@@ -619,7 +619,7 @@ SETTINGS: tuple[Setting, ...] = (
     Setting(
         "lm_translator.key_failure_cooldown_sec",
         "float",
-        "API Key 失敗冷卻秒數",
+        "API Key 無權限(403)冷卻秒數",
         "batch_limits",
         C_BATCH,
         "",

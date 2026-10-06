@@ -1,11 +1,17 @@
 """translation_tool/core/lm_key_health.py 模組。
 
-用途：記住「已確定當天配額用盡 / 無權限」的 API Key，讓後續批次不再白打一次注定失敗的請求
+用途：記住「已確定當天配額用盡 / 無權限」的結果，讓後續批次不再白打一次注定失敗的請求
 （issue #113）。同一份狀態也提供給 UI 顯示每把 key 的健康度。
+
+兩層狀態（同專案模式：所有 API Key 屬於同一個 Google 專案）：
+- ``KeyHealthRegistry``：以 **key** 為單位，記 403 無權限。
+- ``ModelQuotaRegistry``：以 **模型** 為單位，記 RPD 耗盡。RPD 配額算在「專案 × 模型」，
+  換 key 拿不到額度，所以耗盡的是模型，不是 key；到下一個太平洋時間午夜才恢復。
 
 設計重點：
 - **只記兩種失敗**：RPD 耗盡（429 PERDAY / DAILY）與 403 無權限。429 RPM、503 overload 是暫時性的，
-  不會被記錄。
+  不會被記錄。（目前流程中 RPD 只記在模型層級；``KeyHealthRegistry`` 的 ``rpd`` 原因保留為
+  通用能力，翻譯流程不再使用。）
 - **固定冷卻，到期再給一次機會**：冷卻秒數由設定 ``lm_translator.key_failure_cooldown_sec`` 決定
   （預設 3600；0 = 不記憶，回到每批都重試的舊行為）。不依賴時區資料庫。
 - **以 key 的雜湊識別，不是 index**：設定檔增減或調換 key 順序後狀態仍對得上；
@@ -22,6 +28,9 @@ import threading
 import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone, tzinfo
+from datetime import time as dt_time
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 # 失敗原因
 REASON_RPD = "rpd"  # 每日配額用盡
@@ -167,6 +176,82 @@ def get_key_health_registry() -> KeyHealthRegistry:
     return _REGISTRY
 
 
+# -- 同專案模式：每日配額（RPD）以「模型」為單位 ---------------------------------
+#
+# Gemini 的 RPD 配額算在「專案 × 模型」，不是單一 API Key。所有 key 都屬於同一個專案時，
+# 換 key 無法取得額度，所以 RPD 耗盡要記在「模型」上：該模型到下一次配額重置前，
+# 所有 key 都不再請求它。重置點是太平洋時間午夜 00:00（夏令為台灣 15:00、冬令 16:00）。
+
+QUOTA_RESET_TZ = "America/Los_Angeles"
+
+
+def _quota_reset_tzinfo() -> tzinfo:
+    try:
+        return ZoneInfo(QUOTA_RESET_TZ)
+    except ZoneInfoNotFoundError:
+        # 沒有時區資料庫（例如沒裝 tzdata 的 Windows）：退回固定的 UTC-7（夏令）。
+        # 冬令時會比實際重置早 1 小時重新探測一次；探測失敗只會再被記錄一次，不影響正確性。
+        return timezone(timedelta(hours=-7))
+
+
+def next_quota_reset(now: float) -> float:
+    """``now``（epoch 秒）之後的下一個太平洋時間午夜 00:00（epoch 秒），夏令時間自動處理。"""
+    tz = _quota_reset_tzinfo()
+    today = datetime.fromtimestamp(now, tz).date()
+    midnight = datetime.combine(today + timedelta(days=1), dt_time.min, tzinfo=tz)
+    return midnight.timestamp()
+
+
+class ModelQuotaRegistry:
+    """已確定每日配額（RPD）用盡的模型（執行緒安全）。"""
+
+    def __init__(self, clock: Callable[[], float] = time.time) -> None:
+        self._clock = clock
+        self._lock = threading.Lock()
+        self._until: dict[str, float] = {}
+
+    def mark_exhausted(self, model: str, until: float | None = None) -> float:
+        """記錄模型今日配額用盡；預設持續到下一個太平洋午夜。回傳到期時間（epoch 秒）。"""
+        if until is None:
+            until = next_quota_reset(self._clock())
+        with self._lock:
+            self._until[model] = until
+        return until
+
+    def mark_ok(self, model: str) -> bool:
+        """這個模型成功了：清除耗盡紀錄。回傳是否真的清掉了紀錄。"""
+        with self._lock:
+            return self._until.pop(model, None) is not None
+
+    def is_exhausted(self, model: str) -> bool:
+        return self.seconds_remaining(model) > 0
+
+    def seconds_remaining(self, model: str) -> float:
+        with self._lock:
+            until = self._until.get(model)
+        if until is None:
+            return 0.0
+        return max(0.0, until - self._clock())
+
+    def soonest_reset_in(self, models: Sequence[str]) -> float | None:
+        """指定模型中最早恢復還要幾秒；沒有任何耗盡紀錄時回傳 None。"""
+        remaining = [r for m in models if (r := self.seconds_remaining(m)) > 0]
+        return min(remaining) if remaining else None
+
+    def clear(self) -> None:
+        with self._lock:
+            self._until.clear()
+
+
+_MODEL_QUOTA_REGISTRY = ModelQuotaRegistry()
+
+
+def get_model_quota_registry() -> ModelQuotaRegistry:
+    """全程式共用的模型每日配額狀態。"""
+    return _MODEL_QUOTA_REGISTRY
+
+
 def reset_key_health() -> None:
     """清除全部紀錄（測試用）。"""
     _REGISTRY.clear()
+    _MODEL_QUOTA_REGISTRY.clear()

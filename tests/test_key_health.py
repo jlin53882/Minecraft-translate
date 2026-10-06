@@ -518,3 +518,91 @@ def test_valid_cooldown_values(value):
 def test_invalid_cooldown_values_are_rejected(value):
     with pytest.raises(ConfigValidationError, match="key_failure_cooldown_sec"):
         _validate_lm_translator_config({"key_failure_cooldown_sec": value})
+
+
+# ---------------------------------------------------------------------------
+# 同專案模式：模型每日配額（RPD）與太平洋時間午夜重置
+# ---------------------------------------------------------------------------
+
+
+def _utc(*args: int) -> float:
+    from datetime import UTC, datetime
+
+    return datetime(*args, tzinfo=UTC).timestamp()
+
+
+def test_next_quota_reset_is_pacific_midnight_in_summer():
+    """夏令（PDT, UTC-7）：太平洋午夜 = UTC 07:00 = 台灣 15:00。"""
+    from translation_tool.core.lm_key_health import next_quota_reset
+
+    now = _utc(2026, 10, 6, 10, 0)  # 太平洋 10/06 03:00
+    assert next_quota_reset(now) == _utc(2026, 10, 7, 7, 0)
+
+
+def test_next_quota_reset_is_pacific_midnight_in_winter():
+    """冬令（PST, UTC-8）：太平洋午夜 = UTC 08:00 = 台灣 16:00。"""
+    from translation_tool.core.lm_key_health import next_quota_reset
+
+    now = _utc(2026, 12, 1, 10, 0)  # 太平洋 12/01 02:00
+    assert next_quota_reset(now) == _utc(2026, 12, 2, 8, 0)
+
+
+def test_next_quota_reset_follows_the_dst_change():
+    """2026-11-01 夏令結束：這一天有 25 小時，隔天午夜變成 PST。"""
+    from translation_tool.core.lm_key_health import next_quota_reset
+
+    now = _utc(2026, 11, 1, 7, 30)  # 太平洋 11/01 00:30 PDT
+    assert next_quota_reset(now) == _utc(2026, 11, 2, 8, 0)  # 11/02 00:00 PST
+
+
+def test_next_quota_reset_at_exactly_midnight_is_the_following_day():
+    from translation_tool.core.lm_key_health import next_quota_reset
+
+    now = _utc(2026, 10, 7, 7, 0)  # 太平洋 10/07 00:00:00 PDT
+    assert next_quota_reset(now) == _utc(2026, 10, 8, 7, 0)
+
+
+def test_next_quota_reset_falls_back_without_tzdata():
+    """沒有時區資料庫時退回固定 UTC-7：不能拋例外，且不會比實際重置晚。"""
+    from unittest.mock import patch
+    from zoneinfo import ZoneInfoNotFoundError
+
+    from translation_tool.core import lm_key_health as health
+
+    with patch.object(health, "ZoneInfo", side_effect=ZoneInfoNotFoundError("x")):
+        assert health.next_quota_reset(_utc(2026, 12, 1, 10, 0)) == _utc(
+            2026, 12, 2, 7, 0
+        )
+
+
+def test_model_quota_registry_mark_expire_and_clear():
+    from translation_tool.core.lm_key_health import ModelQuotaRegistry
+
+    clock = Clock()
+    reg = ModelQuotaRegistry(clock)
+    assert reg.is_exhausted("m1") is False
+    assert reg.soonest_reset_in(["m1"]) is None
+
+    reg.mark_exhausted("m1", until=clock.t + 600)
+    assert reg.is_exhausted("m1") is True
+    assert reg.is_exhausted("m2") is False  # 其他模型不受影響
+    assert reg.soonest_reset_in(["m1", "m2"]) == 600
+
+    clock.t += 601  # 到期
+    assert reg.is_exhausted("m1") is False
+
+    reg.mark_exhausted("m1", until=clock.t + 600)
+    assert reg.mark_ok("m1") is True
+    assert reg.mark_ok("m1") is False
+    reg.mark_exhausted("m2", until=clock.t + 600)
+    reg.clear()
+    assert reg.is_exhausted("m2") is False
+
+
+def test_model_quota_registry_defaults_to_the_next_pacific_midnight():
+    from translation_tool.core.lm_key_health import ModelQuotaRegistry
+
+    now = _utc(2026, 10, 6, 10, 0)
+    reg = ModelQuotaRegistry(lambda: now)
+
+    assert reg.mark_exhausted("m1") == _utc(2026, 10, 7, 7, 0)

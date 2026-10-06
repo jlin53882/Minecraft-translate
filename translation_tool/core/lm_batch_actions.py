@@ -52,7 +52,11 @@ def decide_batch_action(
             return BatchActionDecision(BatchAction.NEXT_MODEL, "model_output_cap")
         return BatchActionDecision(BatchAction.SHRINK_BATCH, "invalid_argument")
     if error_kind == "rate_limited":
-        if quota_kind == "rpd" and not has_alternative_key:
+        if quota_kind == "rpd":
+            # 同專案模式：每日配額算在「專案 × 模型」，換 key 沒有幫助；
+            # 改試下一個還有額度的模型，全部模型都用完才算耗盡。
+            if has_next_model:
+                return BatchActionDecision(BatchAction.NEXT_MODEL, "daily_quota_model")
             return BatchActionDecision(BatchAction.EXHAUSTED, "daily_quota")
         if quota_kind == "rpm":
             return BatchActionDecision(BatchAction.RETRY_SAME_KEY, "minute_quota")

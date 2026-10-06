@@ -18,6 +18,7 @@ from translation_tool.core.lm_batch_budget import (
 )
 from translation_tool.core.lm_config_rules import ApiKeyCycle
 from translation_tool.core.lm_config_schema import model_output_token_cap
+from translation_tool.core.lm_key_health import get_model_quota_registry
 from translation_tool.core.lm_response_parser import safe_json_loads
 from translation_tool.utils.cancellation import interruptible_sleep
 from translation_tool.utils.config_manager import get_models_config, load_config
@@ -355,6 +356,13 @@ class _BatchRoundOutcome:
     learned_budget: bool = False
 
 
+def _format_remaining(seconds: float) -> str:
+    """把剩餘秒數轉成「X 小時 Y 分鐘」給日誌看。"""
+    minutes = max(0, int(seconds // 60))
+    hours, minutes = divmod(minutes, 60)
+    return f"{hours} 小時 {minutes} 分鐘" if hours else f"{minutes} 分鐘"
+
+
 def _prompt_text(value: object, fallback: str) -> str:
     """Normalize a configured prompt without mixing config concerns into the loop."""
     if isinstance(value, str):
@@ -545,12 +553,21 @@ def _handle_batch_error(
             log_error(f"[⚠️] 無法解析 429 JSON，使用備援：{redact_text(parse_error)}")
 
         if quota_kind == "rpd":
+            # 同專案模式：RPD 算在「專案 × 模型」，所有 key 共用同一份額度。
+            # 記在模型上（到太平洋時間午夜才恢復）→ 換下一個模型；全部模型都耗盡才結束。
+            model_name = runtime.model_pool[model_index]
+            quota = get_model_quota_registry()
+            quota.mark_exhausted(model_name)
             log_warning(
-                f"[🚫] 每日限額已滿 (RPD)：Key Index {runtime.key_cycle.current_index}"
+                f"[🚫] 每日限額已滿 (RPD)：模型 {model_name}（所有 Key 共用同一專案額度），"
+                f"約 {_format_remaining(quota.seconds_remaining(model_name))} 後重置"
             )
-            if not runtime.key_cycle.mark_failed(reason="rpd"):
-                return BatchAction.EXHAUSTED
-            return BatchAction.ROTATE_KEY
+            has_next_model = any(
+                not quota.is_exhausted(name) for name in runtime.model_pool
+            )
+            return decide_batch_action(
+                error_kind, quota_kind="rpd", has_next_model=has_next_model
+            ).action
         if quota_kind == "rpm":
             wait_time = retry_after or 10
             log_info(f"[⏳] 每分鐘頻率限制 (RPM)：等待 {wait_time} 秒")
@@ -665,6 +682,16 @@ def _attempt_batch(
     runtime: _BatchRuntime, round_data: _BatchRound
 ) -> _BatchRoundOutcome:
     """Try the model pool and return an explicit action for the outer state machine."""
+    quota = get_model_quota_registry()
+    if all(quota.is_exhausted(name) for name in runtime.model_pool):
+        log_warning(
+            "[🚫] 所有啟用的模型今日配額（RPD）都已用盡，"
+            f"最快約 {_format_remaining(quota.soonest_reset_in(runtime.model_pool) or 0)} 後重置"
+        )
+        return _BatchRoundOutcome(BatchAction.EXHAUSTED)
+    pinned = runtime.pinned_model_index
+    if pinned is not None and quota.is_exhausted(runtime.model_pool[pinned]):
+        runtime.pinned_model_index = None  # 被釘住的模型已耗盡：改走完整模型池
     model_indices = (
         [runtime.pinned_model_index]
         if runtime.pinned_model_index is not None
@@ -672,6 +699,8 @@ def _attempt_batch(
     )
     for model_index in model_indices:
         model_name = runtime.model_pool[model_index]
+        if quota.is_exhausted(model_name):
+            continue  # 今日配額已用盡：不再白打請求
         prompt = (
             runtime.lang_prompt
             if runtime.batch_profile in {"lang", "kubejs"}
@@ -740,6 +769,7 @@ def _attempt_batch(
             ]
             runtime.batch_size = min(runtime.batch_size, len(runtime.remaining_items))
             runtime.key_cycle.record_success()
+            quota.mark_ok(model_name)  # 成功代表配額已恢復（例如升級方案）
             runtime.pinned_model_index = None
             if not runtime.remaining_items and runtime.rpm_cooldown_sec > 0:
                 interruptible_sleep(runtime.rpm_cooldown_sec)
