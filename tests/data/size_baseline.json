@@ -1,7 +1,7 @@
 {
   "functions": {
     "app/services_impl/moddb_service.py:run_moddb_scan_service": 86,
-    "app/services_impl/moddb_translate_service.py:_translate_rows": 96,
+    "app/services_impl/moddb_translate_service.py:_translate_rows": 98,
     "app/services_impl/pipelines/lm_service.py:run_lm_translation_service": 93,
     "app/services_impl/pipelines/merge_service.py:run_merge_folder_batch_service": 101,
     "app/services_impl/pipelines/merge_service.py:run_merge_zip_batch_service": 99,
