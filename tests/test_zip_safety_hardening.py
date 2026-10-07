@@ -415,15 +415,15 @@ def test_iter_lang_entries_skips_oversized_lang_file(tmp_path):
     jar = _make_zip(
         tmp_path / "m.jar",
         {
-            "assets/m/lang/a.lang": _BIG_TEXT,
-            "assets/m/lang/b.lang": b"item.m.x=Foo\n",
+            "assets/m/lang/en_us.json": _BIG_TEXT,
+            "assets/m/lang/en_us.lang": b"item.m.x=Foo\n",
         },
     )
 
     with zipfile.ZipFile(jar) as zf:
         entries = list(_iter_entries_from_lang_files(zf))
 
-    assert entries == [("item.m.x", "Foo")]
+    assert entries == [("m", "item.m.x", "Foo")]
 
 
 def test_process_single_jar_survives_oversized_lang_and_returns_empty(
@@ -433,7 +433,7 @@ def test_process_single_jar_survives_oversized_lang_and_returns_empty(
 
     jar = _make_zip(tmp_path / "m.jar", {"assets/m/lang/en_us.lang": _BIG_TEXT})
 
-    assert _process_single_jar((jar, "m")) == {}
+    assert _process_single_jar(jar) == {}
 
 
 def test_process_single_jar_keeps_partial_index_when_budget_exceeded(
@@ -460,7 +460,7 @@ def test_process_single_jar_keeps_partial_index_when_budget_exceeded(
     )
     from app.icon_index import _process_single_jar
 
-    result = _process_single_jar((jar, "m"))
+    result = _process_single_jar(jar)
 
     assert list(result) == ["item.m.a"]
 

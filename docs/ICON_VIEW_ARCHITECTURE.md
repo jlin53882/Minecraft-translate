@@ -107,6 +107,7 @@ translation_tool/core/
   - 用 key 轉 model name（`block.<modid>.<name>` → `block/<name>`）精準匹配，並以 `_follow_parent_chain` 追 parent model 取 texture
   - 找不到或 key namespace 與 modid 不一致 → 回 None，**不做 logo/icon.png 最終 fallback**（錯誤的 icon 比沒有更糟）
 - 預建索引檔位於 `.icon_cache/icon_index/`。以 JAR 檔名、檔案大小與 `mtime_ns` 建立快速 manifest；任一 JAR 有新增、刪除或 metadata 變更時會 cache miss。這不是內容雜湊：若內容變更但檔案大小與時間戳都被保留，無法偵測。
+- 預建 producer 僅讀取 `assets/<modid>/lang/en_us.json`，並直接從路徑取得 namespace；同一 JAR 的多個 namespace 都會掃描。為相容舊格式，JSON 不存在或格式錯誤時可讀同 namespace 的 `en_us.lang`；其他語系不作為索引來源。
 - 可執行 `python tools/build_icon_index.py "<mods 資料夾>"` 預建索引；流程為 `build_icon_index` → 比對建置前後 manifest → `save_icon_index`。若 JAR 在建置期間變更會拒絕儲存，完成後 Mod 資料庫載入會由 `load_icon_index` 使用索引；cache miss 則照常逐 JAR 解析。JAR 更新後重跑命令即可。
 - 舊有以 JAR 內通用圖檔或模組 metadata 為來源的 fallback 不屬於現行 model-only icon contract，且沒有 production caller，已移除。
 - `_migrate_old_icon_cache`：選擇模組資料夾時，把舊路徑 `<source_root>/_icon_preview/jar_icons/` 的 png 搬到 `.icon_cache/jar_icons/`

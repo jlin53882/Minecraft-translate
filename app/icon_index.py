@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import re
 import uuid
 import zipfile
 from collections.abc import Iterator
@@ -29,11 +28,6 @@ from translation_tool.utils.zip_safety import (
 # ==================================================
 # 核心資料結構
 # ==================================================
-
-# JAR 檔名 modid 截取 regex（module-level 常數，避免每次呼叫重建）
-# 抓「第一段不以數字結尾」當 modid（如 cofh-core-1.21.jar → cofh-core）
-# 不使用 bare \d，避免 appliedenergistics2-12.9.7 → appliedenergistics 的問題
-_JAR_MODID_RE = re.compile(r"^([a-zA-Z0-9_][a-zA-Z0-9_\-]*?)(?:-\d|$)")
 
 
 def _jar_manifest(mods_dir: Path) -> list[dict[str, int | str]]:
@@ -87,60 +81,78 @@ def get_index_path(mods_dir: Path) -> Path:
 
 def _iter_entries_from_lang_files(
     zf: zipfile.ZipFile, budget: ZipReadBudget | None = None
-) -> Iterator[tuple[str, str]]:
-    """列舉第一個可解析 lang 檔案中的有效 key/value。支援 JSON 與舊 .lang。"""
+) -> Iterator[tuple[str, str, str]]:
+    """列舉每個 assets namespace 的英文 lang entries（modid, key, value）。"""
+    members_by_modid: dict[str, list[str]] = {}
     for name in zf.namelist():
-        is_lang_json = name.endswith(".json") and (
-            "/lang/" in name or name.startswith("lang/")
+        parts = name.split("/")
+        if (
+            len(parts) != 4
+            or parts[0] != "assets"
+            or parts[2] != "lang"
+            or parts[3] not in {"en_us.json", "en_us.lang"}
+        ):
+            continue
+        members_by_modid.setdefault(parts[1], []).append(name)
+
+    for modid in sorted(members_by_modid):
+        # Prefer the production JSON contract; .lang is only a legacy fallback.
+        candidates = sorted(
+            members_by_modid[modid],
+            key=lambda name: (not name.endswith(".json"), name),
         )
-        if not (name.endswith(".lang") or is_lang_json):
-            continue
-        try:
-            content = read_limited(zf, name, budget=budget).decode(
-                "utf-8", errors="ignore"
-            )
-        except ArchiveBudgetError as exc:
-            if budget is not None:
-                raise
-            log_warning(f"[IconIndex] 略過無法讀取的 lang 檔 {name}: {exc!r}")
-            continue
-        except Exception as exc:  # noqa: BLE001 - 單一 lang 檔讀不出來就略過，但要留下是哪個檔案
-            log_warning(f"[IconIndex] 略過無法讀取的 lang 檔 {name}: {exc!r}")
-            continue
-
-        if name.endswith(".json"):
+        for name in candidates:
             try:
-                entries = json.loads(content)
-            except json.JSONDecodeError as exc:
-                log_warning(f"[IconIndex] 略過格式錯誤的 JSON lang 檔 {name}: {exc!r}")
+                content = read_limited(zf, name, budget=budget).decode(
+                    "utf-8", errors="ignore"
+                )
+            except ArchiveBudgetError as exc:
+                if budget is not None:
+                    raise
+                log_warning(f"[IconIndex] 略過無法讀取的 lang 檔 {name}: {exc!r}")
                 continue
-            if not isinstance(entries, dict):
-                log_warning(f"[IconIndex] 略過非 object 的 JSON lang 檔 {name}")
+            except Exception as exc:  # noqa: BLE001 - 單一 lang 檔讀不出來就略過
+                log_warning(f"[IconIndex] 略過無法讀取的 lang 檔 {name}: {exc!r}")
                 continue
-            entries_to_yield = entries.items()
-        else:
-            parsed_entries = []
-            for line in content.splitlines():
-                line = line.strip()
-                if not line or "=" not in line:
+
+            if name.endswith(".json"):
+                try:
+                    entries = json.loads(content)
+                except json.JSONDecodeError as exc:
+                    log_warning(
+                        f"[IconIndex] 略過格式錯誤的 JSON lang 檔 {name}: {exc!r}"
+                    )
                     continue
-                idx = line.index("=")
-                parsed_entries.append((line[:idx].strip(), line[idx + 1 :].strip()))
-            entries_to_yield = parsed_entries
+                if not isinstance(entries, dict):
+                    log_warning(f"[IconIndex] 略過非 object 的 JSON lang 檔 {name}")
+                    continue
+                entries_to_yield = entries.items()
+            else:
+                parsed_entries = []
+                for line in content.splitlines():
+                    line = line.strip()
+                    if not line or "=" not in line:
+                        continue
+                    idx = line.index("=")
+                    parsed_entries.append((line[:idx].strip(), line[idx + 1 :].strip()))
+                entries_to_yield = parsed_entries
 
-        for key, value in entries_to_yield:
-            if isinstance(key, str) and isinstance(value, str) and "." in key and value:
-                yield key, value
-        # 只讀第一個格式正確的 lang 檔案（多數 JAR 只有一個）
-        break
+            for key, value in entries_to_yield:
+                if (
+                    isinstance(key, str)
+                    and isinstance(value, str)
+                    and "." in key
+                    and value
+                ):
+                    yield modid, key, value
+            break  # 每個 namespace 只取第一個有效的英文 lang 檔
 
 
-def _process_single_jar(args: tuple[Path, str]) -> dict[str, str]:
+def _process_single_jar(jar_path: Path) -> dict[str, str]:
     """Worker: 處理單一 JAR，建立該 JAR 所有 entry 的 icon 索引。
 
     回傳：{key: icon_uri} — 該 JAR 內所有有 icon 的 key mapping
     """
-    jar_path, modid = args
     results: dict[str, str] = {}
     try:
         with zipfile.ZipFile(jar_path, "r") as zf:
@@ -151,7 +163,7 @@ def _process_single_jar(args: tuple[Path, str]) -> dict[str, str]:
                 _try_extract_mod_icon_from_model,
             )
 
-            for key, _value in _iter_entries_from_lang_files(zf, budget=budget):
+            for modid, key, _value in _iter_entries_from_lang_files(zf, budget=budget):
                 # 只處理有意義的 content key
                 if key.split(".", 1)[0] not in {
                     "item",
@@ -201,15 +213,9 @@ def build_icon_index(mods_dir: Path, progress_cb=None) -> dict[str, str]:
     回傳：{key: icon_uri} 完整索引
     """
 
-    # 找出所有 JAR 及其 modid（使用 module-level _JAR_MODID_RE）
+    # Namespace 從 assets/<modid>/lang/en_us.* 取得，與即時掃描契約一致。
     jars = sorted(mods_dir.glob("*.jar"))
-    jar_modid_pairs: list[tuple[Path, str]] = []
-    for jar in jars:
-        m = _JAR_MODID_RE.match(jar.stem)
-        modid = m.group(1) if m else jar.stem
-        jar_modid_pairs.append((jar, modid))
-
-    total = len(jar_modid_pairs)
+    total = len(jars)
     log_info(f"[IconIndex] 開始建立索引：{total} 個 JAR，使用 8 threads")
 
     index: dict[str, str] = {}
@@ -220,12 +226,9 @@ def build_icon_index(mods_dir: Path, progress_cb=None) -> dict[str, str]:
     )
     max_workers = max(1, config_workers) if isinstance(config_workers, int) else 8
     with ContextThreadPoolExecutor(max_workers=max_workers) as executor:
-        futures = {
-            executor.submit(_process_single_jar, (jar, modid)): (jar, modid)
-            for jar, modid in jar_modid_pairs
-        }
+        futures = {executor.submit(_process_single_jar, jar): jar for jar in jars}
         for future in as_completed(futures):
-            jar, modid = futures[future]
+            jar = futures[future]
             done += 1
             try:
                 jar_results = future.result()

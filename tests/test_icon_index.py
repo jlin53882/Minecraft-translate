@@ -29,17 +29,26 @@ def test_saved_index_is_invalidated_when_jar_metadata_changes(tmp_path, monkeypa
 def test_build_and_save_icon_index_creates_loadable_index(tmp_path, monkeypatch):
     mods_dir = tmp_path / "mods"
     mods_dir.mkdir()
-    jar = mods_dir / "example-1.0.jar"
+    jar = mods_dir / "my-mod-1.0.jar"
     with zipfile.ZipFile(jar, "w") as archive:
+        # Non-English language is deliberately written first in the ZIP.
         archive.writestr(
-            "assets/example/lang/en_us.json",
-            '{"item.example.apple":"Apple"}',
+            "assets/my_mod/lang/de_de.json",
+            '{"item.my_mod.german":"Deutscher Name"}',
         )
         archive.writestr(
-            "assets/example/models/item/apple.json",
-            '{"textures":{"layer0":"example:item/apple"}}',
+            "assets/my_mod/lang/en_us.lang",
+            "item.my_mod.legacy=Legacy translation\n",
         )
-        archive.writestr("assets/example/textures/item/apple.png", b"png")
+        archive.writestr(
+            "assets/my_mod/lang/en_us.json",
+            '{"item.my_mod.apple":"Apple"}',
+        )
+        archive.writestr(
+            "assets/my_mod/models/item/apple.json",
+            '{"textures":{"layer0":"my_mod:item/apple"}}',
+        )
+        archive.writestr("assets/my_mod/textures/item/apple.png", b"png")
 
     monkeypatch.setattr(icon_index, "get_data_root", lambda: tmp_path / "data")
     from app.views.icon_preview import icon_cache
@@ -64,8 +73,42 @@ def test_build_and_save_icon_index_creates_loadable_index(tmp_path, monkeypatch)
 
     result = icon_index.build_and_save_icon_index(mods_dir)
 
-    assert list(result) == ["item.example.apple"]
-    assert "item.example.apple" in result
+    assert list(result) == ["item.my_mod.apple"]
+    assert "item.my_mod.german" not in result
+    assert icon_index.load_icon_index(mods_dir) == result
+
+
+def test_build_and_save_indexes_every_namespace_in_one_jar(tmp_path, monkeypatch):
+    mods_dir = tmp_path / "mods"
+    mods_dir.mkdir()
+    jar = mods_dir / "combined-mod-1.0.jar"
+    with zipfile.ZipFile(jar, "w") as archive:
+        for namespace, item in (("mod_a", "alpha"), ("mod_b", "beta")):
+            archive.writestr(
+                f"assets/{namespace}/lang/en_us.json",
+                f'{{"item.{namespace}.{item}":"{item}"}}',
+            )
+            archive.writestr(
+                f"assets/{namespace}/models/item/{item}.json",
+                f'{{"textures":{{"layer0":"{namespace}:item/{item}"}}}}',
+            )
+            archive.writestr(f"assets/{namespace}/textures/item/{item}.png", b"png")
+
+    monkeypatch.setattr(icon_index, "get_data_root", lambda: tmp_path / "data")
+    from app.views.icon_preview import icon_cache
+
+    monkeypatch.setattr(
+        icon_cache, "_get_model_index_cache_dir", lambda: tmp_path / "model-index"
+    )
+    monkeypatch.setattr(
+        icon_index,
+        "load_config",
+        lambda: {"translator": {"parallel_execution_workers": 1}},
+    )
+
+    result = icon_index.build_and_save_icon_index(mods_dir)
+
+    assert set(result) == {"item.mod_a.alpha", "item.mod_b.beta"}
     assert icon_index.load_icon_index(mods_dir) == result
 
 
@@ -77,7 +120,7 @@ def test_json_lang_parser_skips_malformed_file_and_reads_later_valid_file(tmp_pa
 
     with zipfile.ZipFile(jar) as archive:
         assert list(icon_index._iter_entries_from_lang_files(archive)) == [
-            ("item.good.apple", "Apple")
+            ("good", "item.good.apple", "Apple")
         ]
 
 

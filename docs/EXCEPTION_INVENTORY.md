@@ -14,7 +14,7 @@
 
 | 位置 | 規則 | 分類 | 原因／處理 |
 |---|---|---|---|
-| `app/icon_index.py:_iter_entries_from_lang_files` | BLE001 | 已記錄／回報 | 單一 lang 檔讀不出來就略過，但要留下是哪個檔案 |
+| `app/icon_index.py:_iter_entries_from_lang_files` | BLE001 | 已記錄／回報 | 單一 lang 檔讀不出來就略過 |
 | `app/icon_index.py:_process_single_jar` | BLE001 | 已記錄／回報 | 單一 JAR 索引失敗不中止整體，但要留下堆疊 |
 | `app/icon_index.py:build_icon_index` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/icon_index.py:load_icon_index` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
