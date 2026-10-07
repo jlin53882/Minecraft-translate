@@ -770,3 +770,42 @@ def test_switching_back_to_a_running_tab_resumes_polling(db_path, monkeypatch):
         assert started == []  # 不在這個頁籤時不需要輪詢
         view.show_tab(key)
         assert started == [1], f"{key} 切回來後沒有接續輪詢"
+
+
+def test_overview_kpi_cards_share_one_layout_contract(db_path):
+    """總覽在可捲動欄位裡：KPI 列不可用 STRETCH（高度無上限會讓版面例外、整個總覽變空白）。
+
+    四張卡改用相同的版面結構等高：標題列同高、說明列都保留（沒有說明文字也占位）、
+    標題列內的按鈕不高過標題列。
+    """
+    import flet as ft
+
+    seed(db_path)
+    view = moddb_view.ModDbView(mock_page(), mock_filepicker())
+    overview = view.overview
+    cards = [
+        overview.stat_mods,
+        overview.stat_content,
+        overview.stat_diff,
+        overview.stat_changed,
+    ]
+    row = next(
+        c
+        for c in overview.content_col.controls
+        if isinstance(c, ft.Row) and overview.stat_mods in c.controls
+    )
+    assert row.vertical_alignment != ft.CrossAxisAlignment.STRETCH
+
+    heads = {card.content.controls[0].height for card in cards}
+    assert len(heads) == 1 and heads != {None}
+    head_height = heads.pop()
+    # 每張卡的「標題列／大數字／說明列」三層結構一致，說明列一律保留
+    for card in cards:
+        assert len(card.content.controls) == 3
+        assert card.delta_text.visible is True
+    # 更新成沒有說明文字時，說明列仍占位
+    overview.stat_content.set_value("1", delta="")
+    assert overview.stat_content.delta_text.visible is True
+    # 標題列內的按鈕不高過標題列（預設 IconButton 的 padding 會讓它高到 36）
+    assert overview.diff_help_btn.height <= head_height
+    assert overview.diff_help_btn.padding == 0
