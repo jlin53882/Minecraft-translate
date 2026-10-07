@@ -35,19 +35,48 @@ from translation_tool.utils.zip_safety import (
 _JAR_MODID_RE = re.compile(r"^([a-zA-Z0-9_][a-zA-Z0-9_\-]*?)(?:-\d|$)")
 
 
-def _compute_modpack_hash(mods_dir: Path) -> str:
-    """計算 modpack 的 stable hash（只用 JAR 檔名，忽略內容）。"""
-    jar_files = sorted(j.name for j in mods_dir.glob("*.jar"))
-    key_str = str(mods_dir.resolve()) + ":" + ",".join(jar_files)
-    return hashlib.sha256(key_str.encode()).hexdigest()[:16]
+def _jar_manifest(mods_dir: Path) -> list[dict[str, int | str]]:
+    """Return a fast, deterministic signature for each JAR in a modpack."""
+    manifest = []
+    for jar_path in sorted(
+        mods_dir.glob("*.jar"), key=lambda path: path.name.casefold()
+    ):
+        stat = jar_path.stat()
+        manifest.append(
+            {
+                "name": jar_path.name,
+                "size": stat.st_size,
+                "mtime_ns": stat.st_mtime_ns,
+            }
+        )
+    return manifest
+
+
+def _compute_modpack_hash(
+    mods_dir: Path, manifest: list[dict[str, int | str]] | None = None
+) -> str:
+    """Hash the modpack path and JAR metadata, not just the JAR filenames."""
+    identity = {
+        "modpack": str(mods_dir.resolve()),
+        "jars": _jar_manifest(mods_dir) if manifest is None else manifest,
+    }
+    key = json.dumps(
+        identity, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    )
+    return hashlib.sha256(key.encode("utf-8")).hexdigest()[:16]
+
+
+def _index_path_for_manifest(
+    mods_dir: Path, manifest: list[dict[str, int | str]]
+) -> Path:
+    cache_dir = get_data_root() / ".icon_cache" / "icon_index"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    return cache_dir / f"{_compute_modpack_hash(mods_dir, manifest)}.json"
 
 
 def get_index_path(mods_dir: Path) -> Path:
     """取得該 modpack 的索引檔路徑。"""
-    cache_dir = get_data_root() / ".icon_cache" / "icon_index"
-    cache_dir.mkdir(parents=True, exist_ok=True)
-    h = _compute_modpack_hash(mods_dir)
-    return cache_dir / f"{h}.json"
+    return _index_path_for_manifest(mods_dir, _jar_manifest(mods_dir))
 
 
 # ==================================================
@@ -174,7 +203,7 @@ def build_icon_index(mods_dir: Path, progress_cb=None) -> dict[str, str]:
         1. 列舉所有 JAR 及每個 JAR 的 modid
         2. 8 threads 平行處理每個 JAR
         3. 合併所有結果為單一 JSON 索引
-        4. 寫入磁碟
+        4. 回傳索引；要寫入磁碟請使用 build_and_save_icon_index()
 
     回傳：{key: icon_uri} 完整索引
     """
@@ -222,12 +251,33 @@ def build_icon_index(mods_dir: Path, progress_cb=None) -> dict[str, str]:
     return index
 
 
+def build_and_save_icon_index(mods_dir: Path, progress_cb=None) -> dict[str, str]:
+    """Build and persist an index only if the source JAR set stayed unchanged."""
+    manifest = _jar_manifest(mods_dir)
+    index = build_icon_index(mods_dir, progress_cb=progress_cb)
+    if _jar_manifest(mods_dir) != manifest:
+        raise RuntimeError(
+            "Mod JARs changed while the icon index was being built; retry."
+        )
+    _save_icon_index_for_manifest(mods_dir, index, manifest)
+    return index
+
+
 def save_icon_index(mods_dir: Path, index: dict[str, str]) -> Path:
     """將 icon 索引寫入磁碟（JSON 格式）。"""
-    idx_path = get_index_path(mods_dir)
+    return _save_icon_index_for_manifest(mods_dir, index, _jar_manifest(mods_dir))
+
+
+def _save_icon_index_for_manifest(
+    mods_dir: Path,
+    index: dict[str, str],
+    manifest: list[dict[str, int | str]],
+) -> Path:
+    idx_path = _index_path_for_manifest(mods_dir, manifest)
     data = {
-        "version": 1,
+        "version": 2,
         "modpack": str(mods_dir.resolve()),
+        "jars": manifest,
         "count": len(index),
         "index": index,
     }
@@ -240,12 +290,13 @@ def save_icon_index(mods_dir: Path, index: dict[str, str]) -> Path:
 
 def load_icon_index(mods_dir: Path) -> dict[str, str] | None:
     """快速載入已建立的 icon 索引。找不到或格式不符回 None。"""
-    idx_path = get_index_path(mods_dir)
+    manifest = _jar_manifest(mods_dir)
+    idx_path = _index_path_for_manifest(mods_dir, manifest)
     if not idx_path.exists():
         return None
     try:
         data = json.loads(idx_path.read_text(encoding="utf-8"))
-        if data.get("version") != 1:
+        if data.get("version") != 2 or data.get("jars") != manifest:
             return None
         if data.get("modpack") != str(mods_dir.resolve()):
             # modpack 路徑改了

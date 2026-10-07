@@ -10,6 +10,7 @@
 | `gap_analysis.py` | 測試缺口分析 |
 | `__code_scan.py` | 程式碼結構掃描 |
 | `verify_patchouli_final.py` | Patchouli 翻譯驗證 |
+| `build_icon_index.py` | 為指定的 mods 資料夾預建 Mod 資料庫 icon 索引；JAR 檔案變更後重新執行，例如 `python tools/build_icon_index.py "C:/path/to/mods"` |
 | `test_main.py` / `test_all_features.py` | 手動執行的整合檢查（不在 pytest 的 `testpaths` 內） |
 
 需要新的一次性腳本時，請放在這裡並在上表補一行；用完請刪除，不要留多個版本。
