@@ -20,6 +20,7 @@ from app.services_impl.moddb_service import (
     SRC_SUBTITLE,
     ScanOptions,
     current_settings,
+    custom_source_codes,
     pack_format_hint,
     run_moddb_scan_service,
     version_choices,
@@ -124,20 +125,21 @@ class ScanPanel(ft.Column):
             icon=ft.Icons.FOLDER_OUTLINED,
             mono=True,
             expand=True,
+            path=True,
         )
         self.zip_pick_btn = kit.pick_button(
             ft.Icons.FOLDER_ZIP_OUTLINED, "選擇 ZIP 檔", self._pick_zip
         )
         self.zip_pick_btn.visible = False
+        self._source_touched = False
         self.source_dd = kit.dropdown(
             label="譯文來源標記",
             dense=True,
             value=str(SRC_CUSTOM),
-            options=[
-                ft.dropdown.Option(key=str(code), text=SOURCE_NAMES[code])
-                for code in ZIP_SOURCES
-            ],
+            options=[],
+            on_select=self._on_source_selected,
         )
+        self._refresh_source_options()
         self.source_dd.visible = False
         self.mode_note = kit.hint_text(
             "ZIP 內的 lang／patchouli 的 zh_tw 一律不判讀、不清理、不套規則，直接匯入（包含沒有中文的值）。"
@@ -293,8 +295,34 @@ class ScanPanel(ft.Column):
             tone="em",
         )
 
+    # ------------------------------------------------------------ 譯文來源
+    def _on_source_selected(self, _e=None) -> None:
+        self._source_touched = True
+
+    def _refresh_source_options(self) -> None:
+        """預設值取自 config 的 translation_db.zip_source（沒設定則「自訂補充」），
+        每次切到本頁籤重讀；使用者在畫面上手動選過就保留他的選擇。
+        """
+        # 選項順序跟隨設定的 translation_db.priority（優先序高的在前）
+        settings = current_settings()
+        allowed = [
+            *ZIP_SOURCES,
+            *custom_source_codes(),
+        ]  # 自訂來源也能當 ZIP 的來源標記
+        order = [c for c in settings.priority if c in allowed]
+        order += [c for c in allowed if c not in order]
+        kit.set_dropdown_options(
+            self.source_dd, [(str(c), SOURCE_NAMES[c]) for c in order]
+        )
+        if not self._source_touched:
+            default = settings.zip_source
+            if default not in allowed:
+                default = SRC_CUSTOM
+            self.source_dd.value = str(default)
+
     # --------------------------------------------------------------- 版本清單
     def refresh_versions(self) -> None:
+        self._refresh_source_options()
         db = self._get_db()
         self._versions = version_choices(db)
         self._render_versions()
@@ -465,14 +493,26 @@ class ScanPanel(ft.Column):
     def will_unmount(self) -> None:
         self._poller.stop()
 
+    def resume(self) -> None:
+        """重新掛載（換頁後切回來）：任務還在追蹤就接續輪詢，已結束的補上最終狀態與摘要。"""
+        if self.session is not None and self._running and not self._poller.running:
+            self._poller.start(self._page, self._poll)
+
+    def _abort_polling(self) -> None:
+        """輪詢失敗時收尾：恢復按鈕、狀態標明原因，避免畫面卡在「掃描中」。"""
+        self._running = False
+        self._set_running(False)
+        self._set_status("畫面更新失敗，請查看日誌（任務可能已結束）", "red")
+        self._safe_update()
+
     # ------------------------------------------------------------------ 輪詢
     async def _poll(self, alive=lambda: True) -> None:
         while alive() and self._running:
             try:
                 self.sync_from_session()
-            except RuntimeError as exc:
-                log_debug(f"掃描輪詢停止：{exc}")
-                self._running = False
+            except Exception as exc:  # noqa: BLE001 - 輪詢失敗不能讓畫面永遠卡在「執行中」
+                log_warning(f"掃描輪詢中止：{exc!r}")
+                self._abort_polling()
                 break
             if alive() and self._running:
                 await asyncio.sleep(_POLL_INTERVAL_SEC)

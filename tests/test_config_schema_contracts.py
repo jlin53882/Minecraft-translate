@@ -243,3 +243,26 @@ class TestUiSection:
 
     def test_ui_defaults(self):
         assert DEFAULT_CONFIG["ui"] == {"theme_mode": "dark"}
+
+
+def test_default_gemini_models_order_is_stable():
+    """預設模型池：3.5 Flash-Lite 為主、3.1 Flash-Lite 為備援（順序即使用順序），皆預設啟用。"""
+    import json
+    from pathlib import Path
+
+    from app.views.config_view import ConfigView
+    from translation_tool.utils.config_schema import SETTINGS_BY_PATH
+
+    expected = ["gemini-3.5-flash-lite", "gemini-3.1-flash-lite"]
+    schema_default = SETTINGS_BY_PATH["lm_translator.models"].default
+    assert list(schema_default) == expected
+    assert all(v == {"enabled": True} for v in schema_default.values())
+    assert list(ConfigView.DEFAULT_MODELS) == expected
+    assert all(ConfigView.DEFAULT_MODELS.values())
+
+    example = json.loads(
+        (Path(__file__).resolve().parent.parent / "config.example.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert list(example["lm_translator"]["models"]) == expected

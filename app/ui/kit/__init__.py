@@ -18,6 +18,7 @@ from app.ui.kit.basics import (
     hint_text,
     kbd,
     mono_text,
+    rekey,
     section_label,
     tone_icon,
     vdivider,
@@ -40,6 +41,7 @@ from app.ui.kit.inputs import (
     field,
     page_window,
     pick_button,
+    set_dropdown_options,
     text_field,
 )
 from app.ui.kit.progress import ProgressRing, clamp01, progress_bar
@@ -70,8 +72,10 @@ __all__ = [
     "page_window",
     "pick_button",
     "progress_bar",
+    "rekey",
     "section_card",
     "section_label",
+    "set_dropdown_options",
     "stat_card",
     "text_field",
     "tone_icon",

@@ -18,11 +18,12 @@
     },
     "translation_db": {
         "enabled": true,
-        "path": "mod_translation.db",
+        "path": "",
         "version": "",
         "cross_version": true,
         "write_back": true,
         "sync_manual": true,
+        "zip_source": "自訂補充",
         "priority": [
             "人工",
             "町宮字幕組",
@@ -42,7 +43,10 @@
             "YOUR_GEMINI_API_KEY_2"
         ],
         "models": {
-            "gemini-2.5-flash": {
+            "gemini-3.5-flash-lite": {
+                "enabled": true
+            },
+            "gemini-3.1-flash-lite": {
                 "enabled": true
             }
         },

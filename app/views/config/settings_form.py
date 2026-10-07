@@ -37,6 +37,15 @@ def helper_text(setting: Setting) -> str | None:
     return text or None
 
 
+_PATH_WORDS = ("path", "dir", "directory", "folder")
+
+
+def _is_path_setting(setting_path: str) -> bool:
+    """設定鍵的最後一段含 path／dir／directory／folder 就視為路徑欄位。"""
+    leaf = setting_path.rsplit(".", 1)[-1].lower()
+    return any(word in leaf for word in _PATH_WORDS)
+
+
 def make_control(setting: Setting) -> ft.Control:
     """依 ``Setting.kind`` 建立對應的 Flet 控制項。"""
     helper = helper_text(setting)
@@ -70,7 +79,14 @@ def make_control(setting: Setting) -> ft.Control:
             helper=helper,
             helper_max_lines=3,
         )
-    return kit.field(label=setting.label, dense=True, helper=helper, helper_max_lines=3)
+    return kit.field(
+        label=setting.label,
+        dense=True,
+        helper=helper,
+        helper_max_lines=3,
+        # 路徑／資料夾類設定：貼上帶引號的路徑（檔案總管「複製為路徑」）自動去引號
+        path_input=_is_path_setting(setting.path),
+    )
 
 
 def build_controls(controls_map: dict[str, Any]) -> None:

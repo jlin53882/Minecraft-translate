@@ -111,10 +111,18 @@ def _tab(
 def build_ftb_tab(view) -> ft.Control:
     """建立 FTB (Forge 模組包) 翻譯面板的完整 UI。"""
     view.ftb_in_dir = kit.text_field(
-        "輸入資料夾（模組包根目錄）", hint="例如：./mods", mono=True, expand=True
+        "輸入資料夾（模組包根目錄）",
+        hint="例如：./mods",
+        mono=True,
+        expand=True,
+        path=True,
     )
     view.ftb_out_dir = kit.text_field(
-        "輸出資料夾（可選）", hint="留空使用 <input>/Output", mono=True, expand=True
+        "輸出資料夾（可選）",
+        hint="留空使用 <input>/Output",
+        mono=True,
+        expand=True,
+        path=True,
     )
     view.ftb_step_export = ft.Checkbox(value=True)
     view.ftb_step_clean = ft.Checkbox(value=True)
@@ -172,10 +180,18 @@ def build_ftb_tab(view) -> ft.Control:
 def build_kjs_tab(view) -> ft.Control:
     """建立 KubeJS 翻譯面板的完整 UI。"""
     view.kjs_in_dir = kit.text_field(
-        "輸入資料夾（模組包根目錄）", hint="例如：./mods", mono=True, expand=True
+        "輸入資料夾（模組包根目錄）",
+        hint="例如：./mods",
+        mono=True,
+        expand=True,
+        path=True,
     )
     view.kjs_out_dir = kit.text_field(
-        "輸出資料夾（可選）", hint="留空使用 <input>/Output", mono=True, expand=True
+        "輸出資料夾（可選）",
+        hint="留空使用 <input>/Output",
+        mono=True,
+        expand=True,
+        path=True,
     )
     view.kjs_step_extract = ft.Checkbox(value=True)
     view.kjs_step_translate = ft.Checkbox(value=True)
@@ -223,10 +239,15 @@ def build_md_tab(view) -> ft.Control:
         hint="例如：./config/patchouli_books",
         mono=True,
         expand=True,
+        path=True,
     )
     view.md_in_dir.helper = "只處理路徑中含 en_us / zh_tw 資料夾的 .md（例如 docs/en_us/intro.md）；程式碼區塊不會送翻譯"
     view.md_out_dir = kit.text_field(
-        "輸出資料夾（可選）", hint="留空使用 <input>/Output/md", mono=True, expand=True
+        "輸出資料夾（可選）",
+        hint="留空使用 <input>/Output/md",
+        mono=True,
+        expand=True,
+        path=True,
     )
     view.md_step_extract = ft.Checkbox(value=True)
     view.md_step_translate = ft.Checkbox(value=True)

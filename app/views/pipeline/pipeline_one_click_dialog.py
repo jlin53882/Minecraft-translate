@@ -414,6 +414,7 @@ def _one_click__build_step3(ctx):
         value=ctx.state["translate_input"],
         expand=True,
         border_color=C.DIA,
+        path_input=True,
     )
     _translate_output_field = SyncTextField(
         label="輸出目錄",
@@ -421,6 +422,7 @@ def _one_click__build_step3(ctx):
         value=ctx.state["translate_output"],
         expand=True,
         border_color=C.DIA,
+        path_input=True,
     )
 
     return ft.Column(
@@ -622,6 +624,7 @@ def _one_click_step4_version_widgets(ctx):
         value=ctx.state["zip_output"],
         expand=True,
         border_color=C.ENCH,
+        path_input=True,
     )
 
     desc_field = SyncTextField(

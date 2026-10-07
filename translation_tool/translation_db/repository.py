@@ -14,13 +14,15 @@ Mod 翻譯資料庫的 SQLite 存取層：所有 SQL 都在這裡，上層只接
 
 from __future__ import annotations
 
+import hashlib
 import json
 import sqlite3
 import threading
 import uuid
-from collections.abc import Callable, Iterable, Iterator
+from collections.abc import Callable, Iterable, Iterator, Sequence
 from contextlib import contextmanager
 from pathlib import Path
+from typing import Any
 
 from translation_tool.translation_db.models import (
     EntryDetail,
@@ -31,6 +33,7 @@ from translation_tool.translation_db.models import (
     SameKeyRow,
     SameTextRow,
     ScanItem,
+    SrcChangeRow,
     TranslationRow,
     VersionStat,
     WriteBackItem,
@@ -106,6 +109,12 @@ class TranslationDB:
             self._conn.close()
             raise
 
+    def set_priority(self, priority: tuple[int, ...]) -> None:
+        """改變來源優先序（例如新登錄了自訂來源）；有變動就重建生效譯文。"""
+        self.priority = tuple(priority)
+        self._rank = rank_sql(self.priority, "t.source")
+        self._sync_priority()
+
     # ------------------------------------------------------------------ 基礎
     def close(self) -> None:
         """關閉連線。"""
@@ -123,7 +132,55 @@ class TranslationDB:
                 self._conn.rollback()
                 raise
             else:
+                # 資料有變動：遞增世代，讓統計快取（stat_cache）失效
+                self._conn.execute(
+                    "INSERT INTO meta (key, value) VALUES ('data_gen', '1') "
+                    "ON CONFLICT(key) DO UPDATE SET value = CAST(value AS INTEGER) + 1"
+                )
                 self._conn.commit()
+
+    def _data_gen(self) -> str:
+        row = self._one("SELECT value FROM meta WHERE key = 'data_gen'")
+        return row[0] if row else "0"
+
+    def _cached(self, key: str, compute: Callable[[], Any]) -> Any:
+        """昂貴統計的快取：資料世代沒變就直接回傳上次算好的結果（JSON 存在資料庫內）。
+
+        數十萬筆條目的總覽統計要 1 秒以上；資料沒變時（切換頁籤、翻頁、重開程式）
+        直接讀快取。唯讀連線或舊資料庫沒有快取表時，退回每次重算。
+        """
+        try:
+            gen = self._data_gen()
+            row = self._one(
+                "SELECT value FROM stat_cache WHERE key = ? AND gen = ?", (key, gen)
+            )
+            if row is not None:
+                return json.loads(row[0])
+        except sqlite3.Error:
+            return compute()
+        value = compute()
+        if not self.readonly:
+            try:
+                with self._lock:
+                    if self._data_gen() != gen:
+                        return value  # 計算期間資料又變了：不寫舊世代，也不清掉新世代的快取
+                    self._conn.execute("DELETE FROM stat_cache WHERE gen <> ?", (gen,))
+                    self._conn.execute(
+                        "INSERT OR REPLACE INTO stat_cache (key, gen, value) "
+                        "VALUES (?,?,?)",
+                        (key, gen, json.dumps(value, ensure_ascii=False)),
+                    )
+                    self._conn.commit()
+            except sqlite3.Error:
+                pass  # 快取寫不進去（被其他連線鎖住等）不影響結果
+        return value
+
+    def warm_stats(self) -> None:
+        """預先算好總覽統計並存入快取（大量寫入後在背景呼叫，之後切到總覽頁就是即時的）。"""
+        stats = self.version_stats()
+        self.overview()
+        if stats:
+            self.missing_by_mod(stats[0].mc_version)
 
     def _q(self, sql: str, params: Iterable = ()) -> list[tuple]:
         with self._lock:
@@ -312,7 +369,10 @@ class TranslationDB:
 
     # ---------------------------------------------------------------- 統計
     def versions(self) -> list[str]:
-        """資料庫中出現過的遊戲版本（條目多者在前）。"""
+        """資料庫中出現過的遊戲版本（條目多者在前；有快取，見 ``_cached``）。"""
+        return self._cached("versions", self._versions_uncached)
+
+    def _versions_uncached(self) -> list[str]:
         return [
             r[0]
             for r in self._q(
@@ -321,6 +381,23 @@ class TranslationDB:
         ]
 
     def mods(self, version: str) -> list[str]:
+        """某版本出現過的模組（有快取，見 ``_cached``）。"""
+        return self._cached(f"mods:{version}", lambda: self._mods_uncached(version))
+
+    def kinds(self, version: str) -> list[str]:
+        """某版本資料庫裡實際出現過的條目類型（日後新增類型不必改這裡；有快取）。"""
+        return self._cached(f"kinds:{version}", lambda: self._kinds_uncached(version))
+
+    def _kinds_uncached(self, version: str) -> list[str]:
+        return [
+            r[0]
+            for r in self._q(
+                "SELECT DISTINCT kind FROM entry WHERE mc_version=? ORDER BY kind",
+                (version,),
+            )
+        ]
+
+    def _mods_uncached(self, version: str) -> list[str]:
         return [
             r[0]
             for r in self._q(
@@ -330,27 +407,35 @@ class TranslationDB:
         ]
 
     def version_stats(self) -> list[VersionStat]:
+        rows = self._cached("version_stats", self._version_stats_rows)
+        return [VersionStat(*r) for r in rows]
+
+    def _version_stats_rows(self) -> list[list]:
         rows = self._q(
             """
             SELECT e.mc_version,
                    COUNT(*),
                    SUM(f.source = ?),
-                   SUM(f.source IN (?, 3, 4, 5)),
+                   SUM(f.source IS NOT NULL AND f.source NOT IN (?, ?, ?)),
                    SUM(f.source = ?),
                    SUM(f.source = ?),
                    SUM(f.entry_id IS NULL)
             FROM entry e LEFT JOIN effective f ON f.entry_id = e.id
             GROUP BY e.mc_version ORDER BY COUNT(*) DESC
             """,
-            (SRC_MANUAL, SRC_JAR_TW, SRC_JAR_CN, SRC_AI),
+            # 自訂來源與「模組自帶／字幕組…」同屬藍色段：凡不是人工、簡中轉繁、AI 的都算
+            (SRC_MANUAL, SRC_MANUAL, SRC_JAR_CN, SRC_AI, SRC_JAR_CN, SRC_AI),
         )
         return [
-            VersionStat(v, t, m or 0, j or 0, c or 0, a or 0, u or 0)
+            [v, t, m or 0, j or 0, c or 0, a or 0, u or 0]
             for v, t, m, j, c, a, u in rows
         ]
 
     def overview(self) -> dict:
-        """總覽頁的全域數字。"""
+        """總覽頁的全域數字（有快取，見 ``_cached``）。"""
+        return self._cached("overview", self._overview_uncached)
+
+    def _overview_uncached(self) -> dict:
         mods = self._one("SELECT COUNT(DISTINCT mod_id) FROM entry")[0]
         content = self._one(
             "SELECT COUNT(*) FROM (SELECT 1 FROM entry GROUP BY kind, mod_id, key, en_us)"
@@ -377,7 +462,12 @@ class TranslationDB:
         }
 
     def missing_by_mod(self, version: str, limit: int = 10) -> list[dict]:
-        """缺譯最多的模組。"""
+        """缺譯最多的模組（有快取，見 ``_cached``）。"""
+        return self._cached(
+            f"missing:{version}:{limit}", lambda: self._missing_by_mod(version, limit)
+        )
+
+    def _missing_by_mod(self, version: str, limit: int) -> list[dict]:
         rows = self._q(
             """
             SELECT e.mod_id, COUNT(*) AS total, SUM(f.entry_id IS NULL) AS missing
@@ -439,12 +529,23 @@ class TranslationDB:
         kind: str | None = None,
         state: str = "all",
         query: str = "",
+        source: int | None = None,
         limit: int = 100,
         offset: int = 0,
     ) -> tuple[list[EntryRow], int]:
-        """條目清單（含總筆數）。state：all / none / diff / manual / ok。"""
+        """條目清單（含總筆數）。state：all / none / diff / changed / manual / ok。
+
+        ``source``：只列出「有該來源譯文」的條目（不論最後採用的是哪個來源，
+        所以新匯入的來源即使排在較低優先序、沒被採用，也找得到）。
+        """
         where = ["e.mc_version = ?"]
         params: list = [version]
+        if source is not None:
+            where.append(
+                "EXISTS (SELECT 1 FROM translation ts WHERE ts.entry_id = e.id "
+                "AND ts.source = ? AND ts.zh_tw <> '')"
+            )
+            params.append(int(source))
         if mod_id:
             where.append("e.mod_id = ?")
             params.append(mod_id)
@@ -462,15 +563,23 @@ class TranslationDB:
             where.append("f.entry_id IS NULL")
         elif state == "diff":
             where.append(f"f.entry_id IS NOT NULL AND {self._DIFF_SQL}")
+        elif state == "changed":  # 掃描時發現原文改了（資料庫仍保留舊原文）
+            where.append(
+                "EXISTS (SELECT 1 FROM src_change sc WHERE sc.kind = e.kind "
+                "AND sc.mc_version = e.mc_version AND sc.mod_id = e.mod_id "
+                "AND sc.key = e.key)"
+            )
         elif state == "manual":
             where.append(f"f.source = {SRC_MANUAL} AND NOT {self._DIFF_SQL}")
         elif state == "ok":
             where.append(
                 f"f.entry_id IS NOT NULL AND f.source <> {SRC_MANUAL} AND NOT {self._DIFF_SQL}"
             )
+        if state == "changed" and self._one("SELECT 1 FROM src_change LIMIT 1") is None:
+            return [], 0  # 沒有任何原文變動記錄：不必掃描整個版本
         cond = " AND ".join(where)
         base = f"FROM entry e LEFT JOIN effective f ON f.entry_id = e.id WHERE {cond}"
-        total = self._one(f"SELECT COUNT(*) {base}", params)[0]
+        total = self._cached_count(f"SELECT COUNT(*) {base}", params)
         rows = self._q(
             f"SELECT {_ENTRY_COLS}, f.zh_tw, f.source, f.checker, "
             f"CASE WHEN f.entry_id IS NULL THEN 0 ELSE {self._DIFF_SQL} END "
@@ -510,7 +619,8 @@ class TranslationDB:
             else [
                 r[0]
                 for r in self._q(
-                    "SELECT mc_version FROM entry WHERE kind=? AND mod_id=? AND key=? "
+                    "SELECT mc_version FROM entry INDEXED BY idx_entry_content "
+                    "WHERE kind=? AND mod_id=? AND key=? "
                     "AND en_us=? ORDER BY mc_version",
                     (entry.kind, entry.mod_id, entry.key, entry.en_us),
                 )
@@ -520,7 +630,8 @@ class TranslationDB:
             SameKeyRow(eid, ver, en, en == entry.en_us, tw or "", src)
             for eid, ver, en, tw, src in self._q(
                 "SELECT e.id, e.mc_version, e.en_us, f.zh_tw, f.source "
-                "FROM entry e LEFT JOIN effective f ON f.entry_id = e.id "
+                "FROM entry e INDEXED BY idx_entry_content "
+                "LEFT JOIN effective f ON f.entry_id = e.id "
                 "WHERE e.kind=? AND e.mod_id=? AND e.key=? AND e.id<>? "
                 "ORDER BY e.mc_version",
                 (entry.kind, entry.mod_id, entry.key, entry_id),
@@ -540,6 +651,14 @@ class TranslationDB:
                 )
             ]
         )
+        detail.src_changes = [
+            SrcChangeRow(*r)
+            for r in self._q(
+                "SELECT old_en, new_en, detected_at FROM src_change "
+                "WHERE kind=? AND mc_version=? AND mod_id=? AND key=? ORDER BY id DESC",
+                (entry.kind, entry.mc_version, entry.mod_id, entry.key),
+            )
+        ]
         detail.history = [
             HistoryRow(*r)
             for r in self._q(
@@ -552,23 +671,28 @@ class TranslationDB:
 
     # ------------------------------------------------------------ 手動更新
     def _same_content(self, conn: sqlite3.Connection, entry_id: int) -> list[tuple]:
-        """與此條目「相同內容」的條目（含自己）。原文未知的條目沒有可比對的內容，只有自己。"""
-        known = conn.execute(
-            "SELECT en_us FROM entry WHERE id = ?", (entry_id,)
+        """與此條目「相同內容」的條目（含自己）。原文未知的條目沒有可比對的內容，只有自己。
+
+        先取出這筆的 (類型, 模組, 鍵值, 原文)，再用內容索引查同內容的條目。
+        不用 ``(a,b,c,d) = (子查詢)`` 的寫法：沒有統計資訊時查詢規劃會只用 ``kind``
+        掃描整張表（百萬筆時每次編輯都要 170 毫秒以上）。
+        """
+        row = conn.execute(
+            "SELECT kind, mod_id, key, en_us FROM entry WHERE id = ?", (entry_id,)
         ).fetchone()
-        if known is None or known[0] == "":
+        if row is None or row[3] == "":
             return conn.execute(
                 "SELECT e.id, e.mc_version, f.zh_tw, f.source FROM entry e "
                 "LEFT JOIN effective f ON f.entry_id = e.id WHERE e.id = ?",
                 (entry_id,),
             ).fetchall()
         return conn.execute(
-            "SELECT e.id, e.mc_version, f.zh_tw, f.source FROM entry e "
+            "SELECT e.id, e.mc_version, f.zh_tw, f.source "
+            "FROM entry e INDEXED BY idx_entry_content "
             "LEFT JOIN effective f ON f.entry_id = e.id "
-            "WHERE (e.kind, e.mod_id, e.key, e.en_us) = "
-            "(SELECT kind, mod_id, key, en_us FROM entry WHERE id = ?) "
+            "WHERE e.kind = ? AND e.mod_id = ? AND e.key = ? AND e.en_us = ? "
             "ORDER BY e.mc_version",
-            (entry_id,),
+            row,
         ).fetchall()
 
     def preview_manual(
@@ -761,6 +885,117 @@ class TranslationDB:
                             touched.append(bid)
             self._refresh(conn, touched)
         return stats
+
+    # --------------------------------------------------------- 批次機翻（資料庫內）
+    def _untranslated_where(self, mod_ids: Sequence[str] | None) -> tuple[str, list]:
+        where = "e.mc_version = ? AND f.entry_id IS NULL AND e.en_us <> ''"
+        params: list = []
+        if mod_ids:
+            where += f" AND e.mod_id IN ({','.join('?' * len(mod_ids))})"
+            params += list(mod_ids)
+        return where, params
+
+    # 其他版本已有「類型／模組／鍵值／原文都相同」的生效譯文（可直接沿用，不必呼叫 AI）
+    # 其他版本的譯文必須一致才算（有衝突時不自動沿用，交給 AI 或人工，避免任意挑一版）
+    _REUSABLE_SQL = """(
+        SELECT COUNT(DISTINCT f2.zh_tw) FROM entry e2 JOIN effective f2 ON f2.entry_id = e2.id
+        WHERE e2.kind = e.kind AND e2.mod_id = e.mod_id AND e2.key = e.key
+          AND e2.en_us = e.en_us AND e2.mc_version <> e.mc_version) = 1"""
+
+    def count_reusable(self, version: str, mod_ids: Sequence[str] | None = None) -> int:
+        """未翻譯條目中，其他版本已有相同內容譯文、開始機翻時會直接沿用的筆數。"""
+        where, extra = self._untranslated_where(mod_ids)
+        sql = (
+            "SELECT COUNT(*) FROM entry e LEFT JOIN effective f ON f.entry_id = e.id "
+            f"WHERE {where} AND {self._REUSABLE_SQL}"
+        )
+        return self._cached_count(sql, [version, *extra])
+
+    def count_untranslated(
+        self, version: str, mod_ids: Sequence[str] | None = None
+    ) -> int:
+        """某版本「有原文、沒有任何譯文」的條目數（可限定模組）。"""
+        where, extra = self._untranslated_where(mod_ids)
+        sql = (
+            "SELECT COUNT(*) FROM entry e LEFT JOIN effective f ON f.entry_id = e.id "
+            f"WHERE {where}"
+        )
+        params = [version, *extra]
+        return self._cached_count(sql, params)
+
+    def _cached_count(self, sql: str, params: list) -> int:
+        """筆數查詢的快取（同樣的條件在資料沒變時不重算；翻頁不必每頁重數）。"""
+        key = (
+            "count:"
+            + hashlib.sha1(
+                json.dumps([sql, params], ensure_ascii=False).encode("utf-8")
+            ).hexdigest()
+        )
+        return self._cached(key, lambda: self._one(sql, params)[0])
+
+    def untranslated_entries(
+        self,
+        version: str,
+        mod_ids: Sequence[str] | None = None,
+        limit: int | None = None,
+        *,
+        exclude_reusable: bool = False,
+    ) -> list[tuple[int, str, str, str, str]]:
+        """未翻譯條目 ``(id, 類型, 模組, 鍵值, 原文)``；順序固定，重跑會接續同一批。
+
+        ``exclude_reusable``：排除「其他版本已有相同內容譯文」的條目（那些會直接沿用，不送 AI）。
+        """
+        where, extra = self._untranslated_where(mod_ids)
+        if exclude_reusable:
+            where += f" AND NOT {self._REUSABLE_SQL}"
+        sql = (
+            "SELECT e.id, e.kind, e.mod_id, e.key, e.en_us "
+            "FROM entry e LEFT JOIN effective f ON f.entry_id = e.id "
+            f"WHERE {where} ORDER BY e.kind, e.mod_id, e.key"
+        )
+        params: list = [version, *extra]
+        if limit is not None and limit > 0:
+            sql += " LIMIT ?"
+            params.append(limit)
+        return self._q(sql, params)
+
+    def reuse_from_other_versions(
+        self, version: str, mod_ids: Sequence[str] | None = None
+    ) -> int:
+        """其他版本已有「類型／模組／鍵值／原文都相同」的譯文時直接沿用（不呼叫 AI）。
+
+        只填沒有任何譯文的條目；沿用時保留原本的來源標記。回傳補上的條目數。
+        """
+        where, extra = self._untranslated_where(mod_ids)
+        with self._tx() as conn:
+            rows = conn.execute(
+                "SELECT e.id, f2.source, f2.zh_tw FROM entry e "
+                "LEFT JOIN effective f ON f.entry_id = e.id "
+                "JOIN entry e2 ON e2.kind = e.kind AND e2.mod_id = e.mod_id "
+                "AND e2.key = e.key AND e2.en_us = e.en_us "
+                "AND e2.mc_version <> e.mc_version "
+                "JOIN effective f2 ON f2.entry_id = e2.id "
+                f"WHERE {where} AND {self._REUSABLE_SQL} ORDER BY e.id, f2.rowid",
+                [version, *extra],
+            ).fetchall()
+            # 譯文已確認一致；來源標記取目前優先序最高者（不可用代碼大小，人工不該被降成 AI）
+            order = {s: i for i, s in enumerate(self.priority)}
+            best: dict[int, tuple[int, int, str]] = {}
+            for eid, source, zh_tw in rows:
+                rank = order.get(source, 99)
+                if eid not in best or rank < best[eid][0]:
+                    best[eid] = (rank, source, zh_tw)
+            touched: list[int] = []
+            for eid, (_rank, source, zh_tw) in best.items():
+                cur = conn.execute(
+                    "INSERT OR IGNORE INTO translation (entry_id, source, zh_tw) "
+                    "VALUES (?,?,?)",
+                    (eid, source, zh_tw),
+                )
+                if cur.rowcount:
+                    touched.append(eid)
+            self._refresh(conn, touched)
+        return len(touched)
 
     # ------------------------------------------------------- 翻譯流程查詢
     def load_mod(self, mod_id: str) -> list[tuple[str, str, str, str, str, int]]:

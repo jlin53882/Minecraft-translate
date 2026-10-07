@@ -1,0 +1,407 @@
+"""app/views/moddb/translate_panel.py：批次機翻（選版本／模組 → 預覽 → 機翻 → 結果）。
+
+把資料庫裡「沒有任何譯文」的條目交給機翻引擎，結果以「AI 機翻」來源寫回；
+只填空白、不覆蓋任何既有譯文，之後匯入或人工校對的譯文會自動優先。
+流程與掃描匯入頁相同：背景執行緒＋畫面輪詢。
+"""
+
+from __future__ import annotations
+
+import asyncio
+import threading
+
+import flet as ft
+
+from app.services_impl.moddb_translate_service import (
+    DEFAULT_LIMIT,
+    TranslateOptions,
+    estimate_batch_count,
+    format_duration,
+    format_live,
+    run_moddb_translate_service,
+)
+from app.tasks.task_session import TaskSession, tag_session
+from app.ui import kit
+from app.ui.design import C
+from app.ui.poller import PollerHandle
+from app.ui.snack import show_snack
+from app.ui.status_chip import apply_status_style, set_chip_status
+from app.views._log import LogView, load_ui_logging_config
+from app.views.moddb.formatting import format_count
+from translation_tool.utils.config_manager import load_config
+from translation_tool.utils.log_unit import log_debug, log_info, log_warning
+
+_POLL_INTERVAL_SEC = 0.2
+ALL_MODS = "__all__"
+LARGE_RUN_WARNING = 5000  # 不限筆數且超過這個數量時提醒額度
+
+
+class TranslatePanel(ft.Column):
+    """批次機翻頁籤。"""
+
+    def __init__(self, page: ft.Page, get_db, on_finished=None):
+        super().__init__(expand=True, spacing=12, scroll=ft.ScrollMode.AUTO)
+        self._page = page
+        self._get_db = get_db
+        self._on_finished = on_finished
+        self.session: TaskSession | None = None
+        self._running = False
+        self._poller = PollerHandle()
+
+        self._build_scope_card()
+        self._build_run_card()
+        self.controls = [self.scope_card, self.run_card]
+
+    # ------------------------------------------------------------------ 建構
+    def _build_scope_card(self) -> None:
+        self.version_dd = kit.dropdown(
+            label="遊戲版本", dense=True, width=220, on_select=self._on_scope_changed
+        )
+        self.mod_dd = kit.dropdown(
+            label="模組", dense=True, width=260, on_select=self._on_scope_changed
+        )
+        self.limit_field = kit.text_field(
+            "單次上限（筆，0 = 不限）",
+            hint="例如 2000",
+            value=str(DEFAULT_LIMIT),
+            width=220,
+            on_change=lambda _e: self._on_limit_changed(),
+        )
+        self.count_text = ft.Text("", size=13, color=C.TEXT)
+        self.reuse_row = kit.SwitchRow(
+            "先沿用其他版本的相同譯文",
+            "其他版本已有「模組、鍵值、原文都相同」的譯文時直接補上，不呼叫 AI、不耗額度",
+            True,
+            on_change=lambda _e: self._on_limit_changed(),
+        )
+        self.cache_row = kit.SwitchRow(
+            "同時寫入翻譯快取",
+            "結果除了寫進資料庫，也寫入「快取資料」資料夾的翻譯快取，原本的機器翻譯頁也能直接命中。"
+            "（設定裡 enable_cache_saving 關閉時不會寫入）",
+            True,
+        )
+        self.scope_card = kit.section_card(
+            "1　選擇要機翻的範圍",
+            ft.Column(
+                [
+                    ft.Row(
+                        [self.version_dd, self.mod_dd, self.limit_field],
+                        spacing=12,
+                        wrap=True,
+                    ),
+                    self.count_text,
+                    self.reuse_row,
+                    self.cache_row,
+                    kit.hint_text(
+                        "只翻譯「沒有任何譯文」的條目，不會動既有的人工、模組自帶或匯入譯文。"
+                        "結果標記為「AI 機翻」（優先序最低，之後補上人工或匯入的譯文會自動蓋過）。"
+                        "翻完會檢查換行、§ 格式碼、%s 佔位符是否與原文一致，不一致者不寫入並在日誌列出。"
+                    ),
+                ],
+                spacing=10,
+            ),
+            icon=ft.Icons.TRANSLATE,
+            tone="dia",
+        )
+
+    def _build_run_card(self) -> None:
+        self.status_chip = ft.Chip(label=ft.Text("尚未開始"))
+        apply_status_style(self.status_chip, "neutral")
+        self.progress_bar = kit.progress_bar(0, "em", height=8)
+        # 批次、已處理筆數、已用時間、預估剩餘時間、預計完成時刻（每批結束更新）
+        self.live_text = ft.Text("", size=12.5, color=C.MUTED, selectable=True)
+        ui_cfg = load_ui_logging_config(load_config)
+        self.log_view = LogView(
+            page=self._page, mode="tail", tail_lines=ui_cfg.get("tail_lines", 250)
+        )
+        self.log_view.height = 200
+        self.start_btn = kit.button(
+            "開始機翻", "primary", icon=ft.Icons.PLAY_ARROW, on_click=self.start_clicked
+        )
+        self.preview_btn = kit.button(
+            "先預覽（不呼叫 AI）",
+            "secondary",
+            icon=ft.Icons.VISIBILITY_OUTLINED,
+            on_click=lambda e: self.start_clicked(e, dry_run=True),
+        )
+        self.cancel_btn = kit.button(
+            "取消",
+            "secondary",
+            icon=ft.Icons.STOP,
+            on_click=self.cancel_clicked,
+            disabled=True,
+        )
+        self.stat_reused = kit.stat_card(
+            "沿用其他版本", "—", icon=ft.Icons.CONTENT_COPY, tone="dia", expand=1
+        )
+        self.stat_written = kit.stat_card(
+            "已寫入（AI 機翻）",
+            "—",
+            icon=ft.Icons.CHECK_CIRCLE_OUTLINE,
+            tone="em",
+            expand=1,
+        )
+        self.stat_flagged = kit.stat_card(
+            "特殊字元不一致", "—", icon=ft.Icons.WARNING_AMBER, tone="gold", expand=1
+        )
+        self.stat_remaining = kit.stat_card(
+            "此範圍仍未翻譯",
+            "—",
+            icon=ft.Icons.PENDING_OUTLINED,
+            tone="neutral",
+            expand=1,
+        )
+        self._stat_cards = (
+            self.stat_reused,
+            self.stat_written,
+            self.stat_flagged,
+            self.stat_remaining,
+        )
+        self.run_card = kit.section_card(
+            "2　機翻",
+            ft.Column(
+                [
+                    ft.Row(
+                        [
+                            self.start_btn,
+                            self.preview_btn,
+                            self.cancel_btn,
+                            self.status_chip,
+                        ],
+                        spacing=10,
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    ),
+                    self.progress_bar,
+                    self.live_text,
+                    self.log_view,
+                    ft.Row(list(self._stat_cards), spacing=10),
+                ],
+                spacing=12,
+            ),
+            icon=ft.Icons.AUTO_AWESOME,
+            tone="em",
+        )
+
+    # ------------------------------------------------------------------ 範圍
+    def refresh_scope(self) -> None:
+        """切到本頁籤時重讀資料庫的版本與模組清單，保留目前選擇。"""
+        db = self._get_db()
+        versions = db.versions() if db else []
+        kit.set_dropdown_options(self.version_dd, [(v, v) for v in versions])
+        if self.version_dd.value not in versions:
+            self.version_dd.value = versions[0] if versions else None
+        self._refresh_mods()
+        self._refresh_counts()
+
+    def _refresh_mods(self) -> None:
+        db = self._get_db()
+        version = self.version_dd.value
+        mods = db.mods(version) if db and version else []
+        kit.set_dropdown_options(
+            self.mod_dd, [(ALL_MODS, "全部模組"), *((m, m) for m in mods)]
+        )
+        if self.mod_dd.value not in [ALL_MODS, *mods]:
+            self.mod_dd.value = ALL_MODS
+
+    def _on_scope_changed(self, e=None) -> None:
+        if e is not None and getattr(e, "control", None) is self.version_dd:
+            self.mod_dd.value = ALL_MODS
+            self._refresh_mods()
+        self._refresh_counts()
+        self._safe_update()
+
+    def mod_ids(self) -> tuple[str, ...]:
+        value = self.mod_dd.value
+        return () if not value or value == ALL_MODS else (value,)
+
+    def limit(self) -> int:
+        try:
+            return max(0, int((self.limit_field.value or "").strip() or 0))
+        except ValueError:
+            return DEFAULT_LIMIT
+
+    def _refresh_counts(self) -> None:
+        db, version = self._get_db(), self.version_dd.value
+        if not db or not version:
+            self.count_text.value = "資料庫還沒有資料，請先到「掃描匯入」建立"
+            return
+        missing = db.count_untranslated(version, self.mod_ids())
+        reusable = (
+            db.count_reusable(version, self.mod_ids()) if self.reuse_row.value else 0
+        )
+        limit = self.limit()
+        to_ai = max(0, missing - reusable)  # 沿用其他版本的不送 AI
+        will = min(to_ai, limit) if limit else to_ai
+        text = f"此範圍有 {format_count(missing)} 筆未翻譯"
+        if reusable:
+            text += (
+                f"，其中約 {format_count(reusable)} 筆其他版本已有相同譯文、"
+                "開始時會直接沿用（原文不同的不算）"
+            )
+        text += f"；上限 {format_count(limit)} 筆" if limit else "；上限為 0（不限）"
+        text += (
+            f"，本次送 AI 翻譯{'最多 ' if limit else '全部 '}{format_count(will)} 筆"
+            f"（預估約 {estimate_batch_count(will):,} 批）"
+        )
+        if not limit and will > LARGE_RUN_WARNING:
+            text += "；筆數很多，會消耗大量 API 額度，建議先按「先預覽」確認"
+        self.count_text.value = text
+
+    def _on_limit_changed(self) -> None:
+        self._refresh_counts()
+        self._safe_update()
+
+    # ------------------------------------------------------------------ 事件
+    def build_options(self, *, dry_run: bool = False) -> TranslateOptions:
+        return TranslateOptions(
+            version=self.version_dd.value or "",
+            mod_ids=self.mod_ids(),
+            limit=self.limit(),
+            dry_run=dry_run,
+            reuse_other_versions=bool(self.reuse_row.value),
+            write_cache=bool(self.cache_row.value),
+        )
+
+    def start_clicked(self, _e=None, *, dry_run: bool = False) -> None:
+        if self._running:
+            show_snack(self._page, "機翻正在執行中", C.GOLD)
+            return
+        if not self.version_dd.value:
+            log_warning("Mod 資料庫機翻未開始：尚未選擇遊戲版本")
+            self._set_status("請先選擇遊戲版本", "red")
+            self._safe_update()
+            return
+        self.session = tag_session(TaskSession(), "Mod 資料庫機翻", "moddb")
+        self._set_status("預覽中" if dry_run else "機翻中", "dia")
+        self._set_running(True)
+        self.progress_bar.value = 0
+        self.live_text.value = ""
+        self.log_view.clear()
+        self._reset_stats()
+        self._safe_update()
+        threading.Thread(
+            target=run_moddb_translate_service,
+            args=(self.build_options(dry_run=dry_run), self.session),
+            daemon=True,
+        ).start()
+        self._running = True
+        if not self._poller.running:
+            self._poller.start(self._page, self._poll)
+
+    def cancel_clicked(self, _e=None) -> None:
+        if self.session is None or not self._running:
+            return
+        self.session.request_cancel()
+        log_info(
+            "Mod 資料庫機翻：使用者要求取消，等待目前批次結束（已完成的批次已寫入）"
+        )
+        self.cancel_btn.disabled = True
+        self._set_status("取消中…", "gold")
+        self._safe_update()
+
+    def will_unmount(self) -> None:
+        self._poller.stop()
+
+    def resume(self) -> None:
+        """重新掛載（換頁後切回來）：任務還在追蹤就接續輪詢，已結束的補上最終狀態與摘要。"""
+        if self.session is not None and self._running and not self._poller.running:
+            self._poller.start(self._page, self._poll)
+
+    def _abort_polling(self) -> None:
+        """輪詢失敗時收尾：恢復按鈕、狀態標明原因，避免畫面卡在「機翻中」。"""
+        self._running = False
+        self._set_running(False)
+        self._set_status("畫面更新失敗，請查看日誌（任務可能已結束）", "red")
+        self._safe_update()
+
+    # ------------------------------------------------------------------ 輪詢
+    async def _poll(self, alive=lambda: True) -> None:
+        while alive() and self._running:
+            try:
+                self.sync_from_session()
+            except Exception as exc:  # noqa: BLE001 - 輪詢失敗不能讓畫面永遠卡在「執行中」
+                log_warning(f"機翻輪詢中止：{exc!r}")
+                self._abort_polling()
+                break
+            if alive() and self._running:
+                await asyncio.sleep(_POLL_INTERVAL_SEC)
+
+    def sync_from_session(self) -> None:
+        session = self.session
+        if session is None:
+            return
+        snap = session.snapshot()
+        self.progress_bar.value = float(snap.get("progress", 0) or 0)
+        self.log_view.sync_entries(snap.get("logs", []) or [], update=False)
+        status = (snap.get("status") or "").upper()
+        live = (snap.get("summary") or {}).get("live")
+        if live and status not in ("DONE", "ERROR"):
+            self.live_text.value = format_live(live)
+        if status in ("DONE", "ERROR"):
+            summary = snap.get("summary") or {}
+            if summary.get("batches"):
+                self.live_text.value = (
+                    f"共送出 {summary['batches']:,} 批，"
+                    f"耗時 {format_duration(summary.get('elapsed_sec'))}"
+                )
+            if status == "ERROR":
+                partial = summary.get("status")
+                self._set_status(
+                    f"未完成（{partial}）"
+                    if partial not in (None, "DONE")
+                    else "機翻發生錯誤",
+                    "red",
+                )
+            elif getattr(session, "cancel_requested", False):
+                self._set_status("已取消", "gold")
+            elif summary.get("dry_run"):
+                self._set_status("預覽完成", "em")
+            elif summary.get("status") not in (None, "DONE"):
+                self._set_status(f"未完成（{summary.get('status')}）", "gold")
+            else:
+                self._set_status("機翻完成", "em")
+            self._apply_summary(summary)
+            self._running = False
+            self._set_running(False)
+            if self._on_finished and not summary.get("dry_run"):
+                self._on_finished()
+            self._refresh_counts()
+        self._safe_update()
+
+    def _apply_summary(self, s: dict) -> None:
+        if not s:
+            return
+        if s.get("dry_run"):
+            self.stat_remaining.set_value(
+                format_count(s.get("remaining")),
+                delta=f"本次將翻譯 {s.get('candidates', 0):,} 筆",
+            )
+            return
+        self.stat_reused.set_value(format_count(s.get("reused")))
+        self.stat_written.set_value(
+            format_count(s.get("written")),
+            delta=f"AI 回傳 {s.get('translated', 0):,} 筆",
+        )
+        self.stat_flagged.set_value(
+            format_count(s.get("flagged")),
+            delta="未寫入，詳見日誌" if s.get("flagged") else "",
+        )
+        self.stat_remaining.set_value(format_count(s.get("remaining")))
+
+    def _reset_stats(self) -> None:
+        for card in self._stat_cards:
+            card.set_value("—", delta="")
+
+    def _set_running(self, running: bool) -> None:
+        self.start_btn.disabled = running
+        self.preview_btn.disabled = running
+        self.cancel_btn.disabled = not running
+
+    def _set_status(self, text: str, tone: str = "neutral") -> None:
+        set_chip_status(self.status_chip, text, tone)
+
+    def _safe_update(self) -> None:
+        try:
+            self._page.update()
+        except Exception as exc:  # noqa: BLE001 - 頁面已卸載時不影響機翻本身
+            log_debug(f"TranslatePanel update 略過：{exc}")

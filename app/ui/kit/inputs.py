@@ -95,6 +95,7 @@ def text_field(
     tooltip: str | None = None,
     suffix: ft.Control | None = None,
     dense: bool = True,
+    path: bool = False,
 ) -> ft.TextField:
     """統一外觀的輸入框（深 / 淺色皆適用）。``mono=True`` 用等寬字（路徑、key、JSON）。
 
@@ -110,6 +111,7 @@ def text_field(
         max_lines=max_lines,
         read_only=read_only,
         password=password,
+        path_input=path,
         can_reveal_password=password,
         on_change=on_change,
         on_submit=on_submit,
@@ -166,6 +168,21 @@ def dropdown(**kwargs) -> ft.Dropdown:
     style.pop("cursor_color", None)
     style.pop("hint_style", None)
     return ft.Dropdown(**{**style, **kwargs})
+
+
+def set_dropdown_options(dd: ft.Dropdown, pairs: Sequence[tuple[str, str]]) -> bool:
+    """更新下拉選項：重複的 key 只留一個；內容沒變就不動，避免每次切頁都重建選項。
+
+    ``pairs`` 為 ``(key, 顯示文字)``。回傳是否真的改了選項。
+    """
+    unique: dict[str, str] = {}
+    for key, text in pairs:
+        unique.setdefault(str(key), str(text))
+    current = [(o.key, o.text) for o in dd.options]
+    if current == list(unique.items()):
+        return False
+    dd.options = [ft.dropdown.Option(key=k, text=t) for k, t in unique.items()]
+    return True
 
 
 def pick_button(
@@ -363,6 +380,7 @@ class Pager(ft.Container):
         self.on_change = on_change
         self.total_items = max(0, total_items)
         self._current = 1
+        self._render_gen = 0
         self.summary = ft.Text(size=12, color=C.MUTED)
         self.buttons = ft.Row(spacing=4, tight=True)
         super().__init__(
@@ -401,6 +419,10 @@ class Pager(ft.Container):
             self.summary.value = (
                 f"第 {first:,}–{last:,} {self.unit} / {self.total_items:,}"
             )
+        # 每次重畫都給按鈕全新的 key：Flet 比對「新舊清單」時會把內容相同的項目當成
+        # 移動而配對，頁數變少時會殘留舊頁碼（例如只有 1 頁卻還顯示 3、4、5…73）。
+        # key 不重複就只會產生單純的刪除／新增，不會配對錯誤。
+        self._render_gen += 1
         controls: list[ft.Control] = [
             self._cell(
                 ft.Icons.CHEVRON_LEFT, self._current - 1, enabled=self._current > 1
@@ -420,7 +442,20 @@ class Pager(ft.Container):
                 enabled=self._current < self.total_pages,
             )
         )
-        self.buttons.controls = controls
+        for index, cell in enumerate(controls):
+            cell.key = f"pager{id(self)}-{self._render_gen}-{index}"
+        # 整列換成新的 Row（而不是改它的 controls 清單）：Flet 對「同一個清單大幅增減項目」的
+        # 比對會出錯（殘留舊頁碼、甚至整列消失）；換掉整個控制項只會產生單一的取代操作。
+        row = ft.Row(
+            controls,
+            spacing=4,
+            tight=True,
+            key=f"pagerrow{id(self)}-{self._render_gen}",
+        )
+        self.buttons = row
+        content = self.content
+        if isinstance(content, ft.Row) and len(content.controls) >= 2:
+            content.controls[1] = row
 
     def _cell(
         self,

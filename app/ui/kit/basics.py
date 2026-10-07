@@ -6,6 +6,9 @@
 
 from __future__ import annotations
 
+import itertools
+from collections.abc import Sequence
+
 import flet as ft
 
 from app.ui import design
@@ -20,6 +23,23 @@ def expand_kwargs(expand: bool | int | None) -> dict:
     整列會爆版（Flutter 錯誤佔位的灰色大區塊），所以不要把 False / 0 傳下去。
     """
     return {"expand": expand} if expand else {}
+
+
+_rekey_counter = itertools.count(1)
+
+
+def rekey(controls: Sequence[ft.Control], prefix: str = "k") -> list[ft.Control]:
+    """替清單中的每個控制項換上「全新、不重複」的 key 後原樣回傳。
+
+    Flet 更新畫面時會比對新舊清單，並把內容相同的項目配對成「移動」；
+    清單內容大幅改變（換篩選、換頁、項目變少）時，配對出錯會殘留上一份清單的項目。
+    key 全新就不會被配對，只會產生單純的刪除與新增。
+    """
+    generation = next(_rekey_counter)
+    out = list(controls)
+    for index, control in enumerate(out):
+        control.key = f"{prefix}{generation}-{index}"
+    return out
 
 
 def tone_icon(

@@ -31,6 +31,11 @@ from app.views.config.config_form import (
     build_key_field,
     build_key_row,
 )
+from app.views.config.db_location import (
+    DbLocationBanner,
+    attach_path_hooks,
+    attach_priority_hooks,
+)
 from app.views.config.settings_form import build_controls, build_pages
 from app.views.config.settings_schema import NAV_PAGES
 
@@ -49,7 +54,8 @@ class ConfigView(ft.Column):
     """
 
     DEFAULT_MODELS: ClassVar[dict[str, bool]] = {
-        "gemini-2.5-flash": True,
+        "gemini-3.5-flash-lite": True,
+        "gemini-3.1-flash-lite": True,
     }
 
     def __init__(self, page: ft.Page):
@@ -65,6 +71,13 @@ class ConfigView(ft.Column):
         self._selected_nav = "general"
 
         self._init_controls()
+        self.db_location = DbLocationBanner()
+        self._check_db_path = attach_path_hooks(
+            self.controls_map["translation_db.path"], self.db_location
+        )
+        self._check_priority = attach_priority_hooks(
+            self.controls_map["translation_db.priority"]
+        )
 
         self.scroll_container = ft.Column(
             scroll=ft.ScrollMode.ADAPTIVE,
@@ -72,6 +85,7 @@ class ConfigView(ft.Column):
             spacing=15,
             controls=[
                 self._build_header(),
+                self.db_location,
                 ft.ResponsiveRow(
                     controls=[
                         ft.Container(
@@ -101,7 +115,10 @@ class ConfigView(ft.Column):
         build_controls(self.controls_map)
 
         self.new_model_field = kit.field(
-            label="新增模型名稱", hint_text="gemini-2.5-flash", expand=True, dense=True
+            label="新增模型名稱",
+            hint_text="gemini-3.5-flash-lite",
+            expand=True,
+            dense=True,
         )
         self.add_model_button = ft.IconButton(
             icon=ft.Icons.ADD, tooltip="新增模型", on_click=self.on_add_model_clicked
@@ -384,7 +401,15 @@ class ConfigView(ft.Column):
     def load_config(self):
         """載入設定檔"""
         config = load_config_json()
-        return load_config_into_view(self, config)
+        result = load_config_into_view(self, config)
+        self.db_location.refresh()
+        self._check_db_path()
+        self._check_priority()
+        return result
+
+    def did_mount(self):
+        """切回設定頁時重新確認資料庫位置（其他頁可能剛建立了資料庫）。"""
+        self.db_location.safe_refresh()
 
     def _success_color(self):
         """取得成功顏色"""

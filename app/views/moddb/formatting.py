@@ -16,12 +16,24 @@ STATE_LABELS = {
     "all": "全部",
     "none": "未翻譯",
     "diff": "版本不同",
+    "changed": "原文已變動",
     "manual": "人工",
     "ok": "有譯文",
 }
 # 條目狀態 → 強調色組（design.tone 的名稱）
-STATE_TONES = {"none": "neutral", "diff": "gold", "manual": "ench", "ok": "dia"}
+STATE_TONES = {
+    "none": "neutral",
+    "diff": "gold",
+    "changed": "gold",
+    "manual": "ench",
+    "ok": "dia",
+}
 KIND_LABELS = {"lang": "語言檔", "patchouli": "Patchouli 手冊"}
+
+
+def kind_label(kind: str) -> str:
+    """條目類型的顯示名稱；日後資料庫新增的類型沒登錄名稱時直接顯示代碼。"""
+    return KIND_LABELS.get(kind, kind)
 
 
 def source_label(source: int | None) -> str:
@@ -79,6 +91,33 @@ def visible_breaks(text: str) -> str:
     """清單預覽用：真正的換行顯示成 ¶（折成一行），其餘空白折疊。"""
     flat = (text or "").replace("\r\n", "\n").replace("\n", " ¶ ")
     return " ".join(flat.split())
+
+
+_VISIBLE_RE = re.compile(_TOKEN_RE.pattern + r"|^[ \t]+|[ \t]+$", re.MULTILINE)
+
+
+def visible_segments(text: str) -> list[tuple[str, str]]:
+    """把特殊字元攤開成 ``[(顯示文字, 種類)]``；種類為 text / token / newline / space。
+
+    換行顯示成 ``↵`` 並真的換行；行首行尾的空白顯示成 ``·``；格式碼、佔位符標成 token。
+    """
+    text = (text or "").replace("\r\n", "\n")
+    out: list[tuple[str, str]] = []
+    pos = 0
+    for m in _VISIBLE_RE.finditer(text):
+        if m.start() > pos:
+            out.append((text[pos : m.start()], "text"))
+        raw = m.group(0)
+        if raw == "\n":
+            out += [("↵", "newline"), ("\n", "text")]
+        elif raw.strip(" \t") == "":
+            out.append(("·" * len(raw.replace("\t", "    ")), "space"))
+        else:
+            out.append((raw, "token"))
+        pos = m.end()
+    if pos < len(text):
+        out.append((text[pos:], "text"))
+    return out
 
 
 def format_tokens(text: str) -> Counter[str]:

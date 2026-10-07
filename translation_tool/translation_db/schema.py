@@ -43,6 +43,25 @@ SOURCE_NAMES: dict[int, str] = {
     SRC_MANUAL: "人工",
 }
 
+BUILTIN_SOURCE_NAMES: dict[int, str] = dict(SOURCE_NAMES)
+
+# 使用者在設定「來源優先順序」輸入的新名稱會成為自訂來源：代碼從這裡開始往上配發，
+# 登錄在資料庫 meta（custom_sources），寫入後不可更動、不重複使用。
+CUSTOM_SOURCE_BASE = 100
+
+
+def register_source_names(registry: dict[str, int]) -> None:
+    """以這個資料庫登錄的自訂來源取代 ``SOURCE_NAMES`` 的自訂部分（就地更新）。
+
+    先清掉前一個資料庫留下的自訂碼，切換資料庫後才不會殘留別的庫的來源。
+    """
+    for code in [c for c in SOURCE_NAMES if c >= CUSTOM_SOURCE_BASE]:
+        del SOURCE_NAMES[code]
+    for name, code in registry.items():
+        if code >= CUSTOM_SOURCE_BASE:
+            SOURCE_NAMES[int(code)] = name
+
+
 # 預設優先序（先者優先）；已校驗（checker 不為空）者永遠最優先
 DEFAULT_PRIORITY: tuple[int, ...] = (
     SRC_MANUAL,
@@ -119,6 +138,13 @@ CREATE TABLE IF NOT EXISTS src_change (
     UNIQUE (kind, mc_version, mod_id, key, new_en)
 );
 
+-- 統計快取：依 meta.data_gen（每次寫入交易遞增）判斷是否過期，跨連線、跨重啟都有效
+CREATE TABLE IF NOT EXISTS stat_cache (
+    key   TEXT PRIMARY KEY,
+    gen   TEXT NOT NULL,
+    value TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS scan_run (
     id          INTEGER PRIMARY KEY,
     mc_version  TEXT NOT NULL,
@@ -148,6 +174,10 @@ def connect(path: str | Path, *, readonly: bool = False) -> sqlite3.Connection:
     if not readonly:
         conn.execute("PRAGMA journal_mode = WAL")
         conn.execute("PRAGMA synchronous = NORMAL")
+    # 數十萬筆條目的掃描／統計查詢：加大頁面快取、暫存放記憶體、用記憶體映射讀取
+    conn.execute("PRAGMA cache_size = -131072")  # 128 MB
+    conn.execute("PRAGMA temp_store = MEMORY")
+    conn.execute("PRAGMA mmap_size = 268435456")  # 256 MB
     return conn
 
 

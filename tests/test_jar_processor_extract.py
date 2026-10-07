@@ -168,7 +168,11 @@ def test_extraction_uses_only_scan_eligible_jars(tmp_path: Path, monkeypatch):
         )
     )
 
-    assert extracted == jars[:3]
+    # 提取在執行緒池裡平行進行，各 JAR 開始處理的先後順序不固定（不是行為保證）；
+    # 要驗證的是「恰好只處理含目標內容的那 3 個 JAR、每個一次、其餘 7 個完全沒碰」。
+    assert len(extracted) == 3
+    assert sorted(extracted) == sorted(jars[:3])
+    assert not set(extracted) & set(jars[3:])
     assert updates[-1]["total"] == 3
     assert updates[-1]["stats"]["scanned_jars"] == 10
     assert updates[-1]["stats"]["eligible_jars"] == 3

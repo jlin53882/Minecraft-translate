@@ -207,8 +207,27 @@ def safe_join(root: str | os.PathLike[str], *parts: str) -> str:
 
     real_root = os.path.realpath(root_abs)
     real_target = os.path.realpath(target)
-    if not _is_within(real_root, real_target):
+    if not _is_within(real_root, real_target) and _has_link_between(root_abs, target):
         raise UnsafePathError(
             f"路徑 {parts!r} 經由符號連結或 junction 解析後位於 {real_root} 之外"
         )
     return target
+
+
+def _has_link_between(root: str, target: str) -> bool:
+    """root 到 target 之間（含 target）已存在的路徑成分是否有 symlink / junction。
+
+    realpath 解析結果與 root 不一致時，用來分辨「真的有連結逃出 root」與
+    「沒有任何連結、只是路徑正規化差異」。後者常見於 OneDrive 同步資料夾
+    （雲端檔案是 reparse point，多執行緒建立資料夾時 realpath 可能回傳不同形式），
+    不應被當成逃逸；只有實際碰到連結才拒絕。
+    """
+    rel = os.path.relpath(target, root)
+    current = root
+    for part in rel.split(os.sep):
+        if part in ("", "."):
+            continue
+        current = os.path.join(current, part)
+        if os.path.islink(current) or os.path.isjunction(current):
+            return True
+    return False

@@ -503,6 +503,18 @@ def _parse_rate_limit_error(error: Exception) -> tuple[str, int, str]:
     return "quota", retry_after, remote_message
 
 
+def _remote_error_detail(error: Exception, limit: int = 300) -> str:
+    """HTTP 錯誤回應裡的伺服器訊息（已遮蔽金鑰、限制長度）；取不到時回傳空字串。"""
+    response = getattr(error, "response", None)
+    if response is None:
+        return ""
+    try:
+        text = str(response.json().get("error", {}).get("message", ""))
+    except Exception:  # noqa: BLE001 - 回應不是 JSON 時改用原始文字
+        text = str(getattr(response, "text", "") or "")
+    return redact_text(text.strip())[:limit]
+
+
 def _handle_batch_error(
     runtime: _BatchRuntime,
     error: Exception,
@@ -563,6 +575,9 @@ def _handle_batch_error(
                 f"❌ maxOutputTokens（{model_output_cap}）超過模型上限；請調低 {setting}"
             )
         log_info("[⚠️] 400 INVALID_ARGUMENT：payload 格式錯誤或過大，縮小 batch")
+        detail = _remote_error_detail(error)
+        if detail:
+            log_info(f"[⚠️] 伺服器回應：{detail}")
         return decide_batch_action(error_kind).action
 
     if error_kind == "rate_limited":

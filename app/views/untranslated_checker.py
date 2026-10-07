@@ -34,9 +34,15 @@ class UntranslatedChecker(ft.Container):
             task_runner: QCBase 實例，用於執行緒任務
         """
         # --- 先建立 UI 元件 ---
-        self.en_dir = kit.text_field("英文 (en_us) 來源資料夾", mono=True, expand=True)
-        self.tw_dir = kit.text_field("繁中 (zh_tw) 來源資料夾", mono=True, expand=True)
-        self.out_dir = kit.text_field("未翻譯報告 輸出資料夾", mono=True, expand=True)
+        self.en_dir = kit.text_field(
+            "英文 (en_us) 來源資料夾", mono=True, expand=True, path=True
+        )
+        self.tw_dir = kit.text_field(
+            "繁中 (zh_tw) 來源資料夾", mono=True, expand=True, path=True
+        )
+        self.out_dir = kit.text_field(
+            "未翻譯報告 輸出資料夾", mono=True, expand=True, path=True
+        )
         self.start_button = kit.button(
             "開始檢查", "primary", icon=ft.Icons.SEARCH_OFF, on_click=self._on_start
         )

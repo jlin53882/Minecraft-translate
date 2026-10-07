@@ -23,18 +23,21 @@ from app.ui import design, kit
 from app.ui.design import C
 from app.ui.mc_text import mc_text_spans
 from app.ui.snack import show_snack
+from app.views.moddb.char_inspector import CharInspector, scrolling_list
 from app.views.moddb.formatting import (
-    KIND_LABELS,
     STATE_LABELS,
     STATE_TONES,
     format_count,
     impact_text,
+    kind_label,
     shorten,
     source_label,
     source_tone,
     token_issues,
     whitespace_note,
 )
+from app.views.moddb.source_filter import SourceFilter
+from app.views.moddb.suggestions import build_suggestions
 from translation_tool.utils.log_unit import (
     log_debug,
     log_exception,
@@ -44,6 +47,7 @@ from translation_tool.utils.log_unit import (
 
 PAGE_SIZE = 50
 ALL_MODS = "全部模組"
+ALL_KINDS = "全部類型"
 ACTOR = "使用者"
 NO_SOURCE_TEXT = "（原文未知：之後掃描同版本的 jar，會自動補上原文）"
 
@@ -59,6 +63,7 @@ class EntriesPanel(ft.Column):
         self._on_changed = on_changed
         self.version: str | None = None
         self.mod_id: str | None = None
+        self.kind: str | None = None
         self.state = "all"
         self.query = ""
         self.rows: list[EntryRow] = []
@@ -75,13 +80,13 @@ class EntriesPanel(ft.Column):
             self.filter_card,
             ft.Row(
                 [
-                    ft.Column([self.list_card], scroll=ft.ScrollMode.AUTO, expand=4),
+                    ft.Column([self.list_card], expand=4),
                     ft.Column([self.editor_card], scroll=ft.ScrollMode.AUTO, expand=6),
                     ft.Column([self.history_card], scroll=ft.ScrollMode.AUTO, expand=3),
                 ],
                 spacing=12,
                 expand=True,
-                vertical_alignment=ft.CrossAxisAlignment.START,
+                vertical_alignment=ft.CrossAxisAlignment.STRETCH,
             ),
         ]
 
@@ -93,6 +98,10 @@ class EntriesPanel(ft.Column):
         self.mod_dd = kit.dropdown(
             label="模組", dense=True, width=220, on_select=self._on_mod
         )
+        self.kind_dd = kit.dropdown(
+            label="類型", dense=True, width=160, on_select=self._on_kind
+        )
+        self.source_filter = SourceFilter(self._on_source)
         self.search = kit.text_field(
             "搜尋", hint="原文、譯文或鍵值", expand=True, on_submit=self._on_search
         )
@@ -102,23 +111,39 @@ class EntriesPanel(ft.Column):
         self.filter_card = kit.section_card(
             None,
             ft.Row(
-                [self.version_dd, self.mod_dd, self.search, self.state_seg],
+                [
+                    self.version_dd,
+                    self.mod_dd,
+                    self.kind_dd,
+                    self.source_filter.dropdown,
+                    self.search,
+                    self.state_seg,
+                ],
                 spacing=12,
                 vertical_alignment=ft.CrossAxisAlignment.CENTER,
             ),
         )
 
     def _build_list_card(self) -> None:
-        self.list_view = ft.ListView(spacing=0, height=520)
+        # 清單高度跟著視窗伸縮（expand），捲軸常駐顯示（全域主題預設只在滑過時出現）
+        self.list_view = ft.ListView(spacing=0, expand=True)
         self.pager = kit.Pager(0, page_size=PAGE_SIZE, on_change=self._on_page)
         self.count_badge = ft.Text("", size=12, color=C.MUTED)
         self.list_card = kit.section_card(
             "條目",
-            ft.Column([self.list_view, self.pager], spacing=0),
+            ft.Column(
+                [
+                    scrolling_list(self.list_view),
+                    self.pager,
+                ],
+                spacing=0,
+                expand=True,
+            ),
             icon=ft.Icons.LIST_ALT,
             tone="dia",
             flush=True,
             actions=[self.count_badge],
+            expand=True,
         )
 
     def _build_editor_inputs(self) -> None:
@@ -172,6 +197,13 @@ class EntriesPanel(ft.Column):
         self.reset_btn = kit.button(
             "還原輸入", "ghost", size="sm", on_click=lambda _e: self._reset_input()
         )
+        self.copy_src_btn = kit.button(
+            "複製原文到譯文",
+            "ghost",
+            size="sm",
+            on_click=lambda _e: self._copy_source(),
+        )
+        self.chars = CharInspector(self._update_format_hints_and_refresh)
         self.confirm_btn = kit.button(
             "審核（確認目前譯文）",
             "gold",
@@ -211,13 +243,15 @@ class EntriesPanel(ft.Column):
                 ft.Row([kit.section_label("譯文 zh_tw"), self.source_chip], spacing=8),
                 self.tw_field,
                 self.token_hint,
+                self.chars.row,
+                self.chars.box,
                 self.mc_preview,
                 self.meta_col,
                 self.impact_box,
                 self.saved_text,
                 self.sync_row,
                 ft.Row(
-                    [self.prev_btn, self.next_btn, self.reset_btn],
+                    [self.prev_btn, self.next_btn, self.reset_btn, self.copy_src_btn],
                     spacing=8,
                     wrap=True,
                 ),
@@ -264,8 +298,9 @@ class EntriesPanel(ft.Column):
             self._render_list()
             self._show_editor(None)
             return
+        self.source_filter.refresh()
         versions = db.versions()
-        self.version_dd.options = [ft.dropdown.Option(v) for v in versions]
+        kit.set_dropdown_options(self.version_dd, [(v, v) for v in versions])
         if self.version not in versions:
             wanted = current_settings().version
             self.version = (
@@ -278,13 +313,25 @@ class EntriesPanel(ft.Column):
     def _load_mods(self) -> None:
         db = self.db()
         mods = db.mods(self.version) if (db and self.version) else []
-        self.mod_dd.options = [
-            ft.dropdown.Option(ALL_MODS),
-            *(ft.dropdown.Option(m) for m in mods),
-        ]
+        kit.set_dropdown_options(
+            self.mod_dd, [(ALL_MODS, ALL_MODS), *((m, m) for m in mods)]
+        )
         if self.mod_id not in mods:
             self.mod_id = None
         self.mod_dd.value = self.mod_id or ALL_MODS
+        self._load_kinds()
+
+    def _load_kinds(self) -> None:
+        """類型選項取自資料庫實際出現的類型（日後新增類型會自動出現）。"""
+        db = self.db()
+        kinds = db.kinds(self.version) if (db and self.version) else []
+        kit.set_dropdown_options(
+            self.kind_dd,
+            [(ALL_KINDS, ALL_KINDS), *((k, kind_label(k)) for k in kinds)],
+        )
+        if self.kind not in kinds:
+            self.kind = None
+        self.kind_dd.value = self.kind or ALL_KINDS
 
     def _load_list(self, *, page: int = 1, keep_selection: bool = True) -> None:
         db = self.db()
@@ -294,8 +341,10 @@ class EntriesPanel(ft.Column):
             self.rows, self.total = db.list_entries(
                 self.version,
                 mod_id=self.mod_id,
+                kind=self.kind,
                 state=self.state,
                 query=self.query,
+                source=self.source_filter.code,
                 limit=PAGE_SIZE,
                 offset=(page - 1) * PAGE_SIZE,
             )
@@ -311,13 +360,33 @@ class EntriesPanel(ft.Column):
 
     def _render_list(self) -> None:
         self.count_badge.value = f"{format_count(self.total)} 筆"
-        self.list_view.controls = [self._row_tile(r) for r in self.rows] or [
+        tiles = [self._row_tile(r) for r in self.rows] or [
             kit.empty_state(
                 "沒有符合的條目",
                 "調整上方篩選，或先到「掃描匯入」建立資料",
                 icon=ft.Icons.SEARCH_OFF,
             )
         ]
+        # 換篩選／換頁後清單內容大幅改變：全新 key 避免 Flet 配對舊項目而殘留上一份清單
+        self.list_view.controls = kit.rekey(tiles, "entry")
+        self._scroll_list_to_top()
+
+    def _scroll_list_to_top(self) -> None:
+        """換篩選／換頁後回到清單最上方（否則沿用上一份清單的捲動位置，第一筆會被標題蓋住）。"""
+        run_task = getattr(self._page, "run_task", None)
+        if not callable(run_task):
+            return
+
+        async def to_top() -> None:
+            try:
+                await self.list_view.scroll_to(offset=0, duration=0)
+            except Exception as exc:  # noqa: BLE001 - 尚未掛上頁面時不影響清單
+                log_debug(f"清單捲回頂端略過：{exc}")
+
+        try:
+            run_task(to_top)
+        except Exception as exc:  # noqa: BLE001 - 排程失敗不影響清單
+            log_debug(f"清單捲回頂端排程失敗：{exc}")
 
     def _row_tile(self, row: EntryRow) -> ft.Control:
         tone = design.tone(STATE_TONES[row.state])
@@ -402,7 +471,7 @@ class EntriesPanel(ft.Column):
                 [
                     kit.section_label("模組"),
                     ft.Text(
-                        f"{entry.mod_id}（{KIND_LABELS.get(entry.kind, entry.kind)}）",
+                        f"{entry.mod_id}（{kind_label(entry.kind)}）",
                         size=12.5,
                         color=C.TEXT,
                     ),
@@ -420,106 +489,26 @@ class EntriesPanel(ft.Column):
                 spacing=6,
                 wrap=True,
             ),
+            *(
+                ft.Column(
+                    [
+                        kit.chip("掃描到原文已變動（尚未採用）", "gold"),
+                        kit.mono_text(f"新原文：{c.new_en}", size=12),
+                    ],
+                    spacing=4,
+                )
+                for c in detail.src_changes[:1]
+            ),
         ]
         self._update_impact()
         self._render_suggestions()
         self._render_history()
 
     def _render_suggestions(self) -> None:
-        detail = self.detail
-        if detail is None:
+        if self.detail is None:
             return
-        entry = detail.entry
-        self.sug_col.controls = []
-        if self.sug_tab == "key":
-            rows = detail.same_key
-            for r in rows:
-                self.sug_col.controls.append(
-                    self._sug_item(
-                        r.zh_tw,
-                        [
-                            r.mc_version,
-                            source_label(r.source) if r.zh_tw else "",
-                            "" if r.same_text else "原文不同",
-                        ],
-                        apply=r.zh_tw
-                        if (r.zh_tw and r.zh_tw != entry.zh_tw and r.same_text)
-                        else None,
-                        same=r.zh_tw == entry.zh_tw,
-                    )
-                )
-            hint = (
-                "原文相同的版本，手動儲存時會一併被取代；標示「原文不同」者不會被動到。"
-            )
-        else:
-            groups: dict[str, list] = {}
-            for r in detail.same_text:
-                groups.setdefault(r.zh_tw, []).append(r)
-            rows = detail.same_text
-            for tw, items in groups.items():
-                tags = [
-                    f"{x.mod_id}・{x.key.split('.')[-1]}・{x.mc_version}"
-                    for x in items[:6]
-                ]
-                if len(items) > 6:
-                    tags.append(f"…共 {len(items)} 筆")
-                self.sug_col.controls.append(
-                    self._sug_item(
-                        tw,
-                        tags,
-                        apply=tw if (tw and tw != entry.zh_tw) else None,
-                        same=tw == entry.zh_tw,
-                        count=len(items),
-                    )
-                )
-            hint = f"原文「{shorten(entry.en_us, 24)}」在其他鍵值／模組的譯法，用來檢查用詞一致性；只供參考。"
-        if not rows:
-            self.sug_col.controls.append(kit.hint_text("沒有符合的資料"))
-        else:
-            self.sug_col.controls.append(kit.hint_text(hint))
-
-    def _sug_item(
-        self,
-        text: str,
-        tags: list[str],
-        *,
-        apply: str | None,
-        same: bool,
-        count: int = 0,
-    ) -> ft.Control:
-        title = text if text else "（未翻譯）"
-        head = ft.Text(
-            title + (f"  × {count}" if count else ""),
-            size=14,
-            color=C.MUTED if same or not text else C.TEXT,
-            selectable=True,
-            expand=True,
-        )
-        row: list[ft.Control] = [head]
-        if apply:
-            row.append(
-                kit.button(
-                    "套用",
-                    "secondary",
-                    size="sm",
-                    on_click=lambda _e, t=apply: self._apply_suggestion(t),
-                )
-            )
-        return ft.Container(
-            padding=ft.Padding.symmetric(vertical=8),
-            border=ft.Border.only(bottom=ft.BorderSide(1, C.LINE)),
-            content=ft.Column(
-                [
-                    ft.Row(row, vertical_alignment=ft.CrossAxisAlignment.START),
-                    ft.Row(
-                        [kit.chip(t, "neutral") for t in tags if t]
-                        + ([kit.chip("與目前相同", "em")] if same and text else []),
-                        spacing=6,
-                        wrap=True,
-                    ),
-                ],
-                spacing=4,
-            ),
+        self.sug_col.controls = build_suggestions(
+            self.detail, self.sug_tab, self._apply_suggestion
         )
 
     def _render_history(self) -> None:
@@ -589,6 +578,16 @@ class EntriesPanel(ft.Column):
     def _on_mod(self, e) -> None:
         value = e.control.value
         self.mod_id = None if value in (None, "", ALL_MODS) else value
+        self._load_list()
+        self._safe_update()
+
+    def _on_kind(self, e) -> None:
+        value = e.control.value
+        self.kind = None if value in (None, "", ALL_KINDS) else value
+        self._load_list()
+        self._safe_update()
+
+    def _on_source(self) -> None:
         self._load_list()
         self._safe_update()
 
@@ -665,6 +664,18 @@ class EntriesPanel(ft.Column):
         self.mc_preview.visible = has_codes
         self.mc_preview.value = ""
         self.mc_preview.spans = mc_text_spans(text, C.TEXT, 14) if has_codes else []
+        self.chars.render(entry.en_us if entry else "", text)
+
+    def _update_format_hints_and_refresh(self) -> None:
+        self._update_format_hints()
+        self._safe_update()
+
+    def _copy_source(self) -> None:
+        """把原文（連同換行與前後空白）原樣放進譯文框，再手動翻譯。"""
+        if self.selected is not None and self.selected.en_us:
+            self.tw_field.value = self.selected.en_us
+            self._update_impact()
+            self._safe_update()
 
     def _update_impact(self) -> None:
         self._update_format_hints()

@@ -187,11 +187,14 @@ class StatCard(ft.Container):
         delta: str | None = None,
         delta_tone: str = "em",
         expand: bool | int = False,
+        action: ft.Control | None = None,
     ) -> None:
         head: list[ft.Control] = []
         if icon:
             head.append(tone_icon(icon, tone, size=14))
-        head.append(ft.Text(label, size=12, color=C.MUTED, no_wrap=True))
+        head.append(ft.Text(label, size=12, color=C.MUTED, no_wrap=True, expand=True))
+        if action is not None:
+            head.append(action)  # 操作按鈕放標題列右側，不多佔一行（各卡高度才一致）
         self.value_text = ft.Text(
             value,
             size=25,
@@ -250,6 +253,7 @@ def stat_card(
     delta: str | None = None,
     delta_tone: str = "em",
     expand: bool | int = False,
+    action: ft.Control | None = None,
 ) -> StatCard:
     """``StatCard`` 的函式寫法。"""
     return StatCard(
@@ -260,6 +264,7 @@ def stat_card(
         delta=delta,
         delta_tone=delta_tone,
         expand=expand,
+        action=action,
     )
 
 

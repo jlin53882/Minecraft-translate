@@ -4,11 +4,11 @@
 > 範圍：`app/`、`translation_tool/`、`main.py` 內所有帶 `noqa: BLE001／S110／S112` 的位置。
 > 命令列 QA 工具（`md_extract_qa.py`、`md_inject_qa.py`）的 `print` 為刻意保留，不在此表。
 
-共 **271** 項；其中 **122** 項尚未在程式碼內寫明原因（以「分類」說明處理方式）。
+共 **285** 項；其中 **122** 項尚未在程式碼內寫明原因（以「分類」說明處理方式）。
 
 | 分類 | 數量 | 意義 |
 |---|---|---|
-| 已記錄／回報 | 236 | 例外處理本身有 log、提示、回報錯誤事件或重新丟出；寬鬆捕捉是為了不中斷整批流程 |
+| 已記錄／回報 | 250 | 例外處理本身有 log、提示、回報錯誤事件或重新丟出；寬鬆捕捉是為了不中斷整批流程 |
 | UI／畫面保護 | 19 | UI 層的畫面更新、icon 快取等；失敗只影響顯示，不影響資料 |
 | 盡力而為（靜默） | 16 | 引擎層、只有 `pass`／`continue`／回傳常數；失敗不影響結果（例如進度回報、還原失敗時以原始例外為準） |
 
@@ -28,7 +28,10 @@
 | `app/services.py:run_variant_compare_tsv_service` | BLE001 | 已記錄／回報 | 錯誤已記錄或回報給呼叫端，不中斷整批流程 |
 | `app/services_impl/cache/cache_services.py:cache_search_service` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/services_impl/cache/cache_services.py:cache_rebuild_index_service` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
+| `app/services_impl/moddb_service.py:warm_stats_quietly` | BLE001 | 已記錄／回報 | 統計預熱失敗不影響任務結果 |
 | `app/services_impl/moddb_service.py:run_moddb_scan_service` | BLE001 | 已記錄／回報 | 背景任務：任何失敗都要回報到 session，不可讓執行緒默默結束 |
+| `app/services_impl/moddb_translate_service.py:_flush_buffer` | BLE001 | 已記錄／回報 | 持久化失敗需重試並回報 |
+| `app/services_impl/moddb_translate_service.py:run_moddb_translate_service` | BLE001 | 已記錄／回報 | 背景任務：任何失敗都要回報到 session |
 | `app/services_impl/pipelines/_task_runner.py:run_callable_task` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/services_impl/pipelines/bundle_service.py:run_bundling_service` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/services_impl/pipelines/extract_service.py:run_lang_extraction_service` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
@@ -50,6 +53,7 @@
 | `app/ui/snack.py:_show_snack_dialog` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/ui/snack.py:_show_snack_dialog` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/ui/snack.py:show_snack` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
+| `app/ui/sync_text_field.py:_clean_path_input` | BLE001 | 已記錄／回報 | 尚未掛上頁面時不影響輸入 |
 | `app/views/bundler_view.py:BundlerView._load_version_data` | BLE001 | 已記錄／回報 | 版本資料讀不到時用空設定，但要留下紀錄 |
 | `app/views/bundler_view.py:BundlerView._bundling_worker` | BLE001 | 已記錄／回報 | 背景執行緒邊界，錯誤顯示於日誌 |
 | `app/views/cache_manager/cache_actions.py:run_cache_action.execute_work` | BLE001 | UI／畫面保護 | 錯誤顯示在 UI |
@@ -88,6 +92,9 @@
 | `app/views/cache_view.py:CacheView._finish_mount` | BLE001/S110 | UI／畫面保護 | （未寫原因；見分類） |
 | `app/views/cache_view.py:CacheView._on_page_resized` | BLE001/S110 | UI／畫面保護 | （未寫原因；見分類） |
 | `app/views/cache_view.py:CacheView.commit_ui` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
+| `app/views/config/db_location.py:DbLocationBanner.safe_refresh` | BLE001 | 已記錄／回報 | 尚未掛上頁面時不影響設定頁 |
+| `app/views/config/db_location.py:attach_path_hooks.chain.handler` | BLE001 | 已記錄／回報 | 尚未掛上頁面時不影響輸入 |
+| `app/views/config/db_location.py:attach_priority_hooks.handler` | BLE001 | 已記錄／回報 | 尚未掛上頁面時不影響輸入 |
 | `app/views/dashboard_view.py:DashboardView._apply_on_ui` | BLE001 | 已記錄／回報 | 沒有 event loop（測試）就直接套用 |
 | `app/views/extractor/extractor_dialog.py:_extractor_run_extraction` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/views/extractor/extractor_preview_dialog.py:_preview_do_scan` | BLE001 | 已記錄／回報 | 錯誤要回報到 UI |
@@ -111,9 +118,14 @@
 | `app/views/merge_view.py:MergeView._run_merge_worker` | BLE001 | 已記錄／回報 | 背景執行緒邊界：失敗要寫進 session，否則輪詢永遠等不到結束 |
 | `app/views/merge_view.py:MergeView._sync_ui_once` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/views/merge_view.py:MergeView._close_dialog_overlay` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
+| `app/views/moddb/entries_panel.py:EntriesPanel._scroll_list_to_top.to_top` | BLE001 | 已記錄／回報 | 尚未掛上頁面時不影響清單 |
+| `app/views/moddb/entries_panel.py:EntriesPanel._scroll_list_to_top` | BLE001 | 已記錄／回報 | 排程失敗不影響清單 |
 | `app/views/moddb/entries_panel.py:EntriesPanel._safe_update` | BLE001 | 已記錄／回報 | 頁面已卸載時不影響資料操作 |
 | `app/views/moddb/overview_panel.py:OverviewPanel.refresh` | BLE001 | 已記錄／回報 | 頁面已卸載時不影響資料 |
+| `app/views/moddb/scan_panel.py:ScanPanel._poll` | BLE001 | 已記錄／回報 | 輪詢失敗不能讓畫面永遠卡在「執行中」 |
 | `app/views/moddb/scan_panel.py:ScanPanel._safe_update` | BLE001 | 已記錄／回報 | 頁面已卸載時不影響掃描本身 |
+| `app/views/moddb/translate_panel.py:TranslatePanel._poll` | BLE001 | 已記錄／回報 | 輪詢失敗不能讓畫面永遠卡在「執行中」 |
+| `app/views/moddb/translate_panel.py:TranslatePanel._safe_update` | BLE001 | 已記錄／回報 | 頁面已卸載時不影響機翻本身 |
 | `app/views/moddb_view.py:ModDbView._safe_update` | BLE001 | 已記錄／回報 | 頁面已卸載時不影響資料操作 |
 | `app/views/pipeline/pipeline_bundle_dialog.py:_load_version_data` | BLE001 | 已記錄／回報 | 讀不到版本資料時使用空設定，UI 仍可開啟 |
 | `app/views/pipeline/pipeline_extract_dialog.py:_extract_preview_worker` | BLE001 | 已記錄／回報 | 錯誤要顯示在對話框 |
@@ -206,6 +218,7 @@
 | `translation_tool/core/lm_resume.py:check_resume_feasibility` | BLE001 | 已記錄／回報 | 檢查失敗要回報給使用者，不能讓啟動流程中斷 |
 | `translation_tool/core/lm_translator.py:load_checkpoint` | BLE001 | 已記錄／回報 | 損毀的 checkpoint 視為沒有，但要留下紀錄 |
 | `translation_tool/core/lm_translator.py:_scan_directory_files` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
+| `translation_tool/core/lm_translator_main.py:_remote_error_detail` | BLE001 | 已記錄／回報 | 回應不是 JSON 時改用原始文字 |
 | `translation_tool/core/lm_translator_main.py:_handle_batch_error` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `translation_tool/core/lm_translator_main.py:_handle_batch_error` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `translation_tool/core/lm_translator_main.py:_attempt_batch` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
@@ -257,6 +270,7 @@
 | `translation_tool/plugins/md/md_lmtranslator.py:translate_md_pending` | BLE001 | 已記錄／回報 | 失敗已記錄，不中斷翻譯批次 |
 | `translation_tool/translation_db/identity.py:patchouli_dir_names` | BLE001 | 已記錄／回報 | 設定不可用時退回預設，不影響身分計算 |
 | `translation_tool/translation_db/scanner.py:load_rules` | BLE001 | 已記錄／回報 | 規則檔問題不應讓掃描失敗，只是略過替換 |
+| `translation_tool/translation_db/settings.py:remember_db_path` | BLE001 | 已記錄／回報 | 寫設定失敗不應中斷建立資料庫 |
 | `translation_tool/translation_db/settings.py:open_db` | BLE001 | 已記錄／回報 | 資料庫問題不應中斷翻譯 |
 | `translation_tool/utils/cache_overview.py:build_cache_overview` | BLE001 | 已記錄／回報 | 讀取失敗不中斷總覽，但要留下紀錄 |
 | `translation_tool/utils/cache_overview.py:build_cache_overview` | BLE001 | 已記錄／回報 | 讀取失敗不中斷總覽，但要留下紀錄 |

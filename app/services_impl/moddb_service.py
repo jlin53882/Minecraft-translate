@@ -30,6 +30,7 @@ from translation_tool.translation_db import (
 )
 from translation_tool.translation_db.scanner import ScanOptions, scan_folder_generator
 from translation_tool.translation_db.schema import (
+    CUSTOM_SOURCE_BASE,
     SRC_AI,
     SRC_CUSTOM,
     SRC_I18N,
@@ -39,6 +40,12 @@ from translation_tool.translation_db.schema import (
     SRC_SUBTITLE,
 )
 from translation_tool.translation_db.settings import database_problem as _db_problem
+from translation_tool.translation_db.settings import (
+    describe_db_path,
+    normalize_db_path,
+    preview_new_source_names,
+    strip_quotes,
+)
 from translation_tool.utils.cancellation import cancel_scope
 from translation_tool.utils.config_manager import load_config
 
@@ -59,13 +66,19 @@ __all__ = [
     "TranslationDB",
     "VersionStat",
     "current_settings",
+    "custom_source_codes",
     "database_problem",
+    "describe_db_path",
     "load_db_settings",
+    "normalize_db_path",
     "open_database",
     "pack_format_hint",
+    "preview_new_source_names",
     "run_moddb_scan_service",
+    "strip_quotes",
     "summarize_database",
     "version_choices",
+    "warm_stats_quietly",
 ]
 
 logger = logging.getLogger(__name__)
@@ -76,6 +89,11 @@ VERSION_FILE = (
     / "core"
     / "resource_pack_version.json"
 )
+
+
+def custom_source_codes() -> list[int]:
+    """使用者自訂來源（在設定「來源優先順序」輸入的新名稱）的代碼，依代碼排序。"""
+    return sorted(c for c in SOURCE_NAMES if c >= CUSTOM_SOURCE_BASE)
 
 
 def current_settings() -> DbSettings:
@@ -152,6 +170,14 @@ def _log_both(session, text: str, level: str = "info") -> None:
     mirror_session_log(session, logger, text, level, prefix="[Mod 資料庫掃描] ")
 
 
+def warm_stats_quietly(db: TranslationDB) -> None:
+    """寫入後預先算好總覽統計（在背景任務執行緒做，之後切到總覽頁就不必等）。"""
+    try:
+        db.warm_stats()
+    except Exception as exc:  # noqa: BLE001 - 統計預熱失敗不影響任務結果
+        logger.debug("統計預熱略過：%s", exc)
+
+
 def run_moddb_scan_service(
     folder: str,
     options: ScanOptions,
@@ -180,6 +206,15 @@ def run_moddb_scan_service(
                     database_problem()
                     or f"請檢查設定中的資料庫路徑與檔案權限（{settings.resolved_path()}）"
                 ),
+                "error",
+            )
+            session.set_error()
+            return
+        if options.translated and options.translation_source not in SOURCE_NAMES:
+            _log_both(
+                session,
+                f"[錯誤] 譯文來源代碼 {options.translation_source} 不在目前資料庫的來源清單中，"
+                "請重新選擇「譯文來源標記」。",
                 "error",
             )
             session.set_error()
@@ -223,6 +258,8 @@ def run_moddb_scan_service(
         session.set_error()
     finally:
         if db is not None:
+            if not options.dry_run:
+                warm_stats_quietly(db)
             db.close()
         UI_LOG_HANDLER.set_session(None)
         if manage_session:

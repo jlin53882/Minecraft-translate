@@ -51,7 +51,7 @@ TRANSLATION_RESPONSE_SCHEMA = {
 
 
 def _build_translation_response_schema(payload: dict) -> dict:
-    """Constrain the response array and IDs to the current input batch."""
+    """Constrain the response IDs to the current input batch (array length is validated by the caller)."""
     if not isinstance(payload, dict):
         raise ValueError("Gemini translation payload must be an object")  # noqa: TRY004
     if "items" not in payload:
@@ -82,8 +82,10 @@ def _build_translation_response_schema(payload: dict) -> dict:
 
     schema = deepcopy(TRANSLATION_RESPONSE_SCHEMA)
     item_array = schema["properties"]["items"]
-    item_array["minItems"] = len(ids)
-    item_array["maxItems"] = len(ids)
+    # 刻意不設 minItems / maxItems：依批次筆數動態設定陣列長度會讓 Gemini
+    # （實測 gemini-3.1-flash-lite，150 筆）回 400 INVALID_ARGUMENT。
+    # 筆數是否完整改由回覆後的程式端驗證（lm_translator_main._merge_batch_response：
+    # ID 必須屬於本批、不可重複、不可缺漏），不完整的回覆不會被合併或寫入。
     item_array["items"]["properties"]["id"]["enum"] = ids
     return schema
 

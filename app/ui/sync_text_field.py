@@ -26,7 +26,8 @@ import inspect
 
 import flet as ft
 
-from translation_tool.utils.log_unit import log_info
+from translation_tool.utils.log_unit import log_debug, log_info
+from translation_tool.utils.path_text import normalize_path_text, strip_path_quotes
 
 
 def _sync_value(e) -> None:
@@ -44,6 +45,25 @@ def _sync_value(e) -> None:
             not current and value
         ):
             e.control.value = value
+
+
+def _clean_path_input(control, *, final: bool) -> None:
+    """路徑欄位（``path_input=True``）：去掉貼上時帶的引號（Windows「複製為路徑」）。
+
+    輸入中（change）只去引號，不動空白（路徑中間可能還在打字）；離開欄位（blur）
+    再整理前後空白。只有內容真的需要改時才寫回並更新畫面，所以平常打字不會觸發反向更新。
+    """
+    if not getattr(control, "path_input", False):
+        return
+    current = getattr(control, "value", "") or ""
+    cleaned = normalize_path_text(current) if final else strip_path_quotes(current)
+    if cleaned == current:
+        return
+    control.value = cleaned
+    try:
+        control.update()
+    except Exception as exc:  # noqa: BLE001 - 尚未掛上頁面時不影響輸入
+        log_debug(f"路徑欄位更新略過：{exc}")
 
 
 def _sync_change(e) -> None:
@@ -69,6 +89,7 @@ def _sync_change(e) -> None:
     else:
         # 測試替身或未使用 Flet Prop 的控制項仍維持可讀行為。
         control.value = value
+    _clean_path_input(control, final=False)
 
 
 def _sync_blur(e) -> None:
@@ -89,6 +110,9 @@ def _sync_blur(e) -> None:
             f"事件資料={data!r}（{len(data) if isinstance(data, str) else 'n/a'}）"
         )
     _sync_value(e)
+    control = getattr(e, "control", None)
+    if control is not None:
+        _clean_path_input(control, final=True)
 
 
 # 內建的同步 handler 本身就是「已同步」：init 再次確認時不可再包一層
@@ -145,6 +169,7 @@ class SyncTextField(ft.TextField):
         # Flet 會在基底建構子內準備事件註冊資料；要在 super() 前傳入，
         # 才能確保 Web renderer 真的把 handler 發佈到前端，而不是只改到
         # Python 物件上的屬性。
+        path_input = bool(kwargs.pop("path_input", False))
         editable = not kwargs.get("read_only", False)
         single_line = editable and not (
             kwargs.get("multiline", False) or kwargs.get("password", False)
@@ -155,6 +180,8 @@ class SyncTextField(ft.TextField):
         if single_line:
             kwargs["on_blur"] = _synced(kwargs.get("on_blur"), _sync_blur)
         super().__init__(*args, **kwargs)
+        # 路徑欄位：貼上帶引號的路徑（檔案總管「複製為路徑」）會自動去掉引號
+        self.path_input = path_input
         self._ensure_sync_handlers()
 
     def _ensure_sync_handlers(self) -> None:

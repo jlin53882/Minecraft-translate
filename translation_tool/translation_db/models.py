@@ -88,6 +88,16 @@ class EntryDetail:
     same_key: list[SameKeyRow] = field(default_factory=list)
     same_text: list[SameTextRow] = field(default_factory=list)
     history: list[HistoryRow] = field(default_factory=list)
+    src_changes: list[SrcChangeRow] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class SrcChangeRow:
+    """掃描時發現、尚未採用的原文變動（資料庫仍保留舊原文）。"""
+
+    old_en: str
+    new_en: str
+    detected_at: str
 
 
 @dataclass(frozen=True)

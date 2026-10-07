@@ -150,6 +150,7 @@ def _merge_init_state_and_config(ctx, input_path):
         value=input_path,
         expand=True,
         border_color=C.EM,
+        path_input=True,
     )
     merge_zip_field = SyncTextField(  # noqa: F841
         label="Mod 來源（ZIP）",
@@ -181,6 +182,7 @@ def _merge_build_option_widgets(
         value=output_path,
         expand=True,
         border_color=C.EM,
+        path_input=True,
     )
     ctx.merge_only_lang_checkbox = ft.Checkbox(label="只處理 lang 檔案", value=True)
     ctx.merge_process_zh_cn_switch = ft.Switch(label="處理 zh_cn 檔案", value=True)

@@ -55,6 +55,9 @@ def _cancel_pending_on_exit(futures: list) -> Generator[None, None, None]:
             fut.cancel()
 
 
+_FILE_FAILED_MESSAGE = "有檔案處理失敗（原因請查看日誌中的 ERROR 記錄）"
+
+
 def _scale_progress(value: float, start: float, end: float) -> float:
     """Map source-local progress into the caller's progress range."""
     return start + max(0.0, min(1.0, value)) * (end - start)
@@ -358,6 +361,8 @@ def merge_zhcn_to_zhtw_from_zip(
                         "error": res.get("error", False),
                         "pending_count": res.get("pending_count", 0),
                     }
+                    if yield_data["error"]:
+                        yield_data["message"] = _FILE_FAILED_MESSAGE
 
                     # 2. 終端機日誌處理
                     log_msg = res.get("log")
@@ -669,6 +674,8 @@ def merge_zhcn_to_zhtw_from_folder(
                     "error": res.get("error", False),
                     "pending_count": res.get("pending_count", 0),
                 }
+                if yield_data["error"]:
+                    yield_data["message"] = _FILE_FAILED_MESSAGE
 
                 log_msg = res.get("log")
                 if log_msg:

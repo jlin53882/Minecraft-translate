@@ -124,8 +124,9 @@ def test_existing_generation_config_fields_are_kept(post):
         "value": {"type": "string"},
     }
     assert item["additionalProperties"] is False
-    assert items["minItems"] == 2
-    assert items["maxItems"] == 2
+    # 動態長度限制會讓 Gemini 回 400（150 筆實測）；筆數改由程式端驗證
+    assert "minItems" not in items
+    assert "maxItems" not in items
     assert set(cfg) >= {"temperature", "responseFormat", "maxOutputTokens"}
     assert "responseMimeType" not in cfg
     assert "responseSchema" not in cfg
@@ -163,9 +164,9 @@ def test_dynamic_schema_is_fresh_for_each_batch(post):
 
     first_items = first_schema["properties"]["items"]
     second_items = second_schema["properties"]["items"]
-    assert first_items["minItems"] == first_items["maxItems"] == 1
+    for array in (first_items, second_items):
+        assert "minItems" not in array and "maxItems" not in array
     assert first_items["items"]["properties"]["id"]["enum"] == ["a"]
-    assert second_items["minItems"] == second_items["maxItems"] == 2
     assert second_items["items"]["properties"]["id"]["enum"] == ["x", "y"]
 
 
@@ -262,3 +263,25 @@ def test_extract_response_meta_tolerates_odd_shapes():
     assert extract_response_meta({})["finish_reason"] is None
     assert extract_response_meta({"candidates": []})["finish_reason"] is None
     assert extract_response_meta({"candidates": [None]})["finish_reason"] is None
+
+
+def test_schema_has_no_dynamic_length_limits_for_large_batches():
+    """150 筆批次帶 minItems/maxItems 會被 Gemini 以 400 拒絕；保留 ID 列舉但不限制長度。"""
+    from translation_tool.core.lm_api_client import (
+        TRANSLATION_RESPONSE_SCHEMA,
+        _build_translation_response_schema,
+    )
+
+    ids = [str(i) for i in range(150)]
+    schema = _build_translation_response_schema(
+        {"items": [{"id": i, "value": f"v{i}"} for i in ids]}
+    )
+    array = schema["properties"]["items"]
+    assert "minItems" not in array and "maxItems" not in array
+    assert array["items"]["properties"]["id"]["enum"] == ids
+    assert array["items"]["required"] == ["id", "value"]
+    assert array["items"]["additionalProperties"] is False
+    assert schema["required"] == ["items"] and schema["additionalProperties"] is False
+    # 模組層級的基底 Schema 不被動態修改
+    base = TRANSLATION_RESPONSE_SCHEMA["properties"]["items"]
+    assert "enum" not in base["items"]["properties"]["id"]

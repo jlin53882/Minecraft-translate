@@ -126,6 +126,7 @@ def _bundle_init_state_and_fields(ctx, input_path, output_path):
         value=ctx.default_input,
         expand=True,
         border_color=C.ENCH,
+        path_input=True,
     )
     ctx.bundle_output_zip_field = SyncTextField(
         label="輸出 ZIP 檔案",
@@ -135,6 +136,7 @@ def _bundle_init_state_and_fields(ctx, input_path, output_path):
         value=ctx.default_output_zip,
         expand=True,
         border_color=C.ENCH,
+        path_input=True,
     )
     return dialog_width
 

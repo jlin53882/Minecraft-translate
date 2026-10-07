@@ -47,10 +47,10 @@ class PipelineView(PipelineWidgetsMixin, ft.Column):
         self.registry = None  # 預留給外部注入
 
         self.input_path_text = kit.text_field(
-            hint="尚未選擇讀取來源...", mono=True, expand=True
+            hint="尚未選擇讀取來源...", mono=True, expand=True, path=True
         )
         self.output_path_text = kit.text_field(
-            hint="尚未選擇輸出目的地...", mono=True, expand=True
+            hint="尚未選擇輸出目的地...", mono=True, expand=True, path=True
         )
         self.progress_bar = kit.progress_bar(0, "em", height=8)
         self.progress_status = ft.Text("等待任務啟動...", size=12, color=C.MUTED)
