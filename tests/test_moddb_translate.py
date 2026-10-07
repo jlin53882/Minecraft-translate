@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 
 import pytest
@@ -1503,6 +1504,85 @@ def test_translation_same_as_source_still_writes_cache_and_database(
     db = TranslationDB(db_path)
     row = next(r for r in db.list_entries("1.21.1")[0] if r.key == "item.foo.b")
     assert row.zh_tw == "Infused Alloy" and row.source == SRC_AI
+    db.close()
+
+
+@pytest.mark.parametrize(
+    ("retry_value", "expected"),
+    [("壓力室", "壓力室"), ("Pressure Chamber", "Pressure Chamber")],
+    ids=["updated", "still-same"],
+)
+def test_same_source_retry_is_finalized_before_mod_db_and_cache_writeback(
+    db_path, monkeypatch, fake_cache, retry_value, expected
+):
+    from translation_tool.core import lm_translator_main as main
+
+    db = TranslationDB(db_path)
+    db.ingest(
+        "1.21.1",
+        [ScanItem(KIND_LANG, "foo", "item.foo.pressure", "Pressure Chamber")],
+    )
+    db.close()
+
+    config = {
+        "lm_translator": {
+            "models": {"same-source-test-model": {"enabled": True}},
+            "temperature": 0.25,
+            "retry_same_as_source": True,
+            "token_budget_enabled": False,
+            "max_output_tokens": 2048,
+            "initial_batch_size_lang": 10,
+            "initial_batch_size_patchouli": 10,
+            "batch_shrink_factor": 0.75,
+            "min_batch_size": 1,
+            "lang_system_prompt": "LANG PROFILE PROMPT",
+            "patchouli_system_prompt": "PATCHOULI PROFILE PROMPT",
+            "rate_limit": {"sleep_seconds_between_batches": 0},
+        }
+    }
+    monkeypatch.setattr(main, "load_config", lambda: config)
+    monkeypatch.setattr(
+        "translation_tool.core.lm_config_rules._get_all_keys",
+        lambda: ["test-key"],
+    )
+    monkeypatch.setattr(main, "interruptible_sleep", lambda _seconds: None)
+    monkeypatch.setattr(
+        "translation_tool.core.lm_translator_shared_loop.load_config",
+        lambda: config,
+    )
+    calls = []
+
+    def call_api(**kwargs):
+        calls.append(kwargs)
+        translations = {"Pressure Chamber": retry_value} if len(calls) == 2 else {}
+        return json.dumps(
+            {
+                "items": [
+                    {
+                        "id": item["id"],
+                        "value": translations.get(item["value"], item["value"]),
+                    }
+                    for item in kwargs["payload"]["items"]
+                ]
+            },
+            ensure_ascii=False,
+        )
+
+    monkeypatch.setattr(main, "call_gemini_requests", call_api)
+    snapshot = run(TranslateOptions(version="1.21.1", reuse_other_versions=False))
+
+    assert snapshot["status"].upper() == "DONE"
+    assert snapshot["summary"]["translated"] == 1
+    assert snapshot["summary"]["written"] == 1
+    assert snapshot["summary"]["flagged"] == 0
+    assert len(calls) == 2
+    assert [entry["value"] for entry in calls[1]["payload"]["items"]] == [
+        "Pressure Chamber"
+    ]
+    assert [row[2:] for row in fake_cache] == [("Pressure Chamber", expected)]
+    db = TranslationDB(db_path)
+    row = next(r for r in db.list_entries("1.21.1")[0] if r.key == "item.foo.pressure")
+    assert row.zh_tw == expected and row.source == SRC_AI
     db.close()
 
 

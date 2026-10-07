@@ -315,6 +315,17 @@ SETTINGS: tuple[Setting, ...] = (
         timing_note="下一批次讀取。",
     ),
     Setting(
+        "lm_translator.retry_same_as_source",
+        "bool",
+        "翻譯與原文相同時重新確認",
+        "translation_behavior",
+        C_LM_BASIC,
+        "譯文完全等於原文時，只將這些項目再送 AI 確認一次；第二次仍相同會正常接受。確認在寫入快取與 Mod 資料庫前完成。",
+        default=True,
+        timing="next_batch",
+        timing_note="下一批次讀取。",
+    ),
+    Setting(
         "lm_translator.rate_limit.timeout",
         "int",
         "API 請求 Timeout",
