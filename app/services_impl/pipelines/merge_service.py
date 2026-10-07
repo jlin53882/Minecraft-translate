@@ -511,17 +511,6 @@ def _run_folder_stages(
     )
 
 
-def _new_folder_stats() -> dict:
-    """資料夾合併的統計計數器初始值。"""
-    return {
-        "total_folders": 1,
-        "success_folders": 0,
-        "failed_folders": 0,
-        "errored_files": 0,
-        "failed_folders_list": [],
-    }
-
-
 def run_merge_folder_batch_service(
     input_dir: str,
     output_dir: str,
@@ -551,7 +540,13 @@ def run_merge_folder_batch_service(
     UI_LOG_HANDLER.set_session(session)
     output_existed_before, lease = True, None
 
-    stats = _new_folder_stats()
+    stats = {
+        "total_folders": 1,
+        "success_folders": 0,
+        "failed_folders": 0,
+        "errored_files": 0,
+        "failed_folders_list": [],
+    }
     folder_errors = []
     finished = False  # generator 被 close（取消）時，yield 之後的 finish 不會執行；finally 補上
 
