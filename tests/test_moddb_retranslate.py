@@ -246,6 +246,88 @@ def test_service_keeps_old_translation_on_token_issue_and_api_failure(
     assert repair_cache == []
 
 
+def test_invalid_result_stops_before_next_batch(db_path, monkeypatch, repair_cache):
+    db = TranslationDB(db_path)
+    for key in ("a", "b", "c"):
+        _ai_entry(db, key=key)
+    preview = moddb_retranslate_service.preview_same_source_ai_retranslation(
+        db, _options(write_cache=False)
+    )
+    db.close()
+    monkeypatch.setattr(
+        moddb_retranslate_service,
+        "_get_default_batch_size",
+        lambda _cache_type, _sizes: 2,
+    )
+    calls = []
+
+    def fake_translate(batch, total):
+        calls.append([item["_entry_id"] for item in batch])
+        valid = {**batch[0], "text": "我的世界"}
+        invalid = {**batch[1], "_entry_id": -1, "text": "錯誤結果"}
+        return [valid, invalid], "AUTO"
+
+    monkeypatch.setattr(
+        moddb_retranslate_service, "translate_batch_smart", fake_translate
+    )
+
+    snap = _run(db_path, preview.entries, options=_options(write_cache=False))
+
+    assert len(calls) == 1
+    assert len(calls[0]) == 2
+    assert snap["summary"]["status"] == "FAILED"
+    assert snap["summary"]["failed"] == 2  # invalid result + skipped next batch
+    check = TranslationDB(db_path)
+    assert check.get_entry(calls[0][0]).zh_tw == "我的世界"
+    assert check.get_entry(calls[0][1]).zh_tw == "Minecraft"
+    third_id = next(
+        row.entry_id for row in preview.entries if row.entry_id not in calls[0]
+    )
+    assert check.get_entry(third_id).zh_tw == "Minecraft"
+    check.close()
+    assert repair_cache == []
+
+
+def test_excess_results_stop_before_next_batch(db_path, monkeypatch, repair_cache):
+    db = TranslationDB(db_path)
+    _ai_entry(db, key="a")
+    _ai_entry(db, key="b")
+    preview = moddb_retranslate_service.preview_same_source_ai_retranslation(
+        db, _options(write_cache=False)
+    )
+    db.close()
+    monkeypatch.setattr(
+        moddb_retranslate_service,
+        "_get_default_batch_size",
+        lambda _cache_type, _sizes: 1,
+    )
+    calls = []
+
+    def fake_translate(batch, total):
+        calls.append([item["_entry_id"] for item in batch])
+        valid = {**batch[0], "text": "我的世界"}
+        extra = {**batch[0], "text": "多餘結果"}
+        return [valid, extra], "AUTO"
+
+    monkeypatch.setattr(
+        moddb_retranslate_service, "translate_batch_smart", fake_translate
+    )
+
+    snap = _run(db_path, preview.entries, options=_options(write_cache=False))
+
+    assert len(calls) == 1
+    assert snap["summary"]["status"] == "FAILED"
+    assert snap["summary"]["failed"] == 1  # skipped next batch
+    check = TranslationDB(db_path)
+    assert check.get_entry(calls[0][0]).zh_tw == "我的世界"
+    pending_id = next(
+        row.entry_id for row in preview.entries if row.entry_id not in calls[0]
+    )
+    assert check.get_entry(pending_id).zh_tw == "Minecraft"
+    check.close()
+    assert repair_cache == []
+
+
 def test_identical_result_is_unchanged_and_does_not_touch_cache(
     db_path, monkeypatch, repair_cache
 ):
