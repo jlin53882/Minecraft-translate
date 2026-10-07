@@ -17,6 +17,13 @@ def _write_translation(review_root, value):
     path.write_text(json.dumps({"key": value}), encoding="utf-8")
 
 
+def _write_source_language(source_root, relative_path, value):
+    path = source_root / relative_path
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"key": value}), encoding="utf-8")
+    return path
+
+
 def _make_view(source_root, review_root, entries_cache=None, cache_meta=None):
     from app.views.icon_preview_view import IconPreviewView
 
@@ -83,6 +90,59 @@ def test_fresh_extracted_scan_hydrates_current_review_root(tmp_path):
     assert len(entries) == 1
     assert entries[0].en == "English"
     assert entries[0].zh_tw == "目前譯文"
+
+
+def test_extracted_l1_cache_misses_when_language_file_metadata_changes(tmp_path):
+    source_root = tmp_path / "source"
+    source_file = _write_source_language(
+        source_root, "assets/mod/lang/en_us.json", "Old"
+    )
+    identity = _compute_source_identity(source_root, "extracted_folder")
+    view = _make_view(
+        source_root,
+        review_root=None,
+        entries_cache=[_source_entry()],
+        cache_meta={"source_identity": identity},
+    )
+    assert view._lookup_cached_entries("extracted_folder")[0] == "L1"
+
+    old_stat = source_file.stat()
+    source_file.write_text(json.dumps({"key": "New"}), encoding="utf-8")
+    os.utime(
+        source_file,
+        ns=(old_stat.st_atime_ns, old_stat.st_mtime_ns + 2_000_000_000),
+    )
+
+    new_stat = source_file.stat()
+    assert new_stat.st_size == old_stat.st_size
+    assert new_stat.st_mtime_ns != old_stat.st_mtime_ns
+    assert view._lookup_cached_entries("extracted_folder") is None
+
+
+def test_extracted_l1_cache_misses_when_language_files_are_added_or_deleted(
+    tmp_path,
+):
+    source_root = tmp_path / "source"
+    source_file = _write_source_language(
+        source_root, "assets/mod/lang/en_us.json", "English"
+    )
+    identity = _compute_source_identity(source_root, "extracted_folder")
+    view = _make_view(
+        source_root,
+        review_root=None,
+        entries_cache=[_source_entry()],
+        cache_meta={"source_identity": identity},
+    )
+
+    _write_source_language(source_root, "assets/another/lang/en_us.json", "Added")
+    assert view._lookup_cached_entries("extracted_folder") is None
+
+    view._cache_meta = {
+        "source_identity": _compute_source_identity(source_root, "extracted_folder")
+    }
+    assert view._lookup_cached_entries("extracted_folder")[0] == "L1"
+    source_file.unlink()
+    assert view._lookup_cached_entries("extracted_folder") is None
 
 
 def test_l2_cache_is_rehydrated_per_view_and_serializes_source_only(

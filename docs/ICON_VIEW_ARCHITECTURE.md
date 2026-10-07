@@ -42,7 +42,7 @@ translation_tool/core/
 [載入] _on_load_clicked()（sync handler：只做 UI 準備，然後 page.run_task(_load_async)）
   └─ _load_async(generation)：每個阻塞步驟都在 asyncio.to_thread，await 之後檢查世代（卸載就丟棄）
        ├─ _detect_source_mode()（glob / rglob）
-       ├─ _lookup_cached_entries(mode)：L1（_entries_cache，source_root + mode 相符）→ L2（僅 jar_directory，讀磁碟 JSON）→ 命中即 _apply_cached_entries（_rebuild_mods + _render_mod_list，在 event loop）
+       ├─ _lookup_cached_entries(mode)：L1（_entries_cache，source identity 相符；extracted_folder 驗證所有 en_us.json 的相對路徑、大小與 mtime_ns，jar_directory 驗證 JAR 與 runtime assets）→ L2（僅 jar_directory，讀磁碟 JSON）→ 命中即 _apply_cached_entries（_rebuild_mods + _render_mod_list，在 event loop）
        ├─ 未命中 → _count_scan_steps(mode)（glob / rglob）→ _show_scan_started（進度條，在 event loop）
        └─ asyncio.to_thread(_scan_entries) → _finish_load()
   無 page.run_task（測試替身）時維持同步流程（_try_use_cached_entries / _begin_scan）
@@ -118,7 +118,7 @@ translation_tool/core/
 |------|------|
 | `source_root` / `review_root` | 原文（en_us + textures）/ 校對（zh_tw）資料夾 |
 | `mods` dict | modid → entries 列表 |
-| `_entries_cache` / `_cache_meta` | L1 快取（source_root + mode 驗證）；L2 為 `.icon_cache/<key>.json`，key 由 `_compute_cache_key`（JAR 檔名清單 hash）決定，僅 jar_directory 使用 |
+| `_entries_cache` / `_cache_meta` | L1 以 source identity 驗證：`extracted_folder` 比對所有 `en_us.json` 的相對路徑、大小與 `mtime_ns`；`jar_directory` 比對 JAR 與 NeoForge runtime assets 的路徑／檔名、大小與 `mtime_ns`。L2 為 `.icon_cache/<key>.json`，只供 `jar_directory` 使用，key 是上述 JAR source identity 的摘要 |
 | `_mod_search_*` / `_detail_search_*` | 兩層即時搜尋（`Debouncer`，150ms） |
 | `mod_page_size` / `page_size` | 模組清單每頁數（`page_size_selector` 可選 25/50/100）/ 詳情頁每頁筆數（50） |
 | `LangItemRow` | 單筆 key：TextField（繁中可編輯）+ lang key + 英文原文 + icon 預覽 |
@@ -127,7 +127,7 @@ translation_tool/core/
 
 1. 新增 icon 解析策略時，優先改 `icon_index.py` / `icon_resolver.py`，不要塞進 view。
 2. `_render_current_page` 每次重建 LangItemRow；entry 需帶 `icon_path` 避免重複解析。
-3. L2 快取只看 JAR 檔名，JAR 內容改變但檔名不變不會自動失效。
+3. source identity 以檔案路徑／名稱、大小與 `mtime_ns` 偵測來源變更，不計算內容雜湊；若檔案內容改變但大小與時間戳都被保留，快取可能不會失效。新增、刪除或一般修改 `en_us.json`／JAR／runtime asset 會改變 identity。
 4. `to_halfwidth()` 是全形轉半形（NFKC）工具，用於翻譯值正規化。
 5. 背景掃描不可直接改控制項；進度一律走 `IconPreviewView._set_progress`。
 

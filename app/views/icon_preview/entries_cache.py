@@ -40,7 +40,7 @@ def _source_entry_data(entry) -> dict:
 
 def _compute_source_identity(source_root: Path, mode: str) -> dict:
     """Describe source inputs whose changes require rescanning entries."""
-    source_root = Path(source_root)
+    source_root = Path(source_root).resolve()
     identity = {
         "source_root": str(source_root.resolve()),
         "mode": mode,
@@ -78,6 +78,29 @@ def _compute_source_identity(source_root: Path, mode: str) -> dict:
                     {"path": str(asset_path.resolve()), "unavailable": True}
                 )
         identity["runtime_assets"] = runtime_assets
+    elif mode == "extracted_folder":
+        language_files = []
+        for language_path in sorted(
+            source_root.rglob("en_us.json"), key=lambda path: path.as_posix()
+        ):
+            try:
+                stat = language_path.stat()
+                language_files.append(
+                    {
+                        "path": language_path.relative_to(source_root).as_posix(),
+                        "size": stat.st_size,
+                        "mtime_ns": stat.st_mtime_ns,
+                    }
+                )
+            except OSError:
+                # A disappearing/unreadable language file must invalidate L1.
+                language_files.append(
+                    {
+                        "path": language_path.relative_to(source_root).as_posix(),
+                        "unavailable": True,
+                    }
+                )
+        identity["language_files"] = language_files
     return identity
 
 
