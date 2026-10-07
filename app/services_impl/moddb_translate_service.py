@@ -222,12 +222,22 @@ def _flush_buffer(session, db, version, buffer, report, failures) -> None:
         return
 
 
+def _log_db_failure(session, buffer, failures) -> None:
+    _log(
+        session,
+        f"❌ 資料庫寫入失敗，已停止後續翻譯；尚有 {len(buffer)} 筆譯文未寫入"
+        f"（{failures['db_error'] or '最後補寫成功，但後續批次未執行'}）。"
+        "請排除問題（磁碟空間/檔案鎖定）後重新執行。",
+        "error",
+    )
+
+
 def _translate_rows(
     session, db, options: TranslateOptions, report: TranslateReport, rows, cancelled
 ) -> None:
     """分批機翻並寫回；每批先檢查特殊字元，一致者才寫入。"""
     buffer: list[WriteBackItem] = []
-    failures = {"streak": 0, "aborted": False, "db_error": ""}
+    failures = {"streak": 0, "aborted": False, "db_error": "", "db_stop": False}
 
     def on_translated_item(item: dict[str, Any]) -> None:
         if item.get("_untranslated"):
@@ -263,6 +273,8 @@ def _translate_rows(
         session.set_summary({**report.as_dict(), "live": tracker.live()})
 
     def translate_batch(batch, batch_total):
+        if failures["db_error"]:
+            failures["db_stop"] = True  # 因資料庫失敗而停止；之後補寫成功也不算整體完成
         if cancelled() or is_cancelled() or failures["aborted"] or failures["db_error"]:
             raise TaskCancelled()
         return translate_batch_smart(batch, total=batch_total)
@@ -286,15 +298,10 @@ def _translate_rows(
             ),
         )
     flush()
-    if failures["db_error"]:
+    if failures["db_error"] or failures["db_stop"]:
         report.status = "FAILED"
         session.set_error()
-        _log(
-            session,
-            f"❌ 資料庫寫入持續失敗，已停止；尚有 {len(buffer)} 筆譯文未寫入"
-            f"（{failures['db_error']}）。請排除問題（磁碟空間/檔案鎖定）後重新執行。",
-            "error",
-        )
+        _log_db_failure(session, buffer, failures)
     else:
         report.status = "ABORTED" if failures["aborted"] else result.status
     report.batches = tracker.batches_done

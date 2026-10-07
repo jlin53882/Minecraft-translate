@@ -23,7 +23,6 @@ from translation_tool.translation_db import (
 )
 from translation_tool.translation_db.models import WriteBackItem
 from translation_tool.translation_db.schema import SRC_AI, SRC_JAR_TW
-from translation_tool.translation_db.schema import KIND_PATCHOULI
 
 
 @pytest.fixture
@@ -1263,3 +1262,47 @@ def test_loop_batches_are_homogeneous_cache_type(monkeypatch):
     )
     assert all(len(s) == 1 for s in seen)
     assert set(saved) == {"lang", "patchouli"}
+
+
+def test_db_stop_then_final_flush_recovers_is_still_failed(db_path, monkeypatch):
+    """前 3 次寫入失敗、最後補寫成功：已翻批次保存，但後續批次未執行 → FAILED/ERROR。"""
+    seed(db_path)
+    fake_engine(monkeypatch, lambda t: "譯:" + t)
+    monkeypatch.setattr(
+        moddb_translate_service,
+        "run_translator_skeleton",
+        _skeleton_one_per_batch(moddb_translate_service.run_translator_skeleton),
+    )
+    real = TranslationDB.write_back
+    state = {"fail": 3}
+
+    def flaky(self, *a, **k):
+        if state["fail"] > 0:
+            state["fail"] -= 1
+            raise OSError("locked")
+        return real(self, *a, **k)
+
+    monkeypatch.setattr(TranslationDB, "write_back", flaky)
+    snap = run(TranslateOptions(version="1.21.1", mod_ids=("foo",)))
+    assert snap["status"] == "ERROR"
+    assert snap["summary"]["status"] == "FAILED"
+    assert snap["summary"]["written"] == 1 and snap["summary"]["remaining"] == 1
+
+
+def test_reuse_picks_highest_priority_source_not_min_code(db_path):
+    """同譯文、不同來源：沿用時取優先序最高者（人工），不是代碼最小者（AI）。"""
+    from translation_tool.translation_db.schema import SRC_MANUAL
+
+    db = TranslationDB(db_path)
+    db.ingest("1.21.1", [ScanItem(KIND_LANG, "m", "k", "Gear")])
+    db.ingest(
+        "1.20.1", [ScanItem(KIND_LANG, "m", "k", "Gear", "齒輪", source=SRC_MANUAL)]
+    )
+    db.ingest("1.19.2", [ScanItem(KIND_LANG, "m", "k", "Gear", "齒輪", source=SRC_AI)])
+    assert db.reuse_from_other_versions("1.21.1") == 1
+    row = db._q(
+        "SELECT t.source FROM translation t JOIN entry e ON e.id=t.entry_id "
+        "WHERE e.mc_version='1.21.1'"
+    )
+    assert row == [(SRC_MANUAL,)]
+    db.close()

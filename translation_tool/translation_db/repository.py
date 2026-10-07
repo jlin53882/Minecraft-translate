@@ -162,6 +162,8 @@ class TranslationDB:
         if not self.readonly:
             try:
                 with self._lock:
+                    if self._data_gen() != gen:
+                        return value  # 計算期間資料又變了：不寫舊世代，也不清掉新世代的快取
                     self._conn.execute("DELETE FROM stat_cache WHERE gen <> ?", (gen,))
                     self._conn.execute(
                         "INSERT OR REPLACE INTO stat_cache (key, gen, value) "
@@ -954,21 +956,24 @@ class TranslationDB:
         where, extra = self._untranslated_where(mod_ids)
         with self._tx() as conn:
             rows = conn.execute(
-                "SELECT e.id, MIN(f2.source), MIN(f2.zh_tw) FROM entry e "
+                "SELECT e.id, f2.source, f2.zh_tw FROM entry e "
                 "LEFT JOIN effective f ON f.entry_id = e.id "
                 "JOIN entry e2 ON e2.kind = e.kind AND e2.mod_id = e.mod_id "
                 "AND e2.key = e.key AND e2.en_us = e.en_us "
                 "AND e2.mc_version <> e.mc_version "
                 "JOIN effective f2 ON f2.entry_id = e2.id "
-                f"WHERE {where} GROUP BY e.id HAVING COUNT(DISTINCT f2.zh_tw) = 1 ORDER BY e.id",
+                f"WHERE {where} AND {self._REUSABLE_SQL} ORDER BY e.id, f2.rowid",
                 [version, *extra],
             ).fetchall()
-            seen: set[int] = set()
-            touched: list[int] = []
+            # 譯文已確認一致；來源標記取目前優先序最高者（不可用代碼大小，人工不該被降成 AI）
+            order = {s: i for i, s in enumerate(self.priority)}
+            best: dict[int, tuple[int, int, str]] = {}
             for eid, source, zh_tw in rows:
-                if eid in seen:
-                    continue
-                seen.add(eid)
+                rank = order.get(source, 99)
+                if eid not in best or rank < best[eid][0]:
+                    best[eid] = (rank, source, zh_tw)
+            touched: list[int] = []
+            for eid, (_rank, source, zh_tw) in best.items():
                 cur = conn.execute(
                     "INSERT OR IGNORE INTO translation (entry_id, source, zh_tw) "
                     "VALUES (?,?,?)",
