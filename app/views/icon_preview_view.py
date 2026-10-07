@@ -12,7 +12,7 @@ from types import SimpleNamespace
 
 import flet as ft
 
-from app.ui import design, kit
+from app.ui import kit
 from app.ui.debounce import Debouncer
 from app.ui.design import C
 from app.ui.safe_file_picker import SafeFilePicker
@@ -27,6 +27,7 @@ from app.views.icon_preview.icon_cache import _migrate_old_icon_cache
 from app.views.icon_preview.list_mixin import IconPreviewListMixin
 from app.views.icon_preview.progress import _make_progress_callback
 from translation_tool.utils.log_unit import log_error, log_info, log_warning
+from translation_tool.utils.path_text import normalize_path_text
 
 
 class IconPreviewView(IconPreviewDetailMixin, IconPreviewListMixin, ft.Column):
@@ -52,14 +53,19 @@ class IconPreviewView(IconPreviewDetailMixin, IconPreviewListMixin, ft.Column):
             ft.Column(
                 [
                     ft.Row(
-                        [self.pick_source_btn, self.source_label],
+                        [self.pick_source_btn, self.source_path_input],
                         spacing=12,
                         vertical_alignment=ft.CrossAxisAlignment.CENTER,
                     ),
                     ft.Row(
-                        [self.pick_review_btn, self.review_label],
+                        [self.pick_review_btn, self.review_path_input],
                         spacing=12,
                         vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    ),
+                    ft.Text(
+                        "Web 模式請輸入執行程式那台電腦上的路徑；選擇按鈕僅適用於支援資料夾對話框的平台。",
+                        size=11,
+                        color=C.MUTED,
                     ),
                     ft.Row([self.load_btn], spacing=12),
                     # 進度條：置於「載入模組清單」按鈕下方，掃描時才顯示
@@ -235,11 +241,23 @@ class IconPreviewView(IconPreviewDetailMixin, IconPreviewListMixin, ft.Column):
             on_click=lambda e: self._page.run_task(self._async_pick_review_dir),
         )
 
-        self.source_label = ft.Text(
-            "模組資料夾：尚未選擇", size=12, color=C.MUTED, font_family=design.FONT_MONO
+        self.source_path_input = kit.field(
+            label="模組資料夾路徑",
+            hint_text=r"例如：C:\Users\使用者\.minecraft\mods",
+            dense=True,
+            expand=True,
+            path_input=True,
+            on_change=self._on_source_path_changed,
+            on_blur=self._on_source_path_input,
         )
-        self.review_label = ft.Text(
-            "資源包路徑：尚未選擇", size=12, color=C.MUTED, font_family=design.FONT_MONO
+        self.review_path_input = kit.field(
+            label="資源包／lang_output 路徑",
+            hint_text=r"例如：C:\Users\使用者\resource_pack\lang_output",
+            dense=True,
+            expand=True,
+            path_input=True,
+            on_change=self._on_review_path_changed,
+            on_blur=self._on_review_path_input,
         )
 
         self.load_btn = kit.button(
@@ -273,7 +291,7 @@ class IconPreviewView(IconPreviewDetailMixin, IconPreviewListMixin, ft.Column):
         result = await self.source_picker.get_directory_path()
         if result:
             self.source_root = Path(result)
-            self.source_label.value = f"模組資料夾：{self.source_root}"
+            self.source_path_input.value = str(self.source_root)
             migrated = _migrate_old_icon_cache(self.source_root)
             if migrated:
                 show_snack(
@@ -309,7 +327,7 @@ class IconPreviewView(IconPreviewDetailMixin, IconPreviewListMixin, ft.Column):
         result = await self.review_picker.get_directory_path()
         if result:
             self.review_root = Path(result)
-            self.review_label.value = f"資源包路徑：{self.review_root}"
+            self.review_path_input.value = str(self.review_root)
             self._update_load_state()
             log_info(f"[IconPreview] 資源包路徑已設定: {self.review_root}")
             show_snack(
@@ -333,7 +351,7 @@ class IconPreviewView(IconPreviewDetailMixin, IconPreviewListMixin, ft.Column):
         """處理來源目錄選擇結果"""
         if e.path:
             self.source_root = Path(e.path)
-            self.source_label.value = f"模組資料夾：{self.source_root}"
+            self.source_path_input.value = str(self.source_root)
             migrated = _migrate_old_icon_cache(self.source_root)
             if migrated:
                 show_snack(
@@ -368,7 +386,7 @@ class IconPreviewView(IconPreviewDetailMixin, IconPreviewListMixin, ft.Column):
         """處理校對目錄選擇結果"""
         if e.path:
             self.review_root = Path(e.path)
-            self.review_label.value = f"資源包路徑：{self.review_root}"
+            self.review_path_input.value = str(self.review_root)
             self._update_load_state()
             log_info(f"[IconPreview] 資源包路徑已設定: {self.review_root}")
             show_snack(
@@ -395,6 +413,111 @@ class IconPreviewView(IconPreviewDetailMixin, IconPreviewListMixin, ft.Column):
         )
         self.update()
 
+    def _on_source_path_input(self, e):
+        """失焦時同步手動輸入的 mods 路徑並刷新載入按鈕。"""
+        value = self._read_path_input_value(e, "_source_path_text")
+        if getattr(e.control, "value", None) != value:
+            e.control.value = value
+        self._set_source_path(value, migrate=True)
+        self._update_load_state()
+
+    def _on_source_path_changed(self, e):
+        """輸入期間同步來源，但不重繪整個頁面以免 Web 欄位失焦。"""
+        value = self._read_path_input_value(e, "_source_path_text")
+        self._set_source_path(value)
+
+    def _set_source_path(self, value, *, migrate: bool = False):
+        new_root = Path(value).expanduser() if value else None
+        if new_root != self.source_root:
+            self._entries_cache = None
+            self._cache_meta = {}
+        self.source_root = new_root
+        if migrate and new_root is not None and new_root.is_dir():
+            migrated = _migrate_old_icon_cache(new_root)
+            if migrated:
+                show_snack(
+                    self.page,
+                    f"✅ 已遷移 {migrated} 個舊版圖示快取",
+                    color=C.EM,
+                )
+
+    def _on_review_path_input(self, e):
+        """失焦時同步校對路徑並刷新載入按鈕。"""
+        value = self._read_path_input_value(e, "_review_path_text")
+        if getattr(e.control, "value", None) != value:
+            e.control.value = value
+        self._set_review_path(value)
+        self._update_load_state()
+
+    def _on_review_path_changed(self, e):
+        """輸入期間同步校對路徑，但避免每個按鍵都觸發整頁更新。"""
+        self._set_review_path(self._read_path_input_value(e, "_review_path_text"))
+
+    def _set_review_path(self, value):
+        self.review_root = Path(value).expanduser() if value else None
+
+    def _read_path_input_value(self, e, buffer_name: str) -> str:
+        """讀取 change 事件完整文字，並在失焦事件資料為空時保留最後值。"""
+        event_value = getattr(e, "data", None)
+        control_value = getattr(e.control, "value", None)
+        if isinstance(event_value, str):
+            value = event_value
+        elif isinstance(control_value, str) and control_value:
+            value = control_value
+        else:
+            value = getattr(self, buffer_name, "")
+        value = normalize_path_text(value)
+        setattr(self, buffer_name, value)
+        return value
+
+    def _validate_input_paths(self) -> bool:
+        """載入前確認兩個路徑都是執行端可讀取的既有資料夾。"""
+        source_value = normalize_path_text(self.source_path_input.value)
+        review_value = normalize_path_text(self.review_path_input.value)
+        # 保留程式內呼叫者與既有測試直接設定 root 的相容性。
+        source_value = source_value or str(self.source_root or "")
+        review_value = review_value or str(self.review_root or "")
+
+        parsed_paths = []
+        for label, value in (
+            ("模組資料夾", source_value),
+            ("資源包路徑", review_value),
+        ):
+            if not value:
+                show_snack(
+                    self.page,
+                    f"⚠️ 請輸入{label}路徑",
+                    color=C.GOLD,
+                    clear_existing=True,
+                )
+                return False
+            path = Path(value).expanduser()
+            if not path.is_dir():
+                show_snack(
+                    self.page,
+                    f"⚠️ {label}不存在或不是資料夾：{path}",
+                    color=C.GOLD,
+                    clear_existing=True,
+                )
+                return False
+            parsed_paths.append(path)
+
+        source_root, review_root = parsed_paths
+        if source_root != self.source_root:
+            self._entries_cache = None
+            self._cache_meta = {}
+        _migrate_old_icon_cache(source_root)
+        self.source_root = source_root
+        self.review_root = review_root
+        self.source_path_input.value = str(source_root)
+        self.review_path_input.value = str(review_root)
+        self._update_load_state()
+        log_info(
+            f"[IconPreview] 路徑已設定：source_root={source_root}, "
+            f"review_root={review_root}"
+        )
+        return True
+
     # ==================================================
     # 載入 → 建立模組清單
     # ==================================================
@@ -412,6 +535,8 @@ class IconPreviewView(IconPreviewDetailMixin, IconPreviewListMixin, ft.Column):
     def _on_load_clicked(self, e):
         """處理載入按鈕點擊事件（磁碟掃描、讀快取都在背景執行緒，不佔用 event loop）。"""
         if getattr(self, "_loading", False):
+            return
+        if not self._validate_input_paths():
             return
         log_info("[IconPreview] 開始掃描模組...")
         show_snack(

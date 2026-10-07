@@ -335,9 +335,15 @@ def _try_extract_mod_icon_from_model(
         # 原理：key = "<prefix>.<modid>.<name>"，去掉 modid 前綴就是 model name
         prefix = key.split(".")[0]  # "block" 或 "item" 等
         rest = key[len(prefix) + 1 + len(modid) + 1 :]  # "restonia_crystal_block"
-        model_name = f"{prefix}/{rest}"  # "block/restonia_crystal_block"
+        model_names = [f"{prefix}/{rest}"]
+        if prefix == "entity":
+            # 一些模組的 entity 翻譯（例如 Worm）沒有 entity model，
+            # 但同名物品模型提供了合適的圖示；只在精確同名時作為 fallback。
+            model_names.append(f"item/{rest}")
 
-        if model_name in model_index:
+        for model_name in model_names:
+            if model_name not in model_index:
+                continue
             for model_path in model_index[model_name]:
                 tex_val = _follow_parent_chain(
                     model_path, names, modid, zf, budget=budget

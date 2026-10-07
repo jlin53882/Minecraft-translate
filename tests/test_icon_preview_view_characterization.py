@@ -1,5 +1,6 @@
 import tempfile
 from pathlib import Path
+from unittest.mock import patch
 
 import flet as ft
 
@@ -88,8 +89,20 @@ def test_icon_preview_view_all_controls_exist():
     assert isinstance(view.pick_review_btn, ft.Button)
     assert view.pick_review_btn.content == "選擇資源包路徑"
 
-    assert view.source_label.value == "模組資料夾：尚未選擇"
-    assert view.review_label.value == "資源包路徑：尚未選擇"
+    assert isinstance(view.source_path_input, ft.TextField)
+    assert view.source_path_input.label == "模組資料夾路徑"
+    assert view.source_path_input.value == ""
+    assert view.source_path_input.path_input is True
+    assert getattr(view.source_path_input.on_change, "_sync_wrapped", False)
+    assert view.source_path_input.on_change.__wrapped__.__self__ is view
+    assert view.source_path_input.on_change.__wrapped__.__name__ == "_on_source_path_changed"
+    assert isinstance(view.review_path_input, ft.TextField)
+    assert view.review_path_input.label == "資源包／lang_output 路徑"
+    assert view.review_path_input.value == ""
+    assert view.review_path_input.path_input is True
+    assert getattr(view.review_path_input.on_change, "_sync_wrapped", False)
+    assert view.review_path_input.on_change.__wrapped__.__self__ is view
+    assert view.review_path_input.on_change.__wrapped__.__name__ == "_on_review_path_changed"
 
     assert isinstance(view.load_btn, ft.Button)
     assert view.load_btn.content == "載入模組清單"
@@ -216,16 +229,73 @@ def test_icon_preview_view_load_btn_disabled_initially():
     assert view.load_btn.disabled is True
 
 
-def test_icon_preview_view_source_label_initially():
+def test_icon_preview_view_source_path_input_initially_empty():
     view = IconPreviewView(mock_page())
 
-    assert "尚未選擇" in view.source_label.value
+    assert view.source_path_input.value == ""
 
 
-def test_icon_preview_view_review_label_initially():
+def test_icon_preview_view_review_path_input_initially_empty():
     view = IconPreviewView(mock_page())
 
-    assert "尚未選擇" in view.review_label.value
+    assert view.review_path_input.value == ""
+
+
+def test_manual_path_input_sets_roots_and_enables_load(tmp_path):
+    page = mock_page()
+    view = IconPreviewView(page)
+    mods = tmp_path / "mods"
+    review = tmp_path / "lang_output"
+    mods.mkdir()
+    review.mkdir()
+
+    view.source_path_input.value = f'"{mods}"'
+    view.review_path_input.value = str(review)
+    view._on_source_path_input(type("E", (), {"control": view.source_path_input})())
+    view._on_review_path_input(type("E", (), {"control": view.review_path_input})())
+
+    assert view.source_root == mods
+    assert view.review_root == review
+    assert view.load_btn.disabled is False
+    assert view._validate_input_paths() is True
+    assert view.source_path_input.value == str(mods)
+
+
+def test_manual_path_input_rejects_missing_directory(tmp_path):
+    view = IconPreviewView(mock_page())
+    view.source_path_input.value = str(tmp_path / "missing-mods")
+    view.review_path_input.value = str(tmp_path)
+
+    assert view._validate_input_paths() is False
+
+
+def test_manual_path_change_does_not_rerender_until_blur(tmp_path):
+    view = IconPreviewView(mock_page())
+    mods = tmp_path / "mods"
+    mods.mkdir()
+    view.review_root = tmp_path
+    event = type(
+        "E",
+        (),
+        {"control": view.source_path_input, "data": str(mods)},
+    )()
+
+    with patch.object(view, "update") as update:
+        view.source_path_input.on_change(event)
+        assert view.source_root == mods
+        assert view.load_btn.disabled is True
+        update.assert_not_called()
+
+        # Some Web blur events carry no text; retain the latest change payload.
+        view.source_path_input.value = ""
+        blur_event = type(
+            "E", (), {"control": view.source_path_input, "data": None}
+        )()
+        view.source_path_input.on_blur(blur_event)
+        assert view.source_path_input.value == str(mods)
+        update.assert_called_once()
+
+    assert view.load_btn.disabled is False
 
 
 def test_icon_preview_view_mod_search_tf_exists():

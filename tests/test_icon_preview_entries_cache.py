@@ -102,7 +102,7 @@ def test_l2_cache_is_rehydrated_per_view_and_serializes_source_only(
 
     cache_file = next(cache_root.glob("*.json"))
     saved = json.loads(cache_file.read_text(encoding="utf-8"))
-    assert saved["version"] == 2
+    assert saved["version"] == entries_cache._CACHE_VERSION
     assert "zh_tw" not in saved["entries"][0]
     assert set(saved["entries"][0]) == {
         "modid",
@@ -187,7 +187,7 @@ def test_l2_cache_misses_when_jar_set_changes(tmp_path, monkeypatch):
     assert _load_entries_cache_l2(deleted_source_root) is None
 
 
-def test_l2_cache_rejects_previous_schema(tmp_path, monkeypatch):
+def test_l2_cache_rejects_previous_schema_versions(tmp_path, monkeypatch):
     from app.views.icon_preview import entries_cache
 
     source_root = tmp_path / "mods"
@@ -197,9 +197,12 @@ def test_l2_cache_rejects_previous_schema(tmp_path, monkeypatch):
     cache_root.mkdir()
     monkeypatch.setattr(entries_cache, "_get_cache_dir", lambda: cache_root)
     cache_file = cache_root / f"{entries_cache._compute_cache_key(source_root)}.json"
-    cache_file.write_text(
-        json.dumps({"version": 1, "source_root": str(source_root), "entries": []}),
-        encoding="utf-8",
-    )
+    for version in (1, 2):
+        cache_file.write_text(
+            json.dumps(
+                {"version": version, "source_root": str(source_root), "entries": []}
+            ),
+            encoding="utf-8",
+        )
 
-    assert _load_entries_cache_l2(source_root) is None
+        assert _load_entries_cache_l2(source_root) is None

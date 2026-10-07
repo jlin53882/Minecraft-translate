@@ -126,6 +126,41 @@ class TestBatchExtractJarIcons:
         assert entry1.icon_path.startswith("jar://")
         assert "assets/test_mod" in entry1.icon_path
 
+    def test_entity_key_uses_exact_named_item_model_fallback(self, tmp_path, monkeypatch):
+        """Entity 翻譯找不到 entity model 時可用同名 item model 顯示圖示。"""
+        from app.views.icon_preview import icon_cache
+
+        jar = tmp_path / "mods" / "actuallyadditions.jar"
+        create_test_jar(
+            jar,
+            {
+                "assets/actuallyadditions/models/item/worm.json": json.dumps(
+                    {"textures": {"layer0": "actuallyadditions:item/worm"}}
+                ).encode(),
+                "assets/actuallyadditions/textures/item/worm.png": png_1x1(),
+            },
+        )
+        monkeypatch.setattr(
+            icon_cache,
+            "_get_model_index_cache_dir",
+            lambda: tmp_path / "model_index_cache",
+        )
+
+        with zipfile.ZipFile(jar) as zf:
+            names = set(zf.namelist())
+            result = icon_cache._try_extract_mod_icon_from_model(
+                jar,
+                "actuallyadditions",
+                zf,
+                names,
+                key="entity.actuallyadditions.worm",
+            )
+
+        assert result == (
+            "actuallyadditions:item/worm",
+            "assets/actuallyadditions/textures/item/worm.png",
+        )
+
     def test_missing_jar_skipped(self, tmp_path):
         """JAR 檔案不存在時跳過，不拋例外"""
         from app.views.icon_preview.icon_cache import _batch_extract_jar_icons

@@ -14,7 +14,9 @@ def _get_cache_dir() -> Path:
 
 
 _SOURCE_ENTRY_FIELDS = ("modid", "key", "en", "source_jar", "icon_path")
-_CACHE_VERSION = 2
+# Version 3 refreshes persisted icons after adding exact-name entity -> item
+# model fallback; version 2 caches may contain the key but no icon_path.
+_CACHE_VERSION = 3
 
 
 def _source_entry_data(entry) -> dict:
