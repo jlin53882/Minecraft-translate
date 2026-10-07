@@ -58,7 +58,7 @@ REVIEWED: dict[tuple[str, str, str, int], str] = {
     ): "後台第一行與畫面文字相同（[ERROR] 提取 … 時產生例外），細節接在後面；多行訊息逐行去重",
     (
         "translation_tool/core/lang_merge_extracted_assets.py",
-        "merge_extracted_to_assets",
+        "_merge_extracted_to_assets",
         "Exception",
         5,
     ): "後台第一行與畫面文字相同（… 錯誤: {exc!r}），後面接 traceback；"
