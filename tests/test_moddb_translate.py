@@ -23,7 +23,12 @@ from translation_tool.translation_db import (
     TranslationDB,
 )
 from translation_tool.translation_db.models import WriteBackItem
-from translation_tool.translation_db.schema import KIND_PATCHOULI, SRC_AI, SRC_JAR_TW
+from translation_tool.translation_db.schema import (
+    KIND_PATCHOULI,
+    SRC_AI,
+    SRC_JAR_TW,
+    SRC_MANUAL,
+)
 
 
 @pytest.fixture
@@ -217,29 +222,65 @@ def test_translate_panel_runs_and_shows_summary(db_path, monkeypatch):
     db.close()
 
 
-def test_list_entries_filters_by_source_even_when_not_effective(db_path):
-    """來源篩選看「有沒有該來源的譯文」，不論最後採用哪個（新匯入但被蓋過的也找得到）。"""
-    from translation_tool.translation_db.schema import SRC_MANUAL, SRC_SUBTITLE
-
-    seed(db_path)
+def test_list_entries_filters_by_effective_source_after_manual_review(db_path):
+    """審核改變 effective source，但保留 AI row；count、搜尋與分頁一致。"""
     db = TranslationDB(db_path)
-    rows = {r.key: r for r in db.list_entries("1.21.1")[0]}
-    eid = rows["item.foo.a"].id
-    with db._tx() as conn:  # 町宮字幕組也有一筆，但被較高優先序的人工蓋過
-        conn.execute(
-            "INSERT INTO translation (entry_id, source, zh_tw) VALUES (?,?,?)",
-            (eid, SRC_SUBTITLE, "鋼鐵外殼"),
+    db.ingest(
+        "1.21.1",
+        [
+            ScanItem(
+                KIND_LANG,
+                "foo",
+                f"item.reviewed.{index:02d}",
+                "Minecraft",
+                "Minecraft",
+                source=SRC_AI,
+            )
+            for index in range(7)
+        ],
+    )
+    ai_rows, ai_total = db.list_entries("1.21.1", source=SRC_AI, state="same")
+    assert ai_total == 7 and len(ai_rows) == 7
+    target = next(row for row in ai_rows if row.key.endswith("00"))
+
+    # 走正式的審核等價 API：不改文字，只新增人工來源並成為 effective。
+    db.save_manual(target.id, "Minecraft", actor="測試審核", propagate=False)
+
+    ai_rows, ai_total = db.list_entries("1.21.1", source=SRC_AI)
+    manual_rows, manual_total = db.list_entries("1.21.1", source=SRC_MANUAL)
+    assert ai_total == 6 and target.id not in {row.id for row in ai_rows}
+    assert manual_total == 1 and [row.id for row in manual_rows] == [target.id]
+    assert manual_rows[0].source == SRC_MANUAL
+
+    # state=manual 與 source=人工一致；與 AI 或「其他譯文」組合時不矛盾。
+    assert db.list_entries("1.21.1", state="manual", source=SRC_MANUAL)[1] == 1
+    assert db.list_entries("1.21.1", state="manual", source=SRC_AI)[1] == 0
+    assert db.list_entries("1.21.1", state="ok", source=SRC_MANUAL)[1] == 0
+
+    # same-source 使用 effective text，因此同文人工項目只會落在人工來源篩選。
+    assert db.list_entries("1.21.1", state="same", source=SRC_AI)[1] == 6
+    assert db.list_entries("1.21.1", state="same", source=SRC_MANUAL)[1] == 1
+    assert db.list_entries("1.21.1", source=SRC_AI, query="reviewed.00") == ([], 0)
+    found, found_total = db.list_entries(
+        "1.21.1", source=SRC_MANUAL, query="reviewed.00"
+    )
+    assert found_total == 1 and [row.id for row in found] == [target.id]
+
+    # AI source filter 的 count 和分頁 rows 共用相同 predicate，無重複或漏項。
+    seen_ids = []
+    for offset in (0, 2, 4):
+        page, total = db.list_entries(
+            "1.21.1", source=SRC_AI, state="same", limit=2, offset=offset
         )
-        conn.execute(
-            "INSERT INTO translation (entry_id, source, zh_tw) VALUES (?,?,?)",
-            (eid, SRC_MANUAL, "鋼製外殼（人工）"),
-        )
-        db._refresh(conn, [eid])
-    keys = lambda src: [r.key for r in db.list_entries("1.21.1", source=src)[0]]
-    assert keys(SRC_SUBTITLE) == ["item.foo.a"]
-    assert keys(SRC_MANUAL) == ["item.foo.a"]
-    assert keys(SRC_AI) == []
-    assert len(keys(None)) == 4
+        assert total == 6
+        seen_ids.extend(row.id for row in page)
+    assert len(seen_ids) == 6 and len(set(seen_ids)) == 6
+    assert set(seen_ids) == {row.id for row in ai_rows}
+
+    # 低優先序 AI row 仍保存，供右側「各來源譯文」列表展示。
+    detail = db.entry_detail(target.id)
+    translations = {row.source: row.zh_tw for row in detail.translations}
+    assert translations == {SRC_AI: "Minecraft", SRC_MANUAL: "Minecraft"}
     db.close()
 
 
@@ -250,6 +291,7 @@ def test_entries_panel_source_filter(db_path):
     seed(db_path)
     db = TranslationDB(db_path)
     panel = entries_panel.EntriesPanel(mock_page(), lambda: db)
+    assert panel.source_filter.dropdown.label == "目前生效來源"
     panel.refresh()
     assert panel.total == 4
     panel.source_filter.dropdown.value = str(SRC_JAR_TW)
@@ -258,6 +300,44 @@ def test_entries_panel_source_filter(db_path):
     panel.source_filter.dropdown.value = "__all__"
     panel._on_source()
     assert panel.total == 4
+    db.close()
+
+
+def test_entries_panel_source_filter_tracks_reviewed_effective_source(db_path):
+    from app.views.moddb import entries_panel
+    from tests.test_moddb_view import texts_of
+
+    db = TranslationDB(db_path)
+    db.ingest(
+        "1.21.1",
+        [
+            ScanItem(
+                KIND_LANG,
+                "foo",
+                "item.reviewed",
+                "Minecraft",
+                "Minecraft",
+                source=SRC_AI,
+            )
+        ],
+    )
+    entry = db.list_entries("1.21.1")[0][0]
+    panel = entries_panel.EntriesPanel(mock_page(), lambda: db)
+    panel.refresh()
+    panel.source_filter.dropdown.value = str(SRC_AI)
+    panel._on_source()
+    assert panel.total == 1
+
+    db.save_manual(entry.id, "Minecraft", actor="測試審核", propagate=False)
+    panel._on_source()
+    assert panel.total == 0
+
+    panel.source_filter.dropdown.value = str(SRC_MANUAL)
+    panel._on_source()
+    assert panel.total == 1 and [row.id for row in panel.rows] == [entry.id]
+    panel.select(entry.id)
+    shown_sources = "\n".join(texts_of(panel.history_col))
+    assert "AI 機翻" in shown_sources and "人工" in shown_sources
     db.close()
 
 
@@ -464,10 +544,12 @@ def test_pager_buttons_get_fresh_unique_keys_on_every_render():
     assert len(after) == 3  # ‹ 1 ›：只有一頁
 
 
-def test_ok_filter_never_lists_untranslated_entries(db_path):
-    """「有譯文」篩選不會出現（未翻譯）的條目；切換篩選後清單項目的 key 全新。"""
+def test_other_translation_filter_never_lists_untranslated_entries(db_path):
+    """「其他譯文」篩選不會出現未翻譯條目；切換篩選後清單項目的 key 全新。"""
     from app.views.moddb import entries_panel
+    from app.views.moddb.formatting import STATE_LABELS
 
+    assert STATE_LABELS["ok"] == "其他譯文"
     seed(db_path)
     db = TranslationDB(db_path)
     panel = entries_panel.EntriesPanel(mock_page(), lambda: db)
@@ -1618,7 +1700,7 @@ def test_same_as_source_filter_uses_effective_translation_and_ignores_empty(db_p
 def test_same_as_source_is_still_translated_and_not_untranslated(db_path):
     db = _seed_same_as_source(db_path)
     assert "minecraft.name" in _keys(db, state="all")[0]  # 全部
-    assert "minecraft.name" in _keys(db, state="ok")[0]  # 已翻譯（有譯文）
+    assert "minecraft.name" in _keys(db, state="ok")[0]  # 其他譯文
     assert "minecraft.name" not in _keys(db, state="none")[0]  # 不是未翻譯
     assert _keys(db, state="none")[0] == ["empty.name", "hello.name"]
     assert db.count_untranslated("1.21.1") == 1  # 空原文不算待機翻；Hello 才是

@@ -19,7 +19,7 @@ STATE_LABELS = {
     "changed": "原文已變動",
     "same": "翻譯與原文相同",
     "manual": "人工",
-    "ok": "有譯文",
+    "ok": "其他譯文",
 }
 # 條目狀態 → 強調色組（design.tone 的名稱）
 STATE_TONES = {

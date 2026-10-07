@@ -543,8 +543,8 @@ class TranslationDB:
     ) -> tuple[list[EntryRow], int]:
         """條目清單（含總筆數）。state：all / none / diff / changed / manual / ok / same（翻譯與原文相同）。
 
-        ``source``：只列出「有該來源譯文」的條目（不論最後採用的是哪個來源，
-        所以新匯入的來源即使排在較低優先序、沒被採用，也找得到）。
+        ``source``：只列出目前 ``effective.source`` 為該來源的條目；較低優先序、
+        目前未生效的來源譯文仍會保留並顯示在條目明細中，但不會命中主要來源篩選。
         ``entry_ids``：只列出這些條目（例如批次機翻「特殊字元不一致」的那幾筆）；
         用 ``json_each`` 傳入，數量多也不會超過 SQLite 的參數上限。
         """
@@ -554,10 +554,7 @@ class TranslationDB:
             where.append("e.id IN (SELECT value FROM json_each(?))")
             params.append(json.dumps([int(i) for i in entry_ids]))
         if source is not None:
-            where.append(
-                "EXISTS (SELECT 1 FROM translation ts WHERE ts.entry_id = e.id "
-                "AND ts.source = ? AND ts.zh_tw <> '')"
-            )
+            where.append("f.source = ?")
             params.append(int(source))
         if mod_id:
             where.append("e.mod_id = ?")
