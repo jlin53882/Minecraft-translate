@@ -12,7 +12,7 @@
 | `entry` | 某遊戲版本中的一個可翻譯項目：`(kind, mc_version, mod_id, key) → en_us`。`kind` 為 `lang` 或 `patchouli` |
 | `translation` | 掛在 entry 上的譯文，每個來源最多一筆（唯一：`entry_id + source`） |
 | `effective` | 每個 entry 依來源優先序選出的生效譯文；寫入時維護，讀取不必重算（優先序變更時開啟資料庫會自動重建） |
-| `history` | 手動更新的異動記錄（可還原，同一次同步的版本共用 `batch`） |
+| `history` | 手動更新、AI 舊譯文重翻與還原的異動記錄（手動同步的版本共用 `batch`） |
 | `src_change` | 「鍵值相同但原文已變動」而略過的記錄 |
 | `scan_run` | 掃描記錄 |
 
@@ -79,6 +79,18 @@ jar 自帶的 `zh_tw`／`zh_cn` 與「語系合併」使用同一套判斷與函
   這類條目仍算「已翻譯」、不屬於「未翻譯」；寫入資料庫與翻譯快取的行為也與其他譯文完全相同。
   比較不做大小寫、空白或 Unicode 正規化。
 - 篩選可與搜尋、模組、類型、譯文來源組合；筆數與分頁使用同一組條件。
+
+### 舊 AI 同原文譯文重翻
+
+Mod DB 批次機翻預設只處理沒有生效譯文的條目，並透過 `write_back()` 只新增、不覆蓋。要修復既有資料，使用批次機翻頁的「舊 AI 譯文修復」：先依目前版本／模組／筆數上限預覽，再明確確認執行。
+
+- 候選必須是目前 `effective.source = SRC_AI`、`effective.zh_tw = entry.en_us`，且兩者非空。人工或任何其他有效來源不會入選。
+- 修復直接呼叫 `translate_batch_smart()`，不走 DB/cache hit；PR #177 的同文確認仍依 `retry_same_as_source` 設定照常執行一次。
+- 僅以專用 compare-and-set API 更新該 entry 的 `SRC_AI` 列；更新前再次確認舊值和 effective AI 條件。競爭期間已變更的資料會跳過。
+- 成功更新寫入 `history.action = ai_retranslate`，並刷新 `effective`。不會同步或填補其他版本；token/格式檢查或 API 失敗時保留舊譯文。
+- 若啟用「同時寫入翻譯快取」，只在 DB 更新成功後用現有 Cache API 更新該項目。此修復不刪除舊 Cache，也不改一般 Cache 命中規則。
+
+此流程不增加資料庫狀態欄位或 migration；一般 `write_back()` 與其他翻譯呼叫者的只新增、不覆蓋契約維持不變。
 
 ## 與翻譯流程的整合
 

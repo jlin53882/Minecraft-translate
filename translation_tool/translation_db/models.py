@@ -36,6 +36,25 @@ class EntryRow:
 
 
 @dataclass(frozen=True)
+class SameSourceAIEntry:
+    """目前生效來源為 AI，且譯文與非空原文完全相同的條目。"""
+
+    entry_id: int
+    kind: str
+    mod_id: str
+    key: str
+    en_us: str
+    current_ai_translation: str
+
+
+@dataclass(frozen=True)
+class AITranslationReplaceResult:
+    """專用 AI 譯文 compare-and-set 的結果。"""
+
+    status: str  # updated / unchanged / skipped_changed
+
+
+@dataclass(frozen=True)
 class TranslationRow:
     source: int
     zh_tw: str

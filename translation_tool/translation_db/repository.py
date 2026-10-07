@@ -25,12 +25,14 @@ from pathlib import Path
 from typing import Any
 
 from translation_tool.translation_db.models import (
+    AITranslationReplaceResult,
     EntryDetail,
     EntryRow,
     HistoryRow,
     Impact,
     IngestStats,
     SameKeyRow,
+    SameSourceAIEntry,
     SameTextRow,
     ScanItem,
     SrcChangeRow,
@@ -899,6 +901,67 @@ class TranslationDB:
             self._refresh(conn, touched)
         return stats
 
+    def replace_ai_translation(
+        self,
+        entry_id: int,
+        expected_old_zh_tw: str,
+        new_zh_tw: str,
+        *,
+        actor: str = "AI 重翻",
+    ) -> AITranslationReplaceResult:
+        """Compare-and-set 一筆仍由 AI 生效且仍與原文相同的 AI 譯文。
+
+        一般 ``write_back`` 保持只新增契約；此 API 僅供使用者明確執行的舊 AI
+        同原文修復。來源優先序或舊值在翻譯期間變動時，回傳 ``skipped_changed``。
+        """
+        if not isinstance(new_zh_tw, str) or not new_zh_tw.strip():
+            raise ValueError("AI 重翻譯文不可為空")
+
+        eligible = (
+            "e.id = ? AND t.entry_id = e.id AND t.source = ? AND t.zh_tw = ? "
+            "AND f.entry_id = e.id AND f.source = ? AND e.en_us <> '' "
+            "AND f.zh_tw <> '' AND f.zh_tw = e.en_us"
+        )
+        with self._tx() as conn:
+            current = conn.execute(
+                "SELECT t.zh_tw FROM translation t "
+                "JOIN entry e ON e.id = t.entry_id "
+                "JOIN effective f ON f.entry_id = e.id "
+                f"WHERE {eligible}",
+                (entry_id, SRC_AI, expected_old_zh_tw, SRC_AI),
+            ).fetchone()
+            if current is None:
+                return AITranslationReplaceResult("skipped_changed")
+            if new_zh_tw == current[0]:
+                return AITranslationReplaceResult("unchanged")
+
+            result = conn.execute(
+                "UPDATE translation SET zh_tw = ?, updated_at = CURRENT_TIMESTAMP "
+                "WHERE entry_id = ? AND source = ? AND zh_tw = ? "
+                "AND EXISTS (SELECT 1 FROM entry e "
+                "JOIN effective f ON f.entry_id = e.id "
+                "WHERE e.id = translation.entry_id AND e.en_us <> '' "
+                "AND f.source = ? AND f.zh_tw <> '' AND f.zh_tw = e.en_us)",
+                (new_zh_tw, entry_id, SRC_AI, expected_old_zh_tw, SRC_AI),
+            )
+            if result.rowcount != 1:
+                return AITranslationReplaceResult("skipped_changed")
+
+            conn.execute(
+                "INSERT INTO history (entry_id, batch, actor, action, old_zh_tw, new_zh_tw) "
+                "VALUES (?,?,?,?,?,?)",
+                (
+                    entry_id,
+                    uuid.uuid4().hex,
+                    actor,
+                    "ai_retranslate",
+                    current[0],
+                    new_zh_tw,
+                ),
+            )
+            self._refresh(conn, [entry_id])
+        return AITranslationReplaceResult("updated")
+
     # --------------------------------------------------------- 批次機翻（資料庫內）
     def _untranslated_where(self, mod_ids: Sequence[str] | None) -> tuple[str, list]:
         where = "e.mc_version = ? AND f.entry_id IS NULL AND e.en_us <> ''"
@@ -971,6 +1034,49 @@ class TranslationDB:
             sql += " LIMIT ?"
             params.append(limit)
         return self._q(sql, params)
+
+    def _same_as_source_ai_where(
+        self, version: str, mod_ids: Sequence[str] | None
+    ) -> tuple[str, list]:
+        where = [
+            "e.mc_version = ?",
+            self._SAME_AS_SOURCE_SQL,
+            "f.source = ?",
+        ]
+        params: list = [version, SRC_AI]
+        if mod_ids:
+            where.append(f"e.mod_id IN ({','.join('?' * len(mod_ids))})")
+            params.extend(mod_ids)
+        return " AND ".join(where), params
+
+    def count_same_as_source_ai(
+        self, version: str, mod_ids: Sequence[str] | None = None
+    ) -> int:
+        """計算目前 effective.source 為 AI 且 effective 譯文等於非空原文的筆數。"""
+        where, params = self._same_as_source_ai_where(version, mod_ids)
+        sql = (
+            "SELECT COUNT(*) FROM entry e LEFT JOIN effective f ON f.entry_id=e.id "
+            f"WHERE {where}"
+        )
+        return self._cached_count(sql, params)
+
+    def same_as_source_ai_entries(
+        self,
+        version: str,
+        mod_ids: Sequence[str] | None = None,
+        limit: int | None = None,
+    ) -> list[SameSourceAIEntry]:
+        """列出目前生效 AI 譯文與原文相同的條目；limit<=0 表示不限。"""
+        where, params = self._same_as_source_ai_where(version, mod_ids)
+        sql = (
+            "SELECT e.id, e.kind, e.mod_id, e.key, e.en_us, f.zh_tw "
+            "FROM entry e LEFT JOIN effective f ON f.entry_id=e.id "
+            f"WHERE {where} ORDER BY e.mod_id, e.kind, e.key"
+        )
+        if limit is not None and limit > 0:
+            sql += " LIMIT ?"
+            params.append(limit)
+        return [SameSourceAIEntry(*row) for row in self._q(sql, params)]
 
     def reuse_from_other_versions(
         self, version: str, mod_ids: Sequence[str] | None = None

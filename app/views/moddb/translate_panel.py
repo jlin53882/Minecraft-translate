@@ -12,6 +12,11 @@ import threading
 
 import flet as ft
 
+from app.services_impl.moddb_retranslate_service import (
+    SameSourceAIRepairPreview,
+    preview_same_source_ai_retranslation,
+    run_moddb_retranslate_service,
+)
 from app.services_impl.moddb_translate_service import (
     DEFAULT_LIMIT,
     TranslateOptions,
@@ -52,13 +57,15 @@ class TranslatePanel(ft.Column):
         self._on_view_flagged = on_view_flagged
         self._flagged: dict[int, str] = {}
         self._run_version = ""
+        self._repair_preview: SameSourceAIRepairPreview | None = None
         self.session: TaskSession | None = None
         self._running = False
         self._poller = PollerHandle()
 
         self._build_scope_card()
         self._build_run_card()
-        self.controls = [self.scope_card, self.run_card]
+        self._build_repair_card()
+        self.controls = [self.scope_card, self.run_card, self.repair_card]
 
     # ------------------------------------------------------------------ 建構
     def _build_scope_card(self) -> None:
@@ -212,6 +219,57 @@ class TranslatePanel(ft.Column):
             tone="em",
         )
 
+    def _build_repair_card(self) -> None:
+        self.repair_preview_btn = kit.button(
+            "預覽符合條件的舊 AI 譯文",
+            "secondary",
+            icon=ft.Icons.VISIBILITY_OUTLINED,
+            on_click=self.preview_retranslation,
+        )
+        self.repair_start_btn = kit.button(
+            "重新翻譯",
+            "primary",
+            icon=ft.Icons.AUTO_AWESOME,
+            disabled=True,
+            on_click=self.confirm_retranslation,
+        )
+        self.repair_preview_text = ft.Text(
+            "只會選取目前生效來源為「AI 機翻」且譯文與非空原文相同的項目。",
+            size=13,
+            color=C.TEXT,
+            selectable=True,
+        )
+        self.repair_samples = ft.Column(spacing=4)
+        self.repair_summary_text = ft.Text(
+            "重翻結果會只更新 AI 機翻來源，不會改動人工或其他來源。",
+            size=12.5,
+            color=C.MUTED,
+            selectable=True,
+        )
+        self.repair_card = kit.section_card(
+            "3　舊 AI 譯文修復",
+            ft.Column(
+                [
+                    kit.hint_text(
+                        "重新翻譯「目前生效來源為 AI 機翻，且譯文與原文完全相同」的舊資料。"
+                        "會略過舊快取；只更新所選版本／模組中的 AI 來源，不會跨版本同步。"
+                        "PR #177 的同文重試仍依設定執行。請先預覽，再確認開始。"
+                    ),
+                    ft.Row(
+                        [self.repair_preview_btn, self.repair_start_btn],
+                        spacing=10,
+                        wrap=True,
+                    ),
+                    self.repair_preview_text,
+                    self.repair_samples,
+                    self.repair_summary_text,
+                ],
+                spacing=10,
+            ),
+            icon=ft.Icons.BUILD_CIRCLE_OUTLINED,
+            tone="gold",
+        )
+
     # ------------------------------------------------------------------ 範圍
     def refresh_scope(self) -> None:
         """切到本頁籤時重讀資料庫的版本與模組清單，保留目前選擇。"""
@@ -237,6 +295,7 @@ class TranslatePanel(ft.Column):
         if e is not None and getattr(e, "control", None) is self.version_dd:
             self.mod_dd.value = ALL_MODS
             self._refresh_mods()
+        self._clear_repair_preview()
         self._refresh_counts()
         self._safe_update()
 
@@ -278,8 +337,17 @@ class TranslatePanel(ft.Column):
         self.count_text.value = text
 
     def _on_limit_changed(self) -> None:
+        self._clear_repair_preview()
         self._refresh_counts()
         self._safe_update()
+
+    def _clear_repair_preview(self) -> None:
+        self._repair_preview = None
+        self.repair_preview_text.value = (
+            "只會選取目前生效來源為「AI 機翻」且譯文與非空原文相同的項目。"
+        )
+        self.repair_samples.controls = []
+        self.repair_start_btn.disabled = True
 
     # ------------------------------------------------------------------ 事件
     def build_options(self, *, dry_run: bool = False) -> TranslateOptions:
@@ -319,12 +387,111 @@ class TranslatePanel(ft.Column):
         if not self._poller.running:
             self._poller.start(self._page, self._poll)
 
+    def preview_retranslation(self, _e=None) -> None:
+        if self._running:
+            show_snack(self._page, "機翻正在執行中", C.GOLD)
+            return
+        self._clear_repair_preview()
+        if not self.version_dd.value:
+            self.repair_preview_text.value = "請先選擇遊戲版本。"
+            self.repair_start_btn.disabled = True
+            self._safe_update()
+            return
+        db = self._get_db()
+        if db is None:
+            self.repair_preview_text.value = "無法開啟 Mod 資料庫。"
+            self.repair_start_btn.disabled = True
+            self._safe_update()
+            return
+
+        options = self.build_options()
+        try:
+            preview = preview_same_source_ai_retranslation(db, options)
+        except Exception as exc:  # noqa: BLE001 - preview errors stay in the UI
+            self.repair_preview_text.value = f"預覽失敗：{exc}"
+            self.repair_start_btn.disabled = True
+            log_warning(f"Mod 資料庫舊 AI 重翻預覽失敗：{exc!r}")
+            self._safe_update()
+            return
+
+        self._repair_preview = preview
+        selected = preview.selected_count
+        cap = f"上限 {format_count(options.limit)} 筆" if options.limit else "不限筆數"
+        self.repair_preview_text.value = (
+            f"符合條件：{format_count(preview.total_candidates)} 筆；{cap}，"
+            f"本次將重翻 {format_count(selected)} 筆。"
+        )
+        self.repair_samples.controls = [
+            ft.Text(
+                f"{row.mod_id} / {row.key}　原文／目前 AI 譯文：{row.en_us}",
+                size=12,
+                color=C.MUTED,
+                selectable=True,
+            )
+            for row in preview.entries[:5]
+        ]
+        self.repair_start_btn.disabled = selected == 0
+        self._safe_update()
+
+    def confirm_retranslation(self, _e=None) -> None:
+        preview = self._repair_preview
+        if self._running or preview is None or preview.selected_count == 0:
+            return
+        show_dialog = getattr(self._page, "show_dialog", None)
+        if not callable(show_dialog):
+            show_snack(self._page, "目前畫面無法顯示確認視窗，未開始重翻", C.GOLD)
+            return
+        show_dialog(
+            ft.AlertDialog(
+                title=ft.Text("確認重新翻譯舊 AI 譯文"),
+                content=ft.Text(
+                    f"即將重翻 {preview.selected_count:,} 筆目前生效來源為「AI 機翻」且"
+                    "譯文與原文相同的項目。只更新 AI 來源；人工及其他來源不會更動，"
+                    "也不會同步到其他版本。",
+                    selectable=True,
+                    width=440,
+                ),
+                actions=[
+                    ft.TextButton(
+                        "取消", on_click=lambda _e=None: self._page.pop_dialog()
+                    ),
+                    ft.TextButton(
+                        "開始重新翻譯",
+                        on_click=lambda _e=None: self._start_retranslation(preview),
+                    ),
+                ],
+            )
+        )
+
+    def _start_retranslation(self, preview: SameSourceAIRepairPreview) -> None:
+        self._page.pop_dialog()
+        if self._running or self._repair_preview is not preview:
+            return
+        options = self.build_options()
+        self.session = tag_session(TaskSession(), "Mod 資料庫舊 AI 重翻", "moddb")
+        self._run_version = str(options.version)
+        self._set_status("舊 AI 重翻中", "dia")
+        self._set_running(True)
+        self.progress_bar.value = 0
+        self.live_text.value = ""
+        self.log_view.clear()
+        self.repair_summary_text.value = "重翻進行中；未成功完成的項目會保留舊譯文。"
+        self._safe_update()
+        threading.Thread(
+            target=run_moddb_retranslate_service,
+            args=(options, self.session, preview.entries),
+            daemon=True,
+        ).start()
+        self._running = True
+        if not self._poller.running:
+            self._poller.start(self._page, self._poll)
+
     def cancel_clicked(self, _e=None) -> None:
         if self.session is None or not self._running:
             return
         self.session.request_cancel()
         log_info(
-            "Mod 資料庫機翻：使用者要求取消，等待目前批次結束（已完成的批次已寫入）"
+            "Mod 資料庫機翻：使用者要求取消，等待目前批次結束（已完成的項目已提交）"
         )
         self.cancel_btn.disabled = True
         self._set_status("取消中…", "gold")
@@ -404,6 +571,19 @@ class TranslatePanel(ft.Column):
     def _apply_summary(self, s: dict) -> None:
         if not s:
             return
+        if s.get("operation") == "retranslate_same_source_ai":
+            self.repair_summary_text.value = (
+                f"候選 {s.get('candidates', 0)}；更新 {s.get('updated', 0)}；"
+                f"仍相同 {s.get('unchanged', 0)}；格式檢查未通過 {s.get('flagged', 0)}；"
+                f"資料已變動跳過 {s.get('skipped_changed', 0)}；"
+                f"失敗 {s.get('failed', 0)}；範圍內仍符合條件 {s.get('remaining', 0)}"
+                + (
+                    f"；快取未同步 {s.get('cache_failed', 0)} 筆"
+                    if s.get("cache_failed")
+                    else ""
+                )
+            )
+            return
         if s.get("dry_run"):
             self.stat_remaining.set_value(
                 format_count(s.get("remaining")),
@@ -440,6 +620,10 @@ class TranslatePanel(ft.Column):
         self.start_btn.disabled = running
         self.preview_btn.disabled = running
         self.cancel_btn.disabled = not running
+        self.repair_preview_btn.disabled = running
+        self.repair_start_btn.disabled = running or not (
+            self._repair_preview and self._repair_preview.selected_count
+        )
 
     def _set_status(self, text: str, tone: str = "neutral") -> None:
         set_chip_status(self.status_chip, text, tone)
