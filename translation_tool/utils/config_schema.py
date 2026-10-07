@@ -286,7 +286,10 @@ SETTINGS: tuple[Setting, ...] = (
         "api_models",
         C_MODELS,
         "",
-        default={"gemini-2.5-flash": {"enabled": True}},
+        default={
+            "gemini-3.5-flash-lite": {"enabled": True},
+            "gemini-3.1-flash-lite": {"enabled": True},
+        },
         timing="next_batch",
         timing_note="下一批次讀取；進行中的批次維持原設定。",
     ),

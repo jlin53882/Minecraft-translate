@@ -54,7 +54,8 @@ class ConfigView(ft.Column):
     """
 
     DEFAULT_MODELS: ClassVar[dict[str, bool]] = {
-        "gemini-2.5-flash": True,
+        "gemini-3.5-flash-lite": True,
+        "gemini-3.1-flash-lite": True,
     }
 
     def __init__(self, page: ft.Page):
@@ -114,7 +115,10 @@ class ConfigView(ft.Column):
         build_controls(self.controls_map)
 
         self.new_model_field = kit.field(
-            label="新增模型名稱", hint_text="gemini-2.5-flash", expand=True, dense=True
+            label="新增模型名稱",
+            hint_text="gemini-3.5-flash-lite",
+            expand=True,
+            dense=True,
         )
         self.add_model_button = ft.IconButton(
             icon=ft.Icons.ADD, tooltip="新增模型", on_click=self.on_add_model_clicked
