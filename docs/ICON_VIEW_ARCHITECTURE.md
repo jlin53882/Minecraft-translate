@@ -29,7 +29,7 @@ translation_tool/core/
 
 1. 標題列：`back_btn`（僅詳情頁顯示）、圖示、`header`（文字「JAR 圖示預覽」）
 2. `mod_search_tf`（label「搜尋模組」）/ `mod_search_status`：模組清單搜尋（初始隱藏，載入並顯示模組清單後才出現；詳情頁隱藏）
-3. 「資料來源」卡（`kit.section_card`）：`pick_source_btn` + `source_label`、`pick_review_btn` + `review_label`、`load_btn`、`progress_bar` / `progress_text`（按鈕文字依序為「選擇模組資料夾（例：mods 資料夾）」、「選擇資源包路徑」、「載入模組清單」；來源標籤預設「模組資料夾：尚未選擇」「資源包路徑：尚未選擇」；`progress_text` 預設「準備就緒」，`progress_bar` 掃描時才顯示）
+3. 「資料來源」卡（`kit.section_card`）：`pick_source_btn` + `source_path_input`、`pick_review_btn` + `review_path_input`、`load_btn`、`progress_bar` / `progress_text`（按鈕文字依序為「選擇模組資料夾（例：mods 資料夾）」、「選擇資源包路徑」、「載入模組清單」；路徑輸入框預設顯示「模組資料夾：尚未選擇」「資源包路徑：尚未選擇」；`progress_text` 預設「準備就緒」，`progress_bar` 掃描時才顯示）
 4. `save_btn`（僅詳情頁顯示）
 5. `page_bar`（`prev_page_btn` / `page_info` / `next_page_btn`；預設只見左右箭頭，`page_info` 為空）與 `page_size_selector`（「每頁顯示」，預設 50）
 6. `list_view`：模組清單列（`_mod_row`）或詳情頁的 `LangItemRow`

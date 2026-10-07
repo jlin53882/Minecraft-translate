@@ -95,14 +95,20 @@ def test_icon_preview_view_all_controls_exist():
     assert view.source_path_input.path_input is True
     assert getattr(view.source_path_input.on_change, "_sync_wrapped", False)
     assert view.source_path_input.on_change.__wrapped__.__self__ is view
-    assert view.source_path_input.on_change.__wrapped__.__name__ == "_on_source_path_changed"
+    assert (
+        view.source_path_input.on_change.__wrapped__.__name__
+        == "_on_source_path_changed"
+    )
     assert isinstance(view.review_path_input, ft.TextField)
     assert view.review_path_input.label == "資源包／lang_output 路徑"
     assert view.review_path_input.value == ""
     assert view.review_path_input.path_input is True
     assert getattr(view.review_path_input.on_change, "_sync_wrapped", False)
     assert view.review_path_input.on_change.__wrapped__.__self__ is view
-    assert view.review_path_input.on_change.__wrapped__.__name__ == "_on_review_path_changed"
+    assert (
+        view.review_path_input.on_change.__wrapped__.__name__
+        == "_on_review_path_changed"
+    )
 
     assert isinstance(view.load_btn, ft.Button)
     assert view.load_btn.content == "載入模組清單"
@@ -288,9 +294,7 @@ def test_manual_path_change_does_not_rerender_until_blur(tmp_path):
 
         # Some Web blur events carry no text; retain the latest change payload.
         view.source_path_input.value = ""
-        blur_event = type(
-            "E", (), {"control": view.source_path_input, "data": None}
-        )()
+        blur_event = type("E", (), {"control": view.source_path_input, "data": None})()
         view.source_path_input.on_blur(blur_event)
         assert view.source_path_input.value == str(mods)
         update.assert_called_once()

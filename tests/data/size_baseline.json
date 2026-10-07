@@ -15,7 +15,8 @@
     "app/views/cache_manager/cache_view_shard.py:CacheShardMixin._render_shard_detail_keys": 82,
     "app/views/cache_manager/cache_view_shard.py:CacheShardMixin._type_shard_card": 81,
     "app/views/cache_view.py:CacheView.__init__": 94,
-    "app/views/icon_preview/icon_cache.py:_batch_extract_jar_icons": 92,
+    "app/views/icon_preview/icon_cache.py:_batch_extract_jar_icons": 101,
+    "app/views/icon_preview/icon_cache.py:_resolve_icon_from_catalog": 87,
     "app/views/merge/merge_widgets.py:MergeWidgetsMixin._init_merge_io_controls": 80,
     "app/views/moddb/scan_panel.py:ScanPanel._build_options_card": 99,
     "app/views/moddb/scan_panel.py:ScanPanel._build_run_card": 81,
@@ -24,5 +25,8 @@
     "app/views/pipeline/pipeline_one_click_dialog.py:_one_click_step4_version_widgets": 99,
     "app/views/pipeline/pipeline_one_click_dialog.py:open_one_click_dialog": 86
   },
-  "view_files": {}
+  "view_files": {
+    "app/views/icon_preview/icon_cache.py": 935,
+    "app/views/icon_preview_view.py": 834
+  }
 }
