@@ -157,8 +157,8 @@ class ModDbView(ft.Column):
         # 只有資料庫路徑／優先序設定變了、或原本沒有資料庫檔案才重新開啟
         if self._db is None or self._db_sig != self._settings_signature():
             self.reload_db()
-        self.scan.resume()
-        self.translate.resume()
+        # 目前頁籤的面板才掛在畫面上：由 show_tab 決定是否接續輪詢（只 resume 目前頁籤），
+        # 沒掛上畫面的面板不該重新開始更新畫面
         self.show_tab(self.tab)
 
     def _safe_update(self) -> None:

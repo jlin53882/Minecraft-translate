@@ -791,7 +791,19 @@ def test_translate_panel_resume_restarts_polling_after_navigating_away(
     db.close()
 
 
-def test_moddb_view_did_mount_resumes_pollers(db_path, monkeypatch):
+@pytest.mark.parametrize(
+    ("tab", "expected"),
+    [
+        ("overview", []),
+        ("entries", []),
+        ("scan", ["scan"]),
+        ("translate", ["translate"]),
+    ],
+)
+def test_moddb_view_did_mount_resumes_only_the_current_tab(
+    db_path, monkeypatch, tab, expected
+):
+    """整頁重新掛載：只接續「目前頁籤」的輪詢；沒掛在畫面上的面板不可重新開始更新畫面。"""
     from app.views import moddb_view
 
     seed(db_path)
@@ -799,8 +811,9 @@ def test_moddb_view_did_mount_resumes_pollers(db_path, monkeypatch):
     resumed: list[str] = []
     monkeypatch.setattr(view.scan, "resume", lambda: resumed.append("scan"))
     monkeypatch.setattr(view.translate, "resume", lambda: resumed.append("translate"))
+    view.tab = tab
     view.did_mount()
-    assert resumed == ["scan", "translate"]
+    assert resumed == expected
 
 
 @pytest.fixture
