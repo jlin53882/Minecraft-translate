@@ -18,7 +18,11 @@ from app.ui.design import C
 from app.ui.safe_file_picker import SafeFilePicker
 from app.ui.snack import show_snack
 from app.views.icon_preview.detail_mixin import IconPreviewDetailMixin
-from app.views.icon_preview.entries_cache import _load_entries_cache_l2
+from app.views.icon_preview.entries_cache import (
+    _compute_source_identity,
+    _load_entries_cache_l2,
+    _source_entry_data,
+)
 from app.views.icon_preview.icon_cache import _migrate_old_icon_cache
 from app.views.icon_preview.list_mixin import IconPreviewListMixin
 from app.views.icon_preview.progress import _make_progress_callback
@@ -505,18 +509,22 @@ class IconPreviewView(IconPreviewDetailMixin, IconPreviewListMixin, ft.Column):
 
         回傳 ``("L1" | "L2", entries)``；沒有可用快取時回傳 None。
         """
+        identity = (
+            _compute_source_identity(self.source_root, mode)
+            if self.source_root is not None
+            else None
+        )
         cache_valid = (
             self._entries_cache is not None
-            and self._cache_meta.get("source_root") == str(self.source_root)
-            and self._cache_meta.get("mode") == mode
+            and self._cache_meta.get("source_identity") == identity
         )
         if cache_valid:
-            return "L1", self._entries_cache
+            return "L1", self._hydrate_entries(self._entries_cache)
         # L2 磁碟快取只在 jar_directory 模式
-        if mode == "jar_directory":
+        if mode == "jar_directory" and self.source_root is not None:
             cached_entries = _load_entries_cache_l2(self.source_root)
             if cached_entries is not None:
-                return "L2", cached_entries
+                return "L2", self._hydrate_entries(cached_entries)
         return None
 
     def _apply_cached_entries(self, kind: str, entries, mode: str) -> None:
@@ -527,8 +535,10 @@ class IconPreviewView(IconPreviewDetailMixin, IconPreviewListMixin, ft.Column):
         else:
             log_info("[IconPreview] 使用 L2 磁碟快取！")
             label = f"✅ 使用磁碟快取（共 {len(entries)} 筆）"
-            self._entries_cache = entries
-            self._cache_meta = {"source_root": str(self.source_root), "mode": mode}
+            self._entries_cache = [_source_entry_data(entry) for entry in entries]
+            self._cache_meta = {
+                "source_identity": _compute_source_identity(self.source_root, mode)
+            }
         show_snack(self.page, label, color=C.EM, clear_existing=True, duration=3000)
         # 用快取重建 mods dict（dict 轉回 SimpleNamespace，保持屬性存取相容）
         self._rebuild_mods(entries)
@@ -614,14 +624,16 @@ class IconPreviewView(IconPreviewDetailMixin, IconPreviewListMixin, ft.Column):
     def _scan_entries(self, mode: str, total_steps: int) -> list:
         """讀取翻譯與圖示（不直接刷新畫面，可在背景執行緒執行）。"""
         if mode == "jar_directory":
-            return self._load_entries_from_jar_directory(
+            entries = self._load_entries_from_jar_directory(
                 processed_callback=_make_progress_callback(
                     self, "讀取翻譯內容", total_steps
                 )
             )
-        if mode == "extracted_folder":
-            return self._load_entries()
-        return []
+        elif mode == "extracted_folder":
+            entries = self._load_entries()
+        else:
+            return []
+        return self._hydrate_entries(entries)
 
     def _finish_load(self, entries: list, mode: str):
         """（event loop 上）套用掃描結果並渲染模組清單。"""
@@ -654,17 +666,12 @@ class IconPreviewView(IconPreviewDetailMixin, IconPreviewListMixin, ft.Column):
             self.update()
             return
 
-        # 寫入快取（dict 格式，脫離 SimpleNamespace）
-        cache_entries = []
-        for entry in entries:
-            if hasattr(entry, "__dict__"):
-                cache_entries.append(entry.__dict__)
-            else:
-                cache_entries.append(entry)
+        # L1 stores source-side scan data only; the review translation is
+        # hydrated afresh on every load from the currently selected root.
+        cache_entries = [_source_entry_data(entry) for entry in entries]
         self._entries_cache = cache_entries
         self._cache_meta = {
-            "source_root": str(self.source_root),
-            "mode": mode,
+            "source_identity": _compute_source_identity(self.source_root, mode),
         }
 
         mods = defaultdict(list)

@@ -13,16 +13,64 @@ def _get_cache_dir() -> Path:
     return get_data_root() / ".icon_cache"
 
 
-def _compute_cache_key(source_root: Path) -> str:
-    """計算快取 key：只看 JAR 檔案名稱，不算內容。
+_SOURCE_ENTRY_FIELDS = ("modid", "key", "en", "source_jar", "icon_path")
+_CACHE_VERSION = 2
 
-    注意：key 只包含 JAR 的檔名。這樣：
-    - 新增/移除 JAR → key 改變 → 快取失效
-    - JAR 內容變了但檔名不變 → 不會自動失效（已知限制）
+
+def _source_entry_data(entry) -> dict:
+    """Return only data derived from the selected source files.
+
+    ``zh_tw`` belongs to the currently selected review root, so it must never
+    become part of either the in-memory or on-disk source cache.
     """
-    jar_files = sorted([j.name for j in source_root.glob("*.jar")])
-    key_str = str(source_root.resolve()) + ":" + ",".join(jar_files)
-    return hashlib.sha256(key_str.encode()).hexdigest()[:16]
+    if isinstance(entry, dict):
+        data = entry
+    elif hasattr(entry, "__dict__"):
+        data = vars(entry)
+    else:
+        data = {
+            field: getattr(entry, field)
+            for field in _SOURCE_ENTRY_FIELDS
+            if hasattr(entry, field)
+        }
+    return {field: data[field] for field in _SOURCE_ENTRY_FIELDS if field in data}
+
+
+def _compute_source_identity(source_root: Path, mode: str) -> dict:
+    """Describe source inputs whose changes require rescanning entries."""
+    source_root = Path(source_root)
+    identity = {
+        "source_root": str(source_root.resolve()),
+        "mode": mode,
+    }
+    if mode == "jar_directory":
+        jars = []
+        for jar_path in sorted(source_root.glob("*.jar"), key=lambda path: path.name):
+            try:
+                stat = jar_path.stat()
+                jars.append(
+                    {
+                        "name": jar_path.name,
+                        "size": stat.st_size,
+                        "mtime_ns": stat.st_mtime_ns,
+                    }
+                )
+            except OSError:
+                # A disappearing/unreadable JAR must not accidentally validate
+                # a previous cache entry for the same directory.
+                jars.append({"name": jar_path.name, "unavailable": True})
+        identity["jars"] = jars
+    return identity
+
+
+def _identity_digest(identity: dict) -> str:
+    canonical = json.dumps(identity, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _compute_cache_key(source_root: Path) -> str:
+    """計算 JAR 來源快取 key（路徑、檔名、大小與 mtime_ns）。"""
+    return _identity_digest(_compute_source_identity(source_root, "jar_directory"))[:16]
 
 
 def _load_entries_cache_l2(source_root: Path) -> list | None:
@@ -31,8 +79,8 @@ def _load_entries_cache_l2(source_root: Path) -> list | None:
     失效條件：
     - 快取檔案不存在
     - JSON 解析失敗
-    - version 不為 1
-    - source_root 不符
+    - version 不為目前版本（舊版快取直接失效）
+    - source identity 不符
     """
     cache_dir = _get_cache_dir()
     cache_file = cache_dir / f"{_compute_cache_key(source_root)}.json"
@@ -46,15 +94,18 @@ def _load_entries_cache_l2(source_root: Path) -> list | None:
     except (OSError, json.JSONDecodeError):
         return None  # 損壞的快取視為失效
 
-    # 版本檢查
-    if data.get("version") != 1:
+    # Version 1 persisted review-root translations and cannot be trusted.
+    if data.get("version") != _CACHE_VERSION:
         return None
 
-    # 路徑檢查
-    if data.get("source_root") != str(source_root):
+    identity = _compute_source_identity(source_root, "jar_directory")
+    if data.get("source_identity") != identity:
         return None
 
-    return data.get("entries", [])
+    entries = data.get("entries")
+    if not isinstance(entries, list):
+        return None
+    return [_source_entry_data(entry) for entry in entries if isinstance(entry, dict)]
 
 
 def _save_entries_cache_l2(source_root: Path, entries: list):
@@ -66,28 +117,13 @@ def _save_entries_cache_l2(source_root: Path, entries: list):
 
     # Atomic write：用 tmp 檔再 rename
     tmp = cache_dir / f"{cache_file.stem}.tmp"
-    # 將 entries 轉為可序列化格式
-    serializable_entries = []
-    for e in entries:
-        if hasattr(e, "__dict__"):
-            serializable_entries.append(e.__dict__)
-        elif isinstance(e, dict):
-            serializable_entries.append(e)
-        else:
-            serializable_entries.append(
-                {
-                    "modid": str(e.modid),
-                    "key": str(e.key),
-                    "en": str(e.en),
-                    "zh_tw": str(e.zh_tw),
-                    "source_jar": getattr(e, "source_jar", ""),
-                    "icon_path": getattr(e, "icon_path", None),  # [FIX] 加入 icon_path
-                }
-            )
+    # Translation data is intentionally omitted: it belongs to review_root.
+    identity = _compute_source_identity(source_root, "jar_directory")
+    serializable_entries = [_source_entry_data(entry) for entry in entries]
 
     data = {
-        "version": 1,
-        "source_root": str(source_root),
+        "version": _CACHE_VERSION,
+        "source_identity": identity,
         "entries": serializable_entries,
         "created_at": datetime.now(UTC).isoformat(),
     }
