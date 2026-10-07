@@ -52,7 +52,10 @@ class ModDbView(ft.Column):
             page, file_picker, self.get_db, on_finished=self._on_scan_finished
         )
         self.translate = TranslatePanel(
-            page, self.get_db, on_finished=self._on_scan_finished
+            page,
+            self.get_db,
+            on_finished=self._on_scan_finished,
+            on_view_flagged=self.open_flagged,
         )
         self._panels = {
             "overview": self.overview,
@@ -107,14 +110,18 @@ class ModDbView(ft.Column):
         self.tab = key
         self.tab_seg.select(key)
         panel = self._panels[key]
+        # 離開頁籤時面板被卸載（will_unmount 會停掉輪詢）；任務還在跑，切回來要接續輪詢，
+        # 否則畫面停在離開當下的進度，直到任務結束後也不會更新
         if key == "overview":
             self.overview.refresh()
         elif key == "entries":
             self.entries.refresh()
         elif key == "scan":
             self.scan.refresh_versions()
+            self.scan.resume()
         elif key == "translate":
             self.translate.refresh_scope()
+            self.translate.resume()
         self.body.content = panel
         if update:
             self._safe_update()
@@ -127,6 +134,13 @@ class ModDbView(ft.Column):
         if version:
             self.entries.version = version
         self.entries.mod_id = mod_id
+        self.show_tab("entries")
+
+    def open_flagged(
+        self, entry_ids: list[int], drafts: dict[int, str], version: str
+    ) -> None:
+        """從批次機翻跳到條目校對，只看「特殊字元不一致、沒寫入」的條目（AI 譯文預填）。"""
+        self.entries.show_flagged(entry_ids, drafts, version)
         self.show_tab("entries")
 
     def _on_scan_finished(self) -> None:
@@ -153,8 +167,8 @@ class ModDbView(ft.Column):
         # 只有資料庫路徑／優先序設定變了、或原本沒有資料庫檔案才重新開啟
         if self._db is None or self._db_sig != self._settings_signature():
             self.reload_db()
-        self.scan.resume()
-        self.translate.resume()
+        # 目前頁籤的面板才掛在畫面上：由 show_tab 決定是否接續輪詢（只 resume 目前頁籤），
+        # 沒掛上畫面的面板不該重新開始更新畫面
         self.show_tab(self.tab)
 
     def _safe_update(self) -> None:

@@ -750,3 +750,163 @@ def test_visible_segments_exposes_newline_spaces_and_tokens():
     assert ("·", "space") in segs
     assert ("↵", "newline") in segs
     assert "".join(s for s, k in segs if k == "text") == "Hi \n"
+
+
+def test_switching_back_to_a_running_tab_resumes_polling(db_path, monkeypatch):
+    """機翻／掃描進行中切到別的頁籤再回來：面板卸載時輪詢已停，必須接續輪詢，畫面才不會卡住。"""
+    seed(db_path)
+    view = moddb_view.ModDbView(mock_page(), mock_filepicker())
+    for panel, key in ((view.translate, "translate"), (view.scan, "scan")):
+        started = []
+        monkeypatch.setattr(
+            panel._poller,
+            "start",
+            lambda page, handler, _s=started: _s.append(1) or True,
+        )
+        panel.session = TaskSession()
+        panel._running = True
+        panel.will_unmount()  # 離開頁籤：面板被卸載、輪詢停止
+        view.show_tab("entries")
+        assert started == []  # 不在這個頁籤時不需要輪詢
+        view.show_tab(key)
+        assert started == [1], f"{key} 切回來後沒有接續輪詢"
+
+
+def test_overview_kpi_cards_share_one_layout_contract(db_path):
+    """總覽在可捲動欄位裡：KPI 列不可用 STRETCH（高度無上限會讓版面例外、整個總覽變空白）。
+
+    四張卡改用相同的版面結構等高：標題列同高、說明列都保留（沒有說明文字也占位）、
+    標題列內的按鈕不高過標題列。
+    """
+    import flet as ft
+
+    seed(db_path)
+    view = moddb_view.ModDbView(mock_page(), mock_filepicker())
+    overview = view.overview
+    cards = [
+        overview.stat_mods,
+        overview.stat_content,
+        overview.stat_diff,
+        overview.stat_changed,
+    ]
+    row = next(
+        c
+        for c in overview.content_col.controls
+        if isinstance(c, ft.Row) and overview.stat_mods in c.controls
+    )
+    assert row.vertical_alignment != ft.CrossAxisAlignment.STRETCH
+
+    heads = {card.content.controls[0].height for card in cards}
+    assert len(heads) == 1 and heads != {None}
+    head_height = heads.pop()
+    # 每張卡的「標題列／大數字／說明列」三層結構一致，說明列一律保留
+    for card in cards:
+        assert len(card.content.controls) == 3
+        assert card.delta_text.visible is True
+    # 更新成沒有說明文字時，說明列仍占位
+    overview.stat_content.set_value("1", delta="")
+    assert overview.stat_content.delta_text.visible is True
+    # 標題列內的按鈕不高過標題列（預設 IconButton 的 padding 會讓它高到 36）
+    assert overview.diff_help_btn.height <= head_height
+    assert overview.diff_help_btn.padding == 0
+
+
+def test_entries_save_keeps_scroll_position_and_selects_the_next_entry(db_path):
+    """儲存後清單重新載入：維持捲動位置；原條目在篩選下消失時，選同一位置的下一筆。"""
+    db = TranslationDB(db_path)
+    db.ingest(
+        "1.21.1",
+        [ScanItem(KIND_LANG, "foo", f"item.foo.{i}", f"Text {i}") for i in range(6)],
+    )
+    panel = entries_panel.EntriesPanel(mock_page(), lambda: db)
+    panel.refresh()
+    scrolls: list[float] = []
+    panel._scroll_list_to = scrolls.append  # 記錄清單被捲到哪裡
+
+    panel._on_state("none")
+    assert scrolls[-1] == 0.0  # 換篩選回到最上方
+    keys = [r.key for r in panel.rows]
+    assert len(keys) == 6
+    panel.select(panel.rows[2].id)
+    panel._scroll_offset = 420.0  # 使用者已往下捲
+
+    panel.tw_field.value = "文字二"
+    panel._on_text_change()
+    panel._save()
+
+    assert scrolls[-1] == 420.0  # 儲存後維持捲動位置，不跳回最上方
+    assert [r.key for r in panel.rows] == keys[:2] + keys[3:]  # 存好的不再是「未翻譯」
+    assert panel.selected is not None and panel.selected.key == keys[3]  # 選到下一筆
+    db.close()
+
+
+def test_entries_save_on_the_last_row_of_the_last_page_goes_back_a_page(db_path):
+    """最後一頁只剩一筆、存完該筆從篩選消失：退回仍有資料的最後一頁，不顯示空清單。"""
+    db = TranslationDB(db_path)
+    count = entries_panel.PAGE_SIZE + 1
+    db.ingest(
+        "1.21.1",
+        [
+            ScanItem(KIND_LANG, "foo", f"item.foo.{i:03d}", f"T {i}")
+            for i in range(count)
+        ],
+    )
+    panel = entries_panel.EntriesPanel(mock_page(), lambda: db)
+    panel.refresh()
+    panel._on_state("none")
+    panel._load_list(page=2, keep_selection=False)
+    assert len(panel.rows) == 1
+    panel.tw_field.value = "最後一筆"
+    panel._on_text_change()
+    panel._save()
+    assert panel.pager.current_page == 1 and len(panel.rows) == entries_panel.PAGE_SIZE
+    db.close()
+
+
+def test_tooltip_text_inside_patchouli_t_macro_may_be_translated():
+    """`$(t:提示文字)` 括號裡是顯示給玩家的提示，翻譯它不算特殊字元不一致。"""
+    from app.views.moddb import formatting as fm
+
+    source = (
+        "The $(item)Reinforced Pressure Chamber Valve/$ is an advanced block, "
+        "possibly unlocking $(ttcolor)$(t:By default all recipes require a max of 5 bar, "
+        "but modpacks may change this)new recipes/$."
+    )
+    translated = (
+        "$(item)強化壓力室閥門/$ 是一種進階方塊，並可能解鎖 $(ttcolor)"
+        "$(t:預設情況下，所有配方所需的最大壓力皆為 5 bar，但模組包可能會修改此設定)新的配方/$。"
+    )
+    assert fm.token_issues(source, translated) == []
+    # 提示標記本身不見了還是要提醒
+    no_tooltip = translated.replace(
+        "$(t:預設情況下，所有配方所需的最大壓力皆為 5 bar，但模組包可能會修改此設定)",
+        "",
+    )
+    assert fm.token_issues(source, no_tooltip) == ["少了 1 個「提示文字 $(t:…)」"]
+    # 不能翻譯的巨集（$(item)、$(ttcolor)、連結）仍須完全相同
+    assert fm.token_issues(source, translated.replace("$(ttcolor)", "")) == [
+        "少了 1 個「$(ttcolor)」"
+    ]
+    assert fm.token_issues("$(l:patchouli:a)x/$", "$(l:patchouli:b)甲/$") == [
+        "少了 1 個「$(l:patchouli:a)」",
+        "多了 1 個「$(l:patchouli:b)」",
+    ]
+
+
+def test_patchouli_macros_with_nested_parentheses_are_one_token():
+    """提示文字或網址裡成對的括號（f(x)、Foo_(bar)）不會讓 `$(…)` 標記提早結束。"""
+    from app.views.moddb import formatting as fm
+
+    assert fm.token_issues("$(t:Use f(x) here)a/$", "$(t:在這裡用 f(x))甲/$") == []
+    tokens = fm.format_tokens("$(l:https://w/Foo_(bar))x$() %s")
+    assert tokens["$(l:https://w/Foo_(bar))"] == 1 and tokens["$()"] == 1
+    # 網址（不能翻譯）不同仍會提醒
+    assert fm.token_issues(
+        "$(l:https://w/Foo_(bar))x$()", "$(l:https://w/Foo)甲$()"
+    ) == [
+        "多了 1 個「$(l:https://w/Foo)」",
+        "少了 1 個「$(l:https://w/Foo_(bar))」",
+    ]
+    # 沒有結尾的 `$(` 不是標記；括號沒配對完時退回第一個 `)`
+    assert not fm.format_tokens("a $( b")
+    assert fm.format_tokens("$(t:(未配對)")["$(t:…)"] == 1

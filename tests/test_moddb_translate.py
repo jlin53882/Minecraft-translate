@@ -791,7 +791,19 @@ def test_translate_panel_resume_restarts_polling_after_navigating_away(
     db.close()
 
 
-def test_moddb_view_did_mount_resumes_pollers(db_path, monkeypatch):
+@pytest.mark.parametrize(
+    ("tab", "expected"),
+    [
+        ("overview", []),
+        ("entries", []),
+        ("scan", ["scan"]),
+        ("translate", ["translate"]),
+    ],
+)
+def test_moddb_view_did_mount_resumes_only_the_current_tab(
+    db_path, monkeypatch, tab, expected
+):
+    """整頁重新掛載：只接續「目前頁籤」的輪詢；沒掛在畫面上的面板不可重新開始更新畫面。"""
     from app.views import moddb_view
 
     seed(db_path)
@@ -799,8 +811,9 @@ def test_moddb_view_did_mount_resumes_pollers(db_path, monkeypatch):
     resumed: list[str] = []
     monkeypatch.setattr(view.scan, "resume", lambda: resumed.append("scan"))
     monkeypatch.setattr(view.translate, "resume", lambda: resumed.append("translate"))
+    view.tab = tab
     view.did_mount()
-    assert resumed == ["scan", "translate"]
+    assert resumed == expected
 
 
 @pytest.fixture
@@ -1326,4 +1339,245 @@ def test_list_entries_filters_by_kind_and_kinds_come_from_db(db_path):
     from app.views.moddb.formatting import kind_label
 
     assert kind_label("future_kind") == "future_kind"  # 沒登錄名稱時顯示代碼
+    db.close()
+
+
+def test_tick_live_updates_elapsed_and_eta_between_batches():
+    """每批結束才有新資料，但畫面要每次輪詢都更新：已用時間往上、預估剩餘往下，預計完成時刻不變。"""
+    from translation_tool.translation_db.run_progress import (
+        RunProgress,
+        format_live,
+        tick_live,
+    )
+
+    progress = RunProgress(total=100, planned_batches=4, started=1000.0)
+    progress.update(25)
+    live = progress.live(now=1050.0)  # 已用 50 秒、已處理 25% → 預估剩餘 150 秒
+    assert live["elapsed_sec"] == 50.0 and live["eta_sec"] == 150.0
+
+    later = tick_live(live, now=1062.0)  # 12 秒後（還沒完成下一批）
+    assert later["elapsed_sec"] == 62.0 and later["eta_sec"] == 138.0
+    assert later["finish_ts"] == live["finish_ts"]
+    assert "已用 1:02" in format_live(later) and "預估剩餘 2:18" in format_live(later)
+    # 超過預估後不會變負數
+    assert tick_live(live, now=1500.0)["eta_sec"] == 0.0
+    # 還沒有任何一批完成：沒有預估剩餘，但已用時間照樣跳動
+    start = RunProgress(total=100, planned_batches=4, started=1000.0).live(now=1000.0)
+    ticked = tick_live(start, now=1007.0)
+    assert ticked["elapsed_sec"] == 7.0 and ticked["eta_sec"] is None
+    # 舊格式（沒有時間戳）原樣回傳
+    old = {k: v for k, v in live.items() if k not in ("started_ts", "updated_ts")}
+    assert tick_live(old, now=2000.0) == old
+
+
+def test_service_publishes_live_progress_before_the_first_batch(db_path, monkeypatch):
+    """第一批結束前就有即時資料（已用時間從開始就會跳動）。"""
+    seed(db_path)
+    seen = []
+
+    def spy(batch, total=None, dry_run=False):
+        # 此時第一批尚未結束，summary 應該已含 live
+        seen.append(dict(session_ref[0].snapshot().get("summary") or {}))
+        return [{**it, "text": "譯:" + it["source_text"]} for it in batch], "DONE"
+
+    session_ref: list = []
+    session = TaskSession()
+    session_ref.append(session)
+    monkeypatch.setattr(moddb_translate_service, "translate_batch_smart", spy)
+    run_moddb_translate_service(
+        TranslateOptions(version="1.21.1", mod_ids=("foo",)), session
+    )
+    live = seen[0].get("live")
+    assert live and live["batch_done"] == 0 and live["started_ts"] <= live["updated_ts"]
+
+
+def test_live_timing_uses_the_monotonic_clock(monkeypatch):
+    """已用時間／預估剩餘用單調時鐘：任務中系統時間被大幅調整也不會跳動。"""
+    from translation_tool.translation_db import run_progress as rp
+
+    wall = {"t": 1_000_000.0}
+    mono = {"t": 50.0}
+    monkeypatch.setattr(rp.time, "time", lambda: wall["t"])
+    monkeypatch.setattr(rp.time, "monotonic", lambda: mono["t"])
+
+    progress = rp.RunProgress(total=100, planned_batches=4)
+    mono["t"] += 40.0
+    progress.update(25)
+    live = progress.live()
+    assert live["elapsed_sec"] == 40.0 and live["eta_sec"] == 120.0
+
+    mono["t"] += 10.0
+    wall["t"] -= 3600.0  # 系統時間被往回調 1 小時
+    ticked = rp.tick_live(live)
+    assert ticked["elapsed_sec"] == 50.0 and ticked["eta_sec"] == 110.0
+    assert (
+        ticked["finish_ts"] == live["finish_ts"]
+    )  # 預計完成時刻仍是上次估計的牆上時間
+    assert progress.elapsed() == 50.0
+
+
+def test_list_entries_can_filter_by_entry_ids(db_path):
+    seed(db_path)
+    db = TranslationDB(db_path)
+    rows = db.list_entries("1.21.1")[0]
+    wanted = [rows[0].id, rows[2].id]
+    got, total = db.list_entries("1.21.1", entry_ids=wanted)
+    assert total == 2 and {r.id for r in got} == set(wanted)
+    assert db.list_entries("1.21.1", entry_ids=[])[1] == 0
+    # 很多 id 也不會超過 SQLite 的參數上限
+    assert db.list_entries("1.21.1", entry_ids=list(range(1, 50_000)))[1] == len(rows)
+    db.close()
+
+
+def test_flagged_entries_flow_from_translation_to_entries_review(db_path, monkeypatch):
+    """機翻特殊字元不一致 → 統計卡「檢視」→ 條目校對只列這些條目、預填 AI 譯文並提示不一致。"""
+    from app.views import moddb_view
+
+    seed(db_path)
+    # 「Infused Alloy」的譯文多帶了 §a（與原文特殊字元不一致 → 不寫入）
+    fake_engine(
+        monkeypatch,
+        lambda t: "§a注入合金" if t == "Infused Alloy" else "譯:" + t,
+    )
+    summary = run(TranslateOptions(version="1.21.1", mod_ids=("foo",)))["summary"]
+    assert summary["flagged"] == 1
+    flagged = summary["flagged_entries"]
+    assert list(flagged.values()) == ["§a注入合金"]
+
+    view = moddb_view.ModDbView(mock_page(), mock_filepicker())
+    panel = view.translate
+    panel._run_version = "1.21.1"
+    assert panel.view_flagged_btn.visible is False
+    panel._apply_summary(summary)
+    assert panel.view_flagged_btn.visible is True
+    panel._view_flagged()  # 按「檢視」
+
+    entries = view.entries
+    assert view.tab == "entries" and entries.state == "none"
+    assert [r.key for r in entries.rows] == ["item.foo.b"]
+    assert entries.flagged_banner.visible is True
+    assert entries.tw_field.value == "§a注入合金"  # 預填 AI 譯文
+    assert "特殊字元不一致" in entries.token_hint.value
+    assert entries.save_btn.disabled is False  # 修正後可直接儲存
+
+    entries.clear_flagged()  # 清除篩選 → 一般清單
+    assert entries.flagged_banner.visible is False and entries.entry_ids is None
+    assert len(entries.rows) > 1
+
+    # 重新開始機翻會清掉上一次的「檢視」
+    panel._reset_stats()
+    assert panel.view_flagged_btn.visible is False and panel._flagged == {}
+    # 從總覽跳進來套用狀態篩選時，也會清掉「特殊字元不一致」篩選
+    entries.show_flagged(list(flagged), flagged, "1.21.1")
+    entries.show_filter("diff")
+    assert entries.entry_ids is None and entries.drafts == {}
+
+
+# ------------------------------------------------ 「翻譯與原文相同」（專有名詞等不需要翻譯）
+def test_translation_same_as_source_still_writes_cache_and_database(
+    db_path, monkeypatch, fake_cache
+):
+    """譯文與原文相同不是失敗：照常寫快取與資料庫、計入已翻譯，不重送 AI。"""
+    seed(db_path)
+    calls: list[list[str]] = []
+
+    def identity(batch, total=None, dry_run=False):
+        calls.append([it["path"] for it in batch])
+        # 「Infused Alloy」原樣回傳（視為不需翻譯的專有名詞）
+        return [
+            {**it, "text": it["source_text"]}
+            if it["source_text"] == "Infused Alloy"
+            else {**it, "text": "譯:" + it["source_text"]}
+            for it in batch
+        ], "DONE"
+
+    monkeypatch.setattr(moddb_translate_service, "translate_batch_smart", identity)
+    summary = run(TranslateOptions(version="1.21.1", mod_ids=("foo",)))["summary"]
+
+    assert summary["status"] == "DONE" and summary["flagged"] == 0
+    assert summary["translated"] == 2 and summary["written"] == 2
+    assert len(calls) == 1  # 一批就完成，沒有因為「與原文相同」而重送
+    # 快取照常寫入（否則下次遇到同一文字又會送 AI）
+    assert ("lang", "item.foo.b", "Infused Alloy", "Infused Alloy") in fake_cache
+    # 資料庫照常寫入，而且來源是 AI 機翻
+    db = TranslationDB(db_path)
+    row = next(r for r in db.list_entries("1.21.1")[0] if r.key == "item.foo.b")
+    assert row.zh_tw == "Infused Alloy" and row.source == SRC_AI
+    db.close()
+
+
+def _seed_same_as_source(path):
+    db = TranslationDB(path)
+    db.ingest(
+        "1.21.1",
+        [
+            ScanItem(KIND_LANG, "m", "minecraft.name", "Minecraft", "Minecraft"),
+            ScanItem(KIND_LANG, "m", "jei.name", "JEI", "JEI"),
+            ScanItem(KIND_LANG, "m", "pressure.name", "Pressure Chamber", "壓力室"),
+            ScanItem(KIND_LANG, "m", "hello.name", "Hello"),
+            ScanItem(KIND_LANG, "m", "empty.name", ""),
+        ],
+    )
+    return db
+
+
+def _keys(db, **kw):
+    rows, total = db.list_entries("1.21.1", limit=100, **kw)
+    return sorted(r.key for r in rows), total
+
+
+def test_same_as_source_filter_uses_effective_translation_and_ignores_empty(db_path):
+    db = _seed_same_as_source(db_path)
+    keys, total = _keys(db, state="same")
+    assert (
+        keys == ["jei.name", "minecraft.name"] and total == 2
+    )  # 空原文、無譯文、不同的都不算
+    db.close()
+
+
+def test_same_as_source_is_still_translated_and_not_untranslated(db_path):
+    db = _seed_same_as_source(db_path)
+    assert "minecraft.name" in _keys(db, state="all")[0]  # 全部
+    assert "minecraft.name" in _keys(db, state="ok")[0]  # 已翻譯（有譯文）
+    assert "minecraft.name" not in _keys(db, state="none")[0]  # 不是未翻譯
+    assert _keys(db, state="none")[0] == ["empty.name", "hello.name"]
+    assert db.count_untranslated("1.21.1") == 1  # 空原文不算待機翻；Hello 才是
+    db.close()
+
+
+def test_same_as_source_filter_combines_with_search(db_path):
+    db = _seed_same_as_source(db_path)
+    assert _keys(db, state="same", query="mine") == (["minecraft.name"], 1)
+    assert _keys(db, state="same", query="pressure") == ([], 0)  # 壓力室與原文不同
+    db.close()
+
+
+def test_same_as_source_follows_the_effective_translation_precedence(db_path):
+    """比較的是「目前生效的譯文」：人工改成不同文字後，就不再算『與原文相同』。"""
+    db = _seed_same_as_source(db_path)
+    entry = next(
+        r for r in db.list_entries("1.21.1", state="same")[0] if r.key == "jei.name"
+    )
+    db.save_manual(entry.id, "JEI（物品檢視器）", actor="測試", propagate=False)
+    assert _keys(db, state="same")[0] == ["minecraft.name"]
+    db.close()
+
+
+def test_same_as_source_count_and_pagination_share_the_condition(db_path):
+    db = TranslationDB(db_path)
+    items = []
+    for i in range(7):
+        items.append(ScanItem(KIND_LANG, "m", f"same.{i:02d}", f"Name{i}", f"Name{i}"))
+        items.append(ScanItem(KIND_LANG, "m", f"diff.{i:02d}", f"Thing{i}", f"東西{i}"))
+        items.append(ScanItem(KIND_LANG, "m", f"none.{i:02d}", f"Todo{i}"))
+    db.ingest("1.21.1", items)
+    seen: list[str] = []
+    for page in range(3):
+        rows, total = db.list_entries("1.21.1", state="same", limit=3, offset=page * 3)
+        assert total == 7  # 每一頁的總筆數都一致
+        seen += [r.key for r in rows]
+    assert seen == [
+        f"same.{i:02d}" for i in range(7)
+    ]  # 三頁合起來沒有重複或混入其他資料
+    assert db.list_entries("1.21.1", state="same", limit=3, offset=9)[0] == []
     db.close()

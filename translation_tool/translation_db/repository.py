@@ -515,6 +515,11 @@ class TranslationDB:
             diff=bool(r[9]),
         )
 
+    # 有效譯文（``effective`` 視圖／表，已套用來源優先序）與 en_us 嚴格相等，且兩者都非空
+    _SAME_AS_SOURCE_SQL = (
+        "(f.entry_id IS NOT NULL AND e.en_us <> '' AND f.zh_tw <> '' "
+        "AND f.zh_tw = e.en_us)"
+    )
     _DIFF_SQL = """EXISTS (
         SELECT 1 FROM entry e2 JOIN effective f2 ON f2.entry_id = e2.id
         WHERE e2.kind = e.kind AND e2.mod_id = e.mod_id AND e2.key = e.key
@@ -530,16 +535,22 @@ class TranslationDB:
         state: str = "all",
         query: str = "",
         source: int | None = None,
+        entry_ids: Sequence[int] | None = None,
         limit: int = 100,
         offset: int = 0,
     ) -> tuple[list[EntryRow], int]:
-        """條目清單（含總筆數）。state：all / none / diff / changed / manual / ok。
+        """條目清單（含總筆數）。state：all / none / diff / changed / manual / ok / same（翻譯與原文相同）。
 
         ``source``：只列出「有該來源譯文」的條目（不論最後採用的是哪個來源，
         所以新匯入的來源即使排在較低優先序、沒被採用，也找得到）。
+        ``entry_ids``：只列出這些條目（例如批次機翻「特殊字元不一致」的那幾筆）；
+        用 ``json_each`` 傳入，數量多也不會超過 SQLite 的參數上限。
         """
         where = ["e.mc_version = ?"]
         params: list = [version]
+        if entry_ids is not None:
+            where.append("e.id IN (SELECT value FROM json_each(?))")
+            params.append(json.dumps([int(i) for i in entry_ids]))
         if source is not None:
             where.append(
                 "EXISTS (SELECT 1 FROM translation ts WHERE ts.entry_id = e.id "
@@ -575,6 +586,8 @@ class TranslationDB:
             where.append(
                 f"f.entry_id IS NOT NULL AND f.source <> {SRC_MANUAL} AND NOT {self._DIFF_SQL}"
             )
+        elif state == "same":  # 目前有效譯文與原文完全相同（派生條件，不是儲存的狀態）
+            where.append(self._SAME_AS_SOURCE_SQL)
         if state == "changed" and self._one("SELECT 1 FROM src_change LIMIT 1") is None:
             return [], 0  # 沒有任何原文變動記錄：不必掃描整個版本
         cond = " AND ".join(where)
