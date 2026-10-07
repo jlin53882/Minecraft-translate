@@ -1093,3 +1093,67 @@ def test_entries_list_scrolls_back_to_top_when_content_changes(db_path):
     asyncio.run(scheduled[-1]())
     assert offsets == [{"offset": 0, "duration": 0}]
     db.close()
+
+
+def _plan(db, sql, params):
+    return " | ".join(r[3] for r in db._q("EXPLAIN QUERY PLAN " + sql, params))
+
+
+def test_content_lookups_use_the_content_index_even_without_statistics(db_path):
+    """沒有 ANALYZE 統計時，規劃器會只用 kind 掃描整張表（百萬筆時每次 150～170 毫秒）。
+
+    條目詳情的「同鍵值／同內容」查詢與每次編輯都會跑的 preview_manual 必須用內容索引。
+    """
+    import inspect
+
+    seed(db_path)
+    db = TranslationDB(db_path)
+    row = db.list_entries("1.21.1")[0][0]
+    for method in (db.entry_detail, db._same_content):
+        assert "INDEXED BY idx_entry_content" in inspect.getsource(method)
+    plan = _plan(
+        db,
+        "SELECT e.id FROM entry e INDEXED BY idx_entry_content "
+        "WHERE e.kind=? AND e.mod_id=? AND e.key=? AND e.id<>?",
+        [row.kind, row.mod_id, row.key, row.id],
+    )
+    assert "idx_entry_content (kind=? AND mod_id=? AND key=?)" in plan
+
+    # 實際跑一遍：結果仍正確（同內容的其他版本、同鍵值的其他版本）
+    detail = db.entry_detail(row.id)
+    assert [r.mc_version for r in detail.same_key] == ["1.20.1"]
+    assert detail.versions == ["1.20.1", "1.21.1"]
+    preview = db.preview_manual(row.id, "新譯文")
+    assert {i.mc_version for i in preview} == {"1.21.1", "1.20.1"}
+    db.close()
+
+
+def test_versions_and_mods_are_cached_and_follow_data_changes(db_path):
+    seed(db_path)
+    db = TranslationDB(db_path)
+    calls = []
+    real_v, real_m = db._versions_uncached, db._mods_uncached
+    db._versions_uncached = lambda: calls.append("v") or real_v()
+    db._mods_uncached = lambda v: calls.append("m") or real_m(v)
+    assert db.versions() == db.versions() == ["1.21.1", "1.20.1"]
+    assert db.mods("1.21.1") == db.mods("1.21.1") == ["bar", "foo"]
+    assert calls == ["v", "m"]  # 第二次都讀快取
+    db.ingest("26.1", [ScanItem(KIND_LANG, "zed", "item.zed.a", "Zed")])
+    assert "26.1" in db.versions() and db.mods("26.1") == ["zed"]  # 寫入後快取失效
+    db.close()
+
+
+def test_changed_filter_skips_the_scan_when_there_are_no_source_changes(db_path):
+    seed(db_path)
+    db = TranslationDB(db_path)
+    queried = []
+    real_q = db._q
+
+    def spy(sql, params=()):
+        queried.append(sql)
+        return real_q(sql, params)
+
+    db._q = spy
+    assert db.list_entries("1.21.1", state="changed") == ([], 0)
+    assert not any("FROM entry e LEFT JOIN effective" in q for q in queried)
+    db.close()

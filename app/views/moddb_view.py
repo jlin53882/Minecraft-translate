@@ -81,6 +81,7 @@ class ModDbView(ft.Column):
             self._db_sig = self._settings_signature()
             self._db = open_database(create=False)
             self._db_loaded = True
+            self._warm_in_background(self._db)
         return self._db
 
     @staticmethod
@@ -88,6 +89,12 @@ class ModDbView(ft.Column):
         """資料庫路徑與來源優先序；兩者變了才需要重新開啟連線。"""
         settings = current_settings()
         return (str(settings.resolved_path()), settings.priority)
+
+    def _warm_in_background(self, db: TranslationDB | None) -> None:
+        """開啟資料庫後在背景先算好總覽統計；使用者切到總覽頁時多半已經算好。"""
+        run_thread = getattr(self._page, "run_thread", None)
+        if db is not None and callable(run_thread):
+            run_thread(warm_stats_quietly, db)
 
     def reload_db(self) -> None:
         """關閉並重新開啟（資料庫路徑或優先序設定變更、掃描建立新檔後）。"""
@@ -133,10 +140,7 @@ class ModDbView(ft.Column):
 
         統計快取已因寫入失效，這裡在背景先算好，之後切到總覽頁就是即時的。
         """
-        db = self._db
-        run_thread = getattr(self._page, "run_thread", None)
-        if db is not None and callable(run_thread):
-            run_thread(warm_stats_quietly, db)
+        self._warm_in_background(self._db)
 
     # ------------------------------------------------------------------ 生命週期
     def will_unmount(self) -> None:

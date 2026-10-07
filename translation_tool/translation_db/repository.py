@@ -367,7 +367,10 @@ class TranslationDB:
 
     # ---------------------------------------------------------------- 統計
     def versions(self) -> list[str]:
-        """資料庫中出現過的遊戲版本（條目多者在前）。"""
+        """資料庫中出現過的遊戲版本（條目多者在前；有快取，見 ``_cached``）。"""
+        return self._cached("versions", self._versions_uncached)
+
+    def _versions_uncached(self) -> list[str]:
         return [
             r[0]
             for r in self._q(
@@ -376,6 +379,10 @@ class TranslationDB:
         ]
 
     def mods(self, version: str) -> list[str]:
+        """某版本出現過的模組（有快取，見 ``_cached``）。"""
+        return self._cached(f"mods:{version}", lambda: self._mods_uncached(version))
+
+    def _mods_uncached(self, version: str) -> list[str]:
         return [
             r[0]
             for r in self._q(
@@ -553,6 +560,8 @@ class TranslationDB:
             where.append(
                 f"f.entry_id IS NOT NULL AND f.source <> {SRC_MANUAL} AND NOT {self._DIFF_SQL}"
             )
+        if state == "changed" and self._one("SELECT 1 FROM src_change LIMIT 1") is None:
+            return [], 0  # 沒有任何原文變動記錄：不必掃描整個版本
         cond = " AND ".join(where)
         base = f"FROM entry e LEFT JOIN effective f ON f.entry_id = e.id WHERE {cond}"
         total = self._cached_count(f"SELECT COUNT(*) {base}", params)
@@ -595,7 +604,8 @@ class TranslationDB:
             else [
                 r[0]
                 for r in self._q(
-                    "SELECT mc_version FROM entry WHERE kind=? AND mod_id=? AND key=? "
+                    "SELECT mc_version FROM entry INDEXED BY idx_entry_content "
+                    "WHERE kind=? AND mod_id=? AND key=? "
                     "AND en_us=? ORDER BY mc_version",
                     (entry.kind, entry.mod_id, entry.key, entry.en_us),
                 )
@@ -605,7 +615,8 @@ class TranslationDB:
             SameKeyRow(eid, ver, en, en == entry.en_us, tw or "", src)
             for eid, ver, en, tw, src in self._q(
                 "SELECT e.id, e.mc_version, e.en_us, f.zh_tw, f.source "
-                "FROM entry e LEFT JOIN effective f ON f.entry_id = e.id "
+                "FROM entry e INDEXED BY idx_entry_content "
+                "LEFT JOIN effective f ON f.entry_id = e.id "
                 "WHERE e.kind=? AND e.mod_id=? AND e.key=? AND e.id<>? "
                 "ORDER BY e.mc_version",
                 (entry.kind, entry.mod_id, entry.key, entry_id),
@@ -645,23 +656,28 @@ class TranslationDB:
 
     # ------------------------------------------------------------ 手動更新
     def _same_content(self, conn: sqlite3.Connection, entry_id: int) -> list[tuple]:
-        """與此條目「相同內容」的條目（含自己）。原文未知的條目沒有可比對的內容，只有自己。"""
-        known = conn.execute(
-            "SELECT en_us FROM entry WHERE id = ?", (entry_id,)
+        """與此條目「相同內容」的條目（含自己）。原文未知的條目沒有可比對的內容，只有自己。
+
+        先取出這筆的 (類型, 模組, 鍵值, 原文)，再用內容索引查同內容的條目。
+        不用 ``(a,b,c,d) = (子查詢)`` 的寫法：沒有統計資訊時查詢規劃會只用 ``kind``
+        掃描整張表（百萬筆時每次編輯都要 170 毫秒以上）。
+        """
+        row = conn.execute(
+            "SELECT kind, mod_id, key, en_us FROM entry WHERE id = ?", (entry_id,)
         ).fetchone()
-        if known is None or known[0] == "":
+        if row is None or row[3] == "":
             return conn.execute(
                 "SELECT e.id, e.mc_version, f.zh_tw, f.source FROM entry e "
                 "LEFT JOIN effective f ON f.entry_id = e.id WHERE e.id = ?",
                 (entry_id,),
             ).fetchall()
         return conn.execute(
-            "SELECT e.id, e.mc_version, f.zh_tw, f.source FROM entry e "
+            "SELECT e.id, e.mc_version, f.zh_tw, f.source "
+            "FROM entry e INDEXED BY idx_entry_content "
             "LEFT JOIN effective f ON f.entry_id = e.id "
-            "WHERE (e.kind, e.mod_id, e.key, e.en_us) = "
-            "(SELECT kind, mod_id, key, en_us FROM entry WHERE id = ?) "
+            "WHERE e.kind = ? AND e.mod_id = ? AND e.key = ? AND e.en_us = ? "
             "ORDER BY e.mc_version",
-            (entry_id,),
+            row,
         ).fetchall()
 
     def preview_manual(
