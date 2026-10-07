@@ -1,9 +1,8 @@
 """tests/test_icon_preview_icon_extraction.py
 
-測試 icon_preview_view 的 icon 提取相關功能（P2 review 反饋）。
+測試 icon_preview_view 的 icon 提取相關功能。
 
 覆蓋：
-- _extract_jar_icon()：單次 JAR icon 提取（fallback 順序、PNG 寫入、唯一性）
 - _batch_extract_jar_icons()：批次 ZIP 處理（每 JAR 只開一次、progress callback、icon_path 回寫）
 - _load_model_index_from_cache()：model index cache 讀取（hit / miss / 失效）
 - _save_model_index_to_cache()：model index cache 寫入
@@ -35,184 +34,6 @@ def png_1x1() -> bytes:
         b"\x00\x00\x00\x0cIDATx\x9cc\xf8\xcf\xc0\x00\x00\x00\x03\x00\x01\x00\x05\xfe\xd4\x00"
         b"\x00\x00\x00IEND\xaeB`\x82"
     )
-
-
-def minimal_model_json(textures: dict) -> str:
-    """建立最小 model JSON 字串（含 textures）。"""
-    return json.dumps(
-        {
-            "parent": "minecraft:item/generated",
-            "textures": textures,
-        }
-    )
-
-
-# ==================================================
-# _extract_jar_icon 測試
-# ==================================================
-
-
-class TestExtractJarIcon:
-    """_extract_jar_icon 的各種情境測試。
-
-    說明：Model JSON 解析（_try_extract_mod_icon_from_model）會寫入真實
-    .icon_cache/model_index/ 目錄。在測試環境中直接 mock 該函式返回 None，
-    隔離測試 _extract_jar_icon 的 fallback 邏輯。
-    """
-
-    def test_fallback_to_icon_png(self, tmp_path):
-        """Model JSON 解析失敗時，fallback 到 icon.png"""
-        from app.views.icon_preview.icon_cache import _extract_jar_icon
-
-        jar = tmp_path / "test_mod-1.0.jar"
-        cache_root = tmp_path / "icon_cache"
-        create_test_jar(
-            jar,
-            {
-                "assets/test_mod/icon.png": png_1x1(),
-            },
-        )
-
-        with patch(
-            "app.views.icon_preview.icon_cache._try_extract_mod_icon_from_model",
-            return_value=None,
-        ):
-            result = _extract_jar_icon(
-                jar, "test_mod", cache_root, "item.test_mod.hello"
-            )
-
-        assert result is not None
-        assert result.exists()
-        assert result.suffix == ".png"
-        assert result.read_bytes() == png_1x1()
-
-    def test_fallback_to_logo_png(self, tmp_path):
-        """icon.png 不存在時，fallback 到 logo.png"""
-        from app.views.icon_preview.icon_cache import _extract_jar_icon
-
-        jar = tmp_path / "test_mod-1.0.jar"
-        cache_root = tmp_path / "icon_cache"
-        create_test_jar(
-            jar,
-            {
-                "assets/test_mod/textures/logo.png": png_1x1(),
-            },
-        )
-
-        # Model JSON 解析失敗（mock 返回 None），才會走到 logo.png fallback
-        with patch(
-            "app.views.icon_preview.icon_cache._try_extract_mod_icon_from_model",
-            return_value=None,
-        ):
-            result = _extract_jar_icon(
-                jar, "test_mod", cache_root, "item.test_mod.hello"
-            )
-
-        assert result is not None
-        assert result.exists()
-        assert result.read_bytes() == png_1x1()
-
-    def test_neoforge_logofile_fallback(self, tmp_path):
-        """NeoForge logoFile fallback"""
-        from app.views.icon_preview.icon_cache import _extract_jar_icon
-
-        jar = tmp_path / "neoforge_mod-1.0.jar"
-        cache_root = tmp_path / "icon_cache"
-        create_test_jar(
-            jar,
-            {
-                "META-INF/neoforge.mods.toml": b'logoFile="assets/neoforge_mod/logo.png"',
-                "assets/neoforge_mod/logo.png": png_1x1(),
-            },
-        )
-
-        with patch(
-            "app.views.icon_preview.icon_cache._try_extract_mod_icon_from_model",
-            return_value=None,
-        ):
-            result = _extract_jar_icon(
-                jar, "neoforge_mod", cache_root, "item.neoforge_mod.hello"
-            )
-
-        assert result is not None
-        assert result.exists()
-
-    def test_no_icon_returns_none(self, tmp_path):
-        """找不到任何 icon 時回傳 None"""
-        from app.views.icon_preview.icon_cache import _extract_jar_icon
-
-        jar = tmp_path / "empty_mod-1.0.jar"
-        cache_root = tmp_path / "icon_cache"
-        create_test_jar(
-            jar,
-            {
-                "assets/empty_mod/lang/en_us.json": b"{}",
-            },
-        )
-
-        result = _extract_jar_icon(jar, "empty_mod", cache_root, "item.empty_mod.hello")
-
-        assert result is None
-
-    def test_corrupted_zip_returns_none(self, tmp_path):
-        """ZIP 損壞時不回報例外，回傳 None"""
-        from app.views.icon_preview.icon_cache import _extract_jar_icon
-
-        jar = tmp_path / "bad_mod-1.0.jar"
-        cache_root = tmp_path / "icon_cache"
-        jar.write_bytes(b"this is not a valid zip")
-
-        result = _extract_jar_icon(jar, "bad_mod", cache_root, "item.bad_mod.hello")
-
-        assert result is None
-
-    def test_icon_path_unique_per_key(self, tmp_path):
-        """同一個 modid，不同 key 產生不同的 icon 檔名"""
-        from app.views.icon_preview.icon_cache import _extract_jar_icon
-
-        jar = tmp_path / "test_mod-1.0.jar"
-        cache_root = tmp_path / "icon_cache"
-        create_test_jar(
-            jar,
-            {
-                "assets/test_mod/icon.png": png_1x1(),
-            },
-        )
-
-        with patch(
-            "app.views.icon_preview.icon_cache._try_extract_mod_icon_from_model",
-            return_value=None,
-        ):
-            path1 = _extract_jar_icon(jar, "test_mod", cache_root, "item.test_mod.one")
-            path2 = _extract_jar_icon(jar, "test_mod", cache_root, "item.test_mod.two")
-
-        assert path1 is not None
-        assert path2 is not None
-        assert path1 != path2  # 不同 key → 不同檔名
-
-    def test_icon_cache_root_created_if_not_exists(self, tmp_path):
-        """icon_cache_root 不存在時自動建立"""
-        from app.views.icon_preview.icon_cache import _extract_jar_icon
-
-        jar = tmp_path / "test_mod-1.0.jar"
-        cache_root = tmp_path / "nonexistent_cache_dir"  # 不存在
-        create_test_jar(
-            jar,
-            {
-                "assets/test_mod/icon.png": png_1x1(),
-            },
-        )
-
-        with patch(
-            "app.views.icon_preview.icon_cache._try_extract_mod_icon_from_model",
-            return_value=None,
-        ):
-            result = _extract_jar_icon(
-                jar, "test_mod", cache_root, "item.test_mod.hello"
-            )
-
-        assert result is not None
-        assert cache_root.exists()
 
 
 # ==================================================
@@ -274,7 +95,8 @@ class TestBatchExtractJarIcons:
             )
 
         assert processed == 1
-        assert zip_open_count == 1, f"ZIP 應只開一次，實際：{zip_open_count}"
+        # Catalog indexing and the per-JAR worker each open the archive once.
+        assert zip_open_count == 2, f"ZIP 應索引與解析各開一次，實際：{zip_open_count}"
 
     def test_icon_path_written_back_to_entries(self, tmp_path):
         """找到 icon 時，icon_path 正確寫回 entry"""
@@ -295,8 +117,12 @@ class TestBatchExtractJarIcons:
         cache_root = tmp_path / "icon_cache"
 
         with patch(
-            "app.views.icon_preview.icon_cache._try_extract_mod_icon_from_model",
-            return_value=("test_mod:item/one", "assets/test_mod/textures/item/one.png"),
+            "app.views.icon_preview.icon_cache._resolve_icon_from_catalog",
+            return_value=(
+                "test_mod:item/one",
+                "assets/test_mod/textures/item/one.png",
+                jar.resolve(),
+            ),
         ):
             _batch_extract_jar_icons(jar_to_entries, cache_root, tmp_path / "mods")
 
@@ -304,6 +130,349 @@ class TestBatchExtractJarIcons:
         assert entry2.icon_path is not None
         assert entry1.icon_path.startswith("jar://")
         assert "assets/test_mod" in entry1.icon_path
+
+    def test_entity_key_uses_exact_named_item_model_fallback(
+        self, tmp_path, monkeypatch
+    ):
+        """Entity 翻譯找不到 entity model 時可用同名 item model 顯示圖示。"""
+        from app.views.icon_preview import icon_cache
+
+        jar = tmp_path / "mods" / "actuallyadditions.jar"
+        create_test_jar(
+            jar,
+            {
+                "assets/actuallyadditions/models/item/worm.json": json.dumps(
+                    {"textures": {"layer0": "actuallyadditions:item/worm"}}
+                ).encode(),
+                "assets/actuallyadditions/textures/item/worm.png": png_1x1(),
+            },
+        )
+        monkeypatch.setattr(
+            icon_cache,
+            "_get_model_index_cache_dir",
+            lambda: tmp_path / "model_index_cache",
+        )
+
+        with zipfile.ZipFile(jar) as zf:
+            names = set(zf.namelist())
+            result = icon_cache._try_extract_mod_icon_from_model(
+                jar,
+                "actuallyadditions",
+                zf,
+                names,
+                key="entity.actuallyadditions.worm",
+            )
+
+        assert result == (
+            "actuallyadditions:item/worm",
+            "assets/actuallyadditions/textures/item/worm.png",
+        )
+
+    def test_catalog_uses_item_model_for_block_key(self, tmp_path):
+        from app.views.icon_preview.icon_cache import (
+            ModpackAssetCatalog,
+            _resolve_icon_from_catalog,
+        )
+
+        mods = tmp_path / "mods"
+        jar = mods / "securitycraft.jar"
+        model = "assets/securitycraft/models/item/block_pocket_manager.json"
+        texture = "assets/securitycraft/textures/block/manager.png"
+        create_test_jar(
+            jar,
+            {
+                model: json.dumps(
+                    {"textures": {"layer0": "securitycraft:block/manager"}}
+                ).encode(),
+                texture: png_1x1(),
+            },
+        )
+        catalog = ModpackAssetCatalog.from_mods_directory(mods)
+        try:
+            with zipfile.ZipFile(jar) as zf:
+                result = _resolve_icon_from_catalog(
+                    jar,
+                    "securitycraft",
+                    "block.securitycraft.block_pocket_manager",
+                    catalog,
+                    current_zf=zf,
+                    budget=None,
+                )
+        finally:
+            catalog.close()
+
+        assert result == ("securitycraft:block/manager", texture, jar.resolve())
+
+    def test_catalog_reads_default_minecraft_texture_from_client_jar(self, tmp_path):
+        from app.views.icon_preview.icon_cache import (
+            ModpackAssetCatalog,
+            _resolve_icon_from_catalog,
+        )
+
+        version_dir = tmp_path / "ATM-Test"
+        mods = version_dir / "mods"
+        jar = mods / "example.jar"
+        client_jar = version_dir / "ATM-Test.jar"
+        texture = "assets/minecraft/textures/block/acacia_planks.png"
+        create_test_jar(
+            jar,
+            {
+                "assets/example/models/block/reinforced_planks.json": json.dumps(
+                    {"textures": {"all": "block/acacia_planks"}}
+                ).encode(),
+            },
+        )
+        create_test_jar(client_jar, {texture: png_1x1()})
+        catalog = ModpackAssetCatalog.from_mods_directory(mods)
+        try:
+            with zipfile.ZipFile(jar) as zf:
+                result = _resolve_icon_from_catalog(
+                    jar,
+                    "example",
+                    "block.example.reinforced_planks",
+                    catalog,
+                    current_zf=zf,
+                    budget=None,
+                )
+        finally:
+            catalog.close()
+
+        assert result == ("block/acacia_planks", texture, client_jar.resolve())
+
+    def test_catalog_resolves_foreign_key_namespace_parent_alias_and_texture_jar(
+        self, tmp_path
+    ):
+        from app.views.icon_preview.icon_cache import (
+            ModpackAssetCatalog,
+            _resolve_icon_from_catalog,
+        )
+
+        mods = tmp_path / "mods"
+        addon = mods / "bibliobiomes.jar"
+        dependency = mods / "regions_unexplored.jar"
+        texture = "assets/biomesoplenty/textures/block/dead_planks.png"
+        create_test_jar(
+            addon,
+            {
+                "assets/bibliocraft/models/item/biomesoplenty_dead_bookcase.json": json.dumps(
+                    {
+                        "parent": "bibliocraft:block/wood/biomesoplenty_dead/bookcase",
+                        "textures": {"layer0": "#texture", "texture": "#face"},
+                    }
+                ).encode(),
+                "assets/bibliocraft/models/block/wood/biomesoplenty_dead/bookcase.json": json.dumps(
+                    {"textures": {"face": "biomesoplenty:block/dead_planks"}}
+                ).encode(),
+            },
+        )
+        create_test_jar(dependency, {texture: png_1x1()})
+        catalog = ModpackAssetCatalog.from_mods_directory(mods)
+        try:
+            with zipfile.ZipFile(addon) as zf:
+                result = _resolve_icon_from_catalog(
+                    addon,
+                    "bibliobiomes",
+                    "block.bibliocraft.biomesoplenty_dead_bookcase",
+                    catalog,
+                    current_zf=zf,
+                    budget=None,
+                )
+        finally:
+            catalog.close()
+
+        assert result == (
+            "biomesoplenty:block/dead_planks",
+            texture,
+            dependency.resolve(),
+        )
+
+    def test_catalog_uses_blockstate_model_variant(self, tmp_path):
+        from app.views.icon_preview.icon_cache import (
+            ModpackAssetCatalog,
+            _resolve_icon_from_catalog,
+        )
+
+        mods = tmp_path / "mods"
+        jar = mods / "example.jar"
+        texture = "assets/example/textures/block/stage.png"
+        create_test_jar(
+            jar,
+            {
+                "assets/example/blockstates/staged_block.json": json.dumps(
+                    {"variants": {"": {"model": "example:block/stage_0"}}}
+                ).encode(),
+                "assets/example/models/block/stage_0.json": json.dumps(
+                    {"textures": {"all": "example:block/stage"}}
+                ).encode(),
+                texture: png_1x1(),
+            },
+        )
+        catalog = ModpackAssetCatalog.from_mods_directory(mods)
+        try:
+            with zipfile.ZipFile(jar) as zf:
+                result = _resolve_icon_from_catalog(
+                    jar,
+                    "example",
+                    "block.example.staged_block",
+                    catalog,
+                    current_zf=zf,
+                    budget=None,
+                )
+        finally:
+            catalog.close()
+
+        assert result == ("example:block/stage", texture, jar.resolve())
+
+    def test_catalog_uses_unique_texture_basename_for_moved_dependency_texture(
+        self, tmp_path
+    ):
+        from app.views.icon_preview.icon_cache import (
+            ModpackAssetCatalog,
+            _resolve_icon_from_catalog,
+        )
+
+        mods = tmp_path / "mods"
+        addon = mods / "addon.jar"
+        dependency = mods / "dependency.jar"
+        actual_texture = "assets/othermod/textures/block/wood_variant.png"
+        create_test_jar(
+            addon,
+            {
+                "assets/addon/models/item/wood_variant.json": json.dumps(
+                    {"textures": {"layer0": "missingmod:item/wood_variant"}}
+                ).encode(),
+            },
+        )
+        create_test_jar(dependency, {actual_texture: png_1x1()})
+        catalog = ModpackAssetCatalog.from_mods_directory(mods)
+        try:
+            with zipfile.ZipFile(addon) as zf:
+                result = _resolve_icon_from_catalog(
+                    addon,
+                    "addon",
+                    "item.addon.wood_variant",
+                    catalog,
+                    current_zf=zf,
+                    budget=None,
+                )
+        finally:
+            catalog.close()
+
+        assert result == (
+            "missingmod:item/wood_variant",
+            actual_texture,
+            dependency.resolve(),
+        )
+
+    def test_catalog_includes_exact_neoforge_runtime_parent_model(self, tmp_path):
+        from app.views.icon_preview.icon_cache import (
+            ModpackAssetCatalog,
+            _resolve_icon_from_catalog,
+        )
+
+        minecraft = tmp_path / ".minecraft"
+        profile_dir = minecraft / "versions" / "TestPack"
+        mods = profile_dir / "mods"
+        addon = mods / "actuallyadditions.jar"
+        loader_version = "21.1.251"
+        loader_jar = (
+            minecraft
+            / "libraries"
+            / "net"
+            / "neoforged"
+            / "neoforge"
+            / loader_version
+            / f"neoforge-{loader_version}-universal.jar"
+        )
+        client_jar = profile_dir / "TestPack.jar"
+        texture = "assets/minecraft/textures/item/bucket.png"
+        create_test_jar(
+            addon,
+            {
+                "assets/actuallyadditions/models/item/canola_oil_bucket.json": json.dumps(
+                    {
+                        "parent": "neoforge:item/bucket",
+                        "fluid": "actuallyadditions:canola_oil",
+                        "loader": "neoforge:fluid_container",
+                    }
+                ).encode(),
+            },
+        )
+        create_test_jar(
+            loader_jar,
+            {
+                "assets/neoforge/models/item/bucket.json": json.dumps(
+                    {
+                        "parent": "neoforge:item/default",
+                        "textures": {
+                            "base": "item/bucket",
+                            "fluid": "neoforge:item/mask/bucket_fluid",
+                        },
+                    }
+                ).encode(),
+                "assets/neoforge/models/item/default.json": b"{}",
+            },
+        )
+        create_test_jar(client_jar, {texture: png_1x1()})
+        profile_dir.mkdir(parents=True, exist_ok=True)
+        (profile_dir / "TestPack.json").write_text(
+            json.dumps(
+                {"arguments": {"game": ["--fml.neoForgeVersion", loader_version]}}
+            ),
+            encoding="utf-8",
+        )
+
+        catalog = ModpackAssetCatalog.from_mods_directory(mods)
+        try:
+            with zipfile.ZipFile(addon) as zf:
+                result = _resolve_icon_from_catalog(
+                    addon,
+                    "actuallyadditions",
+                    "item.actuallyadditions.canola_oil_bucket",
+                    catalog,
+                    current_zf=zf,
+                    budget=None,
+                )
+        finally:
+            catalog.close()
+
+        assert result == ("item/bucket", texture, client_jar.resolve())
+
+    def test_catalog_rejects_ambiguous_texture_basename_fallback(self, tmp_path):
+        from app.views.icon_preview.icon_cache import (
+            ModpackAssetCatalog,
+            _resolve_icon_from_catalog,
+        )
+
+        mods = tmp_path / "mods"
+        addon = mods / "addon.jar"
+        first = "assets/first/textures/item/shared.png"
+        second = "assets/second/textures/item/shared.png"
+        create_test_jar(
+            addon,
+            {
+                "assets/addon/models/item/shared.json": json.dumps(
+                    {"textures": {"layer0": "missingmod:item/shared"}}
+                ).encode(),
+                first: png_1x1(),
+                second: png_1x1(),
+            },
+        )
+        catalog = ModpackAssetCatalog.from_mods_directory(mods)
+        try:
+            with zipfile.ZipFile(addon) as zf:
+                result = _resolve_icon_from_catalog(
+                    addon,
+                    "addon",
+                    "item.addon.shared",
+                    catalog,
+                    current_zf=zf,
+                    budget=None,
+                )
+        finally:
+            catalog.close()
+
+        assert result is None
 
     def test_missing_jar_skipped(self, tmp_path):
         """JAR 檔案不存在時跳過，不拋例外"""
@@ -378,8 +547,12 @@ class TestBatchExtractJarIcons:
         cache_root = tmp_path / "icon_cache"
 
         with patch(
-            "app.views.icon_preview.icon_cache._try_extract_mod_icon_from_model",
-            return_value=("mod_a:item/hello", "assets/mod_a/textures/item/hello.png"),
+            "app.views.icon_preview.icon_cache._resolve_icon_from_catalog",
+            side_effect=lambda _jar, modid, _key, *_args, **_kwargs: (
+                f"{modid}:item/hello",
+                f"assets/{modid}/textures/item/hello.png",
+                jar.resolve(),
+            ),
         ):
             _batch_extract_jar_icons(jar_to_entries, cache_root, tmp_path / "mods")
 
@@ -551,81 +724,6 @@ class TestToHalfwidth:
         from app.views.icon_preview.icon_cache import to_halfwidth
 
         assert to_halfwidth("hello 123") == "hello 123"
-
-
-# ==================================================
-# _safe_filename_key 測試
-# ==================================================
-
-
-class TestSafeFilenameKey:
-    """_safe_filename_key 的各種情境測試。"""
-
-    def test_backslash_removed(self):
-        """key 含反斜線時被移除"""
-        from app.views.icon_preview.icon_cache import _safe_filename_key
-
-        result = _safe_filename_key("Use \\locate structure betterjungletemples")
-        assert "\\" not in result
-        assert "locate" in result
-
-    def test_normal_key(self):
-        """正常 key 不變"""
-        from app.views.icon_preview.icon_cache import _safe_filename_key
-
-        assert _safe_filename_key("restonia_crystal_block") == "restonia_crystal_block"
-
-    def test_slash_replaced(self):
-        """斜線被替換為底線"""
-        from app.views.icon_preview.icon_cache import _safe_filename_key
-
-        result = _safe_filename_key("path/to/some_file")
-        assert "/" not in result
-        assert "some_file" in result
-
-    def test_spaces_replaced(self):
-        """空白被替換為底線"""
-        from app.views.icon_preview.icon_cache import _safe_filename_key
-
-        result = _safe_filename_key("some key with spaces")
-        assert " " not in result
-        assert "_" in result
-
-    def test_long_key_truncated(self):
-        """超長 key 被截斷"""
-        from app.views.icon_preview.icon_cache import _safe_filename_key
-
-        long_key = "a" * 100
-        result = _safe_filename_key(long_key)
-        assert len(result) <= 64
-
-    def test_icon_generated_from_sanitized_key(self, tmp_path):
-        """sanitized key 拿來當檔名時不應報錯"""
-        import zipfile
-
-        from app.views.icon_preview.icon_cache import (
-            _extract_jar_icon,
-            _safe_filename_key,
-        )
-
-        # 建立含特殊字元的 key
-        jar = tmp_path / "test_mod-1.0.jar"
-        cache_root = tmp_path / "icon_cache"
-        with zipfile.ZipFile(jar, "w") as zf:
-            zf.writestr("assets/test_mod/icon.png", png_1x1())
-
-        # 含反斜線的 key
-        key_with_backslash = "Use \\locate structure"
-        safe = _safe_filename_key(key_with_backslash)
-
-        with patch(
-            "app.views.icon_preview.icon_cache._try_extract_mod_icon_from_model",
-            return_value=None,
-        ):
-            result = _extract_jar_icon(jar, "test_mod", cache_root, key_with_backslash)
-
-        assert result is not None, "含 \\ 的 key 應能產生 icon 檔"
-        assert safe in result.name, f"icon 檔名應包含 sanitized key: {safe}"
 
 
 # ==================================================

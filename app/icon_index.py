@@ -9,12 +9,13 @@ from __future__ import annotations
 
 import hashlib
 import json
-import re
+import uuid
 import zipfile
 from collections.abc import Iterator
 from concurrent.futures import as_completed
 from pathlib import Path
 
+from app.icon_runtime import get_runtime_asset_paths
 from translation_tool.utils.app_paths import get_data_root
 from translation_tool.utils.config_manager import load_config
 from translation_tool.utils.log_unit import log_info, log_warning
@@ -29,25 +30,58 @@ from translation_tool.utils.zip_safety import (
 # 核心資料結構
 # ==================================================
 
-# JAR 檔名 modid 截取 regex（module-level 常數，避免每次呼叫重建）
-# 抓「第一段不以數字結尾」當 modid（如 cofh-core-1.21.jar → cofh-core）
-# 不使用 bare \d，避免 appliedenergistics2-12.9.7 → appliedenergistics 的問題
-_JAR_MODID_RE = re.compile(r"^([a-zA-Z0-9_][a-zA-Z0-9_\-]*?)(?:-\d|$)")
+
+def _jar_manifest(mods_dir: Path) -> list[dict[str, int | str]]:
+    """Return a fast, deterministic signature for each JAR in a modpack."""
+    manifest = []
+    for jar_path in sorted(
+        mods_dir.glob("*.jar"), key=lambda path: path.name.casefold()
+    ):
+        stat = jar_path.stat()
+        manifest.append(
+            {
+                "name": jar_path.name,
+                "size": stat.st_size,
+                "mtime_ns": stat.st_mtime_ns,
+            }
+        )
+    for asset_path in get_runtime_asset_paths(mods_dir):
+        stat = asset_path.stat()
+        manifest.append(
+            {
+                "name": str(asset_path.resolve()),
+                "size": stat.st_size,
+                "mtime_ns": stat.st_mtime_ns,
+            }
+        )
+    return manifest
 
 
-def _compute_modpack_hash(mods_dir: Path) -> str:
-    """計算 modpack 的 stable hash（只用 JAR 檔名，忽略內容）。"""
-    jar_files = sorted(j.name for j in mods_dir.glob("*.jar"))
-    key_str = str(mods_dir.resolve()) + ":" + ",".join(jar_files)
-    return hashlib.sha256(key_str.encode()).hexdigest()[:16]
+def _compute_modpack_hash(
+    mods_dir: Path, manifest: list[dict[str, int | str]] | None = None
+) -> str:
+    """Hash the modpack path and JAR metadata, not just the JAR filenames."""
+    identity = {
+        "modpack": str(mods_dir.resolve()),
+        "jars": _jar_manifest(mods_dir) if manifest is None else manifest,
+    }
+    key = json.dumps(
+        identity, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    )
+    return hashlib.sha256(key.encode("utf-8")).hexdigest()[:16]
+
+
+def _index_path_for_manifest(
+    mods_dir: Path, manifest: list[dict[str, int | str]]
+) -> Path:
+    cache_dir = get_data_root() / ".icon_cache" / "icon_index"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    return cache_dir / f"{_compute_modpack_hash(mods_dir, manifest)}.json"
 
 
 def get_index_path(mods_dir: Path) -> Path:
     """取得該 modpack 的索引檔路徑。"""
-    cache_dir = get_data_root() / ".icon_cache" / "icon_index"
-    cache_dir.mkdir(parents=True, exist_ok=True)
-    h = _compute_modpack_hash(mods_dir)
-    return cache_dir / f"{h}.json"
+    return _index_path_for_manifest(mods_dir, _jar_manifest(mods_dir))
 
 
 # ==================================================
@@ -55,38 +89,80 @@ def get_index_path(mods_dir: Path) -> Path:
 # ==================================================
 
 
-def _iter_entries_from_lang_files(zf: zipfile.ZipFile) -> Iterator[tuple[str, str]]:
-    """從 JAR 的 lang 檔案列舉所有有效的 key。
-
-    Yields: (key, value) — 只 yield 有意義的 key（不含 .* wildcard）
-    """
+def _iter_entries_from_lang_files(
+    zf: zipfile.ZipFile, budget: ZipReadBudget | None = None
+) -> Iterator[tuple[str, str, str]]:
+    """列舉每個 assets namespace 的英文 lang entries（modid, key, value）。"""
+    members_by_modid: dict[str, list[str]] = {}
     for name in zf.namelist():
-        if not (name.endswith(".lang") or "/lang/" in name or name.startswith("lang/")):
+        parts = name.split("/")
+        if (
+            len(parts) != 4
+            or parts[0] != "assets"
+            or parts[2] != "lang"
+            or parts[3] not in {"en_us.json", "en_us.lang"}
+        ):
             continue
-        try:
-            content = read_limited(zf, name).decode("utf-8", errors="ignore")
-        except Exception as exc:  # noqa: BLE001 - 單一 lang 檔讀不出來就略過，但要留下是哪個檔案
-            log_warning(f"[IconIndex] 略過無法讀取的 lang 檔 {name}: {exc!r}")
-            continue
-        for line in content.splitlines():
-            line = line.strip()
-            if not line or "=" not in line:
+        members_by_modid.setdefault(parts[1], []).append(name)
+
+    for modid in sorted(members_by_modid):
+        # Prefer the production JSON contract; .lang is only a legacy fallback.
+        candidates = sorted(
+            members_by_modid[modid],
+            key=lambda name: (not name.endswith(".json"), name),
+        )
+        for name in candidates:
+            try:
+                content = read_limited(zf, name, budget=budget).decode(
+                    "utf-8", errors="ignore"
+                )
+            except ArchiveBudgetError as exc:
+                if budget is not None:
+                    raise
+                log_warning(f"[IconIndex] 略過無法讀取的 lang 檔 {name}: {exc!r}")
                 continue
-            idx = line.index("=")
-            key = line[:idx].strip()
-            value = line[idx + 1 :].strip()
-            if key and "." in key and value:
-                yield key, value
-        # 只讀第一個 lang 檔案（多數 JAR 只有一個）
-        break
+            except Exception as exc:  # noqa: BLE001 - 單一 lang 檔讀不出來就略過
+                log_warning(f"[IconIndex] 略過無法讀取的 lang 檔 {name}: {exc!r}")
+                continue
+
+            if name.endswith(".json"):
+                try:
+                    entries = json.loads(content)
+                except json.JSONDecodeError as exc:
+                    log_warning(
+                        f"[IconIndex] 略過格式錯誤的 JSON lang 檔 {name}: {exc!r}"
+                    )
+                    continue
+                if not isinstance(entries, dict):
+                    log_warning(f"[IconIndex] 略過非 object 的 JSON lang 檔 {name}")
+                    continue
+                entries_to_yield = entries.items()
+            else:
+                parsed_entries = []
+                for line in content.splitlines():
+                    line = line.strip()
+                    if not line or "=" not in line:
+                        continue
+                    idx = line.index("=")
+                    parsed_entries.append((line[:idx].strip(), line[idx + 1 :].strip()))
+                entries_to_yield = parsed_entries
+
+            for key, value in entries_to_yield:
+                if (
+                    isinstance(key, str)
+                    and isinstance(value, str)
+                    and "." in key
+                    and value
+                ):
+                    yield modid, key, value
+            break  # 每個 namespace 只取第一個有效的英文 lang 檔
 
 
-def _process_single_jar(args: tuple[Path, str]) -> dict[str, str]:
+def _process_single_jar(jar_path: Path, asset_catalog=None) -> dict[str, str]:
     """Worker: 處理單一 JAR，建立該 JAR 所有 entry 的 icon 索引。
 
     回傳：{key: icon_uri} — 該 JAR 內所有有 icon 的 key mapping
     """
-    jar_path, modid = args
     results: dict[str, str] = {}
     try:
         with zipfile.ZipFile(jar_path, "r") as zf:
@@ -94,63 +170,45 @@ def _process_single_jar(args: tuple[Path, str]) -> dict[str, str]:
             budget = ZipReadBudget.for_icon_scan(jar_path.name)
             from app.icon_reader import IconRef
             from app.views.icon_preview.icon_cache import (
+                _resolve_icon_from_catalog,
                 _try_extract_mod_icon_from_model,
             )
 
-            for name in zf.namelist():
-                # 只讀 lang 檔案
-                if not (
-                    name.endswith(".lang")
-                    or "/lang/" in name
-                    or name.startswith("lang/")
-                ):
+            for modid, key, _value in _iter_entries_from_lang_files(zf, budget=budget):
+                # 只處理有意義的 content key
+                if key.split(".", 1)[0] not in {
+                    "item",
+                    "block",
+                    "entity",
+                    "enchantment",
+                    "effect",
+                    "potion",
+                    "biome",
+                    "attribute",
+                    "tile",
+                    "-effect",
+                }:
                     continue
-                try:
-                    content = read_limited(zf, name, budget=budget).decode(
-                        "utf-8", errors="ignore"
-                    )
-                except ArchiveBudgetError:
-                    raise  # 整包累計超限：交給外層處理
-                except Exception as exc:  # noqa: BLE001 - 單一 lang 檔讀不出來就略過，但要留下是哪個檔案
-                    log_warning(
-                        f"[IconIndex] 略過無法讀取的 lang 檔 {jar_path.name}!/{name}: {exc!r}"
-                    )
-                    continue
-                for line in content.splitlines():
-                    line = line.strip()
-                    if not line or "=" not in line:
-                        continue
-                    idx = line.index("=")
-                    key = line[:idx].strip()
-                    if not key or "." not in key:
-                        continue
 
-                    # 只處理有意义的 content key
-                    parts = key.split(".")
-                    if len(parts) < 2:
-                        continue
-                    prefix = parts[0]
-                    if prefix not in (
-                        "item",
-                        "block",
-                        "entity",
-                        "enchantment",
-                        "effect",
-                        "potion",
-                        "biome",
-                        "attribute",
-                        "tile",
-                        "-effect",
-                    ):
-                        continue
-
+                if asset_catalog is not None:
+                    result = _resolve_icon_from_catalog(
+                        jar_path,
+                        modid,
+                        key,
+                        asset_catalog,
+                        current_zf=zf,
+                        budget=budget,
+                    )
+                    if result:
+                        _tex_val, png_path, texture_archive = result
+                        results[key] = IconRef(texture_archive, png_path).to_uri()
+                else:
                     result = _try_extract_mod_icon_from_model(
                         jar_path, modid, zf, names, key=key, budget=budget
                     )
                     if result:
                         _tex_val, png_path = result
                         results[key] = IconRef(jar_path, png_path).to_uri()
-                break  # 只讀第一個 lang 檔
     except ArchiveBudgetError:
         # 累計讀取超過安全上限（budget 已記錄警告）：保留已建立的部分索引，不中止整個索引建置
         log_warning(f"[IconIndex] {jar_path.name} 累計讀取超限，僅保留已解析的部分索引")
@@ -174,78 +232,106 @@ def build_icon_index(mods_dir: Path, progress_cb=None) -> dict[str, str]:
         1. 列舉所有 JAR 及每個 JAR 的 modid
         2. 8 threads 平行處理每個 JAR
         3. 合併所有結果為單一 JSON 索引
-        4. 寫入磁碟
+        4. 回傳索引；要寫入磁碟請使用 build_and_save_icon_index()
 
     回傳：{key: icon_uri} 完整索引
     """
 
-    # 找出所有 JAR 及其 modid（使用 module-level _JAR_MODID_RE）
+    # Namespace 從 assets/<modid>/lang/en_us.* 取得，與即時掃描契約一致。
     jars = sorted(mods_dir.glob("*.jar"))
-    jar_modid_pairs: list[tuple[Path, str]] = []
-    for jar in jars:
-        m = _JAR_MODID_RE.match(jar.stem)
-        modid = m.group(1) if m else jar.stem
-        jar_modid_pairs.append((jar, modid))
-
-    total = len(jar_modid_pairs)
+    total = len(jars)
     log_info(f"[IconIndex] 開始建立索引：{total} 個 JAR，使用 8 threads")
 
     index: dict[str, str] = {}
     done = 0
+
+    from app.views.icon_preview.icon_cache import ModpackAssetCatalog
+
+    asset_catalog = ModpackAssetCatalog.from_mods_directory(mods_dir)
 
     config_workers = (
         load_config().get("translator", {}).get("parallel_execution_workers", 8)
     )
     max_workers = max(1, config_workers) if isinstance(config_workers, int) else 8
     with ContextThreadPoolExecutor(max_workers=max_workers) as executor:
-        futures = {
-            executor.submit(_process_single_jar, (jar, modid)): (jar, modid)
-            for jar, modid in jar_modid_pairs
-        }
-        for future in as_completed(futures):
-            jar, modid = futures[future]
-            done += 1
-            try:
-                jar_results = future.result()
-                for key, uri in jar_results.items():
-                    index[key] = uri
-                if progress_cb:
-                    progress_cb(done, total)
-            except Exception as ex:  # noqa: BLE001
-                log_warning(f"[IconIndex] JAR 處理失敗 {jar.name}: {ex!r}")
-            if done % 50 == 0 or done == total:
-                log_info(
-                    f"[IconIndex] 進度：{done}/{total} JARs，已建立 {len(index)} 個 icon 索引"
-                )
+        try:
+            futures = {
+                executor.submit(_process_single_jar, jar, asset_catalog): jar
+                for jar in jars
+            }
+            for future in as_completed(futures):
+                jar = futures[future]
+                done += 1
+                try:
+                    jar_results = future.result()
+                    for key, uri in jar_results.items():
+                        index[key] = uri
+                    if progress_cb:
+                        progress_cb(done, total)
+                except Exception as ex:  # noqa: BLE001
+                    log_warning(f"[IconIndex] JAR 處理失敗 {jar.name}: {ex!r}")
+                if done % 50 == 0 or done == total:
+                    log_info(
+                        f"[IconIndex] 進度：{done}/{total} JARs，已建立 {len(index)} 個 icon 索引"
+                    )
+        finally:
+            asset_catalog.close()
 
     log_info(f"[IconIndex] 索引建立完成：{len(index)} 個 icon 進入索引")
     return index
 
 
+def build_and_save_icon_index(mods_dir: Path, progress_cb=None) -> dict[str, str]:
+    """Build and persist an index only if the source JAR set stayed unchanged."""
+    manifest = _jar_manifest(mods_dir)
+    index = build_icon_index(mods_dir, progress_cb=progress_cb)
+    if _jar_manifest(mods_dir) != manifest:
+        raise RuntimeError(
+            "Mod JARs changed while the icon index was being built; retry."
+        )
+    _save_icon_index_for_manifest(mods_dir, index, manifest)
+    return index
+
+
 def save_icon_index(mods_dir: Path, index: dict[str, str]) -> Path:
     """將 icon 索引寫入磁碟（JSON 格式）。"""
-    idx_path = get_index_path(mods_dir)
+    return _save_icon_index_for_manifest(mods_dir, index, _jar_manifest(mods_dir))
+
+
+def _save_icon_index_for_manifest(
+    mods_dir: Path,
+    index: dict[str, str],
+    manifest: list[dict[str, int | str]],
+) -> Path:
+    idx_path = _index_path_for_manifest(mods_dir, manifest)
     data = {
-        "version": 1,
+        "version": 4,
         "modpack": str(mods_dir.resolve()),
+        "jars": manifest,
         "count": len(index),
         "index": index,
     }
-    idx_path.write_text(
-        json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8"
-    )
+    temp_path = idx_path.with_name(f"{idx_path.stem}.{uuid.uuid4().hex}.tmp")
+    try:
+        temp_path.write_text(
+            json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8"
+        )
+        temp_path.replace(idx_path)
+    finally:
+        temp_path.unlink(missing_ok=True)
     log_info(f"[IconIndex] 索引已儲存：{idx_path}")
     return idx_path
 
 
 def load_icon_index(mods_dir: Path) -> dict[str, str] | None:
     """快速載入已建立的 icon 索引。找不到或格式不符回 None。"""
-    idx_path = get_index_path(mods_dir)
+    manifest = _jar_manifest(mods_dir)
+    idx_path = _index_path_for_manifest(mods_dir, manifest)
     if not idx_path.exists():
         return None
     try:
         data = json.loads(idx_path.read_text(encoding="utf-8"))
-        if data.get("version") != 1:
+        if data.get("version") != 4 or data.get("jars") != manifest:
             return None
         if data.get("modpack") != str(mods_dir.resolve()):
             # modpack 路徑改了

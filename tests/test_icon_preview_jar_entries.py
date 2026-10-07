@@ -256,7 +256,7 @@ class TestLoadEntriesFromJarDirectory:
         )
 
         view = create_view(source_root=jar_dir, review_root=review_dir)
-        entries = view._load_entries_from_jar_directory()
+        entries = view._hydrate_entries(view._load_entries_from_jar_directory())
 
         assert len(entries) == 2
         key1_entry = next(e for e in entries if e.key == "key1")
@@ -338,7 +338,7 @@ class TestLoadEntriesFromJarDirectory:
         )
 
         view = create_view(source_root=jar_dir, review_root=review_dir)
-        entries = view._load_entries_from_jar_directory()
+        entries = view._hydrate_entries(view._load_entries_from_jar_directory())
 
         # === 總數驗證 ===
         assert len(entries) == 5, f"預期 5 個 entry，實際 {len(entries)}"
@@ -422,7 +422,7 @@ class TestLoadEntriesFromJarDirectory:
         )
 
         view = create_view(source_root=jar_dir, review_root=review_dir)
-        entries = view._load_entries_from_jar_directory()
+        entries = view._hydrate_entries(view._load_entries_from_jar_directory())
 
         # 非 str 值應被轉為空字串，不應炸錯
         assert len(entries) == 1

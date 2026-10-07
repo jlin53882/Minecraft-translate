@@ -29,7 +29,7 @@ translation_tool/core/
 
 1. 標題列：`back_btn`（僅詳情頁顯示）、圖示、`header`（文字「JAR 圖示預覽」）
 2. `mod_search_tf`（label「搜尋模組」）/ `mod_search_status`：模組清單搜尋（初始隱藏，載入並顯示模組清單後才出現；詳情頁隱藏）
-3. 「資料來源」卡（`kit.section_card`）：`pick_source_btn` + `source_label`、`pick_review_btn` + `review_label`、`load_btn`、`progress_bar` / `progress_text`（按鈕文字依序為「選擇模組資料夾（例：mods 資料夾）」、「選擇資源包路徑」、「載入模組清單」；來源標籤預設「模組資料夾：尚未選擇」「資源包路徑：尚未選擇」；`progress_text` 預設「準備就緒」，`progress_bar` 掃描時才顯示）
+3. 「資料來源」卡（`kit.section_card`）：`pick_source_btn` + `source_path_input`、`pick_review_btn` + `review_path_input`、`load_btn`、`progress_bar` / `progress_text`（按鈕文字依序為「選擇模組資料夾（例：mods 資料夾）」、「選擇資源包路徑」、「載入模組清單」；路徑輸入框預設顯示「模組資料夾：尚未選擇」「資源包路徑：尚未選擇」；`progress_text` 預設「準備就緒」，`progress_bar` 掃描時才顯示）
 4. `save_btn`（僅詳情頁顯示）
 5. `page_bar`（`prev_page_btn` / `page_info` / `next_page_btn`；預設只見左右箭頭，`page_info` 為空）與 `page_size_selector`（「每頁顯示」，預設 50）
 6. `list_view`：模組清單列（`_mod_row`）或詳情頁的 `LangItemRow`
@@ -42,7 +42,7 @@ translation_tool/core/
 [載入] _on_load_clicked()（sync handler：只做 UI 準備，然後 page.run_task(_load_async)）
   └─ _load_async(generation)：每個阻塞步驟都在 asyncio.to_thread，await 之後檢查世代（卸載就丟棄）
        ├─ _detect_source_mode()（glob / rglob）
-       ├─ _lookup_cached_entries(mode)：L1（_entries_cache，source_root + mode 相符）→ L2（僅 jar_directory，讀磁碟 JSON）→ 命中即 _apply_cached_entries（_rebuild_mods + _render_mod_list，在 event loop）
+       ├─ _lookup_cached_entries(mode)：L1（_entries_cache，source identity 相符；extracted_folder 驗證所有 en_us.json 的相對路徑、大小與 mtime_ns，jar_directory 驗證 JAR 與 runtime assets）→ L2（僅 jar_directory，讀磁碟 JSON）→ 命中即 _apply_cached_entries（_rebuild_mods + _render_mod_list，在 event loop）
        ├─ 未命中 → _count_scan_steps(mode)（glob / rglob）→ _show_scan_started（進度條，在 event loop）
        └─ asyncio.to_thread(_scan_entries) → _finish_load()
   無 page.run_task（測試替身）時維持同步流程（_try_use_cached_entries / _begin_scan）
@@ -106,8 +106,10 @@ translation_tool/core/
   - model index 快取（`_load_model_index_from_cache` / `_build_model_index` / `_save_model_index_to_cache`，以 `_get_jar_hash`＝mtime+size 判斷失效）
   - 用 key 轉 model name（`block.<modid>.<name>` → `block/<name>`）精準匹配，並以 `_follow_parent_chain` 追 parent model 取 texture
   - 找不到或 key namespace 與 modid 不一致 → 回 None，**不做 logo/icon.png 最終 fallback**（錯誤的 icon 比沒有更糟）
-- 索引檔位於 `.icon_cache/icon_index/`，以 JAR 檔名清單的 hash 命名；`icon_index.build_icon_index` / `save_icon_index` 目前沒有 app 內呼叫端，索引需事先建立
-- `_extract_jar_icon`（含 icon.png / logo / NeoForge `logoFile` 等 fallback）目前沒有呼叫端
+- 預建索引檔位於 `.icon_cache/icon_index/`。以 JAR 檔名、檔案大小與 `mtime_ns` 建立快速 manifest；任一 JAR 有新增、刪除或 metadata 變更時會 cache miss。這不是內容雜湊：若內容變更但檔案大小與時間戳都被保留，無法偵測。
+- 預建 producer 僅讀取 `assets/<modid>/lang/en_us.json`，並直接從路徑取得 namespace；同一 JAR 的多個 namespace 都會掃描。為相容舊格式，JSON 不存在或格式錯誤時可讀同 namespace 的 `en_us.lang`；其他語系不作為索引來源。
+- 可執行 `python tools/build_icon_index.py "<mods 資料夾>"` 預建索引；流程為 `build_icon_index` → 比對建置前後 manifest → `save_icon_index`。若 JAR 在建置期間變更會拒絕儲存，完成後 Mod 資料庫載入會由 `load_icon_index` 使用索引；cache miss 則照常逐 JAR 解析。JAR 更新後重跑命令即可。
+- 舊有以 JAR 內通用圖檔或模組 metadata 為來源的 fallback 不屬於現行 model-only icon contract，且沒有 production caller，已移除。
 - `_migrate_old_icon_cache`：選擇模組資料夾時，把舊路徑 `<source_root>/_icon_preview/jar_icons/` 的 png 搬到 `.icon_cache/jar_icons/`
 
 ## 主要 UI 元件與狀態
@@ -116,7 +118,7 @@ translation_tool/core/
 |------|------|
 | `source_root` / `review_root` | 原文（en_us + textures）/ 校對（zh_tw）資料夾 |
 | `mods` dict | modid → entries 列表 |
-| `_entries_cache` / `_cache_meta` | L1 快取（source_root + mode 驗證）；L2 為 `.icon_cache/<key>.json`，key 由 `_compute_cache_key`（JAR 檔名清單 hash）決定，僅 jar_directory 使用 |
+| `_entries_cache` / `_cache_meta` | L1 以 source identity 驗證：`extracted_folder` 比對所有 `en_us.json` 的相對路徑、大小與 `mtime_ns`；`jar_directory` 比對 JAR 與 NeoForge runtime assets 的路徑／檔名、大小與 `mtime_ns`。L2 為 `.icon_cache/<key>.json`，只供 `jar_directory` 使用，key 是上述 JAR source identity 的摘要 |
 | `_mod_search_*` / `_detail_search_*` | 兩層即時搜尋（`Debouncer`，150ms） |
 | `mod_page_size` / `page_size` | 模組清單每頁數（`page_size_selector` 可選 25/50/100）/ 詳情頁每頁筆數（50） |
 | `LangItemRow` | 單筆 key：TextField（繁中可編輯）+ lang key + 英文原文 + icon 預覽 |
@@ -125,7 +127,7 @@ translation_tool/core/
 
 1. 新增 icon 解析策略時，優先改 `icon_index.py` / `icon_resolver.py`，不要塞進 view。
 2. `_render_current_page` 每次重建 LangItemRow；entry 需帶 `icon_path` 避免重複解析。
-3. L2 快取只看 JAR 檔名，JAR 內容改變但檔名不變不會自動失效。
+3. source identity 以檔案路徑／名稱、大小與 `mtime_ns` 偵測來源變更，不計算內容雜湊；若檔案內容改變但大小與時間戳都被保留，快取可能不會失效。新增、刪除或一般修改 `en_us.json`／JAR／runtime asset 會改變 identity。
 4. `to_halfwidth()` 是全形轉半形（NFKC）工具，用於翻譯值正規化。
 5. 背景掃描不可直接改控制項；進度一律走 `IconPreviewView._set_progress`。
 
