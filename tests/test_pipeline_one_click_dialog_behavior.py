@@ -59,7 +59,9 @@ class _Env:
         monkeypatch.setattr(
             mod, "load_db_settings", lambda: SimpleNamespace(version="1.21.1")
         )
-        monkeypatch.setattr(pipeline_db_version_field, "summarize_database", lambda: None)
+        monkeypatch.setattr(
+            pipeline_db_version_field, "summarize_database", lambda: None
+        )
         monkeypatch.setattr(
             version_picker, "target_version_choices", lambda: ["1.21.1", "1.20.1"]
         )

@@ -132,10 +132,14 @@ def test_target_version_dropdown_suggests_creating_database_on_focus(monkeypatch
     monkeypatch.setattr(lm_view, "TaskSession", _Session)
     monkeypatch.setattr(lm_view, "summarize_database", lambda: None)
     monkeypatch.setattr(version_picker, "target_version_choices", lambda: ["1.21.1"])
-    monkeypatch.setattr(lm_view, "show_snack", lambda page, message, *a: shown.append(message))
+    monkeypatch.setattr(
+        lm_view, "show_snack", lambda page, message, *a: shown.append(message)
+    )
 
     view = lm_view.LMView(mock_page(), mock_filepicker())
-    view.db_version_field.on_focus(type("Event", (), {"control": view.db_version_field})())
+    view.db_version_field.on_focus(
+        type("Event", (), {"control": view.db_version_field})()
+    )
 
     assert shown and "先到「Mod 資料庫」頁" in shown[0]
 

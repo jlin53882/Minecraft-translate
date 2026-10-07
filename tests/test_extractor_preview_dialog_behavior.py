@@ -250,7 +250,9 @@ def test_confirmation_uses_the_output_path_shown_by_preview(env):
 
     _action(dialog, "確認執行").on_click(None)
 
-    assert env.opened_extractor[-1]["output_path"] == str(env.mods.parent / "resolved_out")
+    assert env.opened_extractor[-1]["output_path"] == str(
+        env.mods.parent / "resolved_out"
+    )
 
 
 def test_dialog_dismiss_when_idle_is_harmless(env):
