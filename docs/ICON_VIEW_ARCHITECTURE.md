@@ -106,8 +106,9 @@ translation_tool/core/
   - model index 快取（`_load_model_index_from_cache` / `_build_model_index` / `_save_model_index_to_cache`，以 `_get_jar_hash`＝mtime+size 判斷失效）
   - 用 key 轉 model name（`block.<modid>.<name>` → `block/<name>`）精準匹配，並以 `_follow_parent_chain` 追 parent model 取 texture
   - 找不到或 key namespace 與 modid 不一致 → 回 None，**不做 logo/icon.png 最終 fallback**（錯誤的 icon 比沒有更糟）
-- 索引檔位於 `.icon_cache/icon_index/`，以 JAR 檔名清單的 hash 命名；`icon_index.build_icon_index` / `save_icon_index` 目前沒有 app 內呼叫端，索引需事先建立
-- `_extract_jar_icon`（含 icon.png / logo / NeoForge `logoFile` 等 fallback）目前沒有呼叫端
+- 預建索引檔位於 `.icon_cache/icon_index/`。以 JAR 檔名、檔案大小與 `mtime_ns` 建立快速 manifest；任一 JAR 有新增、刪除或 metadata 變更時會 cache miss。這不是內容雜湊：若內容變更但檔案大小與時間戳都被保留，無法偵測。
+- 可執行 `python tools/build_icon_index.py "<mods 資料夾>"` 預建索引；流程為 `build_icon_index` → 比對建置前後 manifest → `save_icon_index`。若 JAR 在建置期間變更會拒絕儲存，完成後 Mod 資料庫載入會由 `load_icon_index` 使用索引；cache miss 則照常逐 JAR 解析。JAR 更新後重跑命令即可。
+- 舊有以 JAR 內通用圖檔或模組 metadata 為來源的 fallback 不屬於現行 model-only icon contract，且沒有 production caller，已移除。
 - `_migrate_old_icon_cache`：選擇模組資料夾時，把舊路徑 `<source_root>/_icon_preview/jar_icons/` 的 png 搬到 `.icon_cache/jar_icons/`
 
 ## 主要 UI 元件與狀態

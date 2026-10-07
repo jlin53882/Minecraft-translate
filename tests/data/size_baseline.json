@@ -16,7 +16,6 @@
     "app/views/cache_manager/cache_view_shard.py:CacheShardMixin._type_shard_card": 81,
     "app/views/cache_view.py:CacheView.__init__": 94,
     "app/views/icon_preview/icon_cache.py:_batch_extract_jar_icons": 92,
-    "app/views/icon_preview/icon_cache.py:_extract_jar_icon": 86,
     "app/views/merge/merge_widgets.py:MergeWidgetsMixin._init_merge_io_controls": 80,
     "app/views/moddb/scan_panel.py:ScanPanel._build_options_card": 99,
     "app/views/moddb/scan_panel.py:ScanPanel._build_run_card": 81,

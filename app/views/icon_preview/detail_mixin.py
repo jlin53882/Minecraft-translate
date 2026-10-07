@@ -10,7 +10,6 @@ from app.ui.design import C
 from app.ui.snack import show_snack
 from app.views.icon_preview.entries_cache import _save_entries_cache_l2
 from app.views.icon_preview.icon_cache import (
-    _ENABLE_JAR_ICON,
     _batch_extract_jar_icons,
     _get_icon_cache_dir,
     to_halfwidth,
@@ -475,19 +474,18 @@ class IconPreviewDetailMixin:
         icon_cache_root = _get_icon_cache_dir()
 
         # ===== Phase 4/4：批次提取模組圖示（每個 JAR 只開一次 ZIP）=====
-        if _ENABLE_JAR_ICON:
-            # 按 source_jar 分組
-            jar_to_entries: dict[str, list] = defaultdict(list)
-            for e in entries:
-                if getattr(e, "source_jar", None):
-                    jar_to_entries[e.source_jar].append(e)
+        # 按 source_jar 分組
+        jar_to_entries: dict[str, list] = defaultdict(list)
+        for e in entries:
+            if getattr(e, "source_jar", None):
+                jar_to_entries[e.source_jar].append(e)
 
-            def _on_icon_progress(done: int, total: int):
-                _show_progress_phase(self, "提取模組圖示", done, total)
+        def _on_icon_progress(done: int, total: int):
+            _show_progress_phase(self, "提取模組圖示", done, total)
 
-            _batch_extract_jar_icons(
-                jar_to_entries, icon_cache_root, self.source_root, _on_icon_progress
-            )
+        _batch_extract_jar_icons(
+            jar_to_entries, icon_cache_root, self.source_root, _on_icon_progress
+        )
 
         # ===== 寫入 L2 磁碟快取 =====
         _save_entries_cache_l2(self.source_root, entries)

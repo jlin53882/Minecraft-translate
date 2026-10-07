@@ -5,7 +5,6 @@
 """
 
 import json
-import re
 import shutil
 import threading
 import unicodedata
@@ -19,20 +18,13 @@ from translation_tool.utils.config_manager import load_config
 from translation_tool.utils.log_unit import log_info, log_warning
 from translation_tool.utils.ui_mirror import ContextThreadPoolExecutor
 from translation_tool.utils.zip_safety import (
-    MAX_ICON_BYTES,
     ArchiveBudgetError,
     ZipReadBudget,
     read_limited,
-    safe_join,
 )
 
-# ==================================================
-# 實驗性功能開關
-# ==================================================
-_ENABLE_JAR_ICON = True  # 已啟用（Model JSON 解析 + 批次 ZIP icon 提取）
-
-# 真正需要遊戲圖示的 key 前綴（只有這些才 fallback 到 logo.png）
-# 不在清單裡的 key（如 _comment、advancements.*、recipe_type、jei.* 等）不該有 icon
+# 只有這些內容 key 需要進行 model icon lookup。
+# 不在清單裡的 key（如 _comment、advancements.*、recipe_type、jei.* 等）不該有 icon。
 _CONTENT_ICON_PREFIXES = frozenset(
     [
         "item",
@@ -123,28 +115,6 @@ def _migrate_old_icon_cache(source_root: Path) -> bool:
         f"[IconPreview] 已將 {files_moved} 個 icon 檔案從舊路徑搬移至新路徑: {old_path} → {new_path}"
     )
     return True
-
-
-_INVALID_FN_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
-
-
-def _safe_filename_key(key: str) -> str:
-    """將 lang key 轉為可用於檔名的字串。
-
-    處理的問題：
-    - key 的最後一段可能含 Windows 不允許的字元（如 \\）
-    - key 可能含空白或 unicode 符號
-
-    處理方式：
-    - 移除 Windows 檔名禁用字元（\\ / : * ? " < > |）
-    - 將空白替換為底線
-    - 限制長度（最多 64 字）避免路徑過長
-    """
-    suffix = key.split(".")[-1]
-    safe = _INVALID_FN_CHARS.sub("_", suffix)
-    safe = safe.strip().replace(" ", "_")
-    # 避免路徑過長（Windows MAX_PATH 260）
-    return safe[:64] if len(safe) > 64 else safe
 
 
 # 程序內 model index 快取：(jar 路徑, modid) → (jar_hash, index)
@@ -393,142 +363,6 @@ def _try_extract_mod_icon_from_model(
                 return None  # namespace 不一致，直接回 None，不做任何 fallback
 
     # 當 model lookup 失敗時，不做任何 logo/icon.png fallback，直接回 None
-    return None
-
-
-def _icon_cache_file(
-    icon_cache_root: Path, modid: str, jar_path: Path, key: str
-) -> Path:
-    """icon 快取檔路徑。modid 來自 JAR / ZIP 內容，不可信：結果必須留在 icon_cache_root 內
-    （Windows 上 modid 內含反斜線時會被當成目錄分隔符，safe_join 會拒絕逃逸）。"""
-    return Path(
-        safe_join(
-            icon_cache_root, f"{modid}_{jar_path.stem}_{_safe_filename_key(key)}.png"
-        )
-    )
-
-
-def _store_icon(
-    zf: zipfile.ZipFile,
-    member: str,
-    icon_cache_root: Path,
-    modid: str,
-    jar_path: Path,
-    key: str,
-    budget: ZipReadBudget,
-) -> Path:
-    """讀出 JAR 內的圖示檔並寫入圖示快取，回傳快取檔路徑。"""
-    icon_data = read_limited(zf, member, MAX_ICON_BYTES, budget=budget)
-    icon_cache_root.mkdir(parents=True, exist_ok=True)
-    out_path = _icon_cache_file(icon_cache_root, modid, jar_path, key)
-    out_path.write_bytes(icon_data)
-    return out_path
-
-
-def _neoforge_logo_member(
-    zf: zipfile.ZipFile, names: set[str], budget: ZipReadBudget
-) -> str | None:
-    """從 NeoForge 的 neoforge.mods.toml 取得 logoFile 在 JAR 內的路徑（找不到回傳 None）。"""
-    neoforge_toml = "META-INF/neoforge.mods.toml"
-    if neoforge_toml not in names:
-        return None
-    try:
-        toml_content = read_limited(zf, neoforge_toml, budget=budget).decode("utf-8")
-    except UnicodeDecodeError:
-        return None
-    if not toml_content:
-        return None
-    logo_match = re.search(r'logoFile\s*=\s*"([^"]+\.png)"', toml_content)
-    if logo_match and logo_match.group(1) in names:
-        return logo_match.group(1)
-    return None
-
-
-def _extract_jar_icon(
-    jar_path: Path, modid: str, icon_cache_root: Path, key: str
-) -> Path | None:
-    """從 JAR 中提取 mod icon 並快取到磁碟（Phase 1: Model JSON 解析）。
-
-    支援（按優先順序）：
-        1. Model JSON 解析（layer0 > front > particle > 第一個）+ parent chain 遞迴
-        2. assets/<modid>/icon.png（Fabric 標準）
-        3. assets/<modid>/textures/logo.png（通用 mod logo）
-        4. NeoForge: neoforge.mods.toml → logoFile
-
-    參數：
-        jar_path: JAR 檔案路徑
-        modid: mod ID
-        icon_cache_root: icon 快取根目錄（.icon_cache/jar_icons/）
-        key: lang key（用於產生 unique icon 檔名）
-
-    回傳：
-        提取後的圖示路徑，或 None（找不到或提取失敗）
-    """
-    try:
-        with zipfile.ZipFile(jar_path, "r") as zf:
-            names = set(zf.namelist())
-            budget = ZipReadBudget.for_icon_scan(jar_path.name)
-
-            # ===== Phase 1: Model JSON 解析（最高優先）=====
-            result = _try_extract_mod_icon_from_model(
-                jar_path, modid, zf, names, key=key, budget=budget
-            )
-            if result:
-                tex_val, png_path = result
-                out_path = _store_icon(
-                    zf, png_path, icon_cache_root, modid, jar_path, key, budget
-                )
-                log_info(
-                    f"[IconPreview] Model JSON icon: {modid} → {png_path} (tex={tex_val})"
-                )
-                return out_path
-
-            # ===== Fallback: assets/<modid>/icon.png（Fabric 標準）=====
-            fabric_icon = f"assets/{modid}/icon.png"
-            if fabric_icon in names:
-                out_path = _store_icon(
-                    zf, fabric_icon, icon_cache_root, modid, jar_path, key, budget
-                )
-                log_info(f"[IconPreview] 提取 Fabric icon.png: {modid}")
-                return out_path
-
-            # ===== Fallback: assets/<modid>/textures/*.png（Fabric glob）=====
-            textures_pattern = re.compile(
-                r"^assets/" + re.escape(modid) + r"/textures/.+\.png$"
-            )
-            texture_files = sorted(n for n in names if textures_pattern.match(n))
-            if texture_files:
-                out_path = _store_icon(
-                    zf, texture_files[0], icon_cache_root, modid, jar_path, key, budget
-                )
-                log_info(
-                    f"[IconPreview] 提取 Fabric texture icon: {modid} → {texture_files[0]}"
-                )
-                return out_path
-
-            # ===== Fallback: assets/<modid>/textures/logo.png =====
-            logo_texture = f"assets/{modid}/textures/logo.png"
-            if logo_texture in names:
-                out_path = _store_icon(
-                    zf, logo_texture, icon_cache_root, modid, jar_path, key, budget
-                )
-                log_info(f"[IconPreview] 提取 logo.png: {modid}")
-                return out_path
-
-            # ===== Fallback: NeoForge logoFile =====
-            logo_path = _neoforge_logo_member(zf, names, budget)
-            if logo_path:
-                out_path = _store_icon(
-                    zf, logo_path, icon_cache_root, modid, jar_path, key, budget
-                )
-                log_info(f"[IconPreview] 提取 NeoForge logoFile: {modid} → {logo_path}")
-                return out_path
-
-    except Exception as ex:  # noqa: BLE001
-        log_warning(
-            f"[IconPreview] 提取 JAR icon 失敗: {jar_path.name} / {modid} → {ex!r}"
-        )
-
     return None
 
 

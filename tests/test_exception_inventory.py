@@ -100,7 +100,7 @@ UNEXPLAINED_NOQA_BASELINE = {
     "app/views/cache_view.py": 6,
     "app/views/extractor/extractor_dialog.py": 1,
     "app/views/icon_preview/detail_mixin.py": 2,
-    "app/views/icon_preview/icon_cache.py": 2,
+    "app/views/icon_preview/icon_cache.py": 1,
     "app/views/icon_preview_row.py": 1,
     "app/views/merge_view.py": 2,
     "app/views/qc_view.py": 1,

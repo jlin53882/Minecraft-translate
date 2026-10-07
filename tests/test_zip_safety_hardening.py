@@ -408,45 +408,6 @@ def icon_preview(monkeypatch):
     return mod
 
 
-def test_extract_jar_icon_skips_oversized_fallback_icon(tmp_path, icon_preview):
-    jar = _make_zip(tmp_path / "m.jar", {"assets/m/icon.png": _BIG_ICON})
-    cache_root = tmp_path / "cache"
-
-    result = icon_preview._extract_jar_icon(jar, "m", cache_root, "item.m.x")
-
-    assert result is None
-    assert not cache_root.exists() or not list(cache_root.rglob("*.png"))
-
-
-def test_extract_jar_icon_skips_oversized_logo_texture(tmp_path, icon_preview):
-    jar = _make_zip(tmp_path / "m.jar", {"assets/m/textures/logo.png": _BIG_ICON})
-    cache_root = tmp_path / "cache"
-
-    result = icon_preview._extract_jar_icon(jar, "m", cache_root, "item.m.x")
-
-    assert result is None
-    assert not cache_root.exists() or not list(cache_root.rglob("*.png"))
-
-
-def test_extract_jar_icon_oversized_model_falls_back_to_valid_icon(
-    tmp_path, icon_preview
-):
-    """model JSON 過大 → 略過該 model，不崩潰，仍走後續 fallback 取得合法 icon。"""
-    jar = _make_zip(
-        tmp_path / "m.jar",
-        {
-            "assets/m/models/item/a.json": _BIG_TEXT,
-            "assets/m/icon.png": b"\x89PNG-ok",
-        },
-    )
-    cache_root = tmp_path / "cache"
-
-    result = icon_preview._extract_jar_icon(jar, "m", cache_root, "item.m.a")
-
-    assert result is not None
-    assert result.read_bytes() == b"\x89PNG-ok"
-
-
 def test_iter_lang_entries_skips_oversized_lang_file(tmp_path):
     """icon_index：過大的 lang 檔被略過，不使整個索引建置中止。"""
     from app.icon_index import _iter_entries_from_lang_files
@@ -657,25 +618,6 @@ def test_lang_merge_rejects_symlink_escape(tmp_path, need_symlinks):
     assert not list(outside.rglob("*"))
 
 
-def test_icon_cache_file_stays_inside_cache_root(tmp_path):
-    from app.views.icon_preview import icon_cache as mod
-
-    root = tmp_path / "cache"
-    path = mod._icon_cache_file(root, "m", Path("x/mod-1.0.jar"), "item.m.a")
-
-    assert path.parent == root
-    assert path.name.startswith("m_mod-1.0_")
-
-
-def test_icon_cache_file_rejects_escaping_modid(tmp_path):
-    from app.views.icon_preview import icon_cache as mod
-
-    root = tmp_path / "cache"
-
-    with pytest.raises(UnsafePathError):
-        mod._icon_cache_file(root, "../../evil", Path("x/mod.jar"), "item.m.a")
-
-
 # ---------------------------------------------------------------------------
 # 正式 extraction pipeline：預掃描 + 提取共用同一個 JAR 的累計預算
 # ---------------------------------------------------------------------------
@@ -855,119 +797,6 @@ def test_scan_results_compares_equal_to_plain_dict(tmp_path):
     results = scan_jars(tmp_path, [r"assets/m/lang/.*\.json$"])
 
     assert results == {jar: {"assets/m/lang/t0.json": "x" * 1000}}
-
-
-# ---------------------------------------------------------------------------
-# _extract_jar_icon：model 與 fallback 讀取共用同一份 icon scan 預算
-# ---------------------------------------------------------------------------
-
-
-def _icon_budget(monkeypatch, max_members: int):
-    monkeypatch.setattr(
-        ZipReadBudget,
-        "for_icon_scan",
-        classmethod(lambda cls, label="": cls(10**9, max_members, label)),
-    )
-
-
-_MODEL_MISSING_TEXTURE = (
-    b'{"textures": {"layer0": "m:item/zzz"}}'  # 貼圖不存在 → 走 fallback
-)
-
-
-@pytest.mark.parametrize(("max_members", "expect_icon"), [(1, False), (2, True)])
-def test_extract_jar_icon_fabric_fallback_shares_budget(
-    tmp_path, icon_preview, monkeypatch, max_members, expect_icon
-):
-    """model 讀 1 次；Fabric icon fallback 是第 2 次讀取，預算不足時不可寫入快取。"""
-    _icon_budget(monkeypatch, max_members)
-    jar = _make_zip(
-        tmp_path / "m.jar",
-        {
-            "assets/m/models/item/a.json": _MODEL_MISSING_TEXTURE,
-            "assets/m/icon.png": b"\x89PNG-fabric",
-        },
-    )
-    cache_root = tmp_path / "cache"
-
-    result = icon_preview._extract_jar_icon(jar, "m", cache_root, "item.m.a")
-
-    if expect_icon:
-        assert result is not None
-        assert result.read_bytes() == b"\x89PNG-fabric"
-    else:
-        assert result is None
-        assert not cache_root.exists() or not list(cache_root.rglob("*"))
-
-
-@pytest.mark.parametrize(("max_members", "expect_icon"), [(2, False), (3, True)])
-def test_extract_jar_icon_neoforge_toml_fallback_shares_budget(
-    tmp_path, icon_preview, monkeypatch, max_members, expect_icon
-):
-    """model(1) + neoforge.mods.toml(2) + logoFile PNG(3)：兩個 fallback 讀取都計入預算。"""
-    _icon_budget(monkeypatch, max_members)
-    jar = _make_zip(
-        tmp_path / "m.jar",
-        {
-            "assets/m/models/item/a.json": _MODEL_MISSING_TEXTURE,
-            "META-INF/neoforge.mods.toml": b'logoFile = "logo.png"\n',
-            "logo.png": b"\x89PNG-neo",
-        },
-    )
-    cache_root = tmp_path / "cache"
-
-    result = icon_preview._extract_jar_icon(jar, "m", cache_root, "item.m.a")
-
-    if expect_icon:
-        assert result is not None
-        assert result.read_bytes() == b"\x89PNG-neo"
-    else:
-        assert result is None
-        assert not cache_root.exists() or not list(cache_root.rglob("*"))
-
-
-def test_extract_jar_icon_toml_read_itself_is_charged(
-    tmp_path, icon_preview, monkeypatch
-):
-    """預算只夠 model 讀取時，TOML 讀取本身就被拒絕（不會繼續讀 logoFile）。"""
-    _icon_budget(monkeypatch, 1)
-    jar = _make_zip(
-        tmp_path / "m.jar",
-        {
-            "assets/m/models/item/a.json": _MODEL_MISSING_TEXTURE,
-            "META-INF/neoforge.mods.toml": b'logoFile = "logo.png"\n',
-            "logo.png": b"\x89PNG-neo",
-        },
-    )
-
-    result = icon_preview._extract_jar_icon(jar, "m", tmp_path / "cache", "item.m.a")
-
-    assert result is None
-
-
-@pytest.mark.parametrize(("max_members", "expect_icon"), [(1, False), (2, True)])
-def test_extract_jar_icon_model_resolved_png_read_shares_budget(
-    tmp_path, icon_preview, monkeypatch, max_members, expect_icon
-):
-    """model 解析出貼圖後讀取 PNG 是第 2 次讀取，同樣計入同一份預算。"""
-    _icon_budget(monkeypatch, max_members)
-    jar = _make_zip(
-        tmp_path / "m.jar",
-        {
-            "assets/m/models/item/a.json": b'{"textures": {"layer0": "m:item/a"}}',
-            "assets/m/textures/item/a.png": b"\x89PNG-model",
-        },
-    )
-    cache_root = tmp_path / "cache"
-
-    result = icon_preview._extract_jar_icon(jar, "m", cache_root, "item.m.a")
-
-    if expect_icon:
-        assert result is not None
-        assert result.read_bytes() == b"\x89PNG-model"
-    else:
-        assert result is None
-        assert not cache_root.exists() or not list(cache_root.rglob("*"))
 
 
 # ---------------------------------------------------------------------------
