@@ -36,6 +36,7 @@ from translation_tool.translation_db.run_progress import (
     estimate_batches,
     format_duration,
     format_live,
+    tick_live,
 )
 from translation_tool.translation_db.schema import KIND_LANG
 from translation_tool.utils.cache_manager import add_to_cache, save_translation_cache
@@ -56,6 +57,7 @@ __all__ = [
     "format_live",
     "plan_batches",
     "run_moddb_translate_service",
+    "tick_live",
 ]
 
 logger = logging.getLogger(__name__)
@@ -282,6 +284,8 @@ def _translate_rows(
     items = build_items(rows)
     tracker = RunProgress(total=len(items), planned_batches=plan_batches(items))
     _log(session, tracker.start_line())
+    # 第一批結束前也先給畫面即時資料（已用時間從開始就會跳動）
+    session.set_summary({**report.as_dict(), "live": tracker.live()})
     with cancel_scope(cancelled):
         result = run_translator_skeleton(
             items,

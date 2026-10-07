@@ -80,6 +80,8 @@ class RunProgress:
             "elapsed_sec": self.elapsed(now),
             "eta_sec": eta,
             "finish_ts": None if eta is None else now + eta,
+            "started_ts": self.started,  # 畫面據此每次輪詢重算「已用時間」
+            "updated_ts": now,  # eta_sec 是這個時間點的估計，之後每秒遞減
         }
 
     def start_line(self) -> str:
@@ -91,6 +93,23 @@ class RunProgress:
 
     def line(self, now: float | None = None) -> str:
         return format_live(self.live(now))
+
+
+def tick_live(live: dict, now: float | None = None) -> dict:
+    """依現在時間更新即時資料的「已用時間」與「預估剩餘」（每批結束才有新資料，畫面卻要每秒變化）。
+
+    已用時間＝現在 − 開始時間；預估剩餘＝上次估計值 − 上次更新後經過的時間（不低於 0）。
+    預計完成時刻不變。資料沒有時間戳（舊格式）時原樣回傳。
+    """
+    started, updated = live.get("started_ts"), live.get("updated_ts")
+    if started is None or updated is None:
+        return live
+    now = now if now is not None else time.time()
+    out = dict(live)
+    out["elapsed_sec"] = max(0.0, now - started)
+    if live.get("eta_sec") is not None:
+        out["eta_sec"] = max(0.0, live["eta_sec"] - max(0.0, now - updated))
+    return out
 
 
 def format_live(live: dict) -> str:
@@ -117,4 +136,5 @@ __all__ = [
     "estimate_batches",
     "format_duration",
     "format_live",
+    "tick_live",
 ]

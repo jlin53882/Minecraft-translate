@@ -1340,3 +1340,52 @@ def test_list_entries_filters_by_kind_and_kinds_come_from_db(db_path):
 
     assert kind_label("future_kind") == "future_kind"  # 沒登錄名稱時顯示代碼
     db.close()
+
+
+def test_tick_live_updates_elapsed_and_eta_between_batches():
+    """每批結束才有新資料，但畫面要每次輪詢都更新：已用時間往上、預估剩餘往下，預計完成時刻不變。"""
+    from translation_tool.translation_db.run_progress import (
+        RunProgress,
+        format_live,
+        tick_live,
+    )
+
+    progress = RunProgress(total=100, planned_batches=4, started=1000.0)
+    progress.update(25)
+    live = progress.live(now=1050.0)  # 已用 50 秒、已處理 25% → 預估剩餘 150 秒
+    assert live["elapsed_sec"] == 50.0 and live["eta_sec"] == 150.0
+
+    later = tick_live(live, now=1062.0)  # 12 秒後（還沒完成下一批）
+    assert later["elapsed_sec"] == 62.0 and later["eta_sec"] == 138.0
+    assert later["finish_ts"] == live["finish_ts"]
+    assert "已用 1:02" in format_live(later) and "預估剩餘 2:18" in format_live(later)
+    # 超過預估後不會變負數
+    assert tick_live(live, now=1500.0)["eta_sec"] == 0.0
+    # 還沒有任何一批完成：沒有預估剩餘，但已用時間照樣跳動
+    start = RunProgress(total=100, planned_batches=4, started=1000.0).live(now=1000.0)
+    ticked = tick_live(start, now=1007.0)
+    assert ticked["elapsed_sec"] == 7.0 and ticked["eta_sec"] is None
+    # 舊格式（沒有時間戳）原樣回傳
+    old = {k: v for k, v in live.items() if k not in ("started_ts", "updated_ts")}
+    assert tick_live(old, now=2000.0) == old
+
+
+def test_service_publishes_live_progress_before_the_first_batch(db_path, monkeypatch):
+    """第一批結束前就有即時資料（已用時間從開始就會跳動）。"""
+    seed(db_path)
+    seen = []
+
+    def spy(batch, total=None, dry_run=False):
+        # 此時第一批尚未結束，summary 應該已含 live
+        seen.append(dict(session_ref[0].snapshot().get("summary") or {}))
+        return [{**it, "text": "譯:" + it["source_text"]} for it in batch], "DONE"
+
+    session_ref: list = []
+    session = TaskSession()
+    session_ref.append(session)
+    monkeypatch.setattr(moddb_translate_service, "translate_batch_smart", spy)
+    run_moddb_translate_service(
+        TranslateOptions(version="1.21.1", mod_ids=("foo",)), session
+    )
+    live = seen[0].get("live")
+    assert live and live["batch_done"] == 0 and live["started_ts"] <= live["updated_ts"]

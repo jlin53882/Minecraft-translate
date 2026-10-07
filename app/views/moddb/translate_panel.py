@@ -19,6 +19,7 @@ from app.services_impl.moddb_translate_service import (
     format_duration,
     format_live,
     run_moddb_translate_service,
+    tick_live,
 )
 from app.tasks.task_session import TaskSession, tag_session
 from app.ui import kit
@@ -336,7 +337,9 @@ class TranslatePanel(ft.Column):
         status = (snap.get("status") or "").upper()
         live = (snap.get("summary") or {}).get("live")
         if live and status not in ("DONE", "ERROR"):
-            self.live_text.value = format_live(live)
+            self.live_text.value = format_live(
+                tick_live(live)
+            )  # 已用時間每次輪詢都更新
         if status in ("DONE", "ERROR"):
             summary = snap.get("summary") or {}
             if summary.get("batches"):
