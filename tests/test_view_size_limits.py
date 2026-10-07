@@ -56,12 +56,25 @@ def _rel(path: Path) -> str:
     return path.relative_to(ROOT).as_posix()
 
 
-def _functions():
-    for path in sorted(APP.rglob("*.py")):
+def _functions(root: Path = APP):
+    """逐一產生 ``(路徑, 節點, 限定名稱)``；限定名稱如 ``Class.method``、``outer.inner``。
+
+    同檔案不同類別的同名方法、或不同外層函式裡的同名內層函式，才不會在快照裡被合成一筆。
+    """
+    for path in sorted(root.rglob("*.py")):
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-        for node in ast.walk(tree):
-            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                yield path, node
+        stack: list[tuple[ast.AST, str]] = [(tree, "")]
+        while stack:
+            node, prefix = stack.pop()
+            for child in ast.iter_child_nodes(node):
+                if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    qual = f"{prefix}{child.name}"
+                    yield path, child, qual
+                    stack.append((child, f"{qual}."))
+                elif isinstance(child, ast.ClassDef):
+                    stack.append((child, f"{prefix}{child.name}."))
+                else:
+                    stack.append((child, prefix))
 
 
 def _complexity(func: ast.AST) -> int:
@@ -87,15 +100,15 @@ def _nesting(node: ast.AST, depth: int = 0) -> int:
 def _measure() -> tuple[dict[str, int], dict[str, int], dict[str, int], list[str]]:
     """回傳 (函式行數, View 檔案行數, 硬限制違規, 複雜度警告)。
 
-    函式行數的鍵為 ``路徑:名稱``（同名取最長者）；只記錄審查區以上的項目。
+    函式行數的鍵為 ``路徑:限定名稱``（如 ``a.py:Class.method``）；只記錄審查區以上的項目。
     """
     funcs: dict[str, int] = {}
     files: dict[str, int] = {}
     hard: dict[str, int] = {}
     warns: list[str] = []
-    for path, node in _functions():
+    for path, node, qual in _functions():
         length = node.end_lineno - node.lineno + 1
-        key = f"{_rel(path)}:{node.name}"
+        key = f"{_rel(path)}:{qual}"
         if length >= HARD_FUNCTION_LINES:
             hard[f"{key}:{node.lineno}"] = length
         if length >= SOFT_FUNCTION_LINES:
@@ -165,3 +178,26 @@ def test_review_zone_does_not_grow():
             + "\n".join(warns[:20]),
             stacklevel=1,
         )
+
+
+def test_function_identity_distinguishes_same_named_methods(tmp_path):
+    """同檔案不同類別的同名方法、不同外層的同名內層函式，快照 key 必須各自獨立。"""
+    (tmp_path / "m.py").write_text(
+        "class A:\n    def refresh(self): ...\n\n"
+        "class B:\n    def refresh(self): ...\n    class C:\n        def refresh(self): ...\n\n"
+        "def outer1():\n    def inner(): ...\n\n"
+        "def outer2():\n    def inner(): ...\n\n"
+        "async def top(): ...\n",
+        encoding="utf-8",
+    )
+    names = sorted(qual for _p, _n, qual in _functions(tmp_path))
+    assert names == [
+        "A.refresh",
+        "B.C.refresh",
+        "B.refresh",
+        "outer1",
+        "outer1.inner",
+        "outer2",
+        "outer2.inner",
+        "top",
+    ]
