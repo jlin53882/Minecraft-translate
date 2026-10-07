@@ -32,7 +32,7 @@ app/views/cache_manager/
 
 `CacheView` 以多重繼承組合上述 mixin；mixin 方法內容由原本單一檔案原樣搬出（#114），所有方法仍以 `CacheView._xxx` 呼叫。**測試要 monkeypatch 服務函式時，請 patch 方法實際所在的模組**（例如 `cache_view_query` 的 `cache_search_service`、`cache_view_shard_detail` 的 `cache_update_dst_service`）。
 
-**注意**：`CacheView` 與其 mixin 實際只使用 `cache_actions`、`cache_history_store`、`cache_overview_panel`（連帶 `cache_log_panel`）、`cache_state`。`cache_controller.py`（`CacheController`）、`cache_presenter.py`（`CachePresenter`）、`cache_types.py`、`cache_shared_widgets.py` 仍存在（`cache_manager/__init__.py` 匯出前兩者、有測試涵蓋），但 `CacheView` 目前不使用它們，是尚未接線的 MVC 雛形。`app/views/cache_query_panel.py` 與 `app/views/cache_shard_panel.py` 同樣不被 `CacheView` 使用，只剩測試引用。舊的 `app.views.cache_controller` 等相容 alias 已移除（#121）。
+**注意**：`CacheView` 與其 mixin 只使用 `cache_actions`、`cache_history_store`、`cache_overview_panel`（連帶 `cache_log_panel`）、`cache_state`。曾經存在、但沒有接線的 Controller／Presenter（MVC 雛形）與舊的獨立查詢／分片面板已移除：一個功能只保留一套架構，需要 Controller／Presenter 時再另開重構正式導入。
 
 ## 呼叫鏈（實際）
 
@@ -109,6 +109,6 @@ CacheView（主入口）
 
 ## 維護注意
 
-1. 大量事件回呼觸發背景操作；避免舊任務覆蓋新狀態：總覽動作靠 `run_cache_action` 的 busy 鎖，查詢靠 `_query_seq`（`CacheController` 的 action 序號機制尚未接線）。
+1. 大量事件回呼觸發背景操作；避免舊任務覆蓋新狀態：總覽動作靠 `run_cache_action` 的 busy 鎖，查詢靠 `_query_seq`。
 2. 新增總覽動作：加 service → 加 `_on_*` handler → `_run_action` 包裝 → `_refresh_disabled_state`。
 3. 歷史事件 append 後要 `_render_shard_history` / `_render_query_history` 重繪。

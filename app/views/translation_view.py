@@ -31,7 +31,6 @@ from app.views.translation.translation_panels import (
     build_md_tab,
     build_path_row,
 )
-from app.views.translation.translation_state import TranslationRunState
 from translation_tool.utils.log_unit import log_error, log_warning
 
 # 可選匯入：避免某個 service 暫時不可用時，整頁無法開啟
@@ -97,7 +96,6 @@ class TranslationView(ft.Column):
         """任務翻譯頁的狀態與分頁。"""
         self._page = page
         self.file_picker = file_picker
-        self._state = TranslationRunState()
         self._picker_target_field: ft.TextField | None = None
         self._step_cards: list = []  # 面板建立時登記，reset 後用來刷新步驟卡外觀
 

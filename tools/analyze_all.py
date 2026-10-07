@@ -58,7 +58,6 @@ utils_modules = [
     "cache_search_facade",
     "cache_shards",
     "cache_store",
-    "config_access",
     "config_manager",
     "exceptions",
     "log_unit",

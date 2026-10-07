@@ -66,13 +66,6 @@ def test_cache_overview_import():
     assert cache_overview is not None
 
 
-def test_config_access_import():
-    """Verify config_access can be imported."""
-    from translation_tool.utils import config_access
-
-    assert config_access is not None
-
-
 # ==================== core modules (additional) ====================
 
 

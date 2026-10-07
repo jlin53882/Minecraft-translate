@@ -2,7 +2,7 @@
 
 from types import SimpleNamespace
 
-from app.views.pipeline.pipeline_one_click_dialog import _one_click_dispose_dialogs
+from app.ui.dialogs import dispose_dialogs, present_dialog
 
 
 class _Page:
@@ -20,7 +20,7 @@ def test_dispose_flushes_close_then_flushes_removal():
     page = _Page(dlg)
     ctx = SimpleNamespace(page=page, dialogs=[dlg])
 
-    _one_click_dispose_dialogs(ctx)
+    dispose_dialogs(ctx)
 
     assert page.events == [("update", False, True), ("update", False, False)]
     assert page.overlay == [] and ctx.dialogs == []
@@ -31,7 +31,7 @@ def test_dispose_without_dialogs_does_not_extra_update():
     page.overlay.clear()
     ctx = SimpleNamespace(page=page, dialogs=[])
 
-    _one_click_dispose_dialogs(ctx)
+    dispose_dialogs(ctx)
 
     assert len(page.events) == 1
 
@@ -56,30 +56,22 @@ class _DialogApiPage(_Page):
 
 
 def test_present_uses_show_dialog_when_page_supports_it():
-    from app.views.pipeline.pipeline_one_click_dialog import (
-        _one_click_present_dialog,
-    )
-
     dlg = SimpleNamespace(open=False)
     page = _DialogApiPage()
     ctx = SimpleNamespace(page=page, dialogs=[], uses_dialog_api=True)
 
-    _one_click_present_dialog(ctx, dlg)
+    present_dialog(ctx, dlg)
 
     assert page.shown == [dlg] and page.overlay == [] and ctx.dialogs == [dlg]
 
 
 def test_present_falls_back_to_overlay_without_dialog_api():
-    from app.views.pipeline.pipeline_one_click_dialog import (
-        _one_click_present_dialog,
-    )
-
     dlg = SimpleNamespace(open=False)
     page = _Page(dlg)
     page.overlay.clear()
     ctx = SimpleNamespace(page=page, dialogs=[], uses_dialog_api=False)
 
-    _one_click_present_dialog(ctx, dlg)
+    present_dialog(ctx, dlg)
 
     assert page.overlay == [dlg] and dlg.open is True
 
@@ -89,7 +81,7 @@ def test_dispose_pops_dialog_and_flushes_again_with_dialog_api():
     page = _DialogApiPage()
     ctx = SimpleNamespace(page=page, dialogs=[dlg], uses_dialog_api=True)
 
-    _one_click_dispose_dialogs(ctx)
+    dispose_dialogs(ctx)
 
     assert dlg.open is False and page.popped == 1 and ctx.dialogs == []
     assert page.events == ["update", "update"]  # open=False 先送出、pop 後再送一次

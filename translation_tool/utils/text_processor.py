@@ -13,11 +13,8 @@ from typing import Any
 import orjson
 from opencc import OpenCC
 
-from .config_access import resolve_runtime_path
+from .config_manager import resolve_project_path
 from .log_unit import log_error, log_info, log_warning
-
-# legacy seam：保留給既有 monkeypatch/tests，用新 helper 實作
-resolve_project_path = resolve_runtime_path
 
 
 def _resolve_rules_path(path: str):
@@ -412,7 +409,7 @@ def save_replace_rules(path: str, rules: list[dict[str, str]]):
 def load_custom_translations(folder_path: str, filename="table.tsv") -> dict[str, str]:
     """從指定資料夾載入自訂的翻譯表 (TSV 格式)。"""
     custom_map = {}
-    file_path = resolve_runtime_path(folder_path) / filename
+    file_path = resolve_project_path(folder_path) / filename
     if not file_path.exists():
         log_info(f"自訂翻譯檔 {file_path} 不存在，略過。")
         return custom_map

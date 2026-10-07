@@ -462,55 +462,6 @@ class CacheView(
         except Exception as ex:  # noqa: BLE001
             self._append_log(f"[WARN] UI refresh 異常: {ex}")
 
-    # 與舊測試相容：run_id guard 的狀態更新入口
-    def set_ui_state(
-        self, busy: bool, reason: str, trace: str, run_id: int | None = None
-    ):
-        """設定 UI 狀態。"""
-        current_action_id = getattr(
-            getattr(self, "_controller", None), "current_action_id", None
-        )
-        if (
-            run_id is not None
-            and current_action_id is not None
-            and run_id < current_action_id
-        ):
-            self._append_log(
-                f"[WARN] 忽略過期狀態更新 run_id={run_id} < current_action_id={current_action_id}"
-            )
-            return
-
-        self.ui_busy = bool(busy)
-        self.busy_reason = reason or ""
-
-        if hasattr(self, "_ui_state") and self._ui_state is not None:
-            self._ui_state.busy = self.ui_busy
-            self._ui_state.reason = self.busy_reason
-            self._ui_state.trace = trace
-
-        if hasattr(self, "overview_trace"):
-            self.overview_trace.value = trace
-
-        if hasattr(self, "overview_status"):
-            if (
-                hasattr(self, "_presenter")
-                and hasattr(self._presenter, "status_text")
-                and hasattr(self, "_ui_state")
-            ):
-                self.overview_status.value = self._presenter.status_text(self._ui_state)
-            else:
-                self.overview_status.value = (
-                    "狀態：忙碌" if self.ui_busy else "狀態：就緒"
-                )
-
-        self._refresh_disabled_state()
-        self.commit_ui(
-            [
-                getattr(self, "overview_status", None),
-                getattr(self, "overview_trace", None),
-            ]
-        )
-
     def _append_log(self, text: str):
         """新增日誌訊息並根據等級記錄"""
         if text.startswith("[ERROR"):
