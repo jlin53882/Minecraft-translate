@@ -25,11 +25,11 @@ from app.ui.mc_text import mc_text_spans
 from app.ui.snack import show_snack
 from app.views.moddb.char_inspector import CharInspector, scrolling_list
 from app.views.moddb.formatting import (
-    KIND_LABELS,
     STATE_LABELS,
     STATE_TONES,
     format_count,
     impact_text,
+    kind_label,
     shorten,
     source_label,
     source_tone,
@@ -47,6 +47,7 @@ from translation_tool.utils.log_unit import (
 
 PAGE_SIZE = 50
 ALL_MODS = "全部模組"
+ALL_KINDS = "全部類型"
 ACTOR = "使用者"
 NO_SOURCE_TEXT = "（原文未知：之後掃描同版本的 jar，會自動補上原文）"
 
@@ -62,6 +63,7 @@ class EntriesPanel(ft.Column):
         self._on_changed = on_changed
         self.version: str | None = None
         self.mod_id: str | None = None
+        self.kind: str | None = None
         self.state = "all"
         self.query = ""
         self.rows: list[EntryRow] = []
@@ -96,6 +98,9 @@ class EntriesPanel(ft.Column):
         self.mod_dd = kit.dropdown(
             label="模組", dense=True, width=220, on_select=self._on_mod
         )
+        self.kind_dd = kit.dropdown(
+            label="類型", dense=True, width=160, on_select=self._on_kind
+        )
         self.source_filter = SourceFilter(self._on_source)
         self.search = kit.text_field(
             "搜尋", hint="原文、譯文或鍵值", expand=True, on_submit=self._on_search
@@ -109,6 +114,7 @@ class EntriesPanel(ft.Column):
                 [
                     self.version_dd,
                     self.mod_dd,
+                    self.kind_dd,
                     self.source_filter.dropdown,
                     self.search,
                     self.state_seg,
@@ -313,6 +319,19 @@ class EntriesPanel(ft.Column):
         if self.mod_id not in mods:
             self.mod_id = None
         self.mod_dd.value = self.mod_id or ALL_MODS
+        self._load_kinds()
+
+    def _load_kinds(self) -> None:
+        """類型選項取自資料庫實際出現的類型（日後新增類型會自動出現）。"""
+        db = self.db()
+        kinds = db.kinds(self.version) if (db and self.version) else []
+        kit.set_dropdown_options(
+            self.kind_dd,
+            [(ALL_KINDS, ALL_KINDS), *((k, kind_label(k)) for k in kinds)],
+        )
+        if self.kind not in kinds:
+            self.kind = None
+        self.kind_dd.value = self.kind or ALL_KINDS
 
     def _load_list(self, *, page: int = 1, keep_selection: bool = True) -> None:
         db = self.db()
@@ -322,6 +341,7 @@ class EntriesPanel(ft.Column):
             self.rows, self.total = db.list_entries(
                 self.version,
                 mod_id=self.mod_id,
+                kind=self.kind,
                 state=self.state,
                 query=self.query,
                 source=self.source_filter.code,
@@ -451,7 +471,7 @@ class EntriesPanel(ft.Column):
                 [
                     kit.section_label("模組"),
                     ft.Text(
-                        f"{entry.mod_id}（{KIND_LABELS.get(entry.kind, entry.kind)}）",
+                        f"{entry.mod_id}（{kind_label(entry.kind)}）",
                         size=12.5,
                         color=C.TEXT,
                     ),
@@ -558,6 +578,12 @@ class EntriesPanel(ft.Column):
     def _on_mod(self, e) -> None:
         value = e.control.value
         self.mod_id = None if value in (None, "", ALL_MODS) else value
+        self._load_list()
+        self._safe_update()
+
+    def _on_kind(self, e) -> None:
+        value = e.control.value
+        self.kind = None if value in (None, "", ALL_KINDS) else value
         self._load_list()
         self._safe_update()
 

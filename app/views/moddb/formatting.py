@@ -31,6 +31,11 @@ STATE_TONES = {
 KIND_LABELS = {"lang": "語言檔", "patchouli": "Patchouli 手冊"}
 
 
+def kind_label(kind: str) -> str:
+    """條目類型的顯示名稱；日後資料庫新增的類型沒登錄名稱時直接顯示代碼。"""
+    return KIND_LABELS.get(kind, kind)
+
+
 def source_label(source: int | None) -> str:
     return SOURCE_NAMES.get(source, "—") if source is not None else "—"
 

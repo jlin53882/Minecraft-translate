@@ -22,7 +22,7 @@ from translation_tool.translation_db import (
     TranslationDB,
 )
 from translation_tool.translation_db.models import WriteBackItem
-from translation_tool.translation_db.schema import SRC_AI, SRC_JAR_TW
+from translation_tool.translation_db.schema import KIND_PATCHOULI, SRC_AI, SRC_JAR_TW
 
 
 @pytest.fixture
@@ -1305,4 +1305,25 @@ def test_reuse_picks_highest_priority_source_not_min_code(db_path):
         "WHERE e.mc_version='1.21.1'"
     )
     assert row == [(SRC_MANUAL,)]
+    db.close()
+
+
+def test_list_entries_filters_by_kind_and_kinds_come_from_db(db_path):
+    """類型篩選：選項取自資料庫實際出現的類型，新增類型不必改程式。"""
+    db = TranslationDB(db_path)
+    db.ingest(
+        "1.21.1",
+        [
+            ScanItem(KIND_LANG, "m", "a", "A"),
+            ScanItem(KIND_PATCHOULI, "m", "book.page", "Page"),
+            ScanItem("future_kind", "m", "x", "X"),
+        ],
+    )
+    assert db.kinds("1.21.1") == ["future_kind", "lang", "patchouli"]
+    assert db.list_entries("1.21.1", kind=KIND_PATCHOULI)[1] == 1
+    assert db.list_entries("1.21.1", kind="future_kind")[1] == 1
+    assert db.list_entries("1.21.1")[1] == 3
+    from app.views.moddb.formatting import kind_label
+
+    assert kind_label("future_kind") == "future_kind"  # 沒登錄名稱時顯示代碼
     db.close()

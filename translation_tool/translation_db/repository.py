@@ -384,6 +384,19 @@ class TranslationDB:
         """某版本出現過的模組（有快取，見 ``_cached``）。"""
         return self._cached(f"mods:{version}", lambda: self._mods_uncached(version))
 
+    def kinds(self, version: str) -> list[str]:
+        """某版本資料庫裡實際出現過的條目類型（日後新增類型不必改這裡；有快取）。"""
+        return self._cached(f"kinds:{version}", lambda: self._kinds_uncached(version))
+
+    def _kinds_uncached(self, version: str) -> list[str]:
+        return [
+            r[0]
+            for r in self._q(
+                "SELECT DISTINCT kind FROM entry WHERE mc_version=? ORDER BY kind",
+                (version,),
+            )
+        ]
+
     def _mods_uncached(self, version: str) -> list[str]:
         return [
             r[0]
