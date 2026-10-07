@@ -4,7 +4,11 @@ from __future__ import annotations
 
 import pytest
 
-from app.services_impl import moddb_retranslate_service, moddb_service
+from app.services_impl import (
+    moddb_retranslate_service,
+    moddb_service,
+    moddb_translate_service,
+)
 from app.services_impl.moddb_translate_service import TranslateOptions
 from app.tasks.task_session import TaskSession
 from app.views.moddb import translate_panel
@@ -17,7 +21,9 @@ from translation_tool.translation_db import (
 )
 from translation_tool.translation_db.schema import (
     KIND_LANG,
+    KIND_PATCHOULI,
     SRC_AI,
+    SRC_CUSTOM,
     SRC_JAR_TW,
     SRC_MANUAL,
 )
@@ -34,12 +40,14 @@ def db_path(tmp_path, monkeypatch):
     return path
 
 
-def _ingest(db, version, mod_id, key, source, translation, *, en="Minecraft"):
+def _ingest(
+    db, version, mod_id, key, source, translation, *, en="Minecraft", kind=KIND_LANG
+):
     db.ingest(
         version,
         [
             ScanItem(
-                KIND_LANG,
+                kind,
                 mod_id,
                 key,
                 en,
@@ -50,8 +58,16 @@ def _ingest(db, version, mod_id, key, source, translation, *, en="Minecraft"):
     )
 
 
-def _ai_entry(db, *, version="1.21.1", mod_id="foo", key="item.name", en="Minecraft"):
-    _ingest(db, version, mod_id, key, SRC_AI, en, en=en)
+def _ai_entry(
+    db,
+    *,
+    version="1.21.1",
+    mod_id="foo",
+    key="item.name",
+    en="Minecraft",
+    kind=KIND_LANG,
+):
+    _ingest(db, version, mod_id, key, SRC_AI, en, en=en, kind=kind)
     return next(
         row
         for row in db.list_entries(version)[0]
@@ -70,6 +86,14 @@ def _options(**overrides):
     return TranslateOptions(**values)
 
 
+def _set_repair_batch_size(monkeypatch, size):
+    batch_size = lambda _cache_type, _sizes: size
+    monkeypatch.setattr(
+        moddb_retranslate_service, "_get_default_batch_size", batch_size
+    )
+    monkeypatch.setattr(moddb_translate_service, "_get_default_batch_size", batch_size)
+
+
 def test_preview_uses_effective_ai_source_scope_and_limit(db_path):
     db = TranslationDB(db_path)
     _ai_entry(db, mod_id="foo", key="same")
@@ -79,6 +103,7 @@ def test_preview_uses_effective_ai_source_scope_and_limit(db_path):
     manual = _ai_entry(db, mod_id="foo", key="manual")
     db.save_manual(manual.id, "Minecraft", propagate=False)
     _ingest(db, "1.21.1", "foo", "jar", SRC_JAR_TW, "Minecraft")
+    _ingest(db, "1.21.1", "foo", "custom", SRC_CUSTOM, "Minecraft")
     _ai_entry(db, version="1.20.1", mod_id="foo", key="old-version")
 
     preview = moddb_retranslate_service.preview_same_source_ai_retranslation(
@@ -88,8 +113,151 @@ def test_preview_uses_effective_ai_source_scope_and_limit(db_path):
     assert preview.total_candidates == 1
     assert preview.selected_count == 1
     assert preview.entries[0].key == "same"
+    assert preview.source == SRC_AI
     assert db.count_same_as_source_ai("1.21.1") == 2
     db.close()
+
+
+def _seed_fragmented_candidates(db):
+    scans = []
+    for mod_id, patch_count in (("mod_a", 2), ("mod_b", 3), ("mod_c", 1)):
+        scans.extend(
+            ScanItem(
+                KIND_LANG,
+                mod_id,
+                f"lang.{index:02d}",
+                "Minecraft",
+                "Minecraft",
+                source=SRC_AI,
+            )
+            for index in range(20)
+        )
+        scans.extend(
+            ScanItem(
+                KIND_PATCHOULI,
+                mod_id,
+                f"patchouli.{index:02d}",
+                "Minecraft",
+                "Minecraft",
+                source=SRC_AI,
+            )
+            for index in range(patch_count)
+        )
+    db.ingest("1.21.1", scans)
+
+
+def test_retranslation_items_stable_group_by_runtime_cache_type():
+    items = [
+        {"cache_type": "lang", "_kind": "lang", "id": "lang-a"},
+        {"cache_type": "patchouli", "_kind": "book", "id": "book"},
+        {"cache_type": "lang", "_kind": "future-kind", "id": "lang-b"},
+    ]
+
+    grouped = moddb_retranslate_service._group_retranslation_items_by_cache_type(items)
+
+    assert [item["id"] for item in grouped] == ["lang-a", "lang-b", "book"]
+    assert grouped[-1]["_kind"] == "book"
+    assert grouped[-1]["cache_type"] == "patchouli"
+
+
+def test_repair_batches_group_profiles_and_preview_reports_breakdown(
+    db_path, monkeypatch, repair_cache
+):
+    _set_repair_batch_size(monkeypatch, 100)
+    db = TranslationDB(db_path)
+    _seed_fragmented_candidates(db)
+    preview = moddb_retranslate_service.preview_same_source_ai_retranslation(
+        db, _options()
+    )
+    db.close()
+
+    assert preview.total_candidates == 66
+    assert preview.selected_count == 66
+    assert preview.source == SRC_AI
+    assert dict(preview.profile_counts) == {"lang": 60, "patchouli": 6}
+    assert preview.estimated_batches == 2
+    assert preview.entry_cache_types.count("lang") == 60
+    assert preview.entry_cache_types.count("patchouli") == 6
+
+    calls = []
+
+    def fake_translate(batch, total):
+        types = {item["cache_type"] for item in batch}
+        calls.append((len(batch), types))
+        return [{**item, "text": "我的世界"} for item in batch], "AUTO"
+
+    monkeypatch.setattr(
+        moddb_retranslate_service, "translate_batch_smart", fake_translate
+    )
+    snap = _run(db_path, preview.entries, options=_options(write_cache=False))
+
+    assert calls == [(60, {"lang"}), (6, {"patchouli"})]
+    assert snap["summary"]["batches"] == 2
+    assert snap["summary"]["updated"] == 66
+    logs = "\n".join(entry.text for entry in snap["logs"])
+    assert "舊 AI 機翻修復候選 66 筆" in logs
+    assert "來源：AI 機翻" in logs
+    assert "Lang 60 筆" in logs
+    assert "Patchouli 6 筆" in logs
+    assert "略過舊快取直接重新翻譯" in logs
+    assert repair_cache == []
+
+
+def test_retranslation_token_budget_still_caps_grouped_profile(
+    db_path, monkeypatch, repair_cache
+):
+    db = TranslationDB(db_path)
+    db.ingest(
+        "1.21.1",
+        [
+            ScanItem(
+                KIND_LANG,
+                "mod_a",
+                f"lang.{index:02d}",
+                "Minecraft",
+                "Minecraft",
+                source=SRC_AI,
+            )
+            for index in range(60)
+        ],
+    )
+    preview = moddb_retranslate_service.preview_same_source_ai_retranslation(
+        db, _options()
+    )
+    db.close()
+    _set_repair_batch_size(monkeypatch, 100)
+    monkeypatch.setattr(
+        moddb_retranslate_service,
+        "load_config",
+        lambda: {"lm_translator": {"token_budget_enabled": True}},
+    )
+    budget_calls = []
+
+    def token_budget(items, profile, preferred, lm_cfg):
+        budget_calls.append((len(items), profile, preferred, lm_cfg))
+        return min(len(items), 25)
+
+    monkeypatch.setattr(moddb_retranslate_service, "select_batch_size", token_budget)
+    batch_sizes = []
+
+    def fake_translate(batch, total):
+        batch_sizes.append(len(batch))
+        return [{**item, "text": "我的世界"} for item in batch], "AUTO"
+
+    monkeypatch.setattr(
+        moddb_retranslate_service, "translate_batch_smart", fake_translate
+    )
+
+    snap = _run(db_path, preview.entries, options=_options(write_cache=False))
+
+    assert batch_sizes == [25, 25, 10]
+    assert [call[:3] for call in budget_calls] == [
+        (60, "lang", 100),
+        (35, "lang", 100),
+        (10, "lang", 100),
+    ]
+    assert all(call[3]["token_budget_enabled"] for call in budget_calls)
+    assert snap["summary"]["batches"] == 3
 
 
 def test_replace_ai_translation_is_compare_and_set_and_does_not_propagate(db_path):
@@ -147,6 +315,11 @@ def repair_cache(monkeypatch):
     )
     monkeypatch.setattr(
         moddb_retranslate_service,
+        "_get_default_batch_size",
+        lambda _cache_type, _sizes: 20,
+    )
+    monkeypatch.setattr(
+        moddb_translate_service,
         "_get_default_batch_size",
         lambda _cache_type, _sizes: 20,
     )
@@ -296,11 +469,7 @@ def test_excess_results_stop_before_next_batch(db_path, monkeypatch, repair_cach
         db, _options(write_cache=False)
     )
     db.close()
-    monkeypatch.setattr(
-        moddb_retranslate_service,
-        "_get_default_batch_size",
-        lambda _cache_type, _sizes: 1,
-    )
+    _set_repair_batch_size(monkeypatch, 1)
     calls = []
 
     def fake_translate(batch, total):
@@ -481,4 +650,40 @@ def test_preview_confirmation_cancel_and_scope_invalidation(db_path, monkeypatch
     panel.preview_retranslation()
     assert panel._repair_preview is None
     assert panel.repair_start_btn.disabled is True
+    db.close()
+
+
+def test_retranslation_preview_shows_ai_source_profiles_and_samples(
+    db_path, monkeypatch
+):
+    _set_repair_batch_size(monkeypatch, 1)
+    db = TranslationDB(db_path)
+    _ai_entry(db, key="lang")
+    _ai_entry(db, key="patchouli", kind=KIND_PATCHOULI)
+    manual = _ai_entry(db, key="manual")
+    db.save_manual(manual.id, "Minecraft", propagate=False)
+    _ingest(db, "1.21.1", "foo", "jar", SRC_JAR_TW, "Minecraft")
+    _ingest(db, "1.21.1", "foo", "custom", SRC_CUSTOM, "Minecraft")
+
+    panel = translate_panel.TranslatePanel(mock_page(), lambda: db)
+    panel.version_dd.value = "1.21.1"
+    panel.preview_retranslation()
+
+    preview = panel._repair_preview
+    assert preview is not None
+    assert preview.source == SRC_AI
+    assert preview.total_candidates == 2
+    assert preview.selected_count == 2
+    assert dict(preview.profile_counts) == {"lang": 1, "patchouli": 1}
+    assert preview.estimated_batches == 2
+    text = panel.repair_preview_text.value
+    assert "來源：AI 機翻" in text
+    assert "人工、模組自帶及其他來源不會被重新翻譯" in text
+    assert "Lang：1 筆" in text
+    assert "Patchouli：1 筆" in text
+    assert "預估：約 2 批" in text
+    samples = [control.value for control in panel.repair_samples.controls]
+    assert any("[Lang] [AI 機翻]" in sample for sample in samples)
+    assert any("[Patchouli] [AI 機翻]" in sample for sample in samples)
+    assert all("manual" not in sample and "jar" not in sample for sample in samples)
     db.close()

@@ -14,6 +14,7 @@ import flet as ft
 
 from app.services_impl.moddb_retranslate_service import (
     SameSourceAIRepairPreview,
+    cache_profile_label,
     preview_same_source_ai_retranslation,
     run_moddb_retranslate_service,
 )
@@ -34,7 +35,10 @@ from app.ui.poller import PollerHandle
 from app.ui.snack import show_snack
 from app.ui.status_chip import apply_status_style, set_chip_status
 from app.views._log import LogView, load_ui_logging_config
-from app.views.moddb.formatting import format_count
+from app.views.moddb.formatting import (
+    format_count,
+    source_label,
+)
 from translation_tool.utils.config_manager import load_config
 from translation_tool.utils.log_unit import log_debug, log_info, log_warning
 
@@ -234,7 +238,7 @@ class TranslatePanel(ft.Column):
             on_click=self.confirm_retranslation,
         )
         self.repair_preview_text = ft.Text(
-            "只會選取目前生效來源為「AI 機翻」且譯文與非空原文相同的項目。",
+            "來源：AI 機翻。人工、模組自帶及其他來源不會被重新翻譯。",
             size=13,
             color=C.TEXT,
             selectable=True,
@@ -344,7 +348,7 @@ class TranslatePanel(ft.Column):
     def _clear_repair_preview(self) -> None:
         self._repair_preview = None
         self.repair_preview_text.value = (
-            "只會選取目前生效來源為「AI 機翻」且譯文與非空原文相同的項目。"
+            "來源：AI 機翻。人工、模組自帶及其他來源不會被重新翻譯。"
         )
         self.repair_samples.controls = []
         self.repair_start_btn.disabled = True
@@ -417,18 +421,30 @@ class TranslatePanel(ft.Column):
         self._repair_preview = preview
         selected = preview.selected_count
         cap = f"上限 {format_count(options.limit)} 筆" if options.limit else "不限筆數"
+        breakdown = (
+            "、".join(
+                f"{cache_profile_label(cache_type)}：{format_count(count)} 筆"
+                for cache_type, count in preview.profile_counts
+            )
+            or "無符合類型"
+        )
         self.repair_preview_text.value = (
             f"符合條件：{format_count(preview.total_candidates)} 筆；{cap}，"
-            f"本次將重翻 {format_count(selected)} 筆。"
+            f"本次將重翻 {format_count(selected)} 筆。\n"
+            f"來源：{source_label(preview.source)}。人工、模組自帶及其他來源不會被重新翻譯。\n"
+            f"翻譯 profile：{breakdown}\n"
+            f"預估：約 {format_count(preview.estimated_batches)} 批。"
         )
         self.repair_samples.controls = [
             ft.Text(
-                f"{row.mod_id} / {row.key}　原文／目前 AI 譯文：{row.en_us}",
+                f"[{cache_profile_label(preview.entry_cache_types[index])}] "
+                f"[{source_label(preview.source)}] {row.mod_id} / {row.key}\n"
+                f"原文／目前 AI 譯文：{row.en_us}",
                 size=12,
                 color=C.MUTED,
                 selectable=True,
             )
-            for row in preview.entries[:5]
+            for index, row in enumerate(preview.entries[:5])
         ]
         self.repair_start_btn.disabled = selected == 0
         self._safe_update()

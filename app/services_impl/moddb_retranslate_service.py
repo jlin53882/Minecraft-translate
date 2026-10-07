@@ -25,7 +25,10 @@ from app.services_impl.pipelines._pipeline_logging import (
     mirror_session_log,
 )
 from app.tasks.task_session import add_log_unmirrored
-from app.views.moddb.formatting import token_issues
+from app.views.moddb.formatting import (
+    source_label,
+    token_issues,
+)
 from translation_tool.core.lm_batch_budget import (
     profile_for_cache_type,
     select_batch_size,
@@ -35,6 +38,7 @@ from translation_tool.core.lm_translator_shared_cache import get_default_cache_r
 from translation_tool.core.lm_translator_shared_loop import _get_default_batch_size
 from translation_tool.translation_db.models import SameSourceAIEntry
 from translation_tool.translation_db.run_progress import RunProgress
+from translation_tool.translation_db.schema import SRC_AI
 from translation_tool.utils.cache_manager import (
     add_to_cache,
     initialize_translation_cache,
@@ -52,6 +56,19 @@ logger = logging.getLogger(__name__)
 
 _OPERATION = "retranslate_same_source_ai"
 _LOG_SAMPLE_LIMIT = 20
+_PROFILE_LABELS = {
+    "lang": "Lang",
+    "patch": "Patchouli",
+    "ftb": "FTB",
+    "kubejs": "KubeJS",
+    "md": "Markdown",
+}
+
+
+def cache_profile_label(cache_type: str | None) -> str:
+    """Display the translator profile selected for a runtime cache type."""
+    profile = profile_for_cache_type(cache_type)
+    return _PROFILE_LABELS.get(profile, profile.upper())
 
 
 @dataclass(frozen=True)
@@ -60,6 +77,10 @@ class SameSourceAIRepairPreview:
 
     total_candidates: int
     entries: tuple[SameSourceAIEntry, ...]
+    profile_counts: tuple[tuple[str, int], ...]
+    entry_cache_types: tuple[str, ...]
+    estimated_batches: int
+    source: int = SRC_AI
 
     @property
     def selected_count(self) -> int:
@@ -94,7 +115,16 @@ def preview_same_source_ai_retranslation(db, options: TranslateOptions):
         list(options.mod_ids),
         limit=options.limit or None,
     )
-    return SameSourceAIRepairPreview(total, tuple(entries))
+    items = _build_retranslation_items(entries)
+    entry_cache_types = tuple(_retranslation_cache_type(item) for item in items)
+    items = _group_retranslation_items_by_cache_type(items)
+    return SameSourceAIRepairPreview(
+        total,
+        tuple(entries),
+        tuple(_cache_type_counts(items).items()),
+        entry_cache_types,
+        plan_batches(items),
+    )
 
 
 def _build_retranslation_items(
@@ -107,13 +137,45 @@ def _build_retranslation_items(
     return items
 
 
+def _retranslation_cache_type(item: dict[str, Any]) -> str:
+    return str(item.get("cache_type") or "lang")
+
+
+def _group_retranslation_items_by_cache_type(
+    items: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Stable-group engine items by their actual cache/profile key."""
+    groups: dict[str, list[dict[str, Any]]] = {}
+    for item in items:
+        groups.setdefault(_retranslation_cache_type(item), []).append(item)
+    return [item for group in groups.values() for item in group]
+
+
+def _cache_type_counts(items: Sequence[dict[str, Any]]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for item in items:
+        cache_type = _retranslation_cache_type(item)
+        counts[cache_type] = counts.get(cache_type, 0) + 1
+    return counts
+
+
+def _format_profile_breakdown(counts: dict[str, int]) -> str:
+    return (
+        "、".join(
+            f"{cache_profile_label(cache_type)} {count:,} 筆"
+            for cache_type, count in counts.items()
+        )
+        or "無"
+    )
+
+
 def _same_batch_prefix(items: list[dict[str, Any]], lm_cfg: dict[str, Any]):
     """Choose a homogeneous, token-budgeted prefix without touching the cache."""
-    cache_type = str(items[0].get("cache_type") or "lang")
+    cache_type = _retranslation_cache_type(items[0])
     homogeneous = 1
     while (
         homogeneous < len(items)
-        and str(items[homogeneous].get("cache_type") or "lang") == cache_type
+        and _retranslation_cache_type(items[homogeneous]) == cache_type
     ):
         homogeneous += 1
     preferred = _get_default_batch_size(cache_type, None)
@@ -299,7 +361,9 @@ def _translate_snapshot(
     report: SameSourceAIRepairReport,
     cancelled,
 ) -> None:
-    items = _build_retranslation_items(entries)
+    items = _group_retranslation_items_by_cache_type(
+        _build_retranslation_items(entries)
+    )
     total = len(items)
     tracker = RunProgress(total=total, planned_batches=plan_batches(items))
     config = load_config()
@@ -309,6 +373,12 @@ def _translate_snapshot(
     processed = 0
     cache_types_to_save: set[str] = set()
 
+    _log(
+        session,
+        f"🔎 舊 AI 機翻修復候選 {total:,} 筆；來源：{source_label(SRC_AI)}；"
+        f"{_format_profile_breakdown(_cache_type_counts(items))}；"
+        "略過舊快取直接重新翻譯",
+    )
     _log(session, f"🔁 開始重新翻譯舊 AI 同原文譯文：{total:,} 筆")
     _log(session, tracker.start_line())
     session.set_summary({**report.as_dict(), "live": tracker.live()})
@@ -442,6 +512,7 @@ def run_moddb_retranslate_service(
 __all__ = [
     "SameSourceAIRepairPreview",
     "SameSourceAIRepairReport",
+    "cache_profile_label",
     "preview_same_source_ai_retranslation",
     "run_moddb_retranslate_service",
 ]
