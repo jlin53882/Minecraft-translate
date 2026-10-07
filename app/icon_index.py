@@ -15,6 +15,7 @@ from collections.abc import Iterator
 from concurrent.futures import as_completed
 from pathlib import Path
 
+from app.icon_runtime import get_runtime_asset_paths
 from translation_tool.utils.app_paths import get_data_root
 from translation_tool.utils.config_manager import load_config
 from translation_tool.utils.log_unit import log_info, log_warning
@@ -40,6 +41,15 @@ def _jar_manifest(mods_dir: Path) -> list[dict[str, int | str]]:
         manifest.append(
             {
                 "name": jar_path.name,
+                "size": stat.st_size,
+                "mtime_ns": stat.st_mtime_ns,
+            }
+        )
+    for asset_path in get_runtime_asset_paths(mods_dir):
+        stat = asset_path.stat()
+        manifest.append(
+            {
+                "name": str(asset_path.resolve()),
                 "size": stat.st_size,
                 "mtime_ns": stat.st_mtime_ns,
             }
@@ -148,7 +158,7 @@ def _iter_entries_from_lang_files(
             break  # 每個 namespace 只取第一個有效的英文 lang 檔
 
 
-def _process_single_jar(jar_path: Path) -> dict[str, str]:
+def _process_single_jar(jar_path: Path, asset_catalog=None) -> dict[str, str]:
     """Worker: 處理單一 JAR，建立該 JAR 所有 entry 的 icon 索引。
 
     回傳：{key: icon_uri} — 該 JAR 內所有有 icon 的 key mapping
@@ -160,6 +170,7 @@ def _process_single_jar(jar_path: Path) -> dict[str, str]:
             budget = ZipReadBudget.for_icon_scan(jar_path.name)
             from app.icon_reader import IconRef
             from app.views.icon_preview.icon_cache import (
+                _resolve_icon_from_catalog,
                 _try_extract_mod_icon_from_model,
             )
 
@@ -179,12 +190,25 @@ def _process_single_jar(jar_path: Path) -> dict[str, str]:
                 }:
                     continue
 
-                result = _try_extract_mod_icon_from_model(
-                    jar_path, modid, zf, names, key=key, budget=budget
-                )
-                if result:
-                    _tex_val, png_path = result
-                    results[key] = IconRef(jar_path, png_path).to_uri()
+                if asset_catalog is not None:
+                    result = _resolve_icon_from_catalog(
+                        jar_path,
+                        modid,
+                        key,
+                        asset_catalog,
+                        current_zf=zf,
+                        budget=budget,
+                    )
+                    if result:
+                        _tex_val, png_path, texture_archive = result
+                        results[key] = IconRef(texture_archive, png_path).to_uri()
+                else:
+                    result = _try_extract_mod_icon_from_model(
+                        jar_path, modid, zf, names, key=key, budget=budget
+                    )
+                    if result:
+                        _tex_val, png_path = result
+                        results[key] = IconRef(jar_path, png_path).to_uri()
     except ArchiveBudgetError:
         # 累計讀取超過安全上限（budget 已記錄警告）：保留已建立的部分索引，不中止整個索引建置
         log_warning(f"[IconIndex] {jar_path.name} 累計讀取超限，僅保留已解析的部分索引")
@@ -221,27 +245,37 @@ def build_icon_index(mods_dir: Path, progress_cb=None) -> dict[str, str]:
     index: dict[str, str] = {}
     done = 0
 
+    from app.views.icon_preview.icon_cache import ModpackAssetCatalog
+
+    asset_catalog = ModpackAssetCatalog.from_mods_directory(mods_dir)
+
     config_workers = (
         load_config().get("translator", {}).get("parallel_execution_workers", 8)
     )
     max_workers = max(1, config_workers) if isinstance(config_workers, int) else 8
     with ContextThreadPoolExecutor(max_workers=max_workers) as executor:
-        futures = {executor.submit(_process_single_jar, jar): jar for jar in jars}
-        for future in as_completed(futures):
-            jar = futures[future]
-            done += 1
-            try:
-                jar_results = future.result()
-                for key, uri in jar_results.items():
-                    index[key] = uri
-                if progress_cb:
-                    progress_cb(done, total)
-            except Exception as ex:  # noqa: BLE001
-                log_warning(f"[IconIndex] JAR 處理失敗 {jar.name}: {ex!r}")
-            if done % 50 == 0 or done == total:
-                log_info(
-                    f"[IconIndex] 進度：{done}/{total} JARs，已建立 {len(index)} 個 icon 索引"
-                )
+        try:
+            futures = {
+                executor.submit(_process_single_jar, jar, asset_catalog): jar
+                for jar in jars
+            }
+            for future in as_completed(futures):
+                jar = futures[future]
+                done += 1
+                try:
+                    jar_results = future.result()
+                    for key, uri in jar_results.items():
+                        index[key] = uri
+                    if progress_cb:
+                        progress_cb(done, total)
+                except Exception as ex:  # noqa: BLE001
+                    log_warning(f"[IconIndex] JAR 處理失敗 {jar.name}: {ex!r}")
+                if done % 50 == 0 or done == total:
+                    log_info(
+                        f"[IconIndex] 進度：{done}/{total} JARs，已建立 {len(index)} 個 icon 索引"
+                    )
+        finally:
+            asset_catalog.close()
 
     log_info(f"[IconIndex] 索引建立完成：{len(index)} 個 icon 進入索引")
     return index
@@ -271,7 +305,7 @@ def _save_icon_index_for_manifest(
 ) -> Path:
     idx_path = _index_path_for_manifest(mods_dir, manifest)
     data = {
-        "version": 2,
+        "version": 4,
         "modpack": str(mods_dir.resolve()),
         "jars": manifest,
         "count": len(index),
@@ -297,7 +331,7 @@ def load_icon_index(mods_dir: Path) -> dict[str, str] | None:
         return None
     try:
         data = json.loads(idx_path.read_text(encoding="utf-8"))
-        if data.get("version") != 2 or data.get("jars") != manifest:
+        if data.get("version") != 4 or data.get("jars") != manifest:
             return None
         if data.get("modpack") != str(mods_dir.resolve()):
             # modpack 路徑改了

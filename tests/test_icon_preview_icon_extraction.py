@@ -95,7 +95,8 @@ class TestBatchExtractJarIcons:
             )
 
         assert processed == 1
-        assert zip_open_count == 1, f"ZIP 應只開一次，實際：{zip_open_count}"
+        # Catalog indexing and the per-JAR worker each open the archive once.
+        assert zip_open_count == 2, f"ZIP 應索引與解析各開一次，實際：{zip_open_count}"
 
     def test_icon_path_written_back_to_entries(self, tmp_path):
         """找到 icon 時，icon_path 正確寫回 entry"""
@@ -116,8 +117,12 @@ class TestBatchExtractJarIcons:
         cache_root = tmp_path / "icon_cache"
 
         with patch(
-            "app.views.icon_preview.icon_cache._try_extract_mod_icon_from_model",
-            return_value=("test_mod:item/one", "assets/test_mod/textures/item/one.png"),
+            "app.views.icon_preview.icon_cache._resolve_icon_from_catalog",
+            return_value=(
+                "test_mod:item/one",
+                "assets/test_mod/textures/item/one.png",
+                jar.resolve(),
+            ),
         ):
             _batch_extract_jar_icons(jar_to_entries, cache_root, tmp_path / "mods")
 
@@ -126,7 +131,9 @@ class TestBatchExtractJarIcons:
         assert entry1.icon_path.startswith("jar://")
         assert "assets/test_mod" in entry1.icon_path
 
-    def test_entity_key_uses_exact_named_item_model_fallback(self, tmp_path, monkeypatch):
+    def test_entity_key_uses_exact_named_item_model_fallback(
+        self, tmp_path, monkeypatch
+    ):
         """Entity 翻譯找不到 entity model 時可用同名 item model 顯示圖示。"""
         from app.views.icon_preview import icon_cache
 
@@ -160,6 +167,312 @@ class TestBatchExtractJarIcons:
             "actuallyadditions:item/worm",
             "assets/actuallyadditions/textures/item/worm.png",
         )
+
+    def test_catalog_uses_item_model_for_block_key(self, tmp_path):
+        from app.views.icon_preview.icon_cache import (
+            ModpackAssetCatalog,
+            _resolve_icon_from_catalog,
+        )
+
+        mods = tmp_path / "mods"
+        jar = mods / "securitycraft.jar"
+        model = "assets/securitycraft/models/item/block_pocket_manager.json"
+        texture = "assets/securitycraft/textures/block/manager.png"
+        create_test_jar(
+            jar,
+            {
+                model: json.dumps(
+                    {"textures": {"layer0": "securitycraft:block/manager"}}
+                ).encode(),
+                texture: png_1x1(),
+            },
+        )
+        catalog = ModpackAssetCatalog.from_mods_directory(mods)
+        try:
+            with zipfile.ZipFile(jar) as zf:
+                result = _resolve_icon_from_catalog(
+                    jar,
+                    "securitycraft",
+                    "block.securitycraft.block_pocket_manager",
+                    catalog,
+                    current_zf=zf,
+                    budget=None,
+                )
+        finally:
+            catalog.close()
+
+        assert result == ("securitycraft:block/manager", texture, jar.resolve())
+
+    def test_catalog_reads_default_minecraft_texture_from_client_jar(self, tmp_path):
+        from app.views.icon_preview.icon_cache import (
+            ModpackAssetCatalog,
+            _resolve_icon_from_catalog,
+        )
+
+        version_dir = tmp_path / "ATM-Test"
+        mods = version_dir / "mods"
+        jar = mods / "example.jar"
+        client_jar = version_dir / "ATM-Test.jar"
+        texture = "assets/minecraft/textures/block/acacia_planks.png"
+        create_test_jar(
+            jar,
+            {
+                "assets/example/models/block/reinforced_planks.json": json.dumps(
+                    {"textures": {"all": "block/acacia_planks"}}
+                ).encode(),
+            },
+        )
+        create_test_jar(client_jar, {texture: png_1x1()})
+        catalog = ModpackAssetCatalog.from_mods_directory(mods)
+        try:
+            with zipfile.ZipFile(jar) as zf:
+                result = _resolve_icon_from_catalog(
+                    jar,
+                    "example",
+                    "block.example.reinforced_planks",
+                    catalog,
+                    current_zf=zf,
+                    budget=None,
+                )
+        finally:
+            catalog.close()
+
+        assert result == ("block/acacia_planks", texture, client_jar.resolve())
+
+    def test_catalog_resolves_foreign_key_namespace_parent_alias_and_texture_jar(
+        self, tmp_path
+    ):
+        from app.views.icon_preview.icon_cache import (
+            ModpackAssetCatalog,
+            _resolve_icon_from_catalog,
+        )
+
+        mods = tmp_path / "mods"
+        addon = mods / "bibliobiomes.jar"
+        dependency = mods / "regions_unexplored.jar"
+        texture = "assets/biomesoplenty/textures/block/dead_planks.png"
+        create_test_jar(
+            addon,
+            {
+                "assets/bibliocraft/models/item/biomesoplenty_dead_bookcase.json": json.dumps(
+                    {
+                        "parent": "bibliocraft:block/wood/biomesoplenty_dead/bookcase",
+                        "textures": {"layer0": "#texture", "texture": "#face"},
+                    }
+                ).encode(),
+                "assets/bibliocraft/models/block/wood/biomesoplenty_dead/bookcase.json": json.dumps(
+                    {"textures": {"face": "biomesoplenty:block/dead_planks"}}
+                ).encode(),
+            },
+        )
+        create_test_jar(dependency, {texture: png_1x1()})
+        catalog = ModpackAssetCatalog.from_mods_directory(mods)
+        try:
+            with zipfile.ZipFile(addon) as zf:
+                result = _resolve_icon_from_catalog(
+                    addon,
+                    "bibliobiomes",
+                    "block.bibliocraft.biomesoplenty_dead_bookcase",
+                    catalog,
+                    current_zf=zf,
+                    budget=None,
+                )
+        finally:
+            catalog.close()
+
+        assert result == (
+            "biomesoplenty:block/dead_planks",
+            texture,
+            dependency.resolve(),
+        )
+
+    def test_catalog_uses_blockstate_model_variant(self, tmp_path):
+        from app.views.icon_preview.icon_cache import (
+            ModpackAssetCatalog,
+            _resolve_icon_from_catalog,
+        )
+
+        mods = tmp_path / "mods"
+        jar = mods / "example.jar"
+        texture = "assets/example/textures/block/stage.png"
+        create_test_jar(
+            jar,
+            {
+                "assets/example/blockstates/staged_block.json": json.dumps(
+                    {"variants": {"": {"model": "example:block/stage_0"}}}
+                ).encode(),
+                "assets/example/models/block/stage_0.json": json.dumps(
+                    {"textures": {"all": "example:block/stage"}}
+                ).encode(),
+                texture: png_1x1(),
+            },
+        )
+        catalog = ModpackAssetCatalog.from_mods_directory(mods)
+        try:
+            with zipfile.ZipFile(jar) as zf:
+                result = _resolve_icon_from_catalog(
+                    jar,
+                    "example",
+                    "block.example.staged_block",
+                    catalog,
+                    current_zf=zf,
+                    budget=None,
+                )
+        finally:
+            catalog.close()
+
+        assert result == ("example:block/stage", texture, jar.resolve())
+
+    def test_catalog_uses_unique_texture_basename_for_moved_dependency_texture(
+        self, tmp_path
+    ):
+        from app.views.icon_preview.icon_cache import (
+            ModpackAssetCatalog,
+            _resolve_icon_from_catalog,
+        )
+
+        mods = tmp_path / "mods"
+        addon = mods / "addon.jar"
+        dependency = mods / "dependency.jar"
+        actual_texture = "assets/othermod/textures/block/wood_variant.png"
+        create_test_jar(
+            addon,
+            {
+                "assets/addon/models/item/wood_variant.json": json.dumps(
+                    {"textures": {"layer0": "missingmod:item/wood_variant"}}
+                ).encode(),
+            },
+        )
+        create_test_jar(dependency, {actual_texture: png_1x1()})
+        catalog = ModpackAssetCatalog.from_mods_directory(mods)
+        try:
+            with zipfile.ZipFile(addon) as zf:
+                result = _resolve_icon_from_catalog(
+                    addon,
+                    "addon",
+                    "item.addon.wood_variant",
+                    catalog,
+                    current_zf=zf,
+                    budget=None,
+                )
+        finally:
+            catalog.close()
+
+        assert result == (
+            "missingmod:item/wood_variant",
+            actual_texture,
+            dependency.resolve(),
+        )
+
+    def test_catalog_includes_exact_neoforge_runtime_parent_model(self, tmp_path):
+        from app.views.icon_preview.icon_cache import (
+            ModpackAssetCatalog,
+            _resolve_icon_from_catalog,
+        )
+
+        minecraft = tmp_path / ".minecraft"
+        profile_dir = minecraft / "versions" / "TestPack"
+        mods = profile_dir / "mods"
+        addon = mods / "actuallyadditions.jar"
+        loader_version = "21.1.251"
+        loader_jar = (
+            minecraft
+            / "libraries"
+            / "net"
+            / "neoforged"
+            / "neoforge"
+            / loader_version
+            / f"neoforge-{loader_version}-universal.jar"
+        )
+        client_jar = profile_dir / "TestPack.jar"
+        texture = "assets/minecraft/textures/item/bucket.png"
+        create_test_jar(
+            addon,
+            {
+                "assets/actuallyadditions/models/item/canola_oil_bucket.json": json.dumps(
+                    {
+                        "parent": "neoforge:item/bucket",
+                        "fluid": "actuallyadditions:canola_oil",
+                        "loader": "neoforge:fluid_container",
+                    }
+                ).encode(),
+            },
+        )
+        create_test_jar(
+            loader_jar,
+            {
+                "assets/neoforge/models/item/bucket.json": json.dumps(
+                    {
+                        "parent": "neoforge:item/default",
+                        "textures": {
+                            "base": "item/bucket",
+                            "fluid": "neoforge:item/mask/bucket_fluid",
+                        },
+                    }
+                ).encode(),
+                "assets/neoforge/models/item/default.json": b"{}",
+            },
+        )
+        create_test_jar(client_jar, {texture: png_1x1()})
+        profile_dir.mkdir(parents=True, exist_ok=True)
+        (profile_dir / "TestPack.json").write_text(
+            json.dumps(
+                {"arguments": {"game": ["--fml.neoForgeVersion", loader_version]}}
+            ),
+            encoding="utf-8",
+        )
+
+        catalog = ModpackAssetCatalog.from_mods_directory(mods)
+        try:
+            with zipfile.ZipFile(addon) as zf:
+                result = _resolve_icon_from_catalog(
+                    addon,
+                    "actuallyadditions",
+                    "item.actuallyadditions.canola_oil_bucket",
+                    catalog,
+                    current_zf=zf,
+                    budget=None,
+                )
+        finally:
+            catalog.close()
+
+        assert result == ("item/bucket", texture, client_jar.resolve())
+
+    def test_catalog_rejects_ambiguous_texture_basename_fallback(self, tmp_path):
+        from app.views.icon_preview.icon_cache import (
+            ModpackAssetCatalog,
+            _resolve_icon_from_catalog,
+        )
+
+        mods = tmp_path / "mods"
+        addon = mods / "addon.jar"
+        first = "assets/first/textures/item/shared.png"
+        second = "assets/second/textures/item/shared.png"
+        create_test_jar(
+            addon,
+            {
+                "assets/addon/models/item/shared.json": json.dumps(
+                    {"textures": {"layer0": "missingmod:item/shared"}}
+                ).encode(),
+                first: png_1x1(),
+                second: png_1x1(),
+            },
+        )
+        catalog = ModpackAssetCatalog.from_mods_directory(mods)
+        try:
+            with zipfile.ZipFile(addon) as zf:
+                result = _resolve_icon_from_catalog(
+                    addon,
+                    "addon",
+                    "item.addon.shared",
+                    catalog,
+                    current_zf=zf,
+                    budget=None,
+                )
+        finally:
+            catalog.close()
+
+        assert result is None
 
     def test_missing_jar_skipped(self, tmp_path):
         """JAR 檔案不存在時跳過，不拋例外"""
@@ -234,8 +547,12 @@ class TestBatchExtractJarIcons:
         cache_root = tmp_path / "icon_cache"
 
         with patch(
-            "app.views.icon_preview.icon_cache._try_extract_mod_icon_from_model",
-            return_value=("mod_a:item/hello", "assets/mod_a/textures/item/hello.png"),
+            "app.views.icon_preview.icon_cache._resolve_icon_from_catalog",
+            side_effect=lambda _jar, modid, _key, *_args, **_kwargs: (
+                f"{modid}:item/hello",
+                f"assets/{modid}/textures/item/hello.png",
+                jar.resolve(),
+            ),
         ):
             _batch_extract_jar_icons(jar_to_entries, cache_root, tmp_path / "mods")
 

@@ -5,6 +5,7 @@ import json
 from datetime import UTC, datetime
 from pathlib import Path
 
+from app.icon_runtime import get_runtime_asset_paths
 from translation_tool.utils.app_paths import get_data_root
 
 
@@ -14,9 +15,8 @@ def _get_cache_dir() -> Path:
 
 
 _SOURCE_ENTRY_FIELDS = ("modid", "key", "en", "source_jar", "icon_path")
-# Version 3 refreshes persisted icons after adding exact-name entity -> item
-# model fallback; version 2 caches may contain the key but no icon_path.
-_CACHE_VERSION = 3
+# Version 4 refreshes cached icon paths after runtime-library model resolution.
+_CACHE_VERSION = 4
 
 
 def _source_entry_data(entry) -> dict:
@@ -62,6 +62,22 @@ def _compute_source_identity(source_root: Path, mode: str) -> dict:
                 # a previous cache entry for the same directory.
                 jars.append({"name": jar_path.name, "unavailable": True})
         identity["jars"] = jars
+        runtime_assets = []
+        for asset_path in get_runtime_asset_paths(source_root):
+            try:
+                stat = asset_path.stat()
+                runtime_assets.append(
+                    {
+                        "path": str(asset_path.resolve()),
+                        "size": stat.st_size,
+                        "mtime_ns": stat.st_mtime_ns,
+                    }
+                )
+            except OSError:
+                runtime_assets.append(
+                    {"path": str(asset_path.resolve()), "unavailable": True}
+                )
+        identity["runtime_assets"] = runtime_assets
     return identity
 
 
