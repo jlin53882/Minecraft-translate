@@ -891,3 +891,22 @@ def test_tooltip_text_inside_patchouli_t_macro_may_be_translated():
         "少了 1 個「$(l:patchouli:a)」",
         "多了 1 個「$(l:patchouli:b)」",
     ]
+
+
+def test_patchouli_macros_with_nested_parentheses_are_one_token():
+    """提示文字或網址裡成對的括號（f(x)、Foo_(bar)）不會讓 `$(…)` 標記提早結束。"""
+    from app.views.moddb import formatting as fm
+
+    assert fm.token_issues("$(t:Use f(x) here)a/$", "$(t:在這裡用 f(x))甲/$") == []
+    tokens = fm.format_tokens("$(l:https://w/Foo_(bar))x$() %s")
+    assert tokens["$(l:https://w/Foo_(bar))"] == 1 and tokens["$()"] == 1
+    # 網址（不能翻譯）不同仍會提醒
+    assert fm.token_issues(
+        "$(l:https://w/Foo_(bar))x$()", "$(l:https://w/Foo)甲$()"
+    ) == [
+        "多了 1 個「$(l:https://w/Foo)」",
+        "少了 1 個「$(l:https://w/Foo_(bar))」",
+    ]
+    # 沒有結尾的 `$(` 不是標記；括號沒配對完時退回第一個 `)`
+    assert not fm.format_tokens("a $( b")
+    assert fm.format_tokens("$(t:(未配對)")["$(t:…)"] == 1

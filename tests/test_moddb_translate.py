@@ -1389,3 +1389,28 @@ def test_service_publishes_live_progress_before_the_first_batch(db_path, monkeyp
     )
     live = seen[0].get("live")
     assert live and live["batch_done"] == 0 and live["started_ts"] <= live["updated_ts"]
+
+
+def test_live_timing_uses_the_monotonic_clock(monkeypatch):
+    """已用時間／預估剩餘用單調時鐘：任務中系統時間被大幅調整也不會跳動。"""
+    from translation_tool.translation_db import run_progress as rp
+
+    wall = {"t": 1_000_000.0}
+    mono = {"t": 50.0}
+    monkeypatch.setattr(rp.time, "time", lambda: wall["t"])
+    monkeypatch.setattr(rp.time, "monotonic", lambda: mono["t"])
+
+    progress = rp.RunProgress(total=100, planned_batches=4)
+    mono["t"] += 40.0
+    progress.update(25)
+    live = progress.live()
+    assert live["elapsed_sec"] == 40.0 and live["eta_sec"] == 120.0
+
+    mono["t"] += 10.0
+    wall["t"] -= 3600.0  # 系統時間被往回調 1 小時
+    ticked = rp.tick_live(live)
+    assert ticked["elapsed_sec"] == 50.0 and ticked["eta_sec"] == 110.0
+    assert (
+        ticked["finish_ts"] == live["finish_ts"]
+    )  # 預計完成時刻仍是上次估計的牆上時間
+    assert progress.elapsed() == 50.0

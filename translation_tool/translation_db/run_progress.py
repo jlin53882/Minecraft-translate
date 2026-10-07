@@ -37,7 +37,11 @@ class RunProgress:
 
     total: int
     planned_batches: int  # 開始前依設定估的批數
-    started: float = field(default_factory=time.time)
+    started: float = field(
+        default_factory=lambda: time.time()
+    )  # 牆上時鐘：只用來算預計完成時刻
+    # 已用時間／預估剩餘用單調時鐘計算，系統時間在任務中被調整也不會跳動
+    started_mono: float = field(default_factory=lambda: time.monotonic())
     batches_done: int = 0
     processed: int = 0
 
@@ -59,7 +63,10 @@ class RunProgress:
         return self.batches_done + math.ceil(remaining / average)
 
     def elapsed(self, now: float | None = None) -> float:
-        return (now if now is not None else time.time()) - self.started
+        """已用秒數。不給 ``now`` 時用單調時鐘；給 ``now``（牆上時鐘，測試用）則與 ``started`` 相減。"""
+        if now is None:
+            return time.monotonic() - self.started_mono
+        return now - self.started
 
     def eta_seconds(self, now: float | None = None) -> float | None:
         """依目前平均速度估算剩餘秒數；還沒完成任何一批時無法估算。"""
@@ -70,18 +77,22 @@ class RunProgress:
 
     def live(self, now: float | None = None) -> dict:
         """給畫面顯示用的即時資料。"""
+        explicit = now  # 測試給的牆上時間；None 表示用單調時鐘計時
         now = now if now is not None else time.time()
-        eta = self.eta_seconds(now)
+        eta = self.eta_seconds(explicit)
         return {
             "batch_done": self.batches_done,
             "batch_est": self.estimated_batches(),
             "processed": self.processed,
             "total": self.total,
-            "elapsed_sec": self.elapsed(now),
+            "elapsed_sec": self.elapsed(explicit),
             "eta_sec": eta,
             "finish_ts": None if eta is None else now + eta,
-            "started_ts": self.started,  # 畫面據此每次輪詢重算「已用時間」
-            "updated_ts": now,  # eta_sec 是這個時間點的估計，之後每秒遞減
+            # 畫面據此每次輪詢重算「已用時間」；eta_sec 是 updated 這個時間點的估計，之後逐秒遞減
+            "started_ts": self.started,
+            "updated_ts": now,
+            "started_mono": self.started_mono,
+            "updated_mono": time.monotonic(),
         }
 
     def start_line(self) -> str:
@@ -99,16 +110,24 @@ def tick_live(live: dict, now: float | None = None) -> dict:
     """依現在時間更新即時資料的「已用時間」與「預估剩餘」（每批結束才有新資料，畫面卻要每秒變化）。
 
     已用時間＝現在 − 開始時間；預估剩餘＝上次估計值 − 上次更新後經過的時間（不低於 0）。
-    預計完成時刻不變。資料沒有時間戳（舊格式）時原樣回傳。
+    預計完成時刻不變。預設用單調時鐘（系統時間被調整時不會跳動）；給 ``now``（牆上時鐘）
+    或資料沒有單調時間戳時，改用牆上時鐘的時間戳。資料完全沒有時間戳（舊格式）時原樣回傳。
     """
-    started, updated = live.get("started_ts"), live.get("updated_ts")
-    if started is None or updated is None:
-        return live
-    now = now if now is not None else time.time()
+    if now is None and "started_mono" in live and "updated_mono" in live:
+        current, started, updated = (
+            time.monotonic(),
+            live["started_mono"],
+            live["updated_mono"],
+        )
+    else:
+        started, updated = live.get("started_ts"), live.get("updated_ts")
+        if started is None or updated is None:
+            return live
+        current = now if now is not None else time.time()
     out = dict(live)
-    out["elapsed_sec"] = max(0.0, now - started)
+    out["elapsed_sec"] = max(0.0, current - started)
     if live.get("eta_sec") is not None:
-        out["eta_sec"] = max(0.0, live["eta_sec"] - max(0.0, now - updated))
+        out["eta_sec"] = max(0.0, live["eta_sec"] - max(0.0, current - updated))
     return out
 
 
