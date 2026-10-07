@@ -64,6 +64,9 @@ class EntriesPanel(ft.Column):
         self.version: str | None = None
         self.mod_id: str | None = None
         self.kind: str | None = None
+        # 批次機翻「特殊字元不一致」的檢視：只列這些條目，並把 AI 譯文預填到譯文框供修正
+        self.entry_ids: list[int] | None = None
+        self.drafts: dict[int, str] = {}
         self.state = "all"
         self.query = ""
         self.rows: list[EntryRow] = []
@@ -78,6 +81,7 @@ class EntriesPanel(ft.Column):
         self._build_history_card()
         self.controls = [
             self.filter_card,
+            self.flagged_banner,
             ft.Row(
                 [
                     ft.Column([self.list_card], expand=4),
@@ -108,25 +112,58 @@ class EntriesPanel(ft.Column):
         self.state_seg = kit.Segmented(
             [(k, v) for k, v in STATE_LABELS.items()], "all", self._on_state
         )
+        self.flagged_text = ft.Text("", size=12.5, color=C.TEXT, expand=True)
+        self.flagged_banner = ft.Container(
+            content=ft.Row(
+                [
+                    ft.Icon(ft.Icons.WARNING_AMBER, size=16, color=C.GOLD),
+                    self.flagged_text,
+                    kit.button(
+                        "清除篩選",
+                        "secondary",
+                        size="sm",
+                        on_click=lambda _e: self.clear_flagged(),
+                    ),
+                ],
+                spacing=10,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            ),
+            padding=ft.Padding.symmetric(horizontal=14, vertical=8),
+            bgcolor=C.GOLD_BG,
+            border_radius=8,
+            visible=False,
+        )
+        # 狀態切換項目變多（含「翻譯與原文相同」），獨立一列才不會在視窗較窄時被裁掉
         self.filter_card = kit.section_card(
             None,
-            ft.Row(
+            ft.Column(
                 [
-                    self.version_dd,
-                    self.mod_dd,
-                    self.kind_dd,
-                    self.source_filter.dropdown,
-                    self.search,
-                    self.state_seg,
+                    ft.Row(
+                        [
+                            self.version_dd,
+                            self.mod_dd,
+                            self.kind_dd,
+                            self.source_filter.dropdown,
+                            self.search,
+                        ],
+                        spacing=12,
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    ),
+                    ft.Row([self.state_seg], scroll=ft.ScrollMode.AUTO),
                 ],
-                spacing=12,
-                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                spacing=10,
             ),
         )
 
     def _build_list_card(self) -> None:
         # 清單高度跟著視窗伸縮（expand），捲軸常駐顯示（全域主題預設只在滑過時出現）
-        self.list_view = ft.ListView(spacing=0, expand=True)
+        self._scroll_offset = 0.0  # 清單目前的捲動位置（儲存／還原後要回到同一個位置）
+        self.list_view = ft.ListView(
+            spacing=0,
+            expand=True,
+            on_scroll=self._on_list_scroll,
+            scroll_interval=100,
+        )
         self.pager = kit.Pager(0, page_size=PAGE_SIZE, on_change=self._on_page)
         self.count_badge = ft.Text("", size=12, color=C.MUTED)
         self.list_card = kit.section_card(
@@ -333,8 +370,24 @@ class EntriesPanel(ft.Column):
             self.kind = None
         self.kind_dd.value = self.kind or ALL_KINDS
 
-    def _load_list(self, *, page: int = 1, keep_selection: bool = True) -> None:
+    def _load_list(
+        self,
+        *,
+        page: int = 1,
+        keep_selection: bool = True,
+        keep_scroll: bool = False,
+    ) -> None:
+        """重新載入清單。``keep_scroll=True``（儲存／還原後）維持捲動位置，
+        原本選的條目不在清單了（例如在「未翻譯」篩選下存完就消失）就選同一個位置的下一筆。"""
         db = self.db()
+        old_index = next(
+            (
+                i
+                for i, r in enumerate(self.rows)
+                if self.selected is not None and r.id == self.selected.id
+            ),
+            None,
+        )
         if db is None or not self.version:
             self.rows, self.total = [], 0
         else:
@@ -345,20 +398,31 @@ class EntriesPanel(ft.Column):
                 state=self.state,
                 query=self.query,
                 source=self.source_filter.code,
+                entry_ids=self.entry_ids,
                 limit=PAGE_SIZE,
                 offset=(page - 1) * PAGE_SIZE,
             )
+            if not self.rows and self.total and page > 1:
+                # 最後一頁的最後一筆被處理掉：退回仍有資料的最後一頁
+                return self._load_list(
+                    page=(self.total - 1) // PAGE_SIZE + 1,
+                    keep_selection=keep_selection,
+                    keep_scroll=keep_scroll,
+                )
         self.pager.set_state(self.total, page)
-        self._render_list()
+        self._render_list(keep_scroll=keep_scroll)
         keep = keep_selection and self.selected is not None
         current = next(
             (r for r in self.rows if keep and r.id == self.selected.id), None
         )
         if current is None and self.rows:
-            current = self.rows[0]
+            if keep_scroll and old_index is not None:
+                current = self.rows[min(old_index, len(self.rows) - 1)]
+            else:
+                current = self.rows[0]
         self.select(current.id if current else None)
 
-    def _render_list(self) -> None:
+    def _render_list(self, *, keep_scroll: bool = False) -> None:
         self.count_badge.value = f"{format_count(self.total)} 筆"
         tiles = [self._row_tile(r) for r in self.rows] or [
             kit.empty_state(
@@ -369,24 +433,29 @@ class EntriesPanel(ft.Column):
         ]
         # 換篩選／換頁後清單內容大幅改變：全新 key 避免 Flet 配對舊項目而殘留上一份清單
         self.list_view.controls = kit.rekey(tiles, "entry")
-        self._scroll_list_to_top()
+        self._scroll_list_to(self._scroll_offset if keep_scroll else 0.0)
 
-    def _scroll_list_to_top(self) -> None:
-        """換篩選／換頁後回到清單最上方（否則沿用上一份清單的捲動位置，第一筆會被標題蓋住）。"""
+    def _on_list_scroll(self, e) -> None:
+        self._scroll_offset = float(getattr(e, "pixels", 0) or 0)
+
+    def _scroll_list_to(self, offset: float) -> None:
+        """換篩選／換頁後回到清單最上方（offset=0；否則沿用上一份清單的捲動位置，第一筆會被標題蓋住）；
+        儲存／還原後回到原本的位置，連續校對時不必重新捲動。"""
+        self._scroll_offset = offset
         run_task = getattr(self._page, "run_task", None)
         if not callable(run_task):
             return
 
-        async def to_top() -> None:
+        async def scroll() -> None:
             try:
-                await self.list_view.scroll_to(offset=0, duration=0)
+                await self.list_view.scroll_to(offset=offset, duration=0)
             except Exception as exc:  # noqa: BLE001 - 尚未掛上頁面時不影響清單
-                log_debug(f"清單捲回頂端略過：{exc}")
+                log_debug(f"清單捲動略過：{exc}")
 
         try:
-            run_task(to_top)
+            run_task(scroll)
         except Exception as exc:  # noqa: BLE001 - 排程失敗不影響清單
-            log_debug(f"清單捲回頂端排程失敗：{exc}")
+            log_debug(f"清單捲動排程失敗：{exc}")
 
     def _row_tile(self, row: EntryRow) -> ft.Control:
         tone = design.tone(STATE_TONES[row.state])
@@ -456,7 +525,12 @@ class EntriesPanel(ft.Column):
             return
         entry = detail.entry
         self.src_text.value = entry.en_us or NO_SOURCE_TEXT
-        self.tw_field.value = entry.zh_tw
+        draft = self.drafts.get(entry.id) if not entry.zh_tw else None
+        self.tw_field.value = draft or entry.zh_tw
+        if draft:
+            self.saved_text.value = (
+                "已預填本次機翻的 AI 譯文（特殊字元與原文不一致，尚未寫入）"
+            )
         self.source_chip.content = kit.chip(
             source_label(entry.source) if entry.zh_tw else "尚無譯文",
             source_tone(entry.source),
@@ -729,7 +803,7 @@ class EntriesPanel(ft.Column):
             if others
             else "已儲存"
         )
-        self._load_list(page=self.pager.current_page)
+        self._load_list(page=self.pager.current_page, keep_scroll=True)
         self.saved_text.value = message
         show_snack(self._page, message, C.EM, text_color=C.ON_EM)
         if self._on_changed:
@@ -757,7 +831,7 @@ class EntriesPanel(ft.Column):
             )
             return
         log_info(f"Mod 資料庫還原：history_id={history_id}，還原 {count} 筆")
-        self._load_list(page=self.pager.current_page)
+        self._load_list(page=self.pager.current_page, keep_scroll=True)
         show_snack(
             self._page,
             f"已還原 {count} 筆" if count else "沒有可還原的內容（之後已被再次修改）",
@@ -769,8 +843,39 @@ class EntriesPanel(ft.Column):
 
     def show_filter(self, state: str) -> None:
         """從其他頁籤（總覽／掃描結果）跳進來時套用狀態篩選。"""
+        self._set_flagged(None, {})
         self.state = state
         self.state_seg.select(state)
+
+    def show_flagged(
+        self, entry_ids: list[int], drafts: dict[int, str], version: str
+    ) -> None:
+        """從批次機翻跳進來：只列「特殊字元不一致、沒寫入」的條目，並預填 AI 譯文供修正。"""
+        self.version = version
+        self.mod_id = None
+        self.kind = None
+        self.query = ""
+        self.search.value = ""
+        self.state = "none"
+        self.state_seg.select("none")
+        self.source_filter.reset()
+        self._set_flagged(list(entry_ids), dict(drafts))
+
+    def clear_flagged(self) -> None:
+        """清除「特殊字元不一致」篩選，回到一般清單。"""
+        self._set_flagged(None, {})
+        self._load_list()
+        self._safe_update()
+
+    def _set_flagged(self, entry_ids: list[int] | None, drafts: dict[int, str]) -> None:
+        self.entry_ids = entry_ids
+        self.drafts = drafts
+        self.flagged_banner.visible = entry_ids is not None
+        if entry_ids is not None:
+            self.flagged_text.value = (
+                f"只顯示本次機翻「特殊字元與原文不一致」的 {len(entry_ids):,} 筆"
+                "（AI 譯文尚未寫入，已預填在譯文框；修正後儲存即可，或按「清除篩選」）"
+            )
 
     def _safe_update(self) -> None:
         try:

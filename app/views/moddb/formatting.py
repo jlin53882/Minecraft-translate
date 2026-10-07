@@ -17,6 +17,7 @@ STATE_LABELS = {
     "none": "未翻譯",
     "diff": "版本不同",
     "changed": "原文已變動",
+    "same": "翻譯與原文相同",
     "manual": "人工",
     "ok": "有譯文",
 }
@@ -84,7 +85,7 @@ def impact_text(version: str, new_text: str, impacts) -> str:
 _TOKEN_RE = re.compile(
     r"§[0-9a-fk-orA-FK-OR]|%(?:\d+\$)?[sdfxXeEgGcb%]|\$\([^)]*\)|\{\d*\}|\\n|\n"
 )
-_TOKEN_NAMES = {"\n": "換行", "\\n": "字面 \\n"}
+_TOKEN_NAMES = {"\n": "換行", "\\n": "字面 \\n", "$(t:…)": "提示文字 $(t:…)"}
 
 
 def visible_breaks(text: str) -> str:
@@ -120,9 +121,65 @@ def visible_segments(text: str) -> list[tuple[str, str]]:
     return out
 
 
+# Patchouli 的提示文字 `$(t:提示文字)`：括號裡的文字是要翻譯的，只比對「有幾個提示標記」
+_TOOLTIP_PREFIX = "$(t:"
+_TOOLTIP_TOKEN = "$(t:…)"
+
+
+# 掃描用：Patchouli 巨集只認開頭 `$(`，結尾用括號配對找（提示文字／網址裡可能有成對的括號）
+_SCAN_RE = re.compile(
+    r"§[0-9a-fk-orA-FK-OR]|%(?:\d+\$)?[sdfxXeEgGcb%]|\$\(|\{\d*\}|\\n|\n"
+)
+
+
+def _macro_end(text: str, start: int) -> int | None:
+    """``$(`` 之後的結尾位置（含 ``)``）。依括號配對（巢狀的成對括號算在內）；
+    括號沒有配對完（缺 ``)``）時退回第一個 ``)``；完全沒有 ``)`` 回傳 None。"""
+    depth = 1
+    for i in range(start, len(text)):
+        char = text[i]
+        if char == "(":
+            depth += 1
+        elif char == ")":
+            depth -= 1
+            if depth == 0:
+                return i + 1
+    first = text.find(")", start)
+    return None if first < 0 else first + 1
+
+
+def _iter_tokens(text: str):
+    pos = 0
+    while True:
+        m = _SCAN_RE.search(text, pos)
+        if m is None:
+            return
+        if m.group(0) == "$(":
+            end = _macro_end(text, m.end())
+            if end is None:  # 沒有結尾的 `$(` 不是標記
+                pos = m.end()
+                continue
+            yield text[m.start() : end]
+            pos = end
+        else:
+            yield m.group(0)
+            pos = m.end()
+
+
 def format_tokens(text: str) -> Counter[str]:
-    """文字中的換行、`§` 格式碼、`%s` 類佔位符、Patchouli `$(…)`、`{0}` 的出現次數。"""
-    return Counter(m.group(0).replace("\r", "") for m in _TOKEN_RE.finditer(text or ""))
+    """文字中的換行、`§` 格式碼、`%s` 類佔位符、Patchouli `$(…)`、`{0}` 的出現次數。
+
+    ``$(t:提示文字)`` 的內容會被翻譯，所以統一記成 ``$(t:…)``；其餘 ``$(…)``
+    （``$(item)``、``$(ttcolor)``、``$(l:連結)`` 等不能翻譯）仍須完全相同。
+    巨集的結尾依括號配對，提示文字或網址裡成對的括號（例如 ``f(x)``）不會讓標記提早結束。
+    """
+    tokens: Counter[str] = Counter()
+    for raw in _iter_tokens(text or ""):
+        token = raw.replace("\r", "")
+        if token.startswith(_TOOLTIP_PREFIX):
+            token = _TOOLTIP_TOKEN
+        tokens[token] += 1
+    return tokens
 
 
 def token_issues(source: str, translated: str) -> list[str]:
