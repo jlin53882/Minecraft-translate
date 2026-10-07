@@ -177,6 +177,15 @@ SETTINGS: tuple[Setting, ...] = (
         default=True,
     ),
     Setting(
+        "translation_db.merge_enabled",
+        "bool",
+        "語系合併時使用 Mod 資料庫補譯",
+        "general",
+        C_TDB,
+        "語系合併（階段 1／2）遇到純英文條目時，先向資料庫找相同（模組、鍵值、原文）的譯文，找到就直接寫入、不再進待翻譯；只補沒有譯文的條目，不覆蓋既有譯文。資料庫尚未建立或未指定目標版本時自動略過",
+        default=True,
+    ),
+    Setting(
         "translation_db.path",
         "str",
         "資料庫檔案（SQLite）",

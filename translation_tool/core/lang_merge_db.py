@@ -72,7 +72,7 @@ def open_merge_db_fill(
 ) -> MergeDbFill | None:
     """依設定開啟資料庫；``use_db`` / ``version`` 為 None 時用設定檔的值（與機器翻譯一致）。"""
     settings = load_db_settings()
-    enabled = settings.enabled if use_db is None else bool(use_db)
+    enabled = settings.merge_enabled if use_db is None else bool(use_db)
     if not enabled:
         return None
     target = (version if version is not None else settings.version).strip()
@@ -80,7 +80,7 @@ def open_merge_db_fill(
         log_debug("語系合併：Mod 資料庫已啟用但尚未指定目標版本，略過資料庫補譯")
         return None
     db = open_db(settings, create=False)
-    if db is None:
+    if db is None:  # 資料庫尚未建立／無法開啟：略過（open_db 已記錄原因）
         return None
     log_info(f"📚 語系合併使用 Mod 資料庫補譯：{db.path.name}（目標版本 {target}）")
     return MergeDbFill(db, target, settings.cross_version)

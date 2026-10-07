@@ -36,6 +36,9 @@ class DbSettings:
     """``translation_db`` 設定的快照。"""
 
     enabled: bool = True
+    merge_enabled: bool = (
+        True  # 語系合併是否以資料庫補譯（與機器翻譯的 enabled 各自獨立）
+    )
     path: str = ""  # 空白 = 資料目錄內的預設檔名；首次建立資料庫時會寫入實際路徑
     version: str = ""
     cross_version: bool = True
@@ -246,6 +249,7 @@ def load_db_settings(config: dict | None = None) -> DbSettings:
     by_name.update(registry)
     return DbSettings(
         enabled=bool(cfg.get("enabled", True)),
+        merge_enabled=bool(cfg.get("merge_enabled", True)),
         path=path,
         version=str(cfg.get("version") or "").strip(),
         cross_version=bool(cfg.get("cross_version", True)),

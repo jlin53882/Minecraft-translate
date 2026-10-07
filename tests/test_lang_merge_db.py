@@ -89,7 +89,7 @@ def test_stage1_fills_pending_from_database(tmp_path, monkeypatch, db_path):
 
 
 def test_stage1_unchanged_when_database_disabled(tmp_path, monkeypatch, db_path):
-    _settings(monkeypatch, db_path, enabled=False)
+    _settings(monkeypatch, db_path, merge_enabled=False)
     tw, pending = _run_stage1(tmp_path)
     assert "item.foo.a" not in tw
     assert "item.foo.a" in pending
@@ -144,3 +144,22 @@ def test_context_manager_closes_database(monkeypatch, db_path):
         assert fill is not None
         tw, pending, hits = fill.fill("foo", {}, {"item.foo.a": "Steel Casing"})
     assert (tw, pending, hits) == ({"item.foo.a": "鋼製外殼"}, {}, 1)
+
+
+def test_stage1_skips_when_database_not_created(tmp_path, monkeypatch):
+    """設定啟用、也有版本，但資料庫檔案不存在：略過，不建立檔案、合併照舊。"""
+    missing = tmp_path / "never_created.db"
+    _settings(monkeypatch, missing)
+    _tw, pending = _run_stage1(tmp_path)
+    assert "item.foo.a" in pending
+    assert not missing.exists()
+
+
+def test_merge_switch_is_independent_of_translation_switch(monkeypatch, db_path):
+    """語系合併開關與「翻譯時使用資料庫」各自獨立。"""
+    _settings(monkeypatch, db_path, enabled=False, merge_enabled=True)
+    with merge_db_fill() as fill:
+        assert fill is not None
+    _settings(monkeypatch, db_path, enabled=True, merge_enabled=False)
+    with merge_db_fill() as fill:
+        assert fill is None

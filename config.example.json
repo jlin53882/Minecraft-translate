@@ -18,6 +18,7 @@
     },
     "translation_db": {
         "enabled": true,
+        "merge_enabled": true,
         "path": "",
         "version": "",
         "cross_version": true,
