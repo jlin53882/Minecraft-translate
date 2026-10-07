@@ -107,14 +107,18 @@ class ModDbView(ft.Column):
         self.tab = key
         self.tab_seg.select(key)
         panel = self._panels[key]
+        # 離開頁籤時面板被卸載（will_unmount 會停掉輪詢）；任務還在跑，切回來要接續輪詢，
+        # 否則畫面停在離開當下的進度，直到任務結束後也不會更新
         if key == "overview":
             self.overview.refresh()
         elif key == "entries":
             self.entries.refresh()
         elif key == "scan":
             self.scan.refresh_versions()
+            self.scan.resume()
         elif key == "translate":
             self.translate.refresh_scope()
+            self.translate.resume()
         self.body.content = panel
         if update:
             self._safe_update()

@@ -750,3 +750,23 @@ def test_visible_segments_exposes_newline_spaces_and_tokens():
     assert ("·", "space") in segs
     assert ("↵", "newline") in segs
     assert "".join(s for s, k in segs if k == "text") == "Hi \n"
+
+
+def test_switching_back_to_a_running_tab_resumes_polling(db_path, monkeypatch):
+    """機翻／掃描進行中切到別的頁籤再回來：面板卸載時輪詢已停，必須接續輪詢，畫面才不會卡住。"""
+    seed(db_path)
+    view = moddb_view.ModDbView(mock_page(), mock_filepicker())
+    for panel, key in ((view.translate, "translate"), (view.scan, "scan")):
+        started = []
+        monkeypatch.setattr(
+            panel._poller,
+            "start",
+            lambda page, handler, _s=started: _s.append(1) or True,
+        )
+        panel.session = TaskSession()
+        panel._running = True
+        panel.will_unmount()  # 離開頁籤：面板被卸載、輪詢停止
+        view.show_tab("entries")
+        assert started == []  # 不在這個頁籤時不需要輪詢
+        view.show_tab(key)
+        assert started == [1], f"{key} 切回來後沒有接續輪詢"
