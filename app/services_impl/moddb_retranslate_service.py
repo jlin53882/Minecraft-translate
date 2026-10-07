@@ -268,7 +268,6 @@ def _handle_batch_completion(
     batch,
     results,
     status,
-    pending_items,
     cache_types_to_save,
 ) -> bool:
     """Flush finalized cache writes and decide whether the run must stop."""
@@ -289,9 +288,6 @@ def _handle_batch_completion(
     if str(status or "").upper() not in {"DONE", "AUTO"}:
         report.last_error = report.last_error or f"翻譯引擎回傳狀態：{status}"
         stop_after_batch = True
-    if stop_after_batch:
-        report.failed += len(pending_items)
-        pending_items.clear()
     return stop_after_batch
 
 
@@ -323,7 +319,7 @@ def _translate_snapshot(
         batch, cache_type = _same_batch_prefix(items, lm_cfg)
         report.batches += 1
         translated, status = translate_batch_smart(batch, total)
-        results, stop_after_batch = _finalize_batch_results(
+        results, finalize_stop = _finalize_batch_results(
             db,
             options,
             session,
@@ -336,16 +332,19 @@ def _translate_snapshot(
 
         processed += len(results)
         items = items[len(batch) :]
-        stop_after_batch = _handle_batch_completion(
+        completion_stop = _handle_batch_completion(
             options,
             session,
             report,
             batch,
             results,
             status,
-            items,
             cache_types_to_save,
         )
+        stop_after_batch = finalize_stop or completion_stop
+        if stop_after_batch:
+            report.failed += len(items)
+            items.clear()
 
         if tracker.update(processed):
             live = tracker.live()
