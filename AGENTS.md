@@ -42,7 +42,7 @@
 
 This project is indexed by GitNexus as **Minecraft-translate** (13684 symbols, 36964 relationships, 845 execution flows).
 
-> Index stale? Run `node .gitnexus/run.cjs analyze --index-only` from the project root — it auto-selects an available runner. No `.gitnexus/run.cjs` yet? Bootstrap with `npx`, `bunx`, or `pnpm dlx` — e.g. `bunx gitnexus@latest analyze` (npm 11 npx crash; #1939).
+> Index stale? Run `node .gitnexus/run.cjs analyze --embeddings --index-only` from the project root — embeddings use the configured provider (on this machine, Ollama `qwen3-embedding:4b` on GPU). No `.gitnexus/run.cjs` yet? Bootstrap with `npx`, `bunx`, or `pnpm dlx` — e.g. `bunx gitnexus@latest analyze --embeddings` (npm 11 npx crash; #1939).
 
 ## Always Do
 
