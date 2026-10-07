@@ -51,7 +51,12 @@ CUSTOM_SOURCE_BASE = 100
 
 
 def register_source_names(registry: dict[str, int]) -> None:
-    """把資料庫登錄的自訂來源名稱加進 ``SOURCE_NAMES``（就地更新，所有模組同時看得到）。"""
+    """以這個資料庫登錄的自訂來源取代 ``SOURCE_NAMES`` 的自訂部分（就地更新）。
+
+    先清掉前一個資料庫留下的自訂碼，切換資料庫後才不會殘留別的庫的來源。
+    """
+    for code in [c for c in SOURCE_NAMES if c >= CUSTOM_SOURCE_BASE]:
+        del SOURCE_NAMES[code]
     for name, code in registry.items():
         if code >= CUSTOM_SOURCE_BASE:
             SOURCE_NAMES[int(code)] = name

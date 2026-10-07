@@ -881,10 +881,11 @@ class TranslationDB:
         return where, params
 
     # 其他版本已有「類型／模組／鍵值／原文都相同」的生效譯文（可直接沿用，不必呼叫 AI）
-    _REUSABLE_SQL = """EXISTS (
-        SELECT 1 FROM entry e2 JOIN effective f2 ON f2.entry_id = e2.id
+    # 其他版本的譯文必須一致才算（有衝突時不自動沿用，交給 AI 或人工，避免任意挑一版）
+    _REUSABLE_SQL = """(
+        SELECT COUNT(DISTINCT f2.zh_tw) FROM entry e2 JOIN effective f2 ON f2.entry_id = e2.id
         WHERE e2.kind = e.kind AND e2.mod_id = e.mod_id AND e2.key = e.key
-          AND e2.en_us = e.en_us AND e2.mc_version <> e.mc_version)"""
+          AND e2.en_us = e.en_us AND e2.mc_version <> e.mc_version) = 1"""
 
     def count_reusable(self, version: str, mod_ids: Sequence[str] | None = None) -> int:
         """未翻譯條目中，其他版本已有相同內容譯文、開始機翻時會直接沿用的筆數。"""
@@ -935,7 +936,7 @@ class TranslationDB:
         sql = (
             "SELECT e.id, e.kind, e.mod_id, e.key, e.en_us "
             "FROM entry e LEFT JOIN effective f ON f.entry_id = e.id "
-            f"WHERE {where} ORDER BY e.mod_id, e.kind, e.key"
+            f"WHERE {where} ORDER BY e.kind, e.mod_id, e.key"
         )
         params: list = [version, *extra]
         if limit is not None and limit > 0:
@@ -953,13 +954,13 @@ class TranslationDB:
         where, extra = self._untranslated_where(mod_ids)
         with self._tx() as conn:
             rows = conn.execute(
-                "SELECT e.id, f2.source, f2.zh_tw FROM entry e "
+                "SELECT e.id, MIN(f2.source), MIN(f2.zh_tw) FROM entry e "
                 "LEFT JOIN effective f ON f.entry_id = e.id "
                 "JOIN entry e2 ON e2.kind = e.kind AND e2.mod_id = e.mod_id "
                 "AND e2.key = e.key AND e2.en_us = e.en_us "
                 "AND e2.mc_version <> e.mc_version "
                 "JOIN effective f2 ON f2.entry_id = e2.id "
-                f"WHERE {where} ORDER BY e.id, f2.rowid",
+                f"WHERE {where} GROUP BY e.id HAVING COUNT(DISTINCT f2.zh_tw) = 1 ORDER BY e.id",
                 [version, *extra],
             ).fetchall()
             seen: set[int] = set()

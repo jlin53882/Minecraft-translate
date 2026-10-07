@@ -210,6 +210,15 @@ def run_moddb_scan_service(
             )
             session.set_error()
             return
+        if options.translated and options.translation_source not in SOURCE_NAMES:
+            _log_both(
+                session,
+                f"[錯誤] 譯文來源代碼 {options.translation_source} 不在目前資料庫的來源清單中，"
+                "請重新選擇「譯文來源標記」。",
+                "error",
+            )
+            session.set_error()
+            return
         _log_both(
             session,
             f"開始{'預覽' if options.dry_run else '掃描'}：版本 {options.version}，來源 {folder}"

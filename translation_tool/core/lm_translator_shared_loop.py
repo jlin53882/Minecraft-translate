@@ -172,9 +172,18 @@ def translate_items_with_cache_loop(
         if batch_size <= 0:
             batch_size = 50
 
+        # 同一批只能有一種 cache_type：提示詞 profile、快取分片與 cache_save 都以它為準，
+        # 混批會讓後面的類型用錯提示詞、快取寫到錯的分片。只取開頭連續同型的區段。
+        homogeneous = 1
+        while (
+            homogeneous < len(remaining)
+            and str(remaining[homogeneous].get("cache_type") or "lang") == cache_type
+        ):
+            homogeneous += 1
+
         # 項目數上限之外，再依 token 預算取前綴（與 lm_translator_main 共用同一個估算與學到的預算）
         fit_count = select_batch_size(
-            remaining,
+            remaining[:homogeneous],
             profile_for_cache_type(cache_type),
             batch_size,
             _lm_config(),

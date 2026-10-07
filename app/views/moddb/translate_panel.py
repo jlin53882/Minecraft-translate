@@ -345,7 +345,13 @@ class TranslatePanel(ft.Column):
                     f"耗時 {format_duration(summary.get('elapsed_sec'))}"
                 )
             if status == "ERROR":
-                self._set_status("機翻發生錯誤", "red")
+                partial = summary.get("status")
+                self._set_status(
+                    f"未完成（{partial}）"
+                    if partial not in (None, "DONE")
+                    else "機翻發生錯誤",
+                    "red",
+                )
             elif getattr(session, "cancel_requested", False):
                 self._set_status("已取消", "gold")
             elif summary.get("dry_run"):

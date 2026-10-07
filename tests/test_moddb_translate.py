@@ -23,6 +23,7 @@ from translation_tool.translation_db import (
 )
 from translation_tool.translation_db.models import WriteBackItem
 from translation_tool.translation_db.schema import SRC_AI, SRC_JAR_TW
+from translation_tool.translation_db.schema import KIND_PATCHOULI
 
 
 @pytest.fixture
@@ -1157,3 +1158,108 @@ def test_changed_filter_skips_the_scan_when_there_are_no_source_changes(db_path)
     assert db.list_entries("1.21.1", state="changed") == ([], 0)
     assert not any("FROM entry e LEFT JOIN effective" in q for q in queried)
     db.close()
+
+
+def test_aborted_run_ends_session_as_error(db_path, monkeypatch):
+    """P2-5：ABORTED 不可記成 DONE。"""
+    seed(db_path)
+    monkeypatch.setattr(moddb_translate_service, "ABORT_AFTER_FAILURES", 1)
+    monkeypatch.setattr(
+        moddb_translate_service,
+        "translate_batch_smart",
+        lambda batch, total=None, dry_run=False: (
+            [{**it, "_untranslated": True} for it in batch],
+            "DONE",
+        ),
+    )
+    monkeypatch.setattr(
+        moddb_translate_service,
+        "run_translator_skeleton",
+        _skeleton_one_per_batch(moddb_translate_service.run_translator_skeleton),
+    )
+    snap = run(TranslateOptions(version="1.21.1", mod_ids=("foo",)))
+    assert snap["status"] == "ERROR" and snap["summary"]["status"] == "ABORTED"
+
+
+def test_db_flush_failure_retries_and_keeps_buffer(db_path, monkeypatch):
+    """P1-B：寫入先失敗後成功 → 不遺失譯文；一直失敗 → FAILED/ERROR 且 written 不灌水。"""
+    seed(db_path)
+    fake_engine(monkeypatch, lambda t: "譯:" + t)
+    real = TranslationDB.write_back
+    state = {"fail": 1}
+
+    def flaky(self, *a, **k):
+        if state["fail"] > 0:
+            state["fail"] -= 1
+            raise OSError("disk full")
+        return real(self, *a, **k)
+
+    monkeypatch.setattr(TranslationDB, "write_back", flaky)
+    snap = run(TranslateOptions(version="1.21.1", mod_ids=("foo",)))
+    assert snap["status"] == "DONE" and snap["summary"]["written"] == 2
+
+    seed_db = TranslationDB(db_path)
+    assert seed_db.count_untranslated("1.21.1", ["foo"]) == 0
+    seed_db.close()
+
+
+def test_db_flush_permanent_failure_is_error(db_path, monkeypatch):
+    seed(db_path)
+    fake_engine(monkeypatch, lambda t: "譯:" + t)
+
+    def boom(self, *a, **k):
+        raise OSError("locked")
+
+    monkeypatch.setattr(TranslationDB, "write_back", boom)
+    snap = run(TranslateOptions(version="1.21.1", mod_ids=("foo",)))
+    assert snap["status"] == "ERROR"
+    assert snap["summary"]["status"] == "FAILED" and snap["summary"]["written"] == 0
+
+
+def test_reuse_skips_conflicting_other_versions(db_path):
+    """P2-4：其他版本譯文不一致時不自動沿用。"""
+    db = TranslationDB(db_path)
+    db.ingest("1.21.1", [ScanItem(KIND_LANG, "m", "k", "Gear")])
+    db.ingest("1.20.1", [ScanItem(KIND_LANG, "m", "k", "Gear", "齒輪")])
+    db.ingest("1.19.2", [ScanItem(KIND_LANG, "m", "k", "Gear", "傳動輪")])
+    assert db.count_reusable("1.21.1") == 0
+    assert db.reuse_from_other_versions("1.21.1") == 0
+    db.ingest("1.18.2", [ScanItem(KIND_LANG, "n", "k", "Gear")])
+    db.ingest("1.17.1", [ScanItem(KIND_LANG, "n", "k", "Gear", "齒輪")])
+    db.ingest("1.16.5", [ScanItem(KIND_LANG, "n", "k", "Gear", "齒輪")])
+    assert db.reuse_from_other_versions("1.18.2") == 1
+    db.close()
+
+
+def test_loop_batches_are_homogeneous_cache_type(monkeypatch):
+    """P1-A：lang 與 patchouli 不可混在同一批。"""
+    from translation_tool.core import lm_translator_shared_loop as loop
+
+    seen = []
+    saved = []
+
+    def tb(batch, total=None, dry_run=False):
+        seen.append({i["cache_type"] for i in batch})
+        return [{**i, "text": "譯"} for i in batch], "DONE"
+
+    items = [
+        {
+            "file": "m/a",
+            "path": f"k{i}",
+            "text": "x",
+            "source_text": "x",
+            "cache_type": "lang" if i < 3 else "patchouli",
+        }
+        for i in range(6)
+    ]
+    loop.translate_items_with_cache_loop(
+        items,
+        total_for_smart=6,
+        translate_batch_smart=tb,
+        write_new_cache=True,
+        reload_cache=False,
+        cache_add=lambda *a, **k: True,
+        cache_save=lambda ct, **k: saved.append(ct) or True,
+    )
+    assert all(len(s) == 1 for s in seen)
+    assert set(saved) == {"lang", "patchouli"}

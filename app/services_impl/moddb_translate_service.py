@@ -62,6 +62,7 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_LIMIT = 2000
 _FLAGGED_LOG_LIMIT = 20
+DB_FLUSH_RETRIES = 3  # 寫入資料庫失敗時的重試次數
 ABORT_AFTER_FAILURES = 500  # 連續這麼多筆都沒翻成功就中止（API Key／模型設定有問題）
 
 
@@ -192,12 +193,41 @@ def _select_rows(session, db, options: TranslateOptions, report: TranslateReport
     return rows
 
 
+def _flush_buffer(session, db, version, buffer, report, failures) -> None:
+    """把緩衝寫進資料庫；寫入成功才清緩衝，失敗會重試，仍失敗就留著並記下錯誤。"""
+    if not buffer:
+        return
+    for attempt in range(1, DB_FLUSH_RETRIES + 1):
+        try:
+            done = db.write_back(version, list(buffer), fill_other_versions=True)
+        except Exception as exc:  # noqa: BLE001 - 持久化失敗需重試並回報
+            failures["db_error"] = f"{type(exc).__name__}: {exc}"
+            logger.error(
+                "寫入資料庫失敗（第 %d/%d 次，待寫 %d 筆）: %s",
+                attempt,
+                DB_FLUSH_RETRIES,
+                len(buffer),
+                exc,
+                extra={"ui_mirrored": True},
+            )
+            _log(
+                session,
+                f"寫入資料庫失敗（第 {attempt}/{DB_FLUSH_RETRIES} 次）：{exc}",
+                "error",
+            )
+            continue
+        buffer.clear()
+        failures["db_error"] = ""
+        report.written += done.written
+        return
+
+
 def _translate_rows(
     session, db, options: TranslateOptions, report: TranslateReport, rows, cancelled
 ) -> None:
     """分批機翻並寫回；每批先檢查特殊字元，一致者才寫入。"""
     buffer: list[WriteBackItem] = []
-    failures = {"streak": 0, "aborted": False}
+    failures = {"streak": 0, "aborted": False, "db_error": ""}
 
     def on_translated_item(item: dict[str, Any]) -> None:
         if item.get("_untranslated"):
@@ -221,11 +251,7 @@ def _translate_rows(
         )
 
     def flush() -> None:
-        if not buffer:
-            return
-        batch, buffer[:] = list(buffer), []
-        done = db.write_back(options.version, batch, fill_other_versions=True)
-        report.written += done.written
+        _flush_buffer(session, db, options.version, buffer, report, failures)
 
     def on_progress(progress: float, message: str, _eta: float) -> None:
         session.set_progress(progress)
@@ -237,7 +263,7 @@ def _translate_rows(
         session.set_summary({**report.as_dict(), "live": tracker.live()})
 
     def translate_batch(batch, batch_total):
-        if cancelled() or is_cancelled() or failures["aborted"]:
+        if cancelled() or is_cancelled() or failures["aborted"] or failures["db_error"]:
             raise TaskCancelled()
         return translate_batch_smart(batch, total=batch_total)
 
@@ -260,9 +286,21 @@ def _translate_rows(
             ),
         )
     flush()
-    report.status = "ABORTED" if failures["aborted"] else result.status
+    if failures["db_error"]:
+        report.status = "FAILED"
+        session.set_error()
+        _log(
+            session,
+            f"❌ 資料庫寫入持續失敗，已停止；尚有 {len(buffer)} 筆譯文未寫入"
+            f"（{failures['db_error']}）。請排除問題（磁碟空間/檔案鎖定）後重新執行。",
+            "error",
+        )
+    else:
+        report.status = "ABORTED" if failures["aborted"] else result.status
     report.batches = tracker.batches_done
     report.elapsed_sec = tracker.elapsed()
+    if report.status in ("FAILED", "ABORTED", "ALL_KEYS_EXHAUSTED"):
+        session.set_error()  # 未完成不可記成 DONE（P2-5）
     if failures["aborted"]:
         _log(
             session,
