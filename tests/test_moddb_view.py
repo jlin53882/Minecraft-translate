@@ -861,3 +861,33 @@ def test_entries_save_on_the_last_row_of_the_last_page_goes_back_a_page(db_path)
     panel._save()
     assert panel.pager.current_page == 1 and len(panel.rows) == entries_panel.PAGE_SIZE
     db.close()
+
+
+def test_tooltip_text_inside_patchouli_t_macro_may_be_translated():
+    """`$(t:提示文字)` 括號裡是顯示給玩家的提示，翻譯它不算特殊字元不一致。"""
+    from app.views.moddb import formatting as fm
+
+    source = (
+        "The $(item)Reinforced Pressure Chamber Valve/$ is an advanced block, "
+        "possibly unlocking $(ttcolor)$(t:By default all recipes require a max of 5 bar, "
+        "but modpacks may change this)new recipes/$."
+    )
+    translated = (
+        "$(item)強化壓力室閥門/$ 是一種進階方塊，並可能解鎖 $(ttcolor)"
+        "$(t:預設情況下，所有配方所需的最大壓力皆為 5 bar，但模組包可能會修改此設定)新的配方/$。"
+    )
+    assert fm.token_issues(source, translated) == []
+    # 提示標記本身不見了還是要提醒
+    no_tooltip = translated.replace(
+        "$(t:預設情況下，所有配方所需的最大壓力皆為 5 bar，但模組包可能會修改此設定)",
+        "",
+    )
+    assert fm.token_issues(source, no_tooltip) == ["少了 1 個「提示文字 $(t:…)」"]
+    # 不能翻譯的巨集（$(item)、$(ttcolor)、連結）仍須完全相同
+    assert fm.token_issues(source, translated.replace("$(ttcolor)", "")) == [
+        "少了 1 個「$(ttcolor)」"
+    ]
+    assert fm.token_issues("$(l:patchouli:a)x/$", "$(l:patchouli:b)甲/$") == [
+        "少了 1 個「$(l:patchouli:a)」",
+        "多了 1 個「$(l:patchouli:b)」",
+    ]

@@ -84,7 +84,7 @@ def impact_text(version: str, new_text: str, impacts) -> str:
 _TOKEN_RE = re.compile(
     r"§[0-9a-fk-orA-FK-OR]|%(?:\d+\$)?[sdfxXeEgGcb%]|\$\([^)]*\)|\{\d*\}|\\n|\n"
 )
-_TOKEN_NAMES = {"\n": "換行", "\\n": "字面 \\n"}
+_TOKEN_NAMES = {"\n": "換行", "\\n": "字面 \\n", "$(t:…)": "提示文字 $(t:…)"}
 
 
 def visible_breaks(text: str) -> str:
@@ -120,9 +120,24 @@ def visible_segments(text: str) -> list[tuple[str, str]]:
     return out
 
 
+# Patchouli 的提示文字 `$(t:提示文字)`：括號裡的文字是要翻譯的，只比對「有幾個提示標記」
+_TOOLTIP_PREFIX = "$(t:"
+_TOOLTIP_TOKEN = "$(t:…)"
+
+
 def format_tokens(text: str) -> Counter[str]:
-    """文字中的換行、`§` 格式碼、`%s` 類佔位符、Patchouli `$(…)`、`{0}` 的出現次數。"""
-    return Counter(m.group(0).replace("\r", "") for m in _TOKEN_RE.finditer(text or ""))
+    """文字中的換行、`§` 格式碼、`%s` 類佔位符、Patchouli `$(…)`、`{0}` 的出現次數。
+
+    ``$(t:提示文字)`` 的內容會被翻譯，所以統一記成 ``$(t:…)``；其餘 ``$(…)``
+    （``$(item)``、``$(ttcolor)``、``$(l:連結)`` 等不能翻譯）仍須完全相同。
+    """
+    tokens: Counter[str] = Counter()
+    for m in _TOKEN_RE.finditer(text or ""):
+        token = m.group(0).replace("\r", "")
+        if token.startswith(_TOOLTIP_PREFIX):
+            token = _TOOLTIP_TOKEN
+        tokens[token] += 1
+    return tokens
 
 
 def token_issues(source: str, translated: str) -> list[str]:
