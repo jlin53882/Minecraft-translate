@@ -13,6 +13,9 @@ from app.views.moddb.formatting import format_count, percent
 from translation_tool.utils.log_unit import log_debug
 
 # 進度條各段：(欄位, 標籤, 色調)
+# 總覽四張 KPI 卡的標題列固定高度（有按鈕的卡比較高，固定後四張才等高）
+OVERVIEW_CARD_HEAD = 32
+
 SEGMENTS = (
     ("manual", "人工", "ench"),
     ("jar", "模組自帶／人工來源", "dia"),
@@ -75,7 +78,6 @@ class OverviewPanel(ft.Column):
                         self.stat_changed,
                     ],
                     spacing=12,
-                    vertical_alignment=ft.CrossAxisAlignment.STRETCH,  # 四張卡等高
                 ),
                 kit.section_card(
                     "各版本翻譯進度",
@@ -135,9 +137,15 @@ class OverviewPanel(ft.Column):
             delta="資料庫內出現過的模組",
             delta_tone="neutral",
             expand=1,
+            head_height=OVERVIEW_CARD_HEAD,
         )
         self.stat_content = kit.stat_card(
-            "不重複條目", "—", icon=ft.Icons.TEXT_SNIPPET_OUTLINED, tone="dia", expand=1
+            "不重複條目",
+            "—",
+            icon=ft.Icons.TEXT_SNIPPET_OUTLINED,
+            tone="dia",
+            expand=1,
+            head_height=OVERVIEW_CARD_HEAD,
         )
         self.stat_diff = kit.stat_card(
             "跨版本譯文不同",
@@ -148,6 +156,7 @@ class OverviewPanel(ft.Column):
             delta_tone="neutral",
             expand=1,
             action=ft.Row([self.diff_help_btn, self.diff_btn], spacing=4, tight=True),
+            head_height=OVERVIEW_CARD_HEAD,
         )
         self.stat_changed = kit.stat_card(
             "原文已變動",
@@ -158,6 +167,7 @@ class OverviewPanel(ft.Column):
             delta_tone="neutral",
             expand=1,
             action=self.changed_btn,
+            head_height=OVERVIEW_CARD_HEAD,
         )
 
     # ------------------------------------------------------------------ 載入

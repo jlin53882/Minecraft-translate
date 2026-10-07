@@ -750,3 +750,29 @@ def test_visible_segments_exposes_newline_spaces_and_tokens():
     assert ("·", "space") in segs
     assert ("↵", "newline") in segs
     assert "".join(s for s, k in segs if k == "text") == "Hi \n"
+
+
+def test_overview_kpi_row_does_not_stretch_in_an_unbounded_column(db_path):
+    """總覽在可捲動欄位裡：KPI 列不可用 STRETCH（高度無上限會讓版面例外、整個總覽變空白）。
+
+    四張卡改用相同的標題列高度來等高。
+    """
+    import flet as ft
+
+    seed(db_path)
+    view = moddb_view.ModDbView(mock_page(), mock_filepicker())
+    overview = view.overview
+    cards = [
+        overview.stat_mods,
+        overview.stat_content,
+        overview.stat_diff,
+        overview.stat_changed,
+    ]
+    row = next(
+        c
+        for c in overview.content_col.controls
+        if isinstance(c, ft.Row) and overview.stat_mods in c.controls
+    )
+    assert row.vertical_alignment != ft.CrossAxisAlignment.STRETCH
+    heights = {card.content.controls[0].height for card in cards}
+    assert len(heights) == 1 and heights != {None}

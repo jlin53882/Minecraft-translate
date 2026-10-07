@@ -188,6 +188,7 @@ class StatCard(ft.Container):
         delta_tone: str = "em",
         expand: bool | int = False,
         action: ft.Control | None = None,
+        head_height: int | None = None,
     ) -> None:
         head: list[ft.Control] = []
         if icon:
@@ -213,6 +214,7 @@ class StatCard(ft.Container):
                 [
                     ft.Row(
                         head,
+                        height=head_height,  # 同一列的卡片用相同標題列高度，才會等高
                         spacing=8,
                         vertical_alignment=ft.CrossAxisAlignment.CENTER,
                     ),
@@ -254,6 +256,7 @@ def stat_card(
     delta_tone: str = "em",
     expand: bool | int = False,
     action: ft.Control | None = None,
+    head_height: int | None = None,
 ) -> StatCard:
     """``StatCard`` 的函式寫法。"""
     return StatCard(
@@ -265,6 +268,7 @@ def stat_card(
         delta_tone=delta_tone,
         expand=expand,
         action=action,
+        head_height=head_height,
     )
 
 
