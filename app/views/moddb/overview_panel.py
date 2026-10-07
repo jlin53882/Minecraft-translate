@@ -75,6 +75,7 @@ class OverviewPanel(ft.Column):
                         self.stat_changed,
                     ],
                     spacing=12,
+                    vertical_alignment=ft.CrossAxisAlignment.STRETCH,  # 四張卡等高
                 ),
                 kit.section_card(
                     "各版本翻譯進度",

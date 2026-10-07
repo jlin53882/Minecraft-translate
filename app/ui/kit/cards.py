@@ -192,7 +192,9 @@ class StatCard(ft.Container):
         head: list[ft.Control] = []
         if icon:
             head.append(tone_icon(icon, tone, size=14))
-        head.append(ft.Text(label, size=12, color=C.MUTED, no_wrap=True))
+        head.append(ft.Text(label, size=12, color=C.MUTED, no_wrap=True, expand=True))
+        if action is not None:
+            head.append(action)  # 操作按鈕放標題列右側，不多佔一行（各卡高度才一致）
         self.value_text = ft.Text(
             value,
             size=25,
@@ -216,11 +218,6 @@ class StatCard(ft.Container):
                     ),
                     self.value_text,
                     self.delta_text,
-                    *(
-                        [ft.Row([action], alignment=ft.MainAxisAlignment.END)]
-                        if action is not None
-                        else []
-                    ),
                 ],
                 spacing=4,
                 tight=True,
