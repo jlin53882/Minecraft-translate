@@ -163,3 +163,39 @@ def test_merge_switch_is_independent_of_translation_switch(monkeypatch, db_path)
     _settings(monkeypatch, db_path, enabled=True, merge_enabled=False)
     with merge_db_fill() as fill:
         assert fill is None
+
+
+def test_resolver_stats_are_exact_under_concurrent_lookups(monkeypatch, db_path):
+    """多執行緒共用 resolver 時，命中／未命中統計不可少計（計數遞增需在鎖內）。"""
+    import threading
+    import time
+
+    from translation_tool.translation_db import TranslationResolver
+    from translation_tool.translation_db.resolver import ResolverStats
+
+    class SlowStats(ResolverStats):
+        """讀取計數時讓出執行緒，放大『讀—加—寫』被打斷的機會。"""
+
+        def __getattribute__(self, name):
+            value = super().__getattribute__(name)
+            if name in ("hit_target", "hit_cross", "en_mismatch", "miss"):
+                time.sleep(0.0005)  # 讀到舊值之後才讓出，其他執行緒會讀到同一個舊值
+            return value
+
+    db = TranslationDB(db_path)
+    resolver = TranslationResolver(db, "1.21.1")
+    resolver.stats = SlowStats()
+
+    def work():
+        for _ in range(20):
+            resolver.lookup(KIND_LANG, "foo", "item.foo.a", "Steel Casing")  # 命中
+            resolver.lookup(KIND_LANG, "foo", "item.foo.zzz", "Nope")  # 未命中
+
+    threads = [threading.Thread(target=work) for _ in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert resolver.stats.hit_target == 8 * 20
+    assert resolver.stats.miss == 8 * 20
+    db.close()

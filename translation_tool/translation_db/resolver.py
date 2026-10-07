@@ -63,6 +63,7 @@ class TranslationResolver:
         self.cross_version = cross_version
         self.stats = ResolverStats()
         self._lock = threading.Lock()
+        self._stats_lock = threading.Lock()  # 統計與載入模組表分開鎖，避免互相等待
         self._mods: dict[
             str, dict[tuple[str, str], list[tuple[str, str, str, int]]]
         ] = {}
@@ -78,26 +79,31 @@ class TranslationResolver:
                 self._mods[mod_id] = table
             return table
 
+    def _bump(self, field: str) -> None:
+        """多執行緒共用時，統計計數必須在鎖內遞增（``+=`` 不是原子操作）。"""
+        with self._stats_lock:
+            setattr(self.stats, field, getattr(self.stats, field) + 1)
+
     def lookup(self, kind: str, mod_id: str, key: str, en_us: str) -> Hit | None:
         if not en_us:
             return None
         cands = self._mod_table(mod_id).get((kind, key))
         if not cands:
-            self.stats.miss += 1
+            self._bump("miss")
             return None
         same = [c for c in cands if c[0] == en_us]
         if not same:
-            self.stats.en_mismatch += 1
+            self._bump("en_mismatch")
             return None
         own = next((c for c in same if c[1] == self.version), None)
         if own is not None:
-            self.stats.hit_target += 1
+            self._bump("hit_target")
             return Hit(own[2], own[3], own[1], False)
         if not self.cross_version:
-            self.stats.miss += 1
+            self._bump("miss")
             return None
         best = min(same, key=lambda c: abs(version_number(c[1]) - self._target))
-        self.stats.hit_cross += 1
+        self._bump("hit_cross")
         return Hit(best[2], best[3], best[1], True)
 
 
