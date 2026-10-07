@@ -1414,3 +1414,60 @@ def test_live_timing_uses_the_monotonic_clock(monkeypatch):
         ticked["finish_ts"] == live["finish_ts"]
     )  # 預計完成時刻仍是上次估計的牆上時間
     assert progress.elapsed() == 50.0
+
+
+def test_list_entries_can_filter_by_entry_ids(db_path):
+    seed(db_path)
+    db = TranslationDB(db_path)
+    rows = db.list_entries("1.21.1")[0]
+    wanted = [rows[0].id, rows[2].id]
+    got, total = db.list_entries("1.21.1", entry_ids=wanted)
+    assert total == 2 and {r.id for r in got} == set(wanted)
+    assert db.list_entries("1.21.1", entry_ids=[])[1] == 0
+    # 很多 id 也不會超過 SQLite 的參數上限
+    assert db.list_entries("1.21.1", entry_ids=list(range(1, 50_000)))[1] == len(rows)
+    db.close()
+
+
+def test_flagged_entries_flow_from_translation_to_entries_review(db_path, monkeypatch):
+    """機翻特殊字元不一致 → 統計卡「檢視」→ 條目校對只列這些條目、預填 AI 譯文並提示不一致。"""
+    from app.views import moddb_view
+
+    seed(db_path)
+    # 「Infused Alloy」的譯文多帶了 §a（與原文特殊字元不一致 → 不寫入）
+    fake_engine(
+        monkeypatch,
+        lambda t: "§a注入合金" if t == "Infused Alloy" else "譯:" + t,
+    )
+    summary = run(TranslateOptions(version="1.21.1", mod_ids=("foo",)))["summary"]
+    assert summary["flagged"] == 1
+    flagged = summary["flagged_entries"]
+    assert list(flagged.values()) == ["§a注入合金"]
+
+    view = moddb_view.ModDbView(mock_page(), mock_filepicker())
+    panel = view.translate
+    panel._run_version = "1.21.1"
+    assert panel.view_flagged_btn.visible is False
+    panel._apply_summary(summary)
+    assert panel.view_flagged_btn.visible is True
+    panel._view_flagged()  # 按「檢視」
+
+    entries = view.entries
+    assert view.tab == "entries" and entries.state == "none"
+    assert [r.key for r in entries.rows] == ["item.foo.b"]
+    assert entries.flagged_banner.visible is True
+    assert entries.tw_field.value == "§a注入合金"  # 預填 AI 譯文
+    assert "特殊字元不一致" in entries.token_hint.value
+    assert entries.save_btn.disabled is False  # 修正後可直接儲存
+
+    entries.clear_flagged()  # 清除篩選 → 一般清單
+    assert entries.flagged_banner.visible is False and entries.entry_ids is None
+    assert len(entries.rows) > 1
+
+    # 重新開始機翻會清掉上一次的「檢視」
+    panel._reset_stats()
+    assert panel.view_flagged_btn.visible is False and panel._flagged == {}
+    # 從總覽跳進來套用狀態篩選時，也會清掉「特殊字元不一致」篩選
+    entries.show_flagged(list(flagged), flagged, "1.21.1")
+    entries.show_filter("diff")
+    assert entries.entry_ids is None and entries.drafts == {}

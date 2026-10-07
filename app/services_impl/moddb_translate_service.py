@@ -93,6 +93,8 @@ class TranslateReport:
     dry_run: bool = False
     remaining: int = 0  # 該範圍內仍未翻譯的筆數
     flagged_samples: list[str] = field(default_factory=list)
+    # 特殊字元不一致而沒寫入的條目：條目 id → AI 回傳的譯文（畫面「檢視」用，預填給人工修正）
+    flagged_entries: dict[int, str] = field(default_factory=dict)
     batches: int = 0  # 實際完成的批數
     elapsed_sec: float = 0.0
 
@@ -103,6 +105,7 @@ class TranslateReport:
             "translated": self.translated,
             "written": self.written,
             "flagged": self.flagged,
+            "flagged_entries": dict(self.flagged_entries),
             "status": self.status,
             "dry_run": self.dry_run,
             "remaining": self.remaining,
@@ -253,6 +256,7 @@ def _translate_rows(
         issues = token_issues(source, text)
         if issues:
             report.flagged += 1
+            report.flagged_entries[item["_entry_id"]] = text
             if len(report.flagged_samples) < _FLAGGED_LOG_LIMIT:
                 note = f"{item['_mod_id']} / {item['path']}：{'、'.join(issues)}"
                 report.flagged_samples.append(note)

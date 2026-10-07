@@ -36,6 +36,10 @@ class SourceFilter:
             ],
         )
 
+    def reset(self) -> None:
+        """回到「全部來源」。"""
+        self.dropdown.value = ALL_SOURCES
+
     @property
     def code(self) -> int | None:
         """目前選的來源代碼；全部來源為 None。"""

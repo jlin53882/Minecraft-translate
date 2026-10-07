@@ -530,6 +530,7 @@ class TranslationDB:
         state: str = "all",
         query: str = "",
         source: int | None = None,
+        entry_ids: Sequence[int] | None = None,
         limit: int = 100,
         offset: int = 0,
     ) -> tuple[list[EntryRow], int]:
@@ -537,9 +538,14 @@ class TranslationDB:
 
         ``source``：只列出「有該來源譯文」的條目（不論最後採用的是哪個來源，
         所以新匯入的來源即使排在較低優先序、沒被採用，也找得到）。
+        ``entry_ids``：只列出這些條目（例如批次機翻「特殊字元不一致」的那幾筆）；
+        用 ``json_each`` 傳入，數量多也不會超過 SQLite 的參數上限。
         """
         where = ["e.mc_version = ?"]
         params: list = [version]
+        if entry_ids is not None:
+            where.append("e.id IN (SELECT value FROM json_each(?))")
+            params.append(json.dumps([int(i) for i in entry_ids]))
         if source is not None:
             where.append(
                 "EXISTS (SELECT 1 FROM translation ts WHERE ts.entry_id = e.id "

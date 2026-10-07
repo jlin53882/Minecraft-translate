@@ -52,7 +52,10 @@ class ModDbView(ft.Column):
             page, file_picker, self.get_db, on_finished=self._on_scan_finished
         )
         self.translate = TranslatePanel(
-            page, self.get_db, on_finished=self._on_scan_finished
+            page,
+            self.get_db,
+            on_finished=self._on_scan_finished,
+            on_view_flagged=self.open_flagged,
         )
         self._panels = {
             "overview": self.overview,
@@ -131,6 +134,13 @@ class ModDbView(ft.Column):
         if version:
             self.entries.version = version
         self.entries.mod_id = mod_id
+        self.show_tab("entries")
+
+    def open_flagged(
+        self, entry_ids: list[int], drafts: dict[int, str], version: str
+    ) -> None:
+        """從批次機翻跳到條目校對，只看「特殊字元不一致、沒寫入」的條目（AI 譯文預填）。"""
+        self.entries.show_flagged(entry_ids, drafts, version)
         self.show_tab("entries")
 
     def _on_scan_finished(self) -> None:

@@ -24,6 +24,7 @@ from app.services_impl.moddb_translate_service import (
 from app.tasks.task_session import TaskSession, tag_session
 from app.ui import kit
 from app.ui.design import C
+from app.ui.kit.inputs import BUTTON_HEIGHTS
 from app.ui.poller import PollerHandle
 from app.ui.snack import show_snack
 from app.ui.status_chip import apply_status_style, set_chip_status
@@ -33,6 +34,8 @@ from translation_tool.utils.config_manager import load_config
 from translation_tool.utils.log_unit import log_debug, log_info, log_warning
 
 _POLL_INTERVAL_SEC = 0.2
+# 四張統計卡的標題列同高（「檢視」按鈕出現時卡片不會變高）
+STAT_HEAD_HEIGHT = BUTTON_HEIGHTS["sm"] + 2
 ALL_MODS = "__all__"
 LARGE_RUN_WARNING = 5000  # 不限筆數且超過這個數量時提醒額度
 
@@ -40,11 +43,15 @@ LARGE_RUN_WARNING = 5000  # 不限筆數且超過這個數量時提醒額度
 class TranslatePanel(ft.Column):
     """批次機翻頁籤。"""
 
-    def __init__(self, page: ft.Page, get_db, on_finished=None):
+    def __init__(self, page: ft.Page, get_db, on_finished=None, on_view_flagged=None):
         super().__init__(expand=True, spacing=12, scroll=ft.ScrollMode.AUTO)
         self._page = page
         self._get_db = get_db
         self._on_finished = on_finished
+        # on_view_flagged(條目 id 清單, {id: AI 譯文}, 版本)：跳到條目校對檢視「特殊字元不一致」的條目
+        self._on_view_flagged = on_view_flagged
+        self._flagged: dict[int, str] = {}
+        self._run_version = ""
         self.session: TaskSession | None = None
         self._running = False
         self._poller = PollerHandle()
@@ -133,7 +140,12 @@ class TranslatePanel(ft.Column):
             disabled=True,
         )
         self.stat_reused = kit.stat_card(
-            "沿用其他版本", "—", icon=ft.Icons.CONTENT_COPY, tone="dia", expand=1
+            "沿用其他版本",
+            "—",
+            icon=ft.Icons.CONTENT_COPY,
+            tone="dia",
+            expand=1,
+            head_height=STAT_HEAD_HEIGHT,
         )
         self.stat_written = kit.stat_card(
             "已寫入（AI 機翻）",
@@ -141,9 +153,25 @@ class TranslatePanel(ft.Column):
             icon=ft.Icons.CHECK_CIRCLE_OUTLINE,
             tone="em",
             expand=1,
+            head_height=STAT_HEAD_HEIGHT,
         )
+        self.view_flagged_btn = kit.button(
+            "檢視",
+            "secondary",
+            size="sm",
+            icon=ft.Icons.FILTER_ALT_OUTLINED,
+            tooltip="跳到條目校對，只看這次「特殊字元不一致、沒寫入」的條目（已預填 AI 譯文）",
+            on_click=lambda _e: self._view_flagged(),
+        )
+        self.view_flagged_btn.visible = False
         self.stat_flagged = kit.stat_card(
-            "特殊字元不一致", "—", icon=ft.Icons.WARNING_AMBER, tone="gold", expand=1
+            "特殊字元不一致",
+            "—",
+            icon=ft.Icons.WARNING_AMBER,
+            tone="gold",
+            expand=1,
+            action=self.view_flagged_btn,
+            head_height=STAT_HEAD_HEIGHT,
         )
         self.stat_remaining = kit.stat_card(
             "此範圍仍未翻譯",
@@ -151,6 +179,7 @@ class TranslatePanel(ft.Column):
             icon=ft.Icons.PENDING_OUTLINED,
             tone="neutral",
             expand=1,
+            head_height=STAT_HEAD_HEIGHT,
         )
         self._stat_cards = (
             self.stat_reused,
@@ -273,6 +302,7 @@ class TranslatePanel(ft.Column):
             self._safe_update()
             return
         self.session = tag_session(TaskSession(), "Mod 資料庫機翻", "moddb")
+        self._run_version = str(self.version_dd.value or "")
         self._set_status("預覽中" if dry_run else "機翻中", "dia")
         self._set_running(True)
         self.progress_bar.value = 0
@@ -389,11 +419,22 @@ class TranslatePanel(ft.Column):
             format_count(s.get("flagged")),
             delta="未寫入，詳見日誌" if s.get("flagged") else "",
         )
+        self._flagged = dict(s.get("flagged_entries") or {})
+        self.view_flagged_btn.visible = bool(self._flagged)
         self.stat_remaining.set_value(format_count(s.get("remaining")))
 
     def _reset_stats(self) -> None:
         for card in self._stat_cards:
             card.set_value("—", delta="")
+        self._flagged = {}
+        self.view_flagged_btn.visible = False
+
+    def _view_flagged(self) -> None:
+        """跳到條目校對，只看這次特殊字元不一致、沒寫入的條目。"""
+        if self._flagged and self._on_view_flagged and self._run_version:
+            self._on_view_flagged(
+                list(self._flagged), dict(self._flagged), self._run_version
+            )
 
     def _set_running(self, running: bool) -> None:
         self.start_btn.disabled = running
