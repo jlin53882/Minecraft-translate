@@ -8,7 +8,6 @@ TranslationView（頁面標題「任務翻譯工具」）是 FTB Quests / KubeJS
 - `app/views/translation_view.py` — 主視圖（`TranslationView`）
 - `app/views/translation/translation_actions.py` — `run_ftb` / `run_kjs` / `run_md` / `start_ui_timer`（`_poll_session` / `_sync_from_session`）/ 執行緒安全更新包裝
 - `app/views/translation/translation_panels.py` — `build_path_row` / `build_action_row` / `build_ftb_tab` / `build_kjs_tab` / `build_md_tab`（內部 `_step_row` / `_cache_switch` / `_tab`）
-- `app/views/translation/translation_state.py` — `TranslationRunState` dataclass（見下方「關鍵狀態」）
 - `app/services_impl/pipelines/ftb_service.py` / `kubejs_service.py` / `md_service.py` — pipeline services（step 參數）
 
 ## 架構圖（文字版）
@@ -115,17 +114,10 @@ TranslationView（ft.Column）
 
 各頁由 `app/view_registry.py` 註冊、外殼導覽切換，無父子關係。
 
-## 關鍵狀態（translation_state.py）
+## 關鍵狀態
 
-```python
-@dataclass
-class TranslationRunState:
-    picker_target_field: object | None = None
-    session: object | None = None
-    ui_timer_running: bool = False
-```
-
-`TranslationView._init_translation_state_and_tabs` 會建立 `self._state = TranslationRunState()`，但實際讀寫的是 view 自己的 `_picker_target_field` / `session` / `_ui_timer_running` 屬性，`_state` 目前沒有被其他程式讀取。
+`TranslationView` 直接持有 `_picker_target_field`、`session`、`_ui_timer_running`（沒有另外的 state 物件；
+曾有一個建立後沒人讀取的 state dataclass，已移除）。
 
 ## 維護注意
 

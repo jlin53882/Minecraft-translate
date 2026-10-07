@@ -49,8 +49,6 @@ DOC_SCOPES: dict[str, tuple[str, ...]] = {
     "CACHE_VIEW_ARCHITECTURE.md": (
         "app/views/cache_view.py",
         "app/views/cache_manager/**/*.py",
-        "app/views/cache_query_panel.py",
-        "app/views/cache_shard_panel.py",
     ),
     "CONFIG_VIEW_ARCHITECTURE.md": (
         "app/views/config_view.py",

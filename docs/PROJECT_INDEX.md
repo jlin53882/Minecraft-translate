@@ -27,8 +27,6 @@ Minecraft-translate/
 │   │   └── view_wrapper.py
 │   ├── views/               # 各功能頁面（View）
 │   │   ├── bundler_view.py        # 輸出打包
-│   │   ├── cache_query_panel.py   # 快取查詢面板
-│   │   ├── cache_shard_panel.py   # 快取分片面板
 │   │   ├── cache_view.py          # 快取管理
 │   │   ├── config_view.py         # 設定頁
 │   │   ├── extractor_view.py      # 擷取頁
@@ -105,7 +103,6 @@ Minecraft-translate/
 │       ├── cache_search*.py     # 快取搜尋（facade）
 │       ├── cache_shards.py      # 快取分片
 │       ├── cache_store.py       # 快取儲存
-│       ├── config_access.py     # 設定存取
 │       ├── config_manager.py    # 設定管理
 │       ├── exceptions.py        # 自訂例外
 │       ├── log_unit.py          # 日誌工具

@@ -82,7 +82,7 @@
 ```markdown
 ## Validation checklist
 - [ ] `uv run pytest`
-- [ ] `python -c "import app.views.cache_controller"`
+- [ ] `python -c "import app.views.cache_view"`
 - [ ] <其他驗證指令>
 ```
 

@@ -111,7 +111,7 @@ dist\MinecraftTranslator\
 
 Flet Web 補充（限制與未來擴充方向見 `WEB_MODE_LIMITATIONS.md`）：`FilePicker.get_directory_path()` 在 Web 不支援，現在改為提示「請直接輸入執行程式那台電腦上的路徑」；輸出資料夾不存在時會自動建立，所以 Web 可手動輸入新的輸出路徑走完整流程。
 
-2026-10-06 首次結果：4.1.1 通過（兩任務各成功 3374／3373，無失敗）；4.1.2 的後台紀錄正確，但對話框停在「打包資源設定 4/4」、遮罩殘留、提示未顯示——已修正對話框關閉流程（移除 overlay 後再推一次更新，見 `_one_click_dispose_dialogs`），**待 Windows 重測 4.1.2**。
+2026-10-06 首次結果：4.1.1 通過（兩任務各成功 3374／3373，無失敗）；4.1.2 的後台紀錄正確，但對話框停在「打包資源設定 4/4」、遮罩殘留、提示未顯示——已修正對話框關閉流程（移除 overlay 後再推一次更新，見 `app/ui/dialogs.py` 的 `dispose_dialogs`），**待 Windows 重測 4.1.2**。
 
 ## 5. 不需要 Windows（網頁版 smoke 可驗證）
 

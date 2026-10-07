@@ -4,11 +4,11 @@
 > 範圍：`app/`、`translation_tool/`、`main.py` 內所有帶 `noqa: BLE001／S110／S112` 的位置。
 > 命令列 QA 工具（`md_extract_qa.py`、`md_inject_qa.py`）的 `print` 為刻意保留，不在此表。
 
-共 **285** 項；其中 **122** 項尚未在程式碼內寫明原因（以「分類」說明處理方式）。
+共 **281** 項；其中 **116** 項尚未在程式碼內寫明原因（以「分類」說明處理方式）。
 
 | 分類 | 數量 | 意義 |
 |---|---|---|
-| 已記錄／回報 | 250 | 例外處理本身有 log、提示、回報錯誤事件或重新丟出；寬鬆捕捉是為了不中斷整批流程 |
+| 已記錄／回報 | 246 | 例外處理本身有 log、提示、回報錯誤事件或重新丟出；寬鬆捕捉是為了不中斷整批流程 |
 | UI／畫面保護 | 19 | UI 層的畫面更新、icon 快取等；失敗只影響顯示，不影響資料 |
 | 盡力而為（靜默） | 16 | 引擎層、只有 `pass`／`continue`／回傳常數；失敗不影響結果（例如進度回報、還原失敗時以原始例外為準） |
 
@@ -78,12 +78,6 @@
 | `app/views/cache_manager/cache_view_shard_detail.py:CacheShardDetailMixin._dynamic_shard_src_height` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/views/cache_manager/cache_view_shard_detail.py:CacheShardDetailMixin._dynamic_shard_dst_height` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/views/cache_manager/cache_view_shard_detail.py:CacheShardDetailMixin._on_shard_dst_apply` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
-| `app/views/cache_query_panel.py:CacheQueryPanel._on_page_jump` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
-| `app/views/cache_query_panel.py:CacheQueryPanel._on_page_size_change` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
-| `app/views/cache_query_panel.py:CacheQueryPanel._on_apply_dst` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
-| `app/views/cache_shard_panel.py:CacheShardPanel._load_shard_entry` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
-| `app/views/cache_shard_panel.py:CacheShardPanel._on_shard_dst_apply` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
-| `app/views/cache_shard_panel.py:CacheShardPanel._on_shard_dst_copy` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/views/cache_view.py:CacheView._do_update` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/views/cache_view.py:CacheView._batch_refresh` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/views/cache_view.py:CacheView.did_mount` | BLE001/S110 | UI／畫面保護 | 尚未完成掛載時略過 |
@@ -113,6 +107,8 @@
 | `app/views/lm_view.py:LMView.refresh_key_stat` | BLE001 | UI／畫面保護 | 讀不到設定時只是不顯示 |
 | `app/views/lookup_view.py:LookupView.single_lookup_worker` | BLE001 | 已記錄／回報 | 失敗也要恢復按鈕並顯示原因 |
 | `app/views/lookup_view.py:LookupView.batch_lookup_worker` | BLE001 | 已記錄／回報 | 失敗也要恢復按鈕並顯示原因 |
+| `app/views/merge/merge_db_options.py:MergeDbOptions._on_changed` | BLE001 | 已記錄／回報 | 頁面尚未掛載時只是不即時更新提示 |
+| `app/views/merge/merge_db_options.py:MergeDbOptions.refresh_info` | BLE001 | 已記錄／回報 | 只影響提示文字，不應讓頁面載入失敗 |
 | `app/views/merge_view.py:MergeView._broadcast_config_change_to_config_view` | BLE001 | 已記錄／回報 | 通知失敗不影響合併頁，但要留下紀錄 |
 | `app/views/merge_view.py:MergeView._on_merge_field_changed` | BLE001 | 已記錄／回報 | 欄位寫入失敗不可中斷 UI，但設定沒存成功必須留下紀錄 |
 | `app/views/merge_view.py:MergeView._run_merge_worker` | BLE001 | 已記錄／回報 | 背景執行緒邊界：失敗要寫進 session，否則輪詢永遠等不到結束 |
@@ -196,24 +192,24 @@
 | `translation_tool/core/lang_merge_extracted_assets.py:_cleanup_single_mod_extracted` | BLE001 | 已記錄／回報 | 失敗已記錄，不中斷批次流程 |
 | `translation_tool/core/lang_merge_extracted_assets.py:_safe_session_log` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `translation_tool/core/lang_merge_extracted_assets.py:_cleanup_extracted_dirs` | BLE001 | 已記錄／回報 | 失敗已記錄，不中斷批次流程 |
-| `translation_tool/core/lang_merge_extracted_assets.py:merge_extracted_to_assets` | BLE001 | 已記錄／回報 | 失敗已記錄，不中斷批次流程 |
-| `translation_tool/core/lang_merge_extracted_assets.py:merge_extracted_to_assets` | BLE001 | 已記錄／回報 | 失敗已記錄，不中斷批次流程 |
-| `translation_tool/core/lang_merge_extracted_assets.py:merge_extracted_to_assets` | BLE001 | 已記錄／回報 | 失敗已記錄，不中斷批次流程 |
-| `translation_tool/core/lang_merge_extracted_assets.py:merge_extracted_to_assets` | BLE001 | 已記錄／回報 | 失敗已記錄，不中斷批次流程 |
-| `translation_tool/core/lang_merge_extracted_assets.py:merge_extracted_to_assets` | BLE001 | 已記錄／回報 | 失敗已記錄，不中斷批次流程 |
-| `translation_tool/core/lang_merge_extracted_assets.py:merge_extracted_to_assets` | BLE001 | 已記錄／回報 | 失敗已記錄，不中斷批次流程 |
+| `translation_tool/core/lang_merge_extracted_assets.py:_merge_extracted_to_assets` | BLE001 | 已記錄／回報 | 失敗已記錄，不中斷批次流程 |
+| `translation_tool/core/lang_merge_extracted_assets.py:_merge_extracted_to_assets` | BLE001 | 已記錄／回報 | 失敗已記錄，不中斷批次流程 |
+| `translation_tool/core/lang_merge_extracted_assets.py:_merge_extracted_to_assets` | BLE001 | 已記錄／回報 | 失敗已記錄，不中斷批次流程 |
+| `translation_tool/core/lang_merge_extracted_assets.py:_merge_extracted_to_assets` | BLE001 | 已記錄／回報 | 失敗已記錄，不中斷批次流程 |
+| `translation_tool/core/lang_merge_extracted_assets.py:_merge_extracted_to_assets` | BLE001 | 已記錄／回報 | 失敗已記錄，不中斷批次流程 |
+| `translation_tool/core/lang_merge_extracted_assets.py:_merge_extracted_to_assets` | BLE001 | 已記錄／回報 | 失敗已記錄，不中斷批次流程 |
 | `translation_tool/core/lang_merge_io.py:quarantine_copy` | BLE001 | 已記錄／回報 | 隔離副本寫入失敗不可中斷合併，但要留下紀錄 |
 | `translation_tool/core/lang_merge_pending.py:export_filtered_pending_impl` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `translation_tool/core/lang_merge_pipeline.py:_process_single_mod._safe_read_lang_json` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `translation_tool/core/lang_merge_pipeline.py:_process_single_mod` | BLE001 | 已記錄／回報 | 既有輸出讀不出來時從空白重建，但要留下是哪個檔 |
 | `translation_tool/core/lang_merge_pipeline.py:_process_single_mod` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `translation_tool/core/lang_merge_zip_io.py:quarantine_copy_from_zip` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
-| `translation_tool/core/lang_merger.py:merge_zhcn_to_zhtw_from_zip` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
-| `translation_tool/core/lang_merger.py:merge_zhcn_to_zhtw_from_zip` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
-| `translation_tool/core/lang_merger.py:merge_zhcn_to_zhtw_from_zip` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
-| `translation_tool/core/lang_merger.py:merge_zhcn_to_zhtw_from_folder` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
-| `translation_tool/core/lang_merger.py:merge_zhcn_to_zhtw_from_folder` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
-| `translation_tool/core/lang_merger.py:merge_zhcn_to_zhtw_from_folder` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
+| `translation_tool/core/lang_merger.py:_merge_zhcn_to_zhtw_from_zip` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
+| `translation_tool/core/lang_merger.py:_merge_zhcn_to_zhtw_from_zip` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
+| `translation_tool/core/lang_merger.py:_merge_zhcn_to_zhtw_from_zip` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
+| `translation_tool/core/lang_merger.py:_merge_zhcn_to_zhtw_from_folder` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
+| `translation_tool/core/lang_merger.py:_merge_zhcn_to_zhtw_from_folder` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
+| `translation_tool/core/lang_merger.py:_merge_zhcn_to_zhtw_from_folder` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `translation_tool/core/lm_api_client.py:call_gemini_requests` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `translation_tool/core/lm_resume.py:check_resume_feasibility` | BLE001 | 已記錄／回報 | 檢查失敗要回報給使用者，不能讓啟動流程中斷 |
 | `translation_tool/core/lm_translator.py:load_checkpoint` | BLE001 | 已記錄／回報 | 損毀的 checkpoint 視為沒有，但要留下紀錄 |

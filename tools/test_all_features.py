@@ -82,21 +82,14 @@ def test_config() -> bool:
         ok_all &= fail("load_config()", e)
 
     try:
-        from translation_tool.utils.config_access import (
-            get_runtime_config,
-            resolve_project_path,
-        )
+        from translation_tool.utils.config_manager import resolve_project_path
 
-        cfg2 = get_runtime_config()
-        ok_all &= result(
-            "get_runtime_config()", True, f"回傳型別：{type(cfg2).__name__}"
-        )
         p = resolve_project_path("replace_rules.json")
         ok_all &= result(
             "resolve_project_path()", p is not None, f"replace_rules.json → {p}"
         )
     except Exception as e:  # noqa: BLE001
-        ok_all &= fail("config_access 函式", e)
+        ok_all &= fail("resolve_project_path", e)
 
     return ok_all
 
@@ -363,14 +356,6 @@ def test_bundler() -> bool:
 def test_translation_view() -> bool:
     banner("功能 8：翻譯工具（TranslationView 底層元件）")
     ok_all = True
-
-    try:
-        from app.views.translation.translation_state import TranslationRunState
-
-        state = TranslationRunState()  # noqa: F841
-        ok_all &= result("TranslationRunState 初始化", True)
-    except Exception as e:  # noqa: BLE001
-        ok_all &= fail("TranslationRunState", e)
 
     try:
         ok_all &= result("build_ftb_tab / build_kjs_tab / build_md_tab 存在", True)

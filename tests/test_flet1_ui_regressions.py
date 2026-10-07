@@ -12,10 +12,8 @@ from typing import ClassVar
 import flet as ft
 
 from app.shell import palette as palette_module
-from app.views import cache_shard_panel, cache_view
+from app.views import cache_view
 from app.views.cache_manager import cache_view_overview
-from app.views.cache_manager.cache_state import CacheShardState
-from app.views.cache_shard_panel import CacheShardPanel
 from app.views.pipeline import pipeline_view
 from app.views.pipeline.pipeline_view import PipelineView
 from tests.conftest import mock_filepicker, mock_page
@@ -139,20 +137,3 @@ def test_cache_view_shard_dst_copy_uses_clipboard_service(monkeypatch):
 
     assert values == ["目標內容"]
     assert notes == [("已複製 C3 DST 內容", "info")]
-
-
-def test_cache_shard_panel_dst_copy_uses_clipboard_service(monkeypatch):
-    values = _patch_clipboard(monkeypatch)
-    snacks = []
-    monkeypatch.setattr(
-        cache_shard_panel, "show_snack", lambda page, msg, *a, **k: snacks.append(msg)
-    )
-    state = CacheShardState()
-    state.selected_key = "k"
-    panel = CacheShardPanel(mock_page(), state, {"types": {}})
-    panel.shard_dst_field.value = "DST 內容"
-
-    asyncio.run(panel._on_shard_dst_copy(None))
-
-    assert values == ["DST 內容"]
-    assert snacks == ["已複製 DST 內容"]

@@ -68,7 +68,7 @@ PR #169（UI 與後台日誌同步）歷經多輪審查才收斂。回顧後，�
 
 - [ ] 輸入不存在、型別錯誤（資料夾 vs 檔案、ZIP vs 資料夾）時，核心產生器是否 `yield error=True`，而不是靜默成功？
 - [ ] 一鍵流程可略過缺少的輸入（`skip_missing_input=True`），一般流程不可。
-- [ ] 失敗時 UI 是否真的有可見的提示？對話框關閉後要再推一次 `page.update()`，避免遮罩殘留把 SnackBar 蓋住（`pipeline_one_click_dialog.py` 的 `_one_click_dispose_dialogs`）。
+- [ ] 失敗時 UI 是否真的有可見的提示？對話框關閉後要再推一次 `page.update()`，避免遮罩殘留把 SnackBar 蓋住（`app/ui/dialogs.py` 的 `dispose_dialogs`）。
 - [ ] 完成訊息不可在失敗時仍顯示「已完成」。
 - [ ] 包裝呼叫端 handler 時（例如 `SyncTextField`）要「先同步、再呼叫」並保留 sync／async／零參數寫法，不可二選一；測試要模擬 Web 真實情況（`e.data` 是新值、`control.value` 是舊值），不能在測試裡先手動設好值。
 - [ ] 「取消時清掉新建輸出」不能只靠「原本存不存在」判斷歸屬：兩個任務同時往同一個還不存在的輸出寫，各自都以為是自己新建的，取消一個會刪掉另一個的成果。要先取得輸出路徑的獨占租約（`output_lease.py`，路徑要正規化、包含關係也算衝突），清理完才釋放。

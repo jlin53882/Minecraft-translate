@@ -128,7 +128,6 @@ merge 的取消檢查點（`merge_service`，經 `raise_if_cancelled()`；`Pipel
 - 一鍵／打包對話框的 `_load_version_data()`：讀隨程式附帶的小型 JSON（`resource_pack_version.json`）。
 - 快取頁 `_load_shard_entry`：僅在記憶體快取找不到該筆時才 fallback 讀分片（LRU 只留最近 2 個）；正常路徑由 `cache_get_entry_service` 提供。
 - `icon_preview_row.LangItemRow` 未提供 `prepared_icon` 時的同步計算：**只剩沒有 event loop 的測試替身路徑**；正式路徑一律先 `prepare_row_icon`。
-- `app/views/cache_shard_panel.py`、`cache_query_panel.py`：目前不被 `CacheView` 使用（只剩測試引用，見 `CACHE_VIEW_ARCHITECTURE.md`），不在 UI 路徑上。
 - 對話框 `os.path.isdir` 之類的單次 `stat` 驗證。
 
 ## E. 非驗收 blocker 的後續改善（不影響 #114 契約）

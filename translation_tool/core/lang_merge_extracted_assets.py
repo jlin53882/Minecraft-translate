@@ -30,6 +30,7 @@ from pathlib import Path
 from typing import Any
 
 from translation_tool.core.lang_codec import dump_lang_text, parse_lang_text
+from translation_tool.core.lang_merge_db import merge_db_fill
 from translation_tool.core.lang_merge_dict import (
     contains_cjk as stage2_contains_cjk,
 )
@@ -464,6 +465,21 @@ def merge_extracted_to_assets(
     lang_output_dir: str | Path,
     session: Any = None,
     pending_folder_names: Iterable[str] | None = None,
+    use_translation_db: bool | None = None,
+    translation_db_version: str | None = None,
+) -> Generator[dict[str, Any], None, None]:
+    """合併階段 2（純英文條目會先向 Mod 資料庫補譯；其餘見 ``_merge_extracted_to_assets``）。"""
+    with merge_db_fill(use_translation_db, translation_db_version) as db_fill:
+        yield from _merge_extracted_to_assets(
+            lang_output_dir, session, pending_folder_names, db_fill=db_fill
+        )
+
+
+def _merge_extracted_to_assets(
+    lang_output_dir: str | Path,
+    session: Any = None,
+    pending_folder_names: Iterable[str] | None = None,
+    db_fill: Any = None,
 ) -> Generator[dict[str, Any], None, None]:
     """合併階段 2:把 lang_output_dir 內 XX_extracted 的 lang 檔 key-by-key 進 assets/。
 
@@ -585,6 +601,8 @@ def merge_extracted_to_assets(
                     is_pure_english=stage2_is_pure_english,
                     is_from_output_dir=bool(existing_tw),
                 )
+                if db_fill is not None:
+                    final_tw, pending, _db_hits = db_fill.fill(modid, final_tw, pending)
             except Exception as exc:  # noqa: BLE001 - 失敗已記錄，不中斷批次流程
                 mod_error = f"{modid}: merge failed: {exc}"
                 log_warning(f"[MergeExt→Assets] {mod_error}")

@@ -19,12 +19,9 @@ import types
 import flet as ft
 
 from app.ui.design import C
+from app.ui.dialogs import dispose_dialogs, present_dialog
 from app.ui.sync_text_field import SyncTextField
 from app.views.pipeline.pipeline_config import normalize_extract_mode
-from app.views.pipeline.pipeline_one_click_lifecycle import (
-    _one_click_dispose_dialogs,
-    _one_click_present_dialog,
-)
 from translation_tool.utils.config_manager import load_config
 from translation_tool.utils.log_unit import log_warning
 
@@ -139,7 +136,7 @@ def open_one_click_dialog(
 
     ctx._do_execute = functools.partial(_one_click__do_execute, ctx)
 
-    _one_click_present_dialog(ctx, ctx.build_dialog(1))
+    present_dialog(ctx, ctx.build_dialog(1))
 
 
 def _one_click_init_config_defaults(ctx):
@@ -211,18 +208,18 @@ def _one_click_init_state(
 
 
 def _one_click_rebuild_ui(ctx):
-    _one_click_dispose_dialogs(ctx)
+    dispose_dialogs(ctx)
 
     step = ctx.state["step"]
 
     ctx.step_label.value = f"{step}/4"
 
     dlg = ctx.build_dialog(step)
-    _one_click_present_dialog(ctx, dlg)
+    present_dialog(ctx, dlg)
 
 
 def _one_click_close_all(ctx):
-    _one_click_dispose_dialogs(ctx)
+    dispose_dialogs(ctx)
     ctx.page.update()
 
 

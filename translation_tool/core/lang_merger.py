@@ -27,6 +27,7 @@ from .lang_merge_content import (
     remove_empty_dirs,
 )
 from .lang_merge_content_copy import detect_content_wrapper_prefix
+from .lang_merge_db import merge_db_fill
 from .lang_merge_io import FolderReader, ZipReader
 from .lang_merge_pipeline import _process_single_mod, detect_mod_wrapper_prefix
 
@@ -73,6 +74,36 @@ def merge_zhcn_to_zhtw_from_zip(
     zh_en_threshold: int | None = None,
     progress_start: float = 0.0,
     progress_end: float = 1.0,
+    use_translation_db: bool | None = None,
+    translation_db_version: str | None = None,
+) -> Generator[dict[str, Any], None, None]:
+    """語系合併（zip）：純英文條目會先向 Mod 資料庫補譯（若設定啟用），其餘見 ``_merge_zhcn_to_zhtw_from_zip``。"""
+    with merge_db_fill(use_translation_db, translation_db_version) as db_fill:
+        yield from _merge_zhcn_to_zhtw_from_zip(
+            zip_file,
+            output_dir,
+            only_process_lang,
+            process_zh_cn,
+            patchouli_skip,
+            patchouli_threshold,
+            zh_en_threshold,
+            progress_start,
+            progress_end,
+            db_fill=db_fill,
+        )
+
+
+def _merge_zhcn_to_zhtw_from_zip(
+    zip_file: str,
+    output_dir: str,
+    only_process_lang: bool = False,
+    process_zh_cn: bool | None = None,
+    patchouli_skip: bool | None = None,
+    patchouli_threshold: float | None = None,
+    zh_en_threshold: int | None = None,
+    progress_start: float = 0.0,
+    progress_end: float = 1.0,
+    db_fill: Any = None,
 ) -> Generator[dict[str, Any], None, None]:
     """將 ZIP 檔案中的簡體中文合併為繁體中文。
 
@@ -311,6 +342,7 @@ def merge_zhcn_to_zhtw_from_zip(
                             # 小寫版 all_files_cache 會讓 startswith 比對失敗
                             all_files_cache=all_names_raw,
                             wrapper_prefix=mod_wrapper_prefix,
+                            db_fill=db_fill,
                         )
                     )
 
@@ -450,6 +482,36 @@ def merge_zhcn_to_zhtw_from_folder(
     zh_en_threshold: int | None = None,
     progress_start: float = 0.0,
     progress_end: float = 1.0,
+    use_translation_db: bool | None = None,
+    translation_db_version: str | None = None,
+) -> Generator[dict[str, Any], None, None]:
+    """語系合併（folder）：純英文條目會先向 Mod 資料庫補譯（若設定啟用），其餘見 ``_merge_zhcn_to_zhtw_from_folder``。"""
+    with merge_db_fill(use_translation_db, translation_db_version) as db_fill:
+        yield from _merge_zhcn_to_zhtw_from_folder(
+            input_dir,
+            output_dir,
+            only_process_lang,
+            process_zh_cn,
+            patchouli_skip,
+            patchouli_threshold,
+            zh_en_threshold,
+            progress_start,
+            progress_end,
+            db_fill=db_fill,
+        )
+
+
+def _merge_zhcn_to_zhtw_from_folder(
+    input_dir: str,
+    output_dir: str,
+    only_process_lang: bool = False,
+    process_zh_cn: bool | None = None,
+    patchouli_skip: bool | None = None,
+    patchouli_threshold: float | None = None,
+    zh_en_threshold: int | None = None,
+    progress_start: float = 0.0,
+    progress_end: float = 1.0,
+    db_fill: Any = None,
 ) -> Generator[dict[str, Any], None, None]:
     """將資料夾中的簡體中文合併為繁體中文。
 
@@ -629,6 +691,7 @@ def merge_zhcn_to_zhtw_from_folder(
                         # 需保留原始大小寫（同 ZIP 模式說明）
                         all_files_cache=all_names,
                         wrapper_prefix=mod_wrapper_prefix,
+                        db_fill=db_fill,
                     )
                 )
 

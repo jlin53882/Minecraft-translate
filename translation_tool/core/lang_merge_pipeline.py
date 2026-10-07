@@ -78,6 +78,7 @@ def _process_single_mod(
     errordata_dir: str | None = None,
     all_files_cache: list[str] | None = None,  # 2026-08-04: 預先算好的檔案列表
     wrapper_prefix: str | None | object = _UNSET,
+    db_fill: Any = None,  # lang_merge_db.MergeDbFill：用 Mod 資料庫補純英文條目的譯文
 ) -> dict[str, Any]:
     """處理單一模組（mod）的語言合併流程。
 
@@ -221,6 +222,17 @@ def _process_single_mod(
             is_pure_english=_is_pure_english,
             is_from_output_dir=target_has_tw,
         )
+
+        # Step 4.5 — 純英文條目先問 Mod 資料庫（只補沒有譯文的，不覆蓋既有譯文）
+        if db_fill is not None:
+            from ..translation_db.identity import classify_member
+
+            ident = classify_member(base_path_hint)
+            final_tw, pending, db_hits = db_fill.fill(
+                ident.mod_id if ident else None, final_tw, pending
+            )
+            if db_hits:
+                log_info(f"{log_prefix}資料庫補上 {db_hits} 筆譯文")
 
         # =============================
         # Step 5 — 寫入 pending.json
