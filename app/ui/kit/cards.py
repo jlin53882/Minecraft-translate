@@ -188,7 +188,10 @@ class StatCard(ft.Container):
         delta_tone: str = "em",
         expand: bool | int = False,
         action: ft.Control | None = None,
+        head_height: int | None = None,
+        reserve_delta_space: bool = False,
     ) -> None:
+        self._reserve_delta = reserve_delta_space
         head: list[ft.Control] = []
         if icon:
             head.append(tone_icon(icon, tone, size=14))
@@ -202,17 +205,19 @@ class StatCard(ft.Container):
             color=C.TEXT,
             font_family=design.FONT_MONO,
         )
+        # reserve_delta_space：沒有說明文字時仍保留這一行（空白占位），同一列的卡片才會等高
         self.delta_text = ft.Text(
-            delta or "",
+            delta or (" " if reserve_delta_space else ""),
             size=11.5,
             color=get_tone(delta_tone).fg,
-            visible=bool(delta),
+            visible=bool(delta) or reserve_delta_space,
         )
         super().__init__(
             content=ft.Column(
                 [
                     ft.Row(
                         head,
+                        height=head_height,  # 同一列的卡片用相同標題列高度，才會等高
                         spacing=8,
                         vertical_alignment=ft.CrossAxisAlignment.CENTER,
                     ),
@@ -238,8 +243,8 @@ class StatCard(ft.Container):
         if value is not None:
             self.value_text.value = value
         if delta is not None:
-            self.delta_text.value = delta
-            self.delta_text.visible = bool(delta)
+            self.delta_text.value = delta or (" " if self._reserve_delta else "")
+            self.delta_text.visible = bool(delta) or self._reserve_delta
         if delta_tone is not None:
             self.delta_text.color = get_tone(delta_tone).fg
 
@@ -254,6 +259,8 @@ def stat_card(
     delta_tone: str = "em",
     expand: bool | int = False,
     action: ft.Control | None = None,
+    head_height: int | None = None,
+    reserve_delta_space: bool = False,
 ) -> StatCard:
     """``StatCard`` 的函式寫法。"""
     return StatCard(
@@ -265,6 +272,8 @@ def stat_card(
         delta_tone=delta_tone,
         expand=expand,
         action=action,
+        head_height=head_height,
+        reserve_delta_space=reserve_delta_space,
     )
 
 
