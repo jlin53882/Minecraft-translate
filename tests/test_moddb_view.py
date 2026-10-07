@@ -809,3 +809,55 @@ def test_overview_kpi_cards_share_one_layout_contract(db_path):
     # 標題列內的按鈕不高過標題列（預設 IconButton 的 padding 會讓它高到 36）
     assert overview.diff_help_btn.height <= head_height
     assert overview.diff_help_btn.padding == 0
+
+
+def test_entries_save_keeps_scroll_position_and_selects_the_next_entry(db_path):
+    """儲存後清單重新載入：維持捲動位置；原條目在篩選下消失時，選同一位置的下一筆。"""
+    db = TranslationDB(db_path)
+    db.ingest(
+        "1.21.1",
+        [ScanItem(KIND_LANG, "foo", f"item.foo.{i}", f"Text {i}") for i in range(6)],
+    )
+    panel = entries_panel.EntriesPanel(mock_page(), lambda: db)
+    panel.refresh()
+    scrolls: list[float] = []
+    panel._scroll_list_to = scrolls.append  # 記錄清單被捲到哪裡
+
+    panel._on_state("none")
+    assert scrolls[-1] == 0.0  # 換篩選回到最上方
+    keys = [r.key for r in panel.rows]
+    assert len(keys) == 6
+    panel.select(panel.rows[2].id)
+    panel._scroll_offset = 420.0  # 使用者已往下捲
+
+    panel.tw_field.value = "文字二"
+    panel._on_text_change()
+    panel._save()
+
+    assert scrolls[-1] == 420.0  # 儲存後維持捲動位置，不跳回最上方
+    assert [r.key for r in panel.rows] == keys[:2] + keys[3:]  # 存好的不再是「未翻譯」
+    assert panel.selected is not None and panel.selected.key == keys[3]  # 選到下一筆
+    db.close()
+
+
+def test_entries_save_on_the_last_row_of_the_last_page_goes_back_a_page(db_path):
+    """最後一頁只剩一筆、存完該筆從篩選消失：退回仍有資料的最後一頁，不顯示空清單。"""
+    db = TranslationDB(db_path)
+    count = entries_panel.PAGE_SIZE + 1
+    db.ingest(
+        "1.21.1",
+        [
+            ScanItem(KIND_LANG, "foo", f"item.foo.{i:03d}", f"T {i}")
+            for i in range(count)
+        ],
+    )
+    panel = entries_panel.EntriesPanel(mock_page(), lambda: db)
+    panel.refresh()
+    panel._on_state("none")
+    panel._load_list(page=2, keep_selection=False)
+    assert len(panel.rows) == 1
+    panel.tw_field.value = "最後一筆"
+    panel._on_text_change()
+    panel._save()
+    assert panel.pager.current_page == 1 and len(panel.rows) == entries_panel.PAGE_SIZE
+    db.close()

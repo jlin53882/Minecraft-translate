@@ -25,5 +25,7 @@
     "app/views/pipeline/pipeline_one_click_dialog.py:_one_click_step4_version_widgets": 99,
     "app/views/pipeline/pipeline_one_click_dialog.py:open_one_click_dialog": 86
   },
-  "view_files": {}
+  "view_files": {
+    "app/views/moddb/entries_panel.py": 816
+  }
 }
