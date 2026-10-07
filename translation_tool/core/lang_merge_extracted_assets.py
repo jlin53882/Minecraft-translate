@@ -465,9 +465,11 @@ def merge_extracted_to_assets(
     lang_output_dir: str | Path,
     session: Any = None,
     pending_folder_names: Iterable[str] | None = None,
+    use_translation_db: bool | None = None,
+    translation_db_version: str | None = None,
 ) -> Generator[dict[str, Any], None, None]:
     """合併階段 2（純英文條目會先向 Mod 資料庫補譯；其餘見 ``_merge_extracted_to_assets``）。"""
-    with merge_db_fill() as db_fill:
+    with merge_db_fill(use_translation_db, translation_db_version) as db_fill:
         yield from _merge_extracted_to_assets(
             lang_output_dir, session, pending_folder_names, db_fill=db_fill
         )

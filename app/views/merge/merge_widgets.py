@@ -12,6 +12,7 @@ from app.ui.poller import PollerHandle
 from app.ui.status_chip import apply_status_style
 from app.ui.sync_text_field import SyncTextField
 from app.views._log import LogView
+from app.views.merge.merge_db_options import MergeDbOptions
 from translation_tool.utils.config_manager import load_config
 
 
@@ -22,6 +23,7 @@ class MergeWidgetsMixin:
         """合併狀態與一般／zh_cn／Patchouli 選項控制項。"""
         self._page = page
         self.file_picker = file_picker
+        self.db_options = MergeDbOptions(lambda: self._page.update())
 
         self.session = tag_session(TaskSession(max_logs=2000), "語系合併", "merge")
         self._ui_stop = threading.Event()
@@ -551,7 +553,11 @@ class MergeWidgetsMixin:
             self._info_container,
             ft.Row(
                 [
-                    ft.Column([input_card, output_card], spacing=16, expand=5),
+                    ft.Column(
+                        [input_card, self.db_options.card, output_card],
+                        spacing=16,
+                        expand=5,
+                    ),
                     ft.Column([rules_card, log_card], spacing=16, expand=7),
                 ],
                 spacing=16,

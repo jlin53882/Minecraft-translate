@@ -189,6 +189,8 @@ def _merge_one_zip(
     patchouli_skip,
     patchouli_threshold,
     zh_en_threshold,
+    use_translation_db=None,
+    translation_db_version=None,
 ) -> list[str]:
     """合併單一 ZIP（把進度疊加到整批進度），回傳這個 ZIP 的錯誤訊息清單。"""
     zip_errors: list[str] = []
@@ -202,6 +204,8 @@ def _merge_one_zip(
             patchouli_skip=patchouli_skip,
             patchouli_threshold=patchouli_threshold,
             zh_en_threshold=zh_en_threshold,
+            use_translation_db=use_translation_db,
+            translation_db_version=translation_db_version,
         ):
             _raise_if_session_cancelled(session)  # 取消檢查點：每個 update
             # ---- log ----
@@ -245,6 +249,8 @@ def run_merge_zip_batch_service(
     patchouli_skip: bool | None = None,
     patchouli_threshold: float | None = None,
     zh_en_threshold: int | None = None,
+    use_translation_db: bool | None = None,
+    translation_db_version: str | None = None,
 ):
     """以 ZIP 為單位合併，逐 ZIP 回報進度、日誌與統計摘要。"""
     # ⭐ 每次任務開始，都重新讀取一次 config 並設定 Logger
@@ -294,6 +300,8 @@ def run_merge_zip_batch_service(
                 patchouli_skip=patchouli_skip,
                 patchouli_threshold=patchouli_threshold,
                 zh_en_threshold=zh_en_threshold,
+                use_translation_db=use_translation_db,
+                translation_db_version=translation_db_version,
             )
 
             _record_zip_result(stats, session, idx, total, zip_name, zip_errors)
@@ -379,6 +387,7 @@ def _run_extracted_stage2(
     session,
     progress_start: float,
     progress_end: float,
+    db_options: dict | None = None,
 ) -> None:
     """階段 2：把 XX_extracted 的 lang 檔 key-by-key 合併進 lang_output/assets（就地追加 folder_errors）。
 
@@ -409,6 +418,7 @@ def _run_extracted_stage2(
                 lang_merger.get("pending_folder_name", "待翻譯"),
                 lang_merger.get("pending_organized_folder_name", "待翻譯整理需翻譯"),
             ),
+            **(db_options or {}),
         ):
             _raise_if_session_cancelled(session)  # 取消檢查點：階段 2 每個 update
             if update.get("log"):
@@ -493,7 +503,23 @@ def _run_folder_stages(
         session,
         progress_start,
         progress_end,
+        {
+            k: options[k]
+            for k in ("use_translation_db", "translation_db_version")
+            if k in options
+        },
     )
+
+
+def _new_folder_stats() -> dict:
+    """資料夾合併的統計計數器初始值。"""
+    return {
+        "total_folders": 1,
+        "success_folders": 0,
+        "failed_folders": 0,
+        "errored_files": 0,
+        "failed_folders_list": [],
+    }
 
 
 def run_merge_folder_batch_service(
@@ -509,6 +535,8 @@ def run_merge_folder_batch_service(
     progress_end: float = 1.0,
     finish_session: bool = True,
     skip_missing_input: bool = False,
+    use_translation_db: bool | None = None,
+    translation_db_version: str | None = None,
 ):
     """以資料夾為單位進行合併（支援 generator merge）。
 
@@ -523,13 +551,7 @@ def run_merge_folder_batch_service(
     UI_LOG_HANDLER.set_session(session)
     output_existed_before, lease = True, None
 
-    stats = {
-        "total_folders": 1,
-        "success_folders": 0,
-        "failed_folders": 0,
-        "errored_files": 0,
-        "failed_folders_list": [],
-    }
+    stats = _new_folder_stats()
     folder_errors = []
     finished = False  # generator 被 close（取消）時，yield 之後的 finish 不會執行；finally 補上
 
@@ -558,6 +580,8 @@ def run_merge_folder_batch_service(
                         "patchouli_skip": patchouli_skip,
                         "patchouli_threshold": patchouli_threshold,
                         "zh_en_threshold": zh_en_threshold,
+                        "use_translation_db": use_translation_db,
+                        "translation_db_version": translation_db_version,
                     },
                     progress_start,
                     progress_end,

@@ -74,9 +74,11 @@ def merge_zhcn_to_zhtw_from_zip(
     zh_en_threshold: int | None = None,
     progress_start: float = 0.0,
     progress_end: float = 1.0,
+    use_translation_db: bool | None = None,
+    translation_db_version: str | None = None,
 ) -> Generator[dict[str, Any], None, None]:
     """語系合併（zip）：純英文條目會先向 Mod 資料庫補譯（若設定啟用），其餘見 ``_merge_zhcn_to_zhtw_from_zip``。"""
-    with merge_db_fill() as db_fill:
+    with merge_db_fill(use_translation_db, translation_db_version) as db_fill:
         yield from _merge_zhcn_to_zhtw_from_zip(
             zip_file,
             output_dir,
@@ -480,9 +482,11 @@ def merge_zhcn_to_zhtw_from_folder(
     zh_en_threshold: int | None = None,
     progress_start: float = 0.0,
     progress_end: float = 1.0,
+    use_translation_db: bool | None = None,
+    translation_db_version: str | None = None,
 ) -> Generator[dict[str, Any], None, None]:
     """語系合併（folder）：純英文條目會先向 Mod 資料庫補譯（若設定啟用），其餘見 ``_merge_zhcn_to_zhtw_from_folder``。"""
-    with merge_db_fill() as db_fill:
+    with merge_db_fill(use_translation_db, translation_db_version) as db_fill:
         yield from _merge_zhcn_to_zhtw_from_folder(
             input_dir,
             output_dir,

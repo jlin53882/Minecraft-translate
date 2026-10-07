@@ -303,6 +303,8 @@ class MergeView(MergeWidgetsMixin, ft.Column):
                     self.zh_en_letter_threshold_field.value or ""
                 )
                 or 2,
+                use_translation_db=self.db_options.use_db,
+                translation_db_version=self.db_options.version,
             ):
                 pass
         else:
@@ -323,6 +325,8 @@ class MergeView(MergeWidgetsMixin, ft.Column):
                     self.zh_en_letter_threshold_field.value or ""
                 )
                 or 2,
+                use_translation_db=self.db_options.use_db,
+                translation_db_version=self.db_options.version,
             ):
                 pass
 
@@ -398,6 +402,7 @@ class MergeView(MergeWidgetsMixin, ft.Column):
 
     def did_mount(self) -> None:
         """重新掛載：合併仍在追蹤就接續輪詢（任務已結束時補上最終狀態與摘要）。"""
+        self.db_options.sync_from_config()  # 沒動過資料庫選項就跟著設定
         if self._merge_tracking and not self._ui_stop.is_set():
             self._poller.start(self.page, self._poll_merge)
 
