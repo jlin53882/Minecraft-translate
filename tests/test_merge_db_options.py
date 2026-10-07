@@ -5,6 +5,7 @@ from __future__ import annotations
 from app.services_impl.pipelines import merge_service
 from app.tasks.task_session import TaskSession
 from app.views.merge import merge_db_options
+from app.views.moddb import version_picker
 from translation_tool.translation_db import DbSettings
 
 
@@ -12,6 +13,9 @@ def _patch(monkeypatch, **kw):
     state = {"settings": DbSettings(**kw)}
     monkeypatch.setattr(merge_db_options, "load_db_settings", lambda: state["settings"])
     monkeypatch.setattr(merge_db_options, "summarize_database", lambda: None)
+    monkeypatch.setattr(
+        version_picker, "target_version_choices", lambda: ["1.21.1", "1.20.1"]
+    )
     return state
 
 
@@ -40,6 +44,30 @@ def test_page_choice_wins_after_user_changes_it(monkeypatch):
     state["settings"] = DbSettings(merge_enabled=True, version="1.19.2")
     opts.sync_from_config()
     assert opts.use_db is False and opts.version == "1.21.1"
+
+
+def test_target_version_can_be_selected_or_typed(monkeypatch):
+    _patch(monkeypatch, merge_enabled=True, version="1.21.1")
+    opts = merge_db_options.MergeDbOptions(lambda: None)
+
+    assert opts.version_field.editable is True
+    assert [option.key for option in opts.version_field.options] == ["1.21.1", "1.20.1"]
+    opts.version_field.text = "26.2"
+    opts.version_field.value = None
+    assert opts.version == "26.2"
+
+    opts.version_field.value = "1.20.1"
+    assert opts.version == "1.20.1"
+
+
+def test_focusing_target_version_suggests_creating_missing_database(monkeypatch):
+    _patch(monkeypatch, merge_enabled=True, version="")
+    prompts = []
+    opts = merge_db_options.MergeDbOptions(lambda: None, lambda: prompts.append(True))
+
+    opts.version_field.on_focus(type("Event", (), {"control": opts.version_field})())
+
+    assert len(prompts) == 1
 
 
 def test_info_warns_when_database_missing_or_no_version(monkeypatch):

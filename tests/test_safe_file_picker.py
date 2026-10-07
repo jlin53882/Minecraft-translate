@@ -126,6 +126,23 @@ def test_one_click_creates_missing_output_dir(tmp_path, monkeypatch):
     assert (tmp_path / "fresh" / "out").is_dir()
 
 
+def test_one_click_passes_database_version_override_to_merge(tmp_path, monkeypatch):
+    from app.views.pipeline import pipeline_view as pv
+
+    view, shown = _prepare(tmp_path, tmp_path / "out")
+    monkeypatch.setattr(pv, "show_snack", lambda page, msg, **k: shown.append(msg))
+    prepared = view._prepare_one_click(
+        {
+            "mode": "lang",
+            "lang_codes": ["zh_tw"],
+            "translation_db_version": " 26.2 ",
+        }
+    )
+
+    assert prepared is not None and shown == []
+    assert prepared[3]["translation_db_version"] == "26.2"
+
+
 def test_one_click_rejects_empty_output(tmp_path, monkeypatch):
     from app.views.pipeline import pipeline_view as pv
 
