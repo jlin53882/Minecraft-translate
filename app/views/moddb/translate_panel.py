@@ -234,7 +234,6 @@ class TranslatePanel(ft.Column):
             "重新翻譯",
             "primary",
             icon=ft.Icons.AUTO_AWESOME,
-            disabled=True,
             on_click=self.confirm_retranslation,
         )
         self.repair_preview_text = ft.Text(
@@ -257,7 +256,9 @@ class TranslatePanel(ft.Column):
                     kit.hint_text(
                         "重新翻譯「目前生效來源為 AI 機翻，且譯文與原文完全相同」的舊資料。"
                         "會略過舊快取；只更新所選版本／模組中的 AI 來源，不會跨版本同步。"
-                        "PR #177 的同文重試仍依設定執行。請先預覽，再確認開始。"
+                        "PR #177 的同文重試仍依設定執行。操作方式：先按「預覽符合條件的舊 AI 譯文」，"
+                        "檢查候選筆數與樣本，再按「重新翻譯」並確認開始。版本、模組或筆數上限變更後，"
+                        "預覽會失效，必須重新預覽。"
                     ),
                     ft.Row(
                         [self.repair_preview_btn, self.repair_start_btn],
@@ -351,7 +352,15 @@ class TranslatePanel(ft.Column):
             "來源：AI 機翻。人工、模組自帶及其他來源不會被重新翻譯。"
         )
         self.repair_samples.controls = []
-        self.repair_start_btn.disabled = True
+        self._update_repair_start_button()
+
+    def _update_repair_start_button(self, *, running: bool | None = None) -> None:
+        is_running = self._running if running is None else running
+        has_empty_preview = (
+            self._repair_preview is not None
+            and self._repair_preview.selected_count == 0
+        )
+        self.repair_start_btn.disabled = is_running or has_empty_preview
 
     # ------------------------------------------------------------------ 事件
     def build_options(self, *, dry_run: bool = False) -> TranslateOptions:
@@ -398,13 +407,11 @@ class TranslatePanel(ft.Column):
         self._clear_repair_preview()
         if not self.version_dd.value:
             self.repair_preview_text.value = "請先選擇遊戲版本。"
-            self.repair_start_btn.disabled = True
             self._safe_update()
             return
         db = self._get_db()
         if db is None:
             self.repair_preview_text.value = "無法開啟 Mod 資料庫。"
-            self.repair_start_btn.disabled = True
             self._safe_update()
             return
 
@@ -413,7 +420,6 @@ class TranslatePanel(ft.Column):
             preview = preview_same_source_ai_retranslation(db, options)
         except Exception as exc:  # noqa: BLE001 - preview errors stay in the UI
             self.repair_preview_text.value = f"預覽失敗：{exc}"
-            self.repair_start_btn.disabled = True
             log_warning(f"Mod 資料庫舊 AI 重翻預覽失敗：{exc!r}")
             self._safe_update()
             return
@@ -446,12 +452,22 @@ class TranslatePanel(ft.Column):
             )
             for index, row in enumerate(preview.entries[:5])
         ]
-        self.repair_start_btn.disabled = selected == 0
+        self._update_repair_start_button()
         self._safe_update()
 
     def confirm_retranslation(self, _e=None) -> None:
         preview = self._repair_preview
-        if self._running or preview is None or preview.selected_count == 0:
+        if self._running:
+            return
+        if preview is None:
+            show_snack(
+                self._page,
+                "請先按「預覽符合條件的舊 AI 譯文」，檢查候選範圍與筆數後再重新翻譯。",
+                C.GOLD,
+            )
+            return
+        if preview.selected_count == 0:
+            show_snack(self._page, "目前沒有符合條件的舊 AI 譯文可重新翻譯。", C.GOLD)
             return
         show_dialog = getattr(self._page, "show_dialog", None)
         if not callable(show_dialog):
@@ -637,9 +653,7 @@ class TranslatePanel(ft.Column):
         self.preview_btn.disabled = running
         self.cancel_btn.disabled = not running
         self.repair_preview_btn.disabled = running
-        self.repair_start_btn.disabled = running or not (
-            self._repair_preview and self._repair_preview.selected_count
-        )
+        self._update_repair_start_button(running=running)
 
     def _set_status(self, text: str, tone: str = "neutral") -> None:
         set_chip_status(self.status_chip, text, tone)

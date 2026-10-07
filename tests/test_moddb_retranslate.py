@@ -611,6 +611,21 @@ def test_preview_confirmation_cancel_and_scope_invalidation(db_path, monkeypatch
     panel = translate_panel.TranslatePanel(page, lambda: db)
     panel.version_dd.value = "1.21.1"
     panel.limit_field.value = "1"
+
+    snacks = []
+    monkeypatch.setattr(
+        translate_panel,
+        "show_snack",
+        lambda _page, message, _tone: snacks.append(message),
+    )
+    instructions = panel.repair_card.body.content.controls[0].value
+    assert "檢查候選筆數與樣本" in instructions
+    assert "預覽會失效，必須重新預覽" in instructions
+    assert panel.repair_start_btn.disabled is False
+    panel.confirm_retranslation()
+    assert "請先按「預覽符合條件的舊 AI 譯文」" in snacks[-1]
+    assert page.overlay == []
+
     panel.preview_retranslation()
 
     assert panel._repair_preview.selected_count == 1
@@ -643,13 +658,17 @@ def test_preview_confirmation_cancel_and_scope_invalidation(db_path, monkeypatch
     panel.mod_dd.value = "foo"
     panel._on_scope_changed()
     assert panel._repair_preview is None
-    assert panel.repair_start_btn.disabled is True
+    assert panel.repair_start_btn.disabled is False
+    panel.confirm_retranslation()
+    assert "請先按「預覽符合條件的舊 AI 譯文」" in snacks[-1]
     panel.preview_retranslation()
     assert panel._repair_preview is not None
     panel._get_db = lambda: None
     panel.preview_retranslation()
     assert panel._repair_preview is None
-    assert panel.repair_start_btn.disabled is True
+    assert panel.repair_start_btn.disabled is False
+    panel.confirm_retranslation()
+    assert "請先按「預覽符合條件的舊 AI 譯文」" in snacks[-1]
     db.close()
 
 
