@@ -1471,3 +1471,113 @@ def test_flagged_entries_flow_from_translation_to_entries_review(db_path, monkey
     entries.show_flagged(list(flagged), flagged, "1.21.1")
     entries.show_filter("diff")
     assert entries.entry_ids is None and entries.drafts == {}
+
+
+# ------------------------------------------------ 「翻譯與原文相同」（專有名詞等不需要翻譯）
+def test_translation_same_as_source_still_writes_cache_and_database(
+    db_path, monkeypatch, fake_cache
+):
+    """譯文與原文相同不是失敗：照常寫快取與資料庫、計入已翻譯，不重送 AI。"""
+    seed(db_path)
+    calls: list[list[str]] = []
+
+    def identity(batch, total=None, dry_run=False):
+        calls.append([it["path"] for it in batch])
+        # 「Infused Alloy」原樣回傳（視為不需翻譯的專有名詞）
+        return [
+            {**it, "text": it["source_text"]}
+            if it["source_text"] == "Infused Alloy"
+            else {**it, "text": "譯:" + it["source_text"]}
+            for it in batch
+        ], "DONE"
+
+    monkeypatch.setattr(moddb_translate_service, "translate_batch_smart", identity)
+    summary = run(TranslateOptions(version="1.21.1", mod_ids=("foo",)))["summary"]
+
+    assert summary["status"] == "DONE" and summary["flagged"] == 0
+    assert summary["translated"] == 2 and summary["written"] == 2
+    assert len(calls) == 1  # 一批就完成，沒有因為「與原文相同」而重送
+    # 快取照常寫入（否則下次遇到同一文字又會送 AI）
+    assert ("lang", "item.foo.b", "Infused Alloy", "Infused Alloy") in fake_cache
+    # 資料庫照常寫入，而且來源是 AI 機翻
+    db = TranslationDB(db_path)
+    row = next(r for r in db.list_entries("1.21.1")[0] if r.key == "item.foo.b")
+    assert row.zh_tw == "Infused Alloy" and row.source == SRC_AI
+    db.close()
+
+
+def _seed_same_as_source(path):
+    db = TranslationDB(path)
+    db.ingest(
+        "1.21.1",
+        [
+            ScanItem(KIND_LANG, "m", "minecraft.name", "Minecraft", "Minecraft"),
+            ScanItem(KIND_LANG, "m", "jei.name", "JEI", "JEI"),
+            ScanItem(KIND_LANG, "m", "pressure.name", "Pressure Chamber", "壓力室"),
+            ScanItem(KIND_LANG, "m", "hello.name", "Hello"),
+            ScanItem(KIND_LANG, "m", "empty.name", ""),
+        ],
+    )
+    return db
+
+
+def _keys(db, **kw):
+    rows, total = db.list_entries("1.21.1", limit=100, **kw)
+    return sorted(r.key for r in rows), total
+
+
+def test_same_as_source_filter_uses_effective_translation_and_ignores_empty(db_path):
+    db = _seed_same_as_source(db_path)
+    keys, total = _keys(db, state="same")
+    assert (
+        keys == ["jei.name", "minecraft.name"] and total == 2
+    )  # 空原文、無譯文、不同的都不算
+    db.close()
+
+
+def test_same_as_source_is_still_translated_and_not_untranslated(db_path):
+    db = _seed_same_as_source(db_path)
+    assert "minecraft.name" in _keys(db, state="all")[0]  # 全部
+    assert "minecraft.name" in _keys(db, state="ok")[0]  # 已翻譯（有譯文）
+    assert "minecraft.name" not in _keys(db, state="none")[0]  # 不是未翻譯
+    assert _keys(db, state="none")[0] == ["empty.name", "hello.name"]
+    assert db.count_untranslated("1.21.1") == 1  # 空原文不算待機翻；Hello 才是
+    db.close()
+
+
+def test_same_as_source_filter_combines_with_search(db_path):
+    db = _seed_same_as_source(db_path)
+    assert _keys(db, state="same", query="mine") == (["minecraft.name"], 1)
+    assert _keys(db, state="same", query="pressure") == ([], 0)  # 壓力室與原文不同
+    db.close()
+
+
+def test_same_as_source_follows_the_effective_translation_precedence(db_path):
+    """比較的是「目前生效的譯文」：人工改成不同文字後，就不再算『與原文相同』。"""
+    db = _seed_same_as_source(db_path)
+    entry = next(
+        r for r in db.list_entries("1.21.1", state="same")[0] if r.key == "jei.name"
+    )
+    db.save_manual(entry.id, "JEI（物品檢視器）", actor="測試", propagate=False)
+    assert _keys(db, state="same")[0] == ["minecraft.name"]
+    db.close()
+
+
+def test_same_as_source_count_and_pagination_share_the_condition(db_path):
+    db = TranslationDB(db_path)
+    items = []
+    for i in range(7):
+        items.append(ScanItem(KIND_LANG, "m", f"same.{i:02d}", f"Name{i}", f"Name{i}"))
+        items.append(ScanItem(KIND_LANG, "m", f"diff.{i:02d}", f"Thing{i}", f"東西{i}"))
+        items.append(ScanItem(KIND_LANG, "m", f"none.{i:02d}", f"Todo{i}"))
+    db.ingest("1.21.1", items)
+    seen: list[str] = []
+    for page in range(3):
+        rows, total = db.list_entries("1.21.1", state="same", limit=3, offset=page * 3)
+        assert total == 7  # 每一頁的總筆數都一致
+        seen += [r.key for r in rows]
+    assert seen == [
+        f"same.{i:02d}" for i in range(7)
+    ]  # 三頁合起來沒有重複或混入其他資料
+    assert db.list_entries("1.21.1", state="same", limit=3, offset=9)[0] == []
+    db.close()

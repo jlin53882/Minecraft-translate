@@ -17,6 +17,7 @@ STATE_LABELS = {
     "none": "未翻譯",
     "diff": "版本不同",
     "changed": "原文已變動",
+    "same": "翻譯與原文相同",
     "manual": "人工",
     "ok": "有譯文",
 }

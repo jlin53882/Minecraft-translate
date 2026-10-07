@@ -691,13 +691,15 @@ def _merge_batch_response(
         return None, True
 
     merged: list[dict] = []
-    lazy_count = 0
+    # 只是統計：譯文與原文相同不一定是沒翻（專有名詞、縮寫本來就不需要翻譯），
+    # 不改寫項目、不標失敗、不影響快取／資料庫寫入、不觸發重試
+    same_as_source_count = 0
     for temp_id, original_item in round_data.id_to_item.items():
         translated_text = normalized.get(temp_id, original_item["text"])
         if translated_text == original_item["text"] and any(
             char.isalpha() for char in str(translated_text)
         ):
-            lazy_count += 1
+            same_as_source_count += 1
         if not translated_text or not str(translated_text).strip():
             log_warning("[⚠️ 空翻譯] path=%s", original_item["path"])
         if len(original_item["text"]) > 0 and (
@@ -705,10 +707,10 @@ def _merge_batch_response(
         ):
             log_warning("[⚠️ 異常長度] path=%s", original_item["path"])
         merged.append({**original_item, "text": translated_text})
-    if lazy_count:
+    if same_as_source_count:
         log_info(
-            f"[📊 本批次疑似未翻，建議Cache內容查詢 "
-            f"{lazy_count}/{len(round_data.id_to_item)}]"
+            f"[📊 本批次翻譯與原文相同 "
+            f"{same_as_source_count}/{len(round_data.id_to_item)}]"
         )
     return merged, False
 

@@ -142,3 +142,35 @@ def test_response_with_extra_items_beyond_the_batch_is_rejected(
 
     assert merged is None and rejected is True
     assert "unexpected IDs=['2']" in warning.call_args.args[0]
+
+
+def test_translation_identical_to_source_is_a_normal_result_with_neutral_log(
+    batch_context, monkeypatch
+):
+    """譯文與原文相同（專有名詞等）不是失敗：照常回傳、不標記、不重試；日誌只做中性統計。"""
+    from translation_tool.core import lm_translator_main
+
+    runtime, round_data = batch_context
+    round_data.id_to_item["0"] = {"path": "mod.name", "text": "Minecraft"}
+    logs: list[str] = []
+    monkeypatch.setattr(
+        lm_translator_main, "log_info", lambda m, *a, **k: logs.append(m)
+    )
+
+    merged, rejected = _merge_batch_response(
+        runtime,
+        round_data,
+        '{"items":[{"id":"0","value":"Minecraft"},{"id":"1","value":"鑽石劍"}]}',
+        {},
+    )
+
+    assert rejected is False  # 不觸發重試／縮小批次
+    assert [item["text"] for item in merged] == ["Minecraft", "鑽石劍"]
+    assert not any("_untranslated" in item for item in merged)  # 不標失敗
+    assert merged[0] == {
+        **round_data.id_to_item["0"],
+        "text": "Minecraft",
+    }  # 不改寫項目
+    runtime.budget_tracker.on_truncated.assert_not_called()
+    assert any("本批次翻譯與原文相同 1/2" in m for m in logs)
+    assert not any("疑似未翻" in m for m in logs)

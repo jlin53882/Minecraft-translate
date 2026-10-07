@@ -27,6 +27,6 @@
     "app/views/pipeline/pipeline_one_click_dialog.py:open_one_click_dialog": 86
   },
   "view_files": {
-    "app/views/moddb/entries_panel.py": 878
+    "app/views/moddb/entries_panel.py": 884
   }
 }

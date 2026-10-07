@@ -133,19 +133,25 @@ class EntriesPanel(ft.Column):
             border_radius=8,
             visible=False,
         )
+        # 狀態切換項目變多（含「翻譯與原文相同」），獨立一列才不會在視窗較窄時被裁掉
         self.filter_card = kit.section_card(
             None,
-            ft.Row(
+            ft.Column(
                 [
-                    self.version_dd,
-                    self.mod_dd,
-                    self.kind_dd,
-                    self.source_filter.dropdown,
-                    self.search,
-                    self.state_seg,
+                    ft.Row(
+                        [
+                            self.version_dd,
+                            self.mod_dd,
+                            self.kind_dd,
+                            self.source_filter.dropdown,
+                            self.search,
+                        ],
+                        spacing=12,
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    ),
+                    ft.Row([self.state_seg], scroll=ft.ScrollMode.AUTO),
                 ],
-                spacing=12,
-                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                spacing=10,
             ),
         )
 
