@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import uuid
 import zipfile
 from collections.abc import Iterator
 from concurrent.futures import as_completed
@@ -84,29 +85,53 @@ def get_index_path(mods_dir: Path) -> Path:
 # ==================================================
 
 
-def _iter_entries_from_lang_files(zf: zipfile.ZipFile) -> Iterator[tuple[str, str]]:
-    """從 JAR 的 lang 檔案列舉所有有效的 key。
-
-    Yields: (key, value) — 只 yield 有意義的 key（不含 .* wildcard）
-    """
+def _iter_entries_from_lang_files(
+    zf: zipfile.ZipFile, budget: ZipReadBudget | None = None
+) -> Iterator[tuple[str, str]]:
+    """列舉第一個可解析 lang 檔案中的有效 key/value。支援 JSON 與舊 .lang。"""
     for name in zf.namelist():
-        if not (name.endswith(".lang") or "/lang/" in name or name.startswith("lang/")):
+        is_lang_json = name.endswith(".json") and (
+            "/lang/" in name or name.startswith("lang/")
+        )
+        if not (name.endswith(".lang") or is_lang_json):
             continue
         try:
-            content = read_limited(zf, name).decode("utf-8", errors="ignore")
+            content = read_limited(zf, name, budget=budget).decode(
+                "utf-8", errors="ignore"
+            )
+        except ArchiveBudgetError as exc:
+            if budget is not None:
+                raise
+            log_warning(f"[IconIndex] 略過無法讀取的 lang 檔 {name}: {exc!r}")
+            continue
         except Exception as exc:  # noqa: BLE001 - 單一 lang 檔讀不出來就略過，但要留下是哪個檔案
             log_warning(f"[IconIndex] 略過無法讀取的 lang 檔 {name}: {exc!r}")
             continue
-        for line in content.splitlines():
-            line = line.strip()
-            if not line or "=" not in line:
+
+        if name.endswith(".json"):
+            try:
+                entries = json.loads(content)
+            except json.JSONDecodeError as exc:
+                log_warning(f"[IconIndex] 略過格式錯誤的 JSON lang 檔 {name}: {exc!r}")
                 continue
-            idx = line.index("=")
-            key = line[:idx].strip()
-            value = line[idx + 1 :].strip()
-            if key and "." in key and value:
+            if not isinstance(entries, dict):
+                log_warning(f"[IconIndex] 略過非 object 的 JSON lang 檔 {name}")
+                continue
+            entries_to_yield = entries.items()
+        else:
+            parsed_entries = []
+            for line in content.splitlines():
+                line = line.strip()
+                if not line or "=" not in line:
+                    continue
+                idx = line.index("=")
+                parsed_entries.append((line[:idx].strip(), line[idx + 1 :].strip()))
+            entries_to_yield = parsed_entries
+
+        for key, value in entries_to_yield:
+            if isinstance(key, str) and isinstance(value, str) and "." in key and value:
                 yield key, value
-        # 只讀第一個 lang 檔案（多數 JAR 只有一個）
+        # 只讀第一個格式正確的 lang 檔案（多數 JAR 只有一個）
         break
 
 
@@ -126,60 +151,28 @@ def _process_single_jar(args: tuple[Path, str]) -> dict[str, str]:
                 _try_extract_mod_icon_from_model,
             )
 
-            for name in zf.namelist():
-                # 只讀 lang 檔案
-                if not (
-                    name.endswith(".lang")
-                    or "/lang/" in name
-                    or name.startswith("lang/")
-                ):
+            for key, _value in _iter_entries_from_lang_files(zf, budget=budget):
+                # 只處理有意義的 content key
+                if key.split(".", 1)[0] not in {
+                    "item",
+                    "block",
+                    "entity",
+                    "enchantment",
+                    "effect",
+                    "potion",
+                    "biome",
+                    "attribute",
+                    "tile",
+                    "-effect",
+                }:
                     continue
-                try:
-                    content = read_limited(zf, name, budget=budget).decode(
-                        "utf-8", errors="ignore"
-                    )
-                except ArchiveBudgetError:
-                    raise  # 整包累計超限：交給外層處理
-                except Exception as exc:  # noqa: BLE001 - 單一 lang 檔讀不出來就略過，但要留下是哪個檔案
-                    log_warning(
-                        f"[IconIndex] 略過無法讀取的 lang 檔 {jar_path.name}!/{name}: {exc!r}"
-                    )
-                    continue
-                for line in content.splitlines():
-                    line = line.strip()
-                    if not line or "=" not in line:
-                        continue
-                    idx = line.index("=")
-                    key = line[:idx].strip()
-                    if not key or "." not in key:
-                        continue
 
-                    # 只處理有意义的 content key
-                    parts = key.split(".")
-                    if len(parts) < 2:
-                        continue
-                    prefix = parts[0]
-                    if prefix not in (
-                        "item",
-                        "block",
-                        "entity",
-                        "enchantment",
-                        "effect",
-                        "potion",
-                        "biome",
-                        "attribute",
-                        "tile",
-                        "-effect",
-                    ):
-                        continue
-
-                    result = _try_extract_mod_icon_from_model(
-                        jar_path, modid, zf, names, key=key, budget=budget
-                    )
-                    if result:
-                        _tex_val, png_path = result
-                        results[key] = IconRef(jar_path, png_path).to_uri()
-                break  # 只讀第一個 lang 檔
+                result = _try_extract_mod_icon_from_model(
+                    jar_path, modid, zf, names, key=key, budget=budget
+                )
+                if result:
+                    _tex_val, png_path = result
+                    results[key] = IconRef(jar_path, png_path).to_uri()
     except ArchiveBudgetError:
         # 累計讀取超過安全上限（budget 已記錄警告）：保留已建立的部分索引，不中止整個索引建置
         log_warning(f"[IconIndex] {jar_path.name} 累計讀取超限，僅保留已解析的部分索引")
@@ -281,9 +274,14 @@ def _save_icon_index_for_manifest(
         "count": len(index),
         "index": index,
     }
-    idx_path.write_text(
-        json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8"
-    )
+    temp_path = idx_path.with_name(f"{idx_path.stem}.{uuid.uuid4().hex}.tmp")
+    try:
+        temp_path.write_text(
+            json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8"
+        )
+        temp_path.replace(idx_path)
+    finally:
+        temp_path.unlink(missing_ok=True)
     log_info(f"[IconIndex] 索引已儲存：{idx_path}")
     return idx_path
 
