@@ -455,7 +455,7 @@ def test_navigation_from_dirty_settings_waits_for_user_decision(
     config_view = placeholder_views["config"]
     config_view.has_unsaved_changes = True
     pending = []
-    config_view.confirm_unsaved_changes = lambda on_continue: pending.append(
+    config_view.confirm_unsaved_changes = lambda on_continue, **_kwargs: pending.append(
         on_continue
     )
 
@@ -482,7 +482,7 @@ def test_window_close_from_dirty_settings_waits_for_user_decision(
     config_view = placeholder_views["config"]
     config_view.has_unsaved_changes = True
     pending = []
-    config_view.confirm_unsaved_changes = lambda on_continue: pending.append(
+    config_view.confirm_unsaved_changes = lambda on_continue, **_kwargs: pending.append(
         on_continue
     )
 
@@ -499,7 +499,7 @@ def test_resuming_interrupted_task_waits_for_guarded_navigation(
     config_view = placeholder_views["config"]
     config_view.has_unsaved_changes = True
     pending = []
-    config_view.confirm_unsaved_changes = lambda on_continue: pending.append(
+    config_view.confirm_unsaved_changes = lambda on_continue, **_kwargs: pending.append(
         on_continue
     )
     task = SimpleNamespace(kind="lm_directory")
@@ -520,6 +520,54 @@ def test_resuming_interrupted_task_waits_for_guarded_navigation(
 
     assert shell.current_key == "lm"
     assert received == [task]
+
+
+def test_navigation_from_reload_recovery_state_waits_for_user_decision(
+    shell, placeholder_views
+):
+    shell.navigate("config")
+    config_view = placeholder_views["config"]
+    config_view.has_unsaved_changes = False
+    config_view.requires_exit_confirmation = True
+    pending = []
+    config_view.confirm_unsaved_changes = lambda on_continue, **_kwargs: pending.append(
+        on_continue
+    )
+
+    shell.navigate("dashboard")
+
+    assert shell.current_key == "config"
+    assert len(pending) == 1
+
+
+def test_window_close_from_reload_recovery_state_waits_for_decision(
+    shell, placeholder_views
+):
+    shell.navigate("config")
+    config_view = placeholder_views["config"]
+    config_view.has_unsaved_changes = False
+    config_view.requires_exit_confirmation = True
+    pending = []
+    config_view.confirm_unsaved_changes = lambda on_continue, **_kwargs: pending.append(
+        on_continue
+    )
+
+    asyncio.run(shell._window_on_event(SimpleNamespace(type=ft.WindowEventType.CLOSE)))
+
+    assert not shell._disposed
+    assert len(pending) == 1
+
+
+def test_config_reentry_reloads_before_showing_recovery_view(shell, placeholder_views):
+    shell.navigate("config")
+    config_view = placeholder_views["config"]
+    config_view.has_unsaved_changes = False
+    config_view.reload_before_entry = lambda: False
+    shell.navigate("dashboard")
+
+    shell.navigate("config")
+
+    assert shell.current_key == "dashboard"
 
 
 def test_ctrl_digit_shortcuts_follow_view_specs(shell):

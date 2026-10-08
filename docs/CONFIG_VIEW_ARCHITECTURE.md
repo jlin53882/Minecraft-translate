@@ -48,23 +48,28 @@ app/views/config/
       └─ keys：清空 key_fields / keys_column → _build_key_field + _build_key_row 重建
 
 [儲存] save_config_clicked()
-  → save_config_from_view(view, load_config_json_fn, save_config_json_fn, validate_api_keys_from_ui_fn, registry)
+  → save_config_from_view_with_outcome(view, load_config_json_fn, save_config_json_fn, validate_api_keys_from_ui_fn, registry)
       ├─ load_config_json() → 三層合併結果作為基底
       ├─ 依 schema 從 controls_map 收集新值（blank / 下限 / 驗證器 / label 模板由 Setting 欄位決定）
       ├─ validate_api_keys_from_ui(api_keys)（lm_config_rules.py）
       ├─ validate_config_values(new_config)（共用載入契約；寫入前驗證）
-      │    （欄位／設定契約錯誤或沒有任何啟用模型 → 顯示錯誤 snack 並回傳 False，不寫檔）
+      │    （欄位／設定契約錯誤，或本次模型變更將啟用模型數降為 0 → 顯示錯誤 snack，不寫檔）
       ├─ save_config_json(new_config)   [config_service.py]
       │    ├─ normalization：`lang_merger.process_zh_cn_files` 為 false 時強制關閉相依的 skip 子選項
       │    ├─ 在 `config_store.write_lock()` 內呼叫 config_manager.save_config
       │    └─ 成功後 `config_store.notify_saved(...)` 通知訂閱者
-      ├─ writer 必須明確回傳 True 才算確認儲存；False／例外時保留 dirty 狀態，不離頁
-      ├─ view.load_config() → 重新載入刷新 UI；若重載失敗，明確提示「已寫入、畫面未刷新」
+      ├─ 回傳 SaveOutcome：WRITE_FAILED／SAVED_RELOAD_FAILED／SAVED_OK
+      ├─ WRITE_FAILED：保留 dirty 狀態，不清除表單快照、不離頁
+      ├─ SAVED_RELOAD_FAILED：writer 已確認寫入，但 view.load_config() 失敗；保留獨立的 reload_recovery_required，不把畫面標記為同步
+      ├─ SAVED_OK：寫入與 UI 重載均成功，更新表單快照並清除恢復狀態
+      ├─ 恢復狀態存在時，設定分類、離開設定頁與桌面關閉都要求確認；可留在原頁或重試重載
+      ├─ 應用導覽／桌面關閉另提供明確的「已確認寫入，仍要離開」選擇；選擇後會要求下次進入設定頁前重新載入
+      ├─ 「放棄變更」若重載失敗會保留對話框與目前表單，不呼叫離頁 callback；可重試
       ├─ registry 中已建立的 ExtractorView → refresh_config_defaults()
       └─ 顯示「設定已成功儲存」snack
 套用時機（app/config_apply.py，見 CONFIG_APPLY_TIMING.md）僅用於欄位說明文字（`apply_timing_note`），儲存流程本身不依它重載快取。
 
-未儲存狀態由載入後的表單快照與目前值比較。應用內跨頁導覽、設定分類切換及桌面視窗關閉會提供「留在此頁／放棄變更／儲存並繼續」選項；Flet Web 的瀏覽器分頁關閉不在可攔截範圍。續跑中斷任務的動作必須使用導覽完成 callback，避免設定確認期間提前執行。
+未儲存狀態由載入後的表單快照與目前值比較；儲存成功但 UI 重載失敗另以 `_reload_recovery_required` 保護，兩者不可合併成單一 dirty 布林。重載恢復成功才清除該狀態；若使用者明確選擇仍要離開，則標記下次進入設定頁前必須重新載入。Flet Web 的瀏覽器分頁關閉不在可攔截範圍。續跑中斷任務的動作必須使用導覽完成 callback，避免設定確認期間提前執行。
 ```
 
 ## 主要方法（config_view.py）
@@ -77,7 +82,9 @@ app/views/config/
 | `add_model_row` / `move_model_row` / `remove_model_by_checkbox` / `on_add_model_clicked` | models 動態列（上下移動 + 勾選啟用） |
 | `add_key_row` / `remove_key_row` | API keys 動態列 |
 | `load_config` | 委派 `load_config_into_view` |
-| `save_config_clicked` | 委派 `save_config_from_view` |
+| `save_config_clicked` | 委派 `save_config_from_view_with_outcome`；處理三態結果與重載恢復 |
+| `requires_exit_confirmation` | 合併 dirty 與 reload recovery 狀態，供分類／主導覽／桌面關閉檢查 |
+| `_retry_config_reload` / `reload_before_entry` | 重試 UI 同步；離開恢復狀態後，確保再次進入設定頁前先重載 |
 | `set_registry` / `page` | 外部注入 view registry / page 屬性 |
 
 ## 關鍵設計

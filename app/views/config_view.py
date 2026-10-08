@@ -4,6 +4,8 @@
 維護注意：本檔案的函式 docstring 用於維護說明，不代表行為變更。
 """
 
+import logging
+import traceback
 from typing import ClassVar
 
 import flet as ft
@@ -38,6 +40,9 @@ from app.views.config.db_location import (
 )
 from app.views.config.settings_form import build_controls, build_pages
 from app.views.config.settings_schema import NAV_PAGES
+from translation_tool.utils.redaction import redact_text
+
+logger = logging.getLogger(__name__)
 
 # 導覽項目由 settings_schema.NAV_PAGES 產生（圖示名稱對應 ft.Icons）
 NAV_ITEMS = [
@@ -178,7 +183,13 @@ class ConfigView(ft.Column):
         self._loading_config = False
         self._saved_form_state = None
         self._unsaved_dialog_open = False
+        self._unsaved_dialog_resolved = False
+        self._unsaved_dialog_continue = None
+        self._unsaved_dialog = None
+        self._allow_saved_recovery_exit = False
         self._last_save_outcome = None
+        self._reload_recovery_required = False
+        self._reload_before_next_entry = False
         self.controls_map = {}
         self._selected_nav = "general"
 
@@ -280,7 +291,7 @@ class ConfigView(ft.Column):
         """處理導覽點擊"""
         if nav_id == self._selected_nav:
             return
-        if self.has_unsaved_changes:
+        if self.requires_exit_confirmation:
             self.confirm_unsaved_changes(lambda: self._apply_nav(nav_id))
             return
         self._apply_nav(nav_id)
@@ -290,8 +301,8 @@ class ConfigView(ft.Column):
         self._rebuild_nav()
         self._show_content(nav_id)
 
-    def confirm_unsaved_changes(self, on_continue):
-        """Ask whether to save or discard changes before leaving this settings view."""
+    def confirm_unsaved_changes(self, on_continue, *, allow_saved_recovery_exit=False):
+        """Protect unsaved changes and a confirmed-save UI reload that needs recovery."""
         if self._unsaved_dialog_open:
             return False
         show_dialog = getattr(self.page, "show_dialog", None)
@@ -299,62 +310,117 @@ class ConfigView(ft.Column):
             show_snack(self.page, "設定尚未儲存；目前無法安全切換頁面。")
             return False
 
-        dialog = ft.AlertDialog(
+        self._unsaved_dialog = ft.AlertDialog(
             modal=True,
             title=ft.Text("設定尚未儲存"),
             content=ft.Text("要先儲存設定、放棄變更，還是留在此頁？"),
         )
-        resolved = False
-
-        def stay(_event=None):
-            nonlocal resolved
-            if resolved:
-                return
-            resolved = True
-            self._unsaved_dialog_open = False
-            self.page.pop_dialog()
-
-        def save_and_continue(_event=None):
-            nonlocal resolved
-            if resolved:
-                return
-            save_succeeded = self.save_config_clicked(None)
-            if self._last_save_outcome is SaveOutcome.SAVED_RELOAD_FAILED:
-                dialog.content.value = (
-                    "設定已寫入，但畫面重新載入失敗；請留在此頁重新開啟設定確認。"
-                )
-                dialog.actions[2].disabled = True
-                self.page.update()
-                return
-            if not save_succeeded:
-                return
-            resolved = True
-            self._unsaved_dialog_open = False
-            self.page.pop_dialog()
-            on_continue()
-
-        def discard_and_continue(_event=None):
-            nonlocal resolved
-            if resolved:
-                return
-            self.discard_unsaved_changes()
-            resolved = True
-            self._unsaved_dialog_open = False
-            self.page.pop_dialog()
-            on_continue()
-
-        dialog.actions = [
-            ft.TextButton("留在此頁", on_click=stay),
-            ft.TextButton("放棄變更", on_click=discard_and_continue),
-            ft.TextButton("儲存並繼續", on_click=save_and_continue),
-        ]
+        self._unsaved_dialog_resolved = False
+        self._unsaved_dialog_continue = on_continue
+        self._allow_saved_recovery_exit = allow_saved_recovery_exit
+        self._configure_unsaved_dialog()
         self._unsaved_dialog_open = True
         try:
-            show_dialog(dialog)
+            show_dialog(self._unsaved_dialog)
         except Exception:
             self._unsaved_dialog_open = False
+            self._unsaved_dialog_continue = None
             raise
         return True
+
+    def _configure_unsaved_dialog(self) -> None:
+        dialog = self._unsaved_dialog
+        if self._reload_recovery_required:
+            dialog.title.value = "設定已寫入，但畫面尚未同步"
+            dialog.content.value = (
+                "設定檔已確認寫入，但頁面重載失敗。請重試重新載入；"
+                "若仍要離開，需確認已接受設定畫面尚未同步。"
+                if self._allow_saved_recovery_exit
+                else "設定檔已確認寫入，但頁面重載失敗。請重試重新載入，"
+                "或留在此頁；重新載入成功前不會切換設定分類。"
+            )
+            dialog.actions = [
+                ft.TextButton("留在此頁", on_click=self._on_unsaved_dialog_stay),
+                ft.TextButton(
+                    "重試重新載入", on_click=self._on_unsaved_dialog_retry_reload
+                ),
+            ]
+            if self._allow_saved_recovery_exit:
+                dialog.actions.append(
+                    ft.TextButton(
+                        "已確認寫入，仍要離開",
+                        on_click=self._on_unsaved_dialog_leave_after_ack,
+                    )
+                )
+        else:
+            dialog.title.value = "設定尚未儲存"
+            dialog.content.value = "要先儲存設定、放棄變更，還是留在此頁？"
+            dialog.actions = [
+                ft.TextButton("留在此頁", on_click=self._on_unsaved_dialog_stay),
+                ft.TextButton("放棄變更", on_click=self._on_unsaved_dialog_discard),
+                ft.TextButton("儲存並繼續", on_click=self._on_unsaved_dialog_save),
+            ]
+        self.page.update()
+
+    def _finish_unsaved_dialog(self, *, continue_navigation: bool) -> None:
+        if self._unsaved_dialog_resolved:
+            return
+        self._unsaved_dialog_resolved = True
+        self._unsaved_dialog_open = False
+        callback = self._unsaved_dialog_continue
+        self._unsaved_dialog_continue = None
+        self.page.pop_dialog()
+        if continue_navigation and callback is not None:
+            callback()
+
+    def _on_unsaved_dialog_stay(self, _event=None) -> None:
+        self._finish_unsaved_dialog(continue_navigation=False)
+
+    def _on_unsaved_dialog_save(self, _event=None) -> None:
+        if self._unsaved_dialog_resolved:
+            return
+        save_succeeded = self.save_config_clicked(None)
+        if self._last_save_outcome is SaveOutcome.SAVED_RELOAD_FAILED:
+            self._configure_unsaved_dialog()
+        elif save_succeeded:
+            self._finish_unsaved_dialog(continue_navigation=True)
+
+    def _on_unsaved_dialog_discard(self, _event=None) -> None:
+        if self._unsaved_dialog_resolved:
+            return
+        try:
+            self.discard_unsaved_changes()
+        except Exception:  # noqa: BLE001 - keep the dialog recoverable on reload failure
+            logger.error(
+                "放棄設定變更時重新載入失敗：%s",
+                redact_text(traceback.format_exc()),
+            )
+            self._unsaved_dialog.content.value = (
+                "重新載入設定失敗，原表單內容仍保留；可重試，或留在此頁。"
+            )
+            self.page.update()
+            return
+        self._finish_unsaved_dialog(continue_navigation=True)
+
+    def _on_unsaved_dialog_retry_reload(self, _event=None) -> None:
+        if self._unsaved_dialog_resolved:
+            return
+        if not self._retry_config_reload():
+            self._unsaved_dialog.content.value = (
+                "設定已寫入，但重新載入仍失敗；可稍後重試或留在此頁。"
+            )
+            self.page.update()
+            return
+        self._finish_unsaved_dialog(continue_navigation=True)
+
+    def _on_unsaved_dialog_leave_after_ack(self, _event=None) -> None:
+        if self._unsaved_dialog_resolved:
+            return
+        # The writer already confirmed persistence. Force a fresh load before re-entry.
+        self._reload_recovery_required = False
+        self._reload_before_next_entry = True
+        self._saved_form_state = None
+        self._finish_unsaved_dialog(continue_navigation=True)
 
     def _rebuild_nav(self):
         """重新建構導覽列"""
@@ -565,10 +631,12 @@ class ConfigView(ft.Column):
             self._saved_form_state = self._capture_form_state()
         finally:
             self._loading_config = False
-        self._refresh_dirty_state()
         self.db_location.refresh()
         self._check_db_path()
         self._check_priority()
+        self._reload_recovery_required = False
+        self._reload_before_next_entry = False
+        self._refresh_dirty_state()
         return result
 
     def did_mount(self):
@@ -581,6 +649,9 @@ class ConfigView(ft.Column):
 
     def save_config_clicked(self, e):
         """儲存設定"""
+        if self._reload_recovery_required or self._reload_before_next_entry:
+            self._last_save_outcome = None
+            return self._retry_config_reload()
         outcome = save_config_from_view_with_outcome(
             self,
             load_config_json_fn=load_config_json,
@@ -589,10 +660,38 @@ class ConfigView(ft.Column):
             registry=self._registry,
         )
         self._last_save_outcome = outcome
-        if outcome in (SaveOutcome.SAVED_RELOAD_FAILED, SaveOutcome.SAVED_OK):
+        if outcome is SaveOutcome.SAVED_OK:
             self._saved_form_state = self._capture_form_state()
+            self._reload_recovery_required = False
+            self._refresh_dirty_state()
+        elif outcome is SaveOutcome.SAVED_RELOAD_FAILED:
+            self._reload_recovery_required = True
             self._refresh_dirty_state()
         return outcome is SaveOutcome.SAVED_OK
+
+    def _retry_config_reload(self) -> bool:
+        try:
+            self.load_config()
+        except Exception:  # noqa: BLE001 - keep recovery state until a full reload succeeds
+            self._reload_recovery_required = True
+            logger.error("設定重載恢復失敗：%s", redact_text(traceback.format_exc()))
+            show_snack(
+                self.page,
+                "⚠️ 設定仍未重新載入；目前內容已保留，請稍後重試。",
+            )
+            self._refresh_dirty_state()
+            return False
+        show_snack(self.page, "✅ 設定已重新載入，畫面與設定檔已同步。", C.EM)
+        return True
+
+    def reload_before_entry(self) -> bool:
+        """Ensure a previously acknowledged stale view is refreshed before showing it."""
+        if not self._reload_before_next_entry:
+            return True
+        if self._retry_config_reload():
+            return True
+        self._reload_recovery_required = True
+        return False
 
     def _bind_general_change_tracking(self) -> None:
         for path, control in self.controls_map.items():
@@ -647,22 +746,35 @@ class ConfigView(ft.Column):
             and self._capture_form_state() != self._saved_form_state
         )
 
+    @property
+    def requires_exit_confirmation(self) -> bool:
+        return self.has_unsaved_changes or self._reload_recovery_required
+
     def _refresh_dirty_state(self) -> None:
         if self._loading_config or self._saved_form_state is None:
             return
         dirty = self.has_unsaved_changes
-        self.save_hint.value = (
-            "⚠ 設定尚未儲存，記得按「儲存變更」"
-            if dirty
-            else "提示：修改後請務必點擊儲存"
+        recovery_pending = (
+            self._reload_recovery_required or self._reload_before_next_entry
         )
-        self.save_hint.color = C.GOLD if dirty else C.MUTED
-        self.save_button.content = "儲存變更" if dirty else "儲存所有設定"
-        self.save_button.tooltip = (
-            "設定尚未儲存；按此寫入 config.json"
-            if dirty
-            else "寫入 config.json（請確認 API Keys 有填好）"
-        )
+        if recovery_pending:
+            self.save_hint.value = "⚠ 設定已寫入，但畫面尚未同步；請重新載入設定"
+            self.save_hint.color = C.GOLD
+            self.save_button.content = "重新載入設定"
+            self.save_button.tooltip = "重試從 config.json 載入設定並同步畫面"
+        else:
+            self.save_hint.value = (
+                "⚠ 設定尚未儲存，記得按「儲存變更」"
+                if dirty
+                else "提示：修改後請務必點擊儲存"
+            )
+            self.save_hint.color = C.GOLD if dirty else C.MUTED
+            self.save_button.content = "儲存變更" if dirty else "儲存所有設定"
+            self.save_button.tooltip = (
+                "設定尚未儲存；按此寫入 config.json"
+                if dirty
+                else "寫入 config.json（請確認 API Keys 有填好）"
+            )
         self.page.update()
 
     def discard_unsaved_changes(self) -> None:

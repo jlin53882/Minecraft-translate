@@ -277,13 +277,30 @@ class AppShell:
         if not 0 <= index < len(self.registry):
             return
         target_key = self.registry[index]["key"]
-        if target_key != self.current_key:
-            config_view = self._active_config_view()
-            if config_view is not None and config_view.has_unsaved_changes:
-                config_view.confirm_unsaved_changes(
-                    lambda: self._apply_navigation_index(index, on_navigated)
-                )
-                return
+        config_view = self._active_config_view()
+        reload_before_entry = getattr(config_view, "reload_before_entry", None)
+        if (
+            target_key == "config"
+            and self.current_key != "config"
+            and callable(reload_before_entry)
+            and not reload_before_entry()
+        ):
+            return
+        if (
+            target_key != self.current_key
+            and self.current_key == "config"
+            and config_view is not None
+            and getattr(
+                config_view,
+                "requires_exit_confirmation",
+                config_view.has_unsaved_changes,
+            )
+        ):
+            config_view.confirm_unsaved_changes(
+                lambda: self._apply_navigation_index(index, on_navigated),
+                allow_saved_recovery_exit=True,
+            )
+            return
         self._apply_navigation_index(index, on_navigated)
 
     def _apply_navigation_index(
@@ -678,9 +695,14 @@ class AppShell:
             if self._disposed:
                 return
             config_view = self._active_config_view()
-            if config_view is not None and config_view.has_unsaved_changes:
+            if config_view is not None and getattr(
+                config_view,
+                "requires_exit_confirmation",
+                config_view.has_unsaved_changes,
+            ):
                 config_view.confirm_unsaved_changes(
-                    self._continue_close_after_unsaved_settings
+                    self._continue_close_after_unsaved_settings,
+                    allow_saved_recovery_exit=True,
                 )
                 return
             if self.tasks.active() and not self._close_pending:

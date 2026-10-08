@@ -363,8 +363,118 @@ def test_reload_failure_after_confirmed_write_keeps_navigation_blocked(monkeypat
 
     assert continued == []
     assert dialog.open is True
-    assert dialog.actions[2].disabled is True
-    assert "設定已寫入，但畫面重新載入失敗" in dialog.content.value
+    assert [action.content for action in dialog.actions] == [
+        "留在此頁",
+        "重試重新載入",
+    ]
+    assert "設定已寫入，但畫面尚未同步" in dialog.title.value
+    assert view._reload_recovery_required is True
+
+    dialog.actions[0].on_click(None)
+    view._saved_form_state = view._capture_form_state()
+    assert view.has_unsaved_changes is False
+    assert view.requires_exit_confirmation is True
+
+    view._on_nav_click("prompts")
+    assert view._selected_nav == "general"
+    assert view._unsaved_dialog_open is True
+    assert "畫面尚未同步" in view.page.overlay[-1].title.value
+
+
+def test_recovery_retry_success_clears_guard_and_continues(monkeypatch):
+    monkeypatch.setattr(
+        "app.views.config_view.load_config_json",
+        lambda: {
+            "logging": {"log_level": "INFO"},
+            "translator": {},
+            "species_cache": {},
+            "lm_translator": {},
+            "output_bundler": {},
+            "lang_merger": {},
+        },
+    )
+    view = ConfigView(mock_page())
+    view._reload_recovery_required = True
+    continued = []
+
+    view.confirm_unsaved_changes(lambda: continued.append(True))
+    dialog = view.page.overlay[-1]
+    assert [action.content for action in dialog.actions] == [
+        "留在此頁",
+        "重試重新載入",
+    ]
+    dialog.actions[1].on_click(None)
+
+    assert continued == [True]
+    assert view.requires_exit_confirmation is False
+    assert view._unsaved_dialog_open is False
+
+
+def test_explicit_recovery_exit_requires_reload_before_reentry(monkeypatch):
+    monkeypatch.setattr(
+        "app.views.config_view.load_config_json",
+        lambda: {
+            "logging": {"log_level": "INFO"},
+            "translator": {},
+            "species_cache": {},
+            "lm_translator": {},
+            "output_bundler": {},
+            "lang_merger": {},
+        },
+    )
+    view = ConfigView(mock_page())
+    view._reload_recovery_required = True
+    continued = []
+
+    view.confirm_unsaved_changes(
+        lambda: continued.append(True), allow_saved_recovery_exit=True
+    )
+    dialog = view.page.overlay[-1]
+    assert dialog.actions[-1].content == "已確認寫入，仍要離開"
+    dialog.actions[-1].on_click(None)
+
+    assert continued == [True]
+    assert view._reload_recovery_required is False
+    assert view._reload_before_next_entry is True
+    assert view.reload_before_entry() is True
+    assert view._reload_before_next_entry is False
+
+
+def test_failed_discard_reload_keeps_unsaved_dialog_open(monkeypatch):
+    config = {
+        "logging": {"log_level": "INFO"},
+        "translator": {},
+        "species_cache": {},
+        "lm_translator": {},
+        "output_bundler": {},
+        "lang_merger": {},
+    }
+    calls = 0
+
+    def load_config():
+        nonlocal calls
+        calls += 1
+        if calls > 1:
+            raise OSError("reload failed")
+        return config
+
+    monkeypatch.setattr(
+        "app.views.config_view.load_config_json",
+        load_config,
+    )
+    view = ConfigView(mock_page())
+    view.controls_map["lm_translator.temperature"].value = "0.9"
+    view._on_form_changed()
+    continued = []
+
+    view.confirm_unsaved_changes(lambda: continued.append(True))
+    dialog = view.page.overlay[-1]
+    dialog.actions[1].on_click(None)
+
+    assert continued == []
+    assert dialog.open is True
+    assert view._unsaved_dialog_open is True
+    assert "原表單內容仍保留" in dialog.content.value
 
 
 def test_config_view_save_failure_keeps_unsaved_navigation_dialog_open(monkeypatch):
