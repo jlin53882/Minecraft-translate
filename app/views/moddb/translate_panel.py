@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import threading
+from pathlib import Path
 
 import flet as ft
 
@@ -62,6 +63,7 @@ class TranslatePanel(ft.Column):
         self._flagged: dict[int, str] = {}
         self._run_version = ""
         self._repair_preview: SameSourceAIRepairPreview | None = None
+        self._repair_preview_db_identity: tuple[str, tuple[int, ...]] | None = None
         self.session: TaskSession | None = None
         self._running = False
         self._poller = PollerHandle()
@@ -279,12 +281,27 @@ class TranslatePanel(ft.Column):
     def refresh_scope(self) -> None:
         """切到本頁籤時重讀資料庫的版本與模組清單，保留目前選擇。"""
         db = self._get_db()
+        if (
+            self._repair_preview is not None
+            and self._repair_preview_db_identity != self._database_identity(db)
+        ):
+            self._clear_repair_preview()
         versions = db.versions() if db else []
         kit.set_dropdown_options(self.version_dd, [(v, v) for v in versions])
         if self.version_dd.value not in versions:
             self.version_dd.value = versions[0] if versions else None
         self._refresh_mods()
         self._refresh_counts()
+
+    @staticmethod
+    def _database_identity(db) -> tuple[str, tuple[int, ...]] | None:
+        if db is None:
+            return None
+        path = getattr(db, "path", None)
+        path_identity = (
+            str(Path(path).resolve()) if path is not None else f"object:{id(db)}"
+        )
+        return path_identity, tuple(getattr(db, "priority", ()))
 
     def _refresh_mods(self) -> None:
         db = self._get_db()
@@ -348,6 +365,7 @@ class TranslatePanel(ft.Column):
 
     def _clear_repair_preview(self) -> None:
         self._repair_preview = None
+        self._repair_preview_db_identity = None
         self.repair_preview_text.value = (
             "來源：AI 機翻。人工、模組自帶及其他來源不會被重新翻譯。"
         )
@@ -425,6 +443,7 @@ class TranslatePanel(ft.Column):
             return
 
         self._repair_preview = preview
+        self._repair_preview_db_identity = self._database_identity(db)
         selected = preview.selected_count
         cap = f"上限 {format_count(options.limit)} 筆" if options.limit else "不限筆數"
         breakdown = (
@@ -497,7 +516,23 @@ class TranslatePanel(ft.Column):
 
     def _start_retranslation(self, preview: SameSourceAIRepairPreview) -> None:
         self._page.pop_dialog()
-        if self._running or self._repair_preview is not preview:
+        if self._running:
+            return
+        if self._repair_preview is not preview:
+            show_snack(
+                self._page,
+                "資料庫或範圍已變更，這份預覽已失效；請重新預覽後再開始。",
+                C.GOLD,
+            )
+            return
+        if self._database_identity(self._get_db()) != self._repair_preview_db_identity:
+            self._clear_repair_preview()
+            show_snack(
+                self._page,
+                "資料庫或來源優先序已變更，這份預覽已失效；請重新預覽後再開始。",
+                C.GOLD,
+            )
+            self._safe_update()
             return
         options = self.build_options()
         self.session = tag_session(TaskSession(), "Mod 資料庫舊 AI 重翻", "moddb")

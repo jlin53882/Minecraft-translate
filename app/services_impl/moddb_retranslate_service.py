@@ -134,6 +134,7 @@ def _build_retranslation_items(
     items = build_items(rows)
     for item, row in zip(items, entries, strict=True):
         item["_expected_old_zh_tw"] = row.current_ai_translation
+        item["_expected_version"] = row.mc_version
     return items
 
 
@@ -268,6 +269,11 @@ def _finalize_batch_results(
             original["_entry_id"],
             original["_expected_old_zh_tw"],
             result["text"],
+            expected_version=original["_expected_version"],
+            expected_kind=original["_kind"],
+            expected_mod_id=original["_mod_id"],
+            expected_key=original["path"],
+            expected_en_us=original["source_text"],
         )
         if replace.status == "updated":
             report.updated += 1

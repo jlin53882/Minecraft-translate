@@ -904,6 +904,11 @@ class TranslationDB:
         expected_old_zh_tw: str,
         new_zh_tw: str,
         *,
+        expected_version: str,
+        expected_kind: str,
+        expected_mod_id: str,
+        expected_key: str,
+        expected_en_us: str,
         actor: str = "AI 重翻",
     ) -> AITranslationReplaceResult:
         """Compare-and-set 一筆仍由 AI 生效且仍與原文相同的 AI 譯文。
@@ -915,7 +920,9 @@ class TranslationDB:
             raise ValueError("AI 重翻譯文不可為空")
 
         eligible = (
-            "e.id = ? AND t.entry_id = e.id AND t.source = ? AND t.zh_tw = ? "
+            "e.id = ? AND e.mc_version = ? AND e.kind = ? AND e.mod_id = ? "
+            "AND e.key = ? AND e.en_us = ? AND t.entry_id = e.id "
+            "AND t.source = ? AND t.zh_tw = ? "
             "AND f.entry_id = e.id AND f.source = ? AND e.en_us <> '' "
             "AND f.zh_tw <> '' AND f.zh_tw = e.en_us"
         )
@@ -925,7 +932,17 @@ class TranslationDB:
                 "JOIN entry e ON e.id = t.entry_id "
                 "JOIN effective f ON f.entry_id = e.id "
                 f"WHERE {eligible}",
-                (entry_id, SRC_AI, expected_old_zh_tw, SRC_AI),
+                (
+                    entry_id,
+                    expected_version,
+                    expected_kind,
+                    expected_mod_id,
+                    expected_key,
+                    expected_en_us,
+                    SRC_AI,
+                    expected_old_zh_tw,
+                    SRC_AI,
+                ),
             ).fetchone()
             if current is None:
                 return AITranslationReplaceResult("skipped_changed")
@@ -937,9 +954,22 @@ class TranslationDB:
                 "WHERE entry_id = ? AND source = ? AND zh_tw = ? "
                 "AND EXISTS (SELECT 1 FROM entry e "
                 "JOIN effective f ON f.entry_id = e.id "
-                "WHERE e.id = translation.entry_id AND e.en_us <> '' "
+                "WHERE e.id = translation.entry_id AND e.mc_version = ? "
+                "AND e.kind = ? AND e.mod_id = ? AND e.key = ? AND e.en_us = ? "
+                "AND e.en_us <> '' "
                 "AND f.source = ? AND f.zh_tw <> '' AND f.zh_tw = e.en_us)",
-                (new_zh_tw, entry_id, SRC_AI, expected_old_zh_tw, SRC_AI),
+                (
+                    new_zh_tw,
+                    entry_id,
+                    SRC_AI,
+                    expected_old_zh_tw,
+                    expected_version,
+                    expected_kind,
+                    expected_mod_id,
+                    expected_key,
+                    expected_en_us,
+                    SRC_AI,
+                ),
             )
             if result.rowcount != 1:
                 return AITranslationReplaceResult("skipped_changed")
@@ -1066,7 +1096,7 @@ class TranslationDB:
         """列出目前生效 AI 譯文與原文相同的條目；limit<=0 表示不限。"""
         where, params = self._same_as_source_ai_where(version, mod_ids)
         sql = (
-            "SELECT e.id, e.kind, e.mod_id, e.key, e.en_us, f.zh_tw "
+            "SELECT e.id, e.kind, e.mod_id, e.key, e.en_us, f.zh_tw, e.mc_version "
             "FROM entry e LEFT JOIN effective f ON f.entry_id=e.id "
             f"WHERE {where} ORDER BY e.mod_id, e.kind, e.key"
         )

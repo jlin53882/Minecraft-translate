@@ -45,6 +45,7 @@ class SameSourceAIEntry:
     key: str
     en_us: str
     current_ai_translation: str
+    mc_version: str
 
 
 @dataclass(frozen=True)

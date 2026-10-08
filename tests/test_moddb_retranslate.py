@@ -75,6 +75,16 @@ def _ai_entry(
     )
 
 
+def _replace_identity(entry):
+    return {
+        "expected_version": entry.mc_version,
+        "expected_kind": entry.kind,
+        "expected_mod_id": entry.mod_id,
+        "expected_key": entry.key,
+        "expected_en_us": entry.en_us,
+    }
+
+
 def _options(**overrides):
     values = {
         "version": "1.21.1",
@@ -265,18 +275,22 @@ def test_replace_ai_translation_is_compare_and_set_and_does_not_propagate(db_pat
     target = _ai_entry(db)
     other = _ai_entry(db, version="1.20.1")
 
-    unchanged = db.replace_ai_translation(target.id, "Minecraft", "Minecraft")
+    identity = _replace_identity(target)
+    unchanged = db.replace_ai_translation(
+        target.id, "Minecraft", "Minecraft", **identity
+    )
     assert unchanged.status == "unchanged"
     assert db.entry_detail(target.id).history == []
 
-    result = db.replace_ai_translation(target.id, "Minecraft", "我的世界")
+    result = db.replace_ai_translation(target.id, "Minecraft", "我的世界", **identity)
     assert result.status == "updated"
     assert db.get_entry(target.id).zh_tw == "我的世界"
     assert db.get_entry(target.id).source == SRC_AI
     assert db.get_entry(other.id).zh_tw == "Minecraft"
     assert db.entry_detail(target.id).history[0].action == "ai_retranslate"
-    assert db.replace_ai_translation(target.id, "Minecraft", "過期結果").status == (
-        "skipped_changed"
+    assert (
+        db.replace_ai_translation(target.id, "Minecraft", "過期結果", **identity).status
+        == "skipped_changed"
     )
 
     db.write_back(
@@ -288,6 +302,67 @@ def test_replace_ai_translation_is_compare_and_set_and_does_not_propagate(db_pat
     )
     assert db.get_entry(target.id).zh_tw == "我的世界"
     db.close()
+
+
+@pytest.mark.parametrize(
+    ("field", "wrong_value"),
+    [
+        ("expected_version", "1.20.1"),
+        ("expected_kind", KIND_PATCHOULI),
+        ("expected_mod_id", "different-mod"),
+        ("expected_key", "different.key"),
+        ("expected_en_us", "different source"),
+    ],
+)
+def test_replace_ai_translation_requires_exact_candidate_identity(
+    db_path, field, wrong_value
+):
+    db = TranslationDB(db_path)
+    entry = _ai_entry(db)
+    identity = _replace_identity(entry)
+    identity[field] = wrong_value
+
+    result = db.replace_ai_translation(entry.id, "Minecraft", "我的世界", **identity)
+
+    assert result.status == "skipped_changed"
+    assert db.get_entry(entry.id).zh_tw == "Minecraft"
+    db.close()
+
+
+def test_service_cas_rejects_same_id_from_a_different_candidate(
+    db_path, tmp_path, monkeypatch, repair_cache
+):
+    preview_db = TranslationDB(tmp_path / "preview.db")
+    preview_entry = _ai_entry(preview_db, mod_id="preview-mod")
+    preview = moddb_retranslate_service.preview_same_source_ai_retranslation(
+        preview_db, _options()
+    )
+    preview_db.close()
+
+    current_db = TranslationDB(db_path)
+    current_entry = _ai_entry(current_db, mod_id="current-mod")
+    assert preview_entry.id == current_entry.id
+    current_db.close()
+
+    monkeypatch.setattr(
+        moddb_retranslate_service,
+        "open_database",
+        lambda **_kwargs: TranslationDB(db_path),
+    )
+    monkeypatch.setattr(
+        moddb_retranslate_service,
+        "translate_batch_smart",
+        lambda batch, _total: ([{**batch[0], "text": "我的世界"}], "AUTO"),
+    )
+
+    snap = _run(db_path, preview.entries)
+
+    assert snap["summary"]["status"] == "DONE"
+    assert snap["summary"]["updated"] == 0
+    assert snap["summary"]["skipped_changed"] == 1
+    check = TranslationDB(db_path)
+    assert check.get_entry(current_entry.id).zh_tw == "Minecraft"
+    check.close()
 
 
 @pytest.fixture
@@ -730,6 +805,57 @@ def test_preview_confirmation_cancel_and_scope_invalidation(db_path, monkeypatch
     panel.confirm_retranslation()
     assert "請先按「預覽符合條件的舊 AI 譯文」" in snacks[-1]
     db.close()
+
+
+@pytest.mark.parametrize("identity_change", ["path", "priority"])
+def test_database_change_invalidates_open_repair_confirmation(
+    tmp_path, monkeypatch, identity_change
+):
+    preview_db = TranslationDB(tmp_path / "preview.db")
+    preview_entry = _ai_entry(preview_db, mod_id="preview-mod")
+    current_db = TranslationDB(tmp_path / "current.db")
+    current_entry = _ai_entry(current_db, mod_id="current-mod")
+    assert preview_entry.id == current_entry.id
+
+    active_db = [preview_db]
+    page = mock_page()
+    panel = translate_panel.TranslatePanel(page, lambda: active_db[0])
+    panel.version_dd.value = "1.21.1"
+    panel.preview_retranslation()
+    panel.confirm_retranslation()
+    stale_dialog = page.overlay[-1]
+
+    snacks = []
+    monkeypatch.setattr(
+        translate_panel,
+        "show_snack",
+        lambda _page, message, _tone: snacks.append(message),
+    )
+    starts = []
+
+    class FakeThread:
+        def __init__(self, target, args, daemon):
+            starts.append((target, args, daemon))
+
+        def start(self):
+            pass
+
+    monkeypatch.setattr(translate_panel.threading, "Thread", FakeThread)
+    if identity_change == "path":
+        active_db[0] = current_db
+    else:
+        preview_db.set_priority(tuple(reversed(preview_db.priority)))
+    panel.refresh_scope()
+
+    assert panel._repair_preview is None
+    stale_dialog.actions[1].on_click(None)
+    assert starts == []
+    assert "預覽已失效" in snacks[-1]
+    target_db = active_db[0]
+    target_entry = current_entry if target_db is current_db else preview_entry
+    assert target_db.get_entry(target_entry.id).zh_tw == "Minecraft"
+    preview_db.close()
+    current_db.close()
 
 
 def test_retranslation_preview_shows_ai_source_profiles_and_samples(
