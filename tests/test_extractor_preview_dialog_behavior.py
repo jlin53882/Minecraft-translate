@@ -243,6 +243,18 @@ def test_start_without_output_path_shows_resolved_output(env):
     )
 
 
+def test_confirmation_uses_the_output_path_shown_by_preview(env):
+    env.updates = [{"result": _result()}]
+    dialog = env.open(output_path="")
+    env.scan(dialog)
+
+    _action(dialog, "確認執行").on_click(None)
+
+    assert env.opened_extractor[-1]["output_path"] == str(
+        env.mods.parent / "resolved_out"
+    )
+
+
 def test_dialog_dismiss_when_idle_is_harmless(env):
     dialog = env.open()
     dialog.on_dismiss(None)

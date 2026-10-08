@@ -18,10 +18,14 @@ import types
 
 import flet as ft
 
+from app.services_impl.moddb_service import load_db_settings
 from app.ui.design import C
 from app.ui.dialogs import dispose_dialogs, present_dialog
 from app.ui.sync_text_field import SyncTextField
 from app.views.pipeline.pipeline_config import normalize_extract_mode
+from app.views.pipeline.pipeline_db_version_field import (
+    build_pipeline_db_version_field,
+)
 from translation_tool.utils.config_manager import load_config
 from translation_tool.utils.log_unit import log_warning
 
@@ -181,6 +185,7 @@ def _one_click_init_state(
         ),
         "patchouli_threshold": ctx.patchouli_threshold_default,
         "zh_en_threshold": ctx.zh_en_threshold_default,
+        "translation_db_version": load_db_settings().version,
         "dry_run": False,
         "write_new_cache": True,
         "description": "",
@@ -286,9 +291,12 @@ def _one_click__build_step1(ctx):
 
 
 def _one_click__build_step2(ctx):
-    patchouli_skip_cb, patchouli_thresh_field, zh_en_field = _one_click_step2_widgets(
-        ctx
-    )
+    (
+        patchouli_skip_cb,
+        patchouli_thresh_field,
+        zh_en_field,
+        target_version_field,
+    ) = _one_click_step2_widgets(ctx)
 
     def on_only_lang(e):
         ctx.state["only_lang"] = e.control.value
@@ -317,6 +325,14 @@ def _one_click__build_step2(ctx):
                 on_change=on_process_zh_cn,
             ),
             ft.Divider(),
+            ft.Text("Mod 資料庫補譯目標版本", weight="bold", size=13),
+            target_version_field,
+            ft.Text(
+                "可從資料庫版本中選擇，也可以手動輸入；留空時沿用設定。",
+                size=11,
+                color=C.MUTED,
+            ),
+            ft.Divider(),
             ft.Text("zh 英文含量閾值", weight=ft.FontWeight.W_500, size=12),
             zh_en_field,
             ft.Divider(),
@@ -340,7 +356,10 @@ def _one_click__build_step2(ctx):
 
 
 def _one_click_step2_widgets(ctx):
-    """步驟 2：Patchouli 選項與閾值欄位。"""
+    """步驟 2：合併、資料庫版本與 Patchouli 選項。"""
+    target_version_field = build_pipeline_db_version_field(
+        ctx.state, ctx.show_snack_bar
+    )
 
     patchouli_skip_cb = ft.Switch(
         label="允許 zh_cn 觸發跳過 en_us",
@@ -381,7 +400,7 @@ def _one_click_step2_widgets(ctx):
         text_align=ft.TextAlign.CENTER,
         hint_text="空白用預設值",
     )
-    return patchouli_skip_cb, patchouli_thresh_field, zh_en_field
+    return patchouli_skip_cb, patchouli_thresh_field, zh_en_field, target_version_field
 
 
 def _one_click__build_step3(ctx):
@@ -768,6 +787,7 @@ def _one_click__do_execute(ctx):
         "write_new_cache": ctx.state["write_new_cache"],
         "description": ctx.state["description"],
         "version": ctx.state["version"],
+        "translation_db_version": ctx.state["translation_db_version"],
         "min_format": version_info.get("min_format"),
         "max_format": version_info.get("max_format"),
         "pack_image": ctx.state["pack_image"],

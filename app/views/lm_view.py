@@ -20,6 +20,12 @@ from app.ui.poller import PollerHandle
 from app.ui.snack import show_snack
 from app.ui.status_chip import apply_status_style, set_chip_status
 from app.views._log import LogView, load_ui_logging_config
+from app.views.moddb.version_picker import (
+    refresh_target_version_options,
+    set_target_version,
+    target_version_dropdown,
+    target_version_value,
+)
 from translation_tool.utils.config_manager import (
     get_batch_write_interval,
     load_config,
@@ -142,11 +148,12 @@ class LMView(ft.Column):
         )
         self.use_db_switch = db_row.switch
         self.use_db_switch.on_change = self._on_db_option_changed
-        self.db_version_field = kit.text_field(
-            "目標版本",
-            hint="例如 1.21.1（留空則使用設定中的預設版本）",
+        self._database_missing = False
+        self.db_version_field = target_version_dropdown(
             value=db_settings.version,
+            hint="選擇版本或手動輸入（留空則使用設定中的預設版本）",
             on_change=self._on_db_option_changed,
+            on_focus=self._on_db_version_focus,
         )
         self.db_info = ft.Text("", size=11.5, color=C.DIM)
         self.refresh_db_info()
@@ -169,6 +176,20 @@ class LMView(ft.Column):
         except Exception as exc:  # noqa: BLE001 - 頁面尚未掛載時只是不即時更新提示
             log_debug(f"LM 資料庫提示更新略過：{exc}")
 
+    def _on_db_version_focus(self, _e=None) -> None:
+        refresh_target_version_options(self.db_version_field)
+        self.refresh_db_info()
+        if self._database_missing:
+            show_snack(
+                self._page,
+                "尚未建立 Mod 資料庫，請先到「Mod 資料庫」頁掃描 JAR 建立資料庫。",
+                C.GOLD,
+            )
+        try:
+            self._page.update()
+        except Exception as exc:  # noqa: BLE001 - 頁面尚未掛載時略過即時更新
+            log_debug(f"LM 版本選項更新略過：{exc}")
+
     def refresh_db_info(self) -> None:
         """顯示資料庫目前的狀態（不存在時提示如何建立；開著卻沒有版本時提醒填寫）。"""
         try:
@@ -177,17 +198,20 @@ class LMView(ft.Column):
             log_warning(f"讀取 Mod 資料庫摘要失敗：{exc!r}")
             info = {"problem": f"讀取摘要失敗（{exc}），詳情請看後台 log"}
         if info is not None and info.get("problem"):
+            self._database_missing = False
             self.db_info.value = f"⚠ 資料庫無法使用：{info['problem']}"
         elif info is None:
+            self._database_missing = True
             self.db_info.value = (
                 "尚未建立資料庫：到「Mod 資料庫」頁掃描 jar 後，這裡會自動使用。"
             )
         else:
+            self._database_missing = False
             self.db_info.value = (
                 f"資料庫 {info['entries']:,} 條目（已翻譯 {info['progress']}%）・"
                 f"版本：{'、'.join(info['versions'][:4]) or '—'}"
             )
-        no_version = not (self.db_version_field.value or "").strip() and not (
+        no_version = not target_version_value(self.db_version_field) and not (
             load_db_settings().version
         )
         if self.use_db_switch.value and no_version:
@@ -437,7 +461,7 @@ class LMView(ft.Column):
         dry_run = self.dry_run_switch.value
         export_lang = self.export_lang_checkbox.value
         write_new_cache = self.write_new_cache_switch.value
-        db_version = (self.db_version_field.value or "").strip() or None
+        db_version = target_version_value(self.db_version_field)
 
         log_debug(
             "LM UI options: dry_run=%s export_lang=%s write_new_cache=%s",
@@ -484,7 +508,7 @@ class LMView(ft.Column):
         self.use_db_switch.value = task.use_translation_db and bool(
             task.translation_db_version
         )
-        self.db_version_field.value = task.translation_db_version
+        set_target_version(self.db_version_field, task.translation_db_version)
         self.refresh_db_info()
         self.start_clicked(None)
 

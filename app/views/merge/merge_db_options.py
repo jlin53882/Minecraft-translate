@@ -12,15 +12,23 @@ import flet as ft
 from app.services_impl.moddb_service import load_db_settings, summarize_database
 from app.ui import kit
 from app.ui.design import C
+from app.views.moddb.version_picker import (
+    refresh_target_version_options,
+    set_target_version,
+    target_version_dropdown,
+    target_version_value,
+)
 from translation_tool.utils.log_unit import log_debug, log_warning
 
 
 class MergeDbOptions:
     """開關與版本欄位；``use_db`` / ``version`` 交給合併服務（None＝用設定檔的值）。"""
 
-    def __init__(self, page_update) -> None:
+    def __init__(self, page_update, on_missing_database=None) -> None:
         self._page_update = page_update
+        self._on_missing_database = on_missing_database
         self._touched = False
+        self._database_missing = False
         settings = load_db_settings()
         row = kit.SwitchRow(
             "使用 Mod 資料庫補譯",
@@ -30,11 +38,11 @@ class MergeDbOptions:
         )
         self.switch = row.switch
         self.switch.on_change = self._on_changed
-        self.version_field = kit.text_field(
-            "目標版本",
-            hint="例如 1.21.1（留空則使用設定中的預設版本）",
+        self.version_field = target_version_dropdown(
             value=settings.version,
+            hint="選擇版本或手動輸入（留空則使用設定中的預設版本）",
             on_change=self._on_changed,
+            on_focus=self._on_version_focus,
         )
         self.info = ft.Text("", size=11.5, color=C.DIM)
         self.refresh_info()
@@ -56,7 +64,7 @@ class MergeDbOptions:
     @property
     def version(self) -> str | None:
         """頁面填的版本；空白時回傳 None（使用設定中的預設版本）。"""
-        return (self.version_field.value or "").strip() or None
+        return target_version_value(self.version_field)
 
     def sync_from_config(self) -> None:
         """回到這一頁時：使用者沒動過就跟著設定；動過就維持頁面上的選擇。"""
@@ -64,8 +72,18 @@ class MergeDbOptions:
             return
         settings = load_db_settings()
         self.switch.value = settings.merge_enabled
-        self.version_field.value = settings.version
+        set_target_version(self.version_field, settings.version)
         self.refresh_info()
+
+    def _on_version_focus(self, _e=None) -> None:
+        refresh_target_version_options(self.version_field)
+        self.refresh_info()
+        if self._database_missing and self._on_missing_database:
+            self._on_missing_database()
+        try:
+            self._page_update()
+        except Exception as exc:  # noqa: BLE001 - 頁面尚未掛載時略過即時更新
+            log_debug(f"語系合併版本選項更新略過：{exc}")
 
     def _on_changed(self, _e=None) -> None:
         self._touched = True
@@ -83,10 +101,13 @@ class MergeDbOptions:
             log_warning(f"讀取 Mod 資料庫摘要失敗：{exc!r}")
             info = {"problem": f"讀取摘要失敗（{exc}），詳情請看後台 log"}
         if info is None:
+            self._database_missing = True
             text = "尚未建立資料庫：這次合併會略過資料庫補譯（到「Mod 資料庫」頁掃描後即可使用）。"
         elif info.get("problem"):
+            self._database_missing = False
             text = f"⚠ 資料庫無法使用：{info['problem']}（這次會略過補譯）"
         else:
+            self._database_missing = False
             text = (
                 f"資料庫 {info['entries']:,} 條目（已翻譯 {info['progress']}%）・"
                 f"版本：{'、'.join(info['versions'][:4]) or '—'}"

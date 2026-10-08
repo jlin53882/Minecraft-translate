@@ -398,7 +398,7 @@ def test_dashboard_reload_is_not_reentrant():
 def test_dashboard_reflects_running_and_finished_tasks():
     from app.shell.task_manager import TaskManager
     from app.tasks.task_session import TaskSession
-    from app.views.dashboard.dashboard_data import STEP_DONE, STEP_RUNNING
+    from app.views.dashboard.dashboard_data import STEP_PENDING, STEP_RUNNING
 
     view = _dashboard()
     manager = TaskManager()
@@ -413,7 +413,7 @@ def test_dashboard_reflects_running_and_finished_tasks():
         assert view.stat_tasks.value_text.value == "1"
         session.finish()
         view.refresh_view(view._collect())
-        assert next(s for s in view.data.steps if s.key == "lm").status == STEP_DONE
+        assert next(s for s in view.data.steps if s.key == "lm").status == STEP_PENDING
         assert "完成 1" in view.stat_tasks.delta_text.value
         assert view.activity_column.controls
     finally:
