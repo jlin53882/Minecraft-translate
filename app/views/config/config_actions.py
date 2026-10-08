@@ -116,7 +116,9 @@ def _model_settings_signature(models) -> tuple:
     )
 
 
-def _collect_validated_config(view, load_config_json_fn, validate_api_keys_fn):
+def _collect_validated_config(
+    view, load_config_json_fn, validate_api_keys_fn, *, show_feedback=True
+):
     try:
         config = load_config_json_fn()
         for setting in editable_settings():
@@ -144,21 +146,25 @@ def _collect_validated_config(view, load_config_json_fn, validate_api_keys_fn):
             previous_models
         )
         if not _has_enabled_model(models) and (previous_has_enabled or models_changed):
-            show_snack(view.page, "至少需要保留一個啟用中的模型；設定尚未儲存。")
+            if show_feedback:
+                show_snack(view.page, "至少需要保留一個啟用中的模型；設定尚未儲存。")
             return None
         config["lm_translator"]["models"] = models
         validate_config_values(config)
     except Exception as err:  # noqa: BLE001 - config collection is a UI save boundary
         logger.error("儲存設定驗證失敗：%s", redact_text(traceback.format_exc()))
-        show_snack(
-            view.page,
-            f"❌ 設定驗證失敗（{type(err).__name__}），尚未嘗試寫入。",
-        )
+        if show_feedback:
+            show_snack(
+                view.page,
+                f"❌ 設定驗證失敗（{type(err).__name__}），尚未嘗試寫入。",
+            )
         return None
     return config
 
 
-def _write_config_with_feedback(view, config, save_config_json_fn) -> bool:
+def _write_config_with_feedback(
+    view, config, save_config_json_fn, *, show_feedback=True
+) -> bool:
     try:
         write_result = save_config_json_fn(config)
     except Exception:  # noqa: BLE001 - failure may occur before or after atomic replace
@@ -166,15 +172,16 @@ def _write_config_with_feedback(view, config, save_config_json_fn) -> bool:
         write_result = None
     if write_result is not True:
         logger.error("儲存設定未確認成功：writer 未回報 True")
-        show_snack(
-            view.page,
-            "❌ 無法確認設定檔是否已更新；變更仍保留在此頁，請先檢查 config.json。",
-        )
+        if show_feedback:
+            show_snack(
+                view.page,
+                "❌ 無法確認設定檔是否已更新；變更仍保留在此頁，請先檢查 config.json。",
+            )
         return False
     return True
 
 
-def _reload_after_confirmed_write(view) -> bool:
+def _reload_after_confirmed_write(view, *, show_feedback=True) -> bool:
     try:
         view.load_config()
     except Exception:  # noqa: BLE001 - reload is a UI boundary after confirmed persistence
@@ -182,10 +189,11 @@ def _reload_after_confirmed_write(view) -> bool:
             "設定已寫入，但重新載入設定頁失敗：%s",
             redact_text(traceback.format_exc()),
         )
-        show_snack(
-            view.page,
-            "⚠️ 設定已寫入，但畫面重新載入失敗；請重新開啟設定頁確認顯示內容。",
-        )
+        if show_feedback:
+            show_snack(
+                view.page,
+                "⚠️ 設定已寫入，但畫面重新載入失敗；請重新開啟設定頁確認顯示內容。",
+            )
         return False
     return True
 
@@ -302,6 +310,7 @@ def save_config_from_view_with_outcome(
     save_config_json_fn,
     validate_api_keys_from_ui_fn,
     registry=None,
+    show_feedback=True,
 ):
     """從 view UI 控制項收集使用者輸入並寫入 config.json。
 
@@ -317,18 +326,24 @@ def save_config_from_view_with_outcome(
       → 按儲存後，使用者的「預設值」就會固化進 config.json（Layer 1 覆蓋 Layer 2/3）
     """
     new_config = _collect_validated_config(
-        view, load_config_json_fn, validate_api_keys_from_ui_fn
+        view,
+        load_config_json_fn,
+        validate_api_keys_from_ui_fn,
+        show_feedback=show_feedback,
     )
     if new_config is None:
         return SaveOutcome.WRITE_FAILED
-    if not _write_config_with_feedback(view, new_config, save_config_json_fn):
+    if not _write_config_with_feedback(
+        view, new_config, save_config_json_fn, show_feedback=show_feedback
+    ):
         return SaveOutcome.WRITE_FAILED
-    if not _reload_after_confirmed_write(view):
+    if not _reload_after_confirmed_write(view, show_feedback=show_feedback):
         return SaveOutcome.SAVED_RELOAD_FAILED
     if registry is not None:
         _refresh_registered_extractor_views(registry)
 
-    show_snack(view.page, "✅ 設定已成功儲存！", view._success_color())
+    if show_feedback:
+        show_snack(view.page, "✅ 設定已成功儲存！", view._success_color())
     return SaveOutcome.SAVED_OK
 
 
@@ -351,3 +366,74 @@ def save_config_from_view(
         )
         is not SaveOutcome.WRITE_FAILED
     )
+
+
+def finish_unsaved_dialog(view, *, continue_navigation, before_continue=None) -> bool:
+    """Resolve navigation only after pop confirms this AlertDialog was topmost."""
+    if view._unsaved_dialog_resolved:
+        return False
+    dialog = view._unsaved_dialog
+    view._unsaved_dialog_closing = True
+    try:
+        popped_dialog = view.page.pop_dialog()
+    finally:
+        view._unsaved_dialog_closing = False
+    if popped_dialog is not dialog:
+        logger.error(
+            "關閉設定確認框時預期取得目前設定對話框，實際取得 %s",
+            type(popped_dialog).__name__ if popped_dialog is not None else "None",
+        )
+        return False
+    view._unsaved_dialog_resolved = True
+    view._unsaved_dialog_open = False
+    callback = view._unsaved_dialog_continue
+    view._unsaved_dialog_continue = None
+    if continue_navigation and callback is not None:
+        if before_continue is not None:
+            before_continue()
+        callback()
+    return True
+
+
+def on_unsaved_dialog_dismiss(view) -> None:
+    """Treat an external dismiss as stay; only an explicit action may navigate."""
+    if view._unsaved_dialog_closing or view._unsaved_dialog_resolved:
+        return
+    view._unsaved_dialog_resolved = True
+    view._unsaved_dialog_open = False
+    view._unsaved_dialog_continue = None
+
+
+def handle_unsaved_dialog_save(view) -> None:
+    """Save without stacking a SnackBar above the active unsaved-changes dialog."""
+    if view._unsaved_dialog_resolved:
+        return
+    save_succeeded = view.save_config_clicked(None, show_feedback=False)
+    if view._last_save_outcome is SaveOutcome.SAVED_RELOAD_FAILED:
+        view._configure_unsaved_dialog()
+    elif save_succeeded:
+        if finish_unsaved_dialog(view, continue_navigation=True):
+            show_snack(view.page, "✅ 設定已成功儲存！", view._success_color())
+    else:
+        view._unsaved_dialog.content.value = (
+            "設定驗證或寫入失敗；變更仍保留在此頁，請修正後重試，或留在此頁。"
+        )
+        view.page.update()
+
+
+def handle_unsaved_dialog_retry_reload(view) -> None:
+    """Keep reload recovery in the same dialog, then close it before feedback."""
+    if view._unsaved_dialog_resolved:
+        return
+    if not view._retry_config_reload(show_feedback=False):
+        view._unsaved_dialog.content.value = (
+            "設定已寫入，但重新載入仍失敗；可稍後重試或留在此頁。"
+        )
+        view.page.update()
+        return
+    if finish_unsaved_dialog(view, continue_navigation=True):
+        show_snack(
+            view.page,
+            "✅ 設定已重新載入，畫面與設定檔已同步。",
+            view._success_color(),
+        )
