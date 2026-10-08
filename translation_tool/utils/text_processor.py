@@ -391,8 +391,14 @@ def load_replace_rules(path: str) -> list[dict[str, str]]:
     return sorted_rules
 
 
-def save_replace_rules(path: str, rules: list[dict[str, str]]):
-    """將替換規則儲存到指定的 JSON 檔案（orjson 版）。"""
+def save_replace_rules(
+    path: str, rules: list[dict[str, str]], *, raise_on_error: bool = False
+):
+    """將替換規則儲存到指定的 JSON 檔案（orjson 版）。
+
+    ``raise_on_error`` keeps the historical log-and-continue behavior for
+    best-effort callers while allowing durable user actions to observe failure.
+    """
     resolved_path = _resolve_rules_path(path)
     try:
         resolved_path.parent.mkdir(parents=True, exist_ok=True)
@@ -402,8 +408,10 @@ def save_replace_rules(path: str, rules: list[dict[str, str]]):
                     rules, option=orjson.OPT_INDENT_2 | orjson.OPT_APPEND_NEWLINE
                 )
             )
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         log_error("儲存替換規則到 %s 失敗: %s", resolved_path, e)
+        if raise_on_error:
+            raise
 
 
 def load_custom_translations(folder_path: str, filename="table.tsv") -> dict[str, str]:

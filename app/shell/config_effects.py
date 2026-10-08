@@ -72,7 +72,13 @@ class CacheRootReloader:
                 return
             self._pending = False
             self._running = True
-        self._start(self._run)
+        try:
+            self._start(self._run)
+        except Exception:
+            with self._lock:
+                self._pending = True
+                self._running = False
+            log.warning("快取重載工作未能取得操作 owner，將等待後續重試", exc_info=True)
 
     def _run(self) -> None:
         ok = False

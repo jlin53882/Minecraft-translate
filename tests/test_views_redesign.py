@@ -444,7 +444,9 @@ def test_dashboard_reloads_stats_at_task_boundaries_not_every_progress_event(
         assert reloads == ["reload"]
 
         session.finish()
-        assert reloads == ["reload", "reload"]
+        # First finish projection, then authoritative Registry terminal
+        # update after the active operation has actually been removed.
+        assert reloads == ["reload", "reload", "reload"]
     finally:
         manager.detach()
 

@@ -17,6 +17,12 @@ from app.services_impl.cache.cache_services import (
     cache_rotate_service,
     cache_save_all_service,
 )
+from app.tasks.operation_registry import (
+    CancellationPolicy,
+    CommitPolicy,
+    ShutdownPolicy,
+    reserve_page_operation,
+)
 from app.ui import design, kit
 
 # UI 共用元件：總覽區使用新 UI kit。
@@ -395,9 +401,33 @@ class CacheOverviewMixin:
             finish(*work())
             return
 
+        operation = reserve_page_operation(
+            self.page,
+            name="快取搜尋索引重建",
+            owner="cache-index-rebuild",
+            cancellation=CancellationPolicy.NON_CANCELLABLE,
+            commit=CommitPolicy.PARTIAL_ALLOWED,
+            shutdown=ShutdownPolicy.DRAIN_ONLY,
+        )
+        if not operation.admitted:
+            finish(None, RuntimeError("應用程式正在關閉，未啟動索引重建"))
+            return
+        result = {}
+
+        def rebuild():
+            result["value"] = work()
+
+        if not operation.launch(rebuild):
+            operation.finish(
+                error=RuntimeError("index rebuild worker was not launched")
+            )
+            finish(None, RuntimeError("無法啟動索引重建"))
+            return
+
         async def _rebuild():
-            # 大量快取重建需數秒，改在執行緒執行，避免凍結 UI
-            finish(*(await asyncio.to_thread(work)))
+            while not operation.done_event.is_set():
+                await asyncio.sleep(0.02)
+            finish(*result.get("value", (None, RuntimeError("索引重建無結果"))))
 
         run_task(_rebuild)
 

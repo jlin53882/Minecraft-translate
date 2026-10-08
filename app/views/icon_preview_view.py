@@ -4,7 +4,6 @@
 維護注意：本檔案的函式 docstring 用於維護說明，不代表行為變更。
 """
 
-import asyncio
 import time
 from collections import defaultdict
 from pathlib import Path
@@ -12,6 +11,12 @@ from types import SimpleNamespace
 
 import flet as ft
 
+from app.tasks.operation_registry import (
+    CancellationPolicy,
+    CommitPolicy,
+    ShutdownPolicy,
+    reserve_page_operation,
+)
 from app.ui import kit
 from app.ui.debounce import Debouncer
 from app.ui.design import C
@@ -25,6 +30,10 @@ from app.views.icon_preview.entries_cache import (
 )
 from app.views.icon_preview.icon_cache import _migrate_old_icon_cache
 from app.views.icon_preview.list_mixin import IconPreviewListMixin
+from app.views.icon_preview.load_operation import (
+    load_icon_preview,
+    observe_async_owner,
+)
 from app.views.icon_preview.progress import _make_progress_callback
 from translation_tool.utils.log_unit import log_error, log_info, log_warning
 from translation_tool.utils.path_text import normalize_path_text
@@ -563,61 +572,41 @@ class IconPreviewView(IconPreviewDetailMixin, IconPreviewListMixin, ft.Column):
             self._begin_scan(mode)
             return
 
+        operation = reserve_page_operation(
+            self.page,
+            name="IconPreview 模組載入與掃描",
+            owner="icon-preview-load",
+            cancellation=CancellationPolicy.BOUNDARY_ONLY,
+            commit=CommitPolicy.EPHEMERAL,
+            shutdown=ShutdownPolicy.CANCEL_AND_DRAIN,
+        )
+        if not operation.admitted:
+            show_snack(self.page, "應用程式正在關閉，未啟動掃描", color=C.GOLD)
+            return
+
         self._loading = True
         self.load_btn.disabled = True
         self.update()
         generation = self._load_generation
 
         async def _load():
-            await self._load_async(generation)
+            await self._load_async(generation, operation)
 
-        run_task(_load)
+        try:
+            future = run_task(_load)
+            observe_async_owner(future, operation)
+        except Exception as ex:  # noqa: BLE001 - 排程失敗時需結束 owner 並回報 UI
+            operation.finish(error=ex)
+            self._loading = False
+            self._update_load_state()
+            log_error(f"[IconPreview] 無法排程載入工作: {ex!r}")
 
-    async def _load_async(self, generation: int) -> None:
+    async def _load_async(self, generation: int, operation=None) -> None:
         """依序：偵測模式 → 查快取 → 計算步數 → 掃描；每個阻塞步驟都在執行緒中執行。
 
         每次 await 之後檢查世代：View 已卸載（世代變了）就丟棄結果，只復位旗標。
         """
-
-        def current() -> bool:
-            return self._load_generation == generation
-
-        mode = "unknown"
-        entries: list = []
-        try:
-            mode = await asyncio.to_thread(self._detect_source_mode)
-            if not current():
-                return
-            log_info(f"[IconPreview] 偵測到模式: {mode}")
-            cached = await asyncio.to_thread(self._lookup_cached_entries, mode)
-            if not current():
-                return
-            if cached is not None:
-                self._apply_cached_entries(cached[0], cached[1], mode)
-                return
-            total_steps = await asyncio.to_thread(self._count_scan_steps, mode)
-            if not current():
-                return
-            self._show_scan_started(mode, total_steps)
-            entries = await asyncio.to_thread(self._scan_entries, mode, total_steps)
-        except Exception as ex:  # noqa: BLE001 - 錯誤顯示在 UI
-            if not current():
-                return
-            log_error(f"[IconPreview] 掃描失敗: {ex!r}")
-            show_snack(
-                self.page,
-                f"❌ 掃描失敗：{ex}",
-                color=C.RED,
-                clear_existing=True,
-                duration=4000,
-            )
-            entries = []
-        finally:
-            self._loading = False
-            if current():
-                self._update_load_state()
-        if current():
-            self._finish_load(entries, mode)
+        await load_icon_preview(self, generation, operation)
 
     def _rebuild_mods(self, entries) -> None:
         """依 entries 重建 modid → entry 清單（dict 轉回 SimpleNamespace，保持屬性存取相容）。"""

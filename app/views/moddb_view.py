@@ -14,6 +14,11 @@ from app.services_impl.moddb_service import (
     open_database,
     warm_stats_quietly,
 )
+from app.tasks.operation_registry import (
+    CancellationPolicy,
+    ShutdownPolicy,
+    launch_page_operation,
+)
 from app.ui import kit
 from app.views.moddb.entries_panel import EntriesPanel
 from app.views.moddb.overview_panel import OverviewPanel
@@ -97,7 +102,14 @@ class ModDbView(ft.Column):
         """開啟資料庫後在背景先算好總覽統計；使用者切到總覽頁時多半已經算好。"""
         run_thread = getattr(self._page, "run_thread", None)
         if db is not None and callable(run_thread):
-            run_thread(warm_stats_quietly, db)
+            launch_page_operation(
+                self._page,
+                lambda: warm_stats_quietly(db),
+                name="Mod DB 統計預熱",
+                owner="moddb-warm-stats",
+                cancellation=CancellationPolicy.NON_CANCELLABLE,
+                shutdown=ShutdownPolicy.DRAIN_ONLY,
+            )
 
     def reload_db(self) -> None:
         """關閉並重新開啟（資料庫路徑或優先序設定變更、掃描建立新檔後）。"""

@@ -4,14 +4,19 @@
 維護注意：本模組提供 task_worker 給各 QC 檢查器使用。
 """
 
-import threading
 import traceback
 from collections.abc import Callable
 from typing import Any
 
 import flet as ft
 
+from app.tasks.operation_registry import (
+    CancellationPolicy,
+    ShutdownPolicy,
+    launch_page_operation,
+)
 from app.ui.design import C
+from app.ui.snack import show_snack
 from app.ui.ui_batcher import UiBatcher
 from app.views._log import LogView
 from translation_tool.utils.log_unit import log_error
@@ -117,7 +122,17 @@ class QCBase:
                 batcher.set_state(done=True)
                 batcher.flush(force=True)
 
-        threading.Thread(target=in_new_task("qc", run), daemon=True).start()
+        launched = launch_page_operation(
+            self._page,
+            in_new_task("qc", run),
+            name="品質檢查",
+            owner="qc",
+            cancellation=CancellationPolicy.NON_CANCELLABLE,
+            shutdown=ShutdownPolicy.DRAIN_ONLY,
+        )
+        if not launched:
+            apply_ui([], {"done": True})
+            show_snack(self._page, "應用程式正在關閉，無法啟動新任務", C.GOLD)
 
     @property
     def page(self):

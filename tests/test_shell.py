@@ -559,7 +559,7 @@ def test_window_close_from_reload_recovery_state_waits_for_decision(
 
 
 def test_cancelled_close_restores_config_recovery_navigation_guard(
-    shell, placeholder_views, monkeypatch
+    shell, placeholder_views
 ):
     shell.navigate("config")
     config_view = placeholder_views["config"]
@@ -585,7 +585,8 @@ def test_cancelled_close_restores_config_recovery_navigation_guard(
     )
     shell.page.show_dialog = lambda dialog: shell.page.overlay.append(dialog)
     shell.page.pop_dialog = lambda: shell.page.overlay.pop()
-    monkeypatch.setattr(shell.tasks, "active", lambda: [SimpleNamespace()])
+    active_session = TaskSession(name="close confirmation guard")
+    active_session.start()
 
     asyncio.run(shell._window_on_event(SimpleNamespace(type=ft.WindowEventType.CLOSE)))
 
@@ -595,6 +596,7 @@ def test_cancelled_close_restores_config_recovery_navigation_guard(
         "仍要關閉",
     ]
     close_dialog.actions[0].on_click(None)
+    active_session.finish()
 
     assert config_view.recovery_exit_acknowledged is False
     assert config_view.requires_exit_confirmation is True

@@ -44,7 +44,7 @@ def remove_observer(callback: Callable[[TaskSession, str], None]) -> None:
             _observers.remove(callback)
 
 
-def tag_session(session, name: str, view_key: str | None = None):
+def tag_session(session, name: str, view_key: str | None = None, *, page=None):
     """替 session 標上顯示名稱與所屬頁面（頂列任務膠囊用），並回傳 session。
 
     用屬性設定而不是建構參數，所以替身 / 舊版 session 也能安全呼叫。
@@ -52,6 +52,8 @@ def tag_session(session, name: str, view_key: str | None = None):
     try:
         session.name = name
         session.view_key = view_key
+        if page is not None:
+            session.operation_registry = getattr(page, "operation_registry", None)
     except AttributeError:
         pass
     return session
@@ -73,14 +75,38 @@ def add_log_unmirrored(session, text: str, level: str = "info") -> None:
     session.add_log(text, **kwargs)
 
 
-def _notify(session: TaskSession, event: str) -> None:
+def _notify(session: TaskSession, event: str) -> bool:
+    accepted = True
     with _observers_lock:
         observers = list(_observers)
+    if event == "admission" and len(observers) > 1:
+        # A page-less legacy session cannot be assigned safely when several
+        # workspaces are listening: do not let one registry reserve it before
+        # another registry rejects it.
+        from app.tasks.operation_registry import current_operation
+
+        handle = getattr(session, "operation_handle", None)
+        has_owner = (
+            getattr(session, "operation_registry", None) is not None
+            or getattr(handle, "_registry", None) is not None
+            or current_operation() is not None
+        )
+        if not has_owner:
+            return False
     for callback in observers:
         try:
-            callback(session, event)
+            result = callback(session, event)
+            if event == "admission" and result is False:
+                accepted = False
         except Exception:
             _logger.exception("TaskSession 觀察者失敗：%s", event)
+            if event == "admission":
+                accepted = False
+    return accepted
+
+
+class TaskSessionAdmissionError(RuntimeError):
+    """Raised when shutdown has closed admission before a session can start."""
 
 
 class TaskSession:
@@ -122,6 +148,12 @@ class TaskSession:
         self._start_logs: list[tuple[str, str]] = []
         self._lock = threading.Lock()
         self._cancel_event = threading.Event()
+        self._operation_cancel_event: threading.Event | None = None
+        self.operation_handle = None
+        # Legacy sessions still need an explicit owner when they are created from
+        # a page. A process-global TaskManager observer must not choose a registry
+        # on behalf of another Web session.
+        self.operation_registry = None
         self._started_at: float | None = None
         self._finished = False  # finish() 的終止通知只送一次（見 finish）
         self._amended = False  # 結束後才 set_error() 的更正紀錄只寫一次（見 set_error）
@@ -217,6 +249,9 @@ class TaskSession:
                 "任務結果更正：DONE → ERROR（結束後才標記失敗）", "error"
             )
         _notify(self, "error")
+        registry = self.operation_registry
+        if registry is not None:
+            registry.record_session_error(self)
 
     def add_start_log(self, text: str, level: str = "info") -> None:
         """新增「開始前就知道、要顯示在任務日誌開頭」的訊息。
@@ -268,18 +303,57 @@ class TaskSession:
             "error" if status == "ERROR" else "info",
         )
         _notify(self, "finish")
+        # TaskManager is only a UI projection. A legacy reservation belongs to
+        # this session/registry and must terminate even when UI observers have
+        # already detached.
+        registry = self.operation_registry
+        if registry is not None:
+            registry.finish_session(self)
 
     def request_cancel(self) -> None:
         """要求取消任務；worker 會在下一個檢查點（例如批次之間）停止。"""
         self._cancel_event.set()
 
+    def bind_operation_cancel_event(self, event: threading.Event) -> None:
+        """讓 owner 的取消要求不會被 start() 重設而遺失。"""
+        self._operation_cancel_event = event
+
     @property
     def cancel_requested(self) -> bool:
         """是否已要求取消。"""
-        return self._cancel_event.is_set()
+        return self._cancel_event.is_set() or bool(
+            self._operation_cancel_event and self._operation_cancel_event.is_set()
+        )
 
     def start(self) -> None:
         """開始任務，清空日誌並重置序號。"""
+        registry = self.operation_registry
+        if registry is not None:
+            # A page-bound session must enforce its own registry's admission
+            # even after TaskManager has detached its process-global observer.
+            from app.tasks.operation_registry import current_operation
+
+            parent = current_operation()
+            handle = self.operation_handle
+            if parent is not None:
+                if parent._registry is not registry:
+                    raise TaskSessionAdmissionError(
+                        "TaskSession cannot start under another registry's operation"
+                    )
+                parent.bind_task_session(self)
+            elif handle is not None and handle._registry is not registry:
+                raise TaskSessionAdmissionError(
+                    "TaskSession is bound to a different operation registry"
+                )
+            elif handle is not None and handle.done_event.is_set():
+                self.operation_handle = None
+                handle = None
+            if parent is None and handle is None:
+                handle = registry.register_session(self)
+                if handle is None:
+                    raise TaskSessionAdmissionError("operation admission is closed")
+        if not _notify(self, "admission"):
+            raise TaskSessionAdmissionError("operation admission is closed")
         self._cancel_event.clear()
         with self._lock:
             self.progress = 0.0

@@ -27,7 +27,8 @@ from app.shell.app_shell import AppShell
 from app.shell.resume_prompt import ResumePrompt
 from app.shell.task_manager import TaskManager
 from app.tasks import task_session as task_session_module
-from app.tasks.task_session import TaskSession
+from app.tasks.operation_registry import OperationDescriptor
+from app.tasks.task_session import TaskSession, TaskSessionAdmissionError
 from translation_tool.core.lm_key_health import STATUS_OK, KeyHealth
 
 
@@ -424,6 +425,32 @@ def test_page_on_close_runs_the_teardown(mounted, env):
     assert env.listeners == []
 
 
+def test_page_on_close_flushes_durable_state_before_marking_registry_closed(env, clock):
+    calls = []
+    shell = _make_shell(env, flush_before_close=lambda: calls.append("flush") or True)
+    shell.mount()
+
+    asyncio.run(shell.page.on_close(None))
+
+    assert calls == ["flush"]
+    assert shell.operations.shutdown_state == shell.operations.CLOSED
+    assert shell._disposed
+
+
+def test_page_on_close_flush_failure_keeps_admission_closed_and_still_disposes(
+    env, clock, caplog
+):
+    shell = _make_shell(env, flush_before_close=lambda: False)
+    shell.mount()
+
+    asyncio.run(shell.page.on_close(None))
+
+    assert shell.operations.accepting is False
+    assert shell.operations.shutdown_state == shell.operations.DRAINING
+    assert shell._disposed
+    assert "Web session 結束時 drain/flush 未完整成功" in caplog.text
+
+
 def test_page_on_close_preserves_an_existing_handler(env, clock):
     seen: list[object] = []
     shell = _make_shell(env)
@@ -545,7 +572,8 @@ def test_desktop_close_zero_active_stops_accepting_before_async_flush(env, clock
     async def flush_before_close():
         late = TaskSession(name="flush 中啟動的晚到任務")
         late_sessions.append(late)
-        late.start()
+        with pytest.raises(TaskSessionAdmissionError):
+            late.start()
         assert shell.tasks.active() == []
         await asyncio.sleep(0)
         assert shell.tasks.active() == []
@@ -597,11 +625,18 @@ def test_desktop_close_keeps_window_when_final_flush_fails(env, clock):
     assert shell.page.window.destroy_calls == 0
     assert shell._disposed is False
     assert shell.page.dialogs
-    assert shell.page.dialogs[-1].title.value == "無法安全關閉"
+    assert len(shell.page.dialogs[-1].actions) == 2
     session = TaskSession(name="flush failure 後的任務")
-    session.start()
-    assert any(task.id == id(session) for task in shell.tasks.active())
-    session.finish()
+    with pytest.raises(TaskSessionAdmissionError):
+        session.start()
+    assert all(task.id != id(session) for task in shell.tasks.active())
+    assert not shell.operations.accepting
+    shell.page.dialogs[-1].actions[0].on_click(None)
+    assert shell.operations.accepting
+    accepted = TaskSession(name="明確恢復後")
+    accepted.start()
+    assert any(task.id == id(accepted) for task in shell.tasks.active())
+    accepted.finish()
     shell.dispose()
 
 
@@ -620,13 +655,16 @@ def test_desktop_close_keeps_window_when_final_flush_raises(env, clock):
     assert shell.page.window.destroy_calls == 0
     assert shell._disposed is False
     session = TaskSession(name="flush raise 後的任務")
-    session.start()
-    assert any(task.id == id(session) for task in shell.tasks.active())
-    session.finish()
+    with pytest.raises(TaskSessionAdmissionError):
+        session.start()
+    assert all(task.id != id(session) for task in shell.tasks.active())
+    assert not shell.operations.accepting
+    shell.page.dialogs[-1].actions[0].on_click(None)
+    assert shell.operations.accepting
     shell.dispose()
 
 
-def test_desktop_close_drain_timeout_restores_task_acceptance(env, clock):
+def test_desktop_close_drain_timeout_keeps_admission_closed_until_retry(env, clock):
     shell = _make_shell(env)
     shell.mount()
     shell.page.scheduled.clear()
@@ -641,15 +679,93 @@ def test_desktop_close_drain_timeout_restores_task_acceptance(env, clock):
 
     assert shell.page.window.destroy_calls == 0
     second = TaskSession(name="逾時後的新任務")
-    second.start()
-    assert any(task.id == id(second) for task in shell.tasks.active())
-    second.finish()
+    with pytest.raises(TaskSessionAdmissionError):
+        second.start()
     assert all(task.id != id(second) for task in shell.tasks.active())
+    assert shell.operations.accepting is False
+    assert shell.operations.shutdown_state == shell.operations.DRAIN_TIMEOUT
     first.finish()
+    shell.page.dialogs[-1].actions[0].on_click(None)
+    shell.page.drain()
+    assert shell.page.window.destroy_calls == 1
     shell.dispose()
 
 
-def test_desktop_close_schedule_failure_restores_task_acceptance(env, clock):
+def test_close_timeout_dialog_offers_return_after_last_operation_finishes(env, clock):
+    shell = _make_shell(env)
+    shell.mount()
+    shell.page.scheduled.clear()
+    active = TaskSession(name="之後會完成的任務")
+    active.start()
+
+    asyncio.run(
+        shell.page.window.on_event(SimpleNamespace(type=ft.WindowEventType.CLOSE))
+    )
+    shell.page.dialogs[0].actions[1].on_click(None)
+    shell.page.drain()
+
+    assert shell.operations.shutdown_state == shell.operations.DRAIN_TIMEOUT
+    assert len(_buttons(shell.page.dialogs[-1], "返回應用程式")) == 0
+
+    active.finish()
+    assert shell.operations.shutdown_state == shell.operations.DRAIN_TIMEOUT
+    shell.page.drain()
+
+    assert len(shell.page.dialogs) == 1
+    assert len(_buttons(shell.page.dialogs[-1], "返回應用程式")) == 1
+    assert len(_buttons(shell.page.dialogs[-1], "重新嘗試關閉")) == 1
+    assert "背景操作已結束" in shell.page.dialogs[-1].content.value
+    assert shell.operations.accepting is False
+
+    _buttons(shell.page.dialogs[-1], "返回應用程式")[0].on_click(None)
+    assert shell.operations.accepting is True
+    assert shell._close_pending is False
+    shell.dispose()
+
+
+def test_return_after_close_failure_restores_saved_config_recovery_guard(
+    env, clock, monkeypatch
+):
+    config_view = ft.Column()
+    monkeypatch.setattr(
+        vr,
+        "_lazy_import_view",
+        lambda key, _page, _file_picker: (
+            config_view if key == "config" else ft.Text(f"view:{key}")
+        ),
+    )
+    shell = _make_shell(env)
+    shell.mount()
+    shell.page.scheduled.clear()
+    shell.navigate("config")
+    config_view.has_unsaved_changes = False
+    config_view.requires_exit_confirmation = False
+    state = {"acknowledged": True}
+
+    def cancel_recovery_exit():
+        state["acknowledged"] = False
+        config_view.requires_exit_confirmation = True
+
+    config_view.cancel_reload_recovery_exit = cancel_recovery_exit
+
+    shell.operations.begin_shutdown()
+    shell._show_close_failure()  # models drain timeout/final flush failure
+    _buttons(shell.page.dialogs[-1], "返回應用程式")[0].on_click(None)
+
+    assert state["acknowledged"] is False
+    assert config_view.requires_exit_confirmation is True
+    assert shell.operations.accepting is True
+    pending_navigation = []
+    config_view.confirm_unsaved_changes = lambda callback, **_kwargs: (
+        pending_navigation.append(callback)
+    )
+    shell.navigate("dashboard")
+    assert shell.current_key == "config"
+    assert len(pending_navigation) == 1
+    shell.dispose()
+
+
+def test_desktop_close_schedule_failure_keeps_admission_closed(env, clock):
     shell = _make_shell(env)
     shell.mount()
     shell.page.scheduled.clear()
@@ -664,11 +780,15 @@ def test_desktop_close_schedule_failure_restores_task_acceptance(env, clock):
 
     assert shell.page.window.destroy_calls == 0
     second = TaskSession(name="排程失敗後的新任務")
-    second.start()
-    assert any(task.id == id(second) for task in shell.tasks.active())
-    second.finish()
+    with pytest.raises(TaskSessionAdmissionError):
+        second.start()
     assert all(task.id != id(second) for task in shell.tasks.active())
+    assert shell.operations.accepting is False
     first.finish()
+    shell.page.fail_run_task = False
+    shell.page.dialogs[-1].actions[0].on_click(None)
+    shell.page.drain()
+    assert shell.page.window.destroy_calls == 1
     shell.dispose()
 
 
@@ -676,6 +796,49 @@ def test_disconnect_does_not_tear_down_so_web_reconnect_keeps_working(mounted, e
     """web client 可能只是暫時斷線再重連：不可把永久 teardown 綁在 on_disconnect。"""
     assert mounted.page.on_disconnect is None
     assert _observer_registered(mounted.tasks)
+
+
+def test_web_session_expiry_timeout_keeps_operation_tracked_and_admission_closed(
+    env, clock
+):
+    shell = _make_shell(env)
+    shell.mount()
+    shell.page.scheduled.clear()
+    started = threading.Event()
+    release = threading.Event()
+
+    def blocking_work():
+        started.set()
+        release.wait(2)
+
+    handle = shell.operations.launch(
+        blocking_work,
+        OperationDescriptor(name="web drain", owner="test"),
+    )
+    assert handle is not None
+    assert started.wait(2)
+
+    # Flet page.on_close means session expiry; the operation has already started,
+    # so the cancel request cannot pretend its blocking call has stopped.
+    asyncio.run(shell.page.on_close(None))
+
+    assert handle.cancel_requested
+    assert not handle.done_event.is_set()
+    assert shell.operations.active() == [handle]
+    assert shell.operations.shutdown_state == shell.operations.DRAIN_TIMEOUT
+    assert not shell.operations.accepting
+    assert (
+        shell.operations.reserve(
+            OperationDescriptor(name="must be rejected", owner="test")
+        )
+        is None
+    )
+    assert shell._disposed
+
+    release.set()
+    assert shell.operations.wait_for_idle(timeout=2)
+    assert handle.done_event.is_set()
+    assert not shell.operations.accepting
 
 
 # -- #151：啟動時偵測上次被中斷的機器翻譯 ---------------------------------------------
@@ -820,3 +983,20 @@ def test_several_interrupted_tasks_share_one_dialog_and_resume_only_the_chosen_o
     assert lm_received == [], "沒有被選擇的任務不得啟動"
     assert shell.current_key == "translation"
     shell.dispose()
+
+
+def test_default_close_flush_drains_cache_history_before_log_buffer(monkeypatch):
+    from app.services_impl import logging_service
+    from app.shell.app_shell import _default_flush_before_close
+    from app.views.cache_manager import cache_history_store
+
+    calls = []
+    monkeypatch.setattr(
+        cache_history_store, "history_flush", lambda: calls.append("history")
+    )
+    monkeypatch.setattr(
+        logging_service.GLOBAL_LOG_LIMITER, "flush", lambda: calls.append("logs")
+    )
+
+    assert _default_flush_before_close() is True
+    assert calls == ["history", "logs"]

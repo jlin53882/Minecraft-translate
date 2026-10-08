@@ -42,7 +42,6 @@ RulesView（維護替換規則）→ ConfigView（翻譯參數）→ Translation
 |------|------|
 | `start_reload_thread(view)` | 背景執行緒重載（顯示 loading_indicator + snack） |
 | `perform_reload(view)` | `_load_rules_core()` → 經 `_run_on_ui_thread` 呼叫 `_handle_reload_success/failure` |
-| `start_save_thread(view, clean_rules)` | 背景執行緒 `save_replace_rules(clean_rules)` → snack 成功/失敗 |
 | `calc_total_pages(total, page_size)` | `math.ceil` 總頁數（0 條時回 1） |
 | `translate_regex_error(err)` | Python re.error → 中文提示（`RulesView.translate_regex_error` 轉呼叫它） |
 
@@ -92,15 +91,15 @@ _render_current_page()
 
 ## 儲存流程（save_rules_clicked）
 
-1. 複製 `all_rules_data` 快照，以 `asyncio.to_thread` 在背景執行 `_validate_all`（逐條 `validate_rule`）；`_saving` 旗標防止重複觸發
+1. 複製 `all_rules_data` 快照，先註冊「規則驗證與儲存」operation，再以同一背景 worker 執行 `_validate_all`（逐條 `validate_rule`）及通過後的寫檔；`_saving` 旗標防止重複觸發
 2. 有錯 → snack「第 N 條規則錯誤」並跳到該條所在頁
-3. 通過 → 移除 `_rid`、略過 from 為空的列，交給 `start_save_thread`
+3. 通過 → 移除 `_rid`、略過 from 為空的列，由相同 operation 呼叫 `save_replace_rules`
 
 ## 資料載入/儲存核心（config_service.py）
 
 - `load_replace_rules()` / `save_replace_rules()`：包裝 `load_rules_core` / `save_rules_core`，路徑 `REPLACE_RULES_PATH = PROJECT_ROOT / "replace_rules.json"`
 - 載入失敗或檔案不存在時回傳空 list（UI 顯示空表格）；載入時固定字串規則依 from 長度由長到短排序，正則規則（from 含 `.?*[]()\\` 任一字元者）排在其後，所以畫面順序可能與檔案順序不同
-- 儲存由 `start_save_thread` 背景執行緒呼叫
+- 驗證與持久化寫入由同一個 `rules-save` handle 持有；關閉 admission 後不會在驗證完成與儲存啟動之間丟失使用者的儲存意圖
 - 替換規則最終流向翻譯引擎：`text_processor.load_replace_rules` / `convert_text` / `recursive_translate` 在翻譯時套用
 
 ## 與 lm_config_rules.py 的關係

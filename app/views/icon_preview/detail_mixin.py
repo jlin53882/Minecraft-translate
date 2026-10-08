@@ -2,9 +2,17 @@
 
 import asyncio
 import json
+import threading
 from collections import defaultdict
 from types import SimpleNamespace
 
+from app.tasks.operation_registry import (
+    CancellationPolicy,
+    CommitPolicy,
+    DurabilityPolicy,
+    ShutdownPolicy,
+    reserve_page_operation,
+)
 from app.ui.design import C
 from app.ui.snack import show_snack
 from app.views.icon_preview.entries_cache import (
@@ -17,6 +25,7 @@ from app.views.icon_preview.icon_cache import (
     to_halfwidth,
 )
 from app.views.icon_preview.progress import _show_progress_phase
+from app.views.icon_preview.render_operation import render_current_page
 from app.views.icon_preview_row import LangItemRow, prepare_row_icon
 from translation_tool.utils.jar_browser import scan_jars
 from translation_tool.utils.log_unit import log_error, log_info, log_warning
@@ -63,14 +72,47 @@ class IconPreviewDetailMixin:
         self.update()
         generation = self._render_generation
 
+        operation = reserve_page_operation(
+            self.page,
+            name=f"IconPreview 載入 {modid} 詳情",
+            owner="icon-preview-detail",
+            cancellation=CancellationPolicy.BOUNDARY_ONLY,
+            commit=CommitPolicy.EPHEMERAL,
+            shutdown=ShutdownPolicy.CANCEL_AND_DRAIN,
+        )
+        if not operation.admitted:
+            show_snack(self.page, "應用程式正在關閉，未啟動詳情載入", color=C.GOLD)
+            return
+        result = {}
+
+        def find_file():
+            try:
+                result["found"] = self._find_zh_file(modid)
+            except Exception as ex:  # noqa: BLE001 - UI coroutine 顯示錯誤
+                result["error"] = ex
+
+        if not operation.launch(find_file):
+            operation.finish(error=RuntimeError("detail load worker was not launched"))
+            return
+
         async def _open():
-            found = await asyncio.to_thread(self._find_zh_file, modid)
+            while not operation.done_event.is_set():
+                await asyncio.sleep(0.02)
+            if "error" in result:
+                log_error(f"[IconPreview] 載入 {modid} 詳情失敗: {result['error']!r}")
+                show_snack(self.page, f"載入詳情失敗：{result['error']}", color=C.RED)
+                return
+            if operation.handle and operation.handle.cancel_requested:
+                return
             if generation != self._render_generation or self.current_modid != modid:
                 return  # 期間已換頁／返回／卸載：丟棄結果
-            self._current_zh_file, self._zh_data = found
+            self._current_zh_file, self._zh_data = result["found"]
             self._render_current_page()
 
-        run_task(_open)
+        try:
+            run_task(_open)
+        except Exception as ex:  # noqa: BLE001 - 排程失敗時需結束 owner 並回報 UI
+            log_error(f"[IconPreview] 無法排程詳情載入: {ex!r}")
 
     def _find_zh_file(self, modid: str):
         """找出並讀取 ``{modid}/lang/zh_tw.json``（磁碟 I/O，可在背景執行緒）。
@@ -164,8 +206,38 @@ class IconPreviewDetailMixin:
             self._finish_save(self._write_zh_file(target, payload), target, count)
             return
 
+        operation = reserve_page_operation(
+            self.page,
+            name=f"IconPreview 儲存 {target.name}",
+            owner="icon-preview-save",
+            cancellation=CancellationPolicy.NON_CANCELLABLE,
+            commit=CommitPolicy.PARTIAL_ALLOWED,
+            durability=DurabilityPolicy.USER_ACTION,
+            shutdown=ShutdownPolicy.DRAIN_ONLY,
+        )
+        if not operation.admitted:
+            show_snack(self.page, "應用程式正在關閉，未開始儲存", color=C.GOLD)
+            return
+        saved = {"error": None}
+        worker_done = threading.Event()
+
+        def write_file():
+            try:
+                saved["error"] = self._write_zh_file(target, payload)
+                if saved["error"] is not None:
+                    operation.handle.record_error(saved["error"])
+            finally:
+                worker_done.set()
+
+        if not operation.launch(write_file):
+            operation.finish(error=RuntimeError("save worker was not launched"))
+            show_snack(self.page, "無法啟動儲存工作", color=C.RED)
+            return
+
         async def _save():
-            error = await asyncio.to_thread(self._write_zh_file, target, payload)
+            while not worker_done.is_set():
+                await asyncio.sleep(0.02)
+            error = saved["error"]
             self._finish_save(error, target, count)
 
         run_task(_save)
@@ -433,53 +505,8 @@ class IconPreviewDetailMixin:
         log_info("[IconPreview] 已寫入 L2 磁碟快取")
 
     def _render_current_page(self):
-        """渲染當前頁面的項目列表（支援 detail 搜尋過濾）。
-
-        每列的圖示準備（解析圖示、讀 JAR、產生預覽圖）是磁碟／ZIP／圖片 I/O，
-        在背景執行緒完成；event loop 上只建構控制項。連續呼叫時只有最後一次會套用。
-        """
-        # Phase 2：搜尋過濾邏輯
-        if self._detail_filtered_entries is not None:
-            # 有搜尋條件，使用過濾後的 entries
-            entries = self._detail_filtered_entries
-        else:
-            entries = self.mods.get(self.current_modid, [])
-
-        total = len(entries)
-
-        self.total_pages = max(1, (total + self.page_size - 1) // self.page_size)
-
-        start = self.current_page * self.page_size
-        end = start + self.page_size
-        page_entries = list(entries[start:end])
-
-        self.list_view.controls.clear()
-        self.page_info.value = (
-            f"{self.current_modid}｜第 {self.current_page + 1} / {self.total_pages} 頁"
-        )
-        self.prev_page_btn.disabled = self.current_page <= 0
-        self.next_page_btn.disabled = self.current_page >= self.total_pages - 1
-
-        run_task = getattr(self.page, "run_task", None)
-        if run_task is None:
-            # 沒有 event loop（測試替身）：同步流程
-            self._fill_rows(page_entries, None)
-            return
-
-        self.update()  # 先把空列表／頁碼送出去，畫面不等圖示準備
-        self._render_generation += 1
-        generation = self._render_generation
-        icon_context = (self.source_root / "assets", _get_icon_cache_dir())
-
-        async def _prepare_and_fill():
-            prepared = await asyncio.to_thread(
-                self._prepare_row_icons, page_entries, icon_context
-            )
-            if generation != self._render_generation:
-                return  # 已有更新的渲染、或 View 已卸載：丟棄
-            self._fill_rows(page_entries, prepared)
-
-        run_task(_prepare_and_fill)
+        """渲染當前頁面；I/O orchestration 位於獨立 operation helper。"""
+        render_current_page(self)
 
     @staticmethod
     def _prepare_row_icons(entries, icon_context) -> list:

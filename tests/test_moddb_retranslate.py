@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import threading
+
 import pytest
 
 from app.services_impl import (
@@ -10,8 +12,16 @@ from app.services_impl import (
     moddb_translate_service,
 )
 from app.services_impl.moddb_translate_service import TranslateOptions
+from app.tasks.operation_registry import (
+    CancellationPolicy,
+    CommitPolicy,
+    DurabilityPolicy,
+    OperationDescriptor,
+    OperationRegistry,
+    ShutdownPolicy,
+)
 from app.tasks.task_session import TaskSession
-from app.views.moddb import translate_panel
+from app.views.moddb import retranslation_controller, translate_panel
 from tests.conftest import mock_page
 from translation_tool.translation_db import (
     DbSettings,
@@ -102,6 +112,21 @@ def _set_repair_batch_size(monkeypatch, size):
         moddb_retranslate_service, "_get_default_batch_size", batch_size
     )
     monkeypatch.setattr(moddb_translate_service, "_get_default_batch_size", batch_size)
+
+
+def _drain_page_tasks(page):
+    page._run_all_tasks()
+
+
+def _inline_operation_launcher(calls=None):
+    def launch(page, target, **kwargs):
+        if calls is not None:
+            calls.append((target, kwargs))
+        if kwargs["owner"] == "moddb-retranslate-preview":
+            target()
+        return True
+
+    return launch
 
 
 def test_preview_uses_effective_ai_source_scope_and_limit(db_path):
@@ -746,10 +771,26 @@ def test_preview_confirmation_cancel_and_scope_invalidation(db_path, monkeypatch
     panel = translate_panel.TranslatePanel(page, lambda: db)
     panel.version_dd.value = "1.21.1"
     panel.limit_field.value = "1"
+    launches = []
+    monkeypatch.setattr(
+        translate_panel,
+        "launch_page_operation",
+        _inline_operation_launcher(launches),
+    )
+    monkeypatch.setattr(
+        retranslation_controller,
+        "launch_page_operation",
+        _inline_operation_launcher(launches),
+    )
 
     snacks = []
     monkeypatch.setattr(
         translate_panel,
+        "show_snack",
+        lambda _page, message, _tone: snacks.append(message),
+    )
+    monkeypatch.setattr(
+        retranslation_controller,
         "show_snack",
         lambda _page, message, _tone: snacks.append(message),
     )
@@ -762,6 +803,7 @@ def test_preview_confirmation_cancel_and_scope_invalidation(db_path, monkeypatch
     assert page.overlay == []
 
     panel.preview_retranslation()
+    _drain_page_tasks(page)
 
     assert panel._repair_preview.selected_count == 1
     assert panel.repair_start_btn.disabled is False
@@ -772,22 +814,24 @@ def test_preview_confirmation_cancel_and_scope_invalidation(db_path, monkeypatch
     panel.confirm_retranslation()
     assert "確認重新翻譯舊 AI 譯文" in str(page.overlay[-1].title.value)
     preview = panel._repair_preview
-    calls = []
-
-    class FakeThread:
-        def __init__(self, target, args, daemon):
-            calls.append((target, args, daemon))
-
-        def start(self):
-            pass
-
-    monkeypatch.setattr(translate_panel.threading, "Thread", FakeThread)
+    service_calls = []
+    monkeypatch.setattr(
+        translate_panel,
+        "run_moddb_retranslate_service",
+        lambda options, session, entries: service_calls.append(
+            (options, session, entries)
+        ),
+    )
     panel._poller.start = lambda *_args: None
     page.overlay[-1].actions[1].on_click(None)
-    assert calls[0][0] is moddb_retranslate_service.run_moddb_retranslate_service
-    assert calls[0][1][0].version == "1.21.1"
-    assert calls[0][1][0].limit == 1
-    assert calls[0][1][2] is preview.entries
+    assert launches[-1][1]["name"] == "Mod 資料庫舊 AI 重翻"
+    assert launches[-1][1]["owner"] == "moddb-retranslate"
+    assert launches[-1][1]["task_session"] is panel.session
+    assert panel.session.operation_registry is None
+    launches[-1][0]()
+    assert service_calls[0][0].version == "1.21.1"
+    assert service_calls[0][0].limit == 1
+    assert service_calls[0][2] is preview.entries
 
     panel._running = False
     panel.mod_dd.value = "foo"
@@ -797,6 +841,7 @@ def test_preview_confirmation_cancel_and_scope_invalidation(db_path, monkeypatch
     panel.confirm_retranslation()
     assert "請先按「預覽符合條件的舊 AI 譯文」" in snacks[-1]
     panel.preview_retranslation()
+    _drain_page_tasks(page)
     assert panel._repair_preview is not None
     panel._get_db = lambda: None
     panel.preview_retranslation()
@@ -821,7 +866,14 @@ def test_database_change_invalidates_open_repair_confirmation(
     page = mock_page()
     panel = translate_panel.TranslatePanel(page, lambda: active_db[0])
     panel.version_dd.value = "1.21.1"
+    launches = []
+    monkeypatch.setattr(
+        retranslation_controller,
+        "launch_page_operation",
+        _inline_operation_launcher(launches),
+    )
     panel.preview_retranslation()
+    _drain_page_tasks(page)
     panel.confirm_retranslation()
     stale_dialog = page.overlay[-1]
 
@@ -831,16 +883,6 @@ def test_database_change_invalidates_open_repair_confirmation(
         "show_snack",
         lambda _page, message, _tone: snacks.append(message),
     )
-    starts = []
-
-    class FakeThread:
-        def __init__(self, target, args, daemon):
-            starts.append((target, args, daemon))
-
-        def start(self):
-            pass
-
-    monkeypatch.setattr(translate_panel.threading, "Thread", FakeThread)
     if identity_change == "path":
         active_db[0] = current_db
     else:
@@ -849,7 +891,7 @@ def test_database_change_invalidates_open_repair_confirmation(
 
     assert panel._repair_preview is None
     stale_dialog.actions[1].on_click(None)
-    assert starts == []
+    assert len(launches) == 1
     assert "預覽已失效" in snacks[-1]
     target_db = active_db[0]
     target_entry = current_entry if target_db is current_db else preview_entry
@@ -872,7 +914,14 @@ def test_retranslation_preview_shows_ai_source_profiles_and_samples(
 
     panel = translate_panel.TranslatePanel(mock_page(), lambda: db)
     panel.version_dd.value = "1.21.1"
+    page = panel._page
+    monkeypatch.setattr(
+        retranslation_controller,
+        "launch_page_operation",
+        _inline_operation_launcher(),
+    )
     panel.preview_retranslation()
+    _drain_page_tasks(page)
 
     preview = panel._repair_preview
     assert preview is not None
@@ -891,4 +940,197 @@ def test_retranslation_preview_shows_ai_source_profiles_and_samples(
     assert any("[Lang] [AI 機翻]" in sample for sample in samples)
     assert any("[Patchouli] [AI 機翻]" in sample for sample in samples)
     assert all("manual" not in sample and "jar" not in sample for sample in samples)
+    db.close()
+
+
+def test_preview_uses_isolated_readonly_db_during_ui_queries_and_discards_stale_scope(
+    db_path, monkeypatch
+):
+    db = TranslationDB(db_path)
+    _ai_entry(db)
+    page = mock_page()
+    registry = OperationRegistry()
+    page.operation_registry = registry
+    panel = translate_panel.TranslatePanel(page, lambda: db)
+    panel.version_dd.value = "1.21.1"
+
+    entered = threading.Event()
+    release = threading.Event()
+    ui_query_done = threading.Event()
+    ui_query_result = {}
+    original_preview = moddb_retranslate_service.preview_same_source_ai_retranslation
+
+    def blocking_preview(active_db, options):
+        assert active_db is not db
+        assert active_db.path == db.path
+        assert active_db.priority == db.priority
+        assert active_db.readonly is True
+        with active_db._lock:
+            entered.set()
+            assert release.wait(3)
+            return original_preview(active_db, options)
+
+    monkeypatch.setattr(
+        moddb_retranslate_service,
+        "preview_same_source_ai_retranslation",
+        blocking_preview,
+    )
+
+    panel.preview_retranslation()
+    assert entered.wait(2)
+    assert panel._repair_preview is None
+    assert panel._repair_preview_running is True
+    assert "正在背景查詢" in panel.repair_preview_text.value
+    handle = registry.active()[0]
+    assert handle.descriptor.owner == "moddb-retranslate-preview"
+    assert handle.descriptor.cancellation == CancellationPolicy.NON_CANCELLABLE
+    assert handle.descriptor.commit == CommitPolicy.EPHEMERAL
+    assert handle.descriptor.durability == DurabilityPolicy.RECOMPUTABLE
+    assert handle.descriptor.shutdown == ShutdownPolicy.DRAIN_ONLY
+
+    ui_mod_ids = panel.mod_ids()
+
+    def run_ui_database_queries():
+        try:
+            ui_query_result["versions"] = db.versions()
+            ui_query_result["untranslated"] = db.count_untranslated(
+                "1.21.1", ui_mod_ids
+            )
+        except Exception as exc:  # noqa: BLE001 - surface probe failure to assertion
+            ui_query_result["error"] = exc
+        finally:
+            ui_query_done.set()
+
+    ui_query = threading.Thread(target=run_ui_database_queries, daemon=True)
+    ui_query.start()
+    try:
+        assert ui_query_done.wait(1), (
+            "the UI-owned DB connection must remain usable while preview holds its lock"
+        )
+        ui_query.join(1)
+        assert "error" not in ui_query_result
+        assert "1.21.1" in ui_query_result["versions"]
+        assert isinstance(ui_query_result["untranslated"], int)
+
+        panel.mod_dd.value = "changed-scope"
+        panel._on_scope_changed()
+        registry.begin_shutdown()
+        assert handle.cancel_requested is False
+        assert registry.active_count() == 1
+    finally:
+        release.set()
+        ui_query.join(1)
+
+    assert registry.wait_for_idle(timeout=2)
+    _drain_page_tasks(page)
+    assert panel._repair_preview is None
+    assert panel._repair_preview_running is False
+    assert "舊預覽結果已丟棄" in panel.repair_preview_text.value
+    db.close()
+
+
+def test_retranslation_worker_is_page_owned_cancellable_and_drained(
+    db_path, monkeypatch
+):
+    db = TranslationDB(db_path)
+    _ai_entry(db)
+    preview = moddb_retranslate_service.preview_same_source_ai_retranslation(
+        db, _options()
+    )
+    page_a = mock_page()
+    registry_a = OperationRegistry()
+    page_a.operation_registry = registry_a
+    page_b = mock_page()
+    registry_b = OperationRegistry()
+    page_b.operation_registry = registry_b
+    panel = translate_panel.TranslatePanel(page_a, lambda: db)
+    panel.version_dd.value = "1.21.1"
+    panel._repair_preview = preview
+    panel._repair_preview_db_identity = panel._database_identity(db)
+    panel._poller.start = lambda *_args: None
+
+    entered = threading.Event()
+    cancel_seen = threading.Event()
+    allow_finish = threading.Event()
+
+    def wait_for_cancel(_options, session, _entries):
+        session.start()
+        entered.set()
+        while not session.cancel_requested:
+            cancel_seen.wait(0.01)
+        cancel_seen.set()
+        allow_finish.wait(2)
+        session.finish()
+
+    monkeypatch.setattr(
+        translate_panel, "run_moddb_retranslate_service", wait_for_cancel
+    )
+
+    panel._start_retranslation(preview)
+    assert entered.wait(2)
+    session = panel.session
+    assert session is not None
+    handle = registry_a.active()[0]
+    assert handle.task_session is session
+    assert session.operation_registry is registry_a
+    assert handle.descriptor.owner == "moddb-retranslate"
+    assert handle.descriptor.commit == CommitPolicy.PARTIAL_ALLOWED
+    assert handle.descriptor.durability == DurabilityPolicy.USER_ACTION
+    assert handle.descriptor.shutdown == ShutdownPolicy.CANCEL_AND_DRAIN
+
+    registry_a.begin_shutdown()
+    assert cancel_seen.wait(2)
+    assert handle.cancel_requested is True
+    assert registry_a.active_count() == 1
+
+    other_finished = threading.Event()
+    other_handle = registry_b.launch(
+        other_finished.set,
+        OperationDescriptor(name="other page", owner="other-page"),
+    )
+    assert other_handle is not None
+    assert other_finished.wait(2)
+    assert registry_b.wait_for_idle(timeout=2)
+    assert registry_a.active_count() == 1
+
+    allow_finish.set()
+    assert registry_a.wait_for_idle(timeout=2)
+    assert handle.terminal_reason == "cancelled"
+    db.close()
+
+
+def test_retranslation_admission_rejection_never_starts_service(db_path, monkeypatch):
+    db = TranslationDB(db_path)
+    _ai_entry(db)
+    preview = moddb_retranslate_service.preview_same_source_ai_retranslation(
+        db, _options()
+    )
+    page = mock_page()
+    registry = OperationRegistry()
+    page.operation_registry = registry
+    panel = translate_panel.TranslatePanel(page, lambda: db)
+    panel.version_dd.value = "1.21.1"
+    panel._repair_preview = preview
+    panel._repair_preview_db_identity = panel._database_identity(db)
+    started = []
+    snacks = []
+    monkeypatch.setattr(
+        translate_panel,
+        "run_moddb_retranslate_service",
+        lambda *_args: started.append(True),
+    )
+    monkeypatch.setattr(
+        translate_panel,
+        "show_snack",
+        lambda _page, message, _tone: snacks.append(message),
+    )
+    registry.begin_shutdown()
+
+    panel._start_retranslation(preview)
+
+    assert started == []
+    assert registry.active_count() == 0
+    assert panel.session is None
+    assert panel._running is False
+    assert any("無法啟動新任務" in message for message in snacks)
     db.close()

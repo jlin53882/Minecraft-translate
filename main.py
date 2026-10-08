@@ -68,9 +68,10 @@ def bootstrap_runtime():
 
 def main(page: ft.Page):
     """Flet 應用程式的 entry point，由 ft.run(main) 觸發。"""
-    AppShell(page).mount()
+    shell = AppShell(page)
+    shell.mount()
     # 背景啟動任務（索引重建等不影響啟動速度的慢工作）
-    start_background_startup_tasks()
+    start_background_startup_tasks(shell.operations)
 
 
 if __name__ == "__main__":

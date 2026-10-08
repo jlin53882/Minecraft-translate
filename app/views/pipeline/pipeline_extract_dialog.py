@@ -21,6 +21,7 @@ from app.services_impl.pipelines.extract_service import (
     open_output_folder,
     preview_extraction_generator,
 )
+from app.tasks.operation_registry import launch_page_operation
 from app.ui.design import C
 from app.ui.dialogs import close_overlay_dialog
 from app.ui.safe_file_picker import ensure_output_dir
@@ -450,8 +451,9 @@ def _extract_show_preview_result(ctx, dialog):
     preview_state.current = 0
     cancel_event = threading.Event()
 
-    threading.Thread(
-        target=in_new_task(
+    launched = launch_page_operation(
+        ctx.page,
+        in_new_task(
             "pipeline-extract-preview",
             functools.partial(
                 _extract_preview_worker,
@@ -462,8 +464,13 @@ def _extract_show_preview_result(ctx, dialog):
                 cancel_event,
             ),
         ),
-        daemon=True,
-    ).start()
+        name="流水線提取預覽",
+        owner="pipeline-extract-preview",
+        on_cancel=cancel_event.set,
+    )
+    if not launched:
+        ctx.show_snack_bar("應用程式正在關閉，無法啟動新任務")
+        return
 
     preview_dialog = ft.AlertDialog(
         modal=True,

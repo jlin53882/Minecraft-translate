@@ -6,7 +6,7 @@ Flet 1.0：sync event handler 直接在 app 的 event loop 上執行（handler �
 
 1. worker thread **不得直接** mutate Flet Control，也不得直接 `page.update()` / `show_snack()`；UI 更新必須排回 event loop（`page.run_task`、`self._ui(...)`、`UiBatcher`、`loop.call_soon_threadsafe`）。
 2. **sync event handler 不得做阻塞工作**（長 I/O、迴圈、`time.sleep`、等待外部程式）；要 offload（`asyncio.to_thread`／背景執行緒），或改 async。
-3. 長任務優先透過 `TaskSession`／`TaskManager`；raw `threading.Thread` 只做純 I/O／計算，完成後把結果 marshal 回 UI。
+3. 長工作必須先取得 `OperationRegistry` admission；`TaskSession` 是進度呈現，`TaskManager` 是 registry projection。mounted App 的 fallback thread launcher 只由 operation layer 管理。
 4. 所有 subscription／poller／background task 都要有 **owner** 與 **teardown**（View 被卸載或 session 結束時能停止）。
 
 ### 「有界的同步 I/O」的界線（本盤點採用的解讀）
@@ -27,29 +27,19 @@ rg -n "threading\.Thread|threading\.Timer|Thread\(|run_task\(|run_thread\(|async
 
 行為層測試：`tests/test_view_lifecycle_contracts.py`（poller 的 teardown／重 mount／卸載後不更新、阻塞步驟的執行緒身分、卸載後丟棄結果）、`tests/test_shard_reader.py`、`tests/test_cache_history_store.py`、`tests/test_pipeline_extract_dialog_behavior.py`。
 
-## A. 背景執行緒啟動點（`threading.Thread`，22 處）
+## A. 背景執行緒啟動點（`threading.Thread`，7 個 AST 呼叫點）
 
 | 位置 | 回到 UI 的方式 | owner／結束 |
 |---|---|---|
-| `translation/translation_actions.py`（FTB／KubeJS／MD 三處） | worker 只寫 `TaskSession`；View 的 `_poller`（event loop）同步 | 任務自己結束；輪詢由 View 持有（見 B） |
-| `lm_view.py` | 同上（`run_lm_translation_service`） | 同上 |
-| `moddb/scan_panel.py`（Mod 資料庫掃描，`run_moddb_scan_service`） | worker 只寫 `TaskSession`；`ScanPanel._poller`（event loop）同步 | 任務自己結束（取消旗標在批次之間檢查）；輪詢由 View 持有，`will_unmount()` 停止 |
-| `moddb/translate_panel.py`（Mod 資料庫批次機翻 `run_moddb_translate_service`、舊 AI 重翻 `run_moddb_retranslate_service`） | worker 只寫 `TaskSession`；`TranslatePanel._poller`（event loop）同步 | 任務自己結束（重翻在批次間檢查取消、已完成項目逐筆提交）；輪詢由 View 持有，`will_unmount()` 停止 |
-| `merge_view.py`（`_run_merge_worker`） | 只寫 session；event loop 輪詢 | worker 例外會把 session 轉 ERROR（否則輪詢等不到結束） |
-| `pipeline/pipeline_session.py`（`default_worker_launcher`，單一啟動點；測試可注入 `launch_worker`） | `PipelineRunner.ui(...)`（`page.run_task`）；步驟 watcher 在 event loop | worker 的 `finally` 一定設定 `done`；watcher 由 `PollerHandle` 持有 |
-| `pipeline/pipeline_extract_dialog.py` | worker 只寫 `PreviewState`；`_extract_preview_poll` 在 event loop | `cancel_event`；探索與掃描都在 worker 內 |
-| `extractor/extractor_dialog.py`（`run_extraction`） | `UiBatcher`／`run_on_ui` | 取消旗標 `extraction_cancel_flag`；dismiss 也會設定 |
-| `extractor/extractor_preview_dialog.py`（`_preview_do_scan`） | 只寫 `preview_state`；`_preview_ui_poller` 在 event loop | `state["cancelled"]`；dismiss 設定 |
-| `qc_base.py` | `UiBatcher`（內部 `page.run_task`） | worker 的 `finally` 送最後一批 |
-| `bundler_view.py` | `UiBatcher` | worker 結束；`will_unmount` 取消 config 訂閱 |
-| `lookup_view.py`（兩處） | `self._run_on_ui(apply)`（`page.run_task`） | worker 結束 |
-| `rules_view.py`、`rules/rules_actions.py`（三處） | `_run_on_ui_thread`（`loop.call_soon_threadsafe`；掛載前暫存到 `did_mount`） | worker 結束 |
-| `dashboard_view.py` | `work()` 只讀資料，`_apply_on_ui` 以 `page.run_task` 套用 | worker 結束 |
-| `startup_tasks.py` | 純索引重建，不碰 UI | worker 結束 |
-| `shell/resume_prompt.py`（啟動時檢查能否續跑上次中斷的任務：機器翻譯、FTB、KubeJS、MD；每個任務一個 worker，#151／#164） | worker 只讀輸入並比對指紋（不碰 UI、不呼叫 API）；結果以 `page.run_task` 交回 event loop 更新對話框 | worker 結束；使用者在檢查途中關閉對話框或放棄該任務時結果被丟棄 |
-| `shell/config_effects.py` | `on_reloaded` → `AppShell._submit_ui`（有 `_disposed` 守衛） | worker 結束；`AppShell.dispose()` |
+| `app/tasks/operation_registry.py`（2 個 raw Thread call） | registry wrapper 對 mounted App work；standalone fallback 仍以 page worker/daemon thread 執行 | reservation 先於 launcher；handle 結束前保留 active membership |
+| `app/startup_tasks.py` | 正式入口傳入 AppShell registry；無 App 的 legacy helper 保留 fallback Thread | `startup-index` non-cancellable / drain-only，關閉時等候完成 |
+| `app/shell/config_effects.py` | AppShell 注入 registry launcher；fallback 只供獨立測試/嵌入用 | `cache-root-reload` 註冊為 non-cancellable / drain-only |
+| `app/views/moddb/scan_panel.py` | mounted App 使用 `launch_page_operation`；module Thread 僅為沒有 registry 的舊測試/standalone fallback | `moddb-scan` handle 由 Registry 擁有；View poller teardown 見 B |
+| `app/views/moddb/translate_panel.py`（批次翻譯、舊 AI 重翻） | 兩種工作均經 `launch_page_operation`；無直接 Thread 啟動 | `moddb-translate`、`moddb-retranslate` 由 Registry 擁有；重翻為 page-bound session、cancel-and-drain；逐筆提交見 B |
+| `app/views/moddb/retranslation_controller.py`（舊 AI 預覽） | mounted App 使用 `launch_page_operation`；worker 快照 path/priority 後建立並關閉獨立唯讀 `TranslationDB`，不共用 UI DB lock；module-level Thread 僅供 standalone fallback | `moddb-retranslate-preview` 是 non-cancellable / drain-only；結果經 UI loop 套用並以 generation/DB identity 丟棄舊結果 |
+| `app/views/pipeline/pipeline_session.py` | AppShell 將 Registry 注入 PipelineRunner；default Thread launcher 僅作 standalone fallback | parent handle 跨完整 sequence；步驟 watcher 由 `PollerHandle` 持有 |
 
-其他執行緒：`ThreadPoolExecutor`（`icon_cache._run_jar_workers`、`icon_index`）在 `asyncio.to_thread` 的 worker 內使用，純 I/O；`cache_history_store._MIRROR_EXECUTOR` 單一背景執行緒寫歷史 json 鏡像（不碰 UI）。
+其他 executor：IconPreview 的 `icon_cache`／`icon_index` executor 是 IconPreview Registry operation 的 nested worker；`cache_history_store._MIRROR_EXECUTOR` 是 process-global 衍生 JSON 鏡像 writer，App close 以 `history_flush()` 排空，但目前不在 OperationRegistry membership（剩餘風險見 `docs/OPERATION_LIFECYCLE_CONTRACT.md`）。
 
 ## B. 長生命週期輪詢／task 的 owner 與 teardown
 
@@ -119,6 +109,7 @@ merge 的取消檢查點（`merge_service`，經 `raise_if_cancelled()`；`Pipel
 | `merge_view._open_output_folder`（`Popen(["explorer"], shell=True)`，僅 Windows） | Windows 專用且 `shell=True` | 改走 `open_output_folder` |
 | 快取分片頁 `_load_shard_rows`（每次渲染解析**所有**分片 JSON）、`_load_shard_keys` | 每次同步解析 | `shard_reader` 以檔案簽名記憶；背景（`_fetch_overview`、`run_cache_action`）預熱 |
 | 快取歷史 `history_load_recent`（掃描整個 jsonl）、`history_append_event`（每次讀寫整個 ≤10000 筆的 json 陣列） | 同步 | 索引記憶 + 就地更新；json 鏡像由單一背景執行緒寫入 |
+| Mod DB 舊 AI 重翻預覽：候選查詢、樣本分組與批次估算 | `preview_retranslation()` 在 UI handler 同步查詢 | Registry-owned `moddb-retranslate-preview` 背景操作；worker 依 path/priority 建立獨立唯讀 DB connection，結果經 `page.run_task` 套用，generation 與 DB identity 不符即丟棄 | 查詢不再共用 UI 的 SQLite connection/lock 或阻塞 UI；單次 SQLite 查詢仍不可即時中斷，shutdown 採 drain-only，最大查詢時間尚未證明 |
 | `merge_view` 輪詢執行緒的 `time.sleep(0.1)` | worker 睡眠並反覆排程 | 改為 event loop 輪詢；`app/` 不得有 `time.sleep`（護欄測試） |
 
 ## D. 仍保留的同步 I/O（皆在「有界」界線內或為非 UI 路徑）

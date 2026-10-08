@@ -6,16 +6,20 @@
 
 # /minecraft_translator_flet/app/views/lookup_view.py (加入「查詢中...」功能的修正版)
 
-import threading
-
 import flet as ft
 
 from app.services_impl.pipelines.lookup_service import (
     run_batch_lookup_service,
     run_manual_lookup_service,
 )
+from app.tasks.operation_registry import (
+    CancellationPolicy,
+    ShutdownPolicy,
+    launch_page_operation,
+)
 from app.ui import kit
 from app.ui.design import C
+from app.ui.snack import show_snack
 from translation_tool.utils.log_unit import log_error
 
 RECENT_LIMIT = 6  # 「最近查詢」最多顯示幾筆（只存在這次開啟的程式內）
@@ -200,10 +204,22 @@ class LookupView(ft.Column):
         self.page.update()
 
         # 2. 在背景執行緒中執行查詢
-        thread = threading.Thread(
-            target=self.single_lookup_worker, args=(search_term,), daemon=True
+        launched = launch_page_operation(
+            self.page,
+            lambda: self.single_lookup_worker(search_term),
+            name="單筆翻譯查詢",
+            owner="lookup",
+            cancellation=CancellationPolicy.NON_CANCELLABLE,
+            shutdown=ShutdownPolicy.DRAIN_ONLY,
         )
-        thread.start()
+        if not launched:
+            self.single_button.disabled = False
+            self.single_input.disabled = False
+            self.single_progress_ring.visible = False
+            self.single_result_text.value = "應用程式正在關閉，未啟動查詢。"
+            self.single_result_text.color = C.RED
+            show_snack(self.page, "應用程式正在關閉，無法啟動新任務", C.GOLD)
+            self.page.update()
 
     def _run_on_ui(self, fn):
         """把 UI 更新排到 Flet event loop（背景執行緒直接 page.update 不安全）。"""
@@ -248,10 +264,20 @@ class LookupView(ft.Column):
         self.batch_result_textfield.value = "批次查詢中，請稍候..."
         self.page.update()
 
-        thread = threading.Thread(
-            target=self.batch_lookup_worker, args=(json_text,), daemon=True
+        launched = launch_page_operation(
+            self.page,
+            lambda: self.batch_lookup_worker(json_text),
+            name="批次翻譯查詢",
+            owner="lookup",
+            cancellation=CancellationPolicy.NON_CANCELLABLE,
+            shutdown=ShutdownPolicy.DRAIN_ONLY,
         )
-        thread.start()
+        if not launched:
+            self.batch_button.disabled = False
+            self.batch_progress_bar.visible = False
+            self.batch_result_textfield.value = "應用程式正在關閉，未啟動查詢。"
+            show_snack(self.page, "應用程式正在關閉，無法啟動新任務", C.GOLD)
+            self.page.update()
 
     def batch_lookup_worker(self, json_text):
         """執行批次查詢翻譯服務（背景執行緒）；結果交給 event loop 套用。"""

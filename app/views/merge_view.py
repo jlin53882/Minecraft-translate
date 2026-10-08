@@ -18,6 +18,7 @@ from app.services_impl.pipelines.merge_service import (
     run_merge_folder_batch_service,
     run_merge_zip_batch_service,
 )
+from app.tasks.operation_registry import reserve_page_operation
 from app.tasks.task_session import TaskSession, add_log_unmirrored
 from app.ui.design import C
 from app.ui.snack import show_snack
@@ -360,6 +361,21 @@ class MergeView(MergeWidgetsMixin, ft.Column):
         self.progress_bar.value = 0.0
         self._set_status("執行中", C.DIA_BG)
 
+        operation = reserve_page_operation(
+            self.page,
+            name="語系合併",
+            owner="merge",
+            task_session=self.session,
+        )
+        if not operation.admitted:
+            self.start_button.disabled = False
+            self.cancel_button.visible = False
+            self.zip_list_view.disabled = False
+            self._set_status("應用程式正在關閉，未啟動合併", C.GOLD_BG)
+            show_snack(self.page, "應用程式正在關閉，無法啟動新任務")
+            self.page.update()
+            return
+
         self.session.start()
         source_desc = (
             f"資料夾 {self.folder_path_field.value}"
@@ -371,9 +387,7 @@ class MergeView(MergeWidgetsMixin, ft.Column):
         )
         self._start_ui_poller()
 
-        threading.Thread(
-            target=partial(self._run_merge_worker, input_mode, zip_paths), daemon=True
-        ).start()
+        operation.launch(partial(self._run_merge_worker, input_mode, zip_paths))
 
     def _start_ui_poller(self) -> None:
         """啟動 UI 輪詢器（在 Flet event loop 上），定期同步進度與日誌。

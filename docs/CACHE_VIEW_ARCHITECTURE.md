@@ -40,7 +40,7 @@ app/views/cache_manager/
 CacheView（主入口）
   ├─ 總覽：_load_overview() → cache_get_overview_service() → _render_type_list()
   │        動作：_run_action() → run_cache_action(view, reason, work_fn, ...)
-  │              ├─ `asyncio.to_thread` 執行 work_fn（`show_progress` 時顯示 SnackBar 進度）
+  │              ├─ mounted App 先向 OperationRegistry admission，再由 owner worker 執行 work_fn（`show_progress` 時顯示 SnackBar 進度）
   │              └─ _on_reload_all / _on_save_all_new / _on_rotate_one ... 各自組 work_fn
   ├─ 查詢：_on_query_search() → _compute_query_results()（背景執行緒，內部呼叫 cache_search_service）→ _apply_query_results() → _render_query_results()
   │        _on_select_result() → 詳情（cache_get_entry_service）→ _on_apply_dst() → cache_update_dst_service()
@@ -58,7 +58,7 @@ CacheView（主入口）
 - 「補滿舊檔」為高風險動作：總覽頁「操作」卡片內有確認勾選 `chk_danger_confirm`（「我了解「補滿舊檔」會覆寫既有分片（高風險）」，預設未勾選）；`_on_save_all_fill` / `_on_save_one_fill` 在未勾選時只提示「尚未勾選高風險確認」而不執行
 
 ### 查詢區
-- `_on_query_search()`：模式 `KEY` / `DST` / `ALL`（預設 ALL）、分類預設全部；搜尋在 `asyncio.to_thread` 執行，以 `_query_seq` 只套用最後一次結果 → `_render_query_results()`
+- `_on_query_search()`：模式 `KEY` / `DST` / `ALL`（預設 ALL）、分類預設全部；mounted App 由 Registry 持有搜尋 worker，以 query sequence 只套用最後一次結果 → `_render_query_results()`
 - `_render_query_detail()` / `_on_apply_dst()` / `_on_revert_dst()` / `_on_restore_latest_query()`
 - 分頁：`_set_query_page` + `_on_page_first/prev/next/last/jump` + `_on_page_size_change`
 

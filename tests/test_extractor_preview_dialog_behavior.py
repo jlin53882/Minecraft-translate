@@ -11,6 +11,7 @@ import asyncio
 import flet as ft
 import pytest
 
+from app.tasks import operation_registry
 from app.views.extractor import extractor_dialog
 from app.views.extractor import extractor_preview_dialog as mod
 from tests.conftest import _make_page, mock_filepicker
@@ -65,7 +66,7 @@ class _Env:
             def start(self):
                 pass
 
-        monkeypatch.setattr(mod.threading, "Thread", _Thread)
+        monkeypatch.setattr(operation_registry.threading, "Thread", _Thread)
         monkeypatch.setattr(mod, "_UI_FLUSH_INTERVAL_SEC", 0)
         monkeypatch.setattr(
             mod,

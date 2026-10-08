@@ -1,6 +1,6 @@
 import pytest
 
-from app.tasks import LogEntry
+from app.tasks import LogEntry, operation_registry
 from app.views import lm_view
 from app.views.moddb import version_picker
 from tests.conftest import mock_filepicker, mock_page
@@ -48,7 +48,7 @@ def test_start_clicked_launches_service_with_current_flags(monkeypatch):
     calls = {}
     monkeypatch.setattr(lm_view, "TaskSession", _Session)
     monkeypatch.setattr(
-        lm_view.threading,
+        operation_registry.threading,
         "Thread",
         lambda target=None, args=(), daemon=None: type(
             "T", (), {"start": lambda self: target(*args)}
@@ -96,7 +96,7 @@ def test_db_options_follow_the_page_controls(monkeypatch):
     calls = {}
     monkeypatch.setattr(lm_view, "TaskSession", _Session)
     monkeypatch.setattr(
-        lm_view.threading,
+        operation_registry.threading,
         "Thread",
         lambda target=None, args=(), daemon=None: type(
             "T", (), {"start": lambda self: target(*args)}
@@ -154,7 +154,7 @@ def test_start_clicked_leaves_session_start_and_finish_to_the_service(monkeypatc
     manager.attach()
     try:
         monkeypatch.setattr(
-            lm_view.threading,
+            operation_registry.threading,
             "Thread",
             lambda target=None, args=(), daemon=None: type(
                 "T", (), {"start": lambda self: target(*args)}
@@ -197,7 +197,7 @@ def test_default_output_notice_survives_service_start_and_poller_tail_sync(
     """未指定輸出的預設路徑提示屬於 session 日誌：service 的 start() 清空日誌後仍在，
     而且 poller 的第一次同步（tail mode 會重建控制項）之後、重複同步之後都還在。"""
     monkeypatch.setattr(
-        lm_view.threading,
+        operation_registry.threading,
         "Thread",
         lambda target=None, args=(), daemon=None: type(
             "T", (), {"start": lambda self: target(*args)}
@@ -230,7 +230,7 @@ def test_default_output_notice_survives_service_start_and_poller_tail_sync(
 
 def test_explicit_output_has_no_default_notice(monkeypatch):
     monkeypatch.setattr(
-        lm_view.threading,
+        operation_registry.threading,
         "Thread",
         lambda target=None, args=(), daemon=None: type(
             "T", (), {"start": lambda self: None}
@@ -248,7 +248,7 @@ def _launch_spy(monkeypatch):
     calls = {}
     monkeypatch.setattr(lm_view, "TaskSession", _Session)
     monkeypatch.setattr(
-        lm_view.threading,
+        operation_registry.threading,
         "Thread",
         lambda target=None, args=(), daemon=None: type(
             "T", (), {"start": lambda self: target(*args)}

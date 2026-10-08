@@ -1,4 +1,5 @@
 import tempfile
+import threading
 from pathlib import Path
 from unittest.mock import patch
 
@@ -55,15 +56,46 @@ def test_save_current_zh_writes_modified_json():
 
     with tempfile.TemporaryDirectory() as tmp:
         json_path = Path(tmp) / "icons.json"
+        worker_targets = []
+        page.run_thread = worker_targets.append
         view._current_zh_file = json_path
         view._zh_data = {"k": "青蘋果"}
 
         view._save_current_zh(None)
         assert not json_path.exists()  # 寫檔在背景執行緒，點擊當下不寫
+        worker = threading.Thread(target=worker_targets.pop())
+        worker.start()
+        worker.join(timeout=2)
+        assert not worker.is_alive()
         _drain(page)
 
         assert "青蘋果" in json_path.read_text(encoding="utf-8")
         assert page.overlay
+
+
+def test_registry_owned_icon_preview_save_error_marks_operation_failed(
+    tmp_path, monkeypatch
+):
+    from app.tasks.operation_registry import OperationRegistry
+
+    page = mock_page()
+    registry = OperationRegistry()
+    page.operation_registry = registry
+    view = IconPreviewView(page)
+    view._current_zh_file = tmp_path / "zh_tw.json"
+    view._zh_data = {"key": "translation"}
+    failure = PermissionError("destination is read-only")
+    monkeypatch.setattr(view, "_write_zh_file", lambda *_args: failure)
+    finished = []
+    registry.subscribe(
+        lambda event, handle: finished.append(handle) if event == "finish" else None
+    )
+
+    view._save_current_zh(None)
+
+    assert registry.wait_for_idle(timeout=2)
+    assert finished[0].terminal_reason == "failed"
+    assert finished[0].error is failure
 
 
 def test_icon_preview_view_all_controls_exist():

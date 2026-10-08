@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import gc
+from types import SimpleNamespace
 
 import pytest
 
@@ -12,7 +13,12 @@ from app.shell.task_manager import (
     STATUS_ERROR,
     TaskManager,
 )
-from app.tasks.task_session import TaskSession
+from app.tasks.operation_registry import (
+    CommitPolicy,
+    DurabilityPolicy,
+    OperationDescriptor,
+)
+from app.tasks.task_session import TaskSession, TaskSessionAdmissionError, tag_session
 
 
 @pytest.fixture
@@ -85,11 +91,238 @@ def test_subscribers_are_notified_and_can_unsubscribe(manager):
     session.start()
     session.set_progress(0.1)
     session.finish()
-    assert len(calls) == 3
+    # The TaskSession projection and Registry terminal transition are distinct:
+    # the latter refreshes subscribers after active membership is removed.
+    assert len(calls) == 4
     unsubscribe()
     session.start()
-    assert len(calls) == 3
+    assert len(calls) == 4
     session.finish()
+
+
+def test_registry_only_operation_is_projected_and_recorded_as_recent(manager):
+    handle = manager.operation_registry.reserve(
+        OperationDescriptor(
+            name="索引更新",
+            owner="cache",
+            view_key="cache",
+            commit=CommitPolicy.ATOMIC,
+            durability=DurabilityPolicy.USER_ACTION,
+        )
+    )
+    assert handle is not None
+    assert handle.descriptor.commit == CommitPolicy.ATOMIC
+    assert handle.descriptor.durability == DurabilityPolicy.USER_ACTION
+    active = manager.active()
+    assert len(active) == 1
+    assert (active[0].name, active[0].view_key) == ("索引更新", "cache")
+
+    handle.finish()
+    assert manager.active() == []
+    assert manager.recent()[0].name == "索引更新"
+    assert manager.recent()[0].status == STATUS_DONE
+
+
+def test_session_registry_terminal_notifies_subscribers_of_idle(manager):
+    session = TaskSession(name="session-backed operation")
+    handle = manager.operation_registry.reserve(
+        OperationDescriptor(name="session-backed operation", owner="test"),
+        task_session=session,
+    )
+    assert handle is not None
+    observed_active_counts = []
+    manager.subscribe(
+        lambda: observed_active_counts.append(manager.operation_registry.active_count())
+    )
+
+    session.start()
+    session.finish()
+
+    assert observed_active_counts[-2:] == [1, 0]
+    assert manager.operation_registry.active_count() == 0
+    assert len(manager.recent()) == 1
+
+
+@pytest.mark.parametrize(
+    ("outcome", "expected_reason", "expected_status"),
+    [
+        ("success", "session_finished", STATUS_DONE),
+        ("error", "failed", STATUS_ERROR),
+        ("cancel", "cancelled", STATUS_DONE),
+    ],
+)
+def test_legacy_session_terminal_result_matches_registry(
+    manager, outcome, expected_reason, expected_status
+):
+    session = TaskSession(name=f"legacy {outcome}")
+    session.start()
+    handle = session.operation_handle
+
+    if outcome == "error":
+        session.set_error()
+    elif outcome == "cancel":
+        assert handle.request_cancel()
+
+    session.finish()
+
+    assert handle.done_event.is_set()
+    assert handle.terminal_reason == expected_reason
+    assert (handle.error is not None) == (outcome == "error")
+    assert manager.recent()[0].status == expected_status
+
+
+def test_worker_error_after_session_finish_reconciles_recent(manager):
+    session = TaskSession(name="late worker error")
+    handle = manager.operation_registry.reserve(
+        OperationDescriptor(name="late worker error", owner="test"),
+        task_session=session,
+    )
+    assert handle is not None
+
+    def work():
+        session.start()
+        session.finish()
+        raise RuntimeError("final cleanup failed")
+
+    assert handle.launch(work)
+    assert handle.done_event.wait(2)
+
+    assert handle.terminal_reason == "failed"
+    assert isinstance(handle.error, RuntimeError)
+    assert session.error
+    assert session.status == "ERROR"
+    assert manager.recent()[0].status == STATUS_ERROR
+
+
+def test_legacy_error_after_finish_amends_registry_and_recent_once(manager):
+    session = TaskSession(name="late legacy error")
+    session.start()
+    handle = session.operation_handle
+    session.finish()
+    assert handle.terminal_reason == "session_finished"
+    assert manager.recent()[0].status == STATUS_DONE
+
+    session.set_error()
+    session.set_error()
+
+    assert handle.done_event.is_set()
+    assert handle.terminal_reason == "failed"
+    assert isinstance(handle.error, RuntimeError)
+    assert manager.operation_registry.active_count() == 0
+    assert len(manager.recent()) == 1
+    assert manager.recent()[0].status == STATUS_ERROR
+
+
+def test_reused_task_session_gets_distinct_recent_entries(manager):
+    session = TaskSession(name="reused session")
+    session.start()
+    first_handle = session.operation_handle
+    session.finish()
+
+    session.start()
+    second_handle = session.operation_handle
+    session.set_error()
+    session.finish()
+
+    recent = manager.recent()
+    assert first_handle.id != second_handle.id
+    assert len(recent) == 2
+    assert recent[0].operation_id == second_handle.id
+    assert recent[0].status == STATUS_ERROR
+    assert recent[1].operation_id == first_handle.id
+    assert recent[1].status == STATUS_DONE
+
+
+def test_cancel_before_task_session_start_still_records_recent_terminal(manager):
+    session = TaskSession(name="cancel before start")
+    handle = manager.operation_registry.reserve(
+        OperationDescriptor(name="cancel before start", owner="test"),
+        task_session=session,
+    )
+    assert handle is not None
+    assert handle.request_cancel()
+    assert handle.launch(lambda: pytest.fail("cancelled worker must not run"))
+
+    assert handle.done_event.wait(2)
+    assert handle.terminal_reason == "cancelled"
+    assert manager.operation_registry.active_count() == 0
+    assert len(manager.recent()) == 1
+    assert manager.recent()[0].status == STATUS_DONE
+
+
+def test_detach_keeps_admission_gate_until_last_operation_finishes(manager):
+    page = SimpleNamespace(operation_registry=manager.operation_registry)
+    session = tag_session(TaskSession(name="Web timeout drain"), "Web", page=page)
+    session.start()
+    manager.stop_accepting()
+    manager.detach()
+
+    rejected = tag_session(TaskSession(name="late session"), "late", page=page)
+    with pytest.raises(TaskSessionAdmissionError):
+        rejected.start()
+
+    session.finish()
+    assert manager.operation_registry.active_count() == 0
+    assert manager._attached is False
+
+
+def test_legacy_sessions_are_admitted_only_by_their_own_web_registry():
+    from types import SimpleNamespace
+
+    first = TaskManager()
+    second = TaskManager()
+    first.attach()
+    second.attach()
+    page_a = SimpleNamespace(operation_registry=first.operation_registry)
+    page_b = SimpleNamespace(operation_registry=second.operation_registry)
+    try:
+        session_a = tag_session(
+            TaskSession(name="A draining session"), "A", page=page_a
+        )
+        session_a.start()
+        first.stop_accepting()
+        first.detach()
+
+        session_b = tag_session(TaskSession(name="B legacy session"), "B", page=page_b)
+        session_b.start()
+
+        assert first.operation_registry.active_count() == 1
+        assert second.operation_registry.active_count() == 1
+        assert [task.name for task in first.active()] == ["A"]
+        assert [task.name for task in second.active()] == ["B"]
+
+        session_b.finish()
+        session_a.finish()
+        assert first.operation_registry.active_count() == 0
+        assert second.operation_registry.active_count() == 0
+    finally:
+        first.detach()
+        second.detach()
+
+
+def test_composite_parent_remains_visible_after_child_session_finishes(manager):
+    import threading
+
+    parent = manager.operation_registry.reserve(
+        OperationDescriptor(name="一鍵流水線", owner="pipeline", view_key="pipeline")
+    )
+    assert parent is not None
+    entered = threading.Event()
+    release = threading.Event()
+    assert parent.launch(lambda: (entered.set(), release.wait(timeout=2)))
+    assert entered.wait(timeout=1)
+    child = TaskSession(name="語系合併", view_key="pipeline")
+    parent.bind_task_session(child)
+    child.start()
+    child.finish()
+
+    # Child progress session is terminal, but sequence owner remains active.
+    active = manager.active()
+    assert len(active) == 1
+    assert (active[0].name, active[0].view_key) == ("一鍵流水線", "pipeline")
+    release.set()
+    assert parent.done_event.wait(timeout=1)
+    assert manager.active() == []
 
 
 def test_a_failing_subscriber_does_not_break_the_task(manager):
@@ -113,13 +346,64 @@ def test_detach_stops_tracking():
     session.finish()
 
 
+def test_detached_task_session_cannot_bypass_closed_registry_admission():
+    manager = TaskManager()
+    manager.attach()
+    page = SimpleNamespace(operation_registry=manager.operation_registry)
+    session = tag_session(TaskSession(name="late callback"), "late", page=page)
+    manager.stop_accepting()
+    manager.operation_registry.mark_closed()
+    manager.detach()
+
+    with pytest.raises(TaskSessionAdmissionError):
+        session.start()
+
+    assert session.status == "IDLE"
+    assert manager.operation_registry.active_count() == 0
+
+
+def test_detached_task_manager_does_not_own_legacy_session_terminal():
+    manager = TaskManager()
+    manager.attach()
+    page = SimpleNamespace(operation_registry=manager.operation_registry)
+    session = tag_session(TaskSession(name="detached legacy"), "late", page=page)
+    manager.detach()
+
+    session.start()
+    assert manager.operation_registry.active_count() == 1
+    session.finish()
+
+    assert manager.operation_registry.active_count() == 0
+    assert manager.operation_registry.wait_for_idle(timeout=0)
+
+
+def test_ownerless_legacy_session_is_rejected_by_multiple_workspaces():
+    first = TaskManager()
+    second = TaskManager()
+    first.attach()
+    second.attach()
+    first.stop_accepting()
+
+    session = TaskSession(name="ambiguous owner")
+    with pytest.raises(TaskSessionAdmissionError):
+        session.start()
+
+    assert session.status == "IDLE"
+    assert first.operation_registry.active_count() == 0
+    assert second.operation_registry.active_count() == 0
+    first.detach()
+    second.detach()
+
+
 def test_resume_accepting_reopens_registration_after_close_drain():
     m = TaskManager()
     m.attach()
     m.stop_accepting()
     ignored = TaskSession(name="被拒絕")
-    ignored.start()
+    with pytest.raises(TaskSessionAdmissionError):
+        ignored.start()
     assert m.active() == []
+    assert ignored.status == "IDLE"
 
     m.resume_accepting()
     accepted = TaskSession(name="恢復後")

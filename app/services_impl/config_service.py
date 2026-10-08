@@ -106,13 +106,16 @@ def load_replace_rules():
     return load_rules_core(REPLACE_RULES_PATH)
 
 
-def save_replace_rules(rules):
+def save_replace_rules(rules, *, raise_on_error=False):
     """儲存替換規則。
 
     參數：
         rules: 規則資料
     """
-    save_rules_core(REPLACE_RULES_PATH, rules)
+    if raise_on_error:
+        save_rules_core(REPLACE_RULES_PATH, rules, raise_on_error=True)
+    else:
+        save_rules_core(REPLACE_RULES_PATH, rules)
 
 
 def load_config_json() -> dict:

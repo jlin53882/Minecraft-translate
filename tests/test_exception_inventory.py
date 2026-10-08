@@ -104,7 +104,7 @@ UNEXPLAINED_NOQA_BASELINE = {
     "app/views/icon_preview_row.py": 1,
     "app/views/merge_view.py": 2,
     "app/views/qc_view.py": 1,
-    "app/views/rules/rules_actions.py": 2,
+    "app/views/rules/rules_actions.py": 1,
     "app/views/translation/translation_actions.py": 11,
     "translation_tool/core/ftb_translator.py": 3,
     "translation_tool/core/jar_processor_extract.py": 3,
@@ -123,7 +123,7 @@ UNEXPLAINED_NOQA_BASELINE = {
     "translation_tool/utils/cache_shards.py": 2,
     "translation_tool/utils/config_manager.py": 1,
     "translation_tool/utils/jar_browser.py": 1,
-    "translation_tool/utils/text_processor.py": 4,
+    "translation_tool/utils/text_processor.py": 3,
 }
 
 

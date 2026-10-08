@@ -2,16 +2,20 @@ from __future__ import annotations
 
 import asyncio
 import functools
-import threading
 import traceback
 
 import flet as ft  # noqa: F401
 
+from app.tasks.operation_registry import reserve_page_operation
 from app.tasks.task_session import add_log_unmirrored, tag_session
 from app.ui.design import C
 from app.ui.snack import show_snack
 from translation_tool.utils.log_unit import log_error, log_warning
 from translation_tool.utils.ui_mirror import session_task_scope
+
+
+def _new_translation_session(view, name):
+    return tag_session(view.TaskSession(), name, "translation", page=view.page)
 
 
 # =========================================================
@@ -97,7 +101,18 @@ def run_ftb(view, *, dry_run: bool):
     view.progress.value = 0
     view.log_view.clear()
     _safe_page_update(view)
-    view.session = tag_session(view.TaskSession(), "FTB 任務翻譯", "translation")
+    view.session = _new_translation_session(view, "FTB 任務翻譯")
+    operation = reserve_page_operation(
+        view.page,
+        name="FTB 任務翻譯",
+        owner="translation",
+        task_session=view.session,
+    )
+    if not operation.admitted:
+        show_snack(view.page, "應用程式正在關閉，無法啟動新任務", C.GOLD)
+        view._set_status("應用程式正在關閉", C.GOLD_BG)
+        _safe_page_update(view)
+        return
     try:
         view.session.start()
     except Exception as e:  # noqa: BLE001
@@ -140,7 +155,7 @@ def run_ftb(view, *, dry_run: bool):
             except Exception as e:  # noqa: BLE001
                 log_error(f"記錄 FTB 執行失敗時發生錯誤: {e!r}", exc_info=True)
 
-    threading.Thread(target=worker, daemon=True).start()
+    operation.launch(worker)
     view._start_ui_timer()
 
 
@@ -167,7 +182,18 @@ def run_kjs(view, *, dry_run: bool):
     view.progress.value = 0
     view.log_view.clear()
     _safe_page_update(view)
-    view.session = tag_session(view.TaskSession(), "KubeJS 任務翻譯", "translation")
+    view.session = _new_translation_session(view, "KubeJS 任務翻譯")
+    operation = reserve_page_operation(
+        view.page,
+        name="KubeJS 任務翻譯",
+        owner="translation",
+        task_session=view.session,
+    )
+    if not operation.admitted:
+        show_snack(view.page, "應用程式正在關閉，無法啟動新任務", C.GOLD)
+        view._set_status("應用程式正在關閉", C.GOLD_BG)
+        _safe_page_update(view)
+        return
     try:
         view.session.start()
     except Exception as e:  # noqa: BLE001
@@ -208,7 +234,7 @@ def run_kjs(view, *, dry_run: bool):
             except Exception as e:  # noqa: BLE001
                 log_error(f"記錄 KubeJS 執行失敗時發生錯誤: {e!r}", exc_info=True)
 
-    threading.Thread(target=worker, daemon=True).start()
+    operation.launch(worker)
     view._start_ui_timer()
 
 
@@ -235,7 +261,18 @@ def run_md(view, *, dry_run: bool):
     view.progress.value = 0
     view.log_view.clear()
     _safe_page_update(view)
-    view.session = tag_session(view.TaskSession(), "MD 任務翻譯", "translation")
+    view.session = _new_translation_session(view, "MD 任務翻譯")
+    operation = reserve_page_operation(
+        view.page,
+        name="MD 任務翻譯",
+        owner="translation",
+        task_session=view.session,
+    )
+    if not operation.admitted:
+        show_snack(view.page, "應用程式正在關閉，無法啟動新任務", C.GOLD)
+        view._set_status("應用程式正在關閉", C.GOLD_BG)
+        _safe_page_update(view)
+        return
     try:
         view.session.start()
     except Exception as e:  # noqa: BLE001
@@ -277,7 +314,7 @@ def run_md(view, *, dry_run: bool):
             except Exception as e:  # noqa: BLE001
                 log_error(f"記錄 MD 執行失敗時發生錯誤: {e!r}", exc_info=True)
 
-    threading.Thread(target=worker, daemon=True).start()
+    operation.launch(worker)
     view._start_ui_timer()
 
 

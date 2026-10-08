@@ -22,6 +22,11 @@ from app.services_impl.key_health_service import (
     ModelQuotaHealth,
 )
 from app.shell.task_manager import STATUS_ERROR, TaskManager
+from app.tasks.operation_registry import (
+    CancellationPolicy,
+    ShutdownPolicy,
+    launch_page_operation,
+)
 from app.ui import design, kit
 from app.ui.design import C
 from app.ui.design import tone as get_tone
@@ -413,7 +418,16 @@ class DashboardView(ft.Column):
         if sync:
             work()
         else:
-            threading.Thread(target=work, daemon=True).start()
+            launched = launch_page_operation(
+                self._page,
+                work,
+                name="工作台資料重新載入",
+                owner="dashboard",
+                cancellation=CancellationPolicy.NON_CANCELLABLE,
+                shutdown=ShutdownPolicy.DRAIN_ONLY,
+            )
+            if not launched:
+                self._loading = False
 
     def _apply_on_ui(self, *, direct: bool = False) -> None:
         if direct:

@@ -12,12 +12,16 @@
 from __future__ import annotations
 
 import logging
-import threading
 from collections.abc import Callable
 from typing import Any
 
 import flet as ft
 
+from app.tasks.operation_registry import (
+    CancellationPolicy,
+    ShutdownPolicy,
+    launch_page_operation,
+)
 from app.ui.design import C
 from app.ui.snack import show_snack
 
@@ -221,4 +225,11 @@ class ResumePrompt:
             except Exception:
                 logger.debug("無法回到 UI 執行緒更新續跑對話框", exc_info=True)
 
-        threading.Thread(target=runner, daemon=True).start()
+        launch_page_operation(
+            self.page,
+            runner,
+            name="檢查可續跑任務",
+            owner="resume-prompt",
+            cancellation=CancellationPolicy.NON_CANCELLABLE,
+            shutdown=ShutdownPolicy.DRAIN_ONLY,
+        )

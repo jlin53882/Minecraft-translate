@@ -14,7 +14,7 @@ from app.services_impl.moddb_translate_service import (
     run_moddb_translate_service,
 )
 from app.tasks.task_session import TaskSession
-from app.views.moddb import translate_panel
+from app.views.moddb import retranslation_controller, translate_panel
 from tests.conftest import mock_filepicker, mock_page
 from translation_tool.translation_db import (
     KIND_LANG,
@@ -201,13 +201,9 @@ def test_translate_panel_runs_and_shows_summary(db_path, monkeypatch):
     seed(db_path)
     fake_engine(monkeypatch, lambda t: "翻:" + t)
     monkeypatch.setattr(
-        translate_panel,
-        "threading",
-        SimpleNamespace(
-            Thread=lambda target=None, args=(), daemon=None: SimpleNamespace(
-                start=lambda: target(*args)
-            )
-        ),
+        retranslation_controller,
+        "launch_standalone_worker",
+        lambda target: target(),
     )
     monkeypatch.setattr(
         translate_panel.PollerHandle, "start", lambda self, page, handler: True

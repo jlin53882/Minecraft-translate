@@ -2,10 +2,14 @@ from __future__ import annotations
 
 import math
 import re
-import threading
 
 import flet as ft  # noqa: F401
 
+from app.tasks.operation_registry import (
+    CancellationPolicy,
+    ShutdownPolicy,
+    launch_page_operation,
+)
 from app.ui.design import C
 from app.ui.snack import show_snack
 from translation_tool.utils.log_unit import log_error
@@ -65,26 +69,18 @@ def start_reload_thread(view):
     view.loading_indicator.visible = True
     view.page.update()
     show_snack(view.page, "🔄 正在重新載入規則…", C.DIA)
-    threading.Thread(target=lambda: perform_reload(view), daemon=True).start()
-
-
-def start_save_thread(view, clean_rules):
-    """在后台线程保存规则到配置文件"""
-
-    def worker():
-        """执行规则保存操作"""
-        try:
-            from app.services_impl.config_service import save_replace_rules
-
-            save_replace_rules(clean_rules)
-            view._run_on_ui_thread(
-                lambda: show_snack(view.page, "規則已成功儲存！", C.EM)
-            )
-        except Exception as err:  # noqa: BLE001
-            msg = f"儲存規則時發生錯誤: {err}"
-            view._run_on_ui_thread(lambda msg=msg: show_snack(view.page, msg, C.RED))
-
-    threading.Thread(target=worker, daemon=True).start()
+    launched = launch_page_operation(
+        view.page,
+        lambda: perform_reload(view),
+        name="規則重新載入",
+        owner="rules",
+        cancellation=CancellationPolicy.NON_CANCELLABLE,
+        shutdown=ShutdownPolicy.DRAIN_ONLY,
+    )
+    if not launched:
+        view.loading_indicator.visible = False
+        show_snack(view.page, "應用程式正在關閉，無法啟動新工作", C.GOLD)
+        view.page.update()
 
 
 def calc_total_pages(total_rules: int, page_size: int) -> int:

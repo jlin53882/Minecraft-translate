@@ -10,7 +10,7 @@ from unittest.mock import patch
 
 import flet as ft
 
-from app.tasks import LogEntry
+from app.tasks import LogEntry, operation_registry
 from app.ui.design import C
 from app.ui.design import tone as get_tone
 from app.ui.snack import show_snack
@@ -142,7 +142,7 @@ def test_start_clicked_launches_service_with_current_flags(monkeypatch):
 
     monkeypatch.setattr(lm_view, "TaskSession", _Session)
     monkeypatch.setattr(
-        lm_view.threading,
+        operation_registry.threading,
         "Thread",
         lambda target=None, args=(), daemon=None: type(
             "T", (), {"start": lambda self: target(*args)}
@@ -274,7 +274,7 @@ def test_start_clicked_uses_default_output_dir_when_empty(monkeypatch):
 
     monkeypatch.setattr(lm_view, "TaskSession", _Session)
     monkeypatch.setattr(
-        lm_view.threading,
+        operation_registry.threading,
         "Thread",
         lambda target=None, args=(), daemon=None: type(
             "T", (), {"start": lambda self: target(*args)}
@@ -450,7 +450,7 @@ def test_start_clicked_resets_log_presenter(monkeypatch):
 
     monkeypatch.setattr(lm_view, "TaskSession", _Session)
     monkeypatch.setattr(
-        lm_view.threading,
+        operation_registry.threading,
         "Thread",
         lambda target=None, args=(), daemon=None: type(
             "T", (), {"start": lambda self: None}
@@ -538,7 +538,7 @@ def test_start_clicked_ignored_while_running(monkeypatch):
     monkeypatch.setattr(lm_view, "TaskSession", _Session)
     started = []
     monkeypatch.setattr(
-        lm_view.threading,
+        operation_registry.threading,
         "Thread",
         lambda target=None, args=(), daemon=None: type(
             "T", (), {"start": lambda self: started.append(target)}
@@ -560,7 +560,7 @@ def test_cancel_clicked_requests_session_cancel(monkeypatch):
     from app.tasks.task_session import TaskSession
 
     monkeypatch.setattr(
-        lm_view.threading,
+        operation_registry.threading,
         "Thread",
         lambda target=None, args=(), daemon=None: type(
             "T", (), {"start": lambda self: None}
