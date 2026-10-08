@@ -13,6 +13,8 @@ import flet as ft
 from app.services_impl.config_service import load_replace_rules
 from app.tasks.operation_registry import (
     CancellationPolicy,
+    CommitPolicy,
+    DurabilityPolicy,
     ShutdownPolicy,
     launch_page_operation,
 )
@@ -22,7 +24,6 @@ from app.ui.snack import show_snack
 from app.views.rules.rules_actions import (
     calc_total_pages,
     start_reload_thread,
-    start_save_thread,
 )
 from app.views.rules.rules_actions import (
     translate_regex_error as rules_translate_regex_error,
@@ -627,8 +628,9 @@ class RulesView(RulesWidgetsMixin, ft.Column):
             return
         snapshot = [dict(r) for r in self.all_rules_data]
 
-        def finish(failure):
+        def finish(result):
             self._saving = False
+            failure = result.get("failure")
             if failure is not None:
                 idx, msg = failure
                 show_snack(
@@ -640,77 +642,82 @@ class RulesView(RulesWidgetsMixin, ft.Column):
                 self.current_page = idx // self.page_size + 1
                 self._render_current_page()
                 return
-
-            # 移除 _rid 並過濾
-            clean_rules = [
-                {"from": r.get("from", ""), "to": r.get("to", "")}
-                for r in snapshot
-                if r.get("from", "").strip()
-            ]
+            if result.get("error") is not None:
+                show_snack(
+                    self.page,
+                    f"儲存規則時發生錯誤：{result['error']}",
+                    C.RED,
+                    text_color=C.ON_EM,
+                )
+                return
             show_snack(
                 self.page,
-                "✅ 驗證通過，正在儲存規則…",
+                "規則已成功儲存！",
                 C.EM,
                 text_color=C.ON_EM,
             )
-            start_save_thread(self, clean_rules)
 
         run_task = getattr(self.page, "run_task", None)
-        if run_task is None:
-            finish(self._validate_all(snapshot))
-            return
-
         self._saving = True
-        show_snack(self.page, "🔎 正在驗證規則…", C.EM, text_color=C.ON_EM)
+        show_snack(self.page, "🔎 正在驗證並儲存規則…", C.EM, text_color=C.ON_EM)
         self._launch_rule_validation(snapshot, finish, run_task)
 
     def _launch_rule_validation(self, snapshot, finish, run_task):
-        """Own the validation worker and only continue saving after it returns."""
+        """Keep validation and its requested durable save under one operation owner."""
         result = {}
         worker_done = threading.Event()
 
-        def validate():
+        def validate_and_save():
             try:
-                result["failure"] = self._validate_all(snapshot)
-            except Exception as ex:  # noqa: BLE001 - 傳回 event loop 顯示
+                failure = self._validate_all(snapshot)
+                result["failure"] = failure
+                if failure is not None:
+                    return
+                clean_rules = [
+                    {"from": rule.get("from", ""), "to": rule.get("to", "")}
+                    for rule in snapshot
+                    if rule.get("from", "").strip()
+                ]
+                from app.services_impl.config_service import save_replace_rules
+
+                save_replace_rules(clean_rules)
+            except Exception as ex:
                 result["error"] = ex
+                raise
             finally:
                 worker_done.set()
+                if run_task is None:
+                    self._run_on_ui_thread(finish, result)
 
         operation = launch_page_operation(
             self.page,
-            validate,
-            name="規則批次驗證",
-            owner="rules-validation",
+            validate_and_save,
+            name="規則驗證與儲存",
+            owner="rules-save",
             cancellation=CancellationPolicy.NON_CANCELLABLE,
+            commit=CommitPolicy.PARTIAL_ALLOWED,
+            durability=DurabilityPolicy.USER_ACTION,
             shutdown=ShutdownPolicy.DRAIN_ONLY,
         )
         if not operation:
             self._saving = False
             show_snack(
                 self.page,
-                "應用程式正在關閉，未開始規則驗證",
+                "應用程式正在關閉，未開始規則驗證或儲存",
                 C.GOLD,
                 text_color=C.ON_EM,
             )
             return
 
-        async def _validate_then_save():
+        if run_task is None:
+            return
+
+        async def _wait_for_validation_and_save():
             while not worker_done.is_set():
                 await asyncio.sleep(0.02)
-            if "error" in result:
-                ex = result["error"]
-                self._saving = False
-                show_snack(
-                    self.page,
-                    f"驗證規則時發生錯誤：{ex}",
-                    C.RED,
-                    text_color=C.ON_EM,
-                )
-                return
-            finish(result.get("failure"))
+            finish(result)
 
-        run_task(_validate_then_save)
+        run_task(_wait_for_validation_and_save)
 
     def add_row_clicked(self, e):
         """新增一列空白規則並跳轉至最後一頁"""

@@ -612,15 +612,71 @@ def test_save_runs_validation_off_event_loop(monkeypatch):
     view = RulesView(page)
     view.all_rules_data = [{"from": "a", "to": "b", "_rid": 1}]
     saved = []
+    workers = []
+
+    class DeferredThread:
+        def __init__(self, target=None, daemon=None, **kwargs):
+            self.target = target
+
+        def start(self):
+            workers.append(self.target)
+
     monkeypatch.setattr(
-        "app.views.rules_view.start_save_thread", lambda v, rules: saved.append(rules)
+        "app.views.rules_view.threading.Thread",
+        DeferredThread,
+    )
+    monkeypatch.setattr(
+        "app.services_impl.config_service.save_replace_rules",
+        lambda rules: saved.append(rules),
     )
 
     view.save_rules_clicked(None)
-    assert saved == []  # 點擊當下不在 event loop 上驗證
+    assert saved == []  # 點擊當下不在 event loop 上驗證或寫檔
+    assert len(workers) == 1
+    workers.pop()()
     for handler, args in page._tasks:
         asyncio.run(handler(*args))
     assert saved == [[{"from": "a", "to": "b"}]]
+
+
+def test_rules_validation_and_durable_save_share_one_operation(monkeypatch):
+    from app.tasks.operation_registry import OperationRegistry
+
+    monkeypatch.setattr(RulesView, "_initial_load", lambda self: None)
+    page = mock_page()
+    registry = OperationRegistry()
+    page.operation_registry = registry
+    view = RulesView(page)
+    view.all_rules_data = [{"from": "a", "to": "b", "_rid": 1}]
+    saved = []
+    workers = []
+
+    class DeferredThread:
+        def __init__(self, target=None, daemon=None, **kwargs):
+            self.target = target
+
+        def start(self):
+            workers.append(self.target)
+
+    monkeypatch.setattr("app.tasks.operation_registry.threading.Thread", DeferredThread)
+    monkeypatch.setattr(
+        "app.services_impl.config_service.save_replace_rules",
+        lambda rules: (saved.append(rules), assert_owned()),
+    )
+
+    def assert_owned():
+        assert registry.active_count() == 1
+        handle = registry.active()[0]
+        assert handle.descriptor.owner == "rules-save"
+        assert handle.descriptor.durability == "durable_user_action"
+
+    view.save_rules_clicked(None)
+
+    assert registry.active_count() == 1
+    assert saved == []
+    workers.pop()()
+    assert saved == [[{"from": "a", "to": "b"}]]
+    assert registry.active_count() == 0
 
 
 def test_render_page_does_not_scan_all_rules(monkeypatch):

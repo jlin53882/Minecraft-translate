@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import gc
+from types import SimpleNamespace
 
 import pytest
 
@@ -17,7 +18,7 @@ from app.tasks.operation_registry import (
     DurabilityPolicy,
     OperationDescriptor,
 )
-from app.tasks.task_session import TaskSession, TaskSessionAdmissionError
+from app.tasks.task_session import TaskSession, TaskSessionAdmissionError, tag_session
 
 
 @pytest.fixture
@@ -123,18 +124,53 @@ def test_registry_only_operation_is_projected_and_recorded_as_recent(manager):
 
 
 def test_detach_keeps_admission_gate_until_last_operation_finishes(manager):
-    session = TaskSession(name="Web timeout drain")
+    page = SimpleNamespace(operation_registry=manager.operation_registry)
+    session = tag_session(TaskSession(name="Web timeout drain"), "Web", page=page)
     session.start()
     manager.stop_accepting()
     manager.detach()
 
-    rejected = TaskSession(name="late session")
+    rejected = tag_session(TaskSession(name="late session"), "late", page=page)
     with pytest.raises(TaskSessionAdmissionError):
         rejected.start()
 
     session.finish()
     assert manager.operation_registry.active_count() == 0
     assert manager._attached is False
+
+
+def test_legacy_sessions_are_admitted_only_by_their_own_web_registry():
+    from types import SimpleNamespace
+
+    first = TaskManager()
+    second = TaskManager()
+    first.attach()
+    second.attach()
+    page_a = SimpleNamespace(operation_registry=first.operation_registry)
+    page_b = SimpleNamespace(operation_registry=second.operation_registry)
+    try:
+        session_a = tag_session(
+            TaskSession(name="A draining session"), "A", page=page_a
+        )
+        session_a.start()
+        first.stop_accepting()
+        first.detach()
+
+        session_b = tag_session(TaskSession(name="B legacy session"), "B", page=page_b)
+        session_b.start()
+
+        assert first.operation_registry.active_count() == 1
+        assert second.operation_registry.active_count() == 1
+        assert [task.name for task in first.active()] == ["A"]
+        assert [task.name for task in second.active()] == ["B"]
+
+        session_b.finish()
+        session_a.finish()
+        assert first.operation_registry.active_count() == 0
+        assert second.operation_registry.active_count() == 0
+    finally:
+        first.detach()
+        second.detach()
 
 
 def test_composite_parent_remains_visible_after_child_session_finishes(manager):

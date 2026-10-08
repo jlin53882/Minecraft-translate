@@ -95,6 +95,23 @@ def test_task_thread_reserves_before_launch_and_binds_session_cancellation():
     assert registry.wait_for_idle(timeout=2)
 
 
+def test_handled_task_session_error_marks_operation_failed():
+    registry = OperationRegistry()
+    session = TaskSession(name="handled service error")
+    handle = registry.reserve(_descriptor(), task_session=session)
+    assert handle is not None
+
+    def service_returns_normally_after_reporting_error():
+        session.start()
+        session.set_error()
+        session.finish()
+
+    assert handle.launch(service_returns_normally_after_reporting_error)
+    assert handle.done_event.wait(2)
+    assert handle.terminal_reason == "failed"
+    assert isinstance(handle.error, RuntimeError)
+
+
 def test_admission_can_only_be_reopened_explicitly_after_drain():
     registry = OperationRegistry()
     handle = registry.reserve(_descriptor())

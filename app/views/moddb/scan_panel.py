@@ -466,7 +466,9 @@ class ScanPanel(ft.Column):
             )
             self._safe_update()
             return
-        self.session = tag_session(TaskSession(), "Mod 資料庫掃描", "moddb")
+        self.session = tag_session(
+            TaskSession(), "Mod 資料庫掃描", "moddb", page=self._page
+        )
         self._set_status("預覽中" if dry_run else "掃描中", "dia")
         self._set_running(True)
         self.progress_bar.value = 0

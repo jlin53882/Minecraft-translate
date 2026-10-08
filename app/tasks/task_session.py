@@ -44,7 +44,7 @@ def remove_observer(callback: Callable[[TaskSession, str], None]) -> None:
             _observers.remove(callback)
 
 
-def tag_session(session, name: str, view_key: str | None = None):
+def tag_session(session, name: str, view_key: str | None = None, *, page=None):
     """替 session 標上顯示名稱與所屬頁面（頂列任務膠囊用），並回傳 session。
 
     用屬性設定而不是建構參數，所以替身 / 舊版 session 也能安全呼叫。
@@ -52,6 +52,8 @@ def tag_session(session, name: str, view_key: str | None = None):
     try:
         session.name = name
         session.view_key = view_key
+        if page is not None:
+            session.operation_registry = getattr(page, "operation_registry", None)
     except AttributeError:
         pass
     return session
@@ -134,6 +136,10 @@ class TaskSession:
         self._cancel_event = threading.Event()
         self._operation_cancel_event: threading.Event | None = None
         self.operation_handle = None
+        # Legacy sessions still need an explicit owner when they are created from
+        # a page. A process-global TaskManager observer must not choose a registry
+        # on behalf of another Web session.
+        self.operation_registry = None
         self._started_at: float | None = None
         self._finished = False  # finish() 的終止通知只送一次（見 finish）
         self._amended = False  # 結束後才 set_error() 的更正紀錄只寫一次（見 set_error）

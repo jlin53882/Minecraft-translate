@@ -4,11 +4,11 @@
 > 範圍：`app/`、`translation_tool/`、`main.py` 內所有帶 `noqa: BLE001／S110／S112` 的位置。
 > 命令列 QA 工具（`md_extract_qa.py`、`md_inject_qa.py`）的 `print` 為刻意保留，不在此表。
 
-共 **286** 項；其中 **114** 項尚未在程式碼內寫明原因（以「分類」說明處理方式）。
+共 **284** 項；其中 **113** 項尚未在程式碼內寫明原因（以「分類」說明處理方式）。
 
 | 分類 | 數量 | 意義 |
 |---|---|---|
-| 已記錄／回報 | 251 | 例外處理本身有 log、提示、回報錯誤事件或重新丟出；寬鬆捕捉是為了不中斷整批流程 |
+| 已記錄／回報 | 249 | 例外處理本身有 log、提示、回報錯誤事件或重新丟出；寬鬆捕捉是為了不中斷整批流程 |
 | UI／畫面保護 | 19 | UI 層的畫面更新、icon 快取等；失敗只影響顯示，不影響資料 |
 | 盡力而為（靜默） | 16 | 引擎層、只有 `pass`／`continue`／回傳常數；失敗不影響結果（例如進度回報、還原失敗時以原始例外為準） |
 
@@ -137,10 +137,8 @@
 | `app/views/qc_view.py:QCView._async_pick_file_or_directory` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/views/qc_view.py:QCView._scroll_to_log` | BLE001 | 已記錄／回報 | 捲動失敗不影響任務 |
 | `app/views/rules/rules_actions.py:perform_reload` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
-| `app/views/rules/rules_actions.py:start_save_thread.worker` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/views/rules_view.py:RulesView.on_test_change` | BLE001 | 已記錄／回報 | 規則有問題時顯示原因，不讓頁面出錯 |
 | `app/views/rules_view.py:RulesView._initial_load.run` | BLE001 | 已記錄／回報 | 失敗要顯示在 UI |
-| `app/views/rules_view.py:RulesView._launch_rule_validation.validate` | BLE001 | 已記錄／回報 | 傳回 event loop 顯示 |
 | `app/views/translation/translation_actions.py:_safe_add_log` | BLE001/S110 | UI／畫面保護 | （未寫原因；見分類） |
 | `app/views/translation/translation_actions.py:_safe_page_update` | BLE001/S110 | UI／畫面保護 | （未寫原因；見分類） |
 | `app/views/translation/translation_actions.py:run_ftb` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |

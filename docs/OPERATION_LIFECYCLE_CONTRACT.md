@@ -16,7 +16,10 @@ blocking-call behavior and deeper cooperative cancellation are PR-B work.
   A worker launcher must only be called after a successful reservation. A
   rejected reservation has no worker, service, or write side effect.
 - `TaskSession.start()` requests admission for legacy callers. Mounted views
-  that launch work directly reserve first and bind the session to that handle.
+  bind legacy sessions to their owning page registry; launchers reserve first
+  and bind the session to that handle. Global TaskSession observers only project
+  events for the session's owner registry and cannot veto another Page's
+  admission.
 - A pipeline has one parent handle for the entire sequence. Step sessions are
   projections attached to the parent; a child finish or step handoff does not
   finish the parent.
@@ -58,7 +61,10 @@ OPEN
 Desktop close timeout is a blocking policy, not a hint to resume work. There is
 no implicit “Keep Running” after cancellation was requested. Returning to the
 app is offered only when no operation remains active; that explicit transition
-reopens admission. Retrying close never clears a cancellation request.
+reopens admission. If a timed-out worker later finishes, the close dialog is
+updated with both return and retry choices; admission stays closed until the
+user explicitly chooses return. Retrying close never clears a cancellation
+request.
 
 For Flet Web, `on_disconnect` is not terminal: a client may reconnect and the
 session's operation ownership remains. `on_close` is treated as session expiry:
@@ -84,7 +90,7 @@ tracked risks, not unclassified operations.
 | Bundler | REGISTERED | `bundler`; non-cancellable, partial output policy, durable user action, drain-only. | ZIP/write bound and atomic publication remain PR-B questions. |
 | QC / UntranslatedChecker | REGISTERED | `qc`; non-cancellable, drain-only; worker and final UI batch remain owner-bound. | Service-level blocking bound is not proven here. |
 | Cache view operations / query / index rebuild | REGISTERED | `cache-manager`, `cache-query`, `cache-index-rebuild`; non-cancellable, drain-only; saves are durable user actions, reload/index work recomputable. | Global JSON mirror executor is separately deferred below. |
-| Rules load / validation / save | REGISTERED | `rules`, `rules-validation`, `rules-save`; drain-only; saves are durable user actions. | Save currently uses direct text write, not atomic replace. |
+| Rules load / validation / save | REGISTERED | `rules`; validation and the requested durable save share one `rules-save` operation with drain-only shutdown. | Save currently uses direct text write, not atomic replace. |
 | Lookup single / batch | REGISTERED | `lookup`; non-cancellable, drain-only. | Provider/network timeout remains PR-B. |
 | Translation workers (LM, FTB, KubeJS, MD) | REGISTERED | Reserve before start; sessions bind to owner; cancel-and-drain. | Provider and filesystem blocking bounds are PR-B. |
 | Standalone language merge | REGISTERED | `merge`; reserve before session/service start; cancel-and-drain. | Per-call latency bounds remain PR-B. |
@@ -109,9 +115,17 @@ paths; the mounted application injects the registry.
   each end in one terminal registry removal for single and composite operations.
 - Cancellation tests distinguish request from completion: a blocked worker
   remains active until released, and new work is rejected during drain.
+- Multi-Page legacy TaskSessions must be admitted and projected only by their
+  explicitly bound registry; a detached/draining Page cannot reject work on a
+  different live Page.
+- A durable action with a preparation stage (Rules validation → save) retains
+  one owner continuously from admission through the final write.
+- A handled `TaskSession.set_error()` followed by `finish()` and normal worker
+  return must leave the registry handle failed, not completed.
 - Pipeline tests require one parent handle across multiple step sessions.
 - Desktop/Web tests cover drain success, timeout, retry, and explicit reopen
-  only after idle. Web disconnect itself must not dispose the session.
+  only after idle; a timed-out close dialog recovers its return option when
+  workers drain. Web disconnect itself must not dispose the session.
 - `docs/WORKER_THREAD_AUDIT.md` and
   `tests/test_worker_thread_inventory.py` enumerate remaining raw Thread call
   sites; production owners use Registry launchers.

@@ -14,6 +14,10 @@ from translation_tool.utils.log_unit import log_error, log_warning
 from translation_tool.utils.ui_mirror import session_task_scope
 
 
+def _new_translation_session(view, name):
+    return tag_session(view.TaskSession(), name, "translation", page=view.page)
+
+
 # =========================================================
 # 執行緒安全的 UI 更新包裝函式（ATK-004 / ATK-017 修復）
 # =========================================================
@@ -97,7 +101,7 @@ def run_ftb(view, *, dry_run: bool):
     view.progress.value = 0
     view.log_view.clear()
     _safe_page_update(view)
-    view.session = tag_session(view.TaskSession(), "FTB 任務翻譯", "translation")
+    view.session = _new_translation_session(view, "FTB 任務翻譯")
     operation = reserve_page_operation(
         view.page,
         name="FTB 任務翻譯",
@@ -178,7 +182,7 @@ def run_kjs(view, *, dry_run: bool):
     view.progress.value = 0
     view.log_view.clear()
     _safe_page_update(view)
-    view.session = tag_session(view.TaskSession(), "KubeJS 任務翻譯", "translation")
+    view.session = _new_translation_session(view, "KubeJS 任務翻譯")
     operation = reserve_page_operation(
         view.page,
         name="KubeJS 任務翻譯",
@@ -257,7 +261,7 @@ def run_md(view, *, dry_run: bool):
     view.progress.value = 0
     view.log_view.clear()
     _safe_page_update(view)
-    view.session = tag_session(view.TaskSession(), "MD 任務翻譯", "translation")
+    view.session = _new_translation_session(view, "MD 任務翻譯")
     operation = reserve_page_operation(
         view.page,
         name="MD 任務翻譯",

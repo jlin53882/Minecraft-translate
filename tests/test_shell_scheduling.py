@@ -691,6 +691,38 @@ def test_desktop_close_drain_timeout_keeps_admission_closed_until_retry(env, clo
     shell.dispose()
 
 
+def test_close_timeout_dialog_offers_return_after_last_operation_finishes(env, clock):
+    shell = _make_shell(env)
+    shell.mount()
+    shell.page.scheduled.clear()
+    active = TaskSession(name="之後會完成的任務")
+    active.start()
+
+    asyncio.run(
+        shell.page.window.on_event(SimpleNamespace(type=ft.WindowEventType.CLOSE))
+    )
+    shell.page.dialogs[0].actions[1].on_click(None)
+    shell.page.drain()
+
+    assert shell.operations.shutdown_state == shell.operations.DRAIN_TIMEOUT
+    assert len(_buttons(shell.page.dialogs[-1], "返回應用程式")) == 0
+
+    active.finish()
+    assert shell.operations.shutdown_state == shell.operations.DRAIN_TIMEOUT
+    shell.page.drain()
+
+    assert len(shell.page.dialogs) == 1
+    assert len(_buttons(shell.page.dialogs[-1], "返回應用程式")) == 1
+    assert len(_buttons(shell.page.dialogs[-1], "重新嘗試關閉")) == 1
+    assert "背景操作已結束" in shell.page.dialogs[-1].content.value
+    assert shell.operations.accepting is False
+
+    _buttons(shell.page.dialogs[-1], "返回應用程式")[0].on_click(None)
+    assert shell.operations.accepting is True
+    assert shell._close_pending is False
+    shell.dispose()
+
+
 def test_desktop_close_schedule_failure_keeps_admission_closed(env, clock):
     shell = _make_shell(env)
     shell.mount()

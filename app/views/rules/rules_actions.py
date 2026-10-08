@@ -7,8 +7,6 @@ import flet as ft  # noqa: F401
 
 from app.tasks.operation_registry import (
     CancellationPolicy,
-    CommitPolicy,
-    DurabilityPolicy,
     ShutdownPolicy,
     launch_page_operation,
 )
@@ -83,36 +81,6 @@ def start_reload_thread(view):
         view.loading_indicator.visible = False
         show_snack(view.page, "應用程式正在關閉，無法啟動新工作", C.GOLD)
         view.page.update()
-
-
-def start_save_thread(view, clean_rules):
-    """在后台线程保存规则到配置文件"""
-
-    def worker():
-        """执行规则保存操作"""
-        try:
-            from app.services_impl.config_service import save_replace_rules
-
-            save_replace_rules(clean_rules)
-            view._run_on_ui_thread(
-                lambda: show_snack(view.page, "規則已成功儲存！", C.EM)
-            )
-        except Exception as err:  # noqa: BLE001
-            msg = f"儲存規則時發生錯誤: {err}"
-            view._run_on_ui_thread(lambda msg=msg: show_snack(view.page, msg, C.RED))
-
-    launched = launch_page_operation(
-        view.page,
-        worker,
-        name="規則儲存",
-        owner="rules-save",
-        cancellation=CancellationPolicy.NON_CANCELLABLE,
-        commit=CommitPolicy.PARTIAL_ALLOWED,
-        durability=DurabilityPolicy.USER_ACTION,
-        shutdown=ShutdownPolicy.DRAIN_ONLY,
-    )
-    if not launched:
-        show_snack(view.page, "應用程式正在關閉，無法開始儲存", C.GOLD)
 
 
 def calc_total_pages(total_rules: int, page_size: int) -> int:

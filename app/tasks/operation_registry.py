@@ -113,6 +113,7 @@ class OperationHandle:
         self._task_session_id = id(session)
         try:
             session.operation_handle = self
+            session.operation_registry = self._registry
         except AttributeError:
             _logger.debug("TaskSession 不支援 owner handle 欄位")
         bind = getattr(session, "bind_operation_cancel_event", None)
@@ -170,6 +171,14 @@ class OperationHandle:
             _logger.exception("背景操作失敗：%s", self.descriptor.name)
         finally:
             session = self._task_session_ref() if self._task_session_ref else None
+            if (
+                error is None
+                and session is not None
+                and getattr(session, "error", False)
+            ):
+                error = RuntimeError(
+                    f"TaskSession reported failure: {self.descriptor.name}"
+                )
             try:
                 if session is not None and not getattr(session, "is_finished", False):
                     if error is not None:
@@ -473,7 +482,13 @@ class OperationRegistry:
             handle._state = "failed" if terminal_error is not None else "terminal"
             self._active.pop(handle.id, None)
             handle.done_event.set()
-            if not self._active and not self._accepting:
+            # Preserve an observable timeout state after the final worker
+            # returns; the UI may now offer an explicit recovery choice.
+            if (
+                not self._active
+                and not self._accepting
+                and self._shutdown_state != self.DRAIN_TIMEOUT
+            ):
                 self._shutdown_state = self.DRAINING
             self._condition.notify_all()
         self._emit("finish", handle)

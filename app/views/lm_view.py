@@ -415,7 +415,7 @@ class LMView(ft.Column):
 
         # session 的 start()／finish() 由 run_lm_translation_service 擁有（單一 owner）：
         # 這裡不能再 start()，否則會重複登記並清掉剛寫入的日誌
-        self.session = tag_session(TaskSession(), "機器翻譯", "lm")
+        self.session = tag_session(TaskSession(), "機器翻譯", "lm", page=self.page)
         if not (self.output_path.value or "").strip():
             # 屬於 session 日誌的開頭訊息（service 的 start() 清空日誌後會放回，
             # 輪詢的 tail 重整也不會讓它消失）；沒有此方法的替身退回 add_log

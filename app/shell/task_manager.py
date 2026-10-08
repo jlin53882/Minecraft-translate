@@ -26,6 +26,35 @@ from app.tasks.operation_registry import (
 
 _logger = logging.getLogger(__name__)
 
+
+def _admit_session_for_registry(session, registry, detach_pending: bool):
+    parent = current_operation()
+    handle = getattr(session, "operation_handle", None)
+    session_registry = getattr(session, "operation_registry", None)
+    owner_registry = (
+        handle._registry
+        if isinstance(handle, OperationHandle)
+        else parent._registry
+        if parent is not None
+        else session_registry
+    )
+    if owner_registry is not None and owner_registry is not registry:
+        return None
+    if detach_pending:
+        return registry.accepting if owner_registry is registry else None
+    if parent is not None:
+        parent.bind_task_session(session)
+        return True
+    if isinstance(handle, OperationHandle) and not handle.done_event.is_set():
+        return True
+    if handle is not None:
+        try:
+            session.operation_handle = None
+        except AttributeError:
+            _logger.debug("TaskSession 不支援清除失效 owner handle")
+    return registry.register_session(session) is not None
+
+
 STATUS_RUNNING = "running"
 STATUS_DONE = "done"
 STATUS_ERROR = "error"
@@ -113,19 +142,19 @@ class TaskManager:
 
     def _on_session_event(self, session, event: str) -> bool | None:
         if event == "admission":
-            parent = current_operation()
-            handle = getattr(session, "operation_handle", None)
-            if parent is not None:
-                parent.bind_task_session(session)
-                return True
-            if isinstance(handle, OperationHandle) and not handle.done_event.is_set():
-                return True
-            if handle is not None:
-                try:
-                    session.operation_handle = None
-                except AttributeError:
-                    _logger.debug("TaskSession 不支援清除失效 owner handle")
-            return self.operation_registry.register_session(session) is not None
+            return _admit_session_for_registry(
+                session, self.operation_registry, self._detach_pending
+            )
+
+        handle = getattr(session, "operation_handle", None)
+        session_registry = getattr(session, "operation_registry", None)
+        owner_registry = (
+            handle._registry
+            if isinstance(handle, OperationHandle)
+            else session_registry
+        )
+        if owner_registry is not None and owner_registry is not self.operation_registry:
+            return None
 
         if self._detach_pending:
             if event == "finish":

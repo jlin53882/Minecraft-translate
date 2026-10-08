@@ -155,6 +155,7 @@ class AppShell:
         self._flush_before_close = flush_before_close or _default_flush_before_close
         self._unsubscribe_config: Callable[[], None] | None = None
         self._unsubscribe_config_paths: Callable[[], None] | None = None
+        self._unsubscribe_operations: Callable[[], None] | None = None
         self._unsubscribe_tasks: Callable[[], None] | None = None
         self.current_key: str | None = None
         self._last_refresh = 0.0
@@ -174,6 +175,7 @@ class AppShell:
         self._window_on_event = None
         self._previous_window_on_event = None
         self._close_pending = False
+        self._close_failure_dialog = None
         self._resume_prompt = _build_resume_prompt(
             page, self._resume_interrupted_task, find_interrupted_tasks
         )
@@ -264,6 +266,9 @@ class AppShell:
 
         self.tasks.attach()
         self._unsubscribe_tasks = self.tasks.subscribe(self._schedule_task_refresh)
+        self._unsubscribe_operations = self.operations.subscribe(
+            self._on_operation_registry_event
+        )
         # 設定頁（或任何地方）存檔後，API Key 狀態 / 模型 / 資料夾要立刻更新
         self._unsubscribe_config = self._subscribe_config(self._on_config_saved)
         # 有任務在跑時存檔：提醒「進行中的任務不受影響」（#117）
@@ -577,6 +582,27 @@ class AppShell:
             logger.debug("無法排程 UI 更新", exc_info=True)
             return False, None
 
+    def _on_operation_registry_event(self, event, _handle) -> None:
+        """Refresh a timed-out close choice when the last draining operation ends."""
+        if (
+            event == "finish"
+            and self._close_pending
+            and not self._disposed
+            and self.operations.shutdown_state == self.operations.DRAIN_TIMEOUT
+            and self.operations.active_count() == 0
+        ):
+            self._submit_ui(self._show_idle_close_failure)
+
+    async def _show_idle_close_failure(self) -> None:
+        if (
+            self._disposed
+            or not self._close_pending
+            or self.operations.active_count() != 0
+            or self.operations.shutdown_state != self.operations.DRAIN_TIMEOUT
+        ):
+            return
+        self._show_close_failure()
+
     def _schedule_key_poll(self) -> None:
         """每隔幾秒更新一次 API Key 健康度（冷卻到期 / 額度用盡都會變）。"""
         _ok, self._poll_future = self._submit_ui(self._poll_keys)
@@ -788,10 +814,15 @@ class AppShell:
         if not callable(show_dialog):
             return
         draining = self.operations.active_count() > 0
+        drain_timed_out_idle = (
+            not draining
+            and self.operations.shutdown_state == self.operations.DRAIN_TIMEOUT
+        )
 
         def retry_close(_event=None) -> None:
             try:
                 self.page.pop_dialog()
+                self._close_failure_dialog = None
             except Exception:
                 logger.debug("關閉重試 dialog 關閉失敗", exc_info=True)
             ok, _future = self._submit_ui(self._complete_window_close)
@@ -801,28 +832,37 @@ class AppShell:
         def return_to_app(_event=None) -> None:
             try:
                 self.page.pop_dialog()
+                self._close_failure_dialog = None
                 self.operations.reopen_admission()
                 self._close_pending = False
             except Exception:
                 logger.debug("無法恢復應用程式 admission", exc_info=True)
                 self._show_close_failure()
 
-        content = (
-            "取消要求已送出，但背景操作尚未停止。它仍會被追蹤；新工作暫時不能啟動。"
-            if draining
-            else "關閉前的資料保存未完成。可以重試關閉，或明確返回應用程式。"
-        )
+        if draining:
+            content = (
+                "取消要求已送出，但背景操作尚未停止。它仍會被追蹤；新工作暫時不能啟動。"
+            )
+        elif drain_timed_out_idle:
+            content = "逾時前的背景操作已結束。尚未自動恢復工作；可以明確返回應用程式，或重新嘗試關閉。"
+        else:
+            content = "關閉前的資料保存未完成。可以重試關閉，或明確返回應用程式。"
         actions = [ft.TextButton("重新嘗試關閉", on_click=retry_close)]
         if not draining:
             actions.insert(0, ft.TextButton("返回應用程式", on_click=return_to_app))
-        show_dialog(
-            ft.AlertDialog(
-                modal=True,
-                title=ft.Text("關閉流程仍未完成"),
-                content=ft.Text(content),
-                actions=actions,
-            )
+        if self._close_failure_dialog is not None:
+            self._close_failure_dialog.content = ft.Text(content)
+            self._close_failure_dialog.actions = actions
+            self._safe_update()
+            return
+        dialog = ft.AlertDialog(
+            modal=True,
+            title=ft.Text("關閉流程仍未完成"),
+            content=ft.Text(content),
+            actions=actions,
         )
+        self._close_failure_dialog = dialog
+        show_dialog(dialog)
 
     def dispose(self) -> None:
         """移除 mount 時註冊的全域資源（冪等）。
@@ -840,10 +880,12 @@ class AppShell:
             self._refresh_future = self._env_future = self._poll_future = None
             unsubscribers = [
                 self._unsubscribe_tasks,
+                self._unsubscribe_operations,
                 self._unsubscribe_config,
                 self._unsubscribe_config_paths,
             ]
-            self._unsubscribe_tasks = self._unsubscribe_config = None
+            self._unsubscribe_tasks = self._unsubscribe_operations = None
+            self._unsubscribe_config = None
             self._unsubscribe_config_paths = None
         for unsubscribe in unsubscribers:
             if unsubscribe is not None:

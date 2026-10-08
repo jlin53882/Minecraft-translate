@@ -25,7 +25,9 @@ class MergeWidgetsMixin:
         self.file_picker = file_picker
         self.db_options = MergeDbOptions(lambda: self._page.update())
 
-        self.session = tag_session(TaskSession(max_logs=2000), "語系合併", "merge")
+        self.session = tag_session(
+            TaskSession(max_logs=2000), "語系合併", "merge", page=self._page
+        )
         self._ui_stop = threading.Event()
         self._poller = PollerHandle()  # 輪詢的 owner：卸載時 stop、重新掛載時 resume
         self._merge_tracking = False  # 合併進行中（輪詢尚未見到 DONE／ERROR）

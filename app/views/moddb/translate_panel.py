@@ -302,7 +302,9 @@ class TranslatePanel(ft.Column):
             self._set_status("請先選擇遊戲版本", "red")
             self._safe_update()
             return
-        self.session = tag_session(TaskSession(), "Mod 資料庫機翻", "moddb")
+        self.session = tag_session(
+            TaskSession(), "Mod 資料庫機翻", "moddb", page=self._page
+        )
         self._run_version = str(self.version_dd.value or "")
         self._set_status("預覽中" if dry_run else "機翻中", "dia")
         self._set_running(True)
