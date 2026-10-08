@@ -289,6 +289,61 @@ def test_scan_failure_does_not_emit_completed_scan_or_reset_progress(
     assert "3/3" not in updates[-1]["log"]
 
 
+def test_cancelled_pre_scan_joins_background_worker_without_completion_progress(
+    tmp_path: Path, monkeypatch
+):
+    """取消預掃描時等背景 worker 收斂，不發出掃描完成訊息。"""
+    import re
+    import threading
+
+    from translation_tool.core.jar_processor_extract import run_extraction_process_impl
+    from translation_tool.utils.cancellation import (
+        TaskCancelled,
+        cancel_scope,
+        raise_if_cancelled,
+    )
+
+    mods = tmp_path / "mods"
+    mods.mkdir()
+    jars = [str(mods / "mod.jar")]
+    scan_started = threading.Event()
+    release_scan = threading.Event()
+    cancel_requested = threading.Event()
+    scan_thread = []
+
+    def blocking_scan(**_kwargs):
+        scan_thread.append(threading.current_thread())
+        scan_started.set()
+        assert release_scan.wait(timeout=5)
+        raise_if_cancelled()
+
+    def cancel_after_scan_starts():
+        assert scan_started.wait(timeout=5)
+        cancel_requested.set()
+        release_scan.set()
+
+    monkeypatch.setattr("translation_tool.utils.jar_browser.scan_jars", blocking_scan)
+    updates = []
+    generator = run_extraction_process_impl(
+        str(mods),
+        str(tmp_path / "out"),
+        re.compile(r"assets/[^/]+/lang/en_us\.json$"),
+        "Lang",
+        find_jar_files_fn=lambda _directory: jars,
+        extract_from_jar_fn=lambda *_args: pytest.fail("extraction should not run"),
+    )
+    cancel_thread = threading.Thread(target=cancel_after_scan_starts)
+    cancel_thread.start()
+
+    with cancel_scope(cancel_requested.is_set), pytest.raises(TaskCancelled):
+        updates.extend(generator)
+
+    cancel_thread.join(timeout=5)
+    assert not cancel_thread.is_alive()
+    assert scan_thread and not scan_thread[0].is_alive()
+    assert not any("已掃描 1/1 個 JAR" in update.get("log", "") for update in updates)
+
+
 def test_scan_skipped_target_preserves_warning_stats_without_rescan(
     tmp_path: Path, monkeypatch
 ):

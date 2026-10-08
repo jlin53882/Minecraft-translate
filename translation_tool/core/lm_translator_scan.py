@@ -6,7 +6,6 @@
 
 from __future__ import annotations
 
-import concurrent.futures
 from collections.abc import Generator
 from pathlib import Path
 from typing import Any
@@ -19,6 +18,8 @@ from translation_tool.core.translatable_extractor import (
     find_patchouli_json,
     is_lang_file,
 )
+from translation_tool.utils.bounded_executor import bounded_as_completed
+from translation_tool.utils.cancellation import raise_if_cancelled
 from translation_tool.utils.ui_mirror import ContextThreadPoolExecutor
 
 from ..utils.log_unit import log_error, log_info, log_warning
@@ -74,7 +75,9 @@ def extract_items_parallel(
 
     def process_file_task(f: Path):
         try:
+            raise_if_cancelled()
             data = json.loads(f.read_bytes())
+            raise_if_cancelled()
 
             if is_lang_file(f):
                 c_type = "lang"
@@ -100,9 +103,19 @@ def extract_items_parallel(
             log_error(f"❌ 檔案處理失敗 {f.name}: {e!r}")
             return None
 
-    with ContextThreadPoolExecutor(max_workers=work_thread) as executor:
-        future_to_file = {executor.submit(process_file_task, f): f for f in files}
-        for future in concurrent.futures.as_completed(future_to_file):
+    def submit_file(executor, file_path: Path):
+        return executor.submit(process_file_task, file_path)
+
+    with (
+        ContextThreadPoolExecutor(max_workers=work_thread) as executor,
+        bounded_as_completed(
+            executor,
+            files,
+            submit_file,
+            max_in_flight=max(1, work_thread * 2),
+        ) as completed,
+    ):
+        for future, _file_path in completed:
             result = future.result()
             if not result:
                 continue

@@ -224,6 +224,30 @@ def test_dismiss_while_scanning_stops_the_worker_early(env, monkeypatch):
     assert seen == []
 
 
+def test_cancelled_scan_does_not_report_100_percent(env, monkeypatch):
+    dialog_ref = {}
+
+    def gen(*_args, **_kwargs):
+        yield {"progress": 0.4, "current": 2, "total": 5, "log": "掃描中"}
+        dialog_ref["dialog"].on_dismiss(None)
+        yield {"result": _result()}
+
+    monkeypatch.setattr(mod, "preview_extraction_generator", gen)
+    dialog = env.open()
+    dialog_ref["dialog"] = dialog
+    _action(dialog, "開始預覽").on_click(None)
+    env.threads[-1].target()
+
+    tasks, env.page._tasks = env.page._tasks, []
+    for coro, args in tasks:
+        asyncio.run(coro(*args))
+
+    texts = _texts(dialog)
+    assert "已取消" in texts
+    assert "100%" not in texts
+    assert not any("預覽完成" == text for text in texts)
+
+
 def test_rescan_after_a_finished_scan_works_again(env):
     env.updates = [{"result": _result()}]
     dialog = env.open()

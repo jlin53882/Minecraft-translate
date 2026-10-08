@@ -103,6 +103,33 @@ def test_json_mirror_is_written_in_a_background_thread_in_order(tmp_path, monkey
     ]  # 依呼叫順序
 
 
+def test_jsonl_history_is_available_while_derived_mirror_is_blocked(
+    tmp_path, monkeypatch
+):
+    root = str(tmp_path)
+    entered = threading.Event()
+    release = threading.Event()
+    real_append = hs._append_mirror
+
+    def blocked_append(json_path, event, max_per_file):
+        entered.set()
+        assert release.wait(2)
+        real_append(json_path, event, max_per_file)
+
+    monkeypatch.setattr(hs, "_append_mirror", blocked_append)
+    hs.history_append_event(root, "lang", _event("canonical", 1))
+    assert entered.wait(1)
+    try:
+        rows = hs.history_load_recent(root, "lang", "canonical")
+        assert [row["new_dst"] for row in rows] == ["n1"]
+    finally:
+        release.set()
+
+    hs.history_flush(timeout=2)
+    mirror = next((tmp_path / "cache_history" / "lang" / "json").glob("*.json"))
+    assert json.loads(mirror.read_text(encoding="utf-8")) == [_event("canonical", 1)]
+
+
 def test_json_mirror_is_truncated_to_max_per_file(tmp_path):
     json_path = tmp_path / "m.json"
     for n in range(7):

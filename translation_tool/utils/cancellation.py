@@ -13,12 +13,14 @@ TaskCancelled 繼承 BaseException：翻譯流程中有許多 ``except Exception
 
 from __future__ import annotations
 
-import threading
 import time
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
+from contextvars import ContextVar
 
-_local = threading.local()
+_cancel_check: ContextVar[Callable[[], bool] | None] = ContextVar(
+    "translation_cancel_check", default=None
+)
 
 
 class TaskCancelled(BaseException):
@@ -27,25 +29,27 @@ class TaskCancelled(BaseException):
 
 @contextmanager
 def cancel_scope(check: Callable[[], bool]) -> Iterator[None]:
-    """在目前執行緒註冊取消檢查函式。
+    """在目前 context 註冊取消檢查函式。
 
     可巢狀：內層與外層任一要求取消都算取消（例如一鍵流水線的取消，
     傳到其中一個步驟 service 自己註冊的 scope 裡也有效）；離開時恢復外層。
+    ContextVar 會隨 ContextThreadPoolExecutor 複製到 worker，讓平行工作中的
+    cancellation checkpoint 也能觀察到同一個操作的取消狀態。
     """
-    previous = getattr(_local, "check", None)
-    if previous is None:
-        _local.check = check
-    else:
-        _local.check = lambda: bool(check()) or bool(previous())
+    previous = _cancel_check.get()
+    effective_check = (
+        check if previous is None else lambda: bool(check()) or bool(previous())
+    )
+    token = _cancel_check.set(effective_check)
     try:
         yield
     finally:
-        _local.check = previous
+        _cancel_check.reset(token)
 
 
 def is_cancelled() -> bool:
     """目前執行緒的任務是否已被要求取消。"""
-    check = getattr(_local, "check", None)
+    check = _cancel_check.get()
     if check is None:
         return False
     try:
@@ -63,7 +67,7 @@ def raise_if_cancelled() -> None:
 def interruptible_sleep(seconds: float, step: float = 0.2) -> None:
     """可被取消打斷的 sleep（例如等待 API 限流時）。"""
     seconds = max(0.0, float(seconds))
-    if getattr(_local, "check", None) is None:
+    if _cancel_check.get() is None:
         # 沒有可取消的任務：一般 sleep
         time.sleep(seconds)
         return

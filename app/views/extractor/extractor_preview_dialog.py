@@ -21,6 +21,7 @@ from app.views._log import LogView
 from app.views.extractor import extractor_dialog as _extractor_dialog
 from app.views.extractor.extractor_dialog_helpers import format_size
 from app.views.extractor.extractor_state import PreviewState
+from translation_tool.utils.cancellation import cancel_scope
 from translation_tool.utils.log_unit import log_error, log_info, log_warning
 from translation_tool.utils.ui_mirror import in_new_task, new_task_id
 
@@ -403,26 +404,31 @@ def _preview_reset_scan_state(ctx) -> None:
 
 def _preview_do_scan(ctx):
     """背景執行緒：跑 generator，只寫入 preview_state（不碰任何控制項）。"""
+    generator = preview_extraction_generator(
+        ctx.input_path, ctx.mode, skip_zh_cn=ctx.skip_zh_cn
+    )
     try:
-        for update in preview_extraction_generator(
-            ctx.input_path, ctx.mode, skip_zh_cn=ctx.skip_zh_cn
-        ):
-            if ctx.state["cancelled"]:
-                break
-            if "progress" in update:
-                ctx.preview_state.progress = update.get("progress", 0)
-                ctx.preview_state.current = update.get("current", 0)
-                ctx.preview_state.total = update.get("total", 0)
-                ctx.preview_state.log = update.get("log", "")
-            if "error" in update:
-                ctx.preview_state.error = update["error"]
-                break
-            if "result" in update:
-                ctx.preview_state.result = update["result"]
+        with cancel_scope(lambda: ctx.state["cancelled"]):
+            for update in generator:
+                if ctx.state["cancelled"]:
+                    break
+                if "progress" in update:
+                    ctx.preview_state.progress = update.get("progress", 0)
+                    ctx.preview_state.current = update.get("current", 0)
+                    ctx.preview_state.total = update.get("total", 0)
+                    ctx.preview_state.log = update.get("log", "")
+                if "error" in update:
+                    ctx.preview_state.error = update["error"]
+                    break
+                if "result" in update:
+                    ctx.preview_state.result = update["result"]
     except Exception as ex:  # noqa: BLE001 - 錯誤要回報到 UI
         log_error(f"[提取預覽] 掃描失敗：{ex!r}", exc_info=True)
         ctx.preview_state.error = str(ex)
     finally:
+        close = getattr(generator, "close", None)
+        if callable(close):
+            close()
         # 不論成功、失敗或取消都要標記完成，避免 UI poller 永遠等待
         ctx.preview_state.done = True
 
@@ -456,11 +462,14 @@ async def _preview_ui_poller(ctx):
 
     final_result = ctx.preview_state.result
     final_error = ctx.preview_state.error
-    ctx.progress_bar.value = 1.0
-    ctx.progress_pct.value = "100%"
-    ctx.status_text.value = "預覽完成"
     ctx.start_button.disabled = False
     ctx.state["running"] = False
+
+    cancelled = ctx.state["cancelled"]
+    if not cancelled and not final_error:
+        ctx.progress_bar.value = 1.0
+        ctx.progress_pct.value = "100%"
+        ctx.status_text.value = "預覽完成"
 
     if final_error:
         ctx.add_log(
@@ -482,7 +491,7 @@ async def _preview_ui_poller(ctx):
         )
         ctx.show_result_dialog(final_result)
     else:
-        if ctx.state["cancelled"]:
+        if cancelled:
             ctx.status_text.value = "已取消"
         ctx.preview_dialog.modal = False
         ctx.page.update()

@@ -7,7 +7,6 @@
     "app/services_impl/pipelines/merge_service.py:run_merge_zip_batch_service": 99,
     "app/shell/app_shell.py:AppShell.__init__": 90,
     "app/ui/snack.py:show_snack": 91,
-    "app/views/cache_manager/cache_actions.py:run_cache_action": 98,
     "app/views/cache_manager/cache_overview_panel.py:build_overview_page": 84,
     "app/views/cache_manager/cache_view_history.py:CacheHistoryMixin._render_query_history": 86,
     "app/views/cache_manager/cache_view_history.py:CacheHistoryMixin._render_shard_history": 88,
@@ -15,7 +14,7 @@
     "app/views/cache_manager/cache_view_shard.py:CacheShardMixin._render_shard_detail_keys": 82,
     "app/views/cache_manager/cache_view_shard.py:CacheShardMixin._type_shard_card": 81,
     "app/views/cache_view.py:CacheView.__init__": 94,
-    "app/views/icon_preview/icon_cache.py:_batch_extract_jar_icons": 101,
+    "app/views/icon_preview/icon_cache.py:_batch_extract_jar_icons": 103,
     "app/views/icon_preview/icon_cache.py:_resolve_icon_from_catalog": 87,
     "app/views/merge/merge_widgets.py:MergeWidgetsMixin._init_merge_io_controls": 80,
     "app/views/moddb/scan_panel.py:ScanPanel._build_options_card": 99,
@@ -27,7 +26,7 @@
     "app/views/pipeline/pipeline_one_click_dialog.py:open_one_click_dialog": 86
   },
   "view_files": {
-    "app/views/icon_preview/icon_cache.py": 935,
+    "app/views/icon_preview/icon_cache.py": 957,
     "app/views/icon_preview_view.py": 834,
     "app/views/moddb/entries_panel.py": 888
   }

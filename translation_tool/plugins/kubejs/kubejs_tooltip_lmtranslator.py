@@ -20,7 +20,6 @@ Rich Text Shield：shield_text() / unshield_text() 保護 KubeJS 格式（彩色
 from __future__ import annotations
 
 import re
-from concurrent.futures import as_completed
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -54,6 +53,8 @@ from translation_tool.plugins.shared.rich_text_shield import (
     shield_text,
     unshield_text,
 )
+from translation_tool.utils.bounded_executor import bounded_as_completed
+from translation_tool.utils.cancellation import raise_if_cancelled
 from translation_tool.utils.config_manager import load_config
 from translation_tool.utils.log_unit import log_info, log_warning, progress
 from translation_tool.utils.ui_mirror import ContextThreadPoolExecutor
@@ -247,7 +248,9 @@ def translate_kubejs_pending_to_zh_tw(
     def _count_one(src: Path) -> Tuple[Path, int]:
         """統計單一檔案的翻譯 key 數量。"""
         try:
+            raise_if_cancelled()
             mapping = read_json_dict(src)
+            raise_if_cancelled()
             return src, int(count_translatable_keys(mapping))
         except Exception as e:  # noqa: BLE001 - 失敗已記錄，不中斷翻譯批次
             log_warning(f"[KubeJS-LM] 讀取 JSON 失敗 {src}: {e!r}")
@@ -258,10 +261,20 @@ def translate_kubejs_pending_to_zh_tw(
     )
     max_workers = max(1, max_workers)
 
-    with ContextThreadPoolExecutor(max_workers=max_workers) as ex:
-        futs = [ex.submit(_count_one, p) for p in json_files]
-        for fu in as_completed(futs):
-            src, c = fu.result()
+    def submit_count(executor, src: Path):
+        return executor.submit(_count_one, src)
+
+    with (
+        ContextThreadPoolExecutor(max_workers=max_workers) as ex,
+        bounded_as_completed(
+            ex,
+            json_files,
+            submit_count,
+            max_in_flight=max_workers * 2,
+        ) as completed,
+    ):
+        for future, _src in completed:
+            src, c = future.result()
             per_file_counts.append((src, c))
             global_total_keys += c
 

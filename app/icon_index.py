@@ -12,11 +12,12 @@ import json
 import uuid
 import zipfile
 from collections.abc import Iterator
-from concurrent.futures import as_completed
 from pathlib import Path
 
 from app.icon_runtime import get_runtime_asset_paths
 from translation_tool.utils.app_paths import get_data_root
+from translation_tool.utils.bounded_executor import bounded_as_completed
+from translation_tool.utils.cancellation import raise_if_cancelled
 from translation_tool.utils.config_manager import load_config
 from translation_tool.utils.log_unit import log_info, log_warning
 from translation_tool.utils.ui_mirror import ContextThreadPoolExecutor
@@ -95,6 +96,7 @@ def _iter_entries_from_lang_files(
     """列舉每個 assets namespace 的英文 lang entries（modid, key, value）。"""
     members_by_modid: dict[str, list[str]] = {}
     for name in zf.namelist():
+        raise_if_cancelled()
         parts = name.split("/")
         if (
             len(parts) != 4
@@ -106,6 +108,7 @@ def _iter_entries_from_lang_files(
         members_by_modid.setdefault(parts[1], []).append(name)
 
     for modid in sorted(members_by_modid):
+        raise_if_cancelled()
         # Prefer the production JSON contract; .lang is only a legacy fallback.
         candidates = sorted(
             members_by_modid[modid],
@@ -140,6 +143,7 @@ def _iter_entries_from_lang_files(
             else:
                 parsed_entries = []
                 for line in content.splitlines():
+                    raise_if_cancelled()
                     line = line.strip()
                     if not line or "=" not in line:
                         continue
@@ -167,6 +171,7 @@ def _process_single_jar(jar_path: Path, asset_catalog=None) -> dict[str, str]:
     try:
         with zipfile.ZipFile(jar_path, "r") as zf:
             names = set(zf.namelist())
+            raise_if_cancelled()
             budget = ZipReadBudget.for_icon_scan(jar_path.name)
             from app.icon_reader import IconRef
             from app.views.icon_preview.icon_cache import (
@@ -175,6 +180,7 @@ def _process_single_jar(jar_path: Path, asset_catalog=None) -> dict[str, str]:
             )
 
             for modid, key, _value in _iter_entries_from_lang_files(zf, budget=budget):
+                raise_if_cancelled()
                 # 只處理有意義的 content key
                 if key.split(".", 1)[0] not in {
                     "item",
@@ -253,27 +259,34 @@ def build_icon_index(mods_dir: Path, progress_cb=None) -> dict[str, str]:
         load_config().get("translator", {}).get("parallel_execution_workers", 8)
     )
     max_workers = max(1, config_workers) if isinstance(config_workers, int) else 8
+
+    def submit_jar(executor, jar_path: Path):
+        return executor.submit(_process_single_jar, jar_path, asset_catalog)
+
     with ContextThreadPoolExecutor(max_workers=max_workers) as executor:
         try:
-            futures = {
-                executor.submit(_process_single_jar, jar, asset_catalog): jar
-                for jar in jars
-            }
-            for future in as_completed(futures):
-                jar = futures[future]
-                done += 1
-                try:
-                    jar_results = future.result()
-                    for key, uri in jar_results.items():
-                        index[key] = uri
-                    if progress_cb:
-                        progress_cb(done, total)
-                except Exception as ex:  # noqa: BLE001
-                    log_warning(f"[IconIndex] JAR 處理失敗 {jar.name}: {ex!r}")
-                if done % 50 == 0 or done == total:
-                    log_info(
-                        f"[IconIndex] 進度：{done}/{total} JARs，已建立 {len(index)} 個 icon 索引"
-                    )
+            with bounded_as_completed(
+                executor,
+                jars,
+                submit_jar,
+                max_in_flight=max_workers * 2,
+            ) as completed:
+                for future, jar in completed:
+                    raise_if_cancelled()
+                    done += 1
+                    try:
+                        jar_results = future.result()
+                        for key, uri in jar_results.items():
+                            raise_if_cancelled()
+                            index[key] = uri
+                        if progress_cb:
+                            progress_cb(done, total)
+                    except Exception as ex:  # noqa: BLE001
+                        log_warning(f"[IconIndex] JAR 處理失敗 {jar.name}: {ex!r}")
+                    if done % 50 == 0 or done == total:
+                        log_info(
+                            f"[IconIndex] 進度：{done}/{total} JARs，已建立 {len(index)} 個 icon 索引"
+                        )
         finally:
             asset_catalog.close()
 
@@ -285,6 +298,7 @@ def build_and_save_icon_index(mods_dir: Path, progress_cb=None) -> dict[str, str
     """Build and persist an index only if the source JAR set stayed unchanged."""
     manifest = _jar_manifest(mods_dir)
     index = build_icon_index(mods_dir, progress_cb=progress_cb)
+    raise_if_cancelled()
     if _jar_manifest(mods_dir) != manifest:
         raise RuntimeError(
             "Mod JARs changed while the icon index was being built; retry."

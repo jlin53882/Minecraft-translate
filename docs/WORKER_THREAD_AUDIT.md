@@ -39,7 +39,7 @@ rg -n "threading\.Thread|threading\.Timer|Thread\(|run_task\(|run_thread\(|async
 | `app/views/moddb/retranslation_controller.py`（舊 AI 預覽） | mounted App 使用 `launch_page_operation`；worker 快照 path/priority 後建立並關閉獨立唯讀 `TranslationDB`，不共用 UI DB lock；module-level Thread 僅供 standalone fallback | `moddb-retranslate-preview` 是 non-cancellable / drain-only；結果經 UI loop 套用並以 generation/DB identity 丟棄舊結果 |
 | `app/views/pipeline/pipeline_session.py` | AppShell 將 Registry 注入 PipelineRunner；default Thread launcher 僅作 standalone fallback | parent handle 跨完整 sequence；步驟 watcher 由 `PollerHandle` 持有 |
 
-其他 executor：IconPreview 的 `icon_cache`／`icon_index` executor 是 IconPreview Registry operation 的 nested worker；`cache_history_store._MIRROR_EXECUTOR` 是 process-global 衍生 JSON 鏡像 writer，App close 以 `history_flush()` 排空，但目前不在 OperationRegistry membership（剩餘風險見 `docs/OPERATION_LIFECYCLE_CONTRACT.md`）。
+其他 executor：JAR/language/translation/DB/cache/IconPreview worker pools use bounded in-flight submission; cooperative owners propagate cancellation through `ContextVar`, cancel pending futures, and join already-running futures before terminal. IconPreview 的 `icon_cache`／`icon_index` executor 是 Registry operation 的 nested worker。`cache_history_store._MIRROR_EXECUTOR` 是 process-global 衍生 JSON 鏡像 writer；authoritative JSONL 已同步寫入，應用程式以 `history_flush()` 排空鏡像。此鏡像不屬於個別 operation，但已列為 `TESTED_EXCEPTION`：測試會阻塞鏡像並確認 JSONL 歷史仍立即可讀；詳細界線見 `docs/OPERATION_LIFECYCLE_CONTRACT.md`。Bounded submission does not bound the duration of one blocking ZIP/filesystem/PIL/SQLite/provider call.
 
 ## B. 長生命週期輪詢／task 的 owner 與 teardown
 

@@ -35,7 +35,11 @@ from translation_tool.core.jar_processor import (
     find_jar_files,  # noqa: F401 - 轉出給 View（#136）
     preview_extraction_generator,  # noqa: F401 - 轉出給 View（#136）
 )
-from translation_tool.utils.cancellation import is_cancelled
+from translation_tool.utils.cancellation import (
+    TaskCancelled,
+    cancel_scope,
+    is_cancelled,
+)
 from translation_tool.utils.config_manager import load_config
 
 logger = logging.getLogger(__name__)
@@ -236,7 +240,20 @@ def _run_extraction_with_session(
     # error / stats 一律從原始 update 讀取：filter 只負責 UI 日誌節流，
     # 生命週期判斷不依賴它的回傳值。
     failures = _FailureTracker()
-    for update in generator:
+
+    def cancellable_updates():
+        try:
+            with cancel_scope(lambda: session.cancel_requested):
+                yield from generator
+        except TaskCancelled:
+            yield {"cancelled": True}
+
+    for update in cancellable_updates():
+        if update.get("cancelled"):
+            _session_log(session, f"⏹ {mode_label} 提取已取消", level="warning")
+            if finish_session:
+                session.finish()
+            return
         if is_cancelled():
             # 在 JAR 之間停止（一鍵流水線的取消）
             _session_log(session, f"⏹ {mode_label} 提取已取消", level="warning")
@@ -350,8 +367,20 @@ def run_extraction_loop(
         "book": {"success": 0, "warnings": 0, "failures": 0},
     }
 
-    for update in generator:
+    def cancellable_updates():
+        def check() -> bool:
+            return bool(cancelled_flag is not None and cancelled_flag[0])
+
+        with cancel_scope(check):
+            try:
+                yield from generator
+            except TaskCancelled:
+                return
+
+    updates = cancellable_updates()
+    for update in updates:
         if cancelled_flag is not None and cancelled_flag[0]:
+            updates.close()
             return stats
 
         if "stats" in update:

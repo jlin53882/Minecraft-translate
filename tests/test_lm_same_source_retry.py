@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import json
+import threading
 
 import pytest
 import requests
 
 from translation_tool.core import lm_translator_main as main
 from translation_tool.core.lm_batch_budget import get_tracker
-from translation_tool.utils.cancellation import TaskCancelled
+from translation_tool.utils.cancellation import TaskCancelled, cancel_scope
 
 
 def _http_error(status):
@@ -108,6 +109,42 @@ def test_setting_off_keeps_one_request_and_accepts_same_text(
     assert len(calls) == 1
     assert result == [{**item, "text": "Minecraft"}]
     assert "_untranslated" not in result[0]
+
+
+def test_cancel_before_provider_request_does_not_send_api_call(
+    monkeypatch, configure_batch
+):
+    configure_batch(retry=False)
+    calls = []
+    monkeypatch.setattr(
+        main, "call_gemini_requests", lambda **kwargs: calls.append(kwargs)
+    )
+
+    with cancel_scope(lambda: True), pytest.raises(TaskCancelled):
+        main.translate_batch_smart([_item("Pressure Chamber", 0)], 1)
+
+    assert calls == []
+
+
+def test_cancel_during_provider_request_discards_successful_response(
+    monkeypatch, configure_batch
+):
+    configure_batch(retry=False)
+    cancel = threading.Event()
+    calls = []
+
+    def complete_then_cancel(**kwargs):
+        calls.append(kwargs)
+        response = _reply(kwargs, {kwargs["payload"]["items"][0]["value"]: "壓力室"})
+        cancel.set()
+        return response
+
+    monkeypatch.setattr(main, "call_gemini_requests", complete_then_cancel)
+
+    with cancel_scope(cancel.is_set), pytest.raises(TaskCancelled):
+        main.translate_batch_smart([_item("Pressure Chamber", 0)], 1)
+
+    assert len(calls) == 1
 
 
 def test_same_as_source_is_reconfirmed_and_second_translation_is_used(

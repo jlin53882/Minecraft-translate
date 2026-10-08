@@ -113,7 +113,33 @@ class TestCallGeminiRequests:
         mock_post.assert_called_once()
         # 驗證 timeout 參數被傳遞
         call_kwargs = mock_post.call_args.kwargs
-        assert call_kwargs.get("timeout") == 120
+        assert call_kwargs.get("timeout") == (30, 120)
+
+    @patch("translation_tool.core.lm_api_client.requests.post")
+    @patch("translation_tool.core.lm_api_client.load_config")
+    def test_short_timeout_bounds_connect_and_read_separately(
+        self, mock_config, mock_post
+    ):
+        """短 timeout 設定同時套用於連線與讀取階段。"""
+        from translation_tool.core.lm_api_client import call_gemini_requests
+
+        mock_config.return_value = {"lm_translator": {"rate_limit": {"timeout": 5}}}
+        response = Mock()
+        response.ok = True
+        response.json.return_value = {
+            "candidates": [{"content": {"parts": [{"text": '{"result":"ok"}'}]}}]
+        }
+        mock_post.return_value = response
+
+        call_gemini_requests(
+            model_name="gemini-pro",
+            system_prompt="test",
+            payload={"items": [{"id": "0", "value": "value"}]},
+            api_key="test_key",
+            temperature=0.5,
+        )
+
+        assert mock_post.call_args.kwargs["timeout"] == (5, 5)
 
     @patch("translation_tool.core.lm_api_client.requests.post")
     @patch("translation_tool.core.lm_api_client.load_config")

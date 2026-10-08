@@ -78,8 +78,10 @@ runs, and admission remains closed rather than claiming a successful close.
 ## Known long-running operation coverage
 
 Every audited operation has a disposition. “Registered” means production
-launchers reserve before starting the worker. Deferred items are explicitly
-tracked risks, not unclassified operations.
+launchers reserve before starting the worker. “Tested exception” is a narrow,
+source-verified case where a side effect is derived/non-authoritative and a
+deterministic test proves that the authoritative result is already committed.
+Deferred items are explicitly tracked risks, not unclassified operations.
 
 | Operation | Disposition | Owner / policy summary | Remaining risk |
 |---|---|---|---|
@@ -99,11 +101,11 @@ tracked risks, not unclassified operations.
 | Dashboard reload | REGISTERED | `dashboard`; non-cancellable, drain-only. | Boundedness has not been measured; remains DEFERRED_WITH_EXPLICIT_RISK. |
 | ModDB warm stats | REGISTERED | `moddb-warm-stats`; non-cancellable, drain-only. | Deterministic reload/close race test is still needed; SQLite lock serializes close and each query, but multi-query warm sequence may stop early. DEFERRED_WITH_EXPLICIT_RISK. |
 | ModDB scan / translation / old-AI retranslation | REGISTERED | `moddb-scan`, `moddb-translate`, `moddb-retranslate`; retranslation is page-bound, partial-commit, durable user action, cancel-and-drain. | SQLite transaction and provider-call bounds remain PR-B. |
-| ModDB old-AI retranslation preview | REGISTERED | `moddb-retranslate-preview`; non-cancellable, ephemeral, recomputable, drain-only; worker opens its own read-only `TranslationDB` connection and closes it before publishing; result is applied on the UI loop only if its scope generation and database identity still match. | Candidate queries do not share the UI connection/lock or block the Flet event loop, but query duration is not bounded; shutdown waits for it. |
+| ModDB old-AI retranslation preview | REGISTERED | `moddb-retranslate-preview`; non-cancellable, ephemeral, recomputable, drain-only; worker opens its own read-only `TranslationDB` connection and closes it before publishing; result is applied on the UI loop only if its scope generation and database identity still match. SQL VM execution has a 60-second progress-handler deadline; SQLite lock waiting is capped at 5 seconds. | This is not a strict wall-clock bound for filesystem/OS stalls or Python work between SQLite calls. Such work stays owned and drain-only; the UI reports a timeout as failure. |
 | Startup search-index rebuild | REGISTERED | `startup-index`; non-cancellable, recomputable, drain-only; main passes AppShell's registry before launch. | No dedicated real-data duration bound; drain policy intentionally waits. |
 | Cache-root reload | REGISTERED | `cache-root-reload`; non-cancellable, drain-only; AppShell injects the registry launcher. | Service I/O bound remains PR-B. |
 | Resume prompt input check | REGISTERED | `resume-prompt`; non-cancellable, drain-only; stale UI result is discarded by page lifecycle. | Filesystem read bound remains PR-B. |
-| Cache JSON history mirror executor | DEFERRED_WITH_EXPLICIT_RISK | Process-global serial executor is not an individual registry handle; app close now calls `history_flush()` before log flush and refuses close on timeout. | A mirror write may outlive its originating cache action and that action's UI terminal status; executor-level membership and normal-operation completion linkage are not implemented in PR-A. |
+| Cache JSON history mirror executor | TESTED_EXCEPTION (derived mirror only) | `history_append_event()` synchronously appends the authoritative JSONL event and updates the in-memory index before returning; the pretty JSON file is a serial, process-global projection. `history_load_recent()` reads JSONL, never the pretty mirror. `history_flush()` drains the projection at app close. | Pretty-JSON visibility is intentionally eventual and best-effort during normal operation; an external consumer that requires the projection to be current must call `history_flush()`. A deterministic test blocks the mirror and proves the committed JSONL history remains immediately readable. |
 
 Short Flet tasks that only pick files, focus controls, or marshal an already
 computed result are not domain operations and remain finite event-loop tasks.
@@ -130,5 +132,62 @@ paths; the mounted application injects the registry.
 - `docs/WORKER_THREAD_AUDIT.md` and
   `tests/test_worker_thread_inventory.py` enumerate remaining raw Thread call
   sites; production owners use Registry launchers.
-- PR-B remains responsible for cooperative checkpoint coverage and explicit
-  timeout/chunking/maximum-wait policy for non-interruptible blocking calls.
+- PR-B cancellation checkpoints, pending-work limits, and per-call blocking
+  dispositions are recorded below; remaining non-interruptible calls stay
+  owned and must not be reported terminal while still running.
+
+## PR-B: cooperative cancellation and resource boundaries
+
+The current PR-B branch implements the first cancellation/resource-boundary
+slice; this section records what the code does and what it deliberately does
+not promise.
+
+- `cancel_scope()` stores its checker in a `ContextVar`, so the operation's
+  cancellation token follows `ContextThreadPoolExecutor` submissions and
+  `run_in_context()` child threads. `OperationHandle.run()` installs that scope
+  for cooperative and boundary-only operations. `TaskCancelled` remains
+  separate from ordinary errors and maps to the cancelled terminal reason.
+- `bounded_as_completed()` consumes input lazily and caps submitted-but-not-yet-
+  collected work. On cancellation or early exit it stops consuming inputs and
+  cancels pending futures; the owning executor context joins work that already
+  started before the parent operation can return.
+- Bounded windows now cover language merge (folder and ZIP), JAR scan and
+  extraction, extractor preview, translation DB scan, LM/FTB file scans and
+  translation, FTB Quests/KubeJS counting, cache-shard load, IconPreview cache
+  extraction, and icon-index generation. Tests lock the queue window and
+  cancellation behavior with event/barrier synchronization.
+- Cooperative checkpoints exist at archive-member loops, 64 KiB
+  `read_limited()` chunks, per-file/per-entry processing, before output writes,
+  IconPreview discovery/hydration/catalog loops, and row preparation. The
+  IconPreview async owner installs its cancellation scope across
+  `asyncio.to_thread`, so a generation invalidation or owner cancel reaches
+  nested worker checkpoints. The extractor pre-scan waits for and joins its
+  child thread on cancellation; cancelled preview UI no longer reports `100%`
+  / “preview complete”.
+- Completed output units are retained according to their existing partial
+  commit policy. Cancellation is not rollback: an already-published file or
+  completed database transaction can remain, while the owner waits for active
+  workers to stop before terminal state.
+- User cancellation remains `TaskCancelled` and maps to the `cancelled`
+  terminal reason. Archive safety/resource limits (`ZipSizeError` and
+  `ArchiveBudgetError`) remain distinct skip/failure outcomes in operation
+  statistics; they are never translated into user cancellation. Provider and
+  other unexpected exceptions remain failed outcomes.
+
+### Blocking-call dispositions
+
+| Boundary | Current behavior | Cancellation / wait guarantee |
+|---|---|---|
+| ZIP archive open and central-directory parsing (`ZipFile`, `namelist`, `infolist`) | One library call parses archive metadata before per-member checkpoints. | Not interruptible within the call. The enclosing operation remains registered; desktop drain timeout does not terminate the worker. |
+| ZIP member data (`read_limited`) | Reads decompressed bytes in 64 KiB chunks and checks cancellation between reads. | Cooperative between chunks; an individual filesystem/decompressor read has no strict wall-clock limit. |
+| ZIP creation (`zipfile.write` / `writestr`) | Bundler writes to a temporary archive and publishes by replace after successful close/validation. Bundler is explicitly non-cancellable and drain-only. | A single write/compression call is not interruptible. Existing output remains until atomic publication; temporary output is removed on failure/close. |
+| Filesystem read/write/copy and JSON parse | Checkpoints surround files; some paths still use `read_bytes`, `write_text`, `shutil.copy2`, or a single parser call. | No hard per-call latency bound; current worker ownership/drain policy remains the safety boundary. |
+| Gemini provider request | Explicit Requests timeout tuple: connect is capped at 30 seconds (or the lower configured timeout), read uses the existing configured timeout (default 600 seconds); connection failures retry up to three attempts with interruptible backoff. | Cancellation is observed before/after the request and during retry sleep, not while a request call is blocked. Requests connect/read timeouts are not strict end-to-end wall-clock deadlines, so a request can outlive the app's drain deadline and remain tracked. |
+| SQLite | Connections use `PRAGMA busy_timeout = 5000`; translation queries/transactions are serialized by their connection lock. ModDB old-AI preview additionally installs a 60-second SQLite progress-handler deadline across its read-only SQL and checks the same deadline between Python processing stages. | The preview deadline interrupts SQLite VM execution and becomes a failed/timeout result, not user cancellation. It is not a hard bound on OS/filesystem stalls, connection setup, or arbitrary Python/native work. Other in-flight queries/transactions are not forcibly interrupted; registry ownership/drain timeout remains authoritative. |
+| PIL image decode/resize | Runs in a background operation with cancellation checks between prepared rows/items. | A native decode/resize call is not interruptible mid-call and has no hard time bound. |
+| Cache-history JSON mirror | A process-global single-worker executor remains outside individual operation membership; the authoritative event is synchronously committed to JSONL first, and app close waits through `history_flush(timeout=10)`. | The pretty JSON file is a tested, derived, eventually-consistent projection, not an authoritative cache-history write. If close flush times out it can remain stale; JSONL remains readable and is the source of truth. |
+
+The table is a disposition, not a claim that all calls have a fixed maximum
+latency. In particular, cancellation checkpoints and blocking-call latency are
+separate guarantees. Any future change that makes one of these operations
+terminal must preserve the no-writer-after-terminal rule.

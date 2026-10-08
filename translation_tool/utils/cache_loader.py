@@ -12,6 +12,7 @@ from typing import Any
 
 import orjson as json
 
+from translation_tool.utils.bounded_executor import bounded_as_completed
 from translation_tool.utils.cache_shards import list_shards_oldest_first
 from translation_tool.utils.ui_mirror import ContextThreadPoolExecutor
 
@@ -58,8 +59,23 @@ def load_cache_type(
         translation_cache[cache_type] = {}
         return
 
-    with ContextThreadPoolExecutor(max_workers=parallel_workers) as executor:
-        results = list(executor.map(load_shard_file, json_files))
+    results: list[dict[str, Any] | None] = [None] * len(json_files)
+
+    def submit_shard(executor, item: tuple[int, Path]):
+        _index, path = item
+        return executor.submit(load_shard_file, path)
+
+    with (
+        ContextThreadPoolExecutor(max_workers=parallel_workers) as executor,
+        bounded_as_completed(
+            executor,
+            enumerate(json_files),
+            submit_shard,
+            max_in_flight=max(1, parallel_workers * 2),
+        ) as completed,
+    ):
+        for future, (index, _path) in completed:
+            results[index] = future.result()
 
     temp_cache: dict[str, Any] = {}
     loaded_count = 0

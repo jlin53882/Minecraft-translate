@@ -27,6 +27,7 @@ from app.views.icon_preview.icon_cache import (
 from app.views.icon_preview.progress import _show_progress_phase
 from app.views.icon_preview.render_operation import render_current_page
 from app.views.icon_preview_row import LangItemRow, prepare_row_icon
+from translation_tool.utils.cancellation import raise_if_cancelled
 from translation_tool.utils.jar_browser import scan_jars
 from translation_tool.utils.log_unit import log_error, log_info, log_warning
 from translation_tool.utils.safe_json_loader import load_json_auto_encoding
@@ -293,6 +294,7 @@ class IconPreviewDetailMixin:
 
         # 掃描 en_us
         for en_file in self.source_root.rglob("en_us.json"):
+            raise_if_cancelled()
             data = load_json_auto_encoding(en_file)
             if not isinstance(data, dict):
                 continue
@@ -305,6 +307,7 @@ class IconPreviewDetailMixin:
                 modid = "unknown"
 
             for key, en_text in data.items():
+                raise_if_cancelled()
                 entries.append(
                     SimpleNamespace(
                         modid=modid,
@@ -330,8 +333,15 @@ class IconPreviewDetailMixin:
         if not self.source_root:
             return "unknown"
 
-        jar_count = len(list(self.source_root.glob("*.jar")))
-        extracted_count = len(list(self.source_root.rglob("en_us.json")))
+        jar_count = 0
+        for _jar_path in self.source_root.glob("*.jar"):
+            raise_if_cancelled()
+            jar_count += 1
+
+        extracted_count = 0
+        for _lang_path in self.source_root.rglob("en_us.json"):
+            raise_if_cancelled()
+            extracted_count += 1
 
         if jar_count > 0 and extracted_count == 0:
             log_info(f"[IconPreview] 偵測為 JAR 目錄模式（{jar_count} 個 JAR 檔）")
@@ -355,8 +365,7 @@ class IconPreviewDetailMixin:
         """
         if self.source_root is None:
             return []
-        jar_files = list(self.source_root.glob("*.jar"))
-        total_steps = len(jar_files)
+        total_steps = self._count_scan_steps("jar_directory")
 
         entries = self._scan_jar_entries(processed_callback, total_steps)
         self._extract_and_cache_icons(entries)
@@ -368,11 +377,14 @@ class IconPreviewDetailMixin:
         if self.review_root and all_modids:
             # Track 1：直接路徑
             for modid in all_modids:
+                raise_if_cancelled()
                 direct = self.review_root / modid / "lang" / "zh_tw.json"
                 if direct.exists():
                     data = load_json_auto_encoding(direct)
                     if isinstance(data, dict):
-                        zh_map.update(data)
+                        for key, value in data.items():
+                            raise_if_cancelled()
+                            zh_map[key] = value
                         log_info(f"[IconPreview] JAR雙軌-直接: {direct}")
 
             # Track 2：rglob fallback
@@ -381,10 +393,13 @@ class IconPreviewDetailMixin:
                 for modid in all_modids
             }
             for zh_file in self.review_root.rglob("zh_tw.json"):
+                raise_if_cancelled()
                 if str(zh_file) not in found_paths:
                     data = load_json_auto_encoding(zh_file)
                     if isinstance(data, dict):
-                        zh_map.update(data)
+                        for key, value in data.items():
+                            raise_if_cancelled()
+                            zh_map[key] = value
                         log_warning(f"[IconPreview] JAR雙軌-rglob補漏: {zh_file}")
 
             log_info(f"[IconPreview] 已建立 zh_tw 對照表，共 {len(zh_map)} 筆")
@@ -398,6 +413,7 @@ class IconPreviewDetailMixin:
 
         hydrated = []
         for entry in source_entries:
+            raise_if_cancelled()
             zh_tw = zh_map.get(entry.get("key"), "")
             if not isinstance(zh_tw, str):
                 zh_tw = ""
@@ -440,7 +456,9 @@ class IconPreviewDetailMixin:
 
         # 建立 entries
         for jar_path, files in results.items():
+            raise_if_cancelled()
             for name, content in files.items():
+                raise_if_cancelled()
                 if not name.endswith("lang/en_us.json"):
                     continue
                 if content is None:
@@ -463,6 +481,7 @@ class IconPreviewDetailMixin:
 
                 jar_entries_count = 0
                 for key, en_text in data.items():
+                    raise_if_cancelled()
                     entries.append(
                         SimpleNamespace(
                             modid=modid,
@@ -490,17 +509,20 @@ class IconPreviewDetailMixin:
         # 按 source_jar 分組
         jar_to_entries: dict[str, list] = defaultdict(list)
         for e in entries:
+            raise_if_cancelled()
             if getattr(e, "source_jar", None):
                 jar_to_entries[e.source_jar].append(e)
 
         def _on_icon_progress(done: int, total: int):
             _show_progress_phase(self, "提取模組圖示", done, total)
 
+        raise_if_cancelled()
         _batch_extract_jar_icons(
             jar_to_entries, icon_cache_root, self.source_root, _on_icon_progress
         )
 
         # ===== 寫入 L2 磁碟快取 =====
+        raise_if_cancelled()
         _save_entries_cache_l2(self.source_root, entries)
         log_info("[IconPreview] 已寫入 L2 磁碟快取")
 
@@ -512,12 +534,18 @@ class IconPreviewDetailMixin:
     def _prepare_row_icons(entries, icon_context) -> list:
         """替每個項目準備圖示（磁碟／ZIP／圖片 I/O，在背景執行緒）。"""
         assets_root, preview_root = icon_context
-        return [
-            prepare_row_icon(
-                entry.key, assets_root, preview_root, getattr(entry, "icon_path", None)
+        prepared = []
+        for entry in entries:
+            raise_if_cancelled()
+            prepared.append(
+                prepare_row_icon(
+                    entry.key,
+                    assets_root,
+                    preview_root,
+                    getattr(entry, "icon_path", None),
+                )
             )
-            for entry in entries
-        ]
+        return prepared
 
     def _fill_rows(self, page_entries, prepared) -> None:
         """（event loop 上）依準備好的圖示建構列並刷新；``prepared`` 為 None 時同步計算。"""

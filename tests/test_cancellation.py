@@ -9,6 +9,7 @@ import pytest
 
 from translation_tool.core import lm_translator_shared_loop as loop_mod
 from translation_tool.utils import cancellation as c
+from translation_tool.utils.ui_mirror import ContextThreadPoolExecutor
 
 # ---------- cancellation 模組 ----------
 
@@ -23,6 +24,27 @@ def test_nested_scopes_combine_outer_and_inner():
             assert c.is_cancelled() is True
         assert c.is_cancelled() is True
     assert c.is_cancelled() is False
+
+
+def test_cancel_scope_propagates_to_context_thread_pool_worker():
+    cancel = threading.Event()
+    worker_started = threading.Event()
+    release_worker = threading.Event()
+
+    def worker():
+        worker_started.set()
+        assert release_worker.wait(timeout=2)
+        return c.is_cancelled()
+
+    with (
+        c.cancel_scope(cancel.is_set),
+        ContextThreadPoolExecutor(max_workers=1) as executor,
+    ):
+        future = executor.submit(worker)
+        assert worker_started.wait(timeout=2)
+        cancel.set()
+        release_worker.set()
+        assert future.result(timeout=2) is True
 
 
 def test_interruptible_sleep_stops_early_when_cancelled():

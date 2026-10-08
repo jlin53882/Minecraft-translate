@@ -19,9 +19,10 @@ import os
 import re
 import zipfile
 from collections.abc import Callable, Iterable
-from concurrent.futures import as_completed
 from pathlib import Path
 
+from translation_tool.utils.bounded_executor import bounded_as_completed
+from translation_tool.utils.cancellation import raise_if_cancelled
 from translation_tool.utils.config_manager import load_config
 from translation_tool.utils.log_unit import log_error, log_warning
 from translation_tool.utils.ui_mirror import ContextThreadPoolExecutor
@@ -95,6 +96,7 @@ def _scan_single_jar(
     try:
         with zipfile.ZipFile(jar_path, "r") as zf:
             for name in zf.namelist():
+                raise_if_cancelled()
                 for pattern in patterns:
                     if re.search(pattern, name):
                         try:
@@ -198,26 +200,32 @@ def scan_jars(
     for jar_path in jar_files:
         results.budgets[jar_path] = ZipReadBudget(label=jar_path.name)
 
-    with ContextThreadPoolExecutor(max_workers=workers) as executor:
-        future_to_jar = {
-            executor.submit(
-                _scan_single_jar,
-                jar_path,
-                patterns,
-                results.budgets[jar_path],
-                results.failed_jars.add,
-                results.skipped_jars.add,
-            ): jar_path
-            for jar_path in jar_files
-        }
+    def submit_scan(executor, jar_path: Path):
+        return executor.submit(
+            _scan_single_jar,
+            jar_path,
+            patterns,
+            results.budgets[jar_path],
+            results.failed_jars.add,
+            results.skipped_jars.add,
+        )
 
-        for processed, future in enumerate(as_completed(future_to_jar), start=1):
-            jar_path, content = future.result()
-            # 跳過沒有匹配檔案且可能為 bad zip 的 JAR（bad zip 會 log warning 並回傳 {}）
-            # 若 JAR 有内容則一定會有至少一筆記錄（即使是 None 的 binary 檔）
-            if content:  # 空 dict 表示沒有任何匹配，或 bad zip 被跳過
-                results[jar_path] = content
-            if processed_callback:
-                processed_callback(processed, total)
+    with ContextThreadPoolExecutor(max_workers=workers) as executor:
+        processed = 0
+        with bounded_as_completed(
+            executor,
+            jar_files,
+            submit_scan,
+            max_in_flight=max(1, workers * 2),
+        ) as completed:
+            for future, jar_path in completed:
+                jar_path, content = future.result()
+                # 跳過沒有匹配檔案且可能為 bad zip 的 JAR（bad zip 會 log warning 並回傳 {}）
+                # 若 JAR 有内容則一定會有至少一筆記錄（即使是 None 的 binary 檔）
+                if content:  # 空 dict 表示沒有任何匹配，或 bad zip 被跳過
+                    results[jar_path] = content
+                processed += 1
+                if processed_callback:
+                    processed_callback(processed, total)
 
     return results

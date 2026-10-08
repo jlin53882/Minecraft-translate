@@ -11,7 +11,6 @@
 
 from __future__ import annotations
 
-import concurrent.futures
 import io
 import json
 import re
@@ -34,6 +33,7 @@ from translation_tool.translation_db.identity import (
 from translation_tool.translation_db.models import IngestStats, ScanItem
 from translation_tool.translation_db.repository import TranslationDB
 from translation_tool.translation_db.schema import SRC_CUSTOM
+from translation_tool.utils.bounded_executor import bounded_as_completed
 from translation_tool.utils.config_manager import load_config
 from translation_tool.utils.log_unit import log_warning
 from translation_tool.utils.text_processor import (
@@ -493,65 +493,69 @@ def scan_folder_generator(
     }
 
     done = 0
-    with ContextThreadPoolExecutor(max_workers=max(1, workers)) as pool:
-        futures = {
-            pool.submit(scan_jar, j, options, dirs, should_cancel): j for j in jars
-        }
-        try:
-            for fut in concurrent.futures.as_completed(futures):
-                if should_cancel is not None and should_cancel():
-                    report.cancelled = True
-                    break
-                result: JarResult = fut.result()
-                if result.cancelled:
-                    report.cancelled = True
-                    break
-                done += 1
-                level = "info"
-                report.nested_jars += result.nested_jars
-                report.skipped_nested += result.skipped_nested
-                if (
-                    result.error
-                ):  # 失敗的 archive 不寫入任何資料（避免只匯入一部分卻顯示成功）
-                    report.jars_failed.append(result.name)
-                    log = f"❌ {result.name}　未寫入：{result.error}"
-                    level = "error"
-                elif not result.has_lang:
-                    report.jars_without_lang += 1
-                    log = f"{result.name}　沒有語言檔"
+
+    def submit_scan(pool, jar_path):
+        return pool.submit(scan_jar, jar_path, options, dirs, should_cancel)
+
+    with (
+        ContextThreadPoolExecutor(max_workers=max(1, workers)) as pool,
+        bounded_as_completed(
+            pool,
+            jars,
+            submit_scan,
+            max_in_flight=max(1, workers) * 2,
+        ) as completed,
+    ):
+        for fut, _jar_path in completed:
+            if should_cancel is not None and should_cancel():
+                report.cancelled = True
+                break
+            result: JarResult = fut.result()
+            if result.cancelled:
+                report.cancelled = True
+                break
+            done += 1
+            level = "info"
+            report.nested_jars += result.nested_jars
+            report.skipped_nested += result.skipped_nested
+            if (
+                result.error
+            ):  # 失敗的 archive 不寫入任何資料（避免只匯入一部分卻顯示成功）
+                report.jars_failed.append(result.name)
+                log = f"❌ {result.name}　未寫入：{result.error}"
+                level = "error"
+            elif not result.has_lang:
+                report.jars_without_lang += 1
+                log = f"{result.name}　沒有語言檔"
+            else:
+                report.jars_with_lang += 1
+                report.items_found += len(result.items)
+                if options.dry_run or db is None:
+                    log = f"{result.name}　可匯入 {len(result.items)} 項"
                 else:
-                    report.jars_with_lang += 1
-                    report.items_found += len(result.items)
-                    if options.dry_run or db is None:
-                        log = f"{result.name}　可匯入 {len(result.items)} 項"
-                    else:
-                        try:
-                            stats = db.ingest(options.version, result.items, convert)
-                        except sqlite3.Error as exc:
-                            raise RuntimeError(
-                                f"寫入資料庫失敗（{result.name}，版本 {options.version}，"
-                                f"資料庫 {db.path}）：{exc}"
-                            ) from exc
-                        report.stats.add(stats)
-                        log = (
-                            f"{result.name}　新增 {stats.new_entries}"
-                            f"　補入 {stats.added_translations}　略過 {stats.existing}"
-                            + (f"　補上原文 {stats.adopted}" if stats.adopted else "")
-                            + (
-                                f"　原文已變動 {stats.en_changed}"
-                                if stats.en_changed
-                                else ""
-                            )
+                    try:
+                        stats = db.ingest(options.version, result.items, convert)
+                    except sqlite3.Error as exc:
+                        raise RuntimeError(
+                            f"寫入資料庫失敗（{result.name}，版本 {options.version}，"
+                            f"資料庫 {db.path}）：{exc}"
+                        ) from exc
+                    report.stats.add(stats)
+                    log = (
+                        f"{result.name}　新增 {stats.new_entries}"
+                        f"　補入 {stats.added_translations}　略過 {stats.existing}"
+                        + (f"　補上原文 {stats.adopted}" if stats.adopted else "")
+                        + (
+                            f"　原文已變動 {stats.en_changed}"
+                            if stats.en_changed
+                            else ""
                         )
-                if result.skipped_nested and not result.error:
-                    log += f"（略過 {result.skipped_nested} 個損毀或過大的內嵌 jar）"
-                    level = "warning"
-                    log += "".join(f"\n　⚠️ {note}" for note in result.notes)
-                yield {"progress": done / len(jars), "log": log, "level": level}
-        finally:
-            if report.cancelled:
-                for f in futures:
-                    f.cancel()
+                    )
+            if result.skipped_nested and not result.error:
+                log += f"（略過 {result.skipped_nested} 個損毀或過大的內嵌 jar）"
+                level = "warning"
+                log += "".join(f"\n　⚠️ {note}" for note in result.notes)
+            yield {"progress": done / len(jars), "log": log, "level": level}
 
     state = "已取消（已處理的檔案已寫入，其餘未處理）" if report.cancelled else "完成"
     if options.dry_run or db is None:

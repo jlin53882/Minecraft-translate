@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import traceback
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -114,27 +115,42 @@ class TranslateReport:
         }
 
 
-def build_items(rows: list[tuple[int, str, str, str, str]]) -> list[dict[str, Any]]:
-    """資料庫條目轉成機翻引擎的項目；``_entry_id`` 會原樣帶回，用來對應寫回的條目。"""
-    return [
-        {
-            "file": f"{mod_id}/{kind}",
-            "path": key,
-            "text": en_us,
-            "source_text": en_us,
-            "cache_type": "lang" if kind == KIND_LANG else "patchouli",
-            "_entry_id": eid,
-            "_kind": kind,
-            "_mod_id": mod_id,
-        }
-        for eid, kind, mod_id, key, en_us in rows
-    ]
+def build_items(
+    rows: list[tuple[int, str, str, str, str]],
+    *,
+    check: Callable[[], None] | None = None,
+) -> list[dict[str, Any]]:
+    """資料庫條目轉成引擎項目；``check`` 可在每列轉換前執行 deadline/cancel 檢查。"""
+    items = []
+    for eid, kind, mod_id, key, en_us in rows:
+        if check is not None:
+            check()
+        items.append(
+            {
+                "file": f"{mod_id}/{kind}",
+                "path": key,
+                "text": en_us,
+                "source_text": en_us,
+                "cache_type": "lang" if kind == KIND_LANG else "patchouli",
+                "_entry_id": eid,
+                "_kind": kind,
+                "_mod_id": mod_id,
+            }
+        )
+    return items
 
 
-def plan_batches(items: list[dict[str, Any]]) -> int:
-    """依設定的每批筆數估計總批數（各類型分開算；實際遇到錯誤縮小批次時會更多）。"""
+def plan_batches(
+    items: list[dict[str, Any]], *, check: Callable[[], None] | None = None
+) -> int:
+    """依設定的每批筆數估計總批數（各類型分開算；遇錯縮小批次時實際會更多）。
+
+    ``check`` 若提供，會在處理每列前呼叫，供 deadline/cancel 檢查使用。
+    """
     counts: dict[str, int] = {}
     for item in items:
+        if check is not None:
+            check()
         kind = str(item.get("cache_type") or "lang")
         counts[kind] = counts.get(kind, 0) + 1
     return estimate_batches(counts, lambda kind: _get_default_batch_size(kind, None))

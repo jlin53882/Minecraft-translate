@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sqlite3
 import threading
 
 import pytest
@@ -960,7 +961,7 @@ def test_preview_uses_isolated_readonly_db_during_ui_queries_and_discards_stale_
     ui_query_result = {}
     original_preview = moddb_retranslate_service.preview_same_source_ai_retranslation
 
-    def blocking_preview(active_db, options):
+    def blocking_preview(active_db, options, **kwargs):
         assert active_db is not db
         assert active_db.path == db.path
         assert active_db.priority == db.priority
@@ -968,7 +969,7 @@ def test_preview_uses_isolated_readonly_db_during_ui_queries_and_discards_stale_
         with active_db._lock:
             entered.set()
             assert release.wait(3)
-            return original_preview(active_db, options)
+            return original_preview(active_db, options, **kwargs)
 
     monkeypatch.setattr(
         moddb_retranslate_service,
@@ -1027,6 +1028,54 @@ def test_preview_uses_isolated_readonly_db_during_ui_queries_and_discards_stale_
     assert panel._repair_preview_running is False
     assert "舊預覽結果已丟棄" in panel.repair_preview_text.value
     db.close()
+
+
+def test_readonly_retranslation_preview_has_sql_execution_deadline(
+    db_path, monkeypatch
+):
+    db = TranslationDB(db_path)
+    _ai_entry(db)
+    priority = db.priority
+    db.close()
+
+    ticks = iter((0.0, 0.0, 100.0, 100.0))
+    monkeypatch.setattr(
+        moddb_retranslate_service, "monotonic", lambda: next(ticks, 100.0)
+    )
+    monkeypatch.setattr(moddb_retranslate_service, "PREVIEW_SQL_TIMEOUT_SEC", 60.0)
+    monkeypatch.setattr(moddb_retranslate_service, "PREVIEW_SQL_PROGRESS_OPCODES", 1)
+
+    with pytest.raises(TimeoutError, match="時間預算") as caught:
+        moddb_retranslate_service.preview_same_source_ai_retranslation_from_path(
+            db_path, priority, _options()
+        )
+
+    assert isinstance(caught.value.__cause__, sqlite3.OperationalError)
+    assert "interrupt" in str(caught.value.__cause__).casefold()
+
+
+def test_retranslation_preview_python_transforms_check_deadline(monkeypatch):
+    from types import SimpleNamespace
+
+    ticks = iter((0.0, 0.0, 61.0))
+    monkeypatch.setattr(
+        moddb_retranslate_service, "monotonic", lambda: next(ticks, 61.0)
+    )
+    entries = [
+        SimpleNamespace(
+            entry_id=index,
+            kind=KIND_LANG,
+            mod_id="mod",
+            key=f"key.{index}",
+            en_us="same",
+            current_ai_translation="same",
+            mc_version="1.21.1",
+        )
+        for index in (1, 2)
+    ]
+
+    with pytest.raises(TimeoutError, match="時間預算"):
+        moddb_retranslate_service._build_retranslation_items(entries, deadline=60.0)
 
 
 def test_retranslation_worker_is_page_owned_cancellable_and_drained(

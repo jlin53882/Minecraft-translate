@@ -17,7 +17,6 @@
 from __future__ import annotations
 
 import math
-from concurrent.futures import as_completed
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -48,6 +47,8 @@ from translation_tool.plugins.shared.lang_path_rules import (
 )
 from translation_tool.plugins.shared.lang_text_rules import is_already_zh
 from translation_tool.plugins.shared.rich_text_shield import shield_text, unshield_text
+from translation_tool.utils.bounded_executor import bounded_as_completed
+from translation_tool.utils.cancellation import raise_if_cancelled
 from translation_tool.utils.config_manager import load_config
 from translation_tool.utils.log_unit import (
     log_error,
@@ -292,7 +293,9 @@ def translate_ftb_pending_to_zh_tw(
     def _count_one(src: Path) -> Tuple[Path, int, Dict[str, Any]]:
         """讀取 JSON 並統計可翻譯鍵值數量，同時快取 mapping。"""
         try:
+            raise_if_cancelled()
             mapping = read_json_dict(src)
+            raise_if_cancelled()
             c = count_translatable_keys(mapping)
             return src, int(c), mapping
         except Exception as exc:  # noqa: BLE001 - 失敗已記錄，不中斷翻譯批次
@@ -305,10 +308,20 @@ def translate_ftb_pending_to_zh_tw(
         load_config().get("translator", {}).get("parallel_execution_workers", 4)
     )
 
-    with ContextThreadPoolExecutor(max_workers=max_workers) as ex:
-        futs = [ex.submit(_count_one, src) for src in json_files]
-        for fu in as_completed(futs):
-            src, c, mapping = fu.result()
+    def submit_count(executor, src: Path):
+        return executor.submit(_count_one, src)
+
+    with (
+        ContextThreadPoolExecutor(max_workers=max_workers) as ex,
+        bounded_as_completed(
+            ex,
+            json_files,
+            submit_count,
+            max_in_flight=max_workers * 2,
+        ) as completed,
+    ):
+        for future, _src in completed:
+            src, c, mapping = future.result()
             per_file_counts.append((src, c))
             global_total_keys += c
             if mapping:  # ✅ 只緩存非空的 mapping

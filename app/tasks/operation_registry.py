@@ -160,12 +160,29 @@ class OperationHandle:
 
     def run(self, target: Callable[[], Any]) -> None:
         """Run an admitted operation, recording actual completion exactly once."""
+        from translation_tool.utils.cancellation import TaskCancelled, cancel_scope
+
         token: Token = _current_operation.set(self)
         self._registry._mark_started(self)
         error = None
+        cancelled_by_exception = False
         try:
             if self._run_if_cancelled or not self.cancel_requested:
-                target()
+                if self.descriptor.cancellation == CancellationPolicy.NON_CANCELLABLE:
+                    target()
+                else:
+                    # Install the owner token at the worker boundary. ContextThreadPoolExecutor
+                    # and run_in_context propagate this ContextVar into nested workers.
+                    with cancel_scope(lambda: self.cancel_requested):
+                        target()
+        except TaskCancelled as ex:
+            if self.descriptor.cancellation == CancellationPolicy.NON_CANCELLABLE:
+                error = ex
+                _logger.exception(
+                    "不可取消操作意外收到取消訊號：%s", self.descriptor.name
+                )
+            else:
+                cancelled_by_exception = True
         except BaseException as ex:  # worker boundary: registry must always terminate
             error = ex
             _logger.exception("背景操作失敗：%s", self.descriptor.name)
@@ -199,7 +216,11 @@ class OperationHandle:
                     self._registry._finish(
                         self,
                         error=error,
-                        reason="cancelled" if self.cancel_requested else "completed",
+                        reason=(
+                            "cancelled"
+                            if cancelled_by_exception or self.cancel_requested
+                            else "completed"
+                        ),
                     )
                 finally:
                     _current_operation.reset(token)

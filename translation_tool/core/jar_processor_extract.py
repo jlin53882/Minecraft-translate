@@ -10,7 +10,6 @@
 
 from __future__ import annotations
 
-import concurrent.futures
 import hashlib
 import logging
 import os
@@ -20,6 +19,12 @@ from collections.abc import Callable, Generator
 from pathlib import Path
 from typing import Any
 
+from translation_tool.utils.bounded_executor import bounded_as_completed
+from translation_tool.utils.cancellation import (
+    TaskCancelled,
+    is_cancelled,
+    raise_if_cancelled,
+)
 from translation_tool.utils.ui_mirror import ContextThreadPoolExecutor, run_in_context
 
 from ..utils.config_manager import load_config
@@ -120,6 +125,7 @@ def extract_from_jar_impl(
         else:
             with zipfile.ZipFile(jar_path, "r") as zf:
                 for name in zf.namelist():
+                    raise_if_cancelled()
                     if target_regex.search(name):
                         try:
                             jar_results[name] = read_limited(
@@ -134,6 +140,7 @@ def extract_from_jar_impl(
 
         with zipfile.ZipFile(jar_path, "r") as zf:
             for member in zf.infolist():
+                raise_if_cancelled()
                 if member.is_dir():
                     continue
                 normalized_path = member.filename.replace("\\", "/")
@@ -174,6 +181,7 @@ def extract_from_jar_impl(
                         continue
 
                 source_hash = get_file_hash_fn(source_data)
+                raise_if_cancelled()
 
                 if os.path.exists(final_output_path):
                     with open(final_output_path, "rb") as existing_file:
@@ -262,6 +270,7 @@ def run_extraction_process_impl(
 
     scan_done = threading.Event()
     scan_error = [None]  # 利用 list 可變特性跨執行緒傳遞
+    scan_cancelled = [False]
     scan_results_local = [{}]  # [0] = dict | None
     scan_progress = [0]
 
@@ -276,6 +285,8 @@ def run_extraction_process_impl(
                     0, processed
                 ),
             )
+        except TaskCancelled:
+            scan_cancelled[0] = True
         except Exception as e:  # noqa: BLE001
             scan_error[0] = e
         finally:
@@ -294,6 +305,10 @@ def run_extraction_process_impl(
     last_yielded_at = 0.0
     YIELD_INTERVAL = 5.0  # 節流：每 5 秒才 yield 一次，避免日誌洗版
     while not scan_done.is_set():
+        if is_cancelled():
+            # 子執行緒有 bounded checkpoints；等它實際收斂後再讓 operation terminal。
+            scan_done.wait(timeout=0.1)
+            continue
         elapsed = time.time() - scan_start
         # 節流 yield：避免 100+ JAR × 30s 掃描產生 ~60 條重複訊息淹沒日誌
         if elapsed - last_yielded_at >= YIELD_INTERVAL:
@@ -313,7 +328,7 @@ def run_extraction_process_impl(
         scan_done.wait(timeout=0.5)
     # 最後一次 yield 確保 UI 收到完成訊號
     elapsed = time.time() - scan_start
-    if not scan_error[0] and elapsed - last_yielded_at >= 0:
+    if not scan_error[0] and not scan_cancelled[0] and elapsed - last_yielded_at >= 0:
         last_yielded_at = elapsed
         yield {
             "progress": scan_progress_end,
@@ -324,6 +339,9 @@ def run_extraction_process_impl(
 
     scan_thread.join()
     elapsed_total = time.time() - scan_start
+
+    if scan_cancelled[0] or is_cancelled():
+        raise TaskCancelled()
 
     if scan_error[0]:
         log_error("[scan_jars] background scan failed: %s", scan_error[0])
@@ -402,18 +420,28 @@ def run_extraction_process_impl(
 
     _ex_start = time_module.time()
 
-    with ContextThreadPoolExecutor(max_workers=max_workers) as executor:
-        future_to_jar = {}
-        for jar in eligible_jars:
-            _t_jar_submit = time_module.time()
-            future_to_jar[
-                executor.submit(
-                    extract_from_jar_fn, jar, output_dir, target_regex, all_scan_results
-                )
-            ] = (jar, _t_jar_submit)
+    submit_times = {}
 
-        for future in concurrent.futures.as_completed(future_to_jar):
-            jar_path, submit_time = future_to_jar[future]
+    def submit_extraction(executor, jar_path):
+        raise_if_cancelled()
+        submit_time = time_module.time()
+        future = executor.submit(
+            extract_from_jar_fn, jar_path, output_dir, target_regex, all_scan_results
+        )
+        submit_times[future] = submit_time
+        return future
+
+    with (
+        ContextThreadPoolExecutor(max_workers=max_workers) as executor,
+        bounded_as_completed(
+            executor,
+            eligible_jars,
+            submit_extraction,
+            max_in_flight=max_workers * 2,
+        ) as completed,
+    ):
+        for future, jar_path in completed:
+            submit_time = submit_times.pop(future)
             _t_done = time_module.time()
             wall_time = _t_done - submit_time
             queue_time = submit_time - _ex_start

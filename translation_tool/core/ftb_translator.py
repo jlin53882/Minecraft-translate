@@ -4,7 +4,6 @@
 維護注意：主要 helper 已拆到 ftb_translator_export / clean / template 子模組；新邏輯優先落子模組。
 """
 
-import concurrent.futures
 import math
 import os
 import shutil
@@ -30,6 +29,7 @@ from translation_tool.core.ftb_translator_template import (
     prepare_ftbquests_lang_template_only_impl,
 )
 from translation_tool.core.lm_translator_shared import _get_default_batch_size
+from translation_tool.utils.bounded_executor import bounded_as_completed
 from translation_tool.utils.cancellation import raise_if_cancelled
 from translation_tool.utils.log_unit import (
     get_formatted_duration,
@@ -70,6 +70,7 @@ def _translate_single_file(
     Returns:
         str: 翻譯操作的日誌訊息。
     """
+    raise_if_cancelled()
     relative_path = os.path.relpath(file_path, input_dir)
     output_path = os.path.join(output_dir, relative_path).replace("zh_cn", "zh_tw")
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
@@ -82,6 +83,7 @@ def _translate_single_file(
             with open(file_path, "rb") as f:
                 data = orjson.loads(f.read())
             translated_data = recursive_translate(data, rules, custom_translations)
+            raise_if_cancelled()
             with open(output_path, "wb") as f:
                 orjson_dump_file(translated_data, f)
 
@@ -89,6 +91,7 @@ def _translate_single_file(
             with open(file_path, "r", encoding="utf-8") as f:
                 content = f.read()
             translated_content = convert_text(content, rules)
+            raise_if_cancelled()
             with open(output_path, "w", encoding="utf-8") as f:
                 f.write(translated_content)
 
@@ -126,7 +129,9 @@ def translate_directory_generator(
     files_to_translate = []
     all_files_to_copy = []
     for root, _, files in os.walk(input_dir):
+        raise_if_cancelled()
         for file in files:
+            raise_if_cancelled()
             full_path = os.path.join(root, file)
             all_files_to_copy.append(full_path)
             if file.endswith((".json", ".snbt", ".snbt.qkdownloading", ".js", ".md")):
@@ -155,20 +160,27 @@ def translate_directory_generator(
         else:
             max_workers = max_allowed_workers
 
-        with ContextThreadPoolExecutor(max_workers=max_workers) as executor:
-            future_to_file = {
-                executor.submit(
-                    _translate_single_file,
-                    fp,
-                    input_dir,
-                    output_dir,
-                    rules,
-                    custom_translations,
-                ): fp
-                for fp in files_to_translate
-            }
+        def submit_file(executor, file_path):
+            return executor.submit(
+                _translate_single_file,
+                file_path,
+                input_dir,
+                output_dir,
+                rules,
+                custom_translations,
+            )
 
-            for future in concurrent.futures.as_completed(future_to_file):
+        with (
+            ContextThreadPoolExecutor(max_workers=max_workers) as executor,
+            bounded_as_completed(
+                executor,
+                files_to_translate,
+                submit_file,
+                max_in_flight=max_workers * 2,
+            ) as completed,
+        ):
+            for future, _file_path in completed:
+                raise_if_cancelled()
                 processed_count += 1
                 progress = processed_count / total_files
                 log_msg = future.result()
@@ -180,6 +192,7 @@ def translate_directory_generator(
 
     copied_count = 0
     for src_path in all_files_to_copy:
+        raise_if_cancelled()
         if src_path not in files_to_translate:
             try:
                 rel_path = os.path.relpath(src_path, input_dir)
