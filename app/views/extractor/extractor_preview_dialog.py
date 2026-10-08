@@ -304,6 +304,7 @@ def _preview_result_controls(ctx, result: dict) -> list:
 def _preview_start_extraction(ctx, e):
     """確認執行 — 沿用合併後的單一 dialog,只 pop 一次。"""
     log_info("[PREVIEW] start_extraction CALLED (確認執行 clicked)")
+    output_path = _preview_resolve_output_path(ctx)
     ctx.page.pop_dialog()  # 只有 preview_dialog 一個 dialog,pop 一次就乾淨
     log_info(
         "[PREVIEW] start_extraction: preview_dialog closed via pop_dialog (single)"
@@ -316,7 +317,7 @@ def _preview_start_extraction(ctx, e):
         ctx.page,
         ctx.file_picker,
         input_path=ctx.input_path,
-        output_path=ctx.output_path,
+        output_path=output_path,
         mode=ctx.mode,
         auto_start=True,
         skip_zh_cn=ctx.skip_zh_cn,  # 預覽時的「跳過 zh_cn」要帶到實際提取
@@ -497,10 +498,11 @@ def _preview_start_scan(ctx):
         return
     # 預覽只掃描不寫檔；顯示「確認執行」後實際的提取輸出位置
     # （原本把預覽資料夾當成提取輸出，導致結果多一層或寫進預覽資料夾）
-    if not ctx.output_path:
+    output_path = _preview_resolve_output_path(ctx)
+    if output_path:
         ctx.info_text.value = (
             f"來源：{ctx.input_path}\n"
-            f"輸出（確認執行後）：{prepare_extraction_paths(ctx.input_path, ctx.mode, ctx.output_path)}\n"
+            f"輸出（確認執行後）：{output_path}\n"
             f"模式：{ctx.mode}"
         )
         ctx.page.update()
@@ -539,6 +541,19 @@ def _preview_start_scan(ctx):
         await _preview_ui_poller(ctx)
 
     ctx.page.run_task(poller)
+
+
+def _preview_resolve_output_path(ctx) -> str:
+    """解析並保存預覽確認時要使用的輸出路徑。
+
+    預覽畫面與後續提取共用同一個解析結果，避免只顯示預設路徑、確認時卻重新
+    解析成不同位置。
+    """
+    if not ctx.output_path:
+        ctx.output_path = prepare_extraction_paths(
+            ctx.input_path, ctx.mode, ctx.output_path
+        )
+    return ctx.output_path
 
 
 def _preview_on_preview_dismiss(ctx, e):

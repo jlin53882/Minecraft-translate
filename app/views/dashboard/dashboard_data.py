@@ -114,29 +114,17 @@ def build_cache_bars(overview: dict | None) -> list[CacheBar]:
 def build_step_statuses(
     active: Sequence[TaskInfo], recent: Sequence[TaskInfo]
 ) -> list[StepStatus]:
-    """依本次執行的任務紀錄，決定五個流程步驟的狀態。
+    """依目前執行中的任務決定五個流程步驟的狀態。
 
-    進行中 > 最近一次結果（完成 / 失敗）> 待執行。「一鍵流水線」與「任務翻譯」不屬於單一步驟，
-    不影響這裡。
+    單步驟任務結束後就回到待執行；完成與失敗紀錄仍顯示在任務活動區。「一鍵流水線」
+    與「任務翻譯」不屬於單一步驟，不影響這裡。
     """
     steps = []
     for key, title, desc in PIPELINE_STEPS:
         running = next((t for t in active if t.view_key == key), None)
-        last = next((t for t in recent if t.view_key == key), None)
         if running is not None:
             steps.append(
                 StepStatus(key, title, desc, STEP_RUNNING, f"{running.percent}%")
-            )
-        elif last is not None:
-            failed = last.status == STATUS_ERROR
-            steps.append(
-                StepStatus(
-                    key,
-                    title,
-                    desc,
-                    STEP_FAILED if failed else STEP_DONE,
-                    "上次失敗" if failed else "本次完成",
-                )
             )
         else:
             steps.append(StepStatus(key, title, desc, STEP_PENDING))

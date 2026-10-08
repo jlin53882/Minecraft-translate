@@ -2,6 +2,7 @@ import pytest
 
 from app.tasks import LogEntry
 from app.views import lm_view
+from app.views.moddb import version_picker
 from tests.conftest import mock_filepicker, mock_page
 
 
@@ -110,18 +111,37 @@ def test_db_options_follow_the_page_controls(monkeypatch):
     view = lm_view.LMView(mock_page(), mock_filepicker())
     view.input_path.value = "C:/Assets"
     view.use_db_switch.value = False
-    view.db_version_field.value = " 1.20.1 "
+    view.db_version_field.text = " 26.2 "
+    view.db_version_field.value = None
     view.start_clicked(None)
     assert calls["db"] == {
         "use_translation_db": False,
-        "translation_db_version": "1.20.1",
+        "translation_db_version": "26.2",
     }
 
     view._ui_timer_running = False
-    view.db_version_field.value = ""
+    view.db_version_field.text = ""
+    view.db_version_field.value = None
     view.use_db_switch.value = True
     view.start_clicked(None)
     assert calls["db"] == {"use_translation_db": True, "translation_db_version": None}
+
+
+def test_target_version_dropdown_suggests_creating_database_on_focus(monkeypatch):
+    shown = []
+    monkeypatch.setattr(lm_view, "TaskSession", _Session)
+    monkeypatch.setattr(lm_view, "summarize_database", lambda: None)
+    monkeypatch.setattr(version_picker, "target_version_choices", lambda: ["1.21.1"])
+    monkeypatch.setattr(
+        lm_view, "show_snack", lambda page, message, *a: shown.append(message)
+    )
+
+    view = lm_view.LMView(mock_page(), mock_filepicker())
+    view.db_version_field.on_focus(
+        type("Event", (), {"control": view.db_version_field})()
+    )
+
+    assert shown and "先到「Mod 資料庫」頁" in shown[0]
 
 
 def test_start_clicked_leaves_session_start_and_finish_to_the_service(monkeypatch):

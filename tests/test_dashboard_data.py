@@ -6,8 +6,6 @@ import datetime as dt
 
 from app.shell.task_manager import STATUS_DONE, STATUS_ERROR, STATUS_RUNNING, TaskInfo
 from app.views.dashboard.dashboard_data import (
-    STEP_DONE,
-    STEP_FAILED,
     STEP_PENDING,
     STEP_RUNNING,
     build_cache_bars,
@@ -75,14 +73,14 @@ def test_steps_default_to_pending():
     assert [s.key for s in steps] == ["extractor", "merge", "lm", "qc", "bundler"]
 
 
-def test_steps_follow_task_history():
+def test_steps_reset_after_finished_tasks_and_follow_active_tasks():
     running = _task("lm", STATUS_RUNNING, 0.42)
     done = _task("extractor")
     failed = _task("qc", STATUS_ERROR, 0.3)
     steps = {s.key: s for s in build_step_statuses([running], [done, failed])}
     assert steps["lm"].status == STEP_RUNNING and steps["lm"].detail == "42%"
-    assert steps["extractor"].status == STEP_DONE
-    assert steps["qc"].status == STEP_FAILED
+    assert steps["extractor"].status == STEP_PENDING
+    assert steps["qc"].status == STEP_PENDING
     assert steps["merge"].status == STEP_PENDING
 
 
