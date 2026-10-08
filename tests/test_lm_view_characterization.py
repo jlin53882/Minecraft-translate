@@ -152,6 +152,33 @@ def test_db_options_follow_the_page_controls(monkeypatch):
     )
 
 
+def test_lm_snapshot_preserves_switch_value_before_change_callback(
+    monkeypatch, tmp_path
+):
+    """提交邊界需保留已更新的開關值，即使 on_change 尚未送達。"""
+    settings = DbSettings(
+        enabled=False,
+        path=str(tmp_path / "mod_translation.db"),
+        version="1.21.1",
+    )
+    monkeypatch.setattr(
+        lm_db_options, "database_version_choices", lambda current: [current.version]
+    )
+    monkeypatch.setattr(
+        lm_db_options,
+        "summarize_database",
+        lambda current: {"entries": 1, "progress": 0, "versions": [current.version]},
+    )
+    options = lm_db_options.LmDbOptions(mock_page().update, settings=settings)
+
+    # Flet may have applied the control value before dispatching its change event.
+    options.use_db_switch.value = True
+    snapshot = options.snapshot_for_run(settings)
+
+    assert snapshot.use_db is True
+    assert snapshot.database_settings.enabled is True
+
+
 def test_lm_run_snapshot_refreshes_untouched_global_identity(monkeypatch, tmp_path):
     settings_a = DbSettings(path=str(tmp_path / "a.db"), version="1.20.1")
     settings_b = DbSettings(path=str(tmp_path / "b.db"), version="1.21.1")

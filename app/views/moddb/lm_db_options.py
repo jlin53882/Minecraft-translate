@@ -154,14 +154,18 @@ class LmDbOptions:
     ) -> LmDbRunSnapshot:
         """Resolve against one global-settings snapshot and freeze path/priority too."""
         settings = global_settings or moddb_service.load_db_settings()
+        # A control's value may already have changed before its on_change callback
+        # is delivered (for example, when the user immediately submits the form).
+        # Preserve that explicit value before sync_from_global refreshes untouched
+        # controls from the latest settings snapshot.
+        if bool(self.use_db_switch.value) != bool(self._settings.enabled):
+            self._enabled_touched = True
+        if not bool(self.inherit_version_switch.value):
+            self._version_touched = True
         # Refresh untouched controls and their visible effective-value summary
         # from the same settings object that will be frozen into the operation.
         self.sync_from_global(settings)
-        enabled = (
-            bool(self.use_db_switch.value)
-            if self._enabled_touched
-            else settings.enabled
-        )
+        enabled = bool(self.use_db_switch.value)
         inherited = bool(self.inherit_version_switch.value)
         target = (
             str(settings.version or "").strip()
