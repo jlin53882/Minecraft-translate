@@ -1,4 +1,5 @@
 import flet as ft
+import pytest
 
 from app.ui.snack import show_snack
 from app.views import merge_view
@@ -46,6 +47,36 @@ def test_start_merge_without_inputs_shows_snack(monkeypatch):
 
     assert page.overlay
     assert "請先選擇來源資料夾" in page.overlay[-1].content.value
+
+
+@pytest.mark.parametrize("input_mode", ["folder", "zip"])
+def test_run_merge_service_without_snapshot_disables_database_fill(
+    monkeypatch, tmp_path, input_mode
+):
+    monkeypatch.setattr(merge_view, "TaskSession", _Session)
+    monkeypatch.setattr(merge_widgets, "TaskSession", _Session)
+    monkeypatch.setattr(merge_view, "load_config", lambda: {"lang_merger": {}})
+    monkeypatch.setattr(merge_widgets, "load_config", lambda: {"lang_merger": {}})
+    view = merge_view.MergeView(mock_page(), mock_filepicker())
+    view.session = _Session()
+    view.folder_path_field.value = str(tmp_path / "input")
+    view.output_dir_field.value = str(tmp_path / "output")
+    captured = {}
+
+    def capture(**kwargs):
+        captured.update(kwargs)
+        return iter(())
+
+    if input_mode == "folder":
+        monkeypatch.setattr(merge_view, "run_merge_folder_batch_service", capture)
+        view._run_merge_service("folder")
+    else:
+        monkeypatch.setattr(merge_view, "run_merge_zip_batch_service", capture)
+        view._run_merge_service("zip", [str(tmp_path / "input.zip")])
+
+    assert captured["use_translation_db"] is False
+    assert captured["translation_db_version"] == ""
+    assert captured["translation_db_settings_snapshot"] is None
 
 
 def test_remove_zip_updates_selected_list(monkeypatch):

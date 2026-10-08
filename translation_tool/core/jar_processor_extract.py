@@ -245,6 +245,16 @@ def run_extraction_process_impl(
     """
     from translation_tool.utils.jar_browser import scan_jars
 
+    if (
+        mods_dir
+        and output_dir
+        and Path(mods_dir).resolve() == Path(output_dir).resolve()
+    ):
+        raise ValueError(
+            "source and output directories must differ to prevent overwriting input files; "
+            "choose a separate extraction output folder."
+        )
+
     os.makedirs(output_dir, exist_ok=True)
     jar_files = find_jar_files_fn(mods_dir)
     total_jars = len(jar_files)

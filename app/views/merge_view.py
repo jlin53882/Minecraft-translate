@@ -305,6 +305,11 @@ class MergeView(MergeWidgetsMixin, ft.Column):
         else:
             use_translation_db = db_options_snapshot.use_db
             translation_db_version = db_options_snapshot.version
+        settings_snapshot = (
+            db_options_snapshot.database_settings
+            if db_options_snapshot is not None
+            else None
+        )
         if input_mode == "folder":
             for _ in run_merge_folder_batch_service(
                 input_dir=self.folder_path_field.value,
@@ -323,7 +328,7 @@ class MergeView(MergeWidgetsMixin, ft.Column):
                 or 2,
                 use_translation_db=use_translation_db,
                 translation_db_version=translation_db_version,
-                translation_db_settings_snapshot=db_options_snapshot.database_settings,
+                translation_db_settings_snapshot=settings_snapshot,
             ):
                 pass
         else:
@@ -346,7 +351,7 @@ class MergeView(MergeWidgetsMixin, ft.Column):
                 or 2,
                 use_translation_db=use_translation_db,
                 translation_db_version=translation_db_version,
-                translation_db_settings_snapshot=db_options_snapshot.database_settings,
+                translation_db_settings_snapshot=settings_snapshot,
             ):
                 pass
 

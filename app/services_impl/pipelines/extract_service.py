@@ -86,7 +86,11 @@ def _prepare_output_path(
     preview: bool,
     output_path: str = "",
 ) -> str:
-    """解析輸出路徑；空白路徑一律在來源資料夾同層建立命名目錄。"""
+    """解析輸出路徑；空白路徑使用來源同層命名目錄。
+
+    若來源目錄名稱已含目前模式的提取後綴，為相容既有選擇會沿用該目錄；
+    實際提取邊界會拒絕 input/output 完全相同，避免覆寫來源檔案。
+    """
     suffix_key = {
         (False, "lang"): "lang_extract",
         (False, "book"): "book_extract",
