@@ -20,7 +20,11 @@ def target_version_choices() -> list[str]:
         return version_choices(db)
     except Exception:
         logger.warning("讀取 Mod 資料庫版本建議失敗", exc_info=True)
-        return version_choices()
+        try:
+            return version_choices()
+        except Exception:
+            logger.warning("讀取資源包版本建議失敗", exc_info=True)
+            return []
     finally:
         if db is not None:
             db.close()
@@ -35,12 +39,28 @@ def target_version_dropdown(
     on_focus=None,
 ) -> ft.Dropdown:
     """Build a searchable dropdown that also accepts arbitrary version text."""
+    manual_option: str | None = None
 
     def on_text_change(event) -> None:
-        # Editable Dropdown keeps `value` (the selected key) separate from `text`.
-        # Clear a stale selected key as soon as the user types a different version.
-        if event.control.value and event.control.text != event.control.value:
-            event.control.value = None
+        # Flet clears editable text in the browser when a selected key is set to
+        # None during the same text event. Keep the typed value as a valid option
+        # while replacing the previous ad-hoc option, so it survives blur/refocus.
+        nonlocal manual_option
+        text = event.control.text or ""
+        if text != event.control.value:
+            options = [
+                (option.key, option.text)
+                for option in event.control.options
+                if option.key != manual_option
+            ]
+            known = {key for key, _label in options}
+            if text and text not in known:
+                options.append((text, text))
+                manual_option = text
+            else:
+                manual_option = None
+            kit.set_dropdown_options(event.control, options)
+            event.control.value = text or None
         if on_change is not None:
             on_change(event)
 
@@ -62,9 +82,10 @@ def target_version_dropdown(
 def refresh_target_version_options(control: ft.Dropdown) -> None:
     """Refresh suggestions while retaining the current manual or selected value."""
     current = target_version_value(control)
-    kit.set_dropdown_options(
-        control, [(version, version) for version in target_version_choices()]
-    )
+    choices = target_version_choices()
+    if current and current not in choices:
+        choices.append(current)
+    kit.set_dropdown_options(control, [(version, version) for version in choices])
     set_target_version(control, current)
 
 
