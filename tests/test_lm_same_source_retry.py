@@ -281,6 +281,51 @@ def test_retry_structured_response_failure_does_not_shrink_or_fail_batch(
     assert result == [{**item, "text": "Minecraft"}]
 
 
+@pytest.mark.parametrize(
+    "blank_value", ["", " ", "\n"], ids=["empty", "space", "newline"]
+)
+def test_blank_retry_value_keeps_first_valid_result(
+    monkeypatch, configure_batch, blank_value
+):
+    configure_batch()
+    item = _item("Minecraft", 0)
+    result, status, calls = _run_with_api(
+        monkeypatch,
+        [item],
+        [
+            lambda call: _reply(call, {}),
+            lambda call: _reply(call, {"Minecraft": blank_value}),
+        ],
+    )
+
+    assert status == "AUTO"
+    assert len(calls) == 2
+    assert result == [{**item, "text": "Minecraft"}]
+
+
+def test_partial_blank_retry_keeps_first_value_only_for_blank_candidate(
+    monkeypatch, configure_batch
+):
+    configure_batch()
+    items = [_item("Alpha", 0), _item("Beta", 1), _item("Gamma", 2)]
+    result, status, calls = _run_with_api(
+        monkeypatch,
+        items,
+        [
+            lambda call: _reply(call, {"Alpha": "阿爾法"}),
+            lambda call: _reply(call, {"Beta": "貝塔", "Gamma": " \n "}),
+        ],
+    )
+
+    assert status == "AUTO"
+    assert len(calls) == 2
+    assert [entry["value"] for entry in calls[1]["payload"]["items"]] == [
+        "Beta",
+        "Gamma",
+    ]
+    assert [entry["text"] for entry in result] == ["阿爾法", "貝塔", "Gamma"]
+
+
 def test_retry_cancellation_propagates_instead_of_falling_back(
     monkeypatch, configure_batch
 ):

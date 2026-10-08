@@ -799,10 +799,29 @@ def _retry_same_source_translations(
         )
         return result
 
-    merged = merge_same_source_retry_results(result, candidates.positions, retried)
+    accepted_positions: list[int] = []
+    accepted_results: list[dict] = []
+    blank_count = 0
+    for position, retry_item in zip(candidates.positions, retried, strict=True):
+        retry_text = retry_item.get("text")
+        if not isinstance(retry_text, str) or not retry_text.strip():
+            blank_count += 1
+            continue
+        accepted_positions.append(position)
+        accepted_results.append(retry_item)
+    if blank_count:
+        log_warning(
+            f"[⚠️ 相同譯文重新確認回傳空白，保留第一次翻譯結果：{blank_count} 筆]"
+        )
+
+    merged = merge_same_source_retry_results(
+        result, tuple(accepted_positions), accepted_results
+    )
     updated = sum(
-        retry_item["text"] != original["text"]
-        for original, retry_item in zip(candidates.items, retried, strict=True)
+        retry_item["text"] != result[position]["text"]
+        for position, retry_item in zip(
+            accepted_positions, accepted_results, strict=True
+        )
     )
     log_info(
         f"[✅ 相同譯文重新確認完成：{candidate_count} 筆，其中 {updated} 筆更新、"
