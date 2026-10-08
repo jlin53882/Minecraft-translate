@@ -357,3 +357,34 @@ def test_cancelled_preview_stays_locked_until_worker_reports_done(env):
         assert ctx.status_text.value == "已取消"
 
     asyncio.run(verify_lifecycle())
+
+
+def test_cancel_wins_over_result_ready_before_poller_handles_completion(env):
+    """A result populated before cancel must not be presented after cancel wins."""
+    from types import SimpleNamespace
+
+    from app.views.extractor.extractor_state import PreviewState
+
+    shown_results = []
+    ctx = SimpleNamespace(
+        page=env.page,
+        state={"cancelled": True, "running": True},
+        preview_state=PreviewState(progress=0.8, done=True, result=_result(count=3)),
+        progress_bar=ft.ProgressBar(value=0.8),
+        progress_pct=ft.Text("80%"),
+        status_text=ft.Text("掃描中"),
+        start_button=ft.Button("開始預覽", disabled=True),
+        preview_dialog=ft.AlertDialog(modal=True),
+        add_log=lambda *_args, **_kwargs: None,
+        show_result_dialog=shown_results.append,
+        scan_task=None,
+    )
+
+    asyncio.run(mod._preview_ui_poller(ctx))
+
+    assert shown_results == []
+    assert ctx.status_text.value == "已取消"
+    assert ctx.progress_pct.value != "100%"
+    assert ctx.start_button.disabled is False
+    assert ctx.state["running"] is False
+    assert ctx.preview_dialog.modal is False

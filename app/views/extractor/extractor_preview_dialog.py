@@ -485,7 +485,7 @@ async def _preview_ui_poller(ctx):
         # 掃描已結束：解除 start_scan() 的 modal 鎖定，否則使用者無法關閉對話框
         ctx.preview_dialog.modal = False
         ctx.page.update()
-    elif final_result:
+    elif final_result and not cancelled:
         results = final_result.get("preview_results", [])
         ctx.add_log(
             f"[完成] 找到 {len(results)} 個 JAR",
