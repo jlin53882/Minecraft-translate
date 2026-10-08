@@ -448,12 +448,174 @@ def test_navigate_switches_content_sidebar_and_breadcrumb(shell, placeholder_vie
     assert "設定" in shell.page.title
 
 
+def test_navigation_from_dirty_settings_waits_for_user_decision(
+    shell, placeholder_views
+):
+    shell.navigate("config")
+    config_view = placeholder_views["config"]
+    config_view.has_unsaved_changes = True
+    pending = []
+    config_view.confirm_unsaved_changes = lambda on_continue, **_kwargs: pending.append(
+        on_continue
+    )
+
+    shell.navigate("dashboard")
+
+    assert shell.current_key == "config"
+    assert len(pending) == 1
+    pending[0]()
+    assert shell.current_key == "dashboard"
+
+
 def test_navigate_unknown_key_is_ignored(shell):
     before = shell.current_key
     shell.navigate("nope")
     shell.navigate_index(999)
     shell.navigate_index(-1)
     assert shell.current_key == before
+
+
+def test_window_close_from_dirty_settings_waits_for_user_decision(
+    shell, placeholder_views
+):
+    shell.navigate("config")
+    config_view = placeholder_views["config"]
+    config_view.has_unsaved_changes = True
+    pending = []
+    config_view.confirm_unsaved_changes = lambda on_continue, **_kwargs: pending.append(
+        on_continue
+    )
+
+    asyncio.run(shell._window_on_event(SimpleNamespace(type=ft.WindowEventType.CLOSE)))
+
+    assert not shell._disposed
+    assert len(pending) == 1
+
+
+def test_resuming_interrupted_task_waits_for_guarded_navigation(
+    shell, placeholder_views
+):
+    shell.navigate("config")
+    config_view = placeholder_views["config"]
+    config_view.has_unsaved_changes = True
+    pending = []
+    config_view.confirm_unsaved_changes = lambda on_continue, **_kwargs: pending.append(
+        on_continue
+    )
+    task = SimpleNamespace(kind="lm_directory")
+    received = []
+    resume_view = SimpleNamespace(
+        resume_interrupted=lambda resumed: received.append(resumed)
+    )
+    lm_item = next(item for item in shell.registry if item["key"] == "lm")
+    dict.__setitem__(lm_item, "view", ft.Container(content=resume_view))
+
+    shell._resume_interrupted_task(task)
+
+    assert shell.current_key == "config"
+    assert received == []
+    assert len(pending) == 1
+
+    pending[0]()
+
+    assert shell.current_key == "lm"
+    assert received == [task]
+
+
+def test_navigation_from_reload_recovery_state_waits_for_user_decision(
+    shell, placeholder_views
+):
+    shell.navigate("config")
+    config_view = placeholder_views["config"]
+    config_view.has_unsaved_changes = False
+    config_view.requires_exit_confirmation = True
+    pending = []
+    config_view.confirm_unsaved_changes = lambda on_continue, **_kwargs: pending.append(
+        on_continue
+    )
+
+    shell.navigate("dashboard")
+
+    assert shell.current_key == "config"
+    assert len(pending) == 1
+
+
+def test_window_close_from_reload_recovery_state_waits_for_decision(
+    shell, placeholder_views
+):
+    shell.navigate("config")
+    config_view = placeholder_views["config"]
+    config_view.has_unsaved_changes = False
+    config_view.requires_exit_confirmation = True
+    pending = []
+    config_view.confirm_unsaved_changes = lambda on_continue, **_kwargs: pending.append(
+        on_continue
+    )
+
+    asyncio.run(shell._window_on_event(SimpleNamespace(type=ft.WindowEventType.CLOSE)))
+
+    assert not shell._disposed
+    assert len(pending) == 1
+
+
+def test_cancelled_close_restores_config_recovery_navigation_guard(
+    shell, placeholder_views, monkeypatch
+):
+    shell.navigate("config")
+    config_view = placeholder_views["config"]
+    config_view.has_unsaved_changes = False
+    config_view.requires_exit_confirmation = True
+    config_view.recovery_exit_acknowledged = False
+    pending_navigation = []
+
+    def confirm_close_after_recovery(on_continue, **kwargs):
+        assert kwargs["allow_saved_recovery_exit"] is True
+        config_view.recovery_exit_acknowledged = True
+        config_view.requires_exit_confirmation = False
+        on_continue()
+
+    def cancel_recovery_exit():
+        config_view.recovery_exit_acknowledged = False
+        config_view.requires_exit_confirmation = True
+
+    config_view.confirm_unsaved_changes = confirm_close_after_recovery
+    config_view.cancel_reload_recovery_exit = cancel_recovery_exit
+    config_view.confirm_navigation = lambda callback, **_kwargs: (
+        pending_navigation.append(callback)
+    )
+    shell.page.show_dialog = lambda dialog: shell.page.overlay.append(dialog)
+    shell.page.pop_dialog = lambda: shell.page.overlay.pop()
+    monkeypatch.setattr(shell.tasks, "active", lambda: [SimpleNamespace()])
+
+    asyncio.run(shell._window_on_event(SimpleNamespace(type=ft.WindowEventType.CLOSE)))
+
+    close_dialog = shell.page.overlay[-1]
+    assert [action.content for action in close_dialog.actions] == [
+        "繼續執行",
+        "仍要關閉",
+    ]
+    close_dialog.actions[0].on_click(None)
+
+    assert config_view.recovery_exit_acknowledged is False
+    assert config_view.requires_exit_confirmation is True
+    config_view.has_unsaved_changes = True
+    config_view.confirm_unsaved_changes = config_view.confirm_navigation
+    shell.navigate("dashboard")
+
+    assert shell.current_key == "config"
+    assert len(pending_navigation) == 1
+
+
+def test_config_reentry_reloads_before_showing_recovery_view(shell, placeholder_views):
+    shell.navigate("config")
+    config_view = placeholder_views["config"]
+    config_view.has_unsaved_changes = False
+    config_view.reload_before_entry = lambda: False
+    shell.navigate("dashboard")
+
+    shell.navigate("config")
+
+    assert shell.current_key == "dashboard"
 
 
 def test_ctrl_digit_shortcuts_follow_view_specs(shell):

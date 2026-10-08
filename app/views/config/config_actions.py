@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import traceback
+from enum import Enum, auto
 
 from app.services_impl.logging_service import validate_log_format
 from app.ui.snack import show_snack
@@ -11,10 +12,17 @@ from app.views.config.settings_schema import (
     get_path,
     set_path,
 )
-from translation_tool.utils.config_manager import get_default
+from translation_tool.utils.config_manager import get_default, validate_config_values
 from translation_tool.utils.redaction import redact_text
 
 logger = logging.getLogger(__name__)
+
+
+class SaveOutcome(Enum):
+    WRITE_FAILED = auto()
+    SAVED_RELOAD_FAILED = auto()
+    SAVED_OK = auto()
+
 
 # 設定值 ↔ 設定頁控制項的轉換，全部由 settings_schema 驅動（#134）。
 # 新增一般設定不需要改這個檔案；只有專用元件（API 金鑰列、模型列）在下方手寫。
@@ -73,6 +81,130 @@ def _apply_label_templates(view, config: dict) -> None:
         view.controls_map[setting.path].label = setting.label_template.format(**values)
 
 
+def _models_from_view(view) -> dict:
+    """Collect the per-model settings from their editor rows."""
+    models = {}
+    for row in view.models_column.controls:
+        checkbox = row._checkbox
+        model_cfg = {"enabled": bool(checkbox.value)}
+        cap_field = getattr(row, "_max_output_tokens", None)
+        raw_cap = getattr(cap_field, "value", "") if cap_field is not None else ""
+        if raw_cap not in (None, ""):
+            model_cfg["max_output_tokens"] = int(raw_cap)
+        model_name = getattr(row, "_model_name", checkbox.label)
+        models[model_name] = model_cfg
+    return models
+
+
+def _has_enabled_model(models) -> bool:
+    return isinstance(models, dict) and any(
+        isinstance(model, dict) and model.get("enabled", False)
+        for model in models.values()
+    )
+
+
+def _model_settings_signature(models) -> tuple:
+    if not isinstance(models, dict):
+        return ()
+    return tuple(
+        (
+            name,
+            bool(cfg.get("enabled", False)) if isinstance(cfg, dict) else False,
+            cfg.get("max_output_tokens") if isinstance(cfg, dict) else None,
+        )
+        for name, cfg in models.items()
+    )
+
+
+def _collect_validated_config(view, load_config_json_fn, validate_api_keys_fn):
+    try:
+        config = load_config_json_fn()
+        for setting in editable_settings():
+            control = view.controls_map.get(setting.path)
+            if control is not None:
+                set_path(
+                    config, setting.path, _from_control_value(setting, control.value)
+                )
+        api_keys = [
+            field.value.strip()
+            for field in view.key_fields
+            if field.value and field.value.strip()
+        ]
+        validate_api_keys_fn(api_keys)
+        config["lm_translator"]["keys"] = api_keys
+        models = _models_from_view(view)
+        previous_models = config["lm_translator"].get("models")
+        if previous_models is None and "models" not in config["lm_translator"]:
+            previous_models = {
+                name: {"enabled": enabled}
+                for name, enabled in getattr(view, "DEFAULT_MODELS", {}).items()
+            }
+        previous_has_enabled = _has_enabled_model(previous_models)
+        models_changed = _model_settings_signature(models) != _model_settings_signature(
+            previous_models
+        )
+        if not _has_enabled_model(models) and (previous_has_enabled or models_changed):
+            show_snack(view.page, "至少需要保留一個啟用中的模型；設定尚未儲存。")
+            return None
+        config["lm_translator"]["models"] = models
+        validate_config_values(config)
+    except Exception as err:  # noqa: BLE001 - config collection is a UI save boundary
+        logger.error("儲存設定驗證失敗：%s", redact_text(traceback.format_exc()))
+        show_snack(
+            view.page,
+            f"❌ 設定驗證失敗（{type(err).__name__}），尚未嘗試寫入。",
+        )
+        return None
+    return config
+
+
+def _write_config_with_feedback(view, config, save_config_json_fn) -> bool:
+    try:
+        write_result = save_config_json_fn(config)
+    except Exception:  # noqa: BLE001 - failure may occur before or after atomic replace
+        logger.error("儲存設定結果未確認：%s", redact_text(traceback.format_exc()))
+        write_result = None
+    if write_result is not True:
+        logger.error("儲存設定未確認成功：writer 未回報 True")
+        show_snack(
+            view.page,
+            "❌ 無法確認設定檔是否已更新；變更仍保留在此頁，請先檢查 config.json。",
+        )
+        return False
+    return True
+
+
+def _reload_after_confirmed_write(view) -> bool:
+    try:
+        view.load_config()
+    except Exception:  # noqa: BLE001 - reload is a UI boundary after confirmed persistence
+        logger.error(
+            "設定已寫入，但重新載入設定頁失敗：%s",
+            redact_text(traceback.format_exc()),
+        )
+        show_snack(
+            view.page,
+            "⚠️ 設定已寫入，但畫面重新載入失敗；請重新開啟設定頁確認顯示內容。",
+        )
+        return False
+    return True
+
+
+def _refresh_registered_extractor_views(registry) -> None:
+    from app.view_registry import built_view
+
+    for item in registry:
+        view_obj = built_view(item)
+        if item["key"] != "extractor" or view_obj is None:
+            continue
+        content = getattr(view_obj, "content", None)
+        refresh_config_defaults = getattr(content, "refresh_config_defaults", None)
+        if callable(refresh_config_defaults):
+            refresh_config_defaults()
+        elif hasattr(content, "refresh_output_dir_helper"):
+            content.refresh_output_dir_helper()
+
+
 def load_config_into_view(view, config: dict):
     """
     將 config 字典中的值填入 view 的各個 UI 控制項。
@@ -124,7 +256,46 @@ def load_config_into_view(view, config: dict):
         view.keys_column.controls.append(row)
 
 
-def save_config_from_view(
+def load_config_transactionally(view, load_config_json_fn):
+    """Hydrate the view and commit its baseline only after every UI refresh succeeds."""
+    previous_saved_form_state = view._saved_form_state
+    try:
+        view._loading_config = True
+        try:
+            config = load_config_json_fn()
+            result = load_config_into_view(view, config)
+            for field in view.key_fields:
+                view._bind_change_tracking(field)
+            loaded_form_state = view._capture_form_state()
+            view.db_location.refresh()
+            view._check_db_path()
+            view._check_priority()
+        finally:
+            view._loading_config = False
+
+        # Commit only after hydration and all dependent UI refreshes have succeeded.
+        view._saved_form_state = loaded_form_state
+        view._reload_recovery_required = False
+        view._reload_before_next_entry = False
+        view._reload_exit_acknowledged = False
+        view._refresh_dirty_state()
+    except Exception:
+        view._loading_config = False
+        view._saved_form_state = previous_saved_form_state
+        view._reload_recovery_required = True
+        view._reload_exit_acknowledged = False
+        try:
+            view._refresh_dirty_state()
+        except Exception:  # noqa: BLE001 - hint refresh must not mask the reload error
+            logger.error(
+                "設定重載失敗後無法更新恢復提示：%s",
+                redact_text(traceback.format_exc()),
+            )
+        raise
+    return result
+
+
+def save_config_from_view_with_outcome(
     view,
     *,
     load_config_json_fn,
@@ -145,58 +316,38 @@ def save_config_from_view(
       - 如果 config.json 不存在，會拿到 DEFAULT_CONFIG 的值
       → 按儲存後，使用者的「預設值」就會固化進 config.json（Layer 1 覆蓋 Layer 2/3）
     """
-    new_config = load_config_json_fn()
-    try:
-        for setting in editable_settings():
-            control = view.controls_map.get(setting.path)
-            if control is None:
-                continue
-            set_path(
-                new_config,
-                setting.path,
-                _from_control_value(setting, control.value),
-            )
-        api_keys = [
-            key_field.value.strip()
-            for key_field in view.key_fields
-            if key_field.value and key_field.value.strip()
-        ]
-        validate_api_keys_from_ui_fn(api_keys)
-        new_config["lm_translator"]["keys"] = api_keys
-        models = {}
-        for row in view.models_column.controls:
-            cb = row._checkbox
-            model_cfg = {"enabled": bool(cb.value)}
-            cap_field = getattr(row, "_max_output_tokens", None)
-            raw_cap = getattr(cap_field, "value", "") if cap_field is not None else ""
-            if raw_cap not in (None, ""):
-                model_cfg["max_output_tokens"] = int(raw_cap)
-            models[cb.label] = model_cfg
-        new_config["lm_translator"]["models"] = models
-    except (ValueError, TypeError, RuntimeError) as err:
-        # 錯誤訊息可能帶有使用者輸入，記錄前先遮蔽（#125）
-        logger.error("儲存設定失敗：%s", redact_text(traceback.format_exc()))
-        show_snack(view.page, f"❌ 發生錯誤：{type(err).__name__}: {err}")
-        return False
-    save_config_json_fn(new_config)
-    view.load_config()
-
+    new_config = _collect_validated_config(
+        view, load_config_json_fn, validate_api_keys_from_ui_fn
+    )
+    if new_config is None:
+        return SaveOutcome.WRITE_FAILED
+    if not _write_config_with_feedback(view, new_config, save_config_json_fn):
+        return SaveOutcome.WRITE_FAILED
+    if not _reload_after_confirmed_write(view):
+        return SaveOutcome.SAVED_RELOAD_FAILED
     if registry is not None:
-        from app.view_registry import built_view
-
-        for item in registry:
-            # 只通知已建立的頁面；尚未建立的頁面建立時會讀取最新設定
-            view_obj = built_view(item)
-            if item["key"] != "extractor" or view_obj is None:
-                continue
-
-            content = getattr(view_obj, "content", None)
-            refresh_config_defaults = getattr(content, "refresh_config_defaults", None)
-            if callable(refresh_config_defaults):
-                refresh_config_defaults()
-            elif hasattr(content, "refresh_output_dir_helper"):
-                # Backward-compatible fallback for legacy test doubles/views.
-                content.refresh_output_dir_helper()
+        _refresh_registered_extractor_views(registry)
 
     show_snack(view.page, "✅ 設定已成功儲存！", view._success_color())
-    return True
+    return SaveOutcome.SAVED_OK
+
+
+def save_config_from_view(
+    view,
+    *,
+    load_config_json_fn,
+    save_config_json_fn,
+    validate_api_keys_from_ui_fn,
+    registry=None,
+):
+    """Compatibility boolean API; use the outcome variant for navigation decisions."""
+    return (
+        save_config_from_view_with_outcome(
+            view,
+            load_config_json_fn=load_config_json_fn,
+            save_config_json_fn=save_config_json_fn,
+            validate_api_keys_from_ui_fn=validate_api_keys_from_ui_fn,
+            registry=registry,
+        )
+        is not SaveOutcome.WRITE_FAILED
+    )

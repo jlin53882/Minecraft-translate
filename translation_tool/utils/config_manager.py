@@ -262,9 +262,7 @@ def _load_config_uncached(resolved_config_path: Path) -> tuple[dict, bool]:
     register_secrets(_sensitive_values(config))
 
     # ATK-C-2: 對最終結果做驗證
-    _validate_lm_translator_config(config["lm_translator"])
-    if isinstance(config.get("translator"), dict):
-        _validate_translator_config(config["translator"])
+    validate_config_values(config)
     return config, True
 
 
@@ -485,6 +483,27 @@ def get_models_config(cfg: dict) -> dict[str, dict]:
 
 class ConfigValidationError(ValueError):
     """Config 欄位驗證失敗時拋出。"""
+
+
+def validate_config_values(config: dict) -> None:
+    """驗證設定資料中目前載入流程所支援的欄位契約。
+
+    UI 儲存可在寫檔前呼叫同一套驗證，避免合法 JSON、非法設定值先落盤，
+    之後才在重新載入時拋出 ConfigValidationError。
+    """
+    if not isinstance(config, dict):
+        raise ConfigValidationError("設定根節點必須是 object")
+
+    lm_config = config.get("lm_translator")
+    if not isinstance(lm_config, dict):
+        raise ConfigValidationError("lm_translator 必須是 object")
+    _validate_lm_translator_config(lm_config)
+
+    translator_config = config.get("translator")
+    if translator_config is not None:
+        if not isinstance(translator_config, dict):
+            raise ConfigValidationError("translator 必須是 object")
+        _validate_translator_config(translator_config)
 
 
 def _validate_lm_translator_config(lm: dict) -> None:

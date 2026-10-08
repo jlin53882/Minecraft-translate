@@ -160,6 +160,10 @@ def test_apply_metadata_covers_new_fields_wildcards_and_cache_root():
         get_apply_rule(wildcard_path)
         == CONFIG_APPLY_RULES["lm_translator.models.*.max_output_tokens"]
     )
+    assert (
+        apply_timing_note(wildcard_path)
+        == "留空沿用全域輸出上限；0 不指定輸出上限；其他數值於下一批套用。"
+    )
     # species_cache.* 的每個設定在 schema 內各自標示「需重啟」
     assert get_apply_rule("species_cache.cache_directory")["timing"] == "restart"
     assert get_apply_rule("species_cache.wikipedia_language")["timing"] == "restart"

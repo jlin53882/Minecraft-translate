@@ -261,17 +261,52 @@ class AppShell:
 
     # -- 導覽 ----------------------------------------------------------------
 
-    def navigate(self, view_key: str) -> None:
+    def navigate(
+        self, view_key: str, *, on_navigated: Callable[[], None] | None = None
+    ) -> None:
         """切到指定頁面（key 不存在時記錄警告並忽略）。"""
         index = index_of(self.registry, view_key)
         if index < 0:
             logger.warning("未知的頁面：%s", view_key)
             return
-        self.navigate_index(index)
+        self.navigate_index(index, on_navigated=on_navigated)
 
-    def navigate_index(self, index: int) -> None:
+    def navigate_index(
+        self, index: int, *, on_navigated: Callable[[], None] | None = None
+    ) -> None:
         if not 0 <= index < len(self.registry):
             return
+        target_key = self.registry[index]["key"]
+        config_view = self._active_config_view()
+        reload_before_entry = getattr(config_view, "reload_before_entry", None)
+        if (
+            target_key == "config"
+            and self.current_key != "config"
+            and callable(reload_before_entry)
+            and not reload_before_entry()
+        ):
+            return
+        if (
+            target_key != self.current_key
+            and self.current_key == "config"
+            and config_view is not None
+            and getattr(
+                config_view,
+                "requires_exit_confirmation",
+                config_view.has_unsaved_changes,
+            )
+        ):
+            config_view.confirm_unsaved_changes(
+                lambda: self._apply_navigation_index(index, on_navigated),
+                allow_saved_recovery_exit=True,
+            )
+            return
+        self._apply_navigation_index(index, on_navigated)
+
+    def _apply_navigation_index(
+        self, index: int, on_navigated: Callable[[], None] | None = None
+    ) -> None:
+        """Apply a navigation request after any unsaved-settings decision."""
         item = self.registry[index]
         key = item["key"]
         spec = SPECS_BY_KEY[key]
@@ -284,6 +319,20 @@ class AppShell:
         )
         self.page.title = f"{APP_TITLE} — {spec.label}"
         self._safe_update()
+        if on_navigated is not None:
+            on_navigated()
+
+    def _active_config_view(self):
+        """Return the already-built ConfigView without forcing lazy construction."""
+        index = index_of(self.registry, "config")
+        if index < 0:
+            return None
+        view = built_view(self.registry[index])
+        for _ in range(4):
+            if view is None or hasattr(view, "has_unsaved_changes"):
+                break
+            view = getattr(view, "content", None)
+        return view if hasattr(view, "has_unsaved_changes") else None
 
     def _show_resume_prompt(self) -> None:
         """啟動時偵測上次被中斷的機器翻譯並詢問使用者（不會自動開始任何任務）。"""
@@ -295,15 +344,18 @@ class AppShell:
     def _resume_interrupted_task(self, task) -> None:
         """使用者確認續跑：切到對應的頁面（機器翻譯或任務翻譯），帶入上次的輸入與選項後開始。"""
         view_key = _RESUME_VIEW_BY_KIND.get(getattr(task, "kind", "lm_directory"), "lm")
-        self.navigate(view_key)
-        index = index_of(self.registry, view_key)
-        view = built_view(self.registry[index]) if index >= 0 else None
-        inner = getattr(view, "content", None) or view  # wrap_view 包了一層容器
-        resume = getattr(inner, "resume_interrupted", None)
-        if callable(resume):
-            resume(task)
-        else:
-            logger.warning("頁面 %s 不支援續跑，無法帶入上次的任務", view_key)
+
+        def resume_after_navigation() -> None:
+            index = index_of(self.registry, view_key)
+            view = built_view(self.registry[index]) if index >= 0 else None
+            inner = getattr(view, "content", None) or view
+            resume = getattr(inner, "resume_interrupted", None)
+            if callable(resume):
+                resume(task)
+            else:
+                logger.warning("頁面 %s 不支援續跑，無法帶入上次的任務", view_key)
+
+        self.navigate(view_key, on_navigated=resume_after_navigation)
 
     def _open_task_view(self, view_key: str | None) -> None:
         if view_key:
@@ -622,6 +674,16 @@ class AppShell:
         self._close_pending = False
         if not self._disposed:
             self.tasks.resume_accepting()
+            self._restore_config_recovery_exit_acknowledgement()
+
+    def _restore_config_recovery_exit_acknowledgement(self) -> None:
+        config_view = self._active_config_view()
+        restore = getattr(config_view, "cancel_reload_recovery_exit", None)
+        if callable(restore):
+            try:
+                restore()
+            except Exception:
+                logger.warning("恢復設定頁離開保護失敗", exc_info=True)
 
     def _bind_window_close(self) -> None:
         """把桌面 native CLOSE 導向同一個 lifecycle teardown。"""
@@ -642,6 +704,17 @@ class AppShell:
                 return
             if self._disposed:
                 return
+            config_view = self._active_config_view()
+            if config_view is not None and getattr(
+                config_view,
+                "requires_exit_confirmation",
+                config_view.has_unsaved_changes,
+            ):
+                config_view.confirm_unsaved_changes(
+                    self._continue_close_after_unsaved_settings,
+                    allow_saved_recovery_exit=True,
+                )
+                return
             if self.tasks.active() and not self._close_pending:
                 self._show_close_confirmation()
                 return
@@ -655,18 +728,33 @@ class AppShell:
         except Exception:
             logger.debug("無法掛上 desktop window event handler", exc_info=True)
 
-    def _show_close_confirmation(self) -> None:
+    def _continue_close_after_unsaved_settings(self) -> None:
+        """Resume the existing close flow after settings are saved or discarded."""
+        if self.tasks.active():
+            if not self._show_close_confirmation():
+                self._restore_config_recovery_exit_acknowledgement()
+            return
+        if self._close_pending or self._disposed:
+            return
+        self._close_pending = True
+        ok, _future = self._submit_ui(self._complete_window_close)
+        if not ok:
+            self._abort_close()
+            self._show_close_failure()
+
+    def _show_close_confirmation(self) -> bool:
         """任務執行中先讓使用者選擇繼續或取消關閉。"""
         show_dialog = getattr(self.page, "show_dialog", None)
         if not callable(show_dialog):
             logger.warning("頁面不支援關閉確認對話框，保留視窗開啟")
-            return
+            return False
 
         def keep_running(_event=None) -> None:
             try:
                 self.page.pop_dialog()
             except Exception:
                 logger.debug("關閉確認取消失敗", exc_info=True)
+            self._restore_config_recovery_exit_acknowledgement()
 
         def confirm_close(_event=None) -> None:
             try:
@@ -691,7 +779,12 @@ class AppShell:
                 ft.TextButton("仍要關閉", on_click=confirm_close),
             ],
         )
-        show_dialog(dialog)
+        try:
+            show_dialog(dialog)
+        except Exception:
+            self._restore_config_recovery_exit_acknowledgement()
+            raise
+        return True
 
     async def _complete_window_close(self) -> None:
         """完成 desktop close：先 teardown，再讓 native window 結束。"""

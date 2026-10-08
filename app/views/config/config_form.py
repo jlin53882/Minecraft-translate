@@ -29,6 +29,14 @@ def build_header(view):
 
 def build_footer(view):
     """建立設定頁面的底部橫幅（含提示文字與儲存按鈕）。"""
+    view.save_hint = ft.Text("提示：修改後請務必點擊儲存", color=C.MUTED, size=12.5)
+    view.save_button = kit.button(
+        "儲存所有設定",
+        "primary",
+        icon=ft.Icons.SAVE_OUTLINED,
+        tooltip="寫入 config.json（請確認 API Keys 有填好）",
+        on_click=view.save_config_clicked,
+    )
     return ft.Container(
         padding=ft.Padding.symmetric(horizontal=24, vertical=14),
         bgcolor=C.PANEL,
@@ -43,9 +51,7 @@ def build_footer(view):
                     content=ft.Row(
                         [
                             ft.Icon(ft.Icons.INFO_OUTLINE, size=16, color=C.DIM),
-                            ft.Text(
-                                "提示：修改後請務必點擊儲存", color=C.MUTED, size=12.5
-                            ),
+                            view.save_hint,
                         ],
                         spacing=8,
                     ),
@@ -53,13 +59,7 @@ def build_footer(view):
                 ft.Container(
                     col={"xs": 12, "md": 4},
                     alignment=ft.Alignment.CENTER_RIGHT,
-                    content=kit.button(
-                        "儲存所有設定",
-                        "primary",
-                        icon=ft.Icons.SAVE_OUTLINED,
-                        tooltip="寫入 config.json（請確認 API Keys 有填好）",
-                        on_click=view.save_config_clicked,
-                    ),
+                    content=view.save_button,
                 ),
             ],
         ),

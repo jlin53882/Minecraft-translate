@@ -5,6 +5,16 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 
+def _add_enabled_test_model(view):
+    view.models_column.controls = [
+        SimpleNamespace(
+            _model_name="enabled-test-model",
+            _checkbox=SimpleNamespace(label="enabled-test-model", value=True),
+            _max_output_tokens=SimpleNamespace(value=""),
+        )
+    ]
+
+
 def test_config_ui_round_trips_pr_a_settings():
     from app.views.config.config_actions import (
         load_config_into_view,
@@ -21,6 +31,7 @@ def test_config_ui_round_trips_pr_a_settings():
     view._success_color = MagicMock(return_value="green")
 
     load_config_into_view(view, config)
+    _add_enabled_test_model(view)
     assert (
         view.controls_map["logging.log_format"].value
         == DEFAULT_CONFIG["logging"]["log_format"]
@@ -38,7 +49,7 @@ def test_config_ui_round_trips_pr_a_settings():
     save_config_from_view(
         view,
         load_config_json_fn=lambda: deepcopy(config),
-        save_config_json_fn=saved.update,
+        save_config_json_fn=lambda cfg: (saved.update(cfg), True)[1],
         validate_api_keys_from_ui_fn=lambda keys: None,
     )
 
@@ -92,6 +103,7 @@ def test_config_save_accepts_aq_gemini_key_and_keeps_it():
     view.load_config = MagicMock()
     view._success_color = MagicMock(return_value="green")
     load_config_into_view(view, config)
+    _add_enabled_test_model(view)
     view.key_fields = [
         SimpleNamespace(value="AQ.testKey_0123456789abcdefghijklmnopqrstuvwxyz")
     ]
@@ -100,7 +112,7 @@ def test_config_save_accepts_aq_gemini_key_and_keeps_it():
     result = save_config_from_view(
         view,
         load_config_json_fn=lambda: deepcopy(config),
-        save_config_json_fn=saved.update,
+        save_config_json_fn=lambda cfg: (saved.update(cfg), True)[1],
         validate_api_keys_from_ui_fn=validate_api_keys_from_ui,
     )
 
@@ -126,6 +138,7 @@ def test_mounted_extractor_refreshes_persisted_skip_default_after_save():
     view.load_config = MagicMock()
     view._success_color = MagicMock(return_value="green")
     load_config_into_view(view, config)
+    _add_enabled_test_model(view)
     view.controls_map["extractor.skip_zh_cn_extract"].value = True
 
     extractor_view = ExtractorView.__new__(ExtractorView)
@@ -143,7 +156,7 @@ def test_mounted_extractor_refreshes_persisted_skip_default_after_save():
         result = save_config_from_view(
             view,
             load_config_json_fn=lambda: deepcopy(config),
-            save_config_json_fn=saved.update,
+            save_config_json_fn=lambda cfg: (saved.update(cfg), True)[1],
             validate_api_keys_from_ui_fn=lambda keys: None,
             registry=[{"key": "extractor"}],
         )
@@ -168,12 +181,13 @@ def test_unmounted_extractor_does_not_need_to_be_created_for_config_save():
     view.load_config = MagicMock()
     view._success_color = MagicMock(return_value="green")
     load_config_into_view(view, config)
+    _add_enabled_test_model(view)
 
     with patch("app.view_registry.built_view", return_value=None):
         result = save_config_from_view(
             view,
             load_config_json_fn=lambda: deepcopy(config),
-            save_config_json_fn=MagicMock(),
+            save_config_json_fn=MagicMock(return_value=True),
             validate_api_keys_from_ui_fn=lambda keys: None,
             registry=[{"key": "extractor"}],
         )
