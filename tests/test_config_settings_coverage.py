@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
@@ -185,10 +186,17 @@ def _config():
 
 def _save(view, config):
     saved: dict = {}
+    view.models_column.controls = [
+        SimpleNamespace(
+            _model_name="enabled-test-model",
+            _checkbox=SimpleNamespace(label="enabled-test-model", value=True),
+            _max_output_tokens=SimpleNamespace(value=""),
+        )
+    ]
     ok = save_config_from_view(
         view,
         load_config_json_fn=lambda: deepcopy(config),
-        save_config_json_fn=saved.update,
+        save_config_json_fn=lambda cfg: (saved.update(cfg), True)[1],
         validate_api_keys_from_ui_fn=lambda keys: None,
     )
     return ok, saved

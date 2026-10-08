@@ -261,15 +261,19 @@ class AppShell:
 
     # -- 導覽 ----------------------------------------------------------------
 
-    def navigate(self, view_key: str) -> None:
+    def navigate(
+        self, view_key: str, *, on_navigated: Callable[[], None] | None = None
+    ) -> None:
         """切到指定頁面（key 不存在時記錄警告並忽略）。"""
         index = index_of(self.registry, view_key)
         if index < 0:
             logger.warning("未知的頁面：%s", view_key)
             return
-        self.navigate_index(index)
+        self.navigate_index(index, on_navigated=on_navigated)
 
-    def navigate_index(self, index: int) -> None:
+    def navigate_index(
+        self, index: int, *, on_navigated: Callable[[], None] | None = None
+    ) -> None:
         if not 0 <= index < len(self.registry):
             return
         target_key = self.registry[index]["key"]
@@ -277,12 +281,14 @@ class AppShell:
             config_view = self._active_config_view()
             if config_view is not None and config_view.has_unsaved_changes:
                 config_view.confirm_unsaved_changes(
-                    lambda: self._apply_navigation_index(index)
+                    lambda: self._apply_navigation_index(index, on_navigated)
                 )
                 return
-        self._apply_navigation_index(index)
+        self._apply_navigation_index(index, on_navigated)
 
-    def _apply_navigation_index(self, index: int) -> None:
+    def _apply_navigation_index(
+        self, index: int, on_navigated: Callable[[], None] | None = None
+    ) -> None:
         """Apply a navigation request after any unsaved-settings decision."""
         item = self.registry[index]
         key = item["key"]
@@ -296,6 +302,8 @@ class AppShell:
         )
         self.page.title = f"{APP_TITLE} — {spec.label}"
         self._safe_update()
+        if on_navigated is not None:
+            on_navigated()
 
     def _active_config_view(self):
         """Return the already-built ConfigView without forcing lazy construction."""
@@ -319,15 +327,18 @@ class AppShell:
     def _resume_interrupted_task(self, task) -> None:
         """使用者確認續跑：切到對應的頁面（機器翻譯或任務翻譯），帶入上次的輸入與選項後開始。"""
         view_key = _RESUME_VIEW_BY_KIND.get(getattr(task, "kind", "lm_directory"), "lm")
-        self.navigate(view_key)
-        index = index_of(self.registry, view_key)
-        view = built_view(self.registry[index]) if index >= 0 else None
-        inner = getattr(view, "content", None) or view  # wrap_view 包了一層容器
-        resume = getattr(inner, "resume_interrupted", None)
-        if callable(resume):
-            resume(task)
-        else:
-            logger.warning("頁面 %s 不支援續跑，無法帶入上次的任務", view_key)
+
+        def resume_after_navigation() -> None:
+            index = index_of(self.registry, view_key)
+            view = built_view(self.registry[index]) if index >= 0 else None
+            inner = getattr(view, "content", None) or view
+            resume = getattr(inner, "resume_interrupted", None)
+            if callable(resume):
+                resume(task)
+            else:
+                logger.warning("頁面 %s 不支援續跑，無法帶入上次的任務", view_key)
+
+        self.navigate(view_key, on_navigated=resume_after_navigation)
 
     def _open_task_view(self, view_key: str | None) -> None:
         if view_key:

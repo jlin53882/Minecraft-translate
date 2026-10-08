@@ -162,6 +162,36 @@ def test_config_view_tracks_unsaved_general_and_model_changes(monkeypatch):
     assert view.has_unsaved_changes is True
 
 
+def test_config_view_rechecks_dirty_state_after_blur_normalization(monkeypatch):
+    monkeypatch.setattr(
+        "app.views.config_view.load_config_json",
+        lambda: {
+            "logging": {},
+            "translator": {},
+            "species_cache": {},
+            "lm_translator": {},
+            "output_bundler": {},
+            "lang_merger": {},
+        },
+    )
+    view = ConfigView(mock_page())
+    field = ft.TextField(
+        value="path",
+        on_blur=lambda _event: setattr(field, "value", field.value.strip()),
+    )
+    view.controls_map["test.path"] = field
+    view._bind_change_tracking(field)
+    view._saved_form_state = view._capture_form_state()
+    field.value = "path "
+    field.on_change(None)
+    assert view.has_unsaved_changes is True
+
+    field.on_blur(None)
+
+    assert field.value == "path"
+    assert view.has_unsaved_changes is False
+
+
 def test_config_view_successful_add_model_shows_save_reminder(monkeypatch):
     monkeypatch.setattr(
         "app.views.config_view.load_config_json",
@@ -182,7 +212,7 @@ def test_config_view_successful_add_model_shows_save_reminder(monkeypatch):
 
     assert view.has_unsaved_changes is True
     assert page.overlay[-1].content.value == (
-        "模型已加入清單，記得按「儲存所有設定」才會寫入 config.json。"
+        "模型已加入清單，記得按「儲存變更」才會寫入 config.json。"
     )
     assert page.overlay[-1].content.color == C.GOLD
 
@@ -199,8 +229,9 @@ def test_config_view_failed_save_keeps_unsaved_changes(monkeypatch):
             "lang_merger": {},
         },
     )
+    monkeypatch.setattr("app.views.config_view.save_config_json", lambda _config: False)
     monkeypatch.setattr(
-        "app.views.config_view.save_config_from_view", lambda *args, **kwargs: False
+        "app.views.config_view.validate_api_keys_from_ui", lambda _keys: None
     )
     view = ConfigView(mock_page())
     field = view.controls_map["lm_translator.temperature"]
@@ -209,6 +240,7 @@ def test_config_view_failed_save_keeps_unsaved_changes(monkeypatch):
 
     assert view.save_config_clicked(None) is False
     assert view.has_unsaved_changes is True
+    assert "無法確認設定檔是否已更新" in view.page.overlay[-1].content.value
 
 
 def test_config_view_write_exception_keeps_unsaved_changes(monkeypatch):
@@ -238,7 +270,7 @@ def test_config_view_write_exception_keeps_unsaved_changes(monkeypatch):
 
     assert view.save_config_clicked(None) is False
     assert view.has_unsaved_changes is True
-    assert "變更尚未寫入" in view.page.overlay[-1].content.value
+    assert "無法確認設定檔是否已更新" in view.page.overlay[-1].content.value
 
 
 def test_config_view_unsaved_category_navigation_offers_save_discard_or_stay(
@@ -263,6 +295,9 @@ def test_config_view_unsaved_category_navigation_offers_save_discard_or_stay(
     view._on_nav_click("api_models")
 
     dialog = view.page.overlay[-1]
+    overlay_count = len(view.page.overlay)
+    view._on_nav_click("prompts")
+    assert len(view.page.overlay) == overlay_count
     assert [action.content for action in dialog.actions] == [
         "留在此頁",
         "放棄變更",
@@ -272,6 +307,38 @@ def test_config_view_unsaved_category_navigation_offers_save_discard_or_stay(
     dialog.actions[1].on_click(None)
     assert view._selected_nav == "api_models"
     assert view.has_unsaved_changes is False
+
+
+def test_config_view_save_failure_keeps_unsaved_navigation_dialog_open(monkeypatch):
+    monkeypatch.setattr(
+        "app.views.config_view.load_config_json",
+        lambda: {
+            "logging": {},
+            "translator": {},
+            "species_cache": {},
+            "lm_translator": {},
+            "output_bundler": {},
+            "lang_merger": {},
+        },
+    )
+    monkeypatch.setattr("app.views.config_view.save_config_json", lambda _config: False)
+    monkeypatch.setattr(
+        "app.views.config_view.validate_api_keys_from_ui", lambda _keys: None
+    )
+    page = mock_page()
+    view = ConfigView(page)
+    field = view.controls_map["lm_translator.temperature"]
+    field.value = "0.9"
+    field.on_change(None)
+
+    view._on_nav_click("api_models")
+    dialog = page.overlay[-1]
+    dialog.actions[2].on_click(None)
+
+    assert dialog.open is True
+    assert view._selected_nav == "general"
+    assert view.has_unsaved_changes is True
+    assert view._unsaved_dialog_open is True
 
 
 def test_config_view_save_click_maps_rows_back_to_config(monkeypatch):
@@ -296,7 +363,8 @@ def test_config_view_save_click_maps_rows_back_to_config(monkeypatch):
         },
     )
     monkeypatch.setattr(
-        "app.views.config_view.save_config_json", lambda cfg: saved.update(cfg)
+        "app.views.config_view.save_config_json",
+        lambda cfg: (saved.update(cfg), True)[1],
     )
     monkeypatch.setattr(
         "app.views.config_view.validate_api_keys_from_ui", lambda keys: None

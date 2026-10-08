@@ -11,7 +11,7 @@ from app.views.config.settings_schema import (
     get_path,
     set_path,
 )
-from translation_tool.utils.config_manager import get_default
+from translation_tool.utils.config_manager import get_default, validate_config_values
 from translation_tool.utils.redaction import redact_text
 
 logger = logging.getLogger(__name__)
@@ -88,6 +88,82 @@ def _models_from_view(view) -> dict:
     return models
 
 
+def _collect_validated_config(view, load_config_json_fn, validate_api_keys_fn):
+    config = load_config_json_fn()
+    try:
+        for setting in editable_settings():
+            control = view.controls_map.get(setting.path)
+            if control is not None:
+                set_path(
+                    config, setting.path, _from_control_value(setting, control.value)
+                )
+        api_keys = [
+            field.value.strip()
+            for field in view.key_fields
+            if field.value and field.value.strip()
+        ]
+        validate_api_keys_fn(api_keys)
+        config["lm_translator"]["keys"] = api_keys
+        models = _models_from_view(view)
+        if not any(model.get("enabled", True) for model in models.values()):
+            show_snack(view.page, "至少需要保留一個啟用中的模型；設定尚未儲存。")
+            return None
+        config["lm_translator"]["models"] = models
+        validate_config_values(config)
+    except (ValueError, TypeError, RuntimeError, OSError) as err:
+        logger.error("儲存設定驗證失敗：%s", redact_text(traceback.format_exc()))
+        show_snack(
+            view.page,
+            f"❌ 設定驗證失敗（{type(err).__name__}），尚未嘗試寫入。",
+        )
+        return None
+    return config
+
+
+def _write_config_with_feedback(view, config, save_config_json_fn) -> bool:
+    try:
+        write_result = save_config_json_fn(config)
+    except Exception:  # noqa: BLE001 - failure may occur before or after atomic replace
+        logger.error("儲存設定結果未確認：%s", redact_text(traceback.format_exc()))
+        write_result = None
+    if write_result is not True:
+        logger.error("儲存設定未確認成功：writer 未回報 True")
+        show_snack(
+            view.page,
+            "❌ 無法確認設定檔是否已更新；變更仍保留在此頁，請先檢查 config.json。",
+        )
+        return False
+    return True
+
+
+def _reload_after_confirmed_write(view) -> bool:
+    try:
+        view.load_config()
+    except Exception:
+        logger.exception("設定已寫入，但重新載入設定頁失敗")
+        show_snack(
+            view.page,
+            "⚠️ 設定已寫入，但畫面重新載入失敗；請重新開啟設定頁確認顯示內容。",
+        )
+        return False
+    return True
+
+
+def _refresh_registered_extractor_views(registry) -> None:
+    from app.view_registry import built_view
+
+    for item in registry:
+        view_obj = built_view(item)
+        if item["key"] != "extractor" or view_obj is None:
+            continue
+        content = getattr(view_obj, "content", None)
+        refresh_config_defaults = getattr(content, "refresh_config_defaults", None)
+        if callable(refresh_config_defaults):
+            refresh_config_defaults()
+        elif hasattr(content, "refresh_output_dir_helper"):
+            content.refresh_output_dir_helper()
+
+
 def load_config_into_view(view, config: dict):
     """
     將 config 字典中的值填入 view 的各個 UI 控制項。
@@ -160,52 +236,17 @@ def save_config_from_view(
       - 如果 config.json 不存在，會拿到 DEFAULT_CONFIG 的值
       → 按儲存後，使用者的「預設值」就會固化進 config.json（Layer 1 覆蓋 Layer 2/3）
     """
-    new_config = load_config_json_fn()
-    try:
-        for setting in editable_settings():
-            control = view.controls_map.get(setting.path)
-            if control is None:
-                continue
-            set_path(
-                new_config,
-                setting.path,
-                _from_control_value(setting, control.value),
-            )
-        api_keys = [
-            key_field.value.strip()
-            for key_field in view.key_fields
-            if key_field.value and key_field.value.strip()
-        ]
-        validate_api_keys_from_ui_fn(api_keys)
-        new_config["lm_translator"]["keys"] = api_keys
-        new_config["lm_translator"]["models"] = _models_from_view(view)
-        save_config_json_fn(new_config)
-    except (ValueError, TypeError, RuntimeError, OSError) as err:
-        # 錯誤訊息可能帶有使用者輸入，記錄前先遮蔽（#125）
-        logger.error("儲存設定失敗：%s", redact_text(traceback.format_exc()))
-        show_snack(
-            view.page,
-            f"❌ 設定無法儲存（{type(err).__name__}），變更尚未寫入。",
-        )
+    new_config = _collect_validated_config(
+        view, load_config_json_fn, validate_api_keys_from_ui_fn
+    )
+    if new_config is None:
         return False
-    view.load_config()
-
+    if not _write_config_with_feedback(view, new_config, save_config_json_fn):
+        return False
+    if not _reload_after_confirmed_write(view):
+        return True
     if registry is not None:
-        from app.view_registry import built_view
-
-        for item in registry:
-            # 只通知已建立的頁面；尚未建立的頁面建立時會讀取最新設定
-            view_obj = built_view(item)
-            if item["key"] != "extractor" or view_obj is None:
-                continue
-
-            content = getattr(view_obj, "content", None)
-            refresh_config_defaults = getattr(content, "refresh_config_defaults", None)
-            if callable(refresh_config_defaults):
-                refresh_config_defaults()
-            elif hasattr(content, "refresh_output_dir_helper"):
-                # Backward-compatible fallback for legacy test doubles/views.
-                content.refresh_output_dir_helper()
+        _refresh_registered_extractor_views(registry)
 
     show_snack(view.page, "✅ 設定已成功儲存！", view._success_color())
     return True

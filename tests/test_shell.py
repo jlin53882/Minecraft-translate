@@ -492,6 +492,36 @@ def test_window_close_from_dirty_settings_waits_for_user_decision(
     assert len(pending) == 1
 
 
+def test_resuming_interrupted_task_waits_for_guarded_navigation(
+    shell, placeholder_views
+):
+    shell.navigate("config")
+    config_view = placeholder_views["config"]
+    config_view.has_unsaved_changes = True
+    pending = []
+    config_view.confirm_unsaved_changes = lambda on_continue: pending.append(
+        on_continue
+    )
+    task = SimpleNamespace(kind="lm_directory")
+    received = []
+    resume_view = SimpleNamespace(
+        resume_interrupted=lambda resumed: received.append(resumed)
+    )
+    lm_item = next(item for item in shell.registry if item["key"] == "lm")
+    dict.__setitem__(lm_item, "view", ft.Container(content=resume_view))
+
+    shell._resume_interrupted_task(task)
+
+    assert shell.current_key == "config"
+    assert received == []
+    assert len(pending) == 1
+
+    pending[0]()
+
+    assert shell.current_key == "lm"
+    assert received == [task]
+
+
 def test_ctrl_digit_shortcuts_follow_view_specs(shell):
     for spec in vr.VIEW_SPECS:
         if not spec.shortcut:

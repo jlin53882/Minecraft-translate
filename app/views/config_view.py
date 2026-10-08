@@ -176,6 +176,7 @@ class ConfigView(ft.Column):
         self._registry = None
         self._loading_config = False
         self._saved_form_state = None
+        self._unsaved_dialog_open = False
         self.controls_map = {}
         self._selected_nav = "general"
 
@@ -289,6 +290,8 @@ class ConfigView(ft.Column):
 
     def confirm_unsaved_changes(self, on_continue):
         """Ask whether to save or discard changes before leaving this settings view."""
+        if self._unsaved_dialog_open:
+            return False
         show_dialog = getattr(self.page, "show_dialog", None)
         if not callable(show_dialog):
             show_snack(self.page, "設定尚未儲存；目前無法安全切換頁面。")
@@ -301,16 +304,19 @@ class ConfigView(ft.Column):
         )
 
         def stay(_event=None):
+            self._unsaved_dialog_open = False
             self.page.pop_dialog()
 
         def save_and_continue(_event=None):
             if not self.save_config_clicked(None):
                 return
+            self._unsaved_dialog_open = False
             self.page.pop_dialog()
             on_continue()
 
         def discard_and_continue(_event=None):
             self.discard_unsaved_changes()
+            self._unsaved_dialog_open = False
             self.page.pop_dialog()
             on_continue()
 
@@ -319,7 +325,12 @@ class ConfigView(ft.Column):
             ft.TextButton("放棄變更", on_click=discard_and_continue),
             ft.TextButton("儲存並繼續", on_click=save_and_continue),
         ]
-        show_dialog(dialog)
+        self._unsaved_dialog_open = True
+        try:
+            show_dialog(dialog)
+        except Exception:
+            self._unsaved_dialog_open = False
+            raise
         return True
 
     def _rebuild_nav(self):
@@ -384,7 +395,7 @@ class ConfigView(ft.Column):
                         ]
                     ),
                     ft.Text(
-                        "勾選「啟用」的模型才會參與翻譯；取消勾選即可停用。儲存後，下一個 LM 翻譯批次會讀取新設定；至少保留一個啟用模型。",
+                        "輸入模型名稱後按「+」加入清單；未加入的文字不會寫入設定。勾選「啟用」的模型才會參與翻譯；至少保留一個啟用模型。",
                         size=12,
                         color=C.MUTED,
                     ),
@@ -482,7 +493,7 @@ class ConfigView(ft.Column):
         self._refresh_dirty_state()
         show_snack(
             self.page,
-            "模型已加入清單，記得按「儲存所有設定」才會寫入 config.json。",
+            "模型已加入清單，記得按「儲存變更」才會寫入 config.json。",
             C.GOLD,
         )
 
@@ -567,18 +578,20 @@ class ConfigView(ft.Column):
                 self._bind_change_tracking(control)
 
     def _bind_change_tracking(self, control: ft.Control) -> None:
-        if getattr(control, "_config_change_tracked", False):
-            return
-        event_name = "on_change" if hasattr(control, "on_change") else "on_select"
-        previous = getattr(control, event_name, None)
+        tracked_events = getattr(control, "_config_change_tracked_events", set())
+        for event_name in ("on_change", "on_select", "on_blur"):
+            if not hasattr(control, event_name) or event_name in tracked_events:
+                continue
+            previous = getattr(control, event_name, None)
 
-        def on_change(event):
-            if callable(previous):
-                previous(event)
-            self._on_form_changed(event)
+            def on_event(event, previous=previous):
+                if callable(previous):
+                    previous(event)
+                self._on_form_changed(event)
 
-        setattr(control, event_name, on_change)
-        control._config_change_tracked = True
+            setattr(control, event_name, on_event)
+            tracked_events.add(event_name)
+        control._config_change_tracked_events = tracked_events
 
     def _on_form_changed(self, _event=None) -> None:
         self._refresh_dirty_state()
@@ -615,7 +628,7 @@ class ConfigView(ft.Column):
             return
         dirty = self.has_unsaved_changes
         self.save_hint.value = (
-            "⚠ 設定尚未儲存，記得按「儲存所有設定」"
+            "⚠ 設定尚未儲存，記得按「儲存變更」"
             if dirty
             else "提示：修改後請務必點擊儲存"
         )
