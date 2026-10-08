@@ -101,13 +101,12 @@ def test_db_options_follow_the_page_controls(monkeypatch):
     """機器翻譯頁上的「使用 Mod 資料庫」與目標版本會原樣傳給 service。"""
     calls = {}
     monkeypatch.setattr(lm_view, "TaskSession", _Session)
-    monkeypatch.setattr(
-        operation_registry.threading,
-        "Thread",
-        lambda target=None, args=(), daemon=None: type(
-            "T", (), {"start": lambda self: target(*args)}
-        )(),
-    )
+
+    def launch_immediately(_page, target, **_options):
+        target()
+        return True
+
+    monkeypatch.setattr(lm_view, "launch_page_operation", launch_immediately)
     monkeypatch.setattr(lm_view.LMView, "start_ui_timer", lambda self: None)
     monkeypatch.setattr(
         lm_view,
