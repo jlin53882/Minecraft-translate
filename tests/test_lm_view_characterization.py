@@ -136,14 +136,15 @@ def test_db_options_follow_the_page_controls(monkeypatch):
     assert calls["db"]["translation_db_settings_snapshot"].version == "26.2"
     assert calls["db"]["translation_db_settings_snapshot"].enabled is False
 
-    view._ui_timer_running = False
-    view.db_version_field.text = ""
-    view.db_version_field.value = None
-    view.use_db_switch.value = True
-    view.use_db_switch.on_change(None)
-    view.lm_db_options.inherit_version_switch.value = True
-    view.lm_db_options.inherit_version_switch.on_change(None)
-    view.start_clicked(None)
+    # Use a fresh view for the enabled run: this test checks option snapshot
+    # forwarding, not whether a completed view/session can be started twice.
+    enabled_view = lm_view.LMView(mock_page(), mock_filepicker())
+    enabled_view.input_path.value = "C:/Assets"
+    enabled_view.use_db_switch.value = True
+    enabled_view.use_db_switch.on_change(None)
+    enabled_view.lm_db_options.inherit_version_switch.value = True
+    enabled_view.lm_db_options.inherit_version_switch.on_change(None)
+    enabled_view.start_clicked(None)
     assert calls["db"]["use_translation_db"] is True
     assert calls["db"]["translation_db_version"]
     assert (
