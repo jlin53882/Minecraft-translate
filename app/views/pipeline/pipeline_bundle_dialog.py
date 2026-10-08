@@ -18,7 +18,15 @@ import flet as ft
 from app.services_impl.pipelines.extract_service import open_output_folder
 from app.ui.design import C
 from app.ui.dialogs import close_overlay_dialog, present_dialog, set_dialog_feedback
-from app.ui.sync_text_field import SyncTextField
+from app.views.pipeline.pipeline_forms import (
+    BundleFormState,
+    build_bundle_form,
+    build_version_picker,
+    dialog_button,
+    dialog_content,
+    dialog_dimensions,
+    dialog_text_field,
+)
 from translation_tool.utils.config_manager import load_config
 from translation_tool.utils.log_unit import log_warning
 
@@ -69,28 +77,28 @@ def open_bundle_dialog(
         run_started=False,
     )
     ctx.feedback = ft.Text("", size=12, color=C.GOLD, visible=False)
-    dialog_width = _bundle_init_state_and_fields(ctx, input_path, output_path)
-    version_search = _bundle_build_version_widgets(ctx)
+    _bundle_init_state_and_fields(ctx, input_path, output_path)
+    version_picker = _bundle_build_version_widgets(ctx)
     _bundle_build_extra_widgets(ctx)
-    content = _bundle_build_content(ctx, version_search)
+    content = _bundle_build_content(ctx, version_picker)
 
     dialog = ft.AlertDialog(
         modal=True,
         title=ft.Text("📦 打包資源設定"),
-        content=ft.Container(content=content, width=dialog_width),
+        content=dialog_content(page, content),
         actions=[
-            ft.TextButton("取消", on_click=lambda e: ctx.close_dialog(dialog)),
-            ft.OutlinedButton(
+            dialog_button("取消", lambda e: ctx.close_dialog(dialog)),
+            dialog_button(
                 "預覽結果",
-                icon=ft.Icons.PREVIEW,
                 on_click=lambda e: ctx.show_preview_result(dialog),
+                icon=ft.Icons.PREVIEW,
+                role="preview",
             ),
-            ft.Button(
+            dialog_button(
                 "確定執行",
-                icon=ft.Icons.CHECK,
-                bgcolor=C.ENCH,
-                color=C.ON_EM,
                 on_click=lambda e: ctx.start_bundle(dialog),
+                icon=ft.Icons.CHECK,
+                role="primary",
             ),
         ],
     )
@@ -100,7 +108,7 @@ def open_bundle_dialog(
 
 def _bundle_init_state_and_fields(ctx, input_path, output_path):
     """打包對話框的路徑、設定預設值與輸入欄位。"""
-    dialog_width = int(ctx.page.width * 0.6)
+    dialog_width, _ = dialog_dimensions(ctx.page)
 
     cfg = load_config()
     bundler_cfg = cfg.get("output_bundler", {})
@@ -118,24 +126,28 @@ def _bundle_init_state_and_fields(ctx, input_path, output_path):
     ctx.default_output_zip = (
         os.path.join(output_path, output_zip_name) if output_path else ""
     )
+    ctx.bundle_form_state = BundleFormState(zip_output=ctx.default_output_zip)
 
-    ctx.bundle_input_field = SyncTextField(
+    ctx.bundle_input_field = dialog_text_field(
+        ctx.page,
         label="輸入來源",
         hint_text=f"自動帶入：{ctx.default_input}"
         if ctx.default_input
         else "留空自動帶入翻譯完成後的輸出",
         value=ctx.default_input,
-        expand=True,
         border_color=C.ENCH,
         path_input=True,
     )
-    ctx.bundle_output_zip_field = SyncTextField(
+    ctx.bundle_output_zip_field = dialog_text_field(
+        ctx.page,
+        on_change=lambda event: setattr(
+            ctx.bundle_form_state, "zip_output", event.control.value
+        ),
         label="輸出 ZIP 檔案",
         hint_text=f"自動帶入：{ctx.default_output_zip}"
         if ctx.default_output_zip
         else "留空自動帶入可使用翻譯.zip",
         value=ctx.default_output_zip,
-        expand=True,
         border_color=C.ENCH,
         path_input=True,
     )
@@ -143,62 +155,48 @@ def _bundle_init_state_and_fields(ctx, input_path, output_path):
 
 
 def _bundle_build_version_widgets(ctx):
-    """版本選擇相關控制項。"""
-    ctx.description_field = SyncTextField(
+    """Build the shared searchable pack-version selector and description field."""
+    ctx.description_field = dialog_text_field(
+        ctx.page,
+        reserved_width=80,
+        on_change=lambda event: setattr(
+            ctx.bundle_form_state, "description", event.control.value
+        ),
         label="檔案敘述",
         hint_text="直接輸入文字，或使用 § 顏色代碼",
-        expand=True,
         border_color=C.ENCH,
     )
 
     ctx.version_data = _load_version_data()
-    ctx.version_list = ft.ListView(
-        expand=True, height=160, spacing=4, auto_scroll=False
-    )
-    ctx.version_expanded = False
-    ctx.selected_version = None
-
-    ctx.version_toggle_label = ft.Text("", size=12, expand=True)
-    version_search = SyncTextField(
-        label="搜尋版本",
-        hint_text="輸入版本關鍵字...",
-        expand=True,
+    ctx.version_picker = build_version_picker(
+        page=ctx.page,
+        versions=tuple(ctx.version_data),
+        selected="",
+        on_select=lambda value: setattr(ctx.bundle_form_state, "version", value),
         border_color=C.ENCH,
-        dense=True,
-        on_change=lambda e: ctx._refresh_version_list(e.control.value or ""),
     )
-
-    ctx._refresh_version_list = functools.partial(_bundle__refresh_version_list, ctx)
-
-    ctx._select_version = functools.partial(_bundle__select_version, ctx)
-
-    ctx._refresh_version_list("")
-
-    ctx._toggle_version_expand = functools.partial(_bundle__toggle_version_expand, ctx)
-
-    ctx.version_dropdown_container = ft.Container(
-        content=ctx.version_list,
-        height=160,
-        border=ft.Border.all(1, C.DIM),
-        border_radius=6,
-        padding=4,
-        visible=False,
-    )
-    return version_search
+    ctx.version_search = ctx.version_picker.search
+    ctx.version_list = ctx.version_picker.list_view
+    ctx.version_toggle_label = ctx.version_picker.selected_label
+    ctx.version_dropdown_container = ctx.version_picker.list_container
+    ctx._refresh_version_list = ctx.version_picker.refresh
+    ctx._select_version = ctx.version_picker.select
+    ctx._toggle_version_expand = ctx.version_picker.toggle
+    return ctx.version_picker
 
 
 def _bundle_build_extra_widgets(ctx) -> None:
     """封面圖片與額外資料夾控制項、handler 綁定。"""
 
-    ctx.pack_image_field = SyncTextField(
+    ctx.pack_image_field = dialog_text_field(
+        ctx.page,
         label="封面圖片（可留空）",
         hint_text="選擇 pack.png 圖片",
-        expand=True,
         border_color=C.ENCH,
         read_only=True,
     )
     ctx.extra_folders_view = ft.ListView(height=80, spacing=4, auto_scroll=False)
-    ctx.extra_folders: list[str] = []
+    ctx.extra_folders = ctx.bundle_form_state.extra_folders
 
     ctx.close_dialog = functools.partial(_bundle_close_dialog, ctx)
 
@@ -221,10 +219,9 @@ def _bundle_build_extra_widgets(ctx) -> None:
     ctx.show_preview_result = functools.partial(_bundle_show_preview_result, ctx)
 
 
-def _bundle_build_content(ctx, version_search):
-    """對話框內容。"""
-
-    content = ft.Column(
+def _bundle_build_content(ctx, _version_picker):
+    """Build editable standalone paths and compose the shared bundle form."""
+    path_section = ft.Column(
         [
             ft.Text("輸入來源", weight="bold", size=13),
             ft.Text("留空自動帶入，翻譯完成後再使用", size=10, color=C.MUTED),
@@ -237,7 +234,8 @@ def _bundle_build_content(ctx, version_search):
                     ft.Button(
                         "瀏覽", icon=ft.Icons.SEARCH, on_click=ctx.browse_input_dir
                     ),
-                ]
+                ],
+                wrap=True,
             ),
             ft.Text("輸出 ZIP 檔案", weight="bold", size=13),
             ft.Row(
@@ -246,90 +244,46 @@ def _bundle_build_content(ctx, version_search):
                     ft.Button(
                         "選擇儲存位置", icon=ft.Icons.SAVE, on_click=ctx.pick_output_zip
                     ),
-                ]
+                ],
+                wrap=True,
             ),
-            ft.Text("檔案敘述", weight="bold", size=13),
-            ctx.description_field,
-            ft.Text("Minecraft 版本", weight="bold", size=13),
-            version_search,
-            ft.Container(
-                content=ft.Row(
-                    [
-                        ft.Text("已選擇：", size=11, color=C.MUTED),
-                        ctx.version_toggle_label,
-                        ft.Icon(ft.Icons.EXPAND_MORE, size=18),
-                    ]
-                ),
-                padding=8,
-                border=ft.Border.all(1, C.DIM),
-                border_radius=6,
-                on_click=ctx._toggle_version_expand,
+        ],
+        spacing=8,
+    )
+    image_row = ft.Row(
+        [
+            ctx.pack_image_field,
+            ft.Button("選擇檔案...", icon=ft.Icons.IMAGE, on_click=ctx.pick_pack_image),
+            dialog_button(
+                "移除",
+                lambda _event: _bundle_clear_pack_image(ctx),
+                icon=ft.Icons.DELETE,
             ),
-            ctx.version_dropdown_container,
-            ft.Text("封面圖片（可留空）", weight="bold", size=13),
-            ft.Row(
-                [
-                    ctx.pack_image_field,
-                    ft.Button(
-                        "選擇檔案...", icon=ft.Icons.IMAGE, on_click=ctx.pick_pack_image
-                    ),
-                    ft.Button(
-                        "移除",
-                        icon=ft.Icons.DELETE,
-                        on_click=lambda e: (
-                            setattr(ctx.pack_image_field, "value", "")
-                            or ctx.page.update()
-                        ),
-                    ),
-                ]
-            ),
-            ft.Text("其他指定資料夾", weight="bold", size=13),
+        ],
+        wrap=True,
+    )
+    extra_section = ft.Column(
+        [
             ft.Container(
                 content=ctx.extra_folders_view,
                 border=ft.Border.all(1, C.DIM),
-                border_radius=8,
+                border_radius=6,
                 padding=4,
             ),
             ft.Button(
                 "+ 新增資料夾", icon=ft.Icons.FOLDER_OPEN, on_click=ctx.add_extra_folder
             ),
-            ctx.feedback,
         ],
-        spacing=10,
-        tight=False,
+        spacing=6,
     )
-    return content
-
-
-def _bundle__refresh_version_list(ctx, search_text: str):
-    ctx.version_list.controls.clear()
-    filtered = [v for v in ctx.version_data if search_text.lower() in v.lower()]
-    if not filtered:
-        ctx.version_list.controls.append(ft.Text("無可用版本", size=12, color=C.DIM))
-    for version_key in filtered:
-        item = ft.Container(
-            content=ft.Text(version_key, size=13),
-            padding=8,
-            border=ft.Border.all(1, C.DIM),
-            border_radius=6,
-            on_click=lambda e, v=version_key: ctx._select_version(v),
-        )
-        ctx.version_list.controls.append(item)
-    ctx.page.update()
-
-
-def _bundle__select_version(ctx, version: str):
-    ctx.selected_version = version
-    ctx.version_toggle_label.value = version  # 「已選擇：」前綴是版面上的固定文字
-    ctx.version_expanded = False
-    ctx.version_dropdown_container.visible = False
-    ctx.page.update()
-
-
-def _bundle__toggle_version_expand(ctx, e=None):
-    ctx.version_expanded = not ctx.version_expanded
-    ctx.version_dropdown_container.visible = ctx.version_expanded
-    ctx.page.update()
+    return build_bundle_form(
+        path_section=path_section,
+        description_field=ctx.description_field,
+        version_picker=ctx.version_picker,
+        pack_image_row=image_row,
+        extra_folders_section=extra_section,
+        feedback=ctx.feedback,
+    )
 
 
 def _bundle_close_dialog(ctx, dialog):
@@ -362,7 +316,9 @@ def _bundle_start_bundle(ctx, dialog):
             )
             return
 
-    version_info = ctx.version_data.get(ctx.selected_version or "", {})
+    ctx.bundle_form_state.description = (ctx.description_field.value or "").strip()
+    ctx.bundle_form_state.zip_output = output_zip
+    version_info = ctx.version_data.get(ctx.bundle_form_state.version or "", {})
 
     if not ctx.close_dialog(dialog):
         return
@@ -424,6 +380,7 @@ def _bundle_pick_pack_image(ctx, e=None):
         )
         # Flet 1.0：pick_files() 直接回傳 list[FilePickerFile]
         if result:
+            ctx.bundle_form_state.pack_image = result[0].path
             ctx.pack_image_field.value = result[0].path
             ctx.page.update()
 
@@ -466,6 +423,12 @@ def _bundle__remove_extra_folder(ctx, path: str):
         ctx.extra_folders.remove(path)
         ctx._refresh_extra_folders()
         ctx.page.update()
+
+
+def _bundle_clear_pack_image(ctx):
+    ctx.bundle_form_state.pack_image = None
+    ctx.pack_image_field.value = ""
+    ctx.page.update()
 
 
 def _bundle_show_preview_result(ctx, dialog):

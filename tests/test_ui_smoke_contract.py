@@ -9,7 +9,9 @@ import flet as ft
 import pytest
 
 from tools.ui_smoke import (
+    DIALOG_CLICK_PROBE_EXTRA_CASES,
     DIALOG_CLICK_STAGES,
+    DIALOG_SCROLL_CASES,
     DIALOG_SMOKE_KEYS,
     DIALOG_WIZARD_STEP_KEYS,
     SMOKE_SCENARIOS,
@@ -42,10 +44,16 @@ def test_dialog_scenario_covers_every_primary_entry_point() -> None:
     """Dialog gallery 的期望清單要涵蓋所有登錄的正式入口。"""
     keys = _expected_case_keys("dialogs", ("light",), ((720, 900),))
 
-    assert len(keys) == len(DIALOG_SMOKE_KEYS) + len(DIALOG_WIZARD_STEP_KEYS) + 2
+    assert len(keys) == (
+        len(DIALOG_SMOKE_KEYS)
+        + len(DIALOG_WIZARD_STEP_KEYS)
+        + len(DIALOG_SCROLL_CASES)
+        + 1  # Dedicated Wizard Step 4 bottom-scroll case.
+    )
     assert ("dialog_gallery", "light", "720x900", "pipeline_extract_reopen") in keys
     assert ("dialog_gallery", "light", "720x900", "pipeline_merge_reopen") in keys
     assert ("dialog_scroll", "light", "720x900", "pipeline_merge_bottom") in keys
+    assert ("dialog_scroll", "light", "720x900", "pipeline_bundle_bottom") in keys
     assert (
         "dialog_scroll",
         "light",
@@ -57,6 +65,12 @@ def test_dialog_scenario_covers_every_primary_entry_point() -> None:
         "light",
         "720x900",
         "pipeline_one_click_step4",
+    ) in keys
+    assert (
+        "dialog_wizard_scroll",
+        "light",
+        "720x900",
+        "pipeline_one_click_step4_bottom",
     ) in keys
 
 
@@ -76,7 +90,8 @@ def test_each_state_scenario_has_a_case_for_every_viewport_and_theme() -> None:
 def test_dialog_click_probe_requires_a_real_browser_case() -> None:
     """實際點擊探針不應被誤歸類為單純截圖 state 情境。"""
     assert _expected_case_keys("dialog-click-probe", ("light",), ((1360, 900),)) == {
-        ("dialog_click_probe", "light", "1360x900", "pipeline_extract")
+        ("dialog_click_probe", "light", "1360x900", view)
+        for view in ("pipeline_extract", *DIALOG_CLICK_PROBE_EXTRA_CASES)
     }
 
 

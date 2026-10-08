@@ -30,8 +30,15 @@ from app.ui.dialogs import (
     set_dialog_feedback,
 )
 from app.ui.safe_file_picker import ensure_output_dir
-from app.ui.sync_text_field import SyncTextField
 from app.views.extractor.extractor_state import PreviewState
+from app.views.pipeline.pipeline_forms import (
+    ExtractFormState,
+    build_extract_form,
+    dialog_button,
+    dialog_content,
+    dialog_dimensions,
+    dialog_text_field,
+)
 from translation_tool.utils.config_manager import load_config
 from translation_tool.utils.log_unit import log_error
 from translation_tool.utils.ui_mirror import in_new_task
@@ -71,27 +78,26 @@ def open_extract_dialog(
         preview_cancel_event=None,
     )
     ctx.feedback = ft.Text("", size=12, color=C.GOLD, visible=False)
-    dialog_width = _extract_init_state_and_fields(ctx, input_path, output_path)
-    lang_codes_section = _extract_build_lang_codes_section(ctx)
-    content = _extract_build_content(ctx, lang_codes_section)
+    _extract_init_state_and_fields(ctx, input_path, output_path)
+    content = _extract_build_content(ctx)
 
     dialog = ft.AlertDialog(
         modal=True,
         title=ft.Text("📦 抽取資源設定"),
-        content=ft.Container(content=content, width=dialog_width),
+        content=dialog_content(page, content),
         actions=[
-            ft.TextButton("取消", on_click=lambda e: ctx.close_dialog(dialog)),
-            ft.OutlinedButton(
+            dialog_button("取消", lambda e: ctx.close_dialog(dialog)),
+            dialog_button(
                 "預覽結果",
-                icon=ft.Icons.PREVIEW,
                 on_click=lambda e: ctx.show_preview_result(dialog),
+                icon=ft.Icons.PREVIEW,
+                role="preview",
             ),
-            ft.Button(
+            dialog_button(
                 "確定執行",
-                icon=ft.Icons.CHECK,
-                bgcolor=C.EM,
-                color=C.ON_EM,
                 on_click=lambda e: ctx.start_extraction(dialog),
+                icon=ft.Icons.CHECK,
+                role="primary",
             ),
         ],
     )
@@ -101,55 +107,42 @@ def open_extract_dialog(
 
 def _extract_init_state_and_fields(ctx, input_path, output_path):
     """提取對話框的路徑、設定預設值與輸入欄位。"""
-    dialog_width = int(ctx.page.width * 0.6)
+    dialog_width, _ = dialog_dimensions(ctx.page)
 
     cfg = load_config()
     ctx.lang_codes = cfg.get("jar_extractor", {}).get(
         "lang_codes", ["en_us", "zh_cn", "zh_tw"]
     )
 
-    ctx.mods_field = SyncTextField(
+    ctx.mods_field = dialog_text_field(
+        ctx.page,
         label="Mod 來源",
         hint_text=f"自動帶入：{input_path}"
         if input_path
         else "留空使用上方設定的 Mod 來源",
         value=input_path,
-        expand=True,
         border_color=C.DIA,
         path_input=True,
     )
-    ctx.output_field = SyncTextField(
+    ctx.output_field = dialog_text_field(
+        ctx.page,
         label="輸出目錄",
         hint_text=f"自動帶入：{output_path}"
         if output_path
         else "留空使用上方設定的輸出目錄",
         value=output_path,
-        expand=True,
         border_color=C.DIA,
         path_input=True,
     )
 
-    ctx.radio_group = ft.RadioGroup(
-        content=ft.Column(
-            [
-                ft.Radio(label="提取 Lang", value="lang"),
-                ft.Radio(label="提取 Book", value="book"),
-                ft.Radio(label="全部執行（Lang + Book）", value="both"),
-            ],
-            spacing=4,
-        ),
-        value="lang",
+    ctx.extract_state = ExtractFormState(
+        mode="lang", lang_codes={code: True for code in ctx.lang_codes}
     )
     return dialog_width
 
 
-def _extract_build_lang_codes_section(ctx):
-    """語系代碼區與 handler 綁定。"""
-
-    ctx.lang_code_checks_local = {}
-    for code in ctx.lang_codes:
-        ctx.lang_code_checks_local[code] = ft.Checkbox(label=code, value=True)
-
+def _extract_build_content(ctx):
+    """Build editable paths while sharing mode and language controls."""
     ctx.close_dialog = functools.partial(_extract_close_dialog, ctx)
 
     ctx.start_extraction = functools.partial(_extract_start_extraction, ctx)
@@ -164,16 +157,7 @@ def _extract_build_lang_codes_section(ctx):
 
     ctx.show_preview_result = functools.partial(_extract_show_preview_result, ctx)
 
-    lang_codes_section = ft.Column(
-        [ctx.lang_code_checks_local[code] for code in ctx.lang_codes], spacing=2
-    )
-    return lang_codes_section
-
-
-def _extract_build_content(ctx, lang_codes_section):
-    """對話框內容。"""
-
-    content = ft.Column(
+    path_section = ft.Column(
         [
             ft.Text("Mod 來源", weight="bold", size=13),
             ft.Row(
@@ -185,7 +169,8 @@ def _extract_build_content(ctx, lang_codes_section):
                     ft.Button(
                         "瀏覽", icon=ft.Icons.SEARCH, on_click=ctx.browse_mods_dir
                     ),
-                ]
+                ],
+                wrap=True,
             ),
             ft.Text("輸出目錄", weight="bold", size=13),
             ft.Row(
@@ -199,18 +184,21 @@ def _extract_build_content(ctx, lang_codes_section):
                     ft.Button(
                         "瀏覽", icon=ft.Icons.SEARCH, on_click=ctx.browse_output_dir
                     ),
-                ]
+                ],
+                wrap=True,
             ),
-            ft.Text("執行模式", weight="bold", size=13),
-            ctx.radio_group,
-            ft.Text("處理的語言代碼", weight="bold", size=13),
-            lang_codes_section,
-            ctx.feedback,
         ],
-        spacing=10,
-        tight=False,
+        spacing=8,
     )
-    return content
+    controls = build_extract_form(
+        path_section=path_section,
+        state=ctx.extract_state,
+        language_codes=ctx.lang_codes,
+    )
+    ctx.radio_group = controls.mode
+    ctx.lang_code_checks_local = controls.lang_checks
+    controls.content.controls.append(ctx.feedback)
+    return controls.content
 
 
 def _extract_close_dialog(ctx, dialog):

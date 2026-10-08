@@ -102,12 +102,14 @@ def test_initial_state_and_defaults(env):
     assert dialog.modal is True
     assert _find(dialog, ft.TextField, "Mod 來源").value == str(env.src)
     assert _find(dialog, ft.TextField, "輸出目錄").value == str(env.out)
-    assert _find(dialog, ft.Checkbox).value is True
+    assert _find(dialog, ft.Switch, "只處理 lang 檔案").value is True
     zh = _find(dialog, ft.Switch, "處理 zh_cn 檔案")
     skip = _find(dialog, ft.Switch, "允許 zh_cn 觸發跳過 en_us")
     assert zh.value is True
     assert skip.value is False and skip.disabled is False
-    fields = [c for c in _walk(dialog) if isinstance(c, ft.TextField) and c.width]
+    fields = [
+        c for c in _walk(dialog) if isinstance(c, ft.TextField) and c.width in (80, 100)
+    ]
     assert sorted(f.value for f in fields) == ["0.5", "2"]
     assert _find(dialog, ft.RadioGroup).value == "folder"
 
@@ -122,7 +124,11 @@ def test_config_values_seed_patchouli_and_threshold_fields(env):
     }
     dialog = env.open()
     assert _find(dialog, ft.Switch, "允許 zh_cn 觸發跳過 en_us").value is True
-    values = {c.value for c in _walk(dialog) if isinstance(c, ft.TextField) and c.width}
+    values = {
+        c.value
+        for c in _walk(dialog)
+        if isinstance(c, ft.TextField) and c.width in (80, 100)
+    }
     assert values == {"0.8", "5"}
 
 
@@ -259,7 +265,7 @@ def test_start_strips_paths_and_passes_modified_options(env):
     dialog = env.open()
     _find(dialog, ft.TextField, "Mod 來源").value = f"  {env.src}  "
     _find(dialog, ft.TextField, "輸出目錄").value = f" {env.out} "
-    _find(dialog, ft.Checkbox).value = False
+    _find(dialog, ft.Switch, "只處理 lang 檔案").value = False
     _find(dialog, ft.Switch, "允許 zh_cn 觸發跳過 en_us").value = True
     for c in _walk(dialog):
         if isinstance(c, ft.TextField) and c.width == 100:

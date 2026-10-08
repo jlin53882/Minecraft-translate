@@ -215,16 +215,33 @@ class MergeDbOptions:
         self._refresh_database_state(settings)
         self._refresh_version_control()
         self.refresh_info()
-        if not self.use_db:
-            return MergeDbRunSnapshot(False, "")
         target, _source, warning = self._resolved_choice()
         frozen_settings = replace(
             settings,
             path=str(settings.resolved_path().resolve()),
-            merge_enabled=True,
+            merge_enabled=self.use_db,
             version=target,
         )
+        if not self.use_db:
+            return MergeDbRunSnapshot(
+                False, target, "Mod 資料庫補譯已停用", frozen_settings
+            )
         return MergeDbRunSnapshot(True, target, warning, frozen_settings)
+
+    def resolve_target_for_inheritance(self, global_settings=None) -> tuple[str, str]:
+        """Resolve the Step 2 target regardless of its independent DB enable switch.
+
+        Step 3 can intentionally use the same target even when Step 2 database
+        lookup is disabled. The selected version is still validated against the
+        captured database identity and never silently falls back.
+        """
+        settings = global_settings or load_db_settings()
+        if settings != self._settings:
+            self._refresh_database_state(settings)
+        self._settings = settings
+        self._refresh_version_control()
+        target, _source, warning = self._resolved_choice()
+        return target, warning
 
     def refresh_info(self) -> None:
         """顯示資料庫狀態；沒建立或沒有版本時說明這次會略過補譯。"""

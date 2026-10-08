@@ -25,8 +25,14 @@ from app.tasks.task_session import TaskSession  # noqa: F401
 from app.ui.design import C
 from app.ui.dialogs import close_overlay_dialog, present_dialog, set_dialog_feedback
 from app.ui.safe_file_picker import check_output_dir
-from app.ui.sync_text_field import SyncTextField
 from app.views.merge.merge_db_options import MergeDbOptions
+from app.views.pipeline.pipeline_forms import (
+    MergeFormState,
+    build_merge_form,
+    dialog_button,
+    dialog_content,
+    dialog_text_field,
+)
 from translation_tool.utils.config_manager import load_config
 
 
@@ -87,39 +93,30 @@ def open_merge_dialog(
     )
     ctx.feedback = ft.Text("", size=12, color=C.GOLD, visible=False)
     ctx.merge_db_options = MergeDbOptions(page.update)
-    dialog_width, patchouli_skip, patchouli_threshold, zh_en_threshold = (
-        _merge_init_state_and_config(ctx, input_path)
-    )
-    _merge_build_option_widgets(
-        ctx, output_path, patchouli_skip, patchouli_threshold, zh_en_threshold
-    )
+    _merge_init_state_and_config(ctx, input_path)
+    _merge_build_option_widgets(ctx, output_path)
     _merge_bind_handlers(ctx)
     _merge_build_zip_row(ctx)
     content = _merge_build_content(ctx)
 
     # 保留標題、內容間距與固定操作列所需的垂直空間。
-    dialog_content_height = int(ctx.page.height * 0.62)
     dialog = ft.AlertDialog(
         modal=True,
         title=ft.Text("🔍 語系比對設定"),
-        content=ft.Container(
-            content=content,
-            width=dialog_width,
-            height=dialog_content_height,
-        ),
+        content=dialog_content(page, content),
         actions=[
-            ft.TextButton("取消", on_click=lambda e: ctx.close_dialog(dialog)),
-            ft.OutlinedButton(
+            dialog_button("取消", lambda e: ctx.close_dialog(dialog)),
+            dialog_button(
                 "預覽結果",
-                icon=ft.Icons.PREVIEW,
                 on_click=lambda e: ctx.show_preview_result(dialog),
+                icon=ft.Icons.PREVIEW,
+                role="preview",
             ),
-            ft.Button(
+            dialog_button(
                 "確定執行",
-                icon=ft.Icons.CHECK,
-                bgcolor=C.EM,
-                color=C.ON_EM,
                 on_click=lambda e: ctx.start_merge(dialog),
+                icon=ft.Icons.CHECK,
+                role="primary",
             ),
         ],
     )
@@ -134,8 +131,6 @@ def _merge_init_state_and_config(ctx, input_path):
     if ctx.safe_float is None:
         ctx.safe_float = _default_safe_float
 
-    dialog_width = int(ctx.page.width * 0.6)
-
     cfg = load_config()
     lang_merger_cfg = cfg.get("lang_merger", {})
     patchouli_skip = lang_merger_cfg.get(
@@ -145,20 +140,33 @@ def _merge_init_state_and_config(ctx, input_path):
         lang_merger_cfg.get("patchouli_effective_translation_threshold", 0.5)
     )
     zh_en_threshold = str(lang_merger_cfg.get("zh_en_letter_threshold", 2))
+    ctx.merge_form_state = MergeFormState(
+        patchouli_skip=patchouli_skip,
+        patchouli_threshold=(
+            _default_safe_float(patchouli_threshold)
+            if _default_safe_float(patchouli_threshold) is not None
+            else 0.5
+        ),
+        zh_en_threshold=(
+            _default_safe_int(zh_en_threshold)
+            if _default_safe_int(zh_en_threshold) is not None
+            else 2
+        ),
+    )
 
     ctx.input_mode = "folder"
-    ctx.merge_folder_field = SyncTextField(
+    ctx.merge_folder_field = dialog_text_field(
+        ctx.page,
         label="Mod 來源",
         hint_text=f"自動帶入：{input_path}" if input_path else "留空使用上方設定的路徑",
         value=input_path,
-        expand=True,
         border_color=C.EM,
         path_input=True,
     )
-    merge_zip_field = SyncTextField(  # noqa: F841
+    merge_zip_field = dialog_text_field(  # noqa: F841
+        ctx.page,
         label="Mod 來源（ZIP）",
         hint_text="選擇 ZIP 檔案（支援多選）",
-        expand=True,
         border_color=C.EM,
         read_only=True,
         disabled=True,
@@ -170,46 +178,20 @@ def _merge_init_state_and_config(ctx, input_path):
         spacing=2,
     )
     ctx.merge_selected_zips = []
-    return dialog_width, patchouli_skip, patchouli_threshold, zh_en_threshold
 
 
-def _merge_build_option_widgets(
-    ctx, output_path, patchouli_skip, patchouli_threshold, zh_en_threshold
-) -> None:
-    """輸出、僅 lang、zh_cn 與 Patchouli 選項控制項。"""
-    ctx.merge_output_dir_field = SyncTextField(
+def _merge_build_option_widgets(ctx, output_path) -> None:
+    """Build standalone-only editable source/output controls."""
+    ctx.merge_output_dir_field = dialog_text_field(
+        ctx.page,
         label="輸出目錄",
         hint_text=f"自動帶入：{output_path}"
         if output_path
         else "留空使用上方設定的輸出目錄",
         value=output_path,
-        expand=True,
         border_color=C.EM,
         path_input=True,
     )
-    ctx.merge_only_lang_checkbox = ft.Checkbox(label="只處理 lang 檔案", value=True)
-    ctx.merge_process_zh_cn_switch = ft.Switch(label="處理 zh_cn 檔案", value=True)
-    ctx.merge_patchouli_skip_switch = ft.Switch(
-        label="允許 zh_cn 觸發跳過 en_us",
-        value=patchouli_skip,
-    )
-    ctx.merge_patchouli_threshold_field = SyncTextField(
-        value=patchouli_threshold,
-        width=100,
-        dense=True,
-        keyboard_type=ft.KeyboardType.NUMBER,
-        text_align=ft.TextAlign.CENTER,
-        hint_text="空白用預設值",
-    )
-    ctx.merge_zh_en_threshold_field = SyncTextField(
-        value=zh_en_threshold,
-        width=80,
-        dense=True,
-        keyboard_type=ft.KeyboardType.NUMBER,
-        text_align=ft.TextAlign.CENTER,
-        hint_text="空白用預設值",
-    )
-
     ctx.on_input_mode_changed = functools.partial(_merge_on_input_mode_changed, ctx)
 
     ctx.merge_input_mode_group = ft.RadioGroup(
@@ -229,15 +211,6 @@ def _merge_build_option_widgets(
 
 def _merge_bind_handlers(ctx) -> None:
     """Patchouli／zh_cn 連動與資料夾、ZIP 選取 handler。"""
-
-    ctx.update_patchouli_controls = functools.partial(
-        _merge_update_patchouli_controls, ctx
-    )
-
-    ctx.on_zh_cn_switch_changed = functools.partial(_merge_on_zh_cn_switch_changed, ctx)
-
-    ctx.merge_process_zh_cn_switch.on_change = ctx.on_zh_cn_switch_changed
-    ctx.update_patchouli_controls()
 
     ctx.pick_folder_input = functools.partial(_merge_pick_folder_input, ctx)
 
@@ -296,10 +269,9 @@ def _merge_build_zip_row(ctx) -> None:
 
 
 def _merge_build_content(ctx):
-    """對話框內容。"""
-
-    content = ft.ListView(
-        controls=[
+    """Compose entry-specific paths with the shared merge form."""
+    path_section = ft.Column(
+        [
             ft.Text("Mod 來源", weight="bold", size=13),
             ctx.merge_input_mode_group,
             ctx.folder_input_row,
@@ -316,87 +288,25 @@ def _merge_build_content(ctx):
                     ft.Button(
                         "瀏覽", icon=ft.Icons.SEARCH, on_click=ctx.browse_output_dir
                     ),
-                ]
-            ),
-            ft.Divider(),
-            ctx.merge_db_options.card,
-            ft.Divider(),
-            ft.Text("語系過濾設定", weight="bold", size=13),
-            ctx.merge_only_lang_checkbox,
-            ft.Row(
-                [
-                    ctx.merge_process_zh_cn_switch,
-                    ft.Text(
-                        "（需開啟才能調整下方 Patchouli 設定）", size=11, color=C.MUTED
-                    ),
-                ]
-            ),
-            ft.Divider(),
-            _merge_patchouli_settings(ctx),
-            ctx.feedback,
-        ],
-        spacing=10,
-        padding=0,
-        scroll=ft.ScrollMode.AUTO,
-    )
-    return content
-
-
-def _merge_patchouli_settings(ctx):
-    """Build the merge language threshold and Patchouli controls as one section."""
-    return ft.Column(
-        [
-            ft.Text("zh 英文含量閾值", weight=ft.FontWeight.W_500, size=12),
-            ft.Row(
-                [
-                    ctx.merge_zh_en_threshold_field,
-                    ft.Text(
-                        "超過此數值判定為英文，用於 lang 過濾，空白用預設值 2",
-                        size=10,
-                        color=C.MUTED,
-                    ),
-                ]
-            ),
-            ft.Divider(),
-            ft.Text("Patchouli 進階設定", weight="bold", size=13),
-            ft.Row(
-                [
-                    ft.Column(
-                        [
-                            ft.Text(
-                                "允許 zh_cn 觸發跳過 en_us",
-                                weight=ft.FontWeight.W_500,
-                                size=12,
-                            ),
-                            ctx.merge_patchouli_skip_switch,
-                            ft.Text(
-                                "當 zh_cn 翻譯足夠好時，跳過對應 en_us",
-                                size=10,
-                                color=C.MUTED,
-                            ),
-                        ],
-                        expand=1,
-                    ),
-                    ft.Column(
-                        [
-                            ft.Text(
-                                "en_us 跳過門檻", weight=ft.FontWeight.W_500, size=12
-                            ),
-                            ctx.merge_patchouli_threshold_field,
-                            ft.Text(
-                                "有效翻譯比例 0.0~1.0，空白用預設值 0.5",
-                                size=10,
-                                color=C.MUTED,
-                            ),
-                        ],
-                        expand=1,
-                    ),
                 ],
-                spacing=8,
+                wrap=True,
             ),
         ],
-        spacing=10,
+        spacing=8,
     )
+    controls = build_merge_form(
+        path_section=path_section,
+        state=ctx.merge_form_state,
+        db_card=ctx.merge_db_options.card,
+        on_zh_cn_change=lambda _event: ctx.page.update(),
+    )
+    ctx.merge_only_lang_checkbox = controls.only_lang
+    ctx.merge_process_zh_cn_switch = controls.process_zh_cn
+    ctx.merge_patchouli_skip_switch = controls.patchouli_skip
+    ctx.merge_patchouli_threshold_field = controls.patchouli_threshold
+    ctx.merge_zh_en_threshold_field = controls.zh_en_threshold
+    controls.content.controls.append(ctx.feedback)
+    return ft.ListView(controls=controls.content.controls, spacing=10, padding=0)
 
 
 def _merge_on_input_mode_changed(ctx, e=None):
@@ -410,19 +320,6 @@ def _merge_on_input_mode_changed(ctx, e=None):
 
 def _merge_close_dialog(ctx, dialog):
     return close_overlay_dialog(ctx.page, dialog)
-
-
-def _merge_update_patchouli_controls(ctx):
-    enabled = bool(ctx.merge_process_zh_cn_switch.value)
-    ctx.merge_patchouli_skip_switch.disabled = not enabled
-    ctx.merge_patchouli_threshold_field.disabled = not enabled
-    if not enabled:
-        ctx.merge_patchouli_skip_switch.value = False
-
-
-def _merge_on_zh_cn_switch_changed(ctx, e):
-    ctx.update_patchouli_controls()
-    ctx.page.update()
 
 
 def _merge_pick_folder_input(ctx, e=None):

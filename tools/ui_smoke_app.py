@@ -457,7 +457,8 @@ async def _run_dialog_click_probe(
     native_dialogs,
 ) -> None:
     """Drive real CanvasKit clicks through standalone dialogs and the wizard."""
-    from app.ui.dialogs import close_page_dialog
+    from app.ui.dialogs import close_page_dialog, dialog_dimensions
+    from app.views.pipeline.pipeline_forms import dialog_field_width
 
     pipeline = _view_content(shell, "pipeline")
     input_root = runtime_root / "fixture-input"
@@ -565,6 +566,60 @@ async def _run_dialog_click_probe(
             if isinstance(control, ft.Checkbox)
         ]
 
+    def bundle_version_picker(dialog):
+        controls = list(_smoke_control_tree(dialog.content))
+        search = next(
+            (
+                control
+                for control in controls
+                if isinstance(control, ft.TextField)
+                and getattr(control, "label", None) == "搜尋版本"
+            ),
+            None,
+        )
+        selection = next(
+            (
+                control
+                for control in controls
+                if isinstance(control, ft.Container)
+                and isinstance(getattr(control, "content", None), ft.Row)
+                and any(
+                    isinstance(child, ft.Icon) and child.icon == ft.Icons.EXPAND_MORE
+                    for child in control.content.controls
+                )
+            ),
+            None,
+        )
+        list_container = next(
+            (
+                control
+                for control in controls
+                if isinstance(control, ft.Container)
+                and getattr(control, "height", None) == 196
+                and isinstance(getattr(control, "content", None), ft.ListView)
+            ),
+            None,
+        )
+        selected_label = (
+            next(
+                (
+                    child
+                    for child in _smoke_control_tree(selection)
+                    if isinstance(child, ft.Text)
+                    and child.value not in {"已選擇：", ""}
+                ),
+                None,
+            )
+            if selection is not None
+            else None
+        )
+        if any(
+            value is None
+            for value in (search, selection, list_container, selected_label)
+        ):
+            raise RuntimeError("bundle dialog 搜尋版本選擇器結構不完整")
+        return search, selection, selected_label, list_container
+
     def all_dialog_feedback(dialog, needle: str) -> bool:
         return dialog.open and any(needle in text for text in probe_texts(dialog))
 
@@ -665,6 +720,102 @@ async def _run_dialog_click_probe(
         current = top_dialog()
         if current is None:
             raise RuntimeError(f"pipeline_{key} did not open")
+        if key == "bundle":
+            search, selection, selected_label, list_container = bundle_version_picker(
+                current
+            )
+            await gate(
+                "bundle-version-expand",
+                selection,
+                verify=lambda list_container=list_container: bool(
+                    list_container.visible
+                ),
+                observed=current,
+            )
+            await raw_click_gate("bundle-version-wheel")
+            await raw_click_gate("bundle-version-search")
+            deadline = asyncio.get_running_loop().time() + 5
+            while asyncio.get_running_loop().time() < deadline:
+                version_labels = [
+                    item.content.value
+                    for item in list_container.content.controls
+                    if isinstance(item, ft.Container)
+                    and isinstance(getattr(item, "content", None), ft.Text)
+                ]
+                if (
+                    (search.value or "").strip() == "1.20"
+                    and version_labels
+                    and all("1.20" in value for value in version_labels)
+                ):
+                    break
+                await asyncio.sleep(0.05)
+            filtered = (
+                (search.value or "").strip() == "1.20"
+                and bool(version_labels)
+                and all("1.20" in value for value in version_labels)
+            )
+            page.title = (
+                "SMOKE:CLICK:bundle-version-search:DONE:PASS"
+                if filtered
+                else "SMOKE:CLICK:bundle-version-search:DONE:FAIL"
+            )
+            page.update()
+            await _wait_for_capture_ack(
+                runtime_root,
+                f"{theme}-{viewport}-click-probe-bundle-version-search-verified",
+            )
+            if not filtered:
+                raise RuntimeError(
+                    "bundle version picker search did not filter to 1.20 entries"
+                )
+            if not list_container.content.controls:
+                raise RuntimeError("bundle version picker search returned no item")
+            first_version = list_container.content.controls[0]
+            expected_version = first_version.content.value
+            await gate(
+                "bundle-version-select",
+                first_version,
+                verify=lambda selected_label=selected_label, expected_version=expected_version, list_container=list_container: (
+                    selected_label.value == expected_version
+                    and not list_container.visible
+                ),
+                observed=current,
+            )
+
+            bundle_input = text_field(current, "輸入來源")
+            for resize_key, expected_viewport in (
+                ("bundle-resize-narrow", 390),
+                ("bundle-resize-restore", 1360),
+            ):
+                await raw_click_gate(resize_key)
+                deadline = asyncio.get_running_loop().time() + 8
+                resized = False
+                while asyncio.get_running_loop().time() < deadline:
+                    expected_width, expected_height = dialog_dimensions(page)
+                    expected_field_width = dialog_field_width(page)
+                    if (
+                        abs(int(page.width or 0) - expected_viewport) <= 4
+                        and current.content.width == expected_width
+                        and current.content.height == expected_height
+                        and bundle_input.width == expected_field_width
+                    ):
+                        resized = True
+                        break
+                    await asyncio.sleep(0.05)
+                page.title = (
+                    f"SMOKE:CLICK:{resize_key}:DONE:PASS"
+                    if resized
+                    else f"SMOKE:CLICK:{resize_key}:DONE:FAIL"
+                )
+                page.update()
+                await _wait_for_capture_ack(
+                    runtime_root,
+                    f"{theme}-{viewport}-click-probe-{resize_key}-verified",
+                )
+                if not resized:
+                    raise RuntimeError(
+                        f"open bundle dialog did not resize for viewport {expected_viewport}"
+                    )
         await gate(
             f"{key}-preview",
             action(current, "預覽結果"),
@@ -775,6 +926,7 @@ async def _run_dialog_click_probe(
     pipeline.runner.start_sequence = lambda steps, on_complete: wizard_run_calls.append(
         (steps, on_complete)
     )
+    wizard_selected_version = None
     try:
         wizard = top_dialog()
         await gate(
@@ -793,6 +945,60 @@ async def _run_dialog_click_probe(
             "wizard-step3-next",
             action(wizard, "下一個"),
             verify=lambda wizard=wizard: top_dialog() is not wizard,
+        )
+        wizard = top_dialog()
+        search, selection, selected_label, list_container = bundle_version_picker(
+            wizard
+        )
+        await gate(
+            "wizard-version-expand",
+            selection,
+            verify=lambda list_container=list_container: bool(list_container.visible),
+            observed=wizard,
+        )
+        await raw_click_gate("wizard-version-wheel")
+        await raw_click_gate("wizard-version-search")
+        deadline = asyncio.get_running_loop().time() + 5
+        while asyncio.get_running_loop().time() < deadline:
+            version_labels = [
+                item.content.value
+                for item in list_container.content.controls
+                if isinstance(item, ft.Container)
+                and isinstance(getattr(item, "content", None), ft.Text)
+            ]
+            if (
+                (search.value or "").strip() == "1.20"
+                and version_labels
+                and all("1.20" in value for value in version_labels)
+            ):
+                break
+            await asyncio.sleep(0.05)
+        filtered = (
+            (search.value or "").strip() == "1.20"
+            and bool(version_labels)
+            and all("1.20" in value for value in version_labels)
+        )
+        page.title = (
+            "SMOKE:CLICK:wizard-version-search:DONE:PASS"
+            if filtered
+            else "SMOKE:CLICK:wizard-version-search:DONE:FAIL"
+        )
+        page.update()
+        await _wait_for_capture_ack(
+            runtime_root,
+            f"{theme}-{viewport}-click-probe-wizard-version-search-verified",
+        )
+        if not filtered or not list_container.content.controls:
+            raise RuntimeError("wizard Minecraft version search failed")
+        first_version = list_container.content.controls[0]
+        wizard_selected_version = first_version.content.value
+        await gate(
+            "wizard-version-select",
+            first_version,
+            verify=lambda selected_label=selected_label, expected_version=wizard_selected_version, list_container=list_container: (
+                selected_label.value == expected_version and not list_container.visible
+            ),
+            observed=wizard,
         )
         wizard = top_dialog()
         await gate(
@@ -845,6 +1051,7 @@ async def _run_dialog_click_probe(
                 and len(wizard_run_calls) == 1
                 and len(wizard_execution_configs) == 1
                 and wizard_execution_configs[0]["lang_codes"] == ["en_us"]
+                and wizard_execution_configs[0]["version"] == wizard_selected_version
             ),
         )
         pipeline._end_run()

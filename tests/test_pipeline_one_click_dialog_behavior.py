@@ -405,10 +405,10 @@ def test_step2_switches_are_collected(env):
     only.on_change(SimpleNamespace(control=only))
     zh.value = False
     zh.on_change(SimpleNamespace(control=zh))
-    assert env.switch("允許 zh_cn 觸發跳過 en_us").disabled in (None, False)
+    assert env.switch("允許 zh_cn 觸發跳過 en_us").disabled is True
     for f in env.controls(ft.TextField):
         if f.width in (80, 100):
-            assert not f.disabled
+            assert f.disabled is (f.width == 100)
     config = env.run_to_end_from(2)
     assert config["process_zh_cn"] is False and config["only_lang"] is False
 
@@ -524,7 +524,7 @@ def test_step4_defaults_from_config(monkeypatch, tmp_path):
     e.open()
     e.goto(4)
     assert e.field("輸出 ZIP 檔案").value == os.path.join(str(e.out), "pack.zip")
-    assert e.field("輸入來源").value == os.path.join(str(e.out), "lm_translate", "_out")
+    assert e.field("輸入來源").value == os.path.join(str(e.out), "_打包暫存")
     assert e.field("封面圖片（可留空）").value == ""
     assert e.field("封面圖片（可留空）").read_only is True
     assert "點擊選擇版本" in e.texts()
@@ -689,7 +689,7 @@ def test_wizard_uses_one_fresh_global_database_snapshot_for_both_steps(env):
     merge = config["merge_db_snapshot"]
     lm = config["lm_db_snapshot"]
     assert merge.version == lm.version == "1.20.1"
-    assert lm.source == "global"
+    assert lm.source == "step2"
     assert merge.database_settings.path == lm.database_settings.path
     assert merge.database_settings.path.endswith("updated-global.db")
 
@@ -909,7 +909,7 @@ def test_pack_image_remove_clears_state_and_config(env):
     env.goto(4)
     _pick_image(env, "/img/cover.png")
     remove = next(
-        c for c in env.controls(ft.TextButton) if getattr(c, "content", None) == "移除"
+        c for c in env.controls(ft.Button) if getattr(c, "content", None) == "移除"
     )
     remove.on_click(None)
     assert env.field("封面圖片（可留空）").value == ""

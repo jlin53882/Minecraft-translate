@@ -21,10 +21,23 @@ import flet as ft
 from app.services_impl.moddb_service import load_db_settings
 from app.ui.design import C
 from app.ui.dialogs import dispose_dialogs, present_dialog
-from app.ui.sync_text_field import SyncTextField
 from app.views.merge.merge_db_options import MergeDbOptions
 from app.views.moddb.lm_db_options import LmDbOptions
-from app.views.pipeline.pipeline_config import normalize_extract_mode
+from app.views.pipeline.pipeline_config import PipelineConfig, normalize_extract_mode
+from app.views.pipeline.pipeline_forms import (
+    BundleFormState,
+    ExtractFormState,
+    MergeFormState,
+    PipelineWizardState,
+    TranslateFormState,
+    build_bundle_form,
+    build_extract_form,
+    build_merge_form,
+    build_translate_form,
+    dialog_button,
+    dialog_content,
+    dialog_dimensions,
+)
 from app.views.pipeline.pipeline_one_click_bundle_widgets import (
     build_step4_version_widgets,
 )
@@ -47,14 +60,6 @@ def _load_version_data():
             log_warning(f"讀取版本資料失敗，使用空設定：{config_path}: {exc!r}")
             return {}
     return {}
-
-
-def _parse_number(text, cast, default):
-    """欄位文字轉數字；空白或格式錯誤時回傳預設值（與欄位提示「空白用預設值」一致）。"""
-    try:
-        return cast(str(text).strip())
-    except (TypeError, ValueError):
-        return default
 
 
 def open_one_click_dialog(
@@ -102,6 +107,10 @@ def open_one_click_dialog(
         on_execute=on_execute,
         show_snack_bar=show_snack_bar,
     )
+    ctx.config_snapshot = load_config()
+    ctx.pipeline_config = PipelineConfig(
+        input_path, output_path, config=ctx.config_snapshot
+    )
     # Flet 0.85+ 的 Web 對話框必須交給 page.show_dialog / pop_dialog 管理；
     # 測試用頁面或舊版 Flet 沒有這組 API 時，才退回 overlay 相容流程。
     ctx.uses_dialog_api = callable(getattr(page, "show_dialog", None)) and callable(
@@ -126,7 +135,13 @@ def _one_click_bind_context(ctx):
     ctx.merge_db_options = MergeDbOptions(
         ctx.page.update, settings=ctx.global_db_settings
     )
-    ctx.lm_db_options = LmDbOptions(ctx.page.update, settings=ctx.global_db_settings)
+    ctx.lm_db_options = LmDbOptions(
+        ctx.page.update,
+        settings=ctx.global_db_settings,
+        step2_version_provider=lambda settings: (
+            ctx.merge_db_options.resolve_target_for_inheritance(settings)
+        ),
+    )
     ctx.closed = False
     ctx.executed = False
     ctx.active_step_dialog = None
@@ -146,16 +161,16 @@ def _one_click_bind_context(ctx):
     }
     for name, callback in callbacks.items():
         setattr(ctx, name, functools.partial(callback, ctx))
-    ctx.dialog_width = int(ctx.page.width * 0.6)
+    ctx.dialog_width, ctx.dialog_height = dialog_dimensions(ctx.page)
     ctx.step_label = ft.Text(
-        f"{ctx.state['step']}/4", size=12, color=C.MUTED, weight=ft.FontWeight.W_500
+        f"{ctx.state.step}/4", size=12, color=C.MUTED, weight=ft.FontWeight.W_500
     )
 
 
 def _one_click_init_config_defaults(ctx):
     """一鍵製作對話框：讀取設定預設值。"""
 
-    cfg = load_config()
+    cfg = ctx.config_snapshot
     lang_merger_cfg = cfg.get("lang_merger", {})
     bundler_cfg = cfg.get("output_bundler", {})
     jar_extractor_cfg = cfg.get("jar_extractor", {})
@@ -183,40 +198,29 @@ def _one_click_init_state(
         "patchouli_effective_translation_threshold", 0.5
     )
     ctx.zh_en_threshold_default = lang_merger_cfg.get("zh_en_letter_threshold", 2)
-    ctx.state = {
-        "step": 1,
-        "mode": "lang",
-        "lang_codes": {code: True for code in ctx.lang_codes_default},
-        "only_lang": True,
-        "process_zh_cn": True,
-        "patchouli_skip": lang_merger_cfg.get(
-            "patchouli_skip_en_us_when_zh_cn_exists", False
+    ctx.state = PipelineWizardState(
+        extract=ExtractFormState(
+            mode="lang",
+            lang_codes={code: True for code in ctx.lang_codes_default},
         ),
-        "patchouli_threshold": ctx.patchouli_threshold_default,
-        "zh_en_threshold": ctx.zh_en_threshold_default,
-        "dry_run": False,
-        "write_new_cache": True,
-        "description": "",
-        "version": "",
-        "pack_image": None,
-        "extra_folders": [],
-        "zip_output": os.path.join(ctx.output_path, output_zip_name)
-        if ctx.output_path
-        else "",
-        "translate_input": "",
-        "translate_output": os.path.join(ctx.output_path, "lm_translate")
-        if ctx.output_path
-        else "",
-        "bundle_input": os.path.join(
-            ctx.output_path, "lm_translate", translate_output_subfolder
-        )
-        if ctx.output_path
-        else "",
-    }
+        merge=MergeFormState(
+            patchouli_skip=lang_merger_cfg.get(
+                "patchouli_skip_en_us_when_zh_cn_exists", False
+            ),
+            patchouli_threshold=ctx.patchouli_threshold_default,
+            zh_en_threshold=ctx.zh_en_threshold_default,
+        ),
+        translate=TranslateFormState(),
+        bundle=BundleFormState(
+            zip_output=os.path.join(ctx.output_path, output_zip_name)
+            if ctx.output_path
+            else ""
+        ),
+    )
 
     ctx.dialogs: list[ft.AlertDialog] = []
     ctx.step_label = ft.Text(
-        f"{ctx.state['step']}/4", size=12, color=C.MUTED, weight=ft.FontWeight.W_500
+        f"{ctx.state.step}/4", size=12, color=C.MUTED, weight=ft.FontWeight.W_500
     )
 
 
@@ -227,7 +231,7 @@ def _one_click_rebuild_ui(ctx):
     ctx.active_step_dialog = None
     dispose_dialogs(ctx)
 
-    step = ctx.state["step"]
+    step = ctx.state.step
 
     ctx.step_label.value = f"{step}/4"
 
@@ -256,259 +260,101 @@ def _one_click__build_step_content(ctx, step: int):
 
 
 def _one_click__build_step1(ctx):
-    radio_group = ft.RadioGroup(
-        content=ft.Column(
-            [
-                ft.Radio(label="提取 Lang", value="lang"),
-                ft.Radio(label="提取 Book", value="book"),
-                ft.Radio(label="全部執行（Lang + Book）", value="both"),
-            ],
-            spacing=4,
-        ),
-        value=ctx.state["mode"],
-    )
-
-    def on_mode_changed(e):
-        ctx.state["mode"] = e.control.value
-
-    radio_group.on_change = on_mode_changed
-
-    lang_checks = {}
-    for code in ctx.lang_codes_default:
-        cb = ft.Checkbox(label=code, value=ctx.state["lang_codes"].get(code, True))
-        lang_checks[code] = cb
-
-    def on_lang_check(e=None):
-        for code, cb in lang_checks.items():
-            ctx.state["lang_codes"][code] = cb.value
-
-    for cb in lang_checks.values():
-        cb.on_change = on_lang_check
-
-    lang_section = ft.Column(
-        [lang_checks[code] for code in ctx.lang_codes_default], spacing=2
-    )
-
-    return ft.Column(
+    paths = ft.Column(
         [
             ft.Text("Mod 來源（唯讀）", weight="bold", size=13),
-            ft.Text(ctx.input_path or "未設定", size=11, color=C.MUTED),
+            ft.Text(
+                ctx.input_path or "未設定", size=11, color=C.MUTED, selectable=True
+            ),
             ft.Text("輸出目錄（唯讀）", weight="bold", size=13),
-            ft.Text(ctx.output_path or "未設定", size=11, color=C.MUTED),
-            ft.Divider(),
-            ft.Text("執行模式", weight="bold", size=13),
-            radio_group,
-            ft.Text("處理的語言代碼", weight="bold", size=13),
-            ft.Container(content=lang_section),
+            ft.Text(
+                ctx.output_path or "未設定", size=11, color=C.MUTED, selectable=True
+            ),
         ],
-        spacing=10,
-        tight=False,
+        spacing=8,
     )
+    controls = build_extract_form(
+        path_section=paths,
+        state=ctx.state.extract,
+        language_codes=ctx.lang_codes_default,
+    )
+    ctx.radio_group = controls.mode
+    ctx.lang_code_checks_local = controls.lang_checks
+    return controls.content
 
 
 def _one_click__build_step2(ctx):
-    patchouli_skip_cb, patchouli_thresh_field, zh_en_field = _one_click_step2_widgets(
-        ctx
-    )
-
-    def on_only_lang(e):
-        ctx.state["only_lang"] = e.control.value
-
-    def on_process_zh_cn(e):
-        ctx.state["process_zh_cn"] = e.control.value
-
-    return ft.Column(
+    paths = ft.Column(
         [
-            ft.Text("合併來源（唯讀）", weight="bold", size=13),
-            # 一鍵流程的語系比對固定處理「步驟 1 的提取輸出」，不是另外指定的 Mod 來源
-            ft.Text("步驟 1 的提取輸出（自動帶入）", size=11, color=C.MUTED),
-            ft.Divider(),
-            ft.Text("輸出目錄（唯讀）", weight="bold", size=13),
-            ft.Text(ctx.output_path or "未設定", size=11, color=C.MUTED),
-            ft.Divider(),
-            ft.Text("語系過濾設定", weight="bold", size=13),
-            ft.Switch(
-                label="只處理 lang 檔案",
-                value=ctx.state["only_lang"],
-                on_change=on_only_lang,
-            ),
-            ft.Switch(
-                label="處理 zh_cn 檔案",
-                value=ctx.state["process_zh_cn"],
-                on_change=on_process_zh_cn,
-            ),
-            ft.Divider(),
+            ft.Text("步驟 1 的提取輸出（自動帶入）", weight="bold", size=13),
+            ft.Text("實際合併來源目錄（唯讀）", weight="bold", size=12),
             ft.Text(
-                "步驟 2 合併與步驟 3 LM 各自有資料庫開關；初始皆沿用同一份全域設定，頁面覆寫互相獨立。",
+                ctx.pipeline_config.merge_input_dir,
                 size=11,
                 color=C.MUTED,
+                selectable=True,
             ),
-            ctx.merge_db_options.card,
-            ft.Divider(),
-            ft.Text("zh 英文含量閾值", weight=ft.FontWeight.W_500, size=12),
-            zh_en_field,
-            ft.Divider(),
-            ft.Text("Patchouli 進階設定", weight="bold", size=13),
-            ft.Column(
-                [
-                    ft.Text(
-                        "允許 zh_cn 觸發跳過 en_us",
-                        weight=ft.FontWeight.W_500,
-                        size=12,
-                    ),
-                    patchouli_skip_cb,
-                    ft.Text("en_us 跳過門檻", weight=ft.FontWeight.W_500, size=12),
-                    patchouli_thresh_field,
-                ]
+            ft.Text("輸出目錄（唯讀）", weight="bold", size=13),
+            ft.Text(
+                ctx.pipeline_config.merge_output_dir,
+                size=11,
+                color=C.MUTED,
+                selectable=True,
             ),
         ],
-        spacing=10,
-        tight=False,
+        spacing=8,
     )
-
-
-def _one_click_step2_widgets(ctx):
-    """步驟 2：合併與 Patchouli 選項。"""
-
-    patchouli_skip_cb = ft.Switch(
-        label="允許 zh_cn 觸發跳過 en_us",
-        value=ctx.state["patchouli_skip"],
+    controls = build_merge_form(
+        path_section=paths,
+        state=ctx.state.merge,
+        db_card=ctx.merge_db_options.card,
+        readonly_db_explanation=True,
+        on_zh_cn_change=lambda _event: ctx.page.update(),
     )
-
-    def on_patchouli_skip(e):
-        ctx.state["patchouli_skip"] = e.control.value
-
-    patchouli_skip_cb.on_change = on_patchouli_skip
-
-    def on_patchouli_threshold(e):
-        ctx.state["patchouli_threshold"] = _parse_number(
-            e.control.value, float, ctx.patchouli_threshold_default
-        )
-
-    def on_zh_en_threshold(e):
-        ctx.state["zh_en_threshold"] = _parse_number(
-            e.control.value, int, ctx.zh_en_threshold_default
-        )
-
-    patchouli_thresh_field = SyncTextField(
-        on_change=on_patchouli_threshold,
-        value=str(ctx.state["patchouli_threshold"]),
-        width=100,
-        dense=True,
-        keyboard_type=ft.KeyboardType.NUMBER,
-        text_align=ft.TextAlign.CENTER,
-        hint_text="空白用預設值",
-    )
-
-    zh_en_field = SyncTextField(
-        on_change=on_zh_en_threshold,
-        value=str(ctx.state["zh_en_threshold"]),
-        width=80,
-        dense=True,
-        keyboard_type=ft.KeyboardType.NUMBER,
-        text_align=ft.TextAlign.CENTER,
-        hint_text="空白用預設值",
-    )
-    return patchouli_skip_cb, patchouli_thresh_field, zh_en_field
+    ctx.merge_only_lang_checkbox = controls.only_lang
+    ctx.merge_process_zh_cn_switch = controls.process_zh_cn
+    ctx.merge_patchouli_skip_switch = controls.patchouli_skip
+    ctx.merge_patchouli_threshold_field = controls.patchouli_threshold
+    ctx.merge_zh_en_threshold_field = controls.zh_en_threshold
+    return controls.content
 
 
 def _one_click__build_step3(ctx):
-    dry_run_sw = ft.Switch(
-        label="Dry Run（只分析不翻譯）",
-        value=ctx.state["dry_run"],
-    )
-
-    def on_dry_run(e):
-        ctx.state["dry_run"] = e.control.value
-
-    dry_run_sw.on_change = on_dry_run
-
-    write_cache_sw = ft.Switch(
-        label="寫入新快取（每次回傳單獨快取）",
-        value=ctx.state["write_new_cache"],
-    )
-
-    def on_write_cache(e):
-        ctx.state["write_new_cache"] = e.control.value
-
-    write_cache_sw.on_change = on_write_cache
-
-    _translate_input_field = SyncTextField(
-        label="翻譯目標",
-        hint_text="自動帶入整理後的待翻譯資料夾",
-        value=ctx.state["translate_input"],
-        expand=True,
-        border_color=C.DIA,
-        path_input=True,
-    )
-    _translate_output_field = SyncTextField(
-        label="輸出目錄",
-        hint_text="自動帶入：{output}/lm_translate/<翻譯輸出子資料夾>",
-        value=ctx.state["translate_output"],
-        expand=True,
-        border_color=C.DIA,
-        path_input=True,
-    )
-
-    return ft.Column(
+    paths = ft.Column(
         [
             ft.Text("翻譯目標（唯讀）", weight="bold", size=13),
-            ft.Text(
-                os.path.join(
-                    ctx.output_path,
-                    "locale_sort",
-                    "_整理輸出",
-                    "lang_output",
-                    ctx.organized_folder,
-                )
-                if ctx.output_path
-                else "未設定",
-                size=11,
-                color=C.MUTED,
-            ),
+            *[
+                ft.Text(path, size=11, color=C.MUTED, selectable=True)
+                for path in ctx.pipeline_config.translate_input_dirs
+            ],
             ft.Text("輸出目錄（唯讀）", weight="bold", size=13),
             ft.Text(
-                os.path.join(
-                    ctx.output_path, "lm_translate", ctx.translate_output_subfolder
-                )
-                if ctx.output_path
-                else "未設定",
+                ctx.pipeline_config.translate_output_dir,
                 size=11,
                 color=C.MUTED,
+                selectable=True,
             ),
-            ft.Divider(),
-            ft.Text(
-                "步驟 3 LM 使用獨立快照；若步驟 2 有頁面覆寫，這裡不會暗中跟隨。",
-                size=11,
-                color=C.MUTED,
-            ),
-            ctx.lm_db_options.card,
-            ft.Divider(),
-            ft.Text("執行選項", weight="bold", size=13),
-            dry_run_sw,
-            write_cache_sw,
         ],
-        spacing=10,
-        tight=False,
+        spacing=8,
     )
+    controls = build_translate_form(
+        path_section=paths,
+        state=ctx.state.translate,
+        db_card=ctx.lm_db_options.card,
+    )
+    ctx.dry_run_switch = controls.dry_run
+    ctx.write_new_cache_switch = controls.write_new_cache
+    return controls.content
 
 
 def _one_click__build_step4(ctx):
-    (
-        _toggle_version,
-        bundle_input_field,
-        desc_field,
-        extra_view,
-        pack_image_field,
-        version_dropdown,
-        version_toggle_label,
-        zip_output_field,
-    ) = build_step4_version_widgets(ctx, _load_version_data())
+    widgets = build_step4_version_widgets(ctx, _load_version_data())
+    ctx.bundle_widgets = widgets
 
     def _refresh_extra():
-        extra_view.controls.clear()
-        for path in ctx.state["extra_folders"]:
-            extra_view.controls.append(
+        widgets.extra_folders_view.controls.clear()
+        for path in ctx.state.bundle.extra_folders:
+            widgets.extra_folders_view.controls.append(
                 ft.Row(
                     [
                         ft.Text(os.path.basename(path), expand=True, size=12),
@@ -522,8 +368,8 @@ def _one_click__build_step4(ctx):
             )
 
     def _remove_extra(p: str):
-        if p in ctx.state["extra_folders"]:
-            ctx.state["extra_folders"].remove(p)
+        if p in ctx.state.bundle.extra_folders:
+            ctx.state.bundle.extra_folders.remove(p)
             _refresh_extra()
             ctx.page.update()
 
@@ -532,53 +378,49 @@ def _one_click__build_step4(ctx):
     def _add_extra(e=None):
         async def do():
             result = await ctx.file_picker.get_directory_path()
-            if result and result not in ctx.state["extra_folders"]:
-                ctx.state["extra_folders"].append(result)
+            if result and result not in ctx.state.bundle.extra_folders:
+                ctx.state.bundle.extra_folders.append(result)
                 _refresh_extra()
                 ctx.page.update()
 
         ctx.page.run_task(do)
 
-    return ft.Column(
+    path_section = ft.Column(
         [
             ft.Text("輸入來源（唯讀）", weight="bold", size=13),
             ft.Text(
-                "一鍵流程固定使用步驟 2（語系合併）與步驟 3（翻譯）的輸出，不可在此修改",
+                "打包 staging 由下列來源合併建立，路徑由流程自動帶入且不可在此修改。",
                 size=11,
                 color=C.MUTED,
             ),
-            ft.Row([bundle_input_field]),
+            ft.Row([widgets.input_field], wrap=True),
+            *[
+                ft.Text(f"來源：{path}", size=10, color=C.MUTED, selectable=True)
+                for path in ctx.pipeline_config.bundle_sources
+            ],
             ft.Text("輸出 ZIP 檔案", weight="bold", size=13),
-            ft.Row([zip_output_field]),
-            ft.Text("檔案敘述", weight="bold", size=13),
-            desc_field,
-            ft.Text("Minecraft 版本", weight="bold", size=13),
+            ft.Row([widgets.zip_output_field], wrap=True),
+        ],
+        spacing=6,
+    )
+    extras = ft.Column(
+        [
             ft.Container(
-                content=ft.Row(
-                    [
-                        version_toggle_label,
-                        ft.Icon(ft.Icons.EXPAND_MORE, size=18),
-                    ]
-                ),
-                padding=8,
-                border=ft.Border.all(1, C.DIM),
-                border_radius=6,
-                on_click=_toggle_version,
-            ),
-            version_dropdown,
-            ft.Text("封面圖片（可留空）", weight="bold", size=13),
-            _one_click_pack_image_row(ctx, pack_image_field),
-            ft.Text("其他指定資料夾", weight="bold", size=13),
-            ft.Container(
-                content=extra_view,
+                content=widgets.extra_folders_view,
                 border=ft.Border.all(1, C.DIM),
                 border_radius=6,
                 padding=4,
             ),
             ft.Button("+ 新增資料夾", icon=ft.Icons.FOLDER_OPEN, on_click=_add_extra),
         ],
-        spacing=10,
-        tight=False,
+        spacing=6,
+    )
+    return build_bundle_form(
+        path_section=path_section,
+        description_field=widgets.description_field,
+        version_picker=widgets.version_picker,
+        pack_image_row=_one_click_pack_image_row(ctx, widgets.pack_image_field),
+        extra_folders_section=extras,
     )
 
 
@@ -592,12 +434,13 @@ def _one_click_pack_image_row(ctx, pack_image_field) -> ft.Row:
                 icon=ft.Icons.IMAGE,
                 on_click=lambda e: _one_click_pick_pack_image(ctx, pack_image_field),
             ),
-            ft.TextButton(
+            dialog_button(
                 "移除",
+                lambda e: _one_click_clear_pack_image(ctx, pack_image_field),
                 icon=ft.Icons.DELETE_OUTLINE,
-                on_click=lambda e: _one_click_clear_pack_image(ctx, pack_image_field),
             ),
-        ]
+        ],
+        wrap=True,
     )
 
 
@@ -620,7 +463,7 @@ def _one_click_pick_pack_image(ctx, field) -> None:
         if os.path.splitext(path)[1].lower() not in _PACK_IMAGE_EXTENSIONS:
             ctx.show_snack_bar("⚠️ 封面圖片只支援 .png/.jpg")
             return
-        ctx.state["pack_image"] = path
+        ctx.state.bundle.pack_image = path
         field.value = path
         ctx.page.update()
 
@@ -628,7 +471,7 @@ def _one_click_pick_pack_image(ctx, field) -> None:
 
 
 def _one_click_clear_pack_image(ctx, field) -> None:
-    ctx.state["pack_image"] = None
+    ctx.state.bundle.pack_image = None
     field.value = ""
     ctx.page.update()
 
@@ -643,21 +486,19 @@ def _one_click_build_dialog(ctx, step: int):
 
     actions = []
     if step > 1:
-        # Web 版使用標準 Button，避免 AlertDialog 內的 TextButton 事件未送達。
-        actions.append(ft.Button("上一個", on_click=lambda e, s=step: ctx._go_prev(s)))
+        actions.append(dialog_button("上一個", lambda e, s=step: ctx._go_prev(s)))
     if step < 4:
-        actions.append(ft.Button("下一個", on_click=lambda e, s=step: ctx._go_next(s)))
+        actions.append(dialog_button("下一個", lambda e, s=step: ctx._go_next(s)))
     else:
         actions.append(
-            ft.Button(
+            dialog_button(
                 "確定執行",
-                icon=ft.Icons.CHECK,
-                bgcolor=C.EM,
-                color=C.ON_EM,
                 on_click=lambda e, s=step: ctx._do_execute(s),
+                icon=ft.Icons.CHECK,
+                role="primary",
             )
         )
-    actions.append(ft.Button("取消", on_click=lambda e: ctx.close_all()))
+    actions.append(dialog_button("取消", lambda e: ctx.close_all()))
 
     dlg = ft.AlertDialog(
         modal=True,
@@ -667,11 +508,11 @@ def _one_click_build_dialog(ctx, step: int):
                 ft.Container(content=ctx.step_label, padding=5),
             ]
         ),
-        content=ft.Container(
-            content=ft.Column(
+        content=dialog_content(
+            ctx.page,
+            ft.Column(
                 [ctx._build_step_content(step), ctx.feedback], spacing=8, tight=False
             ),
-            width=ctx.dialog_width,
         ),
         actions=actions,
     )
@@ -693,11 +534,11 @@ def _one_click__go_prev(ctx, expected_step=None):
     if (
         ctx.closed
         or not getattr(ctx.active_step_dialog, "open", False)
-        or (expected_step is not None and ctx.state["step"] != expected_step)
+        or (expected_step is not None and ctx.state.step != expected_step)
     ):
         return
-    if ctx.state["step"] > 1:
-        ctx.state["step"] -= 1
+    if ctx.state.step > 1:
+        ctx.state.step -= 1
         ctx.rebuild_ui()
 
 
@@ -705,53 +546,98 @@ def _one_click__go_next(ctx, expected_step=None):
     if (
         ctx.closed
         or not getattr(ctx.active_step_dialog, "open", False)
-        or (expected_step is not None and ctx.state["step"] != expected_step)
+        or (expected_step is not None and ctx.state.step != expected_step)
     ):
         return
-    if ctx.state["step"] < 4:
-        ctx.state["step"] += 1
+    if ctx.state.step < 4:
+        ctx.state.step += 1
         ctx.rebuild_ui()
+
+
+def _one_click__sync_state_from_controls(ctx) -> None:
+    if hasattr(ctx, "radio_group"):
+        ctx.state.extract.mode = ctx.radio_group.value
+        ctx.state.extract.lang_codes.update(
+            {
+                code: bool(control.value)
+                for code, control in ctx.lang_code_checks_local.items()
+            }
+        )
+    if hasattr(ctx, "merge_only_lang_checkbox"):
+        ctx.state.merge.only_lang = bool(ctx.merge_only_lang_checkbox.value)
+        ctx.state.merge.process_zh_cn = bool(ctx.merge_process_zh_cn_switch.value)
+        ctx.state.merge.patchouli_skip = bool(ctx.merge_patchouli_skip_switch.value)
+        try:
+            ctx.state.merge.patchouli_threshold = float(
+                (ctx.merge_patchouli_threshold_field.value or "").strip()
+            )
+        except (TypeError, ValueError):
+            pass
+        try:
+            ctx.state.merge.zh_en_threshold = int(
+                (ctx.merge_zh_en_threshold_field.value or "").strip()
+            )
+        except (TypeError, ValueError):
+            pass
+    if hasattr(ctx, "dry_run_switch"):
+        ctx.state.translate.dry_run = bool(ctx.dry_run_switch.value)
+        ctx.state.translate.write_new_cache = bool(ctx.write_new_cache_switch.value)
+    if hasattr(ctx, "bundle_widgets"):
+        ctx.state.bundle.description = (
+            ctx.bundle_widgets.description_field.value or ""
+        ).strip()
+        ctx.state.bundle.zip_output = ctx.bundle_widgets.zip_output_field.value or ""
+        ctx.state.bundle.pack_image = (
+            ctx.bundle_widgets.pack_image_field.value or ""
+        ) or None
+
+
+def _one_click__build_execute_config(ctx, lang_codes: list[str]) -> dict:
+    global_settings = load_db_settings()
+    merge_db_snapshot = ctx.merge_db_options.snapshot_for_run(global_settings)
+    lm_db_snapshot = ctx.lm_db_options.snapshot_for_run(global_settings)
+    version_info = _load_version_data().get(ctx.state.bundle.version, {})
+    return {
+        "mode": normalize_extract_mode(ctx.state.extract.mode),
+        "lang_codes": lang_codes,
+        "only_lang": ctx.state.merge.only_lang,
+        "process_zh_cn": ctx.state.merge.process_zh_cn,
+        "patchouli_skip": ctx.state.merge.patchouli_skip,
+        "patchouli_threshold": ctx.state.merge.patchouli_threshold,
+        "zh_en_threshold": ctx.state.merge.zh_en_threshold,
+        "dry_run": ctx.state.translate.dry_run,
+        "write_new_cache": ctx.state.translate.write_new_cache,
+        "description": ctx.state.bundle.description,
+        "version": ctx.state.bundle.version,
+        "merge_db_snapshot": merge_db_snapshot,
+        "lm_db_snapshot": lm_db_snapshot,
+        "min_format": version_info.get("min_format"),
+        "max_format": version_info.get("max_format"),
+        "pack_image": ctx.state.bundle.pack_image,
+        "extra_folders": list(ctx.state.bundle.extra_folders),
+        "zip_output": ctx.state.bundle.zip_output,
+        "merge_input": ctx.input_path,
+    }
 
 
 def _one_click__do_execute(ctx, expected_step=4):
     if (
         ctx.closed
         or ctx.executed
-        or ctx.state["step"] != expected_step
+        or ctx.state.step != expected_step
         or not getattr(ctx.active_step_dialog, "open", False)
     ):
         return
-    lang_codes = [code for code, enabled in ctx.state["lang_codes"].items() if enabled]
+    _one_click__sync_state_from_controls(ctx)
+    lang_codes = [
+        code for code, enabled in ctx.state.extract.lang_codes.items() if enabled
+    ]
     if not lang_codes:
         ctx.feedback.value = "請至少勾選一個語言代碼，修正後再執行。"
         ctx.feedback.visible = True
         ctx.page.update()
         return
-    global_settings = load_db_settings()
-    merge_db_snapshot = ctx.merge_db_options.snapshot_for_run(global_settings)
-    lm_db_snapshot = ctx.lm_db_options.snapshot_for_run(global_settings)
-    version_info = _load_version_data().get(ctx.state["version"], {})
-    config = {
-        "mode": normalize_extract_mode(ctx.state["mode"]),
-        "lang_codes": lang_codes,
-        "only_lang": ctx.state["only_lang"],
-        "process_zh_cn": ctx.state["process_zh_cn"],
-        "patchouli_skip": ctx.state["patchouli_skip"],
-        "patchouli_threshold": ctx.state["patchouli_threshold"],
-        "zh_en_threshold": ctx.state["zh_en_threshold"],
-        "dry_run": ctx.state["dry_run"],
-        "write_new_cache": ctx.state["write_new_cache"],
-        "description": ctx.state["description"],
-        "version": ctx.state["version"],
-        "merge_db_snapshot": merge_db_snapshot,
-        "lm_db_snapshot": lm_db_snapshot,
-        "min_format": version_info.get("min_format"),
-        "max_format": version_info.get("max_format"),
-        "pack_image": ctx.state["pack_image"],
-        "extra_folders": list(ctx.state["extra_folders"]),
-        "zip_output": ctx.state["zip_output"],
-        "merge_input": ctx.input_path,
-    }
+    config = _one_click__build_execute_config(ctx, lang_codes)
     result = ctx.on_execute(config)
     if result is False:
         ctx.feedback.value = "設定驗證未通過；請修正必要欄位後再執行。"

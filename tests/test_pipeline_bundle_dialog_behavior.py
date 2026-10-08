@@ -353,7 +353,9 @@ def _dropdown(dialog):
     return next(
         c
         for c in _walk(dialog)
-        if isinstance(c, ft.Container) and isinstance(c.content, ft.ListView)
+        if isinstance(c, ft.Container)
+        and isinstance(c.content, ft.ListView)
+        and c.height == 196
     )
 
 

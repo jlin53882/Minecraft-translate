@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 
 import flet as ft
@@ -38,12 +39,15 @@ class LmDbOptions:
         *,
         settings: DbSettings | None = None,
         on_missing_database=None,
+        step2_version_provider: Callable[[DbSettings], tuple[str, str]] | None = None,
     ) -> None:
         self._page_update = page_update
         self._on_missing_database = on_missing_database
+        self._step2_version_provider = step2_version_provider
         self._settings = settings or moddb_service.load_db_settings()
         self._enabled_touched = False
         self._version_touched = False
+        self._step2_touched = False
         self._summary: dict | None = None
         self._versions: list[str] = []
 
@@ -52,11 +56,22 @@ class LmDbOptions:
             value=self._settings.enabled,
             on_change=self._on_enabled_changed,
         )
+        self.inherit_step2_switch = (
+            ft.Switch(
+                label="預設沿用步驟 2 語系合併的目標版本",
+                value=True,
+                on_change=self._on_inherit_step2_changed,
+            )
+            if step2_version_provider is not None
+            else None
+        )
         self.inherit_version_switch = ft.Switch(
             label=self._inherit_label(self._settings.version),
             value=True,
             on_change=self._on_inherit_changed,
         )
+        if self.inherit_step2_switch is not None:
+            self.inherit_version_switch.disabled = True
         self.version_field = target_version_dropdown(
             value=self._settings.version,
             label="Mod 資料庫目標版本",
@@ -73,6 +88,7 @@ class LmDbOptions:
             ft.Column(
                 [
                     self.use_db_switch,
+                    *([self.inherit_step2_switch] if self.inherit_step2_switch else []),
                     self.inherit_version_switch,
                     self.version_field,
                     self.info,
@@ -97,8 +113,11 @@ class LmDbOptions:
         self._version_touched = True
         control = getattr(event, "control", None)
         inherited = bool(getattr(control, "value", self.inherit_version_switch.value))
-        self.version_field.disabled = inherited
-        if inherited:
+        step2_inherited = bool(
+            self.inherit_step2_switch and self.inherit_step2_switch.value
+        )
+        self.version_field.disabled = inherited or step2_inherited
+        if inherited and not step2_inherited:
             self._settings = moddb_service.load_db_settings()
             set_target_version(self.version_field, self._settings.version)
         self.refresh_info()
@@ -106,8 +125,22 @@ class LmDbOptions:
 
     def _on_version_changed(self, _event=None) -> None:
         self._version_touched = True
+        if self.inherit_step2_switch is not None:
+            self.inherit_step2_switch.value = False
+            self._step2_touched = True
         self.inherit_version_switch.value = False
         self.version_field.disabled = False
+        self.refresh_info()
+        self._update()
+
+    def _on_inherit_step2_changed(self, event=None) -> None:
+        self._step2_touched = True
+        control = getattr(event, "control", None)
+        inherited = bool(getattr(control, "value", self.inherit_step2_switch.value))
+        self.inherit_version_switch.disabled = inherited
+        self.version_field.disabled = inherited or bool(
+            self.inherit_version_switch.value
+        )
         self.refresh_info()
         self._update()
 
@@ -141,10 +174,18 @@ class LmDbOptions:
         self._refresh_database_state(current)
         if not self._enabled_touched:
             self.use_db_switch.value = current.enabled
+        step2_inherited = bool(
+            self.inherit_step2_switch and self.inherit_step2_switch.value
+        )
         if not self._version_touched or self.inherit_version_switch.value:
             self.inherit_version_switch.value = True
             self.inherit_version_switch.label = self._inherit_label(current.version)
             set_target_version(self.version_field, current.version)
+            self.inherit_version_switch.disabled = step2_inherited
+            self.version_field.disabled = True
+        if self.inherit_step2_switch is not None and not self._step2_touched:
+            self.inherit_step2_switch.value = True
+            self.inherit_version_switch.disabled = True
             self.version_field.disabled = True
         self.refresh_info()
         self._update()
@@ -160,30 +201,51 @@ class LmDbOptions:
         # controls from the latest settings snapshot.
         if bool(self.use_db_switch.value) != bool(self._settings.enabled):
             self._enabled_touched = True
-        if not bool(self.inherit_version_switch.value):
+        if not bool(self.inherit_version_switch.value) or (
+            self.inherit_step2_switch is not None
+            and not self.inherit_step2_switch.value
+        ):
             self._version_touched = True
         # Refresh untouched controls and their visible effective-value summary
         # from the same settings object that will be frozen into the operation.
         self.sync_from_global(settings)
         enabled = bool(self.use_db_switch.value)
-        inherited = bool(self.inherit_version_switch.value)
-        target = (
-            str(settings.version or "").strip()
-            if inherited
-            else str(self.version_field.value or self.version_field.text or "").strip()
+        step2_inherited = bool(
+            self.inherit_step2_switch and self.inherit_step2_switch.value
         )
-        source = "global" if inherited else "page"
+        inherited = bool(self.inherit_version_switch.value)
+        if step2_inherited:
+            target, source, inherited_warning = self._resolve_step2_version(settings)
+        else:
+            target = (
+                str(settings.version or "").strip()
+                if inherited
+                else str(
+                    self.version_field.value or self.version_field.text or ""
+                ).strip()
+            )
+            source = "global" if inherited else "page"
+            inherited_warning = ""
         path = str(settings.resolved_path().resolve())
         if not enabled:
             frozen = replace(settings, enabled=False, path=path, version=target)
-            return LmDbRunSnapshot(False, target, source, "Mod 資料庫已停用", frozen)
+            return LmDbRunSnapshot(
+                False,
+                target,
+                source,
+                inherited_warning or "Mod 資料庫已停用",
+                frozen,
+            )
         if not target:
-            warning = "未指定 Mod 資料庫目標版本；本次會略過資料庫，不會改用其他版本"
+            warning = (
+                inherited_warning
+                or "未指定 Mod 資料庫目標版本；本次會略過資料庫，不會改用其他版本"
+            )
             frozen = replace(settings, enabled=False, path=path, version="")
             return LmDbRunSnapshot(False, "", source, warning, frozen)
 
         frozen = replace(settings, enabled=True, path=path, version=target)
-        warning = ""
+        warning = inherited_warning
         if self._summary is None:
             warning = f"資料庫尚未建立（{path}）；本次會略過資料庫查詢／寫回"
         elif self._summary.get("problem"):
@@ -195,10 +257,14 @@ class LmDbOptions:
         self._settings = settings
         self._enabled_touched = True
         self._version_touched = True
+        self._step2_touched = True
+        if self.inherit_step2_switch is not None:
+            self.inherit_step2_switch.value = False
         self._refresh_database_state(settings)
         self.use_db_switch.value = settings.enabled
         self.inherit_version_switch.value = False
         self.inherit_version_switch.label = "沿用全域版本（續跑固定使用上次快照）"
+        self.inherit_version_switch.disabled = False
         self.version_field.disabled = False
         set_target_version(self.version_field, settings.version)
         self.refresh_info()
@@ -218,18 +284,35 @@ class LmDbOptions:
         if not self.use_db_switch.value:
             text += "\n本次停用資料庫，不查詢也不寫回。"
         else:
-            inherited = bool(self.inherit_version_switch.value)
-            target = (
-                str(self._settings.version or "").strip()
-                if inherited
-                else str(
-                    self.version_field.value or self.version_field.text or ""
-                ).strip()
+            step2_inherited = bool(
+                self.inherit_step2_switch and self.inherit_step2_switch.value
             )
-            source = "沿用全域設定" if inherited else "頁面指定"
-            text += f"\n本次預計使用：{target or '未指定（略過 DB）'}（{source}）"
+            inherited = bool(self.inherit_version_switch.value)
+            if step2_inherited:
+                target, _source, warning = self._resolve_step2_version(self._settings)
+                source = "沿用步驟 2 語系合併"
+            else:
+                target = (
+                    str(self._settings.version or "").strip()
+                    if inherited
+                    else str(
+                        self.version_field.value or self.version_field.text or ""
+                    ).strip()
+                )
+                source = "沿用全域設定" if inherited else "本步驟指定"
+                warning = ""
+            text += f"\n本次查詢／預計寫回：{target or '未指定（略過 DB）'}（{source}）"
+            if warning:
+                text += f"\n⚠ {warning}"
             if not target:
                 text += "\n⚠ 尚未指定目標版本；不會回退到其他版本。"
             elif target not in self._versions:
                 text += "\n此版本目前不在資料庫中；若資料庫可用，LM 仍可依設定建立新版本譯文。"
         self.info.value = text
+
+    def _resolve_step2_version(self, settings: DbSettings) -> tuple[str, str, str]:
+        """Return Step 2's currently resolved target and warning for UI/run snapshot."""
+        if self._step2_version_provider is None:
+            return "", "step2", "步驟 2 的目標版本無法取得"
+        target, warning = self._step2_version_provider(settings)
+        return str(target or "").strip(), "step2", warning
