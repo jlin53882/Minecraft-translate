@@ -40,6 +40,7 @@ from translation_tool.core.lang_merge_dict import (
 from translation_tool.core.lang_merge_dict import (
     merge_lang_dicts,
 )
+from translation_tool.translation_db import DbSettings
 from translation_tool.utils.log_unit import log_debug, log_info, log_warning
 from translation_tool.utils.safe_json_loader import load_json_auto_encoding
 from translation_tool.utils.text_processor import (
@@ -467,9 +468,14 @@ def merge_extracted_to_assets(
     pending_folder_names: Iterable[str] | None = None,
     use_translation_db: bool | None = None,
     translation_db_version: str | None = None,
+    translation_db_settings_snapshot: DbSettings | None = None,
 ) -> Generator[dict[str, Any], None, None]:
     """合併階段 2（純英文條目會先向 Mod 資料庫補譯；其餘見 ``_merge_extracted_to_assets``）。"""
-    with merge_db_fill(use_translation_db, translation_db_version) as db_fill:
+    with merge_db_fill(
+        use_translation_db,
+        translation_db_version,
+        settings_snapshot=translation_db_settings_snapshot,
+    ) as db_fill:
         yield from _merge_extracted_to_assets(
             lang_output_dir, session, pending_folder_names, db_fill=db_fill
         )

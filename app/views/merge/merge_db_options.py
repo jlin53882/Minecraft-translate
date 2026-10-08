@@ -7,11 +7,15 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import flet as ft
 
-from app.services_impl.moddb_service import load_db_settings, summarize_database
+from app.services_impl.moddb_service import (
+    DbSettings,
+    load_db_settings,
+    summarize_database,
+)
 from app.ui import kit
 from app.ui.design import C
 from app.views.moddb import version_picker
@@ -25,6 +29,7 @@ class MergeDbRunSnapshot:
     use_db: bool
     version: str
     warning: str = ""
+    database_settings: DbSettings | None = None
 
 
 class MergeDbOptions:
@@ -41,7 +46,7 @@ class MergeDbOptions:
         self._settings = settings
         self._database_versions: list[str] = []
         self._summary: dict | None = None
-        self._refresh_database_state()
+        self._refresh_database_state(settings)
         row = kit.SwitchRow(
             "使用 Mod 資料庫補譯",
             "純英文條目先向資料庫找相同（模組、鍵值、原文）的譯文；只補沒有譯文的條目",
@@ -86,7 +91,7 @@ class MergeDbOptions:
     def sync_from_config(self) -> None:
         """Refresh global hints/options while preserving independent user overrides."""
         self._settings = load_db_settings()
-        self._refresh_database_state()
+        self._refresh_database_state(self._settings)
         if not self._switch_touched:
             self.switch.value = self._settings.merge_enabled
         self._refresh_version_control()
@@ -94,7 +99,7 @@ class MergeDbOptions:
 
     def _on_version_focus(self, _e=None) -> None:
         self._settings = load_db_settings()
-        self._refresh_database_state()
+        self._refresh_database_state(self._settings)
         self._refresh_version_control()
         self.refresh_info()
         if self._database_missing and self._on_missing_database:
@@ -132,15 +137,17 @@ class MergeDbOptions:
         except Exception as exc:  # noqa: BLE001 - 頁面尚未掛載時只是不即時更新提示
             log_debug(f"語系合併資料庫版本提示更新略過：{exc}")
 
-    def _refresh_database_state(self) -> None:
+    def _refresh_database_state(self, settings: DbSettings | None = None) -> None:
         """Read latest DB candidates without creating a database."""
         try:
-            self._database_versions = version_picker.merge_target_version_choices()
+            self._database_versions = version_picker.merge_target_version_choices(
+                settings
+            )
         except Exception as exc:  # noqa: BLE001 - picker 本身也採 fail-closed
             log_warning(f"讀取語系合併資料庫版本失敗：{exc!r}")
             self._database_versions = []
         try:
-            self._summary = summarize_database()
+            self._summary = summarize_database(settings)
         except Exception as exc:  # noqa: BLE001 - 只影響提示文字，不應讓頁面載入失敗
             log_warning(f"讀取 Mod 資料庫摘要失敗：{exc!r}")
             self._summary = {"problem": f"讀取摘要失敗（{exc}），詳情請看後台 log"}
@@ -204,13 +211,20 @@ class MergeDbOptions:
     def snapshot_for_run(self) -> MergeDbRunSnapshot:
         """Resolve the effective target on the UI thread and freeze it for the worker."""
         self._settings = load_db_settings()
-        self._refresh_database_state()
+        settings = self._settings
+        self._refresh_database_state(settings)
         self._refresh_version_control()
         self.refresh_info()
         if not self.use_db:
             return MergeDbRunSnapshot(False, "")
         target, _source, warning = self._resolved_choice()
-        return MergeDbRunSnapshot(True, target, warning)
+        frozen_settings = replace(
+            settings,
+            path=str(settings.resolved_path().resolve()),
+            merge_enabled=True,
+            version=target,
+        )
+        return MergeDbRunSnapshot(True, target, warning, frozen_settings)
 
     def refresh_info(self) -> None:
         """顯示資料庫狀態；沒建立或沒有版本時說明這次會略過補譯。"""

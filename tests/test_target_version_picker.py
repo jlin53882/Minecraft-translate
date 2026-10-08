@@ -133,6 +133,21 @@ def test_merge_target_version_choices_are_only_versions_stored_in_the_database(
     assert set(version_picker.merge_target_version_choices()) == {"1.21.1", "1.20.1"}
 
 
+def test_merge_target_version_choices_use_the_supplied_database_settings(monkeypatch):
+    from app.services_impl import moddb_service
+
+    settings = moddb_service.DbSettings(path="database-a.db")
+    seen = []
+    monkeypatch.setattr(
+        version_picker,
+        "database_version_choices",
+        lambda actual_settings: seen.append(actual_settings) or ["1.21.1"],
+    )
+
+    assert version_picker.merge_target_version_choices(settings) == ["1.21.1"]
+    assert seen == [settings]
+
+
 @pytest.mark.parametrize("database_state", ["missing", "corrupt", "empty"])
 def test_merge_database_version_choices_fail_closed_without_creating_database(
     tmp_path, monkeypatch, database_state

@@ -6,7 +6,12 @@ import logging
 
 import flet as ft
 
-from app.services_impl.moddb_service import open_database, version_choices
+from app.services_impl.moddb_service import (
+    DbSettings,
+    database_version_choices,
+    open_database,
+    version_choices,
+)
 from app.ui import kit
 
 logger = logging.getLogger(__name__)
@@ -31,8 +36,14 @@ def target_version_choices() -> list[str]:
             db.close()
 
 
-def merge_target_version_choices() -> list[str]:
+def merge_target_version_choices(settings: DbSettings | None = None) -> list[str]:
     """Return only versions present in the existing database; never create/fallback."""
+    if settings is not None:
+        try:
+            return database_version_choices(settings)
+        except Exception:
+            logger.warning("讀取語系合併資料庫版本失敗", exc_info=True)
+            return []
     db = None
     try:
         db = open_database(create=False)

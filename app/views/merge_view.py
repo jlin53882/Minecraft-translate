@@ -323,6 +323,7 @@ class MergeView(MergeWidgetsMixin, ft.Column):
                 or 2,
                 use_translation_db=use_translation_db,
                 translation_db_version=translation_db_version,
+                translation_db_settings_snapshot=db_options_snapshot.database_settings,
             ):
                 pass
         else:
@@ -345,6 +346,7 @@ class MergeView(MergeWidgetsMixin, ft.Column):
                 or 2,
                 use_translation_db=use_translation_db,
                 translation_db_version=translation_db_version,
+                translation_db_settings_snapshot=db_options_snapshot.database_settings,
             ):
                 pass
 

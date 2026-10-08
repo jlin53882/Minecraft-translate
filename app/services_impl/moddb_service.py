@@ -68,6 +68,7 @@ __all__ = [
     "current_settings",
     "custom_source_codes",
     "database_problem",
+    "database_version_choices",
     "describe_db_path",
     "load_db_settings",
     "normalize_db_path",
@@ -111,6 +112,17 @@ def open_database(*, create: bool = True) -> TranslationDB | None:
     return open_db(current_settings(), create=create)
 
 
+def database_version_choices(settings: DbSettings | None = None) -> list[str]:
+    """讀取指定資料庫中已存在的版本，不建立資料庫。"""
+    db = open_db(settings or current_settings(), create=False)
+    if db is None:
+        return []
+    try:
+        return list(db.versions())
+    finally:
+        db.close()
+
+
 def version_choices(db: TranslationDB | None = None) -> list[str]:
     """遊戲版本候選：資料庫已有的版本在前，其後是資源包版本清單（與打包頁同一份）。"""
     seen: list[str] = []
@@ -140,15 +152,16 @@ def pack_format_hint(label: str) -> str:
     return ""
 
 
-def summarize_database() -> dict[str, Any] | None:
+def summarize_database(settings: DbSettings | None = None) -> dict[str, Any] | None:
     """儀表板用的簡要摘要；資料庫不存在時回傳 None（不會建立檔案）。
 
     檔案存在卻不能用（其他用途的 SQLite、版本太新）時回傳 ``{"problem": 原因}``，
     讓畫面說明原因而不是誤顯示「尚未建立」。
     """
-    db = open_database(create=False)
+    settings = settings or current_settings()
+    db = open_db(settings, create=False)
     if db is None:
-        problem = database_problem()
+        problem = _db_problem(settings)
         return {"problem": problem} if problem else None
     try:
         stats = db.version_stats()
@@ -159,7 +172,7 @@ def summarize_database() -> dict[str, Any] | None:
             "entries": total,
             "translated": translated,
             "progress": round(100 * translated / total) if total else 0,
-            "target_version": current_settings().version,
+            "target_version": settings.version,
         }
     finally:
         db.close()

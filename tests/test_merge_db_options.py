@@ -35,12 +35,12 @@ def _patch(monkeypatch, **kw):
     }
     monkeypatch.setattr(merge_db_options, "load_db_settings", lambda: state["settings"])
     monkeypatch.setattr(
-        merge_db_options, "summarize_database", lambda: state["summary"]
+        merge_db_options, "summarize_database", lambda *_args: state["summary"]
     )
     monkeypatch.setattr(
         version_picker,
         "merge_target_version_choices",
-        lambda: list(state["versions"]),
+        lambda *_args: list(state["versions"]),
     )
     return state
 
@@ -242,11 +242,19 @@ def test_stale_page_selection_is_not_reintroduced_or_silently_inherited(monkeypa
 def test_service_passes_page_choice_to_both_stages(monkeypatch, tmp_path, input_mode):
     """Folder／ZIP 的 Stage 1 與 Stage 2 都使用同一固定版本。"""
     seen: dict = {}
+    settings_snapshot = DbSettings(
+        path=str(tmp_path / "database-a.db"),
+        merge_enabled=True,
+        version="1.21.1",
+        cross_version=False,
+        priority=(4, 2, 1),
+    )
 
     def fake_folder(*args, **kwargs):
         seen["stage1"] = (
             kwargs.get("use_translation_db"),
             kwargs.get("translation_db_version"),
+            kwargs.get("translation_db_settings_snapshot"),
         )
         yield {"progress": 1.0, "log": None}
 
@@ -254,6 +262,7 @@ def test_service_passes_page_choice_to_both_stages(monkeypatch, tmp_path, input_
         seen["stage2"] = (
             kwargs.get("use_translation_db"),
             kwargs.get("translation_db_version"),
+            kwargs.get("translation_db_settings_snapshot"),
         )
         yield {"progress": 1.0, "log": None}
 
@@ -277,8 +286,9 @@ def test_service_passes_page_choice_to_both_stages(monkeypatch, tmp_path, input_
                 str(tmp_path / "out"),
                 session,
                 only_process_lang=True,
-                use_translation_db=False,
+                use_translation_db=True,
                 translation_db_version="1.21.1",
+                translation_db_settings_snapshot=settings_snapshot,
             )
         )
     else:
@@ -288,13 +298,14 @@ def test_service_passes_page_choice_to_both_stages(monkeypatch, tmp_path, input_
                 str(tmp_path / "out"),
                 session,
                 only_process_lang=True,
-                use_translation_db=False,
+                use_translation_db=True,
                 translation_db_version="1.21.1",
+                translation_db_settings_snapshot=settings_snapshot,
             )
         )
-    assert seen["stage1"] == (False, "1.21.1")
+    assert seen["stage1"] == (True, "1.21.1", settings_snapshot)
     if input_mode == "folder":
-        assert seen["stage2"] == (False, "1.21.1")
+        assert seen["stage2"] == (True, "1.21.1", settings_snapshot)
     else:
         # ZIP merge currently has no extracted-assets Stage 2 entry point.
         assert "stage2" not in seen
@@ -385,7 +396,15 @@ def test_merge_start_freezes_db_version_for_worker_and_both_stages(
     monkeypatch, tmp_path, input_mode
 ):
     """開始後更改頁面／全域版本，不得影響已提交的 Folder 或 ZIP 任務。"""
-    state = _patch(monkeypatch, merge_enabled=True, version="1.21.1")
+    database_a = tmp_path / "database-a.db"
+    state = _patch(
+        monkeypatch,
+        path=str(database_a),
+        merge_enabled=True,
+        version="1.21.1",
+        cross_version=False,
+        priority=(4, 2, 1),
+    )
     monkeypatch.setattr(merge_view, "TaskSession", TaskSession)
     monkeypatch.setattr(merge_widgets, "TaskSession", TaskSession)
     monkeypatch.setattr(merge_view, "load_config", lambda: {"lang_merger": {}})
@@ -437,7 +456,13 @@ def test_merge_start_freezes_db_version_for_worker_and_both_stages(
     view.start_merge(None)
 
     # 工作者尚未開始時 UI 和全域設定都發生變動。
-    state["settings"] = DbSettings(merge_enabled=True, version="1.21.1")
+    state["settings"] = DbSettings(
+        path=str(tmp_path / "database-b.db"),
+        merge_enabled=True,
+        version="1.21.1",
+        cross_version=True,
+        priority=(1, 2, 4),
+    )
     view.db_options.version_field.value = "1.21.1"
     view.db_options.version_field.on_select(
         type("Event", (), {"control": view.db_options.version_field})()
@@ -447,3 +472,8 @@ def test_merge_start_freezes_db_version_for_worker_and_both_stages(
     service_kwargs = captured[input_mode]
     assert service_kwargs["use_translation_db"] is True
     assert service_kwargs["translation_db_version"] == "1.20.1"
+    snapshot = service_kwargs["translation_db_settings_snapshot"]
+    assert snapshot.path == str(database_a.resolve())
+    assert snapshot.version == "1.20.1"
+    assert snapshot.cross_version is False
+    assert snapshot.priority == (4, 2, 1)

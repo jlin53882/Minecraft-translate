@@ -17,6 +17,7 @@ from typing import Any
 
 from translation_tool.core.lm_config_rules import value_fully_translated
 from translation_tool.translation_db import (
+    DbSettings,
     TranslationDB,
     TranslationResolver,
     load_db_settings,
@@ -68,10 +69,13 @@ class MergeDbFill:
 
 
 def open_merge_db_fill(
-    use_db: bool | None = None, version: str | None = None
+    use_db: bool | None = None,
+    version: str | None = None,
+    *,
+    settings_snapshot: DbSettings | None = None,
 ) -> MergeDbFill | None:
     """依設定開啟資料庫；``use_db`` / ``version`` 為 None 時用設定檔的值（與機器翻譯一致）。"""
-    settings = load_db_settings()
+    settings = settings_snapshot or load_db_settings()
     enabled = settings.merge_enabled if use_db is None else bool(use_db)
     if not enabled:
         return None
@@ -79,8 +83,16 @@ def open_merge_db_fill(
     if not target:
         log_debug("語系合併：Mod 資料庫已啟用但尚未指定目標版本，略過資料庫補譯")
         return None
+    expected_path = settings.resolved_path().resolve()
     db = open_db(settings, create=False)
     if db is None:  # 資料庫尚未建立／無法開啟：略過（open_db 已記錄原因）
+        return None
+    if db.path.resolve() != expected_path:
+        log_warning(
+            "語系合併開啟的資料庫路徑與操作快照不一致，略過補譯："
+            f"預期 {expected_path}，實際 {db.path.resolve()}"
+        )
+        db.close()
         return None
     try:
         versions = db.versions()
@@ -98,10 +110,13 @@ def open_merge_db_fill(
 
 @contextmanager
 def merge_db_fill(
-    use_db: bool | None = None, version: str | None = None
+    use_db: bool | None = None,
+    version: str | None = None,
+    *,
+    settings_snapshot: DbSettings | None = None,
 ) -> Iterator[MergeDbFill | None]:
     """``open_merge_db_fill`` 的 context manager 版本：離開時一定關閉資料庫並記錄統計。"""
-    fill = open_merge_db_fill(use_db, version)
+    fill = open_merge_db_fill(use_db, version, settings_snapshot=settings_snapshot)
     try:
         yield fill
     finally:

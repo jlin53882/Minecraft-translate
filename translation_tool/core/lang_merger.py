@@ -15,6 +15,7 @@ from typing import Any
 from translation_tool.utils.bounded_executor import bounded_as_completed
 from translation_tool.utils.ui_mirror import ContextThreadPoolExecutor
 
+from ..translation_db import DbSettings
 from ..utils.cancellation import raise_if_cancelled
 from ..utils.config_manager import load_config
 from ..utils.log_unit import log_debug, log_error, log_exception, log_info
@@ -60,9 +61,14 @@ def merge_zhcn_to_zhtw_from_zip(
     progress_end: float = 1.0,
     use_translation_db: bool | None = None,
     translation_db_version: str | None = None,
+    translation_db_settings_snapshot: DbSettings | None = None,
 ) -> Generator[dict[str, Any], None, None]:
     """語系合併（zip）：純英文條目會先向 Mod 資料庫補譯（若設定啟用），其餘見 ``_merge_zhcn_to_zhtw_from_zip``。"""
-    with merge_db_fill(use_translation_db, translation_db_version) as db_fill:
+    with merge_db_fill(
+        use_translation_db,
+        translation_db_version,
+        settings_snapshot=translation_db_settings_snapshot,
+    ) as db_fill:
         yield from _merge_zhcn_to_zhtw_from_zip(
             zip_file,
             output_dir,
@@ -467,9 +473,14 @@ def merge_zhcn_to_zhtw_from_folder(
     progress_end: float = 1.0,
     use_translation_db: bool | None = None,
     translation_db_version: str | None = None,
+    translation_db_settings_snapshot: DbSettings | None = None,
 ) -> Generator[dict[str, Any], None, None]:
     """語系合併（folder）：純英文條目會先向 Mod 資料庫補譯（若設定啟用），其餘見 ``_merge_zhcn_to_zhtw_from_folder``。"""
-    with merge_db_fill(use_translation_db, translation_db_version) as db_fill:
+    with merge_db_fill(
+        use_translation_db,
+        translation_db_version,
+        settings_snapshot=translation_db_settings_snapshot,
+    ) as db_fill:
         yield from _merge_zhcn_to_zhtw_from_folder(
             input_dir,
             output_dir,

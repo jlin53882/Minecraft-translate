@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import json
+import zipfile
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 
-from translation_tool.core import lang_merge_db
+from app.services_impl.pipelines import merge_service
+from translation_tool.core import lang_merge_db, lang_merger
 from translation_tool.core.lang_merge_db import merge_db_fill
 from translation_tool.core.lang_merge_extracted_assets import merge_extracted_to_assets
 from translation_tool.core.lang_merger import merge_zhcn_to_zhtw_from_folder
@@ -86,6 +89,159 @@ def test_stage1_fills_pending_from_database(tmp_path, monkeypatch, db_path):
         "item.foo.b",
         "item.foo.c",
     }  # 原文不同／資料庫沒有 → 仍待翻譯
+
+
+def test_zip_batch_keeps_database_identity_after_global_path_switch(
+    tmp_path, monkeypatch
+):
+    """批次開始後全域 DB 路徑改變，所有 ZIP 仍使用啟動時快照中的資料庫。"""
+    database_a_path = tmp_path / "database-a.db"
+    database_b_path = tmp_path / "database-b.db"
+    for path, translations in (
+        (
+            database_a_path,
+            {
+                "item.foo.first": "資料庫 A 第一筆",
+                "item.foo.second": "資料庫 A 第二筆",
+            },
+        ),
+        (
+            database_b_path,
+            {
+                "item.foo.first": "資料庫 B 第一筆",
+                "item.foo.second": "資料庫 B 第二筆",
+            },
+        ),
+    ):
+        db = TranslationDB(path)
+        db.ingest(
+            "1.21.1",
+            [
+                ScanItem(KIND_LANG, "foo", key, english, translated)
+                for key, english, translated in (
+                    ("item.foo.first", "First English", translations["item.foo.first"]),
+                    (
+                        "item.foo.second",
+                        "Second English",
+                        translations["item.foo.second"],
+                    ),
+                )
+            ],
+        )
+        db.close()
+
+    settings_a = DbSettings(
+        path=str(database_a_path.resolve()),
+        merge_enabled=True,
+        version="1.21.1",
+        cross_version=False,
+        priority=(4, 2, 1),
+    )
+    settings_b = DbSettings(
+        path=str(database_b_path.resolve()),
+        merge_enabled=True,
+        version="1.21.1",
+        cross_version=True,
+        priority=(1, 2, 4),
+    )
+    current_global_settings = {"value": settings_a}
+    monkeypatch.setattr(
+        lang_merge_db,
+        "load_db_settings",
+        lambda: current_global_settings["value"],
+    )
+    monkeypatch.setattr(
+        lang_merge_db, "value_fully_translated", lambda value: bool(value)
+    )
+
+    opened_settings = []
+    real_open_db = lang_merge_db.open_db
+
+    def tracking_open_db(settings, *, create=False):
+        opened_settings.append(settings)
+        return real_open_db(settings, create=create)
+
+    monkeypatch.setattr(lang_merge_db, "open_db", tracking_open_db)
+    monkeypatch.setattr(merge_service, "ensure_pipeline_logging", lambda: None)
+
+    class _FakeUIHandler:
+        def set_session(self, _session):
+            pass
+
+    monkeypatch.setattr(merge_service, "UI_LOG_HANDLER", _FakeUIHandler())
+    monkeypatch.setattr(
+        lang_merger,
+        "load_config",
+        lambda: {
+            "lang_merger": {
+                "pending_folder_name": "待翻譯",
+                "pending_organized_folder_name": "待翻譯整理需翻譯",
+                "filtered_pending_min_count": 1,
+                "quarantine_folder_name": "skipped_json",
+            },
+            "translator": {
+                "parallel_execution_workers": 1,
+                "replace_rules_path": "replace_rules.json",
+            },
+        },
+    )
+    monkeypatch.setattr(lang_merger, "load_replace_rules", lambda _path: [])
+
+    zip_paths = []
+    for name, key, english in (
+        ("first.zip", "item.foo.first", "First English"),
+        ("second.zip", "item.foo.second", "Second English"),
+    ):
+        zip_path = tmp_path / name
+        with zipfile.ZipFile(zip_path, "w") as archive:
+            archive.writestr(
+                "assets/foo/lang/en_us.json",
+                json.dumps({key: english}),
+            )
+        zip_paths.append(str(zip_path))
+
+    record_zip_result = merge_service._record_zip_result
+    completed_zips = []
+
+    def switch_global_database_after_first_zip(*args, **kwargs):
+        record_zip_result(*args, **kwargs)
+        completed_zips.append(args[2])
+        if len(completed_zips) == 1:
+            current_global_settings["value"] = settings_b
+
+    monkeypatch.setattr(
+        merge_service, "_record_zip_result", switch_global_database_after_first_zip
+    )
+
+    output_dir = tmp_path / "output"
+    list(
+        merge_service.run_merge_zip_batch_service(
+            zip_paths,
+            str(output_dir),
+            MagicMock(),
+            only_process_lang=True,
+            use_translation_db=True,
+            translation_db_version="1.21.1",
+            translation_db_settings_snapshot=settings_a,
+        )
+    )
+
+    translated = json.loads(
+        (
+            output_dir / "lang_output" / "assets" / "foo" / "lang" / "zh_tw.json"
+        ).read_text(encoding="utf-8")
+    )
+    assert translated == {
+        "item.foo.first": "資料庫 A 第一筆",
+        "item.foo.second": "資料庫 A 第二筆",
+    }
+    assert [Path(settings.path) for settings in opened_settings] == [
+        database_a_path.resolve(),
+        database_a_path.resolve(),
+    ]
+    assert all(settings.version == "1.21.1" for settings in opened_settings)
+    assert all(settings.cross_version is False for settings in opened_settings)
+    assert all(settings.priority == (4, 2, 1) for settings in opened_settings)
 
 
 def test_valid_target_still_allows_configured_cross_version_lookup(

@@ -23,6 +23,7 @@ from translation_tool.core.lang_merger import (
     merge_zhcn_to_zhtw_from_folder,
     merge_zhcn_to_zhtw_from_zip,
 )
+from translation_tool.translation_db import DbSettings
 from translation_tool.utils.cancellation import TaskCancelled, raise_if_cancelled
 from translation_tool.utils.config_manager import load_config
 
@@ -191,6 +192,7 @@ def _merge_one_zip(
     zh_en_threshold,
     use_translation_db=None,
     translation_db_version=None,
+    translation_db_settings_snapshot: DbSettings | None = None,
 ) -> list[str]:
     """合併單一 ZIP（把進度疊加到整批進度），回傳這個 ZIP 的錯誤訊息清單。"""
     zip_errors: list[str] = []
@@ -206,6 +208,7 @@ def _merge_one_zip(
             zh_en_threshold=zh_en_threshold,
             use_translation_db=use_translation_db,
             translation_db_version=translation_db_version,
+            translation_db_settings_snapshot=translation_db_settings_snapshot,
         ):
             _raise_if_session_cancelled(session)  # 取消檢查點：每個 update
             # ---- log ----
@@ -251,9 +254,9 @@ def run_merge_zip_batch_service(
     zh_en_threshold: int | None = None,
     use_translation_db: bool | None = None,
     translation_db_version: str | None = None,
+    translation_db_settings_snapshot: DbSettings | None = None,
 ):
     """以 ZIP 為單位合併，逐 ZIP 回報進度、日誌與統計摘要。"""
-    # ⭐ 每次任務開始，都重新讀取一次 config 並設定 Logger
     ensure_pipeline_logging()
     UI_LOG_HANDLER.set_session(session)
     output_existed_before, lease = True, None
@@ -302,12 +305,12 @@ def run_merge_zip_batch_service(
                 zh_en_threshold=zh_en_threshold,
                 use_translation_db=use_translation_db,
                 translation_db_version=translation_db_version,
+                translation_db_settings_snapshot=translation_db_settings_snapshot,
             )
 
             _record_zip_result(stats, session, idx, total, zip_name, zip_errors)
 
-            # ZIP 完成後，至少推進一次 progress
-            session.set_progress((idx + 1) / total)
+            session.set_progress((idx + 1) / total)  # ZIP 完成後至少推進一次進度
 
         # 產出統計摘要，並寫入 session 供 UI 取用
         final_summary = _zip_summary(stats, output_dir)
@@ -505,7 +508,11 @@ def _run_folder_stages(
         progress_end,
         {
             k: options[k]
-            for k in ("use_translation_db", "translation_db_version")
+            for k in (
+                "use_translation_db",
+                "translation_db_version",
+                "translation_db_settings_snapshot",
+            )
             if k in options
         },
     )
@@ -526,10 +533,9 @@ def run_merge_folder_batch_service(
     skip_missing_input: bool = False,
     use_translation_db: bool | None = None,
     translation_db_version: str | None = None,
+    translation_db_settings_snapshot: DbSettings | None = None,
 ):
-    """以資料夾為單位進行合併（支援 generator merge）。
-
-    與 run_merge_zip_batch_service 結構相同，但使用 merge_zhcn_to_zhtw_from_folder。
+    """以資料夾為單位合併（支援 generator merge），其餘流程同 ZIP service。
 
     輸入資料夾不存在時預設視為失敗（階段 1 失敗、略過階段 2、任務標為 ERROR），
     不會顯示「翻譯已完成」；路徑存在但不是資料夾也視為失敗。``skip_missing_input=True``
@@ -554,7 +560,6 @@ def run_merge_folder_batch_service(
         lease, output_existed_before = _claim_output(output_dir)  # 被占用 → 錯誤路徑
         _session_log(session, f"[資料夾] 開始處理：{os.path.basename(input_dir)}")
 
-        # 只有「路徑不存在」才能略過；存在但型別不對（例如是檔案）一律交給核心判為錯誤
         skipped = skip_missing_input and not os.path.exists(input_dir)
         if skipped:
             _session_log(
@@ -577,6 +582,7 @@ def run_merge_folder_batch_service(
                         "zh_en_threshold": zh_en_threshold,
                         "use_translation_db": use_translation_db,
                         "translation_db_version": translation_db_version,
+                        "translation_db_settings_snapshot": translation_db_settings_snapshot,
                     },
                     progress_start,
                     progress_end,
