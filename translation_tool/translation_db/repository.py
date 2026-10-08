@@ -1161,24 +1161,30 @@ class TranslationDB:
         self, mod_id: str, priority: tuple[int, ...]
     ) -> list[tuple[str, str, str, str, str, int]]:
         """以呼叫端快照優先序唯讀選出模組生效譯文，不依賴共享 effective 表。"""
-        return self._q(
-            f"""
-            SELECT e.kind, e.key, e.en_us, e.mc_version, ranked.zh_tw, ranked.source
+        return self._q(self._load_mod_for_priority_sql(priority), (mod_id,))
+
+    def _load_mod_for_priority_sql(self, priority: tuple[int, ...]) -> str:
+        """Build the module-scoped ranking query used by the merge resolver."""
+        # CROSS JOIN is intentional: SQLite must start from the selected module's
+        # entries, then probe translations by entry_id. Otherwise it may rank the
+        # entire translation table before applying the mod_id filter.
+        return f"""
+            SELECT ranked.kind, ranked.key, ranked.en_us, ranked.mc_version,
+                   ranked.zh_tw, ranked.source
             FROM (
-                SELECT t.entry_id, t.zh_tw, t.source,
+                SELECT e.id, e.kind, e.key, e.en_us, e.mc_version,
+                       t.zh_tw, t.source,
                        ROW_NUMBER() OVER (
                            PARTITION BY t.entry_id
                            ORDER BY {self._priority_order(priority)}
                        ) AS rn
-                FROM translation t
-                WHERE t.zh_tw <> ''
+                FROM entry e
+                CROSS JOIN translation t ON t.entry_id = e.id
+                WHERE e.mod_id = ? AND t.zh_tw <> ''
             ) AS ranked
-            JOIN entry e ON e.id = ranked.entry_id
-            WHERE ranked.rn = 1 AND e.mod_id = ?
-            ORDER BY e.id
-            """,
-            (mod_id,),
-        )
+            WHERE ranked.rn = 1
+            ORDER BY ranked.id
+        """
 
     def count_entries(self) -> int:
         return self._one("SELECT COUNT(*) FROM entry")[0]

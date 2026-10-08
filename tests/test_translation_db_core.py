@@ -161,6 +161,82 @@ def test_source_priority_picks_best_and_rebuilds(tmp_path):
     d2.close()
 
 
+def test_load_mod_for_priority_filters_first_and_uses_mod_index(db):
+    priority = (SRC_AI, SRC_JAR_TW)
+    db.ingest(
+        "1.21.1",
+        [
+            item(key="priority", tw="模組自帶", mod="target"),
+            item(key="reviewed", tw="已審核的模組譯文", mod="target"),
+            item(key="empty", mod="target"),
+            item(key="other", tw="其他模組", mod="other"),
+            *[
+                item(key=f"unrelated.{i}", tw=f"其他譯文 {i}", mod="unrelated")
+                for i in range(500)
+            ],
+        ],
+    )
+    db.ingest(
+        "1.21.1",
+        [
+            ScanItem(
+                KIND_LANG,
+                "target",
+                "priority",
+                "Steel Casing",
+                "AI 優先譯文",
+                source=SRC_AI,
+            ),
+            ScanItem(
+                KIND_LANG,
+                "target",
+                "reviewed",
+                "Steel Casing",
+                "AI 審核候選",
+                source=SRC_AI,
+            ),
+        ],
+    )
+
+    reviewed_id = db._one(
+        "SELECT id FROM entry WHERE mod_id='target' AND key='reviewed'"
+    )[0]
+    with db._tx() as conn:
+        conn.execute(
+            "UPDATE translation SET checker='reviewed' WHERE entry_id=? AND source=?",
+            (reviewed_id, SRC_JAR_TW),
+        )
+
+    rows = db.load_mod_for_priority("target", priority)
+    assert rows == [
+        (KIND_LANG, "priority", "Steel Casing", "1.21.1", "AI 優先譯文", SRC_AI),
+        (
+            KIND_LANG,
+            "reviewed",
+            "Steel Casing",
+            "1.21.1",
+            "已審核的模組譯文",
+            SRC_JAR_TW,
+        ),
+    ]
+
+    db._conn.execute("ANALYZE")
+    plan = [
+        row[3]
+        for row in db._conn.execute(
+            "EXPLAIN QUERY PLAN " + db._load_mod_for_priority_sql(priority),
+            ("target",),
+        )
+    ]
+    assert any(
+        "SEARCH e USING INDEX idx_entry_mod_id (mod_id=?)" in step for step in plan
+    )
+    assert any(
+        "SEARCH t USING INDEX sqlite_autoindex_translation_1 (entry_id=?)" in step
+        for step in plan
+    )
+
+
 # ---------------------------------------------------------- 手動更新
 def test_manual_save_propagates_to_same_content_only(db):
     db.ingest("1.21.1", [item(tw="能量")])
