@@ -2,11 +2,21 @@
 
 from __future__ import annotations
 
+import json
+
 from app.services_impl.pipelines import merge_service
 from app.tasks.task_session import TaskSession
 from app.views.merge import merge_db_options
 from app.views.moddb import version_picker
-from translation_tool.translation_db import DbSettings
+from app.views.pipeline import pipeline_config
+from app.views.pipeline.pipeline_actions import PipelineActions
+from translation_tool.core import lang_merge_db
+from translation_tool.translation_db import (
+    KIND_LANG,
+    DbSettings,
+    ScanItem,
+    TranslationDB,
+)
 
 
 def _patch(monkeypatch, **kw):
@@ -114,3 +124,83 @@ def test_service_passes_page_choice_to_core(monkeypatch, tmp_path):
     )
     assert seen["stage1"] == (False, "1.21.1")
     assert seen["stage2"] == (False, "1.21.1")
+
+
+def test_one_click_uses_selected_version_for_database_supplement(monkeypatch, tmp_path):
+    """完整走過一鍵步驟與合併服務，確認補譯採用頁面版本而非設定預設值。"""
+    db_path = tmp_path / "mod.db"
+    db = TranslationDB(db_path)
+    for version, translation in (
+        ("1.21.1", "設定預設版本"),
+        ("1.20.1", "頁面選取版本"),
+    ):
+        db.ingest(
+            version,
+            [ScanItem(KIND_LANG, "foo", "item.foo.a", "Steel Casing", translation)],
+        )
+    db.close()
+
+    monkeypatch.setattr(
+        lang_merge_db,
+        "load_db_settings",
+        lambda: DbSettings(path=str(db_path), version="1.21.1", merge_enabled=True),
+    )
+    monkeypatch.setattr(
+        lang_merge_db, "value_fully_translated", lambda value: bool(value)
+    )
+    monkeypatch.setattr(pipeline_config, "load_config", dict)
+    monkeypatch.setattr(
+        merge_service,
+        "load_config",
+        lambda: {"lang_merger": {"enable_extracted_to_assets_merge": False}},
+    )
+
+    input_dir, output_dir = tmp_path / "mods", tmp_path / "output"
+    input_dir.mkdir()
+    cfg = pipeline_config.PipelineConfig(str(input_dir), str(output_dir))
+    lang_dir = (
+        tmp_path
+        / "output"
+        / "jar_mod_extract"
+        / "_提取lang_輸出"
+        / "assets"
+        / "foo"
+        / "lang"
+    )
+    lang_dir.mkdir(parents=True)
+    (lang_dir / "en_us.json").write_text(
+        json.dumps({"item.foo.a": "Steel Casing"}), encoding="utf-8"
+    )
+
+    steps = PipelineActions().one_click_steps(
+        {"only_lang": True},
+        cfg,
+        "lang",
+        ["zh_tw"],
+        {
+            "output_dir": cfg.merge_output_dir,
+            "process_zh_cn": False,
+            "patchouli_skip": True,
+            "patchouli_threshold": 0.5,
+            "zh_en_threshold": 2,
+            "use_translation_db": True,
+            "translation_db_version": "1.20.1",
+        },
+    )
+
+    list(steps[1][2](TaskSession()))
+
+    result = (
+        tmp_path
+        / "output"
+        / "locale_sort"
+        / "_整理輸出"
+        / "lang_output"
+        / "assets"
+        / "foo"
+        / "lang"
+        / "zh_tw.json"
+    )
+    assert json.loads(result.read_text(encoding="utf-8")) == {
+        "item.foo.a": "頁面選取版本"
+    }
