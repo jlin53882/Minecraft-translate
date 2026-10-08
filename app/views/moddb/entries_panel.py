@@ -591,7 +591,11 @@ class EntriesPanel(ft.Column):
             return
         out: list[ft.Control] = []
         for h in detail.history:
-            action = "手動更新" if h.action == "manual" else "還原"
+            action = {
+                "manual": "手動更新",
+                "revert": "還原",
+                "ai_retranslate": "AI 重翻",
+            }.get(h.action, "其他異動")
             body = ft.Text(
                 (
                     f"{shorten(h.old_zh_tw, 20)} → {shorten(h.new_zh_tw, 20)}"
