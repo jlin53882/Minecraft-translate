@@ -74,6 +74,7 @@ def test_cancel_while_reserved_skips_work_but_finishes_owned_session():
     assert ran == []
     assert session.cancel_requested
     assert session.is_finished
+    assert handle.done_event.wait(2)
     assert registry.active() == []
 
 

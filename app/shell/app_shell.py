@@ -929,6 +929,7 @@ class AppShell:
             try:
                 self.page.pop_dialog()
                 self._close_failure_dialog = None
+                self._restore_config_recovery_exit_acknowledgement()
                 self.operations.reopen_admission()
                 self._close_pending = False
             except Exception:

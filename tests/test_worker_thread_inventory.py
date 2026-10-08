@@ -23,8 +23,8 @@ EXPECTED_THREAD_SITES = {
     "app/shell/config_effects.py": 1,
     "app/startup_tasks.py": 1,
     "app/tasks/operation_registry.py": 2,
+    "app/views/moddb/retranslation_controller.py": 1,
     "app/views/moddb/scan_panel.py": 1,
-    "app/views/moddb/translate_panel.py": 2,
     "app/views/pipeline/pipeline_session.py": 1,
 }
 

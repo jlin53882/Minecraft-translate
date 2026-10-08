@@ -723,6 +723,48 @@ def test_close_timeout_dialog_offers_return_after_last_operation_finishes(env, c
     shell.dispose()
 
 
+def test_return_after_close_failure_restores_saved_config_recovery_guard(
+    env, clock, monkeypatch
+):
+    config_view = ft.Column()
+    monkeypatch.setattr(
+        vr,
+        "_lazy_import_view",
+        lambda key, _page, _file_picker: (
+            config_view if key == "config" else ft.Text(f"view:{key}")
+        ),
+    )
+    shell = _make_shell(env)
+    shell.mount()
+    shell.page.scheduled.clear()
+    shell.navigate("config")
+    config_view.has_unsaved_changes = False
+    config_view.requires_exit_confirmation = False
+    state = {"acknowledged": True}
+
+    def cancel_recovery_exit():
+        state["acknowledged"] = False
+        config_view.requires_exit_confirmation = True
+
+    config_view.cancel_reload_recovery_exit = cancel_recovery_exit
+
+    shell.operations.begin_shutdown()
+    shell._show_close_failure()  # models drain timeout/final flush failure
+    _buttons(shell.page.dialogs[-1], "返回應用程式")[0].on_click(None)
+
+    assert state["acknowledged"] is False
+    assert config_view.requires_exit_confirmation is True
+    assert shell.operations.accepting is True
+    pending_navigation = []
+    config_view.confirm_unsaved_changes = lambda callback, **_kwargs: (
+        pending_navigation.append(callback)
+    )
+    shell.navigate("dashboard")
+    assert shell.current_key == "config"
+    assert len(pending_navigation) == 1
+    shell.dispose()
+
+
 def test_desktop_close_schedule_failure_keeps_admission_closed(env, clock):
     shell = _make_shell(env)
     shell.mount()

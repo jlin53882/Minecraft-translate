@@ -8,15 +8,11 @@
 from __future__ import annotations
 
 import asyncio
-import threading
-from pathlib import Path
 
 import flet as ft
 
 from app.services_impl.moddb_retranslate_service import (
     SameSourceAIRepairPreview,
-    cache_profile_label,
-    preview_same_source_ai_retranslation,
     run_moddb_retranslate_service,
 )
 from app.services_impl.moddb_translate_service import (
@@ -28,7 +24,12 @@ from app.services_impl.moddb_translate_service import (
     run_moddb_translate_service,
     tick_live,
 )
-from app.tasks.operation_registry import launch_page_operation
+from app.tasks.operation_registry import (
+    CommitPolicy,
+    DurabilityPolicy,
+    ShutdownPolicy,
+    launch_page_operation,
+)
 from app.tasks.task_session import TaskSession, tag_session
 from app.ui import kit
 from app.ui.design import C
@@ -37,10 +38,8 @@ from app.ui.poller import PollerHandle
 from app.ui.snack import show_snack
 from app.ui.status_chip import apply_status_style, set_chip_status
 from app.views._log import LogView, load_ui_logging_config
-from app.views.moddb.formatting import (
-    format_count,
-    source_label,
-)
+from app.views.moddb import retranslation_controller
+from app.views.moddb.formatting import format_count
 from translation_tool.utils.config_manager import load_config
 from translation_tool.utils.log_unit import log_debug, log_info, log_warning
 
@@ -63,8 +62,10 @@ class TranslatePanel(ft.Column):
         self._on_view_flagged = on_view_flagged
         self._flagged: dict[int, str] = {}
         self._run_version = ""
-        self._repair_preview: SameSourceAIRepairPreview | None = None
+        self._repair_preview = None
         self._repair_preview_db_identity: tuple[str, tuple[int, ...]] | None = None
+        self._repair_preview_generation = 0
+        self._repair_preview_running = False
         self.session: TaskSession | None = None
         self._running = False
         self._poller = PollerHandle()
@@ -295,14 +296,8 @@ class TranslatePanel(ft.Column):
         self._refresh_counts()
 
     @staticmethod
-    def _database_identity(db) -> tuple[str, tuple[int, ...]] | None:
-        if db is None:
-            return None
-        path = getattr(db, "path", None)
-        path_identity = (
-            str(Path(path).resolve()) if path is not None else f"object:{id(db)}"
-        )
-        return path_identity, tuple(getattr(db, "priority", ()))
+    def _database_identity(db):
+        return retranslation_controller.database_identity(db)
 
     def _refresh_mods(self) -> None:
         db = self._get_db()
@@ -365,21 +360,10 @@ class TranslatePanel(ft.Column):
         self._safe_update()
 
     def _clear_repair_preview(self) -> None:
-        self._repair_preview = None
-        self._repair_preview_db_identity = None
-        self.repair_preview_text.value = (
-            "來源：AI 機翻。人工、模組自帶及其他來源不會被重新翻譯。"
-        )
-        self.repair_samples.controls = []
-        self._update_repair_start_button()
+        retranslation_controller.clear_preview(self)
 
     def _update_repair_start_button(self, *, running: bool | None = None) -> None:
-        is_running = self._running if running is None else running
-        has_empty_preview = (
-            self._repair_preview is not None
-            and self._repair_preview.selected_count == 0
-        )
-        self.repair_start_btn.disabled = is_running or has_empty_preview
+        retranslation_controller.update_start_button(self, running=running)
 
     # ------------------------------------------------------------------ 事件
     def build_options(self, *, dry_run: bool = False) -> TranslateOptions:
@@ -420,9 +404,7 @@ class TranslatePanel(ft.Column):
             name="Mod 資料庫機翻",
             owner="moddb-translate",
             task_session=self.session,
-            fallback_launcher=lambda target: threading.Thread(
-                target=target, daemon=True
-            ).start(),
+            fallback_launcher=retranslation_controller.launch_standalone_worker,
         )
         if not launched:
             self._set_running(False)
@@ -435,100 +417,10 @@ class TranslatePanel(ft.Column):
             self._poller.start(self._page, self._poll)
 
     def preview_retranslation(self, _e=None) -> None:
-        if self._running:
-            show_snack(self._page, "機翻正在執行中", C.GOLD)
-            return
-        self._clear_repair_preview()
-        if not self.version_dd.value:
-            self.repair_preview_text.value = "請先選擇遊戲版本。"
-            self._safe_update()
-            return
-        db = self._get_db()
-        if db is None:
-            self.repair_preview_text.value = "無法開啟 Mod 資料庫。"
-            self._safe_update()
-            return
-
-        options = self.build_options()
-        try:
-            preview = preview_same_source_ai_retranslation(db, options)
-        except Exception as exc:  # noqa: BLE001 - preview errors stay in the UI
-            self.repair_preview_text.value = f"預覽失敗：{exc}"
-            log_warning(f"Mod 資料庫舊 AI 重翻預覽失敗：{exc!r}")
-            self._safe_update()
-            return
-
-        self._repair_preview = preview
-        self._repair_preview_db_identity = self._database_identity(db)
-        selected = preview.selected_count
-        cap = f"上限 {format_count(options.limit)} 筆" if options.limit else "不限筆數"
-        breakdown = (
-            "、".join(
-                f"{cache_profile_label(cache_type)}：{format_count(count)} 筆"
-                for cache_type, count in preview.profile_counts
-            )
-            or "無符合類型"
-        )
-        self.repair_preview_text.value = (
-            f"符合條件：{format_count(preview.total_candidates)} 筆；{cap}，"
-            f"本次將重翻 {format_count(selected)} 筆。\n"
-            f"來源：{source_label(preview.source)}。人工、模組自帶及其他來源不會被重新翻譯。\n"
-            f"翻譯 profile：{breakdown}\n"
-            f"預估：約 {format_count(preview.estimated_batches)} 批。"
-        )
-        self.repair_samples.controls = [
-            ft.Text(
-                f"[{cache_profile_label(preview.entry_cache_types[index])}] "
-                f"[{source_label(preview.source)}] {row.mod_id} / {row.key}\n"
-                f"原文／目前 AI 譯文：{row.en_us}",
-                size=12,
-                color=C.MUTED,
-                selectable=True,
-            )
-            for index, row in enumerate(preview.entries[:5])
-        ]
-        self._update_repair_start_button()
-        self._safe_update()
+        retranslation_controller.preview(self, _e)
 
     def confirm_retranslation(self, _e=None) -> None:
-        preview = self._repair_preview
-        if self._running:
-            return
-        if preview is None:
-            show_snack(
-                self._page,
-                "請先按「預覽符合條件的舊 AI 譯文」，檢查候選範圍與筆數後再重新翻譯。",
-                C.GOLD,
-            )
-            return
-        if preview.selected_count == 0:
-            show_snack(self._page, "目前沒有符合條件的舊 AI 譯文可重新翻譯。", C.GOLD)
-            return
-        show_dialog = getattr(self._page, "show_dialog", None)
-        if not callable(show_dialog):
-            show_snack(self._page, "目前畫面無法顯示確認視窗，未開始重翻", C.GOLD)
-            return
-        show_dialog(
-            ft.AlertDialog(
-                title=ft.Text("確認重新翻譯舊 AI 譯文"),
-                content=ft.Text(
-                    f"即將重翻 {preview.selected_count:,} 筆目前生效來源為「AI 機翻」且"
-                    "譯文與原文相同的項目。只更新 AI 來源；人工及其他來源不會更動，"
-                    "也不會同步到其他版本。",
-                    selectable=True,
-                    width=440,
-                ),
-                actions=[
-                    ft.TextButton(
-                        "取消", on_click=lambda _e=None: self._page.pop_dialog()
-                    ),
-                    ft.TextButton(
-                        "開始重新翻譯",
-                        on_click=lambda _e=None: self._start_retranslation(preview),
-                    ),
-                ],
-            )
-        )
+        retranslation_controller.confirm(self, _e)
 
     def _start_retranslation(self, preview: SameSourceAIRepairPreview) -> None:
         self._page.pop_dialog()
@@ -551,7 +443,10 @@ class TranslatePanel(ft.Column):
             self._safe_update()
             return
         options = self.build_options()
-        self.session = tag_session(TaskSession(), "Mod 資料庫舊 AI 重翻", "moddb")
+        session = tag_session(
+            TaskSession(), "Mod 資料庫舊 AI 重翻", "moddb", page=self._page
+        )
+        self.session = session
         self._run_version = str(options.version)
         self._set_status("舊 AI 重翻中", "dia")
         self._set_running(True)
@@ -560,11 +455,38 @@ class TranslatePanel(ft.Column):
         self.log_view.clear()
         self.repair_summary_text.value = "重翻進行中；未成功完成的項目會保留舊譯文。"
         self._safe_update()
-        threading.Thread(
-            target=run_moddb_retranslate_service,
-            args=(options, self.session, preview.entries),
-            daemon=True,
-        ).start()
+        launch_error = None
+        try:
+            launched = launch_page_operation(
+                self._page,
+                lambda: run_moddb_retranslate_service(
+                    options, session, preview.entries
+                ),
+                name="Mod 資料庫舊 AI 重翻",
+                owner="moddb-retranslate",
+                task_session=session,
+                commit=CommitPolicy.PARTIAL_ALLOWED,
+                durability=DurabilityPolicy.USER_ACTION,
+                shutdown=ShutdownPolicy.CANCEL_AND_DRAIN,
+                fallback_launcher=retranslation_controller.launch_standalone_worker,
+            )
+        except Exception as exc:  # noqa: BLE001 - restore UI if worker launch fails
+            launched = False
+            launch_error = exc
+            log_warning(f"Mod 資料庫舊 AI 重翻無法啟動：{exc!r}")
+
+        if not launched:
+            self.session = None
+            self._set_running(False)
+            if launch_error is None:
+                self._set_status("應用程式正在關閉，未啟動舊 AI 重翻", "gold")
+                self.repair_summary_text.value = "應用程式正在關閉，未啟動重翻。"
+                show_snack(self._page, "應用程式正在關閉，無法啟動新任務", C.GOLD)
+            else:
+                self._set_status("重翻無法啟動", "red")
+                self.repair_summary_text.value = f"重翻未啟動：{launch_error}"
+            self._safe_update()
+            return
         self._running = True
         if not self._poller.running:
             self._poller.start(self._page, self._poll)
@@ -703,7 +625,7 @@ class TranslatePanel(ft.Column):
         self.start_btn.disabled = running
         self.preview_btn.disabled = running
         self.cancel_btn.disabled = not running
-        self.repair_preview_btn.disabled = running
+        self.repair_preview_btn.disabled = running or self._repair_preview_running
         self._update_repair_start_button(running=running)
 
     def _set_status(self, text: str, tone: str = "neutral") -> None:
