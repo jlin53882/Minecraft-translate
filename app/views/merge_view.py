@@ -253,7 +253,10 @@ class MergeView(MergeWidgetsMixin, ft.Column):
         self.page.update()
 
     def _run_merge_worker(
-        self, input_mode: str, zip_paths: list[str] | None = None
+        self,
+        input_mode: str,
+        zip_paths: list[str] | None = None,
+        db_options_snapshot=None,
     ) -> None:
         """背景執行緒入口：執行合併並處理取消與失敗（不讓例外逸出執行緒）。"""
         try:
@@ -262,7 +265,10 @@ class MergeView(MergeWidgetsMixin, ft.Column):
             with cancel_scope(
                 lambda: bool(getattr(self.session, "cancel_requested", False))
             ):
-                self._run_merge_service(input_mode, zip_paths)
+                if db_options_snapshot is None:
+                    self._run_merge_service(input_mode, zip_paths)
+                else:
+                    self._run_merge_service(input_mode, zip_paths, db_options_snapshot)
         except TaskCancelled:
             # 取消屬於正常終止，不讓背景執行緒把 traceback 噴到 Web 主控台。
             self.session.add_log("[取消] 合併已停止", level="warning")
@@ -285,9 +291,20 @@ class MergeView(MergeWidgetsMixin, ft.Column):
             self.session.finish()  # set_error() → finish()：TaskManager 才會離開 active
 
     def _run_merge_service(
-        self, input_mode: str, zip_paths: list[str] | None = None
+        self,
+        input_mode: str,
+        zip_paths: list[str] | None = None,
+        db_options_snapshot=None,
     ) -> None:
         """依輸入模式呼叫對應的合併服務並消耗其 generator。"""
+        if db_options_snapshot is None:
+            # Internal/legacy direct calls without a click-time snapshot must not
+            # read mutable page controls from a background worker.
+            use_translation_db = False
+            translation_db_version = ""
+        else:
+            use_translation_db = db_options_snapshot.use_db
+            translation_db_version = db_options_snapshot.version
         if input_mode == "folder":
             for _ in run_merge_folder_batch_service(
                 input_dir=self.folder_path_field.value,
@@ -304,8 +321,8 @@ class MergeView(MergeWidgetsMixin, ft.Column):
                     self.zh_en_letter_threshold_field.value or ""
                 )
                 or 2,
-                use_translation_db=self.db_options.use_db,
-                translation_db_version=self.db_options.version,
+                use_translation_db=use_translation_db,
+                translation_db_version=translation_db_version,
             ):
                 pass
         else:
@@ -326,8 +343,8 @@ class MergeView(MergeWidgetsMixin, ft.Column):
                     self.zh_en_letter_threshold_field.value or ""
                 )
                 or 2,
-                use_translation_db=self.db_options.use_db,
-                translation_db_version=self.db_options.version,
+                use_translation_db=use_translation_db,
+                translation_db_version=translation_db_version,
             ):
                 pass
 
@@ -348,6 +365,9 @@ class MergeView(MergeWidgetsMixin, ft.Column):
         if not (self.output_dir_field.value or "").strip():
             show_snack(self.page, "請先選擇輸出資料夾")
             return
+
+        # 解析與驗證在 UI 執行緒完成；worker 後續只使用此不可變快照。
+        db_options_snapshot = self.db_options.snapshot_for_run()
 
         self.start_button.disabled = True
         self.cancel_button.visible = True
@@ -385,9 +405,18 @@ class MergeView(MergeWidgetsMixin, ft.Column):
         self.session.add_log(
             f"[系統] 開始合併任務｜來源：{source_desc}｜輸出：{self.output_dir_field.value}"
         )
+        if db_options_snapshot.warning:
+            self.session.add_log(f"[警告] {db_options_snapshot.warning}")
         self._start_ui_poller()
 
-        operation.launch(partial(self._run_merge_worker, input_mode, zip_paths))
+        operation.launch(
+            partial(
+                self._run_merge_worker,
+                input_mode,
+                zip_paths,
+                db_options_snapshot,
+            )
+        )
 
     def _start_ui_poller(self) -> None:
         """啟動 UI 輪詢器（在 Flet event loop 上），定期同步進度與日誌。

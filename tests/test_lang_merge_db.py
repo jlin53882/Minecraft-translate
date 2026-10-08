@@ -88,6 +88,33 @@ def test_stage1_fills_pending_from_database(tmp_path, monkeypatch, db_path):
     }  # 原文不同／資料庫沒有 → 仍待翻譯
 
 
+def test_valid_target_still_allows_configured_cross_version_lookup(
+    monkeypatch, tmp_path
+):
+    db_path = tmp_path / "cross-version.db"
+    db = TranslationDB(db_path)
+    db.ingest(
+        "1.21.1",
+        [ScanItem(KIND_LANG, "foo", "item.foo.anchor", "Anchor", "錨點")],
+    )
+    db.ingest(
+        "1.20.1",
+        [ScanItem(KIND_LANG, "foo", "item.foo.cross", "Cross Entry", "跨版本譯文")],
+    )
+    db.close()
+    _settings(monkeypatch, db_path, version="1.21.1", cross_version=True)
+
+    with merge_db_fill() as fill:
+        assert fill is not None
+        final_tw, pending, hits = fill.fill(
+            "foo", {}, {"item.foo.cross": "Cross Entry"}
+        )
+
+    assert final_tw == {"item.foo.cross": "跨版本譯文"}
+    assert pending == {}
+    assert hits == 1
+
+
 def test_stage1_unchanged_when_database_disabled(tmp_path, monkeypatch, db_path):
     _settings(monkeypatch, db_path, merge_enabled=False)
     tw, pending = _run_stage1(tmp_path)
@@ -99,6 +126,108 @@ def test_stage1_unchanged_without_version(tmp_path, monkeypatch, db_path):
     _settings(monkeypatch, db_path, version="")
     _tw, pending = _run_stage1(tmp_path)
     assert "item.foo.a" in pending
+
+
+def test_stage1_invalid_target_version_skips_database_supplement(
+    tmp_path, monkeypatch, db_path
+):
+    _settings(monkeypatch, db_path, version="1.19.4", cross_version=True)
+    tw, pending = _run_stage1(tmp_path)
+    assert "item.foo.a" not in tw
+    assert "item.foo.a" in pending
+
+
+def test_invalid_target_version_does_not_read_cross_version_entries(
+    monkeypatch, db_path
+):
+    """即使啟用跨版本沿用，無效目標也不能建立 Resolver 或補譯。"""
+    _settings(monkeypatch, db_path, version="1.19.4", cross_version=True)
+    opened = TranslationDB(db_path)
+    closed = []
+    real_close = opened.close
+
+    def close():
+        closed.append(True)
+        real_close()
+
+    monkeypatch.setattr(opened, "close", close)
+    monkeypatch.setattr(lang_merge_db, "open_db", lambda *_a, **_kw: opened)
+
+    def unexpected_resolver(*_args, **_kwargs):
+        pytest.fail("無效目標版本不得建立 TranslationResolver")
+
+    monkeypatch.setattr(lang_merge_db, "TranslationResolver", unexpected_resolver)
+
+    assert lang_merge_db.open_merge_db_fill() is None
+    assert closed == [True]
+
+
+def test_empty_database_is_closed_and_skipped_without_a_resolver(monkeypatch, tmp_path):
+    db_path = tmp_path / "empty.db"
+    empty_db = TranslationDB(db_path)
+    closed = []
+    real_close = empty_db.close
+
+    def close():
+        closed.append(True)
+        real_close()
+
+    monkeypatch.setattr(empty_db, "close", close)
+    _settings(monkeypatch, db_path, version="1.21.1")
+    monkeypatch.setattr(lang_merge_db, "open_db", lambda *_a, **_kw: empty_db)
+    monkeypatch.setattr(
+        lang_merge_db,
+        "TranslationResolver",
+        lambda *_a, **_kw: pytest.fail("無版本資料庫不得建立 Resolver"),
+    )
+
+    assert lang_merge_db.open_merge_db_fill() is None
+    assert closed == [True]
+
+
+def test_stage2_invalid_target_keeps_pending_entries_unchanged(
+    tmp_path, monkeypatch, db_path
+):
+    """Stage 2 同樣必須略過 DB 中不存在的目標版本。"""
+    _settings(monkeypatch, db_path, version="1.19.4", cross_version=True)
+    lang_output = tmp_path / "lang_output"
+    _write(
+        lang_output / "foo_extracted" / "assets" / "foo" / "lang" / "en_us.json",
+        {"item.foo.a": "Steel Casing"},
+    )
+
+    list(merge_extracted_to_assets(lang_output))
+
+    assert not (lang_output / "assets" / "foo" / "lang" / "zh_tw.json").exists()
+    source = lang_output / "foo_extracted" / "assets" / "foo" / "lang" / "en_us.json"
+    assert json.loads(source.read_text(encoding="utf-8")) == {
+        "item.foo.a": "Steel Casing"
+    }
+
+
+@pytest.mark.parametrize("state", ["missing_database", "unset_version", "disabled"])
+def test_stage2_safely_continues_without_a_usable_database(
+    tmp_path, monkeypatch, db_path, state
+):
+    if state == "missing_database":
+        missing = tmp_path / "not-created.db"
+        _settings(monkeypatch, missing, version="1.21.1")
+    elif state == "unset_version":
+        _settings(monkeypatch, db_path, version="")
+    else:
+        _settings(monkeypatch, db_path, version="1.21.1", merge_enabled=False)
+
+    lang_output = tmp_path / f"lang_output_{state}"
+    source = lang_output / "foo_extracted" / "assets" / "foo" / "lang" / "en_us.json"
+    _write(source, {"item.foo.a": "Steel Casing"})
+
+    updates = list(merge_extracted_to_assets(lang_output))
+
+    assert not any(update.get("error") for update in updates)
+    assert not (lang_output / "assets" / "foo" / "lang" / "zh_tw.json").exists()
+    assert source.is_file()
+    if state == "missing_database":
+        assert not missing.exists()
 
 
 def test_stage2_fills_pending_from_database(tmp_path, monkeypatch, db_path):

@@ -23,7 +23,7 @@ from translation_tool.translation_db import (
     open_db,
 )
 from translation_tool.translation_db.schema import KIND_LANG
-from translation_tool.utils.log_unit import log_debug, log_info
+from translation_tool.utils.log_unit import log_debug, log_info, log_warning
 
 
 class MergeDbFill:
@@ -81,6 +81,16 @@ def open_merge_db_fill(
         return None
     db = open_db(settings, create=False)
     if db is None:  # 資料庫尚未建立／無法開啟：略過（open_db 已記錄原因）
+        return None
+    try:
+        versions = db.versions()
+    except Exception as exc:  # noqa: BLE001 - DB 補譯不可讓正常合併失敗
+        log_warning(f"語系合併讀取資料庫版本失敗，略過補譯：{exc!r}")
+        db.close()
+        return None
+    if target not in versions:
+        log_warning(f"語系合併目標版本 {target} 不存在於資料庫版本清單，略過資料庫補譯")
+        db.close()
         return None
     log_info(f"📚 語系合併使用 Mod 資料庫補譯：{db.path.name}（目標版本 {target}）")
     return MergeDbFill(db, target, settings.cross_version)
