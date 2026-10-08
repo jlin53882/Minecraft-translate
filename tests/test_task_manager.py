@@ -91,12 +91,12 @@ def test_subscribers_are_notified_and_can_unsubscribe(manager):
     session.start()
     session.set_progress(0.1)
     session.finish()
-    # Registry reservation/terminal notifications supplement session lifecycle
-    # updates so registry-only and composite parent work stays visible.
-    assert len(calls) == 4
+    # Registry terminal events clean up ownership without duplicating the
+    # TaskSession finish projection.
+    assert len(calls) == 3
     unsubscribe()
     session.start()
-    assert len(calls) == 4
+    assert len(calls) == 3
     session.finish()
 
 
@@ -233,6 +233,39 @@ def test_detached_task_session_cannot_bypass_closed_registry_admission():
 
     assert session.status == "IDLE"
     assert manager.operation_registry.active_count() == 0
+
+
+def test_detached_task_manager_does_not_own_legacy_session_terminal():
+    manager = TaskManager()
+    manager.attach()
+    page = SimpleNamespace(operation_registry=manager.operation_registry)
+    session = tag_session(TaskSession(name="detached legacy"), "late", page=page)
+    manager.detach()
+
+    session.start()
+    assert manager.operation_registry.active_count() == 1
+    session.finish()
+
+    assert manager.operation_registry.active_count() == 0
+    assert manager.operation_registry.wait_for_idle(timeout=0)
+
+
+def test_ownerless_legacy_session_is_rejected_by_multiple_workspaces():
+    first = TaskManager()
+    second = TaskManager()
+    first.attach()
+    second.attach()
+    first.stop_accepting()
+
+    session = TaskSession(name="ambiguous owner")
+    with pytest.raises(TaskSessionAdmissionError):
+        session.start()
+
+    assert session.status == "IDLE"
+    assert first.operation_registry.active_count() == 0
+    assert second.operation_registry.active_count() == 0
+    first.detach()
+    second.detach()
 
 
 def test_resume_accepting_reopens_registration_after_close_drain():

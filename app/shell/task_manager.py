@@ -157,14 +157,9 @@ class TaskManager:
             return None
 
         if self._detach_pending:
-            if event == "finish":
-                handle = getattr(session, "operation_handle", None)
-                if handle is not None and not handle._worker_managed:
-                    self.operation_registry.finish_session(session)
             return
 
         sid = id(session)
-        legacy_handle = None
         with self._lock:
             info = self._active.get(sid)
             if event == "start":
@@ -212,12 +207,6 @@ class TaskManager:
                 self._active.pop(sid, None)
                 self._sessions.pop(sid, None)
                 self._recent.appendleft(info)
-                handle = getattr(session, "operation_handle", None)
-                if handle is not None and not handle._worker_managed:
-                    legacy_handle = handle
-        if legacy_handle is not None:
-            # Registry observers can call back into TaskManager; never run them under this lock.
-            self.operation_registry.finish_session(session)
         self._emit()
 
     def _on_registry_event(self, event: str, handle: OperationHandle) -> None:
@@ -228,6 +217,10 @@ class TaskManager:
         if event == "start" and handle.task_session is not None:
             # TaskSession.start emits the user-visible transition after its state
             # is initialized; avoid presenting one operation twice at admission.
+            return
+        if event == "finish" and handle._task_session_id is not None:
+            # The TaskSession finish event already updated its task projection;
+            # this Registry event only closes the authoritative owner.
             return
         if event == "finish" and handle._task_session_id is None:
             failed = handle.error is not None

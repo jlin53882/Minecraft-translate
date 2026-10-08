@@ -79,6 +79,20 @@ def _notify(session: TaskSession, event: str) -> bool:
     accepted = True
     with _observers_lock:
         observers = list(_observers)
+    if event == "admission" and len(observers) > 1:
+        # A page-less legacy session cannot be assigned safely when several
+        # workspaces are listening: do not let one registry reserve it before
+        # another registry rejects it.
+        from app.tasks.operation_registry import current_operation
+
+        handle = getattr(session, "operation_handle", None)
+        has_owner = (
+            getattr(session, "operation_registry", None) is not None
+            or getattr(handle, "_registry", None) is not None
+            or current_operation() is not None
+        )
+        if not has_owner:
+            return False
     for callback in observers:
         try:
             result = callback(session, event)
@@ -286,6 +300,12 @@ class TaskSession:
             "error" if status == "ERROR" else "info",
         )
         _notify(self, "finish")
+        # TaskManager is only a UI projection. A legacy reservation belongs to
+        # this session/registry and must terminate even when UI observers have
+        # already detached.
+        registry = self.operation_registry
+        if registry is not None:
+            registry.finish_session(self)
 
     def request_cancel(self) -> None:
         """要求取消任務；worker 會在下一個檢查點（例如批次之間）停止。"""
