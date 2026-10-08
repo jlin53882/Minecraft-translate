@@ -317,3 +317,43 @@ def test_empty_result_unlocks_modal(env):
     dialog = env.open()
     env.scan(dialog)
     assert dialog.modal is False
+
+
+def test_cancelled_preview_stays_locked_until_worker_reports_done(env):
+    """A cancel request alone must not unlock the preview while its worker drains."""
+    from types import SimpleNamespace
+
+    from app.views.extractor.extractor_state import PreviewState
+
+    ctx = SimpleNamespace(
+        page=env.page,
+        state={"cancelled": True, "running": True},
+        preview_state=PreviewState(progress=0.4, done=False),
+        progress_bar=ft.ProgressBar(value=0.4),
+        progress_pct=ft.Text("40%"),
+        status_text=ft.Text("掃描中"),
+        start_button=ft.Button("開始預覽", disabled=True),
+        preview_dialog=ft.AlertDialog(modal=True),
+        add_log=lambda *_args, **_kwargs: None,
+        scan_task=None,
+    )
+
+    async def verify_lifecycle():
+        poller = asyncio.create_task(mod._preview_ui_poller(ctx))
+        await asyncio.sleep(0.01)
+
+        assert not poller.done()
+        assert ctx.start_button.disabled is True
+        assert ctx.state["running"] is True
+        assert ctx.preview_dialog.modal is True
+        assert ctx.status_text.value == "正在取消..."
+
+        ctx.preview_state.done = True
+        await poller
+
+        assert ctx.start_button.disabled is False
+        assert ctx.state["running"] is False
+        assert ctx.preview_dialog.modal is False
+        assert ctx.status_text.value == "已取消"
+
+    asyncio.run(verify_lifecycle())

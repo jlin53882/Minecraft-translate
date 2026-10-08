@@ -440,7 +440,9 @@ async def _preview_ui_poller(ctx):
     """
     last_log = None
     while True:
-        finished = ctx.preview_state.done or ctx.state["cancelled"]
+        # A cancel request is not worker completion. Keep the dialog locked until
+        # _preview_do_scan's finally block reports that the worker has actually exited.
+        finished = ctx.preview_state.done
         ctx.progress_bar.value = ctx.preview_state.progress
         ctx.progress_pct.value = f"{int(ctx.preview_state.progress * 100)}%"
         cur_log = getattr(ctx.preview_state, "log", None)
@@ -455,6 +457,8 @@ async def _preview_ui_poller(ctx):
                     task=getattr(ctx, "scan_task", None),
                 )
                 last_log = cur_log
+        if ctx.state["cancelled"] and not finished:
+            ctx.status_text.value = "正在取消..."
         if finished:
             break
         ctx.page.update()

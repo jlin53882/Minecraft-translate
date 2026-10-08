@@ -298,46 +298,53 @@ def run_extraction_process_impl(
     )
     scan_thread.start()
 
-    # 輪詢等待 scan 完成，每 0.5s 检查一次
-    import time
+    try:
+        # 輪詢等待 scan 完成，每 0.5s 检查一次
+        import time
 
-    scan_start = time.time()
-    last_yielded_at = 0.0
-    YIELD_INTERVAL = 5.0  # 節流：每 5 秒才 yield 一次，避免日誌洗版
-    while not scan_done.is_set():
-        if is_cancelled():
-            # 子執行緒有 bounded checkpoints；等它實際收斂後再讓 operation terminal。
-            scan_done.wait(timeout=0.1)
-            continue
+        scan_start = time.time()
+        last_yielded_at = 0.0
+        YIELD_INTERVAL = 5.0  # 節流：每 5 秒才 yield 一次，避免日誌洗版
+        while not scan_done.is_set():
+            if is_cancelled():
+                # 子執行緒有 bounded checkpoints；等它實際收斂後再讓 operation terminal。
+                scan_done.wait(timeout=0.1)
+                continue
+            elapsed = time.time() - scan_start
+            # 節流 yield：避免 100+ JAR × 30s 掃描產生 ~60 條重複訊息淹沒日誌
+            if elapsed - last_yielded_at >= YIELD_INTERVAL:
+                last_yielded_at = elapsed
+                log.info(
+                    "[scan_jars] background scanning... elapsed=%.1fs, jar_count=%s",
+                    elapsed,
+                    total_jars,
+                )
+                yield {
+                    "progress": progress_start
+                    + scan_span * 0.2 * scan_progress[0] / total_jars,
+                    "current": scan_progress[0],
+                    "total": total_jars,
+                    "log": f"[掃描階段] 已掃描 {scan_progress[0]}/{total_jars} 個 JAR ({elapsed:.0f}s)...",
+                }
+            scan_done.wait(timeout=0.5)
+        # 最後一次 yield 確保 UI 收到完成訊號
         elapsed = time.time() - scan_start
-        # 節流 yield：避免 100+ JAR × 30s 掃描產生 ~60 條重複訊息淹沒日誌
-        if elapsed - last_yielded_at >= YIELD_INTERVAL:
+        if (
+            not scan_error[0]
+            and not scan_cancelled[0]
+            and elapsed - last_yielded_at >= 0
+        ):
             last_yielded_at = elapsed
-            log.info(
-                "[scan_jars] background scanning... elapsed=%.1fs, jar_count=%s",
-                elapsed,
-                total_jars,
-            )
             yield {
-                "progress": progress_start
-                + scan_span * 0.2 * scan_progress[0] / total_jars,
-                "current": scan_progress[0],
+                "progress": scan_progress_end,
+                "current": total_jars,
                 "total": total_jars,
-                "log": f"[掃描階段] 已掃描 {scan_progress[0]}/{total_jars} 個 JAR ({elapsed:.0f}s)...",
+                "log": f"[掃描階段] 已掃描 {total_jars}/{total_jars} 個 JAR ({elapsed:.0f}s)...",
             }
-        scan_done.wait(timeout=0.5)
-    # 最後一次 yield 確保 UI 收到完成訊號
-    elapsed = time.time() - scan_start
-    if not scan_error[0] and not scan_cancelled[0] and elapsed - last_yielded_at >= 0:
-        last_yielded_at = elapsed
-        yield {
-            "progress": scan_progress_end,
-            "current": total_jars,
-            "total": total_jars,
-            "log": f"[掃描階段] 已掃描 {total_jars}/{total_jars} 個 JAR ({elapsed:.0f}s)...",
-        }
-
-    scan_thread.join()
+    finally:
+        # Generator.close() can occur while suspended at either progress yield.
+        # Always join the scanner before allowing the owning operation to finish.
+        scan_thread.join()
     elapsed_total = time.time() - scan_start
 
     if scan_cancelled[0] or is_cancelled():

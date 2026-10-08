@@ -263,32 +263,35 @@ def build_icon_index(mods_dir: Path, progress_cb=None) -> dict[str, str]:
     def submit_jar(executor, jar_path: Path):
         return executor.submit(_process_single_jar, jar_path, asset_catalog)
 
-    with ContextThreadPoolExecutor(max_workers=max_workers) as executor:
-        try:
-            with bounded_as_completed(
+    try:
+        with (
+            ContextThreadPoolExecutor(max_workers=max_workers) as executor,
+            bounded_as_completed(
                 executor,
                 jars,
                 submit_jar,
                 max_in_flight=max_workers * 2,
-            ) as completed:
-                for future, jar in completed:
-                    raise_if_cancelled()
-                    done += 1
-                    try:
-                        jar_results = future.result()
-                        for key, uri in jar_results.items():
-                            raise_if_cancelled()
-                            index[key] = uri
-                        if progress_cb:
-                            progress_cb(done, total)
-                    except Exception as ex:  # noqa: BLE001
-                        log_warning(f"[IconIndex] JAR 處理失敗 {jar.name}: {ex!r}")
-                    if done % 50 == 0 or done == total:
-                        log_info(
-                            f"[IconIndex] 進度：{done}/{total} JARs，已建立 {len(index)} 個 icon 索引"
-                        )
-        finally:
-            asset_catalog.close()
+            ) as completed,
+        ):
+            for future, jar in completed:
+                raise_if_cancelled()
+                done += 1
+                try:
+                    jar_results = future.result()
+                    for key, uri in jar_results.items():
+                        raise_if_cancelled()
+                        index[key] = uri
+                    if progress_cb:
+                        progress_cb(done, total)
+                except Exception as ex:  # noqa: BLE001
+                    log_warning(f"[IconIndex] JAR 處理失敗 {jar.name}: {ex!r}")
+                if done % 50 == 0 or done == total:
+                    log_info(
+                        f"[IconIndex] 進度：{done}/{total} JARs，已建立 {len(index)} 個 icon 索引"
+                    )
+    finally:
+        # The executor context joins running workers before shared ZIP handles close.
+        asset_catalog.close()
 
     log_info(f"[IconIndex] 索引建立完成：{len(index)} 個 icon 進入索引")
     return index
