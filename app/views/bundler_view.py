@@ -6,7 +6,6 @@
 import json
 import logging
 import os
-import threading
 import traceback
 
 import flet as ft
@@ -14,6 +13,13 @@ import flet as ft
 from app import config_store
 from app.services_impl.config_service import load_config_json
 from app.services_impl.pipelines.bundle_service import bundle_outputs_generator
+from app.tasks.operation_registry import (
+    CancellationPolicy,
+    CommitPolicy,
+    DurabilityPolicy,
+    ShutdownPolicy,
+    launch_page_operation,
+)
 from app.ui import design, kit
 from app.ui.design import C
 from app.ui.mc_text import mc_text_spans
@@ -441,12 +447,27 @@ class BundlerView(BundlerWidgetsMixin, ft.Column):
         self._append_log(message, level="info")
         self._page.update()
 
-        thread = threading.Thread(
-            target=in_new_task("bundler", self._bundling_worker),
-            args=(root_dir, output_zip, version, description, pack_image),
-            daemon=True,
+        launched = launch_page_operation(
+            self._page,
+            in_new_task(
+                "bundler",
+                lambda: self._bundling_worker(
+                    root_dir, output_zip, version, description, pack_image
+                ),
+            ),
+            name="資源包打包",
+            owner="bundler",
+            cancellation=CancellationPolicy.NON_CANCELLABLE,
+            commit=CommitPolicy.PARTIAL_ALLOWED,
+            durability=DurabilityPolicy.USER_ACTION,
+            shutdown=ShutdownPolicy.DRAIN_ONLY,
         )
-        thread.start()
+        if not launched:
+            self._bundling_running = False
+            self.start_button.disabled = False
+            self.status_text.value = "應用程式正在關閉，未啟動打包"
+            self._page.update()
+            show_snack(self._page, "應用程式正在關閉，無法啟動新任務")
 
     def _append_log(self, msg: str, level: str = "info"):
         """新增一行日誌（直接走 LogView.add）。

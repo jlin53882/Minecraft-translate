@@ -12,6 +12,7 @@ import types
 
 import pytest
 
+from app.tasks.operation_registry import OperationRegistry
 from app.tasks.task_session import TaskSession
 from app.views.pipeline import pipeline_view
 from app.views.pipeline.pipeline_actions import (
@@ -189,6 +190,104 @@ def test_unmounted_sequence_defers_finish_and_button_restore(loop_page):
     loop_page.drain()
     assert ended == [True]
     assert panel.finished_all == (True, False)
+
+
+def test_pipeline_sequence_has_one_parent_operation_across_child_steps(loop_page):
+    registry = OperationRegistry()
+    runner, _panel = _runner(loop_page, launch_worker=lambda target: target())
+    runner.set_operation_registry(registry)
+    active_counts = []
+    ended = []
+
+    def step(session):
+        active_counts.append(registry.active_count())
+        session.start()
+        session.finish()
+
+    runner.start_sequence(
+        [(1, "第一步", step), (2, "第二步", step)],
+        lambda: ended.append(True),
+    )
+    loop_page.drain()
+
+    assert active_counts == [1, 1]
+    assert ended == [True]
+    assert registry.active() == []
+
+
+def test_pipeline_admission_rejection_does_not_run_service(loop_page):
+    registry = OperationRegistry()
+    registry.begin_shutdown()
+    runner, panel = _runner(loop_page, launch_worker=lambda target: target())
+    runner.set_operation_registry(registry)
+    called = []
+    ended = []
+
+    runner.start_sequence(
+        [(1, "不可啟動", lambda _session: called.append(True))],
+        lambda: ended.append(True),
+    )
+    loop_page.drain()
+
+    assert called == []
+    assert ended == [True]
+    assert registry.active() == []
+    assert any("未啟動新工作" in line for line in panel.logs)
+
+
+@pytest.mark.parametrize("outcome", ["handled_error", "unexpected_exception", "cancel"])
+def test_composite_parent_records_terminal_failure_or_cancel(
+    loop_page, monkeypatch, outcome
+):
+    from app.shell.task_manager import STATUS_ERROR, TaskManager
+
+    registry = OperationRegistry()
+    manager = TaskManager(operation_registry=registry)
+    manager.attach()
+    runner, _panel = _runner(
+        loop_page,
+        launch_worker=lambda target: target(),
+        session_factory=lambda: TaskSession(name="step", view_key="pipeline"),
+    )
+    runner.set_operation_registry(registry)
+    later_steps = []
+
+    def fail_step(session):
+        session.start()
+        if outcome == "handled_error":
+            session.set_error()
+        elif outcome == "cancel":
+            runner.request_cancel()
+        session.finish()
+
+    if outcome == "unexpected_exception":
+
+        def raise_from_step(*_args):
+            raise RuntimeError("unexpected pipeline failure")
+
+        monkeypatch.setattr(runner, "run_step", raise_from_step)
+
+    try:
+        runner.start_sequence(
+            [
+                (1, "第一步", fail_step),
+                (2, "不應執行", lambda _session: later_steps.append(True)),
+            ],
+            lambda: None,
+        )
+        handle = runner.operation_handle
+
+        assert handle is not None and handle.done_event.is_set()
+        assert later_steps == []
+        assert registry.active() == []
+        if outcome == "cancel":
+            assert handle.terminal_reason == "cancelled"
+            assert handle.error is None
+        else:
+            assert handle.terminal_reason == "failed"
+            assert any(task.status == STATUS_ERROR for task in manager.recent())
+    finally:
+        manager.detach()
 
 
 def test_remount_resumes_a_single_poller_without_duplicate_logs(loop_page):

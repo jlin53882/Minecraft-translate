@@ -31,6 +31,12 @@ from app.shell.sidebar import SIDEBAR_WIDTH_COMPACT, Sidebar
 from app.shell.statusbar import StatusBar
 from app.shell.task_manager import TaskInfo, TaskManager
 from app.shell.topbar import TopBar
+from app.tasks.operation_registry import (
+    CancellationPolicy,
+    OperationDescriptor,
+    OperationRegistry,
+    ShutdownPolicy,
+)
 from app.ui import design
 from app.ui.design import C
 from app.ui.keyboard_shortcuts import create_keyboard_handler
@@ -64,6 +70,7 @@ _async_sleep = asyncio.sleep
 
 # 這些頁面建立後，需要拿到 registry 才能互相切頁 / 通知
 _REGISTRY_SETTERS = ("set_registry", "set_view_registry")
+_OPERATION_REGISTRY_SETTERS = ("set_operation_registry",)
 # 需要拿到外殼（導覽 / 任務事件）的頁面
 _SHELL_SETTERS = ("set_shell",)
 # 續跑時各種任務要回到的頁面（機器翻譯頁；FTB／KubeJS／MD 都在任務翻譯頁的分頁）
@@ -136,7 +143,7 @@ class AppShell:
         self.file_picker = file_picker or SafeFilePicker()
         self._key_snapshot = key_snapshot or _default_key_snapshot
         self._config_loader = config_loader or _default_config_loader
-        self.tasks = task_manager or TaskManager()
+        self._setup_operation_runtime(page, task_manager, cache_reloader)
         if initial_mode is None:
             initial_mode = _default_mode()
         self.mode = initial_mode
@@ -147,11 +154,6 @@ class AppShell:
         )
         self._flush_before_close = flush_before_close or _default_flush_before_close
         self._unsubscribe_config: Callable[[], None] | None = None
-        self._cache_reloader = cache_reloader or CacheRootReloader(
-            is_busy=lambda: bool(self.tasks.active()),
-            reload=_default_cache_reload,
-            on_reloaded=self._on_cache_reloaded,
-        )
         self._unsubscribe_config_paths: Callable[[], None] | None = None
         self._unsubscribe_tasks: Callable[[], None] | None = None
         self.current_key: str | None = None
@@ -202,6 +204,24 @@ class AppShell:
         self.keyboard.set_search_callback(lambda _e=None: self.open_palette())
         self.keyboard.set_current_view_getter(lambda: self.content_area.content)
         self.keyboard.set_palette_getter(lambda: current_palette(page))
+
+    def _setup_operation_runtime(self, page, task_manager, cache_reloader) -> None:
+        """Install the sole operation owner and its cache-root reload policy."""
+        self.tasks = task_manager or TaskManager()
+        self.operations: OperationRegistry = self.tasks.operation_registry
+        try:
+            page.operation_registry = self.operations
+        except Exception:
+            logger.debug("無法將 operation registry 掛到 Page", exc_info=True)
+        self._cache_reloader = cache_reloader or CacheRootReloader(
+            is_busy=lambda: any(
+                handle.descriptor.owner != "cache-root-reload"
+                for handle in self.operations.active()
+            ),
+            reload=_default_cache_reload,
+            on_reloaded=self._on_cache_reloaded,
+            start=self._start_cache_root_reload,
+        )
 
     # -- 組裝 ----------------------------------------------------------------
 
@@ -310,16 +330,34 @@ class AppShell:
             self.navigate(view_key)
 
     def _wire_registry(self, view) -> None:
-        """頁面第一次建立後，把 registry 交給需要它的頁面。"""
+        """頁面第一次建立後，把 view/operation registries 交給需要它的頁面。"""
         inner = getattr(view, "content", view)
         for name in _REGISTRY_SETTERS:
             setter = getattr(inner, name, None)
             if callable(setter):
                 setter(self.registry)
+        for name in _OPERATION_REGISTRY_SETTERS:
+            setter = getattr(inner, name, None)
+            if callable(setter):
+                setter(self.operations)
         for name in _SHELL_SETTERS:
             setter = getattr(inner, name, None)
             if callable(setter):
                 setter(self)
+
+    def _start_cache_root_reload(self, target: Callable[[], None]) -> None:
+        """Run cache-root reload as an app-owned, non-cancellable drain operation."""
+        handle = self.operations.launch(
+            target,
+            OperationDescriptor(
+                name="快取根目錄重載",
+                owner="cache-root-reload",
+                cancellation=CancellationPolicy.NON_CANCELLABLE,
+                shutdown=ShutdownPolicy.DRAIN_ONLY,
+            ),
+        )
+        if handle is None:
+            raise RuntimeError("application shutdown has closed operation admission")
 
     # -- 主題 ----------------------------------------------------------------
 
@@ -564,8 +602,29 @@ class AppShell:
 
         async def on_close(event=None) -> None:
             try:
-                self.dispose()
+                self.operations.begin_shutdown()
+                deadline = _monotonic() + CLOSE_WAIT_TIMEOUT_SEC
+                while self.operations.active_count() and _monotonic() < deadline:
+                    await _async_sleep(CLOSE_WAIT_POLL_SEC)
+                if self.operations.active_count():
+                    self.operations.mark_drain_timeout()
+                    logger.warning(
+                        "Web session 過期時仍有背景操作；取消要求已送出，操作仍由 registry 追蹤"
+                    )
+                else:
+                    result = self._flush_before_close()
+                    if inspect.isawaitable(result):
+                        result = await result
+                    if result is False:
+                        raise RuntimeError("Web close flush returned false")
+                    self.operations.mark_closed()
+            except Exception:
+                logger.warning(
+                    "Web session 結束時 drain/flush 未完整成功；admission 維持關閉",
+                    exc_info=True,
+                )
             finally:
+                self.dispose()
                 await self._invoke_existing_handler_async(previous, event)
 
         self._page_on_close = on_close
@@ -617,12 +676,6 @@ class AppShell:
         except Exception:
             logger.debug("既有 async page handler 失敗", exc_info=True)
 
-    def _abort_close(self) -> None:
-        """中止 close，但保留外殼時恢復接收新任務。"""
-        self._close_pending = False
-        if not self._disposed:
-            self.tasks.resume_accepting()
-
     def _bind_window_close(self) -> None:
         """把桌面 native CLOSE 導向同一個 lifecycle teardown。"""
         window = getattr(self.page, "window", None)
@@ -642,7 +695,7 @@ class AppShell:
                 return
             if self._disposed:
                 return
-            if self.tasks.active() and not self._close_pending:
+            if self.operations.active_count() and not self._close_pending:
                 self._show_close_confirmation()
                 return
             if self._close_pending:
@@ -676,10 +729,11 @@ class AppShell:
             if self._close_pending or self._disposed:
                 return
             self._close_pending = True
-            self.tasks.request_cancel_active()
+            self.operations.begin_shutdown()
             ok, _future = self._submit_ui(self._complete_window_close)
             if not ok:
-                self._abort_close()
+                if self.operations.active_count():
+                    self.operations.mark_drain_timeout()
                 self._show_close_failure()
 
         dialog = ft.AlertDialog(
@@ -697,14 +751,13 @@ class AppShell:
         """完成 desktop close：先 teardown，再讓 native window 結束。"""
         if self._disposed:
             return
-        self.tasks.stop_accepting()
-        close_ready = False
+        self.operations.begin_shutdown()
         try:
-            self.tasks.request_cancel_active()
             deadline = _monotonic() + CLOSE_WAIT_TIMEOUT_SEC
-            while self.tasks.active() and _monotonic() < deadline:
+            while self.operations.active_count() and _monotonic() < deadline:
                 await _async_sleep(CLOSE_WAIT_POLL_SEC)
-            if self.tasks.active():
+            if self.operations.active_count():
+                self.operations.mark_drain_timeout()
                 self._show_close_failure()
                 return
             result = self._flush_before_close()
@@ -712,16 +765,13 @@ class AppShell:
                 result = await result
             if result is False:
                 raise RuntimeError("close flush returned false")
-            close_ready = True
         except Exception:
             logger.warning(
                 "關閉前 drain/flush/checkpoint 失敗，保留視窗供重試", exc_info=True
             )
             self._show_close_failure()
             return
-        finally:
-            if not close_ready and not self._disposed:
-                self._abort_close()
+        self.operations.mark_closed()
         self.dispose()
         destroy = getattr(getattr(self.page, "window", None), "destroy", None)
         if not callable(destroy):
@@ -737,16 +787,40 @@ class AppShell:
         show_dialog = getattr(self.page, "show_dialog", None)
         if not callable(show_dialog):
             return
+        draining = self.operations.active_count() > 0
+
+        def retry_close(_event=None) -> None:
+            try:
+                self.page.pop_dialog()
+            except Exception:
+                logger.debug("關閉重試 dialog 關閉失敗", exc_info=True)
+            ok, _future = self._submit_ui(self._complete_window_close)
+            if not ok:
+                self._show_close_failure()
+
+        def return_to_app(_event=None) -> None:
+            try:
+                self.page.pop_dialog()
+                self.operations.reopen_admission()
+                self._close_pending = False
+            except Exception:
+                logger.debug("無法恢復應用程式 admission", exc_info=True)
+                self._show_close_failure()
+
+        content = (
+            "取消要求已送出，但背景操作尚未停止。它仍會被追蹤；新工作暫時不能啟動。"
+            if draining
+            else "關閉前的資料保存未完成。可以重試關閉，或明確返回應用程式。"
+        )
+        actions = [ft.TextButton("重新嘗試關閉", on_click=retry_close)]
+        if not draining:
+            actions.insert(0, ft.TextButton("返回應用程式", on_click=return_to_app))
         show_dialog(
             ft.AlertDialog(
                 modal=True,
-                title=ft.Text("無法安全關閉"),
-                content=ft.Text("任務或資料寫入尚未完成，請稍後再試。"),
-                actions=[
-                    ft.TextButton(
-                        "知道了", on_click=lambda _e=None: self.page.pop_dialog()
-                    )
-                ],
+                title=ft.Text("關閉流程仍未完成"),
+                content=ft.Text(content),
+                actions=actions,
             )
         )
 
@@ -838,9 +912,11 @@ def _build_resume_prompt(page, on_resume, find_tasks=None) -> ResumePrompt:
 
 
 def _default_flush_before_close() -> bool:
-    """flush 共用 log buffer；各 writer 必須在自身 completion 前完成落盤。"""
+    """等待衍生歷史鏡像與共用 log buffer 落盤。"""
     from app.services_impl.logging_service import GLOBAL_LOG_LIMITER
+    from app.views.cache_manager.cache_history_store import history_flush
 
+    history_flush()
     GLOBAL_LOG_LIMITER.flush()
     return True
 

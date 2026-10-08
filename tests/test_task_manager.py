@@ -12,7 +12,12 @@ from app.shell.task_manager import (
     STATUS_ERROR,
     TaskManager,
 )
-from app.tasks.task_session import TaskSession
+from app.tasks.operation_registry import (
+    CommitPolicy,
+    DurabilityPolicy,
+    OperationDescriptor,
+)
+from app.tasks.task_session import TaskSession, TaskSessionAdmissionError
 
 
 @pytest.fixture
@@ -85,11 +90,76 @@ def test_subscribers_are_notified_and_can_unsubscribe(manager):
     session.start()
     session.set_progress(0.1)
     session.finish()
-    assert len(calls) == 3
+    # Registry reservation/terminal notifications supplement session lifecycle
+    # updates so registry-only and composite parent work stays visible.
+    assert len(calls) == 4
     unsubscribe()
     session.start()
-    assert len(calls) == 3
+    assert len(calls) == 4
     session.finish()
+
+
+def test_registry_only_operation_is_projected_and_recorded_as_recent(manager):
+    handle = manager.operation_registry.reserve(
+        OperationDescriptor(
+            name="索引更新",
+            owner="cache",
+            view_key="cache",
+            commit=CommitPolicy.ATOMIC,
+            durability=DurabilityPolicy.USER_ACTION,
+        )
+    )
+    assert handle is not None
+    assert handle.descriptor.commit == CommitPolicy.ATOMIC
+    assert handle.descriptor.durability == DurabilityPolicy.USER_ACTION
+    active = manager.active()
+    assert len(active) == 1
+    assert (active[0].name, active[0].view_key) == ("索引更新", "cache")
+
+    handle.finish()
+    assert manager.active() == []
+    assert manager.recent()[0].name == "索引更新"
+    assert manager.recent()[0].status == STATUS_DONE
+
+
+def test_detach_keeps_admission_gate_until_last_operation_finishes(manager):
+    session = TaskSession(name="Web timeout drain")
+    session.start()
+    manager.stop_accepting()
+    manager.detach()
+
+    rejected = TaskSession(name="late session")
+    with pytest.raises(TaskSessionAdmissionError):
+        rejected.start()
+
+    session.finish()
+    assert manager.operation_registry.active_count() == 0
+    assert manager._attached is False
+
+
+def test_composite_parent_remains_visible_after_child_session_finishes(manager):
+    import threading
+
+    parent = manager.operation_registry.reserve(
+        OperationDescriptor(name="一鍵流水線", owner="pipeline", view_key="pipeline")
+    )
+    assert parent is not None
+    entered = threading.Event()
+    release = threading.Event()
+    assert parent.launch(lambda: (entered.set(), release.wait(timeout=2)))
+    assert entered.wait(timeout=1)
+    child = TaskSession(name="語系合併", view_key="pipeline")
+    parent.bind_task_session(child)
+    child.start()
+    child.finish()
+
+    # Child progress session is terminal, but sequence owner remains active.
+    active = manager.active()
+    assert len(active) == 1
+    assert (active[0].name, active[0].view_key) == ("一鍵流水線", "pipeline")
+    release.set()
+    assert parent.done_event.wait(timeout=1)
+    assert manager.active() == []
 
 
 def test_a_failing_subscriber_does_not_break_the_task(manager):
@@ -118,8 +188,10 @@ def test_resume_accepting_reopens_registration_after_close_drain():
     m.attach()
     m.stop_accepting()
     ignored = TaskSession(name="被拒絕")
-    ignored.start()
+    with pytest.raises(TaskSessionAdmissionError):
+        ignored.start()
     assert m.active() == []
+    assert ignored.status == "IDLE"
 
     m.resume_accepting()
     accepted = TaskSession(name="恢復後")

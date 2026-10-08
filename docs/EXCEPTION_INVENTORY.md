@@ -4,12 +4,12 @@
 > 範圍：`app/`、`translation_tool/`、`main.py` 內所有帶 `noqa: BLE001／S110／S112` 的位置。
 > 命令列 QA 工具（`md_extract_qa.py`、`md_inject_qa.py`）的 `print` 為刻意保留，不在此表。
 
-共 **278** 項；其中 **114** 項尚未在程式碼內寫明原因（以「分類」說明處理方式）。
+共 **286** 項；其中 **114** 項尚未在程式碼內寫明原因（以「分類」說明處理方式）。
 
 | 分類 | 數量 | 意義 |
 |---|---|---|
-| 已記錄／回報 | 244 | 例外處理本身有 log、提示、回報錯誤事件或重新丟出；寬鬆捕捉是為了不中斷整批流程 |
-| UI／畫面保護 | 18 | UI 層的畫面更新、icon 快取等；失敗只影響顯示，不影響資料 |
+| 已記錄／回報 | 251 | 例外處理本身有 log、提示、回報錯誤事件或重新丟出；寬鬆捕捉是為了不中斷整批流程 |
+| UI／畫面保護 | 19 | UI 層的畫面更新、icon 快取等；失敗只影響顯示，不影響資料 |
 | 盡力而為（靜默） | 16 | 引擎層、只有 `pass`／`continue`／回傳常數；失敗不影響結果（例如進度回報、還原失敗時以原始例外為準） |
 
 | 位置 | 規則 | 分類 | 原因／處理 |
@@ -55,7 +55,7 @@
 | `app/ui/sync_text_field.py:_clean_path_input` | BLE001 | 已記錄／回報 | 尚未掛上頁面時不影響輸入 |
 | `app/views/bundler_view.py:BundlerView._load_version_data` | BLE001 | 已記錄／回報 | 版本資料讀不到時用空設定，但要留下紀錄 |
 | `app/views/bundler_view.py:BundlerView._bundling_worker` | BLE001 | 已記錄／回報 | 背景執行緒邊界，錯誤顯示於日誌 |
-| `app/views/cache_manager/cache_actions.py:run_cache_action.execute_work` | BLE001 | UI／畫面保護 | 錯誤顯示在 UI |
+| `app/views/cache_manager/cache_actions.py:_execute_cache_work` | BLE001 | UI／畫面保護 | 錯誤顯示在 UI |
 | `app/views/cache_manager/cache_history_store.py:history_load_active` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/views/cache_manager/cache_history_store.py:_append_mirror` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/views/cache_manager/cache_history_store.py:_append_mirror` | BLE001 | 已記錄／回報 | 鏡像是衍生資料，失敗只記錄 |
@@ -67,7 +67,8 @@
 | `app/views/cache_manager/cache_view_query.py:CacheQueryMixin._on_page_jump` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/views/cache_manager/cache_view_query.py:CacheQueryMixin._on_page_size_change` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/views/cache_manager/cache_view_query.py:CacheQueryMixin._on_apply_dst` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
-| `app/views/cache_manager/cache_view_query.py:CacheQueryMixin._on_query_search._search` | BLE001 | 已記錄／回報 | 錯誤顯示在 UI |
+| `app/views/cache_manager/cache_view_query.py:CacheQueryMixin._on_query_search._search_standalone` | BLE001 | 已記錄／回報 | event loop displays the error |
+| `app/views/cache_manager/cache_view_query.py:CacheQueryMixin._on_query_search.search` | BLE001 | 已記錄／回報 | event loop displays the error |
 | `app/views/cache_manager/cache_view_shard.py:CacheShardMixin._dynamic_shard_list_height` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/views/cache_manager/cache_view_shard.py:CacheShardMixin._dynamic_type_shard_panel_height` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/views/cache_manager/cache_view_shard.py:CacheShardMixin._dynamic_shard_key_list_height` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
@@ -91,14 +92,21 @@
 | `app/views/dashboard_view.py:DashboardView._apply_on_ui` | BLE001 | 已記錄／回報 | 沒有 event loop（測試）就直接套用 |
 | `app/views/extractor/extractor_dialog.py:_extractor_run_extraction` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/views/extractor/extractor_preview_dialog.py:_preview_do_scan` | BLE001 | 已記錄／回報 | 錯誤要回報到 UI |
+| `app/views/icon_preview/detail_mixin.py:IconPreviewDetailMixin._open_mod_detail.find_file` | BLE001 | 已記錄／回報 | UI coroutine 顯示錯誤 |
+| `app/views/icon_preview/detail_mixin.py:IconPreviewDetailMixin._open_mod_detail` | BLE001 | 已記錄／回報 | 排程失敗時需結束 owner 並回報 UI |
 | `app/views/icon_preview/detail_mixin.py:IconPreviewDetailMixin._write_zh_file` | BLE001 | 已記錄／回報 | 錯誤由呼叫端顯示在 UI |
 | `app/views/icon_preview/detail_mixin.py:IconPreviewDetailMixin._load_entries` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/views/icon_preview/icon_cache.py:_follow_parent_chain` | BLE001 | UI／畫面保護 | （未寫原因；見分類） |
 | `app/views/icon_preview/icon_cache.py:_run_jar_workers` | BLE001 | 已記錄／回報 | 單一 JAR 圖示解析失敗不中止整批，但要留下是哪個 JAR |
 | `app/views/icon_preview/icon_cache.py:_batch_extract_jar_icons` | BLE001 | 已記錄／回報 | 預建索引載入失敗時改為逐 JAR 解析，但要留下紀錄 |
 | `app/views/icon_preview/icon_cache.py:_batch_extract_jar_icons._process_jar` | BLE001 | 已記錄／回報 | 單一 JAR 解析失敗保留已解析的部分，但要留下是哪個 JAR |
+| `app/views/icon_preview/load_operation.py:observe_async_owner.on_done` | BLE001 | 已記錄／回報 | Future cancellation must release reservation |
+| `app/views/icon_preview/load_operation.py:_run_blocking` | BLE001 | UI／畫面保護 | drain even when blocking work fails |
+| `app/views/icon_preview/load_operation.py:load_icon_preview` | BLE001 | 已記錄／回報 | 錯誤顯示在 UI |
+| `app/views/icon_preview/render_operation.py:render_current_page.prepare_icons` | BLE001 | 已記錄／回報 | event loop displays failure |
+| `app/views/icon_preview/render_operation.py:render_current_page` | BLE001 | 已記錄／回報 | scheduling failure must be reported |
 | `app/views/icon_preview_row.py:_ensure_icon_size` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
-| `app/views/icon_preview_view.py:IconPreviewView._load_async` | BLE001 | 已記錄／回報 | 錯誤顯示在 UI |
+| `app/views/icon_preview_view.py:IconPreviewView._on_load_clicked` | BLE001 | 已記錄／回報 | 排程失敗時需結束 owner 並回報 UI |
 | `app/views/lm_view.py:LMView._on_db_option_changed` | BLE001 | 已記錄／回報 | 頁面尚未掛載時只是不即時更新提示 |
 | `app/views/lm_view.py:LMView.refresh_db_info` | BLE001 | 已記錄／回報 | 資料庫問題只影響提示文字，不應讓頁面載入失敗 |
 | `app/views/lm_view.py:LMView.refresh_key_stat` | BLE001 | UI／畫面保護 | 讀不到設定時只是不顯示 |
@@ -132,7 +140,7 @@
 | `app/views/rules/rules_actions.py:start_save_thread.worker` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/views/rules_view.py:RulesView.on_test_change` | BLE001 | 已記錄／回報 | 規則有問題時顯示原因，不讓頁面出錯 |
 | `app/views/rules_view.py:RulesView._initial_load.run` | BLE001 | 已記錄／回報 | 失敗要顯示在 UI |
-| `app/views/rules_view.py:RulesView.save_rules_clicked._validate_then_save` | BLE001 | 已記錄／回報 | 錯誤顯示在 UI |
+| `app/views/rules_view.py:RulesView._launch_rule_validation.validate` | BLE001 | 已記錄／回報 | 傳回 event loop 顯示 |
 | `app/views/translation/translation_actions.py:_safe_add_log` | BLE001/S110 | UI／畫面保護 | （未寫原因；見分類） |
 | `app/views/translation/translation_actions.py:_safe_page_update` | BLE001/S110 | UI／畫面保護 | （未寫原因；見分類） |
 | `app/views/translation/translation_actions.py:run_ftb` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |

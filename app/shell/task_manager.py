@@ -18,6 +18,11 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from app.tasks import task_session as task_session_module
+from app.tasks.operation_registry import (
+    OperationHandle,
+    OperationRegistry,
+    current_operation,
+)
 
 _logger = logging.getLogger(__name__)
 
@@ -57,15 +62,22 @@ class TaskInfo:
 class TaskManager:
     """追蹤進行中與最近完成的任務。"""
 
-    def __init__(self, clock: Callable[[], float] = time.time) -> None:
+    def __init__(
+        self,
+        clock: Callable[[], float] = time.time,
+        *,
+        operation_registry: OperationRegistry | None = None,
+    ) -> None:
         self._clock = clock
+        self.operation_registry = operation_registry or OperationRegistry()
         self._lock = threading.Lock()
         self._active: dict[int, TaskInfo] = {}
         self._sessions: dict[int, weakref.ReferenceType] = {}
         self._recent: deque[TaskInfo] = deque(maxlen=RECENT_LIMIT)
         self._subscribers: list[Callable[[], None]] = []
         self._attached = False
-        self._accepting = True
+        self._detach_pending = False
+        self._unsubscribe_registry: Callable[[], None] | None = None
 
     # -- 接上 TaskSession ------------------------------------------------------
 
@@ -73,20 +85,69 @@ class TaskManager:
         """開始接收所有 TaskSession 的事件。"""
         if not self._attached:
             task_session_module.add_observer(self._on_session_event)
+            self._unsubscribe_registry = self.operation_registry.subscribe(
+                self._on_registry_event
+            )
             self._attached = True
-        self.resume_accepting()
 
     def detach(self) -> None:
-        if self._attached:
-            task_session_module.remove_observer(self._on_session_event)
-            self._attached = False
+        if not self._attached:
+            return
+        if self.operation_registry.active_count():
+            # A Web session may expire after the bounded drain deadline. Keep the
+            # admission observer alive until workers actually finish, but detach
+            # all UI projections now.
+            self._detach_pending = True
+            with self._lock:
+                self._subscribers.clear()
+            return
+        self._finish_detach()
 
-    def _on_session_event(self, session, event: str) -> None:
+    def _finish_detach(self) -> None:
+        task_session_module.remove_observer(self._on_session_event)
+        if self._unsubscribe_registry is not None:
+            self._unsubscribe_registry()
+            self._unsubscribe_registry = None
+        self._attached = False
+        self._detach_pending = False
+
+    def _on_session_event(self, session, event: str) -> bool | None:
+        if event == "admission":
+            parent = current_operation()
+            handle = getattr(session, "operation_handle", None)
+            if parent is not None:
+                parent.bind_task_session(session)
+                return True
+            if isinstance(handle, OperationHandle) and not handle.done_event.is_set():
+                return True
+            if handle is not None:
+                try:
+                    session.operation_handle = None
+                except AttributeError:
+                    _logger.debug("TaskSession 不支援清除失效 owner handle")
+            return self.operation_registry.register_session(session) is not None
+
+        if self._detach_pending:
+            if event == "finish":
+                handle = getattr(session, "operation_handle", None)
+                if handle is not None and not handle._worker_managed:
+                    self.operation_registry.finish_session(session)
+            return
+
         sid = id(session)
+        legacy_handle = None
         with self._lock:
             info = self._active.get(sid)
             if event == "start":
-                if not self._accepting:
+                handle = getattr(session, "operation_handle", None)
+                if handle is None:
+                    parent = current_operation()
+                    if parent is not None:
+                        parent.bind_task_session(session)
+                        handle = parent
+                    else:
+                        handle = self.operation_registry.register_session(session)
+                if handle is None:
                     return
                 info = TaskInfo(
                     id=sid,
@@ -122,17 +183,45 @@ class TaskManager:
                 self._active.pop(sid, None)
                 self._sessions.pop(sid, None)
                 self._recent.appendleft(info)
+                handle = getattr(session, "operation_handle", None)
+                if handle is not None and not handle._worker_managed:
+                    legacy_handle = handle
+        if legacy_handle is not None:
+            # Registry observers can call back into TaskManager; never run them under this lock.
+            self.operation_registry.finish_session(session)
+        self._emit()
+
+    def _on_registry_event(self, event: str, handle: OperationHandle) -> None:
+        if self._detach_pending:
+            if self.operation_registry.active_count() == 0:
+                self._finish_detach()
+            return
+        if event == "start" and handle.task_session is not None:
+            # TaskSession.start emits the user-visible transition after its state
+            # is initialized; avoid presenting one operation twice at admission.
+            return
+        if event == "finish" and handle._task_session_id is None:
+            failed = handle.error is not None
+            info = TaskInfo(
+                id=int(handle.id, 16),
+                name=handle.descriptor.name or DEFAULT_TASK_NAME,
+                view_key=handle.descriptor.view_key,
+                status=STATUS_ERROR if failed else STATUS_DONE,
+                progress=0.0 if failed else 1.0,
+                started_at=handle.created_at,
+                finished_at=self._clock(),
+            )
+            with self._lock:
+                self._recent.appendleft(info)
         self._emit()
 
     def stop_accepting(self) -> None:
-        """關閉流程進入 drain 階段後，拒絕新的 session 註冊。"""
-        with self._lock:
-            self._accepting = False
+        """相容舊呼叫端：關閉 authoritative registry 的 admission。"""
+        self.operation_registry.begin_shutdown()
 
     def resume_accepting(self) -> None:
-        """關閉中止且外殼仍存活時，恢復註冊新的 session。"""
-        with self._lock:
-            self._accepting = True
+        """明確恢復 admission；active operation 尚未收斂時會拒絕。"""
+        self.operation_registry.reopen_admission()
 
     def _drop(self, sid: int) -> None:
         """session 被回收卻沒有 finish：當作中斷，從進行中移除。"""
@@ -144,6 +233,7 @@ class TaskManager:
             info.finished_at = self._clock()
             self._sessions.pop(sid, None)
             self._recent.appendleft(info)
+        self.operation_registry.finish_abandoned_session(sid)
         self._emit()
 
     def request_cancel_active(self) -> int:
@@ -152,30 +242,47 @@ class TaskManager:
         這只設定 worker 可觀察的 cancellation flag，不把 requested 誤當成
         worker 已停止；呼叫端仍必須等待 ``finish``／實際 writer completion。
         """
-        with self._lock:
-            sessions = [ref() for ref in self._sessions.values()]
-        requested = 0
-        for session in sessions:
-            if session is None:
-                continue
-            request_cancel = getattr(session, "request_cancel", None)
-            if not callable(request_cancel):
-                continue
-            try:
-                request_cancel()
-            except Exception:
-                _logger.exception("要求任務取消失敗")
-                continue
-            requested += 1
-        return requested
+        return sum(
+            handle.request_cancel() for handle in self.operation_registry.active()
+        )
 
     # -- 讀取 ---------------------------------------------------------------
 
     def active(self) -> list[TaskInfo]:
-        """進行中的任務（最早開始的在前）。"""
-        with self._lock:
-            tasks = [t for t in self._active.values() if t.status != STATUS_DONE]
-        return sorted(tasks, key=lambda t: t.started_at)
+        """TaskSession 的 UI projection；active membership 由 OperationRegistry 擁有。"""
+        projected: list[TaskInfo] = []
+        for handle in self.operation_registry.active():
+            session = handle.task_session
+            session_is_active = session is not None and not getattr(
+                session, "is_finished", False
+            )
+            session_info = None
+            if session_is_active:
+                with self._lock:
+                    session_info = self._active.get(id(session))
+            if session_info is not None:
+                projected.append(session_info)
+                continue
+            projected.append(
+                TaskInfo(
+                    id=int(handle.id, 16),
+                    name=(
+                        (getattr(session, "name", None) if session_is_active else None)
+                        or handle.descriptor.name
+                        or DEFAULT_TASK_NAME
+                    ),
+                    view_key=(
+                        (
+                            getattr(session, "view_key", None)
+                            if session_is_active
+                            else None
+                        )
+                        or handle.descriptor.view_key
+                    ),
+                    started_at=handle.created_at,
+                )
+            )
+        return sorted(projected, key=lambda task: task.started_at)
 
     def current(self) -> TaskInfo | None:
         """頂列膠囊要顯示的任務：最近開始、仍在進行中的那個。"""

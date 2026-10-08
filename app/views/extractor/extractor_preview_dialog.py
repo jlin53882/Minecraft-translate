@@ -7,7 +7,6 @@
 
 import asyncio
 import functools
-import threading
 import types
 
 import flet as ft
@@ -16,6 +15,7 @@ from app.services_impl.pipelines.extract_service import (
     prepare_extraction_paths,
     preview_extraction_generator,
 )
+from app.tasks.operation_registry import launch_page_operation
 from app.ui.design import C
 from app.views._log import LogView
 from app.views.extractor import extractor_dialog as _extractor_dialog
@@ -526,14 +526,32 @@ def _preview_start_scan(ctx):
     )
 
     ctx.scan_task = new_task_id("extract-preview")
-    threading.Thread(
-        target=in_new_task(
+
+    def request_operation_cancel() -> None:
+        ctx.state["cancelled"] = True
+
+    launched = launch_page_operation(
+        ctx.page,
+        in_new_task(
             "extract-preview",
             functools.partial(_preview_do_scan, ctx),
             task=ctx.scan_task,
         ),
-        daemon=True,
-    ).start()
+        name="JAR 提取預覽",
+        owner="extractor-preview",
+        on_cancel=request_operation_cancel,
+    )
+    if not launched:
+        ctx.state["running"] = False
+        ctx.preview_state.done = True
+        ctx.preview_dialog.modal = False
+        ctx.start_button.disabled = False
+        ctx.status_text.value = "應用程式正在關閉，未啟動掃描"
+        ctx.page.update()
+        ctx.page.show_dialog(
+            ft.SnackBar(ft.Text("應用程式正在關閉，無法啟動新任務"), open=True)
+        )
+        return
 
     async def poller():
         await _preview_ui_poller(ctx)

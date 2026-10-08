@@ -92,7 +92,7 @@ _render_current_page()
 
 ## 儲存流程（save_rules_clicked）
 
-1. 複製 `all_rules_data` 快照，以 `asyncio.to_thread` 在背景執行 `_validate_all`（逐條 `validate_rule`）；`_saving` 旗標防止重複觸發
+1. 複製 `all_rules_data` 快照，先註冊「規則批次驗證」operation，再以背景 worker 執行 `_validate_all`（逐條 `validate_rule`）；`_saving` 旗標防止重複觸發
 2. 有錯 → snack「第 N 條規則錯誤」並跳到該條所在頁
 3. 通過 → 移除 `_rid`、略過 from 為空的列，交給 `start_save_thread`
 

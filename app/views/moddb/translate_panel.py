@@ -21,6 +21,7 @@ from app.services_impl.moddb_translate_service import (
     run_moddb_translate_service,
     tick_live,
 )
+from app.tasks.operation_registry import launch_page_operation
 from app.tasks.task_session import TaskSession, tag_session
 from app.ui import kit
 from app.ui.design import C
@@ -310,11 +311,24 @@ class TranslatePanel(ft.Column):
         self.log_view.clear()
         self._reset_stats()
         self._safe_update()
-        threading.Thread(
-            target=run_moddb_translate_service,
-            args=(self.build_options(dry_run=dry_run), self.session),
-            daemon=True,
-        ).start()
+        launched = launch_page_operation(
+            self._page,
+            lambda: run_moddb_translate_service(
+                self.build_options(dry_run=dry_run), self.session
+            ),
+            name="Mod 資料庫機翻",
+            owner="moddb-translate",
+            task_session=self.session,
+            fallback_launcher=lambda target: threading.Thread(
+                target=target, daemon=True
+            ).start(),
+        )
+        if not launched:
+            self._set_running(False)
+            self._set_status("應用程式正在關閉，未啟動機翻", "gold")
+            show_snack(self._page, "應用程式正在關閉，無法啟動新任務", C.GOLD)
+            self._safe_update()
+            return
         self._running = True
         if not self._poller.running:
             self._poller.start(self._page, self._poll)

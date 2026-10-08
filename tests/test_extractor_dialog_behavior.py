@@ -12,6 +12,7 @@ from __future__ import annotations
 import flet as ft
 import pytest
 
+from app.tasks import operation_registry
 from app.views.extractor import extractor_dialog as mod
 from tests.conftest import _make_page, mock_filepicker
 
@@ -80,7 +81,7 @@ class _Env:
             def start(self):
                 pass
 
-        monkeypatch.setattr(mod.threading, "Thread", _Thread)
+        monkeypatch.setattr(operation_registry.threading, "Thread", _Thread)
         monkeypatch.setattr(
             mod, "prepare_extraction_paths", lambda mods, mode, out: str(self.out)
         )

@@ -13,6 +13,12 @@ from app.services_impl.cache.cache_services import (
     cache_search_service,
     cache_update_dst_service,
 )
+from app.tasks.operation_registry import (
+    CancellationPolicy,
+    ShutdownPolicy,
+    get_page_operation_registry,
+    reserve_page_operation,
+)
 from app.ui import kit
 
 # UI 共用元件：總覽區使用新 UI kit。
@@ -379,18 +385,52 @@ class CacheQueryMixin:
 
         seq = self._query_seq = getattr(self, "_query_seq", 0) + 1
         self.query_search_hint.update()
+        if get_page_operation_registry(self.page) is None:
+
+            async def _search_standalone():
+                try:
+                    results = await asyncio.to_thread(
+                        self._compute_query_results, query, mode, targets
+                    )
+                except Exception as ex:  # noqa: BLE001 - event loop displays the error
+                    self._notify(f"搜尋失敗：{ex}", "error")
+                    return
+                if seq == self._query_seq:
+                    self._apply_query_results(results)
+
+            run_task(_search_standalone)
+            return
+        operation = reserve_page_operation(
+            self.page,
+            name="快取查詢",
+            owner="cache-query",
+            cancellation=CancellationPolicy.NON_CANCELLABLE,
+            shutdown=ShutdownPolicy.DRAIN_ONLY,
+        )
+        if not operation.admitted:
+            self._notify("應用程式正在關閉，未啟動查詢", "warn")
+            return
+        result = {}
+
+        def search():
+            try:
+                result["dedup"] = self._compute_query_results(query, mode, targets)
+            except Exception as ex:  # noqa: BLE001 - event loop displays the error
+                result["error"] = ex
+
+        if not operation.launch(search):
+            operation.finish(error=RuntimeError("cache query worker was not launched"))
+            self._notify("無法啟動快取查詢", "error")
+            return
 
         async def _search():
-            # 大量快取時搜尋需數秒，改在執行緒執行，避免凍結 UI
-            try:
-                dedup = await asyncio.to_thread(
-                    self._compute_query_results, query, mode, targets
-                )
-            except Exception as ex:  # noqa: BLE001 - 錯誤顯示在 UI
-                self._notify(f"搜尋失敗：{ex}", "error")
+            while not operation.done_event.is_set():
+                await asyncio.sleep(0.02)
+            if "error" in result:
+                self._notify(f"搜尋失敗：{result['error']}", "error")
                 return
             if seq == self._query_seq:  # 只套用最後一次搜尋
-                self._apply_query_results(dedup)
+                self._apply_query_results(result.get("dedup", []))
 
         run_task(_search)
 

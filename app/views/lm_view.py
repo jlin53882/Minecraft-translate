@@ -5,7 +5,6 @@
 """
 
 import asyncio
-import threading
 import time
 from functools import partial
 
@@ -13,6 +12,7 @@ import flet as ft
 
 from app.services_impl.moddb_service import load_db_settings, summarize_database
 from app.services_impl.pipelines.lm_service import run_lm_translation_service
+from app.tasks.operation_registry import launch_page_operation
 from app.tasks.task_session import TaskSession, tag_session
 from app.ui import kit
 from app.ui.design import C
@@ -446,22 +446,29 @@ class LMView(ft.Column):
             write_new_cache,
         )
 
-        threading.Thread(
-            target=partial(
+        launched = launch_page_operation(
+            self.page,
+            partial(
                 run_lm_translation_service,
-                use_translation_db=self.use_db_switch.value,
-                translation_db_version=db_version,
-            ),
-            args=(
                 self.input_path.value,
                 output_dir,
                 self.session,
                 dry_run,
                 export_lang,
                 write_new_cache,
+                use_translation_db=self.use_db_switch.value,
+                translation_db_version=db_version,
             ),
-            daemon=True,
-        ).start()
+            name="機器翻譯",
+            owner="lm",
+            task_session=self.session,
+        )
+        if not launched:
+            self._set_running(False)
+            self._set_status("應用程式正在關閉，未啟動翻譯", "gold")
+            show_snack(self.page, "應用程式正在關閉，無法啟動新任務", C.GOLD)
+            self.page.update()
+            return
 
         self.start_ui_timer()
 

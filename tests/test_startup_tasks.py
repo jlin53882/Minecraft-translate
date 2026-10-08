@@ -1,75 +1,46 @@
-import logging
-
 from app import startup_tasks
+from app.tasks.operation_registry import OperationRegistry
 
 
-def test_rebuild_index_on_startup_calls_service(monkeypatch):
-    seen = []
-    monkeypatch.setattr(
-        startup_tasks,
-        "cache_rebuild_index_service",
-        lambda: seen.append("rebuilt") or {"success": True},
-    )
-    monkeypatch.setattr(
-        startup_tasks.cache_manager, "is_search_index_current", lambda: False
-    )
-
-    startup_tasks.rebuild_index_on_startup()
-
-    assert seen == ["rebuilt"]
-
-
-def test_rebuild_index_on_startup_skips_when_index_current(monkeypatch):
-    seen = []
-    monkeypatch.setattr(
-        startup_tasks, "cache_rebuild_index_service", lambda: seen.append("rebuilt")
-    )
+def test_startup_index_rebuild_is_reserved_before_worker_launch(monkeypatch):
+    registry = OperationRegistry()
     monkeypatch.setattr(
         startup_tasks.cache_manager, "is_search_index_current", lambda: True
     )
+    reserved_counts = []
 
-    startup_tasks.rebuild_index_on_startup()
+    def launcher(target):
+        reserved_counts.append(registry.active_count())
+        target()
 
-    assert seen == []
+    handle = startup_tasks.start_background_startup_tasks(
+        registry, worker_launcher=launcher
+    )
+
+    assert handle is not None
+    assert reserved_counts == [1]
+    assert handle.descriptor.owner == "startup-index"
+    assert handle.descriptor.cancellation.value == "non_cancellable"
+    assert handle.descriptor.shutdown.value == "drain_only"
+    assert handle.done_event.is_set()
+    assert registry.active() == []
 
 
-def test_startup_rebuild_does_not_report_success_when_service_fails(
-    monkeypatch, caplog
-):
+def test_startup_index_rebuild_is_not_launched_after_shutdown(monkeypatch):
+    registry = OperationRegistry()
+    registry.begin_shutdown()
+    service_calls = []
     monkeypatch.setattr(
-        startup_tasks,
-        "cache_rebuild_index_service",
-        lambda: {"success": False, "error": "cache init failed"},
+        startup_tasks.cache_manager,
+        "is_search_index_current",
+        lambda: service_calls.append("check") or True,
     )
-    monkeypatch.setattr(
-        startup_tasks.cache_manager, "is_search_index_current", lambda: False
-    )
+    launch_calls = []
 
-    with caplog.at_level(logging.INFO, logger="main_app"):
-        startup_tasks.rebuild_index_on_startup()
-
-    assert not any("重建完成" in r.getMessage() for r in caplog.records)
-    assert any(
-        r.levelno == logging.ERROR and "重建失敗" in r.getMessage()
-        for r in caplog.records
+    handle = startup_tasks.start_background_startup_tasks(
+        registry, worker_launcher=lambda target: launch_calls.append(target)
     )
 
-
-def test_start_background_startup_tasks_starts_thread(monkeypatch):
-    seen = []
-
-    class _Thread:
-        def __init__(self, target=None, daemon=None):
-            seen.append(("init", target, daemon))
-            self.target = target
-
-        def start(self):
-            seen.append("start")
-
-    monkeypatch.setattr(startup_tasks.threading, "Thread", _Thread)
-    thread = startup_tasks.start_background_startup_tasks()
-
-    assert seen[0][0] == "init"
-    assert seen[0][2] is True
-    assert seen[1] == "start"
-    assert isinstance(thread, _Thread)
+    assert handle is None
+    assert launch_calls == []
+    assert service_calls == []

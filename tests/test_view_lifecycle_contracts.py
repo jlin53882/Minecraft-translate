@@ -641,6 +641,8 @@ def test_detail_page_icons_are_prepared_off_the_event_loop_thread(
     tmp_path, monkeypatch
 ):
     page, view = _icon_view(tmp_path)
+    worker_targets = []
+    page.run_thread = worker_targets.append
     view.current_modid = "demo"
     view.mods = {"demo": _entries(3)}
     view._zh_data = {}
@@ -659,6 +661,7 @@ def test_detail_page_icons_are_prepared_off_the_event_loop_thread(
 
     async def scenario():
         seen["loop"] = threading.get_ident()
+        await asyncio.to_thread(worker_targets.pop(0))
         handler, args = page._tasks[-1]
         await handler(*args)
 
@@ -671,6 +674,8 @@ def test_only_the_latest_detail_render_is_applied_and_unmount_discards(
     tmp_path, monkeypatch
 ):
     page, view = _icon_view(tmp_path)
+    worker_targets = []
+    page.run_thread = worker_targets.append
     view.current_modid = "demo"
     view.mods = {"demo": _entries(2)}
     view._zh_data = {}
@@ -685,7 +690,11 @@ def test_only_the_latest_detail_render_is_applied_and_unmount_discards(
     view._render_current_page()  # 第二次渲染（使用者很快翻頁）
 
     async def run_all():
-        for handler, args in list(page._tasks):
+        targets, worker_targets[:] = worker_targets[:], []
+        for target in targets:
+            await asyncio.to_thread(target)
+        handlers, page._tasks[:] = page._tasks[:], []
+        for handler, args in handlers:
             await handler(*args)
 
     asyncio.run(run_all())
@@ -696,6 +705,8 @@ def test_only_the_latest_detail_render_is_applied_and_unmount_discards(
     view.list_view.controls.clear()
     view._render_current_page()
     view.will_unmount()
+    targets, worker_targets[:] = worker_targets[:], []
+    asyncio.run(asyncio.to_thread(targets[0]))
     asyncio.run(run_all())
     assert view.list_view.controls == []
 
@@ -704,6 +715,8 @@ def test_open_mod_detail_finds_zh_file_in_a_thread_and_discards_when_stale(
     tmp_path, monkeypatch
 ):
     page, view = _icon_view(tmp_path)
+    worker_targets = []
+    page.run_thread = worker_targets.append
     view.mods = {"demo": _entries(1)}
     seen = {}
     zh = tmp_path / "demo" / "lang" / "zh_tw.json"
@@ -726,7 +739,10 @@ def test_open_mod_detail_finds_zh_file_in_a_thread_and_discards_when_stale(
 
     async def run_all():
         seen["loop"] = threading.get_ident()
-        for handler, args in list(page._tasks):
+        while worker_targets:
+            await asyncio.to_thread(worker_targets.pop(0))
+        handlers, page._tasks[:] = page._tasks[:], []
+        for handler, args in handlers:
             await handler(*args)
 
     asyncio.run(run_all())
@@ -758,24 +774,32 @@ def test_find_zh_file_uses_direct_path_then_rglob_fallback(tmp_path):
 
 
 def test_save_current_zh_writes_in_a_thread(tmp_path, monkeypatch):
+    import threading
+
     page, view = _icon_view(tmp_path)
     target = tmp_path / "zh_tw.json"
     view._current_zh_file = target
     view._zh_data = {"k": "譯"}
     seen = {}
     real = view._write_zh_file
+    release = threading.Event()
+    started = threading.Event()
 
     def spy(path, payload):
         seen["thread"] = threading.get_ident()
+        started.set()
+        release.wait(timeout=2)
         return real(path, payload)
 
     monkeypatch.setattr(view, "_write_zh_file", spy)
     view._save_current_zh(None)
-    assert not target.exists() and "thread" not in seen
+    assert started.wait(timeout=1)
+    assert not target.exists()
 
     async def scenario():
         seen["loop"] = threading.get_ident()
         handler, args = page._tasks[-1]
+        release.set()
         await handler(*args)
 
     asyncio.run(scenario())

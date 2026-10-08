@@ -73,14 +73,24 @@ def add_log_unmirrored(session, text: str, level: str = "info") -> None:
     session.add_log(text, **kwargs)
 
 
-def _notify(session: TaskSession, event: str) -> None:
+def _notify(session: TaskSession, event: str) -> bool:
+    accepted = True
     with _observers_lock:
         observers = list(_observers)
     for callback in observers:
         try:
-            callback(session, event)
+            result = callback(session, event)
+            if event == "admission" and result is False:
+                accepted = False
         except Exception:
             _logger.exception("TaskSession 觀察者失敗：%s", event)
+            if event == "admission":
+                accepted = False
+    return accepted
+
+
+class TaskSessionAdmissionError(RuntimeError):
+    """Raised when shutdown has closed admission before a session can start."""
 
 
 class TaskSession:
@@ -122,6 +132,8 @@ class TaskSession:
         self._start_logs: list[tuple[str, str]] = []
         self._lock = threading.Lock()
         self._cancel_event = threading.Event()
+        self._operation_cancel_event: threading.Event | None = None
+        self.operation_handle = None
         self._started_at: float | None = None
         self._finished = False  # finish() 的終止通知只送一次（見 finish）
         self._amended = False  # 結束後才 set_error() 的更正紀錄只寫一次（見 set_error）
@@ -273,13 +285,21 @@ class TaskSession:
         """要求取消任務；worker 會在下一個檢查點（例如批次之間）停止。"""
         self._cancel_event.set()
 
+    def bind_operation_cancel_event(self, event: threading.Event) -> None:
+        """讓 owner 的取消要求不會被 start() 重設而遺失。"""
+        self._operation_cancel_event = event
+
     @property
     def cancel_requested(self) -> bool:
         """是否已要求取消。"""
-        return self._cancel_event.is_set()
+        return self._cancel_event.is_set() or bool(
+            self._operation_cancel_event and self._operation_cancel_event.is_set()
+        )
 
     def start(self) -> None:
         """開始任務，清空日誌並重置序號。"""
+        if not _notify(self, "admission"):
+            raise TaskSessionAdmissionError("operation admission is closed")
         self._cancel_event.clear()
         with self._lock:
             self.progress = 0.0

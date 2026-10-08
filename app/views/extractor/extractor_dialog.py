@@ -12,7 +12,6 @@
 
 import functools
 import os
-import threading
 import traceback
 import types
 
@@ -27,6 +26,7 @@ from app.services_impl.pipelines.extract_service import (
     prepare_extraction_paths,
     run_extraction_loop,
 )
+from app.tasks.operation_registry import launch_page_operation
 from app.ui.design import C
 from app.ui.ui_batcher import UiBatcher
 from app.views.extractor.extractor_dialog_ui import (
@@ -456,15 +456,37 @@ def _extractor_on_start_click(ctx, e):
     ctx.dialog.modal = True
     ctx.page.update()
 
-    # 啟動執行緒
+    _launch_extractor_operation(ctx)
+
+
+def _launch_extractor_operation(ctx):
+    """Reserve an extraction owner before starting its generator worker."""
+
+    def request_operation_cancel() -> None:
+        ctx.extraction_cancel_flag[0] = True
+        ctx.state["cancelled"] = True
+
     log_debug(
         f"[BTN] on_start_click spawning run_extraction thread (mode={ctx.mode!r})"
     )
-    # 這條執行緒直接消費提取 generator（沒有 TaskSession）：給它自己的任務歸屬，
-    # 核心流程與執行緒池寫出的後台記錄才分得出是哪一次提取。
-    threading.Thread(
-        target=in_new_task("extractor", ctx.run_extraction), daemon=True
-    ).start()
+    launched = launch_page_operation(
+        ctx.page,
+        in_new_task("extractor", ctx.run_extraction),
+        name="JAR 提取",
+        owner="extractor",
+        on_cancel=request_operation_cancel,
+    )
+    if not launched:
+        ctx.state["running"] = False
+        ctx.start_button.visible = True
+        ctx.cancel_button.visible = False
+        ctx.progress_bar.visible = False
+        ctx.dialog.modal = False
+        ctx.status_text.value = "應用程式正在關閉，未啟動提取"
+        ctx.page.show_dialog(
+            ft.SnackBar(ft.Text("應用程式正在關閉，無法啟動新任務"), open=True)
+        )
+        ctx.page.update()
 
 
 def _extractor_on_cancel_click(ctx, e):

@@ -1,4 +1,5 @@
 import tempfile
+import threading
 from pathlib import Path
 from unittest.mock import patch
 
@@ -55,11 +56,17 @@ def test_save_current_zh_writes_modified_json():
 
     with tempfile.TemporaryDirectory() as tmp:
         json_path = Path(tmp) / "icons.json"
+        worker_targets = []
+        page.run_thread = worker_targets.append
         view._current_zh_file = json_path
         view._zh_data = {"k": "青蘋果"}
 
         view._save_current_zh(None)
         assert not json_path.exists()  # 寫檔在背景執行緒，點擊當下不寫
+        worker = threading.Thread(target=worker_targets.pop())
+        worker.start()
+        worker.join(timeout=2)
+        assert not worker.is_alive()
         _drain(page)
 
         assert "青蘋果" in json_path.read_text(encoding="utf-8")

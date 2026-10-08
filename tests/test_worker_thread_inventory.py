@@ -21,23 +21,11 @@ APP = ROOT / "app"
 # 與 docs/WORKER_THREAD_AUDIT.md 的「背景執行緒啟動點」表一致
 EXPECTED_THREAD_SITES = {
     "app/shell/config_effects.py": 1,
-    "app/shell/resume_prompt.py": 1,
     "app/startup_tasks.py": 1,
-    "app/views/bundler_view.py": 1,
-    "app/views/dashboard_view.py": 1,
-    "app/views/extractor/extractor_dialog.py": 1,
-    "app/views/extractor/extractor_preview_dialog.py": 1,
-    "app/views/lm_view.py": 1,
-    "app/views/lookup_view.py": 2,
-    "app/views/merge_view.py": 1,
+    "app/tasks/operation_registry.py": 2,
     "app/views/moddb/scan_panel.py": 1,
     "app/views/moddb/translate_panel.py": 1,
-    "app/views/pipeline/pipeline_extract_dialog.py": 1,
     "app/views/pipeline/pipeline_session.py": 1,
-    "app/views/qc_base.py": 1,
-    "app/views/rules/rules_actions.py": 2,
-    "app/views/rules_view.py": 1,
-    "app/views/translation/translation_actions.py": 3,
 }
 
 # worker 內直接做這些就是「碰 UI」

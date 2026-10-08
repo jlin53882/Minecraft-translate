@@ -22,6 +22,11 @@ import flet as ft
 from app.services_impl.cache.cache_services import (
     cache_get_overview_service,
 )
+from app.tasks.operation_registry import (
+    CancellationPolicy,
+    ShutdownPolicy,
+    reserve_page_operation,
+)
 from app.ui import kit
 
 # UI 共用元件：總覽區使用新 UI kit。
@@ -233,8 +238,32 @@ class CacheView(
         except Exception:  # noqa: BLE001, S110 - 尚未完成掛載時略過
             pass
 
+        operation = reserve_page_operation(
+            self.page,
+            name="快取總覽載入",
+            owner="cache-overview",
+            cancellation=CancellationPolicy.NON_CANCELLABLE,
+            shutdown=ShutdownPolicy.DRAIN_ONLY,
+        )
+        if not operation.admitted:
+            self._set_state(False, "READY", "trace: 正在關閉，未載入快取")
+            return
+        result = {}
+
+        def fetch():
+            result["overview"] = self._fetch_overview()
+
+        if not operation.launch(fetch):
+            operation.finish(
+                error=RuntimeError("cache overview worker was not launched")
+            )
+            self._set_state(False, "READY", "trace: 快取載入未啟動")
+            return
+
         async def _load():
-            fetched = await asyncio.to_thread(self._fetch_overview)
+            while not operation.done_event.is_set():
+                await asyncio.sleep(0.02)
+            fetched = result.get("overview", ({}, RuntimeError("load cancelled"), ""))
             self._finish_mount(fetched)
 
         run_task(_load)

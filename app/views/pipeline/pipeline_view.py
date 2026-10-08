@@ -11,6 +11,7 @@ from functools import partial
 
 import flet as ft
 
+from app.tasks.operation_registry import OperationRegistry
 from app.ui import kit
 from app.ui.design import C
 from app.ui.safe_file_picker import ensure_output_dir
@@ -81,6 +82,10 @@ class PipelineView(PipelineWidgetsMixin, ft.Column):
     def set_registry(self, registry):
         """將全域視圖註冊表注入視圖內（相容舊代碼）。"""
         self.set_view_registry(registry)
+
+    def set_operation_registry(self, registry: OperationRegistry) -> None:
+        """將 authoritative operation owner 注入 pipeline runner。"""
+        self.runner.set_operation_registry(registry)
 
     def _update_progress(self, val, text):
         self.progress_bar.value = val

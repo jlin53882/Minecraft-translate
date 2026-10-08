@@ -2,6 +2,7 @@
 
 import asyncio
 
+from app.tasks import operation_registry
 from app.views import bundler_view as bv
 from app.views import translation_view as tv
 from app.views.translation import translation_actions as ta
@@ -21,7 +22,9 @@ def test_translation_run_is_ignored_while_task_running(monkeypatch):
     page = mock_page()
     view = tv.TranslationView(page, mock_filepicker())
     started = []
-    monkeypatch.setattr(ta.threading, "Thread", _FakeThreadFactory(started))
+    monkeypatch.setattr(
+        operation_registry.threading, "Thread", _FakeThreadFactory(started)
+    )
     view.ftb_in_dir.value = "C:/pack"
     view.kjs_in_dir.value = "C:/pack"
     view.md_in_dir.value = "C:/pack"
@@ -50,7 +53,9 @@ def test_bundler_start_is_ignored_while_running(monkeypatch):
     page = mock_page()
     view = bv.BundlerView(page, mock_filepicker())
     started = []
-    monkeypatch.setattr(bv.threading, "Thread", _FakeThreadFactory(started))
+    monkeypatch.setattr(
+        operation_registry.threading, "Thread", _FakeThreadFactory(started)
+    )
     view.root_dir_field.value = "C:/root"
 
     view.start_bundling_clicked(None)

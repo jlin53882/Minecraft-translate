@@ -24,6 +24,13 @@ import traceback
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
+from app.tasks.operation_registry import (
+    CancellationPolicy,
+    CommitPolicy,
+    OperationDescriptor,
+    OperationRegistry,
+    current_operation,
+)
 from app.tasks.task_session import TaskSession, add_log_unmirrored, tag_session
 from app.ui.poller import PollerHandle
 from translation_tool.utils.cancellation import TaskCancelled, cancel_scope
@@ -71,6 +78,8 @@ class PipelineRunner:
         self._update_progress = update_progress
         self._session_factory = session_factory or default_session_factory
         self._launch = launch_worker or default_worker_launcher
+        self.operation_registry: OperationRegistry | None = None
+        self.operation_handle = None
         self._session_failed = session_failed
         self.cancel_event = threading.Event()
         self.current_session: TaskSession | None = None
@@ -119,11 +128,17 @@ class PipelineRunner:
     def reset_cancel(self) -> None:
         self.cancel_event.clear()
 
+    def set_operation_registry(self, registry: OperationRegistry) -> None:
+        self.operation_registry = registry
+
     def request_cancel(self) -> bool:
         """要求取消；已經在取消中回傳 False。"""
         if self.cancel_event.is_set():
             return False
         self.cancel_event.set()
+        handle = self.operation_handle
+        if handle is not None and not handle.cancel_requested:
+            handle.request_cancel()
         session = self.current_session
         if session is not None:
             session.request_cancel()
@@ -140,7 +155,11 @@ class PipelineRunner:
             finally:
                 self.ui_view(on_end)
 
-        self._launch(worker)
+        if not self._launch_owned(worker, f"{name}"):
+            self.ui_view(
+                self._panel.add_log, "⛔ 應用程式正在關閉，未啟動新工作", "error"
+            )
+            self.ui_view(on_end)
 
     def start_sequence(self, steps, on_end) -> None:
         """在背景依序執行步驟；任一步驟失敗／取消就停止，最後在 event loop 呼叫 ``on_end``。"""
@@ -153,13 +172,40 @@ class PipelineRunner:
                         return
                 success = True
             except Exception as ex:  # noqa: BLE001 - 背景執行緒邊界，確保按鈕會恢復
+                self._record_operation_error(ex)
                 # UI 只顯示一行摘要；完整堆疊只寫後台，排查時才有根因
                 log_error(f"[Pipeline] 一鍵製作失敗：{ex!r}\n{traceback.format_exc()}")
                 self.ui_view(self._panel.add_log, f"❌ 流程失敗：{ex}", "error")
             finally:
                 self.ui_view(self._finish_sequence, success, on_end)
 
-        self._launch(worker)
+        if not self._launch_owned(worker, "一鍵流水線"):
+            self.ui_view(
+                self._panel.add_log, "⛔ 應用程式正在關閉，未啟動新工作", "error"
+            )
+            self.ui_view(self._finish_sequence, False, on_end)
+
+    def _launch_owned(self, worker: Callable[[], None], name: str) -> bool:
+        if self.operation_registry is None:
+            self._launch(worker)
+            return True
+        handle = self.operation_registry.reserve(
+            OperationDescriptor(
+                name=name,
+                owner="pipeline",
+                cancellation=CancellationPolicy.COOPERATIVE,
+                commit=CommitPolicy.PARTIAL_ALLOWED,
+            )
+        )
+        if handle is None:
+            return False
+        self.operation_handle = handle
+        handle.add_cancel_callback(self.request_cancel)
+        return handle.launch(
+            worker,
+            launcher=self._launch,
+            run_if_cancelled=True,
+        )
 
     def _finish_sequence(self, success: bool, on_end) -> None:
         cancelled = self.cancel_event.is_set()
@@ -169,6 +215,11 @@ class PipelineRunner:
         elif cancelled:
             self._panel.add_log("⏹ 一鍵製作已取消", "warning")
         on_end()
+
+    def _record_operation_error(self, error: BaseException) -> None:
+        handle = self.operation_handle
+        if handle is not None and not handle.done_event.is_set():
+            handle.record_error(error)
 
     # ------------------------------------------------------------------ 步驟
 
@@ -182,6 +233,9 @@ class PipelineRunner:
             return False
         session = self._session_factory()
         self.current_session = session
+        owner = current_operation()
+        if owner is not None:
+            owner.bind_task_session(session)
         watch = _Watch(session)
         self._watch = watch
         self.ui_view(self._panel.set_step_running, step_num, name)
@@ -199,6 +253,7 @@ class PipelineRunner:
                             session.finish()
                             break
         except TaskCancelled:
+            self.request_cancel()
             session.finish()  # 取消也要 terminal（TaskManager 不可殘留 active；重複 finish 無害）
         except Exception as ex:  # noqa: BLE001 - 背景步驟邊界：任何錯誤都轉成步驟失敗
             log_error(f"[Pipeline] {name} 失敗：{ex!r}\n{traceback.format_exc()}")
@@ -223,6 +278,8 @@ class PipelineRunner:
 
         cancelled = self.cancel_event.is_set()
         ok = not cancelled and not self._session_failed(session)
+        if not ok and not cancelled:
+            self._record_operation_error(RuntimeError(f"Pipeline step failed: {name}"))
 
         def _finish():
             self._panel.finish_step(step_num, ok, cancelled=cancelled)

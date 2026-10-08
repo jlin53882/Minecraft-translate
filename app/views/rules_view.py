@@ -11,6 +11,11 @@ import threading
 import flet as ft
 
 from app.services_impl.config_service import load_replace_rules
+from app.tasks.operation_registry import (
+    CancellationPolicy,
+    ShutdownPolicy,
+    launch_page_operation,
+)
 from app.ui.debounce import Debouncer
 from app.ui.design import C
 from app.ui.snack import show_snack
@@ -406,7 +411,14 @@ class RulesView(RulesWidgetsMixin, ft.Column):
                 return
             self._run_on_ui_thread(self._handle_reload_success, rules_data)
 
-        threading.Thread(target=run, daemon=True).start()
+        launch_page_operation(
+            self.page,
+            run,
+            name="規則初始載入",
+            owner="rules",
+            cancellation=CancellationPolicy.NON_CANCELLABLE,
+            shutdown=ShutdownPolicy.DRAIN_ONLY,
+        )
 
     # --- 分頁渲染邏輯 ---
 
@@ -650,11 +662,44 @@ class RulesView(RulesWidgetsMixin, ft.Column):
 
         self._saving = True
         show_snack(self.page, "🔎 正在驗證規則…", C.EM, text_color=C.ON_EM)
+        self._launch_rule_validation(snapshot, finish, run_task)
+
+    def _launch_rule_validation(self, snapshot, finish, run_task):
+        """Own the validation worker and only continue saving after it returns."""
+        result = {}
+        worker_done = threading.Event()
+
+        def validate():
+            try:
+                result["failure"] = self._validate_all(snapshot)
+            except Exception as ex:  # noqa: BLE001 - 傳回 event loop 顯示
+                result["error"] = ex
+            finally:
+                worker_done.set()
+
+        operation = launch_page_operation(
+            self.page,
+            validate,
+            name="規則批次驗證",
+            owner="rules-validation",
+            cancellation=CancellationPolicy.NON_CANCELLABLE,
+            shutdown=ShutdownPolicy.DRAIN_ONLY,
+        )
+        if not operation:
+            self._saving = False
+            show_snack(
+                self.page,
+                "應用程式正在關閉，未開始規則驗證",
+                C.GOLD,
+                text_color=C.ON_EM,
+            )
+            return
 
         async def _validate_then_save():
-            try:
-                failure = await asyncio.to_thread(self._validate_all, snapshot)
-            except Exception as ex:  # noqa: BLE001 - 錯誤顯示在 UI
+            while not worker_done.is_set():
+                await asyncio.sleep(0.02)
+            if "error" in result:
+                ex = result["error"]
                 self._saving = False
                 show_snack(
                     self.page,
@@ -663,7 +708,7 @@ class RulesView(RulesWidgetsMixin, ft.Column):
                     text_color=C.ON_EM,
                 )
                 return
-            finish(failure)
+            finish(result.get("failure"))
 
         run_task(_validate_then_save)
 

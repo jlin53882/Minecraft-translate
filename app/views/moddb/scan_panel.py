@@ -25,6 +25,7 @@ from app.services_impl.moddb_service import (
     run_moddb_scan_service,
     version_choices,
 )
+from app.tasks.operation_registry import launch_page_operation
 from app.tasks.task_session import TaskSession, tag_session
 from app.ui import design, kit
 from app.ui.design import C
@@ -472,11 +473,24 @@ class ScanPanel(ft.Column):
         self.log_view.clear()
         self._reset_stats()
         self._safe_update()
-        threading.Thread(
-            target=run_moddb_scan_service,
-            args=(folder, self.build_options(dry_run=dry_run), self.session),
-            daemon=True,
-        ).start()
+        launched = launch_page_operation(
+            self._page,
+            lambda: run_moddb_scan_service(
+                folder, self.build_options(dry_run=dry_run), self.session
+            ),
+            name="Mod 資料庫掃描",
+            owner="moddb-scan",
+            task_session=self.session,
+            fallback_launcher=lambda target: threading.Thread(
+                target=target, daemon=True
+            ).start(),
+        )
+        if not launched:
+            self._set_running(False)
+            self._set_status("應用程式正在關閉，未啟動掃描", "gold")
+            show_snack(self._page, "應用程式正在關閉，無法啟動新任務", C.GOLD)
+            self._safe_update()
+            return
         self._running = True
         if not self._poller.running:
             self._poller.start(self._page, self._poll)
