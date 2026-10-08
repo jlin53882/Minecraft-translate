@@ -680,7 +680,7 @@ class RulesView(RulesWidgetsMixin, ft.Column):
                 ]
                 from app.services_impl.config_service import save_replace_rules
 
-                save_replace_rules(clean_rules)
+                save_replace_rules(clean_rules, raise_on_error=True)
             except Exception as ex:
                 result["error"] = ex
                 raise

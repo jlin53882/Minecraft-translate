@@ -224,6 +224,8 @@ class IconPreviewDetailMixin:
         def write_file():
             try:
                 saved["error"] = self._write_zh_file(target, payload)
+                if saved["error"] is not None:
+                    operation.handle.record_error(saved["error"])
             finally:
                 worker_done.set()
 

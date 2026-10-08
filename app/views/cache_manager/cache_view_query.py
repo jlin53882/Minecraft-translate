@@ -16,6 +16,7 @@ from app.services_impl.cache.cache_services import (
 from app.tasks.operation_registry import (
     CancellationPolicy,
     ShutdownPolicy,
+    current_operation,
     get_page_operation_registry,
     reserve_page_operation,
 )
@@ -417,6 +418,7 @@ class CacheQueryMixin:
                 result["dedup"] = self._compute_query_results(query, mode, targets)
             except Exception as ex:  # noqa: BLE001 - event loop displays the error
                 result["error"] = ex
+                current_operation().record_error(ex)
 
         if not operation.launch(search):
             operation.finish(error=RuntimeError("cache query worker was not launched"))

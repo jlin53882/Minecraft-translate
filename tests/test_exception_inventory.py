@@ -123,7 +123,7 @@ UNEXPLAINED_NOQA_BASELINE = {
     "translation_tool/utils/cache_shards.py": 2,
     "translation_tool/utils/config_manager.py": 1,
     "translation_tool/utils/jar_browser.py": 1,
-    "translation_tool/utils/text_processor.py": 4,
+    "translation_tool/utils/text_processor.py": 3,
 }
 
 

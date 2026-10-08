@@ -18,6 +18,7 @@ from app.tasks.operation_registry import (
     CommitPolicy,
     DurabilityPolicy,
     ShutdownPolicy,
+    current_operation,
     get_page_operation_registry,
     reserve_page_operation,
 )
@@ -90,6 +91,9 @@ def _execute_cache_work(view, work_fn, progress_callback):
             warm(result)
         return result, None
     except Exception as ex:  # noqa: BLE001 - 錯誤顯示在 UI
+        operation = current_operation()
+        if operation is not None:
+            operation.record_error(ex)
         return None, (ex, traceback.format_exc())
 
 

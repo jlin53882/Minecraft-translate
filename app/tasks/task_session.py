@@ -304,6 +304,31 @@ class TaskSession:
 
     def start(self) -> None:
         """開始任務，清空日誌並重置序號。"""
+        registry = self.operation_registry
+        if registry is not None:
+            # A page-bound session must enforce its own registry's admission
+            # even after TaskManager has detached its process-global observer.
+            from app.tasks.operation_registry import current_operation
+
+            parent = current_operation()
+            handle = self.operation_handle
+            if parent is not None:
+                if parent._registry is not registry:
+                    raise TaskSessionAdmissionError(
+                        "TaskSession cannot start under another registry's operation"
+                    )
+                parent.bind_task_session(self)
+            elif handle is not None and handle._registry is not registry:
+                raise TaskSessionAdmissionError(
+                    "TaskSession is bound to a different operation registry"
+                )
+            elif handle is not None and handle.done_event.is_set():
+                self.operation_handle = None
+                handle = None
+            if parent is None and handle is None:
+                handle = registry.register_session(self)
+                if handle is None:
+                    raise TaskSessionAdmissionError("operation admission is closed")
         if not _notify(self, "admission"):
             raise TaskSessionAdmissionError("operation admission is closed")
         self._cancel_event.clear()

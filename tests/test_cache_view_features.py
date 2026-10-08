@@ -2,9 +2,30 @@ import json
 
 import flet as ft
 
+from app.tasks.operation_registry import OperationDescriptor, OperationRegistry
 from app.views.cache_manager import cache_view_query as cache_query_module
 from app.views.cache_manager import cache_view_shard_detail as cache_shard_detail_module
+from app.views.cache_manager.cache_actions import _execute_cache_work
 from app.views.cache_view import CacheView
+
+
+def test_cache_action_handled_error_is_a_failed_operation():
+    registry = OperationRegistry()
+    handle = registry.reserve(OperationDescriptor(name="cache save", owner="test"))
+    assert handle is not None
+    failure = OSError("cache destination unavailable")
+    payloads = []
+
+    assert handle.launch(
+        lambda: payloads.append(
+            _execute_cache_work(None, lambda: (_ for _ in ()).throw(failure), None)
+        )
+    )
+    assert handle.done_event.wait(2)
+    assert handle.terminal_reason == "failed"
+    assert handle.error is failure
+    assert payloads[0][0] is None
+    assert payloads[0][1][0] is failure
 
 
 class FakePage:
@@ -249,3 +270,51 @@ def test_on_query_search_runs_in_thread_and_applies_latest_only(monkeypatch):
 
     assert all(t is not threading.main_thread() for t in threads)
     assert [r["key"] for r in view.query_results] == ["xyz"]
+
+
+def test_registry_owned_query_error_is_terminal_failure(monkeypatch):
+    import asyncio
+
+    tasks = []
+
+    class LoopPage(FakePage):
+        def run_task(self, handler, *args):
+            tasks.append(handler)
+
+    registry = OperationRegistry()
+    page = LoopPage()
+    page.operation_registry = registry
+    view = CacheView.__new__(CacheView)
+    view._page = page
+    view.ui_busy = False
+    view.tf_query_input = ft.TextField(value="needle")
+    view.dd_query_mode = ft.Dropdown(value="DST")
+    view.dd_query_type = ft.Dropdown(value="lang")
+    view.query_search_hint = ft.Text(value="")
+    view.query_search_hint.update = lambda: None
+    view.query_change_hint = ft.Text(value="")
+    view._last_overview_data = {"types": {"lang": {}}}
+    view.query_results = []
+    view.update = lambda: None
+    notifications = []
+    view._notify = lambda message, level="info": notifications.append((level, message))
+    view._render_query_results = lambda: None
+    view._render_query_detail = lambda: None
+    failures = []
+    registry.subscribe(
+        lambda event, handle: failures.append(handle) if event == "finish" else None
+    )
+    failure = RuntimeError("search backend failed")
+    monkeypatch.setattr(
+        view,
+        "_compute_query_results",
+        lambda *_args: (_ for _ in ()).throw(failure),
+    )
+
+    CacheView._on_query_search(view, None)
+    assert registry.wait_for_idle(timeout=2)
+    asyncio.run(tasks[0]())
+
+    assert failures[0].terminal_reason == "failed"
+    assert failures[0].error is failure
+    assert notifications == [("error", f"搜尋失敗：{failure}")]

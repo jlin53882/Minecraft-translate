@@ -73,6 +73,31 @@ def test_save_current_zh_writes_modified_json():
         assert page.overlay
 
 
+def test_registry_owned_icon_preview_save_error_marks_operation_failed(
+    tmp_path, monkeypatch
+):
+    from app.tasks.operation_registry import OperationRegistry
+
+    page = mock_page()
+    registry = OperationRegistry()
+    page.operation_registry = registry
+    view = IconPreviewView(page)
+    view._current_zh_file = tmp_path / "zh_tw.json"
+    view._zh_data = {"key": "translation"}
+    failure = PermissionError("destination is read-only")
+    monkeypatch.setattr(view, "_write_zh_file", lambda *_args: failure)
+    finished = []
+    registry.subscribe(
+        lambda event, handle: finished.append(handle) if event == "finish" else None
+    )
+
+    view._save_current_zh(None)
+
+    assert registry.wait_for_idle(timeout=2)
+    assert finished[0].terminal_reason == "failed"
+    assert finished[0].error is failure
+
+
 def test_icon_preview_view_all_controls_exist():
     """測試 IconPreviewView 所有 UI 控件存在"""
     view = IconPreviewView(mock_page())

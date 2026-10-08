@@ -112,6 +112,22 @@ def test_handled_task_session_error_marks_operation_failed():
     assert isinstance(handle.error, RuntimeError)
 
 
+def test_registry_only_handled_error_marks_operation_failed():
+    registry = OperationRegistry()
+    handle = registry.reserve(_descriptor("handled registry-only error"))
+    assert handle is not None
+    failure = ValueError("result payload contains a handled failure")
+
+    def work():
+        handle.record_error(failure)
+        return {"error": failure}
+
+    assert handle.launch(work)
+    assert handle.done_event.wait(2)
+    assert handle.terminal_reason == "failed"
+    assert handle.error is failure
+
+
 def test_admission_can_only_be_reopened_explicitly_after_drain():
     registry = OperationRegistry()
     handle = registry.reserve(_descriptor())

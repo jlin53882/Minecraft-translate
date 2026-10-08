@@ -219,6 +219,22 @@ def test_detach_stops_tracking():
     session.finish()
 
 
+def test_detached_task_session_cannot_bypass_closed_registry_admission():
+    manager = TaskManager()
+    manager.attach()
+    page = SimpleNamespace(operation_registry=manager.operation_registry)
+    session = tag_session(TaskSession(name="late callback"), "late", page=page)
+    manager.stop_accepting()
+    manager.operation_registry.mark_closed()
+    manager.detach()
+
+    with pytest.raises(TaskSessionAdmissionError):
+        session.start()
+
+    assert session.status == "IDLE"
+    assert manager.operation_registry.active_count() == 0
+
+
 def test_resume_accepting_reopens_registration_after_close_drain():
     m = TaskManager()
     m.attach()

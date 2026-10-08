@@ -627,7 +627,7 @@ def test_save_runs_validation_off_event_loop(monkeypatch):
     )
     monkeypatch.setattr(
         "app.services_impl.config_service.save_replace_rules",
-        lambda rules: saved.append(rules),
+        lambda rules, **kwargs: saved.append(rules),
     )
 
     view.save_rules_clicked(None)
@@ -661,7 +661,7 @@ def test_rules_validation_and_durable_save_share_one_operation(monkeypatch):
     monkeypatch.setattr("app.tasks.operation_registry.threading.Thread", DeferredThread)
     monkeypatch.setattr(
         "app.services_impl.config_service.save_replace_rules",
-        lambda rules: (saved.append(rules), assert_owned()),
+        lambda rules, **kwargs: (saved.append(rules), assert_owned()),
     )
 
     def assert_owned():
