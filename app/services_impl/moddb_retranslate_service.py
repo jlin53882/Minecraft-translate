@@ -6,6 +6,7 @@ import logging
 import traceback
 from collections.abc import Sequence
 from dataclasses import dataclass
+from pathlib import Path
 from time import monotonic
 from typing import Any
 
@@ -36,6 +37,7 @@ from translation_tool.core.lm_batch_budget import (
 from translation_tool.core.lm_translator_main import translate_batch_smart
 from translation_tool.core.lm_translator_shared_cache import get_default_cache_rules
 from translation_tool.core.lm_translator_shared_loop import _get_default_batch_size
+from translation_tool.translation_db import TranslationDB
 from translation_tool.translation_db.models import SameSourceAIEntry
 from translation_tool.translation_db.run_progress import RunProgress
 from translation_tool.translation_db.schema import SRC_AI
@@ -125,6 +127,24 @@ def preview_same_source_ai_retranslation(db, options: TranslateOptions):
         entry_cache_types,
         plan_batches(items),
     )
+
+
+def preview_same_source_ai_retranslation_from_path(
+    database_path: str | Path,
+    priority: tuple[int, ...],
+    options: TranslateOptions,
+) -> SameSourceAIRepairPreview:
+    """Preview through a worker-owned read-only connection, never the UI handle."""
+    preview_db = TranslationDB(
+        database_path,
+        priority=priority,
+        readonly=True,
+        create=False,
+    )
+    try:
+        return preview_same_source_ai_retranslation(preview_db, options)
+    finally:
+        preview_db.close()
 
 
 def _build_retranslation_items(

@@ -943,7 +943,7 @@ def test_retranslation_preview_shows_ai_source_profiles_and_samples(
     db.close()
 
 
-def test_retranslation_preview_is_background_drain_only_and_discards_stale_scope(
+def test_preview_uses_isolated_readonly_db_during_ui_queries_and_discards_stale_scope(
     db_path, monkeypatch
 ):
     db = TranslationDB(db_path)
@@ -956,15 +956,22 @@ def test_retranslation_preview_is_background_drain_only_and_discards_stale_scope
 
     entered = threading.Event()
     release = threading.Event()
-    original_preview = retranslation_controller.preview_same_source_ai_retranslation
+    ui_query_done = threading.Event()
+    ui_query_result = {}
+    original_preview = moddb_retranslate_service.preview_same_source_ai_retranslation
 
     def blocking_preview(active_db, options):
-        entered.set()
-        assert release.wait(2)
-        return original_preview(active_db, options)
+        assert active_db is not db
+        assert active_db.path == db.path
+        assert active_db.priority == db.priority
+        assert active_db.readonly is True
+        with active_db._lock:
+            entered.set()
+            assert release.wait(3)
+            return original_preview(active_db, options)
 
     monkeypatch.setattr(
-        retranslation_controller,
+        moddb_retranslate_service,
         "preview_same_source_ai_retranslation",
         blocking_preview,
     )
@@ -981,13 +988,39 @@ def test_retranslation_preview_is_background_drain_only_and_discards_stale_scope
     assert handle.descriptor.durability == DurabilityPolicy.RECOMPUTABLE
     assert handle.descriptor.shutdown == ShutdownPolicy.DRAIN_ONLY
 
-    panel.mod_dd.value = "changed-scope"
-    panel._on_scope_changed()
-    registry.begin_shutdown()
-    assert handle.cancel_requested is False
-    assert registry.active_count() == 1
+    ui_mod_ids = panel.mod_ids()
 
-    release.set()
+    def run_ui_database_queries():
+        try:
+            ui_query_result["versions"] = db.versions()
+            ui_query_result["untranslated"] = db.count_untranslated(
+                "1.21.1", ui_mod_ids
+            )
+        except Exception as exc:  # noqa: BLE001 - surface probe failure to assertion
+            ui_query_result["error"] = exc
+        finally:
+            ui_query_done.set()
+
+    ui_query = threading.Thread(target=run_ui_database_queries, daemon=True)
+    ui_query.start()
+    try:
+        assert ui_query_done.wait(1), (
+            "the UI-owned DB connection must remain usable while preview holds its lock"
+        )
+        ui_query.join(1)
+        assert "error" not in ui_query_result
+        assert "1.21.1" in ui_query_result["versions"]
+        assert isinstance(ui_query_result["untranslated"], int)
+
+        panel.mod_dd.value = "changed-scope"
+        panel._on_scope_changed()
+        registry.begin_shutdown()
+        assert handle.cancel_requested is False
+        assert registry.active_count() == 1
+    finally:
+        release.set()
+        ui_query.join(1)
+
     assert registry.wait_for_idle(timeout=2)
     _drain_page_tasks(page)
     assert panel._repair_preview is None

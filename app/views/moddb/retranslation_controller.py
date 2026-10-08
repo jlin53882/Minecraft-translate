@@ -10,7 +10,7 @@ import flet as ft
 from app.services_impl.moddb_retranslate_service import (
     SameSourceAIRepairPreview,
     cache_profile_label,
-    preview_same_source_ai_retranslation,
+    preview_same_source_ai_retranslation_from_path,
 )
 from app.services_impl.moddb_translate_service import TranslateOptions
 from app.tasks.operation_registry import (
@@ -65,6 +65,24 @@ def update_start_button(panel, *, running: bool | None = None) -> None:
     )
 
 
+def _query_preview(
+    panel,
+    database_path: Path,
+    database_priority: tuple[int, ...],
+    options: TranslateOptions,
+    generation: int,
+    db_identity: tuple[str, tuple[int, ...]],
+) -> None:
+    try:
+        result = preview_same_source_ai_retranslation_from_path(
+            database_path, database_priority, options
+        )
+    except Exception as exc:  # worker records failure and reports it to the UI
+        _schedule_result(panel, generation, options, db_identity, None, str(exc))
+        raise
+    _schedule_result(panel, generation, options, db_identity, result, None)
+
+
 def preview(panel, _e=None) -> None:
     if panel._running:
         show_snack(panel._page, "機翻正在執行中", C.GOLD)
@@ -83,8 +101,21 @@ def preview(panel, _e=None) -> None:
         panel._safe_update()
         return
 
+    path = getattr(db, "path", None)
+    if path is None:
+        panel.repair_preview_text.value = "無法取得資料庫路徑，未啟動預覽。"
+        panel._safe_update()
+        return
+    try:
+        database_path = Path(path).resolve()
+        database_priority = tuple(getattr(db, "priority", ()))
+    except (OSError, RuntimeError, TypeError, ValueError) as exc:
+        panel.repair_preview_text.value = f"無法準備唯讀資料庫連線：{exc}"
+        log_warning(f"準備舊 AI 重翻預覽資料庫快照失敗：{exc!r}")
+        panel._safe_update()
+        return
     options = panel.build_options()
-    db_identity = database_identity(db)
+    db_identity = (str(database_path), database_priority)
     generation = panel._repair_preview_generation
     panel._repair_preview_running = True
     panel.repair_preview_btn.disabled = True
@@ -95,18 +126,17 @@ def preview(panel, _e=None) -> None:
     update_start_button(panel)
     panel._safe_update()
 
-    def query_preview() -> None:
-        try:
-            result = preview_same_source_ai_retranslation(db, options)
-        except Exception as exc:  # worker records failure and reports it to the UI
-            _schedule_result(panel, generation, options, db_identity, None, str(exc))
-            raise
-        _schedule_result(panel, generation, options, db_identity, result, None)
-
     try:
         launched = launch_page_operation(
             panel._page,
-            query_preview,
+            lambda: _query_preview(
+                panel,
+                database_path,
+                database_priority,
+                options,
+                generation,
+                db_identity,
+            ),
             name="Mod 資料庫舊 AI 重翻預覽",
             owner="moddb-retranslate-preview",
             cancellation=CancellationPolicy.NON_CANCELLABLE,

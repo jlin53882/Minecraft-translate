@@ -36,7 +36,7 @@ rg -n "threading\.Thread|threading\.Timer|Thread\(|run_task\(|run_thread\(|async
 | `app/shell/config_effects.py` | AppShell 注入 registry launcher；fallback 只供獨立測試/嵌入用 | `cache-root-reload` 註冊為 non-cancellable / drain-only |
 | `app/views/moddb/scan_panel.py` | mounted App 使用 `launch_page_operation`；module Thread 僅為沒有 registry 的舊測試/standalone fallback | `moddb-scan` handle 由 Registry 擁有；View poller teardown 見 B |
 | `app/views/moddb/translate_panel.py`（批次翻譯、舊 AI 重翻） | 兩種工作均經 `launch_page_operation`；無直接 Thread 啟動 | `moddb-translate`、`moddb-retranslate` 由 Registry 擁有；重翻為 page-bound session、cancel-and-drain；逐筆提交見 B |
-| `app/views/moddb/retranslation_controller.py`（舊 AI 預覽） | mounted App 使用 `launch_page_operation`；module-level Thread 僅供 standalone fallback | `moddb-retranslate-preview` 是 non-cancellable / drain-only；結果經 UI loop 套用並以 generation/DB identity 丟棄舊結果 |
+| `app/views/moddb/retranslation_controller.py`（舊 AI 預覽） | mounted App 使用 `launch_page_operation`；worker 快照 path/priority 後建立並關閉獨立唯讀 `TranslationDB`，不共用 UI DB lock；module-level Thread 僅供 standalone fallback | `moddb-retranslate-preview` 是 non-cancellable / drain-only；結果經 UI loop 套用並以 generation/DB identity 丟棄舊結果 |
 | `app/views/pipeline/pipeline_session.py` | AppShell 將 Registry 注入 PipelineRunner；default Thread launcher 僅作 standalone fallback | parent handle 跨完整 sequence；步驟 watcher 由 `PollerHandle` 持有 |
 
 其他 executor：IconPreview 的 `icon_cache`／`icon_index` executor 是 IconPreview Registry operation 的 nested worker；`cache_history_store._MIRROR_EXECUTOR` 是 process-global 衍生 JSON 鏡像 writer，App close 以 `history_flush()` 排空，但目前不在 OperationRegistry membership（剩餘風險見 `docs/OPERATION_LIFECYCLE_CONTRACT.md`）。
@@ -109,7 +109,7 @@ merge 的取消檢查點（`merge_service`，經 `raise_if_cancelled()`；`Pipel
 | `merge_view._open_output_folder`（`Popen(["explorer"], shell=True)`，僅 Windows） | Windows 專用且 `shell=True` | 改走 `open_output_folder` |
 | 快取分片頁 `_load_shard_rows`（每次渲染解析**所有**分片 JSON）、`_load_shard_keys` | 每次同步解析 | `shard_reader` 以檔案簽名記憶；背景（`_fetch_overview`、`run_cache_action`）預熱 |
 | 快取歷史 `history_load_recent`（掃描整個 jsonl）、`history_append_event`（每次讀寫整個 ≤10000 筆的 json 陣列） | 同步 | 索引記憶 + 就地更新；json 鏡像由單一背景執行緒寫入 |
-| Mod DB 舊 AI 重翻預覽：候選查詢、樣本分組與批次估算 | `preview_retranslation()` 在 UI handler 同步查詢 | Registry-owned `moddb-retranslate-preview` 背景操作；結果經 `page.run_task` 套用，generation 與 DB identity 不符即丟棄 | 查詢不再阻塞 UI；SQLite 查詢仍不可即時中斷，shutdown 採 drain-only，最大查詢時間尚未證明 |
+| Mod DB 舊 AI 重翻預覽：候選查詢、樣本分組與批次估算 | `preview_retranslation()` 在 UI handler 同步查詢 | Registry-owned `moddb-retranslate-preview` 背景操作；worker 依 path/priority 建立獨立唯讀 DB connection，結果經 `page.run_task` 套用，generation 與 DB identity 不符即丟棄 | 查詢不再共用 UI 的 SQLite connection/lock 或阻塞 UI；單次 SQLite 查詢仍不可即時中斷，shutdown 採 drain-only，最大查詢時間尚未證明 |
 | `merge_view` 輪詢執行緒的 `time.sleep(0.1)` | worker 睡眠並反覆排程 | 改為 event loop 輪詢；`app/` 不得有 `time.sleep`（護欄測試） |
 
 ## D. 仍保留的同步 I/O（皆在「有界」界線內或為非 UI 路徑）
