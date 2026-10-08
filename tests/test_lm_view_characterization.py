@@ -143,6 +143,13 @@ def test_db_options_follow_the_page_controls(monkeypatch):
     enabled_view.use_db_switch.on_change(None)
     enabled_view.lm_db_options.inherit_version_switch.value = True
     enabled_view.lm_db_options.inherit_version_switch.on_change(None)
+    snapshot = enabled_view._db_snapshot_for_run()
+    assert snapshot.use_db is True, (
+        f"switch={enabled_view.use_db_switch.value}, "
+        f"touched={enabled_view.lm_db_options._enabled_touched}, "
+        f"settings={enabled_view.lm_db_options._settings.enabled}, "
+        f"snapshot={snapshot}"
+    )
     enabled_view.start_clicked(None)
     assert calls["db"]["use_translation_db"] is True
     assert calls["db"]["translation_db_version"]
