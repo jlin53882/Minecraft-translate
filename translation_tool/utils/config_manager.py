@@ -485,6 +485,50 @@ class ConfigValidationError(ValueError):
     """Config 欄位驗證失敗時拋出。"""
 
 
+OUTPUT_FOLDER_SUFFIX_LABELS = {
+    "lang_extract": "Lang 提取",
+    "book_extract": "Book 提取",
+    "dual_extract": "Dual 提取",
+    "lang_preview": "Lang 預覽",
+    "book_preview": "Book 預覽",
+    "dual_preview": "Dual 預覽",
+}
+
+
+def validate_output_folder_suffix(value: object, key: str) -> str:
+    """Validate a configurable suffix as one legal Windows folder-name part."""
+    invalid_chars = '<>:"|?*/' + chr(92)
+    if (
+        not isinstance(value, str)
+        or not value.strip()
+        or value in {".", ".."}
+        or any(char in value for char in invalid_chars)
+        or any(ord(char) < 32 for char in value)
+        or value.endswith((" ", "."))
+    ):
+        label = OUTPUT_FOLDER_SUFFIX_LABELS.get(key.rsplit(".", 1)[-1], key)
+        raise ConfigValidationError(
+            f"「{label}」輸出資料夾名稱無效：請填入非空白的單一資料夾名稱後綴，"
+            "不可包含 Windows 路徑禁止字元，且不可用空格或句點結尾。"
+        )
+    return value
+
+
+def validate_output_folder_names(config: dict) -> None:
+    """Validate configured extractor suffixes before saving user settings."""
+    extractor = config.get("extractor", {})
+    if not isinstance(extractor, dict):
+        raise ConfigValidationError("extractor 必須是 object")
+    names = extractor.get("output_folder_names", {})
+    if not isinstance(names, dict):
+        raise ConfigValidationError("extractor.output_folder_names 必須是 object")
+    for key in OUTPUT_FOLDER_SUFFIX_LABELS:
+        if key in names:
+            validate_output_folder_suffix(
+                names[key], f"extractor.output_folder_names.{key}"
+            )
+
+
 def validate_config_values(config: dict) -> None:
     """驗證設定資料中目前載入流程所支援的欄位契約。
 

@@ -55,12 +55,18 @@ class MergeDbOptions:
             on_select=self._on_version_changed,
             on_focus=self._on_version_focus,
         )
+        self.version_warning = ft.Text(
+            "",
+            size=11.5,
+            color=C.GOLD,
+            visible=False,
+        )
         self.info = ft.Text("", size=11.5, color=C.DIM)
         self.refresh_info()
         self.card = kit.section_card(
             "Mod 資料庫補譯",
             ft.Column(
-                [row, self.version_field, self.info],
+                [row, self.version_field, self.version_warning, self.info],
                 spacing=10,
                 horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
             ),
@@ -151,6 +157,15 @@ class MergeDbOptions:
             if self._version_override in self._database_versions
             else None
         )
+        if self._stale_override:
+            self.version_warning.value = (
+                f"⚠️ 頁面原指定版本 {self._stale_override} 已不存在於目前資料庫；"
+                "請重新選擇資料庫版本或改為沿用全域設定。"
+            )
+            self.version_warning.visible = True
+        else:
+            self.version_warning.value = ""
+            self.version_warning.visible = False
         version_picker.refresh_merge_target_version_options(
             self.version_field,
             self._settings.version,

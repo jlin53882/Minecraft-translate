@@ -12,7 +12,12 @@ from app.views.config.settings_schema import (
     get_path,
     set_path,
 )
-from translation_tool.utils.config_manager import get_default, validate_config_values
+from translation_tool.utils.config_manager import (
+    ConfigValidationError,
+    get_default,
+    validate_config_values,
+    validate_output_folder_names,
+)
 from translation_tool.utils.redaction import redact_text
 
 logger = logging.getLogger(__name__)
@@ -150,6 +155,13 @@ def _collect_validated_config(
                 show_snack(view.page, "至少需要保留一個啟用中的模型；設定尚未儲存。")
             return None
         config["lm_translator"]["models"] = models
+        try:
+            validate_output_folder_names(config)
+        except ConfigValidationError as err:
+            logger.warning("提取輸出資料夾名稱設定無效：%s", err)
+            if show_feedback:
+                show_snack(view.page, f"❌ {err}；設定尚未儲存。")
+            return None
         validate_config_values(config)
     except Exception as err:  # noqa: BLE001 - config collection is a UI save boundary
         logger.error("儲存設定驗證失敗：%s", redact_text(traceback.format_exc()))

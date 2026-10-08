@@ -4,6 +4,8 @@ from copy import deepcopy
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 
 def _add_enabled_test_model(view):
     view.models_column.controls = [
@@ -81,6 +83,55 @@ def test_invalid_log_format_is_rejected_before_persistence():
         load_config_json_fn=lambda: deepcopy(config),
         save_config_json_fn=save_config,
         validate_api_keys_from_ui_fn=lambda keys: None,
+    )
+
+    assert result is False
+    save_config.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("suffix_key", "invalid_value"),
+    [
+        (key, value)
+        for key in (
+            "lang_extract",
+            "book_extract",
+            "dual_extract",
+            "lang_preview",
+            "book_preview",
+            "dual_preview",
+        )
+        for value in ("", "   ", "invalid/name")
+    ],
+)
+def test_invalid_extractor_output_suffix_is_rejected_before_persistence(
+    suffix_key, invalid_value
+):
+    from app.views.config.config_actions import (
+        load_config_into_view,
+        save_config_from_view,
+    )
+    from tests.test_config_actions import make_full_view
+    from translation_tool.utils.config_manager import DEFAULT_CONFIG
+
+    config = deepcopy(DEFAULT_CONFIG)
+    config["lm_translator"]["models"] = {}
+    config["lm_translator"]["keys"] = []
+    view = make_full_view()
+    view.load_config = MagicMock()
+    view._success_color = MagicMock(return_value="green")
+    load_config_into_view(view, config)
+    _add_enabled_test_model(view)
+    view.controls_map[
+        f"extractor.output_folder_names.{suffix_key}"
+    ].value = invalid_value
+    save_config = MagicMock()
+
+    result = save_config_from_view(
+        view,
+        load_config_json_fn=lambda: deepcopy(config),
+        save_config_json_fn=save_config,
+        validate_api_keys_from_ui_fn=lambda _keys: None,
     )
 
     assert result is False

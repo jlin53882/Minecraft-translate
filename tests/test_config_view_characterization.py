@@ -566,10 +566,12 @@ def test_config_view_save_click_maps_rows_back_to_config(monkeypatch):
             "lang_merger": {},
             "extractor": {
                 "output_folder_names": {
-                    "lang_extract": "",
-                    "book_extract": "",
-                    "lang_preview": "",
-                    "book_preview": "",
+                    "lang_extract": "_提取lang_輸出",
+                    "book_extract": "_提取book_輸出",
+                    "dual_extract": "_提取both_輸出",
+                    "lang_preview": "_預覽lang_輸出",
+                    "book_preview": "_預覽book_輸出",
+                    "dual_preview": "_預覽both_輸出",
                 }
             },
         },

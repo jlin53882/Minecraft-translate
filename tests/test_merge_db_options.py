@@ -226,9 +226,16 @@ def test_stale_page_selection_is_not_reintroduced_or_silently_inherited(monkeypa
     ]
     assert opts.version == "1.20.1"
     assert "頁面指定版本 1.20.1 不存在於目前資料庫" in opts.info.value
+    assert opts.version_warning.visible is True
+    assert "頁面原指定版本 1.20.1 已不存在" in opts.version_warning.value
     snapshot = opts.snapshot_for_run()
     assert snapshot.version == ""
     assert "1.20.1" in snapshot.warning
+
+    opts.version_field.value = "1.21.1"
+    opts.version_field.on_select(type("Event", (), {"control": opts.version_field})())
+    assert opts.version == "1.21.1"
+    assert opts.version_warning.visible is False
 
 
 @pytest.mark.parametrize("input_mode", ["folder", "zip"])

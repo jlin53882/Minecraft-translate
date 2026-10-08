@@ -23,6 +23,7 @@ from app.services_impl.pipelines.extract_service import (
     get_output_folder_names,
     get_skip_zh_cn_extract,
     prepare_extraction_paths,
+    prepare_preview_paths,
 )
 from app.tasks.task_session import (
     TaskSession,  # noqa: F401 - 測試以 extractor_view.TaskSession patch
@@ -42,7 +43,7 @@ from app.views.extractor.extractor_dialog import (
 from app.views.extractor.extractor_panels import (
     build_settings_panel,
 )
-from translation_tool.utils.log_unit import log_info, log_warning  # noqa: F401
+from translation_tool.utils.log_unit import log_info, log_warning
 
 
 class ExtractorView(ft.Column):
@@ -274,6 +275,10 @@ class ExtractorView(ft.Column):
         resolved_mode = mode if mode in {"lang", "book", "dual"} else "lang"
         output_path = prepare_extraction_paths(mods_dir, resolved_mode)
 
+        return self._apply_auto_filled_output_path(output_path)
+
+    def _apply_auto_filled_output_path(self, output_path: str) -> str:
+        """Display a resolved default path in the extractor form."""
         self.output_dir_textfield.value = output_path
         self.page.update()
         # 🐛 2026-08-01 user review: 改用 SnackBar 跳出提示,不掛 log UI
@@ -283,6 +288,31 @@ class ExtractorView(ft.Column):
             f"[系統] 已自動設定輸出路徑：{output_path}",
             color=C.EM,
         )
+        return output_path
+
+    def _resolve_action_output_path(
+        self, mods_dir: str, mode: str, action_label: str, *, preview: bool
+    ) -> str | None:
+        """Resolve a default destination safely before opening a task/dialog."""
+        existing = (self.output_dir_textfield.value or "").strip()
+        if existing:
+            return existing
+
+        resolver = prepare_preview_paths if preview else prepare_extraction_paths
+        try:
+            output_path = resolver(mods_dir, mode)
+        except ValueError as exc:
+            log_warning(f"{action_label}無法開始，輸出資料夾名稱設定無效：{exc}")
+            show_snack(
+                self.page,
+                f"⚠️ 無法{action_label}：提取輸出資料夾名稱設定無效，"
+                "請到「設定 → Jar 提取設定」修正。",
+                color=C.GOLD,
+            )
+            return None
+
+        if not preview:
+            self._apply_auto_filled_output_path(output_path)
         return output_path
 
     def _check_mods_dir_or_snack(self, mods_dir: str, action_label: str) -> bool:
@@ -323,9 +353,11 @@ class ExtractorView(ft.Column):
         mods_dir = (self.mods_dir_textfield.value or "").strip()
         if not self._check_mods_dir_or_snack(mods_dir, "提取 Lang"):
             return
-        output_path = (self.output_dir_textfield.value or "").strip()
-        if not output_path:
-            output_path = self._auto_fill_output_path(mods_dir, "lang")
+        output_path = self._resolve_action_output_path(
+            mods_dir, "lang", "提取 Lang", preview=False
+        )
+        if output_path is None:
+            return
         # open_extractor_dialog 從頂部 import
         open_extractor_dialog(
             self.page,
@@ -349,9 +381,11 @@ class ExtractorView(ft.Column):
         mods_dir = (self.mods_dir_textfield.value or "").strip()
         if not self._check_mods_dir_or_snack(mods_dir, "提取 Book"):
             return
-        output_path = (self.output_dir_textfield.value or "").strip()
-        if not output_path:
-            output_path = self._auto_fill_output_path(mods_dir, "book")
+        output_path = self._resolve_action_output_path(
+            mods_dir, "book", "提取 Book", preview=False
+        )
+        if output_path is None:
+            return
         # open_extractor_dialog 從頂部 import
         open_extractor_dialog(
             self.page,
@@ -368,9 +402,11 @@ class ExtractorView(ft.Column):
         mods_dir = (self.mods_dir_textfield.value or "").strip()
         if not self._check_mods_dir_or_snack(mods_dir, "提取 Lang + Book"):
             return
-        output_path = (self.output_dir_textfield.value or "").strip()
-        if not output_path:
-            output_path = self._auto_fill_output_path(mods_dir, "dual")
+        output_path = self._resolve_action_output_path(
+            mods_dir, "dual", "提取 Lang + Book", preview=False
+        )
+        if output_path is None:
+            return
         # open_extractor_dialog 從頂部 import
         open_extractor_dialog(
             self.page,
@@ -388,7 +424,11 @@ class ExtractorView(ft.Column):
         mods_dir = (self.mods_dir_textfield.value or "").strip()
         if not self._check_mods_dir_or_snack(mods_dir, "預覽 Lang"):
             return
-        output_path = (self.output_dir_textfield.value or "").strip()
+        output_path = self._resolve_action_output_path(
+            mods_dir, "lang", "預覽 Lang", preview=True
+        )
+        if output_path is None:
+            return
         # open_preview_dialog 從頂部 import
         open_preview_dialog(
             self.page,
@@ -405,7 +445,11 @@ class ExtractorView(ft.Column):
         mods_dir = (self.mods_dir_textfield.value or "").strip()
         if not self._check_mods_dir_or_snack(mods_dir, "預覽 Book"):
             return
-        output_path = (self.output_dir_textfield.value or "").strip()
+        output_path = self._resolve_action_output_path(
+            mods_dir, "book", "預覽 Book", preview=True
+        )
+        if output_path is None:
+            return
         # open_preview_dialog 從頂部 import
         open_preview_dialog(
             self.page,
@@ -422,7 +466,11 @@ class ExtractorView(ft.Column):
         mods_dir = (self.mods_dir_textfield.value or "").strip()
         if not self._check_mods_dir_or_snack(mods_dir, "預覽 Lang + Book"):
             return
-        output_path = (self.output_dir_textfield.value or "").strip()
+        output_path = self._resolve_action_output_path(
+            mods_dir, "dual", "預覽 Lang + Book", preview=True
+        )
+        if output_path is None:
+            return
         # open_preview_dialog 從頂部 import
         open_preview_dialog(
             self.page,

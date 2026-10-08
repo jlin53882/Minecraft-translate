@@ -41,7 +41,10 @@ from translation_tool.utils.cancellation import (
     cancel_scope,
     is_cancelled,
 )
-from translation_tool.utils.config_manager import load_config
+from translation_tool.utils.config_manager import (
+    load_config,
+    validate_output_folder_suffix,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -103,17 +106,7 @@ def _prepare_output_path(
         return ""
 
     suffix = get_output_folder_names()[suffix_key]
-    if (
-        not isinstance(suffix, str)
-        or not suffix
-        or suffix in {".", ".."}
-        or any(char in suffix for char in '<>:"|?*')
-        or "\x00" in suffix
-        or "/" in suffix
-        or "\\" in suffix
-        or suffix.endswith((" ", "."))
-    ):
-        raise ValueError(f"Invalid output folder suffix for {suffix_key}: {suffix!r}")
+    validate_output_folder_suffix(suffix, suffix_key)
 
     # `os.path` is ntpath on Windows. Also recognize Windows absolute paths in
     # cross-platform tests so drive/root semantics are not interpreted as POSIX.

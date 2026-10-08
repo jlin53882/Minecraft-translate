@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import flet as ft
+import pytest
 
 from app.ui.snack import show_snack
 from app.views._log import LogView
@@ -308,7 +309,53 @@ def test_direct_extract_default_is_not_replaced_when_preview_is_opened(
 
     view.output_dir_textfield.value = ""
     view._handle_preview_dual_click(None)
-    assert calls["preview"][1]["output_path"] == ""
+    assert calls["preview"][1]["output_path"] == str(tmp_path / "mods_預覽both_輸出")
+
+
+@pytest.mark.parametrize(
+    ("handler_name", "suffix_key"),
+    [
+        ("_handle_extract_lang_click", "lang_extract"),
+        ("_handle_extract_book_click", "book_extract"),
+        ("_handle_extract_dual_click", "dual_extract"),
+        ("_handle_preview_lang_click", "lang_preview"),
+        ("_handle_preview_book_click", "book_preview"),
+        ("_handle_preview_dual_click", "dual_preview"),
+    ],
+)
+def test_invalid_output_suffix_shows_guidance_without_opening_task_or_preview(
+    monkeypatch, tmp_path, handler_name, suffix_key
+):
+    config = {"extractor": {"output_folder_names": {suffix_key: "invalid/name"}}}
+    monkeypatch.setattr("app.views.extractor_view.TaskSession", _Session)
+    monkeypatch.setattr(
+        "app.services_impl.pipelines.extract_service.load_config", lambda: config
+    )
+    dialogs = []
+    snacks = []
+    monkeypatch.setattr(
+        "app.views.extractor_view.open_extractor_dialog",
+        lambda *args, **kwargs: dialogs.append((args, kwargs)),
+    )
+    monkeypatch.setattr(
+        "app.views.extractor_view.open_preview_dialog",
+        lambda *args, **kwargs: dialogs.append((args, kwargs)),
+    )
+    monkeypatch.setattr(
+        "app.views.extractor_view.show_snack",
+        lambda _page, message, **_kwargs: snacks.append(message),
+    )
+    mods = tmp_path / "mods"
+    mods.mkdir()
+    view = ExtractorView(mock_page(), mock_filepicker())
+    view.mods_dir_textfield.value = str(mods)
+
+    getattr(view, handler_name)(None)
+
+    assert dialogs == []
+    assert len(snacks) == 1
+    assert "Jar 提取設定" in snacks[0]
+    assert view.output_dir_textfield.value == ""
 
 
 def test_extractor_view_skip_zh_cn_switch_has_label(monkeypatch):
