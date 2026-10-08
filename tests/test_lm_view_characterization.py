@@ -97,9 +97,25 @@ def test_start_clicked_launches_service_with_current_flags(monkeypatch):
     assert calls["db"]["translation_db_settings_snapshot"].path
 
 
-def test_db_options_follow_the_page_controls(monkeypatch):
+def test_db_options_follow_the_page_controls(monkeypatch, tmp_path):
     """機器翻譯頁上的「使用 Mod 資料庫」與目標版本會原樣傳給 service。"""
     calls = {}
+    settings = DbSettings(
+        enabled=True,
+        path=str(tmp_path / "mod_translation.db"),
+        version="1.21.1",
+    )
+    monkeypatch.setattr(
+        lm_db_options.moddb_service, "load_db_settings", lambda: settings
+    )
+    monkeypatch.setattr(
+        lm_db_options, "database_version_choices", lambda current: [current.version]
+    )
+    monkeypatch.setattr(
+        lm_db_options,
+        "summarize_database",
+        lambda current: {"entries": 1, "progress": 0, "versions": [current.version]},
+    )
     monkeypatch.setattr(lm_view, "TaskSession", _Session)
 
     def launch_immediately(_page, target, **_options):
@@ -144,12 +160,8 @@ def test_db_options_follow_the_page_controls(monkeypatch):
     enabled_view.lm_db_options.inherit_version_switch.value = True
     enabled_view.lm_db_options.inherit_version_switch.on_change(None)
     snapshot = enabled_view._db_snapshot_for_run()
-    assert snapshot.use_db is True, (
-        f"switch={enabled_view.use_db_switch.value}, "
-        f"touched={enabled_view.lm_db_options._enabled_touched}, "
-        f"settings={enabled_view.lm_db_options._settings.enabled}, "
-        f"snapshot={snapshot}"
-    )
+    assert snapshot.use_db is True
+    assert snapshot.version == "1.21.1"
     enabled_view.start_clicked(None)
     assert calls["db"]["use_translation_db"] is True
     assert calls["db"]["translation_db_version"]
