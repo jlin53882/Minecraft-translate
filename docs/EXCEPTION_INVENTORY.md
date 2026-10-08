@@ -4,11 +4,11 @@
 > 範圍：`app/`、`translation_tool/`、`main.py` 內所有帶 `noqa: BLE001／S110／S112` 的位置。
 > 命令列 QA 工具（`md_extract_qa.py`、`md_inject_qa.py`）的 `print` 為刻意保留，不在此表。
 
-共 **283** 項；其中 **114** 項尚未在程式碼內寫明原因（以「分類」說明處理方式）。
+共 **284** 項；其中 **114** 項尚未在程式碼內寫明原因（以「分類」說明處理方式）。
 
 | 分類 | 數量 | 意義 |
 |---|---|---|
-| 已記錄／回報 | 249 | 例外處理本身有 log、提示、回報錯誤事件或重新丟出；寬鬆捕捉是為了不中斷整批流程 |
+| 已記錄／回報 | 250 | 例外處理本身有 log、提示、回報錯誤事件或重新丟出；寬鬆捕捉是為了不中斷整批流程 |
 | UI／畫面保護 | 18 | UI 層的畫面更新、icon 快取等；失敗只影響顯示，不影響資料 |
 | 盡力而為（靜默） | 16 | 引擎層、只有 `pass`／`continue`／回傳常數；失敗不影響結果（例如進度回報、還原失敗時以原始例外為準） |
 
@@ -88,6 +88,7 @@
 | `app/views/config/config_actions.py:_collect_validated_config` | BLE001 | 已記錄／回報 | config collection is a UI save boundary |
 | `app/views/config/config_actions.py:_write_config_with_feedback` | BLE001 | 已記錄／回報 | failure may occur before or after atomic replace |
 | `app/views/config/config_actions.py:_reload_after_confirmed_write` | BLE001 | 已記錄／回報 | reload is a UI boundary after confirmed persistence |
+| `app/views/config/config_actions.py:load_config_transactionally` | BLE001 | 已記錄／回報 | hint refresh must not mask the reload error |
 | `app/views/config/db_location.py:DbLocationBanner.safe_refresh` | BLE001 | 已記錄／回報 | 尚未掛上頁面時不影響設定頁 |
 | `app/views/config/db_location.py:attach_path_hooks.chain.handler` | BLE001 | 已記錄／回報 | 尚未掛上頁面時不影響輸入 |
 | `app/views/config/db_location.py:attach_priority_hooks.handler` | BLE001 | 已記錄／回報 | 尚未掛上頁面時不影響輸入 |

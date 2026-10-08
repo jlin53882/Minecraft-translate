@@ -17,7 +17,7 @@ from app.ui.design import C
 from app.ui.snack import show_snack
 from app.views.config.config_actions import (
     SaveOutcome,
-    load_config_into_view,
+    load_config_transactionally,
     save_config_from_view_with_outcome,
 )
 from app.views.config.config_form import (
@@ -190,6 +190,7 @@ class ConfigView(ft.Column):
         self._last_save_outcome = None
         self._reload_recovery_required = False
         self._reload_before_next_entry = False
+        self._reload_exit_acknowledged = False
         self.controls_map = {}
         self._selected_nav = "general"
 
@@ -396,7 +397,7 @@ class ConfigView(ft.Column):
                 redact_text(traceback.format_exc()),
             )
             self._unsaved_dialog.content.value = (
-                "重新載入設定失敗，原表單內容仍保留；可重試，或留在此頁。"
+                "重新載入設定失敗，畫面狀態尚未確認；可重試，或留在此頁。"
             )
             self.page.update()
             return
@@ -416,11 +417,16 @@ class ConfigView(ft.Column):
     def _on_unsaved_dialog_leave_after_ack(self, _event=None) -> None:
         if self._unsaved_dialog_resolved:
             return
-        # The writer already confirmed persistence. Force a fresh load before re-entry.
-        self._reload_recovery_required = False
+        # Keep recovery and the dirty baseline until navigation/close really succeeds.
+        # The one-shot acknowledgement only allows the current exit attempt.
+        self._reload_exit_acknowledged = True
         self._reload_before_next_entry = True
-        self._saved_form_state = None
         self._finish_unsaved_dialog(continue_navigation=True)
+
+    def cancel_reload_recovery_exit(self) -> None:
+        """Restore exit protection when an acknowledged close does not complete."""
+        self._reload_exit_acknowledged = False
+        self._refresh_dirty_state()
 
     def _rebuild_nav(self):
         """重新建構導覽列"""
@@ -622,22 +628,7 @@ class ConfigView(ft.Column):
 
     def load_config(self):
         """載入設定檔"""
-        self._loading_config = True
-        try:
-            config = load_config_json()
-            result = load_config_into_view(self, config)
-            for tf in self.key_fields:
-                self._bind_change_tracking(tf)
-            self._saved_form_state = self._capture_form_state()
-        finally:
-            self._loading_config = False
-        self.db_location.refresh()
-        self._check_db_path()
-        self._check_priority()
-        self._reload_recovery_required = False
-        self._reload_before_next_entry = False
-        self._refresh_dirty_state()
-        return result
+        return load_config_transactionally(self, load_config_json)
 
     def did_mount(self):
         """切回設定頁時重新確認資料庫位置（其他頁可能剛建立了資料庫）。"""
@@ -748,6 +739,8 @@ class ConfigView(ft.Column):
 
     @property
     def requires_exit_confirmation(self) -> bool:
+        if self._reload_recovery_required and self._reload_exit_acknowledged:
+            return False
         return self.has_unsaved_changes or self._reload_recovery_required
 
     def _refresh_dirty_state(self) -> None:

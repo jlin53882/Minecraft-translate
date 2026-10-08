@@ -674,6 +674,16 @@ class AppShell:
         self._close_pending = False
         if not self._disposed:
             self.tasks.resume_accepting()
+            self._restore_config_recovery_exit_acknowledgement()
+
+    def _restore_config_recovery_exit_acknowledgement(self) -> None:
+        config_view = self._active_config_view()
+        restore = getattr(config_view, "cancel_reload_recovery_exit", None)
+        if callable(restore):
+            try:
+                restore()
+            except Exception:
+                logger.warning("恢復設定頁離開保護失敗", exc_info=True)
 
     def _bind_window_close(self) -> None:
         """把桌面 native CLOSE 導向同一個 lifecycle teardown。"""
@@ -721,7 +731,8 @@ class AppShell:
     def _continue_close_after_unsaved_settings(self) -> None:
         """Resume the existing close flow after settings are saved or discarded."""
         if self.tasks.active():
-            self._show_close_confirmation()
+            if not self._show_close_confirmation():
+                self._restore_config_recovery_exit_acknowledgement()
             return
         if self._close_pending or self._disposed:
             return
@@ -731,18 +742,19 @@ class AppShell:
             self._abort_close()
             self._show_close_failure()
 
-    def _show_close_confirmation(self) -> None:
+    def _show_close_confirmation(self) -> bool:
         """任務執行中先讓使用者選擇繼續或取消關閉。"""
         show_dialog = getattr(self.page, "show_dialog", None)
         if not callable(show_dialog):
             logger.warning("頁面不支援關閉確認對話框，保留視窗開啟")
-            return
+            return False
 
         def keep_running(_event=None) -> None:
             try:
                 self.page.pop_dialog()
             except Exception:
                 logger.debug("關閉確認取消失敗", exc_info=True)
+            self._restore_config_recovery_exit_acknowledgement()
 
         def confirm_close(_event=None) -> None:
             try:
@@ -767,7 +779,12 @@ class AppShell:
                 ft.TextButton("仍要關閉", on_click=confirm_close),
             ],
         )
-        show_dialog(dialog)
+        try:
+            show_dialog(dialog)
+        except Exception:
+            self._restore_config_recovery_exit_acknowledgement()
+            raise
+        return True
 
     async def _complete_window_close(self) -> None:
         """完成 desktop close：先 teardown，再讓 native window 結束。"""

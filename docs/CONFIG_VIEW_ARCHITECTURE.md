@@ -69,7 +69,7 @@ app/views/config/
       └─ 顯示「設定已成功儲存」snack
 套用時機（app/config_apply.py，見 CONFIG_APPLY_TIMING.md）僅用於欄位說明文字（`apply_timing_note`），儲存流程本身不依它重載快取。
 
-未儲存狀態由載入後的表單快照與目前值比較；儲存成功但 UI 重載失敗另以 `_reload_recovery_required` 保護，兩者不可合併成單一 dirty 布林。重載恢復成功才清除該狀態；若使用者明確選擇仍要離開，則標記下次進入設定頁前必須重新載入。Flet Web 的瀏覽器分頁關閉不在可攔截範圍。續跑中斷任務的動作必須使用導覽完成 callback，避免設定確認期間提前執行。
+未儲存狀態由載入後的表單快照與目前值比較；儲存成功但 UI 重載失敗另以 `_reload_recovery_required` 保護，兩者不可合併成單一 dirty 布林。完整重載流程（包含依賴 UI 更新）成功後才提交新快照；若中途失敗，保留舊快照並繼續要求恢復。使用者明確選擇仍要離開時，只對當次離開操作暫時放行，恢復狀態與快照仍保留，且下次進入設定頁前必須重新載入；若桌面關閉因活動任務確認而取消，會撤銷暫准並恢復離開保護。Flet Web 的瀏覽器分頁關閉不在可攔截範圍。續跑中斷任務的動作必須使用導覽完成 callback，避免設定確認期間提前執行。
 ```
 
 ## 主要方法（config_view.py）
@@ -81,7 +81,7 @@ app/views/config/
 | `_keys_panel` / `_models_panel` | 兩個無法由欄位資料描述的專用元件（以 `Custom("keys")`／`Custom("models")` 在版面登記） |
 | `add_model_row` / `move_model_row` / `remove_model_by_checkbox` / `on_add_model_clicked` | models 動態列（上下移動 + 勾選啟用） |
 | `add_key_row` / `remove_key_row` | API keys 動態列 |
-| `load_config` | 委派 `load_config_into_view` |
+| `load_config` | 委派 `load_config_transactionally`，完成 UI hydration 後才提交新快照 |
 | `save_config_clicked` | 委派 `save_config_from_view_with_outcome`；處理三態結果與重載恢復 |
 | `requires_exit_confirmation` | 合併 dirty 與 reload recovery 狀態，供分類／主導覽／桌面關閉檢查 |
 | `_retry_config_reload` / `reload_before_entry` | 重試 UI 同步；離開恢復狀態後，確保再次進入設定頁前先重載 |

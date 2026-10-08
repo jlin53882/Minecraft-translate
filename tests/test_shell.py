@@ -558,6 +558,54 @@ def test_window_close_from_reload_recovery_state_waits_for_decision(
     assert len(pending) == 1
 
 
+def test_cancelled_close_restores_config_recovery_navigation_guard(
+    shell, placeholder_views, monkeypatch
+):
+    shell.navigate("config")
+    config_view = placeholder_views["config"]
+    config_view.has_unsaved_changes = False
+    config_view.requires_exit_confirmation = True
+    config_view.recovery_exit_acknowledged = False
+    pending_navigation = []
+
+    def confirm_close_after_recovery(on_continue, **kwargs):
+        assert kwargs["allow_saved_recovery_exit"] is True
+        config_view.recovery_exit_acknowledged = True
+        config_view.requires_exit_confirmation = False
+        on_continue()
+
+    def cancel_recovery_exit():
+        config_view.recovery_exit_acknowledged = False
+        config_view.requires_exit_confirmation = True
+
+    config_view.confirm_unsaved_changes = confirm_close_after_recovery
+    config_view.cancel_reload_recovery_exit = cancel_recovery_exit
+    config_view.confirm_navigation = lambda callback, **_kwargs: (
+        pending_navigation.append(callback)
+    )
+    shell.page.show_dialog = lambda dialog: shell.page.overlay.append(dialog)
+    shell.page.pop_dialog = lambda: shell.page.overlay.pop()
+    monkeypatch.setattr(shell.tasks, "active", lambda: [SimpleNamespace()])
+
+    asyncio.run(shell._window_on_event(SimpleNamespace(type=ft.WindowEventType.CLOSE)))
+
+    close_dialog = shell.page.overlay[-1]
+    assert [action.content for action in close_dialog.actions] == [
+        "繼續執行",
+        "仍要關閉",
+    ]
+    close_dialog.actions[0].on_click(None)
+
+    assert config_view.recovery_exit_acknowledged is False
+    assert config_view.requires_exit_confirmation is True
+    config_view.has_unsaved_changes = True
+    config_view.confirm_unsaved_changes = config_view.confirm_navigation
+    shell.navigate("dashboard")
+
+    assert shell.current_key == "config"
+    assert len(pending_navigation) == 1
+
+
 def test_config_reentry_reloads_before_showing_recovery_view(shell, placeholder_views):
     shell.navigate("config")
     config_view = placeholder_views["config"]

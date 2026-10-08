@@ -434,9 +434,15 @@ def test_explicit_recovery_exit_requires_reload_before_reentry(monkeypatch):
     dialog.actions[-1].on_click(None)
 
     assert continued == [True]
-    assert view._reload_recovery_required is False
+    assert view._reload_recovery_required is True
+    assert view._reload_exit_acknowledged is True
     assert view._reload_before_next_entry is True
+    assert view.requires_exit_confirmation is False
+    view.cancel_reload_recovery_exit()
+    assert view._reload_exit_acknowledged is False
+    assert view.requires_exit_confirmation is True
     assert view.reload_before_entry() is True
+    assert view._reload_recovery_required is False
     assert view._reload_before_next_entry is False
 
 
@@ -474,7 +480,45 @@ def test_failed_discard_reload_keeps_unsaved_dialog_open(monkeypatch):
     assert continued == []
     assert dialog.open is True
     assert view._unsaved_dialog_open is True
-    assert "原表單內容仍保留" in dialog.content.value
+    assert "畫面狀態尚未確認" in dialog.content.value
+
+
+def test_late_discard_reload_failure_keeps_recovery_navigation_guard(monkeypatch):
+    config = {
+        "logging": {"log_level": "INFO"},
+        "translator": {},
+        "species_cache": {},
+        "lm_translator": {},
+        "output_bundler": {},
+        "lang_merger": {},
+    }
+    monkeypatch.setattr("app.views.config_view.load_config_json", lambda: config)
+    view = ConfigView(mock_page())
+
+    def fail_late_refresh():
+        raise RuntimeError("post-hydration UI refresh failed")
+
+    monkeypatch.setattr(view, "_check_db_path", fail_late_refresh)
+    view.controls_map["lm_translator.temperature"].value = "0.9"
+    view._on_form_changed()
+    view.confirm_unsaved_changes(lambda: pytest.fail("discard must not navigate"))
+    dialog = view.page.overlay[-1]
+
+    dialog.actions[1].on_click(None)
+
+    assert dialog.open is True
+    assert view._unsaved_dialog_open is True
+    assert view._reload_recovery_required is True
+    assert view.has_unsaved_changes is False
+    assert view.requires_exit_confirmation is True
+    assert "畫面狀態尚未確認" in dialog.content.value
+
+    dialog.actions[0].on_click(None)
+    view._on_nav_click("prompts")
+
+    assert view._selected_nav == "general"
+    assert view._unsaved_dialog_open is True
+    assert "畫面尚未同步" in view.page.overlay[-1].title.value
 
 
 def test_config_view_save_failure_keeps_unsaved_navigation_dialog_open(monkeypatch):

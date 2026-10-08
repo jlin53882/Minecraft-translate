@@ -256,6 +256,45 @@ def load_config_into_view(view, config: dict):
         view.keys_column.controls.append(row)
 
 
+def load_config_transactionally(view, load_config_json_fn):
+    """Hydrate the view and commit its baseline only after every UI refresh succeeds."""
+    previous_saved_form_state = view._saved_form_state
+    try:
+        view._loading_config = True
+        try:
+            config = load_config_json_fn()
+            result = load_config_into_view(view, config)
+            for field in view.key_fields:
+                view._bind_change_tracking(field)
+            loaded_form_state = view._capture_form_state()
+            view.db_location.refresh()
+            view._check_db_path()
+            view._check_priority()
+        finally:
+            view._loading_config = False
+
+        # Commit only after hydration and all dependent UI refreshes have succeeded.
+        view._saved_form_state = loaded_form_state
+        view._reload_recovery_required = False
+        view._reload_before_next_entry = False
+        view._reload_exit_acknowledged = False
+        view._refresh_dirty_state()
+    except Exception:
+        view._loading_config = False
+        view._saved_form_state = previous_saved_form_state
+        view._reload_recovery_required = True
+        view._reload_exit_acknowledged = False
+        try:
+            view._refresh_dirty_state()
+        except Exception:  # noqa: BLE001 - hint refresh must not mask the reload error
+            logger.error(
+                "設定重載失敗後無法更新恢復提示：%s",
+                redact_text(traceback.format_exc()),
+            )
+        raise
+    return result
+
+
 def save_config_from_view_with_outcome(
     view,
     *,
