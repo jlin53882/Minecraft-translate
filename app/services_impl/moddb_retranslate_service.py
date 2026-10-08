@@ -204,20 +204,24 @@ def _valid_translation(result: Any, original: dict[str, Any]) -> bool:
 
 def _cache_finalized_translation(item: dict[str, Any], text: str) -> bool:
     """Update only this finalized result after its database CAS has succeeded."""
-    cache_type = str(item.get("cache_type") or "lang")
-    rule = get_default_cache_rules().get(cache_type)
-    if rule is None:
+    try:
+        cache_type = str(item.get("cache_type") or "lang")
+        rule = get_default_cache_rules().get(cache_type)
+        if rule is None:
+            return False
+        initialize_translation_cache()
+        key = rule.make_key(item)
+        return add_to_cache(
+            cache_type,
+            key,
+            item["source_text"],
+            text,
+            mod=item.get("_mod_id"),
+            path=item.get("path"),
+        )
+    except Exception as exc:  # noqa: BLE001 - cache is best-effort after DB commit
+        logger.warning("Mod DB 舊 AI 重翻快取更新失敗：%r", exc)
         return False
-    initialize_translation_cache()
-    key = rule.make_key(item)
-    return add_to_cache(
-        cache_type,
-        key,
-        item["source_text"],
-        text,
-        mod=item.get("_mod_id"),
-        path=item.get("path"),
-    )
 
 
 def _log(session, text: str, level: str = "info") -> None:
@@ -335,9 +339,15 @@ def _handle_batch_completion(
     """Flush finalized cache writes and decide whether the run must stop."""
     if options.write_cache:
         for cache_type in cache_types_to_save:
-            if not save_translation_cache(cache_type):
+            try:
+                saved = save_translation_cache(cache_type)
+                failure_reason = "快取落盤失敗"
+            except Exception as exc:  # noqa: BLE001 - cache failure must not stop DB work
+                saved = False
+                failure_reason = f"快取落盤拋出例外：{exc!r}"
+            if not saved:
                 report.cache_failed += 1
-                _log(session, f"⚠️ {cache_type} 快取落盤失敗", "warning")
+                _log(session, f"⚠️ {cache_type} {failure_reason}", "warning")
         cache_types_to_save.clear()
 
     stop_after_batch = False

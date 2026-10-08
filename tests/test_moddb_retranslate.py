@@ -549,6 +549,66 @@ def test_cache_write_failure_is_reported_without_rolling_back_database(
     check.close()
 
 
+@pytest.mark.parametrize("failure_stage", ["initialize", "add", "save"])
+def test_cache_exceptions_do_not_stop_later_repair_batches(
+    db_path, monkeypatch, repair_cache, failure_stage
+):
+    db = TranslationDB(db_path)
+    lang_entry = _ai_entry(db, key="item.lang")
+    patch_entry = _ai_entry(db, key="item.patchouli", kind=KIND_PATCHOULI)
+    preview = moddb_retranslate_service.preview_same_source_ai_retranslation(
+        db, _options()
+    )
+    db.close()
+
+    calls = {"initialize": 0, "add": 0, "save": 0}
+    batches = []
+
+    def fail_once(stage):
+        calls[stage] += 1
+        if stage == failure_stage and calls[stage] == 1:
+            raise RuntimeError(f"simulated {stage} failure")
+
+    def fake_translate(batch, _total):
+        batches.append({item["cache_type"] for item in batch})
+        return [{**item, "text": "我的世界"} for item in batch], "AUTO"
+
+    monkeypatch.setattr(
+        moddb_retranslate_service, "translate_batch_smart", fake_translate
+    )
+    monkeypatch.setattr(
+        moddb_retranslate_service,
+        "initialize_translation_cache",
+        lambda: fail_once("initialize"),
+    )
+
+    def add_to_cache(*_args, **_kwargs):
+        fail_once("add")
+        return True
+
+    def save_translation_cache(_cache_type):
+        fail_once("save")
+        return True
+
+    monkeypatch.setattr(moddb_retranslate_service, "add_to_cache", add_to_cache)
+    monkeypatch.setattr(
+        moddb_retranslate_service, "save_translation_cache", save_translation_cache
+    )
+
+    snap = _run(db_path, preview.entries)
+
+    assert batches == [{"lang"}, {"patchouli"}]
+    assert snap["summary"]["status"] == "DONE"
+    assert snap["status"] == "DONE"
+    assert snap["summary"]["updated"] == 2
+    assert snap["summary"]["cache_failed"] == 1
+    assert snap["summary"]["failed"] == 0
+    check = TranslationDB(db_path)
+    assert check.get_entry(lang_entry.id).zh_tw == "我的世界"
+    assert check.get_entry(patch_entry.id).zh_tw == "我的世界"
+    check.close()
+
+
 def test_service_skips_when_effective_source_changes_after_preview(
     db_path, monkeypatch, repair_cache
 ):
