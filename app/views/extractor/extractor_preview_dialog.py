@@ -12,7 +12,7 @@ import types
 import flet as ft
 
 from app.services_impl.pipelines.extract_service import (
-    prepare_extraction_paths,
+    prepare_preview_paths,
     preview_extraction_generator,
 )
 from app.tasks.operation_registry import launch_page_operation
@@ -244,6 +244,7 @@ def _preview_result_controls(ctx, result: dict) -> list:
 
     controls = [
         ft.Text(f"預覽結果（{ctx.mode.upper()}）", size=16, weight=ft.FontWeight.BOLD),
+        ft.Text(f"輸出（確認執行後）：{ctx.output_path}", size=12, color=C.MUTED),
         ft.Divider(),
     ]
 
@@ -580,10 +581,10 @@ def _preview_resolve_output_path(ctx) -> str:
     預覽畫面與後續提取共用同一個解析結果，避免只顯示預設路徑、確認時卻重新
     解析成不同位置。
     """
-    if not ctx.output_path:
-        ctx.output_path = prepare_extraction_paths(
-            ctx.input_path, ctx.mode, ctx.output_path
-        )
+    # The first call snapshots either the explicit user path or the configured
+    # preview suffix. Later calls (including confirmation) pass that snapshot
+    # back as an explicit path, so configuration changes cannot move the target.
+    ctx.output_path = prepare_preview_paths(ctx.input_path, ctx.mode, ctx.output_path)
     return ctx.output_path
 
 

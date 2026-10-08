@@ -70,8 +70,8 @@ class _Env:
         monkeypatch.setattr(mod, "_UI_FLUSH_INTERVAL_SEC", 0)
         monkeypatch.setattr(
             mod,
-            "prepare_extraction_paths",
-            lambda mods, mode, out: str(tmp_path / "resolved_out"),
+            "prepare_preview_paths",
+            lambda mods, mode, out="": out or str(tmp_path / "resolved_out"),
         )
         monkeypatch.setattr(
             mod, "preview_extraction_generator", lambda *a, **k: iter(env.updates)
@@ -195,7 +195,36 @@ def test_confirm_closes_preview_and_opens_extractor_with_auto_start(env):
     assert kwargs["auto_start"] is True
     assert kwargs["mode"] == "book"
     assert kwargs["input_path"] == str(env.mods)
+    assert kwargs["output_path"] == str(env.mods / "out")
     assert kwargs["skip_zh_cn"] is True  # 預覽時勾選的「跳過 zh_cn」要帶到實際提取
+
+
+def test_blank_output_preview_snapshot_matches_confirmed_extraction_target(
+    env, monkeypatch
+):
+    from app.services_impl.pipelines import extract_service
+
+    config = {
+        "extractor": {"output_folder_names": {"dual_preview": "_測試_dual_preview"}}
+    }
+    monkeypatch.setattr(
+        mod, "prepare_preview_paths", extract_service.prepare_preview_paths
+    )
+    monkeypatch.setattr(extract_service, "load_config", lambda: config)
+    env.updates = [{"result": _result()}]
+    dialog = env.open(mode="dual", output_path="")
+
+    env.scan(dialog)
+    expected = str(env.mods.with_name("mods_測試_dual_preview"))
+    assert f"輸出（確認執行後）：{expected}" in _texts(dialog)
+    assert not env.mods.with_name("mods_測試_dual_preview").exists()
+
+    # A settings change after preview must not move this operation's target.
+    config["extractor"]["output_folder_names"]["dual_preview"] = "_new_suffix"
+    _action(dialog, "確認執行").on_click(None)
+
+    assert env.opened_extractor[0]["output_path"] == expected
+    assert not env.mods.with_name("mods_測試_dual_preview").exists()
 
 
 def test_cancel_in_result_view_only_pops_the_dialog(env):

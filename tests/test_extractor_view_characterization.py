@@ -275,6 +275,42 @@ def test_auto_fill_output_path_falls_back_to_default_on_unknown_mode(monkeypatch
     assert Path(view.output_dir_textfield.value).name == "mods_custom_lang"
 
 
+def test_direct_extract_default_is_not_replaced_when_preview_is_opened(
+    monkeypatch, tmp_path
+):
+    """An auto-filled non-empty path remains explicit until the user clears it."""
+    calls = {"extract": [], "preview": []}
+    config = {"extractor": {"output_folder_names": {}}}
+    monkeypatch.setattr("app.views.extractor_view.TaskSession", _Session)
+    monkeypatch.setattr(
+        "app.services_impl.pipelines.extract_service.load_config", lambda: config
+    )
+    monkeypatch.setattr(
+        "app.views.extractor_view.open_extractor_dialog",
+        lambda *args, **kwargs: calls["extract"].append(kwargs),
+    )
+    monkeypatch.setattr(
+        "app.views.extractor_view.open_preview_dialog",
+        lambda *args, **kwargs: calls["preview"].append(kwargs),
+    )
+    mods = tmp_path / "mods"
+    mods.mkdir()
+    view = ExtractorView(mock_page(), mock_filepicker())
+    view.mods_dir_textfield.value = str(mods)
+
+    view._handle_extract_dual_click(None)
+    extracted_path = str(tmp_path / "mods_提取both_輸出")
+    assert calls["extract"][0]["output_path"] == extracted_path
+    assert view.output_dir_textfield.value == extracted_path
+
+    view._handle_preview_dual_click(None)
+    assert calls["preview"][0]["output_path"] == extracted_path
+
+    view.output_dir_textfield.value = ""
+    view._handle_preview_dual_click(None)
+    assert calls["preview"][1]["output_path"] == ""
+
+
 def test_extractor_view_skip_zh_cn_switch_has_label(monkeypatch):
     """測試 skip_zh_cn_switch 有 label 且文字為 '跳過 zh_cn 抽取'"""
     monkeypatch.setattr("app.views.extractor_view.TaskSession", _Session)

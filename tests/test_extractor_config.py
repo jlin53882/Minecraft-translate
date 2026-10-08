@@ -435,4 +435,5 @@ def test_extractor_view_output_dir_helper_text():
 
         helper_text = view.output_dir_textfield.helper
         assert "未指定時自動產生" in helper_text
-        assert "路徑 + 設定名稱" in helper_text
+        assert "同層輸出資料夾" in helper_text
+        assert "Dual 預覽" in helper_text

@@ -44,7 +44,7 @@ ExtractorView._handle_extract_*_click()
   ├─ _check_mods_dir_or_snack()          ← 前置驗證（留空 / 不存在 → SnackBar，不進 dialog）
   ├─ _auto_fill_output_path()            ← 僅輸出欄位留空時：依 mods 路徑與 config 資料夾名推算並填入欄位
   └─ open_extractor_dialog(mode, skip_zh_cn=skip_zh_cn_switch.value)
-      ├─ prepare_extraction_paths()      ← Service：output_path 有值直接用，否則 mods_dir + config 子資料夾名
+      ├─ prepare_extraction_paths()      ← Service：有明確 output_path 就沿用；空白時在來源同層依 config 後綴產生輸出路徑
       ├─ get_lang_codes(skip_zh_cn=...)  ← Service：讀取語系清單
       ├─ page.show_dialog(dialog)
       └─ on_start_click()                ← 點「開始提取」（auto_start=True 時自動呼叫）→ 背景 thread 跑 run_extraction()
@@ -62,11 +62,11 @@ ExtractorView._handle_extract_*_click()
 ```
 ExtractorView._handle_preview_*_click()    ← 只驗證 mods_dir，不自動填輸出路徑
   └─ open_preview_dialog(mode, skip_zh_cn=...)
-      ├─ start_scan()                    ← 點「開始預覽」
+      ├─ start_scan()                    ← 點「開始預覽」並快照確認執行後的輸出路徑
       │   ├─ do_scan()  [thread]         ← 跑 preview_extraction_generator()，逐 update 寫入 preview_state (PreviewState)
       │   └─ ui_poller()  [async, page.run_task]  ← 在 event loop 上每 0.2s 讀 preview_state 更新進度與日誌
       └─ show_result_dialog()            ← 掃描完成 → 同一個 dialog 換成結果清單 +「確認執行」
-          └─ start_extraction()          ← pop_dialog → open_extractor_dialog(auto_start=True)
+          └─ start_extraction()          ← 顯示同一個輸出快照 → pop_dialog → open_extractor_dialog(auto_start=True)
 ```
 
 ---
@@ -90,8 +90,8 @@ ExtractorView._handle_preview_*_click()    ← 只驗證 mods_dir，不自動填
 
 | 函式 | 職責 |
 |------|------|
-| `prepare_extraction_paths(mods_dir, mode, output_path)` | 計算提取輸出路徑：`output_path` 有值直接使用，否則 `mods_dir` + mode 對應子資料夾名（config `extractor.output_folder_names`） |
-| `prepare_preview_paths(mods_dir, mode)` | 計算預覽輸出路徑（mods_dir 同層、名稱加預覽後綴）；目前 app 內沒有呼叫端 |
+| `prepare_extraction_paths(mods_dir, mode, output_path)` | 有值時原樣沿用 `output_path`；空白時依 `lang_extract` / `book_extract` / `dual_extract` 在來源目錄同層產生名稱加後綴的目錄 |
+| `prepare_preview_paths(mods_dir, mode, output_path)` | 預覽使用的輸出解析入口；空白時依三種 `*_preview` 設定在來源同層產生路徑，只做解析、不建立目錄；結果畫面與確認提取沿用同一快照 |
 | `get_output_folder_names()` | 讀取所有子資料夾命名（含預設值） |
 | `get_lang_codes(*, skip_zh_cn)` | 讀取 `jar_extractor.lang_codes`（預設 en_us/zh_cn/zh_tw）；`skip_zh_cn` 為 None 時讀 `extractor.skip_zh_cn_extract` |
 | `get_skip_zh_cn_extract()` | 讀取 `extractor.skip_zh_cn_extract`（預設 False），作為主畫面開關初始值 |

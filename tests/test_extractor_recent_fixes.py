@@ -15,7 +15,6 @@ import importlib.util as _importlib_util
 import sys as _sys
 from pathlib import Path
 from pathlib import Path as _Path
-from unittest.mock import patch
 
 import flet as ft
 import pytest
@@ -243,49 +242,26 @@ class TestAutoFillOutputPath:
 
 
 class TestExtractorDialogPathFilling:
-    """測試 open_extractor_dialog 的路徑自動補齊邏輯。"""
+    """測試提取輸出 Service 的正式路徑解析契約。"""
 
-    def test_未指定輸出目錄時_使用_mods_dir_作為基礎(self, monkeypatch, tmp_path):
-        """未指定 output_path 時，會用 mods_dir + suffix 組出 final_output"""
+    def test_未指定輸出目錄時_使用_service_產生同層目錄(self, tmp_path):
+        """空白 output_path 由正式 Service helper 解析成來源同層目錄。"""
+        from app.services_impl.pipelines.extract_service import prepare_extraction_paths
 
-        page = mock_page()  # noqa: F841
-        fp = mock_filepicker()  # noqa: F841
+        mods_path = tmp_path / "mods"
+        expected = str(tmp_path / "mods_提取lang_輸出")
+        assert prepare_extraction_paths(str(mods_path), "lang", "") == expected
 
-        # 由於 open_extractor_dialog 內部會建立 UI 與背景執行緒，
-        # 這裡只測試 final_output 的邏輯（從原始碼讀取後模擬）
-        # ✅ 重構：mock 對象改為 Service 層的 get_lang_codes
-        with patch(
-            "app.services_impl.pipelines.extract_service.get_lang_codes",
-            return_value=["zh_tw"],
-        ):
-            # 用 tmp_path 動態產生測試路徑
-            mods_path = tmp_path / "mods"
-            input_path = str(mods_path)
-            output_path = ""
-            mode = "lang"  # noqa: F841
+    def test_已指定輸出目錄原樣保留(self, tmp_path):
+        """明確 output_path 是最終位置，不再附加任何模式後綴。"""
+        from app.services_impl.pipelines.extract_service import prepare_extraction_paths
 
-            # 復刻 open_extractor_dialog 的路徑邏輯（用 Path 而非 os.path.join，
-            # 確保跨平台路徑分隔符一致）
-            output_dir = Path(output_path) if output_path else Path(input_path)
-            output_subdir = "_提取lang_輸出"
-            final_output = str(output_dir / output_subdir)
-
-            expected = str(mods_path / "_提取lang_輸出")
-            assert final_output == expected
-
-    def test_已指定輸出目錄時_補上_suffix(self, tmp_path):
-        """已指定 output_path 時，會在其下補上 suffix"""
-        # 用 tmp_path 動態產生測試路徑
-        mods_path = tmp_path / "mods"  # noqa: F841
-        output_path = tmp_path / "my_output"
-        mode = "lang"  # noqa: F841
-
-        output_dir = Path(output_path)
-        output_subdir = "_提取lang_輸出"
-        final_output = str(output_dir / output_subdir)
-
-        expected = str(output_path / "_提取lang_輸出")
-        assert final_output == expected
+        output_path = str(tmp_path / "my_output")
+        for mode in ("lang", "book", "dual"):
+            assert (
+                prepare_extraction_paths(str(tmp_path / "mods"), mode, output_path)
+                == output_path
+            )
 
     def test_各種_mode_對應的_suffix(self):
         """驗證 mode 與 suffix 的對應關係"""
