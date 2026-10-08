@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import sqlite3
+import threading
 import zipfile
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -14,8 +16,18 @@ from translation_tool.core import lang_merge_db, lang_merger
 from translation_tool.core.lang_merge_db import merge_db_fill
 from translation_tool.core.lang_merge_extracted_assets import merge_extracted_to_assets
 from translation_tool.core.lang_merger import merge_zhcn_to_zhtw_from_folder
-from translation_tool.translation_db import DbSettings, ScanItem, TranslationDB
-from translation_tool.translation_db.schema import KIND_LANG
+from translation_tool.translation_db import (
+    DbSettings,
+    ScanItem,
+    TranslationDB,
+    TranslationResolver,
+)
+from translation_tool.translation_db.schema import (
+    KIND_LANG,
+    SRC_AI,
+    SRC_JAR_TW,
+    SRC_MANUAL,
+)
 
 
 def _settings(monkeypatch, db_path: Path, **kw) -> None:
@@ -155,11 +167,13 @@ def test_zip_batch_keeps_database_identity_after_global_path_switch(
     )
 
     opened_settings = []
+    opened_readonly = []
     real_open_db = lang_merge_db.open_db
 
-    def tracking_open_db(settings, *, create=False):
+    def tracking_open_db(settings, *, create=False, readonly=False):
         opened_settings.append(settings)
-        return real_open_db(settings, create=create)
+        opened_readonly.append(readonly)
+        return real_open_db(settings, create=create, readonly=readonly)
 
     monkeypatch.setattr(lang_merge_db, "open_db", tracking_open_db)
     monkeypatch.setattr(merge_service, "ensure_pipeline_logging", lambda: None)
@@ -242,6 +256,290 @@ def test_zip_batch_keeps_database_identity_after_global_path_switch(
     assert all(settings.version == "1.21.1" for settings in opened_settings)
     assert all(settings.cross_version is False for settings in opened_settings)
     assert all(settings.priority == (4, 2, 1) for settings in opened_settings)
+    assert opened_readonly == [True, True]
+
+
+def test_folder_stage1_and_stage2_keep_snapshot_priority_after_global_change(
+    tmp_path, monkeypatch
+):
+    database_path = tmp_path / "folder-shared-database.db"
+    priority_a = (SRC_JAR_TW, SRC_AI, SRC_MANUAL)
+    priority_b = (SRC_AI, SRC_JAR_TW, SRC_MANUAL)
+    db = TranslationDB(database_path, priority=priority_a)
+    db.ingest(
+        "1.21.1",
+        [
+            ScanItem(
+                KIND_LANG,
+                "foo",
+                "item.foo.stage1",
+                "Stage One",
+                "AI one",
+                source=SRC_AI,
+            ),
+            ScanItem(
+                KIND_LANG,
+                "foo",
+                "item.foo.stage1",
+                "Stage One",
+                "Jar one",
+                source=SRC_JAR_TW,
+            ),
+            ScanItem(
+                KIND_LANG,
+                "foo",
+                "item.foo.stage2",
+                "Stage Two",
+                "AI two",
+                source=SRC_AI,
+            ),
+            ScanItem(
+                KIND_LANG,
+                "foo",
+                "item.foo.stage2",
+                "Stage Two",
+                "Jar two",
+                source=SRC_JAR_TW,
+            ),
+        ],
+    )
+    db.close()
+    settings_a = DbSettings(
+        path=str(database_path.resolve()),
+        merge_enabled=True,
+        version="1.21.1",
+        cross_version=False,
+        priority=priority_a,
+    )
+    _settings(monkeypatch, database_path, priority=priority_a)
+    monkeypatch.setattr(
+        lang_merge_db,
+        "value_fully_translated",
+        lambda value: bool(value),
+    )
+
+    source = tmp_path / "folder-input"
+    _write(
+        source / "assets" / "foo" / "lang" / "en_us.json",
+        {"item.foo.stage1": "Stage One"},
+    )
+    output = tmp_path / "folder-output"
+    list(
+        merge_zhcn_to_zhtw_from_folder(
+            str(source),
+            str(output),
+            only_process_lang=True,
+            use_translation_db=True,
+            translation_db_version="1.21.1",
+            translation_db_settings_snapshot=settings_a,
+        )
+    )
+
+    lang_output = output / "lang_output"
+    stage1_target = lang_output / "assets" / "foo" / "lang" / "zh_tw.json"
+    assert json.loads(stage1_target.read_text(encoding="utf-8")) == {
+        "item.foo.stage1": "Jar one"
+    }
+
+    # Make B the actual shared DB state between Folder Stage 1 and Stage 2.
+    current = TranslationDB(database_path, priority=priority_b, create=False)
+    current.close()
+    _settings(monkeypatch, database_path, priority=priority_b)
+    _write(
+        lang_output / "foo_extracted" / "assets" / "foo" / "lang" / "en_us.json",
+        {"item.foo.stage2": "Stage Two"},
+    )
+    list(
+        merge_extracted_to_assets(
+            lang_output,
+            use_translation_db=True,
+            translation_db_version="1.21.1",
+            translation_db_settings_snapshot=settings_a,
+        )
+    )
+
+    stage2_target = lang_output / "assets" / "foo" / "lang" / "zh_tw.json"
+    assert json.loads(stage2_target.read_text(encoding="utf-8")) == {
+        "item.foo.stage1": "Jar one",
+        "item.foo.stage2": "Jar two",
+    }
+    with sqlite3.connect(
+        f"{database_path.resolve().as_uri()}?mode=ro", uri=True
+    ) as conn:
+        assert conn.execute("SELECT value FROM meta WHERE key='priority'").fetchone()[
+            0
+        ] == ",".join(map(str, priority_b))
+
+
+def test_zip_batch_uses_snapshot_priority_without_reverting_global_effective(
+    tmp_path, monkeypatch
+):
+    """A merge reads its click-time source order without rewriting a newer DB order."""
+    database_path = tmp_path / "shared-database.db"
+    priority_a = (SRC_JAR_TW, SRC_AI, SRC_MANUAL)
+    priority_b = (SRC_AI, SRC_JAR_TW, SRC_MANUAL)
+    db = TranslationDB(database_path, priority=priority_a)
+    for key, english in (
+        ("item.foo.first", "First English"),
+        ("item.foo.second", "Second English"),
+        ("item.foo.reviewed", "Reviewed English"),
+    ):
+        db.ingest(
+            "1.21.1",
+            [
+                ScanItem(
+                    KIND_LANG,
+                    "foo",
+                    key,
+                    english,
+                    "AI translation",
+                    source=SRC_AI,
+                ),
+                ScanItem(
+                    KIND_LANG,
+                    "foo",
+                    key,
+                    english,
+                    "Jar translation",
+                    source=SRC_JAR_TW,
+                ),
+            ],
+        )
+    reviewed = next(
+        row
+        for row in db.list_entries("1.21.1", mod_id="foo", limit=100)[0]
+        if row.key == "item.foo.reviewed"
+    )
+    db.save_manual(reviewed.id, "Reviewed translation", actor="reviewer")
+    db.ingest(
+        "1.21.1",
+        [ScanItem(KIND_LANG, "foo", "item.foo.pending", "Pending English")],
+    )
+    db.close()
+
+    settings_a = DbSettings(
+        path=str(database_path.resolve()),
+        merge_enabled=True,
+        version="1.21.1",
+        cross_version=False,
+        priority=priority_a,
+    )
+    settings_b = DbSettings(
+        path=str(database_path.resolve()),
+        merge_enabled=True,
+        version="1.21.1",
+        cross_version=False,
+        priority=priority_b,
+    )
+    current_settings = {"value": settings_a}
+    changed_priority = threading.Event()
+    monkeypatch.setattr(
+        lang_merge_db,
+        "load_db_settings",
+        lambda: current_settings["value"],
+    )
+    monkeypatch.setattr(
+        lang_merge_db, "value_fully_translated", lambda value: bool(value)
+    )
+    monkeypatch.setattr(merge_service, "ensure_pipeline_logging", lambda: None)
+
+    class _FakeUIHandler:
+        def set_session(self, _session):
+            pass
+
+    monkeypatch.setattr(merge_service, "UI_LOG_HANDLER", _FakeUIHandler())
+    monkeypatch.setattr(
+        lang_merger,
+        "load_config",
+        lambda: {
+            "lang_merger": {
+                "pending_folder_name": "待翻譯",
+                "pending_organized_folder_name": "待翻譯整理需翻譯",
+                "filtered_pending_min_count": 1,
+                "quarantine_folder_name": "skipped_json",
+            },
+            "translator": {
+                "parallel_execution_workers": 1,
+                "replace_rules_path": "replace_rules.json",
+            },
+        },
+    )
+    monkeypatch.setattr(lang_merger, "load_replace_rules", lambda _path: [])
+
+    zip_paths = []
+    for name, entries in (
+        ("first.zip", {"item.foo.first": "First English"}),
+        (
+            "second.zip",
+            {
+                "item.foo.second": "Second English",
+                "item.foo.reviewed": "Reviewed English",
+                "item.foo.pending": "Pending English",
+            },
+        ),
+    ):
+        zip_path = tmp_path / name
+        with zipfile.ZipFile(zip_path, "w") as archive:
+            archive.writestr("assets/foo/lang/en_us.json", json.dumps(entries))
+        zip_paths.append(str(zip_path))
+
+    record_zip_result = merge_service._record_zip_result
+    completed_zips = []
+
+    def change_global_priority_after_first_zip(*args, **kwargs):
+        record_zip_result(*args, **kwargs)
+        completed_zips.append(args[2])
+        if len(completed_zips) == 1:
+            current_settings["value"] = settings_b
+            global_db = TranslationDB(database_path, priority=priority_b, create=False)
+            global_db.close()
+            changed_priority.set()
+
+    monkeypatch.setattr(
+        merge_service, "_record_zip_result", change_global_priority_after_first_zip
+    )
+    output_dir = tmp_path / "output"
+    list(
+        merge_service.run_merge_zip_batch_service(
+            zip_paths,
+            str(output_dir),
+            MagicMock(),
+            only_process_lang=True,
+            use_translation_db=True,
+            translation_db_version="1.21.1",
+            translation_db_settings_snapshot=settings_a,
+        )
+    )
+
+    assert changed_priority.is_set()
+    translated = json.loads(
+        (
+            output_dir / "lang_output" / "assets" / "foo" / "lang" / "zh_tw.json"
+        ).read_text(encoding="utf-8")
+    )
+    assert translated == {
+        "item.foo.first": "Jar translation",
+        "item.foo.second": "Jar translation",
+        "item.foo.reviewed": "Reviewed translation",
+    }
+
+    # Inspect raw state with a read-only SQLite connection; constructing a
+    # TranslationDB here would itself synchronize priority and hide a rollback.
+    uri = f"{database_path.resolve().as_uri()}?mode=ro"
+    with sqlite3.connect(uri, uri=True) as conn:
+        meta_priority = conn.execute(
+            "SELECT value FROM meta WHERE key='priority'"
+        ).fetchone()[0]
+        effective = {
+            key: (translation, checker)
+            for key, translation, checker in conn.execute(
+                "SELECT e.key, f.zh_tw, f.checker FROM entry e "
+                "JOIN effective f ON f.entry_id=e.id WHERE e.mod_id='foo'"
+            ).fetchall()
+        }
+    assert meta_priority == ",".join(map(str, priority_b))
+    assert effective["item.foo.second"] == ("AI translation", "")
+    assert effective["item.foo.reviewed"] == ("Reviewed translation", "reviewer")
 
 
 def test_valid_target_still_allows_configured_cross_version_lookup(
@@ -269,6 +567,48 @@ def test_valid_target_still_allows_configured_cross_version_lookup(
     assert final_tw == {"item.foo.cross": "跨版本譯文"}
     assert pending == {}
     assert hits == 1
+
+
+def test_snapshot_priority_preserves_cross_version_distance_tie_order(tmp_path):
+    db_path = tmp_path / "cross-version-tie.db"
+    priority_a = (SRC_JAR_TW, SRC_AI, SRC_MANUAL)
+    priority_b = (SRC_AI, SRC_JAR_TW, SRC_MANUAL)
+    db = TranslationDB(db_path, priority=priority_b)
+    for version, marker in (("1.20.1", "older"), ("1.22.1", "newer")):
+        db.ingest(
+            version,
+            [
+                ScanItem(
+                    KIND_LANG,
+                    "foo",
+                    "item.foo.tie",
+                    "Same English",
+                    f"{marker} AI",
+                    source=SRC_AI,
+                ),
+                ScanItem(
+                    KIND_LANG,
+                    "foo",
+                    "item.foo.tie",
+                    "Same English",
+                    f"{marker} Jar",
+                    source=SRC_JAR_TW,
+                ),
+            ],
+        )
+
+    resolver = TranslationResolver(
+        db,
+        "1.21.1",
+        cross_version=True,
+        source_priority=priority_a,
+    )
+    hit = resolver.lookup(KIND_LANG, "foo", "item.foo.tie", "Same English")
+    db.close()
+
+    # Versions are equally distant; retain the existing first-candidate tie rule.
+    assert hit is not None
+    assert (hit.zh_tw, hit.mc_version, hit.cross) == ("older Jar", "1.20.1", True)
 
 
 def test_stage1_unchanged_when_database_disabled(tmp_path, monkeypatch, db_path):
@@ -335,6 +675,36 @@ def test_empty_database_is_closed_and_skipped_without_a_resolver(monkeypatch, tm
         lang_merge_db,
         "TranslationResolver",
         lambda *_a, **_kw: pytest.fail("無版本資料庫不得建立 Resolver"),
+    )
+
+    assert lang_merge_db.open_merge_db_fill() is None
+    assert closed == [True]
+
+
+def test_database_path_mismatch_is_closed_and_skipped(monkeypatch, tmp_path):
+    actual_path = tmp_path / "actual.db"
+    expected_path = tmp_path / "snapshot.db"
+    db = TranslationDB(actual_path)
+    db.ingest(
+        "1.21.1",
+        [ScanItem(KIND_LANG, "foo", "item.foo.key", "English", "繁中")],
+    )
+    db.close()
+    opened = TranslationDB(actual_path, create=False, readonly=True)
+    closed = []
+    real_close = opened.close
+
+    def close():
+        closed.append(True)
+        real_close()
+
+    monkeypatch.setattr(opened, "close", close)
+    _settings(monkeypatch, expected_path, version="1.21.1")
+    monkeypatch.setattr(lang_merge_db, "open_db", lambda *_a, **_kw: opened)
+    monkeypatch.setattr(
+        lang_merge_db,
+        "TranslationResolver",
+        lambda *_a, **_kw: pytest.fail("路徑不符時不得建立 Resolver"),
     )
 
     assert lang_merge_db.open_merge_db_fill() is None
@@ -427,6 +797,7 @@ def test_context_manager_closes_database(monkeypatch, db_path):
     _settings(monkeypatch, db_path)
     with merge_db_fill() as fill:
         assert fill is not None
+        assert fill.db.readonly is True
         tw, pending, hits = fill.fill("foo", {}, {"item.foo.a": "Steel Casing"})
     assert (tw, pending, hits) == ({"item.foo.a": "鋼製外殼"}, {}, 1)
 

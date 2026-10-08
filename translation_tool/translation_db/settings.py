@@ -304,12 +304,17 @@ def remember_db_path(settings: DbSettings, path: Path) -> bool:
     return False
 
 
-def open_db(settings: DbSettings, *, create: bool = False) -> TranslationDB | None:
+def open_db(
+    settings: DbSettings, *, create: bool = False, readonly: bool = False
+) -> TranslationDB | None:
     """開啟設定指定的資料庫。
 
     ``create=False``（翻譯流程）：檔案不存在就回傳 None，不會憑空建立。
     ``create=True``（掃描／介面）：不存在則建立。
+    ``readonly=True``（純查詢流程）：使用 SQLite 唯讀連線，不同步或改寫來源優先序。
     """
+    if readonly and create:
+        raise ValueError("唯讀資料庫不可同時要求建立")
     path = settings.resolved_path()
     with _open_lock:
         if not path.is_file() and not create:
@@ -317,7 +322,13 @@ def open_db(settings: DbSettings, *, create: bool = False) -> TranslationDB | No
             return None
         existed = path.is_file()
         try:
-            db = TranslationDB(path, priority=settings.priority, create=create)
+            db = TranslationDB(
+                path,
+                priority=settings.priority,
+                readonly=readonly,
+                create=create,
+                sync_priority=not readonly,
+            )
             if create and not existed and path.is_file():
                 remember_db_path(settings, path)
                 # 資料庫剛建立：設定裡輸入的新名稱現在才能登錄成自訂來源

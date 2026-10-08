@@ -119,6 +119,11 @@ class TranslationDB:
         self._rank = rank_sql(self.priority, "t.source")
         self._sync_priority()
 
+    def _priority_order(self, priority: tuple[int, ...] | None = None) -> str:
+        """Return the canonical effective-source ordering for a selected priority."""
+        rank = self._rank if priority is None else rank_sql(tuple(priority), "t.source")
+        return f"CASE WHEN t.checker <> '' THEN 0 ELSE 1 END, {rank}"
+
     # ------------------------------------------------------------------ 基礎
     def close(self) -> None:
         """關閉連線。"""
@@ -218,8 +223,7 @@ class TranslationDB:
                 SELECT t.entry_id, t.zh_tw, t.source, t.checker,
                        ROW_NUMBER() OVER (
                            PARTITION BY t.entry_id
-                           ORDER BY CASE WHEN t.checker <> '' THEN 0 ELSE 1 END,
-                                    {self._rank}
+                           ORDER BY {self._priority_order()}
                        ) AS rn
                 FROM translation t WHERE t.zh_tw <> ''
             ) WHERE rn = 1
@@ -237,11 +241,10 @@ class TranslationDB:
                 INSERT INTO effective (entry_id, zh_tw, source, checker)
                 SELECT entry_id, zh_tw, source, checker FROM (
                     SELECT t.entry_id, t.zh_tw, t.source, t.checker,
-                           ROW_NUMBER() OVER (
-                               PARTITION BY t.entry_id
-                               ORDER BY CASE WHEN t.checker <> '' THEN 0 ELSE 1 END,
-                                        {self._rank}
-                           ) AS rn
+                       ROW_NUMBER() OVER (
+                           PARTITION BY t.entry_id
+                               ORDER BY {self._priority_order()}
+                       ) AS rn
                     FROM translation t
                     WHERE t.zh_tw <> '' AND t.entry_id IN ({marks})
                 ) WHERE rn = 1
@@ -1151,6 +1154,29 @@ class TranslationDB:
         return self._q(
             "SELECT e.kind, e.key, e.en_us, e.mc_version, f.zh_tw, f.source "
             "FROM entry e JOIN effective f ON f.entry_id = e.id WHERE e.mod_id = ?",
+            (mod_id,),
+        )
+
+    def load_mod_for_priority(
+        self, mod_id: str, priority: tuple[int, ...]
+    ) -> list[tuple[str, str, str, str, str, int]]:
+        """以呼叫端快照優先序唯讀選出模組生效譯文，不依賴共享 effective 表。"""
+        return self._q(
+            f"""
+            SELECT e.kind, e.key, e.en_us, e.mc_version, ranked.zh_tw, ranked.source
+            FROM (
+                SELECT t.entry_id, t.zh_tw, t.source,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY t.entry_id
+                           ORDER BY {self._priority_order(priority)}
+                       ) AS rn
+                FROM translation t
+                WHERE t.zh_tw <> ''
+            ) AS ranked
+            JOIN entry e ON e.id = ranked.entry_id
+            WHERE ranked.rn = 1 AND e.mod_id = ?
+            ORDER BY e.id
+            """,
             (mod_id,),
         )
 

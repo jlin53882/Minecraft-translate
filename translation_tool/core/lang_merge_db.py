@@ -33,7 +33,12 @@ class MergeDbFill:
     def __init__(self, db: TranslationDB, version: str, cross_version: bool) -> None:
         self.db = db
         self.version = version
-        self.resolver = TranslationResolver(db, version, cross_version=cross_version)
+        self.resolver = TranslationResolver(
+            db,
+            version,
+            cross_version=cross_version,
+            source_priority=db.priority,
+        )
         self._lock = threading.Lock()
         self.filled = 0
 
@@ -84,7 +89,7 @@ def open_merge_db_fill(
         log_debug("語系合併：Mod 資料庫已啟用但尚未指定目標版本，略過資料庫補譯")
         return None
     expected_path = settings.resolved_path().resolve()
-    db = open_db(settings, create=False)
+    db = open_db(settings, create=False, readonly=True)
     if db is None:  # 資料庫尚未建立／無法開啟：略過（open_db 已記錄原因）
         return None
     if db.path.resolve() != expected_path:
