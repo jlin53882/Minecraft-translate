@@ -309,6 +309,64 @@ def test_config_view_unsaved_category_navigation_offers_save_discard_or_stay(
     assert view.has_unsaved_changes is False
 
 
+def test_unsaved_dialog_resolution_callback_runs_only_once(monkeypatch):
+    monkeypatch.setattr(
+        "app.views.config_view.load_config_json",
+        lambda: {
+            "logging": {"log_level": "INFO"},
+            "translator": {},
+            "species_cache": {},
+            "lm_translator": {},
+            "output_bundler": {},
+            "lang_merger": {},
+        },
+    )
+    view = ConfigView(mock_page())
+    view.controls_map["lm_translator.temperature"].value = "0.9"
+    view._on_form_changed()
+    calls = []
+
+    view.confirm_unsaved_changes(lambda: calls.append("continued"))
+    discard = view.page.overlay[-1].actions[1]
+    discard.on_click(None)
+    discard.on_click(None)
+
+    assert calls == ["continued"]
+
+
+def test_reload_failure_after_confirmed_write_keeps_navigation_blocked(monkeypatch):
+    from app.views.config.config_actions import SaveOutcome
+
+    monkeypatch.setattr(
+        "app.views.config_view.load_config_json",
+        lambda: {
+            "logging": {"log_level": "INFO"},
+            "translator": {},
+            "species_cache": {},
+            "lm_translator": {},
+            "output_bundler": {},
+            "lang_merger": {},
+        },
+    )
+    monkeypatch.setattr(
+        "app.views.config_view.save_config_from_view_with_outcome",
+        lambda *_args, **_kwargs: SaveOutcome.SAVED_RELOAD_FAILED,
+    )
+    view = ConfigView(mock_page())
+    view.controls_map["lm_translator.temperature"].value = "0.9"
+    view._on_form_changed()
+    continued = []
+    view.confirm_unsaved_changes(lambda: continued.append(True))
+
+    dialog = view.page.overlay[-1]
+    dialog.actions[2].on_click(None)
+
+    assert continued == []
+    assert dialog.open is True
+    assert dialog.actions[2].disabled is True
+    assert "設定已寫入，但畫面重新載入失敗" in dialog.content.value
+
+
 def test_config_view_save_failure_keeps_unsaved_navigation_dialog_open(monkeypatch):
     monkeypatch.setattr(
         "app.views.config_view.load_config_json",

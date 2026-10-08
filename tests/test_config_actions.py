@@ -1079,16 +1079,71 @@ class TestConfigSaveFailureContracts:
     def test_confirmed_write_survives_view_reload_failure_as_distinct_outcome(
         self, monkeypatch
     ):
+        from app.views.config.config_actions import (
+            SaveOutcome,
+            save_config_from_view_with_outcome,
+        )
+
         view = _make_full_save_view()
         view.load_config.side_effect = RuntimeError("reload failed")
         snacks = []
 
+        monkeypatch.setattr(
+            "app.views.config.config_actions.show_snack",
+            lambda _page, message, *_args: snacks.append(message),
+        )
+        result = save_config_from_view_with_outcome(
+            view,
+            load_config_json_fn=_make_base_config,
+            save_config_json_fn=lambda _config: True,
+            validate_api_keys_from_ui_fn=lambda _keys: None,
+        )
+
+        assert result is SaveOutcome.SAVED_RELOAD_FAILED
+        assert "設定已寫入，但畫面重新載入失敗" in snacks[-1]
+
+    def test_existing_zero_enabled_models_allow_unrelated_settings_save(
+        self, monkeypatch
+    ):
+        view = _make_full_save_view()
+        view.models_column.controls[0]._checkbox.value = False
+        existing = _make_base_config()
+        existing["lm_translator"]["models"] = {"test-model": {"enabled": False}}
+        writes = []
+        snacks = []
+
         result = self._save(
             view,
-            writer=lambda _config: True,
+            config=existing,
+            writer=lambda config: writes.append(config) or True,
             monkeypatch=monkeypatch,
             snacks=snacks,
         )
 
         assert result is True
-        assert "設定已寫入，但畫面重新載入失敗" in snacks[-1]
+        assert len(writes) == 1
+        assert not any("至少需要保留" in message for message in snacks)
+
+    def test_config_load_failure_is_reported_without_attempting_write(
+        self, monkeypatch
+    ):
+        from app.views.config.config_actions import save_config_from_view
+
+        view = _make_full_save_view()
+        writes = []
+        snacks = []
+        monkeypatch.setattr(
+            "app.views.config.config_actions.show_snack",
+            lambda _page, message, *_args: snacks.append(message),
+        )
+
+        result = save_config_from_view(
+            view,
+            load_config_json_fn=lambda: (_ for _ in ()).throw(OSError("read failed")),
+            save_config_json_fn=lambda config: writes.append(config) or True,
+            validate_api_keys_from_ui_fn=lambda _keys: None,
+        )
+
+        assert result is False
+        assert writes == []
+        assert "設定驗證失敗" in snacks[-1]

@@ -14,8 +14,9 @@ from app.ui import design, kit
 from app.ui.design import C
 from app.ui.snack import show_snack
 from app.views.config.config_actions import (
+    SaveOutcome,
     load_config_into_view,
-    save_config_from_view,
+    save_config_from_view_with_outcome,
 )
 from app.views.config.config_form import (
     build_card as build_config_card,
@@ -177,6 +178,7 @@ class ConfigView(ft.Column):
         self._loading_config = False
         self._saved_form_state = None
         self._unsaved_dialog_open = False
+        self._last_save_outcome = None
         self.controls_map = {}
         self._selected_nav = "general"
 
@@ -302,20 +304,41 @@ class ConfigView(ft.Column):
             title=ft.Text("設定尚未儲存"),
             content=ft.Text("要先儲存設定、放棄變更，還是留在此頁？"),
         )
+        resolved = False
 
         def stay(_event=None):
+            nonlocal resolved
+            if resolved:
+                return
+            resolved = True
             self._unsaved_dialog_open = False
             self.page.pop_dialog()
 
         def save_and_continue(_event=None):
-            if not self.save_config_clicked(None):
+            nonlocal resolved
+            if resolved:
                 return
+            save_succeeded = self.save_config_clicked(None)
+            if self._last_save_outcome is SaveOutcome.SAVED_RELOAD_FAILED:
+                dialog.content.value = (
+                    "設定已寫入，但畫面重新載入失敗；請留在此頁重新開啟設定確認。"
+                )
+                dialog.actions[2].disabled = True
+                self.page.update()
+                return
+            if not save_succeeded:
+                return
+            resolved = True
             self._unsaved_dialog_open = False
             self.page.pop_dialog()
             on_continue()
 
         def discard_and_continue(_event=None):
+            nonlocal resolved
+            if resolved:
+                return
             self.discard_unsaved_changes()
+            resolved = True
             self._unsaved_dialog_open = False
             self.page.pop_dialog()
             on_continue()
@@ -558,17 +581,18 @@ class ConfigView(ft.Column):
 
     def save_config_clicked(self, e):
         """儲存設定"""
-        saved = save_config_from_view(
+        outcome = save_config_from_view_with_outcome(
             self,
             load_config_json_fn=load_config_json,
             save_config_json_fn=save_config_json,
             validate_api_keys_from_ui_fn=validate_api_keys_from_ui,
             registry=self._registry,
         )
-        if saved:
+        self._last_save_outcome = outcome
+        if outcome in (SaveOutcome.SAVED_RELOAD_FAILED, SaveOutcome.SAVED_OK):
             self._saved_form_state = self._capture_form_state()
             self._refresh_dirty_state()
-        return saved
+        return outcome is SaveOutcome.SAVED_OK
 
     def _bind_general_change_tracking(self) -> None:
         for path, control in self.controls_map.items():

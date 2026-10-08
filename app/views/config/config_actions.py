@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import traceback
+from enum import Enum, auto
 
 from app.services_impl.logging_service import validate_log_format
 from app.ui.snack import show_snack
@@ -15,6 +16,13 @@ from translation_tool.utils.config_manager import get_default, validate_config_v
 from translation_tool.utils.redaction import redact_text
 
 logger = logging.getLogger(__name__)
+
+
+class SaveOutcome(Enum):
+    WRITE_FAILED = auto()
+    SAVED_RELOAD_FAILED = auto()
+    SAVED_OK = auto()
+
 
 # 設定值 ↔ 設定頁控制項的轉換，全部由 settings_schema 驅動（#134）。
 # 新增一般設定不需要改這個檔案；只有專用元件（API 金鑰列、模型列）在下方手寫。
@@ -88,9 +96,29 @@ def _models_from_view(view) -> dict:
     return models
 
 
+def _has_enabled_model(models) -> bool:
+    return isinstance(models, dict) and any(
+        isinstance(model, dict) and model.get("enabled", False)
+        for model in models.values()
+    )
+
+
+def _model_settings_signature(models) -> tuple:
+    if not isinstance(models, dict):
+        return ()
+    return tuple(
+        (
+            name,
+            bool(cfg.get("enabled", False)) if isinstance(cfg, dict) else False,
+            cfg.get("max_output_tokens") if isinstance(cfg, dict) else None,
+        )
+        for name, cfg in models.items()
+    )
+
+
 def _collect_validated_config(view, load_config_json_fn, validate_api_keys_fn):
-    config = load_config_json_fn()
     try:
+        config = load_config_json_fn()
         for setting in editable_settings():
             control = view.controls_map.get(setting.path)
             if control is not None:
@@ -105,12 +133,22 @@ def _collect_validated_config(view, load_config_json_fn, validate_api_keys_fn):
         validate_api_keys_fn(api_keys)
         config["lm_translator"]["keys"] = api_keys
         models = _models_from_view(view)
-        if not any(model.get("enabled", True) for model in models.values()):
+        previous_models = config["lm_translator"].get("models")
+        if previous_models is None and "models" not in config["lm_translator"]:
+            previous_models = {
+                name: {"enabled": enabled}
+                for name, enabled in getattr(view, "DEFAULT_MODELS", {}).items()
+            }
+        previous_has_enabled = _has_enabled_model(previous_models)
+        models_changed = _model_settings_signature(models) != _model_settings_signature(
+            previous_models
+        )
+        if not _has_enabled_model(models) and (previous_has_enabled or models_changed):
             show_snack(view.page, "至少需要保留一個啟用中的模型；設定尚未儲存。")
             return None
         config["lm_translator"]["models"] = models
         validate_config_values(config)
-    except (ValueError, TypeError, RuntimeError, OSError) as err:
+    except Exception as err:  # noqa: BLE001 - config collection is a UI save boundary
         logger.error("儲存設定驗證失敗：%s", redact_text(traceback.format_exc()))
         show_snack(
             view.page,
@@ -139,8 +177,11 @@ def _write_config_with_feedback(view, config, save_config_json_fn) -> bool:
 def _reload_after_confirmed_write(view) -> bool:
     try:
         view.load_config()
-    except Exception:
-        logger.exception("設定已寫入，但重新載入設定頁失敗")
+    except Exception:  # noqa: BLE001 - reload is a UI boundary after confirmed persistence
+        logger.error(
+            "設定已寫入，但重新載入設定頁失敗：%s",
+            redact_text(traceback.format_exc()),
+        )
         show_snack(
             view.page,
             "⚠️ 設定已寫入，但畫面重新載入失敗；請重新開啟設定頁確認顯示內容。",
@@ -215,7 +256,7 @@ def load_config_into_view(view, config: dict):
         view.keys_column.controls.append(row)
 
 
-def save_config_from_view(
+def save_config_from_view_with_outcome(
     view,
     *,
     load_config_json_fn,
@@ -240,13 +281,34 @@ def save_config_from_view(
         view, load_config_json_fn, validate_api_keys_from_ui_fn
     )
     if new_config is None:
-        return False
+        return SaveOutcome.WRITE_FAILED
     if not _write_config_with_feedback(view, new_config, save_config_json_fn):
-        return False
+        return SaveOutcome.WRITE_FAILED
     if not _reload_after_confirmed_write(view):
-        return True
+        return SaveOutcome.SAVED_RELOAD_FAILED
     if registry is not None:
         _refresh_registered_extractor_views(registry)
 
     show_snack(view.page, "✅ 設定已成功儲存！", view._success_color())
-    return True
+    return SaveOutcome.SAVED_OK
+
+
+def save_config_from_view(
+    view,
+    *,
+    load_config_json_fn,
+    save_config_json_fn,
+    validate_api_keys_from_ui_fn,
+    registry=None,
+):
+    """Compatibility boolean API; use the outcome variant for navigation decisions."""
+    return (
+        save_config_from_view_with_outcome(
+            view,
+            load_config_json_fn=load_config_json_fn,
+            save_config_json_fn=save_config_json_fn,
+            validate_api_keys_from_ui_fn=validate_api_keys_from_ui_fn,
+            registry=registry,
+        )
+        is not SaveOutcome.WRITE_FAILED
+    )
