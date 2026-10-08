@@ -20,6 +20,7 @@ from dataclasses import dataclass, field
 from app.tasks import task_session as task_session_module
 from app.tasks.operation_registry import (
     OperationHandle,
+    OperationPresentation,
     OperationRegistry,
     current_operation,
 )
@@ -160,6 +161,14 @@ class TaskManager:
         if self._detach_pending:
             return
 
+        if (
+            isinstance(handle, OperationHandle)
+            and handle.descriptor.presentation != OperationPresentation.USER_VISIBLE
+        ):
+            # The registry still owns and drains this work; it simply does not
+            # belong in the task capsule, dashboard activity, or recent history.
+            return
+
         sid = id(session)
         with self._lock:
             info = self._active.get(sid)
@@ -218,6 +227,8 @@ class TaskManager:
             if self.operation_registry.active_count() == 0:
                 self._finish_detach()
             return
+        if handle.descriptor.presentation != OperationPresentation.USER_VISIBLE:
+            return
         if event == "start" and handle.task_session is not None:
             # TaskSession.start emits the user-visible transition after its state
             # is initialized; avoid presenting one operation twice at admission.
@@ -239,6 +250,7 @@ class TaskManager:
                 progress=0.0 if failed else 1.0,
                 started_at=handle.created_at,
                 finished_at=self._clock(),
+                operation_id=handle.id,
             )
             with self._lock:
                 self._recent.appendleft(info)
@@ -309,6 +321,8 @@ class TaskManager:
         """TaskSession 的 UI projection；active membership 由 OperationRegistry 擁有。"""
         projected: list[TaskInfo] = []
         for handle in self.operation_registry.active():
+            if handle.descriptor.presentation != OperationPresentation.USER_VISIBLE:
+                continue
             session = handle.task_session
             session_is_active = session is not None and not getattr(
                 session, "is_finished", False
@@ -337,6 +351,7 @@ class TaskManager:
                         or handle.descriptor.view_key
                     ),
                     started_at=handle.created_at,
+                    operation_id=handle.id,
                 )
             )
         return sorted(projected, key=lambda task: task.started_at)

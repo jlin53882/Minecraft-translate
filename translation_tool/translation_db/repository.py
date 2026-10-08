@@ -76,6 +76,7 @@ class TranslationDB:
         priority: tuple[int, ...] = DEFAULT_PRIORITY,
         readonly: bool = False,
         create: bool = True,
+        sync_priority: bool = True,
     ) -> None:
         self.path = Path(path)
         self.priority = tuple(priority)
@@ -106,7 +107,8 @@ class TranslationDB:
         try:
             if not readonly:
                 init_schema(self._conn)
-                self._sync_priority()
+                if sync_priority:
+                    self._sync_priority()
         except BaseException:
             self._conn.close()
             raise

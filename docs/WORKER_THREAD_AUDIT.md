@@ -41,6 +41,24 @@ rg -n "threading\.Thread|threading\.Timer|Thread\(|run_task\(|run_thread\(|async
 
 其他 executor：JAR/language/translation/DB/cache/IconPreview worker pools use bounded in-flight submission; cooperative owners propagate cancellation through `ContextVar`, cancel pending futures, and join already-running futures before terminal. IconPreview 的 `icon_cache`／`icon_index` executor 是 Registry operation 的 nested worker。`cache_history_store._MIRROR_EXECUTOR` 是 process-global 衍生 JSON 鏡像 writer；authoritative JSONL 已同步寫入，應用程式以 `history_flush()` 排空鏡像。此鏡像不屬於個別 operation，但已列為 `TESTED_EXCEPTION`：測試會阻塞鏡像並確認 JSONL 歷史仍立即可讀；詳細界線見 `docs/OPERATION_LIFECYCLE_CONTRACT.md`。Bounded submission does not bound the duration of one blocking ZIP/filesystem/PIL/SQLite/provider call.
 
+### Registry-owned maintenance work and UI projection
+
+`OperationDescriptor.presentation` separates ownership from presentation:
+`maintenance` operations remain in `OperationRegistry` for atomic admission,
+busy checks, and shutdown drain, but do not generate TaskManager task-card,
+recent-history, or task-change projections. This classification is semantic;
+user-triggered extraction, translation, save, and cache actions remain visible.
+
+| Operation | Owner / UI effect | Coalescing / resource boundary |
+|---|---|---|
+| Dashboard initial and task-boundary reload | `dashboard`, maintenance presentation; remains drain-tracked without notifying its own `TaskManager` subscriber | Requests arriving during a snapshot collapse to a dirty signal rather than queueing one operation per event; the worker rereads the latest state before becoming idle. `TaskInfo.operation_id` is stable across Session and owner projections, so projection changes do not look like new task boundaries. Loader duration remains unmeasured. |
+| ModDB warm statistics | `moddb-warm-stats`, maintenance presentation; never appears as user work | Worker opens a separate writable `TranslationDB` connection from the captured path/priority and closes it in `finally`. It skips constructor priority synchronization so a delayed warm worker cannot apply stale settings back to the DB; the current `effective` table is read and derived stats may still be cached. No UI-thread join; each SQLite call remains individually non-interruptible. |
+| Startup search-index rebuild | `startup-index`, maintenance presentation; remains registry-owned until done | AppShell registry owns admission and shutdown drain. |
+| Cache-root reload | `cache-root-reload`, maintenance presentation | Cache busy/pending decisions continue to use `OperationRegistry.active()`, never the filtered task projection. |
+| Resume prompt input check | `resume-prompt`, maintenance presentation | Registry owns the check; page lifecycle discards stale UI results. |
+
+Behavioral coverage: `test_dashboard_mount_reload_does_not_create_a_task_lifecycle_loop`, `test_dashboard_coalesces_task_changes_during_reload_and_uses_stable_owner_id`, `test_maintenance_operations_remain_owned_without_polluting_task_history`, and the ModDB warm-connection reload/priority-race tests. This does not establish a hard maximum duration for Dashboard loaders or one SQLite call.
+
 ## B. 長生命週期輪詢／task 的 owner 與 teardown
 
 | 輪詢 | owner | teardown | 驗證 |
@@ -124,5 +142,5 @@ merge 的取消檢查點（`merge_service`，經 `raise_if_cancelled()`；`Pipel
 ## E. 非驗收 blocker 的後續改善（不影響 #114 契約）
 
 - 把 `PollerHandle` 推廣到其他一次性 `run_task`（目前不需要）。
-- 統一各設定對話框改用 `page.show_dialog`／`pop_dialog`（目前以 `close_overlay_dialog` 保證關閉與移除）。
+- `ConfigView` 未儲存導覽確認使用 `page.show_dialog`／`pop_dialog` 的 LIFO 契約；save/reload 的提示延後到自己的 AlertDialog pop 後，驗證／寫入錯誤留在該對話框內，外部 dismiss 只視為留在原頁。其他設定對話框仍依各自 owner 關閉，不在此條目宣稱已統一。
 - 真實 Windows 桌面版的卸載時序與大型 Mods 資料夾（>400 個 JAR）驗證：見 `docs/WINDOWS_VERIFICATION.md`；本沙箱以 Flet 網頁版與行為測試驗證。

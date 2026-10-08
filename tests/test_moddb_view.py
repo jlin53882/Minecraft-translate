@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import sqlite3
+import threading
 import zipfile
 from pathlib import Path
 from types import SimpleNamespace
@@ -158,6 +160,122 @@ def test_view_switches_tabs_and_shows_overview_numbers(db_path):
     assert view.body.content is view.entries and view.tab == "entries"
     view.show_tab("scan")
     assert view.body.content is view.scan
+
+
+def test_moddb_stats_warm_uses_a_worker_owned_connection_when_view_reloads(
+    db_path, monkeypatch
+):
+    from app.tasks.operation_registry import OperationRegistry
+
+    seed(db_path)
+    page = mock_page()
+    registry = OperationRegistry()
+    page.operation_registry = registry
+    # The production page exposes run_thread; launch_page_operation uses the
+    # attached registry for the actual owner and worker lifecycle.
+    page.run_thread = lambda _target: None
+
+    warm_entered = threading.Event()
+    release_warm = threading.Event()
+    worker_connections = []
+    warm_errors = []
+    original_warm_stats = TranslationDB.warm_stats
+
+    def gated_warm_stats(db):
+        if threading.current_thread().name.startswith("operation-moddb-warm-stats"):
+            worker_connections.append(db)
+            warm_entered.set()
+            assert release_warm.wait(timeout=2)
+            try:
+                return original_warm_stats(db)
+            except Exception as exc:
+                warm_errors.append(exc)
+                raise
+        return original_warm_stats(db)
+
+    monkeypatch.setattr(TranslationDB, "warm_stats", gated_warm_stats)
+    view = moddb_view.ModDbView(page, mock_filepicker())
+    ui_db = view._db
+    assert ui_db is not None
+    try:
+        assert warm_entered.wait(timeout=1)
+        view.reload_db()
+        release_warm.set()
+        assert registry.wait_for_idle(timeout=2)
+        assert len(worker_connections) == 1
+        assert worker_connections[0] is not ui_db
+        assert warm_errors == []
+        with pytest.raises(sqlite3.ProgrammingError):
+            worker_connections[0]._conn.execute("SELECT 1")
+        with sqlite3.connect(db_path) as check_conn:
+            assert (
+                check_conn.execute("SELECT count(*) FROM stat_cache").fetchone()[0] > 0
+            )
+    finally:
+        release_warm.set()
+        registry.begin_shutdown()
+        assert registry.wait_for_idle(timeout=2)
+        if view._db is not None:
+            view._db.close()
+            view._db = None
+
+
+def test_delayed_moddb_warm_does_not_reapply_stale_priority(db_path, monkeypatch):
+    from app.tasks.operation_registry import OperationRegistry
+
+    seed(db_path)
+    page = mock_page()
+    registry = OperationRegistry()
+    page.operation_registry = registry
+    page.run_thread = lambda _target: None
+
+    constructor_entered = threading.Event()
+    release_constructor = threading.Event()
+    worker_connections = []
+    original_init = TranslationDB.__init__
+
+    def gated_init(db, *args, **kwargs):
+        is_warm_worker = threading.current_thread().name.startswith(
+            "operation-moddb-warm-stats"
+        )
+        if is_warm_worker:
+            assert kwargs.get("sync_priority") is False
+            constructor_entered.set()
+            assert release_constructor.wait(timeout=2)
+        original_init(db, *args, **kwargs)
+        if is_warm_worker:
+            worker_connections.append(db)
+
+    monkeypatch.setattr(TranslationDB, "__init__", gated_init)
+    view = moddb_view.ModDbView(page, mock_filepicker())
+    ui_db = view._db
+    assert ui_db is not None
+    try:
+        assert constructor_entered.wait(timeout=1)
+        new_priority = tuple(reversed(ui_db.priority))
+        assert new_priority != ui_db.priority
+        ui_db.set_priority(new_priority)
+        view.reload_db()
+        release_constructor.set()
+        assert registry.wait_for_idle(timeout=2)
+        assert len(worker_connections) == 1
+        with sqlite3.connect(db_path) as check_conn:
+            stored_priority = check_conn.execute(
+                "SELECT value FROM meta WHERE key = 'priority'"
+            ).fetchone()[0]
+            assert (
+                check_conn.execute("SELECT count(*) FROM stat_cache").fetchone()[0] > 0
+            )
+        assert stored_priority == ",".join(str(source) for source in new_priority)
+        with pytest.raises(sqlite3.ProgrammingError):
+            worker_connections[0]._conn.execute("SELECT 1")
+    finally:
+        release_constructor.set()
+        registry.begin_shutdown()
+        assert registry.wait_for_idle(timeout=2)
+        if view._db is not None:
+            view._db.close()
+            view._db = None
 
 
 def test_overview_link_opens_entries_with_filter(db_path):

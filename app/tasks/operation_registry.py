@@ -49,6 +49,13 @@ class ShutdownPolicy(StrEnum):
     TRANSFER_OWNERSHIP = "transfer_ownership"
 
 
+class OperationPresentation(StrEnum):
+    """Whether a tracked operation belongs in user-facing task projections."""
+
+    USER_VISIBLE = "user_visible"
+    MAINTENANCE = "maintenance"
+
+
 @dataclass(frozen=True)
 class OperationDescriptor:
     """Reviewable behavior contract for an owned operation."""
@@ -61,6 +68,7 @@ class OperationDescriptor:
     commit: CommitPolicy = CommitPolicy.EPHEMERAL
     durability: DurabilityPolicy = DurabilityPolicy.RECOMPUTABLE
     shutdown: ShutdownPolicy = ShutdownPolicy.CANCEL_AND_DRAIN
+    presentation: OperationPresentation = OperationPresentation.USER_VISIBLE
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
@@ -579,6 +587,7 @@ def launch_task_thread(
     commit: CommitPolicy = CommitPolicy.PARTIAL_ALLOWED,
     durability: DurabilityPolicy = DurabilityPolicy.RECOMPUTABLE,
     shutdown: ShutdownPolicy = ShutdownPolicy.CANCEL_AND_DRAIN,
+    presentation: OperationPresentation = OperationPresentation.USER_VISIBLE,
     launcher: Callable[[Callable[[], None]], Any] | None = None,
     on_cancel: Callable[[], Any] | None = None,
     run_if_cancelled: bool = False,
@@ -595,6 +604,7 @@ def launch_task_thread(
             commit=commit,
             durability=durability,
             shutdown=shutdown,
+            presentation=presentation,
         ),
         launcher=launcher,
         task_session=task_session,
@@ -615,6 +625,7 @@ def launch_page_operation(
     commit: CommitPolicy = CommitPolicy.PARTIAL_ALLOWED,
     durability: DurabilityPolicy = DurabilityPolicy.RECOMPUTABLE,
     shutdown: ShutdownPolicy = ShutdownPolicy.CANCEL_AND_DRAIN,
+    presentation: OperationPresentation = OperationPresentation.USER_VISIBLE,
     on_cancel: Callable[[], Any] | None = None,
     fallback_launcher: Callable[[Callable[[], Any]], Any] | None = None,
 ) -> OperationHandle | bool | None:
@@ -639,6 +650,7 @@ def launch_page_operation(
         commit=commit,
         durability=durability,
         shutdown=shutdown,
+        presentation=presentation,
         on_cancel=on_cancel,
     )
     return handle if handle is not None else False
@@ -698,6 +710,7 @@ def reserve_page_operation(
     commit: CommitPolicy = CommitPolicy.PARTIAL_ALLOWED,
     durability: DurabilityPolicy = DurabilityPolicy.RECOMPUTABLE,
     shutdown: ShutdownPolicy = ShutdownPolicy.CANCEL_AND_DRAIN,
+    presentation: OperationPresentation = OperationPresentation.USER_VISIBLE,
     on_cancel: Callable[[], Any] | None = None,
     fallback_launcher: Callable[[Callable[[], Any]], Any] | None = None,
 ) -> PageOperationReservation:
@@ -716,6 +729,7 @@ def reserve_page_operation(
             commit=commit,
             durability=durability,
             shutdown=shutdown,
+            presentation=presentation,
         ),
         task_session=task_session,
     )

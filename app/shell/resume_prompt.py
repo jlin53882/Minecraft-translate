@@ -19,6 +19,7 @@ import flet as ft
 
 from app.tasks.operation_registry import (
     CancellationPolicy,
+    OperationPresentation,
     ShutdownPolicy,
     launch_page_operation,
 )
@@ -232,4 +233,5 @@ class ResumePrompt:
             owner="resume-prompt",
             cancellation=CancellationPolicy.NON_CANCELLABLE,
             shutdown=ShutdownPolicy.DRAIN_ONLY,
+            presentation=OperationPresentation.MAINTENANCE,
         )

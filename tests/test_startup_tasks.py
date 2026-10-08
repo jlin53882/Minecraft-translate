@@ -22,6 +22,7 @@ def test_startup_index_rebuild_is_reserved_before_worker_launch(monkeypatch):
     assert handle.descriptor.owner == "startup-index"
     assert handle.descriptor.cancellation.value == "non_cancellable"
     assert handle.descriptor.shutdown.value == "drain_only"
+    assert handle.descriptor.presentation.value == "maintenance"
     assert handle.done_event.is_set()
     assert registry.active() == []
 

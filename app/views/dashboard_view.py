@@ -24,6 +24,7 @@ from app.services_impl.key_health_service import (
 from app.shell.task_manager import STATUS_ERROR, TaskManager
 from app.tasks.operation_registry import (
     CancellationPolicy,
+    OperationPresentation,
     ShutdownPolicy,
     launch_page_operation,
 )
@@ -205,7 +206,9 @@ class DashboardView(ft.Column):
         self._cache_overview: dict | None = None
         self._rules_count: int | None = None
         self._loading = False
-        self._active_task_ids: set[int] = set()
+        self._reload_dirty = False
+        self._reload_state_lock = threading.Lock()
+        self._active_task_ids: set[str | int] = set()
         self._task_state_lock = threading.Lock()
         self.data = DashboardData()
 
@@ -350,7 +353,9 @@ class DashboardView(ft.Column):
             self._unsubscribe()
         self._tasks = tasks
         with self._task_state_lock:
-            self._active_task_ids = {task.id for task in tasks.active()}
+            self._active_task_ids = {
+                task.operation_id or task.id for task in tasks.active()
+            }
         self._unsubscribe = tasks.subscribe(self._on_tasks_changed)
         self.refresh_view(self._collect())
 
@@ -387,33 +392,49 @@ class DashboardView(ft.Column):
 
     def reload(self, *, sync: bool = False) -> None:
         """重新讀取快取概覽與規則數（背景執行緒），讀完更新畫面。"""
-        if self._loading:
-            return
-        self._loading = True
+        with self._reload_state_lock:
+            if self._loading:
+                # Keep a single flight, but do not lose a real task boundary or
+                # an explicit refresh that arrives while the current snapshot is
+                # being read. The worker performs one coalesced follow-up pass.
+                self._reload_dirty = True
+                return
+            self._loading = True
+            self._reload_dirty = False
 
         def work() -> None:
             try:
-                overview = self._cache_overview_loader()
-            except Exception:
-                logger.warning("工作台讀取快取概覽失敗", exc_info=True)
-                overview = None
-            try:
-                rules = self._rules_count_loader()
-            except Exception:
-                logger.warning("工作台讀取規則數失敗", exc_info=True)
-                rules = None
-            try:
-                moddb = self._moddb_loader()
-            except Exception as exc:
-                logger.warning("工作台讀取 Mod 資料庫摘要失敗", exc_info=True)
-                moddb = {"problem": f"讀取摘要失敗（{exc}），詳情請看後台 log"}
-            self._cache_overview, self._rules_count, self._moddb = (
-                overview,
-                rules,
-                moddb,
-            )
-            self._loading = False
-            self._apply_on_ui(direct=sync)
+                while True:
+                    try:
+                        overview = self._cache_overview_loader()
+                    except Exception:
+                        logger.warning("工作台讀取快取概覽失敗", exc_info=True)
+                        overview = None
+                    try:
+                        rules = self._rules_count_loader()
+                    except Exception:
+                        logger.warning("工作台讀取規則數失敗", exc_info=True)
+                        rules = None
+                    try:
+                        moddb = self._moddb_loader()
+                    except Exception as exc:
+                        logger.warning("工作台讀取 Mod 資料庫摘要失敗", exc_info=True)
+                        moddb = {"problem": f"讀取摘要失敗（{exc}），詳情請看後台 log"}
+                    self._cache_overview, self._rules_count, self._moddb = (
+                        overview,
+                        rules,
+                        moddb,
+                    )
+                    with self._reload_state_lock:
+                        if self._reload_dirty:
+                            self._reload_dirty = False
+                            continue
+                        self._loading = False
+                    self._apply_on_ui(direct=sync)
+                    return
+            finally:
+                with self._reload_state_lock:
+                    self._loading = False
 
         if sync:
             work()
@@ -425,9 +446,12 @@ class DashboardView(ft.Column):
                 owner="dashboard",
                 cancellation=CancellationPolicy.NON_CANCELLABLE,
                 shutdown=ShutdownPolicy.DRAIN_ONLY,
+                presentation=OperationPresentation.MAINTENANCE,
             )
             if not launched:
-                self._loading = False
+                with self._reload_state_lock:
+                    self._loading = False
+                    self._reload_dirty = False
 
     def _apply_on_ui(self, *, direct: bool = False) -> None:
         if direct:
@@ -445,7 +469,11 @@ class DashboardView(ft.Column):
 
     def _on_tasks_changed(self) -> None:
         tasks = self._tasks
-        active_ids = {task.id for task in tasks.active()} if tasks else set()
+        active_ids = (
+            {task.operation_id or task.id for task in tasks.active()}
+            if tasks
+            else set()
+        )
         with self._task_state_lock:
             crossed_task_boundary = active_ids != self._active_task_ids
             self._active_task_ids = active_ids

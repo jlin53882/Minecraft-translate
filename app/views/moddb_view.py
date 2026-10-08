@@ -16,6 +16,7 @@ from app.services_impl.moddb_service import (
 )
 from app.tasks.operation_registry import (
     CancellationPolicy,
+    OperationPresentation,
     ShutdownPolicy,
     launch_page_operation,
 )
@@ -102,13 +103,36 @@ class ModDbView(ft.Column):
         """開啟資料庫後在背景先算好總覽統計；使用者切到總覽頁時多半已經算好。"""
         run_thread = getattr(self._page, "run_thread", None)
         if db is not None and callable(run_thread):
+            # The view owns and may close its connection during navigation or a
+            # settings reload. Give the non-cancellable warm operation its own
+            # connection so closing the view cannot interrupt a multi-query warm.
+            db_path, priority = db.path, db.priority
+
+            def warm() -> None:
+                worker_db = None
+                try:
+                    worker_db = TranslationDB(
+                        db_path,
+                        priority=priority,
+                        create=False,
+                        # warm_stats reads the current effective table and only
+                        # writes derived stat_cache rows. A delayed worker must
+                        # not reapply an older settings snapshot to the database.
+                        sync_priority=False,
+                    )
+                    warm_stats_quietly(worker_db)
+                finally:
+                    if worker_db is not None:
+                        worker_db.close()
+
             launch_page_operation(
                 self._page,
-                lambda: warm_stats_quietly(db),
+                warm,
                 name="Mod DB 統計預熱",
                 owner="moddb-warm-stats",
                 cancellation=CancellationPolicy.NON_CANCELLABLE,
                 shutdown=ShutdownPolicy.DRAIN_ONLY,
+                presentation=OperationPresentation.MAINTENANCE,
             )
 
     def reload_db(self) -> None:

@@ -420,34 +420,134 @@ def test_dashboard_reflects_running_and_finished_tasks():
         manager.detach()
 
 
-def test_dashboard_reloads_stats_at_task_boundaries_not_every_progress_event(
-    monkeypatch,
-):
+def _dashboard_with_registry(cache_overview_loader):
     from app.shell.task_manager import TaskManager
+    from app.tasks.operation_registry import OperationRegistry
+    from app.views.dashboard_view import DashboardView
+
+    page = mock_page()
+    registry = OperationRegistry()
+    page.operation_registry = registry
+    view = DashboardView(
+        page,
+        cache_overview_loader=cache_overview_loader,
+        rules_count_loader=lambda: 10,
+        key_snapshot_loader=list,
+        model_quota_loader=list,
+        moddb_loader=lambda: None,
+    )
+    manager = TaskManager(operation_registry=registry)
+    manager.attach()
+    view.set_task_manager(manager)
+    return view, manager, registry
+
+
+def test_dashboard_mount_reload_does_not_create_a_task_lifecycle_loop():
+    import threading
+
+    load_count = 0
+    repeated_start = threading.Event()
+    first_finish = threading.Event()
+    registry_ref = []
+
+    def load_cache():
+        nonlocal load_count
+        load_count += 1
+        if load_count > 1:
+            # Bound the pre-fix feedback loop so the regression test is safe.
+            registry_ref[0].begin_shutdown()
+        return {"total_entries": 1, "types": {}}
+
+    view, manager, registry = _dashboard_with_registry(load_cache)
+    registry_ref.append(registry)
+
+    def observe(event, handle):
+        if handle.descriptor.owner != "dashboard":
+            return
+        if event == "start" and load_count > 0 and not first_finish.is_set():
+            repeated_start.set()
+        if event == "finish":
+            first_finish.set()
+
+    registry.subscribe(observe)
+    try:
+        view.did_mount()
+        assert first_finish.wait(timeout=2)
+        assert not repeated_start.is_set()
+        assert load_count == 1
+        assert manager.active() == []
+        assert manager.recent() == []
+    finally:
+        registry.begin_shutdown()
+        assert registry.wait_for_idle(timeout=2)
+        manager.detach()
+
+
+def test_dashboard_coalesces_task_changes_during_reload_and_uses_stable_owner_id():
+    import threading
+
+    from app.tasks.operation_registry import OperationDescriptor
     from app.tasks.task_session import TaskSession
 
-    view = _dashboard()
-    manager = TaskManager()
-    manager.attach()
-    sessions: list[TaskSession] = []
-    reloads: list[str] = []
-    monkeypatch.setattr(view, "reload", lambda: reloads.append("reload"))
-    try:
-        view.set_task_manager(manager)
-        session = TaskSession(name="機器翻譯", view_key="lm")
-        sessions.append(session)
+    first_load_started = threading.Event()
+    release_first_load = threading.Event()
+    second_load_started = threading.Event()
+    load_count = 0
+    registry_ref = []
+
+    def load_cache():
+        nonlocal load_count
+        load_count += 1
+        if load_count == 1:
+            first_load_started.set()
+            assert release_first_load.wait(timeout=2)
+        elif load_count == 2:
+            second_load_started.set()
+        else:
+            # Prevent an unbounded loop from hanging a failing implementation.
+            registry_ref[0].begin_shutdown()
+        return {"total_entries": load_count, "types": {}}
+
+    _view, manager, registry = _dashboard_with_registry(load_cache)
+    registry_ref.append(registry)
+    session = TaskSession(name="使用者操作", view_key="test")
+    handle = registry.reserve(
+        OperationDescriptor(name="使用者操作", owner="test"),
+        task_session=session,
+    )
+    assert handle is not None
+
+    worker_finished_session = threading.Event()
+    release_worker = threading.Event()
+
+    def user_work():
         session.start()
-        assert reloads == ["reload"]
-
-        for progress in (0.1, 0.2, 0.3, 0.4):
-            session.set_progress(progress)
-        assert reloads == ["reload"]
-
+        assert first_load_started.wait(timeout=1)
+        session.set_progress(0.4)
+        session.set_progress(0.8)
         session.finish()
-        # First finish projection, then authoritative Registry terminal
-        # update after the active operation has actually been removed.
-        assert reloads == ["reload", "reload", "reload"]
+        worker_finished_session.set()
+        release_worker.wait(timeout=2)
+
+    try:
+        assert handle.launch(user_work)
+        assert worker_finished_session.wait(timeout=1)
+        before_terminal = manager.active()
+        assert len(before_terminal) == 1
+        assert before_terminal[0].operation_id == handle.id
+        release_worker.set()
+        assert handle.done_event.wait(timeout=1)
+        release_first_load.set()
+        assert second_load_started.wait(timeout=1)
+        assert registry.wait_for_idle(timeout=1)
+        assert load_count == 2
+        assert manager.active() == []
+        assert [task.name for task in manager.recent()] == ["使用者操作"]
     finally:
+        release_worker.set()
+        release_first_load.set()
+        registry.begin_shutdown()
+        registry.wait_for_idle(timeout=2)
         manager.detach()
 
 
