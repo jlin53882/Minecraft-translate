@@ -1,10 +1,12 @@
 """Mod 翻譯資料庫：分版本、可掃描 jar、與翻譯流程整合的 SQLite 翻譯記憶庫。"""
 
 from translation_tool.translation_db.models import (
+    AITranslationReplaceResult,
     EntryDetail,
     EntryRow,
     Impact,
     IngestStats,
+    SameSourceAIEntry,
     ScanItem,
     VersionStat,
     WriteBackItem,
@@ -33,11 +35,13 @@ __all__ = [
     "KIND_LANG",
     "KIND_PATCHOULI",
     "SOURCE_NAMES",
+    "AITranslationReplaceResult",
     "DbSettings",
     "EntryDetail",
     "EntryRow",
     "Impact",
     "IngestStats",
+    "SameSourceAIEntry",
     "ScanItem",
     "TranslationDB",
     "TranslationResolver",

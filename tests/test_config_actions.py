@@ -679,7 +679,13 @@ def _make_full_save_view():
     """Create a mock view for save_config_from_view tests with all required attributes."""
     view = make_full_view()
     view.load_config = MagicMock()
-    view.models_column.controls = []
+    view.models_column.controls = [
+        SimpleNamespace(
+            _model_name="test-model",
+            _checkbox=SimpleNamespace(label="test-model", value=True),
+            _max_output_tokens=SimpleNamespace(value=""),
+        )
+    ]
     # view 刪除 _show_snack_bar,SnackBar 顯示由 show_snack 函式處理
     view._success_color = MagicMock(return_value="green")
     return view
@@ -703,6 +709,7 @@ class TestSaveConfigFromViewPatchouliFields:
 
         def save_fn(cfg):
             saved.update(cfg)
+            return True
 
         save_config_from_view(
             view,
@@ -728,6 +735,7 @@ class TestSaveConfigFromViewPatchouliFields:
 
         def save_fn(cfg):
             saved.update(cfg)
+            return True
 
         save_config_from_view(
             view,
@@ -751,6 +759,7 @@ class TestSaveConfigFromViewPatchouliFields:
 
         def save_fn(cfg):
             saved.update(cfg)
+            return True
 
         save_config_from_view(
             view,
@@ -808,7 +817,7 @@ class TestRpmCooldownSetting:
         save_config_from_view(
             view,
             load_config_json_fn=_make_base_config,
-            save_config_json_fn=saved.update,
+            save_config_json_fn=lambda cfg: (saved.update(cfg), True)[1],
             validate_api_keys_from_ui_fn=lambda keys: None,
         )
         assert saved["lm_translator"]["rpm_cooldown_sec"] == expected
@@ -843,7 +852,7 @@ class TestPerModelMaxOutputTokens:
         save_config_from_view(
             view,
             load_config_json_fn=load_fn,
-            save_config_json_fn=saved.update,
+            save_config_json_fn=lambda cfg: (saved.update(cfg), True)[1],
             validate_api_keys_from_ui_fn=lambda keys: None,
         )
         return saved["lm_translator"]["models"]["demo-model"]
@@ -890,11 +899,18 @@ class TestKeyFailureCooldownSetting:
         config["lm_translator"]["models"] = {}
         config["lm_translator"]["keys"] = []
         load_config_into_view(view, config)
+        view.models_column.controls = [
+            SimpleNamespace(
+                _model_name="enabled-test-model",
+                _checkbox=SimpleNamespace(label="enabled-test-model", value=True),
+                _max_output_tokens=SimpleNamespace(value=""),
+            )
+        ]
         saved = {}
         save_config_from_view(
             view,
             load_config_json_fn=lambda: deepcopy(config),
-            save_config_json_fn=saved.update,
+            save_config_json_fn=lambda cfg: (saved.update(cfg), True)[1],
             validate_api_keys_from_ui_fn=lambda keys: None,
         )
         return view, saved
@@ -936,12 +952,19 @@ class TestKeyFailureCooldownSetting:
         merged_config["lm_translator"]["keys"] = []
 
         load_config_into_view(view, merged_config)
+        view.models_column.controls = [
+            SimpleNamespace(
+                _model_name="enabled-test-model",
+                _checkbox=SimpleNamespace(label="enabled-test-model", value=True),
+                _max_output_tokens=SimpleNamespace(value=""),
+            )
+        ]
         view.controls_map["logging.log_dir"].value = "other-logs"
         saved = {}
         save_config_from_view(
             view,
             load_config_json_fn=lambda: deepcopy(merged_config),
-            save_config_json_fn=saved.update,
+            save_config_json_fn=lambda cfg: (saved.update(cfg), True)[1],
             validate_api_keys_from_ui_fn=lambda keys: None,
         )
 
@@ -956,3 +979,171 @@ class TestKeyFailureCooldownSetting:
         _, saved = self._round_trip(config)
 
         assert saved["lm_translator"]["key_failure_cooldown_sec"] == 0.0
+
+
+class TestConfigSaveFailureContracts:
+    """The settings UI must distinguish validation, persistence, and refresh outcomes."""
+
+    @staticmethod
+    def _save(view, *, config=None, writer=None, monkeypatch=None, snacks=None):
+        from app.views.config.config_actions import save_config_from_view
+
+        if monkeypatch is not None:
+            monkeypatch.setattr(
+                "app.views.config.config_actions.show_snack",
+                lambda _page, message, *_args: snacks.append(message),
+            )
+        return save_config_from_view(
+            view,
+            load_config_json_fn=lambda: config or _make_base_config(),
+            save_config_json_fn=writer or (lambda _config: True),
+            validate_api_keys_from_ui_fn=lambda _keys: None,
+        )
+
+    def test_writer_false_keeps_view_dirty_and_reports_unconfirmed_persistence(
+        self, monkeypatch
+    ):
+        view = _make_full_save_view()
+        snacks = []
+        result = self._save(
+            view,
+            writer=lambda _config: False,
+            monkeypatch=monkeypatch,
+            snacks=snacks,
+        )
+
+        assert result is False
+        view.load_config.assert_not_called()
+        assert "無法確認設定檔是否已更新" in snacks[-1]
+
+    def test_writer_oserror_reports_persistence_as_unknown(self, monkeypatch):
+        view = _make_full_save_view()
+        snacks = []
+
+        def writer(_config):
+            raise OSError("write/readback status unknown")
+
+        result = self._save(view, writer=writer, monkeypatch=monkeypatch, snacks=snacks)
+
+        assert result is False
+        view.load_config.assert_not_called()
+        assert "請先檢查 config.json" in snacks[-1]
+
+    def test_invalid_temperature_is_rejected_before_writer(self, monkeypatch):
+        view = _make_full_save_view()
+        view.controls_map["lm_translator.temperature"].value = "3.0"
+        writes = []
+        snacks = []
+
+        result = self._save(
+            view,
+            writer=lambda config: writes.append(config) or True,
+            monkeypatch=monkeypatch,
+            snacks=snacks,
+        )
+
+        assert result is False
+        assert writes == []
+        assert "尚未嘗試寫入" in snacks[-1]
+
+    @pytest.mark.parametrize("model_rows", [[], [False, False]])
+    def test_cannot_remove_or_disable_every_existing_model(
+        self, model_rows, monkeypatch
+    ):
+        view = _make_full_save_view()
+        view.models_column.controls = [
+            SimpleNamespace(
+                _model_name=f"model-{index}",
+                _checkbox=SimpleNamespace(label=f"model-{index}", value=enabled),
+                _max_output_tokens=SimpleNamespace(value=""),
+            )
+            for index, enabled in enumerate(model_rows)
+        ]
+        existing = _make_base_config()
+        existing["lm_translator"]["models"] = {"old": {"enabled": True}}
+        writes = []
+        snacks = []
+
+        result = self._save(
+            view,
+            config=existing,
+            writer=lambda config: writes.append(config) or True,
+            monkeypatch=monkeypatch,
+            snacks=snacks,
+        )
+
+        assert result is False
+        assert writes == []
+        assert "至少需要保留一個啟用中的模型" in snacks[-1]
+
+    def test_confirmed_write_survives_view_reload_failure_as_distinct_outcome(
+        self, monkeypatch
+    ):
+        from app.views.config.config_actions import (
+            SaveOutcome,
+            save_config_from_view_with_outcome,
+        )
+
+        view = _make_full_save_view()
+        view.load_config.side_effect = RuntimeError("reload failed")
+        snacks = []
+
+        monkeypatch.setattr(
+            "app.views.config.config_actions.show_snack",
+            lambda _page, message, *_args: snacks.append(message),
+        )
+        result = save_config_from_view_with_outcome(
+            view,
+            load_config_json_fn=_make_base_config,
+            save_config_json_fn=lambda _config: True,
+            validate_api_keys_from_ui_fn=lambda _keys: None,
+        )
+
+        assert result is SaveOutcome.SAVED_RELOAD_FAILED
+        assert "設定已寫入，但畫面重新載入失敗" in snacks[-1]
+
+    def test_existing_zero_enabled_models_allow_unrelated_settings_save(
+        self, monkeypatch
+    ):
+        view = _make_full_save_view()
+        view.models_column.controls[0]._checkbox.value = False
+        existing = _make_base_config()
+        existing["lm_translator"]["models"] = {"test-model": {"enabled": False}}
+        writes = []
+        snacks = []
+
+        result = self._save(
+            view,
+            config=existing,
+            writer=lambda config: writes.append(config) or True,
+            monkeypatch=monkeypatch,
+            snacks=snacks,
+        )
+
+        assert result is True
+        assert len(writes) == 1
+        assert not any("至少需要保留" in message for message in snacks)
+
+    def test_config_load_failure_is_reported_without_attempting_write(
+        self, monkeypatch
+    ):
+        from app.views.config.config_actions import save_config_from_view
+
+        view = _make_full_save_view()
+        writes = []
+        snacks = []
+        monkeypatch.setattr(
+            "app.views.config.config_actions.show_snack",
+            lambda _page, message, *_args: snacks.append(message),
+        )
+
+        result = save_config_from_view(
+            view,
+            load_config_json_fn=lambda: (_ for _ in ()).throw(OSError("read failed")),
+            save_config_json_fn=lambda config: writes.append(config) or True,
+            validate_api_keys_from_ui_fn=lambda _keys: None,
+        )
+
+        assert result is False
+        assert writes == []
+        assert "設定驗證失敗" in snacks[-1]

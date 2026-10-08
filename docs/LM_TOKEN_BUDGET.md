@@ -53,6 +53,7 @@
 | `budget_min_scale` | `0.0625` | 撞牆後輸出預算最多縮到設定值的幾倍 |
 | `budget_recover_after` | `3` | 連續成功幾批後開始回升 |
 | `budget_recover_factor` | `1.5` | 每次回升的倍率（> 1，最大 4） |
+| `retry_same_as_source` | `true` | 同一批中譯文與原文相同的項目，在持久化前只重新確認一次 |
 
 缺少的鍵由預設值補上；型別或範圍錯誤在載入設定時就會報錯（`ConfigValidationError`）。
 `max_output_token_budget` 大於 `max_output_tokens` 只會警告。
@@ -67,7 +68,13 @@
 
 - 預算是程序內的記憶，重啟後從設定值重新開始學習。
 - 學到的預算依 profile 保存，不分模型；同一 profile 換模型時不會重置。
-- 設定頁（`config_view`）尚未提供這些欄位，目前需直接編輯 `config.json`。
+- Token budget 欄位可在設定頁「批次與限制」編輯；same-as-source 確認開關位於「翻譯行為設定」的「基本設定」卡。
+
+## 譯文與原文相同時重新確認
+
+`lm_translator.retry_same_as_source` 預設為 `true`。每個成功批次中，完全等於原文且含有 alphabetic character 的項目會單獨組成候選 payload；不使用 whitelist、字串長度或格式 heuristic。第二次沿用同一 profile prompt、model、API key、temperature 與 structured-output contract，並附加一次確認說明。`lang`、`patchouli`、`ftbquests`、`kubejs` 與 `md` 都走共用 batch contract。
+
+批次切分估算會在功能開啟時預留 retry prompt 的輸入 token；實際 retry 估算只包含候選項目及追加後的 prompt。結果依原 ID 與位置合併回第一批，processed/checkpoint 數量不變。此步驟在 shared loop 寫 Cache、Mod DB 建立 write-back 前完成。第二次仍相同會作為一般結果接受，並可正常寫入 Cache 與 Mod DB；技術錯誤或 structured response 無效時保留第一次結果。使用者取消仍依既有 cancellation contract 中止。
 
 ## 相關檔案
 

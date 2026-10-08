@@ -9,6 +9,7 @@ from app.tasks.task_session import TaskSession, tag_session
 from app.ui import kit
 from app.ui.design import C
 from app.ui.poller import PollerHandle
+from app.ui.snack import show_snack
 from app.ui.status_chip import apply_status_style
 from app.ui.sync_text_field import SyncTextField
 from app.views._log import LogView
@@ -23,7 +24,14 @@ class MergeWidgetsMixin:
         """合併狀態與一般／zh_cn／Patchouli 選項控制項。"""
         self._page = page
         self.file_picker = file_picker
-        self.db_options = MergeDbOptions(lambda: self._page.update())
+        self.db_options = MergeDbOptions(
+            lambda: self._page.update(),
+            on_missing_database=lambda: show_snack(
+                self._page,
+                "尚未建立 Mod 資料庫，請先到「Mod 資料庫」頁掃描 JAR 建立資料庫。",
+                C.GOLD,
+            ),
+        )
 
         self.session = tag_session(
             TaskSession(max_logs=2000), "語系合併", "merge", page=self._page

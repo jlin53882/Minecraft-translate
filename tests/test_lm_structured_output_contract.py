@@ -144,10 +144,8 @@ def test_response_with_extra_items_beyond_the_batch_is_rejected(
     assert "unexpected IDs=['2']" in warning.call_args.args[0]
 
 
-def test_translation_identical_to_source_is_a_normal_result_with_neutral_log(
-    batch_context, monkeypatch
-):
-    """譯文與原文相同（專有名詞等）不是失敗：照常回傳、不標記、不重試；日誌只做中性統計。"""
+def test_translation_identical_to_source_is_a_valid_result(batch_context, monkeypatch):
+    """Same-as-source is a valid merge result; the batch retry layer decides what follows."""
     from translation_tool.core import lm_translator_main
 
     runtime, round_data = batch_context
@@ -172,5 +170,25 @@ def test_translation_identical_to_source_is_a_normal_result_with_neutral_log(
         "text": "Minecraft",
     }  # 不改寫項目
     runtime.budget_tracker.on_truncated.assert_not_called()
-    assert any("本批次翻譯與原文相同 1/2" in m for m in logs)
+    assert not logs
     assert not any("疑似未翻" in m for m in logs)
+
+
+def test_optional_retry_contract_failure_does_not_change_batch_budget(
+    batch_context, monkeypatch
+):
+    runtime, round_data = batch_context
+    warning = Mock()
+    monkeypatch.setattr("translation_tool.core.lm_translator_main.log_warning", warning)
+
+    merged, rejected = _merge_batch_response(
+        runtime,
+        round_data,
+        '{"items":[]}',
+        {"finish_reason": "STOP"},
+        optional_retry=True,
+    )
+
+    assert merged is None and rejected is True
+    runtime.budget_tracker.on_truncated.assert_not_called()
+    warning.assert_not_called()

@@ -340,6 +340,9 @@ class PipelineView(PipelineWidgetsMixin, ft.Column):
             "patchouli_skip": config.get("patchouli_skip", False),
             "patchouli_threshold": config.get("patchouli_threshold", 0.5),
             "zh_en_threshold": config.get("zh_en_threshold", 2),
+            "translation_db_version": (
+                (config.get("translation_db_version") or "").strip() or None
+            ),
         }
         return cfg, mode, lang_codes, merge_options
 

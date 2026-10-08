@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
@@ -149,6 +150,22 @@ def test_settings_page_has_a_control_for_every_schema_setting():
     assert ui <= expected, ui - expected
 
 
+def test_same_as_source_retry_setting_is_editable_on_translation_behavior_page():
+    path = "lm_translator.retry_same_as_source"
+    setting = schema.SETTINGS_BY_PATH[path]
+    assert setting.kind == "bool"
+    assert setting.default is True
+    assert setting.page == "translation_behavior"
+    assert setting.card == "基本設定"
+    assert path in _config_view_paths()
+    basic_card = next(
+        card
+        for card in schema.resolved_layout()["translation_behavior"]
+        if card.title == "基本設定"
+    )
+    assert path in schema.layout_paths({"translation_behavior": (basic_card,)})
+
+
 def test_settings_page_renders_all_cards_and_pages():
     from app.views.config_view import NAV_ITEMS, ConfigView
 
@@ -185,10 +202,17 @@ def _config():
 
 def _save(view, config):
     saved: dict = {}
+    view.models_column.controls = [
+        SimpleNamespace(
+            _model_name="enabled-test-model",
+            _checkbox=SimpleNamespace(label="enabled-test-model", value=True),
+            _max_output_tokens=SimpleNamespace(value=""),
+        )
+    ]
     ok = save_config_from_view(
         view,
         load_config_json_fn=lambda: deepcopy(config),
-        save_config_json_fn=saved.update,
+        save_config_json_fn=lambda cfg: (saved.update(cfg), True)[1],
         validate_api_keys_from_ui_fn=lambda keys: None,
     )
     return ok, saved

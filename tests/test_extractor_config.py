@@ -111,6 +111,7 @@ def test_config_save_extractor_folder_names():
 
         page = mock_page()
         view = ConfigView(page)
+        view.add_model_row("enabled-test-model")
 
         view.controls_map[
             "extractor.output_folder_names.lang_extract"
@@ -180,6 +181,7 @@ def test_config_save_extractor_folder_names():
 
         def mock_save(cfg):
             saved_config.update(cfg)
+            return True
 
         from app.views.config.config_actions import save_config_from_view
 
@@ -221,6 +223,7 @@ def test_save_config_from_view_section_guards_create_missing_sections(monkeypatc
 
         page = mock_page()
         view = ConfigView(page)
+        view.add_model_row("enabled-test-model")
 
         saved_config = {}
 
@@ -262,6 +265,7 @@ def test_save_config_from_view_section_guards_create_missing_sections(monkeypatc
 
         def mock_save(cfg):
             saved_config.update(cfg)
+            return True
 
         from app.views.config.config_actions import save_config_from_view
 

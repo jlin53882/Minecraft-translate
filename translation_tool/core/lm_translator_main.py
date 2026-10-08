@@ -27,7 +27,12 @@ from translation_tool.core.lm_key_health import (
     get_model_quota_registry,
 )
 from translation_tool.core.lm_response_parser import safe_json_loads
-from translation_tool.utils.cancellation import interruptible_sleep
+from translation_tool.core.lm_same_source_retry import (
+    SAME_SOURCE_RETRY_INSTRUCTION,
+    build_same_source_retry_batch,
+    merge_same_source_retry_results,
+)
+from translation_tool.utils.cancellation import interruptible_sleep, raise_if_cancelled
 from translation_tool.utils.config_manager import get_models_config, load_config
 from translation_tool.utils.log_unit import log_error, log_info, log_warning
 from translation_tool.utils.redaction import redact_text
@@ -337,6 +342,9 @@ class _BatchRuntime:
     lang_prompt: str
     patchouli_prompt: str
     fixed_input_tokens: float
+    batch_fit_input_tokens: float
+    retry_fixed_input_tokens: float
+    retry_same_as_source: bool
     original_total: int | None
     remaining_items: list[dict]
     all_results: list[dict]
@@ -432,6 +440,11 @@ def _build_batch_runtime(
         "你是專業的 Minecraft Patchouli 手冊翻譯員",
     )
     fixed_prompt = lang_prompt if profile in {"lang", "kubejs"} else patchouli_prompt
+    retry_same_as_source = bool(lm_cfg.get("retry_same_as_source", True))
+    fixed_input_tokens = estimate_text_tokens(fixed_prompt)
+    retry_fixed_input_tokens = estimate_text_tokens(
+        f"{fixed_prompt.rstrip()}\n\n{SAME_SOURCE_RETRY_INSTRUCTION}"
+    )
     return _BatchRuntime(
         batch_items=batch_items,
         total=total,
@@ -445,7 +458,12 @@ def _build_batch_runtime(
         model_temperature=lm_cfg.get("temperature", 0.2),
         lang_prompt=lang_prompt,
         patchouli_prompt=patchouli_prompt,
-        fixed_input_tokens=estimate_text_tokens(fixed_prompt),
+        fixed_input_tokens=fixed_input_tokens,
+        batch_fit_input_tokens=(
+            retry_fixed_input_tokens if retry_same_as_source else fixed_input_tokens
+        ),
+        retry_fixed_input_tokens=retry_fixed_input_tokens,
+        retry_same_as_source=retry_same_as_source,
         original_total=total,
         remaining_items=list(batch_items),
         all_results=[],
@@ -463,7 +481,7 @@ def _prepare_batch(runtime: _BatchRuntime) -> _BatchRound:
         runtime.batch_profile,
         runtime.batch_size,
         runtime.lm_cfg,
-        fixed_input_tokens=runtime.fixed_input_tokens,
+        fixed_input_tokens=runtime.batch_fit_input_tokens,
     )
     current_batch = runtime.remaining_items[:fit_count]
     return _BatchRound(
@@ -664,6 +682,8 @@ def _merge_batch_response(
     round_data: _BatchRound,
     raw_text: str,
     api_meta: dict,
+    *,
+    optional_retry: bool = False,
 ) -> tuple[list[dict] | None, bool]:
     """Parse, validate, and restore ordered translations for one successful response."""
     parsed = safe_json_loads(raw_text)
@@ -684,22 +704,16 @@ def _merge_batch_response(
     ):
         contract_error = "one or more translation values are not strings"
     if contract_error is not None:
-        log_warning(f"[❌ 回應契約不符] {contract_error}；本批次將重試/縮小")
-        runtime.budget_tracker.on_truncated(
-            api_meta.get("finish_reason"), kind="missing"
-        )
+        if not optional_retry:
+            log_warning(f"[❌ 回應契約不符] {contract_error}；本批次將重試/縮小")
+            runtime.budget_tracker.on_truncated(
+                api_meta.get("finish_reason"), kind="missing"
+            )
         return None, True
 
     merged: list[dict] = []
-    # 只是統計：譯文與原文相同不一定是沒翻（專有名詞、縮寫本來就不需要翻譯），
-    # 不改寫項目、不標失敗、不影響快取／資料庫寫入、不觸發重試
-    same_as_source_count = 0
     for temp_id, original_item in round_data.id_to_item.items():
         translated_text = normalized.get(temp_id, original_item["text"])
-        if translated_text == original_item["text"] and any(
-            char.isalpha() for char in str(translated_text)
-        ):
-            same_as_source_count += 1
         if not translated_text or not str(translated_text).strip():
             log_warning("[⚠️ 空翻譯] path=%s", original_item["path"])
         if len(original_item["text"]) > 0 and (
@@ -707,12 +721,113 @@ def _merge_batch_response(
         ):
             log_warning("[⚠️ 異常長度] path=%s", original_item["path"])
         merged.append({**original_item, "text": translated_text})
-    if same_as_source_count:
+    return merged, False
+
+
+def _retry_same_source_translations(
+    runtime: _BatchRuntime,
+    round_data: _BatchRound,
+    result: list[dict],
+    *,
+    prompt: str,
+    model_name: str,
+    api_key: str,
+    output_cap: int | None,
+) -> list[dict]:
+    """Reconfirm only same-as-source candidates; keep the first valid result on failure."""
+    candidates = build_same_source_retry_batch(
+        round_data.current_batch, result, list(round_data.id_to_item)
+    )
+    if not candidates.positions:
+        return result
+    if not runtime.retry_same_as_source:
         log_info(
             f"[📊 本批次翻譯與原文相同 "
-            f"{same_as_source_count}/{len(round_data.id_to_item)}]"
+            f"{len(candidates.positions)}/{len(round_data.current_batch)}]"
         )
-    return merged, False
+        return result
+
+    retry_prompt = f"{prompt.rstrip()}\n\n{SAME_SOURCE_RETRY_INSTRUCTION}"
+    retry_estimate = runtime.budget_tracker.estimate(
+        candidates.items, runtime.budget_cfg, runtime.retry_fixed_input_tokens
+    )
+    retry_round = _BatchRound(
+        current_batch=list(candidates.items),
+        fit_count=len(candidates.items),
+        estimate=retry_estimate,
+        payload=candidates.payload,
+        id_to_item=candidates.id_to_item,
+    )
+    candidate_count = len(candidates.positions)
+    log_info(
+        f"[🔁 本批次翻譯與原文相同 {candidate_count}/{len(round_data.current_batch)}，"
+        f"重新確認一次；預估輸入≈{round(retry_estimate.input_tokens)} tokens]"
+    )
+    try:
+        raise_if_cancelled()
+        retry_meta: dict = {}
+        retry_text = call_gemini_requests(
+            model_name=model_name,
+            system_prompt=retry_prompt,
+            payload=retry_round.payload,
+            api_key=api_key,
+            temperature=runtime.model_temperature,
+            max_output_tokens=output_cap,
+            meta_out=retry_meta,
+        ).strip()
+        raise_if_cancelled()
+        if (
+            not retry_text
+            or retry_meta.get("finish_reason") == "MAX_TOKENS"
+            or _is_truncated_response(retry_text)
+        ):
+            log_warning(
+                f"[⚠️ 相同譯文重新確認失敗，保留第一次翻譯結果：{candidate_count} 筆]"
+            )
+            return result
+        retried, invalid = _merge_batch_response(
+            runtime, retry_round, retry_text, retry_meta, optional_retry=True
+        )
+        if invalid or retried is None:
+            log_warning(
+                f"[⚠️ 相同譯文重新確認失敗，保留第一次翻譯結果：{candidate_count} 筆]"
+            )
+            return result
+    except Exception:  # noqa: BLE001 - optional quality retry must not fail the valid batch
+        log_warning(
+            f"[⚠️ 相同譯文重新確認失敗，保留第一次翻譯結果：{candidate_count} 筆]"
+        )
+        return result
+
+    accepted_positions: list[int] = []
+    accepted_results: list[dict] = []
+    blank_count = 0
+    for position, retry_item in zip(candidates.positions, retried, strict=True):
+        retry_text = retry_item.get("text")
+        if not isinstance(retry_text, str) or not retry_text.strip():
+            blank_count += 1
+            continue
+        accepted_positions.append(position)
+        accepted_results.append(retry_item)
+    if blank_count:
+        log_warning(
+            f"[⚠️ 相同譯文重新確認回傳空白，保留第一次翻譯結果：{blank_count} 筆]"
+        )
+
+    merged = merge_same_source_retry_results(
+        result, tuple(accepted_positions), accepted_results
+    )
+    updated = sum(
+        retry_item["text"] != result[position]["text"]
+        for position, retry_item in zip(
+            accepted_positions, accepted_results, strict=True
+        )
+    )
+    log_info(
+        f"[✅ 相同譯文重新確認完成：{candidate_count} 筆，其中 {updated} 筆更新、"
+        f"{candidate_count - updated} 筆維持原文]"
+    )
+    return merged
 
 
 def _clear_quota_on_http_success(
@@ -810,6 +925,47 @@ def _dead_end_outcome(
     return _BatchRoundOutcome(BatchAction.FAIL)
 
 
+def _finish_successful_batch(
+    runtime: _BatchRuntime,
+    round_data: _BatchRound,
+    result: list[dict],
+    api_meta: dict,
+    *,
+    prompt: str,
+    model_name: str,
+    api_key: str,
+    output_cap: int | None,
+) -> _BatchRoundOutcome:
+    """Reconfirm optional candidates, then advance the validated batch exactly once."""
+    finalized = _retry_same_source_translations(
+        runtime,
+        round_data,
+        result,
+        prompt=prompt,
+        model_name=model_name,
+        api_key=api_key,
+        output_cap=output_cap,
+    )
+    runtime.completed_calls += 1
+    runtime.all_results.extend(finalized)
+    actual_output = api_meta.get("candidates_tokens")
+    if isinstance(actual_output, int):
+        actual_output += api_meta.get("thoughts_tokens") or 0
+    runtime.budget_tracker.on_success(
+        runtime.budget_cfg,
+        value_tokens=round_data.estimate.value_tokens,
+        item_count=len(round_data.current_batch),
+        actual_output_tokens=actual_output,
+    )
+    runtime.remaining_items = runtime.remaining_items[len(round_data.current_batch) :]
+    runtime.batch_size = min(runtime.batch_size, len(runtime.remaining_items))
+    runtime.key_cycle.record_success()
+    runtime.pinned_model_index = None
+    if not runtime.remaining_items and runtime.rpm_cooldown_sec > 0:
+        interruptible_sleep(runtime.rpm_cooldown_sec)
+    return _BatchRoundOutcome()
+
+
 def _attempt_batch(
     runtime: _BatchRuntime, round_data: _BatchRound
 ) -> _BatchRoundOutcome:
@@ -852,11 +1008,12 @@ def _attempt_batch(
                 f"/{runtime.batch_size} | 翻譯總量={runtime.original_total}"
             )
             with quota.hold_probe_lease(model_name, owner, lease_sec):
+                api_key = runtime.key_cycle.claim()
                 raw_text = call_gemini_requests(
                     model_name=model_name,
                     system_prompt=prompt,
                     payload=round_data.payload,
-                    api_key=runtime.key_cycle.claim(),
+                    api_key=api_key,
                     temperature=runtime.model_temperature,
                     max_output_tokens=output_cap,
                     meta_out=api_meta,
@@ -887,27 +1044,16 @@ def _attempt_batch(
             )
             if missing:
                 return _BatchRoundOutcome(BatchAction.SHRINK_BATCH, learned_budget=True)
-
-            runtime.completed_calls += 1
-            runtime.all_results.extend(result or [])
-            actual_output = api_meta.get("candidates_tokens")
-            if isinstance(actual_output, int):
-                actual_output += api_meta.get("thoughts_tokens") or 0
-            runtime.budget_tracker.on_success(
-                runtime.budget_cfg,
-                value_tokens=round_data.estimate.value_tokens,
-                item_count=len(round_data.current_batch),
-                actual_output_tokens=actual_output,
+            return _finish_successful_batch(
+                runtime,
+                round_data,
+                result or [],
+                api_meta,
+                prompt=prompt,
+                model_name=model_name,
+                api_key=api_key,
+                output_cap=output_cap,
             )
-            runtime.remaining_items = runtime.remaining_items[
-                len(round_data.current_batch) :
-            ]
-            runtime.batch_size = min(runtime.batch_size, len(runtime.remaining_items))
-            runtime.key_cycle.record_success()
-            runtime.pinned_model_index = None
-            if not runtime.remaining_items and runtime.rpm_cooldown_sec > 0:
-                interruptible_sleep(runtime.rpm_cooldown_sec)
-            return _BatchRoundOutcome()
         except Exception as error:  # noqa: BLE001
             _clear_quota_on_http_success(quota, error, model_name, started)
             action = _handle_batch_error(
@@ -968,7 +1114,7 @@ def _run_batch_state_machine(
                     runtime.batch_profile,
                     runtime.batch_size,
                     runtime.lm_cfg,
-                    fixed_input_tokens=runtime.fixed_input_tokens,
+                    fixed_input_tokens=runtime.batch_fit_input_tokens,
                 )
                 if next_fit < len(round_data.current_batch):
                     continue

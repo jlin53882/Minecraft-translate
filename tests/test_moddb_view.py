@@ -20,6 +20,7 @@ from translation_tool.translation_db import (
     ScanItem,
     TranslationDB,
 )
+from translation_tool.translation_db.models import HistoryRow
 from translation_tool.translation_db.schema import SRC_MANUAL
 
 
@@ -268,6 +269,29 @@ def test_entries_revert_restores_previous_translation(entries):
         next(r for r in db.list_entries("1.21.1")[0] if r.key == "item.foo.a").zh_tw
         == "鋼製外殼"
     )
+
+
+def test_ai_retranslation_history_has_no_manual_revert_action(entries):
+    row = entries.rows[0]
+    entries.select(row.id)
+    entries.detail.history = [
+        HistoryRow(
+            1,
+            "batch",
+            "2026-10-07 10:00:00",
+            "AI 重翻",
+            "ai_retranslate",
+            "舊譯文",
+            "新譯文",
+            "",
+        )
+    ]
+
+    entries._render_history()
+
+    rendered = texts_of(entries.history_col)
+    assert any(text.startswith("AI 重翻・AI 重翻") for text in rendered)
+    assert "還原這次更新" not in rendered
 
 
 def test_entries_step_moves_within_page_and_empty_state_without_database():

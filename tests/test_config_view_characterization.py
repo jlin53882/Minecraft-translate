@@ -1,6 +1,7 @@
 import flet as ft
 import pytest
 
+from app.ui.design import C
 from app.ui.snack import show_snack
 from app.views.config_view import ConfigView
 from tests.conftest import mock_page
@@ -74,6 +75,22 @@ def test_config_view_loads_models_and_keys_from_config(monkeypatch):
     view = ConfigView(mock_page())
 
     assert len(view.models_column.controls) == 2
+    enabled_row, disabled_row = view.models_column.controls
+    assert enabled_row._model_name == "gemini-2.5-flash"
+    assert enabled_row._checkbox.label == "啟用"
+    assert enabled_row._checkbox.value is True
+    assert enabled_row._max_output_tokens_help.visible is False
+    assert (
+        "留空：沿用全域「輸出 Token 上限」" in enabled_row._max_output_tokens_help.value
+    )
+    assert disabled_row._model_name == "gemini-3-flash-preview"
+    assert disabled_row._checkbox.value is False
+    assert disabled_row._max_output_tokens_help.visible is False
+    enabled_row._max_output_tokens_help_button.on_click(None)
+    assert enabled_row._max_output_tokens_help.visible is True
+    assert disabled_row._max_output_tokens_help.visible is False
+    enabled_row._max_output_tokens_help_button.on_click(None)
+    assert enabled_row._max_output_tokens_help.visible is False
     assert [tf.value for tf in view.key_fields] == ["k1", "k2"]
 
 
@@ -100,6 +117,442 @@ def test_config_view_add_and_remove_model_row(monkeypatch):
     assert len(view.models_column.controls) == start
 
 
+def test_config_view_tracks_unsaved_general_and_model_changes(monkeypatch):
+    monkeypatch.setattr(
+        "app.views.config_view.load_config_json",
+        lambda: {
+            "logging": {"log_level": "INFO"},
+            "translator": {},
+            "species_cache": {},
+            "lm_translator": {"models": {"demo": {"enabled": True}}},
+            "output_bundler": {},
+            "lang_merger": {},
+        },
+    )
+    view = ConfigView(mock_page())
+    assert view.has_unsaved_changes is False
+
+    level = view.controls_map["lm_translator.temperature"]
+    original_value = level.value
+    level.value = "0.9"
+    level.on_change(None)
+    assert view.has_unsaved_changes is True
+    assert "尚未儲存" in view.save_hint.value
+    assert view.save_button.content == "儲存變更"
+
+    level.value = original_value
+    level.on_change(None)
+    assert view.has_unsaved_changes is False
+    assert view.save_button.content == "儲存所有設定"
+
+    row = view.models_column.controls[0]
+    row._checkbox.value = False
+    row._checkbox.on_change(None)
+    assert view.has_unsaved_changes is True
+    row._checkbox.value = True
+    row._checkbox.on_change(None)
+    cap = row._max_output_tokens
+    cap.value = "4096"
+    cap.on_change(None)
+    assert view.has_unsaved_changes is True
+
+    choice = view.controls_map["logging.log_level"]
+    choice.value = "WARNING"
+    choice.on_select(None)
+    assert view.has_unsaved_changes is True
+
+
+def test_config_view_rechecks_dirty_state_after_blur_normalization(monkeypatch):
+    monkeypatch.setattr(
+        "app.views.config_view.load_config_json",
+        lambda: {
+            "logging": {},
+            "translator": {},
+            "species_cache": {},
+            "lm_translator": {},
+            "output_bundler": {},
+            "lang_merger": {},
+        },
+    )
+    view = ConfigView(mock_page())
+    field = ft.TextField(
+        value="path",
+        on_blur=lambda _event: setattr(field, "value", field.value.strip()),
+    )
+    view.controls_map["test.path"] = field
+    view._bind_change_tracking(field)
+    view._saved_form_state = view._capture_form_state()
+    field.value = "path "
+    field.on_change(None)
+    assert view.has_unsaved_changes is True
+
+    field.on_blur(None)
+
+    assert field.value == "path"
+    assert view.has_unsaved_changes is False
+
+
+def test_config_view_successful_add_model_shows_save_reminder(monkeypatch):
+    monkeypatch.setattr(
+        "app.views.config_view.load_config_json",
+        lambda: {
+            "logging": {},
+            "translator": {},
+            "species_cache": {},
+            "lm_translator": {"models": {"existing": {"enabled": True}}},
+            "output_bundler": {},
+            "lang_merger": {},
+        },
+    )
+    page = mock_page()
+    view = ConfigView(page)
+    view.new_model_field.value = "new-model"
+
+    view.on_add_model_clicked(None)
+
+    assert view.has_unsaved_changes is True
+    assert page.overlay[-1].content.value == (
+        "模型已加入清單，記得按「儲存變更」才會寫入 config.json。"
+    )
+    assert page.overlay[-1].content.color == C.GOLD
+
+
+def test_config_view_failed_save_keeps_unsaved_changes(monkeypatch):
+    monkeypatch.setattr(
+        "app.views.config_view.load_config_json",
+        lambda: {
+            "logging": {},
+            "translator": {},
+            "species_cache": {},
+            "lm_translator": {},
+            "output_bundler": {},
+            "lang_merger": {},
+        },
+    )
+    monkeypatch.setattr("app.views.config_view.save_config_json", lambda _config: False)
+    monkeypatch.setattr(
+        "app.views.config_view.validate_api_keys_from_ui", lambda _keys: None
+    )
+    view = ConfigView(mock_page())
+    field = view.controls_map["lm_translator.temperature"]
+    field.value = "0.9"
+    field.on_change(None)
+
+    assert view.save_config_clicked(None) is False
+    assert view.has_unsaved_changes is True
+    assert "無法確認設定檔是否已更新" in view.page.overlay[-1].content.value
+
+
+def test_config_view_write_exception_keeps_unsaved_changes(monkeypatch):
+    monkeypatch.setattr(
+        "app.views.config_view.load_config_json",
+        lambda: {
+            "logging": {},
+            "translator": {},
+            "species_cache": {},
+            "lm_translator": {},
+            "output_bundler": {},
+            "lang_merger": {},
+        },
+    )
+
+    def fail_write(_config):
+        raise OSError("test-only write failure")
+
+    monkeypatch.setattr("app.views.config_view.save_config_json", fail_write)
+    monkeypatch.setattr(
+        "app.views.config_view.validate_api_keys_from_ui", lambda _keys: None
+    )
+    view = ConfigView(mock_page())
+    field = view.controls_map["lm_translator.temperature"]
+    field.value = "0.9"
+    field.on_change(None)
+
+    assert view.save_config_clicked(None) is False
+    assert view.has_unsaved_changes is True
+    assert "無法確認設定檔是否已更新" in view.page.overlay[-1].content.value
+
+
+def test_config_view_unsaved_category_navigation_offers_save_discard_or_stay(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        "app.views.config_view.load_config_json",
+        lambda: {
+            "logging": {"log_level": "INFO"},
+            "translator": {},
+            "species_cache": {},
+            "lm_translator": {},
+            "output_bundler": {},
+            "lang_merger": {},
+        },
+    )
+    view = ConfigView(mock_page())
+    level = view.controls_map["lm_translator.temperature"]
+    level.value = "0.9"
+    level.on_change(None)
+
+    view._on_nav_click("api_models")
+
+    dialog = view.page.overlay[-1]
+    overlay_count = len(view.page.overlay)
+    view._on_nav_click("prompts")
+    assert len(view.page.overlay) == overlay_count
+    assert [action.content for action in dialog.actions] == [
+        "留在此頁",
+        "放棄變更",
+        "儲存並繼續",
+    ]
+    assert view._selected_nav == "general"
+    dialog.actions[1].on_click(None)
+    assert view._selected_nav == "api_models"
+    assert view.has_unsaved_changes is False
+
+
+def test_unsaved_dialog_resolution_callback_runs_only_once(monkeypatch):
+    monkeypatch.setattr(
+        "app.views.config_view.load_config_json",
+        lambda: {
+            "logging": {"log_level": "INFO"},
+            "translator": {},
+            "species_cache": {},
+            "lm_translator": {},
+            "output_bundler": {},
+            "lang_merger": {},
+        },
+    )
+    view = ConfigView(mock_page())
+    view.controls_map["lm_translator.temperature"].value = "0.9"
+    view._on_form_changed()
+    calls = []
+
+    view.confirm_unsaved_changes(lambda: calls.append("continued"))
+    discard = view.page.overlay[-1].actions[1]
+    discard.on_click(None)
+    discard.on_click(None)
+
+    assert calls == ["continued"]
+
+
+def test_reload_failure_after_confirmed_write_keeps_navigation_blocked(monkeypatch):
+    from app.views.config.config_actions import SaveOutcome
+
+    monkeypatch.setattr(
+        "app.views.config_view.load_config_json",
+        lambda: {
+            "logging": {"log_level": "INFO"},
+            "translator": {},
+            "species_cache": {},
+            "lm_translator": {},
+            "output_bundler": {},
+            "lang_merger": {},
+        },
+    )
+    monkeypatch.setattr(
+        "app.views.config_view.save_config_from_view_with_outcome",
+        lambda *_args, **_kwargs: SaveOutcome.SAVED_RELOAD_FAILED,
+    )
+    view = ConfigView(mock_page())
+    view.controls_map["lm_translator.temperature"].value = "0.9"
+    view._on_form_changed()
+    continued = []
+    view.confirm_unsaved_changes(lambda: continued.append(True))
+
+    dialog = view.page.overlay[-1]
+    dialog.actions[2].on_click(None)
+
+    assert continued == []
+    assert dialog.open is True
+    assert [action.content for action in dialog.actions] == [
+        "留在此頁",
+        "重試重新載入",
+    ]
+    assert "設定已寫入，但畫面尚未同步" in dialog.title.value
+    assert view._reload_recovery_required is True
+
+    dialog.actions[0].on_click(None)
+    view._saved_form_state = view._capture_form_state()
+    assert view.has_unsaved_changes is False
+    assert view.requires_exit_confirmation is True
+
+    view._on_nav_click("prompts")
+    assert view._selected_nav == "general"
+    assert view._unsaved_dialog_open is True
+    assert "畫面尚未同步" in view.page.overlay[-1].title.value
+
+
+def test_recovery_retry_success_clears_guard_and_continues(monkeypatch):
+    monkeypatch.setattr(
+        "app.views.config_view.load_config_json",
+        lambda: {
+            "logging": {"log_level": "INFO"},
+            "translator": {},
+            "species_cache": {},
+            "lm_translator": {},
+            "output_bundler": {},
+            "lang_merger": {},
+        },
+    )
+    view = ConfigView(mock_page())
+    view._reload_recovery_required = True
+    continued = []
+
+    view.confirm_unsaved_changes(lambda: continued.append(True))
+    dialog = view.page.overlay[-1]
+    assert [action.content for action in dialog.actions] == [
+        "留在此頁",
+        "重試重新載入",
+    ]
+    dialog.actions[1].on_click(None)
+
+    assert continued == [True]
+    assert view.requires_exit_confirmation is False
+    assert view._unsaved_dialog_open is False
+
+
+def test_explicit_recovery_exit_requires_reload_before_reentry(monkeypatch):
+    monkeypatch.setattr(
+        "app.views.config_view.load_config_json",
+        lambda: {
+            "logging": {"log_level": "INFO"},
+            "translator": {},
+            "species_cache": {},
+            "lm_translator": {},
+            "output_bundler": {},
+            "lang_merger": {},
+        },
+    )
+    view = ConfigView(mock_page())
+    view._reload_recovery_required = True
+    continued = []
+
+    view.confirm_unsaved_changes(
+        lambda: continued.append(True), allow_saved_recovery_exit=True
+    )
+    dialog = view.page.overlay[-1]
+    assert dialog.actions[-1].content == "已確認寫入，仍要離開"
+    dialog.actions[-1].on_click(None)
+
+    assert continued == [True]
+    assert view._reload_recovery_required is True
+    assert view._reload_exit_acknowledged is True
+    assert view._reload_before_next_entry is True
+    assert view.requires_exit_confirmation is False
+    view.cancel_reload_recovery_exit()
+    assert view._reload_exit_acknowledged is False
+    assert view.requires_exit_confirmation is True
+    assert view.reload_before_entry() is True
+    assert view._reload_recovery_required is False
+    assert view._reload_before_next_entry is False
+
+
+def test_failed_discard_reload_keeps_unsaved_dialog_open(monkeypatch):
+    config = {
+        "logging": {"log_level": "INFO"},
+        "translator": {},
+        "species_cache": {},
+        "lm_translator": {},
+        "output_bundler": {},
+        "lang_merger": {},
+    }
+    calls = 0
+
+    def load_config():
+        nonlocal calls
+        calls += 1
+        if calls > 1:
+            raise OSError("reload failed")
+        return config
+
+    monkeypatch.setattr(
+        "app.views.config_view.load_config_json",
+        load_config,
+    )
+    view = ConfigView(mock_page())
+    view.controls_map["lm_translator.temperature"].value = "0.9"
+    view._on_form_changed()
+    continued = []
+
+    view.confirm_unsaved_changes(lambda: continued.append(True))
+    dialog = view.page.overlay[-1]
+    dialog.actions[1].on_click(None)
+
+    assert continued == []
+    assert dialog.open is True
+    assert view._unsaved_dialog_open is True
+    assert "畫面狀態尚未確認" in dialog.content.value
+
+
+def test_late_discard_reload_failure_keeps_recovery_navigation_guard(monkeypatch):
+    config = {
+        "logging": {"log_level": "INFO"},
+        "translator": {},
+        "species_cache": {},
+        "lm_translator": {},
+        "output_bundler": {},
+        "lang_merger": {},
+    }
+    monkeypatch.setattr("app.views.config_view.load_config_json", lambda: config)
+    view = ConfigView(mock_page())
+
+    def fail_late_refresh():
+        raise RuntimeError("post-hydration UI refresh failed")
+
+    monkeypatch.setattr(view, "_check_db_path", fail_late_refresh)
+    view.controls_map["lm_translator.temperature"].value = "0.9"
+    view._on_form_changed()
+    view.confirm_unsaved_changes(lambda: pytest.fail("discard must not navigate"))
+    dialog = view.page.overlay[-1]
+
+    dialog.actions[1].on_click(None)
+
+    assert dialog.open is True
+    assert view._unsaved_dialog_open is True
+    assert view._reload_recovery_required is True
+    assert view.has_unsaved_changes is False
+    assert view.requires_exit_confirmation is True
+    assert "畫面狀態尚未確認" in dialog.content.value
+
+    dialog.actions[0].on_click(None)
+    view._on_nav_click("prompts")
+
+    assert view._selected_nav == "general"
+    assert view._unsaved_dialog_open is True
+    assert "畫面尚未同步" in view.page.overlay[-1].title.value
+
+
+def test_config_view_save_failure_keeps_unsaved_navigation_dialog_open(monkeypatch):
+    monkeypatch.setattr(
+        "app.views.config_view.load_config_json",
+        lambda: {
+            "logging": {},
+            "translator": {},
+            "species_cache": {},
+            "lm_translator": {},
+            "output_bundler": {},
+            "lang_merger": {},
+        },
+    )
+    monkeypatch.setattr("app.views.config_view.save_config_json", lambda _config: False)
+    monkeypatch.setattr(
+        "app.views.config_view.validate_api_keys_from_ui", lambda _keys: None
+    )
+    page = mock_page()
+    view = ConfigView(page)
+    field = view.controls_map["lm_translator.temperature"]
+    field.value = "0.9"
+    field.on_change(None)
+
+    view._on_nav_click("api_models")
+    dialog = page.overlay[-1]
+    dialog.actions[2].on_click(None)
+
+    assert dialog.open is True
+    assert view._selected_nav == "general"
+    assert view.has_unsaved_changes is True
+    assert view._unsaved_dialog_open is True
+
+
 def test_config_view_save_click_maps_rows_back_to_config(monkeypatch):
     saved = {}
     monkeypatch.setattr(
@@ -122,7 +575,8 @@ def test_config_view_save_click_maps_rows_back_to_config(monkeypatch):
         },
     )
     monkeypatch.setattr(
-        "app.views.config_view.save_config_json", lambda cfg: saved.update(cfg)
+        "app.views.config_view.save_config_json",
+        lambda cfg: (saved.update(cfg), True)[1],
     )
     monkeypatch.setattr(
         "app.views.config_view.validate_api_keys_from_ui", lambda keys: None
@@ -167,11 +621,16 @@ def test_config_view_save_click_maps_rows_back_to_config(monkeypatch):
     view.key_fields = [ft.TextField(value="k1")]
     view.models_column.controls.clear()
     view.add_model_row("demo-model")
+    view.add_model_row("disabled-model")
+    view.models_column.controls[-1]._checkbox.value = False
 
     view.save_config_clicked(None)
 
+    assert view.has_unsaved_changes is False
+    assert view.save_button.content == "儲存所有設定"
     assert saved["lm_translator"]["keys"] == ["k1"]
     assert saved["lm_translator"]["models"]["demo-model"]["enabled"] is True
+    assert saved["lm_translator"]["models"]["disabled-model"]["enabled"] is False
     assert saved["lm_translator"]["rate_limit"]["sleep_seconds_between_batches"] == 0.0
 
 
@@ -251,7 +710,14 @@ def test_config_view_move_model_row(monkeypatch):
         },
     )
     view = ConfigView(mock_page())
-    view.move_model_row(0, 1)
+    first_row, second_row = view.models_column.controls
+    first_name, second_name = first_row._model_name, second_row._model_name
+    view.move_model_row(first_row._checkbox, 1)
+    assert [row._model_name for row in view.models_column.controls] == [
+        second_name,
+        first_name,
+    ]
+    assert view.has_unsaved_changes is True
 
 
 def test_config_view_add_and_remove_model_row_integration(monkeypatch):
@@ -275,6 +741,11 @@ def test_config_view_add_and_remove_model_row_integration(monkeypatch):
     cb = view.models_column.controls[-1]._checkbox
     view.remove_model_by_checkbox(cb)
     assert len(view.models_column.controls) == start
+    assert view.has_unsaved_changes is False
+
+    view.remove_model_by_checkbox(view.models_column.controls[0]._checkbox)
+    assert len(view.models_column.controls) == start - 1
+    assert view.has_unsaved_changes is True
 
 
 def test_config_view_load_config_updates_controls_map(monkeypatch):

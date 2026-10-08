@@ -27,14 +27,15 @@ rg -n "threading\.Thread|threading\.Timer|Thread\(|run_task\(|run_thread\(|async
 
 行為層測試：`tests/test_view_lifecycle_contracts.py`（poller 的 teardown／重 mount／卸載後不更新、阻塞步驟的執行緒身分、卸載後丟棄結果）、`tests/test_shard_reader.py`、`tests/test_cache_history_store.py`、`tests/test_pipeline_extract_dialog_behavior.py`。
 
-## A. 背景執行緒啟動點（`threading.Thread`，7 個 AST 呼叫點）
+## A. 背景執行緒啟動點（`threading.Thread`，8 個 AST 呼叫點）
 
 | 位置 | 回到 UI 的方式 | owner／結束 |
 |---|---|---|
 | `app/tasks/operation_registry.py`（2 個 raw Thread call） | registry wrapper 對 mounted App work；standalone fallback 仍以 page worker/daemon thread 執行 | reservation 先於 launcher；handle 結束前保留 active membership |
 | `app/startup_tasks.py` | 正式入口傳入 AppShell registry；無 App 的 legacy helper 保留 fallback Thread | `startup-index` non-cancellable / drain-only，關閉時等候完成 |
 | `app/shell/config_effects.py` | AppShell 注入 registry launcher；fallback 只供獨立測試/嵌入用 | `cache-root-reload` 註冊為 non-cancellable / drain-only |
-| `app/views/moddb/scan_panel.py`、`translate_panel.py` | mounted App 使用 `launch_page_operation`；module Thread 僅為沒有 registry 的舊測試/standalone fallback | `moddb-scan` / `moddb-translate` handles 由 Registry 擁有；View poller teardown 見 B |
+| `app/views/moddb/scan_panel.py` | mounted App 使用 `launch_page_operation`；module Thread 僅為沒有 registry 的舊測試/standalone fallback | `moddb-scan` handle 由 Registry 擁有；View poller teardown 見 B |
+| `app/views/moddb/translate_panel.py`（2 個啟動點：批次翻譯、舊 AI 重翻） | mounted App 使用 `launch_page_operation`；standalone fallback 使用 module Thread | `moddb-translate`／retranslation handles 由 Registry 擁有；重翻批次取消與逐筆提交見 B |
 | `app/views/pipeline/pipeline_session.py` | AppShell 將 Registry 注入 PipelineRunner；default Thread launcher 僅作 standalone fallback | parent handle 跨完整 sequence；步驟 watcher 由 `PollerHandle` 持有 |
 
 其他 executor：IconPreview 的 `icon_cache`／`icon_index` executor 是 IconPreview Registry operation 的 nested worker；`cache_history_store._MIRROR_EXECUTOR` 是 process-global 衍生 JSON 鏡像 writer，App close 以 `history_flush()` 排空，但目前不在 OperationRegistry membership（剩餘風險見 `docs/OPERATION_LIFECYCLE_CONTRACT.md`）。

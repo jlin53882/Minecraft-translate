@@ -14,6 +14,8 @@ from types import SimpleNamespace
 import flet as ft
 import pytest
 
+from app.views.moddb import version_picker
+from app.views.pipeline import pipeline_db_version_field
 from app.views.pipeline import pipeline_one_click_dialog as mod
 from tests.conftest import _make_page, mock_filepicker
 
@@ -54,6 +56,15 @@ class _Env:
         self.snacks: list = []
         self.cfg = cfg if cfg is not None else {}
         monkeypatch.setattr(mod, "load_config", lambda: self.cfg)
+        monkeypatch.setattr(
+            mod, "load_db_settings", lambda: SimpleNamespace(version="1.21.1")
+        )
+        monkeypatch.setattr(
+            pipeline_db_version_field, "summarize_database", lambda: None
+        )
+        monkeypatch.setattr(
+            version_picker, "target_version_choices", lambda: ["1.21.1", "1.20.1"]
+        )
         monkeypatch.setattr(
             mod, "_load_version_data", lambda: {"1.20": {}, "1.21": {}, "1.19": {}}
         )
@@ -166,6 +177,29 @@ def test_step1_shows_readonly_paths_and_default_langs(env):
 def test_empty_paths_show_unset_placeholder(env):
     env.open(input_path="", output_path="")
     assert env.texts().count("未設定") == 2
+
+
+def test_merge_step_accepts_selected_or_manually_typed_database_version(env):
+    env.open()
+    env.goto(2)
+    field = next(c for c in env.controls(ft.Dropdown) if c.label == "目標版本")
+    assert field.editable is True
+
+    field.text = "26.2"
+    field.value = None
+    field.on_text_change(SimpleNamespace(control=field))
+
+    assert env.run_to_end_from(2)["translation_db_version"] == "26.2"
+
+
+def test_focusing_pipeline_target_version_suggests_creating_database(env):
+    env.open()
+    env.goto(2)
+    field = next(c for c in env.controls(ft.Dropdown) if c.label == "目標版本")
+
+    field.on_focus(SimpleNamespace(control=field))
+
+    assert env.snacks and "先到「Mod 資料庫」頁" in env.snacks[-1][0]
 
 
 def test_dialog_width_is_sixty_percent_of_page(env):
@@ -573,6 +607,7 @@ def test_confirm_calls_on_execute_once_with_default_config(env):
         "write_new_cache": True,
         "description": "",
         "version": "",
+        "translation_db_version": "1.21.1",
         "min_format": None,
         "max_format": None,
         "pack_image": None,
