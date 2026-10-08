@@ -569,7 +569,7 @@ def test_lm_view_shows_database_status_and_defaults_from_settings(db_path):
     from app.views import lm_view
 
     view = lm_view.LMView(mock_page(), mock_filepicker())
-    assert "尚未建立資料庫" in view.db_info.value
+    assert "尚未建立 Mod 資料庫" in view.db_info.value
     assert view.use_db_switch.value is True  # 預設啟用（資料庫不存在時流程自動略過）
     seed(db_path)
     view.refresh_db_info()
@@ -585,9 +585,12 @@ def test_every_view_spec_reaches_moddb_through_registry_and_palette():
 
 def test_lm_view_warns_when_database_is_on_but_no_version_is_set(db_path, monkeypatch):
     from app.views import lm_view
+    from app.views.moddb import lm_db_options
 
     monkeypatch.setattr(
-        lm_view, "load_db_settings", lambda: DbSettings(path=str(db_path), version="")
+        lm_db_options.moddb_service,
+        "load_db_settings",
+        lambda: DbSettings(path=str(db_path), version=""),
     )
     view = lm_view.LMView(mock_page(), mock_filepicker())
     view.use_db_switch.value = True
@@ -596,12 +599,14 @@ def test_lm_view_warns_when_database_is_on_but_no_version_is_set(db_path, monkey
     assert "尚未指定目標版本" in view.db_info.value
 
     view.db_version_field.value = "1.21.1"
-    view._on_db_option_changed()
+    view.lm_db_options._on_version_changed(
+        SimpleNamespace(control=view.db_version_field)
+    )
     assert "尚未指定目標版本" not in view.db_info.value
 
     view.db_version_field.value = ""
     view.use_db_switch.value = False
-    view._on_db_option_changed()
+    view.lm_db_options._on_enabled_changed(SimpleNamespace(control=view.use_db_switch))
     assert "尚未指定目標版本" not in view.db_info.value
 
 

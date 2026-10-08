@@ -23,9 +23,10 @@ from app.services_impl.pipelines.merge_service import (
 )
 from app.tasks.task_session import TaskSession  # noqa: F401
 from app.ui.design import C
-from app.ui.dialogs import close_overlay_dialog
+from app.ui.dialogs import close_overlay_dialog, present_dialog, set_dialog_feedback
 from app.ui.safe_file_picker import check_output_dir
 from app.ui.sync_text_field import SyncTextField
+from app.views.merge.merge_db_options import MergeDbOptions
 from translation_tool.utils.config_manager import load_config
 
 
@@ -71,7 +72,7 @@ def open_merge_dialog(
         safe_float: 可選的浮點數轉換器，失敗時回傳 None。
 
     Side Effects:
-        將 AlertDialog 附加至 page.overlay、開啟對話框並更新頁面。
+        透過 owned-dialog helper 顯示，使用原生 stack 或舊版 overlay fallback。
     """
     ctx = types.SimpleNamespace(
         page=page,
@@ -81,7 +82,11 @@ def open_merge_dialog(
         show_snack_bar=show_snack_bar,
         safe_int=safe_int,
         safe_float=safe_float,
+        dialogs=[],
+        run_started=False,
     )
+    ctx.feedback = ft.Text("", size=12, color=C.GOLD, visible=False)
+    ctx.merge_db_options = MergeDbOptions(page.update)
     dialog_width, patchouli_skip, patchouli_threshold, zh_en_threshold = (
         _merge_init_state_and_config(ctx, input_path)
     )
@@ -119,9 +124,7 @@ def open_merge_dialog(
         ],
     )
 
-    ctx.page.overlay.append(dialog)
-    dialog.open = True
-    ctx.page.update()
+    present_dialog(ctx, dialog)
 
 
 def _merge_init_state_and_config(ctx, input_path):
@@ -316,6 +319,8 @@ def _merge_build_content(ctx):
                 ]
             ),
             ft.Divider(),
+            ctx.merge_db_options.card,
+            ft.Divider(),
             ft.Text("語系過濾設定", weight="bold", size=13),
             ctx.merge_only_lang_checkbox,
             ft.Row(
@@ -327,6 +332,20 @@ def _merge_build_content(ctx):
                 ]
             ),
             ft.Divider(),
+            _merge_patchouli_settings(ctx),
+            ctx.feedback,
+        ],
+        spacing=10,
+        padding=0,
+        scroll=ft.ScrollMode.AUTO,
+    )
+    return content
+
+
+def _merge_patchouli_settings(ctx):
+    """Build the merge language threshold and Patchouli controls as one section."""
+    return ft.Column(
+        [
             ft.Text("zh 英文含量閾值", weight=ft.FontWeight.W_500, size=12),
             ft.Row(
                 [
@@ -377,10 +396,7 @@ def _merge_build_content(ctx):
             ),
         ],
         spacing=10,
-        padding=0,
-        scroll=ft.ScrollMode.AUTO,
     )
-    return content
 
 
 def _merge_on_input_mode_changed(ctx, e=None):
@@ -393,7 +409,7 @@ def _merge_on_input_mode_changed(ctx, e=None):
 
 
 def _merge_close_dialog(ctx, dialog):
-    close_overlay_dialog(ctx.page, dialog)
+    return close_overlay_dialog(ctx.page, dialog)
 
 
 def _merge_update_patchouli_controls(ctx):
@@ -500,44 +516,55 @@ def _merge_browse_output_dir(ctx, e=None):
 
 
 def _merge_show_preview_result(ctx, dialog):
+    if not dialog.open:
+        return
     if ctx.input_mode == "folder":
         input_src = (ctx.merge_folder_field.value or "").strip()
     else:
         input_src = ",".join(ctx.merge_selected_zips)
     output = (ctx.merge_output_dir_field.value or "").strip()
     if not input_src:
-        ctx.show_snack_bar("⚠️ 請填寫輸入來源")
+        set_dialog_feedback(ctx.page, ctx.feedback, "⚠️ 請填寫輸入來源", C.GOLD)
         return
     if not output:
-        ctx.show_snack_bar("⚠️ 請填寫輸出目錄")
+        set_dialog_feedback(ctx.page, ctx.feedback, "⚠️ 請填寫輸出目錄", C.GOLD)
         return
-    ctx.show_snack_bar("🔍 預覽功能待實作")  # 保留對話框，避免丟掉使用者已填的設定
+    set_dialog_feedback(
+        ctx.page,
+        ctx.feedback,
+        "語系合併預覽尚未支援；設定已保留，請直接執行或取消。",
+        C.GOLD,
+    )
 
 
 def _merge_start_merge(ctx, dialog):
+    if ctx.run_started or not dialog.open:
+        return
     if ctx.input_mode == "folder":
         input_src = (ctx.merge_folder_field.value or "").strip()
         if not input_src:
-            ctx.show_snack_bar("⚠️ 輸入來源為必填欄位")
+            set_dialog_feedback(ctx.page, ctx.feedback, "⚠️ 輸入來源為必填欄位", C.GOLD)
             return
         if not os.path.isdir(input_src):
-            ctx.show_snack_bar("⚠️ 輸入來源資料夾不存在")
+            set_dialog_feedback(
+                ctx.page, ctx.feedback, "⚠️ 輸入來源資料夾不存在", C.GOLD
+            )
             return
         merge_input = input_src
     else:
         if not ctx.merge_selected_zips:
-            ctx.show_snack_bar("⚠️ 請選擇 ZIP 檔案")
+            set_dialog_feedback(ctx.page, ctx.feedback, "⚠️ 請選擇 ZIP 檔案", C.GOLD)
             return
         merge_input = ctx.merge_selected_zips
 
     output = (ctx.merge_output_dir_field.value or "").strip()
     if not output:
-        ctx.show_snack_bar("⚠️ 輸出目錄為必填欄位")
+        set_dialog_feedback(ctx.page, ctx.feedback, "⚠️ 輸出目錄為必填欄位", C.GOLD)
         return
     # 只檢查、不建立：輸出資料夾由合併服務建立，取消時才分得出「新建的」並清掉
     output_error = check_output_dir(output)
     if output_error:
-        ctx.show_snack_bar(f"⚠️ {output_error}")
+        set_dialog_feedback(ctx.page, ctx.feedback, f"⚠️ {output_error}", C.GOLD)
         return
 
     only_lang = ctx.merge_only_lang_checkbox.value
@@ -555,10 +582,13 @@ def _merge_start_merge(ctx, dialog):
 
     lang_codes = [code for code, cb in ctx.lang_code_checks.items() if cb.value]
     if not lang_codes:
-        ctx.show_snack_bar("⚠️ 請至少選擇一個語言代碼")
+        set_dialog_feedback(ctx.page, ctx.feedback, "⚠️ 請至少選擇一個語言代碼", C.GOLD)
         return
 
-    ctx.close_dialog(dialog)
+    snapshot = ctx.merge_db_options.snapshot_for_run()
+    if not ctx.close_dialog(dialog):
+        return
+    ctx.run_started = True
     ctx.on_run_merge(
         merge_input,
         output,
@@ -569,4 +599,5 @@ def _merge_start_merge(ctx, dialog):
         patchouli_threshold_val,
         zh_en_val,
         lang_codes,
+        merge_db_snapshot=snapshot,
     )

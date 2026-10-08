@@ -16,8 +16,9 @@ import flet as ft
 
 from app.services_impl.pipelines.extract_service import open_output_folder
 from app.ui.design import C
-from app.ui.dialogs import close_overlay_dialog
+from app.ui.dialogs import close_overlay_dialog, present_dialog, set_dialog_feedback
 from app.ui.sync_text_field import SyncTextField
+from app.views.moddb.lm_db_options import LmDbOptions
 from translation_tool.utils.config_manager import load_config
 
 
@@ -47,7 +48,11 @@ def open_translate_dialog(
         file_picker=file_picker,
         on_start_translate=on_start_translate,
         show_snack_bar=show_snack_bar,
+        dialogs=[],
+        run_started=False,
     )
+    ctx.feedback = ft.Text("", size=12, color=C.GOLD, visible=False)
+    ctx.lm_db_options = LmDbOptions(page.update)
     dialog_width = _translate_init_state_and_fields(ctx, input_path, output_path)
     _translate_build_option_widgets(ctx)
     content = _translate_build_content(ctx)
@@ -73,9 +78,7 @@ def open_translate_dialog(
         ],
     )
 
-    ctx.page.overlay.append(dialog)
-    dialog.open = True
-    ctx.page.update()
+    present_dialog(ctx, dialog)
 
 
 def _translate_init_state_and_fields(ctx, input_path, output_path):
@@ -191,9 +194,12 @@ def _translate_build_content(ctx):
                 ]
             ),
             ft.Divider(),
+            ctx.lm_db_options.card,
+            ft.Divider(),
             ft.Text("執行選項", weight="bold", size=13),
             ctx.dry_run_switch,
             ctx.write_new_cache_switch,
+            ctx.feedback,
         ],
         spacing=10,
         tight=False,
@@ -202,23 +208,34 @@ def _translate_build_content(ctx):
 
 
 def _translate_close_dialog(ctx, dialog):
-    close_overlay_dialog(ctx.page, dialog)
+    return close_overlay_dialog(ctx.page, dialog)
 
 
 def _translate_start_translate(ctx, dialog):
+    if ctx.run_started or not dialog.open:
+        return
     input_dir = (ctx.translate_input_field.value or "").strip()
     output_dir = (ctx.translate_output_field.value or "").strip()
+    input_dir = input_dir or ctx.default_input
+    output_dir = output_dir or ctx.default_output
 
-    if input_dir and not os.path.isdir(input_dir):
-        ctx.show_snack_bar("⚠️ 翻譯目標資料夾不存在")
+    if not input_dir or not os.path.isdir(input_dir):
+        set_dialog_feedback(ctx.page, ctx.feedback, "⚠️ 翻譯目標資料夾不存在", C.GOLD)
+        return
+    if not output_dir:
+        set_dialog_feedback(ctx.page, ctx.feedback, "⚠️ 輸出目錄為必填欄位", C.GOLD)
         return
 
-    ctx.close_dialog(dialog)
+    snapshot = ctx.lm_db_options.snapshot_for_run()
+    if not ctx.close_dialog(dialog):
+        return
+    ctx.run_started = True
     ctx.on_start_translate(
-        input_dir=input_dir or ctx.default_input,
-        output_dir=output_dir or ctx.default_output,
+        input_dir=input_dir,
+        output_dir=output_dir,
         dry_run=ctx.dry_run_switch.value,
         write_new_cache=ctx.write_new_cache_switch.value,
+        lm_db_snapshot=snapshot,
     )
 
 
@@ -265,9 +282,15 @@ def _translate_browse_output_dir(ctx, e=None):
 
 
 def _translate_show_preview_result(ctx, dialog):
+    if not dialog.open:
+        return
     input_dir = (ctx.translate_input_field.value or "").strip() or ctx.default_input
     if not input_dir or not os.path.isdir(input_dir):
-        ctx.show_snack_bar("⚠️ 翻譯目標資料夾不存在")
+        set_dialog_feedback(ctx.page, ctx.feedback, "⚠️ 翻譯目標資料夾不存在", C.GOLD)
         return
-    ctx.show_snack_bar("🔍 預覽功能待實作")
-    ctx.close_dialog(dialog)
+    set_dialog_feedback(
+        ctx.page,
+        ctx.feedback,
+        "翻譯結果預覽尚未支援；目前設定已保留，請直接執行或取消。",
+        C.GOLD,
+    )

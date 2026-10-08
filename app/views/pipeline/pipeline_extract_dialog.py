@@ -23,7 +23,12 @@ from app.services_impl.pipelines.extract_service import (
 )
 from app.tasks.operation_registry import launch_page_operation
 from app.ui.design import C
-from app.ui.dialogs import close_overlay_dialog
+from app.ui.dialogs import (
+    close_overlay_dialog,
+    present_dialog,
+    present_page_dialog,
+    set_dialog_feedback,
+)
 from app.ui.safe_file_picker import ensure_output_dir
 from app.ui.sync_text_field import SyncTextField
 from app.views.extractor.extractor_state import PreviewState
@@ -59,7 +64,13 @@ def open_extract_dialog(
         on_run_extraction=on_run_extraction,
         lang_code_checks=lang_code_checks,
         show_snack_bar=show_snack_bar,
+        dialogs=[],
+        run_started=False,
+        preview_active=False,
+        preview_dialog=None,
+        preview_cancel_event=None,
     )
+    ctx.feedback = ft.Text("", size=12, color=C.GOLD, visible=False)
     dialog_width = _extract_init_state_and_fields(ctx, input_path, output_path)
     lang_codes_section = _extract_build_lang_codes_section(ctx)
     content = _extract_build_content(ctx, lang_codes_section)
@@ -85,9 +96,7 @@ def open_extract_dialog(
         ],
     )
 
-    ctx.page.overlay.append(dialog)
-    dialog.open = True
-    ctx.page.update()
+    present_dialog(ctx, dialog)
 
 
 def _extract_init_state_and_fields(ctx, input_path, output_path):
@@ -196,6 +205,7 @@ def _extract_build_content(ctx, lang_codes_section):
             ctx.radio_group,
             ft.Text("處理的語言代碼", weight="bold", size=13),
             lang_codes_section,
+            ctx.feedback,
         ],
         spacing=10,
         tight=False,
@@ -204,10 +214,17 @@ def _extract_build_content(ctx, lang_codes_section):
 
 
 def _extract_close_dialog(ctx, dialog):
-    close_overlay_dialog(ctx.page, dialog)
+    if ctx.preview_active:
+        if ctx.preview_cancel_event is not None:
+            ctx.preview_cancel_event.set()
+        if ctx.preview_dialog is not None:
+            close_overlay_dialog(ctx.page, ctx.preview_dialog)
+    return close_overlay_dialog(ctx.page, dialog)
 
 
 def _extract_start_extraction(ctx, dialog):
+    if ctx.run_started or not dialog.open:
+        return
     mods = (ctx.mods_field.value or "").strip()
     output = (ctx.output_field.value or "").strip()
     mode = ctx.radio_group.value
@@ -215,27 +232,29 @@ def _extract_start_extraction(ctx, dialog):
         mode = "dual"
 
     if not mods:
-        ctx.show_snack_bar("⚠️ Mod 來源為必填欄位")
+        set_dialog_feedback(ctx.page, ctx.feedback, "⚠️ Mod 來源為必填欄位", C.GOLD)
         return
     if not os.path.isdir(mods):
-        ctx.show_snack_bar("⚠️ Mod 來源資料夾不存在")
+        set_dialog_feedback(ctx.page, ctx.feedback, "⚠️ Mod 來源資料夾不存在", C.GOLD)
         return
     if not output:
-        ctx.show_snack_bar("⚠️ 輸出目錄為必填欄位")
+        set_dialog_feedback(ctx.page, ctx.feedback, "⚠️ 輸出目錄為必填欄位", C.GOLD)
         return
     output_error = ensure_output_dir(output)
     if output_error:
-        ctx.show_snack_bar(f"⚠️ {output_error}")
+        set_dialog_feedback(ctx.page, ctx.feedback, f"⚠️ {output_error}", C.GOLD)
         return
 
     selected_codes = [
         code for code, cb in ctx.lang_code_checks_local.items() if cb.value
     ]
     if ctx.lang_codes and not selected_codes:
-        ctx.show_snack_bar("⚠️ 請至少選擇一個語言代碼")
+        set_dialog_feedback(ctx.page, ctx.feedback, "⚠️ 請至少選擇一個語言代碼", C.GOLD)
         return
-    ctx.close_dialog(dialog)
+    if not ctx.close_dialog(dialog):
+        return
 
+    ctx.run_started = True
     for code in ctx.lang_codes:
         ctx.lang_code_checks[code] = ctx.lang_code_checks_local[code]
     ctx.on_run_extraction(mods, output, mode, lang_codes=selected_codes)
@@ -413,11 +432,11 @@ async def _extract_preview_poll(
     使用者取消（``cancel_event``）後立即結束輪詢，不再改動已關閉的對話框。
     """
     while not preview_state.done:
-        if cancel_event is not None and cancel_event.is_set():
-            return
         await asyncio.sleep(0.2)
-        if cancel_event is not None and cancel_event.is_set():
-            return
+        if not preview_dialog.open or (
+            cancel_event is not None and cancel_event.is_set()
+        ):
+            continue
         pct = int(preview_state.progress * 100)
         preview_dialog.content = ft.Container(
             content=ft.Text(
@@ -426,16 +445,24 @@ async def _extract_preview_poll(
             width=width,
         )
         ctx.page.update()
-    if cancel_event is not None and cancel_event.is_set():
+    ctx.preview_active = False
+    if not preview_dialog.open or (cancel_event is not None and cancel_event.is_set()):
         return
     _extract_preview_apply_final(ctx, preview_dialog, preview_state, mode, width)
 
 
 def _extract_show_preview_result(ctx, dialog):
+    if not dialog.open:
+        return
+    if ctx.preview_active:
+        set_dialog_feedback(
+            ctx.page, ctx.feedback, "預覽正在執行，請等待目前掃描結束。", C.GOLD
+        )
+        return
     preview_dialog_width = int(ctx.page.width * 0.6)
     mods = (ctx.mods_field.value or "").strip()
     if not mods or not os.path.isdir(mods):
-        ctx.show_snack_bar("⚠️ 請選擇有效的 Mod 來源")
+        set_dialog_feedback(ctx.page, ctx.feedback, "⚠️ 請選擇有效的 Mod 來源", C.GOLD)
         return
 
     mode = ctx.radio_group.value
@@ -445,11 +472,18 @@ def _extract_show_preview_result(ctx, dialog):
     selected_codes = [
         code for code, cb in ctx.lang_code_checks_local.items() if cb.value
     ]
+    _extract_launch_preview(ctx, mods, mode, selected_codes, preview_dialog_width)
 
+
+def _extract_launch_preview(ctx, mods, mode, selected_codes, preview_dialog_width):
+    """Reserve and present one cancellable preview operation."""
     preview_state = PreviewState()
     preview_state.total = 0
     preview_state.current = 0
     cancel_event = threading.Event()
+    ctx.preview_active = True
+    ctx.preview_cancel_event = cancel_event
+    set_dialog_feedback(ctx.page, ctx.feedback, "", C.GOLD)
 
     launched = launch_page_operation(
         ctx.page,
@@ -469,7 +503,10 @@ def _extract_show_preview_result(ctx, dialog):
         on_cancel=cancel_event.set,
     )
     if not launched:
-        ctx.show_snack_bar("應用程式正在關閉，無法啟動新任務")
+        ctx.preview_active = False
+        set_dialog_feedback(
+            ctx.page, ctx.feedback, "應用程式正在關閉，無法啟動預覽。", C.GOLD
+        )
         return
 
     preview_dialog = ft.AlertDialog(
@@ -489,9 +526,16 @@ def _extract_show_preview_result(ctx, dialog):
         ],
     )
 
-    ctx.page.overlay.append(preview_dialog)
-    preview_dialog.open = True
-    ctx.page.update()
+    ctx.preview_dialog = preview_dialog
+    original_dismiss = preview_dialog.on_dismiss
+
+    def on_preview_dismiss(event) -> None:
+        cancel_event.set()
+        if original_dismiss is not None:
+            original_dismiss(event)
+
+    preview_dialog.on_dismiss = on_preview_dismiss
+    present_page_dialog(ctx.page, preview_dialog)
 
     async def poll_preview():
         await _extract_preview_poll(

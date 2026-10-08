@@ -144,6 +144,71 @@ def test_db_hit_then_cache_then_ai_and_output_is_correct(run_env, tmp_path):
     assert book["pages"][0]["text"] == "書本譯文"  # Patchouli 也走資料庫
 
 
+def test_explicit_database_snapshot_survives_global_path_change(run_env, tmp_path):
+    """A/B 同版本譯文不同；任務啟動快照固定後，全域路徑改成 B 仍讀 A。"""
+    inp, database_a, seen, settings = run_env
+    _seed(database_a)
+    database_b = tmp_path / "other-mod.db"
+    db = TranslationDB(database_b)
+    db.ingest(
+        "1.21.1",
+        [
+            ScanItem(
+                KIND_LANG,
+                "foo",
+                "item.foo.db",
+                "From Database Text",
+                "資料庫 B 譯文",
+            ),
+            ScanItem(
+                KIND_PATCHOULI,
+                "foo",
+                BOOK_KEY,
+                "Book paragraph from database.",
+                "B 書本譯文",
+            ),
+        ],
+    )
+    db.close()
+    settings_a = DbSettings(
+        enabled=True,
+        path=str(database_a.resolve()),
+        version="1.21.1",
+    )
+
+    generator = lm_translator.translate_directory_generator(
+        str(inp),
+        str(tmp_path / "snapshot-output"),
+        use_translation_db=True,
+        translation_db_version="1.21.1",
+        translation_db_settings_snapshot=settings_a,
+    )
+    assert next(generator) == {"progress": 0.0}
+    # Settings can change after the operation starts; this run remains on A.
+    settings(path=str(database_b.resolve()))
+    list(generator)
+
+    output = tmp_path / "snapshot-output"
+    lang = json.loads(
+        (output / "assets" / "foo" / "lang" / "zh_tw.json").read_text(encoding="utf-8")
+    )
+    book = json.loads(
+        (
+            output
+            / "assets"
+            / "foo"
+            / "patchouli_books"
+            / "guide"
+            / "en_us"
+            / "entries"
+            / "intro.json"
+        ).read_text(encoding="utf-8")
+    )
+    assert lang["item.foo.db"] == "資料庫譯文"
+    assert book["pages"][0]["text"] == "書本譯文"
+    assert "item.foo.db" not in [path for batch in seen["ai_batches"] for path in batch]
+
+
 def test_results_are_written_back_without_overwriting(run_env, tmp_path):
     inp, db_path, _seen, _ = run_env
     _seed(db_path)

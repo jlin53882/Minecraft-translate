@@ -17,7 +17,7 @@ import flet as ft
 
 from app.services_impl.pipelines.extract_service import open_output_folder
 from app.ui.design import C
-from app.ui.dialogs import close_overlay_dialog
+from app.ui.dialogs import close_overlay_dialog, present_dialog, set_dialog_feedback
 from app.ui.sync_text_field import SyncTextField
 from translation_tool.utils.config_manager import load_config
 from translation_tool.utils.log_unit import log_warning
@@ -65,7 +65,10 @@ def open_bundle_dialog(
         file_picker=file_picker,
         on_start_bundle=on_start_bundle,
         show_snack_bar=show_snack_bar,
+        dialogs=[],
+        run_started=False,
     )
+    ctx.feedback = ft.Text("", size=12, color=C.GOLD, visible=False)
     dialog_width = _bundle_init_state_and_fields(ctx, input_path, output_path)
     version_search = _bundle_build_version_widgets(ctx)
     _bundle_build_extra_widgets(ctx)
@@ -92,9 +95,7 @@ def open_bundle_dialog(
         ],
     )
 
-    ctx.page.overlay.append(dialog)
-    dialog.open = True
-    ctx.page.update()
+    present_dialog(ctx, dialog)
 
 
 def _bundle_init_state_and_fields(ctx, input_path, output_path):
@@ -292,6 +293,7 @@ def _bundle_build_content(ctx, version_search):
             ft.Button(
                 "+ 新增資料夾", icon=ft.Icons.FOLDER_OPEN, on_click=ctx.add_extra_folder
             ),
+            ctx.feedback,
         ],
         spacing=10,
         tight=False,
@@ -331,33 +333,40 @@ def _bundle__toggle_version_expand(ctx, e=None):
 
 
 def _bundle_close_dialog(ctx, dialog):
-    close_overlay_dialog(ctx.page, dialog)
+    return close_overlay_dialog(ctx.page, dialog)
 
 
 def _bundle_start_bundle(ctx, dialog):
+    if ctx.run_started or not dialog.open:
+        return
     input_dir = (ctx.bundle_input_field.value or "").strip()
     output_zip = (ctx.bundle_output_zip_field.value or "").strip()
 
-    if input_dir and not os.path.isdir(input_dir):
-        ctx.show_snack_bar("⚠️ 輸入資料夾不存在")
+    input_dir = input_dir or ctx.default_input
+    if not input_dir or not os.path.isdir(input_dir):
+        set_dialog_feedback(ctx.page, ctx.feedback, "⚠️ 輸入資料夾不存在", C.GOLD)
         return
     if not output_zip:
-        ctx.show_snack_bar("⚠️ 輸出 ZIP 檔名不可空白")
+        set_dialog_feedback(ctx.page, ctx.feedback, "⚠️ 輸出 ZIP 檔名不可空白", C.GOLD)
         return
 
     pack_img = (ctx.pack_image_field.value or "").strip()
     if pack_img:
         ext = os.path.splitext(pack_img)[1].lower()
         if not os.path.isfile(pack_img):
-            ctx.show_snack_bar("⚠️ 封面圖片檔案不存在")
+            set_dialog_feedback(ctx.page, ctx.feedback, "⚠️ 封面圖片檔案不存在", C.GOLD)
             return
         if ext not in (".png", ".jpg", ".jpeg"):
-            ctx.show_snack_bar("⚠️ 封面圖片只支援 .png/.jpg")
+            set_dialog_feedback(
+                ctx.page, ctx.feedback, "⚠️ 封面圖片只支援 .png/.jpg", C.GOLD
+            )
             return
 
     version_info = ctx.version_data.get(ctx.selected_version or "", {})
 
-    ctx.close_dialog(dialog)
+    if not ctx.close_dialog(dialog):
+        return
+    ctx.run_started = True
     ctx.on_start_bundle(
         input_root_dir=input_dir or ctx.default_input,
         output_zip_path=output_zip or ctx.default_output_zip,
@@ -460,8 +469,15 @@ def _bundle__remove_extra_folder(ctx, path: str):
 
 
 def _bundle_show_preview_result(ctx, dialog):
+    if not dialog.open:
+        return
     input_dir = (ctx.bundle_input_field.value or "").strip() or ctx.default_input
     if not input_dir or not os.path.isdir(input_dir):
-        ctx.show_snack_bar("⚠️ 輸入資料夾不存在")
+        set_dialog_feedback(ctx.page, ctx.feedback, "⚠️ 輸入資料夾不存在", C.GOLD)
         return
-    ctx.show_snack_bar("🔍 預覽功能待實作")  # 保留對話框，避免丟掉使用者已填的設定
+    set_dialog_feedback(
+        ctx.page,
+        ctx.feedback,
+        "資源打包預覽尚未支援；目前設定已保留，請直接執行或取消。",
+        C.GOLD,
+    )

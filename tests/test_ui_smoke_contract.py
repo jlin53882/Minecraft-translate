@@ -9,6 +9,7 @@ import flet as ft
 import pytest
 
 from tools.ui_smoke import (
+    DIALOG_CLICK_STAGES,
     DIALOG_SMOKE_KEYS,
     DIALOG_WIZARD_STEP_KEYS,
     SMOKE_SCENARIOS,
@@ -64,10 +65,54 @@ def test_each_state_scenario_has_a_case_for_every_viewport_and_theme() -> None:
     themes = ("dark", "light")
     viewports = ((900, 700), (720, 900))
 
-    for scenario in SMOKE_SCENARIOS[2:]:
+    for scenario in SMOKE_SCENARIOS:
+        if scenario in {"views", "dialogs", "dialog-click-probe"}:
+            continue
         keys = _expected_case_keys(scenario, themes, viewports)
         assert len(keys) == len(themes) * len(viewports)
         assert all(key[0] == "state" for key in keys)
+
+
+def test_dialog_click_probe_requires_a_real_browser_case() -> None:
+    """實際點擊探針不應被誤歸類為單純截圖 state 情境。"""
+    assert _expected_case_keys("dialog-click-probe", ("light",), ((1360, 900),)) == {
+        ("dialog_click_probe", "light", "1360x900", "pipeline_extract")
+    }
+
+
+def test_dialog_click_probe_covers_all_standalone_and_wizard_actions() -> None:
+    """真實滑鼠探針涵蓋四個單步 Dialog 與 Wizard 全部導覽／執行路徑。"""
+    stages = {key for key, _, _ in DIALOG_CLICK_STAGES}
+
+    assert len(stages) == len(DIALOG_CLICK_STAGES)
+    assert {
+        "extract-cancel",
+        "extract-invalid-preview",
+        "extract-valid-preview",
+        "extract-invalid-confirm",
+        "extract-valid-confirm",
+        "merge-preview",
+        "merge-invalid-confirm",
+        "merge-valid-confirm",
+        "merge-cancel",
+        "translate-preview",
+        "translate-invalid-confirm",
+        "translate-valid-confirm",
+        "translate-cancel",
+        "bundle-preview",
+        "bundle-invalid-confirm",
+        "bundle-valid-confirm",
+        "bundle-cancel",
+        "wizard-cancel-step1",
+        "wizard-step1-next",
+        "wizard-step2-next",
+        "wizard-step3-next",
+        "wizard-invalid-confirm",
+        "wizard-step4-prev",
+        "wizard-step3-prev",
+        "wizard-step2-prev",
+        "wizard-valid-confirm",
+    } <= stages
 
 
 def test_viewport_parser_accepts_narrow_and_portrait_cases() -> None:
@@ -275,23 +320,29 @@ class _MixedDialogPage:
 
 
 @pytest.mark.parametrize("managed_count", (0, 1))
-def test_dialog_gallery_dismiss_keeps_overlay_mounted_until_transition_finishes(
+def test_dialog_gallery_dismiss_closes_only_top_owned_dialog(
     managed_count: int,
 ) -> None:
-    """關閉 overlay Dialog 時先送出 open=False，不提前移除 Flutter 控件。"""
+    """關閉只針對最上層 Dialog，不誤關其他頁面或仍開啟的 overlay。"""
     managed = [ft.AlertDialog(open=True) for _ in range(managed_count)]
     overlay_dialogs = [ft.AlertDialog(open=True), ft.AlertDialog(open=True)]
     page = _MixedDialogPage(managed, list(overlay_dialogs))
 
-    _dismiss_top_dialog(page)
+    _dismiss_top_dialog(page, managed)
 
-    assert all(dialog.open is False for dialog in managed)
-    assert all(dialog.open is False for dialog in overlay_dialogs)
+    if managed_count:
+        assert managed[-1].open is False
+        assert all(dialog.open for dialog in overlay_dialogs)
+    else:
+        assert all(dialog.open for dialog in managed)
+        assert overlay_dialogs[-1].open is False
+        assert overlay_dialogs[0].open is True
     assert page.overlay == list(overlay_dialogs)
     assert page.update_count == 1
     _remove_closed_overlay_dialogs(page)
-    assert page.overlay == []
-    assert page.update_count == 2
+    expected_overlay = overlay_dialogs if managed_count else overlay_dialogs[:1]
+    assert page.overlay == expected_overlay
+    assert page.update_count == (1 if managed_count else 2)
 
 
 def test_remove_closed_overlay_dialogs_keeps_open_dialogs_mounted() -> None:

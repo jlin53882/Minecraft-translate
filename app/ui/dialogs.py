@@ -1,55 +1,94 @@
-"""對話框的共用顯示／關閉流程（單一對話框與多步 Wizard 都用這裡）。"""
+"""Owned Flet dialog presentation and targeted dismissal helpers."""
+
+from __future__ import annotations
 
 import flet as ft
 
 
-def close_overlay_dialog(page: ft.Page, dialog: ft.AlertDialog) -> None:
-    """關閉並移除 overlay 內的對話框。
-
-    必須先把 ``open=False`` 送到前端（``page.update``），再從 overlay 移除；
-    直接移除會讓前端的 dialog route 留在畫面上（殘影並擋住整個頁面）。
-    只設 ``open=False`` 不移除則每次開啟都會多留一個已關閉的對話框在 overlay。
-    """
-    dialog.open = False
+def present_page_dialog(page: ft.Page, dialog: ft.DialogControl) -> bool:
+    """Present one native dialog, falling back to a mounted overlay on old Pages."""
+    show_dialog = getattr(page, "show_dialog", None)
+    if callable(show_dialog) and callable(getattr(page, "pop_dialog", None)):
+        show_dialog(dialog)
+        return True
+    page.overlay.append(dialog)
+    dialog.open = True
     page.update()
-    if dialog in page.overlay:
+    return False
+
+
+def close_page_dialog(page: ft.Page, dialog: ft.DialogControl) -> bool:
+    """Close exactly ``dialog`` without popping an unrelated topmost modal.
+
+    Flet's public ``pop_dialog()`` only closes whichever dialog is topmost. A
+    targeted ``open=False`` update lets Flet's ``show_dialog()`` dismissal hook
+    retire this specific stack entry; legacy overlay dialogs are removed only
+    after their closed state has been sent to the client.
+    """
+    if not getattr(dialog, "open", False):
+        return False
+
+    if dialog in getattr(page, "overlay", ()):
+        dialog.open = False
+        page.update()
         page.overlay.remove(dialog)
         page.update()
+    else:
+        # Flet's public pop_dialog() closes only the top item. Inspect the
+        # framework-owned stack first so an unrelated modal is never popped.
+        native_stack = getattr(page, "_dialogs", None)
+        controls = getattr(native_stack, "controls", None)
+        if controls is not None and dialog in controls:
+            top_open = next((item for item in reversed(controls) if item.open), None)
+            if top_open is dialog:
+                popped = page.pop_dialog()
+                if popped is dialog:
+                    return True
+            # A child/foreign modal can be above this control. Close only the
+            # owned target and leave it mounted through its dismiss animation;
+            # Flet's wrapped on_dismiss callback then removes this exact entry.
+            dialog.open = False
+            dialog.update()
+        else:
+            dialog.open = False
+            update = getattr(dialog, "update", None)
+            if callable(update):
+                try:
+                    update()
+                except RuntimeError:
+                    page.update()
+            else:
+                page.update()
+    return True
+
+
+def close_overlay_dialog(page: ft.Page, dialog: ft.DialogControl) -> bool:
+    """Compatibility name for targeted native-or-overlay close behavior."""
+    return close_page_dialog(page, dialog)
+
+
+def set_dialog_feedback(page: ft.Page, control: ft.Text, message: str, color) -> None:
+    """Show validation/action feedback inside its modal so it cannot hide behind it."""
+    control.value = message
+    control.visible = bool(message)
+    control.color = color
+    page.update()
 
 
 def dispose_dialogs(ctx) -> None:
-    """關閉並移除 ``ctx.dialogs`` 內的對話框（``ctx`` 需有 ``page``、``dialogs``、可選 ``uses_dialog_api``）。
-
-    必須先把 ``open=False`` 送到前端（page.update），再從 overlay 移除；
-    直接移除會讓前端的 dialog route 留在畫面上（殘影＋擋住整個頁面）。
-    """
-    for d in ctx.dialogs:
-        d.open = False
-    ctx.page.update()
-
-    removed = False
-    if getattr(ctx, "uses_dialog_api", False) and ctx.dialogs:
-        # page.pop_dialog() 會同步清理 Flet 內部的 dialog stack；若測試替身
-        # 仍把對話框放在 overlay，下面的相容移除則確保兩種環境結果一致。
-        ctx.page.pop_dialog()
-        removed = True
-    for d in ctx.dialogs:
-        if d in ctx.page.overlay:
-            ctx.page.overlay.remove(d)
-            removed = True
+    """Close the dialogs owned by ``ctx`` without touching dialogs above them."""
+    dialogs = tuple(getattr(ctx, "dialogs", ()))
+    if not dialogs:
+        return
+    for dialog in reversed(dialogs):
+        close_page_dialog(ctx.page, dialog)
     ctx.dialogs.clear()
-    if removed:
-        # 移除後也要再推一次：否則緊接著的 SnackBar／進度面板（輸入驗證失敗時）
-        # 會與「移除 overlay」擠在同一次更新，對話框遮罩殘留、提示被蓋住。
-        ctx.page.update()
 
 
-def present_dialog(ctx, dialog) -> None:
-    """使用 Flet 對話框生命週期 API 顯示一步 Wizard。"""
-    ctx.dialogs.append(dialog)
-    if getattr(ctx, "uses_dialog_api", False):
-        ctx.page.show_dialog(dialog)
-    else:
-        ctx.page.overlay.append(dialog)
-        dialog.open = True
-        ctx.page.update()
+def present_dialog(ctx, dialog: ft.DialogControl) -> None:
+    """Present and record one dialog owned by a view/dialog context."""
+    dialogs = getattr(ctx, "dialogs", None)
+    if dialogs is None:
+        ctx.dialogs = dialogs = []
+    dialogs.append(dialog)
+    ctx.uses_dialog_api = present_page_dialog(ctx.page, dialog)

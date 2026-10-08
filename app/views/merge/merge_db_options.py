@@ -35,14 +35,14 @@ class MergeDbRunSnapshot:
 class MergeDbOptions:
     """Merge-specific DB switch and version override, separate from shared pickers."""
 
-    def __init__(self, page_update, on_missing_database=None) -> None:
+    def __init__(self, page_update, on_missing_database=None, *, settings=None) -> None:
         self._page_update = page_update
         self._on_missing_database = on_missing_database
         self._switch_touched = False
         self._version_override: str | None = None
         self._stale_override: str | None = None
         self._database_missing = False
-        settings = load_db_settings()
+        settings = settings or load_db_settings()
         self._settings = settings
         self._database_versions: list[str] = []
         self._summary: dict | None = None
@@ -208,9 +208,9 @@ class MergeDbOptions:
             return "", source, f"{label} {target} 不存在於目前資料庫，本次略過補譯"
         return target, source, ""
 
-    def snapshot_for_run(self) -> MergeDbRunSnapshot:
+    def snapshot_for_run(self, global_settings=None) -> MergeDbRunSnapshot:
         """Resolve the effective target on the UI thread and freeze it for the worker."""
-        self._settings = load_db_settings()
+        self._settings = global_settings or load_db_settings()
         settings = self._settings
         self._refresh_database_state(settings)
         self._refresh_version_control()

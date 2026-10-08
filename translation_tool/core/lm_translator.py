@@ -10,6 +10,7 @@ import json as json_std
 import os
 import time
 from collections.abc import Callable, Generator
+from dataclasses import asdict, replace
 from pathlib import Path
 from typing import Any
 
@@ -24,6 +25,7 @@ from translation_tool.core.lm_translator_db import (
     DirectoryDbContext,
     directory_db,
     flush_write_back,
+    get_db_settings_snapshot,
     resolve_db_choice,
     split_db_hits,
 )
@@ -46,6 +48,7 @@ from translation_tool.core.translation_path_writer import (
     map_lang_output_path,
     set_by_path,
 )
+from translation_tool.translation_db import DbSettings
 from translation_tool.utils.app_paths import get_data_root
 from translation_tool.utils.cache_manager import (
     get_cache_dict_ref,
@@ -488,6 +491,7 @@ def _run_directory_translation(
     write_checkpoint: bool = True,
     db_ctx: DirectoryDbContext | None = None,
     db_choice: tuple[bool, str] = (False, ""),
+    db_settings_snapshot: DbSettings | None = None,
 ) -> tuple[Any, list[dict[str, Any]], list[dict[str, Any]], int]:
     """執行目錄翻譯 phase，集中 callback、輸出、checkpoint 與終態契約。"""
     _note_directory_checkpoint(
@@ -543,7 +547,15 @@ def _run_directory_translation(
             fingerprint=checkpoint_fingerprint,
             export_lang=export_lang,
             write_new_cache=write_new_cache,
-            translation_db={"enabled": db_choice[0], "version": db_choice[1]},
+            translation_db={
+                "enabled": db_choice[0],
+                "version": db_choice[1],
+                "settings": (
+                    asdict(db_settings_snapshot)
+                    if db_settings_snapshot is not None
+                    else None
+                ),
+            },
         )
 
     def on_progress(progress: float, message: str, _eta_sec: float) -> None:
@@ -613,6 +625,81 @@ def _scan_directory_files(root: Path) -> list[Path]:
     return files
 
 
+def _resolve_directory_db_settings(
+    use_translation_db: bool | None,
+    translation_db_version: str | None,
+    settings_snapshot: DbSettings | None,
+) -> tuple[tuple[bool, str], DbSettings]:
+    """Freeze the selected DB identity once for all phases of a directory run."""
+    source_settings = get_db_settings_snapshot(settings_snapshot)
+    db_choice = resolve_db_choice(
+        use_translation_db,
+        translation_db_version,
+        settings_snapshot=source_settings,
+    )
+    frozen_settings = replace(
+        source_settings,
+        enabled=db_choice[0],
+        version=db_choice[1],
+        path=str(source_settings.resolved_path().resolve()),
+    )
+    return db_choice, frozen_settings
+
+
+def _translate_directory_work(
+    *,
+    items_to_translate,
+    cache_hit_count,
+    file_cache,
+    root,
+    out_root,
+    export_lang,
+    should_cancel,
+    write_new_cache,
+    input_dir,
+    checkpoint_fingerprint,
+    db_ctx,
+    db_choice,
+    frozen_settings,
+):
+    """Run the API/cache/checkpoint phase after directory items are prepared."""
+    total = len(items_to_translate)
+    if total == 0:
+        clear_checkpoint()
+        log_info("🎉 所有項目皆已從 Cache 恢復，無需翻譯。")
+        yield {"progress": 1.0, "log": "🎉 所有項目皆已從 Cache 恢復，無需翻譯。"}
+        return
+
+    cache_saving = _cache_saving_enabled()
+    result, pending_events, _translation_log, processed = _run_directory_translation(
+        remaining=items_to_translate,
+        file_cache=file_cache,
+        root=root,
+        out_root=out_root,
+        export_lang=export_lang,
+        should_cancel=should_cancel,
+        write_new_cache=write_new_cache,
+        input_dir=input_dir,
+        items_to_translate=items_to_translate,
+        cache_hit_count=cache_hit_count,
+        checkpoint_fingerprint=checkpoint_fingerprint,
+        total=total,
+        write_checkpoint=cache_saving,
+        db_ctx=db_ctx,
+        db_choice=db_choice,
+        db_settings_snapshot=frozen_settings,
+    )
+    if pending_events:
+        yield from pending_events
+
+    final_message = _directory_final_message(result.status, processed, total)
+    log_info(final_message)
+    yield {
+        "progress": 1.0 if processed >= total else processed / total,
+        "log": final_message,
+    }
+
+
 def _split_db_cache(
     all_items: list[dict[str, Any]],
     db_ctx: DirectoryDbContext | None,
@@ -641,6 +728,7 @@ def translate_directory_generator(
     should_cancel: Callable[[], bool] | None = None,
     use_translation_db: bool | None = None,
     translation_db_version: str | None = None,
+    translation_db_settings_snapshot: DbSettings | None = None,
 ) -> Generator[dict[str, Any], None, None]:
     """編排目錄翻譯各 phase；實際工作由 phase helper 負責。
 
@@ -659,8 +747,17 @@ def translate_directory_generator(
     yield {"progress": 0.0}
 
     # 資料庫選項（設定為「下次任務才套用」）整個任務只解析一次：開啟資料庫、寫回、checkpoint 共用
-    db_choice = resolve_db_choice(use_translation_db, translation_db_version)
-    with directory_db(root, use_db=db_choice[0], version=db_choice[1]) as db_ctx:
+    db_choice, frozen_settings = _resolve_directory_db_settings(
+        use_translation_db,
+        translation_db_version,
+        translation_db_settings_snapshot,
+    )
+    with directory_db(
+        root,
+        use_db=db_choice[0],
+        version=db_choice[1],
+        settings_snapshot=frozen_settings,
+    ) as db_ctx:
         files = _scan_directory_files(root)
         yield {"progress": 0.0}
         if not files:
@@ -705,39 +802,18 @@ def translate_directory_generator(
             yield {"progress": 1.0}
             return
 
-        total = len(items_to_translate)
-        if total == 0:
-            clear_checkpoint()
-            log_info("🎉 所有項目皆已從 Cache 恢復，無需翻譯。")
-            yield {"progress": 1.0, "log": "🎉 所有項目皆已從 Cache 恢復，無需翻譯。"}
-            return
-
-        cache_saving = _cache_saving_enabled()
-        result, pending_events, _translation_log, processed = (
-            _run_directory_translation(
-                remaining=items_to_translate,
-                file_cache=file_cache,
-                root=root,
-                out_root=out_root,
-                export_lang=export_lang,
-                should_cancel=should_cancel,
-                write_new_cache=write_new_cache,
-                input_dir=input_dir,
-                items_to_translate=items_to_translate,
-                cache_hit_count=len(cached_items),
-                checkpoint_fingerprint=checkpoint_fingerprint,
-                total=total,
-                write_checkpoint=cache_saving,
-                db_ctx=db_ctx,
-                db_choice=db_choice,
-            )
+        yield from _translate_directory_work(
+            items_to_translate=items_to_translate,
+            cache_hit_count=len(cached_items),
+            file_cache=file_cache,
+            root=root,
+            out_root=out_root,
+            export_lang=export_lang,
+            should_cancel=should_cancel,
+            write_new_cache=write_new_cache,
+            input_dir=input_dir,
+            checkpoint_fingerprint=checkpoint_fingerprint,
+            db_ctx=db_ctx,
+            db_choice=db_choice,
+            frozen_settings=frozen_settings,
         )
-        if pending_events:
-            yield from pending_events
-
-        final_message = _directory_final_message(result.status, processed, total)
-        log_info(final_message)
-        yield {
-            "progress": 1.0 if processed >= total else processed / total,
-            "log": final_message,
-        }

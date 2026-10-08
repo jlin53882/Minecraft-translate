@@ -7,7 +7,9 @@ import orjson
 from translation_tool.core import lm_translator
 
 
-def test_translate_directory_generator_dry_run_writes_preview_files(tmp_path: Path, monkeypatch) -> None:
+def test_translate_directory_generator_dry_run_writes_preview_files(
+    tmp_path: Path, monkeypatch
+) -> None:
     input_root = tmp_path / "input"
     out_root = tmp_path / "out"
 
@@ -50,6 +52,7 @@ def test_translate_directory_generator_dry_run_writes_preview_files(tmp_path: Pa
             str(input_root),
             str(out_root),
             dry_run=True,
+            use_translation_db=False,
         )
     )
 

@@ -143,6 +143,7 @@ class PipelineView(PipelineWidgetsMixin, ft.Column):
         patchouli_threshold: float,
         zh_en_threshold: int,
         lang_codes: list[str],
+        merge_db_snapshot=None,
     ):
         """執行語系比對（背景執行）。"""
         self._start_single_step(
@@ -158,11 +159,17 @@ class PipelineView(PipelineWidgetsMixin, ft.Column):
                 patchouli_skip=patchouli_skip,
                 patchouli_threshold=patchouli_threshold,
                 zh_en_threshold=zh_en_threshold,
+                merge_db_snapshot=merge_db_snapshot,
             ),
         )
 
     def _run_translate(
-        self, input_dir: str, output_dir: str, dry_run: bool, write_new_cache: bool
+        self,
+        input_dir: str,
+        output_dir: str,
+        dry_run: bool,
+        write_new_cache: bool,
+        lm_db_snapshot=None,
     ):
         """執行啟動翻譯（背景執行）。"""
         self._start_single_step(
@@ -174,6 +181,7 @@ class PipelineView(PipelineWidgetsMixin, ft.Column):
                 output_dir,
                 dry_run=dry_run,
                 write_new_cache=write_new_cache,
+                lm_db_snapshot=lm_db_snapshot,
             ),
         )
 
@@ -303,7 +311,7 @@ class PipelineView(PipelineWidgetsMixin, ft.Column):
     def _on_one_click_execute(self, config: dict):
         prepared = self._prepare_one_click(config)
         if prepared is None:
-            return
+            return False
         cfg, mode, lang_codes, merge_options = prepared
 
         self._show_progress_panel()
@@ -313,6 +321,7 @@ class PipelineView(PipelineWidgetsMixin, ft.Column):
             config, cfg, mode, lang_codes, merge_options
         )
         self.runner.start_sequence(steps, self._end_run)
+        return True
 
     def _prepare_one_click(self, config: dict):
         """檢查一鍵製作的輸入；通過時回傳 (cfg, mode, lang_codes, merge_options)，否則顯示提示並回傳 None。"""
@@ -334,14 +343,21 @@ class PipelineView(PipelineWidgetsMixin, ft.Column):
             return None
 
         cfg = PipelineConfig(input_dir, output_dir)
+        merge_snapshot = config.get("merge_db_snapshot")
         merge_options = {
             "output_dir": cfg.merge_output_dir,
             "process_zh_cn": config.get("process_zh_cn", True),
             "patchouli_skip": config.get("patchouli_skip", False),
             "patchouli_threshold": config.get("patchouli_threshold", 0.5),
             "zh_en_threshold": config.get("zh_en_threshold", 2),
+            "use_translation_db": (
+                merge_snapshot.use_db if merge_snapshot is not None else None
+            ),
             "translation_db_version": (
-                (config.get("translation_db_version") or "").strip() or None
+                merge_snapshot.version if merge_snapshot is not None else None
+            ),
+            "translation_db_settings_snapshot": (
+                merge_snapshot.database_settings if merge_snapshot is not None else None
             ),
         }
         return cfg, mode, lang_codes, merge_options

@@ -144,7 +144,6 @@ def test_open_shows_modal_dialog_with_prefilled_state(env):
     dialog = env.open()
     assert dialog.open is True and dialog.modal is True
     assert dialog in env.page.overlay
-    assert env.page.updated >= 1
     assert dialog.content.width == 600  # page.width * 0.6
     assert _find(dialog, ft.TextField, label="Mod 來源").value == str(env.mods)
     assert _find(dialog, ft.TextField, label="輸出目錄").value == str(env.out)
@@ -216,7 +215,8 @@ def test_missing_output_dir_is_created_instead_of_rejected(env):
 def test_confirm_validation_blocks_run_and_keeps_dialog_open(env, setup, message):
     dialog = env.open(**setup(env))
     _button(dialog, "確定執行").on_click(None)
-    assert env.snacks == [message]
+    assert message in _texts(dialog)
+    assert env.snacks == []
     assert env.runs == []
     assert dialog.open is True
     assert env.checks == {}
@@ -225,7 +225,7 @@ def test_confirm_validation_blocks_run_and_keeps_dialog_open(env, setup, message
 def test_whitespace_only_mods_is_treated_as_missing(env):
     dialog = env.open(input_path="   ")
     _button(dialog, "確定執行").on_click(None)
-    assert env.snacks == ["⚠️ Mod 來源為必填欄位"]
+    assert "⚠️ Mod 來源為必填欄位" in _texts(dialog)
 
 
 # ---------- 確定執行 ----------
@@ -337,8 +337,19 @@ def test_browse_opens_existing_dir_and_reports_bad_paths(env, monkeypatch):
 def test_preview_without_valid_mods_shows_snack_and_no_dialog(env):
     dialog = env.open(input_path=str(env.mods / "missing"))
     _button(dialog, "預覽結果").on_click(None)
-    assert env.snacks == ["⚠️ 請選擇有效的 Mod 來源"]
+    assert "⚠️ 請選擇有效的 Mod 來源" in _texts(dialog)
+    assert env.snacks == []
     assert env.threads == [] and env.page.overlay == [dialog]
+
+
+def test_stale_preview_click_after_parent_close_does_not_launch_worker(env):
+    dialog = env.open()
+    dialog.open = False
+
+    _button(dialog, "預覽結果").on_click(None)
+
+    assert env.threads == []
+    assert env.page._tasks == []
 
 
 def test_preview_start_shows_scanning_dialog_and_starts_daemon_worker(env):
@@ -502,7 +513,7 @@ def test_start_requires_at_least_one_language_code(env):
     for cb in (c for c in _walk(dialog) if isinstance(c, ft.Checkbox)):
         cb.value = False
     _button(dialog, "確定執行").on_click(None)
-    assert "⚠️ 請至少選擇一個語言代碼" in env.snacks
+    assert "⚠️ 請至少選擇一個語言代碼" in _texts(dialog)
     assert env.runs == []
     assert dialog.open is True
 
@@ -585,6 +596,9 @@ def test_repeated_open_cancel_reopen_does_not_accumulate_overlay_or_tasks(env):
         pd = env.page.overlay[-1]
         previews.append(pd)
         _button_in(pd, "取消").on_click(None)
+        # 取消是 request，不代表 scan worker 已退出；排空後才可重新預覽。
+        env.threads[-1].target()
+        _drain(env.page)
     assert env.page.overlay == [dialog]  # 沒有殘留的預覽對話框
     # 排入的 poller 全部立刻結束（取消後不再輪詢），不留下永遠不結束的 task
     _drain(env.page)
@@ -598,6 +612,14 @@ def test_reopen_after_cancel_is_not_affected_by_the_old_scan(env):
     _button(dialog, "預覽結果").on_click(None)
     first = env.page.overlay[-1]
     _button_in(first, "取消").on_click(None)
+
+    # worker 尚未完成時，新的 preview request 必須被拒絕，避免共用 state 競態。
+    _button(dialog, "預覽結果").on_click(None)
+    assert env.page.overlay == [dialog]
+    assert "預覽正在執行，請等待目前掃描結束。" in _texts(dialog)
+
+    env.threads[-1].target()
+    _drain(env.page)
 
     _button(dialog, "預覽結果").on_click(None)
     second = env.page.overlay[-1]

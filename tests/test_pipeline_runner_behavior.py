@@ -235,6 +235,54 @@ def test_pipeline_admission_rejection_does_not_run_service(loop_page):
     assert any("未啟動新工作" in line for line in panel.logs)
 
 
+def test_lm_sources_share_the_same_database_settings_snapshot(tmp_path, monkeypatch):
+    from app.services_impl.moddb_service import DbSettings
+    from app.views.moddb.lm_db_options import LmDbRunSnapshot
+
+    monkeypatch.setattr("app.views.pipeline.pipeline_config.load_config", dict)
+    cfg = PipelineConfig(str(tmp_path / "mods"), str(tmp_path / "output"))
+    sources = cfg.translate_input_dirs
+    for source in sources:
+        path = tmp_path / source
+        path.mkdir(parents=True, exist_ok=True)
+        (path / "entry.json").write_text("{}", encoding="utf-8")
+
+    database_snapshot = DbSettings(
+        enabled=True,
+        merge_enabled=True,
+        path=str((tmp_path / "database-a.db").resolve()),
+        version="1.21.1",
+    )
+    lm_snapshot = LmDbRunSnapshot(
+        use_db=True,
+        version="1.21.1",
+        source="global",
+        warning="",
+        database_settings=database_snapshot,
+    )
+    calls = []
+    actions = PipelineActions(
+        PipelineServices(translate=lambda **kwargs: calls.append(kwargs))
+    )
+
+    actions._step_translate(
+        {
+            "lm_db_snapshot": lm_snapshot,
+            "dry_run": False,
+            "write_new_cache": True,
+        },
+        cfg,
+        TaskSession(name="translate"),
+    )
+
+    assert [call["input_dir"] for call in calls] == sources
+    assert all(call["use_translation_db"] is True for call in calls)
+    assert all(call["translation_db_version"] == "1.21.1" for call in calls)
+    assert all(
+        call["translation_db_settings_snapshot"] is database_snapshot for call in calls
+    )
+
+
 @pytest.mark.parametrize("outcome", ["handled_error", "unexpected_exception", "cancel"])
 def test_composite_parent_records_terminal_failure_or_cancel(
     loop_page, monkeypatch, outcome

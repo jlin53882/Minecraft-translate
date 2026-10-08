@@ -22,9 +22,11 @@ from app.services_impl.moddb_service import load_db_settings
 from app.ui.design import C
 from app.ui.dialogs import dispose_dialogs, present_dialog
 from app.ui.sync_text_field import SyncTextField
+from app.views.merge.merge_db_options import MergeDbOptions
+from app.views.moddb.lm_db_options import LmDbOptions
 from app.views.pipeline.pipeline_config import normalize_extract_mode
-from app.views.pipeline.pipeline_db_version_field import (
-    build_pipeline_db_version_field,
+from app.views.pipeline.pipeline_one_click_bundle_widgets import (
+    build_step4_version_widgets,
 )
 from translation_tool.utils.config_manager import load_config
 from translation_tool.utils.log_unit import log_warning
@@ -111,36 +113,43 @@ def open_one_click_dialog(
     _one_click_init_state(
         ctx, lang_merger_cfg, output_zip_name, translate_output_subfolder
     )
+    _one_click_bind_context(ctx)
 
-    ctx.rebuild_ui = functools.partial(_one_click_rebuild_ui, ctx)
+    initial_dialog = ctx.build_dialog(1)
+    ctx.active_step_dialog = initial_dialog
+    present_dialog(ctx, initial_dialog)
 
-    ctx.close_all = functools.partial(_one_click_close_all, ctx)
 
-    ctx._build_step_content = functools.partial(_one_click__build_step_content, ctx)
-
-    ctx._build_step1 = functools.partial(_one_click__build_step1, ctx)
-
-    ctx._build_step2 = functools.partial(_one_click__build_step2, ctx)
-
-    ctx._build_step3 = functools.partial(_one_click__build_step3, ctx)
-
-    ctx._build_step4 = functools.partial(_one_click__build_step4, ctx)
-
+def _one_click_bind_context(ctx):
+    """Bind the database controls and stateful callbacks for one wizard instance."""
+    ctx.global_db_settings = load_db_settings()
+    ctx.merge_db_options = MergeDbOptions(
+        ctx.page.update, settings=ctx.global_db_settings
+    )
+    ctx.lm_db_options = LmDbOptions(ctx.page.update, settings=ctx.global_db_settings)
+    ctx.closed = False
+    ctx.executed = False
+    ctx.active_step_dialog = None
+    ctx.feedback = ft.Text("", size=12, color=C.GOLD, visible=False)
+    callbacks = {
+        "rebuild_ui": _one_click_rebuild_ui,
+        "close_all": _one_click_close_all,
+        "_build_step_content": _one_click__build_step_content,
+        "_build_step1": _one_click__build_step1,
+        "_build_step2": _one_click__build_step2,
+        "_build_step3": _one_click__build_step3,
+        "_build_step4": _one_click__build_step4,
+        "build_dialog": _one_click_build_dialog,
+        "_go_prev": _one_click__go_prev,
+        "_go_next": _one_click__go_next,
+        "_do_execute": _one_click__do_execute,
+    }
+    for name, callback in callbacks.items():
+        setattr(ctx, name, functools.partial(callback, ctx))
     ctx.dialog_width = int(ctx.page.width * 0.6)
-
     ctx.step_label = ft.Text(
         f"{ctx.state['step']}/4", size=12, color=C.MUTED, weight=ft.FontWeight.W_500
     )
-
-    ctx.build_dialog = functools.partial(_one_click_build_dialog, ctx)
-
-    ctx._go_prev = functools.partial(_one_click__go_prev, ctx)
-
-    ctx._go_next = functools.partial(_one_click__go_next, ctx)
-
-    ctx._do_execute = functools.partial(_one_click__do_execute, ctx)
-
-    present_dialog(ctx, ctx.build_dialog(1))
 
 
 def _one_click_init_config_defaults(ctx):
@@ -185,7 +194,6 @@ def _one_click_init_state(
         ),
         "patchouli_threshold": ctx.patchouli_threshold_default,
         "zh_en_threshold": ctx.zh_en_threshold_default,
-        "translation_db_version": load_db_settings().version,
         "dry_run": False,
         "write_new_cache": True,
         "description": "",
@@ -213,6 +221,10 @@ def _one_click_init_state(
 
 
 def _one_click_rebuild_ui(ctx):
+    if ctx.closed:
+        return
+    # Clear ownership before requesting the old native dialog's asynchronous dismiss event.
+    ctx.active_step_dialog = None
     dispose_dialogs(ctx)
 
     step = ctx.state["step"]
@@ -220,10 +232,14 @@ def _one_click_rebuild_ui(ctx):
     ctx.step_label.value = f"{step}/4"
 
     dlg = ctx.build_dialog(step)
+    ctx.active_step_dialog = dlg
     present_dialog(ctx, dlg)
 
 
 def _one_click_close_all(ctx):
+    if ctx.closed:
+        return
+    ctx.closed = True
     dispose_dialogs(ctx)
     ctx.page.update()
 
@@ -291,12 +307,9 @@ def _one_click__build_step1(ctx):
 
 
 def _one_click__build_step2(ctx):
-    (
-        patchouli_skip_cb,
-        patchouli_thresh_field,
-        zh_en_field,
-        target_version_field,
-    ) = _one_click_step2_widgets(ctx)
+    patchouli_skip_cb, patchouli_thresh_field, zh_en_field = _one_click_step2_widgets(
+        ctx
+    )
 
     def on_only_lang(e):
         ctx.state["only_lang"] = e.control.value
@@ -325,13 +338,12 @@ def _one_click__build_step2(ctx):
                 on_change=on_process_zh_cn,
             ),
             ft.Divider(),
-            ft.Text("Mod 資料庫補譯目標版本", weight="bold", size=13),
-            target_version_field,
             ft.Text(
-                "可從資料庫版本中選擇，也可以手動輸入；留空時沿用設定。",
+                "步驟 2 合併與步驟 3 LM 各自有資料庫開關；初始皆沿用同一份全域設定，頁面覆寫互相獨立。",
                 size=11,
                 color=C.MUTED,
             ),
+            ctx.merge_db_options.card,
             ft.Divider(),
             ft.Text("zh 英文含量閾值", weight=ft.FontWeight.W_500, size=12),
             zh_en_field,
@@ -356,10 +368,7 @@ def _one_click__build_step2(ctx):
 
 
 def _one_click_step2_widgets(ctx):
-    """步驟 2：合併、資料庫版本與 Patchouli 選項。"""
-    target_version_field = build_pipeline_db_version_field(
-        ctx.state, ctx.show_snack_bar
-    )
+    """步驟 2：合併與 Patchouli 選項。"""
 
     patchouli_skip_cb = ft.Switch(
         label="允許 zh_cn 觸發跳過 en_us",
@@ -400,7 +409,7 @@ def _one_click_step2_widgets(ctx):
         text_align=ft.TextAlign.CENTER,
         hint_text="空白用預設值",
     )
-    return patchouli_skip_cb, patchouli_thresh_field, zh_en_field, target_version_field
+    return patchouli_skip_cb, patchouli_thresh_field, zh_en_field
 
 
 def _one_click__build_step3(ctx):
@@ -468,6 +477,13 @@ def _one_click__build_step3(ctx):
                 color=C.MUTED,
             ),
             ft.Divider(),
+            ft.Text(
+                "步驟 3 LM 使用獨立快照；若步驟 2 有頁面覆寫，這裡不會暗中跟隨。",
+                size=11,
+                color=C.MUTED,
+            ),
+            ctx.lm_db_options.card,
+            ft.Divider(),
             ft.Text("執行選項", weight="bold", size=13),
             dry_run_sw,
             write_cache_sw,
@@ -487,7 +503,7 @@ def _one_click__build_step4(ctx):
         version_dropdown,
         version_toggle_label,
         zip_output_field,
-    ) = _one_click_step4_version_widgets(ctx)
+    ) = build_step4_version_widgets(ctx, _load_version_data())
 
     def _refresh_extra():
         extra_view.controls.clear()
@@ -617,107 +633,6 @@ def _one_click_clear_pack_image(ctx, field) -> None:
     ctx.page.update()
 
 
-def _one_click_step4_version_widgets(ctx):
-    """步驟 4：輸出、版本與額外資料夾控制項（版本切換使用 nonlocal，必須同處定義）。"""
-
-    def on_description(e):
-        ctx.state["description"] = e.control.value
-
-    def on_zip_output(e):
-        ctx.state["zip_output"] = e.control.value
-
-    bundle_input_field = SyncTextField(
-        read_only=True,  # 只顯示：實際打包來源由流程自動決定（見 PipelineConfig.bundle_sources）
-        label="輸入來源",
-        hint_text="自動帶入翻譯完成後的輸出",
-        value=ctx.state["bundle_input"],
-        expand=True,
-        border_color=C.ENCH,
-    )
-    zip_output_field = SyncTextField(
-        on_change=on_zip_output,
-        label="輸出 ZIP 檔案",
-        value=ctx.state["zip_output"],
-        expand=True,
-        border_color=C.ENCH,
-        path_input=True,
-    )
-
-    desc_field = SyncTextField(
-        on_change=on_description,
-        label="檔案敘述",
-        hint_text="直接輸入文字，或使用 § 顏色代碼",
-        value=ctx.state["description"],
-        expand=True,
-        border_color=C.ENCH,
-    )
-    pack_image_field = SyncTextField(
-        label="封面圖片（可留空）",
-        value=ctx.state["pack_image"] or "",
-        expand=True,
-        border_color=C.ENCH,
-        read_only=True,
-    )
-
-    version_data = _load_version_data()
-    version_toggle_label = ft.Text(
-        ctx.state["version"] or "點擊選擇版本", expand=True, size=12, color=C.MUTED
-    )
-    version_expanded = False
-    version_list = ft.ListView(expand=True, height=140, spacing=4)
-
-    def _refresh_versions(search=""):
-        version_list.controls.clear()
-        filtered = [v for v in version_data if search.lower() in v.lower()]
-        if not filtered:
-            version_list.controls.append(ft.Text("無可用版本", size=12, color=C.DIM))
-        for v in filtered:
-            version_list.controls.append(
-                ft.Container(
-                    content=ft.Text(v, size=13),
-                    padding=8,
-                    border=ft.Border.all(1, C.DIM),
-                    border_radius=6,
-                    on_click=lambda e, ver=v: _select_version(ver),
-                )
-            )
-
-    def _select_version(v: str):
-        ctx.state["version"] = v
-        version_toggle_label.value = v
-        version_toggle_label.color = None
-        ctx.page.update()
-
-    _refresh_versions()
-
-    def _toggle_version(e=None):
-        nonlocal version_expanded
-        version_expanded = not version_expanded
-        version_dropdown.visible = version_expanded
-        ctx.page.update()
-
-    version_dropdown = ft.Container(
-        content=version_list,
-        height=140,
-        border=ft.Border.all(1, C.DIM),
-        border_radius=6,
-        padding=4,
-        visible=False,
-    )
-
-    extra_view = ft.ListView(height=60, spacing=2)
-    return (
-        _toggle_version,
-        bundle_input_field,
-        desc_field,
-        extra_view,
-        pack_image_field,
-        version_dropdown,
-        version_toggle_label,
-        zip_output_field,
-    )
-
-
 def _one_click_build_dialog(ctx, step: int):
     titles = {
         1: "📦 抽取資源設定",
@@ -729,9 +644,9 @@ def _one_click_build_dialog(ctx, step: int):
     actions = []
     if step > 1:
         # Web 版使用標準 Button，避免 AlertDialog 內的 TextButton 事件未送達。
-        actions.append(ft.Button("上一個", on_click=lambda e: ctx._go_prev()))
+        actions.append(ft.Button("上一個", on_click=lambda e, s=step: ctx._go_prev(s)))
     if step < 4:
-        actions.append(ft.Button("下一個", on_click=lambda e: ctx._go_next()))
+        actions.append(ft.Button("下一個", on_click=lambda e, s=step: ctx._go_next(s)))
     else:
         actions.append(
             ft.Button(
@@ -739,7 +654,7 @@ def _one_click_build_dialog(ctx, step: int):
                 icon=ft.Icons.CHECK,
                 bgcolor=C.EM,
                 color=C.ON_EM,
-                on_click=lambda e: ctx._do_execute(),
+                on_click=lambda e, s=step: ctx._do_execute(s),
             )
         )
     actions.append(ft.Button("取消", on_click=lambda e: ctx.close_all()))
@@ -753,31 +668,72 @@ def _one_click_build_dialog(ctx, step: int):
             ]
         ),
         content=ft.Container(
-            content=ctx._build_step_content(step), width=ctx.dialog_width
+            content=ft.Column(
+                [ctx._build_step_content(step), ctx.feedback], spacing=8, tight=False
+            ),
+            width=ctx.dialog_width,
         ),
         actions=actions,
     )
+    dlg.on_dismiss = lambda _event: _one_click__on_dialog_dismiss(ctx, dlg)
     return dlg
 
 
-def _one_click__go_prev(ctx):
+def _one_click__on_dialog_dismiss(ctx, dialog):
+    """Retire the wizard only when its currently owned step is dismissed externally."""
+    if ctx.active_step_dialog is not dialog or ctx.closed:
+        return
+    ctx.closed = True
+    ctx.active_step_dialog = None
+    if dialog in ctx.dialogs:
+        ctx.dialogs.remove(dialog)
+
+
+def _one_click__go_prev(ctx, expected_step=None):
+    if (
+        ctx.closed
+        or not getattr(ctx.active_step_dialog, "open", False)
+        or (expected_step is not None and ctx.state["step"] != expected_step)
+    ):
+        return
     if ctx.state["step"] > 1:
         ctx.state["step"] -= 1
         ctx.rebuild_ui()
 
 
-def _one_click__go_next(ctx):
+def _one_click__go_next(ctx, expected_step=None):
+    if (
+        ctx.closed
+        or not getattr(ctx.active_step_dialog, "open", False)
+        or (expected_step is not None and ctx.state["step"] != expected_step)
+    ):
+        return
     if ctx.state["step"] < 4:
         ctx.state["step"] += 1
         ctx.rebuild_ui()
 
 
-def _one_click__do_execute(ctx):
-    ctx.close_all()
+def _one_click__do_execute(ctx, expected_step=4):
+    if (
+        ctx.closed
+        or ctx.executed
+        or ctx.state["step"] != expected_step
+        or not getattr(ctx.active_step_dialog, "open", False)
+    ):
+        return
+    lang_codes = [code for code, enabled in ctx.state["lang_codes"].items() if enabled]
+    if not lang_codes:
+        ctx.feedback.value = "請至少勾選一個語言代碼，修正後再執行。"
+        ctx.feedback.visible = True
+        ctx.page.update()
+        return
+    global_settings = load_db_settings()
+    merge_db_snapshot = ctx.merge_db_options.snapshot_for_run(global_settings)
+    lm_db_snapshot = ctx.lm_db_options.snapshot_for_run(global_settings)
     version_info = _load_version_data().get(ctx.state["version"], {})
     config = {
         "mode": normalize_extract_mode(ctx.state["mode"]),
-        "lang_codes": [code for code, v in ctx.state["lang_codes"].items() if v],
+        "lang_codes": lang_codes,
         "only_lang": ctx.state["only_lang"],
         "process_zh_cn": ctx.state["process_zh_cn"],
         "patchouli_skip": ctx.state["patchouli_skip"],
@@ -787,7 +743,8 @@ def _one_click__do_execute(ctx):
         "write_new_cache": ctx.state["write_new_cache"],
         "description": ctx.state["description"],
         "version": ctx.state["version"],
-        "translation_db_version": ctx.state["translation_db_version"],
+        "merge_db_snapshot": merge_db_snapshot,
+        "lm_db_snapshot": lm_db_snapshot,
         "min_format": version_info.get("min_format"),
         "max_format": version_info.get("max_format"),
         "pack_image": ctx.state["pack_image"],
@@ -795,4 +752,11 @@ def _one_click__do_execute(ctx):
         "zip_output": ctx.state["zip_output"],
         "merge_input": ctx.input_path,
     }
-    ctx.on_execute(config)
+    result = ctx.on_execute(config)
+    if result is False:
+        ctx.feedback.value = "設定驗證未通過；請修正必要欄位後再執行。"
+        ctx.feedback.visible = True
+        ctx.page.update()
+        return
+    ctx.executed = True
+    ctx.close_all()

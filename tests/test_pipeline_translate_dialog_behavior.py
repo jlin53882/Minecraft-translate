@@ -42,6 +42,10 @@ def _switch(dialog, prefix):
     raise AssertionError(prefix)
 
 
+def _texts(control):
+    return [c.value for c in _walk(control) if isinstance(c, ft.Text) and c.value]
+
+
 def _drain(page):
     tasks, page._tasks = page._tasks, []
     for coro, args in tasks:
@@ -138,14 +142,19 @@ def test_start_passes_exact_kwargs_and_closes(env):
     _button(dialog, "確定執行").on_click(None)
     assert dialog.open is False
     assert env.snacks == []
-    assert env.runs == [
-        {
-            "input_dir": str(env.organized),
-            "output_dir": str(env.translate_out),
-            "dry_run": False,
-            "write_new_cache": True,
-        }
-    ]
+    assert len(env.runs) == 1
+    run = env.runs[0]
+    assert {
+        key: run[key]
+        for key in ("input_dir", "output_dir", "dry_run", "write_new_cache")
+    } == {
+        "input_dir": str(env.organized),
+        "output_dir": str(env.translate_out),
+        "dry_run": False,
+        "write_new_cache": True,
+    }
+    assert run["lm_db_snapshot"].database_settings.path
+    assert run["lm_db_snapshot"].source == "global"
 
 
 def test_toggled_switches_are_passed(env):
@@ -171,7 +180,8 @@ def test_start_rejects_missing_input_dir(env, tmp_path):
     dialog = env.open()
     env.fields(dialog)[0].value = str(tmp_path / "nope")
     _button(dialog, "確定執行").on_click(None)
-    assert env.snacks == ["⚠️ 翻譯目標資料夾不存在"]
+    assert "⚠️ 翻譯目標資料夾不存在" in _texts(dialog)
+    assert env.snacks == []
     assert env.runs == []
     assert dialog.open is True
 
@@ -203,3 +213,13 @@ def test_cancel_closes_without_running_and_reopen_is_new_dialog(env):
     again = env.open()
     assert again is not dialog and again.open is True
     assert env.page.overlay == [again]  # 關閉後移出 overlay，不累積
+
+
+def test_stale_preview_click_after_close_does_not_start(env):
+    dialog = env.open()
+    dialog.open = False
+
+    _button(dialog, "預覽結果").on_click(None)
+
+    assert dialog.open is False
+    assert env.runs == []

@@ -139,7 +139,7 @@ def _default_input(env, sub="_翻譯輸出"):
 def test_open_shows_modal_dialog_with_three_actions(env):
     dialog = env.open()
     assert dialog.open is True and dialog.modal is True
-    assert dialog in env.page.overlay and env.page.updated >= 1
+    assert dialog in env.page.overlay
     assert dialog.content.width == 600
     assert [a.content for a in dialog.actions] == ["取消", "預覽結果", "確定執行"]
 
@@ -206,7 +206,8 @@ def test_confirm_with_missing_input_dir_is_rejected(env):
     dialog = env.open()  # 預設輸入資料夾尚未建立
     _field(dialog, "輸出 ZIP 檔案").value = str(env.tmp / "x.zip")
     _button(dialog, "確定執行").on_click(None)
-    assert env.snacks == ["⚠️ 輸入資料夾不存在"]
+    assert "⚠️ 輸入資料夾不存在" in _texts(dialog)
+    assert env.snacks == []
     assert env.calls == [] and dialog.open is True
 
 
@@ -225,7 +226,8 @@ def test_confirm_with_empty_zip_name_is_rejected(env):
     dialog = env.open_typing_input(env.out)
     _field(dialog, "輸出 ZIP 檔案").value = "   "
     _button(dialog, "確定執行").on_click(None)
-    assert env.snacks == ["⚠️ 輸出 ZIP 檔名不可空白"]
+    assert "⚠️ 輸出 ZIP 檔名不可空白" in _texts(dialog)
+    assert env.snacks == []
     assert env.calls == [] and dialog.open is True
 
 
@@ -236,7 +238,8 @@ def test_confirm_rejects_existing_image_with_unsupported_extension(env):
     _field(dialog, "輸出 ZIP 檔案").value = "a.zip"
     _field(dialog, "封面圖片（可留空）").value = str(img)
     _button(dialog, "確定執行").on_click(None)
-    assert env.snacks == ["⚠️ 封面圖片只支援 .png/.jpg"]
+    assert "⚠️ 封面圖片只支援 .png/.jpg" in _texts(dialog)
+    assert env.snacks == []
     assert env.calls == []
 
 
@@ -246,7 +249,8 @@ def test_confirm_rejects_nonexistent_image(env):
     _field(dialog, "輸出 ZIP 檔案").value = "a.zip"
     _field(dialog, "封面圖片（可留空）").value = str(env.tmp / "gone.png")
     _button(dialog, "確定執行").on_click(None)
-    assert env.snacks == ["⚠️ 封面圖片檔案不存在"]
+    assert "⚠️ 封面圖片檔案不存在" in _texts(dialog)
+    assert env.snacks == []
     assert env.calls == []
 
 
@@ -535,21 +539,34 @@ def test_browse_input_dir_messages_and_open(env, monkeypatch):
 def test_preview_with_missing_input_dir_shows_error_and_keeps_open(env):
     dialog = env.open()
     _button(dialog, "預覽結果").on_click(None)
-    assert env.snacks == ["⚠️ 輸入資料夾不存在"]
+    assert "⚠️ 輸入資料夾不存在" in _texts(dialog)
+    assert env.snacks == []
     assert dialog.open is True
+
+
+def test_stale_preview_click_after_close_does_not_start(env):
+    dialog = env.open()
+    dialog.open = False
+
+    _button(dialog, "預覽結果").on_click(None)
+
+    assert dialog.open is False
+    assert env.calls == []
 
 
 def test_preview_with_no_input_and_no_output_shows_error(env):
     dialog = env.open(output_path="")
     _button(dialog, "預覽結果").on_click(None)
-    assert env.snacks == ["⚠️ 輸入資料夾不存在"]
+    assert "⚠️ 輸入資料夾不存在" in _texts(dialog)
+    assert env.snacks == []
     assert dialog.open is True
 
 
 def test_preview_with_valid_input_reports_not_implemented_and_keeps_open(env):
     dialog = env.open_typing_input(env.out)
     _button(dialog, "預覽結果").on_click(None)
-    assert env.snacks == ["🔍 預覽功能待實作"]
+    assert any("資源打包預覽尚未支援" in text for text in _texts(dialog))
+    assert env.snacks == []
     assert dialog.open is True
     assert env.calls == []
 
@@ -559,7 +576,8 @@ def test_preview_falls_back_to_default_input_when_field_blank(env):
     dialog = env.open()
     _field(dialog, "輸入來源").value = ""
     _button(dialog, "預覽結果").on_click(None)
-    assert env.snacks == ["🔍 預覽功能待實作"]
+    assert any("資源打包預覽尚未支援" in text for text in _texts(dialog))
+    assert env.snacks == []
     assert dialog.open is True
 
 

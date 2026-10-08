@@ -100,6 +100,7 @@ class PipelineActions:
         patchouli_skip: bool,
         patchouli_threshold: float,
         zh_en_threshold: int,
+        merge_db_snapshot=None,
     ) -> Iterator:
         """語系比對：資料夾模式走 folder service，ZIP 模式走 zip service。"""
         options = {
@@ -110,6 +111,12 @@ class PipelineActions:
             "patchouli_threshold": patchouli_threshold,
             "zh_en_threshold": zh_en_threshold,
         }
+        if merge_db_snapshot is not None:
+            options.update(
+                use_translation_db=merge_db_snapshot.use_db,
+                translation_db_version=merge_db_snapshot.version,
+                translation_db_settings_snapshot=merge_db_snapshot.database_settings,
+            )
         session.start()
         # 不在這裡建立輸出資料夾：合併服務要在建立之前記錄它原本存不存在，
         # 取消時才能只刪「這次新建的」半成品
@@ -128,6 +135,7 @@ class PipelineActions:
         *,
         dry_run: bool,
         write_new_cache: bool,
+        lm_db_snapshot=None,
     ) -> None:
         """啟動翻譯（Gemini 批次）。"""
         os.makedirs(output_dir, exist_ok=True)
@@ -138,6 +146,11 @@ class PipelineActions:
             dry_run=dry_run,
             export_lang=False,
             write_new_cache=write_new_cache,
+            use_translation_db=(lm_db_snapshot.use_db if lm_db_snapshot else None),
+            translation_db_version=(lm_db_snapshot.version if lm_db_snapshot else None),
+            translation_db_settings_snapshot=(
+                lm_db_snapshot.database_settings if lm_db_snapshot else None
+            ),
         )
 
     def bundle(
@@ -252,6 +265,21 @@ class PipelineActions:
                     export_lang=False,
                     write_new_cache=config.get("write_new_cache", True),
                     manage_session=False,
+                    use_translation_db=(
+                        config["lm_db_snapshot"].use_db
+                        if config.get("lm_db_snapshot") is not None
+                        else None
+                    ),
+                    translation_db_version=(
+                        config["lm_db_snapshot"].version
+                        if config.get("lm_db_snapshot") is not None
+                        else None
+                    ),
+                    translation_db_settings_snapshot=(
+                        config["lm_db_snapshot"].database_settings
+                        if config.get("lm_db_snapshot") is not None
+                        else None
+                    ),
                 )
                 if session.error or is_cancelled():  # 失敗或取消：不跑下一個來源
                     return

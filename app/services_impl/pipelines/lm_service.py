@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import traceback
+from functools import partial
 
 from app.services_impl.logging_service import (
     GLOBAL_LOG_LIMITER,
@@ -20,9 +21,14 @@ from app.services_impl.pipelines._pipeline_logging import (
 from translation_tool.core.lm_translator import (
     translate_directory_generator as lm_translate_gen,
 )
+from translation_tool.translation_db import DbSettings
 from translation_tool.utils.cancellation import cancel_scope
 
 logger = logging.getLogger(__name__)
+
+
+def _session_cancel_requested(session) -> bool:
+    return bool(getattr(session, "cancel_requested", False))
 
 
 def run_lm_translation_service(
@@ -36,22 +42,20 @@ def run_lm_translation_service(
     manage_session: bool = True,
     use_translation_db: bool | None = None,
     translation_db_version: str | None = None,
+    translation_db_settings_snapshot: DbSettings | None = None,
 ):
     """執行 LM 翻譯流程（service 層包裝）。
 
     ``manage_session=False`` 時由呼叫端擁有 ``TaskSession`` 的 ``start()``／``finish()``
     （一鍵流程的步驟 3 會依序翻譯多個來源，共用同一個 session）。
 
-    ``use_translation_db`` / ``translation_db_version`` 為 None 時使用設定檔的 Mod 資料庫設定
-    （一鍵流程走這條路徑）；機器翻譯頁會明確傳入頁面上的選擇。
+    Admitted UI operations pass ``translation_db_settings_snapshot``; ``None`` remains
+    supported for legacy callers that resolve the current global settings.
     """
     # ⭐ 每次任務開始，都重新讀取一次 config 並設定 Logger
     ensure_pipeline_logging()
 
     logger.debug(f"DEBUG [2. Service]: 接收到的 export_lang 為 -> {export_lang}")
-
-    def _cancel_requested() -> bool:
-        return bool(getattr(session, "cancel_requested", False))
 
     try:
         # 初始化 Session 狀態
@@ -73,12 +77,13 @@ def run_lm_translation_service(
             dry_run=dry_run,
             export_lang=export_lang,
             write_new_cache=write_new_cache,
-            should_cancel=_cancel_requested,
+            should_cancel=partial(_session_cancel_requested, session),
             use_translation_db=use_translation_db,
             translation_db_version=translation_db_version,
+            translation_db_settings_snapshot=translation_db_settings_snapshot,
         )
         # cancel_scope：generator 在此執行緒迭代，等待 API 限流時也能被取消打斷
-        with cancel_scope(_cancel_requested):
+        with cancel_scope(partial(_session_cancel_requested, session)):
             for update_dict in gen:
                 filtered = GLOBAL_LOG_LIMITER.filter(update_dict)
                 if filtered is None:

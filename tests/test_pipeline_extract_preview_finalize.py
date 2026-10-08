@@ -29,6 +29,7 @@ class _Page:
 
     def show_dialog(self, d):
         self.overlay.append(d)
+        d.open = True
 
     def pop_dialog(self):
         pass
