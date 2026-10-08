@@ -53,7 +53,7 @@ CONFIG_APPLY_RULES["ui_logging.tail_lines"] = {
 # 樣式規則：每個模型自己的輸出上限（lm_translator.models 內的動態 key）
 CONFIG_APPLY_RULES["lm_translator.models.*.max_output_tokens"] = {
     "timing": "next_batch",
-    "note": "下一批次讀取；0 表示不送 maxOutputTokens。",
+    "note": "留空沿用全域輸出上限；0 不指定輸出上限；其他數值於下一批套用。",
 }
 
 

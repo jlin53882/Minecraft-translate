@@ -272,6 +272,18 @@ class AppShell:
     def navigate_index(self, index: int) -> None:
         if not 0 <= index < len(self.registry):
             return
+        target_key = self.registry[index]["key"]
+        if target_key != self.current_key:
+            config_view = self._active_config_view()
+            if config_view is not None and config_view.has_unsaved_changes:
+                config_view.confirm_unsaved_changes(
+                    lambda: self._apply_navigation_index(index)
+                )
+                return
+        self._apply_navigation_index(index)
+
+    def _apply_navigation_index(self, index: int) -> None:
+        """Apply a navigation request after any unsaved-settings decision."""
         item = self.registry[index]
         key = item["key"]
         spec = SPECS_BY_KEY[key]
@@ -284,6 +296,18 @@ class AppShell:
         )
         self.page.title = f"{APP_TITLE} — {spec.label}"
         self._safe_update()
+
+    def _active_config_view(self):
+        """Return the already-built ConfigView without forcing lazy construction."""
+        index = index_of(self.registry, "config")
+        if index < 0:
+            return None
+        view = built_view(self.registry[index])
+        for _ in range(4):
+            if view is None or hasattr(view, "has_unsaved_changes"):
+                break
+            view = getattr(view, "content", None)
+        return view if hasattr(view, "has_unsaved_changes") else None
 
     def _show_resume_prompt(self) -> None:
         """啟動時偵測上次被中斷的機器翻譯並詢問使用者（不會自動開始任何任務）。"""
@@ -642,6 +666,12 @@ class AppShell:
                 return
             if self._disposed:
                 return
+            config_view = self._active_config_view()
+            if config_view is not None and config_view.has_unsaved_changes:
+                config_view.confirm_unsaved_changes(
+                    self._continue_close_after_unsaved_settings
+                )
+                return
             if self.tasks.active() and not self._close_pending:
                 self._show_close_confirmation()
                 return
@@ -654,6 +684,19 @@ class AppShell:
             window.on_event = on_window_event
         except Exception:
             logger.debug("無法掛上 desktop window event handler", exc_info=True)
+
+    def _continue_close_after_unsaved_settings(self) -> None:
+        """Resume the existing close flow after settings are saved or discarded."""
+        if self.tasks.active():
+            self._show_close_confirmation()
+            return
+        if self._close_pending or self._disposed:
+            return
+        self._close_pending = True
+        ok, _future = self._submit_ui(self._complete_window_close)
+        if not ok:
+            self._abort_close()
+            self._show_close_failure()
 
     def _show_close_confirmation(self) -> None:
         """任務執行中先讓使用者選擇繼續或取消關閉。"""

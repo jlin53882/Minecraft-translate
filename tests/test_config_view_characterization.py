@@ -1,6 +1,7 @@
 import flet as ft
 import pytest
 
+from app.ui.design import C
 from app.ui.snack import show_snack
 from app.views.config_view import ConfigView
 from tests.conftest import mock_page
@@ -74,6 +75,22 @@ def test_config_view_loads_models_and_keys_from_config(monkeypatch):
     view = ConfigView(mock_page())
 
     assert len(view.models_column.controls) == 2
+    enabled_row, disabled_row = view.models_column.controls
+    assert enabled_row._model_name == "gemini-2.5-flash"
+    assert enabled_row._checkbox.label == "啟用"
+    assert enabled_row._checkbox.value is True
+    assert enabled_row._max_output_tokens_help.visible is False
+    assert (
+        "留空：沿用全域「輸出 Token 上限」" in enabled_row._max_output_tokens_help.value
+    )
+    assert disabled_row._model_name == "gemini-3-flash-preview"
+    assert disabled_row._checkbox.value is False
+    assert disabled_row._max_output_tokens_help.visible is False
+    enabled_row._max_output_tokens_help_button.on_click(None)
+    assert enabled_row._max_output_tokens_help.visible is True
+    assert disabled_row._max_output_tokens_help.visible is False
+    enabled_row._max_output_tokens_help_button.on_click(None)
+    assert enabled_row._max_output_tokens_help.visible is False
     assert [tf.value for tf in view.key_fields] == ["k1", "k2"]
 
 
@@ -98,6 +115,163 @@ def test_config_view_add_and_remove_model_row(monkeypatch):
     view.remove_model_by_checkbox(cb)
 
     assert len(view.models_column.controls) == start
+
+
+def test_config_view_tracks_unsaved_general_and_model_changes(monkeypatch):
+    monkeypatch.setattr(
+        "app.views.config_view.load_config_json",
+        lambda: {
+            "logging": {"log_level": "INFO"},
+            "translator": {},
+            "species_cache": {},
+            "lm_translator": {"models": {"demo": {"enabled": True}}},
+            "output_bundler": {},
+            "lang_merger": {},
+        },
+    )
+    view = ConfigView(mock_page())
+    assert view.has_unsaved_changes is False
+
+    level = view.controls_map["lm_translator.temperature"]
+    original_value = level.value
+    level.value = "0.9"
+    level.on_change(None)
+    assert view.has_unsaved_changes is True
+    assert "尚未儲存" in view.save_hint.value
+    assert view.save_button.content == "儲存變更"
+
+    level.value = original_value
+    level.on_change(None)
+    assert view.has_unsaved_changes is False
+    assert view.save_button.content == "儲存所有設定"
+
+    row = view.models_column.controls[0]
+    row._checkbox.value = False
+    row._checkbox.on_change(None)
+    assert view.has_unsaved_changes is True
+    row._checkbox.value = True
+    row._checkbox.on_change(None)
+    cap = row._max_output_tokens
+    cap.value = "4096"
+    cap.on_change(None)
+    assert view.has_unsaved_changes is True
+
+    choice = view.controls_map["logging.log_level"]
+    choice.value = "WARNING"
+    choice.on_select(None)
+    assert view.has_unsaved_changes is True
+
+
+def test_config_view_successful_add_model_shows_save_reminder(monkeypatch):
+    monkeypatch.setattr(
+        "app.views.config_view.load_config_json",
+        lambda: {
+            "logging": {},
+            "translator": {},
+            "species_cache": {},
+            "lm_translator": {"models": {"existing": {"enabled": True}}},
+            "output_bundler": {},
+            "lang_merger": {},
+        },
+    )
+    page = mock_page()
+    view = ConfigView(page)
+    view.new_model_field.value = "new-model"
+
+    view.on_add_model_clicked(None)
+
+    assert view.has_unsaved_changes is True
+    assert page.overlay[-1].content.value == (
+        "模型已加入清單，記得按「儲存所有設定」才會寫入 config.json。"
+    )
+    assert page.overlay[-1].content.color == C.GOLD
+
+
+def test_config_view_failed_save_keeps_unsaved_changes(monkeypatch):
+    monkeypatch.setattr(
+        "app.views.config_view.load_config_json",
+        lambda: {
+            "logging": {},
+            "translator": {},
+            "species_cache": {},
+            "lm_translator": {},
+            "output_bundler": {},
+            "lang_merger": {},
+        },
+    )
+    monkeypatch.setattr(
+        "app.views.config_view.save_config_from_view", lambda *args, **kwargs: False
+    )
+    view = ConfigView(mock_page())
+    field = view.controls_map["lm_translator.temperature"]
+    field.value = "0.9"
+    field.on_change(None)
+
+    assert view.save_config_clicked(None) is False
+    assert view.has_unsaved_changes is True
+
+
+def test_config_view_write_exception_keeps_unsaved_changes(monkeypatch):
+    monkeypatch.setattr(
+        "app.views.config_view.load_config_json",
+        lambda: {
+            "logging": {},
+            "translator": {},
+            "species_cache": {},
+            "lm_translator": {},
+            "output_bundler": {},
+            "lang_merger": {},
+        },
+    )
+
+    def fail_write(_config):
+        raise OSError("test-only write failure")
+
+    monkeypatch.setattr("app.views.config_view.save_config_json", fail_write)
+    monkeypatch.setattr(
+        "app.views.config_view.validate_api_keys_from_ui", lambda _keys: None
+    )
+    view = ConfigView(mock_page())
+    field = view.controls_map["lm_translator.temperature"]
+    field.value = "0.9"
+    field.on_change(None)
+
+    assert view.save_config_clicked(None) is False
+    assert view.has_unsaved_changes is True
+    assert "變更尚未寫入" in view.page.overlay[-1].content.value
+
+
+def test_config_view_unsaved_category_navigation_offers_save_discard_or_stay(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        "app.views.config_view.load_config_json",
+        lambda: {
+            "logging": {"log_level": "INFO"},
+            "translator": {},
+            "species_cache": {},
+            "lm_translator": {},
+            "output_bundler": {},
+            "lang_merger": {},
+        },
+    )
+    view = ConfigView(mock_page())
+    level = view.controls_map["lm_translator.temperature"]
+    level.value = "0.9"
+    level.on_change(None)
+
+    view._on_nav_click("api_models")
+
+    dialog = view.page.overlay[-1]
+    assert [action.content for action in dialog.actions] == [
+        "留在此頁",
+        "放棄變更",
+        "儲存並繼續",
+    ]
+    assert view._selected_nav == "general"
+    dialog.actions[1].on_click(None)
+    assert view._selected_nav == "api_models"
+    assert view.has_unsaved_changes is False
 
 
 def test_config_view_save_click_maps_rows_back_to_config(monkeypatch):
@@ -167,11 +341,16 @@ def test_config_view_save_click_maps_rows_back_to_config(monkeypatch):
     view.key_fields = [ft.TextField(value="k1")]
     view.models_column.controls.clear()
     view.add_model_row("demo-model")
+    view.add_model_row("disabled-model")
+    view.models_column.controls[-1]._checkbox.value = False
 
     view.save_config_clicked(None)
 
+    assert view.has_unsaved_changes is False
+    assert view.save_button.content == "儲存所有設定"
     assert saved["lm_translator"]["keys"] == ["k1"]
     assert saved["lm_translator"]["models"]["demo-model"]["enabled"] is True
+    assert saved["lm_translator"]["models"]["disabled-model"]["enabled"] is False
     assert saved["lm_translator"]["rate_limit"]["sleep_seconds_between_batches"] == 0.0
 
 
@@ -251,7 +430,14 @@ def test_config_view_move_model_row(monkeypatch):
         },
     )
     view = ConfigView(mock_page())
-    view.move_model_row(0, 1)
+    first_row, second_row = view.models_column.controls
+    first_name, second_name = first_row._model_name, second_row._model_name
+    view.move_model_row(first_row._checkbox, 1)
+    assert [row._model_name for row in view.models_column.controls] == [
+        second_name,
+        first_name,
+    ]
+    assert view.has_unsaved_changes is True
 
 
 def test_config_view_add_and_remove_model_row_integration(monkeypatch):
@@ -275,6 +461,11 @@ def test_config_view_add_and_remove_model_row_integration(monkeypatch):
     cb = view.models_column.controls[-1]._checkbox
     view.remove_model_by_checkbox(cb)
     assert len(view.models_column.controls) == start
+    assert view.has_unsaved_changes is False
+
+    view.remove_model_by_checkbox(view.models_column.controls[0]._checkbox)
+    assert len(view.models_column.controls) == start - 1
+    assert view.has_unsaved_changes is True
 
 
 def test_config_view_load_config_updates_controls_map(monkeypatch):

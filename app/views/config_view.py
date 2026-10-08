@@ -8,7 +8,6 @@ from typing import ClassVar
 
 import flet as ft
 
-from app.config_apply import apply_timing_note
 from app.services_impl.config_service import load_config_json, save_config_json
 from app.services_impl.key_health_service import validate_api_keys_from_ui
 from app.ui import design, kit
@@ -46,6 +45,114 @@ NAV_ITEMS = [
 ]
 
 
+def _model_cap_controls(view, max_output_tokens):
+    field = kit.field(
+        value="" if max_output_tokens is None else str(max_output_tokens),
+        label="模型上限",
+        hint_text="全域",
+        dense=True,
+        width=130,
+        keyboard_type=ft.KeyboardType.NUMBER,
+        on_change=view._on_form_changed,
+    )
+    help_text = ft.Text(
+        "留空：沿用全域「輸出 Token 上限」；輸入數值：使用此模型專屬上限；"
+        "設為 0：不指定輸出上限。修改後於下一批翻譯時套用。",
+        size=11,
+        color=C.MUTED,
+        visible=False,
+    )
+    help_button = ft.IconButton(
+        icon=ft.Icons.HELP_OUTLINE,
+        tooltip="顯示此模型的輸出上限說明",
+        icon_size=17,
+        on_click=lambda _e: view._toggle_model_cap_help(help_text, help_button),
+    )
+    cap_controls = ft.Row(
+        [field, help_button],
+        spacing=0,
+        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+    )
+    return field, help_text, help_button, cap_controls
+
+
+def _build_model_row(view, model_name, max_output_tokens):
+    cb = ft.Checkbox(
+        label="啟用",
+        value=True,
+        label_style=ft.TextStyle(size=14, weight=ft.FontWeight.W_500),
+        on_change=view._on_form_changed,
+    )
+    model_name_text = ft.Text(model_name, size=14, weight=ft.FontWeight.W_500)
+    order_text = ft.Text(
+        "00",
+        size=12,
+        color=C.MUTED,
+        weight=ft.FontWeight.W_500,
+        width=28,
+        text_align=ft.TextAlign.RIGHT,
+    )
+    btn_up = ft.IconButton(
+        icon=ft.Icons.KEYBOARD_ARROW_UP,
+        tooltip="上移",
+        icon_size=18,
+        on_click=lambda _e: view.move_model_row(cb, -1),
+    )
+    btn_down = ft.IconButton(
+        icon=ft.Icons.KEYBOARD_ARROW_DOWN,
+        tooltip="下移",
+        icon_size=18,
+        on_click=lambda _e: view.move_model_row(cb, +1),
+    )
+    btn_delete = ft.IconButton(
+        icon=ft.Icons.DELETE_OUTLINE,
+        tooltip="刪除模型",
+        icon_size=18,
+        on_click=lambda _e: view.remove_model_by_checkbox(cb),
+    )
+    max_tokens_field, help_text, help_button, cap_controls = _model_cap_controls(
+        view, max_output_tokens
+    )
+    row_content = ft.Column(
+        [
+            ft.Row(
+                [
+                    order_text,
+                    ft.Row(
+                        [
+                            cb,
+                            ft.Container(content=model_name_text, expand=True),
+                            cap_controls,
+                        ],
+                        expand=True,
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    ),
+                    ft.Row([btn_up, btn_down, btn_delete], spacing=2),
+                ],
+                alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            ),
+            help_text,
+        ],
+        spacing=4,
+    )
+    row = ft.Container(
+        padding=12,
+        border_radius=8,
+        bgcolor=C.PANEL,
+        border=ft.Border.all(1, C.TRACK),
+        content=row_content,
+    )
+    row._order_text = order_text
+    row._model_name = model_name
+    row._model_name_text = model_name_text
+    row._checkbox = cb
+    row._max_output_tokens = max_tokens_field
+    row._max_output_tokens_help = help_text
+    row._max_output_tokens_help_button = help_button
+    return row
+
+
 class ConfigView(ft.Column):
     """ConfigView 類別。
 
@@ -67,6 +174,8 @@ class ConfigView(ft.Column):
         super().__init__(expand=True, spacing=0)
         self._page = page
         self._registry = None
+        self._loading_config = False
+        self._saved_form_state = None
         self.controls_map = {}
         self._selected_nav = "general"
 
@@ -78,6 +187,7 @@ class ConfigView(ft.Column):
         self._check_priority = attach_priority_hooks(
             self.controls_map["translation_db.priority"]
         )
+        self._bind_general_change_tracking()
 
         self.scroll_container = ft.Column(
             scroll=ft.ScrollMode.ADAPTIVE,
@@ -165,9 +275,52 @@ class ConfigView(ft.Column):
 
     def _on_nav_click(self, nav_id: str):
         """處理導覽點擊"""
+        if nav_id == self._selected_nav:
+            return
+        if self.has_unsaved_changes:
+            self.confirm_unsaved_changes(lambda: self._apply_nav(nav_id))
+            return
+        self._apply_nav(nav_id)
+
+    def _apply_nav(self, nav_id: str):
         self._selected_nav = nav_id
         self._rebuild_nav()
         self._show_content(nav_id)
+
+    def confirm_unsaved_changes(self, on_continue):
+        """Ask whether to save or discard changes before leaving this settings view."""
+        show_dialog = getattr(self.page, "show_dialog", None)
+        if not callable(show_dialog):
+            show_snack(self.page, "設定尚未儲存；目前無法安全切換頁面。")
+            return False
+
+        dialog = ft.AlertDialog(
+            modal=True,
+            title=ft.Text("設定尚未儲存"),
+            content=ft.Text("要先儲存設定、放棄變更，還是留在此頁？"),
+        )
+
+        def stay(_event=None):
+            self.page.pop_dialog()
+
+        def save_and_continue(_event=None):
+            if not self.save_config_clicked(None):
+                return
+            self.page.pop_dialog()
+            on_continue()
+
+        def discard_and_continue(_event=None):
+            self.discard_unsaved_changes()
+            self.page.pop_dialog()
+            on_continue()
+
+        dialog.actions = [
+            ft.TextButton("留在此頁", on_click=stay),
+            ft.TextButton("放棄變更", on_click=discard_and_continue),
+            ft.TextButton("儲存並繼續", on_click=save_and_continue),
+        ]
+        show_dialog(dialog)
+        return True
 
     def _rebuild_nav(self):
         """重新建構導覽列"""
@@ -230,6 +383,11 @@ class ConfigView(ft.Column):
                             self.add_model_button,
                         ]
                     ),
+                    ft.Text(
+                        "勾選「啟用」的模型才會參與翻譯；取消勾選即可停用。儲存後，下一個 LM 翻譯批次會讀取新設定；至少保留一個啟用模型。",
+                        size=12,
+                        color=C.MUTED,
+                    ),
                     self.models_column,
                 ]
             ),
@@ -272,68 +430,20 @@ class ConfigView(ft.Column):
 
     def add_model_row(self, model_name: str, max_output_tokens: int | None = None):
         """新增模型項目到列表"""
-        cb = ft.Checkbox(
-            label=model_name,
-            value=True,
-            expand=True,
-            label_style=ft.TextStyle(size=14, weight=ft.FontWeight.W_500),
-        )
-        order_text = ft.Text(
-            "00",
-            size=12,
-            color=C.MUTED,
-            weight=ft.FontWeight.W_500,
-            width=28,
-            text_align=ft.TextAlign.RIGHT,
-        )
-        btn_up = ft.IconButton(
-            icon=ft.Icons.KEYBOARD_ARROW_UP,
-            tooltip="上移",
-            icon_size=18,
-            on_click=lambda e: self.move_model_row(cb, -1),
-        )
-        btn_down = ft.IconButton(
-            icon=ft.Icons.KEYBOARD_ARROW_DOWN,
-            tooltip="下移",
-            icon_size=18,
-            on_click=lambda e: self.move_model_row(cb, +1),
-        )
-        btn_delete = ft.IconButton(
-            icon=ft.Icons.DELETE_OUTLINE,
-            tooltip="刪除模型",
-            icon_size=18,
-            on_click=lambda e: self.remove_model_by_checkbox(cb),
-        )
-        max_tokens_field = kit.field(
-            value="" if max_output_tokens is None else str(max_output_tokens),
-            label="模型上限",
-            hint_text="全域",
-            helper=apply_timing_note("lm_translator.models.*.max_output_tokens"),
-            dense=True,
-            width=130,
-            keyboard_type=ft.KeyboardType.NUMBER,
-        )
-
-        row = ft.Container(
-            padding=12,
-            border_radius=8,
-            bgcolor=C.PANEL,
-            border=ft.Border.all(1, C.TRACK),
-            content=ft.Row(
-                [
-                    order_text,
-                    ft.Row([cb, max_tokens_field], expand=True),
-                    ft.Row([btn_up, btn_down, btn_delete], spacing=2),
-                ],
-                alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
-                vertical_alignment=ft.CrossAxisAlignment.CENTER,
-            ),
-        )
-        row._order_text = order_text
-        row._checkbox = cb
-        row._max_output_tokens = max_tokens_field
+        row = _build_model_row(self, model_name, max_output_tokens)
         self.models_column.controls.append(row)
         self._refresh_model_order_labels()
+
+    def _toggle_model_cap_help(self, help_text: ft.Text, button: ft.IconButton):
+        """Toggle one model's output-cap hint without affecting sibling rows."""
+        help_text.visible = not help_text.visible
+        button.icon = ft.Icons.INFO if help_text.visible else ft.Icons.HELP_OUTLINE
+        button.tooltip = (
+            "隱藏此模型的輸出上限說明"
+            if help_text.visible
+            else "顯示此模型的輸出上限說明"
+        )
+        self.page.update()
 
     def move_model_row(self, cb: ft.Checkbox, direction: int):
         """移動模型順序（上移/下移）"""
@@ -346,6 +456,7 @@ class ConfigView(ft.Column):
             return
         controls[idx], controls[new_idx] = controls[new_idx], controls[idx]
         self._refresh_model_order_labels()
+        self._refresh_dirty_state()
 
     def remove_model_by_checkbox(self, cb: ft.Checkbox):
         """刪除勾選的模型項目"""
@@ -353,6 +464,8 @@ class ConfigView(ft.Column):
         if row:
             self.models_column.controls.remove(row)
         self._refresh_model_order_labels()
+        if row:
+            self._refresh_dirty_state()
 
     def on_add_model_clicked(self, e):
         """處理新增模型按鈕點擊事件"""
@@ -360,12 +473,18 @@ class ConfigView(ft.Column):
         if not name:
             show_snack(self.page, "模型名稱不能為空")
             return
-        if any(r._checkbox.label == name for r in self.models_column.controls):
+        if any(r._model_name == name for r in self.models_column.controls):
             show_snack(self.page, "此模型已存在")
             return
         self.add_model_row(name)
         self.new_model_field.value = ""
         self.page.update()
+        self._refresh_dirty_state()
+        show_snack(
+            self.page,
+            "模型已加入清單，記得按「儲存所有設定」才會寫入 config.json。",
+            C.GOLD,
+        )
 
     def _build_key_field(self, value: str = ""):
         """建立 API Key 輸入欄位"""
@@ -381,7 +500,9 @@ class ConfigView(ft.Column):
         row = self._build_key_row(tf)
         self.key_fields.append(tf)
         self.keys_column.controls.append(row)
+        self._bind_change_tracking(tf)
         self.keys_column.update()
+        self._refresh_dirty_state()
 
     def remove_key_row(self, row: ft.Row):
         """刪除 API Key 列表中的指定列"""
@@ -390,6 +511,7 @@ class ConfigView(ft.Column):
             self.keys_column.controls.remove(row)
             self.key_fields.pop(idx)
         self.keys_column.update()
+        self._refresh_dirty_state()
 
     def _refresh_model_order_labels(self):
         """重新整理模型順序編號"""
@@ -400,8 +522,16 @@ class ConfigView(ft.Column):
 
     def load_config(self):
         """載入設定檔"""
-        config = load_config_json()
-        result = load_config_into_view(self, config)
+        self._loading_config = True
+        try:
+            config = load_config_json()
+            result = load_config_into_view(self, config)
+            for tf in self.key_fields:
+                self._bind_change_tracking(tf)
+            self._saved_form_state = self._capture_form_state()
+        finally:
+            self._loading_config = False
+        self._refresh_dirty_state()
         self.db_location.refresh()
         self._check_db_path()
         self._check_priority()
@@ -417,13 +547,89 @@ class ConfigView(ft.Column):
 
     def save_config_clicked(self, e):
         """儲存設定"""
-        return save_config_from_view(
+        saved = save_config_from_view(
             self,
             load_config_json_fn=load_config_json,
             save_config_json_fn=save_config_json,
             validate_api_keys_from_ui_fn=validate_api_keys_from_ui,
             registry=self._registry,
         )
+        if saved:
+            self._saved_form_state = self._capture_form_state()
+            self._refresh_dirty_state()
+        return saved
+
+    def _bind_general_change_tracking(self) -> None:
+        for path, control in self.controls_map.items():
+            if path in ("lm_translator.keys", "lm_translator.models"):
+                continue
+            if hasattr(control, "on_change") or hasattr(control, "on_select"):
+                self._bind_change_tracking(control)
+
+    def _bind_change_tracking(self, control: ft.Control) -> None:
+        if getattr(control, "_config_change_tracked", False):
+            return
+        event_name = "on_change" if hasattr(control, "on_change") else "on_select"
+        previous = getattr(control, event_name, None)
+
+        def on_change(event):
+            if callable(previous):
+                previous(event)
+            self._on_form_changed(event)
+
+        setattr(control, event_name, on_change)
+        control._config_change_tracked = True
+
+    def _on_form_changed(self, _event=None) -> None:
+        self._refresh_dirty_state()
+
+    def _capture_form_state(self):
+        settings = tuple(
+            (path, repr(control.value))
+            for path, control in self.controls_map.items()
+            if path not in ("lm_translator.keys", "lm_translator.models")
+            and hasattr(control, "value")
+        )
+        keys = tuple(tf.value or "" for tf in self.key_fields)
+        models = tuple(
+            (
+                row._model_name,
+                bool(row._checkbox.value),
+                ""
+                if row._max_output_tokens.value is None
+                else str(row._max_output_tokens.value),
+            )
+            for row in self.models_column.controls
+        )
+        return settings, keys, models
+
+    @property
+    def has_unsaved_changes(self) -> bool:
+        return (
+            self._saved_form_state is not None
+            and self._capture_form_state() != self._saved_form_state
+        )
+
+    def _refresh_dirty_state(self) -> None:
+        if self._loading_config or self._saved_form_state is None:
+            return
+        dirty = self.has_unsaved_changes
+        self.save_hint.value = (
+            "⚠ 設定尚未儲存，記得按「儲存所有設定」"
+            if dirty
+            else "提示：修改後請務必點擊儲存"
+        )
+        self.save_hint.color = C.GOLD if dirty else C.MUTED
+        self.save_button.content = "儲存變更" if dirty else "儲存所有設定"
+        self.save_button.tooltip = (
+            "設定尚未儲存；按此寫入 config.json"
+            if dirty
+            else "寫入 config.json（請確認 API Keys 有填好）"
+        )
+        self.page.update()
+
+    def discard_unsaved_changes(self) -> None:
+        self.load_config()
 
     @property
     def page(self):

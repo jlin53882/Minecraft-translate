@@ -73,6 +73,21 @@ def _apply_label_templates(view, config: dict) -> None:
         view.controls_map[setting.path].label = setting.label_template.format(**values)
 
 
+def _models_from_view(view) -> dict:
+    """Collect the per-model settings from their editor rows."""
+    models = {}
+    for row in view.models_column.controls:
+        checkbox = row._checkbox
+        model_cfg = {"enabled": bool(checkbox.value)}
+        cap_field = getattr(row, "_max_output_tokens", None)
+        raw_cap = getattr(cap_field, "value", "") if cap_field is not None else ""
+        if raw_cap not in (None, ""):
+            model_cfg["max_output_tokens"] = int(raw_cap)
+        model_name = getattr(row, "_model_name", checkbox.label)
+        models[model_name] = model_cfg
+    return models
+
+
 def load_config_into_view(view, config: dict):
     """
     將 config 字典中的值填入 view 的各個 UI 控制項。
@@ -163,22 +178,16 @@ def save_config_from_view(
         ]
         validate_api_keys_from_ui_fn(api_keys)
         new_config["lm_translator"]["keys"] = api_keys
-        models = {}
-        for row in view.models_column.controls:
-            cb = row._checkbox
-            model_cfg = {"enabled": bool(cb.value)}
-            cap_field = getattr(row, "_max_output_tokens", None)
-            raw_cap = getattr(cap_field, "value", "") if cap_field is not None else ""
-            if raw_cap not in (None, ""):
-                model_cfg["max_output_tokens"] = int(raw_cap)
-            models[cb.label] = model_cfg
-        new_config["lm_translator"]["models"] = models
-    except (ValueError, TypeError, RuntimeError) as err:
+        new_config["lm_translator"]["models"] = _models_from_view(view)
+        save_config_json_fn(new_config)
+    except (ValueError, TypeError, RuntimeError, OSError) as err:
         # 錯誤訊息可能帶有使用者輸入，記錄前先遮蔽（#125）
         logger.error("儲存設定失敗：%s", redact_text(traceback.format_exc()))
-        show_snack(view.page, f"❌ 發生錯誤：{type(err).__name__}: {err}")
+        show_snack(
+            view.page,
+            f"❌ 設定無法儲存（{type(err).__name__}），變更尚未寫入。",
+        )
         return False
-    save_config_json_fn(new_config)
     view.load_config()
 
     if registry is not None:

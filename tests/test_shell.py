@@ -448,12 +448,48 @@ def test_navigate_switches_content_sidebar_and_breadcrumb(shell, placeholder_vie
     assert "設定" in shell.page.title
 
 
+def test_navigation_from_dirty_settings_waits_for_user_decision(
+    shell, placeholder_views
+):
+    shell.navigate("config")
+    config_view = placeholder_views["config"]
+    config_view.has_unsaved_changes = True
+    pending = []
+    config_view.confirm_unsaved_changes = lambda on_continue: pending.append(
+        on_continue
+    )
+
+    shell.navigate("dashboard")
+
+    assert shell.current_key == "config"
+    assert len(pending) == 1
+    pending[0]()
+    assert shell.current_key == "dashboard"
+
+
 def test_navigate_unknown_key_is_ignored(shell):
     before = shell.current_key
     shell.navigate("nope")
     shell.navigate_index(999)
     shell.navigate_index(-1)
     assert shell.current_key == before
+
+
+def test_window_close_from_dirty_settings_waits_for_user_decision(
+    shell, placeholder_views
+):
+    shell.navigate("config")
+    config_view = placeholder_views["config"]
+    config_view.has_unsaved_changes = True
+    pending = []
+    config_view.confirm_unsaved_changes = lambda on_continue: pending.append(
+        on_continue
+    )
+
+    asyncio.run(shell._window_on_event(SimpleNamespace(type=ft.WindowEventType.CLOSE)))
+
+    assert not shell._disposed
+    assert len(pending) == 1
 
 
 def test_ctrl_digit_shortcuts_follow_view_specs(shell):
