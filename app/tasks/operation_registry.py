@@ -361,9 +361,15 @@ class OperationRegistry:
         handle = getattr(session, "operation_handle", None)
         if not isinstance(handle, OperationHandle) or handle._worker_managed:
             return
+        error = None
+        if getattr(session, "error", False):
+            error = RuntimeError(
+                f"TaskSession reported failure: {handle.descriptor.name}"
+            )
         self._finish(
             handle,
             reason="cancelled" if handle.cancel_requested else "session_finished",
+            error=error,
         )
 
     def finish_abandoned_session(self, session_id: int) -> None:

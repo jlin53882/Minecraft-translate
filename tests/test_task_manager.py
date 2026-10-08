@@ -91,12 +91,12 @@ def test_subscribers_are_notified_and_can_unsubscribe(manager):
     session.start()
     session.set_progress(0.1)
     session.finish()
-    # Registry terminal events clean up ownership without duplicating the
-    # TaskSession finish projection.
-    assert len(calls) == 3
+    # The TaskSession projection and Registry terminal transition are distinct:
+    # the latter refreshes subscribers after active membership is removed.
+    assert len(calls) == 4
     unsubscribe()
     session.start()
-    assert len(calls) == 3
+    assert len(calls) == 4
     session.finish()
 
 
@@ -120,6 +120,71 @@ def test_registry_only_operation_is_projected_and_recorded_as_recent(manager):
     handle.finish()
     assert manager.active() == []
     assert manager.recent()[0].name == "索引更新"
+    assert manager.recent()[0].status == STATUS_DONE
+
+
+def test_session_registry_terminal_notifies_subscribers_of_idle(manager):
+    session = TaskSession(name="session-backed operation")
+    handle = manager.operation_registry.reserve(
+        OperationDescriptor(name="session-backed operation", owner="test"),
+        task_session=session,
+    )
+    assert handle is not None
+    observed_active_counts = []
+    manager.subscribe(
+        lambda: observed_active_counts.append(manager.operation_registry.active_count())
+    )
+
+    session.start()
+    session.finish()
+
+    assert observed_active_counts[-2:] == [1, 0]
+    assert manager.operation_registry.active_count() == 0
+    assert len(manager.recent()) == 1
+
+
+@pytest.mark.parametrize(
+    ("outcome", "expected_reason", "expected_status"),
+    [
+        ("success", "session_finished", STATUS_DONE),
+        ("error", "failed", STATUS_ERROR),
+        ("cancel", "cancelled", STATUS_DONE),
+    ],
+)
+def test_legacy_session_terminal_result_matches_registry(
+    manager, outcome, expected_reason, expected_status
+):
+    session = TaskSession(name=f"legacy {outcome}")
+    session.start()
+    handle = session.operation_handle
+
+    if outcome == "error":
+        session.set_error()
+    elif outcome == "cancel":
+        assert handle.request_cancel()
+
+    session.finish()
+
+    assert handle.done_event.is_set()
+    assert handle.terminal_reason == expected_reason
+    assert (handle.error is not None) == (outcome == "error")
+    assert manager.recent()[0].status == expected_status
+
+
+def test_cancel_before_task_session_start_still_records_recent_terminal(manager):
+    session = TaskSession(name="cancel before start")
+    handle = manager.operation_registry.reserve(
+        OperationDescriptor(name="cancel before start", owner="test"),
+        task_session=session,
+    )
+    assert handle is not None
+    assert handle.request_cancel()
+    assert handle.launch(lambda: pytest.fail("cancelled worker must not run"))
+
+    assert handle.done_event.wait(2)
+    assert handle.terminal_reason == "cancelled"
+    assert manager.operation_registry.active_count() == 0
+    assert len(manager.recent()) == 1
     assert manager.recent()[0].status == STATUS_DONE
 
 

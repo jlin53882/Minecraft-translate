@@ -219,8 +219,13 @@ class TaskManager:
             # is initialized; avoid presenting one operation twice at admission.
             return
         if event == "finish" and handle._task_session_id is not None:
-            # The TaskSession finish event already updated its task projection;
-            # this Registry event only closes the authoritative owner.
+            # A normal TaskSession finish has already made the recent entry.
+            # Also record handles whose worker terminated before session.start()
+            # could create a UI projection.
+            self._record_session_terminal(handle)
+            # Keep the terminal notification: subscribers may have observed
+            # TaskSession.finish while this Registry handle was still active.
+            self._emit()
             return
         if event == "finish" and handle._task_session_id is None:
             failed = handle.error is not None
@@ -236,6 +241,27 @@ class TaskManager:
             with self._lock:
                 self._recent.appendleft(info)
         self._emit()
+
+    def _record_session_terminal(self, handle: OperationHandle) -> None:
+        """Add fallback history only when no TaskSession terminal was projected."""
+        session_id = handle._task_session_id
+        if session_id is None:
+            return
+        with self._lock:
+            if any(task.id == session_id for task in self._recent):
+                return
+            failed = handle.error is not None
+            self._recent.appendleft(
+                TaskInfo(
+                    id=session_id,
+                    name=handle.descriptor.name or DEFAULT_TASK_NAME,
+                    view_key=handle.descriptor.view_key,
+                    status=STATUS_ERROR if failed else STATUS_DONE,
+                    progress=0.0 if failed else 1.0,
+                    started_at=handle.created_at,
+                    finished_at=self._clock(),
+                )
+            )
 
     def stop_accepting(self) -> None:
         """相容舊呼叫端：關閉 authoritative registry 的 admission。"""
