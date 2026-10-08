@@ -171,6 +171,68 @@ def test_legacy_session_terminal_result_matches_registry(
     assert manager.recent()[0].status == expected_status
 
 
+def test_worker_error_after_session_finish_reconciles_recent(manager):
+    session = TaskSession(name="late worker error")
+    handle = manager.operation_registry.reserve(
+        OperationDescriptor(name="late worker error", owner="test"),
+        task_session=session,
+    )
+    assert handle is not None
+
+    def work():
+        session.start()
+        session.finish()
+        raise RuntimeError("final cleanup failed")
+
+    assert handle.launch(work)
+    assert handle.done_event.wait(2)
+
+    assert handle.terminal_reason == "failed"
+    assert isinstance(handle.error, RuntimeError)
+    assert session.error
+    assert session.status == "ERROR"
+    assert manager.recent()[0].status == STATUS_ERROR
+
+
+def test_legacy_error_after_finish_amends_registry_and_recent_once(manager):
+    session = TaskSession(name="late legacy error")
+    session.start()
+    handle = session.operation_handle
+    session.finish()
+    assert handle.terminal_reason == "session_finished"
+    assert manager.recent()[0].status == STATUS_DONE
+
+    session.set_error()
+    session.set_error()
+
+    assert handle.done_event.is_set()
+    assert handle.terminal_reason == "failed"
+    assert isinstance(handle.error, RuntimeError)
+    assert manager.operation_registry.active_count() == 0
+    assert len(manager.recent()) == 1
+    assert manager.recent()[0].status == STATUS_ERROR
+
+
+def test_reused_task_session_gets_distinct_recent_entries(manager):
+    session = TaskSession(name="reused session")
+    session.start()
+    first_handle = session.operation_handle
+    session.finish()
+
+    session.start()
+    second_handle = session.operation_handle
+    session.set_error()
+    session.finish()
+
+    recent = manager.recent()
+    assert first_handle.id != second_handle.id
+    assert len(recent) == 2
+    assert recent[0].operation_id == second_handle.id
+    assert recent[0].status == STATUS_ERROR
+    assert recent[1].operation_id == first_handle.id
+    assert recent[1].status == STATUS_DONE
+
+
 def test_cancel_before_task_session_start_still_records_recent_terminal(manager):
     session = TaskSession(name="cancel before start")
     handle = manager.operation_registry.reserve(

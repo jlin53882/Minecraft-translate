@@ -180,11 +180,11 @@ class OperationHandle:
                     f"TaskSession reported failure: {self.descriptor.name}"
                 )
             try:
+                if session is not None and error is not None:
+                    set_error = getattr(session, "set_error", None)
+                    if callable(set_error):
+                        set_error()
                 if session is not None and not getattr(session, "is_finished", False):
-                    if error is not None:
-                        set_error = getattr(session, "set_error", None)
-                        if callable(set_error):
-                            set_error()
                     finish = getattr(session, "finish", None)
                     if callable(finish):
                         finish()
@@ -371,6 +371,31 @@ class OperationRegistry:
             reason="cancelled" if handle.cancel_requested else "session_finished",
             error=error,
         )
+
+    def record_session_error(self, session) -> None:
+        """Record or amend a TaskSession failure without reopening its operation."""
+        handle = getattr(session, "operation_handle", None)
+        if (
+            not isinstance(handle, OperationHandle)
+            or handle.task_session is not session
+        ):
+            return
+        error = RuntimeError(f"TaskSession reported failure: {handle.descriptor.name}")
+        with self._condition:
+            if handle.done_event.is_set():
+                if handle._error is not None:
+                    return
+                handle._error = error
+                handle._terminal_reason = "failed"
+                handle._state = "failed"
+                self._condition.notify_all()
+                amended = True
+            else:
+                amended = False
+        if amended:
+            self._emit("result", handle)
+        else:
+            self._record_error(handle, error)
 
     def finish_abandoned_session(self, session_id: int) -> None:
         with self._condition:

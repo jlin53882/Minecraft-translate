@@ -249,6 +249,9 @@ class TaskSession:
                 "任務結果更正：DONE → ERROR（結束後才標記失敗）", "error"
             )
         _notify(self, "error")
+        registry = self.operation_registry
+        if registry is not None:
+            registry.record_session_error(self)
 
     def add_start_log(self, text: str, level: str = "info") -> None:
         """新增「開始前就知道、要顯示在任務日誌開頭」的訊息。

@@ -74,6 +74,7 @@ class TaskInfo:
     progress: float = 0.0
     started_at: float = field(default_factory=time.time)
     finished_at: float | None = None
+    operation_id: str | None = None
 
     @property
     def running(self) -> bool:
@@ -178,6 +179,9 @@ class TaskManager:
                     name=getattr(session, "name", None) or DEFAULT_TASK_NAME,
                     view_key=getattr(session, "view_key", None),
                     started_at=self._clock(),
+                    operation_id=(
+                        handle.id if isinstance(handle, OperationHandle) else None
+                    ),
                 )
                 self._active[sid] = info
                 self._sessions[sid] = weakref.ref(session)
@@ -218,10 +222,8 @@ class TaskManager:
             # TaskSession.start emits the user-visible transition after its state
             # is initialized; avoid presenting one operation twice at admission.
             return
-        if event == "finish" and handle._task_session_id is not None:
-            # A normal TaskSession finish has already made the recent entry.
-            # Also record handles whose worker terminated before session.start()
-            # could create a UI projection.
+        if event in {"finish", "result"} and handle._task_session_id is not None:
+            # Reconcile the final owner result into this exact run's UI projection.
             self._record_session_terminal(handle)
             # Keep the terminal notification: subscribers may have observed
             # TaskSession.finish while this Registry handle was still active.
@@ -243,14 +245,20 @@ class TaskManager:
         self._emit()
 
     def _record_session_terminal(self, handle: OperationHandle) -> None:
-        """Add fallback history only when no TaskSession terminal was projected."""
+        """Reconcile the exact operation run, adding a fallback when needed."""
         session_id = handle._task_session_id
         if session_id is None:
             return
         with self._lock:
-            if any(task.id == session_id for task in self._recent):
-                return
+            recent = next(
+                (task for task in self._recent if task.operation_id == handle.id), None
+            )
             failed = handle.error is not None
+            if recent is not None:
+                if failed:
+                    recent.status = STATUS_ERROR
+                    recent.progress = min(recent.progress, 0.99)
+                return
             self._recent.appendleft(
                 TaskInfo(
                     id=session_id,
@@ -260,6 +268,7 @@ class TaskManager:
                     progress=0.0 if failed else 1.0,
                     started_at=handle.created_at,
                     finished_at=self._clock(),
+                    operation_id=handle.id,
                 )
             )
 
