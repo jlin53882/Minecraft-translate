@@ -2,6 +2,8 @@
 
 from concurrent.futures import ThreadPoolExecutor
 
+import pytest
+
 from translation_tool.translation_db.models import ScanItem
 from translation_tool.translation_db.repository import TranslationDB
 from translation_tool.translation_db.scanner import make_converter
@@ -37,6 +39,33 @@ def test_converter_plain_list_keeps_snapshot_semantics():
 
     rules[0]["to"] = "SECOND"
     assert convert("wire assembled") == "SECOND assembled"
+
+
+def test_replace_rules_snapshot_membership_is_read_only():
+    rules = tp.ReplaceRules([{"from": "wire", "to": "FIRST"}])
+    snapshot = rules.snapshot()
+
+    with pytest.raises(AttributeError):
+        snapshot.append({"from": "wire", "to": "APPENDED"})
+    with pytest.raises(AttributeError):
+        snapshot.pop()
+    with pytest.raises(TypeError):
+        snapshot[0] = {"from": "wire", "to": "REPLACED"}
+    with pytest.raises(TypeError):
+        del snapshot[0]
+
+    assert tp.apply_replace_rules("wire", snapshot) == "FIRST"
+
+
+def test_snapshot_cache_invalidates_when_source_rule_row_changes():
+    rules = tp.ReplaceRules([{"from": "wire", "to": "FIRST"}])
+    snapshot = rules.snapshot()
+
+    assert tp.apply_replace_rules("wire", snapshot) == "FIRST"
+
+    rules[0]["to"] = "SECOND"
+
+    assert tp.apply_replace_rules("wire", snapshot) == "SECOND"
 
 
 def test_converter_none_and_empty_rules_keep_opencc_behavior():

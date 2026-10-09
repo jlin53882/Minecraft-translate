@@ -8,6 +8,8 @@ import heapq
 import os
 import re
 import threading
+from collections.abc import Sequence
+from dataclasses import dataclass
 from typing import Any
 
 import orjson
@@ -38,7 +40,7 @@ def get_converter():
 # =========================
 _RULES_CACHE_LOCK = threading.Lock()
 # id(規則清單) → (規則清單本身, 內容簽章, 編譯結果)；保留清單參考避免 id 被重用
-_RULES_CACHE: dict[int, tuple[list, Any, "_CompiledRules"]] = {}
+_RULES_CACHE: dict[int, tuple[Sequence, Any, "_CompiledRules"]] = {}
 _RULES_CACHE_MAX = 4
 
 
@@ -173,23 +175,32 @@ class ReplaceRules(list):
         self._bump()
 
     def snapshot(self):
-        """Copy list membership while retaining O(1) invalidation tracking."""
-        return _ReplaceRulesSnapshot(self)
+        """Freeze list membership while retaining O(1) invalidation tracking."""
+        return _ReplaceRulesSnapshot(tuple(self), self)
 
 
-class _ReplaceRulesSnapshot(list):
-    """A shallow list snapshot that follows edits to its source rule rows."""
+@dataclass(frozen=True, slots=True)
+class _ReplaceRulesSnapshot(Sequence[dict[str, str]]):
+    """Read-only shallow snapshot that follows edits to its source rule rows."""
 
-    def __init__(self, source: ReplaceRules):
-        super().__init__(source)
-        self._source = source
+    _items: tuple[dict[str, str], ...]
+    _source: ReplaceRules
+
+    def __getitem__(self, index):
+        return self._items[index]
+
+    def __len__(self):
+        return len(self._items)
+
+    def __iter__(self):
+        return iter(self._items)
 
     @property
     def revision(self):
         return self._source.revision
 
 
-def _rules_signature(rules: list[dict[str, str]]):
+def _rules_signature(rules: Sequence[dict[str, str]]):
     """編譯快取的內容簽章。
 
     ReplaceRules：revision（O(1)）。其他清單：逐條 (from, to)，
@@ -216,7 +227,7 @@ class _CompiledRules:
       因此串接替換（dst 內含其他規則的 src）結果與逐條檢查完全相同。
     """
 
-    def __init__(self, rules: list[dict[str, str]]):
+    def __init__(self, rules: Sequence[dict[str, str]]):
         literal_rules: list[tuple[str, str]] = []
         regex_rules: list[tuple[re.Pattern, str]] = []
         keywords: set[str] = set()
@@ -307,7 +318,7 @@ class _CompiledRules:
         return text
 
 
-def _get_compiled_rules(rules: list[dict[str, str]]) -> _CompiledRules:
+def _get_compiled_rules(rules: Sequence[dict[str, str]]) -> _CompiledRules:
     """依規則清單取得（或建立）編譯好的規則。
 
     以清單物件與內容簽章判斷：新清單、增刪、以及就地修改 from / to 都會重建
@@ -327,7 +338,7 @@ def _get_compiled_rules(rules: list[dict[str, str]]) -> _CompiledRules:
     return compiled
 
 
-def apply_replace_rules(text: str, rules: list[dict[str, str]]) -> str:
+def apply_replace_rules(text: str, rules: Sequence[dict[str, str]]) -> str:
     """應用替換規則到給定的文字。
 
     語意與舊版相同（固定字串依長詞優先逐條套用、可串接；正則最後套用；
@@ -515,7 +526,7 @@ def convert_snbt_tree_inplace(
     return changed
 
 
-def recursive_translate_dict(data: Any, rules: list[dict[str, str]]) -> Any:
+def recursive_translate_dict(data: Any, rules: Sequence[dict[str, str]]) -> Any:
     """
     (僅用於簡轉繁) 遞迴地對一個字典或列表中的所有字串值進行 OpenCC 轉換和規則替換。
     """
@@ -529,7 +540,7 @@ def recursive_translate_dict(data: Any, rules: list[dict[str, str]]) -> Any:
 
 
 def recursive_translate(
-    data: Any, rules: list[dict[str, str]], custom_translations: dict[str, str]
+    data: Any, rules: Sequence[dict[str, str]], custom_translations: dict[str, str]
 ) -> Any:
     """
     修改點：
