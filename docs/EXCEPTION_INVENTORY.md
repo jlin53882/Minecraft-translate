@@ -4,11 +4,11 @@
 > 範圍：`app/`、`translation_tool/`、`main.py` 內所有帶 `noqa: BLE001／S110／S112` 的位置。
 > 命令列 QA 工具（`md_extract_qa.py`、`md_inject_qa.py`）的 `print` 為刻意保留，不在此表。
 
-共 **304** 項；其中 **112** 項尚未在程式碼內寫明原因（以「分類」說明處理方式）。
+共 **303** 項；其中 **112** 項尚未在程式碼內寫明原因（以「分類」說明處理方式）。
 
 | 分類 | 數量 | 意義 |
 |---|---|---|
-| 已記錄／回報 | 270 | 例外處理本身有 log、提示、回報錯誤事件或重新丟出；寬鬆捕捉是為了不中斷整批流程 |
+| 已記錄／回報 | 269 | 例外處理本身有 log、提示、回報錯誤事件或重新丟出；寬鬆捕捉是為了不中斷整批流程 |
 | UI／畫面保護 | 18 | UI 層的畫面更新、icon 快取等；失敗只影響顯示，不影響資料 |
 | 盡力而為（靜默） | 16 | 引擎層、只有 `pass`／`continue`／回傳常數；失敗不影響結果（例如進度回報、還原失敗時以原始例外為準） |
 
@@ -195,7 +195,6 @@
 | `translation_tool/core/kubejs_translator.py:step2_translate_lm._ProgressProxy.set_progress` | BLE001/S110 | 盡力而為（靜默） | UI 進度回報失敗不可中斷翻譯 |
 | `translation_tool/core/kubejs_translator.py:step2_translate_lm._ProgressProxy.set_status` | BLE001/S110 | 盡力而為（靜默） | UI 狀態回報失敗不可中斷翻譯 |
 | `translation_tool/core/kubejs_translator.py:step2_translate_lm` | BLE001/S110 | 盡力而為（靜默） | UI 進度回報失敗不可中斷翻譯 |
-| `translation_tool/core/kubejs_translator.py:run_kubejs_pipeline._count_pending_lang_keys` | BLE001 | 已記錄／回報 | 壞檔不計入總數，但要留下紀錄 |
 | `translation_tool/core/lang_merge_content_copy.py:_compute_patchouli_lang_effectiveness` | BLE001 | 已記錄／回報 | 解析失敗的檔案不計入有效翻譯，已留 debug 紀錄 |
 | `translation_tool/core/lang_merge_content_copy.py:_compute_patchouli_lang_effectiveness` | BLE001 | 已記錄／回報 | 單一檔案失敗不中斷整批統計，已留 debug 紀錄 |
 | `translation_tool/core/lang_merge_content_copy.py:process_content_or_copy_file_impl` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |

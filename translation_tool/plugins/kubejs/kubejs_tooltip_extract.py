@@ -7,9 +7,16 @@
 import json
 import os
 import re
+import shutil
+import uuid
 from collections import defaultdict
 from pathlib import Path
 
+from translation_tool.core.kubejs_translator_state import (
+    atomic_write_json,
+    load_owned_files,
+    sync_managed_tree,
+)
 from translation_tool.utils.log_unit import (
     log_debug,
     log_error,
@@ -536,6 +543,7 @@ def extract(
     source_dir: str | None = None,
     output_dir: str | None = None,
     *,
+    exclude_dir: str | None = None,
     session=None,
     progress_base: float = 0.0,
     progress_span: float = 1.0,
@@ -552,7 +560,10 @@ def extract(
     src_input = source_dir or "SOURCE_DIR_NOT_SET"
     src_root = Path(resolve_kubejs_root(src_input)).resolve()
     out_root = Path(output_dir or "OUTPUT_DIR_NOT_SET").resolve()
+    out_root.parent.mkdir(parents=True, exist_ok=True)
     out_root.mkdir(parents=True, exist_ok=True)
+    stage_root = out_root.parent / f".{out_root.name}.extract-{uuid.uuid4().hex}"
+    stage_root.mkdir(parents=True, exist_ok=False)
 
     log_info(f"🚀 開始提取流程 | 來源: {src_root} | 輸出: {out_root}")
 
@@ -568,9 +579,27 @@ def extract(
 
     # 2. 預掃描檔案總數（用於精確計算進度條）
     all_files_path = []
-    for root, _, files in os.walk(src_root):
+    excluded_root = Path(exclude_dir).resolve() if exclude_dir else None
+    for root, directories, files in os.walk(src_root):
+        if excluded_root is not None:
+            kept_directories = []
+            for directory in directories:
+                candidate = (Path(root) / directory).resolve()
+                try:
+                    candidate.relative_to(excluded_root)
+                except ValueError:
+                    kept_directories.append(directory)
+            directories[:] = kept_directories
         for f in files:
-            all_files_path.append(os.path.join(root, f))
+            candidate = (Path(root) / f).resolve()
+            if excluded_root is not None:
+                try:
+                    candidate.relative_to(excluded_root)
+                except ValueError:
+                    pass
+                else:
+                    continue
+            all_files_path.append(str(candidate))
 
     total_files = max(1, len(all_files_path))
     processed_count = 0
@@ -584,6 +613,7 @@ def extract(
     for file_path in all_files_path:
         file_name = os.path.basename(file_path)
         rel_dir = os.path.relpath(os.path.dirname(file_path), src_root)
+        relative_parts = {part.lower() for part in Path(rel_dir).parts}
 
         extracted = {}  # 存放當前檔案提取出的 Key-Value
         id_counters = defaultdict(int)
@@ -591,9 +621,7 @@ def extract(
 
         try:
             # --- A) 處理 KubeJS 腳本 (.js) ---
-            if file_name.endswith(".js") and "client_scripts" in file_path.replace(
-                "\\", "/"
-            ):
+            if file_name.lower().endswith(".js") and "client_scripts" in relative_parts:
                 log_debug(f"正在分析 JS 腳本: {file_name}")
                 with open(file_path, "r", encoding="utf-8") as f:
                     content = f.read()
@@ -685,9 +713,7 @@ def extract(
                 )
 
             # --- B) 處理語言檔 (.json) ---
-            elif file_name.endswith(".json") and "/lang/" in file_path.replace(
-                "\\", "/"
-            ):
+            elif file_name.lower().endswith(".json") and "lang" in relative_parts:
                 log_debug(f"正在讀取 Lang JSON: {file_name}")
                 with open(file_path, "r", encoding="utf-8") as f:
                     raw = f.read().lstrip("\ufeff")  # 處理可能的 BOM
@@ -715,7 +741,7 @@ def extract(
 
         # --- C) 輸出與進度更新 ---
         if extracted:
-            out_dir = out_root / rel_dir
+            out_dir = stage_root / rel_dir
             out_dir.mkdir(parents=True, exist_ok=True)
             out_path = out_dir / to_json_name(file_name)
 
@@ -732,6 +758,27 @@ def extract(
             p = progress_base + (processed_count / total_files) * progress_span
             session.set_progress(min(max(p, 0.0), 0.999))
 
+    # Commit a complete extraction snapshot only after every input file parsed.
+    write_conflicts: list[str] = []
+    stale_removed = 0
+    if errors_count == 0:
+        manifest_path = (
+            out_root.parent / f".{out_root.name}.kubejs-extract-manifest.json"
+        )
+        previous_owned = load_owned_files(manifest_path)
+        owned, write_conflicts, stale_removed = sync_managed_tree(
+            stage_root, out_root, previous_owned
+        )
+        if write_conflicts:
+            errors_count += len(write_conflicts)
+            for relative in write_conflicts:
+                log_error(
+                    f"❌ 保留了未受本流程管理或已修改的抽取檔，未覆寫：{out_root / relative}"
+                )
+        atomic_write_json(manifest_path, {"version": 1, "files": owned})
+
+    shutil.rmtree(stage_root, ignore_errors=True)
+
     # 4. 完成報告
     summary = {
         "kubejs_dir": str(src_root),
@@ -739,6 +786,8 @@ def extract(
         "extracted_files": extracted_files_count,
         "extracted_keys_total": extracted_keys_total,
         "errors_count": errors_count,  # ✅ 建議加上
+        "write_conflicts": len(write_conflicts),
+        "stale_files_removed": stale_removed,
     }
 
     if errors_count:

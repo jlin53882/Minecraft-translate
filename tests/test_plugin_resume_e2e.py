@@ -162,7 +162,9 @@ def _read_tree(root: Path, pattern: str = "*") -> dict[str, str]:
     return {
         p.relative_to(root).as_posix(): content(p)
         for p in sorted(root.rglob(pattern))
-        if p.is_file() and not p.name.startswith("translation_map")
+        if p.is_file()
+        and ".pipeline" not in p.relative_to(root).parts
+        and not p.name.startswith("translation_map")
     }
 
 
@@ -279,6 +281,7 @@ class KubejsFlow(Flow):
         "step_translate": True,
         "step_inject": True,
         "write_new_cache": True,
+        "source_mode": "fresh",
     }
     edit_marker = ("kubejs/client_scripts/test.js", "Scene text 0", "Edited scene")
     inject_option = "step_inject"

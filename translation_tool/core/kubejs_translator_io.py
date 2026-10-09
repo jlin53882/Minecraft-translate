@@ -13,6 +13,8 @@ from typing import Any
 
 import orjson
 
+from translation_tool.core.kubejs_translator_state import atomic_write_bytes
+
 log = logging.getLogger(__name__)
 
 
@@ -50,4 +52,4 @@ def write_json_orjson_impl(path: Path, data: dict) -> None:
 
     normalized = _normalize_json_keys(data)
     b = orjson.dumps(normalized, option=orjson.OPT_INDENT_2)
-    path.write_bytes(b)
+    atomic_write_bytes(path, b)
