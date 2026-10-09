@@ -1598,52 +1598,82 @@ class TranslationDB:
         with self._tx() as conn:
             rows = self._same_content(conn, entry_id)
             ver_self = next((v for eid, v, *_ in rows if eid == entry_id), "")
-            for eid, ver, old, src in rows:
-                if eid != entry_id and not propagate:
-                    continue
-                prev = conn.execute(
-                    "SELECT zh_tw, checker, review_status, revision FROM translation "
-                    "WHERE entry_id=? AND source=?",
-                    (eid, SRC_MANUAL),
-                ).fetchone()
-                if prev and prev[0] == text:
-                    continue
-                conn.execute(
+            candidates = [row for row in rows if propagate or int(row[0]) == entry_id]
+            candidate_ids = [int(row[0]) for row in candidates]
+            previous: dict[int, tuple] = {}
+            for start in range(0, len(candidate_ids), _CHUNK):
+                chunk = candidate_ids[start : start + _CHUNK]
+                marks = ",".join("?" for _ in chunk)
+                previous.update(
+                    (int(row[0]), row[1:])
+                    for row in conn.execute(
+                        "SELECT entry_id, zh_tw, checker, review_status, revision "
+                        "FROM translation WHERE source=? "
+                        f"AND entry_id IN ({marks})",
+                        (SRC_MANUAL, *chunk),
+                    ).fetchall()
+                )
+
+            changed = [
+                (row, previous.get(int(row[0])))
+                for row in candidates
+                if previous.get(int(row[0])) is None or previous[int(row[0])][0] != text
+            ]
+            if changed:
+                conn.executemany(
                     "INSERT INTO translation (entry_id, source, zh_tw, checker, review_status) "
                     "VALUES (?,?,?,'','unreviewed') "
                     "ON CONFLICT(entry_id, source) DO UPDATE SET "
                     "zh_tw = excluded.zh_tw, checker = '', "
                     "review_status = 'unreviewed', "
                     "updated_at = CURRENT_TIMESTAMP",
-                    (eid, SRC_MANUAL, text),
+                    ((int(row[0]), SRC_MANUAL, text) for row, _prev in changed),
                 )
-                new_revision = conn.execute(
-                    "SELECT revision FROM translation WHERE entry_id=? AND source=?",
-                    (eid, SRC_MANUAL),
-                ).fetchone()[0]
-                conn.execute(
+
+                changed_ids = [int(row[0]) for row, _prev in changed]
+                revisions: dict[int, int] = {}
+                for start in range(0, len(changed_ids), _CHUNK):
+                    chunk = changed_ids[start : start + _CHUNK]
+                    marks = ",".join("?" for _ in chunk)
+                    revisions.update(
+                        (int(row[0]), int(row[1]))
+                        for row in conn.execute(
+                            "SELECT entry_id, revision FROM translation "
+                            f"WHERE source=? AND entry_id IN ({marks})",
+                            (SRC_MANUAL, *chunk),
+                        ).fetchall()
+                    )
+
+                history_rows = []
+                for row, prev in changed:
+                    eid, ver, old, src = row
+                    prev_manual = prev[0] if prev else None
+                    history_rows.append(
+                        (
+                            eid,
+                            batch,
+                            actor,
+                            "manual",
+                            old or "",
+                            text,
+                            prev_manual,
+                            "" if eid == entry_id else f"同步自 {ver_self}",
+                            prev[1] if prev else None,
+                            prev[2] if prev else None,
+                            "",
+                            "unreviewed",
+                            prev[3] if prev else None,
+                            revisions[int(eid)],
+                        )
+                    )
+                    done.append(Impact(eid, ver, old or "", src, eid == entry_id))
+                conn.executemany(
                     "INSERT INTO history (entry_id, batch, actor, action, old_zh_tw, "
                     "new_zh_tw, prev_manual, note, prev_checker, prev_review_status, "
                     "new_checker, new_review_status, prev_revision, new_revision) "
                     "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                    (
-                        eid,
-                        batch,
-                        actor,
-                        "manual",
-                        old or "",
-                        text,
-                        prev[0] if prev else None,
-                        "" if eid == entry_id else f"同步自 {ver_self}",
-                        prev[1] if prev else None,
-                        prev[2] if prev else None,
-                        "",
-                        "unreviewed",
-                        prev[3] if prev else None,
-                        new_revision,
-                    ),
+                    history_rows,
                 )
-                done.append(Impact(eid, ver, old or "", src, eid == entry_id))
             self._refresh(conn, [i.entry_id for i in done])
         return done
 

@@ -25,6 +25,13 @@ from app.services_impl.moddb_source_service import (
     source_label,
     source_tone,
 )
+from app.tasks.operation_registry import (
+    CancellationPolicy,
+    CommitPolicy,
+    DurabilityPolicy,
+    ShutdownPolicy,
+    launch_page_operation,
+)
 from app.ui import design, kit
 from app.ui.design import C
 from app.ui.mc_text import mc_text_spans
@@ -90,6 +97,7 @@ class EntriesPanel(ft.Column):
         self.sug_tab = "key"
         self._db_identity = None
         self._review_preview: list[ReviewPreviewItem] = []
+        self._save_running = False
 
         self._build_filters()
         self._build_list_card()
@@ -634,27 +642,101 @@ class EntriesPanel(ft.Column):
     def _save(self, _e=None) -> None:
         entry, db = self.selected, self.db()
         text = self.pending_text()
-        if entry is None or db is None or not text:
+        if entry is None or db is None or not text or self._save_running:
             return
+        propagate = bool(self.sync_row.value)
+        self._save_running = True
+        self.save_btn.disabled = True
+        self.saved_text.value = "正在儲存並同步其他版本…" if propagate else "正在儲存…"
+        self._safe_update()
+
+        def save_in_background() -> None:
+            done = None
+            error = None
+            try:
+                done = db.save_manual(entry.id, text, actor=ACTOR, propagate=propagate)
+            except ValueError as exc:
+                error = ("validation", exc)
+            except sqlite3.Error as exc:
+                error = ("database", exc)
+            except Exception as exc:  # noqa: BLE001 - worker boundary reports unexpected failures
+                error = ("unexpected", exc)
+                log_exception(
+                    f"Mod 資料庫手動儲存發生未預期錯誤："
+                    f"{entry.mc_version} {entry.mod_id} {entry.key}"
+                )
+
+            run_task = getattr(self._page, "run_task", None)
+            try:
+                if callable(run_task):
+                    run_task(
+                        self._apply_save_result_async, db, entry, text, done, error
+                    )
+                else:
+                    self._apply_save_result(db, entry, text, done, error)
+            except Exception as exc:  # noqa: BLE001 - a disposed page may reject the result callback
+                log_warning(f"Mod 資料庫儲存結果無法排回畫面：{exc!r}")
+
         try:
-            done = db.save_manual(
-                entry.id, text, actor=ACTOR, propagate=self.sync_row.value
-            )
-        except ValueError as exc:
-            log_warning(
-                f"Mod 資料庫儲存被拒絕：{entry.mc_version} {entry.mod_id} {entry.key}（{exc!r}）"
-            )
-            show_snack(self._page, str(exc), C.RED)
-            return
-        except sqlite3.Error as exc:
-            log_exception(
-                f"Mod 資料庫儲存失敗：{entry.mc_version} {entry.mod_id} {entry.key}"
-            )
-            show_snack(
+            launched = launch_page_operation(
                 self._page,
-                f"儲存失敗（資料庫錯誤：{exc}）。可能是資料庫被其他程式鎖住，請稍後再試；詳情見後台 log",
-                C.RED,
+                save_in_background,
+                name="Mod 資料庫手動儲存",
+                owner="moddb-manual-save",
+                cancellation=CancellationPolicy.NON_CANCELLABLE,
+                commit=CommitPolicy.ATOMIC,
+                durability=DurabilityPolicy.USER_ACTION,
+                shutdown=ShutdownPolicy.ALLOW_TO_FINISH,
             )
+        except Exception as exc:  # noqa: BLE001 - restore the editor if the worker cannot launch
+            self._save_running = False
+            log_exception(
+                f"Mod 資料庫手動儲存無法啟動："
+                f"{entry.mc_version} {entry.mod_id} {entry.key}"
+            )
+            self.saved_text.value = ""
+            show_snack(self._page, f"儲存無法啟動：{exc}", C.RED)
+            self._update_impact()
+            self._safe_update()
+            return
+        if not launched:
+            self._save_running = False
+            self.saved_text.value = ""
+            show_snack(self._page, "應用程式正在關閉，未啟動儲存。", C.GOLD)
+            self._update_impact()
+            self._safe_update()
+
+    async def _apply_save_result_async(self, db, entry, text, done, error) -> None:
+        self._apply_save_result(db, entry, text, done, error)
+
+    def _apply_save_result(self, db, entry, text, done, error) -> None:
+        self._save_running = False
+        if error is not None:
+            kind, exc = error
+            if kind == "validation":
+                log_warning(
+                    f"Mod 資料庫儲存被拒絕：{entry.mc_version} {entry.mod_id} "
+                    f"{entry.key}（{exc!r}）"
+                )
+                show_snack(self._page, str(exc), C.RED)
+            elif kind == "database":
+                log_exception(
+                    f"Mod 資料庫儲存失敗：{entry.mc_version} {entry.mod_id} {entry.key}"
+                )
+                show_snack(
+                    self._page,
+                    f"儲存失敗（資料庫錯誤：{exc}）。可能是資料庫被其他程式鎖住，請稍後再試；詳情見後台 log",
+                    C.RED,
+                )
+            else:
+                show_snack(self._page, f"儲存失敗：{exc}；詳情見後台 log", C.RED)
+            if self.selected is not None and self.selected.id == entry.id:
+                self.saved_text.value = ""
+            self._update_impact()
+            self._safe_update()
+            return
+
+        if done is None:
             return
         others = [i.mc_version for i in done if not i.is_self]
         log_info(
@@ -666,11 +748,19 @@ class EntriesPanel(ft.Column):
             if others
             else "已儲存"
         )
-        self._load_list(page=self.pager.current_page, keep_scroll=True)
-        self.saved_text.value = message
         show_snack(self._page, message, C.EM, text_color=C.ON_EM)
-        if self._on_changed:
-            self._on_changed()
+        if self.db() is db:
+            same_entry = self.selected is not None and self.selected.id == entry.id
+            unchanged_editor = same_entry and self.pending_text() == text
+            if unchanged_editor:
+                self._load_list(page=self.pager.current_page, keep_scroll=True)
+                if self.selected is not None and self.selected.id == entry.id:
+                    self.saved_text.value = message
+            elif same_entry:
+                self.saved_text.value = f"{message}；目前輸入的變更尚未儲存。"
+            if self._on_changed:
+                self._on_changed()
+        self._update_impact()
         self._safe_update()
 
     def _confirm(self, _e=None) -> None:

@@ -26,7 +26,7 @@ class ReviewScopeController:
         entry, db = panel.selected, panel.db()
         text = panel.pending_text()
         changed = bool(entry and db and text and text != entry.zh_tw)
-        panel.save_btn.disabled = not changed
+        panel.save_btn.disabled = panel._save_running or not changed
         ready = bool(
             entry
             and db

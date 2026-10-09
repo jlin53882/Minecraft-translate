@@ -298,6 +298,7 @@ def entries(db_path):
     seed(db_path)
     db = TranslationDB(db_path)
     page = mock_page()
+    page.run_thread = lambda target: target()
     panel = entries_panel.EntriesPanel(page, lambda: db)
     panel.refresh()
     yield panel
@@ -339,6 +340,7 @@ def test_entries_edit_shows_impact_and_save_propagates(entries):
     )
 
     entries._save()
+    entries._page._run_all_tasks()
     assert "同步 1 個版本" in entries.saved_text.value
     db = entries.db()
     old = next(r for r in db.list_entries("1.20.1")[0] if r.key == "item.foo.a")
@@ -361,6 +363,7 @@ def test_entries_sync_switch_off_only_changes_current_version(entries):
         or entries.impact_box.visible
     )
     entries._save()
+    entries._page._run_all_tasks()
     db = entries.db()
     other = next(r for r in db.list_entries("1.20.1")[0] if r.key == "item.foo.a")
     assert other.zh_tw == "鋼外殼"
@@ -382,6 +385,7 @@ def test_entries_revert_restores_previous_translation(entries):
     entries.select(foo_a.id)
     entries.tw_field.value = "新譯文"
     entries._save()
+    entries._page._run_all_tasks()
     history = entries.detail.history[0]
     entries._revert(history.id)
     db = entries.db()
@@ -641,7 +645,9 @@ def special_entries(db_path):
             ScanItem(KIND_LANG, "foo", "tip.b", "Plain Text Here", "純文字"),
         ],
     )
-    panel = entries_panel.EntriesPanel(mock_page(), lambda: db)
+    page = mock_page()
+    page.run_thread = lambda target: target()
+    panel = entries_panel.EntriesPanel(page, lambda: db)
     panel.refresh()
     yield panel
     db.close()
@@ -680,6 +686,7 @@ def test_saving_keeps_newlines_codes_and_surrounding_whitespace(special_entries)
     panel.tw_field.value = " §c警告§r %s\n第二行\n"
     panel._on_text_change()
     panel._save()
+    panel._page._run_all_tasks()
     stored = panel.db().get_entry(panel.selected.id).zh_tw
     assert stored == " §c警告§r %s\n第二行\n"
 
@@ -761,7 +768,9 @@ def test_scan_panel_imports_a_translated_zip_directly(db_path, tmp_path, monkeyp
 def test_entries_and_overview_show_unknown_original_text(db_path):
     db = TranslationDB(db_path)
     db.ingest("1.21.1", [ScanItem(KIND_LANG, "foo", "item.foo.a", "", "鋼製外殼")])
-    panel = entries_panel.EntriesPanel(mock_page(), lambda: db)
+    page = mock_page()
+    page.run_thread = lambda target: target()
+    panel = entries_panel.EntriesPanel(page, lambda: db)
     panel.refresh()
     assert entries_panel.NO_SOURCE_TEXT == panel.src_text.value
     assert "（原文未知）" in texts_of(panel.list_view)
@@ -1273,7 +1282,9 @@ def test_closed_batch_preview_discards_a_late_plan(db_path, monkeypatch):
 def test_invalid_custom_date_has_error_state_and_blocks_batch_query(db_path):
     seed(db_path)
     db = TranslationDB(db_path)
-    panel = entries_panel.EntriesPanel(mock_page(), lambda: db)
+    page = mock_page()
+    page.run_thread = lambda target: target()
+    panel = entries_panel.EntriesPanel(page, lambda: db)
     panel.refresh()
     panel.advanced_filters.time_kind.value = "effective_updated"
     panel.advanced_filters.time_preset.value = "custom"
@@ -1497,7 +1508,9 @@ def test_entries_save_keeps_scroll_position_and_selects_the_next_entry(db_path):
         "1.21.1",
         [ScanItem(KIND_LANG, "foo", f"item.foo.{i}", f"Text {i}") for i in range(6)],
     )
-    panel = entries_panel.EntriesPanel(mock_page(), lambda: db)
+    page = mock_page()
+    page.run_thread = lambda target: target()
+    panel = entries_panel.EntriesPanel(page, lambda: db)
     panel.refresh()
     scrolls: list[float] = []
     panel._scroll_list_to = scrolls.append  # 記錄清單被捲到哪裡
@@ -1512,6 +1525,7 @@ def test_entries_save_keeps_scroll_position_and_selects_the_next_entry(db_path):
     panel.tw_field.value = "文字二"
     panel._on_text_change()
     panel._save()
+    page._run_all_tasks()
 
     assert scrolls[-1] == 420.0  # 儲存後維持捲動位置，不跳回最上方
     assert [r.key for r in panel.rows] == keys[:2] + keys[3:]  # 存好的不再是「未翻譯」
@@ -1530,7 +1544,9 @@ def test_entries_save_on_the_last_row_of_the_last_page_goes_back_a_page(db_path)
             for i in range(count)
         ],
     )
-    panel = entries_panel.EntriesPanel(mock_page(), lambda: db)
+    page = mock_page()
+    page.run_thread = lambda target: target()
+    panel = entries_panel.EntriesPanel(page, lambda: db)
     panel.refresh()
     panel._on_state("none")
     panel._load_list(page=2, keep_selection=False)
@@ -1538,6 +1554,7 @@ def test_entries_save_on_the_last_row_of_the_last_page_goes_back_a_page(db_path)
     panel.tw_field.value = "最後一筆"
     panel._on_text_change()
     panel._save()
+    page._run_all_tasks()
     assert panel.pager.current_page == 1 and len(panel.rows) == entries_panel.PAGE_SIZE
     db.close()
 
