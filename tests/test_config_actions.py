@@ -1188,3 +1188,54 @@ def test_chatgpt_settings_save_without_gemini_key_validation():
     assert saved["lm_translator"]["chatgpt_model_settings"] == {
         "gpt-5-codex": {"max_input_token_budget": 18000}
     }
+
+
+def test_chatgpt_settings_save_does_not_require_an_enabled_gemini_model():
+    from app.views.config.config_actions import save_config_from_view
+
+    view = _make_full_save_view()
+    view.controls_map["lm_translator.provider"] = SimpleNamespace(value="chatgpt")
+    view.controls_map["lm_translator.chatgpt_model"] = SimpleNamespace(
+        value="gpt-5-codex"
+    )
+    view.models_column.controls[0]._checkbox.value = False
+    view.collect_chatgpt_model_settings = MagicMock(return_value={})
+    saved = []
+
+    result = save_config_from_view(
+        view,
+        load_config_json_fn=_make_base_config,
+        save_config_json_fn=lambda config: (saved.append(config), True)[1],
+        validate_api_keys_from_ui_fn=lambda _keys: pytest.fail(
+            "ChatGPT mode must not validate Gemini API keys"
+        ),
+    )
+
+    assert result is True
+    assert len(saved) == 1
+    assert saved[0]["lm_translator"]["models"]["test-model"]["enabled"] is False
+
+
+def test_chatgpt_settings_save_requires_a_selected_chatgpt_model(monkeypatch):
+    from app.views.config.config_actions import save_config_from_view
+
+    view = _make_full_save_view()
+    view.controls_map["lm_translator.provider"] = SimpleNamespace(value="chatgpt")
+    view.controls_map["lm_translator.chatgpt_model"] = SimpleNamespace(value=" ")
+    writes = []
+    snacks = []
+    monkeypatch.setattr(
+        "app.views.config.config_actions.show_snack",
+        lambda _page, message, *_args: snacks.append(message),
+    )
+
+    result = save_config_from_view(
+        view,
+        load_config_json_fn=_make_base_config,
+        save_config_json_fn=lambda config: (writes.append(config), True)[1],
+        validate_api_keys_from_ui_fn=lambda _keys: None,
+    )
+
+    assert result is False
+    assert writes == []
+    assert "選擇模型" in snacks[-1]

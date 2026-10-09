@@ -4,6 +4,8 @@
 維護注意：本檔案的函式 docstring 用於維護說明，不代表行為變更。
 """
 
+import random
+from copy import deepcopy
 from dataclasses import dataclass, field
 
 import requests
@@ -56,6 +58,8 @@ OVERLOAD_RETRY_WAIT_SEC = 12  # Overload 重試等待秒數
 # 同一把 API key 累積這麼多次 503 overload 後，才把「這一把」標記為失敗並換下一把。
 # 次數是逐把 key 計算：不同 key 的 overload 不互相累加。
 OVERLOAD_KEY_SWITCH_THRESHOLD = 3
+CHATGPT_MAX_RETRIES = 3
+CHATGPT_MAX_RETRY_AFTER_SEC = 120
 
 # =========================================================
 # Size Constants - 大小相關常數
@@ -346,6 +350,7 @@ class _BatchRuntime:
     batch_items: list[dict]
     total: int | None
     lm_cfg: dict
+    provider: str
     batch_profile: str
     batch_size: int
     budget_cfg: BudgetConfig
@@ -373,6 +378,7 @@ class _BatchRuntime:
     overload_retry_sec: float = OVERLOAD_RETRY_WAIT_SEC
     request_interval_sec: float = 4
     reasoning_effort: str | None = None
+    chatgpt_retry_count: int = 0
 
 
 @dataclass(frozen=True)
@@ -421,7 +427,9 @@ def _build_batch_runtime(
     total: int | None,
 ) -> _BatchRuntime | None:
     """Build configuration and mutable batch state once per call."""
-    lm_cfg = load_config().get("lm_translator", {})
+    config_snapshot = deepcopy(load_config())
+    lm_cfg = config_snapshot.get("lm_translator", {})
+    provider = lm_cfg.get("provider", "gemini")
     profile = _detect_batch_profile(batch_items)
     max_sizes = {
         "lang": lm_cfg.get("initial_batch_size_lang", 200),
@@ -436,7 +444,6 @@ def _build_batch_runtime(
     except (TypeError, ValueError):
         rpm_cooldown = float(RPM_COOLDOWN_SEC)
 
-    provider = lm_cfg.get("provider", "gemini")
     reasoning_effort = None
     if provider == "chatgpt":
         chatgpt_model = str(lm_cfg.get("chatgpt_model") or "").strip()
@@ -447,7 +454,7 @@ def _build_batch_runtime(
                 lm_cfg = {**lm_cfg, "max_input_token_budget": context_budget}
             reasoning_effort = chatgpt_model_reasoning_effort(lm_cfg, chatgpt_model)
     else:
-        models_cfg = get_models_config(load_config())
+        models_cfg = get_models_config(config_snapshot)
         model_pool = [
             name for name, config in models_cfg.items() if config.get("enabled", False)
         ]
@@ -475,6 +482,7 @@ def _build_batch_runtime(
         batch_items=batch_items,
         total=total,
         lm_cfg=lm_cfg,
+        provider=provider,
         batch_profile=profile,
         batch_size=min(len(batch_items), max_size),
         budget_cfg=BudgetConfig.from_config(lm_cfg),
@@ -568,6 +576,11 @@ def _chatgpt_api_error_message(error) -> str:
 
     if code == "refusal":
         return f"ChatGPT 拒絕處理這批翻譯內容，請檢查來源文字後再試。API 詳情：{detail}"
+    if _is_chatgpt_quota_exhaustion(error):
+        return (
+            "ChatGPT 方案用量或 API 配額已耗盡；系統已停止自動重試，"
+            f"請確認方案使用量或帳務限制後再執行。API 詳情：{detail}"
+        )
     if code in {
         "subscription_sharing_usage_limit_exceeded",
         "subscription_sharing_usage_unavailable",
@@ -603,6 +616,79 @@ def _chatgpt_api_error_message(error) -> str:
     return f"ChatGPT 翻譯請求失敗：{detail}"
 
 
+def _is_chatgpt_quota_exhaustion(error) -> bool:
+    """Return whether an API error signals usage/billing exhaustion, not throttling."""
+    markers = (
+        "credit_balance_exhausted",
+        "insufficient_quota",
+        "usage_limit",
+        "spend_limit",
+        "quota_exceeded",
+        "subscription_sharing_usage_limit_exceeded",
+        "subscription_sharing_usage_unavailable",
+    )
+    details = " ".join((str(error.code), str(error.error_type), str(error))).lower()
+    return any(marker in details for marker in markers)
+
+
+def _chatgpt_retryable_error(error) -> bool:
+    """Recognize transient Responses errors without retrying billing failures."""
+    if _is_chatgpt_quota_exhaustion(error):
+        return False
+    code = str(error.code or "").lower()
+    error_type = str(error.error_type or "").lower()
+    if error.status == 429:
+        return error_type == "rate_limit_error" or code in {
+            "slow_down",
+            "rate_limit_exceeded",
+        }
+    if error.status in {408, 500, 502, 503, 504}:
+        return True
+    return code in {
+        "network_error",
+        "server_error",
+        "service_unavailable",
+        "stream_incomplete",
+        "stream_interrupted",
+    } or error_type in {"rate_limit_error", "service_unavailable_error"}
+
+
+def _handle_chatgpt_api_error(runtime: _BatchRuntime, error) -> BatchAction:
+    """Apply bounded, cancellable backoff for transient ChatGPT request failures."""
+    if error.code == "incomplete":
+        log_warning(f"[ChatGPT] 回應未完整完成，縮小批次後重試：{error}")
+        return BatchAction.SHRINK_BATCH
+    if not _chatgpt_retryable_error(error):
+        raise RuntimeError(_chatgpt_api_error_message(error)) from error
+    if runtime.chatgpt_retry_count >= CHATGPT_MAX_RETRIES:
+        raise RuntimeError(
+            f"{_chatgpt_api_error_message(error)} 已達 {CHATGPT_MAX_RETRIES} 次重試上限。"
+        ) from error
+
+    retry_after = getattr(error, "retry_after", None)
+    if retry_after is not None:
+        try:
+            wait_sec = max(0.0, float(retry_after))
+        except (TypeError, ValueError):
+            retry_after = None
+    if retry_after is None:
+        base_delay = min(2**runtime.chatgpt_retry_count, 30)
+        wait_sec = base_delay + random.uniform(0, min(1.0, base_delay * 0.25))
+    if wait_sec > CHATGPT_MAX_RETRY_AFTER_SEC:
+        raise RuntimeError(
+            f"{_chatgpt_api_error_message(error)} 伺服器要求等待 {wait_sec:g} 秒，"
+            f"超過本程式的 {CHATGPT_MAX_RETRY_AFTER_SEC} 秒上限；請稍後重新執行。"
+        ) from error
+
+    runtime.chatgpt_retry_count += 1
+    log_warning(
+        f"[ChatGPT] 暫時性錯誤，{wait_sec:g} 秒後重試 "
+        f"({runtime.chatgpt_retry_count}/{CHATGPT_MAX_RETRIES})：{error}"
+    )
+    interruptible_sleep(wait_sec)
+    return BatchAction.RETRY_SAME_MODEL
+
+
 def _handle_batch_error(
     runtime: _BatchRuntime,
     error: Exception,
@@ -618,10 +704,7 @@ def _handle_batch_error(
     if isinstance(error, ChatGPTOAuthError):
         raise ChatGPTOAuthError(f"ChatGPT OAuth 登入需要處理：{error}") from error
     if isinstance(error, ChatGPTAPIError):
-        if error.code == "incomplete":
-            log_warning(f"[ChatGPT] 回應未完整完成，縮小批次後重試：{error}")
-            return BatchAction.SHRINK_BATCH
-        raise RuntimeError(_chatgpt_api_error_message(error)) from error
+        return _handle_chatgpt_api_error(runtime, error)
 
     status = (
         error.response.status_code
@@ -847,15 +930,16 @@ def _retry_same_source_translations(
     try:
         raise_if_cancelled()
         retry_meta: dict = {}
-        retry_text = call_gemini_requests(
-            model_name=model_name,
-            system_prompt=retry_prompt,
-            payload=retry_round.payload,
-            api_key=api_key,
-            temperature=runtime.model_temperature,
-            max_output_tokens=output_cap,
-            meta_out=retry_meta,
-        ).strip()
+        request_kwargs = _provider_request_kwargs(
+            runtime,
+            model_name,
+            retry_prompt,
+            retry_round.payload,
+            output_cap,
+            retry_meta,
+            api_key,
+        )
+        retry_text = call_gemini_requests(**request_kwargs).strip()
         raise_if_cancelled()
         if (
             not retry_text
@@ -1059,8 +1143,12 @@ def _provider_request_kwargs(
         "temperature": runtime.model_temperature,
         "max_output_tokens": output_cap,
         "meta_out": meta_out,
+        "provider": getattr(
+            runtime, "provider", runtime.lm_cfg.get("provider", "gemini")
+        ),
+        "lm_config": runtime.lm_cfg,
     }
-    if runtime.lm_cfg.get("provider", "gemini") == "chatgpt":
+    if kwargs["provider"] == "chatgpt":
         kwargs["reasoning_effort"] = runtime.reasoning_effort
     return kwargs
 
@@ -1109,9 +1197,7 @@ def _attempt_batch(
             )
             with quota.hold_probe_lease(model_name, owner, lease_sec):
                 api_key = (
-                    runtime.key_cycle.claim()
-                    if runtime.lm_cfg.get("provider", "gemini") == "gemini"
-                    else ""
+                    runtime.key_cycle.claim() if runtime.provider == "gemini" else ""
                 )
                 request_kwargs = _provider_request_kwargs(
                     runtime,
@@ -1123,6 +1209,8 @@ def _attempt_batch(
                     api_key,
                 )
                 raw_text = call_gemini_requests(**request_kwargs).strip()
+            if runtime.provider == "chatgpt":
+                runtime.chatgpt_retry_count = 0
             # A synchronous provider request cannot be interrupted in flight.
             # If cancellation arrived while it was blocked, discard its result
             # before quota state, retries, or downstream writes can observe it.

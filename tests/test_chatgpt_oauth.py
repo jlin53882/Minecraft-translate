@@ -236,6 +236,51 @@ def test_login_completion_exchanges_code_and_persists_rotating_credentials(
     assert "chatgpt.tokens.use.direct" in saved[-1]["scopes"]
 
 
+def test_login_requires_plan_scope_from_token_response_not_callback(
+    monkeypatch, no_credential_file_lock
+):
+    pending = _pending_login()
+    pending.receive_callback(
+        {
+            "state": "expected-state",
+            "code": "single-use-code",
+            "client_id": "registered-client",
+            "scope": "openid chatgpt.tokens.use.direct",
+        }
+    )
+    monkeypatch.setattr(
+        oauth.requests,
+        "post",
+        lambda *_args, **_kwargs: _Response(
+            {
+                "access_token": "access",
+                "refresh_token": "refresh",
+                "id_token": "id-token",
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        pending,
+        "_save_registration",
+        lambda _client_id: None,
+    )
+    monkeypatch.setattr(
+        oauth,
+        "_validate_id_token",
+        lambda *_args, **_kwargs: pytest.fail(
+            "scope validation must reject before storing or validating the identity"
+        ),
+    )
+    monkeypatch.setattr(
+        oauth,
+        "_write_record_unlocked",
+        lambda _record: pytest.fail("inadequately scoped credentials must not persist"),
+    )
+
+    with pytest.raises(oauth.ChatGPTOAuthError, match="尚未授權使用方案額度"):
+        pending.complete()
+
+
 def test_login_completion_rejects_state_mismatch_before_token_exchange(monkeypatch):
     pending = _pending_login()
     pending.receive_callback({"state": "attacker-state", "code": "code"})

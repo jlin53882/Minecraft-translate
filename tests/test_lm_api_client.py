@@ -48,11 +48,9 @@ class TestCallGeminiRequests:
     ):
         from translation_tool.core.lm_api_client import call_gemini_requests
 
+        # A UI setting change after a batch starts must not redirect its request.
         mock_config.return_value = {
-            "lm_translator": {
-                "provider": "chatgpt",
-                "rate_limit": {"timeout": 45},
-            }
+            "lm_translator": {"provider": "gemini", "rate_limit": {"timeout": 5}}
         }
         mock_chatgpt.return_value = '{"items": []}'
         meta = {}
@@ -66,6 +64,8 @@ class TestCallGeminiRequests:
             temperature=0.2,
             meta_out=meta,
             reasoning_effort="high",
+            provider="chatgpt",
+            lm_config={"provider": "chatgpt", "rate_limit": {"timeout": 45}},
         )
 
         assert result == '{"items": []}'

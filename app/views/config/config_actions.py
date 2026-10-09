@@ -122,6 +122,20 @@ def _model_settings_signature(models) -> tuple:
     )
 
 
+def _validate_provider_settings(
+    view, provider, lm_config, api_keys, validate_api_keys_fn, *, show_feedback
+):
+    if provider == "gemini":
+        validate_api_keys_fn(api_keys)
+    elif (
+        provider == "chatgpt" and not str(lm_config.get("chatgpt_model") or "").strip()
+    ):
+        if show_feedback:
+            show_snack(view.page, "請先登入 ChatGPT 並選擇模型；設定尚未儲存。")
+        return False
+    return True
+
+
 def _collect_validated_config(
     view, load_config_json_fn, validate_api_keys_fn, *, show_feedback=True
 ):
@@ -140,8 +154,17 @@ def _collect_validated_config(
             and field.value.strip()
             and field.value.strip() not in LEGACY_API_KEY_PLACEHOLDERS
         ]
-        if config.get("lm_translator", {}).get("provider", "gemini") == "gemini":
-            validate_api_keys_fn(api_keys)
+        lm_config = config.get("lm_translator", {})
+        provider = lm_config.get("provider", "gemini")
+        if not _validate_provider_settings(
+            view,
+            provider,
+            lm_config,
+            api_keys,
+            validate_api_keys_fn,
+            show_feedback=show_feedback,
+        ):
+            return None
         config["lm_translator"]["keys"] = api_keys
         models = _models_from_view(view)
         previous_models = config["lm_translator"].get("models")
@@ -154,7 +177,11 @@ def _collect_validated_config(
         models_changed = _model_settings_signature(models) != _model_settings_signature(
             previous_models
         )
-        if not _has_enabled_model(models) and (previous_has_enabled or models_changed):
+        if (
+            provider == "gemini"
+            and not _has_enabled_model(models)
+            and (previous_has_enabled or models_changed)
+        ):
             if show_feedback:
                 show_snack(view.page, "至少需要保留一個啟用中的模型；設定尚未儲存。")
             return None

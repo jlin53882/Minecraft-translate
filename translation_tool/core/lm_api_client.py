@@ -179,6 +179,8 @@ def call_gemini_requests(
     max_output_tokens: int | None = None,
     meta_out: dict | None = None,
     reasoning_effort: str | None = None,
+    provider: str | None = None,
+    lm_config: dict | None = None,
 ) -> str:
     """以同步 requests 方式呼叫 Gemini generateContent API，並回傳純文字回應。
 
@@ -188,8 +190,14 @@ def call_gemini_requests(
         meta_out: 若提供，會以 ``extract_response_meta`` 的結果更新這個 dict
             （finish_reason、token 用量）。回傳值維持純文字，既有呼叫端不受影響。
     """
-    lm_cfg = load_config().get("lm_translator", {})
-    provider = lm_cfg.get("provider", "gemini")
+    # Batch translation passes its start-of-task snapshot so a settings change
+    # cannot route an in-flight Gemini model to the ChatGPT Responses endpoint.
+    lm_cfg = (
+        lm_config
+        if isinstance(lm_config, dict)
+        else load_config().get("lm_translator", {})
+    )
+    provider = provider if provider is not None else lm_cfg.get("provider", "gemini")
     if provider == "chatgpt":
         from translation_tool.core.openai_codex_client import call_chatgpt_responses
 

@@ -212,3 +212,16 @@ def test_http_error_preserves_status_type_param_and_request_id():
     assert error.request_id == "req_example"
     assert "HTTP 403" in str(error)
     assert "region_not_supported" in str(error)
+
+
+def test_http_error_carries_retry_after_for_batch_backoff():
+    response = requests.Response()
+    response.status_code = 503
+    response.headers["Retry-After"] = "2.5"
+    response._content = json.dumps(
+        {"error": {"type": "service_unavailable_error", "code": "server_is_overloaded"}}
+    ).encode()
+
+    error = client._response_error(response)
+
+    assert error.retry_after == 2.5

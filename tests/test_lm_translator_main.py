@@ -142,8 +142,11 @@ def test_chatgpt_api_errors_get_provider_specific_guidance(api_error, expected):
         param=param,
     )
 
+    from translation_tool.core import lm_translator_main as main
+
+    runtime = MagicMock(chatgpt_retry_count=main.CHATGPT_MAX_RETRIES)
     with pytest.raises(RuntimeError, match=expected) as exc_info:
-        _handle_batch_error(None, error, 0)
+        _handle_batch_error(runtime, error, 0)
 
     assert code in str(exc_info.value)
 
@@ -234,12 +237,109 @@ def test_provider_request_kwargs_only_send_chatgpt_reasoning(provider):
     )
 
     assert kwargs["model_name"] == "selected-model"
+    assert kwargs["provider"] == provider
+    assert kwargs["lm_config"] is runtime.lm_cfg
     assert kwargs["temperature"] == 0.4
     assert kwargs["max_output_tokens"] == 1024
     if provider == "chatgpt":
         assert kwargs["reasoning_effort"] == "high"
     else:
         assert "reasoning_effort" not in kwargs
+
+
+@pytest.mark.parametrize(
+    ("code", "message", "status", "error_type", "retry_after"),
+    [
+        ("slow_down", "Too many requests.", 429, "rate_limit_error", 2),
+        (
+            "server_is_overloaded",
+            "Model overloaded.",
+            503,
+            "service_unavailable_error",
+            None,
+        ),
+        ("stream_interrupted", "Connection reset.", None, "", None),
+    ],
+)
+def test_chatgpt_transient_errors_use_bounded_backoff(
+    monkeypatch, code, message, status, error_type, retry_after
+):
+    from types import SimpleNamespace
+
+    from translation_tool.core import lm_translator_main as main
+    from translation_tool.core.openai_codex_client import ChatGPTAPIError
+
+    waits = []
+    monkeypatch.setattr(main, "interruptible_sleep", waits.append)
+    monkeypatch.setattr(main.random, "uniform", lambda _low, _high: 0)
+    runtime = SimpleNamespace(chatgpt_retry_count=0)
+    error = ChatGPTAPIError(
+        code,
+        message,
+        status=status,
+        error_type=error_type,
+        retry_after=retry_after,
+    )
+
+    action = main._handle_batch_error(runtime, error, 0)
+
+    assert action is main.BatchAction.RETRY_SAME_MODEL
+    assert runtime.chatgpt_retry_count == 1
+    assert waits == [retry_after if retry_after is not None else 1]
+
+
+def test_chatgpt_transient_retry_stops_at_the_configured_limit(monkeypatch):
+    from types import SimpleNamespace
+
+    from translation_tool.core import lm_translator_main as main
+    from translation_tool.core.openai_codex_client import ChatGPTAPIError
+
+    waits = []
+    monkeypatch.setattr(main, "interruptible_sleep", waits.append)
+    monkeypatch.setattr(main.random, "uniform", lambda _low, _high: 0)
+    runtime = SimpleNamespace(chatgpt_retry_count=0)
+    error = ChatGPTAPIError("server_is_overloaded", "Model overloaded.", status=503)
+
+    for _ in range(main.CHATGPT_MAX_RETRIES):
+        assert main._handle_batch_error(runtime, error, 0) is (
+            main.BatchAction.RETRY_SAME_MODEL
+        )
+    with pytest.raises(RuntimeError, match="重試上限"):
+        main._handle_batch_error(runtime, error, 0)
+
+    assert runtime.chatgpt_retry_count == main.CHATGPT_MAX_RETRIES
+    assert len(waits) == main.CHATGPT_MAX_RETRIES
+
+
+@pytest.mark.parametrize(
+    "code",
+    [
+        "insufficient_quota",
+        "credit_balance_exhausted",
+        "subscription_sharing_usage_limit_exceeded",
+    ],
+)
+def test_chatgpt_usage_exhaustion_never_retries(monkeypatch, code):
+    from types import SimpleNamespace
+
+    from translation_tool.core import lm_translator_main as main
+    from translation_tool.core.openai_codex_client import ChatGPTAPIError
+
+    waits = []
+    monkeypatch.setattr(main, "interruptible_sleep", waits.append)
+    runtime = SimpleNamespace(chatgpt_retry_count=0)
+    error = ChatGPTAPIError(
+        code,
+        "Usage limit reached.",
+        status=429,
+        error_type="rate_limit_error",
+    )
+
+    with pytest.raises(RuntimeError):
+        main._handle_batch_error(runtime, error, 0)
+
+    assert runtime.chatgpt_retry_count == 0
+    assert waits == []
 
 
 class TestTranslateBatchSmart:

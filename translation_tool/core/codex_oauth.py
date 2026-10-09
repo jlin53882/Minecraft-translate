@@ -472,7 +472,9 @@ class PendingChatGPTLogin:
             access_token = tokens.get("access_token")
             refresh_token = tokens.get("refresh_token")
             id_token = tokens.get("id_token")
-            granted_scopes = str(tokens.get("scope") or callback.get("scope") or "")
+            # Only the validated token response proves which permissions OpenAI
+            # granted. The authorization callback may echo requested scopes.
+            granted_scopes = str(tokens.get("scope") or "")
             if not all(
                 isinstance(value, str) and value
                 for value in (access_token, refresh_token, id_token)
