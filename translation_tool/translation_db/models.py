@@ -264,12 +264,43 @@ class BatchReplaceChange:
     new_quality_issues: tuple[str, ...] = ()
     old_whitespace_note: str = ""
     new_whitespace_note: str = ""
+    quality_deltas: tuple[QualityIssueDelta, ...] = ()
 
     @property
     def quality_worsened(self) -> bool:
-        return any(
-            issue not in self.old_quality_issues for issue in self.new_quality_issues
-        ) or bool(self.new_whitespace_note and not self.old_whitespace_note)
+        return any(delta.after > delta.before for delta in self.quality_deltas) or bool(
+            self.new_whitespace_note and not self.old_whitespace_note
+        )
+
+    @property
+    def quality_improved(self) -> bool:
+        return any(delta.after < delta.before for delta in self.quality_deltas) or bool(
+            self.old_whitespace_note and not self.new_whitespace_note
+        )
+
+    @property
+    def quality_mixed(self) -> bool:
+        return self.quality_worsened and self.quality_improved
+
+    @property
+    def quality_change_kind(self) -> str:
+        if self.quality_mixed:
+            return "mixed"
+        if self.quality_worsened:
+            return "worsened"
+        if self.quality_improved:
+            return "improved"
+        return "unchanged"
+
+
+@dataclass(frozen=True)
+class QualityIssueDelta:
+    """Count change for one missing/extra source token in a replacement."""
+
+    token: str
+    direction: str
+    before: int
+    after: int
 
 
 @dataclass(frozen=True)

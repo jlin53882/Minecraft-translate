@@ -791,7 +791,11 @@ def test_batch_replace_dialog_pages_all_rows_and_requires_preview_after_selectio
         ],
     )
     dialog = BatchReplaceDialog(
-        mock_page(), lambda: db, EntryFilter(version="1.21.1"), lambda _result: None
+        mock_page(),
+        lambda: db,
+        EntryFilter(version="1.21.1"),
+        lambda _result: None,
+        operation_launcher=lambda target, **_kwargs: (target(), True)[1],
     )
     dialog.find_field.value = "舊"
     dialog.replace_field.value = "新"
@@ -807,6 +811,151 @@ def test_batch_replace_dialog_pages_all_rows_and_requires_preview_after_selectio
     assert dialog.plan is None and dialog.apply_btn.disabled is True
     dialog._preview()
     assert dialog.plan is not None and dialog.plan.update_count == 54
+    db.close()
+
+
+def test_batch_replace_pending_selection_never_displays_executable_stale_extras(
+    db_path,
+):
+    from app.services_impl.moddb_service import EntryFilter
+    from app.views.moddb.batch_replace_dialog import BatchReplaceDialog
+
+    db = TranslationDB(db_path)
+    db.ingest(
+        "1.21.1",
+        [ScanItem(KIND_LANG, "same", "item.same", "Source", "原譯文")],
+    )
+    db.ingest(
+        "1.20.1",
+        [ScanItem(KIND_LANG, "same", "item.same", "Source", "原譯文")],
+    )
+    dialog = BatchReplaceDialog(
+        mock_page(),
+        lambda: db,
+        EntryFilter(version="1.21.1"),
+        lambda _result: None,
+        operation_launcher=lambda target, **_kwargs: (target(), True)[1],
+    )
+    dialog.find_field.value = "原"
+    dialog.replace_field.value = "新"
+    dialog.propagate.value = True
+    dialog._preview()
+    assert dialog.plan is not None
+    assert dialog.plan.extra_version_count == 1
+
+    root_id = dialog.plan.root_ids[0]
+    dialog._toggle_root(root_id, False)
+    assert dialog.plan is None
+    assert all("跨版本" not in text for text in texts_of(dialog.rows))
+    assert dialog.apply_btn.disabled is True
+
+    dialog._preview()
+    assert dialog.plan is not None and dialog.plan.root_ids == ()
+    assert dialog.plan.update_count == 0
+    assert dialog.apply_btn.disabled is True
+    assert all("跨版本" not in text for text in texts_of(dialog.rows))
+    db.close()
+
+
+def test_batch_replace_requires_second_confirmation_of_same_plan(db_path):
+    from app.services_impl.moddb_service import EntryFilter
+    from app.views.moddb.batch_replace_dialog import BatchReplaceDialog
+
+    db = TranslationDB(db_path)
+    db.ingest(
+        "1.21.1",
+        [ScanItem(KIND_LANG, "same", "item.same", "Source", "原譯文")],
+    )
+    page = mock_page()
+    dialog = BatchReplaceDialog(
+        page,
+        lambda: db,
+        EntryFilter(version="1.21.1"),
+        lambda _result: None,
+        operation_launcher=lambda target, **_kwargs: (target(), True)[1],
+    )
+    dialog.find_field.value = "原"
+    dialog.replace_field.value = "新"
+    dialog._preview()
+    approved_plan = dialog.plan
+    assert approved_plan is not None
+    dialog._open_final_confirmation()
+    assert dialog.final_summary.value.find("實際寫入 1") >= 0
+    assert len(page.overlay) == 1
+    dialog.final_ack.value = True
+    dialog.plan = None  # Any changed preview invalidates the final confirmation.
+    dialog._confirm_apply()
+    assert dialog._busy is False
+    assert db.list_entries("1.21.1")[0][0].zh_tw == "原譯文"
+    db.close()
+
+
+def test_batch_replace_final_confirmation_applies_exact_preview(db_path):
+    from app.services_impl.moddb_service import EntryFilter
+    from app.views.moddb.batch_replace_dialog import BatchReplaceDialog
+
+    db = TranslationDB(db_path)
+    db.ingest(
+        "1.21.1",
+        [ScanItem(KIND_LANG, "same", "item.same", "Source", "原譯文")],
+    )
+    page = mock_page()
+    completed = []
+    dialog = BatchReplaceDialog(
+        page,
+        lambda: db,
+        EntryFilter(version="1.21.1"),
+        completed.append,
+        operation_launcher=lambda target, **_kwargs: (target(), True)[1],
+    )
+    dialog.open()
+    dialog.find_field.value = "原"
+    dialog.replace_field.value = "新"
+    dialog._preview()
+    approved_plan = dialog.plan
+    assert approved_plan is not None
+    dialog._open_final_confirmation()
+    dialog.final_ack.value = True
+    dialog._confirm_apply()
+
+    assert len(completed) == 1
+    assert completed[0].updated == approved_plan.update_count == 1
+    row = db.list_entries("1.21.1")[0][0]
+    assert row.zh_tw == "新譯文"
+    assert row.review_status == "unreviewed"
+    assert dialog._dialog_open is False
+    db.close()
+
+
+def test_invalid_custom_date_has_error_state_and_blocks_batch_query(db_path):
+    seed(db_path)
+    db = TranslationDB(db_path)
+    panel = entries_panel.EntriesPanel(mock_page(), lambda: db)
+    panel.refresh()
+    panel.advanced_filters.time_kind.value = "effective_updated"
+    panel.advanced_filters.time_preset.value = "custom"
+    panel.advanced_filters.start_date.value = "2026-02-30"
+    panel.advanced_filters.end_date.value = "2026-03-01"
+    panel.advanced_filters._custom_changed()
+
+    assert panel._list_error == "日期格式請使用 YYYY-MM-DD"
+    assert panel.count_badge.value.startswith("日期條件錯誤：")
+    assert panel.batch_replace_btn.disabled is True
+    assert "無法套用日期篩選" in texts_of(panel.list_view)
+    with pytest.raises(ValueError, match="日期格式"):
+        panel.advanced_filters.time_filter()
+
+    # Changing another filter cannot silently turn an invalid custom date into
+    # an ordinary empty result set.
+    panel.advanced_filters.time_kind.value = "none"
+    panel.advanced_filters._selection_changed()
+    assert panel._list_error is not None
+    assert panel.batch_replace_btn.disabled is True
+
+    panel.advanced_filters.start_date.value = "2026-03-01"
+    panel.advanced_filters._custom_changed()
+    assert panel._list_error is None
+    assert panel.count_badge.value.endswith("筆")
     db.close()
 
 

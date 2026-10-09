@@ -84,6 +84,7 @@ class EntriesPanel(ft.Column):
         self.query = ""
         self.rows: list[EntryRow] = []
         self.total = 0
+        self._list_error: str | None = None
         self.selected: EntryRow | None = None
         self.detail: EntryDetail | None = None
         self.sug_tab = "key"
@@ -311,6 +312,7 @@ class EntriesPanel(ft.Column):
             self._db_identity = None
             self.version_dd.options = []
             self.rows, self.total = [], 0
+            self._list_error = None
             self._render_list()
             self._show_editor(None)
             return
@@ -375,7 +377,9 @@ class EntriesPanel(ft.Column):
         )
         if db is None or not self.version:
             self.rows, self.total = [], 0
+            self._list_error = None
         else:
+            self._list_error = None
             try:
                 self.rows, self.total = db.list_entries(
                     criteria=self._entry_filter(),
@@ -384,6 +388,7 @@ class EntriesPanel(ft.Column):
                 )
             except ValueError as exc:
                 self.rows, self.total = [], 0
+                self._list_error = str(exc)
                 self.advanced_filters.error_text.value = str(exc)
                 self.advanced_filters.error_text.visible = True
             if not self.rows and self.total and page > 1:
@@ -407,13 +412,20 @@ class EntriesPanel(ft.Column):
         self.select(current.id if current else None)
 
     def _render_list(self, *, keep_scroll: bool = False) -> None:
-        self.count_badge.value = f"{format_count(self.total)} 筆"
+        self.count_badge.value = (
+            f"日期條件錯誤：{self._list_error}"
+            if self._list_error
+            else f"{format_count(self.total)} 筆"
+        )
+        self.batch_replace_btn.disabled = bool(self._list_error)
         self.advanced_filters.set_summary()
         tiles = [self._row_tile(r) for r in self.rows] or [
             kit.empty_state(
-                "沒有符合的條目",
-                "調整上方篩選，或先到「掃描匯入」建立資料",
-                icon=ft.Icons.SEARCH_OFF,
+                "無法套用日期篩選" if self._list_error else "沒有符合的條目",
+                self._list_error or "調整上方篩選，或先到「掃描匯入」建立資料",
+                icon=ft.Icons.ERROR_OUTLINE
+                if self._list_error
+                else ft.Icons.SEARCH_OFF,
             )
         ]
         # 換篩選／換頁後清單內容大幅改變：全新 key 避免 Flet 配對舊項目而殘留上一份清單

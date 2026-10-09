@@ -199,9 +199,11 @@ class AdvancedFilters:
         self._on_change()
 
     def time_filter(self) -> TimeFilter | None:
+        # Invalid custom dates remain an error even if another filter control is
+        # changed or the time-kind dropdown is temporarily set to "none".
+        if self.time_preset.value == "custom" and self.error_text.visible:
+            raise ValueError(self.error_text.value)
         kind = str(self.time_kind.value or "none")
-        if kind == "none":
-            return None
         if self.time_preset.value == "custom":
             bounds = custom_date_bounds(
                 self.start_date.value or "", self.end_date.value or ""
@@ -212,6 +214,8 @@ class AdvancedFilters:
             bounds = self._time_bounds
         if self.error_text.visible:
             raise ValueError(self.error_text.value)
+        if kind == "none":
+            return None
         unknown_policy = (
             str(self.unknown_policy.value or "include")
             if kind == "translation_created"

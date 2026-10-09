@@ -53,6 +53,7 @@ from translation_tool.translation_db.models import (
 from translation_tool.translation_db.quality import (
     matches_quality,
     quality_state,
+    token_issue_deltas,
     token_issues,
     whitespace_note,
 )
@@ -71,6 +72,7 @@ from translation_tool.translation_db.schema import (
     rank_sql,
 )
 from translation_tool.translation_db.source_catalog import SourceCatalog
+from translation_tool.utils.cancellation import raise_if_cancelled
 
 _ENTRY_COLS = "e.id, e.kind, e.mc_version, e.mod_id, e.key, e.en_us"
 _CHUNK = 400  # SQLite 變數上限相容的批次大小
@@ -825,6 +827,7 @@ class TranslationDB:
         conn: sqlite3.Connection | None = None,
         limit: int | None = None,
         offset: int = 0,
+        progress_callback: Callable[[str, float], None] | None = None,
     ) -> list[tuple]:
         cond, params = self._filter_sql(criteria)
         source = self._query_source()
@@ -842,11 +845,18 @@ class TranslationDB:
         else:
             rows = conn.execute(sql, tuple(params)).fetchall()
         if has_quality:
-            rows = [
-                row
-                for row in rows
-                if matches_quality(row[5] or "", row[6] or "", criteria.quality)
-            ]
+            filtered = []
+            total = len(rows)
+            for index, row in enumerate(rows, 1):
+                if index % 100 == 1:
+                    raise_if_cancelled()
+                    if progress_callback is not None:
+                        progress_callback(
+                            "檢查品質條件", 0.05 + 0.4 * index / max(1, total)
+                        )
+                if matches_quality(row[5] or "", row[6] or "", criteria.quality):
+                    filtered.append(row)
+            rows = filtered
             rows = self._sort_filtered_rows(rows, criteria.sort_by)
             if limit is not None:
                 rows = rows[
@@ -917,11 +927,20 @@ class TranslationDB:
         return f"{self.path.resolve()}|{stat.st_dev}|{stat.st_ino}"
 
     def _batch_sibling_rows(
-        self, roots: list[tuple], *, conn: sqlite3.Connection | None = None
+        self,
+        roots: list[tuple],
+        *,
+        conn: sqlite3.Connection | None = None,
+        progress_callback: Callable[[str, float], None] | None = None,
     ) -> dict[tuple[str, str, str, str], list[tuple]]:
         keys = list(dict.fromkeys((row[1], row[3], row[4], row[5]) for row in roots))
         result: dict[tuple[str, str, str, str], list[tuple]] = {key: [] for key in keys}
         for offset in range(0, len(keys), 100):
+            raise_if_cancelled()
+            if progress_callback is not None:
+                progress_callback(
+                    "查詢跨版本候選", 0.45 + 0.15 * offset / max(1, len(keys))
+                )
             chunk = keys[offset : offset + 100]
             tuple_sql = ",".join("(?,?,?,?)" for _ in chunk)
             params = [value for key in chunk for value in key]
@@ -935,7 +954,9 @@ class TranslationDB:
                 if conn is not None
                 else self._q(sql, params)
             )
-            for row in rows:
+            for index, row in enumerate(rows, 1):
+                if index % 100 == 1:
+                    raise_if_cancelled()
                 key = (row[1], row[3], row[4], row[5])
                 result.setdefault(key, []).append(row)
         return result
@@ -961,9 +982,21 @@ class TranslationDB:
         propagate: bool,
         confirmed_quality_worsening: bool,
         conn: sqlite3.Connection | None = None,
+        progress_callback: Callable[[str, float], None] | None = None,
     ) -> BatchReplacePlan:
-        roots = self._query_entry_rows(criteria, conn=conn)
-        siblings = self._batch_sibling_rows(roots, conn=conn) if propagate else {}
+        raise_if_cancelled()
+        if progress_callback is not None:
+            progress_callback("查詢符合條目", 0.02)
+        roots = self._query_entry_rows(
+            criteria, conn=conn, progress_callback=progress_callback
+        )
+        siblings = (
+            self._batch_sibling_rows(
+                roots, conn=conn, progress_callback=progress_callback
+            )
+            if propagate
+            else {}
+        )
         root_ids = tuple(int(row[0]) for row in roots)
         root_id_set = set(root_ids)
         changes: dict[int, BatchReplaceChange] = {}
@@ -1024,15 +1057,24 @@ class TranslationDB:
                 new_quality_issues=new_issues,
                 old_whitespace_note=old_space,
                 new_whitespace_note=new_space,
+                quality_deltas=token_issue_deltas(row[5] or "", old_text, new_text),
             )
             skipped.pop(entry_id, None)
 
-        for row in roots:
+        for index, row in enumerate(roots, 1):
+            if index % 100 == 1:
+                raise_if_cancelled()
+                if progress_callback is not None:
+                    progress_callback(
+                        "建立替換預覽", 0.62 + 0.36 * index / max(1, len(roots))
+                    )
             add_candidate(row, extra=False, root_entry_id=None)
 
         if propagate:
             seen_extra: set[int] = set()
-            for root in roots:
+            for index, root in enumerate(roots, 1):
+                if index % 100 == 1:
+                    raise_if_cancelled()
                 root_id = int(root[0])
                 old_text = root[6] or ""
                 if root[7] is None or not old_text or find_text not in old_text:
@@ -1085,6 +1127,7 @@ class TranslationDB:
         *,
         propagate: bool = False,
         confirmed_quality_worsening: bool = False,
+        progress_callback: Callable[[str, float], None] | None = None,
     ) -> BatchReplacePlan:
         """Build a literal, all-page replacement plan without changing the DB."""
         if not find_text:
@@ -1096,10 +1139,15 @@ class TranslationDB:
                 replace_text,
                 propagate=propagate,
                 confirmed_quality_worsening=confirmed_quality_worsening,
+                progress_callback=progress_callback,
             )
 
     def execute_batch_replace(
-        self, plan: BatchReplacePlan, *, actor: str = ""
+        self,
+        plan: BatchReplacePlan,
+        *,
+        actor: str = "",
+        progress_callback: Callable[[str, float], None] | None = None,
     ) -> BatchReplaceResult:
         """Apply exactly the previewed replacements in one compare-and-set transaction."""
         if not plan.changes:
@@ -1112,6 +1160,8 @@ class TranslationDB:
         ):
             raise ValueError("替換會增加特殊字元或空白問題，請明確確認後再執行")
         batch = uuid.uuid4().hex
+        if progress_callback is not None:
+            progress_callback("重新檢查資料庫快照", 0.05)
         with self._tx(bump_generation_on_noop=False) as conn:
             if self._database_identity() != plan.database_identity:
                 raise ValueError("資料庫已切換，請重新預覽批次替換")
@@ -1122,10 +1172,18 @@ class TranslationDB:
                 propagate=plan.propagate,
                 confirmed_quality_worsening=plan.confirmed_quality_worsening,
                 conn=conn,
+                progress_callback=progress_callback,
             )
             if current != plan:
                 raise ValueError("預覽後條目已變動，請重新產生批次替換預覽")
-            for change in plan.changes:
+            if progress_callback is not None:
+                progress_callback("提交中（本階段不可取消）", 0.55)
+            for index, change in enumerate(plan.changes, 1):
+                if progress_callback is not None and index % 100 == 0:
+                    progress_callback(
+                        "提交中（本階段不可取消）",
+                        0.55 + 0.4 * index / len(plan.changes),
+                    )
                 prev = conn.execute(
                     "SELECT zh_tw, checker, review_status, revision FROM translation "
                     "WHERE entry_id=? AND source=?",
@@ -1165,6 +1223,8 @@ class TranslationDB:
                     ),
                 )
             self._refresh(conn, [change.entry_id for change in plan.changes])
+        if progress_callback is not None:
+            progress_callback("批次替換已提交", 1.0)
         return BatchReplaceResult(
             batch, len(plan.changes), plan.skipped_count, plan.total_unique_entries
         )

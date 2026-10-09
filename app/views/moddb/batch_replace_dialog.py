@@ -2,30 +2,60 @@
 
 from __future__ import annotations
 
+import asyncio
 import sqlite3
+from collections.abc import Callable
 from dataclasses import replace
 
 import flet as ft
 
+from app.services_impl.moddb_batch_operation import launch_batch_replace_job
 from app.services_impl.moddb_service import BatchReplacePlan, EntryFilter
+from app.tasks.task_session import TaskSession
 from app.ui import kit
 from app.ui.design import C
+from app.ui.dialogs import (
+    RESPONSIVE_DIALOG_MARKER,
+    close_page_dialog,
+    dialog_dimensions,
+    present_page_dialog,
+)
+from app.ui.poller import PollerHandle
 from app.ui.snack import show_snack
 
 PREVIEW_PAGE_SIZE = 50
 
 
 class BatchReplaceDialog:
-    def __init__(self, page: ft.Page, get_db, criteria: EntryFilter, on_complete):
+    def __init__(
+        self,
+        page: ft.Page,
+        get_db,
+        criteria: EntryFilter,
+        on_complete,
+        *,
+        operation_launcher: Callable[..., object] | None = None,
+    ):
         self.page = page
         self.get_db = get_db
         self.base_criteria = criteria
         self.on_complete = on_complete
+        self._operation_launcher = operation_launcher
         self.plan: BatchReplacePlan | None = None
         self.selection_plan: BatchReplacePlan | None = None
         self.selected_roots: set[int] | None = None
+        self.only_checked = True
         self.preview_page = 0
         self.show_skipped = False
+        self._generation = 0
+        self._job_generation: int | None = None
+        self._job_kind: str | None = None
+        self._job_session: TaskSession | None = None
+        self._job_handled = False
+        self._busy = False
+        self._dialog_open = False
+        self._final_open = False
+        self._poller = PollerHandle()
         self._build_fields()
         self._build_buttons()
         self._build_dialog()
@@ -42,8 +72,13 @@ class BatchReplaceDialog:
             value=False,
             on_change=self._invalidate,
         )
+        self.only_checked_control = ft.Checkbox(
+            label="僅處理已勾選的根條目",
+            value=True,
+            on_change=self._on_scope_change,
+        )
         self.quality_ack = ft.Checkbox(
-            label="我已檢查品質警告，仍要允許這些問題增加",
+            label="我已檢查品質警告，仍要允許問題增加",
             value=False,
             visible=False,
             on_change=self._on_quality_ack,
@@ -51,11 +86,26 @@ class BatchReplaceDialog:
         self.summary = ft.Text(
             "輸入尋找與取代文字，再產生預覽。", size=12.5, color=C.MUTED
         )
-        self.rows = ft.Column(spacing=4, scroll=ft.ScrollMode.AUTO, height=300)
+        self.progress_text = ft.Text("", size=11.5, color=C.DIM, visible=False)
+        self.progress_bar = ft.ProgressBar(value=0, visible=False)
+        self.rows = ft.Column(
+            [kit.hint_text("預覽結果會顯示在這裡")],
+            spacing=4,
+            scroll=ft.ScrollMode.AUTO,
+            height=340,
+        )
         self.page_text = ft.Text("尚未預覽", size=11.5, color=C.DIM)
 
     def _build_buttons(self) -> None:
         self.preview_btn = kit.button("產生預覽", "secondary", on_click=self._preview)
+        self.cancel_job_btn = kit.button(
+            "取消預覽",
+            "ghost",
+            size="sm",
+            on_click=self._cancel_preview,
+            disabled=True,
+        )
+        self.cancel_job_btn.visible = False
         self.previous_btn = kit.button(
             "上一頁",
             "ghost",
@@ -78,121 +128,420 @@ class BatchReplaceDialog:
             disabled=True,
         )
         self.apply_btn = kit.button(
-            "確認並執行替換", "primary", on_click=self._apply, disabled=True
+            "檢查並確認寫入範圍",
+            "primary",
+            on_click=self._open_final_confirmation,
+            disabled=True,
+        )
+        self.confirm_final_btn = kit.button(
+            "確認並開始不可取消的寫入",
+            "primary",
+            on_click=self._confirm_apply,
+            disabled=True,
+        )
+        self.final_summary = ft.Text("", size=13, selectable=True)
+        self.final_ack = ft.Checkbox(
+            label="我已核對上方範圍與筆數，確認執行",
+            value=False,
+            on_change=self._on_final_ack,
         )
 
     def _build_dialog(self) -> None:
-        self.dialog = ft.AlertDialog(
+        dialog_width, dialog_height = dialog_dimensions(self.page)
+        self.dialog = self._build_preview_dialog(dialog_width, dialog_height)
+        self.final_dialog = self._build_confirmation_dialog(dialog_width, dialog_height)
+
+    def _build_preview_dialog(self, dialog_width: int, dialog_height: int):
+        return ft.AlertDialog(
             modal=True,
             title=ft.Text("批次字面取代"),
-            content=ft.Column(
-                [
-                    ft.Text(
-                        "套用目前清單的版本、模組、來源、狀態、時間及品質條件；只替換目前生效譯文。"
-                        "不會修改機翻快取或替換規則。",
-                        size=12,
-                        color=C.MUTED,
-                        selectable=True,
-                    ),
-                    ft.Row([self.find_field, self.replace_field], spacing=8),
-                    self.propagate,
-                    ft.Row(
-                        [self.preview_btn, self.skipped_btn, self.quality_ack],
-                        spacing=8,
-                        wrap=True,
-                    ),
-                    self.summary,
-                    self.rows,
-                    ft.Row(
-                        [self.previous_btn, self.page_text, self.next_btn],
-                        alignment=ft.MainAxisAlignment.CENTER,
-                    ),
-                ],
-                tight=True,
-                spacing=10,
-                width=780,
-                scroll=ft.ScrollMode.AUTO,
+            content=ft.Container(
+                content=ft.Column(
+                    [
+                        ft.Text(
+                            "套用目前清單的版本、模組、來源、狀態、時間及品質條件；只替換目前生效譯文。"
+                            "不會修改機翻快取或替換規則。",
+                            size=12,
+                            color=C.MUTED,
+                            selectable=True,
+                        ),
+                        ft.Row([self.find_field, self.replace_field], spacing=8),
+                        self.propagate,
+                        ft.Row(
+                            [
+                                self.only_checked_control,
+                                self.preview_btn,
+                                self.cancel_job_btn,
+                                self.skipped_btn,
+                                self.quality_ack,
+                            ],
+                            spacing=8,
+                            wrap=True,
+                        ),
+                        self.progress_text,
+                        self.progress_bar,
+                        self.summary,
+                        self.rows,
+                        ft.Row(
+                            [self.previous_btn, self.page_text, self.next_btn],
+                            alignment=ft.MainAxisAlignment.CENTER,
+                        ),
+                    ],
+                    tight=True,
+                    spacing=10,
+                    scroll=ft.ScrollMode.AUTO,
+                ),
+                width=dialog_width,
+                height=dialog_height,
+                data=RESPONSIVE_DIALOG_MARKER,
             ),
             actions=[
-                ft.TextButton("取消", on_click=lambda _e: self.page.pop_dialog()),
+                ft.TextButton("取消", on_click=self._close_dialog),
                 self.apply_btn,
             ],
+            on_dismiss=self._on_dismiss,
+        )
+
+    def _build_confirmation_dialog(self, dialog_width: int, dialog_height: int):
+        return ft.AlertDialog(
+            modal=True,
+            title=ft.Text("最後確認：批次替換"),
+            content=ft.Container(
+                content=ft.Column(
+                    [
+                        ft.Text(
+                            "這是實際寫入範圍。資料庫會在交易內重新比對預覽快照；"
+                            "寫入開始後不可取消。",
+                            size=12.5,
+                            color=C.MUTED,
+                            selectable=True,
+                        ),
+                        self.final_summary,
+                        self.final_ack,
+                    ],
+                    tight=True,
+                    spacing=12,
+                ),
+                width=min(dialog_width, 520),
+                height=min(dialog_height, 320),
+                data=RESPONSIVE_DIALOG_MARKER,
+            ),
+            actions=[
+                ft.TextButton("返回預覽", on_click=self._close_final),
+                self.confirm_final_btn,
+            ],
+            on_dismiss=self._on_final_dismiss,
         )
 
     def open(self) -> None:
-        show_dialog = getattr(self.page, "show_dialog", None)
-        if callable(show_dialog):
-            show_dialog(self.dialog)
-        else:
+        try:
+            self._dialog_open = True
+            present_page_dialog(self.page, self.dialog)
+        except (AttributeError, RuntimeError):
+            self._dialog_open = False
             show_snack(self.page, "目前畫面無法開啟批次替換確認視窗。", C.GOLD)
 
+    def _close_dialog(self, _e=None) -> None:
+        if self._busy and self._job_kind == "preview":
+            self._cancel_preview()
+        if self._busy and self._job_kind == "apply":
+            show_snack(self.page, "資料庫寫入中，請等待交易完成。", C.GOLD)
+            return
+        self._dialog_open = False
+        self._generation += 1
+        self._poller.stop()
+        close_page_dialog(self.page, self.dialog)
+
+    def _on_dismiss(self, _e=None) -> None:
+        was_open = self._dialog_open
+        self._dialog_open = False
+        if was_open and self._busy and self._job_kind == "preview":
+            self._cancel_preview()
+        self._poller.stop()
+
+    def _on_final_dismiss(self, _e=None) -> None:
+        self._final_open = False
+
     def _invalidate(self, _e=None) -> None:
+        if self._busy:
+            return
+        self._generation += 1
         self.plan = None
         self.selection_plan = None
         self.selected_roots = None
+        self.preview_page = 0
+        self.show_skipped = False
         self.quality_ack.value = False
         self.quality_ack.visible = False
         self.apply_btn.disabled = True
-        self.rows.controls = []
+        self.rows.controls = [kit.hint_text("條件已變更，請重新產生預覽。")]
         self.summary.value = "條件已變更，請重新產生預覽。"
         self.page_text.value = "尚未預覽"
+        self.previous_btn.disabled = True
+        self.next_btn.disabled = True
+        self.skipped_btn.disabled = True
+        self.skipped_btn.text = "顯示略過項目"
         self._update_dialog()
 
+    def _on_scope_change(self, _e=None) -> None:
+        if self._busy or self.selection_plan is None:
+            return
+        self.only_checked = bool(self.only_checked_control.value)
+        self._invalidate_selection("處理範圍已變更，請重新預覽。")
+
+    def _on_quality_ack(self, _e=None) -> None:
+        if self._busy or self.selection_plan is None:
+            return
+        self._invalidate_selection("品質確認已變更；正在重新產生預覽。")
+        if bool(self.quality_ack.value):
+            self._start_preview()
+
+    def _invalidate_selection(self, message: str) -> None:
+        self._generation += 1
+        self.plan = None
+        self.apply_btn.disabled = True
+        self.rows.controls = []
+        self.summary.value = message
+        self.preview_page = 0
+        self._render()
+
     def _criteria(self) -> EntryFilter:
-        if self.selected_roots is None:
+        if self.selected_roots is None or self.selection_plan is None:
             return self.base_criteria
+        universe = set(self.selection_plan.root_ids)
+        if self.only_checked:
+            return replace(
+                self.base_criteria,
+                include_ids=tuple(sorted(self.selected_roots)),
+                exclude_ids=tuple(self.base_criteria.exclude_ids),
+            )
+        newly_excluded = universe - self.selected_roots
+        excluded = tuple(
+            dict.fromkeys((*self.base_criteria.exclude_ids, *sorted(newly_excluded)))
+        )
         return replace(
-            self.base_criteria, include_ids=tuple(sorted(self.selected_roots))
+            self.base_criteria,
+            include_ids=self.base_criteria.include_ids,
+            exclude_ids=excluded,
         )
 
     def _preview(self, _e=None) -> None:
+        self._start_preview()
+
+    def _start_preview(self) -> None:
+        if self._busy:
+            return
         db = self.get_db()
         if db is None:
+            self.plan = None
             self.summary.value = "目前沒有可用的資料庫。"
             self._update_dialog()
             return
-        try:
-            self.plan = db.preview_batch_replace(
-                self._criteria(),
-                self.find_field.value or "",
-                self.replace_field.value or "",
-                propagate=bool(self.propagate.value),
-                confirmed_quality_worsening=bool(self.quality_ack.value),
-            )
-        except ValueError as exc:
-            self.plan = None
-            self.summary.value = str(exc)
-            self._update_dialog()
-            return
-        if self.selection_plan is None:
-            self.selection_plan = self.plan
-            self.selected_roots = set(self.plan.root_ids)
-        self.preview_page = 0
-        self.quality_ack.visible = any(
-            change.quality_worsened for change in self.plan.changes
-        )
-        self.quality_ack.value = self.plan.confirmed_quality_worsening
-        self._render()
+        if self.selection_plan is not None and self.selected_roots is not None:
+            criteria = self._criteria()
+        else:
+            criteria = self.base_criteria
+        find_text = str(self.find_field.value or "")
+        replace_text = str(self.replace_field.value or "")
+        propagate = bool(self.propagate.value)
+        confirmed = bool(self.quality_ack.value)
+        self.plan = None
+        self._busy = True
+        self._generation += 1
+        generation = self._generation
+        self._set_job_ui("preview", "正在建立預覽…")
 
-    def _on_quality_ack(self, _e=None) -> None:
-        if self.plan is not None:
-            # Rebuild the immutable plan so the explicit consent is covered by CAS.
-            self._preview()
+        def work(session: TaskSession):
+            return db.preview_batch_replace(
+                criteria,
+                find_text,
+                replace_text,
+                propagate=propagate,
+                confirmed_quality_worsening=confirmed,
+                progress_callback=lambda stage, value: self._record_progress(
+                    session, generation, stage, value
+                ),
+            )
+
+        self._start_job("preview", generation, work)
+
+    def _record_progress(
+        self, session: TaskSession, generation: int, stage: str, value: float
+    ) -> None:
+        session.set_progress(value)
+        session.set_summary(
+            {
+                "state": "working",
+                "kind": self._job_kind,
+                "generation": generation,
+                "stage": stage,
+            }
+        )
+
+    def _start_job(self, kind: str, generation: int, work: Callable):
+        session, launched = launch_batch_replace_job(
+            self.page,
+            kind=kind,
+            generation=generation,
+            work=work,
+            operation_launcher=self._operation_launcher,
+        )
+        self._job_session = session
+        self._job_generation = generation
+        self._job_kind = kind
+        self._job_handled = False
+        if launched is False or launched is None:
+            self._busy = False
+            self._set_job_ui(None, "應用程式正在關閉，未啟動批次作業。")
+            return
+        self._poller.start(self.page, self._poll)
+        # Inline test launchers and very short operations can finish before the
+        # first event-loop poll is scheduled.
+        if session.is_finished:
+            self._sync_worker()
+
+    async def _poll(self, alive) -> None:
+        while alive():
+            self._sync_worker()
+            if self._job_handled or self._job_session is None:
+                return
+            await asyncio.sleep(0.12)
+
+    def _sync_worker(self) -> None:
+        session = self._job_session
+        if session is None or self._job_handled:
+            return
+        snapshot = session.snapshot()
+        summary = snapshot.get("summary") or {}
+        if summary.get("state") == "working":
+            if summary.get("generation") == self._job_generation:
+                self.progress_text.value = str(summary.get("stage") or "背景作業進行中")
+                self.progress_bar.value = snapshot.get("progress", 0.0)
+                self._update_dialog()
+            return
+        if not session.is_finished:
+            return
+        self._job_handled = True
+        self._busy = False
+        self._poller.stop()
+        kind = summary.get("kind", self._job_kind)
+        generation = summary.get("generation")
+        if kind == "preview" and generation == self._generation:
+            self._finish_preview(summary)
+        elif kind == "apply":
+            self._finish_apply(summary)
+        self._update_dialog()
+
+    def _finish_preview(self, summary: dict) -> None:
+        state = summary.get("state")
+        if state == "complete":
+            self.plan = summary["result"]
+            if self.selection_plan is None:
+                self.selection_plan = self.plan
+                self.selected_roots = set(self.plan.root_ids)
+            self.preview_page = 0
+            self.quality_ack.visible = any(
+                change.quality_worsened for change in self.plan.changes
+            )
+            self.quality_ack.value = self.plan.confirmed_quality_worsening
+            if any(change.quality_mixed for change in self.plan.changes):
+                self.quality_ack.label = (
+                    "我已檢查混合品質變化（部分問題改善、部分增加），仍要允許增加"
+                )
+            else:
+                self.quality_ack.label = "我已檢查品質警告，仍要允許問題增加"
+            self.summary.value = ""
+            self._render()
+        elif state == "cancelled":
+            self.plan = None
+            self.summary.value = "預覽已取消，沒有可執行的替換計畫。"
+            self.apply_btn.disabled = True
+        elif state == "error":
+            error = summary.get("error")
+            self.plan = None
+            self.apply_btn.disabled = True
+            self.summary.value = self._error_message(error)
+            if isinstance(error, ValueError):
+                show_snack(self.page, str(error), C.GOLD)
+        self._set_job_ui(None, self.summary.value)
+
+    def _finish_apply(self, summary: dict) -> None:
+        if summary.get("state") == "complete":
+            result = summary["result"]
+            self._set_job_ui(None, "批次替換已提交。")
+            if self._dialog_open:
+                self._dialog_open = False
+                close_page_dialog(self.page, self.dialog)
+            show_snack(
+                self.page,
+                f"已批次替換 {result.updated:,} 筆；略過 {result.skipped:,} 筆。可在記錄中整批還原。",
+                C.EM,
+                text_color=C.ON_EM,
+            )
+            self.on_complete(result)
+        else:
+            error = summary.get("error")
+            message = self._error_message(error)
+            if isinstance(error, ValueError):
+                self.plan = None
+                self.summary.value = f"{message} 重新預覽後才能繼續。"
+                self._render()
+            self._set_job_ui(
+                None, self.summary.value if isinstance(error, ValueError) else message
+            )
+            show_snack(self.page, message, C.RED)
+
+    @staticmethod
+    def _error_message(error) -> str:
+        if (
+            isinstance(error, sqlite3.OperationalError)
+            and "locked" in str(error).lower()
+        ):
+            return "資料庫目前被其他作業鎖定，請稍後重新預覽並操作。"
+        return f"批次替換失敗：{error}"
+
+    def _set_job_ui(self, kind: str | None, message: str) -> None:
+        self.preview_btn.disabled = kind is not None
+        self.find_field.disabled = kind is not None
+        self.replace_field.disabled = kind is not None
+        self.propagate.disabled = kind is not None
+        self.only_checked_control.disabled = kind is not None
+        self.quality_ack.disabled = kind is not None
+        self.cancel_job_btn.visible = kind == "preview"
+        self.cancel_job_btn.disabled = kind != "preview"
+        self.progress_text.visible = kind is not None
+        self.progress_bar.visible = kind is not None
+        self.progress_text.value = message
+        if kind is None:
+            self.progress_bar.value = 0
+        self.apply_btn.disabled = (
+            kind is not None
+            or self.plan is None
+            or not self.plan.changes
+            or (self.quality_ack.visible and not bool(self.quality_ack.value))
+        )
+        self._update_dialog()
+
+    def _cancel_preview(self, _e=None) -> None:
+        if not self._busy or self._job_kind != "preview":
+            return
+        if self._job_session is not None:
+            self._job_session.request_cancel()
+        self.cancel_job_btn.disabled = True
+        self.progress_text.value = "取消要求已送出，等待查詢停止…"
+        self._update_dialog()
 
     def _turn(self, delta: int) -> None:
-        plan = self.plan or self.selection_plan
-        if plan is None:
+        if self.plan is None:
             return
-        rows = (
-            plan.skipped
-            if self.show_skipped
-            else (self.selection_plan.changes if self.selection_plan else plan.changes)
-        )
+        rows = self.plan.skipped if self.show_skipped else self.plan.changes
         pages = max(1, (len(rows) + PREVIEW_PAGE_SIZE - 1) // PREVIEW_PAGE_SIZE)
         self.preview_page = min(max(0, self.preview_page + delta), pages - 1)
         self._render()
 
     def _toggle_skipped(self, _e=None) -> None:
+        if self.plan is None:
+            return
         self.show_skipped = not self.show_skipped
         self.preview_page = 0
         self.skipped_btn.text = (
@@ -201,7 +550,7 @@ class BatchReplaceDialog:
         self._render()
 
     def _toggle_root(self, entry_id: int, selected: bool) -> None:
-        if self.selection_plan is None:
+        if self._busy or self.selection_plan is None:
             return
         if self.selected_roots is None:
             self.selected_roots = set(self.selection_plan.root_ids)
@@ -209,55 +558,80 @@ class BatchReplaceDialog:
             self.selected_roots.add(entry_id)
         else:
             self.selected_roots.discard(entry_id)
-        self.plan = None
-        self.quality_ack.value = False
-        self.quality_ack.visible = False
-        self.apply_btn.disabled = True
-        self.summary.value = "選取範圍已變更；請重新產生預覽確認最終筆數。"
-        self._render()
+        self._invalidate_selection("根條目選取已變更；重新預覽前不會執行。")
+
+    def _display_rows(self):
+        if self.show_skipped:
+            if self.plan is None:
+                return None
+            return self.plan.skipped
+        if self.plan is not None:
+            return self.plan.changes
+        if self.selection_plan is not None:
+            return tuple(
+                row for row in self.selection_plan.changes if not row.is_extra_version
+            )
+        return ()
 
     def _render(self) -> None:
-        plan = self.plan
-        display_plan = plan or self.selection_plan
-        if display_plan is None:
+        rows = self._display_rows()
+        if rows is None:
+            self.rows.controls = [
+                kit.hint_text("選取範圍待重新預覽；目前不顯示舊略過結果。")
+            ]
+            self.page_text.value = "待重新預覽"
+            self.previous_btn.disabled = True
+            self.next_btn.disabled = True
+            self.skipped_btn.disabled = True
+            self.apply_btn.disabled = True
             self._update_dialog()
             return
-        rows = (
-            display_plan.skipped
-            if self.show_skipped
-            else (
-                self.selection_plan.changes
-                if self.selection_plan
-                else display_plan.changes
-            )
-        )
-        pages = max(1, (len(rows) + PREVIEW_PAGE_SIZE - 1) // PREVIEW_PAGE_SIZE)
+        total = len(rows)
+        pages = max(1, (total + PREVIEW_PAGE_SIZE - 1) // PREVIEW_PAGE_SIZE)
         start = self.preview_page * PREVIEW_PAGE_SIZE
         visible = rows[start : start + PREVIEW_PAGE_SIZE]
         self.page_text.value = (
             f"第 {self.preview_page + 1}/{pages} 頁，每頁最多 {PREVIEW_PAGE_SIZE} 筆"
+            if self.plan is not None
+            else "待重新預覽（不會提交）"
         )
-        self.previous_btn.disabled = self.preview_page == 0
-        self.next_btn.disabled = self.preview_page >= pages - 1
-        self.skipped_btn.disabled = not display_plan.skipped
-        if plan is None:
+        self.previous_btn.disabled = self.plan is None or self.preview_page == 0
+        self.next_btn.disabled = self.plan is None or self.preview_page >= pages - 1
+        self.skipped_btn.disabled = self.plan is None or not self.plan.skipped
+        self.skipped_btn.text = (
+            "顯示可替換項目" if self.show_skipped else "顯示略過項目"
+        )
+        self.rows.controls = self._render_rows(visible)
+        if self.plan is None:
+            selected_count = len(self.selected_roots or ())
             self.summary.value = (
-                f"已選取 {len(self.selected_roots or ()):,d} 筆根條目；"
-                "請重新產生預覽查看跨版本影響與最終更新數。"
+                f"目前仍套用原始篩選範圍；已勾選 {selected_count:,d} 個根條目，"
+                "處理範圍尚未確認。重新預覽後才會列出可執行筆數。"
             )
         else:
-            self.summary.value = (
-                f"篩選條目 {len(plan.root_ids):,} 筆；將更新 {plan.update_count:,} 筆；"
-                f"跨版本候選 {plan.extra_candidate_count:,} 筆（納入 {plan.extra_version_count:,} 筆）；"
-                f"略過 {plan.skipped_count:,} 筆。"
+            mode = (
+                "僅已勾選根條目"
+                if self.only_checked
+                else "目前篩選範圍（套用個別排除）"
             )
-        self.rows.controls = self._render_rows(visible)
+            conflicts = sum(item.is_extra_version for item in self.plan.skipped)
+            mixed = sum(change.quality_mixed for change in self.plan.changes)
+            self.summary.value = (
+                f"範圍：{mode}；符合根條目 {len(self.plan.root_ids):,d}；"
+                f"勾選 {len(self.selected_roots or ()):,d}；可執行 {self.plan.update_count:,d}；"
+                f"跨版本候選 {self.plan.extra_candidate_count:,d}（納入 {self.plan.extra_version_count:,d}）；"
+                f"略過 {self.plan.skipped_count:,d}（衝突 {conflicts:,d}）；"
+                f"品質混合變化 {mixed:,d}。"
+            )
         quality_ok = not self.quality_ack.visible or bool(self.quality_ack.value)
-        self.apply_btn.disabled = plan is None or not plan.changes or not quality_ok
+        self.apply_btn.disabled = (
+            self.plan is None or not self.plan.changes or not quality_ok or self._busy
+        )
         self._update_dialog()
 
     def _render_rows(self, visible) -> list[ft.Control]:
         controls: list[ft.Control] = []
+        selected_roots = self.selected_roots or set()
         for row in visible:
             if self.show_skipped:
                 controls.append(
@@ -268,71 +642,133 @@ class BatchReplaceDialog:
                         selectable=True,
                     )
                 )
+                continue
+            root_checkbox: ft.Control
+            if not row.is_extra_version and self.selection_plan is not None:
+                root_checkbox = ft.Checkbox(
+                    value=row.entry_id in selected_roots,
+                    label="處理此根條目"
+                    if row.entry_id in selected_roots
+                    else "個別排除",
+                    on_change=lambda e, i=row.entry_id: self._toggle_root(
+                        i, bool(e.control.value)
+                    ),
+                    disabled=self._busy,
+                )
+            elif row.is_extra_version:
+                root_checkbox = ft.Text("跨版本", size=10.5, color=C.DIM)
             else:
-                selected = (
-                    self.selected_roots is None or row.entry_id in self.selected_roots
-                )
-                checkbox: ft.Control = (
-                    ft.Checkbox(
-                        value=selected,
-                        label=f"{row.mc_version}・{row.key}",
-                        on_change=lambda e, i=row.entry_id: self._toggle_root(
-                            i, bool(e.control.value)
+                root_checkbox = ft.Text("根條目", size=10.5, color=C.DIM)
+            quality = {
+                "worsened": "品質變差",
+                "improved": "品質改善",
+                "mixed": "品質混合變化（仍需確認）",
+                "unchanged": "",
+            }[row.quality_change_kind]
+            detail = (
+                f"{row.mc_version} · {row.mod_id} · {row.kind} · {row.key}\n"
+                f"來源 {row.effective_source} · {row.effective_checker or '未知'} · "
+                f"{row.effective_review_status or '歷史狀態待確認'}"
+            )
+            controls.append(
+                ft.Column(
+                    [
+                        ft.Row(
+                            [
+                                root_checkbox,
+                                ft.Text(
+                                    f"{row.old_zh_tw} → {row.new_zh_tw}",
+                                    size=11.5,
+                                    color=C.TEXT,
+                                    selectable=True,
+                                    expand=True,
+                                ),
+                                ft.Text(quality, size=10.5, color=C.GOLD),
+                            ],
+                            vertical_alignment=ft.CrossAxisAlignment.CENTER,
                         ),
-                    )
-                    if not row.is_extra_version
-                    else ft.Text(
-                        f"跨版本・{row.mc_version}・{row.key}", size=11.5, color=C.DIM
-                    )
+                        ft.Text(detail, size=10, color=C.DIM, selectable=True),
+                    ],
+                    spacing=1,
                 )
-                controls.append(
-                    ft.Row(
-                        [
-                            checkbox,
-                            ft.Text(
-                                f"{row.old_zh_tw} → {row.new_zh_tw}",
-                                size=11.5,
-                                color=C.TEXT,
-                                selectable=True,
-                                expand=True,
-                            ),
-                            ft.Text(
-                                "品質變差" if row.quality_worsened else "",
-                                size=10.5,
-                                color=C.GOLD,
-                            ),
-                        ],
-                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                    )
-                )
+            )
         return controls or [kit.hint_text("此頁沒有條目")]
 
-    def _apply(self, _e=None) -> None:
-        db = self.get_db()
-        if db is None or self.plan is None:
+    def _open_final_confirmation(self, _e=None) -> None:
+        if self._busy or self.plan is None or not self.plan.changes:
             return
         if self.quality_ack.visible and not self.quality_ack.value:
             show_snack(self.page, "請先確認品質警告，或取消這次替換。", C.GOLD)
             return
-        try:
-            result = db.execute_batch_replace(self.plan, actor="使用者")
-        except ValueError as exc:
-            self.plan = None
-            self.apply_btn.disabled = True
-            self.summary.value = str(exc)
-            self._update_dialog()
-            return
-        except sqlite3.Error as exc:
-            show_snack(self.page, f"批次替換失敗（資料庫錯誤：{exc}）", C.RED)
-            return
-        self.page.pop_dialog()
-        show_snack(
-            self.page,
-            f"已批次替換 {result.updated:,} 筆；略過 {result.skipped:,} 筆。可在記錄中整批還原。",
-            C.EM,
-            text_color=C.ON_EM,
+        self._final_generation = self._generation
+        self._final_plan = self.plan
+        plan = self._final_plan
+        mixed = sum(change.quality_mixed for change in plan.changes)
+        self.final_summary.value = (
+            f"處理範圍：{'僅已勾選根條目' if self.only_checked else '目前篩選範圍'}\n"
+            f"個別排除 {len(set(self.selection_plan.root_ids if self.selection_plan else ()) - (self.selected_roots or set())):,d} 個根條目\n"
+            f"根條目 {len(plan.root_ids):,d}；實際寫入 {plan.update_count:,d}；"
+            f"其中跨版本 {plan.extra_version_count:,d}\n"
+            f"略過 {plan.skipped_count:,d}；跨版本衝突 {sum(i.is_extra_version for i in plan.skipped):,d}\n"
+            f"品質惡化 {sum(c.quality_worsened for c in plan.changes):,d} 筆；"
+            f"品質混合變化 {mixed:,d} 筆\n"
+            "若資料庫快照與此預覽不同，交易會拒絕寫入並要求重新預覽。"
         )
-        self.on_complete(result)
+        self.final_ack.value = False
+        self.confirm_final_btn.disabled = True
+        self._final_open = True
+        present_page_dialog(self.page, self.final_dialog)
+
+    def _on_final_ack(self, _e=None) -> None:
+        self.confirm_final_btn.disabled = not bool(self.final_ack.value)
+        self._update_final_dialog()
+
+    def _close_final(self, _e=None) -> None:
+        if self._final_open:
+            close_page_dialog(self.page, self.final_dialog)
+        self._final_open = False
+
+    def _update_final_dialog(self) -> None:
+        try:
+            self.final_dialog.update()
+        except RuntimeError:
+            pass
+
+    def _confirm_apply(self, _e=None) -> None:
+        plan = getattr(self, "_final_plan", None)
+        generation = getattr(self, "_final_generation", None)
+        if (
+            self._busy
+            or not bool(self.final_ack.value)
+            or plan is None
+            or self.plan is not plan
+            or generation != self._generation
+        ):
+            show_snack(self.page, "預覽範圍已變更，請重新核對預覽。", C.GOLD)
+            return
+        close_page_dialog(self.page, self.final_dialog)
+        self._final_open = False
+        self._busy = True
+        generation = self._generation
+        db = self.get_db()
+        if db is None:
+            self._busy = False
+            self.plan = None
+            self.summary.value = "資料庫已切換或關閉，請重新預覽。"
+            self._render()
+            return
+        self._set_job_ui("apply", "重新檢查資料庫快照…")
+
+        def work(session: TaskSession):
+            return db.execute_batch_replace(
+                plan,
+                actor="使用者",
+                progress_callback=lambda stage, value: self._record_progress(
+                    session, generation, stage, value
+                ),
+            )
+
+        self._start_job("apply", generation, work)
 
     def _update_dialog(self) -> None:
         try:

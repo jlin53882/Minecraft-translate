@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from collections import Counter
 
-from translation_tool.translation_db.models import QualityFilter
+from translation_tool.translation_db.models import QualityFilter, QualityIssueDelta
 
 _SCAN_RE = re.compile(
     r"§[0-9a-fk-orA-FK-OR]|%(?:\d+\$)?[sdfxXeEgGcb%]|\$\(|\{\d*\}|\\n|\n"
@@ -73,6 +73,29 @@ def token_issues(source: str, translated: str) -> list[str]:
                 f"{'多了' if delta > 0 else '少了'} {abs(delta)} 個「{name}」"
             )
     return issues
+
+
+def token_issue_deltas(
+    source: str, before: str, after: str
+) -> tuple[QualityIssueDelta, ...]:
+    """Return structural missing/extra token counts before and after an edit."""
+    wanted = format_tokens(source)
+    before_tokens = format_tokens(before)
+    after_tokens = format_tokens(after)
+    before_missing = wanted - before_tokens
+    after_missing = wanted - after_tokens
+    before_extra = before_tokens - wanted
+    after_extra = after_tokens - wanted
+    deltas = []
+    for direction, old_counts, new_counts in (
+        ("missing", before_missing, after_missing),
+        ("extra", before_extra, after_extra),
+    ):
+        for token in sorted(set(old_counts) | set(new_counts)):
+            old_count, new_count = old_counts[token], new_counts[token]
+            if old_count != new_count:
+                deltas.append(QualityIssueDelta(token, direction, old_count, new_count))
+    return tuple(deltas)
 
 
 def whitespace_note(text: str) -> str:

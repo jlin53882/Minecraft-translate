@@ -674,6 +674,100 @@ def test_batch_replace_requires_explicit_quality_worsening_confirmation(db):
     assert db.execute_batch_replace(confirmed).updated == 1
 
 
+def test_batch_replace_preview_cancellation_stops_before_write(db):
+    from threading import Event
+
+    from translation_tool.utils.cancellation import TaskCancelled, cancel_scope
+
+    db.ingest(
+        "1.21.1",
+        [
+            item(key=f"item.cancel.{index}", en="Source", tw="譯文舊")
+            for index in range(3)
+        ],
+    )
+    cancelled = Event()
+
+    def report(stage: str, _progress: float) -> None:
+        if stage == "查詢符合條目":
+            cancelled.set()
+
+    with cancel_scope(cancelled.is_set), pytest.raises(TaskCancelled):
+        db.preview_batch_replace(
+            EntryFilter(version="1.21.1"),
+            "舊",
+            "新",
+            progress_callback=report,
+        )
+    assert [row.zh_tw for row in db.list_entries("1.21.1", limit=10)[0]] == [
+        "譯文舊",
+        "譯文舊",
+        "譯文舊",
+    ]
+
+
+def test_batch_replace_quality_change_uses_structural_token_deltas(db):
+    # A smaller existing mismatch is an improvement even though its diagnostic
+    # sentence changes (the old string-comparison logic called this worsening).
+    db.ingest(
+        "1.21.1",
+        [item(key="item.quality.improve", en="Token", tw="錯誤%s%s")],
+    )
+    improved = db.preview_batch_replace(
+        EntryFilter(version="1.21.1"), "%s", "", propagate=False
+    )
+    assert improved.changes[0].quality_worsened is False
+    assert improved.changes[0].quality_improved is True
+
+    # Adding another extra placeholder is a worsening and remains explicit.
+    db.ingest(
+        "1.21.1",
+        [item(key="item.quality.worsen", en="Token", tw="錯誤%s")],
+    )
+    worsened = db.preview_batch_replace(
+        EntryFilter(version="1.21.1"), "錯誤", "錯誤%s", propagate=False
+    )
+    assert worsened.changes[0].quality_worsened is True
+    assert worsened.changes[0].quality_change_kind == "worsened"
+
+
+def test_batch_replace_quality_mixed_and_whitespace_changes_are_structural(db):
+    db.ingest(
+        "1.21.1",
+        [item(key="item.quality.mixed", en="Token %s", tw="錯誤\n")],
+    )
+    mixed = db.preview_batch_replace(
+        EntryFilter(version="1.21.1"), "錯誤", "%s §a", propagate=False
+    )
+    change = mixed.changes[0]
+    assert change.quality_worsened is True
+    assert change.quality_improved is True
+    assert change.quality_change_kind == "mixed"
+
+    db.ingest(
+        "1.21.1",
+        [item(key="item.quality.space", en="Token", tw="原文")],
+    )
+    whitespace = db.preview_batch_replace(
+        EntryFilter(version="1.21.1"), "原文", " 原文", propagate=False
+    ).changes[0]
+    assert whitespace.quality_worsened is True
+    assert whitespace.quality_change_kind == "worsened"
+
+
+def test_custom_date_bounds_reject_invalid_and_out_of_range_dates():
+    from translation_tool.translation_db.time_filters import custom_date_bounds
+
+    for start, end in (
+        ("2026-02-30", "2026-03-01"),
+        ("2026-W01-1", "2026-01-08"),
+        ("0001-01-01", "0001-01-01"),
+        ("9999-12-31", "9999-12-31"),
+    ):
+        with pytest.raises(ValueError):
+            custom_date_bounds(start, end)
+
+
 def test_time_bounds_are_taipei_calendar_days_and_half_open():
     from translation_tool.translation_db.time_filters import (
         format_taipei_time,

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from datetime import UTC, date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
@@ -33,9 +34,14 @@ def local_date_bounds_to_utc(start: date, end_inclusive: date) -> tuple[str, str
     """Convert inclusive Taipei local dates into a UTC ``[start, end)`` range."""
     if end_inclusive < start:
         raise ValueError("時間區間無效：起始日期不得晚於結束日期")
-    start_local = datetime.combine(start, time.min, TAIPEI)
-    end_local = datetime.combine(end_inclusive + timedelta(days=1), time.min, TAIPEI)
-    return _utc_text(start_local), _utc_text(end_local)
+    try:
+        start_local = datetime.combine(start, time.min, TAIPEI)
+        end_local = datetime.combine(
+            end_inclusive + timedelta(days=1), time.min, TAIPEI
+        )
+        return _utc_text(start_local), _utc_text(end_local)
+    except (OverflowError, ValueError) as exc:
+        raise ValueError("日期超出可篩選範圍") from exc
 
 
 def quick_date_bounds(
@@ -66,6 +72,9 @@ def custom_date_bounds(start_text: str, end_text: str) -> tuple[str, str] | None
         return None
     if not start_text or not end_text:
         raise ValueError("自訂時間區間需要同時填入起始與結束日期")
+    date_pattern = re.compile(r"\d{4}-\d{2}-\d{2}")
+    if not date_pattern.fullmatch(start_text) or not date_pattern.fullmatch(end_text):
+        raise ValueError("日期格式請使用 YYYY-MM-DD")
     try:
         start, end = date.fromisoformat(start_text), date.fromisoformat(end_text)
     except ValueError as exc:

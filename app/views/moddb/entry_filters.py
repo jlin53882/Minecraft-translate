@@ -157,9 +157,14 @@ def open_batch_replace(panel, _e=None) -> None:
     if panel.db() is None or not panel.version:
         show_snack(panel._page, "目前沒有可用的資料庫版本。", C.GOLD)
         return
+    try:
+        criteria = entry_filter(panel)
+    except ValueError as exc:
+        show_snack(panel._page, f"無法套用目前篩選：{exc}", C.RED)
+        return
     BatchReplaceDialog(
         panel._page,
         panel.db,
-        entry_filter(panel),
+        criteria,
         panel._after_batch_replace,
     ).open()
