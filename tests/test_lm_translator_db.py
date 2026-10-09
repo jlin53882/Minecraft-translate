@@ -14,6 +14,7 @@ from translation_tool.translation_db import (
     DbSettings,
     ScanItem,
     TranslationDB,
+    WriteBackItem,
 )
 from translation_tool.translation_db.schema import SRC_AI, SRC_JAR_TW
 
@@ -207,6 +208,163 @@ def test_explicit_database_snapshot_survives_global_path_change(run_env, tmp_pat
     assert lang["item.foo.db"] == "資料庫譯文"
     assert book["pages"][0]["text"] == "書本譯文"
     assert "item.foo.db" not in [path for batch in seen["ai_batches"] for path in batch]
+
+
+def _seed_priority_conflict(db_path: Path) -> tuple[tuple[int, ...], tuple[int, ...]]:
+    priority_a = (SRC_JAR_TW, SRC_AI)
+    priority_b = (SRC_AI, SRC_JAR_TW)
+    db = TranslationDB(db_path, priority=priority_b)
+    db.ingest(
+        "1.21.1",
+        [
+            ScanItem(
+                KIND_LANG,
+                "foo",
+                "item.foo.db",
+                "From Database Text",
+                "模組自帶譯文",
+                source=SRC_JAR_TW,
+            ),
+            ScanItem(
+                KIND_LANG,
+                "foo",
+                "item.foo.db",
+                "From Database Text",
+                "AI 優先譯文",
+                source=SRC_AI,
+            ),
+        ],
+    )
+    db.close()
+    return priority_a, priority_b
+
+
+def test_lm_snapshot_open_does_not_rewrite_global_priority(run_env, tmp_path):
+    _inp, db_path, _seen, _settings = run_env
+    priority_a, priority_b = _seed_priority_conflict(db_path)
+
+    ctx = lm_translator_db.open_directory_db(
+        tmp_path,
+        settings_snapshot=DbSettings(
+            path=str(db_path.resolve()), version="1.21.1", priority=priority_a
+        ),
+    )
+    assert ctx is not None
+    try:
+        stored_priority = ctx.db._one("SELECT value FROM meta WHERE key='priority'")[0]
+        entry_id = ctx.db._one(
+            "SELECT id FROM entry WHERE mod_id='foo' AND key='item.foo.db'"
+        )[0]
+        assert stored_priority == ",".join(map(str, priority_b))
+        assert ctx.db.get_entry(entry_id).zh_tw == "AI 優先譯文"
+    finally:
+        ctx.close()
+
+
+def test_lm_resolver_uses_snapshot_after_another_operation_rebuilds_effective(
+    run_env, tmp_path
+):
+    _inp, db_path, _seen, _settings = run_env
+    priority_a, priority_b = _seed_priority_conflict(db_path)
+    ctx = lm_translator_db.open_directory_db(
+        tmp_path,
+        settings_snapshot=DbSettings(
+            path=str(db_path.resolve()), version="1.21.1", priority=priority_a
+        ),
+    )
+    assert ctx is not None
+    other_operation = None
+    try:
+        other_operation = TranslationDB(db_path, priority=priority_b)
+        hit = ctx.resolver.lookup(KIND_LANG, "foo", "item.foo.db", "From Database Text")
+        assert hit is not None
+        assert hit.zh_tw == "模組自帶譯文"
+    finally:
+        if other_operation is not None:
+            other_operation.close()
+        ctx.close()
+
+
+def test_lm_writeback_preserves_global_effective_priority_and_reviewed_translation(
+    run_env, tmp_path
+):
+    _inp, db_path, _seen, _settings = run_env
+    priority_a = (SRC_JAR_TW, SRC_AI)
+    priority_b = (SRC_AI, SRC_JAR_TW)
+    db = TranslationDB(db_path, priority=priority_b)
+    db.ingest(
+        "1.21.1",
+        [
+            ScanItem(
+                KIND_LANG,
+                "foo",
+                "item.foo.ai",
+                "Needs Machine Translation",
+                "既有模組譯文",
+                source=SRC_JAR_TW,
+            ),
+            ScanItem(
+                KIND_LANG,
+                "foo",
+                "item.foo.reviewed",
+                "Reviewed Text",
+                "人工審核譯文",
+                source=SRC_JAR_TW,
+            ),
+            ScanItem(
+                KIND_LANG,
+                "foo",
+                "item.foo.reviewed",
+                "Reviewed Text",
+                "未審核 AI 候選",
+                source=SRC_AI,
+            ),
+        ],
+    )
+    reviewed_id = db._one(
+        "SELECT id FROM entry WHERE mod_id='foo' AND key='item.foo.reviewed'"
+    )[0]
+    with db._tx() as conn:
+        conn.execute(
+            "UPDATE translation SET checker='reviewed' WHERE entry_id=? AND source=?",
+            (reviewed_id, SRC_JAR_TW),
+        )
+        db._refresh(conn, [reviewed_id])
+    db.close()
+
+    ctx = lm_translator_db.open_directory_db(
+        tmp_path,
+        settings_snapshot=DbSettings(
+            path=str(db_path.resolve()),
+            version="1.21.1",
+            priority=priority_a,
+            write_back=True,
+        ),
+    )
+    assert ctx is not None and ctx.buffer is not None
+    try:
+        ctx.db.write_back(
+            "1.21.1",
+            [
+                WriteBackItem(
+                    KIND_LANG,
+                    "foo",
+                    "item.foo.ai",
+                    "Needs Machine Translation",
+                    "新 AI 譯文",
+                )
+            ],
+            fill_other_versions=False,
+        )
+        stored_priority = ctx.db._one("SELECT value FROM meta WHERE key='priority'")[0]
+        ai_id = ctx.db._one(
+            "SELECT id FROM entry WHERE mod_id='foo' AND key='item.foo.ai'"
+        )[0]
+        assert stored_priority == ",".join(map(str, priority_b))
+        assert ctx.db.get_entry(ai_id).zh_tw == "新 AI 譯文"
+        assert ctx.db.get_entry(reviewed_id).zh_tw == "人工審核譯文"
+    finally:
+        ctx.close()
 
 
 def test_results_are_written_back_without_overwriting(run_env, tmp_path):

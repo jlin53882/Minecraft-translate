@@ -17,6 +17,7 @@ from translation_tool.translation_db.repository import TranslationDB
 from translation_tool.translation_db.schema import (
     BUILTIN_SOURCE_NAMES,
     CUSTOM_SOURCE_BASE,
+    DB_EMPTY,
     DB_FOREIGN,
     DB_NEWER,
     DB_VALID,
@@ -305,16 +306,24 @@ def remember_db_path(settings: DbSettings, path: Path) -> bool:
 
 
 def open_db(
-    settings: DbSettings, *, create: bool = False, readonly: bool = False
+    settings: DbSettings,
+    *,
+    create: bool = False,
+    readonly: bool = False,
+    sync_priority: bool | None = None,
 ) -> TranslationDB | None:
     """開啟設定指定的資料庫。
 
     ``create=False``（翻譯流程）：檔案不存在就回傳 None，不會憑空建立。
     ``create=True``（掃描／介面）：不存在則建立。
     ``readonly=True``（純查詢流程）：使用 SQLite 唯讀連線，不同步或改寫來源優先序。
+    ``sync_priority=False`` 可供使用固定任務快照、但仍需寫回資料的流程使用：
+    不將該快照套用到共用 ``meta.priority`` / ``effective``。新建資料庫仍會初始化優先序。
     """
     if readonly and create:
         raise ValueError("唯讀資料庫不可同時要求建立")
+    if readonly and sync_priority:
+        raise ValueError("唯讀資料庫不可同步來源優先序")
     path = settings.resolved_path()
     with _open_lock:
         if not path.is_file() and not create:
@@ -322,12 +331,20 @@ def open_db(
             return None
         existed = path.is_file()
         try:
+            initialize_priority = create and (
+                not existed or classify_database(path) == DB_EMPTY
+            )
+            should_sync_priority = (
+                (not readonly) if sync_priority is None else sync_priority
+            )
+            # 對新資料庫，meta.priority 尚無既有全域設定可保護，必須寫入初始值。
+            should_sync_priority = should_sync_priority or initialize_priority
             db = TranslationDB(
                 path,
                 priority=settings.priority,
                 readonly=readonly,
                 create=create,
-                sync_priority=not readonly,
+                sync_priority=should_sync_priority,
             )
             if create and not existed and path.is_file():
                 remember_db_path(settings, path)

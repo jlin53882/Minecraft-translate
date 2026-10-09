@@ -84,7 +84,8 @@ def open_directory_db(
             "📚 Mod 資料庫已啟用但尚未指定目標版本，已略過（請到設定或機器翻譯頁選擇）"
         )
         return None
-    db = open_db(settings, create=False)
+    # LM 讀寫需要可寫連線，但這是任務快照，不可在開啟時覆寫資料庫共用 priority。
+    db = open_db(settings, create=False, sync_priority=False)
     if db is None:
         return None
     expected_path = settings.resolved_path().resolve()
@@ -95,7 +96,12 @@ def open_directory_db(
         )
         db.close()
         return None
-    resolver = TranslationResolver(db, target, cross_version=settings.cross_version)
+    resolver = TranslationResolver(
+        db,
+        target,
+        cross_version=settings.cross_version,
+        source_priority=settings.priority,
+    )
     buffer = (
         WriteBackBuffer(db, target, root, fill_other_versions=True)
         if settings.write_back

@@ -238,6 +238,10 @@ def test_pipeline_admission_rejection_does_not_run_service(loop_page):
 def test_lm_sources_share_the_same_database_settings_snapshot(tmp_path, monkeypatch):
     from app.services_impl.moddb_service import DbSettings
     from app.views.moddb.lm_db_options import LmDbRunSnapshot
+    from translation_tool.translation_db.schema import SRC_AI, SRC_JAR_TW
+
+    priority_a = (SRC_JAR_TW, SRC_AI)
+    priority_b = (SRC_AI, SRC_JAR_TW)
 
     monkeypatch.setattr("app.views.pipeline.pipeline_config.load_config", dict)
     cfg = PipelineConfig(str(tmp_path / "mods"), str(tmp_path / "output"))
@@ -252,6 +256,7 @@ def test_lm_sources_share_the_same_database_settings_snapshot(tmp_path, monkeypa
         merge_enabled=True,
         path=str((tmp_path / "database-a.db").resolve()),
         version="1.21.1",
+        priority=priority_a,
     )
     lm_snapshot = LmDbRunSnapshot(
         use_db=True,
@@ -261,9 +266,17 @@ def test_lm_sources_share_the_same_database_settings_snapshot(tmp_path, monkeypa
         database_settings=database_snapshot,
     )
     calls = []
-    actions = PipelineActions(
-        PipelineServices(translate=lambda **kwargs: calls.append(kwargs))
-    )
+    global_settings = {"priority": database_snapshot.priority}
+
+    def translate(**kwargs):
+        calls.append(
+            {**kwargs, "global_priority_at_start": global_settings["priority"]}
+        )
+        if len(calls) == 1:
+            # Simulate a settings edit between source 1 and source 2 of Step 3.
+            global_settings["priority"] = priority_b
+
+    actions = PipelineActions(PipelineServices(translate=translate))
 
     actions._step_translate(
         {
@@ -280,6 +293,14 @@ def test_lm_sources_share_the_same_database_settings_snapshot(tmp_path, monkeypa
     assert all(call["translation_db_version"] == "1.21.1" for call in calls)
     assert all(
         call["translation_db_settings_snapshot"] is database_snapshot for call in calls
+    )
+    assert [call["global_priority_at_start"] for call in calls] == [
+        priority_a,
+        priority_b,
+    ]
+    assert all(
+        call["translation_db_settings_snapshot"].priority == priority_a
+        for call in calls
     )
 
 

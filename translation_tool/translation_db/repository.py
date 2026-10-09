@@ -230,8 +230,16 @@ class TranslationDB:
             """
         )
 
-    def _refresh(self, conn: sqlite3.Connection, entry_ids: Iterable[int]) -> None:
+    def _refresh(
+        self,
+        conn: sqlite3.Connection,
+        entry_ids: Iterable[int],
+        *,
+        priority: tuple[int, ...] | None = None,
+    ) -> None:
+        """Refresh the shared projection, optionally using an explicit priority."""
         ids = list({int(i) for i in entry_ids})
+        priority_order = self._priority_order(priority)
         for start in range(0, len(ids), _CHUNK):
             chunk = ids[start : start + _CHUNK]
             marks = ",".join("?" * len(chunk))
@@ -243,7 +251,7 @@ class TranslationDB:
                     SELECT t.entry_id, t.zh_tw, t.source, t.checker,
                        ROW_NUMBER() OVER (
                            PARTITION BY t.entry_id
-                               ORDER BY {self._priority_order()}
+                               ORDER BY {priority_order}
                        ) AS rn
                     FROM translation t
                     WHERE t.zh_tw <> '' AND t.entry_id IN ({marks})
@@ -844,6 +852,7 @@ class TranslationDB:
         stats = WriteBackStats()
         touched: list[int] = []
         with self._tx() as conn:
+            effective_priority = self._stored_priority(conn)
             for item in items:
                 text = item.zh_tw
                 if not text.strip() or not item.en_us:
@@ -900,8 +909,21 @@ class TranslationDB:
                         if done.rowcount:
                             stats.filled_other += 1
                             touched.append(bid)
-            self._refresh(conn, touched)
+            # A task's DbSettings priority is a read snapshot. Keep writes intact, but
+            # refresh the shared projection using the database's current global policy.
+            self._refresh(conn, touched, priority=effective_priority)
         return stats
+
+    def _stored_priority(self, conn: sqlite3.Connection) -> tuple[int, ...]:
+        """Read the shared effective-source priority inside the active transaction."""
+        row = conn.execute("SELECT value FROM meta WHERE key='priority'").fetchone()
+        if row is None or not row[0]:
+            return self.priority
+        try:
+            priority = tuple(int(value) for value in row[0].split(","))
+        except (TypeError, ValueError):
+            return self.priority
+        return priority or self.priority
 
     def replace_ai_translation(
         self,
