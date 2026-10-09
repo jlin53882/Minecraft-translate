@@ -1,6 +1,9 @@
 """ModDB converter behavior and compiled-rule cache coverage."""
 
+import subprocess
+import sys
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 
 import pytest
 
@@ -12,6 +15,7 @@ from translation_tool.translation_db.schema import (
     SRC_JAR_CN,
     SRC_JAR_TW,
 )
+from translation_tool.utils import replace_rules as rr
 from translation_tool.utils import text_processor as tp
 
 
@@ -68,6 +72,41 @@ def test_snapshot_cache_invalidates_when_source_rule_row_changes():
     assert tp.apply_replace_rules("wire", snapshot) == "SECOND"
 
 
+def test_text_processor_reexports_the_single_rules_engine_owner():
+    assert tp.ReplaceRules is rr.ReplaceRules
+    assert tp.apply_replace_rules is rr.apply_replace_rules
+
+    rules = rr.ReplaceRules([{"from": "wire", "to": "FIRST"}])
+    assert tp.apply_replace_rules("wire", rules) == "FIRST"
+    compiled = rr._RULES_CACHE[id(rules)][2]
+
+    assert rr.apply_replace_rules("wire", rules) == "FIRST"
+    assert rr._RULES_CACHE[id(rules)][2] is compiled
+
+    rules[0]["to"] = "SECOND"
+    assert tp.apply_replace_rules("wire", rules) == "SECOND"
+    assert rr._RULES_CACHE[id(rules)][2] is not compiled
+
+
+def test_rules_engine_import_does_not_load_facade_or_runtime_dependencies():
+    code = """
+import sys
+from translation_tool.utils import replace_rules
+assert callable(replace_rules.apply_replace_rules)
+assert "translation_tool.utils.text_processor" not in sys.modules
+assert "translation_tool.utils.config_manager" not in sys.modules
+assert "opencc" not in sys.modules
+"""
+    project_root = Path(__file__).resolve().parents[1]
+    subprocess.run(
+        [sys.executable, "-c", code],
+        check=True,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+
+
 def test_converter_none_and_empty_rules_keep_opencc_behavior():
     assert make_converter(None)("wire") == "wire"
     assert make_converter([])("wire") == "wire"
@@ -99,14 +138,14 @@ def test_converter_uses_constant_time_revision_signature_for_replace_rules(
         [{"from": f"needle-{index}", "to": f"value-{index}"} for index in range(200)]
     )
     signatures = []
-    original_signature = tp._rules_signature
+    original_signature = rr._rules_signature
 
     def record_signature(active_rules):
         signature = original_signature(active_rules)
         signatures.append(signature[0])
         return signature
 
-    monkeypatch.setattr(tp, "_rules_signature", record_signature)
+    monkeypatch.setattr(rr, "_rules_signature", record_signature)
     convert = make_converter(rules)
 
     for _ in range(8):
