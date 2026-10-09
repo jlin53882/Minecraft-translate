@@ -358,11 +358,13 @@ def test_entries_panel_save_and_review_use_separate_manual_states(db_path):
         ],
     )
     page = mock_page()
+    page.run_thread = lambda target: target()
     panel = EntriesPanel(page, lambda: db)
     panel.refresh()
     panel.tw_field.value = "人工修改"
     panel._update_impact()
     panel._save()
+    page._run_all_tasks()
     detail = db.entry_detail(panel.selected.id)
     manual = next(row for row in detail.translations if row.source == SRC_MANUAL)
     assert manual.review_status == "unreviewed" and manual.checker == ""

@@ -18,6 +18,7 @@
     "app/views/icon_preview/icon_cache.py:_batch_extract_jar_icons": 103,
     "app/views/icon_preview/icon_cache.py:_resolve_icon_from_catalog": 87,
     "app/views/merge/merge_widgets.py:MergeWidgetsMixin._init_merge_io_controls": 80,
+    "app/views/moddb/overview_panel.py:OverviewPanel.__init__": 92,
     "app/views/moddb/scan_panel.py:ScanPanel._build_options_card": 99,
     "app/views/moddb/scan_panel.py:ScanPanel._build_run_card": 81,
     "app/views/moddb/translate_panel.py:TranslatePanel._build_run_card": 99
@@ -25,6 +26,8 @@
   "view_files": {
     "app/views/config_view.py": 1028,
     "app/views/icon_preview/icon_cache.py": 957,
-    "app/views/icon_preview_view.py": 832
+    "app/views/icon_preview_view.py": 832,
+    "app/views/moddb/batch_replace_dialog.py": 821,
+    "app/views/moddb/entries_panel.py": 854
   }
 }
