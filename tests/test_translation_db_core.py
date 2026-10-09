@@ -1078,6 +1078,7 @@ def _make_v1_db(path):
             "new_review_status",
             "prev_revision",
             "new_revision",
+            "source_id",
         ):
             conn.execute(f"ALTER TABLE history DROP COLUMN {column}")
         conn.execute("UPDATE meta SET value='1' WHERE key='schema_version'")
@@ -1092,11 +1093,12 @@ def test_schema_v1_migration_marks_legacy_manual_unknown_and_keeps_backup(tmp_pa
     db = TranslationDB(path)
     detail = db.entry_detail(entry_id)
     manual = next(row for row in detail.translations if row.source == SRC_MANUAL)
-    assert SCHEMA_VERSION == 3
+    assert SCHEMA_VERSION == 4
     assert manual.review_status == "legacy_unknown" and manual.checker == "old-checker"
     assert detail.entry.review_status == "legacy_unknown"
     assert list(tmp_path.glob("legacy.db.pre-schema-v2-*.bak"))
     assert list(tmp_path.glob("legacy.db.pre-schema-v3-*.bak"))
+    assert list(tmp_path.glob("legacy.db.pre-schema-v4-*.bak"))
     db.close()
 
     # Reopening is idempotent: no second migration backup is created.

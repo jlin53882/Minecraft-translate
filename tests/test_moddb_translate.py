@@ -1789,6 +1789,8 @@ def test_translate_panel_switches_kpis_between_normal_and_ai_repair_modes():
     assert [card.value_text.value for card in panel._stat_cards] == ["3", "7", "1", "4"]
     assert panel._kpi_titles["second"].label_text.value == "已寫入（AI 機翻）"
 
+    panel._repair_mode = "same_source_ai"
+    panel.repair_mode_group.value = "same_source_ai"
     panel._reset_stats(mode="repair")
     assert [card.value_text.value for card in panel._stat_cards] == ["—"] * 4
     assert panel._kpi_titles["first"].label_text.value == "本次候選"

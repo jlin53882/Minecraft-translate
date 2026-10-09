@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sqlite3
 import threading
+from types import SimpleNamespace
 
 import pytest
 
@@ -119,6 +120,31 @@ def _drain_page_tasks(page):
     page._run_all_tasks()
 
 
+def _select_repair_mode(panel, mode="same_source_ai"):
+    panel._repair_mode = mode
+    panel.repair_mode_group.value = mode
+    panel.repair_explainer.value = panel._repair_explanation()
+
+
+def test_repair_mode_selector_explains_scope_and_updates_copy():
+    panel = translate_panel.TranslatePanel(mock_page(), lambda: None)
+
+    radios = panel.repair_mode_group.content.controls
+    assert [radio.value for radio in radios] == [
+        "quality_mismatch",
+        "same_source_ai",
+    ]
+    assert "所有來源" in panel.repair_explainer.value
+    assert "匯入 ZIP" in panel.repair_explainer.value
+    assert "不會改寫原始 ZIP" in panel.repair_explainer.value
+
+    panel.repair_mode_group.value = "same_source_ai"
+    panel._on_repair_mode_changed(SimpleNamespace(control=panel.repair_mode_group))
+
+    assert panel._repair_mode == "same_source_ai"
+    assert "目前生效來源為 AI 機翻" in panel.repair_explainer.value
+
+
 def _inline_operation_launcher(calls=None):
     def launch(page, target, **kwargs):
         if calls is not None:
@@ -152,6 +178,62 @@ def test_preview_uses_effective_ai_source_scope_and_limit(db_path):
     assert preview.source == SRC_AI
     assert db.count_same_as_source_ai("1.21.1") == 2
     db.close()
+
+
+def test_special_character_repair_covers_all_sources_and_can_be_undone(
+    db_path, monkeypatch, repair_cache
+):
+    db = TranslationDB(db_path)
+    entry = _ai_entry(db, en="Use %s")
+    db.save_manual(entry.id, "使用", propagate=False)
+    _ingest(db, "1.21.1", "foo", "item.name", SRC_JAR_TW, "使用", en="Use %s")
+
+    preview = moddb_retranslate_service.preview_same_source_ai_retranslation(
+        db, _options(), mode="quality_mismatch"
+    )
+    assert preview.mode == "quality_mismatch"
+    assert preview.total_candidates == 2
+    assert preview.selected_count == 2
+    assert preview.sources == (SRC_JAR_TW, SRC_MANUAL)
+    assert {row.source_id for row in preview.entries} == {SRC_JAR_TW, SRC_MANUAL}
+    db.close()
+
+    monkeypatch.setattr(
+        moddb_retranslate_service,
+        "translate_batch_smart",
+        lambda batch, _total: (
+            [{**item, "text": "使用 %s"} for item in batch],
+            "AUTO",
+        ),
+    )
+    snap = _run(
+        db_path,
+        preview.entries,
+        options=_options(write_cache=False),
+        mode="quality_mismatch",
+    )
+
+    check = TranslationDB(db_path)
+    rows = {row.source: row for row in check.entry_detail(entry.id).translations}
+    assert rows[SRC_JAR_TW].zh_tw == "使用 %s"
+    assert rows[SRC_MANUAL].zh_tw == "使用 %s"
+    assert rows[SRC_MANUAL].review_status == "unreviewed"
+    assert rows[SRC_AI].zh_tw == "Use %s"
+    history = check.entry_detail(entry.id).history
+    manual_repair = next(
+        row
+        for row in history
+        if row.action == "quality_repair" and row.source_id == SRC_MANUAL
+    )
+    assert snap["summary"]["operation"] == "repair_special_character_mismatch"
+    assert snap["summary"]["updated"] == 2
+    assert snap["summary"]["remaining"] == 0
+    assert check.revert(manual_repair.id) == 1
+    restored = {row.source: row for row in check.entry_detail(entry.id).translations}
+    assert restored[SRC_MANUAL].zh_tw == "使用"
+    assert restored[SRC_MANUAL].review_status == "unreviewed"
+    assert repair_cache == []
+    check.close()
 
 
 def _seed_fragmented_candidates(db):
@@ -427,10 +509,10 @@ def repair_cache(monkeypatch):
     return events
 
 
-def _run(db_path, entries, *, options=None):
+def _run(db_path, entries, *, options=None, mode="same_source_ai"):
     session = TaskSession()
     moddb_retranslate_service.run_moddb_retranslate_service(
-        options or _options(), session, entries
+        options or _options(), session, entries, mode=mode
     )
     return session.snapshot()
 
@@ -770,6 +852,7 @@ def test_preview_confirmation_cancel_and_scope_invalidation(db_path, monkeypatch
     _ai_entry(db)
     page = mock_page()
     panel = translate_panel.TranslatePanel(page, lambda: db)
+    _select_repair_mode(panel)
     panel.version_dd.value = "1.21.1"
     panel.limit_field.value = "1"
     launches = []
@@ -795,12 +878,12 @@ def test_preview_confirmation_cancel_and_scope_invalidation(db_path, monkeypatch
         "show_snack",
         lambda _page, message, _tone: snacks.append(message),
     )
-    instructions = panel.repair_card.body.content.controls[0].value
-    assert "檢查候選筆數與樣本" in instructions
-    assert "預覽會失效，必須重新預覽" in instructions
+    instructions = panel.repair_explainer.value
+    assert "目前生效來源為 AI 機翻" in instructions
+    assert "只更新 AI 來源" in instructions
     assert panel.repair_start_btn.disabled is False
     panel.confirm_retranslation()
-    assert "請先按「預覽符合條件的舊 AI 譯文」" in snacks[-1]
+    assert "請先按「預覽候選譯文」" in snacks[-1]
     assert page.overlay == []
 
     panel.preview_retranslation()
@@ -819,8 +902,8 @@ def test_preview_confirmation_cancel_and_scope_invalidation(db_path, monkeypatch
     monkeypatch.setattr(
         translate_panel,
         "run_moddb_retranslate_service",
-        lambda options, session, entries: service_calls.append(
-            (options, session, entries)
+        lambda options, session, entries, **kwargs: service_calls.append(
+            (options, session, entries, kwargs)
         ),
     )
     panel._poller.start = lambda *_args: None
@@ -833,6 +916,7 @@ def test_preview_confirmation_cancel_and_scope_invalidation(db_path, monkeypatch
     assert service_calls[0][0].version == "1.21.1"
     assert service_calls[0][0].limit == 1
     assert service_calls[0][2] is preview.entries
+    assert service_calls[0][3]["mode"] == "same_source_ai"
 
     panel._running = False
     panel.mod_dd.value = "foo"
@@ -840,7 +924,7 @@ def test_preview_confirmation_cancel_and_scope_invalidation(db_path, monkeypatch
     assert panel._repair_preview is None
     assert panel.repair_start_btn.disabled is False
     panel.confirm_retranslation()
-    assert "請先按「預覽符合條件的舊 AI 譯文」" in snacks[-1]
+    assert "請先按「預覽候選譯文」" in snacks[-1]
     panel.preview_retranslation()
     _drain_page_tasks(page)
     assert panel._repair_preview is not None
@@ -849,7 +933,7 @@ def test_preview_confirmation_cancel_and_scope_invalidation(db_path, monkeypatch
     assert panel._repair_preview is None
     assert panel.repair_start_btn.disabled is False
     panel.confirm_retranslation()
-    assert "請先按「預覽符合條件的舊 AI 譯文」" in snacks[-1]
+    assert "請先按「預覽候選譯文」" in snacks[-1]
     db.close()
 
 
@@ -866,6 +950,7 @@ def test_database_change_invalidates_open_repair_confirmation(
     active_db = [preview_db]
     page = mock_page()
     panel = translate_panel.TranslatePanel(page, lambda: active_db[0])
+    _select_repair_mode(panel)
     panel.version_dd.value = "1.21.1"
     launches = []
     monkeypatch.setattr(
@@ -914,6 +999,7 @@ def test_retranslation_preview_shows_ai_source_profiles_and_samples(
     _ingest(db, "1.21.1", "foo", "custom", SRC_CUSTOM, "Minecraft")
 
     panel = translate_panel.TranslatePanel(mock_page(), lambda: db)
+    _select_repair_mode(panel)
     panel.version_dd.value = "1.21.1"
     page = panel._page
     monkeypatch.setattr(
@@ -953,6 +1039,7 @@ def test_preview_uses_isolated_readonly_db_during_ui_queries_and_discards_stale_
     registry = OperationRegistry()
     page.operation_registry = registry
     panel = translate_panel.TranslatePanel(page, lambda: db)
+    _select_repair_mode(panel)
     panel.version_dd.value = "1.21.1"
 
     entered = threading.Event()
@@ -1102,7 +1189,7 @@ def test_retranslation_worker_is_page_owned_cancellable_and_drained(
     cancel_seen = threading.Event()
     allow_finish = threading.Event()
 
-    def wait_for_cancel(_options, session, _entries):
+    def wait_for_cancel(_options, session, _entries, **_kwargs):
         session.start()
         entered.set()
         while not session.cancel_requested:

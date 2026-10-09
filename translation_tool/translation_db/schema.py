@@ -19,7 +19,7 @@ import sqlite3
 import time
 from pathlib import Path
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 KIND_LANG = "lang"
 KIND_PATCHOULI = "patchouli"
@@ -131,6 +131,7 @@ CREATE TABLE IF NOT EXISTS history (
     new_review_status TEXT,
     prev_revision INTEGER,
     new_revision INTEGER,
+    source_id   INTEGER,
     note        TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_history_entry ON history (entry_id);
@@ -215,12 +216,16 @@ def init_schema(conn: sqlite3.Connection) -> None:
             _backup_before_review_migration(conn)
         elif next_version == 3:
             _backup_before_time_migration(conn)
+        elif next_version == 4:
+            _backup_before_source_history_migration(conn)
         conn.execute("BEGIN IMMEDIATE")
         try:
             if next_version == 2:
                 _migrate_review_state_v2(conn)
             elif next_version == 3:
                 _migrate_time_and_revision_v3(conn)
+            elif next_version == 4:
+                _migrate_source_history_v4(conn)
             conn.execute(
                 "UPDATE meta SET value=? WHERE key='schema_version'",
                 (str(next_version),),
@@ -342,6 +347,38 @@ def _migrate_time_and_revision_v3(conn: sqlite3.Connection) -> None:
         "ON CONFLICT(key) DO UPDATE SET value=CAST(value AS INTEGER)+1"
     )
     _install_schema_v3_objects(conn)
+
+
+def _backup_before_source_history_migration(
+    conn: sqlite3.Connection,
+) -> Path | None:
+    """Keep a consistent sidecar before adding source identity to history."""
+    main = next(
+        (row[2] for row in conn.execute("PRAGMA database_list") if row[1] == "main"),
+        "",
+    )
+    if not main:
+        return None
+    source_path = Path(main)
+    backup_path = source_path.with_name(
+        f"{source_path.name}.pre-schema-v4-{time.time_ns()}.bak"
+    )
+    target = sqlite3.connect(backup_path)
+    try:
+        conn.backup(target)
+    except BaseException:
+        target.close()
+        backup_path.unlink(missing_ok=True)
+        raise
+    target.close()
+    return backup_path
+
+
+def _migrate_source_history_v4(conn: sqlite3.Connection) -> None:
+    """Record which source row a repair changed so its history can be restored."""
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(history)")}
+    if "source_id" not in columns:
+        conn.execute("ALTER TABLE history ADD COLUMN source_id INTEGER")
 
 
 def _install_schema_v3_objects(conn: sqlite3.Connection) -> None:

@@ -158,6 +158,7 @@ class TranslationDB:
                 row[1] for row in self._conn.execute("PRAGMA table_info(history)")
             }
             self.has_history_revision = "new_revision" in history_columns
+            self.has_history_source = "source_id" in history_columns
             if not readonly and sync_priority:
                 self._sync_priority()
             self.source_catalog = self._load_source_catalog()
@@ -1596,7 +1597,8 @@ class TranslationDB:
         )
         last_activity = (
             "(SELECT MAX(h.at) FROM history h WHERE h.entry_id=e.id AND "
-            "h.action IN ('manual','review','batch_replace','revert','batch_revert'))"
+            "h.action IN ('manual','review','batch_replace','revert','batch_revert',"
+            "'quality_repair'))"
         )
         r = self._one(
             f"SELECT {_ENTRY_COLS}, f.zh_tw, f.source, f.checker, "
@@ -1691,11 +1693,13 @@ class TranslationDB:
         history_revision_sql = (
             "prev_revision, new_revision" if self.has_history_revision else "NULL, NULL"
         )
+        history_source_sql = "source_id" if self.has_history_source else "NULL"
         detail.history = [
             HistoryRow(*r)
             for r in self._q(
                 "SELECT id, batch, at, actor, action, old_zh_tw, new_zh_tw, note, "
-                f"prev_manual, {history_review_sql}, {history_revision_sql} "
+                f"prev_manual, {history_review_sql}, {history_revision_sql}, "
+                f"{history_source_sql} "
                 "FROM history WHERE entry_id=? ORDER BY id DESC LIMIT 50",
                 (entry_id,),
             )
@@ -2058,9 +2062,88 @@ class TranslationDB:
 
     def revert(self, history_id: int, *, whole_batch: bool = True) -> int:
         """還原一次手動更新（預設連同步的其他版本一起）。回傳還原的條目數。"""
-        row = self._one("SELECT batch FROM history WHERE id=?", (history_id,))
+        row = self._one("SELECT batch, action FROM history WHERE id=?", (history_id,))
         if row is None:
             return 0
+        if row[1] == "quality_repair":
+            where, params = (
+                ("batch = ?", [row[0]]) if whole_batch else ("id = ?", [history_id])
+            )
+            reverted: list[int] = []
+            new_batch = uuid.uuid4().hex
+            with self._tx(bump_generation_on_noop=False) as conn:
+                rows = conn.execute(
+                    "SELECT id, entry_id, old_zh_tw, new_zh_tw, source_id, "
+                    "prev_checker, prev_review_status, new_checker, "
+                    "new_review_status, new_revision FROM history "
+                    f"WHERE action='quality_repair' AND {where} ORDER BY id DESC",
+                    params,
+                ).fetchall()
+                for (
+                    hid,
+                    eid,
+                    old_text,
+                    new_text,
+                    source_id,
+                    previous_checker,
+                    previous_review,
+                    new_checker,
+                    new_review,
+                    new_revision,
+                ) in rows:
+                    if source_id is None:
+                        continue
+                    current = conn.execute(
+                        "SELECT zh_tw, checker, review_status, revision FROM translation "
+                        "WHERE entry_id=? AND source=?",
+                        (eid, source_id),
+                    ).fetchone()
+                    if current is None or current[0] != new_text:
+                        continue
+                    if new_revision is not None and current[3] != new_revision:
+                        continue
+                    if current[1] != new_checker or current[2] != new_review:
+                        continue
+                    conn.execute(
+                        "UPDATE translation SET zh_tw=?, checker=?, review_status=?, "
+                        "updated_at=CURRENT_TIMESTAMP WHERE entry_id=? AND source=?",
+                        (
+                            old_text,
+                            previous_checker or "",
+                            previous_review,
+                            eid,
+                            source_id,
+                        ),
+                    )
+                    restored = conn.execute(
+                        "SELECT checker, review_status, revision FROM translation "
+                        "WHERE entry_id=? AND source=?",
+                        (eid, source_id),
+                    ).fetchone()
+                    conn.execute(
+                        "INSERT INTO history (entry_id, batch, action, old_zh_tw, "
+                        "new_zh_tw, note, prev_checker, prev_review_status, "
+                        "new_checker, new_review_status, prev_revision, new_revision, "
+                        "source_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                        (
+                            eid,
+                            new_batch,
+                            "revert",
+                            new_text,
+                            old_text,
+                            f"還原 #{hid}",
+                            current[1],
+                            current[2],
+                            restored[0],
+                            restored[1],
+                            current[3],
+                            restored[2],
+                            source_id,
+                        ),
+                    )
+                    reverted.append(eid)
+                self._refresh(conn, reverted)
+            return len(reverted)
         where, params = (
             ("batch = ?", [row[0]]) if whole_batch else ("id = ?", [history_id])
         )
@@ -2344,6 +2427,99 @@ class TranslationDB:
             self._refresh(conn, [entry_id])
         return AITranslationReplaceResult("updated")
 
+    def replace_translation_quality_mismatch(
+        self,
+        entry_id: int,
+        source_id: int,
+        expected_old_zh_tw: str,
+        new_zh_tw: str,
+        *,
+        expected_version: str,
+        expected_kind: str,
+        expected_mod_id: str,
+        expected_key: str,
+        expected_en_us: str,
+        expected_revision: int | None,
+        actor: str = "AI 特殊字元修復",
+    ) -> AITranslationReplaceResult:
+        """Compare-and-set one mismatched source row without changing its identity."""
+        if not isinstance(new_zh_tw, str) or not new_zh_tw.strip():
+            raise ValueError("AI 修復譯文不可為空")
+
+        with self._tx(bump_generation_on_noop=False) as conn:
+            current = conn.execute(
+                "SELECT t.zh_tw, t.revision, t.checker, t.review_status "
+                "FROM translation t JOIN entry e ON e.id=t.entry_id "
+                "WHERE t.entry_id=? AND t.source=? AND e.mc_version=? "
+                "AND e.kind=? AND e.mod_id=? AND e.key=? AND e.en_us=?",
+                (
+                    entry_id,
+                    source_id,
+                    expected_version,
+                    expected_kind,
+                    expected_mod_id,
+                    expected_key,
+                    expected_en_us,
+                ),
+            ).fetchone()
+            if current is None or current[0] != expected_old_zh_tw:
+                return AITranslationReplaceResult("skipped_changed")
+            if expected_revision is not None and current[1] != expected_revision:
+                return AITranslationReplaceResult("skipped_changed")
+            if quality_state(expected_en_us, current[0])[0] != "mismatch":
+                return AITranslationReplaceResult("skipped_changed")
+            if new_zh_tw == current[0]:
+                return AITranslationReplaceResult("unchanged")
+
+            previous_checker, previous_review = current[2], current[3]
+            new_checker, new_review = previous_checker, previous_review
+            if source_id == SRC_MANUAL:
+                # AI-edited manual text must return to the review queue.
+                new_checker, new_review = "", "unreviewed"
+            updated = conn.execute(
+                "UPDATE translation SET zh_tw=?, checker=?, review_status=?, "
+                "updated_at=CURRENT_TIMESTAMP WHERE entry_id=? AND source=? "
+                "AND zh_tw=? AND revision=?",
+                (
+                    new_zh_tw,
+                    new_checker,
+                    new_review,
+                    entry_id,
+                    source_id,
+                    expected_old_zh_tw,
+                    current[1],
+                ),
+            )
+            if updated.rowcount != 1:
+                return AITranslationReplaceResult("skipped_changed")
+            new_revision = conn.execute(
+                "SELECT revision FROM translation WHERE entry_id=? AND source=?",
+                (entry_id, source_id),
+            ).fetchone()[0]
+            conn.execute(
+                "INSERT INTO history (entry_id, batch, actor, action, old_zh_tw, "
+                "new_zh_tw, prev_checker, prev_review_status, new_checker, "
+                "new_review_status, prev_revision, new_revision, source_id) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (
+                    entry_id,
+                    uuid.uuid4().hex,
+                    actor,
+                    "quality_repair",
+                    current[0],
+                    new_zh_tw,
+                    previous_checker,
+                    previous_review,
+                    new_checker,
+                    new_review,
+                    current[1],
+                    new_revision,
+                    source_id,
+                ),
+            )
+            self._refresh(conn, [entry_id])
+        return AITranslationReplaceResult("updated")
+
     # --------------------------------------------------------- 批次機翻（資料庫內）
     def _untranslated_where(self, mod_ids: Sequence[str] | None) -> tuple[str, list]:
         where = "e.mc_version = ? AND f.entry_id IS NULL AND e.en_us <> ''"
@@ -2451,14 +2627,52 @@ class TranslationDB:
         """列出目前生效 AI 譯文與原文相同的條目；limit<=0 表示不限。"""
         where, params = self._same_as_source_ai_where(version, mod_ids)
         sql = (
-            "SELECT e.id, e.kind, e.mod_id, e.key, e.en_us, f.zh_tw, e.mc_version "
+            "SELECT e.id, e.kind, e.mod_id, e.key, e.en_us, f.zh_tw, e.mc_version, "
+            "f.source, t.revision, t.checker, t.review_status "
             "FROM entry e LEFT JOIN effective f ON f.entry_id=e.id "
+            "LEFT JOIN translation t ON t.entry_id=e.id AND t.source=f.source "
             f"WHERE {where} ORDER BY e.mod_id, e.kind, e.key"
         )
         if limit is not None and limit > 0:
             sql += " LIMIT ?"
             params.append(limit)
         return [SameSourceAIEntry(*row) for row in self._q(sql, params)]
+
+    def mismatched_translation_entries(
+        self,
+        version: str,
+        mod_ids: Sequence[str] | None = None,
+        limit: int | None = None,
+        *,
+        check: Callable[[], None] | None = None,
+    ) -> tuple[int, list[SameSourceAIEntry]]:
+        """Find special-character mismatches in every stored source translation."""
+        where = ["e.mc_version=?", "e.en_us<>''", "t.zh_tw<>''"]
+        params: list = [version]
+        if mod_ids:
+            where.append(f"e.mod_id IN ({','.join('?' * len(mod_ids))})")
+            params.extend(mod_ids)
+        sql = (
+            "SELECT e.id, e.kind, e.mod_id, e.key, e.en_us, t.zh_tw, "
+            "e.mc_version, t.source, t.revision, t.checker, t.review_status "
+            "FROM entry e JOIN translation t ON t.entry_id=e.id "
+            f"WHERE {' AND '.join(where)} ORDER BY e.mod_id, e.kind, e.key, t.source"
+        )
+        count = 0
+        candidates: list[SameSourceAIEntry] = []
+        selected_limit = limit if limit and limit > 0 else None
+        with self._lock:
+            cursor = self._conn.execute(sql, tuple(params))
+            while rows := cursor.fetchmany(512):
+                for row in rows:
+                    if check is not None:
+                        check()
+                    if quality_state(row[4], row[5])[0] != "mismatch":
+                        continue
+                    count += 1
+                    if selected_limit is None or len(candidates) < selected_limit:
+                        candidates.append(SameSourceAIEntry(*row))
+        return count, candidates
 
     def reuse_from_other_versions(
         self, version: str, mod_ids: Sequence[str] | None = None

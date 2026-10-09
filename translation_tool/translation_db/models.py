@@ -54,6 +54,10 @@ class SameSourceAIEntry:
     en_us: str
     current_ai_translation: str
     mc_version: str
+    source_id: int | None = None
+    revision: int | None = None
+    checker: str = ""
+    review_status: str | None = None
 
 
 @dataclass(frozen=True)
@@ -117,6 +121,7 @@ class HistoryRow:
     new_review_status: str | None = None
     prev_revision: int | None = None
     new_revision: int | None = None
+    source_id: int | None = None
 
 
 @dataclass(frozen=True)
