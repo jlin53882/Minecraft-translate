@@ -44,7 +44,13 @@ class ScanPanel(ft.Column):
     """掃描匯入頁籤。"""
 
     def __init__(
-        self, page: ft.Page, file_picker: ft.FilePicker, get_db, on_finished=None
+        self,
+        page: ft.Page,
+        file_picker: ft.FilePicker,
+        get_db,
+        on_finished=None,
+        *,
+        defer_initial_refresh: bool = False,
     ):
         super().__init__(expand=True, spacing=12, scroll=ft.ScrollMode.AUTO)
         self._page = page
@@ -71,7 +77,11 @@ class ScanPanel(ft.Column):
             ),
             self.run_card,
         ]
-        self.refresh_versions()
+        # ModDbView defers this until the scan tab is selected. The overview
+        # loader owns the first database connection and must not be preceded by
+        # a synchronous open from this hidden panel during page construction.
+        if not defer_initial_refresh:
+            self.refresh_versions()
 
     # ------------------------------------------------------------------ 建構
     def _build_version_card(self) -> None:

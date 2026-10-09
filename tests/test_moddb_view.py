@@ -162,9 +162,7 @@ def test_view_switches_tabs_and_shows_overview_numbers(db_path):
     assert view.body.content is view.scan
 
 
-def test_moddb_stats_warm_uses_a_worker_owned_connection_when_view_reloads(
-    db_path, monkeypatch
-):
+def test_moddb_overview_load_uses_a_worker_owned_connection(db_path, monkeypatch):
     from app.tasks.operation_registry import OperationRegistry
 
     seed(db_path)
@@ -175,44 +173,38 @@ def test_moddb_stats_warm_uses_a_worker_owned_connection_when_view_reloads(
     # attached registry for the actual owner and worker lifecycle.
     page.run_thread = lambda _target: None
 
-    warm_entered = threading.Event()
-    release_warm = threading.Event()
+    load_entered = threading.Event()
+    release_load = threading.Event()
     worker_connections = []
-    warm_errors = []
-    original_warm_stats = TranslationDB.warm_stats
+    original_version_stats = TranslationDB.version_stats
 
-    def gated_warm_stats(db):
-        if threading.current_thread().name.startswith("operation-moddb-warm-stats"):
+    def gated_version_stats(db):
+        if threading.current_thread().name.startswith("operation-moddb-overview-load"):
             worker_connections.append(db)
-            warm_entered.set()
-            assert release_warm.wait(timeout=2)
-            try:
-                return original_warm_stats(db)
-            except Exception as exc:
-                warm_errors.append(exc)
-                raise
-        return original_warm_stats(db)
+            load_entered.set()
+            assert release_load.wait(timeout=2)
+        return original_version_stats(db)
 
-    monkeypatch.setattr(TranslationDB, "warm_stats", gated_warm_stats)
+    monkeypatch.setattr(TranslationDB, "version_stats", gated_version_stats)
     view = moddb_view.ModDbView(page, mock_filepicker())
-    ui_db = view._db
-    assert ui_db is not None
+    view.did_mount()
     try:
-        assert warm_entered.wait(timeout=1)
-        view.reload_db()
-        release_warm.set()
+        assert load_entered.wait(timeout=1)
+        assert view.overview.loading.visible is True
+        assert view._db is None  # 隱藏的掃描面板不可先在 UI 執行緒開資料庫
+        release_load.set()
         assert registry.wait_for_idle(timeout=2)
+        page._run_all_tasks()
         assert len(worker_connections) == 1
-        assert worker_connections[0] is not ui_db
-        assert warm_errors == []
-        with pytest.raises(sqlite3.ProgrammingError):
-            worker_connections[0]._conn.execute("SELECT 1")
+        assert worker_connections[0] is view._db
+        assert view.overview.content_col.visible is True
+        assert worker_connections[0]._conn.execute("SELECT 1").fetchone() == (1,)
         with sqlite3.connect(db_path) as check_conn:
             assert (
                 check_conn.execute("SELECT count(*) FROM stat_cache").fetchone()[0] > 0
             )
     finally:
-        release_warm.set()
+        release_load.set()
         registry.begin_shutdown()
         assert registry.wait_for_idle(timeout=2)
         if view._db is not None:
@@ -220,7 +212,9 @@ def test_moddb_stats_warm_uses_a_worker_owned_connection_when_view_reloads(
             view._db = None
 
 
-def test_delayed_moddb_warm_does_not_reapply_stale_priority(db_path, monkeypatch):
+def test_delayed_moddb_overview_load_discards_stale_priority(db_path, monkeypatch):
+    from dataclasses import replace
+
     from app.tasks.operation_registry import OperationRegistry
 
     seed(db_path)
@@ -233,32 +227,39 @@ def test_delayed_moddb_warm_does_not_reapply_stale_priority(db_path, monkeypatch
     release_constructor = threading.Event()
     worker_connections = []
     original_init = TranslationDB.__init__
+    settings_state = {"value": moddb_service.current_settings()}
+    new_priority = tuple(reversed(settings_state["value"].priority))
+    assert new_priority != settings_state["value"].priority
+    monkeypatch.setattr(
+        moddb_service, "load_db_settings", lambda: settings_state["value"]
+    )
 
     def gated_init(db, *args, **kwargs):
-        is_warm_worker = threading.current_thread().name.startswith(
-            "operation-moddb-warm-stats"
+        is_overview_worker = threading.current_thread().name.startswith(
+            "operation-moddb-overview-load"
         )
-        if is_warm_worker:
-            assert kwargs.get("sync_priority") is False
+        if is_overview_worker and not constructor_entered.is_set():
             constructor_entered.set()
             assert release_constructor.wait(timeout=2)
         original_init(db, *args, **kwargs)
-        if is_warm_worker:
+        if is_overview_worker:
             worker_connections.append(db)
 
     monkeypatch.setattr(TranslationDB, "__init__", gated_init)
     view = moddb_view.ModDbView(page, mock_filepicker())
-    ui_db = view._db
-    assert ui_db is not None
+    view.did_mount()
     try:
         assert constructor_entered.wait(timeout=1)
-        new_priority = tuple(reversed(ui_db.priority))
-        assert new_priority != ui_db.priority
-        ui_db.set_priority(new_priority)
-        view.reload_db()
+        settings_state["value"] = replace(
+            settings_state["value"], priority=new_priority
+        )
         release_constructor.set()
         assert registry.wait_for_idle(timeout=2)
-        assert len(worker_connections) == 1
+        page._run_all_tasks()
+        page._tasks.clear()
+        assert registry.wait_for_idle(timeout=2)
+        page._run_all_tasks()
+        assert len(worker_connections) == 2
         with sqlite3.connect(db_path) as check_conn:
             stored_priority = check_conn.execute(
                 "SELECT value FROM meta WHERE key = 'priority'"
@@ -269,6 +270,7 @@ def test_delayed_moddb_warm_does_not_reapply_stale_priority(db_path, monkeypatch
         assert stored_priority == ",".join(str(source) for source in new_priority)
         with pytest.raises(sqlite3.ProgrammingError):
             worker_connections[0]._conn.execute("SELECT 1")
+        assert worker_connections[1] is view._db
     finally:
         release_constructor.set()
         registry.begin_shutdown()

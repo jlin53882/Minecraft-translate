@@ -11,8 +11,8 @@ import flet as ft
 from app.services_impl.moddb_service import (
     TranslationDB,
     current_settings,
+    database_problem,
     open_database,
-    warm_stats_quietly,
 )
 from app.tasks.operation_registry import (
     CancellationPolicy,
@@ -35,6 +35,42 @@ TABS = (
 )
 
 
+def _load_overview_snapshot(
+    settings,
+) -> tuple[TranslationDB | None, dict, Exception | None]:
+    """Open the configured database and collect one complete overview snapshot."""
+    worker_db: TranslationDB | None = None
+    snapshot: dict = {
+        "stats": [],
+        "overview": {},
+        "source_stats": [],
+        "missing": [],
+        "scans": [],
+    }
+    try:
+        worker_db = open_database(create=False, settings=settings)
+        if worker_db is None:
+            problem = database_problem(settings)
+            if problem:
+                raise ValueError(problem)
+        if worker_db is not None:
+            stats = worker_db.version_stats()
+            snapshot["stats"] = stats
+            if stats:
+                snapshot["overview"] = worker_db.overview()
+                snapshot["source_stats"] = worker_db.effective_source_stats_by_version()
+                snapshot["missing"] = worker_db.missing_by_mod(
+                    stats[0].mc_version, limit=10
+                )
+                snapshot["scans"] = worker_db.last_scans(5)
+    except Exception as exc:  # noqa: BLE001 - 顯示載入失敗並恢復頁面
+        log_debug(f"Mod DB 總覽載入失敗：{exc!r}")
+        if worker_db is not None:
+            worker_db.close()
+        return None, snapshot, exc
+    return worker_db, snapshot, None
+
+
 class ModDbView(ft.Column):
     """Mod 翻譯資料庫頁。"""
 
@@ -45,17 +81,24 @@ class ModDbView(ft.Column):
         self._db: TranslationDB | None = None
         self._db_loaded = False
         self._db_sig: tuple | None = None
+        self._overview_loading = False
+        self._overview_load_generation = 0
         self.tab = "overview"
 
         self.overview = OverviewPanel(
             page,
             self.get_db,
+            request_refresh=self._request_overview_refresh,
             open_scan=lambda: self.show_tab("scan"),
             open_entries=self.open_entries,
         )
-        self.entries = EntriesPanel(page, self.get_db, on_changed=self._on_data_changed)
+        self.entries = EntriesPanel(page, self.get_db)
         self.scan = ScanPanel(
-            page, file_picker, self.get_db, on_finished=self._on_scan_finished
+            page,
+            file_picker,
+            self.get_db,
+            on_finished=self._on_scan_finished,
+            defer_initial_refresh=True,
         )
         self.translate = TranslatePanel(
             page,
@@ -87,10 +130,13 @@ class ModDbView(ft.Column):
     def get_db(self) -> TranslationDB | None:
         """目前的資料庫（沒有檔案時回傳 None，掃描完成後會重新開啟）。"""
         if not self._db_loaded:
+            # 首次總覽載入期間由背景工作擁有資料庫連線，避免切換其他頁籤時
+            # 又在 UI 執行緒同步開啟同一個大型資料庫。
+            if self._overview_loading:
+                return None
             self._db_sig = self._settings_signature()
             self._db = open_database(create=False)
             self._db_loaded = True
-            self._warm_in_background(self._db)
         return self._db
 
     @staticmethod
@@ -99,41 +145,123 @@ class ModDbView(ft.Column):
         settings = current_settings()
         return (str(settings.resolved_path()), settings.priority)
 
-    def _warm_in_background(self, db: TranslationDB | None) -> None:
-        """開啟資料庫後在背景先算好總覽統計；使用者切到總覽頁時多半已經算好。"""
-        run_thread = getattr(self._page, "run_thread", None)
-        if db is not None and callable(run_thread):
-            # The view owns and may close its connection during navigation or a
-            # settings reload. Give the non-cancellable warm operation its own
-            # connection so closing the view cannot interrupt a multi-query warm.
-            db_path, priority = db.path, db.priority
+    def _request_overview_refresh(self) -> None:
+        """在背景載入總覽需要的全部資料，避免同步統計卡住首次進入。"""
+        if self._overview_loading:
+            return
 
-            def warm() -> None:
-                worker_db = None
-                try:
-                    worker_db = TranslationDB(
-                        db_path,
-                        priority=priority,
-                        create=False,
-                        # warm_stats reads the current effective table and only
-                        # writes derived stat_cache rows. A delayed worker must
-                        # not reapply an older settings snapshot to the database.
-                        sync_priority=False,
-                    )
-                    warm_stats_quietly(worker_db)
-                finally:
-                    if worker_db is not None:
-                        worker_db.close()
+        settings = current_settings()
+        signature = (str(settings.resolved_path()), settings.priority)
+        self._overview_load_generation += 1
+        generation = self._overview_load_generation
+        self._overview_loading = True
+        self.overview.set_loading(preserve=True)
+        if self.tab == "overview":
+            self._safe_update()
 
-            launch_page_operation(
-                self._page,
-                warm,
-                name="Mod DB 統計預熱",
-                owner="moddb-warm-stats",
-                cancellation=CancellationPolicy.NON_CANCELLABLE,
-                shutdown=ShutdownPolicy.DRAIN_ONLY,
-                presentation=OperationPresentation.MAINTENANCE,
+        # Flet pages provide run_thread (and the full app also has an operation
+        # registry). Minimal standalone pages have no scheduler, so load inline.
+        if not self._has_background_scheduler():
+            worker_db, snapshot, error = _load_overview_snapshot(settings)
+            self._apply_overview_result(
+                generation, signature, worker_db, snapshot, error
             )
+            return
+
+        def load() -> None:
+            worker_db, snapshot, error = _load_overview_snapshot(settings)
+
+            async def apply_on_ui() -> None:
+                self._apply_overview_result(
+                    generation, signature, worker_db, snapshot, error
+                )
+
+            run_task = getattr(self._page, "run_task", None)
+            if callable(run_task):
+                run_task(apply_on_ui)
+            else:
+                self._apply_overview_result(
+                    generation, signature, worker_db, snapshot, error
+                )
+
+        launched = launch_page_operation(
+            self._page,
+            load,
+            name="Mod DB 總覽載入",
+            owner="moddb-overview-load",
+            cancellation=CancellationPolicy.NON_CANCELLABLE,
+            shutdown=ShutdownPolicy.DRAIN_ONLY,
+            presentation=OperationPresentation.MAINTENANCE,
+        )
+        if not launched:
+            self._overview_loading = False
+            self.overview.show_error("應用程式正在關閉，無法載入總覽")
+            if self.tab == "overview":
+                self._safe_update()
+
+    def _has_background_scheduler(self) -> bool:
+        return getattr(self._page, "operation_registry", None) is not None or callable(
+            getattr(self._page, "run_thread", None)
+        )
+
+    def _apply_overview_result(
+        self,
+        generation: int,
+        signature: tuple,
+        worker_db: TranslationDB | None,
+        snapshot: dict,
+        error: Exception | None,
+    ) -> None:
+        """Apply a worker snapshot and transfer or close its connection safely."""
+        if generation != self._overview_load_generation:
+            if worker_db is not None:
+                worker_db.close()
+            return
+
+        self._overview_loading = False
+        if signature != self._settings_signature():
+            if worker_db is not None:
+                worker_db.close()
+            self.reload_db()
+            if self.tab == "overview":
+                self._request_overview_refresh()
+            return
+
+        if error is not None:
+            if worker_db is not None:
+                worker_db.close()
+            if self._db_sig != signature:
+                self.reload_db()
+            self._db_loaded = True
+            self._db_sig = signature
+            self.overview.show_error(str(error))
+        else:
+            self._adopt_overview_database(signature, worker_db)
+            self.overview.apply_snapshot(
+                self._db,
+                stats=snapshot["stats"],
+                overview=snapshot["overview"],
+                source_stats=snapshot["source_stats"],
+                missing=snapshot["missing"],
+                scans=snapshot["scans"],
+            )
+
+        if self.tab != "overview":
+            self._refresh_active_panel()
+        self._safe_update()
+
+    def _adopt_overview_database(
+        self, signature: tuple, worker_db: TranslationDB | None
+    ) -> None:
+        """Keep one view-owned connection and close any duplicate worker connection."""
+        if self._db is not None and self._db_sig != signature:
+            self.reload_db()
+        if self._db is None:
+            self._db = worker_db
+        elif worker_db is not None:
+            worker_db.close()
+        self._db_loaded = True
+        self._db_sig = signature
 
     def reload_db(self) -> None:
         """關閉並重新開啟（資料庫路徑或優先序設定變更、掃描建立新檔後）。"""
@@ -149,7 +277,8 @@ class ModDbView(ft.Column):
         # 離開頁籤時面板被卸載（will_unmount 會停掉輪詢）；任務還在跑，切回來要接續輪詢，
         # 否則畫面停在離開當下的進度，直到任務結束後也不會更新
         if key == "overview":
-            self.overview.refresh()
+            if update or not self._has_background_scheduler():
+                self._request_overview_refresh()
         elif key == "entries":
             self.entries.refresh()
         elif key == "scan":
@@ -183,14 +312,15 @@ class ModDbView(ft.Column):
         # 連線看得到其他連線已提交的資料；只有「原本沒有資料庫檔案」才需要重新開啟
         if self._db is None:
             self.reload_db()
-        self.overview.refresh()
 
-    def _on_data_changed(self) -> None:
-        """手動儲存後：總覽的統計等切到總覽頁時才更新（它要重算數十萬筆，不能卡在每次儲存）。
-
-        統計快取已因寫入失效，這裡在背景先算好，之後切到總覽頁就是即時的。
-        """
-        self._warm_in_background(self._db)
+    def _refresh_active_panel(self) -> None:
+        """資料庫背景載入期間若切換了頁籤，連線就緒後刷新目前頁面。"""
+        if self.tab == "entries":
+            self.entries.refresh()
+        elif self.tab == "scan":
+            self.scan.refresh_versions()
+        elif self.tab == "translate":
+            self.translate.refresh_scope()
 
     # ------------------------------------------------------------------ 生命週期
     def will_unmount(self) -> None:

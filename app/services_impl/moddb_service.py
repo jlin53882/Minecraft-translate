@@ -133,14 +133,16 @@ def current_settings() -> DbSettings:
     return load_db_settings()
 
 
-def database_problem() -> str:
+def database_problem(settings: DbSettings | None = None) -> str:
     """設定的資料庫存在但不能用的原因（讓畫面不要誤顯示成「尚未建立」）；正常回傳空字串。"""
-    return _db_problem(current_settings())
+    return _db_problem(settings or current_settings())
 
 
-def open_database(*, create: bool = True) -> TranslationDB | None:
-    """依設定開啟資料庫；``create=False`` 時檔案不存在回傳 None。"""
-    return open_db(current_settings(), create=create)
+def open_database(
+    *, create: bool = True, settings: DbSettings | None = None
+) -> TranslationDB | None:
+    """依指定或目前設定開啟資料庫；``create=False`` 時檔案不存在回傳 None。"""
+    return open_db(settings or current_settings(), create=create)
 
 
 def database_version_choices(settings: DbSettings | None = None) -> list[str]:

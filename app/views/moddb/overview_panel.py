@@ -71,6 +71,7 @@ class OverviewPanel(ft.Column):
         page: ft.Page,
         get_db,
         *,
+        request_refresh: Callable[[], None] | None = None,
         open_scan: Callable[[], None] | None = None,
         open_entries: Callable[[str, str | None, str | None], None] | None = None,
     ):
@@ -78,8 +79,10 @@ class OverviewPanel(ft.Column):
         super().__init__(expand=True, spacing=12, scroll=ft.ScrollMode.AUTO)
         self._page = page
         self._get_db = get_db
+        self._request_refresh = request_refresh
         self._open_scan = open_scan
         self._open_entries = open_entries
+        self._has_snapshot = False
 
         self._build_stat_cards()
         self.versions_col = ft.Column(spacing=14)
@@ -95,10 +98,18 @@ class OverviewPanel(ft.Column):
             "重新整理",
             "secondary",
             icon=ft.Icons.REFRESH,
-            on_click=lambda _e: self.refresh(update=True),
+            on_click=lambda _e: self.refresh(),
         )
         self.problem = ft.Text(
             "", size=12.5, color=C.RED, selectable=True, visible=False
+        )
+        self.loading = ft.Row(
+            [
+                ft.ProgressRing(width=18, height=18, stroke_width=2),
+                ft.Text("正在載入 Mod 資料庫總覽…", size=12.5, color=C.DIM),
+            ],
+            spacing=10,
+            visible=True,
         )
         self.empty = kit.empty_state(
             "資料庫還沒有資料",
@@ -141,10 +152,12 @@ class OverviewPanel(ft.Column):
         )
         self.controls = [
             ft.Row([self.refresh_btn], alignment=ft.MainAxisAlignment.END),
+            self.loading,
             self.problem,
             self.empty,
             self.content_col,
         ]
+        self.set_loading(preserve=False)
 
     def _build_stat_cards(self) -> None:
         self.diff_btn = kit.button(
@@ -220,37 +233,89 @@ class OverviewPanel(ft.Column):
 
     # ------------------------------------------------------------------ 載入
     def refresh(self, *, update: bool = False) -> None:
-        db = self._get_db()
-        stats = db.version_stats() if db else []
+        """請求非同步重新載入；資料查詢由 ModDbView 的背景工作負責。"""
+        if self._request_refresh is None:
+            db = self._get_db()
+            stats = db.version_stats() if db else []
+            if not stats:
+                problem = database_problem()
+                if problem:
+                    self.show_error(problem)
+                    if update:
+                        self._safe_update()
+                    return
+            overview = db.overview() if db and stats else {}
+            source_stats = (
+                db.effective_source_stats_by_version() if db and stats else []
+            )
+            missing = db.missing_by_mod(stats[0].mc_version, limit=10) if stats else []
+            scans = db.last_scans(5) if db and stats else []
+            self.apply_snapshot(
+                db,
+                stats=stats,
+                overview=overview,
+                source_stats=source_stats,
+                missing=missing,
+                scans=scans,
+            )
+            if update:
+                self._safe_update()
+            return
+        self._request_refresh()
+
+    def set_loading(self, *, preserve: bool = True) -> None:
+        self.loading.visible = True
+        self.refresh_btn.disabled = True
+        self.problem.visible = False
+        if not preserve or not self._has_snapshot:
+            self.empty.visible = False
+            self.content_col.visible = False
+
+    def show_error(self, message: str) -> None:
+        self.loading.visible = False
+        self.refresh_btn.disabled = False
+        self.problem.value = f"⚠ 資料庫無法使用：{message}"
+        self.problem.visible = True
+        if not self._has_snapshot:
+            self.empty.visible = False
+            self.content_col.visible = False
+
+    def apply_snapshot(
+        self,
+        db,
+        *,
+        stats: list[VersionStat],
+        overview: dict,
+        source_stats: list,
+        missing: list[dict],
+        scans: list[dict],
+    ) -> None:
+        self._has_snapshot = True
+        self.loading.visible = False
+        self.refresh_btn.disabled = False
+        self.problem.value = ""
+        self.problem.visible = False
         has_data = bool(stats)
         self.empty.visible = not has_data
         self.content_col.visible = has_data
-        # 檔案存在卻開不起來（其他用途的 SQLite、版本太新）：說明原因，避免誤導成「尚未建立」
-        problem = "" if has_data else database_problem()
-        self.problem.value = f"⚠ 資料庫無法使用：{problem}" if problem else ""
-        self.problem.visible = bool(problem)
-        if problem:
-            self.empty.visible = False
         if has_data and db is not None:
-            ov = db.overview()
-            source_stats = db.effective_source_stats_by_version()
             source_stats_by_version, legend_rows = _source_breakdown(db, source_stats)
             self.legend.controls = [
                 kit.chip(label, tone, dot=True) for label, tone in legend_rows
             ]
-            self.stat_mods.set_value(format_count(ov["mods"]))
+            self.stat_mods.set_value(format_count(overview["mods"]))
             self.stat_content.set_value(
-                format_count(ov["content"]),
+                format_count(overview["content"]),
                 delta=f"共 {format_count(sum(s.total for s in stats))} 筆（含各版本）"
                 + (
-                    f"・原文未知 {format_count(ov['no_source'])}"
-                    if ov["no_source"]
+                    f"・原文未知 {format_count(overview['no_source'])}"
+                    if overview["no_source"]
                     else ""
                 ),
                 delta_tone="neutral",
             )
-            self.stat_diff.set_value(format_count(ov["diff"]))
-            self.stat_changed.set_value(format_count(ov["src_changed"]))
+            self.stat_diff.set_value(format_count(overview["diff"]))
+            self.stat_changed.set_value(format_count(overview["src_changed"]))
             self.versions_col.controls = [
                 self._version_bar(
                     s,
@@ -259,13 +324,14 @@ class OverviewPanel(ft.Column):
                 )
                 for s in stats
             ]
-            self._render_missing(db, stats[0].mc_version)
-            self._render_scans(db)
-        if update:
-            try:
-                self._page.update()
-            except Exception as exc:  # noqa: BLE001 - 頁面已卸載時不影響資料
-                log_debug(f"OverviewPanel update 略過：{exc}")
+            self._render_missing(missing, stats[0].mc_version)
+            self._render_scans(scans)
+
+    def _safe_update(self) -> None:
+        try:
+            self._page.update()
+        except Exception as exc:  # noqa: BLE001 - 頁面已卸載時不影響資料
+            log_debug(f"OverviewPanel update 略過：{exc}")
 
     def _version_bar(self, s: VersionStat, source_stats: list, catalog) -> ft.Control:
         segs = [
@@ -314,8 +380,7 @@ class OverviewPanel(ft.Column):
             spacing=5,
         )
 
-    def _render_missing(self, db, version: str) -> None:
-        rows = db.missing_by_mod(version, limit=10)
+    def _render_missing(self, rows: list[dict], version: str) -> None:
         header = ft.Container(
             padding=ft.Padding.symmetric(horizontal=16, vertical=8),
             content=ft.Row(
@@ -381,8 +446,7 @@ class OverviewPanel(ft.Column):
             expand=flex,
         )
 
-    def _render_scans(self, db) -> None:
-        scans = db.last_scans(5)
+    def _render_scans(self, scans: list[dict]) -> None:
         self.scans_col.controls = [
             ft.Row(
                 [
