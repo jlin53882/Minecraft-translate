@@ -21,6 +21,7 @@ import threading
 import uuid
 from collections.abc import Callable, Iterable, Iterator, Sequence
 from contextlib import contextmanager
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -38,6 +39,7 @@ from translation_tool.translation_db.models import (
     HistoryRow,
     Impact,
     IngestStats,
+    QualityIssueDelta,
     ReviewPreviewItem,
     SameKeyRow,
     SameSourceAIEntry,
@@ -53,8 +55,7 @@ from translation_tool.translation_db.models import (
 from translation_tool.translation_db.quality import (
     matches_quality,
     quality_state,
-    token_issue_deltas,
-    token_issues,
+    token_quality_comparison,
     whitespace_note,
 )
 from translation_tool.translation_db.schema import (
@@ -72,7 +73,11 @@ from translation_tool.translation_db.schema import (
     rank_sql,
 )
 from translation_tool.translation_db.source_catalog import SourceCatalog
-from translation_tool.utils.cancellation import raise_if_cancelled
+from translation_tool.utils.cancellation import (
+    TaskCancelled,
+    is_cancelled,
+    raise_if_cancelled,
+)
 
 _ENTRY_COLS = "e.id, e.kind, e.mc_version, e.mod_id, e.key, e.en_us"
 _CHUNK = 400  # SQLite 變數上限相容的批次大小
@@ -820,6 +825,29 @@ class TranslationDB:
             f"{('et.revision' if self.has_translation_revision else 'NULL')} "
         )
 
+    def _batch_replace_select_sql(self) -> str:
+        """Select only fields used by the batch preview, keeping its row layout stable.
+
+        The normal entry projection also calculates cross-version differences and
+        the latest history timestamp for list sorting. Batch replacement does not
+        consume those values, and calculating them for every entry in an all-page
+        preview can dominate the query on a large database.
+        """
+        manual_review = (
+            "man.review_status"
+            if self.has_review_state
+            else f"CASE WHEN man.source={SRC_MANUAL} THEN 'legacy_unknown' END"
+        )
+        manual_revision = "man.revision" if self.has_translation_revision else "NULL"
+        effective_revision = "et.revision" if self.has_translation_revision else "NULL"
+        return (
+            "SELECT e.id, e.kind, e.mc_version, e.mod_id, e.key, e.en_us, "
+            "f.zh_tw, f.source, f.checker, "
+            f"{self._effective_review_sql}, 0, NULL, NULL, et.updated_at, NULL, "
+            f"man.zh_tw, man.checker, {manual_review}, {manual_revision}, NULL, "
+            f"{effective_revision} "
+        )
+
     def _query_entry_rows(
         self,
         criteria: EntryFilter,
@@ -828,10 +856,15 @@ class TranslationDB:
         limit: int | None = None,
         offset: int = 0,
         progress_callback: Callable[[str, float], None] | None = None,
+        batch_replace_projection: bool = False,
     ) -> list[tuple]:
         cond, params = self._filter_sql(criteria)
         source = self._query_source()
-        select = self._entry_select_sql()
+        select = (
+            self._batch_replace_select_sql()
+            if batch_replace_projection
+            else self._entry_select_sql()
+        )
         has_quality = criteria.quality.active
         if has_quality:
             sql = f"{select} {source} WHERE {cond}"
@@ -840,7 +873,30 @@ class TranslationDB:
             if limit is not None:
                 sql += " LIMIT ? OFFSET ?"
                 params.extend((max(0, int(limit)), max(0, int(offset))))
-        if conn is None:
+        if batch_replace_projection:
+            # These previews can cover every entry in a version. Fetch in bounded
+            # chunks so cancellation and progress reporting remain responsive
+            # while SQLite streams a large result set.
+            connection = conn or self._conn
+            rows = []
+            connection.set_progress_handler(lambda: int(is_cancelled()), 10_000)
+            try:
+                cursor = connection.execute(sql, tuple(params))
+                while chunk := cursor.fetchmany(_CHUNK):
+                    raise_if_cancelled()
+                    rows.extend(chunk)
+                    if progress_callback is not None:
+                        progress_callback(
+                            f"查詢符合條目（已讀取 {len(rows):,} 筆）", 0.02
+                        )
+                raise_if_cancelled()
+            except sqlite3.OperationalError:
+                if is_cancelled():
+                    raise TaskCancelled() from None
+                raise
+            finally:
+                connection.set_progress_handler(None, 0)
+        elif conn is None:
             rows = self._q(sql, params)
         else:
             rows = conn.execute(sql, tuple(params)).fetchall()
@@ -945,7 +1001,7 @@ class TranslationDB:
             tuple_sql = ",".join("(?,?,?,?)" for _ in chunk)
             params = [value for key in chunk for value in key]
             sql = (
-                f"{self._entry_select_sql()} {self._query_source()} "
+                f"{self._batch_replace_select_sql()} {self._query_source()} "
                 f"WHERE (e.kind,e.mod_id,e.key,e.en_us) IN ({tuple_sql}) "
                 "AND e.en_us<>'' ORDER BY e.kind,e.mod_id,e.key,e.en_us,e.mc_version"
             )
@@ -988,7 +1044,10 @@ class TranslationDB:
         if progress_callback is not None:
             progress_callback("查詢符合條目", 0.02)
         roots = self._query_entry_rows(
-            criteria, conn=conn, progress_callback=progress_callback
+            criteria,
+            conn=conn,
+            progress_callback=progress_callback,
+            batch_replace_projection=True,
         )
         siblings = (
             self._batch_sibling_rows(
@@ -1001,6 +1060,13 @@ class TranslationDB:
         root_id_set = set(root_ids)
         changes: dict[int, BatchReplaceChange] = {}
         skipped: dict[int, BatchReplaceSkipped] = {}
+
+        @lru_cache(maxsize=4096)
+        def quality_comparison(
+            source: str, before: str, after: str
+        ) -> tuple[tuple[str, ...], tuple[str, ...], tuple[QualityIssueDelta, ...]]:
+            old, new, deltas = token_quality_comparison(source, before, after)
+            return tuple(old), tuple(new), deltas
 
         def add_candidate(
             row: tuple, *, extra: bool, root_entry_id: int | None
@@ -1029,8 +1095,10 @@ class TranslationDB:
                     entry_id, self._batch_skipped(row, "替換後內容未改變", extra=extra)
                 )
                 return
-            old_issues = tuple(token_issues(row[5] or "", old_text))
-            new_issues = tuple(token_issues(row[5] or "", new_text))
+            source_text = row[5] or ""
+            old_issues, new_issues, quality_deltas = quality_comparison(
+                source_text, old_text, new_text
+            )
             old_space = whitespace_note(old_text)
             new_space = whitespace_note(new_text)
             changes[entry_id] = BatchReplaceChange(
@@ -1057,7 +1125,7 @@ class TranslationDB:
                 new_quality_issues=new_issues,
                 old_whitespace_note=old_space,
                 new_whitespace_note=new_space,
-                quality_deltas=token_issue_deltas(row[5] or "", old_text, new_text),
+                quality_deltas=quality_deltas,
             )
             skipped.pop(entry_id, None)
 

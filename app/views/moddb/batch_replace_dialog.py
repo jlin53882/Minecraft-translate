@@ -6,6 +6,7 @@ import asyncio
 import sqlite3
 from collections.abc import Callable
 from dataclasses import replace
+from time import monotonic
 
 import flet as ft
 
@@ -35,6 +36,7 @@ from app.views.moddb.batch_replace_preview import render_batch_preview_rows
 from translation_tool.utils.redaction import redact_secrets
 
 PREVIEW_PAGE_SIZE = 50
+PROGRESS_UPDATE_INTERVAL = 0.35
 
 
 class BatchReplaceDialog:
@@ -67,6 +69,9 @@ class BatchReplaceDialog:
         self._busy = False
         self._dialog_open = False
         self._final_open = False
+        self._last_progress_paint = 0.0
+        self._last_progress_stage = ""
+        self._last_progress_value: float | None = None
         self._quality_ack_plan: BatchReplacePlan | None = None
         self._quality_ack_generation: int | None = None
         self._final_plan: BatchReplacePlan | None = None
@@ -443,6 +448,9 @@ class BatchReplaceDialog:
         self._job_generation = generation
         self._job_kind = kind
         self._job_handled = False
+        self._last_progress_paint = 0.0
+        self._last_progress_stage = ""
+        self._last_progress_value = None
         if launched is False or launched is None:
             result_channel.discard()
             self._job_result = None
@@ -470,9 +478,23 @@ class BatchReplaceDialog:
         summary = snapshot.get("summary") or {}
         if summary.get("state") == "working":
             if summary.get("generation") == self._job_generation:
-                self.progress_text.value = str(summary.get("stage") or "背景作業進行中")
-                self.progress_bar.value = snapshot.get("progress", 0.0)
-                self._update_dialog()
+                stage = str(summary.get("stage") or "背景作業進行中")
+                stage_key = stage.partition("（")[0]
+                progress = snapshot.get("progress", 0.0)
+                now = monotonic()
+                if stage_key != self._last_progress_stage or (
+                    now - self._last_progress_paint >= PROGRESS_UPDATE_INTERVAL
+                    and (
+                        stage != self.progress_text.value
+                        or progress != self._last_progress_value
+                    )
+                ):
+                    self.progress_text.value = stage
+                    self.progress_bar.value = progress
+                    self._last_progress_stage = stage_key
+                    self._last_progress_paint = now
+                    self._last_progress_value = progress
+                    self._update_dialog()
             return
         if not session.is_finished:
             return

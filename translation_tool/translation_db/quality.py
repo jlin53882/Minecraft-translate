@@ -59,7 +59,10 @@ def format_tokens(text: str) -> Counter[str]:
 
 def token_issues(source: str, translated: str) -> list[str]:
     """Return stable Traditional Chinese missing/extra token notes."""
-    wanted, actual = format_tokens(source), format_tokens(translated)
+    return _token_issues_from_counts(format_tokens(source), format_tokens(translated))
+
+
+def _token_issues_from_counts(wanted: Counter[str], actual: Counter[str]) -> list[str]:
     issues: list[str] = []
     for token in sorted(set(wanted) | set(actual)):
         delta = actual[token] - wanted[token]
@@ -82,6 +85,14 @@ def token_issue_deltas(
     wanted = format_tokens(source)
     before_tokens = format_tokens(before)
     after_tokens = format_tokens(after)
+    return _token_issue_deltas_from_counts(wanted, before_tokens, after_tokens)
+
+
+def _token_issue_deltas_from_counts(
+    wanted: Counter[str],
+    before_tokens: Counter[str],
+    after_tokens: Counter[str],
+) -> tuple[QualityIssueDelta, ...]:
     before_missing = wanted - before_tokens
     after_missing = wanted - after_tokens
     before_extra = before_tokens - wanted
@@ -96,6 +107,20 @@ def token_issue_deltas(
             if old_count != new_count:
                 deltas.append(QualityIssueDelta(token, direction, old_count, new_count))
     return tuple(deltas)
+
+
+def token_quality_comparison(
+    source: str, before: str, after: str
+) -> tuple[list[str], list[str], tuple[QualityIssueDelta, ...]]:
+    """Analyze the old and new text once each for a batch preview."""
+    wanted = format_tokens(source)
+    before_tokens = format_tokens(before)
+    after_tokens = format_tokens(after)
+    return (
+        _token_issues_from_counts(wanted, before_tokens),
+        _token_issues_from_counts(wanted, after_tokens),
+        _token_issue_deltas_from_counts(wanted, before_tokens, after_tokens),
+    )
 
 
 def whitespace_note(text: str) -> str:
