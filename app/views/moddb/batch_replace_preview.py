@@ -73,7 +73,7 @@ def _effective_source_detail(row: BatchReplaceChange, catalog: SourceCatalog) ->
 def _row_selector(
     row: BatchReplaceChange,
     *,
-    selected_roots: set[int],
+    excluded_roots: set[int],
     selection_active: bool,
     busy: bool,
     on_toggle: Callable[[int, bool], None],
@@ -82,7 +82,7 @@ def _row_selector(
         return ft.Text("跨版本額外項目", size=10.5, color=C.DIM)
     if not selection_active:
         return ft.Text("根條目", size=10.5, color=C.DIM)
-    checked = row.entry_id in selected_roots
+    checked = row.entry_id not in excluded_roots
     return ft.Checkbox(
         value=checked,
         label="處理此根條目" if checked else "個別排除",
@@ -95,7 +95,7 @@ def render_batch_preview_rows(
     rows: Iterable[BatchReplaceChange],
     *,
     catalog: SourceCatalog,
-    selected_roots: set[int],
+    excluded_roots: set[int],
     selection_active: bool,
     show_skipped: bool,
     busy: bool,
@@ -122,7 +122,7 @@ def render_batch_preview_rows(
                         [
                             _row_selector(
                                 row,
-                                selected_roots=selected_roots,
+                                excluded_roots=excluded_roots,
                                 selection_active=selection_active,
                                 busy=busy,
                                 on_toggle=on_toggle,

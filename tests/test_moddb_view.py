@@ -970,6 +970,7 @@ def test_batch_replace_quality_ack_is_bound_to_one_exact_plan(db_path):
     plan_a = dialog.plan
     assert plan_a is not None and plan_a.update_count == 2
     assert all(change.quality_mixed for change in plan_a.changes)
+    assert plan_a.quality_mixed_count == plan_a.quality_worsened_count == 2
     dialog.quality_ack.value = True
     dialog._on_quality_ack()
     approved_a = dialog.plan
@@ -996,6 +997,82 @@ def test_batch_replace_quality_ack_is_bound_to_one_exact_plan(db_path):
     assert dialog.quality_ack.value is False
     assert dialog.apply_btn.disabled is True
     db.close()
+
+
+def test_batch_replace_plan_precomputes_cross_version_summary_counts(db_path):
+    from app.services_impl.moddb_service import EntryFilter
+
+    db = TranslationDB(db_path)
+    db.ingest(
+        "1.21.1",
+        [ScanItem(KIND_LANG, "same", "item.same", "Source", "原譯文")],
+    )
+    db.ingest(
+        "1.20.1",
+        [ScanItem(KIND_LANG, "same", "item.same", "Source", "不同譯文")],
+    )
+    plan = db.preview_batch_replace(
+        EntryFilter(version="1.21.1"), "原", "新", propagate=True
+    )
+    assert plan.update_count == 1
+    assert plan.skipped_count == plan.conflict_count == 1
+    assert plan.extra_version_count == 0
+    assert plan.extra_candidate_count == 1
+    assert plan.total_unique_entries == 2
+    db.close()
+
+
+def test_batch_replace_completion_does_not_expand_large_root_selection():
+    from app.services_impl.moddb_batch_operation import BatchOperationOutcome
+    from app.services_impl.moddb_service import BatchReplacePlan, EntryFilter
+    from app.views.moddb.batch_replace_dialog import BatchReplaceDialog
+
+    class LargeRootIds(tuple):
+        def __new__(cls):
+            return super().__new__(cls, ())
+
+        def __len__(self):
+            return 243_064
+
+        def __iter__(self):
+            raise AssertionError("completion must not copy every root id")
+
+    plan = BatchReplacePlan(
+        database_identity="db",
+        criteria=EntryFilter(version="1.21.1"),
+        find_text="舊",
+        replace_text="新",
+        propagate=False,
+        root_ids=LargeRootIds(),
+        changes=(),
+        skipped=(),
+        total_unique_entries=243_064,
+        root_changes=(),
+    )
+    dialog = BatchReplaceDialog(
+        mock_page(), lambda: None, plan.criteria, lambda _result: None
+    )
+    dialog._finish_preview(
+        {"state": "complete"},
+        BatchOperationOutcome("preview", 0, "complete", result=plan),
+    )
+    assert dialog.selection_plan is plan
+    assert "勾選 243,064" in dialog.summary.value
+
+
+def test_batch_replace_selection_criteria_use_sparse_exclusions():
+    from app.services_impl.moddb_service import EntryFilter
+    from app.views.moddb.batch_replace_dialog import BatchReplaceDialog
+
+    base = EntryFilter(version="1.21.1")
+    only_checked = BatchReplaceDialog._criteria_for_selection(
+        base, (10, 20, 30), {20}, True
+    )
+    current_range = BatchReplaceDialog._criteria_for_selection(
+        base, (10, 20, 30), {20}, False
+    )
+    assert only_checked.include_ids == (10, 30)
+    assert current_range.exclude_ids == (20,)
 
 
 def test_batch_replace_scope_change_invalidates_quality_ack(db_path):

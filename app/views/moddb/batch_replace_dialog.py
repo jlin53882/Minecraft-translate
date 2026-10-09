@@ -56,7 +56,7 @@ class BatchReplaceDialog:
         self._operation_launcher = operation_launcher
         self.plan: BatchReplacePlan | None = None
         self.selection_plan: BatchReplacePlan | None = None
-        self.selected_roots: set[int] | None = None
+        self.excluded_roots: set[int] = set()
         self.only_checked = True
         self.preview_page = 0
         self.show_skipped = False
@@ -297,7 +297,7 @@ class BatchReplaceDialog:
         self._generation += 1
         self._clear_plan_and_ack()
         self.selection_plan = None
-        self.selected_roots = None
+        self.excluded_roots.clear()
         self.preview_page = 0
         self.show_skipped = False
         self.apply_btn.disabled = True
@@ -319,8 +319,8 @@ class BatchReplaceDialog:
     def _on_quality_ack(self, _e=None) -> None:
         if self._busy or self.plan is None:
             return
-        approved = bool(self.quality_ack.value) and any(
-            change.quality_worsened for change in self.plan.changes
+        approved = bool(self.quality_ack.value) and bool(
+            self.plan.quality_worsened_count
         )
         self.quality_ack.value = approved
         self.plan = replace(self.plan, confirmed_quality_worsening=approved)
@@ -342,7 +342,7 @@ class BatchReplaceDialog:
     def _quality_ack_is_valid(self) -> bool:
         if self.plan is None:
             return False
-        if not any(change.quality_worsened for change in self.plan.changes):
+        if not self.plan.quality_worsened_count:
             return True
         return (
             bool(self.quality_ack.value)
@@ -360,26 +360,6 @@ class BatchReplaceDialog:
         self.preview_page = 0
         self._render()
 
-    def _criteria(self) -> EntryFilter:
-        if self.selected_roots is None or self.selection_plan is None:
-            return self.base_criteria
-        universe = set(self.selection_plan.root_ids)
-        if self.only_checked:
-            return replace(
-                self.base_criteria,
-                include_ids=tuple(sorted(self.selected_roots)),
-                exclude_ids=tuple(self.base_criteria.exclude_ids),
-            )
-        newly_excluded = universe - self.selected_roots
-        excluded = tuple(
-            dict.fromkeys((*self.base_criteria.exclude_ids, *sorted(newly_excluded)))
-        )
-        return replace(
-            self.base_criteria,
-            include_ids=self.base_criteria.include_ids,
-            exclude_ids=excluded,
-        )
-
     def _preview(self, _e=None) -> None:
         self._start_preview()
 
@@ -392,10 +372,9 @@ class BatchReplaceDialog:
             self.summary.value = "目前沒有可用的資料庫。"
             self._update_dialog()
             return
-        if self.selection_plan is not None and self.selected_roots is not None:
-            criteria = self._criteria()
-        else:
-            criteria = self.base_criteria
+        root_ids = self.selection_plan.root_ids if self.selection_plan else None
+        excluded_roots = self.excluded_roots
+        only_checked = self.only_checked
         find_text = str(self.find_field.value or "")
         replace_text = str(self.replace_field.value or "")
         propagate = bool(self.propagate.value)
@@ -407,6 +386,9 @@ class BatchReplaceDialog:
         self._set_job_ui("preview", "正在建立預覽…")
 
         def work(session: TaskSession):
+            criteria = self._criteria_for_selection(
+                self.base_criteria, root_ids, excluded_roots, only_checked
+            )
             return db.preview_batch_replace(
                 criteria,
                 find_text,
@@ -419,6 +401,31 @@ class BatchReplaceDialog:
             )
 
         self._start_job("preview", generation, work)
+
+    @staticmethod
+    def _criteria_for_selection(
+        base: EntryFilter,
+        root_ids: tuple[int, ...] | None,
+        excluded_roots: set[int],
+        only_checked: bool,
+    ) -> EntryFilter:
+        if root_ids is None:
+            return base
+        if only_checked:
+            return replace(
+                base,
+                include_ids=tuple(i for i in root_ids if i not in excluded_roots),
+                exclude_ids=tuple(base.exclude_ids),
+            )
+        if not excluded_roots:
+            return base
+        return replace(
+            base,
+            include_ids=base.include_ids,
+            exclude_ids=tuple(
+                dict.fromkeys((*base.exclude_ids, *sorted(excluded_roots)))
+            ),
+        )
 
     def _record_progress(
         self, session: TaskSession, generation: int, stage: str, value: float
@@ -512,7 +519,6 @@ class BatchReplaceDialog:
             self._set_job_ui(None, "預覽已失效或對話框已關閉；請重新產生預覽。")
         elif kind == "apply":
             self._finish_apply(summary, outcome)
-        self._update_dialog()
 
     def _finish_preview(self, summary: dict, outcome: BatchOperationOutcome | None):
         state = summary.get("state")
@@ -524,23 +530,21 @@ class BatchReplaceDialog:
             self.plan = outcome.result
             if self.selection_plan is None:
                 self.selection_plan = self.plan
-                self.selected_roots = set(self.plan.root_ids)
+                self.excluded_roots.clear()
             self.preview_page = 0
-            self.quality_ack.visible = any(
-                change.quality_worsened for change in self.plan.changes
-            )
+            self.quality_ack.visible = self.plan.quality_worsened_count > 0
             self.quality_ack.value = False
             self.plan = replace(self.plan, confirmed_quality_worsening=False)
             self._quality_ack_plan = None
             self._quality_ack_generation = None
-            if any(change.quality_mixed for change in self.plan.changes):
+            if self.plan.quality_mixed_count:
                 self.quality_ack.label = (
                     "我已檢查混合品質變化（部分問題改善、部分增加），仍要允許增加"
                 )
             else:
                 self.quality_ack.label = "我已檢查品質警告，仍要允許問題增加"
             self.summary.value = ""
-            self._render()
+            self._render(update=False)
         elif state == "cancelled" or (outcome and outcome.state == "cancelled"):
             self.plan = None
             self.summary.value = "預覽已取消，沒有可執行的替換計畫。"
@@ -578,7 +582,7 @@ class BatchReplaceDialog:
             if isinstance(error, ValueError):
                 self.plan = None
                 self.summary.value = f"{message} 重新預覽後才能繼續。"
-                self._render()
+                self._render(update=False)
             self._set_job_ui(
                 None, self.summary.value if isinstance(error, ValueError) else message
             )
@@ -649,12 +653,10 @@ class BatchReplaceDialog:
     def _toggle_root(self, entry_id: int, selected: bool) -> None:
         if self._busy or self.selection_plan is None:
             return
-        if self.selected_roots is None:
-            self.selected_roots = set(self.selection_plan.root_ids)
         if selected:
-            self.selected_roots.add(entry_id)
+            self.excluded_roots.discard(entry_id)
         else:
-            self.selected_roots.discard(entry_id)
+            self.excluded_roots.add(entry_id)
         self._invalidate_selection("根條目選取已變更；重新預覽前不會執行。")
 
     def _display_rows(self):
@@ -665,12 +667,15 @@ class BatchReplaceDialog:
         if self.plan is not None:
             return self.plan.changes
         if self.selection_plan is not None:
-            return tuple(
-                row for row in self.selection_plan.changes if not row.is_extra_version
-            )
+            return self.selection_plan.root_changes
         return ()
 
-    def _render(self) -> None:
+    def _selected_root_count(self) -> int:
+        if self.selection_plan is None:
+            return 0
+        return len(self.selection_plan.root_ids) - len(self.excluded_roots)
+
+    def _render(self, *, update: bool = True) -> None:
         rows = self._display_rows()
         if rows is None:
             self.rows.controls = [
@@ -681,7 +686,8 @@ class BatchReplaceDialog:
             self.next_btn.disabled = True
             self.skipped_btn.disabled = True
             self.apply_btn.disabled = True
-            self._update_dialog()
+            if update:
+                self._update_dialog()
             return
         total = len(rows)
         pages = max(1, (total + PREVIEW_PAGE_SIZE - 1) // PREVIEW_PAGE_SIZE)
@@ -700,7 +706,7 @@ class BatchReplaceDialog:
         )
         self.rows.controls = self._render_rows(visible)
         if self.plan is None:
-            selected_count = len(self.selected_roots or ())
+            selected_count = self._selected_root_count()
             self.summary.value = (
                 f"目前仍套用原始篩選範圍；已勾選 {selected_count:,d} 個根條目，"
                 "處理範圍尚未確認。重新預覽後才會列出可執行筆數。"
@@ -711,26 +717,25 @@ class BatchReplaceDialog:
                 if self.only_checked
                 else "目前篩選範圍（套用個別排除）"
             )
-            conflicts = sum(item.is_extra_version for item in self.plan.skipped)
-            mixed = sum(change.quality_mixed for change in self.plan.changes)
             self.summary.value = (
                 f"範圍：{mode}；符合根條目 {len(self.plan.root_ids):,d}；"
-                f"勾選 {len(self.selected_roots or ()):,d}；可執行 {self.plan.update_count:,d}；"
+                f"勾選 {self._selected_root_count():,d}；可執行 {self.plan.update_count:,d}；"
                 f"跨版本候選 {self.plan.extra_candidate_count:,d}（納入 {self.plan.extra_version_count:,d}）；"
-                f"略過 {self.plan.skipped_count:,d}（衝突 {conflicts:,d}）；"
-                f"品質混合變化 {mixed:,d}。"
+                f"略過 {self.plan.skipped_count:,d}（衝突 {self.plan.conflict_count:,d}）；"
+                f"品質混合變化 {self.plan.quality_mixed_count:,d}。"
             )
         quality_ok = self._quality_ack_is_valid()
         self.apply_btn.disabled = (
             self.plan is None or not self.plan.changes or not quality_ok or self._busy
         )
-        self._update_dialog()
+        if update:
+            self._update_dialog()
 
     def _render_rows(self, visible) -> list[ft.Control]:
         return render_batch_preview_rows(
             visible,
             catalog=self._plan_catalog,
-            selected_roots=self.selected_roots or set(),
+            excluded_roots=self.excluded_roots,
             selection_active=self.selection_plan is not None,
             show_skipped=self.show_skipped,
             busy=self._busy,
@@ -746,15 +751,14 @@ class BatchReplaceDialog:
         self._final_generation = self._generation
         self._final_plan = self.plan
         plan = self._final_plan
-        mixed = sum(change.quality_mixed for change in plan.changes)
         self.final_summary.value = (
             f"處理範圍：{'僅已勾選根條目' if self.only_checked else '目前篩選範圍'}\n"
-            f"個別排除 {len(set(self.selection_plan.root_ids if self.selection_plan else ()) - (self.selected_roots or set())):,d} 個根條目\n"
+            f"個別排除 {len(self.excluded_roots):,d} 個根條目\n"
             f"根條目 {len(plan.root_ids):,d}；實際寫入 {plan.update_count:,d}；"
             f"其中跨版本 {plan.extra_version_count:,d}\n"
-            f"略過 {plan.skipped_count:,d}；跨版本衝突 {sum(i.is_extra_version for i in plan.skipped):,d}\n"
-            f"品質惡化 {sum(c.quality_worsened for c in plan.changes):,d} 筆；"
-            f"品質混合變化 {mixed:,d} 筆\n"
+            f"略過 {plan.skipped_count:,d}；跨版本衝突 {plan.conflict_count:,d}\n"
+            f"品質惡化 {plan.quality_worsened_count:,d} 筆；"
+            f"品質混合變化 {plan.quality_mixed_count:,d} 筆\n"
             "若資料庫快照與此預覽不同，交易會拒絕寫入並要求重新預覽。"
         )
         self.final_ack.value = False

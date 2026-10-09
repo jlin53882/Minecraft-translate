@@ -1175,6 +1175,26 @@ class TranslationDB:
                         add_candidate(sibling, extra=True, root_entry_id=root_id)
                     seen_extra.add(sibling_id)
 
+        ordered_changes = tuple(changes[key] for key in sorted(changes))
+        ordered_skipped = tuple(skipped[key] for key in sorted(skipped))
+        extra_ids: set[int] = set()
+        root_changes: list[BatchReplaceChange] = []
+        extra_version_count = 0
+        quality_mixed_count = 0
+        quality_worsened_count = 0
+        for row in ordered_changes:
+            if row.is_extra_version:
+                extra_ids.add(row.entry_id)
+                extra_version_count += 1
+            else:
+                root_changes.append(row)
+            quality_mixed_count += row.quality_mixed
+            quality_worsened_count += row.quality_worsened
+        conflict_count = 0
+        for row in ordered_skipped:
+            if row.is_extra_version:
+                extra_ids.add(row.entry_id)
+                conflict_count += 1
         return BatchReplacePlan(
             database_identity=self._database_identity(),
             criteria=criteria,
@@ -1182,9 +1202,16 @@ class TranslationDB:
             replace_text=replace_text,
             propagate=propagate,
             root_ids=root_ids,
-            changes=tuple(changes[key] for key in sorted(changes)),
-            skipped=tuple(skipped[key] for key in sorted(skipped)),
+            changes=ordered_changes,
+            skipped=ordered_skipped,
             confirmed_quality_worsening=confirmed_quality_worsening,
+            total_unique_entries=len(root_id_set | extra_ids),
+            extra_version_count=extra_version_count,
+            extra_candidate_count=len(extra_ids),
+            conflict_count=conflict_count,
+            quality_mixed_count=quality_mixed_count,
+            quality_worsened_count=quality_worsened_count,
+            root_changes=tuple(root_changes),
         )
 
     def preview_batch_replace(

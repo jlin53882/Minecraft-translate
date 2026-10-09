@@ -323,23 +323,13 @@ class BatchReplacePlan:
     changes: tuple[BatchReplaceChange, ...]
     skipped: tuple[BatchReplaceSkipped, ...]
     confirmed_quality_worsening: bool = False
-
-    @property
-    def total_unique_entries(self) -> int:
-        extras = {
-            row.entry_id
-            for row in (*self.changes, *self.skipped)
-            if row.is_extra_version
-        }
-        return len(set(self.root_ids) | extras)
-
-    @property
-    def extra_version_count(self) -> int:
-        return sum(row.is_extra_version for row in self.changes)
-
-    @property
-    def extra_candidate_count(self) -> int:
-        return sum(row.is_extra_version for row in (*self.changes, *self.skipped))
+    total_unique_entries: int = 0
+    extra_version_count: int = 0
+    extra_candidate_count: int = 0
+    conflict_count: int = 0
+    quality_mixed_count: int = 0
+    quality_worsened_count: int = 0
+    root_changes: tuple[BatchReplaceChange, ...] = ()
 
     @property
     def update_count(self) -> int:
