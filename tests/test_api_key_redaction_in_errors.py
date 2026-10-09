@@ -25,6 +25,7 @@ def test_ui_validation_error_does_not_leak_key(bad):
 @pytest.mark.parametrize("bad", [BAD_PREFIX, SHORT_KEY, BAD_CHARS])
 def test_runtime_validation_error_and_log_do_not_leak_key(bad, monkeypatch):
     logged: list[str] = []
+    monkeypatch.setattr(lm_config_rules, "get_translation_provider", lambda: "gemini")
     monkeypatch.setattr(lm_config_rules, "log_error", logged.append)
     monkeypatch.setattr(lm_config_rules, "_get_all_keys", lambda: [bad])
     with pytest.raises(RuntimeError) as exc:

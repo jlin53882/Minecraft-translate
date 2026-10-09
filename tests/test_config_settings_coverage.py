@@ -130,7 +130,7 @@ def test_every_custom_block_has_a_builder():
         for b in card.blocks
         if isinstance(b, schema.Custom)
     }
-    assert custom == {"keys", "models"}
+    assert custom == {"chatgpt_model_settings", "keys", "models"}
 
 
 # --- 真正的設定頁 -----------------------------------------------------------
@@ -146,8 +146,11 @@ def test_settings_page_has_a_control_for_every_schema_setting():
     ui = _config_view_paths()
     expected = {s.path for s in schema.ui_settings()}
     assert expected <= ui
-    # 設定頁不應有 schema 沒登記的控制項
-    assert ui <= expected, ui - expected
+    # 每模型 ChatGPT 控制項由 chatgpt_model_settings 自訂區塊建置，不是一般 schema 欄位。
+    assert ui - expected == {
+        "ui.chatgpt_context_budget",
+        "ui.chatgpt_reasoning_effort",
+    }
 
 
 def test_same_as_source_retry_setting_is_editable_on_translation_behavior_page():

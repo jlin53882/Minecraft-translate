@@ -1158,3 +1158,33 @@ class TestConfigSaveFailureContracts:
         assert result is False
         assert writes == []
         assert "設定驗證失敗" in snacks[-1]
+
+
+def test_chatgpt_settings_save_without_gemini_key_validation():
+    from app.views.config.config_actions import save_config_from_view
+
+    view = _make_full_save_view()
+    view.controls_map["lm_translator.provider"] = SimpleNamespace(value="chatgpt")
+    view.controls_map["lm_translator.chatgpt_model"] = SimpleNamespace(
+        value="gpt-5-codex"
+    )
+    view.collect_chatgpt_model_settings = MagicMock(
+        return_value={"gpt-5-codex": {"max_input_token_budget": 18000}}
+    )
+    saved = {}
+
+    result = save_config_from_view(
+        view,
+        load_config_json_fn=_make_base_config,
+        save_config_json_fn=lambda config: (saved.update(config), True)[1],
+        validate_api_keys_from_ui_fn=lambda _keys: pytest.fail(
+            "ChatGPT OAuth must not validate Gemini API keys"
+        ),
+    )
+
+    assert result is True
+    assert saved["lm_translator"]["provider"] == "chatgpt"
+    assert saved["lm_translator"]["chatgpt_model"] == "gpt-5-codex"
+    assert saved["lm_translator"]["chatgpt_model_settings"] == {
+        "gpt-5-codex": {"max_input_token_budget": 18000}
+    }

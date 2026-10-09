@@ -1047,6 +1047,24 @@ def _finish_successful_batch(
     return _BatchRoundOutcome()
 
 
+def _provider_request_kwargs(
+    runtime, model_name, prompt, payload, output_cap, meta_out, api_key
+):
+    """Build shared and ChatGPT-specific arguments for one provider request."""
+    kwargs = {
+        "model_name": model_name,
+        "system_prompt": prompt,
+        "payload": payload,
+        "api_key": api_key,
+        "temperature": runtime.model_temperature,
+        "max_output_tokens": output_cap,
+        "meta_out": meta_out,
+    }
+    if runtime.lm_cfg.get("provider", "gemini") == "chatgpt":
+        kwargs["reasoning_effort"] = runtime.reasoning_effort
+    return kwargs
+
+
 def _attempt_batch(
     runtime: _BatchRuntime, round_data: _BatchRound
 ) -> _BatchRoundOutcome:
@@ -1095,17 +1113,15 @@ def _attempt_batch(
                     if runtime.lm_cfg.get("provider", "gemini") == "gemini"
                     else ""
                 )
-                request_kwargs = {
-                    "model_name": model_name,
-                    "system_prompt": prompt,
-                    "payload": round_data.payload,
-                    "api_key": api_key,
-                    "temperature": runtime.model_temperature,
-                    "max_output_tokens": output_cap,
-                    "meta_out": api_meta,
-                }
-                if runtime.lm_cfg.get("provider", "gemini") == "chatgpt":
-                    request_kwargs["reasoning_effort"] = runtime.reasoning_effort
+                request_kwargs = _provider_request_kwargs(
+                    runtime,
+                    model_name,
+                    prompt,
+                    round_data.payload,
+                    output_cap,
+                    api_meta,
+                    api_key,
+                )
                 raw_text = call_gemini_requests(**request_kwargs).strip()
             # A synchronous provider request cannot be interrupted in flight.
             # If cancellation arrived while it was blocked, discard its result

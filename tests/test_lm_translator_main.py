@@ -148,6 +148,100 @@ def test_chatgpt_api_errors_get_provider_specific_guidance(api_error, expected):
     assert code in str(exc_info.value)
 
 
+@pytest.mark.parametrize(
+    ("model_settings", "expected_budget", "expected_effort"),
+    [
+        ({"max_input_token_budget": 18000, "reasoning_effort": "high"}, 18000, "high"),
+        (
+            {"max_input_token_budget": 0, "reasoning_effort": "model_default"},
+            60000,
+            None,
+        ),
+        ({}, 60000, None),
+    ],
+)
+def test_chatgpt_runtime_uses_selected_model_and_its_overrides(
+    monkeypatch, model_settings, expected_budget, expected_effort
+):
+    from translation_tool.core import lm_translator_main as main
+
+    monkeypatch.setattr(
+        main,
+        "load_config",
+        lambda: {
+            "lm_translator": {
+                "provider": "chatgpt",
+                "chatgpt_model": "gpt-5-codex",
+                "chatgpt_model_settings": {"gpt-5-codex": model_settings},
+                "max_input_token_budget": 60000,
+                "initial_batch_size_lang": 20,
+            }
+        },
+    )
+
+    runtime = main._build_batch_runtime(
+        [{"id": "line-1", "text": "Hello", "file": "lang/en_us.json"}], 1
+    )
+
+    assert runtime is not None
+    assert runtime.model_pool == ["gpt-5-codex"]
+    assert runtime.lm_cfg["max_input_token_budget"] == expected_budget
+    assert runtime.budget_cfg.max_input_token_budget == expected_budget
+    assert runtime.reasoning_effort == expected_effort
+
+
+def test_chatgpt_runtime_without_a_selected_model_does_not_fall_back_to_gemini(
+    monkeypatch,
+):
+    from translation_tool.core import lm_translator_main as main
+
+    monkeypatch.setattr(
+        main,
+        "load_config",
+        lambda: {
+            "lm_translator": {
+                "provider": "chatgpt",
+                "chatgpt_model": "",
+                "models": {"gemini-configured-model": {"enabled": True}},
+            }
+        },
+    )
+    monkeypatch.setattr(main, "log_error", lambda _message: None)
+
+    assert main._build_batch_runtime([{"id": "line-1", "text": "Hello"}], 1) is None
+
+
+@pytest.mark.parametrize("provider", ["gemini", "chatgpt"])
+def test_provider_request_kwargs_only_send_chatgpt_reasoning(provider):
+    from types import SimpleNamespace
+
+    from translation_tool.core import lm_translator_main as main
+
+    runtime = SimpleNamespace(
+        lm_cfg={"provider": provider},
+        model_temperature=0.4,
+        reasoning_effort="high",
+    )
+
+    kwargs = main._provider_request_kwargs(
+        runtime,
+        "selected-model",
+        "Translate.",
+        {"items": [{"id": "line-1", "value": "Hello"}]},
+        1024,
+        {},
+        "key",
+    )
+
+    assert kwargs["model_name"] == "selected-model"
+    assert kwargs["temperature"] == 0.4
+    assert kwargs["max_output_tokens"] == 1024
+    if provider == "chatgpt":
+        assert kwargs["reasoning_effort"] == "high"
+    else:
+        assert "reasoning_effort" not in kwargs
+
+
 class TestTranslateBatchSmart:
     """translate_batch_smart 測試"""
 
@@ -215,6 +309,9 @@ class TestTranslateBatchSmart:
         from translation_tool.core import lm_config_rules, lm_translator_main
 
         monkeypatch.setattr(lm_config_rules, "_get_all_keys", list)
+        monkeypatch.setattr(
+            lm_translator_main, "get_translation_provider", lambda: "gemini"
+        )
         execute_translation = MagicMock()
         monkeypatch.setattr(
             lm_translator_main, "_execute_translation", execute_translation
@@ -333,7 +430,14 @@ class TestSystemPromptConversion:
 
         items = [{"path": "test.key", "text": "Hello", "cache_type": "lang"}]
 
-        _result, _status = translate_batch_smart(items, 1)
+        from translation_tool.core import lm_api_client
+
+        with patch.object(
+            lm_api_client,
+            "load_config",
+            return_value={"lm_translator": {"provider": "gemini"}},
+        ):
+            _result, _status = translate_batch_smart(items, 1)
 
         assert mock_post.call_count >= 1, "API 應該被調用至少一次"
         call_kwargs = mock_post.call_args.kwargs
@@ -386,7 +490,14 @@ class TestSystemPromptConversion:
 
         items = [{"path": "test.key", "text": "Hello", "cache_type": "lang"}]
 
-        _result, _status = translate_batch_smart(items, 1)
+        from translation_tool.core import lm_api_client
+
+        with patch.object(
+            lm_api_client,
+            "load_config",
+            return_value={"lm_translator": {"provider": "gemini"}},
+        ):
+            _result, _status = translate_batch_smart(items, 1)
 
         assert mock_post.call_count >= 1, "API 應該被調用至少一次"
         call_kwargs = mock_post.call_args.kwargs

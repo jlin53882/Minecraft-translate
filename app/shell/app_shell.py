@@ -1106,8 +1106,13 @@ def _default_config_loader() -> dict:
 
 
 def _enabled_model_name(config: dict) -> str | None:
-    """設定中第一個啟用的模型名稱。"""
-    models = (config.get("lm_translator") or {}).get("models") or {}
+    """目前 provider 設定中所選的模型名稱。"""
+    lm_cfg = config.get("lm_translator") or {}
+    if lm_cfg.get("provider", "gemini") == "chatgpt":
+        model_name = str(lm_cfg.get("chatgpt_model") or "").strip()
+        return model_name or None
+
+    models = lm_cfg.get("models") or {}
     for name, cfg in models.items():
         if isinstance(cfg, dict) and cfg.get("enabled"):
             return str(name)

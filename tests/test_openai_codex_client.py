@@ -58,6 +58,69 @@ def test_stream_request_uses_responses_structured_outputs(monkeypatch):
     assert item_schema["properties"]["id"]["enum"] == ["line-1"]
 
 
+def test_stream_request_sends_configured_reasoning_effort(monkeypatch):
+    captured = {}
+    monkeypatch.setattr(
+        client.requests,
+        "post",
+        lambda _url, **kwargs: captured.update(kwargs) or requests.Response(),
+    )
+
+    client._stream_request(
+        token="access-token",
+        model_name="gpt-5-codex",
+        system_prompt="Translate.",
+        payload={"items": [{"id": "line-1", "value": "Hello"}]},
+        timeout=30,
+        reasoning_effort="high",
+    )
+
+    assert captured["json"]["reasoning"] == {"effort": "high"}
+
+
+def test_call_retries_once_after_unauthorized_and_keeps_reasoning(monkeypatch):
+    class _UnauthorizedResponse:
+        status_code = 401
+
+        def close(self):
+            self.closed = True
+
+    class _SuccessResponse:
+        status_code = 200
+        ok = True
+
+    tokens = iter(("expired-token", "refreshed-token"))
+    monkeypatch.setattr(
+        client, "get_chatgpt_access_token", lambda **kwargs: next(tokens)
+    )
+    requests_seen = []
+
+    def stream_request(**kwargs):
+        requests_seen.append(kwargs)
+        return (
+            _UnauthorizedResponse() if len(requests_seen) == 1 else _SuccessResponse()
+        )
+
+    monkeypatch.setattr(client, "_stream_request", stream_request)
+    monkeypatch.setattr(client, "_consume_stream", lambda _response, _meta: "done")
+
+    assert (
+        client.call_chatgpt_responses(
+            model_name="gpt-5-codex",
+            system_prompt="Translate.",
+            payload={"items": []},
+            timeout=30,
+            reasoning_effort="medium",
+        )
+        == "done"
+    )
+    assert [request["token"] for request in requests_seen] == [
+        "expired-token",
+        "refreshed-token",
+    ]
+    assert all(request["reasoning_effort"] == "medium" for request in requests_seen)
+
+
 def test_consume_stream_returns_structured_output_and_usage():
     response = _FakeStreamResponse(
         [
