@@ -20,7 +20,12 @@ from translation_tool.core.lm_batch_budget import (
     get_tracker,
     select_batch_size,
 )
-from translation_tool.core.lm_config_rules import ApiKeyCycle, get_api_key_count
+from translation_tool.core.lm_config_rules import (
+    ApiKeyCycle,
+    get_api_key_count,
+    get_translation_provider,
+    validate_translation_credentials,
+)
 from translation_tool.core.lm_config_schema import model_output_token_cap
 from translation_tool.core.lm_key_health import (
     PROBE_LEASE_MARGIN_SEC,
@@ -215,8 +220,11 @@ def translate_batch_smart(
     items = _validate_batch_items(batch_items)
     if not items:
         return [], "AUTO"
-    if not dry_run and get_api_key_count() == 0:
-        raise RuntimeError("❌ 設定檔中沒有找到任何 API Key，請先設定金鑰。")
+    if not dry_run:
+        if get_translation_provider() == "chatgpt":
+            validate_translation_credentials()
+        elif get_api_key_count() == 0:
+            raise RuntimeError("❌ 設定檔中沒有找到任何 API Key，請先設定金鑰。")
 
     # 批次 profile 與批次大小由 _execute_translation 內部決定（舊版在這裡重複計算後丟棄，已移除）。
 
@@ -423,10 +431,15 @@ def _build_batch_runtime(
     except (TypeError, ValueError):
         rpm_cooldown = float(RPM_COOLDOWN_SEC)
 
-    models_cfg = get_models_config(load_config())
-    model_pool = [
-        name for name, config in models_cfg.items() if config.get("enabled", False)
-    ]
+    provider = lm_cfg.get("provider", "gemini")
+    if provider == "chatgpt":
+        chatgpt_model = str(lm_cfg.get("chatgpt_model") or "").strip()
+        model_pool = [chatgpt_model] if chatgpt_model else []
+    else:
+        models_cfg = get_models_config(load_config())
+        model_pool = [
+            name for name, config in models_cfg.items() if config.get("enabled", False)
+        ]
     if not model_pool:
         log_error(
             "[❌] MODEL_POOL 為空（沒有啟用任何模型），請在設定中啟用至少一個模型"
@@ -535,6 +548,49 @@ def _remote_error_detail(error: Exception, limit: int = 300) -> str:
     return redact_text(text.strip())[:limit]
 
 
+def _chatgpt_api_error_message(error) -> str:
+    """將 Responses API 錯誤轉成可採取行動的翻譯錯誤訊息。"""
+    code = error.code.lower()
+    param = error.param.lower()
+    detail = str(error)
+
+    if code == "refusal":
+        return f"ChatGPT 拒絕處理這批翻譯內容，請檢查來源文字後再試。API 詳情：{detail}"
+    if code in {
+        "subscription_sharing_usage_limit_exceeded",
+        "subscription_sharing_usage_unavailable",
+    }:
+        return f"ChatGPT 方案目前無法繼續處理翻譯，請查看使用量與方案限制後重試。API 詳情：{detail}"
+    if error.status == 401:
+        return (
+            f"ChatGPT OAuth 憑證無效或已過期，請到 API 設定重新登入。API 詳情：{detail}"
+        )
+    if error.status == 403:
+        return (
+            "ChatGPT 拒絕此請求（403）。請確認登入帳號已授權 ChatGPT 計畫用 API 存取，"
+            "且帳號、方案、模型與所在區域符合使用資格；若資格已更新，可到 API 設定重新登入。"
+            f"API 詳情：{detail}"
+        )
+    if error.status == 429:
+        return f"ChatGPT 使用頻率或用量已達限制，請稍後再試並確認方案使用量。API 詳情：{detail}"
+    if error.status in {400, 422} and (
+        "schema" in code or "schema" in param or "text.format" in param
+    ):
+        return (
+            "ChatGPT 拒絕了結構化輸出 JSON Schema；請確認模型支援 Structured Outputs，"
+            f"並檢查 schema 欄位。API 詳情：{detail}"
+        )
+    if error.status in {400, 422}:
+        return f"ChatGPT 無法接受此翻譯請求，請檢查 API 詳情中的欄位與參數。API 詳情：{detail}"
+    if error.status == 404:
+        return f"ChatGPT 找不到或無權使用所選模型，請在設定選擇可用模型。API 詳情：{detail}"
+    if error.status is not None and error.status >= 500:
+        return f"ChatGPT 服務暫時發生錯誤，請稍後重試。API 詳情：{detail}"
+    if code in {"network_error", "stream_interrupted", "stream_incomplete"}:
+        return f"ChatGPT 連線中斷或回應串流未完成，請檢查網路後重試。API 詳情：{detail}"
+    return f"ChatGPT 翻譯請求失敗：{detail}"
+
+
 def _handle_batch_error(
     runtime: _BatchRuntime,
     error: Exception,
@@ -544,6 +600,17 @@ def _handle_batch_error(
     cap_source: str = "global",
 ) -> BatchAction:
     """Classify one failed model attempt and execute stateful key/wait effects."""
+    from translation_tool.core.codex_oauth import ChatGPTOAuthError
+    from translation_tool.core.openai_codex_client import ChatGPTAPIError
+
+    if isinstance(error, ChatGPTOAuthError):
+        raise ChatGPTOAuthError(f"ChatGPT OAuth 登入需要處理：{error}") from error
+    if isinstance(error, ChatGPTAPIError):
+        if error.code == "incomplete":
+            log_warning(f"[ChatGPT] 回應未完整完成，縮小批次後重試：{error}")
+            return BatchAction.SHRINK_BATCH
+        raise RuntimeError(_chatgpt_api_error_message(error)) from error
+
     status = (
         error.response.status_code
         if isinstance(error, requests.HTTPError) and error.response is not None
@@ -1011,7 +1078,11 @@ def _attempt_batch(
                 f"/{runtime.batch_size} | 翻譯總量={runtime.original_total}"
             )
             with quota.hold_probe_lease(model_name, owner, lease_sec):
-                api_key = runtime.key_cycle.claim()
+                api_key = (
+                    runtime.key_cycle.claim()
+                    if runtime.lm_cfg.get("provider", "gemini") == "gemini"
+                    else ""
+                )
                 raw_text = call_gemini_requests(
                     model_name=model_name,
                     system_prompt=prompt,

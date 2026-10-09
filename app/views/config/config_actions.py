@@ -140,7 +140,8 @@ def _collect_validated_config(
             and field.value.strip()
             and field.value.strip() not in LEGACY_API_KEY_PLACEHOLDERS
         ]
-        validate_api_keys_fn(api_keys)
+        if config.get("lm_translator", {}).get("provider", "gemini") == "gemini":
+            validate_api_keys_fn(api_keys)
         config["lm_translator"]["keys"] = api_keys
         models = _models_from_view(view)
         previous_models = config["lm_translator"].get("models")

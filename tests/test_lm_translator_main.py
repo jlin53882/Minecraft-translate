@@ -92,6 +92,62 @@ def test_batch_error_classifier_covers_retry_actions_without_api_calls():
     assert _classify_batch_error(error) == "rate_limited"
 
 
+@pytest.mark.parametrize(
+    ("api_error", "expected"),
+    [
+        (
+            (
+                "forbidden",
+                "No permission for this model.",
+                403,
+                "permission_error",
+                "model",
+            ),
+            "帳號、方案、模型與所在區域",
+        ),
+        (
+            (
+                "invalid_json_schema",
+                "Unsupported schema keyword.",
+                400,
+                "invalid_request_error",
+                "text.format.schema",
+            ),
+            "Structured Outputs",
+        ),
+        (
+            ("unauthorized", "Access token expired.", 401, "authentication_error", ""),
+            "重新登入",
+        ),
+        (
+            ("rate_limit_exceeded", "Slow down.", 429, "rate_limit_error", ""),
+            "使用頻率或用量",
+        ),
+        (
+            ("refusal", "Source content was refused.", None, "", ""),
+            "拒絕處理這批翻譯內容",
+        ),
+    ],
+)
+def test_chatgpt_api_errors_get_provider_specific_guidance(api_error, expected):
+    from translation_tool.core.lm_translator_main import _handle_batch_error
+    from translation_tool.core.openai_codex_client import ChatGPTAPIError
+
+    code, message, status, error_type, param = api_error
+    error = ChatGPTAPIError(
+        code,
+        message,
+        status=status,
+        error_type=error_type,
+        param=param,
+    )
+
+    with pytest.raises(RuntimeError, match=expected) as exc_info:
+        _handle_batch_error(None, error, 0)
+
+    assert code in str(exc_info.value)
+
+
 class TestTranslateBatchSmart:
     """translate_batch_smart 測試"""
 

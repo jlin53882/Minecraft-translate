@@ -187,6 +187,21 @@ def call_gemini_requests(
         meta_out: 若提供，會以 ``extract_response_meta`` 的結果更新這個 dict
             （finish_reason、token 用量）。回傳值維持純文字，既有呼叫端不受影響。
     """
+    lm_cfg = load_config().get("lm_translator", {})
+    provider = lm_cfg.get("provider", "gemini")
+    if provider == "chatgpt":
+        from translation_tool.core.openai_codex_client import call_chatgpt_responses
+
+        return call_chatgpt_responses(
+            model_name=model_name,
+            system_prompt=system_prompt,
+            payload=payload,
+            timeout=int(lm_cfg.get("rate_limit", {}).get("timeout", 600)),
+            meta_out=meta_out,
+        )
+    if provider != "gemini":
+        raise RuntimeError(f"不支援的翻譯服務供應商：{provider}")
+
     url = (
         "https://generativelanguage.googleapis.com/"
         f"v1beta/models/{model_name}:generateContent"
@@ -216,7 +231,6 @@ def call_gemini_requests(
         },
     }
 
-    lm_cfg = load_config().get("lm_translator", {})
     output_cap = _resolve_max_output_tokens(max_output_tokens, lm_cfg)
     if output_cap is not None:
         data["generationConfig"]["maxOutputTokens"] = output_cap

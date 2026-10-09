@@ -39,6 +39,8 @@
         "output_zip_name": "可使用翻譯.zip"
     },
     "lm_translator": {
+        "provider": "gemini",
+        "chatgpt_model": "",
         "keys": [],
         "models": {
             "gemini-3.5-flash-lite": {

@@ -4,12 +4,20 @@
 維護注意：本檔案的函式 docstring 用於維護說明，不代表行為變更。
 """
 
+import asyncio
 import logging
 import traceback
 from typing import ClassVar
 
 import flet as ft
 
+from app.services_impl.chatgpt_oauth_service import (
+    ChatGPTOAuthError,
+    begin_chatgpt_login,
+    chatgpt_account_status,
+    disconnect_chatgpt_account,
+    list_chatgpt_models,
+)
 from app.services_impl.config_service import load_config_json, save_config_json
 from app.services_impl.key_health_service import validate_api_keys_from_ui
 from app.ui import design, kit
@@ -243,6 +251,19 @@ class ConfigView(ft.Column):
         """初始化所有輸入控制項"""
         # 一般設定的控制項由 settings_schema 產生（#134）；下面只建立專用元件
         build_controls(self.controls_map)
+
+        self._chatgpt_pending_login = None
+        self._chatgpt_login_busy = False
+        self.chatgpt_model_control = kit.dropdown(
+            label="ChatGPT 模型",
+            options=[ft.dropdown.Option(key="", text="登入後更新模型清單")],
+            dense=True,
+            on_select=self._on_form_changed,
+        )
+        self.controls_map["lm_translator.chatgpt_model"] = self.chatgpt_model_control
+        self.controls_map[
+            "lm_translator.provider"
+        ].on_select = self._on_provider_changed
 
         self.new_model_field = kit.field(
             label="新增模型名稱",
@@ -489,7 +510,7 @@ class ConfigView(ft.Column):
                         ]
                     ),
                     ft.Text(
-                        "輸入模型名稱後按「+」加入清單；未加入的文字不會寫入設定。勾選「啟用」的模型才會參與翻譯；至少保留一個啟用模型。",
+                        "此清單只供 Gemini 使用。輸入模型名稱後按「+」加入；勾選「啟用」的模型才會參與翻譯，且至少保留一個。ChatGPT 模型依登入帳號在 API 設定中載入。",
                         size=12,
                         color=C.MUTED,
                     ),
@@ -500,21 +521,215 @@ class ConfigView(ft.Column):
 
     def _keys_panel(self) -> ft.Control:
         """API 金鑰列的專用元件（卡片內容）。"""
+        self.gemini_key_section = ft.Column(
+            [
+                ft.Row(
+                    [
+                        ft.Text("Gemini API 金鑰", weight=ft.FontWeight.BOLD),
+                        self.add_key_button,
+                    ]
+                ),
+                self.keys_column,
+            ],
+            spacing=5,
+        )
+        self.chatgpt_status_text = ft.Text("尚未連結 ChatGPT 帳號", size=12)
+        self.chatgpt_login_button = ft.OutlinedButton(
+            "Continue with ChatGPT", on_click=self._on_chatgpt_login
+        )
+        self.chatgpt_cancel_button = ft.TextButton(
+            "取消登入", visible=False, on_click=self._on_chatgpt_cancel
+        )
+        self.chatgpt_refresh_button = ft.TextButton(
+            "更新模型", on_click=self._on_chatgpt_refresh_models
+        )
+        self.chatgpt_disconnect_button = ft.TextButton(
+            "中斷連結", on_click=self._on_chatgpt_disconnect
+        )
+        self.chatgpt_manage_usage_button = ft.TextButton(
+            "管理 ChatGPT 使用量", on_click=self._on_chatgpt_manage_usage
+        )
+        self.chatgpt_section = ft.Container(
+            visible=False,
+            content=ft.Column(
+                [
+                    ft.Text(
+                        "使用 ChatGPT 方案或 credits 處理翻譯。翻譯內容會傳送至 OpenAI Responses API。",
+                        size=12,
+                        color=C.MUTED,
+                    ),
+                    self.chatgpt_status_text,
+                    ft.Row(
+                        [
+                            self.chatgpt_login_button,
+                            self.chatgpt_cancel_button,
+                            self.chatgpt_refresh_button,
+                            self.chatgpt_disconnect_button,
+                        ],
+                        wrap=True,
+                    ),
+                    self.chatgpt_manage_usage_button,
+                ],
+                spacing=6,
+            ),
+        )
         return ft.Container(
             bgcolor=C.PANEL,
             padding=10,
             border_radius=8,
             content=ft.Column(
                 [
-                    ft.Row(
-                        [
-                            ft.Text("API 金鑰 (API Keys)", weight=ft.FontWeight.BOLD),
-                            self.add_key_button,
-                        ]
-                    ),
-                    self.keys_column,
-                ]
+                    self.gemini_key_section,
+                    self.chatgpt_section,
+                ],
+                spacing=10,
             ),
+        )
+
+    def _refresh_provider_panel_visibility(self) -> None:
+        provider = self.controls_map["lm_translator.provider"].value or "gemini"
+        is_chatgpt = provider == "chatgpt"
+        self.gemini_key_section.visible = not is_chatgpt
+        self.chatgpt_section.visible = is_chatgpt
+        self.chatgpt_model_control.visible = is_chatgpt
+        self._refresh_chatgpt_controls()
+
+    def _on_provider_changed(self, _event=None) -> None:
+        self._refresh_provider_panel_visibility()
+
+    def _sync_chatgpt_model_options(self, models=None) -> None:
+        selected = str(self.chatgpt_model_control.value or "")
+        if models is None:
+            pairs = [(selected, selected)] if selected else [("", "登入後更新模型清單")]
+        else:
+            pairs = [(model.slug, model.display_name) for model in models]
+            if not pairs:
+                pairs = [("", "此帳號目前沒有可用模型")]
+            model_ids = {slug for slug, _label in pairs}
+            if selected not in model_ids or not selected:
+                selected = pairs[0][0] if pairs else ""
+                self.chatgpt_model_control.value = selected
+                if not self._loading_config:
+                    self._refresh_dirty_state()
+        kit.set_dropdown_options(self.chatgpt_model_control, pairs)
+
+    def _refresh_chatgpt_controls(self) -> None:
+        busy = self._chatgpt_login_busy
+        try:
+            account = chatgpt_account_status()
+        except ChatGPTOAuthError as exc:
+            account = {"connected": False, "email": ""}
+            self.chatgpt_status_text.value = str(exc)
+        else:
+            if account["connected"]:
+                email = account.get("email")
+                identity = f"：{email}" if email else ""
+                self.chatgpt_status_text.value = f"已連結 ChatGPT 帳號{identity}。翻譯會使用 ChatGPT 方案或 credits。"
+            else:
+                self.chatgpt_status_text.value = "尚未連結 ChatGPT 帳號"
+        connected = bool(account.get("connected"))
+        self.chatgpt_login_button.disabled = busy
+        self.chatgpt_cancel_button.visible = busy
+        self.chatgpt_cancel_button.disabled = not busy
+        self.chatgpt_refresh_button.disabled = busy or not connected
+        self.chatgpt_disconnect_button.disabled = busy or not connected
+        has_model = any(option.key for option in self.chatgpt_model_control.options)
+        self.chatgpt_model_control.disabled = busy or not connected or not has_model
+
+    async def _on_chatgpt_login(self, _event=None) -> None:
+        if self._chatgpt_login_busy:
+            return
+        self._chatgpt_login_busy = True
+        pending = None
+        self.chatgpt_status_text.value = "正在準備 ChatGPT 登入…"
+        self._refresh_chatgpt_controls()
+        self.page.update()
+        try:
+            pending = await asyncio.to_thread(begin_chatgpt_login)
+            self._chatgpt_pending_login = pending
+            self.chatgpt_status_text.value = "等待瀏覽器完成 ChatGPT 登入…"
+            self.page.update()
+            opened = await ft.UrlLauncher().launch_url(
+                pending.authorization_url,
+                mode=ft.LaunchMode.EXTERNAL_APPLICATION,
+            )
+            if opened is False:
+                raise ChatGPTOAuthError("無法開啟系統瀏覽器，請確認預設瀏覽器設定。")
+            await asyncio.to_thread(pending.complete)
+            self._refresh_chatgpt_controls()
+            await self._load_chatgpt_models()
+            show_snack(self.page, "ChatGPT 已連結；選擇模型後儲存設定。", C.EM)
+        except Exception as exc:  # noqa: BLE001 - OAuth is an interactive UI boundary
+            self.chatgpt_status_text.value = redact_text(exc)
+            show_snack(self.page, redact_text(exc))
+        finally:
+            if pending is not None:
+                await asyncio.to_thread(pending.cancel)
+            self._chatgpt_pending_login = None
+            self._chatgpt_login_busy = False
+            self._refresh_chatgpt_controls()
+            self.page.update()
+
+    async def _on_chatgpt_cancel(self, _event=None) -> None:
+        pending = self._chatgpt_pending_login
+        if pending is not None:
+            await asyncio.to_thread(pending.cancel)
+
+    async def _load_chatgpt_models(self) -> None:
+        self.chatgpt_status_text.value = "正在讀取此帳號可用的 ChatGPT 模型…"
+        self.page.update()
+        try:
+            models = await asyncio.to_thread(list_chatgpt_models)
+            if not models:
+                self.chatgpt_status_text.value = "此帳號目前沒有可用的模型。"
+            else:
+                self._sync_chatgpt_model_options(models)
+                self.chatgpt_status_text.value = (
+                    f"已讀取 {len(models)} 個模型。翻譯會使用 ChatGPT 方案或 credits。"
+                )
+        except Exception as exc:  # noqa: BLE001 - provider request is an interactive UI boundary
+            self.chatgpt_status_text.value = redact_text(exc)
+            show_snack(self.page, redact_text(exc))
+        self._refresh_chatgpt_controls()
+        self.page.update()
+
+    async def _on_chatgpt_refresh_models(self, _event=None) -> None:
+        if self._chatgpt_login_busy:
+            return
+        self._chatgpt_login_busy = True
+        self._refresh_chatgpt_controls()
+        try:
+            await self._load_chatgpt_models()
+        finally:
+            self._chatgpt_login_busy = False
+            self._refresh_chatgpt_controls()
+            self.page.update()
+
+    async def _on_chatgpt_disconnect(self, _event=None) -> None:
+        if self._chatgpt_login_busy:
+            return
+        self._chatgpt_login_busy = True
+        self._refresh_chatgpt_controls()
+        try:
+            revoked = await asyncio.to_thread(disconnect_chatgpt_account)
+            self.chatgpt_status_text.value = (
+                "已在此裝置中斷連結 ChatGPT。"
+                if revoked
+                else "本機登入資料已清除；OpenAI 撤銷狀態未確認。"
+            )
+            show_snack(self.page, self.chatgpt_status_text.value)
+        except Exception as exc:  # noqa: BLE001 - credential revocation is a UI boundary
+            self.chatgpt_status_text.value = redact_text(exc)
+            show_snack(self.page, redact_text(exc))
+        finally:
+            self._chatgpt_login_busy = False
+            self._refresh_chatgpt_controls()
+            self.page.update()
+
+    async def _on_chatgpt_manage_usage(self, _event=None) -> None:
+        await ft.UrlLauncher().launch_url(
+            "https://chatgpt.com/settings/usage",
+            mode=ft.LaunchMode.EXTERNAL_APPLICATION,
         )
 
     def _build_lang_merger_card(self) -> ft.Control:
@@ -627,7 +842,10 @@ class ConfigView(ft.Column):
 
     def load_config(self):
         """載入設定檔"""
-        return load_config_transactionally(self, load_config_json)
+        result = load_config_transactionally(self, load_config_json)
+        self._sync_chatgpt_model_options()
+        self._refresh_provider_panel_visibility()
+        return result
 
     def did_mount(self):
         """切回設定頁時重新確認資料庫位置（其他頁可能剛建立了資料庫）。"""

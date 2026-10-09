@@ -563,6 +563,30 @@ class AppShell:
 
     def refresh_keys(self) -> None:
         try:
+            lm_cfg = (self._config_loader() or {}).get("lm_translator", {})
+            provider = lm_cfg.get("provider", "gemini")
+        except Exception:
+            logger.debug("讀取翻譯供應商失敗", exc_info=True)
+            provider = "gemini"
+        if provider == "chatgpt":
+            try:
+                from app.services_impl.chatgpt_oauth_service import (
+                    chatgpt_account_status,
+                )
+
+                account = chatgpt_account_status()
+            except Exception:
+                logger.debug("讀取 ChatGPT 登入狀態失敗", exc_info=True)
+                self.topbar.set_chatgpt_status(
+                    connected=False, error="ChatGPT 登入狀態無法讀取"
+                )
+            else:
+                self.topbar.set_chatgpt_status(
+                    connected=bool(account.get("connected")),
+                    email=str(account.get("email") or ""),
+                )
+            return
+        try:
             snapshot = self._key_snapshot()
         except Exception:
             logger.debug("讀取 Key 狀態失敗", exc_info=True)

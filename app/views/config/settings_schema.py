@@ -185,7 +185,14 @@ LAYOUT: dict[str, tuple[Card, ...]] = {
         Card(C_BUNDLER),
     ),
     "api_models": (
-        Card(C_KEYS, (Custom("keys"),)),
+        Card(
+            C_KEYS,
+            (
+                F("lm_translator.provider"),
+                Custom("keys"),
+                F("lm_translator.chatgpt_model"),
+            ),
+        ),
         Card(C_MODELS, (Custom("models"),)),
     ),
     "translation_behavior": (
