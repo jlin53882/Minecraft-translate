@@ -230,10 +230,10 @@ class TranslatePanel(ft.Column):
 
     def _bind_kpi_titles(self) -> None:
         self._kpi_titles = {
-            "first": self.stat_reused.content.controls[0].controls[1],
-            "second": self.stat_written.content.controls[0].controls[1],
-            "third": self.stat_flagged.content.controls[0].controls[1],
-            "fourth": self.stat_remaining.content.controls[0].controls[1],
+            "first": self.stat_reused,
+            "second": self.stat_written,
+            "third": self.stat_flagged,
+            "fourth": self.stat_remaining,
         }
         self._kpi_mode = "normal"
         self._set_kpi_mode("normal")
@@ -659,12 +659,14 @@ class TranslatePanel(ft.Column):
         for key, label in zip(
             ("first", "second", "third", "fourth"), labels, strict=True
         ):
-            self._kpi_titles[key].value = label
-        self._kpi_titles["third"].tooltip = (
-            "只計入 AI 有效回傳且內容與舊譯文完全相同的筆數；格式不符、失敗與資料競態跳過各自另計。"
-            if mode == "repair"
-            else None
-        )
+            self._kpi_titles[key].set_title(
+                label,
+                tooltip=(
+                    "只計入 AI 有效回傳且內容與舊譯文完全相同的筆數；格式不符、失敗與資料競態跳過各自另計。"
+                    if key == "third" and mode == "repair"
+                    else None
+                ),
+            )
         self.view_flagged_btn.visible = mode == "normal" and bool(self._flagged)
 
     def _reset_stats(self, *, mode: str = "normal") -> None:

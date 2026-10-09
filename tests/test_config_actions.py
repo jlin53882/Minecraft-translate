@@ -1158,3 +1158,40 @@ class TestConfigSaveFailureContracts:
         assert result is False
         assert writes == []
         assert "設定驗證失敗" in snacks[-1]
+
+
+def test_saved_translation_source_priority_uses_collision_proof_tokens(monkeypatch):
+    from copy import deepcopy
+
+    from app.services_impl import moddb_source_service
+    from app.views.config.config_actions import save_config_from_view
+    from translation_tool.translation_db import settings as db_settings
+    from translation_tool.utils.config_manager import DEFAULT_CONFIG
+
+    config = deepcopy(DEFAULT_CONFIG)
+    config["translation_db"]["path"] = ""
+    config["translation_db"]["priority"] = ["builtin:subtitle", "釘宮翻譯組"]
+    config["lm_translator"]["models"] = {"enabled-test-model": {"enabled": True}}
+    registry = {"釘宮翻譯組": 100}
+    monkeypatch.setattr(
+        moddb_source_service, "read_custom_sources", lambda _path: registry
+    )
+
+    view = _make_full_save_view()
+    view.controls_map["translation_db.priority"] = SimpleNamespace(value="")
+    view.controls_map["translation_db.priority"].value = "builtin:subtitle\n釘宮翻譯組"
+    saved = {}
+    save_config_from_view(
+        view,
+        load_config_json_fn=lambda: deepcopy(config),
+        save_config_json_fn=lambda cfg: (saved.update(cfg), True)[1],
+        validate_api_keys_from_ui_fn=lambda _keys: None,
+    )
+
+    assert saved["translation_db"]["priority"] == [
+        "builtin:subtitle",
+        "custom:100",
+    ]
+    assert db_settings.parse_priority(saved["translation_db"]["priority"], registry)[
+        :2
+    ] == (3, 100)

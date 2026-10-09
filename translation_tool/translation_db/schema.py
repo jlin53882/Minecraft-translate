@@ -19,7 +19,7 @@ import sqlite3
 import time
 from pathlib import Path
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 KIND_LANG = "lang"
 KIND_PATCHOULI = "patchouli"
@@ -101,7 +101,9 @@ CREATE TABLE IF NOT EXISTS translation (
     zh_cn      TEXT NOT NULL DEFAULT '',
     checker    TEXT NOT NULL DEFAULT '',
     review_status TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    revision   INTEGER NOT NULL DEFAULT 0,
     UNIQUE (entry_id, source)
 );
 
@@ -127,10 +129,13 @@ CREATE TABLE IF NOT EXISTS history (
     prev_review_status TEXT,
     new_checker TEXT,
     new_review_status TEXT,
+    prev_revision INTEGER,
+    new_revision INTEGER,
     note        TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_history_entry ON history (entry_id);
 CREATE INDEX IF NOT EXISTS idx_history_batch ON history (batch);
+CREATE INDEX IF NOT EXISTS idx_history_entry_action_at ON history (entry_id, action, at);
 
 CREATE TABLE IF NOT EXISTS src_change (
     id          INTEGER PRIMARY KEY,
@@ -200,6 +205,7 @@ def init_schema(conn: sqlite3.Connection) -> None:
             "CREATE INDEX IF NOT EXISTS idx_effective_source_review "
             "ON effective (source, review_status)"
         )
+        _install_schema_v3_objects(conn)
         conn.commit()
         return
     version = stored_schema_version(conn)
@@ -207,10 +213,14 @@ def init_schema(conn: sqlite3.Connection) -> None:
         next_version = version + 1
         if next_version == 2:
             _backup_before_review_migration(conn)
+        elif next_version == 3:
+            _backup_before_time_migration(conn)
         conn.execute("BEGIN IMMEDIATE")
         try:
             if next_version == 2:
                 _migrate_review_state_v2(conn)
+            elif next_version == 3:
+                _migrate_time_and_revision_v3(conn)
             conn.execute(
                 "UPDATE meta SET value=? WHERE key='schema_version'",
                 (str(next_version),),
@@ -225,6 +235,7 @@ def init_schema(conn: sqlite3.Connection) -> None:
         "CREATE INDEX IF NOT EXISTS idx_effective_source_review "
         "ON effective (source, review_status)"
     )
+    _install_schema_v3_objects(conn)
     conn.commit()
 
 
@@ -277,6 +288,93 @@ def _migrate_review_state_v2(conn: sqlite3.Connection) -> None:
     conn.execute(
         "INSERT INTO meta (key, value) VALUES ('data_gen', '1') "
         "ON CONFLICT(key) DO UPDATE SET value=CAST(value AS INTEGER)+1"
+    )
+
+
+def _backup_before_time_migration(conn: sqlite3.Connection) -> Path | None:
+    """Keep a consistent v2 sidecar before adding timestamps and revisions."""
+    main = next(
+        (row[2] for row in conn.execute("PRAGMA database_list") if row[1] == "main"),
+        "",
+    )
+    if not main:
+        return None
+    source_path = Path(main)
+    backup_path = source_path.with_name(
+        f"{source_path.name}.pre-schema-v3-{time.time_ns()}.bak"
+    )
+    target = sqlite3.connect(backup_path)
+    try:
+        conn.backup(target)
+    except BaseException:
+        target.close()
+        backup_path.unlink(missing_ok=True)
+        raise
+    target.close()
+    return backup_path
+
+
+def _migrate_time_and_revision_v3(conn: sqlite3.Connection) -> None:
+    """Add unknown-preserving first-seen timestamps and monotonic row revisions."""
+    translation_columns = {
+        row[1] for row in conn.execute("PRAGMA table_info(translation)")
+    }
+    if "created_at" not in translation_columns:
+        # Old rows remain NULL: updated_at is not evidence of first import.
+        conn.execute("ALTER TABLE translation ADD COLUMN created_at TEXT")
+    if "revision" not in translation_columns:
+        conn.execute(
+            "ALTER TABLE translation ADD COLUMN revision INTEGER NOT NULL DEFAULT 0"
+        )
+    history_columns = {row[1] for row in conn.execute("PRAGMA table_info(history)")}
+    for column in ("prev_revision", "new_revision"):
+        if column not in history_columns:
+            conn.execute(f"ALTER TABLE history ADD COLUMN {column} INTEGER")
+    max_id = conn.execute("SELECT COALESCE(MAX(id), 0) FROM translation").fetchone()[0]
+    conn.execute(
+        "INSERT INTO meta (key, value) VALUES ('translation_revision_seq', ?) "
+        "ON CONFLICT(key) DO UPDATE SET value=MAX(CAST(value AS INTEGER), CAST(excluded.value AS INTEGER))",
+        (str(max_id),),
+    )
+    conn.execute("DELETE FROM stat_cache")
+    conn.execute(
+        "INSERT INTO meta (key, value) VALUES ('data_gen', '1') "
+        "ON CONFLICT(key) DO UPDATE SET value=CAST(value AS INTEGER)+1"
+    )
+    _install_schema_v3_objects(conn)
+
+
+def _install_schema_v3_objects(conn: sqlite3.Connection) -> None:
+    """Install timestamp and revision triggers for fresh and migrated databases."""
+    conn.execute(
+        """
+        CREATE TRIGGER IF NOT EXISTS translation_insert_timestamp_revision
+        AFTER INSERT ON translation
+        BEGIN
+            INSERT INTO meta (key, value) VALUES ('translation_revision_seq', '1')
+            ON CONFLICT(key) DO UPDATE SET value=CAST(value AS INTEGER)+1;
+            UPDATE translation
+            SET created_at=COALESCE(NEW.created_at, CURRENT_TIMESTAMP),
+                revision=(SELECT CAST(value AS INTEGER) FROM meta
+                          WHERE key='translation_revision_seq')
+            WHERE id=NEW.id;
+        END;
+        """
+    )
+    conn.execute(
+        """
+        CREATE TRIGGER IF NOT EXISTS translation_update_revision
+        AFTER UPDATE ON translation
+        WHEN NEW.revision IS OLD.revision
+        BEGIN
+            INSERT INTO meta (key, value) VALUES ('translation_revision_seq', '1')
+            ON CONFLICT(key) DO UPDATE SET value=CAST(value AS INTEGER)+1;
+            UPDATE translation
+            SET revision=(SELECT CAST(value AS INTEGER) FROM meta
+                          WHERE key='translation_revision_seq')
+            WHERE id=NEW.id;
+        END;
+        """
     )
 
 

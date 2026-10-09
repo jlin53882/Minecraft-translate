@@ -770,6 +770,46 @@ def test_entries_and_overview_show_unknown_original_text(db_path):
     db.close()
 
 
+def test_batch_replace_dialog_pages_all_rows_and_requires_preview_after_selection(
+    db_path,
+):
+    from app.services_impl.moddb_service import EntryFilter
+    from app.views.moddb.batch_replace_dialog import BatchReplaceDialog
+
+    db = TranslationDB(db_path)
+    db.ingest(
+        "1.21.1",
+        [
+            ScanItem(
+                KIND_LANG,
+                "batch",
+                f"item.batch.{index:03d}",
+                f"Source {index}",
+                f"譯文舊{index:03d}",
+            )
+            for index in range(55)
+        ],
+    )
+    dialog = BatchReplaceDialog(
+        mock_page(), lambda: db, EntryFilter(version="1.21.1"), lambda _result: None
+    )
+    dialog.find_field.value = "舊"
+    dialog.replace_field.value = "新"
+    dialog._preview()
+
+    assert dialog.plan is not None and dialog.plan.update_count == 55
+    assert len(dialog.rows.controls) == 50 and dialog.next_btn.disabled is False
+    dialog._turn(1)
+    assert len(dialog.rows.controls) == 5
+
+    first_id = dialog.plan.changes[0].entry_id
+    dialog._toggle_root(first_id, False)
+    assert dialog.plan is None and dialog.apply_btn.disabled is True
+    dialog._preview()
+    assert dialog.plan is not None and dialog.plan.update_count == 54
+    db.close()
+
+
 # ------------------------------------------------------------------ 同步開關（設定預設值與預覽）
 def test_sync_switch_starts_from_setting_and_refreshes_the_preview(
     db_path, monkeypatch

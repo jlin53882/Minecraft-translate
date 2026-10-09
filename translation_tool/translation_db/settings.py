@@ -231,7 +231,31 @@ def parse_priority(names: Any, custom: dict[str, int] | None = None) -> tuple[in
 def priority_names(
     priority: tuple[int, ...], catalog: SourceCatalog = DEFAULT_SOURCE_CATALOG
 ) -> list[str]:
-    return [catalog.label(code) for code in priority]
+    """Serialize source identity, never a potentially colliding display label."""
+    return [catalog.token_for(code) for code in priority]
+
+
+def serialize_priority_lines(
+    names: Any, catalog: SourceCatalog = DEFAULT_SOURCE_CATALOG
+) -> list[str]:
+    """Persist known source names as stable identity tokens and retain new names.
+
+    Unregistered plain names remain intact until a database can assign their
+    database-local custom code. Known names, including a display-name collision,
+    are serialized unambiguously before they are written to config.
+    """
+    serialized: list[str] = []
+    seen_codes: set[int] = set()
+    for name in clean_source_names(names):
+        code = catalog.resolve(name)
+        if code is None:
+            if name not in serialized:
+                serialized.append(name)
+            continue
+        if code not in seen_codes:
+            serialized.append(catalog.token_for(code))
+            seen_codes.add(code)
+    return serialized
 
 
 def split_new_source_names(

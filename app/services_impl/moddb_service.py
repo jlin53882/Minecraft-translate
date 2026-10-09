@@ -20,13 +20,23 @@ from app.services_impl.pipelines._pipeline_logging import (
 from app.tasks.task_session import add_log_unmirrored
 from translation_tool.translation_db import (
     SOURCE_NAMES,
+    BatchReplacePlan,
     DbSettings,
     EntryDetail,
+    EntryFilter,
     EntryRow,
+    QualityFilter,
+    ReviewPreviewItem,
+    TimeFilter,
     TranslationDB,
     VersionStat,
     load_db_settings,
     open_db,
+)
+from translation_tool.translation_db.quality import (
+    format_tokens,
+    token_issues,
+    whitespace_note,
 )
 from translation_tool.translation_db.scanner import ScanOptions, scan_folder_generator
 from translation_tool.translation_db.schema import (
@@ -45,6 +55,11 @@ from translation_tool.translation_db.settings import (
     preview_new_source_names,
     strip_quotes,
 )
+from translation_tool.translation_db.time_filters import (
+    custom_date_bounds,
+    format_taipei_time,
+    quick_date_bounds,
+)
 from translation_tool.utils.cancellation import cancel_scope
 from translation_tool.utils.config_manager import load_config
 
@@ -58,27 +73,38 @@ __all__ = [
     "SRC_JAR_TW",
     "SRC_MANUAL",
     "SRC_SUBTITLE",
+    "BatchReplacePlan",
     "DbSettings",
     "EntryDetail",
+    "EntryFilter",
     "EntryRow",
+    "QualityFilter",
+    "ReviewPreviewItem",
     "ScanOptions",
+    "TimeFilter",
     "TranslationDB",
     "VersionStat",
     "current_settings",
+    "custom_date_bounds",
     "custom_source_codes",
     "database_problem",
     "database_version_choices",
     "describe_db_path",
+    "format_taipei_time",
+    "format_tokens",
     "load_db_settings",
     "normalize_db_path",
     "open_database",
     "pack_format_hint",
     "preview_new_source_names",
+    "quick_date_bounds",
     "run_moddb_scan_service",
     "strip_quotes",
     "summarize_database",
+    "token_issues",
     "version_choices",
     "warm_stats_quietly",
+    "whitespace_note",
 ]
 
 logger = logging.getLogger(__name__)

@@ -3,6 +3,13 @@
 from __future__ import annotations
 
 from app.services_impl.moddb_service import SRC_AI, SRC_JAR_CN, SRC_MANUAL
+from translation_tool.translation_db.schema import CUSTOM_SOURCE_BASE, SRC_CUSTOM
+from translation_tool.translation_db.settings import (
+    DbSettings,
+    normalize_db_path,
+    read_custom_sources,
+    serialize_priority_lines,
+)
 from translation_tool.translation_db.source_catalog import (
     DEFAULT_SOURCE_CATALOG,
     SourceCatalog,
@@ -13,6 +20,14 @@ MANUAL_REVIEW_LABELS = {
     "reviewed": "人工-已審核",
     "legacy_unknown": "人工（歷史狀態待確認）",
 }
+
+
+def normalize_priority_config(config: dict) -> None:
+    """Persist registered priorities as database-scoped collision-proof tokens."""
+    db_config = config.setdefault("translation_db", {})
+    path = DbSettings(path=normalize_db_path(db_config.get("path"))).resolved_path()
+    catalog = SourceCatalog.from_registry(read_custom_sources(path))
+    db_config["priority"] = serialize_priority_lines(db_config.get("priority"), catalog)
 
 
 def source_catalog_for(db) -> SourceCatalog:
@@ -32,11 +47,16 @@ def source_label(
 
 
 def source_tone(source: int | None) -> str:
-    """譯文來源的色調：人工紫、簡中轉繁金、AI 中性、其餘藍。"""
+    """Give custom source identities a repeatable palette for overview charts."""
     if source == SRC_MANUAL:
         return "ench"
     if source == SRC_JAR_CN:
         return "gold"
     if source == SRC_AI or source is None:
         return "neutral"
+    if source >= CUSTOM_SOURCE_BASE:
+        palette = ("dia", "red", "em", "gold", "ench", "neutral")
+        return palette[(int(source) - CUSTOM_SOURCE_BASE) % len(palette)]
+    if source == SRC_CUSTOM:
+        return "red"
     return "dia"

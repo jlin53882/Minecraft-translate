@@ -14,7 +14,9 @@ import flet as ft
 
 from app.services_impl.moddb_service import (
     EntryDetail,
+    EntryFilter,
     EntryRow,
+    ReviewPreviewItem,
     TranslationDB,
     current_settings,
 )
@@ -28,17 +30,24 @@ from app.ui.design import C
 from app.ui.mc_text import mc_text_spans
 from app.ui.snack import show_snack
 from app.views.moddb.char_inspector import CharInspector, scrolling_list
+from app.views.moddb.entry_filters import (
+    build_filter_controls,
+    database_identity,
+    entry_filter,
+    on_advanced_change,
+    open_batch_replace,
+)
+from app.views.moddb.entry_metadata import build_entry_metadata
+from app.views.moddb.entry_row_tile import build_entry_tile
 from app.views.moddb.formatting import (
-    STATE_LABELS,
-    STATE_TONES,
     format_count,
-    impact_text,
     kind_label,
-    shorten,
     token_issues,
     whitespace_note,
 )
-from app.views.moddb.source_filter import ReviewStatusFilter, SourceFilter
+from app.views.moddb.history_renderer import render_history
+from app.views.moddb.review_scope_dialog import ReviewScopeController
+from app.views.moddb.source_filter import SourceFilter
 from app.views.moddb.suggestions import build_suggestions
 from translation_tool.utils.log_unit import (
     log_debug,
@@ -48,6 +57,7 @@ from translation_tool.utils.log_unit import (
 )
 
 PAGE_SIZE = 50
+__all__ = ["EntriesPanel", "SourceFilter"]
 ALL_MODS = "全部模組"
 ALL_KINDS = "全部類型"
 ALL_REVIEW_STATES = "__all__"
@@ -77,6 +87,8 @@ class EntriesPanel(ft.Column):
         self.selected: EntryRow | None = None
         self.detail: EntryDetail | None = None
         self.sug_tab = "key"
+        self._db_identity = None
+        self._review_preview: list[ReviewPreviewItem] = []
 
         self._build_filters()
         self._build_list_card()
@@ -96,72 +108,11 @@ class EntriesPanel(ft.Column):
                 vertical_alignment=ft.CrossAxisAlignment.STRETCH,
             ),
         ]
+        self._review_controller = ReviewScopeController(self)
 
     # ------------------------------------------------------------------ 建構
     def _build_filters(self) -> None:
-        self.version_dd = kit.dropdown(
-            label="遊戲版本", dense=True, width=220, on_select=self._on_version
-        )
-        self.mod_dd = kit.dropdown(
-            label="模組", dense=True, width=220, on_select=self._on_mod
-        )
-        self.kind_dd = kit.dropdown(
-            label="類型", dense=True, width=160, on_select=self._on_kind
-        )
-        self.source_filter = SourceFilter(self._on_source)
-        self.review_filter = ReviewStatusFilter(self._on_review_status).dropdown
-        self.search = kit.text_field(
-            "搜尋", hint="原文、譯文或鍵值", expand=True, on_submit=self._on_search
-        )
-        self.state_seg = kit.Segmented(
-            [(k, v) for k, v in STATE_LABELS.items()], "all", self._on_state
-        )
-        self.flagged_text = ft.Text("", size=12.5, color=C.TEXT, expand=True)
-        self.flagged_banner = ft.Container(
-            content=ft.Row(
-                [
-                    ft.Icon(ft.Icons.WARNING_AMBER, size=16, color=C.GOLD),
-                    self.flagged_text,
-                    kit.button(
-                        "清除篩選",
-                        "secondary",
-                        size="sm",
-                        on_click=lambda _e: self.clear_flagged(),
-                    ),
-                ],
-                spacing=10,
-                vertical_alignment=ft.CrossAxisAlignment.CENTER,
-            ),
-            padding=ft.Padding.symmetric(horizontal=14, vertical=8),
-            bgcolor=C.GOLD_BG,
-            border_radius=8,
-            visible=False,
-        )
-        # 分類狀態與人工審核狀態分開呈現，窄視窗可橫向捲動。
-        self.filter_card = kit.section_card(
-            None,
-            ft.Column(
-                [
-                    ft.Row(
-                        [
-                            self.version_dd,
-                            self.mod_dd,
-                            self.kind_dd,
-                            self.source_filter.dropdown,
-                            self.search,
-                        ],
-                        spacing=12,
-                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                    ),
-                    ft.Row(
-                        [self.state_seg, self.review_filter],
-                        spacing=10,
-                        scroll=ft.ScrollMode.AUTO,
-                    ),
-                ],
-                spacing=10,
-            ),
-        )
+        build_filter_controls(self)
 
     def _build_list_card(self) -> None:
         # 清單高度跟著視窗伸縮（expand），捲軸常駐顯示（全域主題預設只在滑過時出現）
@@ -334,15 +285,41 @@ class EntriesPanel(ft.Column):
     def db(self) -> TranslationDB | None:
         return self._get_db()
 
+    @staticmethod
+    def _database_identity(db):
+        return database_identity(db)
+
+    def _entry_filter(self) -> EntryFilter:
+        return entry_filter(self)
+
+    def _on_advanced_change(self) -> None:
+        on_advanced_change(self)
+
+    def _open_batch_replace(self, _e=None) -> None:
+        open_batch_replace(self, _e)
+
+    def _after_batch_replace(self, result) -> None:
+        self._load_list(page=self.pager.current_page, keep_scroll=True)
+        if self._on_changed:
+            self._on_changed()
+        self._safe_update()
+
     def refresh(self, *, keep_selection: bool = True) -> None:
         """重新載入版本／模組選項與清單（資料庫更新後呼叫）。"""
         db = self.db()
         if db is None:
+            self._db_identity = None
             self.version_dd.options = []
             self.rows, self.total = [], 0
             self._render_list()
             self._show_editor(None)
             return
+        identity = self._database_identity(db)
+        if self._db_identity is not None and identity != self._db_identity:
+            # A numeric source id belongs to the old DB-local registry; do not
+            # carry it into a different database.
+            self.source_filter.reset()
+        self._db_identity = identity
         self.source_filter.refresh()
         versions = db.versions()
         kit.set_dropdown_options(self.version_dd, [(v, v) for v in versions])
@@ -399,22 +376,16 @@ class EntriesPanel(ft.Column):
         if db is None or not self.version:
             self.rows, self.total = [], 0
         else:
-            self.rows, self.total = db.list_entries(
-                self.version,
-                mod_id=self.mod_id,
-                kind=self.kind,
-                state=self.state,
-                query=self.query,
-                source=self.source_filter.code,
-                review_status=(
-                    None
-                    if self.review_filter.value in (None, "", ALL_REVIEW_STATES)
-                    else str(self.review_filter.value)
-                ),
-                entry_ids=self.entry_ids,
-                limit=PAGE_SIZE,
-                offset=(page - 1) * PAGE_SIZE,
-            )
+            try:
+                self.rows, self.total = db.list_entries(
+                    criteria=self._entry_filter(),
+                    limit=PAGE_SIZE,
+                    offset=(page - 1) * PAGE_SIZE,
+                )
+            except ValueError as exc:
+                self.rows, self.total = [], 0
+                self.advanced_filters.error_text.value = str(exc)
+                self.advanced_filters.error_text.visible = True
             if not self.rows and self.total and page > 1:
                 # 最後一頁的最後一筆被處理掉：退回仍有資料的最後一頁
                 return self._load_list(
@@ -437,6 +408,7 @@ class EntriesPanel(ft.Column):
 
     def _render_list(self, *, keep_scroll: bool = False) -> None:
         self.count_badge.value = f"{format_count(self.total)} 筆"
+        self.advanced_filters.set_summary()
         tiles = [self._row_tile(r) for r in self.rows] or [
             kit.empty_state(
                 "沒有符合的條目",
@@ -471,71 +443,7 @@ class EntriesPanel(ft.Column):
             log_debug(f"清單捲動排程失敗：{exc}")
 
     def _row_tile(self, row: EntryRow) -> ft.Control:
-        tone = design.tone(STATE_TONES[row.state])
-        db = self.db()
-        catalog = source_catalog_for(db)
-        return ft.Container(
-            data=row.id,
-            on_click=lambda _e, i=row.id: self.select(i),
-            ink=True,
-            padding=ft.Padding.symmetric(horizontal=14, vertical=9),
-            bgcolor=C.EM_BG if self.selected and self.selected.id == row.id else None,
-            border=ft.Border.only(bottom=ft.BorderSide(1, C.LINE)),
-            content=ft.Row(
-                [
-                    ft.Container(
-                        width=8,
-                        height=8,
-                        border_radius=4,
-                        bgcolor=tone.fg,
-                        margin=ft.Margin.only(top=5),
-                    ),
-                    ft.Column(
-                        [
-                            ft.Text(
-                                shorten(row.en_us, 48) if row.en_us else "（原文未知）",
-                                size=13,
-                                weight=ft.FontWeight.W_500,
-                                color=C.TEXT if row.en_us else C.DIM,
-                            ),
-                            ft.Row(
-                                [
-                                    ft.Text(
-                                        shorten(row.zh_tw, 48)
-                                        if row.zh_tw
-                                        else "（未翻譯）",
-                                        size=12,
-                                        color=C.MUTED,
-                                        expand=True,
-                                    ),
-                                    *(
-                                        [
-                                            kit.chip(
-                                                source_label(
-                                                    row.source,
-                                                    catalog,
-                                                    row.review_status,
-                                                ),
-                                                source_tone(row.source),
-                                            )
-                                        ]
-                                        if row.source is not None
-                                        else []
-                                    ),
-                                ],
-                                spacing=6,
-                            ),
-                            kit.mono_text(shorten(row.key, 46), size=10.5, color=C.DIM),
-                        ],
-                        spacing=1,
-                        tight=True,
-                        expand=True,
-                    ),
-                ],
-                spacing=10,
-                vertical_alignment=ft.CrossAxisAlignment.START,
-            ),
-        )
+        return build_entry_tile(self, row)
 
     # ------------------------------------------------------------------ 選取
     def select(self, entry_id: int | None) -> None:
@@ -576,45 +484,7 @@ class EntriesPanel(ft.Column):
             else "尚無譯文",
             source_tone(entry.source),
         )
-        self.meta_col.controls = [
-            ft.Row(
-                [kit.section_label("鍵值"), kit.mono_text(entry.key, size=12)],
-                spacing=10,
-                wrap=True,
-            ),
-            ft.Row(
-                [
-                    kit.section_label("模組"),
-                    ft.Text(
-                        f"{entry.mod_id}（{kind_label(entry.kind)}）",
-                        size=12.5,
-                        color=C.TEXT,
-                    ),
-                ],
-                spacing=10,
-            ),
-            ft.Row(
-                [
-                    kit.section_label("出現於"),
-                    *(
-                        kit.chip(v, "em" if v == entry.mc_version else "neutral")
-                        for v in detail.versions
-                    ),
-                ],
-                spacing=6,
-                wrap=True,
-            ),
-            *(
-                ft.Column(
-                    [
-                        kit.chip("掃描到原文已變動（尚未採用）", "gold"),
-                        kit.mono_text(f"新原文：{c.new_en}", size=12),
-                    ],
-                    spacing=4,
-                )
-                for c in detail.src_changes[:1]
-            ),
-        ]
+        self.meta_col.controls = build_entry_metadata(detail)
         self._update_impact()
         self._render_suggestions()
         self._render_history()
@@ -630,70 +500,7 @@ class EntriesPanel(ft.Column):
         )
 
     def _render_history(self) -> None:
-        detail = self.detail
-        if detail is None:
-            return
-        db = self.db()
-        catalog = source_catalog_for(db)
-        out: list[ft.Control] = []
-        for h in detail.history:
-            action = {
-                "manual": "手動儲存（未審核）",
-                "review": "人工審核",
-                "revert": "還原",
-                "ai_retranslate": "AI 重翻",
-            }.get(h.action, "其他異動")
-            body = ft.Text(
-                (
-                    f"{shorten(h.old_zh_tw, 20)} → {shorten(h.new_zh_tw, 20)}"
-                    if h.old_zh_tw
-                    else shorten(h.new_zh_tw, 40)
-                ),
-                size=12.5,
-                color=C.TEXT,
-            )
-            controls: list[ft.Control] = [
-                ft.Row(
-                    [
-                        ft.Text(
-                            f"{action}・{h.actor or '—'}", size=11.5, color=C.MUTED
-                        ),
-                        ft.Text(h.at[:16], size=11, color=C.DIM),
-                    ],
-                    alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
-                ),
-                body,
-            ]
-            if h.note:
-                controls.append(ft.Text(h.note, size=11, color=C.DIM))
-            if h.action in ("manual", "review"):
-                controls.append(
-                    kit.button(
-                        "還原這次更新",
-                        "ghost",
-                        size="sm",
-                        on_click=lambda _e, i=h.id: self._revert(i),
-                    )
-                )
-            out.append(ft.Column(controls, spacing=3))
-        if detail.translations:
-            out.append(kit.section_label("各來源譯文"))
-            for t in detail.translations:
-                out.append(
-                    ft.Row(
-                        [
-                            kit.chip(
-                                source_label(t.source, catalog, t.review_status),
-                                source_tone(t.source),
-                            ),
-                            ft.Text(
-                                shorten(t.zh_tw, 28), size=12, color=C.TEXT, expand=True
-                            ),
-                        ],
-                        spacing=6,
-                    )
-                )
-        self.history_col.controls = out or [kit.hint_text("還沒有異動記錄")]
+        render_history(self)
 
     # ------------------------------------------------------------------ 事件
     def _on_version(self, e) -> None:
@@ -810,21 +617,7 @@ class EntriesPanel(ft.Column):
             self._safe_update()
 
     def _update_impact(self) -> None:
-        self._update_format_hints()
-        entry, db = self.selected, self.db()
-        text = self.pending_text()
-        changed = bool(entry and db and text and text != entry.zh_tw)
-        self.save_btn.disabled = not changed
-        # 沒改文字且尚未確認過的人工譯文也可審核；核心層會以目前文字做 CAS。
-        self.confirm_btn.visible = bool(
-            entry and entry.zh_tw and entry.review_status != "reviewed" and not changed
-        )
-        if not changed:
-            self.impact_box.visible = False
-            return
-        impacts = db.preview_manual(entry.id, text, propagate=self.sync_row.value)
-        self.impact_text.value = impact_text(entry.mc_version, text, impacts)
-        self.impact_box.visible = True
+        self._review_controller.update_impact()
 
     def _save(self, _e=None) -> None:
         entry, db = self.selected, self.db()
@@ -869,51 +662,7 @@ class EntriesPanel(ft.Column):
         self._safe_update()
 
     def _confirm(self, _e=None) -> None:
-        """審核目前顯示的譯文，不依賴畫面狀態直接寫入核心契約。"""
-        entry, db = self.selected, self.db()
-        if entry is None or db is None or not entry.zh_tw:
-            return
-        try:
-            done = db.review_manual(
-                entry.id,
-                expected_zh_tw=entry.zh_tw,
-                expected_source=entry.source,
-                expected_review_status=entry.review_status,
-                actor=ACTOR,
-                propagate=self.sync_row.value,
-            )
-        except ValueError as exc:
-            log_warning(
-                f"Mod 資料庫審核被拒絕：{entry.mc_version} {entry.mod_id} {entry.key}（{exc!r}）"
-            )
-            show_snack(self._page, str(exc), C.GOLD)
-            self._load_list(page=self.pager.current_page, keep_scroll=True)
-            self._safe_update()
-            return
-        except sqlite3.Error as exc:
-            log_exception(
-                f"Mod 資料庫審核失敗：{entry.mc_version} {entry.mod_id} {entry.key}"
-            )
-            show_snack(
-                self._page, f"審核失敗（資料庫錯誤：{exc}）；詳情見後台 log", C.RED
-            )
-            return
-        others = [change.mc_version for change in done if not change.is_self]
-        log_info(
-            f"Mod 資料庫人工審核：{entry.mc_version} {entry.mod_id} {entry.key}"
-            f"（同步 {len(others)} 個版本：{'、'.join(others) or '無'}）"
-        )
-        message = (
-            f"已審核，並同步 {len(others)} 個版本：{'、'.join(others)}"
-            if others
-            else "已標記為人工-已審核"
-        )
-        self._load_list(page=self.pager.current_page, keep_scroll=True)
-        self.saved_text.value = message
-        show_snack(self._page, message, C.EM, text_color=C.ON_EM)
-        if self._on_changed:
-            self._on_changed()
-        self._safe_update()
+        self._review_controller.confirm(_e)
 
     def _revert(self, history_id: int) -> None:
         db = self.db()
@@ -935,6 +684,26 @@ class EntriesPanel(ft.Column):
             self._page,
             f"已還原 {count} 筆" if count else "沒有可還原的內容（之後已被再次修改）",
             C.EM if count else C.GOLD,
+        )
+        if self._on_changed:
+            self._on_changed()
+        self._safe_update()
+
+    def _revert_batch(self, batch_id: str) -> None:
+        db = self.db()
+        if db is None:
+            return
+        try:
+            result = db.revert_batch_replace(batch_id)
+        except sqlite3.Error as exc:
+            log_exception(f"Mod 資料庫批次取代還原失敗：batch={batch_id}")
+            show_snack(self._page, f"整批還原失敗（資料庫錯誤：{exc}）", C.RED)
+            return
+        self._load_list(page=self.pager.current_page, keep_scroll=True)
+        show_snack(
+            self._page,
+            f"已還原 {result.reverted:,} 筆；因後續修改略過 {result.skipped:,} 筆。",
+            C.EM if result.reverted else C.GOLD,
         )
         if self._on_changed:
             self._on_changed()

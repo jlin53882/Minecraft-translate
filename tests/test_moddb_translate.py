@@ -357,7 +357,8 @@ def test_entries_panel_save_and_review_use_separate_manual_states(db_path):
             )
         ],
     )
-    panel = EntriesPanel(mock_page(), lambda: db)
+    page = mock_page()
+    panel = EntriesPanel(page, lambda: db)
     panel.refresh()
     panel.tw_field.value = "人工修改"
     panel._update_impact()
@@ -368,7 +369,16 @@ def test_entries_panel_save_and_review_use_separate_manual_states(db_path):
     assert "人工-未審核" in "\n".join(texts_of(panel))
     assert panel.confirm_btn.visible
 
+    panel.tw_field.value = ""
+    panel._on_text_change()
+    assert panel.confirm_btn.visible is False and panel.confirm_btn.disabled is True
+    panel.tw_field.value = panel.selected.zh_tw
+    panel._on_text_change()
+    assert panel.confirm_btn.visible is True and panel.confirm_btn.disabled is False
+
     panel._confirm()
+    assert page.overlay and page.overlay[-1].title.value == "確認審核範圍"
+    page.overlay[-1].actions[-1].on_click(None)
     detail = db.entry_detail(panel.selected.id)
     manual = next(row for row in detail.translations if row.source == SRC_MANUAL)
     assert manual.review_status == "reviewed"
@@ -1768,12 +1778,12 @@ def test_translate_panel_switches_kpis_between_normal_and_ai_repair_modes():
         }
     )
     assert [card.value_text.value for card in panel._stat_cards] == ["3", "7", "1", "4"]
-    assert panel._kpi_titles["second"].value == "已寫入（AI 機翻）"
+    assert panel._kpi_titles["second"].label_text.value == "已寫入（AI 機翻）"
 
     panel._reset_stats(mode="repair")
     assert [card.value_text.value for card in panel._stat_cards] == ["—"] * 4
-    assert panel._kpi_titles["first"].value == "本次候選"
-    assert panel._kpi_titles["third"].value == "重翻後仍相同"
+    assert panel._kpi_titles["first"].label_text.value == "本次候選"
+    assert panel._kpi_titles["third"].label_text.value == "重翻後仍相同"
 
     partial = {
         "operation": "retranslate_same_source_ai",
@@ -1812,8 +1822,8 @@ def test_translate_panel_switches_kpis_between_normal_and_ai_repair_modes():
     assert "重翻完成" not in panel.repair_summary_text.value
 
     panel._reset_stats(mode="normal")
-    assert panel._kpi_titles["first"].value == "沿用其他版本"
-    assert panel._kpi_titles["third"].value == "特殊字元不一致"
+    assert panel._kpi_titles["first"].label_text.value == "沿用其他版本"
+    assert panel._kpi_titles["third"].label_text.value == "特殊字元不一致"
 
 
 def test_translate_panel_restores_partial_and_cancelled_repair_from_task_session():
