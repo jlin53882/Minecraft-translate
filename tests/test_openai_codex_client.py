@@ -1,6 +1,8 @@
 """Codex OAuth Responses transport and Structured Outputs tests."""
 
 import json
+from datetime import UTC, datetime, timedelta
+from email.utils import format_datetime
 
 import pytest
 import requests
@@ -225,3 +227,119 @@ def test_http_error_carries_retry_after_for_batch_backoff():
     error = client._response_error(response)
 
     assert error.retry_after == 2.5
+
+
+@pytest.mark.parametrize(
+    ("status", "body", "retry_after", "expected_code", "expected_wait", "retry"),
+    [
+        (429, b"", None, "http_429", 1, True),
+        (429, b"not-json", "2", "http_429", 2, True),
+        (429, b"{}", "not-a-date", "http_429", 1, True),
+        (
+            429,
+            b'{"error":{"code":"rate_limit_exceeded","type":"rate_limit_error"}}',
+            None,
+            "rate_limit_exceeded",
+            1,
+            True,
+        ),
+        (
+            429,
+            b'{"error":{"code":"subscription_sharing_usage_limit_exceeded"}}',
+            "1",
+            "subscription_sharing_usage_limit_exceeded",
+            None,
+            False,
+        ),
+        (
+            400,
+            b'{"error":{"code":"subscription_sharing_unsupported_capability"}}',
+            None,
+            "subscription_sharing_unsupported_capability",
+            None,
+            False,
+        ),
+        (
+            403,
+            b'{"error":{"code":"subscription_sharing_user_not_eligible"}}',
+            None,
+            "subscription_sharing_user_not_eligible",
+            None,
+            False,
+        ),
+    ],
+)
+def test_http_response_errors_follow_real_chatgpt_batch_retry_path(
+    monkeypatch, status, body, retry_after, expected_code, expected_wait, retry
+):
+    from types import SimpleNamespace
+
+    from translation_tool.core import lm_translator_main as main
+
+    waits = []
+    monkeypatch.setattr(main, "interruptible_sleep", waits.append)
+    monkeypatch.setattr(main.random, "uniform", lambda _low, _high: 0)
+    response = requests.Response()
+    response.status_code = status
+    response.headers["x-request-id"] = "req_retry_path"
+    if retry_after is not None:
+        response.headers["Retry-After"] = retry_after
+    response._content = body
+
+    error = client._response_error(response)
+    assert error.status == status
+    assert error.request_id == "req_retry_path"
+    assert error.code == expected_code
+    runtime = SimpleNamespace(chatgpt_retry_count=0)
+    if retry:
+        assert main._handle_batch_error(runtime, error, 0) is (
+            main.BatchAction.RETRY_SAME_MODEL
+        )
+        assert runtime.chatgpt_retry_count == 1
+        assert waits == [expected_wait]
+    else:
+        with pytest.raises(RuntimeError):
+            main._handle_batch_error(runtime, error, 0)
+        assert runtime.chatgpt_retry_count == 0
+        assert waits == []
+
+
+def test_http_date_retry_after_reaches_batch_backoff_without_sleeping(monkeypatch):
+    from types import SimpleNamespace
+
+    from translation_tool.core import lm_translator_main as main
+
+    waits = []
+    monkeypatch.setattr(main, "interruptible_sleep", waits.append)
+    monkeypatch.setattr(main.random, "uniform", lambda _low, _high: 0)
+    response = requests.Response()
+    response.status_code = 429
+    response.headers["Retry-After"] = format_datetime(
+        datetime.now(UTC) + timedelta(seconds=10), usegmt=True
+    )
+    response._content = b"{}"
+
+    error = client._response_error(response)
+    assert error.retry_after is not None
+    assert main._handle_batch_error(
+        SimpleNamespace(chatgpt_retry_count=0), error, 0
+    ) is (main.BatchAction.RETRY_SAME_MODEL)
+    assert 0 < waits[0] <= 10
+
+
+def test_http_429_retry_after_over_cap_fails_without_sleeping(monkeypatch):
+    from types import SimpleNamespace
+
+    from translation_tool.core import lm_translator_main as main
+
+    waits = []
+    monkeypatch.setattr(main, "interruptible_sleep", waits.append)
+    response = requests.Response()
+    response.status_code = 429
+    response.headers["Retry-After"] = str(main.CHATGPT_MAX_RETRY_AFTER_SEC + 1)
+    response._content = b""
+    error = client._response_error(response)
+
+    with pytest.raises(RuntimeError, match="等待"):
+        main._handle_batch_error(SimpleNamespace(chatgpt_retry_count=0), error, 0)
+    assert waits == []

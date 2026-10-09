@@ -342,6 +342,80 @@ def test_chatgpt_usage_exhaustion_never_retries(monkeypatch, code):
     assert waits == []
 
 
+@pytest.mark.parametrize(
+    "code",
+    [
+        "subscription_sharing_usage_unavailable",
+        "subscription_sharing_user_unavailable",
+    ],
+)
+def test_chatgpt_temporary_subscription_usage_errors_retry(monkeypatch, code):
+    from types import SimpleNamespace
+
+    from translation_tool.core import lm_translator_main as main
+    from translation_tool.core.openai_codex_client import ChatGPTAPIError
+
+    waits = []
+    monkeypatch.setattr(main, "interruptible_sleep", waits.append)
+    monkeypatch.setattr(main.random, "uniform", lambda _low, _high: 0)
+    runtime = SimpleNamespace(chatgpt_retry_count=0)
+    error = ChatGPTAPIError(
+        code,
+        "Usage availability is temporarily unavailable.",
+        status=503,
+        error_type="service_unavailable_error",
+    )
+
+    action = main._handle_batch_error(runtime, error, 0)
+
+    assert action is main.BatchAction.RETRY_SAME_MODEL
+    assert runtime.chatgpt_retry_count == 1
+    assert waits == [1]
+
+
+def test_chatgpt_http_429_uses_status_without_fuzzy_message_classification(
+    monkeypatch,
+):
+    from types import SimpleNamespace
+
+    from translation_tool.core import lm_translator_main as main
+    from translation_tool.core.openai_codex_client import ChatGPTAPIError
+
+    waits = []
+    monkeypatch.setattr(main, "interruptible_sleep", waits.append)
+    monkeypatch.setattr(main.random, "uniform", lambda _low, _high: 0)
+    runtime = SimpleNamespace(chatgpt_retry_count=0)
+    error = ChatGPTAPIError(
+        "http_429",
+        "Temporary usage_limit message from the service.",
+        status=429,
+    )
+
+    action = main._handle_batch_error(runtime, error, 0)
+
+    assert action is main.BatchAction.RETRY_SAME_MODEL
+    assert runtime.chatgpt_retry_count == 1
+    assert waits == [1]
+
+
+def test_chatgpt_retry_wait_remains_cancellable(monkeypatch):
+    from types import SimpleNamespace
+
+    from translation_tool.core import lm_translator_main as main
+    from translation_tool.core.openai_codex_client import ChatGPTAPIError
+    from translation_tool.utils.cancellation import TaskCancelled
+
+    def cancel_wait(_seconds):
+        raise TaskCancelled("cancelled during retry wait")
+
+    monkeypatch.setattr(main, "interruptible_sleep", cancel_wait)
+    runtime = SimpleNamespace(chatgpt_retry_count=0)
+    error = ChatGPTAPIError("http_429", status=429)
+
+    with pytest.raises(TaskCancelled):
+        main._handle_batch_error(runtime, error, 0)
+
+
 class TestTranslateBatchSmart:
     """translate_batch_smart 測試"""
 

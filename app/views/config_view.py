@@ -785,6 +785,14 @@ class ConfigView(ft.Column):
                 email = account.get("email")
                 identity = f"：{email}" if email else ""
                 self.chatgpt_status_text.value = f"已連結 ChatGPT 帳號{identity}。翻譯會使用 ChatGPT 方案或 credits。"
+            elif account.get("reauth_required"):
+                self.chatgpt_status_text.value = (
+                    "ChatGPT 方案授權需要更新；請重新登入後再翻譯。"
+                )
+            elif account.get("client_id_registered"):
+                self.chatgpt_status_text.value = (
+                    "ChatGPT 帳號已中斷連結；重新登入會沿用已註冊帳號。"
+                )
             else:
                 self.chatgpt_status_text.value = "尚未連結 ChatGPT 帳號"
         connected = bool(account.get("connected"))
@@ -792,7 +800,9 @@ class ConfigView(ft.Column):
         self.chatgpt_cancel_button.visible = busy
         self.chatgpt_cancel_button.disabled = not busy
         self.chatgpt_refresh_button.disabled = busy or not connected
-        self.chatgpt_disconnect_button.disabled = busy or not connected
+        self.chatgpt_disconnect_button.disabled = busy or not bool(
+            account.get("oauth_session_present") or connected
+        )
         has_model = any(option.key for option in self.chatgpt_model_control.options)
         self.chatgpt_model_control.disabled = busy or not connected or not has_model
 

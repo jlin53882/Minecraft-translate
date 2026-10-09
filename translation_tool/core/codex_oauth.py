@@ -13,6 +13,8 @@ import hashlib
 import json
 import os
 import secrets
+import stat
+import sys
 import tempfile
 import threading
 import time
@@ -55,13 +57,36 @@ class ChatGPTModel:
 
 
 def _credential_path() -> Path:
-    if os.name == "nt":
+    if sys.platform == "win32":
         root = Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local")
-    elif os.name == "darwin":
+    elif sys.platform == "darwin":
         root = Path.home() / "Library" / "Application Support"
     else:
         root = Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local" / "share")
     return root / "MinecraftTranslate" / "chatgpt-oauth.dat"
+
+
+def _legacy_macos_credential_path() -> Path | None:
+    """Return the credential path used before macOS got its native app-data path."""
+    if sys.platform != "darwin":
+        return None
+    root = Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local" / "share")
+    legacy = root / "MinecraftTranslate" / "chatgpt-oauth.dat"
+    return None if legacy == _credential_path() else legacy
+
+
+def _validate_legacy_macos_credential_file(path: Path) -> None:
+    """Refuse legacy credential migration unless the source file is private."""
+    try:
+        if path.is_symlink():
+            raise ChatGPTOAuthError("舊版 ChatGPT 登入資料是符號連結，拒絕遷移。")
+        mode = stat.S_IMODE(path.stat().st_mode)
+    except OSError as exc:
+        raise ChatGPTOAuthError("無法安全檢查舊版 ChatGPT 登入資料。") from exc
+    if mode & 0o077:
+        raise ChatGPTOAuthError(
+            "舊版 ChatGPT 登入資料的檔案權限不安全；請先將權限設為僅限目前使用者讀取。"
+        )
 
 
 def _dpapi_transform(payload: bytes, *, protect: bool) -> bytes:
@@ -194,7 +219,26 @@ def _credential_file_lock():
 def _read_record_unlocked() -> dict[str, Any]:
     path = _credential_path()
     if not path.exists():
-        return {}
+        legacy_path = _legacy_macos_credential_path()
+        if legacy_path is None or not (
+            legacy_path.exists() or legacy_path.is_symlink()
+        ):
+            return {}
+        _validate_legacy_macos_credential_file(legacy_path)
+        try:
+            record = _decode_record(legacy_path.read_bytes())
+        except OSError as exc:
+            raise ChatGPTOAuthError("無法讀取舊版 ChatGPT 登入資料。") from exc
+        # The normal writer uses an atomic replacement and owner-only mode on
+        # POSIX. Keep the old file until that protected write has succeeded.
+        _write_record_unlocked(record)
+        try:
+            legacy_path.unlink()
+        except OSError as exc:
+            raise ChatGPTOAuthError(
+                "已遷移 ChatGPT 登入資料，但無法清除舊位置的副本。"
+            ) from exc
+        return record
     try:
         return _decode_record(path.read_bytes())
     except OSError as exc:
@@ -239,19 +283,41 @@ def _load_or_create_host_record() -> dict[str, Any]:
         return record
 
 
+def _record_scopes(record: dict[str, Any]) -> set[str]:
+    """Normalize the trusted scopes stored from a token endpoint response."""
+    scopes = record.get("scopes")
+    if isinstance(scopes, str):
+        return set(scopes.split())
+    if isinstance(scopes, (list, tuple, set)):
+        return {item for item in scopes if isinstance(item, str) and item}
+    return set()
+
+
 def chatgpt_account_status() -> dict[str, Any]:
     # Atomic replace keeps this non-secret status read consistent without waiting
     # behind a token refresh that may hold the cross-process lock during HTTP I/O.
     record = _read_record_unlocked()
-    connected = bool(
-        record.get("access_token")
-        and record.get("refresh_token")
-        and record.get("client_id")
+    oauth_session_present = bool(
+        record.get("refresh_token") and record.get("client_id")
+    )
+    access_token_present = bool(record.get("access_token"))
+    direct_scope_granted = "chatgpt.tokens.use.direct" in _record_scopes(record)
+    reauth_required = bool(record.get("reauth_required")) or (
+        oauth_session_present and (not direct_scope_granted or not access_token_present)
+    )
+    connected = (
+        oauth_session_present
+        and access_token_present
+        and direct_scope_granted
+        and not reauth_required
     )
     return {
         "connected": connected,
         "email": str(record.get("email") or ""),
         "client_id_registered": bool(record.get("client_id")),
+        "oauth_session_present": oauth_session_present,
+        "direct_scope_granted": direct_scope_granted,
+        "reauth_required": reauth_required,
         "expires_at": record.get("expires_at"),
     }
 
@@ -517,6 +583,7 @@ class PendingChatGPTLogin:
                     "token_type": "Bearer",
                     "expires_at": time.time() + expires_in,
                     "scopes": sorted(scopes),
+                    "reauth_required": False,
                     "saved_at": int(time.time()),
                 }
             )
@@ -631,12 +698,23 @@ def get_chatgpt_access_token(*, force_refresh: bool = False) -> str:
         refresh_token = str(record.get("refresh_token") or "")
         client_id = str(record.get("client_id") or "")
         if not access_token or not refresh_token or not client_id:
+            if record.get("reauth_required") or client_id:
+                raise ChatGPTOAuthError(
+                    "ChatGPT 登入授權需要更新，請到 API 設定重新登入。"
+                )
             raise ChatGPTOAuthError("尚未連結 ChatGPT 帳號；請先在設定頁登入。")
         try:
             expires_at = float(record.get("expires_at") or 0)
         except (TypeError, ValueError):
             expires_at = 0
-        if not force_refresh and expires_at > time.time() + _REFRESH_SKEW_SEC:
+        trusted_scopes = _record_scopes(record)
+        has_direct_scope = "chatgpt.tokens.use.direct" in trusted_scopes
+        if (
+            not force_refresh
+            and has_direct_scope
+            and not record.get("reauth_required")
+            and expires_at > time.time() + _REFRESH_SKEW_SEC
+        ):
             return access_token
 
         metadata = _discover()
@@ -679,18 +757,35 @@ def get_chatgpt_access_token(*, force_refresh: bool = False) -> str:
             expires_in = max(60, int(tokens.get("expires_in", 3600)))
         except (TypeError, ValueError):
             expires_in = 3600
-        scopes = tokens.get("scope")
-        if isinstance(scopes, str) and scopes.strip():
-            record["scopes"] = sorted(set(scopes.split()))
+        # A missing scope field inherits the trusted grant under OAuth refresh
+        # semantics. An explicit empty/non-string scope is a real downgrade.
+        if "scope" in tokens:
+            response_scopes = tokens.get("scope")
+            granted_scopes = (
+                set(response_scopes.split())
+                if isinstance(response_scopes, str)
+                else set()
+            )
+        else:
+            granted_scopes = trusted_scopes
+        direct_scope_granted = "chatgpt.tokens.use.direct" in granted_scopes
         record.update(
             {
-                "access_token": new_access,
+                # Persist the replacement refresh token before reporting a
+                # scope downgrade; the previous rotating token may be invalid.
+                "access_token": new_access if direct_scope_granted else "",
                 "refresh_token": new_refresh,
-                "expires_at": time.time() + expires_in,
+                "expires_at": time.time() + expires_in if direct_scope_granted else 0,
+                "scopes": sorted(granted_scopes),
+                "reauth_required": not direct_scope_granted,
                 "saved_at": int(time.time()),
             }
         )
         _write_record_unlocked(record)
+        if not direct_scope_granted:
+            raise ChatGPTOAuthError(
+                "ChatGPT 方案授權範圍已變更或無法確認；請到 API 設定重新登入後再翻譯。"
+            )
         return new_access
 
 
@@ -764,10 +859,10 @@ def disconnect_chatgpt_account() -> bool:
                 if confirmed or not retryable or attempt == 2:
                     break
                 time.sleep(0.5 * (2**attempt))
-        retained = (
-            {"ext_agent_host_id": record["ext_agent_host_id"]}
-            if record.get("ext_agent_host_id")
-            else {}
-        )
+        retained = {
+            key: record[key]
+            for key in ("ext_agent_host_id", "client_id", "subject", "email")
+            if record.get(key)
+        }
         _write_record_unlocked(retained)
     return confirmed

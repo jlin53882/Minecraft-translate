@@ -576,16 +576,17 @@ def _chatgpt_api_error_message(error) -> str:
 
     if code == "refusal":
         return f"ChatGPT 拒絕處理這批翻譯內容，請檢查來源文字後再試。API 詳情：{detail}"
+    if code == "subscription_sharing_usage_limit_exceeded":
+        return (
+            "ChatGPT 方案或此應用的使用限制已達；系統已停止自動重試，"
+            "請查看 ChatGPT 使用量設定後再執行。API 詳情："
+            f"{detail}"
+        )
     if _is_chatgpt_quota_exhaustion(error):
         return (
             "ChatGPT 方案用量或 API 配額已耗盡；系統已停止自動重試，"
             f"請確認方案使用量或帳務限制後再執行。API 詳情：{detail}"
         )
-    if code in {
-        "subscription_sharing_usage_limit_exceeded",
-        "subscription_sharing_usage_unavailable",
-    }:
-        return f"ChatGPT 方案目前無法繼續處理翻譯，請查看使用量與方案限制後重試。API 詳情：{detail}"
     if error.status == 401:
         return (
             f"ChatGPT OAuth 憑證無效或已過期，請到 API 設定重新登入。API 詳情：{detail}"
@@ -617,18 +618,18 @@ def _chatgpt_api_error_message(error) -> str:
 
 
 def _is_chatgpt_quota_exhaustion(error) -> bool:
-    """Return whether an API error signals usage/billing exhaustion, not throttling."""
-    markers = (
+    """Return whether a machine-readable API code signals a permanent quota limit."""
+    permanent_codes = {
         "credit_balance_exhausted",
         "insufficient_quota",
         "usage_limit",
         "spend_limit",
         "quota_exceeded",
         "subscription_sharing_usage_limit_exceeded",
-        "subscription_sharing_usage_unavailable",
-    )
-    details = " ".join((str(error.code), str(error.error_type), str(error))).lower()
-    return any(marker in details for marker in markers)
+    }
+    code = str(error.code or "").strip().lower()
+    error_type = str(error.error_type or "").strip().lower()
+    return code in permanent_codes or error_type in permanent_codes
 
 
 def _chatgpt_retryable_error(error) -> bool:
@@ -638,10 +639,9 @@ def _chatgpt_retryable_error(error) -> bool:
     code = str(error.code or "").lower()
     error_type = str(error.error_type or "").lower()
     if error.status == 429:
-        return error_type == "rate_limit_error" or code in {
-            "slow_down",
-            "rate_limit_exceeded",
-        }
+        # A 429 is retryable throttling unless its machine-readable code above
+        # identified a terminal plan or billing limit.
+        return True
     if error.status in {408, 500, 502, 503, 504}:
         return True
     return code in {
