@@ -12,7 +12,6 @@ import threading
 import flet as ft
 
 from app.services_impl.moddb_service import (
-    SOURCE_NAMES,
     SRC_CUSTOM,
     SRC_I18N,
     SRC_JAR_TW,
@@ -20,7 +19,6 @@ from app.services_impl.moddb_service import (
     SRC_SUBTITLE,
     ScanOptions,
     current_settings,
-    custom_source_codes,
     pack_format_hint,
     run_moddb_scan_service,
     version_choices,
@@ -308,12 +306,12 @@ class ScanPanel(ft.Column):
         settings = current_settings()
         allowed = [
             *ZIP_SOURCES,
-            *custom_source_codes(),
+            *settings.source_catalog.custom_codes,
         ]  # 自訂來源也能當 ZIP 的來源標記
         order = [c for c in settings.priority if c in allowed]
         order += [c for c in allowed if c not in order]
         kit.set_dropdown_options(
-            self.source_dd, [(str(c), SOURCE_NAMES[c]) for c in order]
+            self.source_dd, [(str(c), settings.source_catalog.label(c)) for c in order]
         )
         if not self._source_touched:
             default = settings.zip_source

@@ -195,7 +195,10 @@ class StatCard(ft.Container):
         head: list[ft.Control] = []
         if icon:
             head.append(tone_icon(icon, tone, size=14))
-        head.append(ft.Text(label, size=12, color=C.MUTED, no_wrap=True, expand=True))
+        self.label_text = ft.Text(
+            label, size=12, color=C.MUTED, no_wrap=True, expand=True
+        )
+        head.append(self.label_text)
         if action is not None:
             head.append(action)  # 操作按鈕放標題列右側，不多佔一行（各卡高度才一致）
         self.value_text = ft.Text(
@@ -247,6 +250,11 @@ class StatCard(ft.Container):
             self.delta_text.visible = bool(delta) or self._reserve_delta
         if delta_tone is not None:
             self.delta_text.color = get_tone(delta_tone).fg
+
+    def set_title(self, label: str, *, tooltip: str | None = None) -> None:
+        """Update the KPI heading through a stable component API."""
+        self.label_text.value = label
+        self.label_text.tooltip = tooltip
 
 
 def stat_card(

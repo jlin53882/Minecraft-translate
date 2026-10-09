@@ -4,12 +4,19 @@ from __future__ import annotations
 
 import flet as ft
 
+from app.services_impl.moddb_source_service import source_label
 from app.ui import kit
 from app.ui.design import C
-from app.views.moddb.formatting import shorten, source_label
+from app.views.moddb.formatting import shorten
 
 
-def build_suggestions(detail, tab: str, on_apply) -> list[ft.Control]:
+def build_suggestions(
+    detail,
+    tab: str,
+    on_apply,
+    *,
+    catalog=None,
+) -> list[ft.Control]:
     """「同鍵值・其他版本／相同原文」建議清單；``on_apply(text)`` 在按「套用」時呼叫。"""
     entry = detail.entry
     controls: list[ft.Control] = []
@@ -21,7 +28,11 @@ def build_suggestions(detail, tab: str, on_apply) -> list[ft.Control]:
                     r.zh_tw,
                     [
                         r.mc_version,
-                        source_label(r.source) if r.zh_tw else "",
+                        source_label(
+                            r.source, catalog, getattr(r, "review_status", None)
+                        )
+                        if r.zh_tw
+                        else "",
                         _source_tag(r),
                     ],
                     apply=r.zh_tw if (r.zh_tw and r.zh_tw != entry.zh_tw) else None,

@@ -7,23 +7,60 @@ from collections.abc import Callable
 import flet as ft
 
 from app.services_impl.moddb_service import VersionStat, database_problem
+from app.services_impl.moddb_source_service import source_label, source_tone
 from app.ui import design, kit
 from app.ui.design import C
 from app.ui.kit.inputs import BUTTON_HEIGHTS
 from app.views.moddb.formatting import format_count, percent
 from translation_tool.utils.log_unit import log_debug
 
-# 進度條各段：(欄位, 標籤, 色調)
 # 總覽四張 KPI 卡的標題列固定高度（有按鈕的卡比較高，固定後四張才等高）
 OVERVIEW_CARD_HEAD = BUTTON_HEIGHTS["sm"] + 2  # 容得下 sm 按鈕與同高的說明圖示鈕
 
-SEGMENTS = (
-    ("manual", "人工", "ench"),
-    ("jar", "模組自帶／人工來源", "dia"),
-    ("converted", "簡中轉繁", "gold"),
-    ("ai", "AI 機翻", "em"),
-    ("untranslated", "未翻譯", "neutral"),
-)
+
+def _source_breakdown(db, source_stats):
+    """Order observed source buckets by this DB's priority and build legend rows."""
+    grouped: dict[str, list] = {}
+    observed = set()
+    for row in source_stats:
+        grouped.setdefault(row.mc_version, []).append(row)
+        if row.count > 0:
+            observed.add((row.source, row.review_status))
+
+    order = db.source_catalog.ordered_codes(db.priority)
+    priority_index = {code: index for index, code in enumerate(order)}
+    sources = sorted(
+        {source for source, _status in observed if source is not None},
+        key=lambda source: (priority_index.get(source, len(priority_index)), source),
+    )
+    status_order = {"unreviewed": 0, "reviewed": 1, "legacy_unknown": 2}
+    source_index = {source: index for index, source in enumerate(sources)}
+    for rows in grouped.values():
+        rows.sort(
+            key=lambda row: (
+                len(source_index)
+                if row.source is None
+                else source_index.get(row.source, len(source_index)),
+                status_order.get(row.review_status, 3),
+            )
+        )
+
+    legend = []
+    for source in sources:
+        statuses = sorted(
+            {status for row_source, status in observed if row_source == source},
+            key=lambda status: status_order.get(status, 3),
+        )
+        for status in statuses:
+            legend.append(
+                (
+                    source_label(source, db.source_catalog, status),
+                    source_tone(source),
+                )
+            )
+    if (None, None) in observed:
+        legend.append(("未翻譯", "neutral"))
+    return grouped, legend
 
 
 class OverviewPanel(ft.Column):
@@ -46,10 +83,11 @@ class OverviewPanel(ft.Column):
 
         self._build_stat_cards()
         self.versions_col = ft.Column(spacing=14)
-        self.legend = ft.Row(
-            [kit.chip(label, tone, dot=True) for _f, label, tone in SEGMENTS],
-            spacing=8,
-            wrap=True,
+        self.legend = ft.Row(spacing=8, wrap=True)
+        self.legend_note = ft.Text(
+            "圖例只列出目前生效且有筆數的來源；未翻譯另列。來源優先序只影響排列。",
+            size=11.5,
+            color=C.DIM,
         )
         self.missing_col = ft.Column(spacing=0)
         self.scans_col = ft.Column(spacing=8)
@@ -82,7 +120,9 @@ class OverviewPanel(ft.Column):
                 ),
                 kit.section_card(
                     "各版本翻譯進度",
-                    ft.Column([self.legend, self.versions_col], spacing=12),
+                    ft.Column(
+                        [self.legend, self.legend_note, self.versions_col], spacing=8
+                    ),
                     icon=ft.Icons.BAR_CHART,
                     tone="em",
                 ),
@@ -193,6 +233,11 @@ class OverviewPanel(ft.Column):
             self.empty.visible = False
         if has_data and db is not None:
             ov = db.overview()
+            source_stats = db.effective_source_stats_by_version()
+            source_stats_by_version, legend_rows = _source_breakdown(db, source_stats)
+            self.legend.controls = [
+                kit.chip(label, tone, dot=True) for label, tone in legend_rows
+            ]
             self.stat_mods.set_value(format_count(ov["mods"]))
             self.stat_content.set_value(
                 format_count(ov["content"]),
@@ -206,7 +251,14 @@ class OverviewPanel(ft.Column):
             )
             self.stat_diff.set_value(format_count(ov["diff"]))
             self.stat_changed.set_value(format_count(ov["src_changed"]))
-            self.versions_col.controls = [self._version_bar(s) for s in stats]
+            self.versions_col.controls = [
+                self._version_bar(
+                    s,
+                    source_stats_by_version.get(s.mc_version, []),
+                    db.source_catalog,
+                )
+                for s in stats
+            ]
             self._render_missing(db, stats[0].mc_version)
             self._render_scans(db)
         if update:
@@ -215,17 +267,22 @@ class OverviewPanel(ft.Column):
             except Exception as exc:  # noqa: BLE001 - 頁面已卸載時不影響資料
                 log_debug(f"OverviewPanel update 略過：{exc}")
 
-    def _version_bar(self, s: VersionStat) -> ft.Control:
-        values = {f: getattr(s, f) for f, _l, _t in SEGMENTS}
+    def _version_bar(self, s: VersionStat, source_stats: list, catalog) -> ft.Control:
         segs = [
             ft.Container(
-                expand=max(v, 0),
-                bgcolor=design.tone(tone).fg if f != "untranslated" else C.TRACK,
+                expand=max(row.count, 0),
+                bgcolor=(
+                    design.tone(source_tone(row.source)).fg
+                    if row.source is not None
+                    else C.TRACK
+                ),
                 height=10,
-                tooltip=f"{label}：{v:,}",
+                tooltip=(
+                    f"{source_label(row.source, catalog, row.review_status) if row.source is not None else '未翻譯'}：{row.count:,}"
+                ),
             )
-            for (f, label, tone), v in zip(SEGMENTS, values.values(), strict=True)
-            if v > 0
+            for row in source_stats
+            if row.count > 0
         ]
         translated = s.total - s.untranslated
         return ft.Column(
