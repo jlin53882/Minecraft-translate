@@ -29,6 +29,7 @@ from translation_tool.translation_db.settings import (
     load_db_settings,
     open_db,
 )
+from translation_tool.translation_db.source_catalog import SourceCatalog
 
 __all__ = [
     "DEFAULT_PRIORITY",
@@ -43,6 +44,7 @@ __all__ = [
     "IngestStats",
     "SameSourceAIEntry",
     "ScanItem",
+    "SourceCatalog",
     "TranslationDB",
     "TranslationResolver",
     "VersionStat",

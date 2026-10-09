@@ -55,6 +55,7 @@ from translation_tool.translation_db.schema import (
     init_schema,
     rank_sql,
 )
+from translation_tool.translation_db.source_catalog import SourceCatalog
 
 _ENTRY_COLS = "e.id, e.kind, e.mc_version, e.mod_id, e.key, e.en_us"
 _CHUNK = 400  # SQLite 變數上限相容的批次大小
@@ -109,6 +110,7 @@ class TranslationDB:
                 init_schema(self._conn)
                 if sync_priority:
                     self._sync_priority()
+            self.source_catalog = self._load_source_catalog()
         except BaseException:
             self._conn.close()
             raise
@@ -118,6 +120,15 @@ class TranslationDB:
         self.priority = tuple(priority)
         self._rank = rank_sql(self.priority, "t.source")
         self._sync_priority()
+        self.source_catalog = self._load_source_catalog()
+
+    def _load_source_catalog(self) -> SourceCatalog:
+        row = self._one("SELECT value FROM meta WHERE key='custom_sources'")
+        try:
+            registry = json.loads(row[0]) if row else {}
+        except (TypeError, ValueError):
+            registry = {}
+        return SourceCatalog.from_registry(registry)
 
     def _priority_order(self, priority: tuple[int, ...] | None = None) -> str:
         """Return the canonical effective-source ordering for a selected priority."""

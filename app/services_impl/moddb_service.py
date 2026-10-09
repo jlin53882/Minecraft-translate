@@ -30,7 +30,6 @@ from translation_tool.translation_db import (
 )
 from translation_tool.translation_db.scanner import ScanOptions, scan_folder_generator
 from translation_tool.translation_db.schema import (
-    CUSTOM_SOURCE_BASE,
     SRC_AI,
     SRC_CUSTOM,
     SRC_I18N,
@@ -94,7 +93,7 @@ VERSION_FILE = (
 
 def custom_source_codes() -> list[int]:
     """使用者自訂來源（在設定「來源優先順序」輸入的新名稱）的代碼，依代碼排序。"""
-    return sorted(c for c in SOURCE_NAMES if c >= CUSTOM_SOURCE_BASE)
+    return list(current_settings().source_catalog.custom_codes)
 
 
 def current_settings() -> DbSettings:
@@ -223,7 +222,11 @@ def run_moddb_scan_service(
             )
             session.set_error()
             return
-        if options.translated and options.translation_source not in SOURCE_NAMES:
+        if (
+            options.translated
+            and options.translation_source
+            not in current_settings().source_catalog.codes
+        ):
             _log_both(
                 session,
                 f"[錯誤] 譯文來源代碼 {options.translation_source} 不在目前資料庫的來源清單中，"

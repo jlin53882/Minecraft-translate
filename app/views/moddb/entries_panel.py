@@ -38,6 +38,7 @@ from app.views.moddb.formatting import (
 )
 from app.views.moddb.source_filter import SourceFilter
 from app.views.moddb.suggestions import build_suggestions
+from translation_tool.translation_db.source_catalog import DEFAULT_SOURCE_CATALOG
 from translation_tool.utils.log_unit import (
     log_debug,
     log_exception,
@@ -531,8 +532,10 @@ class EntriesPanel(ft.Column):
             self.saved_text.value = (
                 "已預填本次機翻的 AI 譯文（特殊字元與原文不一致，尚未寫入）"
             )
+        db = self.db()
+        catalog = db.source_catalog if db is not None else DEFAULT_SOURCE_CATALOG
         self.source_chip.content = kit.chip(
-            source_label(entry.source) if entry.zh_tw else "尚無譯文",
+            source_label(entry.source, catalog) if entry.zh_tw else "尚無譯文",
             source_tone(entry.source),
         )
         self.meta_col.controls = [
@@ -582,13 +585,22 @@ class EntriesPanel(ft.Column):
         if self.detail is None:
             return
         self.sug_col.controls = build_suggestions(
-            self.detail, self.sug_tab, self._apply_suggestion
+            self.detail,
+            self.sug_tab,
+            self._apply_suggestion,
+            catalog=(
+                self.db().source_catalog
+                if self.db() is not None
+                else DEFAULT_SOURCE_CATALOG
+            ),
         )
 
     def _render_history(self) -> None:
         detail = self.detail
         if detail is None:
             return
+        db = self.db()
+        catalog = db.source_catalog if db is not None else DEFAULT_SOURCE_CATALOG
         out: list[ft.Control] = []
         for h in detail.history:
             action = {
@@ -635,7 +647,9 @@ class EntriesPanel(ft.Column):
                 out.append(
                     ft.Row(
                         [
-                            kit.chip(source_label(t.source), source_tone(t.source)),
+                            kit.chip(
+                                source_label(t.source, catalog), source_tone(t.source)
+                            ),
                             ft.Text(
                                 shorten(t.zh_tw, 28), size=12, color=C.TEXT, expand=True
                             ),

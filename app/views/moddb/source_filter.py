@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from app.services_impl.moddb_service import SOURCE_NAMES, current_settings
+from app.services_impl.moddb_service import current_settings
 from app.ui import kit
 
 ALL_SOURCES = "__all__"
@@ -27,12 +27,14 @@ class SourceFilter:
 
     def refresh(self) -> None:
         """選項順序跟隨設定的 translation_db.priority（每次切到條目校對頁籤重讀）。"""
-        order = current_settings().priority
+        settings = current_settings()
+        catalog = settings.source_catalog
+        order = catalog.ordered_codes(settings.priority)
         kit.set_dropdown_options(
             self.dropdown,
             [
                 (ALL_SOURCES, "全部來源"),
-                *((str(c), SOURCE_NAMES.get(c, f"來源 {c}")) for c in order),
+                *((str(c), catalog.label(c)) for c in order),
             ],
         )
 

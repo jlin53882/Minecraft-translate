@@ -5,11 +5,10 @@ from __future__ import annotations
 import re
 from collections import Counter
 
-from app.services_impl.moddb_service import (
-    SOURCE_NAMES,
-    SRC_AI,
-    SRC_JAR_CN,
-    SRC_MANUAL,
+from app.services_impl.moddb_service import SRC_AI, SRC_JAR_CN, SRC_MANUAL
+from translation_tool.translation_db.source_catalog import (
+    DEFAULT_SOURCE_CATALOG,
+    SourceCatalog,
 )
 
 STATE_LABELS = {
@@ -37,8 +36,18 @@ def kind_label(kind: str) -> str:
     return KIND_LABELS.get(kind, kind)
 
 
-def source_label(source: int | None) -> str:
-    return SOURCE_NAMES.get(source, "—") if source is not None else "—"
+def source_label(
+    source: int | None,
+    catalog: SourceCatalog = DEFAULT_SOURCE_CATALOG,
+    review_status: str | None = None,
+) -> str:
+    if source == SRC_MANUAL and review_status:
+        return {
+            "unreviewed": "人工-未審核",
+            "reviewed": "人工-已審核",
+            "legacy_unknown": "人工（歷史狀態待確認）",
+        }.get(review_status, catalog.label(source))
+    return catalog.label(source)
 
 
 def source_tone(source: int | None) -> str:

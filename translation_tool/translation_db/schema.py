@@ -28,7 +28,7 @@ KINDS = (KIND_LANG, KIND_PATCHOULI)
 SRC_AI = 0
 SRC_JAR_TW = 1
 SRC_JAR_CN = 2  # 簡中經 OpenCC 轉繁
-SRC_SUBTITLE = 3  # 町宮字幕組
+SRC_SUBTITLE = 3  # 釘宮翻譯組（舊設定別名：町宮字幕組）
 SRC_I18N = 4
 SRC_CUSTOM = 5
 SRC_MANUAL = 6
@@ -37,7 +37,7 @@ SOURCE_NAMES: dict[int, str] = {
     SRC_AI: "AI 機翻",
     SRC_JAR_TW: "模組自帶繁中",
     SRC_JAR_CN: "簡中轉繁",
-    SRC_SUBTITLE: "町宮字幕組",
+    SRC_SUBTITLE: "釘宮翻譯組",
     SRC_I18N: "i18n 轉換",
     SRC_CUSTOM: "自訂補充",
     SRC_MANUAL: "人工",
@@ -51,15 +51,13 @@ CUSTOM_SOURCE_BASE = 100
 
 
 def register_source_names(registry: dict[str, int]) -> None:
-    """以這個資料庫登錄的自訂來源取代 ``SOURCE_NAMES`` 的自訂部分（就地更新）。
+    """Deprecated compatibility hook; custom names belong to ``SourceCatalog``.
 
-    先清掉前一個資料庫留下的自訂碼，切換資料庫後才不會殘留別的庫的來源。
+    ``SOURCE_NAMES`` intentionally contains built-ins only. Keeping this
+    function avoids breaking downstream imports while preventing a database
+    selection from changing labels in another open database or task.
     """
-    for code in [c for c in SOURCE_NAMES if c >= CUSTOM_SOURCE_BASE]:
-        del SOURCE_NAMES[code]
-    for name, code in registry.items():
-        if code >= CUSTOM_SOURCE_BASE:
-            SOURCE_NAMES[int(code)] = name
+    del registry
 
 
 # 預設優先序（先者優先）；已校驗（checker 不為空）者永遠最優先

@@ -897,12 +897,8 @@ def test_moddb_view_did_mount_resumes_only_the_current_tab(
 
 @pytest.fixture
 def clean_custom_sources():
-    """自訂來源會就地加進全域 SOURCE_NAMES；測試結束後移除，避免影響其他測試。"""
-    from translation_tool.translation_db.schema import SOURCE_NAMES
-
+    """Compatibility fixture: custom sources no longer mutate global names."""
     yield
-    for code in [c for c in SOURCE_NAMES if c >= 100]:
-        del SOURCE_NAMES[code]
 
 
 def _cfg(path, lines):
@@ -917,37 +913,123 @@ def test_new_names_in_priority_become_custom_sources(db_path, clean_custom_sourc
     seed(db_path)
     lines = ["人工", "測試", "町宮字幕組", "自訂補充", "模組自帶繁中", "i18n 轉換"]
     settings = load_db_settings(_cfg(db_path, lines))
-    assert SOURCE_NAMES[100] == "測試"
+    assert 100 not in SOURCE_NAMES
+    assert settings.source_catalog.label(100) == "測試"
     assert settings.priority[:3] == (6, 100, 3)  # 人工、測試、町宮字幕組
     assert set(settings.priority) >= {0, 1, 2, 3, 4, 5, 6, 100}  # 沒列出的仍補在後面
 
     # 代碼穩定：重讀不變；再新增一個拿到下一個代碼；從設定移除也不會消失或重用代碼
-    load_db_settings(_cfg(db_path, [*lines, "新來源B"]))
-    assert SOURCE_NAMES[101] == "新來源B" and SOURCE_NAMES[100] == "測試"
+    added = load_db_settings(_cfg(db_path, [*lines, "新來源B"]))
+    assert added.source_catalog.label(100) == "測試"
+    assert added.source_catalog.label(101) == "新來源B"
     removed = load_db_settings(_cfg(db_path, ["人工"]))
     assert 100 in removed.priority and 101 in removed.priority
     assert removed.priority[-2:] == (100, 101)  # 沒列出的自訂來源依代碼接在最後
 
 
-def test_typo_in_builtin_name_creates_a_separate_custom_source(
-    db_path, clean_custom_sources, monkeypatch
+def test_source_catalog_resolves_legacy_alias_and_custom_name_collision(
+    db_path, clean_custom_sources
 ):
-    from translation_tool.translation_db.schema import SOURCE_NAMES
-    from translation_tool.translation_db.settings import (
-        load_db_settings,
-        preview_new_source_names,
-    )
+    import json
+    import sqlite3
+
+    from translation_tool.translation_db.schema import SOURCE_NAMES, SRC_SUBTITLE
+    from translation_tool.translation_db.settings import load_db_settings
 
     seed(db_path)
-    monkeypatch.setattr(
-        "translation_tool.translation_db.settings.load_db_settings",
-        lambda *a, **k: DbSettings(path=str(db_path)),
+    # Reproduce an existing DB written before subtitle source 3 was renamed.
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            "INSERT INTO meta (key, value) VALUES ('custom_sources', ?) "
+            "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            (json.dumps({"釘宮翻譯組": 100}, ensure_ascii=False),),
+        )
+    settings = load_db_settings(
+        {
+            "translation_db": {
+                "path": str(db_path),
+                "priority": ["町宮字幕組", "釘宮翻譯組", "custom:100"],
+                "zip_source": "builtin:subtitle",
+            }
+        }
     )
-    load_db_settings(_cfg(db_path, ["釘宮翻譯組", "町宮字幕組"]))
-    assert SOURCE_NAMES[100] == "釘宮翻譯組" and SOURCE_NAMES[3] == "町宮字幕組"
-    # 設定頁即時提示：哪些是已存在的、哪些會被新增
-    known, new = preview_new_source_names("人工\n町宮字幕組\n釘宮翻譯組\n另一個")
-    assert known == ["人工", "町宮字幕組", "釘宮翻譯組"] and new == ["另一個"]
+    assert settings.priority[:2] == (SRC_SUBTITLE, 100)
+    assert settings.zip_source == SRC_SUBTITLE
+    assert settings.priority_lines[0] == "町宮字幕組"
+    assert settings.source_catalog.label(SRC_SUBTITLE) == "釘宮翻譯組"
+    assert settings.source_catalog.label(100) == "釘宮翻譯組（自訂 #100）"
+    assert settings.source_catalog.token_for(SRC_SUBTITLE) == "builtin:subtitle"
+    assert settings.source_catalog.resolve("builtin:subtitle") == SRC_SUBTITLE
+    assert settings.source_catalog.resolve("custom:100") == 100
+    legacy_zip = load_db_settings(
+        {
+            "translation_db": {
+                "path": str(db_path),
+                "priority": [],
+                "zip_source": "町宮字幕組",
+            }
+        }
+    )
+    assert legacy_zip.zip_source == SRC_SUBTITLE
+    # Built-in names are process-global constants; opening this DB does not leak #100.
+    assert SRC_SUBTITLE in SOURCE_NAMES and 100 not in SOURCE_NAMES
+
+
+def test_renamed_source_display_is_default_and_not_auto_registered(db_path):
+    from translation_tool.translation_db.schema import SRC_SUBTITLE
+    from translation_tool.translation_db.settings import load_db_settings
+
+    seed(db_path)
+    settings = load_db_settings(
+        {"translation_db": {"path": str(db_path), "priority": ["釘宮翻譯組"]}}
+    )
+    assert settings.priority[0] == SRC_SUBTITLE
+    assert settings.source_catalog.custom_codes == ()
+
+
+def test_legacy_source_name_collision_keeps_builtin_and_custom_rows_distinct(
+    db_path, clean_custom_sources
+):
+    import sqlite3
+
+    from translation_tool.translation_db.schema import SRC_SUBTITLE
+    from translation_tool.translation_db.settings import load_db_settings
+
+    seed(db_path)
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            "INSERT INTO meta (key, value) VALUES ('custom_sources', ?) "
+            "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            (json.dumps({"釘宮翻譯組": 100}, ensure_ascii=False),),
+        )
+    settings = load_db_settings(
+        {
+            "translation_db": {
+                "path": str(db_path),
+                "priority": ["builtin:subtitle", "custom:100"],
+            }
+        }
+    )
+    db = TranslationDB(db_path, priority=settings.priority)
+    item = WriteBackItem(
+        KIND_LANG, "foo", "item.foo.b", "Infused Alloy", "釘宮內建譯文"
+    )
+    db.write_back("1.21.1", [item], source=SRC_SUBTITLE, fill_other_versions=False)
+    db.write_back(
+        "1.21.1",
+        [WriteBackItem(KIND_LANG, "foo", item.key, item.en_us, "自訂版譯文")],
+        source=100,
+        fill_other_versions=False,
+    )
+    entry = next(row for row in db.list_entries("1.21.1")[0] if row.key == item.key)
+    translations = {
+        row.source: row.zh_tw for row in db.entry_detail(entry.id).translations
+    }
+    assert translations[SRC_SUBTITLE] == "釘宮內建譯文"
+    assert translations[100] == "自訂版譯文"
+    assert db.source_catalog.label(SRC_SUBTITLE) == "釘宮翻譯組"
+    assert db.source_catalog.label(100) == "釘宮翻譯組（自訂 #100）"
+    db.close()
 
 
 def test_custom_source_works_end_to_end(db_path, clean_custom_sources, monkeypatch):
@@ -962,7 +1044,10 @@ def test_custom_source_works_end_to_end(db_path, clean_custom_sources, monkeypat
         moddb_service, "load_db_settings", lambda: load_db_settings(cfg)
     )
     code = load_db_settings(cfg).priority[1]
-    assert code == 100 and source_label(code) == "測試"
+    assert (
+        code == 100
+        and source_label(code, load_db_settings(cfg).source_catalog) == "測試"
+    )
 
     db = TranslationDB(db_path, priority=load_db_settings(cfg).priority)
     db.write_back(
@@ -1000,7 +1085,8 @@ def test_names_typed_before_the_database_exists_are_registered_on_creation(
     assert 100 not in settings.priority  # 資料庫還沒有，無處登錄
     db = open_db(settings, create=True)
     assert db is not None
-    assert read_custom_sources(path) == {"測試": 100} and SOURCE_NAMES[100] == "測試"
+    assert read_custom_sources(path) == {"測試": 100}
+    assert 100 not in SOURCE_NAMES and db.source_catalog.label(100) == "測試"
     assert db.priority[:2] == (6, 100)
     db.close()
 
@@ -1017,9 +1103,10 @@ def test_priority_field_previews_new_custom_sources(db_path, monkeypatch):
     )
     field = kit.field(label="優先序", multiline=True, helper="說明")
     check = attach_priority_hooks(field)
-    field.value = "人工\n測試\n釘宮翻譯組"
+    field.value = "人工\n測試\n新自訂來源"
     field.on_change(SimpleNamespace(control=field, data=field.value))
-    assert "將新增自訂來源：測試、釘宮翻譯組" in field.helper and "說明" in field.helper
+    assert "將新增自訂來源：測試、新自訂來源" in field.helper and "說明" in field.helper
+    assert "釘宮翻譯組" not in field.helper
     field.value = "人工\n町宮字幕組"
     check()
     assert "所有名稱都是已存在的來源" in field.helper
