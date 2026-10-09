@@ -159,6 +159,16 @@ def _collect_validated_config(
                 show_snack(view.page, "至少需要保留一個啟用中的模型；設定尚未儲存。")
             return None
         config["lm_translator"]["models"] = models
+        collect_chatgpt_settings = getattr(view, "collect_chatgpt_model_settings", None)
+        if callable(collect_chatgpt_settings):
+            try:
+                config["lm_translator"]["chatgpt_model_settings"] = (
+                    collect_chatgpt_settings()
+                )
+            except ValueError as err:
+                if show_feedback:
+                    show_snack(view.page, f"❌ {err}；設定尚未儲存。")
+                return None
         try:
             validate_output_folder_names(config)
         except ConfigValidationError as err:
@@ -278,6 +288,9 @@ def load_config_into_view(view, config: dict):
         row = view._build_key_row(tf)
         view.key_fields.append(tf)
         view.keys_column.controls.append(row)
+    hydrate_chatgpt_settings = getattr(view, "_hydrate_chatgpt_model_settings", None)
+    if callable(hydrate_chatgpt_settings):
+        hydrate_chatgpt_settings(lm_cfg.get("chatgpt_model_settings", {}))
 
 
 def load_config_transactionally(view, load_config_json_fn):

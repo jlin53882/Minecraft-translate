@@ -26,7 +26,11 @@ from translation_tool.core.lm_config_rules import (
     get_translation_provider,
     validate_translation_credentials,
 )
-from translation_tool.core.lm_config_schema import model_output_token_cap
+from translation_tool.core.lm_config_schema import (
+    chatgpt_model_input_token_budget,
+    chatgpt_model_reasoning_effort,
+    model_output_token_cap,
+)
 from translation_tool.core.lm_key_health import (
     PROBE_LEASE_MARGIN_SEC,
     get_model_quota_registry,
@@ -368,6 +372,7 @@ class _BatchRuntime:
     key_rotation_buffer_sec: float = 5
     overload_retry_sec: float = OVERLOAD_RETRY_WAIT_SEC
     request_interval_sec: float = 4
+    reasoning_effort: str | None = None
 
 
 @dataclass(frozen=True)
@@ -432,9 +437,15 @@ def _build_batch_runtime(
         rpm_cooldown = float(RPM_COOLDOWN_SEC)
 
     provider = lm_cfg.get("provider", "gemini")
+    reasoning_effort = None
     if provider == "chatgpt":
         chatgpt_model = str(lm_cfg.get("chatgpt_model") or "").strip()
         model_pool = [chatgpt_model] if chatgpt_model else []
+        if chatgpt_model:
+            context_budget = chatgpt_model_input_token_budget(lm_cfg, chatgpt_model)
+            if context_budget is not None:
+                lm_cfg = {**lm_cfg, "max_input_token_budget": context_budget}
+            reasoning_effort = chatgpt_model_reasoning_effort(lm_cfg, chatgpt_model)
     else:
         models_cfg = get_models_config(load_config())
         model_pool = [
@@ -486,6 +497,7 @@ def _build_batch_runtime(
         key_rotation_buffer_sec=lm_cfg.get("key_rotation_buffer_sec", 5),
         overload_retry_sec=lm_cfg.get("overload_retry_sec", OVERLOAD_RETRY_WAIT_SEC),
         request_interval_sec=lm_cfg.get("request_interval_sec", 4),
+        reasoning_effort=reasoning_effort,
     )
 
 
@@ -1083,15 +1095,18 @@ def _attempt_batch(
                     if runtime.lm_cfg.get("provider", "gemini") == "gemini"
                     else ""
                 )
-                raw_text = call_gemini_requests(
-                    model_name=model_name,
-                    system_prompt=prompt,
-                    payload=round_data.payload,
-                    api_key=api_key,
-                    temperature=runtime.model_temperature,
-                    max_output_tokens=output_cap,
-                    meta_out=api_meta,
-                ).strip()
+                request_kwargs = {
+                    "model_name": model_name,
+                    "system_prompt": prompt,
+                    "payload": round_data.payload,
+                    "api_key": api_key,
+                    "temperature": runtime.model_temperature,
+                    "max_output_tokens": output_cap,
+                    "meta_out": api_meta,
+                }
+                if runtime.lm_cfg.get("provider", "gemini") == "chatgpt":
+                    request_kwargs["reasoning_effort"] = runtime.reasoning_effort
+                raw_text = call_gemini_requests(**request_kwargs).strip()
             # A synchronous provider request cannot be interrupted in flight.
             # If cancellation arrived while it was blocked, discard its result
             # before quota state, retries, or downstream writes can observe it.

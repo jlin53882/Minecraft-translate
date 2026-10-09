@@ -70,6 +70,7 @@ def _stream_request(
     system_prompt: str,
     payload: dict,
     timeout: int,
+    reasoning_effort: str | None = None,
 ) -> requests.Response:
     response_schema = _build_translation_response_schema(payload)
     body = {
@@ -92,6 +93,8 @@ def _stream_request(
         "store": False,
         "stream": True,
     }
+    if reasoning_effort is not None:
+        body["reasoning"] = {"effort": reasoning_effort}
     response = requests.post(
         _RESPONSES_URL,
         headers={
@@ -252,30 +255,29 @@ def call_chatgpt_responses(
     payload: dict,
     timeout: int,
     meta_out: dict | None = None,
+    reasoning_effort: str | None = None,
 ) -> str:
     """Call Responses with the locally stored ChatGPT OAuth token and SSE stream."""
     token = get_chatgpt_access_token()
+    request_kwargs = {
+        "token": token,
+        "model_name": model_name,
+        "system_prompt": system_prompt,
+        "payload": payload,
+        "timeout": timeout,
+    }
+    if reasoning_effort is not None:
+        request_kwargs["reasoning_effort"] = reasoning_effort
     try:
-        response = _stream_request(
-            token=token,
-            model_name=model_name,
-            system_prompt=system_prompt,
-            payload=payload,
-            timeout=timeout,
-        )
+        response = _stream_request(**request_kwargs)
     except requests.RequestException as exc:
         raise ChatGPTAPIError("network_error", redact_text(exc)) from exc
     if response.status_code == 401:
         response.close()
         token = get_chatgpt_access_token(force_refresh=True)
+        request_kwargs["token"] = token
         try:
-            response = _stream_request(
-                token=token,
-                model_name=model_name,
-                system_prompt=system_prompt,
-                payload=payload,
-                timeout=timeout,
-            )
+            response = _stream_request(**request_kwargs)
         except requests.RequestException as exc:
             raise ChatGPTAPIError("network_error", redact_text(exc)) from exc
     if not response.ok:

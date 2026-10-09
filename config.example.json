@@ -41,6 +41,7 @@
     "lm_translator": {
         "provider": "gemini",
         "chatgpt_model": "",
+        "chatgpt_model_settings": {},
         "keys": [],
         "models": {
             "gemini-3.5-flash-lite": {

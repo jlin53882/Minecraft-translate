@@ -191,6 +191,7 @@ LAYOUT: dict[str, tuple[Card, ...]] = {
                 F("lm_translator.provider"),
                 Custom("keys"),
                 F("lm_translator.chatgpt_model"),
+                Custom("chatgpt_model_settings"),
             ),
         ),
         Card(C_MODELS, (Custom("models"),)),

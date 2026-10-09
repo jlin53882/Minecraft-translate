@@ -303,6 +303,12 @@ SETTINGS: tuple[Setting, ...] = (
         timing_note="下次翻譯請求讀取；進行中的請求維持原模型。",
     ),
     Setting(
+        "lm_translator.chatgpt_model_settings",
+        "none",
+        default={},
+        reason="由 ChatGPT 模型設定控制項管理各模型的輸入預算與思考強度。",
+    ),
+    Setting(
         "lm_translator.keys",
         "custom",
         "API 金鑰",
@@ -706,7 +712,7 @@ SETTINGS: tuple[Setting, ...] = (
         "單批輸入預算（Token）",
         "batch_limits",
         C_BATCH,
-        "控制每批翻譯內容的預估輸入 Token 數。請依所選模型的 Context Window 調整，並為系統指示與輸出預留空間；此值不是模型本身的 Context 上限。",
+        "控制每批翻譯內容的預估輸入 Token 數。請依模型的 Context Window 調整，並為系統指示與輸出預留空間；此值不是模型本身的 Context 上限。ChatGPT 可在 API & 模型設定依各模型覆寫。",
         default=60000,
         blank="zero",
         timing="next_batch",

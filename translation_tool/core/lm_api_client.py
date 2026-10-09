@@ -178,6 +178,7 @@ def call_gemini_requests(
     temperature: float,
     max_output_tokens: int | None = None,
     meta_out: dict | None = None,
+    reasoning_effort: str | None = None,
 ) -> str:
     """以同步 requests 方式呼叫 Gemini generateContent API，並回傳純文字回應。
 
@@ -198,6 +199,7 @@ def call_gemini_requests(
             payload=payload,
             timeout=int(lm_cfg.get("rate_limit", {}).get("timeout", 600)),
             meta_out=meta_out,
+            reasoning_effort=reasoning_effort,
         )
     if provider != "gemini":
         raise RuntimeError(f"不支援的翻譯服務供應商：{provider}")
