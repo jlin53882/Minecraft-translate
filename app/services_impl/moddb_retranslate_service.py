@@ -17,6 +17,7 @@ from app.services_impl.moddb_service import (
     open_database,
     warm_stats_quietly,
 )
+from app.services_impl.moddb_source_service import source_label
 from app.services_impl.moddb_translate_service import (
     TranslateOptions,
     build_items,
@@ -27,10 +28,7 @@ from app.services_impl.pipelines._pipeline_logging import (
     mirror_session_log,
 )
 from app.tasks.task_session import add_log_unmirrored
-from app.views.moddb.formatting import (
-    source_label,
-    token_issues,
-)
+from app.views.moddb.formatting import token_issues
 from translation_tool.core.lm_batch_budget import (
     profile_for_cache_type,
     select_batch_size,
@@ -102,7 +100,7 @@ class SameSourceAIRepairReport:
     skipped_changed: int = 0
     failed: int = 0
     cache_failed: int = 0
-    remaining: int = 0
+    remaining: int | None = None
     batches: int = 0
     elapsed_sec: float = 0.0
     status: str = "DONE"

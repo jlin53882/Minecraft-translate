@@ -2,6 +2,7 @@
 
 from translation_tool.translation_db.models import (
     AITranslationReplaceResult,
+    EffectiveSourceStat,
     EntryDetail,
     EntryRow,
     Impact,
@@ -38,6 +39,7 @@ __all__ = [
     "SOURCE_NAMES",
     "AITranslationReplaceResult",
     "DbSettings",
+    "EffectiveSourceStat",
     "EntryDetail",
     "EntryRow",
     "Impact",

@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from app.services_impl.moddb_service import current_settings
+from app.services_impl.moddb_source_service import MANUAL_REVIEW_LABELS
 from app.ui import kit
 
 ALL_SOURCES = "__all__"
@@ -47,3 +48,21 @@ class SourceFilter:
         """目前選的來源代碼；全部來源為 None。"""
         value = self.dropdown.value
         return None if value in (None, "", ALL_SOURCES) else int(value)
+
+
+class ReviewStatusFilter:
+    """Separate effective-source filtering from manual review-state filtering."""
+
+    def __init__(self, on_change: Callable[[], None]):
+        self.dropdown = kit.dropdown(
+            label="人工審核狀態",
+            dense=True,
+            width=190,
+            value="__all__",
+            options=[],
+            on_select=lambda _e: on_change(),
+        )
+        kit.set_dropdown_options(
+            self.dropdown,
+            [("__all__", "全部狀態"), *MANUAL_REVIEW_LABELS.items()],
+        )

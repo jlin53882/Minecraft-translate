@@ -13,11 +13,15 @@ import sqlite3
 import flet as ft
 
 from app.services_impl.moddb_service import (
-    SRC_MANUAL,
     EntryDetail,
     EntryRow,
     TranslationDB,
     current_settings,
+)
+from app.services_impl.moddb_source_service import (
+    source_catalog_for,
+    source_label,
+    source_tone,
 )
 from app.ui import design, kit
 from app.ui.design import C
@@ -31,14 +35,11 @@ from app.views.moddb.formatting import (
     impact_text,
     kind_label,
     shorten,
-    source_label,
-    source_tone,
     token_issues,
     whitespace_note,
 )
-from app.views.moddb.source_filter import SourceFilter
+from app.views.moddb.source_filter import ReviewStatusFilter, SourceFilter
 from app.views.moddb.suggestions import build_suggestions
-from translation_tool.translation_db.source_catalog import DEFAULT_SOURCE_CATALOG
 from translation_tool.utils.log_unit import (
     log_debug,
     log_exception,
@@ -49,6 +50,7 @@ from translation_tool.utils.log_unit import (
 PAGE_SIZE = 50
 ALL_MODS = "全部模組"
 ALL_KINDS = "全部類型"
+ALL_REVIEW_STATES = "__all__"
 ACTOR = "使用者"
 NO_SOURCE_TEXT = "（原文未知：之後掃描同版本的 jar，會自動補上原文）"
 
@@ -107,6 +109,7 @@ class EntriesPanel(ft.Column):
             label="類型", dense=True, width=160, on_select=self._on_kind
         )
         self.source_filter = SourceFilter(self._on_source)
+        self.review_filter = ReviewStatusFilter(self._on_review_status).dropdown
         self.search = kit.text_field(
             "搜尋", hint="原文、譯文或鍵值", expand=True, on_submit=self._on_search
         )
@@ -134,7 +137,7 @@ class EntriesPanel(ft.Column):
             border_radius=8,
             visible=False,
         )
-        # 狀態切換項目變多（含「翻譯與原文相同」），獨立一列才不會在視窗較窄時被裁掉
+        # 分類狀態與人工審核狀態分開呈現，窄視窗可橫向捲動。
         self.filter_card = kit.section_card(
             None,
             ft.Column(
@@ -150,7 +153,11 @@ class EntriesPanel(ft.Column):
                         spacing=12,
                         vertical_alignment=ft.CrossAxisAlignment.CENTER,
                     ),
-                    ft.Row([self.state_seg], scroll=ft.ScrollMode.AUTO),
+                    ft.Row(
+                        [self.state_seg, self.review_filter],
+                        spacing=10,
+                        scroll=ft.ScrollMode.AUTO,
+                    ),
                 ],
                 spacing=10,
             ),
@@ -211,7 +218,7 @@ class EntriesPanel(ft.Column):
         # 預設值取自設定 translation_db.sync_manual；頁面上的開關是這一頁的個別覆寫
         self.sync_row = kit.SwitchRow(
             "同步其他版本",
-            "原文相同的版本一併取代（可還原）",
+            "儲存會取代相同原文版本；審核只同步目前顯示相同譯文者（可還原）",
             current_settings().sync_manual,
             on_change=self._on_sync_change,
             divider=False,
@@ -248,7 +255,7 @@ class EntriesPanel(ft.Column):
             icon=ft.Icons.VERIFIED_OUTLINED,
             size="sm",
             on_click=self._confirm,
-            tooltip="把目前的譯文確認為人工校對：優先於其他來源，並同步原文相同的版本",
+            tooltip="確認目前譯文為人工-已審核；同步時只審核目前顯示相同譯文的版本",
         )
         self.save_btn = kit.button(
             "儲存", "primary", icon=ft.Icons.CHECK, on_click=self._save, disabled=True
@@ -399,6 +406,11 @@ class EntriesPanel(ft.Column):
                 state=self.state,
                 query=self.query,
                 source=self.source_filter.code,
+                review_status=(
+                    None
+                    if self.review_filter.value in (None, "", ALL_REVIEW_STATES)
+                    else str(self.review_filter.value)
+                ),
                 entry_ids=self.entry_ids,
                 limit=PAGE_SIZE,
                 offset=(page - 1) * PAGE_SIZE,
@@ -460,6 +472,8 @@ class EntriesPanel(ft.Column):
 
     def _row_tile(self, row: EntryRow) -> ft.Control:
         tone = design.tone(STATE_TONES[row.state])
+        db = self.db()
+        catalog = source_catalog_for(db)
         return ft.Container(
             data=row.id,
             on_click=lambda _e, i=row.id: self.select(i),
@@ -484,10 +498,32 @@ class EntriesPanel(ft.Column):
                                 weight=ft.FontWeight.W_500,
                                 color=C.TEXT if row.en_us else C.DIM,
                             ),
-                            ft.Text(
-                                shorten(row.zh_tw, 48) if row.zh_tw else "（未翻譯）",
-                                size=12,
-                                color=C.MUTED,
+                            ft.Row(
+                                [
+                                    ft.Text(
+                                        shorten(row.zh_tw, 48)
+                                        if row.zh_tw
+                                        else "（未翻譯）",
+                                        size=12,
+                                        color=C.MUTED,
+                                        expand=True,
+                                    ),
+                                    *(
+                                        [
+                                            kit.chip(
+                                                source_label(
+                                                    row.source,
+                                                    catalog,
+                                                    row.review_status,
+                                                ),
+                                                source_tone(row.source),
+                                            )
+                                        ]
+                                        if row.source is not None
+                                        else []
+                                    ),
+                                ],
+                                spacing=6,
                             ),
                             kit.mono_text(shorten(row.key, 46), size=10.5, color=C.DIM),
                         ],
@@ -533,9 +569,11 @@ class EntriesPanel(ft.Column):
                 "已預填本次機翻的 AI 譯文（特殊字元與原文不一致，尚未寫入）"
             )
         db = self.db()
-        catalog = db.source_catalog if db is not None else DEFAULT_SOURCE_CATALOG
+        catalog = source_catalog_for(db)
         self.source_chip.content = kit.chip(
-            source_label(entry.source, catalog) if entry.zh_tw else "尚無譯文",
+            source_label(entry.source, catalog, entry.review_status)
+            if entry.zh_tw
+            else "尚無譯文",
             source_tone(entry.source),
         )
         self.meta_col.controls = [
@@ -588,11 +626,7 @@ class EntriesPanel(ft.Column):
             self.detail,
             self.sug_tab,
             self._apply_suggestion,
-            catalog=(
-                self.db().source_catalog
-                if self.db() is not None
-                else DEFAULT_SOURCE_CATALOG
-            ),
+            catalog=source_catalog_for(self.db()),
         )
 
     def _render_history(self) -> None:
@@ -600,11 +634,12 @@ class EntriesPanel(ft.Column):
         if detail is None:
             return
         db = self.db()
-        catalog = db.source_catalog if db is not None else DEFAULT_SOURCE_CATALOG
+        catalog = source_catalog_for(db)
         out: list[ft.Control] = []
         for h in detail.history:
             action = {
-                "manual": "手動更新",
+                "manual": "手動儲存（未審核）",
+                "review": "人工審核",
                 "revert": "還原",
                 "ai_retranslate": "AI 重翻",
             }.get(h.action, "其他異動")
@@ -631,7 +666,7 @@ class EntriesPanel(ft.Column):
             ]
             if h.note:
                 controls.append(ft.Text(h.note, size=11, color=C.DIM))
-            if h.action == "manual":
+            if h.action in ("manual", "review"):
                 controls.append(
                     kit.button(
                         "還原這次更新",
@@ -648,7 +683,8 @@ class EntriesPanel(ft.Column):
                     ft.Row(
                         [
                             kit.chip(
-                                source_label(t.source, catalog), source_tone(t.source)
+                                source_label(t.source, catalog, t.review_status),
+                                source_tone(t.source),
                             ),
                             ft.Text(
                                 shorten(t.zh_tw, 28), size=12, color=C.TEXT, expand=True
@@ -680,6 +716,10 @@ class EntriesPanel(ft.Column):
         self._safe_update()
 
     def _on_source(self) -> None:
+        self._load_list()
+        self._safe_update()
+
+    def _on_review_status(self) -> None:
         self._load_list()
         self._safe_update()
 
@@ -775,9 +815,9 @@ class EntriesPanel(ft.Column):
         text = self.pending_text()
         changed = bool(entry and db and text and text != entry.zh_tw)
         self.save_btn.disabled = not changed
-        # 沒改動、但目前譯文不是人工來源：可以「審核」，把它確認為人工校對（同樣會同步相同原文的版本）
+        # 沒改文字且尚未確認過的人工譯文也可審核；核心層會以目前文字做 CAS。
         self.confirm_btn.visible = bool(
-            entry and entry.zh_tw and entry.source != SRC_MANUAL and not changed
+            entry and entry.zh_tw and entry.review_status != "reviewed" and not changed
         )
         if not changed:
             self.impact_box.visible = False
@@ -829,10 +869,51 @@ class EntriesPanel(ft.Column):
         self._safe_update()
 
     def _confirm(self, _e=None) -> None:
-        """審核：不改文字，直接把目前譯文寫成人工來源。"""
-        if self.selected is not None and self.selected.zh_tw:
-            self.tw_field.value = self.selected.zh_tw
-            self._save()
+        """審核目前顯示的譯文，不依賴畫面狀態直接寫入核心契約。"""
+        entry, db = self.selected, self.db()
+        if entry is None or db is None or not entry.zh_tw:
+            return
+        try:
+            done = db.review_manual(
+                entry.id,
+                expected_zh_tw=entry.zh_tw,
+                expected_source=entry.source,
+                expected_review_status=entry.review_status,
+                actor=ACTOR,
+                propagate=self.sync_row.value,
+            )
+        except ValueError as exc:
+            log_warning(
+                f"Mod 資料庫審核被拒絕：{entry.mc_version} {entry.mod_id} {entry.key}（{exc!r}）"
+            )
+            show_snack(self._page, str(exc), C.GOLD)
+            self._load_list(page=self.pager.current_page, keep_scroll=True)
+            self._safe_update()
+            return
+        except sqlite3.Error as exc:
+            log_exception(
+                f"Mod 資料庫審核失敗：{entry.mc_version} {entry.mod_id} {entry.key}"
+            )
+            show_snack(
+                self._page, f"審核失敗（資料庫錯誤：{exc}）；詳情見後台 log", C.RED
+            )
+            return
+        others = [change.mc_version for change in done if not change.is_self]
+        log_info(
+            f"Mod 資料庫人工審核：{entry.mc_version} {entry.mod_id} {entry.key}"
+            f"（同步 {len(others)} 個版本：{'、'.join(others) or '無'}）"
+        )
+        message = (
+            f"已審核，並同步 {len(others)} 個版本：{'、'.join(others)}"
+            if others
+            else "已標記為人工-已審核"
+        )
+        self._load_list(page=self.pager.current_page, keep_scroll=True)
+        self.saved_text.value = message
+        show_snack(self._page, message, C.EM, text_color=C.ON_EM)
+        if self._on_changed:
+            self._on_changed()
+        self._safe_update()
 
     def _revert(self, history_id: int) -> None:
         db = self.db()

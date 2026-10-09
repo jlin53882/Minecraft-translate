@@ -22,6 +22,7 @@ class EntryRow:
     source: int | None  # 生效譯文的來源；沒有則 None
     checker: str
     diff: bool  # 其他版本相同內容的生效譯文與此不同
+    review_status: str | None = None
 
     @property
     def state(self) -> str:
@@ -62,6 +63,7 @@ class TranslationRow:
     zh_cn: str
     checker: str
     updated_at: str
+    review_status: str | None = None
 
 
 @dataclass(frozen=True)
@@ -74,6 +76,7 @@ class SameKeyRow:
     same_text: bool  # 原文與目前條目相同（手動儲存時會被一併取代）
     zh_tw: str
     source: int | None
+    review_status: str | None = None
 
 
 @dataclass(frozen=True)
@@ -86,6 +89,7 @@ class SameTextRow:
     key: str
     zh_tw: str
     source: int | None
+    review_status: str | None = None
 
 
 @dataclass(frozen=True)
@@ -98,6 +102,10 @@ class HistoryRow:
     old_zh_tw: str
     new_zh_tw: str
     note: str
+    prev_checker: str | None = None
+    prev_review_status: str | None = None
+    new_checker: str | None = None
+    new_review_status: str | None = None
 
 
 @dataclass
@@ -187,3 +195,13 @@ class VersionStat:
     converted: int  # 簡中轉繁
     ai: int
     untranslated: int
+
+
+@dataclass(frozen=True)
+class EffectiveSourceStat:
+    """One effective-source bucket for a game version."""
+
+    mc_version: str
+    source: int | None
+    review_status: str | None
+    count: int

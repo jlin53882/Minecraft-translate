@@ -72,6 +72,7 @@ class TranslatePanel(ft.Column):
 
         self._build_scope_card()
         self._build_run_card()
+        self._bind_kpi_titles()
         self._build_repair_card()
         self.controls = [self.scope_card, self.run_card, self.repair_card]
 
@@ -226,6 +227,16 @@ class TranslatePanel(ft.Column):
             icon=ft.Icons.AUTO_AWESOME,
             tone="em",
         )
+
+    def _bind_kpi_titles(self) -> None:
+        self._kpi_titles = {
+            "first": self.stat_reused.content.controls[0].controls[1],
+            "second": self.stat_written.content.controls[0].controls[1],
+            "third": self.stat_flagged.content.controls[0].controls[1],
+            "fourth": self.stat_remaining.content.controls[0].controls[1],
+        }
+        self._kpi_mode = "normal"
+        self._set_kpi_mode("normal")
 
     def _build_repair_card(self) -> None:
         self.repair_preview_btn = kit.button(
@@ -394,7 +405,7 @@ class TranslatePanel(ft.Column):
         self.progress_bar.value = 0
         self.live_text.value = ""
         self.log_view.clear()
-        self._reset_stats()
+        self._reset_stats(mode="normal")
         self._safe_update()
         launched = launch_page_operation(
             self._page,
@@ -442,6 +453,7 @@ class TranslatePanel(ft.Column):
             )
             self._safe_update()
             return
+        self._reset_stats(mode="repair")
         options = self.build_options()
         session = tag_session(
             TaskSession(), "Mod 資料庫舊 AI 重翻", "moddb", page=self._page
@@ -537,13 +549,15 @@ class TranslatePanel(ft.Column):
         self.progress_bar.value = float(snap.get("progress", 0) or 0)
         self.log_view.sync_entries(snap.get("logs", []) or [], update=False)
         status = (snap.get("status") or "").upper()
-        live = (snap.get("summary") or {}).get("live")
+        summary = snap.get("summary") or {}
+        if summary:
+            self._apply_summary(summary, final=status in ("DONE", "ERROR"))
+        live = summary.get("live")
         if live and status not in ("DONE", "ERROR"):
             self.live_text.value = format_live(
                 tick_live(live)
             )  # 已用時間每次輪詢都更新
         if status in ("DONE", "ERROR"):
-            summary = snap.get("summary") or {}
             if summary.get("batches"):
                 self.live_text.value = (
                     f"共送出 {summary['batches']:,} 批，"
@@ -565,7 +579,6 @@ class TranslatePanel(ft.Column):
                 self._set_status(f"未完成（{summary.get('status')}）", "gold")
             else:
                 self._set_status("機翻完成", "em")
-            self._apply_summary(summary)
             self._running = False
             self._set_running(False)
             if self._on_finished and not summary.get("dry_run"):
@@ -573,22 +586,45 @@ class TranslatePanel(ft.Column):
             self._refresh_counts()
         self._safe_update()
 
-    def _apply_summary(self, s: dict) -> None:
+    def _apply_summary(self, s: dict, *, final: bool = True) -> None:
         if not s:
             return
         if s.get("operation") == "retranslate_same_source_ai":
+            self._set_kpi_mode("repair")
+            self.stat_reused.set_value(
+                format_count(s.get("candidates")), delta="本次預覽選中的候選"
+            )
+            self.stat_written.set_value(
+                format_count(s.get("updated")), delta="compare-and-set 成功更新"
+            )
+            self.stat_flagged.set_value(
+                format_count(s.get("unchanged")), delta="格式檢查未通過不計入此數"
+            )
+            self.stat_remaining.set_value(
+                format_count(s.get("remaining") if final else None)
+            )
+            status = str(s.get("status") or "UNKNOWN").upper()
+            progress = "重翻完成" if final and status == "DONE" else "目前部分進度"
+            state_text = (
+                ""
+                if status == "DONE" and final
+                else f"；狀態 {status}，數字為已提交／已確認的部分結果"
+            )
             self.repair_summary_text.value = (
-                f"候選 {s.get('candidates', 0)}；更新 {s.get('updated', 0)}；"
+                f"{progress}：候選 {s.get('candidates', 0)}；更新 {s.get('updated', 0)}；"
                 f"仍相同 {s.get('unchanged', 0)}；格式檢查未通過 {s.get('flagged', 0)}；"
                 f"資料已變動跳過 {s.get('skipped_changed', 0)}；"
                 f"失敗 {s.get('failed', 0)}；範圍內仍符合條件 {s.get('remaining', 0)}"
+                f"{state_text}"
                 + (
                     f"；快取未同步 {s.get('cache_failed', 0)} 筆"
                     if s.get("cache_failed")
                     else ""
                 )
+                + (f"；最後錯誤：{s['last_error']}" if s.get("last_error") else "")
             )
             return
+        self._set_kpi_mode("normal")
         if s.get("dry_run"):
             self.stat_remaining.set_value(
                 format_count(s.get("remaining")),
@@ -608,11 +644,35 @@ class TranslatePanel(ft.Column):
         self.view_flagged_btn.visible = bool(self._flagged)
         self.stat_remaining.set_value(format_count(s.get("remaining")))
 
-    def _reset_stats(self) -> None:
+    def _set_kpi_mode(self, mode: str) -> None:
+        self._kpi_mode = mode
+        labels = (
+            ("本次候選", "成功更新 AI 譯文", "重翻後仍相同", "範圍內仍符合修復條件")
+            if mode == "repair"
+            else (
+                "沿用其他版本",
+                "已寫入（AI 機翻）",
+                "特殊字元不一致",
+                "此範圍仍未翻譯",
+            )
+        )
+        for key, label in zip(
+            ("first", "second", "third", "fourth"), labels, strict=True
+        ):
+            self._kpi_titles[key].value = label
+        self._kpi_titles["third"].tooltip = (
+            "只計入 AI 有效回傳且內容與舊譯文完全相同的筆數；格式不符、失敗與資料競態跳過各自另計。"
+            if mode == "repair"
+            else None
+        )
+        self.view_flagged_btn.visible = mode == "normal" and bool(self._flagged)
+
+    def _reset_stats(self, *, mode: str = "normal") -> None:
         for card in self._stat_cards:
             card.set_value("—", delta="")
         self._flagged = {}
         self.view_flagged_btn.visible = False
+        self._set_kpi_mode(mode)
 
     def _view_flagged(self) -> None:
         """跳到條目校對，只看這次特殊字元不一致、沒寫入的條目。"""

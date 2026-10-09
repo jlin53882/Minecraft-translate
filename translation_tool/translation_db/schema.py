@@ -16,9 +16,10 @@ Mod 翻譯資料庫（SQLite）的資料表結構、來源代碼與連線設定�
 from __future__ import annotations
 
 import sqlite3
+import time
 from pathlib import Path
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 KIND_LANG = "lang"
 KIND_PATCHOULI = "patchouli"
@@ -99,6 +100,7 @@ CREATE TABLE IF NOT EXISTS translation (
     zh_tw      TEXT NOT NULL DEFAULT '',
     zh_cn      TEXT NOT NULL DEFAULT '',
     checker    TEXT NOT NULL DEFAULT '',
+    review_status TEXT,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE (entry_id, source)
 );
@@ -107,7 +109,8 @@ CREATE TABLE IF NOT EXISTS effective (
     entry_id INTEGER PRIMARY KEY REFERENCES entry (id) ON DELETE CASCADE,
     zh_tw    TEXT NOT NULL,
     source   INTEGER NOT NULL,
-    checker  TEXT NOT NULL DEFAULT ''
+    checker  TEXT NOT NULL DEFAULT '',
+    review_status TEXT
 );
 
 CREATE TABLE IF NOT EXISTS history (
@@ -120,6 +123,10 @@ CREATE TABLE IF NOT EXISTS history (
     old_zh_tw   TEXT NOT NULL DEFAULT '',
     new_zh_tw   TEXT NOT NULL DEFAULT '',
     prev_manual TEXT,
+    prev_checker TEXT,
+    prev_review_status TEXT,
+    new_checker TEXT,
+    new_review_status TEXT,
     note        TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_history_entry ON history (entry_id);
@@ -181,13 +188,96 @@ def connect(path: str | Path, *, readonly: bool = False) -> sqlite3.Connection:
 
 
 def init_schema(conn: sqlite3.Connection) -> None:
-    """建立資料表（已存在則略過）並記錄 schema 版本。"""
+    """建立資料表，遞增 migration 先備份並在單一交易中套用。"""
     conn.executescript(_DDL)
+    row = conn.execute("SELECT value FROM meta WHERE key='schema_version'").fetchone()
+    if row is None:
+        conn.execute(
+            "INSERT INTO meta (key, value) VALUES ('schema_version', ?)",
+            (str(SCHEMA_VERSION),),
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_effective_source_review "
+            "ON effective (source, review_status)"
+        )
+        conn.commit()
+        return
+    version = stored_schema_version(conn)
+    while version < SCHEMA_VERSION:
+        next_version = version + 1
+        if next_version == 2:
+            _backup_before_review_migration(conn)
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            if next_version == 2:
+                _migrate_review_state_v2(conn)
+            conn.execute(
+                "UPDATE meta SET value=? WHERE key='schema_version'",
+                (str(next_version),),
+            )
+        except BaseException:
+            conn.rollback()
+            raise
+        else:
+            conn.commit()
+        version = next_version
     conn.execute(
-        "INSERT OR IGNORE INTO meta (key, value) VALUES ('schema_version', ?)",
-        (str(SCHEMA_VERSION),),
+        "CREATE INDEX IF NOT EXISTS idx_effective_source_review "
+        "ON effective (source, review_status)"
     )
     conn.commit()
+
+
+def _backup_before_review_migration(conn: sqlite3.Connection) -> Path | None:
+    """Write a consistent side-by-side SQLite backup before the v1→v2 change."""
+    main = next(
+        (row[2] for row in conn.execute("PRAGMA database_list") if row[1] == "main"),
+        "",
+    )
+    if not main:
+        return None
+    source_path = Path(main)
+    backup_path = source_path.with_name(
+        f"{source_path.name}.pre-schema-v2-{time.time_ns()}.bak"
+    )
+    target = sqlite3.connect(backup_path)
+    try:
+        conn.backup(target)
+    except BaseException:
+        target.close()
+        backup_path.unlink(missing_ok=True)
+        raise
+    target.close()
+    return backup_path
+
+
+def _migrate_review_state_v2(conn: sqlite3.Connection) -> None:
+    """Add explicit review state while preserving all v1 manual provenance."""
+    for table, column in (
+        ("translation", "review_status"),
+        ("effective", "review_status"),
+        ("history", "prev_checker"),
+        ("history", "prev_review_status"),
+        ("history", "new_checker"),
+        ("history", "new_review_status"),
+    ):
+        columns = {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
+        if column not in columns:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} TEXT")
+    conn.execute(
+        "UPDATE translation SET review_status='legacy_unknown' WHERE source=?",
+        (SRC_MANUAL,),
+    )
+    conn.execute(
+        "UPDATE effective SET review_status=(SELECT review_status FROM translation "
+        "WHERE translation.entry_id=effective.entry_id "
+        "AND translation.source=effective.source)"
+    )
+    conn.execute("DELETE FROM stat_cache")
+    conn.execute(
+        "INSERT INTO meta (key, value) VALUES ('data_gen', '1') "
+        "ON CONFLICT(key) DO UPDATE SET value=CAST(value AS INTEGER)+1"
+    )
 
 
 DB_EMPTY = "empty"  # 沒有任何資料表（新檔案或 0 位元組的檔案）

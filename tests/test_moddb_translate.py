@@ -239,8 +239,10 @@ def test_list_entries_filters_by_effective_source_after_manual_review(db_path):
     assert ai_total == 7 and len(ai_rows) == 7
     target = next(row for row in ai_rows if row.key.endswith("00"))
 
-    # 走正式的審核等價 API：不改文字，只新增人工來源並成為 effective。
-    db.save_manual(target.id, "Minecraft", actor="測試審核", propagate=False)
+    # 明確審核會新增已審核人工列，並保留原 AI 譯文。
+    db.review_manual(
+        target.id, expected_zh_tw="Minecraft", actor="測試審核", propagate=False
+    )
 
     ai_rows, ai_total = db.list_entries("1.21.1", source=SRC_AI)
     manual_rows, manual_total = db.list_entries("1.21.1", source=SRC_MANUAL)
@@ -324,7 +326,12 @@ def test_entries_panel_source_filter_tracks_reviewed_effective_source(db_path):
     panel._on_source()
     assert panel.total == 1
 
-    db.save_manual(entry.id, "Minecraft", actor="測試審核", propagate=False)
+    db.review_manual(
+        entry.id,
+        expected_zh_tw="Minecraft",
+        actor="測試審核",
+        propagate=False,
+    )
     panel._on_source()
     assert panel.total == 0
 
@@ -334,6 +341,40 @@ def test_entries_panel_source_filter_tracks_reviewed_effective_source(db_path):
     panel.select(entry.id)
     shown_sources = "\n".join(texts_of(panel.history_col))
     assert "AI 機翻" in shown_sources and "人工" in shown_sources
+    db.close()
+
+
+def test_entries_panel_save_and_review_use_separate_manual_states(db_path):
+    from app.views.moddb.entries_panel import EntriesPanel
+    from tests.test_moddb_view import texts_of
+
+    db = TranslationDB(db_path)
+    db.ingest(
+        "1.21.1",
+        [
+            ScanItem(
+                KIND_LANG, "foo", "item.review", "Minecraft", "Minecraft", source=SRC_AI
+            )
+        ],
+    )
+    panel = EntriesPanel(mock_page(), lambda: db)
+    panel.refresh()
+    panel.tw_field.value = "人工修改"
+    panel._update_impact()
+    panel._save()
+    detail = db.entry_detail(panel.selected.id)
+    manual = next(row for row in detail.translations if row.source == SRC_MANUAL)
+    assert manual.review_status == "unreviewed" and manual.checker == ""
+    assert "人工-未審核" in "\n".join(texts_of(panel))
+    assert panel.confirm_btn.visible
+
+    panel._confirm()
+    detail = db.entry_detail(panel.selected.id)
+    manual = next(row for row in detail.translations if row.source == SRC_MANUAL)
+    assert manual.review_status == "reviewed"
+    assert detail.history[0].action == "review"
+    assert "人工-已審核" in "\n".join(texts_of(panel))
+    assert panel.confirm_btn.visible is False
     db.close()
 
 
@@ -505,6 +546,81 @@ def test_overview_stat_cards_jump_to_filtered_entries(db_path):
     panel.diff_btn.on_click(None)
     panel.changed_btn.on_click(None)
     assert jumps == [("diff", None, None), ("changed", None, None)]
+    db.close()
+
+
+def test_overview_uses_dynamic_effective_source_catalog_and_priority(db_path):
+    import sqlite3
+
+    from app.views.moddb.overview_panel import OverviewPanel
+    from tests.test_moddb_view import texts_of
+
+    db = TranslationDB(db_path)
+    db.ingest(
+        "1.21.1",
+        [
+            ScanItem(
+                KIND_LANG, "foo", "item.subtitle", "Subtitle", "字幕譯文", source=3
+            ),
+            ScanItem(KIND_LANG, "foo", "item.custom", "Custom", "自訂譯文", source=100),
+            ScanItem(KIND_LANG, "foo", "item.jar", "Jar", "內建譯文", source=1),
+            ScanItem(KIND_LANG, "foo", "item.manual.unreviewed", "Manual A", "舊譯文"),
+            ScanItem(KIND_LANG, "foo", "item.manual.reviewed", "Manual B", "舊譯文"),
+            ScanItem(KIND_LANG, "foo", "item.manual.legacy", "Manual C", "舊譯文"),
+            ScanItem(KIND_LANG, "foo", "item.untranslated", "Empty", ""),
+        ],
+    )
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO meta(key, value) VALUES ('custom_sources', ?)",
+            (json.dumps({"釘宮翻譯組": 100}, ensure_ascii=False),),
+        )
+    db.close()
+    db = TranslationDB(db_path)
+    for key, text in (
+        ("item.manual.unreviewed", "人工待審核"),
+        ("item.manual.reviewed", "人工已審核"),
+        ("item.manual.legacy", "歷史人工"),
+    ):
+        entry = next(row for row in db.list_entries("1.21.1")[0] if row.key == key)
+        db.save_manual(entry.id, text, propagate=False)
+        if key == "item.manual.reviewed":
+            db.review_manual(entry.id, expected_zh_tw=text, propagate=False)
+        elif key == "item.manual.legacy":
+            db._conn.execute(
+                "UPDATE translation SET review_status='legacy_unknown' "
+                "WHERE entry_id=? AND source=?",
+                (entry.id, SRC_MANUAL),
+            )
+            db._conn.execute(
+                "UPDATE effective SET review_status='legacy_unknown' WHERE entry_id=?",
+                (entry.id,),
+            )
+            db._conn.commit()
+
+    db.set_priority((100, SRC_MANUAL, 1, 3))
+    panel = OverviewPanel(mock_page(), lambda: db)
+    panel.refresh()
+    labels = texts_of(panel.legend)
+    assert "釘宮翻譯組" in labels
+    assert "釘宮翻譯組（自訂 #100）" in labels
+    assert "人工-未審核" in labels
+    assert "人工-已審核" in labels
+    assert "人工（歷史狀態待確認）" in labels
+    assert "未翻譯" in labels
+    assert labels.index("釘宮翻譯組（自訂 #100）") < labels.index("模組自帶繁中")
+
+    bar = panel.versions_col.controls[0].controls[1].content
+    assert (
+        sum(segment.expand for segment in bar.controls) == db.version_stats()[0].total
+    )
+    assert any("未翻譯：1" in segment.tooltip for segment in bar.controls)
+
+    db.set_priority((3, SRC_MANUAL, 1, 100))
+    panel.refresh()
+    labels = texts_of(panel.legend)
+    assert labels.index("釘宮翻譯組") < labels.index("人工-未審核")
+    assert labels.index("人工（歷史狀態待確認）") < labels.index("模組自帶繁中")
     db.close()
 
 
@@ -1034,8 +1150,8 @@ def test_legacy_source_name_collision_keeps_builtin_and_custom_rows_distinct(
 
 def test_custom_source_works_end_to_end(db_path, clean_custom_sources, monkeypatch):
     """自訂來源可寫入譯文、被篩選、顯示名稱，並算進進度條；ZIP 匯入選單也找得到。"""
+    from app.services_impl.moddb_source_service import source_label
     from app.views.moddb import entries_panel, scan_panel
-    from app.views.moddb.formatting import source_label
     from translation_tool.translation_db.settings import load_db_settings
 
     seed(db_path)
@@ -1637,6 +1753,112 @@ def test_flagged_entries_flow_from_translation_to_entries_review(db_path, monkey
     entries.show_flagged(list(flagged), flagged, "1.21.1")
     entries.show_filter("diff")
     assert entries.entry_ids is None and entries.drafts == {}
+
+
+def test_translate_panel_switches_kpis_between_normal_and_ai_repair_modes():
+    panel = translate_panel.TranslatePanel(mock_page(), lambda: None)
+
+    panel._apply_summary(
+        {
+            "reused": 3,
+            "written": 7,
+            "translated": 8,
+            "flagged": 1,
+            "remaining": 4,
+        }
+    )
+    assert [card.value_text.value for card in panel._stat_cards] == ["3", "7", "1", "4"]
+    assert panel._kpi_titles["second"].value == "已寫入（AI 機翻）"
+
+    panel._reset_stats(mode="repair")
+    assert [card.value_text.value for card in panel._stat_cards] == ["—"] * 4
+    assert panel._kpi_titles["first"].value == "本次候選"
+    assert panel._kpi_titles["third"].value == "重翻後仍相同"
+
+    partial = {
+        "operation": "retranslate_same_source_ai",
+        "candidates": 444,
+        "updated": 404,
+        "unchanged": 40,
+        "flagged": 2,
+        "skipped_changed": 3,
+        "failed": 1,
+        "cache_failed": 5,
+        "remaining": 40,
+        "status": "CANCELLED",
+        "last_error": "使用者取消",
+    }
+    panel._apply_summary(partial, final=False)
+    assert [card.value_text.value for card in panel._stat_cards] == [
+        "444",
+        "404",
+        "40",
+        "—",
+    ]
+    details = panel.repair_summary_text.value
+    assert all(
+        value in details
+        for value in (
+            "格式檢查未通過 2",
+            "資料已變動跳過 3",
+            "失敗 1",
+            "快取未同步 5",
+            "CANCELLED",
+        )
+    )
+
+    panel._apply_summary(partial, final=True)
+    assert panel.stat_remaining.value_text.value == "40"
+    assert "重翻完成" not in panel.repair_summary_text.value
+
+    panel._reset_stats(mode="normal")
+    assert panel._kpi_titles["first"].value == "沿用其他版本"
+    assert panel._kpi_titles["third"].value == "特殊字元不一致"
+
+
+def test_translate_panel_restores_partial_and_cancelled_repair_from_task_session():
+    panel = translate_panel.TranslatePanel(mock_page(), lambda: None)
+    session = TaskSession()
+    session.start()
+    panel.session = session
+    panel._running = True
+
+    session.set_summary(
+        {
+            "operation": "retranslate_same_source_ai",
+            "candidates": 8,
+            "updated": 3,
+            "unchanged": 2,
+            "flagged": 1,
+            "skipped_changed": 1,
+            "failed": 0,
+            "remaining": 5,
+            "status": "DONE",
+        }
+    )
+    panel.sync_from_session()
+    assert [card.value_text.value for card in panel._stat_cards] == ["8", "3", "2", "—"]
+    assert panel._running is True
+
+    session.request_cancel()
+    session.set_summary(
+        {
+            "operation": "retranslate_same_source_ai",
+            "candidates": 8,
+            "updated": 3,
+            "unchanged": 2,
+            "flagged": 1,
+            "skipped_changed": 1,
+            "failed": 0,
+            "remaining": 5,
+            "status": "CANCELLED",
+        }
+    )
+    session.finish()
+    panel.sync_from_session()
+    assert [card.value_text.value for card in panel._stat_cards] == ["8", "3", "2", "5"]
+    assert panel.status_chip.label.value == "已取消"
+    assert panel._running is False
 
 
 # ------------------------------------------------ 「翻譯與原文相同」（專有名詞等不需要翻譯）

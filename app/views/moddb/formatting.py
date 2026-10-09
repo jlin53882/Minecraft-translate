@@ -5,12 +5,6 @@ from __future__ import annotations
 import re
 from collections import Counter
 
-from app.services_impl.moddb_service import SRC_AI, SRC_JAR_CN, SRC_MANUAL
-from translation_tool.translation_db.source_catalog import (
-    DEFAULT_SOURCE_CATALOG,
-    SourceCatalog,
-)
-
 STATE_LABELS = {
     "all": "全部",
     "none": "未翻譯",
@@ -34,31 +28,6 @@ KIND_LABELS = {"lang": "語言檔", "patchouli": "Patchouli 手冊"}
 def kind_label(kind: str) -> str:
     """條目類型的顯示名稱；日後資料庫新增的類型沒登錄名稱時直接顯示代碼。"""
     return KIND_LABELS.get(kind, kind)
-
-
-def source_label(
-    source: int | None,
-    catalog: SourceCatalog = DEFAULT_SOURCE_CATALOG,
-    review_status: str | None = None,
-) -> str:
-    if source == SRC_MANUAL and review_status:
-        return {
-            "unreviewed": "人工-未審核",
-            "reviewed": "人工-已審核",
-            "legacy_unknown": "人工（歷史狀態待確認）",
-        }.get(review_status, catalog.label(source))
-    return catalog.label(source)
-
-
-def source_tone(source: int | None) -> str:
-    """譯文來源的色調：人工 = 紫、簡中轉繁 = 金、AI = 中性、其餘 = 藍。"""
-    if source == SRC_MANUAL:
-        return "ench"
-    if source == SRC_JAR_CN:
-        return "gold"
-    if source == SRC_AI or source is None:
-        return "neutral"
-    return "dia"
 
 
 def shorten(text: str, limit: int = 60) -> str:

@@ -190,6 +190,16 @@ def warm_stats_quietly(db: TranslationDB) -> None:
         logger.debug("統計預熱略過：%s", exc)
 
 
+def _reject_unknown_translation_source(session, source: int) -> None:
+    _log_both(
+        session,
+        f"[錯誤] 譯文來源代碼 {source} 不在目前資料庫的來源清單中，"
+        "請重新選擇「譯文來源標記」。",
+        "error",
+    )
+    session.set_error()
+
+
 def run_moddb_scan_service(
     folder: str,
     options: ScanOptions,
@@ -227,13 +237,7 @@ def run_moddb_scan_service(
             and options.translation_source
             not in current_settings().source_catalog.codes
         ):
-            _log_both(
-                session,
-                f"[錯誤] 譯文來源代碼 {options.translation_source} 不在目前資料庫的來源清單中，"
-                "請重新選擇「譯文來源標記」。",
-                "error",
-            )
-            session.set_error()
+            _reject_unknown_translation_source(session, options.translation_source)
             return
         _log_both(
             session,

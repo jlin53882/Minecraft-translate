@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import json
+import sqlite3
 import zipfile
 from pathlib import Path
 
@@ -282,6 +283,334 @@ def test_manual_save_rejects_empty(db):
     db.ingest("1.21.1", [item(tw="A")])
     with pytest.raises(ValueError):
         db.save_manual(db.list_entries("1.21.1")[0][0].id, "  ")
+
+
+def test_manual_save_review_transition_and_idempotence(db):
+    db.ingest("1.21.1", [item(tw="來源譯文")])
+    entry = db.list_entries("1.21.1")[0][0]
+
+    db.save_manual(entry.id, "人工修改", actor="editor", propagate=False)
+    detail = db.entry_detail(entry.id)
+    manual = next(row for row in detail.translations if row.source == SRC_MANUAL)
+    assert manual.review_status == "unreviewed" and manual.checker == ""
+    assert detail.entry.review_status == "unreviewed"
+
+    reviewed = db.review_manual(
+        entry.id, expected_zh_tw="人工修改", actor="reviewer", propagate=False
+    )
+    assert [row.entry_id for row in reviewed] == [entry.id]
+    detail = db.entry_detail(entry.id)
+    manual = next(row for row in detail.translations if row.source == SRC_MANUAL)
+    assert manual.review_status == "reviewed" and manual.checker == "reviewer"
+    assert detail.history[0].action == "review"
+
+    review_gen = db._data_gen()
+    assert not db.review_manual(
+        entry.id, expected_zh_tw="人工修改", actor="reviewer", propagate=False
+    )
+    assert len(db.entry_detail(entry.id).history) == 2
+    assert db._data_gen() == review_gen
+
+
+def test_manual_edit_demotes_review_and_same_text_save_keeps_review(db):
+    db.ingest("1.21.1", [item(tw="來源譯文")])
+    entry = db.list_entries("1.21.1")[0][0]
+    db.save_manual(entry.id, "人工修改", propagate=False)
+    db.review_manual(
+        entry.id, expected_zh_tw="人工修改", actor="reviewer", propagate=False
+    )
+
+    assert db.save_manual(entry.id, "人工修改", propagate=False) == []
+    assert db.entry_detail(entry.id).entry.review_status == "reviewed"
+    db.save_manual(entry.id, "再次修改", propagate=False)
+    detail = db.entry_detail(entry.id)
+    manual = next(row for row in detail.translations if row.source == SRC_MANUAL)
+    assert manual.review_status == "unreviewed" and manual.checker == ""
+    edit_history = detail.history[0]
+    assert edit_history.action == "manual"
+    assert db.revert(edit_history.id, whole_batch=False) == 1
+    restored = db.entry_detail(entry.id)
+    manual = next(row for row in restored.translations if row.source == SRC_MANUAL)
+    assert manual.review_status == "reviewed" and manual.checker == "reviewer"
+    assert manual.zh_tw == "人工修改"
+
+
+def test_review_manual_rejects_stale_text_and_revert_restores_review_state(db):
+    db.ingest("1.21.1", [item(tw="來源譯文")])
+    entry = db.list_entries("1.21.1")[0][0]
+    db.save_manual(entry.id, "人工修改", propagate=False)
+    with pytest.raises(ValueError, match="已變動"):
+        db.review_manual(entry.id, expected_zh_tw="過期譯文", propagate=False)
+
+    db.review_manual(
+        entry.id, expected_zh_tw="人工修改", actor="reviewer", propagate=False
+    )
+    review_history = db.entry_detail(entry.id).history[0]
+    assert review_history.action == "review"
+    assert db.revert(review_history.id, whole_batch=False) == 1
+    detail = db.entry_detail(entry.id)
+    manual = next(row for row in detail.translations if row.source == SRC_MANUAL)
+    assert manual.review_status == "unreviewed" and manual.checker == ""
+
+
+def test_review_manual_compare_and_set_rejects_source_changed_with_same_text(db):
+    db.ingest("1.21.1", [item(tw="相同譯文")])
+    entry = db.list_entries("1.21.1")[0][0]
+    db.write_back(
+        "1.21.1",
+        [WriteBackItem(KIND_LANG, "foo", entry.key, entry.en_us, "相同譯文")],
+        source=SRC_AI,
+        fill_other_versions=False,
+    )
+    db.set_priority((SRC_AI, SRC_JAR_TW, SRC_MANUAL))
+    assert db.get_entry(entry.id).source == SRC_AI
+
+    with pytest.raises(ValueError, match="已變動"):
+        db.review_manual(
+            entry.id,
+            expected_zh_tw="相同譯文",
+            expected_source=SRC_JAR_TW,
+        )
+
+
+def test_reviewed_manual_wins_without_reordering_unreviewed_manual(db):
+    db.ingest("1.21.1", [item(tw="同一譯文")])
+    entry = db.list_entries("1.21.1")[0][0]
+    db.write_back(
+        "1.21.1",
+        [WriteBackItem(KIND_LANG, "foo", entry.key, entry.en_us, "同一譯文")],
+        source=SRC_AI,
+        fill_other_versions=False,
+    )
+    db.set_priority((SRC_AI, SRC_JAR_TW, SRC_MANUAL))
+
+    db.save_manual(entry.id, "同一譯文", propagate=False)
+    assert db.get_entry(entry.id).source == SRC_AI
+    assert db.get_entry(entry.id).review_status is None
+
+    db.review_manual(
+        entry.id,
+        expected_zh_tw="同一譯文",
+        expected_source=SRC_AI,
+        propagate=False,
+    )
+    assert db.get_entry(entry.id).source == SRC_MANUAL
+    assert db.get_entry(entry.id).review_status == "reviewed"
+    assert any(row.source == SRC_AI for row in db.entry_detail(entry.id).translations)
+
+
+def test_effective_source_stats_group_codes_review_states_and_untranslated(db):
+    codes = (SRC_AI, SRC_JAR_TW, SRC_JAR_CN, SRC_SUBTITLE, 4, 5, 100)
+    for code in codes:
+        db.ingest(
+            "1.21.1",
+            [
+                ScanItem(
+                    KIND_LANG,
+                    "foo",
+                    f"item.source.{code}",
+                    f"Source {code}",
+                    f"譯文 {code}",
+                    source=code,
+                )
+            ],
+        )
+
+    manual_entries = []
+    for suffix, status in (
+        ("unreviewed", "unreviewed"),
+        ("reviewed", "reviewed"),
+        ("legacy", "legacy_unknown"),
+    ):
+        db.ingest("1.21.1", [item(key=f"item.manual.{suffix}", tw="原譯文")])
+        entry = next(
+            row
+            for row in db.list_entries("1.21.1")[0]
+            if row.key == f"item.manual.{suffix}"
+        )
+        db.save_manual(entry.id, f"人工 {suffix}", propagate=False)
+        if status == "reviewed":
+            db.review_manual(entry.id, expected_zh_tw=f"人工 {suffix}", propagate=False)
+        elif status == "legacy_unknown":
+            db._conn.execute(
+                "UPDATE translation SET review_status='legacy_unknown' "
+                "WHERE entry_id=? AND source=?",
+                (entry.id, SRC_MANUAL),
+            )
+            db._conn.execute(
+                "UPDATE effective SET review_status='legacy_unknown' WHERE entry_id=?",
+                (entry.id,),
+            )
+            db._conn.commit()
+        manual_entries.append(entry)
+
+    db.ingest("1.21.1", [item(key="item.no.translation", tw="")])
+    db.ingest("1.20.1", [item(key="item.other-version", tw="另一版譯文")])
+    stats = db.effective_source_stats_by_version()
+    buckets = {(row.source, row.review_status): row.count for row in stats}
+    assert all(buckets[(code, None)] == 1 for code in codes)
+    assert buckets[(SRC_MANUAL, "unreviewed")] == 1
+    assert buckets[(SRC_MANUAL, "reviewed")] == 1
+    assert buckets[(SRC_MANUAL, "legacy_unknown")] == 1
+    assert buckets[(None, None)] == 1
+    totals = {}
+    for row in stats:
+        totals[row.mc_version] = totals.get(row.mc_version, 0) + row.count
+    assert totals == {row.mc_version: row.total for row in db.version_stats()}
+
+
+def test_manual_review_state_filter_matches_list_and_count(db):
+    db.ingest("1.21.1", [item(tw="來源譯文"), item(key="k2", tw="另一來源譯文")])
+    rows, _ = db.list_entries("1.21.1")
+    db.save_manual(rows[0].id, "待審核", propagate=False)
+    db.review_manual(rows[1].id, expected_zh_tw="另一來源譯文", propagate=False)
+
+    unreviewed, unreviewed_count = db.list_entries(
+        "1.21.1", source=SRC_MANUAL, review_status="unreviewed"
+    )
+    reviewed, reviewed_count = db.list_entries(
+        "1.21.1", source=SRC_MANUAL, review_status="reviewed"
+    )
+    assert unreviewed_count == len(unreviewed) == 1
+    assert reviewed_count == len(reviewed) == 1
+    assert unreviewed[0].review_status == "unreviewed"
+    assert reviewed[0].review_status == "reviewed"
+
+
+def test_review_sync_only_marks_versions_currently_showing_same_text(db):
+    db.ingest("1.21.1", [item(tw="相同譯文")])
+    db.ingest("1.20.1", [item(tw="相同譯文")])
+    db.ingest("1.19.2", [item(tw="不同譯文")])
+    selected = db.list_entries("1.21.1")[0][0]
+
+    done = db.review_manual(
+        selected.id,
+        expected_zh_tw="相同譯文",
+        actor="reviewer",
+        propagate=True,
+    )
+    assert {change.mc_version for change in done} == {"1.21.1", "1.20.1"}
+    for version in ("1.21.1", "1.20.1"):
+        manual = next(
+            row
+            for row in db.entry_detail(db.list_entries(version)[0][0].id).translations
+            if row.source == SRC_MANUAL
+        )
+        assert manual.review_status == "reviewed"
+    assert all(
+        row.source != SRC_MANUAL
+        for row in db.entry_detail(db.list_entries("1.19.2")[0][0].id).translations
+    )
+
+
+def _make_v1_db(path):
+    from translation_tool.translation_db.schema import SRC_MANUAL
+
+    old = TranslationDB(path)
+    old.ingest("1.21.1", [item(tw="來源譯文")])
+    entry = old.list_entries("1.21.1")[0][0]
+    old.save_manual(entry.id, "舊人工譯文", actor="old-editor", propagate=False)
+    old._conn.execute(
+        "UPDATE translation SET checker='old-checker' WHERE entry_id=? AND source=?",
+        (entry.id, SRC_MANUAL),
+    )
+    old._conn.commit()
+    old.close()
+    with sqlite3.connect(path) as conn:
+        conn.execute("DROP INDEX IF EXISTS idx_effective_source_review")
+        conn.execute("ALTER TABLE translation DROP COLUMN review_status")
+        conn.execute("ALTER TABLE effective DROP COLUMN review_status")
+        for column in (
+            "prev_checker",
+            "prev_review_status",
+            "new_checker",
+            "new_review_status",
+        ):
+            conn.execute(f"ALTER TABLE history DROP COLUMN {column}")
+        conn.execute("UPDATE meta SET value='1' WHERE key='schema_version'")
+    return entry.id
+
+
+def test_schema_v1_migration_marks_legacy_manual_unknown_and_keeps_backup(tmp_path):
+    from translation_tool.translation_db.schema import SCHEMA_VERSION
+
+    path = tmp_path / "legacy.db"
+    entry_id = _make_v1_db(path)
+    db = TranslationDB(path)
+    detail = db.entry_detail(entry_id)
+    manual = next(row for row in detail.translations if row.source == SRC_MANUAL)
+    assert SCHEMA_VERSION == 2
+    assert manual.review_status == "legacy_unknown" and manual.checker == "old-checker"
+    assert detail.entry.review_status == "legacy_unknown"
+    assert list(tmp_path.glob("legacy.db.pre-schema-v2-*.bak"))
+    db.close()
+
+    # Reopening is idempotent: no second migration backup is created.
+    backups_before = list(tmp_path.glob("legacy.db.pre-schema-v2-*.bak"))
+    db = TranslationDB(path)
+    backups_after = list(tmp_path.glob("legacy.db.pre-schema-v2-*.bak"))
+    assert backups_after == backups_before
+    db.close()
+
+
+def test_readonly_v1_database_reports_legacy_unknown_without_migrating(tmp_path):
+    path = tmp_path / "readonly-legacy.db"
+    entry_id = _make_v1_db(path)
+    db = TranslationDB(path, readonly=True)
+    entry = db.get_entry(entry_id)
+    detail = db.entry_detail(entry_id)
+    assert entry.review_status == "legacy_unknown"
+    assert (
+        next(
+            row for row in detail.translations if row.source == SRC_MANUAL
+        ).review_status
+        == "legacy_unknown"
+    )
+    stats = db.effective_source_stats_by_version()
+    assert any(
+        row.source == SRC_MANUAL
+        and row.review_status == "legacy_unknown"
+        and row.count == 1
+        for row in stats
+    )
+    db.close()
+    with sqlite3.connect(path) as conn:
+        version = conn.execute(
+            "SELECT value FROM meta WHERE key='schema_version'"
+        ).fetchone()[0]
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(translation)")}
+    assert version == "1" and "review_status" not in columns
+    assert not list(tmp_path.glob("readonly-legacy.db.pre-schema-v2-*.bak"))
+
+
+def test_schema_migration_failure_rolls_back_all_review_columns(tmp_path, monkeypatch):
+    from translation_tool.translation_db import schema
+
+    path = tmp_path / "rollback-legacy.db"
+    _make_v1_db(path)
+    migrate = schema._migrate_review_state_v2
+
+    def fail_after_migration(conn):
+        migrate(conn)
+        raise RuntimeError("simulated migration failure")
+
+    monkeypatch.setattr(schema, "_migrate_review_state_v2", fail_after_migration)
+    with pytest.raises(RuntimeError, match="simulated migration failure"):
+        TranslationDB(path)
+    with sqlite3.connect(path) as conn:
+        version = conn.execute(
+            "SELECT value FROM meta WHERE key='schema_version'"
+        ).fetchone()[0]
+        translation_columns = {
+            row[1] for row in conn.execute("PRAGMA table_info(translation)")
+        }
+        effective_columns = {
+            row[1] for row in conn.execute("PRAGMA table_info(effective)")
+        }
+    assert version == "1"
+    assert "review_status" not in translation_columns
+    assert "review_status" not in effective_columns
+    assert list(tmp_path.glob("rollback-legacy.db.pre-schema-v2-*.bak"))
 
 
 # -------------------------------------------------------- AI 寫回
@@ -823,8 +1152,6 @@ def test_nested_jars_are_charged_to_the_archive_budget(tmp_path, monkeypatch):
 
 
 # ------------------------------------------------ 審查 #168：foreign SQLite、部分寫入、遞迴預算、取消
-import sqlite3  # noqa: E402
-
 from translation_tool.translation_db import DbSettings, open_db  # noqa: E402
 from translation_tool.utils import zip_safety  # noqa: E402
 
