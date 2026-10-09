@@ -37,6 +37,7 @@ from translation_tool.utils.bounded_executor import bounded_as_completed
 from translation_tool.utils.config_manager import load_config
 from translation_tool.utils.log_unit import log_warning
 from translation_tool.utils.text_processor import (
+    ReplaceRules,
     apply_replace_rules,
     load_replace_rules,
     recursive_translate_dict,
@@ -141,7 +142,7 @@ def load_rules() -> list:
 
 def make_converter(rules: list | None = None) -> Callable[[str], str]:
     """簡轉繁（OpenCC s2twp）後套用替換規則；與語系合併的 ``recursive_translate_dict`` 相同。"""
-    active = list(rules or [])
+    active = rules.snapshot() if isinstance(rules, ReplaceRules) else list(rules or [])
     return lambda text: recursive_translate_dict(text, active)
 
 

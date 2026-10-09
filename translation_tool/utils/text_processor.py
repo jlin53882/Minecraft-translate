@@ -172,6 +172,22 @@ class ReplaceRules(list):
         super().reverse()
         self._bump()
 
+    def snapshot(self):
+        """Copy list membership while retaining O(1) invalidation tracking."""
+        return _ReplaceRulesSnapshot(self)
+
+
+class _ReplaceRulesSnapshot(list):
+    """A shallow list snapshot that follows edits to its source rule rows."""
+
+    def __init__(self, source: ReplaceRules):
+        super().__init__(source)
+        self._source = source
+
+    @property
+    def revision(self):
+        return self._source.revision
+
 
 def _rules_signature(rules: list[dict[str, str]]):
     """編譯快取的內容簽章。
@@ -179,7 +195,7 @@ def _rules_signature(rules: list[dict[str, str]]):
     ReplaceRules：revision（O(1)）。其他清單：逐條 (from, to)，
     正確但為 O(規則數)，大量規則請使用 load_replace_rules 回傳的清單。
     """
-    if isinstance(rules, ReplaceRules):
+    if isinstance(rules, (ReplaceRules, _ReplaceRulesSnapshot)):
         return ("revision", rules.revision)
     return (
         "content",
