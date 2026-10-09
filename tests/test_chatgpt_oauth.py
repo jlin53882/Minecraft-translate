@@ -1,5 +1,9 @@
 """Unit tests for ChatGPT OAuth credential and token flows."""
 
+import errno
+import multiprocessing
+import sys
+import time
 from contextlib import nullcontext
 from pathlib import Path
 from types import SimpleNamespace
@@ -41,9 +45,54 @@ class _Server:
         self.closed = True
 
 
+def _refresh_in_child_process(
+    credential_path, start_event, ready_event, result_queue, calls
+):
+    """Run a competing token refresh from a real child process."""
+    worker_oauth = oauth
+    worker_oauth._credential_path = lambda: Path(credential_path)
+    worker_oauth._dpapi_transform = lambda payload, *, protect: payload
+    worker_oauth._discover = lambda: {
+        "token_endpoint": "https://auth.openai.com/oauth/token"
+    }
+
+    def post(*_args, **_kwargs):
+        with calls.get_lock():
+            calls.value += 1
+        time.sleep(0.35)
+        return _Response(
+            {
+                "access_token": "access-rotated",
+                "refresh_token": "refresh-rotated",
+                "scope": "openid chatgpt.tokens.use.direct",
+                "expires_in": 3600,
+            }
+        )
+
+    worker_oauth.requests.post = post
+    ready_event.set()
+    if not start_event.wait(10):
+        result_queue.put((False, "start timeout"))
+        return
+    try:
+        result_queue.put((True, worker_oauth.get_chatgpt_access_token()))
+    except Exception as exc:  # noqa: BLE001 - report child failures to parent
+        result_queue.put((False, repr(exc)))
+
+
 @pytest.fixture
 def no_credential_file_lock(monkeypatch):
     monkeypatch.setattr(oauth, "_credential_file_lock", lambda: nullcontext())
+    monkeypatch.setattr(oauth, "_dpapi_transform", lambda payload, *, protect: payload)
+
+
+@pytest.fixture(autouse=True)
+def isolate_oauth_credential_file(monkeypatch, tmp_path):
+    native_path = oauth._credential_path
+    credential_path = tmp_path / "chatgpt-oauth.dat"
+    monkeypatch.setattr(oauth, "_credential_path", lambda: credential_path)
+    monkeypatch.setattr(oauth, "_legacy_macos_credential_path", lambda: None)
+    return credential_path, native_path
 
 
 def _pending_login(server=None, **overrides):
@@ -71,6 +120,125 @@ def test_credential_record_round_trips_and_rejects_unknown_format(monkeypatch):
     assert oauth._decode_record(encoded) == record
     with pytest.raises(oauth.ChatGPTOAuthError, match="格式無法辨識"):
         oauth._decode_record(b"unknown-format")
+
+
+def test_windows_file_lock_retries_contention_and_unlocks_only_after_acquire(
+    monkeypatch, tmp_path
+):
+    class FakeMsvcrt:
+        LK_NBLCK = 1
+        LK_UNLCK = 2
+
+        def __init__(self, fail_count):
+            self.fail_count = fail_count
+            self.lock_calls = 0
+            self.unlock_calls = 0
+
+        def locking(self, _fd, mode, _count):
+            if mode == self.LK_UNLCK:
+                self.unlock_calls += 1
+                return
+            self.lock_calls += 1
+            if self.fail_count is None or self.lock_calls <= self.fail_count:
+                raise OSError(errno.EACCES, "locked")
+
+    lock_module = FakeMsvcrt(fail_count=2)
+    monkeypatch.setattr(oauth.os, "name", "nt")
+    monkeypatch.setitem(sys.modules, "msvcrt", lock_module)
+    monkeypatch.setattr(oauth, "_credential_path", lambda: tmp_path / "oauth.dat")
+    monkeypatch.setattr(oauth, "_CREDENTIAL_LOCK_TIMEOUT_SEC", 0.1)
+    monkeypatch.setattr(oauth, "_CREDENTIAL_LOCK_RETRY_SEC", 0.001)
+
+    with oauth._credential_file_lock():
+        assert lock_module.lock_calls == 3
+    assert lock_module.unlock_calls == 1
+
+    blocked = FakeMsvcrt(fail_count=None)
+    monkeypatch.setitem(sys.modules, "msvcrt", blocked)
+    monkeypatch.setattr(oauth, "_CREDENTIAL_LOCK_TIMEOUT_SEC", 0.01)
+    with (
+        pytest.raises(oauth.ChatGPTOAuthError, match="等待逾時"),
+        oauth._credential_file_lock(),
+    ):
+        pytest.fail("a blocked lock must not enter its critical section")
+    assert blocked.unlock_calls == 0
+
+
+def test_two_processes_share_one_serialized_refresh(
+    monkeypatch, isolate_oauth_credential_file
+):
+    credential_path, _native_path = isolate_oauth_credential_file
+    monkeypatch.setattr(oauth, "_dpapi_transform", lambda payload, *, protect: payload)
+    monkeypatch.setattr(
+        oauth,
+        "_discover",
+        lambda: {"token_endpoint": "https://auth.openai.com/oauth/token"},
+    )
+    oauth._write_store_unlocked(
+        {
+            "schema_version": oauth._CREDENTIAL_STORE_VERSION,
+            "ext_agent_host_id": "urn:uuid:host",
+            "active_profile_id": "profile-a",
+            "profiles": {
+                "profile-a": {
+                    "client_id": "client-a",
+                    "subject": "account-a",
+                    "access_token": "access-expired",
+                    "refresh_token": "refresh-original",
+                    "expires_at": 0,
+                    "scopes": ["openid", "chatgpt.tokens.use.direct"],
+                }
+            },
+        }
+    )
+    context = multiprocessing.get_context("spawn")
+    calls = context.Value("i", 0)
+    start_event = context.Event()
+    ready_event = context.Event()
+    result_queue = context.Queue()
+    worker = context.Process(
+        target=_refresh_in_child_process,
+        args=(
+            str(credential_path),
+            start_event,
+            ready_event,
+            result_queue,
+            calls,
+        ),
+    )
+    worker.start()
+    try:
+        assert ready_event.wait(10), "child process did not initialize"
+
+        def post(*_args, **_kwargs):
+            with calls.get_lock():
+                calls.value += 1
+            time.sleep(0.35)
+            return _Response(
+                {
+                    "access_token": "access-rotated",
+                    "refresh_token": "refresh-rotated",
+                    "scope": "openid chatgpt.tokens.use.direct",
+                    "expires_in": 3600,
+                }
+            )
+
+        monkeypatch.setattr(oauth.requests, "post", post)
+        start_event.set()
+        parent_token = oauth.get_chatgpt_access_token()
+        child_ok, child_token = result_queue.get(timeout=10)
+        worker.join(timeout=10)
+
+        assert worker.exitcode == 0
+        assert child_ok is True, child_token
+        assert parent_token == child_token == "access-rotated"
+        assert calls.value == 1
+        assert oauth._read_record_unlocked()["refresh_token"] == "refresh-rotated"
+    finally:
+        if worker.is_alive():
+            worker.terminate()
+            worker.join(timeout=5)
+        result_queue.close()
 
 
 @pytest.mark.parametrize(
@@ -105,14 +273,16 @@ def test_credential_record_round_trips_and_rejects_unknown_format(monkeypatch):
             False,
             True,
             False,
-            True,
+            False,
         ),
     ],
 )
 def test_account_status_distinguishes_registration_session_and_direct_scope(
     monkeypatch, record, connected, session, scope, reauth
 ):
-    monkeypatch.setattr(oauth, "_read_record_unlocked", lambda: dict(record))
+    monkeypatch.setattr(
+        oauth, "_read_store_unlocked", lambda: oauth._normalize_store(record)
+    )
 
     status = oauth.chatgpt_account_status()
 
@@ -123,9 +293,81 @@ def test_account_status_distinguishes_registration_session_and_direct_scope(
     assert status["reauth_required"] is reauth
 
 
-def test_credential_path_uses_platform_specific_application_data_roots(
-    monkeypatch, tmp_path
+def test_account_profiles_keep_separate_credentials_and_can_be_switched(
+    no_credential_file_lock,
 ):
+    store = {
+        "schema_version": oauth._CREDENTIAL_STORE_VERSION,
+        "ext_agent_host_id": "urn:uuid:host",
+        "active_profile_id": "profile-a",
+        "profiles": {
+            "profile-a": {
+                "client_id": "client-a",
+                "subject": "subject-a",
+                "email": "a@example.test",
+                "access_token": "access-a",
+                "refresh_token": "refresh-a",
+                "scopes": ["chatgpt.tokens.use.direct"],
+            },
+            "profile-b": {
+                "client_id": "client-b",
+                "subject": "subject-b",
+                "email": "b@example.test",
+                "access_token": "access-b",
+                "refresh_token": "refresh-b",
+                "scopes": ["chatgpt.tokens.use.direct"],
+            },
+        },
+    }
+    oauth._write_store_unlocked(store)
+
+    status = oauth.set_active_chatgpt_account("profile-b")
+
+    assert status["active_profile_id"] == "profile-b"
+    assert status["email"] == "b@example.test"
+    assert status["connected"] is True
+    persisted = oauth._read_store_unlocked()
+    assert persisted["profiles"]["profile-a"]["refresh_token"] == "refresh-a"
+    assert persisted["profiles"]["profile-b"]["refresh_token"] == "refresh-b"
+
+
+def test_new_account_registration_does_not_replace_existing_profile(
+    no_credential_file_lock,
+):
+    oauth._write_store_unlocked(
+        {
+            "schema_version": oauth._CREDENTIAL_STORE_VERSION,
+            "ext_agent_host_id": "urn:uuid:host",
+            "active_profile_id": "profile-a",
+            "profiles": {
+                "profile-a": {
+                    "client_id": "client-a",
+                    "subject": "subject-a",
+                    "email": "a@example.test",
+                    "refresh_token": "refresh-a",
+                }
+            },
+        }
+    )
+    pending = _pending_login(
+        existing_record={"ext_agent_host_id": "urn:uuid:host"},
+        profile_id="profile-b",
+    )
+
+    pending._save_registration("client-b")
+
+    store = oauth._read_store_unlocked()
+    assert store["active_profile_id"] == "profile-a"
+    assert store["profiles"]["profile-a"]["client_id"] == "client-a"
+    assert store["profiles"]["profile-a"]["refresh_token"] == "refresh-a"
+    assert store["profiles"]["profile-b"] == {"client_id": "client-b"}
+
+
+def test_credential_path_uses_platform_specific_application_data_roots(
+    monkeypatch, tmp_path, isolate_oauth_credential_file
+):
+    _isolated, native_path = isolate_oauth_credential_file
+    monkeypatch.setattr(oauth, "_credential_path", native_path)
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "local-app-data"))
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg-data"))
@@ -181,10 +423,14 @@ def test_macos_legacy_credential_path_is_migrated_after_secure_write(
         assert legacy.exists()
         writes.append(value)
 
-    monkeypatch.setattr(oauth, "_write_record_unlocked", write_new_record)
+    monkeypatch.setattr(oauth, "_write_store_unlocked", write_new_record)
 
-    assert oauth._read_record_unlocked() == record
-    assert writes == [record]
+    migrated = oauth._read_record_unlocked()
+    assert migrated["client_id"] == record["client_id"]
+    assert migrated["access_token"] == record["access_token"]
+    assert len(writes) == 1
+    assert writes[0]["schema_version"] == oauth._CREDENTIAL_STORE_VERSION
+    assert len(writes[0]["profiles"]) == 1
     assert not legacy.exists()
 
 
@@ -344,7 +590,48 @@ def test_begin_login_reuses_saved_registration_and_host_identity(monkeypatch):
     assert params["ext_agent_host_id"] == ["urn:uuid:saved-host"]
     assert params["login_hint"] == ["user@example.test"]
     assert "agent_name_hint" not in params
+    assert "prompt" not in params
     pending.cancel()
+
+
+def test_add_account_registers_separately_and_reconsent_is_explicit(monkeypatch):
+    server = _Server(("127.0.0.1", 0), object)
+    monkeypatch.setattr(oauth.secrets, "token_urlsafe", lambda size: f"value-{size}")
+    monkeypatch.setattr(
+        oauth,
+        "_discover",
+        lambda: {
+            "issuer": oauth._ISSUER,
+            "authorization_endpoint": "https://auth.openai.com/authorize",
+        },
+    )
+    monkeypatch.setattr(
+        oauth,
+        "_load_or_create_host_record",
+        lambda: {
+            "ext_agent_host_id": "urn:uuid:saved-host",
+            "_profile_id": "profile-a",
+            "client_id": "client-a",
+            "subject": "account-a",
+            "email": "a@example.test",
+            "id_token": "id-token-a",
+        },
+    )
+    monkeypatch.setattr(oauth, "ThreadingHTTPServer", lambda address, handler: server)
+
+    added = oauth.begin_chatgpt_login(add_account=True)
+    add_params = parse_qs(urlsplit(added.authorization_url).query)
+    assert add_params["client_id"] == [oauth._DYNAMIC_CLIENT_ID]
+    assert "prompt" not in add_params
+    assert added.profile_id != "profile-a"
+    added.cancel()
+
+    reconsent = oauth.begin_chatgpt_login(request_plan_usage=True)
+    consent_params = parse_qs(urlsplit(reconsent.authorization_url).query)
+    assert consent_params["client_id"] == ["client-a"]
+    assert consent_params["prompt"] == ["consent"]
+    assert consent_params["id_token_hint"] == ["id-token-a"]
+    reconsent.cancel()
 
 
 def test_login_completion_exchanges_code_and_persists_rotating_credentials(
@@ -405,7 +692,7 @@ def test_login_completion_exchanges_code_and_persists_rotating_credentials(
     assert "chatgpt.tokens.use.direct" in saved[-1]["scopes"]
 
 
-def test_login_requires_plan_scope_from_token_response_not_callback(
+def test_login_without_plan_scope_preserves_identity_but_disables_usage(
     monkeypatch, no_credential_file_lock
 ):
     pending = _pending_login()
@@ -436,18 +723,22 @@ def test_login_requires_plan_scope_from_token_response_not_callback(
     monkeypatch.setattr(
         oauth,
         "_validate_id_token",
-        lambda *_args, **_kwargs: pytest.fail(
-            "scope validation must reject before storing or validating the identity"
-        ),
-    )
-    monkeypatch.setattr(
-        oauth,
-        "_write_record_unlocked",
-        lambda _record: pytest.fail("inadequately scoped credentials must not persist"),
+        lambda *_args, **_kwargs: {
+            "sub": "account-no-consent",
+            "email": "no-consent@example.test",
+        },
     )
 
-    with pytest.raises(oauth.ChatGPTOAuthError, match="尚未授權使用方案額度"):
-        pending.complete()
+    result = pending.complete()
+
+    assert result["identity_connected"] is True
+    assert result["connected"] is False
+    assert result["plan_usage_authorized"] is False
+    assert result["email"] == "no-consent@example.test"
+    record = oauth._read_record_unlocked()
+    assert record["subject"] == "account-no-consent"
+    assert record["refresh_token"] == "refresh"
+    assert record["scopes"] == []
 
 
 def test_login_completion_rejects_state_mismatch_before_token_exchange(monkeypatch):
@@ -515,7 +806,7 @@ def test_access_token_refresh_rotates_refresh_token_and_scopes(
         "access_token": "access-old",
         "refresh_token": "refresh-old",
         "expires_at": 0,
-        "scopes": ["openid"],
+        "scopes": ["openid", "chatgpt.tokens.use.direct"],
     }
     monkeypatch.setattr(oauth, "_read_record_unlocked", lambda: dict(stored))
     monkeypatch.setattr(
@@ -619,7 +910,11 @@ def test_refresh_scope_downgrade_saves_rotation_and_requires_reauthorization(
     assert saved[-1]["refresh_token"] == "refresh-rotated"
     assert saved[-1]["access_token"] == ""
     assert saved[-1]["scopes"] == scope.split()
-    monkeypatch.setattr(oauth, "_read_record_unlocked", lambda: dict(saved[-1]))
+    monkeypatch.setattr(
+        oauth,
+        "_read_store_unlocked",
+        lambda: oauth._normalize_store(saved[-1]),
+    )
     status = oauth.chatgpt_account_status()
     assert status["connected"] is False
     assert status["client_id_registered"] is True
@@ -642,12 +937,10 @@ def test_refresh_without_scope_or_trusted_prior_scope_fails_closed(
         {"access_token": "access-new", "refresh_token": "refresh-new"},
     )
 
-    with pytest.raises(oauth.ChatGPTOAuthError, match="重新登入"):
+    with pytest.raises(oauth.ChatGPTOAuthError, match="尚未授權方案使用"):
         oauth.get_chatgpt_access_token()
 
-    assert saved[-1]["refresh_token"] == "refresh-new"
-    assert saved[-1]["access_token"] == ""
-    assert saved[-1]["scopes"] == []
+    assert saved == []
 
 
 def test_refresh_without_trusted_scope_does_not_return_cached_access_token(
@@ -665,11 +958,10 @@ def test_refresh_without_trusted_scope_does_not_return_cached_access_token(
         {"access_token": "access-new", "refresh_token": "refresh-new"},
     )
 
-    with pytest.raises(oauth.ChatGPTOAuthError, match="重新登入"):
+    with pytest.raises(oauth.ChatGPTOAuthError, match="尚未授權方案使用"):
         oauth.get_chatgpt_access_token()
 
-    assert saved[-1]["access_token"] == ""
-    assert saved[-1]["refresh_token"] == "refresh-new"
+    assert saved == []
 
 
 def test_temporary_refresh_network_failure_preserves_existing_credentials(

@@ -6,6 +6,7 @@ from translation_tool.core.codex_oauth import (
     chatgpt_account_status,
     disconnect_chatgpt_account,
     list_chatgpt_models,
+    set_active_chatgpt_account,
 )
 
 __all__ = [
@@ -14,4 +15,5 @@ __all__ = [
     "chatgpt_account_status",
     "disconnect_chatgpt_account",
     "list_chatgpt_models",
+    "set_active_chatgpt_account",
 ]

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import base64
 import ctypes
+import errno
 import hashlib
 import json
 import os
@@ -42,6 +43,9 @@ _APP_NAME = "Minecraft Translate"
 _CALLBACK_PATH = "/auth/callback"
 _LOGIN_TIMEOUT_SEC = 300
 _REFRESH_SKEW_SEC = 120
+_CREDENTIAL_LOCK_TIMEOUT_SEC = 120.0
+_CREDENTIAL_LOCK_RETRY_SEC = 0.1
+_CREDENTIAL_STORE_VERSION = 2
 _DATA_MAGIC = b"MTCHATGPT1\0"
 _credential_mutex = threading.RLock()
 
@@ -188,6 +192,7 @@ def _credential_file_lock():
     path.parent.mkdir(parents=True, exist_ok=True)
     lock_path = path.with_suffix(path.suffix + ".lock")
     handle = lock_path.open("a+b")
+    acquired = False
     try:
         if os.name == "nt":
             import msvcrt
@@ -197,41 +202,112 @@ def _credential_file_lock():
                 handle.write(b"\0")
                 handle.flush()
             handle.seek(0)
-            msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
+            deadline = time.monotonic() + _CREDENTIAL_LOCK_TIMEOUT_SEC
+            while True:
+                try:
+                    msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+                    acquired = True
+                    break
+                except OSError as exc:
+                    if exc.errno not in {errno.EACCES, errno.EAGAIN, errno.EDEADLK}:
+                        raise
+                    if time.monotonic() >= deadline:
+                        raise ChatGPTOAuthError(
+                            "另一個 Minecraft Translate 程序正在更新 ChatGPT 登入狀態；等待逾時，請稍後重試。"
+                        ) from exc
+                    time.sleep(_CREDENTIAL_LOCK_RETRY_SEC)
         else:
             import fcntl
 
             fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+            acquired = True
         yield
     finally:
-        if os.name == "nt":
-            import msvcrt
+        try:
+            if acquired and os.name == "nt":
+                import msvcrt
 
-            handle.seek(0)
-            msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
-        else:
-            import fcntl
+                handle.seek(0)
+                msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+            elif acquired:
+                import fcntl
 
-            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
-        handle.close()
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+        finally:
+            handle.close()
 
 
-def _read_record_unlocked() -> dict[str, Any]:
+def _profile_key(record: dict[str, Any]) -> str:
+    explicit = record.get("_profile_id")
+    if isinstance(explicit, str) and explicit:
+        return explicit
+    client_id = str(record.get("client_id") or "")
+    subject = str(record.get("subject") or "")
+    if client_id or subject:
+        identity = f"minecraft-translate-chatgpt:{client_id}:{subject}"
+        return uuid.uuid5(uuid.NAMESPACE_URL, identity).hex
+    return uuid.uuid4().hex
+
+
+def _normalize_store(record: dict[str, Any]) -> dict[str, Any]:
+    """Migrate legacy single-account records to the profile registry shape."""
+    if record.get("schema_version") == _CREDENTIAL_STORE_VERSION:
+        profiles = record.get("profiles")
+        if not isinstance(profiles, dict):
+            profiles = {}
+        clean_profiles = {
+            key: dict(value)
+            for key, value in profiles.items()
+            if isinstance(key, str) and key and isinstance(value, dict)
+        }
+        active = record.get("active_profile_id")
+        if not isinstance(active, str) or active not in clean_profiles:
+            active = next(iter(clean_profiles), "")
+        return {
+            "schema_version": _CREDENTIAL_STORE_VERSION,
+            "ext_agent_host_id": str(record.get("ext_agent_host_id") or ""),
+            "active_profile_id": active,
+            "profiles": clean_profiles,
+        }
+
+    host_id = str(record.get("ext_agent_host_id") or "")
+    profile = {
+        key: value
+        for key, value in record.items()
+        if key not in {"ext_agent_host_id", "_profile_id"}
+    }
+    if not any(profile.get(key) for key in ("client_id", "subject", "refresh_token")):
+        return {
+            "schema_version": _CREDENTIAL_STORE_VERSION,
+            "ext_agent_host_id": host_id,
+            "active_profile_id": "",
+            "profiles": {},
+        }
+    profile_id = _profile_key(record)
+    return {
+        "schema_version": _CREDENTIAL_STORE_VERSION,
+        "ext_agent_host_id": host_id,
+        "active_profile_id": profile_id,
+        "profiles": {profile_id: profile},
+    }
+
+
+def _read_store_unlocked() -> dict[str, Any]:
     path = _credential_path()
     if not path.exists():
         legacy_path = _legacy_macos_credential_path()
         if legacy_path is None or not (
             legacy_path.exists() or legacy_path.is_symlink()
         ):
-            return {}
+            return _normalize_store({})
         _validate_legacy_macos_credential_file(legacy_path)
         try:
-            record = _decode_record(legacy_path.read_bytes())
+            record = _normalize_store(_decode_record(legacy_path.read_bytes()))
         except OSError as exc:
             raise ChatGPTOAuthError("無法讀取舊版 ChatGPT 登入資料。") from exc
         # The normal writer uses an atomic replacement and owner-only mode on
         # POSIX. Keep the old file until that protected write has succeeded.
-        _write_record_unlocked(record)
+        _write_store_unlocked(record)
         try:
             legacy_path.unlink()
         except OSError as exc:
@@ -240,12 +316,12 @@ def _read_record_unlocked() -> dict[str, Any]:
             ) from exc
         return record
     try:
-        return _decode_record(path.read_bytes())
+        return _normalize_store(_decode_record(path.read_bytes()))
     except OSError as exc:
         raise ChatGPTOAuthError("無法讀取 ChatGPT 登入資料。") from exc
 
 
-def _write_record_unlocked(record: dict[str, Any]) -> None:
+def _write_store_unlocked(record: dict[str, Any]) -> None:
     path = _credential_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     encoded = _encode_record(record)
@@ -274,13 +350,49 @@ def _write_record_unlocked(record: dict[str, Any]) -> None:
         raise ChatGPTOAuthError("無法安全儲存 ChatGPT 登入資料。") from exc
 
 
+def _active_record(store: dict[str, Any]) -> dict[str, Any]:
+    profile_id = store.get("active_profile_id") or ""
+    profile = store.get("profiles", {}).get(profile_id, {})
+    if not isinstance(profile, dict):
+        profile = {}
+    record = dict(profile)
+    record["ext_agent_host_id"] = store.get("ext_agent_host_id", "")
+    if profile_id:
+        record["_profile_id"] = profile_id
+    return record
+
+
+def _read_record_unlocked() -> dict[str, Any]:
+    return _active_record(_read_store_unlocked())
+
+
+def _write_record_unlocked(record: dict[str, Any]) -> None:
+    store = _read_store_unlocked()
+    profile_id = _profile_key(record)
+    profile = {
+        key: value
+        for key, value in record.items()
+        if key not in {"ext_agent_host_id", "_profile_id"}
+    }
+    store["ext_agent_host_id"] = str(
+        record.get("ext_agent_host_id") or store.get("ext_agent_host_id") or ""
+    )
+    store.setdefault("profiles", {})[profile_id] = profile
+    store["active_profile_id"] = profile_id
+    store["schema_version"] = _CREDENTIAL_STORE_VERSION
+    _write_store_unlocked(store)
+
+
 def _load_or_create_host_record() -> dict[str, Any]:
     with _credential_mutex, _credential_file_lock():
-        record = _read_record_unlocked()
-        if not record.get("ext_agent_host_id"):
-            record["ext_agent_host_id"] = f"urn:uuid:{uuid.uuid4()}"
-            _write_record_unlocked(record)
-        return record
+        store = _read_store_unlocked()
+        if not store.get("ext_agent_host_id"):
+            store["ext_agent_host_id"] = f"urn:uuid:{uuid.uuid4()}"
+            store["schema_version"] = _CREDENTIAL_STORE_VERSION
+            store.setdefault("active_profile_id", "")
+            store.setdefault("profiles", {})
+            _write_store_unlocked(store)
+        return _active_record(store)
 
 
 def _record_scopes(record: dict[str, Any]) -> set[str]:
@@ -296,30 +408,59 @@ def _record_scopes(record: dict[str, Any]) -> set[str]:
 def chatgpt_account_status() -> dict[str, Any]:
     # Atomic replace keeps this non-secret status read consistent without waiting
     # behind a token refresh that may hold the cross-process lock during HTTP I/O.
-    record = _read_record_unlocked()
-    oauth_session_present = bool(
-        record.get("refresh_token") and record.get("client_id")
-    )
-    access_token_present = bool(record.get("access_token"))
-    direct_scope_granted = "chatgpt.tokens.use.direct" in _record_scopes(record)
-    reauth_required = bool(record.get("reauth_required")) or (
-        oauth_session_present and (not direct_scope_granted or not access_token_present)
-    )
-    connected = (
-        oauth_session_present
-        and access_token_present
-        and direct_scope_granted
-        and not reauth_required
-    )
-    return {
-        "connected": connected,
-        "email": str(record.get("email") or ""),
-        "client_id_registered": bool(record.get("client_id")),
-        "oauth_session_present": oauth_session_present,
-        "direct_scope_granted": direct_scope_granted,
-        "reauth_required": reauth_required,
-        "expires_at": record.get("expires_at"),
-    }
+    store = _read_store_unlocked()
+    active_id = str(store.get("active_profile_id") or "")
+    profiles = store.get("profiles", {})
+
+    def profile_status(profile_id: str, profile: dict[str, Any]) -> dict[str, Any]:
+        oauth_session_present = bool(
+            profile.get("refresh_token") and profile.get("client_id")
+        )
+        access_token_present = bool(profile.get("access_token"))
+        direct_scope_granted = "chatgpt.tokens.use.direct" in _record_scopes(profile)
+        reauth_required = bool(profile.get("reauth_required")) or (
+            oauth_session_present and direct_scope_granted and not access_token_present
+        )
+        plan_usage_authorized = direct_scope_granted and not reauth_required
+        connected = (
+            oauth_session_present and access_token_present and plan_usage_authorized
+        )
+        return {
+            "profile_id": profile_id,
+            "connected": connected,
+            "identity_connected": bool(
+                profile.get("client_id")
+                and profile.get("subject")
+                and (oauth_session_present or profile.get("id_token"))
+            ),
+            "email": str(profile.get("email") or ""),
+            "client_id_registered": bool(profile.get("client_id")),
+            "oauth_session_present": oauth_session_present,
+            "direct_scope_granted": direct_scope_granted,
+            "plan_usage_authorized": plan_usage_authorized,
+            "reauth_required": reauth_required,
+            "expires_at": profile.get("expires_at"),
+        }
+
+    accounts = [
+        profile_status(profile_id, profile) for profile_id, profile in profiles.items()
+    ]
+    active = profiles.get(active_id, {}) if isinstance(profiles, dict) else {}
+    result = profile_status(active_id, active if isinstance(active, dict) else {})
+    result["accounts"] = accounts
+    result["active_profile_id"] = active_id
+    return result
+
+
+def set_active_chatgpt_account(profile_id: str) -> dict[str, Any]:
+    """Select one saved OAuth profile without changing any profile credentials."""
+    with _credential_mutex, _credential_file_lock():
+        store = _read_store_unlocked()
+        if profile_id not in store.get("profiles", {}):
+            raise ChatGPTOAuthError("找不到所選的 ChatGPT 帳號。")
+        store["active_profile_id"] = profile_id
+        _write_store_unlocked(store)
+    return chatgpt_account_status()
 
 
 def _discover() -> dict[str, Any]:
@@ -436,6 +577,8 @@ class PendingChatGPTLogin:
         requested_client_id: str,
         existing_record: dict[str, Any],
         metadata: dict[str, Any],
+        profile_id: str = "",
+        request_plan_usage: bool = False,
     ) -> None:
         self.server = server
         self.state = state
@@ -444,7 +587,9 @@ class PendingChatGPTLogin:
         self.redirect_uri = redirect_uri
         self.requested_client_id = requested_client_id
         self.existing_record = existing_record
+        self.profile_id = profile_id or _profile_key(existing_record)
         self.metadata = metadata
+        self.request_plan_usage = request_plan_usage
         self.callback_event = threading.Event()
         self.cancelled_event = threading.Event()
         self._shutdown_lock = threading.Lock()
@@ -541,23 +686,15 @@ class PendingChatGPTLogin:
             # Only the validated token response proves which permissions OpenAI
             # granted. The authorization callback may echo requested scopes.
             granted_scopes = str(tokens.get("scope") or "")
-            if not all(
-                isinstance(value, str) and value
-                for value in (access_token, refresh_token, id_token)
-            ):
-                raise ChatGPTOAuthError("OpenAI token response 缺少必要的登入憑證。")
-            scopes = set(granted_scopes.split())
-            if "chatgpt.tokens.use.direct" not in scopes:
-                raise ChatGPTOAuthError(
-                    "此 ChatGPT 帳號尚未授權使用方案額度；請重新登入並同意方案使用權限。"
-                )
-
+            if not isinstance(id_token, str) or not id_token:
+                raise ChatGPTOAuthError("OpenAI token response 缺少 ID token。")
             claims = _validate_id_token(
                 id_token,
                 client_id=client_id,
                 nonce=self.nonce,
                 metadata=self.metadata,
             )
+            scopes = set(granted_scopes.split())
             previous_subject = self.existing_record.get("subject")
             if (
                 previous_subject
@@ -570,24 +707,41 @@ class PendingChatGPTLogin:
                 expires_in = max(60, int(tokens.get("expires_in", 3600)))
             except (TypeError, ValueError):
                 expires_in = 3600
-            record = dict(self.existing_record)
-            record.update(
-                {
-                    "ext_agent_host_id": self.existing_record["ext_agent_host_id"],
-                    "client_id": client_id,
-                    "subject": str(claims["sub"]),
-                    "email": str(claims.get("email") or ""),
-                    "id_token": id_token,
-                    "access_token": access_token,
-                    "refresh_token": refresh_token,
-                    "token_type": "Bearer",
-                    "expires_at": time.time() + expires_in,
-                    "scopes": sorted(scopes),
-                    "reauth_required": False,
-                    "saved_at": int(time.time()),
-                }
-            )
             with _credential_mutex, _credential_file_lock():
+                store = _read_store_unlocked()
+                latest = store.get("profiles", {}).get(self.profile_id, {})
+                if not latest:
+                    latest = self.existing_record
+                if (
+                    latest.get("subject")
+                    and latest.get("subject") != claims.get("sub")
+                    and latest.get("client_id") == client_id
+                ):
+                    raise ChatGPTOAuthError("登入帳號與已選取的 ChatGPT 帳號不同。")
+                record = dict(latest)
+                record.update(
+                    {
+                        "ext_agent_host_id": self.existing_record["ext_agent_host_id"],
+                        "_profile_id": self.profile_id,
+                        "client_id": client_id,
+                        "subject": str(claims["sub"]),
+                        "email": str(claims.get("email") or ""),
+                        "id_token": id_token,
+                        "access_token": access_token
+                        if isinstance(access_token, str)
+                        else "",
+                        "refresh_token": refresh_token
+                        if isinstance(refresh_token, str)
+                        else "",
+                        "token_type": "Bearer",
+                        "expires_at": time.time() + expires_in
+                        if isinstance(access_token, str) and access_token
+                        else 0,
+                        "scopes": sorted(scopes),
+                        "reauth_required": False,
+                        "saved_at": int(time.time()),
+                    }
+                )
                 _write_record_unlocked(record)
             return chatgpt_account_status()
         finally:
@@ -595,20 +749,44 @@ class PendingChatGPTLogin:
 
     def _save_registration(self, client_id: str) -> None:
         with _credential_mutex, _credential_file_lock():
-            current = _read_record_unlocked()
+            store = _read_store_unlocked()
+            profiles = store.setdefault("profiles", {})
+            current = profiles.get(self.profile_id, {})
             if current.get("client_id") not in (None, "", client_id):
                 raise ChatGPTOAuthError(
                     "已選取另一個 ChatGPT 用戶端，請先中斷連結再登入。"
                 )
-            current["ext_agent_host_id"] = self.existing_record["ext_agent_host_id"]
+            if any(
+                profile_id != self.profile_id
+                and isinstance(profile, dict)
+                and profile.get("client_id") == client_id
+                for profile_id, profile in profiles.items()
+            ):
+                raise ChatGPTOAuthError(
+                    "OpenAI 回傳的用戶端已綁定另一個帳號，已拒絕覆寫登入資料。"
+                )
             current["client_id"] = client_id
-            _write_record_unlocked(current)
+            profiles[self.profile_id] = current
+            store["schema_version"] = _CREDENTIAL_STORE_VERSION
+            store.setdefault("active_profile_id", "")
+            store["ext_agent_host_id"] = self.existing_record["ext_agent_host_id"]
+            _write_store_unlocked(store)
 
 
-def begin_chatgpt_login() -> PendingChatGPTLogin:
+def begin_chatgpt_login(
+    *, add_account: bool = False, request_plan_usage: bool = False
+) -> PendingChatGPTLogin:
     """Start the official dynamic-registration OAuth + PKCE flow."""
     metadata = _discover()
-    record = _load_or_create_host_record()
+    active_record = _load_or_create_host_record()
+    if add_account:
+        record = {"ext_agent_host_id": active_record["ext_agent_host_id"]}
+        profile_id = uuid.uuid4().hex
+    else:
+        record = active_record
+        profile_id = str(record.get("_profile_id") or uuid.uuid4().hex)
+    if request_plan_usage and not record.get("client_id"):
+        raise ChatGPTOAuthError("請先連結 ChatGPT 帳號，再重新授權方案使用權限。")
     registered_client_id = str(record.get("client_id") or "")
     requested_client_id = registered_client_id or _DYNAMIC_CLIENT_ID
     state = secrets.token_urlsafe(32)
@@ -664,7 +842,9 @@ def begin_chatgpt_login() -> PendingChatGPTLogin:
         redirect_uri=redirect_uri,
         requested_client_id=requested_client_id,
         existing_record=record,
+        profile_id=profile_id,
         metadata=metadata,
+        request_plan_usage=request_plan_usage,
     )
     params: dict[str, str] = {
         "client_id": requested_client_id,
@@ -682,6 +862,8 @@ def begin_chatgpt_login() -> PendingChatGPTLogin:
         params["agent_name_hint"] = _APP_NAME
     elif record.get("id_token"):
         params["id_token_hint"] = str(record["id_token"])
+    if request_plan_usage:
+        params["prompt"] = "consent"
     if record.get("email"):
         params["login_hint"] = str(record["email"])
     authorization_endpoint = _auth_endpoint(metadata, "authorization_endpoint")
@@ -697,21 +879,22 @@ def get_chatgpt_access_token(*, force_refresh: bool = False) -> str:
         access_token = str(record.get("access_token") or "")
         refresh_token = str(record.get("refresh_token") or "")
         client_id = str(record.get("client_id") or "")
-        if not access_token or not refresh_token or not client_id:
-            if record.get("reauth_required") or client_id:
-                raise ChatGPTOAuthError(
-                    "ChatGPT 登入授權需要更新，請到 API 設定重新登入。"
-                )
+        if not client_id:
             raise ChatGPTOAuthError("尚未連結 ChatGPT 帳號；請先在設定頁登入。")
+        trusted_scopes = _record_scopes(record)
+        has_direct_scope = "chatgpt.tokens.use.direct" in trusted_scopes
+        if not has_direct_scope:
+            raise ChatGPTOAuthError(
+                "此 ChatGPT 帳號已連結，但尚未授權方案使用；請在 API 設定選擇「啟用方案使用權限」。"
+            )
+        if not access_token or not refresh_token:
+            raise ChatGPTOAuthError("ChatGPT 登入授權需要更新，請到 API 設定重新登入。")
         try:
             expires_at = float(record.get("expires_at") or 0)
         except (TypeError, ValueError):
             expires_at = 0
-        trusted_scopes = _record_scopes(record)
-        has_direct_scope = "chatgpt.tokens.use.direct" in trusted_scopes
         if (
             not force_refresh
-            and has_direct_scope
             and not record.get("reauth_required")
             and expires_at > time.time() + _REFRESH_SKEW_SEC
         ):
@@ -861,7 +1044,13 @@ def disconnect_chatgpt_account() -> bool:
                 time.sleep(0.5 * (2**attempt))
         retained = {
             key: record[key]
-            for key in ("ext_agent_host_id", "client_id", "subject", "email")
+            for key in (
+                "ext_agent_host_id",
+                "_profile_id",
+                "client_id",
+                "subject",
+                "email",
+            )
             if record.get(key)
         }
         _write_record_unlocked(retained)

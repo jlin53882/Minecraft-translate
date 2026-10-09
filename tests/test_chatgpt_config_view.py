@@ -15,7 +15,7 @@ def _chatgpt_config_view(monkeypatch):
     config["lm_translator"]["chatgpt_model"] = "gpt-alpha"
     monkeypatch.setattr("app.views.config_view.load_config_json", lambda: config)
     monkeypatch.setattr(
-        "app.views.config_view.chatgpt_account_status",
+        "app.views.config.chatgpt_oauth_panel.chatgpt_account_status",
         lambda: {"connected": False, "email": ""},
     )
     return ConfigView(mock_page())
@@ -68,7 +68,7 @@ def test_reauth_required_status_does_not_enable_chatgpt_translation_controls(
 ):
     view = _chatgpt_config_view(monkeypatch)
     monkeypatch.setattr(
-        "app.views.config_view.chatgpt_account_status",
+        "app.views.config.chatgpt_oauth_panel.chatgpt_account_status",
         lambda: {
             "connected": False,
             "client_id_registered": True,
@@ -78,19 +78,22 @@ def test_reauth_required_status_does_not_enable_chatgpt_translation_controls(
         },
     )
 
-    view._refresh_chatgpt_controls()
+    view.chatgpt_oauth_panel.refresh_controls()
 
-    assert "重新登入" in view.chatgpt_status_text.value
-    assert view.chatgpt_login_button.disabled is False
-    assert view.chatgpt_refresh_button.disabled is True
-    assert view.chatgpt_disconnect_button.disabled is False
+    panel = view.chatgpt_oauth_panel
+    assert "重新同意" in panel.status_text.value
+    assert panel.login_button.disabled is False
+    assert panel.authorize_usage_button.visible is True
+    assert panel.authorize_usage_button.disabled is False
+    assert panel.refresh_button.disabled is True
+    assert panel.disconnect_button.disabled is False
     assert view.chatgpt_model_control.disabled is True
 
 
 def test_disconnected_registration_status_explains_client_id_reuse(monkeypatch):
     view = _chatgpt_config_view(monkeypatch)
     monkeypatch.setattr(
-        "app.views.config_view.chatgpt_account_status",
+        "app.views.config.chatgpt_oauth_panel.chatgpt_account_status",
         lambda: {
             "connected": False,
             "client_id_registered": True,
@@ -100,11 +103,71 @@ def test_disconnected_registration_status_explains_client_id_reuse(monkeypatch):
         },
     )
 
-    view._refresh_chatgpt_controls()
+    view.chatgpt_oauth_panel.refresh_controls()
 
-    assert "沿用已註冊帳號" in view.chatgpt_status_text.value
-    assert view.chatgpt_login_button.disabled is False
-    assert view.chatgpt_disconnect_button.disabled is True
+    panel = view.chatgpt_oauth_panel
+    assert "沿用已註冊帳號" in panel.status_text.value
+    assert panel.login_button.disabled is False
+    assert panel.disconnect_button.disabled is True
+
+
+def test_identity_without_plan_scope_shows_explicit_reconsent_action(monkeypatch):
+    view = _chatgpt_config_view(monkeypatch)
+    monkeypatch.setattr(
+        "app.views.config.chatgpt_oauth_panel.chatgpt_account_status",
+        lambda: {
+            "connected": False,
+            "identity_connected": True,
+            "client_id_registered": True,
+            "oauth_session_present": True,
+            "plan_usage_authorized": False,
+            "reauth_required": False,
+            "email": "user@example.test",
+            "accounts": [],
+            "active_profile_id": "profile-a",
+        },
+    )
+
+    view.chatgpt_oauth_panel.refresh_controls()
+
+    panel = view.chatgpt_oauth_panel
+    assert "身分" in panel.status_text.value
+    assert "尚未授權" in panel.status_text.value
+    assert panel.authorize_usage_button.visible is True
+    assert panel.refresh_button.disabled is True
+    assert view.chatgpt_model_control.disabled is True
+
+
+def test_multiple_saved_accounts_are_available_in_account_selector(monkeypatch):
+    view = _chatgpt_config_view(monkeypatch)
+    monkeypatch.setattr(
+        "app.views.config.chatgpt_oauth_panel.chatgpt_account_status",
+        lambda: {
+            "connected": True,
+            "identity_connected": True,
+            "client_id_registered": True,
+            "oauth_session_present": True,
+            "plan_usage_authorized": True,
+            "reauth_required": False,
+            "email": "b@example.test",
+            "active_profile_id": "profile-b",
+            "accounts": [
+                {"profile_id": "profile-a", "email": "a@example.test"},
+                {"profile_id": "profile-b", "email": "b@example.test"},
+            ],
+        },
+    )
+
+    view.chatgpt_oauth_panel.refresh_controls()
+
+    selector = view.chatgpt_oauth_panel.account_selector
+    assert selector.visible is True
+    assert selector.disabled is False
+    assert selector.value == "profile-b"
+    assert [option.key for option in selector.options] == [
+        "profile-a",
+        "profile-b",
+    ]
 
 
 @pytest.mark.parametrize(

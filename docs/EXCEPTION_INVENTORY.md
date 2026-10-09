@@ -4,11 +4,11 @@
 > 範圍：`app/`、`translation_tool/`、`main.py` 內所有帶 `noqa: BLE001／S110／S112` 的位置。
 > 命令列 QA 工具（`md_extract_qa.py`、`md_inject_qa.py`）的 `print` 為刻意保留，不在此表。
 
-共 **306** 項；其中 **112** 項尚未在程式碼內寫明原因（以「分類」說明處理方式）。
+共 **307** 項；其中 **112** 項尚未在程式碼內寫明原因（以「分類」說明處理方式）。
 
 | 分類 | 數量 | 意義 |
 |---|---|---|
-| 已記錄／回報 | 272 | 例外處理本身有 log、提示、回報錯誤事件或重新丟出；寬鬆捕捉是為了不中斷整批流程 |
+| 已記錄／回報 | 273 | 例外處理本身有 log、提示、回報錯誤事件或重新丟出；寬鬆捕捉是為了不中斷整批流程 |
 | UI／畫面保護 | 18 | UI 層的畫面更新、icon 快取等；失敗只影響顯示，不影響資料 |
 | 盡力而為（靜默） | 16 | 引擎層、只有 `pass`／`continue`／回傳常數；失敗不影響結果（例如進度回報、還原失敗時以原始例外為準） |
 
@@ -89,6 +89,10 @@
 | `app/views/cache_view.py:CacheView._finish_mount` | BLE001/S110 | UI／畫面保護 | （未寫原因；見分類） |
 | `app/views/cache_view.py:CacheView._on_page_resized` | BLE001/S110 | UI／畫面保護 | （未寫原因；見分類） |
 | `app/views/cache_view.py:CacheView.commit_ui` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
+| `app/views/config/chatgpt_oauth_panel.py:ChatGPTOAuthPanel._start_login` | BLE001 | 已記錄／回報 | interactive OAuth boundary |
+| `app/views/config/chatgpt_oauth_panel.py:ChatGPTOAuthPanel._on_account_selected` | BLE001 | 已記錄／回報 | account switching UI boundary |
+| `app/views/config/chatgpt_oauth_panel.py:ChatGPTOAuthPanel._load_models` | BLE001 | 已記錄／回報 | provider request UI boundary |
+| `app/views/config/chatgpt_oauth_panel.py:ChatGPTOAuthPanel._on_disconnect` | BLE001 | 已記錄／回報 | credential revocation UI boundary |
 | `app/views/config/config_actions.py:_collect_validated_config` | BLE001 | 已記錄／回報 | config collection is a UI save boundary |
 | `app/views/config/config_actions.py:_write_config_with_feedback` | BLE001 | 已記錄／回報 | failure may occur before or after atomic replace |
 | `app/views/config/config_actions.py:_reload_after_confirmed_write` | BLE001 | 已記錄／回報 | reload is a UI boundary after confirmed persistence |
@@ -97,9 +101,6 @@
 | `app/views/config/db_location.py:attach_path_hooks.chain.handler` | BLE001 | 已記錄／回報 | 尚未掛上頁面時不影響輸入 |
 | `app/views/config/db_location.py:attach_priority_hooks.handler` | BLE001 | 已記錄／回報 | 尚未掛上頁面時不影響輸入 |
 | `app/views/config_view.py:ConfigView._on_unsaved_dialog_discard` | BLE001 | 已記錄／回報 | keep the dialog recoverable on reload failure |
-| `app/views/config_view.py:ConfigView._on_chatgpt_login` | BLE001 | 已記錄／回報 | OAuth is an interactive UI boundary |
-| `app/views/config_view.py:ConfigView._load_chatgpt_models` | BLE001 | 已記錄／回報 | provider request is an interactive UI boundary |
-| `app/views/config_view.py:ConfigView._on_chatgpt_disconnect` | BLE001 | 已記錄／回報 | credential revocation is a UI boundary |
 | `app/views/config_view.py:ConfigView._retry_config_reload` | BLE001 | 已記錄／回報 | keep recovery state until a full reload succeeds |
 | `app/views/dashboard_view.py:DashboardView._apply_on_ui` | BLE001 | 已記錄／回報 | 沒有 event loop（測試）就直接套用 |
 | `app/views/extractor/extractor_dialog.py:_extractor_run_extraction` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
