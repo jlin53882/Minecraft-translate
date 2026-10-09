@@ -878,7 +878,11 @@ def test_batch_replace_dialog_pages_all_rows_and_requires_preview_after_selectio
     dialog._preview()
 
     assert dialog.plan is not None and dialog.plan.update_count == 55
-    assert len(dialog.rows.controls) == 50 and dialog.next_btn.disabled is False
+    assert (
+        len(dialog.rows.controls) == 50
+        and dialog.next_btn.disabled is False
+        and dialog.page_nav.visible is True
+    )
     dialog._turn(1)
     assert len(dialog.rows.controls) == 5
 
@@ -887,6 +891,79 @@ def test_batch_replace_dialog_pages_all_rows_and_requires_preview_after_selectio
     assert dialog.plan is None and dialog.apply_btn.disabled is True
     dialog._preview()
     assert dialog.plan is not None and dialog.plan.update_count == 54
+    db.close()
+
+
+def test_batch_replace_dialog_makes_zero_matches_and_skip_reasons_clear(db_path):
+    from app.services_impl.moddb_service import EntryFilter
+    from app.views.moddb.batch_replace_dialog import BatchReplaceDialog
+
+    db = TranslationDB(db_path)
+    db.ingest(
+        "1.21.1",
+        [ScanItem(KIND_LANG, "batch", "item.batch", "Source", "已有譯文")],
+    )
+    dialog = BatchReplaceDialog(
+        mock_page(),
+        lambda: db,
+        EntryFilter(version="1.21.1"),
+        lambda _result: None,
+        operation_launcher=lambda target, **_kwargs: (target(), True)[1],
+    )
+    dialog.find_field.value = "青青"
+    dialog.replace_field.value = ""
+    dialog._preview()
+
+    assert dialog.plan is not None
+    assert dialog.plan.update_count == 0 and dialog.plan.skipped_count == 1
+    assert dialog.summary.value == "可替換 0 筆　·　略過 1 筆"
+    assert "沒有可替換項目" in "\n".join(texts_of(dialog.rows))
+    assert dialog.skipped_btn.disabled is False
+    assert dialog.skipped_btn.text == "查看略過原因（1）"
+    assert dialog.page_nav.visible is False
+
+    dialog._toggle_skipped()
+
+    assert dialog.skipped_btn.text == "查看可替換項目（0）"
+    assert dialog.page_nav.visible is True
+    assert "找不到符合的原文片段" in "\n".join(texts_of(dialog.rows))
+    db.close()
+
+
+def test_batch_replace_dialog_loads_skip_reasons_by_page(db_path):
+    from app.services_impl.moddb_service import EntryFilter
+    from app.views.moddb.batch_replace_dialog import BatchReplaceDialog
+
+    db = TranslationDB(db_path)
+    db.ingest(
+        "1.21.1",
+        [
+            ScanItem(KIND_LANG, "batch", f"item.batch.{index:03d}", "Source", "譯文")
+            for index in range(60)
+        ],
+    )
+    dialog = BatchReplaceDialog(
+        mock_page(),
+        lambda: db,
+        EntryFilter(version="1.21.1"),
+        lambda _result: None,
+        operation_launcher=lambda target, **_kwargs: (target(), True)[1],
+    )
+    dialog.find_field.value = "沒有這段文字"
+    dialog.replace_field.value = "新的文字"
+    dialog._preview()
+
+    assert dialog.plan is not None and dialog.plan.skipped_count == 60
+    assert dialog.plan.skipped_details_loaded is False
+    assert dialog._skipped_pages == {}
+
+    dialog._toggle_skipped()
+    assert len(dialog._skipped_pages[0]) == 50
+    assert dialog.page_text.value == "第 1/2 頁，每頁最多 50 筆"
+
+    dialog._turn(1)
+    assert len(dialog._skipped_pages[1]) == 10
+    assert dialog.page_text.value == "第 2/2 頁，每頁最多 50 筆"
     db.close()
 
 
@@ -1122,7 +1199,7 @@ def test_batch_replace_completion_does_not_expand_large_root_selection():
         BatchOperationOutcome("preview", 0, "complete", result=plan),
     )
     assert dialog.selection_plan is plan
-    assert "勾選 243,064" in dialog.summary.value
+    assert dialog.summary.value == "可替換 0 筆"
 
 
 def test_batch_replace_selection_criteria_use_sparse_exclusions():

@@ -60,6 +60,8 @@ class BatchReplaceDialog:
         self.only_checked = True
         self.preview_page = 0
         self.show_skipped = False
+        self._skipped_pages: dict[int, tuple] = {}
+        self._requested_skipped_page = 0
         self._generation = 0
         self._job_generation: int | None = None
         self._job_kind: str | None = None
@@ -106,12 +108,14 @@ class BatchReplaceDialog:
             on_change=self._on_quality_ack,
         )
         self.summary = ft.Text(
-            "輸入尋找與取代文字，再產生預覽。", size=12.5, color=C.MUTED
+            "尚未預覽",
+            size=14,
+            weight=ft.FontWeight.BOLD,
         )
         self.progress_text = ft.Text("", size=11.5, color=C.DIM, visible=False)
         self.progress_bar = ft.ProgressBar(value=0, visible=False)
         self.rows = ft.Column(
-            [kit.hint_text("預覽結果會顯示在這裡")],
+            [kit.hint_text("輸入尋找文字後，按「產生預覽」。")],
             spacing=4,
             scroll=ft.ScrollMode.AUTO,
             height=340,
@@ -142,8 +146,13 @@ class BatchReplaceDialog:
             on_click=lambda _e: self._turn(1),
             disabled=True,
         )
+        self.page_nav = ft.Row(
+            [self.previous_btn, self.page_text, self.next_btn],
+            alignment=ft.MainAxisAlignment.CENTER,
+            visible=False,
+        )
         self.skipped_btn = kit.button(
-            "顯示略過項目",
+            "查看略過原因",
             "ghost",
             size="sm",
             on_click=self._toggle_skipped,
@@ -176,13 +185,12 @@ class BatchReplaceDialog:
     def _build_preview_dialog(self, dialog_width: int, dialog_height: int):
         return ft.AlertDialog(
             modal=True,
-            title=ft.Text("批次字面取代"),
+            title=ft.Text("批次尋找與取代"),
             content=ft.Container(
                 content=ft.Column(
                     [
                         ft.Text(
-                            "套用目前清單的版本、模組、來源、狀態、時間及品質條件；只替換目前生效譯文。"
-                            "不會修改機翻快取或替換規則。",
+                            "依目前篩選搜尋生效譯文；預覽不會寫入，確認後才會取代。",
                             size=12,
                             color=C.MUTED,
                             selectable=True,
@@ -204,10 +212,7 @@ class BatchReplaceDialog:
                         self.progress_bar,
                         self.summary,
                         self.rows,
-                        ft.Row(
-                            [self.previous_btn, self.page_text, self.next_btn],
-                            alignment=ft.MainAxisAlignment.CENTER,
-                        ),
+                        self.page_nav,
                     ],
                     tight=True,
                     spacing=10,
@@ -281,7 +286,7 @@ class BatchReplaceDialog:
     def _on_dismiss(self, _e=None) -> None:
         was_open = self._dialog_open
         self._dialog_open = False
-        if was_open and self._busy and self._job_kind == "preview":
+        if was_open and self._busy and self._job_kind in {"preview", "skipped"}:
             self._cancel_preview()
         if was_open and self._job_kind != "apply":
             self._generation += 1
@@ -301,20 +306,21 @@ class BatchReplaceDialog:
         self.preview_page = 0
         self.show_skipped = False
         self.apply_btn.disabled = True
-        self.rows.controls = [kit.hint_text("條件已變更，請重新產生預覽。")]
-        self.summary.value = "條件已變更，請重新產生預覽。"
+        self.rows.controls = [kit.hint_text("條件已變更，請重新預覽。")]
+        self.summary.value = "條件已變更，請重新預覽。"
         self.page_text.value = "尚未預覽"
+        self.page_nav.visible = False
         self.previous_btn.disabled = True
         self.next_btn.disabled = True
         self.skipped_btn.disabled = True
-        self.skipped_btn.text = "顯示略過項目"
+        self.skipped_btn.text = "查看略過原因"
         self._update_dialog()
 
     def _on_scope_change(self, _e=None) -> None:
         if self._busy or self.selection_plan is None:
             return
         self.only_checked = bool(self.only_checked_control.value)
-        self._invalidate_selection("處理範圍已變更，請重新預覽。")
+        self._invalidate_selection("範圍已變更，請重新預覽。")
 
     def _on_quality_ack(self, _e=None) -> None:
         if self._busy or self.plan is None:
@@ -332,6 +338,7 @@ class BatchReplaceDialog:
 
     def _clear_plan_and_ack(self) -> None:
         self.plan = None
+        self._skipped_pages.clear()
         self._quality_ack_plan = None
         self._quality_ack_generation = None
         self._final_plan = None
@@ -373,12 +380,17 @@ class BatchReplaceDialog:
             self._update_dialog()
             return
         root_ids = self.selection_plan.root_ids if self.selection_plan else None
+        selection_criteria = (
+            self.selection_plan.criteria if self.selection_plan else None
+        )
         excluded_roots = self.excluded_roots
         only_checked = self.only_checked
         find_text = str(self.find_field.value or "")
         replace_text = str(self.replace_field.value or "")
         propagate = bool(self.propagate.value)
         self._clear_plan_and_ack()
+        self.show_skipped = False
+        self.preview_page = 0
         self._plan_catalog = source_catalog_for(db)
         self._busy = True
         self._generation += 1
@@ -387,7 +399,11 @@ class BatchReplaceDialog:
 
         def work(session: TaskSession):
             criteria = self._criteria_for_selection(
-                self.base_criteria, root_ids, excluded_roots, only_checked
+                self.base_criteria,
+                root_ids,
+                excluded_roots,
+                only_checked,
+                selection_criteria=selection_criteria,
             )
             return db.preview_batch_replace(
                 criteria,
@@ -408,10 +424,21 @@ class BatchReplaceDialog:
         root_ids: tuple[int, ...] | None,
         excluded_roots: set[int],
         only_checked: bool,
+        *,
+        selection_criteria: EntryFilter | None = None,
     ) -> EntryFilter:
         if root_ids is None:
             return base
         if only_checked:
+            if selection_criteria is not None:
+                return replace(
+                    selection_criteria,
+                    exclude_ids=tuple(
+                        dict.fromkeys(
+                            (*selection_criteria.exclude_ids, *sorted(excluded_roots))
+                        )
+                    ),
+                )
             return replace(
                 base,
                 include_ids=tuple(i for i in root_ids if i not in excluded_roots),
@@ -442,6 +469,8 @@ class BatchReplaceDialog:
 
     def _start_job(self, kind: str, generation: int, work: Callable):
         result_channel = BatchOperationResult(kind, generation)
+        self._job_generation = generation
+        self._job_kind = kind
         session, launched = launch_batch_replace_job(
             self.page,
             kind=kind,
@@ -452,8 +481,6 @@ class BatchReplaceDialog:
         )
         self._job_session = session
         self._job_result = result_channel
-        self._job_generation = generation
-        self._job_kind = kind
         self._job_handled = False
         self._last_progress_paint = 0.0
         self._last_progress_stage = ""
@@ -517,6 +544,8 @@ class BatchReplaceDialog:
             self._finish_preview(summary, outcome)
         elif kind == "preview":
             self._set_job_ui(None, "預覽已失效或對話框已關閉；請重新產生預覽。")
+        elif kind == "skipped" and generation == self._generation:
+            self._finish_skipped(summary, outcome)
         elif kind == "apply":
             self._finish_apply(summary, outcome)
 
@@ -528,6 +557,7 @@ class BatchReplaceDialog:
             and isinstance(outcome.result, BatchReplacePlan)
         ):
             self.plan = outcome.result
+            self._skipped_pages.clear()
             if self.selection_plan is None:
                 self.selection_plan = self.plan
                 self.excluded_roots.clear()
@@ -557,6 +587,60 @@ class BatchReplaceDialog:
             if isinstance(error, ValueError):
                 show_snack(self.page, redact_secrets(error), C.GOLD)
         self._set_job_ui(None, self.summary.value)
+
+    def _start_skipped_load(self, page_index: int) -> None:
+        if self._busy or self.plan is None:
+            return
+        db = self.get_db()
+        if db is None:
+            show_snack(self.page, "目前沒有可用的資料庫。", C.RED)
+            return
+        plan = self.plan
+        generation = self._generation
+        self._requested_skipped_page = page_index
+        self.preview_page = page_index
+        self.show_skipped = True
+        self._busy = True
+        self._render(update=False)
+        self._set_job_ui("skipped", "正在載入略過原因…")
+
+        def work(session: TaskSession):
+            return db.load_batch_replace_skipped_page(
+                plan,
+                offset=page_index * PREVIEW_PAGE_SIZE,
+                limit=PREVIEW_PAGE_SIZE,
+                progress_callback=lambda stage, value: self._record_progress(
+                    session, generation, stage, value
+                ),
+            )
+
+        self._start_job("skipped", generation, work)
+
+    def _finish_skipped(
+        self, summary: dict, outcome: BatchOperationOutcome | None
+    ) -> None:
+        state = summary.get("state")
+        if (
+            state == "complete"
+            and outcome is not None
+            and isinstance(outcome.result, tuple)
+            and self.plan is not None
+        ):
+            self._skipped_pages[self._requested_skipped_page] = outcome.result
+            self.show_skipped = True
+            self._render(update=False)
+            message = "略過原因已載入。"
+        elif state == "cancelled" or (outcome and outcome.state == "cancelled"):
+            self.show_skipped = False
+            self._render(update=False)
+            message = "略過原因載入已取消。"
+        else:
+            error = outcome.error if outcome else None
+            self.show_skipped = False
+            self._render(update=False)
+            message = self._error_message(error)
+            show_snack(self.page, message, C.RED)
+        self._set_job_ui(None, message)
 
     def _finish_apply(self, summary: dict, outcome: BatchOperationOutcome | None):
         if (
@@ -604,8 +688,9 @@ class BatchReplaceDialog:
         self.propagate.disabled = kind is not None
         self.only_checked_control.disabled = kind is not None
         self.quality_ack.disabled = kind is not None
-        self.cancel_job_btn.visible = kind == "preview"
-        self.cancel_job_btn.disabled = kind != "preview"
+        self.cancel_job_btn.visible = kind in {"preview", "skipped"}
+        self.cancel_job_btn.text = "取消載入" if kind == "skipped" else "取消預覽"
+        self.cancel_job_btn.disabled = kind not in {"preview", "skipped"}
         self.progress_text.visible = kind is not None
         self.progress_bar.visible = kind is not None
         self.progress_text.value = message
@@ -620,34 +705,54 @@ class BatchReplaceDialog:
         self._update_dialog()
 
     def _cancel_preview(self, _e=None) -> None:
-        if not self._busy or self._job_kind != "preview":
+        if not self._busy or self._job_kind not in {"preview", "skipped"}:
             return
+        kind = self._job_kind
         if self._job_session is not None:
             self._job_session.request_cancel()
         if self._job_result is not None:
             self._job_result.discard()
-        self._generation += 1
-        self._clear_plan_and_ack()
+        if kind == "preview":
+            self._generation += 1
+            self._clear_plan_and_ack()
+        else:
+            self.show_skipped = False
         self.cancel_job_btn.disabled = True
-        self.progress_text.value = "取消要求已送出，等待查詢停止…"
+        self.progress_text.value = (
+            "取消要求已送出，等待查詢停止…"
+            if kind == "preview"
+            else "取消要求已送出，等待載入停止…"
+        )
         self._update_dialog()
 
     def _turn(self, delta: int) -> None:
-        if self.plan is None:
+        if self.plan is None or self._busy:
             return
-        rows = self.plan.skipped if self.show_skipped else self.plan.changes
-        pages = max(1, (len(rows) + PREVIEW_PAGE_SIZE - 1) // PREVIEW_PAGE_SIZE)
-        self.preview_page = min(max(0, self.preview_page + delta), pages - 1)
+        total = self.plan.skipped_count if self.show_skipped else len(self.plan.changes)
+        pages = max(1, (total + PREVIEW_PAGE_SIZE - 1) // PREVIEW_PAGE_SIZE)
+        page_index = min(max(0, self.preview_page + delta), pages - 1)
+        self.preview_page = page_index
+        if (
+            self.show_skipped
+            and not self.plan.skipped_details_loaded
+            and page_index not in self._skipped_pages
+        ):
+            self._start_skipped_load(page_index)
+            return
         self._render()
 
     def _toggle_skipped(self, _e=None) -> None:
-        if self.plan is None:
+        if self.plan is None or self._busy:
             return
         self.show_skipped = not self.show_skipped
         self.preview_page = 0
-        self.skipped_btn.text = (
-            "顯示可替換項目" if self.show_skipped else "顯示略過項目"
-        )
+        if (
+            self.show_skipped
+            and not self.plan.skipped_details_loaded
+            and 0 not in self._skipped_pages
+        ):
+            self._start_skipped_load(0)
+            return
         self._render()
 
     def _toggle_root(self, entry_id: int, selected: bool) -> None:
@@ -657,73 +762,72 @@ class BatchReplaceDialog:
             self.excluded_roots.discard(entry_id)
         else:
             self.excluded_roots.add(entry_id)
-        self._invalidate_selection("根條目選取已變更；重新預覽前不會執行。")
+        self._invalidate_selection("勾選範圍已變更，請重新預覽。")
 
     def _display_rows(self):
         if self.show_skipped:
             if self.plan is None:
                 return None
-            return self.plan.skipped
+            if self.plan.skipped_details_loaded:
+                return self.plan.skipped
+            return self._skipped_pages.get(self.preview_page, ())
         if self.plan is not None:
             return self.plan.changes
         if self.selection_plan is not None:
             return self.selection_plan.root_changes
         return ()
 
-    def _selected_root_count(self) -> int:
-        if self.selection_plan is None:
-            return 0
-        return len(self.selection_plan.root_ids) - len(self.excluded_roots)
-
     def _render(self, *, update: bool = True) -> None:
         rows = self._display_rows()
         if rows is None:
-            self.rows.controls = [
-                kit.hint_text("選取範圍待重新預覽；目前不顯示舊略過結果。")
-            ]
+            self.rows.controls = [kit.hint_text("範圍已變更，請重新預覽。")]
             self.page_text.value = "待重新預覽"
+            self.page_nav.visible = False
             self.previous_btn.disabled = True
             self.next_btn.disabled = True
             self.skipped_btn.disabled = True
+            self.skipped_btn.text = self._skipped_button_label()
             self.apply_btn.disabled = True
             if update:
                 self._update_dialog()
             return
-        total = len(rows)
+        total = (
+            self.plan.skipped_count
+            if self.plan is not None and self.show_skipped
+            else len(rows)
+        )
         pages = max(1, (total + PREVIEW_PAGE_SIZE - 1) // PREVIEW_PAGE_SIZE)
         start = self.preview_page * PREVIEW_PAGE_SIZE
-        visible = rows[start : start + PREVIEW_PAGE_SIZE]
+        if self.show_skipped and self.plan and not self.plan.skipped_details_loaded:
+            visible = rows
+        else:
+            visible = rows[start : start + PREVIEW_PAGE_SIZE]
+        self.page_nav.visible = total > 0
         self.page_text.value = (
             f"第 {self.preview_page + 1}/{pages} 頁，每頁最多 {PREVIEW_PAGE_SIZE} 筆"
             if self.plan is not None
             else "待重新預覽（不會提交）"
         )
-        self.previous_btn.disabled = self.plan is None or self.preview_page == 0
-        self.next_btn.disabled = self.plan is None or self.preview_page >= pages - 1
-        self.skipped_btn.disabled = self.plan is None or not self.plan.skipped
-        self.skipped_btn.text = (
-            "顯示可替換項目" if self.show_skipped else "顯示略過項目"
+        self.previous_btn.disabled = (
+            self.plan is None or self.preview_page == 0 or self._busy
         )
+        self.next_btn.disabled = (
+            self.plan is None or self.preview_page >= pages - 1 or self._busy
+        )
+        self.skipped_btn.disabled = (
+            self.plan is None or not self.plan.skipped_count or self._busy
+        )
+        self.skipped_btn.text = self._skipped_button_label()
         self.rows.controls = self._render_rows(visible)
         if self.plan is None:
-            selected_count = self._selected_root_count()
-            self.summary.value = (
-                f"目前仍套用原始篩選範圍；已勾選 {selected_count:,d} 個根條目，"
-                "處理範圍尚未確認。重新預覽後才會列出可執行筆數。"
-            )
+            self.summary.value = "範圍已變更，請重新預覽。"
         else:
-            mode = (
-                "僅已勾選根條目"
-                if self.only_checked
-                else "目前篩選範圍（套用個別排除）"
-            )
-            self.summary.value = (
-                f"範圍：{mode}；符合根條目 {len(self.plan.root_ids):,d}；"
-                f"勾選 {self._selected_root_count():,d}；可執行 {self.plan.update_count:,d}；"
-                f"跨版本候選 {self.plan.extra_candidate_count:,d}（納入 {self.plan.extra_version_count:,d}）；"
-                f"略過 {self.plan.skipped_count:,d}（衝突 {self.plan.conflict_count:,d}）；"
-                f"品質混合變化 {self.plan.quality_mixed_count:,d}。"
-            )
+            result = f"可替換 {self.plan.update_count:,d} 筆"
+            if self.plan.extra_version_count:
+                result += f"（含跨版本 {self.plan.extra_version_count:,d} 筆）"
+            if self.plan.skipped_count:
+                result += f"　·　略過 {self.plan.skipped_count:,d} 筆"
+            self.summary.value = result
         quality_ok = self._quality_ack_is_valid()
         self.apply_btn.disabled = (
             self.plan is None or not self.plan.changes or not quality_ok or self._busy
@@ -740,7 +844,27 @@ class BatchReplaceDialog:
             show_skipped=self.show_skipped,
             busy=self._busy,
             on_toggle=self._toggle_root,
+            empty_message=(
+                "正在載入略過原因…"
+                if self.show_skipped and self._busy
+                else "尚未載入此頁略過原因"
+                if self.show_skipped
+                and self.plan
+                and not self.plan.skipped_details_loaded
+                else "沒有略過項目"
+                if self.show_skipped
+                else "沒有可替換項目"
+                if self.plan is not None
+                else "尚未產生預覽"
+            ),
         )
+
+    def _skipped_button_label(self) -> str:
+        if self.plan is None:
+            return "查看略過原因"
+        if self.show_skipped:
+            return f"查看可替換項目（{self.plan.update_count:,d}）"
+        return f"查看略過原因（{self.plan.skipped_count:,d}）"
 
     def _open_final_confirmation(self, _e=None) -> None:
         if self._busy or self.plan is None or not self.plan.changes:

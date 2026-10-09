@@ -81,6 +81,22 @@ from translation_tool.utils.cancellation import (
 
 _ENTRY_COLS = "e.id, e.kind, e.mc_version, e.mod_id, e.key, e.en_us"
 _CHUNK = 400  # SQLite 變數上限相容的批次大小
+_BATCH_REPLACE_STRIP_CHARS = "".join(
+    chr(codepoint)
+    for codepoint in (
+        *range(0x09, 0x0E),
+        *range(0x1C, 0x21),
+        0x85,
+        0xA0,
+        0x1680,
+        *range(0x2000, 0x200B),
+        0x2028,
+        0x2029,
+        0x202F,
+        0x205F,
+        0x3000,
+    )
+)
 
 
 def _like(text: str) -> str:
@@ -1029,6 +1045,56 @@ class TranslationDB:
             is_extra_version=extra,
         )
 
+    def _query_batch_replace_fast_rows(
+        self,
+        criteria: EntryFilter,
+        *,
+        conn: sqlite3.Connection | None = None,
+        find_text: str | None = None,
+        ids_only: bool = False,
+        progress_callback: Callable[[str, float], None] | None = None,
+    ) -> list[tuple] | list[int]:
+        """Fetch only the scope IDs or actual text matches for a simple preview.
+
+        The preview dialog normally shows replacements, not every row that was
+        skipped. Avoid transferring the full effective-translation projection
+        for hundreds of thousands of non-matching rows; skip details can be
+        loaded on demand when the user opens that view.
+        """
+        cond, params = self._filter_sql(criteria)
+        if ids_only:
+            select = "SELECT e.id"
+        else:
+            select = self._batch_replace_select_sql().removesuffix(" ")
+            cond += " AND f.entry_id IS NOT NULL AND f.zh_tw IS NOT NULL "
+            cond += " AND f.zh_tw<>'' AND instr(f.zh_tw, ?) > 0"
+            params.append(find_text or "")
+        sql = f"{select} {self._query_source()} WHERE {cond}"
+        connection = conn or self._conn
+        result: list[tuple] | list[int] = []
+        connection.set_progress_handler(lambda: int(is_cancelled()), 10_000)
+        try:
+            cursor = connection.execute(sql, tuple(params))
+            while chunk := cursor.fetchmany(_CHUNK):
+                raise_if_cancelled()
+                if ids_only:
+                    result.extend(int(row[0]) for row in chunk)
+                else:
+                    result.extend(chunk)
+                if progress_callback is not None:
+                    progress_callback(
+                        "查詢替換範圍" if ids_only else "查詢符合文字的條目",
+                        0.08 if ids_only else 0.42,
+                    )
+            raise_if_cancelled()
+        except sqlite3.OperationalError:
+            if is_cancelled():
+                raise TaskCancelled() from None
+            raise
+        finally:
+            connection.set_progress_handler(None, 0)
+        return result
+
     def _build_batch_replace_plan(
         self,
         criteria: EntryFilter,
@@ -1039,16 +1105,41 @@ class TranslationDB:
         confirmed_quality_worsening: bool,
         conn: sqlite3.Connection | None = None,
         progress_callback: Callable[[str, float], None] | None = None,
+        collect_skipped: bool = False,
     ) -> BatchReplacePlan:
         raise_if_cancelled()
         if progress_callback is not None:
             progress_callback("查詢符合條目", 0.02)
-        roots = self._query_entry_rows(
-            criteria,
-            conn=conn,
-            progress_callback=progress_callback,
-            batch_replace_projection=True,
-        )
+        # Cross-version checks and custom Python quality filters need every
+        # candidate row. The common no-propagation path only needs the root IDs
+        # plus rows whose effective translation can contain the find text.
+        collect_skipped = collect_skipped or propagate or criteria.quality.active
+        fast_path = not collect_skipped
+        if fast_path:
+            root_ids = tuple(
+                sorted(
+                    self._query_batch_replace_fast_rows(
+                        criteria,
+                        conn=conn,
+                        ids_only=True,
+                        progress_callback=progress_callback,
+                    )
+                )
+            )
+            roots = self._query_batch_replace_fast_rows(
+                criteria,
+                conn=conn,
+                find_text=find_text,
+                progress_callback=progress_callback,
+            )
+        else:
+            roots = self._query_entry_rows(
+                criteria,
+                conn=conn,
+                progress_callback=progress_callback,
+                batch_replace_projection=True,
+            )
+            root_ids = tuple(sorted(int(row[0]) for row in roots))
         siblings = (
             self._batch_sibling_rows(
                 roots, conn=conn, progress_callback=progress_callback
@@ -1056,8 +1147,7 @@ class TranslationDB:
             if propagate
             else {}
         )
-        root_ids = tuple(int(row[0]) for row in roots)
-        root_id_set = set(root_ids)
+        root_id_set = set(root_ids) if propagate else set()
         changes: dict[int, BatchReplaceChange] = {}
         skipped: dict[int, BatchReplaceSkipped] = {}
 
@@ -1074,26 +1164,33 @@ class TranslationDB:
             entry_id = int(row[0])
             old_text = row[6] or ""
             if row[7] is None or not old_text:
-                skipped.setdefault(
-                    entry_id, self._batch_skipped(row, "沒有目前生效譯文", extra=extra)
-                )
+                if collect_skipped:
+                    skipped.setdefault(
+                        entry_id,
+                        self._batch_skipped(row, "沒有目前生效譯文", extra=extra),
+                    )
                 return
             if find_text not in old_text:
-                skipped.setdefault(
-                    entry_id,
-                    self._batch_skipped(row, "找不到符合的原文片段", extra=extra),
-                )
+                if collect_skipped:
+                    skipped.setdefault(
+                        entry_id,
+                        self._batch_skipped(row, "找不到符合的原文片段", extra=extra),
+                    )
                 return
             new_text = old_text.replace(find_text, replace_text)
             if not new_text.strip():
-                skipped.setdefault(
-                    entry_id, self._batch_skipped(row, "替換後譯文為空白", extra=extra)
-                )
+                if collect_skipped:
+                    skipped.setdefault(
+                        entry_id,
+                        self._batch_skipped(row, "替換後譯文為空白", extra=extra),
+                    )
                 return
             if new_text == old_text:
-                skipped.setdefault(
-                    entry_id, self._batch_skipped(row, "替換後內容未改變", extra=extra)
-                )
+                if collect_skipped:
+                    skipped.setdefault(
+                        entry_id,
+                        self._batch_skipped(row, "替換後內容未改變", extra=extra),
+                    )
                 return
             source_text = row[5] or ""
             old_issues, new_issues, quality_deltas = quality_comparison(
@@ -1205,13 +1302,19 @@ class TranslationDB:
             changes=ordered_changes,
             skipped=ordered_skipped,
             confirmed_quality_worsening=confirmed_quality_worsening,
-            total_unique_entries=len(root_id_set | extra_ids),
+            total_unique_entries=(
+                len(root_id_set | extra_ids) if propagate else len(root_ids)
+            ),
             extra_version_count=extra_version_count,
             extra_candidate_count=len(extra_ids),
             conflict_count=conflict_count,
             quality_mixed_count=quality_mixed_count,
             quality_worsened_count=quality_worsened_count,
             root_changes=tuple(root_changes),
+            skipped_count_value=(
+                None if collect_skipped else len(root_ids) - len(ordered_changes)
+            ),
+            skipped_details_loaded=collect_skipped,
         )
 
     def preview_batch_replace(
@@ -1235,6 +1338,85 @@ class TranslationDB:
                 propagate=propagate,
                 confirmed_quality_worsening=confirmed_quality_worsening,
                 progress_callback=progress_callback,
+            )
+
+    def load_batch_replace_skipped_page(
+        self,
+        plan: BatchReplacePlan,
+        *,
+        offset: int = 0,
+        limit: int = 50,
+        progress_callback: Callable[[str, float], None] | None = None,
+    ) -> tuple[BatchReplaceSkipped, ...]:
+        """Load one page of skip reasons after the user opens that view."""
+        start = max(0, int(offset))
+        size = max(1, int(limit))
+        if plan.skipped_details_loaded:
+            return plan.skipped[start : start + size]
+        with self._lock:
+            if self._database_identity() != plan.database_identity:
+                raise ValueError("資料庫已切換，請重新產生批次替換預覽")
+            current = self._build_batch_replace_plan(
+                plan.criteria,
+                plan.find_text,
+                plan.replace_text,
+                propagate=plan.propagate,
+                confirmed_quality_worsening=plan.confirmed_quality_worsening,
+            )
+            if current != plan:
+                raise ValueError("預覽後條目已變動，請重新產生批次替換預覽")
+            cond, filter_params = self._filter_sql(plan.criteria)
+            reason_sql = (
+                "CASE "
+                "WHEN f.entry_id IS NULL OR f.zh_tw IS NULL OR f.zh_tw='' "
+                "THEN ? "
+                "WHEN instr(f.zh_tw, ?) = 0 THEN ? "
+                "WHEN trim(replace(f.zh_tw, ?, ?), ?) = '' THEN ? "
+                "WHEN replace(f.zh_tw, ?, ?) = f.zh_tw THEN ? "
+                "END"
+            )
+            sql = (
+                "SELECT entry_id, mc_version, key, reason FROM ("
+                "SELECT e.id AS entry_id, e.mc_version, e.key, "
+                f"{reason_sql} AS reason {self._query_source()} WHERE {cond}"
+                ") WHERE reason IS NOT NULL ORDER BY entry_id LIMIT ? OFFSET ?"
+            )
+            params = (
+                "沒有目前生效譯文",
+                plan.find_text,
+                "找不到符合的原文片段",
+                plan.find_text,
+                plan.replace_text,
+                _BATCH_REPLACE_STRIP_CHARS,
+                "替換後譯文為空白",
+                plan.find_text,
+                plan.replace_text,
+                "替換後內容未改變",
+                *filter_params,
+                size,
+                start,
+            )
+            connection = self._conn
+            connection.set_progress_handler(lambda: int(is_cancelled()), 10_000)
+            try:
+                if progress_callback is not None:
+                    progress_callback("載入略過原因", 0.1)
+                rows = connection.execute(sql, params).fetchall()
+                raise_if_cancelled()
+            except sqlite3.OperationalError:
+                if is_cancelled():
+                    raise TaskCancelled() from None
+                raise
+            finally:
+                connection.set_progress_handler(None, 0)
+            return tuple(
+                BatchReplaceSkipped(
+                    entry_id=int(row[0]),
+                    mc_version=row[1],
+                    key=row[2],
+                    reason=row[3],
+                )
+                for row in rows
             )
 
     def execute_batch_replace(
@@ -1268,6 +1450,7 @@ class TranslationDB:
                 confirmed_quality_worsening=plan.confirmed_quality_worsening,
                 conn=conn,
                 progress_callback=progress_callback,
+                collect_skipped=plan.skipped_details_loaded,
             )
             if current != plan:
                 raise ValueError("預覽後條目已變動，請重新產生批次替換預覽")

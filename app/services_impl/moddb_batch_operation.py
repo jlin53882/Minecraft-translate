@@ -126,7 +126,7 @@ def _run_batch_job(
 ) -> None:
     try:
         session.start()
-        if kind == "preview":
+        if kind in {"preview", "skipped"}:
             with cancel_scope(lambda: session.cancel_requested):
                 result = work(session)
         else:
@@ -180,7 +180,13 @@ def launch_batch_replace_job(
     """Own session start/finish and operation policy for one batch dialog job."""
     session = tag_session(
         TaskSession(),
-        "Mod DB 批次替換預覽" if kind == "preview" else "Mod DB 批次替換寫入",
+        (
+            "Mod DB 批次替換預覽"
+            if kind == "preview"
+            else "Mod DB 略過原因載入"
+            if kind == "skipped"
+            else "Mod DB 批次替換寫入"
+        ),
         "moddb",
         page=page,
     )
@@ -205,20 +211,22 @@ def launch_batch_replace_job(
             task_session=session,
             cancellation=(
                 CancellationPolicy.COOPERATIVE
-                if kind == "preview"
+                if kind in {"preview", "skipped"}
                 else CancellationPolicy.NON_CANCELLABLE
             ),
             commit=(
-                CommitPolicy.EPHEMERAL if kind == "preview" else CommitPolicy.ATOMIC
+                CommitPolicy.EPHEMERAL
+                if kind in {"preview", "skipped"}
+                else CommitPolicy.ATOMIC
             ),
             durability=(
                 DurabilityPolicy.RECOMPUTABLE
-                if kind == "preview"
+                if kind in {"preview", "skipped"}
                 else DurabilityPolicy.USER_ACTION
             ),
             shutdown=(
                 ShutdownPolicy.CANCEL_AND_DRAIN
-                if kind == "preview"
+                if kind in {"preview", "skipped"}
                 else ShutdownPolicy.ALLOW_TO_FINISH
             ),
         )

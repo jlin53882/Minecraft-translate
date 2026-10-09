@@ -330,6 +330,8 @@ class BatchReplacePlan:
     quality_mixed_count: int = 0
     quality_worsened_count: int = 0
     root_changes: tuple[BatchReplaceChange, ...] = ()
+    skipped_count_value: int | None = None
+    skipped_details_loaded: bool = True
 
     @property
     def update_count(self) -> int:
@@ -337,6 +339,8 @@ class BatchReplacePlan:
 
     @property
     def skipped_count(self) -> int:
+        if self.skipped_count_value is not None:
+            return self.skipped_count_value
         return len(self.skipped)
 
 

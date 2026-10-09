@@ -100,6 +100,7 @@ def render_batch_preview_rows(
     show_skipped: bool,
     busy: bool,
     on_toggle: Callable[[int, bool], None],
+    empty_message: str,
 ) -> list[ft.Control]:
     """Build controls only for the supplied page, never the complete plan."""
     controls: list[ft.Control] = []
@@ -167,4 +168,4 @@ def render_batch_preview_rows(
                 tight=True,
             )
         )
-    return controls or [kit.hint_text("此頁沒有條目")]
+    return controls or [kit.hint_text(empty_message)]

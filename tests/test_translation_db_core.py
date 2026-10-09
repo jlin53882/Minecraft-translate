@@ -603,6 +603,57 @@ def test_batch_replace_literal_all_pages_and_manual_unreviewed(db):
     )
 
 
+def test_batch_replace_loads_skip_details_only_when_requested(db):
+    from dataclasses import replace
+
+    db.ingest(
+        "1.21.1",
+        [
+            item(key="item.lazy.match", tw="譯文舊字"),
+            item(key="item.lazy.miss", tw="沒有符合文字"),
+            item(key="item.lazy.empty", tw=""),
+            item(key="item.lazy.blank", tw="舊字"),
+            item(key="item.lazy.unchanged", tw="完全相同"),
+        ],
+    )
+    criteria = EntryFilter(version="1.21.1")
+
+    plan = db.preview_batch_replace(
+        criteria, "舊字", "　", confirmed_quality_worsening=True
+    )
+
+    assert plan.update_count == 1
+    assert plan.skipped_count == 4
+    assert plan.skipped == ()
+    assert plan.skipped_details_loaded is False
+
+    skipped = (
+        *db.load_batch_replace_skipped_page(plan, offset=0, limit=2),
+        *db.load_batch_replace_skipped_page(plan, offset=2, limit=2),
+    )
+
+    assert {item.key: item.reason for item in skipped} == {
+        "item.lazy.empty": "沒有目前生效譯文",
+        "item.lazy.miss": "找不到符合的原文片段",
+        "item.lazy.blank": "替換後譯文為空白",
+        "item.lazy.unchanged": "找不到符合的原文片段",
+    }
+    loaded_plan = replace(
+        plan,
+        skipped=skipped,
+        skipped_count_value=None,
+        skipped_details_loaded=True,
+    )
+    result = db.execute_batch_replace(loaded_plan)
+    assert result.updated == 1 and result.skipped == 4
+
+    unchanged_plan = db.preview_batch_replace(criteria, "相同", "相同")
+    unchanged_page = db.load_batch_replace_skipped_page(unchanged_plan, limit=50)
+    assert {item.key: item.reason for item in unchanged_page}[
+        "item.lazy.unchanged"
+    ] == ("替換後內容未改變")
+
+
 def test_batch_replace_propagates_only_exact_same_effective_state(db):
     db.ingest("1.21.1", [item(key="item.same", tw="before")])
     db.ingest("1.20.1", [item(key="item.same", tw="before")])
