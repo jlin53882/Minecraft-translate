@@ -16,9 +16,10 @@ Mod 翻譯資料庫（SQLite）的資料表結構、來源代碼與連線設定�
 from __future__ import annotations
 
 import sqlite3
+import time
 from pathlib import Path
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 3
 
 KIND_LANG = "lang"
 KIND_PATCHOULI = "patchouli"
@@ -28,7 +29,7 @@ KINDS = (KIND_LANG, KIND_PATCHOULI)
 SRC_AI = 0
 SRC_JAR_TW = 1
 SRC_JAR_CN = 2  # 簡中經 OpenCC 轉繁
-SRC_SUBTITLE = 3  # 町宮字幕組
+SRC_SUBTITLE = 3  # 釘宮翻譯組（舊設定別名：町宮字幕組）
 SRC_I18N = 4
 SRC_CUSTOM = 5
 SRC_MANUAL = 6
@@ -37,7 +38,7 @@ SOURCE_NAMES: dict[int, str] = {
     SRC_AI: "AI 機翻",
     SRC_JAR_TW: "模組自帶繁中",
     SRC_JAR_CN: "簡中轉繁",
-    SRC_SUBTITLE: "町宮字幕組",
+    SRC_SUBTITLE: "釘宮翻譯組",
     SRC_I18N: "i18n 轉換",
     SRC_CUSTOM: "自訂補充",
     SRC_MANUAL: "人工",
@@ -51,15 +52,13 @@ CUSTOM_SOURCE_BASE = 100
 
 
 def register_source_names(registry: dict[str, int]) -> None:
-    """以這個資料庫登錄的自訂來源取代 ``SOURCE_NAMES`` 的自訂部分（就地更新）。
+    """Deprecated compatibility hook; custom names belong to ``SourceCatalog``.
 
-    先清掉前一個資料庫留下的自訂碼，切換資料庫後才不會殘留別的庫的來源。
+    ``SOURCE_NAMES`` intentionally contains built-ins only. Keeping this
+    function avoids breaking downstream imports while preventing a database
+    selection from changing labels in another open database or task.
     """
-    for code in [c for c in SOURCE_NAMES if c >= CUSTOM_SOURCE_BASE]:
-        del SOURCE_NAMES[code]
-    for name, code in registry.items():
-        if code >= CUSTOM_SOURCE_BASE:
-            SOURCE_NAMES[int(code)] = name
+    del registry
 
 
 # 預設優先序（先者優先）；已校驗（checker 不為空）者永遠最優先
@@ -101,7 +100,10 @@ CREATE TABLE IF NOT EXISTS translation (
     zh_tw      TEXT NOT NULL DEFAULT '',
     zh_cn      TEXT NOT NULL DEFAULT '',
     checker    TEXT NOT NULL DEFAULT '',
+    review_status TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    revision   INTEGER NOT NULL DEFAULT 0,
     UNIQUE (entry_id, source)
 );
 
@@ -109,7 +111,8 @@ CREATE TABLE IF NOT EXISTS effective (
     entry_id INTEGER PRIMARY KEY REFERENCES entry (id) ON DELETE CASCADE,
     zh_tw    TEXT NOT NULL,
     source   INTEGER NOT NULL,
-    checker  TEXT NOT NULL DEFAULT ''
+    checker  TEXT NOT NULL DEFAULT '',
+    review_status TEXT
 );
 
 CREATE TABLE IF NOT EXISTS history (
@@ -122,10 +125,17 @@ CREATE TABLE IF NOT EXISTS history (
     old_zh_tw   TEXT NOT NULL DEFAULT '',
     new_zh_tw   TEXT NOT NULL DEFAULT '',
     prev_manual TEXT,
+    prev_checker TEXT,
+    prev_review_status TEXT,
+    new_checker TEXT,
+    new_review_status TEXT,
+    prev_revision INTEGER,
+    new_revision INTEGER,
     note        TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_history_entry ON history (entry_id);
 CREATE INDEX IF NOT EXISTS idx_history_batch ON history (batch);
+CREATE INDEX IF NOT EXISTS idx_history_entry_action_at ON history (entry_id, action, at);
 
 CREATE TABLE IF NOT EXISTS src_change (
     id          INTEGER PRIMARY KEY,
@@ -183,13 +193,189 @@ def connect(path: str | Path, *, readonly: bool = False) -> sqlite3.Connection:
 
 
 def init_schema(conn: sqlite3.Connection) -> None:
-    """建立資料表（已存在則略過）並記錄 schema 版本。"""
+    """建立資料表，遞增 migration 先備份並在單一交易中套用。"""
     conn.executescript(_DDL)
+    row = conn.execute("SELECT value FROM meta WHERE key='schema_version'").fetchone()
+    if row is None:
+        conn.execute(
+            "INSERT INTO meta (key, value) VALUES ('schema_version', ?)",
+            (str(SCHEMA_VERSION),),
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_effective_source_review "
+            "ON effective (source, review_status)"
+        )
+        _install_schema_v3_objects(conn)
+        conn.commit()
+        return
+    version = stored_schema_version(conn)
+    while version < SCHEMA_VERSION:
+        next_version = version + 1
+        if next_version == 2:
+            _backup_before_review_migration(conn)
+        elif next_version == 3:
+            _backup_before_time_migration(conn)
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            if next_version == 2:
+                _migrate_review_state_v2(conn)
+            elif next_version == 3:
+                _migrate_time_and_revision_v3(conn)
+            conn.execute(
+                "UPDATE meta SET value=? WHERE key='schema_version'",
+                (str(next_version),),
+            )
+        except BaseException:
+            conn.rollback()
+            raise
+        else:
+            conn.commit()
+        version = next_version
     conn.execute(
-        "INSERT OR IGNORE INTO meta (key, value) VALUES ('schema_version', ?)",
-        (str(SCHEMA_VERSION),),
+        "CREATE INDEX IF NOT EXISTS idx_effective_source_review "
+        "ON effective (source, review_status)"
     )
+    _install_schema_v3_objects(conn)
     conn.commit()
+
+
+def _backup_before_review_migration(conn: sqlite3.Connection) -> Path | None:
+    """Write a consistent side-by-side SQLite backup before the v1→v2 change."""
+    main = next(
+        (row[2] for row in conn.execute("PRAGMA database_list") if row[1] == "main"),
+        "",
+    )
+    if not main:
+        return None
+    source_path = Path(main)
+    backup_path = source_path.with_name(
+        f"{source_path.name}.pre-schema-v2-{time.time_ns()}.bak"
+    )
+    target = sqlite3.connect(backup_path)
+    try:
+        conn.backup(target)
+    except BaseException:
+        target.close()
+        backup_path.unlink(missing_ok=True)
+        raise
+    target.close()
+    return backup_path
+
+
+def _migrate_review_state_v2(conn: sqlite3.Connection) -> None:
+    """Add explicit review state while preserving all v1 manual provenance."""
+    for table, column in (
+        ("translation", "review_status"),
+        ("effective", "review_status"),
+        ("history", "prev_checker"),
+        ("history", "prev_review_status"),
+        ("history", "new_checker"),
+        ("history", "new_review_status"),
+    ):
+        columns = {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
+        if column not in columns:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} TEXT")
+    conn.execute(
+        "UPDATE translation SET review_status='legacy_unknown' WHERE source=?",
+        (SRC_MANUAL,),
+    )
+    conn.execute(
+        "UPDATE effective SET review_status=(SELECT review_status FROM translation "
+        "WHERE translation.entry_id=effective.entry_id "
+        "AND translation.source=effective.source)"
+    )
+    conn.execute("DELETE FROM stat_cache")
+    conn.execute(
+        "INSERT INTO meta (key, value) VALUES ('data_gen', '1') "
+        "ON CONFLICT(key) DO UPDATE SET value=CAST(value AS INTEGER)+1"
+    )
+
+
+def _backup_before_time_migration(conn: sqlite3.Connection) -> Path | None:
+    """Keep a consistent v2 sidecar before adding timestamps and revisions."""
+    main = next(
+        (row[2] for row in conn.execute("PRAGMA database_list") if row[1] == "main"),
+        "",
+    )
+    if not main:
+        return None
+    source_path = Path(main)
+    backup_path = source_path.with_name(
+        f"{source_path.name}.pre-schema-v3-{time.time_ns()}.bak"
+    )
+    target = sqlite3.connect(backup_path)
+    try:
+        conn.backup(target)
+    except BaseException:
+        target.close()
+        backup_path.unlink(missing_ok=True)
+        raise
+    target.close()
+    return backup_path
+
+
+def _migrate_time_and_revision_v3(conn: sqlite3.Connection) -> None:
+    """Add unknown-preserving first-seen timestamps and monotonic row revisions."""
+    translation_columns = {
+        row[1] for row in conn.execute("PRAGMA table_info(translation)")
+    }
+    if "created_at" not in translation_columns:
+        # Old rows remain NULL: updated_at is not evidence of first import.
+        conn.execute("ALTER TABLE translation ADD COLUMN created_at TEXT")
+    if "revision" not in translation_columns:
+        conn.execute(
+            "ALTER TABLE translation ADD COLUMN revision INTEGER NOT NULL DEFAULT 0"
+        )
+    history_columns = {row[1] for row in conn.execute("PRAGMA table_info(history)")}
+    for column in ("prev_revision", "new_revision"):
+        if column not in history_columns:
+            conn.execute(f"ALTER TABLE history ADD COLUMN {column} INTEGER")
+    max_id = conn.execute("SELECT COALESCE(MAX(id), 0) FROM translation").fetchone()[0]
+    conn.execute(
+        "INSERT INTO meta (key, value) VALUES ('translation_revision_seq', ?) "
+        "ON CONFLICT(key) DO UPDATE SET value=MAX(CAST(value AS INTEGER), CAST(excluded.value AS INTEGER))",
+        (str(max_id),),
+    )
+    conn.execute("DELETE FROM stat_cache")
+    conn.execute(
+        "INSERT INTO meta (key, value) VALUES ('data_gen', '1') "
+        "ON CONFLICT(key) DO UPDATE SET value=CAST(value AS INTEGER)+1"
+    )
+    _install_schema_v3_objects(conn)
+
+
+def _install_schema_v3_objects(conn: sqlite3.Connection) -> None:
+    """Install timestamp and revision triggers for fresh and migrated databases."""
+    conn.execute(
+        """
+        CREATE TRIGGER IF NOT EXISTS translation_insert_timestamp_revision
+        AFTER INSERT ON translation
+        BEGIN
+            INSERT INTO meta (key, value) VALUES ('translation_revision_seq', '1')
+            ON CONFLICT(key) DO UPDATE SET value=CAST(value AS INTEGER)+1;
+            UPDATE translation
+            SET created_at=COALESCE(NEW.created_at, CURRENT_TIMESTAMP),
+                revision=(SELECT CAST(value AS INTEGER) FROM meta
+                          WHERE key='translation_revision_seq')
+            WHERE id=NEW.id;
+        END;
+        """
+    )
+    conn.execute(
+        """
+        CREATE TRIGGER IF NOT EXISTS translation_update_revision
+        AFTER UPDATE ON translation
+        WHEN NEW.revision IS OLD.revision
+        BEGIN
+            INSERT INTO meta (key, value) VALUES ('translation_revision_seq', '1')
+            ON CONFLICT(key) DO UPDATE SET value=CAST(value AS INTEGER)+1;
+            UPDATE translation
+            SET revision=(SELECT CAST(value AS INTEGER) FROM meta
+                          WHERE key='translation_revision_seq')
+            WHERE id=NEW.id;
+        END;
+        """
+    )
 
 
 DB_EMPTY = "empty"  # 沒有任何資料表（新檔案或 0 位元組的檔案）
