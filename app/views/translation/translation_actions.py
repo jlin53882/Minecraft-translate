@@ -175,7 +175,6 @@ def run_kjs(view, *, dry_run: bool):
         show_snack(view.page, "TaskSession 尚未可用", C.RED)
         return
     out_dir = (view.kjs_out_dir.value or "").strip() or None
-    source_mode = str(getattr(view.kjs_source_mode, "value", None) or "fresh")
     view._set_status(
         "模擬執行" if dry_run else "執行中",
         C.GOLD_BG if dry_run else C.DIA_BG,
@@ -223,7 +222,6 @@ def run_kjs(view, *, dry_run: bool):
                 step_translate=bool(view.kjs_step_translate.value),
                 step_inject=bool(view.kjs_step_inject.value),
                 write_new_cache=bool(view.kjs_write_new_cache.value),
-                source_mode=source_mode,
             )
         except Exception as ex:  # noqa: BLE001
             try:

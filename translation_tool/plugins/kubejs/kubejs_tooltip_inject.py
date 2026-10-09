@@ -12,7 +12,6 @@ from collections import defaultdict
 from collections.abc import Callable
 from pathlib import Path
 
-from translation_tool.core.kubejs_translator_state import atomic_write_bytes
 from translation_tool.utils.log_unit import log_error, log_info
 
 
@@ -318,9 +317,6 @@ def inject(
     session=None,
     progress_base: float = 0.0,
     progress_span: float = 1.0,
-    source_roots: dict[str, str] | None = None,
-    source_order: list[str] | None = None,
-    pending_root: str | None = None,
 ) -> dict:
     """將翻譯內容注入 KubeJS 輸出，保留來源腳本並只計數真正變更的 JS。
 
@@ -362,23 +358,6 @@ def inject(
             if file.endswith(".json"):
                 json_files.append(os.path.join(root, file))
 
-    source_roots = source_roots or {}
-    order_index = {
-        source_id: index for index, source_id in enumerate(source_order or [])
-    }
-
-    def _ordered_json_key(path: str) -> tuple[int, str]:
-        relative = Path(path).relative_to(trans_root)
-        if len(relative.parts) >= 3 and relative.parts[0] == "_sources":
-            return (
-                order_index.get(relative.parts[1], 10**9),
-                relative.as_posix().casefold(),
-            )
-        return (-1, relative.as_posix().casefold())
-
-    json_files.sort(key=_ordered_json_key)
-    claimed_js_outputs: set[str] = set()
-
     total = max(1, len(json_files))
     done = 0
 
@@ -387,61 +366,15 @@ def inject(
 
     for json_path in json_files:
         file = os.path.basename(json_path)
-        relative_path = Path(json_path).relative_to(trans_root)
-        relative_parts = relative_path.parts
-        source_id: str | None = None
-        script_relative = relative_path
-        if len(relative_parts) >= 3 and relative_parts[0] == "_sources":
-            source_id = relative_parts[1]
-            script_relative = Path(*relative_parts[2:])
-        rel = script_relative.parent.as_posix()
-        if rel == ".":
-            rel = ""
+        rel = os.path.relpath(os.path.dirname(json_path), trans_root)
 
         # ---------------- Lang JSON ----------------
-        if "lang" in {part.lower() for part in relative_path.parts}:
+        if "/lang/" in json_path.replace("\\", "/"):
             # ✅ 把 LM翻譯後的 lang 結果輸出到 完成（保留相對路徑）
             rel_file = Path(os.path.relpath(json_path, trans_root))
             out_path = out_root / rel_file
-            try:
-                incoming = json.loads(Path(json_path).read_text(encoding="utf-8-sig"))
-            except (OSError, json.JSONDecodeError) as exc:
-                raise ValueError(f"無法讀取翻譯語言檔：{json_path}: {exc}") from exc
-            if not isinstance(incoming, dict):
-                raise ValueError(f"翻譯語言檔不是 JSON object：{json_path}")
-            existing: dict = {}
-            if out_path.is_file():
-                try:
-                    loaded = json.loads(out_path.read_text(encoding="utf-8-sig"))
-                    if isinstance(loaded, dict):
-                        existing = loaded
-                except (OSError, json.JSONDecodeError):
-                    existing = {}
-            pending_keys: set[str] = set()
-            if pending_root:
-                pending_relative = (
-                    rel_file.with_name("en_us.json")
-                    if rel_file.name.lower() == "zh_tw.json"
-                    else rel_file
-                )
-                pending_path = Path(pending_root) / pending_relative
-                if pending_path.is_file():
-                    try:
-                        pending_value = json.loads(
-                            pending_path.read_text(encoding="utf-8-sig")
-                        )
-                        if isinstance(pending_value, dict):
-                            pending_keys = set(pending_value)
-                    except (OSError, json.JSONDecodeError):
-                        pending_keys = set()
-            merged = dict(existing)
-            for key, value in incoming.items():
-                if key not in merged or key in pending_keys:
-                    merged[key] = value
-            payload = (json.dumps(merged, ensure_ascii=False, indent=2) + "\n").encode(
-                "utf-8"
-            )
-            atomic_write_bytes(out_path, payload)
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            out_path.write_bytes(Path(json_path).read_bytes())
 
             if session:
                 log_info(f"✔ Lang → {out_path}")
@@ -455,18 +388,7 @@ def inject(
 
         # ---------------- KubeJS Tooltips ----------------
         original_js = to_js_name(file)
-        if source_id is not None:
-            source_root_value = source_roots.get(source_id)
-            if source_root_value is None:
-                if session:
-                    log_info(f"⏭️ 找不到來源對應，略過：{relative_path}")
-                done += 1
-                continue
-            script_root = Path(resolve_kubejs_root(source_root_value)).resolve()
-        else:
-            script_root = orig_root
-        script_path = script_relative.with_suffix(".js")
-        js_path = script_root / script_path
+        js_path = orig_root / rel / original_js
 
         if not js_path.exists():
             # 找不到原始 js 就跳過（但也算進 progress）
@@ -477,14 +399,6 @@ def inject(
                 p = progress_base + (done / total) * progress_span
                 session.set_progress(min(max(p, 0.0), 0.999))
             continue
-
-        output_relative = script_path.as_posix().casefold()
-        if output_relative in claimed_js_outputs:
-            if session:
-                log_info(f"⏭️ 多來源同一路徑，保留較早匯入的來源：{script_path}")
-            done += 1
-            continue
-        claimed_js_outputs.add(output_relative)
 
         with open(json_path, "r", encoding="utf-8") as f:
             translations = json.load(f)
@@ -714,7 +628,7 @@ def inject(
         # ----------------------------
         # ✅ 寫出 patched js
         # ----------------------------
-        out_path = out_root / script_path
+        out_path = out_root / rel / original_js
         out_path.parent.mkdir(parents=True, exist_ok=True)
 
         with open(out_path, "w", encoding="utf-8") as f:

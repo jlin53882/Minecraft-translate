@@ -196,18 +196,6 @@ def build_kjs_tab(view) -> ft.Control:
     view.kjs_step_extract = ft.Checkbox(value=True)
     view.kjs_step_translate = ft.Checkbox(value=True)
     view.kjs_step_inject = ft.Checkbox(value=True)
-    view.kjs_source_mode = ft.Dropdown(
-        label="來源匯入方式",
-        value="fresh",
-        dense=True,
-        options=[
-            ft.dropdown.Option(key="fresh", text="重新整理（僅目前來源）"),
-            ft.dropdown.Option(
-                key="incremental",
-                text="增量匯入（保留來源；衝突時先匯入者優先）",
-            ),
-        ],
-    )
     cache = _cache_switch(view, "kjs_write_new_cache")
     steps = _step_row(
         view,
@@ -237,11 +225,7 @@ def build_kjs_tab(view) -> ft.Control:
     )
     return _tab(
         view,
-        [
-            build_path_row(view, view.kjs_in_dir),
-            build_path_row(view, view.kjs_out_dir),
-            view.kjs_source_mode,
-        ],
+        [build_path_row(view, view.kjs_in_dir), build_path_row(view, view.kjs_out_dir)],
         steps,
         cache,
         actions,

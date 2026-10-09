@@ -15,7 +15,6 @@ def run_kubejs_tooltip_service(
     step_translate: bool = True,
     step_inject: bool = True,
     write_new_cache: bool = True,
-    source_mode: str = "fresh",
 ) -> None:
     """執行 KubeJS 翻譯流程（無回傳值）。"""
     from app.services_impl.pipelines._task_runner import run_callable_task
@@ -31,7 +30,6 @@ def run_kubejs_tooltip_service(
             "step_translate": step_translate,
             "step_inject": step_inject,
             "write_new_cache": write_new_cache,
-            "source_mode": source_mode,
         },
         session=session,
         dry_run=dry_run,
@@ -50,7 +48,6 @@ def run_kubejs_tooltip_service(
                 "step_translate": step_translate,
                 "step_inject": step_inject,
                 "write_new_cache": write_new_cache,
-                "source_mode": source_mode,
             },
             add_session_log_on_error=False,
             ui_log_handler=UI_LOG_HANDLER,

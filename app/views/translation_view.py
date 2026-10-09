@@ -325,7 +325,6 @@ class TranslationView(ft.Column):
             self.kjs_step_translate.value = True
             self.kjs_step_inject.value = flag("step_inject")
             self.kjs_write_new_cache.value = flag("write_new_cache")
-            self.kjs_source_mode.value = str(options.get("source_mode") or "fresh")
             runner = self._run_kjs
         elif kind == "md":
             self.tabs.selected_index = 2
@@ -422,7 +421,6 @@ class TranslationView(ft.Column):
     def _reset_kjs_inputs(self):
         """重置 KubeJS 翻譯的所有輸入欄位"""
         self.kjs_in_dir.value = ""
-        self.kjs_source_mode.value = "fresh"
         self.kjs_out_dir.value = ""
         self.kjs_step_extract.value = True
         self.kjs_step_translate.value = True

@@ -6,25 +6,70 @@
 
 from __future__ import annotations
 
+import json
 import re
-import shutil
-import tempfile
 from collections.abc import Callable
-from hashlib import sha256
 from pathlib import Path
 from typing import Any
 
-from translation_tool.core.kubejs_translator_state import (
-    atomic_write_json,
-    load_owned_files,
-    sync_managed_tree,
-)
 from translation_tool.plugins.shared.rich_text_shield import (
     shield_text,
     unshield_text,
 )
 
 _LANG_REF_RE = re.compile(r"^\{.+\}$")
+
+
+def _build_reverse_index_impl(final_tw_lookup: dict[str, str]) -> dict[str, str]:
+    """建立 reverse_index：{英文文字: 選擇的 canonical key}。
+
+    選擇策略（確定性）：
+    1. 優先取「已翻譯的 key」（即 zh_tw 值與英文 key 名不同，表示有真正翻譯）
+    2. 若多個已翻譯，取字母序第一個（確定性 tiebreaker）
+    3. 若無已翻譯，則取字母序第一個 key
+
+    Returns:
+        dict[str, str]: reverse_index，永遠是 str->str（而非 str->list）
+    """
+    reverse_index: dict[str, str] = {}
+    rev_candidates: dict[str, list[tuple[str, bool]]] = {}
+    for k, v in final_tw_lookup.items():
+        if is_filled_text_impl(v):
+            is_translated = bool(
+                v.casefold() != k.casefold() if v.isascii() and k.isascii() else v != k
+            )
+            rev_candidates.setdefault(v, []).append((k, is_translated))
+
+    for en_text, candidates in rev_candidates.items():
+        translated = sorted([k for k, t in candidates if t], key=lambda x: x)
+        untranslated = sorted([k for k, t in candidates if not t], key=lambda x: x)
+        reverse_index[en_text] = (translated or untranslated)[0]
+
+    return reverse_index
+
+
+def _dedup_pending_en_impl(
+    pending_en: dict[str, str], reverse_index: dict[str, str]
+) -> dict[str, str]:
+    """過濾 pending_en：跳過那些「英文文字已存在於 reverse_index」的 key。
+
+    修復 cross-namespace bug：原本 `k != reverse_index[v]` 比較不同命名空間
+    的 key（raw/pending 的 k vs final/zh_tw 的 key），直接比對 key 幾乎
+    不會成立。正確邏輯：若同一個翻譯結果 v 已出現在 final
+    （即 v in reverse_index），就視為已處理，直接跳過不送 pending。
+
+    Args:
+        pending_en: 待翻譯的 en_us 資料（key → 英文文字）
+        reverse_index: reverse_index（英文文字 → canonical key）
+
+    Returns:
+        dict[str, str]: 過濾後的 pending_en
+    """
+    return {
+        k: v
+        for k, v in pending_en.items()
+        if not (is_filled_text_impl(v) and v in reverse_index)
+    }
 
 
 def _shielded_convert(text: str, convert_fn: Callable[[str], str]) -> str:
@@ -79,20 +124,10 @@ def deep_merge_3way_flat_impl(
 
 
 def prune_en_by_tw_flat_impl(en_map: dict, tw_available: dict) -> dict:
-    """剪掉同一 identity 已有且與英文來源不同的繁中內容。"""
+    """剪掉 tw 已有內容的 en key。"""
     out = {}
     for k, v in en_map.items():
-        translated = tw_available.get(k)
-        same_as_source = (
-            isinstance(v, str)
-            and isinstance(translated, str)
-            and (
-                v.casefold() == translated.casefold()
-                if v.isascii() and translated.isascii()
-                else v == translated
-            )
-        )
-        if is_filled_text_impl(translated) and not same_as_source:
+        if is_filled_text_impl(tw_available.get(k)):
             continue
         out[k] = v
     return out
@@ -105,11 +140,6 @@ def clean_kubejs_from_raw_impl(
     raw_dir: str | None = None,
     pending_root: str | None = None,
     final_root: str | None = None,
-    previous_final_root: str | None = None,
-    manual_final_root: str | None = None,
-    previous_final_owned: dict[str, str] | None = None,
-    current_source_provenance: dict[str, Any] | None = None,
-    previous_source_provenance: dict[str, Any] | None = None,
     read_json_dict_fn: Callable[[Path], dict],
     write_json_fn: Callable[[Path, dict], None],
     safe_convert_text_fn: Callable[[str], str],
@@ -148,225 +178,140 @@ def clean_kubejs_from_raw_impl(
         else (out_root / "kubejs" / "完成" / "kubejs")
     )
 
-    lang_files: list[Path] = []
-    other_jsons: list[Path] = []
-    for path in raw_root.rglob("*.json"):
-        relative_parts = {part.lower() for part in path.relative_to(raw_root).parts}
-        if "lang" in relative_parts:
-            lang_files.append(path)
-        else:
-            other_jsons.append(path)
+    pending_root_p.mkdir(parents=True, exist_ok=True)
+    final_root_p.mkdir(parents=True, exist_ok=True)
 
-    pending_outputs: dict[str, dict[str, Any] | bytes] = {}
+    lang_files = []
+    other_jsons = []
+    for p in raw_root.rglob("*.json"):
+        pp = str(p).replace("\\", "/")
+        if "/lang/" in pp:
+            lang_files.append(p)
+        else:
+            other_jsons.append(p)
+
+    # 建立 zh_tw lookup table：用於過濾 client_scripts/*.json
+    # 已翻譯的 key（有 zh_tw 對應）→ skip；未翻譯 → 保留到 pending
+    tw_lookup: dict[str, str] = {}
+    if final_root_p.exists():
+        for tw_file in final_root_p.rglob("zh_tw.json"):
+            tw_data = read_json_dict_fn(tw_file)
+            if tw_data:
+                tw_lookup.update(tw_data)
+    # 同時從 raw_root 的 lang/zh_tw.json 讀取（確保新翻譯也被納入）
+    for tw_file in raw_root.rglob("zh_tw.json"):
+        tw_data = read_json_dict_fn(tw_file)
+        if tw_data:
+            tw_lookup.update(
+                deep_merge_3way_flat_impl(
+                    tw_data, {}, {}, safe_convert_text_fn=safe_convert_text_fn
+                )
+            )
+
     copied_other = 0
-    for path in other_jsons:
-        relative = path.relative_to(raw_root)
-        data = read_json_dict_fn(path)
-        if not data:
-            continue
-        if "client_scripts" in {part.lower() for part in path.parts}:
-            # Lang IDs cannot prove that one particular script tooltip is translated.
-            # Keep the original JS identity and let the translator/injector use it.
-            filtered = {
-                key: _shielded_convert(value, safe_convert_text_fn)
-                if isinstance(value, str)
-                else value
-                for key, value in data.items()
-            }
-            if filtered:
-                pending_outputs[relative.as_posix()] = filtered
+    for p in other_jsons:
+        rel = p.relative_to(raw_root)
+        dst = pending_root_p / rel
+        dst.parent.mkdir(parents=True, exist_ok=True)
+
+        if "client_scripts" in str(p):
+            # 對 client_scripts/*.json 做三語合併比對過濾
+            # client_scripts JSON key 格式：tooltips.js|modid:item.tooltip.0
+            # zh_tw.json key 格式：modid:item（無 .tooltip.N 後綴）
+            # → 需剝除前綴與 .tooltip.N 後綴才能正確比對
+            data = read_json_dict_fn(p)
+            if data:
+                filtered = {}
+                for k, v in data.items():
+                    # 解析 key：去掉前綴 tooltips.js| 和 .tooltip.N 後綴
+                    lookup_key = k.split("|", 1)[-1] if "|" in k else k
+                    lookup_key = re.sub(r"\.tooltip\.\d+$", "", lookup_key)
+                    lookup_key = re.sub(r"\[.*?\]", "", lookup_key).strip()
+                    # 有 zh_tw 翻譯 → skip（視為 cache hit）；無 → 保留
+                    if lookup_key and lookup_key not in tw_lookup:
+                        # ✅ 對簡體中文值做 OpenCC 轉換（s2tw），轉為繁體中文
+                        # ✅ Rich Text Shield：保護 KubeJS 格式後再做 s2t 轉換
+                        v_converted = _shielded_convert(v, safe_convert_text_fn)
+                        filtered[k] = v_converted
+                if filtered:
+                    dst.write_text(
+                        json.dumps(filtered, indent=2, ensure_ascii=False), "utf-8"
+                    )
+                    copied_other += 1
+                # else: 全部被過濾，不寫入也不計入 copied_other
+            else:
+                dst.write_bytes(p.read_bytes())
                 copied_other += 1
         else:
-            pending_outputs[relative.as_posix()] = path.read_bytes()
+            dst.write_bytes(p.read_bytes())
             copied_other += 1
 
     groups: dict[Path, dict[str, Path]] = {}
-    for path in lang_files:
-        groups.setdefault(path.parent, {})[path.stem.lower()] = path
+    for p in lang_files:
+        group_dir = p.parent
+        lang_name = p.stem.lower()
+        groups.setdefault(group_dir, {})[lang_name] = p
 
-    previous_root = (
-        Path(previous_final_root).resolve() if previous_final_root else final_root_p
-    )
-    manual_root = Path(manual_final_root).resolve() if manual_final_root else None
-    previous_final_owned = previous_final_owned or {}
-    current_source_provenance = current_source_provenance or {}
-    previous_source_provenance = previous_source_provenance or {}
-    pending_lang_written = 0
     merged_lang_written = 0
-    previous_final_keys_preserved = 0
-    final_outputs: dict[str, dict[str, Any]] = {}
-    provenance_conflicts: list[dict[str, str]] = []
+    pending_lang_written = 0
 
-    def key_evidence(
-        provenance: dict[str, Any], relative_group: Path, key: str
-    ) -> dict[str, Any]:
-        evidence: dict[str, Any] = {}
-        for language in ("en_us", "zh_cn", "zh_tw"):
-            relative = (relative_group / f"{language}.json").as_posix()
-            file_data = provenance.get(relative, {})
-            key_data = file_data.get(key, {}) if isinstance(file_data, dict) else {}
-            if isinstance(key_data, dict) and language in key_data:
-                evidence[language] = key_data[language]
-        return evidence
-
-    def read_final(path: Path) -> dict[str, Any]:
-        return read_json_dict_fn(path)
+    # ── 雙軌去重的前置建置（O(N) once, outside group loop）───────────────────
+    # 目的：避免每個 group 都重新 rglob("zh_tw.json")，將 O(N×G) 降至 O(N)
+    #      （G = group 數量，N = final_root 內 zh_tw.json 檔案數）
+    final_tw_lookup: dict[str, str] = {}
+    if final_root_p.exists():
+        for tw_file in final_root_p.rglob("zh_tw.json"):
+            tw_data = read_json_dict_fn(tw_file)
+            if tw_data:
+                final_tw_lookup.update(tw_data)
+    # 若有 final_tw_lookup，先建好 reverse_index（整個 function 只建一次）
+    reverse_index = (
+        _build_reverse_index_impl(final_tw_lookup) if final_tw_lookup else {}
+    )
 
     for group_dir, files_map in groups.items():
         en = read_json_dict_fn(files_map.get("en_us"))
         cn = read_json_dict_fn(files_map.get("zh_cn"))
         tw = read_json_dict_fn(files_map.get("zh_tw"))
-        relative_group = group_dir.relative_to(raw_root)
-        previous_output = read_final(previous_root / relative_group / "zh_tw.json")
-        current_keys = set(en) | set(cn) | set(tw)
-        old_final: dict[str, Any] = {}
-        manual_final: dict[str, Any] = {}
-        relative_final = (relative_group / "zh_tw.json").as_posix()
-        manual_path = manual_root / Path(relative_final) if manual_root else None
-        recorded_hash = previous_final_owned.get(relative_final)
-        manual_file_edited = False
-        if manual_path is not None and recorded_hash and manual_path.is_file():
-            try:
-                manual_file_edited = (
-                    sha256(manual_path.read_bytes()).hexdigest() != recorded_hash
-                )
-            except OSError:
-                provenance_conflicts.append(
-                    {
-                        "path": relative_final,
-                        "key": "*",
-                        "kind": "manual_final_unreadable",
-                        "decision": "保留公開檔並回到待翻譯快照",
-                    }
-                )
-        manual_candidate = (
-            read_final(manual_path)
-            if manual_path is not None and manual_file_edited
-            else {}
-        )
-        current_keys.update(previous_output)
-        current_keys.update(manual_candidate)
-
-        for key in current_keys:
-            current_evidence = key_evidence(
-                current_source_provenance, relative_group, str(key)
-            )
-            previous_evidence = key_evidence(
-                previous_source_provenance, relative_group, str(key)
-            )
-            if (
-                key in previous_output
-                and current_evidence
-                and current_evidence == previous_evidence
-            ):
-                old_final[key] = previous_output[key]
-            elif key in previous_output and current_evidence != previous_evidence:
-                provenance_conflicts.append(
-                    {
-                        "path": relative_final,
-                        "key": str(key),
-                        "kind": "stale_previous_translation",
-                        "decision": "不沿用舊譯文；使用本輪來源或保留待翻譯",
-                    }
-                )
-
-            if key in manual_candidate:
-                if current_evidence and current_evidence == previous_evidence:
-                    manual_final[key] = manual_candidate[key]
-                else:
-                    provenance_conflicts.append(
-                        {
-                            "path": relative_final,
-                            "key": str(key),
-                            "kind": "manual_final_source_changed",
-                            "decision": "保留公開手動檔；此 key 不併入新快照並回到待翻譯",
-                        }
-                    )
-        previous_final_keys_preserved += len(old_final)
 
         log_debug_fn(
-            f"[KubeJS-CLEAN-DBG] group={group_dir} | en={len(en)} cn={len(cn)} tw={len(tw)} old_tw={len(old_final)}"
+            f"[KubeJS-CLEAN-DBG] group={group_dir} | en={len(en or {})} cn={len(cn or {})} tw={len(tw or {})}"
         )
 
-        # Prior outputs are usable only when the source evidence still matches.
-        # A verified user edit outranks current sources; valid current zh_tw
-        # outranks zh_cn; source translations outrank old AI output.
-        merged_tw: dict[str, Any] = {}
-        for key in current_keys:
-            current_evidence = key_evidence(
-                current_source_provenance, relative_group, str(key)
-            )
-            previous_evidence = key_evidence(
-                previous_source_provenance, relative_group, str(key)
-            )
-            if key in manual_final:
-                merged_tw[key] = manual_final[key]
-            elif is_filled_text_impl(tw.get(key)):
-                # Cross-language priority is stable: any valid current zh_tw
-                # wins over zh_cn, even when only zh_cn changed this run.
-                merged_tw[key] = tw[key]
-            elif is_filled_text_impl(cn.get(key)):
-                # Use current zh_cn only when there is no valid current zh_tw.
-                merged_tw[key] = _shielded_convert(cn[key], safe_convert_text_fn)
-            elif key in old_final and current_evidence == previous_evidence:
-                # AI output is a last resort and only remains valid for the
-                # exact same source evidence; changed English returns to pending.
-                merged_tw[key] = old_final[key]
+        has_twcn = bool(cn or tw)
+        rel_group = group_dir.relative_to(raw_root)
 
-        pending_en = prune_en_by_tw_flat_impl(en, merged_tw)
-        if pending_en:
-            pending_outputs[(relative_group / "en_us.json").as_posix()] = pending_en
-            pending_lang_written += 1
-        if merged_tw:
-            final_outputs[(relative_group / "zh_tw.json").as_posix()] = merged_tw
+        if en:
+            if has_twcn:
+                available_tw = deep_merge_3way_flat_impl(
+                    tw, cn, {}, safe_convert_text_fn=safe_convert_text_fn
+                )
+                pending_en = prune_en_by_tw_flat_impl(en, available_tw)
+            else:
+                pending_en = en
+
+            # ── 雙軌去重（reverse_index dedup）───────────────────────────────
+            # reverse_index 已於 group loop 外部建好（每個 group 複用同一份）
+            # 若英文文字已出現在 final/zh_tw.json（不同 key），不需要送 pending
+            if pending_en and reverse_index:
+                pending_en = _dedup_pending_en_impl(pending_en, reverse_index)
+            # ── 雙軌去重 end ───────────────────────────────────────────────
+
+            if pending_en:
+                dst_en = pending_root_p / rel_group / "en_us.json"
+                write_json_fn(dst_en, pending_en)
+                pending_lang_written += 1
+
+        if has_twcn:
+            merged_tw = deep_merge_3way_flat_impl(
+                tw, cn, {}, safe_convert_text_fn=safe_convert_text_fn
+            )
+            dst_tw = final_root_p / rel_group / "zh_tw.json"
+            write_json_fn(dst_tw, merged_tw)
             merged_lang_written += 1
 
-    pending_root_p.parent.mkdir(parents=True, exist_ok=True)
-    final_root_p.parent.mkdir(parents=True, exist_ok=True)
-    pending_stage = Path(
-        tempfile.mkdtemp(
-            prefix=f".{pending_root_p.name}.clean-", dir=pending_root_p.parent
-        )
-    )
-    final_stage = Path(
-        tempfile.mkdtemp(prefix=f".{final_root_p.name}.clean-", dir=final_root_p.parent)
-    )
-    for relative, payload in pending_outputs.items():
-        destination = pending_stage / Path(relative)
-        if isinstance(payload, bytes):
-            destination.parent.mkdir(parents=True, exist_ok=True)
-            destination.write_bytes(payload)
-        else:
-            write_json_fn(destination, payload)
-    for relative, payload in final_outputs.items():
-        write_json_fn(final_stage / Path(relative), payload)
-
-    pending_manifest = pending_root_p.parent / ".kubejs-clean-manifest.json"
-    final_manifest = final_root_p.parent / ".kubejs-final-manifest.json"
-    pending_owned, pending_conflicts, stale_pending_removed = sync_managed_tree(
-        pending_stage, pending_root_p, load_owned_files(pending_manifest)
-    )
-    final_owned, final_conflicts, stale_final_removed = sync_managed_tree(
-        final_stage, final_root_p, load_owned_files(final_manifest)
-    )
-    atomic_write_json(pending_manifest, {"version": 1, "files": pending_owned})
-    atomic_write_json(final_manifest, {"version": 1, "files": final_owned})
-    shutil.rmtree(pending_stage, ignore_errors=True)
-    shutil.rmtree(final_stage, ignore_errors=True)
-
-    for relative in pending_conflicts:
-        log_info_fn(f"[KubeJS-CLEAN] 保留未受管理或已修改的待翻譯檔：{relative}")
-    for relative in final_conflicts:
-        log_info_fn(f"[KubeJS-CLEAN] 保留未受管理或已修改的完成檔：{relative}")
-    for conflict in provenance_conflicts:
-        log_info_fn(
-            "[KubeJS-CLEAN] 來源譯文衝突："
-            f"{conflict['path']} key={conflict['key']} "
-            f"type={conflict['kind']}；{conflict['decision']}"
-        )
-
     log_info_fn(
-        f"[KubeJS-CLEAN] 處理完畢！群組數: {len(groups)} | 產出待翻譯: {pending_lang_written} | 產出完成品: {merged_lang_written} | 複製其他檔案: {copied_other} | 保留舊繁中鍵: {previous_final_keys_preserved} | 清除過期待翻譯: {stale_pending_removed}"
+        f"[KubeJS-CLEAN] 處理完畢！群組數: {len(groups)} | 產出待翻譯: {pending_lang_written} | 產出完成品: {merged_lang_written} | 複製其他檔案: {copied_other}"
     )
 
     return {
@@ -377,9 +322,4 @@ def clean_kubejs_from_raw_impl(
         "pending_lang_written": pending_lang_written,
         "merged_lang_written": merged_lang_written,
         "copied_other_jsons": copied_other,
-        "previous_final_keys_preserved": previous_final_keys_preserved,
-        "stale_pending_removed": stale_pending_removed,
-        "stale_final_removed": stale_final_removed,
-        "write_conflicts": len(pending_conflicts) + len(final_conflicts),
-        "provenance_conflicts": provenance_conflicts,
     }
