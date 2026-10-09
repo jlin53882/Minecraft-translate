@@ -12,7 +12,6 @@ from app.services_impl.moddb_retranslate_service import (
     cache_profile_label,
     preview_same_source_ai_retranslation_from_path,
 )
-from app.services_impl.moddb_source_service import source_label
 from app.services_impl.moddb_translate_service import TranslateOptions
 from app.tasks.operation_registry import (
     CancellationPolicy,
@@ -23,7 +22,7 @@ from app.tasks.operation_registry import (
 )
 from app.ui.design import C
 from app.ui.snack import show_snack
-from app.views.moddb.formatting import format_count
+from app.views.moddb.formatting import format_count, source_label
 from translation_tool.utils.log_unit import log_warning
 
 
@@ -91,7 +90,6 @@ def preview(panel, _e=None) -> None:
     if panel._repair_preview_running:
         show_snack(panel._page, "舊 AI 重翻預覽仍在查詢中，請稍候", C.GOLD)
         return
-    panel._reset_stats(mode="repair")
     clear_preview(panel)
     if not panel.version_dd.value:
         panel.repair_preview_text.value = "請先選擇遊戲版本。"

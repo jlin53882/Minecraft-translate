@@ -5,7 +5,6 @@ import traceback
 from enum import Enum, auto
 
 from app.services_impl.logging_service import validate_log_format
-from app.services_impl.moddb_source_service import normalize_priority_config
 from app.ui.snack import show_snack
 from app.views.config.settings_schema import (
     Setting,
@@ -133,8 +132,6 @@ def _collect_validated_config(
                 set_path(
                     config, setting.path, _from_control_value(setting, control.value)
                 )
-        # Database-local source identities are normalized in the service layer.
-        normalize_priority_config(config)
         api_keys = [
             field.value.strip()
             for field in view.key_fields

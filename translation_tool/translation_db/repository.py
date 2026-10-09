@@ -26,36 +26,20 @@ from typing import Any
 
 from translation_tool.translation_db.models import (
     AITranslationReplaceResult,
-    BatchReplaceChange,
-    BatchReplacePlan,
-    BatchReplaceResult,
-    BatchReplaceSkipped,
-    BatchRevertResult,
-    EffectiveSourceStat,
     EntryDetail,
-    EntryFilter,
     EntryRow,
     HistoryRow,
     Impact,
     IngestStats,
-    ReviewPreviewItem,
     SameKeyRow,
     SameSourceAIEntry,
     SameTextRow,
     ScanItem,
     SrcChangeRow,
-    TimeFilter,
     TranslationRow,
     VersionStat,
     WriteBackItem,
     WriteBackStats,
-)
-from translation_tool.translation_db.quality import (
-    matches_quality,
-    quality_state,
-    token_issue_deltas,
-    token_issues,
-    whitespace_note,
 )
 from translation_tool.translation_db.schema import (
     DB_EMPTY,
@@ -71,8 +55,6 @@ from translation_tool.translation_db.schema import (
     init_schema,
     rank_sql,
 )
-from translation_tool.translation_db.source_catalog import SourceCatalog
-from translation_tool.utils.cancellation import raise_if_cancelled
 
 _ENTRY_COLS = "e.id, e.kind, e.mc_version, e.mod_id, e.key, e.en_us"
 _CHUNK = 400  # SQLite 變數上限相容的批次大小
@@ -125,21 +107,8 @@ class TranslationDB:
         try:
             if not readonly:
                 init_schema(self._conn)
-            self.has_review_state = "review_status" in {
-                row[1] for row in self._conn.execute("PRAGMA table_info(translation)")
-            }
-            translation_columns = {
-                row[1] for row in self._conn.execute("PRAGMA table_info(translation)")
-            }
-            self.has_translation_created_at = "created_at" in translation_columns
-            self.has_translation_revision = "revision" in translation_columns
-            history_columns = {
-                row[1] for row in self._conn.execute("PRAGMA table_info(history)")
-            }
-            self.has_history_revision = "new_revision" in history_columns
-            if not readonly and sync_priority:
-                self._sync_priority()
-            self.source_catalog = self._load_source_catalog()
+                if sync_priority:
+                    self._sync_priority()
         except BaseException:
             self._conn.close()
             raise
@@ -149,26 +118,11 @@ class TranslationDB:
         self.priority = tuple(priority)
         self._rank = rank_sql(self.priority, "t.source")
         self._sync_priority()
-        self.source_catalog = self._load_source_catalog()
-
-    def _load_source_catalog(self) -> SourceCatalog:
-        row = self._one("SELECT value FROM meta WHERE key='custom_sources'")
-        try:
-            registry = json.loads(row[0]) if row else {}
-        except (TypeError, ValueError):
-            registry = {}
-        return SourceCatalog.from_registry(registry)
 
     def _priority_order(self, priority: tuple[int, ...] | None = None) -> str:
         """Return the canonical effective-source ordering for a selected priority."""
         rank = self._rank if priority is None else rank_sql(tuple(priority), "t.source")
-        if not self.has_review_state:
-            return f"CASE WHEN t.checker <> '' THEN 0 ELSE 1 END, {rank}"
-        return (
-            "CASE WHEN t.review_status='reviewed' THEN 0 "
-            "WHEN t.checker <> '' AND t.review_status IS NOT 'unreviewed' THEN 0 "
-            f"ELSE 1 END, {rank}"
-        )
+        return f"CASE WHEN t.checker <> '' THEN 0 ELSE 1 END, {rank}"
 
     # ------------------------------------------------------------------ 基礎
     def close(self) -> None:
@@ -177,13 +131,10 @@ class TranslationDB:
             self._conn.close()
 
     @contextmanager
-    def _tx(
-        self, *, bump_generation_on_noop: bool = True
-    ) -> Iterator[sqlite3.Connection]:
+    def _tx(self) -> Iterator[sqlite3.Connection]:
         """單一寫入交易（失敗自動回復）。"""
         with self._lock:
             self._conn.execute("BEGIN IMMEDIATE")
-            changes_before = self._conn.total_changes
             try:
                 yield self._conn
             except BaseException:
@@ -191,11 +142,10 @@ class TranslationDB:
                 raise
             else:
                 # 資料有變動：遞增世代，讓統計快取（stat_cache）失效
-                if bump_generation_on_noop or self._conn.total_changes > changes_before:
-                    self._conn.execute(
-                        "INSERT INTO meta (key, value) VALUES ('data_gen', '1') "
-                        "ON CONFLICT(key) DO UPDATE SET value = CAST(value AS INTEGER) + 1"
-                    )
+                self._conn.execute(
+                    "INSERT INTO meta (key, value) VALUES ('data_gen', '1') "
+                    "ON CONFLICT(key) DO UPDATE SET value = CAST(value AS INTEGER) + 1"
+                )
                 self._conn.commit()
 
     def _data_gen(self) -> str:
@@ -268,9 +218,9 @@ class TranslationDB:
         conn.execute("DELETE FROM effective")
         conn.execute(
             f"""
-            INSERT INTO effective (entry_id, zh_tw, source, checker, review_status)
-            SELECT entry_id, zh_tw, source, checker, review_status FROM (
-                SELECT t.entry_id, t.zh_tw, t.source, t.checker, t.review_status,
+            INSERT INTO effective (entry_id, zh_tw, source, checker)
+            SELECT entry_id, zh_tw, source, checker FROM (
+                SELECT t.entry_id, t.zh_tw, t.source, t.checker,
                        ROW_NUMBER() OVER (
                            PARTITION BY t.entry_id
                            ORDER BY {self._priority_order()}
@@ -296,9 +246,9 @@ class TranslationDB:
             conn.execute(f"DELETE FROM effective WHERE entry_id IN ({marks})", chunk)
             conn.execute(
                 f"""
-                INSERT INTO effective (entry_id, zh_tw, source, checker, review_status)
-                SELECT entry_id, zh_tw, source, checker, review_status FROM (
-                    SELECT t.entry_id, t.zh_tw, t.source, t.checker, t.review_status,
+                INSERT INTO effective (entry_id, zh_tw, source, checker)
+                SELECT entry_id, zh_tw, source, checker FROM (
+                    SELECT t.entry_id, t.zh_tw, t.source, t.checker,
                        ROW_NUMBER() OVER (
                            PARTITION BY t.entry_id
                                ORDER BY {priority_order}
@@ -391,12 +341,10 @@ class TranslationDB:
                     for src, tw, cn in adds:
                         if (eid, src) in have:
                             continue
-                        review_status = "unreviewed" if src == SRC_MANUAL else None
                         conn.execute(
-                            "INSERT INTO translation "
-                            "(entry_id, source, zh_tw, zh_cn, review_status) "
-                            "VALUES (?,?,?,?,?)",
-                            (eid, src, tw, cn, review_status),
+                            "INSERT INTO translation (entry_id, source, zh_tw, zh_cn) "
+                            "VALUES (?,?,?,?)",
+                            (eid, src, tw, cn),
                         )
                         have.add((eid, src))
                         touched.append(eid)
@@ -476,39 +424,6 @@ class TranslationDB:
     def version_stats(self) -> list[VersionStat]:
         rows = self._cached("version_stats", self._version_stats_rows)
         return [VersionStat(*r) for r in rows]
-
-    def effective_source_stats_by_version(self) -> list[EffectiveSourceStat]:
-        """Count effective entries once per source and manual review state.
-
-        The query groups all versions and source codes in one pass. For an old
-        read-only database, manual rows are reported as ``legacy_unknown``.
-        """
-        rows = self._cached(
-            "effective_source_stats_by_version",
-            self._effective_source_stats_by_version_rows,
-        )
-        return [EffectiveSourceStat(*row) for row in rows]
-
-    def _effective_source_stats_by_version_rows(self) -> list[list]:
-        if self.has_review_state:
-            review = (
-                f"CASE WHEN f.source = {SRC_MANUAL} THEN "
-                "CASE WHEN f.review_status IN "
-                "('unreviewed', 'reviewed', 'legacy_unknown') "
-                "THEN f.review_status ELSE 'legacy_unknown' END END"
-            )
-        else:
-            review = f"CASE WHEN f.source = {SRC_MANUAL} THEN 'legacy_unknown' END"
-        return [
-            list(row)
-            for row in self._q(
-                "SELECT e.mc_version, f.source, "
-                f"{review}, COUNT(*) "
-                "FROM entry e LEFT JOIN effective f ON f.entry_id=e.id "
-                f"GROUP BY e.mc_version, f.source, {review} "
-                "ORDER BY e.mc_version, f.source, 3"
-            )
-        ]
 
     def _version_stats_rows(self) -> list[list]:
         rows = self._q(
@@ -602,38 +517,17 @@ class TranslationDB:
 
     # ------------------------------------------------------------ 條目查詢
     def _row(self, r: tuple) -> EntryRow:
-        review_status = r[9]
-        if r[7] == SRC_MANUAL and review_status is None:
-            review_status = "legacy_unknown"
-        en_us, zh_tw = r[5] or "", r[6] or ""
-        quality, issues, whitespace = quality_state(en_us, zh_tw)
         return EntryRow(
             id=r[0],
             kind=r[1],
             mc_version=r[2],
             mod_id=r[3],
             key=r[4],
-            en_us=en_us,
-            zh_tw=zh_tw,
+            en_us=r[5],
+            zh_tw=r[6] or "",
             source=r[7],
             checker=r[8] or "",
-            diff=bool(r[10]),
-            review_status=review_status,
-            created_at=r[11] if len(r) > 11 else None,
-            translation_created_at=r[12] if len(r) > 12 else None,
-            effective_updated_at=r[13] if len(r) > 13 else None,
-            last_manual_at=r[14] if len(r) > 14 else None,
-            quality_state=quality,
-            quality_issues=issues,
-            whitespace_note=whitespace,
-        )
-
-    @property
-    def _effective_review_sql(self) -> str:
-        return (
-            "f.review_status"
-            if self.has_review_state
-            else f"CASE WHEN f.source={SRC_MANUAL} THEN 'legacy_unknown' END"
+            diff=bool(r[9]),
         )
 
     # 有效譯文（``effective`` 視圖／表，已套用來源優先序）與 en_us 嚴格相等，且兩者都非空
@@ -647,234 +541,15 @@ class TranslationDB:
           AND e2.en_us = e.en_us AND e.en_us <> '' AND e2.mc_version <> e.mc_version
           AND (f.zh_tw IS NULL OR f2.zh_tw <> f.zh_tw))"""
 
-    def _query_source(self) -> str:
-        return (
-            "FROM entry e LEFT JOIN effective f ON f.entry_id=e.id "
-            "LEFT JOIN translation et ON et.entry_id=e.id AND et.source=f.source "
-            f"LEFT JOIN translation man ON man.entry_id=e.id AND man.source={SRC_MANUAL}"
-        )
-
-    def _filter_sql(self, criteria: EntryFilter) -> tuple[str, list]:
-        where = ["e.mc_version = ?"]
-        params: list = [criteria.version]
-        if criteria.entry_ids is not None:
-            where.append("e.id IN (SELECT value FROM json_each(?))")
-            params.append(json.dumps(criteria.entry_ids))
-        if criteria.include_ids is not None:
-            where.append("e.id IN (SELECT value FROM json_each(?))")
-            params.append(json.dumps(criteria.include_ids))
-        if criteria.exclude_ids:
-            where.append("e.id NOT IN (SELECT value FROM json_each(?))")
-            params.append(json.dumps(criteria.exclude_ids))
-        if criteria.source is not None:
-            where.append("f.source = ?")
-            params.append(int(criteria.source))
-        if criteria.review_status is not None:
-            where.append(
-                f"f.source = {SRC_MANUAL} AND {self._effective_review_sql} = ?"
-            )
-            params.append(criteria.review_status)
-        if criteria.mod_id:
-            where.append("e.mod_id = ?")
-            params.append(criteria.mod_id)
-        if criteria.kind:
-            where.append("e.kind = ?")
-            params.append(criteria.kind)
-        if criteria.query.strip():
-            like = _like(criteria.query.strip())
-            where.append(
-                "(e.en_us LIKE ? ESCAPE '\\' OR e.key LIKE ? ESCAPE '\\' "
-                "OR f.zh_tw LIKE ? ESCAPE '\\')"
-            )
-            params += [like, like, like]
-
-        if criteria.state == "none":
-            where.append("f.entry_id IS NULL")
-        elif criteria.state == "diff":
-            where.append(f"f.entry_id IS NOT NULL AND {self._DIFF_SQL}")
-        elif criteria.state == "changed":
-            where.append(
-                "EXISTS (SELECT 1 FROM src_change sc WHERE sc.kind=e.kind "
-                "AND sc.mc_version=e.mc_version AND sc.mod_id=e.mod_id AND sc.key=e.key)"
-            )
-        elif criteria.state == "manual":
-            where.append(f"f.source={SRC_MANUAL} AND NOT {self._DIFF_SQL}")
-        elif criteria.state == "ok":
-            where.append(
-                f"f.entry_id IS NOT NULL AND f.source<>{SRC_MANUAL} AND NOT {self._DIFF_SQL}"
-            )
-        elif criteria.state == "same":
-            where.append(self._SAME_AS_SOURCE_SQL)
-
-        if criteria.time is not None:
-            time_where, time_params = self._time_filter_sql(criteria.time)
-            where.extend(time_where)
-            params.extend(time_params)
-        return " AND ".join(where), params
-
-    def _time_filter_sql(self, spec: TimeFilter) -> tuple[list[str], list]:
-        where: list[str] = []
-        params: list = []
-        if spec.kind == "manual_activity":
-            actions_by_kind = {
-                "all": ("manual", "review", "batch_replace", "revert", "batch_revert"),
-                "edit": ("manual",),
-                "review": ("review",),
-                "batch": ("batch_replace", "batch_revert"),
-                "revert": ("revert", "batch_revert"),
-            }
-            actions = actions_by_kind[spec.action]
-            marks = ",".join("?" for _ in actions)
-            event = [f"h.entry_id=e.id AND h.action IN ({marks})"]
-            params.extend(actions)
-            if spec.start_utc is not None:
-                event.append("h.at >= ?")
-                params.append(spec.start_utc)
-            if spec.end_utc is not None:
-                event.append("h.at < ?")
-                params.append(spec.end_utc)
-            where.append(
-                "EXISTS (SELECT 1 FROM history h WHERE " + " AND ".join(event) + ")"
-            )
-            return where, params
-
-        if spec.kind == "entry_created":
-            column = "e.created_at"
-        elif spec.kind == "translation_created":
-            column = "et.created_at" if self.has_translation_created_at else "NULL"
-        else:
-            column = "et.updated_at"
-
-        if spec.unknown_policy == "only":
-            where.append(f"{column} IS NULL")
-            return where, params
-        has_bounds = spec.start_utc is not None or spec.end_utc is not None
-        if has_bounds:
-            bounds: list[str] = []
-            if spec.start_utc is not None:
-                bounds.append(f"{column} >= ?")
-                params.append(spec.start_utc)
-            if spec.end_utc is not None:
-                bounds.append(f"{column} < ?")
-                params.append(spec.end_utc)
-            in_range = " AND ".join(bounds)
-            if spec.unknown_policy == "include":
-                where.append(f"({column} IS NULL OR ({in_range}))")
-            else:
-                where.append(f"{column} IS NOT NULL AND ({in_range})")
-        elif spec.unknown_policy == "exclude":
-            where.append(f"{column} IS NOT NULL")
-        return where, params
-
-    def _sort_sql(self, sort_by: str) -> str:
-        if sort_by == "entry_newest":
-            return "e.created_at IS NULL, e.created_at DESC, e.id"
-        if sort_by == "entry_oldest":
-            return "e.created_at IS NULL, e.created_at, e.id"
-        if sort_by == "effective_updated_newest":
-            return "et.updated_at IS NULL, et.updated_at DESC, e.id"
-        if sort_by == "manual_activity_newest":
-            activity = (
-                "(SELECT MAX(h.at) FROM history h WHERE h.entry_id=e.id AND "
-                "h.action IN ('manual','review','batch_replace','revert','batch_revert'))"
-            )
-            return f"{activity} IS NULL, {activity} DESC, e.id"
-        return "e.mod_id, e.kind, e.key, e.id"
-
-    @staticmethod
-    def _sort_filtered_rows(rows: list[tuple], sort_by: str) -> list[tuple]:
-        index = {
-            "entry_newest": 11,
-            "entry_oldest": 11,
-            "effective_updated_newest": 13,
-            "manual_activity_newest": 14,
-        }.get(sort_by)
-        if index is None:
-            return sorted(rows, key=lambda row: (row[3], row[1], row[4], row[0]))
-        dated = [row for row in rows if row[index] is not None]
-        undated = [row for row in rows if row[index] is None]
-        dated.sort(key=lambda row: row[0])
-        dated.sort(key=lambda row: row[index], reverse=sort_by != "entry_oldest")
-        undated.sort(key=lambda row: row[0])
-        return [*dated, *undated]
-
-    def _entry_select_sql(self) -> str:
-        translation_created = (
-            "et.created_at" if self.has_translation_created_at else "NULL"
-        )
-        manual_review = (
-            "man.review_status"
-            if self.has_review_state
-            else f"CASE WHEN man.source={SRC_MANUAL} THEN 'legacy_unknown' END"
-        )
-        manual_revision = "man.revision" if self.has_translation_revision else "NULL"
-        return (
-            f"SELECT {_ENTRY_COLS}, f.zh_tw, f.source, f.checker, "
-            f"{self._effective_review_sql}, "
-            f"CASE WHEN f.entry_id IS NULL THEN 0 ELSE {self._DIFF_SQL} END, "
-            f"e.created_at, {translation_created}, et.updated_at, "
-            "(SELECT MAX(h.at) FROM history h WHERE h.entry_id=e.id AND "
-            "h.action IN ('manual','review','batch_replace','revert','batch_revert')), "
-            "man.zh_tw, man.checker, "
-            f"{manual_review}, {manual_revision}, man.updated_at, "
-            f"{('et.revision' if self.has_translation_revision else 'NULL')} "
-        )
-
-    def _query_entry_rows(
-        self,
-        criteria: EntryFilter,
-        *,
-        conn: sqlite3.Connection | None = None,
-        limit: int | None = None,
-        offset: int = 0,
-        progress_callback: Callable[[str, float], None] | None = None,
-    ) -> list[tuple]:
-        cond, params = self._filter_sql(criteria)
-        source = self._query_source()
-        select = self._entry_select_sql()
-        has_quality = criteria.quality.active
-        if has_quality:
-            sql = f"{select} {source} WHERE {cond}"
-        else:
-            sql = f"{select} {source} WHERE {cond} ORDER BY {self._sort_sql(criteria.sort_by)}"
-            if limit is not None:
-                sql += " LIMIT ? OFFSET ?"
-                params.extend((max(0, int(limit)), max(0, int(offset))))
-        if conn is None:
-            rows = self._q(sql, params)
-        else:
-            rows = conn.execute(sql, tuple(params)).fetchall()
-        if has_quality:
-            filtered = []
-            total = len(rows)
-            for index, row in enumerate(rows, 1):
-                if index % 100 == 1:
-                    raise_if_cancelled()
-                    if progress_callback is not None:
-                        progress_callback(
-                            "檢查品質條件", 0.05 + 0.4 * index / max(1, total)
-                        )
-                if matches_quality(row[5] or "", row[6] or "", criteria.quality):
-                    filtered.append(row)
-            rows = filtered
-            rows = self._sort_filtered_rows(rows, criteria.sort_by)
-            if limit is not None:
-                rows = rows[
-                    max(0, int(offset)) : max(0, int(offset)) + max(0, int(limit))
-                ]
-        return rows
-
     def list_entries(
         self,
-        version: str | None = None,
+        version: str,
         *,
-        criteria: EntryFilter | None = None,
         mod_id: str | None = None,
         kind: str | None = None,
         state: str = "all",
         query: str = "",
         source: int | None = None,
-        review_status: str | None = None,
         entry_ids: Sequence[int] | None = None,
         limit: int = 100,
         offset: int = 0,
@@ -886,448 +561,63 @@ class TranslationDB:
         ``entry_ids``：只列出這些條目（例如批次機翻「特殊字元不一致」的那幾筆）；
         用 ``json_each`` 傳入，數量多也不會超過 SQLite 的參數上限。
         """
-        if criteria is None:
-            if version is None:
-                raise ValueError("條目查詢必須指定遊戲版本")
-            criteria = EntryFilter(
-                version=version,
-                mod_id=mod_id,
-                kind=kind,
-                state=state,
-                query=query,
-                source=source,
-                review_status=review_status,
-                entry_ids=None if entry_ids is None else tuple(entry_ids),
+        where = ["e.mc_version = ?"]
+        params: list = [version]
+        if entry_ids is not None:
+            where.append("e.id IN (SELECT value FROM json_each(?))")
+            params.append(json.dumps([int(i) for i in entry_ids]))
+        if source is not None:
+            where.append("f.source = ?")
+            params.append(int(source))
+        if mod_id:
+            where.append("e.mod_id = ?")
+            params.append(mod_id)
+        if kind:
+            where.append("e.kind = ?")
+            params.append(kind)
+        if query.strip():
+            like = _like(query.strip())
+            where.append(
+                "(e.en_us LIKE ? ESCAPE '\\' OR e.key LIKE ? ESCAPE '\\' "
+                "OR f.zh_tw LIKE ? ESCAPE '\\')"
             )
-        elif version is not None and version != criteria.version:
-            raise ValueError("version 與 criteria.version 不一致")
-
-        if (
-            criteria.state == "changed"
-            and self._one("SELECT 1 FROM src_change LIMIT 1") is None
-        ):
-            return [], 0
-
-        if criteria.quality.active:
-            all_rows = self._query_entry_rows(criteria)
-            total = len(all_rows)
-            rows = all_rows[
-                max(0, int(offset)) : max(0, int(offset)) + max(0, int(limit))
-            ]
-        else:
-            cond, params = self._filter_sql(criteria)
-            total = self._cached_count(
-                f"SELECT COUNT(*) {self._query_source()} WHERE {cond}", params
+            params += [like, like, like]
+        if state == "none":
+            where.append("f.entry_id IS NULL")
+        elif state == "diff":
+            where.append(f"f.entry_id IS NOT NULL AND {self._DIFF_SQL}")
+        elif state == "changed":  # 掃描時發現原文改了（資料庫仍保留舊原文）
+            where.append(
+                "EXISTS (SELECT 1 FROM src_change sc WHERE sc.kind = e.kind "
+                "AND sc.mc_version = e.mc_version AND sc.mod_id = e.mod_id "
+                "AND sc.key = e.key)"
             )
-            rows = self._query_entry_rows(criteria, limit=limit, offset=offset)
-        return [self._row(row) for row in rows], total
-
-    def _database_identity(self) -> str:
-        stat = self.path.stat()
-        return f"{self.path.resolve()}|{stat.st_dev}|{stat.st_ino}"
-
-    def _batch_sibling_rows(
-        self,
-        roots: list[tuple],
-        *,
-        conn: sqlite3.Connection | None = None,
-        progress_callback: Callable[[str, float], None] | None = None,
-    ) -> dict[tuple[str, str, str, str], list[tuple]]:
-        keys = list(dict.fromkeys((row[1], row[3], row[4], row[5]) for row in roots))
-        result: dict[tuple[str, str, str, str], list[tuple]] = {key: [] for key in keys}
-        for offset in range(0, len(keys), 100):
-            raise_if_cancelled()
-            if progress_callback is not None:
-                progress_callback(
-                    "查詢跨版本候選", 0.45 + 0.15 * offset / max(1, len(keys))
-                )
-            chunk = keys[offset : offset + 100]
-            tuple_sql = ",".join("(?,?,?,?)" for _ in chunk)
-            params = [value for key in chunk for value in key]
-            sql = (
-                f"{self._entry_select_sql()} {self._query_source()} "
-                f"WHERE (e.kind,e.mod_id,e.key,e.en_us) IN ({tuple_sql}) "
-                "AND e.en_us<>'' ORDER BY e.kind,e.mod_id,e.key,e.en_us,e.mc_version"
+        elif state == "manual":
+            where.append(f"f.source = {SRC_MANUAL} AND NOT {self._DIFF_SQL}")
+        elif state == "ok":
+            where.append(
+                f"f.entry_id IS NOT NULL AND f.source <> {SRC_MANUAL} AND NOT {self._DIFF_SQL}"
             )
-            rows = (
-                conn.execute(sql, tuple(params)).fetchall()
-                if conn is not None
-                else self._q(sql, params)
-            )
-            for index, row in enumerate(rows, 1):
-                if index % 100 == 1:
-                    raise_if_cancelled()
-                key = (row[1], row[3], row[4], row[5])
-                result.setdefault(key, []).append(row)
-        return result
-
-    @staticmethod
-    def _batch_skipped(
-        row: tuple, reason: str, *, extra: bool = False
-    ) -> BatchReplaceSkipped:
-        return BatchReplaceSkipped(
-            entry_id=int(row[0]),
-            mc_version=row[2],
-            key=row[4],
-            reason=reason,
-            is_extra_version=extra,
+        elif state == "same":  # 目前有效譯文與原文完全相同（派生條件，不是儲存的狀態）
+            where.append(self._SAME_AS_SOURCE_SQL)
+        if state == "changed" and self._one("SELECT 1 FROM src_change LIMIT 1") is None:
+            return [], 0  # 沒有任何原文變動記錄：不必掃描整個版本
+        cond = " AND ".join(where)
+        base = f"FROM entry e LEFT JOIN effective f ON f.entry_id = e.id WHERE {cond}"
+        total = self._cached_count(f"SELECT COUNT(*) {base}", params)
+        rows = self._q(
+            f"SELECT {_ENTRY_COLS}, f.zh_tw, f.source, f.checker, "
+            f"CASE WHEN f.entry_id IS NULL THEN 0 ELSE {self._DIFF_SQL} END "
+            f"{base} ORDER BY e.mod_id, e.kind, e.key LIMIT ? OFFSET ?",
+            [*params, limit, offset],
         )
-
-    def _build_batch_replace_plan(
-        self,
-        criteria: EntryFilter,
-        find_text: str,
-        replace_text: str,
-        *,
-        propagate: bool,
-        confirmed_quality_worsening: bool,
-        conn: sqlite3.Connection | None = None,
-        progress_callback: Callable[[str, float], None] | None = None,
-    ) -> BatchReplacePlan:
-        raise_if_cancelled()
-        if progress_callback is not None:
-            progress_callback("查詢符合條目", 0.02)
-        roots = self._query_entry_rows(
-            criteria, conn=conn, progress_callback=progress_callback
-        )
-        siblings = (
-            self._batch_sibling_rows(
-                roots, conn=conn, progress_callback=progress_callback
-            )
-            if propagate
-            else {}
-        )
-        root_ids = tuple(int(row[0]) for row in roots)
-        root_id_set = set(root_ids)
-        changes: dict[int, BatchReplaceChange] = {}
-        skipped: dict[int, BatchReplaceSkipped] = {}
-
-        def add_candidate(
-            row: tuple, *, extra: bool, root_entry_id: int | None
-        ) -> None:
-            entry_id = int(row[0])
-            old_text = row[6] or ""
-            if row[7] is None or not old_text:
-                skipped.setdefault(
-                    entry_id, self._batch_skipped(row, "沒有目前生效譯文", extra=extra)
-                )
-                return
-            if find_text not in old_text:
-                skipped.setdefault(
-                    entry_id,
-                    self._batch_skipped(row, "找不到符合的原文片段", extra=extra),
-                )
-                return
-            new_text = old_text.replace(find_text, replace_text)
-            if not new_text.strip():
-                skipped.setdefault(
-                    entry_id, self._batch_skipped(row, "替換後譯文為空白", extra=extra)
-                )
-                return
-            if new_text == old_text:
-                skipped.setdefault(
-                    entry_id, self._batch_skipped(row, "替換後內容未改變", extra=extra)
-                )
-                return
-            old_issues = tuple(token_issues(row[5] or "", old_text))
-            new_issues = tuple(token_issues(row[5] or "", new_text))
-            old_space = whitespace_note(old_text)
-            new_space = whitespace_note(new_text)
-            changes[entry_id] = BatchReplaceChange(
-                entry_id=entry_id,
-                kind=row[1],
-                mc_version=row[2],
-                mod_id=row[3],
-                key=row[4],
-                en_us=row[5],
-                old_zh_tw=old_text,
-                new_zh_tw=new_text,
-                effective_source=int(row[7]),
-                effective_checker=row[8] or "",
-                effective_review_status=row[9],
-                effective_revision=row[20],
-                effective_updated_at=row[13],
-                manual_zh_tw=row[15],
-                manual_checker=row[16],
-                manual_review_status=row[17],
-                manual_revision=row[18],
-                is_extra_version=extra,
-                root_entry_id=root_entry_id,
-                old_quality_issues=old_issues,
-                new_quality_issues=new_issues,
-                old_whitespace_note=old_space,
-                new_whitespace_note=new_space,
-                quality_deltas=token_issue_deltas(row[5] or "", old_text, new_text),
-            )
-            skipped.pop(entry_id, None)
-
-        for index, row in enumerate(roots, 1):
-            if index % 100 == 1:
-                raise_if_cancelled()
-                if progress_callback is not None:
-                    progress_callback(
-                        "建立替換預覽", 0.62 + 0.36 * index / max(1, len(roots))
-                    )
-            add_candidate(row, extra=False, root_entry_id=None)
-
-        if propagate:
-            seen_extra: set[int] = set()
-            for index, root in enumerate(roots, 1):
-                if index % 100 == 1:
-                    raise_if_cancelled()
-                root_id = int(root[0])
-                old_text = root[6] or ""
-                if root[7] is None or not old_text or find_text not in old_text:
-                    continue
-                key = (root[1], root[3], root[4], root[5])
-                if not key[3]:
-                    continue
-                for sibling in siblings.get(key, []):
-                    sibling_id = int(sibling[0])
-                    if (
-                        sibling_id == root_id
-                        or sibling_id in root_id_set
-                        or sibling_id in seen_extra
-                    ):
-                        continue
-                    if (
-                        (sibling[6] or "") != old_text
-                        or sibling[7] != root[7]
-                        or sibling[9] != root[9]
-                    ):
-                        skipped.setdefault(
-                            sibling_id,
-                            self._batch_skipped(
-                                sibling,
-                                "其他版本的生效譯文、來源或審核狀態不同",
-                                extra=True,
-                            ),
-                        )
-                    else:
-                        add_candidate(sibling, extra=True, root_entry_id=root_id)
-                    seen_extra.add(sibling_id)
-
-        return BatchReplacePlan(
-            database_identity=self._database_identity(),
-            criteria=criteria,
-            find_text=find_text,
-            replace_text=replace_text,
-            propagate=propagate,
-            root_ids=root_ids,
-            changes=tuple(changes[key] for key in sorted(changes)),
-            skipped=tuple(skipped[key] for key in sorted(skipped)),
-            confirmed_quality_worsening=confirmed_quality_worsening,
-        )
-
-    def preview_batch_replace(
-        self,
-        criteria: EntryFilter,
-        find_text: str,
-        replace_text: str,
-        *,
-        propagate: bool = False,
-        confirmed_quality_worsening: bool = False,
-        progress_callback: Callable[[str, float], None] | None = None,
-    ) -> BatchReplacePlan:
-        """Build a literal, all-page replacement plan without changing the DB."""
-        if not find_text:
-            raise ValueError("尋找文字不可為空")
-        with self._lock:
-            return self._build_batch_replace_plan(
-                criteria,
-                find_text,
-                replace_text,
-                propagate=propagate,
-                confirmed_quality_worsening=confirmed_quality_worsening,
-                progress_callback=progress_callback,
-            )
-
-    def execute_batch_replace(
-        self,
-        plan: BatchReplacePlan,
-        *,
-        actor: str = "",
-        progress_callback: Callable[[str, float], None] | None = None,
-    ) -> BatchReplaceResult:
-        """Apply exactly the previewed replacements in one compare-and-set transaction."""
-        if not plan.changes:
-            return BatchReplaceResult(
-                "", 0, plan.skipped_count, plan.total_unique_entries
-            )
-        if (
-            any(change.quality_worsened for change in plan.changes)
-            and not plan.confirmed_quality_worsening
-        ):
-            raise ValueError("替換會增加特殊字元或空白問題，請明確確認後再執行")
-        batch = uuid.uuid4().hex
-        if progress_callback is not None:
-            progress_callback("重新檢查資料庫快照", 0.05)
-        with self._tx(bump_generation_on_noop=False) as conn:
-            if self._database_identity() != plan.database_identity:
-                raise ValueError("資料庫已切換，請重新預覽批次替換")
-            current = self._build_batch_replace_plan(
-                plan.criteria,
-                plan.find_text,
-                plan.replace_text,
-                propagate=plan.propagate,
-                confirmed_quality_worsening=plan.confirmed_quality_worsening,
-                conn=conn,
-                progress_callback=progress_callback,
-            )
-            if current != plan:
-                raise ValueError("預覽後條目已變動，請重新產生批次替換預覽")
-            if progress_callback is not None:
-                progress_callback("提交中（本階段不可取消）", 0.55)
-            for index, change in enumerate(plan.changes, 1):
-                if progress_callback is not None and index % 100 == 0:
-                    progress_callback(
-                        "提交中（本階段不可取消）",
-                        0.55 + 0.4 * index / len(plan.changes),
-                    )
-                prev = conn.execute(
-                    "SELECT zh_tw, checker, review_status, revision FROM translation "
-                    "WHERE entry_id=? AND source=?",
-                    (change.entry_id, SRC_MANUAL),
-                ).fetchone()
-                conn.execute(
-                    "INSERT INTO translation (entry_id, source, zh_tw, checker, review_status) "
-                    "VALUES (?,?,?,'','unreviewed') ON CONFLICT(entry_id,source) DO UPDATE SET "
-                    "zh_tw=excluded.zh_tw, checker='', review_status='unreviewed', "
-                    "updated_at=CURRENT_TIMESTAMP",
-                    (change.entry_id, SRC_MANUAL, change.new_zh_tw),
-                )
-                new_revision = conn.execute(
-                    "SELECT revision FROM translation WHERE entry_id=? AND source=?",
-                    (change.entry_id, SRC_MANUAL),
-                ).fetchone()[0]
-                conn.execute(
-                    "INSERT INTO history (entry_id,batch,actor,action,old_zh_tw,new_zh_tw,"
-                    "prev_manual,note,prev_checker,prev_review_status,new_checker,"
-                    "new_review_status,prev_revision,new_revision) "
-                    "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                    (
-                        change.entry_id,
-                        batch,
-                        actor,
-                        "batch_replace",
-                        change.old_zh_tw,
-                        change.new_zh_tw,
-                        prev[0] if prev else None,
-                        "批次字面取代",
-                        prev[1] if prev else None,
-                        prev[2] if prev else None,
-                        "",
-                        "unreviewed",
-                        prev[3] if prev else None,
-                        new_revision,
-                    ),
-                )
-            self._refresh(conn, [change.entry_id for change in plan.changes])
-        if progress_callback is not None:
-            progress_callback("批次替換已提交", 1.0)
-        return BatchReplaceResult(
-            batch, len(plan.changes), plan.skipped_count, plan.total_unique_entries
-        )
-
-    def revert_batch_replace(self, batch_id: str) -> BatchRevertResult:
-        """CAS-revert every still-current row in a batch, leaving newer edits intact."""
-        reverted: list[int] = []
-        skipped = 0
-        with self._tx(bump_generation_on_noop=False) as conn:
-            rows = conn.execute(
-                "SELECT id,entry_id,new_zh_tw,prev_manual,prev_checker,prev_review_status,"
-                "new_checker,new_review_status,prev_revision,new_revision FROM history "
-                "WHERE batch=? AND action='batch_replace' ORDER BY id DESC",
-                (batch_id,),
-            ).fetchall()
-            revert_batch = uuid.uuid4().hex
-            for (
-                hid,
-                eid,
-                new_text,
-                prev_text,
-                prev_checker,
-                prev_status,
-                new_checker,
-                new_status,
-                prev_revision,
-                new_revision,
-            ) in rows:
-                cur = conn.execute(
-                    "SELECT zh_tw,checker,review_status,revision FROM translation "
-                    "WHERE entry_id=? AND source=?",
-                    (eid, SRC_MANUAL),
-                ).fetchone()
-                if (
-                    cur is None
-                    or cur[0] != new_text
-                    or cur[1] != new_checker
-                    or cur[2] != new_status
-                    or cur[3] != new_revision
-                ):
-                    skipped += 1
-                    continue
-                if prev_text is not None and (
-                    prev_checker is None or prev_status is None
-                ):
-                    skipped += 1
-                    continue
-                if prev_text is None:
-                    conn.execute(
-                        "DELETE FROM translation WHERE entry_id=? AND source=?",
-                        (eid, SRC_MANUAL),
-                    )
-                    restored = None
-                else:
-                    conn.execute(
-                        "UPDATE translation SET zh_tw=?,checker=?,review_status=?,"
-                        "updated_at=CURRENT_TIMESTAMP WHERE entry_id=? AND source=?",
-                        (prev_text, prev_checker, prev_status, eid, SRC_MANUAL),
-                    )
-                    restored = conn.execute(
-                        "SELECT checker,review_status,revision FROM translation "
-                        "WHERE entry_id=? AND source=?",
-                        (eid, SRC_MANUAL),
-                    ).fetchone()
-                conn.execute(
-                    "INSERT INTO history (entry_id,batch,action,old_zh_tw,new_zh_tw,note,"
-                    "prev_checker,prev_review_status,new_checker,new_review_status,"
-                    "prev_revision,new_revision) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
-                    (
-                        eid,
-                        revert_batch,
-                        "batch_revert",
-                        new_text,
-                        prev_text or "",
-                        f"批次還原 #{hid}",
-                        cur[1],
-                        cur[2],
-                        restored[0] if restored else None,
-                        restored[1] if restored else None,
-                        cur[3],
-                        restored[2] if restored else None,
-                    ),
-                )
-                reverted.append(eid)
-            self._refresh(conn, reverted)
-        return BatchRevertResult(len(reverted), skipped, len(reverted) + skipped)
+        return [self._row(r) for r in rows], total
 
     def get_entry(self, entry_id: int) -> EntryRow | None:
-        effective_created = (
-            "et.created_at" if self.has_translation_created_at else "NULL"
-        )
-        last_activity = (
-            "(SELECT MAX(h.at) FROM history h WHERE h.entry_id=e.id AND "
-            "h.action IN ('manual','review','batch_replace','revert','batch_revert'))"
-        )
         r = self._one(
             f"SELECT {_ENTRY_COLS}, f.zh_tw, f.source, f.checker, "
-            f"{self._effective_review_sql}, "
-            f"CASE WHEN f.entry_id IS NULL THEN 0 ELSE {self._DIFF_SQL} END, "
-            f"e.created_at, {effective_created}, et.updated_at, {last_activity} "
-            "FROM entry e LEFT JOIN effective f ON f.entry_id=e.id "
-            "LEFT JOIN translation et ON et.entry_id=e.id AND et.source=f.source "
-            "WHERE e.id=?",
+            f"CASE WHEN f.entry_id IS NULL THEN 0 ELSE {self._DIFF_SQL} END "
+            "FROM entry e LEFT JOIN effective f ON f.entry_id = e.id WHERE e.id = ?",
             (entry_id,),
         )
         return self._row(r) if r else None
@@ -1340,19 +630,10 @@ class TranslationDB:
         if entry is None:
             return None
         detail = EntryDetail(entry=entry)
-        translation_review_sql = (
-            "review_status"
-            if self.has_review_state
-            else f"CASE WHEN source={SRC_MANUAL} THEN 'legacy_unknown' END"
-        )
-        translation_created_sql = (
-            "created_at" if self.has_translation_created_at else "NULL"
-        )
         detail.translations = [
             TranslationRow(*r)
             for r in self._q(
-                "SELECT source, zh_tw, zh_cn, checker, updated_at, "
-                f"{translation_review_sql}, {translation_created_sql} FROM translation "
+                "SELECT source, zh_tw, zh_cn, checker, updated_at FROM translation "
                 "WHERE entry_id=? ORDER BY source",
                 (entry_id,),
             )
@@ -1371,10 +652,9 @@ class TranslationDB:
             ]
         )
         detail.same_key = [
-            SameKeyRow(eid, ver, en, en == entry.en_us, tw or "", src, review_status)
-            for eid, ver, en, tw, src, review_status in self._q(
-                "SELECT e.id, e.mc_version, e.en_us, f.zh_tw, f.source, "
-                f"{self._effective_review_sql} "
+            SameKeyRow(eid, ver, en, en == entry.en_us, tw or "", src)
+            for eid, ver, en, tw, src in self._q(
+                "SELECT e.id, e.mc_version, e.en_us, f.zh_tw, f.source "
                 "FROM entry e INDEXED BY idx_entry_content "
                 "LEFT JOIN effective f ON f.entry_id = e.id "
                 "WHERE e.kind=? AND e.mod_id=? AND e.key=? AND e.id<>? "
@@ -1386,10 +666,9 @@ class TranslationDB:
             []
             if not entry.en_us
             else [
-                SameTextRow(eid, ver, mod, key, tw or "", src, review_status)
-                for eid, ver, mod, key, tw, src, review_status in self._q(
-                    "SELECT e.id, e.mc_version, e.mod_id, e.key, f.zh_tw, f.source, "
-                    f"{self._effective_review_sql} "
+                SameTextRow(eid, ver, mod, key, tw or "", src)
+                for eid, ver, mod, key, tw, src in self._q(
+                    "SELECT e.id, e.mc_version, e.mod_id, e.key, f.zh_tw, f.source "
                     "FROM entry e LEFT JOIN effective f ON f.entry_id = e.id "
                     "WHERE e.en_us=? AND e.kind=? AND NOT (e.mod_id=? AND e.key=?) "
                     "ORDER BY (f.zh_tw IS NULL), e.mod_id, e.key LIMIT ?",
@@ -1405,19 +684,10 @@ class TranslationDB:
                 (entry.kind, entry.mc_version, entry.mod_id, entry.key),
             )
         ]
-        history_review_sql = (
-            "prev_checker, prev_review_status, new_checker, new_review_status"
-            if self.has_review_state
-            else "NULL, NULL, NULL, NULL"
-        )
-        history_revision_sql = (
-            "prev_revision, new_revision" if self.has_history_revision else "NULL, NULL"
-        )
         detail.history = [
             HistoryRow(*r)
             for r in self._q(
-                "SELECT id, batch, at, actor, action, old_zh_tw, new_zh_tw, note, "
-                f"prev_manual, {history_review_sql}, {history_revision_sql} "
+                "SELECT id, batch, at, actor, action, old_zh_tw, new_zh_tw, note "
                 "FROM history WHERE entry_id=? ORDER BY id DESC LIMIT 50",
                 (entry_id,),
             )
@@ -1465,122 +735,6 @@ class TranslationDB:
             impacts.append(Impact(eid, ver, old or "", src, eid == entry_id))
         return impacts
 
-    def preview_manual_review(
-        self,
-        entry_id: int,
-        *,
-        expected_zh_tw: str,
-        expected_source: int | None = None,
-        expected_review_status: str | None = None,
-        expected_checker: str | None = None,
-        propagate: bool = True,
-    ) -> list[ReviewPreviewItem]:
-        """Return a review scope with both effective and existing manual snapshots.
-
-        The returned immutable rows can be supplied back to ``review_manual`` so
-        every included and skipped sibling is checked again inside the write
-        transaction before any row is changed.
-        """
-        with self._lock:
-            return self._review_preview_rows(
-                self._conn,
-                entry_id,
-                expected_zh_tw=expected_zh_tw,
-                expected_source=expected_source,
-                expected_review_status=expected_review_status,
-                expected_checker=expected_checker,
-                propagate=propagate,
-            )
-
-    def _review_preview_rows(
-        self,
-        conn: sqlite3.Connection,
-        entry_id: int,
-        *,
-        expected_zh_tw: str,
-        expected_source: int | None,
-        expected_review_status: str | None,
-        expected_checker: str | None,
-        propagate: bool,
-    ) -> list[ReviewPreviewItem]:
-        selected = conn.execute(
-            "SELECT * FROM entry WHERE id=?", (entry_id,)
-        ).fetchone()
-        if selected is None:
-            raise ValueError("目前譯文已變動，請重新整理後再審核")
-        siblings = self._same_content(conn, entry_id)
-        ids = [int(row[0]) for row in siblings]
-        records: dict[int, tuple] = {}
-        for offset in range(0, len(ids), _CHUNK):
-            chunk = ids[offset : offset + _CHUNK]
-            marks = ",".join("?" for _ in chunk)
-            revision_col = "t.revision" if self.has_translation_revision else "NULL"
-            manual_revision_col = (
-                "m.revision" if self.has_translation_revision else "NULL"
-            )
-            query = (
-                "SELECT e.id, e.mc_version, f.zh_tw, f.source, f.checker, "
-                f"{self._effective_review_sql}, {revision_col}, m.zh_tw, m.checker, "
-                f"m.review_status, {manual_revision_col} "
-                "FROM entry e LEFT JOIN effective f ON f.entry_id=e.id "
-                "LEFT JOIN translation t ON t.entry_id=e.id AND t.source=f.source "
-                "LEFT JOIN translation m ON m.entry_id=e.id AND m.source=? "
-                f"WHERE e.id IN ({marks}) ORDER BY e.mc_version"
-            )
-            for row in conn.execute(query, (SRC_MANUAL, *chunk)).fetchall():
-                records[int(row[0])] = row
-        current = records.get(entry_id)
-        if (
-            current is None
-            or (current[2] or "") != expected_zh_tw
-            or (expected_source is not None and current[3] != expected_source)
-            or (
-                expected_review_status is not None
-                and current[5] != expected_review_status
-            )
-            or (expected_checker is not None and current[4] != expected_checker)
-        ):
-            raise ValueError("目前譯文已變動，請重新整理後再審核")
-
-        result: list[ReviewPreviewItem] = []
-        for eid, version, *_ in siblings:
-            row = records[eid]
-            text = row[2] or ""
-            source = row[3]
-            review_status = row[5]
-            checker = row[4]
-            if eid == entry_id:
-                included = review_status != "reviewed" or source != SRC_MANUAL
-                reason = "目前版本" if included else "目前版本已審核"
-            elif not propagate:
-                included, reason = False, "已選擇僅審核目前版本"
-            elif text != expected_zh_tw:
-                included, reason = False, "目前生效譯文不同"
-            elif row[9] == "reviewed" and (row[7] or "") != expected_zh_tw:
-                included, reason = False, "已有不同的已審核人工譯文"
-            elif row[9] == "reviewed":
-                included, reason = False, "已審核相同譯文"
-            else:
-                included, reason = True, "原文與目前譯文相同"
-            result.append(
-                ReviewPreviewItem(
-                    entry_id=eid,
-                    mc_version=version,
-                    text=text,
-                    source=source,
-                    review_status=review_status,
-                    checker=checker,
-                    effective_revision=row[6],
-                    manual_text=row[7],
-                    manual_checker=row[8],
-                    manual_review_status=row[9],
-                    manual_revision=row[10],
-                    included=included,
-                    reason=reason,
-                )
-            )
-        return result
-
     def save_manual(
         self,
         entry_id: int,
@@ -1589,7 +743,7 @@ class TranslationDB:
         actor: str = "",
         propagate: bool = True,
     ) -> list[Impact]:
-        """儲存新譯文為人工未審核；文字未變時保留原 review 狀態。"""
+        """手動儲存譯文：寫入「人工」來源，並同步原文相同的其他版本。回傳受影響的條目。"""
         text = new_zh_tw  # 原樣儲存：前後空白、換行、格式碼都不改動
         if not text.strip():
             raise ValueError("譯文不可為空，未儲存")
@@ -1602,30 +756,21 @@ class TranslationDB:
                 if eid != entry_id and not propagate:
                     continue
                 prev = conn.execute(
-                    "SELECT zh_tw, checker, review_status, revision FROM translation "
-                    "WHERE entry_id=? AND source=?",
+                    "SELECT zh_tw FROM translation WHERE entry_id=? AND source=?",
                     (eid, SRC_MANUAL),
                 ).fetchone()
                 if prev and prev[0] == text:
                     continue
                 conn.execute(
-                    "INSERT INTO translation (entry_id, source, zh_tw, checker, review_status) "
-                    "VALUES (?,?,?,'','unreviewed') "
-                    "ON CONFLICT(entry_id, source) DO UPDATE SET "
-                    "zh_tw = excluded.zh_tw, checker = '', "
-                    "review_status = 'unreviewed', "
+                    "INSERT INTO translation (entry_id, source, zh_tw, checker) "
+                    "VALUES (?,?,?,?) ON CONFLICT(entry_id, source) DO UPDATE SET "
+                    "zh_tw = excluded.zh_tw, checker = excluded.checker, "
                     "updated_at = CURRENT_TIMESTAMP",
-                    (eid, SRC_MANUAL, text),
+                    (eid, SRC_MANUAL, text, actor or "人工"),
                 )
-                new_revision = conn.execute(
-                    "SELECT revision FROM translation WHERE entry_id=? AND source=?",
-                    (eid, SRC_MANUAL),
-                ).fetchone()[0]
                 conn.execute(
                     "INSERT INTO history (entry_id, batch, actor, action, old_zh_tw, "
-                    "new_zh_tw, prev_manual, note, prev_checker, prev_review_status, "
-                    "new_checker, new_review_status, prev_revision, new_revision) "
-                    "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    "new_zh_tw, prev_manual, note) VALUES (?,?,?,?,?,?,?,?)",
                     (
                         eid,
                         batch,
@@ -1635,117 +780,10 @@ class TranslationDB:
                         text,
                         prev[0] if prev else None,
                         "" if eid == entry_id else f"同步自 {ver_self}",
-                        prev[1] if prev else None,
-                        prev[2] if prev else None,
-                        "",
-                        "unreviewed",
-                        prev[3] if prev else None,
-                        new_revision,
                     ),
                 )
                 done.append(Impact(eid, ver, old or "", src, eid == entry_id))
             self._refresh(conn, [i.entry_id for i in done])
-        return done
-
-    def review_manual(
-        self,
-        entry_id: int,
-        *,
-        expected_zh_tw: str,
-        expected_source: int | None = None,
-        expected_review_status: str | None = None,
-        expected_checker: str | None = None,
-        expected_preview: Sequence[ReviewPreviewItem] | None = None,
-        actor: str = "",
-        propagate: bool = True,
-    ) -> list[Impact]:
-        """Confirm the current effective text as reviewed manual translation.
-
-        ``expected_zh_tw`` is a compare-and-set guard from the editor snapshot.
-        When propagation is enabled, only same-content versions currently showing
-        the same text are reviewed; a different sibling translation is preserved.
-        """
-        if not expected_zh_tw.strip():
-            raise ValueError("沒有可審核的譯文，請先輸入並儲存")
-        batch = uuid.uuid4().hex
-        done: list[Impact] = []
-        with self._tx(bump_generation_on_noop=False) as conn:
-            preview = self._review_preview_rows(
-                conn,
-                entry_id,
-                expected_zh_tw=expected_zh_tw,
-                expected_source=expected_source,
-                expected_review_status=expected_review_status,
-                expected_checker=expected_checker,
-                propagate=propagate,
-            )
-            if expected_preview is not None and tuple(preview) != tuple(
-                expected_preview
-            ):
-                raise ValueError("審核影響範圍已變動，請重新整理後再確認")
-            for item in preview:
-                if not item.included:
-                    continue
-                eid, ver = item.entry_id, item.mc_version
-                prev = conn.execute(
-                    "SELECT zh_tw, checker, review_status, revision FROM translation "
-                    "WHERE entry_id=? AND source=?",
-                    (eid, SRC_MANUAL),
-                ).fetchone()
-                if prev and prev[2] == "reviewed" and prev[0] == expected_zh_tw:
-                    continue
-                conn.execute(
-                    "INSERT INTO translation "
-                    "(entry_id, source, zh_tw, checker, review_status) "
-                    "VALUES (?,?,?,?, 'reviewed') "
-                    "ON CONFLICT(entry_id, source) DO UPDATE SET "
-                    "zh_tw=excluded.zh_tw, checker=excluded.checker, "
-                    "review_status='reviewed', updated_at=CURRENT_TIMESTAMP",
-                    (eid, SRC_MANUAL, expected_zh_tw, actor or "人工"),
-                )
-                new_revision = conn.execute(
-                    "SELECT revision FROM translation WHERE entry_id=? AND source=?",
-                    (eid, SRC_MANUAL),
-                ).fetchone()[0]
-                conn.execute(
-                    "INSERT INTO history "
-                    "(entry_id, batch, actor, action, old_zh_tw, new_zh_tw, "
-                    "prev_manual, note, prev_checker, prev_review_status, "
-                    "new_checker, new_review_status, prev_revision, new_revision) "
-                    "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                    (
-                        eid,
-                        batch,
-                        actor,
-                        "review",
-                        item.text,
-                        expected_zh_tw,
-                        prev[0] if prev else None,
-                        ""
-                        if eid == entry_id
-                        else f"同步審核自 {next((x.mc_version for x in preview if x.entry_id == entry_id), '')}",
-                        prev[1] if prev else None,
-                        prev[2] if prev else None,
-                        actor or "人工",
-                        "reviewed",
-                        prev[3] if prev else None,
-                        new_revision,
-                    ),
-                )
-                done.append(Impact(eid, ver, item.text, item.source, eid == entry_id))
-            if not any(change.is_self for change in done):
-                manual = conn.execute(
-                    "SELECT zh_tw, review_status FROM translation "
-                    "WHERE entry_id=? AND source=?",
-                    (entry_id, SRC_MANUAL),
-                ).fetchone()
-                if (
-                    manual is None
-                    or manual[0] != expected_zh_tw
-                    or manual[1] != "reviewed"
-                ):
-                    raise ValueError("目前譯文已變動，請重新整理後再審核")
-            self._refresh(conn, [change.entry_id for change in done])
         return done
 
     def revert(self, history_id: int, *, whole_batch: bool = True) -> int:
@@ -1758,57 +796,18 @@ class TranslationDB:
         )
         reverted: list[int] = []
         new_batch = uuid.uuid4().hex
-        with self._tx(bump_generation_on_noop=False) as conn:
-            for (
-                hid,
-                eid,
-                new_tw,
-                prev_manual,
-                prev_checker,
-                prev_review_status,
-                new_checker,
-                new_review_status,
-                prev_revision,
-                new_revision,
-            ) in conn.execute(
-                f"SELECT id, entry_id, new_zh_tw, prev_manual, prev_checker, "
-                f"prev_review_status, new_checker, new_review_status, "
-                f"prev_revision, new_revision FROM history "
-                f"WHERE action IN ('manual','review') AND {where} ORDER BY id DESC",
+        with self._tx() as conn:
+            for hid, eid, new_tw, prev_manual in conn.execute(
+                f"SELECT id, entry_id, new_zh_tw, prev_manual FROM history "
+                f"WHERE action='manual' AND {where}",
                 params,
             ).fetchall():
                 cur = conn.execute(
-                    "SELECT zh_tw, checker, review_status, revision FROM translation "
-                    "WHERE entry_id=? AND source=?",
+                    "SELECT zh_tw FROM translation WHERE entry_id=? AND source=?",
                     (eid, SRC_MANUAL),
                 ).fetchone()
                 if cur is None or cur[0] != new_tw:
                     continue  # 之後又被改過，不覆蓋
-                if new_revision is not None:
-                    # Revision is globally monotonic, so A→B→C→B cannot make an
-                    # old history record appear current again.
-                    if cur[3] != new_revision:
-                        continue
-                else:
-                    # Legacy histories have no revision. Require no later known
-                    # manual mutation and refuse to invent missing old metadata.
-                    later = conn.execute(
-                        "SELECT 1 FROM history WHERE entry_id=? AND id>? "
-                        "AND action IN ('manual','review','revert','batch_replace',"
-                        "'batch_revert') LIMIT 1",
-                        (eid, hid),
-                    ).fetchone()
-                    if later:
-                        continue
-                if new_review_status is not None:
-                    if cur[1] != new_checker or cur[2] != new_review_status:
-                        continue
-                elif cur[2] not in (None, "legacy_unknown"):
-                    continue  # 舊 history 沒有狀態快照，只能還原未被新版操作改動的舊列
-                if prev_manual is not None and (
-                    prev_checker is None or prev_review_status is None
-                ):
-                    continue  # 不虛構舊 checker／審核狀態，避免改變有效譯文排序
                 if prev_manual is None:
                     conn.execute(
                         "DELETE FROM translation WHERE entry_id=? AND source=?",
@@ -1816,26 +815,13 @@ class TranslationDB:
                     )
                 else:
                     conn.execute(
-                        "UPDATE translation SET zh_tw=?, checker=?, review_status=?, "
-                        "updated_at=CURRENT_TIMESTAMP "
+                        "UPDATE translation SET zh_tw=?, updated_at=CURRENT_TIMESTAMP "
                         "WHERE entry_id=? AND source=?",
-                        (
-                            prev_manual,
-                            prev_checker,
-                            prev_review_status,
-                            eid,
-                            SRC_MANUAL,
-                        ),
+                        (prev_manual, eid, SRC_MANUAL),
                     )
-                restored = conn.execute(
-                    "SELECT checker, review_status, revision FROM translation "
-                    "WHERE entry_id=? AND source=?",
-                    (eid, SRC_MANUAL),
-                ).fetchone()
                 conn.execute(
-                    "INSERT INTO history (entry_id, batch, action, old_zh_tw, new_zh_tw, "
-                    "note, prev_checker, prev_review_status, new_checker, new_review_status, "
-                    "prev_revision, new_revision) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                    "INSERT INTO history (entry_id, batch, action, old_zh_tw, new_zh_tw, note) "
+                    "VALUES (?,?,?,?,?,?)",
                     (
                         eid,
                         new_batch,
@@ -1843,12 +829,6 @@ class TranslationDB:
                         new_tw,
                         prev_manual or "",
                         f"還原 #{hid}",
-                        cur[1],
-                        cur[2],
-                        restored[0] if restored else None,
-                        restored[1] if restored else None,
-                        cur[3],
-                        restored[2] if restored else None,
                     ),
                 )
                 reverted.append(eid)

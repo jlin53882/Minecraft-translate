@@ -9,23 +9,22 @@ from __future__ import annotations
 import json
 import sqlite3
 import threading
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from translation_tool.translation_db.repository import TranslationDB
 from translation_tool.translation_db.schema import (
+    BUILTIN_SOURCE_NAMES,
     CUSTOM_SOURCE_BASE,
     DB_EMPTY,
     DB_FOREIGN,
     DB_NEWER,
     DB_VALID,
     DEFAULT_PRIORITY,
+    SOURCE_NAMES,
     classify_database,
-)
-from translation_tool.translation_db.source_catalog import (
-    DEFAULT_SOURCE_CATALOG,
-    SourceCatalog,
+    register_source_names,
 )
 from translation_tool.utils.log_unit import log_info, log_warning
 from translation_tool.utils.path_text import normalize_path_text, strip_path_quotes
@@ -51,9 +50,6 @@ class DbSettings:
         str, ...
     ] = ()  # 設定裡「來源優先順序」輸入的名稱（含新增的自訂來源）
     zip_source: int | None = None  # 翻譯 ZIP 匯入時，「譯文來源標記」的預設來源
-    source_catalog: SourceCatalog = field(
-        default_factory=lambda: DEFAULT_SOURCE_CATALOG
-    )
 
     @property
     def usable(self) -> bool:
@@ -165,14 +161,11 @@ def ensure_custom_sources(path: Path, names: list[str]) -> dict[str, int]:
     只處理「本功能的資料庫」；名稱與內建來源同名者沿用內建代碼，不另外配發。
     """
     registry = read_custom_sources(path)
-    catalog = SourceCatalog.from_registry(registry)
-    new = []
-    for name in clean_source_names(names):
-        if catalog.resolve(name) is not None:
-            continue
-        if name.startswith(("builtin:", "custom:")):
-            continue
-        new.append(name)
+    new = [
+        n
+        for n in clean_source_names(names)
+        if n not in registry and n not in BUILTIN_SOURCE_NAMES.values()
+    ]
     if not new or not path.is_file() or classify_database(path) != DB_VALID:
         return registry
     try:
@@ -217,10 +210,11 @@ def parse_priority(names: Any, custom: dict[str, int] | None = None) -> tuple[in
     名稱對得上內建來源或已登錄的自訂來源（``custom``）才有效；
     沒列出的內建來源依預設順序、沒列出的自訂來源依代碼順序接在後面。
     """
-    catalog = SourceCatalog.from_registry(custom)
+    by_name = {name: code for code, name in BUILTIN_SOURCE_NAMES.items()}
+    by_name.update(custom or {})
     order: list[int] = []
     for name in clean_source_names(names):
-        code = catalog.resolve(name)
+        code = by_name.get(name)
         if code is not None and code not in order:
             order.append(code)
     order.extend(c for c in DEFAULT_PRIORITY if c not in order)
@@ -228,49 +222,17 @@ def parse_priority(names: Any, custom: dict[str, int] | None = None) -> tuple[in
     return tuple(order)
 
 
-def priority_names(
-    priority: tuple[int, ...], catalog: SourceCatalog = DEFAULT_SOURCE_CATALOG
-) -> list[str]:
-    """Serialize source identity, never a potentially colliding display label."""
-    return [catalog.token_for(code) for code in priority]
-
-
-def serialize_priority_lines(
-    names: Any, catalog: SourceCatalog = DEFAULT_SOURCE_CATALOG
-) -> list[str]:
-    """Persist known source names as stable identity tokens and retain new names.
-
-    Unregistered plain names remain intact until a database can assign their
-    database-local custom code. Known names, including a display-name collision,
-    are serialized unambiguously before they are written to config.
-    """
-    serialized: list[str] = []
-    seen_codes: set[int] = set()
-    for name in clean_source_names(names):
-        code = catalog.resolve(name)
-        if code is None:
-            if name not in serialized:
-                serialized.append(name)
-            continue
-        if code not in seen_codes:
-            serialized.append(catalog.token_for(code))
-            seen_codes.add(code)
-    return serialized
+def priority_names(priority: tuple[int, ...]) -> list[str]:
+    return [SOURCE_NAMES.get(c, f"來源 {c}") for c in priority]
 
 
 def split_new_source_names(
     names: Any, registry: dict[str, int] | None = None
 ) -> tuple[list[str], list[str]]:
     """輸入的名稱分成 ``(已存在, 將新增)``；供設定頁即時提示。"""
-    catalog = SourceCatalog.from_registry(registry)
+    known = set(BUILTIN_SOURCE_NAMES.values()) | set(registry or {})
     cleaned = clean_source_names(names)
-    known = [n for n in cleaned if catalog.resolve(n) is not None]
-    new = [
-        n
-        for n in cleaned
-        if catalog.resolve(n) is None and not n.startswith(("builtin:", "custom:"))
-    ]
-    return known, new
+    return [n for n in cleaned if n in known], [n for n in cleaned if n not in known]
 
 
 def load_db_settings(config: dict | None = None) -> DbSettings:
@@ -283,7 +245,9 @@ def load_db_settings(config: dict | None = None) -> DbSettings:
     path = normalize_db_path(cfg.get("path"))
     lines = tuple(clean_source_names(cfg.get("priority")))
     registry = ensure_custom_sources(DbSettings(path=path).resolved_path(), list(lines))
-    catalog = SourceCatalog.from_registry(registry)
+    register_source_names(registry)
+    by_name = {name: code for code, name in BUILTIN_SOURCE_NAMES.items()}
+    by_name.update(registry)
     return DbSettings(
         enabled=bool(cfg.get("enabled", True)),
         merge_enabled=bool(cfg.get("merge_enabled", True)),
@@ -294,8 +258,7 @@ def load_db_settings(config: dict | None = None) -> DbSettings:
         sync_manual=bool(cfg.get("sync_manual", True)),
         priority=parse_priority(lines, registry),
         priority_lines=lines,
-        zip_source=catalog.resolve(cfg.get("zip_source")),
-        source_catalog=catalog,
+        zip_source=by_name.get(str(cfg.get("zip_source") or "").strip()),
     )
 
 
@@ -388,6 +351,7 @@ def open_db(
                 # 資料庫剛建立：設定裡輸入的新名稱現在才能登錄成自訂來源
                 registry = ensure_custom_sources(path, list(settings.priority_lines))
                 if registry:
+                    register_source_names(registry)
                     db.set_priority(parse_priority(settings.priority_lines, registry))
             return db
         except Exception as exc:  # noqa: BLE001 - 資料庫問題不應中斷翻譯
