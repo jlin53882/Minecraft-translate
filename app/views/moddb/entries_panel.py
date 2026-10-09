@@ -37,11 +37,15 @@ from app.ui.design import C
 from app.ui.snack import show_snack
 from app.views.moddb.char_inspector import CharInspector, scrolling_list
 from app.views.moddb.entry_filters import (
+    ALL_KINDS,
+    ALL_MODS,
+    apply_filter_options,
     build_filter_controls,
     database_identity,
     entry_filter,
     on_advanced_change,
     open_batch_replace,
+    refresh_entry_filter,
 )
 from app.views.moddb.entry_metadata import build_entry_metadata
 from app.views.moddb.entry_row_tile import build_entry_tile
@@ -65,8 +69,6 @@ from translation_tool.utils.log_unit import (
 
 PAGE_SIZE = 50
 __all__ = ["EntriesPanel", "SourceFilter"]
-ALL_MODS = "全部模組"
-ALL_KINDS = "全部類型"
 ALL_REVIEW_STATES = "__all__"
 ACTOR = "使用者"
 NO_SOURCE_TEXT = "（原文未知：之後掃描同版本的 jar，會自動補上原文）"
@@ -75,12 +77,15 @@ NO_SOURCE_TEXT = "（原文未知：之後掃描同版本的 jar，會自動補�
 class EntriesPanel(ft.Column):
     """條目校對頁籤。"""
 
-    def __init__(self, page: ft.Page, get_db, on_changed=None):
+    def __init__(self, page: ft.Page, get_db, on_changed=None, on_filter_changed=None):
         """``get_db()`` 回傳目前的 ``TranslationDB``（沒有資料庫時回傳 None）。"""
         super().__init__(expand=True, spacing=12)
         self._page = page
         self._get_db = get_db
         self._on_changed = on_changed
+        self._on_filter_changed = on_filter_changed
+        self._refresh_keep_selection = True
+        self._filter_only_refresh = False
         self.version: str | None = None
         self.mod_id: str | None = None
         self.kind: str | None = None
@@ -287,7 +292,10 @@ class EntriesPanel(ft.Column):
         )
 
     def _build_history_card(self) -> None:
-        self.history_col = ft.Column(spacing=10)
+        self.history_col = ft.Column(
+            spacing=10,
+            horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
+        )
         self.history_card = kit.section_card(
             "記錄",
             self.history_col,
@@ -350,46 +358,30 @@ class EntriesPanel(ft.Column):
 
     def apply_refresh_snapshot(self, snapshot: dict) -> None:
         """Apply a worker-loaded tab snapshot without querying SQLite on the UI thread."""
-        identity = snapshot.get("identity")
-        self._render_source_catalog = snapshot.get("source_catalog")
-        if self._db_identity is not None and identity != self._db_identity:
-            self.source_filter.reset()
-        self._db_identity = identity
-        self.source_filter.refresh()
-        versions = snapshot.get("versions", [])
-        kit.set_dropdown_options(self.version_dd, [(v, v) for v in versions])
-        self.version = snapshot.get("version")
-        self.version_dd.value = self.version
-
-        mods = snapshot.get("mods", [])
-        kit.set_dropdown_options(
-            self.mod_dd, [(ALL_MODS, ALL_MODS), *((m, m) for m in mods)]
-        )
-        self.mod_id = snapshot.get("mod_id")
-        self.mod_dd.value = self.mod_id or ALL_MODS
-        kinds = snapshot.get("kinds", [])
-        kit.set_dropdown_options(
-            self.kind_dd,
-            [(ALL_KINDS, ALL_KINDS), *((k, kind_label(k)) for k in kinds)],
-        )
-        self.kind = snapshot.get("kind")
-        self.kind_dd.value = self.kind or ALL_KINDS
+        previous_selected_id = self.selected.id if self.selected else None
+        filter_only = snapshot.get("filter_only", False)
+        if not filter_only:
+            apply_filter_options(self, snapshot)
 
         self.rows = snapshot.get("rows", [])
         self.total = snapshot.get("total", 0)
         self._list_error = snapshot.get("list_error") or snapshot.get("error")
         self.advanced_filters.error_text.value = self._list_error or ""
         self.advanced_filters.error_text.visible = bool(self._list_error)
-        self.pager.set_state(self.total, 1)
+        self.pager.set_state(self.total, snapshot.get("page", 1))
         self._render_list()
         self.detail = snapshot.get("detail")
         self.selected = self.detail.entry if self.detail else None
-        self._show_editor(
-            self.detail,
-            calculate_impact=False,
-            catalog=snapshot.get("source_catalog"),
-        )
-        self._render_list_selection()
+        if (
+            not filter_only
+            or (self.selected.id if self.selected else None) != previous_selected_id
+        ):
+            self._show_editor(
+                self.detail,
+                calculate_impact=False,
+                catalog=snapshot.get("source_catalog"),
+            )
+        self._render_list_selection(previous_selected_id)
         self.refresh_indicator.value = str(snapshot.get("error") or "")
         self.refresh_indicator.visible = bool(snapshot.get("error"))
 
@@ -478,17 +470,18 @@ class EntriesPanel(ft.Column):
         )
         self.batch_replace_btn.disabled = bool(self._list_error)
         self.advanced_filters.set_summary()
-        tiles = [self._row_tile(r) for r in self.rows] or [
-            kit.empty_state(
+        tiles = [self._row_tile(r) for r in self.rows]
+        if not tiles:
+            empty = kit.empty_state(
                 "無法套用日期篩選" if self._list_error else "沒有符合的條目",
                 self._list_error or "調整上方篩選，或先到「掃描匯入」建立資料",
                 icon=ft.Icons.ERROR_OUTLINE
                 if self._list_error
                 else ft.Icons.SEARCH_OFF,
             )
-        ]
-        # 換篩選／換頁後清單內容大幅改變：全新 key 避免 Flet 配對舊項目而殘留上一份清單
-        self.list_view.controls = kit.rekey(tiles, "entry")
+            empty.key = "entry-empty"
+            tiles = [empty]
+        self.list_view.controls = tiles
         self._scroll_list_to(self._scroll_offset if keep_scroll else 0.0)
 
     def _on_list_scroll(self, e) -> None:
@@ -518,19 +511,33 @@ class EntriesPanel(ft.Column):
 
     # ------------------------------------------------------------------ 選取
     def select(self, entry_id: int | None) -> None:
+        previous_selected_id = self.selected.id if self.selected else None
         db = self.db()
         detail = db.entry_detail(entry_id) if (db and entry_id) else None
         self.detail = detail
         self.selected = detail.entry if detail else None
         self._show_editor(detail)
-        self._render_list_selection()
+        self._render_list_selection(previous_selected_id)
 
-    def _render_list_selection(self) -> None:
-        for tile in self.list_view.controls:
-            if isinstance(tile, ft.Container) and tile.data is not None:
-                tile.bgcolor = (
-                    C.EM_BG if self.selected and tile.data == self.selected.id else None
-                )
+    def _render_list_selection(self, previous_selected_id: int | None = None) -> None:
+        """Rebuild selected rows because mounted Flet controls are immutable."""
+        selected_id = self.selected.id if self.selected else None
+        changed_ids = {
+            entry_id
+            for entry_id in (previous_selected_id, selected_id)
+            if entry_id is not None
+        }
+        if not changed_ids:
+            return
+        rows_by_id = {row.id: row for row in self.rows if row.id in changed_ids}
+        if not rows_by_id:
+            return
+        self.list_view.controls = [
+            self._row_tile(rows_by_id[entry_id])
+            if (entry_id := getattr(tile, "data", None)) in rows_by_id
+            else tile
+            for tile in self.list_view.controls
+        ]
 
     def _show_editor(
         self,
@@ -600,43 +607,36 @@ class EntriesPanel(ft.Column):
     def _on_version(self, e) -> None:
         self.version = e.control.value
         self.mod_id = None
-        self._load_mods()
-        self._load_list()
-        self._safe_update()
+        if self._on_filter_changed is None:
+            self._load_mods()
+        refresh_entry_filter(self, full_refresh=True)
 
     def _on_mod(self, e) -> None:
         value = e.control.value
         self.mod_id = None if value in (None, "", ALL_MODS) else value
-        self._load_list()
-        self._safe_update()
+        refresh_entry_filter(self)
 
     def _on_kind(self, e) -> None:
         value = e.control.value
         self.kind = None if value in (None, "", ALL_KINDS) else value
-        self._load_list()
-        self._safe_update()
+        refresh_entry_filter(self)
 
     def _on_source(self) -> None:
-        self._load_list()
-        self._safe_update()
+        refresh_entry_filter(self)
 
     def _on_review_status(self) -> None:
-        self._load_list()
-        self._safe_update()
+        refresh_entry_filter(self)
 
     def _on_state(self, key: str) -> None:
         self.state = key
-        self._load_list()
-        self._safe_update()
+        refresh_entry_filter(self)
 
     def _on_search(self, e) -> None:
         self.query = (e.control.value or "").strip()
-        self._load_list()
-        self._safe_update()
+        refresh_entry_filter(self)
 
     def _on_page(self, page: int) -> None:
-        self._load_list(page=page, keep_selection=False)
-        self._safe_update()
+        refresh_entry_filter(self, page=page, keep_selection=False)
 
     def _on_sug_tab(self, key: str) -> None:
         self.sug_tab = key
@@ -905,8 +905,7 @@ class EntriesPanel(ft.Column):
     def clear_flagged(self) -> None:
         """清除「特殊字元不一致」篩選，回到一般清單。"""
         self._set_flagged(None, {})
-        self._load_list()
-        self._safe_update()
+        refresh_entry_filter(self)
 
     def _set_flagged(self, entry_ids: list[int] | None, drafts: dict[int, str]) -> None:
         self.entry_ids = entry_ids

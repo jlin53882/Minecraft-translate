@@ -157,9 +157,97 @@ def test_view_switches_tabs_and_shows_overview_numbers(db_path):
         view.overview.stat_diff.value_text.value == "1"
     )  # foo 的 Steel Casing 兩版本譯文不同
     view.show_tab("entries")
-    assert view.body.content is view.entries and view.tab == "entries"
+    assert view.body.content is view._tab_stack and view.tab == "entries"
+    assert view._panel_hosts["entries"].visible is True
+    assert view._panel_hosts["overview"].visible is False
     view.show_tab("scan")
-    assert view.body.content is view.scan
+    assert view._panel_hosts["scan"].visible is True
+    assert view._panel_hosts["entries"].visible is False
+
+
+def test_visited_moddb_tabs_stay_mounted_for_fast_switching(db_path):
+    seed(db_path)
+    view = moddb_view.ModDbView(mock_page(), mock_filepicker())
+    assert view._tab_stack.controls == [view._panel_hosts["overview"]]
+
+    for key in ("entries", "scan", "translate", "overview", "entries"):
+        view.show_tab(key)
+        assert view.tab == key
+        assert view._panel_hosts[key].visible is True
+        assert all(
+            host.visible is (tab_key == key)
+            for tab_key, host in view._panel_hosts.items()
+            if tab_key in view._mounted_tabs
+        )
+
+    assert view._mounted_tabs == {"overview", "entries", "scan", "translate"}
+    assert len(view._tab_stack.controls) == len(view._mounted_tabs)
+
+
+def test_unchanged_moddb_tabs_skip_database_refresh_on_reselection(
+    db_path, monkeypatch
+):
+    seed(db_path)
+    view = moddb_view.ModDbView(mock_page(), mock_filepicker())
+    refreshes = {"entries": 0, "scan": 0, "translate": 0}
+
+    monkeypatch.setattr(
+        view.entries,
+        "refresh",
+        lambda **_kwargs: refreshes.__setitem__("entries", refreshes["entries"] + 1),
+    )
+    monkeypatch.setattr(
+        view.scan,
+        "refresh_versions",
+        lambda: refreshes.__setitem__("scan", refreshes["scan"] + 1),
+    )
+    monkeypatch.setattr(
+        view.translate,
+        "refresh_scope",
+        lambda: refreshes.__setitem__("translate", refreshes["translate"] + 1),
+    )
+
+    for key in ("entries", "scan", "translate", "overview", "entries", "scan"):
+        view.show_tab(key)
+
+    assert refreshes == {"entries": 1, "scan": 1, "translate": 1}
+
+
+def test_entries_write_invalidates_overview_but_keeps_current_rows_fresh(db_path):
+    seed(db_path)
+    view = moddb_view.ModDbView(mock_page(), mock_filepicker())
+    view.show_tab("entries")
+    previous_revision = view._data_revision
+
+    view._on_entries_changed()
+
+    assert view._data_revision == previous_revision + 1
+    assert view._panel_refresh_needed["entries"] is False
+    assert view._overview_needs_refresh is True
+
+
+def test_task_completion_invalidates_cached_moddb_panels(db_path, monkeypatch):
+    seed(db_path)
+    view = moddb_view.ModDbView(mock_page(), mock_filepicker())
+    for key in ("entries", "scan", "translate"):
+        view.show_tab(key)
+    assert all(not needed for needed in view._panel_refresh_needed.values())
+
+    refreshed = []
+    original_refresh = view.translate.refresh_scope
+
+    def record_refresh():
+        refreshed.append(True)
+        original_refresh()
+
+    monkeypatch.setattr(view.translate, "refresh_scope", record_refresh)
+    view._on_scan_finished()
+
+    assert view._overview_needs_refresh is True
+    assert view._panel_refresh_needed["entries"] is True
+    assert view._panel_refresh_needed["scan"] is True
+    assert view._panel_refresh_needed["translate"] is False
+    assert refreshed == [True]
 
 
 def test_database_tab_refreshes_run_queries_in_worker_threads(db_path, monkeypatch):
@@ -188,6 +276,17 @@ def test_database_tab_refreshes_run_queries_in_worker_threads(db_path, monkeypat
     for method in originals:
         monkeypatch.setattr(TranslationDB, method, record(method))
 
+    filter_connections = []
+    original_filter_snapshot = moddb_view.load_entries_filter_snapshot
+
+    def record_filter_snapshot(db, request):
+        filter_connections.append((db, threading.current_thread().name))
+        return original_filter_snapshot(db, request)
+
+    monkeypatch.setattr(
+        moddb_view, "load_entries_filter_snapshot", record_filter_snapshot
+    )
+
     view = moddb_view.ModDbView(page, mock_filepicker())
     try:
         for key in ("entries", "scan", "translate"):
@@ -202,10 +301,55 @@ def test_database_tab_refreshes_run_queries_in_worker_threads(db_path, monkeypat
         assert "未翻譯" in view.translate.count_text.value
         assert query_threads
         assert all(name != threading.current_thread().name for _, name in query_threads)
-        assert view._db is None
+
+        query_threads.clear()
+        view.show_tab("entries")
+        view.entries._on_state("none")
+        assert view.entries.refresh_indicator.visible is True
+        assert view.entries.refresh_indicator.value == "正在篩選條目…"
+        assert page.operation_registry.wait_for_idle(timeout=2)
+        page._run_all_tasks()
+        page._tasks.clear()
+        assert [row.key for row in view.entries.rows] == ["item.foo.b"]
+        assert len(filter_connections) == 1
+        assert filter_connections[0][0] is view._db
+        assert filter_connections[0][1] != threading.current_thread().name
+        assert query_threads
+        assert all(name != threading.current_thread().name for _, name in query_threads)
+        assert view.entries.refresh_indicator.visible is False
+        assert view._db is not None
     finally:
         page.operation_registry.begin_shutdown()
         assert page.operation_registry.wait_for_idle(timeout=2)
+        if view._db is not None:
+            view._db.close()
+
+
+def test_entries_worker_snapshot_preserves_requested_page(db_path):
+    seed(db_path)
+    db = TranslationDB(db_path)
+    db.ingest(
+        "1.21.1",
+        [
+            ScanItem(KIND_LANG, "foo", f"item.page.{index:03}", f"Page {index}")
+            for index in range(52)
+        ],
+    )
+    db.close()
+
+    view = moddb_view.ModDbView(mock_page(), mock_filepicker())
+    view.show_tab("entries")
+    assert view.entries.total == 55
+    view.entries.pager.set_state(view.entries.total, 2)
+    request = view._panel_refresh_request("entries")
+
+    snapshot = moddb_view.load_panel_snapshot(
+        "entries", request, moddb_service.current_settings()
+    )
+
+    assert request["page"] == 2
+    assert snapshot["page"] == 2
+    assert len(snapshot["rows"]) == 5
 
 
 def test_moddb_overview_load_uses_a_worker_owned_connection(db_path, monkeypatch):
@@ -359,8 +503,10 @@ def test_entries_lists_selected_version_and_selects_first(entries):
 
 
 def test_entries_filters_by_state_mod_and_search(entries):
+    original_keys = {row.id: f"entry-{row.id}" for row in entries.rows}
     entries._on_state("none")
     assert [r.key for r in entries.rows] == ["item.foo.b"]
+    assert entries.list_view.controls[0].key == original_keys[entries.rows[0].id]
     entries._on_state("diff")
     assert [r.key for r in entries.rows] == ["item.foo.a"]
     entries._on_state("all")
@@ -1662,23 +1808,26 @@ def test_visible_segments_exposes_newline_spaces_and_tokens():
 
 
 def test_switching_back_to_a_running_tab_resumes_polling(db_path, monkeypatch):
-    """機翻／掃描進行中切到別的頁籤再回來：面板卸載時輪詢已停，必須接續輪詢，畫面才不會卡住。"""
+    """隱藏機翻／掃描頁時停止輪詢，切回保留的面板時接續輪詢。"""
     seed(db_path)
     view = moddb_view.ModDbView(mock_page(), mock_filepicker())
     for panel, key in ((view.translate, "translate"), (view.scan, "scan")):
         started = []
+        stopped = []
         monkeypatch.setattr(
             panel._poller,
             "start",
             lambda page, handler, _s=started: _s.append(1) or True,
         )
+        monkeypatch.setattr(panel._poller, "stop", lambda _s=stopped: _s.append(1))
         panel.session = TaskSession()
         panel._running = True
-        panel.will_unmount()  # 離開頁籤：面板被卸載、輪詢停止
-        view.show_tab("entries")
-        assert started == []  # 不在這個頁籤時不需要輪詢
         view.show_tab(key)
-        assert started == [1], f"{key} 切回來後沒有接續輪詢"
+        assert started == [1], f"{key} 頁籤選取後沒有接續輪詢"
+        view.show_tab("entries")
+        assert stopped == [1], f"隱藏 {key} 時沒有停止輪詢"
+        view.show_tab(key)
+        assert started == [1, 1], f"{key} 切回來後沒有接續輪詢"
 
 
 def test_overview_kpi_cards_share_one_layout_contract(db_path):

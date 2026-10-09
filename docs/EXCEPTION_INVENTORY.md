@@ -4,11 +4,11 @@
 > 範圍：`app/`、`translation_tool/`、`main.py` 內所有帶 `noqa: BLE001／S110／S112` 的位置。
 > 命令列 QA 工具（`md_extract_qa.py`、`md_inject_qa.py`）的 `print` 為刻意保留，不在此表。
 
-共 **309** 項；其中 **112** 項尚未在程式碼內寫明原因（以「分類」說明處理方式）。
+共 **310** 項；其中 **112** 項尚未在程式碼內寫明原因（以「分類」說明處理方式）。
 
 | 分類 | 數量 | 意義 |
 |---|---|---|
-| 已記錄／回報 | 275 | 例外處理本身有 log、提示、回報錯誤事件或重新丟出；寬鬆捕捉是為了不中斷整批流程 |
+| 已記錄／回報 | 276 | 例外處理本身有 log、提示、回報錯誤事件或重新丟出；寬鬆捕捉是為了不中斷整批流程 |
 | UI／畫面保護 | 18 | UI 層的畫面更新、icon 快取等；失敗只影響顯示，不影響資料 |
 | 盡力而為（靜默） | 16 | 引擎層、只有 `pass`／`continue`／回傳常數；失敗不影響結果（例如進度回報、還原失敗時以原始例外為準） |
 
@@ -154,7 +154,8 @@
 | `app/views/moddb/translate_panel.py:TranslatePanel._poll` | BLE001 | 已記錄／回報 | 輪詢失敗不能讓畫面永遠卡在「執行中」 |
 | `app/views/moddb/translate_panel.py:TranslatePanel._safe_update` | BLE001 | 已記錄／回報 | 頁面已卸載時不影響機翻本身 |
 | `app/views/moddb_view.py:_load_overview_snapshot` | BLE001 | 已記錄／回報 | 顯示載入失敗並恢復頁面 |
-| `app/views/moddb_view.py:ModDbView._request_panel_refresh.load` | BLE001 | 已記錄／回報 | 顯示載入錯誤並恢復頁籤 |
+| `app/views/moddb_view.py:ModDbView._launch_panel_refresh.load` | BLE001 | 已記錄／回報 | 顯示載入錯誤並恢復頁籤 |
+| `app/views/moddb_view.py:ModDbView._safe_update` | BLE001 | 已記錄／回報 | page may already be detached |
 | `app/views/moddb_view.py:ModDbView._safe_update` | BLE001 | 已記錄／回報 | 頁面已卸載時不影響資料操作 |
 | `app/views/pipeline/pipeline_bundle_dialog.py:_load_version_data` | BLE001 | 已記錄／回報 | 讀不到版本資料時使用空設定，UI 仍可開啟 |
 | `app/views/pipeline/pipeline_db_version_field.py:build_pipeline_db_version_field.on_focus` | BLE001 | 已記錄／回報 | manual input remains available |

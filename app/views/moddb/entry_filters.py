@@ -10,16 +10,45 @@ from app.ui.design import C
 from app.ui.snack import show_snack
 from app.views.moddb.advanced_filters import AdvancedFilters
 from app.views.moddb.batch_replace_dialog import BatchReplaceDialog
-from app.views.moddb.formatting import STATE_LABELS
+from app.views.moddb.formatting import STATE_LABELS, kind_label
 from app.views.moddb.source_filter import ReviewStatusFilter, SourceFilter
 
 ALL_REVIEW_STATES = "__all__"
+ALL_MODS = "全部模組"
+ALL_KINDS = "全部類型"
 
 
 def build_filter_controls(panel) -> None:
     _build_controls(panel)
     _build_flagged_banner(panel)
     _build_filter_card(panel)
+
+
+def apply_filter_options(panel, snapshot: dict) -> None:
+    """Apply worker-loaded filter options and keep their selected values valid."""
+    identity = snapshot.get("identity")
+    panel._render_source_catalog = snapshot.get("source_catalog")
+    if panel._db_identity is not None and identity != panel._db_identity:
+        panel.source_filter.reset()
+    panel._db_identity = identity
+    panel.source_filter.refresh()
+    versions = snapshot.get("versions", [])
+    kit.set_dropdown_options(panel.version_dd, [(v, v) for v in versions])
+    panel.version = snapshot.get("version")
+    panel.version_dd.value = panel.version
+    mods = snapshot.get("mods", [])
+    kit.set_dropdown_options(
+        panel.mod_dd, [(ALL_MODS, ALL_MODS), *((m, m) for m in mods)]
+    )
+    panel.mod_id = snapshot.get("mod_id")
+    panel.mod_dd.value = panel.mod_id or ALL_MODS
+    kinds = snapshot.get("kinds", [])
+    kit.set_dropdown_options(
+        panel.kind_dd,
+        [(ALL_KINDS, ALL_KINDS), *((k, kind_label(k)) for k in kinds)],
+    )
+    panel.kind = snapshot.get("kind")
+    panel.kind_dd.value = panel.kind or ALL_KINDS
 
 
 def _build_controls(panel) -> None:
@@ -141,9 +170,20 @@ def entry_filter(panel) -> EntryFilter:
     )
 
 
-def on_advanced_change(panel) -> None:
-    panel._load_list()
+def refresh_entry_filter(
+    panel, *, page: int = 1, keep_selection: bool = True, full_refresh: bool = False
+) -> None:
+    """Refresh filter results without blocking when the parent provides a worker."""
+    panel.pager.set_state(panel.total, page)
+    if panel._on_filter_changed is not None:
+        panel._on_filter_changed(page, keep_selection, full_refresh)
+        return
+    panel._load_list(page=page, keep_selection=keep_selection)
     panel._safe_update()
+
+
+def on_advanced_change(panel) -> None:
+    refresh_entry_filter(panel)
 
 
 def open_batch_replace(panel, _e=None) -> None:

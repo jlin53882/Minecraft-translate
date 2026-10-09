@@ -45,12 +45,25 @@ def _load_entries_snapshot(db, request: dict, settings, snapshot: dict) -> dict:
     mod_id = request.get("mod_id") if request.get("mod_id") in mods else None
     kind = request.get("kind") if request.get("kind") in kinds else None
     rows, total, error, detail = [], 0, None, None
+    page = max(1, int(request.get("page", 1)))
     if db is not None and version:
         criteria = replace(
             request["criteria"], version=version, mod_id=mod_id, kind=kind
         )
         try:
-            rows, total = db.list_entries(criteria=criteria, limit=PAGE_SIZE, offset=0)
+            rows, total = db.list_entries(
+                criteria=criteria,
+                limit=PAGE_SIZE,
+                offset=(page - 1) * PAGE_SIZE,
+            )
+            last_page = max(1, (total + PAGE_SIZE - 1) // PAGE_SIZE)
+            if page > last_page:
+                page = last_page
+                rows, total = db.list_entries(
+                    criteria=criteria,
+                    limit=PAGE_SIZE,
+                    offset=(page - 1) * PAGE_SIZE,
+                )
         except ValueError as exc:
             error = str(exc)
         selected_id = request.get("selected_id")
@@ -64,6 +77,7 @@ def _load_entries_snapshot(db, request: dict, settings, snapshot: dict) -> dict:
         version=version,
         mods=mods,
         kinds=kinds,
+        page=page,
         mod_id=mod_id,
         kind=kind,
         rows=rows,
@@ -72,6 +86,52 @@ def _load_entries_snapshot(db, request: dict, settings, snapshot: dict) -> dict:
         detail=detail,
     )
     return snapshot
+
+
+def load_entries_filter_snapshot(db, request: dict) -> dict:
+    """Query one filter page on the view-owned, count-cached database connection."""
+    page = max(1, int(request.get("page", 1)))
+    rows, total, error, detail = [], 0, None, None
+    criteria = request["criteria"]
+    if db is not None:
+        try:
+            rows, total = db.list_entries(
+                criteria=criteria,
+                limit=PAGE_SIZE,
+                offset=(page - 1) * PAGE_SIZE,
+            )
+            last_page = max(1, (total + PAGE_SIZE - 1) // PAGE_SIZE)
+            if page > last_page:
+                page = last_page
+                rows, total = db.list_entries(
+                    criteria=criteria,
+                    limit=PAGE_SIZE,
+                    offset=(page - 1) * PAGE_SIZE,
+                )
+            selected_id = request.get("selected_id")
+            row_ids = {row.id for row in rows}
+            target_id = (
+                selected_id
+                if selected_id in row_ids
+                else (rows[0].id if rows else None)
+            )
+            detail = db.entry_detail(target_id) if target_id is not None else None
+        except ValueError as exc:
+            error = str(exc)
+    return {
+        "key": "entries",
+        "identity": request.get("identity"),
+        "source_catalog": request.get("source_catalog"),
+        "filter_only": True,
+        "version": request.get("version"),
+        "mod_id": request.get("mod_id"),
+        "kind": request.get("kind"),
+        "page": page,
+        "rows": rows,
+        "total": total,
+        "list_error": error,
+        "detail": detail,
+    }
 
 
 def _load_translate_snapshot(db, request: dict, snapshot: dict) -> dict:

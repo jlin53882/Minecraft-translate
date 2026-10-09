@@ -19,6 +19,7 @@ def build_entry_tile(panel, row, *, catalog=None) -> ft.Control:
     catalog = catalog or source_catalog_for(panel.db())
     return ft.Container(
         data=row.id,
+        key=f"entry-{row.id}",
         on_click=lambda _e, entry_id=row.id: panel.select(entry_id),
         ink=True,
         padding=ft.Padding.symmetric(horizontal=14, vertical=9),

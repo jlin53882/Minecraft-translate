@@ -92,7 +92,6 @@ class ScanPanel(ft.Column):
     def _build_version_card(self) -> None:
         self.version_field = kit.text_field(
             "遊戲版本",
-            hint="可手動輸入，例如 1.21.1，或從下方清單選擇",
             value=current_settings().version,
             on_change=self._on_version_typed,
             expand=True,
@@ -105,7 +104,7 @@ class ScanPanel(ft.Column):
         )
         self.version_list = ft.ListView(spacing=0, height=170)
         self.version_card = kit.section_card(
-            "1　選擇遊戲版本",
+            "1　選擇遊戲版本（可輸入或從下方清單選擇）",
             ft.Column(
                 [
                     self.version_field,
