@@ -20,7 +20,7 @@ from translation_tool.core.lm_batch_budget import (
     get_tracker,
     select_batch_size,
 )
-from translation_tool.core.lm_config_rules import ApiKeyCycle
+from translation_tool.core.lm_config_rules import ApiKeyCycle, get_api_key_count
 from translation_tool.core.lm_config_schema import model_output_token_cap
 from translation_tool.core.lm_key_health import (
     PROBE_LEASE_MARGIN_SEC,
@@ -215,6 +215,8 @@ def translate_batch_smart(
     items = _validate_batch_items(batch_items)
     if not items:
         return [], "AUTO"
+    if not dry_run and get_api_key_count() == 0:
+        raise RuntimeError("❌ 設定檔中沒有找到任何 API Key，請先設定金鑰。")
 
     # 批次 profile 與批次大小由 _execute_translation 內部決定（舊版在這裡重複計算後丟棄，已移除）。
 

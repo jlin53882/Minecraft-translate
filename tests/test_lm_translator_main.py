@@ -4,7 +4,9 @@
 """
 
 import inspect
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
+
+import pytest
 
 
 def test_batch_profile_and_response_helpers_preserve_translation_contract():
@@ -152,6 +154,49 @@ class TestTranslateBatchSmart:
         assert result == []
         assert status == "AUTO"
         mock_call_api.assert_not_called()
+
+    def test_translate_batch_smart_requires_key_before_execution(self, monkeypatch):
+        from translation_tool.core import lm_config_rules, lm_translator_main
+
+        monkeypatch.setattr(lm_config_rules, "_get_all_keys", list)
+        execute_translation = MagicMock()
+        monkeypatch.setattr(
+            lm_translator_main, "_execute_translation", execute_translation
+        )
+        items = [{"path": "test.key", "text": "Hello", "cache_type": "lang"}]
+
+        with pytest.raises(RuntimeError, match="沒有找到任何 API Key"):
+            lm_translator_main.translate_batch_smart(items, total=1)
+
+        execute_translation.assert_not_called()
+
+    def test_translate_batch_smart_dry_run_does_not_require_key(self, monkeypatch):
+        from translation_tool.core import lm_config_rules, lm_translator_main
+
+        monkeypatch.setattr(lm_config_rules, "_get_all_keys", list)
+        execute_translation = MagicMock(return_value=([], "AUTO"))
+        monkeypatch.setattr(
+            lm_translator_main, "_execute_translation", execute_translation
+        )
+        items = [{"path": "test.key", "text": "Hello", "cache_type": "lang"}]
+
+        assert lm_translator_main.translate_batch_smart(
+            items, total=1, dry_run=True
+        ) == ([], "AUTO")
+        execute_translation.assert_called_once()
+        assert execute_translation.call_args.args[1:] == (1, True)
+
+    def test_translate_batch_smart_empty_batch_does_not_require_key(self, monkeypatch):
+        from translation_tool.core import lm_config_rules, lm_translator_main
+
+        monkeypatch.setattr(lm_config_rules, "_get_all_keys", list)
+        execute_translation = MagicMock()
+        monkeypatch.setattr(
+            lm_translator_main, "_execute_translation", execute_translation
+        )
+
+        assert lm_translator_main.translate_batch_smart([]) == ([], "AUTO")
+        execute_translation.assert_not_called()
 
     @patch("translation_tool.core.lm_translator_main.safe_json_loads")
     @patch("translation_tool.core.lm_translator_main.load_config")

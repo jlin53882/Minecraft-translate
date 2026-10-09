@@ -10,6 +10,7 @@ from collections.abc import Collection
 from typing import Any
 
 from ..utils.config_manager import get_models_config, load_config, load_config_shared
+from ..utils.config_schema import LEGACY_API_KEY_PLACEHOLDERS
 from ..utils.log_unit import log_debug, log_error, log_info, log_warning
 from .lm_key_health import (
     DEFAULT_COOLDOWN_SEC,
@@ -100,11 +101,14 @@ def _get_all_keys() -> list[str]:
     私有輔助函式：統一代理從設定檔讀取並清理金鑰列表。
     """
     config = load_config()
-    return [
-        key.strip()
-        for key in config.get("lm_translator", {}).get("keys", [])
-        if isinstance(key, str) and key.strip()
-    ]
+    keys = []
+    for key in config.get("lm_translator", {}).get("keys", []):
+        if not isinstance(key, str):
+            continue
+        normalized = key.strip()
+        if normalized and normalized not in LEGACY_API_KEY_PLACEHOLDERS:
+            keys.append(normalized)
+    return keys
 
 
 def get_api_key_count() -> int:

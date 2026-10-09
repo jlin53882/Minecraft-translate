@@ -113,6 +113,7 @@ class TestSchema型別合約:
         assert isinstance(lm["min_batch_size"], int)
         assert isinstance(lm["batch_shrink_factor"], float)
         assert isinstance(lm["keys"], list)
+        assert lm["keys"] == []
         # rate_limit 是 nested dict
         assert isinstance(lm["rate_limit"], dict)
         assert isinstance(lm["rate_limit"]["timeout"], int)

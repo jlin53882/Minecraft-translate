@@ -18,6 +18,7 @@ from translation_tool.utils.config_manager import (
     validate_config_values,
     validate_output_folder_names,
 )
+from translation_tool.utils.config_schema import LEGACY_API_KEY_PLACEHOLDERS
 from translation_tool.utils.redaction import redact_text
 
 logger = logging.getLogger(__name__)
@@ -135,7 +136,9 @@ def _collect_validated_config(
         api_keys = [
             field.value.strip()
             for field in view.key_fields
-            if field.value and field.value.strip()
+            if field.value
+            and field.value.strip()
+            and field.value.strip() not in LEGACY_API_KEY_PLACEHOLDERS
         ]
         validate_api_keys_fn(api_keys)
         config["lm_translator"]["keys"] = api_keys

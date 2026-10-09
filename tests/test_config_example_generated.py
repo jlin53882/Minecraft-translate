@@ -30,6 +30,7 @@ def test_example_file_is_exactly_what_the_generator_produces():
 def test_example_equals_default_config():
     example = json.loads((ROOT / "config.example.json").read_text(encoding="utf-8"))
     assert example == DEFAULT_CONFIG
+    assert example["lm_translator"]["keys"] == []
 
 
 def test_first_run_config_from_example_is_complete(tmp_path):

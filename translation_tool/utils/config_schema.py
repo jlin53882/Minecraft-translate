@@ -36,6 +36,9 @@ from typing import Any
 TIMINGS = frozenset(
     {"immediate", "next_request", "next_batch", "next_task", "when_idle", "restart"}
 )
+LEGACY_API_KEY_PLACEHOLDERS = frozenset(
+    {"YOUR_GEMINI_API_KEY_1", "YOUR_GEMINI_API_KEY_2"}
+)
 
 
 @dataclass(frozen=True)
@@ -283,7 +286,7 @@ SETTINGS: tuple[Setting, ...] = (
         "api_models",
         C_KEYS,
         "",
-        default=["YOUR_GEMINI_API_KEY_1", "YOUR_GEMINI_API_KEY_2"],
+        default=[],
         timing="next_request",
         timing_note="下次 API 請求讀取；不改變已送出的請求。",
         sensitive=True,

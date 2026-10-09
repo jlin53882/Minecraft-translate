@@ -267,7 +267,7 @@ def _load_config_uncached(resolved_config_path: Path) -> tuple[dict, bool]:
 
 
 # 同步時不寫入使用者 config.json 的路徑：
-# - lm_translator.keys：範本是佔位字串，不是使用者的金鑰，不能寫進使用者的設定檔。
+# - lm_translator.keys：API 金鑰由使用者提供，不把預設清單同步進現有設定檔。
 # - lm_translator.models：使用者自訂的名單，缺少的模型是使用者刻意移除，不能補回去。
 _SYNC_SKIP_PATHS = frozenset({"lm_translator.keys", "lm_translator.models"})
 

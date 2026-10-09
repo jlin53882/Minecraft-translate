@@ -173,6 +173,42 @@ def test_config_save_accepts_aq_gemini_key_and_keeps_it():
     ]
 
 
+def test_config_save_discards_legacy_api_key_placeholders():
+    from app.views.config.config_actions import (
+        load_config_into_view,
+        save_config_from_view,
+    )
+    from tests.test_config_actions import make_full_view
+    from translation_tool.core.lm_config_rules import validate_api_keys_from_ui
+    from translation_tool.utils.config_manager import DEFAULT_CONFIG
+
+    config = deepcopy(DEFAULT_CONFIG)
+    config["lm_translator"]["models"] = {}
+    config["lm_translator"]["keys"] = [
+        "YOUR_GEMINI_API_KEY_1",
+        "YOUR_GEMINI_API_KEY_2",
+    ]
+    view = make_full_view()
+    view.load_config = MagicMock()
+    view._success_color = MagicMock(return_value="green")
+    view._build_key_field = lambda value: SimpleNamespace(value=value)
+    view._build_key_row = lambda field: field
+
+    load_config_into_view(view, config)
+    _add_enabled_test_model(view)
+    saved = {}
+
+    result = save_config_from_view(
+        view,
+        load_config_json_fn=lambda: deepcopy(config),
+        save_config_json_fn=lambda cfg: (saved.update(cfg), True)[1],
+        validate_api_keys_from_ui_fn=validate_api_keys_from_ui,
+    )
+
+    assert result is True
+    assert saved["lm_translator"]["keys"] == []
+
+
 def test_mounted_extractor_refreshes_persisted_skip_default_after_save():
     from app.views.config.config_actions import (
         load_config_into_view,

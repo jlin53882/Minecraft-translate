@@ -50,6 +50,52 @@ class TestAPIKeyManagement:
         assert result == ""
 
     @patch("translation_tool.core.lm_config_rules.load_config")
+    def test_legacy_placeholders_are_ignored_when_a_real_key_exists(
+        self, mock_load_config
+    ):
+        from translation_tool.core.lm_config_rules import (
+            get_api_key_count,
+            get_current_api_key,
+            validate_api_keys,
+        )
+
+        real_key = "AIza" + "x" * 36
+        mock_load_config.return_value = {
+            "lm_translator": {
+                "keys": [
+                    "YOUR_GEMINI_API_KEY_1",
+                    "YOUR_GEMINI_API_KEY_2",
+                    "  ",
+                    None,
+                    f" {real_key} ",
+                ]
+            }
+        }
+
+        assert get_api_key_count() == 1
+        assert get_current_api_key() == real_key
+        validate_api_keys()
+
+    @patch("translation_tool.core.lm_config_rules.load_config")
+    def test_legacy_placeholders_are_treated_as_missing_keys(self, mock_load_config):
+        from translation_tool.core.lm_config_rules import (
+            get_api_key_count,
+            get_current_api_key,
+            validate_api_keys,
+        )
+
+        mock_load_config.return_value = {
+            "lm_translator": {
+                "keys": ["YOUR_GEMINI_API_KEY_1", "YOUR_GEMINI_API_KEY_2"]
+            }
+        }
+
+        assert get_api_key_count() == 0
+        assert get_current_api_key() == ""
+        with pytest.raises(RuntimeError, match="沒有找到任何 API Key"):
+            validate_api_keys()
+
+    @patch("translation_tool.core.lm_config_rules.load_config")
     def test_rotate_api_key_success(self, mock_load_config):
         """測試 API Key 輪換（成功）。"""
         from translation_tool.core.lm_config_rules import (
