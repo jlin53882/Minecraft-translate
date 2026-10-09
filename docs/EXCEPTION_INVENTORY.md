@@ -137,11 +137,14 @@
 | `app/views/merge_view.py:MergeView._close_dialog_overlay` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/views/moddb/entries_panel.py:EntriesPanel._scroll_list_to.scroll` | BLE001 | 已記錄／回報 | 尚未掛上頁面時不影響清單 |
 | `app/views/moddb/entries_panel.py:EntriesPanel._scroll_list_to` | BLE001 | 已記錄／回報 | 排程失敗不影響清單 |
+| `app/views/moddb/entries_panel.py:EntriesPanel._save.save_in_background` | BLE001 | 已記錄／回報 | worker boundary reports unexpected failures |
+| `app/views/moddb/entries_panel.py:EntriesPanel._save.save_in_background` | BLE001 | 已記錄／回報 | a disposed page may reject the result callback |
+| `app/views/moddb/entries_panel.py:EntriesPanel._save` | BLE001 | 已記錄／回報 | restore the editor if the worker cannot launch |
 | `app/views/moddb/entries_panel.py:EntriesPanel._safe_update` | BLE001 | 已記錄／回報 | 頁面已卸載時不影響資料操作 |
 | `app/views/moddb/lm_db_options.py:LmDbOptions._update` | BLE001 | 已記錄／回報 | control may be temporarily detached |
 | `app/views/moddb/lm_db_options.py:LmDbOptions._refresh_database_state` | BLE001 | 已記錄／回報 | LM still permits a manual new target |
 | `app/views/moddb/lm_db_options.py:LmDbOptions._refresh_database_state` | BLE001 | 已記錄／回報 | keep the page usable and expose warning |
-| `app/views/moddb/overview_panel.py:OverviewPanel.refresh` | BLE001 | 已記錄／回報 | 頁面已卸載時不影響資料 |
+| `app/views/moddb/overview_panel.py:OverviewPanel._safe_update` | BLE001 | 已記錄／回報 | 頁面已卸載時不影響資料 |
 | `app/views/moddb/retranslation_controller.py:preview` | BLE001 | 已記錄／回報 | restore controls when the operation cannot launch |
 | `app/views/moddb/retranslation_controller.py:_schedule_result` | BLE001 | 已記錄／回報 | a disposed page may reject UI work |
 | `app/views/moddb/retranslation_controller.py:apply_preview_result` | BLE001 | 已記錄／回報 | unavailable database means stale result |
@@ -150,6 +153,7 @@
 | `app/views/moddb/translate_panel.py:TranslatePanel._start_retranslation` | BLE001 | 已記錄／回報 | restore UI if worker launch fails |
 | `app/views/moddb/translate_panel.py:TranslatePanel._poll` | BLE001 | 已記錄／回報 | 輪詢失敗不能讓畫面永遠卡在「執行中」 |
 | `app/views/moddb/translate_panel.py:TranslatePanel._safe_update` | BLE001 | 已記錄／回報 | 頁面已卸載時不影響機翻本身 |
+| `app/views/moddb_view.py:_load_overview_snapshot` | BLE001 | 已記錄／回報 | 顯示載入失敗並恢復頁面 |
 | `app/views/moddb_view.py:ModDbView._safe_update` | BLE001 | 已記錄／回報 | 頁面已卸載時不影響資料操作 |
 | `app/views/pipeline/pipeline_bundle_dialog.py:_load_version_data` | BLE001 | 已記錄／回報 | 讀不到版本資料時使用空設定，UI 仍可開啟 |
 | `app/views/pipeline/pipeline_db_version_field.py:build_pipeline_db_version_field.on_focus` | BLE001 | 已記錄／回報 | manual input remains available |
