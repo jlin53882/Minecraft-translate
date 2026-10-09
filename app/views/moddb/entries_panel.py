@@ -96,14 +96,19 @@ class EntriesPanel(ft.Column):
         self.detail: EntryDetail | None = None
         self.sug_tab = "key"
         self._db_identity = None
+        self._render_source_catalog = None
         self._review_preview: list[ReviewPreviewItem] = []
         self._save_running = False
+        self.refresh_indicator = ft.Text(
+            "背景更新條目資料中…", size=12, color=C.MUTED, visible=False
+        )
 
         self._build_filters()
         self._build_list_card()
         self._build_editor_card()
         self._build_history_card()
         self.controls = [
+            self.refresh_indicator,
             self.filter_card,
             self.flagged_banner,
             ft.Row(
@@ -325,6 +330,7 @@ class EntriesPanel(ft.Column):
             self._show_editor(None)
             return
         identity = self._database_identity(db)
+        self._render_source_catalog = source_catalog_for(db)
         if self._db_identity is not None and identity != self._db_identity:
             # A numeric source id belongs to the old DB-local registry; do not
             # carry it into a different database.
@@ -341,6 +347,51 @@ class EntriesPanel(ft.Column):
         self.version_dd.value = self.version
         self._load_mods()
         self._load_list(keep_selection=keep_selection)
+
+    def apply_refresh_snapshot(self, snapshot: dict) -> None:
+        """Apply a worker-loaded tab snapshot without querying SQLite on the UI thread."""
+        identity = snapshot.get("identity")
+        self._render_source_catalog = snapshot.get("source_catalog")
+        if self._db_identity is not None and identity != self._db_identity:
+            self.source_filter.reset()
+        self._db_identity = identity
+        self.source_filter.refresh()
+        versions = snapshot.get("versions", [])
+        kit.set_dropdown_options(self.version_dd, [(v, v) for v in versions])
+        self.version = snapshot.get("version")
+        self.version_dd.value = self.version
+
+        mods = snapshot.get("mods", [])
+        kit.set_dropdown_options(
+            self.mod_dd, [(ALL_MODS, ALL_MODS), *((m, m) for m in mods)]
+        )
+        self.mod_id = snapshot.get("mod_id")
+        self.mod_dd.value = self.mod_id or ALL_MODS
+        kinds = snapshot.get("kinds", [])
+        kit.set_dropdown_options(
+            self.kind_dd,
+            [(ALL_KINDS, ALL_KINDS), *((k, kind_label(k)) for k in kinds)],
+        )
+        self.kind = snapshot.get("kind")
+        self.kind_dd.value = self.kind or ALL_KINDS
+
+        self.rows = snapshot.get("rows", [])
+        self.total = snapshot.get("total", 0)
+        self._list_error = snapshot.get("list_error") or snapshot.get("error")
+        self.advanced_filters.error_text.value = self._list_error or ""
+        self.advanced_filters.error_text.visible = bool(self._list_error)
+        self.pager.set_state(self.total, 1)
+        self._render_list()
+        self.detail = snapshot.get("detail")
+        self.selected = self.detail.entry if self.detail else None
+        self._show_editor(
+            self.detail,
+            calculate_impact=False,
+            catalog=snapshot.get("source_catalog"),
+        )
+        self._render_list_selection()
+        self.refresh_indicator.value = str(snapshot.get("error") or "")
+        self.refresh_indicator.visible = bool(snapshot.get("error"))
 
     def _load_mods(self) -> None:
         db = self.db()
@@ -463,7 +514,7 @@ class EntriesPanel(ft.Column):
             log_debug(f"清單捲動排程失敗：{exc}")
 
     def _row_tile(self, row: EntryRow) -> ft.Control:
-        return build_entry_tile(self, row)
+        return build_entry_tile(self, row, catalog=self._render_source_catalog)
 
     # ------------------------------------------------------------------ 選取
     def select(self, entry_id: int | None) -> None:
@@ -481,7 +532,13 @@ class EntriesPanel(ft.Column):
                     C.EM_BG if self.selected and tile.data == self.selected.id else None
                 )
 
-    def _show_editor(self, detail: EntryDetail | None) -> None:
+    def _show_editor(
+        self,
+        detail: EntryDetail | None,
+        *,
+        calculate_impact: bool = True,
+        catalog=None,
+    ) -> None:
         self.empty_editor.visible = detail is None
         self.editor_body.visible = detail is not None
         self.saved_text.value = ""
@@ -496,8 +553,9 @@ class EntriesPanel(ft.Column):
             self.saved_text.value = (
                 "已預填本次機翻的 AI 譯文（特殊字元與原文不一致，尚未寫入）"
             )
-        db = self.db()
-        catalog = source_catalog_for(db)
+        if catalog is None:
+            db = self.db() if calculate_impact else None
+            catalog = source_catalog_for(db)
         self.source_chip.content = kit.chip(
             source_label(entry.source, catalog, entry.review_status)
             if entry.zh_tw
@@ -505,22 +563,38 @@ class EntriesPanel(ft.Column):
             source_tone(entry.source),
         )
         self.meta_col.controls = build_entry_metadata(detail)
-        self._update_impact()
-        self._render_suggestions()
-        self._render_history()
+        if calculate_impact:
+            self._update_impact()
+        else:
+            self._update_editor_actions_without_impact(entry)
+        self._render_suggestions(catalog=catalog)
+        self._render_history(catalog=catalog)
 
-    def _render_suggestions(self) -> None:
+    def _update_editor_actions_without_impact(self, entry: EntryRow) -> None:
+        """Set initial editor state without a cross-version preview query."""
+        self._update_format_hints()
+        changed = bool(entry and self.pending_text() != entry.zh_tw)
+        ready = bool(
+            entry and entry.zh_tw and entry.review_status != "reviewed" and not changed
+        )
+        self.save_btn.disabled = self._save_running or not changed
+        self.confirm_btn.visible = ready
+        self.confirm_btn.disabled = not ready
+        self._review_preview = []
+        self.impact_box.visible = False
+
+    def _render_suggestions(self, *, catalog=None) -> None:
         if self.detail is None:
             return
         self.sug_col.controls = build_suggestions(
             self.detail,
             self.sug_tab,
             self._apply_suggestion,
-            catalog=source_catalog_for(self.db()),
+            catalog=catalog or source_catalog_for(self.db()),
         )
 
-    def _render_history(self) -> None:
-        render_history(self)
+    def _render_history(self, *, catalog=None) -> None:
+        render_history(self, catalog=catalog)
 
     # ------------------------------------------------------------------ 事件
     def _on_version(self, e) -> None:

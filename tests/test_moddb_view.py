@@ -162,6 +162,52 @@ def test_view_switches_tabs_and_shows_overview_numbers(db_path):
     assert view.body.content is view.scan
 
 
+def test_database_tab_refreshes_run_queries_in_worker_threads(db_path, monkeypatch):
+    from app.tasks.operation_registry import OperationRegistry
+
+    seed(db_path)
+    page = mock_page()
+    page.operation_registry = OperationRegistry()
+    page.run_thread = lambda _target: None
+    query_threads = []
+    originals = {
+        "versions": TranslationDB.versions,
+        "list_entries": TranslationDB.list_entries,
+        "count_untranslated": TranslationDB.count_untranslated,
+    }
+
+    def record(name):
+        original = originals[name]
+
+        def wrapped(db, *args, **kwargs):
+            query_threads.append((name, threading.current_thread().name))
+            return original(db, *args, **kwargs)
+
+        return wrapped
+
+    for method in originals:
+        monkeypatch.setattr(TranslationDB, method, record(method))
+
+    view = moddb_view.ModDbView(page, mock_filepicker())
+    try:
+        for key in ("entries", "scan", "translate"):
+            view.show_tab(key)
+            assert view._panels[key].refresh_indicator.visible is True
+            assert page.operation_registry.wait_for_idle(timeout=2)
+            page._run_all_tasks()
+            page._tasks.clear()
+            assert view._panels[key].refresh_indicator.visible is False
+        assert view.entries.total == 3
+        assert view.scan._db_versions == {"1.21.1", "1.20.1"}
+        assert "未翻譯" in view.translate.count_text.value
+        assert query_threads
+        assert all(name != threading.current_thread().name for _, name in query_threads)
+        assert view._db is None
+    finally:
+        page.operation_registry.begin_shutdown()
+        assert page.operation_registry.wait_for_idle(timeout=2)
+
+
 def test_moddb_overview_load_uses_a_worker_owned_connection(db_path, monkeypatch):
     from app.tasks.operation_registry import OperationRegistry
 

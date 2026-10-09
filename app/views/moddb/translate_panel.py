@@ -69,12 +69,20 @@ class TranslatePanel(ft.Column):
         self.session: TaskSession | None = None
         self._running = False
         self._poller = PollerHandle()
+        self.refresh_indicator = ft.Text(
+            "背景更新機翻範圍中…", size=12, color=C.MUTED, visible=False
+        )
 
         self._build_scope_card()
         self._build_run_card()
         self._bind_kpi_titles()
         self._build_repair_card()
-        self.controls = [self.scope_card, self.run_card, self.repair_card]
+        self.controls = [
+            self.refresh_indicator,
+            self.scope_card,
+            self.run_card,
+            self.repair_card,
+        ]
 
     # ------------------------------------------------------------------ 建構
     def _build_scope_card(self) -> None:
@@ -306,6 +314,33 @@ class TranslatePanel(ft.Column):
         self._refresh_mods()
         self._refresh_counts()
 
+    def apply_refresh_snapshot(self, snapshot: dict) -> None:
+        """Apply worker-loaded scope and counts without blocking the page thread."""
+        identity = snapshot.get("identity")
+        if (
+            self._repair_preview is not None
+            and self._repair_preview_db_identity != identity
+        ):
+            self._clear_repair_preview()
+        versions = snapshot.get("versions", [])
+        kit.set_dropdown_options(self.version_dd, [(v, v) for v in versions])
+        self.version_dd.value = snapshot.get("version")
+        mods = snapshot.get("mods", [])
+        kit.set_dropdown_options(
+            self.mod_dd, [(ALL_MODS, "全部模組"), *((m, m) for m in mods)]
+        )
+        self.mod_dd.value = snapshot.get("mod", ALL_MODS)
+        if snapshot.get("error"):
+            self.count_text.value = f"資料載入失敗：{snapshot['error']}"
+        elif not versions:
+            self.count_text.value = "資料庫還沒有資料，請先到「掃描匯入」建立"
+        else:
+            self._set_count_text(
+                snapshot.get("missing", 0), snapshot.get("reusable", 0)
+            )
+        self.refresh_indicator.value = str(snapshot.get("error") or "")
+        self.refresh_indicator.visible = bool(snapshot.get("error"))
+
     @staticmethod
     def _database_identity(db):
         return retranslation_controller.database_identity(db)
@@ -347,6 +382,9 @@ class TranslatePanel(ft.Column):
         reusable = (
             db.count_reusable(version, self.mod_ids()) if self.reuse_row.value else 0
         )
+        self._set_count_text(missing, reusable)
+
+    def _set_count_text(self, missing: int, reusable: int) -> None:
         limit = self.limit()
         to_ai = max(0, missing - reusable)  # 沿用其他版本的不送 AI
         will = min(to_ai, limit) if limit else to_ai

@@ -61,12 +61,17 @@ class ScanPanel(ft.Column):
         self._running = False
         self._poller = PollerHandle()
         self._versions: list[str] = []
+        self._db_versions: set[str] = set()
         self.mode = "jar"
+        self.refresh_indicator = ft.Text(
+            "背景更新版本清單中…", size=12, color=C.MUTED, visible=False
+        )
 
         self._build_version_card()
         self._build_options_card()
         self._build_run_card()
         self.controls = [
+            self.refresh_indicator,
             ft.Row(
                 [
                     ft.Container(self.version_card, expand=1),
@@ -333,15 +338,25 @@ class ScanPanel(ft.Column):
     def refresh_versions(self) -> None:
         self._refresh_source_options()
         db = self._get_db()
+        self._db_versions = set(db.versions()) if db else set()
         self._versions = version_choices(db)
         self._render_versions()
         self._on_version_typed()
 
+    def apply_refresh_snapshot(self, snapshot: dict) -> None:
+        """Apply the background-loaded version choices and database markers."""
+        self._refresh_source_options()
+        self._versions = snapshot.get("versions", [])
+        self._db_versions = snapshot.get("database_versions", set())
+        self._render_versions()
+        self._on_version_typed()
+        self.refresh_indicator.value = str(snapshot.get("error") or "")
+        self.refresh_indicator.visible = bool(snapshot.get("error"))
+
     def _render_versions(self) -> None:
         q = (self.version_search.value or "").strip().lower()
         chosen = (self.version_field.value or "").strip()
-        db = self._get_db()
-        in_db = set(db.versions()) if db else set()
+        in_db = self._db_versions
         rows: list[ft.Control] = []
         for label in self._versions:
             if q and q not in label.lower():

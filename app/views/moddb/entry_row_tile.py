@@ -14,9 +14,9 @@ from app.ui.design import C
 from app.views.moddb.formatting import STATE_TONES, shorten
 
 
-def build_entry_tile(panel, row) -> ft.Control:
+def build_entry_tile(panel, row, *, catalog=None) -> ft.Control:
     tone = design.tone(STATE_TONES[row.state])
-    catalog = source_catalog_for(panel.db())
+    catalog = catalog or source_catalog_for(panel.db())
     return ft.Container(
         data=row.id,
         on_click=lambda _e, entry_id=row.id: panel.select(entry_id),

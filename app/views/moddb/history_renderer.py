@@ -15,11 +15,11 @@ from app.ui.design import C
 from app.views.moddb.formatting import shorten
 
 
-def render_history(panel) -> None:
+def render_history(panel, *, catalog=None) -> None:
     detail = panel.detail
     if detail is None:
         return
-    catalog = source_catalog_for(panel.db())
+    catalog = catalog or source_catalog_for(panel.db())
     controls = [_history_event(panel, event) for event in detail.history]
     if detail.translations:
         controls.append(kit.section_label("各來源譯文"))

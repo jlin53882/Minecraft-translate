@@ -23,6 +23,7 @@ from app.tasks.operation_registry import (
 from app.ui import kit
 from app.views.moddb.entries_panel import EntriesPanel
 from app.views.moddb.overview_panel import OverviewPanel
+from app.views.moddb.panel_refresh import load_panel_snapshot
 from app.views.moddb.scan_panel import ScanPanel
 from app.views.moddb.translate_panel import TranslatePanel
 from translation_tool.utils.log_unit import log_debug
@@ -83,6 +84,8 @@ class ModDbView(ft.Column):
         self._db_sig: tuple | None = None
         self._overview_loading = False
         self._overview_load_generation = 0
+        self._panel_refresh_loading: set[str] = set()
+        self._panel_refresh_generation = {key: 0 for key, _label in TABS}
         self.tab = "overview"
 
         self.overview = OverviewPanel(
@@ -274,22 +277,165 @@ class ModDbView(ft.Column):
         self.tab = key
         self.tab_seg.select(key)
         panel = self._panels[key]
+        self.body.content = panel
+        background = self._has_background_scheduler()
         # 離開頁籤時面板被卸載（will_unmount 會停掉輪詢）；任務還在跑，切回來要接續輪詢，
         # 否則畫面停在離開當下的進度，直到任務結束後也不會更新
         if key == "overview":
-            if update or not self._has_background_scheduler():
+            if self._overview_loading and update:
+                self._safe_update()
+            elif update or not background:
                 self._request_overview_refresh()
         elif key == "entries":
-            self.entries.refresh()
+            if background and update:
+                self._request_panel_refresh(key)
+            elif not background:
+                self.entries.refresh()
+                if update:
+                    self._safe_update()
         elif key == "scan":
-            self.scan.refresh_versions()
+            if background and update:
+                self._request_panel_refresh(key)
+            elif not background:
+                self.scan.refresh_versions()
+                if update:
+                    self._safe_update()
             self.scan.resume()
         elif key == "translate":
-            self.translate.refresh_scope()
+            if background and update:
+                self._request_panel_refresh(key)
+            elif not background:
+                self.translate.refresh_scope()
+                if update:
+                    self._safe_update()
             self.translate.resume()
-        self.body.content = panel
-        if update:
+
+    def _request_panel_refresh(self, key: str) -> None:
+        """Load the selected tab's database data off the UI thread."""
+        if key in self._panel_refresh_loading:
+            if self.tab == key:
+                self._safe_update()
+            return
+        panel = self._panels[key]
+        try:
+            request = self._panel_refresh_request(key)
+        except ValueError as exc:
+            panel.refresh_indicator.value = str(exc)
+            panel.refresh_indicator.visible = True
+            if self.tab == key:
+                self._safe_update()
+            return
+        settings = current_settings()
+        signature = (str(settings.resolved_path()), settings.priority)
+        self._panel_refresh_generation[key] += 1
+        generation = self._panel_refresh_generation[key]
+        self._panel_refresh_loading.add(key)
+        panel.refresh_indicator.value = {
+            "entries": "背景更新條目資料中…",
+            "scan": "背景更新版本清單中…",
+            "translate": "背景更新機翻範圍中…",
+        }[key]
+        panel.refresh_indicator.visible = True
+        if self.tab == key:
             self._safe_update()
+
+        def load() -> None:
+            try:
+                snapshot = load_panel_snapshot(key, request, settings)
+            except Exception as exc:  # noqa: BLE001 - 顯示載入錯誤並恢復頁籤
+                log_debug(f"Mod DB {key} 頁籤資料載入失敗：{exc!r}")
+                snapshot = {"key": key, "identity": None, "error": str(exc)}
+
+            async def apply_on_ui() -> None:
+                self._apply_panel_refresh(
+                    key, generation, signature, request, panel, snapshot
+                )
+
+            run_task = getattr(self._page, "run_task", None)
+            if callable(run_task):
+                run_task(apply_on_ui)
+            else:
+                self._apply_panel_refresh(
+                    key, generation, signature, request, panel, snapshot
+                )
+
+        launched = launch_page_operation(
+            self._page,
+            load,
+            name=f"Mod DB {dict(TABS)[key]}資料載入",
+            owner=f"moddb-{key}-panel-refresh",
+            cancellation=CancellationPolicy.NON_CANCELLABLE,
+            shutdown=ShutdownPolicy.DRAIN_ONLY,
+            presentation=OperationPresentation.MAINTENANCE,
+        )
+        if launched is False:
+            self._panel_refresh_loading.discard(key)
+            panel.refresh_indicator.visible = False
+            panel.refresh_indicator.value = "應用程式正在關閉，無法載入資料。"
+            if self.tab == key:
+                self._safe_update()
+
+    def _apply_panel_refresh(
+        self,
+        key: str,
+        generation: int,
+        signature: tuple,
+        request: dict,
+        panel,
+        snapshot: dict,
+    ) -> None:
+        """Fallback for lightweight pages without a UI task scheduler."""
+        if generation != self._panel_refresh_generation[key]:
+            return
+        self._panel_refresh_loading.discard(key)
+        if signature != self._settings_signature():
+            panel.refresh_indicator.visible = False
+            panel.refresh_indicator.value = ""
+            if self.tab == key:
+                self._request_panel_refresh(key)
+            return
+        if key != "scan":
+            try:
+                current_request = self._panel_refresh_request(key)
+            except ValueError as exc:
+                panel.refresh_indicator.value = str(exc)
+                panel.refresh_indicator.visible = True
+                if self.tab == key:
+                    self._safe_update()
+                return
+            if current_request != request:
+                panel.refresh_indicator.visible = False
+                panel.refresh_indicator.value = ""
+                if self.tab == key:
+                    self._request_panel_refresh(key)
+                return
+        panel.apply_refresh_snapshot(snapshot)
+        if self.tab == key:
+            self._safe_update()
+
+    def _panel_refresh_request(self, key: str) -> dict:
+        if key == "entries":
+            return {
+                "criteria": self.entries._entry_filter(),
+                "version": self.entries.version,
+                "mod_id": self.entries.mod_id,
+                "kind": self.entries.kind,
+                "selected_id": self.entries.selected.id
+                if self.entries.selected is not None
+                else None,
+            }
+        if key == "scan":
+            return {
+                "version": self.scan.version(),
+                "query": (self.scan.version_search.value or "").strip().lower(),
+            }
+        if key == "translate":
+            return {
+                "version": self.translate.version_dd.value,
+                "mod": self.translate.mod_dd.value,
+                "reuse": bool(self.translate.reuse_row.value),
+            }
+        raise ValueError(f"未知 Mod DB 頁籤：{key}")
 
     def open_entries(
         self, state: str, version: str | None = None, mod_id: str | None = None
@@ -316,11 +462,20 @@ class ModDbView(ft.Column):
     def _refresh_active_panel(self) -> None:
         """資料庫背景載入期間若切換了頁籤，連線就緒後刷新目前頁面。"""
         if self.tab == "entries":
-            self.entries.refresh()
+            if self._has_background_scheduler():
+                self._request_panel_refresh("entries")
+            else:
+                self.entries.refresh()
         elif self.tab == "scan":
-            self.scan.refresh_versions()
+            if self._has_background_scheduler():
+                self._request_panel_refresh("scan")
+            else:
+                self.scan.refresh_versions()
         elif self.tab == "translate":
-            self.translate.refresh_scope()
+            if self._has_background_scheduler():
+                self._request_panel_refresh("translate")
+            else:
+                self.translate.refresh_scope()
 
     # ------------------------------------------------------------------ 生命週期
     def will_unmount(self) -> None:
