@@ -9,8 +9,17 @@ from dataclasses import replace
 
 import flet as ft
 
-from app.services_impl.moddb_batch_operation import launch_batch_replace_job
-from app.services_impl.moddb_service import BatchReplacePlan, EntryFilter
+from app.services_impl.moddb_batch_operation import (
+    BatchOperationOutcome,
+    BatchOperationResult,
+    launch_batch_replace_job,
+)
+from app.services_impl.moddb_service import (
+    BatchReplacePlan,
+    BatchReplaceResult,
+    EntryFilter,
+)
+from app.services_impl.moddb_source_service import source_catalog_for
 from app.tasks.task_session import TaskSession
 from app.ui import kit
 from app.ui.design import C
@@ -22,6 +31,8 @@ from app.ui.dialogs import (
 )
 from app.ui.poller import PollerHandle
 from app.ui.snack import show_snack
+from app.views.moddb.batch_replace_preview import render_batch_preview_rows
+from translation_tool.utils.redaction import redact_secrets
 
 PREVIEW_PAGE_SIZE = 50
 
@@ -51,10 +62,16 @@ class BatchReplaceDialog:
         self._job_generation: int | None = None
         self._job_kind: str | None = None
         self._job_session: TaskSession | None = None
+        self._job_result: BatchOperationResult | None = None
         self._job_handled = False
         self._busy = False
         self._dialog_open = False
         self._final_open = False
+        self._quality_ack_plan: BatchReplacePlan | None = None
+        self._quality_ack_generation: int | None = None
+        self._final_plan: BatchReplacePlan | None = None
+        self._final_generation: int | None = None
+        self._plan_catalog = source_catalog_for(None)
         self._poller = PollerHandle()
         self._build_fields()
         self._build_buttons()
@@ -237,6 +254,9 @@ class BatchReplaceDialog:
         try:
             self._dialog_open = True
             present_page_dialog(self.page, self.dialog)
+            if self._busy and self._job_session is not None:
+                self._poller.start(self.page, self._poll)
+                self._sync_worker()
         except (AttributeError, RuntimeError):
             self._dialog_open = False
             show_snack(self.page, "目前畫面無法開啟批次替換確認視窗。", C.GOLD)
@@ -249,6 +269,7 @@ class BatchReplaceDialog:
             return
         self._dialog_open = False
         self._generation += 1
+        self._clear_plan_and_ack()
         self._poller.stop()
         close_page_dialog(self.page, self.dialog)
 
@@ -257,6 +278,9 @@ class BatchReplaceDialog:
         self._dialog_open = False
         if was_open and self._busy and self._job_kind == "preview":
             self._cancel_preview()
+        if was_open and self._job_kind != "apply":
+            self._generation += 1
+            self._clear_plan_and_ack()
         self._poller.stop()
 
     def _on_final_dismiss(self, _e=None) -> None:
@@ -266,13 +290,11 @@ class BatchReplaceDialog:
         if self._busy:
             return
         self._generation += 1
-        self.plan = None
+        self._clear_plan_and_ack()
         self.selection_plan = None
         self.selected_roots = None
         self.preview_page = 0
         self.show_skipped = False
-        self.quality_ack.value = False
-        self.quality_ack.visible = False
         self.apply_btn.disabled = True
         self.rows.controls = [kit.hint_text("條件已變更，請重新產生預覽。")]
         self.summary.value = "條件已變更，請重新產生預覽。"
@@ -290,15 +312,43 @@ class BatchReplaceDialog:
         self._invalidate_selection("處理範圍已變更，請重新預覽。")
 
     def _on_quality_ack(self, _e=None) -> None:
-        if self._busy or self.selection_plan is None:
+        if self._busy or self.plan is None:
             return
-        self._invalidate_selection("品質確認已變更；正在重新產生預覽。")
-        if bool(self.quality_ack.value):
-            self._start_preview()
+        approved = bool(self.quality_ack.value) and any(
+            change.quality_worsened for change in self.plan.changes
+        )
+        self.quality_ack.value = approved
+        self.plan = replace(self.plan, confirmed_quality_worsening=approved)
+        self._quality_ack_plan = self.plan if approved else None
+        self._quality_ack_generation = self._generation if approved else None
+        self._final_plan = None
+        self._final_generation = None
+        self._render()
+
+    def _clear_plan_and_ack(self) -> None:
+        self.plan = None
+        self._quality_ack_plan = None
+        self._quality_ack_generation = None
+        self._final_plan = None
+        self._final_generation = None
+        self.quality_ack.value = False
+        self.quality_ack.visible = False
+
+    def _quality_ack_is_valid(self) -> bool:
+        if self.plan is None:
+            return False
+        if not any(change.quality_worsened for change in self.plan.changes):
+            return True
+        return (
+            bool(self.quality_ack.value)
+            and self.plan.confirmed_quality_worsening
+            and self._quality_ack_plan is self.plan
+            and self._quality_ack_generation == self._generation
+        )
 
     def _invalidate_selection(self, message: str) -> None:
         self._generation += 1
-        self.plan = None
+        self._clear_plan_and_ack()
         self.apply_btn.disabled = True
         self.rows.controls = []
         self.summary.value = message
@@ -344,8 +394,8 @@ class BatchReplaceDialog:
         find_text = str(self.find_field.value or "")
         replace_text = str(self.replace_field.value or "")
         propagate = bool(self.propagate.value)
-        confirmed = bool(self.quality_ack.value)
-        self.plan = None
+        self._clear_plan_and_ack()
+        self._plan_catalog = source_catalog_for(db)
         self._busy = True
         self._generation += 1
         generation = self._generation
@@ -357,7 +407,7 @@ class BatchReplaceDialog:
                 find_text,
                 replace_text,
                 propagate=propagate,
-                confirmed_quality_worsening=confirmed,
+                confirmed_quality_worsening=False,
                 progress_callback=lambda stage, value: self._record_progress(
                     session, generation, stage, value
                 ),
@@ -379,18 +429,23 @@ class BatchReplaceDialog:
         )
 
     def _start_job(self, kind: str, generation: int, work: Callable):
+        result_channel = BatchOperationResult(kind, generation)
         session, launched = launch_batch_replace_job(
             self.page,
             kind=kind,
             generation=generation,
             work=work,
             operation_launcher=self._operation_launcher,
+            result_channel=result_channel,
         )
         self._job_session = session
+        self._job_result = result_channel
         self._job_generation = generation
         self._job_kind = kind
         self._job_handled = False
         if launched is False or launched is None:
+            result_channel.discard()
+            self._job_result = None
             self._busy = False
             self._set_job_ui(None, "應用程式正在關閉，未啟動批次作業。")
             return
@@ -426,16 +481,25 @@ class BatchReplaceDialog:
         self._poller.stop()
         kind = summary.get("kind", self._job_kind)
         generation = summary.get("generation")
+        channel = self._job_result
+        outcome = channel.take_for_summary(session, summary) if channel else None
+        self._job_result = None
         if kind == "preview" and generation == self._generation:
-            self._finish_preview(summary)
+            self._finish_preview(summary, outcome)
+        elif kind == "preview":
+            self._set_job_ui(None, "預覽已失效或對話框已關閉；請重新產生預覽。")
         elif kind == "apply":
-            self._finish_apply(summary)
+            self._finish_apply(summary, outcome)
         self._update_dialog()
 
-    def _finish_preview(self, summary: dict) -> None:
+    def _finish_preview(self, summary: dict, outcome: BatchOperationOutcome | None):
         state = summary.get("state")
-        if state == "complete":
-            self.plan = summary["result"]
+        if (
+            state == "complete"
+            and outcome is not None
+            and isinstance(outcome.result, BatchReplacePlan)
+        ):
+            self.plan = outcome.result
             if self.selection_plan is None:
                 self.selection_plan = self.plan
                 self.selected_roots = set(self.plan.root_ids)
@@ -443,7 +507,10 @@ class BatchReplaceDialog:
             self.quality_ack.visible = any(
                 change.quality_worsened for change in self.plan.changes
             )
-            self.quality_ack.value = self.plan.confirmed_quality_worsening
+            self.quality_ack.value = False
+            self.plan = replace(self.plan, confirmed_quality_worsening=False)
+            self._quality_ack_plan = None
+            self._quality_ack_generation = None
             if any(change.quality_mixed for change in self.plan.changes):
                 self.quality_ack.label = (
                     "我已檢查混合品質變化（部分問題改善、部分增加），仍要允許增加"
@@ -452,22 +519,26 @@ class BatchReplaceDialog:
                 self.quality_ack.label = "我已檢查品質警告，仍要允許問題增加"
             self.summary.value = ""
             self._render()
-        elif state == "cancelled":
+        elif state == "cancelled" or (outcome and outcome.state == "cancelled"):
             self.plan = None
             self.summary.value = "預覽已取消，沒有可執行的替換計畫。"
             self.apply_btn.disabled = True
-        elif state == "error":
-            error = summary.get("error")
+        elif state == "error" or (outcome and outcome.state == "error"):
+            error = outcome.error if outcome else None
             self.plan = None
             self.apply_btn.disabled = True
             self.summary.value = self._error_message(error)
             if isinstance(error, ValueError):
-                show_snack(self.page, str(error), C.GOLD)
+                show_snack(self.page, redact_secrets(error), C.GOLD)
         self._set_job_ui(None, self.summary.value)
 
-    def _finish_apply(self, summary: dict) -> None:
-        if summary.get("state") == "complete":
-            result = summary["result"]
+    def _finish_apply(self, summary: dict, outcome: BatchOperationOutcome | None):
+        if (
+            summary.get("state") == "complete"
+            and outcome is not None
+            and isinstance(outcome.result, BatchReplaceResult)
+        ):
+            result = outcome.result
             self._set_job_ui(None, "批次替換已提交。")
             if self._dialog_open:
                 self._dialog_open = False
@@ -480,7 +551,7 @@ class BatchReplaceDialog:
             )
             self.on_complete(result)
         else:
-            error = summary.get("error")
+            error = outcome.error if outcome else None
             message = self._error_message(error)
             if isinstance(error, ValueError):
                 self.plan = None
@@ -498,7 +569,7 @@ class BatchReplaceDialog:
             and "locked" in str(error).lower()
         ):
             return "資料庫目前被其他作業鎖定，請稍後重新預覽並操作。"
-        return f"批次替換失敗：{error}"
+        return f"批次替換失敗：{redact_secrets(error)}"
 
     def _set_job_ui(self, kind: str | None, message: str) -> None:
         self.preview_btn.disabled = kind is not None
@@ -518,7 +589,7 @@ class BatchReplaceDialog:
             kind is not None
             or self.plan is None
             or not self.plan.changes
-            or (self.quality_ack.visible and not bool(self.quality_ack.value))
+            or not self._quality_ack_is_valid()
         )
         self._update_dialog()
 
@@ -527,6 +598,10 @@ class BatchReplaceDialog:
             return
         if self._job_session is not None:
             self._job_session.request_cancel()
+        if self._job_result is not None:
+            self._job_result.discard()
+        self._generation += 1
+        self._clear_plan_and_ack()
         self.cancel_job_btn.disabled = True
         self.progress_text.value = "取消要求已送出，等待查詢停止…"
         self._update_dialog()
@@ -623,81 +698,27 @@ class BatchReplaceDialog:
                 f"略過 {self.plan.skipped_count:,d}（衝突 {conflicts:,d}）；"
                 f"品質混合變化 {mixed:,d}。"
             )
-        quality_ok = not self.quality_ack.visible or bool(self.quality_ack.value)
+        quality_ok = self._quality_ack_is_valid()
         self.apply_btn.disabled = (
             self.plan is None or not self.plan.changes or not quality_ok or self._busy
         )
         self._update_dialog()
 
     def _render_rows(self, visible) -> list[ft.Control]:
-        controls: list[ft.Control] = []
-        selected_roots = self.selected_roots or set()
-        for row in visible:
-            if self.show_skipped:
-                controls.append(
-                    ft.Text(
-                        f"略過・{row.mc_version}・{row.key}：{row.reason}",
-                        size=11.5,
-                        color=C.GOLD,
-                        selectable=True,
-                    )
-                )
-                continue
-            root_checkbox: ft.Control
-            if not row.is_extra_version and self.selection_plan is not None:
-                root_checkbox = ft.Checkbox(
-                    value=row.entry_id in selected_roots,
-                    label="處理此根條目"
-                    if row.entry_id in selected_roots
-                    else "個別排除",
-                    on_change=lambda e, i=row.entry_id: self._toggle_root(
-                        i, bool(e.control.value)
-                    ),
-                    disabled=self._busy,
-                )
-            elif row.is_extra_version:
-                root_checkbox = ft.Text("跨版本", size=10.5, color=C.DIM)
-            else:
-                root_checkbox = ft.Text("根條目", size=10.5, color=C.DIM)
-            quality = {
-                "worsened": "品質變差",
-                "improved": "品質改善",
-                "mixed": "品質混合變化（仍需確認）",
-                "unchanged": "",
-            }[row.quality_change_kind]
-            detail = (
-                f"{row.mc_version} · {row.mod_id} · {row.kind} · {row.key}\n"
-                f"來源 {row.effective_source} · {row.effective_checker or '未知'} · "
-                f"{row.effective_review_status or '歷史狀態待確認'}"
-            )
-            controls.append(
-                ft.Column(
-                    [
-                        ft.Row(
-                            [
-                                root_checkbox,
-                                ft.Text(
-                                    f"{row.old_zh_tw} → {row.new_zh_tw}",
-                                    size=11.5,
-                                    color=C.TEXT,
-                                    selectable=True,
-                                    expand=True,
-                                ),
-                                ft.Text(quality, size=10.5, color=C.GOLD),
-                            ],
-                            vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                        ),
-                        ft.Text(detail, size=10, color=C.DIM, selectable=True),
-                    ],
-                    spacing=1,
-                )
-            )
-        return controls or [kit.hint_text("此頁沒有條目")]
+        return render_batch_preview_rows(
+            visible,
+            catalog=self._plan_catalog,
+            selected_roots=self.selected_roots or set(),
+            selection_active=self.selection_plan is not None,
+            show_skipped=self.show_skipped,
+            busy=self._busy,
+            on_toggle=self._toggle_root,
+        )
 
     def _open_final_confirmation(self, _e=None) -> None:
         if self._busy or self.plan is None or not self.plan.changes:
             return
-        if self.quality_ack.visible and not self.quality_ack.value:
+        if not self._quality_ack_is_valid():
             show_snack(self.page, "請先確認品質警告，或取消這次替換。", C.GOLD)
             return
         self._final_generation = self._generation
@@ -743,6 +764,7 @@ class BatchReplaceDialog:
             or plan is None
             or self.plan is not plan
             or generation != self._generation
+            or not self._quality_ack_is_valid()
         ):
             show_snack(self.page, "預覽範圍已變更，請重新核對預覽。", C.GOLD)
             return

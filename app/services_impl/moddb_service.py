@@ -20,7 +20,9 @@ from app.services_impl.pipelines._pipeline_logging import (
 from app.tasks.task_session import add_log_unmirrored
 from translation_tool.translation_db import (
     SOURCE_NAMES,
+    BatchReplaceChange,
     BatchReplacePlan,
+    BatchReplaceResult,
     DbSettings,
     EntryDetail,
     EntryFilter,
@@ -35,6 +37,7 @@ from translation_tool.translation_db import (
 )
 from translation_tool.translation_db.quality import (
     format_tokens,
+    token_category,
     token_issues,
     whitespace_note,
 )
@@ -73,7 +76,9 @@ __all__ = [
     "SRC_JAR_TW",
     "SRC_MANUAL",
     "SRC_SUBTITLE",
+    "BatchReplaceChange",
     "BatchReplacePlan",
+    "BatchReplaceResult",
     "DbSettings",
     "EntryDetail",
     "EntryFilter",
@@ -101,6 +106,7 @@ __all__ = [
     "run_moddb_scan_service",
     "strip_quotes",
     "summarize_database",
+    "token_category",
     "token_issues",
     "version_choices",
     "warm_stats_quietly",

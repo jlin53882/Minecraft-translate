@@ -927,6 +927,347 @@ def test_batch_replace_final_confirmation_applies_exact_preview(db_path):
     db.close()
 
 
+def test_batch_replace_quality_ack_is_bound_to_one_exact_plan(db_path):
+    from app.services_impl.moddb_service import EntryFilter
+    from app.views.moddb.batch_replace_dialog import BatchReplaceDialog
+
+    db = TranslationDB(db_path)
+    db.ingest(
+        "1.21.1",
+        [
+            ScanItem(
+                KIND_LANG,
+                "quality",
+                f"item.quality.{index}",
+                "Hello %s",
+                "舊譯文",
+            )
+            for index in range(2)
+        ],
+    )
+    dialog = BatchReplaceDialog(
+        mock_page(),
+        lambda: db,
+        EntryFilter(version="1.21.1"),
+        lambda _result: None,
+        operation_launcher=lambda target, **_kwargs: (target(), True)[1],
+    )
+    dialog.find_field.value = "舊譯文"
+    dialog.replace_field.value = "新譯文%s%s"
+    dialog._preview()
+
+    plan_a = dialog.plan
+    assert plan_a is not None and plan_a.update_count == 2
+    assert all(change.quality_mixed for change in plan_a.changes)
+    dialog.quality_ack.value = True
+    dialog._on_quality_ack()
+    approved_a = dialog.plan
+    assert approved_a is not None
+    assert approved_a.confirmed_quality_worsening is True
+
+    # A selection change starts a distinct plan. Its consent must not inherit A.
+    dialog._toggle_root(approved_a.root_ids[0], False)
+    assert dialog.quality_ack.value is False
+    assert dialog.plan is None
+    dialog._preview()
+    plan_b = dialog.plan
+    assert plan_b is not None and plan_b.update_count == 1
+    assert plan_b.confirmed_quality_worsening is False
+    assert dialog.quality_ack.visible is True
+    assert dialog.apply_btn.disabled is True
+
+    # Even an explicit fresh preview of the same current criteria needs consent again.
+    dialog.quality_ack.value = True
+    dialog._on_quality_ack()
+    assert dialog.plan.confirmed_quality_worsening is True
+    dialog._preview()
+    assert dialog.plan.confirmed_quality_worsening is False
+    assert dialog.quality_ack.value is False
+    assert dialog.apply_btn.disabled is True
+    db.close()
+
+
+def test_batch_replace_scope_change_invalidates_quality_ack(db_path):
+    from app.services_impl.moddb_service import EntryFilter
+    from app.views.moddb.batch_replace_dialog import BatchReplaceDialog
+
+    db = TranslationDB(db_path)
+    db.ingest(
+        "1.21.1",
+        [
+            ScanItem(KIND_LANG, "quality", f"item.q.{index}", "%s", "舊")
+            for index in range(2)
+        ],
+    )
+    dialog = BatchReplaceDialog(
+        mock_page(),
+        lambda: db,
+        EntryFilter(version="1.21.1"),
+        lambda _result: None,
+        operation_launcher=lambda target, **_kwargs: (target(), True)[1],
+    )
+    dialog.find_field.value = "舊"
+    dialog.replace_field.value = "新%s%s"
+    dialog._preview()
+    dialog.quality_ack.value = True
+    dialog._on_quality_ack()
+    assert dialog.plan.confirmed_quality_worsening is True
+
+    dialog.only_checked_control.value = False
+    dialog._on_scope_change()
+    assert dialog.plan is None
+    assert dialog.quality_ack.value is False
+    dialog._preview()
+    assert dialog.plan.confirmed_quality_worsening is False
+    db.close()
+
+
+def test_batch_replace_preview_shows_db_bound_identity_and_quality_details(db_path):
+    from dataclasses import replace
+
+    from app.services_impl.moddb_service import EntryFilter
+    from app.views.moddb.batch_replace_dialog import BatchReplaceDialog
+    from translation_tool.translation_db.models import (
+        BatchReplaceSkipped,
+        QualityIssueDelta,
+    )
+
+    db = TranslationDB(db_path)
+    db.ingest(
+        "1.21.1",
+        [ScanItem(KIND_LANG, "same", "item.same", "Hello %s", "舊譯文")],
+    )
+    with db._tx() as conn:
+        conn.execute(
+            "INSERT INTO meta(key,value) VALUES('custom_sources',?) "
+            "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            (json.dumps({"釘宮翻譯組": 100}),),
+        )
+    db.source_catalog = db._load_source_catalog()
+    base = db.preview_batch_replace(EntryFilter(version="1.21.1"), "舊", "新")
+    template = base.changes[0]
+    deltas = (
+        QualityIssueDelta("%s", "missing", 2, 1),
+        QualityIssueDelta("§a", "extra", 0, 1),
+        QualityIssueDelta("$(s0)", "missing", 1, 0),
+        QualityIssueDelta("\\n", "extra", 0, 1),
+        QualityIssueDelta("\n", "missing", 1, 0),
+    )
+    sources = ((0, None), (1, None), (3, None), (6, "legacy_unknown"), (100, None))
+    rows = tuple(
+        replace(
+            template,
+            entry_id=index + 1,
+            key=f"item.preview.{index}",
+            en_us=f"English source {index}\\nwith a second line",
+            effective_source=source,
+            effective_review_status=status,
+            is_extra_version=index == 4,
+            quality_deltas=deltas,
+        )
+        for index, (source, status) in enumerate(sources)
+    )
+    dialog = BatchReplaceDialog(
+        mock_page(),
+        lambda: db,
+        EntryFilter(version="1.21.1"),
+        lambda _result: None,
+    )
+    dialog._plan_catalog = db.source_catalog
+    texts = [
+        text for control in dialog._render_rows(rows) for text in texts_of(control)
+    ]
+    visible = "\n".join(texts)
+
+    assert "English source 0\\nwith a second line" in visible
+    assert "生效來源：釘宮翻譯組〔3〕" in visible
+    assert "生效來源：釘宮翻譯組（自訂 #100）〔100〕" in visible
+    assert "人工（歷史狀態待確認）" in visible
+    assert "人工審核：不適用" in visible
+    assert "跨版本額外項目" in visible
+    assert "缺少佔位符 `%s`：2 → 1" in visible
+    assert "多出 Minecraft 色碼 `§a`：0 → 1" in visible
+    assert "缺少 Patchouli 巨集 `$(s0)`：1 → 0" in visible
+    assert "字面 \\n" in visible and "實際換行" in visible
+    detail_lines = [text for text in texts if text.startswith("生效來源：")]
+    assert len(detail_lines) == 5
+    assert all(
+        "人工審核：不適用" in text for text in detail_lines if "〔6〕" not in text
+    )
+    assert not any(
+        "歷史狀態待確認" in text and "〔6〕" not in text for text in detail_lines
+    )
+    dialog.show_skipped = True
+    skipped_text = "\n".join(
+        text
+        for control in dialog._render_rows(
+            [BatchReplaceSkipped(99, "1.20.1", "item.skipped", "來源狀態不一致")]
+        )
+        for text in texts_of(control)
+    )
+    assert "item.skipped：來源狀態不一致" in skipped_text
+    db.close()
+
+
+def test_batch_worker_keeps_large_plan_out_of_task_session_summary(
+    db_path, monkeypatch
+):
+    from dataclasses import replace
+
+    from app.services_impl.moddb_batch_operation import (
+        BatchOperationResult,
+        launch_batch_replace_job,
+    )
+    from app.services_impl.moddb_service import EntryFilter
+    from translation_tool.translation_db.models import BatchReplacePlan
+
+    db = TranslationDB(db_path)
+    db.ingest(
+        "1.21.1",
+        [
+            ScanItem(
+                KIND_LANG, "large", "item.large", "Sensitive English", "Sensitive 繁中"
+            )
+        ],
+    )
+    base = db.preview_batch_replace(
+        EntryFilter(version="1.21.1"), "Sensitive", "Updated"
+    )
+    row = base.changes[0]
+    large_plan = replace(
+        base,
+        root_ids=tuple(range(10_000)),
+        changes=tuple(
+            replace(row, entry_id=index + 1, key=f"item.large.{index}")
+            for index in range(10_000)
+        ),
+    )
+
+    def fail_plan_repr(_self):
+        pytest.fail("TaskSession.finish must not stringify a complete batch plan")
+
+    monkeypatch.setattr(BatchReplacePlan, "__repr__", fail_plan_repr)
+    lifecycle = []
+    monkeypatch.setattr(
+        TaskSession,
+        "_log_lifecycle",
+        lambda _session, text, _level="info": lifecycle.append(text),
+    )
+    channel = BatchOperationResult("preview", 19)
+    session, launched = launch_batch_replace_job(
+        mock_page(),
+        kind="preview",
+        generation=19,
+        work=lambda _session: large_plan,
+        result_channel=channel,
+        operation_launcher=lambda target, **_kwargs: (target(), True)[1],
+    )
+
+    assert launched is True
+    assert session.is_finished
+    assert session.summary["update_count"] == 10_000
+    assert "result" not in session.summary
+    lifecycle_text = " ".join(lifecycle)
+    assert "Sensitive English" not in lifecycle_text
+    assert "Sensitive 繁中" not in lifecycle_text
+    delivered = channel.take(session, "preview", 19)
+    assert delivered is not None and delivered.result is large_plan
+    db.close()
+
+
+def test_batch_worker_result_channels_isolate_workspaces_and_discard_late_results(
+    db_path,
+):
+    from app.services_impl.moddb_batch_operation import (
+        BatchOperationResult,
+        launch_batch_replace_job,
+    )
+
+    jobs = []
+    channel_a = BatchOperationResult("preview", 3)
+    channel_b = BatchOperationResult("preview", 9)
+    session_a, launched_a = launch_batch_replace_job(
+        mock_page(),
+        kind="preview",
+        generation=3,
+        work=lambda _session: {"database": "workspace-a"},
+        result_channel=channel_a,
+        operation_launcher=lambda target, **_kwargs: (jobs.append(target), True)[1],
+    )
+    session_b, launched_b = launch_batch_replace_job(
+        mock_page(),
+        kind="preview",
+        generation=9,
+        work=lambda _session: {"database": "workspace-b"},
+        result_channel=channel_b,
+        operation_launcher=lambda target, **_kwargs: (jobs.append(target), True)[1],
+    )
+    assert launched_a is True and launched_b is True
+
+    # Complete out of order: no channel can consume another job's payload.
+    jobs[1]()
+    jobs[0]()
+    assert channel_a.take(session_b, "preview", 9) is None
+    result_a = channel_a.take(session_a, "preview", 3)
+    result_b = channel_b.take(session_b, "preview", 9)
+    assert result_a is not None and result_a.result == {"database": "workspace-a"}
+    assert result_b is not None and result_b.result == {"database": "workspace-b"}
+
+    discarded = BatchOperationResult("preview", 11)
+    session_c, _launched_c = launch_batch_replace_job(
+        mock_page(),
+        kind="preview",
+        generation=11,
+        work=lambda _session: {"database": "closed-dialog"},
+        result_channel=discarded,
+        operation_launcher=lambda target, **_kwargs: (jobs.append(target), True)[1],
+    )
+    discarded.discard()
+    jobs[2]()
+    assert discarded.take(session_c, "preview", 11) is None
+
+
+def test_closed_batch_preview_discards_a_late_plan(db_path, monkeypatch):
+    from app.services_impl.moddb_service import EntryFilter
+    from app.views.moddb.batch_replace_dialog import BatchReplaceDialog
+
+    db = TranslationDB(db_path)
+    db.ingest(
+        "1.21.1",
+        [ScanItem(KIND_LANG, "late", "item.late", "Source", "舊譯文")],
+    )
+    plan = db.preview_batch_replace(EntryFilter(version="1.21.1"), "舊", "新")
+    monkeypatch.setattr(db, "preview_batch_replace", lambda *_args, **_kwargs: plan)
+    jobs = []
+    dialog = BatchReplaceDialog(
+        mock_page(),
+        lambda: db,
+        EntryFilter(version="1.21.1"),
+        lambda _result: None,
+        operation_launcher=lambda target, **_kwargs: (jobs.append(target), True)[1],
+    )
+    dialog.open()
+    dialog.find_field.value = "舊"
+    dialog.replace_field.value = "新"
+    dialog._preview()
+    session = dialog._job_session
+    channel = dialog._job_result
+    assert dialog._busy and session is not None and channel is not None
+
+    dialog._close_dialog()
+    assert dialog.plan is None
+    jobs[0]()  # Simulate a worker that finished after its dialog was dismissed.
+    dialog._sync_worker()
+
+    assert session.is_finished
+    assert dialog.plan is None
+    assert not dialog._busy
+    assert "result" not in session.summary
+    assert channel.take(session, "preview", session.summary["generation"]) is None
+    assert "預覽已失效" in dialog.progress_text.value
+    db.close()
+
+
 def test_invalid_custom_date_has_error_state_and_blocks_batch_query(db_path):
     seed(db_path)
     db = TranslationDB(db_path)
