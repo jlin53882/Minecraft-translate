@@ -496,9 +496,9 @@ class Pager(ft.Container):
             return
         self._current = page
         self._render()
+        if self.on_change:
+            self.on_change(page)
         try:
             self.update()
         except RuntimeError:
             pass
-        if self.on_change:
-            self.on_change(page)

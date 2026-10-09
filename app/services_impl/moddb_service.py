@@ -139,10 +139,13 @@ def database_problem(settings: DbSettings | None = None) -> str:
 
 
 def open_database(
-    *, create: bool = True, settings: DbSettings | None = None
+    *,
+    create: bool = True,
+    settings: DbSettings | None = None,
+    readonly: bool = False,
 ) -> TranslationDB | None:
-    """依指定或目前設定開啟資料庫；``create=False`` 時檔案不存在回傳 None。"""
-    return open_db(settings or current_settings(), create=create)
+    """依指定或目前設定開啟資料庫；唯讀查詢不建立、遷移或同步來源優先序。"""
+    return open_db(settings or current_settings(), create=create, readonly=readonly)
 
 
 def database_version_choices(settings: DbSettings | None = None) -> list[str]:

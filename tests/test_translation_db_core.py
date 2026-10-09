@@ -546,6 +546,32 @@ def test_legacy_revert_does_not_fabricate_missing_checker(db):
     assert manual.zh_tw == "目前文" and manual.checker == ""
 
 
+def test_quality_repair_invalidates_legacy_manual_revert_without_revision(db):
+    db.ingest("1.21.1", [item(tw="Source")])
+    entry = db.list_entries("1.21.1")[0][0]
+    db.save_manual(entry.id, "Before", propagate=False)
+    db.save_manual(entry.id, "Legacy manual value", propagate=False)
+    history = db.entry_detail(entry.id).history[0]
+    db._conn.execute(
+        "UPDATE history SET prev_revision=NULL, new_revision=NULL WHERE id=?",
+        (history.id,),
+    )
+    db._conn.execute(
+        "INSERT INTO history (entry_id, batch, action, source_id) "
+        "VALUES (?, 'quality-repair', 'quality_repair', ?)",
+        (entry.id, SRC_MANUAL),
+    )
+    db._conn.commit()
+
+    assert db.revert(history.id, whole_batch=False) == 0
+    manual = next(
+        row
+        for row in db.entry_detail(entry.id).translations
+        if row.source == SRC_MANUAL
+    )
+    assert manual.zh_tw == "Legacy manual value"
+
+
 def test_ingest_manual_source_is_explicitly_unreviewed(db):
     db.ingest(
         "1.21.1",
@@ -936,6 +962,116 @@ def test_quality_filter_evaluates_before_pagination_and_uses_core_tokens(db):
     assert unknown_count == 1 and unknown[0].key == "item.quality.unknown"
 
 
+def test_quality_repair_history_does_not_count_as_manual_activity(db):
+    db.ingest(
+        "1.21.1",
+        [item(key="item.quality.activity", en="Source %s", tw="Source")],
+    )
+    entry = db.list_entries("1.21.1")[0][0]
+    db.save_manual(entry.id, "Manual", actor="editor", propagate=False)
+    manual_history = db.entry_detail(entry.id).history[0]
+    db._conn.execute(
+        "UPDATE history SET at='2020-01-01 00:00:00' WHERE id=?",
+        (manual_history.id,),
+    )
+    db._conn.execute(
+        "INSERT INTO history (entry_id, batch, action, at, source_id) "
+        "VALUES (?, 'repair', 'quality_repair', '2099-01-01 00:00:00', 6)",
+        (entry.id,),
+    )
+    db._conn.commit()
+
+    assert db.get_entry(entry.id).last_manual_at == "2020-01-01 00:00:00"
+    recent_manual, recent_count = db.list_entries(
+        criteria=EntryFilter(
+            version="1.21.1",
+            time=TimeFilter(
+                kind="manual_activity",
+                start_utc="2090-01-01 00:00:00",
+                end_utc="2100-01-01 00:00:00",
+                unknown_policy="exclude",
+            ),
+        )
+    )
+    assert recent_count == 0 and recent_manual == []
+
+
+@pytest.mark.parametrize(
+    "sort_by",
+    [
+        "entry_newest",
+        "entry_oldest",
+        "effective_updated_newest",
+        "manual_activity_newest",
+        "default",
+    ],
+)
+def test_quality_page_matches_full_filter_order_for_every_sort_mode(
+    db, sort_by, monkeypatch
+):
+    from translation_tool.translation_db import repository
+
+    monkeypatch.setattr(repository, "_QUALITY_PAGE_BUFFER_LIMIT", 2)
+    db.ingest(
+        "1.21.1",
+        [
+            item(
+                mod="quality-page",
+                key=f"item.quality.page.{index:02}",
+                en=f"Source {index} %s",
+                tw=f"Translation {index}",
+            )
+            for index in range(8)
+        ],
+    )
+    rows = db.list_entries("1.21.1", mod_id="quality-page", limit=20)[0]
+    for index, row in enumerate(rows):
+        stamp = f"2026-01-{index + 1:02} 12:00:00"
+        db._conn.execute("UPDATE entry SET created_at=? WHERE id=?", (stamp, row.id))
+        db._conn.execute(
+            "UPDATE translation SET updated_at=? WHERE entry_id=?", (stamp, row.id)
+        )
+        db._conn.execute(
+            "INSERT INTO history (entry_id, batch, action, at) "
+            "VALUES (?, ?, 'manual', ?)",
+            (row.id, f"manual-{row.id}", stamp),
+        )
+
+    criteria = EntryFilter(
+        version="1.21.1",
+        mod_id="quality-page",
+        quality=QualityFilter(status="mismatch"),
+        sort_by=sort_by,
+    )
+    complete = db._query_entry_rows(criteria)
+    expected = db._sort_filtered_rows(complete, sort_by)[2:5]
+    page, total = db.list_entries(criteria=criteria, limit=3, offset=2)
+
+    assert total == len(complete) == 8
+    assert [row.id for row in page] == [row[0] for row in expected]
+
+
+def test_quality_filter_observes_cancellation_before_query(db):
+    from threading import Event
+
+    from translation_tool.utils.cancellation import TaskCancelled, cancel_scope
+
+    db.ingest(
+        "1.21.1",
+        [item(key="item.cancel.quality", en="Use %s", tw="譯文")],
+    )
+    cancelled = Event()
+    cancelled.set()
+
+    with cancel_scope(cancelled.is_set), pytest.raises(TaskCancelled):
+        db.list_entries(
+            criteria=EntryFilter(
+                version="1.21.1", quality=QualityFilter(status="mismatch")
+            ),
+            limit=10,
+        )
+
+
 def test_all_sort_modes_put_nulls_last_and_stable_ids(db):
     db.ingest("1.21.1", [item(key=f"item.sort.{n}", tw=f"文字 {n}") for n in range(3)])
     rows = db.list_entries("1.21.1", limit=10)[0]
@@ -1102,9 +1238,9 @@ def test_schema_v1_migration_marks_legacy_manual_unknown_and_keeps_backup(tmp_pa
     db.close()
 
     # Reopening is idempotent: no second migration backup is created.
-    backups_before = list(tmp_path.glob("legacy.db.pre-schema-v2-*.bak"))
+    backups_before = sorted(tmp_path.glob("legacy.db.pre-schema-v*.bak"))
     db = TranslationDB(path)
-    backups_after = list(tmp_path.glob("legacy.db.pre-schema-v2-*.bak"))
+    backups_after = sorted(tmp_path.glob("legacy.db.pre-schema-v*.bak"))
     assert backups_after == backups_before
     db.close()
 
@@ -1177,6 +1313,57 @@ def test_schema_v2_migration_keeps_first_seen_unknown_and_supports_readonly(tmp_
     )
     assert manual.created_at is not None
     migrated.close()
+
+
+def test_schema_v3_migration_backup_includes_committed_wal_snapshot(tmp_path):
+    path = tmp_path / "legacy-v3-wal.db"
+    db = TranslationDB(path)
+    db.ingest("1.21.1", [item(key="item.wal", en="Before WAL", tw="譯文")])
+    entry_id = db.list_entries("1.21.1")[0][0].id
+    db.close()
+
+    writer = sqlite3.connect(path)
+    writer.execute("PRAGMA journal_mode=WAL")
+    writer.execute("ALTER TABLE history DROP COLUMN source_id")
+    writer.execute("UPDATE meta SET value='3' WHERE key='schema_version'")
+    writer.execute("UPDATE entry SET en_us='Committed in WAL' WHERE id=?", (entry_id,))
+    writer.commit()
+    assert path.with_name(path.name + "-wal").exists()
+
+    migrated = TranslationDB(path)
+    assert migrated.get_entry(entry_id).en_us == "Committed in WAL"
+    assert (
+        migrated._conn.execute(
+            "SELECT value FROM meta WHERE key='schema_version'"
+        ).fetchone()[0]
+        == "4"
+    )
+    backups = list(tmp_path.glob("legacy-v3-wal.db.pre-schema-v4-*.bak"))
+    assert len(backups) == 1
+    writer.close()
+    migrated.close()
+
+    with sqlite3.connect(backups[0]) as backup:
+        assert (
+            backup.execute(
+                "SELECT value FROM meta WHERE key='schema_version'"
+            ).fetchone()[0]
+            == "3"
+        )
+        assert (
+            backup.execute(
+                "SELECT en_us FROM entry WHERE id=?", (entry_id,)
+            ).fetchone()[0]
+            == "Committed in WAL"
+        )
+        history_columns = {
+            row[1] for row in backup.execute("PRAGMA table_info(history)")
+        }
+        assert "source_id" not in history_columns
+
+    reopened = TranslationDB(path)
+    assert list(tmp_path.glob("legacy-v3-wal.db.pre-schema-v4-*.bak")) == backups
+    reopened.close()
 
 
 def test_schema_migration_failure_rolls_back_all_review_columns(tmp_path, monkeypatch):

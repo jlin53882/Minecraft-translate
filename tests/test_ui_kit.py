@@ -145,6 +145,16 @@ def test_pager_goto_notifies_once_and_clamps():
     assert p.current_page == 1
 
 
+def test_pager_calls_page_handler_before_updating_its_control(monkeypatch):
+    events = []
+    p = kit.Pager(100, page_size=10, on_change=lambda _page: events.append("load"))
+    monkeypatch.setattr(kit.Pager, "update", lambda _self: events.append("update"))
+
+    p.goto(2)
+
+    assert events == ["load", "update"]
+
+
 def test_pager_set_state_does_not_notify_and_clamps_page():
     seen: list[int] = []
     p = kit.Pager(100, page=10, page_size=10, on_change=seen.append)

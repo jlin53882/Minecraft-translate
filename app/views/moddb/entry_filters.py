@@ -171,12 +171,19 @@ def entry_filter(panel) -> EntryFilter:
 
 
 def refresh_entry_filter(
-    panel, *, page: int = 1, keep_selection: bool = True, full_refresh: bool = False
+    panel,
+    *,
+    page: int = 1,
+    keep_selection: bool = True,
+    full_refresh: bool = False,
+    background: bool = True,
 ) -> None:
-    """Refresh filter results without blocking when the parent provides a worker."""
+    """Refresh the requested result page, optionally delegating filter edits."""
     panel.pager.set_state(panel.total, page)
     if panel._on_filter_changed is not None:
-        panel._on_filter_changed(page, keep_selection, full_refresh)
+        panel._on_filter_changed(
+            page, keep_selection, full_refresh, background=background
+        )
         return
     panel._load_list(page=page, keep_selection=keep_selection)
     panel._safe_update()

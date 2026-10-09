@@ -7,7 +7,10 @@ from enum import Enum, auto
 from app.services_impl.logging_service import validate_log_format
 from app.services_impl.moddb_source_service import (
     normalize_priority_config,
+    priority_custom_source_lines,
+    priority_database_identity,
     priority_display_lines,
+    priority_has_custom_sources,
 )
 from app.ui.snack import show_snack
 from app.views.config.settings_schema import (
@@ -159,6 +162,13 @@ def _collect_validated_config(
                 set_path(
                     config, setting.path, _from_control_value(setting, control.value)
                 )
+        if _priority_source_path_change_needs_review(view, config):
+            if show_feedback:
+                show_snack(
+                    view.page,
+                    "資料庫路徑已變更，請先檢查「來源優先順序」中的自訂來源，再儲存。",
+                )
+            return None
         # Database-local source identities are normalized in the service layer.
         normalize_priority_config(config)
         api_keys = [
@@ -228,6 +238,27 @@ def _collect_validated_config(
             )
         return None
     return config
+
+
+def _priority_source_path_change_needs_review(view, config: dict) -> bool:
+    """Require explicit review before carrying custom IDs to another database."""
+    baseline = getattr(view, "_priority_source_baseline", None)
+    priority_control = view.controls_map.get("translation_db.priority")
+    path_control = view.controls_map.get("translation_db.path")
+    if baseline is None or priority_control is None or path_control is None:
+        return False
+    if not baseline["has_custom"]:
+        return False
+    current_path = priority_database_identity(
+        config.get("translation_db", {}).get("path")
+    )
+    if current_path == baseline["path"]:
+        return False
+    return bool(
+        priority_custom_source_lines(
+            (priority_control.value or "").splitlines(), baseline["path"]
+        )
+    )
 
 
 def _write_config_with_feedback(
@@ -301,8 +332,17 @@ def load_config_into_view(view, config: dict):
         value = _initial_value(config, setting)
         if setting.path == "translation_db.priority":
             db_config = config.get("translation_db", {}) or {}
-            value = priority_display_lines(value, db_config.get("path"))
+            raw_priority = value
+            value = priority_display_lines(raw_priority, db_config.get("path"))
         control.value = _to_control_value(setting, value)
+        if setting.path == "translation_db.priority":
+            db_config = config.get("translation_db", {}) or {}
+            view._priority_source_baseline = {
+                "path": priority_database_identity(db_config.get("path")),
+                "has_custom": priority_has_custom_sources(
+                    raw_priority, db_config.get("path")
+                ),
+            }
     _apply_label_templates(view, config)
 
     view.models_column.controls.clear()

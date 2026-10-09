@@ -279,9 +279,9 @@ def test_database_tab_refreshes_run_queries_in_worker_threads(db_path, monkeypat
     filter_connections = []
     original_filter_snapshot = moddb_view.load_entries_filter_snapshot
 
-    def record_filter_snapshot(db, request):
-        filter_connections.append((db, threading.current_thread().name))
-        return original_filter_snapshot(db, request)
+    def record_filter_snapshot(settings, request):
+        filter_connections.append((settings, threading.current_thread().name))
+        return original_filter_snapshot(settings, request)
 
     monkeypatch.setattr(
         moddb_view, "load_entries_filter_snapshot", record_filter_snapshot
@@ -312,15 +312,108 @@ def test_database_tab_refreshes_run_queries_in_worker_threads(db_path, monkeypat
         page._tasks.clear()
         assert [row.key for row in view.entries.rows] == ["item.foo.b"]
         assert len(filter_connections) == 1
-        assert filter_connections[0][0] is view._db
+        assert str(filter_connections[0][0].resolved_path()) == str(db_path)
         assert filter_connections[0][1] != threading.current_thread().name
         assert query_threads
         assert all(name != threading.current_thread().name for _, name in query_threads)
         assert view.entries.refresh_indicator.visible is False
-        assert view._db is not None
+        assert view._db is None
     finally:
         page.operation_registry.begin_shutdown()
         assert page.operation_registry.wait_for_idle(timeout=2)
+        if view._db is not None:
+            view._db.close()
+
+
+def test_quality_filter_worker_owns_readonly_connection_and_does_not_block_select(
+    db_path, monkeypatch
+):
+    from dataclasses import replace
+
+    from app.tasks.operation_registry import OperationRegistry
+    from app.views.moddb import panel_refresh
+    from translation_tool.translation_db import QualityFilter
+
+    seed(db_path)
+    page = mock_page()
+    registry = OperationRegistry()
+    page.operation_registry = registry
+    page.run_thread = lambda _target: None
+    view = moddb_view.ModDbView(page, mock_filepicker())
+    settings = moddb_service.current_settings()
+    view._db = moddb_service.open_database(create=False, settings=settings)
+    view._db_loaded = True
+    view._db_sig = (str(settings.resolved_path()), settings.priority)
+    view.entries.refresh()
+    view.tab = "entries"
+    target_id = view.entries.rows[0].id
+    criteria = replace(
+        view.entries._entry_filter(), quality=QualityFilter(status="mismatch")
+    )
+    view.entries._entry_filter = lambda: criteria
+    view.entries._filter_only_refresh = True
+    request = view._panel_refresh_request("entries")
+    generation = 1
+    view._panel_refresh_generation["entries"] = generation
+    view._panel_refresh_loading.add("entries")
+
+    query_entered = threading.Event()
+    release_query = threading.Event()
+    selection_finished = threading.Event()
+    worker_connections = []
+    original_list_entries = TranslationDB.list_entries
+    original_open_database = panel_refresh.open_database
+
+    def gated_list_entries(db, *args, **kwargs):
+        if threading.current_thread().name.startswith(
+            "operation-moddb-entries-panel-refresh"
+        ):
+            worker_connections.append(db)
+            with db._lock:
+                query_entered.set()
+                assert release_query.wait(timeout=3)
+        return original_list_entries(db, *args, **kwargs)
+
+    def record_worker_open(*args, **kwargs):
+        db = original_open_database(*args, **kwargs)
+        if db is not None and kwargs.get("readonly"):
+            worker_connections.append(db)
+        return db
+
+    monkeypatch.setattr(TranslationDB, "list_entries", gated_list_entries)
+    monkeypatch.setattr(panel_refresh, "open_database", record_worker_open)
+    try:
+        launched = view._launch_panel_refresh(
+            "entries",
+            view.entries,
+            request,
+            settings,
+            view._settings_signature(),
+            view._data_revision,
+            generation,
+        )
+        assert launched
+        assert query_entered.wait(timeout=2)
+        select_thread = threading.Thread(
+            target=lambda: (view.entries.select(target_id), selection_finished.set())
+        )
+        select_thread.start()
+        assert selection_finished.wait(timeout=1)
+        release_query.set()
+        select_thread.join(timeout=1)
+        assert registry.wait_for_idle(timeout=2)
+        page._run_all_tasks()
+        assert worker_connections
+        worker_db = worker_connections[-1]
+        assert worker_db is not view._db
+        assert worker_db.readonly is True
+        with pytest.raises(sqlite3.ProgrammingError):
+            worker_db._conn.execute("SELECT 1")
+        assert not view._panel_refresh_loading
+    finally:
+        release_query.set()
+        registry.begin_shutdown()
+        assert registry.wait_for_idle(timeout=2)
         if view._db is not None:
             view._db.close()
 
@@ -350,6 +443,107 @@ def test_entries_worker_snapshot_preserves_requested_page(db_path):
     assert request["page"] == 2
     assert snapshot["page"] == 2
     assert len(snapshot["rows"]) == 5
+
+
+def test_entry_page_navigation_loads_inline_and_discards_stale_filter_snapshot(
+    db_path, monkeypatch
+):
+    from app.tasks.operation_registry import OperationRegistry
+
+    seed(db_path)
+    db = TranslationDB(db_path)
+    db.ingest(
+        "1.21.1",
+        [
+            ScanItem(KIND_LANG, "foo", f"item.page.{index:03}", f"Page {index}")
+            for index in range(52)
+        ],
+    )
+    db.close()
+
+    page = mock_page()
+    page.operation_registry = OperationRegistry()
+    page.run_thread = lambda _target: None
+    view = moddb_view.ModDbView(page, mock_filepicker())
+    try:
+        view.show_tab("entries")
+        assert page.operation_registry.wait_for_idle(timeout=2)
+        page._run_all_tasks()
+        page._tasks.clear()
+        assert view.entries.total == 55
+
+        old_request = view._panel_refresh_request("entries")
+        query_threads = []
+        original_list_entries = TranslationDB.list_entries
+
+        def record_query_thread(db, *args, **kwargs):
+            query_threads.append(threading.current_thread().name)
+            return original_list_entries(db, *args, **kwargs)
+
+        monkeypatch.setattr(TranslationDB, "list_entries", record_query_thread)
+        view.entries.pager.goto(2)
+
+        assert view.entries.pager.current_page == 2
+        assert len(view.entries.rows) == 5
+        assert query_threads[-1] == threading.current_thread().name
+        assert view.entries.refresh_indicator.visible is False
+        assert view._panel_refresh_needed["entries"] is False
+
+        scheduled = []
+        monkeypatch.setattr(
+            view,
+            "_request_panel_refresh",
+            lambda key, **_kwargs: scheduled.append(key),
+        )
+        view._panel_refresh_loading.add("entries")
+        view._apply_panel_refresh(
+            "entries",
+            view._panel_refresh_generation["entries"],
+            view._settings_signature(),
+            old_request,
+            view._data_revision,
+            view.entries,
+            {"key": "entries", "rows": [], "total": 55, "page": 1},
+        )
+
+        assert scheduled == []
+        assert view.entries.pager.current_page == 2
+        assert len(view.entries.rows) == 5
+        assert not view._panel_refresh_loading
+    finally:
+        page.operation_registry.begin_shutdown()
+        assert page.operation_registry.wait_for_idle(timeout=2)
+        if view._db is not None:
+            view._db.close()
+
+
+def test_filter_snapshot_generation_guard_rejects_stale_result(db_path, monkeypatch):
+    seed(db_path)
+    view = moddb_view.ModDbView(mock_page(), mock_filepicker())
+    view._db = TranslationDB(db_path)
+    view.tab = "entries"
+    scheduled = []
+    monkeypatch.setattr(
+        view,
+        "_request_panel_refresh",
+        lambda key, **_kwargs: scheduled.append(key),
+    )
+    try:
+        is_valid = view._validate_filter_snapshot(
+            {"identity": "same-db"},
+            {
+                "identity": "same-db",
+                "db_generation": "stale-generation",
+            },
+            view.entries,
+        )
+
+        assert is_valid is False
+        assert scheduled == ["entries"]
+        assert view._panel_refresh_needed["entries"] is True
+        assert view.entries.refresh_indicator.visible is False
+    finally:
+        view._db.close()
 
 
 def test_moddb_overview_load_uses_a_worker_owned_connection(db_path, monkeypatch):
@@ -400,6 +594,82 @@ def test_moddb_overview_load_uses_a_worker_owned_connection(db_path, monkeypatch
         if view._db is not None:
             view._db.close()
             view._db = None
+
+
+def test_overview_worker_closes_connection_when_ui_dispatch_raises(
+    db_path, monkeypatch
+):
+    from app.tasks.operation_registry import OperationRegistry
+
+    seed(db_path)
+    page = mock_page()
+    registry = OperationRegistry()
+    page.operation_registry = registry
+    page.run_thread = lambda _target: None
+    page.run_task = lambda _coro: (_ for _ in ()).throw(RuntimeError("detached"))
+    worker_databases = []
+    original_load = moddb_view._load_overview_snapshot
+
+    def record_load(settings):
+        result = original_load(settings)
+        worker_databases.append(result[0])
+        return result
+
+    monkeypatch.setattr(moddb_view, "_load_overview_snapshot", record_load)
+    view = moddb_view.ModDbView(page, mock_filepicker())
+    try:
+        view.did_mount()
+        assert registry.wait_for_idle(timeout=2)
+        assert worker_databases and worker_databases[0] is not None
+        assert view._overview_loading is False
+        assert view._overview_needs_refresh is True
+        with pytest.raises(sqlite3.ProgrammingError):
+            worker_databases[0]._conn.execute("SELECT 1")
+    finally:
+        registry.begin_shutdown()
+        assert registry.wait_for_idle(timeout=2)
+        if view._db is not None:
+            view._db.close()
+            view._db = None
+
+
+def test_panel_worker_dispatch_failure_releases_loading_and_database(
+    db_path, monkeypatch
+):
+    from app.tasks.operation_registry import OperationRegistry
+    from app.views.moddb import panel_refresh
+
+    seed(db_path)
+    page = mock_page()
+    registry = OperationRegistry()
+    page.operation_registry = registry
+    page.run_thread = lambda _target: None
+    page.run_task = lambda _coro: (_ for _ in ()).throw(RuntimeError("detached"))
+    opened = []
+    original_open = panel_refresh.open_database
+
+    def record_open(*args, **kwargs):
+        db = original_open(*args, **kwargs)
+        if db is not None:
+            opened.append(db)
+        return db
+
+    monkeypatch.setattr(panel_refresh, "open_database", record_open)
+    view = moddb_view.ModDbView(page, mock_filepicker())
+    try:
+        view.tab = "entries"
+        view._request_panel_refresh("entries")
+        assert registry.wait_for_idle(timeout=2)
+        assert opened and opened[-1].readonly is True
+        assert "entries" not in view._panel_refresh_loading
+        assert view._panel_refresh_needed["entries"] is True
+        with pytest.raises(sqlite3.ProgrammingError):
+            opened[-1]._conn.execute("SELECT 1")
+    finally:
+        registry.begin_shutdown()
+        assert registry.wait_for_idle(timeout=2)
+        if view._db is not None:
+            view._db.close()
 
 
 def test_delayed_moddb_overview_load_discards_stale_priority(db_path, monkeypatch):

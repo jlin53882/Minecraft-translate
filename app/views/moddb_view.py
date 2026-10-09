@@ -215,21 +215,36 @@ class ModDbView(ft.Column):
 
             run_task = getattr(self._page, "run_task", None)
             if callable(run_task):
-                run_task(apply_on_ui)
+                try:
+                    run_task(apply_on_ui)
+                except Exception as exc:  # noqa: BLE001 - page may detach during load
+                    if worker_db is not None:
+                        worker_db.close()
+                    self._overview_loading = False
+                    self._overview_needs_refresh = True
+                    log_debug(f"Mod DB 總覽結果排程失敗：{exc!r}")
             else:
                 self._apply_overview_result(
                     generation, signature, worker_db, snapshot, error, data_revision
                 )
 
-        launched = launch_page_operation(
-            self._page,
-            load,
-            name="Mod DB 總覽載入",
-            owner="moddb-overview-load",
-            cancellation=CancellationPolicy.NON_CANCELLABLE,
-            shutdown=ShutdownPolicy.DRAIN_ONLY,
-            presentation=OperationPresentation.MAINTENANCE,
-        )
+        try:
+            launched = launch_page_operation(
+                self._page,
+                load,
+                name="Mod DB 總覽載入",
+                owner="moddb-overview-load",
+                cancellation=CancellationPolicy.NON_CANCELLABLE,
+                shutdown=ShutdownPolicy.DRAIN_ONLY,
+                presentation=OperationPresentation.MAINTENANCE,
+            )
+        except Exception as exc:  # noqa: BLE001 - restore state on launch failure
+            self._overview_loading = False
+            self._overview_needs_refresh = True
+            self.overview.show_error(f"無法啟動總覽載入：{exc}")
+            if self.tab == "overview":
+                self._safe_update()
+            return
         if not launched:
             self._overview_loading = False
             self.overview.show_error("應用程式正在關閉，無法載入總覽")
@@ -237,9 +252,10 @@ class ModDbView(ft.Column):
                 self._safe_update()
 
     def _has_background_scheduler(self) -> bool:
-        return getattr(self._page, "operation_registry", None) is not None or callable(
-            getattr(self._page, "run_thread", None)
-        )
+        can_run_worker = getattr(
+            self._page, "operation_registry", None
+        ) is not None or callable(getattr(self._page, "run_thread", None))
+        return can_run_worker and callable(getattr(self._page, "run_task", None))
 
     def _apply_overview_result(
         self,
@@ -419,9 +435,15 @@ class ModDbView(ft.Column):
             else:
                 self._safe_update()
 
-        launched = self._launch_panel_refresh(
-            key, panel, request, settings, signature, data_revision, generation
-        )
+        try:
+            launched = self._launch_panel_refresh(
+                key, panel, request, settings, signature, data_revision, generation
+            )
+        except Exception as exc:  # noqa: BLE001 - restore state if admission fails
+            launched = False
+            panel.refresh_indicator.visible = True
+            panel.refresh_indicator.value = f"無法啟動資料載入：{exc}"
+            log_debug(f"Mod DB {key} 頁籤資料載入無法啟動：{exc!r}")
         if launched is False:
             self._panel_refresh_loading.discard(key)
             self._panel_refresh_needed[key] = True
@@ -438,16 +460,7 @@ class ModDbView(ft.Column):
         def load() -> None:
             try:
                 if key == "entries" and request.get("filter_only"):
-                    db = panel.db()
-                    signature_matches = self._db_sig == signature
-                    priority_matches = (
-                        db is not None and db.priority == settings.priority
-                    )
-                    snapshot = (
-                        load_entries_filter_snapshot(db, request)
-                        if signature_matches and priority_matches
-                        else load_panel_snapshot(key, request, settings)
-                    )
+                    snapshot = load_entries_filter_snapshot(settings, request)
                 else:
                     snapshot = load_panel_snapshot(key, request, settings)
             except Exception as exc:  # noqa: BLE001 - 顯示載入錯誤並恢復頁籤
@@ -473,7 +486,12 @@ class ModDbView(ft.Column):
 
             run_task = getattr(self._page, "run_task", None)
             if callable(run_task):
-                run_task(apply_on_ui)
+                try:
+                    run_task(apply_on_ui)
+                except Exception as exc:  # noqa: BLE001 - page may detach during load
+                    self._panel_refresh_loading.discard(key)
+                    self._panel_refresh_needed[key] = True
+                    log_debug(f"Mod DB {key} 頁籤結果排程失敗：{exc!r}")
             else:
                 self._apply_panel_refresh(
                     key,
@@ -532,12 +550,20 @@ class ModDbView(ft.Column):
                     self._safe_update()
                 return
             if current_request != request:
+                if not self._panel_refresh_needed[key]:
+                    return
                 self._panel_refresh_needed[key] = True
                 panel.refresh_indicator.visible = False
                 panel.refresh_indicator.value = ""
                 if self.tab == key:
                     self._request_panel_refresh(key)
                 return
+        if (
+            key == "entries"
+            and snapshot.get("filter_only")
+            and not (self._validate_filter_snapshot(request, snapshot, panel))
+        ):
+            return
         if self.tab != key:
             self._pending_panel_results[key] = (
                 generation,
@@ -552,6 +578,35 @@ class ModDbView(ft.Column):
         self._panel_refresh_needed[key] = bool(snapshot.get("error"))
         if self.tab == key:
             self._update_panel(key)
+
+    def _validate_filter_snapshot(self, request: dict, snapshot: dict, panel) -> bool:
+        """Reject filter results whose database identity or generation is stale."""
+        expected_identity = request.get("identity")
+        if (
+            expected_identity is not None
+            and snapshot.get("identity") != expected_identity
+        ):
+            self._panel_refresh_needed["entries"] = True
+            self.entries._filter_only_refresh = False
+            self.entries._db_identity = None
+            self.reload_db()
+            panel.refresh_indicator.visible = False
+            panel.refresh_indicator.value = ""
+            if self.tab == "entries":
+                self._request_panel_refresh("entries")
+            return False
+        if (
+            self._db is not None
+            and snapshot.get("db_generation") is not None
+            and self._db._data_gen() != snapshot["db_generation"]
+        ):
+            self._panel_refresh_needed["entries"] = True
+            panel.refresh_indicator.visible = False
+            panel.refresh_indicator.value = ""
+            if self.tab == "entries":
+                self._request_panel_refresh("entries")
+            return False
+        return True
 
     def _panel_refresh_request(self, key: str) -> dict:
         if key == "entries":
@@ -618,19 +673,26 @@ class ModDbView(ft.Column):
             self._refresh_active_panel()
 
     def _on_entries_filter_changed(
-        self, page: int = 1, keep_selection: bool = True, full_refresh: bool = False
+        self,
+        page: int = 1,
+        keep_selection: bool = True,
+        full_refresh: bool = False,
+        *,
+        background: bool = True,
     ) -> None:
-        """Refresh a changed entries query without blocking the UI thread."""
+        """Refresh changed filters in a worker and page navigation inline."""
         self._invalidate_panel("entries")
         self.entries._refresh_keep_selection = keep_selection
-        self.entries._filter_only_refresh = not full_refresh
+        self.entries._filter_only_refresh = background and not full_refresh
         if self.tab != "entries":
             return
-        if self._has_background_scheduler():
+        if background and self._has_background_scheduler():
             self._request_panel_refresh("entries", message="正在篩選條目…")
             return
         self.entries._load_list(page=page, keep_selection=keep_selection)
         self._panel_refresh_needed["entries"] = bool(self.entries._list_error)
+        self.entries.refresh_indicator.visible = False
+        self.entries.refresh_indicator.value = ""
         self._safe_update()
 
     def _invalidate_database_snapshots(self) -> None:
@@ -660,6 +722,12 @@ class ModDbView(ft.Column):
 
     # ------------------------------------------------------------------ 生命週期
     def will_unmount(self) -> None:
+        self._overview_load_generation += 1
+        self._overview_loading = False
+        for key in self._panel_refresh_generation:
+            self._panel_refresh_generation[key] += 1
+        self._panel_refresh_loading.clear()
+        self._pending_panel_results.clear()
         self.scan.will_unmount()
         self.translate.will_unmount()
 

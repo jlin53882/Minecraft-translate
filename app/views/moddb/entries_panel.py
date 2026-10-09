@@ -636,7 +636,7 @@ class EntriesPanel(ft.Column):
         refresh_entry_filter(self)
 
     def _on_page(self, page: int) -> None:
-        refresh_entry_filter(self, page=page, keep_selection=False)
+        refresh_entry_filter(self, page=page, keep_selection=False, background=False)
 
     def _on_sug_tab(self, key: str) -> None:
         self.sug_tab = key

@@ -15,6 +15,7 @@ Mod 翻譯資料庫的 SQLite 存取層：所有 SQL 都在這裡，上層只接
 from __future__ import annotations
 
 import hashlib
+import heapq
 import json
 import sqlite3
 import threading
@@ -81,6 +82,8 @@ from translation_tool.utils.cancellation import (
 
 _ENTRY_COLS = "e.id, e.kind, e.mc_version, e.mod_id, e.key, e.en_us"
 _CHUNK = 400  # SQLite 變數上限相容的批次大小
+_QUALITY_FETCH_BATCH_SIZE = 4_000
+_QUALITY_PAGE_BUFFER_LIMIT = 10_000
 _BATCH_REPLACE_STRIP_CHARS = "".join(
     chr(codepoint)
     for codepoint in (
@@ -97,6 +100,43 @@ _BATCH_REPLACE_STRIP_CHARS = "".join(
         0x3000,
     )
 )
+
+
+class _WorstFirstQualityRow:
+    """Heap wrapper that keeps the last row in the requested display order first."""
+
+    __slots__ = ("date", "date_index", "entry_id", "key", "row", "sort_by")
+
+    def __init__(self, row: tuple, sort_by: str) -> None:
+        self.row = row
+        self.sort_by = sort_by
+        self.date_index = {
+            "entry_newest": 11,
+            "entry_oldest": 11,
+            "effective_updated_newest": 13,
+            "manual_activity_newest": 14,
+        }.get(sort_by)
+        if self.date_index is None:
+            self.date = None
+            self.entry_id = row[0]
+            self.key = (row[3], row[1], row[4], row[0])
+        else:
+            self.date = row[self.date_index]
+            self.entry_id = row[0]
+            self.key = None
+
+    def __lt__(self, other: _WorstFirstQualityRow) -> bool:
+        if self.date_index is None:
+            return self.key > other.key
+        if (self.date is None) != (other.date is None):
+            return self.date is None
+        if self.date != other.date:
+            return (
+                self.date < other.date
+                if self.sort_by != "entry_oldest"
+                else self.date > other.date
+            )
+        return self.entry_id > other.entry_id
 
 
 def _like(text: str) -> str:
@@ -820,6 +860,129 @@ class TranslationDB:
         undated.sort(key=lambda row: row[0])
         return [*dated, *undated]
 
+    def _quality_candidate_select_sql(self, sort_by: str) -> str:
+        activity = "NULL"
+        if sort_by == "manual_activity_newest":
+            activity = (
+                "(SELECT MAX(h.at) FROM history h WHERE h.entry_id=e.id AND "
+                "h.action IN ('manual','review','batch_replace','revert','batch_revert'))"
+            )
+        return (
+            "SELECT e.id, e.kind, NULL, e.mod_id, e.key, e.en_us, f.zh_tw, "
+            "NULL, NULL, NULL, NULL, e.created_at, NULL, et.updated_at, "
+            f"{activity} "
+        )
+
+    def _quality_filtered_page(
+        self, criteria: EntryFilter, *, limit: int | None, offset: int
+    ) -> tuple[list[tuple], int]:
+        """Filter compact candidate rows, then fetch full data for the requested page."""
+        condition, params = self._filter_sql(criteria)
+        raise_if_cancelled()
+        offset = max(0, int(offset))
+        page_limit = None if limit is None else max(0, int(limit))
+        retain_count = None if page_limit is None else offset + page_limit
+        buffered: list[tuple] = []
+        retained: list[_WorstFirstQualityRow] = []
+        streaming = False
+        total = 0
+        with self._lock:
+            cursor = None
+            owns_transaction = not self._conn.in_transaction
+            if owns_transaction:
+                self._conn.execute("BEGIN")
+            self._conn.set_progress_handler(lambda: int(is_cancelled()), 10_000)
+            try:
+                select = (
+                    self._entry_select_sql()
+                    if page_limit is None
+                    else self._quality_candidate_select_sql(criteria.sort_by)
+                )
+                query_source = (
+                    self._query_source()
+                    if page_limit is None
+                    else (
+                        "FROM entry e LEFT JOIN effective f ON f.entry_id=e.id "
+                        "LEFT JOIN translation et ON et.entry_id=e.id "
+                        "AND et.source=f.source"
+                    )
+                )
+                cursor = self._conn.execute(
+                    f"{select} {query_source} WHERE {condition}", tuple(params)
+                )
+                while chunk := cursor.fetchmany(_QUALITY_FETCH_BATCH_SIZE):
+                    raise_if_cancelled()
+                    for row in chunk:
+                        if not matches_quality(
+                            row[5] or "", row[6] or "", criteria.quality
+                        ):
+                            continue
+                        total += 1
+                        if retain_count == 0:
+                            continue
+                        if page_limit is None:
+                            buffered.append(row)
+                            continue
+                        if not streaming:
+                            buffered.append(row)
+                            if len(buffered) > _QUALITY_PAGE_BUFFER_LIMIT:
+                                retained = [
+                                    _WorstFirstQualityRow(row, criteria.sort_by)
+                                    for row in buffered
+                                ]
+                                heapq.heapify(retained)
+                                while len(retained) > retain_count:
+                                    heapq.heappop(retained)
+                                buffered.clear()
+                                streaming = True
+                        else:
+                            candidate = _WorstFirstQualityRow(row, criteria.sort_by)
+                            if len(retained) < retain_count:
+                                heapq.heappush(retained, candidate)
+                            elif retained[0] < candidate:
+                                heapq.heapreplace(retained, candidate)
+                cursor.close()
+                cursor = None
+
+                ordered = (
+                    [row.row for row in sorted(retained, reverse=True)]
+                    if streaming
+                    else self._sort_filtered_rows(buffered, criteria.sort_by)
+                )
+                if page_limit is None:
+                    return ordered[offset:], total
+
+                selected = ordered[offset : offset + page_limit]
+                if not selected:
+                    return [], total
+
+                selected_ids = [row[0] for row in selected]
+                full_query = (
+                    f"{self._entry_select_sql()} {self._query_source()} WHERE "
+                    f"({condition}) AND e.id IN (SELECT value FROM json_each(?))"
+                )
+                cursor = self._conn.execute(
+                    full_query,
+                    (*params, json.dumps(selected_ids)),
+                )
+                full_rows = cursor.fetchall()
+                full_rows_by_id = {row[0]: row for row in full_rows}
+                return [
+                    full_rows_by_id[row[0]]
+                    for row in selected
+                    if row[0] in full_rows_by_id
+                ], total
+            except sqlite3.OperationalError:
+                if is_cancelled():
+                    raise TaskCancelled() from None
+                raise
+            finally:
+                if cursor is not None:
+                    cursor.close()
+                self._conn.set_progress_handler(None, 0)
+                if owns_transaction and self._conn.in_transaction:
+                    self._conn.rollback()
+
     def _entry_select_sql(self) -> str:
         translation_created = (
             "et.created_at" if self.has_translation_created_at else "NULL"
@@ -982,11 +1145,9 @@ class TranslationDB:
             return [], 0
 
         if criteria.quality.active:
-            all_rows = self._query_entry_rows(criteria)
-            total = len(all_rows)
-            rows = all_rows[
-                max(0, int(offset)) : max(0, int(offset)) + max(0, int(limit))
-            ]
+            rows, total = self._quality_filtered_page(
+                criteria, limit=limit, offset=offset
+            )
         else:
             cond, params = self._filter_sql(criteria)
             total = self._cached_count(
@@ -1597,8 +1758,7 @@ class TranslationDB:
         )
         last_activity = (
             "(SELECT MAX(h.at) FROM history h WHERE h.entry_id=e.id AND "
-            "h.action IN ('manual','review','batch_replace','revert','batch_revert',"
-            "'quality_repair'))"
+            "h.action IN ('manual','review','batch_replace','revert','batch_revert'))"
         )
         r = self._one(
             f"SELECT {_ENTRY_COLS}, f.zh_tw, f.source, f.checker, "
@@ -2186,7 +2346,7 @@ class TranslationDB:
                     later = conn.execute(
                         "SELECT 1 FROM history WHERE entry_id=? AND id>? "
                         "AND action IN ('manual','review','revert','batch_replace',"
-                        "'batch_revert') LIMIT 1",
+                        "'batch_revert','quality_repair') LIMIT 1",
                         (eid, hid),
                     ).fetchone()
                     if later:

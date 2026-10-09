@@ -7,17 +7,21 @@ from dataclasses import replace
 from app.services_impl.moddb_service import open_database, version_choices
 from app.services_impl.moddb_source_service import source_catalog_for
 from app.views.moddb.entries_panel import PAGE_SIZE
+from app.views.moddb.entry_filters import database_identity
 
 ALL_MODS = "__all__"
 
 
 def load_panel_snapshot(key: str, request: dict, settings) -> dict:
-    """Read tab data using a worker-owned connection; return values for UI apply."""
-    db = open_database(create=False, settings=settings)
+    """Read tab data from a worker-owned, read-only connection."""
+    db = open_database(create=False, settings=settings, readonly=True)
     snapshot = {"key": key, "identity": None, "error": None}
     try:
+        if db is not None:
+            db._conn.execute("BEGIN")
         snapshot["identity"] = _database_identity(db)
         snapshot["source_catalog"] = source_catalog_for(db)
+        snapshot["db_generation"] = db._data_gen() if db is not None else None
         if key == "entries":
             return _load_entries_snapshot(db, request, settings, snapshot)
         if key == "scan":
@@ -29,6 +33,8 @@ def load_panel_snapshot(key: str, request: dict, settings) -> dict:
         raise ValueError(f"未知 Mod DB 頁籤：{key}")
     finally:
         if db is not None:
+            if db._conn.in_transaction:
+                db._conn.rollback()
             db.close()
 
 
@@ -88,40 +94,17 @@ def _load_entries_snapshot(db, request: dict, settings, snapshot: dict) -> dict:
     return snapshot
 
 
-def load_entries_filter_snapshot(db, request: dict) -> dict:
-    """Query one filter page on the view-owned, count-cached database connection."""
+def load_entries_filter_snapshot(settings, request: dict) -> dict:
+    """Query a filtered page on a worker-owned read-only SQLite snapshot."""
+    db = open_database(create=False, settings=settings, readonly=True)
     page = max(1, int(request.get("page", 1)))
     rows, total, error, detail = [], 0, None, None
     criteria = request["criteria"]
-    if db is not None:
-        try:
-            rows, total = db.list_entries(
-                criteria=criteria,
-                limit=PAGE_SIZE,
-                offset=(page - 1) * PAGE_SIZE,
-            )
-            last_page = max(1, (total + PAGE_SIZE - 1) // PAGE_SIZE)
-            if page > last_page:
-                page = last_page
-                rows, total = db.list_entries(
-                    criteria=criteria,
-                    limit=PAGE_SIZE,
-                    offset=(page - 1) * PAGE_SIZE,
-                )
-            selected_id = request.get("selected_id")
-            row_ids = {row.id for row in rows}
-            target_id = (
-                selected_id
-                if selected_id in row_ids
-                else (rows[0].id if rows else None)
-            )
-            detail = db.entry_detail(target_id) if target_id is not None else None
-        except ValueError as exc:
-            error = str(exc)
-    return {
+    snapshot = {
         "key": "entries",
-        "identity": request.get("identity"),
-        "source_catalog": request.get("source_catalog"),
+        "identity": _database_identity(db),
+        "source_catalog": source_catalog_for(db),
+        "db_generation": None,
         "filter_only": True,
         "version": request.get("version"),
         "mod_id": request.get("mod_id"),
@@ -132,6 +115,47 @@ def load_entries_filter_snapshot(db, request: dict) -> dict:
         "list_error": error,
         "detail": detail,
     }
+    try:
+        if db is not None:
+            db._conn.execute("BEGIN")
+            snapshot["db_generation"] = db._data_gen()
+            try:
+                rows, total = db.list_entries(
+                    criteria=criteria,
+                    limit=PAGE_SIZE,
+                    offset=(page - 1) * PAGE_SIZE,
+                )
+                last_page = max(1, (total + PAGE_SIZE - 1) // PAGE_SIZE)
+                if page > last_page:
+                    page = last_page
+                    rows, total = db.list_entries(
+                        criteria=criteria,
+                        limit=PAGE_SIZE,
+                        offset=(page - 1) * PAGE_SIZE,
+                    )
+                selected_id = request.get("selected_id")
+                row_ids = {row.id for row in rows}
+                target_id = (
+                    selected_id
+                    if selected_id in row_ids
+                    else (rows[0].id if rows else None)
+                )
+                detail = db.entry_detail(target_id) if target_id is not None else None
+            except ValueError as exc:
+                error = str(exc)
+            snapshot.update(
+                page=page,
+                rows=rows,
+                total=total,
+                list_error=error,
+                detail=detail,
+            )
+        return snapshot
+    finally:
+        if db is not None:
+            if db._conn.in_transaction:
+                db._conn.rollback()
+            db.close()
 
 
 def _load_translate_snapshot(db, request: dict, snapshot: dict) -> dict:
@@ -164,11 +188,4 @@ def _load_translate_snapshot(db, request: dict, snapshot: dict) -> dict:
 
 
 def _database_identity(db):
-    if db is None:
-        return None
-    path = getattr(db, "path", None)
-    try:
-        stat = path.stat()
-        return str(path.resolve()), stat.st_dev, stat.st_ino
-    except (AttributeError, OSError):
-        return str(path), id(db)
+    return database_identity(db)

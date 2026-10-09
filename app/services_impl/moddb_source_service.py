@@ -38,8 +38,45 @@ def priority_display_lines(names, database_path: str | None = None) -> list[str]
     display_lines = []
     for name in clean_source_names(names):
         code = catalog.resolve(name)
-        display_lines.append(catalog.label(code) if code is not None else name)
+        if code is None:
+            display_lines.append(name)
+            continue
+        label = catalog.label(code)
+        # A custom source can reuse a newer built-in label. In that case the
+        # built-in's plain label resolves to the custom identity, so keep its
+        # stable token visible and editable instead of silently changing IDs.
+        display_lines.append(
+            catalog.token_for(code) if catalog.resolve(label) != code else label
+        )
     return display_lines
+
+
+def priority_database_identity(database_path: str | None = None) -> str:
+    """Return the normalized resolved path used to scope custom source IDs."""
+    return str(DbSettings(path=normalize_db_path(database_path)).resolved_path())
+
+
+def priority_has_custom_sources(names, database_path: str | None = None) -> bool:
+    """Whether a priority list carries database-local custom source identities."""
+    path = DbSettings(path=normalize_db_path(database_path)).resolved_path()
+    catalog = SourceCatalog.from_registry(read_custom_sources(path))
+    return any(
+        code is not None and code >= CUSTOM_SOURCE_BASE
+        for code in (catalog.resolve(name) for name in clean_source_names(names))
+    )
+
+
+def priority_custom_source_lines(
+    names, database_path: str | None = None
+) -> tuple[str, ...]:
+    """Return entered lines that still resolve to custom IDs in this database."""
+    path = DbSettings(path=normalize_db_path(database_path)).resolved_path()
+    catalog = SourceCatalog.from_registry(read_custom_sources(path))
+    return tuple(
+        name
+        for name in clean_source_names(names)
+        if (code := catalog.resolve(name)) is not None and code >= CUSTOM_SOURCE_BASE
+    )
 
 
 def source_catalog_for(db) -> SourceCatalog:

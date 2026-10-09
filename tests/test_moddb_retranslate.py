@@ -97,6 +97,14 @@ def _replace_identity(entry):
     }
 
 
+def _translation_revision(db, entry_id, source):
+    row = db._one(
+        "SELECT revision FROM translation WHERE entry_id=? AND source=?",
+        (entry_id, source),
+    )
+    return row[0] if row else None
+
+
 def _options(**overrides):
     values = {
         "version": "1.21.1",
@@ -232,6 +240,62 @@ def test_special_character_repair_covers_all_sources_and_can_be_undone(
     restored = {row.source: row for row in check.entry_detail(entry.id).translations}
     assert restored[SRC_MANUAL].zh_tw == "使用"
     assert restored[SRC_MANUAL].review_status == "unreviewed"
+    assert repair_cache == []
+    check.close()
+
+
+def test_quality_repair_demotes_reviewed_manual_and_revert_restores_it(
+    db_path, monkeypatch, repair_cache
+):
+    db = TranslationDB(db_path)
+    entry = _ai_entry(db, en="Use %s")
+    db.save_manual(entry.id, "使用", actor="editor", propagate=False)
+    db.review_manual(entry.id, expected_zh_tw="使用", actor="reviewer", propagate=False)
+    preview = moddb_retranslate_service.preview_same_source_ai_retranslation(
+        db, _options(), mode="quality_mismatch"
+    )
+    assert preview.sources == (SRC_MANUAL,)
+    db.close()
+
+    monkeypatch.setattr(
+        moddb_retranslate_service,
+        "translate_batch_smart",
+        lambda batch, _total: ([{**batch[0], "text": "使用 %s"}], "AUTO"),
+    )
+    result = _run(
+        db_path,
+        preview.entries,
+        options=_options(write_cache=False),
+        mode="quality_mismatch",
+    )
+
+    check = TranslationDB(db_path)
+    detail = check.entry_detail(entry.id)
+    manual = next(row for row in detail.translations if row.source == SRC_MANUAL)
+    repaired_history = next(
+        row for row in detail.history if row.action == "quality_repair"
+    )
+    assert result["summary"]["updated"] == 1
+    assert (manual.zh_tw, manual.checker, manual.review_status) == (
+        "使用 %s",
+        "",
+        "unreviewed",
+    )
+    # Manual remains the default highest-priority source after it returns to
+    # the review queue; the effective projection must reflect repaired text.
+    assert detail.entry.source == SRC_MANUAL
+    assert detail.entry.zh_tw == "使用 %s"
+    assert detail.entry.review_status == "unreviewed"
+
+    assert check.revert(repaired_history.id) == 1
+    restored = check.entry_detail(entry.id)
+    manual = next(row for row in restored.translations if row.source == SRC_MANUAL)
+    assert (manual.zh_tw, manual.checker, manual.review_status) == (
+        "使用",
+        "reviewer",
+        "reviewed",
+    )
+    assert restored.entry.source == SRC_MANUAL
     assert repair_cache == []
     check.close()
 
@@ -434,6 +498,111 @@ def test_replace_ai_translation_requires_exact_candidate_identity(
 
     assert result.status == "skipped_changed"
     assert db.get_entry(entry.id).zh_tw == "Minecraft"
+    db.close()
+
+
+@pytest.mark.parametrize(
+    ("field", "wrong_value"),
+    [
+        ("expected_version", "1.20.1"),
+        ("expected_kind", KIND_PATCHOULI),
+        ("expected_mod_id", "different-mod"),
+        ("expected_key", "different.key"),
+        ("expected_en_us", "different source"),
+    ],
+)
+def test_quality_repair_cas_requires_exact_entry_identity(db_path, field, wrong_value):
+    db = TranslationDB(db_path)
+    _ingest(db, "1.21.1", "foo", "item.quality.cas", SRC_AI, "Use", en="Use %s")
+    entry = next(
+        row for row in db.list_entries("1.21.1")[0] if row.key == "item.quality.cas"
+    )
+    identity = _replace_identity(entry)
+    identity[field] = wrong_value
+
+    result = db.replace_translation_quality_mismatch(
+        entry.id,
+        SRC_AI,
+        "Use",
+        "Use %s",
+        **identity,
+        expected_revision=_translation_revision(db, entry.id, SRC_AI),
+    )
+
+    assert result.status == "skipped_changed"
+    assert (
+        next(
+            row
+            for row in db.entry_detail(entry.id).translations
+            if row.source == SRC_AI
+        ).zh_tw
+        == "Use"
+    )
+    db.close()
+
+
+def test_quality_repair_cas_rejects_a_newer_source_revision(db_path):
+    db = TranslationDB(db_path)
+    _ingest(db, "1.21.1", "foo", "item.quality.revision", SRC_AI, "Use", en="Use %s")
+    entry = next(
+        row
+        for row in db.list_entries("1.21.1")[0]
+        if row.key == "item.quality.revision"
+    )
+    expected_revision = _translation_revision(db, entry.id, SRC_AI)
+    db._conn.execute(
+        "UPDATE translation SET checker='external-writer' "
+        "WHERE entry_id=? AND source=?",
+        (entry.id, SRC_AI),
+    )
+    db._conn.commit()
+
+    result = db.replace_translation_quality_mismatch(
+        entry.id,
+        SRC_AI,
+        "Use",
+        "Use %s",
+        **_replace_identity(entry),
+        expected_revision=expected_revision,
+    )
+
+    current = next(
+        row for row in db.entry_detail(entry.id).translations if row.source == SRC_AI
+    )
+    assert result.status == "skipped_changed"
+    assert current.zh_tw == "Use" and current.checker == "external-writer"
+    db.close()
+
+
+def test_quality_repair_cas_does_not_follow_translation_to_another_source(db_path):
+    db = TranslationDB(db_path)
+    _ingest(db, "1.21.1", "foo", "item.quality.source", SRC_AI, "Use", en="Use %s")
+    entry = next(
+        row for row in db.list_entries("1.21.1")[0] if row.key == "item.quality.source"
+    )
+    expected_revision = _translation_revision(db, entry.id, SRC_AI)
+    db._conn.execute(
+        "UPDATE translation SET source=? WHERE entry_id=? AND source=?",
+        (SRC_JAR_TW, entry.id, SRC_AI),
+    )
+    db._conn.commit()
+
+    result = db.replace_translation_quality_mismatch(
+        entry.id,
+        SRC_AI,
+        "Use",
+        "Use %s",
+        **_replace_identity(entry),
+        expected_revision=expected_revision,
+    )
+
+    current = next(
+        row
+        for row in db.entry_detail(entry.id).translations
+        if row.source == SRC_JAR_TW
+    )
+    assert result.status == "skipped_changed"
+    assert current.zh_tw == "Use"
     db.close()
 
 
