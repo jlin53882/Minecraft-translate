@@ -5,7 +5,10 @@ import traceback
 from enum import Enum, auto
 
 from app.services_impl.logging_service import validate_log_format
-from app.services_impl.moddb_source_service import normalize_priority_config
+from app.services_impl.moddb_source_service import (
+    normalize_priority_config,
+    priority_display_lines,
+)
 from app.ui.snack import show_snack
 from app.views.config.settings_schema import (
     Setting,
@@ -295,7 +298,11 @@ def load_config_into_view(view, config: dict):
         control = view.controls_map.get(setting.path)
         if control is None:
             continue
-        control.value = _to_control_value(setting, _initial_value(config, setting))
+        value = _initial_value(config, setting)
+        if setting.path == "translation_db.priority":
+            db_config = config.get("translation_db", {}) or {}
+            value = priority_display_lines(value, db_config.get("path"))
+        control.value = _to_control_value(setting, value)
     _apply_label_templates(view, config)
 
     view.models_column.controls.clear()

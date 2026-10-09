@@ -6,6 +6,7 @@ from app.services_impl.moddb_service import SRC_AI, SRC_JAR_CN, SRC_MANUAL
 from translation_tool.translation_db.schema import CUSTOM_SOURCE_BASE, SRC_CUSTOM
 from translation_tool.translation_db.settings import (
     DbSettings,
+    clean_source_names,
     normalize_db_path,
     read_custom_sources,
     serialize_priority_lines,
@@ -28,6 +29,17 @@ def normalize_priority_config(config: dict) -> None:
     path = DbSettings(path=normalize_db_path(db_config.get("path"))).resolved_path()
     catalog = SourceCatalog.from_registry(read_custom_sources(path))
     db_config["priority"] = serialize_priority_lines(db_config.get("priority"), catalog)
+
+
+def priority_display_lines(names, database_path: str | None = None) -> list[str]:
+    """Render stored source identity tokens as readable labels for the settings UI."""
+    path = DbSettings(path=normalize_db_path(database_path)).resolved_path()
+    catalog = SourceCatalog.from_registry(read_custom_sources(path))
+    display_lines = []
+    for name in clean_source_names(names):
+        code = catalog.resolve(name)
+        display_lines.append(catalog.label(code) if code is not None else name)
+    return display_lines
 
 
 def source_catalog_for(db) -> SourceCatalog:

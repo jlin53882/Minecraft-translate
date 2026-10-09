@@ -133,7 +133,7 @@ Patchouli 與 lang 走同一個流程，只是身分不同。FTB Quests / KubeJS
 | `cross_version` | `true` | 允許沿用其他版本、原文相同的譯文 |
 | `write_back` | `true` | 翻譯結果寫入資料庫 |
 | `sync_manual` | `true` | 手動儲存時同步其他版本（頁面上也可個別關閉） |
-| `priority` | 見上 | 來源優先序（每行一個顯示名稱或穩定代碼，例如 `builtin:subtitle`、`custom:100`）；舊名稱仍依資料庫登錄解析 |
+| `priority` | 見上 | 來源優先序（每行一個顯示名稱或穩定代碼，例如 `builtin:subtitle`、`custom:100`）；設定頁顯示來源名稱，`config.json` 會將已登錄來源保存為穩定代碼；舊名稱仍依資料庫登錄解析 |
 
 ### Schema 升級
 
