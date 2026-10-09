@@ -34,7 +34,6 @@ from app.tasks.operation_registry import (
 )
 from app.ui import design, kit
 from app.ui.design import C
-from app.ui.mc_text import mc_text_spans
 from app.ui.snack import show_snack
 from app.views.moddb.char_inspector import CharInspector, scrolling_list
 from app.views.moddb.entry_filters import (
@@ -53,6 +52,7 @@ from app.views.moddb.formatting import (
     whitespace_note,
 )
 from app.views.moddb.history_renderer import render_history
+from app.views.moddb.mc_text_preview import MinecraftTextPreview
 from app.views.moddb.review_scope_dialog import ReviewScopeController
 from app.views.moddb.source_filter import SourceFilter
 from app.views.moddb.suggestions import build_suggestions
@@ -168,7 +168,7 @@ class EntriesPanel(ft.Column):
         )
         self.source_chip = ft.Container()
         self.token_hint = ft.Text("", size=12, color=C.GOLD, visible=False)
-        self.mc_preview = ft.Text("", size=14, selectable=True, visible=False)
+        self.mc_preview = MinecraftTextPreview()
         self.meta_col = ft.Column(spacing=4)
         self.impact_text = ft.Text("", size=12.5, color=C.GOLD)
         self.impact_box = ft.Container(
@@ -255,7 +255,7 @@ class EntriesPanel(ft.Column):
                 self.token_hint,
                 self.chars.row,
                 self.chars.box,
-                self.mc_preview,
+                self.mc_preview.control,
                 self.meta_col,
                 self.impact_box,
                 self.saved_text,
@@ -693,10 +693,7 @@ class EntriesPanel(ft.Column):
             notes.append(space)
         self.token_hint.value = "；".join(notes)
         self.token_hint.visible = bool(notes)
-        has_codes = "§" in text
-        self.mc_preview.visible = has_codes
-        self.mc_preview.value = ""
-        self.mc_preview.spans = mc_text_spans(text, C.TEXT, 14) if has_codes else []
+        self.mc_preview.render(text)
         self.chars.render(entry.en_us if entry else "", text)
 
     def _update_format_hints_and_refresh(self) -> None:

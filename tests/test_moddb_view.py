@@ -711,9 +711,16 @@ def test_list_shows_newline_marker_and_editor_keeps_exact_text(special_entries):
 
 
 def test_editor_hints_for_missing_tokens_whitespace_and_color_codes(special_entries):
+    from app.ui import design
+
     panel = special_entries
     panel.select(next(r for r in panel.rows if r.key == "tip.a").id)
-    assert panel.mc_preview.visible is True and panel.mc_preview.spans  # § 顏色預覽
+    preview = panel.mc_preview
+    assert preview.control.visible is True and preview.text.spans
+    assert preview.text.visible is True and preview.hint.visible is False
+    assert preview.hint.value == ""
+    assert preview.surface.bgcolor == design.MC_PREVIEW_BG
+    assert panel.chars.box.visible is False  # 特殊字元對照開關與預覽分開
     assert "前後有空白" in panel.token_hint.value  # 結尾空白提醒
 
     panel.tw_field.value = "§a哈囉§r\n世界"  # 少了 %s
@@ -723,7 +730,19 @@ def test_editor_hints_for_missing_tokens_whitespace_and_color_codes(special_entr
 
     panel.tw_field.value = "哈囉 %s\n世界"
     panel._on_text_change()
-    assert panel.token_hint.visible is False and panel.mc_preview.visible is False
+    assert panel.token_hint.visible is False
+    assert preview.control.visible is True and preview.text.visible is True
+    assert "哈囉 %s\n世界" == "".join(span.text or "" for span in preview.text.spans)
+
+    panel.tw_field.value = "§e§r"
+    panel._on_text_change()
+    assert preview.text.visible is False and preview.hint.visible is True
+    assert preview.hint.value == "目前只有格式碼，沒有可顯示的文字。"
+
+    panel.tw_field.value = ""
+    panel._on_text_change()
+    assert preview.text.visible is False and preview.hint.visible is True
+    assert preview.hint.value == "輸入譯文後，預覽會顯示在這裡。"
 
 
 def test_saving_keeps_newlines_codes_and_surrounding_whitespace(special_entries):
