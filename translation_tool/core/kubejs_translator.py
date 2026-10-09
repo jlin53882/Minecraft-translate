@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-import os
+import hashlib
 import shutil
 import time
 from collections.abc import Callable
@@ -117,6 +117,10 @@ def clean_kubejs_from_raw(
     pending_root: str | None = None,
     final_root: str | None = None,
     previous_final_root: str | None = None,
+    manual_final_root: str | None = None,
+    previous_final_owned: dict[str, str] | None = None,
+    current_source_provenance: dict[str, Any] | None = None,
+    previous_source_provenance: dict[str, Any] | None = None,
 ) -> dict:
     """將 KubeJS 原始提取資料進行清理與三方合併，產出待翻譯與完成品目錄。
 
@@ -136,6 +140,10 @@ def clean_kubejs_from_raw(
         pending_root=pending_root,
         final_root=final_root,
         previous_final_root=previous_final_root,
+        manual_final_root=manual_final_root,
+        previous_final_owned=previous_final_owned,
+        current_source_provenance=current_source_provenance,
+        previous_source_provenance=previous_source_provenance,
         read_json_dict_fn=_read_json_dict_orjson,
         write_json_fn=_write_json_orjson,
         safe_convert_text_fn=safe_convert_text,
@@ -165,6 +173,9 @@ def step1_extract_and_clean(
     session=None,
     pre_extracted_summary: dict[str, Any] | None = None,
     previous_final_root: str | None = None,
+    manual_final_root: str | None = None,
+    previous_final_owned: dict[str, str] | None = None,
+    previous_source_provenance: dict[str, Any] | None = None,
     progress_base: float = 0.0,
     progress_span: float = 0.33,
 ) -> dict[str, Any]:
@@ -213,6 +224,12 @@ def step1_extract_and_clean(
         pending_root=str(Path(pending_dir).resolve()),
         final_root=str(Path(final_dir).resolve()),
         previous_final_root=previous_final_root,
+        manual_final_root=manual_final_root,
+        previous_final_owned=previous_final_owned,
+        current_source_provenance=(pre_extracted_summary or {}).get(
+            "source_provenance"
+        ),
+        previous_source_provenance=previous_source_provenance,
     )
 
     progress(session, min(progress_base + progress_span, 0.999))
@@ -363,7 +380,9 @@ def _aggregate_source_snapshots(
     raw_root = run_root / "raw" / "kubejs"
     raw_root.mkdir(parents=True, exist_ok=True)
     files: dict[str, dict[str, Any]] = {}
-    conflicts: list[str] = []
+    conflicts: list[dict[str, Any]] = []
+    source_provenance: dict[str, dict[str, dict[str, dict[str, str]]]] = {}
+    key_winners: dict[tuple[str, str], dict[str, Any]] = {}
     extracted_files = 0
     extracted_keys = 0
 
@@ -383,27 +402,123 @@ def _aggregate_source_snapshots(
             extracted_files += 1
             extracted_keys += len(incoming)
             current = files.setdefault(relative_key, {})
+            language = (
+                path.stem.lower()
+                if "lang" in {part.lower() for part in relative.parts}
+                and path.stem.lower() in {"en_us", "zh_cn", "zh_tw"}
+                else None
+            )
             for key, value in incoming.items():
                 if key not in current:
                     current[key] = value
+                    key_winners[(relative_key, str(key))] = source
+                    if language:
+                        value_hash = hashlib.sha256(
+                            orjson.dumps(value, option=orjson.OPT_SORT_KEYS)
+                        ).hexdigest()
+                        source_provenance.setdefault(relative_key, {}).setdefault(
+                            str(key), {}
+                        )[language] = {
+                            "identity": str(source["identity"]),
+                            "value_hash": value_hash,
+                        }
                 elif current[key] != value:
-                    conflicts.append(f"{relative_key}:{key}")
+                    winner = key_winners.get((relative_key, str(key)), {})
+                    conflicts.append(
+                        {
+                            "relative_path": relative_key,
+                            "key": str(key),
+                            "source_a": {
+                                "identity": str(winner.get("identity", "unknown")),
+                                "root": str(winner.get("root", "unknown")),
+                                "value_hash": hashlib.sha256(
+                                    orjson.dumps(
+                                        current[key], option=orjson.OPT_SORT_KEYS
+                                    )
+                                ).hexdigest(),
+                            },
+                            "source_b": {
+                                "identity": str(source.get("identity", "unknown")),
+                                "root": str(source.get("root", "unknown")),
+                                "value_hash": hashlib.sha256(
+                                    orjson.dumps(value, option=orjson.OPT_SORT_KEYS)
+                                ).hexdigest(),
+                            },
+                            "decision": "保留較早匯入來源的值",
+                        }
+                    )
 
     for relative, data in files.items():
         _write_json_orjson(raw_root / Path(relative), data)
 
-    for conflict in conflicts[:10]:
-        log_warning(f"[KubeJS] 增量來源衝突，保留較早匯入的值：{conflict}")
-    if len(conflicts) > 10:
-        log_warning(f"[KubeJS] 另有 {len(conflicts) - 10} 個來源衝突，摘要未逐項列出")
+    for conflict in conflicts:
+        log_warning(
+            "[KubeJS] 增量來源衝突，"
+            f"{conflict['source_a']['root']} "
+            f"(identity={conflict['source_a']['identity']}, "
+            f"value_sha256={conflict['source_a']['value_hash']}) 與 "
+            f"{conflict['source_b']['root']} "
+            f"(identity={conflict['source_b']['identity']}, "
+            f"value_sha256={conflict['source_b']['value_hash']}) "
+            f"在 {conflict['relative_path']} 的 {conflict['key']} 不同；"
+            f"決策：{conflict['decision']}"
+        )
+    if conflicts:
+        log_warning(
+            f"[KubeJS] 共發現 {len(conflicts)} 個來源衝突；已逐項列出來源與決策"
+        )
     return {
         "output_dir": str(raw_root),
         "extracted_files": extracted_files,
         "extracted_keys_total": extracted_keys,
         "errors_count": 0,
         "source_conflicts": len(conflicts),
-        "source_conflict_examples": conflicts[:10],
+        "source_conflict_examples": [
+            f"{conflict['relative_path']}:{conflict['key']}"
+            for conflict in conflicts[:10]
+        ],
+        "source_conflict_details": conflicts,
+        "source_provenance": source_provenance,
     }
+
+
+def _collect_source_provenance(
+    run_root: Path, sources: list[dict[str, Any]]
+) -> dict[str, dict[str, dict[str, dict[str, str]]]]:
+    """Rebuild the winning source identity and value hash for each lang key."""
+    provenance: dict[str, dict[str, dict[str, dict[str, str]]]] = {}
+    seen: set[tuple[str, str, str]] = set()
+    for source in sorted(sources, key=lambda item: int(item.get("import_order", 0))):
+        source_raw = run_root / Path(source["snapshot"])
+        for path in sorted(source_raw.rglob("*.json")):
+            relative = path.relative_to(source_raw)
+            if "lang" not in {part.lower() for part in relative.parts}:
+                continue
+            language = path.stem.lower()
+            if language not in {"en_us", "zh_cn", "zh_tw"}:
+                continue
+            try:
+                data = orjson.loads(path.read_bytes())
+            except (OSError, orjson.JSONDecodeError) as exc:
+                raise ValueError(f"無法讀取 KubeJS 語系快照 {path}: {exc}") from exc
+            if not isinstance(data, dict):
+                raise TypeError(f"KubeJS 語系快照不是 JSON object：{path}")
+            relative_key = relative.as_posix()
+            for key, value in data.items():
+                identity = (relative_key, str(key), language)
+                if identity in seen:
+                    continue
+                seen.add(identity)
+                value_hash = hashlib.sha256(
+                    orjson.dumps(value, option=orjson.OPT_SORT_KEYS)
+                ).hexdigest()
+                provenance.setdefault(relative_key, {}).setdefault(str(key), {})[
+                    language
+                ] = {
+                    "identity": str(source["identity"]),
+                    "value_hash": value_hash,
+                }
+    return provenance
 
 
 def _sync_output_mirrors(
@@ -411,8 +526,9 @@ def _sync_output_mirrors(
     run_root: Path,
     manifest: dict[str, Any],
     categories: tuple[str, ...],
-) -> list[str]:
+) -> list[dict[str, str]]:
     """Update familiar output folders only where the previous snapshot owns files."""
+    layout = create_run_layout(run_root, manifest)
     targets = {
         "raw": (run_root / "raw" / "kubejs", output_root / "kubejs" / "raw" / "kubejs"),
         "pending": (
@@ -420,31 +536,105 @@ def _sync_output_mirrors(
             output_root / "kubejs" / "待翻譯" / "kubejs",
         ),
         "translated": (
-            run_root / "LM翻譯後" / "kubejs",
+            layout["translated"],
             output_root / "kubejs" / "LM翻譯後" / "kubejs",
         ),
         "final": (
-            run_root / "完成" / "kubejs",
+            layout["final"],
             output_root / "kubejs" / "完成" / "kubejs",
         ),
     }
     mirrors = manifest.setdefault("mirrors", {})
-    conflicts: list[str] = []
+    conflicts: list[dict[str, str]] = []
     for category in categories:
         source_root, target_root = targets[category]
         old_owned = mirrors.get(category, {})
-        owned, category_conflicts, removed = sync_managed_tree(
-            source_root, target_root, old_owned
+        if not isinstance(old_owned, dict):
+            raise TypeError(f"KubeJS 狀態檔 {category} mirror ownership 格式無效")
+        category_details: list[dict[str, str]] = []
+        owned, _category_conflicts, removed = sync_managed_tree(
+            source_root,
+            target_root,
+            old_owned,
+            conflict_details=category_details,
         )
         mirrors[category] = owned
-        conflicts.extend(f"{category}/{path}" for path in category_conflicts)
+        conflicts.extend(
+            {
+                "category": category,
+                "path": f"{category}/{detail['path']}",
+                "conflict_type": detail["kind"],
+                "preserved": "true",
+                "mirror_path": str(target_root / detail["path"]),
+                "snapshot_path": str(source_root / detail["path"]),
+                "snapshot_exists": str((source_root / detail["path"]).exists()).lower(),
+                "action": "比較公開檔與私有快照；確認後手動移走衝突檔或重新執行同步",
+            }
+            for detail in category_details
+        )
         if removed:
             log_info(
                 f"[KubeJS] 已清除 {category} 中 {removed} 個本流程管理且已過期的檔案"
             )
-    for relative in conflicts[:20]:
-        log_warning(f"[KubeJS] 保留未受管理或已修改的輸出檔：{relative}")
+    for conflict in conflicts:
+        log_warning(
+            f"[KubeJS] 公開 {conflict['category']} 鏡像衝突"
+            f"（{conflict['conflict_type']}）：{conflict['mirror_path']}；"
+            f"已保留公開檔={conflict['preserved']}；"
+            f"私有快照：{conflict['snapshot_path']} "
+            f"（存在={conflict['snapshot_exists']}）；{conflict['action']}"
+        )
     return conflicts
+
+
+def _translation_output_gaps(pending_root: Path, translated_root: Path) -> list[str]:
+    """Return pending keys missing from their expected Step 2 result files."""
+    missing: list[str] = []
+    for pending_path in sorted(pending_root.rglob("*.json")):
+        try:
+            pending_data = orjson.loads(pending_path.read_bytes())
+        except (OSError, orjson.JSONDecodeError) as exc:
+            raise ValueError(f"待翻譯 JSON 無法讀取：{pending_path}: {exc}") from exc
+        if not isinstance(pending_data, dict):
+            raise TypeError(f"待翻譯 JSON 不是 object：{pending_path}")
+        relative = pending_path.relative_to(pending_root)
+        if relative.parent.name.lower() == "lang" and relative.stem.lower() == "en_us":
+            relative = relative.with_name("zh_tw.json")
+        translated_path = translated_root / relative
+        try:
+            translated_data = orjson.loads(translated_path.read_bytes())
+        except (OSError, orjson.JSONDecodeError):
+            missing.append(f"{relative.as_posix()} (輸出檔不存在或無法讀取)")
+            continue
+        if not isinstance(translated_data, dict):
+            missing.append(f"{relative.as_posix()} (輸出不是 JSON object)")
+            continue
+        absent = sorted(str(key) for key in pending_data if key not in translated_data)
+        if absent:
+            missing.append(
+                f"{relative.as_posix()} (缺少 keys: {', '.join(absent[:10])})"
+            )
+    return missing
+
+
+def _validate_final_snapshot(final_root: Path) -> None:
+    """Reject an incomplete or unreadable injection candidate before commit."""
+    if not final_root.is_dir():
+        raise RuntimeError(f"KubeJS 完成品快照不存在：{final_root}")
+    for path in sorted(final_root.rglob("*")):
+        if not path.is_file():
+            continue
+        try:
+            content = path.read_bytes()
+        except OSError as exc:
+            raise RuntimeError(f"KubeJS 完成品快照無法讀取：{path}: {exc}") from exc
+        if path.suffix.lower() == ".json":
+            try:
+                value = orjson.loads(content)
+            except orjson.JSONDecodeError as exc:
+                raise RuntimeError(f"KubeJS 完成品 JSON 無效：{path}: {exc}") from exc
+            if not isinstance(value, dict):
+                raise RuntimeError(f"KubeJS 完成品 JSON 不是 object：{path}")
 
 
 def run_kubejs_pipeline(
@@ -488,6 +678,7 @@ def run_kubejs_pipeline(
     start_time = time.perf_counter()
     result: dict[str, Any] = {
         "source_mode": mode,
+        "mirror_conflicts": [],
         "paths": {
             "input": str(base),
             "kubejs_source": str(source_root),
@@ -506,6 +697,17 @@ def run_kubejs_pipeline(
             identity, storage_id = source_identity(source_root)
             prior_run = run_root_for(state_root, current) if current else None
             prior_sources = current.get("sources", []) if current else []
+            prior_source_provenance = (
+                _collect_source_provenance(prior_run, prior_sources)
+                if prior_run is not None
+                else {}
+            )
+            prior_mirrors = current.get("mirrors", {}) if current else {}
+            if not isinstance(prior_mirrors, dict):
+                raise ValueError("KubeJS 狀態檔 mirrors 格式無效")
+            prior_final_owned = prior_mirrors.get("final", {})
+            if not isinstance(prior_final_owned, dict):
+                raise ValueError("KubeJS 狀態檔 final ownership 格式無效")
             prior_by_identity = {
                 str(source.get("identity")): source
                 for source in prior_sources
@@ -596,7 +798,7 @@ def run_kubejs_pipeline(
                     staging_root, stage_sources
                 )
                 previous_final = (
-                    str(canonical_paths["final"])
+                    str(create_run_layout(prior_run, current)["final"])
                     if mode == "incremental" and prior_run is not None
                     else None
                 )
@@ -608,9 +810,13 @@ def run_kubejs_pipeline(
                     session=session,
                     pre_extracted_summary=aggregate_summary,
                     previous_final_root=previous_final,
+                    manual_final_root=str(canonical_paths["final"]),
+                    previous_final_owned=prior_final_owned,
+                    previous_source_provenance=prior_source_provenance,
                     progress_base=0.23,
                     progress_span=0.10,
                 )
+                aggregate_summary.pop("source_provenance", None)
                 result["step1"]["source_mode"] = mode
                 result["step1"]["sources"] = [
                     {
@@ -622,6 +828,9 @@ def run_kubejs_pipeline(
                     for source in stage_sources
                 ]
                 result["step1"]["extractions"] = extraction_results
+                result["step1"]["source_conflict_details"] = aggregate_summary.get(
+                    "source_conflict_details", []
+                )
 
                 # Commit the complete Step 1 snapshot before updating public mirrors.
                 runs_root = state_root / "runs"
@@ -641,14 +850,17 @@ def run_kubejs_pipeline(
                     "mirrors": dict(current.get("mirrors", {})) if current else {},
                     "updated_at": time.time(),
                 }
-                _sync_output_mirrors(
-                    out_root,
-                    committed_root,
-                    current,
-                    ("raw", "pending", "translated", "final"),
+                write_current_manifest(state_root, current)
+                result["mirror_conflicts"].extend(
+                    _sync_output_mirrors(
+                        out_root,
+                        committed_root,
+                        current,
+                        ("raw", "pending", "translated", "final"),
+                    )
                 )
                 write_current_manifest(state_root, current)
-                paths = create_run_layout(committed_root)
+                paths = create_run_layout(committed_root, current)
                 result["paths"]["snapshot"] = str(committed_root)
             except BaseException:
                 if staging_root.exists():
@@ -658,7 +870,7 @@ def run_kubejs_pipeline(
             if current is None:
                 raise ValueError("目前沒有 KubeJS 快照；請先執行 Step 1 抽取")
             committed_root = run_root_for(state_root, current)
-            paths = create_run_layout(committed_root)
+            paths = create_run_layout(committed_root, current)
             stage_sources = list(current.get("sources", []))
             result["step1"] = {"skipped": True, "reason": "step_extract disabled"}
             result["paths"]["snapshot"] = str(committed_root)
@@ -694,30 +906,65 @@ def run_kubejs_pipeline(
             raise_if_cancelled()
             if translator_fn is None:
                 translator_fn = step2_translate_lm
-            # A new LM pass only reads this run's pending files and writes into
-            # an empty result folder, so a previous translation cannot leak in.
-            shutil.rmtree(paths["translated"], ignore_errors=True)
-            paths["translated"].mkdir(parents=True, exist_ok=True)
-            result["step2"] = translator_fn(
-                pending_dir=str(paths["pending"]),
-                output_dir=str(paths["translated"]),
-                session=session,
-                progress_base=0.33,
-                progress_span=0.33,
-                dry_run=bool(dry_run),
-                write_new_cache=bool(write_new_cache and not dry_run),
+            translated_stage_container = (
+                committed_root / f".translated-stage-{new_run_id()}"
             )
-            if not isinstance(result["step2"], dict):
-                result["step2"] = {"result": result["step2"]}
-            translation_ran = not dry_run and not result["step2"].get("skipped")
-            if is_cancelled():
-                translation_ran = False
-            if translation_ran:
-                translated_json = sorted(paths["translated"].rglob("*.json"))
-                current["stage"] = "translated"
-                current["updated_at"] = time.time()
-                _sync_output_mirrors(out_root, committed_root, current, ("translated",))
-                write_current_manifest(state_root, current)
+            translated_stage = translated_stage_container / "kubejs"
+            translated_stage.mkdir(parents=True, exist_ok=True)
+            try:
+                result["step2"] = translator_fn(
+                    pending_dir=str(paths["pending"]),
+                    output_dir=str(translated_stage),
+                    session=session,
+                    progress_base=0.33,
+                    progress_span=0.33,
+                    dry_run=bool(dry_run),
+                    write_new_cache=bool(write_new_cache and not dry_run),
+                )
+                if not isinstance(result["step2"], dict):
+                    result["step2"] = {"result": result["step2"]}
+                translation_ran = not dry_run and not result["step2"].get("skipped")
+                if is_cancelled():
+                    translation_ran = False
+                    result["step2"].update({"skipped": True, "reason": "cancelled"})
+                if translation_ran:
+                    gaps = _translation_output_gaps(paths["pending"], translated_stage)
+                    if gaps:
+                        result["step2"]["incomplete_outputs"] = gaps
+                        raise RuntimeError(
+                            "KubeJS Step 2 輸出不完整，未提交翻譯快照："
+                            + "; ".join(gaps[:10])
+                        )
+                    translated_relative = (
+                        Path("translated-versions") / new_run_id() / "kubejs"
+                    )
+                    translated_committed = committed_root / translated_relative
+                    used_copy_fallback = commit_staging_run(
+                        translated_stage, translated_committed
+                    )
+                    if used_copy_fallback:
+                        log_warning(
+                            "[KubeJS] Windows 暫時封鎖翻譯快照重新命名；已安全複製完成快照"
+                        )
+                    current["translated_snapshot"] = translated_relative.as_posix()
+                    current["stage"] = "translated"
+                    current["updated_at"] = time.time()
+                    paths = create_run_layout(committed_root, current)
+                    translated_json = sorted(paths["translated"].rglob("*.json"))
+                    write_current_manifest(state_root, current)
+                    result["mirror_conflicts"].extend(
+                        _sync_output_mirrors(
+                            out_root, committed_root, current, ("translated",)
+                        )
+                    )
+                    write_current_manifest(state_root, current)
+            except BaseException:
+                if translated_stage_container.exists():
+                    shutil.rmtree(translated_stage_container, ignore_errors=True)
+                raise
+            finally:
+                if translated_stage_container.exists():
+                    shutil.rmtree(translated_stage_container, ignore_errors=True)
             progress(session, 0.66)
 
         if not step_translate and pending_count > 0:
@@ -733,8 +980,8 @@ def run_kubejs_pipeline(
         elif not translated_json:
             result["step3"] = {"skipped": True, "reason": "translation output is empty"}
         else:
-            injected_stage = committed_root / f".final-inject-{new_run_id()}"
-            copy_snapshot_tree(paths["final"], injected_stage)
+            injected_stage_container = committed_root / f".final-inject-{new_run_id()}"
+            injected_stage = injected_stage_container / "kubejs"
             source_roots = {
                 str(source["storage_id"]): str(source["root"])
                 for source in stage_sources
@@ -746,6 +993,7 @@ def run_kubejs_pipeline(
                 )
             ]
             try:
+                copy_snapshot_tree(paths["final"], injected_stage)
                 result["step3"] = step3_inject(
                     pack_or_kubejs_dir=str(source_root),
                     src_dir=str(paths["translated"]),
@@ -757,15 +1005,47 @@ def run_kubejs_pipeline(
                     progress_base=0.66,
                     progress_span=0.33,
                 )
-                shutil.rmtree(paths["final"], ignore_errors=True)
-                os.replace(injected_stage, paths["final"])
-                current["stage"] = "injected"
-                current["updated_at"] = time.time()
-                _sync_output_mirrors(out_root, committed_root, current, ("final",))
-                write_current_manifest(state_root, current)
+                if is_cancelled():
+                    result["step3"] = {"skipped": True, "reason": "cancelled"}
+                else:
+                    _validate_final_snapshot(injected_stage)
+                    final_relative = Path("final-versions") / new_run_id() / "kubejs"
+                    final_committed = committed_root / final_relative
+                    used_copy_fallback = commit_staging_run(
+                        injected_stage, final_committed
+                    )
+                    if used_copy_fallback:
+                        log_warning(
+                            "[KubeJS] Windows 暫時封鎖完成品快照重新命名；已安全複製完成快照"
+                        )
+                    current["final_snapshot"] = final_relative.as_posix()
+                    current["stage"] = "injected"
+                    current["updated_at"] = time.time()
+                    paths = create_run_layout(committed_root, current)
+                    write_current_manifest(state_root, current)
+                    result["mirror_conflicts"].extend(
+                        _sync_output_mirrors(
+                            out_root, committed_root, current, ("final",)
+                        )
+                    )
+                    write_current_manifest(state_root, current)
             except BaseException:
-                shutil.rmtree(injected_stage, ignore_errors=True)
+                if injected_stage_container.exists():
+                    shutil.rmtree(injected_stage_container, ignore_errors=True)
                 raise
+            finally:
+                if injected_stage_container.exists():
+                    shutil.rmtree(injected_stage_container, ignore_errors=True)
+
+        result["mirror_conflict_count"] = len(result["mirror_conflicts"])
+        result["output_sync_status"] = (
+            "conflicts" if result["mirror_conflicts"] else "synced"
+        )
+        if result["mirror_conflicts"]:
+            log_warning(
+                f"[KubeJS] 最新私有快照已完成；公開輸出有 {len(result['mirror_conflicts'])} 個鏡像衝突。"
+                "請依上方路徑比較公開檔與快照，再決定是否移走衝突檔後重新執行。"
+            )
 
     result["duration"] = get_formatted_duration(start_time)
     if is_cancelled():

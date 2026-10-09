@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 
 import orjson
@@ -26,6 +27,9 @@ def test_is_filled_text_rejects_empty_and_lang_references() -> None:
     assert not is_filled_text_impl("{some.key}")
     assert not is_filled_text_impl(None)
     assert is_filled_text_impl("Hello world")
+    assert not is_filled_text_impl(123)
+    assert not is_filled_text_impl([])
+    assert not is_filled_text_impl({"value": "text"})
 
 
 def test_three_way_merge_uses_tw_then_converted_cn_then_english() -> None:
@@ -41,6 +45,20 @@ def test_three_way_merge_uses_tw_then_converted_cn_then_english() -> None:
     assert result == {"tw": "TW", "cn": "converted:CN"}
 
 
+def test_three_way_merge_falls_back_to_english_and_skips_empty_values() -> None:
+    result = deep_merge_3way_flat_impl(
+        {"empty_tw": "", "ref_tw": "{lang.key}"},
+        {"empty_tw": "  ", "ref_cn": "{lang.ref}"},
+        {"empty_tw": "English", "ref_tw": "English", "ref_cn": "English"},
+        safe_convert_text_fn=_convert,
+    )
+    assert result == {
+        "empty_tw": "English",
+        "ref_tw": "English",
+        "ref_cn": "English",
+    }
+
+
 def test_prune_uses_exact_key_and_keeps_same_as_english() -> None:
     english = {"same": "Energy", "translated": "Book", "other": "Energy"}
     available = {"same": "Energy", "translated": "書"}
@@ -52,6 +70,20 @@ def test_prune_uses_exact_key_and_keeps_same_as_english() -> None:
 
 def test_shielded_convert_calls_converter_when_no_special_tokens() -> None:
     assert _shielded_convert("plain", _convert) == "plain"
+    assert _shielded_convert("", _convert) == ""
+    assert _shielded_convert("  \t", _convert) == "  \t"
+
+
+def test_shielded_convert_restores_rich_text_tokens() -> None:
+    def convert(text: str) -> str:
+        return text.replace("简体", "繁體").replace("物品", "道具")
+
+    source = "§6简体物品 {0}"
+    assert _shielded_convert(source, convert) == "§6繁體道具 {0}"
+    assert (
+        _shielded_convert("简体 https://example.com", convert)
+        == "简体 https://example.com"
+    )
 
 
 def test_clean_merges_existing_effective_tw_and_removes_stale_pending(
@@ -83,6 +115,26 @@ def test_clean_merges_existing_effective_tw_and_removes_stale_pending(
         pending_root=str(pending),
         final_root=str(current_final),
         previous_final_root=str(tmp_path / "old-final"),
+        current_source_provenance={
+            "assets/demo/lang/en_us.json": {
+                "b": {
+                    "en_us": {
+                        "identity": "same-source",
+                        "value_hash": hashlib.sha256(orjson.dumps("Book")).hexdigest(),
+                    }
+                }
+            }
+        },
+        previous_source_provenance={
+            "assets/demo/lang/en_us.json": {
+                "b": {
+                    "en_us": {
+                        "identity": "same-source",
+                        "value_hash": hashlib.sha256(orjson.dumps("Book")).hexdigest(),
+                    }
+                }
+            }
+        },
         read_json_dict_fn=read_json,
         write_json_fn=write_json,
         safe_convert_text_fn=_convert,
@@ -96,6 +148,41 @@ def test_clean_merges_existing_effective_tw_and_removes_stale_pending(
         "a": "apple-tw",
         "b": "book-tw",
     }
+
+
+@pytest.mark.parametrize(
+    ("current_tw", "expected_final", "expected_pending"),
+    [
+        ({"k": "香蕉"}, {"k": "香蕉"}, {}),
+        ({}, {}, {"k": "Banana"}),
+    ],
+)
+def test_stale_final_does_not_override_changed_source(
+    clean_args, current_tw, expected_final, expected_pending
+) -> None:
+    raw, pending, final, kwargs = clean_args
+    lang = raw / "assets/demo/lang"
+    lang.mkdir(parents=True)
+    (lang / "en_us.json").write_bytes(orjson.dumps({"k": "Banana"}))
+    if current_tw:
+        (lang / "zh_tw.json").write_bytes(orjson.dumps(current_tw))
+    previous = raw.parent / "previous-final" / "assets/demo/lang"
+    previous.mkdir(parents=True)
+    (previous / "zh_tw.json").write_bytes(orjson.dumps({"k": "蘋果"}))
+
+    clean_kubejs_from_raw_impl(
+        **kwargs,
+        previous_final_root=str(previous.parents[2]),
+    )
+
+    final_path = final / "assets/demo/lang/zh_tw.json"
+    pending_path = pending / "assets/demo/lang/en_us.json"
+    actual_final = orjson.loads(final_path.read_bytes()) if final_path.exists() else {}
+    actual_pending = (
+        orjson.loads(pending_path.read_bytes()) if pending_path.exists() else {}
+    )
+    assert actual_final == expected_final
+    assert actual_pending == expected_pending
 
 
 @pytest.fixture

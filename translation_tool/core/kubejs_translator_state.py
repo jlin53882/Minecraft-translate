@@ -9,6 +9,7 @@ import re
 import shutil
 import tempfile
 import threading
+import time
 import uuid
 from pathlib import Path
 from typing import Any
@@ -35,14 +36,39 @@ def new_run_id() -> str:
     return uuid.uuid4().hex
 
 
-def create_run_layout(run_root: Path) -> dict[str, Path]:
+def _manifest_snapshot_path(
+    run_root: Path, manifest: dict[str, Any] | None, key: str, default: str
+) -> Path:
+    relative = manifest.get(key, default) if manifest else default
+    if not isinstance(relative, str) or not relative:
+        raise ValueError(f"KubeJS 狀態檔的 {key} 無效")
+    candidate = Path(relative)
+    if candidate.is_absolute():
+        raise ValueError(f"KubeJS 狀態檔的 {key} 必須是相對路徑")
+    root = run_root.resolve()
+    resolved = (root / candidate).resolve()
+    try:
+        resolved.relative_to(root)
+    except ValueError as exc:
+        raise ValueError(f"KubeJS 狀態檔的 {key} 路徑越界：{relative}") from exc
+    return resolved
+
+
+def create_run_layout(
+    run_root: Path, manifest: dict[str, Any] | None = None
+) -> dict[str, Path]:
+    run_root = run_root.resolve()
     paths = {
         "run": run_root,
         "sources": run_root / "sources",
         "raw": run_root / "raw" / "kubejs",
         "pending": run_root / "待翻譯" / "kubejs",
-        "translated": run_root / "LM翻譯後" / "kubejs",
-        "final": run_root / "完成" / "kubejs",
+        "translated": _manifest_snapshot_path(
+            run_root, manifest, "translated_snapshot", "LM翻譯後/kubejs"
+        ),
+        "final": _manifest_snapshot_path(
+            run_root, manifest, "final_snapshot", "完成/kubejs"
+        ),
     }
     for path in paths.values():
         path.mkdir(parents=True, exist_ok=True)
@@ -118,7 +144,16 @@ def atomic_write_bytes(path: Path, data: bytes) -> None:
             handle.write(data)
             handle.flush()
             os.fsync(handle.fileno())
-        os.replace(temporary, path)
+        for attempt in range(4):
+            try:
+                os.replace(temporary, path)
+                break
+            except PermissionError:
+                if attempt == 3:
+                    raise
+                # Windows scanners/editors can hold a just-written manifest for
+                # a short interval. Retry briefly; never remove the old target.
+                time.sleep(0.025 * (attempt + 1))
     except BaseException:
         temporary.unlink(missing_ok=True)
         raise
@@ -153,6 +188,13 @@ def load_current_manifest(state_root: Path) -> dict[str, Any] | None:
         ) from exc
     if not isinstance(manifest, dict) or manifest.get("version") != STATE_VERSION:
         raise ValueError(f"不支援的 KubeJS 狀態檔版本：{manifest_path}")
+    mirrors = manifest.get("mirrors", {})
+    if not isinstance(mirrors, dict):
+        raise TypeError(f"KubeJS 狀態檔 mirrors 格式無效：{manifest_path}")
+    for category, files in mirrors.items():
+        if not isinstance(category, str) or not isinstance(files, dict):
+            raise TypeError(f"KubeJS 狀態檔 mirror ownership 格式無效：{manifest_path}")
+        _validate_owned_files(files, manifest_path)
     run_id = manifest.get("run_id")
     if not isinstance(run_id, str) or not _RUN_ID_RE.fullmatch(run_id):
         raise ValueError(f"KubeJS 狀態檔的 run_id 無效：{manifest_path}")
@@ -175,11 +217,36 @@ def load_current_manifest(state_root: Path) -> dict[str, Any] | None:
             raise ValueError(f"KubeJS 狀態檔 source 路徑越界：{snapshot}") from exc
         if not source_root.is_dir():
             raise ValueError(f"KubeJS 狀態檔 source snapshot 不存在：{source_root}")
+    for key, default in (
+        ("translated_snapshot", "LM翻譯後/kubejs"),
+        ("final_snapshot", "完成/kubejs"),
+    ):
+        snapshot = _manifest_snapshot_path(run_root, manifest, key, default)
+        if key in manifest and not snapshot.is_dir():
+            raise ValueError(f"KubeJS 狀態檔 {key} 不存在：{snapshot}")
     return manifest
 
 
 def run_root_for(state_root: Path, manifest: dict[str, Any]) -> Path:
     return state_root / "runs" / manifest["run_id"]
+
+
+def _validate_owned_files(files: dict[str, Any], path: Path) -> dict[str, str]:
+    output: dict[str, str] = {}
+    for relative, digest in files.items():
+        relative_path = Path(relative) if isinstance(relative, str) else None
+        if (
+            relative_path is None
+            or relative_path.is_absolute()
+            or ".." in relative_path.parts
+            or not isinstance(digest, str)
+            or not re.fullmatch(r"[0-9a-fA-F]{64}", digest)
+        ):
+            raise ValueError(
+                f"KubeJS ownership manifest 含無效路徑或雜湊，已保留原檔：{path}"
+            )
+        output[relative] = digest.lower()
+    return output
 
 
 def load_owned_files(path: Path) -> dict[str, str]:
@@ -188,22 +255,22 @@ def load_owned_files(path: Path) -> dict[str, str]:
         return {}
     try:
         value = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return {}
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(
+            f"KubeJS ownership manifest 無法讀取，已保留原檔：{path}: {exc}"
+        ) from exc
     files = value.get("files") if isinstance(value, dict) else None
     if not isinstance(files, dict):
-        return {}
-    return {
-        str(relative): str(digest)
-        for relative, digest in files.items()
-        if isinstance(relative, str) and isinstance(digest, str) and len(digest) == 64
-    }
+        raise TypeError(f"KubeJS ownership manifest 格式無效，已保留原檔：{path}")
+    return _validate_owned_files(files, path)
 
 
 def sync_managed_tree(
     source_root: Path,
     destination_root: Path,
     previous_owned: dict[str, str],
+    *,
+    conflict_details: list[dict[str, str]] | None = None,
 ) -> tuple[dict[str, str], list[str], int]:
     """Mirror a generated tree without replacing or deleting unowned/edited files.
 
@@ -230,9 +297,15 @@ def sync_managed_tree(
     conflicts: list[str] = []
     now_owned: dict[str, str] = {}
 
+    def conflict(relative: str, kind: str) -> None:
+        conflicts.append(relative)
+        if conflict_details is not None:
+            conflict_details.append({"path": relative, "kind": kind})
+
     for relative, source in new_files.items():
         target = safe_paths.get(relative)
         if target is None:
+            conflict(relative, "unsafe_relative_path")
             continue
         expected_hash = new_hashes[relative]
         old_hash = previous_owned.get(relative)
@@ -240,18 +313,51 @@ def sync_managed_tree(
             try:
                 actual_hash = sha256_file(target)
             except OSError:
-                conflicts.append(relative)
+                conflict(relative, "unreadable_existing_file")
+                if old_hash is not None:
+                    now_owned[relative] = old_hash
                 continue
             if actual_hash == expected_hash:
                 now_owned[relative] = expected_hash
                 continue
+            if target.suffix.lower() == ".json":
+                try:
+                    semantically_equal = json.loads(
+                        target.read_text(encoding="utf-8")
+                    ) == json.loads(source.read_text(encoding="utf-8"))
+                except (OSError, UnicodeDecodeError):
+                    conflict(relative, "semantic_compare_failed")
+                    if old_hash is not None:
+                        now_owned[relative] = old_hash
+                    continue
+                except json.JSONDecodeError:
+                    semantically_equal = False
+                if semantically_equal:
+                    try:
+                        atomic_copy_file(source, target)
+                    except OSError:
+                        conflict(relative, "write_failed")
+                        if old_hash is not None:
+                            now_owned[relative] = old_hash
+                        continue
+                    now_owned[relative] = expected_hash
+                    continue
             if old_hash is None or actual_hash != old_hash:
-                conflicts.append(relative)
+                conflict(
+                    relative,
+                    "unowned_file_collision"
+                    if old_hash is None
+                    else "modified_owned_file",
+                )
+                if old_hash is not None:
+                    now_owned[relative] = old_hash
                 continue
         try:
             atomic_copy_file(source, target)
         except OSError:
-            conflicts.append(relative)
+            conflict(relative, "write_failed")
+            if old_hash is not None:
+                now_owned[relative] = old_hash
             continue
         now_owned[relative] = expected_hash
 
@@ -267,9 +373,21 @@ def sync_managed_tree(
                 target.unlink()
                 removed += 1
             else:
-                conflicts.append(relative)
+                conflict(relative, "modified_stale_owned_file")
+                now_owned[relative] = old_hash
         except OSError:
-            conflicts.append(relative)
+            conflict(relative, "stale_file_cleanup_failed")
+            now_owned[relative] = old_hash
+
+    # Legacy output may predate the ownership manifest. Preserve it, but surface
+    # it because the public folder can no longer be described as a full mirror.
+    if destination_root.is_dir():
+        for path in sorted(destination_root.rglob("*")):
+            if not path.is_file():
+                continue
+            relative = path.relative_to(destination_root).as_posix()
+            if relative not in new_files and relative not in previous_owned:
+                conflict(relative, "legacy_unowned_stale_file")
 
     return now_owned, conflicts, removed
 

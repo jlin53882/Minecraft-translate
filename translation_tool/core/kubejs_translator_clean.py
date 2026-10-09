@@ -10,6 +10,7 @@ import re
 import shutil
 import tempfile
 from collections.abc import Callable
+from hashlib import sha256
 from pathlib import Path
 from typing import Any
 
@@ -105,6 +106,10 @@ def clean_kubejs_from_raw_impl(
     pending_root: str | None = None,
     final_root: str | None = None,
     previous_final_root: str | None = None,
+    manual_final_root: str | None = None,
+    previous_final_owned: dict[str, str] | None = None,
+    current_source_provenance: dict[str, Any] | None = None,
+    previous_source_provenance: dict[str, Any] | None = None,
     read_json_dict_fn: Callable[[Path], dict],
     write_json_fn: Callable[[Path, dict], None],
     safe_convert_text_fn: Callable[[str], str],
@@ -182,33 +187,151 @@ def clean_kubejs_from_raw_impl(
     previous_root = (
         Path(previous_final_root).resolve() if previous_final_root else final_root_p
     )
+    manual_root = Path(manual_final_root).resolve() if manual_final_root else None
+    previous_final_owned = previous_final_owned or {}
+    current_source_provenance = current_source_provenance or {}
+    previous_source_provenance = previous_source_provenance or {}
     pending_lang_written = 0
     merged_lang_written = 0
     previous_final_keys_preserved = 0
     final_outputs: dict[str, dict[str, Any]] = {}
+    provenance_conflicts: list[dict[str, str]] = []
+
+    def key_evidence(
+        provenance: dict[str, Any], relative_group: Path, key: str
+    ) -> dict[str, Any]:
+        evidence: dict[str, Any] = {}
+        for language in ("en_us", "zh_cn", "zh_tw"):
+            relative = (relative_group / f"{language}.json").as_posix()
+            file_data = provenance.get(relative, {})
+            key_data = file_data.get(key, {}) if isinstance(file_data, dict) else {}
+            if isinstance(key_data, dict) and language in key_data:
+                evidence[language] = key_data[language]
+        return evidence
+
+    def language_source_changed(
+        current_evidence: dict[str, Any],
+        previous_evidence: dict[str, Any],
+        language: str,
+    ) -> bool:
+        return current_evidence.get(language) != previous_evidence.get(language)
+
+    def read_final(path: Path) -> dict[str, Any]:
+        return read_json_dict_fn(path)
 
     for group_dir, files_map in groups.items():
         en = read_json_dict_fn(files_map.get("en_us"))
         cn = read_json_dict_fn(files_map.get("zh_cn"))
         tw = read_json_dict_fn(files_map.get("zh_tw"))
         relative_group = group_dir.relative_to(raw_root)
-        old_final = read_json_dict_fn(previous_root / relative_group / "zh_tw.json")
+        previous_output = read_final(previous_root / relative_group / "zh_tw.json")
         current_keys = set(en) | set(cn) | set(tw)
-        old_final = {
-            key: value for key, value in old_final.items() if key in current_keys
-        }
+        old_final: dict[str, Any] = {}
+        manual_final: dict[str, Any] = {}
+        relative_final = (relative_group / "zh_tw.json").as_posix()
+        manual_path = manual_root / Path(relative_final) if manual_root else None
+        recorded_hash = previous_final_owned.get(relative_final)
+        manual_file_edited = False
+        if manual_path is not None and recorded_hash and manual_path.is_file():
+            try:
+                manual_file_edited = (
+                    sha256(manual_path.read_bytes()).hexdigest() != recorded_hash
+                )
+            except OSError:
+                provenance_conflicts.append(
+                    {
+                        "path": relative_final,
+                        "key": "*",
+                        "kind": "manual_final_unreadable",
+                        "decision": "保留公開檔並回到待翻譯快照",
+                    }
+                )
+        manual_candidate = (
+            read_final(manual_path)
+            if manual_path is not None and manual_file_edited
+            else {}
+        )
+        current_keys.update(previous_output)
+        current_keys.update(manual_candidate)
+
+        for key in current_keys:
+            current_evidence = key_evidence(
+                current_source_provenance, relative_group, str(key)
+            )
+            previous_evidence = key_evidence(
+                previous_source_provenance, relative_group, str(key)
+            )
+            if (
+                key in previous_output
+                and current_evidence
+                and current_evidence == previous_evidence
+            ):
+                old_final[key] = previous_output[key]
+            elif key in previous_output and current_evidence != previous_evidence:
+                provenance_conflicts.append(
+                    {
+                        "path": relative_final,
+                        "key": str(key),
+                        "kind": "stale_previous_translation",
+                        "decision": "不沿用舊譯文；使用本輪來源或保留待翻譯",
+                    }
+                )
+
+            if key in manual_candidate:
+                if current_evidence and current_evidence == previous_evidence:
+                    manual_final[key] = manual_candidate[key]
+                else:
+                    provenance_conflicts.append(
+                        {
+                            "path": relative_final,
+                            "key": str(key),
+                            "kind": "manual_final_source_changed",
+                            "decision": "保留公開手動檔；此 key 不併入新快照並回到待翻譯",
+                        }
+                    )
         previous_final_keys_preserved += len(old_final)
 
         log_debug_fn(
             f"[KubeJS-CLEAN-DBG] group={group_dir} | en={len(en)} cn={len(cn)} tw={len(tw)} old_tw={len(old_final)}"
         )
 
-        # Existing effective zh_tw wins, then current zh_tw, then converted zh_cn.
-        effective_tw = dict(tw)
-        effective_tw.update(old_final)
-        merged_tw = deep_merge_3way_flat_impl(
-            effective_tw, cn, {}, safe_convert_text_fn=safe_convert_text_fn
-        )
+        # Prior outputs are usable only when the source evidence still matches.
+        # A verified user edit outranks current sources; changed zh_tw/zh_cn
+        # source data outranks old AI output; unchanged AI output may be reused.
+        merged_tw: dict[str, Any] = {}
+        for key in current_keys:
+            current_evidence = key_evidence(
+                current_source_provenance, relative_group, str(key)
+            )
+            previous_evidence = key_evidence(
+                previous_source_provenance, relative_group, str(key)
+            )
+            english_changed = language_source_changed(
+                current_evidence, previous_evidence, "en_us"
+            )
+            tw_source_changed = language_source_changed(
+                current_evidence, previous_evidence, "zh_tw"
+            )
+            cn_source_changed = language_source_changed(
+                current_evidence, previous_evidence, "zh_cn"
+            )
+            if key in manual_final:
+                merged_tw[key] = manual_final[key]
+            elif is_filled_text_impl(tw.get(key)) and (
+                tw_source_changed or not previous_evidence
+            ):
+                merged_tw[key] = tw[key]
+            elif is_filled_text_impl(cn.get(key)) and (
+                cn_source_changed or not previous_evidence
+            ):
+                merged_tw[key] = _shielded_convert(cn[key], safe_convert_text_fn)
+            elif key in old_final and current_evidence == previous_evidence:
+                merged_tw[key] = old_final[key]
+            elif is_filled_text_impl(tw.get(key)) and not english_changed:
+                merged_tw[key] = tw[key]
+            elif is_filled_text_impl(cn.get(key)) and not english_changed:
+                merged_tw[key] = _shielded_convert(cn[key], safe_convert_text_fn)
+
         pending_en = prune_en_by_tw_flat_impl(en, merged_tw)
         if pending_en:
             pending_outputs[(relative_group / "en_us.json").as_posix()] = pending_en
@@ -254,6 +377,12 @@ def clean_kubejs_from_raw_impl(
         log_info_fn(f"[KubeJS-CLEAN] 保留未受管理或已修改的待翻譯檔：{relative}")
     for relative in final_conflicts:
         log_info_fn(f"[KubeJS-CLEAN] 保留未受管理或已修改的完成檔：{relative}")
+    for conflict in provenance_conflicts:
+        log_info_fn(
+            "[KubeJS-CLEAN] 來源譯文衝突："
+            f"{conflict['path']} key={conflict['key']} "
+            f"type={conflict['kind']}；{conflict['decision']}"
+        )
 
     log_info_fn(
         f"[KubeJS-CLEAN] 處理完畢！群組數: {len(groups)} | 產出待翻譯: {pending_lang_written} | 產出完成品: {merged_lang_written} | 複製其他檔案: {copied_other} | 保留舊繁中鍵: {previous_final_keys_preserved} | 清除過期待翻譯: {stale_pending_removed}"
@@ -271,4 +400,5 @@ def clean_kubejs_from_raw_impl(
         "stale_pending_removed": stale_pending_removed,
         "stale_final_removed": stale_final_removed,
         "write_conflicts": len(pending_conflicts) + len(final_conflicts),
+        "provenance_conflicts": provenance_conflicts,
     }
