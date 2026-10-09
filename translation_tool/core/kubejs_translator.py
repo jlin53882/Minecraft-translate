@@ -32,6 +32,7 @@ from translation_tool.core.kubejs_translator_state import (
     copy_snapshot_tree,
     create_run_layout,
     fingerprint_source,
+    list_relevant_source_files,
     load_current_manifest,
     new_run_id,
     output_lock,
@@ -521,6 +522,68 @@ def _collect_source_provenance(
     return provenance
 
 
+def _source_drift_error(source: dict[str, Any], phase: str) -> RuntimeError:
+    message = (
+        f"[KubeJS] 來源 {source.get('root', 'unknown')} 在 Step 1 之後於{phase}時已變更，"
+        "為避免把舊翻譯注入不同腳本，已停止 Step 3；請重新執行 Step 1。"
+    )
+    log_warning(message)
+    return RuntimeError(message)
+
+
+def _snapshot_sources_for_injection(
+    sources: list[dict[str, Any]], snapshot_root: Path, output_root: Path
+) -> dict[str, str]:
+    """Copy each source's relevant inputs and verify the copy matches Step 1."""
+    snapshot_root.mkdir(parents=True, exist_ok=False)
+    snapshot_roots: dict[str, str] = {}
+    for source in sorted(sources, key=lambda item: int(item.get("import_order", 0))):
+        original_root = Path(source["root"]).resolve()
+        source_id = str(source["storage_id"])
+        expected_fingerprint = str(source.get("fingerprint", ""))
+        copied_root = snapshot_root / source_id
+        copied_root.mkdir(parents=True, exist_ok=False)
+        try:
+            for source_file in list_relevant_source_files(original_root, output_root):
+                relative = source_file.relative_to(original_root)
+                destination = copied_root / relative
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(source_file, destination)
+            copied_fingerprint, copied_count, copied_bytes = fingerprint_source(
+                copied_root, copied_root.parent / ".excluded-output"
+            )
+        except OSError as exc:
+            raise _source_drift_error(source, f"建立來源快照失敗：{exc}") from exc
+
+        if (
+            copied_fingerprint != expected_fingerprint
+            or copied_count != int(source.get("source_files", -1))
+            or copied_bytes != int(source.get("source_bytes", -1))
+        ):
+            raise _source_drift_error(source, "來源快照指紋與 Step 1 不符")
+        snapshot_roots[source_id] = str(copied_root)
+    return snapshot_roots
+
+
+def _assert_sources_match_step1(
+    sources: list[dict[str, Any]], output_root: Path
+) -> None:
+    """Reject a source edit detected while Step 3 was using its immutable copy."""
+    for source in sources:
+        try:
+            fingerprint, file_count, source_bytes = fingerprint_source(
+                Path(source["root"]), output_root
+            )
+        except OSError as exc:
+            raise _source_drift_error(source, f"重新檢查來源失敗：{exc}") from exc
+        if (
+            fingerprint != source.get("fingerprint")
+            or file_count != int(source.get("source_files", -1))
+            or source_bytes != int(source.get("source_bytes", -1))
+        ):
+            raise _source_drift_error(source, "注入期間來源又有變更")
+
+
 def _sync_output_mirrors(
     output_root: Path,
     run_root: Path,
@@ -982,20 +1045,24 @@ def run_kubejs_pipeline(
         else:
             injected_stage_container = committed_root / f".final-inject-{new_run_id()}"
             injected_stage = injected_stage_container / "kubejs"
-            source_roots = {
-                str(source["storage_id"]): str(source["root"])
-                for source in stage_sources
-            }
-            source_order = [
-                str(source["storage_id"])
-                for source in sorted(
-                    stage_sources, key=lambda item: int(item["import_order"])
-                )
-            ]
+            ordered_sources = sorted(
+                stage_sources, key=lambda item: int(item["import_order"])
+            )
+            source_order = [str(source["storage_id"]) for source in ordered_sources]
             try:
+                source_roots = _snapshot_sources_for_injection(
+                    stage_sources,
+                    injected_stage_container / "source-inputs",
+                    out_root,
+                )
+                primary_source_root = (
+                    source_roots.get(source_order[0], str(source_root))
+                    if source_order
+                    else str(source_root)
+                )
                 copy_snapshot_tree(paths["final"], injected_stage)
                 result["step3"] = step3_inject(
-                    pack_or_kubejs_dir=str(source_root),
+                    pack_or_kubejs_dir=primary_source_root,
                     src_dir=str(paths["translated"]),
                     final_dir=str(injected_stage),
                     source_roots=source_roots,
@@ -1008,6 +1075,7 @@ def run_kubejs_pipeline(
                 if is_cancelled():
                     result["step3"] = {"skipped": True, "reason": "cancelled"}
                 else:
+                    _assert_sources_match_step1(stage_sources, out_root)
                     _validate_final_snapshot(injected_stage)
                     final_relative = Path("final-versions") / new_run_id() / "kubejs"
                     final_committed = committed_root / final_relative

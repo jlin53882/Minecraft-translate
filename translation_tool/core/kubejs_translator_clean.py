@@ -209,13 +209,6 @@ def clean_kubejs_from_raw_impl(
                 evidence[language] = key_data[language]
         return evidence
 
-    def language_source_changed(
-        current_evidence: dict[str, Any],
-        previous_evidence: dict[str, Any],
-        language: str,
-    ) -> bool:
-        return current_evidence.get(language) != previous_evidence.get(language)
-
     def read_final(path: Path) -> dict[str, Any]:
         return read_json_dict_fn(path)
 
@@ -296,8 +289,8 @@ def clean_kubejs_from_raw_impl(
         )
 
         # Prior outputs are usable only when the source evidence still matches.
-        # A verified user edit outranks current sources; changed zh_tw/zh_cn
-        # source data outranks old AI output; unchanged AI output may be reused.
+        # A verified user edit outranks current sources; valid current zh_tw
+        # outranks zh_cn; source translations outrank old AI output.
         merged_tw: dict[str, Any] = {}
         for key in current_keys:
             current_evidence = key_evidence(
@@ -306,31 +299,19 @@ def clean_kubejs_from_raw_impl(
             previous_evidence = key_evidence(
                 previous_source_provenance, relative_group, str(key)
             )
-            english_changed = language_source_changed(
-                current_evidence, previous_evidence, "en_us"
-            )
-            tw_source_changed = language_source_changed(
-                current_evidence, previous_evidence, "zh_tw"
-            )
-            cn_source_changed = language_source_changed(
-                current_evidence, previous_evidence, "zh_cn"
-            )
             if key in manual_final:
                 merged_tw[key] = manual_final[key]
-            elif is_filled_text_impl(tw.get(key)) and (
-                tw_source_changed or not previous_evidence
-            ):
+            elif is_filled_text_impl(tw.get(key)):
+                # Cross-language priority is stable: any valid current zh_tw
+                # wins over zh_cn, even when only zh_cn changed this run.
                 merged_tw[key] = tw[key]
-            elif is_filled_text_impl(cn.get(key)) and (
-                cn_source_changed or not previous_evidence
-            ):
+            elif is_filled_text_impl(cn.get(key)):
+                # Use current zh_cn only when there is no valid current zh_tw.
                 merged_tw[key] = _shielded_convert(cn[key], safe_convert_text_fn)
             elif key in old_final and current_evidence == previous_evidence:
+                # AI output is a last resort and only remains valid for the
+                # exact same source evidence; changed English returns to pending.
                 merged_tw[key] = old_final[key]
-            elif is_filled_text_impl(tw.get(key)) and not english_changed:
-                merged_tw[key] = tw[key]
-            elif is_filled_text_impl(cn.get(key)) and not english_changed:
-                merged_tw[key] = _shielded_convert(cn[key], safe_convert_text_fn)
 
         pending_en = prune_en_by_tw_flat_impl(en, merged_tw)
         if pending_en:

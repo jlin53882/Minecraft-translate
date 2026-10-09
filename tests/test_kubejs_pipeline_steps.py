@@ -136,6 +136,15 @@ def _fake_translate_pending(*, pending_dir: str, output_dir: str, **kwargs) -> d
     return {"files": files, "total_keys": total_keys}
 
 
+def _private_snapshot_layer(
+    result: dict, output: Path, manifest_key: str, default: str
+) -> Path:
+    manifest = json.loads(
+        (output / "kubejs" / ".pipeline" / "current.json").read_text(encoding="utf-8")
+    )
+    return Path(result["paths"]["snapshot"]) / manifest.get(manifest_key, default)
+
+
 def test_inject_merges_ai_lang_output_with_existing_effective_translation(
     tmp_path: Path,
 ) -> None:
@@ -710,6 +719,9 @@ def test_incremental_zh_tw_source_change_wins_over_previous_final(
     traditional.write_text(
         json.dumps({"apple": "蘋果"}, ensure_ascii=False), encoding="utf-8"
     )
+    (lang / "zh_cn.json").write_text(
+        json.dumps({"apple": "苹果"}, ensure_ascii=False), encoding="utf-8"
+    )
     kubejs_translator.run_kubejs_pipeline(
         input_dir=str(lang.parents[3]),
         output_dir=str(output),
@@ -941,3 +953,626 @@ def test_final_mirror_conflict_is_reported_and_public_edit_is_kept(
         and conflict["snapshot_exists"] == "false"
         for conflict in result["mirror_conflicts"]
     )
+
+
+def test_incremental_zh_cn_change_does_not_override_current_zh_tw(
+    tmp_path: Path,
+) -> None:
+    output = tmp_path / "Output"
+    lang = tmp_path / "pack" / "kubejs" / "assets" / "demo" / "lang"
+    lang.mkdir(parents=True)
+    (lang / "en_us.json").write_text(json.dumps({"apple": "Apple"}), encoding="utf-8")
+    (lang / "zh_tw.json").write_text(
+        json.dumps({"apple": "蘋果"}, ensure_ascii=False), encoding="utf-8"
+    )
+    simplified = lang / "zh_cn.json"
+    simplified.write_text(
+        json.dumps({"apple": "苹果"}, ensure_ascii=False), encoding="utf-8"
+    )
+    kubejs_translator.run_kubejs_pipeline(
+        input_dir=str(lang.parents[3]),
+        output_dir=str(output),
+        step_translate=False,
+        step_inject=False,
+    )
+
+    simplified.write_text(
+        json.dumps({"apple": "香蕉"}, ensure_ascii=False), encoding="utf-8"
+    )
+    result = kubejs_translator.run_kubejs_pipeline(
+        input_dir=str(lang.parents[3]),
+        output_dir=str(output),
+        source_mode="incremental",
+        step_translate=False,
+        step_inject=False,
+    )
+
+    final_lang = (
+        _private_snapshot_layer(result, output, "final_snapshot", "完成/kubejs")
+        / "assets"
+        / "demo"
+        / "lang"
+        / "zh_tw.json"
+    )
+    pending_lang = (
+        _private_snapshot_layer(result, output, "pending_snapshot", "待翻譯/kubejs")
+        / "assets"
+        / "demo"
+        / "lang"
+        / "en_us.json"
+    )
+    assert json.loads(final_lang.read_text(encoding="utf-8")) == {"apple": "蘋果"}
+    pending = (
+        json.loads(pending_lang.read_text(encoding="utf-8"))
+        if pending_lang.is_file()
+        else {}
+    )
+    assert "apple" not in pending
+
+
+def test_incremental_new_zh_cn_key_does_not_override_current_zh_tw(
+    tmp_path: Path,
+) -> None:
+    output = tmp_path / "Output"
+    lang = tmp_path / "pack" / "kubejs" / "assets" / "demo" / "lang"
+    lang.mkdir(parents=True)
+    (lang / "en_us.json").write_text(json.dumps({"apple": "Apple"}), encoding="utf-8")
+    (lang / "zh_tw.json").write_text(
+        json.dumps({"apple": "蘋果"}, ensure_ascii=False), encoding="utf-8"
+    )
+    kubejs_translator.run_kubejs_pipeline(
+        input_dir=str(lang.parents[3]),
+        output_dir=str(output),
+        step_translate=False,
+        step_inject=False,
+    )
+
+    (lang / "zh_cn.json").write_text(
+        json.dumps({"apple": "香蕉"}, ensure_ascii=False), encoding="utf-8"
+    )
+    result = kubejs_translator.run_kubejs_pipeline(
+        input_dir=str(lang.parents[3]),
+        output_dir=str(output),
+        source_mode="incremental",
+        step_translate=False,
+        step_inject=False,
+    )
+
+    final_lang = (
+        _private_snapshot_layer(result, output, "final_snapshot", "完成/kubejs")
+        / "assets"
+        / "demo"
+        / "lang"
+        / "zh_tw.json"
+    )
+    pending_lang = (
+        _private_snapshot_layer(result, output, "pending_snapshot", "待翻譯/kubejs")
+        / "assets"
+        / "demo"
+        / "lang"
+        / "en_us.json"
+    )
+    assert json.loads(final_lang.read_text(encoding="utf-8")) == {"apple": "蘋果"}
+    pending = (
+        json.loads(pending_lang.read_text(encoding="utf-8"))
+        if pending_lang.is_file()
+        else {}
+    )
+    assert "apple" not in pending
+
+
+def test_english_change_keeps_current_zh_tw_and_removes_key_from_pending(
+    tmp_path: Path,
+) -> None:
+    output = tmp_path / "Output"
+    lang = tmp_path / "pack" / "kubejs" / "assets" / "demo" / "lang"
+    lang.mkdir(parents=True)
+    english = lang / "en_us.json"
+    english.write_text(json.dumps({"apple": "Apple"}), encoding="utf-8")
+    (lang / "zh_tw.json").write_text(
+        json.dumps({"apple": "蘋果"}, ensure_ascii=False), encoding="utf-8"
+    )
+    kubejs_translator.run_kubejs_pipeline(
+        input_dir=str(lang.parents[3]),
+        output_dir=str(output),
+        step_translate=False,
+        step_inject=False,
+    )
+
+    english.write_text(json.dumps({"apple": "Banana"}), encoding="utf-8")
+    result = kubejs_translator.run_kubejs_pipeline(
+        input_dir=str(lang.parents[3]),
+        output_dir=str(output),
+        source_mode="incremental",
+        step_translate=False,
+        step_inject=False,
+    )
+
+    final_lang = (
+        _private_snapshot_layer(result, output, "final_snapshot", "完成/kubejs")
+        / "assets"
+        / "demo"
+        / "lang"
+        / "zh_tw.json"
+    )
+    pending_lang = (
+        _private_snapshot_layer(result, output, "pending_snapshot", "待翻譯/kubejs")
+        / "assets"
+        / "demo"
+        / "lang"
+        / "en_us.json"
+    )
+    final_value = (
+        json.loads(final_lang.read_text(encoding="utf-8"))
+        if final_lang.is_file()
+        else {}
+    )
+    assert final_value == {"apple": "蘋果"}
+    pending = (
+        json.loads(pending_lang.read_text(encoding="utf-8"))
+        if pending_lang.is_file()
+        else {}
+    )
+    assert "apple" not in pending
+
+
+def test_incremental_cn_conflict_keeps_earlier_cn_record_and_current_tw(
+    tmp_path: Path,
+) -> None:
+    output = tmp_path / "Output"
+    roots = [tmp_path / name / "kubejs" for name in ("base", "patch", "late")]
+    for root in roots:
+        (root / "assets" / "demo" / "lang").mkdir(parents=True)
+    lang_a = roots[0] / "assets" / "demo" / "lang"
+    (lang_a / "en_us.json").write_text(json.dumps({"apple": "Apple"}), encoding="utf-8")
+    (lang_a / "zh_tw.json").write_text(
+        json.dumps({"apple": "蘋果"}, ensure_ascii=False), encoding="utf-8"
+    )
+    lang_b = roots[1] / "assets" / "demo" / "lang"
+    (lang_b / "zh_cn.json").write_text(
+        json.dumps({"apple": "香蕉"}, ensure_ascii=False), encoding="utf-8"
+    )
+    lang_c = roots[2] / "assets" / "demo" / "lang"
+    (lang_c / "zh_cn.json").write_text(
+        json.dumps({"apple": "葡萄"}, ensure_ascii=False), encoding="utf-8"
+    )
+
+    kubejs_translator.run_kubejs_pipeline(
+        input_dir=str(roots[0]),
+        output_dir=str(output),
+        step_translate=False,
+        step_inject=False,
+    )
+    kubejs_translator.run_kubejs_pipeline(
+        input_dir=str(roots[1]),
+        output_dir=str(output),
+        source_mode="incremental",
+        step_translate=False,
+        step_inject=False,
+    )
+    result = kubejs_translator.run_kubejs_pipeline(
+        input_dir=str(roots[2]),
+        output_dir=str(output),
+        source_mode="incremental",
+        step_translate=False,
+        step_inject=False,
+    )
+
+    final_lang = (
+        _private_snapshot_layer(result, output, "final_snapshot", "完成/kubejs")
+        / "assets"
+        / "demo"
+        / "lang"
+        / "zh_tw.json"
+    )
+    assert json.loads(final_lang.read_text(encoding="utf-8")) == {"apple": "蘋果"}
+    cn_conflict = next(
+        item
+        for item in result["step1"]["source_conflict_details"]
+        if item["relative_path"].endswith("zh_cn.json") and item["key"] == "apple"
+    )
+    assert cn_conflict["source_a"]["root"] == str(roots[1])
+    assert cn_conflict["source_b"]["root"] == str(roots[2])
+    assert "較早匯入" in cn_conflict["decision"]
+
+
+@pytest.mark.parametrize("tw_value", ["", "{demo.apple}"])
+def test_invalid_zh_tw_uses_zh_cn_and_keeps_placeholders(
+    tmp_path: Path, tw_value: str
+) -> None:
+    output = tmp_path / "Output"
+    lang = tmp_path / "pack" / "kubejs" / "assets" / "demo" / "lang"
+    lang.mkdir(parents=True)
+    (lang / "en_us.json").write_text(json.dumps({"apple": "Apple"}), encoding="utf-8")
+    (lang / "zh_tw.json").write_text(
+        json.dumps({"apple": tw_value}, ensure_ascii=False), encoding="utf-8"
+    )
+    (lang / "zh_cn.json").write_text(
+        json.dumps({"apple": "苹果 %s $(item.apple) §a${value}"}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    result = kubejs_translator.run_kubejs_pipeline(
+        input_dir=str(lang.parents[3]),
+        output_dir=str(output),
+        step_translate=False,
+        step_inject=False,
+    )
+
+    final_lang = (
+        _private_snapshot_layer(result, output, "final_snapshot", "完成/kubejs")
+        / "assets"
+        / "demo"
+        / "lang"
+        / "zh_tw.json"
+    )
+    pending_lang = (
+        _private_snapshot_layer(result, output, "pending_snapshot", "待翻譯/kubejs")
+        / "assets"
+        / "demo"
+        / "lang"
+        / "en_us.json"
+    )
+    value = json.loads(final_lang.read_text(encoding="utf-8"))["apple"]
+    assert value.startswith("蘋果")
+    assert all(token in value for token in ("%s", "$(item.apple)", "§a", "${value}"))
+    pending = (
+        json.loads(pending_lang.read_text(encoding="utf-8"))
+        if pending_lang.is_file()
+        else {}
+    )
+    assert "apple" not in pending
+
+
+def test_changed_source_does_not_reuse_manual_public_translation(
+    tmp_path: Path,
+) -> None:
+    output = tmp_path / "Output"
+    lang = tmp_path / "pack" / "kubejs" / "assets" / "demo" / "lang"
+    lang.mkdir(parents=True)
+    english = lang / "en_us.json"
+    english.write_text(json.dumps({"apple": "Apple"}), encoding="utf-8")
+    first = kubejs_translator.run_kubejs_pipeline(
+        input_dir=str(lang.parents[3]),
+        output_dir=str(output),
+        translator_fn=_fake_translate_pending,
+        step_inject=True,
+    )
+    public_final = (
+        Path(first["paths"]["final"]) / "assets" / "demo" / "lang" / "zh_tw.json"
+    )
+    public_final.write_text(
+        json.dumps({"apple": "人工校訂"}, ensure_ascii=False), encoding="utf-8"
+    )
+    english.write_text(json.dumps({"apple": "Banana"}), encoding="utf-8")
+
+    result = kubejs_translator.run_kubejs_pipeline(
+        input_dir=str(lang.parents[3]),
+        output_dir=str(output),
+        source_mode="incremental",
+        step_translate=False,
+        step_inject=False,
+    )
+
+    pending_lang = (
+        _private_snapshot_layer(result, output, "pending_snapshot", "待翻譯/kubejs")
+        / "assets"
+        / "demo"
+        / "lang"
+        / "en_us.json"
+    )
+    assert json.loads(pending_lang.read_text(encoding="utf-8")) == {"apple": "Banana"}
+    final_lang = (
+        _private_snapshot_layer(result, output, "final_snapshot", "完成/kubejs")
+        / "assets"
+        / "demo"
+        / "lang"
+        / "zh_tw.json"
+    )
+    final_values = (
+        json.loads(final_lang.read_text(encoding="utf-8"))
+        if final_lang.is_file()
+        else {}
+    )
+    assert final_values.get("apple") != "人工校訂"
+    assert json.loads(public_final.read_text(encoding="utf-8")) == {"apple": "人工校訂"}
+
+
+def test_incremental_cn_merge_is_idempotent(tmp_path: Path) -> None:
+    output = tmp_path / "Output"
+    lang = tmp_path / "pack" / "kubejs" / "assets" / "demo" / "lang"
+    lang.mkdir(parents=True)
+    (lang / "en_us.json").write_text(json.dumps({"apple": "Apple"}), encoding="utf-8")
+    (lang / "zh_tw.json").write_text(
+        json.dumps({"apple": "蘋果"}, ensure_ascii=False), encoding="utf-8"
+    )
+    (lang / "zh_cn.json").write_text(
+        json.dumps({"apple": "苹果"}, ensure_ascii=False), encoding="utf-8"
+    )
+
+    results = [
+        kubejs_translator.run_kubejs_pipeline(
+            input_dir=str(lang.parents[3]),
+            output_dir=str(output),
+            source_mode=mode,
+            step_translate=False,
+            step_inject=False,
+        )
+        for mode in ("fresh", "incremental", "incremental")
+    ]
+    final_files = [
+        _private_snapshot_layer(result, output, "final_snapshot", "完成/kubejs")
+        / "assets"
+        / "demo"
+        / "lang"
+        / "zh_tw.json"
+        for result in results
+    ]
+    assert [json.loads(path.read_text(encoding="utf-8")) for path in final_files] == [
+        {"apple": "蘋果"}
+    ] * 3
+    assert all(result["mirror_conflict_count"] == 0 for result in results)
+
+
+def test_source_changed_after_step1_is_not_used_for_injection(
+    tmp_path: Path,
+) -> None:
+    output = tmp_path / "Output"
+    base_script = tmp_path / "base" / "kubejs" / "client_scripts" / "base.js"
+    base_script.parent.mkdir(parents=True)
+    base_script.write_text("scene.text('scene', 'Base text')\n", encoding="utf-8")
+    first = kubejs_translator.run_kubejs_pipeline(
+        input_dir=str(base_script.parents[2]),
+        output_dir=str(output),
+        translator_fn=_fake_translate_pending,
+    )
+    previous_manifest = json.loads(
+        (output / "kubejs" / ".pipeline" / "current.json").read_text(encoding="utf-8")
+    )
+    previous_final = (
+        Path(first["paths"]["snapshot"])
+        / previous_manifest["final_snapshot"]
+        / "client_scripts"
+        / "base.js"
+    )
+    previous_final_bytes = previous_final.read_bytes()
+
+    patch_script = tmp_path / "patch" / "kubejs" / "client_scripts" / "patch.js"
+    patch_script.parent.mkdir(parents=True)
+    patch_script.write_text("scene.text('scene', 'Patch text')\n", encoding="utf-8")
+
+    def mutate_source_during_translation(
+        *, pending_dir: str, output_dir: str, **kwargs
+    ) -> dict:
+        translated = _fake_translate_pending(
+            pending_dir=pending_dir, output_dir=output_dir, **kwargs
+        )
+        patch_script.write_text(
+            "scene.text('scene', 'Changed after Step 1')\n", encoding="utf-8"
+        )
+        return translated
+
+    with pytest.raises(RuntimeError, match="來源.*(變更|重新抽取)"):
+        kubejs_translator.run_kubejs_pipeline(
+            input_dir=str(patch_script.parents[2]),
+            output_dir=str(output),
+            source_mode="incremental",
+            translator_fn=mutate_source_during_translation,
+        )
+
+    current_manifest = json.loads(
+        (output / "kubejs" / ".pipeline" / "current.json").read_text(encoding="utf-8")
+    )
+    assert current_manifest["stage"] == "translated"
+    assert previous_final.read_bytes() == previous_final_bytes
+    current_final = (
+        output
+        / "kubejs"
+        / ".pipeline"
+        / "runs"
+        / current_manifest["run_id"]
+        / current_manifest.get("final_snapshot", "完成/kubejs")
+        / "client_scripts"
+        / "patch.js"
+    )
+    assert not current_final.exists()
+
+
+def test_source_changed_during_injection_uses_verified_snapshot_and_aborts_commit(
+    tmp_path: Path, monkeypatch
+) -> None:
+    output = tmp_path / "Output"
+    base_script = tmp_path / "base" / "kubejs" / "client_scripts" / "base.js"
+    base_script.parent.mkdir(parents=True)
+    base_script.write_text("scene.text('scene', 'Base text')\n", encoding="utf-8")
+    first = kubejs_translator.run_kubejs_pipeline(
+        input_dir=str(base_script.parents[2]),
+        output_dir=str(output),
+        translator_fn=_fake_translate_pending,
+    )
+    first_manifest = json.loads(
+        (output / "kubejs" / ".pipeline" / "current.json").read_text(encoding="utf-8")
+    )
+    old_final = (
+        Path(first["paths"]["snapshot"])
+        / first_manifest["final_snapshot"]
+        / "client_scripts"
+        / "base.js"
+    )
+    old_final_bytes = old_final.read_bytes()
+
+    patch_script = tmp_path / "patch" / "kubejs" / "client_scripts" / "patch.js"
+    patch_script.parent.mkdir(parents=True)
+    patch_script.write_text("scene.text('scene', 'Patch text')\n", encoding="utf-8")
+    real_step3_inject = kubejs_translator.step3_inject
+
+    def mutate_live_source_after_injection(**kwargs) -> dict:
+        patch_snapshot = next(
+            Path(root) / "client_scripts" / "patch.js"
+            for root in kwargs["source_roots"].values()
+            if (Path(root) / "client_scripts" / "patch.js").is_file()
+        )
+        assert patch_snapshot.read_text(encoding="utf-8") == (
+            "scene.text('scene', 'Patch text')\n"
+        )
+        injected = real_step3_inject(**kwargs)
+        candidate = Path(kwargs["final_dir"]) / "client_scripts" / "patch.js"
+        assert "譯:Patch text" in candidate.read_text(encoding="utf-8")
+        patch_script.write_text(
+            "scene.text('scene', 'Changed during injection')\n", encoding="utf-8"
+        )
+        return injected
+
+    monkeypatch.setattr(
+        kubejs_translator, "step3_inject", mutate_live_source_after_injection
+    )
+    with pytest.raises(RuntimeError, match="來源.*(變更|重新抽取)"):
+        kubejs_translator.run_kubejs_pipeline(
+            input_dir=str(patch_script.parents[2]),
+            output_dir=str(output),
+            source_mode="incremental",
+            translator_fn=_fake_translate_pending,
+        )
+
+    current_manifest = json.loads(
+        (output / "kubejs" / ".pipeline" / "current.json").read_text(encoding="utf-8")
+    )
+    assert current_manifest["stage"] == "translated"
+    assert old_final.read_bytes() == old_final_bytes
+
+
+def test_incremental_cn_priority_end_to_end_step1_then_resume_step2_step3(
+    tmp_path: Path,
+) -> None:
+    output = tmp_path / "Output"
+    lang = tmp_path / "pack" / "kubejs" / "assets" / "demo" / "lang"
+    lang.mkdir(parents=True)
+    english = {"apple": "Apple"}
+    (lang / "en_us.json").write_text(json.dumps(english), encoding="utf-8")
+    (lang / "zh_tw.json").write_text(
+        json.dumps({"apple": "蘋果"}, ensure_ascii=False), encoding="utf-8"
+    )
+
+    fresh = kubejs_translator.run_kubejs_pipeline(
+        input_dir=str(lang.parents[3]),
+        output_dir=str(output),
+        step_translate=False,
+        step_inject=False,
+    )
+    (lang / "zh_cn.json").write_text(
+        json.dumps({"apple": "香蕉"}, ensure_ascii=False), encoding="utf-8"
+    )
+    incremental_add = kubejs_translator.run_kubejs_pipeline(
+        input_dir=str(lang.parents[3]),
+        output_dir=str(output),
+        source_mode="incremental",
+        step_translate=False,
+        step_inject=False,
+    )
+    (lang / "zh_cn.json").write_text(
+        json.dumps({"apple": "葡萄"}, ensure_ascii=False), encoding="utf-8"
+    )
+    incremental_update = kubejs_translator.run_kubejs_pipeline(
+        input_dir=str(lang.parents[3]),
+        output_dir=str(output),
+        source_mode="incremental",
+        step_translate=False,
+        step_inject=False,
+    )
+
+    expected_tw = {"apple": "蘋果"}
+    for result in (fresh, incremental_add, incremental_update):
+        final_lang = (
+            _private_snapshot_layer(result, output, "final_snapshot", "完成/kubejs")
+            / "assets"
+            / "demo"
+            / "lang"
+            / "zh_tw.json"
+        )
+        assert json.loads(final_lang.read_text(encoding="utf-8")) == expected_tw
+
+    english["pear"] = "Pear"
+    (lang / "en_us.json").write_text(json.dumps(english), encoding="utf-8")
+    step1_only = kubejs_translator.run_kubejs_pipeline(
+        input_dir=str(lang.parents[3]),
+        output_dir=str(output),
+        source_mode="incremental",
+        step_translate=False,
+        step_inject=False,
+    )
+    pending_lang = (
+        _private_snapshot_layer(step1_only, output, "pending_snapshot", "待翻譯/kubejs")
+        / "assets"
+        / "demo"
+        / "lang"
+        / "en_us.json"
+    )
+    assert json.loads(pending_lang.read_text(encoding="utf-8")) == {"pear": "Pear"}
+
+    resumed = kubejs_translator.run_kubejs_pipeline(
+        input_dir=str(lang.parents[3]),
+        output_dir=str(output),
+        step_extract=False,
+        step_translate=True,
+        step_inject=True,
+        translator_fn=_fake_translate_pending,
+    )
+    final_root = _private_snapshot_layer(
+        resumed, output, "final_snapshot", "完成/kubejs"
+    )
+    final_lang = json.loads(
+        (final_root / "assets" / "demo" / "lang" / "zh_tw.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert final_lang == {"apple": "蘋果", "pear": "譯:Pear"}
+    manifest = json.loads(
+        (output / "kubejs" / ".pipeline" / "current.json").read_text(encoding="utf-8")
+    )
+    source = manifest["sources"][0]
+    assert source["fingerprint"]
+    source_raw = Path(resumed["paths"]["snapshot"]) / source["snapshot"]
+    source_tw = json.loads(
+        (source_raw / "assets" / "demo" / "lang" / "zh_tw.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    source_cn = json.loads(
+        (source_raw / "assets" / "demo" / "lang" / "zh_cn.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert source_tw == {"apple": "蘋果"}
+    assert source_cn == {"apple": "葡萄"}
+    assert json.loads(
+        (
+            Path(resumed["paths"]["pending"])
+            / "assets"
+            / "demo"
+            / "lang"
+            / "en_us.json"
+        ).read_text(encoding="utf-8")
+    ) == {"pear": "Pear"}
+    translated_root = (
+        Path(resumed["paths"]["snapshot"]) / manifest["translated_snapshot"]
+    )
+    assert json.loads(
+        (translated_root / "assets" / "demo" / "lang" / "zh_tw.json").read_text(
+            encoding="utf-8"
+        )
+    ) == {"pear": "譯:Pear"}
+    assert (
+        json.loads(
+            (
+                Path(resumed["paths"]["final"])
+                / "assets"
+                / "demo"
+                / "lang"
+                / "zh_tw.json"
+            ).read_text(encoding="utf-8")
+        )
+        == final_lang
+    )
+    assert resumed["step3"]["patched_js_files"] == 0
+    assert resumed["mirror_conflict_count"] == 0
+    assert resumed["output_sync_status"] == "synced"
