@@ -703,10 +703,10 @@ SETTINGS: tuple[Setting, ...] = (
     Setting(
         "lm_translator.max_input_token_budget",
         "int",
-        "單批輸入預算",
+        "單批輸入預算（Token）",
         "batch_limits",
         C_BATCH,
-        "",
+        "控制每批翻譯內容的預估輸入 Token 數。請依所選模型的 Context Window 調整，並為系統指示與輸出預留空間；此值不是模型本身的 Context 上限。",
         default=60000,
         blank="zero",
         timing="next_batch",
