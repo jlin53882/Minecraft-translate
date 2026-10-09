@@ -3,18 +3,14 @@
 from __future__ import annotations
 
 import re
+from collections import Counter
 
 from app.services_impl.moddb_service import (
-    format_tokens,
-    token_issues,
-    whitespace_note,
+    SOURCE_NAMES,
+    SRC_AI,
+    SRC_JAR_CN,
+    SRC_MANUAL,
 )
-
-__all__ = [
-    "format_tokens",
-    "token_issues",
-    "whitespace_note",
-]
 
 STATE_LABELS = {
     "all": "全部",
@@ -39,6 +35,21 @@ KIND_LABELS = {"lang": "語言檔", "patchouli": "Patchouli 手冊"}
 def kind_label(kind: str) -> str:
     """條目類型的顯示名稱；日後資料庫新增的類型沒登錄名稱時直接顯示代碼。"""
     return KIND_LABELS.get(kind, kind)
+
+
+def source_label(source: int | None) -> str:
+    return SOURCE_NAMES.get(source, "—") if source is not None else "—"
+
+
+def source_tone(source: int | None) -> str:
+    """譯文來源的色調：人工 = 紫、簡中轉繁 = 金、AI = 中性、其餘 = 藍。"""
+    if source == SRC_MANUAL:
+        return "ench"
+    if source == SRC_JAR_CN:
+        return "gold"
+    if source == SRC_AI or source is None:
+        return "neutral"
+    return "dia"
 
 
 def shorten(text: str, limit: int = 60) -> str:
@@ -108,3 +119,83 @@ def visible_segments(text: str) -> list[tuple[str, str]]:
     if pos < len(text):
         out.append((text[pos:], "text"))
     return out
+
+
+# Patchouli 的提示文字 `$(t:提示文字)`：括號裡的文字是要翻譯的，只比對「有幾個提示標記」
+_TOOLTIP_PREFIX = "$(t:"
+_TOOLTIP_TOKEN = "$(t:…)"
+
+
+# 掃描用：Patchouli 巨集只認開頭 `$(`，結尾用括號配對找（提示文字／網址裡可能有成對的括號）
+_SCAN_RE = re.compile(
+    r"§[0-9a-fk-orA-FK-OR]|%(?:\d+\$)?[sdfxXeEgGcb%]|\$\(|\{\d*\}|\\n|\n"
+)
+
+
+def _macro_end(text: str, start: int) -> int | None:
+    """``$(`` 之後的結尾位置（含 ``)``）。依括號配對（巢狀的成對括號算在內）；
+    括號沒有配對完（缺 ``)``）時退回第一個 ``)``；完全沒有 ``)`` 回傳 None。"""
+    depth = 1
+    for i in range(start, len(text)):
+        char = text[i]
+        if char == "(":
+            depth += 1
+        elif char == ")":
+            depth -= 1
+            if depth == 0:
+                return i + 1
+    first = text.find(")", start)
+    return None if first < 0 else first + 1
+
+
+def _iter_tokens(text: str):
+    pos = 0
+    while True:
+        m = _SCAN_RE.search(text, pos)
+        if m is None:
+            return
+        if m.group(0) == "$(":
+            end = _macro_end(text, m.end())
+            if end is None:  # 沒有結尾的 `$(` 不是標記
+                pos = m.end()
+                continue
+            yield text[m.start() : end]
+            pos = end
+        else:
+            yield m.group(0)
+            pos = m.end()
+
+
+def format_tokens(text: str) -> Counter[str]:
+    """文字中的換行、`§` 格式碼、`%s` 類佔位符、Patchouli `$(…)`、`{0}` 的出現次數。
+
+    ``$(t:提示文字)`` 的內容會被翻譯，所以統一記成 ``$(t:…)``；其餘 ``$(…)``
+    （``$(item)``、``$(ttcolor)``、``$(l:連結)`` 等不能翻譯）仍須完全相同。
+    巨集的結尾依括號配對，提示文字或網址裡成對的括號（例如 ``f(x)``）不會讓標記提早結束。
+    """
+    tokens: Counter[str] = Counter()
+    for raw in _iter_tokens(text or ""):
+        token = raw.replace("\r", "")
+        if token.startswith(_TOOLTIP_PREFIX):
+            token = _TOOLTIP_TOKEN
+        tokens[token] += 1
+    return tokens
+
+
+def token_issues(source: str, translated: str) -> list[str]:
+    """譯文與原文的特殊字元不一致時的提醒（缺少或多出）。"""
+    want, got = format_tokens(source), format_tokens(translated)
+    issues: list[str] = []
+    for token in sorted(set(want) | set(got)):
+        diff = got[token] - want[token]
+        if diff:
+            name = _TOKEN_NAMES.get(token, token)
+            issues.append(f"{'多了' if diff > 0 else '少了'} {abs(diff)} 個「{name}」")
+    return issues
+
+
+def whitespace_note(text: str) -> str:
+    """前後有空白或換行時的提醒（儲存時原樣保留，不會被修剪）。"""
+    if not text or text == text.strip():
+        return ""
+    return "譯文前後有空白或換行，儲存時會原樣保留"

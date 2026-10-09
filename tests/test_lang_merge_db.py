@@ -376,7 +376,7 @@ def test_zip_batch_uses_snapshot_priority_without_reverting_global_effective(
 ):
     """A merge reads its click-time source order without rewriting a newer DB order."""
     database_path = tmp_path / "shared-database.db"
-    priority_a = (SRC_MANUAL, SRC_JAR_TW, SRC_AI)
+    priority_a = (SRC_JAR_TW, SRC_AI, SRC_MANUAL)
     priority_b = (SRC_AI, SRC_JAR_TW, SRC_MANUAL)
     db = TranslationDB(database_path, priority=priority_a)
     for key, english in (
@@ -411,11 +411,6 @@ def test_zip_batch_uses_snapshot_priority_without_reverting_global_effective(
         if row.key == "item.foo.reviewed"
     )
     db.save_manual(reviewed.id, "Reviewed translation", actor="reviewer")
-    db.review_manual(
-        reviewed.id,
-        expected_zh_tw="Reviewed translation",
-        actor="reviewer",
-    )
     db.ingest(
         "1.21.1",
         [ScanItem(KIND_LANG, "foo", "item.foo.pending", "Pending English")],

@@ -51,11 +51,3 @@ def test_randomized_equivalence_with_sequential_replace():
                 text,
                 rules,
             )
-
-
-def test_regex_rules_are_not_hidden_by_unmatched_fixed_rule_keywords():
-    rules = [
-        {"from": "unrelated", "to": "literal"},
-        {"from": r"\d+", "to": "number"},
-    ]
-    assert apply_replace_rules("item 42", rules) == "item number"

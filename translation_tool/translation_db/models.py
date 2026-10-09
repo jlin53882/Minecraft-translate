@@ -22,14 +22,6 @@ class EntryRow:
     source: int | None  # 生效譯文的來源；沒有則 None
     checker: str
     diff: bool  # 其他版本相同內容的生效譯文與此不同
-    review_status: str | None = None
-    created_at: str | None = None
-    translation_created_at: str | None = None
-    effective_updated_at: str | None = None
-    last_manual_at: str | None = None
-    quality_state: str = "unknown_source"
-    quality_issues: tuple[str, ...] = ()
-    whitespace_note: str = ""
 
     @property
     def state(self) -> str:
@@ -70,8 +62,6 @@ class TranslationRow:
     zh_cn: str
     checker: str
     updated_at: str
-    review_status: str | None = None
-    created_at: str | None = None
 
 
 @dataclass(frozen=True)
@@ -84,7 +74,6 @@ class SameKeyRow:
     same_text: bool  # 原文與目前條目相同（手動儲存時會被一併取代）
     zh_tw: str
     source: int | None
-    review_status: str | None = None
 
 
 @dataclass(frozen=True)
@@ -97,7 +86,6 @@ class SameTextRow:
     key: str
     zh_tw: str
     source: int | None
-    review_status: str | None = None
 
 
 @dataclass(frozen=True)
@@ -110,259 +98,6 @@ class HistoryRow:
     old_zh_tw: str
     new_zh_tw: str
     note: str
-    prev_manual: str | None = None
-    prev_checker: str | None = None
-    prev_review_status: str | None = None
-    new_checker: str | None = None
-    new_review_status: str | None = None
-    prev_revision: int | None = None
-    new_revision: int | None = None
-
-
-@dataclass(frozen=True)
-class QualityFilter:
-    """Filter the current effective translation using the shared token analyzer."""
-
-    status: str = "all"
-    direction: str = "all"
-    token_category: str = "all"
-
-    def __post_init__(self) -> None:
-        if self.status not in {
-            "all",
-            "mismatch",
-            "consistent",
-            "unknown_source",
-            "missing_translation",
-            "whitespace",
-        }:
-            raise ValueError(f"未知翻譯品質狀態：{self.status}")
-        if self.direction not in {"all", "missing", "extra"}:
-            raise ValueError(f"未知 token 不一致方向：{self.direction}")
-        if self.token_category not in {
-            "all",
-            "placeholder",
-            "minecraft",
-            "patchouli",
-            "newline",
-        }:
-            raise ValueError(f"未知 token 類別：{self.token_category}")
-
-    @property
-    def active(self) -> bool:
-        return (
-            self.status != "all"
-            or self.direction != "all"
-            or self.token_category != "all"
-        )
-
-
-@dataclass(frozen=True)
-class TimeFilter:
-    """UTC half-open time range over one explicitly selected timestamp meaning."""
-
-    kind: str
-    start_utc: str | None = None
-    end_utc: str | None = None
-    unknown_policy: str = "include"
-    action: str = "all"
-
-    def __post_init__(self) -> None:
-        if self.kind not in {
-            "entry_created",
-            "translation_created",
-            "effective_updated",
-            "manual_activity",
-        }:
-            raise ValueError(f"未知時間類型：{self.kind}")
-        if self.unknown_policy not in {"include", "exclude", "only"}:
-            raise ValueError(f"未知時間未知值策略：{self.unknown_policy}")
-        if self.action not in {"all", "edit", "review", "batch", "revert"}:
-            raise ValueError(f"未知歷史操作類型：{self.action}")
-        if self.start_utc and self.end_utc and self.start_utc >= self.end_utc:
-            raise ValueError("時間區間無效：起始時間必須早於結束時間")
-
-
-@dataclass(frozen=True)
-class EntryFilter:
-    """Immutable resolved query shared by entries, count, paging and batch preview."""
-
-    version: str
-    mod_id: str | None = None
-    kind: str | None = None
-    state: str = "all"
-    query: str = ""
-    source: int | None = None
-    review_status: str | None = None
-    entry_ids: tuple[int, ...] | None = None
-    time: TimeFilter | None = None
-    quality: QualityFilter = field(default_factory=QualityFilter)
-    sort_by: str = "default"
-    include_ids: tuple[int, ...] | None = None
-    exclude_ids: tuple[int, ...] = ()
-
-    def __post_init__(self) -> None:
-        if self.state not in {"all", "none", "diff", "changed", "manual", "ok", "same"}:
-            raise ValueError(f"未知條目狀態：{self.state}")
-        if self.review_status not in (None, "unreviewed", "reviewed", "legacy_unknown"):
-            raise ValueError(f"未知人工審核狀態：{self.review_status}")
-        if self.sort_by not in {
-            "default",
-            "entry_newest",
-            "entry_oldest",
-            "effective_updated_newest",
-            "manual_activity_newest",
-        }:
-            raise ValueError(f"未知條目排序：{self.sort_by}")
-        for name in ("entry_ids", "include_ids", "exclude_ids"):
-            values = getattr(self, name)
-            if values is not None:
-                object.__setattr__(
-                    self, name, tuple(dict.fromkeys(int(x) for x in values))
-                )
-
-
-@dataclass(frozen=True)
-class ReviewPreviewItem:
-    entry_id: int
-    mc_version: str
-    text: str
-    source: int | None
-    review_status: str | None
-    checker: str | None
-    effective_revision: int | None
-    manual_text: str | None
-    manual_checker: str | None
-    manual_review_status: str | None
-    manual_revision: int | None
-    included: bool
-    reason: str
-
-
-@dataclass(frozen=True)
-class BatchReplaceChange:
-    entry_id: int
-    kind: str
-    mc_version: str
-    mod_id: str
-    key: str
-    en_us: str
-    old_zh_tw: str
-    new_zh_tw: str
-    effective_source: int
-    effective_checker: str
-    effective_review_status: str | None
-    effective_revision: int | None
-    effective_updated_at: str | None
-    manual_zh_tw: str | None
-    manual_checker: str | None
-    manual_review_status: str | None
-    manual_revision: int | None
-    is_extra_version: bool = False
-    root_entry_id: int | None = None
-    old_quality_issues: tuple[str, ...] = ()
-    new_quality_issues: tuple[str, ...] = ()
-    old_whitespace_note: str = ""
-    new_whitespace_note: str = ""
-    quality_deltas: tuple[QualityIssueDelta, ...] = ()
-
-    @property
-    def quality_worsened(self) -> bool:
-        return any(delta.after > delta.before for delta in self.quality_deltas) or bool(
-            self.new_whitespace_note and not self.old_whitespace_note
-        )
-
-    @property
-    def quality_improved(self) -> bool:
-        return any(delta.after < delta.before for delta in self.quality_deltas) or bool(
-            self.old_whitespace_note and not self.new_whitespace_note
-        )
-
-    @property
-    def quality_mixed(self) -> bool:
-        return self.quality_worsened and self.quality_improved
-
-    @property
-    def quality_change_kind(self) -> str:
-        if self.quality_mixed:
-            return "mixed"
-        if self.quality_worsened:
-            return "worsened"
-        if self.quality_improved:
-            return "improved"
-        return "unchanged"
-
-
-@dataclass(frozen=True)
-class QualityIssueDelta:
-    """Count change for one missing/extra source token in a replacement."""
-
-    token: str
-    direction: str
-    before: int
-    after: int
-
-
-@dataclass(frozen=True)
-class BatchReplaceSkipped:
-    entry_id: int
-    mc_version: str
-    key: str
-    reason: str
-    is_extra_version: bool = False
-
-
-@dataclass(frozen=True)
-class BatchReplacePlan:
-    database_identity: str
-    criteria: EntryFilter
-    find_text: str
-    replace_text: str
-    propagate: bool
-    root_ids: tuple[int, ...]
-    changes: tuple[BatchReplaceChange, ...]
-    skipped: tuple[BatchReplaceSkipped, ...]
-    confirmed_quality_worsening: bool = False
-
-    @property
-    def total_unique_entries(self) -> int:
-        extras = {
-            row.entry_id
-            for row in (*self.changes, *self.skipped)
-            if row.is_extra_version
-        }
-        return len(set(self.root_ids) | extras)
-
-    @property
-    def extra_version_count(self) -> int:
-        return sum(row.is_extra_version for row in self.changes)
-
-    @property
-    def extra_candidate_count(self) -> int:
-        return sum(row.is_extra_version for row in (*self.changes, *self.skipped))
-
-    @property
-    def update_count(self) -> int:
-        return len(self.changes)
-
-    @property
-    def skipped_count(self) -> int:
-        return len(self.skipped)
-
-
-@dataclass(frozen=True)
-class BatchReplaceResult:
-    batch_id: str
-    updated: int
-    skipped: int
-    total: int
-
-
-@dataclass(frozen=True)
-class BatchRevertResult:
-    reverted: int
-    skipped: int
-    total: int
 
 
 @dataclass
@@ -452,13 +187,3 @@ class VersionStat:
     converted: int  # 簡中轉繁
     ai: int
     untranslated: int
-
-
-@dataclass(frozen=True)
-class EffectiveSourceStat:
-    """One effective-source bucket for a game version."""
-
-    mc_version: str
-    source: int | None
-    review_status: str | None
-    count: int

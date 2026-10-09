@@ -28,6 +28,6 @@
   "view_files": {
     "app/views/icon_preview/icon_cache.py": 957,
     "app/views/icon_preview_view.py": 834,
-    "app/views/moddb/entries_panel.py": 983
+    "app/views/moddb/entries_panel.py": 888
   }
 }
