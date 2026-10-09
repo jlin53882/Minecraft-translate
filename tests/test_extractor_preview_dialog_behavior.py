@@ -70,8 +70,8 @@ class _Env:
         monkeypatch.setattr(mod, "_UI_FLUSH_INTERVAL_SEC", 0)
         monkeypatch.setattr(
             mod,
-            "prepare_extraction_paths",
-            lambda mods, mode, out: str(tmp_path / "resolved_out"),
+            "prepare_preview_paths",
+            lambda mods, mode, out="": out or str(tmp_path / "resolved_out"),
         )
         monkeypatch.setattr(
             mod, "preview_extraction_generator", lambda *a, **k: iter(env.updates)
@@ -195,7 +195,36 @@ def test_confirm_closes_preview_and_opens_extractor_with_auto_start(env):
     assert kwargs["auto_start"] is True
     assert kwargs["mode"] == "book"
     assert kwargs["input_path"] == str(env.mods)
+    assert kwargs["output_path"] == str(env.mods / "out")
     assert kwargs["skip_zh_cn"] is True  # 預覽時勾選的「跳過 zh_cn」要帶到實際提取
+
+
+def test_blank_output_preview_snapshot_matches_confirmed_extraction_target(
+    env, monkeypatch
+):
+    from app.services_impl.pipelines import extract_service
+
+    config = {
+        "extractor": {"output_folder_names": {"dual_preview": "_測試_dual_preview"}}
+    }
+    monkeypatch.setattr(
+        mod, "prepare_preview_paths", extract_service.prepare_preview_paths
+    )
+    monkeypatch.setattr(extract_service, "load_config", lambda: config)
+    env.updates = [{"result": _result()}]
+    dialog = env.open(mode="dual", output_path="")
+
+    env.scan(dialog)
+    expected = str(env.mods.with_name("mods_測試_dual_preview"))
+    assert f"輸出（確認執行後）：{expected}" in _texts(dialog)
+    assert not env.mods.with_name("mods_測試_dual_preview").exists()
+
+    # A settings change after preview must not move this operation's target.
+    config["extractor"]["output_folder_names"]["dual_preview"] = "_new_suffix"
+    _action(dialog, "確認執行").on_click(None)
+
+    assert env.opened_extractor[0]["output_path"] == expected
+    assert not env.mods.with_name("mods_測試_dual_preview").exists()
 
 
 def test_cancel_in_result_view_only_pops_the_dialog(env):
@@ -222,6 +251,30 @@ def test_dismiss_while_scanning_stops_the_worker_early(env, monkeypatch):
     _action(dialog, "開始預覽").on_click(None)
     env.threads[-1].target()
     assert seen == []
+
+
+def test_cancelled_scan_does_not_report_100_percent(env, monkeypatch):
+    dialog_ref = {}
+
+    def gen(*_args, **_kwargs):
+        yield {"progress": 0.4, "current": 2, "total": 5, "log": "掃描中"}
+        dialog_ref["dialog"].on_dismiss(None)
+        yield {"result": _result()}
+
+    monkeypatch.setattr(mod, "preview_extraction_generator", gen)
+    dialog = env.open()
+    dialog_ref["dialog"] = dialog
+    _action(dialog, "開始預覽").on_click(None)
+    env.threads[-1].target()
+
+    tasks, env.page._tasks = env.page._tasks, []
+    for coro, args in tasks:
+        asyncio.run(coro(*args))
+
+    texts = _texts(dialog)
+    assert "已取消" in texts
+    assert "100%" not in texts
+    assert not any("預覽完成" == text for text in texts)
 
 
 def test_rescan_after_a_finished_scan_works_again(env):
@@ -293,3 +346,74 @@ def test_empty_result_unlocks_modal(env):
     dialog = env.open()
     env.scan(dialog)
     assert dialog.modal is False
+
+
+def test_cancelled_preview_stays_locked_until_worker_reports_done(env):
+    """A cancel request alone must not unlock the preview while its worker drains."""
+    from types import SimpleNamespace
+
+    from app.views.extractor.extractor_state import PreviewState
+
+    ctx = SimpleNamespace(
+        page=env.page,
+        state={"cancelled": True, "running": True},
+        preview_state=PreviewState(progress=0.4, done=False),
+        progress_bar=ft.ProgressBar(value=0.4),
+        progress_pct=ft.Text("40%"),
+        status_text=ft.Text("掃描中"),
+        start_button=ft.Button("開始預覽", disabled=True),
+        preview_dialog=ft.AlertDialog(modal=True),
+        add_log=lambda *_args, **_kwargs: None,
+        scan_task=None,
+    )
+
+    async def verify_lifecycle():
+        poller = asyncio.create_task(mod._preview_ui_poller(ctx))
+        await asyncio.sleep(0.01)
+
+        assert not poller.done()
+        assert ctx.start_button.disabled is True
+        assert ctx.state["running"] is True
+        assert ctx.preview_dialog.modal is True
+        assert ctx.status_text.value == "正在取消..."
+
+        ctx.preview_state.done = True
+        await poller
+
+        assert ctx.start_button.disabled is False
+        assert ctx.state["running"] is False
+        assert ctx.preview_dialog.modal is False
+        assert ctx.status_text.value == "已取消"
+
+    asyncio.run(verify_lifecycle())
+
+
+def test_cancel_wins_over_result_ready_before_poller_handles_completion(env):
+    """A result populated before cancel must not be presented after cancel wins."""
+    from types import SimpleNamespace
+
+    from app.views.extractor.extractor_state import PreviewState
+
+    shown_results = []
+    ctx = SimpleNamespace(
+        page=env.page,
+        state={"cancelled": True, "running": True},
+        preview_state=PreviewState(progress=0.8, done=True, result=_result(count=3)),
+        progress_bar=ft.ProgressBar(value=0.8),
+        progress_pct=ft.Text("80%"),
+        status_text=ft.Text("掃描中"),
+        start_button=ft.Button("開始預覽", disabled=True),
+        preview_dialog=ft.AlertDialog(modal=True),
+        add_log=lambda *_args, **_kwargs: None,
+        show_result_dialog=shown_results.append,
+        scan_task=None,
+    )
+
+    asyncio.run(mod._preview_ui_poller(ctx))
+
+    assert shown_results == []
+    assert ctx.status_text.value == "已取消"
+    assert ctx.progress_pct.value != "100%"
+    assert ctx.start_button.disabled is False
+    assert ctx.state["running"] is False
+    assert ctx.preview_dialog.modal is False

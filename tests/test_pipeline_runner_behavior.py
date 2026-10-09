@@ -235,6 +235,75 @@ def test_pipeline_admission_rejection_does_not_run_service(loop_page):
     assert any("未啟動新工作" in line for line in panel.logs)
 
 
+def test_lm_sources_share_the_same_database_settings_snapshot(tmp_path, monkeypatch):
+    from app.services_impl.moddb_service import DbSettings
+    from app.views.moddb.lm_db_options import LmDbRunSnapshot
+    from translation_tool.translation_db.schema import SRC_AI, SRC_JAR_TW
+
+    priority_a = (SRC_JAR_TW, SRC_AI)
+    priority_b = (SRC_AI, SRC_JAR_TW)
+
+    monkeypatch.setattr("app.views.pipeline.pipeline_config.load_config", dict)
+    cfg = PipelineConfig(str(tmp_path / "mods"), str(tmp_path / "output"))
+    sources = cfg.translate_input_dirs
+    for source in sources:
+        path = tmp_path / source
+        path.mkdir(parents=True, exist_ok=True)
+        (path / "entry.json").write_text("{}", encoding="utf-8")
+
+    database_snapshot = DbSettings(
+        enabled=True,
+        merge_enabled=True,
+        path=str((tmp_path / "database-a.db").resolve()),
+        version="1.21.1",
+        priority=priority_a,
+    )
+    lm_snapshot = LmDbRunSnapshot(
+        use_db=True,
+        version="1.21.1",
+        source="global",
+        warning="",
+        database_settings=database_snapshot,
+    )
+    calls = []
+    global_settings = {"priority": database_snapshot.priority}
+
+    def translate(**kwargs):
+        calls.append(
+            {**kwargs, "global_priority_at_start": global_settings["priority"]}
+        )
+        if len(calls) == 1:
+            # Simulate a settings edit between source 1 and source 2 of Step 3.
+            global_settings["priority"] = priority_b
+
+    actions = PipelineActions(PipelineServices(translate=translate))
+
+    actions._step_translate(
+        {
+            "lm_db_snapshot": lm_snapshot,
+            "dry_run": False,
+            "write_new_cache": True,
+        },
+        cfg,
+        TaskSession(name="translate"),
+    )
+
+    assert [call["input_dir"] for call in calls] == sources
+    assert all(call["use_translation_db"] is True for call in calls)
+    assert all(call["translation_db_version"] == "1.21.1" for call in calls)
+    assert all(
+        call["translation_db_settings_snapshot"] is database_snapshot for call in calls
+    )
+    assert [call["global_priority_at_start"] for call in calls] == [
+        priority_a,
+        priority_b,
+    ]
+    assert all(
+        call["translation_db_settings_snapshot"].priority == priority_a
+        for call in calls
+    )
+
+
 @pytest.mark.parametrize("outcome", ["handled_error", "unexpected_exception", "cancel"])
 def test_composite_parent_records_terminal_failure_or_cancel(
     loop_page, monkeypatch, outcome

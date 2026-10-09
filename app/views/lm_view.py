@@ -10,7 +10,7 @@ from functools import partial
 
 import flet as ft
 
-from app.services_impl.moddb_service import load_db_settings, summarize_database
+from app.services_impl.moddb_service import DbSettings
 from app.services_impl.pipelines.lm_service import run_lm_translation_service
 from app.tasks.operation_registry import launch_page_operation
 from app.tasks.task_session import TaskSession, tag_session
@@ -20,17 +20,12 @@ from app.ui.poller import PollerHandle
 from app.ui.snack import show_snack
 from app.ui.status_chip import apply_status_style, set_chip_status
 from app.views._log import LogView, load_ui_logging_config
-from app.views.moddb.version_picker import (
-    refresh_target_version_options,
-    set_target_version,
-    target_version_dropdown,
-    target_version_value,
-)
+from app.views.moddb.lm_db_options import LmDbOptions, LmDbRunSnapshot
 from translation_tool.utils.config_manager import (
     get_batch_write_interval,
     load_config,
 )
-from translation_tool.utils.log_unit import log_debug, log_info, log_warning
+from translation_tool.utils.log_unit import log_debug, log_info
 
 DEFAULT_LM_TRANSLATE_FOLDER_NAME = "LM翻譯後"
 
@@ -80,6 +75,7 @@ class LMView(ft.Column):
         self._ui_timer_running = False
         self._poller = PollerHandle()  # 輪詢的 owner：卸載時 stop、重新掛載時 resume
         self._started_at: float | None = None
+        self._resume_db_settings_snapshot: DbSettings | None = None
 
         # 基本輸入
         self.input_path = kit.text_field(
@@ -139,83 +135,41 @@ class LMView(ft.Column):
 
     def _init_db_options(self) -> None:
         """Mod 資料庫選項：預設值取自設定，可在這一次任務個別覆寫。"""
-        db_settings = load_db_settings()
-        db_row = kit.SwitchRow(
-            "使用 Mod 資料庫",
-            "資料庫 → 快取 → AI；翻譯結果也會寫回資料庫",
-            db_settings.enabled,
-            divider=False,
+        self.lm_db_options = LmDbOptions(
+            self._page.update, on_missing_database=self._show_db_setup_hint
         )
-        self.use_db_switch = db_row.switch
-        self.use_db_switch.on_change = self._on_db_option_changed
-        self._database_missing = False
-        self.db_version_field = target_version_dropdown(
-            value=db_settings.version,
-            hint="選擇版本或手動輸入（留空則使用設定中的預設版本）",
-            on_change=self._on_db_option_changed,
-            on_focus=self._on_db_version_focus,
-        )
-        self.db_info = ft.Text("", size=11.5, color=C.DIM)
-        self.refresh_db_info()
-        self.db_card = kit.section_card(
-            "預翻譯資料庫",
-            ft.Column(
-                [db_row, self.db_version_field, self.db_info],
-                spacing=10,
-                horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
-            ),
-            icon=ft.Icons.DATASET_OUTLINED,
-            tone="dia",
-        )
+        self.use_db_switch = self.lm_db_options.use_db_switch
+        self.db_version_field = self.lm_db_options.version_field
+        self.db_info = self.lm_db_options.info
+        self.db_card = self.lm_db_options.card
+        self._database_missing = self.lm_db_options._summary is None
 
     def _on_db_option_changed(self, _e=None) -> None:
         """開關或版本變更：更新提示（沒有指定版本時，這次不會使用資料庫）。"""
-        self.refresh_db_info()
-        try:
-            self._page.update()
-        except Exception as exc:  # noqa: BLE001 - 頁面尚未掛載時只是不即時更新提示
-            log_debug(f"LM 資料庫提示更新略過：{exc}")
+        self.lm_db_options.refresh_info()
+        self.lm_db_options._update()
 
     def _on_db_version_focus(self, _e=None) -> None:
-        refresh_target_version_options(self.db_version_field)
-        self.refresh_db_info()
+        self.lm_db_options.sync_from_global()
+        self._database_missing = self.lm_db_options._summary is None
         if self._database_missing:
-            show_snack(
-                self._page,
-                "尚未建立 Mod 資料庫，請先到「Mod 資料庫」頁掃描 JAR 建立資料庫。",
-                C.GOLD,
-            )
+            self._show_db_setup_hint()
         try:
             self._page.update()
         except Exception as exc:  # noqa: BLE001 - 頁面尚未掛載時略過即時更新
             log_debug(f"LM 版本選項更新略過：{exc}")
 
+    def _show_db_setup_hint(self) -> None:
+        show_snack(
+            self._page,
+            "尚未建立 Mod 資料庫，請先到「Mod 資料庫」頁掃描 JAR 建立資料庫。",
+            C.GOLD,
+        )
+
     def refresh_db_info(self) -> None:
         """顯示資料庫目前的狀態（不存在時提示如何建立；開著卻沒有版本時提醒填寫）。"""
-        try:
-            info = summarize_database()
-        except Exception as exc:  # noqa: BLE001 - 資料庫問題只影響提示文字，不應讓頁面載入失敗
-            log_warning(f"讀取 Mod 資料庫摘要失敗：{exc!r}")
-            info = {"problem": f"讀取摘要失敗（{exc}），詳情請看後台 log"}
-        if info is not None and info.get("problem"):
-            self._database_missing = False
-            self.db_info.value = f"⚠ 資料庫無法使用：{info['problem']}"
-        elif info is None:
-            self._database_missing = True
-            self.db_info.value = (
-                "尚未建立資料庫：到「Mod 資料庫」頁掃描 jar 後，這裡會自動使用。"
-            )
-        else:
-            self._database_missing = False
-            self.db_info.value = (
-                f"資料庫 {info['entries']:,} 條目（已翻譯 {info['progress']}%）・"
-                f"版本：{'、'.join(info['versions'][:4]) or '—'}"
-            )
-        no_version = not target_version_value(self.db_version_field) and not (
-            load_db_settings().version
-        )
-        if self.use_db_switch.value and no_version:
-            self.db_info.value += "\n⚠ 尚未指定目標版本：請填寫上方「目標版本」，否則這次不會使用也不會寫入資料庫。"
+        self.lm_db_options.sync_from_global()
+        self._database_missing = self.lm_db_options._summary is None
 
     def _build_lm_settings_card(self, batch_interval, cache_row, dry_run_row, lang_row):
         """機器翻譯設定卡片與執行按鈕。"""
@@ -461,7 +415,7 @@ class LMView(ft.Column):
         dry_run = self.dry_run_switch.value
         export_lang = self.export_lang_checkbox.value
         write_new_cache = self.write_new_cache_switch.value
-        db_version = target_version_value(self.db_version_field)
+        db_snapshot = self._db_snapshot_for_run()
 
         log_debug(
             "LM UI options: dry_run=%s export_lang=%s write_new_cache=%s",
@@ -480,8 +434,9 @@ class LMView(ft.Column):
                 dry_run,
                 export_lang,
                 write_new_cache,
-                use_translation_db=self.use_db_switch.value,
-                translation_db_version=db_version,
+                use_translation_db=db_snapshot.use_db,
+                translation_db_version=db_snapshot.version,
+                translation_db_settings_snapshot=db_snapshot.database_settings,
             ),
             name="機器翻譯",
             owner="lm",
@@ -495,6 +450,19 @@ class LMView(ft.Column):
             return
 
         self.start_ui_timer()
+
+    def _db_snapshot_for_run(self) -> LmDbRunSnapshot:
+        """Return the restored checkpoint identity or resolve current page choices once."""
+        settings = self._resume_db_settings_snapshot
+        if settings is None:
+            return self.lm_db_options.snapshot_for_run()
+        return LmDbRunSnapshot(
+            use_db=settings.enabled,
+            version=settings.version if settings.enabled else "",
+            source="resume",
+            warning="續跑固定沿用上次資料庫快照",
+            database_settings=settings,
+        )
 
     def resume_interrupted(self, task) -> None:
         """重開後續跑（#151）：帶入上次的輸入與選項後開始。
@@ -512,11 +480,34 @@ class LMView(ft.Column):
         self.write_new_cache_switch.value = task.write_new_cache
         # 沿用上次任務實際使用的資料庫選項，不採用目前的頁面／設定值（否則剩餘項目會寫回不同版本）
         # 沒有版本＝上次其實沒有使用資料庫；不能讓空欄位退回目前設定的版本
-        self.use_db_switch.value = task.use_translation_db and bool(
-            task.translation_db_version
-        )
-        set_target_version(self.db_version_field, task.translation_db_version)
-        self.refresh_db_info()
+        self._resume_db_settings_snapshot = None
+        saved_db_settings = getattr(task, "translation_db_settings", None)
+        if task.use_translation_db and not saved_db_settings:
+            show_snack(
+                self.page,
+                "續跑標記缺少資料庫路徑快照，為避免使用錯誤資料庫已停止續跑。",
+                C.GOLD,
+            )
+            return
+        if saved_db_settings:
+            settings_data = dict(saved_db_settings)
+            settings_data["priority"] = tuple(settings_data.get("priority", ()))
+            settings_data["priority_lines"] = tuple(
+                settings_data.get("priority_lines", ())
+            )
+            try:
+                self._resume_db_settings_snapshot = DbSettings(**settings_data)
+            except (TypeError, ValueError) as exc:
+                show_snack(self.page, f"續跑資料庫快照無法還原：{exc}", C.RED)
+                return
+            self.lm_db_options.restore_snapshot(self._resume_db_settings_snapshot)
+        else:
+            self.use_db_switch.value = False
+            self.lm_db_options._enabled_touched = True
+            self.lm_db_options._version_touched = True
+            self.lm_db_options.inherit_version_switch.value = False
+            self.lm_db_options.version_field.value = ""
+            self.lm_db_options.version_field.text = ""
         self.start_clicked(None)
 
     def cancel_clicked(self, e):

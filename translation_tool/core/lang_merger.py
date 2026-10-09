@@ -6,16 +6,16 @@
 
 from __future__ import annotations
 
-import concurrent.futures
 import os
 import zipfile
 from collections import defaultdict
 from collections.abc import Generator
-from contextlib import contextmanager
 from typing import Any
 
+from translation_tool.utils.bounded_executor import bounded_as_completed
 from translation_tool.utils.ui_mirror import ContextThreadPoolExecutor
 
+from ..translation_db import DbSettings
 from ..utils.cancellation import raise_if_cancelled
 from ..utils.config_manager import load_config
 from ..utils.log_unit import log_debug, log_error, log_exception, log_info
@@ -41,21 +41,6 @@ def _checkpoint(index: int) -> None:
         raise_if_cancelled()
 
 
-@contextmanager
-def _cancel_pending_on_exit(futures: list) -> Generator[None, None, None]:
-    """離開時取消尚未開始的任務。
-
-    要放在 ``with executor`` 之後（內層先離開）：取消、關閉 generator 或例外時，
-    佇列中還沒開始的任務直接丟棄，執行緒池只需等「正在執行」的少數任務，
-    而不是把整個佇列跑完才結束。
-    """
-    try:
-        yield
-    finally:
-        for fut in futures:
-            fut.cancel()
-
-
 _FILE_FAILED_MESSAGE = "有檔案處理失敗（原因請查看日誌中的 ERROR 記錄）"
 
 
@@ -76,9 +61,14 @@ def merge_zhcn_to_zhtw_from_zip(
     progress_end: float = 1.0,
     use_translation_db: bool | None = None,
     translation_db_version: str | None = None,
+    translation_db_settings_snapshot: DbSettings | None = None,
 ) -> Generator[dict[str, Any], None, None]:
     """語系合併（zip）：純英文條目會先向 Mod 資料庫補譯（若設定啟用），其餘見 ``_merge_zhcn_to_zhtw_from_zip``。"""
-    with merge_db_fill(use_translation_db, translation_db_version) as db_fill:
+    with merge_db_fill(
+        use_translation_db,
+        translation_db_version,
+        settings_snapshot=translation_db_settings_snapshot,
+    ) as db_fill:
         yield from _merge_zhcn_to_zhtw_from_zip(
             zip_file,
             output_dir,
@@ -310,13 +300,51 @@ def _merge_zhcn_to_zhtw_from_zip(
             else:
                 max_workers = max_allowed_workers
 
-            futures = []
             # 所有任務共用同一個累計讀取預算（防止大量合法大小成員的 ZIP bomb）
             zip_budget = ZipReadBudget.for_pack(label=str(zip_file))
-            with (
-                ContextThreadPoolExecutor(max_workers=max_workers) as executor,
-                _cancel_pending_on_exit(futures),
-            ):
+            patchouli_eff_cache: dict = {}
+
+            def iter_work_items():
+                yield from ((True, paths) for paths in mods_to_process.values())
+                yield from ((False, path) for path in eligible_other_files)
+
+            def submit_work(executor, task):
+                is_mod, payload = task
+                if is_mod:
+                    return executor.submit(
+                        _process_single_mod,
+                        ZipReader(zf, zip_budget),
+                        payload,
+                        rules,
+                        lang_output_dir,
+                        must_translate_dir,
+                        errordata_output_dir,
+                        # 需保留原始大小寫：用於偵測/剝離包裝前綴，
+                        # 小寫版 all_files_cache 會讓 startswith 比對失敗
+                        all_files_cache=all_names_raw,
+                        wrapper_prefix=mod_wrapper_prefix,
+                        db_fill=db_fill,
+                    )
+                return executor.submit(
+                    _process_content_or_copy_file,
+                    ZipReader(zf, zip_budget),
+                    payload,
+                    rules,
+                    output_dir,
+                    only_process_lang,
+                    all_files_cache=all_files_cache,
+                    wrapper_prefix=content_wrapper_prefix,
+                    patchouli_eff_cache=patchouli_eff_cache,
+                    patchouli_output_dir=patchouli_output_dir,
+                    other_output_dir=other_output_dir,
+                    errordata_dir=errordata_output_dir,
+                    process_zh_cn=process_zh_cn,
+                    patchouli_skip=patchouli_skip,
+                    patchouli_threshold=patchouli_threshold,
+                    zh_en_threshold=zh_en_threshold,
+                )
+
+            with ContextThreadPoolExecutor(max_workers=max_workers) as executor:
                 # ✅ 優化點：在啟動 ThreadPool 前，先完成一次性的路徑標準化快取
                 all_names_raw = all_names  # 同一份清單：不再重複呼叫 namelist()
                 all_files_cache = [n.lower().replace("\\", "/") for n in all_names_raw]
@@ -326,86 +354,47 @@ def _merge_zhcn_to_zhtw_from_zip(
                 # all_files_cache 是小寫版,只供 case-insensitive 查找
                 content_wrapper_prefix = detect_content_wrapper_prefix(all_names_raw)
 
-                # 提交每個 mod 的處理（這裡每個 mod 的 paths 會包含 zh_cn/zh_tw/en_us 任一或多個）
-                for mod_key, paths in mods_to_process.items():
-                    raise_if_cancelled()
-                    futures.append(
-                        executor.submit(
-                            _process_single_mod,
-                            ZipReader(zf, zip_budget),
-                            paths,
-                            rules,
-                            lang_output_dir,
-                            must_translate_dir,
-                            errordata_output_dir,
-                            # 需保留原始大小寫：用於偵測/剝離包裝前綴，
-                            # 小寫版 all_files_cache 會讓 startswith 比對失敗
-                            all_files_cache=all_names_raw,
-                            wrapper_prefix=mod_wrapper_prefix,
-                            db_fill=db_fill,
-                        )
-                    )
-
-                # 提交其他檔案處理（例如圖片、md、json5、localized files 等）
-                patchouli_eff_cache: dict = {}
-                for input_path in eligible_other_files:
-                    raise_if_cancelled()
-                    futures.append(
-                        executor.submit(
-                            _process_content_or_copy_file,
-                            ZipReader(zf, zip_budget),
-                            input_path,
-                            rules,
-                            output_dir,
-                            only_process_lang,
-                            all_files_cache=all_files_cache,
-                            wrapper_prefix=content_wrapper_prefix,
-                            patchouli_eff_cache=patchouli_eff_cache,
-                            patchouli_output_dir=patchouli_output_dir,
-                            other_output_dir=other_output_dir,
-                            errordata_dir=errordata_output_dir,
-                            process_zh_cn=process_zh_cn,
-                            patchouli_skip=patchouli_skip,
-                            patchouli_threshold=patchouli_threshold,
-                            zh_en_threshold=zh_en_threshold,
-                        )
-                    )
-
                 completed = 0
-                for fut in concurrent.futures.as_completed(futures):
-                    raise_if_cancelled()
-                    completed += 1  # noqa: SIM113
-                    try:
-                        res = fut.result()
-                    except Exception as e:  # noqa: BLE001
-                        log_error(f"處理時發生未預期錯誤: {e!r}")
-                        res = {"success": False, "error": True}
+                with bounded_as_completed(
+                    executor,
+                    iter_work_items(),
+                    submit_work,
+                    max_in_flight=max_workers * 2,
+                ) as work:
+                    for fut, _task in work:
+                        raise_if_cancelled()
+                        completed += 1
+                        try:
+                            res = fut.result()
+                        except Exception as e:  # noqa: BLE001
+                            log_error(f"處理時發生未預期錯誤: {e!r}")
+                            res = {"success": False, "error": True}
 
-                    progress = _scale_progress(
-                        completed / total_tasks, progress_start, processing_end
-                    )
-                    # ⭐ 修改重點：無論有沒有 log，都要 yield 進度
-                    # 這樣 UI 才會收到 progress 並更新進度條
+                        progress = _scale_progress(
+                            completed / total_tasks, progress_start, processing_end
+                        )
+                        # ⭐ 修改重點：無論有沒有 log，都要 yield 進度
+                        # 這樣 UI 才會收到 progress 並更新進度條
 
-                    # 1. 準備回傳給 UI 的資料包
-                    yield_data = {
-                        "progress": progress,
-                        "error": res.get("error", False),
-                        "pending_count": res.get("pending_count", 0),
-                    }
-                    if yield_data["error"]:
-                        yield_data["message"] = _FILE_FAILED_MESSAGE
+                        # 1. 準備回傳給 UI 的資料包
+                        yield_data = {
+                            "progress": progress,
+                            "error": res.get("error", False),
+                            "pending_count": res.get("pending_count", 0),
+                        }
+                        if yield_data["error"]:
+                            yield_data["message"] = _FILE_FAILED_MESSAGE
 
-                    # 2. 終端機日誌處理
-                    log_msg = res.get("log")
-                    if log_msg:
-                        log_info(log_msg)
-                    else:
-                        log_debug(f"靜默處理完成 (進度: {progress:.2%})")
+                        # 2. 終端機日誌處理
+                        log_msg = res.get("log")
+                        if log_msg:
+                            log_info(log_msg)
+                        else:
+                            log_debug(f"靜默處理完成 (進度: {progress:.2%})")
 
-                    # 3. 核心重點：無論有沒有 log，每一條任務完成都 yield 一次
-                    # 這樣進度條 (progress) 就會隨著任務完成一個個跳動
-                    yield yield_data
+                        # 3. 核心重點：無論有沒有 log，每一條任務完成都 yield 一次
+                        # 這樣進度條 (progress) 就會隨著任務完成一個個跳動
+                        yield yield_data
             # 累計讀取預算用盡是 sticky 的：之後所有讀取都會失敗並被視為「單檔失敗」，
             # 輸出只會是部分合併。必須在 pack 層級明確回報，不能顯示成功（issue #109）。
             budget_exhausted = zip_budget.exhausted
@@ -484,9 +473,14 @@ def merge_zhcn_to_zhtw_from_folder(
     progress_end: float = 1.0,
     use_translation_db: bool | None = None,
     translation_db_version: str | None = None,
+    translation_db_settings_snapshot: DbSettings | None = None,
 ) -> Generator[dict[str, Any], None, None]:
     """語系合併（folder）：純英文條目會先向 Mod 資料庫補譯（若設定啟用），其餘見 ``_merge_zhcn_to_zhtw_from_folder``。"""
-    with merge_db_fill(use_translation_db, translation_db_version) as db_fill:
+    with merge_db_fill(
+        use_translation_db,
+        translation_db_version,
+        settings_snapshot=translation_db_settings_snapshot,
+    ) as db_fill:
         yield from _merge_zhcn_to_zhtw_from_folder(
             input_dir,
             output_dir,
@@ -666,87 +660,87 @@ def _merge_zhcn_to_zhtw_from_folder(
         else:
             max_workers = max_allowed_workers
 
-        futures = []
-        with (
-            ContextThreadPoolExecutor(max_workers=max_workers) as executor,
-            _cancel_pending_on_exit(futures),
-        ):
-            all_files_cache = [n.lower().replace("\\", "/") for n in all_names]
-            # 包裝前綴只算一次,避免每個 mod / 內容檔各掃一次全部檔名
-            mod_wrapper_prefix = detect_mod_wrapper_prefix(all_names)
-            # 前綴剝離必須用原始大小寫的檔名（同 ZIP 模式說明）
-            content_wrapper_prefix = detect_content_wrapper_prefix(all_names)
+        all_files_cache = [n.lower().replace("\\", "/") for n in all_names]
+        # 包裝前綴只算一次,避免每個 mod / 內容檔各掃一次全部檔名
+        mod_wrapper_prefix = detect_mod_wrapper_prefix(all_names)
+        # 前綴剝離必須用原始大小寫的檔名（同 ZIP 模式說明）
+        content_wrapper_prefix = detect_content_wrapper_prefix(all_names)
+        patchouli_eff_cache: dict = {}
 
-            for mod_key, paths in mods_to_process.items():
-                raise_if_cancelled()
-                futures.append(
-                    executor.submit(
-                        _process_single_mod,
-                        FolderReader(input_dir),
-                        paths,
-                        rules,
-                        lang_output_dir,
-                        must_translate_dir,
-                        errordata_output_dir,
-                        # 需保留原始大小寫（同 ZIP 模式說明）
-                        all_files_cache=all_names,
-                        wrapper_prefix=mod_wrapper_prefix,
-                        db_fill=db_fill,
-                    )
+        def iter_work_items():
+            yield from ((True, paths) for paths in mods_to_process.values())
+            yield from ((False, path) for path in eligible_other_files)
+
+        def submit_work(executor, task):
+            is_mod, payload = task
+            if is_mod:
+                return executor.submit(
+                    _process_single_mod,
+                    FolderReader(input_dir),
+                    payload,
+                    rules,
+                    lang_output_dir,
+                    must_translate_dir,
+                    errordata_output_dir,
+                    # 需保留原始大小寫（同 ZIP 模式說明）
+                    all_files_cache=all_names,
+                    wrapper_prefix=mod_wrapper_prefix,
+                    db_fill=db_fill,
                 )
+            return executor.submit(
+                _process_content_or_copy_file,
+                FolderReader(input_dir),
+                payload,
+                rules,
+                output_dir,
+                only_process_lang,
+                all_files_cache=all_files_cache,
+                wrapper_prefix=content_wrapper_prefix,
+                patchouli_eff_cache=patchouli_eff_cache,
+                patchouli_output_dir=patchouli_output_dir,
+                other_output_dir=other_output_dir,
+                errordata_dir=errordata_output_dir,
+                process_zh_cn=process_zh_cn,
+                patchouli_skip=patchouli_skip,
+                patchouli_threshold=patchouli_threshold,
+                zh_en_threshold=zh_en_threshold,
+            )
 
-            patchouli_eff_cache: dict = {}
-            for input_path in eligible_other_files:
-                raise_if_cancelled()
-                futures.append(
-                    executor.submit(
-                        _process_content_or_copy_file,
-                        FolderReader(input_dir),
-                        input_path,
-                        rules,
-                        output_dir,
-                        only_process_lang,
-                        all_files_cache=all_files_cache,
-                        wrapper_prefix=content_wrapper_prefix,
-                        patchouli_eff_cache=patchouli_eff_cache,
-                        patchouli_output_dir=patchouli_output_dir,
-                        other_output_dir=other_output_dir,
-                        errordata_dir=errordata_output_dir,
-                        process_zh_cn=process_zh_cn,
-                        patchouli_skip=patchouli_skip,
-                        patchouli_threshold=patchouli_threshold,
-                        zh_en_threshold=zh_en_threshold,
-                    )
-                )
-
+        with ContextThreadPoolExecutor(max_workers=max_workers) as executor:
             completed = 0
-            for fut in concurrent.futures.as_completed(futures):
-                raise_if_cancelled()
-                completed += 1  # noqa: SIM113
-                try:
-                    res = fut.result()
-                except Exception as e:  # noqa: BLE001
-                    log_error(f"處理時發生未預期錯誤: {e!r}")
-                    res = {"success": False, "error": True}
+            with bounded_as_completed(
+                executor,
+                iter_work_items(),
+                submit_work,
+                max_in_flight=max_workers * 2,
+            ) as work:
+                for fut, _task in work:
+                    raise_if_cancelled()
+                    completed += 1
+                    try:
+                        res = fut.result()
+                    except Exception as e:  # noqa: BLE001
+                        log_error(f"處理時發生未預期錯誤: {e!r}")
+                        res = {"success": False, "error": True}
 
-                progress = _scale_progress(
-                    completed / total_tasks, progress_start, processing_end
-                )
-                yield_data = {
-                    "progress": progress,
-                    "error": res.get("error", False),
-                    "pending_count": res.get("pending_count", 0),
-                }
-                if yield_data["error"]:
-                    yield_data["message"] = _FILE_FAILED_MESSAGE
+                    progress = _scale_progress(
+                        completed / total_tasks, progress_start, processing_end
+                    )
+                    yield_data = {
+                        "progress": progress,
+                        "error": res.get("error", False),
+                        "pending_count": res.get("pending_count", 0),
+                    }
+                    if yield_data["error"]:
+                        yield_data["message"] = _FILE_FAILED_MESSAGE
 
-                log_msg = res.get("log")
-                if log_msg:
-                    log_info(log_msg)
-                else:
-                    log_debug(f"靜默處理完成 (進度: {progress:.2%})")
+                    log_msg = res.get("log")
+                    if log_msg:
+                        log_info(log_msg)
+                    else:
+                        log_debug(f"靜默處理完成 (進度: {progress:.2%})")
 
-                yield yield_data
+                    yield yield_data
 
         yield {"progress": _scale_progress(0.90, progress_start, progress_end)}
         log_info("正在清理空的待翻譯資料夾...")

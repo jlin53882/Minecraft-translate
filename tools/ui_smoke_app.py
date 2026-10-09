@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import copy
+import inspect
 import json
 import os
 import sys
@@ -22,6 +23,7 @@ SOURCE_ROOT = Path(__file__).resolve().parents[1]
 SMOKE_SCENARIOS = (
     "views",
     "dialogs",
+    "dialog-click-probe",
     "empty",
     "data",
     "running",
@@ -83,6 +85,34 @@ def _view_content(shell, view_key: str) -> ft.Control:
     item = next(item for item in shell.registry if item["key"] == view_key)
     view = item["view"]
     return getattr(view, "content", view)
+
+
+def _install_smoke_dialog_tracking(page: ft.Page) -> list[ft.DialogControl]:
+    """Track Flet native dialogs via the public show_dialog boundary (smoke only)."""
+    dialogs: list[ft.DialogControl] = []
+    show_dialog = page.show_dialog
+
+    def tracked_show_dialog(dialog: ft.DialogControl) -> None:
+        show_dialog(dialog)
+        dialogs.append(dialog)
+
+    page.show_dialog = tracked_show_dialog
+    return dialogs
+
+
+def _top_open_smoke_dialog(page: ft.Page, native_dialogs) -> ft.DialogControl | None:
+    """Return the newest open smoke dialog, whether native or overlay based."""
+    for dialog in reversed(native_dialogs):
+        if dialog.open:
+            return dialog
+    return next(
+        (
+            control
+            for control in reversed(page.overlay)
+            if isinstance(control, ft.DialogControl) and control.open
+        ),
+        None,
+    )
 
 
 def _prepare_scenario_data(scenario: str) -> None:
@@ -219,20 +249,19 @@ async def _run_view_sequence(
     page.update()
 
 
-def _dismiss_top_dialog(page: ft.Page) -> None:
-    """送出本次 smoke Dialog 的關閉狀態，保留 overlay 等待 Flutter dismiss。
+def _dismiss_top_dialog(page: ft.Page, native_dialogs) -> None:
+    """只關閉本次 smoke 最上層 Dialog，保留 overlay 等待反向動畫。
 
     Args:
         page: 持有 Flet Dialog stack 與 overlay 的 smoke Page。
 
     Side Effects:
-        關閉所有受管理 Dialog、將 AlertDialog overlay 設為 closed，並更新頁面。
+        關閉一個 smoke 追蹤的 native 或 overlay Dialog，並更新頁面。
     """
-    while page.pop_dialog() is not None:
-        pass
-    for control in tuple(page.overlay):
-        if isinstance(control, ft.AlertDialog):
-            control.open = False
+    dialog = _top_open_smoke_dialog(page, native_dialogs)
+    if dialog is not None:
+        dialog.open = False
+        dialog.update()
     page.update()
 
 
@@ -257,7 +286,13 @@ def _remove_closed_overlay_dialogs(page: ft.Page) -> None:
 
 
 async def _run_dialog_sequence(
-    page: ft.Page, shell, interval: float, runtime_root: Path, theme: str, viewport: str
+    page: ft.Page,
+    shell,
+    interval: float,
+    runtime_root: Path,
+    theme: str,
+    viewport: str,
+    native_dialogs,
 ) -> None:
     """透過正式 workflow entry points 展示 Dialog，並重開 Pipeline Merge。"""
     from app.views.extractor.extractor_dialog import (
@@ -270,6 +305,14 @@ async def _run_dialog_sequence(
     output_root = runtime_root / "fixture-output"
     input_root.mkdir(exist_ok=True)
     output_root.mkdir(exist_ok=True)
+    # The standalone translation and bundle dialogs derive their preview input
+    # from the pipeline output root. Materialize those safe fixture directories
+    # so the real click probe reaches the documented preview stub instead of
+    # correctly stopping at the missing-input validation message.
+    (
+        output_root / "locale_sort" / "_整理輸出" / "lang_output" / "待翻譯整理需翻譯"
+    ).mkdir(parents=True, exist_ok=True)
+    (output_root / "lm_translate" / "_翻譯輸出").mkdir(parents=True, exist_ok=True)
     pipeline.input_path_text.value = str(input_root)
     pipeline.output_path_text.value = str(output_root)
 
@@ -336,11 +379,9 @@ async def _run_dialog_sequence(
         )
         if dialog_key == "pipeline_one_click":
             for step in range(2, 5):
-                current_dialog = next(
-                    dialog
-                    for dialog in reversed(page.overlay)
-                    if isinstance(dialog, ft.AlertDialog) and dialog.open
-                )
+                current_dialog = _top_open_smoke_dialog(page, native_dialogs)
+                if current_dialog is None:
+                    raise RuntimeError("Wizard step transition 沒有 active dialog")
                 # Step 1 actions are [下一個, 取消]; steps 2/3 are
                 # [上一個, 下一個, 取消], so the penultimate action advances.
                 current_dialog.actions[-2].on_click(None)
@@ -351,7 +392,7 @@ async def _run_dialog_sequence(
                     runtime_root,
                     f"{theme}-{viewport}-dialog_wizard-pipeline_one_click_step{step}",
                 )
-        _dismiss_top_dialog(page)
+        _dismiss_top_dialog(page, native_dialogs)
         # 等 Flutter modal 的 reverse transition 完成，避免殘影混入下一張截圖。
         await asyncio.sleep(0.35)
         _remove_closed_overlay_dialogs(page)
@@ -407,6 +448,649 @@ async def _run_state_scenario(
     page.update()
 
 
+async def _run_dialog_click_probe(
+    page: ft.Page,
+    shell,
+    runtime_root: Path,
+    theme: str,
+    viewport: str,
+    native_dialogs,
+) -> None:
+    """Drive real CanvasKit clicks through standalone dialogs and the wizard."""
+    from app.ui.dialogs import close_page_dialog, dialog_dimensions
+    from app.views.pipeline.pipeline_forms import dialog_field_width
+
+    pipeline = _view_content(shell, "pipeline")
+    input_root = runtime_root / "fixture-input"
+    output_root = runtime_root / "fixture-output"
+    input_root.mkdir(exist_ok=True)
+    output_root.mkdir(exist_ok=True)
+    (
+        output_root / "locale_sort" / "_整理輸出" / "lang_output" / "待翻譯整理需翻譯"
+    ).mkdir(parents=True, exist_ok=True)
+    (output_root / "lm_translate" / "_翻譯輸出").mkdir(parents=True, exist_ok=True)
+    pipeline.input_path_text.value = str(input_root)
+    pipeline.output_path_text.value = str(output_root)
+    standalone_launches: dict[str, list] = {}
+
+    def top_dialog():
+        return _top_open_smoke_dialog(page, native_dialogs)
+
+    def probe_texts(control):
+        return [
+            str(getattr(item, "value", ""))
+            for item in _smoke_control_tree(control)
+            if type(item).__name__ == "Text"
+        ]
+
+    async def gate(
+        key: str, control, handler_attr="on_click", verify=None, observed=None
+    ):
+        original = getattr(control, handler_attr, None)
+
+        def mark_done():
+            passed = bool(verify()) if verify is not None else True
+            result_title = f"SMOKE:CLICK:{key}:DONE:{'PASS' if passed else 'FAIL'}"
+            if not passed:
+                top = top_dialog()
+                details = {
+                    "open": getattr(observed, "open", None),
+                    "texts": probe_texts(observed) if observed is not None else [],
+                    "top_dialog_texts": probe_texts(top) if top is not None else [],
+                    "launch_counts": {
+                        name: len(calls) for name, calls in standalone_launches.items()
+                    },
+                }
+                result_title += ":" + json.dumps(details, ensure_ascii=True)
+                print(
+                    "[UI_SMOKE] " + result_title,
+                    flush=True,
+                )
+            page.title = result_title
+            page.update()
+
+        if inspect.iscoroutinefunction(original):
+
+            async def observe(event):
+                await original(event)
+                mark_done()
+
+        else:
+
+            def observe(event):
+                if original is not None:
+                    original(event)
+                mark_done()
+
+        setattr(control, handler_attr, observe)
+        page.title = f"SMOKE:CLICK:{key}:READY"
+        page.update()
+        await _wait_for_capture_ack(
+            runtime_root, f"{theme}-{viewport}-click-probe-{key}"
+        )
+
+    async def capture_gate(key: str):
+        page.title = f"SMOKE:CLICK:{key}:READY"
+        page.update()
+        await _wait_for_capture_ack(
+            runtime_root, f"{theme}-{viewport}-click-probe-{key}"
+        )
+
+    async def raw_click_gate(key: str):
+        """Synchronize a real control click; assert its effect at a later boundary."""
+        page.title = f"SMOKE:CLICK:{key}:READY"
+        page.update()
+        await _wait_for_capture_ack(
+            runtime_root, f"{theme}-{viewport}-click-probe-{key}"
+        )
+
+    def action(dialog, label: str):
+        for button in dialog.actions or []:
+            if _smoke_button_label(button) == label:
+                return button
+        raise RuntimeError(f"Dialog action not found: {label}")
+
+    def text_field(dialog, label: str):
+        for control in _smoke_control_tree(dialog.content):
+            if (
+                isinstance(control, ft.TextField)
+                and getattr(control, "label", None) == label
+            ):
+                return control
+        raise RuntimeError(f"Dialog field not found: {label}")
+
+    def checkboxes(dialog):
+        return [
+            control
+            for control in _smoke_control_tree(dialog.content)
+            if isinstance(control, ft.Checkbox)
+        ]
+
+    def bundle_version_picker(dialog):
+        controls = list(_smoke_control_tree(dialog.content))
+        search = next(
+            (
+                control
+                for control in controls
+                if isinstance(control, ft.TextField)
+                and getattr(control, "label", None) == "搜尋版本"
+            ),
+            None,
+        )
+        selection = next(
+            (
+                control
+                for control in controls
+                if isinstance(control, ft.Container)
+                and isinstance(getattr(control, "content", None), ft.Row)
+                and any(
+                    isinstance(child, ft.Icon) and child.icon == ft.Icons.EXPAND_MORE
+                    for child in control.content.controls
+                )
+            ),
+            None,
+        )
+        list_container = next(
+            (
+                control
+                for control in controls
+                if isinstance(control, ft.Container)
+                and getattr(control, "height", None) == 196
+                and isinstance(getattr(control, "content", None), ft.ListView)
+            ),
+            None,
+        )
+        selected_label = (
+            next(
+                (
+                    child
+                    for child in _smoke_control_tree(selection)
+                    if isinstance(child, ft.Text)
+                    and child.value not in {"已選擇：", ""}
+                ),
+                None,
+            )
+            if selection is not None
+            else None
+        )
+        if any(
+            value is None
+            for value in (search, selection, list_container, selected_label)
+        ):
+            raise RuntimeError("bundle dialog 搜尋版本選擇器結構不完整")
+        return search, selection, selected_label, list_container
+
+    def all_dialog_feedback(dialog, needle: str) -> bool:
+        return dialog.open and any(needle in text for text in probe_texts(dialog))
+
+    # The extraction cancel is the first browser click and its screenshot is
+    # retained by the Playwright report.
+    extraction_calls = []
+    pipeline._run_extraction = lambda *args, **kwargs: extraction_calls.append(
+        (args, kwargs)
+    )
+    pipeline._on_extract_click()
+    parent = top_dialog()
+    if parent is None or not parent.actions:
+        raise RuntimeError("pipeline_extract action probe 找不到 open Dialog")
+    await gate(
+        "extract-cancel",
+        action(parent, "取消"),
+        verify=lambda: not parent.open and top_dialog() is None,
+    )
+
+    # Invalid preview must keep the parent open and expose actionable inline feedback.
+    pipeline._on_extract_click()
+    parent = top_dialog()
+    input_field = text_field(parent, "Mod 來源")
+    input_field.value = ""
+    page.update()
+    await gate(
+        "extract-invalid-preview",
+        action(parent, "預覽結果"),
+        verify=lambda: all_dialog_feedback(parent, "有效的 Mod 來源"),
+    )
+
+    # Valid preview uses a real empty fixture directory: scan completes without
+    # touching user files, and the nested result modal must leave its parent intact.
+    input_field.value = str(input_root)
+    page.update()
+    await gate(
+        "extract-valid-preview",
+        action(parent, "預覽結果"),
+        verify=lambda: top_dialog() is not parent and bool(top_dialog().open),
+    )
+    child = top_dialog()
+    deadline = asyncio.get_running_loop().time() + 15
+    while asyncio.get_running_loop().time() < deadline:
+        if child.actions and _smoke_button_label(child.actions[0]) == "確定":
+            break
+        await asyncio.sleep(0.05)
+    else:
+        raise TimeoutError("extract preview worker did not publish its result")
+    await capture_gate("extract-preview-result")
+    close_page_dialog(page, child)
+    await asyncio.sleep(0.35)
+    if top_dialog() is not parent or not parent.open:
+        raise RuntimeError("closing the nested preview changed the parent dialog")
+
+    # Invalid then valid confirm clicks prove validation is visible and callback is once-only.
+    language_checks = checkboxes(parent)
+    if not language_checks:
+        raise RuntimeError("extract dialog has no language checkboxes")
+    for checkbox in language_checks:
+        checkbox.value = False
+    page.update()
+    run_button = action(parent, "確定執行")
+    await gate(
+        "extract-invalid-confirm",
+        run_button,
+        verify=lambda: (
+            all_dialog_feedback(parent, "至少選擇一個語言") and not extraction_calls
+        ),
+    )
+    language_checks[0].value = True
+    page.update()
+    await gate(
+        "extract-valid-confirm",
+        run_button,
+        verify=lambda: not parent.open and len(extraction_calls) == 1,
+    )
+
+    standalone_launches.update({"merge": [], "translate": [], "bundle": []})
+    pipeline._run_merge = lambda *args, **kwargs: standalone_launches["merge"].append(
+        (args, kwargs)
+    )
+    pipeline._run_translate = lambda *args, **kwargs: standalone_launches[
+        "translate"
+    ].append((args, kwargs))
+    pipeline._run_bundle = lambda *args, **kwargs: standalone_launches["bundle"].append(
+        (args, kwargs)
+    )
+
+    # Remaining standalone dialogs: preview, invalid confirmation, successful
+    # confirmation, and cancel are real clicks. Run callbacks are intercepted so
+    # this UI probe never launches long-running pipeline work.
+    for key, open_dialog in (
+        ("merge", pipeline._on_merge_click),
+        ("translate", pipeline._on_translate_click),
+        ("bundle", pipeline._on_bundle_click),
+    ):
+        open_dialog()
+        current = top_dialog()
+        if current is None:
+            raise RuntimeError(f"pipeline_{key} did not open")
+        if key == "bundle":
+            search, selection, selected_label, list_container = bundle_version_picker(
+                current
+            )
+            await gate(
+                "bundle-version-expand",
+                selection,
+                verify=lambda list_container=list_container: bool(
+                    list_container.visible
+                ),
+                observed=current,
+            )
+            await raw_click_gate("bundle-version-wheel")
+            await raw_click_gate("bundle-version-search")
+            deadline = asyncio.get_running_loop().time() + 5
+            while asyncio.get_running_loop().time() < deadline:
+                version_labels = [
+                    item.content.value
+                    for item in list_container.content.controls
+                    if isinstance(item, ft.Container)
+                    and isinstance(getattr(item, "content", None), ft.Text)
+                ]
+                if (
+                    (search.value or "").strip() == "1.20"
+                    and version_labels
+                    and all("1.20" in value for value in version_labels)
+                ):
+                    break
+                await asyncio.sleep(0.05)
+            filtered = (
+                (search.value or "").strip() == "1.20"
+                and bool(version_labels)
+                and all("1.20" in value for value in version_labels)
+            )
+            page.title = (
+                "SMOKE:CLICK:bundle-version-search:DONE:PASS"
+                if filtered
+                else "SMOKE:CLICK:bundle-version-search:DONE:FAIL"
+            )
+            page.update()
+            await _wait_for_capture_ack(
+                runtime_root,
+                f"{theme}-{viewport}-click-probe-bundle-version-search-verified",
+            )
+            if not filtered:
+                raise RuntimeError(
+                    "bundle version picker search did not filter to 1.20 entries"
+                )
+            if not list_container.content.controls:
+                raise RuntimeError("bundle version picker search returned no item")
+            first_version = list_container.content.controls[0]
+            expected_version = first_version.content.value
+            await gate(
+                "bundle-version-select",
+                first_version,
+                verify=lambda selected_label=selected_label, expected_version=expected_version, list_container=list_container: (
+                    selected_label.value == expected_version
+                    and not list_container.visible
+                ),
+                observed=current,
+            )
+
+            bundle_input = text_field(current, "輸入來源")
+            for resize_key, expected_viewport in (
+                ("bundle-resize-narrow", 390),
+                ("bundle-resize-restore", 1360),
+            ):
+                await raw_click_gate(resize_key)
+                deadline = asyncio.get_running_loop().time() + 8
+                resized = False
+                while asyncio.get_running_loop().time() < deadline:
+                    expected_width, expected_height = dialog_dimensions(page)
+                    expected_field_width = dialog_field_width(page)
+                    if (
+                        abs(int(page.width or 0) - expected_viewport) <= 4
+                        and current.content.width == expected_width
+                        and current.content.height == expected_height
+                        and bundle_input.width == expected_field_width
+                    ):
+                        resized = True
+                        break
+                    await asyncio.sleep(0.05)
+                page.title = (
+                    f"SMOKE:CLICK:{resize_key}:DONE:PASS"
+                    if resized
+                    else f"SMOKE:CLICK:{resize_key}:DONE:FAIL"
+                )
+                page.update()
+                await _wait_for_capture_ack(
+                    runtime_root,
+                    f"{theme}-{viewport}-click-probe-{resize_key}-verified",
+                )
+                if not resized:
+                    raise RuntimeError(
+                        f"open bundle dialog did not resize for viewport {expected_viewport}"
+                    )
+        await gate(
+            f"{key}-preview",
+            action(current, "預覽結果"),
+            verify=lambda current=current: (
+                current.open
+                and any(
+                    marker in text
+                    for text in probe_texts(current)
+                    for marker in ("尚未支援", "不存在")
+                )
+            ),
+            observed=current,
+        )
+        await gate(
+            f"{key}-cancel",
+            action(current, "取消"),
+            verify=lambda current=current: not current.open and top_dialog() is None,
+        )
+        open_dialog()
+        current = top_dialog()
+        if current is None:
+            raise RuntimeError(f"pipeline_{key} did not reopen after cancel")
+        input_label = {
+            "merge": "Mod 來源",
+            "translate": "翻譯目標",
+            "bundle": "輸入來源",
+        }[key]
+        input_control = text_field(current, input_label)
+        original_input = input_control.value
+        input_control.value = str(runtime_root / f"missing-{key}-input")
+        page.update()
+        await gate(
+            f"{key}-invalid-confirm",
+            action(current, "確定執行"),
+            verify=lambda current=current, key=key: (
+                current.open
+                and any("不存在" in text for text in probe_texts(current))
+                and not standalone_launches[key]
+            ),
+            observed=current,
+        )
+        input_control.value = original_input
+        page.update()
+        await gate(
+            f"{key}-valid-confirm",
+            action(current, "確定執行"),
+            verify=lambda current=current, key=key: (
+                not current.open
+                and top_dialog() is None
+                and len(standalone_launches[key]) == 1
+            ),
+            observed=current,
+        )
+
+    # Wizard cancellation/reopen, all four steps, invalid confirmation, back
+    # navigation, then a single valid callback. The runner is intercepted only
+    # after PipelineView validation so this scenario never launches real work.
+    wizard_execution_configs = []
+    original_one_click_execute = pipeline._on_one_click_execute
+
+    def capture_one_click_execute(config):
+        wizard_execution_configs.append(copy.deepcopy(config))
+        return original_one_click_execute(config)
+
+    pipeline._on_one_click_execute = capture_one_click_execute
+    pipeline._on_one_click_click()
+    wizard = top_dialog()
+    page.title = "SMOKE:CLICK:wizard-step1-open:READY"
+    page.update()
+    await _wait_for_capture_ack(
+        runtime_root, f"{theme}-{viewport}-click-probe-wizard-step1-open"
+    )
+    if wizard is None or "1/4" not in probe_texts(wizard):
+        raise RuntimeError(
+            "one-click wizard did not become the top dialog: "
+            f"top={type(wizard).__name__ if wizard else None}, "
+            f"texts={probe_texts(wizard) if wizard else []}, "
+            f"native_open={[probe_texts(item) for item in native_dialogs if item.open]}"
+        )
+    await gate(
+        "wizard-cancel-step1",
+        action(wizard, "取消"),
+        verify=lambda: top_dialog() is None,
+    )
+    pipeline._on_one_click_click()
+    wizard = top_dialog()
+    if wizard is None or "1/4" not in probe_texts(wizard):
+        raise RuntimeError(
+            "reopened one-click wizard did not become the top dialog: "
+            f"top={type(wizard).__name__ if wizard else None}, "
+            f"texts={probe_texts(wizard) if wizard else []}, "
+            f"native_open={[probe_texts(item) for item in native_dialogs if item.open]}"
+        )
+    options = checkboxes(wizard)
+    if len(options) != 3:
+        raise RuntimeError(
+            f"expected three wizard language options, got {len(options)}"
+        )
+    for key in (
+        "wizard-deselect-en",
+        "wizard-deselect-zh-cn",
+        "wizard-deselect-zh-tw",
+    ):
+        await raw_click_gate(key)
+
+    wizard_run_calls = []
+    original_start_sequence = pipeline.runner.start_sequence
+    pipeline.runner.start_sequence = lambda steps, on_complete: wizard_run_calls.append(
+        (steps, on_complete)
+    )
+    wizard_selected_version = None
+    try:
+        wizard = top_dialog()
+        await gate(
+            "wizard-step1-next",
+            action(wizard, "下一個"),
+            verify=lambda wizard=wizard: top_dialog() is not wizard,
+        )
+        wizard = top_dialog()
+        await gate(
+            "wizard-step2-next",
+            action(wizard, "下一個"),
+            verify=lambda wizard=wizard: top_dialog() is not wizard,
+        )
+        wizard = top_dialog()
+        await gate(
+            "wizard-step3-next",
+            action(wizard, "下一個"),
+            verify=lambda wizard=wizard: top_dialog() is not wizard,
+        )
+        wizard = top_dialog()
+        search, selection, selected_label, list_container = bundle_version_picker(
+            wizard
+        )
+        await gate(
+            "wizard-version-expand",
+            selection,
+            verify=lambda list_container=list_container: bool(list_container.visible),
+            observed=wizard,
+        )
+        await raw_click_gate("wizard-version-wheel")
+        await raw_click_gate("wizard-version-search")
+        deadline = asyncio.get_running_loop().time() + 5
+        while asyncio.get_running_loop().time() < deadline:
+            version_labels = [
+                item.content.value
+                for item in list_container.content.controls
+                if isinstance(item, ft.Container)
+                and isinstance(getattr(item, "content", None), ft.Text)
+            ]
+            if (
+                (search.value or "").strip() == "1.20"
+                and version_labels
+                and all("1.20" in value for value in version_labels)
+            ):
+                break
+            await asyncio.sleep(0.05)
+        filtered = (
+            (search.value or "").strip() == "1.20"
+            and bool(version_labels)
+            and all("1.20" in value for value in version_labels)
+        )
+        page.title = (
+            "SMOKE:CLICK:wizard-version-search:DONE:PASS"
+            if filtered
+            else "SMOKE:CLICK:wizard-version-search:DONE:FAIL"
+        )
+        page.update()
+        await _wait_for_capture_ack(
+            runtime_root,
+            f"{theme}-{viewport}-click-probe-wizard-version-search-verified",
+        )
+        if not filtered or not list_container.content.controls:
+            raise RuntimeError("wizard Minecraft version search failed")
+        first_version = list_container.content.controls[0]
+        wizard_selected_version = first_version.content.value
+        await gate(
+            "wizard-version-select",
+            first_version,
+            verify=lambda selected_label=selected_label, expected_version=wizard_selected_version, list_container=list_container: (
+                selected_label.value == expected_version and not list_container.visible
+            ),
+            observed=wizard,
+        )
+        wizard = top_dialog()
+        await gate(
+            "wizard-invalid-confirm",
+            action(wizard, "確定執行"),
+            verify=lambda wizard=wizard: (
+                all_dialog_feedback(wizard, "至少勾選一個語言代碼")
+                and not wizard_run_calls
+                and not wizard_execution_configs
+            ),
+        )
+
+        wizard = top_dialog()
+        await gate(
+            "wizard-step4-prev",
+            action(wizard, "上一個"),
+            verify=lambda wizard=wizard: top_dialog() is not wizard,
+        )
+        wizard = top_dialog()
+        await gate(
+            "wizard-step3-prev",
+            action(wizard, "上一個"),
+            verify=lambda wizard=wizard: top_dialog() is not wizard,
+        )
+        wizard = top_dialog()
+        await gate(
+            "wizard-step2-prev",
+            action(wizard, "上一個"),
+            verify=lambda wizard=wizard: top_dialog() is not wizard,
+        )
+        wizard = top_dialog()
+        await raw_click_gate("wizard-select-en")
+        for key in (
+            "wizard-step1-next-valid",
+            "wizard-step2-next-valid",
+            "wizard-step3-next-valid",
+        ):
+            current = top_dialog()
+            await gate(
+                key,
+                action(current, "下一個"),
+                verify=lambda current=current: top_dialog() is not current,
+            )
+        wizard = top_dialog()
+        await gate(
+            "wizard-valid-confirm",
+            action(wizard, "確定執行"),
+            verify=lambda: (
+                top_dialog() is None
+                and len(wizard_run_calls) == 1
+                and len(wizard_execution_configs) == 1
+                and wizard_execution_configs[0]["lang_codes"] == ["en_us"]
+                and wizard_execution_configs[0]["version"] == wizard_selected_version
+            ),
+        )
+        pipeline._end_run()
+    finally:
+        pipeline.runner.start_sequence = original_start_sequence
+
+    _dispose_and_probe_late_task(page, shell)
+    await asyncio.sleep(0.2)
+    page.title = "SMOKE:DIALOG_CLICK_PROBE:DONE"
+    page.update()
+
+
+def _smoke_control_tree(root):
+    """Yield a Flet control tree without walking parent cycles."""
+    pending = [root]
+    seen = set()
+    while pending:
+        control = pending.pop()
+        if id(control) in seen:
+            continue
+        seen.add(id(control))
+        yield control
+        for name in ("controls", "content", "actions", "title"):
+            children = getattr(control, name, None)
+            if isinstance(children, (list, tuple)):
+                pending.extend(children)
+            elif children is not None and not isinstance(children, str):
+                pending.append(children)
+
+
+def _smoke_button_label(button) -> str:
+    """Get the visible title from standard Flet buttons."""
+    content = getattr(button, "content", None)
+    if isinstance(content, str):
+        return content
+    value = getattr(content, "value", None)
+    return str(value if value is not None else getattr(button, "text", ""))
+
+
 async def _run_sequence(
     page: ft.Page,
     shell,
@@ -415,13 +1099,27 @@ async def _run_sequence(
     runtime_root: Path,
     theme: str,
     viewport: str,
+    native_dialogs,
 ) -> None:
     """依所選驗收情境驅動正式外殼，結束時檢查 teardown。"""
     if scenario == "views":
         await _run_view_sequence(page, shell, interval, runtime_root, theme, viewport)
     elif scenario == "dialogs":
         await asyncio.sleep(0.8)
-        await _run_dialog_sequence(page, shell, interval, runtime_root, theme, viewport)
+        await _run_dialog_sequence(
+            page,
+            shell,
+            interval,
+            runtime_root,
+            theme,
+            viewport,
+            native_dialogs,
+        )
+    elif scenario == "dialog-click-probe":
+        await asyncio.sleep(0.8)
+        await _run_dialog_click_probe(
+            page, shell, runtime_root, theme, viewport, native_dialogs
+        )
     else:
         await asyncio.sleep(0.8)
         await _run_state_scenario(page, shell, scenario, runtime_root, theme, viewport)
@@ -446,10 +1144,14 @@ def main(page: ft.Page) -> None:
     from app.ui import design
     from app.view_registry import DEFAULT_VIEW_KEY
 
+    native_dialogs = _install_smoke_dialog_tracking(page)
+
     mode = _query(page, "theme", "dark")
     mode = mode if mode in {"dark", "light"} else "dark"
     start_view = (
-        "pipeline" if scenario == "dialogs" else _query(page, "view", DEFAULT_VIEW_KEY)
+        "pipeline"
+        if scenario in {"dialogs", "dialog-click-probe"}
+        else _query(page, "view", DEFAULT_VIEW_KEY)
     )
     try:
         interval = max(0.5, float(_query(page, "interval", "2.5")))
@@ -476,7 +1178,15 @@ def main(page: ft.Page) -> None:
     page.update()
     viewport = _query(page, "viewport", "unknown")
     page.run_task(
-        _run_sequence, page, shell, interval, scenario, runtime_root, mode, viewport
+        _run_sequence,
+        page,
+        shell,
+        interval,
+        scenario,
+        runtime_root,
+        mode,
+        viewport,
+        native_dialogs,
     )
 
 

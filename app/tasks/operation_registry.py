@@ -49,6 +49,13 @@ class ShutdownPolicy(StrEnum):
     TRANSFER_OWNERSHIP = "transfer_ownership"
 
 
+class OperationPresentation(StrEnum):
+    """Whether a tracked operation belongs in user-facing task projections."""
+
+    USER_VISIBLE = "user_visible"
+    MAINTENANCE = "maintenance"
+
+
 @dataclass(frozen=True)
 class OperationDescriptor:
     """Reviewable behavior contract for an owned operation."""
@@ -61,6 +68,7 @@ class OperationDescriptor:
     commit: CommitPolicy = CommitPolicy.EPHEMERAL
     durability: DurabilityPolicy = DurabilityPolicy.RECOMPUTABLE
     shutdown: ShutdownPolicy = ShutdownPolicy.CANCEL_AND_DRAIN
+    presentation: OperationPresentation = OperationPresentation.USER_VISIBLE
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
@@ -160,12 +168,29 @@ class OperationHandle:
 
     def run(self, target: Callable[[], Any]) -> None:
         """Run an admitted operation, recording actual completion exactly once."""
+        from translation_tool.utils.cancellation import TaskCancelled, cancel_scope
+
         token: Token = _current_operation.set(self)
         self._registry._mark_started(self)
         error = None
+        cancelled_by_exception = False
         try:
             if self._run_if_cancelled or not self.cancel_requested:
-                target()
+                if self.descriptor.cancellation == CancellationPolicy.NON_CANCELLABLE:
+                    target()
+                else:
+                    # Install the owner token at the worker boundary. ContextThreadPoolExecutor
+                    # and run_in_context propagate this ContextVar into nested workers.
+                    with cancel_scope(lambda: self.cancel_requested):
+                        target()
+        except TaskCancelled as ex:
+            if self.descriptor.cancellation == CancellationPolicy.NON_CANCELLABLE:
+                error = ex
+                _logger.exception(
+                    "不可取消操作意外收到取消訊號：%s", self.descriptor.name
+                )
+            else:
+                cancelled_by_exception = True
         except BaseException as ex:  # worker boundary: registry must always terminate
             error = ex
             _logger.exception("背景操作失敗：%s", self.descriptor.name)
@@ -199,7 +224,11 @@ class OperationHandle:
                     self._registry._finish(
                         self,
                         error=error,
-                        reason="cancelled" if self.cancel_requested else "completed",
+                        reason=(
+                            "cancelled"
+                            if cancelled_by_exception or self.cancel_requested
+                            else "completed"
+                        ),
                     )
                 finally:
                     _current_operation.reset(token)
@@ -558,6 +587,7 @@ def launch_task_thread(
     commit: CommitPolicy = CommitPolicy.PARTIAL_ALLOWED,
     durability: DurabilityPolicy = DurabilityPolicy.RECOMPUTABLE,
     shutdown: ShutdownPolicy = ShutdownPolicy.CANCEL_AND_DRAIN,
+    presentation: OperationPresentation = OperationPresentation.USER_VISIBLE,
     launcher: Callable[[Callable[[], None]], Any] | None = None,
     on_cancel: Callable[[], Any] | None = None,
     run_if_cancelled: bool = False,
@@ -574,6 +604,7 @@ def launch_task_thread(
             commit=commit,
             durability=durability,
             shutdown=shutdown,
+            presentation=presentation,
         ),
         launcher=launcher,
         task_session=task_session,
@@ -594,6 +625,7 @@ def launch_page_operation(
     commit: CommitPolicy = CommitPolicy.PARTIAL_ALLOWED,
     durability: DurabilityPolicy = DurabilityPolicy.RECOMPUTABLE,
     shutdown: ShutdownPolicy = ShutdownPolicy.CANCEL_AND_DRAIN,
+    presentation: OperationPresentation = OperationPresentation.USER_VISIBLE,
     on_cancel: Callable[[], Any] | None = None,
     fallback_launcher: Callable[[Callable[[], Any]], Any] | None = None,
 ) -> OperationHandle | bool | None:
@@ -618,6 +650,7 @@ def launch_page_operation(
         commit=commit,
         durability=durability,
         shutdown=shutdown,
+        presentation=presentation,
         on_cancel=on_cancel,
     )
     return handle if handle is not None else False
@@ -677,6 +710,7 @@ def reserve_page_operation(
     commit: CommitPolicy = CommitPolicy.PARTIAL_ALLOWED,
     durability: DurabilityPolicy = DurabilityPolicy.RECOMPUTABLE,
     shutdown: ShutdownPolicy = ShutdownPolicy.CANCEL_AND_DRAIN,
+    presentation: OperationPresentation = OperationPresentation.USER_VISIBLE,
     on_cancel: Callable[[], Any] | None = None,
     fallback_launcher: Callable[[Callable[[], Any]], Any] | None = None,
 ) -> PageOperationReservation:
@@ -695,6 +729,7 @@ def reserve_page_operation(
             commit=commit,
             durability=durability,
             shutdown=shutdown,
+            presentation=presentation,
         ),
         task_session=task_session,
     )

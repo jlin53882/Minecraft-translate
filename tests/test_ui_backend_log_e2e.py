@@ -30,7 +30,11 @@ def test_real_merge_keeps_ui_and_backend_logs_in_sync(tmp_path, caplog):
     with caplog.at_level(logging.INFO):
         session.start()
         for _ in run_merge_folder_batch_service(
-            str(inp), str(out), session, only_process_lang=True
+            str(inp),
+            str(out),
+            session,
+            only_process_lang=True,
+            use_translation_db=False,
         ):
             pass
 

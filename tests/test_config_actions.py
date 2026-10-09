@@ -72,6 +72,17 @@ def make_full_view():
     for k in keys:
         view.controls_map[k] = MagicMock()
     view.controls_map["logging.log_format"].value = "%(message)s"
+    # Saving tests that do not call load_config_into_view still model a real
+    # settings form, whose six extractor suffix controls start at schema defaults.
+    for key, value in {
+        "lang_extract": "_提取lang_輸出",
+        "book_extract": "_提取book_輸出",
+        "dual_extract": "_提取both_輸出",
+        "lang_preview": "_預覽lang_輸出",
+        "book_preview": "_預覽book_輸出",
+        "dual_preview": "_預覽both_輸出",
+    }.items():
+        view.controls_map[f"extractor.output_folder_names.{key}"].value = value
     return view
 
 

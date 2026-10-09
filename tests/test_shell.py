@@ -15,6 +15,7 @@ from app.shell.sidebar import SIDEBAR_WIDTH, SIDEBAR_WIDTH_COMPACT, Sidebar
 from app.shell.task_manager import TaskManager
 from app.shell.topbar import ApiStatusPill, TaskPill, TopBar, summarize_keys
 from app.tasks.task_session import TaskSession
+from app.views.config_view import ConfigView
 from translation_tool.core.lm_key_health import (
     STATUS_COOLING,
     STATUS_OK,
@@ -465,6 +466,166 @@ def test_navigation_from_dirty_settings_waits_for_user_decision(
     assert len(pending) == 1
     pending[0]()
     assert shell.current_key == "dashboard"
+
+
+def test_app_shell_navigation_after_config_save_pops_config_dialog_once(
+    shell, monkeypatch
+):
+    config = {
+        "logging": {},
+        "translator": {},
+        "ftb_translator": {},
+        "species_cache": {},
+        "lm_translator": {"models": {"test-model": {"enabled": True}}},
+        "output_bundler": {},
+        "lang_merger": {},
+        "extractor": {"output_folder_names": {}},
+    }
+    monkeypatch.setattr("app.views.config_view.load_config_json", lambda: dict(config))
+    monkeypatch.setattr("app.views.config_view.save_config_json", lambda _cfg: True)
+    monkeypatch.setattr(
+        "app.views.config_view.validate_api_keys_from_ui", lambda _keys: None
+    )
+    monkeypatch.setattr(
+        "app.views.config.config_actions.validate_config_values", lambda _cfg: None
+    )
+
+    dialog_stack = []
+    popped = []
+
+    def show_dialog(dialog):
+        dialog_stack.append(dialog)
+        shell.page.overlay.append(dialog)
+        dialog.open = True
+
+    def pop_dialog():
+        if not dialog_stack:
+            return None
+        dialog = dialog_stack.pop()
+        dialog.open = False
+        popped.append(dialog)
+        if dialog in shell.page.overlay:
+            shell.page.overlay.remove(dialog)
+        on_dismiss = getattr(dialog, "on_dismiss", None)
+        if callable(on_dismiss):
+            on_dismiss(None)
+        return dialog
+
+    shell.page.show_dialog = show_dialog
+    shell.page.pop_dialog = pop_dialog
+    monkeypatch.setattr(
+        vr,
+        "_lazy_import_view",
+        lambda key, page, _picker: (
+            ConfigView(page) if key == "config" else ft.Text(f"view:{key}")
+        ),
+    )
+
+    shell.navigate("config")
+    config_view = shell._active_config_view()
+    config_view.controls_map["lm_translator.temperature"].value = "0.9"
+    config_view._on_form_changed()
+    shell.navigate("dashboard")
+    config_dialog = dialog_stack[-1]
+
+    config_dialog.actions[2].on_click(None)
+    config_dialog.actions[2].on_click(None)
+
+    assert popped == [config_dialog]
+    assert config_dialog.open is False
+    assert shell.current_key == "dashboard"
+    assert isinstance(dialog_stack[-1], ft.SnackBar)
+    assert dialog_stack[-1].content.value == "✅ 設定已成功儲存！"
+
+
+def test_app_shell_recovery_retry_navigates_only_after_reload_succeeds(
+    shell, monkeypatch
+):
+    config = {
+        "logging": {},
+        "translator": {},
+        "ftb_translator": {},
+        "species_cache": {},
+        "lm_translator": {"models": {"test-model": {"enabled": True}}},
+        "output_bundler": {},
+        "lang_merger": {},
+        "extractor": {"output_folder_names": {}},
+    }
+    load_calls = 0
+
+    def load_config():
+        nonlocal load_calls
+        load_calls += 1
+        if load_calls in (3, 4):
+            raise OSError("temporary reload failure")
+        return dict(config)
+
+    monkeypatch.setattr("app.views.config_view.load_config_json", load_config)
+    monkeypatch.setattr("app.views.config_view.save_config_json", lambda _cfg: True)
+    monkeypatch.setattr(
+        "app.views.config_view.validate_api_keys_from_ui", lambda _keys: None
+    )
+    monkeypatch.setattr(
+        "app.views.config.config_actions.validate_config_values", lambda _cfg: None
+    )
+
+    dialog_stack = []
+    popped = []
+
+    def show_dialog(dialog):
+        dialog_stack.append(dialog)
+        shell.page.overlay.append(dialog)
+        dialog.open = True
+
+    def pop_dialog():
+        if not dialog_stack:
+            return None
+        dialog = dialog_stack.pop()
+        dialog.open = False
+        popped.append(dialog)
+        if dialog in shell.page.overlay:
+            shell.page.overlay.remove(dialog)
+        on_dismiss = getattr(dialog, "on_dismiss", None)
+        if callable(on_dismiss):
+            on_dismiss(None)
+        return dialog
+
+    shell.page.show_dialog = show_dialog
+    shell.page.pop_dialog = pop_dialog
+    monkeypatch.setattr(
+        vr,
+        "_lazy_import_view",
+        lambda key, page, _picker: (
+            ConfigView(page) if key == "config" else ft.Text(f"view:{key}")
+        ),
+    )
+
+    shell.navigate("config")
+    config_view = shell._active_config_view()
+    config_view.controls_map["lm_translator.temperature"].value = "0.9"
+    config_view._on_form_changed()
+    shell.navigate("dashboard")
+    config_dialog = dialog_stack[-1]
+
+    config_dialog.actions[2].on_click(None)
+    assert shell.current_key == "config"
+    assert config_view._reload_recovery_required is True
+    assert config_dialog.open is True
+    assert popped == []
+
+    retry = config_dialog.actions[1].on_click
+    retry(None)
+    assert shell.current_key == "config"
+    assert config_dialog.open is True
+    assert popped == []
+
+    retry(None)
+    retry(None)
+    assert popped == [config_dialog]
+    assert config_dialog.open is False
+    assert shell.current_key == "dashboard"
+    assert isinstance(dialog_stack[-1], ft.SnackBar)
+    assert dialog_stack[-1].content.value == "✅ 設定已重新載入，畫面與設定檔已同步。"
 
 
 def test_navigate_unknown_key_is_ignored(shell):

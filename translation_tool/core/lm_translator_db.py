@@ -14,6 +14,7 @@ from typing import Any
 
 from translation_tool.core.lm_config_rules import value_fully_translated
 from translation_tool.translation_db import (
+    DbSettings,
     TranslationDB,
     TranslationResolver,
     WriteBackBuffer,
@@ -39,14 +40,17 @@ class DirectoryDbContext:
 
 
 def resolve_db_choice(
-    use_db: bool | None = None, version: str | None = None
+    use_db: bool | None = None,
+    version: str | None = None,
+    *,
+    settings_snapshot=None,
 ) -> tuple[bool, str]:
     """這次任務**實際生效**的 (是否使用資料庫, 目標版本)。
 
     None 代表「用設定檔的值」；續跑用的 checkpoint 必須保存解析後的值，
     否則重開後設定檔改了，剩餘項目會查詢／寫回到不同的版本。
     """
-    settings = load_db_settings()
+    settings = settings_snapshot or load_db_settings()
     enabled = settings.enabled if use_db is None else bool(use_db)
     target = (version if version is not None else settings.version).strip()
     if enabled and not target:
@@ -57,14 +61,20 @@ def resolve_db_choice(
     return (True, target) if enabled and target else (False, "")
 
 
+def get_db_settings_snapshot(settings_snapshot: DbSettings | None = None) -> DbSettings:
+    """Return one settings snapshot through this module's established seam."""
+    return settings_snapshot or load_db_settings()
+
+
 def open_directory_db(
     root: str | Path,
     *,
     use_db: bool | None = None,
     version: str | None = None,
+    settings_snapshot=None,
 ) -> DirectoryDbContext | None:
     """依設定開啟資料庫；``use_db`` / ``version`` 為 None 時使用設定檔的值。"""
-    settings = load_db_settings()
+    settings = settings_snapshot or load_db_settings()
     enabled = settings.enabled if use_db is None else use_db
     if not enabled:
         return None
@@ -74,10 +84,24 @@ def open_directory_db(
             "📚 Mod 資料庫已啟用但尚未指定目標版本，已略過（請到設定或機器翻譯頁選擇）"
         )
         return None
-    db = open_db(settings, create=False)
+    # LM 讀寫需要可寫連線，但這是任務快照，不可在開啟時覆寫資料庫共用 priority。
+    db = open_db(settings, create=False, sync_priority=False)
     if db is None:
         return None
-    resolver = TranslationResolver(db, target, cross_version=settings.cross_version)
+    expected_path = settings.resolved_path().resolve()
+    if db.path.resolve() != expected_path:
+        log_info(
+            "📚 Mod 資料庫路徑與本次操作快照不一致，略過資料庫："
+            f"預期 {expected_path}，實際 {db.path.resolve()}"
+        )
+        db.close()
+        return None
+    resolver = TranslationResolver(
+        db,
+        target,
+        cross_version=settings.cross_version,
+        source_priority=settings.priority,
+    )
     buffer = (
         WriteBackBuffer(db, target, root, fill_other_versions=True)
         if settings.write_back
@@ -89,10 +113,19 @@ def open_directory_db(
 
 @contextmanager
 def directory_db(
-    root: str | Path, *, use_db: bool | None = None, version: str | None = None
+    root: str | Path,
+    *,
+    use_db: bool | None = None,
+    version: str | None = None,
+    settings_snapshot=None,
 ) -> Iterator[DirectoryDbContext | None]:
     """``open_directory_db`` 的 context manager 版本：離開時一定關閉資料庫。"""
-    ctx = open_directory_db(root, use_db=use_db, version=version)
+    ctx = open_directory_db(
+        root,
+        use_db=use_db,
+        version=version,
+        settings_snapshot=settings_snapshot,
+    )
     try:
         yield ctx
     finally:

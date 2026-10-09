@@ -8,6 +8,8 @@ from app.tasks.operation_registry import (
     launch_task_thread,
 )
 from app.tasks.task_session import TaskSession
+from translation_tool.utils.cancellation import is_cancelled, raise_if_cancelled
+from translation_tool.utils.ui_mirror import ContextThreadPoolExecutor
 
 
 def _descriptor(name="work"):
@@ -41,6 +43,39 @@ def test_registry_keeps_cancel_requested_work_active_until_worker_returns():
     assert finished.is_set()
     assert handle.done_event.is_set()
     assert handle.terminal_reason == "cancelled"
+
+
+def test_operation_cancel_scope_reaches_nested_pool_and_drains_workers():
+    registry = OperationRegistry()
+    worker_started = threading.Event()
+    release_worker = threading.Event()
+    worker_observations = []
+
+    def nested_worker():
+        worker_started.set()
+        assert release_worker.wait(2)
+        worker_observations.append(is_cancelled())
+        raise_if_cancelled()
+
+    def operation():
+        with ContextThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(nested_worker)
+            assert worker_started.wait(2)
+            assert release_worker.wait(2)
+            future.result()
+
+    handle = registry.launch(operation, _descriptor("nested cancellation"))
+    assert handle is not None
+    assert worker_started.wait(2)
+    assert handle.request_cancel()
+    assert not handle.done_event.is_set()
+
+    release_worker.set()
+    assert handle.done_event.wait(2)
+    assert registry.active() == []
+    assert worker_observations == [True]
+    assert handle.terminal_reason == "cancelled"
+    assert handle.error is None
 
 
 def test_closed_admission_rejects_before_calling_launcher():

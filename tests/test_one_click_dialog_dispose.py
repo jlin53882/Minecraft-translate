@@ -1,8 +1,8 @@
-"""一鍵對話框關閉：先 open=False 推到前端、移除 overlay 後再推一次，提示才不會被殘留遮罩蓋住。"""
+"""Pipeline dialogs close through their owned control without popping foreign modals."""
 
 from types import SimpleNamespace
 
-from app.ui.dialogs import dispose_dialogs, present_dialog
+from app.ui.dialogs import close_page_dialog, dispose_dialogs, present_dialog
 
 
 class _Page:
@@ -33,11 +33,11 @@ def test_dispose_without_dialogs_does_not_extra_update():
 
     dispose_dialogs(ctx)
 
-    assert len(page.events) == 1
+    assert len(page.events) == 0
 
 
 class _DialogApiPage(_Page):
-    """有 show_dialog / pop_dialog 的頁面（Flet 0.85+ Web）。"""
+    """Page surface exposing the public dialog API, without modeling private state."""
 
     def __init__(self):
         self.overlay = []
@@ -49,6 +49,7 @@ class _DialogApiPage(_Page):
         self.events.append("update")
 
     def show_dialog(self, dialog):
+        dialog.open = True
         self.shown.append(dialog)
 
     def pop_dialog(self):
@@ -76,12 +77,50 @@ def test_present_falls_back_to_overlay_without_dialog_api():
     assert page.overlay == [dlg] and dlg.open is True
 
 
-def test_dispose_pops_dialog_and_flushes_again_with_dialog_api():
-    dlg = SimpleNamespace(open=True)
+def test_dispose_closes_owned_native_dialog_by_targeted_update():
+    dlg = SimpleNamespace(open=True, updates=0)
+    dlg.update = lambda: setattr(dlg, "updates", dlg.updates + 1)
     page = _DialogApiPage()
     ctx = SimpleNamespace(page=page, dialogs=[dlg], uses_dialog_api=True)
 
     dispose_dialogs(ctx)
 
-    assert dlg.open is False and page.popped == 1 and ctx.dialogs == []
-    assert page.events == ["update", "update"]  # open=False 先送出、pop 後再送一次
+    assert dlg.open is False and dlg.updates == 1
+    assert page.popped == 0 and ctx.dialogs == []
+    assert page.events == []
+
+
+def test_close_targets_owned_dialog_without_popping_unrelated_modal():
+    owned = SimpleNamespace(open=True, updates=0)
+    owned.update = lambda: setattr(owned, "updates", owned.updates + 1)
+    unrelated = SimpleNamespace(open=True)
+    page = _DialogApiPage()
+    page.show_dialog(unrelated)
+
+    assert close_page_dialog(page, owned)
+
+    assert owned.open is False
+    assert unrelated.open is True
+    assert page.popped == 0
+    assert owned.updates == 1
+
+
+def test_close_native_dialog_never_uses_stack_pop():
+    owned = SimpleNamespace(open=True, updates=0)
+    owned.update = lambda: setattr(owned, "updates", owned.updates + 1)
+    page = _DialogApiPage()
+    page.show_dialog(owned)
+
+    assert close_page_dialog(page, owned)
+
+    assert owned.open is False
+    assert owned.updates == 1
+    assert page.popped == 0
+
+
+def test_close_is_idempotent_for_already_closed_dialog():
+    dlg = SimpleNamespace(open=False)
+    page = _DialogApiPage()
+
+    assert not close_page_dialog(page, dlg)
+    assert page.popped == 0 and page.events == []

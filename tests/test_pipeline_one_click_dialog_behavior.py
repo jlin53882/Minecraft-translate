@@ -14,10 +14,11 @@ from types import SimpleNamespace
 import flet as ft
 import pytest
 
-from app.views.moddb import version_picker
-from app.views.pipeline import pipeline_db_version_field
+from app.views.merge import merge_db_options
+from app.views.moddb import lm_db_options, version_picker
 from app.views.pipeline import pipeline_one_click_dialog as mod
 from tests.conftest import _make_page, mock_filepicker
+from translation_tool.translation_db import DbSettings
 
 
 def _walk(control):
@@ -56,11 +57,24 @@ class _Env:
         self.snacks: list = []
         self.cfg = cfg if cfg is not None else {}
         monkeypatch.setattr(mod, "load_config", lambda: self.cfg)
-        monkeypatch.setattr(
-            mod, "load_db_settings", lambda: SimpleNamespace(version="1.21.1")
+        self.db_settings = DbSettings(
+            enabled=True,
+            merge_enabled=True,
+            version="1.21.1",
+            path=str(tmp_path / "test-mod-db.sqlite"),
         )
+        monkeypatch.setattr(mod, "load_db_settings", lambda: self.db_settings)
+        monkeypatch.setattr(merge_db_options, "summarize_database", lambda *_a: None)
         monkeypatch.setattr(
-            pipeline_db_version_field, "summarize_database", lambda: None
+            version_picker,
+            "merge_target_version_choices",
+            lambda *_a, **_k: ["1.21.1", "1.20.1"],
+        )
+        monkeypatch.setattr(lm_db_options, "summarize_database", lambda *_a: None)
+        monkeypatch.setattr(
+            lm_db_options,
+            "database_version_choices",
+            lambda *_a: ["1.21.1", "1.20.1"],
         )
         monkeypatch.setattr(
             version_picker, "target_version_choices", lambda: ["1.21.1", "1.20.1"]
@@ -179,17 +193,20 @@ def test_empty_paths_show_unset_placeholder(env):
     assert env.texts().count("未設定") == 2
 
 
-def test_merge_step_accepts_selected_or_manually_typed_database_version(env):
+def test_merge_step_only_accepts_existing_database_versions(env):
     env.open()
     env.goto(2)
     field = next(c for c in env.controls(ft.Dropdown) if c.label == "目標版本")
-    assert field.editable is True
+    assert field.editable is False
+    assert {option.key for option in field.options} == {
+        "__inherit_global__",
+        "1.21.1",
+        "1.20.1",
+    }
+    field.value = "1.20.1"
+    field.on_select(SimpleNamespace(control=field))
 
-    field.text = "26.2"
-    field.value = None
-    field.on_text_change(SimpleNamespace(control=field))
-
-    assert env.run_to_end_from(2)["translation_db_version"] == "26.2"
+    assert env.run_to_end_from(2)["merge_db_snapshot"].version == "1.20.1"
 
 
 def test_focusing_pipeline_target_version_suggests_creating_database(env):
@@ -199,7 +216,8 @@ def test_focusing_pipeline_target_version_suggests_creating_database(env):
 
     field.on_focus(SimpleNamespace(control=field))
 
-    assert env.snacks and "先到「Mod 資料庫」頁" in env.snacks[-1][0]
+    assert any("尚未建立資料庫" in text for text in env.texts())
+    assert env.snacks == []
 
 
 def test_dialog_width_is_sixty_percent_of_page(env):
@@ -257,6 +275,32 @@ def test_stale_buttons_do_not_overrun_step_bounds(env):
     assert env.step_text() == "1/4"
 
 
+def test_external_dismiss_makes_stale_navigation_callbacks_inert(env):
+    env.open()
+    dialog = env.dialog
+    stale_next = env.button("下一個")
+
+    dialog.open = False
+    dialog.on_dismiss(None)
+    env.page.overlay.remove(dialog)  # The fake Page does not own Flet's native stack.
+    stale_next.on_click(None)
+
+    assert env.page.overlay == []
+    assert env.executed == []
+
+
+def test_closed_active_dialog_rejects_stale_navigation_callback(env):
+    env.open()
+    dialog = env.dialog
+    stale_next = env.button("下一個")
+    dialog.open = False
+
+    stale_next.on_click(None)
+
+    assert env.page.overlay == [dialog]
+    assert env.executed == []
+
+
 def test_no_validation_empty_paths_still_navigate_and_execute(env):
     """目前沒有任何驗證訊息：缺少路徑也能一路走到完成。"""
     env.open(input_path="", output_path="")
@@ -307,8 +351,11 @@ def test_lang_codes_come_from_config_and_zero_codes_means_empty_list(
     e2 = _Env(monkeypatch, tmp_path, {"jar_extractor": {"lang_codes": []}})
     e2.open()
     assert e2.controls(ft.Checkbox) == []
-    cfg = e2.run_to_end()
-    assert cfg["lang_codes"] == []
+    e2.goto(4)
+    e2.click("確定執行")
+    assert e2.executed == []
+    assert e2.dialog.open is True
+    assert any("請至少勾選一個語言代碼" in text for text in e2.texts())
     assert e2.snacks == []
 
 
@@ -358,10 +405,10 @@ def test_step2_switches_are_collected(env):
     only.on_change(SimpleNamespace(control=only))
     zh.value = False
     zh.on_change(SimpleNamespace(control=zh))
-    assert env.switch("允許 zh_cn 觸發跳過 en_us").disabled in (None, False)
+    assert env.switch("允許 zh_cn 觸發跳過 en_us").disabled is True
     for f in env.controls(ft.TextField):
         if f.width in (80, 100):
-            assert not f.disabled
+            assert f.disabled is (f.width == 100)
     config = env.run_to_end_from(2)
     assert config["process_zh_cn"] is False and config["only_lang"] is False
 
@@ -477,7 +524,7 @@ def test_step4_defaults_from_config(monkeypatch, tmp_path):
     e.open()
     e.goto(4)
     assert e.field("輸出 ZIP 檔案").value == os.path.join(str(e.out), "pack.zip")
-    assert e.field("輸入來源").value == os.path.join(str(e.out), "lm_translate", "_out")
+    assert e.field("輸入來源").value == os.path.join(str(e.out), "_打包暫存")
     assert e.field("封面圖片（可留空）").value == ""
     assert e.field("封面圖片（可留空）").read_only is True
     assert "點擊選擇版本" in e.texts()
@@ -607,7 +654,8 @@ def test_confirm_calls_on_execute_once_with_default_config(env):
         "write_new_cache": True,
         "description": "",
         "version": "",
-        "translation_db_version": "1.21.1",
+        "merge_db_snapshot": config["merge_db_snapshot"],
+        "lm_db_snapshot": config["lm_db_snapshot"],
         "min_format": None,
         "max_format": None,
         "pack_image": None,
@@ -615,8 +663,70 @@ def test_confirm_calls_on_execute_once_with_default_config(env):
         "zip_output": os.path.join(str(env.out), "可使用翻譯.zip"),
         "merge_input": str(env.mods),
     }
+    assert config["merge_db_snapshot"].version == "1.21.1"
+    assert config["merge_db_snapshot"].database_settings.path.endswith(
+        "test-mod-db.sqlite"
+    )
+    assert config["lm_db_snapshot"].version == "1.21.1"
+    assert config["lm_db_snapshot"].database_settings.path.endswith(
+        "test-mod-db.sqlite"
+    )
     assert dialog.open is False
     assert env.page.overlay == []
+
+
+def test_wizard_uses_one_fresh_global_database_snapshot_for_both_steps(env):
+    env.open()
+    env.db_settings = DbSettings(
+        enabled=True,
+        merge_enabled=True,
+        version="1.20.1",
+        path=os.path.join(str(env.out), "updated-global.db"),
+    )
+
+    config = env.run_to_end()
+
+    merge = config["merge_db_snapshot"]
+    lm = config["lm_db_snapshot"]
+    assert merge.version == lm.version == "1.20.1"
+    assert lm.source == "step2"
+    assert merge.database_settings.path == lm.database_settings.path
+    assert merge.database_settings.path.endswith("updated-global.db")
+
+
+def test_wizard_merge_and_lm_version_overrides_are_independent(env):
+    env.open()
+    env.goto(2)
+    merge_field = next(
+        control for control in env.controls(ft.Dropdown) if control.label == "目標版本"
+    )
+    merge_field.value = "1.20.1"
+    merge_field.on_select(SimpleNamespace(control=merge_field))
+
+    env.click("下一個")
+    inherit = next(
+        control
+        for control in env.controls(ft.Switch)
+        if (control.label or "").startswith("沿用全域目標版本")
+    )
+    inherit.value = False
+    inherit.on_change(SimpleNamespace(control=inherit))
+    lm_field = next(
+        control
+        for control in env.controls(ft.Dropdown)
+        if control.label == "Mod 資料庫目標版本"
+    )
+    lm_field.text = "26.2"
+    lm_field.value = None
+    lm_field.on_text_change(SimpleNamespace(control=lm_field))
+
+    config = env.run_to_end_from(3)
+
+    merge = config["merge_db_snapshot"]
+    lm = config["lm_db_snapshot"]
+    assert merge.version == "1.20.1"
+    assert (lm.version, lm.source) == ("26.2", "page")
+    assert merge.database_settings.path == lm.database_settings.path
 
 
 def test_selected_version_maps_to_pack_formats(env, monkeypatch):
@@ -799,7 +909,7 @@ def test_pack_image_remove_clears_state_and_config(env):
     env.goto(4)
     _pick_image(env, "/img/cover.png")
     remove = next(
-        c for c in env.controls(ft.TextButton) if getattr(c, "content", None) == "移除"
+        c for c in env.controls(ft.Button) if getattr(c, "content", None) == "移除"
     )
     remove.on_click(None)
     assert env.field("封面圖片（可留空）").value == ""

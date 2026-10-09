@@ -46,6 +46,7 @@ class InterruptedTask:
     # 上次任務實際生效的 Mod 資料庫選項；沒有記錄的舊 checkpoint（資料庫功能之前建立）一定沒用資料庫
     use_translation_db: bool = False
     translation_db_version: str = ""
+    translation_db_settings: dict[str, Any] | None = None
 
     @property
     def label(self) -> str:
@@ -91,6 +92,11 @@ def peek_interrupted_task() -> InterruptedTask | None:
         write_new_cache=data.get("write_new_cache") is not False,
         use_translation_db=bool(db_opts.get("enabled")),
         translation_db_version=str(db_opts.get("version") or ""),
+        translation_db_settings=(
+            db_opts.get("settings")
+            if isinstance(db_opts.get("settings"), dict)
+            else None
+        ),
         completed=_as_int(data.get("completed_count")),
         total=_as_int(data.get("total")),
         updated_at=str(data.get("updated_at") or ""),
@@ -186,6 +192,11 @@ def check_resume_feasibility(task: InterruptedTask) -> ResumeCheck:
     """
     if task.kind != LM_KIND:
         return _check_plugin_task(task)
+    if task.use_translation_db and not task.translation_db_settings:
+        return ResumeCheck(
+            False,
+            "續跑標記只有資料庫版本，沒有資料庫路徑與行為快照；為避免寫入錯誤資料庫，請放棄此標記後重新開始",
+        )
     if not task.has_current_format or not task.fingerprint:
         return ResumeCheck(False, "標記是舊版格式，無法驗證輸入是否與上次相同")
     if not task.input_dir or not Path(task.input_dir).is_dir():

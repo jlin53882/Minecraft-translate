@@ -10,6 +10,7 @@ from app.tasks.operation_registry import (
     CancellationPolicy,
     CommitPolicy,
     OperationHandle,
+    OperationPresentation,
     OperationRegistry,
     ShutdownPolicy,
     launch_task_thread,
@@ -57,6 +58,7 @@ def start_background_startup_tasks(
             cancellation=CancellationPolicy.NON_CANCELLABLE,
             commit=CommitPolicy.PARTIAL_ALLOWED,
             shutdown=ShutdownPolicy.DRAIN_ONLY,
+            presentation=OperationPresentation.MAINTENANCE,
             launcher=worker_launcher,
         )
     thread = threading.Thread(target=rebuild_index_on_startup, daemon=True)

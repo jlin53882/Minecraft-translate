@@ -16,13 +16,14 @@
 # 所有 caller 改成 show_snack(self.page, ...) 直接呼叫 app/ui/snack.py helper
 import os
 import threading  # noqa: F401 - 測試 / 其他模組以 extractor_view.threading 引用
-from pathlib import Path
 
 import flet as ft
 
 from app.services_impl.pipelines.extract_service import (
     get_output_folder_names,
     get_skip_zh_cn_extract,
+    prepare_extraction_paths,
+    prepare_preview_paths,
 )
 from app.tasks.task_session import (
     TaskSession,  # noqa: F401 - 測試以 extractor_view.TaskSession patch
@@ -42,7 +43,7 @@ from app.views.extractor.extractor_dialog import (
 from app.views.extractor.extractor_panels import (
     build_settings_panel,
 )
-from translation_tool.utils.log_unit import log_info, log_warning  # noqa: F401
+from translation_tool.utils.log_unit import log_info, log_warning
 
 
 class ExtractorView(ft.Column):
@@ -224,14 +225,16 @@ class ExtractorView(ft.Column):
         dual_extract = folder_names["dual_extract"]
         lang_preview = folder_names["lang_preview"]
         book_preview = folder_names["book_preview"]
+        dual_preview = folder_names.get("dual_preview", "_預覽both_輸出")
 
         helper_text = (
-            f"未指定時自動產生（路徑 + 設定名稱）：\n"
+            f"未指定時自動產生同層輸出資料夾（來源資料夾名稱 + 設定後綴）：\n"
             f"  • Lang 提取：...mods + {lang_extract}\n"
             f"  • Book 提取：...mods + {book_extract}\n"
             f"  • Dual 提取：...mods + {dual_extract}\n"
             f"  • Lang 預覽：...mods + {lang_preview}\n"
-            f"  • Book 預覽：...mods + {book_preview}\n\n"
+            f"  • Book 預覽：...mods + {book_preview}\n"
+            f"  • Dual 預覽：...mods + {dual_preview}\n\n"
             f"預設抽取語系：zh_cn / zh_tw / en_us\n"
             f"選項：可勾選「跳過 zh_cn 抽取」（預設關閉）\n"
             f"自動產生資料夾名稱可以在設定頁面調整"
@@ -262,42 +265,20 @@ class ExtractorView(ft.Column):
         ✅ 階段 B 重構：config 讀取已抽離至 extract_service.get_output_folder_names()
         """
         # get_output_folder_names 從頂部 import
-        folder_names = get_output_folder_names()
-        lang_extract = folder_names["lang_extract"]
-        book_extract = folder_names["book_extract"]
-        dual_extract = folder_names["dual_extract"]
-
-        if mode == "lang":
-            suffix = lang_extract
-        elif mode == "book":
-            suffix = book_extract
-        elif mode == "dual":
-            suffix = dual_extract
-        else:
-            suffix = lang_extract
-
         # 保護機制：只有輸出路徑為空時才自動填入，避免覆寫使用者已輸入的自訂路徑
         existing = (self.output_dir_textfield.value or "").strip()
         if existing:
             return existing
 
-        # 修正邏輯：處理路徑末尾斜線並正確合併名稱
-        # 注意：必須先轉成 str 才能呼叫 rstrip，否則會觸發 AttributeError
-        mods_path = Path(str(mods_dir).rstrip("\\/"))
+        # 保留此 View 的舊相容行為：未知 mode 以 lang 命名；合法模式的
+        # 路徑拼接則統一交由 Service，避免 UI 自行推導路徑。
+        resolved_mode = mode if mode in {"lang", "book", "dual"} else "lang"
+        output_path = prepare_extraction_paths(mods_dir, resolved_mode)
 
-        # 智慧判斷：如果名稱已經包含 suffix，則直接使用原路徑（避免重複疊加）
-        # 如果是「mods」目錄，則在 mods 旁邊產生新的資料夾
-        # 其他情況，則把 suffix 加在最後一級目錄名後面
-        if mods_path.name.lower() == "mods":
-            # 輸入是 .../mods，產生 .../mods_提取XX
-            output_path = str(mods_path.parent / (mods_path.name + suffix))
-        elif suffix in mods_path.name:
-            # 已經包含 suffix（例如使用者已經手動輸入過），直接使用原路徑
-            output_path = str(mods_path)
-        else:
-            # 其他自訂路徑，則在最後一級目錄下合併
-            output_path = str(mods_path.with_name(mods_path.name + suffix))
+        return self._apply_auto_filled_output_path(output_path)
 
+    def _apply_auto_filled_output_path(self, output_path: str) -> str:
+        """Display a resolved default path in the extractor form."""
         self.output_dir_textfield.value = output_path
         self.page.update()
         # 🐛 2026-08-01 user review: 改用 SnackBar 跳出提示,不掛 log UI
@@ -307,6 +288,31 @@ class ExtractorView(ft.Column):
             f"[系統] 已自動設定輸出路徑：{output_path}",
             color=C.EM,
         )
+        return output_path
+
+    def _resolve_action_output_path(
+        self, mods_dir: str, mode: str, action_label: str, *, preview: bool
+    ) -> str | None:
+        """Resolve a default destination safely before opening a task/dialog."""
+        existing = (self.output_dir_textfield.value or "").strip()
+        if existing:
+            return existing
+
+        resolver = prepare_preview_paths if preview else prepare_extraction_paths
+        try:
+            output_path = resolver(mods_dir, mode)
+        except ValueError as exc:
+            log_warning(f"{action_label}無法開始，輸出資料夾名稱設定無效：{exc}")
+            show_snack(
+                self.page,
+                f"⚠️ 無法{action_label}：提取輸出資料夾名稱設定無效，"
+                "請到「設定 → Jar 提取設定」修正。",
+                color=C.GOLD,
+            )
+            return None
+
+        if not preview:
+            self._apply_auto_filled_output_path(output_path)
         return output_path
 
     def _check_mods_dir_or_snack(self, mods_dir: str, action_label: str) -> bool:
@@ -347,9 +353,11 @@ class ExtractorView(ft.Column):
         mods_dir = (self.mods_dir_textfield.value or "").strip()
         if not self._check_mods_dir_or_snack(mods_dir, "提取 Lang"):
             return
-        output_path = (self.output_dir_textfield.value or "").strip()
-        if not output_path:
-            output_path = self._auto_fill_output_path(mods_dir, "lang")
+        output_path = self._resolve_action_output_path(
+            mods_dir, "lang", "提取 Lang", preview=False
+        )
+        if output_path is None:
+            return
         # open_extractor_dialog 從頂部 import
         open_extractor_dialog(
             self.page,
@@ -373,9 +381,11 @@ class ExtractorView(ft.Column):
         mods_dir = (self.mods_dir_textfield.value or "").strip()
         if not self._check_mods_dir_or_snack(mods_dir, "提取 Book"):
             return
-        output_path = (self.output_dir_textfield.value or "").strip()
-        if not output_path:
-            output_path = self._auto_fill_output_path(mods_dir, "book")
+        output_path = self._resolve_action_output_path(
+            mods_dir, "book", "提取 Book", preview=False
+        )
+        if output_path is None:
+            return
         # open_extractor_dialog 從頂部 import
         open_extractor_dialog(
             self.page,
@@ -392,9 +402,11 @@ class ExtractorView(ft.Column):
         mods_dir = (self.mods_dir_textfield.value or "").strip()
         if not self._check_mods_dir_or_snack(mods_dir, "提取 Lang + Book"):
             return
-        output_path = (self.output_dir_textfield.value or "").strip()
-        if not output_path:
-            output_path = self._auto_fill_output_path(mods_dir, "dual")
+        output_path = self._resolve_action_output_path(
+            mods_dir, "dual", "提取 Lang + Book", preview=False
+        )
+        if output_path is None:
+            return
         # open_extractor_dialog 從頂部 import
         open_extractor_dialog(
             self.page,
@@ -412,7 +424,11 @@ class ExtractorView(ft.Column):
         mods_dir = (self.mods_dir_textfield.value or "").strip()
         if not self._check_mods_dir_or_snack(mods_dir, "預覽 Lang"):
             return
-        output_path = (self.output_dir_textfield.value or "").strip()
+        output_path = self._resolve_action_output_path(
+            mods_dir, "lang", "預覽 Lang", preview=True
+        )
+        if output_path is None:
+            return
         # open_preview_dialog 從頂部 import
         open_preview_dialog(
             self.page,
@@ -429,7 +445,11 @@ class ExtractorView(ft.Column):
         mods_dir = (self.mods_dir_textfield.value or "").strip()
         if not self._check_mods_dir_or_snack(mods_dir, "預覽 Book"):
             return
-        output_path = (self.output_dir_textfield.value or "").strip()
+        output_path = self._resolve_action_output_path(
+            mods_dir, "book", "預覽 Book", preview=True
+        )
+        if output_path is None:
+            return
         # open_preview_dialog 從頂部 import
         open_preview_dialog(
             self.page,
@@ -446,7 +466,11 @@ class ExtractorView(ft.Column):
         mods_dir = (self.mods_dir_textfield.value or "").strip()
         if not self._check_mods_dir_or_snack(mods_dir, "預覽 Lang + Book"):
             return
-        output_path = (self.output_dir_textfield.value or "").strip()
+        output_path = self._resolve_action_output_path(
+            mods_dir, "dual", "預覽 Lang + Book", preview=True
+        )
+        if output_path is None:
+            return
         # open_preview_dialog 從頂部 import
         open_preview_dialog(
             self.page,

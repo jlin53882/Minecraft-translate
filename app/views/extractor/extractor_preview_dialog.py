@@ -12,7 +12,7 @@ import types
 import flet as ft
 
 from app.services_impl.pipelines.extract_service import (
-    prepare_extraction_paths,
+    prepare_preview_paths,
     preview_extraction_generator,
 )
 from app.tasks.operation_registry import launch_page_operation
@@ -21,6 +21,7 @@ from app.views._log import LogView
 from app.views.extractor import extractor_dialog as _extractor_dialog
 from app.views.extractor.extractor_dialog_helpers import format_size
 from app.views.extractor.extractor_state import PreviewState
+from translation_tool.utils.cancellation import cancel_scope
 from translation_tool.utils.log_unit import log_error, log_info, log_warning
 from translation_tool.utils.ui_mirror import in_new_task, new_task_id
 
@@ -243,6 +244,7 @@ def _preview_result_controls(ctx, result: dict) -> list:
 
     controls = [
         ft.Text(f"預覽結果（{ctx.mode.upper()}）", size=16, weight=ft.FontWeight.BOLD),
+        ft.Text(f"輸出（確認執行後）：{ctx.output_path}", size=12, color=C.MUTED),
         ft.Divider(),
     ]
 
@@ -403,26 +405,31 @@ def _preview_reset_scan_state(ctx) -> None:
 
 def _preview_do_scan(ctx):
     """背景執行緒：跑 generator，只寫入 preview_state（不碰任何控制項）。"""
+    generator = preview_extraction_generator(
+        ctx.input_path, ctx.mode, skip_zh_cn=ctx.skip_zh_cn
+    )
     try:
-        for update in preview_extraction_generator(
-            ctx.input_path, ctx.mode, skip_zh_cn=ctx.skip_zh_cn
-        ):
-            if ctx.state["cancelled"]:
-                break
-            if "progress" in update:
-                ctx.preview_state.progress = update.get("progress", 0)
-                ctx.preview_state.current = update.get("current", 0)
-                ctx.preview_state.total = update.get("total", 0)
-                ctx.preview_state.log = update.get("log", "")
-            if "error" in update:
-                ctx.preview_state.error = update["error"]
-                break
-            if "result" in update:
-                ctx.preview_state.result = update["result"]
+        with cancel_scope(lambda: ctx.state["cancelled"]):
+            for update in generator:
+                if ctx.state["cancelled"]:
+                    break
+                if "progress" in update:
+                    ctx.preview_state.progress = update.get("progress", 0)
+                    ctx.preview_state.current = update.get("current", 0)
+                    ctx.preview_state.total = update.get("total", 0)
+                    ctx.preview_state.log = update.get("log", "")
+                if "error" in update:
+                    ctx.preview_state.error = update["error"]
+                    break
+                if "result" in update:
+                    ctx.preview_state.result = update["result"]
     except Exception as ex:  # noqa: BLE001 - 錯誤要回報到 UI
         log_error(f"[提取預覽] 掃描失敗：{ex!r}", exc_info=True)
         ctx.preview_state.error = str(ex)
     finally:
+        close = getattr(generator, "close", None)
+        if callable(close):
+            close()
         # 不論成功、失敗或取消都要標記完成，避免 UI poller 永遠等待
         ctx.preview_state.done = True
 
@@ -434,7 +441,9 @@ async def _preview_ui_poller(ctx):
     """
     last_log = None
     while True:
-        finished = ctx.preview_state.done or ctx.state["cancelled"]
+        # A cancel request is not worker completion. Keep the dialog locked until
+        # _preview_do_scan's finally block reports that the worker has actually exited.
+        finished = ctx.preview_state.done
         ctx.progress_bar.value = ctx.preview_state.progress
         ctx.progress_pct.value = f"{int(ctx.preview_state.progress * 100)}%"
         cur_log = getattr(ctx.preview_state, "log", None)
@@ -449,6 +458,8 @@ async def _preview_ui_poller(ctx):
                     task=getattr(ctx, "scan_task", None),
                 )
                 last_log = cur_log
+        if ctx.state["cancelled"] and not finished:
+            ctx.status_text.value = "正在取消..."
         if finished:
             break
         ctx.page.update()
@@ -456,11 +467,14 @@ async def _preview_ui_poller(ctx):
 
     final_result = ctx.preview_state.result
     final_error = ctx.preview_state.error
-    ctx.progress_bar.value = 1.0
-    ctx.progress_pct.value = "100%"
-    ctx.status_text.value = "預覽完成"
     ctx.start_button.disabled = False
     ctx.state["running"] = False
+
+    cancelled = ctx.state["cancelled"]
+    if not cancelled and not final_error:
+        ctx.progress_bar.value = 1.0
+        ctx.progress_pct.value = "100%"
+        ctx.status_text.value = "預覽完成"
 
     if final_error:
         ctx.add_log(
@@ -472,7 +486,7 @@ async def _preview_ui_poller(ctx):
         # 掃描已結束：解除 start_scan() 的 modal 鎖定，否則使用者無法關閉對話框
         ctx.preview_dialog.modal = False
         ctx.page.update()
-    elif final_result:
+    elif final_result and not cancelled:
         results = final_result.get("preview_results", [])
         ctx.add_log(
             f"[完成] 找到 {len(results)} 個 JAR",
@@ -482,7 +496,7 @@ async def _preview_ui_poller(ctx):
         )
         ctx.show_result_dialog(final_result)
     else:
-        if ctx.state["cancelled"]:
+        if cancelled:
             ctx.status_text.value = "已取消"
         ctx.preview_dialog.modal = False
         ctx.page.update()
@@ -567,10 +581,10 @@ def _preview_resolve_output_path(ctx) -> str:
     預覽畫面與後續提取共用同一個解析結果，避免只顯示預設路徑、確認時卻重新
     解析成不同位置。
     """
-    if not ctx.output_path:
-        ctx.output_path = prepare_extraction_paths(
-            ctx.input_path, ctx.mode, ctx.output_path
-        )
+    # The first call snapshots either the explicit user path or the configured
+    # preview suffix. Later calls (including confirmation) pass that snapshot
+    # back as an explicit path, so configuration changes cannot move the target.
+    ctx.output_path = prepare_preview_paths(ctx.input_path, ctx.mode, ctx.output_path)
     return ctx.output_path
 
 

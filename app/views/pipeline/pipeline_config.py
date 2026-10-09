@@ -20,8 +20,8 @@ def normalize_extract_mode(mode: str | None) -> str:
 class PipelineConfig:
     """一鍵製作路徑設定檔"""
 
-    def __init__(self, input_dir: str, output_dir: str):
-        cfg = load_config()
+    def __init__(self, input_dir: str, output_dir: str, *, config=None):
+        cfg = config if config is not None else load_config()
         self.input_dir = input_dir
         self.output_dir = output_dir
 

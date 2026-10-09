@@ -4,11 +4,11 @@
 > 範圍：`app/`、`translation_tool/`、`main.py` 內所有帶 `noqa: BLE001／S110／S112` 的位置。
 > 命令列 QA 工具（`md_extract_qa.py`、`md_inject_qa.py`）的 `print` 為刻意保留，不在此表。
 
-共 **300** 項；其中 **112** 項尚未在程式碼內寫明原因（以「分類」說明處理方式）。
+共 **304** 項；其中 **112** 項尚未在程式碼內寫明原因（以「分類」說明處理方式）。
 
 | 分類 | 數量 | 意義 |
 |---|---|---|
-| 已記錄／回報 | 266 | 例外處理本身有 log、提示、回報錯誤事件或重新丟出；寬鬆捕捉是為了不中斷整批流程 |
+| 已記錄／回報 | 270 | 例外處理本身有 log、提示、回報錯誤事件或重新丟出；寬鬆捕捉是為了不中斷整批流程 |
 | UI／畫面保護 | 18 | UI 層的畫面更新、icon 快取等；失敗只影響顯示，不影響資料 |
 | 盡力而為（靜默） | 16 | 引擎層、只有 `pass`／`continue`／回傳常數；失敗不影響結果（例如進度回報、還原失敗時以原始例外為準） |
 
@@ -116,15 +116,15 @@
 | `app/views/icon_preview/render_operation.py:render_current_page` | BLE001 | 已記錄／回報 | scheduling failure must be reported |
 | `app/views/icon_preview_row.py:_ensure_icon_size` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/views/icon_preview_view.py:IconPreviewView._on_load_clicked` | BLE001 | 已記錄／回報 | 排程失敗時需結束 owner 並回報 UI |
-| `app/views/lm_view.py:LMView._on_db_option_changed` | BLE001 | 已記錄／回報 | 頁面尚未掛載時只是不即時更新提示 |
 | `app/views/lm_view.py:LMView._on_db_version_focus` | BLE001 | 已記錄／回報 | 頁面尚未掛載時略過即時更新 |
-| `app/views/lm_view.py:LMView.refresh_db_info` | BLE001 | 已記錄／回報 | 資料庫問題只影響提示文字，不應讓頁面載入失敗 |
 | `app/views/lm_view.py:LMView.refresh_key_stat` | BLE001 | UI／畫面保護 | 讀不到設定時只是不顯示 |
 | `app/views/lookup_view.py:LookupView.single_lookup_worker` | BLE001 | 已記錄／回報 | 失敗也要恢復按鈕並顯示原因 |
 | `app/views/lookup_view.py:LookupView.batch_lookup_worker` | BLE001 | 已記錄／回報 | 失敗也要恢復按鈕並顯示原因 |
 | `app/views/merge/merge_db_options.py:MergeDbOptions._on_version_focus` | BLE001 | 已記錄／回報 | 頁面尚未掛載時略過即時更新 |
 | `app/views/merge/merge_db_options.py:MergeDbOptions._on_changed` | BLE001 | 已記錄／回報 | 頁面尚未掛載時只是不即時更新提示 |
-| `app/views/merge/merge_db_options.py:MergeDbOptions.refresh_info` | BLE001 | 已記錄／回報 | 只影響提示文字，不應讓頁面載入失敗 |
+| `app/views/merge/merge_db_options.py:MergeDbOptions._on_version_changed` | BLE001 | 已記錄／回報 | 頁面尚未掛載時只是不即時更新提示 |
+| `app/views/merge/merge_db_options.py:MergeDbOptions._refresh_database_state` | BLE001 | 已記錄／回報 | picker 本身也採 fail-closed |
+| `app/views/merge/merge_db_options.py:MergeDbOptions._refresh_database_state` | BLE001 | 已記錄／回報 | 只影響提示文字，不應讓頁面載入失敗 |
 | `app/views/merge_view.py:MergeView._broadcast_config_change_to_config_view` | BLE001 | 已記錄／回報 | 通知失敗不影響合併頁，但要留下紀錄 |
 | `app/views/merge_view.py:MergeView._on_merge_field_changed` | BLE001 | 已記錄／回報 | 欄位寫入失敗不可中斷 UI，但設定沒存成功必須留下紀錄 |
 | `app/views/merge_view.py:MergeView._run_merge_worker` | BLE001 | 已記錄／回報 | 背景執行緒邊界：失敗要寫進 session，否則輪詢永遠等不到結束 |
@@ -133,6 +133,9 @@
 | `app/views/moddb/entries_panel.py:EntriesPanel._scroll_list_to.scroll` | BLE001 | 已記錄／回報 | 尚未掛上頁面時不影響清單 |
 | `app/views/moddb/entries_panel.py:EntriesPanel._scroll_list_to` | BLE001 | 已記錄／回報 | 排程失敗不影響清單 |
 | `app/views/moddb/entries_panel.py:EntriesPanel._safe_update` | BLE001 | 已記錄／回報 | 頁面已卸載時不影響資料操作 |
+| `app/views/moddb/lm_db_options.py:LmDbOptions._update` | BLE001 | 已記錄／回報 | control may be temporarily detached |
+| `app/views/moddb/lm_db_options.py:LmDbOptions._refresh_database_state` | BLE001 | 已記錄／回報 | LM still permits a manual new target |
+| `app/views/moddb/lm_db_options.py:LmDbOptions._refresh_database_state` | BLE001 | 已記錄／回報 | keep the page usable and expose warning |
 | `app/views/moddb/overview_panel.py:OverviewPanel.refresh` | BLE001 | 已記錄／回報 | 頁面已卸載時不影響資料 |
 | `app/views/moddb/retranslation_controller.py:preview` | BLE001 | 已記錄／回報 | restore controls when the operation cannot launch |
 | `app/views/moddb/retranslation_controller.py:_schedule_result` | BLE001 | 已記錄／回報 | a disposed page may reject UI work |
@@ -208,6 +211,7 @@
 | `translation_tool/core/lang_merge_content_patchers.py:patch_localized_content_json_impl` | BLE001 | 已記錄／回報 | 錯誤已記錄或回報給呼叫端，不中斷整批流程 |
 | `translation_tool/core/lang_merge_content_patchers.py:patch_localized_content_json_impl` | BLE001 | 已記錄／回報 | 錯誤已記錄或回報給呼叫端，不中斷整批流程 |
 | `translation_tool/core/lang_merge_content_patchers.py:patch_localized_content_json_impl` | BLE001 | 已記錄／回報 | 錯誤已記錄或回報給呼叫端，不中斷整批流程 |
+| `translation_tool/core/lang_merge_db.py:open_merge_db_fill` | BLE001 | 已記錄／回報 | DB 補譯不可讓正常合併失敗 |
 | `translation_tool/core/lang_merge_extracted_assets.py:_cleanup_single_mod_extracted` | BLE001 | 已記錄／回報 | 失敗已記錄，不中斷批次流程 |
 | `translation_tool/core/lang_merge_extracted_assets.py:_safe_session_log` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `translation_tool/core/lang_merge_extracted_assets.py:_cleanup_extracted_dirs` | BLE001 | 已記錄／回報 | 失敗已記錄，不中斷批次流程 |

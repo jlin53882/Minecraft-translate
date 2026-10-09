@@ -978,6 +978,7 @@ def _attempt_batch(
     pinned_round = runtime.pinned_model_index is not None
     skipped_by_quota: set[int] = set()
     for model_index in model_indices:
+        raise_if_cancelled()
         if model_index in runtime.missing_models:
             continue
         model_name = runtime.model_pool[model_index]
@@ -1018,6 +1019,10 @@ def _attempt_batch(
                     max_output_tokens=output_cap,
                     meta_out=api_meta,
                 ).strip()
+            # A synchronous provider request cannot be interrupted in flight.
+            # If cancellation arrived while it was blocked, discard its result
+            # before quota state, retries, or downstream writes can observe it.
+            raise_if_cancelled()
             # HTTP 200 已證明沒有被 RPD 拒絕：配額紀錄在這裡就清除；回應內容的問題（空、截斷、
             # 格式不符）由 batch 流程自己處理，不影響配額狀態。
             quota.mark_ok(model_name, started_at=started)

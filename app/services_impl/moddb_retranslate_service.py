@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import sqlite3
 import traceback
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -58,6 +59,8 @@ logger = logging.getLogger(__name__)
 
 _OPERATION = "retranslate_same_source_ai"
 _LOG_SAMPLE_LIMIT = 20
+PREVIEW_SQL_TIMEOUT_SEC = 60.0
+PREVIEW_SQL_PROGRESS_OPCODES = 1000
 _PROFILE_LABELS = {
     "lang": "Lang",
     "patch": "Patchouli",
@@ -109,23 +112,48 @@ class SameSourceAIRepairReport:
         return {"operation": _OPERATION, **self.__dict__}
 
 
-def preview_same_source_ai_retranslation(db, options: TranslateOptions):
-    """Return total matches plus the exact version/mod/limit snapshot to confirm."""
+def _raise_preview_timeout(deadline: float | None) -> None:
+    if deadline is not None and monotonic() >= deadline:
+        raise TimeoutError(
+            f"舊 AI 重翻預覽查詢超過 {PREVIEW_SQL_TIMEOUT_SEC:g} 秒時間預算"
+        )
+
+
+def preview_same_source_ai_retranslation(
+    db, options: TranslateOptions, *, deadline: float | None = None
+):
+    """Return the exact candidate snapshot; optional monotonic deadline covers SQL and transforms."""
+    _raise_preview_timeout(deadline)
     total = db.count_same_as_source_ai(options.version, list(options.mod_ids))
+    _raise_preview_timeout(deadline)
     entries = db.same_as_source_ai_entries(
         options.version,
         list(options.mod_ids),
         limit=options.limit or None,
     )
-    items = _build_retranslation_items(entries)
-    entry_cache_types = tuple(_retranslation_cache_type(item) for item in items)
-    items = _group_retranslation_items_by_cache_type(items)
+    _raise_preview_timeout(deadline)
+    items = _build_retranslation_items(entries, deadline=deadline)
+    entry_cache_types = []
+    for item in items:
+        _raise_preview_timeout(deadline)
+        entry_cache_types.append(_retranslation_cache_type(item))
+    items = _group_retranslation_items_by_cache_type(items, deadline=deadline)
+    _raise_preview_timeout(deadline)
+    profile_counts = _cache_type_counts(items, deadline=deadline)
+    estimated_batches = plan_batches(
+        items, check=lambda: _raise_preview_timeout(deadline)
+    )
+    _raise_preview_timeout(deadline)
+    preview_entries = []
+    for entry in entries:
+        _raise_preview_timeout(deadline)
+        preview_entries.append(entry)
     return SameSourceAIRepairPreview(
         total,
-        tuple(entries),
-        tuple(_cache_type_counts(items).items()),
-        entry_cache_types,
-        plan_batches(items),
+        tuple(preview_entries),
+        tuple(profile_counts.items()),
+        tuple(entry_cache_types),
+        estimated_batches,
     )
 
 
@@ -134,25 +162,42 @@ def preview_same_source_ai_retranslation_from_path(
     priority: tuple[int, ...],
     options: TranslateOptions,
 ) -> SameSourceAIRepairPreview:
-    """Preview through a worker-owned read-only connection, never the UI handle."""
+    """Use a worker-owned read-only connection with bounded SQLite VM execution."""
     preview_db = TranslationDB(
         database_path,
         priority=priority,
         readonly=True,
         create=False,
     )
+    deadline = monotonic() + PREVIEW_SQL_TIMEOUT_SEC
     try:
-        return preview_same_source_ai_retranslation(preview_db, options)
+        preview_db._conn.set_progress_handler(
+            lambda: int(monotonic() >= deadline), PREVIEW_SQL_PROGRESS_OPCODES
+        )
+        try:
+            return preview_same_source_ai_retranslation(
+                preview_db, options, deadline=deadline
+            )
+        except sqlite3.OperationalError as exc:
+            if monotonic() >= deadline and "interrupt" in str(exc).casefold():
+                raise TimeoutError(
+                    f"舊 AI 重翻預覽查詢超過 {PREVIEW_SQL_TIMEOUT_SEC:g} 秒時間預算"
+                ) from exc
+            raise
     finally:
         preview_db.close()
 
 
 def _build_retranslation_items(
-    entries: Sequence[SameSourceAIEntry],
+    entries: Sequence[SameSourceAIEntry], *, deadline: float | None = None
 ) -> list[dict[str, Any]]:
-    rows = [(row.entry_id, row.kind, row.mod_id, row.key, row.en_us) for row in entries]
-    items = build_items(rows)
+    rows = []
+    for row in entries:
+        _raise_preview_timeout(deadline)
+        rows.append((row.entry_id, row.kind, row.mod_id, row.key, row.en_us))
+    items = build_items(rows, check=lambda: _raise_preview_timeout(deadline))
     for item, row in zip(items, entries, strict=True):
+        _raise_preview_timeout(deadline)
         item["_expected_old_zh_tw"] = row.current_ai_translation
         item["_expected_version"] = row.mc_version
     return items
@@ -163,18 +208,27 @@ def _retranslation_cache_type(item: dict[str, Any]) -> str:
 
 
 def _group_retranslation_items_by_cache_type(
-    items: list[dict[str, Any]],
+    items: list[dict[str, Any]], *, deadline: float | None = None
 ) -> list[dict[str, Any]]:
     """Stable-group engine items by their actual cache/profile key."""
     groups: dict[str, list[dict[str, Any]]] = {}
     for item in items:
+        _raise_preview_timeout(deadline)
         groups.setdefault(_retranslation_cache_type(item), []).append(item)
-    return [item for group in groups.values() for item in group]
+    grouped = []
+    for group in groups.values():
+        for item in group:
+            _raise_preview_timeout(deadline)
+            grouped.append(item)
+    return grouped
 
 
-def _cache_type_counts(items: Sequence[dict[str, Any]]) -> dict[str, int]:
+def _cache_type_counts(
+    items: Sequence[dict[str, Any]], *, deadline: float | None = None
+) -> dict[str, int]:
     counts: dict[str, int] = {}
     for item in items:
+        _raise_preview_timeout(deadline)
         cache_type = _retranslation_cache_type(item)
         counts[cache_type] = counts.get(cache_type, 0) + 1
     return counts

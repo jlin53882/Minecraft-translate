@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import gc
+import threading
 from types import SimpleNamespace
 
 import pytest
@@ -17,6 +18,7 @@ from app.tasks.operation_registry import (
     CommitPolicy,
     DurabilityPolicy,
     OperationDescriptor,
+    OperationPresentation,
 )
 from app.tasks.task_session import TaskSession, TaskSessionAdmissionError, tag_session
 
@@ -121,6 +123,36 @@ def test_registry_only_operation_is_projected_and_recorded_as_recent(manager):
     assert manager.active() == []
     assert manager.recent()[0].name == "索引更新"
     assert manager.recent()[0].status == STATUS_DONE
+
+
+def test_maintenance_operations_remain_owned_without_polluting_task_history(manager):
+    notifications = []
+    manager.subscribe(lambda: notifications.append(True))
+
+    for index in range(30):
+        handle = manager.operation_registry.reserve(
+            OperationDescriptor(
+                name=f"maintenance {index}",
+                owner="test-maintenance",
+                presentation=OperationPresentation.MAINTENANCE,
+            )
+        )
+        assert handle is not None
+        assert manager.operation_registry.active() == [handle]
+        assert manager.active() == []
+        handle.finish()
+
+    assert manager.operation_registry.active_count() == 0
+    assert manager.recent() == []
+    assert notifications == []
+
+    visible = manager.operation_registry.reserve(
+        OperationDescriptor(name="user action", owner="test")
+    )
+    assert visible is not None
+    assert [task.name for task in manager.active()] == ["user action"]
+    visible.finish()
+    assert [task.name for task in manager.recent()] == ["user action"]
 
 
 def test_session_registry_terminal_notifies_subscribers_of_idle(manager):
@@ -323,6 +355,35 @@ def test_composite_parent_remains_visible_after_child_session_finishes(manager):
     release.set()
     assert parent.done_event.wait(timeout=1)
     assert manager.active() == []
+
+
+def test_session_operation_id_stays_stable_after_session_projection_finishes(manager):
+    session = TaskSession(name="session projection transition")
+    handle = manager.operation_registry.reserve(
+        OperationDescriptor(name="session projection transition", owner="test"),
+        task_session=session,
+    )
+    assert handle is not None
+
+    session_finished = threading.Event()
+    release_worker = threading.Event()
+    observed_operation_ids = []
+
+    def work():
+        session.start()
+        observed_operation_ids.append(manager.active()[0].operation_id)
+        session.finish()
+        observed_operation_ids.append(manager.active()[0].operation_id)
+        session_finished.set()
+        release_worker.wait(timeout=2)
+
+    try:
+        assert handle.launch(work)
+        assert session_finished.wait(timeout=1)
+        assert observed_operation_ids == [handle.id, handle.id]
+    finally:
+        release_worker.set()
+    assert handle.done_event.wait(timeout=1)
 
 
 def test_a_failing_subscriber_does_not_break_the_task(manager):

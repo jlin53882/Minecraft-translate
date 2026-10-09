@@ -41,7 +41,8 @@ def test_pipeline_merge_dialog_bounds_scrollable_body_and_keeps_actions_separate
     assert body.height is not None
     assert 0 < body.height < height
     assert height * 0.5 <= body.height <= height * 0.7
-    assert body.content.scroll == ft.ScrollMode.AUTO
+    assert isinstance(body.content, ft.ListView)
+    assert body.content.auto_scroll is False
     assert dialog.scrollable is False
     assert len(dialog.actions) == 3
     assert all(action not in body.content.controls for action in dialog.actions)

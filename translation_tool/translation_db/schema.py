@@ -91,6 +91,7 @@ CREATE TABLE IF NOT EXISTS entry (
 );
 CREATE INDEX IF NOT EXISTS idx_entry_content ON entry (kind, mod_id, key, en_us);
 CREATE INDEX IF NOT EXISTS idx_entry_mod ON entry (mc_version, mod_id);
+CREATE INDEX IF NOT EXISTS idx_entry_mod_id ON entry (mod_id);
 CREATE INDEX IF NOT EXISTS idx_entry_en ON entry (en_us);
 
 CREATE TABLE IF NOT EXISTS translation (

@@ -17,7 +17,11 @@ from app.ui.design import C
 from app.ui.snack import show_snack
 from app.views.config.config_actions import (
     SaveOutcome,
+    finish_unsaved_dialog,
+    handle_unsaved_dialog_retry_reload,
+    handle_unsaved_dialog_save,
     load_config_transactionally,
+    on_unsaved_dialog_dismiss,
     save_config_from_view_with_outcome,
 )
 from app.views.config.config_form import (
@@ -184,6 +188,7 @@ class ConfigView(ft.Column):
         self._saved_form_state = None
         self._unsaved_dialog_open = False
         self._unsaved_dialog_resolved = False
+        self._unsaved_dialog_closing = False
         self._unsaved_dialog_continue = None
         self._unsaved_dialog = None
         self._allow_saved_recovery_exit = False
@@ -315,6 +320,7 @@ class ConfigView(ft.Column):
             modal=True,
             title=ft.Text("設定尚未儲存"),
             content=ft.Text("要先儲存設定、放棄變更，還是留在此頁？"),
+            on_dismiss=self._on_unsaved_dialog_dismiss,
         )
         self._unsaved_dialog_resolved = False
         self._unsaved_dialog_continue = on_continue
@@ -363,28 +369,24 @@ class ConfigView(ft.Column):
             ]
         self.page.update()
 
-    def _finish_unsaved_dialog(self, *, continue_navigation: bool) -> None:
-        if self._unsaved_dialog_resolved:
-            return
-        self._unsaved_dialog_resolved = True
-        self._unsaved_dialog_open = False
-        callback = self._unsaved_dialog_continue
-        self._unsaved_dialog_continue = None
-        self.page.pop_dialog()
-        if continue_navigation and callback is not None:
-            callback()
+    def _finish_unsaved_dialog(
+        self, *, continue_navigation: bool, before_continue=None
+    ) -> bool:
+        return finish_unsaved_dialog(
+            self,
+            continue_navigation=continue_navigation,
+            before_continue=before_continue,
+        )
+
+    def _on_unsaved_dialog_dismiss(self, _event=None) -> None:
+        """Treat external dismiss as stay; only our explicit action may navigate."""
+        on_unsaved_dialog_dismiss(self)
 
     def _on_unsaved_dialog_stay(self, _event=None) -> None:
         self._finish_unsaved_dialog(continue_navigation=False)
 
     def _on_unsaved_dialog_save(self, _event=None) -> None:
-        if self._unsaved_dialog_resolved:
-            return
-        save_succeeded = self.save_config_clicked(None)
-        if self._last_save_outcome is SaveOutcome.SAVED_RELOAD_FAILED:
-            self._configure_unsaved_dialog()
-        elif save_succeeded:
-            self._finish_unsaved_dialog(continue_navigation=True)
+        handle_unsaved_dialog_save(self)
 
     def _on_unsaved_dialog_discard(self, _event=None) -> None:
         if self._unsaved_dialog_resolved:
@@ -404,24 +406,21 @@ class ConfigView(ft.Column):
         self._finish_unsaved_dialog(continue_navigation=True)
 
     def _on_unsaved_dialog_retry_reload(self, _event=None) -> None:
-        if self._unsaved_dialog_resolved:
-            return
-        if not self._retry_config_reload():
-            self._unsaved_dialog.content.value = (
-                "設定已寫入，但重新載入仍失敗；可稍後重試或留在此頁。"
-            )
-            self.page.update()
-            return
-        self._finish_unsaved_dialog(continue_navigation=True)
+        handle_unsaved_dialog_retry_reload(self)
 
     def _on_unsaved_dialog_leave_after_ack(self, _event=None) -> None:
         if self._unsaved_dialog_resolved:
             return
+
         # Keep recovery and the dirty baseline until navigation/close really succeeds.
         # The one-shot acknowledgement only allows the current exit attempt.
-        self._reload_exit_acknowledged = True
-        self._reload_before_next_entry = True
-        self._finish_unsaved_dialog(continue_navigation=True)
+        def acknowledge_recovery_exit() -> None:
+            self._reload_exit_acknowledged = True
+            self._reload_before_next_entry = True
+
+        self._finish_unsaved_dialog(
+            continue_navigation=True, before_continue=acknowledge_recovery_exit
+        )
 
     def cancel_reload_recovery_exit(self) -> None:
         """Restore exit protection when an acknowledged close does not complete."""
@@ -638,17 +637,18 @@ class ConfigView(ft.Column):
         """取得成功顏色"""
         return C.EM
 
-    def save_config_clicked(self, e):
+    def save_config_clicked(self, e, *, show_feedback=True):
         """儲存設定"""
         if self._reload_recovery_required or self._reload_before_next_entry:
             self._last_save_outcome = None
-            return self._retry_config_reload()
+            return self._retry_config_reload(show_feedback=show_feedback)
         outcome = save_config_from_view_with_outcome(
             self,
             load_config_json_fn=load_config_json,
             save_config_json_fn=save_config_json,
             validate_api_keys_from_ui_fn=validate_api_keys_from_ui,
             registry=self._registry,
+            show_feedback=show_feedback,
         )
         self._last_save_outcome = outcome
         if outcome is SaveOutcome.SAVED_OK:
@@ -660,19 +660,21 @@ class ConfigView(ft.Column):
             self._refresh_dirty_state()
         return outcome is SaveOutcome.SAVED_OK
 
-    def _retry_config_reload(self) -> bool:
+    def _retry_config_reload(self, *, show_feedback=True) -> bool:
         try:
             self.load_config()
         except Exception:  # noqa: BLE001 - keep recovery state until a full reload succeeds
             self._reload_recovery_required = True
             logger.error("設定重載恢復失敗：%s", redact_text(traceback.format_exc()))
-            show_snack(
-                self.page,
-                "⚠️ 設定仍未重新載入；目前內容已保留，請稍後重試。",
-            )
+            if show_feedback:
+                show_snack(
+                    self.page,
+                    "⚠️ 設定仍未重新載入；目前內容已保留，請稍後重試。",
+                )
             self._refresh_dirty_state()
             return False
-        show_snack(self.page, "✅ 設定已重新載入，畫面與設定檔已同步。", C.EM)
+        if show_feedback:
+            show_snack(self.page, "✅ 設定已重新載入，畫面與設定檔已同步。", C.EM)
         return True
 
     def reload_before_entry(self) -> bool:

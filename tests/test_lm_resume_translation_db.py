@@ -31,9 +31,16 @@ def test_checkpoint_records_the_resolved_database_choice(env, monkeypatch):  # n
         run(env, "out", write_new_cache=True)
 
     saved = json.loads(Path(lm_translator.CHECKPOINT_FILE).read_text("utf-8"))
-    assert saved["translation_db"] == {"enabled": True, "version": "1.21.1"}
+    assert saved["translation_db"]["enabled"] is True
+    assert saved["translation_db"]["version"] == "1.21.1"
+    assert Path(saved["translation_db"]["settings"]["path"]).is_absolute()
+    assert saved["translation_db"]["settings"]["version"] == "1.21.1"
     task = lm_resume.peek_interrupted_task()
     assert (task.use_translation_db, task.translation_db_version) == (True, "1.21.1")
+    assert (
+        task.translation_db_settings["path"]
+        == saved["translation_db"]["settings"]["path"]
+    )
 
     # 重開後設定改成 1.20.1：checkpoint 仍然記著原本的版本
     _settings(monkeypatch, enabled=True, version="1.20.1")

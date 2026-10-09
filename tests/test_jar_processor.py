@@ -8,6 +8,8 @@ import re
 import zipfile
 from pathlib import Path
 
+import pytest
+
 from translation_tool.core.jar_processor import (
     BOOK_PATH_REGEX_DUAL_STRUCTURE,
     ExtractionSummary,
@@ -42,6 +44,31 @@ class TestJarProcessorExports:
         assert regex.search("assets/mymod/lang/en_us.json")
         assert regex.search("assets/mymod/lang/zh_cn.json")
         assert regex.search("assets/mymod/lang/zh_tw.json")
+
+    def test_extraction_rejects_input_folder_as_output(self, tmp_path):
+        """An already-suffixed source must not be overwritten in place."""
+        source = tmp_path / "mods_提取lang_輸出"
+        source.mkdir()
+        archive_path = source / "mod.jar"
+        with zipfile.ZipFile(archive_path, "w") as archive:
+            archive.writestr(
+                "assets/mod/lang/en_us.json", '{"item.mod.key":"New content"}'
+            )
+        existing = source / "assets" / "mod" / "lang" / "en_us.json"
+        existing.parent.mkdir(parents=True)
+        existing.write_text('{"item.mod.key":"Keep source"}', encoding="utf-8")
+
+        with pytest.raises(
+            ValueError, match="source and output directories must differ"
+        ):
+            list(
+                extract_lang_files_generator(
+                    str(source), str(source), lang_codes=["en_us"]
+                )
+            )
+
+        assert existing.read_text(encoding="utf-8") == '{"item.mod.key":"Keep source"}'
+        assert archive_path.is_file()
 
     def test_book_regex_defined(self):
         """測試 BOOK_PATH_REGEX_DUAL_STRUCTURE 有定義"""

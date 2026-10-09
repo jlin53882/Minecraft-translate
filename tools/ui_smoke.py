@@ -35,6 +35,7 @@ DEFAULT_THEMES = ("dark", "light")
 SMOKE_SCENARIOS = (
     "views",
     "dialogs",
+    "dialog-click-probe",
     "empty",
     "data",
     "running",
@@ -63,7 +64,67 @@ DIALOG_WIZARD_STEP_KEYS = (
 DIALOG_SCROLL_CASES: dict[str, str] = {
     "pipeline_merge": "pipeline_merge_bottom",
     "pipeline_merge_reopen": "pipeline_merge_reopen_bottom",
+    "pipeline_bundle": "pipeline_bundle_bottom",
 }
+DIALOG_CLICK_PROBE_EXTRA_CASES = (
+    "pipeline_bundle_versions_open",
+    "pipeline_bundle_versions_scrolled",
+    "pipeline_bundle_versions_filtered",
+    "pipeline_bundle_version_selected",
+    "pipeline_bundle_resize_narrow",
+    "pipeline_bundle_resize_restored",
+    "pipeline_wizard_versions_open",
+    "pipeline_wizard_versions_scrolled",
+    "pipeline_wizard_versions_filtered",
+    "pipeline_wizard_version_selected",
+)
+DIALOG_CLICK_STAGES: tuple[tuple[str, int, int], ...] = (
+    ("extract-cancel", 813, 834),
+    ("extract-invalid-preview", 908, 834),
+    ("extract-valid-preview", 908, 834),
+    ("extract-invalid-confirm", 1030, 834),
+    ("extract-valid-confirm", 1030, 834),
+    ("merge-preview", 908, 834),
+    ("merge-cancel", 813, 834),
+    ("merge-invalid-confirm", 1030, 834),
+    ("merge-valid-confirm", 1030, 834),
+    ("translate-preview", 908, 834),
+    ("translate-cancel", 813, 834),
+    ("translate-invalid-confirm", 1030, 834),
+    ("translate-valid-confirm", 1030, 834),
+    ("bundle-version-expand", 680, 493),
+    ("bundle-version-wheel", 680, 600),
+    ("bundle-version-search", 680, 445),
+    ("bundle-version-select", 680, 533),
+    ("bundle-resize-narrow", 0, 0),
+    ("bundle-resize-restore", 0, 0),
+    ("bundle-preview", 908, 834),
+    ("bundle-cancel", 813, 834),
+    ("bundle-invalid-confirm", 1030, 834),
+    ("bundle-valid-confirm", 1030, 834),
+    ("wizard-cancel-step1", 1058, 834),
+    # Click near each checkbox glyph center, with coordinates captured from the
+    # fixed CanvasKit viewport used by this deterministic browser probe.
+    ("wizard-deselect-en", 291, 428),
+    ("wizard-deselect-zh-cn", 291, 469),
+    ("wizard-deselect-zh-tw", 291, 511),
+    ("wizard-step1-next", 982, 834),
+    ("wizard-step2-next", 982, 834),
+    ("wizard-step3-next", 982, 834),
+    ("wizard-version-expand", 680, 546),
+    ("wizard-version-wheel", 680, 650),
+    ("wizard-version-search", 680, 500),
+    ("wizard-version-select", 680, 590),
+    ("wizard-invalid-confirm", 962, 834),
+    ("wizard-step4-prev", 865, 834),
+    ("wizard-step3-prev", 902, 834),
+    ("wizard-step2-prev", 902, 834),
+    ("wizard-select-en", 291, 428),
+    ("wizard-step1-next-valid", 982, 834),
+    ("wizard-step2-next-valid", 982, 834),
+    ("wizard-step3-next-valid", 982, 834),
+    ("wizard-valid-confirm", 962, 834),
+)
 SCENARIO_NOTES = {
     "cancelled": (
         "此案例截取取消要求已送出但 worker 尚未結束的畫面；"
@@ -291,9 +352,30 @@ def _expected_case_keys(
                     ("dialog_wizard", theme, viewport, key)
                     for key in DIALOG_WIZARD_STEP_KEYS
                 )
+                expected.add(
+                    (
+                        "dialog_wizard_scroll",
+                        theme,
+                        viewport,
+                        "pipeline_one_click_step4_bottom",
+                    )
+                )
                 expected.update(
                     ("dialog_scroll", theme, viewport, key)
                     for key in DIALOG_SCROLL_CASES.values()
+                )
+            elif scenario == "dialog-click-probe":
+                expected.add(
+                    ("dialog_click_probe", theme, viewport, "pipeline_extract")
+                )
+                expected.update(
+                    (
+                        "dialog_click_probe",
+                        theme,
+                        viewport,
+                        view,
+                    )
+                    for view in DIALOG_CLICK_PROBE_EXTRA_CASES
                 )
             else:
                 expected.add(("state", theme, viewport, scenario))
@@ -482,6 +564,26 @@ def _run_dialog_scenario(
                         "needs_visual_review": True,
                     }
                 )
+                if step == 4:
+                    viewport_width, viewport_height = map(int, viewport.split("x"))
+                    page.mouse.move(viewport_width // 2, viewport_height // 2)
+                    page.mouse.wheel(0, viewport_height * 2)
+                    page.wait_for_timeout(250)
+                    bottom_filename = (
+                        f"{theme}-{viewport}-dialog-pipeline_one_click_step4_bottom.png"
+                    )
+                    cases.append(
+                        {
+                            "kind": "dialog_wizard_scroll",
+                            "theme": theme,
+                            "viewport": viewport,
+                            "view": "pipeline_one_click_step4_bottom",
+                            "screenshot": _capture_case(
+                                page, output_dir, bottom_filename
+                            ),
+                            "needs_visual_review": True,
+                        }
+                    )
                 _ack_capture(
                     runtime_root,
                     f"{theme}-{viewport}-dialog_wizard-{wizard_key}",
@@ -495,6 +597,242 @@ def _run_dialog_scenario(
         }
     )
     wait_for_title(page, "SMOKE:DIALOGS:DONE", 30000, exact=True)
+
+
+def _run_dialog_click_probe(
+    page: Page,
+    output_dir: Path,
+    runtime_root: Path,
+    cases: list[dict],
+    behavior_checks: list[dict],
+    *,
+    theme: str,
+    viewport: str,
+) -> None:
+    """Use real CanvasKit mouse input for four dialogs and the complete wizard path."""
+    if viewport != "1360x900":
+        raise ValueError("dialog-click-probe 目前固定使用 1360x900 viewport")
+    wait_for_title(page, "SMOKE:CLICK:extract-cancel:READY", 30000, exact=True)
+    page.wait_for_timeout(250)
+    filename = f"{theme}-{viewport}-dialog-click-pipeline_extract.png"
+    cases.append(
+        {
+            "kind": "dialog_click_probe",
+            "theme": theme,
+            "viewport": viewport,
+            "view": "pipeline_extract",
+            "screenshot": _capture_case(page, output_dir, filename),
+            "needs_visual_review": True,
+        }
+    )
+    for key, x, y in DIALOG_CLICK_STAGES:
+        wait_for_title(page, f"SMOKE:CLICK:{key}:READY", 30000, exact=True)
+        page.wait_for_timeout(120)
+        if key in {"bundle-resize-narrow", "bundle-resize-restore"}:
+            target = (
+                {"width": 390, "height": 844}
+                if key == "bundle-resize-narrow"
+                else {"width": 1360, "height": 900}
+            )
+            page.set_viewport_size(target)
+            page.wait_for_timeout(350)
+            view = (
+                "pipeline_bundle_resize_narrow"
+                if key == "bundle-resize-narrow"
+                else "pipeline_bundle_resize_restored"
+            )
+            filename = f"{theme}-{viewport}-{view}.png"
+            cases.append(
+                {
+                    "kind": "dialog_click_probe",
+                    "theme": theme,
+                    "viewport": viewport,
+                    "view": view,
+                    "screenshot": _capture_case(page, output_dir, filename),
+                    "needs_visual_review": True,
+                }
+            )
+            _ack_capture(runtime_root, f"{theme}-{viewport}-click-probe-{key}")
+            result = wait_for_title(
+                page, f"SMOKE:CLICK:{key}:DONE:PASS", 10000, exact=True
+            )
+            behavior_checks.append(
+                {
+                    "scenario": "dialog-click-probe",
+                    "check": f"resize_open_bundle_dialog_{key}",
+                    "result": "passed",
+                    "event": result,
+                    "input": f"Playwright viewport resize to {target['width']}x{target['height']}",
+                }
+            )
+            _ack_capture(
+                runtime_root,
+                f"{theme}-{viewport}-click-probe-{key}-verified",
+            )
+            continue
+        if key == "wizard-deselect-en":
+            page.screenshot(
+                path=str(
+                    output_dir / f"{theme}-{viewport}-wizard-step1-before-click.png"
+                )
+            )
+        if key not in {"bundle-version-wheel", "wizard-version-wheel"}:
+            page.mouse.click(x, y)
+        if key == "wizard-deselect-en":
+            page.wait_for_timeout(250)
+            page.screenshot(
+                path=str(
+                    output_dir / f"{theme}-{viewport}-wizard-step1-after-click.png"
+                )
+            )
+        if key.startswith("wizard-deselect-") or key == "wizard-select-en":
+            page.wait_for_timeout(120)
+            behavior_checks.append(
+                {
+                    "scenario": "dialog-click-probe",
+                    "check": f"real_web_click_{key}",
+                    "result": "passed",
+                    "event": "mouse input sent; effect asserted by wizard validation",
+                    "input": f"Playwright mouse click at ({x}, {y})",
+                }
+            )
+            _ack_capture(runtime_root, f"{theme}-{viewport}-click-probe-{key}")
+            continue
+        if key in {"bundle-version-wheel", "wizard-version-wheel"}:
+            page.mouse.move(x, y)
+            page.mouse.wheel(0, 180)
+            page.wait_for_timeout(250)
+            view = (
+                "pipeline_bundle_versions_scrolled"
+                if key == "bundle-version-wheel"
+                else "pipeline_wizard_versions_scrolled"
+            )
+            filename = f"{theme}-{viewport}-{view}.png"
+            page.screenshot(path=str(output_dir / filename))
+            cases.append(
+                {
+                    "kind": "dialog_click_probe",
+                    "theme": theme,
+                    "viewport": viewport,
+                    "view": view,
+                    "screenshot": filename,
+                    "needs_visual_review": True,
+                }
+            )
+            page.mouse.wheel(0, -600)
+            page.wait_for_timeout(120)
+            behavior_checks.append(
+                {
+                    "scenario": "dialog-click-probe",
+                    "check": f"real_web_scroll_{key}",
+                    "result": "passed",
+                    "event": "wheel input sent to open bounded version list",
+                    "input": f"Playwright wheel at ({x}, {y})",
+                }
+            )
+            _ack_capture(runtime_root, f"{theme}-{viewport}-click-probe-{key}")
+            continue
+        if key in {"bundle-version-search", "wizard-version-search"}:
+            page.keyboard.press("Control+A")
+            page.keyboard.type("1.20")
+            page.wait_for_timeout(300)
+            view = (
+                "pipeline_bundle_versions_filtered"
+                if key == "bundle-version-search"
+                else "pipeline_wizard_versions_filtered"
+            )
+            filename = f"{theme}-{viewport}-{view}.png"
+            page.screenshot(path=str(output_dir / filename))
+            cases.append(
+                {
+                    "kind": "dialog_click_probe",
+                    "theme": theme,
+                    "viewport": viewport,
+                    "view": view,
+                    "screenshot": filename,
+                    "needs_visual_review": True,
+                }
+            )
+            behavior_checks.append(
+                {
+                    "scenario": "dialog-click-probe",
+                    "check": f"real_web_type_{key}",
+                    "result": "passed",
+                    "event": "CanvasKit TextField focused and typed with Playwright keyboard",
+                    "input": "1.20",
+                }
+            )
+            _ack_capture(runtime_root, f"{theme}-{viewport}-click-probe-{key}")
+            result = wait_for_title(
+                page, f"SMOKE:CLICK:{key}:DONE:PASS", 10000, exact=True
+            )
+            _ack_capture(
+                runtime_root,
+                f"{theme}-{viewport}-click-probe-{key}-verified",
+            )
+            continue
+        result = wait_for_title(page, f"SMOKE:CLICK:{key}:DONE:PASS", 10000, exact=True)
+        behavior_checks.append(
+            {
+                "scenario": "dialog-click-probe",
+                "check": f"real_web_click_{key}",
+                "result": "passed",
+                "event": result,
+                "input": f"Playwright mouse click at ({x}, {y})",
+            }
+        )
+        _ack_capture(runtime_root, f"{theme}-{viewport}-click-probe-{key}")
+
+        bundle_picker_view = {
+            "bundle-version-expand": "pipeline_bundle_versions_open",
+            "bundle-version-select": "pipeline_bundle_version_selected",
+            "wizard-version-expand": "pipeline_wizard_versions_open",
+            "wizard-version-select": "pipeline_wizard_version_selected",
+        }.get(key)
+        if bundle_picker_view:
+            filename = f"{theme}-{viewport}-{bundle_picker_view}.png"
+            page.screenshot(path=str(output_dir / filename))
+            cases.append(
+                {
+                    "kind": "dialog_click_probe",
+                    "theme": theme,
+                    "viewport": viewport,
+                    "view": bundle_picker_view,
+                    "screenshot": filename,
+                    "needs_visual_review": True,
+                }
+            )
+
+        if key == "bundle-valid-confirm":
+            wait_for_title(
+                page, "SMOKE:CLICK:wizard-step1-open:READY", 30000, exact=True
+            )
+            wizard_path = output_dir / f"{theme}-{viewport}-wizard-step1-open.png"
+            page.screenshot(path=str(wizard_path))
+            _ack_capture(
+                runtime_root,
+                f"{theme}-{viewport}-click-probe-wizard-step1-open",
+            )
+
+        if key == "extract-valid-preview":
+            wait_for_title(
+                page, "SMOKE:CLICK:extract-preview-result:READY", 30000, exact=True
+            )
+            preview_path = output_dir / f"{theme}-{viewport}-extract-preview-result.png"
+            page.screenshot(path=str(preview_path))
+            behavior_checks.append(
+                {
+                    "scenario": "dialog-click-probe",
+                    "check": "real_web_extract_preview_result_visible",
+                    "result": "passed",
+                    "screenshot": preview_path.name,
+                }
+            )
+            _ack_capture(
+                runtime_root,
+                f"{theme}-{viewport}-click-probe-extract-preview-result",
+            )
+    wait_for_title(page, "SMOKE:DIALOG_CLICK_PROBE:DONE", 10000, exact=True)
 
 
 def _run_state_scenario(
@@ -706,6 +1044,16 @@ def run_smoke(
                                         theme=theme,
                                         viewport=viewport,
                                     )
+                                elif scenario == "dialog-click-probe":
+                                    _run_dialog_click_probe(
+                                        page,
+                                        output_dir,
+                                        runtime_root,
+                                        report["cases"],
+                                        report["behavior_checks"],
+                                        theme=theme,
+                                        viewport=f"{width}x{height}",
+                                    )
                                 else:
                                     _run_state_scenario(
                                         page,
@@ -761,7 +1109,12 @@ def run_smoke(
     report["screenshot_count"] = len(report["cases"])
     report["expected_case_count"] = len(expected_cases)
     report["behavior_check_errors"] = []
-    if len(report["behavior_checks"]) != len(themes) * len(viewports):
+    expected_behavior_checks = (
+        len(DIALOG_CLICK_STAGES) + 1
+        if scenario == "dialog-click-probe"
+        else len(themes) * len(viewports)
+    )
+    if len(report["behavior_checks"]) != expected_behavior_checks:
         report["behavior_check_errors"].append("lifecycle check matrix incomplete")
     report["ok"] = not any(
         (

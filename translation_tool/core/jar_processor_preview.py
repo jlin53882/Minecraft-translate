@@ -5,7 +5,7 @@
 
 多執行緒實作：
 - 掃描階段由 ThreadPoolExecutor 平行執行 _scan_single_jar_for_preview。
-- 主執行緒透過 as_completed 輪詢完成狀態，逐步 yield 進度更新。
+- 以 bounded in-flight window 控制排隊數；主執行緒逐步消費完成結果並 yield 進度更新。
 - 結果合併在主執行緒完成（所有工作執行緒結束後才執行），避免跨執行緒競爭。
 
 Thread Safety：
@@ -23,10 +23,11 @@ import re
 import threading
 import zipfile
 from collections.abc import Callable, Generator
-from concurrent.futures import as_completed
 from pathlib import Path
 from typing import Any
 
+from translation_tool.utils.bounded_executor import bounded_as_completed
+from translation_tool.utils.cancellation import raise_if_cancelled
 from translation_tool.utils.config_manager import load_config
 from translation_tool.utils.ui_mirror import ContextThreadPoolExecutor
 
@@ -69,6 +70,7 @@ def _scan_single_jar_for_preview(
         dual 模式：{jar, lang_matched, book_matched, lang_count, book_count, size_mb, error}
     """
     jar_name = os.path.basename(jar_path)
+    raise_if_cancelled()
     jar_size = os.path.getsize(jar_path)
 
     matched_bytes = 0
@@ -78,6 +80,7 @@ def _scan_single_jar_for_preview(
                 lang_matched = []
                 book_matched = []
                 for member in zf.infolist():
+                    raise_if_cancelled()
                     if member.is_dir():
                         continue
                     normalized_path = member.filename.replace("\\", "/")
@@ -102,6 +105,7 @@ def _scan_single_jar_for_preview(
             else:
                 matched_files = []
                 for member in zf.infolist():
+                    raise_if_cancelled()
                     if member.is_dir():
                         continue
                     normalized_path = member.filename.replace("\\", "/")
@@ -178,8 +182,9 @@ def preview_extraction_generator_impl(
 
     流程：
         1. find_jar_files_fn 收集所有待掃描的 JAR 路徑。
-        2. 建立 ThreadPoolExecutor，以 _get_preview_workers() 為執行緒數上限。
-        3. 所有 JAR 由執行緒池並行掃描；主執行緒以 as_completed 輪詢完成的未來物件，
+        2. 建立 ThreadPoolExecutor，以 _get_preview_workers() 為執行緒數上限，
+           同時限制 in-flight work，避免一次排入整個 JAR 清單。
+        3. JAR 由執行緒池並行掃描；主執行緒消費完成的 future，
            每完成一個即時 yield 進度更新（progress, current, total, log）。
         4. 所有 JAR 完成後，在主執行緒合併掃描結果並 yield 最終報告。
 
@@ -251,21 +256,26 @@ def preview_extraction_generator_impl(
     scan_lock = threading.Lock()  # 保護 scan_results 的寫入
     done_count = [0]  # 已完成的 JAR 數量（用 list 包裝以便跨執行緒修改）
 
-    with ContextThreadPoolExecutor(max_workers=workers) as executor:
-        future_to_jar = {
-            executor.submit(
-                _scan_single_jar_for_preview,
-                jar_path,
-                mode,
-                target_regex,
-                book_path_regex,
-                lang_regex,
-            ): jar_path
-            for jar_path in jar_files
-        }
+    def submit_preview(executor, jar_path):
+        return executor.submit(
+            _scan_single_jar_for_preview,
+            jar_path,
+            mode,
+            target_regex,
+            book_path_regex,
+            lang_regex,
+        )
 
-        for future in as_completed(future_to_jar):
-            jar_path = future_to_jar[future]
+    with (
+        ContextThreadPoolExecutor(max_workers=workers) as executor,
+        bounded_as_completed(
+            executor,
+            jar_files,
+            submit_preview,
+            max_in_flight=workers * 2,
+        ) as completed,
+    ):
+        for future, jar_path in completed:
             try:
                 result = future.result()
             except Exception as e:  # noqa: BLE001 - 失敗已記錄，不中斷批次流程

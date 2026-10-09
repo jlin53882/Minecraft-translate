@@ -14,6 +14,7 @@ import os
 import threading
 import zipfile
 
+from translation_tool.utils.cancellation import raise_if_cancelled
 from translation_tool.utils.log_unit import log_warning
 
 # 文字類資源（lang / json / toml 等）預設上限
@@ -159,6 +160,7 @@ def read_limited(
     total = 0
     with zf.open(info) as f:
         while True:
+            raise_if_cancelled()
             chunk = f.read(_CHUNK)
             if not chunk:
                 break

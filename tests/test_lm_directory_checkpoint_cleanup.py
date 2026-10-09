@@ -115,6 +115,7 @@ def test_dry_run_retains_existing_checkpoint(tmp_path, monkeypatch):
 
 def test_directory_entrypoint_remains_orchestration_level():
     source = inspect.getsource(lm_translator.translate_directory_generator)
+    work_source = inspect.getsource(lm_translator._translate_directory_work)
 
     assert len(source.splitlines()) <= 110
     for helper in (
@@ -123,4 +124,4 @@ def test_directory_entrypoint_remains_orchestration_level():
         "_write_directory_previews",
         "_run_directory_translation",
     ):
-        assert helper in source
+        assert helper in source + work_source

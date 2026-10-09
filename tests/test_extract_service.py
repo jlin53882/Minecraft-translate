@@ -10,6 +10,7 @@ refactors don't accidentally break the contract.
 
 from __future__ import annotations
 
+import ntpath
 import os
 import tempfile
 from unittest.mock import patch
@@ -21,8 +22,8 @@ from unittest.mock import patch
 class TestGetOutputFolderNames:
     """Tests for get_output_folder_names()."""
 
-    def test_returns_all_five_keys_with_defaults(self):
-        """When config has no output_folder_names, return defaults for all 5 keys."""
+    def test_returns_all_six_keys_with_defaults(self):
+        """When config has no output_folder_names, return defaults for all 6 keys."""
         from app.services_impl.pipelines.extract_service import get_output_folder_names
 
         with patch(
@@ -37,6 +38,7 @@ class TestGetOutputFolderNames:
             "dual_extract",
             "lang_preview",
             "book_preview",
+            "dual_preview",
         }
         # Verify defaults (Chinese suffix)
         assert names["lang_extract"] == "_提取lang_輸出"
@@ -44,6 +46,7 @@ class TestGetOutputFolderNames:
         assert names["dual_extract"] == "_提取both_輸出"
         assert names["lang_preview"] == "_預覽lang_輸出"
         assert names["book_preview"] == "_預覽book_輸出"
+        assert names["dual_preview"] == "_預覽both_輸出"
 
     def test_uses_custom_values_from_config(self):
         """When config has custom values, they should override defaults."""
@@ -159,23 +162,26 @@ class TestPrepareExtractionPaths:
                 == "/x/mods_提取lang_輸出"
             )
 
-    def test_empty_output_uses_mode_suffix(self):
-        """未指定輸出目錄時，依模式使用對應的子資料夾名稱。"""
+    def test_empty_output_uses_sibling_directory_for_every_extract_mode(self):
+        """空白輸出時，三種提取模式都在來源資料夾同層建立預設名稱。"""
         from app.services_impl.pipelines.extract_service import prepare_extraction_paths
 
         with patch(
             "app.services_impl.pipelines.extract_service.load_config",
             return_value={},
         ):
-            assert prepare_extraction_paths("/mods", "book", "").endswith(
-                "_提取book_輸出"
+            assert prepare_extraction_paths("/workspace/mods", "lang", "") == (
+                "/workspace/mods_提取lang_輸出"
             )
-            assert prepare_extraction_paths("/mods", "dual", "").endswith(
-                "_提取both_輸出"
+            assert prepare_extraction_paths("/workspace/mods", "book", "") == (
+                "/workspace/mods_提取book_輸出"
+            )
+            assert prepare_extraction_paths("/workspace/mods", "dual", "") == (
+                "/workspace/mods_提取both_輸出"
             )
 
-    def test_empty_output_falls_back_to_mods_dir(self):
-        """When output_path is empty, mods_dir is used as base."""
+    def test_empty_output_uses_sibling_of_mods_dir(self):
+        """空白輸出時，source basename 加後綴後放在來源同層。"""
         from app.services_impl.pipelines.extract_service import prepare_extraction_paths
 
         with patch(
@@ -184,8 +190,7 @@ class TestPrepareExtractionPaths:
         ):
             result = prepare_extraction_paths("/mods", "lang", "")
 
-        assert "mods" in result
-        assert "_提取lang_輸出" in result
+        assert result == "/mods_提取lang_輸出"
 
     def test_empty_mods_and_empty_output_returns_empty(self):
         """When both are empty, return empty string."""
@@ -203,18 +208,6 @@ class TestPrepareExtractionPaths:
 class TestPreparePreviewPaths:
     """Tests for prepare_preview_paths()."""
 
-    def test_returns_empty_for_nonexistent_path(self):
-        """If mods_dir doesn't exist, return empty string."""
-        from app.services_impl.pipelines.extract_service import prepare_preview_paths
-
-        with patch(
-            "app.services_impl.pipelines.extract_service.load_config",
-            return_value={},
-        ):
-            result = prepare_preview_paths("/this/does/not/exist/mods", "lang")
-
-        assert result == ""
-
     def test_lang_mode_appends_preview_suffix(self):
         """lang mode should append lang_preview suffix to a real path."""
         from app.services_impl.pipelines.extract_service import prepare_preview_paths
@@ -229,8 +222,7 @@ class TestPreparePreviewPaths:
             ):
                 result = prepare_preview_paths(mods_dir, "lang")
 
-        assert "_預覽lang_輸出" in result
-        assert "mods" in result
+        assert result == os.path.join(tmp, "mods_預覽lang_輸出")
 
     def test_book_mode_appends_book_preview_suffix(self):
         """book mode should append book_preview suffix."""
@@ -246,10 +238,10 @@ class TestPreparePreviewPaths:
             ):
                 result = prepare_preview_paths(mods_dir, "book")
 
-        assert "_預覽book_輸出" in result
+        assert result == os.path.join(tmp, "mods_預覽book_輸出")
 
-    def test_dual_mode_uses_dual_preview_suffix(self):
-        """dual mode should use a dedicated _預覽_dual_輸出 suffix."""
+    def test_dual_mode_uses_configured_dual_preview_suffix(self):
+        """dual preview must read dual_preview instead of a hard-coded suffix."""
         from app.services_impl.pipelines.extract_service import prepare_preview_paths
 
         with tempfile.TemporaryDirectory() as tmp:
@@ -258,11 +250,164 @@ class TestPreparePreviewPaths:
 
             with patch(
                 "app.services_impl.pipelines.extract_service.load_config",
-                return_value={},
+                return_value={
+                    "extractor": {
+                        "output_folder_names": {"dual_preview": "_預覽both_輸出"}
+                    }
+                },
             ):
                 result = prepare_preview_paths(mods_dir, "dual")
 
-        assert "_預覽_dual_輸出" in result
+        assert result == os.path.join(tmp, "mods_預覽both_輸出")
+
+
+class TestOutputPathContractMatrix:
+    """回歸測試：六種操作都使用 service 層同一套 sibling path 契約。"""
+
+    def test_windows_absolute_paths_use_sibling_directories(self):
+        from app.services_impl.pipelines.extract_service import (
+            prepare_extraction_paths,
+            prepare_preview_paths,
+        )
+
+        source = r"C:\Users\Jlin5\OneDrive\桌面\測試minecraft\mods"
+        expected = {
+            (
+                "extract",
+                "lang",
+            ): r"C:\Users\Jlin5\OneDrive\桌面\測試minecraft\mods_提取lang_輸出",
+            (
+                "extract",
+                "book",
+            ): r"C:\Users\Jlin5\OneDrive\桌面\測試minecraft\mods_提取book_輸出",
+            (
+                "extract",
+                "dual",
+            ): r"C:\Users\Jlin5\OneDrive\桌面\測試minecraft\mods_提取both_輸出",
+            (
+                "preview",
+                "lang",
+            ): r"C:\Users\Jlin5\OneDrive\桌面\測試minecraft\mods_預覽lang_輸出",
+            (
+                "preview",
+                "book",
+            ): r"C:\Users\Jlin5\OneDrive\桌面\測試minecraft\mods_預覽book_輸出",
+            (
+                "preview",
+                "dual",
+            ): r"C:\Users\Jlin5\OneDrive\桌面\測試minecraft\mods_預覽both_輸出",
+        }
+        extract = {"lang", "book", "dual"}
+        for (action, mode), target in expected.items():
+            actual = (
+                prepare_extraction_paths(source, mode)
+                if action == "extract"
+                else prepare_preview_paths(source, mode)
+            )
+            assert actual == target
+            assert ntpath.dirname(actual) == ntpath.dirname(source)
+            assert actual != ntpath.join(source, target.rsplit("\\", 1)[-1])
+            if mode in extract and action == "extract":
+                assert "\\mods\\_提取" not in actual
+
+    def test_custom_output_is_preserved_for_all_six_operations(self):
+        from app.services_impl.pipelines.extract_service import (
+            prepare_extraction_paths,
+            prepare_preview_paths,
+        )
+
+        for mode in ("lang", "book", "dual"):
+            for action in ("extract", "preview"):
+                custom = rf"C:\custom\{action}-{mode}"
+                actual = (
+                    prepare_extraction_paths("C:\\source\\mods", mode, custom)
+                    if action == "extract"
+                    else prepare_preview_paths("C:\\source\\mods", mode, custom)
+                )
+                assert actual == custom
+
+    def test_custom_suffixes_are_used_for_all_six_operations(self):
+        from app.services_impl.pipelines.extract_service import (
+            prepare_extraction_paths,
+            prepare_preview_paths,
+        )
+
+        custom_names = {
+            "lang_extract": "-L",
+            "book_extract": "-B",
+            "dual_extract": "-D",
+            "lang_preview": "-PL",
+            "book_preview": "-PB",
+            "dual_preview": "-PD",
+        }
+        config = {"extractor": {"output_folder_names": custom_names}}
+        source = "/workspace/custom-mods/"
+        with patch(
+            "app.services_impl.pipelines.extract_service.load_config",
+            return_value=config,
+        ):
+            for mode, suffix in (("lang", "-L"), ("book", "-B"), ("dual", "-D")):
+                assert prepare_extraction_paths(source, mode) == (
+                    f"/workspace/custom-mods{suffix}"
+                )
+            for mode, suffix in (("lang", "-PL"), ("book", "-PB"), ("dual", "-PD")):
+                assert prepare_preview_paths(source, mode) == (
+                    f"/workspace/custom-mods{suffix}"
+                )
+
+    def test_trailing_separators_custom_sources_and_existing_suffix(self):
+        from app.services_impl.pipelines.extract_service import prepare_extraction_paths
+
+        with patch(
+            "app.services_impl.pipelines.extract_service.load_config", return_value={}
+        ):
+            assert prepare_extraction_paths("/workspace/mods/", "dual") == (
+                "/workspace/mods_提取both_輸出"
+            )
+            assert prepare_extraction_paths(r"C:\workspace\mods" + "\\", "dual") == (
+                r"C:\workspace\mods_提取both_輸出"
+            )
+            assert prepare_extraction_paths("/workspace/custom-mods", "book") == (
+                "/workspace/custom-mods_提取book_輸出"
+            )
+            assert (
+                prepare_extraction_paths("/workspace/mods_提取both_輸出", "dual")
+                == "/workspace/mods_提取both_輸出"
+            )
+
+    def test_preview_resolution_does_not_create_output_directory(self, tmp_path):
+        from app.services_impl.pipelines.extract_service import prepare_preview_paths
+
+        source = tmp_path / "mods"
+        source.mkdir()
+        output = prepare_preview_paths(str(source), "dual")
+        assert output == str(tmp_path / "mods_預覽both_輸出")
+        assert not os.path.exists(output)
+
+    def test_output_directory_is_created_only_when_extraction_generator_runs(
+        self, tmp_path
+    ):
+        from app.services_impl.pipelines.extract_service import prepare_extraction_paths
+        from translation_tool.core.jar_processor import extract_lang_files_generator
+
+        source = tmp_path / "mods"
+        source.mkdir()
+        output = prepare_extraction_paths(str(source), "lang")
+        assert output == str(tmp_path / "mods_提取lang_輸出")
+        assert not os.path.exists(output)
+
+        list(extract_lang_files_generator(str(source), output, lang_codes=["en_us"]))
+        assert os.path.isdir(output)
+
+    def test_invalid_mode_and_unusable_source_are_rejected(self):
+        import pytest
+
+        from app.services_impl.pipelines.extract_service import prepare_extraction_paths
+
+        with pytest.raises(ValueError, match="mode"):
+            prepare_extraction_paths("/workspace/mods", "invalid")
+        with pytest.raises(ValueError, match="source"):
+            prepare_extraction_paths("/", "lang")
 
 
 # =============================================================================

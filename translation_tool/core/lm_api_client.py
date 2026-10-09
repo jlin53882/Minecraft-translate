@@ -22,6 +22,7 @@ from translation_tool.utils.redaction import redact_text
 # （換 key、等待、縮小 batch），不在這一層重試，避免重複等待與浪費配額。
 NETWORK_RETRY_ATTEMPTS = 3
 NETWORK_RETRY_BASE_SEC = 1.0
+NETWORK_CONNECT_TIMEOUT_SEC = 30
 
 # 單次回應的輸出 token 上限（generationConfig.maxOutputTokens）。
 # 不設的話，模型重複輸出時會燒光整個輸出額度（issue #108）。
@@ -221,12 +222,13 @@ def call_gemini_requests(
         data["generationConfig"]["maxOutputTokens"] = output_cap
 
     request_timeout = int(lm_cfg.get("rate_limit", {}).get("timeout", 600))
+    connect_timeout = min(request_timeout, NETWORK_CONNECT_TIMEOUT_SEC)
 
     response = _post_with_retry(
         url,
         headers=headers,
         json=data,
-        timeout=request_timeout,
+        timeout=(connect_timeout, request_timeout),
     )
 
     if not response.ok:

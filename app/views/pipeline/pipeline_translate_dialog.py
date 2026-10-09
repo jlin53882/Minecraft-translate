@@ -16,8 +16,16 @@ import flet as ft
 
 from app.services_impl.pipelines.extract_service import open_output_folder
 from app.ui.design import C
-from app.ui.dialogs import close_overlay_dialog
-from app.ui.sync_text_field import SyncTextField
+from app.ui.dialogs import close_overlay_dialog, present_dialog, set_dialog_feedback
+from app.views.moddb.lm_db_options import LmDbOptions
+from app.views.pipeline.pipeline_forms import (
+    TranslateFormState,
+    build_translate_form,
+    dialog_button,
+    dialog_content,
+    dialog_dimensions,
+    dialog_text_field,
+)
 from translation_tool.utils.config_manager import load_config
 
 
@@ -47,40 +55,42 @@ def open_translate_dialog(
         file_picker=file_picker,
         on_start_translate=on_start_translate,
         show_snack_bar=show_snack_bar,
+        dialogs=[],
+        run_started=False,
     )
-    dialog_width = _translate_init_state_and_fields(ctx, input_path, output_path)
+    ctx.feedback = ft.Text("", size=12, color=C.GOLD, visible=False)
+    ctx.lm_db_options = LmDbOptions(page.update)
+    _translate_init_state_and_fields(ctx, input_path, output_path)
     _translate_build_option_widgets(ctx)
     content = _translate_build_content(ctx)
 
     dialog = ft.AlertDialog(
         modal=True,
         title=ft.Text("🔄 啟動翻譯設定"),
-        content=ft.Container(content=content, width=dialog_width),
+        content=dialog_content(page, content),
         actions=[
-            ft.TextButton("取消", on_click=lambda e: ctx.close_dialog(dialog)),
-            ft.OutlinedButton(
+            dialog_button("取消", lambda e: ctx.close_dialog(dialog)),
+            dialog_button(
                 "預覽結果",
-                icon=ft.Icons.PREVIEW,
                 on_click=lambda e: ctx.show_preview_result(dialog),
+                icon=ft.Icons.PREVIEW,
+                role="preview",
             ),
-            ft.Button(
+            dialog_button(
                 "確定執行",
-                icon=ft.Icons.CHECK,
-                bgcolor=C.DIA,
-                color=C.ON_EM,
                 on_click=lambda e: ctx.start_translate(dialog),
+                icon=ft.Icons.CHECK,
+                role="primary",
             ),
         ],
     )
 
-    ctx.page.overlay.append(dialog)
-    dialog.open = True
-    ctx.page.update()
+    present_dialog(ctx, dialog)
 
 
 def _translate_init_state_and_fields(ctx, input_path, output_path):
     """翻譯對話框的路徑、設定預設值與輸入欄位。"""
-    dialog_width = int(ctx.page.width * 0.6)
+    dialog_width, _ = dialog_dimensions(ctx.page)
 
     cfg = load_config()
     lang_merger_cfg = cfg.get("lang_merger", {})
@@ -107,37 +117,33 @@ def _translate_init_state_and_fields(ctx, input_path, output_path):
         else ""
     )
 
-    ctx.translate_input_field = SyncTextField(
+    ctx.translate_input_field = dialog_text_field(
+        ctx.page,
         label="翻譯目標",
         hint_text=f"自動帶入：{ctx.default_input}"
         if ctx.default_input
         else "留空自動帶入整理後的待翻譯資料夾",
         value=ctx.default_input,
-        expand=True,
         border_color=C.DIA,
         path_input=True,
     )
-    ctx.translate_output_field = SyncTextField(
+    ctx.translate_output_field = dialog_text_field(
+        ctx.page,
         label="輸出目錄",
         hint_text=f"自動帶入：{ctx.default_output}"
         if ctx.default_output
         else "留空自動帶入 lm_translate/<翻譯輸出子資料夾>",
         value=ctx.default_output,
-        expand=True,
         border_color=C.DIA,
         path_input=True,
     )
 
-    ctx.dry_run_switch = ft.Switch(label="Dry Run（只分析不翻譯）", value=False)
+    ctx.translate_form_state = TranslateFormState()
     return dialog_width
 
 
 def _translate_build_option_widgets(ctx) -> None:
     """開關、API 金鑰區與 handler 綁定。"""
-    ctx.write_new_cache_switch = ft.Switch(
-        label="寫入新快取（每次回傳單獨快取）", value=True
-    )
-
     ctx.close_dialog = functools.partial(_translate_close_dialog, ctx)
 
     ctx.start_translate = functools.partial(_translate_start_translate, ctx)
@@ -154,9 +160,8 @@ def _translate_build_option_widgets(ctx) -> None:
 
 
 def _translate_build_content(ctx):
-    """對話框內容。"""
-
-    content = ft.Column(
+    """Build editable paths, then use the same form factory as the wizard."""
+    path_section = ft.Column(
         [
             ft.Text("輸入來源", weight="bold", size=13),
             ft.Text("留空自動帶入前一步驟輸出", size=10, color=C.MUTED),
@@ -169,7 +174,8 @@ def _translate_build_content(ctx):
                     ft.Button(
                         "瀏覽", icon=ft.Icons.SEARCH, on_click=ctx.browse_input_dir
                     ),
-                ]
+                ],
+                wrap=True,
             ),
             ft.Text("輸出目錄", weight="bold", size=13),
             ft.Text(
@@ -188,37 +194,52 @@ def _translate_build_content(ctx):
                     ft.Button(
                         "瀏覽", icon=ft.Icons.SEARCH, on_click=ctx.browse_output_dir
                     ),
-                ]
+                ],
+                wrap=True,
             ),
-            ft.Divider(),
-            ft.Text("執行選項", weight="bold", size=13),
-            ctx.dry_run_switch,
-            ctx.write_new_cache_switch,
         ],
-        spacing=10,
-        tight=False,
+        spacing=8,
     )
-    return content
+    controls = build_translate_form(
+        path_section=path_section,
+        state=ctx.translate_form_state,
+        db_card=ctx.lm_db_options.card,
+    )
+    ctx.dry_run_switch = controls.dry_run
+    ctx.write_new_cache_switch = controls.write_new_cache
+    controls.content.controls.append(ctx.feedback)
+    return controls.content
 
 
 def _translate_close_dialog(ctx, dialog):
-    close_overlay_dialog(ctx.page, dialog)
+    return close_overlay_dialog(ctx.page, dialog)
 
 
 def _translate_start_translate(ctx, dialog):
+    if ctx.run_started or not dialog.open:
+        return
     input_dir = (ctx.translate_input_field.value or "").strip()
     output_dir = (ctx.translate_output_field.value or "").strip()
+    input_dir = input_dir or ctx.default_input
+    output_dir = output_dir or ctx.default_output
 
-    if input_dir and not os.path.isdir(input_dir):
-        ctx.show_snack_bar("⚠️ 翻譯目標資料夾不存在")
+    if not input_dir or not os.path.isdir(input_dir):
+        set_dialog_feedback(ctx.page, ctx.feedback, "⚠️ 翻譯目標資料夾不存在", C.GOLD)
+        return
+    if not output_dir:
+        set_dialog_feedback(ctx.page, ctx.feedback, "⚠️ 輸出目錄為必填欄位", C.GOLD)
         return
 
-    ctx.close_dialog(dialog)
+    snapshot = ctx.lm_db_options.snapshot_for_run()
+    if not ctx.close_dialog(dialog):
+        return
+    ctx.run_started = True
     ctx.on_start_translate(
-        input_dir=input_dir or ctx.default_input,
-        output_dir=output_dir or ctx.default_output,
+        input_dir=input_dir,
+        output_dir=output_dir,
         dry_run=ctx.dry_run_switch.value,
         write_new_cache=ctx.write_new_cache_switch.value,
+        lm_db_snapshot=snapshot,
     )
 
 
@@ -265,9 +286,15 @@ def _translate_browse_output_dir(ctx, e=None):
 
 
 def _translate_show_preview_result(ctx, dialog):
+    if not dialog.open:
+        return
     input_dir = (ctx.translate_input_field.value or "").strip() or ctx.default_input
     if not input_dir or not os.path.isdir(input_dir):
-        ctx.show_snack_bar("⚠️ 翻譯目標資料夾不存在")
+        set_dialog_feedback(ctx.page, ctx.feedback, "⚠️ 翻譯目標資料夾不存在", C.GOLD)
         return
-    ctx.show_snack_bar("🔍 預覽功能待實作")
-    ctx.close_dialog(dialog)
+    set_dialog_feedback(
+        ctx.page,
+        ctx.feedback,
+        "翻譯結果預覽尚未支援；目前設定已保留，請直接執行或取消。",
+        C.GOLD,
+    )

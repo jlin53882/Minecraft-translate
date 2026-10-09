@@ -35,6 +35,7 @@ from app.views.icon_preview.load_operation import (
     observe_async_owner,
 )
 from app.views.icon_preview.progress import _make_progress_callback
+from translation_tool.utils.cancellation import raise_if_cancelled
 from translation_tool.utils.log_unit import log_error, log_info, log_warning
 from translation_tool.utils.path_text import normalize_path_text
 
@@ -669,10 +670,18 @@ class IconPreviewView(IconPreviewDetailMixin, IconPreviewListMixin, ft.Column):
     def _count_scan_steps(self, mode: str) -> int:
         """掃描前計算步數（glob／rglob；可在背景執行緒）。"""
         if mode == "jar_directory":
-            return len(list(self.source_root.glob("*.jar")))
-        if mode == "extracted_folder":
-            return len(list(self.source_root.rglob("en_us.json")))
-        return 0
+            paths = self.source_root.glob("*.jar")
+        elif mode == "extracted_folder":
+            paths = self.source_root.rglob("en_us.json")
+        else:
+            return 0
+
+        count = 0
+        for _path in paths:
+            raise_if_cancelled()
+            count += 1
+        raise_if_cancelled()
+        return count
 
     def _show_scan_started(self, mode: str, total_steps: int) -> None:
         """（event loop 上）顯示掃描進度條與提示。"""

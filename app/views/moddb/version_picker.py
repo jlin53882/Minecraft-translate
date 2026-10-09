@@ -6,10 +6,16 @@ import logging
 
 import flet as ft
 
-from app.services_impl.moddb_service import open_database, version_choices
+from app.services_impl.moddb_service import (
+    DbSettings,
+    database_version_choices,
+    open_database,
+    version_choices,
+)
 from app.ui import kit
 
 logger = logging.getLogger(__name__)
+MERGE_INHERIT_VERSION = "__inherit_global__"
 
 
 def target_version_choices() -> list[str]:
@@ -28,6 +34,70 @@ def target_version_choices() -> list[str]:
     finally:
         if db is not None:
             db.close()
+
+
+def merge_target_version_choices(settings: DbSettings | None = None) -> list[str]:
+    """Return only versions present in the existing database; never create/fallback."""
+    if settings is not None:
+        try:
+            return database_version_choices(settings)
+        except Exception:
+            logger.warning("讀取語系合併資料庫版本失敗", exc_info=True)
+            return []
+    db = None
+    try:
+        db = open_database(create=False)
+        return list(db.versions()) if db is not None else []
+    except Exception:
+        logger.warning("讀取語系合併資料庫版本失敗", exc_info=True)
+        return []
+    finally:
+        if db is not None:
+            try:
+                db.close()
+            except Exception:
+                logger.warning("關閉語系合併版本查詢資料庫失敗", exc_info=True)
+
+
+def merge_target_version_dropdown(
+    *,
+    global_version: str = "",
+    value: str | None = None,
+    on_select=None,
+    on_focus=None,
+) -> ft.Dropdown:
+    """Build the non-editable, database-only version selector for Merge DB."""
+    control = kit.dropdown(
+        label="目標版本",
+        hint_text="選擇沿用全域設定或指定資料庫版本",
+        editable=False,
+        enable_filter=True,
+        options=[],
+        on_select=on_select,
+        on_focus=on_focus,
+    )
+    refresh_merge_target_version_options(control, global_version, value)
+    return control
+
+
+def refresh_merge_target_version_options(
+    control: ft.Dropdown,
+    global_version: str,
+    value: str | None = None,
+    choices: list[str] | None = None,
+) -> None:
+    """Refresh Merge DB options without ever adding a stale/manual value."""
+    versions = merge_target_version_choices() if choices is None else list(choices)
+    global_version = str(global_version or "").strip()
+    inherited_label = f"沿用全域設定（目前：{global_version or '未指定'}）"
+    kit.set_dropdown_options(
+        control,
+        [(MERGE_INHERIT_VERSION, inherited_label)]
+        + [(version, version) for version in versions],
+    )
+    selected = value if value in versions else MERGE_INHERIT_VERSION
+    control.value = selected
+    control.text = selected
 
 
 def target_version_dropdown(

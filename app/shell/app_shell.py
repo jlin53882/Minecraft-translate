@@ -34,6 +34,7 @@ from app.shell.topbar import TopBar
 from app.tasks.operation_registry import (
     CancellationPolicy,
     OperationDescriptor,
+    OperationPresentation,
     OperationRegistry,
     ShutdownPolicy,
 )
@@ -411,6 +412,7 @@ class AppShell:
                 owner="cache-root-reload",
                 cancellation=CancellationPolicy.NON_CANCELLABLE,
                 shutdown=ShutdownPolicy.DRAIN_ONLY,
+                presentation=OperationPresentation.MAINTENANCE,
             ),
         )
         if handle is None:

@@ -76,6 +76,7 @@ class TranslationDB:
         priority: tuple[int, ...] = DEFAULT_PRIORITY,
         readonly: bool = False,
         create: bool = True,
+        sync_priority: bool = True,
     ) -> None:
         self.path = Path(path)
         self.priority = tuple(priority)
@@ -106,7 +107,8 @@ class TranslationDB:
         try:
             if not readonly:
                 init_schema(self._conn)
-                self._sync_priority()
+                if sync_priority:
+                    self._sync_priority()
         except BaseException:
             self._conn.close()
             raise
@@ -116,6 +118,11 @@ class TranslationDB:
         self.priority = tuple(priority)
         self._rank = rank_sql(self.priority, "t.source")
         self._sync_priority()
+
+    def _priority_order(self, priority: tuple[int, ...] | None = None) -> str:
+        """Return the canonical effective-source ordering for a selected priority."""
+        rank = self._rank if priority is None else rank_sql(tuple(priority), "t.source")
+        return f"CASE WHEN t.checker <> '' THEN 0 ELSE 1 END, {rank}"
 
     # ------------------------------------------------------------------ 基礎
     def close(self) -> None:
@@ -216,16 +223,23 @@ class TranslationDB:
                 SELECT t.entry_id, t.zh_tw, t.source, t.checker,
                        ROW_NUMBER() OVER (
                            PARTITION BY t.entry_id
-                           ORDER BY CASE WHEN t.checker <> '' THEN 0 ELSE 1 END,
-                                    {self._rank}
+                           ORDER BY {self._priority_order()}
                        ) AS rn
                 FROM translation t WHERE t.zh_tw <> ''
             ) WHERE rn = 1
             """
         )
 
-    def _refresh(self, conn: sqlite3.Connection, entry_ids: Iterable[int]) -> None:
+    def _refresh(
+        self,
+        conn: sqlite3.Connection,
+        entry_ids: Iterable[int],
+        *,
+        priority: tuple[int, ...] | None = None,
+    ) -> None:
+        """Refresh the shared projection, optionally using an explicit priority."""
         ids = list({int(i) for i in entry_ids})
+        priority_order = self._priority_order(priority)
         for start in range(0, len(ids), _CHUNK):
             chunk = ids[start : start + _CHUNK]
             marks = ",".join("?" * len(chunk))
@@ -235,11 +249,10 @@ class TranslationDB:
                 INSERT INTO effective (entry_id, zh_tw, source, checker)
                 SELECT entry_id, zh_tw, source, checker FROM (
                     SELECT t.entry_id, t.zh_tw, t.source, t.checker,
-                           ROW_NUMBER() OVER (
-                               PARTITION BY t.entry_id
-                               ORDER BY CASE WHEN t.checker <> '' THEN 0 ELSE 1 END,
-                                        {self._rank}
-                           ) AS rn
+                       ROW_NUMBER() OVER (
+                           PARTITION BY t.entry_id
+                               ORDER BY {priority_order}
+                       ) AS rn
                     FROM translation t
                     WHERE t.zh_tw <> '' AND t.entry_id IN ({marks})
                 ) WHERE rn = 1
@@ -839,6 +852,7 @@ class TranslationDB:
         stats = WriteBackStats()
         touched: list[int] = []
         with self._tx() as conn:
+            effective_priority = self._stored_priority(conn)
             for item in items:
                 text = item.zh_tw
                 if not text.strip() or not item.en_us:
@@ -895,8 +909,21 @@ class TranslationDB:
                         if done.rowcount:
                             stats.filled_other += 1
                             touched.append(bid)
-            self._refresh(conn, touched)
+            # A task's DbSettings priority is a read snapshot. Keep writes intact, but
+            # refresh the shared projection using the database's current global policy.
+            self._refresh(conn, touched, priority=effective_priority)
         return stats
+
+    def _stored_priority(self, conn: sqlite3.Connection) -> tuple[int, ...]:
+        """Read the shared effective-source priority inside the active transaction."""
+        row = conn.execute("SELECT value FROM meta WHERE key='priority'").fetchone()
+        if row is None or not row[0]:
+            return self.priority
+        try:
+            priority = tuple(int(value) for value in row[0].split(","))
+        except (TypeError, ValueError):
+            return self.priority
+        return priority or self.priority
 
     def replace_ai_translation(
         self,
@@ -1151,6 +1178,35 @@ class TranslationDB:
             "FROM entry e JOIN effective f ON f.entry_id = e.id WHERE e.mod_id = ?",
             (mod_id,),
         )
+
+    def load_mod_for_priority(
+        self, mod_id: str, priority: tuple[int, ...]
+    ) -> list[tuple[str, str, str, str, str, int]]:
+        """以呼叫端快照優先序唯讀選出模組生效譯文，不依賴共享 effective 表。"""
+        return self._q(self._load_mod_for_priority_sql(priority), (mod_id,))
+
+    def _load_mod_for_priority_sql(self, priority: tuple[int, ...]) -> str:
+        """Build the module-scoped ranking query used by the merge resolver."""
+        # CROSS JOIN is intentional: SQLite must start from the selected module's
+        # entries, then probe translations by entry_id. Otherwise it may rank the
+        # entire translation table before applying the mod_id filter.
+        return f"""
+            SELECT ranked.kind, ranked.key, ranked.en_us, ranked.mc_version,
+                   ranked.zh_tw, ranked.source
+            FROM (
+                SELECT e.id, e.kind, e.key, e.en_us, e.mc_version,
+                       t.zh_tw, t.source,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY t.entry_id
+                           ORDER BY {self._priority_order(priority)}
+                       ) AS rn
+                FROM entry e
+                CROSS JOIN translation t ON t.entry_id = e.id
+                WHERE e.mod_id = ? AND t.zh_tw <> ''
+            ) AS ranked
+            WHERE ranked.rn = 1
+            ORDER BY ranked.id
+        """
 
     def count_entries(self) -> int:
         return self._one("SELECT COUNT(*) FROM entry")[0]

@@ -25,6 +25,10 @@ def _walk(control):
         yield from _walk(content)
 
 
+def _texts(control):
+    return [c.value for c in _walk(control) if isinstance(c, ft.Text) and c.value]
+
+
 def _find(dialog, cls, label=None):
     for c in _walk(dialog):
         if isinstance(c, cls) and (label is None or getattr(c, "label", None) == label):
@@ -59,6 +63,7 @@ class _Env:
         self.out.mkdir()
         self.snacks: list[str] = []
         self.runs: list[tuple] = []
+        self.snapshots = []
         self.cfg: dict = {}
         self.picker = mock_filepicker()
         monkeypatch.setattr(mod, "load_config", lambda: self.cfg)
@@ -70,7 +75,10 @@ class _Env:
         mod.open_merge_dialog(
             page=self.page,
             file_picker=self.picker,
-            on_run_merge=lambda *a: self.runs.append(a),
+            on_run_merge=lambda *a, **kw: (
+                self.runs.append(a),
+                self.snapshots.append(kw.get("merge_db_snapshot")),
+            ),
             show_snack_bar=self.snacks.append,
             **kwargs,
         )
@@ -94,12 +102,14 @@ def test_initial_state_and_defaults(env):
     assert dialog.modal is True
     assert _find(dialog, ft.TextField, "Mod 來源").value == str(env.src)
     assert _find(dialog, ft.TextField, "輸出目錄").value == str(env.out)
-    assert _find(dialog, ft.Checkbox).value is True
+    assert _find(dialog, ft.Switch, "只處理 lang 檔案").value is True
     zh = _find(dialog, ft.Switch, "處理 zh_cn 檔案")
     skip = _find(dialog, ft.Switch, "允許 zh_cn 觸發跳過 en_us")
     assert zh.value is True
     assert skip.value is False and skip.disabled is False
-    fields = [c for c in _walk(dialog) if isinstance(c, ft.TextField) and c.width]
+    fields = [
+        c for c in _walk(dialog) if isinstance(c, ft.TextField) and c.width in (80, 100)
+    ]
     assert sorted(f.value for f in fields) == ["0.5", "2"]
     assert _find(dialog, ft.RadioGroup).value == "folder"
 
@@ -114,7 +124,11 @@ def test_config_values_seed_patchouli_and_threshold_fields(env):
     }
     dialog = env.open()
     assert _find(dialog, ft.Switch, "允許 zh_cn 觸發跳過 en_us").value is True
-    values = {c.value for c in _walk(dialog) if isinstance(c, ft.TextField) and c.width}
+    values = {
+        c.value
+        for c in _walk(dialog)
+        if isinstance(c, ft.TextField) and c.width in (80, 100)
+    }
     assert values == {"0.8", "5"}
 
 
@@ -197,7 +211,8 @@ def test_start_rejects_bad_directories(env, tmp_path, which, expected):
         file_path.write_text("x")
         out.value = str(file_path)
     _button(dialog, "確定執行").on_click(None)
-    assert env.snacks == [expected]
+    assert expected in _texts(dialog)
+    assert env.snacks == []
     assert env.runs == []
     assert dialog.open is True
 
@@ -215,7 +230,8 @@ def test_start_accepts_a_new_output_dir_without_creating_it(env, tmp_path):
 def test_start_rejects_when_no_language_code_selected(env):
     dialog = env.open(lang_code_checks={"zh_tw": SimpleNamespace(value=False)})
     _button(dialog, "確定執行").on_click(None)
-    assert env.snacks == ["⚠️ 請至少選擇一個語言代碼"]
+    assert "⚠️ 請至少選擇一個語言代碼" in _texts(dialog)
+    assert env.snacks == []
     assert env.runs == []
     assert dialog.open is True
 
@@ -249,7 +265,7 @@ def test_start_strips_paths_and_passes_modified_options(env):
     dialog = env.open()
     _find(dialog, ft.TextField, "Mod 來源").value = f"  {env.src}  "
     _find(dialog, ft.TextField, "輸出目錄").value = f" {env.out} "
-    _find(dialog, ft.Checkbox).value = False
+    _find(dialog, ft.Switch, "只處理 lang 檔案").value = False
     _find(dialog, ft.Switch, "允許 zh_cn 觸發跳過 en_us").value = True
     for c in _walk(dialog):
         if isinstance(c, ft.TextField) and c.width == 100:
@@ -331,7 +347,8 @@ def test_zip_mode_requires_selection_and_passes_list(env):
     dialog = env.open()
     _set_mode(dialog, "zip")
     _button(dialog, "確定執行").on_click(None)
-    assert env.snacks == ["⚠️ 請選擇 ZIP 檔案"]
+    assert "⚠️ 請選擇 ZIP 檔案" in _texts(dialog)
+    assert env.snacks == []
     assert env.runs == []
 
     zip_button = next(
@@ -453,7 +470,8 @@ def test_preview_validates_fields(env, src, out, message):
     _find(dialog, ft.TextField, "Mod 來源").value = src
     _find(dialog, ft.TextField, "輸出目錄").value = out
     _button(dialog, "預覽結果").on_click(None)
-    assert env.snacks == [message]
+    assert message in _texts(dialog)
+    assert env.snacks == []
     assert dialog.open is True
 
 
@@ -461,8 +479,19 @@ def test_preview_is_stub_that_keeps_dialog_open(env):
     """預覽尚未實作：只提示，不關閉對話框（避免丟掉使用者已填的設定）。"""
     dialog = env.open()
     _button(dialog, "預覽結果").on_click(None)
-    assert env.snacks == ["🔍 預覽功能待實作"]
+    assert any("語系合併預覽尚未支援" in text for text in _texts(dialog))
+    assert env.snacks == []
     assert dialog.open is True
+    assert env.runs == []
+
+
+def test_stale_preview_click_after_close_does_not_start(env):
+    dialog = env.open()
+    dialog.open = False
+
+    _button(dialog, "預覽結果").on_click(None)
+
+    assert dialog.open is False
     assert env.runs == []
 
 
@@ -470,4 +499,4 @@ def test_preview_in_zip_mode_needs_selected_zip(env):
     dialog = env.open()
     _set_mode(dialog, "zip")
     _button(dialog, "預覽結果").on_click(None)
-    assert env.snacks == ["⚠️ 請填寫輸入來源"]
+    assert "⚠️ 請填寫輸入來源" in _texts(dialog)

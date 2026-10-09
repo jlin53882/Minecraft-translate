@@ -127,20 +127,31 @@ def test_one_click_creates_missing_output_dir(tmp_path, monkeypatch):
 
 
 def test_one_click_passes_database_version_override_to_merge(tmp_path, monkeypatch):
+    from app.views.merge.merge_db_options import MergeDbRunSnapshot
     from app.views.pipeline import pipeline_view as pv
+    from translation_tool.translation_db import DbSettings
 
     view, shown = _prepare(tmp_path, tmp_path / "out")
     monkeypatch.setattr(pv, "show_snack", lambda page, msg, **k: shown.append(msg))
+    database_settings = DbSettings(
+        path=str(tmp_path / "database.db"), version="26.2", enabled=True
+    )
     prepared = view._prepare_one_click(
         {
             "mode": "lang",
             "lang_codes": ["zh_tw"],
-            "translation_db_version": " 26.2 ",
+            "merge_db_snapshot": MergeDbRunSnapshot(
+                use_db=True,
+                version="26.2",
+                database_settings=database_settings,
+            ),
         }
     )
 
     assert prepared is not None and shown == []
     assert prepared[3]["translation_db_version"] == "26.2"
+    assert prepared[3]["use_translation_db"] is True
+    assert prepared[3]["translation_db_settings_snapshot"] is database_settings
 
 
 def test_one_click_rejects_empty_output(tmp_path, monkeypatch):

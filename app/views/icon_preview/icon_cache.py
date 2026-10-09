@@ -10,12 +10,13 @@ import threading
 import unicodedata
 import zipfile
 from collections import OrderedDict, defaultdict
-from concurrent.futures import as_completed
 from pathlib import Path
 
 from app.icon_reader import IconRef
 from app.icon_runtime import get_runtime_asset_paths
 from translation_tool.utils.app_paths import get_data_root
+from translation_tool.utils.bounded_executor import bounded_as_completed
+from translation_tool.utils.cancellation import raise_if_cancelled
 from translation_tool.utils.config_manager import load_config
 from translation_tool.utils.log_unit import log_info, log_warning
 from translation_tool.utils.ui_mirror import ContextThreadPoolExecutor
@@ -150,6 +151,7 @@ class ModpackAssetCatalog:
         self._budgets: dict[Path, ZipReadBudget] = {}
         self._lock = threading.Lock()
         for archive in self.archives:
+            raise_if_cancelled()
             try:
                 with zipfile.ZipFile(archive) as zf:
                     names = set(zf.namelist())
@@ -157,6 +159,7 @@ class ModpackAssetCatalog:
                 continue
             self.members[archive] = names
             for name in names:
+                raise_if_cancelled()
                 parts = name.split("/")
                 if (
                     len(parts) >= 4
@@ -169,12 +172,17 @@ class ModpackAssetCatalog:
                             name
                         )
         for paths in self.resources.values():
+            raise_if_cancelled()
             paths.sort(key=lambda p: str(p).casefold())
 
     @classmethod
     def from_mods_directory(cls, source_root: Path) -> "ModpackAssetCatalog":
         source_root = Path(source_root).resolve()
-        archives = sorted(source_root.glob("*.jar"), key=lambda p: p.name.casefold())
+        archives = []
+        for archive in source_root.glob("*.jar"):
+            raise_if_cancelled()
+            archives.append(archive)
+        archives.sort(key=lambda p: p.name.casefold())
         runtime_assets = get_runtime_asset_paths(source_root)
         # A normal Minecraft installation keeps the client JAR beside the mods folder.
         client_jar = source_root.parent / f"{source_root.parent.name}.jar"
@@ -588,6 +596,7 @@ def _build_model_index(names: list[str], modid: str) -> dict[str, list[str]]:
     prefix = f"assets/{modid}/models/"
 
     for n in names:
+        raise_if_cancelled()
         if not (n.startswith(prefix) and n.endswith(".json")):
             continue
         rel = n[len(prefix) :]
@@ -708,6 +717,7 @@ def _try_extract_mod_icon_from_model(
     model_index = _load_model_index_from_cache(jar_path, modid)
     if model_index is None:
         model_index = _build_model_index(list(names), modid)
+        raise_if_cancelled()
         _save_model_index_to_cache(jar_path, modid, model_index)
 
     # ===== 優先：嘗試用 key 查 item 自己的 model texture =====
@@ -765,6 +775,7 @@ def _apply_icon_index(jar_to_entries: dict[str, list], icon_index, progress_cb) 
     applied = 0
     for entries in jar_to_entries.values():
         for e in entries:
+            raise_if_cancelled()
             if not (hasattr(e, "modid") and hasattr(e, "key")):
                 continue
             key = e.key
@@ -785,16 +796,25 @@ def _run_jar_workers(jar_to_entries: dict[str, list], process_jar, progress_cb) 
         load_config().get("translator", {}).get("parallel_execution_workers", 4)
     )
     max_workers = max(1, config_workers) if isinstance(config_workers, int) else 4
-    with ContextThreadPoolExecutor(max_workers=max_workers) as executor:
-        futures = {
-            executor.submit(process_jar, jar_name): jar_name
-            for jar_name in jar_to_entries
-        }
-        for future in as_completed(futures):
-            jar_name = futures[future]
+
+    def submit_jar(executor, jar_name: str):
+        return executor.submit(process_jar, jar_name)
+
+    with (
+        ContextThreadPoolExecutor(max_workers=max_workers) as executor,
+        bounded_as_completed(
+            executor,
+            jar_to_entries,
+            submit_jar,
+            max_in_flight=max_workers * 2,
+        ) as completed,
+    ):
+        for future, jar_name in completed:
+            raise_if_cancelled()
             try:
                 entry_icon_paths = future.result()
                 for e in jar_to_entries.get(jar_name, []):
+                    raise_if_cancelled()
                     if hasattr(e, "key") and e.key in entry_icon_paths:
                         uri = entry_icon_paths[e.key]
                         if uri:
@@ -860,12 +880,14 @@ def _batch_extract_jar_icons(
         """Worker：處理單一 JAR，回傳 {key: icon_uri or None}。"""
         jar_path = source_root / jar_name
         result_map: dict[str, str | None] = {}
+        raise_if_cancelled()
         if not jar_path.exists():
             return result_map
         try:
             with zipfile.ZipFile(jar_path, "r") as zf:
                 budget = ZipReadBudget.for_icon_scan(jar_name)
                 for e in jar_to_entries.get(jar_name, []):
+                    raise_if_cancelled()
                     if not (hasattr(e, "modid") and hasattr(e, "key")):
                         continue
                     modid = e.modid

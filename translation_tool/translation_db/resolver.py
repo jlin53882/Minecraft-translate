@@ -56,11 +56,17 @@ class TranslationResolver:
     """以 ``(類型, 模組, 鍵值, 原文)`` 查詢目標版本的既有譯文。"""
 
     def __init__(
-        self, db: TranslationDB, version: str, *, cross_version: bool = True
+        self,
+        db: TranslationDB,
+        version: str,
+        *,
+        cross_version: bool = True,
+        source_priority: tuple[int, ...] | None = None,
     ) -> None:
         self.db = db
         self.version = version
         self.cross_version = cross_version
+        self.source_priority = source_priority
         self.stats = ResolverStats()
         self._lock = threading.Lock()
         self._stats_lock = threading.Lock()  # 統計與載入模組表分開鎖，避免互相等待
@@ -74,7 +80,11 @@ class TranslationResolver:
             table = self._mods.get(mod_id)
             if table is None:
                 table = {}
-                for kind, key, en, ver, tw, src in self.db.load_mod(mod_id):
+                if self.source_priority is None:
+                    rows = self.db.load_mod(mod_id)
+                else:
+                    rows = self.db.load_mod_for_priority(mod_id, self.source_priority)
+                for kind, key, en, ver, tw, src in rows:
                     table.setdefault((kind, key), []).append((en, ver, tw, src))
                 self._mods[mod_id] = table
             return table

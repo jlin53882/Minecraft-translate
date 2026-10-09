@@ -23,10 +23,22 @@ from app.services_impl.pipelines.extract_service import (
 )
 from app.tasks.operation_registry import launch_page_operation
 from app.ui.design import C
-from app.ui.dialogs import close_overlay_dialog
+from app.ui.dialogs import (
+    close_overlay_dialog,
+    present_dialog,
+    present_page_dialog,
+    set_dialog_feedback,
+)
 from app.ui.safe_file_picker import ensure_output_dir
-from app.ui.sync_text_field import SyncTextField
 from app.views.extractor.extractor_state import PreviewState
+from app.views.pipeline.pipeline_forms import (
+    ExtractFormState,
+    build_extract_form,
+    dialog_button,
+    dialog_content,
+    dialog_dimensions,
+    dialog_text_field,
+)
 from translation_tool.utils.config_manager import load_config
 from translation_tool.utils.log_unit import log_error
 from translation_tool.utils.ui_mirror import in_new_task
@@ -59,88 +71,78 @@ def open_extract_dialog(
         on_run_extraction=on_run_extraction,
         lang_code_checks=lang_code_checks,
         show_snack_bar=show_snack_bar,
+        dialogs=[],
+        run_started=False,
+        preview_active=False,
+        preview_dialog=None,
+        preview_cancel_event=None,
     )
-    dialog_width = _extract_init_state_and_fields(ctx, input_path, output_path)
-    lang_codes_section = _extract_build_lang_codes_section(ctx)
-    content = _extract_build_content(ctx, lang_codes_section)
+    ctx.feedback = ft.Text("", size=12, color=C.GOLD, visible=False)
+    _extract_init_state_and_fields(ctx, input_path, output_path)
+    content = _extract_build_content(ctx)
 
     dialog = ft.AlertDialog(
         modal=True,
         title=ft.Text("📦 抽取資源設定"),
-        content=ft.Container(content=content, width=dialog_width),
+        content=dialog_content(page, content),
         actions=[
-            ft.TextButton("取消", on_click=lambda e: ctx.close_dialog(dialog)),
-            ft.OutlinedButton(
+            dialog_button("取消", lambda e: ctx.close_dialog(dialog)),
+            dialog_button(
                 "預覽結果",
-                icon=ft.Icons.PREVIEW,
                 on_click=lambda e: ctx.show_preview_result(dialog),
+                icon=ft.Icons.PREVIEW,
+                role="preview",
             ),
-            ft.Button(
+            dialog_button(
                 "確定執行",
-                icon=ft.Icons.CHECK,
-                bgcolor=C.EM,
-                color=C.ON_EM,
                 on_click=lambda e: ctx.start_extraction(dialog),
+                icon=ft.Icons.CHECK,
+                role="primary",
             ),
         ],
     )
 
-    ctx.page.overlay.append(dialog)
-    dialog.open = True
-    ctx.page.update()
+    present_dialog(ctx, dialog)
 
 
 def _extract_init_state_and_fields(ctx, input_path, output_path):
     """提取對話框的路徑、設定預設值與輸入欄位。"""
-    dialog_width = int(ctx.page.width * 0.6)
+    dialog_width, _ = dialog_dimensions(ctx.page)
 
     cfg = load_config()
     ctx.lang_codes = cfg.get("jar_extractor", {}).get(
         "lang_codes", ["en_us", "zh_cn", "zh_tw"]
     )
 
-    ctx.mods_field = SyncTextField(
+    ctx.mods_field = dialog_text_field(
+        ctx.page,
         label="Mod 來源",
         hint_text=f"自動帶入：{input_path}"
         if input_path
         else "留空使用上方設定的 Mod 來源",
         value=input_path,
-        expand=True,
         border_color=C.DIA,
         path_input=True,
     )
-    ctx.output_field = SyncTextField(
+    ctx.output_field = dialog_text_field(
+        ctx.page,
         label="輸出目錄",
         hint_text=f"自動帶入：{output_path}"
         if output_path
         else "留空使用上方設定的輸出目錄",
         value=output_path,
-        expand=True,
         border_color=C.DIA,
         path_input=True,
     )
 
-    ctx.radio_group = ft.RadioGroup(
-        content=ft.Column(
-            [
-                ft.Radio(label="提取 Lang", value="lang"),
-                ft.Radio(label="提取 Book", value="book"),
-                ft.Radio(label="全部執行（Lang + Book）", value="both"),
-            ],
-            spacing=4,
-        ),
-        value="lang",
+    ctx.extract_state = ExtractFormState(
+        mode="lang", lang_codes={code: True for code in ctx.lang_codes}
     )
     return dialog_width
 
 
-def _extract_build_lang_codes_section(ctx):
-    """語系代碼區與 handler 綁定。"""
-
-    ctx.lang_code_checks_local = {}
-    for code in ctx.lang_codes:
-        ctx.lang_code_checks_local[code] = ft.Checkbox(label=code, value=True)
-
+def _extract_build_content(ctx):
+    """Build editable paths while sharing mode and language controls."""
     ctx.close_dialog = functools.partial(_extract_close_dialog, ctx)
 
     ctx.start_extraction = functools.partial(_extract_start_extraction, ctx)
@@ -155,16 +157,7 @@ def _extract_build_lang_codes_section(ctx):
 
     ctx.show_preview_result = functools.partial(_extract_show_preview_result, ctx)
 
-    lang_codes_section = ft.Column(
-        [ctx.lang_code_checks_local[code] for code in ctx.lang_codes], spacing=2
-    )
-    return lang_codes_section
-
-
-def _extract_build_content(ctx, lang_codes_section):
-    """對話框內容。"""
-
-    content = ft.Column(
+    path_section = ft.Column(
         [
             ft.Text("Mod 來源", weight="bold", size=13),
             ft.Row(
@@ -176,7 +169,8 @@ def _extract_build_content(ctx, lang_codes_section):
                     ft.Button(
                         "瀏覽", icon=ft.Icons.SEARCH, on_click=ctx.browse_mods_dir
                     ),
-                ]
+                ],
+                wrap=True,
             ),
             ft.Text("輸出目錄", weight="bold", size=13),
             ft.Row(
@@ -190,24 +184,35 @@ def _extract_build_content(ctx, lang_codes_section):
                     ft.Button(
                         "瀏覽", icon=ft.Icons.SEARCH, on_click=ctx.browse_output_dir
                     ),
-                ]
+                ],
+                wrap=True,
             ),
-            ft.Text("執行模式", weight="bold", size=13),
-            ctx.radio_group,
-            ft.Text("處理的語言代碼", weight="bold", size=13),
-            lang_codes_section,
         ],
-        spacing=10,
-        tight=False,
+        spacing=8,
     )
-    return content
+    controls = build_extract_form(
+        path_section=path_section,
+        state=ctx.extract_state,
+        language_codes=ctx.lang_codes,
+    )
+    ctx.radio_group = controls.mode
+    ctx.lang_code_checks_local = controls.lang_checks
+    controls.content.controls.append(ctx.feedback)
+    return controls.content
 
 
 def _extract_close_dialog(ctx, dialog):
-    close_overlay_dialog(ctx.page, dialog)
+    if ctx.preview_active:
+        if ctx.preview_cancel_event is not None:
+            ctx.preview_cancel_event.set()
+        if ctx.preview_dialog is not None:
+            close_overlay_dialog(ctx.page, ctx.preview_dialog)
+    return close_overlay_dialog(ctx.page, dialog)
 
 
 def _extract_start_extraction(ctx, dialog):
+    if ctx.run_started or not dialog.open:
+        return
     mods = (ctx.mods_field.value or "").strip()
     output = (ctx.output_field.value or "").strip()
     mode = ctx.radio_group.value
@@ -215,27 +220,29 @@ def _extract_start_extraction(ctx, dialog):
         mode = "dual"
 
     if not mods:
-        ctx.show_snack_bar("⚠️ Mod 來源為必填欄位")
+        set_dialog_feedback(ctx.page, ctx.feedback, "⚠️ Mod 來源為必填欄位", C.GOLD)
         return
     if not os.path.isdir(mods):
-        ctx.show_snack_bar("⚠️ Mod 來源資料夾不存在")
+        set_dialog_feedback(ctx.page, ctx.feedback, "⚠️ Mod 來源資料夾不存在", C.GOLD)
         return
     if not output:
-        ctx.show_snack_bar("⚠️ 輸出目錄為必填欄位")
+        set_dialog_feedback(ctx.page, ctx.feedback, "⚠️ 輸出目錄為必填欄位", C.GOLD)
         return
     output_error = ensure_output_dir(output)
     if output_error:
-        ctx.show_snack_bar(f"⚠️ {output_error}")
+        set_dialog_feedback(ctx.page, ctx.feedback, f"⚠️ {output_error}", C.GOLD)
         return
 
     selected_codes = [
         code for code, cb in ctx.lang_code_checks_local.items() if cb.value
     ]
     if ctx.lang_codes and not selected_codes:
-        ctx.show_snack_bar("⚠️ 請至少選擇一個語言代碼")
+        set_dialog_feedback(ctx.page, ctx.feedback, "⚠️ 請至少選擇一個語言代碼", C.GOLD)
         return
-    ctx.close_dialog(dialog)
+    if not ctx.close_dialog(dialog):
+        return
 
+    ctx.run_started = True
     for code in ctx.lang_codes:
         ctx.lang_code_checks[code] = ctx.lang_code_checks_local[code]
     ctx.on_run_extraction(mods, output, mode, lang_codes=selected_codes)
@@ -413,11 +420,11 @@ async def _extract_preview_poll(
     使用者取消（``cancel_event``）後立即結束輪詢，不再改動已關閉的對話框。
     """
     while not preview_state.done:
-        if cancel_event is not None and cancel_event.is_set():
-            return
         await asyncio.sleep(0.2)
-        if cancel_event is not None and cancel_event.is_set():
-            return
+        if not preview_dialog.open or (
+            cancel_event is not None and cancel_event.is_set()
+        ):
+            continue
         pct = int(preview_state.progress * 100)
         preview_dialog.content = ft.Container(
             content=ft.Text(
@@ -426,16 +433,24 @@ async def _extract_preview_poll(
             width=width,
         )
         ctx.page.update()
-    if cancel_event is not None and cancel_event.is_set():
+    ctx.preview_active = False
+    if not preview_dialog.open or (cancel_event is not None and cancel_event.is_set()):
         return
     _extract_preview_apply_final(ctx, preview_dialog, preview_state, mode, width)
 
 
 def _extract_show_preview_result(ctx, dialog):
+    if not dialog.open:
+        return
+    if ctx.preview_active:
+        set_dialog_feedback(
+            ctx.page, ctx.feedback, "預覽正在執行，請等待目前掃描結束。", C.GOLD
+        )
+        return
     preview_dialog_width = int(ctx.page.width * 0.6)
     mods = (ctx.mods_field.value or "").strip()
     if not mods or not os.path.isdir(mods):
-        ctx.show_snack_bar("⚠️ 請選擇有效的 Mod 來源")
+        set_dialog_feedback(ctx.page, ctx.feedback, "⚠️ 請選擇有效的 Mod 來源", C.GOLD)
         return
 
     mode = ctx.radio_group.value
@@ -445,11 +460,18 @@ def _extract_show_preview_result(ctx, dialog):
     selected_codes = [
         code for code, cb in ctx.lang_code_checks_local.items() if cb.value
     ]
+    _extract_launch_preview(ctx, mods, mode, selected_codes, preview_dialog_width)
 
+
+def _extract_launch_preview(ctx, mods, mode, selected_codes, preview_dialog_width):
+    """Reserve and present one cancellable preview operation."""
     preview_state = PreviewState()
     preview_state.total = 0
     preview_state.current = 0
     cancel_event = threading.Event()
+    ctx.preview_active = True
+    ctx.preview_cancel_event = cancel_event
+    set_dialog_feedback(ctx.page, ctx.feedback, "", C.GOLD)
 
     launched = launch_page_operation(
         ctx.page,
@@ -469,7 +491,10 @@ def _extract_show_preview_result(ctx, dialog):
         on_cancel=cancel_event.set,
     )
     if not launched:
-        ctx.show_snack_bar("應用程式正在關閉，無法啟動新任務")
+        ctx.preview_active = False
+        set_dialog_feedback(
+            ctx.page, ctx.feedback, "應用程式正在關閉，無法啟動預覽。", C.GOLD
+        )
         return
 
     preview_dialog = ft.AlertDialog(
@@ -489,9 +514,16 @@ def _extract_show_preview_result(ctx, dialog):
         ],
     )
 
-    ctx.page.overlay.append(preview_dialog)
-    preview_dialog.open = True
-    ctx.page.update()
+    ctx.preview_dialog = preview_dialog
+    original_dismiss = preview_dialog.on_dismiss
+
+    def on_preview_dismiss(event) -> None:
+        cancel_event.set()
+        if original_dismiss is not None:
+            original_dismiss(event)
+
+    preview_dialog.on_dismiss = on_preview_dismiss
+    present_page_dialog(ctx.page, preview_dialog)
 
     async def poll_preview():
         await _extract_preview_poll(

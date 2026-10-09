@@ -12,11 +12,12 @@ PR19：將 extract 類 service 從 app.services.py 抽離到 pipelines 子模組
 """
 
 import logging
+import ntpath
 import os
+import posixpath
 import subprocess
 import sys
 import traceback
-from pathlib import Path
 from typing import Any
 
 from app.services_impl.logging_service import (
@@ -35,8 +36,15 @@ from translation_tool.core.jar_processor import (
     find_jar_files,  # noqa: F401 - 轉出給 View（#136）
     preview_extraction_generator,  # noqa: F401 - 轉出給 View（#136）
 )
-from translation_tool.utils.cancellation import is_cancelled
-from translation_tool.utils.config_manager import load_config
+from translation_tool.utils.cancellation import (
+    TaskCancelled,
+    cancel_scope,
+    is_cancelled,
+)
+from translation_tool.utils.config_manager import (
+    load_config,
+    validate_output_folder_suffix,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -71,8 +79,64 @@ def _select_extraction_generator(
     return extract_dual_files_generator(mods_dir, output_dir, skip_zh_cn=skip_zh_cn)
 
 
+def _prepare_output_path(
+    mods_dir: str,
+    mode: str,
+    *,
+    preview: bool,
+    output_path: str = "",
+) -> str:
+    """解析輸出路徑；空白路徑使用來源同層命名目錄。
+
+    若來源目錄名稱已含目前模式的提取後綴，為相容既有選擇會沿用該目錄；
+    實際提取邊界會拒絕 input/output 完全相同，避免覆寫來源檔案。
+    """
+    suffix_key = {
+        (False, "lang"): "lang_extract",
+        (False, "book"): "book_extract",
+        (False, "dual"): "dual_extract",
+        (True, "lang"): "lang_preview",
+        (True, "book"): "book_preview",
+        (True, "dual"): "dual_preview",
+    }.get((preview, mode))
+    if suffix_key is None:
+        raise ValueError(f"Invalid extraction mode: {mode!r}")
+
+    if output_path and output_path.strip():
+        return output_path
+
+    source = os.fspath(mods_dir or "").strip()
+    if not source:
+        return ""
+
+    suffix = get_output_folder_names()[suffix_key]
+    validate_output_folder_suffix(suffix, suffix_key)
+
+    # `os.path` is ntpath on Windows. Also recognize Windows absolute paths in
+    # cross-platform tests so drive/root semantics are not interpreted as POSIX.
+    if ntpath.splitdrive(source)[0] or ("\\" in source and "/" not in source):
+        path_module = ntpath
+    elif source.startswith("/") and "\\" not in source:
+        path_module = posixpath
+    else:
+        path_module = os.path
+    normalized_source = path_module.normpath(source)
+    source_name = path_module.basename(normalized_source)
+    if not source_name:
+        raise ValueError(f"Cannot derive output path from source: {mods_dir!r}")
+
+    # Avoid repeating a suffix when an already-generated output folder is used
+    # as the source for another extraction.
+    if source_name.endswith(suffix):
+        return normalized_source
+
+    return path_module.join(
+        path_module.dirname(normalized_source), source_name + suffix
+    )
+
+
 def prepare_extraction_paths(mods_dir: str, mode: str, output_path: str = "") -> str:
-    """統一處理提取任務的輸出路徑（含子資料夾名稱）。
+    """統一處理提取輸出路徑。
 
     取代原本散落在 extractor_dialog.py 中的路徑拼接邏輯。
     UI 層不應再自行讀取 config 與拼接子資料夾。
@@ -85,27 +149,7 @@ def prepare_extraction_paths(mods_dir: str, mode: str, output_path: str = "") ->
     Returns:
         最終輸出路徑
     """
-    cfg = load_config()
-    folder_names = cfg.get("extractor", {}).get("output_folder_names", {})
-    lang_extract = folder_names.get("lang_extract", "_提取lang_輸出")
-    book_extract = folder_names.get("book_extract", "_提取book_輸出")
-    dual_extract = folder_names.get("dual_extract", "_提取both_輸出")
-
-    if mode == "lang":
-        output_subdir = lang_extract
-    elif mode == "book":
-        output_subdir = book_extract
-    else:  # dual
-        output_subdir = dual_extract
-
-    # 已指定輸出目錄（使用者輸入或頁面自動補齊的「mods_提取lang_輸出」）時直接使用；
-    # 原本會再多加一層子資料夾，變成 .../mods_提取lang_輸出/_提取lang_輸出
-    if output_path:
-        return output_path
-    # 未指定時，在 mods_dir 下建立對應模式的子資料夾
-    if mods_dir:
-        return os.path.join(mods_dir, output_subdir)
-    return ""
+    return _prepare_output_path(mods_dir, mode, preview=False, output_path=output_path)
 
 
 def get_output_folder_names() -> dict[str, str]:
@@ -116,8 +160,8 @@ def get_output_folder_names() -> dict[str, str]:
 
     Returns:
         dict 包含以下 key：
-        - lang_extract / book_extract / dual_extract（提取模式的子資料夾名）
-        - lang_preview / book_preview（預覽模式的子資料夾名）
+        - lang_extract / book_extract / dual_extract（提取模式的輸出後綴）
+        - lang_preview / book_preview / dual_preview（預覽模式的輸出後綴）
     """
     cfg = load_config()
     folder_names = cfg.get("extractor", {}).get("output_folder_names", {})
@@ -127,6 +171,7 @@ def get_output_folder_names() -> dict[str, str]:
         "dual_extract": folder_names.get("dual_extract", "_提取both_輸出"),
         "lang_preview": folder_names.get("lang_preview", "_預覽lang_輸出"),
         "book_preview": folder_names.get("book_preview", "_預覽book_輸出"),
+        "dual_preview": folder_names.get("dual_preview", "_預覽both_輸出"),
     }
 
 
@@ -170,8 +215,8 @@ def get_skip_zh_cn_extract() -> bool:
     return bool(cfg.get("extractor", {}).get("skip_zh_cn_extract", False))
 
 
-def prepare_preview_paths(mods_dir: str, mode: str) -> str:
-    """根據模式產生預覽用的輸出路徑（含子資料夾後綴）。
+def prepare_preview_paths(mods_dir: str, mode: str, output_path: str = "") -> str:
+    """根據模式產生預覽後確認提取時使用的輸出路徑。
 
     與 prepare_extraction_paths 對稱，但用於 preview 模式。
     取代 extractor_dialog.py 與 extractor_actions.py 中重複的「
@@ -180,26 +225,13 @@ def prepare_preview_paths(mods_dir: str, mode: str) -> str:
     Args:
         mods_dir: Mod 來源資料夾路徑
         mode: 預覽模式（'lang' / 'book' / 'dual'）
+        output_path: 明確指定的輸出位置；非空時原樣沿用
 
     Returns:
-        預覽輸出路徑（mods_dir 同層目錄，加上 preview 子資料夾後綴）
-        若 mods_dir 不存在則回傳空字串
+        確認執行後的輸出路徑（預設位於 mods_dir 同層，加上 preview 後綴）。
+        此函式只解析路徑，不建立輸出目錄；空白來源回傳空字串。
     """
-    folder_names = get_output_folder_names()
-    lang_preview = folder_names["lang_preview"]
-    book_preview = folder_names["book_preview"]
-
-    if mode == "lang":
-        suffix = lang_preview
-    elif mode == "book":
-        suffix = book_preview
-    else:  # dual 預覽使用統一的 _預覽_dual_輸出 後綴
-        suffix = "_預覽_dual_輸出"
-
-    mods_path = Path(mods_dir)
-    if not mods_path.exists():
-        return ""
-    return str(mods_path.with_name(mods_path.name + suffix))
+    return _prepare_output_path(mods_dir, mode, preview=True, output_path=output_path)
 
 
 def _end_failed(session: TaskSession, finish_session: bool) -> None:
@@ -236,7 +268,20 @@ def _run_extraction_with_session(
     # error / stats 一律從原始 update 讀取：filter 只負責 UI 日誌節流，
     # 生命週期判斷不依賴它的回傳值。
     failures = _FailureTracker()
-    for update in generator:
+
+    def cancellable_updates():
+        try:
+            with cancel_scope(lambda: session.cancel_requested):
+                yield from generator
+        except TaskCancelled:
+            yield {"cancelled": True}
+
+    for update in cancellable_updates():
+        if update.get("cancelled"):
+            _session_log(session, f"⏹ {mode_label} 提取已取消", level="warning")
+            if finish_session:
+                session.finish()
+            return
         if is_cancelled():
             # 在 JAR 之間停止（一鍵流水線的取消）
             _session_log(session, f"⏹ {mode_label} 提取已取消", level="warning")
@@ -350,8 +395,20 @@ def run_extraction_loop(
         "book": {"success": 0, "warnings": 0, "failures": 0},
     }
 
-    for update in generator:
+    def cancellable_updates():
+        def check() -> bool:
+            return bool(cancelled_flag is not None and cancelled_flag[0])
+
+        with cancel_scope(check):
+            try:
+                yield from generator
+            except TaskCancelled:
+                return
+
+    updates = cancellable_updates()
+    for update in updates:
         if cancelled_flag is not None and cancelled_flag[0]:
+            updates.close()
             return stats
 
         if "stats" in update:
