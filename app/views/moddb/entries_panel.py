@@ -694,7 +694,7 @@ class EntriesPanel(ft.Column):
             notes.append(space)
         self.token_hint.value = "；".join(notes)
         self.token_hint.visible = bool(notes)
-        self.mc_preview.render(text)
+        self.mc_preview.render(text, key=entry.key if entry else None)
         self.chars.render(entry.en_us if entry else "", text)
 
     def _update_format_hints_and_refresh(self) -> None:

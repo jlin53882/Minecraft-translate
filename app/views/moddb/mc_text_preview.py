@@ -25,6 +25,7 @@ class MinecraftTextPreview:
             size=12,
             color=design.MC_PREVIEW_HINT,
         )
+        self.mode_hint = ft.Text("一般文字背景", size=11, color=C.MUTED)
         self.surface = ft.Container(
             ft.Column([self.text, self.hint], spacing=0, tight=True),
             padding=12,
@@ -43,6 +44,7 @@ class MinecraftTextPreview:
                             color=C.TEXT,
                         ),
                         ft.Text("即時更新・唯讀", size=11, color=C.MUTED),
+                        self.mode_hint,
                     ],
                     spacing=8,
                     wrap=True,
@@ -53,10 +55,21 @@ class MinecraftTextPreview:
             tight=True,
         )
 
-    def render(self, value: str) -> None:
+    def render(self, value: str, *, key: str | None = None) -> None:
         """Render plain text and Minecraft codes, or explain why the preview is empty."""
         value = value or ""
-        spans = mc_text_spans(value, design.MC_PREVIEW_TEXT, 14)
+        is_book = _is_book_key(key)
+        self.surface.bgcolor = (
+            design.MC_BOOK_PREVIEW_BG if is_book else design.MC_PREVIEW_BG
+        )
+        self.surface.border = ft.Border.all(
+            1, design.MC_BOOK_PREVIEW_LINE if is_book else design.MC_PREVIEW_LINE
+        )
+        self.mode_hint.value = "書頁背景" if is_book else "一般文字背景"
+        default_color = (
+            design.MC_BOOK_PREVIEW_TEXT if is_book else design.MC_PREVIEW_TEXT
+        )
+        spans = mc_text_spans(value, default_color, 14)
         visible_text = "".join(span.text or "" for span in spans).strip()
         self.text.value = ""
         self.text.spans = spans
@@ -68,3 +81,9 @@ class MinecraftTextPreview:
             self.hint.value = "輸入譯文後，預覽會顯示在這裡。"
         else:
             self.hint.value = "目前只有格式碼，沒有可顯示的文字。"
+
+
+def _is_book_key(key: str | None) -> bool:
+    """Recognize namespaced and legacy localization keys containing a book segment."""
+    normalized = f".{(key or '').strip('.').casefold()}."
+    return ".book." in normalized

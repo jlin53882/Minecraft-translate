@@ -60,6 +60,7 @@ logger = logging.getLogger(__name__)
 _OPERATION = "retranslate_same_source_ai"
 _QUALITY_REPAIR_OPERATION = "repair_special_character_mismatch"
 _LOG_SAMPLE_LIMIT = 20
+_FLAGGED_DETAIL_LIMIT = 200
 PREVIEW_SQL_TIMEOUT_SEC = 60.0
 PREVIEW_SQL_PROGRESS_OPCODES = 1000
 _PROFILE_LABELS = {
@@ -105,6 +106,8 @@ class SameSourceAIRepairReport:
     updated: int = 0
     unchanged: int = 0
     flagged: int = 0
+    flagged_entries: list[dict[str, Any]] = field(default_factory=list)
+    flagged_entries_omitted: int = 0
     skipped_changed: int = 0
     failed: int = 0
     cache_failed: int = 0
@@ -951,7 +954,9 @@ def _finalize_representative_result(
     translated_text = result["text"]
     issues = token_issues(original["source_text"], translated_text)
     if issues:
-        _mark_batch_targets_flagged(db, session, report, targets, issues, cancelled)
+        _mark_batch_targets_flagged(
+            db, session, report, targets, translated_text, issues, cancelled
+        )
         return False
     report.ai_validated_items += 1
     for target in targets:
@@ -983,7 +988,9 @@ def _mark_batch_targets_failed(
         _log_candidate(db, session, report, target, category, message, "warning")
 
 
-def _mark_batch_targets_flagged(db, session, report, targets, issues, cancelled):
+def _mark_batch_targets_flagged(
+    db, session, report, targets, translated_text, issues, cancelled
+):
     """Keep the old translation when a validated answer changes protected tokens."""
     old_source = "原來源譯文" if report.mode == "quality_mismatch" else "舊 AI 譯文"
     message = f"特殊字元不一致，保留{old_source}：{'、'.join(issues)}"
@@ -993,6 +1000,24 @@ def _mark_batch_targets_flagged(db, session, report, targets, issues, cancelled)
         report.translated += 1
         report.flagged += 1
         report.processed_candidates += 1
+        if report.mode == "quality_mismatch":
+            if len(report.flagged_entries) < _FLAGGED_DETAIL_LIMIT:
+                report.flagged_entries.append(
+                    {
+                        "entry_id": target["_entry_id"],
+                        "version": target["_expected_version"],
+                        "mod_id": target["_mod_id"],
+                        "kind": target["_kind"],
+                        "source_id": target["_source_id"],
+                        "key": target["path"],
+                        "en_us": target["source_text"],
+                        "old_translation": target["_expected_old_zh_tw"],
+                        "ai_translation": translated_text,
+                        "issues": tuple(issues),
+                    }
+                )
+            else:
+                report.flagged_entries_omitted += 1
         _log_candidate(
             db, session, report, target, "token_mismatch", message, "warning"
         )
