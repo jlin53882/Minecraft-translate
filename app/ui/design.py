@@ -31,14 +31,11 @@ import flet as ft
 FONT_SANS = "Noto Sans TC"
 FONT_MONO = "JetBrains Mono"
 
-# Minecraft 的實際色碼預覽固定使用深色畫布，讓 §e 等亮色在淺色主題也清楚。
-MC_PREVIEW_BG = "#20252B"
-MC_PREVIEW_LINE = "#3A424B"
-MC_PREVIEW_TEXT = "#F1F5F9"
-MC_PREVIEW_HINT = "#CBD5E1"
-MC_BOOK_PREVIEW_BG = "#F3E9CE"
-MC_BOOK_PREVIEW_LINE = "#C9B98C"
-MC_BOOK_PREVIEW_TEXT = "#2D2619"
+# Minecraft 樣式預覽統一使用書頁底色；預設深色文字清楚易讀，格式碼仍保留原色。
+MC_PREVIEW_BG = "#F3E9CE"
+MC_PREVIEW_LINE = "#C9B98C"
+MC_PREVIEW_TEXT = "#2D2619"
+MC_PREVIEW_HINT = "#6B6252"
 
 
 def _rgb(hex_color: str) -> tuple[int, int, int]:
