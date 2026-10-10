@@ -140,6 +140,12 @@ def _select_repair_mode(panel, mode="same_source_ai"):
 def test_repair_mode_selector_explains_scope_and_updates_copy():
     panel = translate_panel.TranslatePanel(mock_page(), lambda: None)
 
+    assert panel.log_view.expand is False
+    assert panel.log_view.height == 0
+    assert panel.log_view.visible is False
+    assert panel.repair_samples.height == 0
+    assert panel.repair_samples.visible is False
+
     radios = panel.repair_mode_group.content.controls
     assert [radio.value for radio in radios] == [
         "quality_mismatch",

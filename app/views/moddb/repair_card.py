@@ -88,7 +88,7 @@ def create_repair_card(
         "搜尋 Key／Mod／原文／譯文",
         icon=ft.Icons.SEARCH,
         on_change=on_filter_change,
-        expand=True,
+        width=360,
     )
     preview_source_filter = kit.dropdown(
         label="翻譯來源",
@@ -101,7 +101,10 @@ def create_repair_card(
         on_select=on_filter_change,
     )
     preview_count = ft.Text("尚未載入候選預覽。", size=12, color=C.MUTED)
-    samples = ft.ListView(spacing=8, height=520, auto_scroll=False, visible=False)
+    # The page already owns the scroll position.  Keeping a second scrollable
+    # viewport here makes Flet Web retain a blank nested viewport after the
+    # preview is populated, so let the outer TranslatePanel scroll the cards.
+    samples = ft.Column(spacing=8, height=0, visible=False)
     summary = ft.Text(
         "預覽只列候選、不呼叫 AI；按「開始修復」才會呼叫 AI。只儲存通過特殊字元檢查的結果，"
         "未通過就保留舊譯文。版本、模組、上限或條件變更後需重新預覽。",

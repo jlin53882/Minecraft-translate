@@ -199,9 +199,13 @@ class TranslatePanel(ft.Column):
         )
         ui_cfg = load_ui_logging_config(load_config)
         self.log_view = LogView(
-            page=self._page, mode="tail", tail_lines=ui_cfg.get("tail_lines", 250)
+            page=self._page,
+            mode="tail",
+            tail_lines=ui_cfg.get("tail_lines", 250),
+            height=0,
+            expand=False,
         )
-        self.log_view.height = 200
+        self.log_view.visible = False
         self.log_explainer = kit.hint_text(
             "執行紀錄說明：來源項目＝資料庫中需要處理的譯文；"
             "唯一 AI 修復項目＝相容來源只送一份 AI 工作；"
@@ -485,6 +489,8 @@ class TranslatePanel(ft.Column):
         self.progress_bar.value = 0
         self.live_text.value = ""
         self.log_view.clear()
+        self.log_view.height = 0
+        self.log_view.visible = False
         self._reset_stats(mode="normal")
         self._safe_update()
         launched = launch_page_operation(
@@ -553,6 +559,8 @@ class TranslatePanel(ft.Column):
         self.progress_bar.value = 0
         self.live_text.value = ""
         self.log_view.clear()
+        self.log_view.height = 0
+        self.log_view.visible = False
         self.repair_summary_text.value = (
             "正在修復所選來源譯文；結果仍不一致、失敗或資料已變動時會保留原譯文。"
             if preview.mode == "quality_mismatch"
@@ -651,7 +659,11 @@ class TranslatePanel(ft.Column):
             return
         snap = session.snapshot()
         self.progress_bar.value = float(snap.get("progress", 0) or 0)
-        self.log_view.sync_entries(snap.get("logs", []) or [], update=False)
+        log_entries = snap.get("logs", []) or []
+        self.log_view.sync_entries(log_entries, update=False)
+        has_logs = bool(log_entries)
+        self.log_view.height = 200 if has_logs else 0
+        self.log_view.visible = has_logs
         status = (snap.get("status") or "").upper()
         summary = snap.get("summary") or {}
         if summary:

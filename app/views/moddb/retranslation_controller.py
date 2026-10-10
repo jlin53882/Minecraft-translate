@@ -31,6 +31,7 @@ from translation_tool.utils.log_unit import log_warning
 
 _PREVIEW_SOURCE_ALL = "__all__"
 _PREVIEW_ISSUE_ALL = "all"
+_PREVIEW_RENDER_LIMIT = 50
 _PREVIEW_ISSUE_LABELS = {
     "all": "全部異常類型",
     "minecraft": "Minecraft 格式碼 §",
@@ -66,6 +67,7 @@ def clear_preview(panel) -> None:
         else panel._repair_default_text()
     )
     panel.repair_samples.controls = []
+    panel.repair_samples.height = 0
     panel.repair_samples.visible = False
     panel.repair_preview_search.value = ""
     kit.set_dropdown_options(
@@ -499,6 +501,7 @@ def refresh_preview_cards(panel, *, update: bool = True) -> None:
     result = panel._repair_preview
     if result is None:
         panel.repair_samples.controls = []
+        panel.repair_samples.height = 0
         panel.repair_samples.visible = False
         panel.repair_preview_count.value = "尚未載入候選預覽。"
         return
@@ -511,16 +514,27 @@ def refresh_preview_cards(panel, *, update: bool = True) -> None:
         if _preview_group_matches(group, query, source_filter, issue_filter)
     ]
     total_groups = len(_preview_groups(result))
-    panel.repair_preview_count.value = (
-        f"顯示 {len(groups):,} / {total_groups:,} 個翻譯 Key；"
-        f"涵蓋 {sum(len(group) for group in groups):,} 筆來源項目。"
-        + (" 可展開查看完整原文與各來源譯文。" if groups else " 沒有符合目前篩選條件的候選。")
-    )
+    render_groups = groups[:_PREVIEW_RENDER_LIMIT]
+    if len(groups) > _PREVIEW_RENDER_LIMIT:
+        count_text = (
+            f"符合 {len(groups):,} / {total_groups:,} 個翻譯 Key；"
+            f"涵蓋 {sum(len(group) for group in groups):,} 筆來源項目。"
+            f" 目前先顯示前 {_PREVIEW_RENDER_LIMIT:,} 筆；請使用搜尋或篩選查看其他候選。"
+        )
+    else:
+        count_text = (
+            f"顯示 {len(groups):,} / {total_groups:,} 個翻譯 Key；"
+            f"涵蓋 {sum(len(group) for group in groups):,} 筆來源項目。"
+            + (" 可展開查看完整原文與各來源譯文。" if groups else " 沒有符合目前篩選條件的候選。")
+        )
+    panel.repair_preview_count.value = count_text
     panel.repair_samples.controls = [
         _build_preview_group_card(panel, group, index, len(groups))
-        for index, group in enumerate(groups, start=1)
+        for index, group in enumerate(render_groups, start=1)
     ]
-    panel.repair_samples.visible = bool(groups)
+    has_groups = bool(groups)
+    panel.repair_samples.height = None if has_groups else 0
+    panel.repair_samples.visible = has_groups
     if update:
         panel._safe_update()
 
