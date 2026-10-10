@@ -104,7 +104,7 @@ class ScanPanel(ft.Column):
         )
         self.version_list = ft.ListView(spacing=0, height=170)
         self.version_card = kit.section_card(
-            "1　選擇遊戲版本（可輸入或從下方清單選擇）",
+            "1　選擇遊戲版本（可輸入自訂版本或從下方清單選擇）",
             ft.Column(
                 [
                     self.version_field,

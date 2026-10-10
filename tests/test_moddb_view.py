@@ -1175,6 +1175,19 @@ def test_saving_keeps_newlines_codes_and_surrounding_whitespace(special_entries)
 
 
 # ------------------------------------------------------------------ 翻譯 ZIP 匯入（掃描頁）
+def test_scan_panel_version_heading_explains_custom_version_input():
+    panel = scan_panel.ScanPanel(
+        mock_page(),
+        mock_filepicker(),
+        lambda: None,
+        defer_initial_refresh=True,
+    )
+
+    assert (
+        panel.version_card.title == "1　選擇遊戲版本（可輸入自訂版本或從下方清單選擇）"
+    )
+
+
 def test_scan_panel_zip_mode_switches_controls_and_options(db_path):
     panel = scan_panel.ScanPanel(mock_page(), mock_filepicker(), lambda: None)
     panel.version_field.value = "1.21.1"
