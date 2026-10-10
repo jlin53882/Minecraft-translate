@@ -402,6 +402,86 @@ def test_manual_review_confirmation_skips_format_check_but_keeps_cas_history_and
     check.close()
 
 
+def test_manual_review_applies_one_confirmed_draft_to_matching_keys(
+    db_path,
+):
+    db = TranslationDB(db_path)
+    _ingest(db, "1.21.1", "foo", "shared.key", SRC_AI, "舊 AI", en="Use %s")
+    _ingest(
+        db,
+        "1.21.1",
+        "foo",
+        "shared.key",
+        SRC_MANUAL,
+        "保留舊譯文",
+        en="Use %s",
+    )
+    entry = next(
+        row
+        for row in db.list_entries("1.21.1")[0]
+        if row.mod_id == "foo" and row.key == "shared.key"
+    )
+    review_path = moddb_repair_review_store.create_run(db_path, "run-shared-key")
+
+    def review_item(source_id):
+        old_translation = {
+            SRC_AI: "舊 AI",
+            SRC_MANUAL: "保留舊譯文",
+        }[source_id]
+        return {
+            "entry_id": entry.id,
+            "version": entry.mc_version,
+            "mod_id": entry.mod_id,
+            "kind": entry.kind,
+            "source_id": source_id,
+            "key": entry.key,
+            "en_us": entry.en_us,
+            "old_translation": old_translation,
+            "expected_revision": _translation_revision(db, entry.id, source_id),
+            "database_identity": str(db_path.resolve()),
+            "database_file_id": db_path.stat().st_ino,
+            "database_priority": db.priority,
+        }
+
+    first_index = moddb_repair_review_store.append_item(
+        review_path, "run-shared-key", review_item(SRC_AI)
+    )
+    moddb_repair_review_store.append_item(
+        review_path, "run-shared-key", review_item(SRC_MANUAL)
+    )
+    unrelated = review_item(SRC_AI)
+    unrelated["mod_id"] = "other-mod"
+    moddb_repair_review_store.append_item(review_path, "run-shared-key", unrelated)
+    first = moddb_repair_review_store.load_item(
+        review_path, "run-shared-key", first_index
+    )
+    db.close()
+
+    assert first is not None
+    assert (
+        moddb_retranslate_service.apply_and_record_repair_review(
+            db_path,
+            review_path,
+            "run-shared-key",
+            first,
+            "人工統一翻譯 %s",
+        )
+        == "applied"
+    )
+    assert moddb_repair_review_store.status_counts(review_path, "run-shared-key") == {
+        "applied": 2,
+        "pending": 1,
+    }
+
+    check = TranslationDB(db_path)
+    translations = {
+        row.source: row.zh_tw for row in check.entry_detail(entry.id).translations
+    }
+    assert translations[SRC_AI] == "人工統一翻譯 %s"
+    assert translations[SRC_MANUAL] == "人工統一翻譯 %s"
+    check.close()
+
+
 def test_rejected_repair_result_is_written_to_durable_review_store(
     db_path, monkeypatch, repair_cache
 ):

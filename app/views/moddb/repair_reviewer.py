@@ -334,6 +334,16 @@ class RepairReviewer:
             else "資料已變動；草稿保留，請重新讀取並比較。"
         )
         self.status.color = C.EM if status == "applied" else C.GOLD
+        self.filtered_count = moddb_repair_review_store.index_count(
+            self.store_path, self.run_id, self.status_filter
+        )
+        self.page_offset = min(
+            self.page_offset,
+            max(0, ((self.filtered_count - 1) // self.page_size) * self.page_size),
+        )
+        self._load_index_page()
+        if self.item_indices:
+            self.position = min(self.position, len(self.item_indices) - 1)
         self._render()
 
     def _close(self) -> None:

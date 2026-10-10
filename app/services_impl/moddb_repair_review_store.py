@@ -70,6 +70,44 @@ def load_item(path: str | Path, run_id: str, index: int) -> dict[str, Any] | Non
     return item
 
 
+def matching_items(
+    path: str | Path,
+    run_id: str,
+    item: dict[str, Any],
+    *,
+    statuses: tuple[str, ...] = ("pending", "invalid"),
+) -> list[dict[str, Any]]:
+    """Return unresolved review items for the same source identity and key."""
+    if not statuses:
+        return []
+    fields = (
+        "database_identity",
+        "database_file_id",
+        "version",
+        "mod_id",
+        "kind",
+        "key",
+        "en_us",
+    )
+    expected = tuple(item.get(field) for field in fields)
+    if any(value in (None, "") for value in expected):
+        return []
+
+    matches: list[dict[str, Any]] = []
+    seen: set[int] = set()
+    for status in statuses:
+        for index in indices(path, run_id, status):
+            if index in seen:
+                continue
+            candidate = load_item(path, run_id, index)
+            if candidate is None:
+                continue
+            if tuple(candidate.get(field) for field in fields) == expected:
+                matches.append(candidate)
+                seen.add(index)
+    return matches
+
+
 def indices(
     path: str | Path,
     run_id: str,

@@ -1267,7 +1267,7 @@ def apply_and_record_repair_review(
     item: dict[str, Any],
     draft: str,
 ) -> str:
-    """Apply one draft and durably update its review state on the worker thread."""
+    """Apply a draft and matching unresolved keys on the worker thread."""
     result = apply_repair_review_item(database_path, item, draft)
     moddb_repair_review_store.save_review_state(
         store_path,
@@ -1276,6 +1276,21 @@ def apply_and_record_repair_review(
         "applied" if result == "applied" else "stale",
         draft,
     )
+    if result != "applied":
+        return result
+
+    matching = moddb_repair_review_store.matching_items(store_path, run_id, item)
+    for sibling in matching:
+        if int(sibling["item_index"]) == int(item["item_index"]):
+            continue
+        sibling_result = apply_repair_review_item(database_path, sibling, draft)
+        moddb_repair_review_store.save_review_state(
+            store_path,
+            run_id,
+            int(sibling["item_index"]),
+            "applied" if sibling_result == "applied" else "stale",
+            draft,
+        )
     return result
 
 
