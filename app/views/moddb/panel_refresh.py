@@ -5,7 +5,10 @@ from __future__ import annotations
 from dataclasses import replace
 
 from app.services_impl.moddb_service import open_database, version_choices
-from app.services_impl.moddb_source_service import source_catalog_for
+from app.services_impl.moddb_source_service import (
+    CUSTOM_SOURCE_BASE,
+    source_catalog_for,
+)
 from app.views.moddb.entries_panel import PAGE_SIZE
 from app.views.moddb.entry_filters import database_identity
 
@@ -57,8 +60,20 @@ def _load_entries_snapshot(db, request: dict, settings, snapshot: dict) -> dict:
     rows, total, error, detail = [], 0, None, None
     page = max(1, int(request.get("page", 1)))
     if db is not None and version:
+        requested_criteria = request["criteria"]
+        source = requested_criteria.source
+        if (
+            source is not None
+            and source >= CUSTOM_SOURCE_BASE
+            and source not in snapshot["effective_source_codes"]
+        ):
+            source = None
         criteria = replace(
-            request["criteria"], version=version, mod_id=mod_id, kind=kind
+            requested_criteria,
+            version=version,
+            mod_id=mod_id,
+            kind=kind,
+            source=source,
         )
         try:
             rows, total = db.list_entries(
