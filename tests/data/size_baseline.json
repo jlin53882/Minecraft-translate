@@ -14,7 +14,7 @@
     "app/views/cache_manager/cache_view_shard.py:CacheShardMixin._render_shard_detail_keys": 82,
     "app/views/cache_manager/cache_view_shard.py:CacheShardMixin._type_shard_card": 81,
     "app/views/cache_view.py:CacheView.__init__": 94,
-    "app/views/config/config_actions.py:_collect_validated_config": 80,
+    "app/views/config/config_actions.py:_collect_validated_config": 87,
     "app/views/icon_preview/icon_cache.py:_batch_extract_jar_icons": 103,
     "app/views/icon_preview/icon_cache.py:_resolve_icon_from_catalog": 87,
     "app/views/merge/merge_widgets.py:MergeWidgetsMixin._init_merge_io_controls": 80,

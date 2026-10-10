@@ -1242,6 +1242,8 @@ def test_chatgpt_settings_save_requires_a_selected_chatgpt_model(monkeypatch):
     assert result is False
     assert writes == []
     assert "選擇模型" in snacks[-1]
+
+
 def test_saved_translation_source_priority_uses_collision_proof_tokens(monkeypatch):
     from copy import deepcopy
 
