@@ -64,6 +64,10 @@ class TranslationResultInspector:
         self._repair_condition = repair_condition
         self._sync_button()
 
+    @property
+    def normal_entries(self) -> dict[int, str]:
+        return self._normal_entries
+
     def set_normal_results(self, summary: dict, version: str) -> None:
         self._normal_entries = dict(summary.get("flagged_entries") or {})
         self._normal_version = version

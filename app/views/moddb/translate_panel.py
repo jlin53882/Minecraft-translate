@@ -798,6 +798,13 @@ class TranslatePanel(ft.Column):
         self.result_inspector.clear()
         self._set_kpi_mode(mode)
 
+    @property
+    def _flagged(self) -> dict[int, str]:
+        return self.result_inspector.normal_entries
+
+    def _view_flagged(self) -> None:
+        self.result_inspector.inspect()
+
     def _set_running(self, running: bool) -> None:
         self.start_btn.disabled = running
         self.preview_btn.disabled = running
