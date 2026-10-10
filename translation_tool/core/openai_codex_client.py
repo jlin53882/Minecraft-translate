@@ -188,12 +188,16 @@ def _consume_stream(response: requests.Response, meta_out: dict | None) -> str:
                 refusal_chunks[:] = [refusal]
         elif event_type == "error":
             error = payload.get("error", payload)
+            nested_error = isinstance(error, dict) and error is not payload
             if not isinstance(error, dict):
                 error = {}
+            error_type = (
+                error.get("type") if nested_error else payload.get("error_type")
+            )
             raise ChatGPTAPIError(
-                str(error.get("code") or error.get("type") or "stream_error"),
+                str(error.get("code") or error_type or "stream_error"),
                 str(error.get("message") or ""),
-                error_type=str(error.get("type") or ""),
+                error_type=str(error_type or ""),
                 param=str(error.get("param") or ""),
                 request_id=str(
                     payload.get("request_id")

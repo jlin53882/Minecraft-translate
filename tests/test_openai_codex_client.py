@@ -265,7 +265,13 @@ def test_sse_temporary_usage_errors_reach_bounded_batch_retry(monkeypatch, event
             "response": {"id": "resp_test", "status": "failed", "error": error_data},
         }
     else:
-        event_payload = {"type": event, "error": error_data}
+        event_payload = {
+            "type": event,
+            "code": code,
+            "message": error_data["message"],
+            "param": None,
+            "sequence_number": 1,
+        }
     response = _FakeStreamResponse([event_payload])
     response.headers["x-request-id"] = "req_sse_retry"
     waits = []
@@ -355,6 +361,39 @@ def test_unknown_sse_failure_does_not_retry_based_on_message_text(monkeypatch):
     with pytest.raises(client.ChatGPTAPIError) as exc_info:
         client._consume_stream(response, None)
 
+    with pytest.raises(RuntimeError):
+        main._handle_batch_error(
+            SimpleNamespace(chatgpt_retry_count=0), exc_info.value, 0
+        )
+    assert response.closed is True
+    assert waits == []
+
+
+def test_sse_error_with_null_code_stays_unknown_and_does_not_retry(monkeypatch):
+    from types import SimpleNamespace
+
+    from translation_tool.core import lm_translator_main as main
+
+    response = _FakeStreamResponse(
+        [
+            {
+                "type": "error",
+                "code": None,
+                "message": "The stream failed without a machine-readable code.",
+                "param": None,
+                "sequence_number": 1,
+            }
+        ],
+        headers={"x-request-id": "req_unknown_error"},
+    )
+    waits = []
+    monkeypatch.setattr(main, "interruptible_sleep", waits.append)
+    with pytest.raises(client.ChatGPTAPIError) as exc_info:
+        client._consume_stream(response, None)
+
+    assert exc_info.value.code == "stream_error"
+    assert exc_info.value.error_type == ""
+    assert exc_info.value.request_id == "req_unknown_error"
     with pytest.raises(RuntimeError):
         main._handle_batch_error(
             SimpleNamespace(chatgpt_retry_count=0), exc_info.value, 0
@@ -468,10 +507,10 @@ def test_sse_retry_wait_cancellation_bubbles_out(monkeypatch):
         [
             {
                 "type": "error",
-                "error": {
-                    "code": "subscription_sharing_user_unavailable",
-                    "message": "Usage is temporarily unavailable.",
-                },
+                "code": "subscription_sharing_user_unavailable",
+                "message": "Usage is temporarily unavailable.",
+                "param": None,
+                "sequence_number": 1,
             }
         ]
     )
