@@ -61,7 +61,13 @@ class TranslatePanel(ft.Column):
         self._page = page
         self._get_db = get_db
         self._on_finished = on_finished
-        self.result_inspector = TranslationResultInspector(page, on_view_flagged)
+        self._repair_summary: dict | None = None
+        self._repair_summary_final = True
+        self.result_inspector = TranslationResultInspector(
+            page,
+            on_view_flagged,
+            on_repair_review_changed=self._on_repair_review_changed,
+        )
         self.view_flagged_btn = self.result_inspector.button
         self._run_version = ""
         self._repair_preview = None
@@ -642,6 +648,8 @@ class TranslatePanel(ft.Column):
         self._apply_translation_summary(s)
 
     def _apply_repair_summary(self, s: dict, *, final: bool) -> None:
+        self._repair_summary = dict(s)
+        self._repair_summary_final = final
         quality_repair = s.get("operation") == "repair_special_character_mismatch"
         self.result_inspector.set_repair_results(s)
         self._set_kpi_mode(
@@ -701,6 +709,18 @@ class TranslatePanel(ft.Column):
         detail_parts = repair_summary_detail_lines(s)
         if detail_parts:
             self.repair_summary_text.value += "\n" + "\n".join(detail_parts)
+
+    def _on_repair_review_changed(self, unresolved_count: int) -> None:
+        if (
+            self._repair_summary is None
+            or self._repair_summary.get("operation")
+            != "repair_special_character_mismatch"
+        ):
+            return
+        summary = dict(self._repair_summary)
+        summary["flagged"] = max(0, int(unresolved_count))
+        self._apply_repair_summary(summary, final=self._repair_summary_final)
+        self._safe_update()
 
     def _apply_translation_summary(self, s: dict) -> None:
         self._set_kpi_mode("normal")
@@ -767,6 +787,7 @@ class TranslatePanel(ft.Column):
         self.result_inspector.set_mode(mode, self._kpi_repair_condition)
 
     def _reset_stats(self, *, mode: str = "normal") -> None:
+        self._repair_summary = None
         for card in self._stat_cards:
             card.set_value("—", delta="")
         self.result_inspector.clear()

@@ -17,10 +17,11 @@ from app.views.moddb.formatting import format_count
 
 
 class RepairReviewer:
-    def __init__(self, page, store_path: str, run_id: str) -> None:
+    def __init__(self, page, store_path: str, run_id: str, on_close=None) -> None:
         self.page = page
         self.store_path = store_path
         self.run_id = run_id
+        self.on_close = on_close
         self.status_filter = "pending"
         self.page_size = 100
         self.page_offset = 0
@@ -94,6 +95,7 @@ class RepairReviewer:
             self.status.value = "無法載入此筆審查資料。"
             self.page.update()
             return
+        self._show_review_status(self.item.get("review_status", "pending"))
         counts = moddb_repair_review_store.status_counts(self.store_path, self.run_id)
         total = sum(counts.values())
         self.position_text.value = (
@@ -140,7 +142,7 @@ class RepairReviewer:
             ft.Text(identity, size=12, color=C.MUTED, selectable=True),
             ft.Text(str(item.get("key") or ""), size=12.5, selectable=True),
             ft.Text(
-                "格式差異：" + "、".join(item.get("issues") or ()),
+                "原譯文格式差異：" + "、".join(item.get("issues") or ()),
                 size=12,
                 color=C.GOLD,
             ),
@@ -158,9 +160,20 @@ class RepairReviewer:
         self.page.update()
 
     def _draft_changed(self, _event=None) -> None:
-        self._save_draft()
+        self._save_draft(status="pending")
         self._update_format_status()
         self.page.update()
+
+    def _show_review_status(self, status: str) -> None:
+        messages = {
+            "applied": ("已套用，原來源與歷史均已保留。", C.EM),
+            "kept_old": ("已保留舊譯文；沒有寫入翻譯資料，也沒有新增歷史。", C.EM),
+            "stale": ("資料已變動；草稿保留，請重新讀取並比較。", C.GOLD),
+            "invalid": ("此筆草稿仍有格式問題。", C.GOLD),
+        }
+        message, color = messages.get(status, ("", C.MUTED))
+        self.status.value = message
+        self.status.color = color
 
     def _update_format_status(self) -> list[str]:
         if self.item is None or self.draft is None:
@@ -177,11 +190,17 @@ class RepairReviewer:
         self.apply_button.disabled = self.applying or bool(issues)
         return issues
 
-    def _save_draft(self, _event=None, status="pending") -> None:
+    def _save_draft(self, _event=None, status=None) -> None:
         if self.item is None or self.draft is None:
             return
         value = self.draft.value or ""
+        if status is None:
+            unchanged = value == str(self.item.get("draft") or "")
+            status = (
+                self.item.get("review_status", "pending") if unchanged else "pending"
+            )
         self.item["draft"] = value
+        self.item["review_status"] = status
         moddb_repair_review_store.save_review_state(
             self.store_path,
             self.run_id,
@@ -289,7 +308,11 @@ class RepairReviewer:
         self._save_draft()
         self.closed = True
         self.page.pop_dialog()
+        if self.on_close is not None:
+            self.on_close(
+                moddb_repair_review_store.status_counts(self.store_path, self.run_id)
+            )
 
 
-def open_repair_reviewer(page, store_path: str, run_id: str) -> None:
-    RepairReviewer(page, store_path, run_id).open()
+def open_repair_reviewer(page, store_path: str, run_id: str, on_close=None) -> None:
+    RepairReviewer(page, store_path, run_id, on_close=on_close).open()

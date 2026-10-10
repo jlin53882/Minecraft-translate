@@ -1920,6 +1920,30 @@ def test_translate_panel_switches_kpis_between_normal_and_ai_repair_modes():
     assert panel._kpi_titles["third"].label_text.value == "特殊字元不一致"
 
 
+def test_manual_repair_review_updates_flagged_kpi_and_summary():
+    panel = translate_panel.TranslatePanel(mock_page(), lambda: None)
+    panel._apply_repair_summary(
+        {
+            "operation": "repair_special_character_mismatch",
+            "candidates": 10,
+            "updated": 5,
+            "unchanged": 0,
+            "flagged": 4,
+            "skipped_changed": 0,
+            "failed": 1,
+            "remaining": 4,
+            "status": "DONE",
+            "reviewable_results": 4,
+        },
+        final=True,
+    )
+
+    panel._on_repair_review_changed(3)
+
+    assert panel.stat_flagged.value_text.value == "3"
+    assert "格式檢查未通過 3" in panel.repair_summary_text.value
+
+
 def test_translate_panel_restores_partial_and_cancelled_repair_from_task_session():
     panel = translate_panel.TranslatePanel(mock_page(), lambda: None)
     session = TaskSession()

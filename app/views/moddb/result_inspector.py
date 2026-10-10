@@ -42,9 +42,12 @@ def _repair_detail_card(item: dict, index: int) -> ft.Container:
 class TranslationResultInspector:
     """Own the KPI action and the read-only views for flagged translation results."""
 
-    def __init__(self, page, on_view_flagged=None) -> None:
+    def __init__(
+        self, page, on_view_flagged=None, on_repair_review_changed=None
+    ) -> None:
         self._page = page
         self._on_view_flagged = on_view_flagged
+        self._on_repair_review_changed = on_repair_review_changed
         self._normal_entries: dict[int, str] = {}
         self._normal_version = ""
         self._repair_entries: list[dict] = []
@@ -130,8 +133,17 @@ class TranslationResultInspector:
             and self._repair_store_path
             and self._repair_reviewable_count
         ):
+
+            def on_close(counts: dict[str, int]) -> None:
+                if self._on_repair_review_changed is not None:
+                    unresolved = sum(counts.values()) - counts.get("applied", 0)
+                    self._on_repair_review_changed(unresolved)
+
             open_repair_reviewer(
-                self._page, self._repair_store_path, self._repair_run_id
+                self._page,
+                self._repair_store_path,
+                self._repair_run_id,
+                on_close=on_close,
             )
             return
         if not self._repair_entries:

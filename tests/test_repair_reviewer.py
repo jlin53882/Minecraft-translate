@@ -86,3 +86,97 @@ def test_draft_box_is_taller_and_checks_format_while_editing(tmp_path):
     assert reviewer.format_status.value == "格式檢查通過；可確認套用。"
     saved = store.load_item(path, "run-live-check", item_index)
     assert saved["draft"] == "翻譯 %s"
+
+
+def test_close_preserves_applied_status_and_reports_current_counts(tmp_path):
+    path = store.create_run(tmp_path / "review.db", "run-applied")
+    item_index = store.append_item(
+        path,
+        "run-applied",
+        {
+            "key": "repair.applied",
+            "version": "1.21.1",
+            "mod_id": "foo",
+            "kind": "lang",
+            "source_id": 0,
+            "en_us": "Use %s",
+            "old_translation": "使用",
+            "ai_translation": "使用",
+            "draft": "使用 %s",
+            "issues": ("少了 1 個「%s」",),
+        },
+    )
+    page = mock_page()
+    closed_counts = []
+    reviewer = RepairReviewer(
+        page, str(path), "run-applied", on_close=closed_counts.append
+    )
+    reviewer.open()
+
+    store.save_review_state(path, "run-applied", item_index, "applied", "使用 %s")
+    reviewer._render()  # mirror the refresh after a successful apply
+    reviewer._close()
+
+    assert store.status_counts(path, "run-applied") == {"applied": 1}
+    assert closed_counts == [{"applied": 1}]
+
+
+def test_inspector_reports_unresolved_count_after_reviewer_closes(monkeypatch):
+    from app.views.moddb import result_inspector as inspector_module
+
+    callback_counts = []
+    close_callback = {}
+
+    def open_reviewer(_page, _path, _run_id, *, on_close):
+        close_callback["callback"] = on_close
+
+    monkeypatch.setattr(inspector_module, "open_repair_reviewer", open_reviewer)
+    inspector = TranslationResultInspector(
+        mock_page(), on_repair_review_changed=callback_counts.append
+    )
+    inspector.set_mode("repair", "quality_mismatch")
+    inspector.set_repair_results(
+        {
+            "review_store_path": "review.db",
+            "review_run_id": "run-1",
+            "reviewable_results": 4,
+        }
+    )
+
+    inspector.inspect()
+    close_callback["callback"]({"applied": 2, "pending": 1, "kept_old": 1})
+
+    assert callback_counts == [2]
+
+
+def test_switching_review_item_replaces_the_previous_status_message(tmp_path):
+    path = store.create_run(tmp_path / "review.db", "run-switch")
+    for key, draft in (("repair.first", "已套用 %s"), ("repair.second", "草稿")):
+        store.append_item(
+            path,
+            "run-switch",
+            {
+                "key": key,
+                "version": "1.21.1",
+                "mod_id": "foo",
+                "kind": "lang",
+                "source_id": 0,
+                "en_us": "Use %s",
+                "old_translation": "舊譯文",
+                "ai_translation": draft,
+                "draft": draft,
+                "issues": (),
+            },
+        )
+    page = mock_page()
+    reviewer = RepairReviewer(page, str(path), "run-switch")
+    reviewer.status_filter = "all"
+    reviewer.filtered_count = 2
+    reviewer._load_index_page()
+    reviewer._render()
+
+    reviewer.status.value = "上一筆的套用成功訊息"
+    reviewer._move(1)
+
+    assert reviewer.status.value == ""
+    assert "少了 1 個「%s」" in reviewer.format_status.value
