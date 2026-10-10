@@ -86,6 +86,7 @@ from translation_tool.utils.cancellation import (
 
 _ENTRY_COLS = "e.id, e.kind, e.mc_version, e.mod_id, e.key, e.en_us"
 _CHUNK = 400  # SQLite 變數上限相容的批次大小
+_EFFECTIVE_PRIORITY_VERSION = "2"
 _QUALITY_FETCH_BATCH_SIZE = 4_000
 _QUALITY_PAGE_BUFFER_LIMIT = 10_000
 _BATCH_REPLACE_STRIP_CHARS = "".join(
@@ -319,7 +320,15 @@ class TranslationDB:
         """優先序與上次記錄不同時，重建所有條目的生效譯文。"""
         want = ",".join(str(s) for s in self.priority)
         row = self._one("SELECT value FROM meta WHERE key='priority'")
-        if row and row[0] == want:
+        rank_version = self._one(
+            "SELECT value FROM meta WHERE key='effective_priority_version'"
+        )
+        if (
+            row
+            and row[0] == want
+            and rank_version
+            and rank_version[0] == _EFFECTIVE_PRIORITY_VERSION
+        ):
             return
         with self._tx() as conn:
             self._rebuild_effective(conn)
@@ -327,6 +336,11 @@ class TranslationDB:
                 "INSERT INTO meta (key, value) VALUES ('priority', ?) "
                 "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
                 (want,),
+            )
+            conn.execute(
+                "INSERT INTO meta (key, value) VALUES ('effective_priority_version', ?) "
+                "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                (_EFFECTIVE_PRIORITY_VERSION,),
             )
 
     # ------------------------------------------------------------ 生效譯文
