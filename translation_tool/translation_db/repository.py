@@ -2684,7 +2684,13 @@ class TranslationDB:
             if expected_revision is not None and current[1] != expected_revision:
                 return AITranslationReplaceResult("skipped_changed")
             eligible, _issues, _mixed = repair_input_issues(expected_en_us, current[0])
-            if not eligible or repair_output_issues(expected_en_us, new_zh_tw):
+            if not eligible:
+                return AITranslationReplaceResult("skipped_changed")
+            # Automated repair must pass output checks; an explicit human review
+            # accepts the reviewed draft while retaining the same source CAS.
+            if action == "quality_repair" and repair_output_issues(
+                expected_en_us, new_zh_tw
+            ):
                 return AITranslationReplaceResult("skipped_changed")
             if new_zh_tw == current[0]:
                 return AITranslationReplaceResult("unchanged")

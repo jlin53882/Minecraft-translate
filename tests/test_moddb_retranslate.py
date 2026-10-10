@@ -334,7 +334,9 @@ def test_quality_repair_representative_limit_keeps_all_mapped_sources(db_path):
     db.close()
 
 
-def test_manual_review_confirmation_uses_source_revision_history_and_undo(db_path):
+def test_manual_review_confirmation_skips_format_check_but_keeps_cas_history_and_undo(
+    db_path,
+):
     db = TranslationDB(db_path)
     entry = _ai_entry(db, key="review", en="Use %s")
     db._conn.execute(
@@ -363,7 +365,9 @@ def test_manual_review_confirmation_uses_source_revision_history_and_undo(db_pat
         == "stale"
     )
     assert (
-        moddb_retranslate_service.apply_repair_review_item(db_path, item, "使用 %s")
+        moddb_retranslate_service.apply_repair_review_item(
+            db_path, item, "人工已確認，即使不同於來源佔位符"
+        )
         == "applied"
     )
     check = TranslationDB(db_path)
@@ -375,7 +379,7 @@ def test_manual_review_confirmation_uses_source_revision_history_and_undo(db_pat
     assert history.source_id == SRC_AI
     assert (
         next(row for row in detail.translations if row.source == SRC_AI).zh_tw
-        == "使用 %s"
+        == "人工已確認，即使不同於來源佔位符"
     )
     assert check.revert(history.id) == 1
     assert (
@@ -723,6 +727,30 @@ def test_quality_repair_cas_requires_exact_entry_identity(db_path, field, wrong_
         ).zh_tw
         == "Use"
     )
+    db.close()
+
+
+def test_automated_quality_repair_still_requires_valid_output(db_path):
+    db = TranslationDB(db_path)
+    _ingest(db, "1.21.1", "foo", "item.quality.output", SRC_AI, "Use", en="Use %s")
+    entry = next(
+        row for row in db.list_entries("1.21.1")[0] if row.key == "item.quality.output"
+    )
+
+    result = db.replace_translation_quality_mismatch(
+        entry.id,
+        SRC_AI,
+        "Use",
+        "人工已確認但未保留佔位符",
+        **_replace_identity(entry),
+        expected_revision=_translation_revision(db, entry.id, SRC_AI),
+    )
+
+    current = next(
+        row for row in db.entry_detail(entry.id).translations if row.source == SRC_AI
+    )
+    assert result.status == "skipped_changed"
+    assert current.zh_tw == "Use"
     db.close()
 
 

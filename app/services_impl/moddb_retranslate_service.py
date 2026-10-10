@@ -1260,11 +1260,6 @@ def apply_repair_review_item(
         db.close()
 
 
-def validate_repair_draft(source: str, translated: str) -> list[str]:
-    """View-facing validator entrypoint for manually edited repair drafts."""
-    return repair_output_issues(source, translated)
-
-
 def apply_and_record_repair_review(
     database_path: str | Path,
     store_path: str | Path,

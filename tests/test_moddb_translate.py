@@ -1897,7 +1897,7 @@ def test_translate_panel_switches_kpis_between_normal_and_ai_repair_modes():
     assert all(
         value in details
         for value in (
-            "格式檢查未通過 2",
+            "待人工確認 2",
             "資料已變動跳過 3",
             "失敗 1",
             "快取未同步事件 5",
@@ -1941,7 +1941,7 @@ def test_manual_repair_review_updates_flagged_kpi_and_summary():
     panel._on_repair_review_changed(3)
 
     assert panel.stat_flagged.value_text.value == "3"
-    assert "格式檢查未通過 3" in panel.repair_summary_text.value
+    assert "待人工確認 3" in panel.repair_summary_text.value
 
 
 def test_translate_panel_restores_partial_and_cancelled_repair_from_task_session():

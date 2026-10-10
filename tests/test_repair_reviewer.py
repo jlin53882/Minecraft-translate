@@ -41,6 +41,10 @@ def test_inspector_mounts_one_item_from_full_persisted_run(tmp_path):
     body = dialog.content.content
     assert len(body.controls) < 20
     assert any(getattr(control, "value", "") == "repair.0" for control in body.controls)
+    assert all(
+        "特殊字元差異" not in str(getattr(control, "value", ""))
+        for control in body.controls
+    )
 
 
 def test_keep_old_uses_defined_semantic_color():
@@ -53,7 +57,7 @@ def test_keep_old_uses_defined_semantic_color():
     assert reviewer.status.color == C.EM
 
 
-def test_draft_box_is_taller_and_checks_format_while_editing(tmp_path):
+def test_draft_box_allows_human_confirmed_apply_without_format_check(tmp_path):
     path = store.create_run(tmp_path / "review.db", "run-live-check")
     item_index = store.append_item(
         path,
@@ -76,16 +80,24 @@ def test_draft_box_is_taller_and_checks_format_while_editing(tmp_path):
     reviewer.open()
 
     assert reviewer.draft.height == 240
-    assert reviewer.apply_button.disabled is True
-    assert "少了 1 個「%s」" in reviewer.format_status.value
+    assert reviewer.apply_button.disabled is False
+    assert all(
+        "格式差異" not in str(getattr(control, "value", ""))
+        for control in reviewer.body.controls
+    )
 
-    reviewer.draft.value = "翻譯 %s"
+    reviewer.draft.value = "翻譯文字，保留由人工確認的內容"
     reviewer._draft_changed()
 
     assert reviewer.apply_button.disabled is False
-    assert reviewer.format_status.value == "格式檢查通過；可確認套用。"
     saved = store.load_item(path, "run-live-check", item_index)
-    assert saved["draft"] == "翻譯 %s"
+    assert saved["draft"] == "翻譯文字，保留由人工確認的內容"
+
+    reviewer._apply()
+
+    assert page._tasks
+    assert reviewer.status.value == "正在重新驗證來源與 revision…"
+    assert reviewer.apply_button.disabled is True
 
 
 def test_close_preserves_applied_status_and_reports_current_counts(tmp_path):
@@ -179,4 +191,8 @@ def test_switching_review_item_replaces_the_previous_status_message(tmp_path):
     reviewer._move(1)
 
     assert reviewer.status.value == ""
-    assert "少了 1 個「%s」" in reviewer.format_status.value
+    assert reviewer.draft.value == "草稿"
+    assert all(
+        "格式差異" not in str(getattr(control, "value", ""))
+        for control in reviewer.body.controls
+    )

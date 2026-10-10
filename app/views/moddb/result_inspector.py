@@ -16,13 +16,11 @@ def _repair_detail_card(item: dict, index: int) -> ft.Container:
         f"{item.get('version', '')} · {item.get('mod_id', '')} · "
         f"{item.get('kind', '')} · 來源 #{item.get('source_id', '')}"
     )
-    issues = "、".join(item.get("issues") or ())
     return ft.Container(
         content=ft.Column(
             [
                 ft.Text(f"{index}. {identity}", size=12, color=C.MUTED),
                 ft.Text(str(item.get("key") or ""), size=12.5, selectable=True),
-                ft.Text("特殊字元差異：" + issues, size=12, color=C.GOLD),
                 ft.Text("英文原文", size=11, color=C.MUTED),
                 ft.Text(str(item.get("en_us") or ""), selectable=True),
                 ft.Text("保留的舊譯文", size=11, color=C.MUTED),
@@ -164,7 +162,7 @@ class TranslationResultInspector:
         show_dialog(
             ft.AlertDialog(
                 modal=True,
-                title=ft.Text("AI 結果未通過格式檢查"),
+                title=ft.Text("AI 修復結果・待人工確認"),
                 content=ft.Container(
                     content=ft.Column(
                         [

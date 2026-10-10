@@ -7,10 +7,7 @@ import asyncio
 import flet as ft
 
 from app.services_impl import moddb_repair_review_store
-from app.services_impl.moddb_retranslate_service import (
-    apply_and_record_repair_review,
-    validate_repair_draft,
-)
+from app.services_impl.moddb_retranslate_service import apply_and_record_repair_review
 from app.ui.design import C
 from app.ui.sync_text_field import SyncTextField
 from app.views.moddb.formatting import format_count
@@ -32,7 +29,6 @@ class RepairReviewer:
         self.item: dict | None = None
         self.draft: ft.TextField | None = None
         self.status = ft.Text("", size=12, color=C.MUTED)
-        self.format_status = ft.Text("", size=12, color=C.MUTED)
         self.applying = False
         self.apply_button = ft.TextButton("確認套用", on_click=self._apply)
         self.body = ft.Column([], height=500, scroll=ft.ScrollMode.AUTO)
@@ -98,13 +94,13 @@ class RepairReviewer:
         self._show_review_status(self.item.get("review_status", "pending"))
         counts = moddb_repair_review_store.status_counts(self.store_path, self.run_id)
         total = sum(counts.values())
+        pending = counts.get("pending", 0) + counts.get("invalid", 0)
         self.position_text.value = (
             f"第 {self.page_offset + self.position + 1} / {self.filtered_count} 筆 · "
-            f"待審 {format_count(counts.get('pending', 0))} · "
+            f"待確認 {format_count(pending)} · "
             f"已套用 {format_count(counts.get('applied', 0))} · "
             f"保留舊譯文 {format_count(counts.get('kept_old', 0))} · "
-            f"資料已變動 {format_count(counts.get('stale', 0))} · "
-            f"格式不合格 {format_count(counts.get('invalid', 0))} / {total}"
+            f"資料已變動 {format_count(counts.get('stale', 0))} / {total}"
         )
         item = self.item
         self.draft = SyncTextField(
@@ -130,7 +126,7 @@ class RepairReviewer:
                     ("applied", "已套用"),
                     ("kept_old", "保留舊譯文"),
                     ("stale", "資料已變動"),
-                    ("invalid", "格式不合格"),
+                    ("invalid", "待確認草稿"),
                     ("all", "全部狀態"),
                 )
             ],
@@ -141,11 +137,6 @@ class RepairReviewer:
             status_filter,
             ft.Text(identity, size=12, color=C.MUTED, selectable=True),
             ft.Text(str(item.get("key") or ""), size=12.5, selectable=True),
-            ft.Text(
-                "原譯文格式差異：" + "、".join(item.get("issues") or ()),
-                size=12,
-                color=C.GOLD,
-            ),
             ft.Text("英文原文", size=11, color=C.MUTED),
             ft.Text(str(item.get("en_us") or ""), selectable=True),
             ft.Text("保留中的舊譯文", size=11, color=C.MUTED),
@@ -153,15 +144,12 @@ class RepairReviewer:
             ft.Text("未寫入的 AI 結果", size=11, color=C.MUTED),
             ft.Text(str(item.get("ai_translation") or ""), selectable=True),
             self.draft,
-            self.format_status,
             self.status,
         ]
-        self._update_format_status()
         self.page.update()
 
     def _draft_changed(self, _event=None) -> None:
         self._save_draft(status="pending")
-        self._update_format_status()
         self.page.update()
 
     def _show_review_status(self, status: str) -> None:
@@ -169,26 +157,11 @@ class RepairReviewer:
             "applied": ("已套用，原來源與歷史均已保留。", C.EM),
             "kept_old": ("已保留舊譯文；沒有寫入翻譯資料，也沒有新增歷史。", C.EM),
             "stale": ("資料已變動；草稿保留，請重新讀取並比較。", C.GOLD),
-            "invalid": ("此筆草稿仍有格式問題。", C.GOLD),
+            "invalid": ("此筆草稿待確認，可由你決定是否套用。", C.GOLD),
         }
         message, color = messages.get(status, ("", C.MUTED))
         self.status.value = message
         self.status.color = color
-
-    def _update_format_status(self) -> list[str]:
-        if self.item is None or self.draft is None:
-            return []
-        issues = validate_repair_draft(
-            str(self.item.get("en_us") or ""), self.draft.value or ""
-        )
-        if issues:
-            self.format_status.value = "格式尚未通過：" + "、".join(issues)
-            self.format_status.color = C.GOLD
-        else:
-            self.format_status.value = "格式檢查通過；可確認套用。"
-            self.format_status.color = C.EM
-        self.apply_button.disabled = self.applying or bool(issues)
-        return issues
 
     def _save_draft(self, _event=None, status=None) -> None:
         if self.item is None or self.draft is None:
@@ -253,14 +226,7 @@ class RepairReviewer:
         if self.item is None or self.draft is None:
             return
         value = self.draft.value or ""
-        issues = self._update_format_status()
-        if issues:
-            self._save_draft(status="invalid")
-            self.status.value = "格式仍不合格：" + "、".join(issues)
-            self.status.color = C.GOLD
-            self.page.update()
-            return
-        self.status.value = "正在重新驗證來源、revision 與格式…"
+        self.status.value = "正在重新驗證來源與 revision…"
         self.applying = True
         self.apply_button.disabled = True
         self.page.update()

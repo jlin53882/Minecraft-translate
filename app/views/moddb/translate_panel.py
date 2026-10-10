@@ -669,7 +669,7 @@ class TranslatePanel(ft.Column):
         self.stat_flagged.set_value(
             format_count(s.get("flagged") if quality_repair else s.get("unchanged")),
             delta=(
-                "AI 結果仍不一致，舊譯文保留"
+                "AI 草稿待人工確認，原譯文保留"
                 if quality_repair
                 else "AI 結果與舊譯文相同"
             ),
@@ -690,7 +690,7 @@ class TranslatePanel(ft.Column):
         )
         self.repair_summary_text.value = (
             f"{progress}：候選 {s.get('candidates', 0)}；更新 {s.get('updated', 0)}；"
-            f"重翻後仍相同 {s.get('unchanged', 0)}；格式檢查未通過 {s.get('flagged', 0)}；"
+            f"重翻後仍相同 {s.get('unchanged', 0)}；待人工確認 {s.get('flagged', 0)}；"
             f"資料已變動跳過 {s.get('skipped_changed', 0)}；"
             f"失敗 {s.get('failed', 0)}；"
             + (
@@ -756,7 +756,7 @@ class TranslatePanel(ft.Column):
                 "成功更新來源譯文"
                 if self._kpi_repair_condition == "quality_mismatch"
                 else "成功更新 AI 譯文",
-                "AI 結果未通過格式檢查"
+                "AI 草稿待人工確認"
                 if self._kpi_repair_condition == "quality_mismatch"
                 else "重翻後仍相同",
                 "範圍內仍不一致"
