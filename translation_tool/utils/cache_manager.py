@@ -8,6 +8,7 @@ from __future__ import annotations
 import logging
 import threading
 import time
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -72,6 +73,7 @@ class CacheAddReceipt:
 
     accepted: bool
     changed: bool
+    generation: int | None = None
 
 
 @dataclass(frozen=True)
@@ -80,6 +82,16 @@ class CacheSaveReceipt:
 
     saving_enabled: bool
     saved_keys: tuple[str, ...] | None
+    superseded_keys: tuple[str, ...] = ()
+
+
+def _next_session_entry_version(state, cache_type: str, key: str) -> int:
+    """Assign a unique token to the latest pending mutation for one cache key."""
+    state.next_session_entry_version += 1
+    versions = cache_store.get_session_entries(state.session_entry_versions, cache_type)
+    version = state.next_session_entry_version
+    versions[key] = version
+    return version
 
 
 def _state():
@@ -224,6 +236,9 @@ def reload_translation_cache_type(cache_type: str):
             return
         state.translation_cache[cache_type] = {}
         cache_store.get_session_entries(state.session_new_entries, cache_type).clear()
+        cache_store.get_session_entries(
+            state.session_entry_versions, cache_type
+        ).clear()
         cache_store.clear_dirty(state.is_dirty, cache_type)
     _load_cache_type(cache_type)
 
@@ -260,6 +275,10 @@ def save_translation_cache(cache_type: str, write_new_shard: bool = True):
         data_to_save = cache_store.flush_session_entries(
             state.session_new_entries, cache_type
         )
+        versions = cache_store.get_session_entries(
+            state.session_entry_versions, cache_type
+        )
+        versions_to_save = {key: versions.get(key) for key in data_to_save}
     try:
         save_path = state.cache_file_path.get(cache_type)
         if not save_path:
@@ -277,6 +296,15 @@ def save_translation_cache(cache_type: str, write_new_shard: bool = True):
         )
         with state.cache_lock:
             # save 期間若又有新 pending，仍保持 dirty
+            pending = cache_store.get_session_entries(
+                state.session_new_entries, cache_type
+            )
+            versions = cache_store.get_session_entries(
+                state.session_entry_versions, cache_type
+            )
+            for key, version in versions_to_save.items():
+                if key not in pending and versions.get(key) == version:
+                    versions.pop(key, None)
             if not cache_store.get_session_entries(
                 state.session_new_entries, cache_type
             ):
@@ -294,7 +322,11 @@ def save_translation_cache(cache_type: str, write_new_shard: bool = True):
 
 
 def save_translation_cache_keys(
-    cache_type: str, keys: set[str] | frozenset[str], write_new_shard: bool = True
+    cache_type: str,
+    keys: set[str] | frozenset[str],
+    write_new_shard: bool = True,
+    *,
+    expected_versions: Mapping[str, int] | None = None,
 ) -> CacheSaveReceipt:
     """Persist only the requested pending keys and return an exact flush receipt.
 
@@ -307,11 +339,32 @@ def save_translation_cache_keys(
     state = _state()
     with state.cache_lock:
         pending = cache_store.get_session_entries(state.session_new_entries, cache_type)
-        data_to_save = {key: pending[key] for key in keys if key in pending}
+        versions = cache_store.get_session_entries(
+            state.session_entry_versions, cache_type
+        )
+        selected = {
+            key
+            for key in keys
+            if key in pending
+            and (
+                expected_versions is None
+                or (
+                    expected_versions.get(key) is not None
+                    and expected_versions.get(key) == versions.get(key)
+                )
+            )
+        }
+        superseded = (
+            tuple(sorted(set(keys) - selected)) if expected_versions is not None else ()
+        )
+        data_to_save = {key: pending[key] for key in keys if key in selected}
+        versions_to_save = {key: versions.get(key) for key in data_to_save}
         for key in data_to_save:
             del pending[key]
     if not data_to_save:
-        return CacheSaveReceipt(saving_enabled=True, saved_keys=())
+        return CacheSaveReceipt(
+            saving_enabled=True, saved_keys=(), superseded_keys=superseded
+        )
 
     try:
         save_path = state.cache_file_path.get(cache_type)
@@ -320,17 +373,30 @@ def save_translation_cache_keys(
                 cache_store.restore_session_entries_if_absent(
                     state.session_new_entries, state.is_dirty, cache_type, data_to_save
                 )
-            return CacheSaveReceipt(saving_enabled=True, saved_keys=None)
+            return CacheSaveReceipt(
+                saving_enabled=True, saved_keys=None, superseded_keys=superseded
+            )
         _save_entries_to_active_shards(
             cache_type, data_to_save, force_new_shard=write_new_shard
         )
         with state.cache_lock:
+            pending = cache_store.get_session_entries(
+                state.session_new_entries, cache_type
+            )
+            versions = cache_store.get_session_entries(
+                state.session_entry_versions, cache_type
+            )
+            for key, version in versions_to_save.items():
+                if key not in pending and versions.get(key) == version:
+                    versions.pop(key, None)
             if not cache_store.get_session_entries(
                 state.session_new_entries, cache_type
             ):
                 cache_store.clear_dirty(state.is_dirty, cache_type)
         return CacheSaveReceipt(
-            saving_enabled=True, saved_keys=tuple(data_to_save.keys())
+            saving_enabled=True,
+            saved_keys=tuple(data_to_save.keys()),
+            superseded_keys=superseded,
         )
     except Exception:
         with state.cache_lock:
@@ -338,7 +404,9 @@ def save_translation_cache_keys(
                 state.session_new_entries, state.is_dirty, cache_type, data_to_save
             )
         log.exception("儲存 %s 指定快取鍵失敗", cache_type)
-        return CacheSaveReceipt(saving_enabled=True, saved_keys=None)
+        return CacheSaveReceipt(
+            saving_enabled=True, saved_keys=None, superseded_keys=superseded
+        )
 
 
 def _get_active_shard_path(cache_type: str) -> Path:
@@ -402,7 +470,12 @@ def add_to_cache_with_receipt(
             )
             session_entries[key] = entry
             cache_store.mark_dirty(state.is_dirty, cache_type)
-        return CacheAddReceipt(accepted=True, changed=changed)
+            generation = _next_session_entry_version(state, cache_type, key)
+        else:
+            generation = cache_store.get_session_entries(
+                state.session_entry_versions, cache_type
+            ).get(key)
+        return CacheAddReceipt(accepted=True, changed=changed, generation=generation)
 
 
 def add_to_cache_batch(
@@ -447,6 +520,7 @@ def add_to_cache_batch(
             changed = cache_store.add_entry(cache, key, entry)
             if changed:
                 session_entries[key] = entry
+                _next_session_entry_version(state, cache_type, key)
                 dirty = True
 
         if dirty:

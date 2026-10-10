@@ -663,15 +663,19 @@ def repair_cache(monkeypatch):
         "add_to_cache_with_receipt",
         lambda *args, **kwargs: (
             events.append(("add", args, kwargs))
-            or SimpleNamespace(accepted=True, changed=True)
+            or SimpleNamespace(accepted=True, changed=True, generation=1)
         ),
     )
     monkeypatch.setattr(
         moddb_retranslate_service,
         "save_translation_cache_keys",
-        lambda cache_type, keys: (
-            events.append(("save", cache_type, set(keys)))
-            or SimpleNamespace(saving_enabled=True, saved_keys=tuple(keys))
+        lambda cache_type, keys, *, expected_versions: (
+            events.append(("save", cache_type, set(keys), dict(expected_versions)))
+            or SimpleNamespace(
+                saving_enabled=True,
+                saved_keys=tuple(keys),
+                superseded_keys=(),
+            )
         ),
     )
     monkeypatch.setattr(
@@ -869,6 +873,52 @@ def test_excess_results_stop_before_next_batch(db_path, monkeypatch, repair_cach
     assert repair_cache == []
 
 
+def test_unexpected_batch_exception_keeps_candidate_counters_distinct(
+    db_path, monkeypatch, repair_cache
+):
+    db = TranslationDB(db_path)
+    entries = [_ai_entry(db, key=f"exception-{index}") for index in range(3)]
+    preview = moddb_retranslate_service.preview_same_source_ai_retranslation(
+        db, _options(write_cache=False)
+    )
+    db.close()
+    _set_repair_batch_size(monkeypatch, 2)
+    failing_id = entries[1].id
+    original_replace = TranslationDB.replace_ai_translation
+
+    def fail_during_second_result(self, entry_id, *args, **kwargs):
+        if entry_id == failing_id:
+            raise RuntimeError("simulated CAS failure after an earlier failed row")
+        return original_replace(self, entry_id, *args, **kwargs)
+
+    monkeypatch.setattr(
+        TranslationDB, "replace_ai_translation", fail_during_second_result
+    )
+    monkeypatch.setattr(
+        moddb_retranslate_service,
+        "translate_batch_smart",
+        lambda batch, _total: (
+            [
+                {**batch[0], "_entry_id": -1, "text": "invalid"},
+                {**batch[1], "text": "有效譯文"},
+            ],
+            "AUTO",
+        ),
+    )
+
+    snap = _run(db_path, preview.entries, options=_options(write_cache=False))
+
+    summary = snap["summary"]
+    assert summary["status"] == "FAILED"
+    assert summary["attempted_candidates"] == 2
+    assert summary["processed_candidates"] == 1
+    assert summary["failed"] == 1
+    assert summary["not_submitted_candidates"] == 1
+    assert summary["unprocessed_candidates"] == 2
+    assert any("已送出 2，已完成 1，其中失敗 1" in row.text for row in snap["logs"])
+    assert repair_cache == []
+
+
 def test_identical_result_is_unchanged_and_does_not_touch_cache(
     db_path, monkeypatch, repair_cache
 ):
@@ -961,11 +1011,14 @@ def test_cache_exceptions_do_not_stop_later_repair_batches(
 
     def add_to_cache_with_receipt(*_args, **_kwargs):
         fail_once("add")
-        return SimpleNamespace(accepted=True, changed=True)
+        return SimpleNamespace(accepted=True, changed=True, generation=1)
 
-    def save_translation_cache_keys(_cache_type, keys):
+    def save_translation_cache_keys(_cache_type, keys, *, expected_versions):
         fail_once("save")
-        return SimpleNamespace(saving_enabled=True, saved_keys=tuple(keys))
+        assert set(expected_versions) == set(keys)
+        return SimpleNamespace(
+            saving_enabled=True, saved_keys=tuple(keys), superseded_keys=()
+        )
 
     monkeypatch.setattr(
         moddb_retranslate_service,
@@ -1468,7 +1521,7 @@ def test_repair_progress_does_not_apply_patchouli_sample_to_lang(monkeypatch):
     )
 
     tracker.update("patchouli", candidate_count=79, representative_count=79, elapsed=20)
-    live = tracker.live(items[79:], processed=79, now_mono=20.0, now_wall=120.0)
+    live = tracker.live(processed=79, now_mono=20.0, now_wall=120.0)
 
     assert live["batch_done"] == 1
     assert live["batch_est"] == 2
@@ -1478,18 +1531,125 @@ def test_repair_progress_does_not_apply_patchouli_sample_to_lang(monkeypatch):
     assert "Lang 尚無耗時樣本" in live["eta_note"]
 
     tracker.update("lang", candidate_count=100, representative_count=100, elapsed=10)
-    sampled = tracker.live(items[179:], processed=179, now_mono=30.0, now_wall=130.0)
+    sampled = tracker.live(processed=179, now_mono=30.0, now_wall=130.0)
     assert sampled["eta_sec"] == pytest.approx(12.1)
     assert sampled["eta_note"] == ""
     assert sampled["profile_progress"]["lang"]["planned_remaining_batches"] == 1
     assert sampled["profile_progress"]["lang"]["ai_submitted_items"] == 100
 
     tracker.update("lang", candidate_count=121, representative_count=121, elapsed=10)
-    done = tracker.live([], processed=300, now_mono=40.0, now_wall=140.0)
+    done = tracker.live(processed=300, now_mono=40.0, now_wall=140.0)
     assert done["batch_done"] == 3
     assert done["batch_est"] == 3
     assert done["processed"] == done["total"] == 300
     assert done["eta_sec"] == 0
+
+
+def test_batch_planner_handles_100k_candidates_with_bounded_windows(monkeypatch):
+    preferred = 64
+    monkeypatch.setattr(
+        moddb_retranslate_service,
+        "_get_default_batch_size",
+        lambda _cache_type, _sizes: preferred,
+    )
+    windows = []
+    monkeypatch.setattr(
+        moddb_retranslate_service,
+        "select_batch_size",
+        lambda items, _profile, cap, _cfg: (
+            windows.append(len(items)) or min(len(items), cap)
+        ),
+    )
+    items = [{"cache_type": "lang"} for _ in range(100_000)]
+
+    planned = moddb_retranslate_service._count_planned_batches(
+        items, {"token_budget_enabled": False}
+    )
+
+    assert planned == (len(items) + preferred - 1) // preferred
+    assert len(windows) == planned
+    assert max(windows) == preferred
+
+
+def test_batch_planner_checks_deadline_while_scanning_profile(monkeypatch):
+    times = iter((0.0, 0.0, 61.0))
+    monkeypatch.setattr(
+        moddb_retranslate_service, "monotonic", lambda: next(times, 61.0)
+    )
+    monkeypatch.setattr(
+        moddb_retranslate_service,
+        "_get_default_batch_size",
+        lambda _cache_type, _sizes: 32,
+    )
+    items = [{"cache_type": "lang"} for _ in range(1000)]
+
+    with pytest.raises(TimeoutError, match="時間預算"):
+        moddb_retranslate_service._count_planned_batches(
+            items, {"token_budget_enabled": False}, deadline=60.0
+        )
+
+
+def test_repair_progress_replans_only_when_profile_budget_changes(monkeypatch):
+    selected_size = 64
+    signature = 0
+    monkeypatch.setattr(
+        moddb_retranslate_service,
+        "_get_default_batch_size",
+        lambda _cache_type, _sizes: 64,
+    )
+    monkeypatch.setattr(
+        moddb_retranslate_service,
+        "_batch_plan_signature",
+        lambda _cache_type, _cfg: (64, signature),
+    )
+    monkeypatch.setattr(
+        moddb_retranslate_service,
+        "select_batch_size",
+        lambda items, _profile, _cap, _cfg: min(len(items), selected_size),
+    )
+    items = [{"cache_type": "lang"} for _ in range(130)]
+    fanout = {id(item): (item,) for item in items}
+    tracker = moddb_retranslate_service._RepairRunProgress(
+        items, fanout, total_candidates=130, lm_cfg={}
+    )
+
+    assert tracker.live()["batch_est"] == 3
+    tracker.update("lang", candidate_count=64, representative_count=64, elapsed=1)
+    signature = 1
+    selected_size = 32
+
+    live = tracker.live(processed=64)
+
+    assert live["profile_progress"]["lang"]["planned_remaining_batches"] == 3
+    assert live["batch_est"] == 4
+
+
+def test_batch_planner_checks_cancellation_while_scanning_profile(monkeypatch):
+    from translation_tool.utils.cancellation import TaskCancelled
+
+    monkeypatch.setattr(
+        moddb_retranslate_service,
+        "_get_default_batch_size",
+        lambda _cache_type, _sizes: 32,
+    )
+    checks = 0
+
+    def cancel_during_planning():
+        nonlocal checks
+        checks += 1
+        if checks == 3:
+            raise TaskCancelled()
+
+    items = [{"cache_type": "lang"} for _ in range(1000)]
+
+    with pytest.raises(TaskCancelled):
+        moddb_retranslate_service._count_planned_batches(
+            items,
+            {"token_budget_enabled": False},
+            check=cancel_during_planning,
+        )
+
+    assert checks == 3
 
 
 def test_repair_progress_empty_run_has_no_batches_or_eta(monkeypatch):
@@ -1497,7 +1657,7 @@ def test_repair_progress_empty_run_has_no_batches_or_eta(monkeypatch):
         [], {}, total_candidates=0, lm_cfg={}
     )
 
-    live = tracker.live([], processed=0)
+    live = tracker.live(processed=0)
 
     assert live["batch_done"] == live["batch_est"] == 0
     assert live["processed"] == live["total"] == 0

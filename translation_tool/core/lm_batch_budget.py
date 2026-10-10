@@ -219,6 +219,24 @@ class BatchBudgetTracker:
             scale = max(self._scale, cfg.min_scale)
         return cfg.max_output_token_budget * scale, float(cfg.max_input_token_budget)
 
+    def planning_signature(self, cfg: BudgetConfig) -> tuple[bool, float, float, float]:
+        """Return the immutable budget inputs used to decide batch boundaries."""
+        if not cfg.enabled:
+            return False, 0.0, 0.0, 0.0
+        with self._lock:
+            scale = max(self._scale, cfg.min_scale)
+            output_factor = (
+                self._output_factor
+                if self._output_factor is not None
+                else cfg.output_token_factor
+            )
+            return (
+                cfg.enabled,
+                cfg.max_output_token_budget * scale,
+                float(cfg.max_input_token_budget),
+                output_factor,
+            )
+
     # -- 切批 --------------------------------------------------------------
 
     def estimate(

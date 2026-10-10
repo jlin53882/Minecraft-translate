@@ -30,6 +30,8 @@ from app.services_impl.pipelines._pipeline_logging import (
 from app.tasks.task_session import add_log_unmirrored
 from app.views.moddb.formatting import token_issues
 from translation_tool.core.lm_batch_budget import (
+    BudgetConfig,
+    get_tracker,
     profile_for_cache_type,
     select_batch_size,
 )
@@ -110,6 +112,7 @@ class SameSourceAIRepairReport:
     cache_save_failed: int = 0
     cache_keys_changed: int | None = None
     cache_keys_saved: int | None = None
+    cache_keys_superseded: int = 0
     cache_stats_note: str = ""
     ai_representatives: int = 0
     ai_submitted_items: int = 0
@@ -120,6 +123,7 @@ class SameSourceAIRepairReport:
     candidate_profile_counts: dict[str, int] = field(default_factory=dict)
     representative_profile_counts: dict[str, int] = field(default_factory=dict)
     processed_candidates: int = 0
+    attempted_candidates: int = 0
     not_submitted_candidates: int = 0
     unprocessed_candidates: int = 0
     log_details_omitted: int = 0
@@ -130,6 +134,9 @@ class SameSourceAIRepairReport:
     _cache_changed_keys: set[tuple[str, str]] = field(default_factory=set, repr=False)
     _cache_saved_keys: set[tuple[str, str]] = field(default_factory=set, repr=False)
     _cache_save_failed_keys: set[tuple[str, str]] = field(
+        default_factory=set, repr=False
+    )
+    _cache_superseded_keys: set[tuple[str, str]] = field(
         default_factory=set, repr=False
     )
     _cache_saving_disabled: bool = field(default=False, repr=False)
@@ -180,14 +187,34 @@ class _RepairRunProgress:
         self.profile_items_submitted: dict[str, int] = {}
         self.profile_sample_items: dict[str, int] = {}
         self.profile_sample_seconds: dict[str, float] = {}
-        for item in items:
+        self._items = items
+        self._profile_ranges: dict[str, list[tuple[int, int]]] = {}
+        for index, item in enumerate(items):
             cache_type = _retranslation_cache_type(item)
+            ranges = self._profile_ranges.setdefault(cache_type, [])
+            if ranges and ranges[-1][1] == index:
+                ranges[-1] = (ranges[-1][0], index + 1)
+            else:
+                ranges.append((index, index + 1))
             self.profile_representative_totals[cache_type] = (
                 self.profile_representative_totals.get(cache_type, 0) + 1
             )
             self.profile_candidate_totals[cache_type] = (
                 self.profile_candidate_totals.get(cache_type, 0)
                 + len(fanout.get(id(item), (item,)))
+            )
+        self._planned_batches_by_profile: dict[str, int] = {}
+        self._planned_first_sizes: dict[str, int] = {}
+        self._planned_signatures: dict[str, tuple[Any, ...]] = {}
+        self._last_batch_sizes: dict[str, int] = {}
+        for cache_type, ranges in self._profile_ranges.items():
+            batches, first_size = _plan_profile_ranges(
+                self._items, cache_type, ranges, self.lm_cfg
+            )
+            self._planned_batches_by_profile[cache_type] = batches
+            self._planned_first_sizes[cache_type] = first_size
+            self._planned_signatures[cache_type] = _batch_plan_signature(
+                cache_type, self.lm_cfg
             )
 
     def update(
@@ -214,36 +241,21 @@ class _RepairRunProgress:
         self.profile_sample_seconds[cache_type] = self.profile_sample_seconds.get(
             cache_type, 0.0
         ) + max(0.0, elapsed)
+        self._last_batch_sizes[cache_type] = representative_count
 
     def live(
         self,
-        remaining_items: Sequence[dict[str, Any]],
         *,
         processed: int = 0,
         now_mono: float | None = None,
         now_wall: float | None = None,
+        check=None,
     ) -> dict[str, Any]:
         now_mono = monotonic() if now_mono is None else now_mono
         now_wall = time.time() if now_wall is None else now_wall
-        remaining: dict[str, int] = {}
-        remaining_candidates: dict[str, int] = {}
-        for item in remaining_items:
-            cache_type = _retranslation_cache_type(item)
-            remaining[cache_type] = remaining.get(cache_type, 0) + 1
-            remaining_candidates[cache_type] = remaining_candidates.get(
-                cache_type, 0
-            ) + len(self._fanout.get(id(item), (item,)))
-        remaining_batches_by_profile = {
-            cache_type: _count_planned_batches(
-                [
-                    item
-                    for item in remaining_items
-                    if _retranslation_cache_type(item) == cache_type
-                ],
-                self.lm_cfg,
-            )
-            for cache_type in remaining
-        }
+        remaining, remaining_candidates, remaining_batches_by_profile = (
+            self._remaining_profile_state(check)
+        )
         remaining_batches = sum(remaining_batches_by_profile.values())
         eta = 0.0
         unknown_profiles = []
@@ -294,9 +306,33 @@ class _RepairRunProgress:
             "profile_progress": profile_progress,
         }
 
+    def _remaining_profile_state(self, check):
+        remaining: dict[str, int] = {}
+        remaining_candidates: dict[str, int] = {}
+        remaining_batches_by_profile = {}
+        for (
+            cache_type,
+            total_representatives,
+        ) in self.profile_representative_totals.items():
+            if check is not None:
+                check()
+            submitted = self.profile_items_submitted.get(cache_type, 0)
+            remaining_count = max(0, total_representatives - submitted)
+            if remaining_count:
+                remaining[cache_type] = remaining_count
+                remaining_candidates[cache_type] = max(
+                    0,
+                    self.profile_candidate_totals[cache_type]
+                    - self.profile_candidate_processed.get(cache_type, 0),
+                )
+            remaining_batches_by_profile[cache_type] = self._remaining_batch_plan(
+                cache_type, submitted, remaining_count, check
+            )
+        return remaining, remaining_candidates, remaining_batches_by_profile
+
     def start_line(self, items: Sequence[dict[str, Any]]) -> str:
         counts = _cache_type_counts(items)
-        planned = _count_planned_batches(items, self.lm_cfg)
+        planned = sum(self._planned_batches_by_profile.values())
         return (
             f"📦 AI 代表 {len(items):,} 筆；依目前 profile／token 預算預估 "
             f"{planned:,} 個外層批次（{_format_profile_breakdown(counts)}；"
@@ -308,6 +344,48 @@ class _RepairRunProgress:
 
     def elapsed(self) -> float:
         return max(0.0, monotonic() - self.started_mono)
+
+    def _remaining_batch_plan(
+        self, cache_type: str, submitted: int, remaining_count: int, check
+    ) -> int:
+        if not remaining_count:
+            self._planned_batches_by_profile[cache_type] = 0
+            self._planned_first_sizes[cache_type] = 0
+            self._last_batch_sizes.pop(cache_type, None)
+            return 0
+
+        signature = _batch_plan_signature(cache_type, self.lm_cfg)
+        last_batch_size = self._last_batch_sizes.pop(cache_type, None)
+        signature_changed = signature != self._planned_signatures[cache_type]
+        batch_size_changed = (
+            last_batch_size is not None
+            and last_batch_size != self._planned_first_sizes[cache_type]
+        )
+        if signature_changed or batch_size_changed:
+            ranges = _remaining_profile_ranges(
+                self._profile_ranges[cache_type], submitted
+            )
+            batches, first_size = _plan_profile_ranges(
+                self._items, cache_type, ranges, self.lm_cfg, check=check
+            )
+            self._planned_batches_by_profile[cache_type] = batches
+            self._planned_first_sizes[cache_type] = first_size
+            self._planned_signatures[cache_type] = signature
+        elif last_batch_size is not None:
+            self._planned_batches_by_profile[cache_type] = max(
+                0, self._planned_batches_by_profile[cache_type] - 1
+            )
+            ranges = _remaining_profile_ranges(
+                self._profile_ranges[cache_type], submitted
+            )
+            self._planned_first_sizes[cache_type] = _first_profile_batch_size(
+                self._items,
+                cache_type,
+                ranges,
+                self.lm_cfg,
+                check=check,
+            )
+        return self._planned_batches_by_profile[cache_type]
 
 
 def _raise_preview_timeout(deadline: float | None) -> None:
@@ -359,7 +437,9 @@ def preview_same_source_ai_retranslation(
         representatives, deadline=deadline
     )
     lm_cfg = _load_lm_config()
-    estimated_batches = _count_planned_batches(representatives, lm_cfg)
+    estimated_batches = _count_planned_batches(
+        representatives, lm_cfg, deadline=deadline
+    )
     _raise_preview_timeout(deadline)
     preview_entries = []
     for entry in entries:
@@ -544,15 +624,16 @@ def _format_profile_breakdown(counts: dict[str, int]) -> str:
 def _same_batch_prefix(items: list[dict[str, Any]], lm_cfg: dict[str, Any]):
     """Choose a homogeneous, token-budgeted prefix without touching the cache."""
     cache_type = _retranslation_cache_type(items[0])
-    homogeneous = 1
-    while (
-        homogeneous < len(items)
-        and _retranslation_cache_type(items[homogeneous]) == cache_type
-    ):
-        homogeneous += 1
     preferred = _get_default_batch_size(cache_type, None)
     if preferred <= 0:
         preferred = 50
+    profile_limit = min(len(items), preferred)
+    homogeneous = 1
+    while (
+        homogeneous < profile_limit
+        and _retranslation_cache_type(items[homogeneous]) == cache_type
+    ):
+        homogeneous += 1
     fit_count = select_batch_size(
         items[:homogeneous],
         profile_for_cache_type(cache_type),
@@ -569,16 +650,136 @@ def _load_lm_config() -> dict[str, Any]:
 
 
 def _count_planned_batches(
-    items: Sequence[dict[str, Any]], lm_cfg: dict[str, Any]
+    items: Sequence[dict[str, Any]],
+    lm_cfg: dict[str, Any],
+    *,
+    deadline: float | None = None,
+    check=None,
 ) -> int:
-    """Re-run the current outer batch selector over a planning snapshot."""
-    remaining = list(items)
+    """Count bounded windows without repeatedly copying the unplanned suffix."""
+    return sum(
+        _count_planned_batches_by_profile(
+            items, lm_cfg, deadline=deadline, check=check
+        ).values()
+    )
+
+
+def _count_planned_batches_by_profile(
+    items: Sequence[dict[str, Any]],
+    lm_cfg: dict[str, Any],
+    *,
+    deadline: float | None = None,
+    check=None,
+) -> dict[str, int]:
+    """Plan contiguous profile ranges with bounded slices and repeated checks."""
+    counts: dict[str, int] = {}
+    offset = 0
+    total = len(items)
+    while offset < total:
+        _check_batch_planning(deadline, check)
+        cache_type = _retranslation_cache_type(items[offset])
+        profile_end = offset + 1
+        while profile_end < total:
+            if profile_end % 128 == 0:
+                _check_batch_planning(deadline, check)
+            if _retranslation_cache_type(items[profile_end]) != cache_type:
+                break
+            profile_end += 1
+        profile_batches, _first_size = _plan_profile_range(
+            items,
+            cache_type,
+            offset,
+            profile_end,
+            lm_cfg,
+            deadline=deadline,
+            check=check,
+        )
+        counts[cache_type] = counts.get(cache_type, 0) + profile_batches
+        offset = profile_end
+    _check_batch_planning(deadline, check)
+    return counts
+
+
+def _plan_profile_range(
+    items, cache_type, start, end, lm_cfg, *, deadline=None, check=None
+) -> tuple[int, int]:
     batches = 0
-    while remaining:
-        batch, _cache_type = _same_batch_prefix(remaining, lm_cfg)
+    first_size = 0
+    offset = start
+    while offset < end:
+        _check_batch_planning(deadline, check)
+        size = _profile_batch_size(
+            items, cache_type, offset, end, lm_cfg, deadline=deadline, check=check
+        )
+        if not first_size:
+            first_size = size
+        offset += size
         batches += 1
-        remaining = remaining[len(batch) :]
-    return batches
+    return batches, first_size
+
+
+def _profile_batch_size(
+    items, cache_type, offset, end, lm_cfg, *, deadline=None, check=None
+) -> int:
+    _check_batch_planning(deadline, check)
+    preferred = _get_default_batch_size(cache_type, None)
+    if preferred <= 0:
+        preferred = 50
+    window_end = min(end, offset + preferred)
+    window = items[offset:window_end]
+    fit_count = select_batch_size(
+        window, profile_for_cache_type(cache_type), preferred, lm_cfg
+    )
+    return max(1, min(fit_count, len(window)))
+
+
+def _first_profile_batch_size(items, cache_type, ranges, lm_cfg, *, check=None):
+    if not ranges:
+        return 0
+    start, end = ranges[0]
+    return _profile_batch_size(items, cache_type, start, end, lm_cfg, check=check)
+
+
+def _plan_profile_ranges(items, cache_type, ranges, lm_cfg, *, check=None):
+    batches = 0
+    first_size = 0
+    for start, end in ranges:
+        range_batches, range_first_size = _plan_profile_range(
+            items, cache_type, start, end, lm_cfg, check=check
+        )
+        batches += range_batches
+        if not first_size:
+            first_size = range_first_size
+    return batches, first_size
+
+
+def _remaining_profile_ranges(ranges, submitted):
+    remaining_ranges = []
+    skipped = submitted
+    for start, end in ranges:
+        length = end - start
+        if skipped >= length:
+            skipped -= length
+            continue
+        remaining_ranges.append((start + skipped, end))
+        skipped = 0
+    return remaining_ranges
+
+
+def _batch_plan_signature(cache_type, lm_cfg):
+    preferred = _get_default_batch_size(cache_type, None)
+    if preferred <= 0:
+        preferred = 50
+    profile = profile_for_cache_type(cache_type)
+    return preferred, get_tracker(profile).planning_signature(
+        BudgetConfig.from_config(lm_cfg)
+    )
+
+
+def _check_batch_planning(deadline, check) -> None:
+    _raise_preview_timeout(deadline)
+    if check is not None:
+        check()
 
 
 def _valid_translation(result: Any, original: dict[str, Any]) -> bool:
@@ -676,7 +877,7 @@ def _finalize_batch_results(
     results: list[dict[str, Any]],
     report: SameSourceAIRepairReport,
     fanout: dict[int, tuple[dict[str, Any], ...]],
-    cache_keys_to_save: dict[str, set[str]],
+    cache_keys_to_save: dict[str, dict[str, int | None]],
     cancelled,
 ) -> tuple[int, bool]:
     """Validate one representative result, then independently CAS each source row."""
@@ -851,7 +1052,7 @@ def _record_repair_cache(db, session, report, target, text, cache_keys_to_save):
     if receipt.changed:
         # Preview order is stable. For shared keys, the last successful CAS owns dst.
         report._cache_changed_keys.add((cache_type, key))
-        cache_keys_to_save.setdefault(cache_type, set()).add(key)
+        cache_keys_to_save.setdefault(cache_type, {})[key] = receipt.generation
 
 
 def _replace_candidate_translation(db, original, text, report):
@@ -894,6 +1095,7 @@ def _finish_snapshot(db, options, session, report, tracker) -> None:
     _log(
         session,
         f"完成：候選 {report.candidates}；AI 代表計劃 {report.ai_representatives}，"
+        f"送出候選 {report.attempted_candidates}，已完成候選 {report.processed_candidates}；"
         f"交給 translate_batch_smart {report.ai_submitted_items} 個 item "
         f"（不是 API/HTTP 次數），已驗證 {report.ai_validated_items}，"
         f"安全共用 {report.dedup_reused_candidates}；更新 {report.updated}，"
@@ -931,6 +1133,11 @@ def _set_cache_report_stats(options, report) -> None:
         report.cache_stats_note = "快取落盤設定停用，變更保留在記憶體 pending"
     else:
         report.cache_keys_saved = len(report._cache_saved_keys)
+        if report._cache_superseded_keys:
+            report.cache_stats_note = (
+                f"{len(report._cache_superseded_keys):,} 個快取 key 已被較新寫入取代，"
+                "未歸屬於本任務落盤"
+            )
 
 
 def _remaining_candidate_count(db, options, mode: str) -> int:
@@ -969,23 +1176,25 @@ def _handle_batch_completion(
 def _flush_repair_cache(options, session, report, cache_keys_to_save) -> None:
     if not options.write_cache:
         return
-    for cache_type, keys in list(cache_keys_to_save.items()):
-        if not keys:
+    for cache_type, key_versions in list(cache_keys_to_save.items()):
+        if not key_versions:
             cache_keys_to_save.pop(cache_type, None)
             continue
         try:
-            receipt = save_translation_cache_keys(cache_type, keys)
+            receipt = save_translation_cache_keys(
+                cache_type, set(key_versions), expected_versions=key_versions
+            )
         except Exception as exc:  # noqa: BLE001 - DB results survive cache failure
             logger.warning("Mod DB repair cache flush failed: %r", exc)
             receipt = None
         if receipt is None:
-            failed = {(cache_type, key) for key in keys}
+            failed = {(cache_type, key) for key in key_versions}
             report._cache_save_failed_keys.update(failed)
-            report.cache_save_failed += len(keys)
-            report.cache_failed += len(keys)
+            report.cache_save_failed += len(key_versions)
+            report.cache_failed += len(key_versions)
             _log(
                 session,
-                f"⚠️ {cache_type} 有 {len(keys):,} 個本次變更 key 落盤狀態未知；"
+                f"⚠️ {cache_type} 有 {len(key_versions):,} 個本次變更 key 落盤狀態未知；"
                 "資料庫更新已保留",
                 "warning",
             )
@@ -993,14 +1202,21 @@ def _flush_repair_cache(options, session, report, cache_keys_to_save) -> None:
         if not receipt.saving_enabled:
             report._cache_saving_disabled = True
             continue
+        report._cache_superseded_keys.update(
+            (cache_type, key) for key in receipt.superseded_keys
+        )
+        report.cache_keys_superseded = len(report._cache_superseded_keys)
         if receipt.saved_keys is None:
-            failed = {(cache_type, key) for key in keys}
+            failed = {
+                (cache_type, key)
+                for key in set(key_versions) - set(receipt.superseded_keys)
+            }
             report._cache_save_failed_keys.update(failed)
-            report.cache_save_failed += len(keys)
-            report.cache_failed += len(keys)
+            report.cache_save_failed += len(failed)
+            report.cache_failed += len(failed)
             _log(
                 session,
-                f"⚠️ {cache_type} 有 {len(keys):,} 個本次變更 key 落盤失敗；"
+                f"⚠️ {cache_type} 有 {len(failed):,} 個本次變更 key 落盤失敗；"
                 "資料庫更新已保留，快取仍待重試",
                 "warning",
             )
@@ -1023,7 +1239,7 @@ def _translate_snapshot(
         entries, session, report, options
     )
     fanout = tracker._fanout
-    cache_keys_to_save: dict[str, set[str]] = {}
+    cache_keys_to_save: dict[str, dict[str, int | None]] = {}
     while items:
         _raise_if_repair_cancelled(items, fanout, report, cancelled)
         batch, cache_type = _same_batch_prefix(items, lm_cfg)
@@ -1073,22 +1289,20 @@ def _run_repair_batch(
     report,
     fanout,
     cancelled,
-    cache_keys_to_save,
+    cache_keys_to_save: dict[str, dict[str, int | None]],
 ):
     """Submit one homogeneous batch, finalize each CAS, then publish its progress."""
     report.batches += 1
     report.ai_submitted_items += len(batch)
+    report.attempted_candidates += sum(
+        len(fanout.get(id(item), (item,))) for item in batch
+    )
     batch_started = monotonic()
     tail = items[len(batch) :]
     try:
         translated, status = translate_batch_smart(batch, report.ai_representatives)
-    except TaskCancelled:
-        _set_not_submitted_candidates(report, tail, fanout)
-        raise
-    if cancelled() or is_cancelled():
-        _set_not_submitted_candidates(report, tail, fanout)
-        raise TaskCancelled()
-    try:
+        if cancelled() or is_cancelled():
+            raise TaskCancelled()
         result_count, finalize_stop = _finalize_batch_results(
             db,
             options,
@@ -1100,30 +1314,51 @@ def _run_repair_batch(
             cache_keys_to_save,
             cancelled,
         )
+        completion_stop = _handle_batch_completion(
+            options, session, report, batch, result_count, status, cache_keys_to_save
+        )
+        stop_after_batch = finalize_stop or completion_stop
+        if stop_after_batch:
+            _set_not_submitted_candidates(report, tail, fanout)
+        tracker.update(
+            cache_type,
+            candidate_count=sum(len(fanout[id(item)]) for item in batch),
+            representative_count=len(batch),
+            elapsed=monotonic() - batch_started,
+        )
+
+        def check_planning_cancelled():
+            if cancelled() or is_cancelled():
+                raise TaskCancelled()
+
+        live = tracker.live(
+            processed=report.processed_candidates, check=check_planning_cancelled
+        )
+        session.set_progress(report.processed_candidates / max(report.candidates, 1))
+        session.set_summary({**report.as_dict(), "live": live})
+        _log(session, f"⏱ {tracker.line(live)}")
     except TaskCancelled:
         _set_not_submitted_candidates(report, tail, fanout)
-        _flush_repair_cache(options, session, report, cache_keys_to_save)
         report.unprocessed_candidates = max(
             0, report.candidates - report.processed_candidates
         )
+        _flush_after_interrupted_batch(options, session, report, cache_keys_to_save)
         raise
-    completion_stop = _handle_batch_completion(
-        options, session, report, batch, result_count, status, cache_keys_to_save
-    )
-    stop_after_batch = finalize_stop or completion_stop
-    if stop_after_batch:
+    except Exception:
         _set_not_submitted_candidates(report, tail, fanout)
-    tracker.update(
-        cache_type,
-        candidate_count=sum(len(fanout[id(item)]) for item in batch),
-        representative_count=len(batch),
-        elapsed=monotonic() - batch_started,
-    )
-    live = tracker.live(tail, processed=report.processed_candidates)
-    session.set_progress(report.processed_candidates / max(report.candidates, 1))
-    session.set_summary({**report.as_dict(), "live": live})
-    _log(session, f"⏱ {tracker.line(live)}")
+        report.unprocessed_candidates = max(
+            0, report.candidates - report.processed_candidates
+        )
+        _flush_after_interrupted_batch(options, session, report, cache_keys_to_save)
+        raise
     return tail, stop_after_batch
+
+
+def _flush_after_interrupted_batch(options, session, report, cache_keys_to_save):
+    try:
+        _flush_repair_cache(options, session, report, cache_keys_to_save)
+    except Exception:
+        logger.exception("Mod DB repair cache flush failed while stopping a batch")
 
 
 def _initialize_snapshot_run(entries, session, report, options):
@@ -1173,7 +1408,7 @@ def _initialize_snapshot_run(entries, session, report, options):
     _log(session, tracker.start_line(items))
     if not options.write_cache:
         report.cache_stats_note = "本次未啟用快取寫入"
-    session.set_summary({**report.as_dict(), "live": tracker.live(items)})
+    session.set_summary({**report.as_dict(), "live": tracker.live()})
     return items, tracker, lm_cfg, sleep_seconds
 
 
@@ -1202,11 +1437,9 @@ def _report_repair_failure(options, session, report, operation_label, exc):
         extra={"ui_mirrored": True},
     )
     report.status = "FAILED"
-    remaining_failed = max(
-        0, report.candidates - report.processed_candidates - report.failed
+    report.not_submitted_candidates = max(
+        0, report.candidates - report.attempted_candidates
     )
-    report.failed += remaining_failed
-    report.processed_candidates += remaining_failed
     report.unprocessed_candidates = max(
         0, report.candidates - report.processed_candidates
     )
@@ -1214,6 +1447,14 @@ def _report_repair_failure(options, session, report, operation_label, exc):
     _set_cache_report_stats(options, report)
     session.set_error()
     add_log_unmirrored(session, f"[致命錯誤] {operation_label}失敗：{exc}", "error")
+    _log(
+        session,
+        f"失敗統計：候選 {report.candidates}，已送出 {report.attempted_candidates}，"
+        f"已完成 {report.processed_candidates}，其中失敗 {report.failed}，"
+        f"未送出 {report.not_submitted_candidates}，"
+        f"未處理 {report.unprocessed_candidates}",
+        "warning",
+    )
     _log_omitted_candidate_details(session, report)
     session.set_summary(report.as_dict())
 

@@ -57,6 +57,8 @@ def test_add_to_cache_with_receipt_distinguishes_mutation_from_acceptance(fresh_
 
     assert first.accepted and first.changed
     assert unchanged.accepted and not unchanged.changed
+    assert first.generation is not None
+    assert unchanged.generation == first.generation
     assert fresh_state.session_new_entries["lang"] == {
         "same-key": {"src": "source", "dst": "first", "mod": "one"}
     }
@@ -93,6 +95,60 @@ def test_save_translation_cache_keys_only_flushes_selected_pending_keys(
         "other-run": {"src": "b", "dst": "B"}
     }
     assert fresh_state.is_dirty[cache_type] is True
+
+
+def test_selected_cache_flush_does_not_save_a_newer_tasks_same_key_value(
+    mock_save_path, monkeypatch, fresh_state
+):
+    cache_type, _type_dir = mock_save_path
+    fresh_state.initialized = True
+    monkeypatch.setattr(
+        cache_manager,
+        "load_config",
+        lambda: {"translator": {"enable_cache_saving": True}},
+    )
+    writes = []
+    monkeypatch.setattr(
+        cache_manager,
+        "_save_entries_to_active_shards",
+        lambda kind, entries, **_kwargs: writes.append((kind, dict(entries))),
+    )
+
+    task_a = cache_manager.add_to_cache_with_receipt(
+        cache_type, "same-key", "source", "translation A"
+    )
+    task_b = cache_manager.add_to_cache_with_receipt(
+        cache_type, "same-key", "source", "translation B"
+    )
+    assert task_a.generation is not None
+    assert task_b.generation is not None
+    assert task_a.generation != task_b.generation
+
+    stale_flush = cache_manager.save_translation_cache_keys(
+        cache_type,
+        {"same-key"},
+        expected_versions={"same-key": task_a.generation},
+    )
+
+    assert stale_flush.saved_keys == ()
+    assert stale_flush.superseded_keys == ("same-key",)
+    assert writes == []
+    assert fresh_state.session_new_entries[cache_type]["same-key"]["dst"] == (
+        "translation B"
+    )
+
+    current_flush = cache_manager.save_translation_cache_keys(
+        cache_type,
+        {"same-key"},
+        expected_versions={"same-key": task_b.generation},
+    )
+
+    assert current_flush.saved_keys == ("same-key",)
+    assert current_flush.superseded_keys == ()
+    assert writes == [
+        (cache_type, {"same-key": {"src": "source", "dst": "translation B"}})
+    ]
+    assert fresh_state.session_new_entries[cache_type] == {}
 
 
 def test_save_translation_cache_keys_reports_disabled_and_failure_receipts(
