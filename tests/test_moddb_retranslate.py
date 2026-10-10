@@ -10,6 +10,7 @@ from types import SimpleNamespace
 import pytest
 
 from app.services_impl import (
+    moddb_repair_review_store,
     moddb_retranslate_service,
     moddb_service,
     moddb_translate_service,
@@ -245,6 +246,175 @@ def test_special_character_repair_covers_all_sources_and_can_be_undone(
     assert restored[SRC_MANUAL].review_status == "unreviewed"
     assert repair_cache == []
     check.close()
+
+
+def test_quality_repair_skips_input_newline_mismatch_and_allows_output_difference(
+    db_path, monkeypatch, repair_cache
+):
+    db = TranslationDB(db_path)
+    skipped = _ai_entry(db, key="a.skipped", en="Use %s\nnext")
+    eligible = _ai_entry(db, key="b.eligible", en="Use %s\nnext")
+    db._conn.execute(
+        "UPDATE translation SET zh_tw='Use' WHERE entry_id=? AND source=?",
+        (skipped.id, SRC_AI),
+    )
+    db._conn.execute(
+        "UPDATE translation SET zh_tw='Use\nnext' WHERE entry_id=? AND source=?",
+        (eligible.id, SRC_AI),
+    )
+    db._conn.commit()
+
+    preview = moddb_retranslate_service.preview_same_source_ai_retranslation(
+        db, _options(limit=1), mode="quality_mismatch"
+    )
+    assert preview.total_candidates == 1
+    assert preview.skipped_input_newline_mismatch == 1
+    assert preview.skipped_newline_with_other_hard_issues == 1
+    assert [row.key for row in preview.entries] == ["b.eligible"]
+    db.close()
+
+    monkeypatch.setattr(
+        moddb_retranslate_service,
+        "translate_batch_smart",
+        lambda batch, _total: ([{**batch[0], "text": "Use %s repaired"}], "AUTO"),
+    )
+    result = _run(
+        db_path,
+        preview.entries,
+        options=_options(write_cache=False),
+        mode="quality_mismatch",
+    )
+    check = TranslationDB(db_path)
+    stored = {
+        row[0]: row[1]
+        for row in check._q(
+            "SELECT e.key,t.zh_tw FROM entry e JOIN translation t "
+            "ON t.entry_id=e.id WHERE t.source=?",
+            (SRC_AI,),
+        )
+    }
+    assert stored["a.skipped"] == "Use"
+    assert stored["b.eligible"] == "Use %s repaired"
+    # The general quality view still warns about this output's real newline delta.
+    eligible_detail = check.entry_detail(eligible.id)
+    assert eligible_detail.entry.quality_state == "mismatch"
+    assert result["summary"]["updated"] == 1
+    assert result["summary"]["remaining"] == 0
+    assert check.entry_detail(eligible.id).history[0].action == "quality_repair"
+    check.close()
+
+
+def test_quality_repair_representative_limit_keeps_all_mapped_sources(db_path):
+    db = TranslationDB(db_path)
+    entry = _ai_entry(db, en="Use %s", key="mapped")
+    db.save_manual(entry.id, "Use", propagate=False)
+    _ingest(db, "1.21.1", "foo", "mapped", SRC_JAR_TW, "Use", en="Use %s")
+    db._conn.execute(
+        "UPDATE translation SET zh_tw='Use' WHERE entry_id=? AND source=?",
+        (entry.id, SRC_AI),
+    )
+    db._conn.commit()
+    preview = moddb_retranslate_service.preview_same_source_ai_retranslation(
+        db, _options(limit=1), mode="quality_mismatch"
+    )
+    assert preview.ai_representatives == 1
+    assert preview.selected_count == 3
+    assert {row.source_id for row in preview.entries} == {
+        SRC_AI,
+        SRC_MANUAL,
+        SRC_JAR_TW,
+    }
+    db.close()
+
+
+def test_manual_review_confirmation_uses_source_revision_history_and_undo(db_path):
+    db = TranslationDB(db_path)
+    entry = _ai_entry(db, key="review", en="Use %s")
+    db._conn.execute(
+        "UPDATE translation SET zh_tw='Use' WHERE entry_id=? AND source=?",
+        (entry.id, SRC_AI),
+    )
+    db._conn.commit()
+    item = {
+        "entry_id": entry.id,
+        "version": entry.mc_version,
+        "mod_id": entry.mod_id,
+        "kind": entry.kind,
+        "source_id": SRC_AI,
+        "key": entry.key,
+        "en_us": entry.en_us,
+        "old_translation": "Use",
+        "expected_revision": _translation_revision(db, entry.id, SRC_AI),
+        "database_identity": str(db_path.resolve()),
+        "database_file_id": db_path.stat().st_ino,
+        "database_priority": db.priority,
+    }
+    db.close()
+
+    assert (
+        moddb_retranslate_service.apply_repair_review_item(db_path, item, "Use")
+        == "stale"
+    )
+    assert (
+        moddb_retranslate_service.apply_repair_review_item(db_path, item, "使用 %s")
+        == "applied"
+    )
+    check = TranslationDB(db_path)
+    detail = check.entry_detail(entry.id)
+    history = next(
+        row for row in detail.history if row.action == "quality_repair_review"
+    )
+    assert history.actor == "AI 機翻修復・人工確認"
+    assert history.source_id == SRC_AI
+    assert (
+        next(row for row in detail.translations if row.source == SRC_AI).zh_tw
+        == "使用 %s"
+    )
+    assert check.revert(history.id) == 1
+    assert (
+        next(
+            row
+            for row in check.entry_detail(entry.id).translations
+            if row.source == SRC_AI
+        ).zh_tw
+        == "Use"
+    )
+    check.close()
+
+
+def test_rejected_repair_result_is_written_to_durable_review_store(
+    db_path, monkeypatch, repair_cache
+):
+    db = TranslationDB(db_path)
+    entry = _ai_entry(db, key="rejected", en="Use %s")
+    db._conn.execute(
+        "UPDATE translation SET zh_tw='Use' WHERE entry_id=? AND source=?",
+        (entry.id, SRC_AI),
+    )
+    db._conn.commit()
+    preview = moddb_retranslate_service.preview_same_source_ai_retranslation(
+        db, _options(), mode="quality_mismatch"
+    )
+    db.close()
+    monkeypatch.setattr(
+        moddb_retranslate_service,
+        "translate_batch_smart",
+        lambda batch, _total: ([{**batch[0], "text": "Use"}], "AUTO"),
+    )
+    summary = _run(
+        db_path,
+        preview.entries,
+        options=_options(write_cache=False),
+        mode="quality_mismatch",
+    )["summary"]
+
+    assert summary["flagged"] == summary["reviewable_results"] == 1
+    assert summary["flagged_entries"] == []
+    store_path = summary["review_store_path"]
+    item = moddb_repair_review_store.load_item(store_path, summary["review_run_id"], 1)
+    assert item["entry_id"] == entry.id
+    assert item["expected_revision"] is not None
+    assert item["database_file_id"] == db_path.stat().st_ino
 
 
 def test_quality_repair_demotes_reviewed_manual_and_revert_restores_it(

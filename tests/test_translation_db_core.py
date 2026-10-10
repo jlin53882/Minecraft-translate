@@ -31,7 +31,12 @@ from translation_tool.translation_db.models import (
     QualityFilter,
     TimeFilter,
 )
-from translation_tool.translation_db.quality import format_tokens, token_issues
+from translation_tool.translation_db.quality import (
+    format_tokens,
+    repair_input_issues,
+    repair_output_issues,
+    token_issues,
+)
 from translation_tool.translation_db.resolver import version_number
 from translation_tool.translation_db.scanner import (
     ScanOptions,
@@ -960,6 +965,23 @@ def test_quality_filter_evaluates_before_pagination_and_uses_core_tokens(db):
         )
     )
     assert unknown_count == 1 and unknown[0].key == "item.quality.unknown"
+
+
+def test_repair_newline_policy_is_scoped_and_keeps_literal_backslash_n_strict():
+    assert repair_input_issues("a\nb", "甲\n乙") == (False, (), False)
+    assert repair_input_issues("a %s\nb", "甲") == (False, (), True)
+    assert repair_input_issues("Use %s\nnext", "用\n譯文") == (
+        True,
+        ("少了 1 個「%s」",),
+        False,
+    )
+    assert repair_input_issues("a\r\nb", "甲\nb") == (False, (), False)
+    # The existing token canonicalizer treats lone CR as ordinary text, not an LF.
+    assert repair_output_issues("a\rb", "ab") == []
+    assert repair_output_issues("Use %s\nnext", "使用 %s next") == []
+    assert repair_output_issues("Use %s\\nnext", "使用 %s\nnext")
+    # General quality diagnostics intentionally retain exact newline counts.
+    assert "換行" in " ".join(token_issues("a\nb", "甲"))
 
 
 def test_quality_repair_history_does_not_count_as_manual_activity(db):

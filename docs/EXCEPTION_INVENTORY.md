@@ -4,11 +4,11 @@
 > 範圍：`app/`、`translation_tool/`、`main.py` 內所有帶 `noqa: BLE001／S110／S112` 的位置。
 > 命令列 QA 工具（`md_extract_qa.py`、`md_inject_qa.py`）的 `print` 為刻意保留，不在此表。
 
-共 **318** 項；其中 **112** 項尚未在程式碼內寫明原因（以「分類」說明處理方式）。
+共 **319** 項；其中 **112** 項尚未在程式碼內寫明原因（以「分類」說明處理方式）。
 
 | 分類 | 數量 | 意義 |
 |---|---|---|
-| 已記錄／回報 | 284 | 例外處理本身有 log、提示、回報錯誤事件或重新丟出；寬鬆捕捉是為了不中斷整批流程 |
+| 已記錄／回報 | 285 | 例外處理本身有 log、提示、回報錯誤事件或重新丟出；寬鬆捕捉是為了不中斷整批流程 |
 | UI／畫面保護 | 18 | UI 層的畫面更新、icon 快取等；失敗只影響顯示，不影響資料 |
 | 盡力而為（靜默） | 16 | 引擎層、只有 `pass`／`continue`／回傳常數；失敗不影響結果（例如進度回報、還原失敗時以原始例外為準） |
 
@@ -145,6 +145,7 @@
 | `app/views/moddb/lm_db_options.py:LmDbOptions._refresh_database_state` | BLE001 | 已記錄／回報 | LM still permits a manual new target |
 | `app/views/moddb/lm_db_options.py:LmDbOptions._refresh_database_state` | BLE001 | 已記錄／回報 | keep the page usable and expose warning |
 | `app/views/moddb/overview_panel.py:OverviewPanel._safe_update` | BLE001 | 已記錄／回報 | 頁面已卸載時不影響資料 |
+| `app/views/moddb/repair_reviewer.py:RepairReviewer._apply_async` | BLE001 | 已記錄／回報 | keep the draft and show the worker failure |
 | `app/views/moddb/retranslation_controller.py:_launch_preview_query` | BLE001 | 已記錄／回報 | restore controls when the operation cannot launch |
 | `app/views/moddb/retranslation_controller.py:_schedule_result` | BLE001 | 已記錄／回報 | a disposed page may reject UI work |
 | `app/views/moddb/retranslation_controller.py:apply_preview_result` | BLE001 | 已記錄／回報 | unavailable database means stale result |

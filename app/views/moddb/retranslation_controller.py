@@ -261,10 +261,14 @@ def _display_preview_result(panel, options, db_identity, result):
     if result.mode == "quality_mismatch":
         sources = "、".join(source_label(source, catalog) for source in result.sources)
         panel.repair_preview_text.value = (
-            f"符合條件：{format_count(result.total_candidates)} 筆來源譯文；{cap}，"
-            f"本次處理 {format_count(selected)} 筆。來源：{sources or '無'}。\n"
-            "每筆只更新原來源；AI 結果會再檢查特殊字元，不一致或失敗時保留舊譯文。\n"
-            f"{ai_plan}翻譯 profile：{breakdown}；{representative_breakdown}；"
+            f"全範圍修復合格來源列 {format_count(result.total_candidates)} 筆；"
+            f"輸入實體換行異常跳過 {format_count(result.skipped_input_newline_mismatch)} 筆"
+            f"（其中同時有其他硬格式問題 {format_count(result.skipped_newline_with_other_hard_issues)} 筆）。\n"
+            f"本次 AI 代表上限：{cap}；選中 {format_count(result.ai_representatives)} 個代表，"
+            f"對應 {format_count(selected)} 個來源列。來源：{sources or '無'}。\n"
+            "只更新預覽中的來源列；AI 輸出實體換行數可不同，其他格式 token 仍須一致。\n"
+            f"等價映射 {format_count(result.dedup_reused_candidates)} 筆；"
+            f"翻譯 profile：{breakdown}；{representative_breakdown}；"
             f"目前預估：約 {format_count(result.estimated_batches)} 個外層批次。"
         )
     else:
@@ -318,8 +322,9 @@ def confirm(panel, _e=None) -> None:
             ),
             content=ft.Text(
                 (
-                    f"即將修復 {selected.selected_count:,} 筆來源譯文，保留各筆原有來源標記。"
-                    "只更新特殊字元不一致的資料庫譯文；若 AI 結果仍不一致或翻譯失敗，舊譯文會保留。"
+                    f"即將修復 {selected.ai_representatives:,} 個 AI 代表，最多對應 "
+                    f"{selected.selected_count:,} 筆來源譯文；去重共用可能更新超過代表上限的來源列。"
+                    "保留各筆原有來源標記；若 AI 輸出缺少受保護格式 token 或翻譯失敗，舊譯文會保留。"
                     "人工來源修復後會改為未審核。匯入 ZIP 檔案不會被修改。"
                 )
                 if selected.mode == "quality_mismatch"

@@ -6,12 +6,14 @@ import logging
 import sqlite3
 import time
 import traceback
+import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from time import monotonic
 from typing import Any
 
+from app.services_impl import moddb_repair_review_store
 from app.services_impl.logging_service import UI_LOG_HANDLER
 from app.services_impl.moddb_service import (
     database_problem,
@@ -40,6 +42,7 @@ from translation_tool.core.lm_translator_shared_cache import get_default_cache_r
 from translation_tool.core.lm_translator_shared_loop import _get_default_batch_size
 from translation_tool.translation_db import TranslationDB
 from translation_tool.translation_db.models import SameSourceAIEntry
+from translation_tool.translation_db.quality import repair_output_issues
 from translation_tool.translation_db.run_progress import format_live
 from translation_tool.translation_db.schema import SRC_AI
 from translation_tool.utils.cache_manager import (
@@ -93,6 +96,8 @@ class SameSourceAIRepairPreview:
     ai_representatives: int = 0
     dedup_reused_candidates: int = 0
     representative_profile_counts: tuple[tuple[str, int], ...] = ()
+    skipped_input_newline_mismatch: int = 0
+    skipped_newline_with_other_hard_issues: int = 0
 
     @property
     def selected_count(self) -> int:
@@ -108,6 +113,11 @@ class SameSourceAIRepairReport:
     flagged: int = 0
     flagged_entries: list[dict[str, Any]] = field(default_factory=list)
     flagged_entries_omitted: int = 0
+    skipped_input_newline_mismatch: int = 0
+    skipped_newline_with_other_hard_issues: int = 0
+    review_run_id: str = ""
+    review_store_path: str = ""
+    reviewable_results: int = 0
     skipped_changed: int = 0
     failed: int = 0
     cache_failed: int = 0
@@ -398,6 +408,105 @@ def _raise_preview_timeout(deadline: float | None) -> None:
         )
 
 
+def _limited_repair_snapshot(db, options, deadline):
+    """Stream all eligible source rows while retaining only selected rep fanout."""
+    limit = options.limit if options.limit and options.limit > 0 else None
+    representatives: list[dict[str, Any]] = []
+    targets: dict[int, list[tuple[dict[str, Any], SameSourceAIEntry]]] = {}
+    by_key: dict[tuple[Any, ...], list[dict[str, Any]]] = {}
+    selected_entry_ids: set[int] = set()
+    eligible = skipped_newline = skipped_mixed = 0
+    for entry, newline_mismatch, mixed in db.iter_repairable_translation_entries(
+        options.version,
+        list(options.mod_ids),
+        check=lambda: _raise_preview_timeout(deadline),
+    ):
+        _raise_preview_timeout(deadline)
+        skipped_newline, skipped_mixed = _count_newline_skips(
+            newline_mismatch, mixed, skipped_newline, skipped_mixed
+        )
+        if entry is None:
+            continue
+        eligible += 1
+        if not _could_map_to_selected_representative(
+            entry, limit, representatives, selected_entry_ids
+        ):
+            # Entry ID is part of the complete equivalence key; a new entry
+            # cannot fan out into any selected representative.
+            continue
+        candidate = _build_retranslation_items([entry], deadline=deadline)[0]
+        _add_limited_repair_candidate(
+            candidate,
+            entry,
+            representatives,
+            targets,
+            by_key,
+            selected_entry_ids,
+            limit,
+        )
+    selected = [
+        pair
+        for representative in representatives
+        for pair in targets[id(representative)]
+    ]
+    selected_items = _group_retranslation_items_by_cache_type(
+        [item for item, _row in selected], deadline=deadline
+    )
+    rows_by_key = {
+        (int(item["_entry_id"]), int(item.get("_source_id", SRC_AI))): row
+        for item, row in selected
+    }
+    selected_entries = [
+        rows_by_key[(int(item["_entry_id"]), int(item.get("_source_id", SRC_AI)))]
+        for item in selected_items
+    ]
+    return eligible, skipped_newline, skipped_mixed, selected_entries
+
+
+def _count_newline_skips(newline_mismatch, mixed, skipped, skipped_mixed):
+    return skipped + int(newline_mismatch), skipped_mixed + int(
+        newline_mismatch and mixed
+    )
+
+
+def _could_map_to_selected_representative(entry, limit, representatives, selected_ids):
+    """Keep scanning counts, but build prompt items only for selected entry IDs."""
+    return (
+        limit is None or len(representatives) < limit or entry.entry_id in selected_ids
+    )
+
+
+def _add_limited_repair_candidate(
+    candidate, entry, representatives, targets, by_key, selected_entry_ids, limit
+):
+    """Add one row to a selected representative or admit a new representative."""
+    key = _retranslation_equivalence_key(candidate)
+    source_id = int(candidate.get("_source_id", SRC_AI))
+    representative = _find_unmapped_repair_representative(
+        key, source_id, by_key, targets
+    )
+    if representative is not None:
+        targets[id(representative)].append((candidate, entry))
+        return
+    if limit is not None and len(representatives) >= limit:
+        return
+    representatives.append(candidate)
+    targets[id(candidate)] = [(candidate, entry)]
+    by_key.setdefault(key, []).append(candidate)
+    selected_entry_ids.add(entry.entry_id)
+
+
+def _find_unmapped_repair_representative(key, source_id, by_key, targets):
+    """Find an equivalent selected group that does not already include this source."""
+    for candidate in by_key.get(key, ()):
+        if all(
+            int(target.get("_source_id", SRC_AI)) != source_id
+            for target, _row in targets[id(candidate)]
+        ):
+            return candidate
+    return None
+
+
 def preview_same_source_ai_retranslation(
     db,
     options: TranslateOptions,
@@ -408,11 +517,8 @@ def preview_same_source_ai_retranslation(
     """Return the exact candidate snapshot; optional monotonic deadline covers SQL and transforms."""
     _raise_preview_timeout(deadline)
     if mode == "quality_mismatch":
-        total, entries = db.mismatched_translation_entries(
-            options.version,
-            list(options.mod_ids),
-            limit=options.limit or None,
-            check=lambda: _raise_preview_timeout(deadline),
+        total, skipped_newline, skipped_mixed, entries = _limited_repair_snapshot(
+            db, options, deadline
         )
     elif mode == "same_source_ai":
         total = db.count_same_as_source_ai(options.version, list(options.mod_ids))
@@ -426,16 +532,13 @@ def preview_same_source_ai_retranslation(
         raise ValueError(f"未知既有譯文修復條件：{mode}")
     _raise_preview_timeout(deadline)
     items = _build_retranslation_items(entries, deadline=deadline)
-    entry_cache_types = []
-    for item in items:
-        _raise_preview_timeout(deadline)
-        entry_cache_types.append(_retranslation_cache_type(item))
     items = _group_retranslation_items_by_cache_type(items, deadline=deadline)
     _raise_preview_timeout(deadline)
-    profile_counts = _cache_type_counts(items, deadline=deadline)
     representatives, _fanout = _deduplicate_retranslation_items(
         items, enabled=mode == "quality_mismatch", deadline=deadline
     )
+    entry_cache_types = [_retranslation_cache_type(item) for item in items]
+    profile_counts = _cache_type_counts(items, deadline=deadline)
     representative_profile_counts = _cache_type_counts(
         representatives, deadline=deadline
     )
@@ -459,6 +562,12 @@ def preview_same_source_ai_retranslation(
         ai_representatives=len(representatives),
         dedup_reused_candidates=len(entries) - len(representatives),
         representative_profile_counts=tuple(representative_profile_counts.items()),
+        skipped_input_newline_mismatch=(
+            skipped_newline if mode == "quality_mismatch" else 0
+        ),
+        skipped_newline_with_other_hard_issues=(
+            skipped_mixed if mode == "quality_mismatch" else 0
+        ),
     )
 
 
@@ -952,7 +1061,11 @@ def _finalize_representative_result(
         )
         return True
     translated_text = result["text"]
-    issues = token_issues(original["source_text"], translated_text)
+    issues = (
+        repair_output_issues(original["source_text"], translated_text)
+        if report.mode == "quality_mismatch"
+        else token_issues(original["source_text"], translated_text)
+    )
     if issues:
         _mark_batch_targets_flagged(
             db, session, report, targets, translated_text, issues, cancelled
@@ -1001,21 +1114,30 @@ def _mark_batch_targets_flagged(
         report.flagged += 1
         report.processed_candidates += 1
         if report.mode == "quality_mismatch":
-            if len(report.flagged_entries) < _FLAGGED_DETAIL_LIMIT:
-                report.flagged_entries.append(
-                    {
-                        "entry_id": target["_entry_id"],
-                        "version": target["_expected_version"],
-                        "mod_id": target["_mod_id"],
-                        "kind": target["_kind"],
-                        "source_id": target["_source_id"],
-                        "key": target["path"],
-                        "en_us": target["source_text"],
-                        "old_translation": target["_expected_old_zh_tw"],
-                        "ai_translation": translated_text,
-                        "issues": tuple(issues),
-                    }
+            review_item = {
+                "entry_id": target["_entry_id"],
+                "version": target["_expected_version"],
+                "mod_id": target["_mod_id"],
+                "kind": target["_kind"],
+                "source_id": target["_source_id"],
+                "key": target["path"],
+                "en_us": target["source_text"],
+                "old_translation": target["_expected_old_zh_tw"],
+                "ai_translation": translated_text,
+                "issues": tuple(issues),
+                "expected_revision": target["_expected_revision"],
+                "database_identity": str(getattr(db, "path", "")),
+                "database_file_id": Path(getattr(db, "path", "")).stat().st_ino,
+                "database_priority": tuple(getattr(db, "priority", ())),
+            }
+            if report.review_store_path and report.review_run_id:
+                moddb_repair_review_store.append_item(
+                    report.review_store_path, report.review_run_id, review_item
                 )
+                report.reviewable_results += 1
+                report.flagged_entries_omitted += 1
+            elif len(report.flagged_entries) < _FLAGGED_DETAIL_LIMIT:
+                report.flagged_entries.append(review_item)
             else:
                 report.flagged_entries_omitted += 1
         _log_candidate(
@@ -1103,6 +1225,69 @@ def _replace_candidate_translation(db, original, text, report):
     return db.replace_ai_translation(entry_id, old_text, text, **identity)
 
 
+def apply_repair_review_item(
+    database_path: str | Path, item: dict[str, Any], draft: str
+) -> str:
+    """Apply one human-confirmed rejected draft using the original source CAS."""
+    if str(Path(database_path).resolve()) != str(
+        Path(item.get("database_identity", "")).resolve()
+    ):
+        return "stale"
+    try:
+        if Path(database_path).stat().st_ino != int(item["database_file_id"]):
+            return "stale"
+    except (KeyError, OSError, TypeError, ValueError):
+        return "stale"
+    priority = tuple(int(value) for value in item.get("database_priority", ()))
+    db = TranslationDB(database_path, priority=priority, create=False)
+    try:
+        if str(Path(db.path).resolve()) != str(
+            Path(item["database_identity"]).resolve()
+        ):
+            return "stale"
+        result = db.replace_translation_quality_mismatch(
+            int(item["entry_id"]),
+            int(item["source_id"]),
+            str(item["old_translation"]),
+            draft,
+            expected_version=str(item["version"]),
+            expected_kind=str(item["kind"]),
+            expected_mod_id=str(item["mod_id"]),
+            expected_key=str(item["key"]),
+            expected_en_us=str(item["en_us"]),
+            expected_revision=item.get("expected_revision"),
+            actor="AI 機翻修復・人工確認",
+            action="quality_repair_review",
+        )
+        return "applied" if result.status == "updated" else "stale"
+    finally:
+        db.close()
+
+
+def validate_repair_draft(source: str, translated: str) -> list[str]:
+    """View-facing validator entrypoint for manually edited repair drafts."""
+    return repair_output_issues(source, translated)
+
+
+def apply_and_record_repair_review(
+    database_path: str | Path,
+    store_path: str | Path,
+    run_id: str,
+    item: dict[str, Any],
+    draft: str,
+) -> str:
+    """Apply one draft and durably update its review state on the worker thread."""
+    result = apply_repair_review_item(database_path, item, draft)
+    moddb_repair_review_store.save_review_state(
+        store_path,
+        run_id,
+        int(item["item_index"]),
+        "applied" if result == "applied" else "stale",
+        draft,
+    )
+    return result
+
+
 def _finish_snapshot(db, options, session, report, tracker) -> None:
     report.remaining = _remaining_candidate_count(db, options, report.mode)
     report.unprocessed_candidates = max(
@@ -1167,10 +1352,12 @@ def _set_cache_report_stats(options, report) -> None:
 
 def _remaining_candidate_count(db, options, mode: str) -> int:
     if mode == "quality_mismatch":
-        count, _ = db.mismatched_translation_entries(
-            options.version, list(options.mod_ids), limit=1
+        return sum(
+            entry is not None
+            for entry, _newline_mismatch, _mixed in db.iter_repairable_translation_entries(
+                options.version, list(options.mod_ids)
+            )
         )
-        return count
     return db.count_same_as_source_ai(options.version, list(options.mod_ids))
 
 
@@ -1490,12 +1677,24 @@ def run_moddb_retranslate_service(
     entries: Sequence[SameSourceAIEntry],
     *,
     mode: str = "same_source_ai",
+    review_preview: SameSourceAIRepairPreview | None = None,
     manage_session: bool = True,
 ) -> None:
     """Direct-AI repair for the exact entries shown by the user's preview."""
     ensure_pipeline_logging()
     db = None
-    report = SameSourceAIRepairReport(candidates=len(entries), mode=mode)
+    report = SameSourceAIRepairReport(
+        candidates=len(entries),
+        mode=mode,
+        skipped_input_newline_mismatch=(
+            review_preview.skipped_input_newline_mismatch if review_preview else 0
+        ),
+        skipped_newline_with_other_hard_issues=(
+            review_preview.skipped_newline_with_other_hard_issues
+            if review_preview
+            else 0
+        ),
+    )
     operation_label = "特殊字元修復" if mode == "quality_mismatch" else "舊 AI 重翻"
     started_at = monotonic()
 
@@ -1537,6 +1736,11 @@ def run_moddb_retranslate_service(
 
 def _run_repair_candidates(db, options, session, entries, report, mode, cancelled):
     """Run the exact preview snapshot, including the no-candidate completion path."""
+    if mode == "quality_mismatch" and entries:
+        report.review_run_id = uuid.uuid4().hex
+        report.review_store_path = str(
+            moddb_repair_review_store.create_run(db.path, report.review_run_id)
+        )
     if not entries:
         report.remaining = _remaining_candidate_count(db, options, mode)
         report.unprocessed_candidates = 0

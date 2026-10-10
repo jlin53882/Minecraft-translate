@@ -76,6 +76,7 @@ class TranslationRow:
     updated_at: str
     review_status: str | None = None
     created_at: str | None = None
+    revision: int | None = None
 
 
 @dataclass(frozen=True)

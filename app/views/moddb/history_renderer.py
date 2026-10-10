@@ -22,7 +22,10 @@ def render_history(panel, *, catalog=None) -> None:
     controls = [_history_event(panel, event, catalog) for event in detail.history]
     if detail.translations:
         controls.append(kit.section_label("各來源譯文"))
-        controls.extend(_translation_row(row, catalog) for row in detail.translations)
+        controls.extend(
+            _translation_row(row, catalog, detail.history)
+            for row in detail.translations
+        )
     panel.history_col.controls = controls or [kit.hint_text("還沒有異動記錄")]
 
 
@@ -35,6 +38,7 @@ def _history_event(panel, event, catalog) -> ft.Control:
         "batch_revert": "批次還原",
         "ai_retranslate": "AI 重翻",
         "quality_repair": "特殊字元修復",
+        "quality_repair_review": "AI 機翻修復・人工確認",
     }.get(event.action, "其他異動")
     controls: list[ft.Control] = [
         ft.Row(
@@ -43,7 +47,12 @@ def _history_event(panel, event, catalog) -> ft.Control:
                     f"{action}"
                     + (
                         f"・{source_label(event.source_id, catalog)}"
-                        if event.action in ("quality_repair", "revert")
+                        if event.action
+                        in (
+                            "quality_repair",
+                            "quality_repair_review",
+                            "revert",
+                        )
                         and event.source_id is not None
                         else ""
                     )
@@ -103,10 +112,17 @@ def _append_history_details(controls, panel, event) -> None:
                 selectable=True,
             )
         )
-    if event.action in ("manual", "review", "quality_repair"):
+    if event.action in (
+        "manual",
+        "review",
+        "quality_repair",
+        "quality_repair_review",
+    ):
         controls.append(
             kit.button(
-                "還原這次修復" if event.action == "quality_repair" else "還原這次更新",
+                "還原這次修復"
+                if event.action in ("quality_repair", "quality_repair_review")
+                else "還原這次更新",
                 "ghost",
                 size="sm",
                 on_click=lambda _e, history_id=event.id: panel._revert(history_id),
@@ -123,7 +139,24 @@ def _append_history_details(controls, panel, event) -> None:
         )
 
 
-def _translation_row(row, catalog) -> ft.Control:
+def _translation_row(row, catalog, history) -> ft.Control:
+    repaired_action = next(
+        (
+            event
+            for event in history
+            if event.source_id == row.source
+            and event.new_revision == row.revision
+            and event.action in ("quality_repair", "quality_repair_review")
+        ),
+        None,
+    )
+    provenance = (
+        "AI 機翻修復・人工確認"
+        if repaired_action and repaired_action.action == "quality_repair_review"
+        else "AI 機翻修復"
+        if repaired_action
+        else None
+    )
     return ft.Column(
         [
             ft.Row(
@@ -132,6 +165,7 @@ def _translation_row(row, catalog) -> ft.Control:
                         source_label(row.source, catalog, row.review_status),
                         source_tone(row.source),
                     ),
+                    *([kit.chip(provenance, "dia")] if provenance else []),
                     ft.Text(
                         f"首次 {format_taipei_time(row.created_at)} · "
                         f"更新 {format_taipei_time(row.updated_at)}",

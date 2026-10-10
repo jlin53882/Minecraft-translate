@@ -62,6 +62,33 @@ def token_issues(source: str, translated: str) -> list[str]:
     return _token_issues_from_counts(format_tokens(source), format_tokens(translated))
 
 
+def repair_input_issues(
+    source: str, previous_translation: str
+) -> tuple[bool, tuple[str, ...], bool]:
+    """Return whether a repair row is eligible, hard issues, and mixed-newline flag.
+
+    Real LF count mismatches are excluded before AI submission. CRLF is naturally
+    counted as one LF token by ``format_tokens``; literal ``\\n`` remains separate.
+    """
+    wanted = format_tokens(source)
+    previous = format_tokens(previous_translation)
+    newline_mismatch = wanted["\n"] != previous["\n"]
+    wanted.pop("\n", None)
+    previous.pop("\n", None)
+    hard_issues = tuple(_token_issues_from_counts(wanted, previous))
+    if newline_mismatch:
+        return False, (), bool(hard_issues)
+    return bool(hard_issues), hard_issues, False
+
+
+def repair_output_issues(source: str, translated: str) -> list[str]:
+    """Validate repair output while allowing only real LF count differences."""
+    wanted, actual = format_tokens(source), format_tokens(translated)
+    wanted.pop("\n", None)
+    actual.pop("\n", None)
+    return _token_issues_from_counts(wanted, actual)
+
+
 def _token_issues_from_counts(wanted: Counter[str], actual: Counter[str]) -> list[str]:
     issues: list[str] = []
     for token in sorted(set(wanted) | set(actual)):

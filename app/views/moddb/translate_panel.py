@@ -41,6 +41,7 @@ from app.views._log import LogView, load_ui_logging_config
 from app.views.moddb import retranslation_controller
 from app.views.moddb.formatting import format_count
 from app.views.moddb.repair_card import create_repair_card, repair_copy
+from app.views.moddb.repair_summary import repair_summary_detail_lines
 from app.views.moddb.result_inspector import TranslationResultInspector
 from translation_tool.utils.config_manager import load_config
 from translation_tool.utils.log_unit import log_debug, log_info, log_warning
@@ -523,7 +524,11 @@ class TranslatePanel(ft.Column):
             launched = launch_page_operation(
                 self._page,
                 lambda: run_moddb_retranslate_service(
-                    options, session, preview.entries, mode=preview.mode
+                    options,
+                    session,
+                    preview.entries,
+                    mode=preview.mode,
+                    review_preview=preview,
                 ),
                 name=name,
                 owner="moddb-retranslate",
@@ -693,40 +698,9 @@ class TranslatePanel(ft.Column):
             )
             + (f"；最後錯誤：{s['last_error']}" if s.get("last_error") else "")
         )
-        detail_parts = self._repair_summary_detail_lines(s)
+        detail_parts = repair_summary_detail_lines(s)
         if detail_parts:
             self.repair_summary_text.value += "\n" + "\n".join(detail_parts)
-
-    def _repair_summary_detail_lines(self, s: dict) -> list[str]:
-        """Format repair-only units and cache receipts shown beneath the summary."""
-        detail_parts = []
-        if "ai_representatives" in s:
-            detail_parts.append(
-                f"AI 代表計劃 {s.get('ai_representatives', 0)}；"
-                f"實際送入引擎 {s.get('ai_submitted_items', 0)} items"
-                "（不是 API/HTTP 次數）；"
-                f"驗證通過 {s.get('ai_validated_items', 0)}；"
-                f"等價映射候選 {s.get('dedup_mapped_candidates', 0)}；"
-                f"已共用驗證結果 {s.get('dedup_reused_candidates', 0)}"
-            )
-            detail_parts.append(
-                f"來源列進度 {s.get('processed_candidates', 0)}/"
-                f"{s.get('candidates', 0)}；未送出候選 "
-                f"{s.get('not_submitted_candidates', 0)}；未處理候選 "
-                f"{s.get('unprocessed_candidates', 0)}"
-            )
-        if "cache_keys_changed" in s:
-            changed = s.get("cache_keys_changed")
-            saved = s.get("cache_keys_saved")
-            detail_parts.append(
-                "快取 key 變更 "
-                f"{changed if changed is not None else '未知'}；成功落盤 "
-                f"{saved if saved is not None else '未知'}"
-                + (f"（{s['cache_stats_note']}）" if s.get("cache_stats_note") else "")
-                + f"；新增失敗來源列 {s.get('cache_add_failed', 0)}；"
-                f"尚未確認落盤 keys {s.get('cache_save_failed', 0)}"
-            )
-        return detail_parts
 
     def _apply_translation_summary(self, s: dict) -> None:
         self._set_kpi_mode("normal")

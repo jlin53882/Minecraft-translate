@@ -54,8 +54,11 @@ from translation_tool.translation_db.models import (
     WriteBackStats,
 )
 from translation_tool.translation_db.quality import (
+    format_tokens,
     matches_quality,
     quality_state,
+    repair_input_issues,
+    repair_output_issues,
     token_quality_comparison,
     whitespace_note,
 )
@@ -1834,11 +1837,15 @@ class TranslationDB:
         translation_created_sql = (
             "created_at" if self.has_translation_created_at else "NULL"
         )
+        translation_revision_sql = (
+            "revision" if self.has_translation_revision else "NULL"
+        )
         detail.translations = [
             TranslationRow(*r)
             for r in self._q(
                 "SELECT source, zh_tw, zh_cn, checker, updated_at, "
-                f"{translation_review_sql}, {translation_created_sql} FROM translation "
+                f"{translation_review_sql}, {translation_created_sql}, "
+                f"{translation_revision_sql} FROM translation "
                 "WHERE entry_id=? ORDER BY source",
                 (entry_id,),
             )
@@ -2271,7 +2278,7 @@ class TranslationDB:
         row = self._one("SELECT batch, action FROM history WHERE id=?", (history_id,))
         if row is None:
             return 0
-        if row[1] == "quality_repair":
+        if row[1] in ("quality_repair", "quality_repair_review"):
             where, params = (
                 ("batch = ?", [row[0]]) if whole_batch else ("id = ?", [history_id])
             )
@@ -2282,7 +2289,8 @@ class TranslationDB:
                     "SELECT id, entry_id, old_zh_tw, new_zh_tw, source_id, "
                     "prev_checker, prev_review_status, new_checker, "
                     "new_review_status, new_revision FROM history "
-                    f"WHERE action='quality_repair' AND {where} ORDER BY id DESC",
+                    "WHERE action IN ('quality_repair','quality_repair_review') "
+                    f"AND {where} ORDER BY id DESC",
                     params,
                 ).fetchall()
                 for (
@@ -2392,7 +2400,7 @@ class TranslationDB:
                     later = conn.execute(
                         "SELECT 1 FROM history WHERE entry_id=? AND id>? "
                         "AND action IN ('manual','review','revert','batch_replace',"
-                        "'batch_revert','quality_repair') LIMIT 1",
+                        "'batch_revert','quality_repair','quality_repair_review') LIMIT 1",
                         (eid, hid),
                     ).fetchone()
                     if later:
@@ -2647,8 +2655,11 @@ class TranslationDB:
         expected_en_us: str,
         expected_revision: int | None,
         actor: str = "AI 特殊字元修復",
+        action: str = "quality_repair",
     ) -> AITranslationReplaceResult:
         """Compare-and-set one mismatched source row without changing its identity."""
+        if action not in {"quality_repair", "quality_repair_review"}:
+            raise ValueError("invalid quality repair history action")
         if not isinstance(new_zh_tw, str) or not new_zh_tw.strip():
             raise ValueError("AI 修復譯文不可為空")
 
@@ -2672,7 +2683,8 @@ class TranslationDB:
                 return AITranslationReplaceResult("skipped_changed")
             if expected_revision is not None and current[1] != expected_revision:
                 return AITranslationReplaceResult("skipped_changed")
-            if quality_state(expected_en_us, current[0])[0] != "mismatch":
+            eligible, _issues, _mixed = repair_input_issues(expected_en_us, current[0])
+            if not eligible or repair_output_issues(expected_en_us, new_zh_tw):
                 return AITranslationReplaceResult("skipped_changed")
             if new_zh_tw == current[0]:
                 return AITranslationReplaceResult("unchanged")
@@ -2711,7 +2723,7 @@ class TranslationDB:
                     entry_id,
                     uuid.uuid4().hex,
                     actor,
-                    "quality_repair",
+                    action,
                     current[0],
                     new_zh_tw,
                     previous_checker,
@@ -2879,6 +2891,42 @@ class TranslationDB:
                     if selected_limit is None or len(candidates) < selected_limit:
                         candidates.append(SameSourceAIEntry(*row))
         return count, candidates
+
+    def iter_repairable_translation_entries(
+        self,
+        version: str,
+        mod_ids: Sequence[str] | None = None,
+        *,
+        check: Callable[[], None] | None = None,
+    ):
+        """Yield eligible repair rows and newline skip facts using bounded fetches."""
+        where = ["e.mc_version=?", "e.en_us<>''", "t.zh_tw<>''"]
+        params: list = [version]
+        if mod_ids:
+            where.append(f"e.mod_id IN ({','.join('?' * len(mod_ids))})")
+            params.extend(mod_ids)
+        sql = (
+            "SELECT e.id, e.kind, e.mod_id, e.key, e.en_us, t.zh_tw, "
+            "e.mc_version, t.source, t.revision, t.checker, t.review_status "
+            "FROM entry e JOIN translation t ON t.entry_id=e.id "
+            f"WHERE {' AND '.join(where)} ORDER BY e.mod_id, e.kind, e.key, t.source"
+        )
+        with self._lock:
+            cursor = self._conn.execute(sql, tuple(params))
+            while rows := cursor.fetchmany(512):
+                for row in rows:
+                    if check is not None:
+                        check()
+                    eligible, _issues, mixed = repair_input_issues(row[4], row[5])
+                    newline_mismatch = (
+                        format_tokens(row[4])["\n"] != format_tokens(row[5])["\n"]
+                    )
+                    if eligible or newline_mismatch:
+                        yield (
+                            SameSourceAIEntry(*row) if eligible else None,
+                            newline_mismatch,
+                            mixed,
+                        )
 
     def reuse_from_other_versions(
         self, version: str, mod_ids: Sequence[str] | None = None

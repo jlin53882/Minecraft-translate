@@ -7,6 +7,7 @@ import flet as ft
 from app.ui import kit
 from app.ui.design import C
 from app.ui.snack import show_snack
+from app.views.moddb.repair_reviewer import open_repair_reviewer
 
 
 def _repair_detail_card(item: dict, index: int) -> ft.Container:
@@ -48,6 +49,9 @@ class TranslationResultInspector:
         self._normal_version = ""
         self._repair_entries: list[dict] = []
         self._repair_omitted = 0
+        self._repair_store_path = ""
+        self._repair_run_id = ""
+        self._repair_reviewable_count = 0
         self._mode = "normal"
         self._repair_condition = "quality_mismatch"
         self.button = kit.button(
@@ -73,11 +77,17 @@ class TranslationResultInspector:
         self._normal_version = version
         self._repair_entries = []
         self._repair_omitted = 0
+        self._repair_store_path = ""
+        self._repair_run_id = ""
+        self._repair_reviewable_count = 0
         self._sync_button()
 
     def set_repair_results(self, summary: dict) -> None:
         self._repair_entries = list(summary.get("flagged_entries") or ())
         self._repair_omitted = int(summary.get("flagged_entries_omitted") or 0)
+        self._repair_store_path = str(summary.get("review_store_path") or "")
+        self._repair_run_id = str(summary.get("review_run_id") or "")
+        self._repair_reviewable_count = int(summary.get("reviewable_results") or 0)
         self._sync_button()
 
     def clear(self) -> None:
@@ -85,11 +95,14 @@ class TranslationResultInspector:
         self._normal_version = ""
         self._repair_entries = []
         self._repair_omitted = 0
+        self._repair_store_path = ""
+        self._repair_run_id = ""
+        self._repair_reviewable_count = 0
         self._sync_button()
 
     def _sync_button(self) -> None:
         self.button.tooltip = (
-            "查看 AI 結果與原譯文的特殊字元差異；只讀，不會寫回資料庫"
+            "逐筆檢視、編輯與確認 AI 草稿；每筆會以原來源和 revision 重新驗證"
             if self._mode == "repair"
             else "跳到條目校對，只看這次特殊字元不一致、未寫入的條目"
         )
@@ -98,7 +111,7 @@ class TranslationResultInspector:
         ) or (
             self._mode == "repair"
             and self._repair_condition == "quality_mismatch"
-            and bool(self._repair_entries)
+            and bool(self._repair_entries or self._repair_reviewable_count)
         )
 
     def inspect(self) -> None:
@@ -112,6 +125,15 @@ class TranslationResultInspector:
             )
 
     def _show_repair_results(self) -> None:
+        if (
+            self._repair_run_id
+            and self._repair_store_path
+            and self._repair_reviewable_count
+        ):
+            open_repair_reviewer(
+                self._page, self._repair_store_path, self._repair_run_id
+            )
+            return
         if not self._repair_entries:
             return
         show_dialog = getattr(self._page, "show_dialog", None)
