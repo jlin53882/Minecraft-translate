@@ -15,6 +15,7 @@ from app.services_impl.pipelines import merge_service
 from translation_tool.core import lang_merge_db, lang_merger
 from translation_tool.core.lang_merge_db import merge_db_fill
 from translation_tool.core.lang_merge_extracted_assets import merge_extracted_to_assets
+from translation_tool.core.lang_merge_provenance import write_translation_provenance
 from translation_tool.core.lang_merger import merge_zhcn_to_zhtw_from_folder
 from translation_tool.translation_db import (
     DbSettings,
@@ -101,6 +102,12 @@ def test_stage1_fills_pending_from_database(tmp_path, monkeypatch, db_path):
         "item.foo.b",
         "item.foo.c",
     }  # 原文不同／資料庫沒有 → 仍待翻譯
+    manifest = json.loads(
+        (tmp_path / "out" / "lang_output" / ".translation-provenance.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert "item.foo.a" in manifest["outputs"]["assets/foo/lang/zh_tw.json"]["entries"]
 
 
 def test_zip_batch_keeps_database_identity_after_global_path_switch(
@@ -376,7 +383,7 @@ def test_zip_batch_uses_snapshot_priority_without_reverting_global_effective(
 ):
     """A merge reads its click-time source order without rewriting a newer DB order."""
     database_path = tmp_path / "shared-database.db"
-    priority_a = (SRC_JAR_TW, SRC_AI, SRC_MANUAL)
+    priority_a = (SRC_MANUAL, SRC_JAR_TW, SRC_AI)
     priority_b = (SRC_AI, SRC_JAR_TW, SRC_MANUAL)
     db = TranslationDB(database_path, priority=priority_a)
     for key, english in (
@@ -411,6 +418,11 @@ def test_zip_batch_uses_snapshot_priority_without_reverting_global_effective(
         if row.key == "item.foo.reviewed"
     )
     db.save_manual(reviewed.id, "Reviewed translation", actor="reviewer")
+    db.review_manual(
+        reviewed.id,
+        expected_zh_tw="Reviewed translation",
+        actor="reviewer",
+    )
     db.ingest(
         "1.21.1",
         [ScanItem(KIND_LANG, "foo", "item.foo.pending", "Pending English")],
@@ -567,6 +579,73 @@ def test_valid_target_still_allows_configured_cross_version_lookup(
     assert final_tw == {"item.foo.cross": "跨版本譯文"}
     assert pending == {}
     assert hits == 1
+
+
+def test_database_fill_persists_ai_repair_provenance_and_clears_stale_tags(
+    tmp_path, monkeypatch
+):
+    from translation_tool.translation_db.schema import SRC_AI_REPAIR
+
+    db_path = tmp_path / "repair-source.db"
+    db = TranslationDB(db_path)
+    db.ingest(
+        "1.21.1",
+        [
+            ScanItem(
+                KIND_LANG,
+                "foo",
+                "item.foo.repaired",
+                "Repair source",
+                "修復後譯文",
+                source=SRC_AI_REPAIR,
+            ),
+            ScanItem(
+                KIND_LANG,
+                "foo",
+                "item.foo.ai",
+                "AI source",
+                "AI 機翻譯文",
+                source=SRC_AI,
+            ),
+        ],
+    )
+    db.close()
+    _settings(monkeypatch, db_path, cross_version=False)
+
+    provenance = {}
+    with merge_db_fill() as fill:
+        assert fill is not None
+        final_tw, pending, hits = fill.fill(
+            "foo",
+            {},
+            {
+                "item.foo.repaired": "Repair source",
+                "item.foo.ai": "AI source",
+            },
+            source_provenance_by_key=provenance,
+        )
+
+    assert hits == 2 and pending == {}
+    assert final_tw == {
+        "item.foo.repaired": "修復後譯文",
+        "item.foo.ai": "AI 機翻譯文",
+    }
+    assert provenance["item.foo.repaired"]["label"] == "AI補譯修正"
+    assert provenance["item.foo.ai"]["label"] == "AI補譯修正"
+    manifest_path = write_translation_provenance(
+        tmp_path,
+        "assets/foo/lang/zh_tw.json",
+        provenance,
+    )
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    recorded = manifest["outputs"]["assets/foo/lang/zh_tw.json"]["entries"]
+    assert recorded["item.foo.repaired"]["label"] == "AI補譯修正"
+    assert recorded["item.foo.ai"]["label"] == "AI補譯修正"
+    assert "value_sha256" in recorded["item.foo.repaired"]
+    assert (
+        write_translation_provenance(tmp_path, "assets/foo/lang/zh_tw.json", {}) is None
+    )
+    assert not manifest_path.exists()
 
 
 def test_snapshot_priority_preserves_cross_version_distance_tie_order(tmp_path):
@@ -768,6 +847,10 @@ def test_stage2_fills_pending_from_database(tmp_path, monkeypatch, db_path):
     target = lang_output / "assets" / "foo" / "lang" / "zh_tw.json"
     tw = json.loads(target.read_text(encoding="utf-8"))
     assert tw == {"item.foo.a": "鋼製外殼"}
+    manifest = json.loads(
+        (lang_output / ".translation-provenance.json").read_text(encoding="utf-8")
+    )
+    assert "item.foo.a" in manifest["outputs"]["assets/foo/lang/zh_tw.json"]["entries"]
 
 
 def test_database_never_overrides_existing_output_translation(

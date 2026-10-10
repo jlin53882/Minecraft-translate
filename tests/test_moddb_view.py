@@ -157,14 +157,396 @@ def test_view_switches_tabs_and_shows_overview_numbers(db_path):
         view.overview.stat_diff.value_text.value == "1"
     )  # foo 的 Steel Casing 兩版本譯文不同
     view.show_tab("entries")
-    assert view.body.content is view.entries and view.tab == "entries"
+    assert view.body.content is view._tab_stack and view.tab == "entries"
+    assert view._panel_hosts["entries"].visible is True
+    assert view._panel_hosts["overview"].visible is False
     view.show_tab("scan")
-    assert view.body.content is view.scan
+    assert view._panel_hosts["scan"].visible is True
+    assert view._panel_hosts["entries"].visible is False
 
 
-def test_moddb_stats_warm_uses_a_worker_owned_connection_when_view_reloads(
+def test_visited_moddb_tabs_stay_mounted_for_fast_switching(db_path):
+    seed(db_path)
+    view = moddb_view.ModDbView(mock_page(), mock_filepicker())
+    assert view._tab_stack.controls == [view._panel_hosts["overview"]]
+
+    for key in ("entries", "scan", "translate", "overview", "entries"):
+        view.show_tab(key)
+        assert view.tab == key
+        assert view._panel_hosts[key].visible is True
+        assert all(
+            host.visible is (tab_key == key)
+            for tab_key, host in view._panel_hosts.items()
+            if tab_key in view._mounted_tabs
+        )
+
+    assert view._mounted_tabs == {"overview", "entries", "scan", "translate"}
+    assert len(view._tab_stack.controls) == len(view._mounted_tabs)
+
+
+def test_unchanged_moddb_tabs_skip_database_refresh_on_reselection(
     db_path, monkeypatch
 ):
+    seed(db_path)
+    view = moddb_view.ModDbView(mock_page(), mock_filepicker())
+    refreshes = {"entries": 0, "scan": 0, "translate": 0}
+
+    monkeypatch.setattr(
+        view.entries,
+        "refresh",
+        lambda **_kwargs: refreshes.__setitem__("entries", refreshes["entries"] + 1),
+    )
+    monkeypatch.setattr(
+        view.scan,
+        "refresh_versions",
+        lambda: refreshes.__setitem__("scan", refreshes["scan"] + 1),
+    )
+    monkeypatch.setattr(
+        view.translate,
+        "refresh_scope",
+        lambda: refreshes.__setitem__("translate", refreshes["translate"] + 1),
+    )
+
+    for key in ("entries", "scan", "translate", "overview", "entries", "scan"):
+        view.show_tab(key)
+
+    assert refreshes == {"entries": 1, "scan": 1, "translate": 1}
+
+
+def test_entries_write_invalidates_overview_but_keeps_current_rows_fresh(db_path):
+    seed(db_path)
+    view = moddb_view.ModDbView(mock_page(), mock_filepicker())
+    view.show_tab("entries")
+    previous_revision = view._data_revision
+
+    view._on_entries_changed()
+
+    assert view._data_revision == previous_revision + 1
+    assert view._panel_refresh_needed["entries"] is False
+    assert view._overview_needs_refresh is True
+
+
+def test_task_completion_invalidates_cached_moddb_panels(db_path, monkeypatch):
+    seed(db_path)
+    view = moddb_view.ModDbView(mock_page(), mock_filepicker())
+    for key in ("entries", "scan", "translate"):
+        view.show_tab(key)
+    assert all(not needed for needed in view._panel_refresh_needed.values())
+
+    refreshed = []
+    original_refresh = view.translate.refresh_scope
+
+    def record_refresh():
+        refreshed.append(True)
+        original_refresh()
+
+    monkeypatch.setattr(view.translate, "refresh_scope", record_refresh)
+    view._on_scan_finished()
+
+    assert view._overview_needs_refresh is True
+    assert view._panel_refresh_needed["entries"] is True
+    assert view._panel_refresh_needed["scan"] is True
+    assert view._panel_refresh_needed["translate"] is False
+    assert refreshed == [True]
+
+
+def test_database_tab_refreshes_run_queries_in_worker_threads(db_path, monkeypatch):
+    from app.tasks.operation_registry import OperationRegistry
+
+    seed(db_path)
+    page = mock_page()
+    page.operation_registry = OperationRegistry()
+    page.run_thread = lambda _target: None
+    query_threads = []
+    originals = {
+        "versions": TranslationDB.versions,
+        "list_entries": TranslationDB.list_entries,
+        "count_untranslated": TranslationDB.count_untranslated,
+    }
+
+    def record(name):
+        original = originals[name]
+
+        def wrapped(db, *args, **kwargs):
+            query_threads.append((name, threading.current_thread().name))
+            return original(db, *args, **kwargs)
+
+        return wrapped
+
+    for method in originals:
+        monkeypatch.setattr(TranslationDB, method, record(method))
+
+    filter_connections = []
+    original_filter_snapshot = moddb_view.load_entries_filter_snapshot
+
+    def record_filter_snapshot(settings, request):
+        filter_connections.append((settings, threading.current_thread().name))
+        return original_filter_snapshot(settings, request)
+
+    monkeypatch.setattr(
+        moddb_view, "load_entries_filter_snapshot", record_filter_snapshot
+    )
+
+    view = moddb_view.ModDbView(page, mock_filepicker())
+    try:
+        for key in ("entries", "scan", "translate"):
+            view.show_tab(key)
+            assert view._panels[key].refresh_indicator.visible is True
+            assert page.operation_registry.wait_for_idle(timeout=2)
+            page._run_all_tasks()
+            page._tasks.clear()
+            assert view._panels[key].refresh_indicator.visible is False
+        assert view.entries.total == 3
+        assert view.scan._db_versions == {"1.21.1", "1.20.1"}
+        assert "未翻譯" in view.translate.count_text.value
+        assert query_threads
+        assert all(name != threading.current_thread().name for _, name in query_threads)
+
+        query_threads.clear()
+        view.show_tab("entries")
+        view.entries._on_state("none")
+        assert view.entries.refresh_indicator.visible is True
+        assert view.entries.refresh_indicator.value == "正在篩選條目…"
+        assert page.operation_registry.wait_for_idle(timeout=2)
+        page._run_all_tasks()
+        page._tasks.clear()
+        assert [row.key for row in view.entries.rows] == ["item.foo.b"]
+        assert len(filter_connections) == 1
+        assert str(filter_connections[0][0].resolved_path()) == str(db_path)
+        assert filter_connections[0][1] != threading.current_thread().name
+        assert query_threads
+        assert all(name != threading.current_thread().name for _, name in query_threads)
+        assert view.entries.refresh_indicator.visible is False
+        assert view._db is None
+    finally:
+        page.operation_registry.begin_shutdown()
+        assert page.operation_registry.wait_for_idle(timeout=2)
+        if view._db is not None:
+            view._db.close()
+
+
+def test_quality_filter_worker_owns_readonly_connection_and_does_not_block_select(
+    db_path, monkeypatch
+):
+    from dataclasses import replace
+
+    from app.tasks.operation_registry import OperationRegistry
+    from app.views.moddb import panel_refresh
+    from translation_tool.translation_db import QualityFilter
+
+    seed(db_path)
+    page = mock_page()
+    registry = OperationRegistry()
+    page.operation_registry = registry
+    page.run_thread = lambda _target: None
+    view = moddb_view.ModDbView(page, mock_filepicker())
+    settings = moddb_service.current_settings()
+    view._db = moddb_service.open_database(create=False, settings=settings)
+    view._db_loaded = True
+    view._db_sig = (str(settings.resolved_path()), settings.priority)
+    view.entries.refresh()
+    view.tab = "entries"
+    target_id = view.entries.rows[0].id
+    criteria = replace(
+        view.entries._entry_filter(), quality=QualityFilter(status="mismatch")
+    )
+    view.entries._entry_filter = lambda: criteria
+    view.entries._filter_only_refresh = True
+    request = view._panel_refresh_request("entries")
+    generation = 1
+    view._panel_refresh_generation["entries"] = generation
+    view._panel_refresh_loading.add("entries")
+
+    query_entered = threading.Event()
+    release_query = threading.Event()
+    selection_finished = threading.Event()
+    worker_connections = []
+    original_list_entries = TranslationDB.list_entries
+    original_open_database = panel_refresh.open_database
+
+    def gated_list_entries(db, *args, **kwargs):
+        if threading.current_thread().name.startswith(
+            "operation-moddb-entries-panel-refresh"
+        ):
+            worker_connections.append(db)
+            with db._lock:
+                query_entered.set()
+                assert release_query.wait(timeout=3)
+        return original_list_entries(db, *args, **kwargs)
+
+    def record_worker_open(*args, **kwargs):
+        db = original_open_database(*args, **kwargs)
+        if db is not None and kwargs.get("readonly"):
+            worker_connections.append(db)
+        return db
+
+    monkeypatch.setattr(TranslationDB, "list_entries", gated_list_entries)
+    monkeypatch.setattr(panel_refresh, "open_database", record_worker_open)
+    try:
+        launched = view._launch_panel_refresh(
+            "entries",
+            view.entries,
+            request,
+            settings,
+            view._settings_signature(),
+            view._data_revision,
+            generation,
+        )
+        assert launched
+        assert query_entered.wait(timeout=2)
+        select_thread = threading.Thread(
+            target=lambda: (view.entries.select(target_id), selection_finished.set())
+        )
+        select_thread.start()
+        assert selection_finished.wait(timeout=1)
+        release_query.set()
+        select_thread.join(timeout=1)
+        assert registry.wait_for_idle(timeout=2)
+        page._run_all_tasks()
+        assert worker_connections
+        worker_db = worker_connections[-1]
+        assert worker_db is not view._db
+        assert worker_db.readonly is True
+        with pytest.raises(sqlite3.ProgrammingError):
+            worker_db._conn.execute("SELECT 1")
+        assert not view._panel_refresh_loading
+    finally:
+        release_query.set()
+        registry.begin_shutdown()
+        assert registry.wait_for_idle(timeout=2)
+        if view._db is not None:
+            view._db.close()
+
+
+def test_entries_worker_snapshot_preserves_requested_page(db_path):
+    seed(db_path)
+    db = TranslationDB(db_path)
+    db.ingest(
+        "1.21.1",
+        [
+            ScanItem(KIND_LANG, "foo", f"item.page.{index:03}", f"Page {index}")
+            for index in range(52)
+        ],
+    )
+    db.close()
+
+    view = moddb_view.ModDbView(mock_page(), mock_filepicker())
+    view.show_tab("entries")
+    assert view.entries.total == 55
+    view.entries.pager.set_state(view.entries.total, 2)
+    request = view._panel_refresh_request("entries")
+
+    snapshot = moddb_view.load_panel_snapshot(
+        "entries", request, moddb_service.current_settings()
+    )
+
+    assert request["page"] == 2
+    assert snapshot["page"] == 2
+    assert len(snapshot["rows"]) == 5
+
+
+def test_entry_page_navigation_loads_inline_and_discards_stale_filter_snapshot(
+    db_path, monkeypatch
+):
+    from app.tasks.operation_registry import OperationRegistry
+
+    seed(db_path)
+    db = TranslationDB(db_path)
+    db.ingest(
+        "1.21.1",
+        [
+            ScanItem(KIND_LANG, "foo", f"item.page.{index:03}", f"Page {index}")
+            for index in range(52)
+        ],
+    )
+    db.close()
+
+    page = mock_page()
+    page.operation_registry = OperationRegistry()
+    page.run_thread = lambda _target: None
+    view = moddb_view.ModDbView(page, mock_filepicker())
+    try:
+        view.show_tab("entries")
+        assert page.operation_registry.wait_for_idle(timeout=2)
+        page._run_all_tasks()
+        page._tasks.clear()
+        assert view.entries.total == 55
+
+        old_request = view._panel_refresh_request("entries")
+        query_threads = []
+        original_list_entries = TranslationDB.list_entries
+
+        def record_query_thread(db, *args, **kwargs):
+            query_threads.append(threading.current_thread().name)
+            return original_list_entries(db, *args, **kwargs)
+
+        monkeypatch.setattr(TranslationDB, "list_entries", record_query_thread)
+        view.entries.pager.goto(2)
+
+        assert view.entries.pager.current_page == 2
+        assert len(view.entries.rows) == 5
+        assert query_threads[-1] == threading.current_thread().name
+        assert view.entries.refresh_indicator.visible is False
+        assert view._panel_refresh_needed["entries"] is False
+
+        scheduled = []
+        monkeypatch.setattr(
+            view,
+            "_request_panel_refresh",
+            lambda key, **_kwargs: scheduled.append(key),
+        )
+        view._panel_refresh_loading.add("entries")
+        view._apply_panel_refresh(
+            "entries",
+            view._panel_refresh_generation["entries"],
+            view._settings_signature(),
+            old_request,
+            view._data_revision,
+            view.entries,
+            {"key": "entries", "rows": [], "total": 55, "page": 1},
+        )
+
+        assert scheduled == []
+        assert view.entries.pager.current_page == 2
+        assert len(view.entries.rows) == 5
+        assert not view._panel_refresh_loading
+    finally:
+        page.operation_registry.begin_shutdown()
+        assert page.operation_registry.wait_for_idle(timeout=2)
+        if view._db is not None:
+            view._db.close()
+
+
+def test_filter_snapshot_generation_guard_rejects_stale_result(db_path, monkeypatch):
+    seed(db_path)
+    view = moddb_view.ModDbView(mock_page(), mock_filepicker())
+    view._db = TranslationDB(db_path)
+    view.tab = "entries"
+    scheduled = []
+    monkeypatch.setattr(
+        view,
+        "_request_panel_refresh",
+        lambda key, **_kwargs: scheduled.append(key),
+    )
+    try:
+        is_valid = view._validate_filter_snapshot(
+            {"identity": "same-db"},
+            {
+                "identity": "same-db",
+                "db_generation": "stale-generation",
+            },
+            view.entries,
+        )
+
+        assert is_valid is False
+        assert scheduled == ["entries"]
+        assert view._panel_refresh_needed["entries"] is True
+        assert view.entries.refresh_indicator.visible is False
+    finally:
+        view._db.close()
+
+
+def test_moddb_overview_load_uses_a_worker_owned_connection(db_path, monkeypatch):
     from app.tasks.operation_registry import OperationRegistry
 
     seed(db_path)
@@ -175,44 +557,40 @@ def test_moddb_stats_warm_uses_a_worker_owned_connection_when_view_reloads(
     # attached registry for the actual owner and worker lifecycle.
     page.run_thread = lambda _target: None
 
-    warm_entered = threading.Event()
-    release_warm = threading.Event()
+    load_entered = threading.Event()
+    release_load = threading.Event()
     worker_connections = []
-    warm_errors = []
-    original_warm_stats = TranslationDB.warm_stats
+    original_version_stats = TranslationDB.version_stats_from_effective_sources
 
-    def gated_warm_stats(db):
-        if threading.current_thread().name.startswith("operation-moddb-warm-stats"):
+    def gated_version_stats(db, source_stats):
+        if threading.current_thread().name.startswith("operation-moddb-overview-load"):
             worker_connections.append(db)
-            warm_entered.set()
-            assert release_warm.wait(timeout=2)
-            try:
-                return original_warm_stats(db)
-            except Exception as exc:
-                warm_errors.append(exc)
-                raise
-        return original_warm_stats(db)
+            load_entered.set()
+            assert release_load.wait(timeout=2)
+        return original_version_stats(db, source_stats)
 
-    monkeypatch.setattr(TranslationDB, "warm_stats", gated_warm_stats)
+    monkeypatch.setattr(
+        TranslationDB, "version_stats_from_effective_sources", gated_version_stats
+    )
     view = moddb_view.ModDbView(page, mock_filepicker())
-    ui_db = view._db
-    assert ui_db is not None
+    view.did_mount()
     try:
-        assert warm_entered.wait(timeout=1)
-        view.reload_db()
-        release_warm.set()
+        assert load_entered.wait(timeout=1)
+        assert view.overview.loading.visible is True
+        assert view._db is None  # 隱藏的掃描面板不可先在 UI 執行緒開資料庫
+        release_load.set()
         assert registry.wait_for_idle(timeout=2)
+        page._run_all_tasks()
         assert len(worker_connections) == 1
-        assert worker_connections[0] is not ui_db
-        assert warm_errors == []
-        with pytest.raises(sqlite3.ProgrammingError):
-            worker_connections[0]._conn.execute("SELECT 1")
+        assert worker_connections[0] is view._db
+        assert view.overview.content_col.visible is True
+        assert worker_connections[0]._conn.execute("SELECT 1").fetchone() == (1,)
         with sqlite3.connect(db_path) as check_conn:
             assert (
                 check_conn.execute("SELECT count(*) FROM stat_cache").fetchone()[0] > 0
             )
     finally:
-        release_warm.set()
+        release_load.set()
         registry.begin_shutdown()
         assert registry.wait_for_idle(timeout=2)
         if view._db is not None:
@@ -220,7 +598,85 @@ def test_moddb_stats_warm_uses_a_worker_owned_connection_when_view_reloads(
             view._db = None
 
 
-def test_delayed_moddb_warm_does_not_reapply_stale_priority(db_path, monkeypatch):
+def test_overview_worker_closes_connection_when_ui_dispatch_raises(
+    db_path, monkeypatch
+):
+    from app.tasks.operation_registry import OperationRegistry
+
+    seed(db_path)
+    page = mock_page()
+    registry = OperationRegistry()
+    page.operation_registry = registry
+    page.run_thread = lambda _target: None
+    page.run_task = lambda _coro: (_ for _ in ()).throw(RuntimeError("detached"))
+    worker_databases = []
+    original_load = moddb_view._load_overview_snapshot
+
+    def record_load(settings):
+        result = original_load(settings)
+        worker_databases.append(result[0])
+        return result
+
+    monkeypatch.setattr(moddb_view, "_load_overview_snapshot", record_load)
+    view = moddb_view.ModDbView(page, mock_filepicker())
+    try:
+        view.did_mount()
+        assert registry.wait_for_idle(timeout=2)
+        assert worker_databases and worker_databases[0] is not None
+        assert view._overview_loading is False
+        assert view._overview_needs_refresh is True
+        with pytest.raises(sqlite3.ProgrammingError):
+            worker_databases[0]._conn.execute("SELECT 1")
+    finally:
+        registry.begin_shutdown()
+        assert registry.wait_for_idle(timeout=2)
+        if view._db is not None:
+            view._db.close()
+            view._db = None
+
+
+def test_panel_worker_dispatch_failure_releases_loading_and_database(
+    db_path, monkeypatch
+):
+    from app.tasks.operation_registry import OperationRegistry
+    from app.views.moddb import panel_refresh
+
+    seed(db_path)
+    page = mock_page()
+    registry = OperationRegistry()
+    page.operation_registry = registry
+    page.run_thread = lambda _target: None
+    page.run_task = lambda _coro: (_ for _ in ()).throw(RuntimeError("detached"))
+    opened = []
+    original_open = panel_refresh.open_database
+
+    def record_open(*args, **kwargs):
+        db = original_open(*args, **kwargs)
+        if db is not None:
+            opened.append(db)
+        return db
+
+    monkeypatch.setattr(panel_refresh, "open_database", record_open)
+    view = moddb_view.ModDbView(page, mock_filepicker())
+    try:
+        view.tab = "entries"
+        view._request_panel_refresh("entries")
+        assert registry.wait_for_idle(timeout=2)
+        assert opened and opened[-1].readonly is True
+        assert "entries" not in view._panel_refresh_loading
+        assert view._panel_refresh_needed["entries"] is True
+        with pytest.raises(sqlite3.ProgrammingError):
+            opened[-1]._conn.execute("SELECT 1")
+    finally:
+        registry.begin_shutdown()
+        assert registry.wait_for_idle(timeout=2)
+        if view._db is not None:
+            view._db.close()
+
+
+def test_delayed_moddb_overview_load_discards_stale_priority(db_path, monkeypatch):
+    from dataclasses import replace
+
     from app.tasks.operation_registry import OperationRegistry
 
     seed(db_path)
@@ -233,32 +689,39 @@ def test_delayed_moddb_warm_does_not_reapply_stale_priority(db_path, monkeypatch
     release_constructor = threading.Event()
     worker_connections = []
     original_init = TranslationDB.__init__
+    settings_state = {"value": moddb_service.current_settings()}
+    new_priority = tuple(reversed(settings_state["value"].priority))
+    assert new_priority != settings_state["value"].priority
+    monkeypatch.setattr(
+        moddb_service, "load_db_settings", lambda: settings_state["value"]
+    )
 
     def gated_init(db, *args, **kwargs):
-        is_warm_worker = threading.current_thread().name.startswith(
-            "operation-moddb-warm-stats"
+        is_overview_worker = threading.current_thread().name.startswith(
+            "operation-moddb-overview-load"
         )
-        if is_warm_worker:
-            assert kwargs.get("sync_priority") is False
+        if is_overview_worker and not constructor_entered.is_set():
             constructor_entered.set()
             assert release_constructor.wait(timeout=2)
         original_init(db, *args, **kwargs)
-        if is_warm_worker:
+        if is_overview_worker:
             worker_connections.append(db)
 
     monkeypatch.setattr(TranslationDB, "__init__", gated_init)
     view = moddb_view.ModDbView(page, mock_filepicker())
-    ui_db = view._db
-    assert ui_db is not None
+    view.did_mount()
     try:
         assert constructor_entered.wait(timeout=1)
-        new_priority = tuple(reversed(ui_db.priority))
-        assert new_priority != ui_db.priority
-        ui_db.set_priority(new_priority)
-        view.reload_db()
+        settings_state["value"] = replace(
+            settings_state["value"], priority=new_priority
+        )
         release_constructor.set()
         assert registry.wait_for_idle(timeout=2)
-        assert len(worker_connections) == 1
+        page._run_all_tasks()
+        page._tasks.clear()
+        assert registry.wait_for_idle(timeout=2)
+        page._run_all_tasks()
+        assert len(worker_connections) == 2
         with sqlite3.connect(db_path) as check_conn:
             stored_priority = check_conn.execute(
                 "SELECT value FROM meta WHERE key = 'priority'"
@@ -269,6 +732,7 @@ def test_delayed_moddb_warm_does_not_reapply_stale_priority(db_path, monkeypatch
         assert stored_priority == ",".join(str(source) for source in new_priority)
         with pytest.raises(sqlite3.ProgrammingError):
             worker_connections[0]._conn.execute("SELECT 1")
+        assert worker_connections[1] is view._db
     finally:
         release_constructor.set()
         registry.begin_shutdown()
@@ -296,6 +760,7 @@ def entries(db_path):
     seed(db_path)
     db = TranslationDB(db_path)
     page = mock_page()
+    page.run_thread = lambda target: target()
     panel = entries_panel.EntriesPanel(page, lambda: db)
     panel.refresh()
     yield panel
@@ -310,8 +775,10 @@ def test_entries_lists_selected_version_and_selects_first(entries):
 
 
 def test_entries_filters_by_state_mod_and_search(entries):
+    original_keys = {row.id: f"entry-{row.id}" for row in entries.rows}
     entries._on_state("none")
     assert [r.key for r in entries.rows] == ["item.foo.b"]
+    assert entries.list_view.controls[0].key == original_keys[entries.rows[0].id]
     entries._on_state("diff")
     assert [r.key for r in entries.rows] == ["item.foo.a"]
     entries._on_state("all")
@@ -337,6 +804,7 @@ def test_entries_edit_shows_impact_and_save_propagates(entries):
     )
 
     entries._save()
+    entries._page._run_all_tasks()
     assert "同步 1 個版本" in entries.saved_text.value
     db = entries.db()
     old = next(r for r in db.list_entries("1.20.1")[0] if r.key == "item.foo.a")
@@ -359,6 +827,7 @@ def test_entries_sync_switch_off_only_changes_current_version(entries):
         or entries.impact_box.visible
     )
     entries._save()
+    entries._page._run_all_tasks()
     db = entries.db()
     other = next(r for r in db.list_entries("1.20.1")[0] if r.key == "item.foo.a")
     assert other.zh_tw == "鋼外殼"
@@ -380,6 +849,7 @@ def test_entries_revert_restores_previous_translation(entries):
     entries.select(foo_a.id)
     entries.tw_field.value = "新譯文"
     entries._save()
+    entries._page._run_all_tasks()
     history = entries.detail.history[0]
     entries._revert(history.id)
     db = entries.db()
@@ -639,7 +1109,9 @@ def special_entries(db_path):
             ScanItem(KIND_LANG, "foo", "tip.b", "Plain Text Here", "純文字"),
         ],
     )
-    panel = entries_panel.EntriesPanel(mock_page(), lambda: db)
+    page = mock_page()
+    page.run_thread = lambda target: target()
+    panel = entries_panel.EntriesPanel(page, lambda: db)
     panel.refresh()
     yield panel
     db.close()
@@ -657,9 +1129,16 @@ def test_list_shows_newline_marker_and_editor_keeps_exact_text(special_entries):
 
 
 def test_editor_hints_for_missing_tokens_whitespace_and_color_codes(special_entries):
+    from app.ui import design
+
     panel = special_entries
     panel.select(next(r for r in panel.rows if r.key == "tip.a").id)
-    assert panel.mc_preview.visible is True and panel.mc_preview.spans  # § 顏色預覽
+    preview = panel.mc_preview
+    assert preview.control.visible is True and preview.text.spans
+    assert preview.text.visible is True and preview.hint.visible is False
+    assert preview.hint.value == ""
+    assert preview.surface.bgcolor == design.MC_PREVIEW_BG
+    assert panel.chars.box.visible is False  # 特殊字元對照開關與預覽分開
     assert "前後有空白" in panel.token_hint.value  # 結尾空白提醒
 
     panel.tw_field.value = "§a哈囉§r\n世界"  # 少了 %s
@@ -669,7 +1148,19 @@ def test_editor_hints_for_missing_tokens_whitespace_and_color_codes(special_entr
 
     panel.tw_field.value = "哈囉 %s\n世界"
     panel._on_text_change()
-    assert panel.token_hint.visible is False and panel.mc_preview.visible is False
+    assert panel.token_hint.visible is False
+    assert preview.control.visible is True and preview.text.visible is True
+    assert "哈囉 %s\n世界" == "".join(span.text or "" for span in preview.text.spans)
+
+    panel.tw_field.value = "§e§r"
+    panel._on_text_change()
+    assert preview.text.visible is False and preview.hint.visible is True
+    assert preview.hint.value == "目前只有格式碼，沒有可顯示的文字。"
+
+    panel.tw_field.value = ""
+    panel._on_text_change()
+    assert preview.text.visible is False and preview.hint.visible is True
+    assert preview.hint.value == "輸入譯文後，預覽會顯示在這裡。"
 
 
 def test_saving_keeps_newlines_codes_and_surrounding_whitespace(special_entries):
@@ -678,11 +1169,25 @@ def test_saving_keeps_newlines_codes_and_surrounding_whitespace(special_entries)
     panel.tw_field.value = " §c警告§r %s\n第二行\n"
     panel._on_text_change()
     panel._save()
+    panel._page._run_all_tasks()
     stored = panel.db().get_entry(panel.selected.id).zh_tw
     assert stored == " §c警告§r %s\n第二行\n"
 
 
 # ------------------------------------------------------------------ 翻譯 ZIP 匯入（掃描頁）
+def test_scan_panel_version_heading_explains_custom_version_input():
+    panel = scan_panel.ScanPanel(
+        mock_page(),
+        mock_filepicker(),
+        lambda: None,
+        defer_initial_refresh=True,
+    )
+
+    assert (
+        panel.version_card.title == "1　選擇遊戲版本（可輸入自訂版本或從下方清單選擇）"
+    )
+
+
 def test_scan_panel_zip_mode_switches_controls_and_options(db_path):
     panel = scan_panel.ScanPanel(mock_page(), mock_filepicker(), lambda: None)
     panel.version_field.value = "1.21.1"
@@ -759,7 +1264,9 @@ def test_scan_panel_imports_a_translated_zip_directly(db_path, tmp_path, monkeyp
 def test_entries_and_overview_show_unknown_original_text(db_path):
     db = TranslationDB(db_path)
     db.ingest("1.21.1", [ScanItem(KIND_LANG, "foo", "item.foo.a", "", "鋼製外殼")])
-    panel = entries_panel.EntriesPanel(mock_page(), lambda: db)
+    page = mock_page()
+    page.run_thread = lambda target: target()
+    panel = entries_panel.EntriesPanel(page, lambda: db)
     panel.refresh()
     assert entries_panel.NO_SOURCE_TEXT == panel.src_text.value
     assert "（原文未知）" in texts_of(panel.list_view)
@@ -767,6 +1274,692 @@ def test_entries_and_overview_show_unknown_original_text(db_path):
     overview = moddb_view.OverviewPanel(mock_page(), lambda: db)
     overview.refresh()
     assert "原文未知 1" in overview.stat_content.delta_text.value
+    db.close()
+
+
+def test_batch_replace_dialog_pages_all_rows_and_requires_preview_after_selection(
+    db_path,
+):
+    from app.services_impl.moddb_service import EntryFilter
+    from app.views.moddb.batch_replace_dialog import BatchReplaceDialog
+
+    db = TranslationDB(db_path)
+    db.ingest(
+        "1.21.1",
+        [
+            ScanItem(
+                KIND_LANG,
+                "batch",
+                f"item.batch.{index:03d}",
+                f"Source {index}",
+                f"譯文舊{index:03d}",
+            )
+            for index in range(55)
+        ],
+    )
+    dialog = BatchReplaceDialog(
+        mock_page(),
+        lambda: db,
+        EntryFilter(version="1.21.1"),
+        lambda _result: None,
+        operation_launcher=lambda target, **_kwargs: (target(), True)[1],
+    )
+    dialog.find_field.value = "舊"
+    dialog.replace_field.value = "新"
+    dialog._preview()
+
+    assert dialog.plan is not None and dialog.plan.update_count == 55
+    assert (
+        len(dialog.rows.controls) == 50
+        and dialog.next_btn.disabled is False
+        and dialog.page_nav.visible is True
+    )
+    dialog._turn(1)
+    assert len(dialog.rows.controls) == 5
+
+    first_id = dialog.plan.changes[0].entry_id
+    dialog._toggle_root(first_id, False)
+    assert dialog.plan is None and dialog.apply_btn.disabled is True
+    dialog._preview()
+    assert dialog.plan is not None and dialog.plan.update_count == 54
+    db.close()
+
+
+def test_batch_replace_dialog_makes_zero_matches_and_skip_reasons_clear(db_path):
+    from app.services_impl.moddb_service import EntryFilter
+    from app.views.moddb.batch_replace_dialog import BatchReplaceDialog
+
+    db = TranslationDB(db_path)
+    db.ingest(
+        "1.21.1",
+        [ScanItem(KIND_LANG, "batch", "item.batch", "Source", "已有譯文")],
+    )
+    dialog = BatchReplaceDialog(
+        mock_page(),
+        lambda: db,
+        EntryFilter(version="1.21.1"),
+        lambda _result: None,
+        operation_launcher=lambda target, **_kwargs: (target(), True)[1],
+    )
+    dialog.find_field.value = "青青"
+    dialog.replace_field.value = ""
+    dialog._preview()
+
+    assert dialog.plan is not None
+    assert dialog.plan.update_count == 0 and dialog.plan.skipped_count == 1
+    assert dialog.summary.value == "可替換 0 筆　·　略過 1 筆"
+    assert "沒有可替換項目" in "\n".join(texts_of(dialog.rows))
+    assert dialog.skipped_btn.disabled is False
+    assert dialog.skipped_btn.text == "查看略過原因（1）"
+    assert dialog.page_nav.visible is False
+
+    dialog._toggle_skipped()
+
+    assert dialog.skipped_btn.text == "查看可替換項目（0）"
+    assert dialog.page_nav.visible is True
+    assert "找不到符合的原文片段" in "\n".join(texts_of(dialog.rows))
+    db.close()
+
+
+def test_batch_replace_dialog_loads_skip_reasons_by_page(db_path):
+    from app.services_impl.moddb_service import EntryFilter
+    from app.views.moddb.batch_replace_dialog import BatchReplaceDialog
+
+    db = TranslationDB(db_path)
+    db.ingest(
+        "1.21.1",
+        [
+            ScanItem(KIND_LANG, "batch", f"item.batch.{index:03d}", "Source", "譯文")
+            for index in range(60)
+        ],
+    )
+    dialog = BatchReplaceDialog(
+        mock_page(),
+        lambda: db,
+        EntryFilter(version="1.21.1"),
+        lambda _result: None,
+        operation_launcher=lambda target, **_kwargs: (target(), True)[1],
+    )
+    dialog.find_field.value = "沒有這段文字"
+    dialog.replace_field.value = "新的文字"
+    dialog._preview()
+
+    assert dialog.plan is not None and dialog.plan.skipped_count == 60
+    assert dialog.plan.skipped_details_loaded is False
+    assert dialog._skipped_pages == {}
+
+    dialog._toggle_skipped()
+    assert len(dialog._skipped_pages[0]) == 50
+    assert dialog.page_text.value == "第 1/2 頁，每頁最多 50 筆"
+
+    dialog._turn(1)
+    assert len(dialog._skipped_pages[1]) == 10
+    assert dialog.page_text.value == "第 2/2 頁，每頁最多 50 筆"
+    db.close()
+
+
+def test_batch_replace_pending_selection_never_displays_executable_stale_extras(
+    db_path,
+):
+    from app.services_impl.moddb_service import EntryFilter
+    from app.views.moddb.batch_replace_dialog import BatchReplaceDialog
+
+    db = TranslationDB(db_path)
+    db.ingest(
+        "1.21.1",
+        [ScanItem(KIND_LANG, "same", "item.same", "Source", "原譯文")],
+    )
+    db.ingest(
+        "1.20.1",
+        [ScanItem(KIND_LANG, "same", "item.same", "Source", "原譯文")],
+    )
+    dialog = BatchReplaceDialog(
+        mock_page(),
+        lambda: db,
+        EntryFilter(version="1.21.1"),
+        lambda _result: None,
+        operation_launcher=lambda target, **_kwargs: (target(), True)[1],
+    )
+    dialog.find_field.value = "原"
+    dialog.replace_field.value = "新"
+    dialog.propagate.value = True
+    dialog._preview()
+    assert dialog.plan is not None
+    assert dialog.plan.extra_version_count == 1
+
+    root_id = dialog.plan.root_ids[0]
+    dialog._toggle_root(root_id, False)
+    assert dialog.plan is None
+    assert all("跨版本" not in text for text in texts_of(dialog.rows))
+    assert dialog.apply_btn.disabled is True
+
+    dialog._preview()
+    assert dialog.plan is not None and dialog.plan.root_ids == ()
+    assert dialog.plan.update_count == 0
+    assert dialog.apply_btn.disabled is True
+    assert all("跨版本" not in text for text in texts_of(dialog.rows))
+    db.close()
+
+
+def test_batch_replace_requires_second_confirmation_of_same_plan(db_path):
+    from app.services_impl.moddb_service import EntryFilter
+    from app.views.moddb.batch_replace_dialog import BatchReplaceDialog
+
+    db = TranslationDB(db_path)
+    db.ingest(
+        "1.21.1",
+        [ScanItem(KIND_LANG, "same", "item.same", "Source", "原譯文")],
+    )
+    page = mock_page()
+    dialog = BatchReplaceDialog(
+        page,
+        lambda: db,
+        EntryFilter(version="1.21.1"),
+        lambda _result: None,
+        operation_launcher=lambda target, **_kwargs: (target(), True)[1],
+    )
+    dialog.find_field.value = "原"
+    dialog.replace_field.value = "新"
+    dialog._preview()
+    approved_plan = dialog.plan
+    assert approved_plan is not None
+    dialog._open_final_confirmation()
+    assert dialog.final_summary.value.find("實際寫入 1") >= 0
+    assert len(page.overlay) == 1
+    dialog.final_ack.value = True
+    dialog.plan = None  # Any changed preview invalidates the final confirmation.
+    dialog._confirm_apply()
+    assert dialog._busy is False
+    assert db.list_entries("1.21.1")[0][0].zh_tw == "原譯文"
+    db.close()
+
+
+def test_batch_replace_final_confirmation_applies_exact_preview(db_path):
+    from app.services_impl.moddb_service import EntryFilter
+    from app.views.moddb.batch_replace_dialog import BatchReplaceDialog
+
+    db = TranslationDB(db_path)
+    db.ingest(
+        "1.21.1",
+        [ScanItem(KIND_LANG, "same", "item.same", "Source", "原譯文")],
+    )
+    page = mock_page()
+    completed = []
+    dialog = BatchReplaceDialog(
+        page,
+        lambda: db,
+        EntryFilter(version="1.21.1"),
+        completed.append,
+        operation_launcher=lambda target, **_kwargs: (target(), True)[1],
+    )
+    dialog.open()
+    dialog.find_field.value = "原"
+    dialog.replace_field.value = "新"
+    dialog._preview()
+    approved_plan = dialog.plan
+    assert approved_plan is not None
+    dialog._open_final_confirmation()
+    dialog.final_ack.value = True
+    dialog._confirm_apply()
+
+    assert len(completed) == 1
+    assert completed[0].updated == approved_plan.update_count == 1
+    row = db.list_entries("1.21.1")[0][0]
+    assert row.zh_tw == "新譯文"
+    assert row.review_status == "unreviewed"
+    assert dialog._dialog_open is False
+    db.close()
+
+
+def test_batch_replace_quality_ack_is_bound_to_one_exact_plan(db_path):
+    from app.services_impl.moddb_service import EntryFilter
+    from app.views.moddb.batch_replace_dialog import BatchReplaceDialog
+
+    db = TranslationDB(db_path)
+    db.ingest(
+        "1.21.1",
+        [
+            ScanItem(
+                KIND_LANG,
+                "quality",
+                f"item.quality.{index}",
+                "Hello %s",
+                "舊譯文",
+            )
+            for index in range(2)
+        ],
+    )
+    dialog = BatchReplaceDialog(
+        mock_page(),
+        lambda: db,
+        EntryFilter(version="1.21.1"),
+        lambda _result: None,
+        operation_launcher=lambda target, **_kwargs: (target(), True)[1],
+    )
+    dialog.find_field.value = "舊譯文"
+    dialog.replace_field.value = "新譯文%s%s"
+    dialog._preview()
+
+    plan_a = dialog.plan
+    assert plan_a is not None and plan_a.update_count == 2
+    assert all(change.quality_mixed for change in plan_a.changes)
+    assert plan_a.quality_mixed_count == plan_a.quality_worsened_count == 2
+    dialog.quality_ack.value = True
+    dialog._on_quality_ack()
+    approved_a = dialog.plan
+    assert approved_a is not None
+    assert approved_a.confirmed_quality_worsening is True
+
+    # A selection change starts a distinct plan. Its consent must not inherit A.
+    dialog._toggle_root(approved_a.root_ids[0], False)
+    assert dialog.quality_ack.value is False
+    assert dialog.plan is None
+    dialog._preview()
+    plan_b = dialog.plan
+    assert plan_b is not None and plan_b.update_count == 1
+    assert plan_b.confirmed_quality_worsening is False
+    assert dialog.quality_ack.visible is True
+    assert dialog.apply_btn.disabled is True
+
+    # Even an explicit fresh preview of the same current criteria needs consent again.
+    dialog.quality_ack.value = True
+    dialog._on_quality_ack()
+    assert dialog.plan.confirmed_quality_worsening is True
+    dialog._preview()
+    assert dialog.plan.confirmed_quality_worsening is False
+    assert dialog.quality_ack.value is False
+    assert dialog.apply_btn.disabled is True
+    db.close()
+
+
+def test_batch_replace_plan_precomputes_cross_version_summary_counts(db_path):
+    from app.services_impl.moddb_service import EntryFilter
+
+    db = TranslationDB(db_path)
+    db.ingest(
+        "1.21.1",
+        [ScanItem(KIND_LANG, "same", "item.same", "Source", "原譯文")],
+    )
+    db.ingest(
+        "1.20.1",
+        [ScanItem(KIND_LANG, "same", "item.same", "Source", "不同譯文")],
+    )
+    plan = db.preview_batch_replace(
+        EntryFilter(version="1.21.1"), "原", "新", propagate=True
+    )
+    assert plan.update_count == 1
+    assert plan.skipped_count == plan.conflict_count == 1
+    assert plan.extra_version_count == 0
+    assert plan.extra_candidate_count == 1
+    assert plan.total_unique_entries == 2
+    db.close()
+
+
+def test_batch_replace_completion_does_not_expand_large_root_selection():
+    from app.services_impl.moddb_batch_operation import BatchOperationOutcome
+    from app.services_impl.moddb_service import BatchReplacePlan, EntryFilter
+    from app.views.moddb.batch_replace_dialog import BatchReplaceDialog
+
+    class LargeRootIds(tuple):
+        def __new__(cls):
+            return super().__new__(cls, ())
+
+        def __len__(self):
+            return 243_064
+
+        def __iter__(self):
+            raise AssertionError("completion must not copy every root id")
+
+    plan = BatchReplacePlan(
+        database_identity="db",
+        criteria=EntryFilter(version="1.21.1"),
+        find_text="舊",
+        replace_text="新",
+        propagate=False,
+        root_ids=LargeRootIds(),
+        changes=(),
+        skipped=(),
+        total_unique_entries=243_064,
+        root_changes=(),
+    )
+    dialog = BatchReplaceDialog(
+        mock_page(), lambda: None, plan.criteria, lambda _result: None
+    )
+    dialog._finish_preview(
+        {"state": "complete"},
+        BatchOperationOutcome("preview", 0, "complete", result=plan),
+    )
+    assert dialog.selection_plan is plan
+    assert dialog.summary.value == "可替換 0 筆"
+
+
+def test_batch_replace_selection_criteria_use_sparse_exclusions():
+    from app.services_impl.moddb_service import EntryFilter
+    from app.views.moddb.batch_replace_dialog import BatchReplaceDialog
+
+    base = EntryFilter(version="1.21.1")
+    only_checked = BatchReplaceDialog._criteria_for_selection(
+        base, (10, 20, 30), {20}, True
+    )
+    current_range = BatchReplaceDialog._criteria_for_selection(
+        base, (10, 20, 30), {20}, False
+    )
+    assert only_checked.include_ids == (10, 30)
+    assert current_range.exclude_ids == (20,)
+
+
+def test_batch_replace_scope_change_invalidates_quality_ack(db_path):
+    from app.services_impl.moddb_service import EntryFilter
+    from app.views.moddb.batch_replace_dialog import BatchReplaceDialog
+
+    db = TranslationDB(db_path)
+    db.ingest(
+        "1.21.1",
+        [
+            ScanItem(KIND_LANG, "quality", f"item.q.{index}", "%s", "舊")
+            for index in range(2)
+        ],
+    )
+    dialog = BatchReplaceDialog(
+        mock_page(),
+        lambda: db,
+        EntryFilter(version="1.21.1"),
+        lambda _result: None,
+        operation_launcher=lambda target, **_kwargs: (target(), True)[1],
+    )
+    dialog.find_field.value = "舊"
+    dialog.replace_field.value = "新%s%s"
+    dialog._preview()
+    dialog.quality_ack.value = True
+    dialog._on_quality_ack()
+    assert dialog.plan.confirmed_quality_worsening is True
+
+    dialog.only_checked_control.value = False
+    dialog._on_scope_change()
+    assert dialog.plan is None
+    assert dialog.quality_ack.value is False
+    dialog._preview()
+    assert dialog.plan.confirmed_quality_worsening is False
+    db.close()
+
+
+def test_batch_replace_preview_shows_db_bound_identity_and_quality_details(db_path):
+    from dataclasses import replace
+
+    from app.services_impl.moddb_service import EntryFilter
+    from app.views.moddb.batch_replace_dialog import BatchReplaceDialog
+    from translation_tool.translation_db.models import (
+        BatchReplaceSkipped,
+        QualityIssueDelta,
+    )
+
+    db = TranslationDB(db_path)
+    db.ingest(
+        "1.21.1",
+        [ScanItem(KIND_LANG, "same", "item.same", "Hello %s", "舊譯文")],
+    )
+    with db._tx() as conn:
+        conn.execute(
+            "INSERT INTO meta(key,value) VALUES('custom_sources',?) "
+            "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            (json.dumps({"釘宮翻譯組": 100}),),
+        )
+    db.source_catalog = db._load_source_catalog()
+    base = db.preview_batch_replace(EntryFilter(version="1.21.1"), "舊", "新")
+    template = base.changes[0]
+    deltas = (
+        QualityIssueDelta("%s", "missing", 2, 1),
+        QualityIssueDelta("§a", "extra", 0, 1),
+        QualityIssueDelta("$(s0)", "missing", 1, 0),
+        QualityIssueDelta("\\n", "extra", 0, 1),
+        QualityIssueDelta("\n", "missing", 1, 0),
+    )
+    sources = ((0, None), (1, None), (3, None), (6, "legacy_unknown"), (100, None))
+    rows = tuple(
+        replace(
+            template,
+            entry_id=index + 1,
+            key=f"item.preview.{index}",
+            en_us=f"English source {index}\\nwith a second line",
+            effective_source=source,
+            effective_review_status=status,
+            is_extra_version=index == 4,
+            quality_deltas=deltas,
+        )
+        for index, (source, status) in enumerate(sources)
+    )
+    dialog = BatchReplaceDialog(
+        mock_page(),
+        lambda: db,
+        EntryFilter(version="1.21.1"),
+        lambda _result: None,
+    )
+    dialog._plan_catalog = db.source_catalog
+    texts = [
+        text for control in dialog._render_rows(rows) for text in texts_of(control)
+    ]
+    visible = "\n".join(texts)
+
+    assert "English source 0\\nwith a second line" in visible
+    assert "生效來源：釘宮翻譯組〔3〕" in visible
+    assert "生效來源：釘宮翻譯組（自訂 #100）〔100〕" in visible
+    assert "人工（歷史狀態待確認）" in visible
+    assert "人工審核：不適用" in visible
+    assert "跨版本額外項目" in visible
+    assert "缺少佔位符 `%s`：2 → 1" in visible
+    assert "多出 Minecraft 色碼 `§a`：0 → 1" in visible
+    assert "缺少 Patchouli 巨集 `$(s0)`：1 → 0" in visible
+    assert "字面 \\n" in visible and "實際換行" in visible
+    detail_lines = [text for text in texts if text.startswith("生效來源：")]
+    assert len(detail_lines) == 5
+    assert all(
+        "人工審核：不適用" in text for text in detail_lines if "〔6〕" not in text
+    )
+    assert not any(
+        "歷史狀態待確認" in text and "〔6〕" not in text for text in detail_lines
+    )
+    dialog.show_skipped = True
+    skipped_text = "\n".join(
+        text
+        for control in dialog._render_rows(
+            [BatchReplaceSkipped(99, "1.20.1", "item.skipped", "來源狀態不一致")]
+        )
+        for text in texts_of(control)
+    )
+    assert "item.skipped：來源狀態不一致" in skipped_text
+    db.close()
+
+
+def test_batch_worker_keeps_large_plan_out_of_task_session_summary(
+    db_path, monkeypatch
+):
+    from dataclasses import replace
+
+    from app.services_impl.moddb_batch_operation import (
+        BatchOperationResult,
+        launch_batch_replace_job,
+    )
+    from app.services_impl.moddb_service import EntryFilter
+    from translation_tool.translation_db.models import BatchReplacePlan
+
+    db = TranslationDB(db_path)
+    db.ingest(
+        "1.21.1",
+        [
+            ScanItem(
+                KIND_LANG, "large", "item.large", "Sensitive English", "Sensitive 繁中"
+            )
+        ],
+    )
+    base = db.preview_batch_replace(
+        EntryFilter(version="1.21.1"), "Sensitive", "Updated"
+    )
+    row = base.changes[0]
+    large_plan = replace(
+        base,
+        root_ids=tuple(range(10_000)),
+        changes=tuple(
+            replace(row, entry_id=index + 1, key=f"item.large.{index}")
+            for index in range(10_000)
+        ),
+    )
+
+    def fail_plan_repr(_self):
+        pytest.fail("TaskSession.finish must not stringify a complete batch plan")
+
+    monkeypatch.setattr(BatchReplacePlan, "__repr__", fail_plan_repr)
+    lifecycle = []
+    monkeypatch.setattr(
+        TaskSession,
+        "_log_lifecycle",
+        lambda _session, text, _level="info": lifecycle.append(text),
+    )
+    channel = BatchOperationResult("preview", 19)
+    session, launched = launch_batch_replace_job(
+        mock_page(),
+        kind="preview",
+        generation=19,
+        work=lambda _session: large_plan,
+        result_channel=channel,
+        operation_launcher=lambda target, **_kwargs: (target(), True)[1],
+    )
+
+    assert launched is True
+    assert session.is_finished
+    assert session.summary["update_count"] == 10_000
+    assert "result" not in session.summary
+    lifecycle_text = " ".join(lifecycle)
+    assert "Sensitive English" not in lifecycle_text
+    assert "Sensitive 繁中" not in lifecycle_text
+    delivered = channel.take(session, "preview", 19)
+    assert delivered is not None and delivered.result is large_plan
+    db.close()
+
+
+def test_batch_worker_result_channels_isolate_workspaces_and_discard_late_results(
+    db_path,
+):
+    from app.services_impl.moddb_batch_operation import (
+        BatchOperationResult,
+        launch_batch_replace_job,
+    )
+
+    jobs = []
+    channel_a = BatchOperationResult("preview", 3)
+    channel_b = BatchOperationResult("preview", 9)
+    session_a, launched_a = launch_batch_replace_job(
+        mock_page(),
+        kind="preview",
+        generation=3,
+        work=lambda _session: {"database": "workspace-a"},
+        result_channel=channel_a,
+        operation_launcher=lambda target, **_kwargs: (jobs.append(target), True)[1],
+    )
+    session_b, launched_b = launch_batch_replace_job(
+        mock_page(),
+        kind="preview",
+        generation=9,
+        work=lambda _session: {"database": "workspace-b"},
+        result_channel=channel_b,
+        operation_launcher=lambda target, **_kwargs: (jobs.append(target), True)[1],
+    )
+    assert launched_a is True and launched_b is True
+
+    # Complete out of order: no channel can consume another job's payload.
+    jobs[1]()
+    jobs[0]()
+    assert channel_a.take(session_b, "preview", 9) is None
+    result_a = channel_a.take(session_a, "preview", 3)
+    result_b = channel_b.take(session_b, "preview", 9)
+    assert result_a is not None and result_a.result == {"database": "workspace-a"}
+    assert result_b is not None and result_b.result == {"database": "workspace-b"}
+
+    discarded = BatchOperationResult("preview", 11)
+    session_c, _launched_c = launch_batch_replace_job(
+        mock_page(),
+        kind="preview",
+        generation=11,
+        work=lambda _session: {"database": "closed-dialog"},
+        result_channel=discarded,
+        operation_launcher=lambda target, **_kwargs: (jobs.append(target), True)[1],
+    )
+    discarded.discard()
+    jobs[2]()
+    assert discarded.take(session_c, "preview", 11) is None
+
+
+def test_closed_batch_preview_discards_a_late_plan(db_path, monkeypatch):
+    from app.services_impl.moddb_service import EntryFilter
+    from app.views.moddb.batch_replace_dialog import BatchReplaceDialog
+
+    db = TranslationDB(db_path)
+    db.ingest(
+        "1.21.1",
+        [ScanItem(KIND_LANG, "late", "item.late", "Source", "舊譯文")],
+    )
+    plan = db.preview_batch_replace(EntryFilter(version="1.21.1"), "舊", "新")
+    monkeypatch.setattr(db, "preview_batch_replace", lambda *_args, **_kwargs: plan)
+    jobs = []
+    dialog = BatchReplaceDialog(
+        mock_page(),
+        lambda: db,
+        EntryFilter(version="1.21.1"),
+        lambda _result: None,
+        operation_launcher=lambda target, **_kwargs: (jobs.append(target), True)[1],
+    )
+    dialog.open()
+    dialog.find_field.value = "舊"
+    dialog.replace_field.value = "新"
+    dialog._preview()
+    session = dialog._job_session
+    channel = dialog._job_result
+    assert dialog._busy and session is not None and channel is not None
+
+    dialog._close_dialog()
+    assert dialog.plan is None
+    jobs[0]()  # Simulate a worker that finished after its dialog was dismissed.
+    dialog._sync_worker()
+
+    assert session.is_finished
+    assert dialog.plan is None
+    assert not dialog._busy
+    assert "result" not in session.summary
+    assert channel.take(session, "preview", session.summary["generation"]) is None
+    assert "預覽已失效" in dialog.progress_text.value
+    db.close()
+
+
+def test_invalid_custom_date_has_error_state_and_blocks_batch_query(db_path):
+    seed(db_path)
+    db = TranslationDB(db_path)
+    page = mock_page()
+    page.run_thread = lambda target: target()
+    panel = entries_panel.EntriesPanel(page, lambda: db)
+    panel.refresh()
+    panel.advanced_filters.time_kind.value = "effective_updated"
+    panel.advanced_filters.time_preset.value = "custom"
+    panel.advanced_filters.start_date.value = "2026-02-30"
+    panel.advanced_filters.end_date.value = "2026-03-01"
+    panel.advanced_filters._custom_changed()
+
+    assert panel._list_error == "日期格式請使用 YYYY-MM-DD"
+    assert panel.count_badge.value.startswith("日期條件錯誤：")
+    assert panel.batch_replace_btn.disabled is True
+    assert "無法套用日期篩選" in texts_of(panel.list_view)
+    with pytest.raises(ValueError, match="日期格式"):
+        panel.advanced_filters.time_filter()
+
+    # Changing another filter cannot silently turn an invalid custom date into
+    # an ordinary empty result set.
+    panel.advanced_filters.time_kind.value = "none"
+    panel.advanced_filters._selection_changed()
+    assert panel._list_error is not None
+    assert panel.batch_replace_btn.disabled is True
+
+    panel.advanced_filters.start_date.value = "2026-03-01"
+    panel.advanced_filters._custom_changed()
+    assert panel._list_error is None
+    assert panel.count_badge.value.endswith("筆")
     db.close()
 
 
@@ -900,23 +2093,26 @@ def test_visible_segments_exposes_newline_spaces_and_tokens():
 
 
 def test_switching_back_to_a_running_tab_resumes_polling(db_path, monkeypatch):
-    """機翻／掃描進行中切到別的頁籤再回來：面板卸載時輪詢已停，必須接續輪詢，畫面才不會卡住。"""
+    """隱藏機翻／掃描頁時停止輪詢，切回保留的面板時接續輪詢。"""
     seed(db_path)
     view = moddb_view.ModDbView(mock_page(), mock_filepicker())
     for panel, key in ((view.translate, "translate"), (view.scan, "scan")):
         started = []
+        stopped = []
         monkeypatch.setattr(
             panel._poller,
             "start",
             lambda page, handler, _s=started: _s.append(1) or True,
         )
+        monkeypatch.setattr(panel._poller, "stop", lambda _s=stopped: _s.append(1))
         panel.session = TaskSession()
         panel._running = True
-        panel.will_unmount()  # 離開頁籤：面板被卸載、輪詢停止
-        view.show_tab("entries")
-        assert started == []  # 不在這個頁籤時不需要輪詢
         view.show_tab(key)
-        assert started == [1], f"{key} 切回來後沒有接續輪詢"
+        assert started == [1], f"{key} 頁籤選取後沒有接續輪詢"
+        view.show_tab("entries")
+        assert stopped == [1], f"隱藏 {key} 時沒有停止輪詢"
+        view.show_tab(key)
+        assert started == [1, 1], f"{key} 切回來後沒有接續輪詢"
 
 
 def test_overview_kpi_cards_share_one_layout_contract(db_path):
@@ -965,7 +2161,9 @@ def test_entries_save_keeps_scroll_position_and_selects_the_next_entry(db_path):
         "1.21.1",
         [ScanItem(KIND_LANG, "foo", f"item.foo.{i}", f"Text {i}") for i in range(6)],
     )
-    panel = entries_panel.EntriesPanel(mock_page(), lambda: db)
+    page = mock_page()
+    page.run_thread = lambda target: target()
+    panel = entries_panel.EntriesPanel(page, lambda: db)
     panel.refresh()
     scrolls: list[float] = []
     panel._scroll_list_to = scrolls.append  # 記錄清單被捲到哪裡
@@ -980,6 +2178,7 @@ def test_entries_save_keeps_scroll_position_and_selects_the_next_entry(db_path):
     panel.tw_field.value = "文字二"
     panel._on_text_change()
     panel._save()
+    page._run_all_tasks()
 
     assert scrolls[-1] == 420.0  # 儲存後維持捲動位置，不跳回最上方
     assert [r.key for r in panel.rows] == keys[:2] + keys[3:]  # 存好的不再是「未翻譯」
@@ -998,7 +2197,9 @@ def test_entries_save_on_the_last_row_of_the_last_page_goes_back_a_page(db_path)
             for i in range(count)
         ],
     )
-    panel = entries_panel.EntriesPanel(mock_page(), lambda: db)
+    page = mock_page()
+    page.run_thread = lambda target: target()
+    panel = entries_panel.EntriesPanel(page, lambda: db)
     panel.refresh()
     panel._on_state("none")
     panel._load_list(page=2, keep_selection=False)
@@ -1006,6 +2207,7 @@ def test_entries_save_on_the_last_row_of_the_last_page_goes_back_a_page(db_path)
     panel.tw_field.value = "最後一筆"
     panel._on_text_change()
     panel._save()
+    page._run_all_tasks()
     assert panel.pager.current_page == 1 and len(panel.rows) == entries_panel.PAGE_SIZE
     db.close()
 

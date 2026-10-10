@@ -244,6 +244,10 @@ class _CompiledRules:
 
     def may_hit(self, text: str) -> bool:
         """等同舊版逐條 `k in text or k 去空白 in text 去空白` 的預檢（O(文字長度)）。"""
+        # Regex patterns do not have literal-prefix keywords; a fixed-rule miss
+        # must not suppress regex rules that can still match the input.
+        if self.regex_rules:
+            return True
         if not self.spaceless_keywords:
             return True
         if "" in self.spaceless_keywords:

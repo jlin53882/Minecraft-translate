@@ -29,6 +29,7 @@ class ChatGPTOAuthPanel:
         model_control: ft.Dropdown,
         on_models_loaded: Callable[[list, str], None],
         on_models_invalidated: Callable[[str], None] | None = None,
+        models_valid: Callable[[], bool] | None = None,
     ) -> None:
         self.page = page
         self.model_control = model_control
@@ -36,6 +37,7 @@ class ChatGPTOAuthPanel:
         self.on_models_invalidated = on_models_invalidated or (
             lambda _message: self.on_models_loaded([], "")
         )
+        self.models_valid = models_valid or (lambda: True)
         self._pending_login = None
         self._busy = False
         self._switching_account = False
@@ -165,7 +167,9 @@ class ChatGPTOAuthPanel:
             account.get("oauth_session_present") or connected
         )
         has_model = any(option.key for option in self.model_control.options)
-        self.model_control.disabled = self._busy or not connected or not has_model
+        self.model_control.disabled = (
+            self._busy or not connected or not has_model or not self.models_valid()
+        )
 
     async def _on_login(self, _event=None) -> None:
         await self._start_login()

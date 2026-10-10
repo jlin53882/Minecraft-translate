@@ -12,7 +12,6 @@ import threading
 import flet as ft
 
 from app.services_impl.moddb_service import (
-    SOURCE_NAMES,
     SRC_CUSTOM,
     SRC_I18N,
     SRC_JAR_TW,
@@ -20,7 +19,6 @@ from app.services_impl.moddb_service import (
     SRC_SUBTITLE,
     ScanOptions,
     current_settings,
-    custom_source_codes,
     pack_format_hint,
     run_moddb_scan_service,
     version_choices,
@@ -46,7 +44,13 @@ class ScanPanel(ft.Column):
     """掃描匯入頁籤。"""
 
     def __init__(
-        self, page: ft.Page, file_picker: ft.FilePicker, get_db, on_finished=None
+        self,
+        page: ft.Page,
+        file_picker: ft.FilePicker,
+        get_db,
+        on_finished=None,
+        *,
+        defer_initial_refresh: bool = False,
     ):
         super().__init__(expand=True, spacing=12, scroll=ft.ScrollMode.AUTO)
         self._page = page
@@ -57,12 +61,17 @@ class ScanPanel(ft.Column):
         self._running = False
         self._poller = PollerHandle()
         self._versions: list[str] = []
+        self._db_versions: set[str] = set()
         self.mode = "jar"
+        self.refresh_indicator = ft.Text(
+            "背景更新版本清單中…", size=12, color=C.MUTED, visible=False
+        )
 
         self._build_version_card()
         self._build_options_card()
         self._build_run_card()
         self.controls = [
+            self.refresh_indicator,
             ft.Row(
                 [
                     ft.Container(self.version_card, expand=1),
@@ -73,13 +82,16 @@ class ScanPanel(ft.Column):
             ),
             self.run_card,
         ]
-        self.refresh_versions()
+        # ModDbView defers this until the scan tab is selected. The overview
+        # loader owns the first database connection and must not be preceded by
+        # a synchronous open from this hidden panel during page construction.
+        if not defer_initial_refresh:
+            self.refresh_versions()
 
     # ------------------------------------------------------------------ 建構
     def _build_version_card(self) -> None:
         self.version_field = kit.text_field(
             "遊戲版本",
-            hint="可手動輸入，例如 1.21.1，或從下方清單選擇",
             value=current_settings().version,
             on_change=self._on_version_typed,
             expand=True,
@@ -92,7 +104,7 @@ class ScanPanel(ft.Column):
         )
         self.version_list = ft.ListView(spacing=0, height=170)
         self.version_card = kit.section_card(
-            "1　選擇遊戲版本",
+            "1　選擇遊戲版本（可輸入自訂版本或從下方清單選擇）",
             ft.Column(
                 [
                     self.version_field,
@@ -308,12 +320,12 @@ class ScanPanel(ft.Column):
         settings = current_settings()
         allowed = [
             *ZIP_SOURCES,
-            *custom_source_codes(),
+            *settings.source_catalog.custom_codes,
         ]  # 自訂來源也能當 ZIP 的來源標記
         order = [c for c in settings.priority if c in allowed]
         order += [c for c in allowed if c not in order]
         kit.set_dropdown_options(
-            self.source_dd, [(str(c), SOURCE_NAMES[c]) for c in order]
+            self.source_dd, [(str(c), settings.source_catalog.label(c)) for c in order]
         )
         if not self._source_touched:
             default = settings.zip_source
@@ -325,15 +337,25 @@ class ScanPanel(ft.Column):
     def refresh_versions(self) -> None:
         self._refresh_source_options()
         db = self._get_db()
+        self._db_versions = set(db.versions()) if db else set()
         self._versions = version_choices(db)
         self._render_versions()
         self._on_version_typed()
 
+    def apply_refresh_snapshot(self, snapshot: dict) -> None:
+        """Apply the background-loaded version choices and database markers."""
+        self._refresh_source_options()
+        self._versions = snapshot.get("versions", [])
+        self._db_versions = snapshot.get("database_versions", set())
+        self._render_versions()
+        self._on_version_typed()
+        self.refresh_indicator.value = str(snapshot.get("error") or "")
+        self.refresh_indicator.visible = bool(snapshot.get("error"))
+
     def _render_versions(self) -> None:
         q = (self.version_search.value or "").strip().lower()
         chosen = (self.version_field.value or "").strip()
-        db = self._get_db()
-        in_db = set(db.versions()) if db else set()
+        in_db = self._db_versions
         rows: list[ft.Control] = []
         for label in self._versions:
             if q and q not in label.lower():

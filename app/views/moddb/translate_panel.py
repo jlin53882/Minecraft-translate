@@ -40,6 +40,9 @@ from app.ui.status_chip import apply_status_style, set_chip_status
 from app.views._log import LogView, load_ui_logging_config
 from app.views.moddb import retranslation_controller
 from app.views.moddb.formatting import format_count
+from app.views.moddb.repair_card import create_repair_card, repair_copy
+from app.views.moddb.repair_summary import repair_summary_detail_lines
+from app.views.moddb.result_inspector import TranslationResultInspector
 from translation_tool.utils.config_manager import load_config
 from translation_tool.utils.log_unit import log_debug, log_info, log_warning
 
@@ -58,22 +61,38 @@ class TranslatePanel(ft.Column):
         self._page = page
         self._get_db = get_db
         self._on_finished = on_finished
-        # on_view_flagged(條目 id 清單, {id: AI 譯文}, 版本)：跳到條目校對檢視「特殊字元不一致」的條目
-        self._on_view_flagged = on_view_flagged
-        self._flagged: dict[int, str] = {}
+        self._repair_summary: dict | None = None
+        self._repair_summary_final = True
+        self.result_inspector = TranslationResultInspector(
+            page,
+            on_view_flagged,
+            on_repair_review_changed=self._on_repair_review_changed,
+        )
+        self.view_flagged_btn = self.result_inspector.button
         self._run_version = ""
         self._repair_preview = None
         self._repair_preview_db_identity: tuple[str, tuple[int, ...]] | None = None
         self._repair_preview_generation = 0
         self._repair_preview_running = False
+        self._repair_mode = "quality_mismatch"
+        self._kpi_repair_condition = self._repair_mode
         self.session: TaskSession | None = None
         self._running = False
         self._poller = PollerHandle()
+        self.refresh_indicator = ft.Text(
+            "背景更新機翻範圍中…", size=12, color=C.MUTED, visible=False
+        )
 
         self._build_scope_card()
         self._build_run_card()
+        self._bind_kpi_titles()
         self._build_repair_card()
-        self.controls = [self.scope_card, self.run_card, self.repair_card]
+        self.controls = [
+            self.refresh_indicator,
+            self.scope_card,
+            self.run_card,
+            self.repair_card,
+        ]
 
     # ------------------------------------------------------------------ 建構
     def _build_scope_card(self) -> None:
@@ -118,7 +137,8 @@ class TranslatePanel(ft.Column):
                     kit.hint_text(
                         "只翻譯「沒有任何譯文」的條目，不會動既有的人工、模組自帶或匯入譯文。"
                         "結果標記為「AI 機翻」（優先序最低，之後補上人工或匯入的譯文會自動蓋過）。"
-                        "翻完會檢查換行、§ 格式碼、%s 佔位符是否與原文一致，不一致者不寫入並在日誌列出。"
+                        "翻完會檢查換行、§ 格式碼、佔位符與 Patchouli 標記是否與原文一致；不一致者不寫入。"
+                        "既有來源譯文也可在下方預覽並修復。"
                     ),
                 ],
                 spacing=10,
@@ -170,15 +190,6 @@ class TranslatePanel(ft.Column):
             expand=1,
             head_height=STAT_HEAD_HEIGHT,
         )
-        self.view_flagged_btn = kit.button(
-            "檢視",
-            "secondary",
-            size="sm",
-            icon=ft.Icons.FILTER_ALT_OUTLINED,
-            tooltip="跳到條目校對，只看這次「特殊字元不一致、沒寫入」的條目（已預填 AI 譯文）",
-            on_click=lambda _e: self._view_flagged(),
-        )
-        self.view_flagged_btn.visible = False
         self.stat_flagged = kit.stat_card(
             "特殊字元不一致",
             "—",
@@ -227,57 +238,49 @@ class TranslatePanel(ft.Column):
             tone="em",
         )
 
+    def _bind_kpi_titles(self) -> None:
+        self._kpi_titles = {
+            "first": self.stat_reused,
+            "second": self.stat_written,
+            "third": self.stat_flagged,
+            "fourth": self.stat_remaining,
+        }
+        self._kpi_mode = "normal"
+        self._set_kpi_mode("normal")
+
     def _build_repair_card(self) -> None:
-        self.repair_preview_btn = kit.button(
-            "預覽符合條件的舊 AI 譯文",
-            "secondary",
-            icon=ft.Icons.VISIBILITY_OUTLINED,
-            on_click=self.preview_retranslation,
+        controls = create_repair_card(
+            self._repair_mode,
+            on_mode_change=self._on_repair_mode_changed,
+            on_preview=self.preview_retranslation,
+            on_confirm=self.confirm_retranslation,
         )
-        self.repair_start_btn = kit.button(
-            "重新翻譯",
-            "primary",
-            icon=ft.Icons.AUTO_AWESOME,
-            on_click=self.confirm_retranslation,
-        )
-        self.repair_preview_text = ft.Text(
-            "來源：AI 機翻。人工、模組自帶及其他來源不會被重新翻譯。",
-            size=13,
-            color=C.TEXT,
-            selectable=True,
-        )
-        self.repair_samples = ft.Column(spacing=4)
-        self.repair_summary_text = ft.Text(
-            "重翻結果會只更新 AI 機翻來源，不會改動人工或其他來源。",
-            size=12.5,
-            color=C.MUTED,
-            selectable=True,
-        )
-        self.repair_card = kit.section_card(
-            "3　舊 AI 譯文修復",
-            ft.Column(
-                [
-                    kit.hint_text(
-                        "重新翻譯「目前生效來源為 AI 機翻，且譯文與原文完全相同」的舊資料。"
-                        "會略過舊快取；只更新所選版本／模組中的 AI 來源，不會跨版本同步。"
-                        "PR #177 的同文重試仍依設定執行。操作方式：先按「預覽符合條件的舊 AI 譯文」，"
-                        "檢查候選筆數與樣本，再按「重新翻譯」並確認開始。版本、模組或筆數上限變更後，"
-                        "預覽會失效，必須重新預覽。"
-                    ),
-                    ft.Row(
-                        [self.repair_preview_btn, self.repair_start_btn],
-                        spacing=10,
-                        wrap=True,
-                    ),
-                    self.repair_preview_text,
-                    self.repair_samples,
-                    self.repair_summary_text,
-                ],
-                spacing=10,
-            ),
-            icon=ft.Icons.BUILD_CIRCLE_OUTLINED,
-            tone="gold",
-        )
+        self.repair_card = controls.card
+        self.repair_mode_group = controls.mode_group
+        self.repair_preview_btn = controls.preview_button
+        self.repair_start_btn = controls.start_button
+        self.repair_preview_text = controls.preview_text
+        self.repair_explainer = controls.explainer
+        self.repair_samples = controls.samples
+        self.repair_summary_text = controls.summary
+
+    def _repair_default_text(self) -> str:
+        return repair_copy(self._repair_mode)[0]
+
+    def _repair_explanation(self) -> str:
+        return repair_copy(self._repair_mode)[1]
+
+    def _on_repair_mode_changed(self, e=None) -> None:
+        value = getattr(getattr(e, "control", None), "value", None)
+        if value not in {"quality_mismatch", "same_source_ai"}:
+            return
+        if value == self._repair_mode:
+            return
+        self._repair_mode = value
+        self.repair_explainer.value = self._repair_explanation()
+        self._reset_stats(mode="repair")
+        self._clear_repair_preview()
+        self._safe_update()
 
     # ------------------------------------------------------------------ 範圍
     def refresh_scope(self) -> None:
@@ -294,6 +297,33 @@ class TranslatePanel(ft.Column):
             self.version_dd.value = versions[0] if versions else None
         self._refresh_mods()
         self._refresh_counts()
+
+    def apply_refresh_snapshot(self, snapshot: dict) -> None:
+        """Apply worker-loaded scope and counts without blocking the page thread."""
+        identity = snapshot.get("identity")
+        if (
+            self._repair_preview is not None
+            and self._repair_preview_db_identity != identity
+        ):
+            self._clear_repair_preview()
+        versions = snapshot.get("versions", [])
+        kit.set_dropdown_options(self.version_dd, [(v, v) for v in versions])
+        self.version_dd.value = snapshot.get("version")
+        mods = snapshot.get("mods", [])
+        kit.set_dropdown_options(
+            self.mod_dd, [(ALL_MODS, "全部模組"), *((m, m) for m in mods)]
+        )
+        self.mod_dd.value = snapshot.get("mod", ALL_MODS)
+        if snapshot.get("error"):
+            self.count_text.value = f"資料載入失敗：{snapshot['error']}"
+        elif not versions:
+            self.count_text.value = "資料庫還沒有資料，請先到「掃描匯入」建立"
+        else:
+            self._set_count_text(
+                snapshot.get("missing", 0), snapshot.get("reusable", 0)
+            )
+        self.refresh_indicator.value = str(snapshot.get("error") or "")
+        self.refresh_indicator.visible = bool(snapshot.get("error"))
 
     @staticmethod
     def _database_identity(db):
@@ -336,6 +366,9 @@ class TranslatePanel(ft.Column):
         reusable = (
             db.count_reusable(version, self.mod_ids()) if self.reuse_row.value else 0
         )
+        self._set_count_text(missing, reusable)
+
+    def _set_count_text(self, missing: int, reusable: int) -> None:
         limit = self.limit()
         to_ai = max(0, missing - reusable)  # 沿用其他版本的不送 AI
         will = min(to_ai, limit) if limit else to_ai
@@ -365,7 +398,6 @@ class TranslatePanel(ft.Column):
     def _update_repair_start_button(self, *, running: bool | None = None) -> None:
         retranslation_controller.update_start_button(self, running=running)
 
-    # ------------------------------------------------------------------ 事件
     def build_options(self, *, dry_run: bool = False) -> TranslateOptions:
         return TranslateOptions(
             version=self.version_dd.value or "",
@@ -394,7 +426,7 @@ class TranslatePanel(ft.Column):
         self.progress_bar.value = 0
         self.live_text.value = ""
         self.log_view.clear()
-        self._reset_stats()
+        self._reset_stats(mode="normal")
         self._safe_update()
         launched = launch_page_operation(
             self._page,
@@ -442,39 +474,35 @@ class TranslatePanel(ft.Column):
             )
             self._safe_update()
             return
+        self._reset_stats(mode="repair")
         options = self.build_options()
         session = tag_session(
-            TaskSession(), "Mod 資料庫舊 AI 重翻", "moddb", page=self._page
+            TaskSession(),
+            "Mod 資料庫特殊字元修復"
+            if preview.mode == "quality_mismatch"
+            else "Mod 資料庫舊 AI 重翻",
+            "moddb",
+            page=self._page,
         )
         self.session = session
         self._run_version = str(options.version)
-        self._set_status("舊 AI 重翻中", "dia")
+        self._set_status(
+            "來源譯文修復中" if preview.mode == "quality_mismatch" else "舊 AI 重翻中",
+            "dia",
+        )
         self._set_running(True)
         self.progress_bar.value = 0
         self.live_text.value = ""
         self.log_view.clear()
-        self.repair_summary_text.value = "重翻進行中；未成功完成的項目會保留舊譯文。"
+        self.repair_summary_text.value = (
+            "正在修復所選來源譯文；結果仍不一致、失敗或資料已變動時會保留原譯文。"
+            if preview.mode == "quality_mismatch"
+            else "重翻進行中；未成功完成的項目會保留舊譯文。"
+        )
         self._safe_update()
-        launch_error = None
-        try:
-            launched = launch_page_operation(
-                self._page,
-                lambda: run_moddb_retranslate_service(
-                    options, session, preview.entries
-                ),
-                name="Mod 資料庫舊 AI 重翻",
-                owner="moddb-retranslate",
-                task_session=session,
-                commit=CommitPolicy.PARTIAL_ALLOWED,
-                durability=DurabilityPolicy.USER_ACTION,
-                shutdown=ShutdownPolicy.CANCEL_AND_DRAIN,
-                fallback_launcher=retranslation_controller.launch_standalone_worker,
-            )
-        except Exception as exc:  # noqa: BLE001 - restore UI if worker launch fails
-            launched = False
-            launch_error = exc
-            log_warning(f"Mod 資料庫舊 AI 重翻無法啟動：{exc!r}")
-
+        launched, launch_error = self._launch_retranslation_worker(
+            preview, options, session
+        )
         if not launched:
             self.session = None
             self._set_running(False)
@@ -490,6 +518,36 @@ class TranslatePanel(ft.Column):
         self._running = True
         if not self._poller.running:
             self._poller.start(self._page, self._poll)
+
+    def _launch_retranslation_worker(self, preview, options, session):
+        """Register the repair worker with the page-owned operation lifecycle."""
+        name = (
+            "Mod 資料庫特殊字元修復"
+            if preview.mode == "quality_mismatch"
+            else "Mod 資料庫舊 AI 重翻"
+        )
+        try:
+            launched = launch_page_operation(
+                self._page,
+                lambda: run_moddb_retranslate_service(
+                    options,
+                    session,
+                    preview.entries,
+                    mode=preview.mode,
+                    review_preview=preview,
+                ),
+                name=name,
+                owner="moddb-retranslate",
+                task_session=session,
+                commit=CommitPolicy.PARTIAL_ALLOWED,
+                durability=DurabilityPolicy.USER_ACTION,
+                shutdown=ShutdownPolicy.CANCEL_AND_DRAIN,
+                fallback_launcher=retranslation_controller.launch_standalone_worker,
+            )
+        except Exception as exc:  # noqa: BLE001 - caller restores the UI state
+            log_warning(f"{name}無法啟動：{exc!r}")
+            return False, exc
+        return launched, None
 
     def cancel_clicked(self, _e=None) -> None:
         if self.session is None or not self._running:
@@ -517,7 +575,6 @@ class TranslatePanel(ft.Column):
         self._set_status("畫面更新失敗，請查看日誌（任務可能已結束）", "red")
         self._safe_update()
 
-    # ------------------------------------------------------------------ 輪詢
     async def _poll(self, alive=lambda: True) -> None:
         while alive() and self._running:
             try:
@@ -537,13 +594,15 @@ class TranslatePanel(ft.Column):
         self.progress_bar.value = float(snap.get("progress", 0) or 0)
         self.log_view.sync_entries(snap.get("logs", []) or [], update=False)
         status = (snap.get("status") or "").upper()
-        live = (snap.get("summary") or {}).get("live")
+        summary = snap.get("summary") or {}
+        if summary:
+            self._apply_summary(summary, final=status in ("DONE", "ERROR"))
+        live = summary.get("live")
         if live and status not in ("DONE", "ERROR"):
             self.live_text.value = format_live(
                 tick_live(live)
             )  # 已用時間每次輪詢都更新
         if status in ("DONE", "ERROR"):
-            summary = snap.get("summary") or {}
             if summary.get("batches"):
                 self.live_text.value = (
                     f"共送出 {summary['batches']:,} 批，"
@@ -564,8 +623,12 @@ class TranslatePanel(ft.Column):
             elif summary.get("status") not in (None, "DONE"):
                 self._set_status(f"未完成（{summary.get('status')}）", "gold")
             else:
-                self._set_status("機翻完成", "em")
-            self._apply_summary(summary)
+                if summary.get("operation") == "repair_special_character_mismatch":
+                    self._set_status("譯文修復完成", "em")
+                elif summary.get("operation") == "retranslate_same_source_ai":
+                    self._set_status("舊 AI 重翻完成", "em")
+                else:
+                    self._set_status("機翻完成", "em")
             self._running = False
             self._set_running(False)
             if self._on_finished and not summary.get("dry_run"):
@@ -573,22 +636,94 @@ class TranslatePanel(ft.Column):
             self._refresh_counts()
         self._safe_update()
 
-    def _apply_summary(self, s: dict) -> None:
+    def _apply_summary(self, s: dict, *, final: bool = True) -> None:
         if not s:
             return
-        if s.get("operation") == "retranslate_same_source_ai":
-            self.repair_summary_text.value = (
-                f"候選 {s.get('candidates', 0)}；更新 {s.get('updated', 0)}；"
-                f"仍相同 {s.get('unchanged', 0)}；格式檢查未通過 {s.get('flagged', 0)}；"
-                f"資料已變動跳過 {s.get('skipped_changed', 0)}；"
-                f"失敗 {s.get('failed', 0)}；範圍內仍符合條件 {s.get('remaining', 0)}"
-                + (
-                    f"；快取未同步 {s.get('cache_failed', 0)} 筆"
-                    if s.get("cache_failed")
-                    else ""
-                )
-            )
+        if s.get("operation") in {
+            "retranslate_same_source_ai",
+            "repair_special_character_mismatch",
+        }:
+            self._apply_repair_summary(s, final=final)
             return
+        self._apply_translation_summary(s)
+
+    def _apply_repair_summary(self, s: dict, *, final: bool) -> None:
+        self._repair_summary = dict(s)
+        self._repair_summary_final = final
+        quality_repair = s.get("operation") == "repair_special_character_mismatch"
+        self.result_inspector.set_repair_results(s)
+        self._set_kpi_mode(
+            "repair",
+            repair_condition=(
+                "quality_mismatch" if quality_repair else "same_source_ai"
+            ),
+        )
+        self.stat_reused.set_value(
+            format_count(s.get("candidates")),
+            delta="本次預覽選中的來源譯文" if quality_repair else "本次預覽選中的候選",
+        )
+        self.stat_written.set_value(
+            format_count(s.get("updated")),
+            delta="原來源更新成功" if quality_repair else "compare-and-set 成功更新",
+        )
+        self.stat_flagged.set_value(
+            format_count(s.get("flagged") if quality_repair else s.get("unchanged")),
+            delta=(
+                "AI 草稿待人工確認，原譯文保留"
+                if quality_repair
+                else "AI 結果與舊譯文相同"
+            ),
+        )
+        self.stat_remaining.set_value(
+            format_count(s.get("remaining") if final else None)
+        )
+        status = str(s.get("status") or "UNKNOWN").upper()
+        progress = (
+            ("修復完成" if quality_repair else "重翻完成")
+            if final and status == "DONE"
+            else "目前部分進度"
+        )
+        state_text = (
+            ""
+            if status == "DONE" and final
+            else f"；狀態 {status}，數字為已提交／已確認的部分結果"
+        )
+        self.repair_summary_text.value = (
+            f"{progress}：候選 {s.get('candidates', 0)}；更新 {s.get('updated', 0)}；"
+            f"重翻後仍相同 {s.get('unchanged', 0)}；待人工確認 {s.get('flagged', 0)}；"
+            f"資料已變動跳過 {s.get('skipped_changed', 0)}；"
+            f"失敗 {s.get('failed', 0)}；"
+            + (
+                f"範圍內仍不一致 {s.get('remaining', 0)}"
+                if quality_repair
+                else f"範圍內仍符合條件 {s.get('remaining', 0)}"
+            )
+            + f"{state_text}"
+            + (
+                f"；快取未同步事件 {s.get('cache_failed', 0)}"
+                if s.get("cache_failed")
+                else ""
+            )
+            + (f"；最後錯誤：{s['last_error']}" if s.get("last_error") else "")
+        )
+        detail_parts = repair_summary_detail_lines(s)
+        if detail_parts:
+            self.repair_summary_text.value += "\n" + "\n".join(detail_parts)
+
+    def _on_repair_review_changed(self, unresolved_count: int) -> None:
+        if (
+            self._repair_summary is None
+            or self._repair_summary.get("operation")
+            != "repair_special_character_mismatch"
+        ):
+            return
+        summary = dict(self._repair_summary)
+        summary["flagged"] = max(0, int(unresolved_count))
+        self._apply_repair_summary(summary, final=self._repair_summary_final)
+        self._safe_update()
+
+    def _apply_translation_summary(self, s: dict) -> None:
+        self._set_kpi_mode("normal")
         if s.get("dry_run"):
             self.stat_remaining.set_value(
                 format_count(s.get("remaining")),
@@ -604,28 +739,73 @@ class TranslatePanel(ft.Column):
             format_count(s.get("flagged")),
             delta="未寫入，詳見日誌" if s.get("flagged") else "",
         )
-        self._flagged = dict(s.get("flagged_entries") or {})
-        self.view_flagged_btn.visible = bool(self._flagged)
+        self.result_inspector.set_normal_results(s, self._run_version)
         self.stat_remaining.set_value(format_count(s.get("remaining")))
 
-    def _reset_stats(self) -> None:
+    def _set_kpi_mode(self, mode: str, *, repair_condition: str | None = None) -> None:
+        self._kpi_mode = mode
+        if repair_condition is not None:
+            self._kpi_repair_condition = repair_condition
+        elif mode == "repair":
+            self._kpi_repair_condition = self._repair_mode
+        labels = (
+            (
+                "本次來源譯文"
+                if self._kpi_repair_condition == "quality_mismatch"
+                else "本次候選",
+                "成功更新來源譯文"
+                if self._kpi_repair_condition == "quality_mismatch"
+                else "成功更新 AI 譯文",
+                "AI 草稿待人工確認"
+                if self._kpi_repair_condition == "quality_mismatch"
+                else "重翻後仍相同",
+                "範圍內仍不一致"
+                if self._kpi_repair_condition == "quality_mismatch"
+                else "範圍內仍符合修復條件",
+            )
+            if mode == "repair"
+            else (
+                "沿用其他版本",
+                "已寫入（AI 機翻）",
+                "特殊字元不一致",
+                "此範圍仍未翻譯",
+            )
+        )
+        for key, label in zip(
+            ("first", "second", "third", "fourth"), labels, strict=True
+        ):
+            self._kpi_titles[key].set_title(
+                label,
+                tooltip=(
+                    "只計入 AI 有效回傳且內容與舊譯文完全相同的筆數；格式不符、失敗與資料競態跳過各自另計。"
+                    if key == "third"
+                    and mode == "repair"
+                    and self._kpi_repair_condition == "same_source_ai"
+                    else None
+                ),
+            )
+        self.result_inspector.set_mode(mode, self._kpi_repair_condition)
+
+    def _reset_stats(self, *, mode: str = "normal") -> None:
+        self._repair_summary = None
         for card in self._stat_cards:
             card.set_value("—", delta="")
-        self._flagged = {}
-        self.view_flagged_btn.visible = False
+        self.result_inspector.clear()
+        self._set_kpi_mode(mode)
+
+    @property
+    def _flagged(self) -> dict[int, str]:
+        return self.result_inspector.normal_entries
 
     def _view_flagged(self) -> None:
-        """跳到條目校對，只看這次特殊字元不一致、沒寫入的條目。"""
-        if self._flagged and self._on_view_flagged and self._run_version:
-            self._on_view_flagged(
-                list(self._flagged), dict(self._flagged), self._run_version
-            )
+        self.result_inspector.inspect()
 
     def _set_running(self, running: bool) -> None:
         self.start_btn.disabled = running
         self.preview_btn.disabled = running
         self.cancel_btn.disabled = not running
         self.repair_preview_btn.disabled = running or self._repair_preview_running
+        self.repair_mode_group.disabled = running or self._repair_preview_running
         self._update_repair_start_button(running=running)
 
     def _set_status(self, text: str, tone: str = "neutral") -> None:

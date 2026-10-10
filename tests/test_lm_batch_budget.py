@@ -126,6 +126,19 @@ def test_fit_takes_prefix_in_order():
     assert n == 5  # 第 6 條（長項目）放不下，不會跳過它
 
 
+def test_planning_signature_tracks_only_budget_inputs_used_by_fit():
+    tracker = BatchBudgetTracker("lang")
+    enabled_signature = tracker.planning_signature(CFG)
+
+    tracker.on_truncated("MAX_TOKENS")
+
+    assert tracker.planning_signature(CFG) != enabled_signature
+    disabled = BudgetConfig(enabled=False)
+    disabled_signature = tracker.planning_signature(disabled)
+    tracker.on_truncated("MAX_TOKENS")
+    assert tracker.planning_signature(disabled) == disabled_signature
+
+
 # ---------------------------------------------------------------------------
 # 學習：撞牆減半、持續保存、緩慢回升
 # ---------------------------------------------------------------------------

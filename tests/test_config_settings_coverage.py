@@ -229,6 +229,13 @@ def test_default_config_round_trips_through_the_settings_page():
     ok, saved = _save(view, config)
     assert ok
     for s in schema.editable_settings():
+        if s.path == "translation_db.priority":
+            from translation_tool.translation_db.settings import parse_priority
+
+            assert parse_priority(schema.get_path(saved, s.path), {}) == parse_priority(
+                schema.get_path(config, s.path), {}
+            )
+            continue
         assert schema.get_path(saved, s.path) == schema.get_path(config, s.path), s.path
 
 

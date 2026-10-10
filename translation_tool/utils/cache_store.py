@@ -58,6 +58,8 @@ class CacheRuntimeState:
     init_failed_at: float | None = None
     write_reject_logged: bool = False
     session_new_entries: dict[str, dict[str, Any]] = field(default_factory=dict)
+    session_entry_versions: dict[str, dict[str, int]] = field(default_factory=dict)
+    next_session_entry_version: int = 0
     is_dirty: dict[str, bool] = field(default_factory=dict)
     cache_lock: threading.RLock = field(default_factory=threading.RLock)
 
@@ -141,6 +143,8 @@ def reset_runtime_state(cache_types: list[str]) -> CacheRuntimeState:
     state.init_failed_at = None
     state.write_reject_logged = False
     state.session_new_entries = {k: {} for k in cache_types}
+    state.session_entry_versions = {k: {} for k in cache_types}
+    state.next_session_entry_version = 0
     state.is_dirty = {k: False for k in cache_types}
     return state
 
@@ -160,6 +164,11 @@ def ensure_runtime_maps(cache_types: list[str]) -> CacheRuntimeState:
     else:
         for k in cache_types:
             state.session_new_entries.setdefault(k, {})
+    if not state.session_entry_versions:
+        state.session_entry_versions = {k: {} for k in cache_types}
+    else:
+        for k in cache_types:
+            state.session_entry_versions.setdefault(k, {})
     if not state.is_dirty:
         state.is_dirty = {k: False for k in cache_types}
     else:

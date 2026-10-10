@@ -5,6 +5,14 @@ import traceback
 from enum import Enum, auto
 
 from app.services_impl.logging_service import validate_log_format
+from app.services_impl.moddb_source_service import (
+    normalize_priority_config,
+    priority_custom_source_lines,
+    priority_database_identity,
+    priority_display_lines,
+    priority_has_custom_sources,
+)
+from app.ui import kit
 from app.ui.snack import show_snack
 from app.views.config.settings_schema import (
     Setting,
@@ -144,6 +152,70 @@ def _bind_chatgpt_model_catalog(config, view, provider):
         config["lm_translator"]["chatgpt_model_profile_id"] = str(profile_id)
 
 
+def refresh_chatgpt_model_controls_after_reload(view):
+    """Keep valid authenticated model options and refresh their panel state."""
+    selected = str(view.chatgpt_model_control.value or "").strip()
+    available = {
+        str(option.key)
+        for option in (view.chatgpt_model_control.options or [])
+        if getattr(option, "key", None)
+    }
+    if not view._chatgpt_model_catalog_valid or selected not in available:
+        view._sync_chatgpt_model_options()
+    view._refresh_provider_panel_visibility()
+
+
+def sync_chatgpt_model_options(view, models=None, profile_id=None) -> None:
+    """Update the ChatGPT model choices without losing the configured selection."""
+    current = str(view.chatgpt_model_control.value or "")
+    selected = current
+    if models is None:
+        view._chatgpt_model_catalog_valid = False
+        view._chatgpt_model_catalog_profile_id = None
+        pairs = (
+            [(selected, f"{selected}（尚未驗證；請更新模型清單）")]
+            if selected
+            else [("", "登入後更新模型清單")]
+        )
+    else:
+        pairs = [(model.slug, model.display_name) for model in models]
+        if not pairs:
+            pairs = [("", "此帳號目前沒有可用模型")]
+        model_ids = {slug for slug, _label in pairs}
+        if selected not in model_ids or not selected:
+            selected = pairs[0][0] if pairs else ""
+        view._chatgpt_model_catalog_valid = bool(selected and selected in model_ids)
+        view._chatgpt_model_catalog_profile_id = (
+            str(profile_id)
+            if view._chatgpt_model_catalog_valid and profile_id
+            else None
+        )
+    if selected != current:
+        view._store_chatgpt_model_settings(view._chatgpt_active_model)
+        view.chatgpt_model_control.value = selected
+    kit.set_dropdown_options(view.chatgpt_model_control, pairs)
+    view.chatgpt_model_settings_panel.visible = view.controls_map[
+        "lm_translator.provider"
+    ].value == "chatgpt" and bool(selected)
+    if selected != view._chatgpt_active_model:
+        view._load_chatgpt_model_settings_for(selected)
+    if not view._loading_config:
+        view._refresh_dirty_state()
+
+
+def invalidate_chatgpt_model_options(view, message: str) -> None:
+    """Mark the saved model unverified while keeping it visible in the dropdown."""
+    view._chatgpt_model_catalog_valid = False
+    selected = str(view.chatgpt_model_control.value or "").strip()
+    options = (
+        [(selected, f"{selected}（{message or '尚未驗證'}）")]
+        if selected
+        else [("", message or "請重新載入目前帳號的模型")]
+    )
+    kit.set_dropdown_options(view.chatgpt_model_control, options)
+    view.chatgpt_model_settings_panel.visible = False
+
+
 def _collect_validated_config(
     view, load_config_json_fn, validate_api_keys_fn, *, show_feedback=True
 ):
@@ -155,6 +227,15 @@ def _collect_validated_config(
                 set_path(
                     config, setting.path, _from_control_value(setting, control.value)
                 )
+        if _priority_source_path_change_needs_review(view, config):
+            if show_feedback:
+                show_snack(
+                    view.page,
+                    "資料庫路徑已變更，請先檢查「來源優先順序」中的自訂來源，再儲存。",
+                )
+            return None
+        # Database-local source identities are normalized in the service layer.
+        normalize_priority_config(config)
         api_keys = [
             field.value.strip()
             for field in view.key_fields
@@ -222,6 +303,27 @@ def _collect_validated_config(
             )
         return None
     return config
+
+
+def _priority_source_path_change_needs_review(view, config: dict) -> bool:
+    """Require explicit review before carrying custom IDs to another database."""
+    baseline = getattr(view, "_priority_source_baseline", None)
+    priority_control = view.controls_map.get("translation_db.priority")
+    path_control = view.controls_map.get("translation_db.path")
+    if baseline is None or priority_control is None or path_control is None:
+        return False
+    if not baseline["has_custom"]:
+        return False
+    current_path = priority_database_identity(
+        config.get("translation_db", {}).get("path")
+    )
+    if current_path == baseline["path"]:
+        return False
+    return bool(
+        priority_custom_source_lines(
+            (priority_control.value or "").splitlines(), baseline["path"]
+        )
+    )
 
 
 def _write_config_with_feedback(
@@ -292,7 +394,20 @@ def load_config_into_view(view, config: dict):
         control = view.controls_map.get(setting.path)
         if control is None:
             continue
-        control.value = _to_control_value(setting, _initial_value(config, setting))
+        value = _initial_value(config, setting)
+        if setting.path == "translation_db.priority":
+            db_config = config.get("translation_db", {}) or {}
+            raw_priority = value
+            value = priority_display_lines(raw_priority, db_config.get("path"))
+        control.value = _to_control_value(setting, value)
+        if setting.path == "translation_db.priority":
+            db_config = config.get("translation_db", {}) or {}
+            view._priority_source_baseline = {
+                "path": priority_database_identity(db_config.get("path")),
+                "has_custom": priority_has_custom_sources(
+                    raw_priority, db_config.get("path")
+                ),
+            }
     _apply_label_templates(view, config)
 
     view.models_column.controls.clear()

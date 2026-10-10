@@ -4,11 +4,11 @@
 > 範圍：`app/`、`translation_tool/`、`main.py` 內所有帶 `noqa: BLE001／S110／S112` 的位置。
 > 命令列 QA 工具（`md_extract_qa.py`、`md_inject_qa.py`）的 `print` 為刻意保留，不在此表。
 
-共 **307** 項；其中 **112** 項尚未在程式碼內寫明原因（以「分類」說明處理方式）。
+共 **319** 項；其中 **112** 項尚未在程式碼內寫明原因（以「分類」說明處理方式）。
 
 | 分類 | 數量 | 意義 |
 |---|---|---|
-| 已記錄／回報 | 273 | 例外處理本身有 log、提示、回報錯誤事件或重新丟出；寬鬆捕捉是為了不中斷整批流程 |
+| 已記錄／回報 | 285 | 例外處理本身有 log、提示、回報錯誤事件或重新丟出；寬鬆捕捉是為了不中斷整批流程 |
 | UI／畫面保護 | 18 | UI 層的畫面更新、icon 快取等；失敗只影響顯示，不影響資料 |
 | 盡力而為（靜默） | 16 | 引擎層、只有 `pass`／`continue`／回傳常數；失敗不影響結果（例如進度回報、還原失敗時以原始例外為準） |
 
@@ -27,8 +27,9 @@
 | `app/services.py:run_variant_compare_tsv_service` | BLE001 | 已記錄／回報 | 錯誤已記錄或回報給呼叫端，不中斷整批流程 |
 | `app/services_impl/cache/cache_services.py:cache_search_service` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/services_impl/cache/cache_services.py:cache_rebuild_index_service` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
+| `app/services_impl/moddb_batch_operation.py:_run_batch_job` | BLE001 | 已記錄／回報 | worker boundary must publish unexpected failures |
 | `app/services_impl/moddb_retranslate_service.py:_cache_finalized_translation` | BLE001 | 已記錄／回報 | cache is best-effort after DB commit |
-| `app/services_impl/moddb_retranslate_service.py:_handle_batch_completion` | BLE001 | 已記錄／回報 | cache failure must not stop DB work |
+| `app/services_impl/moddb_retranslate_service.py:_flush_repair_cache` | BLE001 | 已記錄／回報 | DB results survive cache failure |
 | `app/services_impl/moddb_retranslate_service.py:run_moddb_retranslate_service` | BLE001 | 已記錄／回報 | service boundary reports failure in TaskSession |
 | `app/services_impl/moddb_service.py:warm_stats_quietly` | BLE001 | 已記錄／回報 | 統計預熱失敗不影響任務結果 |
 | `app/services_impl/moddb_service.py:run_moddb_scan_service` | BLE001 | 已記錄／回報 | 背景任務：任何失敗都要回報到 session，不可讓執行緒默默結束 |
@@ -136,19 +137,30 @@
 | `app/views/merge_view.py:MergeView._close_dialog_overlay` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/views/moddb/entries_panel.py:EntriesPanel._scroll_list_to.scroll` | BLE001 | 已記錄／回報 | 尚未掛上頁面時不影響清單 |
 | `app/views/moddb/entries_panel.py:EntriesPanel._scroll_list_to` | BLE001 | 已記錄／回報 | 排程失敗不影響清單 |
+| `app/views/moddb/entries_panel.py:EntriesPanel._save.save_in_background` | BLE001 | 已記錄／回報 | worker boundary reports unexpected failures |
+| `app/views/moddb/entries_panel.py:EntriesPanel._save.save_in_background` | BLE001 | 已記錄／回報 | a disposed page may reject the result callback |
+| `app/views/moddb/entries_panel.py:EntriesPanel._save` | BLE001 | 已記錄／回報 | restore the editor if the worker cannot launch |
 | `app/views/moddb/entries_panel.py:EntriesPanel._safe_update` | BLE001 | 已記錄／回報 | 頁面已卸載時不影響資料操作 |
 | `app/views/moddb/lm_db_options.py:LmDbOptions._update` | BLE001 | 已記錄／回報 | control may be temporarily detached |
 | `app/views/moddb/lm_db_options.py:LmDbOptions._refresh_database_state` | BLE001 | 已記錄／回報 | LM still permits a manual new target |
 | `app/views/moddb/lm_db_options.py:LmDbOptions._refresh_database_state` | BLE001 | 已記錄／回報 | keep the page usable and expose warning |
-| `app/views/moddb/overview_panel.py:OverviewPanel.refresh` | BLE001 | 已記錄／回報 | 頁面已卸載時不影響資料 |
-| `app/views/moddb/retranslation_controller.py:preview` | BLE001 | 已記錄／回報 | restore controls when the operation cannot launch |
+| `app/views/moddb/overview_panel.py:OverviewPanel._safe_update` | BLE001 | 已記錄／回報 | 頁面已卸載時不影響資料 |
+| `app/views/moddb/repair_reviewer.py:RepairReviewer._apply_async` | BLE001 | 已記錄／回報 | keep the draft and show the worker failure |
+| `app/views/moddb/retranslation_controller.py:_launch_preview_query` | BLE001 | 已記錄／回報 | restore controls when the operation cannot launch |
 | `app/views/moddb/retranslation_controller.py:_schedule_result` | BLE001 | 已記錄／回報 | a disposed page may reject UI work |
 | `app/views/moddb/retranslation_controller.py:apply_preview_result` | BLE001 | 已記錄／回報 | unavailable database means stale result |
 | `app/views/moddb/scan_panel.py:ScanPanel._poll` | BLE001 | 已記錄／回報 | 輪詢失敗不能讓畫面永遠卡在「執行中」 |
 | `app/views/moddb/scan_panel.py:ScanPanel._safe_update` | BLE001 | 已記錄／回報 | 頁面已卸載時不影響掃描本身 |
-| `app/views/moddb/translate_panel.py:TranslatePanel._start_retranslation` | BLE001 | 已記錄／回報 | restore UI if worker launch fails |
+| `app/views/moddb/translate_panel.py:TranslatePanel._launch_retranslation_worker` | BLE001 | 已記錄／回報 | caller restores the UI state |
 | `app/views/moddb/translate_panel.py:TranslatePanel._poll` | BLE001 | 已記錄／回報 | 輪詢失敗不能讓畫面永遠卡在「執行中」 |
 | `app/views/moddb/translate_panel.py:TranslatePanel._safe_update` | BLE001 | 已記錄／回報 | 頁面已卸載時不影響機翻本身 |
+| `app/views/moddb_view.py:_load_overview_snapshot` | BLE001 | 已記錄／回報 | 顯示載入失敗並恢復頁面 |
+| `app/views/moddb_view.py:ModDbView._request_overview_refresh.load` | BLE001 | 已記錄／回報 | page may detach during load |
+| `app/views/moddb_view.py:ModDbView._request_overview_refresh` | BLE001 | 已記錄／回報 | restore state on launch failure |
+| `app/views/moddb_view.py:ModDbView._request_panel_refresh` | BLE001 | 已記錄／回報 | restore state if admission fails |
+| `app/views/moddb_view.py:ModDbView._launch_panel_refresh.load` | BLE001 | 已記錄／回報 | 顯示載入錯誤並恢復頁籤 |
+| `app/views/moddb_view.py:ModDbView._launch_panel_refresh.load` | BLE001 | 已記錄／回報 | page may detach during load |
+| `app/views/moddb_view.py:ModDbView._safe_update` | BLE001 | 已記錄／回報 | page may already be detached |
 | `app/views/moddb_view.py:ModDbView._safe_update` | BLE001 | 已記錄／回報 | 頁面已卸載時不影響資料操作 |
 | `app/views/pipeline/pipeline_bundle_dialog.py:_load_version_data` | BLE001 | 已記錄／回報 | 讀不到版本資料時使用空設定，UI 仍可開啟 |
 | `app/views/pipeline/pipeline_db_version_field.py:build_pipeline_db_version_field.on_focus` | BLE001 | 已記錄／回報 | manual input remains available |
@@ -241,7 +253,7 @@
 | `translation_tool/core/lm_translator.py:load_checkpoint` | BLE001 | 已記錄／回報 | 損毀的 checkpoint 視為沒有，但要留下紀錄 |
 | `translation_tool/core/lm_translator.py:_scan_directory_files` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `translation_tool/core/lm_translator_main.py:_remote_error_detail` | BLE001 | 已記錄／回報 | 回應不是 JSON 時改用原始文字 |
-| `translation_tool/core/lm_translator_main.py:_handle_batch_error` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
+| `translation_tool/core/lm_translator_main.py:_handle_service_unavailable_error` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `translation_tool/core/lm_translator_main.py:_handle_batch_error` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `translation_tool/core/lm_translator_main.py:_retry_same_source_translations` | BLE001 | 已記錄／回報 | optional quality retry must not fail the valid batch |
 | `translation_tool/core/lm_translator_main.py:_attempt_batch` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |

@@ -1242,3 +1242,214 @@ def test_chatgpt_settings_save_requires_a_selected_chatgpt_model(monkeypatch):
     assert result is False
     assert writes == []
     assert "選擇模型" in snacks[-1]
+
+
+def test_saved_translation_source_priority_uses_collision_proof_tokens(monkeypatch):
+    from copy import deepcopy
+
+    from app.services_impl import moddb_source_service
+    from app.views.config.config_actions import save_config_from_view
+    from translation_tool.translation_db import settings as db_settings
+    from translation_tool.utils.config_manager import DEFAULT_CONFIG
+
+    config = deepcopy(DEFAULT_CONFIG)
+    config["translation_db"]["path"] = ""
+    config["translation_db"]["priority"] = ["builtin:subtitle", "釘宮翻譯組"]
+    config["lm_translator"]["models"] = {"enabled-test-model": {"enabled": True}}
+    registry = {"釘宮翻譯組": 100}
+    monkeypatch.setattr(
+        moddb_source_service, "read_custom_sources", lambda _path: registry
+    )
+
+    view = _make_full_save_view()
+    view.controls_map["translation_db.priority"] = SimpleNamespace(value="")
+    view.controls_map["translation_db.priority"].value = "builtin:subtitle\n釘宮翻譯組"
+    saved = {}
+    save_config_from_view(
+        view,
+        load_config_json_fn=lambda: deepcopy(config),
+        save_config_json_fn=lambda cfg: (saved.update(cfg), True)[1],
+        validate_api_keys_from_ui_fn=lambda _keys: None,
+    )
+
+    assert saved["translation_db"]["priority"] == [
+        "builtin:subtitle",
+        "custom:100",
+    ]
+    assert db_settings.parse_priority(saved["translation_db"]["priority"], registry)[
+        :2
+    ] == (3, 100)
+
+
+def _create_priority_db(path, custom_sources):
+    import json
+
+    from translation_tool.translation_db.repository import TranslationDB
+
+    db = TranslationDB(path)
+    with db._tx() as conn:
+        conn.execute(
+            "INSERT INTO meta (key, value) VALUES ('custom_sources', ?) "
+            "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            (json.dumps(custom_sources, ensure_ascii=False),),
+        )
+    db.close()
+
+
+def _priority_round_trip_config(path, priority):
+    from copy import deepcopy
+
+    from translation_tool.utils.config_manager import DEFAULT_CONFIG
+
+    config = deepcopy(DEFAULT_CONFIG)
+    config["translation_db"]["path"] = str(path)
+    config["translation_db"]["priority"] = list(priority)
+    config["lm_translator"]["keys"] = []
+    config["lm_translator"]["models"] = {"enabled-test-model": {"enabled": True}}
+    return config
+
+
+@pytest.mark.parametrize(
+    ("priority", "expected_display", "expected_codes"),
+    [
+        (
+            ["builtin:subtitle", "custom:100"],
+            [
+                "builtin:subtitle",
+                "\u91d8\u5bae\u7ffb\u8b6f\u7d44\uff08\u81ea\u8a02 #100\uff09",
+            ],
+            (3, 100),
+        ),
+        (
+            ["custom:100", "builtin:subtitle"],
+            [
+                "\u91d8\u5bae\u7ffb\u8b6f\u7d44\uff08\u81ea\u8a02 #100\uff09",
+                "builtin:subtitle",
+            ],
+            (100, 3),
+        ),
+    ],
+)
+def test_source_priority_load_save_reload_round_trip_keeps_colliding_ids(
+    tmp_path, priority, expected_display, expected_codes
+):
+    from app.views.config.config_actions import (
+        load_config_into_view,
+        save_config_from_view,
+    )
+    from translation_tool.translation_db.settings import (
+        parse_priority,
+        read_custom_sources,
+    )
+
+    path = tmp_path / "priority.db"
+    _create_priority_db(path, {"\u91d8\u5bae\u7ffb\u8b6f\u7d44": 100})
+    config = _priority_round_trip_config(path, priority)
+    config["lm_translator"]["models"] = {}
+    view = _make_full_save_view()
+    view.models_column.controls = []
+    view.controls_map["translation_db.path"] = SimpleNamespace(value="")
+    view.controls_map["translation_db.priority"] = SimpleNamespace(value="")
+
+    load_config_into_view(view, config)
+    actual_lines = view.controls_map["translation_db.priority"].value.splitlines()
+    assert actual_lines == expected_display
+    view.models_column.controls = [
+        SimpleNamespace(
+            _model_name="enabled-test-model",
+            _checkbox=SimpleNamespace(label="enabled-test-model", value=True),
+            _max_output_tokens=SimpleNamespace(value=""),
+        )
+    ]
+
+    saved = {}
+    result = save_config_from_view(
+        view,
+        load_config_json_fn=lambda: config,
+        save_config_json_fn=lambda current: (saved.update(current), True)[1],
+        validate_api_keys_from_ui_fn=lambda _keys: None,
+    )
+    assert result is True
+
+    reloaded = _make_full_save_view()
+    reloaded.models_column.controls = []
+    saved["lm_translator"]["models"] = {}
+    reloaded.controls_map["translation_db.path"] = SimpleNamespace(value="")
+    reloaded.controls_map["translation_db.priority"] = SimpleNamespace(value="")
+    load_config_into_view(reloaded, saved)
+    registry = read_custom_sources(path)
+    assert (
+        parse_priority(
+            reloaded.controls_map["translation_db.priority"].value.splitlines(),
+            registry,
+        )[:2]
+        == expected_codes
+    )
+    assert saved["translation_db"]["priority"] == priority
+
+
+def test_source_priority_path_switch_requires_review_before_reusing_custom_ids(
+    tmp_path,
+):
+    from app.views.config.config_actions import (
+        load_config_into_view,
+        save_config_from_view,
+    )
+
+    old_path = tmp_path / "old-priority.db"
+    new_path = tmp_path / "new-priority.db"
+    _create_priority_db(old_path, {"old-source": 100})
+    _create_priority_db(new_path, {"new-source": 100})
+    config = _priority_round_trip_config(old_path, ["builtin:subtitle", "custom:100"])
+    config["lm_translator"]["models"] = {}
+    view = _make_full_save_view()
+    view.models_column.controls = []
+    view.controls_map["translation_db.path"] = SimpleNamespace(value="")
+    view.controls_map["translation_db.priority"] = SimpleNamespace(value="")
+    load_config_into_view(view, config)
+    view.controls_map["translation_db.path"].value = str(new_path)
+    writes = []
+
+    result = save_config_from_view(
+        view,
+        load_config_json_fn=lambda: config,
+        save_config_json_fn=lambda current: writes.append(current) or True,
+        validate_api_keys_from_ui_fn=lambda _keys: None,
+    )
+
+    assert result is False
+    assert writes == []
+
+
+def test_source_priority_path_switch_still_requires_review_after_reordering_builtins(
+    tmp_path,
+):
+    from app.views.config.config_actions import (
+        load_config_into_view,
+        save_config_from_view,
+    )
+
+    old_path = tmp_path / "old-priority.db"
+    new_path = tmp_path / "new-priority.db"
+    _create_priority_db(old_path, {"old-source": 100})
+    _create_priority_db(new_path, {"new-source": 100})
+    config = _priority_round_trip_config(old_path, ["builtin:subtitle", "custom:100"])
+    config["lm_translator"]["models"] = {}
+    view = _make_full_save_view()
+    view.models_column.controls = []
+    view.controls_map["translation_db.path"] = SimpleNamespace(value="")
+    view.controls_map["translation_db.priority"] = SimpleNamespace(value="")
+    load_config_into_view(view, config)
+    view.controls_map["translation_db.path"].value = str(new_path)
+    view.controls_map["translation_db.priority"].value = "builtin:subtitle\nold-source"
+    writes = []
+
+    result = save_config_from_view(
+        view,
+        load_config_json_fn=lambda: config,
+        save_config_json_fn=lambda current: writes.append(current) or True,
+        validate_api_keys_from_ui_fn=lambda _keys: None,
+    )
+
+    assert result is False
+    assert writes == []

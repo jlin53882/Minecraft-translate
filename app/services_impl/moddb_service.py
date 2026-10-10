@@ -20,17 +20,29 @@ from app.services_impl.pipelines._pipeline_logging import (
 from app.tasks.task_session import add_log_unmirrored
 from translation_tool.translation_db import (
     SOURCE_NAMES,
+    BatchReplaceChange,
+    BatchReplacePlan,
+    BatchReplaceResult,
     DbSettings,
     EntryDetail,
+    EntryFilter,
     EntryRow,
+    QualityFilter,
+    ReviewPreviewItem,
+    TimeFilter,
     TranslationDB,
     VersionStat,
     load_db_settings,
     open_db,
 )
+from translation_tool.translation_db.quality import (
+    format_tokens,
+    token_category,
+    token_issues,
+    whitespace_note,
+)
 from translation_tool.translation_db.scanner import ScanOptions, scan_folder_generator
 from translation_tool.translation_db.schema import (
-    CUSTOM_SOURCE_BASE,
     SRC_AI,
     SRC_CUSTOM,
     SRC_I18N,
@@ -46,6 +58,11 @@ from translation_tool.translation_db.settings import (
     preview_new_source_names,
     strip_quotes,
 )
+from translation_tool.translation_db.time_filters import (
+    custom_date_bounds,
+    format_taipei_time,
+    quick_date_bounds,
+)
 from translation_tool.utils.cancellation import cancel_scope
 from translation_tool.utils.config_manager import load_config
 
@@ -59,27 +76,41 @@ __all__ = [
     "SRC_JAR_TW",
     "SRC_MANUAL",
     "SRC_SUBTITLE",
+    "BatchReplaceChange",
+    "BatchReplacePlan",
+    "BatchReplaceResult",
     "DbSettings",
     "EntryDetail",
+    "EntryFilter",
     "EntryRow",
+    "QualityFilter",
+    "ReviewPreviewItem",
     "ScanOptions",
+    "TimeFilter",
     "TranslationDB",
     "VersionStat",
     "current_settings",
+    "custom_date_bounds",
     "custom_source_codes",
     "database_problem",
     "database_version_choices",
     "describe_db_path",
+    "format_taipei_time",
+    "format_tokens",
     "load_db_settings",
     "normalize_db_path",
     "open_database",
     "pack_format_hint",
     "preview_new_source_names",
+    "quick_date_bounds",
     "run_moddb_scan_service",
     "strip_quotes",
     "summarize_database",
+    "token_category",
+    "token_issues",
     "version_choices",
     "warm_stats_quietly",
+    "whitespace_note",
 ]
 
 logger = logging.getLogger(__name__)
@@ -94,7 +125,7 @@ VERSION_FILE = (
 
 def custom_source_codes() -> list[int]:
     """使用者自訂來源（在設定「來源優先順序」輸入的新名稱）的代碼，依代碼排序。"""
-    return sorted(c for c in SOURCE_NAMES if c >= CUSTOM_SOURCE_BASE)
+    return list(current_settings().source_catalog.custom_codes)
 
 
 def current_settings() -> DbSettings:
@@ -102,14 +133,19 @@ def current_settings() -> DbSettings:
     return load_db_settings()
 
 
-def database_problem() -> str:
+def database_problem(settings: DbSettings | None = None) -> str:
     """設定的資料庫存在但不能用的原因（讓畫面不要誤顯示成「尚未建立」）；正常回傳空字串。"""
-    return _db_problem(current_settings())
+    return _db_problem(settings or current_settings())
 
 
-def open_database(*, create: bool = True) -> TranslationDB | None:
-    """依設定開啟資料庫；``create=False`` 時檔案不存在回傳 None。"""
-    return open_db(current_settings(), create=create)
+def open_database(
+    *,
+    create: bool = True,
+    settings: DbSettings | None = None,
+    readonly: bool = False,
+) -> TranslationDB | None:
+    """依指定或目前設定開啟資料庫；唯讀查詢不建立、遷移或同步來源優先序。"""
+    return open_db(settings or current_settings(), create=create, readonly=readonly)
 
 
 def database_version_choices(settings: DbSettings | None = None) -> list[str]:
@@ -191,6 +227,16 @@ def warm_stats_quietly(db: TranslationDB) -> None:
         logger.debug("統計預熱略過：%s", exc)
 
 
+def _reject_unknown_translation_source(session, source: int) -> None:
+    _log_both(
+        session,
+        f"[錯誤] 譯文來源代碼 {source} 不在目前資料庫的來源清單中，"
+        "請重新選擇「譯文來源標記」。",
+        "error",
+    )
+    session.set_error()
+
+
 def run_moddb_scan_service(
     folder: str,
     options: ScanOptions,
@@ -223,14 +269,12 @@ def run_moddb_scan_service(
             )
             session.set_error()
             return
-        if options.translated and options.translation_source not in SOURCE_NAMES:
-            _log_both(
-                session,
-                f"[錯誤] 譯文來源代碼 {options.translation_source} 不在目前資料庫的來源清單中，"
-                "請重新選擇「譯文來源標記」。",
-                "error",
-            )
-            session.set_error()
+        if (
+            options.translated
+            and options.translation_source
+            not in current_settings().source_catalog.codes
+        ):
+            _reject_unknown_translation_source(session, options.translation_source)
             return
         _log_both(
             session,

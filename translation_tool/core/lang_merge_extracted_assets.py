@@ -40,6 +40,7 @@ from translation_tool.core.lang_merge_dict import (
 from translation_tool.core.lang_merge_dict import (
     merge_lang_dicts,
 )
+from translation_tool.core.lang_merge_provenance import write_translation_provenance
 from translation_tool.translation_db import DbSettings
 from translation_tool.utils.log_unit import log_debug, log_info, log_warning
 from translation_tool.utils.safe_json_loader import load_json_auto_encoding
@@ -584,6 +585,7 @@ def _merge_extracted_to_assets(
 
             # 跑 Stage 1 拆出來的 merge 邏輯 - 行為 1:1 一致
             try:
+                source_provenance_by_key: dict[str, dict[str, Any]] = {}
                 # 既有 assets/{modid}/lang/zh_tw.json (人工翻譯保護)
                 existing_tw = existing.get((modid, "zh_tw"), {})
             except Exception as exc:  # noqa: BLE001 - 失敗已記錄，不中斷批次流程
@@ -608,7 +610,12 @@ def _merge_extracted_to_assets(
                     is_from_output_dir=bool(existing_tw),
                 )
                 if db_fill is not None:
-                    final_tw, pending, _db_hits = db_fill.fill(modid, final_tw, pending)
+                    final_tw, pending, _db_hits = db_fill.fill(
+                        modid,
+                        final_tw,
+                        pending,
+                        source_provenance_by_key=source_provenance_by_key,
+                    )
             except Exception as exc:  # noqa: BLE001 - 失敗已記錄，不中斷批次流程
                 mod_error = f"{modid}: merge failed: {exc}"
                 log_warning(f"[MergeExt→Assets] {mod_error}")
@@ -665,6 +672,11 @@ def _merge_extracted_to_assets(
                         _safe_session_log(
                             session, f"  - {modid}: 沒 zh_tw 內容,跳過寫 assets/"
                         )
+                write_translation_provenance(
+                    lang_output_dir,
+                    target_path.relative_to(lang_output_dir).as_posix(),
+                    source_provenance_by_key,
+                )
             except Exception as exc:  # noqa: BLE001 - 失敗已記錄，不中斷批次流程
                 mod_error = f"{modid}: write failed ({target_path}): {exc}"
                 log_warning(f"[MergeExt→Assets] {mod_error}")

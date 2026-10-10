@@ -126,6 +126,30 @@ def test_pager_summary_and_pages():
     assert p.current_page == 3
     assert "17" in p.summary.value and "24" in p.summary.value
     assert "1,842" in p.summary.value
+    assert "第 3 / 231 頁" in p.summary.value
+
+
+def test_pager_large_page_numbers_fit_without_wrapping():
+    p = kit.Pager(243064, page=4860, page_size=50)
+    numbered = [
+        cell
+        for cell in p.buttons.controls
+        if isinstance(cell.content, ft.Text) and cell.content.value.isdigit()
+    ]
+
+    assert p.total_pages == 4862
+    assert p.current_page == 4860
+    assert p.buttons.controls[0].width == 30
+    assert all(cell.width >= 40 for cell in numbered if len(cell.content.value) == 4)
+    assert all(cell.width >= 34 for cell in numbered)
+    assert [int(cell.content.value) for cell in numbered] == [
+        1,
+        4858,
+        4859,
+        4860,
+        4861,
+        4862,
+    ]
 
 
 def test_pager_empty():
@@ -143,6 +167,16 @@ def test_pager_goto_notifies_once_and_clamps():
     p.goto(0)
     assert seen == [4, 10, 1]
     assert p.current_page == 1
+
+
+def test_pager_calls_page_handler_before_updating_its_control(monkeypatch):
+    events = []
+    p = kit.Pager(100, page_size=10, on_change=lambda _page: events.append("load"))
+    monkeypatch.setattr(kit.Pager, "update", lambda _self: events.append("update"))
+
+    p.goto(2)
+
+    assert events == ["load", "update"]
 
 
 def test_pager_set_state_does_not_notify_and_clamps_page():

@@ -239,8 +239,10 @@ def test_list_entries_filters_by_effective_source_after_manual_review(db_path):
     assert ai_total == 7 and len(ai_rows) == 7
     target = next(row for row in ai_rows if row.key.endswith("00"))
 
-    # 走正式的審核等價 API：不改文字，只新增人工來源並成為 effective。
-    db.save_manual(target.id, "Minecraft", actor="測試審核", propagate=False)
+    # 明確審核會新增已審核人工列，並保留原 AI 譯文。
+    db.review_manual(
+        target.id, expected_zh_tw="Minecraft", actor="測試審核", propagate=False
+    )
 
     ai_rows, ai_total = db.list_entries("1.21.1", source=SRC_AI)
     manual_rows, manual_total = db.list_entries("1.21.1", source=SRC_MANUAL)
@@ -324,7 +326,12 @@ def test_entries_panel_source_filter_tracks_reviewed_effective_source(db_path):
     panel._on_source()
     assert panel.total == 1
 
-    db.save_manual(entry.id, "Minecraft", actor="測試審核", propagate=False)
+    db.review_manual(
+        entry.id,
+        expected_zh_tw="Minecraft",
+        actor="測試審核",
+        propagate=False,
+    )
     panel._on_source()
     assert panel.total == 0
 
@@ -334,6 +341,52 @@ def test_entries_panel_source_filter_tracks_reviewed_effective_source(db_path):
     panel.select(entry.id)
     shown_sources = "\n".join(texts_of(panel.history_col))
     assert "AI 機翻" in shown_sources and "人工" in shown_sources
+    db.close()
+
+
+def test_entries_panel_save_and_review_use_separate_manual_states(db_path):
+    from app.views.moddb.entries_panel import EntriesPanel
+    from tests.test_moddb_view import texts_of
+
+    db = TranslationDB(db_path)
+    db.ingest(
+        "1.21.1",
+        [
+            ScanItem(
+                KIND_LANG, "foo", "item.review", "Minecraft", "Minecraft", source=SRC_AI
+            )
+        ],
+    )
+    page = mock_page()
+    page.run_thread = lambda target: target()
+    panel = EntriesPanel(page, lambda: db)
+    panel.refresh()
+    panel.tw_field.value = "人工修改"
+    panel._update_impact()
+    panel._save()
+    page._run_all_tasks()
+    detail = db.entry_detail(panel.selected.id)
+    manual = next(row for row in detail.translations if row.source == SRC_MANUAL)
+    assert manual.review_status == "unreviewed" and manual.checker == ""
+    assert "人工-未審核" in "\n".join(texts_of(panel))
+    assert panel.confirm_btn.visible
+
+    panel.tw_field.value = ""
+    panel._on_text_change()
+    assert panel.confirm_btn.visible is False and panel.confirm_btn.disabled is True
+    panel.tw_field.value = panel.selected.zh_tw
+    panel._on_text_change()
+    assert panel.confirm_btn.visible is True and panel.confirm_btn.disabled is False
+
+    panel._confirm()
+    assert page.overlay and page.overlay[-1].title.value == "確認審核範圍"
+    page.overlay[-1].actions[-1].on_click(None)
+    detail = db.entry_detail(panel.selected.id)
+    manual = next(row for row in detail.translations if row.source == SRC_MANUAL)
+    assert manual.review_status == "reviewed"
+    assert detail.history[0].action == "review"
+    assert "人工-已審核" in "\n".join(texts_of(panel))
+    assert panel.confirm_btn.visible is False
     db.close()
 
 
@@ -508,6 +561,81 @@ def test_overview_stat_cards_jump_to_filtered_entries(db_path):
     db.close()
 
 
+def test_overview_uses_dynamic_effective_source_catalog_and_priority(db_path):
+    import sqlite3
+
+    from app.views.moddb.overview_panel import OverviewPanel
+    from tests.test_moddb_view import texts_of
+
+    db = TranslationDB(db_path)
+    db.ingest(
+        "1.21.1",
+        [
+            ScanItem(
+                KIND_LANG, "foo", "item.subtitle", "Subtitle", "字幕譯文", source=3
+            ),
+            ScanItem(KIND_LANG, "foo", "item.custom", "Custom", "自訂譯文", source=100),
+            ScanItem(KIND_LANG, "foo", "item.jar", "Jar", "內建譯文", source=1),
+            ScanItem(KIND_LANG, "foo", "item.manual.unreviewed", "Manual A", "舊譯文"),
+            ScanItem(KIND_LANG, "foo", "item.manual.reviewed", "Manual B", "舊譯文"),
+            ScanItem(KIND_LANG, "foo", "item.manual.legacy", "Manual C", "舊譯文"),
+            ScanItem(KIND_LANG, "foo", "item.untranslated", "Empty", ""),
+        ],
+    )
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO meta(key, value) VALUES ('custom_sources', ?)",
+            (json.dumps({"釘宮翻譯組": 100}, ensure_ascii=False),),
+        )
+    db.close()
+    db = TranslationDB(db_path)
+    for key, text in (
+        ("item.manual.unreviewed", "人工待審核"),
+        ("item.manual.reviewed", "人工已審核"),
+        ("item.manual.legacy", "歷史人工"),
+    ):
+        entry = next(row for row in db.list_entries("1.21.1")[0] if row.key == key)
+        db.save_manual(entry.id, text, propagate=False)
+        if key == "item.manual.reviewed":
+            db.review_manual(entry.id, expected_zh_tw=text, propagate=False)
+        elif key == "item.manual.legacy":
+            db._conn.execute(
+                "UPDATE translation SET review_status='legacy_unknown' "
+                "WHERE entry_id=? AND source=?",
+                (entry.id, SRC_MANUAL),
+            )
+            db._conn.execute(
+                "UPDATE effective SET review_status='legacy_unknown' WHERE entry_id=?",
+                (entry.id,),
+            )
+            db._conn.commit()
+
+    db.set_priority((100, SRC_MANUAL, 1, 3))
+    panel = OverviewPanel(mock_page(), lambda: db)
+    panel.refresh()
+    labels = texts_of(panel.legend)
+    assert "釘宮翻譯組" in labels
+    assert "釘宮翻譯組（自訂 #100）" in labels
+    assert "人工-未審核" in labels
+    assert "人工-已審核" in labels
+    assert "人工（歷史狀態待確認）" in labels
+    assert "未翻譯" in labels
+    assert labels.index("釘宮翻譯組（自訂 #100）") < labels.index("模組自帶繁中")
+
+    bar = panel.versions_col.controls[0].controls[1].content
+    assert (
+        sum(segment.expand for segment in bar.controls) == db.version_stats()[0].total
+    )
+    assert any("未翻譯：1" in segment.tooltip for segment in bar.controls)
+
+    db.set_priority((3, SRC_MANUAL, 1, 100))
+    panel.refresh()
+    labels = texts_of(panel.legend)
+    assert labels.index("釘宮翻譯組") < labels.index("人工-未審核")
+    assert labels.index("人工（歷史狀態待確認）") < labels.index("模組自帶繁中")
+    db.close()
+
+
 def test_entries_panel_changed_filter_and_editor_note(db_path):
     from app.views.moddb import entries_panel
     from tests.test_moddb_view import texts_of
@@ -649,6 +777,12 @@ def test_source_dropdowns_follow_config_priority(tmp_path, monkeypatch):
     flt = sf.SourceFilter(lambda: None)
     keys = [o.key for o in flt.dropdown.options]
     assert keys[:4] == ["__all__", str(SRC_SUBTITLE), str(SRC_MANUAL), str(SRC_CUSTOM)]
+    from translation_tool.translation_db.schema import SRC_AI_REPAIR
+
+    assert str(SRC_AI_REPAIR) in keys
+    assert next(
+        o for o in flt.dropdown.options if o.key == str(SRC_AI_REPAIR)
+    ).text == ("AI補譯修正")
 
     state["priority"] = (SRC_MANUAL, SRC_CUSTOM, SRC_SUBTITLE)
     flt.refresh()
@@ -904,12 +1038,8 @@ def test_moddb_view_did_mount_resumes_only_the_current_tab(
 
 @pytest.fixture
 def clean_custom_sources():
-    """自訂來源會就地加進全域 SOURCE_NAMES；測試結束後移除，避免影響其他測試。"""
-    from translation_tool.translation_db.schema import SOURCE_NAMES
-
+    """Compatibility fixture: custom sources no longer mutate global names."""
     yield
-    for code in [c for c in SOURCE_NAMES if c >= 100]:
-        del SOURCE_NAMES[code]
 
 
 def _cfg(path, lines):
@@ -924,43 +1054,129 @@ def test_new_names_in_priority_become_custom_sources(db_path, clean_custom_sourc
     seed(db_path)
     lines = ["人工", "測試", "町宮字幕組", "自訂補充", "模組自帶繁中", "i18n 轉換"]
     settings = load_db_settings(_cfg(db_path, lines))
-    assert SOURCE_NAMES[100] == "測試"
+    assert 100 not in SOURCE_NAMES
+    assert settings.source_catalog.label(100) == "測試"
     assert settings.priority[:3] == (6, 100, 3)  # 人工、測試、町宮字幕組
     assert set(settings.priority) >= {0, 1, 2, 3, 4, 5, 6, 100}  # 沒列出的仍補在後面
 
     # 代碼穩定：重讀不變；再新增一個拿到下一個代碼；從設定移除也不會消失或重用代碼
-    load_db_settings(_cfg(db_path, [*lines, "新來源B"]))
-    assert SOURCE_NAMES[101] == "新來源B" and SOURCE_NAMES[100] == "測試"
+    added = load_db_settings(_cfg(db_path, [*lines, "新來源B"]))
+    assert added.source_catalog.label(100) == "測試"
+    assert added.source_catalog.label(101) == "新來源B"
     removed = load_db_settings(_cfg(db_path, ["人工"]))
     assert 100 in removed.priority and 101 in removed.priority
     assert removed.priority[-2:] == (100, 101)  # 沒列出的自訂來源依代碼接在最後
 
 
-def test_typo_in_builtin_name_creates_a_separate_custom_source(
-    db_path, clean_custom_sources, monkeypatch
+def test_source_catalog_resolves_legacy_alias_and_custom_name_collision(
+    db_path, clean_custom_sources
 ):
-    from translation_tool.translation_db.schema import SOURCE_NAMES
-    from translation_tool.translation_db.settings import (
-        load_db_settings,
-        preview_new_source_names,
-    )
+    import json
+    import sqlite3
+
+    from translation_tool.translation_db.schema import SOURCE_NAMES, SRC_SUBTITLE
+    from translation_tool.translation_db.settings import load_db_settings
 
     seed(db_path)
-    monkeypatch.setattr(
-        "translation_tool.translation_db.settings.load_db_settings",
-        lambda *a, **k: DbSettings(path=str(db_path)),
+    # Reproduce an existing DB written before subtitle source 3 was renamed.
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            "INSERT INTO meta (key, value) VALUES ('custom_sources', ?) "
+            "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            (json.dumps({"釘宮翻譯組": 100}, ensure_ascii=False),),
+        )
+    settings = load_db_settings(
+        {
+            "translation_db": {
+                "path": str(db_path),
+                "priority": ["町宮字幕組", "釘宮翻譯組", "custom:100"],
+                "zip_source": "builtin:subtitle",
+            }
+        }
     )
-    load_db_settings(_cfg(db_path, ["釘宮翻譯組", "町宮字幕組"]))
-    assert SOURCE_NAMES[100] == "釘宮翻譯組" and SOURCE_NAMES[3] == "町宮字幕組"
-    # 設定頁即時提示：哪些是已存在的、哪些會被新增
-    known, new = preview_new_source_names("人工\n町宮字幕組\n釘宮翻譯組\n另一個")
-    assert known == ["人工", "町宮字幕組", "釘宮翻譯組"] and new == ["另一個"]
+    assert settings.priority[:2] == (SRC_SUBTITLE, 100)
+    assert settings.zip_source == SRC_SUBTITLE
+    assert settings.priority_lines[0] == "町宮字幕組"
+    assert settings.source_catalog.label(SRC_SUBTITLE) == "釘宮翻譯組"
+    assert settings.source_catalog.label(100) == "釘宮翻譯組（自訂 #100）"
+    assert settings.source_catalog.token_for(SRC_SUBTITLE) == "builtin:subtitle"
+    assert settings.source_catalog.resolve("builtin:subtitle") == SRC_SUBTITLE
+    assert settings.source_catalog.resolve("custom:100") == 100
+    legacy_zip = load_db_settings(
+        {
+            "translation_db": {
+                "path": str(db_path),
+                "priority": [],
+                "zip_source": "町宮字幕組",
+            }
+        }
+    )
+    assert legacy_zip.zip_source == SRC_SUBTITLE
+    # Built-in names are process-global constants; opening this DB does not leak #100.
+    assert SRC_SUBTITLE in SOURCE_NAMES and 100 not in SOURCE_NAMES
+
+
+def test_renamed_source_display_is_default_and_not_auto_registered(db_path):
+    from translation_tool.translation_db.schema import SRC_SUBTITLE
+    from translation_tool.translation_db.settings import load_db_settings
+
+    seed(db_path)
+    settings = load_db_settings(
+        {"translation_db": {"path": str(db_path), "priority": ["釘宮翻譯組"]}}
+    )
+    assert settings.priority[0] == SRC_SUBTITLE
+    assert settings.source_catalog.custom_codes == ()
+
+
+def test_legacy_source_name_collision_keeps_builtin_and_custom_rows_distinct(
+    db_path, clean_custom_sources
+):
+    import sqlite3
+
+    from translation_tool.translation_db.schema import SRC_SUBTITLE
+    from translation_tool.translation_db.settings import load_db_settings
+
+    seed(db_path)
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            "INSERT INTO meta (key, value) VALUES ('custom_sources', ?) "
+            "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            (json.dumps({"釘宮翻譯組": 100}, ensure_ascii=False),),
+        )
+    settings = load_db_settings(
+        {
+            "translation_db": {
+                "path": str(db_path),
+                "priority": ["builtin:subtitle", "custom:100"],
+            }
+        }
+    )
+    db = TranslationDB(db_path, priority=settings.priority)
+    item = WriteBackItem(
+        KIND_LANG, "foo", "item.foo.b", "Infused Alloy", "釘宮內建譯文"
+    )
+    db.write_back("1.21.1", [item], source=SRC_SUBTITLE, fill_other_versions=False)
+    db.write_back(
+        "1.21.1",
+        [WriteBackItem(KIND_LANG, "foo", item.key, item.en_us, "自訂版譯文")],
+        source=100,
+        fill_other_versions=False,
+    )
+    entry = next(row for row in db.list_entries("1.21.1")[0] if row.key == item.key)
+    translations = {
+        row.source: row.zh_tw for row in db.entry_detail(entry.id).translations
+    }
+    assert translations[SRC_SUBTITLE] == "釘宮內建譯文"
+    assert translations[100] == "自訂版譯文"
+    assert db.source_catalog.label(SRC_SUBTITLE) == "釘宮翻譯組"
+    assert db.source_catalog.label(100) == "釘宮翻譯組（自訂 #100）"
+    db.close()
 
 
 def test_custom_source_works_end_to_end(db_path, clean_custom_sources, monkeypatch):
     """自訂來源可寫入譯文、被篩選、顯示名稱，並算進進度條；ZIP 匯入選單也找得到。"""
+    from app.services_impl.moddb_source_service import source_label
     from app.views.moddb import entries_panel, scan_panel
-    from app.views.moddb.formatting import source_label
     from translation_tool.translation_db.settings import load_db_settings
 
     seed(db_path)
@@ -969,7 +1185,10 @@ def test_custom_source_works_end_to_end(db_path, clean_custom_sources, monkeypat
         moddb_service, "load_db_settings", lambda: load_db_settings(cfg)
     )
     code = load_db_settings(cfg).priority[1]
-    assert code == 100 and source_label(code) == "測試"
+    assert (
+        code == 100
+        and source_label(code, load_db_settings(cfg).source_catalog) == "測試"
+    )
 
     db = TranslationDB(db_path, priority=load_db_settings(cfg).priority)
     db.write_back(
@@ -991,6 +1210,70 @@ def test_custom_source_works_end_to_end(db_path, clean_custom_sources, monkeypat
     db.close()
 
 
+def test_entry_source_filter_hides_unreferenced_custom_sources(db_path, monkeypatch):
+    import sqlite3
+
+    from app.views.moddb import entries_panel, scan_panel
+    from app.views.moddb.panel_refresh import load_panel_snapshot
+    from translation_tool.translation_db.settings import load_db_settings
+
+    seed(db_path)
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            "INSERT INTO meta (key, value) VALUES ('custom_sources', ?) "
+            "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            (
+                json.dumps(
+                    {
+                        "測試": 100,
+                        "釘宮翻譯組": 101,
+                        "ModsTranslationPack": 102,
+                    },
+                    ensure_ascii=False,
+                ),
+            ),
+        )
+
+    settings = load_db_settings(_cfg(db_path, ["人工"]))
+    monkeypatch.setattr(moddb_service, "load_db_settings", lambda: settings)
+    db = TranslationDB(db_path, priority=settings.priority)
+    db.write_back(
+        "1.21.1",
+        [WriteBackItem(KIND_LANG, "foo", "item.foo.b", "Infused Alloy", "測試譯文")],
+        source=100,
+    )
+
+    panel = entries_panel.EntriesPanel(mock_page(), lambda: db)
+    snapshot = load_panel_snapshot(
+        "entries",
+        {
+            "version": "1.21.1",
+            "mod_id": None,
+            "kind": None,
+            "page": 1,
+            "selected_id": None,
+            "criteria": moddb_service.EntryFilter(version="1.21.1"),
+        },
+        settings,
+    )
+    assert 100 in snapshot["effective_source_codes"]
+    assert 101 not in snapshot["effective_source_codes"]
+    assert 102 not in snapshot["effective_source_codes"]
+    panel.apply_refresh_snapshot(snapshot)
+    option_keys = {option.key for option in panel.source_filter.dropdown.options}
+    option_labels = {option.text for option in panel.source_filter.dropdown.options}
+    assert "100" in option_keys
+    assert "101" not in option_keys
+    assert "102" not in option_keys
+    assert "釘宮翻譯組（自訂 #101）" not in option_labels
+    assert "ModsTranslationPack" not in option_labels
+
+    scan = scan_panel.ScanPanel(mock_page(), mock_filepicker(), lambda: db)
+    zip_source_keys = {option.key for option in scan.source_dd.options}
+    assert {"100", "101", "102"}.issubset(zip_source_keys)
+    db.close()
+
+
 def test_names_typed_before_the_database_exists_are_registered_on_creation(
     tmp_path, clean_custom_sources
 ):
@@ -1007,7 +1290,8 @@ def test_names_typed_before_the_database_exists_are_registered_on_creation(
     assert 100 not in settings.priority  # 資料庫還沒有，無處登錄
     db = open_db(settings, create=True)
     assert db is not None
-    assert read_custom_sources(path) == {"測試": 100} and SOURCE_NAMES[100] == "測試"
+    assert read_custom_sources(path) == {"測試": 100}
+    assert 100 not in SOURCE_NAMES and db.source_catalog.label(100) == "測試"
     assert db.priority[:2] == (6, 100)
     db.close()
 
@@ -1024,9 +1308,10 @@ def test_priority_field_previews_new_custom_sources(db_path, monkeypatch):
     )
     field = kit.field(label="優先序", multiline=True, helper="說明")
     check = attach_priority_hooks(field)
-    field.value = "人工\n測試\n釘宮翻譯組"
+    field.value = "人工\n測試\n新自訂來源"
     field.on_change(SimpleNamespace(control=field, data=field.value))
-    assert "將新增自訂來源：測試、釘宮翻譯組" in field.helper and "說明" in field.helper
+    assert "將新增自訂來源：測試、新自訂來源" in field.helper and "說明" in field.helper
+    assert "釘宮翻譯組" not in field.helper
     field.value = "人工\n町宮字幕組"
     check()
     assert "所有名稱都是已存在的來源" in field.helper
@@ -1557,6 +1842,157 @@ def test_flagged_entries_flow_from_translation_to_entries_review(db_path, monkey
     entries.show_flagged(list(flagged), flagged, "1.21.1")
     entries.show_filter("diff")
     assert entries.entry_ids is None and entries.drafts == {}
+
+
+def test_translate_panel_switches_kpis_between_normal_and_ai_repair_modes():
+    panel = translate_panel.TranslatePanel(mock_page(), lambda: None)
+
+    panel._apply_summary(
+        {
+            "reused": 3,
+            "written": 7,
+            "translated": 8,
+            "flagged": 1,
+            "remaining": 4,
+        }
+    )
+    assert [card.value_text.value for card in panel._stat_cards] == ["3", "7", "1", "4"]
+    assert panel._kpi_titles["second"].label_text.value == "已寫入（AI 機翻）"
+
+    panel._repair_mode = "same_source_ai"
+    panel.repair_mode_group.value = "same_source_ai"
+    panel._reset_stats(mode="repair")
+    assert [card.value_text.value for card in panel._stat_cards] == ["—"] * 4
+    assert panel._kpi_titles["first"].label_text.value == "本次候選"
+    assert panel._kpi_titles["third"].label_text.value == "重翻後仍相同"
+
+    partial = {
+        "operation": "retranslate_same_source_ai",
+        "candidates": 444,
+        "updated": 404,
+        "unchanged": 40,
+        "flagged": 2,
+        "skipped_changed": 3,
+        "failed": 1,
+        "cache_failed": 5,
+        "cache_add_failed": 2,
+        "cache_save_failed": 1,
+        "cache_keys_changed": 80,
+        "cache_keys_saved": None,
+        "cache_stats_note": "1 個 key 落盤結果未確認",
+        "ai_representatives": 130,
+        "ai_submitted_items": 128,
+        "ai_validated_items": 120,
+        "dedup_mapped_candidates": 24,
+        "dedup_reused_candidates": 12,
+        "processed_candidates": 400,
+        "not_submitted_candidates": 10,
+        "unprocessed_candidates": 44,
+        "remaining": 40,
+        "status": "CANCELLED",
+        "last_error": "使用者取消",
+    }
+    panel._apply_summary(partial, final=False)
+    assert [card.value_text.value for card in panel._stat_cards] == [
+        "444",
+        "404",
+        "40",
+        "—",
+    ]
+    details = panel.repair_summary_text.value
+    assert all(
+        value in details
+        for value in (
+            "待人工確認 2",
+            "資料已變動跳過 3",
+            "失敗 1",
+            "快取未同步事件 5",
+            "CANCELLED",
+            "AI 代表計劃 130",
+            "實際送入引擎 128 items（不是 API/HTTP 次數）",
+            "等價映射候選 24；已共用驗證結果 12",
+            "來源列進度 400/444；未送出候選 10；未處理候選 44",
+            "快取 key 變更 80；成功落盤 未知",
+            "新增失敗來源列 2；尚未確認落盤 keys 1",
+        )
+    )
+
+    panel._apply_summary(partial, final=True)
+    assert panel.stat_remaining.value_text.value == "40"
+    assert "重翻完成" not in panel.repair_summary_text.value
+
+    panel._reset_stats(mode="normal")
+    assert panel._kpi_titles["first"].label_text.value == "沿用其他版本"
+    assert panel._kpi_titles["third"].label_text.value == "特殊字元不一致"
+
+
+def test_manual_repair_review_updates_flagged_kpi_and_summary():
+    panel = translate_panel.TranslatePanel(mock_page(), lambda: None)
+    panel._apply_repair_summary(
+        {
+            "operation": "repair_special_character_mismatch",
+            "candidates": 10,
+            "updated": 5,
+            "unchanged": 0,
+            "flagged": 4,
+            "skipped_changed": 0,
+            "failed": 1,
+            "remaining": 4,
+            "status": "DONE",
+            "reviewable_results": 4,
+        },
+        final=True,
+    )
+
+    panel._on_repair_review_changed(3)
+
+    assert panel.stat_flagged.value_text.value == "3"
+    assert "待人工確認 3" in panel.repair_summary_text.value
+
+
+def test_translate_panel_restores_partial_and_cancelled_repair_from_task_session():
+    panel = translate_panel.TranslatePanel(mock_page(), lambda: None)
+    session = TaskSession()
+    session.start()
+    panel.session = session
+    panel._running = True
+
+    session.set_summary(
+        {
+            "operation": "retranslate_same_source_ai",
+            "candidates": 8,
+            "updated": 3,
+            "unchanged": 2,
+            "flagged": 1,
+            "skipped_changed": 1,
+            "failed": 0,
+            "remaining": 5,
+            "status": "DONE",
+        }
+    )
+    panel.sync_from_session()
+    assert [card.value_text.value for card in panel._stat_cards] == ["8", "3", "2", "—"]
+    assert panel._running is True
+
+    session.request_cancel()
+    session.set_summary(
+        {
+            "operation": "retranslate_same_source_ai",
+            "candidates": 8,
+            "updated": 3,
+            "unchanged": 2,
+            "flagged": 1,
+            "skipped_changed": 1,
+            "failed": 0,
+            "remaining": 5,
+            "status": "CANCELLED",
+        }
+    )
+    session.finish()
+    panel.sync_from_session()
+    assert [card.value_text.value for card in panel._stat_cards] == ["8", "3", "2", "5"]
+    assert panel.status_chip.label.value == "已取消"
+    assert panel._running is False
 
 
 # ------------------------------------------------ 「翻譯與原文相同」（專有名詞等不需要翻譯）

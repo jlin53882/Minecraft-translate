@@ -21,9 +21,12 @@ from app.views.config.config_actions import (
     finish_unsaved_dialog,
     handle_unsaved_dialog_retry_reload,
     handle_unsaved_dialog_save,
+    invalidate_chatgpt_model_options,
     load_config_transactionally,
     on_unsaved_dialog_dismiss,
+    refresh_chatgpt_model_controls_after_reload,
     save_config_from_view_with_outcome,
+    sync_chatgpt_model_options,
 )
 from app.views.config.config_form import (
     build_card as build_config_card,
@@ -565,6 +568,7 @@ class ConfigView(ft.Column):
             self.chatgpt_model_control,
             self._sync_chatgpt_model_options,
             self._invalidate_chatgpt_model_options,
+            lambda: self._chatgpt_model_catalog_valid,
         )
         self.chatgpt_section = self.chatgpt_oauth_panel.section
         return ft.Container(
@@ -595,45 +599,10 @@ class ConfigView(ft.Column):
         self._refresh_provider_panel_visibility()
 
     def _sync_chatgpt_model_options(self, models=None, profile_id=None) -> None:
-        current = str(self.chatgpt_model_control.value or "")
-        selected = current
-        if models is None:
-            self._chatgpt_model_catalog_valid = False
-            self._chatgpt_model_catalog_profile_id = None
-            pairs = [("", "登入後更新模型清單")]
-        else:
-            pairs = [(model.slug, model.display_name) for model in models]
-            if not pairs:
-                pairs = [("", "此帳號目前沒有可用模型")]
-            model_ids = {slug for slug, _label in pairs}
-            if selected not in model_ids or not selected:
-                selected = pairs[0][0] if pairs else ""
-            self._chatgpt_model_catalog_valid = bool(selected and selected in model_ids)
-            self._chatgpt_model_catalog_profile_id = (
-                str(profile_id)
-                if self._chatgpt_model_catalog_valid and profile_id
-                else None
-            )
-        if selected != current:
-            self._store_chatgpt_model_settings(self._chatgpt_active_model)
-            self.chatgpt_model_control.value = selected
-        kit.set_dropdown_options(self.chatgpt_model_control, pairs)
-        self.chatgpt_model_settings_panel.visible = self.controls_map[
-            "lm_translator.provider"
-        ].value == "chatgpt" and bool(selected)
-        if selected != self._chatgpt_active_model:
-            self._load_chatgpt_model_settings_for(selected)
-        if not self._loading_config:
-            self._refresh_dirty_state()
+        sync_chatgpt_model_options(self, models, profile_id)
 
     def _invalidate_chatgpt_model_options(self, message: str) -> None:
-        """Hide stale model choices without changing the saved model value."""
-        self._chatgpt_model_catalog_valid = False
-        kit.set_dropdown_options(
-            self.chatgpt_model_control,
-            [("", message or "請重新載入目前帳號的模型")],
-        )
-        self.chatgpt_model_settings_panel.visible = False
+        invalidate_chatgpt_model_options(self, message)
 
     def _build_chatgpt_model_settings_panel(self) -> ft.Control:
         self.chatgpt_model_settings_panel = ft.Container(
@@ -861,8 +830,7 @@ class ConfigView(ft.Column):
     def load_config(self):
         """載入設定檔"""
         result = load_config_transactionally(self, load_config_json)
-        self._sync_chatgpt_model_options()
-        self._refresh_provider_panel_visibility()
+        refresh_chatgpt_model_controls_after_reload(self)
         return result
 
     def did_mount(self):

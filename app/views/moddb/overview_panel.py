@@ -7,23 +7,60 @@ from collections.abc import Callable
 import flet as ft
 
 from app.services_impl.moddb_service import VersionStat, database_problem
+from app.services_impl.moddb_source_service import source_label, source_tone
 from app.ui import design, kit
 from app.ui.design import C
 from app.ui.kit.inputs import BUTTON_HEIGHTS
 from app.views.moddb.formatting import format_count, percent
 from translation_tool.utils.log_unit import log_debug
 
-# 進度條各段：(欄位, 標籤, 色調)
 # 總覽四張 KPI 卡的標題列固定高度（有按鈕的卡比較高，固定後四張才等高）
 OVERVIEW_CARD_HEAD = BUTTON_HEIGHTS["sm"] + 2  # 容得下 sm 按鈕與同高的說明圖示鈕
 
-SEGMENTS = (
-    ("manual", "人工", "ench"),
-    ("jar", "模組自帶／人工來源", "dia"),
-    ("converted", "簡中轉繁", "gold"),
-    ("ai", "AI 機翻", "em"),
-    ("untranslated", "未翻譯", "neutral"),
-)
+
+def _source_breakdown(db, source_stats):
+    """Order observed source buckets by this DB's priority and build legend rows."""
+    grouped: dict[str, list] = {}
+    observed = set()
+    for row in source_stats:
+        grouped.setdefault(row.mc_version, []).append(row)
+        if row.count > 0:
+            observed.add((row.source, row.review_status))
+
+    order = db.source_catalog.ordered_codes(db.priority)
+    priority_index = {code: index for index, code in enumerate(order)}
+    sources = sorted(
+        {source for source, _status in observed if source is not None},
+        key=lambda source: (priority_index.get(source, len(priority_index)), source),
+    )
+    status_order = {"unreviewed": 0, "reviewed": 1, "legacy_unknown": 2}
+    source_index = {source: index for index, source in enumerate(sources)}
+    for rows in grouped.values():
+        rows.sort(
+            key=lambda row: (
+                len(source_index)
+                if row.source is None
+                else source_index.get(row.source, len(source_index)),
+                status_order.get(row.review_status, 3),
+            )
+        )
+
+    legend = []
+    for source in sources:
+        statuses = sorted(
+            {status for row_source, status in observed if row_source == source},
+            key=lambda status: status_order.get(status, 3),
+        )
+        for status in statuses:
+            legend.append(
+                (
+                    source_label(source, db.source_catalog, status),
+                    source_tone(source),
+                )
+            )
+    if (None, None) in observed:
+        legend.append(("未翻譯", "neutral"))
+    return grouped, legend
 
 
 class OverviewPanel(ft.Column):
@@ -34,6 +71,7 @@ class OverviewPanel(ft.Column):
         page: ft.Page,
         get_db,
         *,
+        request_refresh: Callable[[], None] | None = None,
         open_scan: Callable[[], None] | None = None,
         open_entries: Callable[[str, str | None, str | None], None] | None = None,
     ):
@@ -41,15 +79,18 @@ class OverviewPanel(ft.Column):
         super().__init__(expand=True, spacing=12, scroll=ft.ScrollMode.AUTO)
         self._page = page
         self._get_db = get_db
+        self._request_refresh = request_refresh
         self._open_scan = open_scan
         self._open_entries = open_entries
+        self._has_snapshot = False
 
         self._build_stat_cards()
         self.versions_col = ft.Column(spacing=14)
-        self.legend = ft.Row(
-            [kit.chip(label, tone, dot=True) for _f, label, tone in SEGMENTS],
-            spacing=8,
-            wrap=True,
+        self.legend = ft.Row(spacing=8, wrap=True)
+        self.legend_note = ft.Text(
+            "圖例只列出目前生效且有筆數的來源；未翻譯另列。來源優先序只影響排列。",
+            size=11.5,
+            color=C.DIM,
         )
         self.missing_col = ft.Column(spacing=0)
         self.scans_col = ft.Column(spacing=8)
@@ -57,10 +98,18 @@ class OverviewPanel(ft.Column):
             "重新整理",
             "secondary",
             icon=ft.Icons.REFRESH,
-            on_click=lambda _e: self.refresh(update=True),
+            on_click=lambda _e: self.refresh(),
         )
         self.problem = ft.Text(
             "", size=12.5, color=C.RED, selectable=True, visible=False
+        )
+        self.loading = ft.Row(
+            [
+                ft.ProgressRing(width=18, height=18, stroke_width=2),
+                ft.Text("正在載入 Mod 資料庫總覽…", size=12.5, color=C.DIM),
+            ],
+            spacing=10,
+            visible=True,
         )
         self.empty = kit.empty_state(
             "資料庫還沒有資料",
@@ -82,7 +131,9 @@ class OverviewPanel(ft.Column):
                 ),
                 kit.section_card(
                     "各版本翻譯進度",
-                    ft.Column([self.legend, self.versions_col], spacing=12),
+                    ft.Column(
+                        [self.legend, self.legend_note, self.versions_col], spacing=8
+                    ),
                     icon=ft.Icons.BAR_CHART,
                     tone="em",
                 ),
@@ -101,10 +152,12 @@ class OverviewPanel(ft.Column):
         )
         self.controls = [
             ft.Row([self.refresh_btn], alignment=ft.MainAxisAlignment.END),
+            self.loading,
             self.problem,
             self.empty,
             self.content_col,
         ]
+        self.set_loading(preserve=False)
 
     def _build_stat_cards(self) -> None:
         self.diff_btn = kit.button(
@@ -180,52 +233,120 @@ class OverviewPanel(ft.Column):
 
     # ------------------------------------------------------------------ 載入
     def refresh(self, *, update: bool = False) -> None:
-        db = self._get_db()
-        stats = db.version_stats() if db else []
+        """請求非同步重新載入；資料查詢由 ModDbView 的背景工作負責。"""
+        if self._request_refresh is None:
+            db = self._get_db()
+            source_stats = db.effective_source_stats_by_version() if db else []
+            stats = db.version_stats_from_effective_sources(source_stats) if db else []
+            if not stats:
+                problem = database_problem()
+                if problem:
+                    self.show_error(problem)
+                    if update:
+                        self._safe_update()
+                    return
+            overview = db.overview() if db and stats else {}
+            missing = db.missing_by_mod(stats[0].mc_version, limit=10) if stats else []
+            scans = db.last_scans(5) if db and stats else []
+            self.apply_snapshot(
+                db,
+                stats=stats,
+                overview=overview,
+                source_stats=source_stats,
+                missing=missing,
+                scans=scans,
+            )
+            if update:
+                self._safe_update()
+            return
+        self._request_refresh()
+
+    def set_loading(self, *, preserve: bool = True) -> None:
+        self.loading.visible = True
+        self.refresh_btn.disabled = True
+        self.problem.visible = False
+        if not preserve or not self._has_snapshot:
+            self.empty.visible = False
+            self.content_col.visible = False
+
+    def show_error(self, message: str) -> None:
+        self.loading.visible = False
+        self.refresh_btn.disabled = False
+        self.problem.value = f"⚠ 資料庫無法使用：{message}"
+        self.problem.visible = True
+        if not self._has_snapshot:
+            self.empty.visible = False
+            self.content_col.visible = False
+
+    def apply_snapshot(
+        self,
+        db,
+        *,
+        stats: list[VersionStat],
+        overview: dict,
+        source_stats: list,
+        missing: list[dict],
+        scans: list[dict],
+    ) -> None:
+        self._has_snapshot = True
+        self.loading.visible = False
+        self.refresh_btn.disabled = False
+        self.problem.value = ""
+        self.problem.visible = False
         has_data = bool(stats)
         self.empty.visible = not has_data
         self.content_col.visible = has_data
-        # 檔案存在卻開不起來（其他用途的 SQLite、版本太新）：說明原因，避免誤導成「尚未建立」
-        problem = "" if has_data else database_problem()
-        self.problem.value = f"⚠ 資料庫無法使用：{problem}" if problem else ""
-        self.problem.visible = bool(problem)
-        if problem:
-            self.empty.visible = False
         if has_data and db is not None:
-            ov = db.overview()
-            self.stat_mods.set_value(format_count(ov["mods"]))
+            source_stats_by_version, legend_rows = _source_breakdown(db, source_stats)
+            self.legend.controls = [
+                kit.chip(label, tone, dot=True) for label, tone in legend_rows
+            ]
+            self.stat_mods.set_value(format_count(overview["mods"]))
             self.stat_content.set_value(
-                format_count(ov["content"]),
+                format_count(overview["content"]),
                 delta=f"共 {format_count(sum(s.total for s in stats))} 筆（含各版本）"
                 + (
-                    f"・原文未知 {format_count(ov['no_source'])}"
-                    if ov["no_source"]
+                    f"・原文未知 {format_count(overview['no_source'])}"
+                    if overview["no_source"]
                     else ""
                 ),
                 delta_tone="neutral",
             )
-            self.stat_diff.set_value(format_count(ov["diff"]))
-            self.stat_changed.set_value(format_count(ov["src_changed"]))
-            self.versions_col.controls = [self._version_bar(s) for s in stats]
-            self._render_missing(db, stats[0].mc_version)
-            self._render_scans(db)
-        if update:
-            try:
-                self._page.update()
-            except Exception as exc:  # noqa: BLE001 - 頁面已卸載時不影響資料
-                log_debug(f"OverviewPanel update 略過：{exc}")
+            self.stat_diff.set_value(format_count(overview["diff"]))
+            self.stat_changed.set_value(format_count(overview["src_changed"]))
+            self.versions_col.controls = [
+                self._version_bar(
+                    s,
+                    source_stats_by_version.get(s.mc_version, []),
+                    db.source_catalog,
+                )
+                for s in stats
+            ]
+            self._render_missing(missing, stats[0].mc_version)
+            self._render_scans(scans)
 
-    def _version_bar(self, s: VersionStat) -> ft.Control:
-        values = {f: getattr(s, f) for f, _l, _t in SEGMENTS}
+    def _safe_update(self) -> None:
+        try:
+            self._page.update()
+        except Exception as exc:  # noqa: BLE001 - 頁面已卸載時不影響資料
+            log_debug(f"OverviewPanel update 略過：{exc}")
+
+    def _version_bar(self, s: VersionStat, source_stats: list, catalog) -> ft.Control:
         segs = [
             ft.Container(
-                expand=max(v, 0),
-                bgcolor=design.tone(tone).fg if f != "untranslated" else C.TRACK,
+                expand=max(row.count, 0),
+                bgcolor=(
+                    design.tone(source_tone(row.source)).fg
+                    if row.source is not None
+                    else C.TRACK
+                ),
                 height=10,
-                tooltip=f"{label}：{v:,}",
+                tooltip=(
+                    f"{source_label(row.source, catalog, row.review_status) if row.source is not None else '未翻譯'}：{row.count:,}"
+                ),
             )
-            for (f, label, tone), v in zip(SEGMENTS, values.values(), strict=True)
-            if v > 0
+            for row in source_stats
+            if row.count > 0
         ]
         translated = s.total - s.untranslated
         return ft.Column(
@@ -257,8 +378,7 @@ class OverviewPanel(ft.Column):
             spacing=5,
         )
 
-    def _render_missing(self, db, version: str) -> None:
-        rows = db.missing_by_mod(version, limit=10)
+    def _render_missing(self, rows: list[dict], version: str) -> None:
         header = ft.Container(
             padding=ft.Padding.symmetric(horizontal=16, vertical=8),
             content=ft.Row(
@@ -324,8 +444,7 @@ class OverviewPanel(ft.Column):
             expand=flex,
         )
 
-    def _render_scans(self, db) -> None:
-        scans = db.last_scans(5)
+    def _render_scans(self, scans: list[dict]) -> None:
         self.scans_col.controls = [
             ft.Row(
                 [

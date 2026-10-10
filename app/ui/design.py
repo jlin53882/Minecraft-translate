@@ -31,6 +31,12 @@ import flet as ft
 FONT_SANS = "Noto Sans TC"
 FONT_MONO = "JetBrains Mono"
 
+# Minecraft 樣式預覽統一使用書頁底色；預設深色文字清楚易讀，格式碼仍保留原色。
+MC_PREVIEW_BG = "#F3E9CE"
+MC_PREVIEW_LINE = "#C9B98C"
+MC_PREVIEW_TEXT = "#2D2619"
+MC_PREVIEW_HINT = "#6B6252"
+
 
 def _rgb(hex_color: str) -> tuple[int, int, int]:
     h = hex_color.lstrip("#")

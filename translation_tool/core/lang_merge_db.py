@@ -15,6 +15,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import Any
 
+from translation_tool.core.lang_merge_provenance import source_provenance
 from translation_tool.core.lm_config_rules import value_fully_translated
 from translation_tool.translation_db import (
     DbSettings,
@@ -47,6 +48,8 @@ class MergeDbFill:
         mod_id: str | None,
         final_tw: dict[str, Any],
         pending: dict[str, Any],
+        *,
+        source_provenance_by_key: dict[str, dict[str, Any]] | None = None,
     ) -> tuple[dict[str, Any], dict[str, Any], int]:
         """用資料庫譯文補 ``pending`` 內的條目；回傳 ``(final_tw, pending, 補上筆數)``。"""
         if not mod_id or not pending:
@@ -61,6 +64,11 @@ class MergeDbFill:
             )
             if hit and hit.zh_tw and value_fully_translated(hit.zh_tw):
                 final_tw[key] = hit.zh_tw
+                if source_provenance_by_key is not None:
+                    source_provenance_by_key[key] = {
+                        **source_provenance(hit, self.db.source_catalog),
+                        "value": hit.zh_tw,
+                    }
                 hits += 1
             else:
                 remaining[key] = en
