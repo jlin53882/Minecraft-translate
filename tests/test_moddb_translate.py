@@ -379,7 +379,12 @@ def test_entries_panel_save_and_review_use_separate_manual_states(db_path):
     assert panel.confirm_btn.visible is True and panel.confirm_btn.disabled is False
 
     panel._confirm()
-    assert page.overlay and page.overlay[-1].title.value == "確認審核範圍"
+    assert page.overlay and page.overlay[-1].title.value == "確認條目審核"
+    dialog_text = "\n".join(texts_of(page.overlay[-1].content))
+    assert "英文原文・en_us" in dialog_text
+    assert "繁體中文譯文・zh_tw" in dialog_text
+    assert "條目內容" in dialog_text
+    assert "版本審核範圍" in dialog_text
     page.overlay[-1].actions[-1].on_click(None)
     detail = db.entry_detail(panel.selected.id)
     manual = next(row for row in detail.translations if row.source == SRC_MANUAL)
