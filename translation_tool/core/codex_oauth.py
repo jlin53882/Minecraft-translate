@@ -197,10 +197,6 @@ def _credential_file_lock():
         if os.name == "nt":
             import msvcrt
 
-            handle.seek(0, os.SEEK_END)
-            if handle.tell() == 0:
-                handle.write(b"\0")
-                handle.flush()
             handle.seek(0)
             deadline = time.monotonic() + _CREDENTIAL_LOCK_TIMEOUT_SEC
             while True:

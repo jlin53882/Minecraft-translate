@@ -2,10 +2,12 @@
 
 import errno
 import multiprocessing
+import os
 import sys
 import time
 from contextlib import nullcontext
 from pathlib import Path
+from queue import Empty
 from types import SimpleNamespace
 from urllib.parse import parse_qs, urlsplit
 
@@ -80,6 +82,32 @@ def _refresh_in_child_process(
         result_queue.put((False, repr(exc)))
 
 
+def _credential_lock_in_child_process(
+    credential_path, start_barrier, result_queue, hold_seconds
+):
+    """Compete for a credential lock from a cold-start spawned process."""
+    worker_oauth = oauth
+    worker_oauth._credential_path = lambda: Path(credential_path)
+    try:
+        start_barrier.wait(timeout=10)
+        with worker_oauth._credential_file_lock():
+            entered = time.monotonic()
+            result_queue.put(("entered", os.getpid(), entered))
+            time.sleep(hold_seconds)
+            result_queue.put(("left", os.getpid(), time.monotonic()))
+    except Exception as exc:  # noqa: BLE001 - report child failures to parent
+        result_queue.put(
+            (
+                "error",
+                os.getpid(),
+                type(exc).__name__,
+                getattr(exc, "errno", None),
+                getattr(exc, "winerror", None),
+                str(exc),
+            )
+        )
+
+
 @pytest.fixture
 def no_credential_file_lock(monkeypatch):
     monkeypatch.setattr(oauth, "_credential_file_lock", lambda: nullcontext())
@@ -122,15 +150,19 @@ def test_credential_record_round_trips_and_rejects_unknown_format(monkeypatch):
         oauth._decode_record(b"unknown-format")
 
 
+@pytest.mark.parametrize(
+    "contention_errno", [errno.EACCES, errno.EAGAIN, errno.EDEADLK]
+)
 def test_windows_file_lock_retries_contention_and_unlocks_only_after_acquire(
-    monkeypatch, tmp_path
+    monkeypatch, tmp_path, contention_errno
 ):
     class FakeMsvcrt:
         LK_NBLCK = 1
         LK_UNLCK = 2
 
-        def __init__(self, fail_count):
+        def __init__(self, fail_count, fail_errno=errno.EACCES):
             self.fail_count = fail_count
+            self.fail_errno = fail_errno
             self.lock_calls = 0
             self.unlock_calls = 0
 
@@ -140,18 +172,29 @@ def test_windows_file_lock_retries_contention_and_unlocks_only_after_acquire(
                 return
             self.lock_calls += 1
             if self.fail_count is None or self.lock_calls <= self.fail_count:
-                raise OSError(errno.EACCES, "locked")
+                raise OSError(self.fail_errno, "locked")
 
-    lock_module = FakeMsvcrt(fail_count=2)
+    lock_module = FakeMsvcrt(fail_count=2, fail_errno=contention_errno)
     monkeypatch.setattr(oauth.os, "name", "nt")
     monkeypatch.setitem(sys.modules, "msvcrt", lock_module)
     monkeypatch.setattr(oauth, "_credential_path", lambda: tmp_path / "oauth.dat")
     monkeypatch.setattr(oauth, "_CREDENTIAL_LOCK_TIMEOUT_SEC", 0.1)
     monkeypatch.setattr(oauth, "_CREDENTIAL_LOCK_RETRY_SEC", 0.001)
 
+    real_open = Path.open
+    handles = []
+
+    def open_tracked(path, *args, **kwargs):
+        handle = real_open(path, *args, **kwargs)
+        handles.append(handle)
+        return handle
+
+    monkeypatch.setattr(Path, "open", open_tracked)
+
     with oauth._credential_file_lock():
         assert lock_module.lock_calls == 3
     assert lock_module.unlock_calls == 1
+    assert handles[0].closed
 
     blocked = FakeMsvcrt(fail_count=None)
     monkeypatch.setitem(sys.modules, "msvcrt", blocked)
@@ -162,12 +205,169 @@ def test_windows_file_lock_retries_contention_and_unlocks_only_after_acquire(
     ):
         pytest.fail("a blocked lock must not enter its critical section")
     assert blocked.unlock_calls == 0
+    assert handles[1].closed
+
+    raising = FakeMsvcrt(fail_count=0)
+    monkeypatch.setitem(sys.modules, "msvcrt", raising)
+    with (
+        pytest.raises(RuntimeError, match="yield failure"),
+        oauth._credential_file_lock(),
+    ):
+        raise RuntimeError("yield failure")
+    assert raising.unlock_calls == 1
+    assert handles[2].closed
+
+
+def test_windows_file_lock_does_not_touch_the_lock_byte_before_acquiring(
+    monkeypatch, tmp_path
+):
+    class FakeMsvcrt:
+        LK_NBLCK = 1
+        LK_UNLCK = 2
+
+        def __init__(self):
+            self.acquired = False
+            self.lock_calls = 0
+            self.unlock_calls = 0
+
+        def locking(self, _fd, mode, _count):
+            if mode == self.LK_UNLCK:
+                self.unlock_calls += 1
+                self.acquired = False
+            else:
+                self.lock_calls += 1
+                self.acquired = True
+
+    lock_module = FakeMsvcrt()
+    monkeypatch.setattr(oauth.os, "name", "nt")
+    monkeypatch.setitem(sys.modules, "msvcrt", lock_module)
+    credential_path = tmp_path / "oauth.dat"
+    lock_path = credential_path.with_suffix(".dat.lock")
+    monkeypatch.setattr(oauth, "_credential_path", lambda: credential_path)
+
+    real_open = Path.open
+    handles = []
+
+    class GuardedHandle:
+        def __init__(self, handle):
+            self.handle = handle
+            self.write_attempts = 0
+            self.flush_attempts = 0
+            handles.append(self)
+
+        def __getattr__(self, name):
+            return getattr(self.handle, name)
+
+        def write(self, data):
+            self.write_attempts += 1
+            if not lock_module.acquired:
+                raise PermissionError(13, "competing process owns byte zero")
+            return self.handle.write(data)
+
+        def flush(self):
+            self.flush_attempts += 1
+            if not lock_module.acquired:
+                raise PermissionError(13, "competing process owns byte zero")
+            return self.handle.flush()
+
+    def open_tracked(path, *args, **kwargs):
+        handle = real_open(path, *args, **kwargs)
+        return GuardedHandle(handle) if path == lock_path else handle
+
+    monkeypatch.setattr(Path, "open", open_tracked)
+
+    with oauth._credential_file_lock():
+        assert lock_module.lock_calls == 1
+
+    assert handles[0].write_attempts == 0
+    assert handles[0].flush_attempts == 0
+    assert handles[0].closed
+    assert lock_module.unlock_calls == 1
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="requires Windows msvcrt locks")
+def test_windows_file_lock_serializes_cold_start_spawn_processes(tmp_path):
+    context = multiprocessing.get_context("spawn")
+    scenarios = [("missing", 20), ("empty", 1), ("nonempty", 1)]
+
+    for state, rounds in scenarios:
+        for round_index in range(rounds):
+            credential_path = tmp_path / f"{state}-{round_index}.dat"
+            lock_path = credential_path.with_suffix(".dat.lock")
+            if state == "empty":
+                lock_path.touch()
+            elif state == "nonempty":
+                lock_path.write_bytes(b"existing lock file")
+            else:
+                lock_path.unlink(missing_ok=True)
+
+            start_barrier = context.Barrier(2)
+            result_queue = context.Queue()
+            workers = [
+                context.Process(
+                    target=_credential_lock_in_child_process,
+                    args=(str(credential_path), start_barrier, result_queue, 0.025),
+                )
+                for _ in range(2)
+            ]
+            messages = []
+            started_workers = []
+            try:
+                for worker in workers:
+                    worker.start()
+                    started_workers.append(worker)
+
+                deadline = time.monotonic() + 8
+                while len(messages) < 4 and time.monotonic() < deadline:
+                    try:
+                        messages.append(result_queue.get(timeout=0.1))
+                    except Empty:
+                        if all(not worker.is_alive() for worker in started_workers):
+                            break
+
+                for worker in started_workers:
+                    worker.join(timeout=1)
+
+                errors = [message for message in messages if message[0] == "error"]
+                assert not errors, f"{state} round {round_index}: {errors}"
+                assert all(worker.exitcode == 0 for worker in workers), (
+                    state,
+                    round_index,
+                    [worker.exitcode for worker in workers],
+                    messages,
+                )
+                assert len(messages) == 4, (state, round_index, messages)
+
+                intervals = {}
+                for event, pid, timestamp in messages:
+                    intervals.setdefault(pid, {})[event] = timestamp
+                assert len(intervals) == 2, (state, round_index, messages)
+                spans = sorted(
+                    (events["entered"], events["left"]) for events in intervals.values()
+                )
+                assert spans[0][1] <= spans[1][0], (
+                    state,
+                    round_index,
+                    spans,
+                )
+            finally:
+                for worker in started_workers:
+                    if worker.is_alive():
+                        worker.terminate()
+                    worker.join(timeout=2)
+                    if worker.exitcode is not None:
+                        worker.close()
+                result_queue.close()
+                result_queue.join_thread()
+                lock_path.unlink(missing_ok=True)
 
 
 def test_two_processes_share_one_serialized_refresh(
     monkeypatch, isolate_oauth_credential_file
 ):
     credential_path, _native_path = isolate_oauth_credential_file
+    lock_path = credential_path.with_suffix(credential_path.suffix + ".lock")
+    lock_path.unlink(missing_ok=True)
     monkeypatch.setattr(oauth, "_dpapi_transform", lambda payload, *, protect: payload)
     monkeypatch.setattr(
         oauth,
