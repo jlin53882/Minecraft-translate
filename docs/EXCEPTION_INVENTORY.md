@@ -29,7 +29,7 @@
 | `app/services_impl/cache/cache_services.py:cache_rebuild_index_service` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/services_impl/moddb_batch_operation.py:_run_batch_job` | BLE001 | 已記錄／回報 | worker boundary must publish unexpected failures |
 | `app/services_impl/moddb_retranslate_service.py:_cache_finalized_translation` | BLE001 | 已記錄／回報 | cache is best-effort after DB commit |
-| `app/services_impl/moddb_retranslate_service.py:_handle_batch_completion` | BLE001 | 已記錄／回報 | cache failure must not stop DB work |
+| `app/services_impl/moddb_retranslate_service.py:_flush_repair_cache` | BLE001 | 已記錄／回報 | DB results survive cache failure |
 | `app/services_impl/moddb_retranslate_service.py:run_moddb_retranslate_service` | BLE001 | 已記錄／回報 | service boundary reports failure in TaskSession |
 | `app/services_impl/moddb_service.py:warm_stats_quietly` | BLE001 | 已記錄／回報 | 統計預熱失敗不影響任務結果 |
 | `app/services_impl/moddb_service.py:run_moddb_scan_service` | BLE001 | 已記錄／回報 | 背景任務：任何失敗都要回報到 session，不可讓執行緒默默結束 |

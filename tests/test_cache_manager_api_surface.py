@@ -8,6 +8,8 @@ def test_cache_manager_public_api_surface_exists() -> None:
         "reload_translation_cache",
         "reload_translation_cache_type",
         "save_translation_cache",
+        "save_translation_cache_keys",
+        "add_to_cache_with_receipt",
         "search_cache",
         "get_cache_entry",
         "get_cache_dict_ref",

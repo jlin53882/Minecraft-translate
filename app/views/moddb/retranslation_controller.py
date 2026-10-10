@@ -247,13 +247,25 @@ def _display_preview_result(panel, options, db_identity, result):
         or "無符合類型"
     )
     catalog = source_catalog_for(panel._get_db())
+    ai_plan = (
+        f"AI 代表 {format_count(result.ai_representatives)} 筆；"
+        f"預計共用 {format_count(result.dedup_reused_candidates)} 筆候選；"
+    )
+    representative_breakdown = (
+        "、".join(
+            f"{cache_profile_label(cache_type)}：{format_count(count)} 筆代表"
+            for cache_type, count in result.representative_profile_counts
+        )
+        or "無代表項目"
+    )
     if result.mode == "quality_mismatch":
         sources = "、".join(source_label(source, catalog) for source in result.sources)
         panel.repair_preview_text.value = (
             f"符合條件：{format_count(result.total_candidates)} 筆來源譯文；{cap}，"
             f"本次處理 {format_count(selected)} 筆。來源：{sources or '無'}。\n"
             "每筆只更新原來源；AI 結果會再檢查特殊字元，不一致或失敗時保留舊譯文。\n"
-            f"翻譯 profile：{breakdown}；預估：約 {format_count(result.estimated_batches)} 批。"
+            f"{ai_plan}翻譯 profile：{breakdown}；{representative_breakdown}；"
+            f"目前預估：約 {format_count(result.estimated_batches)} 個外層批次。"
         )
     else:
         panel.repair_preview_text.value = (
@@ -261,7 +273,8 @@ def _display_preview_result(panel, options, db_identity, result):
             f"本次將重翻 {format_count(selected)} 筆。\n"
             f"來源：{source_label(result.source, catalog)}；只處理目前生效來源為 AI 且譯文等於原文的項目；"
             "人工、模組自帶及其他來源不會被重新翻譯。\n"
-            f"翻譯 profile：{breakdown}；預估：約 {format_count(result.estimated_batches)} 批。"
+            f"{ai_plan}翻譯 profile：{breakdown}；{representative_breakdown}；"
+            f"目前預估：約 {format_count(result.estimated_batches)} 個外層批次。"
         )
     panel.repair_samples.controls = [
         ft.Text(

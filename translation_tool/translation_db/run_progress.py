@@ -139,8 +139,29 @@ def format_live(live: dict) -> str:
         f"第 {live['batch_done']:,} / 約 {live['batch_est']:,} 批",
         f"已處理 {live['processed']:,} / {live['total']:,} 筆（{percent:.0f}%）",
         f"已用 {format_duration(live['elapsed_sec'])}",
-        f"預估剩餘 {format_duration(live['eta_sec'])}",
+        "預估剩餘 "
+        + format_duration(live["eta_sec"])
+        + (f"（{live['eta_note']}）" if live.get("eta_note") else ""),
     ]
+    profile_progress = live.get("profile_progress")
+    if profile_progress:
+        representative_total = sum(
+            values["ai_representatives"] for values in profile_progress.values()
+        )
+        representative_submitted = sum(
+            values["ai_submitted_items"] for values in profile_progress.values()
+        )
+        parts.append(
+            f"AI 代表已送 {representative_submitted:,}/{representative_total:,} 筆"
+        )
+        for values in profile_progress.values():
+            parts.append(
+                f"{values['label']} 候選 {values['processed_candidates']:,}/"
+                f"{values['total_candidates']:,}；代表 {values['ai_submitted_items']:,}/"
+                f"{values['ai_representatives']:,}；外層批次已完成 "
+                f"{values['completed_batches']:,}、目前規劃待處理 "
+                f"{values['planned_remaining_batches']:,}"
+            )
     if live.get("finish_ts"):
         # 顯示本機時間：先以 UTC 建立再轉成本機時區
         finish = datetime.fromtimestamp(live["finish_ts"], tz=UTC).astimezone()

@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import logging
 import sqlite3
+import time
 import traceback
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from time import monotonic
 from typing import Any
@@ -17,11 +18,10 @@ from app.services_impl.moddb_service import (
     open_database,
     warm_stats_quietly,
 )
-from app.services_impl.moddb_source_service import source_label
+from app.services_impl.moddb_source_service import source_catalog_for, source_label
 from app.services_impl.moddb_translate_service import (
     TranslateOptions,
     build_items,
-    plan_batches,
 )
 from app.services_impl.pipelines._pipeline_logging import (
     ensure_pipeline_logging,
@@ -38,12 +38,12 @@ from translation_tool.core.lm_translator_shared_cache import get_default_cache_r
 from translation_tool.core.lm_translator_shared_loop import _get_default_batch_size
 from translation_tool.translation_db import TranslationDB
 from translation_tool.translation_db.models import SameSourceAIEntry
-from translation_tool.translation_db.run_progress import RunProgress
+from translation_tool.translation_db.run_progress import format_live
 from translation_tool.translation_db.schema import SRC_AI
 from translation_tool.utils.cache_manager import (
-    add_to_cache,
+    add_to_cache_with_receipt,
     initialize_translation_cache,
-    save_translation_cache,
+    save_translation_cache_keys,
 )
 from translation_tool.utils.cancellation import (
     TaskCancelled,
@@ -87,6 +87,9 @@ class SameSourceAIRepairPreview:
     source: int = SRC_AI
     mode: str = "same_source_ai"
     sources: tuple[int, ...] = ()
+    ai_representatives: int = 0
+    dedup_reused_candidates: int = 0
+    representative_profile_counts: tuple[tuple[str, int], ...] = ()
 
     @property
     def selected_count(self) -> int:
@@ -103,6 +106,33 @@ class SameSourceAIRepairReport:
     skipped_changed: int = 0
     failed: int = 0
     cache_failed: int = 0
+    cache_add_failed: int = 0
+    cache_save_failed: int = 0
+    cache_keys_changed: int | None = None
+    cache_keys_saved: int | None = None
+    cache_stats_note: str = ""
+    ai_representatives: int = 0
+    ai_submitted_items: int = 0
+    ai_validated_items: int = 0
+    ai_submission_unit: str = "items_passed_to_translate_batch_smart"
+    dedup_mapped_candidates: int = 0
+    dedup_reused_candidates: int = 0
+    candidate_profile_counts: dict[str, int] = field(default_factory=dict)
+    representative_profile_counts: dict[str, int] = field(default_factory=dict)
+    processed_candidates: int = 0
+    not_submitted_candidates: int = 0
+    unprocessed_candidates: int = 0
+    log_details_omitted: int = 0
+    _log_details_emitted: int = field(default=0, repr=False)
+    _log_details_omitted_by_category: dict[str, int] = field(
+        default_factory=dict, repr=False
+    )
+    _cache_changed_keys: set[tuple[str, str]] = field(default_factory=set, repr=False)
+    _cache_saved_keys: set[tuple[str, str]] = field(default_factory=set, repr=False)
+    _cache_save_failed_keys: set[tuple[str, str]] = field(
+        default_factory=set, repr=False
+    )
+    _cache_saving_disabled: bool = field(default=False, repr=False)
     remaining: int | None = None
     batches: int = 0
     elapsed_sec: float = 0.0
@@ -114,7 +144,170 @@ class SameSourceAIRepairReport:
         operation = (
             _QUALITY_REPAIR_OPERATION if self.mode == "quality_mismatch" else _OPERATION
         )
-        return {"operation": operation, **self.__dict__}
+        return {
+            "operation": operation,
+            **{
+                key: value
+                for key, value in self.__dict__.items()
+                if not key.startswith("_")
+            },
+        }
+
+
+class _RepairRunProgress:
+    """Track source-row progress and profile-specific representative ETA samples."""
+
+    def __init__(
+        self,
+        items: Sequence[dict[str, Any]],
+        fanout: dict[int, tuple[dict[str, Any], ...]],
+        *,
+        total_candidates: int,
+        lm_cfg: dict[str, Any],
+        started_mono: float | None = None,
+        started_wall: float | None = None,
+    ) -> None:
+        self.total_candidates = total_candidates
+        self._fanout = fanout
+        self.lm_cfg = lm_cfg
+        self.started_mono = monotonic() if started_mono is None else started_mono
+        self.started_wall = time.time() if started_wall is None else started_wall
+        self.batches_done = 0
+        self.profile_batches_done: dict[str, int] = {}
+        self.profile_candidate_totals: dict[str, int] = {}
+        self.profile_candidate_processed: dict[str, int] = {}
+        self.profile_representative_totals: dict[str, int] = {}
+        self.profile_items_submitted: dict[str, int] = {}
+        self.profile_sample_items: dict[str, int] = {}
+        self.profile_sample_seconds: dict[str, float] = {}
+        for item in items:
+            cache_type = _retranslation_cache_type(item)
+            self.profile_representative_totals[cache_type] = (
+                self.profile_representative_totals.get(cache_type, 0) + 1
+            )
+            self.profile_candidate_totals[cache_type] = (
+                self.profile_candidate_totals.get(cache_type, 0)
+                + len(fanout.get(id(item), (item,)))
+            )
+
+    def update(
+        self,
+        cache_type: str,
+        *,
+        candidate_count: int,
+        representative_count: int,
+        elapsed: float,
+    ) -> None:
+        self.batches_done += 1
+        self.profile_batches_done[cache_type] = (
+            self.profile_batches_done.get(cache_type, 0) + 1
+        )
+        self.profile_candidate_processed[cache_type] = (
+            self.profile_candidate_processed.get(cache_type, 0) + candidate_count
+        )
+        self.profile_items_submitted[cache_type] = (
+            self.profile_items_submitted.get(cache_type, 0) + representative_count
+        )
+        self.profile_sample_items[cache_type] = (
+            self.profile_sample_items.get(cache_type, 0) + representative_count
+        )
+        self.profile_sample_seconds[cache_type] = self.profile_sample_seconds.get(
+            cache_type, 0.0
+        ) + max(0.0, elapsed)
+
+    def live(
+        self,
+        remaining_items: Sequence[dict[str, Any]],
+        *,
+        processed: int = 0,
+        now_mono: float | None = None,
+        now_wall: float | None = None,
+    ) -> dict[str, Any]:
+        now_mono = monotonic() if now_mono is None else now_mono
+        now_wall = time.time() if now_wall is None else now_wall
+        remaining: dict[str, int] = {}
+        remaining_candidates: dict[str, int] = {}
+        for item in remaining_items:
+            cache_type = _retranslation_cache_type(item)
+            remaining[cache_type] = remaining.get(cache_type, 0) + 1
+            remaining_candidates[cache_type] = remaining_candidates.get(
+                cache_type, 0
+            ) + len(self._fanout.get(id(item), (item,)))
+        remaining_batches_by_profile = {
+            cache_type: _count_planned_batches(
+                [
+                    item
+                    for item in remaining_items
+                    if _retranslation_cache_type(item) == cache_type
+                ],
+                self.lm_cfg,
+            )
+            for cache_type in remaining
+        }
+        remaining_batches = sum(remaining_batches_by_profile.values())
+        eta = 0.0
+        unknown_profiles = []
+        for cache_type, count in remaining.items():
+            sample_items = self.profile_sample_items.get(cache_type, 0)
+            if count and sample_items <= 0:
+                unknown_profiles.append(cache_profile_label(cache_type))
+                continue
+            if count:
+                eta += (self.profile_sample_seconds[cache_type] / sample_items) * count
+        if unknown_profiles:
+            eta_value = None
+            eta_note = f"{', '.join(unknown_profiles)} 尚無耗時樣本"
+        else:
+            eta_value = eta
+            eta_note = ""
+
+        profile_progress = {
+            cache_type: {
+                "label": cache_profile_label(cache_type),
+                "processed_candidates": self.profile_candidate_processed.get(
+                    cache_type, 0
+                ),
+                "total_candidates": self.profile_candidate_totals[cache_type],
+                "remaining_candidates": remaining_candidates.get(cache_type, 0),
+                "ai_representatives": self.profile_representative_totals[cache_type],
+                "ai_submitted_items": self.profile_items_submitted.get(cache_type, 0),
+                "completed_batches": self.profile_batches_done.get(cache_type, 0),
+                "planned_remaining_batches": remaining_batches_by_profile.get(
+                    cache_type, 0
+                ),
+            }
+            for cache_type in self.profile_candidate_totals
+        }
+        return {
+            "batch_done": self.batches_done,
+            "batch_est": self.batches_done + remaining_batches,
+            "processed": max(0, min(processed, self.total_candidates)),
+            "total": self.total_candidates,
+            "elapsed_sec": max(0.0, now_mono - self.started_mono),
+            "eta_sec": eta_value,
+            "eta_note": eta_note,
+            "finish_ts": None if eta_value is None else now_wall + eta_value,
+            "started_ts": self.started_wall,
+            "updated_ts": now_wall,
+            "started_mono": self.started_mono,
+            "updated_mono": now_mono,
+            "profile_progress": profile_progress,
+        }
+
+    def start_line(self, items: Sequence[dict[str, Any]]) -> str:
+        counts = _cache_type_counts(items)
+        planned = _count_planned_batches(items, self.lm_cfg)
+        return (
+            f"📦 AI 代表 {len(items):,} 筆；依目前 profile／token 預算預估 "
+            f"{planned:,} 個外層批次（{_format_profile_breakdown(counts)}；"
+            "候選進度以來源列計，內部 LM 重試不計外層批次）"
+        )
+
+    def line(self, live: dict[str, Any]) -> str:
+        return format_live(live)
+
+    def elapsed(self) -> float:
+        return max(0.0, monotonic() - self.started_mono)
 
 
 def _raise_preview_timeout(deadline: float | None) -> None:
@@ -159,9 +352,14 @@ def preview_same_source_ai_retranslation(
     items = _group_retranslation_items_by_cache_type(items, deadline=deadline)
     _raise_preview_timeout(deadline)
     profile_counts = _cache_type_counts(items, deadline=deadline)
-    estimated_batches = plan_batches(
-        items, check=lambda: _raise_preview_timeout(deadline)
+    representatives, _fanout = _deduplicate_retranslation_items(
+        items, enabled=mode == "quality_mismatch", deadline=deadline
     )
+    representative_profile_counts = _cache_type_counts(
+        representatives, deadline=deadline
+    )
+    lm_cfg = _load_lm_config()
+    estimated_batches = _count_planned_batches(representatives, lm_cfg)
     _raise_preview_timeout(deadline)
     preview_entries = []
     for entry in entries:
@@ -175,6 +373,9 @@ def preview_same_source_ai_retranslation(
         estimated_batches,
         mode=mode,
         sources=tuple(sorted({int(entry.source_id or SRC_AI) for entry in entries})),
+        ai_representatives=len(representatives),
+        dedup_reused_candidates=len(entries) - len(representatives),
+        representative_profile_counts=tuple(representative_profile_counts.items()),
     )
 
 
@@ -249,6 +450,76 @@ def _group_retranslation_items_by_cache_type(
     return grouped
 
 
+def _retranslation_equivalence_key(item: dict[str, Any]) -> tuple[Any, ...]:
+    """Key every prompt/context field except source-row CAS state."""
+    source_row_fields = {
+        "_source_id",
+        "_expected_old_zh_tw",
+        "_expected_revision",
+        "_review_status",
+    }
+    return tuple(
+        (key, _stable_retranslation_value(value))
+        for key, value in sorted(item.items())
+        if key not in source_row_fields
+    )
+
+
+def _stable_retranslation_value(value: Any) -> Any:
+    """Convert nested prompt context into a deterministic, hashable key."""
+    if isinstance(value, dict):
+        return tuple(
+            (key, _stable_retranslation_value(nested))
+            for key, nested in sorted(value.items(), key=lambda pair: str(pair[0]))
+        )
+    if isinstance(value, (list, tuple)):
+        return tuple(_stable_retranslation_value(nested) for nested in value)
+    if isinstance(value, set):
+        return tuple(sorted(_stable_retranslation_value(nested) for nested in value))
+    try:
+        hash(value)
+    except TypeError:
+        return repr(value)
+    return value
+
+
+def _deduplicate_retranslation_items(
+    items: Sequence[dict[str, Any]],
+    *,
+    enabled: bool,
+    deadline: float | None = None,
+) -> tuple[list[dict[str, Any]], dict[int, tuple[dict[str, Any], ...]]]:
+    """Share one task-local AI answer only across source rows of the same entry."""
+    representatives: list[dict[str, Any]] = []
+    fanout: dict[int, list[dict[str, Any]]] = {}
+    by_key: dict[tuple[Any, ...], list[dict[str, Any]]] = {}
+    for item in items:
+        _raise_preview_timeout(deadline)
+        key = _retranslation_equivalence_key(item) if enabled else (id(item),)
+        source_id = item.get("_source_id")
+        group = next(
+            (
+                candidate
+                for candidate in by_key.get(key, ())
+                if all(
+                    target.get("_source_id") != source_id
+                    for target in fanout[id(candidate)]
+                )
+            ),
+            None,
+        )
+        if group is None:
+            representatives.append(item)
+            fanout[id(item)] = [item]
+            by_key.setdefault(key, []).append(item)
+        else:
+            fanout[id(group)].append(item)
+    return representatives, {
+        representative_id: tuple(targets)
+        for representative_id, targets in fanout.items()
+    }
+
+
 def _cache_type_counts(
     items: Sequence[dict[str, Any]], *, deadline: float | None = None
 ) -> dict[str, int]:
@@ -291,6 +562,25 @@ def _same_batch_prefix(items: list[dict[str, Any]], lm_cfg: dict[str, Any]):
     return items[: max(1, fit_count)], cache_type
 
 
+def _load_lm_config() -> dict[str, Any]:
+    config = load_config()
+    lm_cfg = config.get("lm_translator", {}) if isinstance(config, dict) else {}
+    return lm_cfg if isinstance(lm_cfg, dict) else {}
+
+
+def _count_planned_batches(
+    items: Sequence[dict[str, Any]], lm_cfg: dict[str, Any]
+) -> int:
+    """Re-run the current outer batch selector over a planning snapshot."""
+    remaining = list(items)
+    batches = 0
+    while remaining:
+        batch, _cache_type = _same_batch_prefix(remaining, lm_cfg)
+        batches += 1
+        remaining = remaining[len(batch) :]
+    return batches
+
+
 def _valid_translation(result: Any, original: dict[str, Any]) -> bool:
     return (
         isinstance(result, dict)
@@ -303,16 +593,18 @@ def _valid_translation(result: Any, original: dict[str, Any]) -> bool:
     )
 
 
-def _cache_finalized_translation(item: dict[str, Any], text: str) -> bool:
-    """Update only this finalized result after its database CAS has succeeded."""
+def _cache_finalized_translation(
+    item: dict[str, Any], text: str
+) -> tuple[str, str, Any] | None:
+    """Update the cache after DB CAS and return its mutation receipt."""
     try:
         cache_type = str(item.get("cache_type") or "lang")
         rule = get_default_cache_rules().get(cache_type)
         if rule is None:
-            return False
+            return None
         initialize_translation_cache()
         key = rule.make_key(item)
-        return add_to_cache(
+        receipt = add_to_cache_with_receipt(
             cache_type,
             key,
             item["source_text"],
@@ -320,13 +612,60 @@ def _cache_finalized_translation(item: dict[str, Any], text: str) -> bool:
             mod=item.get("_mod_id"),
             path=item.get("path"),
         )
+        return cache_type, key, receipt
     except Exception as exc:  # noqa: BLE001 - cache is best-effort after DB commit
-        logger.warning("Mod DB 舊 AI 重翻快取更新失敗：%r", exc)
-        return False
+        logger.warning("Mod DB repair cache add failed: %r", exc)
+        return None
 
 
 def _log(session, text: str, level: str = "info") -> None:
     mirror_session_log(session, logger, text, level, prefix="[Mod DB 譯文修復] ")
+
+
+def _candidate_identity(db, item: dict[str, Any]) -> str:
+    source_id = int(item.get("_source_id", SRC_AI))
+    label = source_label(source_id, source_catalog_for(db), item.get("_review_status"))
+    return (
+        f"[MC {item.get('_expected_version', '')}]"
+        f"[mod={item.get('_mod_id', '')}]"
+        f"[kind={item.get('_kind', '')}]"
+        f"[source={source_id}:{label}]"
+        f"[key={item.get('path', '')}]"
+    )
+
+
+def _log_candidate(
+    db,
+    session,
+    report,
+    item: dict[str, Any],
+    category: str,
+    text: str,
+    level: str = "info",
+) -> None:
+    """Emit source-identifiable detail while respecting the run-wide sample cap."""
+    if report._log_details_emitted >= _LOG_SAMPLE_LIMIT:
+        report.log_details_omitted += 1
+        report._log_details_omitted_by_category[category] = (
+            report._log_details_omitted_by_category.get(category, 0) + 1
+        )
+        return
+    report._log_details_emitted += 1
+    _log(session, f"{_candidate_identity(db, item)} {text}", level)
+
+
+def _log_omitted_candidate_details(session, report) -> None:
+    if not report.log_details_omitted:
+        return
+    category_counts = "、".join(
+        f"{name} {count:,} 筆"
+        for name, count in sorted(report._log_details_omitted_by_category.items())
+    )
+    _log(
+        session,
+        f"ℹ️ 已省略 {report.log_details_omitted:,} 筆候選明細"
+        + (f"（{category_counts}）" if category_counts else ""),
+    )
 
 
 def _finalize_batch_results(
@@ -335,86 +674,184 @@ def _finalize_batch_results(
     session,
     batch: list[dict[str, Any]],
     results: list[dict[str, Any]],
-    cache_type: str,
     report: SameSourceAIRepairReport,
-    cache_types_to_save: set[str],
-) -> tuple[list[dict[str, Any]], bool]:
-    """Validate, guard, and persist each result from one engine batch."""
+    fanout: dict[int, tuple[dict[str, Any], ...]],
+    cache_keys_to_save: dict[str, set[str]],
+    cancelled,
+) -> tuple[int, bool]:
+    """Validate one representative result, then independently CAS each source row."""
     stop_after_batch = False
     if len(results) > len(batch):
         results = results[: len(batch)]
         report.last_error = "翻譯引擎回傳超過本批筆數的結果"
         stop_after_batch = True
+    for index, original in enumerate(batch):
+        if cancelled() or is_cancelled():
+            raise TaskCancelled()
+        has_result = index < len(results)
+        result = results[index] if has_result else None
+        stop_after_batch = (
+            _finalize_representative_result(
+                db,
+                options,
+                session,
+                original,
+                result,
+                has_result,
+                report,
+                fanout[id(original)],
+                cache_keys_to_save,
+                cancelled,
+            )
+            or stop_after_batch
+        )
+    return len(results), stop_after_batch
 
-    for original, result in zip(batch, results, strict=False):
-        stop_after_batch |= _finalize_candidate(
+
+def _finalize_representative_result(
+    db,
+    options,
+    session,
+    original,
+    result,
+    has_result,
+    report,
+    targets,
+    cache_keys_to_save,
+    cancelled,
+) -> bool:
+    """Validate and fan out one AI result, including one CAS per equivalent source."""
+    if not has_result:
+        report.last_error = (
+            report.last_error or "翻譯未回傳完整本批結果，未回傳項目保留舊譯文"
+        )
+        _mark_batch_targets_failed(
+            db,
+            session,
+            report,
+            targets,
+            "missing_result",
+            "翻譯引擎未回傳本筆結果，保留舊譯文",
+            cancelled,
+        )
+        return True
+    if not _valid_translation(result, original):
+        report.last_error = report.last_error or "翻譯結果格式無效，舊譯文已保留"
+        _mark_batch_targets_failed(
+            db,
+            session,
+            report,
+            targets,
+            "invalid_result",
+            "AI 結果格式無效，保留舊譯文",
+            cancelled,
+        )
+        return True
+    translated_text = result["text"]
+    issues = token_issues(original["source_text"], translated_text)
+    if issues:
+        _mark_batch_targets_flagged(db, session, report, targets, issues, cancelled)
+        return False
+    report.ai_validated_items += 1
+    for target in targets:
+        if cancelled() or is_cancelled():
+            raise TaskCancelled()
+        _finalize_source_target(
             db,
             options,
             session,
-            original,
-            result,
-            cache_type,
             report,
-            cache_types_to_save,
+            target,
+            translated_text,
+            cache_keys_to_save,
+            shared=len(targets) > 1,
+            reused=target is not original,
         )
-    return results, stop_after_batch
+    return False
 
 
-def _finalize_candidate(
-    db, options, session, original, result, cache_type, report, cache_types_to_save
-) -> bool:
-    """Validate and persist one candidate; return whether the batch must stop."""
-    if not _valid_translation(result, original):
+def _mark_batch_targets_failed(
+    db, session, report, targets, category, message, cancelled
+):
+    """Record one missing or invalid representative result for every mapped source."""
+    for target in targets:
+        if cancelled() or is_cancelled():
+            raise TaskCancelled()
         report.failed += 1
-        report.last_error = report.last_error or "翻譯結果格式無效，舊譯文已保留"
-        return True
-    report.translated += 1
-    issues = token_issues(original["source_text"], result["text"])
-    if issues:
-        report.flagged += 1
-        source_text = (
-            "原來源譯文" if report.mode == "quality_mismatch" else "舊 AI 譯文"
-        )
-        _log(
-            session,
-            f"⚠️ 特殊字元不一致，保留{source_text}："
-            f"{original['_mod_id']} / {original['path']}：{'、'.join(issues)}",
-            "warning",
-        )
-        return False
+        report.processed_candidates += 1
+        _log_candidate(db, session, report, target, category, message, "warning")
 
-    replace = _replace_candidate_translation(db, original, result["text"], report)
+
+def _mark_batch_targets_flagged(db, session, report, targets, issues, cancelled):
+    """Keep the old translation when a validated answer changes protected tokens."""
+    old_source = "原來源譯文" if report.mode == "quality_mismatch" else "舊 AI 譯文"
+    message = f"特殊字元不一致，保留{old_source}：{'、'.join(issues)}"
+    for target in targets:
+        if cancelled() or is_cancelled():
+            raise TaskCancelled()
+        report.translated += 1
+        report.flagged += 1
+        report.processed_candidates += 1
+        _log_candidate(
+            db, session, report, target, "token_mismatch", message, "warning"
+        )
+
+
+def _finalize_source_target(
+    db, options, session, report, target, text, cache_keys_to_save, *, shared, reused
+):
+    """CAS one source row, then report only cache mutations owned by this run."""
+    replace = _replace_candidate_translation(db, target, text, report)
+    report.translated += 1
+    report.dedup_reused_candidates += int(reused)
+    suffix = "（共用已驗證 AI 回覆；獨立 CAS）" if shared else ""
     if replace.status == "updated":
         report.updated += 1
-        if report.updated <= _LOG_SAMPLE_LIMIT:
-            _log(
-                session,
-                f"✅ {original['_mod_id']} / {original['path']}："
-                f"{original['source_text'][:50]} → {result['text'][:50]}",
-            )
+        _log_candidate(db, session, report, target, "updated", f"✅ 更新成功{suffix}")
     elif replace.status == "unchanged":
         report.unchanged += 1
+        _log_candidate(
+            db, session, report, target, "unchanged", f"譯文已相同，未新增歷史{suffix}"
+        )
     else:
         report.skipped_changed += 1
-        _log(
+        report.processed_candidates += 1
+        _log_candidate(
+            db,
             session,
-            f"⚠️ 資料已變動，跳過覆寫：{original['_mod_id']} / {original['path']}",
+            report,
+            target,
+            "cas_changed",
+            f"⚠️ 資料已變動，跳過覆寫{suffix}",
             "warning",
         )
-        return False
-
+        return
+    report.processed_candidates += 1
     if options.write_cache and replace.status == "updated":
-        if _cache_finalized_translation(original, result["text"]):
-            cache_types_to_save.add(cache_type)
-        else:
-            report.cache_failed += 1
-            _log(
-                session,
-                f"⚠️ 資料庫已更新，但快取寫入未成功："
-                f"{original['_mod_id']} / {original['path']}",
-                "warning",
-            )
-    return False
+        _record_repair_cache(db, session, report, target, text, cache_keys_to_save)
+
+
+def _record_repair_cache(db, session, report, target, text, cache_keys_to_save):
+    cached = _cache_finalized_translation(target, text)
+    if cached is None or not cached[2].accepted:
+        report.cache_add_failed += 1
+        report.cache_failed += 1
+        detail = "快取變更未能確認" if cached is None else "快取拒絕此 key"
+        _log_candidate(
+            db,
+            session,
+            report,
+            target,
+            "cache_add_failed",
+            f"⚠️ 資料庫已更新，但{detail}",
+            "warning",
+        )
+        return
+    cache_type, key, receipt = cached
+    if receipt.changed:
+        # Preview order is stable. For shared keys, the last successful CAS owns dst.
+        report._cache_changed_keys.add((cache_type, key))
+        cache_keys_to_save.setdefault(cache_type, set()).add(key)
 
 
 def _replace_candidate_translation(db, original, text, report):
@@ -440,27 +877,60 @@ def _replace_candidate_translation(db, original, text, report):
     return db.replace_ai_translation(entry_id, old_text, text, **identity)
 
 
-def _finish_snapshot(db, options, session, report, tracker, processed, total) -> None:
+def _finish_snapshot(db, options, session, report, tracker) -> None:
     report.remaining = _remaining_candidate_count(db, options, report.mode)
+    report.unprocessed_candidates = max(
+        0, report.candidates - report.processed_candidates
+    )
+    _set_cache_report_stats(options, report)
     if report.failed or report.last_error:
         report.status = "FAILED"
         session.set_error()
     else:
         report.status = "DONE"
     report.elapsed_sec = tracker.elapsed()
-    session.set_progress(processed / max(total, 1))
+    session.set_progress(report.processed_candidates / max(report.candidates, 1))
     level = "warning" if report.failed or report.flagged else "info"
     _log(
         session,
-        f"完成：候選 {report.candidates}，更新 {report.updated}，"
+        f"完成：候選 {report.candidates}；AI 代表計劃 {report.ai_representatives}，"
+        f"交給 translate_batch_smart {report.ai_submitted_items} 個 item "
+        f"（不是 API/HTTP 次數），已驗證 {report.ai_validated_items}，"
+        f"安全共用 {report.dedup_reused_candidates}；更新 {report.updated}，"
         f"仍相同 {report.unchanged}，格式檢查未通過 {report.flagged}，"
         f"資料已變動跳過 {report.skipped_changed}，失敗 {report.failed}，"
-        f"範圍內仍符合修復條件 {report.remaining}",
+        f"未處理 {report.unprocessed_candidates}，未送出候選 {report.not_submitted_candidates}，"
+        f"範圍內仍符合修復條件 {report.remaining}；快取 key 變更 "
+        f"{report.cache_keys_changed if report.cache_keys_changed is not None else '未知'}，"
+        f"成功落盤 "
+        f"{report.cache_keys_saved if report.cache_keys_saved is not None else '未知'}"
+        + (f"（{report.cache_stats_note}）" if report.cache_stats_note else ""),
         level,
     )
     if report.last_error:
         _log(session, f"最後一次錯誤：{report.last_error}", "warning")
+    _log_omitted_candidate_details(session, report)
     session.set_summary(report.as_dict())
+
+
+def _set_cache_report_stats(options, report) -> None:
+    report.cache_save_failed = len(report._cache_save_failed_keys)
+    report.cache_keys_changed = (
+        len(report._cache_changed_keys) if options.write_cache else None
+    )
+    if not options.write_cache:
+        report.cache_keys_saved = None
+        report.cache_stats_note = "本次未啟用快取寫入"
+    elif report._cache_save_failed_keys:
+        report.cache_keys_saved = None
+        report.cache_stats_note = (
+            f"{len(report._cache_save_failed_keys):,} 個 key 落盤結果未確認"
+        )
+    elif report._cache_saving_disabled:
+        report.cache_keys_saved = len(report._cache_saved_keys)
+        report.cache_stats_note = "快取落盤設定停用，變更保留在記憶體 pending"
+    else:
+        report.cache_keys_saved = len(report._cache_saved_keys)
 
 
 def _remaining_candidate_count(db, options, mode: str) -> int:
@@ -477,27 +947,15 @@ def _handle_batch_completion(
     session,
     report,
     batch,
-    results,
+    result_count,
     status,
-    cache_types_to_save,
+    cache_keys_to_save,
 ) -> bool:
-    """Flush finalized cache writes and decide whether the run must stop."""
-    if options.write_cache:
-        for cache_type in cache_types_to_save:
-            try:
-                saved = save_translation_cache(cache_type)
-                failure_reason = "快取落盤失敗"
-            except Exception as exc:  # noqa: BLE001 - cache failure must not stop DB work
-                saved = False
-                failure_reason = f"快取落盤拋出例外：{exc!r}"
-            if not saved:
-                report.cache_failed += 1
-                _log(session, f"⚠️ {cache_type} {failure_reason}", "warning")
-        cache_types_to_save.clear()
+    """Flush this run's changed keys and decide whether the run must stop."""
+    _flush_repair_cache(options, session, report, cache_keys_to_save)
 
     stop_after_batch = False
-    if len(results) < len(batch):
-        report.failed += len(batch) - len(results)
+    if result_count < len(batch):
         report.last_error = (
             report.last_error or "翻譯未回傳完整本批結果，未回傳項目保留舊譯文"
         )
@@ -506,6 +964,51 @@ def _handle_batch_completion(
         report.last_error = report.last_error or f"翻譯引擎回傳狀態：{status}"
         stop_after_batch = True
     return stop_after_batch
+
+
+def _flush_repair_cache(options, session, report, cache_keys_to_save) -> None:
+    if not options.write_cache:
+        return
+    for cache_type, keys in list(cache_keys_to_save.items()):
+        if not keys:
+            cache_keys_to_save.pop(cache_type, None)
+            continue
+        try:
+            receipt = save_translation_cache_keys(cache_type, keys)
+        except Exception as exc:  # noqa: BLE001 - DB results survive cache failure
+            logger.warning("Mod DB repair cache flush failed: %r", exc)
+            receipt = None
+        if receipt is None:
+            failed = {(cache_type, key) for key in keys}
+            report._cache_save_failed_keys.update(failed)
+            report.cache_save_failed += len(keys)
+            report.cache_failed += len(keys)
+            _log(
+                session,
+                f"⚠️ {cache_type} 有 {len(keys):,} 個本次變更 key 落盤狀態未知；"
+                "資料庫更新已保留",
+                "warning",
+            )
+            continue
+        if not receipt.saving_enabled:
+            report._cache_saving_disabled = True
+            continue
+        if receipt.saved_keys is None:
+            failed = {(cache_type, key) for key in keys}
+            report._cache_save_failed_keys.update(failed)
+            report.cache_save_failed += len(keys)
+            report.cache_failed += len(keys)
+            _log(
+                session,
+                f"⚠️ {cache_type} 有 {len(keys):,} 個本次變更 key 落盤失敗；"
+                "資料庫更新已保留，快取仍待重試",
+                "warning",
+            )
+            continue
+        saved = {(cache_type, key) for key in receipt.saved_keys}
+        report._cache_saved_keys.update(saved)
+        report._cache_save_failed_keys.difference_update(saved)
+        cache_keys_to_save.pop(cache_type, None)
 
 
 def _translate_snapshot(
@@ -517,70 +1020,134 @@ def _translate_snapshot(
     cancelled,
 ) -> None:
     items, tracker, lm_cfg, sleep_seconds = _initialize_snapshot_run(
-        entries, session, report
+        entries, session, report, options
     )
-    total = len(items)
-    processed = 0
-    cache_types_to_save: set[str] = set()
-
+    fanout = tracker._fanout
+    cache_keys_to_save: dict[str, set[str]] = {}
     while items:
-        if cancelled() or is_cancelled():
-            raise TaskCancelled()
+        _raise_if_repair_cancelled(items, fanout, report, cancelled)
         batch, cache_type = _same_batch_prefix(items, lm_cfg)
-        report.batches += 1
-        translated, status = translate_batch_smart(batch, total)
-        results, finalize_stop = _finalize_batch_results(
+        remainder, stop_after_batch = _run_repair_batch(
+            db,
+            options,
+            session,
+            batch,
+            items,
+            cache_type,
+            tracker,
+            report,
+            fanout,
+            cancelled,
+            cache_keys_to_save,
+        )
+        if stop_after_batch:
+            break
+        items = remainder
+        if items and sleep_seconds > 0:
+            try:
+                interruptible_sleep(sleep_seconds)
+            except TaskCancelled:
+                _set_not_submitted_candidates(report, items, fanout)
+                raise
+    _finish_snapshot(db, options, session, report, tracker)
+
+
+def _set_not_submitted_candidates(report, items, fanout):
+    report.not_submitted_candidates = sum(len(fanout[id(item)]) for item in items)
+
+
+def _raise_if_repair_cancelled(items, fanout, report, cancelled):
+    if cancelled() or is_cancelled():
+        _set_not_submitted_candidates(report, items, fanout)
+        raise TaskCancelled()
+
+
+def _run_repair_batch(
+    db,
+    options,
+    session,
+    batch,
+    items,
+    cache_type,
+    tracker,
+    report,
+    fanout,
+    cancelled,
+    cache_keys_to_save,
+):
+    """Submit one homogeneous batch, finalize each CAS, then publish its progress."""
+    report.batches += 1
+    report.ai_submitted_items += len(batch)
+    batch_started = monotonic()
+    tail = items[len(batch) :]
+    try:
+        translated, status = translate_batch_smart(batch, report.ai_representatives)
+    except TaskCancelled:
+        _set_not_submitted_candidates(report, tail, fanout)
+        raise
+    if cancelled() or is_cancelled():
+        _set_not_submitted_candidates(report, tail, fanout)
+        raise TaskCancelled()
+    try:
+        result_count, finalize_stop = _finalize_batch_results(
             db,
             options,
             session,
             batch,
             list(translated or []),
-            cache_type,
             report,
-            cache_types_to_save,
+            fanout,
+            cache_keys_to_save,
+            cancelled,
         )
-
-        processed += len(results)
-        items = items[len(batch) :]
-        completion_stop = _handle_batch_completion(
-            options,
-            session,
-            report,
-            batch,
-            results,
-            status,
-            cache_types_to_save,
+    except TaskCancelled:
+        _set_not_submitted_candidates(report, tail, fanout)
+        _flush_repair_cache(options, session, report, cache_keys_to_save)
+        report.unprocessed_candidates = max(
+            0, report.candidates - report.processed_candidates
         )
-        stop_after_batch = finalize_stop or completion_stop
-        if stop_after_batch:
-            report.failed += len(items)
-            items.clear()
+        raise
+    completion_stop = _handle_batch_completion(
+        options, session, report, batch, result_count, status, cache_keys_to_save
+    )
+    stop_after_batch = finalize_stop or completion_stop
+    if stop_after_batch:
+        _set_not_submitted_candidates(report, tail, fanout)
+    tracker.update(
+        cache_type,
+        candidate_count=sum(len(fanout[id(item)]) for item in batch),
+        representative_count=len(batch),
+        elapsed=monotonic() - batch_started,
+    )
+    live = tracker.live(tail, processed=report.processed_candidates)
+    session.set_progress(report.processed_candidates / max(report.candidates, 1))
+    session.set_summary({**report.as_dict(), "live": live})
+    _log(session, f"⏱ {tracker.line(live)}")
+    return tail, stop_after_batch
 
-        if tracker.update(processed):
-            live = tracker.live()
-            session.set_progress(processed / max(total, 1))
-            session.set_summary({**report.as_dict(), "live": live})
-            _log(session, f"⏱ {tracker.line()}")
 
-        if stop_after_batch:
-            break
-        if items and sleep_seconds > 0:
-            interruptible_sleep(sleep_seconds)
-
-    _finish_snapshot(db, options, session, report, tracker, processed, total)
-
-
-def _initialize_snapshot_run(entries, session, report):
+def _initialize_snapshot_run(entries, session, report, options):
     """Group candidates and prepare the rate-limited translator run."""
-    items = _group_retranslation_items_by_cache_type(
+    candidates = _group_retranslation_items_by_cache_type(
         _build_retranslation_items(entries)
     )
-    total = len(items)
-    tracker = RunProgress(total=total, planned_batches=plan_batches(items))
-    config = load_config()
-    lm_cfg = config.get("lm_translator", {}) if isinstance(config, dict) else {}
+    items, fanout = _deduplicate_retranslation_items(
+        candidates, enabled=report.mode == "quality_mismatch"
+    )
+    report.ai_representatives = len(items)
+    report.dedup_mapped_candidates = len(candidates) - len(items)
+    report.candidate_profile_counts = _cache_type_counts(candidates)
+    report.representative_profile_counts = _cache_type_counts(items)
+    lm_cfg = _load_lm_config()
+    tracker = _RepairRunProgress(
+        items,
+        fanout,
+        total_candidates=len(candidates),
+        lm_cfg=lm_cfg,
+    )
     rate_cfg = lm_cfg.get("rate_limit", {}) if isinstance(lm_cfg, dict) else {}
     sleep_seconds = float(rate_cfg.get("sleep_seconds_between_batches", 0.0) or 0.0)
+    total = len(candidates)
     _log(
         session,
         (
@@ -588,7 +1155,9 @@ def _initialize_snapshot_run(entries, session, report):
             if report.mode == "quality_mismatch"
             else f"🔎 舊 AI 機翻修復候選 {total:,} 筆；來源：{source_label(SRC_AI)}"
         )
-        + f"；{_format_profile_breakdown(_cache_type_counts(items))}；"
+        + f"；候選 {total:,}，AI 代表 {len(items):,}，"
+        f"等價映射 {report.dedup_mapped_candidates:,}，"
+        f"{_format_profile_breakdown(_cache_type_counts(candidates))}；"
         "略過舊快取直接重新翻譯",
     )
     _log(
@@ -599,11 +1168,54 @@ def _initialize_snapshot_run(entries, session, report):
             if report.mode == "quality_mismatch"
             else "舊 AI 同原文譯文"
         )
-        + f"：{total:,} 筆",
+        + f"：{total:,} 候選，{len(items):,} 個 AI 代表",
     )
-    _log(session, tracker.start_line())
-    session.set_summary({**report.as_dict(), "live": tracker.live()})
+    _log(session, tracker.start_line(items))
+    if not options.write_cache:
+        report.cache_stats_note = "本次未啟用快取寫入"
+    session.set_summary({**report.as_dict(), "live": tracker.live(items)})
     return items, tracker, lm_cfg, sleep_seconds
+
+
+def _report_cancelled_repair(db, options, session, report, mode, started_at):
+    """Publish the committed partial result when the user cancels repair."""
+    report.status = "CANCELLED"
+    report.elapsed_sec = monotonic() - started_at
+    report.unprocessed_candidates = max(
+        0, report.candidates - report.processed_candidates
+    )
+    _set_cache_report_stats(options, report)
+    _log(session, "⏹ 已取消；已完成並提交的項目保留，其他舊譯文未更動", "warning")
+    if db is not None:
+        report.remaining = _remaining_candidate_count(db, options, mode)
+    _log_omitted_candidate_details(session, report)
+    session.set_summary(report.as_dict())
+
+
+def _report_repair_failure(options, session, report, operation_label, exc):
+    """Turn a worker-boundary exception into an explicit failed session report."""
+    logger.error(
+        "Mod DB %s 失敗: %s\n%s",
+        operation_label,
+        exc,
+        traceback.format_exc(),
+        extra={"ui_mirrored": True},
+    )
+    report.status = "FAILED"
+    remaining_failed = max(
+        0, report.candidates - report.processed_candidates - report.failed
+    )
+    report.failed += remaining_failed
+    report.processed_candidates += remaining_failed
+    report.unprocessed_candidates = max(
+        0, report.candidates - report.processed_candidates
+    )
+    report.last_error = f"{type(exc).__name__}: {exc}"
+    _set_cache_report_stats(options, report)
+    session.set_error()
+    add_log_unmirrored(session, f"[致命錯誤] {operation_label}失敗：{exc}", "error")
+    _log_omitted_candidate_details(session, report)
+    session.set_summary(report.as_dict())
 
 
 def run_moddb_retranslate_service(
@@ -642,26 +1254,9 @@ def run_moddb_retranslate_service(
             return
         _run_repair_candidates(db, options, session, entries, report, mode, cancelled)
     except TaskCancelled:
-        report.status = "CANCELLED"
-        report.elapsed_sec = monotonic() - started_at
-        _log(session, "⏹ 已取消；已完成並提交的項目保留，其他舊譯文未更動", "warning")
-        if db is not None:
-            report.remaining = _remaining_candidate_count(db, options, mode)
-        session.set_summary(report.as_dict())
+        _report_cancelled_repair(db, options, session, report, mode, started_at)
     except Exception as exc:  # noqa: BLE001 - service boundary reports failure in TaskSession
-        logger.error(
-            "Mod DB %s 失敗: %s\n%s",
-            operation_label,
-            exc,
-            traceback.format_exc(),
-            extra={"ui_mirrored": True},
-        )
-        report.status = "FAILED"
-        report.failed += max(0, report.candidates - report.translated - report.failed)
-        report.last_error = f"{type(exc).__name__}: {exc}"
-        session.set_error()
-        add_log_unmirrored(session, f"[致命錯誤] {operation_label}失敗：{exc}", "error")
-        session.set_summary(report.as_dict())
+        _report_repair_failure(options, session, report, operation_label, exc)
     finally:
         report.elapsed_sec = max(report.elapsed_sec, monotonic() - started_at)
         if db is not None:
@@ -678,6 +1273,8 @@ def _run_repair_candidates(db, options, session, entries, report, mode, cancelle
     """Run the exact preview snapshot, including the no-candidate completion path."""
     if not entries:
         report.remaining = _remaining_candidate_count(db, options, mode)
+        report.unprocessed_candidates = 0
+        _set_cache_report_stats(options, report)
         message = (
             "沒有符合條件的來源譯文特殊字元不一致項目"
             if mode == "quality_mismatch"

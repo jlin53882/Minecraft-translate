@@ -8,6 +8,7 @@ from __future__ import annotations
 import logging
 import threading
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -39,8 +40,11 @@ __all__ = [
     "ACTIVE_SHARD_FILE",
     "CACHE_TYPES",
     "ROLLING_SHARD_SIZE",
+    "CacheAddReceipt",
+    "CacheSaveReceipt",
     "add_to_cache",
     "add_to_cache_batch",
+    "add_to_cache_with_receipt",
     "find_similar_translations",
     "force_rotate_shard",
     "get_active_shard_id",
@@ -57,8 +61,25 @@ __all__ = [
     "reload_translation_cache",
     "reload_translation_cache_type",
     "save_translation_cache",
+    "save_translation_cache_keys",
     "search_cache",
 ]
+
+
+@dataclass(frozen=True)
+class CacheAddReceipt:
+    """Whether an add was accepted and whether it changed the cached dst."""
+
+    accepted: bool
+    changed: bool
+
+
+@dataclass(frozen=True)
+class CacheSaveReceipt:
+    """Receipt for the selected pending keys written by one cache flush."""
+
+    saving_enabled: bool
+    saved_keys: tuple[str, ...] | None
 
 
 def _state():
@@ -272,6 +293,54 @@ def save_translation_cache(cache_type: str, write_new_shard: bool = True):
         return False
 
 
+def save_translation_cache_keys(
+    cache_type: str, keys: set[str] | frozenset[str], write_new_shard: bool = True
+) -> CacheSaveReceipt:
+    """Persist only the requested pending keys and return an exact flush receipt.
+
+    Other pending keys for the same profile belong to other runs and stay queued.
+    A disabled cache writer is reported separately from a successful empty flush.
+    """
+    if not load_config().get("translator", {}).get("enable_cache_saving", True):
+        return CacheSaveReceipt(saving_enabled=False, saved_keys=())
+
+    state = _state()
+    with state.cache_lock:
+        pending = cache_store.get_session_entries(state.session_new_entries, cache_type)
+        data_to_save = {key: pending[key] for key in keys if key in pending}
+        for key in data_to_save:
+            del pending[key]
+    if not data_to_save:
+        return CacheSaveReceipt(saving_enabled=True, saved_keys=())
+
+    try:
+        save_path = state.cache_file_path.get(cache_type)
+        if not save_path:
+            with state.cache_lock:
+                cache_store.restore_session_entries_if_absent(
+                    state.session_new_entries, state.is_dirty, cache_type, data_to_save
+                )
+            return CacheSaveReceipt(saving_enabled=True, saved_keys=None)
+        _save_entries_to_active_shards(
+            cache_type, data_to_save, force_new_shard=write_new_shard
+        )
+        with state.cache_lock:
+            if not cache_store.get_session_entries(
+                state.session_new_entries, cache_type
+            ):
+                cache_store.clear_dirty(state.is_dirty, cache_type)
+        return CacheSaveReceipt(
+            saving_enabled=True, saved_keys=tuple(data_to_save.keys())
+        )
+    except Exception:
+        with state.cache_lock:
+            cache_store.restore_session_entries_if_absent(
+                state.session_new_entries, state.is_dirty, cache_type, data_to_save
+            )
+        log.exception("儲存 %s 指定快取鍵失敗", cache_type)
+        return CacheSaveReceipt(saving_enabled=True, saved_keys=None)
+
+
 def _get_active_shard_path(cache_type: str) -> Path:
     """取得目前作用中的分片檔案路徑"""
     state = _state()
@@ -298,13 +367,28 @@ def add_to_cache(
         True 代表條目已在快取中（新增或內容未變）；False 代表未寫入
         （key/dst 為空，或快取初始化失敗而拒絕寫入）。
     """
+    return add_to_cache_with_receipt(
+        cache_type, key, src, dst, mod=mod, path=path
+    ).accepted
+
+
+def add_to_cache_with_receipt(
+    cache_type: str,
+    key: str,
+    src: str,
+    dst: str,
+    *,
+    mod: str | None = None,
+    path: str | None = None,
+) -> CacheAddReceipt:
+    """Add a translation and distinguish acceptance from a dst mutation."""
     if not key or not dst:
-        return False
+        return CacheAddReceipt(accepted=False, changed=False)
 
     state = _initialized_state()
     with state.cache_lock:
-        if _write_rejected(state, "add_to_cache"):
-            return False
+        if _write_rejected(state, "add_to_cache_with_receipt"):
+            return CacheAddReceipt(accepted=False, changed=False)
         cache = cache_store.get_cache_type_dict(state.translation_cache, cache_type)
         entry = {"src": src, "dst": dst}
         if mod:
@@ -318,7 +402,7 @@ def add_to_cache(
             )
             session_entries[key] = entry
             cache_store.mark_dirty(state.is_dirty, cache_type)
-        return True
+        return CacheAddReceipt(accepted=True, changed=changed)
 
 
 def add_to_cache_batch(

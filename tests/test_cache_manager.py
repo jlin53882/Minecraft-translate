@@ -45,6 +45,94 @@ def mock_save_path(tmp_path: Path, fresh_state):
     return cache_type, type_dir
 
 
+def test_add_to_cache_with_receipt_distinguishes_mutation_from_acceptance(fresh_state):
+    fresh_state.initialized = True
+
+    first = cache_manager.add_to_cache_with_receipt(
+        "lang", "same-key", "source", "first", mod="one"
+    )
+    unchanged = cache_manager.add_to_cache_with_receipt(
+        "lang", "same-key", "source", "first", mod="two"
+    )
+
+    assert first.accepted and first.changed
+    assert unchanged.accepted and not unchanged.changed
+    assert fresh_state.session_new_entries["lang"] == {
+        "same-key": {"src": "source", "dst": "first", "mod": "one"}
+    }
+
+
+def test_save_translation_cache_keys_only_flushes_selected_pending_keys(
+    mock_save_path, monkeypatch, fresh_state
+):
+    cache_type, _type_dir = mock_save_path
+    fresh_state.initialized = True
+    fresh_state.is_dirty[cache_type] = True
+    fresh_state.session_new_entries[cache_type] = {
+        "this-run": {"src": "a", "dst": "A"},
+        "other-run": {"src": "b", "dst": "B"},
+    }
+    monkeypatch.setattr(
+        cache_manager,
+        "load_config",
+        lambda: {"translator": {"enable_cache_saving": True}},
+    )
+    writes = []
+    monkeypatch.setattr(
+        cache_manager,
+        "_save_entries_to_active_shards",
+        lambda kind, entries, **_kwargs: writes.append((kind, dict(entries))),
+    )
+
+    receipt = cache_manager.save_translation_cache_keys(cache_type, {"this-run"})
+
+    assert receipt.saving_enabled
+    assert receipt.saved_keys == ("this-run",)
+    assert writes == [(cache_type, {"this-run": {"src": "a", "dst": "A"}})]
+    assert fresh_state.session_new_entries[cache_type] == {
+        "other-run": {"src": "b", "dst": "B"}
+    }
+    assert fresh_state.is_dirty[cache_type] is True
+
+
+def test_save_translation_cache_keys_reports_disabled_and_failure_receipts(
+    mock_save_path, monkeypatch, fresh_state
+):
+    cache_type, _type_dir = mock_save_path
+    fresh_state.initialized = True
+    fresh_state.is_dirty[cache_type] = True
+    fresh_state.session_new_entries[cache_type] = {"key": {"src": "a", "dst": "A"}}
+    monkeypatch.setattr(
+        cache_manager,
+        "load_config",
+        lambda: {"translator": {"enable_cache_saving": False}},
+    )
+
+    disabled = cache_manager.save_translation_cache_keys(cache_type, {"key"})
+
+    assert not disabled.saving_enabled and disabled.saved_keys == ()
+    assert "key" in fresh_state.session_new_entries[cache_type]
+
+    monkeypatch.setattr(
+        cache_manager,
+        "load_config",
+        lambda: {"translator": {"enable_cache_saving": True}},
+    )
+    monkeypatch.setattr(
+        cache_manager,
+        "_save_entries_to_active_shards",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("disk full")),
+    )
+
+    failed = cache_manager.save_translation_cache_keys(cache_type, {"key"})
+
+    assert failed.saving_enabled and failed.saved_keys is None
+    assert fresh_state.session_new_entries[cache_type] == {
+        "key": {"src": "a", "dst": "A"}
+    }
+    assert fresh_state.is_dirty[cache_type] is True
+
+
 # =============================================================================
 # 測試 1: initialize_translation_cache() 的 cache_lock 保護
 # =============================================================================
