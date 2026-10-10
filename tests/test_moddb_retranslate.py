@@ -310,10 +310,56 @@ def test_quality_repair_includes_input_newline_mismatch_and_allows_output_differ
     eligible_detail = check.entry_detail(eligible.id)
     assert eligible_detail.entry.quality_state == "mismatch"
     assert result["summary"]["updated"] == 2
-    # LF differences remain visible in general quality diagnostics.
-    assert result["summary"]["remaining"] == 2
+    # 只有實際換行差異的結果不再佔用 AI 修復名額，因此完成後不列為待 AI 修復。
+    assert result["summary"]["remaining"] == 0
     assert check.entry_detail(eligible.id).history[0].action == "quality_repair"
     check.close()
+
+
+def test_quality_repair_skips_newline_only_input_mismatch(db_path, monkeypatch):
+    db = TranslationDB(db_path)
+    newline_only = _ai_entry(db, key="a.newline_only", en="Line one\nLine two")
+    hard_issue = _ai_entry(db, key="b.hard_issue", en="Use %s")
+    db._conn.execute(
+        "UPDATE translation SET zh_tw='Line one' WHERE entry_id=? AND source=?",
+        (newline_only.id, SRC_AI),
+    )
+    db._conn.execute(
+        "UPDATE translation SET zh_tw='Use' WHERE entry_id=? AND source=?",
+        (hard_issue.id, SRC_AI),
+    )
+    db._conn.commit()
+
+    preview = moddb_retranslate_service.preview_same_source_ai_retranslation(
+        db, _options(), mode="quality_mismatch"
+    )
+    db.close()
+
+    assert preview.total_candidates == 1
+    assert preview.selected_count == 1
+    assert preview.entries[0].key == "b.hard_issue"
+    assert preview.skipped_newline_only_candidates == 1
+
+    monkeypatch.setattr(
+        moddb_retranslate_service,
+        "translate_batch_smart",
+        lambda batch, _total: (
+            [{**item, "text": "Use %s repaired"} for item in batch],
+            "AUTO",
+        ),
+    )
+    session = TaskSession()
+    moddb_retranslate_service.run_moddb_retranslate_service(
+        _options(write_cache=False),
+        session,
+        preview.entries,
+        mode="quality_mismatch",
+        review_preview=preview,
+    )
+    summary = session.snapshot()["summary"]
+    assert summary["candidates"] == 1
+    assert summary["skipped_newline_only_candidates"] == 1
+    assert summary["ai_submitted_items"] == 1
 
 
 def test_quality_repair_representative_limit_keeps_all_mapped_sources(db_path):
@@ -649,11 +695,11 @@ def test_repair_batches_group_profiles_and_preview_reports_breakdown(
     assert snap["summary"]["batches"] == 2
     assert snap["summary"]["updated"] == 66
     logs = "\n".join(entry.text for entry in snap["logs"])
-    assert "待重新翻譯的來源項目：66 個" in logs
+    assert "找到 66 筆待處理來源項目" in logs
     assert "來源：AI 機翻" in logs
     assert "Lang 60 筆" in logs
     assert "Patchouli 6 筆" in logs
-    assert "本次略過舊快取，會重新呼叫 AI" in logs
+    assert "本次略過既有翻譯快取，重新呼叫 AI" in logs
     assert repair_cache == []
 
 

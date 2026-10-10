@@ -173,10 +173,35 @@ def format_live(live: dict) -> str:
     return "｜".join(parts)
 
 
+def format_repair_live(live: dict) -> str:
+    """Format repair progress with separate source, AI and planned-batch counters."""
+    source_total = int(live.get("source_total", live.get("total", 0)) or 0)
+    source_done = int(live.get("source_processed", live.get("processed", 0)) or 0)
+    source_percent = 100 * source_done / max(source_total, 1)
+    ai_done = int(live.get("ai_completed", 0) or 0)
+    ai_total = int(live.get("ai_total", 0) or 0)
+    planned_done = int(live.get("planned_batches_done", live.get("batch_done", 0)) or 0)
+    planned_total = int(live.get("planned_batches_total", live.get("batch_est", 0)) or 0)
+    eta = (
+        format_duration(live.get("eta_sec"))
+        if live.get("eta_sec") is not None
+        else "計算中"
+    )
+    return (
+        f"來源進度 {source_done:,}/{source_total:,}（{source_percent:.0f}%）｜"
+        f"AI 修復項目 {ai_done:,}/{ai_total:,}｜"
+        f"規劃批次 {planned_done:,}/{planned_total:,}｜"
+        f"實際請求 {int(live.get('actual_requests', planned_done) or 0):,}｜"
+        f"已耗時 {format_duration(live.get('elapsed_sec'))}｜"
+        f"預估剩餘：{eta}"
+    )
+
+
 __all__ = [
     "RunProgress",
     "estimate_batches",
     "format_duration",
     "format_live",
+    "format_repair_live",
     "tick_live",
 ]

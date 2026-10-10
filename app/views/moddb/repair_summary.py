@@ -8,9 +8,9 @@ def repair_summary_detail_lines(summary: dict) -> list[str]:
     lines = []
     if "ai_representatives" in summary:
         lines.append(
-            f"唯一 AI 翻譯項目：預計 {summary.get('ai_representatives', 0)} 個；"
+            f"唯一 AI 修復項目：預計 {summary.get('ai_representatives', 0)} 個；"
             f"實際送入引擎 {summary.get('ai_submitted_items', 0)} 個"
-            "（不是 API 請求次數）；"
+            "（不等於實際 HTTP 請求次數）；"
             f"驗證通過 {summary.get('ai_validated_items', 0)}；"
             f"共用 AI 結果的來源項目 {summary.get('dedup_mapped_candidates', 0)}；"
             f"已成功套用共用結果 {summary.get('dedup_reused_candidates', 0)}"
@@ -20,6 +20,16 @@ def repair_summary_detail_lines(summary: dict) -> list[str]:
             f"{summary.get('candidates', 0)}；未送出的來源項目 "
             f"{summary.get('not_submitted_candidates', 0)}；未處理的來源項目 "
             f"{summary.get('unprocessed_candidates', 0)}"
+        )
+    if summary.get("skipped_newline_only_candidates"):
+        lines.append(
+            f"略過 {summary.get('skipped_newline_only_candidates', 0)} 筆只有實際換行數不同的項目"
+            "（不送 AI、不佔修復名額）"
+        )
+    if "planned_batches" in summary:
+        lines.append(
+            f"規劃批次：{summary.get('planned_batches', 0)}；"
+            f"實際送出請求：{summary.get('batches', 0)}（重試可能增加）"
         )
     if summary.get("input_newline_mismatch_candidates") is not None:
         lines.append(

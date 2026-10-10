@@ -42,8 +42,11 @@ from translation_tool.core.lm_translator_shared_cache import get_default_cache_r
 from translation_tool.core.lm_translator_shared_loop import _get_default_batch_size
 from translation_tool.translation_db import TranslationDB
 from translation_tool.translation_db.models import SameSourceAIEntry
-from translation_tool.translation_db.quality import repair_output_issues
-from translation_tool.translation_db.run_progress import format_live
+from translation_tool.translation_db.quality import (
+    repair_input_issues,
+    repair_output_issues,
+)
+from translation_tool.translation_db.run_progress import format_repair_live
 from translation_tool.translation_db.schema import SRC_AI
 from translation_tool.utils.cache_manager import (
     add_to_cache_with_receipt,
@@ -98,6 +101,7 @@ class SameSourceAIRepairPreview:
     representative_profile_counts: tuple[tuple[str, int], ...] = ()
     input_newline_mismatch_candidates: int = 0
     input_newline_mismatch_with_other_hard_issues: int = 0
+    skipped_newline_only_candidates: int = 0
 
     @property
     def selected_count(self) -> int:
@@ -115,6 +119,7 @@ class SameSourceAIRepairReport:
     flagged_entries_omitted: int = 0
     input_newline_mismatch_candidates: int = 0
     input_newline_mismatch_with_other_hard_issues: int = 0
+    skipped_newline_only_candidates: int = 0
     review_run_id: str = ""
     review_store_path: str = ""
     reviewable_results: int = 0
@@ -155,6 +160,7 @@ class SameSourceAIRepairReport:
     _cache_saving_disabled: bool = field(default=False, repr=False)
     remaining: int | None = None
     batches: int = 0
+    planned_batches: int = 0
     elapsed_sec: float = 0.0
     status: str = "DONE"
     last_error: str | None = None
@@ -306,6 +312,13 @@ class _RepairRunProgress:
         return {
             "batch_done": self.batches_done,
             "batch_est": self.batches_done + remaining_batches,
+            "planned_batches_done": self.batches_done,
+            "planned_batches_total": self.batches_done + remaining_batches,
+            "actual_requests": self.batches_done,
+            "ai_completed": sum(self.profile_items_submitted.values()),
+            "ai_total": sum(self.profile_representative_totals.values()),
+            "source_processed": max(0, min(processed, self.total_candidates)),
+            "source_total": self.total_candidates,
             "processed": max(0, min(processed, self.total_candidates)),
             "total": self.total_candidates,
             "elapsed_sec": max(0.0, now_mono - self.started_mono),
@@ -347,13 +360,12 @@ class _RepairRunProgress:
         counts = _cache_type_counts(items)
         planned = sum(self._planned_batches_by_profile.values())
         return (
-            f"📦 唯一 AI 翻譯項目 {len(items):,} 個；依目前每批 token 上限，"
-            f"預估分成 {planned:,} 個 API 批次（{_format_profile_breakdown(counts)}；"
-            "進度以全部來源項目計算，模型內部重試不會增加 API 批次數）"
+            f"📦 批次規劃｜預計 {planned:,} 批，共 {len(items):,} 個唯一 AI 修復項目"
+            f"（{_format_profile_breakdown(counts)}）"
         )
 
     def line(self, live: dict[str, Any]) -> str:
-        return format_live(live)
+        return format_repair_live(live)
 
     def elapsed(self) -> float:
         return max(0.0, monotonic() - self.started_mono)
@@ -415,7 +427,9 @@ def _limited_repair_snapshot(db, options, deadline):
     targets: dict[int, list[tuple[dict[str, Any], SameSourceAIEntry]]] = {}
     by_key: dict[tuple[Any, ...], list[dict[str, Any]]] = {}
     selected_entry_ids: set[int] = set()
-    eligible = newline_mismatch_count = newline_mismatch_with_hard_issues = 0
+    eligible = (
+        newline_mismatch_count
+    ) = newline_mismatch_with_hard_issues = skipped_newline_only = 0
     for entry, newline_mismatch, mixed in db.iter_repairable_translation_entries(
         options.version,
         list(options.mod_ids),
@@ -424,6 +438,9 @@ def _limited_repair_snapshot(db, options, deadline):
         _raise_preview_timeout(deadline)
         newline_mismatch_count += int(newline_mismatch)
         newline_mismatch_with_hard_issues += int(newline_mismatch and mixed)
+        if newline_mismatch and not mixed:
+            skipped_newline_only += 1
+            continue
         eligible += 1
         if not _could_map_to_selected_representative(
             entry, limit, representatives, selected_entry_ids
@@ -461,6 +478,7 @@ def _limited_repair_snapshot(db, options, deadline):
         eligible,
         newline_mismatch_count,
         newline_mismatch_with_hard_issues,
+        skipped_newline_only,
         selected_entries,
     )
 
@@ -512,10 +530,15 @@ def preview_same_source_ai_retranslation(
 ):
     """Return the exact candidate snapshot; optional monotonic deadline covers SQL and transforms."""
     _raise_preview_timeout(deadline)
+    skipped_newline_only = 0
     if mode == "quality_mismatch":
-        total, newline_mismatch_count, newline_mismatch_with_hard_issues, entries = (
-            _limited_repair_snapshot(db, options, deadline)
-        )
+        (
+            total,
+            newline_mismatch_count,
+            newline_mismatch_with_hard_issues,
+            skipped_newline_only,
+            entries,
+        ) = _limited_repair_snapshot(db, options, deadline)
     elif mode == "same_source_ai":
         total = db.count_same_as_source_ai(options.version, list(options.mod_ids))
         _raise_preview_timeout(deadline)
@@ -563,6 +586,9 @@ def preview_same_source_ai_retranslation(
         ),
         input_newline_mismatch_with_other_hard_issues=(
             newline_mismatch_with_hard_issues if mode == "quality_mismatch" else 0
+        ),
+        skipped_newline_only_candidates=(
+            skipped_newline_only if mode == "quality_mismatch" else 0
         ),
     )
 
@@ -755,6 +781,21 @@ def _load_lm_config() -> dict[str, Any]:
     config = load_config()
     lm_cfg = config.get("lm_translator", {}) if isinstance(config, dict) else {}
     return lm_cfg if isinstance(lm_cfg, dict) else {}
+
+
+def _configured_model_label(lm_cfg: dict[str, Any]) -> str:
+    """Return a safe display label; the translator may still rotate models on retry."""
+    provider = str(lm_cfg.get("provider") or "gemini").lower()
+    if provider == "chatgpt":
+        return str(lm_cfg.get("chatgpt_model") or "ChatGPT 模型未設定")
+    models = lm_cfg.get("models")
+    if isinstance(models, dict):
+        enabled = [
+            str(name) for name, values in models.items() if isinstance(values, dict) and values.get("enabled")
+        ]
+        if enabled:
+            return "、".join(enabled)
+    return f"{provider} 模型池"
 
 
 def _count_planned_batches(
@@ -1310,9 +1351,9 @@ def _finish_snapshot(db, options, session, report, tracker) -> None:
     level = "warning" if report.failed or report.flagged else "info"
     _log(
         session,
-        f"完成：來源項目 {report.candidates}；唯一 AI 翻譯項目 {report.ai_representatives}，"
+        f"完成：來源項目 {report.candidates}；唯一 AI 修復項目 {report.ai_representatives}，"
         f"送出來源項目 {report.attempted_candidates}，已完成來源項目 {report.processed_candidates}；"
-        f"實際送給 AI {report.ai_submitted_items} 個唯一項目（不是 API 請求次數），"
+        f"實際送給 AI {report.ai_submitted_items} 個唯一項目（不等於實際 HTTP 請求次數），"
         f"已驗證 {report.ai_validated_items}，共用 AI 結果 {report.dedup_reused_candidates}；更新 {report.updated}，"
         f"仍相同 {report.unchanged}，格式檢查未通過 {report.flagged}，"
         f"資料已變動跳過 {report.skipped_changed}，失敗 {report.failed}，"
@@ -1359,7 +1400,8 @@ def _remaining_candidate_count(db, options, mode: str) -> int:
     if mode == "quality_mismatch":
         return sum(
             entry is not None
-            for entry, _newline_mismatch, _mixed in db.iter_repairable_translation_entries(
+            and not (newline_mismatch and not mixed)
+            for entry, newline_mismatch, mixed in db.iter_repairable_translation_entries(
                 options.version, list(options.mod_ids)
             )
         )
@@ -1516,10 +1558,43 @@ def _run_repair_batch(
     )
     batch_started = monotonic()
     tail = items[len(batch) :]
+    batch_number = tracker.batches_done + 1
+    before_validated = report.ai_validated_items
+    planned_live = tracker.live(processed=report.processed_candidates)
+    planned_total = planned_live["planned_batches_total"]
+    model_label = _configured_model_label(tracker.lm_cfg)
+    in_flight_live = dict(planned_live)
+    in_flight_live.update(
+        {
+            "current_profile": cache_profile_label(cache_type),
+            "current_batch": batch_number,
+            "current_batch_total": planned_total,
+            "current_status": "等待模型回應",
+            "model_label": model_label,
+        }
+    )
+    session.set_summary({**report.as_dict(), "live": in_flight_live})
+    _log(
+        session,
+        f"🚀 第 {batch_number}/{planned_total} 批｜{cache_profile_label(cache_type)} "
+        f"{len(batch):,} 筆已送出｜模型：{model_label}｜狀態：等待模型回應",
+    )
     try:
         translated, status = translate_batch_smart(batch, report.ai_representatives)
         if cancelled() or is_cancelled():
             raise TaskCancelled()
+        applying_live = dict(planned_live)
+        applying_live.update(
+            {
+                "current_profile": cache_profile_label(cache_type),
+                "current_batch": batch_number,
+                "current_batch_total": planned_total,
+                "current_status": "套用翻譯結果至對應來源項目",
+                "model_label": model_label,
+            }
+        )
+        session.set_summary({**report.as_dict(), "live": applying_live})
+        _log(session, "🔄 正在套用翻譯結果至對應來源項目")
         result_count, finalize_stop = _finalize_batch_results(
             db,
             options,
@@ -1551,9 +1626,25 @@ def _run_repair_batch(
         live = tracker.live(
             processed=report.processed_candidates, check=check_planning_cancelled
         )
+        live.update(
+            {
+                "current_profile": cache_profile_label(cache_type),
+                "current_batch": batch_number,
+                "current_batch_total": live["planned_batches_total"],
+                "current_status": "本批完成",
+                "model_label": model_label,
+            }
+        )
+        report.planned_batches = live["planned_batches_total"]
         session.set_progress(report.processed_candidates / max(report.candidates, 1))
         session.set_summary({**report.as_dict(), "live": live})
-        _log(session, f"⏱ {tracker.line(live)}")
+        _log(
+            session,
+            f"✅ 第 {batch_number}/{live['planned_batches_total']} 批完成｜"
+            f"回應 {result_count:,}/{len(batch):,} 筆｜"
+            f"通過格式檢查 {report.ai_validated_items - before_validated:,} 筆",
+        )
+        _log(session, f"📈 {tracker.line(live)}")
     except TaskCancelled:
         _set_not_submitted_candidates(report, tail, fanout)
         report.unprocessed_candidates = max(
@@ -1580,6 +1671,10 @@ def _flush_after_interrupted_batch(options, session, report, cache_keys_to_save)
 
 def _initialize_snapshot_run(entries, session, report, options):
     """Group candidates and prepare the rate-limited translator run."""
+    if report.mode == "quality_mismatch":
+        entries, skipped_newline_only = _filter_newline_only_repair_entries(entries)
+        report.skipped_newline_only_candidates += skipped_newline_only
+        report.candidates = len(entries)
     candidates = _group_retranslation_items_by_cache_type(
         _build_retranslation_items(entries)
     )
@@ -1597,41 +1692,62 @@ def _initialize_snapshot_run(entries, session, report, options):
         total_candidates=len(candidates),
         lm_cfg=lm_cfg,
     )
+    report.planned_batches = tracker.live()["planned_batches_total"]
     rate_cfg = lm_cfg.get("rate_limit", {}) if isinstance(lm_cfg, dict) else {}
     sleep_seconds = float(rate_cfg.get("sleep_seconds_between_batches", 0.0) or 0.0)
     total = len(candidates)
-    _log(
-        session,
-        (
-            f"🔎 待修復的來源項目：{total:,} 個"
-            if report.mode == "quality_mismatch"
-            else f"🔎 待重新翻譯的來源項目：{total:,} 個；來源：{source_label(SRC_AI)}"
+    operation = "格式修復" if report.mode == "quality_mismatch" else "舊 AI 重翻"
+    if report.mode == "quality_mismatch":
+        _log(
+            session,
+            f"🔎 掃描完成｜找到 {total:,} 筆格式不一致的來源項目"
+            f"（{_format_profile_breakdown(_cache_type_counts(candidates))}）",
         )
-        + (
-            "（原文與譯文的換行、格式碼或其他特殊標記不一致）"
-            if report.mode == "quality_mismatch"
-            else ""
+        if report.skipped_newline_only_candidates:
+            _log(
+                session,
+                f"⏭️ 略過 {report.skipped_newline_only_candidates:,} 筆只有實際換行數不同的項目"
+                "｜不佔用 AI 修復名額",
+            )
+        _log(
+            session,
+            f"📋 修復規劃｜{len(items):,} 筆需由 AI 修復，"
+            f"{report.dedup_mapped_candidates:,} 筆來源項目共用結果",
         )
-        + f"；其中 {len(items):,} 個是唯一 AI 翻譯項目，"
-        f"{report.dedup_mapped_candidates:,} 個來源項目會共用相同翻譯結果；"
-        f"來源分布：{_format_profile_breakdown(_cache_type_counts(candidates))}；"
-        "本次略過舊快取，會重新呼叫 AI",
-    )
-    _log(
-        session,
-        "🔁 開始處理："
-        + (
-            "修復特殊字元或格式不一致的譯文"
-            if report.mode == "quality_mismatch"
-            else "重新翻譯舊 AI 與原文相同的項目"
+    else:
+        _log(
+            session,
+            f"🔎 掃描完成｜找到 {total:,} 筆待處理來源項目"
+            f"（來源：{source_label(SRC_AI)}；{_format_profile_breakdown(_cache_type_counts(candidates))}）",
         )
-        + f"；共 {total:,} 個來源項目，實際送給 AI {len(items):,} 個唯一項目",
-    )
+        _log(
+            session,
+            f"📋 重翻規劃｜{len(items):,} 筆唯一 AI 項目，"
+            f"{report.dedup_mapped_candidates:,} 筆來源項目共用結果",
+        )
+    _log(session, f"🧭 執行項目｜{operation}；本次略過既有翻譯快取，重新呼叫 AI")
     _log(session, tracker.start_line(items))
     if not options.write_cache:
         report.cache_stats_note = "本次未啟用快取寫入"
     session.set_summary({**report.as_dict(), "live": tracker.live()})
     return items, tracker, lm_cfg, sleep_seconds
+
+
+def _filter_newline_only_repair_entries(
+    entries: Sequence[SameSourceAIEntry],
+) -> tuple[list[SameSourceAIEntry], int]:
+    """Keep hard format repairs; newline-only mismatches are intentionally skipped."""
+    selected: list[SameSourceAIEntry] = []
+    skipped = 0
+    for entry in entries:
+        eligible, hard_issues, mixed = repair_input_issues(
+            entry.en_us, entry.current_ai_translation
+        )
+        if eligible and not hard_issues and not mixed:
+            skipped += 1
+            continue
+        selected.append(entry)
+    return selected, skipped
 
 
 def _report_cancelled_repair(db, options, session, report, mode, started_at):
@@ -1704,6 +1820,9 @@ def run_moddb_retranslate_service(
             if review_preview
             else 0
         ),
+        skipped_newline_only_candidates=(
+            review_preview.skipped_newline_only_candidates if review_preview else 0
+        ),
     )
     operation_label = "特殊字元修復" if mode == "quality_mismatch" else "舊 AI 重翻"
     started_at = monotonic()
@@ -1765,10 +1884,6 @@ def _run_repair_candidates(db, options, session, entries, report, mode, cancelle
         session.set_summary(report.as_dict())
         return
 
-    _log(
-        session,
-        f"🔎 找到 {len(entries):,} 個待處理來源項目；本次略過舊快取，會直接重新呼叫 AI",
-    )
     with cancel_scope(cancelled):
         _translate_snapshot(db, options, session, entries, report, cancelled)
 
