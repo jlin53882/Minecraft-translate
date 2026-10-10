@@ -19,8 +19,12 @@ class RepairCardControls:
     start_button: ft.Control
     preview_text: ft.Text
     explainer: ft.Text
-    samples: ft.Column
+    samples: ft.Control
     summary: ft.Text
+    preview_search: ft.TextField
+    preview_source_filter: ft.Dropdown
+    preview_issue_filter: ft.Dropdown
+    preview_count: ft.Text
 
 
 def repair_copy(mode: str) -> tuple[str, str]:
@@ -50,6 +54,7 @@ def create_repair_card(
     on_mode_change: Callable,
     on_preview: Callable,
     on_confirm: Callable,
+    on_filter_change: Callable,
 ) -> RepairCardControls:
     """Build the repair mode selector, scope notes, preview and confirmation controls."""
     mode_group = ft.RadioGroup(
@@ -79,7 +84,24 @@ def create_repair_card(
     default_text, explanation = repair_copy(mode)
     preview_text = ft.Text(default_text, size=13, color=C.TEXT, selectable=True)
     explainer = kit.hint_text(explanation)
-    samples = ft.Column(spacing=4)
+    preview_search = kit.text_field(
+        "搜尋 Key／Mod／原文／譯文",
+        icon=ft.Icons.SEARCH,
+        on_change=on_filter_change,
+        expand=True,
+    )
+    preview_source_filter = kit.dropdown(
+        label="翻譯來源",
+        width=190,
+        on_select=on_filter_change,
+    )
+    preview_issue_filter = kit.dropdown(
+        label="異常類型",
+        width=180,
+        on_select=on_filter_change,
+    )
+    preview_count = ft.Text("尚未載入候選預覽。", size=12, color=C.MUTED)
+    samples = ft.ListView(spacing=8, height=520, auto_scroll=False)
     summary = ft.Text(
         "預覽只列候選、不呼叫 AI；按「開始修復」才會呼叫 AI。只儲存通過特殊字元檢查的結果，"
         "未通過就保留舊譯文。版本、模組、上限或條件變更後需重新預覽。",
@@ -95,6 +117,12 @@ def create_repair_card(
                 explainer,
                 ft.Row([preview_button, start_button], spacing=10, wrap=True),
                 preview_text,
+                ft.Row(
+                    [preview_search, preview_source_filter, preview_issue_filter],
+                    spacing=8,
+                    wrap=True,
+                ),
+                preview_count,
                 samples,
                 summary,
             ],
@@ -112,4 +140,8 @@ def create_repair_card(
         explainer,
         samples,
         summary,
+        preview_search,
+        preview_source_filter,
+        preview_issue_filter,
+        preview_count,
     )

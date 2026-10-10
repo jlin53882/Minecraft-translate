@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import threading
+from collections import defaultdict
 from pathlib import Path
 
 import flet as ft
@@ -12,6 +13,7 @@ from app.services_impl.moddb_retranslate_service import (
     cache_profile_label,
     preview_same_source_ai_retranslation_from_path,
 )
+from app.services_impl.moddb_service import format_tokens, token_category
 from app.services_impl.moddb_source_service import source_catalog_for, source_label
 from app.services_impl.moddb_translate_service import TranslateOptions
 from app.tasks.operation_registry import (
@@ -21,10 +23,22 @@ from app.tasks.operation_registry import (
     ShutdownPolicy,
     launch_page_operation,
 )
+from app.ui import kit
 from app.ui.design import C
 from app.ui.snack import show_snack
-from app.views.moddb.formatting import format_count
+from app.views.moddb.formatting import format_count, visible_breaks
 from translation_tool.utils.log_unit import log_warning
+
+_PREVIEW_SOURCE_ALL = "__all__"
+_PREVIEW_ISSUE_ALL = "all"
+_PREVIEW_ISSUE_LABELS = {
+    "all": "全部異常類型",
+    "minecraft": "Minecraft 格式碼 §",
+    "newline": "實際換行",
+    "placeholder": "佔位符",
+    "patchouli": "Patchouli 標記",
+    "other": "其他格式",
+}
 
 
 def launch_standalone_worker(target) -> None:
@@ -52,6 +66,18 @@ def clear_preview(panel) -> None:
         else panel._repair_default_text()
     )
     panel.repair_samples.controls = []
+    panel.repair_preview_search.value = ""
+    kit.set_dropdown_options(
+        panel.repair_preview_source_filter,
+        [(_PREVIEW_SOURCE_ALL, "全部翻譯來源")],
+    )
+    panel.repair_preview_source_filter.value = _PREVIEW_SOURCE_ALL
+    kit.set_dropdown_options(
+        panel.repair_preview_issue_filter,
+        [(_PREVIEW_ISSUE_ALL, _PREVIEW_ISSUE_LABELS[_PREVIEW_ISSUE_ALL])],
+    )
+    panel.repair_preview_issue_filter.value = _PREVIEW_ISSUE_ALL
+    panel.repair_preview_count.value = "尚未載入候選預覽。"
     panel.repair_preview_btn.disabled = panel._running or panel._repair_preview_running
     update_start_button(panel)
 
@@ -234,7 +260,7 @@ async def apply_preview_result(
 
 
 def _display_preview_result(panel, options, db_identity, result):
-    """Render candidate scope, source breakdown and a few reviewable samples."""
+    """Render the exact candidate snapshot and initialize grouped preview filters."""
     panel._repair_preview = result
     panel._repair_preview_db_identity = db_identity
     selected = result.selected_count
@@ -248,7 +274,7 @@ def _display_preview_result(panel, options, db_identity, result):
     )
     catalog = source_catalog_for(panel._get_db())
     ai_plan = (
-        f"唯一 AI 翻譯項目 {format_count(result.ai_representatives)} 筆；"
+        f"本次唯一 AI 修復項目：{format_count(result.ai_representatives)} 個；"
         f"預計共用結果給 {format_count(result.dedup_reused_candidates)} 個來源項目；"
     )
     representative_breakdown = (
@@ -261,38 +287,239 @@ def _display_preview_result(panel, options, db_identity, result):
     if result.mode == "quality_mismatch":
         sources = "、".join(source_label(source, catalog) for source in result.sources)
         panel.repair_preview_text.value = (
-            f"全範圍修復合格來源列 {format_count(result.total_candidates)} 筆；"
+            f"修復候選預覽｜待處理來源項目 {format_count(result.total_candidates)} 筆；"
             f"候選中有 {format_count(result.input_newline_mismatch_candidates)} 筆輸入換行數不同"
             f"（其中另有硬格式問題 {format_count(result.input_newline_mismatch_with_other_hard_issues)} 筆）。\n"
-            f"本次唯一 AI 項目上限：{cap}；選中 {format_count(result.ai_representatives)} 個，"
-            f"對應 {format_count(selected)} 個來源列。來源：{sources or '無'}。\n"
-            "只更新預覽中的來源列；AI 輸出實體換行數可不同，其他格式 token 仍須一致。\n"
-            f"會共用 AI 結果的來源項目 {format_count(result.dedup_reused_candidates)} 筆；"
-            f"翻譯類型分布：{breakdown}；{representative_breakdown}；"
-            f"目前預估：約 {format_count(result.estimated_batches)} 個 API 批次。"
+            f"本次唯一 AI 修復項目：{format_count(result.ai_representatives)} 個，"
+            f"涉及來源項目：{format_count(selected)} 筆；共用結果 {format_count(result.dedup_reused_candidates)} 筆。\n"
+            f"略過只有實際換行數不同：{format_count(result.skipped_newline_only_candidates)} 筆（不佔 AI 名額）。\n"
+            f"來源：{sources or '無'}；翻譯類型：{breakdown}；{representative_breakdown}；"
+            f"規劃批次：{format_count(result.estimated_batches)}（不等於實際 HTTP 請求次數）。"
         )
     else:
         panel.repair_preview_text.value = (
-            f"符合條件：{format_count(result.total_candidates)} 筆；{cap}，"
+            f"修復候選預覽｜待處理來源項目 {format_count(result.total_candidates)} 筆；{cap}，"
             f"本次將重翻 {format_count(selected)} 筆。\n"
             f"來源：{source_label(result.source, catalog)}；只處理目前生效來源為 AI 且譯文等於原文的項目；"
             "人工、模組自帶及其他來源不會被重新翻譯。\n"
             f"{ai_plan}翻譯類型分布：{breakdown}；{representative_breakdown}；"
-            f"目前預估：約 {format_count(result.estimated_batches)} 個 API 批次。"
+            f"規劃批次：{format_count(result.estimated_batches)}（不等於實際 HTTP 請求次數）。"
         )
-    panel.repair_samples.controls = [
-        ft.Text(
-            f"[{cache_profile_label(result.entry_cache_types[index])}] "
-            f"[{source_label(row.source_id, catalog)}] {row.mod_id} / {row.key}\n"
-            f"原文：{row.en_us}\n目前譯文：{row.current_ai_translation}",
-            size=12,
-            color=C.MUTED,
-            selectable=True,
-        )
-        for index, row in enumerate(result.entries[:5])
-    ]
+    kit.set_dropdown_options(
+        panel.repair_preview_source_filter,
+        [(_PREVIEW_SOURCE_ALL, "全部翻譯來源")]
+        + [
+            (str(source), source_label(source, catalog))
+            for source in sorted({int(row.source_id or 0) for row in result.entries})
+        ],
+    )
+    panel.repair_preview_source_filter.value = _PREVIEW_SOURCE_ALL
+    kit.set_dropdown_options(
+        panel.repair_preview_issue_filter,
+        [
+            (key, label)
+            for key, label in _PREVIEW_ISSUE_LABELS.items()
+            if key == _PREVIEW_ISSUE_ALL or any(
+                key in _entry_issue_categories(row) for row in result.entries
+            )
+        ],
+    )
+    panel.repair_preview_issue_filter.value = _PREVIEW_ISSUE_ALL
+    refresh_preview_cards(panel, update=False)
     update_start_button(panel)
     panel._safe_update()
+
+
+def _entry_issue_categories(row) -> set[str]:
+    """Return filter categories from the same token comparison used by repair validation."""
+    wanted = format_tokens(row.en_us)
+    actual = format_tokens(row.current_ai_translation)
+    categories = set()
+    for token in set(wanted) | set(actual):
+        if wanted[token] != actual[token]:
+            categories.add(token_category(token))
+    return categories or {"other"}
+
+
+def _preview_groups(result):
+    """Group one immutable preview snapshot by compatible translation key context."""
+    groups = defaultdict(list)
+    for index, row in enumerate(result.entries):
+        group_key = (row.mc_version, row.mod_id, row.kind, row.key, row.en_us)
+        groups[group_key].append((result.entry_cache_types[index], row))
+    return list(groups.values())
+
+
+def _preview_group_matches(group, query: str, source_filter: str, issue_filter: str) -> bool:
+    query = query.strip().casefold()
+    if source_filter != _PREVIEW_SOURCE_ALL and not any(
+        str(row.source_id or 0) == source_filter for _cache_type, row in group
+    ):
+        return False
+    if issue_filter != _PREVIEW_ISSUE_ALL and not any(
+        issue_filter in _entry_issue_categories(row) for _cache_type, row in group
+    ):
+        return False
+    if not query:
+        return True
+    searchable = "\n".join(
+        [
+            str(value)
+            for _cache_type, row in group
+            for value in (
+                row.mc_version,
+                row.mod_id,
+                row.kind,
+                row.key,
+                row.en_us,
+                row.current_ai_translation,
+                source_label(row.source_id),
+            )
+        ]
+    ).casefold()
+    return query in searchable
+
+
+def _copy_preview_text(panel, text: str) -> None:
+    async def copy() -> None:
+        await ft.Clipboard().set(text)
+
+    panel._page.run_task(copy)
+
+
+def _build_preview_group_card(panel, group, index: int, total: int):
+    first_cache_type, first_row = group[0]
+    issue_categories = set().union(*(_entry_issue_categories(row) for _cache, row in group))
+    issue_text = "、".join(
+        _PREVIEW_ISSUE_LABELS.get(category, category) for category in sorted(issue_categories)
+    )
+    detail = ft.Column(spacing=8, visible=False)
+    toggle = ft.TextButton("查看詳細資料", icon=ft.Icons.EXPAND_MORE)
+
+    def toggle_detail(_e=None):
+        detail.visible = not detail.visible
+        toggle.text = "收合詳細資料" if detail.visible else "查看詳細資料"
+        toggle.icon = ft.Icons.EXPAND_LESS if detail.visible else ft.Icons.EXPAND_MORE
+        panel._safe_update()
+
+    toggle.on_click = toggle_detail
+    detail.controls = [
+        ft.Row(
+            [
+                ft.Text("英文原文", size=11.5, color=C.MUTED),
+                ft.IconButton(
+                    icon=ft.Icons.CONTENT_COPY,
+                    tooltip="複製英文原文",
+                    on_click=lambda _e, text=first_row.en_us: _copy_preview_text(panel, text),
+                ),
+            ],
+            spacing=3,
+        ),
+        ft.Text(first_row.en_us, size=13, color=C.TEXT, selectable=True),
+        ft.Text(f"來源譯文（{len(group)} 筆）", size=11.5, color=C.MUTED),
+    ]
+    for cache_type, row in group:
+        detail.controls.append(
+            ft.Container(
+                padding=8,
+                bgcolor=C.PANEL2,
+                border_radius=8,
+                content=ft.Column(
+                    [
+                        ft.Row(
+                            [
+                                kit.chip(source_label(row.source_id), "neutral"),
+                                ft.Text(
+                                    f"{cache_profile_label(cache_type)}｜待修復",
+                                    size=11.5,
+                                    color=C.GOLD,
+                                ),
+                            ],
+                            spacing=8,
+                        ),
+                        ft.Text(
+                            row.current_ai_translation,
+                            size=13,
+                            color=C.TEXT,
+                            selectable=True,
+                        ),
+                    ],
+                    spacing=4,
+                ),
+            )
+        )
+    return ft.Container(
+        padding=12,
+        border=ft.Border.all(1, C.LINE),
+        border_radius=10,
+        content=ft.Column(
+            [
+                ft.Row(
+                    [
+                        kit.chip(cache_profile_label(first_cache_type), "dia"),
+                        ft.Text(
+                            f"{first_row.mod_id} · {first_row.kind}",
+                            size=12,
+                            color=C.MUTED,
+                            expand=True,
+                        ),
+                        kit.chip(f"{len(group)} 個來源", "neutral"),
+                        kit.chip(issue_text, "gold"),
+                    ],
+                    spacing=7,
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                ),
+                ft.Text(first_row.key, size=12.5, color=C.TEXT, selectable=True),
+                ft.Text(f"修復項目 {index} / {total}", size=11.5, color=C.MUTED),
+                ft.Text(
+                    visible_breaks(first_row.en_us),
+                    size=13,
+                    color=C.TEXT,
+                    max_lines=3,
+                ),
+                ft.Row(
+                    [
+                        kit.chip("共用 1 次 AI 修復", "dia"),
+                        ft.Text("通過各來源驗證後，分別更新對應譯文", size=11.5, color=C.MUTED),
+                        toggle,
+                    ],
+                    spacing=8,
+                    wrap=True,
+                ),
+                detail,
+            ],
+            spacing=7,
+        ),
+    )
+
+
+def refresh_preview_cards(panel, *, update: bool = True) -> None:
+    """Filter and render the current immutable preview without changing execution entries."""
+    result = panel._repair_preview
+    if result is None:
+        panel.repair_samples.controls = []
+        panel.repair_preview_count.value = "尚未載入候選預覽。"
+        return
+    query = str(panel.repair_preview_search.value or "")
+    source_filter = str(panel.repair_preview_source_filter.value or _PREVIEW_SOURCE_ALL)
+    issue_filter = str(panel.repair_preview_issue_filter.value or _PREVIEW_ISSUE_ALL)
+    groups = [
+        group
+        for group in _preview_groups(result)
+        if _preview_group_matches(group, query, source_filter, issue_filter)
+    ]
+    total_groups = len(_preview_groups(result))
+    panel.repair_preview_count.value = (
+        f"顯示 {len(groups):,} / {total_groups:,} 個翻譯 Key；"
+        f"涵蓋 {sum(len(group) for group in groups):,} 筆來源項目。"
+        + (" 可展開查看完整原文與各來源譯文。" if groups else " 沒有符合目前篩選條件的候選。")
+    )
+    panel.repair_samples.controls = [
+        _build_preview_group_card(panel, group, index, len(groups))
+        for index, group in enumerate(groups, start=1)
+    ]
+    if update:
+        panel._safe_update()
 
 
 def confirm(panel, _e=None) -> None:
@@ -322,7 +549,7 @@ def confirm(panel, _e=None) -> None:
             ),
             content=ft.Text(
                 (
-                    f"即將送出 {selected.ai_representatives:,} 個唯一 AI 翻譯項目，最多對應 "
+            f"即將送出 {selected.ai_representatives:,} 個唯一 AI 修復項目，最多對應 "
                     f"{selected.selected_count:,} 筆來源譯文；去重共用可能更新超過代表上限的來源列。"
                     "保留各筆原有來源標記；若 AI 輸出缺少受保護格式 token 或翻譯失敗，舊譯文會保留。"
                     "人工來源修復後會改為未審核。匯入 ZIP 檔案不會被修改。"

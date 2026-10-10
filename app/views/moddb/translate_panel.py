@@ -13,6 +13,7 @@ import flet as ft
 
 from app.services_impl.moddb_retranslate_service import (
     SameSourceAIRepairPreview,
+    format_repair_live,
     run_moddb_retranslate_service,
 )
 from app.services_impl.moddb_translate_service import (
@@ -43,7 +44,6 @@ from app.views.moddb.formatting import format_count
 from app.views.moddb.repair_card import create_repair_card, repair_copy
 from app.views.moddb.repair_summary import repair_summary_detail_lines
 from app.views.moddb.result_inspector import TranslationResultInspector
-from translation_tool.translation_db.run_progress import format_repair_live
 from translation_tool.utils.config_manager import load_config
 from translation_tool.utils.log_unit import log_debug, log_info, log_warning
 
@@ -306,6 +306,9 @@ class TranslatePanel(ft.Column):
             on_mode_change=self._on_repair_mode_changed,
             on_preview=self.preview_retranslation,
             on_confirm=self.confirm_retranslation,
+            on_filter_change=lambda _e=None: retranslation_controller.refresh_preview_cards(
+                self
+            ),
         )
         self.repair_card = controls.card
         self.repair_mode_group = controls.mode_group
@@ -314,6 +317,10 @@ class TranslatePanel(ft.Column):
         self.repair_preview_text = controls.preview_text
         self.repair_explainer = controls.explainer
         self.repair_samples = controls.samples
+        self.repair_preview_search = controls.preview_search
+        self.repair_preview_source_filter = controls.preview_source_filter
+        self.repair_preview_issue_filter = controls.preview_issue_filter
+        self.repair_preview_count = controls.preview_count
         self.repair_summary_text = controls.summary
 
     def _repair_default_text(self) -> str:

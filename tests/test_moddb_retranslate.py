@@ -2270,13 +2270,45 @@ def test_retranslation_preview_shows_ai_source_profiles_and_samples(
     assert "人工、模組自帶及其他來源不會被重新翻譯" in text
     assert "Lang：1 筆" in text
     assert "Patchouli：1 筆" in text
-    assert "唯一 AI 翻譯項目 2 筆" in text
+    assert "唯一 AI 修復項目：2 個" in text
     assert "預計共用結果給 0 個來源項目" in text
-    assert "目前預估：約 2 個 API 批次" in text
-    samples = [control.value for control in panel.repair_samples.controls]
-    assert any("[Lang] [AI 機翻]" in sample for sample in samples)
-    assert any("[Patchouli] [AI 機翻]" in sample for sample in samples)
-    assert all("manual" not in sample and "jar" not in sample for sample in samples)
+    assert "規劃批次：2（不等於實際 HTTP 請求次數）" in text
+    assert len(panel.repair_samples.controls) == 2
+    assert "顯示 2 / 2 個翻譯 Key" in panel.repair_preview_count.value
+    panel.repair_preview_search.value = "patchouli"
+    retranslation_controller.refresh_preview_cards(panel)
+    assert len(panel.repair_samples.controls) == 1
+    assert "顯示 1 / 2 個翻譯 Key" in panel.repair_preview_count.value
+    db.close()
+
+
+def test_retranslation_preview_groups_same_key_sources_and_filters(db_path):
+    db = TranslationDB(db_path)
+    entry = _ai_entry(db, key="shared", en="Use %s")
+    db.save_manual(entry.id, "Use", propagate=False)
+    _ingest(db, "1.21.1", "foo", "shared", SRC_JAR_TW, "Use", en="Use %s")
+    panel = translate_panel.TranslatePanel(mock_page(), lambda: db)
+    _select_repair_mode(panel, "quality_mismatch")
+    panel.version_dd.value = "1.21.1"
+    preview = moddb_retranslate_service.preview_same_source_ai_retranslation(
+        db, _options(), mode="quality_mismatch"
+    )
+
+    retranslation_controller._display_preview_result(
+        panel,
+        _options(),
+        panel._database_identity(panel._get_db()),
+        preview,
+    )
+
+    assert preview.ai_representatives == 1
+    assert preview.selected_count == 2
+    assert len(panel.repair_samples.controls) == 1
+    assert "顯示 1 / 1 個翻譯 Key" in panel.repair_preview_count.value
+    panel.repair_preview_search.value = "not-found"
+    retranslation_controller.refresh_preview_cards(panel)
+    assert panel.repair_samples.controls == []
+    assert "沒有符合目前篩選條件" in panel.repair_preview_count.value
     db.close()
 
 
