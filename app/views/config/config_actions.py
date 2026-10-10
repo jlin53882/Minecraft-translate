@@ -151,6 +151,19 @@ def _bind_chatgpt_model_catalog(config, view, provider):
         config["lm_translator"]["chatgpt_model_profile_id"] = str(profile_id)
 
 
+def refresh_chatgpt_model_controls_after_reload(view):
+    """Keep valid authenticated model options and refresh their panel state."""
+    selected = str(view.chatgpt_model_control.value or "").strip()
+    available = {
+        str(option.key)
+        for option in (view.chatgpt_model_control.options or [])
+        if getattr(option, "key", None)
+    }
+    if not view._chatgpt_model_catalog_valid or selected not in available:
+        view._sync_chatgpt_model_options()
+    view._refresh_provider_panel_visibility()
+
+
 def _collect_validated_config(
     view, load_config_json_fn, validate_api_keys_fn, *, show_feedback=True
 ):

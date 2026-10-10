@@ -23,6 +23,7 @@ from app.views.config.config_actions import (
     handle_unsaved_dialog_save,
     load_config_transactionally,
     on_unsaved_dialog_dismiss,
+    refresh_chatgpt_model_controls_after_reload,
     save_config_from_view_with_outcome,
 )
 from app.views.config.config_form import (
@@ -861,8 +862,7 @@ class ConfigView(ft.Column):
     def load_config(self):
         """載入設定檔"""
         result = load_config_transactionally(self, load_config_json)
-        self._sync_chatgpt_model_options()
-        self._refresh_provider_panel_visibility()
+        refresh_chatgpt_model_controls_after_reload(self)
         return result
 
     def did_mount(self):

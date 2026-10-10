@@ -64,6 +64,67 @@ def test_per_model_settings_survive_model_switches_and_are_collected(monkeypatch
     }
 
 
+def test_config_reload_preserves_valid_model_catalog_and_selection(monkeypatch):
+    from app.views.config import chatgpt_oauth_panel as panel_module
+
+    config = deepcopy(DEFAULT_CONFIG)
+    config["lm_translator"]["provider"] = "chatgpt"
+    config["lm_translator"]["chatgpt_model"] = "gpt-alpha"
+    config["lm_translator"]["chatgpt_model_settings"] = {
+        "gpt-alpha": {
+            "max_input_token_budget": 264000,
+            "reasoning_effort": "high",
+        }
+    }
+    monkeypatch.setattr("app.views.config_view.load_config_json", lambda: config)
+    monkeypatch.setattr(
+        panel_module,
+        "chatgpt_account_status",
+        lambda: {"connected": False, "email": ""},
+    )
+    view = ConfigView(mock_page())
+    models = [SimpleNamespace(slug="gpt-alpha", display_name="GPT Alpha")]
+    view._sync_chatgpt_model_options(models, profile_id="profile-a")
+
+    view.load_config()
+
+    assert view.chatgpt_model_control.value == "gpt-alpha"
+    assert [option.key for option in view.chatgpt_model_control.options] == [
+        "gpt-alpha"
+    ]
+    assert view._chatgpt_model_catalog_valid is True
+    assert view.chatgpt_model_settings_panel.visible is True
+    assert view.chatgpt_context_budget_control.value == "264000"
+    assert view.chatgpt_reasoning_effort_control.value == "high"
+
+
+def test_config_reload_invalidates_model_catalog_when_selected_model_is_missing(
+    monkeypatch,
+):
+    from app.views.config import chatgpt_oauth_panel as panel_module
+
+    config = deepcopy(DEFAULT_CONFIG)
+    config["lm_translator"]["provider"] = "chatgpt"
+    config["lm_translator"]["chatgpt_model"] = "gpt-removed"
+    monkeypatch.setattr("app.views.config_view.load_config_json", lambda: config)
+    monkeypatch.setattr(
+        panel_module,
+        "chatgpt_account_status",
+        lambda: {"connected": False, "email": ""},
+    )
+    view = ConfigView(mock_page())
+    view._sync_chatgpt_model_options(
+        [SimpleNamespace(slug="gpt-alpha", display_name="GPT Alpha")],
+        profile_id="profile-a",
+    )
+
+    view.load_config()
+
+    assert view.chatgpt_model_control.value == "gpt-removed"
+    assert [option.key for option in view.chatgpt_model_control.options] == [""]
+    assert view._chatgpt_model_catalog_valid is False
+
+
 def test_reauth_required_status_does_not_enable_chatgpt_translation_controls(
     monkeypatch,
 ):
