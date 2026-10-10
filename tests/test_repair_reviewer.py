@@ -5,6 +5,16 @@ from app.views.moddb.result_inspector import TranslationResultInspector
 from tests.conftest import mock_page
 
 
+def _snack_messages(page):
+    import flet as ft
+
+    return [
+        control.content.value
+        for control in page.overlay
+        if isinstance(control, ft.SnackBar)
+    ]
+
+
 def test_inspector_mounts_one_item_from_full_persisted_run(tmp_path):
     path = store.create_run(tmp_path / "review.db", "run-2")
     for index in range(205):
@@ -58,6 +68,105 @@ def test_keep_old_uses_defined_semantic_color():
 
     assert reviewer.status.value == "已保留舊譯文；沒有寫入翻譯資料，也沒有新增歷史。"
     assert reviewer.status.color == C.EM
+
+
+def test_navigation_reports_first_and_last_item_boundaries(tmp_path):
+    path = store.create_run(tmp_path / "review-boundary.db", "run-boundary")
+    store.append_item(
+        path,
+        "run-boundary",
+        {
+            "key": "repair.boundary",
+            "version": "1.21.1",
+            "mod_id": "foo",
+            "kind": "lang",
+            "source_id": 0,
+            "en_us": "Use %s",
+            "old_translation": "使用",
+            "ai_translation": "使用 %s",
+        },
+    )
+    page = mock_page()
+    reviewer = RepairReviewer(page, str(path), "run-boundary")
+    reviewer.open()
+
+    reviewer._move(-1)
+    assert _snack_messages(page)[-1] == "已經是第一筆，沒有更早的待審查項目。"
+
+    reviewer._move(1)
+    assert _snack_messages(page)[-1] == "已經是最後一筆，沒有下一筆待審查項目。"
+
+
+def test_apply_with_format_issue_requires_human_confirmation(tmp_path):
+    path = store.create_run(tmp_path / "review-confirm.db", "run-confirm")
+    store.append_item(
+        path,
+        "run-confirm",
+        {
+            "key": "repair.format",
+            "version": "1.21.1",
+            "mod_id": "foo",
+            "kind": "lang",
+            "source_id": 0,
+            "en_us": "Use %s",
+            "old_translation": "使用",
+            "ai_translation": "Use",
+            "draft": "Use",
+        },
+    )
+    page = mock_page()
+    reviewer = RepairReviewer(page, str(path), "run-confirm")
+    reviewer.open()
+
+    reviewer._apply()
+
+    dialog = reviewer.apply_confirmation_dialog
+    assert dialog is not None
+    assert dialog.open is True
+    assert not page._tasks
+    assert len(dialog.actions) == 2
+
+
+def test_apply_last_item_reports_review_completion(tmp_path, monkeypatch):
+    path = store.create_run(tmp_path / "review-complete.db", "run-complete")
+    item_index = store.append_item(
+        path,
+        "run-complete",
+        {
+            "key": "repair.complete",
+            "version": "1.21.1",
+            "mod_id": "foo",
+            "kind": "lang",
+            "source_id": 0,
+            "en_us": "Use %s",
+            "old_translation": "使用",
+            "ai_translation": "使用 %s",
+            "draft": "使用 %s",
+        },
+    )
+
+    def apply_and_save(_database_path, store_path, run_id, item, draft):
+        store.save_review_state(
+            store_path, run_id, item["item_index"], "applied", draft
+        )
+        return "applied"
+
+    monkeypatch.setattr(
+        "app.views.moddb.repair_reviewer.apply_and_record_repair_review",
+        apply_and_save,
+    )
+    page = mock_page()
+    reviewer = RepairReviewer(page, str(path), "run-complete")
+    reviewer.open()
+
+    import asyncio
+
+    asyncio.run(reviewer._apply_async(dict(reviewer.item), "使用 %s"))
+
+    assert (
+        store.load_item(path, "run-complete", item_index)["review_status"] == "applied"
+    )
+    assert "已套用最後一筆待確認內容" in _snack_messages(page)[-1]
 
 
 def test_draft_box_shows_live_format_check_but_allows_human_confirmed_apply(tmp_path):
