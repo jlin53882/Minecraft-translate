@@ -511,7 +511,9 @@ SETTINGS: tuple[Setting, ...] = (
             "9. Minecraft 請保持原文，不要翻譯成「當個創世神」\n"
             "10. 每一筆 value 必須只根據該筆原文自身內容翻譯\n"
             "11. 只要 value 包含人類語言就必須翻譯\n"
-            "12. 學名請翻譯為台灣常用語（如 Creeper → 苦力怕）,(Spawn Egg-> 生怪蛋),(cobblestone->鵝卵石)"
+            "12. 學名請翻譯為台灣常用語（如 Creeper → 苦力怕）,(Spawn Egg-> 生怪蛋),(cobblestone->鵝卵石)\n"
+            "13. 保留每筆 value 原有的實際換行數量；可依譯文語意調整換行位置，但不可新增或刪除實際換行\n"
+            "14. 字面上的反斜線+n（\\n）必須原樣保留，不可轉成實際換行；實際換行也不可改成字面上的反斜線+n。"
         ),
         timing="next_batch",
         timing_note="下一批次讀取。",
@@ -547,6 +549,8 @@ SETTINGS: tuple[Setting, ...] = (
             "9. Minecraft 請保持原文\n"
             "10. 每一筆 value 只依該筆原文翻譯\n"
             "11. 只要 value 包含人類語言就必須翻譯\n"
+            "12. 保留每筆 value 原有的實際換行數量；可依譯文語意調整換行位置，但不可新增或刪除實際換行\n"
+            "13. 字面上的反斜線+n（\\n）必須原樣保留，不可轉成實際換行；實際換行也不可改成字面上的反斜線+n。\n"
         ),
         timing="next_batch",
         timing_note="下一批次讀取。",
