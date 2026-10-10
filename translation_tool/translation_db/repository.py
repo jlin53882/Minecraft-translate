@@ -2921,9 +2921,9 @@ class TranslationDB:
                     newline_mismatch = (
                         format_tokens(row[4])["\n"] != format_tokens(row[5])["\n"]
                     )
-                    if eligible or newline_mismatch:
+                    if eligible:
                         yield (
-                            SameSourceAIEntry(*row) if eligible else None,
+                            SameSourceAIEntry(*row),
                             newline_mismatch,
                             mixed,
                         )

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 
 def repair_summary_detail_lines(summary: dict) -> list[str]:
-    """Format representative units, source progress, newline skips and cache receipts."""
+    """Format representative units, source progress, newline candidates and cache receipts."""
     lines = []
     if "ai_representatives" in summary:
         lines.append(
@@ -21,11 +21,11 @@ def repair_summary_detail_lines(summary: dict) -> list[str]:
             f"{summary.get('not_submitted_candidates', 0)}；未處理候選 "
             f"{summary.get('unprocessed_candidates', 0)}"
         )
-    if summary.get("skipped_input_newline_mismatch") is not None:
+    if summary.get("input_newline_mismatch_candidates") is not None:
         lines.append(
-            f"輸入實體換行異常跳過 {summary.get('skipped_input_newline_mismatch', 0)} 筆；"
-            f"其中同時有其他硬格式問題 "
-            f"{summary.get('skipped_newline_with_other_hard_issues', 0)} 筆；"
+            f"候選中有輸入換行數不同 {summary.get('input_newline_mismatch_candidates', 0)} 筆；"
+            f"其中另有硬格式問題 "
+            f"{summary.get('input_newline_mismatch_with_other_hard_issues', 0)} 筆；"
             f"可逐筆審查 AI 結果 {summary.get('reviewable_results', 0)} 筆"
         )
     if "cache_keys_changed" in summary:

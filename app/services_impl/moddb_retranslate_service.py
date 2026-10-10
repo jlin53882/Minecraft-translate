@@ -96,8 +96,8 @@ class SameSourceAIRepairPreview:
     ai_representatives: int = 0
     dedup_reused_candidates: int = 0
     representative_profile_counts: tuple[tuple[str, int], ...] = ()
-    skipped_input_newline_mismatch: int = 0
-    skipped_newline_with_other_hard_issues: int = 0
+    input_newline_mismatch_candidates: int = 0
+    input_newline_mismatch_with_other_hard_issues: int = 0
 
     @property
     def selected_count(self) -> int:
@@ -113,8 +113,8 @@ class SameSourceAIRepairReport:
     flagged: int = 0
     flagged_entries: list[dict[str, Any]] = field(default_factory=list)
     flagged_entries_omitted: int = 0
-    skipped_input_newline_mismatch: int = 0
-    skipped_newline_with_other_hard_issues: int = 0
+    input_newline_mismatch_candidates: int = 0
+    input_newline_mismatch_with_other_hard_issues: int = 0
     review_run_id: str = ""
     review_store_path: str = ""
     reviewable_results: int = 0
@@ -415,18 +415,15 @@ def _limited_repair_snapshot(db, options, deadline):
     targets: dict[int, list[tuple[dict[str, Any], SameSourceAIEntry]]] = {}
     by_key: dict[tuple[Any, ...], list[dict[str, Any]]] = {}
     selected_entry_ids: set[int] = set()
-    eligible = skipped_newline = skipped_mixed = 0
+    eligible = newline_mismatch_count = newline_mismatch_with_hard_issues = 0
     for entry, newline_mismatch, mixed in db.iter_repairable_translation_entries(
         options.version,
         list(options.mod_ids),
         check=lambda: _raise_preview_timeout(deadline),
     ):
         _raise_preview_timeout(deadline)
-        skipped_newline, skipped_mixed = _count_newline_skips(
-            newline_mismatch, mixed, skipped_newline, skipped_mixed
-        )
-        if entry is None:
-            continue
+        newline_mismatch_count += int(newline_mismatch)
+        newline_mismatch_with_hard_issues += int(newline_mismatch and mixed)
         eligible += 1
         if not _could_map_to_selected_representative(
             entry, limit, representatives, selected_entry_ids
@@ -460,12 +457,11 @@ def _limited_repair_snapshot(db, options, deadline):
         rows_by_key[(int(item["_entry_id"]), int(item.get("_source_id", SRC_AI)))]
         for item in selected_items
     ]
-    return eligible, skipped_newline, skipped_mixed, selected_entries
-
-
-def _count_newline_skips(newline_mismatch, mixed, skipped, skipped_mixed):
-    return skipped + int(newline_mismatch), skipped_mixed + int(
-        newline_mismatch and mixed
+    return (
+        eligible,
+        newline_mismatch_count,
+        newline_mismatch_with_hard_issues,
+        selected_entries,
     )
 
 
@@ -517,8 +513,8 @@ def preview_same_source_ai_retranslation(
     """Return the exact candidate snapshot; optional monotonic deadline covers SQL and transforms."""
     _raise_preview_timeout(deadline)
     if mode == "quality_mismatch":
-        total, skipped_newline, skipped_mixed, entries = _limited_repair_snapshot(
-            db, options, deadline
+        total, newline_mismatch_count, newline_mismatch_with_hard_issues, entries = (
+            _limited_repair_snapshot(db, options, deadline)
         )
     elif mode == "same_source_ai":
         total = db.count_same_as_source_ai(options.version, list(options.mod_ids))
@@ -562,11 +558,11 @@ def preview_same_source_ai_retranslation(
         ai_representatives=len(representatives),
         dedup_reused_candidates=len(entries) - len(representatives),
         representative_profile_counts=tuple(representative_profile_counts.items()),
-        skipped_input_newline_mismatch=(
-            skipped_newline if mode == "quality_mismatch" else 0
+        input_newline_mismatch_candidates=(
+            newline_mismatch_count if mode == "quality_mismatch" else 0
         ),
-        skipped_newline_with_other_hard_issues=(
-            skipped_mixed if mode == "quality_mismatch" else 0
+        input_newline_mismatch_with_other_hard_issues=(
+            newline_mismatch_with_hard_issues if mode == "quality_mismatch" else 0
         ),
     )
 
@@ -1686,11 +1682,11 @@ def run_moddb_retranslate_service(
     report = SameSourceAIRepairReport(
         candidates=len(entries),
         mode=mode,
-        skipped_input_newline_mismatch=(
-            review_preview.skipped_input_newline_mismatch if review_preview else 0
+        input_newline_mismatch_candidates=(
+            review_preview.input_newline_mismatch_candidates if review_preview else 0
         ),
-        skipped_newline_with_other_hard_issues=(
-            review_preview.skipped_newline_with_other_hard_issues
+        input_newline_mismatch_with_other_hard_issues=(
+            review_preview.input_newline_mismatch_with_other_hard_issues
             if review_preview
             else 0
         ),

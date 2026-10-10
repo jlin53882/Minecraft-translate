@@ -969,7 +969,12 @@ def test_quality_filter_evaluates_before_pagination_and_uses_core_tokens(db):
 
 def test_repair_newline_policy_is_scoped_and_keeps_literal_backslash_n_strict():
     assert repair_input_issues("a\nb", "甲\n乙") == (False, (), False)
-    assert repair_input_issues("a %s\nb", "甲") == (False, (), True)
+    assert repair_input_issues("a\nb", "甲") == (True, (), False)
+    assert repair_input_issues("a %s\nb", "甲") == (
+        True,
+        ("少了 1 個「%s」",),
+        True,
+    )
     assert repair_input_issues("Use %s\nnext", "用\n譯文") == (
         True,
         ("少了 1 個「%s」",),

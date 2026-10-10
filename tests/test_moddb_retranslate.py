@@ -248,15 +248,15 @@ def test_special_character_repair_covers_all_sources_and_can_be_undone(
     check.close()
 
 
-def test_quality_repair_skips_input_newline_mismatch_and_allows_output_difference(
+def test_quality_repair_includes_input_newline_mismatch_and_allows_output_difference(
     db_path, monkeypatch, repair_cache
 ):
     db = TranslationDB(db_path)
-    skipped = _ai_entry(db, key="a.skipped", en="Use %s\nnext")
+    newline_mismatch = _ai_entry(db, key="a.newline_mismatch", en="Use %s\nnext")
     eligible = _ai_entry(db, key="b.eligible", en="Use %s\nnext")
     db._conn.execute(
         "UPDATE translation SET zh_tw='Use' WHERE entry_id=? AND source=?",
-        (skipped.id, SRC_AI),
+        (newline_mismatch.id, SRC_AI),
     )
     db._conn.execute(
         "UPDATE translation SET zh_tw='Use\nnext' WHERE entry_id=? AND source=?",
@@ -265,18 +265,24 @@ def test_quality_repair_skips_input_newline_mismatch_and_allows_output_differenc
     db._conn.commit()
 
     preview = moddb_retranslate_service.preview_same_source_ai_retranslation(
-        db, _options(limit=1), mode="quality_mismatch"
+        db, _options(limit=2), mode="quality_mismatch"
     )
-    assert preview.total_candidates == 1
-    assert preview.skipped_input_newline_mismatch == 1
-    assert preview.skipped_newline_with_other_hard_issues == 1
-    assert [row.key for row in preview.entries] == ["b.eligible"]
+    assert preview.total_candidates == 2
+    assert preview.input_newline_mismatch_candidates == 1
+    assert preview.input_newline_mismatch_with_other_hard_issues == 1
+    assert [row.key for row in preview.entries] == [
+        "a.newline_mismatch",
+        "b.eligible",
+    ]
     db.close()
 
     monkeypatch.setattr(
         moddb_retranslate_service,
         "translate_batch_smart",
-        lambda batch, _total: ([{**batch[0], "text": "Use %s repaired"}], "AUTO"),
+        lambda batch, _total: (
+            [{**item, "text": "Use %s repaired"} for item in batch],
+            "AUTO",
+        ),
     )
     result = _run(
         db_path,
@@ -293,13 +299,14 @@ def test_quality_repair_skips_input_newline_mismatch_and_allows_output_differenc
             (SRC_AI,),
         )
     }
-    assert stored["a.skipped"] == "Use"
+    assert stored["a.newline_mismatch"] == "Use %s repaired"
     assert stored["b.eligible"] == "Use %s repaired"
     # The general quality view still warns about this output's real newline delta.
     eligible_detail = check.entry_detail(eligible.id)
     assert eligible_detail.entry.quality_state == "mismatch"
-    assert result["summary"]["updated"] == 1
-    assert result["summary"]["remaining"] == 0
+    assert result["summary"]["updated"] == 2
+    # LF differences remain visible in general quality diagnostics.
+    assert result["summary"]["remaining"] == 2
     assert check.entry_detail(eligible.id).history[0].action == "quality_repair"
     check.close()
 

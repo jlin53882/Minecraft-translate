@@ -262,8 +262,8 @@ def _display_preview_result(panel, options, db_identity, result):
         sources = "、".join(source_label(source, catalog) for source in result.sources)
         panel.repair_preview_text.value = (
             f"全範圍修復合格來源列 {format_count(result.total_candidates)} 筆；"
-            f"輸入實體換行異常跳過 {format_count(result.skipped_input_newline_mismatch)} 筆"
-            f"（其中同時有其他硬格式問題 {format_count(result.skipped_newline_with_other_hard_issues)} 筆）。\n"
+            f"候選中有 {format_count(result.input_newline_mismatch_candidates)} 筆輸入換行數不同"
+            f"（其中另有硬格式問題 {format_count(result.input_newline_mismatch_with_other_hard_issues)} 筆）。\n"
             f"本次 AI 代表上限：{cap}；選中 {format_count(result.ai_representatives)} 個代表，"
             f"對應 {format_count(selected)} 個來源列。來源：{sources or '無'}。\n"
             "只更新預覽中的來源列；AI 輸出實體換行數可不同，其他格式 token 仍須一致。\n"
