@@ -1,4 +1,7 @@
+import flet as ft
+
 from app.services_impl.moddb_format_diff_service import compare_format_diff
+from app.views.moddb.format_diff_review import FormatDiffReview
 from app.views.moddb.format_diff_viewer import FormatDiffViewer
 
 
@@ -64,3 +67,27 @@ def test_viewer_keeps_markers_out_of_text_and_can_toggle_highlights():
     assert viewer.box.visible is True
     assert "[缺少" not in result.target_text
     assert "使用" in "".join(span.text or "" for span in viewer.tw.spans)
+
+
+def test_shared_review_renders_same_contract_without_inserting_ui_markers():
+    review = FormatDiffReview(
+        context_label="條目校對",
+        editable_control=ft.TextField(value="目前譯文"),
+    )
+    result = review.render("A §7 line", "目前譯文")
+
+    assert result.legacy_messages == ("少了 1 個「§7」",)
+    assert review._result is result
+    assert review._source_text == "A §7 line"
+    assert review._target_text == "目前譯文"
+    assert all(
+        "缺少"
+        not in (span.text or "")
+        for span in review._text_panel(
+            "目前譯文", "目前譯文", (), set(), "em"
+        ).content.controls[-1].spans
+    )
+
+    review._select_tab("edit")
+    assert review._tab == "edit"
+    assert review.control.content.controls

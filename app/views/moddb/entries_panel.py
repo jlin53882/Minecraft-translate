@@ -50,6 +50,7 @@ from app.views.moddb.entry_filters import (
 )
 from app.views.moddb.entry_metadata import build_entry_metadata
 from app.views.moddb.entry_row_tile import build_entry_tile
+from app.views.moddb.format_diff_review import FormatDiffReview
 from app.views.moddb.format_diff_viewer import FormatDiffViewer
 from app.views.moddb.formatting import (
     format_count,
@@ -223,6 +224,11 @@ class EntriesPanel(ft.Column):
             self._update_format_hints_and_refresh,
             switch_label="顯示特殊字元",
         )
+        self.format_review = FormatDiffReview(
+            context_label="條目校對",
+            editable_control=self.tw_field,
+            edit_notice=self.token_hint,
+        )
         self.confirm_btn = kit.button(
             "審核（確認目前譯文）",
             "gold",
@@ -251,18 +257,7 @@ class EntriesPanel(ft.Column):
         )
         self.editor_body = ft.Column(
             [
-                kit.section_label("原文 en_us"),
-                ft.Container(
-                    self.src_text,
-                    padding=12,
-                    bgcolor=C.PANEL2,
-                    border_radius=design.RADIUS_CONTROL,
-                    border=ft.Border.all(1, C.LINE),
-                ),
-                ft.Row([kit.section_label("譯文 zh_tw"), self.source_chip], spacing=8),
-                self.tw_field,
-                self.token_hint,
-                self.chars.control,
+                self.format_review.control,
                 self.mc_preview.control,
                 self.meta_col,
                 self.impact_box,
@@ -574,6 +569,11 @@ class EntriesPanel(ft.Column):
             source_tone(entry.source),
         )
         self.meta_col.controls = build_entry_metadata(detail)
+        self.format_review.render(
+            entry.en_us or NO_SOURCE_TEXT,
+            self.tw_field.value or "",
+            metadata=[self.source_chip],
+        )
         if calculate_impact:
             self._update_impact()
         else:
@@ -703,6 +703,12 @@ class EntriesPanel(ft.Column):
         self.token_hint.visible = bool(notes)
         self.mc_preview.render(text)
         self.chars.render(entry.en_us if entry else "", text, diff_result)
+        self.format_review.render(
+            entry.en_us if entry else "",
+            text,
+            diff_result,
+            metadata=[self.source_chip],
+        )
 
     def _update_format_hints_and_refresh(self) -> None:
         self._update_format_hints()
