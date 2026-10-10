@@ -308,7 +308,7 @@ def test_chatgpt_transient_errors_use_bounded_backoff(
     waits = []
     monkeypatch.setattr(main, "interruptible_sleep", waits.append)
     monkeypatch.setattr(main.random, "uniform", lambda _low, _high: 0)
-    runtime = SimpleNamespace(chatgpt_retry_count=0)
+    runtime = SimpleNamespace(chatgpt_retry_count=0, batch_size=8)
     error = ChatGPTAPIError(
         code,
         message,
@@ -321,6 +321,7 @@ def test_chatgpt_transient_errors_use_bounded_backoff(
 
     assert action is main.BatchAction.RETRY_SAME_MODEL
     assert runtime.chatgpt_retry_count == 1
+    assert runtime.batch_size == 8
     assert waits == [retry_after if retry_after is not None else 1]
 
 
@@ -345,6 +346,105 @@ def test_chatgpt_transient_retry_stops_at_the_configured_limit(monkeypatch):
 
     assert runtime.chatgpt_retry_count == main.CHATGPT_MAX_RETRIES
     assert len(waits) == main.CHATGPT_MAX_RETRIES
+
+
+def test_gemini_high_demand_503_retries_three_times_without_shrinking(monkeypatch):
+    import json
+    from types import SimpleNamespace
+
+    import requests
+
+    from translation_tool.core import lm_translator_main as main
+
+    waits = []
+    monkeypatch.setattr(main, "interruptible_sleep", waits.append)
+    monkeypatch.setattr(main, "get_model_quota_registry", lambda: object())
+    monkeypatch.setattr(main, "_usable_model_indices", lambda *_args: [0])
+
+    response = requests.Response()
+    response.status_code = 503
+    response._content = json.dumps(
+        {
+            "error": {
+                "status": "UNAVAILABLE",
+                "message": "This model is currently experiencing high demand.",
+            }
+        }
+    ).encode()
+    error = requests.HTTPError(response=response)
+    source_items = [{"id": "one", "text": "first"}, {"id": "two", "text": "second"}]
+    runtime = SimpleNamespace(
+        provider="gemini",
+        batch_size=8,
+        key_cycle=MagicMock(),
+        remaining_items=list(source_items),
+        all_results=[],
+        pinned_model_index=None,
+        gemini_503_retry_count=0,
+        gemini_503_attempted_models=set(),
+    )
+
+    for retry_count, wait_sec in enumerate((30, 60, 120), start=1):
+        action = main._handle_batch_error(runtime, error, 0)
+        assert action is main.BatchAction.RETRY_SAME_MODEL
+        assert runtime.gemini_503_retry_count == retry_count
+        assert runtime.batch_size == 8
+
+    assert waits == [30, 60, 120]
+    assert runtime.remaining_items == source_items
+
+    action = main._handle_batch_error(runtime, error, 0)
+
+    assert action is main.BatchAction.PARTIAL
+    assert waits == [30, 60, 120]
+    assert runtime.batch_size == 8
+    assert runtime.remaining_items == []
+    assert runtime.all_results == [
+        {**item, "_untranslated": True} for item in source_items
+    ]
+
+
+def test_gemini_503_retry_after_over_cap_defers_without_waiting(monkeypatch):
+    import json
+    from types import SimpleNamespace
+
+    import requests
+
+    from translation_tool.core import lm_translator_main as main
+
+    waits = []
+    monkeypatch.setattr(main, "interruptible_sleep", waits.append)
+    response = requests.Response()
+    response.status_code = 503
+    response.headers["Retry-After"] = str(main.GEMINI_503_MAX_RETRY_AFTER_SEC + 1)
+    response._content = json.dumps(
+        {
+            "error": {
+                "status": "UNAVAILABLE",
+                "message": "This model is currently experiencing high demand.",
+            }
+        }
+    ).encode()
+    runtime = SimpleNamespace(
+        provider="gemini",
+        batch_size=8,
+        key_cycle=MagicMock(),
+        remaining_items=[{"id": "one", "text": "first"}],
+        all_results=[],
+        pinned_model_index=None,
+        gemini_503_retry_count=0,
+        gemini_503_attempted_models=set(),
+    )
+
+    action = main._handle_batch_error(runtime, requests.HTTPError(response=response), 0)
+
+    assert action is main.BatchAction.PARTIAL
+    assert waits == []
+    assert runtime.gemini_503_retry_count == 0
+    assert runtime.batch_size == 8
+    assert runtime.all_results == [
+        {"id": "one", "text": "first", "_untranslated": True}
+    ]
 
 
 @pytest.mark.parametrize(
