@@ -27,13 +27,20 @@ class ChatGPTOAuthPanel:
         self,
         page: ft.Page,
         model_control: ft.Dropdown,
-        on_models_loaded: Callable[[list], None],
+        on_models_loaded: Callable[[list, str], None],
+        on_models_invalidated: Callable[[str], None] | None = None,
     ) -> None:
         self.page = page
         self.model_control = model_control
         self.on_models_loaded = on_models_loaded
+        self.on_models_invalidated = on_models_invalidated or (
+            lambda _message: self.on_models_loaded([], "")
+        )
         self._pending_login = None
         self._busy = False
+        self._switching_account = False
+        self._account_switch_generation = 0
+        self._account_switch_lock = asyncio.Lock()
         self.status_text = ft.Text("尚未連結 ChatGPT 帳號", size=12)
         self.account_selector = ft.Dropdown(
             label="ChatGPT 帳號",
@@ -135,12 +142,12 @@ class ChatGPTOAuthPanel:
             if item.get("profile_id")
         ]
         active_profile_id = str(account.get("active_profile_id") or "")
-        if active_profile_id:
+        if active_profile_id and not self._switching_account:
             self.account_selector.value = active_profile_id
         self.account_selector.visible = bool(self.account_selector.options)
         self.account_selector.disabled = (
-            self._busy or len(self.account_selector.options) < 2
-        )
+            self._busy and not self._switching_account
+        ) or len(self.account_selector.options) < 2
         self.login_button.disabled = self._busy
         self.add_account_button.disabled = self._busy
         self.authorize_usage_button.visible = bool(
@@ -197,7 +204,12 @@ class ChatGPTOAuthPanel:
             result = await asyncio.to_thread(pending.complete)
             self.refresh_controls()
             if result.get("connected"):
-                await self._load_models()
+                self._account_switch_generation += 1
+                self._invalidate_models("正在載入此帳號的模型…")
+                await self._load_models(
+                    profile_id=result.get("active_profile_id"),
+                    generation=self._account_switch_generation,
+                )
                 show_snack(self.page, "ChatGPT 已連結；選擇模型後儲存設定。", C.EM)
             else:
                 self.status_text.value = (
@@ -217,48 +229,93 @@ class ChatGPTOAuthPanel:
             self.page.update()
 
     async def _on_account_selected(self, _event=None) -> None:
-        if self._busy:
+        if self._busy and not self._switching_account:
             return
         profile_id = str(self.account_selector.value or "")
         if not profile_id:
             return
+        self._account_switch_generation += 1
+        generation = self._account_switch_generation
+        self._switching_account = True
         self._busy = True
+        self.status_text.value = "正在切換 ChatGPT 帳號並讀取模型…"
+        self._invalidate_models("正在載入此帳號的模型…")
         self.refresh_controls()
+        self.page.update()
         try:
-            account = await asyncio.to_thread(set_active_chatgpt_account, profile_id)
-            self.refresh_controls()
-            if account.get("connected"):
-                await self._load_models()
-            else:
-                self.on_models_loaded([])
+            async with self._account_switch_lock:
+                if generation != self._account_switch_generation:
+                    return
+                account = await asyncio.to_thread(
+                    set_active_chatgpt_account, profile_id
+                )
+                if generation != self._account_switch_generation:
+                    return
+                if account.get("connected"):
+                    await self._load_models(
+                        profile_id=profile_id, generation=generation
+                    )
+                else:
+                    self._invalidate_models("此帳號尚未授權模型使用")
         except Exception as exc:  # noqa: BLE001 - account switching UI boundary
-            self.status_text.value = redact_text(exc)
-            show_snack(self.page, redact_text(exc))
+            if generation == self._account_switch_generation:
+                self._invalidate_models("帳號模型清單無效；請重新載入")
+                self.status_text.value = redact_text(exc)
+                show_snack(self.page, redact_text(exc))
         finally:
-            self._busy = False
-            self.refresh_controls()
-            self.page.update()
+            if generation == self._account_switch_generation:
+                self._switching_account = False
+                self._busy = False
+                self.refresh_controls()
+                self.page.update()
 
     async def _on_cancel(self, _event=None) -> None:
         pending = self._pending_login
         if pending is not None:
             await asyncio.to_thread(pending.cancel)
 
-    async def _load_models(self) -> None:
+    def _invalidate_models(self, message: str) -> None:
+        self.on_models_invalidated(message)
+        self.model_control.disabled = True
+
+    async def _load_models(
+        self, *, profile_id: str | None = None, generation: int | None = None
+    ) -> None:
+        generation = (
+            self._account_switch_generation if generation is None else generation
+        )
+        if profile_id is None:
+            profile_id = str(chatgpt_account_status().get("active_profile_id") or "")
+        profile_id = str(profile_id or "")
+        if not profile_id:
+            self._invalidate_models("尚未選擇 ChatGPT 帳號")
+            return
         self.status_text.value = "正在讀取此帳號可用的 ChatGPT 模型…"
+        self.model_control.disabled = True
         self.page.update()
         try:
-            models = await asyncio.to_thread(list_chatgpt_models)
-            self.on_models_loaded(models)
+            models = await asyncio.to_thread(list_chatgpt_models, profile_id=profile_id)
+            if (
+                generation != self._account_switch_generation
+                or str(self.account_selector.value or "") != profile_id
+            ):
+                return
             if not models:
+                self._invalidate_models("此帳號目前沒有可用的模型")
                 self.status_text.value = "此帳號目前沒有可用的模型。"
             else:
+                self.on_models_loaded(models, profile_id)
                 self.status_text.value = (
                     f"已讀取 {len(models)} 個模型。翻譯會使用 ChatGPT 方案或 credits。"
                 )
         except Exception as exc:  # noqa: BLE001 - provider request UI boundary
-            self.status_text.value = redact_text(exc)
-            show_snack(self.page, redact_text(exc))
+            if (
+                generation == self._account_switch_generation
+                and str(self.account_selector.value or "") == profile_id
+            ):
+                self._invalidate_models("模型清單讀取失敗；請重新載入")
+                self.status_text.value = redact_text(exc)
+                show_snack(self.page, redact_text(exc))
         self.refresh_controls()
         self.page.update()
 
@@ -268,7 +325,10 @@ class ChatGPTOAuthPanel:
         self._busy = True
         self.refresh_controls()
         try:
-            await self._load_models()
+            self._account_switch_generation += 1
+            generation = self._account_switch_generation
+            self._invalidate_models("正在重新載入模型清單…")
+            await self._load_models(generation=generation)
         finally:
             self._busy = False
             self.refresh_controls()
@@ -281,7 +341,8 @@ class ChatGPTOAuthPanel:
         self.refresh_controls()
         try:
             revoked = await asyncio.to_thread(disconnect_chatgpt_account)
-            self.on_models_loaded([])
+            self._account_switch_generation += 1
+            self._invalidate_models("請重新連結 ChatGPT 並載入模型")
             self.status_text.value = (
                 "已在此裝置中斷連結 ChatGPT。"
                 if revoked

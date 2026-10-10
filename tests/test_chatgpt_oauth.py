@@ -331,6 +331,67 @@ def test_account_profiles_keep_separate_credentials_and_can_be_switched(
     assert persisted["profiles"]["profile-b"]["refresh_token"] == "refresh-b"
 
 
+def test_profile_pinned_refresh_updates_only_that_account_without_switching_active(
+    monkeypatch, no_credential_file_lock
+):
+    oauth._write_store_unlocked(
+        {
+            "schema_version": oauth._CREDENTIAL_STORE_VERSION,
+            "ext_agent_host_id": "urn:uuid:host",
+            "active_profile_id": "profile-b",
+            "profiles": {
+                "profile-a": {
+                    "client_id": "client-a",
+                    "subject": "subject-a",
+                    "access_token": "access-a-expired",
+                    "refresh_token": "refresh-a",
+                    "expires_at": 0,
+                    "scopes": ["openid", "chatgpt.tokens.use.direct"],
+                },
+                "profile-b": {
+                    "client_id": "client-b",
+                    "subject": "subject-b",
+                    "access_token": "access-b",
+                    "refresh_token": "refresh-b",
+                    "expires_at": 4_000_000_000,
+                    "scopes": ["openid", "chatgpt.tokens.use.direct"],
+                },
+            },
+        }
+    )
+    monkeypatch.setattr(
+        oauth,
+        "_discover",
+        lambda: {"token_endpoint": "https://auth.openai.com/oauth/token"},
+    )
+    request = {}
+    monkeypatch.setattr(
+        oauth.requests,
+        "post",
+        lambda url, **kwargs: (
+            request.update(url=url, **kwargs)
+            or _Response(
+                {
+                    "access_token": "access-a-rotated",
+                    "refresh_token": "refresh-a-rotated",
+                    "scope": "openid chatgpt.tokens.use.direct",
+                    "expires_in": 3600,
+                }
+            )
+        ),
+    )
+
+    token = oauth.get_chatgpt_access_token(profile_id="profile-a")
+
+    assert token == "access-a-rotated"
+    assert request["data"]["client_id"] == "client-a"
+    assert request["data"]["refresh_token"] == "refresh-a"
+    persisted = oauth._read_store_unlocked()
+    assert persisted["active_profile_id"] == "profile-b"
+    assert persisted["profiles"]["profile-a"]["refresh_token"] == "refresh-a-rotated"
+    assert persisted["profiles"]["profile-b"]["refresh_token"] == "refresh-b"
+
+
 def test_new_account_registration_does_not_replace_existing_profile(
     no_credential_file_lock,
 ):

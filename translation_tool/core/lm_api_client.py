@@ -179,6 +179,7 @@ def call_gemini_requests(
     max_output_tokens: int | None = None,
     meta_out: dict | None = None,
     reasoning_effort: str | None = None,
+    profile_id: str | None = None,
     provider: str | None = None,
     lm_config: dict | None = None,
 ) -> str:
@@ -201,14 +202,17 @@ def call_gemini_requests(
     if provider == "chatgpt":
         from translation_tool.core.openai_codex_client import call_chatgpt_responses
 
-        return call_chatgpt_responses(
-            model_name=model_name,
-            system_prompt=system_prompt,
-            payload=payload,
-            timeout=int(lm_cfg.get("rate_limit", {}).get("timeout", 600)),
-            meta_out=meta_out,
-            reasoning_effort=reasoning_effort,
-        )
+        chatgpt_kwargs = {
+            "model_name": model_name,
+            "system_prompt": system_prompt,
+            "payload": payload,
+            "timeout": int(lm_cfg.get("rate_limit", {}).get("timeout", 600)),
+            "meta_out": meta_out,
+            "reasoning_effort": reasoning_effort,
+        }
+        if profile_id is not None:
+            chatgpt_kwargs["profile_id"] = profile_id
+        return call_chatgpt_responses(**chatgpt_kwargs)
     if provider != "gemini":
         raise RuntimeError(f"不支援的翻譯服務供應商：{provider}")
 

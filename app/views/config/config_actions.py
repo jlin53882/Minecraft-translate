@@ -136,6 +136,14 @@ def _validate_provider_settings(
     return True
 
 
+def _bind_chatgpt_model_catalog(config, view, provider):
+    if provider != "chatgpt":
+        return
+    profile_id = getattr(view, "_chatgpt_model_catalog_profile_id", None)
+    if profile_id and getattr(view, "_chatgpt_model_catalog_valid", True):
+        config["lm_translator"]["chatgpt_model_profile_id"] = str(profile_id)
+
+
 def _collect_validated_config(
     view, load_config_json_fn, validate_api_keys_fn, *, show_feedback=True
 ):
@@ -186,6 +194,7 @@ def _collect_validated_config(
                 show_snack(view.page, "至少需要保留一個啟用中的模型；設定尚未儲存。")
             return None
         config["lm_translator"]["models"] = models
+        _bind_chatgpt_model_catalog(config, view, provider)
         collect_chatgpt_settings = getattr(view, "collect_chatgpt_model_settings", None)
         if callable(collect_chatgpt_settings):
             try:

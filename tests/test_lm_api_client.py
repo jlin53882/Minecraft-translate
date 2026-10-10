@@ -64,6 +64,7 @@ class TestCallGeminiRequests:
             temperature=0.2,
             meta_out=meta,
             reasoning_effort="high",
+            profile_id="profile-a",
             provider="chatgpt",
             lm_config={"provider": "chatgpt", "rate_limit": {"timeout": 45}},
         )
@@ -76,6 +77,7 @@ class TestCallGeminiRequests:
             timeout=45,
             meta_out=meta,
             reasoning_effort="high",
+            profile_id="profile-a",
         )
 
     @patch("translation_tool.core.lm_api_client.requests.post")

@@ -175,13 +175,18 @@ def test_chatgpt_runtime_uses_selected_model_and_its_overrides(
             "lm_translator": {
                 "provider": "chatgpt",
                 "chatgpt_model": "gpt-5-codex",
+                "chatgpt_model_profile_id": "profile-a",
                 "chatgpt_model_settings": {"gpt-5-codex": model_settings},
                 "max_input_token_budget": 60000,
                 "initial_batch_size_lang": 20,
             }
         },
     )
-
+    monkeypatch.setattr(
+        main,
+        "chatgpt_account_status",
+        lambda: {"active_profile_id": "profile-a"},
+    )
     runtime = main._build_batch_runtime(
         [{"id": "line-1", "text": "Hello", "file": "lang/en_us.json"}], 1
     )
@@ -214,6 +219,34 @@ def test_chatgpt_runtime_without_a_selected_model_does_not_fall_back_to_gemini(
     assert main._build_batch_runtime([{"id": "line-1", "text": "Hello"}], 1) is None
 
 
+def test_chatgpt_runtime_rejects_model_catalog_bound_to_another_profile(monkeypatch):
+    from translation_tool.core import lm_translator_main as main
+
+    errors = []
+    monkeypatch.setattr(
+        main,
+        "load_config",
+        lambda: {
+            "lm_translator": {
+                "provider": "chatgpt",
+                "chatgpt_model": "gpt-5-codex",
+                "chatgpt_model_profile_id": "profile-a",
+            }
+        },
+    )
+    monkeypatch.setattr(
+        main,
+        "chatgpt_account_status",
+        lambda: {"active_profile_id": "profile-b"},
+    )
+    monkeypatch.setattr(main, "log_error", errors.append)
+
+    runtime = main._build_batch_runtime([{"id": "line-1", "text": "Hello"}], 1)
+
+    assert runtime is None
+    assert any("更新模型清單" in message for message in errors)
+
+
 @pytest.mark.parametrize("provider", ["gemini", "chatgpt"])
 def test_provider_request_kwargs_only_send_chatgpt_reasoning(provider):
     from types import SimpleNamespace
@@ -224,6 +257,7 @@ def test_provider_request_kwargs_only_send_chatgpt_reasoning(provider):
         lm_cfg={"provider": provider},
         model_temperature=0.4,
         reasoning_effort="high",
+        chatgpt_profile_id="profile-a",
     )
 
     kwargs = main._provider_request_kwargs(
@@ -243,8 +277,10 @@ def test_provider_request_kwargs_only_send_chatgpt_reasoning(provider):
     assert kwargs["max_output_tokens"] == 1024
     if provider == "chatgpt":
         assert kwargs["reasoning_effort"] == "high"
+        assert kwargs["profile_id"] == "profile-a"
     else:
         assert "reasoning_effort" not in kwargs
+        assert "profile_id" not in kwargs
 
 
 @pytest.mark.parametrize(

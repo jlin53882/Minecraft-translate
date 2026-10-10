@@ -278,9 +278,11 @@ def call_chatgpt_responses(
     timeout: int,
     meta_out: dict | None = None,
     reasoning_effort: str | None = None,
+    profile_id: str | None = None,
 ) -> str:
     """Call Responses with the locally stored ChatGPT OAuth token and SSE stream."""
-    token = get_chatgpt_access_token()
+    token_kwargs = {"profile_id": profile_id} if profile_id is not None else {}
+    token = get_chatgpt_access_token(**token_kwargs)
     request_kwargs = {
         "token": token,
         "model_name": model_name,
@@ -296,7 +298,7 @@ def call_chatgpt_responses(
         raise ChatGPTAPIError("network_error", redact_text(exc)) from exc
     if response.status_code == 401:
         response.close()
-        token = get_chatgpt_access_token(force_refresh=True)
+        token = get_chatgpt_access_token(force_refresh=True, **token_kwargs)
         request_kwargs["token"] = token
         try:
             response = _stream_request(**request_kwargs)

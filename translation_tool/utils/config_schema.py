@@ -303,6 +303,12 @@ SETTINGS: tuple[Setting, ...] = (
         timing_note="下次翻譯請求讀取；進行中的請求維持原模型。",
     ),
     Setting(
+        "lm_translator.chatgpt_model_profile_id",
+        "none",
+        default="",
+        reason="由目前帳號已載入的 ChatGPT 模型清單驗證，不直接編輯。",
+    ),
+    Setting(
         "lm_translator.chatgpt_model_settings",
         "none",
         default={},

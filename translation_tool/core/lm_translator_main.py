@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 
 import requests
 
+from translation_tool.core.codex_oauth import chatgpt_account_status
 from translation_tool.core.lm_api_client import (
     GeminiResponseFormatError,
     call_gemini_requests,
@@ -378,6 +379,7 @@ class _BatchRuntime:
     overload_retry_sec: float = OVERLOAD_RETRY_WAIT_SEC
     request_interval_sec: float = 4
     reasoning_effort: str | None = None
+    chatgpt_profile_id: str | None = None
     chatgpt_retry_count: int = 0
 
 
@@ -445,6 +447,7 @@ def _build_batch_runtime(
         rpm_cooldown = float(RPM_COOLDOWN_SEC)
 
     reasoning_effort = None
+    chatgpt_profile_id = None
     if provider == "chatgpt":
         chatgpt_model = str(lm_cfg.get("chatgpt_model") or "").strip()
         model_pool = [chatgpt_model] if chatgpt_model else []
@@ -463,6 +466,19 @@ def _build_batch_runtime(
             "[❌] MODEL_POOL 為空（沒有啟用任何模型），請在設定中啟用至少一個模型"
         )
         return None
+    if provider == "chatgpt":
+        chatgpt_profile_id = str(
+            chatgpt_account_status().get("active_profile_id") or ""
+        )
+        if not chatgpt_profile_id:
+            log_error("[❌] 找不到作用中的 ChatGPT 帳號，請先在設定頁連結並選擇帳號")
+            return None
+        configured_profile_id = str(lm_cfg.get("chatgpt_model_profile_id") or "")
+        if configured_profile_id != chatgpt_profile_id:
+            log_error(
+                "[❌] ChatGPT 模型尚未確認適用於目前帳號；請在設定頁更新模型清單並儲存設定"
+            )
+            return None
 
     lang_prompt = _prompt_text(
         lm_cfg.get("lang_system_prompt"),
@@ -506,6 +522,7 @@ def _build_batch_runtime(
         overload_retry_sec=lm_cfg.get("overload_retry_sec", OVERLOAD_RETRY_WAIT_SEC),
         request_interval_sec=lm_cfg.get("request_interval_sec", 4),
         reasoning_effort=reasoning_effort,
+        chatgpt_profile_id=chatgpt_profile_id,
     )
 
 
@@ -1150,6 +1167,9 @@ def _provider_request_kwargs(
     }
     if kwargs["provider"] == "chatgpt":
         kwargs["reasoning_effort"] = runtime.reasoning_effort
+        profile_id = getattr(runtime, "chatgpt_profile_id", None)
+        if profile_id:
+            kwargs["profile_id"] = profile_id
     return kwargs
 
 

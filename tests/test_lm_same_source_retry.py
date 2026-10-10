@@ -185,12 +185,19 @@ def test_provider_and_reasoning_snapshot_are_used_for_normal_and_same_source_cal
         {
             "provider": "chatgpt",
             "chatgpt_model": "gpt-5-codex",
+            "chatgpt_model_profile_id": "profile-a",
             "chatgpt_model_settings": {"gpt-5-codex": {"reasoning_effort": "high"}},
         }
     )
     monkeypatch.setattr(main, "load_config", lambda: deepcopy(active_config))
     monkeypatch.setattr(main, "get_translation_provider", lambda: "chatgpt")
     monkeypatch.setattr(main, "validate_translation_credentials", lambda: None)
+    active_profile = {"id": "profile-a"}
+    monkeypatch.setattr(
+        main,
+        "chatgpt_account_status",
+        lambda: {"active_profile_id": active_profile["id"]},
+    )
     calls = []
 
     def call_api(**kwargs):
@@ -198,6 +205,7 @@ def test_provider_and_reasoning_snapshot_are_used_for_normal_and_same_source_cal
         if len(calls) == 1:
             # Simulate settings being saved while the already-started batch runs.
             active_config["lm_translator"]["provider"] = "gemini"
+            active_profile["id"] = "profile-b"
             return _reply(kwargs, {})
         return _reply(kwargs, {"Pressure Chamber": "壓力室"})
 
@@ -215,6 +223,7 @@ def test_provider_and_reasoning_snapshot_are_used_for_normal_and_same_source_cal
         "chatgpt",
     ]
     assert [call["reasoning_effort"] for call in calls] == ["high", "high"]
+    assert [call["profile_id"] for call in calls] == ["profile-a", "profile-a"]
 
 
 def test_still_same_after_retry_is_normal_final_result_with_no_third_request(

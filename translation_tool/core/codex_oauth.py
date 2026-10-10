@@ -352,6 +352,10 @@ def _write_store_unlocked(record: dict[str, Any]) -> None:
 
 def _active_record(store: dict[str, Any]) -> dict[str, Any]:
     profile_id = store.get("active_profile_id") or ""
+    return _profile_record(store, str(profile_id))
+
+
+def _profile_record(store: dict[str, Any], profile_id: str) -> dict[str, Any]:
     profile = store.get("profiles", {}).get(profile_id, {})
     if not isinstance(profile, dict):
         profile = {}
@@ -366,7 +370,7 @@ def _read_record_unlocked() -> dict[str, Any]:
     return _active_record(_read_store_unlocked())
 
 
-def _write_record_unlocked(record: dict[str, Any]) -> None:
+def _write_record_unlocked(record: dict[str, Any], *, activate: bool = True) -> None:
     store = _read_store_unlocked()
     profile_id = _profile_key(record)
     profile = {
@@ -378,7 +382,8 @@ def _write_record_unlocked(record: dict[str, Any]) -> None:
         record.get("ext_agent_host_id") or store.get("ext_agent_host_id") or ""
     )
     store.setdefault("profiles", {})[profile_id] = profile
-    store["active_profile_id"] = profile_id
+    if activate:
+        store["active_profile_id"] = profile_id
     store["schema_version"] = _CREDENTIAL_STORE_VERSION
     _write_store_unlocked(store)
 
@@ -872,10 +877,19 @@ def begin_chatgpt_login(
     return pending
 
 
-def get_chatgpt_access_token(*, force_refresh: bool = False) -> str:
+def get_chatgpt_access_token(
+    *, force_refresh: bool = False, profile_id: str | None = None
+) -> str:
     """Return a usable access token, serializing rotating-token refreshes."""
     with _credential_mutex, _credential_file_lock():
-        record = _read_record_unlocked()
+        if profile_id is None:
+            record = _read_record_unlocked()
+        else:
+            store = _read_store_unlocked()
+            profiles = store.get("profiles", {})
+            if not isinstance(profiles, dict) or profile_id not in profiles:
+                raise ChatGPTOAuthError("所選的 ChatGPT 帳號已不存在，請重新選擇帳號。")
+            record = _profile_record(store, profile_id)
         access_token = str(record.get("access_token") or "")
         refresh_token = str(record.get("refresh_token") or "")
         client_id = str(record.get("client_id") or "")
@@ -964,7 +978,12 @@ def get_chatgpt_access_token(*, force_refresh: bool = False) -> str:
                 "saved_at": int(time.time()),
             }
         )
-        _write_record_unlocked(record)
+        # Refreshing a task-pinned profile must never switch the application's
+        # active account as a side effect of saving its rotated credentials.
+        if profile_id is None:
+            _write_record_unlocked(record)
+        else:
+            _write_record_unlocked(record, activate=False)
         if not direct_scope_granted:
             raise ChatGPTOAuthError(
                 "ChatGPT 方案授權範圍已變更或無法確認；請到 API 設定重新登入後再翻譯。"
@@ -972,9 +991,10 @@ def get_chatgpt_access_token(*, force_refresh: bool = False) -> str:
         return new_access
 
 
-def list_chatgpt_models() -> list[ChatGPTModel]:
+def list_chatgpt_models(*, profile_id: str | None = None) -> list[ChatGPTModel]:
     """Fetch the signed-in account's current displayable model catalog."""
-    token = get_chatgpt_access_token()
+    token_kwargs = {"profile_id": profile_id} if profile_id is not None else {}
+    token = get_chatgpt_access_token(**token_kwargs)
     for attempt in range(2):
         try:
             response = requests.get(
@@ -988,7 +1008,7 @@ def list_chatgpt_models() -> list[ChatGPTModel]:
         except requests.RequestException as exc:
             raise ChatGPTOAuthError("無法讀取 ChatGPT 帳號可用模型。") from exc
         if response.status_code == 401 and attempt == 0:
-            token = get_chatgpt_access_token(force_refresh=True)
+            token = get_chatgpt_access_token(force_refresh=True, **token_kwargs)
             continue
         if not response.ok:
             raise ChatGPTOAuthError(

@@ -92,9 +92,13 @@ def test_call_retries_once_after_unauthorized_and_keeps_reasoning(monkeypatch):
         ok = True
 
     tokens = iter(("expired-token", "refreshed-token"))
-    monkeypatch.setattr(
-        client, "get_chatgpt_access_token", lambda **kwargs: next(tokens)
-    )
+    token_requests = []
+
+    def get_token(**kwargs):
+        token_requests.append(kwargs)
+        return next(tokens)
+
+    monkeypatch.setattr(client, "get_chatgpt_access_token", get_token)
     requests_seen = []
 
     def stream_request(**kwargs):
@@ -113,6 +117,7 @@ def test_call_retries_once_after_unauthorized_and_keeps_reasoning(monkeypatch):
             payload={"items": []},
             timeout=30,
             reasoning_effort="medium",
+            profile_id="profile-a",
         )
         == "done"
     )
@@ -121,6 +126,10 @@ def test_call_retries_once_after_unauthorized_and_keeps_reasoning(monkeypatch):
         "refreshed-token",
     ]
     assert all(request["reasoning_effort"] == "medium" for request in requests_seen)
+    assert token_requests == [
+        {"profile_id": "profile-a"},
+        {"force_refresh": True, "profile_id": "profile-a"},
+    ]
 
 
 def test_consume_stream_returns_structured_output_and_usage():

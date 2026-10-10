@@ -1171,6 +1171,8 @@ def test_chatgpt_settings_save_without_gemini_key_validation():
     view.collect_chatgpt_model_settings = MagicMock(
         return_value={"gpt-5-codex": {"max_input_token_budget": 18000}}
     )
+    view._chatgpt_model_catalog_valid = True
+    view._chatgpt_model_catalog_profile_id = "profile-a"
     saved = {}
 
     result = save_config_from_view(
@@ -1185,6 +1187,7 @@ def test_chatgpt_settings_save_without_gemini_key_validation():
     assert result is True
     assert saved["lm_translator"]["provider"] == "chatgpt"
     assert saved["lm_translator"]["chatgpt_model"] == "gpt-5-codex"
+    assert saved["lm_translator"]["chatgpt_model_profile_id"] == "profile-a"
     assert saved["lm_translator"]["chatgpt_model_settings"] == {
         "gpt-5-codex": {"max_input_token_budget": 18000}
     }
