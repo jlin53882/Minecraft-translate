@@ -8,17 +8,17 @@ def repair_summary_detail_lines(summary: dict) -> list[str]:
     lines = []
     if "ai_representatives" in summary:
         lines.append(
-            f"AI 代表計劃 {summary.get('ai_representatives', 0)}；"
-            f"實際送入引擎 {summary.get('ai_submitted_items', 0)} items"
-            "（不是 API/HTTP 次數）；"
+            f"唯一 AI 翻譯項目：預計 {summary.get('ai_representatives', 0)} 個；"
+            f"實際送入引擎 {summary.get('ai_submitted_items', 0)} 個"
+            "（不是 API 請求次數）；"
             f"驗證通過 {summary.get('ai_validated_items', 0)}；"
-            f"等價映射候選 {summary.get('dedup_mapped_candidates', 0)}；"
-            f"已共用驗證結果 {summary.get('dedup_reused_candidates', 0)}"
+            f"共用 AI 結果的來源項目 {summary.get('dedup_mapped_candidates', 0)}；"
+            f"已成功套用共用結果 {summary.get('dedup_reused_candidates', 0)}"
         )
         lines.append(
-            f"來源列進度 {summary.get('processed_candidates', 0)}/"
-            f"{summary.get('candidates', 0)}；未送出候選 "
-            f"{summary.get('not_submitted_candidates', 0)}；未處理候選 "
+            f"來源項目進度 {summary.get('processed_candidates', 0)}/"
+            f"{summary.get('candidates', 0)}；未送出的來源項目 "
+            f"{summary.get('not_submitted_candidates', 0)}；未處理的來源項目 "
             f"{summary.get('unprocessed_candidates', 0)}"
         )
     if summary.get("input_newline_mismatch_candidates") is not None:

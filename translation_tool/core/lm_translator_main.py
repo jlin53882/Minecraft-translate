@@ -1367,8 +1367,9 @@ def _attempt_batch(
             )
             api_meta: dict = {}
             log_info(
-                f"[→] 嘗試模型 {model_name} | Batch={len(round_data.current_batch)}"
-                f"/{runtime.batch_size} | 翻譯總量={runtime.original_total}"
+                f"[→] 送出至模型 {model_name}｜"
+                f"本批 {len(round_data.current_batch)} 個（每批上限 {runtime.batch_size}）｜"
+                f"本次唯一 AI 翻譯項目共 {runtime.original_total} 個"
             )
             with quota.hold_probe_lease(model_name, owner, lease_sec):
                 api_key = (

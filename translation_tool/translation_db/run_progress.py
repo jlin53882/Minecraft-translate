@@ -152,15 +152,17 @@ def format_live(live: dict) -> str:
             values["ai_submitted_items"] for values in profile_progress.values()
         )
         parts.append(
-            f"AI 代表已送 {representative_submitted:,}/{representative_total:,} 筆"
+            f"唯一 AI 項目已送出 {representative_submitted:,}/"
+            f"{representative_total:,} 個"
         )
         for values in profile_progress.values():
             parts.append(
-                f"{values['label']} 候選 {values['processed_candidates']:,}/"
-                f"{values['total_candidates']:,}；代表 {values['ai_submitted_items']:,}/"
-                f"{values['ai_representatives']:,}；外層批次已完成 "
-                f"{values['completed_batches']:,}、目前規劃待處理 "
-                f"{values['planned_remaining_batches']:,}"
+                f"{values['label']} 來源項目 "
+                f"{values['processed_candidates']:,}/{values['total_candidates']:,}；"
+                f"唯一 AI 項目 {values['ai_submitted_items']:,}/"
+                f"{values['ai_representatives']:,}；API 批次已完成 "
+                f"{values['completed_batches']:,}，預計剩餘 "
+                f"{values['planned_remaining_batches']:,} 批"
             )
     if live.get("finish_ts"):
         # 顯示本機時間：先以 UTC 建立再轉成本機時區

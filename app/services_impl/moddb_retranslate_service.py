@@ -347,9 +347,9 @@ class _RepairRunProgress:
         counts = _cache_type_counts(items)
         planned = sum(self._planned_batches_by_profile.values())
         return (
-            f"📦 AI 代表 {len(items):,} 筆；依目前 profile／token 預算預估 "
-            f"{planned:,} 個外層批次（{_format_profile_breakdown(counts)}；"
-            "候選進度以來源列計，內部 LM 重試不計外層批次）"
+            f"📦 唯一 AI 翻譯項目 {len(items):,} 個；依目前每批 token 上限，"
+            f"預估分成 {planned:,} 個 API 批次（{_format_profile_breakdown(counts)}；"
+            "進度以全部來源項目計算，模型內部重試不會增加 API 批次數）"
         )
 
     def line(self, live: dict[str, Any]) -> str:
@@ -1310,14 +1310,13 @@ def _finish_snapshot(db, options, session, report, tracker) -> None:
     level = "warning" if report.failed or report.flagged else "info"
     _log(
         session,
-        f"完成：候選 {report.candidates}；AI 代表計劃 {report.ai_representatives}，"
-        f"送出候選 {report.attempted_candidates}，已完成候選 {report.processed_candidates}；"
-        f"交給 translate_batch_smart {report.ai_submitted_items} 個 item "
-        f"（不是 API/HTTP 次數），已驗證 {report.ai_validated_items}，"
-        f"安全共用 {report.dedup_reused_candidates}；更新 {report.updated}，"
+        f"完成：來源項目 {report.candidates}；唯一 AI 翻譯項目 {report.ai_representatives}，"
+        f"送出來源項目 {report.attempted_candidates}，已完成來源項目 {report.processed_candidates}；"
+        f"實際送給 AI {report.ai_submitted_items} 個唯一項目（不是 API 請求次數），"
+        f"已驗證 {report.ai_validated_items}，共用 AI 結果 {report.dedup_reused_candidates}；更新 {report.updated}，"
         f"仍相同 {report.unchanged}，格式檢查未通過 {report.flagged}，"
         f"資料已變動跳過 {report.skipped_changed}，失敗 {report.failed}，"
-        f"未處理 {report.unprocessed_candidates}，未送出候選 {report.not_submitted_candidates}，"
+        f"未處理來源項目 {report.unprocessed_candidates}，未送出來源項目 {report.not_submitted_candidates}，"
         f"範圍內仍符合修復條件 {report.remaining}；快取 key 變更 "
         f"{report.cache_keys_changed if report.cache_keys_changed is not None else '未知'}，"
         f"成功落盤 "
@@ -1604,24 +1603,29 @@ def _initialize_snapshot_run(entries, session, report, options):
     _log(
         session,
         (
-            f"🔎 各來源特殊字元不一致候選 {total:,} 筆"
+            f"🔎 待修復的來源項目：{total:,} 個"
             if report.mode == "quality_mismatch"
-            else f"🔎 舊 AI 機翻修復候選 {total:,} 筆；來源：{source_label(SRC_AI)}"
+            else f"🔎 待重新翻譯的來源項目：{total:,} 個；來源：{source_label(SRC_AI)}"
         )
-        + f"；候選 {total:,}，AI 代表 {len(items):,}，"
-        f"等價映射 {report.dedup_mapped_candidates:,}，"
-        f"{_format_profile_breakdown(_cache_type_counts(candidates))}；"
-        "略過舊快取直接重新翻譯",
+        + (
+            "（原文與譯文的換行、格式碼或其他特殊標記不一致）"
+            if report.mode == "quality_mismatch"
+            else ""
+        )
+        + f"；其中 {len(items):,} 個是唯一 AI 翻譯項目，"
+        f"{report.dedup_mapped_candidates:,} 個來源項目會共用相同翻譯結果；"
+        f"來源分布：{_format_profile_breakdown(_cache_type_counts(candidates))}；"
+        "本次略過舊快取，會重新呼叫 AI",
     )
     _log(
         session,
-        "🔁 開始修復"
+        "🔁 開始處理："
         + (
-            "各來源特殊字元不一致譯文"
+            "修復特殊字元或格式不一致的譯文"
             if report.mode == "quality_mismatch"
-            else "舊 AI 同原文譯文"
+            else "重新翻譯舊 AI 與原文相同的項目"
         )
-        + f"：{total:,} 候選，{len(items):,} 個 AI 代表",
+        + f"；共 {total:,} 個來源項目，實際送給 AI {len(items):,} 個唯一項目",
     )
     _log(session, tracker.start_line(items))
     if not options.write_cache:
@@ -1761,7 +1765,10 @@ def _run_repair_candidates(db, options, session, entries, report, mode, cancelle
         session.set_summary(report.as_dict())
         return
 
-    _log(session, f"🔎 找到 {len(entries):,} 筆預覽候選，準備直接送 AI（略過舊快取）")
+    _log(
+        session,
+        f"🔎 找到 {len(entries):,} 個待處理來源項目；本次略過舊快取，會直接重新呼叫 AI",
+    )
     with cancel_scope(cancelled):
         _translate_snapshot(db, options, session, entries, report, cancelled)
 

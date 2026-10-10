@@ -248,15 +248,15 @@ def _display_preview_result(panel, options, db_identity, result):
     )
     catalog = source_catalog_for(panel._get_db())
     ai_plan = (
-        f"AI 代表 {format_count(result.ai_representatives)} 筆；"
-        f"預計共用 {format_count(result.dedup_reused_candidates)} 筆候選；"
+        f"唯一 AI 翻譯項目 {format_count(result.ai_representatives)} 筆；"
+        f"預計共用結果給 {format_count(result.dedup_reused_candidates)} 個來源項目；"
     )
     representative_breakdown = (
         "、".join(
-            f"{cache_profile_label(cache_type)}：{format_count(count)} 筆代表"
+            f"{cache_profile_label(cache_type)}：{format_count(count)} 個唯一 AI 項目"
             for cache_type, count in result.representative_profile_counts
         )
-        or "無代表項目"
+        or "無唯一 AI 項目"
     )
     if result.mode == "quality_mismatch":
         sources = "、".join(source_label(source, catalog) for source in result.sources)
@@ -264,12 +264,12 @@ def _display_preview_result(panel, options, db_identity, result):
             f"全範圍修復合格來源列 {format_count(result.total_candidates)} 筆；"
             f"候選中有 {format_count(result.input_newline_mismatch_candidates)} 筆輸入換行數不同"
             f"（其中另有硬格式問題 {format_count(result.input_newline_mismatch_with_other_hard_issues)} 筆）。\n"
-            f"本次 AI 代表上限：{cap}；選中 {format_count(result.ai_representatives)} 個代表，"
+            f"本次唯一 AI 項目上限：{cap}；選中 {format_count(result.ai_representatives)} 個，"
             f"對應 {format_count(selected)} 個來源列。來源：{sources or '無'}。\n"
             "只更新預覽中的來源列；AI 輸出實體換行數可不同，其他格式 token 仍須一致。\n"
-            f"等價映射 {format_count(result.dedup_reused_candidates)} 筆；"
-            f"翻譯 profile：{breakdown}；{representative_breakdown}；"
-            f"目前預估：約 {format_count(result.estimated_batches)} 個外層批次。"
+            f"會共用 AI 結果的來源項目 {format_count(result.dedup_reused_candidates)} 筆；"
+            f"翻譯類型分布：{breakdown}；{representative_breakdown}；"
+            f"目前預估：約 {format_count(result.estimated_batches)} 個 API 批次。"
         )
     else:
         panel.repair_preview_text.value = (
@@ -277,8 +277,8 @@ def _display_preview_result(panel, options, db_identity, result):
             f"本次將重翻 {format_count(selected)} 筆。\n"
             f"來源：{source_label(result.source, catalog)}；只處理目前生效來源為 AI 且譯文等於原文的項目；"
             "人工、模組自帶及其他來源不會被重新翻譯。\n"
-            f"{ai_plan}翻譯 profile：{breakdown}；{representative_breakdown}；"
-            f"目前預估：約 {format_count(result.estimated_batches)} 個外層批次。"
+            f"{ai_plan}翻譯類型分布：{breakdown}；{representative_breakdown}；"
+            f"目前預估：約 {format_count(result.estimated_batches)} 個 API 批次。"
         )
     panel.repair_samples.controls = [
         ft.Text(
@@ -322,7 +322,7 @@ def confirm(panel, _e=None) -> None:
             ),
             content=ft.Text(
                 (
-                    f"即將修復 {selected.ai_representatives:,} 個 AI 代表，最多對應 "
+                    f"即將送出 {selected.ai_representatives:,} 個唯一 AI 翻譯項目，最多對應 "
                     f"{selected.selected_count:,} 筆來源譯文；去重共用可能更新超過代表上限的來源列。"
                     "保留各筆原有來源標記；若 AI 輸出缺少受保護格式 token 或翻譯失敗，舊譯文會保留。"
                     "人工來源修復後會改為未審核。匯入 ZIP 檔案不會被修改。"

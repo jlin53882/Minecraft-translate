@@ -158,6 +158,12 @@ class TranslatePanel(ft.Column):
             page=self._page, mode="tail", tail_lines=ui_cfg.get("tail_lines", 250)
         )
         self.log_view.height = 200
+        self.log_explainer = kit.hint_text(
+            "執行紀錄說明：來源項目＝資料庫中需要處理的譯文；"
+            "唯一 AI 翻譯項目＝翻譯條件相同時只送一份 AI 工作（失敗時仍可能重試）；"
+            "API 批次＝依模型 token 上限分組送出的請求；"
+            "略過舊快取＝不沿用先前 AI 結果，會重新呼叫 AI。"
+        )
         self.start_btn = kit.button(
             "開始機翻", "primary", icon=ft.Icons.PLAY_ARROW, on_click=self.start_clicked
         )
@@ -230,6 +236,7 @@ class TranslatePanel(ft.Column):
                     self.progress_bar,
                     self.live_text,
                     self.log_view,
+                    self.log_explainer,
                     ft.Row(list(self._stat_cards), spacing=10),
                 ],
                 spacing=12,

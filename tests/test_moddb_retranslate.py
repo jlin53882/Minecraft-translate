@@ -649,11 +649,11 @@ def test_repair_batches_group_profiles_and_preview_reports_breakdown(
     assert snap["summary"]["batches"] == 2
     assert snap["summary"]["updated"] == 66
     logs = "\n".join(entry.text for entry in snap["logs"])
-    assert "舊 AI 機翻修復候選 66 筆" in logs
+    assert "待重新翻譯的來源項目：66 個" in logs
     assert "來源：AI 機翻" in logs
     assert "Lang 60 筆" in logs
     assert "Patchouli 6 筆" in logs
-    assert "略過舊快取直接重新翻譯" in logs
+    assert "本次略過舊快取，會重新呼叫 AI" in logs
     assert repair_cache == []
 
 
@@ -2224,9 +2224,9 @@ def test_retranslation_preview_shows_ai_source_profiles_and_samples(
     assert "人工、模組自帶及其他來源不會被重新翻譯" in text
     assert "Lang：1 筆" in text
     assert "Patchouli：1 筆" in text
-    assert "AI 代表 2 筆" in text
-    assert "預計共用 0 筆候選" in text
-    assert "目前預估：約 2 個外層批次" in text
+    assert "唯一 AI 翻譯項目 2 筆" in text
+    assert "預計共用結果給 0 個來源項目" in text
+    assert "目前預估：約 2 個 API 批次" in text
     samples = [control.value for control in panel.repair_samples.controls]
     assert any("[Lang] [AI 機翻]" in sample for sample in samples)
     assert any("[Patchouli] [AI 機翻]" in sample for sample in samples)
