@@ -7,6 +7,7 @@ import asyncio
 import flet as ft
 
 from app.services_impl import moddb_repair_review_store
+from app.services_impl.moddb_format_diff_service import compare_format_diff
 from app.services_impl.moddb_retranslate_service import (
     apply_and_record_repair_review,
     repair_output_issues,
@@ -15,6 +16,7 @@ from app.ui import design
 from app.ui.design import C
 from app.ui.snack import show_snack
 from app.ui.sync_text_field import SyncTextField
+from app.views.moddb.format_diff_viewer import FormatDiffViewer
 from app.views.moddb.formatting import format_count
 
 
@@ -34,6 +36,7 @@ class RepairReviewer:
         self.item: dict | None = None
         self.draft: ft.TextField | None = None
         self.format_status = ft.Text("", size=12, color=C.MUTED)
+        self.format_diff_viewer = FormatDiffViewer(switch_label="顯示格式差異")
         self.status = ft.Text("", size=13, weight=ft.FontWeight.BOLD, color=C.MUTED)
         self.applying = False
         self.previous_button = ft.OutlinedButton(
@@ -250,6 +253,7 @@ class RepairReviewer:
                         color=C.MUTED,
                     ),
                     self.format_status,
+                    self.format_diff_viewer.control,
                 ],
                 spacing=10,
             ),
@@ -351,13 +355,16 @@ class RepairReviewer:
         return status_filter
 
     def _update_format_status(self, source: str, draft: str) -> None:
-        issues = repair_output_issues(source, draft)
-        if issues:
-            self.format_status.value = "格式檢查：" + "；".join(issues)
+        diff_result = compare_format_diff(source, draft)
+        if diff_result.legacy_messages:
+            self.format_status.value = "格式檢查：" + "；".join(
+                diff_result.legacy_messages
+            )
             self.format_status.color = C.GOLD
         else:
             self.format_status.value = "格式檢查通過。"
             self.format_status.color = C.EM
+        self.format_diff_viewer.render(source, draft, diff_result)
 
     def _draft_changed(self, _event=None) -> None:
         if self.applying or self.item is None or self.draft is None:

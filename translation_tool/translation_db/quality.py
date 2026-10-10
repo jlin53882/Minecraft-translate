@@ -28,7 +28,13 @@ def _macro_end(text: str, start: int) -> int | None:
     return None if first < 0 else first + 1
 
 
-def _iter_tokens(text: str):
+def _normalize_token(raw: str) -> str:
+    token = raw.replace("\r", "")
+    return _TOOLTIP_TOKEN if token.startswith(_TOOLTIP_PREFIX) else token
+
+
+def _iter_token_spans(text: str):
+    text = text or ""
     pos = 0
     while True:
         match = _SCAN_RE.search(text, pos)
@@ -39,21 +45,31 @@ def _iter_tokens(text: str):
             if end is None:
                 pos = match.end()
                 continue
-            yield text[match.start() : end]
+            yield text[match.start() : end], match.start(), end
             pos = end
         else:
-            yield match.group(0)
+            yield match.group(0), match.start(), match.end()
             pos = match.end()
+
+
+def _iter_tokens(text: str):
+    for raw, _start, _end in _iter_token_spans(text):
+        yield raw
+
+
+def format_token_spans(text: str) -> tuple[tuple[str, int, int], ...]:
+    """Return normalized format tokens with source offsets from the shared scanner."""
+    return tuple(
+        (_normalize_token(raw), start, end)
+        for raw, start, end in _iter_token_spans(text)
+    )
 
 
 def format_tokens(text: str) -> Counter[str]:
     """Count placeholders, Minecraft codes, Patchouli macros and line breaks."""
     tokens: Counter[str] = Counter()
     for raw in _iter_tokens(text or ""):
-        token = raw.replace("\r", "")
-        if token.startswith(_TOOLTIP_PREFIX):
-            token = _TOOLTIP_TOKEN
-        tokens[token] += 1
+        tokens[_normalize_token(raw)] += 1
     return tokens
 
 

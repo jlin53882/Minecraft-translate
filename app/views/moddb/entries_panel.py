@@ -12,6 +12,7 @@ import sqlite3
 
 import flet as ft
 
+from app.services_impl.moddb_format_diff_service import compare_format_diff
 from app.services_impl.moddb_service import (
     EntryDetail,
     EntryFilter,
@@ -35,7 +36,7 @@ from app.tasks.operation_registry import (
 from app.ui import design, kit
 from app.ui.design import C
 from app.ui.snack import show_snack
-from app.views.moddb.char_inspector import CharInspector, scrolling_list
+from app.views.moddb.char_inspector import scrolling_list
 from app.views.moddb.entry_filters import (
     ALL_KINDS,
     ALL_MODS,
@@ -49,10 +50,10 @@ from app.views.moddb.entry_filters import (
 )
 from app.views.moddb.entry_metadata import build_entry_metadata
 from app.views.moddb.entry_row_tile import build_entry_tile
+from app.views.moddb.format_diff_viewer import FormatDiffViewer
 from app.views.moddb.formatting import (
     format_count,
     kind_label,
-    token_issues,
     whitespace_note,
 )
 from app.views.moddb.history_renderer import render_history
@@ -218,7 +219,10 @@ class EntriesPanel(ft.Column):
             size="sm",
             on_click=lambda _e: self._copy_source(),
         )
-        self.chars = CharInspector(self._update_format_hints_and_refresh)
+        self.chars = FormatDiffViewer(
+            self._update_format_hints_and_refresh,
+            switch_label="顯示特殊字元",
+        )
         self.confirm_btn = kit.button(
             "審核（確認目前譯文）",
             "gold",
@@ -258,8 +262,7 @@ class EntriesPanel(ft.Column):
                 ft.Row([kit.section_label("譯文 zh_tw"), self.source_chip], spacing=8),
                 self.tw_field,
                 self.token_hint,
-                self.chars.row,
-                self.chars.box,
+                self.chars.control,
                 self.mc_preview.control,
                 self.meta_col,
                 self.impact_box,
@@ -685,17 +688,21 @@ class EntriesPanel(ft.Column):
         entry = self.selected
         text = self.tw_field.value or ""
         notes: list[str] = []
+        diff_result = None
         if entry is not None and entry.en_us and text.strip():
-            issues = token_issues(entry.en_us, text)
-            if issues:
-                notes.append("與原文的特殊字元不一致：" + "、".join(issues))
+            diff_result = compare_format_diff(entry.en_us, text)
+            if diff_result.legacy_messages:
+                notes.append(
+                    "與原文的特殊字元不一致："
+                    + "、".join(diff_result.legacy_messages)
+                )
         space = whitespace_note(text)
         if space:
             notes.append(space)
         self.token_hint.value = "；".join(notes)
         self.token_hint.visible = bool(notes)
         self.mc_preview.render(text)
-        self.chars.render(entry.en_us if entry else "", text)
+        self.chars.render(entry.en_us if entry else "", text, diff_result)
 
     def _update_format_hints_and_refresh(self) -> None:
         self._update_format_hints()

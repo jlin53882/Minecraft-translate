@@ -1144,6 +1144,8 @@ def test_editor_hints_for_missing_tokens_whitespace_and_color_codes(special_entr
     panel.tw_field.value = "§a哈囉§r\n世界"  # 少了 %s
     panel._on_text_change()
     assert "少了 1 個「%s」" in panel.token_hint.value
+    assert "缺少 %s × 1（位置無法可靠判定）" in panel.chars.summary.value
+    assert "多出 §a × 1（位置無法可靠判定）" in panel.chars.summary.value
     assert panel.save_btn.disabled is False
 
     panel.tw_field.value = "哈囉 %s\n世界"

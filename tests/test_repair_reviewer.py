@@ -195,6 +195,9 @@ def test_draft_box_shows_live_format_check_but_allows_human_confirmed_apply(tmp_
     assert reviewer.draft.width == 524
     assert reviewer.apply_button.disabled is False
     assert "格式檢查：少了 1 個「%s」" == reviewer.format_status.value
+    assert reviewer.format_diff_viewer.summary.value == (
+        "缺少 %s × 1（位置無法可靠判定）"
+    )
     assert all(
         "格式差異" not in str(getattr(control, "value", ""))
         for control in reviewer.body.controls
@@ -205,8 +208,10 @@ def test_draft_box_shows_live_format_check_but_allows_human_confirmed_apply(tmp_
 
     assert reviewer.apply_button.disabled is False
     assert reviewer.format_status.value == "格式檢查通過。"
+    assert reviewer.format_diff_viewer.summary.value == "格式檢查通過。"
     saved = store.load_item(path, "run-live-check", item_index)
     assert saved["draft"] == "翻譯文字 %s，保留由人工確認的內容"
+    assert "缺少" not in saved["draft"]
 
     reviewer._apply()
 
