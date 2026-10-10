@@ -2730,36 +2730,34 @@ class TranslationDB:
             if new_zh_tw == current[0]:
                 return AITranslationReplaceResult("unchanged")
 
-            repair_row = conn.execute(
-                "SELECT zh_tw, checker, review_status, revision FROM translation "
-                "WHERE entry_id=? AND source=?",
-                (entry_id, SRC_AI_REPAIR),
-            ).fetchone()
-            if repair_row is not None and repair_row[0] == new_zh_tw:
-                return AITranslationReplaceResult("unchanged")
-            if repair_row is None:
-                conn.execute(
-                    "INSERT INTO translation (entry_id, source, zh_tw) VALUES (?,?,?)",
-                    (entry_id, SRC_AI_REPAIR, new_zh_tw),
-                )
+            previous_checker, previous_review = current[2], current[3]
+            if source_id == SRC_MANUAL and action == "quality_repair":
+                new_checker, new_review = "", "unreviewed"
+            elif source_id == SRC_MANUAL and action == "quality_repair_review":
+                new_checker, new_review = actor, "reviewed"
             else:
-                updated = conn.execute(
-                    "UPDATE translation SET zh_tw=?, checker='', review_status=NULL, "
-                    "updated_at=CURRENT_TIMESTAMP WHERE entry_id=? AND source=? "
-                    "AND zh_tw=? AND revision=?",
-                    (
-                        new_zh_tw,
-                        entry_id,
-                        SRC_AI_REPAIR,
-                        repair_row[0],
-                        repair_row[3],
-                    ),
-                )
-                if updated.rowcount != 1:
-                    return AITranslationReplaceResult("skipped_changed")
+                new_checker, new_review = previous_checker, previous_review
+            updated = conn.execute(
+                "UPDATE translation SET zh_tw=?, checker=?, review_status=?, "
+                "updated_at=CURRENT_TIMESTAMP WHERE entry_id=? AND source=? "
+                "AND zh_tw=? AND revision=? AND checker IS ? AND review_status IS ?",
+                (
+                    new_zh_tw,
+                    new_checker,
+                    new_review,
+                    entry_id,
+                    source_id,
+                    current[0],
+                    current[1],
+                    previous_checker,
+                    previous_review,
+                ),
+            )
+            if updated.rowcount != 1:
+                return AITranslationReplaceResult("skipped_changed")
             new_revision = conn.execute(
                 "SELECT revision FROM translation WHERE entry_id=? AND source=?",
-                (entry_id, SRC_AI_REPAIR),
+                (entry_id, source_id),
             ).fetchone()[0]
             conn.execute(
                 "INSERT INTO history (entry_id, batch, actor, action, old_zh_tw, "
@@ -2773,14 +2771,14 @@ class TranslationDB:
                     action,
                     current[0],
                     new_zh_tw,
-                    repair_row[1] if repair_row else "",
-                    repair_row[2] if repair_row else None,
-                    "",
-                    None,
-                    repair_row[3] if repair_row else None,
+                    previous_checker or "",
+                    previous_review,
+                    new_checker or "",
+                    new_review,
+                    current[1],
                     new_revision,
-                    SRC_AI_REPAIR,
-                    repair_row[0] if repair_row else None,
+                    source_id,
+                    None,
                 ),
             )
             self._refresh(conn, [entry_id])
@@ -2917,11 +2915,6 @@ class TranslationDB:
             "e.mc_version=?",
             "e.en_us<>''",
             "t.zh_tw<>''",
-            (
-                f"(t.source={SRC_AI_REPAIR} OR NOT EXISTS ("
-                "SELECT 1 FROM translation repaired WHERE "
-                f"repaired.entry_id=t.entry_id AND repaired.source={SRC_AI_REPAIR}))"
-            ),
         ]
         params: list = [version]
         if mod_ids:
@@ -2961,11 +2954,6 @@ class TranslationDB:
             "e.mc_version=?",
             "e.en_us<>''",
             "t.zh_tw<>''",
-            (
-                f"(t.source={SRC_AI_REPAIR} OR NOT EXISTS ("
-                "SELECT 1 FROM translation repaired WHERE "
-                f"repaired.entry_id=t.entry_id AND repaired.source={SRC_AI_REPAIR}))"
-            ),
         ]
         params: list = [version]
         if mod_ids:

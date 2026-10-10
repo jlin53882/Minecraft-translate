@@ -7,7 +7,10 @@ import asyncio
 import flet as ft
 
 from app.services_impl import moddb_repair_review_store
-from app.services_impl.moddb_retranslate_service import apply_and_record_repair_review
+from app.services_impl.moddb_retranslate_service import (
+    apply_and_record_repair_review,
+    repair_output_issues,
+)
 from app.ui.design import C
 from app.ui.sync_text_field import SyncTextField
 from app.views.moddb.formatting import format_count
@@ -28,9 +31,19 @@ class RepairReviewer:
         self.position = 0
         self.item: dict | None = None
         self.draft: ft.TextField | None = None
-        self.status = ft.Text("", size=12, color=C.MUTED)
+        self.format_status = ft.Text("", size=12, color=C.MUTED)
+        self.status = ft.Text("", size=13, weight=ft.FontWeight.BOLD, color=C.MUTED)
         self.applying = False
         self.apply_button = ft.TextButton("確認套用", on_click=self._apply)
+        self.close_button = ft.TextButton("關閉", on_click=lambda _e: self._close())
+        self.action_buttons = [
+            ft.TextButton("上一筆", on_click=lambda _e: self._move(-1)),
+            ft.TextButton("下一筆", on_click=lambda _e: self._move(1)),
+            ft.TextButton("保留舊譯文", on_click=self._keep_old),
+            self.apply_button,
+            self.close_button,
+        ]
+        self.status_filter_control = None
         self.body = ft.Column([], height=500, scroll=ft.ScrollMode.AUTO)
         self.position_text = ft.Text("", size=12, color=C.MUTED)
         self.content_box = ft.Container(content=self.body, width=820, height=560)
@@ -74,15 +87,31 @@ class RepairReviewer:
         )
 
     def _actions(self):
-        return [
-            ft.TextButton("上一筆", on_click=lambda _e: self._move(-1)),
-            ft.TextButton("下一筆", on_click=lambda _e: self._move(1)),
-            ft.TextButton("保留舊譯文", on_click=self._keep_old),
-            self.apply_button,
-            ft.TextButton("關閉", on_click=lambda _e: self._close()),
-        ]
+        return self.action_buttons
 
     def _render(self) -> None:
+        if not self.item_indices:
+            counts = moddb_repair_review_store.status_counts(
+                self.store_path, self.run_id
+            )
+            total = sum(counts.values())
+            self.item = None
+            self.draft = None
+            self.position_text.value = (
+                f"待確認 {format_count(counts.get('pending', 0) + counts.get('invalid', 0))} · "
+                f"已套用 {format_count(counts.get('applied', 0))} · "
+                f"保留舊譯文 {format_count(counts.get('kept_old', 0))} · "
+                f"資料已變動 {format_count(counts.get('stale', 0))} / {total}"
+            )
+            self.status.value = "此篩選目前沒有項目。請切換審查篩選或關閉視窗。"
+            self.status.color = C.MUTED
+            self.body.controls = [
+                self.position_text,
+                self._filter_control(),
+                self.status,
+            ]
+            self.page.update()
+            return
         index = self.item_indices[self.position]
         self.item = moddb_repair_review_store.load_item(
             self.store_path, self.run_id, index
@@ -112,10 +141,32 @@ class RepairReviewer:
             height=240,
             on_change=self._draft_changed,
         )
+        self._update_format_status(
+            str(item.get("en_us") or ""), str(item.get("draft") or "")
+        )
         identity = (
             f"{item.get('version', '')} · {item.get('mod_id', '')} · "
             f"{item.get('kind', '')} · 原來源 #{item.get('source_id', '')}"
         )
+        status_filter = self._filter_control()
+        self.body.controls = [
+            self.position_text,
+            status_filter,
+            self.status,
+            ft.Text(identity, size=12, color=C.MUTED, selectable=True),
+            ft.Text(str(item.get("key") or ""), size=12.5, selectable=True),
+            ft.Text("英文原文", size=11, color=C.MUTED),
+            ft.Text(str(item.get("en_us") or ""), selectable=True),
+            ft.Text("保留中的舊譯文", size=11, color=C.MUTED),
+            ft.Text(str(item.get("old_translation") or ""), selectable=True),
+            ft.Text("未寫入的 AI 結果", size=11, color=C.MUTED),
+            ft.Text(str(item.get("ai_translation") or ""), selectable=True),
+            self.draft,
+            self.format_status,
+        ]
+        self.page.update()
+
+    def _filter_control(self):
         status_filter = ft.Dropdown(
             label="審查篩選",
             value=self.status_filter,
@@ -132,38 +183,47 @@ class RepairReviewer:
             ],
         )
         status_filter.on_select = self._change_filter
-        self.body.controls = [
-            self.position_text,
-            status_filter,
-            ft.Text(identity, size=12, color=C.MUTED, selectable=True),
-            ft.Text(str(item.get("key") or ""), size=12.5, selectable=True),
-            ft.Text("英文原文", size=11, color=C.MUTED),
-            ft.Text(str(item.get("en_us") or ""), selectable=True),
-            ft.Text("保留中的舊譯文", size=11, color=C.MUTED),
-            ft.Text(str(item.get("old_translation") or ""), selectable=True),
-            ft.Text("未寫入的 AI 結果", size=11, color=C.MUTED),
-            ft.Text(str(item.get("ai_translation") or ""), selectable=True),
-            self.draft,
-            self.status,
-        ]
-        self.page.update()
+        self.status_filter_control = status_filter
+        status_filter.disabled = self.applying
+        return status_filter
+
+    def _update_format_status(self, source: str, draft: str) -> None:
+        issues = repair_output_issues(source, draft)
+        if issues:
+            self.format_status.value = "格式檢查：" + "；".join(issues)
+            self.format_status.color = C.GOLD
+        else:
+            self.format_status.value = "格式檢查通過。"
+            self.format_status.color = C.EM
 
     def _draft_changed(self, _event=None) -> None:
+        if self.applying or self.item is None or self.draft is None:
+            return
         self._save_draft(status="pending")
+        self._update_format_status(
+            str(self.item.get("en_us") or ""), self.draft.value or ""
+        )
         self.page.update()
 
     def _show_review_status(self, status: str) -> None:
+        source_id = self.item.get("source_id", "?") if self.item else "?"
         messages = {
-            "applied": ("已套用，原來源與歷史均已保留。", C.EM),
+            "applied": (
+                f"✓ 已套用至原來源 #{source_id}；修復內容與歷史紀錄已保存。",
+                C.EM,
+            ),
             "kept_old": ("已保留舊譯文；沒有寫入翻譯資料，也沒有新增歷史。", C.EM),
             "stale": ("資料已變動；草稿保留，請重新讀取並比較。", C.GOLD),
             "invalid": ("此筆草稿待確認，可由你決定是否套用。", C.GOLD),
+            "pending": ("待審查：尚未套用。", C.MUTED),
         }
         message, color = messages.get(status, ("", C.MUTED))
         self.status.value = message
         self.status.color = color
 
     def _save_draft(self, _event=None, status=None) -> None:
+        if self.applying:
+            return
         if self.item is None or self.draft is None:
             return
         value = self.draft.value or ""
@@ -183,6 +243,8 @@ class RepairReviewer:
         )
 
     def _move(self, delta: int) -> None:
+        if self.applying or not self.item_indices:
+            return
         self._save_draft()
         target = self.position + delta
         if 0 <= target < len(self.item_indices):
@@ -203,6 +265,8 @@ class RepairReviewer:
             self._render()
 
     def _change_filter(self, event) -> None:
+        if self.applying:
+            return
         self._save_draft()
         self.status_filter = event.control.value or "all"
         self.filtered_count = moddb_repair_review_store.index_count(
@@ -214,6 +278,8 @@ class RepairReviewer:
         self._render()
 
     def _keep_old(self, _event=None) -> None:
+        if self.applying or self.item is None:
+            return
         self._save_draft(status="kept_old")
         self.status.value = "已保留舊譯文；沒有寫入翻譯資料，也沒有新增歷史。"
         self.status.color = C.EM
@@ -228,14 +294,14 @@ class RepairReviewer:
         value = self.draft.value or ""
         self.status.value = "正在重新驗證來源與 revision…"
         self.applying = True
-        self.apply_button.disabled = True
+        self._set_controls_disabled(True)
         self.page.update()
         run_task = getattr(self.page, "run_task", None)
         if callable(run_task):
             run_task(self._apply_async, dict(self.item), value)
         else:
             self.applying = False
-            self.apply_button.disabled = False
+            self._set_controls_disabled(False)
             self.status.value = "目前頁面無法啟動背景工作，草稿已保存。"
             self.page.update()
 
@@ -252,7 +318,7 @@ class RepairReviewer:
         except Exception as exc:  # noqa: BLE001 - keep the draft and show the worker failure
             if not self.closed:
                 self.applying = False
-                self.apply_button.disabled = False
+                self._set_controls_disabled(False)
                 self.status.value = f"套用失敗，草稿已保留：{exc}"
                 self.status.color = C.GOLD
                 self.page.update()
@@ -260,7 +326,7 @@ class RepairReviewer:
         if self.closed:
             return
         self.applying = False
-        self.apply_button.disabled = False
+        self._set_controls_disabled(False)
         status = "applied" if result == "applied" else "stale"
         self.status.value = (
             "已套用，原來源與歷史均已保留。"
@@ -271,6 +337,8 @@ class RepairReviewer:
         self._render()
 
     def _close(self) -> None:
+        if self.applying:
+            return
         self._save_draft()
         self.closed = True
         self.page.pop_dialog()
@@ -278,6 +346,14 @@ class RepairReviewer:
             self.on_close(
                 moddb_repair_review_store.status_counts(self.store_path, self.run_id)
             )
+
+    def _set_controls_disabled(self, disabled: bool) -> None:
+        for button in self.action_buttons:
+            button.disabled = disabled
+        if self.status_filter_control is not None:
+            self.status_filter_control.disabled = disabled
+        if self.draft is not None:
+            self.draft.read_only = disabled
 
 
 def open_repair_reviewer(page, store_path: str, run_id: str, on_close=None) -> None:

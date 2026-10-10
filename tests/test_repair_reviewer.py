@@ -49,7 +49,10 @@ def test_inspector_mounts_one_item_from_full_persisted_run(tmp_path):
 
 def test_keep_old_uses_defined_semantic_color():
     reviewer = RepairReviewer(mock_page(), "unused.db", "run-1")
+    reviewer.item = {"item_index": 1, "draft": "舊譯文"}
+    reviewer.draft = __import__("flet").TextField(value="舊譯文")
     reviewer._render = lambda: None
+    reviewer._save_draft = lambda **_kwargs: None
 
     reviewer._keep_old()
 
@@ -57,7 +60,7 @@ def test_keep_old_uses_defined_semantic_color():
     assert reviewer.status.color == C.EM
 
 
-def test_draft_box_allows_human_confirmed_apply_without_format_check(tmp_path):
+def test_draft_box_shows_live_format_check_but_allows_human_confirmed_apply(tmp_path):
     path = store.create_run(tmp_path / "review.db", "run-live-check")
     item_index = store.append_item(
         path,
@@ -81,23 +84,26 @@ def test_draft_box_allows_human_confirmed_apply_without_format_check(tmp_path):
 
     assert reviewer.draft.height == 240
     assert reviewer.apply_button.disabled is False
+    assert "格式檢查：少了 1 個「%s」" == reviewer.format_status.value
     assert all(
         "格式差異" not in str(getattr(control, "value", ""))
         for control in reviewer.body.controls
     )
 
-    reviewer.draft.value = "翻譯文字，保留由人工確認的內容"
+    reviewer.draft.value = "翻譯文字 %s，保留由人工確認的內容"
     reviewer._draft_changed()
 
     assert reviewer.apply_button.disabled is False
+    assert reviewer.format_status.value == "格式檢查通過。"
     saved = store.load_item(path, "run-live-check", item_index)
-    assert saved["draft"] == "翻譯文字，保留由人工確認的內容"
+    assert saved["draft"] == "翻譯文字 %s，保留由人工確認的內容"
 
     reviewer._apply()
 
     assert page._tasks
     assert reviewer.status.value == "正在重新驗證來源與 revision…"
     assert reviewer.apply_button.disabled is True
+    assert reviewer.close_button.disabled is True
 
 
 def test_close_preserves_applied_status_and_reports_current_counts(tmp_path):
@@ -127,6 +133,8 @@ def test_close_preserves_applied_status_and_reports_current_counts(tmp_path):
 
     store.save_review_state(path, "run-applied", item_index, "applied", "使用 %s")
     reviewer._render()  # mirror the refresh after a successful apply
+    assert reviewer.status.value.startswith("✓ 已套用至原來源 #0")
+    assert reviewer.body.controls[2] is reviewer.status
     reviewer._close()
 
     assert store.status_counts(path, "run-applied") == {"applied": 1}
@@ -190,9 +198,109 @@ def test_switching_review_item_replaces_the_previous_status_message(tmp_path):
     reviewer.status.value = "上一筆的套用成功訊息"
     reviewer._move(1)
 
-    assert reviewer.status.value == ""
+    assert reviewer.status.value == "待審查：尚未套用。"
     assert reviewer.draft.value == "草稿"
     assert all(
         "格式差異" not in str(getattr(control, "value", ""))
         for control in reviewer.body.controls
     )
+
+
+def test_empty_filter_shows_empty_state_and_can_switch_back(tmp_path):
+    path = store.create_run(tmp_path / "review-empty-filter.db", "run-empty-filter")
+    store.append_item(
+        path,
+        "run-empty-filter",
+        {
+            "key": "repair.pending",
+            "version": "1.21.1",
+            "mod_id": "foo",
+            "kind": "lang",
+            "source_id": 0,
+            "en_us": "Use %s",
+            "old_translation": "使用",
+            "ai_translation": "使用 %s",
+        },
+    )
+    page = mock_page()
+    reviewer = RepairReviewer(page, str(path), "run-empty-filter")
+    reviewer.open()
+
+    reviewer._change_filter(
+        type("Event", (), {"control": type("Control", (), {"value": "applied"})()})()
+    )
+
+    assert reviewer.item_indices == []
+    assert reviewer.item is None
+    assert "沒有項目" in reviewer.status.value
+    assert len(reviewer.body.controls) == 3
+
+    reviewer._change_filter(
+        type("Event", (), {"control": type("Control", (), {"value": "pending"})()})()
+    )
+
+    assert reviewer.item is not None
+    assert reviewer.item["key"] == "repair.pending"
+
+
+def test_close_during_apply_does_not_overwrite_background_applied_state(
+    tmp_path, monkeypatch
+):
+    import asyncio
+    import threading
+
+    from app.views.moddb import repair_reviewer as reviewer_module
+
+    path = store.create_run(tmp_path / "review-close-race.db", "run-close-race")
+    item_index = store.append_item(
+        path,
+        "run-close-race",
+        {
+            "key": "repair.race",
+            "version": "1.21.1",
+            "mod_id": "foo",
+            "kind": "lang",
+            "source_id": 0,
+            "en_us": "Use %s",
+            "old_translation": "使用",
+            "ai_translation": "使用 %s",
+            "draft": "使用 %s",
+        },
+    )
+    entered = threading.Event()
+    release = threading.Event()
+
+    def apply_then_save(*args):
+        entered.set()
+        assert release.wait(timeout=5)
+        store.save_review_state(
+            path, "run-close-race", item_index, "applied", "使用 %s"
+        )
+        return "applied"
+
+    monkeypatch.setattr(
+        reviewer_module, "apply_and_record_repair_review", apply_then_save
+    )
+    page = mock_page()
+    reviewer = RepairReviewer(page, str(path), "run-close-race")
+    reviewer.open()
+    reviewer._apply()
+
+    async def scenario():
+        task_coro, args = page._tasks.pop()
+        task = asyncio.create_task(task_coro(*args))
+        assert await asyncio.to_thread(entered.wait, 5)
+        reviewer._close()
+        assert not reviewer.closed
+        release.set()
+        await task
+
+    asyncio.run(scenario())
+
+    assert (
+        store.load_item(path, "run-close-race", item_index)["review_status"]
+        == "applied"
+    )
+    assert reviewer.applying is False
+    reviewer._close()
+    assert reviewer.closed
