@@ -61,6 +61,22 @@ OVERLOAD_RETRY_WAIT_SEC = 12  # Overload 重試等待秒數
 OVERLOAD_KEY_SWITCH_THRESHOLD = 3
 CHATGPT_MAX_RETRIES = 3
 CHATGPT_MAX_RETRY_AFTER_SEC = 120
+CHATGPT_TRANSIENT_USAGE_ERROR_CODES = frozenset(
+    {
+        "subscription_sharing_usage_unavailable",
+        "subscription_sharing_user_unavailable",
+    }
+)
+CHATGPT_PERMANENT_QUOTA_ERROR_CODES = frozenset(
+    {
+        "credit_balance_exhausted",
+        "insufficient_quota",
+        "usage_limit",
+        "spend_limit",
+        "quota_exceeded",
+        "subscription_sharing_usage_limit_exceeded",
+    }
+)
 
 # =========================================================
 # Size Constants - 大小相關常數
@@ -636,25 +652,22 @@ def _chatgpt_api_error_message(error) -> str:
 
 def _is_chatgpt_quota_exhaustion(error) -> bool:
     """Return whether a machine-readable API code signals a permanent quota limit."""
-    permanent_codes = {
-        "credit_balance_exhausted",
-        "insufficient_quota",
-        "usage_limit",
-        "spend_limit",
-        "quota_exceeded",
-        "subscription_sharing_usage_limit_exceeded",
-    }
     code = str(error.code or "").strip().lower()
     error_type = str(error.error_type or "").strip().lower()
-    return code in permanent_codes or error_type in permanent_codes
+    return (
+        code in CHATGPT_PERMANENT_QUOTA_ERROR_CODES
+        or error_type in CHATGPT_PERMANENT_QUOTA_ERROR_CODES
+    )
 
 
 def _chatgpt_retryable_error(error) -> bool:
     """Recognize transient Responses errors without retrying billing failures."""
     if _is_chatgpt_quota_exhaustion(error):
         return False
-    code = str(error.code or "").lower()
+    code = str(error.code or "").strip().lower()
     error_type = str(error.error_type or "").lower()
+    if code in CHATGPT_TRANSIENT_USAGE_ERROR_CODES:
+        return True
     if error.status == 429:
         # A 429 is retryable throttling unless its machine-readable code above
         # identified a terminal plan or billing limit.

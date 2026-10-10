@@ -195,7 +195,10 @@ def _consume_stream(response: requests.Response, meta_out: dict | None) -> str:
                 str(error.get("message") or ""),
                 error_type=str(error.get("type") or ""),
                 param=str(error.get("param") or ""),
-                request_id=str(payload.get("request_id") or ""),
+                request_id=str(
+                    payload.get("request_id")
+                    or response.headers.get("x-request-id", "")
+                ),
             )
         elif event_type == "response.failed":
             failed = payload.get("response", {})

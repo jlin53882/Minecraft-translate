@@ -11,9 +11,11 @@ from translation_tool.core import openai_codex_client as client
 
 
 class _FakeStreamResponse:
-    def __init__(self, events):
+    def __init__(self, events, *, status_code=200, headers=None):
         self.events = events
-        self.headers = {}
+        self.status_code = status_code
+        self.ok = status_code < 400
+        self.headers = headers or {}
         self.closed = False
 
     def iter_lines(self, decode_unicode=True):
@@ -197,6 +199,475 @@ def test_consume_stream_detects_structured_output_refusal():
 
     assert "cannot be translated" in str(exc_info.value)
     assert response.closed is True
+    from types import SimpleNamespace
+
+    from translation_tool.core import lm_translator_main as main
+
+    with pytest.raises(RuntimeError, match="拒絕處理"):
+        main._handle_batch_error(
+            SimpleNamespace(chatgpt_retry_count=0), exc_info.value, 0
+        )
+
+
+def test_response_incomplete_keeps_shrink_batch_action(monkeypatch):
+    from types import SimpleNamespace
+
+    from translation_tool.core import lm_translator_main as main
+
+    response = _FakeStreamResponse(
+        [
+            {
+                "type": "response.incomplete",
+                "response": {
+                    "status": "incomplete",
+                    "incomplete_details": {"reason": "max_output_tokens"},
+                },
+            }
+        ]
+    )
+    waits = []
+    monkeypatch.setattr(main, "interruptible_sleep", waits.append)
+    with pytest.raises(client.ChatGPTAPIError) as exc_info:
+        client._consume_stream(response, None)
+
+    assert exc_info.value.code == "incomplete"
+    assert (
+        main._handle_batch_error(
+            SimpleNamespace(chatgpt_retry_count=0), exc_info.value, 0
+        )
+        is main.BatchAction.SHRINK_BATCH
+    )
+    assert response.closed is True
+    assert waits == []
+
+
+@pytest.mark.parametrize(
+    ("event", "code"),
+    [
+        ("response.failed", "subscription_sharing_usage_unavailable"),
+        ("response.failed", "subscription_sharing_user_unavailable"),
+        ("error", "subscription_sharing_usage_unavailable"),
+        ("error", "subscription_sharing_user_unavailable"),
+    ],
+)
+def test_sse_temporary_usage_errors_reach_bounded_batch_retry(monkeypatch, event, code):
+    from types import SimpleNamespace
+
+    from translation_tool.core import lm_translator_main as main
+
+    error_data = {
+        "code": code,
+        "message": "Usage availability is temporarily unavailable.",
+    }
+    if event == "response.failed":
+        event_payload = {
+            "type": event,
+            "response": {"id": "resp_test", "status": "failed", "error": error_data},
+        }
+    else:
+        event_payload = {"type": event, "error": error_data}
+    response = _FakeStreamResponse([event_payload])
+    response.headers["x-request-id"] = "req_sse_retry"
+    waits = []
+    monkeypatch.setattr(main, "interruptible_sleep", waits.append)
+    monkeypatch.setattr(main.random, "uniform", lambda _low, _high: 0)
+
+    with pytest.raises(client.ChatGPTAPIError) as exc_info:
+        client._consume_stream(response, None)
+
+    error = exc_info.value
+    assert error.code == code
+    assert error.status is None
+    assert error.error_type == ""
+    assert error.request_id == "req_sse_retry"
+    assert response.closed is True
+    runtime = SimpleNamespace(chatgpt_retry_count=0)
+    assert main._handle_batch_error(runtime, error, 0) is (
+        main.BatchAction.RETRY_SAME_MODEL
+    )
+    assert runtime.chatgpt_retry_count == 1
+    assert waits == [1]
+
+
+@pytest.mark.parametrize(
+    "code",
+    [
+        "subscription_sharing_usage_limit_exceeded",
+        "insufficient_quota",
+        "credit_balance_exhausted",
+    ],
+)
+def test_sse_permanent_quota_errors_never_retry(monkeypatch, code):
+    from types import SimpleNamespace
+
+    from translation_tool.core import lm_translator_main as main
+
+    response = _FakeStreamResponse(
+        [
+            {
+                "type": "response.failed",
+                "response": {
+                    "id": "resp_quota",
+                    "status": "failed",
+                    "error": {"code": code, "message": "Quota exhausted."},
+                },
+            }
+        ]
+    )
+    waits = []
+    monkeypatch.setattr(main, "interruptible_sleep", waits.append)
+    meta = {}
+    with pytest.raises(client.ChatGPTAPIError) as exc_info:
+        client._consume_stream(response, meta)
+
+    runtime = SimpleNamespace(chatgpt_retry_count=0)
+    with pytest.raises(RuntimeError):
+        main._handle_batch_error(runtime, exc_info.value, 0)
+    assert exc_info.value.status is None
+    assert exc_info.value.code == code
+    assert runtime.chatgpt_retry_count == 0
+    assert waits == []
+    assert response.closed is True
+    assert meta == {}
+
+
+def test_unknown_sse_failure_does_not_retry_based_on_message_text(monkeypatch):
+    from types import SimpleNamespace
+
+    from translation_tool.core import lm_translator_main as main
+
+    response = _FakeStreamResponse(
+        [
+            {
+                "type": "response.failed",
+                "response": {
+                    "status": "failed",
+                    "error": {
+                        "code": "unrecognized_backend_failure",
+                        "message": "subscription_sharing_usage_unavailable",
+                    },
+                },
+            }
+        ]
+    )
+    waits = []
+    monkeypatch.setattr(main, "interruptible_sleep", waits.append)
+    with pytest.raises(client.ChatGPTAPIError) as exc_info:
+        client._consume_stream(response, None)
+
+    with pytest.raises(RuntimeError):
+        main._handle_batch_error(
+            SimpleNamespace(chatgpt_retry_count=0), exc_info.value, 0
+        )
+    assert response.closed is True
+    assert waits == []
+
+
+def test_sse_partial_delta_is_discarded_and_response_is_closed(monkeypatch):
+    from types import SimpleNamespace
+
+    from translation_tool.core import lm_translator_main as main
+
+    response = _FakeStreamResponse(
+        [
+            {"type": "response.output_text.delta", "delta": '{"items":[{"id":"0",'},
+            {
+                "type": "response.failed",
+                "response": {
+                    "status": "failed",
+                    "error": {
+                        "code": "subscription_sharing_usage_unavailable",
+                        "message": "Usage is temporarily unavailable.",
+                    },
+                },
+            },
+        ]
+    )
+    meta = {}
+    waits = []
+    monkeypatch.setattr(main, "interruptible_sleep", waits.append)
+    monkeypatch.setattr(main.random, "uniform", lambda _low, _high: 0)
+    with pytest.raises(client.ChatGPTAPIError) as exc_info:
+        client._consume_stream(response, meta)
+
+    assert response.closed is True
+    assert meta == {}
+    assert (
+        main._handle_batch_error(
+            SimpleNamespace(chatgpt_retry_count=0), exc_info.value, 0
+        )
+        is main.BatchAction.RETRY_SAME_MODEL
+    )
+    assert waits == [1]
+
+
+def test_sse_temporary_failure_retry_is_bounded(monkeypatch):
+    from types import SimpleNamespace
+
+    from translation_tool.core import lm_translator_main as main
+
+    runtime = SimpleNamespace(chatgpt_retry_count=0)
+    responses = []
+    waits = []
+    monkeypatch.setattr(main, "interruptible_sleep", waits.append)
+    monkeypatch.setattr(main.random, "uniform", lambda _low, _high: 0)
+    for _ in range(main.CHATGPT_MAX_RETRIES):
+        response = _FakeStreamResponse(
+            [
+                {
+                    "type": "response.failed",
+                    "response": {
+                        "status": "failed",
+                        "error": {
+                            "code": "subscription_sharing_user_unavailable",
+                            "message": "Usage is temporarily unavailable.",
+                        },
+                    },
+                }
+            ]
+        )
+        responses.append(response)
+        with pytest.raises(client.ChatGPTAPIError) as exc_info:
+            client._consume_stream(response, None)
+        assert main._handle_batch_error(runtime, exc_info.value, 0) is (
+            main.BatchAction.RETRY_SAME_MODEL
+        )
+
+    final_response = _FakeStreamResponse(
+        [
+            {
+                "type": "response.failed",
+                "response": {
+                    "status": "failed",
+                    "error": {
+                        "code": "subscription_sharing_user_unavailable",
+                        "message": "Usage is temporarily unavailable.",
+                    },
+                },
+            }
+        ]
+    )
+    responses.append(final_response)
+    with pytest.raises(client.ChatGPTAPIError) as exc_info:
+        client._consume_stream(final_response, None)
+    with pytest.raises(RuntimeError, match="重試上限"):
+        main._handle_batch_error(runtime, exc_info.value, 0)
+
+    assert runtime.chatgpt_retry_count == main.CHATGPT_MAX_RETRIES
+    assert len(waits) == main.CHATGPT_MAX_RETRIES
+    assert all(response.closed for response in responses)
+
+
+def test_sse_retry_wait_cancellation_bubbles_out(monkeypatch):
+    from types import SimpleNamespace
+
+    from translation_tool.core import lm_translator_main as main
+    from translation_tool.utils.cancellation import TaskCancelled
+
+    response = _FakeStreamResponse(
+        [
+            {
+                "type": "error",
+                "error": {
+                    "code": "subscription_sharing_user_unavailable",
+                    "message": "Usage is temporarily unavailable.",
+                },
+            }
+        ]
+    )
+    with pytest.raises(client.ChatGPTAPIError) as exc_info:
+        client._consume_stream(response, None)
+
+    def cancel_wait(_seconds):
+        raise TaskCancelled("cancelled during SSE retry wait")
+
+    monkeypatch.setattr(main, "interruptible_sleep", cancel_wait)
+    with pytest.raises(TaskCancelled):
+        main._handle_batch_error(
+            SimpleNamespace(chatgpt_retry_count=0), exc_info.value, 0
+        )
+    assert response.closed is True
+
+
+def test_sse_retry_wait_cancellation_stops_the_batch_before_another_request(
+    monkeypatch,
+):
+    from translation_tool.core import lm_translator_main as main
+    from translation_tool.utils.cancellation import TaskCancelled
+
+    response = _FakeStreamResponse(
+        [
+            {
+                "type": "response.failed",
+                "response": {
+                    "status": "failed",
+                    "error": {
+                        "code": "subscription_sharing_usage_unavailable",
+                        "message": "Usage is temporarily unavailable.",
+                    },
+                },
+            }
+        ]
+    )
+    request_calls = []
+    monkeypatch.setattr(
+        main,
+        "load_config",
+        lambda: {
+            "lm_translator": {
+                "provider": "chatgpt",
+                "chatgpt_model": "gpt-sse-cancel-test",
+                "chatgpt_model_profile_id": "profile-a",
+                "max_input_token_budget": 60000,
+                "initial_batch_size_lang": 1,
+                "retry_same_as_source": False,
+                "rpm_cooldown_sec": 0,
+                "request_interval_sec": 0,
+            }
+        },
+    )
+    monkeypatch.setattr(
+        main, "chatgpt_account_status", lambda: {"active_profile_id": "profile-a"}
+    )
+
+    def call_chatgpt(**kwargs):
+        request_calls.append(kwargs)
+        return client._consume_stream(response, kwargs["meta_out"])
+
+    def cancel_wait(_seconds):
+        raise TaskCancelled("cancelled during SSE retry wait")
+
+    monkeypatch.setattr(main, "call_gemini_requests", call_chatgpt)
+    monkeypatch.setattr(main, "interruptible_sleep", cancel_wait)
+    items = [
+        {
+            "id": "line-1",
+            "text": "Hello",
+            "file": "lang/en_us.json",
+            "path": "lang/en_us.json",
+        }
+    ]
+    runtime = main._build_batch_runtime(items, 1)
+    assert runtime is not None
+    round_data = main._prepare_batch(runtime)
+
+    with pytest.raises(TaskCancelled):
+        main._attempt_batch(runtime, round_data)
+
+    assert len(request_calls) == 1
+    assert response.closed is True
+    assert runtime.all_results == []
+
+
+def test_sse_retry_then_success_uses_same_batch_and_pinned_profile(monkeypatch):
+    from translation_tool.core import lm_translator_main as main
+
+    active_profile = {"id": "profile-a"}
+    token_requests = []
+    posts = []
+    responses = [
+        _FakeStreamResponse(
+            [
+                {"type": "response.output_text.delta", "delta": "partial output"},
+                {
+                    "type": "response.failed",
+                    "response": {
+                        "status": "failed",
+                        "error": {
+                            "code": "subscription_sharing_usage_unavailable",
+                            "message": "Usage is temporarily unavailable.",
+                        },
+                    },
+                },
+            ],
+            headers={"x-request-id": "req_sse_failed"},
+        ),
+        _FakeStreamResponse([], status_code=401),
+        _FakeStreamResponse(
+            [
+                {
+                    "type": "response.output_text.delta",
+                    "delta": '{"items":[{"id":"0","value":"Bonjour"}]}',
+                },
+                {
+                    "type": "response.completed",
+                    "response": {"status": "completed", "usage": {}},
+                },
+            ]
+        ),
+    ]
+    stream_responses = list(responses)
+    waits = []
+    monkeypatch.setattr(
+        main,
+        "load_config",
+        lambda: {
+            "lm_translator": {
+                "provider": "chatgpt",
+                "chatgpt_model": "gpt-sse-retry-test",
+                "chatgpt_model_profile_id": "profile-a",
+                "max_input_token_budget": 60000,
+                "initial_batch_size_lang": 1,
+                "retry_same_as_source": False,
+                "rpm_cooldown_sec": 0,
+                "request_interval_sec": 0,
+                "rate_limit": {"timeout": 30},
+            }
+        },
+    )
+    monkeypatch.setattr(
+        main,
+        "chatgpt_account_status",
+        lambda: {"active_profile_id": active_profile["id"]},
+    )
+    monkeypatch.setattr(main, "interruptible_sleep", waits.append)
+    monkeypatch.setattr(main.random, "uniform", lambda _low, _high: 0)
+    monkeypatch.setattr(
+        client,
+        "get_chatgpt_access_token",
+        lambda **kwargs: token_requests.append(kwargs) or "access-token",
+    )
+
+    def post(_url, **kwargs):
+        posts.append(kwargs)
+        return responses.pop(0)
+
+    monkeypatch.setattr(client.requests, "post", post)
+    items = [
+        {
+            "id": "line-1",
+            "text": "Hello",
+            "file": "lang/en_us.json",
+            "path": "lang/en_us.json",
+        }
+    ]
+    runtime = main._build_batch_runtime(items, 1)
+    assert runtime is not None
+    round_data = main._prepare_batch(runtime)
+
+    first = main._attempt_batch(runtime, round_data)
+    assert first.action is main.BatchAction.RETRY_SAME_MODEL
+    assert runtime.all_results == []
+    assert runtime.chatgpt_retry_count == 1
+    active_profile["id"] = "profile-b"
+
+    second = main._attempt_batch(runtime, round_data)
+
+    assert second.action is None
+    assert runtime.all_results == [{**items[0], "text": "Bonjour"}]
+    assert runtime.completed_calls == 1
+    assert runtime.chatgpt_retry_count == 0
+    assert token_requests == [
+        {"profile_id": "profile-a"},
+        {"profile_id": "profile-a"},
+        {"force_refresh": True, "profile_id": "profile-a"},
+    ]
+    assert [call["json"]["input"] for call in posts] == [
+        posts[0]["json"]["input"]
+    ] * len(posts)
+    assert waits == [1]
+    assert len(posts) == 3
+    assert all(response.closed for response in stream_responses)
 
 
 def test_http_error_preserves_status_type_param_and_request_id():
@@ -249,6 +720,14 @@ def test_http_error_carries_retry_after_for_batch_backoff():
             b'{"error":{"code":"rate_limit_exceeded","type":"rate_limit_error"}}',
             None,
             "rate_limit_exceeded",
+            1,
+            True,
+        ),
+        (
+            503,
+            b'{"error":{"code":"server_is_overloaded","type":"service_unavailable_error"}}',
+            None,
+            "server_is_overloaded",
             1,
             True,
         ),
