@@ -92,6 +92,366 @@ def test_batch_error_classifier_covers_retry_actions_without_api_calls():
     assert _classify_batch_error(error) == "rate_limited"
 
 
+@pytest.mark.parametrize(
+    ("api_error", "expected"),
+    [
+        (
+            (
+                "forbidden",
+                "No permission for this model.",
+                403,
+                "permission_error",
+                "model",
+            ),
+            "帳號、方案、模型與所在區域",
+        ),
+        (
+            (
+                "invalid_json_schema",
+                "Unsupported schema keyword.",
+                400,
+                "invalid_request_error",
+                "text.format.schema",
+            ),
+            "Structured Outputs",
+        ),
+        (
+            ("unauthorized", "Access token expired.", 401, "authentication_error", ""),
+            "重新登入",
+        ),
+        (
+            ("rate_limit_exceeded", "Slow down.", 429, "rate_limit_error", ""),
+            "使用頻率或用量",
+        ),
+        (
+            ("refusal", "Source content was refused.", None, "", ""),
+            "拒絕處理這批翻譯內容",
+        ),
+    ],
+)
+def test_chatgpt_api_errors_get_provider_specific_guidance(api_error, expected):
+    from translation_tool.core.lm_translator_main import _handle_batch_error
+    from translation_tool.core.openai_codex_client import ChatGPTAPIError
+
+    code, message, status, error_type, param = api_error
+    error = ChatGPTAPIError(
+        code,
+        message,
+        status=status,
+        error_type=error_type,
+        param=param,
+    )
+
+    from translation_tool.core import lm_translator_main as main
+
+    runtime = MagicMock(chatgpt_retry_count=main.CHATGPT_MAX_RETRIES)
+    with pytest.raises(RuntimeError, match=expected) as exc_info:
+        _handle_batch_error(runtime, error, 0)
+
+    assert code in str(exc_info.value)
+
+
+@pytest.mark.parametrize(
+    ("model_settings", "expected_budget", "expected_effort"),
+    [
+        ({"max_input_token_budget": 18000, "reasoning_effort": "high"}, 18000, "high"),
+        (
+            {"max_input_token_budget": 0, "reasoning_effort": "model_default"},
+            60000,
+            None,
+        ),
+        ({}, 60000, None),
+    ],
+)
+def test_chatgpt_runtime_uses_selected_model_and_its_overrides(
+    monkeypatch, model_settings, expected_budget, expected_effort
+):
+    from translation_tool.core import lm_translator_main as main
+
+    monkeypatch.setattr(
+        main,
+        "load_config",
+        lambda: {
+            "lm_translator": {
+                "provider": "chatgpt",
+                "chatgpt_model": "gpt-5-codex",
+                "chatgpt_model_profile_id": "profile-a",
+                "chatgpt_model_settings": {"gpt-5-codex": model_settings},
+                "max_input_token_budget": 60000,
+                "initial_batch_size_lang": 20,
+            }
+        },
+    )
+    monkeypatch.setattr(
+        main,
+        "chatgpt_account_status",
+        lambda: {"active_profile_id": "profile-a"},
+    )
+    runtime = main._build_batch_runtime(
+        [{"id": "line-1", "text": "Hello", "file": "lang/en_us.json"}], 1
+    )
+
+    assert runtime is not None
+    assert runtime.model_pool == ["gpt-5-codex"]
+    assert runtime.lm_cfg["max_input_token_budget"] == expected_budget
+    assert runtime.budget_cfg.max_input_token_budget == expected_budget
+    assert runtime.reasoning_effort == expected_effort
+
+
+def test_chatgpt_runtime_without_a_selected_model_does_not_fall_back_to_gemini(
+    monkeypatch,
+):
+    from translation_tool.core import lm_translator_main as main
+
+    monkeypatch.setattr(
+        main,
+        "load_config",
+        lambda: {
+            "lm_translator": {
+                "provider": "chatgpt",
+                "chatgpt_model": "",
+                "models": {"gemini-configured-model": {"enabled": True}},
+            }
+        },
+    )
+    monkeypatch.setattr(main, "log_error", lambda _message: None)
+
+    assert main._build_batch_runtime([{"id": "line-1", "text": "Hello"}], 1) is None
+
+
+def test_chatgpt_runtime_rejects_model_catalog_bound_to_another_profile(monkeypatch):
+    from translation_tool.core import lm_translator_main as main
+
+    errors = []
+    monkeypatch.setattr(
+        main,
+        "load_config",
+        lambda: {
+            "lm_translator": {
+                "provider": "chatgpt",
+                "chatgpt_model": "gpt-5-codex",
+                "chatgpt_model_profile_id": "profile-a",
+            }
+        },
+    )
+    monkeypatch.setattr(
+        main,
+        "chatgpt_account_status",
+        lambda: {"active_profile_id": "profile-b"},
+    )
+    monkeypatch.setattr(main, "log_error", errors.append)
+
+    runtime = main._build_batch_runtime([{"id": "line-1", "text": "Hello"}], 1)
+
+    assert runtime is None
+    assert any("更新模型清單" in message for message in errors)
+
+
+@pytest.mark.parametrize("provider", ["gemini", "chatgpt"])
+def test_provider_request_kwargs_only_send_chatgpt_reasoning(provider):
+    from types import SimpleNamespace
+
+    from translation_tool.core import lm_translator_main as main
+
+    runtime = SimpleNamespace(
+        lm_cfg={"provider": provider},
+        model_temperature=0.4,
+        reasoning_effort="high",
+        chatgpt_profile_id="profile-a",
+    )
+
+    kwargs = main._provider_request_kwargs(
+        runtime,
+        "selected-model",
+        "Translate.",
+        {"items": [{"id": "line-1", "value": "Hello"}]},
+        1024,
+        {},
+        "key",
+    )
+
+    assert kwargs["model_name"] == "selected-model"
+    assert kwargs["provider"] == provider
+    assert kwargs["lm_config"] is runtime.lm_cfg
+    assert kwargs["temperature"] == 0.4
+    assert kwargs["max_output_tokens"] == 1024
+    if provider == "chatgpt":
+        assert kwargs["reasoning_effort"] == "high"
+        assert kwargs["profile_id"] == "profile-a"
+    else:
+        assert "reasoning_effort" not in kwargs
+        assert "profile_id" not in kwargs
+
+
+@pytest.mark.parametrize(
+    ("code", "message", "status", "error_type", "retry_after"),
+    [
+        ("slow_down", "Too many requests.", 429, "rate_limit_error", 2),
+        (
+            "server_is_overloaded",
+            "Model overloaded.",
+            503,
+            "service_unavailable_error",
+            None,
+        ),
+        ("stream_interrupted", "Connection reset.", None, "", None),
+    ],
+)
+def test_chatgpt_transient_errors_use_bounded_backoff(
+    monkeypatch, code, message, status, error_type, retry_after
+):
+    from types import SimpleNamespace
+
+    from translation_tool.core import lm_translator_main as main
+    from translation_tool.core.openai_codex_client import ChatGPTAPIError
+
+    waits = []
+    monkeypatch.setattr(main, "interruptible_sleep", waits.append)
+    monkeypatch.setattr(main.random, "uniform", lambda _low, _high: 0)
+    runtime = SimpleNamespace(chatgpt_retry_count=0)
+    error = ChatGPTAPIError(
+        code,
+        message,
+        status=status,
+        error_type=error_type,
+        retry_after=retry_after,
+    )
+
+    action = main._handle_batch_error(runtime, error, 0)
+
+    assert action is main.BatchAction.RETRY_SAME_MODEL
+    assert runtime.chatgpt_retry_count == 1
+    assert waits == [retry_after if retry_after is not None else 1]
+
+
+def test_chatgpt_transient_retry_stops_at_the_configured_limit(monkeypatch):
+    from types import SimpleNamespace
+
+    from translation_tool.core import lm_translator_main as main
+    from translation_tool.core.openai_codex_client import ChatGPTAPIError
+
+    waits = []
+    monkeypatch.setattr(main, "interruptible_sleep", waits.append)
+    monkeypatch.setattr(main.random, "uniform", lambda _low, _high: 0)
+    runtime = SimpleNamespace(chatgpt_retry_count=0)
+    error = ChatGPTAPIError("server_is_overloaded", "Model overloaded.", status=503)
+
+    for _ in range(main.CHATGPT_MAX_RETRIES):
+        assert main._handle_batch_error(runtime, error, 0) is (
+            main.BatchAction.RETRY_SAME_MODEL
+        )
+    with pytest.raises(RuntimeError, match="重試上限"):
+        main._handle_batch_error(runtime, error, 0)
+
+    assert runtime.chatgpt_retry_count == main.CHATGPT_MAX_RETRIES
+    assert len(waits) == main.CHATGPT_MAX_RETRIES
+
+
+@pytest.mark.parametrize(
+    "code",
+    [
+        "insufficient_quota",
+        "credit_balance_exhausted",
+        "subscription_sharing_usage_limit_exceeded",
+    ],
+)
+def test_chatgpt_usage_exhaustion_never_retries(monkeypatch, code):
+    from types import SimpleNamespace
+
+    from translation_tool.core import lm_translator_main as main
+    from translation_tool.core.openai_codex_client import ChatGPTAPIError
+
+    waits = []
+    monkeypatch.setattr(main, "interruptible_sleep", waits.append)
+    runtime = SimpleNamespace(chatgpt_retry_count=0)
+    error = ChatGPTAPIError(
+        code,
+        "Usage limit reached.",
+        status=429,
+        error_type="rate_limit_error",
+    )
+
+    with pytest.raises(RuntimeError):
+        main._handle_batch_error(runtime, error, 0)
+
+    assert runtime.chatgpt_retry_count == 0
+    assert waits == []
+
+
+@pytest.mark.parametrize(
+    "code",
+    [
+        "subscription_sharing_usage_unavailable",
+        "subscription_sharing_user_unavailable",
+    ],
+)
+def test_chatgpt_temporary_subscription_usage_errors_retry(monkeypatch, code):
+    from types import SimpleNamespace
+
+    from translation_tool.core import lm_translator_main as main
+    from translation_tool.core.openai_codex_client import ChatGPTAPIError
+
+    waits = []
+    monkeypatch.setattr(main, "interruptible_sleep", waits.append)
+    monkeypatch.setattr(main.random, "uniform", lambda _low, _high: 0)
+    runtime = SimpleNamespace(chatgpt_retry_count=0)
+    error = ChatGPTAPIError(
+        code,
+        "Usage availability is temporarily unavailable.",
+        status=503,
+        error_type="service_unavailable_error",
+    )
+
+    action = main._handle_batch_error(runtime, error, 0)
+
+    assert action is main.BatchAction.RETRY_SAME_MODEL
+    assert runtime.chatgpt_retry_count == 1
+    assert waits == [1]
+
+
+def test_chatgpt_http_429_uses_status_without_fuzzy_message_classification(
+    monkeypatch,
+):
+    from types import SimpleNamespace
+
+    from translation_tool.core import lm_translator_main as main
+    from translation_tool.core.openai_codex_client import ChatGPTAPIError
+
+    waits = []
+    monkeypatch.setattr(main, "interruptible_sleep", waits.append)
+    monkeypatch.setattr(main.random, "uniform", lambda _low, _high: 0)
+    runtime = SimpleNamespace(chatgpt_retry_count=0)
+    error = ChatGPTAPIError(
+        "http_429",
+        "Temporary usage_limit message from the service.",
+        status=429,
+    )
+
+    action = main._handle_batch_error(runtime, error, 0)
+
+    assert action is main.BatchAction.RETRY_SAME_MODEL
+    assert runtime.chatgpt_retry_count == 1
+    assert waits == [1]
+
+
+def test_chatgpt_retry_wait_remains_cancellable(monkeypatch):
+    from types import SimpleNamespace
+
+    from translation_tool.core import lm_translator_main as main
+    from translation_tool.core.openai_codex_client import ChatGPTAPIError
+    from translation_tool.utils.cancellation import TaskCancelled
+
+    def cancel_wait(_seconds):
+        raise TaskCancelled("cancelled during retry wait")
+
+    monkeypatch.setattr(main, "interruptible_sleep", cancel_wait)
+    runtime = SimpleNamespace(chatgpt_retry_count=0)
+    error = ChatGPTAPIError("http_429", status=429)
+
+    with pytest.raises(TaskCancelled):
+        main._handle_batch_error(runtime, error, 0)
+
+
 class TestTranslateBatchSmart:
     """translate_batch_smart 測試"""
 
@@ -159,6 +519,9 @@ class TestTranslateBatchSmart:
         from translation_tool.core import lm_config_rules, lm_translator_main
 
         monkeypatch.setattr(lm_config_rules, "_get_all_keys", list)
+        monkeypatch.setattr(
+            lm_translator_main, "get_translation_provider", lambda: "gemini"
+        )
         execute_translation = MagicMock()
         monkeypatch.setattr(
             lm_translator_main, "_execute_translation", execute_translation
@@ -277,7 +640,14 @@ class TestSystemPromptConversion:
 
         items = [{"path": "test.key", "text": "Hello", "cache_type": "lang"}]
 
-        _result, _status = translate_batch_smart(items, 1)
+        from translation_tool.core import lm_api_client
+
+        with patch.object(
+            lm_api_client,
+            "load_config",
+            return_value={"lm_translator": {"provider": "gemini"}},
+        ):
+            _result, _status = translate_batch_smart(items, 1)
 
         assert mock_post.call_count >= 1, "API 應該被調用至少一次"
         call_kwargs = mock_post.call_args.kwargs
@@ -330,7 +700,14 @@ class TestSystemPromptConversion:
 
         items = [{"path": "test.key", "text": "Hello", "cache_type": "lang"}]
 
-        _result, _status = translate_batch_smart(items, 1)
+        from translation_tool.core import lm_api_client
+
+        with patch.object(
+            lm_api_client,
+            "load_config",
+            return_value={"lm_translator": {"provider": "gemini"}},
+        ):
+            _result, _status = translate_batch_smart(items, 1)
 
         assert mock_post.call_count >= 1, "API 應該被調用至少一次"
         call_kwargs = mock_post.call_args.kwargs

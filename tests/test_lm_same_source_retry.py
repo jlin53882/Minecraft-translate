@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import threading
+from copy import deepcopy
 
 import pytest
 import requests
@@ -173,6 +174,56 @@ def test_same_as_source_is_reconfirmed_and_second_translation_is_used(
     assert retry_prompt.startswith("LANG PROFILE PROMPT")
     assert "再次確認" in retry_prompt and "繁體中文（台灣用語）" in retry_prompt
     assert result == [{**item, "text": "壓力室"}]
+
+
+def test_provider_and_reasoning_snapshot_are_used_for_normal_and_same_source_calls(
+    monkeypatch, configure_batch
+):
+    active_config = configure_batch()
+    lm_config = active_config["lm_translator"]
+    lm_config.update(
+        {
+            "provider": "chatgpt",
+            "chatgpt_model": "gpt-5-codex",
+            "chatgpt_model_profile_id": "profile-a",
+            "chatgpt_model_settings": {"gpt-5-codex": {"reasoning_effort": "high"}},
+        }
+    )
+    monkeypatch.setattr(main, "load_config", lambda: deepcopy(active_config))
+    monkeypatch.setattr(main, "get_translation_provider", lambda: "chatgpt")
+    monkeypatch.setattr(main, "validate_translation_credentials", lambda: None)
+    active_profile = {"id": "profile-a"}
+    monkeypatch.setattr(
+        main,
+        "chatgpt_account_status",
+        lambda: {"active_profile_id": active_profile["id"]},
+    )
+    calls = []
+
+    def call_api(**kwargs):
+        calls.append(kwargs)
+        if len(calls) == 1:
+            # Simulate settings being saved while the already-started batch runs.
+            active_config["lm_translator"]["provider"] = "gemini"
+            active_profile["id"] = "profile-b"
+            return _reply(kwargs, {})
+        return _reply(kwargs, {"Pressure Chamber": "壓力室"})
+
+    monkeypatch.setattr(main, "call_gemini_requests", call_api)
+    item = _item("Pressure Chamber", 0)
+
+    result, status = main.translate_batch_smart([item], 1)
+
+    assert status == "AUTO"
+    assert result == [{**item, "text": "壓力室"}]
+    assert len(calls) == 2
+    assert [call["provider"] for call in calls] == ["chatgpt", "chatgpt"]
+    assert [call["lm_config"]["provider"] for call in calls] == [
+        "chatgpt",
+        "chatgpt",
+    ]
+    assert [call["reasoning_effort"] for call in calls] == ["high", "high"]
+    assert [call["profile_id"] for call in calls] == ["profile-a", "profile-a"]
 
 
 def test_still_same_after_retry_is_normal_final_result_with_no_third_request(

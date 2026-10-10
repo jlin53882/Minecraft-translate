@@ -116,6 +116,31 @@ def get_api_key_count() -> int:
     return len(_get_all_keys())
 
 
+def get_translation_provider() -> str:
+    """Return the configured provider, keeping old config files on Gemini."""
+    provider = load_config().get("lm_translator", {}).get("provider", "gemini")
+    if provider not in {"gemini", "chatgpt"}:
+        raise RuntimeError(f"❌ 不支援的翻譯服務供應商：{provider}")
+    return provider
+
+
+def validate_translation_credentials() -> None:
+    """Fail early when the selected provider lacks usable credentials or model."""
+    config = load_config().get("lm_translator", {})
+    provider = config.get("provider", "gemini")
+    if provider == "chatgpt":
+        if not str(config.get("chatgpt_model") or "").strip():
+            raise RuntimeError("❌ 尚未選擇 ChatGPT 模型，請先登入並更新模型清單。")
+        from .codex_oauth import get_chatgpt_access_token
+
+        get_chatgpt_access_token()
+        return
+    if provider != "gemini":
+        raise RuntimeError(f"❌ 不支援的翻譯服務供應商：{provider}")
+    if not _get_all_keys():
+        raise RuntimeError("❌ 設定檔中沒有找到任何 API Key，請先設定金鑰。")
+
+
 def get_key_failure_cooldown_sec() -> float:
     """已確定 403 無權限的 key 要冷卻多久（秒）；0 = 不記憶（issue #113）。
 
@@ -427,6 +452,11 @@ def validate_api_keys():
     驗證 API 金鑰格式。
     這應該在程式啟動或開始翻譯前呼叫一次。
     """
+    if get_translation_provider() == "chatgpt":
+        validate_translation_credentials()
+        log_info("✅ ChatGPT OAuth 登入狀態可用。")
+        return
+
     # 統一使用輔助函式獲取金鑰清單
     keys = _get_all_keys()
 

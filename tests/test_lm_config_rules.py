@@ -553,3 +553,61 @@ def test_short_text_skip_len_is_configurable(monkeypatch):
     monkeypatch.setattr(rules, "load_config_shared", lambda: cfg0)
     assert rules.is_value_translatable("Axe", is_lang=True) is True
     assert rules.is_value_translatable("Ore", is_lang=True) is True
+
+
+def test_chatgpt_provider_validates_model_and_oauth_token_without_gemini_keys(
+    monkeypatch,
+):
+    from translation_tool.core import codex_oauth
+    from translation_tool.core import lm_config_rules as rules
+
+    config = {
+        "lm_translator": {
+            "provider": "chatgpt",
+            "chatgpt_model": "gpt-5-codex",
+            "keys": [],
+        }
+    }
+    calls = []
+    monkeypatch.setattr(rules, "load_config", lambda: config)
+    monkeypatch.setattr(
+        codex_oauth, "get_chatgpt_access_token", lambda: calls.append("token") or "ok"
+    )
+
+    assert rules.get_translation_provider() == "chatgpt"
+    rules.validate_api_keys()
+
+    assert calls == ["token"]
+
+
+def test_chatgpt_provider_requires_a_selected_model_before_refreshing_token(
+    monkeypatch,
+):
+    from translation_tool.core import codex_oauth
+    from translation_tool.core import lm_config_rules as rules
+
+    monkeypatch.setattr(
+        rules,
+        "load_config",
+        lambda: {"lm_translator": {"provider": "chatgpt", "chatgpt_model": " "}},
+    )
+    monkeypatch.setattr(
+        codex_oauth,
+        "get_chatgpt_access_token",
+        lambda: pytest.fail("model validation must happen first"),
+    )
+
+    with pytest.raises(RuntimeError, match="尚未選擇 ChatGPT 模型"):
+        rules.validate_translation_credentials()
+
+
+@pytest.mark.parametrize("provider", ["unknown", "openai"])
+def test_unknown_translation_provider_is_rejected(monkeypatch, provider):
+    from translation_tool.core import lm_config_rules as rules
+
+    monkeypatch.setattr(
+        rules, "load_config", lambda: {"lm_translator": {"provider": provider}}
+    )
+
+    with pytest.raises(RuntimeError, match="不支援的翻譯服務供應商"):
+        rules.get_translation_provider()

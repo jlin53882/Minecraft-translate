@@ -31,8 +31,11 @@ class TestGetPreviewWorkers:
         assert isinstance(workers, int)
         assert workers >= 1
 
-    def test_fallback_value_is_reasonable(self):
+    def test_fallback_value_is_reasonable(self, monkeypatch):
         """Fallback 值應為 min(4, cpu_count)，且 >= 1"""
+        monkeypatch.setattr(
+            "translation_tool.core.jar_processor_preview.load_config", dict
+        )
         workers = _get_preview_workers()
         cpu = os.cpu_count() or 2
         assert workers <= 4

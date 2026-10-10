@@ -190,7 +190,7 @@ class LMView(ft.Column):
             "已用時間", "—", icon=ft.Icons.TIMER_OUTLINED, tone="gold", expand=1
         )
         self.stat_keys = kit.stat_card(
-            "可用 API Key", "—", icon=ft.Icons.KEY, tone="dia", expand=1
+            "AI 認證", "—", icon=ft.Icons.KEY, tone="dia", expand=1
         )
         self.stat_cache = kit.stat_card(
             "快取寫入",
@@ -310,8 +310,23 @@ class LMView(ft.Column):
         )
 
     def refresh_key_stat(self):
-        """更新「可用 API Key」統計（#113 的 key 健康度）。"""
+        """更新目前供應商的登入或 Key 健康狀態。"""
         try:
+            from translation_tool.utils.config_manager import load_config
+
+            lm_cfg = load_config().get("lm_translator", {})
+            if lm_cfg.get("provider", "gemini") == "chatgpt":
+                from app.services_impl.chatgpt_oauth_service import (
+                    chatgpt_account_status,
+                )
+
+                connected = bool(chatgpt_account_status().get("connected"))
+                self.stat_keys.set_value(
+                    "ChatGPT",
+                    delta="已連結" if connected else "尚未登入",
+                    delta_tone="em" if connected else "gold",
+                )
+                return
             from app.services_impl.key_health_service import get_key_health_snapshot
             from app.shell.topbar import summarize_keys
 
@@ -320,7 +335,11 @@ class LMView(ft.Column):
             return
         self.stat_keys.set_value(
             f"{summary.usable}/{summary.total}" if summary.total else "—",
-            delta=(f"{summary.cooling} 把冷卻中" if summary.cooling else ""),
+            delta=(
+                f"{summary.cooling} 把冷卻中"
+                if summary.cooling
+                else (summary.tooltip if summary.total == 0 else "全部正常")
+            ),
             delta_tone="gold",
         )
 

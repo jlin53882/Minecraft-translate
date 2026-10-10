@@ -19,13 +19,22 @@ from translation_tool.core import lm_resume, lm_translator, lm_translator_db
 from translation_tool.translation_db import DbSettings
 
 
-def _settings(monkeypatch, **kw):
-    monkeypatch.setattr(lm_translator_db, "load_db_settings", lambda: DbSettings(**kw))
+def _settings(monkeypatch, *, path="", **kw):
+    monkeypatch.setattr(
+        lm_translator_db,
+        "load_db_settings",
+        lambda: DbSettings(path=path, **kw),
+    )
 
 
 def test_checkpoint_records_the_resolved_database_choice(env, monkeypatch):  # noqa: F811
     """畫面欄位留空、使用設定檔的版本時，checkpoint 存的是解析後的版本，不是 null。"""
-    _settings(monkeypatch, enabled=True, version="1.21.1")
+    _settings(
+        monkeypatch,
+        path=str(env.tmp / "translation-db.sqlite"),
+        enabled=True,
+        version="1.21.1",
+    )
     env.crash_at_translate_call = 2
     with pytest.raises(SimulatedCrash):
         run(env, "out", write_new_cache=True)
@@ -49,7 +58,12 @@ def test_checkpoint_records_the_resolved_database_choice(env, monkeypatch):  # n
 
 
 def test_checkpoint_records_page_override_and_disabled(env, monkeypatch):  # noqa: F811
-    _settings(monkeypatch, enabled=True, version="1.21.1")
+    _settings(
+        monkeypatch,
+        path=str(env.tmp / "translation-db.sqlite"),
+        enabled=True,
+        version="1.21.1",
+    )
     env.crash_at_translate_call = 2
     with pytest.raises(SimulatedCrash):
         run(
@@ -69,7 +83,12 @@ def test_legacy_checkpoint_without_database_fields_means_database_unused(
     monkeypatch,
 ):
     """資料庫功能之前建立的 checkpoint 一定沒用資料庫：明確視為停用，不採用目前設定。"""
-    _settings(monkeypatch, enabled=True, version="1.21.1")
+    _settings(
+        monkeypatch,
+        path=str(env.tmp / "translation-db.sqlite"),
+        enabled=True,
+        version="1.21.1",
+    )
     env.crash_at_translate_call = 2
     with pytest.raises(SimulatedCrash):
         run(env, "out", write_new_cache=True)
@@ -84,7 +103,12 @@ def test_legacy_checkpoint_without_database_fields_means_database_unused(
 
 
 def test_resume_with_different_database_choice_is_warned(env, monkeypatch):  # noqa: F811
-    _settings(monkeypatch, enabled=True, version="1.21.1")
+    _settings(
+        monkeypatch,
+        path=str(env.tmp / "translation-db.sqlite"),
+        enabled=True,
+        version="1.21.1",
+    )
     env.crash_at_translate_call = 2
     with pytest.raises(SimulatedCrash):
         run(env, "out", write_new_cache=True)
@@ -92,7 +116,12 @@ def test_resume_with_different_database_choice_is_warned(env, monkeypatch):  # n
 
     warnings: list[str] = []
     monkeypatch.setattr(lm_translator, "log_warning", warnings.append)
-    _settings(monkeypatch, enabled=True, version="1.20.1")
+    _settings(
+        monkeypatch,
+        path=str(env.tmp / "translation-db.sqlite"),
+        enabled=True,
+        version="1.20.1",
+    )
     run(env, "out", write_new_cache=True)
     text = "\n".join(warnings)
     assert "Mod 資料庫選項" in text and "1.21.1" in text and "1.20.1" in text
@@ -119,7 +148,11 @@ def test_database_choice_is_resolved_once_per_task(env, monkeypatch):  # noqa: F
     reads = iter(["1.21.1"] + ["1.20.1"] * 50)
 
     def changing_settings():
-        return DbSettings(enabled=True, version=next(reads))
+        return DbSettings(
+            enabled=True,
+            version=next(reads),
+            path=str(env.tmp / "translation-db.sqlite"),
+        )
 
     monkeypatch.setattr(lm_translator_db, "load_db_settings", changing_settings)
     env.crash_at_translate_call = 2

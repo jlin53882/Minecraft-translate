@@ -15,6 +15,7 @@ from app.services_impl.key_health_service import validate_api_keys_from_ui
 from app.ui import design, kit
 from app.ui.design import C
 from app.ui.snack import show_snack
+from app.views.config.chatgpt_oauth_panel import ChatGPTOAuthPanel
 from app.views.config.config_actions import (
     SaveOutcome,
     finish_unsaved_dialog,
@@ -244,6 +245,49 @@ class ConfigView(ft.Column):
         # 一般設定的控制項由 settings_schema 產生（#134）；下面只建立專用元件
         build_controls(self.controls_map)
 
+        self._chatgpt_model_settings: dict[str, dict] = {}
+        self._chatgpt_active_model = ""
+        self._chatgpt_model_catalog_valid = False
+        self._chatgpt_model_catalog_profile_id: str | None = None
+        self.chatgpt_model_control = kit.dropdown(
+            label="ChatGPT 模型",
+            options=[ft.dropdown.Option(key="", text="登入後更新模型清單")],
+            dense=True,
+            on_select=self._on_chatgpt_model_selected,
+        )
+        self.controls_map["lm_translator.chatgpt_model"] = self.chatgpt_model_control
+        self.chatgpt_context_budget_control = kit.field(
+            value="",
+            label="單批輸入預算（Token）",
+            hint_text="留空沿用全域預算",
+            dense=True,
+            width=210,
+            keyboard_type=ft.KeyboardType.NUMBER,
+            on_change=self._on_chatgpt_model_settings_changed,
+        )
+        self.chatgpt_reasoning_effort_control = kit.dropdown(
+            label="思考強度",
+            options=[
+                ft.dropdown.Option(key="model_default", text="模型預設"),
+                ft.dropdown.Option(key="low", text="低（Low）"),
+                ft.dropdown.Option(key="medium", text="中（Medium）"),
+                ft.dropdown.Option(key="high", text="高（High）"),
+            ],
+            value="model_default",
+            dense=True,
+            width=210,
+            on_select=self._on_chatgpt_model_settings_changed,
+        )
+        self.controls_map["ui.chatgpt_context_budget"] = (
+            self.chatgpt_context_budget_control
+        )
+        self.controls_map["ui.chatgpt_reasoning_effort"] = (
+            self.chatgpt_reasoning_effort_control
+        )
+        self.controls_map[
+            "lm_translator.provider"
+        ].on_select = self._on_provider_changed
+
         self.new_model_field = kit.field(
             label="新增模型名稱",
             hint_text="gemini-3.5-flash-lite",
@@ -458,7 +502,11 @@ class ConfigView(ft.Column):
         self._content_containers = build_pages(
             self.controls_map,
             self._build_card,
-            {"keys": self._keys_panel, "models": self._models_panel},
+            {
+                "keys": self._keys_panel,
+                "models": self._models_panel,
+                "chatgpt_model_settings": self._build_chatgpt_model_settings_panel,
+            },
         )
 
         self.content_scroll = ft.Container(
@@ -489,7 +537,7 @@ class ConfigView(ft.Column):
                         ]
                     ),
                     ft.Text(
-                        "輸入模型名稱後按「+」加入清單；未加入的文字不會寫入設定。勾選「啟用」的模型才會參與翻譯；至少保留一個啟用模型。",
+                        "此清單只供 Gemini 使用。輸入模型名稱後按「+」加入；勾選「啟用」的模型才會參與翻譯，且至少保留一個。ChatGPT 模型依登入帳號在 API 設定中載入。",
                         size=12,
                         color=C.MUTED,
                     ),
@@ -500,22 +548,207 @@ class ConfigView(ft.Column):
 
     def _keys_panel(self) -> ft.Control:
         """API 金鑰列的專用元件（卡片內容）。"""
+        self.gemini_key_section = ft.Column(
+            [
+                ft.Row(
+                    [
+                        ft.Text("Gemini API 金鑰", weight=ft.FontWeight.BOLD),
+                        self.add_key_button,
+                    ]
+                ),
+                self.keys_column,
+            ],
+            spacing=5,
+        )
+        self.chatgpt_oauth_panel = ChatGPTOAuthPanel(
+            self.page,
+            self.chatgpt_model_control,
+            self._sync_chatgpt_model_options,
+            self._invalidate_chatgpt_model_options,
+        )
+        self.chatgpt_section = self.chatgpt_oauth_panel.section
         return ft.Container(
             bgcolor=C.PANEL,
             padding=10,
             border_radius=8,
             content=ft.Column(
                 [
-                    ft.Row(
-                        [
-                            ft.Text("API 金鑰 (API Keys)", weight=ft.FontWeight.BOLD),
-                            self.add_key_button,
-                        ]
-                    ),
-                    self.keys_column,
-                ]
+                    self.gemini_key_section,
+                    self.chatgpt_section,
+                ],
+                spacing=10,
             ),
         )
+
+    def _refresh_provider_panel_visibility(self) -> None:
+        provider = self.controls_map["lm_translator.provider"].value or "gemini"
+        is_chatgpt = provider == "chatgpt"
+        self.gemini_key_section.visible = not is_chatgpt
+        self.chatgpt_section.visible = is_chatgpt
+        self.chatgpt_model_control.visible = is_chatgpt
+        self.chatgpt_model_settings_panel.visible = is_chatgpt and bool(
+            str(self.chatgpt_model_control.value or "").strip()
+        )
+        self.chatgpt_oauth_panel.refresh_controls()
+
+    def _on_provider_changed(self, _event=None) -> None:
+        self._refresh_provider_panel_visibility()
+
+    def _sync_chatgpt_model_options(self, models=None, profile_id=None) -> None:
+        current = str(self.chatgpt_model_control.value or "")
+        selected = current
+        if models is None:
+            self._chatgpt_model_catalog_valid = False
+            self._chatgpt_model_catalog_profile_id = None
+            pairs = [("", "登入後更新模型清單")]
+        else:
+            pairs = [(model.slug, model.display_name) for model in models]
+            if not pairs:
+                pairs = [("", "此帳號目前沒有可用模型")]
+            model_ids = {slug for slug, _label in pairs}
+            if selected not in model_ids or not selected:
+                selected = pairs[0][0] if pairs else ""
+            self._chatgpt_model_catalog_valid = bool(selected and selected in model_ids)
+            self._chatgpt_model_catalog_profile_id = (
+                str(profile_id)
+                if self._chatgpt_model_catalog_valid and profile_id
+                else None
+            )
+        if selected != current:
+            self._store_chatgpt_model_settings(self._chatgpt_active_model)
+            self.chatgpt_model_control.value = selected
+        kit.set_dropdown_options(self.chatgpt_model_control, pairs)
+        self.chatgpt_model_settings_panel.visible = self.controls_map[
+            "lm_translator.provider"
+        ].value == "chatgpt" and bool(selected)
+        if selected != self._chatgpt_active_model:
+            self._load_chatgpt_model_settings_for(selected)
+        if not self._loading_config:
+            self._refresh_dirty_state()
+
+    def _invalidate_chatgpt_model_options(self, message: str) -> None:
+        """Hide stale model choices without changing the saved model value."""
+        self._chatgpt_model_catalog_valid = False
+        kit.set_dropdown_options(
+            self.chatgpt_model_control,
+            [("", message or "請重新載入目前帳號的模型")],
+        )
+        self.chatgpt_model_settings_panel.visible = False
+
+    def _build_chatgpt_model_settings_panel(self) -> ft.Control:
+        self.chatgpt_model_settings_panel = ft.Container(
+            visible=False,
+            padding=ft.Padding.only(top=4, bottom=8),
+            content=ft.Column(
+                [
+                    ft.Row(
+                        [
+                            self.chatgpt_context_budget_control,
+                            self.chatgpt_reasoning_effort_control,
+                        ],
+                        wrap=True,
+                        spacing=10,
+                    ),
+                    ft.Text(
+                        "只套用到上方選取的 ChatGPT 模型。輸入預算留空時沿用全域批次預算；它是輸入估算上限，需為系統指示與輸出預留空間。思考強度選「模型預設」時不送 reasoning.effort；若模型不支援所選強度，請改回模型預設。",
+                        size=11,
+                        color=C.MUTED,
+                    ),
+                ],
+                spacing=5,
+            ),
+        )
+        return self.chatgpt_model_settings_panel
+
+    def _on_chatgpt_model_selected(self, _event=None) -> None:
+        self._store_chatgpt_model_settings(self._chatgpt_active_model)
+        self._load_chatgpt_model_settings_for(
+            str(self.chatgpt_model_control.value or "")
+        )
+        self._refresh_dirty_state()
+
+    def _on_chatgpt_model_settings_changed(self, _event=None) -> None:
+        self._store_chatgpt_model_settings(self._chatgpt_active_model)
+        self._refresh_dirty_state()
+
+    def _store_chatgpt_model_settings(self, model_name: str) -> None:
+        if not model_name:
+            return
+        settings = {}
+        context_budget = str(self.chatgpt_context_budget_control.value or "").strip()
+        if context_budget:
+            settings["max_input_token_budget"] = context_budget
+        effort = str(self.chatgpt_reasoning_effort_control.value or "model_default")
+        if effort != "model_default":
+            settings["reasoning_effort"] = effort
+        if settings:
+            self._chatgpt_model_settings[model_name] = settings
+        else:
+            self._chatgpt_model_settings.pop(model_name, None)
+
+    def _load_chatgpt_model_settings_for(self, model_name: str) -> None:
+        settings = self._chatgpt_model_settings.get(model_name, {})
+        context_budget = settings.get("max_input_token_budget", "")
+        self.chatgpt_context_budget_control.value = (
+            "" if context_budget in (None, "") else str(context_budget)
+        )
+        self.chatgpt_context_budget_control.hint_text = (
+            "留空沿用全域 "
+            f"{self.controls_map['lm_translator.max_input_token_budget'].value or '60000'}"
+        )
+        effort = settings.get("reasoning_effort", "model_default")
+        if not isinstance(effort, str) or effort not in {
+            "model_default",
+            "low",
+            "medium",
+            "high",
+        }:
+            effort = "model_default"
+        self.chatgpt_reasoning_effort_control.value = effort
+        self._chatgpt_active_model = model_name
+
+    def _hydrate_chatgpt_model_settings(self, settings) -> None:
+        self._chatgpt_model_settings = (
+            {
+                str(model): dict(value)
+                for model, value in settings.items()
+                if isinstance(model, str) and isinstance(value, dict)
+            }
+            if isinstance(settings, dict)
+            else {}
+        )
+        self._load_chatgpt_model_settings_for(
+            str(self.chatgpt_model_control.value or "")
+        )
+
+    def collect_chatgpt_model_settings(self) -> dict[str, dict]:
+        self._store_chatgpt_model_settings(self._chatgpt_active_model)
+        collected = {}
+        for model_name, settings in self._chatgpt_model_settings.items():
+            clean = {}
+            raw_budget = settings.get("max_input_token_budget")
+            if raw_budget not in (None, ""):
+                try:
+                    budget = int(raw_budget)
+                except (TypeError, ValueError) as exc:
+                    raise ValueError(
+                        f"{model_name} 的單批輸入預算必須是正整數。"
+                    ) from exc
+                if isinstance(raw_budget, bool) or budget <= 0:
+                    raise ValueError(f"{model_name} 的單批輸入預算必須大於 0。")
+                clean["max_input_token_budget"] = budget
+            effort = settings.get("reasoning_effort")
+            if effort not in (None, "", "model_default"):
+                if not isinstance(effort, str) or effort not in {
+                    "low",
+                    "medium",
+                    "high",
+                }:
+                    raise ValueError(f"{model_name} 的思考強度設定無效。")
+                clean["reasoning_effort"] = effort
+            if clean:
+                collected[model_name] = clean
+        return collected
 
     def _build_lang_merger_card(self) -> ft.Control:
         """語言合併器頁的卡片（保留給既有呼叫端；內容由 schema 產生）。"""
@@ -627,7 +860,10 @@ class ConfigView(ft.Column):
 
     def load_config(self):
         """載入設定檔"""
-        return load_config_transactionally(self, load_config_json)
+        result = load_config_transactionally(self, load_config_json)
+        self._sync_chatgpt_model_options()
+        self._refresh_provider_panel_visibility()
+        return result
 
     def did_mount(self):
         """切回設定頁時重新確認資料庫位置（其他頁可能剛建立了資料庫）。"""
@@ -730,7 +966,15 @@ class ConfigView(ft.Column):
             )
             for row in self.models_column.controls
         )
-        return settings, keys, models
+        chatgpt_model_settings = tuple(
+            (
+                model_name,
+                tuple(sorted((key, repr(value)) for key, value in values.items())),
+            )
+            for model_name, values in sorted(self._chatgpt_model_settings.items())
+        )
+        chatgpt_catalog = self._chatgpt_model_catalog_profile_id
+        return settings, keys, models, chatgpt_model_settings, chatgpt_catalog
 
     @property
     def has_unsaved_changes(self) -> bool:

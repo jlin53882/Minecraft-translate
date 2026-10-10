@@ -41,6 +41,45 @@ class TestCallGeminiRequests:
 
         assert result == '{"translated": "value"}'
 
+    @patch("translation_tool.core.openai_codex_client.call_chatgpt_responses")
+    @patch("translation_tool.core.lm_api_client.load_config")
+    def test_chatgpt_provider_dispatches_with_reasoning_effort(
+        self, mock_config, mock_chatgpt
+    ):
+        from translation_tool.core.lm_api_client import call_gemini_requests
+
+        # A UI setting change after a batch starts must not redirect its request.
+        mock_config.return_value = {
+            "lm_translator": {"provider": "gemini", "rate_limit": {"timeout": 5}}
+        }
+        mock_chatgpt.return_value = '{"items": []}'
+        meta = {}
+        payload = {"items": [{"id": "line-1", "value": "Hello"}]}
+
+        result = call_gemini_requests(
+            model_name="gpt-5-codex",
+            system_prompt="Translate.",
+            payload=payload,
+            api_key="unused-for-oauth",
+            temperature=0.2,
+            meta_out=meta,
+            reasoning_effort="high",
+            profile_id="profile-a",
+            provider="chatgpt",
+            lm_config={"provider": "chatgpt", "rate_limit": {"timeout": 45}},
+        )
+
+        assert result == '{"items": []}'
+        mock_chatgpt.assert_called_once_with(
+            model_name="gpt-5-codex",
+            system_prompt="Translate.",
+            payload=payload,
+            timeout=45,
+            meta_out=meta,
+            reasoning_effort="high",
+            profile_id="profile-a",
+        )
+
     @patch("translation_tool.core.lm_api_client.requests.post")
     @patch("translation_tool.core.lm_api_client.load_config")
     def test_http_error(self, mock_config, mock_post):
@@ -225,6 +264,11 @@ def test_malformed_gemini_envelope_raises_a_dedicated_runtime_error_subclass():
     response.json.return_value = {"promptFeedback": {"blockReason": "SAFETY"}}
 
     with (
+        patch.object(
+            client,
+            "load_config",
+            return_value={"lm_translator": {"provider": "gemini"}},
+        ),
         patch.object(client, "_post_with_retry", return_value=response),
         pytest.raises(client.GeminiResponseFormatError) as info,
     ):
@@ -251,6 +295,11 @@ def test_http_200_with_an_invalid_json_body_raises_the_format_error():
     response.json.side_effect = ValueError("Expecting value")
 
     with (
+        patch.object(
+            client,
+            "load_config",
+            return_value={"lm_translator": {"provider": "gemini"}},
+        ),
         patch.object(client, "_post_with_retry", return_value=response),
         pytest.raises(client.GeminiResponseFormatError),
     ):
@@ -276,6 +325,11 @@ def test_http_200_with_an_unexpected_json_type_raises_the_format_error():
     response.json.return_value = ["not", "an", "object"]
 
     with (
+        patch.object(
+            client,
+            "load_config",
+            return_value={"lm_translator": {"provider": "gemini"}},
+        ),
         patch.object(client, "_post_with_retry", return_value=response),
         pytest.raises(client.GeminiResponseFormatError),
     ):

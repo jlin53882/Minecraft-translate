@@ -563,6 +563,30 @@ class AppShell:
 
     def refresh_keys(self) -> None:
         try:
+            lm_cfg = (self._config_loader() or {}).get("lm_translator", {})
+            provider = lm_cfg.get("provider", "gemini")
+        except Exception:
+            logger.debug("讀取翻譯供應商失敗", exc_info=True)
+            provider = "gemini"
+        if provider == "chatgpt":
+            try:
+                from app.services_impl.chatgpt_oauth_service import (
+                    chatgpt_account_status,
+                )
+
+                account = chatgpt_account_status()
+            except Exception:
+                logger.debug("讀取 ChatGPT 登入狀態失敗", exc_info=True)
+                self.topbar.set_chatgpt_status(
+                    connected=False, error="ChatGPT 登入狀態無法讀取"
+                )
+            else:
+                self.topbar.set_chatgpt_status(
+                    connected=bool(account.get("connected")),
+                    email=str(account.get("email") or ""),
+                )
+            return
+        try:
             snapshot = self._key_snapshot()
         except Exception:
             logger.debug("讀取 Key 狀態失敗", exc_info=True)
@@ -1082,8 +1106,13 @@ def _default_config_loader() -> dict:
 
 
 def _enabled_model_name(config: dict) -> str | None:
-    """設定中第一個啟用的模型名稱。"""
-    models = (config.get("lm_translator") or {}).get("models") or {}
+    """目前 provider 設定中所選的模型名稱。"""
+    lm_cfg = config.get("lm_translator") or {}
+    if lm_cfg.get("provider", "gemini") == "chatgpt":
+        model_name = str(lm_cfg.get("chatgpt_model") or "").strip()
+        return model_name or None
+
+    models = lm_cfg.get("models") or {}
     for name, cfg in models.items():
         if isinstance(cfg, dict) and cfg.get("enabled"):
             return str(name)

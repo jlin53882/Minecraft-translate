@@ -896,6 +896,24 @@ def test_environment_helpers_tolerate_missing_config():
     assert _cache_dir_of({"translator": {"cache_directory": "x"}}) == "x"
 
 
+def test_statusbar_model_name_follows_chatgpt_provider_selection():
+    config = {
+        "lm_translator": {
+            "provider": "chatgpt",
+            "chatgpt_model": "  gpt-5-codex  ",
+            "models": {"gemini-stale-model": {"enabled": True}},
+        }
+    }
+
+    assert _enabled_model_name(config) == "gpt-5-codex"
+    assert (
+        _enabled_model_name(
+            {"lm_translator": {"provider": "chatgpt", "chatgpt_model": "  "}}
+        )
+        is None
+    )
+
+
 def test_broken_config_or_keys_do_not_stop_the_shell(placeholder_views, env):
     def boom():
         raise RuntimeError("壞掉了")

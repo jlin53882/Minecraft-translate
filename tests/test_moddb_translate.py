@@ -585,11 +585,18 @@ def test_db_path_strips_quotes_and_accepts_a_folder(tmp_path, monkeypatch):
     assert folder_settings.resolved_path() == folder / DEFAULT_DB_FILE
 
 
-def test_config_db_path_field_cleans_quotes_and_checks_existence(db_path):
+def test_config_db_path_field_cleans_quotes_and_checks_existence(db_path, monkeypatch):
     """設定頁路徑欄位：貼上帶引號的路徑自動去引號，並即時顯示檔案是否存在。"""
     from app.ui import kit
     from app.views.config.db_location import DbLocationBanner, attach_path_hooks
     from tests.test_moddb_view import texts_of
+    from translation_tool.utils import config_manager
+
+    monkeypatch.setattr(
+        config_manager,
+        "resolve_project_path",
+        lambda path: db_path.parent / path,
+    )
 
     field = kit.field(label="資料庫檔案", helper="原本的說明")
     banner = DbLocationBanner()

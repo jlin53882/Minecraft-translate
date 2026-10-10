@@ -4,10 +4,13 @@
 維護注意：本檔案的函式 docstring 用於維護說明，不代表行為變更。
 """
 
+import random
+from copy import deepcopy
 from dataclasses import dataclass, field
 
 import requests
 
+from translation_tool.core.codex_oauth import chatgpt_account_status
 from translation_tool.core.lm_api_client import (
     GeminiResponseFormatError,
     call_gemini_requests,
@@ -20,8 +23,17 @@ from translation_tool.core.lm_batch_budget import (
     get_tracker,
     select_batch_size,
 )
-from translation_tool.core.lm_config_rules import ApiKeyCycle, get_api_key_count
-from translation_tool.core.lm_config_schema import model_output_token_cap
+from translation_tool.core.lm_config_rules import (
+    ApiKeyCycle,
+    get_api_key_count,
+    get_translation_provider,
+    validate_translation_credentials,
+)
+from translation_tool.core.lm_config_schema import (
+    chatgpt_model_input_token_budget,
+    chatgpt_model_reasoning_effort,
+    model_output_token_cap,
+)
 from translation_tool.core.lm_key_health import (
     PROBE_LEASE_MARGIN_SEC,
     get_model_quota_registry,
@@ -47,6 +59,24 @@ OVERLOAD_RETRY_WAIT_SEC = 12  # Overload 重試等待秒數
 # 同一把 API key 累積這麼多次 503 overload 後，才把「這一把」標記為失敗並換下一把。
 # 次數是逐把 key 計算：不同 key 的 overload 不互相累加。
 OVERLOAD_KEY_SWITCH_THRESHOLD = 3
+CHATGPT_MAX_RETRIES = 3
+CHATGPT_MAX_RETRY_AFTER_SEC = 120
+CHATGPT_TRANSIENT_USAGE_ERROR_CODES = frozenset(
+    {
+        "subscription_sharing_usage_unavailable",
+        "subscription_sharing_user_unavailable",
+    }
+)
+CHATGPT_PERMANENT_QUOTA_ERROR_CODES = frozenset(
+    {
+        "credit_balance_exhausted",
+        "insufficient_quota",
+        "usage_limit",
+        "spend_limit",
+        "quota_exceeded",
+        "subscription_sharing_usage_limit_exceeded",
+    }
+)
 
 # =========================================================
 # Size Constants - 大小相關常數
@@ -215,8 +245,11 @@ def translate_batch_smart(
     items = _validate_batch_items(batch_items)
     if not items:
         return [], "AUTO"
-    if not dry_run and get_api_key_count() == 0:
-        raise RuntimeError("❌ 設定檔中沒有找到任何 API Key，請先設定金鑰。")
+    if not dry_run:
+        if get_translation_provider() == "chatgpt":
+            validate_translation_credentials()
+        elif get_api_key_count() == 0:
+            raise RuntimeError("❌ 設定檔中沒有找到任何 API Key，請先設定金鑰。")
 
     # 批次 profile 與批次大小由 _execute_translation 內部決定（舊版在這裡重複計算後丟棄，已移除）。
 
@@ -334,6 +367,7 @@ class _BatchRuntime:
     batch_items: list[dict]
     total: int | None
     lm_cfg: dict
+    provider: str
     batch_profile: str
     batch_size: int
     budget_cfg: BudgetConfig
@@ -360,6 +394,9 @@ class _BatchRuntime:
     key_rotation_buffer_sec: float = 5
     overload_retry_sec: float = OVERLOAD_RETRY_WAIT_SEC
     request_interval_sec: float = 4
+    reasoning_effort: str | None = None
+    chatgpt_profile_id: str | None = None
+    chatgpt_retry_count: int = 0
 
 
 @dataclass(frozen=True)
@@ -408,7 +445,9 @@ def _build_batch_runtime(
     total: int | None,
 ) -> _BatchRuntime | None:
     """Build configuration and mutable batch state once per call."""
-    lm_cfg = load_config().get("lm_translator", {})
+    config_snapshot = deepcopy(load_config())
+    lm_cfg = config_snapshot.get("lm_translator", {})
+    provider = lm_cfg.get("provider", "gemini")
     profile = _detect_batch_profile(batch_items)
     max_sizes = {
         "lang": lm_cfg.get("initial_batch_size_lang", 200),
@@ -423,15 +462,39 @@ def _build_batch_runtime(
     except (TypeError, ValueError):
         rpm_cooldown = float(RPM_COOLDOWN_SEC)
 
-    models_cfg = get_models_config(load_config())
-    model_pool = [
-        name for name, config in models_cfg.items() if config.get("enabled", False)
-    ]
+    reasoning_effort = None
+    chatgpt_profile_id = None
+    if provider == "chatgpt":
+        chatgpt_model = str(lm_cfg.get("chatgpt_model") or "").strip()
+        model_pool = [chatgpt_model] if chatgpt_model else []
+        if chatgpt_model:
+            context_budget = chatgpt_model_input_token_budget(lm_cfg, chatgpt_model)
+            if context_budget is not None:
+                lm_cfg = {**lm_cfg, "max_input_token_budget": context_budget}
+            reasoning_effort = chatgpt_model_reasoning_effort(lm_cfg, chatgpt_model)
+    else:
+        models_cfg = get_models_config(config_snapshot)
+        model_pool = [
+            name for name, config in models_cfg.items() if config.get("enabled", False)
+        ]
     if not model_pool:
         log_error(
             "[❌] MODEL_POOL 為空（沒有啟用任何模型），請在設定中啟用至少一個模型"
         )
         return None
+    if provider == "chatgpt":
+        chatgpt_profile_id = str(
+            chatgpt_account_status().get("active_profile_id") or ""
+        )
+        if not chatgpt_profile_id:
+            log_error("[❌] 找不到作用中的 ChatGPT 帳號，請先在設定頁連結並選擇帳號")
+            return None
+        configured_profile_id = str(lm_cfg.get("chatgpt_model_profile_id") or "")
+        if configured_profile_id != chatgpt_profile_id:
+            log_error(
+                "[❌] ChatGPT 模型尚未確認適用於目前帳號；請在設定頁更新模型清單並儲存設定"
+            )
+            return None
 
     lang_prompt = _prompt_text(
         lm_cfg.get("lang_system_prompt"),
@@ -451,6 +514,7 @@ def _build_batch_runtime(
         batch_items=batch_items,
         total=total,
         lm_cfg=lm_cfg,
+        provider=provider,
         batch_profile=profile,
         batch_size=min(len(batch_items), max_size),
         budget_cfg=BudgetConfig.from_config(lm_cfg),
@@ -473,6 +537,8 @@ def _build_batch_runtime(
         key_rotation_buffer_sec=lm_cfg.get("key_rotation_buffer_sec", 5),
         overload_retry_sec=lm_cfg.get("overload_retry_sec", OVERLOAD_RETRY_WAIT_SEC),
         request_interval_sec=lm_cfg.get("request_interval_sec", 4),
+        reasoning_effort=reasoning_effort,
+        chatgpt_profile_id=chatgpt_profile_id,
     )
 
 
@@ -535,6 +601,124 @@ def _remote_error_detail(error: Exception, limit: int = 300) -> str:
     return redact_text(text.strip())[:limit]
 
 
+def _chatgpt_api_error_message(error) -> str:
+    """將 Responses API 錯誤轉成可採取行動的翻譯錯誤訊息。"""
+    code = error.code.lower()
+    param = error.param.lower()
+    detail = str(error)
+
+    if code == "refusal":
+        return f"ChatGPT 拒絕處理這批翻譯內容，請檢查來源文字後再試。API 詳情：{detail}"
+    if code == "subscription_sharing_usage_limit_exceeded":
+        return (
+            "ChatGPT 方案或此應用的使用限制已達；系統已停止自動重試，"
+            "請查看 ChatGPT 使用量設定後再執行。API 詳情："
+            f"{detail}"
+        )
+    if _is_chatgpt_quota_exhaustion(error):
+        return (
+            "ChatGPT 方案用量或 API 配額已耗盡；系統已停止自動重試，"
+            f"請確認方案使用量或帳務限制後再執行。API 詳情：{detail}"
+        )
+    if error.status == 401:
+        return (
+            f"ChatGPT OAuth 憑證無效或已過期，請到 API 設定重新登入。API 詳情：{detail}"
+        )
+    if error.status == 403:
+        return (
+            "ChatGPT 拒絕此請求（403）。請確認登入帳號已授權 ChatGPT 計畫用 API 存取，"
+            "且帳號、方案、模型與所在區域符合使用資格；若資格已更新，可到 API 設定重新登入。"
+            f"API 詳情：{detail}"
+        )
+    if error.status == 429:
+        return f"ChatGPT 使用頻率或用量已達限制，請稍後再試並確認方案使用量。API 詳情：{detail}"
+    if error.status in {400, 422} and (
+        "schema" in code or "schema" in param or "text.format" in param
+    ):
+        return (
+            "ChatGPT 拒絕了結構化輸出 JSON Schema；請確認模型支援 Structured Outputs，"
+            f"並檢查 schema 欄位。API 詳情：{detail}"
+        )
+    if error.status in {400, 422}:
+        return f"ChatGPT 無法接受此翻譯請求，請檢查 API 詳情中的欄位與參數。API 詳情：{detail}"
+    if error.status == 404:
+        return f"ChatGPT 找不到或無權使用所選模型，請在設定選擇可用模型。API 詳情：{detail}"
+    if error.status is not None and error.status >= 500:
+        return f"ChatGPT 服務暫時發生錯誤，請稍後重試。API 詳情：{detail}"
+    if code in {"network_error", "stream_interrupted", "stream_incomplete"}:
+        return f"ChatGPT 連線中斷或回應串流未完成，請檢查網路後重試。API 詳情：{detail}"
+    return f"ChatGPT 翻譯請求失敗：{detail}"
+
+
+def _is_chatgpt_quota_exhaustion(error) -> bool:
+    """Return whether a machine-readable API code signals a permanent quota limit."""
+    code = str(error.code or "").strip().lower()
+    error_type = str(error.error_type or "").strip().lower()
+    return (
+        code in CHATGPT_PERMANENT_QUOTA_ERROR_CODES
+        or error_type in CHATGPT_PERMANENT_QUOTA_ERROR_CODES
+    )
+
+
+def _chatgpt_retryable_error(error) -> bool:
+    """Recognize transient Responses errors without retrying billing failures."""
+    if _is_chatgpt_quota_exhaustion(error):
+        return False
+    code = str(error.code or "").strip().lower()
+    error_type = str(error.error_type or "").lower()
+    if code in CHATGPT_TRANSIENT_USAGE_ERROR_CODES:
+        return True
+    if error.status == 429:
+        # A 429 is retryable throttling unless its machine-readable code above
+        # identified a terminal plan or billing limit.
+        return True
+    if error.status in {408, 500, 502, 503, 504}:
+        return True
+    return code in {
+        "network_error",
+        "server_error",
+        "service_unavailable",
+        "stream_incomplete",
+        "stream_interrupted",
+    } or error_type in {"rate_limit_error", "service_unavailable_error"}
+
+
+def _handle_chatgpt_api_error(runtime: _BatchRuntime, error) -> BatchAction:
+    """Apply bounded, cancellable backoff for transient ChatGPT request failures."""
+    if error.code == "incomplete":
+        log_warning(f"[ChatGPT] 回應未完整完成，縮小批次後重試：{error}")
+        return BatchAction.SHRINK_BATCH
+    if not _chatgpt_retryable_error(error):
+        raise RuntimeError(_chatgpt_api_error_message(error)) from error
+    if runtime.chatgpt_retry_count >= CHATGPT_MAX_RETRIES:
+        raise RuntimeError(
+            f"{_chatgpt_api_error_message(error)} 已達 {CHATGPT_MAX_RETRIES} 次重試上限。"
+        ) from error
+
+    retry_after = getattr(error, "retry_after", None)
+    if retry_after is not None:
+        try:
+            wait_sec = max(0.0, float(retry_after))
+        except (TypeError, ValueError):
+            retry_after = None
+    if retry_after is None:
+        base_delay = min(2**runtime.chatgpt_retry_count, 30)
+        wait_sec = base_delay + random.uniform(0, min(1.0, base_delay * 0.25))
+    if wait_sec > CHATGPT_MAX_RETRY_AFTER_SEC:
+        raise RuntimeError(
+            f"{_chatgpt_api_error_message(error)} 伺服器要求等待 {wait_sec:g} 秒，"
+            f"超過本程式的 {CHATGPT_MAX_RETRY_AFTER_SEC} 秒上限；請稍後重新執行。"
+        ) from error
+
+    runtime.chatgpt_retry_count += 1
+    log_warning(
+        f"[ChatGPT] 暫時性錯誤，{wait_sec:g} 秒後重試 "
+        f"({runtime.chatgpt_retry_count}/{CHATGPT_MAX_RETRIES})：{error}"
+    )
+    interruptible_sleep(wait_sec)
+    return BatchAction.RETRY_SAME_MODEL
+
+
 def _handle_batch_error(
     runtime: _BatchRuntime,
     error: Exception,
@@ -544,6 +728,14 @@ def _handle_batch_error(
     cap_source: str = "global",
 ) -> BatchAction:
     """Classify one failed model attempt and execute stateful key/wait effects."""
+    from translation_tool.core.codex_oauth import ChatGPTOAuthError
+    from translation_tool.core.openai_codex_client import ChatGPTAPIError
+
+    if isinstance(error, ChatGPTOAuthError):
+        raise ChatGPTOAuthError(f"ChatGPT OAuth 登入需要處理：{error}") from error
+    if isinstance(error, ChatGPTAPIError):
+        return _handle_chatgpt_api_error(runtime, error)
+
     status = (
         error.response.status_code
         if isinstance(error, requests.HTTPError) and error.response is not None
@@ -768,15 +960,16 @@ def _retry_same_source_translations(
     try:
         raise_if_cancelled()
         retry_meta: dict = {}
-        retry_text = call_gemini_requests(
-            model_name=model_name,
-            system_prompt=retry_prompt,
-            payload=retry_round.payload,
-            api_key=api_key,
-            temperature=runtime.model_temperature,
-            max_output_tokens=output_cap,
-            meta_out=retry_meta,
-        ).strip()
+        request_kwargs = _provider_request_kwargs(
+            runtime,
+            model_name,
+            retry_prompt,
+            retry_round.payload,
+            output_cap,
+            retry_meta,
+            api_key,
+        )
+        retry_text = call_gemini_requests(**request_kwargs).strip()
         raise_if_cancelled()
         if (
             not retry_text
@@ -968,6 +1161,31 @@ def _finish_successful_batch(
     return _BatchRoundOutcome()
 
 
+def _provider_request_kwargs(
+    runtime, model_name, prompt, payload, output_cap, meta_out, api_key
+):
+    """Build shared and ChatGPT-specific arguments for one provider request."""
+    kwargs = {
+        "model_name": model_name,
+        "system_prompt": prompt,
+        "payload": payload,
+        "api_key": api_key,
+        "temperature": runtime.model_temperature,
+        "max_output_tokens": output_cap,
+        "meta_out": meta_out,
+        "provider": getattr(
+            runtime, "provider", runtime.lm_cfg.get("provider", "gemini")
+        ),
+        "lm_config": runtime.lm_cfg,
+    }
+    if kwargs["provider"] == "chatgpt":
+        kwargs["reasoning_effort"] = runtime.reasoning_effort
+        profile_id = getattr(runtime, "chatgpt_profile_id", None)
+        if profile_id:
+            kwargs["profile_id"] = profile_id
+    return kwargs
+
+
 def _attempt_batch(
     runtime: _BatchRuntime, round_data: _BatchRound
 ) -> _BatchRoundOutcome:
@@ -1011,16 +1229,21 @@ def _attempt_batch(
                 f"/{runtime.batch_size} | 翻譯總量={runtime.original_total}"
             )
             with quota.hold_probe_lease(model_name, owner, lease_sec):
-                api_key = runtime.key_cycle.claim()
-                raw_text = call_gemini_requests(
-                    model_name=model_name,
-                    system_prompt=prompt,
-                    payload=round_data.payload,
-                    api_key=api_key,
-                    temperature=runtime.model_temperature,
-                    max_output_tokens=output_cap,
-                    meta_out=api_meta,
-                ).strip()
+                api_key = (
+                    runtime.key_cycle.claim() if runtime.provider == "gemini" else ""
+                )
+                request_kwargs = _provider_request_kwargs(
+                    runtime,
+                    model_name,
+                    prompt,
+                    round_data.payload,
+                    output_cap,
+                    api_meta,
+                    api_key,
+                )
+                raw_text = call_gemini_requests(**request_kwargs).strip()
+            if runtime.provider == "chatgpt":
+                runtime.chatgpt_retry_count = 0
             # A synchronous provider request cannot be interrupted in flight.
             # If cancellation arrived while it was blocked, discard its result
             # before quota state, retries, or downstream writes can observe it.

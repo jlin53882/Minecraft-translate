@@ -149,12 +149,30 @@ class ApiStatusPill(ft.Container):
         self.set_keys([])
 
     def set_keys(self, snapshot: Sequence[KeyHealth]) -> None:
+        self.provider_text.value = self.provider
         self.summary = summarize_keys(snapshot)
         tone = get_tone(self.summary.tone)
         self.dot.bgcolor = tone.fg
         self.count_text.value = self.summary.text
         self.count_text.color = tone.fg if self.summary.tone != "em" else C.MUTED
         self.tooltip = self.summary.tooltip
+
+    def set_chatgpt_status(
+        self, *, connected: bool, email: str = "", error: str = ""
+    ) -> None:
+        """Show ChatGPT account status instead of the Gemini key count."""
+        self.provider_text.value = "ChatGPT"
+        self.count_text.value = "已連結" if connected else "未登入"
+        tone = get_tone("em" if connected else "gold")
+        self.dot.bgcolor = tone.fg
+        self.count_text.color = tone.fg
+        self.tooltip = (
+            f"已連結 ChatGPT 帳號：{email}"
+            if connected and email
+            else "已連結 ChatGPT 帳號"
+            if connected
+            else error or "尚未連結 ChatGPT 帳號；點擊此處前往設定登入"
+        )
 
 
 class TopBar(ft.Container):
@@ -228,6 +246,11 @@ class TopBar(ft.Container):
 
     def set_keys(self, snapshot: Sequence[KeyHealth]) -> None:
         self.api_pill.set_keys(snapshot)
+
+    def set_chatgpt_status(
+        self, *, connected: bool, email: str = "", error: str = ""
+    ) -> None:
+        self.api_pill.set_chatgpt_status(connected=connected, email=email, error=error)
 
     def set_recent(self, tasks: Sequence[TaskInfo], *, unread: bool = False) -> None:
         """通知清單：最近結束的任務（失敗的標紅）。"""
