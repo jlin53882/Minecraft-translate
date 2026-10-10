@@ -16,6 +16,7 @@ from app.ui import design
 from app.ui.design import C
 from app.ui.snack import show_snack
 from app.ui.sync_text_field import SyncTextField
+from app.views.moddb.format_diff_review import FormatDiffReview
 from app.views.moddb.format_diff_viewer import FormatDiffViewer
 from app.views.moddb.formatting import format_count
 
@@ -37,6 +38,10 @@ class RepairReviewer:
         self.draft: ft.TextField | None = None
         self.format_status = ft.Text("", size=12, color=C.MUTED)
         self.format_diff_viewer = FormatDiffViewer(switch_label="顯示格式差異")
+        self.format_review = FormatDiffReview(
+            context_label="AI 修復預覽",
+            panel_width=240,
+        )
         self.status = ft.Text("", size=13, weight=ft.FontWeight.BOLD, color=C.MUTED)
         self.applying = False
         self.previous_button = ft.OutlinedButton(
@@ -246,14 +251,13 @@ class RepairReviewer:
                         weight=ft.FontWeight.W_600,
                         color=C.EM,
                     ),
-                    self.draft,
                     ft.Text(
                         "可直接修改；內容會即時保存為草稿，格式檢查結果會顯示在下方。",
                         size=11.5,
                         color=C.MUTED,
                     ),
                     self.format_status,
-                    self.format_diff_viewer.control,
+                    self.format_review.control,
                 ],
                 spacing=10,
             ),
@@ -311,6 +315,7 @@ class RepairReviewer:
             width=max(240.0, float(self.content_box.width or 1120) / 2 - 36),
             on_change=self._draft_changed,
         )
+        self.format_review.set_editable_control(self.draft)
         self._update_format_status(
             str(item.get("en_us") or ""), str(item.get("draft") or "")
         )
@@ -365,6 +370,7 @@ class RepairReviewer:
             self.format_status.value = "格式檢查通過。"
             self.format_status.color = C.EM
         self.format_diff_viewer.render(source, draft, diff_result)
+        self.format_review.render(source, draft, diff_result)
 
     def _draft_changed(self, _event=None) -> None:
         if self.applying or self.item is None or self.draft is None:

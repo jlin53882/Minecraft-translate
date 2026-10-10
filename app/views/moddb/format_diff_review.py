@@ -74,12 +74,16 @@ class FormatDiffReview:
         editable_control: ft.Control | None = None,
         edit_notice: ft.Control | None = None,
         compact: bool = False,
+        panel_width: float | None = None,
+        show_source: bool = True,
     ) -> None:
         self.context_label = context_label
         self.source_label = source_label
         self.target_label = target_label
         self.editable_control = editable_control
         self.compact = compact
+        self.panel_width = panel_width or (320 if compact else 340)
+        self.show_source = show_source
         self._result: FormatDiffResult | None = None
         self._highlight = True
         self._tab = "diff"
@@ -171,22 +175,19 @@ class FormatDiffReview:
                     ),
                 ],
                 spacing=2,
-                expand=True,
             ),
+            ft.Container(expand=True),
             kit.chip(self.context_label, "dia"),
         ]
-        if self._meta_controls:
-            header_controls.append(
-                ft.Row(self._meta_controls, spacing=6, wrap=True)
-            )
         content: list[ft.Control] = [
             ft.Row(
                 header_controls,
                 spacing=8,
                 vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                wrap=True,
             ),
         ]
+        if self._meta_controls:
+            content.append(ft.Row(self._meta_controls, spacing=6, wrap=True))
         if self._tabs.visible:
             content.append(
                 ft.Row(
@@ -249,12 +250,14 @@ class FormatDiffReview:
             target_tokens,
             "em",
         )
+        comparison_panels = [target_panel]
+        if self.show_source:
+            comparison_panels.insert(0, source_panel)
         return [
             issue_summary,
             ft.Row(
-                [source_panel, target_panel],
+                comparison_panels,
                 spacing=10,
-                wrap=True,
                 vertical_alignment=ft.CrossAxisAlignment.START,
             ),
             self._result_table(result),
@@ -269,36 +272,25 @@ class FormatDiffReview:
         tone: str,
     ) -> ft.Container:
         palette = design.tone(tone)
-        rendered = ft.Text(
-            "",
-            size=13,
-            color=C.TEXT,
-            selectable=True,
-            font_family=design.FONT_MONO,
-        )
-        rendered.spans = _token_spans(
-            text,
-            occurrences,
-            affected_tokens,
-            highlight=self._highlight,
-        )
+        rendered = ft.Text(text or "（無）", size=13, color=C.TEXT, selectable=True)
+        if self._highlight:
+            rendered.value = ""
+            rendered.spans = _token_spans(
+                text,
+                occurrences,
+                affected_tokens,
+                highlight=True,
+            )
         return ft.Container(
             content=ft.Column(
-                [
-                    ft.Row(
-                        [ft.Text(title, size=12, color=palette.fg), ft.Container(expand=True)],
-                        spacing=4,
-                    ),
-                    ft.Divider(height=1, color=C.LINE),
-                    rendered,
-                ],
-                spacing=8,
+                [ft.Text(title, size=12, color=palette.fg), rendered], spacing=8
             ),
             padding=12,
-            bgcolor=palette.bg,
+            bgcolor=C.PANEL2,
             border=ft.Border.all(1, palette.line),
             border_radius=design.RADIUS_CONTROL,
-            expand=True,
+            width=self.panel_width,
+            height=220 if self.compact else 260,
         )
 
     def _result_table(self, result: FormatDiffResult) -> ft.Container:

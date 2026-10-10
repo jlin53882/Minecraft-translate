@@ -26,6 +26,7 @@ from app.tasks.operation_registry import (
 from app.ui import kit
 from app.ui.design import C
 from app.ui.snack import show_snack
+from app.views.moddb.format_diff_review import FormatDiffReview
 from app.views.moddb.formatting import format_count, visible_breaks
 from translation_tool.utils.log_unit import log_warning
 
@@ -409,7 +410,7 @@ def _build_preview_group_card(panel, group, index: int, total: int):
     detail.controls = [
         ft.Row(
             [
-                ft.Text("英文原文", size=11.5, color=C.MUTED),
+                ft.Text(f"來源譯文（{len(group)} 筆）", size=11.5, color=C.MUTED),
                 ft.IconButton(
                     icon=ft.Icons.CONTENT_COPY,
                     tooltip="複製英文原文",
@@ -417,11 +418,12 @@ def _build_preview_group_card(panel, group, index: int, total: int):
                 ),
             ],
             spacing=3,
-        ),
-        ft.Text(first_row.en_us, size=13, color=C.TEXT, selectable=True),
-        ft.Text(f"來源譯文（{len(group)} 筆）", size=11.5, color=C.MUTED),
+        )
     ]
-    for cache_type, row in group:
+    for source_index, (cache_type, row) in enumerate(group):
+        format_review = _build_preview_format_review(
+            cache_type, row, show_source=source_index == 0
+        )
         detail.controls.append(
             ft.Container(
                 padding=8,
@@ -440,12 +442,7 @@ def _build_preview_group_card(panel, group, index: int, total: int):
                             ],
                             spacing=8,
                         ),
-                        ft.Text(
-                            row.current_ai_translation,
-                            size=13,
-                            color=C.TEXT,
-                            selectable=True,
-                        ),
+                        format_review,
                     ],
                     spacing=4,
                 ),
@@ -494,6 +491,18 @@ def _build_preview_group_card(panel, group, index: int, total: int):
             spacing=7,
         ),
     )
+
+
+def _build_preview_format_review(cache_type, row, *, show_source):
+    review = FormatDiffReview(
+        context_label=source_label(row.source_id),
+        source_label="英文原文・en_us",
+        target_label=f"{cache_profile_label(cache_type)}・目前譯文",
+        compact=True,
+        show_source=show_source,
+    )
+    review.render(row.en_us, row.current_ai_translation)
+    return review.control
 
 
 def refresh_preview_cards(panel, *, update: bool = True) -> None:

@@ -131,6 +131,20 @@ def _drain_page_tasks(page):
     page._run_all_tasks()
 
 
+def _contains_control_text(control, expected):
+    if getattr(control, "value", None) == expected:
+        return True
+    if getattr(control, "text", None) == expected:
+        return True
+    content = getattr(control, "content", None)
+    if content is not None and _contains_control_text(content, expected):
+        return True
+    return any(
+        _contains_control_text(child, expected)
+        for child in (getattr(control, "controls", None) or [])
+    )
+
+
 def _select_repair_mode(panel, mode="same_source_ai"):
     panel._repair_mode = mode
     panel.repair_mode_group.value = mode
@@ -2282,6 +2296,7 @@ def test_retranslation_preview_shows_ai_source_profiles_and_samples(
     assert "規劃批次：2（不等於實際 HTTP 請求次數）" in text
     assert len(panel.repair_samples.controls) == 2
     assert panel.repair_samples.visible is True
+    assert _contains_control_text(panel.repair_samples.controls[0], "格式差異檢視")
     assert "顯示 2 / 2 個翻譯 Key" in panel.repair_preview_count.value
     panel.repair_preview_search.value = "patchouli"
     retranslation_controller.refresh_preview_cards(panel)
