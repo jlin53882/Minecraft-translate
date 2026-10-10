@@ -3,7 +3,11 @@
 from __future__ import annotations
 
 from app.services_impl.moddb_service import SRC_AI, SRC_JAR_CN, SRC_MANUAL
-from translation_tool.translation_db.schema import CUSTOM_SOURCE_BASE, SRC_CUSTOM
+from translation_tool.translation_db.schema import (
+    BUILTIN_SOURCE_NAMES,
+    CUSTOM_SOURCE_BASE,
+    SRC_CUSTOM,
+)
 from translation_tool.translation_db.settings import (
     DbSettings,
     clean_source_names,
@@ -21,6 +25,11 @@ MANUAL_REVIEW_LABELS = {
     "reviewed": "人工-已審核",
     "legacy_unknown": "人工（歷史狀態待確認）",
 }
+
+
+def builtin_source_codes() -> tuple[int, ...]:
+    """Return built-in source IDs for UI filters without exposing DB schema imports."""
+    return tuple(BUILTIN_SOURCE_NAMES)
 
 
 def normalize_priority_config(config: dict) -> None:

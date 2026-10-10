@@ -1204,6 +1204,70 @@ def test_custom_source_works_end_to_end(db_path, clean_custom_sources, monkeypat
     db.close()
 
 
+def test_entry_source_filter_hides_unreferenced_custom_sources(db_path, monkeypatch):
+    import sqlite3
+
+    from app.views.moddb import entries_panel, scan_panel
+    from app.views.moddb.panel_refresh import load_panel_snapshot
+    from translation_tool.translation_db.settings import load_db_settings
+
+    seed(db_path)
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            "INSERT INTO meta (key, value) VALUES ('custom_sources', ?) "
+            "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            (
+                json.dumps(
+                    {
+                        "測試": 100,
+                        "釘宮翻譯組": 101,
+                        "ModsTranslationPack": 102,
+                    },
+                    ensure_ascii=False,
+                ),
+            ),
+        )
+
+    settings = load_db_settings(_cfg(db_path, ["人工"]))
+    monkeypatch.setattr(moddb_service, "load_db_settings", lambda: settings)
+    db = TranslationDB(db_path, priority=settings.priority)
+    db.write_back(
+        "1.21.1",
+        [WriteBackItem(KIND_LANG, "foo", "item.foo.b", "Infused Alloy", "測試譯文")],
+        source=100,
+    )
+
+    panel = entries_panel.EntriesPanel(mock_page(), lambda: db)
+    snapshot = load_panel_snapshot(
+        "entries",
+        {
+            "version": "1.21.1",
+            "mod_id": None,
+            "kind": None,
+            "page": 1,
+            "selected_id": None,
+            "criteria": moddb_service.EntryFilter(version="1.21.1"),
+        },
+        settings,
+    )
+    assert 100 in snapshot["effective_source_codes"]
+    assert 101 not in snapshot["effective_source_codes"]
+    assert 102 not in snapshot["effective_source_codes"]
+    panel.apply_refresh_snapshot(snapshot)
+    option_keys = {option.key for option in panel.source_filter.dropdown.options}
+    option_labels = {option.text for option in panel.source_filter.dropdown.options}
+    assert "100" in option_keys
+    assert "101" not in option_keys
+    assert "102" not in option_keys
+    assert "釘宮翻譯組（自訂 #101）" not in option_labels
+    assert "ModsTranslationPack" not in option_labels
+
+    scan = scan_panel.ScanPanel(mock_page(), mock_filepicker(), lambda: db)
+    zip_source_keys = {option.key for option in scan.source_dd.options}
+    assert {"100", "101", "102"}.issubset(zip_source_keys)
+    db.close()
+
+
 def test_names_typed_before_the_database_exists_are_registered_on_creation(
     tmp_path, clean_custom_sources
 ):

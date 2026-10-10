@@ -1140,6 +1140,7 @@ def test_effective_source_stats_group_codes_review_states_and_untranslated(db):
     for row in stats:
         totals[row.mc_version] = totals.get(row.mc_version, 0) + row.count
     assert totals == {row.mc_version: row.total for row in db.version_stats()}
+    assert db._version_stats_from_source_stats(stats) == db._version_stats_rows()
 
 
 def test_manual_review_state_filter_matches_list_and_count(db):

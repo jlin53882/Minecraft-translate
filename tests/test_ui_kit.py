@@ -126,6 +126,23 @@ def test_pager_summary_and_pages():
     assert p.current_page == 3
     assert "17" in p.summary.value and "24" in p.summary.value
     assert "1,842" in p.summary.value
+    assert "第 3 / 231 頁" in p.summary.value
+
+
+def test_pager_large_page_numbers_fit_without_wrapping():
+    p = kit.Pager(243064, page=4858, page_size=50)
+    numbered = [
+        cell
+        for cell in p.buttons.controls
+        if isinstance(cell.content, ft.Text) and cell.content.value.isdigit()
+    ]
+
+    assert p.total_pages == 4862
+    assert p.current_page == 4858
+    assert p.buttons.controls[0].width == 30
+    assert all(cell.width >= 40 for cell in numbered if len(cell.content.value) == 4)
+    assert all(cell.width >= 34 for cell in numbered)
+    assert [int(cell.content.value) for cell in numbered] == [1, 4857, 4858, 4859, 4862]
 
 
 def test_pager_empty():

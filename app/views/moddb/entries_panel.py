@@ -344,7 +344,6 @@ class EntriesPanel(ft.Column):
             # carry it into a different database.
             self.source_filter.reset()
         self._db_identity = identity
-        self.source_filter.refresh()
         versions = db.versions()
         kit.set_dropdown_options(self.version_dd, [(v, v) for v in versions])
         if self.version not in versions:
@@ -353,6 +352,8 @@ class EntriesPanel(ft.Column):
                 wanted if wanted in versions else (versions[0] if versions else None)
             )
         self.version_dd.value = self.version
+        source_codes = db.effective_source_codes(self.version) if self.version else ()
+        self.source_filter.refresh(source_codes, catalog=self._render_source_catalog)
         self._load_mods()
         self._load_list(keep_selection=keep_selection)
 

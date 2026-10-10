@@ -236,7 +236,8 @@ class OverviewPanel(ft.Column):
         """請求非同步重新載入；資料查詢由 ModDbView 的背景工作負責。"""
         if self._request_refresh is None:
             db = self._get_db()
-            stats = db.version_stats() if db else []
+            source_stats = db.effective_source_stats_by_version() if db else []
+            stats = db.version_stats_from_effective_sources(source_stats) if db else []
             if not stats:
                 problem = database_problem()
                 if problem:
@@ -245,9 +246,6 @@ class OverviewPanel(ft.Column):
                         self._safe_update()
                     return
             overview = db.overview() if db and stats else {}
-            source_stats = (
-                db.effective_source_stats_by_version() if db and stats else []
-            )
             missing = db.missing_by_mod(stats[0].mc_version, limit=10) if stats else []
             scans = db.last_scans(5) if db and stats else []
             self.apply_snapshot(

@@ -16,6 +16,7 @@ def load_panel_snapshot(key: str, request: dict, settings) -> dict:
     """Read tab data from a worker-owned, read-only connection."""
     db = open_database(create=False, settings=settings, readonly=True)
     snapshot = {"key": key, "identity": None, "error": None}
+    snapshot["effective_source_codes"] = ()
     try:
         if db is not None:
             db._conn.execute("BEGIN")
@@ -46,6 +47,9 @@ def _load_entries_snapshot(db, request: dict, settings, snapshot: dict) -> dict:
         version = settings.version
     if version is None and versions:
         version = versions[0]
+    snapshot["effective_source_codes"] = (
+        db.effective_source_codes(version) if db is not None and version else ()
+    )
     mods = db.mods(version) if db and version else []
     kinds = db.kinds(version) if db and version else []
     mod_id = request.get("mod_id") if request.get("mod_id") in mods else None

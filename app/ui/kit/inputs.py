@@ -381,15 +381,15 @@ class Pager(ft.Container):
         self.total_items = max(0, total_items)
         self._current = 1
         self._render_gen = 0
-        self.summary = ft.Text(size=12, color=C.MUTED)
+        self.summary = ft.Text(size=12, color=C.MUTED, text_align=ft.TextAlign.CENTER)
         self.buttons = ft.Row(spacing=4, tight=True)
         super().__init__(
-            content=ft.Row(
+            content=ft.Column(
                 [self.summary, self.buttons],
-                alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
-                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                spacing=6,
+                horizontal_alignment=ft.CrossAxisAlignment.CENTER,
             ),
-            padding=ft.Padding.symmetric(horizontal=14, vertical=10),
+            padding=ft.Padding.symmetric(horizontal=8, vertical=8),
             border=ft.Border.only(top=ft.BorderSide(1, C.LINE)),
         )
         self.set_state(self.total_items, page)
@@ -417,7 +417,8 @@ class Pager(ft.Container):
             first = (self._current - 1) * self.page_size + 1
             last = min(self._current * self.page_size, self.total_items)
             self.summary.value = (
-                f"第 {first:,}–{last:,} {self.unit} / {self.total_items:,}"
+                f"第 {self._current:,} / {self.total_pages:,} 頁 · "
+                f"{first:,}–{last:,} / {self.total_items:,} {self.unit}"
             )
         # 每次重畫都給按鈕全新的 key：Flet 比對「新舊清單」時會把內容相同的項目當成
         # 移動而配對，頁數變少時會殘留舊頁碼（例如只有 1 頁卻還顯示 3、4、5…73）。
@@ -428,7 +429,9 @@ class Pager(ft.Container):
                 ft.Icons.CHEVRON_LEFT, self._current - 1, enabled=self._current > 1
             )
         ]
-        for item in page_window(self._current, self.total_pages):
+        # 頁碼進入五位數後縮短按鈕列，避免擠壓清單欄位；目前頁與首尾頁仍會保留。
+        window_size = 1 if self.total_pages >= 10_000 else 3
+        for item in page_window(self._current, self.total_pages, size=window_size):
             if item == "…":
                 controls.append(self._cell("…", None, enabled=False))
             else:
@@ -454,7 +457,7 @@ class Pager(ft.Container):
         )
         self.buttons = row
         content = self.content
-        if isinstance(content, ft.Row) and len(content.controls) >= 2:
+        if isinstance(content, ft.Column) and len(content.controls) >= 2:
             content.controls[1] = row
 
     def _cell(
@@ -477,8 +480,10 @@ class Pager(ft.Container):
             )
         )
         return ft.Container(
-            width=28,
-            height=28,
+            width=(
+                30 if is_icon else 24 if label == "…" else max(34, 8 * len(label) + 8)
+            ),
+            height=32,
             border_radius=7,
             alignment=ft.Alignment.CENTER,
             bgcolor=C.EM if selected else None,

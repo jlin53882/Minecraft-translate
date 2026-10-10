@@ -31,7 +31,10 @@ def apply_filter_options(panel, snapshot: dict) -> None:
     if panel._db_identity is not None and identity != panel._db_identity:
         panel.source_filter.reset()
     panel._db_identity = identity
-    panel.source_filter.refresh()
+    panel.source_filter.refresh(
+        snapshot.get("effective_source_codes", ()),
+        catalog=snapshot.get("source_catalog"),
+    )
     versions = snapshot.get("versions", [])
     kit.set_dropdown_options(panel.version_dd, [(v, v) for v in versions])
     panel.version = snapshot.get("version")

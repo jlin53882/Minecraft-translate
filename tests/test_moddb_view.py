@@ -560,16 +560,18 @@ def test_moddb_overview_load_uses_a_worker_owned_connection(db_path, monkeypatch
     load_entered = threading.Event()
     release_load = threading.Event()
     worker_connections = []
-    original_version_stats = TranslationDB.version_stats
+    original_version_stats = TranslationDB.version_stats_from_effective_sources
 
-    def gated_version_stats(db):
+    def gated_version_stats(db, source_stats):
         if threading.current_thread().name.startswith("operation-moddb-overview-load"):
             worker_connections.append(db)
             load_entered.set()
             assert release_load.wait(timeout=2)
-        return original_version_stats(db)
+        return original_version_stats(db, source_stats)
 
-    monkeypatch.setattr(TranslationDB, "version_stats", gated_version_stats)
+    monkeypatch.setattr(
+        TranslationDB, "version_stats_from_effective_sources", gated_version_stats
+    )
     view = moddb_view.ModDbView(page, mock_filepicker())
     view.did_mount()
     try:

@@ -539,6 +539,39 @@ class TranslationDB:
         rows = self._cached("version_stats", self._version_stats_rows)
         return [VersionStat(*r) for r in rows]
 
+    def version_stats_from_effective_sources(
+        self, source_stats: Sequence[EffectiveSourceStat]
+    ) -> list[VersionStat]:
+        """Build version totals from an already loaded source breakdown."""
+        rows = self._cached(
+            "version_stats",
+            lambda: self._version_stats_from_source_stats(source_stats),
+        )
+        return [VersionStat(*row) for row in rows]
+
+    @staticmethod
+    def _version_stats_from_source_stats(
+        source_stats: Sequence[EffectiveSourceStat],
+    ) -> list[list]:
+        totals: dict[str, list[int]] = {}
+        for row in source_stats:
+            counts = totals.setdefault(row.mc_version, [0, 0, 0, 0, 0, 0])
+            counts[0] += row.count
+            if row.source is None:
+                counts[5] += row.count
+            elif row.source == SRC_MANUAL:
+                counts[1] += row.count
+            elif row.source == SRC_JAR_CN:
+                counts[3] += row.count
+            elif row.source == SRC_AI:
+                counts[4] += row.count
+            else:
+                counts[2] += row.count
+        return [
+            [version, *totals[version]]
+            for version in sorted(totals, key=lambda key: (-totals[key][0], key))
+        ]
+
     def effective_source_stats_by_version(self) -> list[EffectiveSourceStat]:
         """Count effective entries once per source and manual review state.
 
@@ -550,6 +583,19 @@ class TranslationDB:
             self._effective_source_stats_by_version_rows,
         )
         return [EffectiveSourceStat(*row) for row in rows]
+
+    def effective_source_codes(self, version: str | None = None) -> tuple[int, ...]:
+        """Return source IDs that currently win at least one effective entry."""
+        if version is None:
+            rows = self._q("SELECT DISTINCT source FROM effective ORDER BY source")
+        else:
+            rows = self._q(
+                "SELECT DISTINCT f.source FROM effective f "
+                "JOIN entry e ON e.id=f.entry_id "
+                "WHERE e.mc_version=? ORDER BY f.source",
+                (version,),
+            )
+        return tuple(int(row[0]) for row in rows)
 
     def _effective_source_stats_by_version_rows(self) -> list[list]:
         if self.has_review_state:

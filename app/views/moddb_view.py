@@ -63,11 +63,13 @@ def _load_overview_snapshot(
             if problem:
                 raise ValueError(problem)
         if worker_db is not None:
-            stats = worker_db.version_stats()
+            snapshot["source_stats"] = worker_db.effective_source_stats_by_version()
+            stats = worker_db.version_stats_from_effective_sources(
+                snapshot["source_stats"]
+            )
             snapshot["stats"] = stats
             if stats:
                 snapshot["overview"] = worker_db.overview()
-                snapshot["source_stats"] = worker_db.effective_source_stats_by_version()
                 snapshot["missing"] = worker_db.missing_by_mod(
                     stats[0].mc_version, limit=10
                 )
