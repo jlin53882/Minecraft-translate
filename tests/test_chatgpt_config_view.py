@@ -98,7 +98,53 @@ def test_config_reload_preserves_valid_model_catalog_and_selection(monkeypatch):
     assert view.chatgpt_reasoning_effort_control.value == "high"
 
 
-def test_config_reload_invalidates_model_catalog_when_selected_model_is_missing(
+def test_save_keeps_configured_model_and_overrides_visible_without_catalog(
+    monkeypatch,
+):
+    from app.views.config import chatgpt_oauth_panel as panel_module
+
+    config = deepcopy(DEFAULT_CONFIG)
+    config["lm_translator"]["provider"] = "chatgpt"
+    config["lm_translator"]["chatgpt_model"] = "gpt-alpha"
+    config["lm_translator"]["chatgpt_model_settings"] = {
+        "gpt-alpha": {
+            "max_input_token_budget": 264000,
+            "reasoning_effort": "high",
+        }
+    }
+    saved_config = deepcopy(config)
+
+    def load_config():
+        return deepcopy(saved_config)
+
+    def save_config(value):
+        saved_config.clear()
+        saved_config.update(deepcopy(value))
+        return True
+
+    monkeypatch.setattr("app.views.config_view.load_config_json", load_config)
+    monkeypatch.setattr("app.views.config_view.save_config_json", save_config)
+    monkeypatch.setattr(
+        panel_module,
+        "chatgpt_account_status",
+        lambda: {"connected": False, "email": ""},
+    )
+    view = ConfigView(mock_page())
+    view._invalidate_chatgpt_model_options("帳號未連結")
+
+    assert view.save_config_clicked(None) is True
+
+    assert view.chatgpt_model_control.value == "gpt-alpha"
+    assert [option.key for option in view.chatgpt_model_control.options] == [
+        "gpt-alpha"
+    ]
+    assert "尚未驗證" in view.chatgpt_model_control.options[0].text
+    assert view.chatgpt_model_settings_panel.visible is True
+    assert view.chatgpt_context_budget_control.value == "264000"
+    assert view.chatgpt_reasoning_effort_control.value == "high"
+
+
+def test_config_reload_keeps_missing_saved_model_visible_as_unverified(
     monkeypatch,
 ):
     from app.views.config import chatgpt_oauth_panel as panel_module
@@ -121,7 +167,10 @@ def test_config_reload_invalidates_model_catalog_when_selected_model_is_missing(
     view.load_config()
 
     assert view.chatgpt_model_control.value == "gpt-removed"
-    assert [option.key for option in view.chatgpt_model_control.options] == [""]
+    assert [option.key for option in view.chatgpt_model_control.options] == [
+        "gpt-removed"
+    ]
+    assert "尚未驗證" in view.chatgpt_model_control.options[0].text
     assert view._chatgpt_model_catalog_valid is False
 
 
@@ -281,9 +330,10 @@ def test_account_switch_invalidates_stale_models_and_reload_binds_new_profile(
     assert active["profile_id"] == "profile-b"
     assert reads == ["profile-b"]
     assert view.chatgpt_model_control.value == "gpt-alpha"
-    assert all(
-        option.key != "gpt-alpha" for option in view.chatgpt_model_control.options
-    )
+    assert [option.key for option in view.chatgpt_model_control.options] == [
+        "gpt-alpha"
+    ]
+    assert "請重新載入" in view.chatgpt_model_control.options[0].text
     assert view.chatgpt_model_control.disabled is True
     assert view._chatgpt_model_catalog_valid is False
     assert view._chatgpt_model_catalog_profile_id == "profile-a"

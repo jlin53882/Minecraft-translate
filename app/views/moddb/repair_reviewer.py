@@ -31,6 +31,7 @@ class RepairReviewer:
         self.item: dict | None = None
         self.draft: ft.TextField | None = None
         self.status = ft.Text("", size=12, color=C.MUTED)
+        self.format_status = ft.Text("", size=12, color=C.MUTED)
         self.applying = False
         self.apply_button = ft.TextButton("確認套用", on_click=self._apply)
         self.body = ft.Column([], height=500, scroll=ft.ScrollMode.AUTO)
@@ -108,10 +109,10 @@ class RepairReviewer:
             label="AI 草稿（可編輯）",
             value=str(item.get("draft") or ""),
             multiline=True,
-            min_lines=3,
-            max_lines=6,
-            height=145,
-            on_change=self._save_draft,
+            min_lines=7,
+            max_lines=10,
+            height=240,
+            on_change=self._draft_changed,
         )
         identity = (
             f"{item.get('version', '')} · {item.get('mod_id', '')} · "
@@ -150,9 +151,31 @@ class RepairReviewer:
             ft.Text("未寫入的 AI 結果", size=11, color=C.MUTED),
             ft.Text(str(item.get("ai_translation") or ""), selectable=True),
             self.draft,
+            self.format_status,
             self.status,
         ]
+        self._update_format_status()
         self.page.update()
+
+    def _draft_changed(self, _event=None) -> None:
+        self._save_draft()
+        self._update_format_status()
+        self.page.update()
+
+    def _update_format_status(self) -> list[str]:
+        if self.item is None or self.draft is None:
+            return []
+        issues = validate_repair_draft(
+            str(self.item.get("en_us") or ""), self.draft.value or ""
+        )
+        if issues:
+            self.format_status.value = "格式尚未通過：" + "、".join(issues)
+            self.format_status.color = C.GOLD
+        else:
+            self.format_status.value = "格式檢查通過；可確認套用。"
+            self.format_status.color = C.EM
+        self.apply_button.disabled = self.applying or bool(issues)
+        return issues
 
     def _save_draft(self, _event=None, status="pending") -> None:
         if self.item is None or self.draft is None:
@@ -211,7 +234,7 @@ class RepairReviewer:
         if self.item is None or self.draft is None:
             return
         value = self.draft.value or ""
-        issues = validate_repair_draft(str(self.item.get("en_us") or ""), value)
+        issues = self._update_format_status()
         if issues:
             self._save_draft(status="invalid")
             self.status.value = "格式仍不合格：" + "、".join(issues)

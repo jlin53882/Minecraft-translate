@@ -12,6 +12,7 @@ from app.services_impl.moddb_source_service import (
     priority_display_lines,
     priority_has_custom_sources,
 )
+from app.ui import kit
 from app.ui.snack import show_snack
 from app.views.config.settings_schema import (
     Setting,
@@ -162,6 +163,57 @@ def refresh_chatgpt_model_controls_after_reload(view):
     if not view._chatgpt_model_catalog_valid or selected not in available:
         view._sync_chatgpt_model_options()
     view._refresh_provider_panel_visibility()
+
+
+def sync_chatgpt_model_options(view, models=None, profile_id=None) -> None:
+    """Update the ChatGPT model choices without losing the configured selection."""
+    current = str(view.chatgpt_model_control.value or "")
+    selected = current
+    if models is None:
+        view._chatgpt_model_catalog_valid = False
+        view._chatgpt_model_catalog_profile_id = None
+        pairs = (
+            [(selected, f"{selected}（尚未驗證；請更新模型清單）")]
+            if selected
+            else [("", "登入後更新模型清單")]
+        )
+    else:
+        pairs = [(model.slug, model.display_name) for model in models]
+        if not pairs:
+            pairs = [("", "此帳號目前沒有可用模型")]
+        model_ids = {slug for slug, _label in pairs}
+        if selected not in model_ids or not selected:
+            selected = pairs[0][0] if pairs else ""
+        view._chatgpt_model_catalog_valid = bool(selected and selected in model_ids)
+        view._chatgpt_model_catalog_profile_id = (
+            str(profile_id)
+            if view._chatgpt_model_catalog_valid and profile_id
+            else None
+        )
+    if selected != current:
+        view._store_chatgpt_model_settings(view._chatgpt_active_model)
+        view.chatgpt_model_control.value = selected
+    kit.set_dropdown_options(view.chatgpt_model_control, pairs)
+    view.chatgpt_model_settings_panel.visible = view.controls_map[
+        "lm_translator.provider"
+    ].value == "chatgpt" and bool(selected)
+    if selected != view._chatgpt_active_model:
+        view._load_chatgpt_model_settings_for(selected)
+    if not view._loading_config:
+        view._refresh_dirty_state()
+
+
+def invalidate_chatgpt_model_options(view, message: str) -> None:
+    """Mark the saved model unverified while keeping it visible in the dropdown."""
+    view._chatgpt_model_catalog_valid = False
+    selected = str(view.chatgpt_model_control.value or "").strip()
+    options = (
+        [(selected, f"{selected}（{message or '尚未驗證'}）")]
+        if selected
+        else [("", message or "請重新載入目前帳號的模型")]
+    )
+    kit.set_dropdown_options(view.chatgpt_model_control, options)
+    view.chatgpt_model_settings_panel.visible = False
 
 
 def _collect_validated_config(

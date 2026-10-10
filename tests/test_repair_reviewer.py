@@ -51,3 +51,38 @@ def test_keep_old_uses_defined_semantic_color():
 
     assert reviewer.status.value == "已保留舊譯文；沒有寫入翻譯資料，也沒有新增歷史。"
     assert reviewer.status.color == C.EM
+
+
+def test_draft_box_is_taller_and_checks_format_while_editing(tmp_path):
+    path = store.create_run(tmp_path / "review.db", "run-live-check")
+    item_index = store.append_item(
+        path,
+        "run-live-check",
+        {
+            "key": "repair.placeholder",
+            "version": "1.21.1",
+            "mod_id": "foo",
+            "kind": "lang",
+            "source_id": 0,
+            "en_us": "Use %s",
+            "old_translation": "舊譯文 %s",
+            "ai_translation": "草稿",
+            "draft": "草稿",
+            "issues": ("少了 1 個「%s」",),
+        },
+    )
+    page = mock_page()
+    reviewer = RepairReviewer(page, str(path), "run-live-check")
+    reviewer.open()
+
+    assert reviewer.draft.height == 240
+    assert reviewer.apply_button.disabled is True
+    assert "少了 1 個「%s」" in reviewer.format_status.value
+
+    reviewer.draft.value = "翻譯 %s"
+    reviewer._draft_changed()
+
+    assert reviewer.apply_button.disabled is False
+    assert reviewer.format_status.value == "格式檢查通過；可確認套用。"
+    saved = store.load_item(path, "run-live-check", item_index)
+    assert saved["draft"] == "翻譯 %s"
