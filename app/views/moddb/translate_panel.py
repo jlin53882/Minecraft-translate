@@ -41,6 +41,7 @@ from app.views._log import LogView, load_ui_logging_config
 from app.views.moddb import retranslation_controller
 from app.views.moddb.formatting import format_count
 from app.views.moddb.repair_card import create_repair_card, repair_copy
+from app.views.moddb.result_inspector import TranslationResultInspector
 from translation_tool.utils.config_manager import load_config
 from translation_tool.utils.log_unit import log_debug, log_info, log_warning
 
@@ -51,35 +52,6 @@ ALL_MODS = "__all__"
 LARGE_RUN_WARNING = 5000  # 不限筆數且超過這個數量時提醒額度
 
 
-def _repair_flagged_detail_card(item: dict, index: int) -> ft.Container:
-    """Build one read-only comparison of the retained translation and rejected AI text."""
-    identity = (
-        f"{item.get('version', '')} · {item.get('mod_id', '')} · "
-        f"{item.get('kind', '')} · 來源 #{item.get('source_id', '')}"
-    )
-    issues = "、".join(item.get("issues") or ())
-    return ft.Container(
-        content=ft.Column(
-            [
-                ft.Text(f"{index}. {identity}", size=12, color=C.MUTED),
-                ft.Text(str(item.get("key") or ""), size=12.5, selectable=True),
-                ft.Text("特殊字元差異：" + issues, size=12, color=C.GOLD),
-                ft.Text("英文原文", size=11, color=C.MUTED),
-                ft.Text(str(item.get("en_us") or ""), selectable=True),
-                ft.Text("保留的舊譯文", size=11, color=C.MUTED),
-                ft.Text(str(item.get("old_translation") or ""), selectable=True),
-                ft.Text("未寫入的 AI 結果", size=11, color=C.MUTED),
-                ft.Text(str(item.get("ai_translation") or ""), selectable=True),
-            ],
-            spacing=3,
-            tight=True,
-        ),
-        padding=10,
-        border=ft.Border.all(1, C.LINE),
-        border_radius=8,
-    )
-
-
 class TranslatePanel(ft.Column):
     """批次機翻頁籤。"""
 
@@ -88,11 +60,8 @@ class TranslatePanel(ft.Column):
         self._page = page
         self._get_db = get_db
         self._on_finished = on_finished
-        # on_view_flagged(條目 id 清單, {id: AI 譯文}, 版本)：跳到條目校對檢視「特殊字元不一致」的條目
-        self._on_view_flagged = on_view_flagged
-        self._flagged: dict[int, str] = {}
-        self._repair_flagged_entries: list[dict] = []
-        self._repair_flagged_entries_omitted = 0
+        self.result_inspector = TranslationResultInspector(page, on_view_flagged)
+        self.view_flagged_btn = self.result_inspector.button
         self._run_version = ""
         self._repair_preview = None
         self._repair_preview_db_identity: tuple[str, tuple[int, ...]] | None = None
@@ -214,15 +183,6 @@ class TranslatePanel(ft.Column):
             expand=1,
             head_height=STAT_HEAD_HEIGHT,
         )
-        self.view_flagged_btn = kit.button(
-            "檢視",
-            "secondary",
-            size="sm",
-            icon=ft.Icons.FILTER_ALT_OUTLINED,
-            tooltip="檢視本次未寫入的特殊字元修復結果",
-            on_click=lambda _e: self._view_flagged(),
-        )
-        self.view_flagged_btn.visible = False
         self.stat_flagged = kit.stat_card(
             "特殊字元不一致",
             "—",
@@ -678,10 +638,7 @@ class TranslatePanel(ft.Column):
 
     def _apply_repair_summary(self, s: dict, *, final: bool) -> None:
         quality_repair = s.get("operation") == "repair_special_character_mismatch"
-        self._repair_flagged_entries = list(s.get("flagged_entries") or ())
-        self._repair_flagged_entries_omitted = int(
-            s.get("flagged_entries_omitted") or 0
-        )
+        self.result_inspector.set_repair_results(s)
         self._set_kpi_mode(
             "repair",
             repair_condition=(
@@ -703,9 +660,6 @@ class TranslatePanel(ft.Column):
                 if quality_repair
                 else "AI 結果與舊譯文相同"
             ),
-        )
-        self.view_flagged_btn.visible = quality_repair and bool(
-            self._repair_flagged_entries
         )
         self.stat_remaining.set_value(
             format_count(s.get("remaining") if final else None)
@@ -775,8 +729,6 @@ class TranslatePanel(ft.Column):
         return detail_parts
 
     def _apply_translation_summary(self, s: dict) -> None:
-        self._repair_flagged_entries = []
-        self._repair_flagged_entries_omitted = 0
         self._set_kpi_mode("normal")
         if s.get("dry_run"):
             self.stat_remaining.set_value(
@@ -793,8 +745,7 @@ class TranslatePanel(ft.Column):
             format_count(s.get("flagged")),
             delta="未寫入，詳見日誌" if s.get("flagged") else "",
         )
-        self._flagged = dict(s.get("flagged_entries") or {})
-        self.view_flagged_btn.visible = bool(self._flagged)
+        self.result_inspector.set_normal_results(s, self._run_version)
         self.stat_remaining.set_value(format_count(s.get("remaining")))
 
     def _set_kpi_mode(self, mode: str, *, repair_condition: str | None = None) -> None:
@@ -839,77 +790,13 @@ class TranslatePanel(ft.Column):
                     else None
                 ),
             )
-        self.view_flagged_btn.tooltip = (
-            "查看 AI 結果與原譯文的特殊字元差異；只讀，不會寫回資料庫"
-            if mode == "repair"
-            else "跳到條目校對，只看這次特殊字元不一致、未寫入的條目"
-        )
-        self.view_flagged_btn.visible = (mode == "normal" and bool(self._flagged)) or (
-            mode == "repair"
-            and self._kpi_repair_condition == "quality_mismatch"
-            and bool(self._repair_flagged_entries)
-        )
+        self.result_inspector.set_mode(mode, self._kpi_repair_condition)
 
     def _reset_stats(self, *, mode: str = "normal") -> None:
         for card in self._stat_cards:
             card.set_value("—", delta="")
-        self._flagged = {}
-        self._repair_flagged_entries = []
-        self._repair_flagged_entries_omitted = 0
-        self.view_flagged_btn.visible = False
+        self.result_inspector.clear()
         self._set_kpi_mode(mode)
-
-    def _view_flagged(self) -> None:
-        """跳到條目校對，只看這次特殊字元不一致、沒寫入的條目。"""
-        if self._kpi_mode == "repair":
-            self._show_repair_flagged_results()
-            return
-        if self._flagged and self._on_view_flagged and self._run_version:
-            self._on_view_flagged(
-                list(self._flagged), dict(self._flagged), self._run_version
-            )
-
-    def _show_repair_flagged_results(self) -> None:
-        """Show rejected repair candidates read-only; never offer them as saved text."""
-        if not self._repair_flagged_entries:
-            return
-        show_dialog = getattr(self._page, "show_dialog", None)
-        if not callable(show_dialog):
-            show_snack(self._page, "目前畫面無法顯示修復結果。", C.GOLD)
-            return
-        cards = [
-            _repair_flagged_detail_card(item, index)
-            for index, item in enumerate(self._repair_flagged_entries, start=1)
-        ]
-        omitted = self._repair_flagged_entries_omitted
-        note = (
-            f"目前顯示前 {len(cards):,} 筆；另有 {omitted:,} 筆未附詳細內容。"
-            if omitted
-            else f"共 {len(cards):,} 筆。這些 AI 結果未寫入，原譯文已保留。"
-        )
-        show_dialog(
-            ft.AlertDialog(
-                modal=True,
-                title=ft.Text("AI 結果未通過格式檢查"),
-                content=ft.Container(
-                    content=ft.Column(
-                        [
-                            ft.Text(note, size=12, color=C.MUTED),
-                            ft.ListView(controls=cards, spacing=8, height=500),
-                        ],
-                        tight=True,
-                        spacing=8,
-                    ),
-                    width=820,
-                    height=560,
-                ),
-                actions=[
-                    ft.TextButton(
-                        "關閉", on_click=lambda _e=None: self._page.pop_dialog()
-                    )
-                ],
-            )
-        )
 
     def _set_running(self, running: bool) -> None:
         self.start_btn.disabled = running
