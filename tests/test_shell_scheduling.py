@@ -256,15 +256,18 @@ def test_config_saved_from_a_worker_thread_only_schedules_ui_work(shell, env):
     page = shell.page
     main_thread = threading.get_ident()
     env.snapshot = [_key(0), _key(1), _key(2)]
+    env.config = {"lm_translator": {"models": {"worker-model": {"enabled": True}}}}
 
     _in_thread(env.fire_config_saved)
 
     assert page.update_threads == []  # callback 本身只排程
     assert shell.topbar.api_pill.count_text.value == "1/1 Key"  # UI 還沒被動到
+    assert shell.statusbar.model.value == "gemini-x"  # 背景執行緒不可直接改 UI
     assert len(page.scheduled) == 1
 
     page.drain()
     assert shell.topbar.api_pill.count_text.value == "3/3 Key"
+    assert shell.statusbar.model.value == "worker-model"
     assert set(page.update_threads) == {main_thread}
 
 

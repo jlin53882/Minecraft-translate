@@ -962,7 +962,11 @@ def test_config_saved_elsewhere_refreshes_topbar_and_statusbar(shell, env):
     env.snapshot = [_key(0), _key(1), _key(2)]
     env.config = {"lm_translator": {"models": {"other-model": {"enabled": True}}}}
     env.fire_config_saved()
+    assert shell.statusbar.model.value == "other-model"
+    env.config = {"lm_translator": {"models": {"new-model": {"enabled": True}}}}
+    env.fire_config_saved()
+    assert shell.statusbar.model.value == "new-model"
     _run_scheduled_ui_work(shell.page)  # 設定異動只排程，更新在 page event loop 上做
     assert shell.topbar.api_pill.count_text.value == "3/3 Key"
-    assert shell.statusbar.model.value == "other-model"
+    assert shell.statusbar.model.value == "new-model"
     assert shell.statusbar.workdir.value == ""  # 設定裡沒有快取資料夾 → 不顯示

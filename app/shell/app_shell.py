@@ -170,7 +170,7 @@ class AppShell:
         self._env_scheduled = False
         self._refresh_future = None
         self._env_future = None
-        self._poll_future = None
+        self._poll_future, self._ui_thread_id = None, None
         self._page_on_close = None
         self._previous_on_close = None
         self._window_on_event = None
@@ -246,6 +246,7 @@ class AppShell:
     def mount(self, start_view: str = DEFAULT_VIEW_KEY) -> None:
         """設定視窗、掛上版面、開始接收任務事件並顯示首頁。"""
         page = self.page
+        self._ui_thread_id = threading.get_ident()
         page.title = APP_TITLE
         width, height = get_window_size()
         try:
@@ -482,11 +483,20 @@ class AppShell:
         self.statusbar.set_workdir(_cache_dir_of(config))
 
     def _on_config_saved(self) -> None:
-        """設定存檔後（可能在任何執行緒）：只排程，真正的更新在 page event loop 上做。"""
+        """設定存檔後同步模型文字，並把其餘環境刷新排到 page event loop。"""
         with self._sched_lock:
-            if self._disposed or self._env_scheduled:
+            if self._disposed:
                 return
-            self._env_scheduled = True
+            schedule_refresh = not self._env_scheduled
+            if schedule_refresh:
+                self._env_scheduled = True
+        if threading.get_ident() == self._ui_thread_id:
+            # 設定頁的儲存事件本身就在 page event loop；先同步更新模型文字，
+            # 讓底部狀態列不必等下一個排程工作才反映新設定。
+            self._refresh_model_status()
+            self._safe_update()
+        if not schedule_refresh:
+            return
         ok, future = self._submit_ui(self._apply_config_refresh)
         with self._sched_lock:
             if not ok:
@@ -560,6 +570,15 @@ class AppShell:
                 return
         self.refresh_environment()
         self._safe_update()
+
+    def _refresh_model_status(self) -> None:
+        """只同步底部狀態列模型；完整環境刷新仍由 page task 執行。"""
+        try:
+            config = self._config_loader() or {}
+        except Exception:
+            logger.debug("即時讀取模型設定失敗", exc_info=True)
+            return
+        self.statusbar.set_model(_enabled_model_name(config))
 
     def refresh_keys(self) -> None:
         try:
