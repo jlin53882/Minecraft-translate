@@ -4,9 +4,12 @@
 維護注意：本檔案的函式 docstring 用於維護說明，不代表行為變更。
 """
 
+import math
 import random
 from copy import deepcopy
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
+from email.utils import parsedate_to_datetime
 
 import requests
 
@@ -56,6 +59,9 @@ from translation_tool.utils.redaction import redact_text
 # 免費層若常遇到 429，可在設定頁把「每批翻譯後等待秒數」調高。
 RPM_COOLDOWN_SEC = 0
 OVERLOAD_RETRY_WAIT_SEC = 12  # Overload 重試等待秒數
+# Gemini 503 UNAVAILABLE/high-demand：最多重試三次，重試等待逐步增加。
+GEMINI_503_RETRY_DELAYS_SEC = (30, 60, 120)
+GEMINI_503_MAX_RETRY_AFTER_SEC = 120
 # 同一把 API key 累積這麼多次 503 overload 後，才把「這一把」標記為失敗並換下一把。
 # 次數是逐把 key 計算：不同 key 的 overload 不互相累加。
 OVERLOAD_KEY_SWITCH_THRESHOLD = 3
@@ -397,6 +403,8 @@ class _BatchRuntime:
     reasoning_effort: str | None = None
     chatgpt_profile_id: str | None = None
     chatgpt_retry_count: int = 0
+    gemini_503_retry_count: int = 0
+    gemini_503_attempted_models: set[int] = field(default_factory=set)
 
 
 @dataclass(frozen=True)
@@ -601,6 +609,70 @@ def _remote_error_detail(error: Exception, limit: int = 300) -> str:
     return redact_text(text.strip())[:limit]
 
 
+def _parse_gemini_retry_after_seconds(response, error_json: dict) -> float | None:
+    """Read Retry-After or Google RetryInfo as a nonnegative delay in seconds."""
+    headers = getattr(response, "headers", {}) or {}
+    header_value = headers.get("Retry-After")
+    if header_value is not None:
+        try:
+            wait_sec = float(header_value)
+        except (TypeError, ValueError):
+            try:
+                retry_at = parsedate_to_datetime(str(header_value))
+                if retry_at.tzinfo is None:
+                    retry_at = retry_at.replace(tzinfo=UTC)
+                wait_sec = (retry_at - datetime.now(UTC)).total_seconds()
+            except (TypeError, ValueError, OverflowError, IndexError):
+                wait_sec = None
+        if wait_sec is not None and math.isfinite(wait_sec):
+            return max(0.0, wait_sec)
+
+    error_value = error_json.get("error", {}) if isinstance(error_json, dict) else {}
+    error = error_value if isinstance(error_value, dict) else {}
+    details = error.get("details", []) if isinstance(error, dict) else []
+    for detail in details if isinstance(details, list) else []:
+        if not isinstance(detail, dict) or not str(detail.get("@type", "")).endswith(
+            "RetryInfo"
+        ):
+            continue
+        retry_delay = detail.get("retryDelay")
+        if retry_delay is None:
+            continue
+        raw_delay = str(retry_delay).strip().removesuffix("s")
+        try:
+            wait_sec = float(raw_delay)
+        except (TypeError, ValueError, OverflowError):
+            continue
+        if math.isfinite(wait_sec):
+            return max(0.0, wait_sec)
+    return None
+
+
+def _reset_gemini_503_retry_state(runtime: _BatchRuntime) -> None:
+    runtime.gemini_503_retry_count = 0
+    runtime.gemini_503_attempted_models.clear()
+
+
+def _reset_provider_retry_state_after_success(runtime: _BatchRuntime) -> None:
+    if runtime.provider == "chatgpt":
+        runtime.chatgpt_retry_count = 0
+    elif runtime.provider == "gemini":
+        _reset_gemini_503_retry_state(runtime)
+
+
+def _defer_gemini_503_remaining_items(
+    runtime: _BatchRuntime, reason: str
+) -> BatchAction:
+    """Preserve this batch and all later items as untranslated after 503 exhaustion."""
+    log_warning(reason)
+    runtime.all_results.extend(
+        {**item, "_untranslated": True} for item in runtime.remaining_items
+    )
+    runtime.remaining_items.clear()
+    runtime.pinned_model_index = None
+    return BatchAction.PARTIAL
+
+
 def _chatgpt_api_error_message(error) -> str:
     """將 Responses API 錯誤轉成可採取行動的翻譯錯誤訊息。"""
     code = error.code.lower()
@@ -719,6 +791,104 @@ def _handle_chatgpt_api_error(runtime: _BatchRuntime, error) -> BatchAction:
     return BatchAction.RETRY_SAME_MODEL
 
 
+def _handle_service_unavailable_error(
+    runtime: _BatchRuntime,
+    error: Exception,
+    model_index: int,
+    status: int | None,
+) -> BatchAction:
+    response = error.response if isinstance(error, requests.HTTPError) else None
+    error_json = {}
+    try:
+        error_json = response.json() if response is not None else {}
+        remote_message = redact_text(error_json.get("error", {}).get("message", ""))
+        remote_status = error_json.get("error", {}).get("status", "")
+    except Exception:  # noqa: BLE001
+        remote_message = redact_text(getattr(response, "text", "") or "")
+        remote_status = "NON_JSON"
+    log_error(f"[Gemini 503] status={remote_status} message={remote_message}")
+    overloaded = (
+        "overloaded" in remote_message.lower()
+        or "too many requests" in remote_message.lower()
+    )
+    if overloaded:
+        overload_count = runtime.key_cycle.record_overload()
+        if overload_count >= OVERLOAD_KEY_SWITCH_THRESHOLD:
+            if not runtime.key_cycle.mark_failed():
+                return BatchAction.PARTIAL
+            runtime.pinned_model_index = None
+            interruptible_sleep(runtime.key_rotation_buffer_sec)
+            return BatchAction.ROTATE_KEY
+        runtime.pinned_model_index = model_index
+        interruptible_sleep(runtime.overload_retry_sec)
+        return decide_batch_action(
+            "service_unavailable",
+            quota_kind="overloaded",
+            overload_count=overload_count,
+            has_alternative_key=True,
+        ).action
+
+    high_demand_unavailable = (
+        runtime.provider == "gemini"
+        and status == 503
+        and (
+            str(remote_status).upper() == "UNAVAILABLE"
+            or "high demand" in remote_message.lower()
+        )
+    )
+    if high_demand_unavailable:
+        runtime.key_cycle.clear_overload()
+        retry_after = _parse_gemini_retry_after_seconds(response, error_json)
+        if retry_after is not None and retry_after > GEMINI_503_MAX_RETRY_AFTER_SEC:
+            return _defer_gemini_503_remaining_items(
+                runtime,
+                "[Gemini 503] Retry-After 超過 120 秒上限；保留未翻譯項目並回報 PARTIAL",
+            )
+        if runtime.gemini_503_retry_count >= len(GEMINI_503_RETRY_DELAYS_SEC):
+            return _defer_gemini_503_remaining_items(
+                runtime,
+                "[Gemini 503] 已完成 3 次重試仍不可用；保留未翻譯項目並回報 PARTIAL",
+            )
+
+        retry_index = runtime.gemini_503_retry_count
+        runtime.gemini_503_retry_count += 1
+        wait_sec = GEMINI_503_RETRY_DELAYS_SEC[retry_index]
+        if retry_after is not None:
+            wait_sec = max(wait_sec, retry_after)
+        runtime.gemini_503_attempted_models.add(model_index)
+
+        alternate_models = []
+        if retry_index > 0:
+            quota = get_model_quota_registry()
+            alternate_models = [
+                candidate
+                for candidate in _usable_model_indices(runtime, quota)
+                if candidate != model_index
+                and candidate not in runtime.gemini_503_attempted_models
+            ]
+        if alternate_models:
+            action = BatchAction.NEXT_MODEL
+        else:
+            runtime.pinned_model_index = model_index
+            action = BatchAction.RETRY_SAME_MODEL
+
+        log_warning(
+            f"[Gemini 503] UNAVAILABLE 暫時高需求，{wait_sec:g} 秒後重試 "
+            f"({runtime.gemini_503_retry_count}/{len(GEMINI_503_RETRY_DELAYS_SEC)})；"
+            f"保留 batch={runtime.batch_size}"
+        )
+        interruptible_sleep(wait_sec)
+        return action
+
+    if runtime.provider == "gemini":
+        _reset_gemini_503_retry_state(runtime)
+    runtime.pinned_model_index = None
+    interruptible_sleep(runtime.request_interval_sec)
+    return decide_batch_action(
+        "service_unavailable", has_next_model=model_index + 1 < len(runtime.model_pool)
+    ).action
+
+
 def _handle_batch_error(
     runtime: _BatchRuntime,
     error: Exception,
@@ -790,7 +960,10 @@ def _handle_batch_error(
         detail = _remote_error_detail(error)
         if detail:
             log_info(f"[⚠️] 伺服器回應：{detail}")
-        return decide_batch_action(error_kind).action
+        action = decide_batch_action(error_kind).action
+        if runtime.provider == "gemini" and action is BatchAction.SHRINK_BATCH:
+            _reset_gemini_503_retry_state(runtime)
+        return action
 
     if error_kind == "rate_limited":
         try:
@@ -828,42 +1001,11 @@ def _handle_batch_error(
         return BatchAction.ROTATE_KEY
 
     if error_kind == "service_unavailable":
-        response = error.response if isinstance(error, requests.HTTPError) else None
-        try:
-            error_json = response.json() if response is not None else {}
-            remote_message = redact_text(error_json.get("error", {}).get("message", ""))
-            remote_status = error_json.get("error", {}).get("status", "")
-        except Exception:  # noqa: BLE001
-            remote_message = redact_text(getattr(response, "text", "") or "")
-            remote_status = "NON_JSON"
-        log_error(f"[Gemini 503] status={remote_status} message={remote_message}")
-        overloaded = (
-            "overloaded" in remote_message.lower()
-            or "too many requests" in remote_message.lower()
-        )
-        if overloaded:
-            overload_count = runtime.key_cycle.record_overload()
-            if overload_count >= OVERLOAD_KEY_SWITCH_THRESHOLD:
-                if not runtime.key_cycle.mark_failed():
-                    return BatchAction.PARTIAL
-                runtime.pinned_model_index = None
-                interruptible_sleep(runtime.key_rotation_buffer_sec)
-                return BatchAction.ROTATE_KEY
-            runtime.pinned_model_index = model_index
-            interruptible_sleep(runtime.overload_retry_sec)
-            return decide_batch_action(
-                error_kind,
-                quota_kind="overloaded",
-                overload_count=overload_count,
-                has_alternative_key=True,
-            ).action
-        runtime.pinned_model_index = None
-        interruptible_sleep(runtime.request_interval_sec)
-        return decide_batch_action(
-            error_kind, has_next_model=model_index + 1 < len(runtime.model_pool)
-        ).action
+        return _handle_service_unavailable_error(runtime, error, model_index, status)
 
     if error_kind in {"deadline_exceeded", "server_error", "timeout"}:
+        if runtime.provider == "gemini":
+            _reset_gemini_503_retry_state(runtime)
         log_info(f"[{error_kind}] 請求失敗，縮小 batch")
         return decide_batch_action(error_kind).action
 
@@ -1242,12 +1384,11 @@ def _attempt_batch(
                     api_key,
                 )
                 raw_text = call_gemini_requests(**request_kwargs).strip()
-            if runtime.provider == "chatgpt":
-                runtime.chatgpt_retry_count = 0
             # A synchronous provider request cannot be interrupted in flight.
             # If cancellation arrived while it was blocked, discard its result
             # before quota state, retries, or downstream writes can observe it.
             raise_if_cancelled()
+            _reset_provider_retry_state_after_success(runtime)
             # HTTP 200 已證明沒有被 RPD 拒絕：配額紀錄在這裡就清除；回應內容的問題（空、截斷、
             # 格式不符）由 batch 流程自己處理，不影響配額狀態。
             quota.mark_ok(model_name, started_at=started)
