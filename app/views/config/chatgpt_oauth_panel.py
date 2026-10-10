@@ -40,6 +40,7 @@ class ChatGPTOAuthPanel:
         self.models_valid = models_valid or (lambda: True)
         self._pending_login = None
         self._busy = False
+        self._auto_model_load_pending = False
         self._switching_account = False
         self._account_switch_generation = 0
         self._account_switch_lock = asyncio.Lock()
@@ -150,6 +151,13 @@ class ChatGPTOAuthPanel:
         self.account_selector.disabled = (
             self._busy and not self._switching_account
         ) or len(self.account_selector.options) < 2
+        self.login_button.content = (
+            "重新登入／重新授權"
+            if connected
+            else "重新登入 ChatGPT"
+            if account.get("client_id_registered")
+            else "Continue with ChatGPT"
+        )
         self.login_button.disabled = self._busy
         self.add_account_button.disabled = self._busy
         self.authorize_usage_button.visible = bool(
@@ -277,6 +285,46 @@ class ChatGPTOAuthPanel:
         pending = self._pending_login
         if pending is not None:
             await asyncio.to_thread(pending.cancel)
+
+    def ensure_models_loaded(self) -> None:
+        """在已連結帳號但模型清單尚未驗證時，自動排程一次載入。"""
+        if self._busy or self._switching_account or self.models_valid():
+            return
+        try:
+            account = chatgpt_account_status()
+        except ChatGPTOAuthError:
+            return
+        if not account.get("connected"):
+            return
+        profile_id = str(account.get("active_profile_id") or "")
+        run_task = getattr(self.page, "run_task", None)
+        if not profile_id or not callable(run_task) or self._auto_model_load_pending:
+            return
+
+        self._auto_model_load_pending = True
+        self._busy = True
+        generation = self._account_switch_generation
+        self.refresh_controls()
+        self.status_text.value = "正在自動載入此帳號的 ChatGPT 模型清單…"
+        self.page.update()
+        try:
+            run_task(self._load_models_on_entry, profile_id, generation)
+        except Exception:  # noqa: BLE001 - page lifecycle may already be closing
+            self._auto_model_load_pending = False
+            self._busy = False
+            self.refresh_controls()
+            self.status_text.value = "無法自動載入模型清單；請按「更新模型」重試。"
+            self.page.update()
+
+    async def _load_models_on_entry(self, profile_id: str, generation: int) -> None:
+        try:
+            await self._load_models(profile_id=profile_id, generation=generation)
+        finally:
+            if generation == self._account_switch_generation:
+                self._auto_model_load_pending = False
+                self._busy = False
+                self.refresh_controls()
+                self.page.update()
 
     def _invalidate_models(self, message: str) -> None:
         self.on_models_invalidated(message)

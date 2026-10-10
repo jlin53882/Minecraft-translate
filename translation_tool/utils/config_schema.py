@@ -297,7 +297,7 @@ SETTINGS: tuple[Setting, ...] = (
         "ChatGPT 模型",
         "api_models",
         C_KEYS,
-        "登入後按「更新模型」讀取帳號可用模型；使用 ChatGPT 方案額度。",
+        "已連結帳號時會自動讀取可用模型；也可按「更新模型」重新取得清單。使用 ChatGPT 方案額度。",
         default="",
         timing="next_request",
         timing_note="下次翻譯請求讀取；進行中的請求維持原模型。",
