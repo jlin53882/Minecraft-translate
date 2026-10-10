@@ -170,7 +170,7 @@ class ReviewScopeController:
         return ft.Column(
             [
                 ft.Text(
-                    "確認原文、目前生效譯文與版本範圍；確認後只會更新審核狀態。",
+                    "確認原文、目前生效譯文與版本範圍；確認後會記錄為人工已審核。",
                     size=12.5,
                     color=C.MUTED,
                     selectable=True,
@@ -181,7 +181,8 @@ class ReviewScopeController:
                 ft.Divider(height=1, color=C.LINE),
                 self._build_version_scope(entry, db, included, skipped),
                 ft.Text(
-                    "確認後會重新檢查資料是否被其他操作修改；不會修改英文原文、譯文內容或其他版本。",
+                    "確認後會重新檢查資料是否被其他操作修改；只會處理列出的相同譯文版本，"
+                    "不會修改英文原文或略過版本。",
                     size=11.5,
                     color=C.MUTED,
                     selectable=True,
