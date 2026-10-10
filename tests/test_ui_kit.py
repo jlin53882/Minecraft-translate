@@ -130,7 +130,7 @@ def test_pager_summary_and_pages():
 
 
 def test_pager_large_page_numbers_fit_without_wrapping():
-    p = kit.Pager(243064, page=4858, page_size=50)
+    p = kit.Pager(243064, page=4860, page_size=50)
     numbered = [
         cell
         for cell in p.buttons.controls
@@ -138,11 +138,18 @@ def test_pager_large_page_numbers_fit_without_wrapping():
     ]
 
     assert p.total_pages == 4862
-    assert p.current_page == 4858
+    assert p.current_page == 4860
     assert p.buttons.controls[0].width == 30
     assert all(cell.width >= 40 for cell in numbered if len(cell.content.value) == 4)
     assert all(cell.width >= 34 for cell in numbered)
-    assert [int(cell.content.value) for cell in numbered] == [1, 4857, 4858, 4859, 4862]
+    assert [int(cell.content.value) for cell in numbered] == [
+        1,
+        4858,
+        4859,
+        4860,
+        4861,
+        4862,
+    ]
 
 
 def test_pager_empty():

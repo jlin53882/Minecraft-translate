@@ -429,8 +429,9 @@ class Pager(ft.Container):
                 ft.Icons.CHEVRON_LEFT, self._current - 1, enabled=self._current > 1
             )
         ]
-        # 頁碼進入五位數後縮短按鈕列，避免擠壓清單欄位；目前頁與首尾頁仍會保留。
-        window_size = 1 if self.total_pages >= 10_000 else 3
+        # 一般頁數顯示目前頁附近 5 頁，接近端點時也能保留足夠的相鄰頁碼；
+        # 頁碼進入五位數後縮短按鈕列，避免擠壓清單欄位。
+        window_size = 1 if self.total_pages >= 10_000 else 5
         for item in page_window(self._current, self.total_pages, size=window_size):
             if item == "…":
                 controls.append(self._cell("…", None, enabled=False))
