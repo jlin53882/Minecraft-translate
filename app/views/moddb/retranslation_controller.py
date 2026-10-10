@@ -66,6 +66,7 @@ def clear_preview(panel) -> None:
         else panel._repair_default_text()
     )
     panel.repair_samples.controls = []
+    panel.repair_samples.visible = False
     panel.repair_preview_search.value = ""
     kit.set_dropdown_options(
         panel.repair_preview_source_filter,
@@ -498,6 +499,7 @@ def refresh_preview_cards(panel, *, update: bool = True) -> None:
     result = panel._repair_preview
     if result is None:
         panel.repair_samples.controls = []
+        panel.repair_samples.visible = False
         panel.repair_preview_count.value = "尚未載入候選預覽。"
         return
     query = str(panel.repair_preview_search.value or "")
@@ -518,6 +520,7 @@ def refresh_preview_cards(panel, *, update: bool = True) -> None:
         _build_preview_group_card(panel, group, index, len(groups))
         for index, group in enumerate(groups, start=1)
     ]
+    panel.repair_samples.visible = bool(groups)
     if update:
         panel._safe_update()
 

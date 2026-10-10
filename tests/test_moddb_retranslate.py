@@ -2255,6 +2255,7 @@ def test_retranslation_preview_shows_ai_source_profiles_and_samples(
         "launch_page_operation",
         _inline_operation_launcher(),
     )
+    assert panel.repair_samples.visible is False
     panel.preview_retranslation()
     _drain_page_tasks(page)
 
@@ -2274,6 +2275,7 @@ def test_retranslation_preview_shows_ai_source_profiles_and_samples(
     assert "預計共用結果給 0 個來源項目" in text
     assert "規劃批次：2（不等於實際 HTTP 請求次數）" in text
     assert len(panel.repair_samples.controls) == 2
+    assert panel.repair_samples.visible is True
     assert "顯示 2 / 2 個翻譯 Key" in panel.repair_preview_count.value
     panel.repair_preview_search.value = "patchouli"
     retranslation_controller.refresh_preview_cards(panel)
@@ -2308,6 +2310,7 @@ def test_retranslation_preview_groups_same_key_sources_and_filters(db_path):
     panel.repair_preview_search.value = "not-found"
     retranslation_controller.refresh_preview_cards(panel)
     assert panel.repair_samples.controls == []
+    assert panel.repair_samples.visible is False
     assert "沒有符合目前篩選條件" in panel.repair_preview_count.value
     db.close()
 

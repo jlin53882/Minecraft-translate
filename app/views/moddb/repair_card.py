@@ -101,7 +101,7 @@ def create_repair_card(
         on_select=on_filter_change,
     )
     preview_count = ft.Text("尚未載入候選預覽。", size=12, color=C.MUTED)
-    samples = ft.ListView(spacing=8, height=520, auto_scroll=False)
+    samples = ft.ListView(spacing=8, height=520, auto_scroll=False, visible=False)
     summary = ft.Text(
         "預覽只列候選、不呼叫 AI；按「開始修復」才會呼叫 AI。只儲存通過特殊字元檢查的結果，"
         "未通過就保留舊譯文。版本、模組、上限或條件變更後需重新預覽。",
