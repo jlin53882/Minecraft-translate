@@ -68,6 +68,7 @@ from translation_tool.translation_db.schema import (
     DB_NEWER,
     DEFAULT_PRIORITY,
     SRC_AI,
+    SRC_AI_REPAIR,
     SRC_JAR_CN,
     SRC_JAR_TW,
     SRC_MANUAL,
@@ -2288,7 +2289,8 @@ class TranslationDB:
                 rows = conn.execute(
                     "SELECT id, entry_id, old_zh_tw, new_zh_tw, source_id, "
                     "prev_checker, prev_review_status, new_checker, "
-                    "new_review_status, new_revision FROM history "
+                    "new_review_status, prev_revision, new_revision, "
+                    "repair_prev_zh_tw FROM history "
                     "WHERE action IN ('quality_repair','quality_repair_review') "
                     f"AND {where} ORDER BY id DESC",
                     params,
@@ -2303,7 +2305,9 @@ class TranslationDB:
                     previous_review,
                     new_checker,
                     new_review,
+                    previous_revision,
                     new_revision,
+                    previous_repair_text,
                 ) in rows:
                     if source_id is None:
                         continue
@@ -2318,17 +2322,26 @@ class TranslationDB:
                         continue
                     if current[1] != new_checker or current[2] != new_review:
                         continue
-                    conn.execute(
-                        "UPDATE translation SET zh_tw=?, checker=?, review_status=?, "
-                        "updated_at=CURRENT_TIMESTAMP WHERE entry_id=? AND source=?",
-                        (
-                            old_text,
-                            previous_checker or "",
-                            previous_review,
-                            eid,
-                            source_id,
-                        ),
-                    )
+                    if source_id == SRC_AI_REPAIR and previous_revision is None:
+                        conn.execute(
+                            "DELETE FROM translation WHERE entry_id=? AND source=?",
+                            (eid, source_id),
+                        )
+                    else:
+                        conn.execute(
+                            "UPDATE translation SET zh_tw=?, checker=?, review_status=?, "
+                            "updated_at=CURRENT_TIMESTAMP WHERE entry_id=? AND source=?",
+                            (
+                                previous_repair_text
+                                if source_id == SRC_AI_REPAIR
+                                and previous_repair_text is not None
+                                else old_text,
+                                previous_checker or "",
+                                previous_review,
+                                eid,
+                                source_id,
+                            ),
+                        )
                     restored = conn.execute(
                         "SELECT checker, review_status, revision FROM translation "
                         "WHERE entry_id=? AND source=?",
@@ -2344,14 +2357,19 @@ class TranslationDB:
                             new_batch,
                             "revert",
                             new_text,
-                            old_text,
+                            (
+                                previous_repair_text
+                                if source_id == SRC_AI_REPAIR
+                                and previous_repair_text is not None
+                                else old_text
+                            ),
                             f"還原 #{hid}",
                             current[1],
                             current[2],
-                            restored[0],
-                            restored[1],
+                            restored[0] if restored else "",
+                            restored[1] if restored else None,
                             current[3],
-                            restored[2],
+                            restored[2] if restored else None,
                             source_id,
                         ),
                     )
@@ -2601,34 +2619,43 @@ class TranslationDB:
             if new_zh_tw == current[0]:
                 return AITranslationReplaceResult("unchanged")
 
-            result = conn.execute(
-                "UPDATE translation SET zh_tw = ?, updated_at = CURRENT_TIMESTAMP "
-                "WHERE entry_id = ? AND source = ? AND zh_tw = ? "
-                "AND EXISTS (SELECT 1 FROM entry e "
-                "JOIN effective f ON f.entry_id = e.id "
-                "WHERE e.id = translation.entry_id AND e.mc_version = ? "
-                "AND e.kind = ? AND e.mod_id = ? AND e.key = ? AND e.en_us = ? "
-                "AND e.en_us <> '' "
-                "AND f.source = ? AND f.zh_tw <> '' AND f.zh_tw = e.en_us)",
-                (
-                    new_zh_tw,
-                    entry_id,
-                    SRC_AI,
-                    expected_old_zh_tw,
-                    expected_version,
-                    expected_kind,
-                    expected_mod_id,
-                    expected_key,
-                    expected_en_us,
-                    SRC_AI,
-                ),
-            )
-            if result.rowcount != 1:
-                return AITranslationReplaceResult("skipped_changed")
+            repair_row = conn.execute(
+                "SELECT zh_tw, checker, review_status, revision FROM translation "
+                "WHERE entry_id=? AND source=?",
+                (entry_id, SRC_AI_REPAIR),
+            ).fetchone()
+            if repair_row is not None and repair_row[0] == new_zh_tw:
+                return AITranslationReplaceResult("unchanged")
+            if repair_row is None:
+                conn.execute(
+                    "INSERT INTO translation (entry_id, source, zh_tw) VALUES (?,?,?)",
+                    (entry_id, SRC_AI_REPAIR, new_zh_tw),
+                )
+            else:
+                result = conn.execute(
+                    "UPDATE translation SET zh_tw=?, checker='', review_status=NULL, "
+                    "updated_at=CURRENT_TIMESTAMP WHERE entry_id=? AND source=? "
+                    "AND zh_tw=? AND revision=?",
+                    (
+                        new_zh_tw,
+                        entry_id,
+                        SRC_AI_REPAIR,
+                        repair_row[0],
+                        repair_row[3],
+                    ),
+                )
+                if result.rowcount != 1:
+                    return AITranslationReplaceResult("skipped_changed")
+            new_revision = conn.execute(
+                "SELECT revision FROM translation WHERE entry_id=? AND source=?",
+                (entry_id, SRC_AI_REPAIR),
+            ).fetchone()[0]
 
             conn.execute(
-                "INSERT INTO history (entry_id, batch, actor, action, old_zh_tw, new_zh_tw) "
-                "VALUES (?,?,?,?,?,?)",
+                "INSERT INTO history (entry_id, batch, actor, action, old_zh_tw, "
+                "new_zh_tw, prev_checker, prev_review_status, new_checker, "
+                "new_review_status, prev_revision, new_revision, source_id, "
+                "repair_prev_zh_tw) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (
                     entry_id,
                     uuid.uuid4().hex,
@@ -2636,6 +2663,14 @@ class TranslationDB:
                     "ai_retranslate",
                     current[0],
                     new_zh_tw,
+                    repair_row[1] if repair_row else "",
+                    repair_row[2] if repair_row else None,
+                    "",
+                    None,
+                    repair_row[3] if repair_row else None,
+                    new_revision,
+                    SRC_AI_REPAIR,
+                    repair_row[0] if repair_row else None,
                 ),
             )
             self._refresh(conn, [entry_id])
@@ -2695,36 +2730,42 @@ class TranslationDB:
             if new_zh_tw == current[0]:
                 return AITranslationReplaceResult("unchanged")
 
-            previous_checker, previous_review = current[2], current[3]
-            new_checker, new_review = previous_checker, previous_review
-            if source_id == SRC_MANUAL:
-                # AI-edited manual text must return to the review queue.
-                new_checker, new_review = "", "unreviewed"
-            updated = conn.execute(
-                "UPDATE translation SET zh_tw=?, checker=?, review_status=?, "
-                "updated_at=CURRENT_TIMESTAMP WHERE entry_id=? AND source=? "
-                "AND zh_tw=? AND revision=?",
-                (
-                    new_zh_tw,
-                    new_checker,
-                    new_review,
-                    entry_id,
-                    source_id,
-                    expected_old_zh_tw,
-                    current[1],
-                ),
-            )
-            if updated.rowcount != 1:
-                return AITranslationReplaceResult("skipped_changed")
+            repair_row = conn.execute(
+                "SELECT zh_tw, checker, review_status, revision FROM translation "
+                "WHERE entry_id=? AND source=?",
+                (entry_id, SRC_AI_REPAIR),
+            ).fetchone()
+            if repair_row is not None and repair_row[0] == new_zh_tw:
+                return AITranslationReplaceResult("unchanged")
+            if repair_row is None:
+                conn.execute(
+                    "INSERT INTO translation (entry_id, source, zh_tw) VALUES (?,?,?)",
+                    (entry_id, SRC_AI_REPAIR, new_zh_tw),
+                )
+            else:
+                updated = conn.execute(
+                    "UPDATE translation SET zh_tw=?, checker='', review_status=NULL, "
+                    "updated_at=CURRENT_TIMESTAMP WHERE entry_id=? AND source=? "
+                    "AND zh_tw=? AND revision=?",
+                    (
+                        new_zh_tw,
+                        entry_id,
+                        SRC_AI_REPAIR,
+                        repair_row[0],
+                        repair_row[3],
+                    ),
+                )
+                if updated.rowcount != 1:
+                    return AITranslationReplaceResult("skipped_changed")
             new_revision = conn.execute(
                 "SELECT revision FROM translation WHERE entry_id=? AND source=?",
-                (entry_id, source_id),
+                (entry_id, SRC_AI_REPAIR),
             ).fetchone()[0]
             conn.execute(
                 "INSERT INTO history (entry_id, batch, actor, action, old_zh_tw, "
                 "new_zh_tw, prev_checker, prev_review_status, new_checker, "
-                "new_review_status, prev_revision, new_revision, source_id) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "new_review_status, prev_revision, new_revision, source_id, "
+                "repair_prev_zh_tw) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (
                     entry_id,
                     uuid.uuid4().hex,
@@ -2732,13 +2773,14 @@ class TranslationDB:
                     action,
                     current[0],
                     new_zh_tw,
-                    previous_checker,
-                    previous_review,
-                    new_checker,
-                    new_review,
-                    current[1],
+                    repair_row[1] if repair_row else "",
+                    repair_row[2] if repair_row else None,
+                    "",
+                    None,
+                    repair_row[3] if repair_row else None,
                     new_revision,
-                    source_id,
+                    SRC_AI_REPAIR,
+                    repair_row[0] if repair_row else None,
                 ),
             )
             self._refresh(conn, [entry_id])
@@ -2871,7 +2913,16 @@ class TranslationDB:
         check: Callable[[], None] | None = None,
     ) -> tuple[int, list[SameSourceAIEntry]]:
         """Find special-character mismatches in every stored source translation."""
-        where = ["e.mc_version=?", "e.en_us<>''", "t.zh_tw<>''"]
+        where = [
+            "e.mc_version=?",
+            "e.en_us<>''",
+            "t.zh_tw<>''",
+            (
+                f"(t.source={SRC_AI_REPAIR} OR NOT EXISTS ("
+                "SELECT 1 FROM translation repaired WHERE "
+                f"repaired.entry_id=t.entry_id AND repaired.source={SRC_AI_REPAIR}))"
+            ),
+        ]
         params: list = [version]
         if mod_ids:
             where.append(f"e.mod_id IN ({','.join('?' * len(mod_ids))})")
@@ -2906,7 +2957,16 @@ class TranslationDB:
         check: Callable[[], None] | None = None,
     ):
         """Yield eligible repair rows and newline skip facts using bounded fetches."""
-        where = ["e.mc_version=?", "e.en_us<>''", "t.zh_tw<>''"]
+        where = [
+            "e.mc_version=?",
+            "e.en_us<>''",
+            "t.zh_tw<>''",
+            (
+                f"(t.source={SRC_AI_REPAIR} OR NOT EXISTS ("
+                "SELECT 1 FROM translation repaired WHERE "
+                f"repaired.entry_id=t.entry_id AND repaired.source={SRC_AI_REPAIR}))"
+            ),
+        ]
         params: list = [version]
         if mod_ids:
             where.append(f"e.mod_id IN ({','.join('?' * len(mod_ids))})")

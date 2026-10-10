@@ -1257,12 +1257,13 @@ def test_schema_v1_migration_marks_legacy_manual_unknown_and_keeps_backup(tmp_pa
     db = TranslationDB(path)
     detail = db.entry_detail(entry_id)
     manual = next(row for row in detail.translations if row.source == SRC_MANUAL)
-    assert SCHEMA_VERSION == 4
+    assert SCHEMA_VERSION == 5
     assert manual.review_status == "legacy_unknown" and manual.checker == "old-checker"
     assert detail.entry.review_status == "legacy_unknown"
     assert list(tmp_path.glob("legacy.db.pre-schema-v2-*.bak"))
     assert list(tmp_path.glob("legacy.db.pre-schema-v3-*.bak"))
     assert list(tmp_path.glob("legacy.db.pre-schema-v4-*.bak"))
+    assert list(tmp_path.glob("legacy.db.pre-schema-v5-*.bak"))
     db.close()
 
     # Reopening is idempotent: no second migration backup is created.
@@ -1364,7 +1365,7 @@ def test_schema_v3_migration_backup_includes_committed_wal_snapshot(tmp_path):
         migrated._conn.execute(
             "SELECT value FROM meta WHERE key='schema_version'"
         ).fetchone()[0]
-        == "4"
+        == "5"
     )
     backups = list(tmp_path.glob("legacy-v3-wal.db.pre-schema-v4-*.bak"))
     assert len(backups) == 1

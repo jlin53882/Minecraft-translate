@@ -19,7 +19,7 @@ import sqlite3
 import time
 from pathlib import Path
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 KIND_LANG = "lang"
 KIND_PATCHOULI = "patchouli"
@@ -33,6 +33,7 @@ SRC_SUBTITLE = 3  # 釘宮翻譯組（舊設定別名：町宮字幕組）
 SRC_I18N = 4
 SRC_CUSTOM = 5
 SRC_MANUAL = 6
+SRC_AI_REPAIR = 7
 
 SOURCE_NAMES: dict[int, str] = {
     SRC_AI: "AI 機翻",
@@ -42,6 +43,7 @@ SOURCE_NAMES: dict[int, str] = {
     SRC_I18N: "i18n 轉換",
     SRC_CUSTOM: "自訂補充",
     SRC_MANUAL: "人工",
+    SRC_AI_REPAIR: "AI補譯修正",
 }
 
 BUILTIN_SOURCE_NAMES: dict[int, str] = dict(SOURCE_NAMES)
@@ -132,6 +134,7 @@ CREATE TABLE IF NOT EXISTS history (
     prev_revision INTEGER,
     new_revision INTEGER,
     source_id   INTEGER,
+    repair_prev_zh_tw TEXT,
     note        TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_history_entry ON history (entry_id);
@@ -218,6 +221,8 @@ def init_schema(conn: sqlite3.Connection) -> None:
             _backup_before_time_migration(conn)
         elif next_version == 4:
             _backup_before_source_history_migration(conn)
+        elif next_version == 5:
+            _backup_before_ai_repair_source_migration(conn)
         conn.execute("BEGIN IMMEDIATE")
         try:
             if next_version == 2:
@@ -226,6 +231,8 @@ def init_schema(conn: sqlite3.Connection) -> None:
                 _migrate_time_and_revision_v3(conn)
             elif next_version == 4:
                 _migrate_source_history_v4(conn)
+            elif next_version == 5:
+                _migrate_ai_repair_source_v5(conn)
             conn.execute(
                 "UPDATE meta SET value=? WHERE key='schema_version'",
                 (str(next_version),),
@@ -381,6 +388,38 @@ def _migrate_source_history_v4(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE history ADD COLUMN source_id INTEGER")
 
 
+def _backup_before_ai_repair_source_migration(
+    conn: sqlite3.Connection,
+) -> Path | None:
+    """Keep a sidecar backup before adding repair-source undo metadata."""
+    main = next(
+        (row[2] for row in conn.execute("PRAGMA database_list") if row[1] == "main"),
+        "",
+    )
+    if not main:
+        return None
+    source_path = Path(main)
+    backup_path = source_path.with_name(
+        f"{source_path.name}.pre-schema-v5-{time.time_ns()}.bak"
+    )
+    target = sqlite3.connect(backup_path)
+    try:
+        conn.backup(target)
+    except BaseException:
+        target.close()
+        backup_path.unlink(missing_ok=True)
+        raise
+    target.close()
+    return backup_path
+
+
+def _migrate_ai_repair_source_v5(conn: sqlite3.Connection) -> None:
+    """Preserve the prior repair-source value so moving repairs can be undone."""
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(history)")}
+    if "repair_prev_zh_tw" not in columns:
+        conn.execute("ALTER TABLE history ADD COLUMN repair_prev_zh_tw TEXT")
+
+
 def _install_schema_v3_objects(conn: sqlite3.Connection) -> None:
     """Install timestamp and revision triggers for fresh and migrated databases."""
     conn.execute(
@@ -467,5 +506,8 @@ def stored_schema_version(conn: sqlite3.Connection) -> int:
 
 def rank_sql(priority: tuple[int, ...], col: str = "source") -> str:
     """把來源優先序轉成 SQL ``CASE`` 排序運算式（只含整數，不接受外部字串）。"""
-    parts = " ".join(f"WHEN {int(s)} THEN {i}" for i, s in enumerate(priority))
+    ordered = list(priority)
+    if SRC_AI_REPAIR not in ordered:
+        ordered.insert(0, SRC_AI_REPAIR)
+    parts = " ".join(f"WHEN {int(s)} THEN {i}" for i, s in enumerate(ordered))
     return f"CASE {col} {parts} ELSE 99 END"

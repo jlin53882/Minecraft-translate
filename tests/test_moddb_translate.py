@@ -777,6 +777,12 @@ def test_source_dropdowns_follow_config_priority(tmp_path, monkeypatch):
     flt = sf.SourceFilter(lambda: None)
     keys = [o.key for o in flt.dropdown.options]
     assert keys[:4] == ["__all__", str(SRC_SUBTITLE), str(SRC_MANUAL), str(SRC_CUSTOM)]
+    from translation_tool.translation_db.schema import SRC_AI_REPAIR
+
+    assert str(SRC_AI_REPAIR) in keys
+    assert next(
+        o for o in flt.dropdown.options if o.key == str(SRC_AI_REPAIR)
+    ).text == ("AI補譯修正")
 
     state["priority"] = (SRC_MANUAL, SRC_CUSTOM, SRC_SUBTITLE)
     flt.refresh()

@@ -8,6 +8,7 @@ from translation_tool.translation_db.schema import (
     BUILTIN_SOURCE_NAMES,
     CUSTOM_SOURCE_BASE,
     SRC_AI,
+    SRC_AI_REPAIR,
     SRC_CUSTOM,
     SRC_I18N,
     SRC_JAR_CN,
@@ -27,6 +28,7 @@ class SourceDefinition:
 
 
 BUILTIN_SOURCES = (
+    SourceDefinition(SRC_AI_REPAIR, "ai-repair", "AI補譯修正"),
     SourceDefinition(SRC_AI, "ai", "AI 機翻"),
     SourceDefinition(SRC_JAR_TW, "jar-tw", "模組自帶繁中"),
     SourceDefinition(SRC_JAR_CN, "jar-cn", "簡中轉繁"),

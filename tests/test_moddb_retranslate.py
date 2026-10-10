@@ -37,6 +37,7 @@ from translation_tool.translation_db.schema import (
     KIND_LANG,
     KIND_PATCHOULI,
     SRC_AI,
+    SRC_AI_REPAIR,
     SRC_CUSTOM,
     SRC_JAR_TW,
     SRC_MANUAL,
@@ -227,23 +228,22 @@ def test_special_character_repair_covers_all_sources_and_can_be_undone(
 
     check = TranslationDB(db_path)
     rows = {row.source: row for row in check.entry_detail(entry.id).translations}
-    assert rows[SRC_JAR_TW].zh_tw == "使用 %s"
-    assert rows[SRC_MANUAL].zh_tw == "使用 %s"
-    assert rows[SRC_MANUAL].review_status == "unreviewed"
+    assert rows[SRC_JAR_TW].zh_tw == "使用"
+    assert rows[SRC_MANUAL].zh_tw == "使用"
+    assert rows[SRC_AI_REPAIR].zh_tw == "使用 %s"
     assert rows[SRC_AI].zh_tw == "Use %s"
     history = check.entry_detail(entry.id).history
     manual_repair = next(
         row
         for row in history
-        if row.action == "quality_repair" and row.source_id == SRC_MANUAL
+        if row.action == "quality_repair" and row.source_id == SRC_AI_REPAIR
     )
     assert snap["summary"]["operation"] == "repair_special_character_mismatch"
-    assert snap["summary"]["updated"] == 2
+    assert snap["summary"]["updated"] == 1
     assert snap["summary"]["remaining"] == 0
     assert check.revert(manual_repair.id) == 1
     restored = {row.source: row for row in check.entry_detail(entry.id).translations}
-    assert restored[SRC_MANUAL].zh_tw == "使用"
-    assert restored[SRC_MANUAL].review_status == "unreviewed"
+    assert SRC_AI_REPAIR not in restored
     assert repair_cache == []
     check.close()
 
@@ -296,7 +296,7 @@ def test_quality_repair_includes_input_newline_mismatch_and_allows_output_differ
         for row in check._q(
             "SELECT e.key,t.zh_tw FROM entry e JOIN translation t "
             "ON t.entry_id=e.id WHERE t.source=?",
-            (SRC_AI,),
+            (SRC_AI_REPAIR,),
         )
     }
     assert stored["a.newline_mismatch"] == "Use %s repaired"
@@ -376,11 +376,15 @@ def test_manual_review_confirmation_skips_format_check_but_keeps_cas_history_and
         row for row in detail.history if row.action == "quality_repair_review"
     )
     assert history.actor == "AI 機翻修復・人工確認"
-    assert history.source_id == SRC_AI
+    from translation_tool.translation_db.schema import SRC_AI_REPAIR
+
+    assert history.source_id == SRC_AI_REPAIR
     assert (
-        next(row for row in detail.translations if row.source == SRC_AI).zh_tw
-        == "人工已確認，即使不同於來源佔位符"
+        next(row for row in detail.translations if row.source == SRC_AI).zh_tw == "Use"
     )
+    repaired = next(row for row in detail.translations if row.source == SRC_AI_REPAIR)
+    assert repaired.zh_tw == "人工已確認，即使不同於來源佔位符"
+    assert check.get_entry(entry.id).source == SRC_AI_REPAIR
     assert check.revert(history.id) == 1
     assert (
         next(
@@ -389,6 +393,9 @@ def test_manual_review_confirmation_skips_format_check_but_keeps_cas_history_and
             if row.source == SRC_AI
         ).zh_tw
         == "Use"
+    )
+    assert all(
+        row.source != SRC_AI_REPAIR for row in check.entry_detail(entry.id).translations
     )
     check.close()
 
@@ -461,15 +468,16 @@ def test_quality_repair_demotes_reviewed_manual_and_revert_restores_it(
     )
     assert result["summary"]["updated"] == 1
     assert (manual.zh_tw, manual.checker, manual.review_status) == (
-        "使用 %s",
-        "",
-        "unreviewed",
+        "使用",
+        "reviewer",
+        "reviewed",
     )
-    # Manual remains the default highest-priority source after it returns to
-    # the review queue; the effective projection must reflect repaired text.
+    # Repair text uses its own source and leaves reviewed manual data intact.
     assert detail.entry.source == SRC_MANUAL
-    assert detail.entry.zh_tw == "使用 %s"
-    assert detail.entry.review_status == "unreviewed"
+    assert detail.entry.zh_tw == "使用"
+    assert detail.entry.review_status == "reviewed"
+    repaired = next(row for row in detail.translations if row.source == SRC_AI_REPAIR)
+    assert repaired.zh_tw == "使用 %s"
 
     assert check.revert(repaired_history.id) == 1
     restored = check.entry_detail(entry.id)
@@ -646,7 +654,13 @@ def test_replace_ai_translation_is_compare_and_set_and_does_not_propagate(db_pat
     result = db.replace_ai_translation(target.id, "Minecraft", "我的世界", **identity)
     assert result.status == "updated"
     assert db.get_entry(target.id).zh_tw == "我的世界"
-    assert db.get_entry(target.id).source == SRC_AI
+    from translation_tool.translation_db.schema import SRC_AI_REPAIR
+
+    assert db.get_entry(target.id).source == SRC_AI_REPAIR
+    assert any(
+        row.source == SRC_AI and row.zh_tw == "Minecraft"
+        for row in db.entry_detail(target.id).translations
+    )
     assert db.get_entry(other.id).zh_tw == "Minecraft"
     assert db.entry_detail(target.id).history[0].action == "ai_retranslate"
     assert (
@@ -751,6 +765,38 @@ def test_automated_quality_repair_still_requires_valid_output(db_path):
     )
     assert result.status == "skipped_changed"
     assert current.zh_tw == "Use"
+    db.close()
+
+
+def test_automated_quality_repair_is_tagged_and_keeps_original_source(db_path):
+    from translation_tool.translation_db.schema import SRC_AI_REPAIR
+
+    db = TranslationDB(db_path)
+    entry = _ai_entry(db, key="quality.tagged", en="Use %s")
+    db._conn.execute(
+        "UPDATE translation SET zh_tw='Use' WHERE entry_id=? AND source=?",
+        (entry.id, SRC_AI),
+    )
+    db._conn.commit()
+
+    result = db.replace_translation_quality_mismatch(
+        entry.id,
+        SRC_AI,
+        "Use",
+        "使用 %s",
+        **_replace_identity(entry),
+        expected_revision=_translation_revision(db, entry.id, SRC_AI),
+    )
+
+    detail = db.entry_detail(entry.id)
+    translations = {row.source: row for row in detail.translations}
+    assert result.status == "updated"
+    assert translations[SRC_AI].zh_tw == "Use"
+    assert translations[SRC_AI_REPAIR].zh_tw == "使用 %s"
+    assert db.get_entry(entry.id).source == SRC_AI_REPAIR
+    assert SRC_AI_REPAIR in db.effective_source_codes("1.21.1")
+    # The original mismatch is represented by its repaired source, not counted twice.
+    assert db.mismatched_translation_entries("1.21.1")[0] == 0
     db.close()
 
 
@@ -1345,20 +1391,21 @@ def test_quality_repair_deduplicates_equivalent_rows_and_keeps_source_cas(
     assert summary["ai_validated_items"] == 1
     assert summary["dedup_reused_candidates"] == 1
     assert summary["processed_candidates"] == 2
-    assert summary["updated"] == 2
+    assert summary["updated"] == 1
     assert summary["cache_keys_changed"] == 1
     assert summary["cache_keys_saved"] == 1
 
     check = TranslationDB(db_path)
     rows = {row.source: row for row in check.entry_detail(entry.id).translations}
-    assert rows[SRC_AI].zh_tw == "Use %s：正確"
-    assert rows[SRC_MANUAL].zh_tw == "Use %s：正確"
+    assert rows[SRC_AI].zh_tw == "Use"
+    assert rows[SRC_MANUAL].zh_tw == "Use"
+    assert rows[SRC_AI_REPAIR].zh_tw == "Use %s：正確"
     history_sources = {
         row.source_id
         for row in check.entry_detail(entry.id).history
         if row.action == "quality_repair"
     }
-    assert history_sources == {SRC_AI, SRC_MANUAL}
+    assert history_sources == {SRC_AI_REPAIR}
     check.close()
 
     logs = "\n".join(row.text for row in snap["logs"])
@@ -1453,7 +1500,7 @@ def test_candidate_log_uses_database_local_source_catalog(
     logs = "\n".join(row.text for row in snap["logs"])
     assert "[source=100:譯文團隊]" in logs
     assert "[key=custom/source/path]" in logs
-    assert snap["summary"]["updated"] == 2
+    assert snap["summary"]["updated"] == 1
 
 
 def test_fanout_stale_second_source_keeps_first_cas_and_checker(
@@ -1503,7 +1550,8 @@ def test_fanout_stale_second_source_keeps_first_cas_and_checker(
     check = TranslationDB(db_path)
     detail = check.entry_detail(entry.id)
     rows = {row.source: row for row in detail.translations}
-    assert rows[SRC_AI].zh_tw == "Use %s：正確"
+    assert rows[SRC_AI].zh_tw == "Use"
+    assert rows[SRC_AI_REPAIR].zh_tw == "Use %s：正確"
     assert rows[SRC_MANUAL].zh_tw == before.zh_tw
     assert rows[SRC_MANUAL].checker == "external-writer"
     assert rows[SRC_MANUAL].review_status == before.review_status
@@ -1514,7 +1562,7 @@ def test_fanout_stale_second_source_keeps_first_cas_and_checker(
     assert current_revision == before_revision + 1
     assert {
         row.source_id for row in detail.history if row.action == "quality_repair"
-    } == {SRC_AI}
+    } == {SRC_AI_REPAIR}
     check.close()
     assert snap["summary"]["updated"] == 1
     assert snap["summary"]["skipped_changed"] == 1
@@ -1572,7 +1620,8 @@ def test_cancel_between_fanout_targets_preserves_committed_row_and_review_state(
     check = TranslationDB(db_path)
     detail = check.entry_detail(entry.id)
     rows = {row.source: row for row in detail.translations}
-    assert rows[SRC_AI].zh_tw == "Use %s：正確"
+    assert rows[SRC_AI].zh_tw == "Use"
+    assert rows[SRC_AI_REPAIR].zh_tw == "Use %s：正確"
     assert (
         rows[SRC_MANUAL].zh_tw,
         rows[SRC_MANUAL].checker,
@@ -1589,7 +1638,7 @@ def test_cancel_between_fanout_targets_preserves_committed_row_and_review_state(
     assert current_revision == before_revision
     assert [
         row.source_id for row in detail.history if row.action == "quality_repair"
-    ] == [SRC_AI]
+    ] == [SRC_AI_REPAIR]
     check.close()
     assert snap["summary"]["status"] == "CANCELLED"
     assert snap["summary"]["updated"] == 1

@@ -24,6 +24,7 @@ from .lang_merge_dict import (
     is_pure_english as _is_pure_english,
 )
 from .lang_merge_io import quarantine_copy
+from .lang_merge_provenance import write_translation_provenance
 from .lang_merge_zip_io import (
     _write_bytes_atomic,
     _write_text_atomic,
@@ -224,12 +225,16 @@ def _process_single_mod(
         )
 
         # Step 4.5 — 純英文條目先問 Mod 資料庫（只補沒有譯文的，不覆蓋既有譯文）
+        source_provenance_by_key: dict[str, dict[str, Any]] = {}
         if db_fill is not None:
             from ..translation_db.identity import classify_member
 
             ident = classify_member(base_path_hint)
             final_tw, pending, db_hits = db_fill.fill(
-                ident.mod_id if ident else None, final_tw, pending
+                ident.mod_id if ident else None,
+                final_tw,
+                pending,
+                source_provenance_by_key=source_provenance_by_key,
             )
             if db_hits:
                 log_info(f"{log_prefix}資料庫補上 {db_hits} 筆譯文")
@@ -283,6 +288,10 @@ def _process_single_mod(
                 _write_text_atomic(final_output_path, dump_lang_text(final_tw))
             else:
                 _write_bytes_atomic(final_output_path, dump_json_bytes(final_tw))
+
+        write_translation_provenance(
+            output_dir, final_output_rel, source_provenance_by_key
+        )
 
         log_info(f"{log_prefix}完成，pending 條目: {pending_count}")
         return {

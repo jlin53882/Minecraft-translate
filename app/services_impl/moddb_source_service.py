@@ -6,6 +6,7 @@ from app.services_impl.moddb_service import SRC_AI, SRC_JAR_CN, SRC_MANUAL
 from translation_tool.translation_db.schema import (
     BUILTIN_SOURCE_NAMES,
     CUSTOM_SOURCE_BASE,
+    SRC_AI_REPAIR,
     SRC_CUSTOM,
 )
 from translation_tool.translation_db.settings import (
@@ -110,7 +111,7 @@ def source_tone(source: int | None) -> str:
         return "ench"
     if source == SRC_JAR_CN:
         return "gold"
-    if source == SRC_AI or source is None:
+    if source in {SRC_AI, SRC_AI_REPAIR} or source is None:
         return "neutral"
     if source >= CUSTOM_SOURCE_BASE:
         palette = ("dia", "red", "em", "gold", "ench", "neutral")
