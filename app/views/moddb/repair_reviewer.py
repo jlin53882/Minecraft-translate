@@ -244,6 +244,11 @@ class RepairReviewer:
                         color=C.EM,
                     ),
                     self.draft,
+                    ft.Text(
+                        "可直接修改；內容會即時保存為草稿，格式檢查結果會顯示在下方。",
+                        size=11.5,
+                        color=C.MUTED,
+                    ),
                     self.format_status,
                 ],
                 spacing=10,
@@ -254,7 +259,12 @@ class RepairReviewer:
             border_radius=design.RADIUS_CONTROL,
             width=column_width,
         )
-        return ft.Row([left, draft_card], spacing=16, wrap=True)
+        return ft.Row(
+            [left, draft_card],
+            spacing=16,
+            wrap=True,
+            vertical_alignment=ft.CrossAxisAlignment.START,
+        )
 
     def _render(self) -> None:
         if not self.item_indices:
@@ -288,12 +298,13 @@ class RepairReviewer:
         self._update_progress(counts, total)
         item = self.item
         self.draft = SyncTextField(
-            label="AI 草稿（可編輯）",
+            label="修改後的譯文",
             value=str(item.get("draft") or ""),
             multiline=True,
-            min_lines=7,
-            max_lines=10,
-            height=240,
+            min_lines=10,
+            max_lines=16,
+            height=360,
+            width=max(240.0, float(self.content_box.width or 1120) / 2 - 36),
             on_change=self._draft_changed,
         )
         self._update_format_status(

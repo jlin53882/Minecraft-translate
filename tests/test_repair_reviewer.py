@@ -191,7 +191,8 @@ def test_draft_box_shows_live_format_check_but_allows_human_confirmed_apply(tmp_
     reviewer = RepairReviewer(page, str(path), "run-live-check")
     reviewer.open()
 
-    assert reviewer.draft.height == 240
+    assert reviewer.draft.height == 360
+    assert reviewer.draft.width == 524
     assert reviewer.apply_button.disabled is False
     assert "格式檢查：少了 1 個「%s」" == reviewer.format_status.value
     assert all(
