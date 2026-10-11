@@ -59,7 +59,8 @@ def test_batch_state_machine_has_separate_state_action_and_response_layers():
         )
     }
     assert function_lengths["_run_batch_state_machine"] < 100
-    assert function_lengths["_attempt_batch"] < 120
+    # 125：多一行 set_active_model（給 UI 狀態列），職責仍是同一個批次嘗試流程
+    assert function_lengths["_attempt_batch"] < 125
     assert function_lengths["_merge_batch_response"] < 60
     assert function_lengths["_handle_batch_error"] < 160
 
