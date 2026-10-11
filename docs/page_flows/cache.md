@@ -38,7 +38,7 @@ flowchart TD
 
 ### 總覽的類型操作
 
-類型列的按鈕與「更多」選單（`_type_actions_row`）統一透過 `_run_action` 進入 `run_cache_action`（`app/views/cache_manager/cache_actions.py`）。
+類型列的按鈕（`_type_actions_row`）統一透過 `_run_action` 進入 `run_cache_action`（`app/views/cache_manager/cache_actions.py`）。
 
 ```mermaid
 flowchart TD

@@ -224,49 +224,21 @@ class CacheOverviewMixin:
         )
 
     def _type_actions_row(self, ctype: str) -> ft.Row:
-        """常用操作留在卡片上，會改動分片的操作收進「更多」。"""
+        """單一類型的操作按鈕列（全部直接展開）。"""
+        buttons = (
+            ("重新載入", ft.Icons.REFRESH, self._on_reload_one),
+            ("新分片", ft.Icons.SAVE, self._on_save_one_new),
+            ("補滿舊檔", ft.Icons.SAVE_AS, self._on_save_one_fill),
+            ("輪替分片", ft.Icons.ROTATE_RIGHT, self._on_rotate_one),
+            ("分析", ft.Icons.INSIGHTS, self._on_analyze_one),
+            ("切換查詢", ft.Icons.MANAGE_SEARCH, self._on_jump_to_query_type),
+        )
         return ft.Row(
             [
-                ft.TextButton(
-                    "重新載入",
-                    icon=ft.Icons.REFRESH,
-                    on_click=lambda e, t=ctype: self._on_reload_one(t),
-                ),
-                ft.TextButton(
-                    "切換查詢",
-                    icon=ft.Icons.MANAGE_SEARCH,
-                    on_click=lambda e, t=ctype: self._on_jump_to_query_type(t),
-                ),
-                ft.PopupMenuButton(
-                    icon=ft.Icons.MORE_HORIZ,
-                    tooltip="更多操作",
-                    items=[
-                        self._more_item(
-                            "分析", ft.Icons.INSIGHTS, ctype, "_on_analyze_one"
-                        ),
-                        self._more_item(
-                            "新分片", ft.Icons.SAVE, ctype, "_on_save_one_new"
-                        ),
-                        self._more_item(
-                            "補滿舊檔", ft.Icons.SAVE_AS, ctype, "_on_save_one_fill"
-                        ),
-                        self._more_item(
-                            "輪替分片", ft.Icons.ROTATE_RIGHT, ctype, "_on_rotate_one"
-                        ),
-                    ],
-                ),
+                ft.TextButton(label, icon=icon, on_click=lambda e, h=handler: h(ctype))
+                for label, icon, handler in buttons
             ],
             wrap=True,
-        )
-
-    def _more_item(
-        self, label: str, icon: str, ctype: str, handler: str
-    ) -> ft.PopupMenuItem:
-        return ft.PopupMenuItem(
-            content=ft.Row(
-                [ft.Icon(icon, size=16), ft.Text(label, size=13)], spacing=8
-            ),
-            on_click=lambda e, t=ctype: getattr(self, handler)(t),
         )
 
     def _refresh_overview_ui(self, data: dict):
