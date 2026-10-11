@@ -24,6 +24,7 @@ from translation_tool.utils.config_manager import (
     ConfigValidationError,
     get_default,
     validate_config_values,
+    validate_lm_translate_folder_name,
     validate_output_folder_names,
 )
 from translation_tool.utils.config_schema import LEGACY_API_KEY_PLACEHOLDERS
@@ -288,8 +289,9 @@ def _collect_validated_config(
                 return None
         try:
             validate_output_folder_names(config)
+            validate_lm_translate_folder_name(config)
         except ConfigValidationError as err:
-            logger.warning("提取輸出資料夾名稱設定無效：%s", err)
+            logger.warning("輸出資料夾名稱設定無效：%s", err)
             if show_feedback:
                 show_snack(view.page, f"❌ {err}；設定尚未儲存。")
             return None

@@ -803,13 +803,56 @@ config = LazyConfigProxy()
 
 
 DEFAULT_LM_TRANSLATE_FOLDER_NAME = "LM翻譯後"
+_WINDOWS_RESERVED_NAMES = frozenset(
+    {"CON", "PRN", "AUX", "NUL"}
+    | {f"COM{i}" for i in range(1, 10)}
+    | {f"LPT{i}" for i in range(1, 10)}
+)
+
+
+def is_single_folder_name(value: object) -> bool:
+    """value 是否為單一、合法的 Windows 資料夾名稱（不是路徑，也不會跳出上層資料夾）。"""
+    invalid_chars = '<>:"|?*/' + chr(92)
+    return (
+        isinstance(value, str)
+        and bool(value.strip())
+        and value == value.strip()
+        and value not in {".", ".."}
+        and not any(char in invalid_chars or ord(char) < 32 for char in value)
+        and not value.endswith(".")
+        and value.split(".", 1)[0].upper() not in _WINDOWS_RESERVED_NAMES
+    )
+
+
+def validate_lm_translate_folder_name(config: dict) -> None:
+    """儲存前檢查 LM 翻譯輸出資料夾名稱；空白表示使用預設值，允許。"""
+    value = (config.get("lm_translator") or {}).get("lm_translate_folder_name")
+    if value is None or (isinstance(value, str) and not value.strip()):
+        return
+    if not is_single_folder_name(value):
+        raise ConfigValidationError(
+            "「LM 翻譯輸出資料夾」名稱無效：請填入單一資料夾名稱，不可是路徑、"
+            "「.」或「..」，不可包含 Windows 路徑禁止字元或保留名稱，"
+            "且不可用空白開頭或結尾、用句點結尾。"
+        )
 
 
 def get_lm_translate_folder_name(config: dict | None = None) -> str:
     """回傳 LM 翻譯輸出資料夾名稱（``lm_translator.lm_translate_folder_name``）。
 
-    機器翻譯頁與一鍵流水線共用；使用時才讀設定，存檔後不需重啟。缺漏或空白 → 預設值。
+    機器翻譯頁與一鍵流水線共用；使用時才讀設定，存檔後不需重啟。
+    缺漏或只有空白 → 預設值；不是單一資料夾名稱（路徑、``..`` 等，
+    例如手動編輯的 config.json）→ 記錄警告並改用預設值，避免寫到輸出資料夾以外。
     """
     cfg = load_config() if config is None else config
     name = (cfg.get("lm_translator") or {}).get("lm_translate_folder_name")
-    return name or DEFAULT_LM_TRANSLATE_FOLDER_NAME
+    if name is None or (isinstance(name, str) and not name.strip()):
+        return DEFAULT_LM_TRANSLATE_FOLDER_NAME
+    if not is_single_folder_name(name):
+        log.warning(
+            "LM 翻譯輸出資料夾名稱無效（%r），改用預設「%s」",
+            name,
+            DEFAULT_LM_TRANSLATE_FOLDER_NAME,
+        )
+        return DEFAULT_LM_TRANSLATE_FOLDER_NAME
+    return name

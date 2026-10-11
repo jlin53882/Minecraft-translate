@@ -67,7 +67,7 @@ flowchart TD
   - 語系比對：`locale_sort/_整理輸出`；翻譯來源為 `lang_output/<pending_organized_folder_name>` 與 `patchouli_output/<pending_folder_name>`。
   - 翻譯輸出：`lm_translate/<lm_translate_folder_name>`。
   - 打包：暫存目錄 `_打包暫存`，ZIP 輸出為 `output_bundler.output_zip_name` 指定的檔名（未設定時為預設值）。
-- 讀取的設定鍵：`lang_merger.pending_folder_name`、`lang_merger.pending_organized_folder_name`、`lm_translator.lm_translate_folder_name`（經 `get_lm_translate_folder_name()`，與機器翻譯頁共用）、`output_bundler.output_zip_name`、`jar_extractor.lang_codes`（精靈預設語系）。
+- 讀取的設定鍵：`lang_merger.pending_folder_name`、`lang_merger.pending_organized_folder_name`、`lm_translator.lm_translate_folder_name`（經 `get_lm_translate_folder_name()`，與機器翻譯頁共用；不是單一資料夾名稱時記錄警告並改用預設 `LM翻譯後`）、`output_bundler.output_zip_name`、`jar_extractor.lang_codes`（精靈預設語系）。
 - 打包版本範圍由 `translation_tool/core/resource_pack_version.json` 依所選版本取得 `min_format`／`max_format`。
 - 資料庫選項：`merge_db_snapshot` 與 `lm_db_snapshot` 在點擊當下由 `snapshot_for_run()` 取得，之後的 worker 只使用快照。
 - 打包步驟會先由 `build_bundle_staging` 把三個來源（既有譯文、Patchouli 譯文、LLM 新譯文，優先序由低到高）整合到暫存目錄，再由 `run_bundling_service` 產生 ZIP。

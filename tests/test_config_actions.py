@@ -72,6 +72,7 @@ def make_full_view():
     for k in keys:
         view.controls_map[k] = MagicMock()
     view.controls_map["logging.log_format"].value = "%(message)s"
+    view.controls_map["lm_translator.lm_translate_folder_name"].value = "LM翻譯後"
     # Saving tests that do not call load_config_into_view still model a real
     # settings form, whose six extractor suffix controls start at schema defaults.
     for key, value in {
@@ -1056,6 +1057,41 @@ class TestConfigSaveFailureContracts:
         assert result is False
         assert writes == []
         assert "尚未嘗試寫入" in snacks[-1]
+
+    @pytest.mark.parametrize("name", [r"..\..\other", r"D:\other", "sub/dir", ".."])
+    def test_lm_folder_path_is_rejected_before_writer(self, monkeypatch, name):
+        view = _make_full_save_view()
+        view.controls_map["lm_translator.lm_translate_folder_name"].value = name
+        writes = []
+        snacks = []
+
+        result = self._save(
+            view,
+            writer=lambda config: writes.append(config) or True,
+            monkeypatch=monkeypatch,
+            snacks=snacks,
+        )
+
+        assert result is False
+        assert writes == []
+        assert "「LM 翻譯輸出資料夾」名稱無效" in snacks[-1]
+        assert "設定尚未儲存" in snacks[-1]
+
+    def test_blank_lm_folder_name_is_saved_and_means_default(self, monkeypatch):
+        view = _make_full_save_view()
+        view.controls_map["lm_translator.lm_translate_folder_name"].value = ""
+        writes = []
+
+        self._save(
+            view,
+            writer=lambda config: writes.append(config) or True,
+            monkeypatch=monkeypatch,
+            snacks=[],
+        )
+
+        assert len(writes) == 1
+        saved = writes[0]["lm_translator"]["lm_translate_folder_name"]
+        assert saved == ""
 
     @pytest.mark.parametrize("model_rows", [[], [False, False]])
     def test_cannot_remove_or_disable_every_existing_model(
