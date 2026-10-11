@@ -1749,6 +1749,10 @@ def test_scan_dry_run_reads_but_never_writes(db, tmp_path):
 
 # ------------------------------------------------ 與語系合併相同的清理規則
 RULES = [{"from": "存儲", "to": "儲存"}]
+OVERLAPPING_RULES = [
+    {"from": "苔石磚", "to": "青苔石磚"},
+    {"from": "苔石", "to": "青苔鵝卵石"},
+]
 
 
 def test_scan_ignores_non_cjk_values_in_chinese_files(tmp_path):
@@ -1781,6 +1785,20 @@ def test_scan_applies_replace_rules_to_traditional_text(tmp_path):
     assert on.items[0].zh_tw == "儲存方塊"
     off = scan_jar(jar, ScanOptions("1.21.1", apply_rules=False), ())
     assert off.items[0].zh_tw == "存儲方塊"
+
+
+def test_scan_does_not_reapply_overlapping_rule_output(tmp_path):
+    jar = make_jar(
+        tmp_path / "foo.jar",
+        {
+            "assets/foo/lang/en_us.json": {"a.b": "Mossy Stone Bricks"},
+            "assets/foo/lang/zh_tw.json": {"a.b": "苔石磚"},
+        },
+    )
+
+    result = scan_jar(jar, ScanOptions("1.21.1", rules=OVERLAPPING_RULES), ())
+
+    assert result.items[0].zh_tw == "青苔石磚"
 
 
 def test_cn_conversion_also_applies_replace_rules(db, tmp_path, monkeypatch):

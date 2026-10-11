@@ -1,7 +1,8 @@
-"""Task 7：apply_replace_rules 加速後，結果需與「逐條依序 replace」完全相同。"""
+"""Replacement-rule semantics and recursive-application regression coverage."""
 
 import random
 
+from translation_tool.utils.replace_rules import find_replacement_conflicts
 from translation_tool.utils.text_processor import apply_replace_rules
 
 
@@ -31,7 +32,47 @@ def test_cascading_replacement_matches_sequential_semantics():
         {"from": "模組", "to": "模組件"},
     ]
     text = "這是內存條"
-    assert apply_replace_rules(text, rules) == _naive(text, rules) == "這是回憶體模組件"
+    assert (
+        apply_replace_rules(text, rules, cascade=True)
+        == _naive(text, rules)
+        == "這是回憶體模組件"
+    )
+
+
+def test_literal_replacement_is_atomic_by_default():
+    rules = [
+        {"from": "內存條", "to": "記憶體模組"},
+        {"from": "記憶", "to": "回憶"},
+        {"from": "模組", "to": "模組件"},
+    ]
+
+    assert apply_replace_rules("這是內存條", rules) == "這是記憶體模組"
+
+
+def test_atomic_replacement_protects_existing_destination_phrases():
+    rules = [
+        {"from": "苔石磚", "to": "青苔石磚"},
+        {"from": "苔石", "to": "青苔鵝卵石"},
+    ]
+
+    assert apply_replace_rules("苔石磚", []) == "苔石磚"  # no rules is a no-op
+    assert apply_replace_rules("苔石磚", rules) == "青苔石磚"
+    assert apply_replace_rules("苔石磚樓梯", rules) == "青苔石磚樓梯"
+    assert apply_replace_rules("青苔石磚", rules) == "青苔石磚"
+    converted = apply_replace_rules("苔石磚", rules)
+    assert apply_replace_rules(converted, rules) == converted
+    assert apply_replace_rules("苔石磚", rules, cascade=True) == "青青苔鵝卵石磚"
+
+
+def test_conflict_report_finds_sources_inside_outputs():
+    rules = [
+        {"from": "苔石磚", "to": "青苔石磚"},
+        {"from": "苔石", "to": "青苔鵝卵石"},
+    ]
+
+    conflicts = find_replacement_conflicts(rules)
+    assert (0, "苔石磚", 0, "青苔石磚") in conflicts
+    assert (1, "苔石", 0, "青苔石磚") in conflicts
 
 
 def test_randomized_equivalence_with_sequential_replace():
@@ -47,7 +88,9 @@ def test_randomized_equivalence_with_sequential_replace():
             text = "".join(
                 random.choice(alphabet) for _ in range(random.randint(0, 20))
             )
-            assert apply_replace_rules(text, rules) == _naive(text, rules), (
+            assert apply_replace_rules(text, rules, cascade=True) == _naive(
+                text, rules
+            ), (
                 text,
                 rules,
             )

@@ -112,22 +112,25 @@ def test_converter_none_and_empty_rules_keep_opencc_behavior():
     assert make_converter([])("wire") == "wire"
 
 
-def test_converter_preserves_long_first_chained_regex_and_invalid_regex_rules():
-    convert = make_converter(
-        tp.ReplaceRules(
-            [
-                {"from": "capacitor block", "to": "long"},
-                {"from": "capacitor", "to": "short"},
-                {"from": "source", "to": "first"},
-                {"from": "first", "to": "second"},
-                {"from": r"(gear)-(\d+)", "to": "$2_$1"},
-                {"from": "[", "to": "left-bracket"},
-            ]
-        )
+def test_converter_uses_atomic_literals_and_keeps_regex_rules():
+    rules = tp.ReplaceRules(
+        [
+            {"from": "capacitor block", "to": "long"},
+            {"from": "capacitor", "to": "short"},
+            {"from": "source", "to": "first"},
+            {"from": "first", "to": "second"},
+            {"from": r"(gear)-(\d+)", "to": "$2_$1"},
+            {"from": "[", "to": "left-bracket"},
+        ]
     )
+    convert = make_converter(rules)
 
     assert convert("capacitor block source gear-12 [") == (
-        "long second 12_gear left-bracket"
+        "long first 12_gear left-bracket"
+    )
+    assert (
+        tp.apply_replace_rules("capacitor block source gear-12 [", rules, cascade=True)
+        == "long second 12_gear left-bracket"
     )
 
 

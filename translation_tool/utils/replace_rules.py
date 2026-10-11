@@ -14,6 +14,67 @@ _RULES_CACHE_LOCK = threading.Lock()
 # id(規則清單) → (規則清單本身, 內容簽章, 編譯結果)；保留清單參考避免 id 被重用
 _RULES_CACHE: dict[int, tuple[Sequence, Any, "_CompiledRules"]] = {}
 _RULES_CACHE_MAX = 4
+_TRIE_TERMINAL = object()
+
+
+def _build_literal_trie(rows: Sequence[tuple[str, Any]]) -> dict[Any, Any]:
+    """Build a read-only-at-runtime trie for literal matching."""
+    trie: dict[Any, Any] = {}
+    for value, payload in rows:
+        if not value:
+            continue
+        node = trie
+        for char in value:
+            node = node.setdefault(char, {})
+        node.setdefault(_TRIE_TERMINAL, payload)
+    return trie
+
+
+def find_replacement_conflicts(
+    rules: Sequence[dict[str, str]],
+) -> list[tuple[int, str, int, str]]:
+    """Find literal rules whose output contains another literal source.
+
+    Each tuple is ``(source_index, source, destination_index, destination)``.
+    The trie keeps this diagnostic linear in the total destination text rather
+    than comparing every pair of rules, which matters for large rule files.
+    """
+    source_trie: dict[Any, Any] = {}
+    destinations: list[tuple[int, str]] = []
+
+    for index, rule in enumerate(rules):
+        if not isinstance(rule, dict):
+            continue
+        source = rule.get("from")
+        destination = rule.get("to")
+        if not isinstance(source, str) or not isinstance(destination, str):
+            continue
+        if any(char in source for char in ".?*[]()\\") or not source:
+            continue
+
+        node = source_trie
+        for char in source:
+            node = node.setdefault(char, {})
+        node.setdefault(_TRIE_TERMINAL, []).append((index, source))
+        if destination:
+            destinations.append((index, destination))
+
+    conflicts: list[tuple[int, str, int, str]] = []
+    for destination_index, destination in destinations:
+        for start in range(len(destination)):
+            node = source_trie
+            end = start
+            while end < len(destination):
+                node = node.get(destination[end])
+                if node is None:
+                    break
+                end += 1
+                for source_index, source in node.get(_TRIE_TERMINAL, ()):
+                    conflicts.append(
+                        (source_index, source, destination_index, destination)
+                    )
+
+    return conflicts
 
 
 class _TrackedRule(dict):
@@ -192,11 +253,13 @@ def _rules_signature(rules: Sequence[dict[str, str]]):
 class _CompiledRules:
     """預先整理好的替換規則（依規則清單建立一次，所有執行緒共用、唯讀）。
 
-    固定字串規則維持原本「依序（長詞優先）逐條 replace」的語意，
-    但只檢查「前兩個字（單字規則為該字）出現在目前文字中」的規則：
+    固定字串規則預設只對原文做一次最長匹配掃描，避免替換結果再次成為
+    後續規則的輸入。``cascade=True`` 時才使用舊的逐條串接語意。
+
+    兩種模式都只檢查「前兩個字（單字規則為該字）出現在文字中」的規則：
     - by_prefix：規則前綴 → 規則索引（遞增）
-    - 套用一條規則後，重新計算文字中新出現的前綴並把對應（索引較後）的規則加入候選，
-      因此串接替換（dst 內含其他規則的 src）結果與逐條檢查完全相同。
+    - cascade 模式套用一條規則後，重新計算文字中新出現的前綴並把對應
+      （索引較後）的規則加入候選，因此結果與逐條檢查完全相同。
     """
 
     def __init__(self, rules: Sequence[dict[str, str]]):
@@ -241,6 +304,15 @@ class _CompiledRules:
             if src:
                 by_prefix.setdefault(src[:2], []).append(idx)
         self.by_prefix = by_prefix
+        self.literal_trie = _build_literal_trie(
+            ((src, idx) for idx, (src, _dst) in enumerate(literal_rules))
+        )
+        # 已存在的完整輸出詞視為已轉換內容。這會防止第二次處理
+        # ``青苔石磚`` 時再次命中其中的 ``苔石磚``，同時也保護
+        # ``記憶體模組`` 內的 ``記憶``／``模組``來源詞。
+        self.output_trie = _build_literal_trie(
+            ((dst, True) for _src, dst in literal_rules)
+        )
 
     def may_hit(self, text: str) -> bool:
         """等同舊版逐條 `k in text or k 去空白 in text 去空白` 的預檢（O(文字長度)）。"""
@@ -267,7 +339,65 @@ class _CompiledRules:
         grams.update(text[i : i + 2] for i in range(len(text) - 1))
         return grams
 
-    def apply_literals(self, text: str) -> str:
+    def _protected_until(self, text: str) -> list[int]:
+        """Return the end offset of a destination phrase covering each index."""
+        protected_until = [0] * len(text)
+        if not self.output_trie:
+            return protected_until
+
+        for start in range(len(text)):
+            node = self.output_trie
+            end = start
+            while end < len(text):
+                node = node.get(text[end])
+                if node is None:
+                    break
+                end += 1
+                if _TRIE_TERMINAL in node:
+                    for index in range(start, end):
+                        protected_until[index] = max(protected_until[index], end)
+        return protected_until
+
+    def _apply_literals_once(self, text: str) -> str:
+        """Apply literal rules once against the original text."""
+        if not self.literal_trie:
+            return text
+
+        protected_until = self._protected_until(text)
+        output: list[str] = []
+        index = 0
+        while index < len(text):
+            node = self.literal_trie
+            cursor = index
+            matched_idx = None
+            while cursor < len(text):
+                node = node.get(text[cursor])
+                if node is None:
+                    break
+                cursor += 1
+                candidate = node.get(_TRIE_TERMINAL)
+                if candidate is not None:
+                    matched_idx = candidate
+
+            if matched_idx is None:
+                output.append(text[index])
+                index += 1
+                continue
+
+            src, dst = self.literal_rules[matched_idx]
+            end = index + len(src)
+            if protected_until[index] >= end:
+                output.append(text[index])
+                index += 1
+                continue
+
+            output.append(dst)
+            index = end
+
+        return "".join(output)
+
+    def _apply_literals_cascade(self, text: str) -> str:
+        """Apply literal rules using the legacy sequential/cascade semantics."""
         literal_rules = self.literal_rules
         by_prefix = self.by_prefix
         seen = self._grams(text)
@@ -293,6 +423,12 @@ class _CompiledRules:
                         heapq.heappush(heap, later)
         return text
 
+    def apply_literals(self, text: str, *, cascade: bool = False) -> str:
+        """Apply literal rules in atomic mode, or cascade when explicitly asked."""
+        if cascade:
+            return self._apply_literals_cascade(text)
+        return self._apply_literals_once(text)
+
 
 def _get_compiled_rules(rules: Sequence[dict[str, str]]) -> _CompiledRules:
     """依規則清單取得（或建立）編譯好的規則。
@@ -314,11 +450,15 @@ def _get_compiled_rules(rules: Sequence[dict[str, str]]) -> _CompiledRules:
     return compiled
 
 
-def apply_replace_rules(text: str, rules: Sequence[dict[str, str]]) -> str:
+def apply_replace_rules(
+    text: str, rules: Sequence[dict[str, str]], *, cascade: bool = False
+) -> str:
     """應用替換規則到給定的文字。
 
-    語意與舊版相同（固定字串依長詞優先逐條套用、可串接；正則最後套用；
-    文字不含任何規則前兩字時整段略過），但只檢查可能命中的規則：
+    預設固定字串規則只對原文做一次最長匹配，替換結果不會再被其他固定
+    字串規則掃描；這避免來源詞出現在目標詞中時發生遞迴套用。
+    ``cascade=True`` 提供明確的舊版逐條串接語意。正則規則仍在固定字串
+    階段後依序套用；文字不含任何規則前兩字時整段略過。
     3 萬條規則時不再對每段文字掃過全部規則。
     """
 
@@ -335,7 +475,7 @@ def apply_replace_rules(text: str, rules: Sequence[dict[str, str]]) -> str:
     if not compiled.may_hit(text):
         return text
 
-    text = compiled.apply_literals(text)
+    text = compiled.apply_literals(text, cascade=cascade)
 
     for pattern, repl in compiled.regex_rules:
         text = pattern.sub(repl, text)
