@@ -1,6 +1,5 @@
 """PipelineView 的控制項與版面組裝（由 pipeline_view.py 拆出，#114）。"""
 
-
 import flet as ft
 
 from app.ui import design, kit
