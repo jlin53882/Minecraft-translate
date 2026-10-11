@@ -737,10 +737,8 @@ def test_translate_output_path_follows_lm_translate_folder_name(monkeypatch):
     monkeypatch.setattr(
         pipeline_config,
         "load_config",
-        lambda: {"lang_merger": {"lm_translate_folder_name": "LM翻譯後"}},
+        lambda: {"lm_translator": {"lm_translate_folder_name": "自訂輸出"}},
     )
     cfg = PipelineConfig("in", "out")
-    assert cfg.translate_output_dir.endswith("lm_translate/LM翻譯後") or (
-        cfg.translate_output_dir.replace("\\", "/").endswith("lm_translate/LM翻譯後")
-    )
+    assert cfg.translate_output_dir.replace("\\", "/").endswith("lm_translate/自訂輸出")
     assert cfg.bundle_sources[-1] == cfg.translate_output_dir

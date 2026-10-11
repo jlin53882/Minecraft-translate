@@ -800,3 +800,16 @@ class LazyConfigProxy:
 # 對外仍維持 `config` 這個名稱，讓既有呼叫點不用一次大改；
 # 真正的目標是先移除 import-time side effect，再逐步收斂舊依賴。
 config = LazyConfigProxy()
+
+
+DEFAULT_LM_TRANSLATE_FOLDER_NAME = "LM翻譯後"
+
+
+def get_lm_translate_folder_name(config: dict | None = None) -> str:
+    """回傳 LM 翻譯輸出資料夾名稱（``lm_translator.lm_translate_folder_name``）。
+
+    機器翻譯頁與一鍵流水線共用；使用時才讀設定，存檔後不需重啟。缺漏或空白 → 預設值。
+    """
+    cfg = load_config() if config is None else config
+    name = (cfg.get("lm_translator") or {}).get("lm_translate_folder_name")
+    return name or DEFAULT_LM_TRANSLATE_FOLDER_NAME

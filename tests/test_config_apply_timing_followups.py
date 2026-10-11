@@ -8,15 +8,34 @@ from app import config_apply
 from app.shell import app_shell
 from app.shell.app_shell import AppShell
 from app.views import lm_view
-from translation_tool.utils import exceptions
+from translation_tool.utils import config_manager, exceptions
 
 
 def test_lm_folder_name_is_read_at_use_time(monkeypatch):
     values = {"lm_translate_folder_name": "A資料夾"}
-    monkeypatch.setattr(lm_view, "load_config", lambda: {"lm_translator": values})
+    monkeypatch.setattr(
+        config_manager, "load_config", lambda: {"lm_translator": values}
+    )
     assert lm_view.get_lm_translate_folder_name() == "A資料夾"
     values["lm_translate_folder_name"] = "B資料夾"
     assert lm_view.get_lm_translate_folder_name() == "B資料夾"
+
+
+def test_lm_page_and_pipeline_share_the_lm_folder_name(monkeypatch):
+    """機器翻譯頁與一鍵流水線讀同一個設定鍵；缺漏或空白時用同一個預設值。"""
+    from app.views.pipeline.pipeline_config import PipelineConfig
+
+    cfg = {"lm_translator": {"lm_translate_folder_name": "共用資料夾"}}
+    monkeypatch.setattr(config_manager, "load_config", lambda: cfg)
+    assert lm_view.get_lm_translate_folder_name() == "共用資料夾"
+    assert PipelineConfig("in", "out", config=cfg).translate_output_subfolder == (
+        "共用資料夾"
+    )
+    for blank in ({}, {"lm_translator": {"lm_translate_folder_name": ""}}):
+        assert config_manager.get_lm_translate_folder_name(blank) == "LM翻譯後"
+        assert PipelineConfig("in", "out", config=blank).translate_output_subfolder == (
+            "LM翻譯後"
+        )
 
 
 def test_error_log_dir_follows_config(monkeypatch, tmp_path):

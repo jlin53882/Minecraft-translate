@@ -312,7 +312,7 @@ async def _run_dialog_sequence(
     (
         output_root / "locale_sort" / "_整理輸出" / "lang_output" / "待翻譯整理需翻譯"
     ).mkdir(parents=True, exist_ok=True)
-    (output_root / "lm_translate" / "_翻譯輸出").mkdir(parents=True, exist_ok=True)
+    (output_root / "lm_translate" / "LM翻譯後").mkdir(parents=True, exist_ok=True)
     pipeline.input_path_text.value = str(input_root)
     pipeline.output_path_text.value = str(output_root)
 
@@ -468,7 +468,7 @@ async def _run_dialog_click_probe(
     (
         output_root / "locale_sort" / "_整理輸出" / "lang_output" / "待翻譯整理需翻譯"
     ).mkdir(parents=True, exist_ok=True)
-    (output_root / "lm_translate" / "_翻譯輸出").mkdir(parents=True, exist_ok=True)
+    (output_root / "lm_translate" / "LM翻譯後").mkdir(parents=True, exist_ok=True)
     pipeline.input_path_text.value = str(input_root)
     pipeline.output_path_text.value = str(output_root)
     standalone_launches: dict[str, list] = {}

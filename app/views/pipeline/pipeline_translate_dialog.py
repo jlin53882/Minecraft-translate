@@ -26,7 +26,10 @@ from app.views.pipeline.pipeline_forms import (
     dialog_dimensions,
     dialog_text_field,
 )
-from translation_tool.utils.config_manager import load_config
+from translation_tool.utils.config_manager import (
+    get_lm_translate_folder_name,
+    load_config,
+)
 
 
 def open_translate_dialog(
@@ -98,9 +101,7 @@ def _translate_init_state_and_fields(ctx, input_path, output_path):
         "pending_organized_folder_name", "待翻譯整理需翻譯"
     )
 
-    translate_output_subfolder = lang_merger_cfg.get(
-        "lm_translate_folder_name", "_翻譯輸出"
-    )
+    translate_output_subfolder = get_lm_translate_folder_name(cfg)
 
     # 與 PipelineConfig 一致：語系合併把待翻譯清單輸出在 lang_output/ 底下；
     # 翻譯輸出 {output}/lm_translate/<子資料夾> 也是打包對話框的預設輸入

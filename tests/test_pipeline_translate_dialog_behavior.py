@@ -69,7 +69,7 @@ class _Env:
         self.organized = (
             self.out / "locale_sort" / "_整理輸出" / "lang_output" / "待翻譯整理需翻譯"
         )
-        self.translate_out = self.out / "lm_translate" / "_翻譯輸出"
+        self.translate_out = self.out / "lm_translate" / "LM翻譯後"
         self.organized.mkdir(parents=True)
         self.snacks: list[str] = []
         self.runs: list[dict] = []

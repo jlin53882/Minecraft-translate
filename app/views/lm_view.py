@@ -23,20 +23,10 @@ from app.views._log import LogView, load_ui_logging_config
 from app.views.moddb.lm_db_options import LmDbOptions, LmDbRunSnapshot
 from translation_tool.utils.config_manager import (
     get_batch_write_interval,
+    get_lm_translate_folder_name,
     load_config,
 )
 from translation_tool.utils.log_unit import log_debug, log_info
-
-DEFAULT_LM_TRANSLATE_FOLDER_NAME = "LM翻譯後"
-
-
-def get_lm_translate_folder_name() -> str:
-    """輸出資料夾預設名稱；使用時才讀設定，存檔後不需重啟（#117）。"""
-    return (
-        load_config()
-        .get("lm_translator", {})
-        .get("lm_translate_folder_name", DEFAULT_LM_TRANSLATE_FOLDER_NAME)
-    )
 
 
 def format_elapsed(seconds: float) -> str:
