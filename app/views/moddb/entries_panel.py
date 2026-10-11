@@ -105,6 +105,8 @@ class EntriesPanel(ft.Column):
         # 批次機翻「特殊字元不一致」的檢視：只列這些條目，並把 AI 譯文預填到譯文框供修正
         self.entry_ids: list[int] | None = None
         self.drafts: dict[int, str] = {}
+        # 每換一份清單（套用、清除、切換篩選）就加一；背景儲存完成時據此判斷清單是否還是同一份
+        self._flagged_batch = 0
         self.state = "all"
         self.query = ""
         self.rows: list[EntryRow] = []
@@ -755,6 +757,7 @@ class EntriesPanel(ft.Column):
         text = self.pending_text()
         if entry is None or db is None or not text or self._save_running:
             return
+        flagged_batch = self._flagged_batch
         propagate = bool(self.sync_row.value)
         self._save_running = True
         self.save_btn.disabled = True
@@ -777,14 +780,13 @@ class EntriesPanel(ft.Column):
                     f"{entry.mc_version} {entry.mod_id} {entry.key}"
                 )
 
+            result = (db, entry, text, done, error, flagged_batch)
             run_task = getattr(self._page, "run_task", None)
             try:
                 if callable(run_task):
-                    run_task(
-                        self._apply_save_result_async, db, entry, text, done, error
-                    )
+                    run_task(self._apply_save_result_async, *result)
                 else:
-                    self._apply_save_result(db, entry, text, done, error)
+                    self._apply_save_result(*result)
             except Exception as exc:  # noqa: BLE001 - a disposed page may reject the result callback
                 log_warning(f"Mod 資料庫儲存結果無法排回畫面：{exc!r}")
 
@@ -817,10 +819,10 @@ class EntriesPanel(ft.Column):
             self._update_impact()
             self._safe_update()
 
-    async def _apply_save_result_async(self, db, entry, text, done, error) -> None:
-        self._apply_save_result(db, entry, text, done, error)
+    async def _apply_save_result_async(self, *result) -> None:
+        self._apply_save_result(*result)
 
-    def _apply_save_result(self, db, entry, text, done, error) -> None:
+    def _apply_save_result(self, db, entry, text, done, error, flagged_batch) -> None:
         self._save_running = False
         if error is not None:
             kind, exc = error
@@ -860,8 +862,8 @@ class EntriesPanel(ft.Column):
             else "已儲存"
         )
         show_snack(self._page, message, C.EM, text_color=C.ON_EM)
-        self._resolve_flagged(entry.id)
         if self.db() is db:
+            self._resolve_flagged(entry.id, flagged_batch)
             same_entry = self.selected is not None and self.selected.id == entry.id
             unchanged_editor = same_entry and self.pending_text() == text
             if unchanged_editor:
@@ -875,14 +877,18 @@ class EntriesPanel(ft.Column):
         self._update_impact()
         self._safe_update()
 
-    def _resolve_flagged(self, entry_id: int) -> None:
-        """機翻「特殊字元不一致」清單裡的條目已手動儲存：移出清單並通知機翻頁扣掉數量。"""
-        if self.entry_ids is None or entry_id not in self.entry_ids:
+    def _resolve_flagged(self, entry_id: int, flagged_batch: int) -> None:
+        """機翻「特殊字元不一致」清單裡的條目已手動儲存：移出清單並通知機翻頁扣掉數量。
+
+        條目編號只在同一個資料庫、同一份清單內有意義：儲存期間換過清單就不動新清單。
+        """
+        if flagged_batch != self._flagged_batch or entry_id not in (
+            self.entry_ids or ()
+        ):
             return
-        self._set_flagged(
-            [i for i in self.entry_ids if i != entry_id],
-            {k: v for k, v in self.drafts.items() if k != entry_id},
-        )
+        self.entry_ids = [i for i in self.entry_ids if i != entry_id]
+        self.drafts = {k: v for k, v in self.drafts.items() if k != entry_id}
+        self._show_flagged_banner()
         if self._on_flagged_resolved is not None:
             self._on_flagged_resolved(entry_id)
 
@@ -960,12 +966,16 @@ class EntriesPanel(ft.Column):
         refresh_entry_filter(self)
 
     def _set_flagged(self, entry_ids: list[int] | None, drafts: dict[int, str]) -> None:
+        self._flagged_batch += 1
         self.entry_ids = entry_ids
         self.drafts = drafts
-        self.flagged_banner.visible = entry_ids is not None
-        if entry_ids is not None:
+        self._show_flagged_banner()
+
+    def _show_flagged_banner(self) -> None:
+        self.flagged_banner.visible = self.entry_ids is not None
+        if self.entry_ids is not None:
             self.flagged_text.value = (
-                f"只顯示本次機翻「特殊字元與原文不一致」的 {len(entry_ids):,} 筆"
+                f"只顯示本次機翻「特殊字元與原文不一致」的 {len(self.entry_ids):,} 筆"
                 "（AI 譯文尚未寫入，已預填在譯文框；修正後儲存即可，或按「清除篩選」）"
             )
 

@@ -139,12 +139,12 @@ class AppShell:
         flush_before_close: Callable[[], object] | None = None,
         cache_reloader: CacheRootReloader | None = None,
         find_interrupted_tasks: Callable[[], object] | None = None,
-        active_model: Callable[[], str | None] | None = None,
+        active_model: Callable[[str | None], str | None] | None = None,
     ) -> None:
         self.page = page
         self.file_picker = file_picker or SafeFilePicker()
         self._key_snapshot = key_snapshot or _default_key_snapshot
-        self._active_model = active_model or _default_active_model
+        self._active_model = active_model or _default_active_model_lookup()
         self._shown_active_model: str | None = None
         self._config_loader = config_loader or _default_config_loader
         self._setup_operation_runtime(page, task_manager, cache_reloader)
@@ -585,8 +585,9 @@ class AppShell:
 
     def refresh_active_model(self) -> None:
         """任務執行中，底部狀態列顯示「目前實際送出請求的模型」（配額用盡切換後會跟著變）。"""
+        task = self.tasks.current()
         try:
-            active = self._active_model() if self.tasks.current() is not None else None
+            active = self._active_model(task.operation_id) if task is not None else None
         except Exception:
             logger.debug("讀取目前模型失敗", exc_info=True)
             return
@@ -1137,10 +1138,15 @@ def _default_key_snapshot() -> list:
     return get_key_health_snapshot()
 
 
-def _default_active_model() -> str | None:
-    from app.services_impl.key_health_service import get_active_model
+def _default_active_model_lookup() -> Callable[[str | None], str | None]:
+    """開始記錄模型由哪個操作切換，回傳「依操作查詢目前模型」的函式。"""
+    from app.services_impl.key_health_service import (
+        get_active_model,
+        track_active_model_by_operation,
+    )
 
-    return get_active_model()
+    track_active_model_by_operation()
+    return get_active_model
 
 
 def _default_config_loader() -> dict:

@@ -31,7 +31,7 @@
     "app/views/icon_preview/icon_cache.py": 957,
     "app/views/icon_preview_view.py": 832,
     "app/views/moddb/batch_replace_dialog.py": 982,
-    "app/views/moddb/entries_panel.py": 976,
-    "app/views/moddb/translate_panel.py": 1035
+    "app/views/moddb/entries_panel.py": 986,
+    "app/views/moddb/translate_panel.py": 1028
   }
 }

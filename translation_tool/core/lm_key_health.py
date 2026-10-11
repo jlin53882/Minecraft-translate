@@ -183,17 +183,29 @@ def get_key_health_registry() -> KeyHealthRegistry:
 
 _active_model_lock = threading.Lock()
 _active_model: str | None = None
+# 記錄是哪個任務切換的模型：翻譯結束後執行的其他任務不會沿用上一輪的模型
+_active_model_owner: object | None = None
+_active_model_owner_resolver: Callable[[], object | None] = lambda: None
+
+
+def set_active_model_owner_resolver(resolver: Callable[[], object | None]) -> None:
+    """由 app 層提供「目前執行緒屬於哪個任務」；引擎核心不直接依賴 app 的任務登錄。"""
+    global _active_model_owner_resolver
+    _active_model_owner_resolver = resolver
 
 
 def set_active_model(name: str | None) -> None:
-    global _active_model
+    global _active_model, _active_model_owner
+    owner = _active_model_owner_resolver() if name else None
     with _active_model_lock:
         _active_model = name or None
+        _active_model_owner = owner
 
 
-def get_active_model() -> str | None:
+def get_active_model(owner: object | None = None) -> str | None:
+    """``owner`` 任務自己切換到的模型；其他任務記下的模型不算。"""
     with _active_model_lock:
-        return _active_model
+        return _active_model if _active_model_owner == owner else None
 
 
 # -- 同專案模式：每日配額（RPD）以「模型」為單位 ---------------------------------

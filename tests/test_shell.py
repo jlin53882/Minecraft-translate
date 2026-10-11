@@ -975,7 +975,7 @@ def test_config_saved_elsewhere_refreshes_topbar_and_statusbar(shell, env):
 def test_statusbar_model_follows_the_model_actually_in_use(placeholder_views, env):
     """配額用盡切換模型後，底部狀態列跟著顯示目前實際送請求的模型；任務結束後回到設定值。"""
     active = {"name": None}
-    s = _make_shell(env, active_model=lambda: active["name"])
+    s = _make_shell(env, active_model=lambda _operation_id: active["name"])
     s.mount()
     try:
         assert s.statusbar.model.value == "gemini-x"
@@ -995,4 +995,35 @@ def test_statusbar_model_follows_the_model_actually_in_use(placeholder_views, en
         s.refresh_active_model()
         assert s.statusbar.model.value == "gemini-x"
     finally:
+        s.dispose()
+
+
+def test_statusbar_does_not_carry_a_finished_translations_model_into_the_next_task(
+    placeholder_views, env
+):
+    """翻譯最後切到的模型屬於那個任務；之後執行 JAR 掃描時狀態列回到設定值。"""
+    from translation_tool.core import lm_key_health
+
+    owner = {"id": None}
+    lm_key_health.set_active_model_owner_resolver(lambda: owner["id"])
+    s = _make_shell(env, active_model=lm_key_health.get_active_model)
+    s.mount()
+    try:
+        translation = TaskSession(name="機器翻譯", view_key="lm")
+        translation.start()
+        owner["id"] = s.tasks.current().operation_id
+        lm_key_health.set_active_model("gemini-b")
+        s.refresh_active_model()
+        assert s.statusbar.model.value == "gemini-b"
+        translation.finish()
+
+        scan = TaskSession(name="JAR 掃描", view_key="moddb")
+        scan.start()
+        s.refresh_tasks()
+        s.refresh_active_model()
+        assert s.statusbar.model.value == "gemini-x"
+        scan.finish()
+    finally:
+        lm_key_health.set_active_model_owner_resolver(lambda: None)
+        lm_key_health.set_active_model(None)
         s.dispose()

@@ -2190,8 +2190,8 @@ def test_same_as_source_count_and_pagination_share_the_condition(db_path):
     db.close()
 
 
-def test_manual_fix_of_a_flagged_entry_lowers_the_translate_card(db_path, monkeypatch):
-    """在條目校對修好「特殊字元不一致」的條目後，機翻頁的數量與「檢視」同步減少。"""
+def _flagged_entry_saved_by_hand(db_path, monkeypatch):
+    """機翻留下一筆「特殊字元不一致」，開啟檢視後在資料庫手動存好它（尚未排回畫面）。"""
     from app.views import moddb_view
 
     seed(db_path)
@@ -2210,13 +2210,55 @@ def test_manual_fix_of_a_flagged_entry_lowers_the_translate_card(db_path, monkey
     assert panel.stat_flagged.value_text.value == "1"
     panel.result_inspector.inspect()
     entries = view.entries
+    batch = entries._flagged_batch
 
     db = view.get_db()
     entry = db.list_entries("1.21.1", entry_ids=[entry_id])[0][0]
     done = db.save_manual(entry.id, "注入合金", actor="測試", propagate=False)
-    entries._apply_save_result(db, entry, "注入合金", done, None)
+    return view, panel, entries, db, entry, done, batch
+
+
+def test_manual_fix_of_a_flagged_entry_lowers_the_translate_card(db_path, monkeypatch):
+    """在條目校對修好「特殊字元不一致」的條目後，機翻頁的數量與「檢視」同步減少。"""
+    _, panel, entries, db, entry, done, batch = _flagged_entry_saved_by_hand(
+        db_path, monkeypatch
+    )
+    entries._apply_save_result(db, entry, "注入合金", done, None, batch)
 
     assert panel.stat_flagged.value_text.value == "0"
     assert panel.view_flagged_btn.visible is False
     assert panel.result_inspector.normal_entries == {}
     assert entries.entry_ids == []
+
+
+def test_late_save_does_not_touch_a_flagged_list_opened_after_it_started(
+    db_path, monkeypatch
+):
+    """儲存還在背景時又開了另一份清單：舊儲存完成不能把新清單裡同編號的條目拿掉。"""
+    _, panel, entries, db, entry, done, batch = _flagged_entry_saved_by_hand(
+        db_path, monkeypatch
+    )
+    entries.show_flagged([entry.id], {entry.id: "§a新一輪譯文"}, "1.21.1")
+
+    entries._apply_save_result(db, entry, "注入合金", done, None, batch)
+
+    assert entries.entry_ids == [entry.id]
+    assert entries.drafts == {entry.id: "§a新一輪譯文"}
+    assert panel.stat_flagged.value_text.value == "1"
+
+
+def test_late_save_from_another_database_does_not_touch_the_flagged_list(
+    db_path, monkeypatch
+):
+    """儲存還在背景時換了資料庫：舊資料庫的條目編號不代表目前清單裡的條目。"""
+    _, panel, entries, _, entry, done, batch = _flagged_entry_saved_by_hand(
+        db_path, monkeypatch
+    )
+    previous_db = TranslationDB(db_path)
+    try:
+        entries._apply_save_result(previous_db, entry, "注入合金", done, None, batch)
+    finally:
+        previous_db.close()
+
+    assert entries.entry_ids == [entry.id]
+    assert panel.stat_flagged.value_text.value == "1"
