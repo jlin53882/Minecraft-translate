@@ -138,7 +138,7 @@ flowchart TD
 - **同步在 UI 執行緒的操作**：套用 DST、套用歷史、還原、刷新統計、分頁切換、分片詳情的選取。這些操作會呼叫磁碟寫入，因此操作期間頁面會阻塞。
 - **忙碌狀態**：`_set_state(busy, reason, trace)` 更新 `ui_busy`、`busy_reason` 與狀態列文字，並呼叫 `_refresh_disabled_state` 依忙碌狀態切換所有按鈕與分頁控制項。
 - **日誌與提示**：`_append_log` 依前綴 `[ERROR`、`[WARN` 分別寫入 `log_error`、`log_warning`，其餘寫入 `log_info`，並同步加入記憶體日誌（上限 1500 筆）。`_notify` 同時寫日誌並顯示 `show_snack`。日誌面板可切換「只看警告以上」。
-- **換頁清理**：`will_unmount` 會取消 `Debouncer`；`_on_page_resized` 會重算分片鍵清單寬度並重新渲染分片區。
+- **換頁與視窗大小**：本頁沒有換頁清理（不覆寫 Flet 的 unmount 回呼）。`did_mount` 把 `page.on_resized` 設為 `_on_page_resized`（重算分片鍵清單寬度並重新渲染分片區），離開本頁後不會解除，此時重新渲染失敗會被忽略。總覽讀取的 operation 為 `NON_CANCELLABLE`／`DRAIN_ONLY`，由 `OperationRegistry` 管理，不需要頁面自行取消。
 
 ## 狀態與資料
 

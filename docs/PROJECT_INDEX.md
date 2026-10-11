@@ -323,7 +323,7 @@ app/
 | `docs/TRANSLATION_VIEW_ARCHITECTURE.md` | TranslationView（`app/views/translation/`） |
 | `docs/UNTRANSLATED_CHECKER_ARCHITECTURE.md` | UntranslatedChecker（`app/views/untranslated_checker.py`） |
 
-相關系統文件：`JAR_PIPELINE.md`（抽取流程）、`CACHE_SYSTEM.md`（快取資料結構）、`TRANSLATION_WORKFLOW.md`（翻譯流程）、`DOCSTRING_SPEC.md`（docstring 規範）、`GH_WORKFLOW.md`（GitHub 操作流程）、`PR_EXECUTION_TYPES.md`（PR 執行類型對照）、`RELEASE_WORKFLOW.md`（Release 操作流程）、`TEST_STRATEGY.md`（測試策略）。
+相關系統文件：`JAR_PIPELINE.md`（抽取流程）、`CACHE_SYSTEM.md`（快取資料結構）、`TRANSLATION_WORKFLOW.md`（翻譯流程）、`DOCSTRING_SPEC.md`（docstring 規範）、`GH_WORKFLOW.md`（GitHub 操作流程）、`RELEASE_WORKFLOW.md`（Release 操作流程）、`TEST_STRATEGY.md`（測試策略）。
 
 ---
 

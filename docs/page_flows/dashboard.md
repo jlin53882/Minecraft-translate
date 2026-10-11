@@ -55,7 +55,7 @@ flowchart TD
 - `work()` 內以 `while True` 合併重新載入請求：讀取期間又有人呼叫 `reload()`，會設定 `_reload_dirty`，由同一個 worker 再跑一輪，不另開執行緒。
 - 背景執行緒只寫入 `_cache_overview`、`_rules_count`、`_moddb` 三個欄位，完成後以 `_apply_on_ui` 透過 `page.run_task` 排回 event loop 呼叫 `refresh_view`；沒有 event loop 時（測試）直接套用。
 - `_collect()` 在 UI 執行緒同步呼叫 Key 與模型配額的 loader，內部例外會被吞掉並以空清單顯示。
-- 本頁沒有取消流程，也沒有 `will_unmount`；重新載入被標記為不可取消。
+- 本頁沒有取消流程，也沒有換頁清理；重新載入被標記為不可取消。
 - 鎖：`_reload_state_lock` 保護 `_loading` 與 `_reload_dirty`；`_task_state_lock` 保護 `_active_task_ids`。
 
 ## 狀態與資料
