@@ -446,3 +446,64 @@ def test_prune_banner_button_cleans_priority_lines(tmp_path, monkeypatch):
     assert field.value == "人工\nPack"
     assert rechecked == [1]
     assert "測試" in banner.note.value
+
+
+def _fake_config(monkeypatch, cfg):
+    import json
+
+    from translation_tool.utils import config_manager
+
+    saved = []
+
+    def fake_save(config, *_args, **_kwargs):
+        saved.append(config)
+        snapshot = json.loads(json.dumps(config))
+        cfg.clear()
+        cfg.update(snapshot)
+        return True
+
+    monkeypatch.setattr(config_manager, "load_config", lambda *a, **k: cfg)
+    monkeypatch.setattr(config_manager, "save_config", fake_save)
+    return saved
+
+
+def test_source_preview_is_read_only(tmp_path, monkeypatch):
+    from translation_tool.translation_db.settings import (
+        preview_new_source_names,
+        read_custom_sources,
+    )
+
+    path = _registry_db(tmp_path, {"Pack": 102}, used_codes=(102,))
+    _fake_config(
+        monkeypatch,
+        {"translation_db": {"path": str(path), "priority": ["Pack", "尚未登錄"]}},
+    )
+
+    _known, new = preview_new_source_names("Pack\n尚未登錄")
+
+    assert new == ["尚未登錄"]
+    assert read_custom_sources(path) == {"Pack": 102}
+
+
+def test_pruned_source_is_not_registered_again_by_the_saved_config(
+    tmp_path, monkeypatch
+):
+    from app.services_impl.moddb_source_service import (
+        prune_unused_custom_sources_report,
+    )
+    from translation_tool.translation_db.settings import (
+        load_db_settings,
+        read_custom_sources,
+    )
+
+    path = _registry_db(tmp_path, {"測試": 100, "Pack": 102}, used_codes=(102,))
+    cfg = {"translation_db": {"path": str(path), "priority": ["測試", "Pack"]}}
+    saved = _fake_config(monkeypatch, cfg)
+
+    removed, _kept, _gone = prune_unused_custom_sources_report(str(path))
+
+    assert removed == ["測試"]
+    assert saved and saved[-1]["translation_db"]["priority"] == ["Pack"]
+    # 重新載入設定（等同重啟）不會把剛清掉的來源登錄回來
+    load_db_settings()
+    assert read_custom_sources(path) == {"Pack": 102}

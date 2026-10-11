@@ -482,7 +482,7 @@ def test_manual_review_confirmation_skips_format_check_but_keeps_cas_history_and
     check.close()
 
 
-def test_manual_review_applies_one_confirmed_draft_to_matching_keys(
+def test_manual_review_confirmation_does_not_reach_same_key_with_other_old_text(
     db_path,
 ):
     db = TranslationDB(db_path)
@@ -549,8 +549,8 @@ def test_manual_review_applies_one_confirmed_draft_to_matching_keys(
         == "applied"
     )
     assert moddb_repair_review_store.status_counts(review_path, "run-shared-key") == {
-        "applied": 2,
-        "pending": 1,
+        "applied": 1,
+        "pending": 2,
     }
 
     check = TranslationDB(db_path)
@@ -558,7 +558,8 @@ def test_manual_review_applies_one_confirmed_draft_to_matching_keys(
         row.source: row.zh_tw for row in check.entry_detail(entry.id).translations
     }
     assert translations[SRC_AI] == "人工統一翻譯 %s"
-    assert translations[SRC_MANUAL] == "人工統一翻譯 %s"
+    # 同 key 但舊譯文不同的來源沒被確認，不能被連帶覆蓋
+    assert translations[SRC_MANUAL] == "保留舊譯文"
     check.close()
 
 

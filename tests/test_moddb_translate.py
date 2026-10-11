@@ -1308,9 +1308,10 @@ def test_priority_field_previews_new_custom_sources(db_path, monkeypatch):
     from translation_tool.translation_db.settings import load_db_settings
 
     seed(db_path)
+    resolved = load_db_settings(_cfg(db_path, [])).resolved_path()
     monkeypatch.setattr(
-        "translation_tool.translation_db.settings.load_db_settings",
-        lambda *a, **k: load_db_settings(_cfg(db_path, [])),
+        "translation_tool.translation_db.settings.configured_db_path",
+        lambda *a, **k: resolved,
     )
     field = kit.field(label="優先序", multiline=True, helper="說明")
     check = attach_priority_hooks(field)

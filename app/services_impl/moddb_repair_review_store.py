@@ -114,20 +114,16 @@ def matching_items(
     *,
     statuses: tuple[str, ...] = ("pending", "invalid"),
 ) -> list[dict[str, Any]]:
-    """Return unresolved review items for the same source identity and key."""
+    """Return unresolved review items that are the same review group as ``item``.
+
+    Same group = same database, version, mod, key, source text, old translation and
+    AI draft (see ``group_key``); a confirmation never reaches rows whose old text or
+    draft differs, nor rows without a reliable identity.
+    """
     if not statuses:
         return []
-    fields = (
-        "database_identity",
-        "database_file_id",
-        "version",
-        "mod_id",
-        "kind",
-        "key",
-        "en_us",
-    )
-    expected = tuple(item.get(field) for field in fields)
-    if any(value in (None, "") for value in expected):
+    wanted = group_key(item)
+    if wanted is None:
         return []
 
     matches: list[dict[str, Any]] = []
@@ -139,7 +135,7 @@ def matching_items(
             candidate = load_item(path, run_id, index)
             if candidate is None:
                 continue
-            if tuple(candidate.get(field) for field in fields) == expected:
+            if group_key(candidate) == wanted:
                 matches.append(candidate)
                 seen.add(index)
     return matches

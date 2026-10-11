@@ -12,6 +12,7 @@ from translation_tool.translation_db.schema import (
 from translation_tool.translation_db.settings import (
     DbSettings,
     clean_source_names,
+    forget_priority_lines,
     normalize_db_path,
     prune_unused_custom_sources,
     read_custom_sources,
@@ -105,6 +106,8 @@ def prune_unused_custom_sources_report(
     gone = {
         token for name in removed for token in (name, f"custom:{before.resolve(name)}")
     }
+    if gone:
+        forget_priority_lines(gone)
     return removed, kept, gone
 
 

@@ -262,8 +262,44 @@ def prune_unused_custom_sources(path: Path) -> tuple[list[str], list[str]]:
 
 def preview_new_source_names(text: str) -> tuple[list[str], list[str]]:
     """設定頁輸入框的即時預覽：``(已存在, 將新增)`` 的來源名稱（只讀，不登錄）。"""
-    registry = read_custom_sources(load_db_settings().resolved_path())
+    registry = read_custom_sources(configured_db_path())
     return split_new_source_names(text.splitlines(), registry)
+
+
+def configured_db_path(config: dict | None = None) -> Path:
+    """設定檔指定的資料庫路徑；只讀，不會登錄任何自訂來源。"""
+    if config is None:
+        from translation_tool.utils.config_manager import load_config
+
+        config = load_config()
+    cfg = config.get("translation_db", {}) or {}
+    return DbSettings(path=normalize_db_path(cfg.get("path"))).resolved_path()
+
+
+def forget_priority_lines(gone: set[str]) -> bool:
+    """把已儲存設定的來源優先順序中指向 ``gone`` 的行拿掉；有改動才寫檔。
+
+    清除自訂來源後若設定檔仍留著那些名稱，下次載入設定會把它們重新登錄回來。
+    """
+    from translation_tool.utils.config_manager import load_config, save_config
+
+    config = load_config()
+    cfg = config.get("translation_db") or {}
+    lines = cfg.get("priority")
+    if not isinstance(lines, list):
+        return False
+
+    def points_to(line: object) -> bool:
+        text = str(line).strip()
+        name, sep, _code = text.partition("（自訂 #")
+        return text in gone or (bool(sep) and name in gone)
+
+    kept = [line for line in lines if not points_to(line)]
+    if len(kept) == len(lines):
+        return False
+    cfg["priority"] = kept
+    config["translation_db"] = cfg
+    return save_config(config)
 
 
 def parse_priority(names: Any, custom: dict[str, int] | None = None) -> tuple[int, ...]:

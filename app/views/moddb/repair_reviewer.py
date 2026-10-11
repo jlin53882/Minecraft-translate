@@ -93,7 +93,7 @@ class RepairReviewer:
         if not self.filtered_count:
             self.status_filter = "all"
             self.filtered_count = moddb_repair_review_store.index_count(
-                self.store_path, self.run_id, self.status_filter
+                self.store_path, self.run_id, self.status_filter, grouped=True
             )
         self.page_offset = 0
         self._load_index_page()

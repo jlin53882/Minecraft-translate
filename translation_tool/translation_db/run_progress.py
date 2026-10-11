@@ -192,7 +192,7 @@ def format_repair_live(live: dict) -> str:
         f"來源進度 {source_done:,}/{source_total:,}（{source_percent:.0f}%）｜"
         f"AI 修復項目 {ai_done:,}/{ai_total:,}｜"
         f"規劃批次 {planned_done:,}/{planned_total:,}｜"
-        f"實際請求 {int(live.get('actual_requests', planned_done) or 0):,}｜"
+        f"已送出批次 {int(live.get('actual_requests', planned_done) or 0):,}｜"
         f"已耗時 {format_duration(live.get('elapsed_sec'))}｜"
         f"預估剩餘：{eta}"
     )

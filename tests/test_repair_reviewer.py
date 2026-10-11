@@ -504,3 +504,28 @@ def test_reviewer_lists_merged_sources_and_keep_old_covers_the_whole_group(tmp_p
     reviewer._keep_old()
 
     assert store.status_counts(path, "run-ui") == {"kept_old": 2}
+
+
+def test_matching_items_never_reaches_rows_with_other_old_text_or_draft(tmp_path):
+    path = store.create_run(tmp_path / "match.db", "run-m")
+    mine = _identity(tmp_path, source_id=2)
+    store.append_item(path, "run-m", mine)
+    same = store.append_item(path, "run-m", _identity(tmp_path, source_id=4))
+    store.append_item(
+        path, "run-m", _identity(tmp_path, source_id=1, old_translation="別的")
+    )
+    store.append_item(
+        path, "run-m", _identity(tmp_path, source_id=3, ai_translation="另一版")
+    )
+
+    matched = store.matching_items(path, "run-m", mine)
+
+    assert sorted(item["item_index"] for item in matched) == [1, same]
+
+
+def test_matching_items_ignores_items_without_a_reliable_identity(tmp_path):
+    path = store.create_run(tmp_path / "noid.db", "run-n")
+    store.append_item(path, "run-n", {"key": "a", "source_id": 0})
+    store.append_item(path, "run-n", {"key": "a", "source_id": 1})
+
+    assert store.matching_items(path, "run-n", {"key": "a", "source_id": 0}) == []
