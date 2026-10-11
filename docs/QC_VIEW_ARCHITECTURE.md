@@ -4,6 +4,8 @@
 
 QCView 是 **Quality Check（品質檢查）頁**，翻譯完成後的品質驗證工具，非翻譯管線必要環節。頁面先以三張模式卡（`kit.ChoiceCard`，由 `QC_MODES` 定義）選擇檢驗模式，只顯示對應的設定面板；三種模式共用同一組 `progress_bar` + `log_view`。
 
+流程圖見 [page_flows/qc.md](page_flows/qc.md)。
+
 ## 檔案結構
 
 - `app/views/qc_view.py` — 主視圖
@@ -19,9 +21,9 @@ QCView 是 **Quality Check（品質檢查）頁**，翻譯完成後的品質驗�
 start_task()（event loop）
   → 清空 log、重置 progress_bar、停用控制項、page.update()
   → task_worker(service_func, args, on_complete, controls_to_disable)
-       → threading.Thread(run)                         [worker thread]
+       → launch_page_operation(in_new_task("qc", run), ...)   [worker thread]
             for update in service_func(*args):
-                log 逐行 → batcher.add_lines([(line, level)])
+                log 逐行（mirror_lines 加上 "[QC] " 前綴）→ batcher.add_lines([(line, level)])
                 progress → batcher.set_state(progress=...)
                 error    → batcher.set_state(error=True)
                 batcher.flush()                        ← 依節流 / 背壓決定是否排程
@@ -35,6 +37,7 @@ start_task()（event loop）
 ```
 
 - **worker thread 不直接修改 Flet control，也不呼叫 `page.update()`**；它只把資料交給 `UiBatcher`，所有 UI 變更都在 `apply_ui`（event loop）上執行。
+- **任務登錄**：以 `launch_page_operation` 登錄為 `owner="qc"` 的頁面操作，`CancellationPolicy.NON_CANCELLABLE`（QC 任務不提供取消）、`ShutdownPolicy.DRAIN_ONLY`（關閉時等待任務跑完）。應用程式正在關閉、無法接受新任務時，直接以 done 狀態套用 UI，並顯示「應用程式正在關閉，無法啟動新任務」。
 - **UiBatcher 行為**：
   - 節流：兩次刷新至少間隔 `interval`（QC 為 0.2 秒）。
   - 背壓：上一次刷新還在 event loop 上執行時不排新的刷新，資料繼續累積，避免 `run_task` 佇列堆積。

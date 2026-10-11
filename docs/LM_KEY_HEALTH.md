@@ -1,4 +1,4 @@
-# API Key / 模型健康狀態（issue #113）
+# API Key / 模型健康狀態
 
 > **同專案模式**：本專案假設所有 API Key 都屬於同一個 Google 專案。Gemini 的 RPD 配額算在
 > 「專案 × 模型」，所以**每日配額耗盡記在「模型」上**（`ModelQuotaRegistry`），不是記在 key 上；
@@ -18,11 +18,11 @@
 | 重啟 | 狀態只存在程序記憶體，重啟後第一次請求會再被 429 一次後重新記錄 |
 | 設定 | 不受 `key_failure_cooldown_sec` 影響（該設定現在只管 403） |
 
-## 為什麼
+## 設計目的
 
-某一把 key 已確定當天 RPD 耗盡後，**之後每一個批次**輪到它時仍會再請求一次、收到 429 才改用下一把。
 每個批次都是新的 `ApiKeyCycle`（共用迴圈與目錄翻譯都是「每批呼叫一次 `translate_batch_smart`」），
-成功時又會 `reset()`，所以失敗紀錄一直被清掉。常用模型的 RPD 只有 500，這些白打的請求很可惜。
+成功時會 `reset()`。如果失敗紀錄只存在單一 cycle 內，已確定失效的 key **在之後每一個批次**都會被再請求一次。
+健康狀態因此存在跨批次的 registry，讓失效的 key 在冷卻期間不再被請求，避免浪費每日配額。
 
 ## 行為
 
@@ -49,7 +49,7 @@ for h in get_key_health_snapshot():   # 依設定檔順序
 
 ## 與既有契約的關係
 
-- 維持 #112 的 contract：耗盡 = 「所有 key 都在本輪實際嘗試且失敗」，另外加上「冷卻中的 key 在沒有健康 key 時仍會被試探一次」。
+- 耗盡的定義 = 「所有 key 都在本輪實際嘗試且失敗」，另外加上「冷卻中的 key 在沒有健康 key 時仍會被試探一次」。
 - 「失敗紀錄在 cycle 成功後清空、key0 重新有資格被領取」只在失敗記憶關閉時成立，由 `test_success_resets_failed_keys_when_failure_memory_is_disabled` 鎖定；預設（開啟）時失敗的 key 不會被下一批再次請求（`test_forbidden_key_is_not_requested_again_by_the_next_batch`）。
 
 ## 已知限制

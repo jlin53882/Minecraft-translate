@@ -1,6 +1,6 @@
 # Minecraft Translator Flet — 專案索引
 
-> 版本：0.8.0｜最後更新：2026-10-04
+> 版本號以 `pyproject.toml` 為準；變更記錄見 `CHANGELOG.md`。
 
 ---
 

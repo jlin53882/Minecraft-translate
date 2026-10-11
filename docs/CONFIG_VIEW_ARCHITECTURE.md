@@ -1,8 +1,10 @@
 # Config View 架構
 
+流程圖見 [page_flows/config.md](page_flows/config.md)。
+
 ## 定位
 
-ConfigView（`app/views/config_view.py`）是全域設定頁：以**左側導覽 + 右側內容**的兩欄佈局，管理 `config.json` 的設定區段。設定頁可編輯 logging / translator / ftb_translator / lm_translator / lang_merger / extractor / output_bundler / species_cache；`ui`（`ui.theme_mode`）、`jar_extractor.lang_codes` 等沒有指定 `page` 的設定不在此頁編輯。頁面頂部為 `build_header`；底部為固定橫幅，乾淨狀態顯示一般儲存提示，偵測到欄位或動態列變更時持續提示「設定尚未儲存」並將按鈕改為「儲存變更」。預設進入「一般設定」頁，每個設定欄位下方有說明文字（含套用時機與用途）。
+ConfigView（`app/views/config_view.py`）是全域設定頁：以**左側導覽 + 右側內容**的兩欄佈局，管理 `config.json` 的設定區段。設定頁可編輯 logging / translator / ftb_translator / lm_translator / lang_merger / extractor / output_bundler / species_cache / translation_db；kind 為 none 的設定（如 `ui.theme_mode`、`jar_extractor.lang_codes`）不在此頁編輯，由側欄或提取頁處理。頁面頂部為 `build_header` 與「資料庫位置」資訊列（`db_location.py`）；底部為固定橫幅，乾淨狀態顯示一般儲存提示，偵測到欄位或動態列變更時持續提示「設定尚未儲存」並將按鈕改為「儲存變更」。預設進入「一般設定」頁，每個設定欄位下方有說明文字（含套用時機與用途）。
 
 ## 檔案結構
 
@@ -13,7 +15,9 @@ app/views/config/
   ├─ settings_schema.py                  ← 設定頁特有的「導覽頁（NAV_PAGES）」與「版面（LAYOUT）」；未列在版面的設定自動接在所屬卡片後面
   ├─ settings_form.py                    ← 由 schema 產生控制項與頁面（make_control / build_controls / build_pages）
   ├─ config_actions.py                   ← 泛化的載入／儲存（load_config_into_view / save_config_from_view）
-  └─ config_form.py                      ← 共用 UI 工具（build_card / build_header / build_footer / build_key_row / build_key_field）
+  ├─ config_form.py                      ← 共用 UI 工具（build_card / build_header / build_footer / build_key_row / build_key_field）
+  ├─ chatgpt_oauth_panel.py              ← ChatGPT 登入與模型選單區塊（ChatGPTOAuthPanel）
+  └─ db_location.py                      ← 頁面頂部「資料庫位置」資訊列
 ```
 
 新增一個一般設定只需在 `config_schema.SETTINGS` 加一個 `Setting`（見 `docs/CONFIG_SETTINGS_SCHEMA.md`）；
@@ -26,14 +30,14 @@ app/views/config/
 | id | label | 內容 |
 |----|-------|------|
 | `general` | 一般設定 | 依序為「日誌設定 (Logging)」、「翻譯與處理設定 (Translator)」、「成品打包器 (Output Bundler)」三張卡，欄位單欄堆疊：logging（log_level / log_dir / log_format）、translator（`output_dir_name`、`replace_rules_path`、`cache_directory`、`parallel_execution_workers`、`enable_cache_saving`、`custom_translator_folder`）、`ftb_translator.output_dir_name`、`output_bundler.output_zip_name` |
-| `api_models` | API & 模型設定 | 「API 金鑰設定」卡（`_keys_panel`：標題「API 金鑰 (API Keys)」旁「+」新增；每列為遮罩輸入框＋顯示/隱藏眼睛＋刪除鈕）與「模型設定」卡（`_models_panel`：標題「模型清單 (Models List)」＋「新增模型名稱」輸入框＋「+」；輸入框文字只是草稿，按「+」加入後才成為設定變更；每列為序號、勾選啟用、模型名、`max_output_tokens`「模型上限」欄（空白表示用全域值）、上移／下移／刪除） |
+| `api_models` | API & 模型設定 | 「API 金鑰設定」卡（依序為 provider 選擇、`_keys_panel`、ChatGPT 模型選擇、ChatGPT 模型設定；`_keys_panel` 的 Gemini 區塊標題「Gemini API 金鑰」旁「+」新增，每列為遮罩輸入框＋顯示/隱藏眼睛＋刪除鈕，下方為 `ChatGPTOAuthPanel` 登入區塊）與「模型設定」卡（`_models_panel`：標題「模型清單 (Models List)」＋「新增模型名稱」輸入框＋「+」；輸入框文字只是草稿，按「+」加入後才成為設定變更；每列為序號、勾選啟用、模型名、`max_output_tokens`「模型上限」欄（空白表示用全域值）、上移／下移／刪除） |
 | `translation_behavior` | 翻譯行為設定 | 「基本設定」卡（temperature、`retry_same_as_source`、rate_limit.timeout、sleep_seconds_between_batches、`lm_translate_folder_name`）與「過濾條件與目錄」卡（skip_terms、translatable_keywords、patchouli 目錄名稱三個多行欄並排；`short_text_skip_len` 在其下方）。`retry_same_as_source` 開啟時，譯文與原文相同的候選會在 persistence 前單獨重新確認一次；第二次仍相同就接受。 |
 | `merger` | 語言合併器設定 | 單張「語言合併器設定 (Lang Merger)」卡，由上而下：pending 資料夾命名／整理資料夾名稱／key 最小出現次數／隔離資料夾名稱（兩欄兩列）、「語系過濾設定」（zh 英文含量閾值）、「Patchouli 進階設定」（翻譯來源優先級勾選、en_us 跳過門檻）、「檔案合併(階段 2)」（合併 XX_extracted → assets/） |
 | `mod_db` | Mod 資料庫 | 「Mod 資料庫 (Translation DB)」卡，分組：使用時機（翻譯時使用、語系合併補譯）、資料庫與版本（檔案路徑、預設目標版本）、沿用與寫回（跨版本沿用、翻譯結果寫入、手動儲存同步其他版本）、來源（ZIP 預設來源標記、來源優先順序） |
 | `prompts` | 提示詞管理 | 「提示詞 (System Prompts)」卡：Patchouli 與 Lang 兩個 system prompt 多行欄左右並排 |
 | `species_lookup` | 學名查詢管理 | 「學名查詢設定 (Species Cache)」卡，四欄單欄堆疊：species_cache 設定（cache_directory、cache_filename、wikipedia 語言與速率） |
-| `batch_limits` | 批次與限制 | 「批次大小與限制」卡（多列並排欄位，含「啟用 Token 預算切批」勾選）：initial_batch_size_* 各格式、min_batch_size、batch_shrink_factor、rpm_cooldown_sec、max_output_tokens、金鑰失敗冷卻、batch_write_interval |
-| `token_budget` | Token 預算 | 「Token 預算切批」卡：啟用開關、單批輸出／輸入預算、輸出／輸入係數、預算最小縮放、回升前連續成功批次、預算回升倍率 |
+| `batch_limits` | 批次與限制 | 「批次大小與限制」卡（多列並排欄位）：initial_batch_size_* 各格式、min_batch_size、batch_shrink_factor、rpm_cooldown_sec、max_output_tokens、金鑰失敗冷卻、batch_write_interval |
+| `token_budget` | Token 預算 | 「Token 預算切批」卡：啟用開關（`token_budget_enabled`）、單批輸出／輸入預算、輸出係數（`output_token_factor`）、預算最小縮放、回升前連續成功批次、預算回升倍率 |
 | `extractor` | Jar 提取設定 | 「JAR 輸出資料夾命名」卡：extractor.output_folder_names（extract / preview 各三種）、skip_zh_cn_extract；target_language 僅作舊設定相容，不宣稱會生效（版面中以 `Note` 說明） |
 
 ## 呼叫鏈
@@ -56,7 +60,7 @@ app/views/config/
       ├─ validate_api_keys_from_ui(api_keys)（lm_config_rules.py）
       ├─ validate_config_values(new_config)（共用載入契約；寫入前驗證）
       │    （欄位／設定契約錯誤，或本次模型變更將啟用模型數降為 0 → 顯示錯誤 snack，不寫檔）
-      ├─ save_config_json(new_config)   [config_service.py]
+      ├─ save_config_json(new_config)   [app/services_impl/config_service.py]
       │    ├─ normalization：`lang_merger.process_zh_cn_files` 為 false 時強制關閉相依的 skip 子選項
       │    ├─ 在 `config_store.write_lock()` 內呼叫 config_manager.save_config
       │    └─ 成功後 `config_store.notify_saved(...)` 通知訂閱者
@@ -97,7 +101,7 @@ app/views/config/
 - **三層 config 合併**：儲存基底來自 `load_config_json()`（config.json > config.example.json > DEFAULT_CONFIG），儲存後使用者的「預設值」固化進 config.json。
 - **API keys 驗證**：儲存前由 `translation_tool/core/lm_config_rules.py:validate_api_keys_from_ui` 驗證格式。
 
-## 三層合併細節（config_manager.py:load_config）
+## 三層合併細節（`translation_tool/utils/config_manager.py` 的 `load_config`）
 
 合併順序：`deep_merge(deep_merge(DEFAULT_CONFIG, example), user_config)` — user 覆蓋 example 覆蓋 DEFAULT_CONFIG：
 
@@ -109,7 +113,7 @@ app/views/config/
 
 `deep_merge` 本身：key 已存在且兩側皆 dict → 遞迴合併；否則 override 值直接取代（list/str 整組覆蓋）。
 
-## 載入驗證（ATK-C-2，啟動即爆炸）
+## 載入驗證（啟動即爆炸）
 
 `load_config` 最後對合併結果做型別驗證，失敗拋 `ConfigValidationError`：
 
@@ -126,7 +130,7 @@ app/views/config/
 
 `save_config` 使用與目標檔同目錄的唯一暫存檔：先完成 JSON 序列化、
 `flush`、檔案 `fsync` 與暫存檔讀回解析，再以 `os.replace` 原子發布，
-最後重新讀取目標檔驗證。提交前任何失敗都保留原本的 `config.json`，
+最後重新讀取目標檔驗證。提交前任何失敗都保留既有的 `config.json`，
 並清理本次暫存檔；Windows 目標檔被占用時 `os.replace` 失敗也不會截斷舊檔。
 
 原子替換保證讀者不會看到半份已發布 JSON，但不等同「斷電後最後一次寫入必定存在」。
@@ -142,9 +146,9 @@ app/views/config/
 2. list 欄位在 UI 是「每行一個元素」的多行 TextField，載入用 `\n` join、儲存用 splitlines 過濾空行。
 3. `save_config_from_view` 的 registry 參數會在儲存後通知已建立的 ExtractorView 執行 `refresh_config_defaults()`，重新同步 config-backed UI defaults；尚未建立的頁面則於建立時讀取最新設定。
 
-## PR-A 設定稽核結論
+## 設定鍵的 runtime 接線狀態
 
 - `extractor.skip_zh_cn_extract`：設定頁提供預設值；ExtractorView 建立時載入，提取/預覽仍保留每次操作的手動覆寫，最後由 regex/generator 實際套用。
 - `translator.custom_translator_folder`：設定頁提供 round-trip；FTB translator 每次任務讀取並傳給 `load_custom_translations`。
-- `logging.log_format`：設定頁提供 round-trip；既有 `update_logger_config` formatter 契約保留，下一次流水線啟動套用。
-- `extractor.target_language`、`translator.cjk_ratio_threshold`：保留舊設定以避免升級遺失，但歷史追查沒有正式 caller/可證明規則；列為 `DEPRECATED_CONFIG_KEYS`，不在 UI 製造無效控制項。
+- `logging.log_format`：設定頁提供 round-trip；`update_logger_config` 的 formatter 在下一次流水線啟動時套用。
+- `extractor.target_language`、`translator.cjk_ratio_threshold`：仍由三層合併保留讀取，但目前沒有可證明的 runtime caller 與規則；列為 `DEPRECATED_CONFIG_KEYS`（`translation_tool/utils/config_manager.py`），不在 UI 提供可調整控制項。

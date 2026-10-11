@@ -1,4 +1,4 @@
-# 發佈形式與資料目錄契約（#137）
+# 發佈形式與資料目錄契約
 
 > 本文件記錄發佈形式與可寫資料的位置。結論來自讀 repo 的靜態盤點；
 > 打包後的實測尚未進行（需 Windows 環境），見最後一節。
@@ -102,7 +102,7 @@
 
 ### 仍使用 `__file__` 的唯讀資源
 
-`resource_pack_version.json` 在 3 處（`pipeline_bundle_dialog.py`、`pipeline_one_click_dialog.py`、`bundler_view.py`）仍以 `os.path.dirname(__file__)` 往上推算，**沒有改成 `get_resource_root()`**：這三個檔案有大量既有 ruff 問題，改動會讓 CI 的 changed-files lint 失敗，而清理它們超出本 PR 範圍。
+`resource_pack_version.json` 在 4 處以模組的 `__file__` 往上推算，**沒有使用 `get_resource_root()`**：`pipeline_bundle_dialog.py`、`pipeline_one_click_dialog.py`、`bundler_view.py`（`os.path.dirname(__file__)`）與 `app/services_impl/moddb_service.py` 的 `VERSION_FILE`（`Path(__file__).resolve().parents[2]`）。
 它們依賴 Nuitka 把模組的 `__file__` 對應到 `app/` 內的虛擬路徑，並由 `--include-data-files` 把該 JSON 放在 `app/translation_tool/core/`。這是推論，**需 Windows 實機確認**；有 `tests/test_app_paths.py::test_source_mode_resource_root_is_repo_root` 確保原始碼模式下檔案位置一致。
 
 ## 尚未驗證（需 Windows 實機）

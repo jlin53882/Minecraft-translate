@@ -1,5 +1,7 @@
 # MERGE_VIEW_ARCHITECTURE.md
 
+> 流程圖：[page_flows/merge.md](page_flows/merge.md)
+
 ## 定位
 
 MergeView（頁面標題「語系比對合併」）整合 en_us、zh_cn、zh_tw 三種來源，保留已完成的繁中、把 zh_cn 轉為繁體，只留下真正需要翻譯的條目，並依類型分類輸出（`lang_output`、`patchouli_output`、`other_output`、`errordata_output` 與待翻譯資料夾）。
@@ -10,7 +12,7 @@ MergeView（頁面標題「語系比對合併」）整合 en_us、zh_cn、zh_tw 
 
 ## 主要 UI 結構
 
-控制項與版面的組裝在 `app/views/merge/merge_widgets.py`（`MergeWidgetsMixin`，由 `merge_view.py` 拆出，#114）；`MergeView` 保留事件處理、執行流程與日誌輪詢。
+控制項與版面的組裝在 `app/views/merge/merge_widgets.py`（`MergeWidgetsMixin`）；`MergeView` 保留事件處理、執行流程與日誌輪詢。
 
 版面：`kit.page_header`「語系比對合併」→ 輸出資料夾說明方塊（`_info_container`）→ 左右兩欄 Row：
 
@@ -32,13 +34,11 @@ MergeView（頁面標題「語系比對合併」）整合 en_us、zh_cn、zh_tw 
 | 輸出 | `output_dir_field`、`start_button`、`status_chip`、`progress_bar` | 輸出位置、開始按鈕與進度/狀態顯示 |
 | 日誌 | `log_view` | **LogView widget**，`mode="append"`、`max_lines=2000` |
 
-**注意**：舊版文件提到的 `skip_zh_cn_switch` 已不存在；現在以 `process_zh_cn_switch` 為全域主開關。
-
 ## config 雙向同步
 
 `_on_merge_field_changed(key, value)` 在 UI 變更時：
 1. 寫入 `config.json` 的 `lang_merger[key]`
-2. `_broadcast_config_change_to_config_view()`：遍歷 view registry，找到有 `controls_map` + `load_config` 的 ConfigView，用 `load_config_into_view` 重新讀取（`set_view_registry` 由 main.py 注入）
+2. `_broadcast_config_change_to_config_view()`：遍歷 view registry，找到有 `controls_map` + `load_config` 的 ConfigView，用 `load_config_into_view` 重新讀取（`set_view_registry` 由 `AppShell`（`app/shell/app_shell.py`）注入）
 
 欄位即時寫入（皆為 `lang_merger.*`）：`patchouli_skip_en_us_when_zh_cn_exists`、`patchouli_effective_translation_threshold`、`zh_en_letter_threshold`、`enable_extracted_to_assets_merge`。`only_lang_checkbox` 與 `process_zh_cn_switch` 不寫入 config，只在按下開始時傳給 service。
 
@@ -46,11 +46,11 @@ MergeView（頁面標題「語系比對合併」）整合 en_us、zh_cn、zh_tw 
 
 `_process_single_mod` 讀取來源、決定輸出路徑並寫檔；逐 key 決定最終 zh_tw 值與是否列為待翻譯的純函式是 `merge_lang_dicts`（階段 2 的 `merge_extracted_to_assets` 共用同一個）。優先序如下：
 
-1. **人工 zh_tw 保護**：key 已存在於 output_dir 的既有 zh_tw.json 且值含 CJK → 直接保留（外部 ZIP 內的 zh_tw 視為普通來源，仍會套用替換規則再處理）。
+1. **人工 zh_tw 保護**：key 已存在於 output_dir 的既有 zh_tw.json（`merge_lang_dicts` 的 `is_from_output_dir`）且值含 CJK → 直接保留（外部 ZIP 內的 zh_tw 視為普通來源，仍會套用替換規則再處理）。
 2. **zh_tw（ZIP 來源）含中文** → `apply_replace_rules()`（字串）或 `recursive_translate_dict()`（結構）後採用。
 3. **zh_cn 含中文** → 以 `recursive_translate_dict`（內部走 S2TW 轉繁）後採用。
 4. **皆非中文（或 zh_tw/zh_cn 缺值）** → 依 en_us、zh_cn、zh_tw 順序取第一個非 None 的值作為英文來源（皆無則為空字串）：
-   - 空字串（來源本身就是 `""`）→ **跳過**（非待翻譯內容）
+   - 空白字串（`strip()` 後為空）→ **跳過**（非待翻譯內容）
    - `is_pure_english()`（有文字且全不含 CJK）→ 寫入 **pending**（`en_us.json` → must_translate_dir）
    - 含 CJK 但非純英文 → fallback `final_tw.setdefault(key, english_source)` 保留原值
 
@@ -65,7 +65,7 @@ MergeView（頁面標題「語系比對合併」）整合 en_us、zh_cn、zh_tw 
 
 - 對 book 根目錄下 `zh_tw/`、`zh_cn/` 各自掃描 `.json` / `.md` / `.txt` 檔；單一檔案的 CJK 字元佔比 >= 0.5（寫死）才算「有效檔案」（JSON 取所有字串值計算）
 - 該語言有效檔案數 / 檔案總數 `ratio >= threshold`（預設 **0.5**）即該語言「effective」
-- 結果以 `(book_root_lower, threshold)` 為 key 存 `_patchouli_eff_cache`（module-level，process 存活期間有效）
+- 結果存入 `_patchouli_eff_cache`（module-level，process 存活期間有效）；key 為 `(cache_namespace, book_root_lower, threshold)`。呼叫端傳入 `cache_store` 時改存於該 store，key 為 `(book_root_lower, threshold)`。同一 book 併發查詢時以 single-flight 只計算一次
 - 用途：`patchouli_skip_zh_cn_switch` 開啟時，zh_cn 已達 effective 的 book 對應 en_us 才跳過；`process_zh_cn_switch` 關閉時一律不啟用
 - **注意**：threshold 同時是 service 的 `patchouli_threshold` 與 UI `patchouli_threshold_field` 的連動值（config `patchouli_effective_translation_threshold`，預設 0.5）
 
@@ -88,9 +88,9 @@ service 結束時以 session.set_summary() 寫入統計摘要
 
 ## Poller 同步（_start_ui_poller）
 
-輪詢在 **Flet event loop** 上執行：`_start_ui_poller()` 經 `self._poller`（`PollerHandle`）啟動 `_poll_merge(alive)`，每 0.1 秒 `await asyncio.sleep` 並呼叫 `_sync_ui_once()`（讀取 `session.snapshot()`）；不再另開 `time.sleep` 的 poll 執行緒。合併的背景工作 `_run_merge_worker` 若丟出例外會把 session 轉為 ERROR（否則輪詢等不到結束）。
+輪詢在 **Flet event loop** 上執行：`_start_ui_poller()` 經 `self._poller`（`PollerHandle`）啟動 `_poll_merge(alive)`，每 0.1 秒 `await asyncio.sleep` 並呼叫 `_sync_ui_once()`（讀取 `session.snapshot()`）；輪詢不另開執行緒。合併的背景工作 `_run_merge_worker` 若丟出例外會把 session 轉為 ERROR（否則輪詢等不到結束）。
 
-**Lifecycle（#114）**：`will_unmount()` 停止輪詢（idempotent）；`did_mount()` 在合併仍被追蹤（`_merge_tracking` 且 `_ui_stop` 未設定）時接續輪詢，合併於卸載期間結束時補上最終狀態與摘要（只顯示一次）。每次 `_sync_ui_once()` 的內容：
+**Lifecycle**：`will_unmount()` 停止輪詢（idempotent）；`did_mount()` 在合併仍被追蹤（`_merge_tracking` 且 `_ui_stop` 未設定）時接續輪詢，合併於卸載期間結束時補上最終狀態與摘要（只顯示一次）。每次 `_sync_ui_once()` 的內容：
 - `progress` → `progress_bar.value`
 - `logs` → `log_view.sync_from_session(session)`（LogView 管理 append + truncate + scroll）
 - 狀態：RUNNING→執行中 / DONE→任務完成 / ERROR→任務發生錯誤
@@ -106,7 +106,7 @@ service 結束時以 session.set_summary() 寫入統計摘要
 ## MergeView 與 Session
 
 - `TaskSession(max_logs=2000)`：任務日誌與進度狀態
-- `log_view` 為 LogView widget（`mode="append"`）；清空須用公開的 `.clear()`（內部為 ft.Container，無 `.controls`，PR refactor/unified-log-view）
+- `log_view` 為 LogView widget（`mode="append"`）；清空日誌須呼叫 LogView 公開的 `.clear()`，不直接操作其內部控制項
 
 ## 維護注意
 

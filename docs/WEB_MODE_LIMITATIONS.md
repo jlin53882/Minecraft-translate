@@ -25,7 +25,7 @@ Web 模式**只能手動輸入路徑**，而且路徑指的是「**執行程式�
 
 Flet 1.0.1 的 `FilePicker.get_directory_path()` 在 Web 模式會拋出 `FletUnsupportedPlatformException`；瀏覽器本身也不會把本機資料夾的絕對路徑交給網頁。
 
-## 3. 目前的處理方式（PR #169）
+## 3. 目前的處理方式
 
 - `app/ui/safe_file_picker.py` 的 `SafeFilePicker`：不支援時記一筆警告、顯示「Web 模式不支援選擇資料夾／檔案對話框，請直接輸入「執行程式那台電腦」上的路徑」，並視為使用者取消。其他例外不吞。
 - `app/` 內**不得直接建立 `ft.FilePicker(...)`**，一律用 `SafeFilePicker`（`tests/test_safe_file_picker.py` 的 AST 契約測試強制）。

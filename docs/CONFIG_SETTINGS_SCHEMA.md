@@ -1,4 +1,4 @@
-# 設定頁 schema（#134）
+# 設定頁 schema
 
 設定的欄位、型別、預設值、說明、套用時機、是否敏感與驗證，**全部以 `translation_tool/utils/config_schema.py` 的 `SETTINGS` 為唯一來源**；預設設定、設定頁、套用時機提示與機密遮蔽都由它衍生。
 

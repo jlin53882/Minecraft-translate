@@ -1,5 +1,7 @@
 # Cache View 架構
 
+流程圖見 [page_flows/cache.md](page_flows/cache.md)。
+
 ## 定位
 
 CacheView（`app/views/cache_view.py` 為主入口；功能實作以 mixin 拆在 `app/views/cache_manager/cache_view_*.py`）是快取系統的 UI 入口，頁面標題「快取管理」（副標「翻譯快取分片儲存與全文檢索；命中愈高，API 花費愈低」），預設停在「總覽 / 管理」分頁，以 `ft.Tabs` 分為「總覽 / 管理」與「查詢」兩個主分頁（`_build_main_tabs`），功能包含：
@@ -7,14 +9,14 @@ CacheView（`app/views/cache_view.py` 為主入口；功能實作以 mixin 拆�
 | 區域 | 功能 |
 |------|------|
 | 總覽 | 四張統計卡（快取總筆數 / 有變更的類型 / 快取類型 / 最近儲存）、預設收合的「詳細資訊」；下方左側「分類狀態清單」（各 cache_type 卡片：重新載入 / 新分片 / 補滿舊檔 / 輪替分片 / 分析 / 切換查詢），右側「操作」卡（狀態列、重新載入全部、刷新統計、重建搜尋索引、「補滿舊檔」高風險確認勾選）、預設收合的「按鈕說明」與「日誌」（預設開啟「只看警告以上」，另有複製全部 / 清空） |
-| 查詢 | 查詢頁內有「查詢區」與「分類/分片」兩個子分頁（預設「查詢區」）。查詢區為「查詢區塊（Explorer）」：關鍵字輸入（placeholder「輸入 key / dst / 關鍵字」）+「搜尋」「清空」，模式與分類兩個下拉預設皆「全部」（Key / DST / 全部模式，含全文索引），左側「結果列表」（空時顯示「沒有搜尋結果」）、右側「內容檢視」（Key / 類型 / Shard / Cache 狀態、可展開 SRC）與「歷史紀錄」按鈕，底部為分頁列（每頁預設 50）與「套用」「還原」「還原最新」 |
+| 查詢 | 查詢頁內有「查詢區」與「分類/分片」兩個子分頁（預設「查詢區」）。查詢區為「查詢區塊（Explorer）」：關鍵字輸入（placeholder「輸入 key / dst / 關鍵字」）+「搜尋」「清空」，模式與分類兩個下拉預設皆「全部」（模式選項 Key / DST / 全部；搜尋走全文索引，失敗或無結果時降級為線性掃描），左側「結果列表」（空時顯示「沒有搜尋結果」）、右側「內容檢視」（Key / 類型 / Shard / Cache 狀態、可展開 SRC）與「歷史紀錄」按鈕，底部為分頁列（每頁預設 50，可選 50／100／200）與「套用」「還原」；「歷史紀錄」列提供「還原最新」 |
 | 分片編輯 | 「分類/分片」子分頁依 cache_type 列出卡片（分片編號、狀態、筆數、shard 使用量、「切換查詢」與預設收合的「分片清單」）；進入 shard → 選 key → SRC 預覽（preview/raw 模式）、編輯 dst、復原、複製、還原最新、套用歷史版本 |
-| 歷史 | 查詢區與分片區各有一個浮動視窗（標題「版本歷史紀錄」，預設隱藏，由「歷史紀錄」按鈕開啟），查看/套用歷史事件 |
+| 歷史 | 查詢區與分片區各有一個浮動視窗（查詢區標題「版本歷史紀錄」、分片區標題「分片歷史紀錄」，預設隱藏，由「歷史紀錄」按鈕開啟），查看/套用歷史事件 |
 
 ## 檔案結構（實際現況）
 
 ```
-app/views/cache_view.py                         ← 主入口（ft.Column）：__init__、生命週期、忙碌／停用狀態、髒標記刷新
+app/views/cache_view.py                         ← 主入口（ft.Column）：__init__、生命週期、忙碌／停用狀態、總覽統計卡刷新
 app/views/cache_manager/
   ├─ cache_view_overview.py     CacheOverviewMixin       總覽：類型清單、批次操作、日誌
   ├─ cache_view_query.py        CacheQueryMixin          查詢：搜尋、結果顯示／分頁、單筆編輯
@@ -27,12 +29,12 @@ app/views/cache_manager/
   ├─ cache_actions.py          run_cache_action()          ← 被引用
   ├─ cache_history_store.py    history_* 函式              ← 被引用
   ├─ cache_overview_panel.py   build_overview_page()       ← 被引用（內部再用 cache_log_panel.py 的 build_log_panel）
-  └─ cache_state.py            CacheQueryState/ShardState/HistoryState ← 被引用
+  └─ cache_state.py            CacheQueryState/CacheShardState/CacheHistoryState ← 被引用
 ```
 
-`CacheView` 以多重繼承組合上述 mixin；mixin 方法內容由原本單一檔案原樣搬出（#114），所有方法仍以 `CacheView._xxx` 呼叫。**測試要 monkeypatch 服務函式時，請 patch 方法實際所在的模組**（例如 `cache_view_query` 的 `cache_search_service`、`cache_view_shard_detail` 的 `cache_update_dst_service`）。
+`CacheView` 以多重繼承組合上述 mixin（`ft.Column` 為最後一個基底），各 mixin 方法定義在對應模組，所有方法仍以 `CacheView._xxx` 呼叫。**測試要 monkeypatch 服務函式時，請 patch 方法實際所在的模組**（例如 `cache_view_query` 的 `cache_search_service`、`cache_view_shard_detail` 的 `cache_update_dst_service`）。
 
-**注意**：`CacheView` 與其 mixin 只使用 `cache_actions`、`cache_history_store`、`cache_overview_panel`（連帶 `cache_log_panel`）、`cache_state`。曾經存在、但沒有接線的 Controller／Presenter（MVC 雛形）與舊的獨立查詢／分片面板已移除：一個功能只保留一套架構，需要 Controller／Presenter 時再另開重構正式導入。
+**設計規則**：一個功能只保留一套 UI 架構；目前沒有 Controller／Presenter 層，若要導入需另行規劃。
 
 ## 呼叫鏈（實際）
 
@@ -63,7 +65,7 @@ CacheView（主入口）
 - 分頁：`_set_query_page` + `_on_page_first/prev/next/last/jump` + `_on_page_size_change`
 
 ### 分片區
-- **分片讀取的執行緒契約（#114）**：`_load_shard_rows` / `_load_shard_keys` 只查 `shard_reader` 的記憶（檔案簽名未變就不再解析 JSON）；`_fetch_overview`（載入總覽的背景執行緒）與 `run_cache_action` 的背景工作結束前呼叫 `_warm_shard_cache` 預熱（含歷史索引 `warm_history_index`）。`_load_shard_entry` 僅在記憶體快取找不到該筆時才 fallback 讀檔（LRU 只留最近 2 個分片）。歷史紀錄 `cache_history_store`：讀取以 `{key: events}` 索引記憶，append 就地更新；整份 json 鏡像由單一背景執行緒寫入（`history_flush` 可等待）。
+- **分片讀取的執行緒契約**：`_load_shard_rows` / `_load_shard_keys` 只查 `shard_reader` 的記憶（檔案簽名未變就不再解析 JSON）；`_fetch_overview`（載入總覽的背景執行緒）與 `run_cache_action` 的背景工作結束前呼叫 `_warm_shard_cache` 預熱（含歷史索引 `warm_history_index`）。單筆 SRC 先以 `cache_get_entry_service` 取得，找不到才 fallback 到 `_load_shard_entry`（經 `shard_reader.shard_raw` 讀取整個分片，LRU 只保留最近 2 個分片）。歷史紀錄 `cache_history_store`：讀取以 `{key: events}` 索引記憶，append 就地更新；整份 json 鏡像由單一背景執行緒寫入（`history_flush` 可等待）。
 - `_load_shard_rows` → `_load_shard_keys(cache_type, filename)` → `_on_select_shard_key` → `_load_shard_entry` → `_render_shard_src_panel` / `_render_shard_dst_panel`
 - dst 編輯：`_on_shard_dst_apply` / `_on_shard_dst_revert` / `_on_shard_dst_copy` / `_on_shard_dst_restore_latest`
 - 動態高度計算：`_dynamic_*_height/width` 系列（`_on_page_resized` 觸發）
@@ -104,7 +106,7 @@ CacheView（主入口）
 - 頂層：`total_entries`、`dirty_type_count`（有未存變更的型別數）
 
 ### 查詢（`cache_search_service`）
-- 先以搜尋引擎（FTS5，`cache_manager.search_cache`）查詢，無結果或失敗時降級為 `_search_linear` 線性掃描記憶體快取；回傳 `items`（`key` / `rank` / `preview` / `score`）、`truncated`、`limit`
+- 先以搜尋引擎（FTS5，`cache_manager.search_cache`）查詢，無結果或失敗時降級為 `app/services_impl/cache/cache_services.py` 的 `_search_linear` 線性掃描記憶體快取；回傳 `items`（`key` / `rank` / `preview` / `score`）、`truncated`、`limit`
 - 全文索引由 `cache_rebuild_index_service` 重建
 
 ## 維護注意

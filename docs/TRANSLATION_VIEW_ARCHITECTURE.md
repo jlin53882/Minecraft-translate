@@ -3,6 +3,8 @@
 ## 定位
 TranslationView（頁面標題「任務翻譯工具」）是 FTB Quests / KubeJS Tooltips / Markdown 三種目標的**批次翻譯工作台**；每個目標都有「步驟可自由勾選」的多步流程（匯出／清理 → LM 翻譯 → 寫回），不處理 JAR Extract / Merge。
 
+流程圖見 [page_flows/translation.md](page_flows/translation.md)。
+
 ## 檔案結構
 
 - `app/views/translation_view.py` — 主視圖（`TranslationView`）
@@ -35,7 +37,7 @@ TranslationView（ft.Column）
 | Tab | 步驟 Checkbox | 額外選項 |
 |-----|---------------|----------|
 | FTB Quests | `ftb_step_export`（匯出）/ `ftb_step_clean`（清理）/ `ftb_step_translate`（翻譯）/ `ftb_step_inject`（寫回） | `ftb_write_new_cache` Switch |
-| KubeJS | `kjs_step_extract`（匯出與清理）/ `kjs_step_translate`（翻譯）/ `kjs_step_inject`（寫回） | `kjs_write_new_cache` Switch |
+| KubeJS | `kjs_step_extract`（匯出與清理）/ `kjs_step_translate`（翻譯）/ `kjs_step_inject`（寫回） | `kjs_write_new_cache` Switch + `kjs_source_mode` Dropdown（fresh「重新整理（僅目前來源）」/ incremental「增量匯入」） |
 | Markdown | `md_step_extract`（抽取）/ `md_step_translate`（翻譯）/ `md_step_inject`（寫回） | `md_write_new_cache` Switch + `md_lang_mode` Dropdown（non_cjk_only / cjk_only / all） |
 
 每個 tab 的輸入／輸出欄位為 `ftb_in_dir` / `ftb_out_dir`、`kjs_in_dir` / `kjs_out_dir`、`md_in_dir` / `md_out_dir`；欄位標籤：FTB / KubeJS 為「輸入資料夾（模組包根目錄）」「輸出資料夾（可選）」，MD 為「輸入資料夾（遞迴掃描 .md）」「輸出資料夾（可選）」；欄位右側各有資料夾選擇按鈕。輸出留空時由 service 使用預設位置（hint 分別為 `<input>/Output`、MD 為 `<input>/Output/md`）。
@@ -47,9 +49,11 @@ TranslationView（ft.Column）
        ├─ 已有任務執行中（_ui_timer_running）→ snack「已有翻譯任務執行中」
        ├─ 驗證 in_dir 非空、service/TaskSession 可用（否則 snack）
        ├─ _set_status(「模擬執行」/「執行中」)、progress=0、log_view.clear()
-       ├─ view.session = tag_session(TaskSession(), ...); session.start()
-       ├─ threading.Thread(worker).start()
-       │    └→ run_ftb_translation_service(in_dir, session, output_dir=...,
+       ├─ view.session = _new_translation_session(view, ...)（tag_session(view.TaskSession(), ...)）
+       ├─ reserve_page_operation(...)：應用程式關閉中則 snack 並返回
+       ├─ view.session.start()；_log_task_start() 寫入輸入、輸出與步驟設定
+       ├─ operation.launch(worker)
+       │    └→ view.run_ftb_translation_service(in_dir, session, output_dir=...,
        │         dry_run, step_export/clean/translate/inject, write_new_cache)
        └─ view._start_ui_timer()        （啟用 cancel_button）
             └→ start_ui_timer(view) → view._poller.start(page, _poll_session)
@@ -59,22 +63,22 @@ TranslationView（ft.Column）
                  └─ status DONE/ERROR → _set_status（任務完成／已取消／任務發生錯誤）
                       + 停止輪詢 + 停用 cancel_button
 ```
-**Lifecycle（#114）**：輪詢由 `view._poller`（`PollerHandle`）持有；`TranslationView.will_unmount()` → `stop_ui_timer`（idempotent，輪詢立刻停止、不再碰控制項，任務照常執行），`did_mount()` → `resume_ui_timer`（任務仍被追蹤才重新啟動；重複 mount 不累積；卸載期間任務已結束則補上最終狀態）。
+**Lifecycle**：輪詢由 `view._poller`（`PollerHandle`）持有；`TranslationView.will_unmount()` → `stop_ui_timer`（idempotent，輪詢立刻停止、不再碰控制項，任務照常執行），`did_mount()` → `resume_ui_timer`（任務仍被追蹤才重新啟動；重複 mount 不累積；卸載期間任務已結束則補上最終狀態）。
 
 三個 pipeline 皆同一模式（FTB / KubeJS / MD），差異僅在 service 函式與參數（MD 多 `lang_mode`，且以關鍵字 `input_dir=` 傳入）。
 
 **取消**：`cancel_button` → `view._on_cancel()` → `session.request_cancel()`，狀態晶片顯示「正在取消…」；實際在批次之間或等待 API 限流時停止。
 
-## 執行緒安全包裝（ATK-004 / ATK-017 修復）
+## 執行緒安全包裝
 
-- `_safe_add_log(view, msg)`：view 已卸載或 session GC 時靜靜忽略
+- `_safe_add_log(view, msg)`：view 已卸載或 session GC 時靜靜忽略；`mirror=False` 時只寫入畫面日誌，不再重複寫後台
 - `_safe_page_update(view)`：view 已卸載時忽略
-- worker 內例外 → `_safe_add_log(view, "[UI] 服務執行失敗：…")` + `session.set_error()`
+- worker 內例外 → `_report_service_failure`：完整堆疊經 `session_task_scope` 寫入後台 log；畫面顯示「[UI] {label} 服務執行失敗：例外類型與訊息（完整堆疊已寫入後台 log）」，接著 `session.set_error()`，再 `finish()`
 
 ## UI 風格
 
-- 以 `app/ui/kit` 的 `button`、`section_card`、`StepCard`、`SwitchRow`、`ProgressRing` 與 `app/ui/design` 的 `C` 色票組裝畫面；舊的 `components.py` 與 `theme.py` 相容層已移除（#121）。
-- `log_view` 為 **LogView widget**（`mode="tail"`、`tail_lines=250`）；`_append_log` 直接走 `log_view.add(line, level="system")`
+- 以 `app/ui/kit` 的 `button`、`section_card`、`StepCard`、`SwitchRow`、`ProgressRing` 與 `app/ui/design` 的 `C` 色票組裝畫面。
+- `log_view` 為 **LogView widget**（`mode="tail"`、`tail_lines=250`）；`_append_log` 直接走 `log_view.add(line, level="system", dedupe=False)`
 - `page` 屬性為 `@property`（回傳 `_page`）
 
 ## 各 Pipeline Step 行為（core 層邏輯）
@@ -101,7 +105,7 @@ TranslationView（ft.Column）
   - `map_lang_in_rel_path_allow_zh_fn` 回傳 `status` 只認 `SRC_EN` / `SRC_ZH`，其他狀態跳過（`skipped_lang_status`）
   - 來源 MD 不存在 → `skipped_missing_source`；保留原始結尾換行（`ends_with_nl`）
 
-## 重開後續跑（#164）
+## 重開後續跑
 
 啟動時若偵測到上次被中斷的 FTB／KubeJS／MD 任務，使用者在外殼的確認對話框按「續跑」後，外殼切到本頁並呼叫 `TranslationView.resume_interrupted(task)`：依 `task.kind` 切到對應分頁、把輸入／輸出資料夾與步驟開關帶回控制項（翻譯步驟一律開啟、dry-run 一律關閉），再走和按下「執行」相同的 `_run_ftb`／`_run_kjs`／`_run_md`。已有任務在跑時不會重複啟動。行為與限制見 `docs/RESUME_CAPABILITY.md`。
 
@@ -116,10 +120,9 @@ TranslationView（ft.Column）
 
 ## 關鍵狀態
 
-`TranslationView` 直接持有 `_picker_target_field`、`session`、`_ui_timer_running`（沒有另外的 state 物件；
-曾有一個建立後沒人讀取的 state dataclass，已移除）。
+`TranslationView` 直接持有 `_picker_target_field`、`session`、`_ui_timer_running`、`_step_cards`（面板建立時登記，供 reset 後刷新步驟卡外觀）與 `_poller`，沒有另外的 state 物件。
 
 ## 維護注意
 
-1. 新增 pipeline 目標：在 `translation_panels` 加 `build_*_tab()`、`translation_actions` 加 `run_*()`、`_build_translation_status_and_right_panel` 加 service seam、`_init_translation_state_and_tabs` 加 tab、`_reset_*_inputs()`。
-2. `_reset_*_inputs` 會重設步驟為全 True + write_new_cache True（MD 的 lang_mode 回 non_cjk_only）。
+1. 新增 pipeline 目標：在 `translation_panels` 加 `build_*_tab()`、`translation_actions` 加 `run_*()`、`_build_translation_status_and_right_panel` 加 service seam、`_init_translation_state_and_tabs` 加 tab、`_reset_*_inputs()`，並在 `resume_interrupted` 加入對應的 `task.kind` 分支。
+2. `_reset_*_inputs` 會重設步驟為全 True + write_new_cache True（MD 的 lang_mode 回 non_cjk_only，KubeJS 的 source_mode 回 fresh）。

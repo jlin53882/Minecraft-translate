@@ -1,9 +1,9 @@
-# 設定何時生效（盤點與改善設計）
+# 設定何時生效（盤點與套用契約）
 
-> 後續追蹤：生效時機改善 → #117；`replace_rules_path` 讀錯位置的 bug → #118。均不在 PR #106 範圍。
+> 設定檔：`config.json`（三層合併：預設值 < `config.example.json` < `config.json`）。
+> 生效時機的中央表與現行契約見下方「套用時機契約」與「實際契約」。
 
-> 依程式碼靜態盤點（2026-10-01，PR #106 當時）。**沒有逐項在真實執行中驗證**；
-> 標「未確認」的是我沒追到底的地方。設定檔：`config.json`（三層合併：預設值 < `config.example.json` < `config.json`）。
+> 依程式碼靜態盤點。**沒有逐項在真實執行中驗證**；標「未確認」的是尚未追到底的地方。
 
 ## 讀取機制
 
@@ -27,7 +27,7 @@
 |---|---|
 | `ui.theme_mode` | 切換即套用並寫入 |
 | `lm_translator.keys`、`lm_translator.models`（顯示） | 頂列 API 狀態、狀態列模型名稱會更新 |
-| `translator.cache_directory`（顯示） | 狀態列快取資料夾名稱會更新（**但實際快取內容不會跟著換，見下方風險**） |
+| `translator.cache_directory`（顯示） | 狀態列快取資料夾名稱會更新（**但實際快取內容要經重載才會換，見下方「風險最高的一項」**） |
 
 ### B 下次任務才生效（不用重啟）
 | 設定 | 備註 |
@@ -59,57 +59,55 @@
 | 設定 | 位置 |
 |---|---|
 | `species_cache.cache_directory / cache_filename / wikipedia_language / wikipedia_rate_limit_delay` | `species_cache.py` 模組層級；學名資料庫已初始化後改了不會重載 |
-| 視窗大小 | `AppShell.build` 時設定（本來就不需要即時） |
+| 視窗大小 | `AppShell.build` 時設定（不需要即時） |
 
-### E 不生效（疑似 bug / 死設定）
+### E 不生效（歷史相容欄位）
 | 設定 | 說明 |
 |---|---|
-| `translator.replace_rules_path` | `lang_merger.py` 兩處（L74、L397）讀的是**頂層** `replace_rules_path`，但設定放在 `translator.replace_rules_path`，所以合併時永遠用預設 `replace_rules.json`。`ftb_translator.py` 與 `variant_comparator.py` 讀對了。→ 改了路徑只有部分流程會用到 |
 | `extractor.target_language` | 歷史相容欄位；追查不到正式 caller，目前不生效，不應在 UI 宣稱可調整 |
 | `translator.cjk_ratio_threshold` | 歷史相容欄位；追查不到 caller 或明確判定規則，目前不生效，不應臆造語意 |
-| `translator.enable_cache_saving` | 只找到零星使用，未確認行為 |
 
 ## 風險最高的一項：`translator.cache_directory`
 
-- 路徑本身每次都重讀（`_get_cache_root()`），**但記憶體裡已載入的快取內容與搜尋索引不會重載**
-  （`initialized` 旗標維持 True）。改路徑後：新寫入會去新資料夾，記憶體仍是舊資料，快取管理頁看到的也是舊資料。
-- 這是唯一可能造成資料混在一起的情況，值得處理。
+- 路徑本身每次都重讀（`_get_cache_root()`），但記憶體裡已載入的快取內容與搜尋索引只在重載時更新。
+- 若只改路徑而不重載，新寫入會去新資料夾，記憶體仍是舊資料，快取管理頁看到的也是舊資料；這是唯一可能造成資料混在一起的情況。
+- 存檔後的重載時機見下方「快取資料夾變更」。
 
-## 改善設計：哪些真的需要「設定後自動套用」
+## 自動套用的判準
 
 原則：**只為「使用者會預期立刻生效」或「不生效會造成錯誤」的項目做；其餘維持「下次任務生效」並明講。**
 
-| 優先 | 項目 | 作法 | 理由 |
-|---|---|---|---|
-| 高 | `translator.cache_directory` 變更 | 設定存檔且該值改變時，呼叫 `reload_translation_cache()`、重設搜尋索引，並重新整理快取管理頁與工作台 | 避免新舊資料混用 |
-| 高 | `translator.replace_rules_path`（E） | 修正 `lang_merger.py` 兩處讀取位置，補測試 | 設定被忽略；預設值情況下行為不變 |
-| 高 | 進行中任務時存檔 | 訂閱存檔事件，若有任務在跑，顯示提示：「已儲存；進行中的任務不受影響，下次啟動才套用（API 金鑰除外）」 | 使用者預期即時生效，需要說清楚 |
-| 中 | `lm_translate_folder_name`（D） | 改成使用時才讀（函式，不要模組常數） | 改了得重啟，沒有理由 |
-| 中 | `output_bundler.output_zip_name` 提示文字（C） | 打包頁訂閱存檔事件，更新提示 | 提示與實際行為不一致 |
-| 中 | `species_cache.*`（D） | 改成使用時才讀，或存檔後呼叫重新初始化；若不改，設定頁標示「需重啟」 | 低頻，至少要標示 |
-| 低 | `logging.log_level` | 存檔時立即套用，不等下次任務 | 偵錯時想馬上看到 DEBUG |
-| 低 | 日誌行數 | 訂閱存檔事件重建 `LogView` 設定 | 影響小 |
-| 低 | `logging.log_dir`（E） | 實際使用或移除欄位 | 死設定 |
+| 項目 | 現行作法 |
+|---|---|
+| `translator.cache_directory` | 存檔且值改變時由 `CacheRootReloader` 處理（見「快取資料夾變更」） |
+| `translator.replace_rules_path` | 合併流程每次執行時讀 `translator` 區段，下次執行生效 |
+| 進行中任務時存檔 | 依 `app/config_apply.py` 的 timing 顯示提示（進行中任務不受影響者：下次任務才套用；`lm_translator.keys` 例外，見上方 B） |
+| `lm_translate_folder_name`（D） | 使用時才讀（`get_lm_translate_folder_name()`），不是模組常數 |
+| `output_bundler.output_zip_name` 提示文字（C） | 打包頁訂閱 `config_store.subscribe_paths`，存檔即時更新提示 |
+| `species_cache.*`（D） | timing 為 `restart`，設定頁與存檔提示標示「需重新啟動」 |
+| `logging.log_level` | 存檔時立即套用（timing `immediate`） |
+| 日誌行數 | 機器翻譯頁在每次開始任務時讀最新設定 |
+| `logging.log_dir` | 錯誤記錄每次寫入時讀；應用日誌需重啟才換資料夾 |
 
 ### 不建議做的
 
 - **進行中任務套用新的批次大小 / 預算 / 溫度 / 提示詞**：行為會在任務中途改變，結果不可重現，不要做；維持「下次任務生效」。
 - 視窗大小即時套用：沒必要。
 
-### 建議的實作形狀（小改動，不新增大架構）
+### 實作形狀
 
-1. 設定頁每個欄位標示生效時機：`即時` / `下次任務` / `需重啟`（由一份中央表 `app/config_apply.py` 提供，設定頁與文件共用）。
-2. `config_store` 增加「哪些路徑變了」：`subscribe(callback(changed_paths))`，各頁只處理自己關心的路徑，而不是每次全部重讀。
-3. 針對高優先項目各補一個測試（快取目錄變更觸發重載、規則路徑讀對、有任務時的提示）。
+1. 設定頁的生效時機說明與存檔提示由中央表 `app/config_apply.py` 提供（時機值見下方「套用時機契約」）。
+2. `config_store.subscribe_paths(callback(changed_paths))` 讓各頁只處理自己關心的路徑；既有 `subscribe(callback)` 維持零參數相容。
+3. 高優先項目的行為以測試鎖住（快取目錄變更觸發重載、規則路徑讀對、有任務時的提示）。
 
-## PR-5 實際契約
+## 實際契約
 
 - 中央 metadata 位於 `app/config_apply.py`，目前對快取根目錄、模型設定、token 上限與 species cache 定義生效時機。
 - 既有 `config_store.subscribe(callback)` 維持零參數相容性；需要精準刷新時使用 `subscribe_paths(callback(changed_paths))`，不要求舊 callback 改簽名。
 - `translator.cache_directory` 儲存後不會讓現行任務中途換根目錄。下一次啟動或明確呼叫 `reload_translation_cache()` 才採用持久化的新路徑；pending writer 仍綁定目前 active root。
-- `lm_translator` 的 per-model `max_output_tokens` 是可選欄位：缺少或 `null` 使用全域值，`0` 表示不送欄位；下一批次讀取，舊版只含 `enabled` 的設定可直接載入。
+- `lm_translator` 的 per-model `max_output_tokens` 是可選欄位：缺少或 `null` 使用全域值，`0` 表示不送欄位；下一批次讀取，只含 `enabled` 的舊設定可直接載入。
 
-## 套用時機契約（#117 最終）
+## 套用時機契約
 
 中央表在 `app/config_apply.py`：設定頁的說明文字、存檔提示與自動重載都以它為準。
 
@@ -127,13 +125,14 @@
 存檔且該值改變時（`app/shell/config_effects.py::CacheRootReloader`）：
 
 - **沒有任務進行中**：在背景執行緒呼叫 `cache_reload_service()`（重載快取並重建搜尋索引），完成後刷新工作台與快取頁並提示。
-- **有任務進行中**：不動；任務全部結束後才重載（相容 PR #143「現行任務不可中途換快取根目錄」的契約，避免任務寫入新舊兩個資料夾）。
+- **有任務進行中**：不動；任務全部結束後才重載。現行任務不中途換快取根目錄，避免任務寫入新舊兩個資料夾。
 - 重載期間又有新變更：重載結束後再跑一次；重載失敗只記錄並提示，仍使用舊快取。
 
-### 其他已落實的項目
+### 其他生效行為
 
 - 機器翻譯輸出資料夾預設名稱、打包 `output_zip_name` 都是使用時才讀；打包頁的輸入框提示訂閱存檔事件即時更新。
 - `logging.log_level`／`log_format` 存檔後立即套用；機器翻譯頁日誌行數在每次開始任務時讀最新設定。
 - 錯誤記錄（`errors_*.log`）每次寫入時讀 `logging.log_dir`；應用日誌需重啟才換資料夾。
 - `translator.enable_cache_saving`：`cache_manager.save_translation_cache` 每次寫入前讀取，下次寫入生效。
-- 仍不做：進行中任務中途改批次大小等「引擎行為」以外的重新設計——現況就是各設定依上表在「下一批次／下次請求／下次任務」讀取。
+- `translator.replace_rules_path`：合併流程每次執行時讀取（`translator` 區段），下次執行生效。
+- 不做：進行中任務中途改批次大小、預算、溫度或提示詞等引擎行為（結果不可重現）；這些設定依上表在「下一批次／下次請求／下次任務」讀取。

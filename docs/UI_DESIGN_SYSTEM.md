@@ -54,7 +54,7 @@
 
 - **ViewSpec / NAV_GROUPS**：分組為 流程 / 品檢 / 資料 / 輸出，加上 系統。快捷鍵 `Ctrl+1`…`Ctrl+0` 依導覽順序自動編號。
 - **TaskManager**：訂閱 `TaskSession` 全域觀察者，頂列膠囊與狀態列顯示目前任務與進度，不需要頁面各自回報。
-- **API 狀態**：`summarize_keys()` 讀取 `lm_key_health.snapshot()`（#113），顯示可用 / 冷卻中的金鑰數。
+- **API 狀態**：`summarize_keys()` 讀取 `lm_key_health.snapshot()`，顯示可用 / 冷卻中的金鑰數。
 - **快速跳轉**：`Ctrl+P`，來源為 `AppShell.palette_items()`（頁面 + 動作）。
 - 視窗：預設 1360×900，最小 1100×720。
 

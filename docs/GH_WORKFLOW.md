@@ -36,7 +36,7 @@
 ## 1) 開 PR 標準流程
 
 ### 1.1 你要提供給我（每次開 PR 前）
-- `--head`：你的分支名（例：`feat/pr40-lm-translator-split`）
+- `--head`：你的分支名（例：`feat/lm-translator-split`）
 - `--base`：目標分支（預設 `main`）
 - PR 目的（這顆 PR 做什麼）
 - Changelog（有哪些改動；可貼 commit log 或條列）
