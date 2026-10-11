@@ -46,7 +46,6 @@ import json
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Tuple
 
 from translation_tool.plugins.shared.rich_text_shield import (
     ShieldPiece,
@@ -54,8 +53,8 @@ from translation_tool.plugins.shared.rich_text_shield import (
 )
 
 # ======== 跟抽取器一致：哪些行視為 token 行（不可翻、不可改） ========
-RE_HARD_SPLIT_LINE = re.compile(r"^\s*§(rule\{|recipe\[|entity\[)", re.I)
-RE_SOFT_SKIP_LINE = re.compile(r"^\s*§(align:|stack\[)", re.I)
+RE_HARD_SPLIT_LINE = re.compile(r"^\s*§(rule\{|recipe\[|entity\[)", re.IGNORECASE)
+RE_SOFT_SKIP_LINE = re.compile(r"^\s*§(align:|stack\[)", re.IGNORECASE)
 
 # ======== 語言資料夾段落映射：en_us -> zh_tw（支援 _en_us、大小寫） ========
 RE_LANG_SEG = re.compile(r"^(_?)([a-z]{2}_[a-z]{2})$", re.IGNORECASE)
@@ -149,9 +148,7 @@ def is_token_line(line: str) -> bool:
         return True
     if RE_SOFT_SKIP_LINE.match(s):
         return True
-    if RE_MOSTLY_TOKEN_LINE.match(s):
-        return True
-    return False
+    return bool(RE_MOSTLY_TOKEN_LINE.match(s))
 
 
 def is_text_line(line: str) -> bool:
@@ -173,10 +170,7 @@ def is_text_line(line: str) -> bool:
         return False
 
     # 純 component/tag 行：整行不應被替換
-    if re.match(r"^\s*<[^>]+>\s*$", line):
-        return False
-
-    return True
+    return not re.match(r"^\s*<[^>]+>\s*$", line)
 
 
 def flatten_for_md(text: str) -> str:
@@ -187,8 +181,8 @@ def flatten_for_md(text: str) -> str:
     這樣回寫時比較不會把原 md 洗成怪格式。
     """
     lines = [line.rstrip() for line in text.splitlines()]
-    out: List[str] = []
-    buf: List[str] = []
+    out: list[str] = []
+    buf: list[str] = []
 
     def flush_buf():
         """將緩衝區內容刷新到輸出。"""
@@ -201,9 +195,7 @@ def flatten_for_md(text: str) -> str:
         if not line.strip():
             flush_buf()
             # 保留段落空行（不要連續堆很多空行）
-            if out and out[-1] != "":
-                out.append("")
-            elif not out:
+            if not out or out[-1] != "":
                 out.append("")
         else:
             buf.append(line)
@@ -238,13 +230,13 @@ class Item:
             self._shields = []
 
 
-def load_items_from_json(json_path: Path) -> Tuple[str, List[Item]]:
+def load_items_from_json(json_path: Path) -> tuple[str, list[Item]]:
     """
     讀一個 md_pending_blocks_v1 JSON，回傳 source_md 與 items
     """
     data = json.loads(json_path.read_text(encoding="utf-8"))
     source_md = data["source_md"]
-    items: List[Item] = []
+    items: list[Item] = []
     for it in data.get("items", []):
         items.append(
             Item(
@@ -263,7 +255,7 @@ def load_items_from_json(json_path: Path) -> Tuple[str, List[Item]]:
     #    目前先穩定為主。
 
 
-def apply_item_to_md_lines(md_lines: List[str], item: Item) -> None:
+def apply_item_to_md_lines(md_lines: list[str], item: Item) -> None:
     """
     在 md_lines 上原地套用一個 item（只替換文字行，token/空行不動）
 
@@ -283,7 +275,7 @@ def apply_item_to_md_lines(md_lines: List[str], item: Item) -> None:
         return
 
     # 1) 找範圍內所有「可翻文字行」的位置（空行與 token 行不動）
-    text_line_indices: List[int] = []
+    text_line_indices: list[int] = []
     for idx in range(a, b + 1):
         if is_text_line(md_lines[idx]):
             text_line_indices.append(idx)
@@ -371,7 +363,7 @@ def main():
     for jp in json_files:
         try:
             source_md, items = load_items_from_json(jp)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - 單一 JSON 損壞時略過該檔，繼續處理其餘檔案
             print(f"[略過] JSON 讀取失敗：{jp} ({e})")
             skipped += 1
             continue
