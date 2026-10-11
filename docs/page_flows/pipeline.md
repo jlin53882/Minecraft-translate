@@ -1,6 +1,6 @@
 # 一鍵流水線（`pipeline`）處理流程
 
-> 入口：`app/views/pipeline/pipeline_view.py` 的 `PipelineView`。詳細元件說明見 [`PIPELINE_VIEW_ARCHITECTURE.md`](../PIPELINE_VIEW_ARCHITECTURE.md)。
+> 入口：`app/views/pipeline/pipeline_view.py` 的 `PipelineView`。詳細元件說明見 [`View 架構文件`](../developer-guide/views/PIPELINE_VIEW_ARCHITECTURE.md)。
 
 ## 職責
 

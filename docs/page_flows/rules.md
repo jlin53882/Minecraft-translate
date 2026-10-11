@@ -1,6 +1,6 @@
 # 替換規則頁（`rules`）處理流程
 
-> 入口：`app/views/rules_view.py` 的 `RulesView`。詳細元件說明見 [`RULES_VIEW_ARCHITECTURE.md`](../RULES_VIEW_ARCHITECTURE.md)。
+> 入口：`app/views/rules_view.py` 的 `RulesView`。詳細元件說明見 [`View 架構文件`](../developer-guide/views/RULES_VIEW_ARCHITECTURE.md)。
 
 ## 職責
 

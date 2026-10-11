@@ -1,6 +1,6 @@
 # 語系合併（`merge`）處理流程
 
-> 入口：`app/views/merge_view.py` 的 `MergeView`。詳細元件說明見 [`MERGE_VIEW_ARCHITECTURE.md`](../MERGE_VIEW_ARCHITECTURE.md)。
+> 入口：`app/views/merge_view.py` 的 `MergeView`。詳細元件說明見 [`View 架構文件`](../developer-guide/views/MERGE_VIEW_ARCHITECTURE.md)。
 
 ## 職責
 

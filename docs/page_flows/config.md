@@ -1,6 +1,6 @@
 # 設定頁（`config`）處理流程
 
-> 入口：`app/views/config_view.py` 的 `ConfigView`。詳細說明見 [`CONFIG_VIEW_ARCHITECTURE.md`](../CONFIG_VIEW_ARCHITECTURE.md)。
+> 入口：`app/views/config_view.py` 的 `ConfigView`。詳細說明見 [`View 架構文件`](../developer-guide/views/CONFIG_VIEW_ARCHITECTURE.md)。
 
 ## 職責
 

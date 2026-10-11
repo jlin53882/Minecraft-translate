@@ -6,7 +6,7 @@
 - 程式碼內的 ``print``（T201）改用 logging。
 
 唯一的例外是兩個「命令列 QA 工具」：它們的 stdout 就是產品介面，且刻意以 print 回報略過的檔案。
-完整的盤點與分類見 docs/SECURITY_ERROR_HANDLING_AUDIT.md。
+完整的盤點與分類見 docs/developer-guide/security-error-handling-audit.md。
 """
 
 from __future__ import annotations
@@ -79,7 +79,7 @@ def test_allowlist_entries_exist():
 # 數量只能減少：新增的寬鬆例外必須在 noqa 後面寫原因（" - 原因"）；補上原因後請把這裡的數字調降。
 # 這 N 個位置的處理方式已分類：121 處的例外處理本身已有紀錄／回報／重新丟出（只缺文字說明），
 # 其餘為 UI 保護（畫面更新、進度回報）——都不是無聲吞掉資料相關錯誤的路徑；
-# 資料相關的無聲路徑已補上紀錄（見 docs/SECURITY_ERROR_HANDLING_AUDIT.md）。
+# 資料相關的無聲路徑已補上紀錄（見 docs/developer-guide/security-error-handling-audit.md）。
 UNEXPLAINED_NOQA_BASELINE = {
     "app/icon_index.py": 2,
     "app/icon_reader.py": 3,
@@ -174,13 +174,15 @@ def test_baseline_has_no_stale_entries():
 
 
 def test_inventory_document_matches_the_code():
-    """docs/EXCEPTION_INVENTORY.md 必須與 render(collect()) 逐字一致。
+    """docs/generated/exception-inventory.md 必須與 render(collect()) 逐字一致。
 
     每一列的檔案、函式、規則、分類、原因都會比對（文件不含行號，所以一般的程式碼移動不會讓它失敗）。
     """
     gen = _load_generator()
     expected = gen.render(gen.collect())
-    actual = (REPO_ROOT / "docs" / "EXCEPTION_INVENTORY.md").read_text(encoding="utf-8")
+    actual = (REPO_ROOT / "docs" / "generated" / "exception-inventory.md").read_text(
+        encoding="utf-8"
+    )
     assert actual == expected, (
-        "docs/EXCEPTION_INVENTORY.md 已過期，請執行 `uv run python tools/gen_exception_inventory.py` 重新產生"
+        "docs/generated/exception-inventory.md 已過期，請執行 `uv run python tools/gen_exception_inventory.py` 重新產生"
     )

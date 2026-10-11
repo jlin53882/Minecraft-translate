@@ -85,7 +85,7 @@ uv run python main.py
 啟動後會開啟桌面 GUI。
 
 > ⚠️ 任務執行中關閉視窗會先跳出確認；確定關閉會中斷任務，尚未落盤的資料可能遺失。
-> 被中斷的機器翻譯在下次啟動時會詢問是否續跑（不會自動開始），行為見 [`docs/RESUME_CAPABILITY.md`](docs/RESUME_CAPABILITY.md)。
+> 被中斷的機器翻譯在下次啟動時會詢問是否續跑（不會自動開始），行為見 [`docs/developer-guide/resume-capability.md`](docs/developer-guide/resume-capability.md)。
 
 ## 設定說明
 
@@ -108,11 +108,11 @@ uv run python main.py
 
 - **API Key**：填在 `lm_translator.keys`（陣列，可多把輪替）。設定頁的 Key 欄位預設遮蔽。
 - **模型**：`lm_translator.models` 中把要使用的模型設為 `enabled: true`。
-- **token 預算與 Key 冷卻**：設定頁的「Token 預算」與「批次與限制」分類可直接編輯；說明見 [`docs/LM_TOKEN_BUDGET.md`](docs/LM_TOKEN_BUDGET.md)、[`docs/LM_KEY_HEALTH.md`](docs/LM_KEY_HEALTH.md)。
-- **何時生效**：多數設定在「下一次任務」才套用，少數需要重新啟動；逐項說明見 [`docs/CONFIG_APPLY_TIMING.md`](docs/CONFIG_APPLY_TIMING.md)。
+- **token 預算與 Key 冷卻**：設定頁的「Token 預算」與「批次與限制」分類可直接編輯；說明見 [`docs/developer-guide/lm-token-budget.md`](docs/developer-guide/lm-token-budget.md)、[`docs/developer-guide/lm-key-health.md`](docs/developer-guide/lm-key-health.md)。
+- **何時生效**：多數設定在「下一次任務」才套用，少數需要重新啟動；逐項說明見 [`docs/reference/configuration-apply-timing.md`](docs/reference/configuration-apply-timing.md)。
 
 > ⚠️ `config.json` 含 API Key，**以明文儲存**，已加入 `.gitignore`，請勿上傳或分享給他人。
-> Key 在日誌與錯誤訊息中的遮蔽規則見 [`docs/SECURITY_ERROR_HANDLING_AUDIT.md`](docs/SECURITY_ERROR_HANDLING_AUDIT.md)。
+> Key 在日誌與錯誤訊息中的遮蔽規則見 [`docs/developer-guide/security-error-handling-audit.md`](docs/developer-guide/security-error-handling-audit.md)。
 
 ## 架構概覽
 
@@ -142,7 +142,7 @@ docs/                   架構、設計與維護文件
 - **任務事件單一來源**：頁面照原本方式使用 `TaskSession`，`TaskManager` 會自動收集，頂列與工作台直接訂閱。
 - **Flet 1.0 單執行緒模型**：背景執行緒不得直接改 Control；UI 更新要排程回 page 的 event loop（`page.run_task`）。
 
-完整說明見 [`docs/UI_DESIGN_SYSTEM.md`](docs/UI_DESIGN_SYSTEM.md)、[`docs/PROJECT_STRUCTURE.md`](docs/PROJECT_STRUCTURE.md)。
+完整說明見 [`docs/developer-guide/ui-design-system.md`](docs/developer-guide/ui-design-system.md)、[`docs/developer-guide/codebase-ownership.md`](docs/developer-guide/codebase-ownership.md)。
 
 ## 開發與測試
 
@@ -170,24 +170,26 @@ uv run pytest -q --basetemp=.pytest-tmp\full -o cache_dir=.pytest-cache\full
 
 ## 已知限制與後續規劃
 
-後續工作以 [GitHub Issues](https://github.com/jlin53882/Minecraft-translate/issues) 追蹤；Windows 才能驗證的項目見 [`docs/WINDOWS_VERIFICATION.md`](docs/WINDOWS_VERIFICATION.md)。
+後續工作以 [GitHub Issues](https://github.com/jlin53882/Minecraft-translate/issues) 追蹤；Windows 才能驗證的項目見 [`docs/user-guide/windows-verification.md`](docs/user-guide/windows-verification.md)。
 
 ## 文件索引
+
+完整的依讀者導覽從 [`docs/index.md`](docs/index.md) 開始；下表保留常用文件的直接入口。
 
 | 文件 | 內容 |
 |---|---|
 | [`docs/page_flows/`](docs/page_flows/README.md) | 每個頁面的處理流程圖（操作 → 背景工作 → 結果回到畫面） |
-| `docs/*_VIEW_ARCHITECTURE.md` | 各頁面的元件、呼叫鏈與 service 層關係 |
-| [`docs/UI_DESIGN_SYSTEM.md`](docs/UI_DESIGN_SYSTEM.md) | 設計 token、UI kit、外殼、新增頁面步驟 |
-| [`docs/PROJECT_STRUCTURE.md`](docs/PROJECT_STRUCTURE.md)、[`docs/PROJECT_INDEX.md`](docs/PROJECT_INDEX.md) | 專案結構與索引 |
-| [`docs/OPERATION_LIFECYCLE_CONTRACT.md`](docs/OPERATION_LIFECYCLE_CONTRACT.md)、[`docs/WORKER_THREAD_AUDIT.md`](docs/WORKER_THREAD_AUDIT.md) | 長任務生命週期、worker thread 與 UI 更新契約 |
-| [`docs/MOD_TRANSLATION_DB.md`](docs/MOD_TRANSLATION_DB.md) | Mod 翻譯資料庫 |
-| [`docs/LM_TOKEN_BUDGET.md`](docs/LM_TOKEN_BUDGET.md)、[`docs/LM_KEY_HEALTH.md`](docs/LM_KEY_HEALTH.md) | token 預算切批、API Key 健康度 |
-| [`docs/CONFIG_APPLY_TIMING.md`](docs/CONFIG_APPLY_TIMING.md)、[`docs/CONFIG_SETTINGS_SCHEMA.md`](docs/CONFIG_SETTINGS_SCHEMA.md) | 設定「何時生效」與設定頁 schema |
-| [`docs/CACHE_SYSTEM.md`](docs/CACHE_SYSTEM.md) | 快取系統與搜尋索引 |
-| [`docs/JAR_PIPELINE.md`](docs/JAR_PIPELINE.md)、[`docs/TRANSLATION_WORKFLOW.md`](docs/TRANSLATION_WORKFLOW.md)、[`docs/RESUME_CAPABILITY.md`](docs/RESUME_CAPABILITY.md) | JAR 提取、翻譯流程與重開後續跑 |
-| [`docs/TEST_STRATEGY.md`](docs/TEST_STRATEGY.md)、[`docs/CROSS_CUTTING_REVIEW_CHECKLIST.md`](docs/CROSS_CUTTING_REVIEW_CHECKLIST.md) | 測試策略與審查清單 |
-| [`docs/GH_WORKFLOW.md`](docs/GH_WORKFLOW.md)、[`docs/RELEASE_WORKFLOW.md`](docs/RELEASE_WORKFLOW.md)、[`RELEASE_STRATEGY.md`](RELEASE_STRATEGY.md) | GitHub、發佈流程與版本策略 |
+| [`docs/developer-guide/views/`](docs/developer-guide/views/) | 各頁面的元件、呼叫鏈與 service 層關係 |
+| [`docs/developer-guide/ui-design-system.md`](docs/developer-guide/ui-design-system.md) | 設計 token、UI kit、外殼、新增頁面步驟 |
+| [`docs/developer-guide/codebase-ownership.md`](docs/developer-guide/codebase-ownership.md)、[`docs/developer-guide/architecture.md`](docs/developer-guide/architecture.md) | 專案結構、系統地圖與 ownership |
+| [`docs/developer-guide/operation-lifecycle.md`](docs/developer-guide/operation-lifecycle.md)、[`docs/developer-guide/worker-thread-audit.md`](docs/developer-guide/worker-thread-audit.md) | 長任務生命週期、worker thread 與 UI 更新契約 |
+| [`docs/user-guide/mod-translation-db.md`](docs/user-guide/mod-translation-db.md) | Mod 翻譯資料庫 |
+| [`docs/developer-guide/lm-token-budget.md`](docs/developer-guide/lm-token-budget.md)、[`docs/developer-guide/lm-key-health.md`](docs/developer-guide/lm-key-health.md) | token 預算切批、API Key 健康度 |
+| [`docs/reference/configuration-apply-timing.md`](docs/reference/configuration-apply-timing.md)、[`docs/reference/configuration.md`](docs/reference/configuration.md) | 設定「何時生效」與設定頁 schema |
+| [`docs/developer-guide/cache.md`](docs/developer-guide/cache.md) | 快取系統與搜尋索引 |
+| [`docs/developer-guide/jar-pipeline.md`](docs/developer-guide/jar-pipeline.md)、[`docs/user-guide/translation-workflow.md`](docs/user-guide/translation-workflow.md)、[`docs/developer-guide/resume-capability.md`](docs/developer-guide/resume-capability.md) | JAR 提取、翻譯流程與重開後續跑 |
+| [`docs/contributing/testing.md`](docs/contributing/testing.md)、[`docs/contributing/review-checklist.md`](docs/contributing/review-checklist.md) | 測試策略與審查清單 |
+| [`docs/contributing/pr-workflow.md`](docs/contributing/pr-workflow.md)、[`docs/contributing/release.md`](docs/contributing/release.md)、[`RELEASE_STRATEGY.md`](RELEASE_STRATEGY.md) | GitHub、發佈流程與版本策略 |
 
 ## 授權
 
