@@ -419,3 +419,88 @@ def test_close_during_apply_does_not_overwrite_background_applied_state(
     assert reviewer.applying is False
     reviewer._close()
     assert reviewer.closed
+
+
+def _identity(db_path, **overrides):
+    item = {
+        "database_identity": str(db_path),
+        "database_file_id": 1,
+        "version": "1.21.1",
+        "mod_id": "fancymenu",
+        "kind": "lang",
+        "key": "tooltip",
+        "en_us": "Will prevent\nthe element",
+        "old_translation": "防止元素",
+        "ai_translation": "防止元素。",
+        "source_id": 2,
+    }
+    item.update(overrides)
+    return item
+
+
+def test_identical_items_from_different_sources_are_reviewed_as_one(tmp_path):
+    path = store.create_run(tmp_path / "group.db", "run-g")
+    first = store.append_item(path, "run-g", _identity(tmp_path, source_id=2))
+    second = store.append_item(path, "run-g", _identity(tmp_path, source_id=4))
+    # 舊譯文不同、或 AI 草稿不同的不能併進同一筆
+    store.append_item(
+        path, "run-g", _identity(tmp_path, source_id=1, old_translation="別的")
+    )
+    store.append_item(
+        path, "run-g", _identity(tmp_path, source_id=3, ai_translation="另一版")
+    )
+
+    assert store.index_count(path, "run-g", "pending") == 4
+    assert store.index_count(path, "run-g", "pending", grouped=True) == 3
+    assert store.indices(path, "run-g", "pending", grouped=True)[0] == first
+    assert store.group_indices(path, "run-g", second) == [first, second]
+    assert store.status_counts(path, "run-g", grouped=True) == {"pending": 3}
+    assert store.status_counts(path, "run-g") == {"pending": 4}
+
+
+def test_items_without_identity_fields_stay_single(tmp_path):
+    path = store.create_run(tmp_path / "single.db", "run-s")
+    store.append_item(path, "run-s", {"key": "a", "source_id": 0})
+    store.append_item(path, "run-s", {"key": "a", "source_id": 1})
+
+    assert store.index_count(path, "run-s", grouped=True) == 2
+    assert store.group_indices(path, "run-s", 1) == [1]
+
+
+def test_old_store_without_group_column_is_migrated_on_use(tmp_path):
+    import sqlite3
+
+    path = tmp_path / "old.sqlite3"
+    with sqlite3.connect(path) as conn:
+        conn.execute(
+            "CREATE TABLE repair_review (run_id TEXT NOT NULL, item_index INTEGER "
+            "NOT NULL, payload TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending', "
+            "draft TEXT, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+            "PRIMARY KEY (run_id, item_index))"
+        )
+        conn.execute(
+            "INSERT INTO repair_review(run_id,item_index,payload) VALUES ('r',1,'{}')"
+        )
+
+    assert store.index_count(path, "r", "pending", grouped=True) == 1
+    assert store.indices(path, "r", "pending", grouped=True) == [1]
+
+
+def test_reviewer_lists_merged_sources_and_keep_old_covers_the_whole_group(tmp_path):
+    path = store.create_run(tmp_path / "ui.db", "run-ui")
+    store.append_item(path, "run-ui", _identity(tmp_path, source_id=2))
+    store.append_item(path, "run-ui", _identity(tmp_path, source_id=4))
+    reviewer = RepairReviewer(mock_page(), str(path), "run-ui")
+    reviewer.filtered_count = store.index_count(path, "run-ui", "pending", grouped=True)
+    reviewer._load_index_page()
+    reviewer.page_size = 100
+
+    reviewer._render()
+
+    assert reviewer.filtered_count == 1
+    assert "#2、#4" in reviewer._source_text(reviewer.item)
+    assert "共 2 個來源" in reviewer._source_text(reviewer.item)
+
+    reviewer._keep_old()
+
+    assert store.status_counts(path, "run-ui") == {"kept_old": 2}

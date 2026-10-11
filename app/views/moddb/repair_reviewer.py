@@ -36,6 +36,7 @@ class RepairReviewer:
         self.item_indices: list[int] = []
         self.position = 0
         self.item: dict | None = None
+        self.group_members: list[dict] = []
         self.draft: ft.TextField | None = None
         self.format_status = ft.Text("", size=12, color=C.MUTED)
         self.format_diff_viewer = FormatDiffViewer(switch_label="顯示格式差異")
@@ -87,7 +88,7 @@ class RepairReviewer:
 
     def open(self) -> None:
         self.filtered_count = moddb_repair_review_store.index_count(
-            self.store_path, self.run_id, self.status_filter
+            self.store_path, self.run_id, self.status_filter, grouped=True
         )
         if not self.filtered_count:
             self.status_filter = "all"
@@ -115,6 +116,7 @@ class RepairReviewer:
             self.status_filter,
             limit=self.page_size,
             offset=self.page_offset,
+            grouped=True,
         )
 
     def _actions(self):
@@ -193,6 +195,17 @@ class RepairReviewer:
             border_radius=design.RADIUS_CONTROL,
         )
 
+    def _source_text(self, item: dict) -> str:
+        """「原來源 #2」；同一組相同內容有多個來源時列出全部，確認後一併套用。"""
+        sources = sorted(
+            {int(m.get("source_id", 0)) for m in self.group_members}
+            | {int(item.get("source_id", 0))}
+        )
+        if len(sources) <= 1:
+            return f"原來源 #{item.get('source_id', '')}"
+        listed = "、".join(f"#{s}" for s in sources)
+        return f"原來源 {listed}（相同內容，共 {len(sources)} 個來源，一併審查）"
+
     def _identity_card(self, item: dict) -> ft.Container:
         identity = ft.Row(
             [
@@ -203,7 +216,7 @@ class RepairReviewer:
                 ft.Text(str(item.get("kind") or ""), size=12, color=C.MUTED),
                 ft.Text("·", size=12, color=C.DIM),
                 ft.Text(
-                    f"原來源 #{item.get('source_id', '')}",
+                    self._source_text(item),
                     size=12,
                     color=C.GOLD,
                 ),
@@ -278,7 +291,7 @@ class RepairReviewer:
     def _render(self) -> None:
         if not self.item_indices:
             counts = moddb_repair_review_store.status_counts(
-                self.store_path, self.run_id
+                self.store_path, self.run_id, grouped=True
             )
             total = sum(counts.values())
             self.item = None
@@ -301,8 +314,17 @@ class RepairReviewer:
             self.status.value = "無法載入此筆審查資料。"
             self.page.update()
             return
+        self.group_members = [
+            moddb_repair_review_store.load_item(self.store_path, self.run_id, i)
+            for i in moddb_repair_review_store.group_indices(
+                self.store_path, self.run_id, index
+            )
+        ]
+        self.group_members = [m for m in self.group_members if m is not None]
         self._show_review_status(self.item.get("review_status", "pending"))
-        counts = moddb_repair_review_store.status_counts(self.store_path, self.run_id)
+        counts = moddb_repair_review_store.status_counts(
+            self.store_path, self.run_id, grouped=True
+        )
         total = sum(counts.values())
         self._update_progress(counts, total)
         item = self.item
@@ -411,13 +433,15 @@ class RepairReviewer:
             )
         self.item["draft"] = value
         self.item["review_status"] = status
-        moddb_repair_review_store.save_review_state(
-            self.store_path,
-            self.run_id,
-            int(self.item["item_index"]),
-            status,
-            value,
-        )
+        indices = {int(self.item["item_index"])} | {
+            int(m["item_index"])
+            for m in self.group_members
+            if m.get("review_status") not in {"applied", "kept_old"}
+        }
+        for index in sorted(indices):
+            moddb_repair_review_store.save_review_state(
+                self.store_path, self.run_id, index, status, value
+            )
 
     def _move(self, delta: int) -> None:
         if self.applying or not self.item_indices:
@@ -456,7 +480,7 @@ class RepairReviewer:
         self._save_draft()
         self.status_filter = event.control.value or "all"
         self.filtered_count = moddb_repair_review_store.index_count(
-            self.store_path, self.run_id, self.status_filter
+            self.store_path, self.run_id, self.status_filter, grouped=True
         )
         self.page_offset = 0
         self._load_index_page()
@@ -604,7 +628,7 @@ class RepairReviewer:
         )
         self.status.color = C.EM if status == "applied" else C.GOLD
         self.filtered_count = moddb_repair_review_store.index_count(
-            self.store_path, self.run_id, self.status_filter
+            self.store_path, self.run_id, self.status_filter, grouped=True
         )
         self.page_offset = min(
             self.page_offset,
@@ -614,7 +638,9 @@ class RepairReviewer:
         if self.item_indices:
             self.position = min(self.position, len(self.item_indices) - 1)
         self._render()
-        counts = moddb_repair_review_store.status_counts(self.store_path, self.run_id)
+        counts = moddb_repair_review_store.status_counts(
+            self.store_path, self.run_id, grouped=True
+        )
         pending = counts.get("pending", 0) + counts.get("invalid", 0)
         if status == "applied":
             message = (
@@ -639,7 +665,9 @@ class RepairReviewer:
         self.page.pop_dialog()
         if self.on_close is not None:
             self.on_close(
-                moddb_repair_review_store.status_counts(self.store_path, self.run_id)
+                moddb_repair_review_store.status_counts(
+                    self.store_path, self.run_id, grouped=True
+                )
             )
 
     def _set_controls_disabled(self, disabled: bool) -> None:
