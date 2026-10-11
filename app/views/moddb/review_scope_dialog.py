@@ -216,7 +216,7 @@ class ReviewScopeController:
                                     color=C.TEXT,
                                 ),
                                 ft.Text(
-                                    "只同步原文與目前譯文都相同的版本；關閉則只審核目前版本。",
+                                    "原文相同的其他版本會一併改用此譯文並標為已審核（可還原）；關閉則只審核目前版本。",
                                     size=11.5,
                                     color=C.MUTED,
                                 ),
@@ -366,6 +366,11 @@ class ReviewScopeController:
                 detail = "將審核目前顯示的繁體中文譯文"
             else:
                 detail = "原文與目前譯文相同，將同步審核此版本"
+                if item.text != entry.zh_tw:
+                    detail = (
+                        "原文相同，將以目前譯文取代此版本的生效譯文："
+                        f"{shorten(item.text, 36) or '（無）'}"
+                    )
             if item.manual_text is not None and item.manual_text != item.text:
                 detail += f"；將取代非生效人工譯文：{shorten(item.manual_text, 36)}"
         else:

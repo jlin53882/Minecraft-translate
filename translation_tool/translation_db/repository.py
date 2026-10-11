@@ -2219,12 +2219,10 @@ class TranslationDB:
                 reason = "目前版本" if included else "目前版本已審核"
             elif not propagate:
                 included, reason = False, "已選擇僅審核目前版本"
-            elif text != expected_zh_tw:
-                included, reason = False, "目前生效譯文不同"
-            elif row[9] == "reviewed" and (row[7] or "") != expected_zh_tw:
-                included, reason = False, "已有不同的已審核人工譯文"
-            elif row[9] == "reviewed":
+            elif row[9] == "reviewed" and (row[7] or "") == expected_zh_tw:
                 included, reason = False, "已審核相同譯文"
+            elif text != expected_zh_tw:
+                included, reason = True, "原文相同但目前生效譯文不同"
             else:
                 included, reason = True, "原文與目前譯文相同"
             result.append(
@@ -2357,8 +2355,9 @@ class TranslationDB:
         """Confirm the current effective text as reviewed manual translation.
 
         ``expected_zh_tw`` is a compare-and-set guard from the editor snapshot.
-        When propagation is enabled, only same-content versions currently showing
-        the same text are reviewed; a different sibling translation is preserved.
+        When propagation is enabled, every same-content version (same original
+        text) is reviewed with this text, even if it currently shows a different
+        translation; the replaced text is recorded in history and can be reverted.
         """
         if not expected_zh_tw.strip():
             raise ValueError("沒有可審核的譯文，請先輸入並儲存")
