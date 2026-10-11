@@ -61,6 +61,7 @@ from translation_tool.translation_db.quality import (
     repair_input_issues,
     repair_input_issues_from_counts,
     repair_output_issues,
+    token_issues,
     token_quality_comparison,
     whitespace_note,
 )
@@ -2859,8 +2860,12 @@ class TranslationDB:
         expected_revision: int | None,
         actor: str = "AI 特殊字元修復",
         action: str = "quality_repair",
+        strict_newline: bool = False,
     ) -> AITranslationReplaceResult:
-        """Compare-and-set one mismatched source row without changing its identity."""
+        """Compare-and-set one mismatched source row without changing its identity.
+
+        ``strict_newline`` also requires the new text to keep the source's LF count.
+        """
         if action not in {"quality_repair", "quality_repair_review"}:
             raise ValueError("invalid quality repair history action")
         if not isinstance(new_zh_tw, str) or not new_zh_tw.strip():
@@ -2891,9 +2896,8 @@ class TranslationDB:
                 return AITranslationReplaceResult("skipped_changed")
             # Automated repair must pass output checks; an explicit human review
             # accepts the reviewed draft while retaining the same source CAS.
-            if action == "quality_repair" and repair_output_issues(
-                expected_en_us, new_zh_tw
-            ):
+            output_issues = token_issues if strict_newline else repair_output_issues
+            if action == "quality_repair" and output_issues(expected_en_us, new_zh_tw):
                 return AITranslationReplaceResult("skipped_changed")
             if new_zh_tw == current[0]:
                 return AITranslationReplaceResult("unchanged")

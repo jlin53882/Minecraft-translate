@@ -102,6 +102,7 @@ class SameSourceAIRepairPreview:
     input_newline_mismatch_candidates: int = 0
     input_newline_mismatch_with_other_hard_issues: int = 0
     skipped_newline_only_candidates: int = 0
+    newline_only_included: bool = False
 
     @property
     def selected_count(self) -> int:
@@ -120,6 +121,7 @@ class SameSourceAIRepairReport:
     input_newline_mismatch_candidates: int = 0
     input_newline_mismatch_with_other_hard_issues: int = 0
     skipped_newline_only_candidates: int = 0
+    strict_newline: bool = False
     review_run_id: str = ""
     review_store_path: str = ""
     reviewable_results: int = 0
@@ -438,7 +440,7 @@ def _limited_repair_snapshot(db, options, deadline):
         _raise_preview_timeout(deadline)
         newline_mismatch_count += int(newline_mismatch)
         newline_mismatch_with_hard_issues += int(newline_mismatch and mixed)
-        if newline_mismatch and not mixed:
+        if newline_mismatch and not mixed and not options.repair_newline_only:
             skipped_newline_only += 1
             continue
         eligible += 1
@@ -590,6 +592,8 @@ def preview_same_source_ai_retranslation(
         skipped_newline_only_candidates=(
             skipped_newline_only if mode == "quality_mismatch" else 0
         ),
+        newline_only_included=mode == "quality_mismatch"
+        and options.repair_newline_only,
     )
 
 
@@ -1102,7 +1106,7 @@ def _finalize_representative_result(
     translated_text = result["text"]
     issues = (
         repair_output_issues(original["source_text"], translated_text)
-        if report.mode == "quality_mismatch"
+        if report.mode == "quality_mismatch" and not report.strict_newline
         else token_issues(original["source_text"], translated_text)
     )
     if issues:
@@ -1165,6 +1169,7 @@ def _mark_batch_targets_flagged(
                 "ai_translation": translated_text,
                 "issues": tuple(issues),
                 "expected_revision": target["_expected_revision"],
+                "strict_newline": report.strict_newline,
                 "database_identity": str(getattr(db, "path", "")),
                 "database_file_id": Path(getattr(db, "path", "")).stat().st_ino,
                 "database_priority": tuple(getattr(db, "priority", ())),
@@ -1260,6 +1265,7 @@ def _replace_candidate_translation(db, original, text, report):
             text,
             **identity,
             expected_revision=original["_expected_revision"],
+            strict_newline=report.strict_newline,
         )
     return db.replace_ai_translation(entry_id, old_text, text, **identity)
 
@@ -1401,7 +1407,8 @@ def _set_cache_report_stats(options, report) -> None:
 def _remaining_candidate_count(db, options, mode: str) -> int:
     if mode == "quality_mismatch":
         return sum(
-            entry is not None and not (newline_mismatch and not mixed)
+            entry is not None
+            and (options.repair_newline_only or not (newline_mismatch and not mixed))
             for entry, newline_mismatch, mixed in db.iter_repairable_translation_entries(
                 options.version, list(options.mod_ids)
             )
@@ -1672,7 +1679,7 @@ def _flush_after_interrupted_batch(options, session, report, cache_keys_to_save)
 
 def _initialize_snapshot_run(entries, session, report, options):
     """Group candidates and prepare the rate-limited translator run."""
-    if report.mode == "quality_mismatch":
+    if report.mode == "quality_mismatch" and not options.repair_newline_only:
         entries, skipped_newline_only = _filter_newline_only_repair_entries(entries)
         report.skipped_newline_only_candidates += skipped_newline_only
         report.candidates = len(entries)
@@ -1813,6 +1820,7 @@ def run_moddb_retranslate_service(
     report = SameSourceAIRepairReport(
         candidates=len(entries),
         mode=mode,
+        strict_newline=mode == "quality_mismatch" and options.repair_newline_only,
         input_newline_mismatch_candidates=(
             review_preview.input_newline_mismatch_candidates if review_preview else 0
         ),

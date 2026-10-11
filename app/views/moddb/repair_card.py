@@ -26,6 +26,7 @@ class RepairCardControls:
     preview_issue_filter: ft.Dropdown
     preview_count: ft.Text
     pager: kit.Pager
+    newline_row: kit.SwitchRow
 
 
 def repair_copy(mode: str) -> tuple[str, str]:
@@ -56,6 +57,7 @@ def create_repair_card(
     on_preview: Callable,
     on_confirm: Callable,
     on_filter_change: Callable,
+    on_newline_change: Callable,
     on_page: Callable[[int], None],
     page_size: int,
 ) -> RepairCardControls:
@@ -87,6 +89,15 @@ def create_repair_card(
     default_text, explanation = repair_copy(mode)
     preview_text = ft.Text(default_text, size=13, color=C.TEXT, selectable=True)
     explainer = kit.hint_text(explanation)
+    newline_row = kit.SwitchRow(
+        "連「只有換行數不同」的項目一起送 AI 修復",
+        "預設略過原文與譯文只差實際換行數的項目。開啟後這類項目也會送 AI，"
+        "且 AI 結果的換行數必須與原文一致才會寫入。",
+        False,
+        on_change=on_newline_change,
+        divider=False,
+    )
+    newline_row.visible = mode == "quality_mismatch"
     preview_search = kit.text_field(
         "搜尋 Key／Mod／原文／譯文",
         icon=ft.Icons.SEARCH,
@@ -123,6 +134,7 @@ def create_repair_card(
             [
                 mode_group,
                 explainer,
+                newline_row,
                 ft.Row([preview_button, start_button], spacing=10, wrap=True),
                 preview_text,
                 ft.Row(
@@ -154,4 +166,5 @@ def create_repair_card(
         preview_issue_filter,
         preview_count,
         pager,
+        newline_row,
     )

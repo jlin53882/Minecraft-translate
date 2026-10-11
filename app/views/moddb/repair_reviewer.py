@@ -11,6 +11,7 @@ from app.services_impl.moddb_format_diff_service import compare_format_diff
 from app.services_impl.moddb_retranslate_service import (
     apply_and_record_repair_review,
     repair_output_issues,
+    token_issues,
 )
 from app.ui import design
 from app.ui.design import C
@@ -487,7 +488,10 @@ class RepairReviewer:
         if not value.strip():
             show_snack(self.page, "AI 草稿不能是空白，請先輸入翻譯內容。", C.GOLD)
             return
-        issues = repair_output_issues(str(self.item.get("en_us") or ""), value)
+        check = (
+            token_issues if self.item.get("strict_newline") else repair_output_issues
+        )
+        issues = check(str(self.item.get("en_us") or ""), value)
         if issues:
             self._open_apply_confirmation(value, issues)
             return

@@ -297,8 +297,12 @@ def _display_preview_result(panel, options, db_identity, result):
             f"（其中另有硬格式問題 {format_count(result.input_newline_mismatch_with_other_hard_issues)} 筆）。\n"
             f"本次唯一 AI 修復項目：{format_count(result.ai_representatives)} 個，"
             f"涉及來源項目：{format_count(selected)} 筆；共用結果 {format_count(result.dedup_reused_candidates)} 筆。\n"
-            f"略過只有實際換行數不同：{format_count(result.skipped_newline_only_candidates)} 筆（不佔 AI 名額）。\n"
-            f"來源：{sources or '無'}；翻譯類型：{breakdown}；{representative_breakdown}；"
+            + (
+                "已納入只有實際換行數不同的項目（AI 結果換行數須與原文一致）。\n"
+                if result.newline_only_included
+                else f"略過只有實際換行數不同：{format_count(result.skipped_newline_only_candidates)} 筆（不佔 AI 名額）。\n"
+            )
+            + f"來源：{sources or '無'}；翻譯類型：{breakdown}；{representative_breakdown}；"
             f"規劃批次：{format_count(result.estimated_batches)}（不等於實際 HTTP 請求次數）。"
         )
     else:

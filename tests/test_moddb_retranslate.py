@@ -2636,3 +2636,132 @@ def test_repair_preview_cards_are_paged_and_filters_return_to_page_one(
     del groups[size:]  # 剩一頁：不顯示頁碼列
     retranslation_controller.refresh_preview_cards(panel, update=False)
     assert pager.visible is False
+
+
+def _stored_ai_text(db, entry_id):
+    return db._q(
+        "SELECT zh_tw FROM translation WHERE entry_id=? AND source=?",
+        (entry_id, SRC_AI),
+    )[0][0]
+
+
+def _newline_only_entry(db):
+    entry = _ai_entry(db, key="a.newline_only", en="Line one\nLine two")
+    db._conn.execute(
+        "UPDATE translation SET zh_tw='第一行第二行' WHERE entry_id=? AND source=?",
+        (entry.id, SRC_AI),
+    )
+    db._conn.commit()
+    return entry
+
+
+def test_repair_newline_only_option_includes_those_candidates_in_preview(db_path):
+    db = TranslationDB(db_path)
+    _newline_only_entry(db)
+
+    default = moddb_retranslate_service.preview_same_source_ai_retranslation(
+        db, _options(), mode="quality_mismatch"
+    )
+    included = moddb_retranslate_service.preview_same_source_ai_retranslation(
+        db, _options(repair_newline_only=True), mode="quality_mismatch"
+    )
+    db.close()
+
+    assert default.selected_count == 0
+    assert default.skipped_newline_only_candidates == 1
+    assert default.newline_only_included is False
+    assert [row.key for row in included.entries] == ["a.newline_only"]
+    assert included.skipped_newline_only_candidates == 0
+    assert included.newline_only_included is True
+    assert included.input_newline_mismatch_candidates == 1
+
+
+def test_repair_newline_only_option_requires_output_to_keep_source_newlines(
+    db_path, monkeypatch
+):
+    db = TranslationDB(db_path)
+    entry = _newline_only_entry(db)
+    options = _options(write_cache=False, repair_newline_only=True)
+    preview = moddb_retranslate_service.preview_same_source_ai_retranslation(
+        db, options, mode="quality_mismatch"
+    )
+    db.close()
+
+    def run_with(text):
+        monkeypatch.setattr(
+            moddb_retranslate_service,
+            "translate_batch_smart",
+            lambda batch, _total: ([{**item, "text": text} for item in batch], "AUTO"),
+        )
+        return _run(db_path, preview.entries, options=options, mode="quality_mismatch")
+
+    # 換行數仍與原文不同：視為格式不一致，不寫入、保留舊譯文
+    flagged = run_with("第一行第二行（重翻）")
+    assert flagged["summary"]["flagged"] == 1
+    assert flagged["summary"]["updated"] == 0
+    check = TranslationDB(db_path)
+    assert _stored_ai_text(check, entry.id) == "第一行第二行"
+    check.close()
+
+    # 換行數與原文一致：寫入
+    ok = run_with("第一行\n第二行")
+    assert ok["summary"]["updated"] == 1
+    check = TranslationDB(db_path)
+    assert _stored_ai_text(check, entry.id) == "第一行\n第二行"
+    check.close()
+
+
+def test_replace_quality_mismatch_strict_newline_rejects_wrong_newline_count(db_path):
+    db = TranslationDB(db_path)
+    entry = _newline_only_entry(db)
+    identity = {
+        "expected_version": "1.21.1",
+        "expected_kind": "lang",
+        "expected_mod_id": "foo",
+        "expected_key": "a.newline_only",
+        "expected_en_us": "Line one\nLine two",
+        "expected_revision": None,
+    }
+
+    strict = db.replace_translation_quality_mismatch(
+        entry.id, SRC_AI, "第一行第二行", "還是沒換行", strict_newline=True, **identity
+    )
+    lenient = db.replace_translation_quality_mismatch(
+        entry.id, SRC_AI, "第一行第二行", "還是沒換行", **identity
+    )
+    db.close()
+
+    assert strict.status == "skipped_changed"
+    assert lenient.status == "updated"
+
+
+def test_repair_card_newline_switch_is_off_by_default_and_follows_mode():
+    from app.views.moddb.repair_card import create_repair_card
+
+    noop = lambda *_a, **_k: None
+    kwargs = {
+        "on_mode_change": noop,
+        "on_preview": noop,
+        "on_confirm": noop,
+        "on_filter_change": noop,
+        "on_newline_change": noop,
+        "on_page": noop,
+        "page_size": 50,
+    }
+
+    quality = create_repair_card("quality_mismatch", **kwargs)
+    same_source = create_repair_card("same_source_ai", **kwargs)
+
+    assert quality.newline_row.value is False
+    assert quality.newline_row.visible is True
+    assert same_source.newline_row.visible is False
+
+
+def test_translate_panel_builds_newline_option_only_for_quality_mode(db_path):
+    panel = translate_panel.TranslatePanel(mock_page(), lambda: TranslationDB(db_path))
+
+    assert panel.build_options().repair_newline_only is False
+    panel.repair_newline_row.value = True
+    assert panel.build_options().repair_newline_only is True
+    panel._repair_mode = "same_source_ai"
+    assert panel.build_options().repair_newline_only is False
