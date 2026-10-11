@@ -36,24 +36,6 @@ def get_converter():
     return thread_local.converter
 
 
-def convert_only_cjk_old(text: str, rules=None) -> str:
-    """只轉換中文（基本 CJK）＋ 套用自訂規則"""
-    result = []
-    for ch in text:
-        if "\u4e00" <= ch <= "\u9fff":
-            result.append(converter.convert(ch))
-        else:
-            result.append(ch)
-
-    result_text = "".join(result)
-
-    # ✅ 套用 rules
-    if rules:
-        result_text = apply_replace_rules(result_text, rules)
-
-    return result_text
-
-
 def convert_only_cjk(text: str, rules=None) -> str:
     """
     只轉換中文（基本 CJK）＋ 套用自訂規則

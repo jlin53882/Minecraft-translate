@@ -21,27 +21,6 @@ from app.views.cache_manager.shard_reader import (
 class CacheShardMixin:
     """分片頁：分片 widgets、分片清單／內容、dst 編輯與分頁。"""
 
-    # =========================================================
-    # Shared helpers
-    # =========================================================
-    def _dynamic_shard_list_height(self) -> int:
-        """計算 shard list height 高度（跟視窗 height 自適應）。
-
-        規則：
-        - 若 page.height 取得失敗或 <= 0 → 180
-        - 正常：int(page.height * 0.24)，clamp 120..360
-        """
-        try:
-            h = float(getattr(self.page, "height", 0) or 0)
-        except Exception:  # noqa: BLE001
-            h = 0
-
-        if h <= 0:
-            return 180
-
-        # 動態高度：跟視窗高度走，但做上下限保護避免 Flet 撐高異常
-        return max(120, min(360, int(h * 0.24)))
-
     def _dynamic_type_shard_panel_height(self) -> int:
         """計算 type shard panel height（跟視窗 height 自適應）。
 
@@ -60,23 +39,6 @@ class CacheShardMixin:
         # 上方分類清單固定高度，避免下方 C1/C2 卡撐掉可視區
         return max(180, min(420, int(h * 0.30)))
 
-    def _dynamic_shard_key_list_height(self) -> int:
-        """計算 shard key list height 高度（跟視窗 height 自適應）。
-
-        規則：
-        - 若 page.height 取得失敗或 <= 0 → 220
-        - 正常：int(page.height * 0.30)，clamp 140..420
-        """
-        try:
-            h = float(getattr(self.page, "height", 0) or 0)
-        except Exception:  # noqa: BLE001
-            h = 0
-
-        if h <= 0:
-            return 220
-
-        return max(140, min(420, int(h * 0.30)))
-
     def _dynamic_shard_key_panel_width(self) -> int:
         """計算 shard key panel width（跟視窗 width 自適應）。
 
@@ -93,8 +55,6 @@ class CacheShardMixin:
             return 360
 
         return max(280, min(560, int(w * 0.30)))
-
-        # overview 分類下拉已移除（按鈕維持在分類卡）
 
     def _load_shard_rows(
         self, cache_type: str, active_shard_id: str, shard_capacity: int
@@ -123,14 +83,6 @@ class CacheShardMixin:
         if not fp.exists():
             return []
         return list(shard_summary(fp)[1])
-
-    def _set_shard_detail_page(self, page: int):
-        """設定分片詳情頁碼並計算總頁數"""
-        total = len(self.shard_detail_keys)
-        self.shard_detail_total_pages = max(
-            1, (total + self.shard_detail_page_size - 1) // self.shard_detail_page_size
-        )
-        self.shard_detail_page = max(1, min(page, self.shard_detail_total_pages))
 
     def _render_shard_detail_keys(self):
         """渲染分片詳情的鍵值列表 UI"""

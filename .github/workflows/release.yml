@@ -39,4 +39,4 @@ jobs:
           draft: true
           generate_release_notes: true
           # If you prefer using CHANGELOG as body, set body_path
-          # body_path: release_notes_v0.6.0.md
+          # body_path: <file with the CHANGELOG section for this tag>

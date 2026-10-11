@@ -81,11 +81,6 @@ def get_current_key_index() -> int:
     return _key_tracker.get_current()
 
 
-def rotate_key_index() -> int:
-    """輪替至下一個索引（向後相容用）。"""
-    return _key_tracker.next()
-
-
 def reset_key_index() -> None:
     """重置索引（向後相容用）。"""
     return _key_tracker.reset()

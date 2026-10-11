@@ -1,17 +1,16 @@
 # Windows 實機驗證清單（交給 Codex／測試者執行）
 
 > 目的：整理「**只能在 Windows 驗證**」的項目。Linux／網頁版（`tools/ui_smoke.py` + Playwright）可以驗證的畫面項目**不在這裡**，由開發環境另外處理（見最後一節）。
-> 每一項請照「步驟」執行，把結果（通過／失敗＋截圖或日誌）貼回對應 issue；全部通過後才關閉該 issue。
-> 最後更新：PR #153 合併後（2026-10-04）。
+> 每一項請照「步驟」執行，把結果（通過／失敗＋截圖或日誌）回報到對應的 GitHub issue；全部通過後才關閉該 issue。
 
 ## 0. 共同前提
 
 - Windows 10/11，已安裝 [uv](https://docs.astral.sh/uv/) 與 Nuitka 需要的 C 編譯器（MSVC Build Tools 或 Nuitka 自動下載的 MinGW）。
-- 取得 `main` 最新程式碼；`git log -1` 應包含 PR #153（`Merge pull request #153`）。
+- 取得 `main` 最新程式碼。
 - 準備一把可用的 Gemini API 金鑰（只在需要實際翻譯的項目使用）；**不要把真實金鑰貼進 issue 或截圖**。
 - 回報格式：每項寫「通過 / 失敗」，失敗附 `data\logs\` 內的日誌（先檢查沒有金鑰）與重現步驟。
 
-## 1. 打包與資料目錄（issue #137）
+## 1. 打包與資料目錄
 
 契約說明：`docs/DISTRIBUTION_AND_DATA_DIR.md`；打包腳本：`tools/build_exe.bat`（草稿，**尚未在 Windows 實測**，失敗請記錄並回報要修的地方）。
 
@@ -31,7 +30,7 @@ dist\MinecraftTranslator\
 | 1.3 | 路徑判定 | 在 console 或日誌確認資料根目錄 | 資料根目錄為 `dist\MinecraftTranslator\data`（不是 `app\`）。若不符，記錄 `sys.argv[0]`、`__compiled__`、`sys.frozen` 與 `get_data_root()` 的實際值 |
 | 1.4 | 第一次啟動 | 刪除 `data\` 後啟動 | 自動建立 `data\config.json`（內容等同 `config.example.json`，**欄位完整**）、`data\logs\` 等；沒有錯誤提示 |
 | 1.5 | 存設定、重開 | 設定頁改一個值（例如 `log_level`）→ 存檔 → 關閉 → 重開 | 值保留；`data\config.json` 是合法 JSON |
-| 1.6 | 唯讀資源 | 檢查程式能讀到 `assets`、`config.example.json`、`pyproject.toml`、`resource_pack_version.json` | 圖示與版本資訊正常；`resource_pack_version.json` 有 3 處以 `__file__` 讀取，確認打包版都能讀到（若找不到檔案請回報是哪一處） |
+| 1.6 | 唯讀資源 | 檢查程式能讀到 `assets`、`config.example.json`、`pyproject.toml`、`resource_pack_version.json` | 圖示與版本資訊正常；`resource_pack_version.json` 有 4 處以 `__file__` 讀取（`app/views/bundler_view.py`、`app/views/pipeline/pipeline_bundle_dialog.py`、`app/views/pipeline/pipeline_one_click_dialog.py`、`app/services_impl/moddb_service.py`），確認打包版都能讀到（若找不到檔案請回報是哪一處） |
 | 1.7 | 舊安裝遷移 | 模擬舊版平面式安裝：把 `config.json`、`replace_rules.json`、`logs\`、`快取資料\` 放在 `dist\MinecraftTranslator\`（與 `app\` 同層），其中 `config.json` 填入可辨識的自訂值；再啟動新版 | 首次啟動後這些項目被搬進 `data\`，自訂值仍在，沒有被預設值覆蓋；`data\` 已有同名檔時**不覆蓋**、舊位置檔案保留 |
 | 1.8 | 更新（發佈腳本） | 在 `data\` 放一個標記檔，再次執行 `tools\build_exe.bat` | `app\` 被換成新版；`data\` 內容（含標記檔、`config.json`）完全不變 |
 | 1.9 | 更新時程式正在執行 | 保持 exe 執行中，執行 `build_exe.bat` 的發佈步驟 | 發佈失敗並提示先關閉程式；`app\` 被還原、仍可正常啟動 |
@@ -39,11 +38,11 @@ dist\MinecraftTranslator\
 | 1.11 | 啟動器 `.bat` | 從不同工作目錄（例如桌面捷徑）啟動 `.bat` | 仍能啟動，資料仍在 `data\` |
 | 1.12 | 圖示快取 | 開「圖示預覽」頁並載入一個模組包 | 快取寫入 `data\.icon_cache\`，不寫在 `app\` |
 
-完成後把結果貼到 **#137**。若 `build_exe.bat` 需要修正，請另開 PR 並在 issue 說明。
+完成後把結果回報到對應的 GitHub issue。若 `build_exe.bat` 需要修正，請另開 PR 並在 issue 說明。
 
-## 2. 視窗關閉流程（issue #126、#122）
+## 2. 視窗關閉流程
 
-背景：桌面視窗關閉不會觸發 `page.on_close`；PR #149 實作了「有任務時確認 → 取消 → drain → flush → `dispose()` → `destroy()`」。**自動測試與假 page 不能證明視窗事件**，必須在真實桌面版驗證（建議用 1.1 打包出的 exe；也可用 `uv run main.py`）。
+背景：桌面視窗關閉不會觸發 `page.on_close`；關閉流程為「有任務時確認 → 取消 → drain → flush → `dispose()` → `page.window.destroy()`」。**自動測試與假 page 不能證明視窗事件**，必須在真實桌面版驗證（建議用 1.1 打包出的 exe；也可用 `uv run main.py`）。
 
 | # | 項目 | 步驟 | 預期結果 |
 |---|---|---|---|
@@ -56,11 +55,11 @@ dist\MinecraftTranslator\
 | 2.7 | `dispose()` 只執行一次 | 觀察日誌（log_level 設 DEBUG） | 桌面關閉路徑只有一次 `dispose`；沒有重複或例外 |
 | 2.8 | 工作台刷新 | 任務進行中停在工作台頁 | 快取筆數、規則數會在合理延遲內更新；沒有任務時沒有持續輪詢（CPU 閒置） |
 
-結果貼到 **#126**（2.1–2.8 都貼）與 **#122**（2.1、2.4、2.7）。
+結果回報到對應的 GitHub issue（2.1–2.8 全部回報）。
 
-## 3. 重開後續跑（issue #151）
+## 3. 重開後續跑
 
-實作與自動測試（假 API、真實快取層）已完成：`docs/RESUME_CAPABILITY.md`。以下需在 Windows 打包版驗證；**請用測試用金鑰與小資料夾**（數十筆即可），以工作管理員「結束工作」模擬被強制結束。
+實作與自動測試（假 API、真實快取層）見 `docs/RESUME_CAPABILITY.md`。以下需在 Windows 打包版驗證；**請用測試用金鑰與小資料夾**（數十筆即可），以工作管理員「結束工作」模擬被強制結束。
 
 | # | 項目 | 步驟 | 預期結果 |
 |---|---|---|---|
@@ -77,9 +76,9 @@ dist\MinecraftTranslator\
 | 3.11 | 關閉快取儲存 | 設定 `translator.enable_cache_saving = false` 後重做 3.1 | 不會出現續跑對話框（沒有快取就沒有可還原的來源）；已存在的舊標記在下次翻譯時被捨棄並在日誌警告 |
 | 3.12 | 一鍵流水線 | 在流水線中途強制結束 | 只有「機器翻譯單頁」會被偵測；流水線需重新執行（已完成的來源由快取命中，很快跑完） |
 
-結果貼到 **#151**。
+結果回報到對應的 GitHub issue。
 
-### 3.A FTB／KubeJS／MD 的續跑（issue #164）
+### 3.A FTB／KubeJS／MD 的續跑
 
 以小資料夾（FTB：含 `config/ftbquests/quests`；KubeJS：含 `kubejs/client_scripts`；MD：含 `en_us` 的 `.md`，各數十筆即可）重做上面 3.1–3.8，並確認：
 
@@ -92,38 +91,38 @@ dist\MinecraftTranslator\
 | 3.17 | 輸入改過 | 重開前修改該流程的來源檔案（FTB 的 `.snbt`／KubeJS 的 `.js`／MD 的 `en_us` `.md`） | 「無法續跑：輸入內容與上次不同」，只能放棄或稍後 |
 | 3.18 | 輸出資料夾在輸入底下 | 使用預設輸出（`<輸入>/Output`）中斷並重開 | 檢查仍通過（輸出檔案不會讓指紋改變） |
 | 3.19 | 輸入選到整個 modpack | KubeJS／MD 輸入選整個 modpack 根目錄（來源很大） | 檢查在背景執行、不凍結視窗；來源超過 50,000 個檔案或 512 MB 時不提供續跑（不出現對話框、翻譯本身正常） |
-| 3.20 | 舊格式標記不靜默忽略 | 保留舊版（#163 之前）遺留的 `translator_*_checkpoint.json`（沒有 `version`／`input_dir`） | 啟動對話框列出該任務並顯示「無法續跑：舊版續跑標記…請放棄此任務」，「續跑」停用；按「放棄」後檔案被清除，下次啟動不再出現 |
+| 3.20 | 舊格式標記不靜默忽略 | 保留舊版遺留的 `translator_*_checkpoint.json`（沒有 `version`／`input_dir`） | 啟動對話框列出該任務並顯示「無法續跑：舊版續跑標記…請放棄此任務」，「續跑」停用；按「放棄」後檔案被清除，下次啟動不再出現 |
 | 3.21 | 剛開始就中斷 | FTB／KubeJS／MD 各自：在「抽取／清理」階段或第一個 API 批次完成前用工作管理員強制結束 → 重開 | 仍會出現該任務（已保存的進度 0 / 0）；「續跑」通過檢查後可啟用並完整續跑，完成後標記清除 |
 
 ## 4. 其他只能在 Windows 驗證的項目
 
-| Issue | 項目 | 說明 |
-|---|---|---|
-| #139 | Snackbar 與底部狀態列重疊 | 原觀察來自 Windows 11 / Flet 1.0.1 / Chrome 的截圖。開發環境會用網頁版重現；若網頁版與桌面版行為不同，請在 Windows 桌面版再確認 |
-| #147 | oauthlib CVE | 不需要 Windows；需要確認 Flet 是否會進入 PKCE Authorization Code 流程（程式／依賴分析） |
+| 項目 | 說明 |
+|---|---|
+| Snackbar 與底部狀態列重疊 | 觀察環境為 Windows 11 / Flet 1.0.1 / Chrome 的截圖。開發環境會用網頁版重現；若網頁版與桌面版行為不同，請在 Windows 桌面版再確認 |
+| oauthlib CVE（依賴分析） | 不需要 Windows；需要確認 Flet 是否會進入 PKCE Authorization Code 流程（程式／依賴分析） |
 
-### 4.1 日誌／任務歸屬煙霧測試（PR #169，Flet Web，491 個 JAR）
+### 4.1 日誌／任務歸屬煙霧測試（Flet Web，491 個 JAR）
 
 | # | 項目 | 步驟 | 預期結果 |
 |---|---|---|---|
 | 4.1.1 | 雙任務並行 | 開兩個 Flet Web 分頁，同時各執行一次 DUAL 提取（輸出路徑不同） | `app.log` 每一行都帶 `[task=extractor/extractor-…]`，兩個任務的 task 不同；畫面上的輸出路徑、成功／跳過／失敗數與對應 task 的後台紀錄一致 |
 | 4.1.2 | 一鍵流程輸入失敗 | 一鍵製作的 Mod 來源填不存在的路徑，走完 4 個步驟按「確定執行」 | 對話框完全關閉、遮罩不殘留；畫面可見「❌ Mod 來源不存在或未選擇」提示；後台有對應 ERROR 的 `[UI] SnackBar` 紀錄；不啟動任何任務 |
 
-Flet Web 補充（限制與未來擴充方向見 `WEB_MODE_LIMITATIONS.md`）：`FilePicker.get_directory_path()` 在 Web 不支援，現在改為提示「請直接輸入執行程式那台電腦上的路徑」；輸出資料夾不存在時會自動建立，所以 Web 可手動輸入新的輸出路徑走完整流程。
+Flet Web 補充（限制與未來擴充方向見 `WEB_MODE_LIMITATIONS.md`）：`FilePicker.get_directory_path()` 在 Web 不支援，此時提示「請直接輸入執行程式那台電腦上的路徑」；輸出資料夾不存在時會自動建立，所以 Web 可手動輸入新的輸出路徑走完整流程。
 
-2026-10-06 首次結果：4.1.1 通過（兩任務各成功 3374／3373，無失敗）；4.1.2 的後台紀錄正確，但對話框停在「打包資源設定 4/4」、遮罩殘留、提示未顯示——已修正對話框關閉流程（移除 overlay 後再推一次更新，見 `app/ui/dialogs.py` 的 `dispose_dialogs`），**待 Windows 重測 4.1.2**。
+4.1.2 的對話框關閉流程：先移除遮罩，再推一次更新（見 `app/ui/dialogs.py` 的 `dispose_dialogs`）。Windows 重測時確認對話框確實關閉、遮罩不殘留、提示可見。
 
 ## 5. 不需要 Windows（網頁版 smoke 可驗證）
 
 這些項目可用 `tools/ui_smoke.py`（真實 Flet 網頁版＋Playwright）驗證；外網被封鎖的環境改用 `tools/ui_smoke_offline.py`（把 CanvasKit／字型導向本機檔案，參數相同）：
 
-- #134：設定頁的排版、欄寬與補齊欄位的顯示（smoke 只截設定頁預設的一般設定頁；其他頁與互動需手動操作）。
-- #117：設定頁套用時機說明（文字可見性）；存檔提示、快取重載、打包頁即時更新屬互動行為，smoke 不涵蓋，仍建議手動確認。
-- #114／#121／#120：View 拆分與舊色名稱清除以 smoke 截圖前後對照（`views`、`dialogs` 兩個 scenario，深淺色 × 1360×900／900×700）。
+- 設定頁的排版、欄寬與補齊欄位的顯示（smoke 只截設定頁預設的一般設定頁；其他頁與互動需手動操作）。
+- 設定頁套用時機說明（文字可見性）；存檔提示、快取重載、打包頁即時更新屬互動行為，smoke 不涵蓋，仍建議手動確認。
+- View 拆分與舊色名稱清除以 smoke 截圖前後對照（`views`、`dialogs` 兩個 scenario，深淺色 × 1360×900／900×700）。
 
 > 網頁版驗證**不能**取代第 1、2 節；視窗事件、打包與檔案鎖只存在於 Windows 桌面版。
 
 ## 6. 回報後的收尾
 
-- 全部通過：在對應 issue 留言附結果並關閉（#137、#126、#122；#117、#134 在網頁版驗證完成、且本清單無相關項目後關閉）。
+- 全部通過：在對應 GitHub issue 留言附結果並關閉。第 5 節的項目在網頁版驗證完成、且本清單無相關項目後，關閉對應 issue。
 - 失敗：在 issue 留言附日誌與重現步驟，並**不要**關閉；需要改程式時另開 PR（不要直接推到 `main`）。

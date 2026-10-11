@@ -266,36 +266,3 @@ def _log_error_to_file(error: Exception, func_name: str):
 # =============================================================================
 # 便利函式
 # =============================================================================
-
-
-def raise_if_invalid_json(data: dict, required_keys: list, source: str = "unknown"):
-    """檢查 JSON 資料是否包含必要欄位
-
-    Args:
-        data: JSON 資料（dict）
-        required_keys: 必要欄位清單
-        source: 資料來源（用於錯誤訊息）
-
-    Raises:
-        FileFormatError: 如果缺少必要欄位
-    """
-    missing = [key for key in required_keys if key not in data]
-    if missing:
-        raise FileFormatError(
-            f"JSON 格式錯誤：缺少必要欄位 {missing}",
-            context={"source": source, "missing_keys": missing},
-        )
-
-
-def raise_if_empty(value, name: str):
-    """檢查值是否為空
-
-    Args:
-        value: 要檢查的值
-        name: 值的名稱（用於錯誤訊息）
-
-    Raises:
-        TranslationError: 如果值為空
-    """
-    if not value:
-        raise TranslationError(f"{name} 不可為空")

@@ -1,4 +1,4 @@
-"""產生 docs/EXCEPTION_INVENTORY.md：逐項列出所有寬鬆例外豁免（#135）。
+"""產生 docs/EXCEPTION_INVENTORY.md：逐項列出所有寬鬆例外豁免。
 
 每一列：位置（檔案:函式）｜規則｜分類｜處理方式。分類由例外處理的內容判定：
 
@@ -125,7 +125,7 @@ def render(rows: list[dict[str, str]]) -> str:
         by_kind[r["kind"]] = by_kind.get(r["kind"], 0) + 1
     unexplained = sum(1 for r in rows if r["reason"].startswith("（未寫原因"))
     out = [
-        "# 寬鬆例外逐項盤點（#135）",
+        "# 寬鬆例外逐項盤點",
         "",
         "> 由 `tools/gen_exception_inventory.py` 產生；`tests/test_exception_inventory.py` 檢查整份文件與程式碼逐字一致（不含行號，避免普通修改造成漂移）。",
         "> 範圍：`app/`、`translation_tool/`、`main.py` 內所有帶 `noqa: BLE001／S110／S112` 的位置。",

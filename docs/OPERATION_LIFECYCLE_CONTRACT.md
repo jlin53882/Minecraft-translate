@@ -1,10 +1,8 @@
-# Operation lifecycle contract (PR-A)
+# Operation lifecycle contract
 
-Date: 2026-10-08
-
-This document defines ownership, admission, shutdown, and coverage for PR-A. It
-does not claim that every blocking call is immediately interruptible; bounded
-blocking-call behavior and deeper cooperative cancellation are PR-B work.
+This document defines ownership, admission, shutdown, cooperative cancellation,
+and coverage for long-running operations. It does not claim that every blocking
+call is immediately interruptible; see “Blocking-call dispositions” below.
 
 ## Authoritative ownership
 
@@ -86,26 +84,26 @@ Deferred items are explicitly tracked risks, not unclassified operations.
 
 | Operation | Disposition | Owner / policy summary | Remaining risk |
 |---|---|---|---|
-| Pipeline parent and child steps | REGISTERED | One `pipeline` parent for the sequence; child `TaskSession`s are projections; cancel-and-drain; no ownership gap between steps. | PR-B must prove each blocking step's cancellation bound. |
-| Standalone JAR extraction | REGISTERED | `extractor`; cooperative cancel; cancel-and-drain; extraction cancel flag is connected to handle. | ZIP/read blocking bounds are PR-B. |
-| Extractor preview | REGISTERED | `extractor-preview`; cancel callback sets preview cancel state; cancel-and-drain. | Same underlying archive blocking bounds are PR-B. |
-| Pipeline extractor preview | REGISTERED | `pipeline-extract-preview`; cancel event callback; cancel-and-drain. | Archive blocking bounds are PR-B. |
-| Bundler | REGISTERED | `bundler`; non-cancellable, partial output policy, durable user action, drain-only. | ZIP/write bound and atomic publication remain PR-B questions. |
+| Pipeline parent and child steps | REGISTERED | One `pipeline` parent for the sequence; child `TaskSession`s are projections; cancel-and-drain; no ownership gap between steps. | Each blocking step's cancellation bound is not proven. |
+| Standalone JAR extraction | REGISTERED | `extractor`; cooperative cancel; cancel-and-drain; extraction cancel flag is connected to handle. | ZIP open/read calls have no hard blocking bound. |
+| Extractor preview | REGISTERED | `extractor-preview`; cancel callback sets preview cancel state; cancel-and-drain. | Same archive blocking limits as extraction. |
+| Pipeline extractor preview | REGISTERED | `pipeline-extract-preview`; cancel event callback; cancel-and-drain. | Same archive blocking limits as extraction. |
+| Bundler | REGISTERED | `bundler`; non-cancellable, partial output policy, durable user action, drain-only. | A single ZIP write/compression call is not interruptible; output is published by replace after validation. |
 | QC / UntranslatedChecker | REGISTERED | `qc`; non-cancellable, drain-only; worker and final UI batch remain owner-bound. | Service-level blocking bound is not proven here. |
 | Cache view operations / query / index rebuild | REGISTERED | `cache-manager`, `cache-query`, `cache-index-rebuild`; non-cancellable, drain-only; saves are durable user actions, reload/index work recomputable. | Global JSON mirror executor is separately deferred below. |
 | Rules load / validation / save | REGISTERED | `rules`; validation and the requested durable save share one `rules-save` operation with drain-only shutdown. | Save currently uses direct text write, not atomic replace. |
-| Lookup single / batch | REGISTERED | `lookup`; non-cancellable, drain-only. | Provider/network timeout remains PR-B. |
-| Translation workers (LM, FTB, KubeJS, MD) | REGISTERED | Reserve before start; sessions bind to owner; cancel-and-drain. | Provider and filesystem blocking bounds are PR-B. |
-| Standalone language merge | REGISTERED | `merge`; reserve before session/service start; cancel-and-drain. | Per-call latency bounds remain PR-B. |
-| IconPreview load / scan / detail / icon cache | REGISTERED | `icon-preview-load`, `icon-preview-detail`, `icon-preview-cache`; boundary-only cancel, ephemeral output, cancel-and-drain. Nested icon/index executors are contained by the owner operation. | An individual ZIP/PIL/filesystem call may block beyond a checkpoint; PR-B. |
+| Lookup single / batch | REGISTERED | `lookup`; non-cancellable, drain-only. | Provider/network calls have no strict wall-clock bound. |
+| Translation workers (LM, FTB, KubeJS, MD) | REGISTERED | Reserve before start; sessions bind to owner; cancel-and-drain. | Provider and filesystem calls have no strict wall-clock bound. |
+| Standalone language merge | REGISTERED | `merge`; reserve before session/service start; cancel-and-drain. | Individual calls have no strict latency bound. |
+| IconPreview load / scan / detail / icon cache | REGISTERED | `icon-preview-load`, `icon-preview-detail`, `icon-preview-cache`; boundary-only cancel, ephemeral output, cancel-and-drain. Nested icon/index executors are contained by the owner operation. | An individual ZIP/PIL/filesystem call may block beyond a checkpoint. |
 | IconPreview Save | REGISTERED | `icon-preview-save`; non-cancellable, partial-commit, durable user action, drain-only. | `Path.write_text` is not atomic; explicit remaining risk until separately fixed. |
 | Dashboard reload | REGISTERED | `dashboard`; non-cancellable, drain-only, maintenance presentation. Its own registry lifecycle is excluded from user task notifications; concurrent refresh requests collapse into a dirty signal and the worker rereads the latest state before becoming idle. | The data loaders have no measured wall-clock bound; registry ownership/drain remains authoritative. |
-| ModDB warm stats | REGISTERED | `moddb-warm-stats`; non-cancellable, drain-only, maintenance presentation. The worker owns a separate writable `TranslationDB` connection, skips priority synchronization from its possibly stale launch snapshot, warms derived stats, and closes its connection in `finally`. | Individual SQLite/filesystem calls have no hard wall-clock bound; registry ownership/drain remains authoritative. Event-controlled reload/priority-race tests cover connection isolation and prevent stale priority rollback. |
-| ModDB scan / translation / old-AI retranslation | REGISTERED | `moddb-scan`, `moddb-translate`, `moddb-retranslate`; retranslation is page-bound, partial-commit, durable user action, cancel-and-drain. | SQLite transaction and provider-call bounds remain PR-B. |
+| ModDB derived-stats warm-up | OWNED BY PARENT (not a separate operation) | `warm_stats_quietly()` runs at the end of the `moddb-scan`, `moddb-translate` and `moddb-retranslate` workers on the worker's own connection, before it closes; failures are logged at debug level and do not change the task result. | Bounded only by the owning operation; no separate wall-clock bound. |
+| ModDB scan / translation / old-AI retranslation | REGISTERED | `moddb-scan`, `moddb-translate`, `moddb-retranslate`; retranslation is page-bound, partial-commit, durable user action, cancel-and-drain. | SQLite transactions and provider calls have no strict wall-clock bound. |
 | ModDB old-AI retranslation preview | REGISTERED | `moddb-retranslate-preview`; non-cancellable, ephemeral, recomputable, drain-only; worker opens its own read-only `TranslationDB` connection and closes it before publishing; result is applied on the UI loop only if its scope generation and database identity still match. SQL VM execution has a 60-second progress-handler deadline; SQLite lock waiting is capped at 5 seconds. | This is not a strict wall-clock bound for filesystem/OS stalls or Python work between SQLite calls. Such work stays owned and drain-only; the UI reports a timeout as failure. |
 | Startup search-index rebuild | REGISTERED | `startup-index`; non-cancellable, recomputable, drain-only, maintenance presentation; main passes AppShell's registry before launch. | No dedicated real-data duration bound; drain policy intentionally waits. |
-| Cache-root reload | REGISTERED | `cache-root-reload`; non-cancellable, drain-only, maintenance presentation; AppShell injects the registry launcher. Busy checks use authoritative Registry membership, not TaskManager visibility. | Service I/O bound remains PR-B. |
-| Resume prompt input check | REGISTERED | `resume-prompt`; non-cancellable, drain-only, maintenance presentation; stale UI result is discarded by page lifecycle. | Filesystem read bound remains PR-B. |
+| Cache-root reload | REGISTERED | `cache-root-reload`; non-cancellable, drain-only, maintenance presentation; AppShell injects the registry launcher. Busy checks use authoritative Registry membership, not TaskManager visibility. | Service I/O has no strict wall-clock bound. |
+| Resume prompt input check | REGISTERED | `resume-prompt`; non-cancellable, drain-only, maintenance presentation; stale UI result is discarded by page lifecycle. | Filesystem reads have no strict wall-clock bound. |
 | Cache JSON history mirror executor | TESTED_EXCEPTION (derived mirror only) | `history_append_event()` synchronously appends the authoritative JSONL event and updates the in-memory index before returning; the pretty JSON file is a serial, process-global projection. `history_load_recent()` reads JSONL, never the pretty mirror. `history_flush()` drains the projection at app close. | Pretty-JSON visibility is intentionally eventual and best-effort during normal operation; an external consumer that requires the projection to be current must call `history_flush()`. A deterministic test blocks the mirror and proves the committed JSONL history remains immediately readable. |
 
 Short Flet tasks that only pick files, focus controls, or marshal an already
@@ -133,15 +131,14 @@ paths; the mounted application injects the registry.
 - `docs/WORKER_THREAD_AUDIT.md` and
   `tests/test_worker_thread_inventory.py` enumerate remaining raw Thread call
   sites; production owners use Registry launchers.
-- PR-B cancellation checkpoints, pending-work limits, and per-call blocking
+- Cancellation checkpoints, pending-work limits, and per-call blocking
   dispositions are recorded below; remaining non-interruptible calls stay
   owned and must not be reported terminal while still running.
 
-## PR-B: cooperative cancellation and resource boundaries
+## Cooperative cancellation and resource boundaries
 
-The current PR-B branch implements the first cancellation/resource-boundary
-slice; this section records what the code does and what it deliberately does
-not promise.
+This section records what the code does and what it deliberately does not
+promise.
 
 - `cancel_scope()` stores its checker in a `ContextVar`, so the operation's
   cancellation token follows `ContextThreadPoolExecutor` submissions and
@@ -152,7 +149,7 @@ not promise.
   collected work. On cancellation or early exit it stops consuming inputs and
   cancels pending futures; the owning executor context joins work that already
   started before the parent operation can return.
-- Bounded windows now cover language merge (folder and ZIP), JAR scan and
+- Bounded windows cover language merge (folder and ZIP), JAR scan and
   extraction, extractor preview, translation DB scan, LM/FTB file scans and
   translation, FTB Quests/KubeJS counting, cache-shard load, IconPreview cache
   extraction, and icon-index generation. Tests lock the queue window and
@@ -163,7 +160,7 @@ not promise.
   IconPreview async owner installs its cancellation scope across
   `asyncio.to_thread`, so a generation invalidation or owner cancel reaches
   nested worker checkpoints. The extractor pre-scan waits for and joins its
-  child thread on cancellation; cancelled preview UI no longer reports `100%`
+  child thread on cancellation; cancelled preview UI does not report `100%`
   / “preview complete”.
 - Completed output units are retained according to their existing partial
   commit policy. Cancellation is not rollback: an already-published file or

@@ -17,6 +17,7 @@
   - 多把 API Key 輪替；額度用盡（RPD）或無權限（403）的 Key 會暫時冷卻，不再被重複請求
   - 依 token 預算切批，避免批次被截斷後才縮小而浪費額度
   - 依錯誤類型自動縮批、重試、換 Key、節流
+- **Mod 翻譯資料庫**：分版本的 SQLite 翻譯記憶庫；掃描 JAR／資源包匯入、條目校對、批次機翻、AI 修復既有譯文與逐筆審查、批次取代
 - **快取管理**：翻譯快取分片儲存、全文搜尋（SQLite FTS5）、版本歷史
 - **品管檢查**：偵測未翻譯條目、簡繁不一致、英文殘留
 - **學名查詢**：生物學名的 Wikipedia 查詢與快取
@@ -48,7 +49,8 @@
 | | 任務翻譯 | FTB Quests / KubeJS / Markdown 翻譯 | `Ctrl+6` |
 | 品管與校對 | QC 檢驗 | 未翻譯、簡繁不一致、英文殘留 | `Ctrl+7` |
 | | 翻譯校對 | 圖示預覽與逐項校對 | `Ctrl+8` |
-| 資料庫 | 快取管理 | 快取總覽、查詢、分片 | `Ctrl+9` |
+| 資料庫 | Mod 資料庫 | 總覽、掃描匯入、條目校對、批次機翻與 AI 修復 | — |
+| | 快取管理 | 快取總覽、查詢、分片 | `Ctrl+9` |
 | | 替換規則 | 簡繁替換規則（支援純文字與正規表示式） | `Ctrl+0` |
 | | 學名查詢 | 生物學名查詢 | — |
 | 輸出 | 資源包打包 | 產出資源包 ZIP | — |
@@ -82,8 +84,8 @@ uv run python main.py
 
 啟動後會開啟桌面 GUI。
 
-> ⚠️ 目前關閉視窗會中斷進行中的任務，尚未寫入磁碟的快取與進度可能遺失。
-> 長時間任務請保持視窗開啟。相關改善追蹤於 [#126](https://github.com/jlin53882/Minecraft-translate/issues/126)、[#127](https://github.com/jlin53882/Minecraft-translate/issues/127)。
+> ⚠️ 任務執行中關閉視窗會先跳出確認；確定關閉會中斷任務，尚未落盤的資料可能遺失。
+> 被中斷的機器翻譯在下次啟動時會詢問是否續跑（不會自動開始），行為見 [`docs/RESUME_CAPABILITY.md`](docs/RESUME_CAPABILITY.md)。
 
 ## 設定說明
 
@@ -96,6 +98,7 @@ uv run python main.py
 | `translator` | 輸出資料夾、快取目錄、平行處理 worker 數、替換規則檔路徑 |
 | `ftb_translator` | FTB 任務翻譯輸出資料夾 |
 | `species_cache` | 生物學名快取（Wikipedia 查詢） |
+| `translation_db` | Mod 翻譯資料庫路徑、使用時機、版本與來源優先序 |
 | `lm_translator` | Gemini API Keys、模型清單、溫度、批次大小、token 預算、Key 冷卻、System Prompt |
 | `output_bundler` | 最終 ZIP 打包名稱 |
 | `lang_merger` | 待翻譯與隔離資料夾命名、簡中處理選項 |
@@ -105,11 +108,11 @@ uv run python main.py
 
 - **API Key**：填在 `lm_translator.keys`（陣列，可多把輪替）。設定頁的 Key 欄位預設遮蔽。
 - **模型**：`lm_translator.models` 中把要使用的模型設為 `enabled: true`。
-- **token 預算與 Key 冷卻**（`token_budget_*`、`max_output_tokens`、`key_failure_cooldown_sec` 等）：**目前設定頁尚未提供欄位**，需要直接編輯 `config.json`；說明見 [`docs/LM_TOKEN_BUDGET.md`](docs/LM_TOKEN_BUDGET.md)、[`docs/LM_KEY_HEALTH.md`](docs/LM_KEY_HEALTH.md)（補齊欄位追蹤於 [#134](https://github.com/jlin53882/Minecraft-translate/issues/134)）。
+- **token 預算與 Key 冷卻**：設定頁的「Token 預算」與「批次與限制」分類可直接編輯；說明見 [`docs/LM_TOKEN_BUDGET.md`](docs/LM_TOKEN_BUDGET.md)、[`docs/LM_KEY_HEALTH.md`](docs/LM_KEY_HEALTH.md)。
 - **何時生效**：多數設定在「下一次任務」才套用，少數需要重新啟動；逐項說明見 [`docs/CONFIG_APPLY_TIMING.md`](docs/CONFIG_APPLY_TIMING.md)。
 
 > ⚠️ `config.json` 含 API Key，**以明文儲存**，已加入 `.gitignore`，請勿上傳或分享給他人。
-> 關於 Key 的儲存與日誌遮蔽，審查項目追蹤於 [#125](https://github.com/jlin53882/Minecraft-translate/issues/125)。
+> Key 在日誌與錯誤訊息中的遮蔽規則見 [`docs/SECURITY_ERROR_HANDLING_AUDIT.md`](docs/SECURITY_ERROR_HANDLING_AUDIT.md)。
 
 ## 架構概覽
 
@@ -129,7 +132,7 @@ translation_tool/       核心翻譯引擎（不含 UI）
   checkers/             品管檢查器
   utils/                設定管理、快取（SQLite FTS5）、文字處理…
 tests/                  單元與整合測試
-docs/                   架構、設計與計畫文件
+docs/                   架構、設計與維護文件
 ```
 
 設計重點：
@@ -154,7 +157,7 @@ uv run ruff format --check <變更的檔案>
 
 - CI（[`.github/workflows/ci.yml`](.github/workflows/ci.yml)）：`test` 跑完整測試；`lint` 只對 PR 變更的 Python 檔跑 `ruff check` 與 `ruff format --check`。
 - 新增或修改的程式請搭配測試；翻譯引擎的行為變更需有「修正前會失敗」的回歸測試。
-- 目前尚無 ruff 設定檔與型別檢查（追蹤於 [#128](https://github.com/jlin53882/Minecraft-translate/issues/128)）。
+- ruff 規則設定在 `pyproject.toml` 的 `[tool.ruff]`；目前沒有型別檢查。
 
 Windows 若遇到 `WinError 5`（使用者目錄快取/暫存權限），建議改用 repo 內路徑：
 
@@ -167,29 +170,24 @@ uv run pytest -q --basetemp=.pytest-tmp\full -o cache_dir=.pytest-cache\full
 
 ## 已知限制與後續規劃
 
-後續工作都以 GitHub issue 追蹤，主要方向：
-
-- **穩定性**：設定檔 atomic write（[#129](https://github.com/jlin53882/Minecraft-translate/issues/129)）、設定存檔後的套用時機（[#117](https://github.com/jlin53882/Minecraft-translate/issues/117)）、`replace_rules_path` 讀取位置的 bug（[#118](https://github.com/jlin53882/Minecraft-translate/issues/118)）。
-- **任務體驗**：工作台統計即時刷新與關閉視窗確認（[#126](https://github.com/jlin53882/Minecraft-translate/issues/126)）、關閉視窗後繼續執行的架構決策（[#127](https://github.com/jlin53882/Minecraft-translate/issues/127)）。
-- **品質**：視覺與行為驗收（[#123](https://github.com/jlin53882/Minecraft-translate/issues/123)）、效能 baseline（[#124](https://github.com/jlin53882/Minecraft-translate/issues/124)）、安全審查（[#125](https://github.com/jlin53882/Minecraft-translate/issues/125)）。
-- **重構**：巨型 View 與引擎函式拆分（[#114](https://github.com/jlin53882/Minecraft-translate/issues/114)、[#115](https://github.com/jlin53882/Minecraft-translate/issues/115)）。
-
-完整清單請看 [Issues](https://github.com/jlin53882/Minecraft-translate/issues)。
+後續工作以 [GitHub Issues](https://github.com/jlin53882/Minecraft-translate/issues) 追蹤；Windows 才能驗證的項目見 [`docs/WINDOWS_VERIFICATION.md`](docs/WINDOWS_VERIFICATION.md)。
 
 ## 文件索引
 
 | 文件 | 內容 |
 |---|---|
+| [`docs/page_flows/`](docs/page_flows/README.md) | 每個頁面的處理流程圖（操作 → 背景工作 → 結果回到畫面） |
+| `docs/*_VIEW_ARCHITECTURE.md` | 各頁面的元件、呼叫鏈與 service 層關係 |
 | [`docs/UI_DESIGN_SYSTEM.md`](docs/UI_DESIGN_SYSTEM.md) | 設計 token、UI kit、外殼、新增頁面步驟 |
 | [`docs/PROJECT_STRUCTURE.md`](docs/PROJECT_STRUCTURE.md)、[`docs/PROJECT_INDEX.md`](docs/PROJECT_INDEX.md) | 專案結構與索引 |
+| [`docs/OPERATION_LIFECYCLE_CONTRACT.md`](docs/OPERATION_LIFECYCLE_CONTRACT.md)、[`docs/WORKER_THREAD_AUDIT.md`](docs/WORKER_THREAD_AUDIT.md) | 長任務生命週期、worker thread 與 UI 更新契約 |
+| [`docs/MOD_TRANSLATION_DB.md`](docs/MOD_TRANSLATION_DB.md) | Mod 翻譯資料庫 |
 | [`docs/LM_TOKEN_BUDGET.md`](docs/LM_TOKEN_BUDGET.md)、[`docs/LM_KEY_HEALTH.md`](docs/LM_KEY_HEALTH.md) | token 預算切批、API Key 健康度 |
-| [`docs/CONFIG_APPLY_TIMING.md`](docs/CONFIG_APPLY_TIMING.md) | 設定「何時生效」逐項盤點 |
-| [`docs/CACHE_SYSTEM.md`](docs/CACHE_SYSTEM.md)、[`docs/cache_search_optimization.md`](docs/cache_search_optimization.md) | 快取系統與搜尋索引 |
-| [`docs/JAR_PIPELINE.md`](docs/JAR_PIPELINE.md)、[`docs/TRANSLATION_WORKFLOW.md`](docs/TRANSLATION_WORKFLOW.md) | JAR 提取與翻譯流程 |
-| [`docs/REFACTOR_PLAN.md`](docs/REFACTOR_PLAN.md)、[`docs/REFACTOR_AUDIT.md`](docs/REFACTOR_AUDIT.md) | 重構計畫與審查 |
-| [`docs/TEST_STRATEGY.md`](docs/TEST_STRATEGY.md)、[`docs/PR_WORKFLOW.md`](docs/PR_WORKFLOW.md)、[`docs/RELEASE_WORKFLOW.md`](docs/RELEASE_WORKFLOW.md) | 測試策略、PR 與發佈流程 |
-
-> 各頁面的 `*_VIEW_ARCHITECTURE.md` 寫於 UI 重新設計之前，部分內容可能已過期（追蹤於 [#120](https://github.com/jlin53882/Minecraft-translate/issues/120)）。
+| [`docs/CONFIG_APPLY_TIMING.md`](docs/CONFIG_APPLY_TIMING.md)、[`docs/CONFIG_SETTINGS_SCHEMA.md`](docs/CONFIG_SETTINGS_SCHEMA.md) | 設定「何時生效」與設定頁 schema |
+| [`docs/CACHE_SYSTEM.md`](docs/CACHE_SYSTEM.md) | 快取系統與搜尋索引 |
+| [`docs/JAR_PIPELINE.md`](docs/JAR_PIPELINE.md)、[`docs/TRANSLATION_WORKFLOW.md`](docs/TRANSLATION_WORKFLOW.md)、[`docs/RESUME_CAPABILITY.md`](docs/RESUME_CAPABILITY.md) | JAR 提取、翻譯流程與重開後續跑 |
+| [`docs/TEST_STRATEGY.md`](docs/TEST_STRATEGY.md)、[`docs/CROSS_CUTTING_REVIEW_CHECKLIST.md`](docs/CROSS_CUTTING_REVIEW_CHECKLIST.md) | 測試策略與審查清單 |
+| [`docs/GH_WORKFLOW.md`](docs/GH_WORKFLOW.md)、[`docs/RELEASE_WORKFLOW.md`](docs/RELEASE_WORKFLOW.md)、[`RELEASE_STRATEGY.md`](RELEASE_STRATEGY.md) | GitHub、發佈流程與版本策略 |
 
 ## 授權
 

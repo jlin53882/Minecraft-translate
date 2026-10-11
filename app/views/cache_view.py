@@ -30,7 +30,6 @@ from app.tasks.operation_registry import (
 from app.ui import kit
 
 # UI 共用元件：總覽區使用新 UI kit。
-from app.ui.debounce import Debouncer
 from app.ui.design import C
 from app.ui.snack import show_snack
 from app.views.cache_manager.cache_view_history import CacheHistoryMixin
@@ -76,16 +75,6 @@ class CacheView(
         self._all_logs: list[str] = []
         self._page = page
         super().__init__(expand=True, spacing=10)
-
-        # -------------------- 效能優化：髒標記機制 --------------------
-        # PR5-7 整合：減少 update() 呼叫次數，避免 UI 卡顿
-        self._dirty_flags = {
-            "overview": False,
-            "query": False,
-            "shard": False,
-            "logs": False,
-        }
-        self._update_debouncer = Debouncer(lambda: self.page, 0.1)
 
         # -------------------- Global state --------------------
         self.ui_busy = False
@@ -161,64 +150,12 @@ class CacheView(
 
         self._build_query_widgets()
 
-    # =========================================================
-    # 效能優化：髒標記機制（PR5-7 整合）
-    # =========================================================
-    def _mark_dirty(self, area: str):
-        """標記某區域需要更新"""
-        if area not in self._dirty_flags:
-            return
-        self._dirty_flags[area] = True
-        self._schedule_update()
-
-    def _schedule_update(self):
-        """排程更新（debounce 100ms）"""
-        # 防呆：確保已在 page 上
-        if not hasattr(self, "page") or self.page is None:
-            return
-
-        self._update_debouncer.call(self._do_update)
-
-    def _do_update(self):
-        """批次更新所有髒區域"""
-        # 防呆：確保已在 page 上
-        if not hasattr(self, "page") or self.page is None:
-            return
-        if not any(self._dirty_flags.values()):
-            return
-        try:
-            # 根據髒標記決定要更新的區域
-            if self._dirty_flags.get("overview"):
-                pass  # overview 由背景任務觸發更新
-            if self._dirty_flags.get("query"):
-                pass  # query 由背景任務觸發更新
-            if self._dirty_flags.get("shard"):
-                pass  # shard 由背景任務觸發更新
-            if self._dirty_flags.get("logs"):
-                pass  # logs 由背景任務觸發更新
-
-            self.update()
-            for k in self._dirty_flags:
-                self._dirty_flags[k] = False
-        except (AttributeError, AssertionError):
-            # 控件尚未添加到 page，略過
-            pass
-        except Exception as e:  # noqa: BLE001
-            log_error(f"[CacheView] 更新失敗: {e!r}")
-
     def _batch_refresh(self):
         """批量刷新所有區域（用於初始載入）"""
         try:
             self.update()
         except Exception as e:  # noqa: BLE001
             log_error(f"[CacheView] 批量刷新失敗: {e!r}")
-
-    # =========================================================
-    # Lifecycle
-    # =========================================================
-    def will_unmount(self):
-        """換頁／關閉：取消尚未執行的 debounce 更新（idempotent）。"""
-        self._update_debouncer.cancel()
 
     def did_mount(self):
         """元件載入完成後初始化資料與 UI。
@@ -298,7 +235,6 @@ class CacheView(
             self._render_query_results()
             self._render_query_detail()
             self._refresh_disabled_state()
-            # PR5-7: 使用批量刷新優化初始載入
             self._batch_refresh()
         except Exception as ex:  # noqa: BLE001
             log_error(f"CacheView did_mount failed: {ex!r}")
@@ -478,18 +414,6 @@ class CacheView(
                 self.ui_busy
                 or getattr(self, "shard_history_selected_event", None) is None
             )
-
-    # 與舊測試相容：集中提交 UI 更新
-    def commit_ui(self, controls=None):
-        """批次更新多個 UI 控制項"""
-        try:
-            for c in controls or []:
-                if hasattr(c, "update"):
-                    c.update()
-            if hasattr(self, "page") and self.page:
-                self.update()
-        except Exception as ex:  # noqa: BLE001
-            self._append_log(f"[WARN] UI refresh 異常: {ex}")
 
     def _append_log(self, text: str):
         """新增日誌訊息並根據等級記錄"""

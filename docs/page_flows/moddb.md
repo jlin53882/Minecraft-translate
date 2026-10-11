@@ -1,0 +1,176 @@
+# Mod 資料庫頁（`moddb`）處理流程
+
+> 入口：`app/views/moddb_view.py` 的 `ModDbView`。詳細說明見 [`MOD_TRANSLATION_DB.md`](../MOD_TRANSLATION_DB.md)。
+
+## 職責
+
+- `ModDbView`（`app/views/moddb_view.py`）持有唯一的資料庫連線 `_db`、四個頁籤的顯示切換，以及跨頁籤的快照失效與背景刷新。
+- 四個頁籤位於 `app/views/moddb/`：`OverviewPanel`（`overview_panel.py`）、`EntriesPanel`（`entries_panel.py`）、`ScanPanel`（`scan_panel.py`）、`TranslatePanel`（`translate_panel.py`）。
+- 批次取代對話框 `BatchReplaceDialog`（`batch_replace_dialog.py`）由條目校對頁開啟；AI 修復逐筆審查 `RepairReviewer`（`repair_reviewer.py`）由批次機翻的結果檢視開啟。
+- 實際寫入與掃描邏輯在 `app/services_impl/` 下的 moddb 系列模組（例如 `moddb_service.py`、`moddb_translate_service.py`、`moddb_retranslate_service.py`），資料庫方法在 `translation_tool/translation_db/repository.py`。
+
+## 主要流程
+
+### 頁籤切換與背景資料載入
+
+切換頁籤時，離開的頁籤會先停止輪詢，已掛載的頁籤以 `visible` 切換而不重建控制項。
+
+```mermaid
+flowchart TD
+    A["使用者點選頁籤（kit.Segmented）"] --> B["ModDbView.show_tab"]
+    B --> C["離開的面板呼叫 will_unmount 停止輪詢"]
+    C --> D["首次進入才掛入 _tab_stack，其餘以 visible 切換"]
+    D --> E{"目前是總覽？"}
+    E -- 是 --> F["總覽需要刷新時 _request_overview_refresh"]
+    E -- 否 --> G["_activate_panel"]
+    G --> H{"有暫存的背景結果？"}
+    H -- 是 --> I["直接 _apply_panel_refresh 套用"]
+    H -- 否 --> J{"需要刷新？"}
+    J -- 是 --> K["_request_panel_refresh 背景載入"]
+    K --> L["_panel_refresh_request 收集篩選與頁碼"]
+    L --> M["launch_page_operation 執行 load_panel_snapshot（唯讀連線）"]
+    M --> N["run_task 排回 UI：_apply_panel_refresh"]
+    N --> O{"generation、設定簽章、data_revision 是否仍相同？"}
+    O -- 否 --> P["丟棄或重新請求"]
+    O -- 是 --> Q["panel.apply_refresh_snapshot 更新畫面"]
+    I --> Q
+```
+
+### 掃描匯入
+
+```mermaid
+flowchart TD
+    A["按「開始掃描」或「預覽」（dry_run）"] --> B["ScanPanel.start_clicked 檢查版本與來源路徑"]
+    B --> C["build_options 建立 ScanOptions"]
+    C --> D["tag_session 建立 TaskSession 並顯示執行狀態"]
+    D --> E["launch_page_operation 執行 run_moddb_scan_service"]
+    E --> F["open_database（預覽時 create=False）"]
+    F --> G["scan_folder_generator 逐步產生 log、progress、report"]
+    G --> H["_poll 每 0.2 秒呼叫 sync_from_session"]
+    H --> I{"狀態為 DONE 或 ERROR？"}
+    I -- 否 --> H
+    I -- 是 --> J["_apply_summary 更新統計卡並刷新版本清單"]
+    J --> K{"非預覽且完成？"}
+    K -- 是 --> L["ModDbView._on_scan_finished：必要時 reload_db，失效快照並刷新目前頁"]
+```
+
+取消掃描時 `cancel_clicked` 只呼叫 `session.request_cancel()`，等待目前處理中的檔案停止。
+
+### 條目校對與儲存
+
+```mermaid
+flowchart TD
+    A["選取條目（select → _show_editor）"] --> B["編輯框輸入譯文（pending_text）"]
+    B --> C["按「儲存」→ EntriesPanel._save"]
+    C --> D["捕捉 entry、db、text、_flagged_batch 與同步旗標"]
+    D --> E["launch_page_operation 執行 db.save_manual"]
+    E --> F["run_task 排回 _apply_save_result"]
+    F --> G{"有錯誤？"}
+    G -- 是 --> H["依 validation、database、unexpected 分類顯示提示"]
+    G -- 否 --> I{"self.db() 仍是同一個物件？"}
+    I -- 是 --> J["_resolve_flagged：batch 與條目編號皆相符才移出 AI 異常清單"]
+    J --> K["保留捲動重載清單，並通知 ModDbView._on_entries_changed"]
+    I -- 否 --> L["僅顯示結果，不改動畫面狀態"]
+```
+
+人工審核走 `ReviewScopeController`（`review_scope_dialog.py`）：`confirm` 先呼叫 `preview_manual_review` 顯示影響範圍，確定後 `execute` 呼叫 `review_manual`。還原單筆或整批分別由 `_revert`（`db.revert`）與 `_revert_batch`（`db.revert_batch_replace`）處理。
+
+### 批次機翻與異常清單
+
+```mermaid
+flowchart TD
+    A["按「開始機翻」或「預覽」→ TranslatePanel.start_clicked"] --> B["build_options 建立 TranslateOptions"]
+    B --> C["launch_page_operation 執行 run_moddb_translate_service"]
+    C --> D["open_database(create=False) 後 _select_rows"]
+    D --> E{"reuse_other_versions 且非預覽？"}
+    E -- 是 --> F["reuse_from_other_versions 沿用譯文（不呼叫 AI）"]
+    E -- 否 --> G["untranslated_entries 取得待翻列"]
+    F --> G
+    G --> H{"預覽或無待翻列？"}
+    H -- 是 --> I["寫入摘要後結束"]
+    H -- 否 --> J["_translate_rows 分批送 AI"]
+    J --> K{"token_issues 特殊字元是否一致？"}
+    K -- 是 --> L["放入 buffer，_flush_buffer 呼叫 db.write_back"]
+    K -- 否 --> M["記入 report.flagged_entries，不寫入"]
+    M --> N["結果檢視的異常按鈕 → ModDbView.open_flagged"]
+    N --> O["EntriesPanel.show_flagged：只列異常條目並預填 AI 譯文"]
+```
+
+### AI 修復既有譯文與逐筆審查
+
+修復有兩種模式：`quality_mismatch`（來源譯文特殊字元修復）與 `same_source_ai`（舊 AI 同原文重翻）。先預覽、再確認、最後才送 AI。
+
+```mermaid
+flowchart TD
+    A["批次機翻頁籤選擇修復模式，按「預覽候選譯文」"] --> B["retranslation_controller.preview"]
+    B --> C["背景 _query_preview：preview_same_source_ai_retranslation_from_path（不呼叫 AI）"]
+    C --> D["_schedule_result 排回 UI：apply_preview_result"]
+    D --> E{"generation 與資料庫識別仍相同？"}
+    E -- 否 --> F["丟棄舊預覽"]
+    E -- 是 --> G["refresh_preview_cards 分頁顯示候選"]
+    G --> H["按「開始修復」→ retranslation_controller.confirm 顯示確認框"]
+    H --> I["TranslatePanel._start_retranslation 再次比對預覽與資料庫識別"]
+    I --> J["launch_page_operation 執行 run_moddb_retranslate_service"]
+    J --> K["quality_mismatch 時建立 review store run"]
+    K --> L["_translate_snapshot 逐批呼叫 _run_repair_batch（內含 translate_batch_smart）"]
+    L --> M["_finalize_batch_results → _finalize_result 驗證每筆結果"]
+    M --> N{"驗證結果"}
+    N -- 通過 --> O["_replace_candidate_translation（CAS 更新，保留歷史）"]
+    N -- 不一致 --> P["_mark_flagged：保留舊譯文，append_item 寫入審查清單"]
+    N -- 缺漏或格式錯誤 --> Q["_mark_failed：保留舊譯文"]
+    P --> R["摘要 flagged 數，_on_repair_review_changed 更新卡片"]
+    R --> S["結果檢視 → open_repair_reviewer"]
+    S --> T["RepairReviewer 逐筆編輯草稿（_save_draft）"]
+    T --> U{"格式檢查有問題？"}
+    U -- 是 --> V["確認框：仍要套用才繼續"]
+    U -- 否 --> W["_start_apply → run_task → apply_and_record_repair_review（worker thread）"]
+    V --> W
+    W --> X["replace_translation_quality_mismatch 驗證 revision 後寫入"]
+    X --> Y["同組 matching_items 的其他條目一併套用，save_review_state 記錄 applied 或 stale"]
+```
+
+### 批次取代
+
+```mermaid
+flowchart TD
+    A["條目校對按「批次取代」→ open_batch_replace"] --> B{"清單含未寫入草稿？"}
+    B -- 是 --> C["拒絕並提示先離開草稿檢視"]
+    B -- 否 --> D["BatchReplaceDialog.open"]
+    D --> E["輸入尋找與取代文字，選擇範圍與是否同步其他版本"]
+    E --> F["_start_preview → db.preview_batch_replace（背景 TaskSession）"]
+    F --> G["_sync_worker 讀取進度，完成後 _finish_preview 顯示 plan"]
+    G --> H{"含品質惡化項目？"}
+    H -- 是 --> I["必須勾選品質警告確認"]
+    H -- 否 --> J["_open_final_confirmation"]
+    I --> J
+    J --> K["勾選最終確認後 _confirm_apply"]
+    K --> L["db.execute_batch_replace（交易內重新檢查快照）"]
+    L --> M["_finish_apply → EntriesPanel._after_batch_replace 重載並通知總覽"]
+```
+
+跳過原因清單由 `_start_skipped_load` 以同樣的背景作業機制載入。
+
+## 背景任務與 UI 更新
+
+- 資料庫的讀取與寫入主要透過 `launch_page_operation`（`app/tasks/operation_registry.py`）執行；批次取代改由 `launch_batch_replace_job` 啟動。只有缺少 `run_task` 的精簡頁面（例如測試用頁面）才會在當前執行緒直接套用結果。
+- 結果一律以 `page.run_task` 排回 UI 執行緒，worker 本身不操作 Flet 控制項。
+- 掃描與機翻以 `_poll` 協程每 0.2 秒讀取 `TaskSession.snapshot()`；離開頁籤時 `will_unmount` 停止輪詢，切回來時 `resume` 接續。
+- 批次取代對話框以 `_sync_worker` 輪詢，並以 `generation` 判斷結果是否仍有效。
+- `ModDbView._safe_update` 只更新 `_tab_stack` 子樹，避免每次切換都重送整個頁面。
+
+## 狀態與資料
+
+- `ModDbView` 狀態：`_db`、`_db_loaded`、`_db_sig`（資料庫路徑與來源優先序簽章）、`_data_revision`（資料變動計數）、`_panel_refresh_generation`、`_panel_refresh_needed`、`_pending_panel_results`。
+- 背景載入使用唯讀連線（`open_database(create=False, readonly=True)`），並在套用前比對 generation、簽章與 `data_revision`。
+- `EntriesPanel` 的 AI 異常清單狀態：`entry_ids`、`drafts`、`_flagged_batch`。每次 `_set_flagged` 會把 `_flagged_batch` 加一。
+- 修復審查草稿存放在資料庫旁的 sidecar 檔（`moddb_repair_review_store.store_path`，後綴 `.repair-review.sqlite3`）。
+- 譯文變更的歷史紀錄存於資料庫 `history` 表，還原時依 `history_id`（單筆）或 `batch_id`（整批）查詢（見 `translation_tool/translation_db/repository.py` 的 `revert` 與 `revert_batch_replace`）。
+
+## 錯誤處理
+
+- 開啟資料庫失敗時，服務層回傳 `database_problem()` 的說明並呼叫 `session.set_error()`；總覽則顯示錯誤並保留頁面。
+- 手動儲存：`ValueError` 顯示驗證訊息；`sqlite3.Error` 提示資料庫可能被鎖定；其他例外記錄後台 log。
+- 機翻：單一批次 `token_issues` 不一致的譯文不寫入，只記錄；寫入失敗最多重試 `DB_FLUSH_RETRIES` 次，仍失敗則停止後續翻譯。連續 `ABORT_AFTER_FAILURES` 筆未成功會中止，通常代表 API 金鑰或模型設定有問題。
+- 修復：寫入時以 compare-and-set 比對舊譯文與 revision，資料已變動時記為 `cas_changed` 並跳過；審查套用時若版本已變動，該筆記為 `stale` 且草稿保留。
+- 取消：掃描、機翻與修復都以 `session.request_cancel()` 請求取消，已提交的批次保留。
+- 輪詢或畫面更新失敗時 `_abort_polling` 會恢復按鈕並顯示「畫面更新失敗」，不會永久停在執行中。

@@ -254,17 +254,6 @@ class LogView(ft.Container):
     def add_warning(self, text: str) -> None:
         self.add(text, level="warning")
 
-    def add_info(self, text: str) -> None:
-        self.add(text, level="info")
-
-    def add_system(self, text: str) -> None:
-        """新增 system 等級 log。"""
-        self.add(text, level="system")
-
-    def add_debug(self, text: str) -> None:
-        """新增 debug 等級 log。"""
-        self.add(text, level="debug")
-
     def set_tail_lines(self, tail_lines: int) -> None:
         """更新 tail 模式的顯示筆數（設定變更後下次同步即生效）。"""
         if not isinstance(tail_lines, int) or isinstance(tail_lines, bool):

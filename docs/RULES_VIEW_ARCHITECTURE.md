@@ -8,13 +8,16 @@ RulesView 是翻譯前置工具，`replace_rules.json`（From/To 替換對）的
 RulesView（維護替換規則）→ ConfigView（翻譯參數）→ Translation Workflow（執行翻譯）
 ```
 
+流程圖見 [page_flows/rules.md](page_flows/rules.md)。
+
 ## 檔案結構
 
 - `app/views/rules_view.py` — 主視圖（`RulesView`）
-- `app/views/rules/rules_actions.py` — 載入/儲存執行緒與分頁計算等操作
+- `app/views/rules/rules_widgets.py` — `RulesWidgetsMixin`，控制項建立與版面組裝（`_init_*`、`_build_*`）
+- `app/views/rules/rules_actions.py` — 重新載入執行緒、分頁計算與正則錯誤翻譯等操作
 - `app/views/rules/rules_state.py` — `RulesTableState` dataclass（**page_size=50**、current_page、total_pages、rid_seq）
 - `app/views/rules/rules_table.py` — `create_rule_row(view, from_text, to_text, rid, display_no)` 建立 DataRow（`RulesView.create_rule_row` 轉呼叫它）
-- `app/services_impl/config_service.py` — `load_replace_rules()` / `save_replace_rules()`（包裝 `load_rules_core` / `save_rules_core`，路徑 `REPLACE_RULES_PATH`）
+- `app/services_impl/config_service.py` — `load_replace_rules()` / `save_replace_rules()`（委派給 `translation_tool/utils/text_processor.py` 的同名函式，路徑 `REPLACE_RULES_PATH = str(PROJECT_ROOT / "replace_rules.json")`）
 
 ## RulesTable 結構（ft.DataTable）
 
@@ -32,7 +35,7 @@ RulesView（維護替換規則）→ ConfigView（翻譯參數）→ Translation
 
 ## 頁面佈局
 
-`__init__` 先 `_init_controls`（`_init_rules_table_controls` + `_init_rules_sort_and_test_controls`），再組出：`_build_header`（`kit.page_header`，標題「替換規則」、副標「機器翻譯後自動套用的用語統一規則，支援純文字與正規表達式」，右側 `loading_indicator`）、`_build_toolbar`（由左至右：`search_box`（placeholder「搜尋 from / to / 備註 / 分類　(/正則/ 以斜線包起來)」）/ `sort_box`（placeholder「排序方式」）/ 重新載入 / 新增規則 / 全部儲存）、左側 `_build_rules_table_area`（`rules_table` + `_build_footer` 分頁列：`total_count_text`、`prev_button`、`page_jump_field`、`total_pages_text_label`、`next_button`）、右側 `_build_test_panel`（「即時測試」卡：`test_input`（標籤「輸入文字」，placeholder「貼上一段簡體文字，立即看到套用結果」）/ `test_result`（標籤「套用結果」）/ `test_info`；其下為「使用說明」卡）。最後 `_initial_load()` 啟動背景載入。
+`__init__` 先 `_init_controls`（`_init_rules_table_controls` + `_init_rules_sort_and_test_controls`），再組出：`_build_header`（`kit.page_header`，標題「替換規則」、副標「機器翻譯後自動套用的用語統一規則，支援純文字與正規表達式」，右側 `loading_indicator`）、`_build_toolbar`（由左至右：`search_box`（placeholder「搜尋 from / to / 備註 / 分類　（/正則/ 以斜線包起來）」）/ `sort_box`（placeholder「排序方式」）/ 重新載入 / 新增規則 / 全部儲存）、左側 `_build_rules_table_area`（`rules_table` + `_build_footer` 分頁列：`total_count_text`、`prev_button`、`page_jump_field`、`total_pages_text_label`、`next_button`）、右側 `_build_test_panel`（「即時測試」卡：`test_input`（標籤「輸入文字」，placeholder「貼上一段簡體文字，立即看到套用結果」）/ `test_result`（標籤「套用結果」）/ `test_info`；其下為「使用說明」卡）。最後 `_initial_load()` 啟動背景載入。
 
 即時測試（`on_test_change`）以目前尚未儲存的 `all_rules_data`（略過 from 為空或無法編譯者）呼叫 `apply_replace_rules`。
 
@@ -91,29 +94,22 @@ _render_current_page()
 
 ## 儲存流程（save_rules_clicked）
 
-1. 複製 `all_rules_data` 快照，先註冊「規則驗證與儲存」operation，再以同一背景 worker 執行 `_validate_all`（逐條 `validate_rule`）及通過後的寫檔；`_saving` 旗標防止重複觸發
+1. 複製 `all_rules_data` 快照，以 `launch_page_operation` 啟動「規則驗證與儲存」operation（owner `rules-save`，`DurabilityPolicy.USER_ACTION`，`ShutdownPolicy.DRAIN_ONLY`）；背景 worker 依序執行 `_validate_all`（逐條 `validate_rule`，重複檢查透過 `_build_from_index`）及通過後的寫檔；`_saving` 旗標防止重複觸發
 2. 有錯 → snack「第 N 條規則錯誤」並跳到該條所在頁
-3. 通過 → 移除 `_rid`、略過 from 為空的列，由相同 operation 呼叫 `save_replace_rules`
+3. 通過 → 只保留 from / to（移除 `_rid`、略過 from 為空的列），由同一 operation 呼叫 `save_replace_rules(..., raise_on_error=True)`
 
 ## 資料載入/儲存核心（config_service.py）
 
-- `load_replace_rules()` / `save_replace_rules()`：包裝 `load_rules_core` / `save_rules_core`，路徑 `REPLACE_RULES_PATH = PROJECT_ROOT / "replace_rules.json"`
+- `load_replace_rules()` / `save_replace_rules(rules, *, raise_on_error=False)`：委派給 `translation_tool/utils/text_processor.py` 的同名函式，路徑 `REPLACE_RULES_PATH = str(PROJECT_ROOT / "replace_rules.json")`
 - 載入失敗或檔案不存在時回傳空 list（UI 顯示空表格）；載入時固定字串規則依 from 長度由長到短排序，正則規則（from 含 `.?*[]()\\` 任一字元者）排在其後，所以畫面順序可能與檔案順序不同
-- 驗證與持久化寫入由同一個 `rules-save` handle 持有；關閉 admission 後不會在驗證完成與儲存啟動之間丟失使用者的儲存意圖
 - 替換規則最終流向翻譯引擎：`text_processor.load_replace_rules` / `convert_text` / `recursive_translate` 在翻譯時套用
 
 ## 與 lm_config_rules.py 的關係
 
-- RulesView **不直接依賴** `lm_config_rules.py`；後者屬翻譯引擎層（API Key 輪替與提示詞管理）
+- RulesView **不直接依賴** `translation_tool/core/lm_config_rules.py`；後者屬翻譯引擎層（API Key 輪替、健康狀態與可翻譯判斷）
 - 替換規則是**翻譯引擎的輸入資料**，兩者在不同層次
 
 ## 維護注意
 
 1. `_run_on_ui_thread` 用於把背景執行緒結果切回 UI 執行緒（Flet 無內建 thread-safe 更新）。
 2. `delete_row_clicked` / `add_row_clicked` 操作 `all_rules_data` 後需 `_render_current_page()`。
-
-## 檔案結構（拆分後）
-
-- `app/views/rules_view.py`：`RulesView` 主體（載入、搜尋、驗證、儲存、新增／刪除）。
-- `app/views/rules/rules_widgets.py`：`RulesWidgetsMixin`，控制項與版面組裝（`_init_*`、`_build_*`）。
-- `app/views/rules/rules_actions.py`、`rules_state.py`、`rules_table.py`：重新載入與儲存動作、狀態、表格列。

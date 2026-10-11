@@ -1,14 +1,14 @@
-# 寬鬆例外逐項盤點（#135）
+# 寬鬆例外逐項盤點
 
 > 由 `tools/gen_exception_inventory.py` 產生；`tests/test_exception_inventory.py` 檢查整份文件與程式碼逐字一致（不含行號，避免普通修改造成漂移）。
 > 範圍：`app/`、`translation_tool/`、`main.py` 內所有帶 `noqa: BLE001／S110／S112` 的位置。
 > 命令列 QA 工具（`md_extract_qa.py`、`md_inject_qa.py`）的 `print` 為刻意保留，不在此表。
 
-共 **320** 項；其中 **112** 項尚未在程式碼內寫明原因（以「分類」說明處理方式）。
+共 **315** 項；其中 **106** 項尚未在程式碼內寫明原因（以「分類」說明處理方式）。
 
 | 分類 | 數量 | 意義 |
 |---|---|---|
-| 已記錄／回報 | 286 | 例外處理本身有 log、提示、回報錯誤事件或重新丟出；寬鬆捕捉是為了不中斷整批流程 |
+| 已記錄／回報 | 281 | 例外處理本身有 log、提示、回報錯誤事件或重新丟出；寬鬆捕捉是為了不中斷整批流程 |
 | UI／畫面保護 | 18 | UI 層的畫面更新、icon 快取等；失敗只影響顯示，不影響資料 |
 | 盡力而為（靜默） | 16 | 引擎層、只有 `pass`／`continue`／回傳常數；失敗不影響結果（例如進度回報、還原失敗時以原始例外為準） |
 
@@ -73,23 +73,17 @@
 | `app/views/cache_manager/cache_view_query.py:CacheQueryMixin._on_apply_dst` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/views/cache_manager/cache_view_query.py:CacheQueryMixin._on_query_search._search_standalone` | BLE001 | 已記錄／回報 | event loop displays the error |
 | `app/views/cache_manager/cache_view_query.py:CacheQueryMixin._on_query_search.search` | BLE001 | 已記錄／回報 | event loop displays the error |
-| `app/views/cache_manager/cache_view_shard.py:CacheShardMixin._dynamic_shard_list_height` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/views/cache_manager/cache_view_shard.py:CacheShardMixin._dynamic_type_shard_panel_height` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
-| `app/views/cache_manager/cache_view_shard.py:CacheShardMixin._dynamic_shard_key_list_height` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/views/cache_manager/cache_view_shard.py:CacheShardMixin._dynamic_shard_key_panel_width` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/views/cache_manager/cache_view_shard.py:CacheShardMixin._set_shard_workspace_visible` | BLE001/S110 | UI／畫面保護 | （未寫原因；見分類） |
 | `app/views/cache_manager/cache_view_shard.py:CacheShardMixin._on_shard_dst_copy` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
-| `app/views/cache_manager/cache_view_shard_detail.py:CacheShardDetailMixin._dynamic_shard_src_height` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
-| `app/views/cache_manager/cache_view_shard_detail.py:CacheShardDetailMixin._dynamic_shard_dst_height` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/views/cache_manager/cache_view_shard_detail.py:CacheShardDetailMixin._on_shard_dst_apply` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
-| `app/views/cache_view.py:CacheView._do_update` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/views/cache_view.py:CacheView._batch_refresh` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/views/cache_view.py:CacheView.did_mount` | BLE001/S110 | UI／畫面保護 | 尚未完成掛載時略過 |
 | `app/views/cache_view.py:CacheView._fetch_overview` | BLE001 | UI／畫面保護 | 錯誤顯示在 UI |
 | `app/views/cache_view.py:CacheView._finish_mount` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/views/cache_view.py:CacheView._finish_mount` | BLE001/S110 | UI／畫面保護 | （未寫原因；見分類） |
 | `app/views/cache_view.py:CacheView._on_page_resized` | BLE001/S110 | UI／畫面保護 | （未寫原因；見分類） |
-| `app/views/cache_view.py:CacheView.commit_ui` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/views/config/chatgpt_oauth_panel.py:ChatGPTOAuthPanel._start_login` | BLE001 | 已記錄／回報 | interactive OAuth boundary |
 | `app/views/config/chatgpt_oauth_panel.py:ChatGPTOAuthPanel._on_account_selected` | BLE001 | 已記錄／回報 | account switching UI boundary |
 | `app/views/config/chatgpt_oauth_panel.py:ChatGPTOAuthPanel.ensure_models_loaded` | BLE001 | 已記錄／回報 | page lifecycle may already be closing |
@@ -296,6 +290,7 @@
 | `translation_tool/plugins/kubejs/kubejs_tooltip_lmtranslator.py:translate_kubejs_pending_to_zh_tw.on_translated_item` | BLE001 | 已記錄／回報 | 失敗已記錄，不中斷翻譯批次 |
 | `translation_tool/plugins/kubejs/kubejs_tooltip_lmtranslator.py:translate_kubejs_pending_to_zh_tw.on_batch_flushed` | BLE001 | 已記錄／回報 | 失敗已記錄，不中斷翻譯批次 |
 | `translation_tool/plugins/kubejs/kubejs_tooltip_lmtranslator.py:translate_kubejs_pending_to_zh_tw` | BLE001 | 已記錄／回報 | 失敗已記錄，不中斷翻譯批次 |
+| `translation_tool/plugins/md/md_inject_qa.py:main` | BLE001 | 已記錄／回報 | 單一 JSON 損壞時略過該檔，繼續處理其餘檔案 |
 | `translation_tool/plugins/md/md_lmtranslator.py:translate_md_pending` | BLE001 | 已記錄／回報 | 失敗已記錄，不中斷翻譯批次 |
 | `translation_tool/plugins/md/md_lmtranslator.py:translate_md_pending` | BLE001 | 已記錄／回報 | 失敗已記錄，不中斷翻譯批次 |
 | `translation_tool/plugins/md/md_lmtranslator.py:translate_md_pending` | BLE001 | 已記錄／回報 | 失敗已記錄，不中斷翻譯批次 |
