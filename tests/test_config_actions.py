@@ -1339,8 +1339,8 @@ def test_source_priority_load_save_reload_round_trip_collapses_colliding_ids(
 
     load_config_into_view(view, config)
     actual_lines = view.controls_map["translation_db.priority"].value.splitlines()
-    # 同名的歷史自訂來源顯示為內建來源，且不重複
-    assert actual_lines == ["builtin:subtitle"]
+    # 同名的歷史自訂來源併入內建來源：顯示名稱（不是 builtin:subtitle），且不重複
+    assert actual_lines == ["釘宮翻譯組"]
     view.models_column.controls = [
         SimpleNamespace(
             _model_name="enabled-test-model",
@@ -1365,14 +1365,10 @@ def test_source_priority_load_save_reload_round_trip_collapses_colliding_ids(
     reloaded.controls_map["translation_db.priority"] = SimpleNamespace(value="")
     load_config_into_view(reloaded, saved)
     registry = read_custom_sources(path)
-    assert (
-        parse_priority(
-            reloaded.controls_map["translation_db.priority"].value.splitlines(),
-            registry,
-        )[0]
-        == 3
-    )
+    # 存檔的是穩定代碼，載入後仍排在內建來源 3；輸入框顯示的是可讀名稱
     assert saved["translation_db"]["priority"] == ["builtin:subtitle"]
+    assert parse_priority(saved["translation_db"]["priority"], registry)[0] == 3
+    assert reloaded.controls_map["translation_db.priority"].value == "釘宮翻譯組"
 
 
 def test_source_priority_path_switch_requires_review_before_reusing_custom_ids(
