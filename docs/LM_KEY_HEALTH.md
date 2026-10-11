@@ -50,8 +50,7 @@ for h in get_key_health_snapshot():   # 依設定檔順序
 ## 與既有契約的關係
 
 - 維持 #112 的 contract：耗盡 = 「所有 key 都在本輪實際嘗試且失敗」，另外加上「冷卻中的 key 在沒有健康 key 時仍會被試探一次」。
-- #112 的測試 `test_success_resets_failed_keys_for_the_next_batch_of_the_same_call` 鎖定的是「失敗紀錄在 cycle 成功後清空、key0 重新有資格被領取」。
-  這正是本 issue 要改變的行為，所以改成兩個測試：記憶關閉時維持舊行為；預設（開啟）時 key0 只被請求一次。
+- 「失敗紀錄在 cycle 成功後清空、key0 重新有資格被領取」只在失敗記憶關閉時成立，由 `test_success_resets_failed_keys_when_failure_memory_is_disabled` 鎖定；預設（開啟）時失敗的 key 不會被下一批再次請求（`test_forbidden_key_is_not_requested_again_by_the_next_batch`）。
 
 ## 已知限制
 

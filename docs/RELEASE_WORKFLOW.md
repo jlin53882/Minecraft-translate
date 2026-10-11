@@ -62,7 +62,7 @@ git push origin v0.6.0
 
 ### 7) GitHub Release
 - Title: Minecraft Translator v0.6
-- Body: `release_notes_v0.6.0.md` 的內容（或從 CHANGELOG 擷取）
+- Body: 從 `CHANGELOG.md` 擷取該版本段落
 
 ---
 

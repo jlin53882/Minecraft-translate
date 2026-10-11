@@ -59,7 +59,7 @@ BundlerView.start_bundling_clicked()
 | 函式 | 職責 |
 |------|------|
 | `bundle_outputs_generator(input_root_dir, output_zip_path, description, min_format, max_format, pack_image_path, extra_folders)` | 主流程 generator，yield `{progress, log, error?}` |
-| `_add_folder_to_zip(zip_file, folder_path, base_path_in_zip, seen_files)` | 遞迴寫入資料夾；檔案命名衝突自動加 `_1`、`_2` 後綴 |
+| `_iter_add_folder_to_zip(zip_file, folder_path, base_path_in_zip, seen_files, exclude)` | 遞迴寫入資料夾，每寫完一個檔案 yield 一次（供進度回報）；檔案命名衝突自動加 `_1`、`_2` 後綴 |
 | `_write_pack_mcmeta(zip_file, description, min_format, max_format)` | 寫 pack.mcmeta（UI 設定的 description/min/max_format） |
 
 ### generator 行為細節
@@ -78,7 +78,7 @@ BundlerView.start_bundling_clicked()
 
 1. **不要改成走 `run_bundling_service`**：BundlerView 的 worker 直接迭代 generator（無 TaskSession），與 pipeline 的 session 流程是刻意不同的兩種設計。
 2. 背景 worker（`_bundling_worker`）不直接改控制項或呼叫 `page.update()`：日誌與進度經 `UiBatcher` 排到 event loop 上套用（Flet 1.0 的 worker-thread 契約）。
-3. `_on_pack_image_picked` / `_on_output_zip_picked` / `_on_extra_folder_picked` 是 FilePicker 事件 stub（`pass`），實際流程用 `_page.run_task(_async_*)` 完成。
+3. `_on_pack_image_picked` 是 FilePicker 上傳事件的 stub（`pass`）；選檔／選資料夾的實際流程用 `_page.run_task(_async_*)` 完成。
 
 ## 檔案結構（拆分後）
 

@@ -16,7 +16,7 @@
 
 ## 色彩
 
-顏色一律用 **語意字串**（`C.PANEL`、`C.EM`、`C.TEXT_DIM`…），由 Flet 依目前主題解析。
+顏色一律用 **語意字串**（`C.PANEL`、`C.EM`、`C.MUTED`…），由 Flet 依目前主題解析。
 因此切換深 / 淺色只要 `design.apply(page, mode)`，**不需重建畫面**。
 
 語氣（tone）：`em`（主色 / 成功）、`gold`（警告 / 進行中）、`dia`（資訊）、`ench`（強調）、`red`（錯誤）、`neutral`。

@@ -98,7 +98,7 @@ ExtractorView._handle_preview_*_click()    ← 只驗證 mods_dir，不自動填
 | `get_target_language()` | 讀取 `extractor.target_language`（預設 zh_tw），僅為相容保留，沒有 production 呼叫端 |
 | `_select_extraction_generator(mode, ...)` | 依 mode 回傳對應 generator（lang 傳 `lang_codes`，dual 傳 `skip_zh_cn`，book 不傳參數） |
 | `_run_extraction_with_session(generator, session, mode_label)` | 透過 TaskSession 驅動 generator（GLOBAL_LOG_LIMITER 過濾 + add_log/set_progress/set_error） |
-| `run_lang/book/dual_extraction_service(...)` | 封裝 `_run_extraction_with_session`，用於 **pipeline_view** 的 TaskSession 流程 |
+| `run_lang/book/dual_extraction_service(...)` | 封裝 `_run_extraction_with_session`；lang／book 由 pipeline（`PipelineActions`）的 TaskSession 流程呼叫，dual 目前只有測試呼叫 |
 | `run_extraction_loop(generator, cancelled_flag, on_update)` | 供 **dialog** 用：逐 update 回呼 + 累計 stats，不依賴 TaskSession |
 | `open_output_folder(path)` | 跨平台開啟資料夾（取代 UI 直接 os.startfile） |
 

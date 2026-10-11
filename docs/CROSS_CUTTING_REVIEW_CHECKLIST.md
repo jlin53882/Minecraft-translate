@@ -104,7 +104,6 @@ PR #169（UI 與後台日誌同步）歷經多輪審查才收斂。回顧後，�
 ## 相關文件
 
 - [`TEST_STRATEGY.md`](TEST_STRATEGY.md)：測試策略
-- [`PR_WORKFLOW.md`](PR_WORKFLOW.md)：PR 執行彙報格式
 - [`EXCEPTION_INVENTORY.md`](EXCEPTION_INVENTORY.md)：例外處理盤點
 - [`WORKER_THREAD_AUDIT.md`](WORKER_THREAD_AUDIT.md)：背景執行緒稽核
 - [`WEB_MODE_LIMITATIONS.md`](WEB_MODE_LIMITATIONS.md)：Flet Web 模式限制

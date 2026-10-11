@@ -69,8 +69,8 @@ Behavioral coverage: `test_dashboard_mount_reload_does_not_create_a_task_lifecyc
 | 流水線步驟 `_watch_loop` | `PipelineRunner.poller`（`PollerHandle`） | `will_unmount()` → `runner.on_unmount()`；`did_mount()` → `runner.on_mount()`；worker `finally` 設定 `done` 並補 `_final_sync` | `test_pipeline_runner_behavior`（卸載停止、重掛載單一 poller、卸載期間完成補日誌、取消）、`test_pipeline_step_watcher_always_ends_with_the_step` |
 | 提取預覽 `_preview_ui_poller` | 對話框（`preview_state`／`state["cancelled"]`） | 完成或取消即結束；dismiss 設定取消 | `test_extractor_preview_dialog_behavior` |
 | 流水線提取預覽 `_extract_preview_poll` | 對話框（`cancel_event`） | 「取消」設旗標、輪詢立即結束、結果丟棄、overlay 移除 | `test_pipeline_extract_dialog_behavior`（探索期間取消、反覆開關不累積） |
-| 圖示預覽載入／渲染（`_load_async`、`_prepare_and_fill`、`_open`） | `IconPreviewView._load_generation`／`_render_generation` | `will_unmount()` 遞增世代：結果丟棄、旗標復位；進度刷新在載入結束後不再套用 | `test_icon_*`（卸載中的掃描／渲染／zh 讀取被丟棄） |
-| Debouncer（快取頁、規則頁、圖示頁） | View | `will_unmount()` 呼叫 `cancel()` | `test_views_with_debounced_work_cancel_it_on_unmount` |
+| 圖示預覽載入／渲染（`_load_async`、`_prepare_row_icons`／`_fill_rows`、`_open`） | `IconPreviewView._load_generation`／`_render_generation` | `will_unmount()` 遞增世代：結果丟棄、旗標復位；進度刷新在載入結束後不再套用 | `test_icon_*`（卸載中的掃描／渲染／zh 讀取被丟棄） |
+| Debouncer（規則頁、圖示頁） | View | `will_unmount()` 呼叫 `cancel()` | `test_views_with_debounced_work_cancel_it_on_unmount` |
 | `AppShell` 的任務／config 訂閱 | `AppShell` | `dispose()` | 既有測試 |
 | `BundlerView` config 訂閱 | `BundlerView` | `will_unmount()` | 既有測試 |
 | `UiBatcher` 排程 | 該次 worker | worker 的最後一次 `flush(force=True)`；有限次、非常駐 | 既有測試 |

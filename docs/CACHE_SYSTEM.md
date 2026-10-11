@@ -44,7 +44,6 @@ CacheRuntimeState:
   session_new_entries: dict[str, dict[str, Any]]  # 本次執行階段新增的項目（flush 前暂存）
   is_dirty: dict[str, bool]                    # 是否有未儲存的變更
   cache_lock: threading.RLock                   # 執行緒安全鎖
-  metrics: CacheMetrics                        # PR66-A 效能監控
 ```
 
 **Cache 條目格式**：
@@ -153,4 +152,3 @@ rebuild_search_index_for_type(cache_type)            # 重建指定類型索引
   `translation_cache` dict。Python GIL 使簡單 dict 讀取（`dict.get()`）具備原子性，
   故在 Flet UI 背景執行緒中使用是安全的；但**不支援 read-then-write 的複合操作**。
 - **延遲寫入**：翻譯結果先寫記憶體（`session_new_entries`），session 結束才 flush 磁碟，避免大量小寫入
-- **效能監控**：`CacheMetrics` 追蹤 hit/miss/load_ms/save_ms，另有 PR66-A 專門對此做過優化

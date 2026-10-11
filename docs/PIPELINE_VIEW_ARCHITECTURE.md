@@ -2,7 +2,7 @@
 
 ## 定位
 
-PipelineView（`app/views/pipeline/pipeline_view.py`，組版／事件委派／生命週期）是**翻譯工作台**：在單一頁面串起整條流水線（抽取 → 語系比對 → 翻譯 → 打包），可逐步執行或「一鍵製作」自動跑完。`PipelineView` 另建了一個 API 金鑰管理區塊（`api_view`），但目前並未掛到頁面上（`controls` 只含 `workbench_view`）。
+PipelineView（`app/views/pipeline/pipeline_view.py`，組版／事件委派／生命週期）是**翻譯工作台**：在單一頁面串起整條流水線（抽取 → 語系比對 → 翻譯 → 打包），可逐步執行或「一鍵製作」自動跑完。
 
 > 與各單頁的關係：此頁經 `PipelineActions`（`pipeline_actions.py`）呼叫 service（`run_lang_extraction_service` / `run_book_extraction_service`、`run_merge_folder_batch_service` / `run_merge_zip_batch_service`、`run_lm_translation_service`、`build_bundle_staging` + `run_bundling_service`），不經由 ExtractorView / MergeView / LMView / BundlerView。
 
@@ -163,10 +163,6 @@ core generator 與 service 以 dict 回報進度，欄位皆為選用：
 - 抽取（`_run_extraction_with_session`）：收到 `error` → set_error；結束時 `failures > 0` → 寫入 summary、記錄錯誤、set_error；否則 finish。取消 → 停止並記錄。
 - 語系比對：部分失敗寫入 summary 的 `failed_*` / `errored_files`（單頁維持批次語意，session 可能是 DONE），一鍵流程以 `session_failed` 視為失敗。
 - 打包：`PipelineActions.bundle` 見到 `error` 即 set_error 並停止迭代。
-
-## API 金鑰管理（api_view）
-
-`api_view` 內含 `keys_container`（以 `_add_key_field` / `_delete_key_field` 增刪 API Key 列）與「儲存設定」按鈕；該按鈕尚未綁定 `on_click`，且 `api_view` 未被加入頁面，所以目前不會顯示。
 
 ## 與其他 View 的關係
 

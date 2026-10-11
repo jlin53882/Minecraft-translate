@@ -41,7 +41,7 @@ CacheView（主入口）
   ├─ 總覽：_load_overview() → cache_get_overview_service() → _render_type_list()
   │        動作：_run_action() → run_cache_action(view, reason, work_fn, ...)
   │              ├─ mounted App 先向 OperationRegistry admission，再由 owner worker 執行 work_fn（`show_progress` 時顯示 SnackBar 進度）
-  │              └─ _on_reload_all / _on_save_all_new / _on_rotate_one ... 各自組 work_fn
+  │              └─ _on_reload_all / _on_save_one_new / _on_rotate_one ... 各自組 work_fn
   ├─ 查詢：_on_query_search() → _compute_query_results()（背景執行緒，內部呼叫 cache_search_service）→ _apply_query_results() → _render_query_results()
   │        _on_select_result() → 詳情（cache_get_entry_service）→ _on_apply_dst() → cache_update_dst_service()
   ├─ 分片：_load_shard_rows() → _load_shard_keys() → _load_shard_entry() → 編輯 dst / 歷史
@@ -54,8 +54,8 @@ CacheView（主入口）
 ### 總覽區
 - `_build_overview_page()`：組裝總覽頁（UI 組裝已抽到 `cache_overview_panel.build_overview_page`）
 - `_run_action(reason, work_fn, success_msg, show_progress=False)`：共用動作包裝（busy 狀態 + SnackBar），委派 `run_cache_action`
-- `_on_reload_all` / `_on_reload_one` / `_on_save_all_new` / `_on_save_all_fill` / `_on_save_one_new` / `_on_save_one_fill` / `_on_rotate_one` / `_on_analyze_one` / `_on_jump_to_query_type` / `_on_rebuild_index` / `_on_refresh_stats`
-- 「補滿舊檔」為高風險動作：總覽頁「操作」卡片內有確認勾選 `chk_danger_confirm`（「我了解「補滿舊檔」會覆寫既有分片（高風險）」，預設未勾選）；`_on_save_all_fill` / `_on_save_one_fill` 在未勾選時只提示「尚未勾選高風險確認」而不執行
+- `_on_reload_all` / `_on_reload_one` / `_on_save_one_new` / `_on_save_one_fill` / `_on_rotate_one` / `_on_analyze_one` / `_on_jump_to_query_type` / `_on_rebuild_index` / `_on_refresh_stats`
+- 「補滿舊檔」為高風險動作：總覽頁「操作」卡片內有確認勾選 `chk_danger_confirm`（「我了解「補滿舊檔」會覆寫既有分片（高風險）」，預設未勾選）；`_on_save_one_fill` 在未勾選時只提示「尚未勾選高風險確認」而不執行
 
 ### 查詢區
 - `_on_query_search()`：模式 `KEY` / `DST` / `ALL`（預設 ALL）、分類預設全部；mounted App 由 Registry 持有搜尋 worker，以 query sequence 只套用最後一次結果 → `_render_query_results()`
@@ -76,7 +76,7 @@ CacheView（主入口）
 ## UI 狀態管理
 
 - `_set_state(busy, reason, trace)`：busy 鎖定 + 原因顯示；`_refresh_disabled_state()` 依 busy 禁用按鈕
-- `_mark_dirty(area)` / `_schedule_update()` / `_do_update()` / `_batch_refresh()`：髒標記 + 批次 UI 更新（避免大量小 update 凍結）
+- `_batch_refresh()`：初次載入完成後一次刷新整頁
 - `_append_log` / `_notify(message, level)`：日誌與 SnackBar 通知
 
 ## 與 Cache 系統（utils 層）的關係
@@ -86,14 +86,14 @@ CacheView（主入口）
 - `cache_reload_service` / `cache_reload_type_service`
 - `cache_save_all_service`（`write_new_shard=True` 為「新分片」、`False` 為「補滿舊檔」）/ `cache_rotate_service` / `cache_update_dst_service` / `cache_rebuild_index_service`
 
-> 底層 cache 資料結構與分片格式見 `CACHE_SYSTEM.md`；關鍵字搜尋的效能設計見 `cache_search_optimization.md`。
+> 底層 cache 資料結構與分片格式見 `CACHE_SYSTEM.md`。
 
 ## Cache 系統邏輯細節
 
 ### 分片（`translation_tool/utils/cache_shards.py`）
 - **分片命名**：編號分片 `{cache_type}_{id:05d}.json`（如 `lang_00001.json`），`.active` 指標檔記錄目前 active 分片 id；另有時間戳分片 `{cache_type}_{mmddHHMMSS}-{seq}.json`（`_write_timestamp_shard`），新舊順序記在 `.shard_order`，不依賴檔名
 - **`_get_active_shard_path`**：`.active` 不存在時自動掃描現有編號分片、取最大 id 初始化指標（無分片時預設 `00001`）
-- **`_rotate_shard_if_needed`**：`len(data) >= rolling_shard_size` 時切到下一片；`rolling_shard_size` 由 `cache_manager.py` 的常數 `ROLLING_SHARD_SIZE`（**2500**）傳入（不是設定項）
+- **`_rotate_shard_if_needed_locked`**：在 `.active.lock` 內判斷，`len(data) >= rolling_shard_size` 時切到下一片；`rolling_shard_size` 由 `cache_manager.py` 的常數 `ROLLING_SHARD_SIZE`（**2500**）傳入（不是設定項）
 - **手動輪替**：`force_rotate_active_shard`（總覽的「輪替分片」，經 `cache_rotate_service` → `force_rotate_shard`）把 `.active` 前進一號
 - **跨行程安全**：旋轉與寫入都用 `.active.lock` 檔案鎖（`_shard_lock`；Windows `msvcrt` / POSIX `fcntl`），讀取-合併-寫入在同一個鎖內完成
 - **`_save_entries_to_active_shards`**：分段寫入，active 分片容量不足時續寫並旋轉；`force_new_shard=True`（「新分片」動作）或一次寫入筆數超過分片上限時，整批寫入一個時間戳分片，不動 `.active` 指標
