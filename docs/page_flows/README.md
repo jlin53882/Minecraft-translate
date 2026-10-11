@@ -1,8 +1,8 @@
 # 頁面處理流程
 
 每個側欄頁面一份流程文件，描述「使用者操作 → 背景工作 → 結果回到畫面」的實際程式路徑。
-元件與版面細節見各頁的 `*_VIEW_ARCHITECTURE.md`；跨頁面的長任務規則見
-[`OPERATION_LIFECYCLE_CONTRACT.md`](../OPERATION_LIFECYCLE_CONTRACT.md)。
+元件與版面細節見 [`View 架構文件`](../developer-guide/views/) 下各頁的 `*_VIEW_ARCHITECTURE.md`；跨頁面的長任務規則見
+[`../developer-guide/operation-lifecycle.md`](../developer-guide/operation-lifecycle.md)。
 
 | 側欄 | key | 流程文件 | 入口 |
 |---|---|---|---|
@@ -45,6 +45,6 @@ flowchart TD
 共通規則：
 
 - 頁面只在第一次切換到該頁時建立（`build_view_registry` 回傳 `LazyViewItem`）。
-- worker thread 不直接修改控制項或呼叫 `page.update()`；結果經 `page.run_task`、`UiBatcher` 或輪詢 `TaskSession` 回到 UI 執行緒（見 [`WORKER_THREAD_AUDIT.md`](../WORKER_THREAD_AUDIT.md)）。
+- worker thread 不直接修改控制項或呼叫 `page.update()`；結果經 `page.run_task`、`UiBatcher` 或輪詢 `TaskSession` 回到 UI 執行緒（見 [`worker thread 稽核`](../developer-guide/worker-thread-audit.md)）。
 - 背景結果套回畫面前，要比對啟動時擷取的識別（例如 generation、資料庫物件、清單批次）；不一致就丟棄，避免晚到的結果覆蓋目前狀態。
 - 沒有組 `AppShell` 的測試頁面（缺 `operation_registry`）由 `launch_page_operation` 改走 fallback launcher。

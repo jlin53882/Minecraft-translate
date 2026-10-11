@@ -1,4 +1,4 @@
-"""#114 worker-thread 契約的靜態護欄（搭配 ``docs/WORKER_THREAD_AUDIT.md`` 與行為測試）。
+"""#114 worker-thread 契約的靜態護欄（搭配 ``docs/developer-guide/worker-thread-audit.md`` 與行為測試）。
 
 1. 背景執行緒啟動點必須與盤點一致：新增 ``threading.Thread`` 要同步更新
    ``EXPECTED_THREAD_SITES`` 與稽核文件（強迫每個新 worker 都被分類）。
@@ -18,7 +18,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 APP = ROOT / "app"
 
-# 與 docs/WORKER_THREAD_AUDIT.md 的「背景執行緒啟動點」表一致
+# 與 docs/developer-guide/worker-thread-audit.md 的「背景執行緒啟動點」表一致
 EXPECTED_THREAD_SITES = {
     "app/shell/config_effects.py": 1,
     "app/startup_tasks.py": 1,
@@ -56,7 +56,7 @@ def _thread_sites() -> dict[str, int]:
 def test_thread_start_sites_match_the_audit():
     assert _thread_sites() == EXPECTED_THREAD_SITES, (
         "背景執行緒啟動點與盤點不一致：請把新的 worker 分類後更新 "
-        "docs/WORKER_THREAD_AUDIT.md 與 EXPECTED_THREAD_SITES"
+        "docs/developer-guide/worker-thread-audit.md 與 EXPECTED_THREAD_SITES"
     )
 
 

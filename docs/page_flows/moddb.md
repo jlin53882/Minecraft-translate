@@ -1,6 +1,6 @@
 # Mod 資料庫頁（`moddb`）處理流程
 
-> 入口：`app/views/moddb_view.py` 的 `ModDbView`。詳細說明見 [`MOD_TRANSLATION_DB.md`](../MOD_TRANSLATION_DB.md)。
+> 入口：`app/views/moddb_view.py` 的 `ModDbView`。詳細說明見 [`Mod DB 文件`](../user-guide/mod-translation-db.md)。
 
 ## 職責
 

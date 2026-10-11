@@ -1,6 +1,6 @@
 # 學名查詢頁（`lookup`）處理流程
 
-> 入口：`app/views/lookup_view.py` 的 `LookupView`。詳細元件說明見 [`LOOKUP_VIEW_ARCHITECTURE.md`](../LOOKUP_VIEW_ARCHITECTURE.md)。
+> 入口：`app/views/lookup_view.py` 的 `LookupView`。詳細元件說明見 [`View 架構文件`](../developer-guide/views/LOOKUP_VIEW_ARCHITECTURE.md)。
 
 ## 職責
 

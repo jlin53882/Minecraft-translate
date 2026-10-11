@@ -1,6 +1,6 @@
 # 機器翻譯（`lm`）處理流程
 
-> 入口：`app/views/lm_view.py` 的 `LMView`。詳細元件說明見 [`LM_VIEW_ARCHITECTURE.md`](../LM_VIEW_ARCHITECTURE.md)。
+> 入口：`app/views/lm_view.py` 的 `LMView`。詳細元件說明見 [`View 架構文件`](../developer-guide/views/LM_VIEW_ARCHITECTURE.md)。
 
 ## 職責
 

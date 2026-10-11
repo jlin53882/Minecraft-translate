@@ -1,6 +1,6 @@
 # QC 檢驗（`qc`）處理流程
 
-> 入口：`app/views/qc_view.py` 的 `QCView`。詳細元件說明見 [`QC_VIEW_ARCHITECTURE.md`](../QC_VIEW_ARCHITECTURE.md)，未翻譯檢查另見 [`UNTRANSLATED_CHECKER_ARCHITECTURE.md`](../UNTRANSLATED_CHECKER_ARCHITECTURE.md)。
+> 入口：`app/views/qc_view.py` 的 `QCView`。詳細元件說明見 [`View 架構文件`](../developer-guide/views/QC_VIEW_ARCHITECTURE.md)，未翻譯檢查另見 [`未翻譯檢查架構`](../developer-guide/views/UNTRANSLATED_CHECKER_ARCHITECTURE.md)。
 
 ## 職責
 

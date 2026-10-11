@@ -1,6 +1,6 @@
 # ADR-0001：關閉視窗後的長任務（#127）
 
-- 狀態：**已接受方案 C**（決策：2026-10-04）；**#151 已實作**（見 `docs/RESUME_CAPABILITY.md`，Windows 實機驗證待完成）
+- 狀態：**已接受方案 C**（決策：2026-10-04）；**#151 已實作**（見 `docs/developer-guide/resume-capability.md`，Windows 實機驗證待完成）
 - 相關：#126（關閉確認，已於 PR #149 落地）、#137（發佈形式）、#129（落盤）
 
 ## 背景
@@ -10,7 +10,7 @@ PR #149 加入「關閉前確認、取消、drain、flush」作為短期緩解�
 
 ## 事實盤點
 
-**發佈形式**：打包 exe，資料放 exe 旁邊（見 `docs/DISTRIBUTION_AND_DATA_DIR.md`）。
+**發佈形式**：打包 exe，資料放 exe 旁邊（見 `docs/reference/distribution-and-data-dir.md`）。
 打包後關閉視窗是否立即終止、不保證 flush，需 Windows 實機確認。
 
 **續跑能力**（靜態盤點，皆未端到端驗證）：
@@ -66,5 +66,5 @@ PR #149 加入「關閉前確認、取消、drain、flush」作為短期緩解�
   只翻譯未完成的項目。指紋改為涵蓋全部抽取項目，才不受快取進度影響。
 - 啟動時偵測與對話框：`lm_resume`（引擎，唯讀）→ `resume_service`（service）→ `ResumePrompt`（外殼）。
 - 關閉快取儲存時不寫 checkpoint（沒有可還原來源）。
-- 其他流程的盤點見 `docs/RESUME_CAPABILITY.md`。
-- **#164**：FTB／KubeJS／MD 也支援重開後續跑（整個任務一個標記、整條流程以同一組選項重新執行、來源檔案內容指紋、多任務共用一個對話框）；設計決定與限制見 `docs/RESUME_CAPABILITY.md`。
+- 其他流程的盤點見 `docs/developer-guide/resume-capability.md`。
+- **#164**：FTB／KubeJS／MD 也支援重開後續跑（整個任務一個標記、整條流程以同一組選項重新執行、來源檔案內容指紋、多任務共用一個對話框）；設計決定與限制見 `docs/developer-guide/resume-capability.md`。
