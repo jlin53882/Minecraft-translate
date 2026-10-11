@@ -412,7 +412,7 @@ class TranslationView(ft.Column):
         self.ftb_step_clean.value = True
         self.ftb_step_translate.value = True
         self.ftb_step_inject.value = True
-        self.ftb_write_new_cache.value = True
+        self.ftb_write_new_cache.value = False
         self._set_status("尚未開始", "neutral")
         self.progress.value = 0
         self._refresh_steps()
@@ -427,7 +427,7 @@ class TranslationView(ft.Column):
         self.kjs_step_extract.value = True
         self.kjs_step_translate.value = True
         self.kjs_step_inject.value = True
-        self.kjs_write_new_cache.value = True
+        self.kjs_write_new_cache.value = False
         self._set_status("尚未開始", "neutral")
         self.progress.value = 0
         self._refresh_steps()
@@ -441,7 +441,7 @@ class TranslationView(ft.Column):
         self.md_step_extract.value = True
         self.md_step_translate.value = True
         self.md_step_inject.value = True
-        self.md_write_new_cache.value = True
+        self.md_write_new_cache.value = False
         self.md_lang_mode.value = "non_cjk_only"
         self._set_status("尚未開始", "neutral")
         self.progress.value = 0

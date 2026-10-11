@@ -87,7 +87,9 @@ class LMView(ft.Column):
         dry_run_row = kit.SwitchRow("Dry-run", "只分析，不發送 API")
         lang_row = kit.SwitchRow("輸出 .lang 格式", "預設輸出 .json")
         cache_row = kit.SwitchRow(
-            "寫入新快取", "每次回傳單獨存入快取（write_new_cache）", divider=False
+            "每次寫入新快取分片",
+            "關閉時寫入編號分片（滿 2,500 筆自動換下一片）；開啟時每批獨立存成一個分片（write_new_cache）",
+            divider=False,
         )
         self.dry_run_switch = dry_run_row.switch
         self.export_lang_checkbox = lang_row.switch

@@ -263,7 +263,7 @@ class PipelineActions:
                     session=session,
                     dry_run=config.get("dry_run", False),
                     export_lang=False,
-                    write_new_cache=config.get("write_new_cache", True),
+                    write_new_cache=config.get("write_new_cache", False),
                     manage_session=False,
                     use_translation_db=(
                         config["lm_db_snapshot"].use_db

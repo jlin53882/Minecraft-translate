@@ -120,10 +120,10 @@ class TranslatePanel(ft.Column):
             on_change=lambda _e: self._on_limit_changed(),
         )
         self.cache_row = kit.SwitchRow(
-            "同時寫入翻譯快取",
-            "結果除了寫進資料庫，也寫入「快取資料」資料夾的翻譯快取，原本的機器翻譯頁也能直接命中。"
-            "（設定裡 enable_cache_saving 關閉時不會寫入）",
-            True,
+            "每次寫入新快取分片",
+            "結果一律也寫入「快取資料」資料夾的翻譯快取。關閉（預設）時寫入編號分片，滿 2,500 筆自動換下一片；"
+            "開啟時每次執行都另存成獨立的分片。（設定裡 enable_cache_saving 關閉時不會寫入）",
+            False,
         )
         self.scope_card = kit.section_card(
             "1　選擇要機翻的範圍",
@@ -522,7 +522,7 @@ class TranslatePanel(ft.Column):
             limit=self.limit(),
             dry_run=dry_run,
             reuse_other_versions=bool(self.reuse_row.value),
-            write_cache=bool(self.cache_row.value),
+            new_cache_shard=bool(self.cache_row.value),
             repair_newline_only=(
                 self._repair_mode == "quality_mismatch"
                 and bool(self.repair_newline_row.value)

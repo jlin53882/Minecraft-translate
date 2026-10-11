@@ -107,7 +107,7 @@ Mod DB 批次機翻預設只處理沒有生效譯文的條目，並透過 `write
 - 修復直接呼叫 `translate_batch_smart()`，不走 DB/cache hit；「譯文與原文相同時重新確認」仍依 `retry_same_as_source` 設定照常執行一次。
 - 僅以專用 compare-and-set API 更新該 entry 的 `SRC_AI` 列；更新前再次確認舊值和 effective AI 條件。競爭期間已變更的資料會跳過。
 - 成功更新寫入 `history.action = ai_retranslate`，並刷新 `effective`。不會同步或填補其他版本；token/格式檢查或 API 失敗時保留舊譯文。
-- 若啟用「同時寫入翻譯快取」，只在 DB 更新成功後用現有 Cache API 更新該項目。此修復不刪除舊 Cache，也不改一般 Cache 命中規則。
+- 翻譯快取一律寫入（`enable_cache_saving` 關閉時除外），只在 DB 更新成功後用現有 Cache API 更新該項目；「每次寫入新快取分片」關閉（預設）時寫入編號分片，開啟時另存獨立的時間戳分片。此修復不刪除舊 Cache，也不改一般 Cache 命中規則。
 
 此流程不增加資料庫狀態欄位或 migration；一般 `write_back()` 與其他翻譯呼叫者的只新增、不覆蓋契約維持不變。
 

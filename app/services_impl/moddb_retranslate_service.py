@@ -1267,7 +1267,10 @@ def _flush_repair_cache(options, session, report, cache_keys_to_save) -> None:
             continue
         try:
             receipt = save_translation_cache_keys(
-                cache_type, set(key_versions), expected_versions=key_versions
+                cache_type,
+                set(key_versions),
+                write_new_shard=options.new_cache_shard,
+                expected_versions=key_versions,
             )
         except Exception as exc:  # noqa: BLE001 - DB results survive cache failure
             logger.warning("Mod DB repair cache flush failed: %r", exc)

@@ -20,7 +20,7 @@ TranslationView（ft.Column）
        ├─ 左（expand=3）：ft.Tabs（TabBar + TabBarView：FTB Quests / KubeJS Tooltips / Markdown）
        │    └─ 每個 tab 由 translation_panels.build_*_tab() 建立（_tab）
        │         ├─ section_card「路徑設定」：build_path_row（輸入／輸出資料夾；MD 另有 md_lang_mode）
-       │         ├─ section_card「翻譯步驟」：kit.StepCard 步驟列（背後為 ft.Checkbox）+「寫入新快取」kit.SwitchRow
+       │         ├─ section_card「翻譯步驟」：kit.StepCard 步驟列（背後為 ft.Checkbox）+「每次寫入新快取分片」kit.SwitchRow（預設關閉）
        │         └─ build_action_row：開始翻譯 / Dry-run 開始模擬翻譯 / Reset
        └─ 右（expand=2）：
             ├─ 執行狀態卡：kit.ProgressRing（progress，預設 0%）+「執行狀態」標籤 + status_chip（預設「尚未開始」）+ cancel_button（「取消」，預設停用）
