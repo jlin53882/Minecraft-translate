@@ -2,7 +2,10 @@
 
 import os
 
-from translation_tool.utils.config_manager import load_config
+from translation_tool.utils.config_manager import (
+    get_lm_translate_folder_name,
+    load_config,
+)
 
 
 def _has_files(path: str) -> bool:
@@ -40,9 +43,7 @@ class PipelineConfig:
         )
 
         self.lm_translate = "lm_translate"
-        self.translate_output_subfolder = lang_merger.get(
-            "lm_translate_folder_name", "_翻譯輸出"
-        )
+        self.translate_output_subfolder = get_lm_translate_folder_name(cfg)
 
         self.output_zip_name = bundler.get("output_zip_name", "可使用翻譯.zip")
 

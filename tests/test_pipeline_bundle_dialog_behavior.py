@@ -129,7 +129,7 @@ def env(monkeypatch, tmp_path):
     return _Env(monkeypatch, tmp_path)
 
 
-def _default_input(env, sub="_翻譯輸出"):
+def _default_input(env, sub="LM翻譯後"):
     return os.path.join(str(env.out), "lm_translate", sub)
 
 
@@ -145,7 +145,7 @@ def test_open_shows_modal_dialog_with_three_actions(env):
 
 
 def test_default_input_comes_from_output_path_and_config_subfolder(env):
-    env.cfg = {"lang_merger": {"lm_translate_folder_name": "自訂輸出"}}
+    env.cfg = {"lm_translator": {"lm_translate_folder_name": "自訂輸出"}}
     dialog = env.open()
     assert _field(dialog, "輸入來源").value == _default_input(env, "自訂輸出")
     assert (
@@ -168,7 +168,7 @@ def test_default_subfolder_and_zip_name_without_config(env):
 
 
 def test_mod_source_is_never_used_as_bundle_input(env):
-    """原本把 Mod 來源當成打包輸入；預設應是 {output}/lm_translate/_翻譯輸出。"""
+    """原本把 Mod 來源當成打包輸入；預設應是 {output}/lm_translate/LM翻譯後。"""
     dialog = env.open(input_path="/some/mods")
     assert _field(dialog, "輸入來源").value == _default_input(env)
 
@@ -191,7 +191,7 @@ def test_reopen_reads_fresh_config(env):
     first = env.open()
     env.cfg = {
         "output_bundler": {"output_zip_name": "new.zip"},
-        "lang_merger": {"lm_translate_folder_name": "新資料夾"},
+        "lm_translator": {"lm_translate_folder_name": "新資料夾"},
     }
     second = env.open()
     assert _field(first, "輸入來源").value == _default_input(env)

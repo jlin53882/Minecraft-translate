@@ -41,7 +41,10 @@ from app.views.pipeline.pipeline_forms import (
 from app.views.pipeline.pipeline_one_click_bundle_widgets import (
     build_step4_version_widgets,
 )
-from translation_tool.utils.config_manager import load_config
+from translation_tool.utils.config_manager import (
+    get_lm_translate_folder_name,
+    load_config,
+)
 from translation_tool.utils.log_unit import log_warning
 
 
@@ -181,9 +184,7 @@ def _one_click_init_config_defaults(ctx):
     ctx.organized_folder = lang_merger_cfg.get(
         "pending_organized_folder_name", "待翻譯整理需翻譯"
     )
-    translate_output_subfolder = lang_merger_cfg.get(
-        "lm_translate_folder_name", "_翻譯輸出"
-    )
+    translate_output_subfolder = get_lm_translate_folder_name(cfg)
     output_zip_name = bundler_cfg.get("output_zip_name", "可使用翻譯.zip")
     ctx.translate_output_subfolder = translate_output_subfolder
     return lang_merger_cfg, output_zip_name, translate_output_subfolder

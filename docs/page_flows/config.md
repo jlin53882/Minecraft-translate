@@ -58,7 +58,7 @@ flowchart TD
     F -- 否 --> H["normalize_priority_config、金鑰、模型與 ChatGPT 設定收集"]
     H --> I{"provider 驗證與模型啟用數通過？"}
     I -- 否 --> G
-    I -- 是 --> J["validate_output_folder_names、validate_config_values"]
+    I -- 是 --> J["validate_output_folder_names、validate_lm_translate_folder_name、validate_config_values"]
     J --> K["_write_config_with_feedback：save_config_json 必須回傳 True"]
     K --> L{"寫入確認成功？"}
     L -- 否 --> G
@@ -110,7 +110,8 @@ flowchart TD
 
 ## 錯誤處理
 
-- 收集或驗證失敗（例如 `validate_config_values` 拋出錯誤）：`_collect_validated_config` 記錄含堆疊的 log（經 `redact_text` 遮蔽），顯示「設定驗證失敗」提示，不寫入。
+- 輸出資料夾名稱無效（提取輸出後綴，或「LM 翻譯輸出資料夾」不是單一資料夾名稱，例如路徑、`..`、Windows 保留名稱）：`validate_output_folder_names`／`validate_lm_translate_folder_name` 拋出 `ConfigValidationError`，記錄警告並以錯誤原因提示，不寫入。「LM 翻譯輸出資料夾」留空表示使用預設值 `LM翻譯後`。
+- 其他收集或驗證失敗（例如 `validate_config_values` 拋出錯誤）：`_collect_validated_config` 記錄含堆疊的 log（經 `redact_text` 遮蔽），顯示「設定驗證失敗」提示，不寫入。
 - 寫入回傳值不是 `True`，或例外發生：視為無法確認寫入，變更保留在頁面上，提示使用者檢查 `config.json`。
 - 寫入成功但重載失敗：結果為 `SAVED_RELOAD_FAILED`，頁面進入復原模式，儲存按鈕改為「重新載入設定」，離開前會再次確認。
 - 載入失敗：`load_config_transactionally` 還原舊基準後重新拋出例外，由呼叫端處理。

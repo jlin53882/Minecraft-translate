@@ -471,7 +471,7 @@ def test_step3_shows_paths_and_defaults(env):
     env.open()
     env.goto(3)
     texts = env.texts()
-    assert os.path.join(str(env.out), "lm_translate", "_翻譯輸出") in texts
+    assert os.path.join(str(env.out), "lm_translate", "LM翻譯後") in texts
     assert (
         os.path.join(
             str(env.out), "locale_sort", "_整理輸出", "lang_output", "待翻譯整理需翻譯"
@@ -518,7 +518,7 @@ def test_step4_defaults_from_config(monkeypatch, tmp_path):
         tmp_path,
         {
             "output_bundler": {"output_zip_name": "pack.zip"},
-            "lang_merger": {"lm_translate_folder_name": "_out"},
+            "lm_translator": {"lm_translate_folder_name": "_out"},
         },
     )
     e.open()

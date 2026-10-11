@@ -33,7 +33,7 @@ PipelineView（`app/views/pipeline/pipeline_view.py`，組版／事件委派／�
 | 抽取輸出 | lang：`<output>/jar_mod_extract/_提取lang_輸出`；book：`<output>/jar_mod_extract/_提取book_輸出` |
 | 語系比對輸出 | `<output>/locale_sort/_整理輸出`（`merge_output_dir`） |
 | 翻譯輸入 | `translate_input_dirs`：`<merge_output>/lang_output/<待翻譯整理需翻譯>`、`<merge_output>/patchouli_output/<待翻譯>` |
-| 翻譯輸出 | `<output>/lm_translate/<translate_output_subfolder>`；`PipelineConfig.translate_output_subfolder` 讀 `lang_merger.lm_translate_folder_name`，未設定時為 `_翻譯輸出`。注意：翻譯頁（`app/views/lm_view.py`）與設定 schema 使用的是 `lm_translator.lm_translate_folder_name`，兩者目前不相同，修改時需一併確認 |
+| 翻譯輸出 | `<output>/lm_translate/<lm_translator.lm_translate_folder_name>`（預設 `LM翻譯後`；`translate_output_subfolder` 由 `get_lm_translate_folder_name()` 讀設定，與機器翻譯頁及翻譯／打包／一鍵對話框一致） |
 | 打包暫存 | `<output>/_打包暫存`（`bundle_staging_dir`） |
 | 打包來源 | `bundle_sources`（優先序由低到高）：`<merge_output>/lang_output` → `<merge_output>/patchouli_output` → 翻譯輸出 |
 | 打包輸出 | `<output>/<output_bundler.output_zip_name>` |
@@ -54,7 +54,7 @@ PipelineView（`app/views/pipeline/pipeline_view.py`，組版／事件委派／�
 
 - **抽取模式**：對話框顯示的「全部執行」(`both`) 在邊界（一鍵對話框 config 輸出、`PipelineView._prepare_one_click`）以 `normalize_extract_mode` 轉成引擎的 `dual`；`PipelineActions` 只認 `lang`／`book`／`dual`。
 - **TaskSession terminal 契約**：呼叫過 `session.start()` 的工作，任何結束路徑（成功／service 回報錯誤／例外／取消）都必須送出一次 `finish()`，失敗時順序一定是 `set_error()` → `finish()`——`TaskManager` 不把 `set_error()` 當結案事件，漏掉 `finish()` 會讓 session 永遠留在 `active()`（頂列任務、`CacheRootReloader` busy 判斷、Windows 安全關閉的 drain）。service（extract／LM／merge）自己擁有生命週期；composite action 以 `manage_session=False`／`finish_session=False` 呼叫 service 時，**外層**（dual 抽取、一鍵 merge、打包步驟）用 `try/except/finally` 成為 owner：`except` 先 `set_error()`，`finally` 才 `finish()`；`PipelineRunner` 對例外／取消（含 merge generator 被 `close()`）另有安全網，merge service 的 `finally` 也會補 `finish`。一鍵步驟 3（翻譯）依序處理多個來源（lang／patchouli）但共用同一個 session：步驟自己 `start()`／`finally finish()`，對 `run_lm_translation_service` 傳 `manage_session=False`，所以不會清掉前一個來源的日誌、也不會在 TaskManager 留下重複的完成紀錄；沒有待翻譯內容時仍是一次 start → finish。單一打包步驟由 `PipelineActions.bundle(manage_session=True)` 負責，一鍵步驟 4 自己 `start()`／`finally finish()`（內部 `manage_session=False`）。
-- **翻譯輸出路徑單一來源**：`PipelineConfig.translate_output_subfolder` 為流水線內的翻譯輸出子資料夾名稱；`pipeline_bundle_dialog.py` 以相同 key 計算預設來源路徑。
+- **翻譯輸出路徑單一來源**：`PipelineConfig.translate_output_subfolder` 與翻譯／打包／一鍵對話框都以 `get_lm_translate_folder_name()`（`translation_tool/utils/config_manager.py`）讀 `lm_translator.lm_translate_folder_name`（預設 `LM翻譯後`），與機器翻譯頁的輸出資料夾相同。
 
 ### 工作台（workbench_view）
 ```

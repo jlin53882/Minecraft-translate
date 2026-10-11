@@ -107,7 +107,7 @@ def test_pipeline_config_default_paths(monkeypatch):
     assert cfg.pending_folder == "待翻譯"
     assert cfg.organized_folder == "待翻譯整理需翻譯"
     assert cfg.lm_translate == "lm_translate"
-    assert cfg.translate_output_subfolder == "_翻譯輸出"
+    assert cfg.translate_output_subfolder == "LM翻譯後"
     assert cfg.output_zip_name == "可使用翻譯.zip"
 
 
@@ -170,7 +170,7 @@ def test_pipeline_config_translate_paths(monkeypatch):
         "C:/output", "locale_sort", "_整理輸出", "patchouli_output", "待翻譯"
     )
     assert cfg.translate_output_dir == os.path.join(
-        "C:/output", "lm_translate", "_翻譯輸出"
+        "C:/output", "lm_translate", "LM翻譯後"
     )
 
 
@@ -186,9 +186,7 @@ def test_pipeline_config_bundle_paths(monkeypatch):
     )
     cfg = PipelineConfig("C:/input", "C:/output")
 
-    assert cfg.bundle_input_dir == os.path.join(
-        "C:/output", "lm_translate", "_翻譯輸出"
-    )
+    assert cfg.bundle_input_dir == os.path.join("C:/output", "lm_translate", "LM翻譯後")
     assert cfg.bundle_output_zip == os.path.join("C:/output", "可使用翻譯.zip")
 
 

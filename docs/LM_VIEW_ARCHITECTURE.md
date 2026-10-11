@@ -146,6 +146,6 @@ LMView 本身不直接操作 cache_manager，只透過 `write_new_cache_switch` 
 ## 維護注意
 
 1. 目錄選擇回呼（`on_input_dir_picked` / `on_output_dir_picked`）接受帶 `.path` 的事件物件；`_async_pick_input_directory` / `_async_pick_output_directory` 會包 FakeEvent 觸發（FilePicker 相容層）。
-2. 輸出資料夾名稱由 `get_lm_translate_folder_name()`（`app/views/lm_view.py`，後備值為 `DEFAULT_LM_TRANSLATE_FOLDER_NAME`）讀取 `lm_translator.lm_translate_folder_name`，下次任務套用（見 `CONFIG_APPLY_TIMING.md`）。
+2. 輸出資料夾名稱由 `get_lm_translate_folder_name()`（`translation_tool/utils/config_manager.py`，與一鍵流水線共用；缺漏、只有空白或不是單一資料夾名稱時用 `DEFAULT_LM_TRANSLATE_FOLDER_NAME`）讀取 `lm_translator.lm_translate_folder_name`，下次任務套用（見 `CONFIG_APPLY_TIMING.md`）。
 3. 背景執行緒只寫 `TaskSession`，不可直接修改 control 或呼叫 `page.update()`；畫面更新一律由 `_poll_session` 在 event loop 上進行。
 4. 翻譯流程新增等待時使用 `interruptible_sleep()`；新增長迴圈時在迭代之間檢查 `is_cancelled()`。

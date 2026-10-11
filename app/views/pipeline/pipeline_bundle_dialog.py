@@ -27,7 +27,10 @@ from app.views.pipeline.pipeline_forms import (
     dialog_dimensions,
     dialog_text_field,
 )
-from translation_tool.utils.config_manager import load_config
+from translation_tool.utils.config_manager import (
+    get_lm_translate_folder_name,
+    load_config,
+)
 from translation_tool.utils.log_unit import log_warning
 
 
@@ -113,10 +116,7 @@ def _bundle_init_state_and_fields(ctx, input_path, output_path):
     cfg = load_config()
     bundler_cfg = cfg.get("output_bundler", {})
     output_zip_name = bundler_cfg.get("output_zip_name", "可使用翻譯.zip")
-    lang_merger_cfg = cfg.get("lang_merger", {})
-    translate_output_subfolder = lang_merger_cfg.get(
-        "lm_translate_folder_name", "_翻譯輸出"
-    )
+    translate_output_subfolder = get_lm_translate_folder_name(cfg)
 
     ctx.default_input = (
         os.path.join(output_path, "lm_translate", translate_output_subfolder)
