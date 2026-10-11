@@ -59,12 +59,12 @@ def priority_display_lines(names, database_path: str | None = None) -> list[str]
             continue
         seen.add(code)
         label = catalog.label(code)
-        # A custom source can reuse a newer built-in label. In that case the
-        # built-in's plain label resolves to the custom identity, so keep its
-        # stable token visible and editable instead of silently changing IDs.
-        display_lines.append(
-            catalog.token_for(code) if catalog.resolve(label) != code else label
-        )
+        # A custom source that reuses a built-in label is folded onto that
+        # built-in (canonical_code), so the plain label already means ``code``.
+        # Only show the stable token when the label would resolve elsewhere.
+        resolved = catalog.resolve(label)
+        same = resolved is not None and catalog.canonical_code(resolved) == code
+        display_lines.append(label if same else catalog.token_for(code))
     return display_lines
 
 

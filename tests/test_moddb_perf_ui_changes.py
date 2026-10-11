@@ -544,3 +544,36 @@ def test_prune_button_is_disabled_while_the_path_is_unsaved(tmp_path, monkeypatc
 
     banner.refresh(str(path))
     assert banner.prune_btn.disabled is False
+
+
+def test_priority_display_shows_plain_names_for_folded_custom_sources(tmp_path):
+    from app.services_impl.moddb_source_service import priority_display_lines
+    from translation_tool.translation_db.settings import (
+        read_custom_sources,
+        serialize_priority_lines,
+    )
+    from translation_tool.translation_db.source_catalog import SourceCatalog
+
+    path = _registry_db(tmp_path, {"釘宮翻譯組": 101, "Pack": 102}, used_codes=(101,))
+
+    shown = priority_display_lines(
+        [
+            "builtin:manual",
+            "builtin:subtitle",
+            "custom:101",
+            "custom:102",
+            "builtin:ai",
+        ],
+        str(path),
+    )
+
+    # 與內建同名的歷史自訂來源併入內建來源：顯示名稱、不顯示 builtin:subtitle
+    assert shown == ["人工", "釘宮翻譯組", "Pack", "AI 機翻"]
+    # 輸入框裡的名稱存檔時仍落到穩定代碼
+    catalog = SourceCatalog.from_registry(read_custom_sources(path))
+    assert serialize_priority_lines(shown, catalog) == [
+        "builtin:manual",
+        "builtin:subtitle",
+        "custom:102",
+        "builtin:ai",
+    ]
