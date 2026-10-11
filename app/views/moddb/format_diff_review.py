@@ -198,7 +198,11 @@ class FormatDiffReview:
         else:
             content.append(
                 ft.Row(
-                    [ft.Text("差異預覽", size=12, color=C.MUTED), ft.Container(expand=True), self._highlight_switch],
+                    [
+                        ft.Text("差異預覽", size=12, color=C.MUTED),
+                        ft.Container(expand=True),
+                        self._highlight_switch,
+                    ],
                     vertical_alignment=ft.CrossAxisAlignment.CENTER,
                 )
             )
@@ -219,7 +223,9 @@ class FormatDiffReview:
 
     def _diff_content(self, result: FormatDiffResult) -> list[ft.Control]:
         issue_controls = [
-            kit.chip(_issue_label(issue), _issue_tone(issue), icon=ft.Icons.WARNING_AMBER)
+            kit.chip(
+                _issue_label(issue), _issue_tone(issue), icon=ft.Icons.WARNING_AMBER
+            )
             for issue in result.issues
         ]
         issue_summary: ft.Control = (
@@ -309,9 +315,15 @@ class FormatDiffReview:
             rows.append(
                 ft.Row(
                     [
-                        ft.Text(issue.display_token, size=12, color=C.TEXT, expand=True),
-                        ft.Text(str(issue.source_count), size=12, color=C.TEXT, width=48),
-                        ft.Text(str(issue.target_count), size=12, color=C.TEXT, width=48),
+                        ft.Text(
+                            issue.display_token, size=12, color=C.TEXT, expand=True
+                        ),
+                        ft.Text(
+                            str(issue.source_count), size=12, color=C.TEXT, width=48
+                        ),
+                        ft.Text(
+                            str(issue.target_count), size=12, color=C.TEXT, width=48
+                        ),
                         ft.Text(
                             f"{_issue_label(issue)}（位置無法可靠判定）"
                             if issue.location_confidence == "unknown"

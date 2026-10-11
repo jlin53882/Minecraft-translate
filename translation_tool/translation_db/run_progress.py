@@ -181,7 +181,9 @@ def format_repair_live(live: dict) -> str:
     ai_done = int(live.get("ai_completed", 0) or 0)
     ai_total = int(live.get("ai_total", 0) or 0)
     planned_done = int(live.get("planned_batches_done", live.get("batch_done", 0)) or 0)
-    planned_total = int(live.get("planned_batches_total", live.get("batch_est", 0)) or 0)
+    planned_total = int(
+        live.get("planned_batches_total", live.get("batch_est", 0)) or 0
+    )
     eta = (
         format_duration(live.get("eta_sec"))
         if live.get("eta_sec") is not None

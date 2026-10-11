@@ -693,8 +693,7 @@ class EntriesPanel(ft.Column):
             diff_result = compare_format_diff(entry.en_us, text)
             if diff_result.legacy_messages:
                 notes.append(
-                    "與原文的特殊字元不一致："
-                    + "、".join(diff_result.legacy_messages)
+                    "與原文的特殊字元不一致：" + "、".join(diff_result.legacy_messages)
                 )
         space = whitespace_note(text)
         if space:

@@ -54,10 +54,7 @@ class FormatDiffIssue:
         if self.token == "\n":
             return f"換行數量不一致：原文 {self.source_count}、譯文 {self.target_count}"
         action = "缺少" if self.direction == "missing" else "多出"
-        return (
-            f"{action} {self.display_token} × {abs(self.delta)}"
-            "（位置無法可靠判定）"
-        )
+        return f"{action} {self.display_token} × {abs(self.delta)}（位置無法可靠判定）"
 
 
 @dataclass(frozen=True)

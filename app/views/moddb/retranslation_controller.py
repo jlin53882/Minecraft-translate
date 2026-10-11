@@ -323,9 +323,8 @@ def _display_preview_result(panel, options, db_identity, result):
         [
             (key, label)
             for key, label in _PREVIEW_ISSUE_LABELS.items()
-            if key == _PREVIEW_ISSUE_ALL or any(
-                key in _entry_issue_categories(row) for row in result.entries
-            )
+            if key == _PREVIEW_ISSUE_ALL
+            or any(key in _entry_issue_categories(row) for row in result.entries)
         ],
     )
     panel.repair_preview_issue_filter.value = _PREVIEW_ISSUE_ALL
@@ -354,7 +353,9 @@ def _preview_groups(result):
     return list(groups.values())
 
 
-def _preview_group_matches(group, query: str, source_filter: str, issue_filter: str) -> bool:
+def _preview_group_matches(
+    group, query: str, source_filter: str, issue_filter: str
+) -> bool:
     query = query.strip().casefold()
     if source_filter != _PREVIEW_SOURCE_ALL and not any(
         str(row.source_id or 0) == source_filter for _cache_type, row in group
@@ -393,9 +394,12 @@ def _copy_preview_text(panel, text: str) -> None:
 
 def _build_preview_group_card(panel, group, index: int, total: int):
     first_cache_type, first_row = group[0]
-    issue_categories = set().union(*(_entry_issue_categories(row) for _cache, row in group))
+    issue_categories = set().union(
+        *(_entry_issue_categories(row) for _cache, row in group)
+    )
     issue_text = "、".join(
-        _PREVIEW_ISSUE_LABELS.get(category, category) for category in sorted(issue_categories)
+        _PREVIEW_ISSUE_LABELS.get(category, category)
+        for category in sorted(issue_categories)
     )
     detail = ft.Column(spacing=8, visible=False)
     toggle = ft.TextButton("查看詳細資料", icon=ft.Icons.EXPAND_MORE)
@@ -414,7 +418,9 @@ def _build_preview_group_card(panel, group, index: int, total: int):
                 ft.IconButton(
                     icon=ft.Icons.CONTENT_COPY,
                     tooltip="複製英文原文",
-                    on_click=lambda _e, text=first_row.en_us: _copy_preview_text(panel, text),
+                    on_click=lambda _e, text=first_row.en_us: _copy_preview_text(
+                        panel, text
+                    ),
                 ),
             ],
             spacing=3,
@@ -480,7 +486,11 @@ def _build_preview_group_card(panel, group, index: int, total: int):
                 ft.Row(
                     [
                         kit.chip("共用 1 次 AI 修復", "dia"),
-                        ft.Text("通過各來源驗證後，分別更新對應譯文", size=11.5, color=C.MUTED),
+                        ft.Text(
+                            "通過各來源驗證後，分別更新對應譯文",
+                            size=11.5,
+                            color=C.MUTED,
+                        ),
                         toggle,
                     ],
                     spacing=8,
@@ -534,7 +544,11 @@ def refresh_preview_cards(panel, *, update: bool = True) -> None:
         count_text = (
             f"顯示 {len(groups):,} / {total_groups:,} 個翻譯 Key；"
             f"涵蓋 {sum(len(group) for group in groups):,} 筆來源項目。"
-            + (" 可展開查看完整原文與各來源譯文。" if groups else " 沒有符合目前篩選條件的候選。")
+            + (
+                " 可展開查看完整原文與各來源譯文。"
+                if groups
+                else " 沒有符合目前篩選條件的候選。"
+            )
         )
     panel.repair_preview_count.value = count_text
     panel.repair_samples.controls = [
@@ -575,7 +589,7 @@ def confirm(panel, _e=None) -> None:
             ),
             content=ft.Text(
                 (
-            f"即將送出 {selected.ai_representatives:,} 個唯一 AI 修復項目，最多對應 "
+                    f"即將送出 {selected.ai_representatives:,} 個唯一 AI 修復項目，最多對應 "
                     f"{selected.selected_count:,} 筆來源譯文；去重共用可能更新超過代表上限的來源列。"
                     "保留各筆原有來源標記；若 AI 輸出缺少受保護格式 token 或翻譯失敗，舊譯文會保留。"
                     "人工來源修復後會改為未審核。匯入 ZIP 檔案不會被修改。"

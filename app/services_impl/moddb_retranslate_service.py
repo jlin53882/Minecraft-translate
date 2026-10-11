@@ -427,9 +427,9 @@ def _limited_repair_snapshot(db, options, deadline):
     targets: dict[int, list[tuple[dict[str, Any], SameSourceAIEntry]]] = {}
     by_key: dict[tuple[Any, ...], list[dict[str, Any]]] = {}
     selected_entry_ids: set[int] = set()
-    eligible = (
-        newline_mismatch_count
-    ) = newline_mismatch_with_hard_issues = skipped_newline_only = 0
+    eligible = newline_mismatch_count = newline_mismatch_with_hard_issues = (
+        skipped_newline_only
+    ) = 0
     for entry, newline_mismatch, mixed in db.iter_repairable_translation_entries(
         options.version,
         list(options.mod_ids),
@@ -791,7 +791,9 @@ def _configured_model_label(lm_cfg: dict[str, Any]) -> str:
     models = lm_cfg.get("models")
     if isinstance(models, dict):
         enabled = [
-            str(name) for name, values in models.items() if isinstance(values, dict) and values.get("enabled")
+            str(name)
+            for name, values in models.items()
+            if isinstance(values, dict) and values.get("enabled")
         ]
         if enabled:
             return "、".join(enabled)
@@ -1399,8 +1401,7 @@ def _set_cache_report_stats(options, report) -> None:
 def _remaining_candidate_count(db, options, mode: str) -> int:
     if mode == "quality_mismatch":
         return sum(
-            entry is not None
-            and not (newline_mismatch and not mixed)
+            entry is not None and not (newline_mismatch and not mixed)
             for entry, newline_mismatch, mixed in db.iter_repairable_translation_entries(
                 options.version, list(options.mod_ids)
             )

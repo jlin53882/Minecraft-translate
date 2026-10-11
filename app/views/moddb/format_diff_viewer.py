@@ -38,7 +38,11 @@ def _spans(
         if occurrence.start > cursor:
             spans.append(ft.TextSpan(_display_text(text[cursor : occurrence.start])))
         raw = text[occurrence.start : occurrence.end]
-        style = _text_style(issue_color) if occurrence.token in affected_tokens else _text_style()
+        style = (
+            _text_style(issue_color)
+            if occurrence.token in affected_tokens
+            else _text_style()
+        )
         spans.append(ft.TextSpan(_display_text(raw), style))
         cursor = occurrence.end
     if cursor < len(text):
@@ -64,7 +68,9 @@ class FormatDiffViewer:
             on_change=lambda _e: self._toggle(),
             divider=False,
         )
-        self.summary = ft.Text("尚未檢查格式。", size=12, color=C.MUTED, selectable=True)
+        self.summary = ft.Text(
+            "尚未檢查格式。", size=12, color=C.MUTED, selectable=True
+        )
         self.src = ft.Text("", size=13, selectable=True, color=C.TEXT)
         self.tw = ft.Text("", size=13, selectable=True, color=C.TEXT)
         self.box = ft.Container(

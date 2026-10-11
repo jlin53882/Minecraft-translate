@@ -81,11 +81,10 @@ def test_shared_review_renders_same_contract_without_inserting_ui_markers():
     assert review._source_text == "A §7 line"
     assert review._target_text == "目前譯文"
     assert all(
-        "缺少"
-        not in (span.text or "")
-        for span in review._text_panel(
-            "目前譯文", "目前譯文", (), set(), "em"
-        ).content.controls[-1].spans
+        "缺少" not in (span.text or "")
+        for span in review._text_panel("目前譯文", "目前譯文", (), set(), "em")
+        .content.controls[-1]
+        .spans
     )
 
     review._select_tab("edit")

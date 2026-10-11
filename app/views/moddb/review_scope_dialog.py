@@ -201,8 +201,12 @@ class ReviewScopeController:
             content=ft.Row(
                 [
                     kit.stat_card("本次審核條目", "1 筆", tone="dia", expand=True),
-                    kit.stat_card("審核版本", str(len(included)), tone="em", expand=True),
-                    kit.stat_card("略過版本", str(len(skipped)), tone="gold", expand=True),
+                    kit.stat_card(
+                        "審核版本", str(len(included)), tone="em", expand=True
+                    ),
+                    kit.stat_card(
+                        "略過版本", str(len(skipped)), tone="gold", expand=True
+                    ),
                 ],
                 spacing=12,
             ),
@@ -230,7 +234,9 @@ class ReviewScopeController:
                 ),
                 ft.Row(
                     [
-                        self._build_language_box("英文原文", "en_us", entry.en_us, "dia"),
+                        self._build_language_box(
+                            "英文原文", "en_us", entry.en_us, "dia"
+                        ),
                         self._build_language_box(
                             "繁體中文譯文", "zh_tw", entry.zh_tw, "em", quality
                         ),
@@ -267,7 +273,9 @@ class ReviewScopeController:
             content=ft.Column(
                 [
                     ft.Row(heading, spacing=8),
-                    ft.Text(value or "（內容為空）", size=15, color=C.TEXT, selectable=True),
+                    ft.Text(
+                        value or "（內容為空）", size=15, color=C.TEXT, selectable=True
+                    ),
                 ],
                 spacing=8,
                 tight=True,
@@ -287,12 +295,13 @@ class ReviewScopeController:
         skipped: list[ReviewPreviewItem],
     ) -> ft.Column:
         items = [
-            self._build_version_item(entry, item)
-            for item in [*included, *skipped]
+            self._build_version_item(entry, item) for item in [*included, *skipped]
         ]
         return ft.Column(
             [
-                ft.Text("版本審核範圍", size=15, weight=ft.FontWeight.BOLD, color=C.TEXT),
+                ft.Text(
+                    "版本審核範圍", size=15, weight=ft.FontWeight.BOLD, color=C.TEXT
+                ),
                 ft.Column(items, spacing=8, tight=True),
             ],
             spacing=10,
@@ -361,7 +370,9 @@ class ReviewScopeController:
     ) -> list[ft.Control]:
         panel = self.panel
         actions = [
-            kit.button("取消", "ghost", on_click=lambda _e=None: panel._page.pop_dialog())
+            kit.button(
+                "取消", "ghost", on_click=lambda _e=None: panel._page.pop_dialog()
+            )
         ]
         others = sum(item.included and item.entry_id != entry.id for item in preview)
         if propagate and others:
