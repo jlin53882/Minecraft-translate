@@ -360,6 +360,7 @@ class TranslatePanel(ft.Column):
         self.repair_preview_btn = controls.preview_button
         self.repair_start_btn = controls.start_button
         self.repair_newline_row = controls.newline_row
+        self.repair_sync_row = controls.sync_row
         self.repair_preview_text = controls.preview_text
         self.repair_explainer = controls.explainer
         self.repair_samples = controls.samples
@@ -384,6 +385,7 @@ class TranslatePanel(ft.Column):
             return
         self._repair_mode = value
         self.repair_newline_row.visible = value == "quality_mismatch"
+        self.repair_sync_row.visible = value == "quality_mismatch"
         self.repair_explainer.value = self._repair_explanation()
         self._reset_stats(mode="repair")
         self._clear_repair_preview()
@@ -522,6 +524,10 @@ class TranslatePanel(ft.Column):
             repair_newline_only=(
                 self._repair_mode == "quality_mismatch"
                 and bool(self.repair_newline_row.value)
+            ),
+            repair_sync_other_versions=(
+                self._repair_mode == "quality_mismatch"
+                and bool(self.repair_sync_row.value)
             ),
         )
 

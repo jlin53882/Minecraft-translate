@@ -2861,10 +2861,13 @@ class TranslationDB:
         actor: str = "AI 特殊字元修復",
         action: str = "quality_repair",
         strict_newline: bool = False,
+        sync_other_versions: bool = False,
     ) -> AITranslationReplaceResult:
         """Compare-and-set one mismatched source row without changing its identity.
 
         ``strict_newline`` also requires the new text to keep the source's LF count.
+        ``sync_other_versions`` also rewrites the same source row of entries in other
+        versions that share kind/mod/key/source text and hold the identical old text.
         """
         if action not in {"quality_repair", "quality_repair_review"}:
             raise ValueError("invalid quality repair history action")
@@ -2902,59 +2905,74 @@ class TranslationDB:
             if new_zh_tw == current[0]:
                 return AITranslationReplaceResult("unchanged")
 
-            previous_checker, previous_review = current[2], current[3]
-            if source_id == SRC_MANUAL and action == "quality_repair":
-                new_checker, new_review = "", "unreviewed"
-            elif source_id == SRC_MANUAL and action == "quality_repair_review":
-                new_checker, new_review = actor, "reviewed"
-            else:
-                new_checker, new_review = previous_checker, previous_review
-            updated = conn.execute(
-                "UPDATE translation SET zh_tw=?, checker=?, review_status=?, "
-                "updated_at=CURRENT_TIMESTAMP WHERE entry_id=? AND source=? "
-                "AND zh_tw=? AND revision=? AND checker IS ? AND review_status IS ?",
-                (
-                    new_zh_tw,
-                    new_checker,
-                    new_review,
-                    entry_id,
-                    source_id,
-                    current[0],
-                    current[1],
-                    previous_checker,
-                    previous_review,
-                ),
-            )
-            if updated.rowcount != 1:
+            def apply_row(target_id, revision, checker, review) -> bool:
+                if source_id == SRC_MANUAL and action == "quality_repair":
+                    new_checker, new_review = "", "unreviewed"
+                elif source_id == SRC_MANUAL and action == "quality_repair_review":
+                    new_checker, new_review = actor, "reviewed"
+                else:
+                    new_checker, new_review = checker, review
+                updated = conn.execute(
+                    "UPDATE translation SET zh_tw=?, checker=?, review_status=?, "
+                    "updated_at=CURRENT_TIMESTAMP WHERE entry_id=? AND source=? "
+                    "AND zh_tw=? AND revision=? AND checker IS ? AND review_status IS ?",
+                    (
+                        new_zh_tw,
+                        new_checker,
+                        new_review,
+                        target_id,
+                        source_id,
+                        current[0],
+                        revision,
+                        checker,
+                        review,
+                    ),
+                )
+                if updated.rowcount != 1:
+                    return False
+                new_revision = conn.execute(
+                    "SELECT revision FROM translation WHERE entry_id=? AND source=?",
+                    (target_id, source_id),
+                ).fetchone()[0]
+                conn.execute(
+                    "INSERT INTO history (entry_id, batch, actor, action, old_zh_tw, "
+                    "new_zh_tw, prev_checker, prev_review_status, new_checker, "
+                    "new_review_status, prev_revision, new_revision, source_id, "
+                    "repair_prev_zh_tw) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (
+                        target_id,
+                        uuid.uuid4().hex,
+                        actor,
+                        action,
+                        current[0],
+                        new_zh_tw,
+                        checker or "",
+                        review,
+                        new_checker or "",
+                        new_review,
+                        revision,
+                        new_revision,
+                        source_id,
+                        None,
+                    ),
+                )
+                return True
+
+            if not apply_row(entry_id, current[1], current[2], current[3]):
                 return AITranslationReplaceResult("skipped_changed")
-            new_revision = conn.execute(
-                "SELECT revision FROM translation WHERE entry_id=? AND source=?",
-                (entry_id, source_id),
-            ).fetchone()[0]
-            conn.execute(
-                "INSERT INTO history (entry_id, batch, actor, action, old_zh_tw, "
-                "new_zh_tw, prev_checker, prev_review_status, new_checker, "
-                "new_review_status, prev_revision, new_revision, source_id, "
-                "repair_prev_zh_tw) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                (
-                    entry_id,
-                    uuid.uuid4().hex,
-                    actor,
-                    action,
-                    current[0],
-                    new_zh_tw,
-                    previous_checker or "",
-                    previous_review,
-                    new_checker or "",
-                    new_review,
-                    current[1],
-                    new_revision,
-                    source_id,
-                    None,
-                ),
-            )
-            self._refresh(conn, [entry_id])
-        return AITranslationReplaceResult("updated")
+            synced: list[int] = []
+            if sync_other_versions and action == "quality_repair":
+                siblings = conn.execute(
+                    "SELECT t.entry_id, t.revision, t.checker, t.review_status "
+                    "FROM entry e0 JOIN entry e ON e.kind=e0.kind AND e.mod_id=e0.mod_id "
+                    "AND e.key=e0.key AND e.en_us=e0.en_us AND e.mc_version<>e0.mc_version "
+                    "JOIN translation t ON t.entry_id=e.id AND t.source=? AND t.zh_tw=? "
+                    "WHERE e0.id=?",
+                    (source_id, current[0], entry_id),
+                ).fetchall()
+                synced = [row[0] for row in siblings if apply_row(*row)]
+            self._refresh(conn, [entry_id, *synced])
+        return AITranslationReplaceResult("updated", len(synced))
 
     # --------------------------------------------------------- 批次機翻（資料庫內）
     def _untranslated_where(self, mod_ids: Sequence[str] | None) -> tuple[str, list]:

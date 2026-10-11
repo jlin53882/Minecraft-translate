@@ -27,6 +27,7 @@ class RepairCardControls:
     preview_count: ft.Text
     pager: kit.Pager
     newline_row: kit.SwitchRow
+    sync_row: kit.SwitchRow
 
 
 def repair_copy(mode: str) -> tuple[str, str]:
@@ -98,6 +99,14 @@ def create_repair_card(
         divider=False,
     )
     newline_row.visible = mode == "quality_mismatch"
+    sync_row = kit.SwitchRow(
+        "修復後同步到其他版本",
+        "同一模組、鍵值與原文的其他版本，若該來源的舊譯文跟這筆完全相同，"
+        "一併改成新譯文（各自記錄歷史）。預設只修目前選的版本。",
+        False,
+        divider=False,
+    )
+    sync_row.visible = mode == "quality_mismatch"
     preview_search = kit.text_field(
         "搜尋 Key／Mod／原文／譯文",
         icon=ft.Icons.SEARCH,
@@ -135,6 +144,7 @@ def create_repair_card(
                 mode_group,
                 explainer,
                 newline_row,
+                sync_row,
                 ft.Row([preview_button, start_button], spacing=10, wrap=True),
                 preview_text,
                 ft.Row(
@@ -167,4 +177,5 @@ def create_repair_card(
         preview_count,
         pager,
         newline_row,
+        sync_row,
     )

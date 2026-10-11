@@ -2765,3 +2765,104 @@ def test_translate_panel_builds_newline_option_only_for_quality_mode(db_path):
     assert panel.build_options().repair_newline_only is True
     panel._repair_mode = "same_source_ai"
     assert panel.build_options().repair_newline_only is False
+
+
+def _identity(en="Use %s"):
+    return {
+        "expected_version": "1.21.1",
+        "expected_kind": "lang",
+        "expected_mod_id": "foo",
+        "expected_key": "k.sync",
+        "expected_en_us": en,
+        "expected_revision": None,
+    }
+
+
+def _stored(db, version, source=SRC_AI):
+    return db._q(
+        "SELECT t.zh_tw FROM translation t JOIN entry e ON e.id=t.entry_id "
+        "WHERE e.mc_version=? AND e.key='k.sync' AND t.source=?",
+        (version, source),
+    )[0][0]
+
+
+def test_quality_repair_can_sync_identical_old_text_to_other_versions(db_path):
+    db = TranslationDB(db_path)
+    _ingest(db, "1.21.1", "foo", "k.sync", SRC_AI, "使用", en="Use %s")
+    _ingest(db, "1.20.1", "foo", "k.sync", SRC_AI, "使用", en="Use %s")  # 舊譯文相同
+    _ingest(db, "1.19.2", "foo", "k.sync", SRC_AI, "別的舊譯", en="Use %s")  # 不同
+    _ingest(db, "1.18.2", "foo", "k.sync", SRC_AI, "使用", en="Other %s")  # 原文不同
+    root = db._q("SELECT id FROM entry WHERE mc_version='1.21.1' AND key='k.sync'")[0][
+        0
+    ]
+
+    result = db.replace_translation_quality_mismatch(
+        root, SRC_AI, "使用", "使用 %s", sync_other_versions=True, **_identity()
+    )
+
+    assert (result.status, result.synced_other_versions) == ("updated", 1)
+    assert _stored(db, "1.21.1") == "使用 %s"
+    assert _stored(db, "1.20.1") == "使用 %s"
+    assert _stored(db, "1.19.2") == "別的舊譯"
+    assert _stored(db, "1.18.2") == "使用"
+    # 同步的版本也有自己的歷史，可個別還原
+    synced_entry = db._q(
+        "SELECT id FROM entry WHERE mc_version='1.20.1' AND key='k.sync'"
+    )[0][0]
+    assert db.entry_detail(synced_entry).history[0].action == "quality_repair"
+    db.close()
+
+
+def test_quality_repair_does_not_touch_other_versions_by_default(db_path):
+    db = TranslationDB(db_path)
+    _ingest(db, "1.21.1", "foo", "k.sync", SRC_AI, "使用", en="Use %s")
+    _ingest(db, "1.20.1", "foo", "k.sync", SRC_AI, "使用", en="Use %s")
+    root = db._q("SELECT id FROM entry WHERE mc_version='1.21.1' AND key='k.sync'")[0][
+        0
+    ]
+
+    result = db.replace_translation_quality_mismatch(
+        root, SRC_AI, "使用", "使用 %s", **_identity()
+    )
+
+    assert result.synced_other_versions == 0
+    assert _stored(db, "1.20.1") == "使用"
+    db.close()
+
+
+def test_repair_service_reports_synced_other_versions(db_path, monkeypatch):
+    db = TranslationDB(db_path)
+    _ingest(db, "1.21.1", "foo", "k.sync", SRC_AI, "使用", en="Use %s")
+    _ingest(db, "1.20.1", "foo", "k.sync", SRC_AI, "使用", en="Use %s")
+    options = _options(write_cache=False, repair_sync_other_versions=True)
+    preview = moddb_retranslate_service.preview_same_source_ai_retranslation(
+        db, options, mode="quality_mismatch"
+    )
+    db.close()
+    monkeypatch.setattr(
+        moddb_retranslate_service,
+        "translate_batch_smart",
+        lambda batch, _total: (
+            [{**item, "text": "使用 %s"} for item in batch],
+            "AUTO",
+        ),
+    )
+
+    result = _run(db_path, preview.entries, options=options, mode="quality_mismatch")
+
+    assert result["summary"]["updated"] == 1
+    assert result["summary"]["synced_other_versions"] == 1
+    check = TranslationDB(db_path)
+    assert _stored(check, "1.20.1") == "使用 %s"
+    check.close()
+
+
+def test_translate_panel_builds_sync_option_only_for_quality_mode(db_path):
+    panel = translate_panel.TranslatePanel(mock_page(), lambda: TranslationDB(db_path))
+
+    assert panel.repair_sync_row.value is False
+    assert panel.build_options().repair_sync_other_versions is False
+    panel.repair_sync_row.value = True
+    assert panel.build_options().repair_sync_other_versions is True
+    panel._repair_mode = "same_source_ai"
+    assert panel.build_options().repair_sync_other_versions is False

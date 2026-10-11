@@ -122,6 +122,8 @@ class SameSourceAIRepairReport:
     input_newline_mismatch_with_other_hard_issues: int = 0
     skipped_newline_only_candidates: int = 0
     strict_newline: bool = False
+    sync_other_versions: bool = False
+    synced_other_versions: int = 0
     review_run_id: str = ""
     review_store_path: str = ""
     reviewable_results: int = 0
@@ -1199,6 +1201,7 @@ def _finalize_source_target(
     suffix = "（共用已驗證 AI 回覆；獨立 CAS）" if shared else ""
     if replace.status == "updated":
         report.updated += 1
+        report.synced_other_versions += replace.synced_other_versions
         _log_candidate(db, session, report, target, "updated", f"✅ 更新成功{suffix}")
     elif replace.status == "unchanged":
         report.unchanged += 1
@@ -1266,6 +1269,7 @@ def _replace_candidate_translation(db, original, text, report):
             **identity,
             expected_revision=original["_expected_revision"],
             strict_newline=report.strict_newline,
+            sync_other_versions=report.sync_other_versions,
         )
     return db.replace_ai_translation(entry_id, old_text, text, **identity)
 
@@ -1821,6 +1825,8 @@ def run_moddb_retranslate_service(
         candidates=len(entries),
         mode=mode,
         strict_newline=mode == "quality_mismatch" and options.repair_newline_only,
+        sync_other_versions=mode == "quality_mismatch"
+        and options.repair_sync_other_versions,
         input_newline_mismatch_candidates=(
             review_preview.input_newline_mismatch_candidates if review_preview else 0
         ),
