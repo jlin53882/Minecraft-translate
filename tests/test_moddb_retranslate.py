@@ -444,17 +444,17 @@ def test_manual_review_confirmation_skips_format_check_but_keeps_cas_history_and
         "database_priority": db.priority,
     }
     db.close()
+    store = moddb_repair_review_store.create_run(db_path, "run-manual")
+    index = moddb_repair_review_store.append_item(store, "run-manual", item)
+    item = moddb_repair_review_store.load_item(store, "run-manual", index)
 
-    assert (
-        moddb_retranslate_service.apply_repair_review_item(db_path, item, "Use")
-        == "stale"
-    )
-    assert (
-        moddb_retranslate_service.apply_repair_review_item(
-            db_path, item, "人工已確認，即使不同於來源佔位符"
+    def apply(draft):
+        return moddb_retranslate_service.apply_and_record_repair_review(
+            db_path, store, "run-manual", item, draft
         )
-        == "applied"
-    )
+
+    assert apply("Use") == "stale"
+    assert apply("人工已確認，即使不同於來源佔位符") == "applied"
     check = TranslationDB(db_path)
     detail = check.entry_detail(entry.id)
     history = next(

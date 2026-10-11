@@ -332,13 +332,6 @@ def parse_priority(names: Any, custom: dict[str, int] | None = None) -> tuple[in
     return tuple(order)
 
 
-def priority_names(
-    priority: tuple[int, ...], catalog: SourceCatalog = DEFAULT_SOURCE_CATALOG
-) -> list[str]:
-    """Serialize source identity, never a potentially colliding display label."""
-    return [catalog.token_for(code) for code in priority]
-
-
 def serialize_priority_lines(
     names: Any, catalog: SourceCatalog = DEFAULT_SOURCE_CATALOG
 ) -> list[str]:

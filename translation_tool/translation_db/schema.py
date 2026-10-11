@@ -53,16 +53,6 @@ BUILTIN_SOURCE_NAMES: dict[int, str] = dict(SOURCE_NAMES)
 CUSTOM_SOURCE_BASE = 100
 
 
-def register_source_names(registry: dict[str, int]) -> None:
-    """Deprecated compatibility hook; custom names belong to ``SourceCatalog``.
-
-    ``SOURCE_NAMES`` intentionally contains built-ins only. Keeping this
-    function avoids breaking downstream imports while preventing a database
-    selection from changing labels in another open database or task.
-    """
-    del registry
-
-
 # 預設優先序（先者優先）；已校驗（checker 不為空）者永遠最優先
 DEFAULT_PRIORITY: tuple[int, ...] = (
     SRC_MANUAL,

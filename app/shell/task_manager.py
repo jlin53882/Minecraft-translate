@@ -284,14 +284,6 @@ class TaskManager:
                 )
             )
 
-    def stop_accepting(self) -> None:
-        """相容舊呼叫端：關閉 authoritative registry 的 admission。"""
-        self.operation_registry.begin_shutdown()
-
-    def resume_accepting(self) -> None:
-        """明確恢復 admission；active operation 尚未收斂時會拒絕。"""
-        self.operation_registry.reopen_admission()
-
     def _drop(self, sid: int) -> None:
         """session 被回收卻沒有 finish：當作中斷，從進行中移除。"""
         with self._lock:
@@ -304,16 +296,6 @@ class TaskManager:
             self._recent.appendleft(info)
         self.operation_registry.finish_abandoned_session(sid)
         self._emit()
-
-    def request_cancel_active(self) -> int:
-        """要求所有已註冊中的 session 取消，回傳送出要求的數量。
-
-        這只設定 worker 可觀察的 cancellation flag，不把 requested 誤當成
-        worker 已停止；呼叫端仍必須等待 ``finish``／實際 writer completion。
-        """
-        return sum(
-            handle.request_cancel() for handle in self.operation_registry.active()
-        )
 
     # -- 讀取 ---------------------------------------------------------------
 

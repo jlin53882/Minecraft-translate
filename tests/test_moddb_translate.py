@@ -1828,7 +1828,7 @@ def test_flagged_entries_flow_from_translation_to_entries_review(db_path, monkey
     assert panel.view_flagged_btn.visible is False
     panel._apply_summary(summary)
     assert panel.view_flagged_btn.visible is True
-    panel._view_flagged()  # 按「檢視」
+    panel.result_inspector.inspect()  # 按「檢視」
 
     entries = view.entries
     assert view.tab == "entries" and entries.state == "none"
@@ -1844,7 +1844,10 @@ def test_flagged_entries_flow_from_translation_to_entries_review(db_path, monkey
 
     # 重新開始機翻會清掉上一次的「檢視」
     panel._reset_stats()
-    assert panel.view_flagged_btn.visible is False and panel._flagged == {}
+    assert (
+        panel.view_flagged_btn.visible is False
+        and panel.result_inspector.normal_entries == {}
+    )
     # 從總覽跳進來套用狀態篩選時，也會清掉「特殊字元不一致」篩選
     entries.show_flagged(list(flagged), flagged, "1.21.1")
     entries.show_filter("diff")
@@ -2205,7 +2208,7 @@ def test_manual_fix_of_a_flagged_entry_lowers_the_translate_card(db_path, monkey
     panel._run_version = "1.21.1"
     panel._apply_summary(summary)
     assert panel.stat_flagged.value_text.value == "1"
-    panel._view_flagged()
+    panel.result_inspector.inspect()
     entries = view.entries
 
     db = view.get_db()
@@ -2215,5 +2218,5 @@ def test_manual_fix_of_a_flagged_entry_lowers_the_translate_card(db_path, monkey
 
     assert panel.stat_flagged.value_text.value == "0"
     assert panel.view_flagged_btn.visible is False
-    assert panel._flagged == {}
+    assert panel.result_inspector.normal_entries == {}
     assert entries.entry_ids == []

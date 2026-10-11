@@ -668,13 +668,13 @@ def test_ingest_manual_source_is_explicitly_unreviewed(db):
     assert entry.review_status == "unreviewed"
 
 
-def test_priority_names_roundtrip_builtin_custom_collision():
-    from translation_tool.translation_db.settings import parse_priority, priority_names
+def test_priority_tokens_roundtrip_builtin_custom_collision():
+    from translation_tool.translation_db.settings import parse_priority
     from translation_tool.translation_db.source_catalog import SourceCatalog
 
     catalog = SourceCatalog.from_registry({"釘宮翻譯組": 100})
     priority = (SRC_SUBTITLE, 100)
-    names = priority_names(priority, catalog)
+    names = [catalog.token_for(code) for code in priority]
     assert names == ["builtin:subtitle", "custom:100"]
     assert parse_priority(names, {"釘宮翻譯組": 100})[:2] == priority
 

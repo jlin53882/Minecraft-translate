@@ -135,16 +135,6 @@ def _token_issues_from_counts(wanted: Counter[str], actual: Counter[str]) -> lis
     return issues
 
 
-def token_issue_deltas(
-    source: str, before: str, after: str
-) -> tuple[QualityIssueDelta, ...]:
-    """Return structural missing/extra token counts before and after an edit."""
-    wanted = format_tokens(source)
-    before_tokens = format_tokens(before)
-    after_tokens = format_tokens(after)
-    return _token_issue_deltas_from_counts(wanted, before_tokens, after_tokens)
-
-
 def _token_issue_deltas_from_counts(
     wanted: Counter[str],
     before_tokens: Counter[str],

@@ -1111,19 +1111,6 @@ def _apply_review_item_on(db, item: dict[str, Any], draft: str) -> str:
     return "applied" if result.status == "updated" else "stale"
 
 
-def apply_repair_review_item(
-    database_path: str | Path, item: dict[str, Any], draft: str
-) -> str:
-    """Apply one human-confirmed rejected draft using the original source CAS."""
-    db = _open_review_db(database_path, item)
-    if db is None:
-        return "stale"
-    try:
-        return _apply_review_item_on(db, item, draft)
-    finally:
-        db.close()
-
-
 def apply_and_record_repair_review(
     database_path: str | Path,
     store_path: str | Path,

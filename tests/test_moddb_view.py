@@ -1042,7 +1042,7 @@ def test_lm_view_shows_database_status_and_defaults_from_settings(db_path):
     assert "尚未建立 Mod 資料庫" in view.db_info.value
     assert view.use_db_switch.value is True  # 預設啟用（資料庫不存在時流程自動略過）
     seed(db_path)
-    view.refresh_db_info()
+    view.lm_db_options.sync_from_global()
     assert "4 條目" in view.db_info.value and "1.21.1" in view.db_info.value
 
 
@@ -1065,7 +1065,7 @@ def test_lm_view_warns_when_database_is_on_but_no_version_is_set(db_path, monkey
     view = lm_view.LMView(mock_page(), mock_filepicker())
     view.use_db_switch.value = True
     view.db_version_field.value = ""
-    view.refresh_db_info()
+    view.lm_db_options.sync_from_global()
     assert "尚未指定目標版本" in view.db_info.value
 
     view.db_version_field.value = "1.21.1"
@@ -2082,16 +2082,6 @@ def test_ui_handler_skips_records_already_written_to_the_session():
     finally:
         log.removeHandler(handler)
     assert [e.text for e in session.snapshot()["logs"]] == ["兩邊都要"]
-
-
-def test_visible_segments_exposes_newline_spaces_and_tokens():
-    from app.views.moddb.formatting import visible_segments
-
-    segs = visible_segments("Hi %2$s \n")
-    assert ("%2$s", "token") in segs
-    assert ("·", "space") in segs
-    assert ("↵", "newline") in segs
-    assert "".join(s for s, k in segs if k == "text") == "Hi \n"
 
 
 def test_switching_back_to_a_running_tab_resumes_polling(db_path, monkeypatch):
