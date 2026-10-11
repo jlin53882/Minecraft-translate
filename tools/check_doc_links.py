@@ -1,7 +1,8 @@
 """檢查 Markdown 文件中的本地連結與錨點。
 
-這是低依賴的 repository check，不會連線驗證外部 URL。它只解析一般 inline
-Markdown links/images，並明確略過 fenced code block，避免把範例字串誤判成文件連結。
+這是低依賴的 repository check，不會連線驗證外部 URL。它解析 README、根目錄
+agent 指示文件與 docs/**/*.md 中的一般 inline Markdown links/images，並明確略過
+fenced code block，避免把範例字串誤判成文件連結。
 """
 
 from __future__ import annotations
@@ -19,6 +20,7 @@ _PROTOCOL = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*:")
 _FENCE = re.compile(r"^\s*(`{3,}|~{3,})")
 _HEADING = re.compile(r"^\s{0,3}#{1,6}\s+(.+?)\s*#*\s*$")
 _EXPLICIT_ANCHOR = re.compile(r"\b(?:id|name)\s*=\s*[\"'](.*?)[\"']", re.IGNORECASE)
+_ROOT_DOCUMENTS = ("README.md", "AGENTS.md", "CLAUDE.md")
 
 
 def _without_fenced_code(text: str) -> list[str]:
@@ -105,10 +107,7 @@ def _is_external(target: str) -> bool:
 
 
 def _iter_documents(root: Path) -> list[Path]:
-    documents = []
-    readme = root / "README.md"
-    if readme.is_file():
-        documents.append(readme)
+    documents = [root / name for name in _ROOT_DOCUMENTS if (root / name).is_file()]
     documents.extend(sorted((root / "docs").rglob("*.md")))
     return documents
 

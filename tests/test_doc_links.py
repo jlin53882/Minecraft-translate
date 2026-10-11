@@ -45,10 +45,27 @@ def test_checker_reports_missing_path_and_anchor(tmp_path: Path):
     docs.mkdir()
     (docs / "target.md").write_text("# 只有這個標題\n", encoding="utf-8")
     (tmp_path / "README.md").write_text(
-        "[不存在](docs/missing.md)\n[錯誤錨點](docs/target.md#missing)\n",
+        "[不存在](docs/missing.md)\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "AGENTS.md").write_text(
+        "[錯誤錨點](docs/target.md#missing)\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "CLAUDE.md").write_text(
+        "[另一個不存在](docs/other-missing.md)\n",
         encoding="utf-8",
     )
 
     problems = find_broken_links(tmp_path)
     assert any("missing target" in item for item in problems)
     assert any("missing anchor" in item for item in problems)
+
+
+def test_agent_guidance_uses_current_view_docs_root():
+    current = "docs/developer-guide/views/*_VIEW_ARCHITECTURE.md"
+    old = "docs/*_VIEW_ARCHITECTURE.md"
+    for name in ("AGENTS.md", "CLAUDE.md"):
+        text = (Path(__file__).parents[1] / name).read_text(encoding="utf-8")
+        assert current in text
+        assert old not in text

@@ -42,9 +42,9 @@
 - 文件只描述「現在」的程式與規則：不寫 PR／issue 編號、「原本／改為／已移除」等演進過程，也不寫「為什麼要做這次修改」；
   這些放在 commit message 與 PR 說明。例外：`CHANGELOG.md` 與 `docs/adr/`（決策紀錄）。
 - 修改頁面（`app/views/`）的使用者流程、背景工作或錯誤處理時，同步更新 `docs/page_flows/<key>.md`
-  與對應的 `docs/*_VIEW_ARCHITECTURE.md`；新增頁面時一併新增流程文件並列入 `docs/page_flows/README.md`。
+  與對應的 `docs/developer-guide/views/*_VIEW_ARCHITECTURE.md`；新增頁面時一併新增流程文件並列入 `docs/page_flows/README.md`。
 - 文件中的程式路徑、`docs/page_flows/` 中反引號標示的識別字，以及 PR／issue 編號由 `tests/test_docs_code_paths.py` 檢查；
-  `*_VIEW_ARCHITECTURE.md` 的識別字由 `tests/test_view_docs_identifiers.py` 檢查。刪除或改名程式碼後跑這兩個測試。
+  `docs/developer-guide/views/*_VIEW_ARCHITECTURE.md` 的識別字由 `tests/test_view_docs_identifiers.py` 檢查。刪除或改名程式碼後跑這兩個測試。
 
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
