@@ -381,3 +381,68 @@ def test_edit_tab_keeps_same_container_across_rerenders_so_input_keeps_focus():
 
     assert last is first
     assert field in last.controls
+
+
+def _registry_db(tmp_path, registry, used_codes=()):
+    import json
+    import sqlite3
+
+    path = tmp_path / "reg.db"
+    database = TranslationDB(path)
+    database.ingest(
+        "1.21.1",
+        [ScanItem(KIND_LANG, "foo", f"k.{i}", f"En {i}", f"譯{i}") for i in range(3)],
+    )
+    database.close()
+    with sqlite3.connect(path) as conn:
+        conn.execute(
+            "INSERT INTO meta (key, value) VALUES ('custom_sources', ?) "
+            "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            (json.dumps(registry, ensure_ascii=False),),
+        )
+        for i, code in enumerate(used_codes):
+            conn.execute(
+                "INSERT INTO translation (entry_id, source, zh_tw) VALUES (?,?,?)",
+                (i + 1, code, "x"),
+            )
+    return path
+
+
+def test_prune_unused_custom_sources_keeps_referenced_ones(tmp_path):
+    from translation_tool.translation_db.settings import (
+        prune_unused_custom_sources,
+        read_custom_sources,
+    )
+
+    path = _registry_db(
+        tmp_path, {"測試": 100, "釘宮翻譯組": 101, "Pack": 102}, used_codes=(102,)
+    )
+
+    removed, kept = prune_unused_custom_sources(path)
+
+    assert sorted(removed) == ["測試", "釘宮翻譯組"]
+    assert kept == ["Pack"]
+    assert read_custom_sources(path) == {"Pack": 102}
+    # 再跑一次沒有東西可清，且不會動到仍在使用的來源
+    assert prune_unused_custom_sources(path) == ([], ["Pack"])
+
+
+def test_prune_banner_button_cleans_priority_lines(tmp_path, monkeypatch):
+    from app.views.config import db_location
+    from translation_tool.translation_db.settings import read_custom_sources
+
+    path = _registry_db(tmp_path, {"測試": 100, "Pack": 102}, used_codes=(102,))
+    monkeypatch.setattr(
+        db_location, "current_settings", lambda: type("S", (), {"path": str(path)})()
+    )
+    banner = db_location.DbLocationBanner()
+    field = ft.TextField(value="人工\n測試\nPack\ncustom:100")
+    rechecked: list[int] = []
+    db_location.attach_prune_cleanup(banner, field, lambda: rechecked.append(1))
+
+    banner._on_prune()
+
+    assert read_custom_sources(path) == {"Pack": 102}
+    assert field.value == "人工\nPack"
+    assert rechecked == [1]
+    assert "測試" in banner.note.value

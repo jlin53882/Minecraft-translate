@@ -205,6 +205,61 @@ def ensure_custom_sources(path: Path, names: list[str]) -> dict[str, int]:
     return registry
 
 
+def prune_unused_custom_sources(path: Path) -> tuple[list[str], list[str]]:
+    """從資料庫登錄移除沒有任何資料引用的自訂來源；回傳 ``(已移除, 仍在使用)`` 名稱。
+
+    只改 ``meta.custom_sources`` 這一列，不動翻譯資料。引用檢查涵蓋翻譯列、
+    生效列與歷史紀錄；被引用的來源一律保留。移除前的登錄表另存在
+    ``meta.custom_sources_pruned``，需要時可手動還原。
+    """
+    registry = read_custom_sources(path)
+    if not registry or classify_database(path) != DB_VALID:
+        return [], []
+    conn = sqlite3.connect(path, timeout=5)
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        row = conn.execute(
+            "SELECT value FROM meta WHERE key = 'custom_sources'"
+        ).fetchone()
+        registry = (
+            {str(k): int(v) for k, v in json.loads(row[0]).items()} if row else {}
+        )
+        used: set[int] = set()
+        for sql in (
+            "SELECT DISTINCT source FROM translation",
+            "SELECT DISTINCT source FROM effective",
+            "SELECT DISTINCT source_id FROM history WHERE source_id IS NOT NULL",
+        ):
+            used.update(int(r[0]) for r in conn.execute(sql))
+        removed = [n for n, code in registry.items() if code not in used]
+        kept = [n for n, code in registry.items() if code in used]
+        if removed:
+            conn.execute(
+                "INSERT INTO meta (key, value) VALUES ('custom_sources_pruned', ?) "
+                "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                (json.dumps(registry, ensure_ascii=False),),
+            )
+            conn.execute(
+                "UPDATE meta SET value = ? WHERE key = 'custom_sources'",
+                (
+                    json.dumps(
+                        {n: c for n, c in registry.items() if n in kept},
+                        ensure_ascii=False,
+                    ),
+                ),
+            )
+        conn.commit()
+    except (sqlite3.Error, ValueError) as exc:
+        conn.rollback()
+        log_warning(f"⚠️ 無法清除未使用的自訂來源：{exc!r}")
+        return [], []
+    finally:
+        conn.close()
+    if removed:
+        log_info(f"📚 已移除未使用的自訂來源：{'、'.join(removed)}")
+    return removed, kept
+
+
 def preview_new_source_names(text: str) -> tuple[list[str], list[str]]:
     """設定頁輸入框的即時預覽：``(已存在, 將新增)`` 的來源名稱（只讀，不登錄）。"""
     registry = read_custom_sources(load_db_settings().resolved_path())

@@ -45,6 +45,7 @@ from app.views.config.db_location import (
     DbLocationBanner,
     attach_path_hooks,
     attach_priority_hooks,
+    attach_prune_cleanup,
 )
 from app.views.config.settings_form import build_controls, build_pages
 from app.views.config.settings_schema import NAV_PAGES
@@ -211,6 +212,11 @@ class ConfigView(ft.Column):
         )
         self._check_priority = attach_priority_hooks(
             self.controls_map["translation_db.priority"]
+        )
+        attach_prune_cleanup(
+            self.db_location,
+            self.controls_map["translation_db.priority"],
+            self._check_priority,
         )
         self._bind_general_change_tracking()
 
