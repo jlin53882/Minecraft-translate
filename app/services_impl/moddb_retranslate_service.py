@@ -1366,7 +1366,13 @@ def _finish_snapshot(db, options, session, report, tracker) -> None:
         f"完成：來源項目 {report.candidates}；唯一 AI 修復項目 {report.ai_representatives}，"
         f"送出來源項目 {report.attempted_candidates}，已完成來源項目 {report.processed_candidates}；"
         f"實際送給 AI {report.ai_submitted_items} 個唯一項目（不等於實際 HTTP 請求次數），"
-        f"已驗證 {report.ai_validated_items}，共用 AI 結果 {report.dedup_reused_candidates}；更新 {report.updated}，"
+        f"已驗證 {report.ai_validated_items}，共用 AI 結果 {report.dedup_reused_candidates}；更新 {report.updated}"
+        + (
+            f"（另同步其他版本 {report.synced_other_versions}）"
+            if report.sync_other_versions
+            else ""
+        )
+        + "，"
         f"仍相同 {report.unchanged}，格式檢查未通過 {report.flagged}，"
         f"資料已變動跳過 {report.skipped_changed}，失敗 {report.failed}，"
         f"未處理來源項目 {report.unprocessed_candidates}，未送出來源項目 {report.not_submitted_candidates}，"

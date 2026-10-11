@@ -829,7 +829,13 @@ class TranslatePanel(ft.Column):
         )
         self.repair_summary_text.value = (
             f"{progress}：待處理來源項目 {s.get('candidates', 0)}；"
-            f"更新 {s.get('updated', 0)}；"
+            f"更新 {s.get('updated', 0)}"
+            + (
+                f"（另同步其他版本 {s.get('synced_other_versions', 0)}）"
+                if s.get("sync_other_versions")
+                else ""
+            )
+            + "；"
             f"重翻後仍相同 {s.get('unchanged', 0)}；待人工確認 {s.get('flagged', 0)}；"
             f"資料已變動跳過 {s.get('skipped_changed', 0)}；"
             f"失敗 {s.get('failed', 0)}；"

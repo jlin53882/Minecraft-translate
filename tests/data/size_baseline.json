@@ -31,6 +31,6 @@
     "app/views/icon_preview_view.py": 832,
     "app/views/moddb/batch_replace_dialog.py": 982,
     "app/views/moddb/entries_panel.py": 956,
-    "app/views/moddb/translate_panel.py": 1014
+    "app/views/moddb/translate_panel.py": 1020
   }
 }

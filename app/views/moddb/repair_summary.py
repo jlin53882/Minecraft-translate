@@ -21,6 +21,11 @@ def repair_summary_detail_lines(summary: dict) -> list[str]:
             f"{summary.get('not_submitted_candidates', 0)}；未處理的來源項目 "
             f"{summary.get('unprocessed_candidates', 0)}"
         )
+    if summary.get("sync_other_versions"):
+        lines.append(
+            f"同步其他版本：{summary.get('synced_other_versions', 0)} 筆"
+            "（原文與舊譯文都相同的條目）"
+        )
     if summary.get("skipped_newline_only_candidates"):
         lines.append(
             f"略過 {summary.get('skipped_newline_only_candidates', 0)} 筆只有實際換行數不同的項目"

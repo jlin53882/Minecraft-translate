@@ -2866,3 +2866,49 @@ def test_translate_panel_builds_sync_option_only_for_quality_mode(db_path):
     assert panel.build_options().repair_sync_other_versions is True
     panel._repair_mode = "same_source_ai"
     assert panel.build_options().repair_sync_other_versions is False
+
+
+def test_repair_summary_shows_synced_other_versions_count():
+    from app.views.moddb.repair_summary import repair_summary_detail_lines
+
+    panel = translate_panel.TranslatePanel(mock_page(), lambda: None)
+    base = {
+        "operation": "repair_special_character_mismatch",
+        "candidates": 3,
+        "updated": 3,
+        "unchanged": 0,
+        "flagged": 0,
+        "skipped_changed": 0,
+        "failed": 0,
+        "remaining": 0,
+        "status": "DONE",
+    }
+
+    panel._apply_repair_summary({**base, "sync_other_versions": False}, final=True)
+    assert "同步其他版本" not in panel.repair_summary_text.value
+
+    synced = {**base, "sync_other_versions": True, "synced_other_versions": 7}
+    panel._apply_repair_summary(synced, final=True)
+    assert "更新 3（另同步其他版本 7）" in panel.repair_summary_text.value
+    assert "同步其他版本：7 筆" in "\n".join(repair_summary_detail_lines(synced))
+    assert not any("同步其他版本" in line for line in repair_summary_detail_lines(base))
+
+
+def test_repair_completion_log_reports_synced_count(db_path, monkeypatch):
+    db = TranslationDB(db_path)
+    _ingest(db, "1.21.1", "foo", "k.sync", SRC_AI, "使用", en="Use %s")
+    _ingest(db, "1.20.1", "foo", "k.sync", SRC_AI, "使用", en="Use %s")
+    options = _options(write_cache=False, repair_sync_other_versions=True)
+    preview = moddb_retranslate_service.preview_same_source_ai_retranslation(
+        db, options, mode="quality_mismatch"
+    )
+    db.close()
+    monkeypatch.setattr(
+        moddb_retranslate_service,
+        "translate_batch_smart",
+        lambda batch, _total: ([{**i, "text": "使用 %s"} for i in batch], "AUTO"),
+    )
+
+    result = _run(db_path, preview.entries, options=options, mode="quality_mismatch")
+
+    assert any("更新 1（另同步其他版本 1）" in str(line) for line in result["logs"])
