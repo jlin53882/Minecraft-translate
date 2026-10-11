@@ -684,7 +684,7 @@ SETTINGS: tuple[Setting, ...] = (
         "batch_limits",
         C_BATCH,
         "Gemini 請求的輸出上限；ChatGPT 方案 OAuth 流程不支援 max_output_tokens，因此會忽略此設定。",
-        default=32768,
+        default=65536,
         blank="zero",
         timing="next_batch",
         timing_note="下一批次讀取；per-model override 優先於全域值；0 表示不送 maxOutputTokens。",

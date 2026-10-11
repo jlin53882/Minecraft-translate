@@ -36,7 +36,7 @@ def test_defaults_exist_and_match_budget_config_defaults():
     assert lm["token_budget_enabled"] is d.enabled
     assert lm["max_output_token_budget"] == d.max_output_token_budget == 65536
     assert lm["max_input_token_budget"] == d.max_input_token_budget == 264000
-    assert lm["max_output_tokens"] == d.max_output_tokens == 32768
+    assert lm["max_output_tokens"] == d.max_output_tokens == 65536
     assert lm["output_token_factor"] == d.output_token_factor
     assert lm["budget_min_scale"] == d.min_scale
     assert lm["budget_recover_after"] == d.recover_after

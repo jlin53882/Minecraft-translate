@@ -12,7 +12,7 @@
 |---|---|
 | 觀測 | `call_gemini_requests(..., meta_out=dict)` 回報 `finishReason`、`promptTokenCount`、`candidatesTokenCount`、`thoughtsTokenCount`；回傳值仍是字串 |
 | 截斷診斷 | 截斷時 log 一行 `[截斷診斷]`：原因（`MAX_TOKENS` 或 `STOP` 但 JSON 壞）、送出筆數、估算與實際 token |
-| 上限 | 一律送 `generationConfig.maxOutputTokens`（預設 32768），避免模型重複輸出燒光額度 |
+| 上限 | 一律送 `generationConfig.maxOutputTokens`（預設 65536），避免模型重複輸出燒光額度 |
 | 切批 | `lm_batch_budget.select_batch_size`：由前往後累加，項目數上限 / 輸出 token 預算 / 輸入 token 預算，先到者為準，永遠只取輸入的**前綴** |
 | 學習 | 依 profile（lang / ftb / kubejs / md / patch）保存。`MAX_TOKENS` 截斷 → 輸出預算減半；連續成功 → 緩慢回升到設定值 |
 | 校正 | 成功回應後，以實際輸出（`candidates` + 思考 token）用 EMA 校正「輸出 / 輸入」係數 |
@@ -48,7 +48,7 @@
 | `token_budget_enabled` | `true` | `false` = 回到舊行為，只看項目數 |
 | `max_output_token_budget` | `65536` | 單批預期輸出 token 上限（保守值） |
 | `max_input_token_budget` | `264000` | 單批輸入 token 上限，避免單次呼叫吃掉太多 TPM |
-| `max_output_tokens` | `32768` | 送給 API 的 `maxOutputTokens`；`0` = 不送 |
+| `max_output_tokens` | `65536` | 送給 API 的 `maxOutputTokens`；`0` = 不送 |
 | `output_token_factor` | `1.5` | 預期輸出 / 輸入係數，範圍 0.3~6.0，會依實際用量校正 |
 | `budget_min_scale` | `0.0625` | 撞牆後輸出預算最多縮到設定值的幾倍 |
 | `budget_recover_after` | `3` | 連續成功幾批後開始回升 |
@@ -60,7 +60,7 @@
 
 ### 注意：`max_output_tokens` 不可超過模型上限
 
-32768 低於 Gemini 2.5 Flash 與 3.1 Flash Lite 的 65,536，但**高於** Gemini 2.0 Flash 的 8,192。
+65536 等於 Gemini 2.5 Flash 與 3.1 Flash Lite 的上限 65,536，但**高於** Gemini 2.0 Flash 的 8,192。
 啟用會超限的模型時 API 會回 400；偵測到 `maxOutputTokens` 相關的 400 時會直接拋出明確錯誤
 （請調低 `max_output_tokens`，或設為 `0`），不會一路縮小批次後把每一批都放棄。
 
