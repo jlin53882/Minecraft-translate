@@ -26,6 +26,7 @@ from translation_tool.utils.config_schema import (  # noqa: F401 - 重新匯出�
     C_PROMPTS,
     C_SPECIES,
     C_TDB,
+    C_TOKEN_BUDGET,
     C_TRANSLATOR,
     SETTINGS,
     SETTINGS_BY_PATH,
@@ -41,9 +42,11 @@ NAV_PAGES: tuple[dict[str, str], ...] = (
     {"id": "api_models", "label": "API & 模型設定", "icon": "KEY"},
     {"id": "translation_behavior", "label": "翻譯行為設定", "icon": "TRANSLATE"},
     {"id": "merger", "label": "語言合併器設定", "icon": "MERGE_TYPE"},
+    {"id": "mod_db", "label": "Mod 資料庫", "icon": "DATASET"},
     {"id": "prompts", "label": "提示詞管理", "icon": "MESSAGE"},
     {"id": "species_lookup", "label": "學名查詢管理", "icon": "SEARCH"},
     {"id": "batch_limits", "label": "批次與限制", "icon": "DEVELOPER_BOARD"},
+    {"id": "token_budget", "label": "Token 預算", "icon": "SPEED"},
     {"id": "extractor", "label": "Jar 提取設定", "icon": "FOLDER_OPEN"},
 )
 
@@ -181,7 +184,6 @@ LAYOUT: dict[str, tuple[Card, ...]] = {
                 ),
             ),
         ),
-        Card(C_TDB),
         Card(C_BUNDLER),
     ),
     "api_models": (
@@ -239,6 +241,7 @@ LAYOUT: dict[str, tuple[Card, ...]] = {
         Card(
             C_BATCH,
             (
+                Head("各類型單批請求大小"),
                 R(
                     "lm_translator.initial_batch_size_patchouli",
                     "lm_translator.initial_batch_size_lang",
@@ -247,28 +250,73 @@ LAYOUT: dict[str, tuple[Card, ...]] = {
                 R(
                     "lm_translator.initial_batch_size_kubejs",
                     "lm_translator.initial_batch_size_md",
+                    pad=1,
+                ),
+                Gap(),
+                Head("失敗縮批與等待"),
+                R(
                     "lm_translator.min_batch_size",
                     "lm_translator.batch_shrink_factor",
+                    "lm_translator.rpm_cooldown_sec",
                 ),
                 R(
-                    "lm_translator.rpm_cooldown_sec",
                     "lm_translator.max_output_tokens",
                     "lm_translator.key_failure_cooldown_sec",
+                    "lm_translator.batch_write_interval",
                 ),
+            ),
+        ),
+    ),
+    "token_budget": (
+        Card(
+            C_TOKEN_BUDGET,
+            (
+                R("lm_translator.token_budget_enabled", pad=2),
+                Gap(),
+                Head("預算上限"),
                 R(
                     "lm_translator.max_output_token_budget",
                     "lm_translator.max_input_token_budget",
-                ),
-                R(
-                    "lm_translator.token_budget_enabled",
                     "lm_translator.output_token_factor",
-                    "lm_translator.budget_min_scale",
                 ),
+                Gap(),
+                Head("撞牆後的學習調整"),
                 R(
+                    "lm_translator.budget_min_scale",
                     "lm_translator.budget_recover_after",
                     "lm_translator.budget_recover_factor",
-                    "lm_translator.batch_write_interval",
                 ),
+            ),
+        ),
+    ),
+    "mod_db": (
+        Card(
+            C_TDB,
+            (
+                Head("使用時機"),
+                R(
+                    "translation_db.enabled",
+                    "translation_db.merge_enabled",
+                    pad=1,
+                ),
+                Gap(),
+                Head("資料庫與版本"),
+                R(
+                    "translation_db.path",
+                    "translation_db.version",
+                    pad=1,
+                ),
+                Gap(),
+                Head("沿用與寫回"),
+                R(
+                    "translation_db.cross_version",
+                    "translation_db.write_back",
+                    "translation_db.sync_manual",
+                ),
+                Gap(),
+                Head("來源"),
+                F("translation_db.zip_source"),
+                F("translation_db.priority"),
             ),
         ),
     ),

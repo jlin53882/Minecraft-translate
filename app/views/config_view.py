@@ -45,6 +45,7 @@ from app.views.config.db_location import (
     DbLocationBanner,
     attach_path_hooks,
     attach_priority_hooks,
+    attach_prune_cleanup,
 )
 from app.views.config.settings_form import build_controls, build_pages
 from app.views.config.settings_schema import NAV_PAGES
@@ -200,6 +201,7 @@ class ConfigView(ft.Column):
         self._reload_recovery_required = False
         self._reload_before_next_entry = False
         self._reload_exit_acknowledged = False
+        self._mounted = False
         self.controls_map = {}
         self._selected_nav = "general"
 
@@ -210,6 +212,11 @@ class ConfigView(ft.Column):
         )
         self._check_priority = attach_priority_hooks(
             self.controls_map["translation_db.priority"]
+        )
+        attach_prune_cleanup(
+            self.db_location,
+            self.controls_map["translation_db.priority"],
+            self._check_priority,
         )
         self._bind_general_change_tracking()
 
@@ -597,6 +604,15 @@ class ConfigView(ft.Column):
 
     def _on_provider_changed(self, _event=None) -> None:
         self._refresh_provider_panel_visibility()
+        self._ensure_chatgpt_models_loaded()
+
+    def _ensure_chatgpt_models_loaded(self) -> None:
+        if (
+            not self._mounted
+            or self.controls_map["lm_translator.provider"].value != "chatgpt"
+        ):
+            return
+        self.chatgpt_oauth_panel.ensure_models_loaded()
 
     def _sync_chatgpt_model_options(self, models=None, profile_id=None) -> None:
         sync_chatgpt_model_options(self, models, profile_id)
@@ -663,7 +679,7 @@ class ConfigView(ft.Column):
         )
         self.chatgpt_context_budget_control.hint_text = (
             "留空沿用全域 "
-            f"{self.controls_map['lm_translator.max_input_token_budget'].value or '60000'}"
+            f"{self.controls_map['lm_translator.max_input_token_budget'].value or '264000'}"
         )
         effort = settings.get("reasoning_effort", "model_default")
         if not isinstance(effort, str) or effort not in {
@@ -831,11 +847,15 @@ class ConfigView(ft.Column):
         """載入設定檔"""
         result = load_config_transactionally(self, load_config_json)
         refresh_chatgpt_model_controls_after_reload(self)
+        if self._mounted:
+            self._ensure_chatgpt_models_loaded()
         return result
 
     def did_mount(self):
         """切回設定頁時重新確認資料庫位置（其他頁可能剛建立了資料庫）。"""
+        self._mounted = True
         self.db_location.safe_refresh()
+        self._ensure_chatgpt_models_loaded()
 
     def _success_color(self):
         """取得成功顏色"""

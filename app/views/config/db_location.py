@@ -18,6 +18,9 @@ from app.services_impl.moddb_service import (
     preview_new_source_names,
     strip_quotes,
 )
+from app.services_impl.moddb_source_service import (
+    prune_unused_custom_sources_report,
+)
 from app.ui import design, kit
 from app.ui.design import C
 from app.ui.sync_text_field import _sync_change, _synced
@@ -34,6 +37,14 @@ class DbLocationBanner(ft.Container):
         self.file_text = ft.Text("", size=12, color=C.MUTED)
         self.status_box = ft.Container()
         self.note = ft.Text("", size=11.5, color=C.DIM)
+        self.on_pruned: Callable[[set[str]], None] | None = None
+        self.prune_btn = kit.button(
+            "清除未使用的自訂來源",
+            "ghost",
+            size="sm",
+            icon=ft.Icons.CLEANING_SERVICES_OUTLINED,
+            on_click=self._on_prune,
+        )
         super().__init__(
             padding=ft.Padding.symmetric(horizontal=16, vertical=12),
             bgcolor=C.PANEL,
@@ -53,6 +64,7 @@ class DbLocationBanner(ft.Container):
                     self.folder_text,
                     self.file_text,
                     self.note,
+                    self.prune_btn,
                 ],
                 spacing=4,
             ),
@@ -73,6 +85,15 @@ class DbLocationBanner(ft.Container):
                 "無法使用" if path.is_file() else "找不到",
             ),
         }[level]
+        unsaved = normalize_db_path(path_text) != normalize_db_path(
+            current_settings().path
+        )
+        self.prune_btn.disabled = unsaved
+        self.prune_btn.tooltip = (
+            "資料庫路徑尚未儲存；請先儲存設定，再清除未使用的自訂來源"
+            if unsaved
+            else None
+        )
         self.folder_text.value = str(path.parent)
         self.file_text.value = f"檔案：{path.name}"
         self.status_box.content = kit.chip(label, tone)
@@ -92,6 +113,26 @@ class DbLocationBanner(ft.Container):
             self.note.value = (
                 "要搬移資料庫時，請把檔案放到新位置後，在下方「資料庫檔案」改成新路徑。"
             )
+
+    def _on_prune(self, _e=None) -> None:
+        """移除資料庫登錄裡沒有任何資料引用的自訂來源（有資料的一律保留）。"""
+        if self.prune_btn.disabled:
+            return
+        removed, kept, gone_tokens = prune_unused_custom_sources_report(
+            current_settings().path
+        )
+        if removed:
+            self.note.value = f"已移除未使用的自訂來源：{'、'.join(removed)}。"
+            if self.on_pruned is not None:
+                self.on_pruned(gone_tokens)
+        elif kept:
+            self.note.value = f"沒有可清除的項目；{'、'.join(kept)} 仍有資料在使用。"
+        else:
+            self.note.value = "沒有可清除的自訂來源。"
+        try:
+            self.update()
+        except Exception as exc:  # noqa: BLE001 - 尚未掛上頁面時不影響設定頁
+            log_debug(f"DbLocationBanner 更新略過：{exc}")
 
     def safe_refresh(self, path_text: object | None = None) -> None:
         try:
@@ -169,3 +210,28 @@ def attach_priority_hooks(field: ft.TextField) -> Callable[[], None]:
 
     field.on_change = _synced(handler, _sync_change)
     return check
+
+
+def attach_prune_cleanup(
+    banner: DbLocationBanner, field: ft.TextField, recheck: Callable[[], None]
+) -> None:
+    """清除自訂來源後，把來源優先順序輸入框裡指向它們的行一併拿掉（儲存後生效）。"""
+
+    def drop(gone: set[str]) -> None:
+        lines = (field.value or "").splitlines()
+        field.value = "\n".join(
+            line for line in lines if not _line_points_to(line, gone)
+        )
+        recheck()
+        try:
+            field.update()
+        except Exception as exc:  # noqa: BLE001 - 尚未掛上頁面時不影響設定頁
+            log_debug(f"來源優先順序欄位更新略過：{exc}")
+
+    banner.on_pruned = drop
+
+
+def _line_points_to(line: str, gone: set[str]) -> bool:
+    text = line.strip()
+    name, sep, _code = text.partition("（自訂 #")
+    return text in gone or (bool(sep) and name in gone)

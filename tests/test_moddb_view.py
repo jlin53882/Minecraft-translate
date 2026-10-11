@@ -1042,7 +1042,7 @@ def test_lm_view_shows_database_status_and_defaults_from_settings(db_path):
     assert "尚未建立 Mod 資料庫" in view.db_info.value
     assert view.use_db_switch.value is True  # 預設啟用（資料庫不存在時流程自動略過）
     seed(db_path)
-    view.refresh_db_info()
+    view.lm_db_options.sync_from_global()
     assert "4 條目" in view.db_info.value and "1.21.1" in view.db_info.value
 
 
@@ -1065,7 +1065,7 @@ def test_lm_view_warns_when_database_is_on_but_no_version_is_set(db_path, monkey
     view = lm_view.LMView(mock_page(), mock_filepicker())
     view.use_db_switch.value = True
     view.db_version_field.value = ""
-    view.refresh_db_info()
+    view.lm_db_options.sync_from_global()
     assert "尚未指定目標版本" in view.db_info.value
 
     view.db_version_field.value = "1.21.1"
@@ -1144,6 +1144,8 @@ def test_editor_hints_for_missing_tokens_whitespace_and_color_codes(special_entr
     panel.tw_field.value = "§a哈囉§r\n世界"  # 少了 %s
     panel._on_text_change()
     assert "少了 1 個「%s」" in panel.token_hint.value
+    assert "缺少 %s × 1（位置無法可靠判定）" in panel.chars.summary.value
+    assert "多出 §a × 1（位置無法可靠判定）" in panel.chars.summary.value
     assert panel.save_btn.disabled is False
 
     panel.tw_field.value = "哈囉 %s\n世界"
@@ -2082,16 +2084,6 @@ def test_ui_handler_skips_records_already_written_to_the_session():
     assert [e.text for e in session.snapshot()["logs"]] == ["兩邊都要"]
 
 
-def test_visible_segments_exposes_newline_spaces_and_tokens():
-    from app.views.moddb.formatting import visible_segments
-
-    segs = visible_segments("Hi %2$s \n")
-    assert ("%2$s", "token") in segs
-    assert ("·", "space") in segs
-    assert ("↵", "newline") in segs
-    assert "".join(s for s, k in segs if k == "text") == "Hi \n"
-
-
 def test_switching_back_to_a_running_tab_resumes_polling(db_path, monkeypatch):
     """隱藏機翻／掃描頁時停止輪詢，切回保留的面板時接續輪詢。"""
     seed(db_path)
@@ -2259,3 +2251,27 @@ def test_patchouli_macros_with_nested_parentheses_are_one_token():
     # 沒有結尾的 `$(` 不是標記；括號沒配對完時退回第一個 `)`
     assert not fm.format_tokens("a $( b")
     assert fm.format_tokens("$(t:(未配對)")["$(t:…)"] == 1
+
+
+def test_entries_search_runs_live_after_typing_and_enter_is_immediate(entries):
+    """搜尋框輸入後自動搜尋（防抖），Enter 則立即搜尋並取消等待中的那次。"""
+    scheduled: list[tuple] = []
+    entries._search_debounce.call = lambda fn, *args: scheduled.append((fn, args))
+    field = type("C", (), {"value": "alloy"})()
+    event = type("E", (), {"control": field})()
+
+    entries._on_search_input(event)
+    assert entries.query == "" and len(scheduled) == 1  # 還沒查，只排程
+
+    fn, args = scheduled[-1]
+    fn(*args)  # 防抖時間到
+    assert entries.query == "alloy"
+    assert [r.key for r in entries.rows] == ["item.foo.b"]
+
+    entries._on_search_input(event)  # 內容沒變：不再排程
+    assert len(scheduled) == 1
+
+    field.value = ""
+    entries._on_search(event)  # Enter 立即生效
+    assert entries.query == ""
+    assert len(entries.rows) > 1

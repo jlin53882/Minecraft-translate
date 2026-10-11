@@ -139,10 +139,13 @@ class AppShell:
         flush_before_close: Callable[[], object] | None = None,
         cache_reloader: CacheRootReloader | None = None,
         find_interrupted_tasks: Callable[[], object] | None = None,
+        active_model: Callable[[str | None], str | None] | None = None,
     ) -> None:
         self.page = page
         self.file_picker = file_picker or SafeFilePicker()
         self._key_snapshot = key_snapshot or _default_key_snapshot
+        self._active_model = active_model or _default_active_model_lookup()
+        self._shown_active_model: str | None = None
         self._config_loader = config_loader or _default_config_loader
         self._setup_operation_runtime(page, task_manager, cache_reloader)
         if initial_mode is None:
@@ -170,7 +173,7 @@ class AppShell:
         self._env_scheduled = False
         self._refresh_future = None
         self._env_future = None
-        self._poll_future = None
+        self._poll_future, self._ui_thread_id = None, None
         self._page_on_close = None
         self._previous_on_close = None
         self._window_on_event = None
@@ -246,6 +249,7 @@ class AppShell:
     def mount(self, start_view: str = DEFAULT_VIEW_KEY) -> None:
         """設定視窗、掛上版面、開始接收任務事件並顯示首頁。"""
         page = self.page
+        self._ui_thread_id = threading.get_ident()
         page.title = APP_TITLE
         width, height = get_window_size()
         try:
@@ -482,11 +486,20 @@ class AppShell:
         self.statusbar.set_workdir(_cache_dir_of(config))
 
     def _on_config_saved(self) -> None:
-        """設定存檔後（可能在任何執行緒）：只排程，真正的更新在 page event loop 上做。"""
+        """設定存檔後同步模型文字，並把其餘環境刷新排到 page event loop。"""
         with self._sched_lock:
-            if self._disposed or self._env_scheduled:
+            if self._disposed:
                 return
-            self._env_scheduled = True
+            schedule_refresh = not self._env_scheduled
+            if schedule_refresh:
+                self._env_scheduled = True
+        if threading.get_ident() == self._ui_thread_id:
+            # 設定頁的儲存事件本身就在 page event loop；先同步更新模型文字，
+            # 讓底部狀態列不必等下一個排程工作才反映新設定。
+            self._refresh_model_status()
+            self._safe_update()
+        if not schedule_refresh:
+            return
         ok, future = self._submit_ui(self._apply_config_refresh)
         with self._sched_lock:
             if not ok:
@@ -560,6 +573,31 @@ class AppShell:
                 return
         self.refresh_environment()
         self._safe_update()
+
+    def _refresh_model_status(self) -> None:
+        """只同步底部狀態列模型；完整環境刷新仍由 page task 執行。"""
+        try:
+            config = self._config_loader() or {}
+        except Exception:
+            logger.debug("即時讀取模型設定失敗", exc_info=True)
+            return
+        self.statusbar.set_model(_enabled_model_name(config))
+
+    def refresh_active_model(self) -> None:
+        """任務執行中，底部狀態列顯示「目前實際送出請求的模型」（配額用盡切換後會跟著變）。"""
+        task = self.tasks.current()
+        try:
+            active = self._active_model(task.operation_id) if task is not None else None
+        except Exception:
+            logger.debug("讀取目前模型失敗", exc_info=True)
+            return
+        if active == self._shown_active_model:
+            return
+        self._shown_active_model = active
+        if active:
+            self.statusbar.set_model(active)
+        else:
+            self._refresh_model_status()
 
     def refresh_keys(self) -> None:
         try:
@@ -691,6 +729,7 @@ class AppShell:
             if self._disposed:
                 break
             self.refresh_keys()
+            self.refresh_active_model()
             self._safe_update()
 
     # -- 生命週期 ------------------------------------------------------------
@@ -1097,6 +1136,17 @@ def _default_key_snapshot() -> list:
     from app.services_impl.key_health_service import get_key_health_snapshot
 
     return get_key_health_snapshot()
+
+
+def _default_active_model_lookup() -> Callable[[str | None], str | None]:
+    """開始記錄模型由哪個操作切換，回傳「依操作查詢目前模型」的函式。"""
+    from app.services_impl.key_health_service import (
+        get_active_model,
+        track_active_model_by_operation,
+    )
+
+    track_active_model_by_operation()
+    return get_active_model
 
 
 def _default_config_loader() -> dict:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import sqlite3
 from pathlib import Path
@@ -23,11 +24,45 @@ def create_run(database_path: str | Path, run_id: str) -> Path:
             "updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, "
             "PRIMARY KEY (run_id, item_index))"
         )
+        _ensure_group_column(conn)
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_repair_review_status "
             "ON repair_review(run_id,status,item_index)"
         )
     return path
+
+
+_GROUP_FIELDS = (
+    "database_identity",
+    "database_file_id",
+    "version",
+    "mod_id",
+    "kind",
+    "key",
+    "en_us",
+    "old_translation",
+    "ai_translation",
+)
+
+
+def _ensure_group_column(conn: sqlite3.Connection) -> None:
+    """Older stores lack ``group_key``; add it (their rows stay ungrouped)."""
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(repair_review)")}
+    if "group_key" not in columns:
+        conn.execute("ALTER TABLE repair_review ADD COLUMN group_key TEXT")
+
+
+def group_key(item: dict[str, Any]) -> str | None:
+    """Same DB, version, mod, key, source text, old text and AI draft = one review.
+
+    Rows only differ by the source (#2 簡中轉繁, #4 i18n…) that carried the text.
+    Returns ``None`` when an identity field is missing, so such rows stay single.
+    """
+    values = [item.get(field) for field in _GROUP_FIELDS]
+    if any(value in (None, "") for value in values[:7]):
+        return None
+    raw = json.dumps(values, ensure_ascii=False, separators=(",", ":"))
+    return hashlib.sha1(raw.encode("utf-8")).hexdigest()
 
 
 def append_item(path: str | Path, run_id: str, item: dict[str, Any]) -> int:
@@ -37,9 +72,11 @@ def append_item(path: str | Path, run_id: str, item: dict[str, Any]) -> int:
             "SELECT COALESCE(MAX(item_index),0)+1 FROM repair_review WHERE run_id=?",
             (run_id,),
         ).fetchone()[0]
+        _ensure_group_column(conn)
         conn.execute(
-            "INSERT INTO repair_review(run_id,item_index,payload) VALUES (?,?,?)",
-            (run_id, index, payload),
+            "INSERT INTO repair_review(run_id,item_index,payload,group_key) "
+            "VALUES (?,?,?,?)",
+            (run_id, index, payload, group_key(item)),
         )
     return int(index)
 
@@ -70,6 +107,29 @@ def load_item(path: str | Path, run_id: str, index: int) -> dict[str, Any] | Non
     return item
 
 
+def matching_items(
+    path: str | Path,
+    run_id: str,
+    item: dict[str, Any],
+    *,
+    statuses: tuple[str, ...] = ("pending", "invalid"),
+) -> list[dict[str, Any]]:
+    """Return unresolved review items in the same persisted review group as ``item``.
+
+    The group is the stored ``group_key`` (what the reviewer shows as one item), so a
+    confirmation never reaches a row the screen listed separately. Rows without a
+    stored key (older stores) and items without ``item_index`` stay single.
+    """
+    if not statuses or item.get("item_index") is None:
+        return []
+    matches: list[dict[str, Any]] = []
+    for index in group_indices(path, run_id, int(item["item_index"])):
+        candidate = load_item(path, run_id, index)
+        if candidate is not None and candidate.get("review_status") in statuses:
+            matches.append(candidate)
+    return matches
+
+
 def indices(
     path: str | Path,
     run_id: str,
@@ -77,37 +137,88 @@ def indices(
     *,
     limit: int | None = None,
     offset: int = 0,
+    grouped: bool = False,
 ) -> list[int]:
-    sql = "SELECT item_index FROM repair_review WHERE run_id=?"
+    """Item indices for a status; ``grouped`` keeps one (the first) per identical group."""
+    where = "run_id=?"
     params: tuple[Any, ...] = (run_id,)
     if status and status != "all":
-        sql += " AND status=?"
+        where += " AND status=?"
         params += (status,)
-    sql += " ORDER BY item_index"
-    if limit is not None:
-        sql += " LIMIT ? OFFSET ?"
-        params += (max(int(limit), 0), max(int(offset), 0))
     with sqlite3.connect(path, timeout=10) as conn:
+        if grouped:
+            _ensure_group_column(conn)
+            sql = (
+                "SELECT MIN(item_index) AS first FROM repair_review "
+                f"WHERE {where} GROUP BY COALESCE(group_key, 'i' || item_index) "
+                "ORDER BY first"
+            )
+        else:
+            sql = f"SELECT item_index FROM repair_review WHERE {where} ORDER BY item_index"
+        if limit is not None:
+            sql += " LIMIT ? OFFSET ?"
+            params += (max(int(limit), 0), max(int(offset), 0))
         return [int(row[0]) for row in conn.execute(sql, params)]
 
 
-def index_count(path: str | Path, run_id: str, status: str | None = None) -> int:
-    sql = "SELECT COUNT(*) FROM repair_review WHERE run_id=?"
+def index_count(
+    path: str | Path,
+    run_id: str,
+    status: str | None = None,
+    *,
+    grouped: bool = False,
+) -> int:
+    where = "run_id=?"
     params: tuple[Any, ...] = (run_id,)
     if status and status != "all":
-        sql += " AND status=?"
+        where += " AND status=?"
         params += (status,)
     with sqlite3.connect(path, timeout=10) as conn:
+        if grouped:
+            _ensure_group_column(conn)
+            sql = (
+                "SELECT COUNT(DISTINCT COALESCE(group_key, 'i' || item_index)) "
+                f"FROM repair_review WHERE {where}"
+            )
+        else:
+            sql = f"SELECT COUNT(*) FROM repair_review WHERE {where}"
         return int(conn.execute(sql, params).fetchone()[0])
 
 
-def status_counts(path: str | Path, run_id: str) -> dict[str, int]:
+def status_counts(
+    path: str | Path, run_id: str, *, grouped: bool = False
+) -> dict[str, int]:
     with sqlite3.connect(path, timeout=10) as conn:
+        if grouped:
+            _ensure_group_column(conn)
+            count = "COUNT(DISTINCT COALESCE(group_key, 'i' || item_index))"
+        else:
+            count = "COUNT(*)"
         rows = conn.execute(
-            "SELECT status,COUNT(*) FROM repair_review WHERE run_id=? GROUP BY status",
+            f"SELECT status,{count} FROM repair_review WHERE run_id=? GROUP BY status",
             (run_id,),
-        )
-    return {str(status): int(count) for status, count in rows}
+        ).fetchall()
+    return {str(status): int(n) for status, n in rows}
+
+
+def group_indices(path: str | Path, run_id: str, index: int) -> list[int]:
+    """Every item index that is reviewed together with ``index`` (always includes it)."""
+    with sqlite3.connect(path, timeout=10) as conn:
+        _ensure_group_column(conn)
+        row = conn.execute(
+            "SELECT group_key FROM repair_review WHERE run_id=? AND item_index=?",
+            (run_id, index),
+        ).fetchone()
+        if row is None or row[0] is None:
+            return [int(index)]
+        return [
+            int(r[0])
+            for r in conn.execute(
+                "SELECT item_index FROM repair_review "
+                "WHERE run_id=? AND group_key=? ORDER BY item_index",
+                (run_id, row[0]),
+            )
+        ]
 
 
 def save_review_state(

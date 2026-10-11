@@ -53,16 +53,6 @@ BUILTIN_SOURCE_NAMES: dict[int, str] = dict(SOURCE_NAMES)
 CUSTOM_SOURCE_BASE = 100
 
 
-def register_source_names(registry: dict[str, int]) -> None:
-    """Deprecated compatibility hook; custom names belong to ``SourceCatalog``.
-
-    ``SOURCE_NAMES`` intentionally contains built-ins only. Keeping this
-    function avoids breaking downstream imports while preventing a database
-    selection from changing labels in another open database or task.
-    """
-    del registry
-
-
 # 預設優先序（先者優先）；已校驗（checker 不為空）者永遠最優先
 DEFAULT_PRIORITY: tuple[int, ...] = (
     SRC_MANUAL,
@@ -508,6 +498,12 @@ def rank_sql(priority: tuple[int, ...], col: str = "source") -> str:
     """把來源優先序轉成 SQL ``CASE`` 排序運算式（只含整數，不接受外部字串）。"""
     ordered = list(priority)
     if SRC_AI_REPAIR not in ordered:
-        ordered.insert(0, SRC_AI_REPAIR)
+        # AI 修復是暫存的修復來源：沒有人工譯文時要蓋過原 AI，
+        # 但不能蓋過使用者剛儲存的人工修改，否則畫面會看起來像儲存失敗。
+        try:
+            manual_index = ordered.index(SRC_MANUAL)
+        except ValueError:
+            manual_index = -1
+        ordered.insert(manual_index + 1 if manual_index >= 0 else 0, SRC_AI_REPAIR)
     parts = " ".join(f"WHEN {int(s)} THEN {i}" for i, s in enumerate(ordered))
     return f"CASE {col} {parts} ELSE 99 END"

@@ -146,21 +146,22 @@ def format_live(live: dict) -> str:
     profile_progress = live.get("profile_progress")
     if profile_progress:
         representative_total = sum(
-            values["ai_representatives"] for values in profile_progress.values()
+            values["total_candidates"] for values in profile_progress.values()
         )
         representative_submitted = sum(
             values["ai_submitted_items"] for values in profile_progress.values()
         )
         parts.append(
-            f"AI 代表已送 {representative_submitted:,}/{representative_total:,} 筆"
+            f"AI 項目已送出 {representative_submitted:,}/{representative_total:,} 個"
         )
         for values in profile_progress.values():
             parts.append(
-                f"{values['label']} 候選 {values['processed_candidates']:,}/"
-                f"{values['total_candidates']:,}；代表 {values['ai_submitted_items']:,}/"
-                f"{values['ai_representatives']:,}；外層批次已完成 "
-                f"{values['completed_batches']:,}、目前規劃待處理 "
-                f"{values['planned_remaining_batches']:,}"
+                f"{values['label']} 來源項目 "
+                f"{values['processed_candidates']:,}/{values['total_candidates']:,}；"
+                f"AI 項目 {values['ai_submitted_items']:,}/"
+                f"{values['total_candidates']:,}；API 批次已完成 "
+                f"{values['completed_batches']:,}，預計剩餘 "
+                f"{values['planned_remaining_batches']:,} 批"
             )
     if live.get("finish_ts"):
         # 顯示本機時間：先以 UTC 建立再轉成本機時區
@@ -171,10 +172,37 @@ def format_live(live: dict) -> str:
     return "｜".join(parts)
 
 
+def format_repair_live(live: dict) -> str:
+    """Format repair progress with separate source, AI and planned-batch counters."""
+    source_total = int(live.get("source_total", live.get("total", 0)) or 0)
+    source_done = int(live.get("source_processed", live.get("processed", 0)) or 0)
+    source_percent = 100 * source_done / max(source_total, 1)
+    ai_done = int(live.get("ai_completed", 0) or 0)
+    ai_total = int(live.get("ai_total", 0) or 0)
+    planned_done = int(live.get("planned_batches_done", live.get("batch_done", 0)) or 0)
+    planned_total = int(
+        live.get("planned_batches_total", live.get("batch_est", 0)) or 0
+    )
+    eta = (
+        format_duration(live.get("eta_sec"))
+        if live.get("eta_sec") is not None
+        else "計算中"
+    )
+    return (
+        f"來源進度 {source_done:,}/{source_total:,}（{source_percent:.0f}%）｜"
+        f"AI 修復項目 {ai_done:,}/{ai_total:,}｜"
+        f"規劃批次 {planned_done:,}/{planned_total:,}｜"
+        f"已送出批次 {int(live.get('actual_requests', planned_done) or 0):,}｜"
+        f"已耗時 {format_duration(live.get('elapsed_sec'))}｜"
+        f"預估剩餘：{eta}"
+    )
+
+
 __all__ = [
     "RunProgress",
     "estimate_batches",
     "format_duration",
     "format_live",
+    "format_repair_live",
     "tick_live",
 ]

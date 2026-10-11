@@ -19,8 +19,15 @@ class RepairCardControls:
     start_button: ft.Control
     preview_text: ft.Text
     explainer: ft.Text
-    samples: ft.Column
+    samples: ft.Control
     summary: ft.Text
+    preview_search: ft.TextField
+    preview_source_filter: ft.Dropdown
+    preview_issue_filter: ft.Dropdown
+    preview_count: ft.Text
+    pager: kit.Pager
+    newline_row: kit.SwitchRow
+    sync_row: kit.SwitchRow
 
 
 def repair_copy(mode: str) -> tuple[str, str]:
@@ -50,6 +57,10 @@ def create_repair_card(
     on_mode_change: Callable,
     on_preview: Callable,
     on_confirm: Callable,
+    on_filter_change: Callable,
+    on_newline_change: Callable,
+    on_page: Callable[[int], None],
+    page_size: int,
 ) -> RepairCardControls:
     """Build the repair mode selector, scope notes, preview and confirmation controls."""
     mode_group = ft.RadioGroup(
@@ -79,7 +90,46 @@ def create_repair_card(
     default_text, explanation = repair_copy(mode)
     preview_text = ft.Text(default_text, size=13, color=C.TEXT, selectable=True)
     explainer = kit.hint_text(explanation)
-    samples = ft.Column(spacing=4)
+    newline_row = kit.SwitchRow(
+        "連「只有換行數不同」的項目一起送 AI 修復",
+        "預設略過原文與譯文只差實際換行數的項目。開啟後這類項目也會送 AI，"
+        "且 AI 結果的換行數必須與原文一致才會寫入。",
+        False,
+        on_change=on_newline_change,
+        divider=False,
+    )
+    newline_row.visible = mode == "quality_mismatch"
+    sync_row = kit.SwitchRow(
+        "修復後同步到其他版本",
+        "同一模組、鍵值與原文的其他版本，若該來源的舊譯文跟這筆完全相同，"
+        "一併改成新譯文（各自記錄歷史）。預設只修目前選的版本。",
+        False,
+        divider=False,
+    )
+    sync_row.visible = mode == "quality_mismatch"
+    preview_search = kit.text_field(
+        "搜尋 Key／Mod／原文／譯文",
+        icon=ft.Icons.SEARCH,
+        on_change=on_filter_change,
+        width=360,
+    )
+    preview_source_filter = kit.dropdown(
+        label="翻譯來源",
+        width=190,
+        on_select=on_filter_change,
+    )
+    preview_issue_filter = kit.dropdown(
+        label="異常類型",
+        width=180,
+        on_select=on_filter_change,
+    )
+    preview_count = ft.Text("尚未載入候選預覽。", size=12, color=C.MUTED)
+    # The page already owns the scroll position.  Keeping a second scrollable
+    # viewport here makes Flet Web retain a blank nested viewport after the
+    # preview is populated, so let the outer TranslatePanel scroll the cards.
+    samples = ft.Column(spacing=8, height=0, visible=False)
+    pager = kit.Pager(0, page_size=page_size, on_change=on_page, unit="個 Key")
+    pager.visible = False  # 候選不超過一頁時不顯示
     summary = ft.Text(
         "預覽只列候選、不呼叫 AI；按「開始修復」才會呼叫 AI。只儲存通過特殊字元檢查的結果，"
         "未通過就保留舊譯文。版本、模組、上限或條件變更後需重新預覽。",
@@ -93,8 +143,17 @@ def create_repair_card(
             [
                 mode_group,
                 explainer,
+                newline_row,
+                sync_row,
                 ft.Row([preview_button, start_button], spacing=10, wrap=True),
                 preview_text,
+                ft.Row(
+                    [preview_search, preview_source_filter, preview_issue_filter],
+                    spacing=8,
+                    wrap=True,
+                ),
+                preview_count,
+                pager,
                 samples,
                 summary,
             ],
@@ -112,4 +171,11 @@ def create_repair_card(
         explainer,
         samples,
         summary,
+        preview_search,
+        preview_source_filter,
+        preview_issue_filter,
+        preview_count,
+        pager,
+        newline_row,
+        sync_row,
     )

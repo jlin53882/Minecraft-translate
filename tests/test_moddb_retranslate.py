@@ -131,6 +131,38 @@ def _drain_page_tasks(page):
     page._run_all_tasks()
 
 
+def _contains_control_text(control, expected):
+    if getattr(control, "value", None) == expected:
+        return True
+    if getattr(control, "text", None) == expected:
+        return True
+    content = getattr(control, "content", None)
+    if content is not None and _contains_control_text(content, expected):
+        return True
+    return any(
+        _contains_control_text(child, expected)
+        for child in (getattr(control, "controls", None) or [])
+    )
+
+
+def _find_control_by_text(control, expected):
+    content = getattr(control, "content", None)
+    if getattr(control, "text", None) == expected or content == expected:
+        return control
+    found = (
+        _find_control_by_text(content, expected)
+        if content is not None and not isinstance(content, str)
+        else None
+    )
+    if found is not None:
+        return found
+    for child in getattr(control, "controls", None) or []:
+        found = _find_control_by_text(child, expected)
+        if found is not None:
+            return found
+    return None
+
+
 def _select_repair_mode(panel, mode="same_source_ai"):
     panel._repair_mode = mode
     panel.repair_mode_group.value = mode
@@ -139,6 +171,12 @@ def _select_repair_mode(panel, mode="same_source_ai"):
 
 def test_repair_mode_selector_explains_scope_and_updates_copy():
     panel = translate_panel.TranslatePanel(mock_page(), lambda: None)
+
+    assert panel.log_view.expand is False
+    assert panel.log_view.height == 0
+    assert panel.log_view.visible is False
+    assert panel.repair_samples.height == 0
+    assert panel.repair_samples.visible is False
 
     radios = panel.repair_mode_group.content.controls
     assert [radio.value for radio in radios] == [
@@ -191,7 +229,35 @@ def test_preview_uses_effective_ai_source_scope_and_limit(db_path):
     db.close()
 
 
-def test_special_character_repair_covers_all_sources_and_can_be_undone(
+def test_repair_scan_follows_the_effective_source_including_ai_repair(db_path):
+    db = TranslationDB(db_path)
+    shadowed = _ai_entry(db, key="shadowed", en="Use %s")
+    db.save_manual(shadowed.id, "使用", propagate=False)
+    _ingest(db, "1.21.1", "foo", "shadowed", SRC_JAR_TW, "使用", en="Use %s")
+    repaired = _ai_entry(db, key="repaired", en="Use %s")
+    db._conn.execute(
+        "UPDATE translation SET zh_tw='使用' WHERE entry_id=? AND source=?",
+        (repaired.id, SRC_AI),
+    )
+    db._conn.commit()
+    _ingest(db, "1.21.1", "foo", "repaired", SRC_AI_REPAIR, "使用", en="Use %s")
+
+    scanned = {
+        (entry.key, entry.source_id)
+        for entry, _nl, _mixed in db.iter_repairable_translation_entries("1.21.1")
+    }
+    effective = {
+        row[0]: row[1]
+        for row in db._conn.execute(
+            "SELECT e.key, f.source FROM effective f JOIN entry e ON e.id=f.entry_id"
+        )
+    }
+    db.close()
+
+    assert scanned == {("shadowed", SRC_MANUAL), ("repaired", effective["repaired"])}
+
+
+def test_special_character_repair_only_touches_the_effective_source_and_can_be_undone(
     db_path, monkeypatch, repair_cache
 ):
     db = TranslationDB(db_path)
@@ -202,13 +268,12 @@ def test_special_character_repair_covers_all_sources_and_can_be_undone(
     preview = moddb_retranslate_service.preview_same_source_ai_retranslation(
         db, _options(), mode="quality_mismatch"
     )
+    # 人工（生效）以外的來源被蓋住、使用者看不到，不列入修復
     assert preview.mode == "quality_mismatch"
-    assert preview.total_candidates == 2
-    assert preview.selected_count == 2
-    assert preview.ai_representatives == 1
-    assert preview.dedup_reused_candidates == 1
-    assert preview.sources == (SRC_JAR_TW, SRC_MANUAL)
-    assert {row.source_id for row in preview.entries} == {SRC_JAR_TW, SRC_MANUAL}
+    assert preview.total_candidates == 1
+    assert preview.selected_count == 1
+    assert preview.sources == (SRC_MANUAL,)
+    assert {row.source_id for row in preview.entries} == {SRC_MANUAL}
     db.close()
 
     monkeypatch.setattr(
@@ -228,25 +293,17 @@ def test_special_character_repair_covers_all_sources_and_can_be_undone(
 
     check = TranslationDB(db_path)
     rows = {row.source: row for row in check.entry_detail(entry.id).translations}
-    assert rows[SRC_JAR_TW].zh_tw == "使用 %s"
     assert rows[SRC_MANUAL].zh_tw == "使用 %s"
+    assert rows[SRC_JAR_TW].zh_tw == "使用"
     assert rows[SRC_AI].zh_tw == "Use %s"
     history = check.entry_detail(entry.id).history
-    manual_repair = next(
-        row
-        for row in history
-        if row.action == "quality_repair" and row.source_id == SRC_MANUAL
-    )
-    assert snap["summary"]["operation"] == "repair_special_character_mismatch"
-    assert snap["summary"]["updated"] == 2
-    assert snap["summary"]["remaining"] == 0
     source_repairs = [row for row in history if row.action == "quality_repair"]
-    assert len(source_repairs) == 2
-    assert check.revert(manual_repair.id) == 1
-    other_repair = next(row for row in source_repairs if row.id != manual_repair.id)
-    assert check.revert(other_repair.id) == 1
+    assert len(source_repairs) == 1 and source_repairs[0].source_id == SRC_MANUAL
+    assert snap["summary"]["operation"] == "repair_special_character_mismatch"
+    assert snap["summary"]["updated"] == 1
+    assert snap["summary"]["remaining"] == 0
+    assert check.revert(source_repairs[0].id) == 1
     restored = {row.source: row for row in check.entry_detail(entry.id).translations}
-    assert restored[SRC_JAR_TW].zh_tw == "使用"
     assert restored[SRC_MANUAL].zh_tw == "使用"
     assert SRC_AI_REPAIR not in restored
     assert repair_cache == []
@@ -310,33 +367,56 @@ def test_quality_repair_includes_input_newline_mismatch_and_allows_output_differ
     eligible_detail = check.entry_detail(eligible.id)
     assert eligible_detail.entry.quality_state == "mismatch"
     assert result["summary"]["updated"] == 2
-    # LF differences remain visible in general quality diagnostics.
-    assert result["summary"]["remaining"] == 2
+    # 只有實際換行差異的結果不再佔用 AI 修復名額，因此完成後不列為待 AI 修復。
+    assert result["summary"]["remaining"] == 0
     assert check.entry_detail(eligible.id).history[0].action == "quality_repair"
     check.close()
 
 
-def test_quality_repair_representative_limit_keeps_all_mapped_sources(db_path):
+def test_quality_repair_skips_newline_only_input_mismatch(db_path, monkeypatch):
     db = TranslationDB(db_path)
-    entry = _ai_entry(db, en="Use %s", key="mapped")
-    db.save_manual(entry.id, "Use", propagate=False)
-    _ingest(db, "1.21.1", "foo", "mapped", SRC_JAR_TW, "Use", en="Use %s")
+    newline_only = _ai_entry(db, key="a.newline_only", en="Line one\nLine two")
+    hard_issue = _ai_entry(db, key="b.hard_issue", en="Use %s")
+    db._conn.execute(
+        "UPDATE translation SET zh_tw='Line one' WHERE entry_id=? AND source=?",
+        (newline_only.id, SRC_AI),
+    )
     db._conn.execute(
         "UPDATE translation SET zh_tw='Use' WHERE entry_id=? AND source=?",
-        (entry.id, SRC_AI),
+        (hard_issue.id, SRC_AI),
     )
     db._conn.commit()
+
     preview = moddb_retranslate_service.preview_same_source_ai_retranslation(
-        db, _options(limit=1), mode="quality_mismatch"
+        db, _options(), mode="quality_mismatch"
     )
-    assert preview.ai_representatives == 1
-    assert preview.selected_count == 3
-    assert {row.source_id for row in preview.entries} == {
-        SRC_AI,
-        SRC_MANUAL,
-        SRC_JAR_TW,
-    }
     db.close()
+
+    assert preview.total_candidates == 1
+    assert preview.selected_count == 1
+    assert preview.entries[0].key == "b.hard_issue"
+    assert preview.skipped_newline_only_candidates == 1
+
+    monkeypatch.setattr(
+        moddb_retranslate_service,
+        "translate_batch_smart",
+        lambda batch, _total: (
+            [{**item, "text": "Use %s repaired"} for item in batch],
+            "AUTO",
+        ),
+    )
+    session = TaskSession()
+    moddb_retranslate_service.run_moddb_retranslate_service(
+        _options(write_cache=False),
+        session,
+        preview.entries,
+        mode="quality_mismatch",
+        review_preview=preview,
+    )
+    summary = session.snapshot()["summary"]
+    assert summary["candidates"] == 1
+    assert summary["skipped_newline_only_candidates"] == 1
+    assert summary["ai_submitted_items"] == 1
 
 
 def test_manual_review_confirmation_skips_format_check_but_keeps_cas_history_and_undo(
@@ -364,17 +444,17 @@ def test_manual_review_confirmation_skips_format_check_but_keeps_cas_history_and
         "database_priority": db.priority,
     }
     db.close()
+    store = moddb_repair_review_store.create_run(db_path, "run-manual")
+    index = moddb_repair_review_store.append_item(store, "run-manual", item)
+    item = moddb_repair_review_store.load_item(store, "run-manual", index)
 
-    assert (
-        moddb_retranslate_service.apply_repair_review_item(db_path, item, "Use")
-        == "stale"
-    )
-    assert (
-        moddb_retranslate_service.apply_repair_review_item(
-            db_path, item, "人工已確認，即使不同於來源佔位符"
+    def apply(draft):
+        return moddb_retranslate_service.apply_and_record_repair_review(
+            db_path, store, "run-manual", item, draft
         )
-        == "applied"
-    )
+
+    assert apply("Use") == "stale"
+    assert apply("人工已確認，即使不同於來源佔位符") == "applied"
     check = TranslationDB(db_path)
     detail = check.entry_detail(entry.id)
     history = next(
@@ -399,6 +479,87 @@ def test_manual_review_confirmation_skips_format_check_but_keeps_cas_history_and
     assert all(
         row.source != SRC_AI_REPAIR for row in check.entry_detail(entry.id).translations
     )
+    check.close()
+
+
+def test_manual_review_confirmation_does_not_reach_same_key_with_other_old_text(
+    db_path,
+):
+    db = TranslationDB(db_path)
+    _ingest(db, "1.21.1", "foo", "shared.key", SRC_AI, "舊 AI", en="Use %s")
+    _ingest(
+        db,
+        "1.21.1",
+        "foo",
+        "shared.key",
+        SRC_MANUAL,
+        "保留舊譯文",
+        en="Use %s",
+    )
+    entry = next(
+        row
+        for row in db.list_entries("1.21.1")[0]
+        if row.mod_id == "foo" and row.key == "shared.key"
+    )
+    review_path = moddb_repair_review_store.create_run(db_path, "run-shared-key")
+
+    def review_item(source_id):
+        old_translation = {
+            SRC_AI: "舊 AI",
+            SRC_MANUAL: "保留舊譯文",
+        }[source_id]
+        return {
+            "entry_id": entry.id,
+            "version": entry.mc_version,
+            "mod_id": entry.mod_id,
+            "kind": entry.kind,
+            "source_id": source_id,
+            "key": entry.key,
+            "en_us": entry.en_us,
+            "old_translation": old_translation,
+            "expected_revision": _translation_revision(db, entry.id, source_id),
+            "database_identity": str(db_path.resolve()),
+            "database_file_id": db_path.stat().st_ino,
+            "database_priority": db.priority,
+        }
+
+    first_index = moddb_repair_review_store.append_item(
+        review_path, "run-shared-key", review_item(SRC_AI)
+    )
+    moddb_repair_review_store.append_item(
+        review_path, "run-shared-key", review_item(SRC_MANUAL)
+    )
+    unrelated = review_item(SRC_AI)
+    unrelated["mod_id"] = "other-mod"
+    moddb_repair_review_store.append_item(review_path, "run-shared-key", unrelated)
+    first = moddb_repair_review_store.load_item(
+        review_path, "run-shared-key", first_index
+    )
+    db.close()
+
+    assert first is not None
+    assert (
+        moddb_retranslate_service.apply_and_record_repair_review(
+            db_path,
+            review_path,
+            "run-shared-key",
+            first,
+            "人工統一翻譯 %s",
+        )
+        == "applied"
+    )
+    assert moddb_repair_review_store.status_counts(review_path, "run-shared-key") == {
+        "applied": 1,
+        "pending": 2,
+    }
+
+    check = TranslationDB(db_path)
+    translations = {
+        row.source: row.zh_tw for row in check.entry_detail(entry.id).translations
+    }
+    assert translations[SRC_AI] == "人工統一翻譯 %s"
+    # 同 key 但舊譯文不同的來源沒被確認，不能被連帶覆蓋
+    assert translations[SRC_MANUAL] == "保留舊譯文"
     check.close()
 
 
@@ -569,11 +730,11 @@ def test_repair_batches_group_profiles_and_preview_reports_breakdown(
     assert snap["summary"]["batches"] == 2
     assert snap["summary"]["updated"] == 66
     logs = "\n".join(entry.text for entry in snap["logs"])
-    assert "舊 AI 機翻修復候選 66 筆" in logs
+    assert "找到 66 筆待處理來源項目" in logs
     assert "來源：AI 機翻" in logs
     assert "Lang 60 筆" in logs
     assert "Patchouli 6 筆" in logs
-    assert "略過舊快取直接重新翻譯" in logs
+    assert "本次略過既有翻譯快取，重新呼叫 AI" in logs
     assert repair_cache == []
 
 
@@ -1377,113 +1538,6 @@ def test_service_cancellation_preserves_old_translation(
     assert repair_cache == []
 
 
-def test_quality_repair_deduplicates_equivalent_rows_and_keeps_source_cas(
-    db_path, monkeypatch, repair_cache
-):
-    db = TranslationDB(db_path)
-    entry = _ai_entry(db, en="Use %s", key="a/very/long/path/item.name")
-    db._conn.execute(
-        "UPDATE translation SET zh_tw='Use' WHERE entry_id=? AND source=?",
-        (entry.id, SRC_AI),
-    )
-    db._conn.commit()
-    db.save_manual(entry.id, "Use", propagate=False)
-    preview = moddb_retranslate_service.preview_same_source_ai_retranslation(
-        db, _options(), mode="quality_mismatch"
-    )
-    db.close()
-
-    assert preview.selected_count == 2
-    assert preview.ai_representatives == 1
-    assert preview.dedup_reused_candidates == 1
-    calls = []
-
-    def fake_translate(batch, _total):
-        calls.append(batch)
-        return [{**batch[0], "text": "Use %s：正確"}], "AUTO"
-
-    monkeypatch.setattr(
-        moddb_retranslate_service, "translate_batch_smart", fake_translate
-    )
-    snap = _run(db_path, preview.entries, mode="quality_mismatch")
-
-    assert [len(batch) for batch in calls] == [1]
-    summary = snap["summary"]
-    assert summary["candidates"] == 2
-    assert summary["ai_representatives"] == 1
-    assert summary["ai_submitted_items"] == 1
-    assert summary["ai_validated_items"] == 1
-    assert summary["dedup_reused_candidates"] == 1
-    assert summary["processed_candidates"] == 2
-    assert summary["updated"] == 2
-    assert summary["cache_keys_changed"] == 1
-    assert summary["cache_keys_saved"] == 1
-
-    check = TranslationDB(db_path)
-    rows = {row.source: row for row in check.entry_detail(entry.id).translations}
-    assert rows[SRC_AI].zh_tw == "Use %s：正確"
-    assert rows[SRC_MANUAL].zh_tw == "Use %s：正確"
-    history_sources = {
-        row.source_id
-        for row in check.entry_detail(entry.id).history
-        if row.action == "quality_repair"
-    }
-    assert history_sources == {SRC_AI, SRC_MANUAL}
-    check.close()
-
-    logs = "\n".join(row.text for row in snap["logs"])
-    assert f"[MC 1.21.1][mod=foo][kind=lang][source={SRC_AI}:AI 機翻]" in logs
-    assert f"[source={SRC_MANUAL}:人工-未審核]" in logs
-    assert "[key=a/very/long/path/item.name]" in logs
-
-
-def test_invalid_representative_never_fans_out_to_source_rows(
-    db_path, monkeypatch, repair_cache
-):
-    db = TranslationDB(db_path)
-    entry = _ai_entry(db, en="Use %s", key="same.entry")
-    db._conn.execute(
-        "UPDATE translation SET zh_tw='Use' WHERE entry_id=? AND source=?",
-        (entry.id, SRC_AI),
-    )
-    db._conn.commit()
-    db.save_manual(entry.id, "Use", propagate=False)
-    history_before = db.entry_detail(entry.id).history
-    preview = moddb_retranslate_service.preview_same_source_ai_retranslation(
-        db, _options(), mode="quality_mismatch"
-    )
-    db.close()
-
-    monkeypatch.setattr(
-        moddb_retranslate_service,
-        "translate_batch_smart",
-        lambda batch, _total: (
-            [{**batch[0], "_entry_id": -1, "text": "Use %s：正確"}],
-            "AUTO",
-        ),
-    )
-    snap = _run(
-        db_path,
-        preview.entries,
-        options=_options(write_cache=False),
-        mode="quality_mismatch",
-    )
-
-    check = TranslationDB(db_path)
-    rows = {row.source: row for row in check.entry_detail(entry.id).translations}
-    assert rows[SRC_AI].zh_tw == "Use"
-    assert rows[SRC_MANUAL].zh_tw == "Use"
-    assert check.entry_detail(entry.id).history == history_before
-    check.close()
-    assert snap["summary"]["ai_representatives"] == 1
-    assert snap["summary"]["ai_submitted_items"] == 1
-    assert snap["summary"]["ai_validated_items"] == 0
-    assert snap["summary"]["dedup_mapped_candidates"] == 1
-    assert snap["summary"]["dedup_reused_candidates"] == 0
-    assert snap["summary"]["failed"] == 2
-    assert snap["summary"]["updated"] == 0
-
-
 def test_candidate_log_uses_database_local_source_catalog(
     db_path, monkeypatch, repair_cache
 ):
@@ -1496,13 +1550,7 @@ def test_candidate_log_uses_database_local_source_catalog(
     db.close()
 
     db = TranslationDB(db_path)
-    entry = _ai_entry(db, en="Use %s", key="custom/source/path")
-    db._conn.execute(
-        "UPDATE translation SET zh_tw='Use' WHERE entry_id=? AND source=?",
-        (entry.id, SRC_AI),
-    )
-    db._conn.commit()
-    _ingest(db, "1.21.1", "foo", entry.key, 100, "Use", en="Use %s")
+    _ingest(db, "1.21.1", "foo", "custom/source/path", 100, "Use", en="Use %s")
     preview = moddb_retranslate_service.preview_same_source_ai_retranslation(
         db, _options(), mode="quality_mismatch"
     )
@@ -1523,258 +1571,7 @@ def test_candidate_log_uses_database_local_source_catalog(
     logs = "\n".join(row.text for row in snap["logs"])
     assert "[source=100:譯文團隊]" in logs
     assert "[key=custom/source/path]" in logs
-    assert snap["summary"]["updated"] == 2
-
-
-def test_fanout_stale_second_source_keeps_first_cas_and_checker(
-    db_path, monkeypatch, repair_cache
-):
-    db = TranslationDB(db_path)
-    entry = _ai_entry(db, en="Use %s", key="same.entry")
-    db._conn.execute(
-        "UPDATE translation SET zh_tw='Use' WHERE entry_id=? AND source=?",
-        (entry.id, SRC_AI),
-    )
-    db._conn.commit()
-    db.save_manual(entry.id, "Use", propagate=False)
-    before = {row.source: row for row in db.entry_detail(entry.id).translations}[
-        SRC_MANUAL
-    ]
-    before_revision = db._conn.execute(
-        "SELECT revision FROM translation WHERE entry_id=? AND source=?",
-        (entry.id, SRC_MANUAL),
-    ).fetchone()[0]
-    preview = moddb_retranslate_service.preview_same_source_ai_retranslation(
-        db, _options(), mode="quality_mismatch"
-    )
-    db.close()
-
-    def stale_manual_then_translate(batch, _total):
-        external = TranslationDB(db_path)
-        external._conn.execute(
-            "UPDATE translation SET checker='external-writer', revision=revision+1 "
-            "WHERE entry_id=? AND source=?",
-            (entry.id, SRC_MANUAL),
-        )
-        external._conn.commit()
-        external.close()
-        return [{**batch[0], "text": "Use %s：正確"}], "AUTO"
-
-    monkeypatch.setattr(
-        moddb_retranslate_service, "translate_batch_smart", stale_manual_then_translate
-    )
-    snap = _run(
-        db_path,
-        preview.entries,
-        options=_options(write_cache=False),
-        mode="quality_mismatch",
-    )
-
-    check = TranslationDB(db_path)
-    detail = check.entry_detail(entry.id)
-    rows = {row.source: row for row in detail.translations}
-    assert rows[SRC_AI].zh_tw == "Use %s：正確"
-    assert SRC_AI_REPAIR not in rows
-    assert rows[SRC_MANUAL].zh_tw == before.zh_tw
-    assert rows[SRC_MANUAL].checker == "external-writer"
-    assert rows[SRC_MANUAL].review_status == before.review_status
-    current_revision = check._conn.execute(
-        "SELECT revision FROM translation WHERE entry_id=? AND source=?",
-        (entry.id, SRC_MANUAL),
-    ).fetchone()[0]
-    assert current_revision == before_revision + 1
-    assert {
-        row.source_id for row in detail.history if row.action == "quality_repair"
-    } == {SRC_AI}
-    check.close()
     assert snap["summary"]["updated"] == 1
-    assert snap["summary"]["skipped_changed"] == 1
-    assert snap["summary"]["dedup_reused_candidates"] == 1
-
-
-def test_cancel_between_fanout_targets_preserves_committed_row_and_review_state(
-    db_path, monkeypatch, repair_cache
-):
-    db = TranslationDB(db_path)
-    entry = _ai_entry(db, en="Use %s", key="same.entry")
-    db._conn.execute(
-        "UPDATE translation SET zh_tw='Use' WHERE entry_id=? AND source=?",
-        (entry.id, SRC_AI),
-    )
-    db._conn.commit()
-    db.save_manual(entry.id, "Use", propagate=False)
-    before_manual = {row.source: row for row in db.entry_detail(entry.id).translations}[
-        SRC_MANUAL
-    ]
-    before_revision = db._conn.execute(
-        "SELECT revision FROM translation WHERE entry_id=? AND source=?",
-        (entry.id, SRC_MANUAL),
-    ).fetchone()[0]
-    preview = moddb_retranslate_service.preview_same_source_ai_retranslation(
-        db, _options(), mode="quality_mismatch"
-    )
-    db.close()
-
-    session = TaskSession()
-    original_replace = TranslationDB.replace_translation_quality_mismatch
-
-    def cancel_after_first_commit(self, *args, **kwargs):
-        result = original_replace(self, *args, **kwargs)
-        if result.status == "updated":
-            session.request_cancel()
-        return result
-
-    monkeypatch.setattr(
-        TranslationDB, "replace_translation_quality_mismatch", cancel_after_first_commit
-    )
-    monkeypatch.setattr(
-        moddb_retranslate_service,
-        "translate_batch_smart",
-        lambda batch, _total: ([{**batch[0], "text": "Use %s：正確"}], "AUTO"),
-    )
-    moddb_retranslate_service.run_moddb_retranslate_service(
-        _options(write_cache=False),
-        session,
-        preview.entries,
-        mode="quality_mismatch",
-    )
-    snap = session.snapshot()
-
-    check = TranslationDB(db_path)
-    detail = check.entry_detail(entry.id)
-    rows = {row.source: row for row in detail.translations}
-    assert rows[SRC_AI].zh_tw == "Use %s：正確"
-    assert SRC_AI_REPAIR not in rows
-    assert (
-        rows[SRC_MANUAL].zh_tw,
-        rows[SRC_MANUAL].checker,
-        rows[SRC_MANUAL].review_status,
-    ) == (
-        before_manual.zh_tw,
-        before_manual.checker,
-        before_manual.review_status,
-    )
-    current_revision = check._conn.execute(
-        "SELECT revision FROM translation WHERE entry_id=? AND source=?",
-        (entry.id, SRC_MANUAL),
-    ).fetchone()[0]
-    assert current_revision == before_revision
-    assert [
-        row.source_id for row in detail.history if row.action == "quality_repair"
-    ] == [SRC_AI]
-    check.close()
-    assert snap["summary"]["status"] == "CANCELLED"
-    assert snap["summary"]["updated"] == 1
-    assert snap["summary"]["processed_candidates"] == 1
-    assert snap["summary"]["unprocessed_candidates"] == 1
-    assert snap["summary"]["failed"] == 0
-
-
-def test_cancel_after_result_before_fanout_leaves_all_source_rows_unchanged(
-    db_path, monkeypatch, repair_cache
-):
-    db = TranslationDB(db_path)
-    entry = _ai_entry(db, en="Use %s", key="same.entry")
-    db._conn.execute(
-        "UPDATE translation SET zh_tw='Use' WHERE entry_id=? AND source=?",
-        (entry.id, SRC_AI),
-    )
-    db._conn.commit()
-    db.save_manual(entry.id, "Use", propagate=False)
-    history_before = db.entry_detail(entry.id).history
-    preview = moddb_retranslate_service.preview_same_source_ai_retranslation(
-        db, _options(), mode="quality_mismatch"
-    )
-    db.close()
-
-    session = TaskSession()
-
-    def cancel_when_result_returns(batch, _total):
-        session.request_cancel()
-        return [{**batch[0], "text": "Use %s：正確"}], "AUTO"
-
-    monkeypatch.setattr(
-        moddb_retranslate_service,
-        "translate_batch_smart",
-        cancel_when_result_returns,
-    )
-    moddb_retranslate_service.run_moddb_retranslate_service(
-        _options(write_cache=False),
-        session,
-        preview.entries,
-        mode="quality_mismatch",
-    )
-    snap = session.snapshot()
-
-    check = TranslationDB(db_path)
-    detail = check.entry_detail(entry.id)
-    assert {row.source: row.zh_tw for row in detail.translations} == {
-        SRC_AI: "Use",
-        SRC_MANUAL: "Use",
-    }
-    assert detail.history == history_before
-    check.close()
-    assert snap["summary"]["status"] == "CANCELLED"
-    assert snap["summary"]["ai_submitted_items"] == 1
-    assert snap["summary"]["ai_validated_items"] == 0
-    assert snap["summary"]["processed_candidates"] == 0
-    assert snap["summary"]["unprocessed_candidates"] == 2
-
-
-def test_quality_repair_dedup_is_limited_to_same_entry_and_profile(
-    db_path, monkeypatch, repair_cache
-):
-    db = TranslationDB(db_path)
-    first = _ai_entry(db, en="Use %s", key="same.source.first")
-    second = _ai_entry(db, en="Use %s", key="same.source.second")
-    for entry in (first, second):
-        db._conn.execute(
-            "UPDATE translation SET zh_tw='Use' WHERE entry_id=? AND source=?",
-            (entry.id, SRC_AI),
-        )
-        db._conn.commit()
-        db.save_manual(entry.id, "Use", propagate=False)
-    patch = _ai_entry(db, en="Use %s", key="same.source.patch", kind=KIND_PATCHOULI)
-    db._conn.execute(
-        "UPDATE translation SET zh_tw='Use' WHERE entry_id=? AND source=?",
-        (patch.id, SRC_AI),
-    )
-    db._conn.commit()
-    preview = moddb_retranslate_service.preview_same_source_ai_retranslation(
-        db, _options(), mode="quality_mismatch"
-    )
-    db.close()
-
-    assert preview.selected_count == 5
-    assert preview.ai_representatives == 3
-    assert preview.dedup_reused_candidates == 2
-    no_reuse_representatives, _fanout = (
-        moddb_retranslate_service._deduplicate_retranslation_items(
-            moddb_retranslate_service._build_retranslation_items(preview.entries),
-            enabled=False,
-        )
-    )
-    assert len(no_reuse_representatives) == 5
-    calls = []
-
-    def fake_translate(batch, _total):
-        calls.append((batch[0]["cache_type"], [item["path"] for item in batch]))
-        return [{**item, "text": "Use %s：正確"} for item in batch], "AUTO"
-
-    monkeypatch.setattr(
-        moddb_retranslate_service, "translate_batch_smart", fake_translate
-    )
-    _run(
-        db_path,
-        preview.entries,
-        options=_options(write_cache=False),
-        mode="quality_mismatch",
-    )
-
-    assert calls == [
-        ("lang", [first.key, second.key]),
-        ("patchouli", [patch.key]),
-    ]
 
 
 def test_repair_progress_does_not_apply_patchouli_sample_to_lang(monkeypatch):
@@ -1787,17 +1584,15 @@ def test_repair_progress_does_not_apply_patchouli_sample_to_lang(monkeypatch):
         *({"cache_type": "patchouli"} for _ in range(79)),
         *({"cache_type": "lang"} for _ in range(221)),
     ]
-    fanout = {id(item): (item,) for item in items}
     tracker = moddb_retranslate_service._RepairRunProgress(
         items,
-        fanout,
         total_candidates=300,
         lm_cfg={},
         started_mono=0.0,
         started_wall=100.0,
     )
 
-    tracker.update("patchouli", candidate_count=79, representative_count=79, elapsed=20)
+    tracker.update("patchouli", count=79, elapsed=20)
     live = tracker.live(processed=79, now_mono=20.0, now_wall=120.0)
 
     assert live["batch_done"] == 1
@@ -1807,14 +1602,14 @@ def test_repair_progress_does_not_apply_patchouli_sample_to_lang(monkeypatch):
     assert live["eta_sec"] is None
     assert "Lang 尚無耗時樣本" in live["eta_note"]
 
-    tracker.update("lang", candidate_count=100, representative_count=100, elapsed=10)
+    tracker.update("lang", count=100, elapsed=10)
     sampled = tracker.live(processed=179, now_mono=30.0, now_wall=130.0)
     assert sampled["eta_sec"] == pytest.approx(12.1)
     assert sampled["eta_note"] == ""
     assert sampled["profile_progress"]["lang"]["planned_remaining_batches"] == 1
     assert sampled["profile_progress"]["lang"]["ai_submitted_items"] == 100
 
-    tracker.update("lang", candidate_count=121, representative_count=121, elapsed=10)
+    tracker.update("lang", count=121, elapsed=10)
     done = tracker.live(processed=300, now_mono=40.0, now_wall=140.0)
     assert done["batch_done"] == 3
     assert done["batch_est"] == 3
@@ -1885,13 +1680,12 @@ def test_repair_progress_replans_only_when_profile_budget_changes(monkeypatch):
         lambda items, _profile, _cap, _cfg: min(len(items), selected_size),
     )
     items = [{"cache_type": "lang"} for _ in range(130)]
-    fanout = {id(item): (item,) for item in items}
     tracker = moddb_retranslate_service._RepairRunProgress(
-        items, fanout, total_candidates=130, lm_cfg={}
+        items, total_candidates=130, lm_cfg={}
     )
 
     assert tracker.live()["batch_est"] == 3
-    tracker.update("lang", candidate_count=64, representative_count=64, elapsed=1)
+    tracker.update("lang", count=64, elapsed=1)
     signature = 1
     selected_size = 32
 
@@ -1931,7 +1725,7 @@ def test_batch_planner_checks_cancellation_while_scanning_profile(monkeypatch):
 
 def test_repair_progress_empty_run_has_no_batches_or_eta(monkeypatch):
     tracker = moddb_retranslate_service._RepairRunProgress(
-        [], {}, total_candidates=0, lm_cfg={}
+        [], total_candidates=0, lm_cfg={}
     )
 
     live = tracker.live(processed=0)
@@ -2129,6 +1923,7 @@ def test_retranslation_preview_shows_ai_source_profiles_and_samples(
         "launch_page_operation",
         _inline_operation_launcher(),
     )
+    assert panel.repair_samples.visible is False
     panel.preview_retranslation()
     _drain_page_tasks(page)
 
@@ -2144,13 +1939,49 @@ def test_retranslation_preview_shows_ai_source_profiles_and_samples(
     assert "人工、模組自帶及其他來源不會被重新翻譯" in text
     assert "Lang：1 筆" in text
     assert "Patchouli：1 筆" in text
-    assert "AI 代表 2 筆" in text
-    assert "預計共用 0 筆候選" in text
-    assert "目前預估：約 2 個外層批次" in text
-    samples = [control.value for control in panel.repair_samples.controls]
-    assert any("[Lang] [AI 機翻]" in sample for sample in samples)
-    assert any("[Patchouli] [AI 機翻]" in sample for sample in samples)
-    assert all("manual" not in sample and "jar" not in sample for sample in samples)
+    assert "規劃批次：2（不等於實際 HTTP 請求次數）" in text
+    assert len(panel.repair_samples.controls) == 2
+    assert panel.repair_samples.visible is True
+    first_card = panel.repair_samples.controls[0]
+    # 詳細內容（格式差異檢視）收合時不建立，展開才建，翻頁才不會卡
+    assert not _contains_control_text(first_card, "格式差異檢視")
+    _find_control_by_text(first_card, "查看詳細資料").on_click()
+    assert _contains_control_text(first_card, "格式差異檢視")
+    assert "顯示 2 / 2 個翻譯 Key" in panel.repair_preview_count.value
+    panel.repair_preview_search.value = "patchouli"
+    retranslation_controller.refresh_preview_cards(panel)
+    assert len(panel.repair_samples.controls) == 1
+    assert "顯示 1 / 2 個翻譯 Key" in panel.repair_preview_count.value
+    db.close()
+
+
+def test_retranslation_preview_shows_one_card_per_key_and_filters(db_path):
+    db = TranslationDB(db_path)
+    entry = _ai_entry(db, key="shared", en="Use %s")
+    db.save_manual(entry.id, "Use", propagate=False)
+    _ingest(db, "1.21.1", "foo", "shared", SRC_JAR_TW, "Use", en="Use %s")
+    panel = translate_panel.TranslatePanel(mock_page(), lambda: db)
+    _select_repair_mode(panel, "quality_mismatch")
+    panel.version_dd.value = "1.21.1"
+    preview = moddb_retranslate_service.preview_same_source_ai_retranslation(
+        db, _options(), mode="quality_mismatch"
+    )
+
+    retranslation_controller._display_preview_result(
+        panel,
+        _options(),
+        panel._database_identity(panel._get_db()),
+        preview,
+    )
+
+    assert preview.selected_count == 1
+    assert len(panel.repair_samples.controls) == 1
+    assert "顯示 1 / 1 個翻譯 Key" in panel.repair_preview_count.value
+    panel.repair_preview_search.value = "not-found"
+    retranslation_controller.refresh_preview_cards(panel)
+    assert panel.repair_samples.controls == []
+    assert panel.repair_samples.visible is False
+    assert "沒有符合目前篩選條件" in panel.repair_preview_count.value
     db.close()
 
 
@@ -2394,3 +2225,400 @@ def test_retranslation_admission_rejection_never_starts_service(db_path, monkeyp
     assert panel._running is False
     assert any("無法啟動新任務" in message for message in snacks)
     db.close()
+
+
+def test_repair_preview_cards_are_paged_and_filters_return_to_page_one(
+    db_path, monkeypatch
+):
+    """候選超過一頁時顯示頁碼列；換頁看到對應的 Key，改篩選則回到第 1 頁。"""
+    panel = translate_panel.TranslatePanel(mock_page(), lambda: TranslationDB(db_path))
+    size = retranslation_controller.PREVIEW_PAGE_SIZE
+    groups = [[object()] for _ in range(size * 2 + 20)]
+    panel._repair_preview = object()
+    monkeypatch.setattr(retranslation_controller, "_preview_groups", lambda _r: groups)
+    monkeypatch.setattr(
+        retranslation_controller, "_preview_group_matches", lambda *_a: True
+    )
+    monkeypatch.setattr(
+        retranslation_controller,
+        "_build_preview_group_card",
+        lambda _panel, _group, index, total: __import__("flet").Text(
+            f"{index}/{total}"
+        ),
+    )
+
+    retranslation_controller.refresh_preview_cards(panel, update=False)
+    pager = panel.repair_preview_pager
+    assert pager.visible is True and pager.total_pages == 3
+    assert [c.value for c in panel.repair_samples.controls][:1] == [f"1/{len(groups)}"]
+    assert len(panel.repair_samples.controls) == size
+
+    pager.goto(3)  # 按頁碼：最後一頁只剩 20 筆，卡片編號延續
+    assert len(panel.repair_samples.controls) == 20
+    assert panel.repair_samples.controls[0].value == f"{size * 2 + 1}/{len(groups)}"
+
+    retranslation_controller.refresh_preview_cards(panel, update=False)  # 改篩選
+    assert pager.current_page == 1
+
+    del groups[size:]  # 剩一頁：不顯示頁碼列
+    retranslation_controller.refresh_preview_cards(panel, update=False)
+    assert pager.visible is False
+
+
+def _stored_ai_text(db, entry_id):
+    return db._q(
+        "SELECT zh_tw FROM translation WHERE entry_id=? AND source=?",
+        (entry_id, SRC_AI),
+    )[0][0]
+
+
+def _newline_only_entry(db):
+    entry = _ai_entry(db, key="a.newline_only", en="Line one\nLine two")
+    db._conn.execute(
+        "UPDATE translation SET zh_tw='第一行第二行' WHERE entry_id=? AND source=?",
+        (entry.id, SRC_AI),
+    )
+    db._conn.commit()
+    return entry
+
+
+def test_repair_newline_only_option_includes_those_candidates_in_preview(db_path):
+    db = TranslationDB(db_path)
+    _newline_only_entry(db)
+
+    default = moddb_retranslate_service.preview_same_source_ai_retranslation(
+        db, _options(), mode="quality_mismatch"
+    )
+    included = moddb_retranslate_service.preview_same_source_ai_retranslation(
+        db, _options(repair_newline_only=True), mode="quality_mismatch"
+    )
+    db.close()
+
+    assert default.selected_count == 0
+    assert default.skipped_newline_only_candidates == 1
+    assert default.newline_only_included is False
+    assert [row.key for row in included.entries] == ["a.newline_only"]
+    assert included.skipped_newline_only_candidates == 0
+    assert included.newline_only_included is True
+    assert included.input_newline_mismatch_candidates == 1
+
+
+def test_repair_newline_only_option_requires_output_to_keep_source_newlines(
+    db_path, monkeypatch
+):
+    db = TranslationDB(db_path)
+    entry = _newline_only_entry(db)
+    options = _options(write_cache=False, repair_newline_only=True)
+    preview = moddb_retranslate_service.preview_same_source_ai_retranslation(
+        db, options, mode="quality_mismatch"
+    )
+    db.close()
+
+    def run_with(text):
+        monkeypatch.setattr(
+            moddb_retranslate_service,
+            "translate_batch_smart",
+            lambda batch, _total: ([{**item, "text": text} for item in batch], "AUTO"),
+        )
+        return _run(db_path, preview.entries, options=options, mode="quality_mismatch")
+
+    # 換行數仍與原文不同：視為格式不一致，不寫入、保留舊譯文
+    flagged = run_with("第一行第二行（重翻）")
+    assert flagged["summary"]["flagged"] == 1
+    assert flagged["summary"]["updated"] == 0
+    check = TranslationDB(db_path)
+    assert _stored_ai_text(check, entry.id) == "第一行第二行"
+    check.close()
+
+    # 換行數與原文一致：寫入
+    ok = run_with("第一行\n第二行")
+    assert ok["summary"]["updated"] == 1
+    check = TranslationDB(db_path)
+    assert _stored_ai_text(check, entry.id) == "第一行\n第二行"
+    check.close()
+
+
+def test_replace_quality_mismatch_strict_newline_rejects_wrong_newline_count(db_path):
+    db = TranslationDB(db_path)
+    entry = _newline_only_entry(db)
+    identity = {
+        "expected_version": "1.21.1",
+        "expected_kind": "lang",
+        "expected_mod_id": "foo",
+        "expected_key": "a.newline_only",
+        "expected_en_us": "Line one\nLine two",
+        "expected_revision": None,
+    }
+
+    strict = db.replace_translation_quality_mismatch(
+        entry.id, SRC_AI, "第一行第二行", "還是沒換行", strict_newline=True, **identity
+    )
+    lenient = db.replace_translation_quality_mismatch(
+        entry.id, SRC_AI, "第一行第二行", "還是沒換行", **identity
+    )
+    db.close()
+
+    assert strict.status == "skipped_changed"
+    assert lenient.status == "updated"
+
+
+def test_repair_card_newline_switch_is_off_by_default_and_follows_mode():
+    from app.views.moddb.repair_card import create_repair_card
+
+    noop = lambda *_a, **_k: None
+    kwargs = {
+        "on_mode_change": noop,
+        "on_preview": noop,
+        "on_confirm": noop,
+        "on_filter_change": noop,
+        "on_newline_change": noop,
+        "on_page": noop,
+        "page_size": 50,
+    }
+
+    quality = create_repair_card("quality_mismatch", **kwargs)
+    same_source = create_repair_card("same_source_ai", **kwargs)
+
+    assert quality.newline_row.value is False
+    assert quality.newline_row.visible is True
+    assert same_source.newline_row.visible is False
+
+
+def test_translate_panel_builds_newline_option_only_for_quality_mode(db_path):
+    panel = translate_panel.TranslatePanel(mock_page(), lambda: TranslationDB(db_path))
+
+    assert panel.build_options().repair_newline_only is False
+    panel.repair_newline_row.value = True
+    assert panel.build_options().repair_newline_only is True
+    panel._repair_mode = "same_source_ai"
+    assert panel.build_options().repair_newline_only is False
+
+
+def _identity(en="Use %s"):
+    return {
+        "expected_version": "1.21.1",
+        "expected_kind": "lang",
+        "expected_mod_id": "foo",
+        "expected_key": "k.sync",
+        "expected_en_us": en,
+        "expected_revision": None,
+    }
+
+
+def _stored(db, version, source=SRC_AI):
+    return db._q(
+        "SELECT t.zh_tw FROM translation t JOIN entry e ON e.id=t.entry_id "
+        "WHERE e.mc_version=? AND e.key='k.sync' AND t.source=?",
+        (version, source),
+    )[0][0]
+
+
+def test_quality_repair_can_sync_identical_old_text_to_other_versions(db_path):
+    db = TranslationDB(db_path)
+    _ingest(db, "1.21.1", "foo", "k.sync", SRC_AI, "使用", en="Use %s")
+    _ingest(db, "1.20.1", "foo", "k.sync", SRC_AI, "使用", en="Use %s")  # 舊譯文相同
+    _ingest(db, "1.19.2", "foo", "k.sync", SRC_AI, "別的舊譯", en="Use %s")  # 不同
+    _ingest(db, "1.18.2", "foo", "k.sync", SRC_AI, "使用", en="Other %s")  # 原文不同
+    root = db._q("SELECT id FROM entry WHERE mc_version='1.21.1' AND key='k.sync'")[0][
+        0
+    ]
+
+    result = db.replace_translation_quality_mismatch(
+        root, SRC_AI, "使用", "使用 %s", sync_other_versions=True, **_identity()
+    )
+
+    assert (result.status, result.synced_other_versions) == ("updated", 1)
+    assert _stored(db, "1.21.1") == "使用 %s"
+    assert _stored(db, "1.20.1") == "使用 %s"
+    assert _stored(db, "1.19.2") == "別的舊譯"
+    assert _stored(db, "1.18.2") == "使用"
+    # 同步的版本也有自己的歷史，可個別還原
+    synced_entry = db._q(
+        "SELECT id FROM entry WHERE mc_version='1.20.1' AND key='k.sync'"
+    )[0][0]
+    assert db.entry_detail(synced_entry).history[0].action == "quality_repair"
+    db.close()
+
+
+def test_quality_repair_does_not_touch_other_versions_by_default(db_path):
+    db = TranslationDB(db_path)
+    _ingest(db, "1.21.1", "foo", "k.sync", SRC_AI, "使用", en="Use %s")
+    _ingest(db, "1.20.1", "foo", "k.sync", SRC_AI, "使用", en="Use %s")
+    root = db._q("SELECT id FROM entry WHERE mc_version='1.21.1' AND key='k.sync'")[0][
+        0
+    ]
+
+    result = db.replace_translation_quality_mismatch(
+        root, SRC_AI, "使用", "使用 %s", **_identity()
+    )
+
+    assert result.synced_other_versions == 0
+    assert _stored(db, "1.20.1") == "使用"
+    db.close()
+
+
+def test_repair_service_reports_synced_other_versions(db_path, monkeypatch):
+    db = TranslationDB(db_path)
+    _ingest(db, "1.21.1", "foo", "k.sync", SRC_AI, "使用", en="Use %s")
+    _ingest(db, "1.20.1", "foo", "k.sync", SRC_AI, "使用", en="Use %s")
+    options = _options(write_cache=False, repair_sync_other_versions=True)
+    preview = moddb_retranslate_service.preview_same_source_ai_retranslation(
+        db, options, mode="quality_mismatch"
+    )
+    db.close()
+    monkeypatch.setattr(
+        moddb_retranslate_service,
+        "translate_batch_smart",
+        lambda batch, _total: (
+            [{**item, "text": "使用 %s"} for item in batch],
+            "AUTO",
+        ),
+    )
+
+    result = _run(db_path, preview.entries, options=options, mode="quality_mismatch")
+
+    assert result["summary"]["updated"] == 1
+    assert result["summary"]["synced_other_versions"] == 1
+    check = TranslationDB(db_path)
+    assert _stored(check, "1.20.1") == "使用 %s"
+    check.close()
+
+
+def test_translate_panel_builds_sync_option_only_for_quality_mode(db_path):
+    panel = translate_panel.TranslatePanel(mock_page(), lambda: TranslationDB(db_path))
+
+    assert panel.repair_sync_row.value is False
+    assert panel.build_options().repair_sync_other_versions is False
+    panel.repair_sync_row.value = True
+    assert panel.build_options().repair_sync_other_versions is True
+    panel._repair_mode = "same_source_ai"
+    assert panel.build_options().repair_sync_other_versions is False
+
+
+def test_repair_summary_shows_synced_other_versions_count():
+    from app.views.moddb.repair_summary import repair_summary_detail_lines
+
+    panel = translate_panel.TranslatePanel(mock_page(), lambda: None)
+    base = {
+        "operation": "repair_special_character_mismatch",
+        "candidates": 3,
+        "updated": 3,
+        "unchanged": 0,
+        "flagged": 0,
+        "skipped_changed": 0,
+        "failed": 0,
+        "remaining": 0,
+        "status": "DONE",
+    }
+
+    panel._apply_repair_summary({**base, "sync_other_versions": False}, final=True)
+    assert "同步其他版本" not in panel.repair_summary_text.value
+
+    synced = {**base, "sync_other_versions": True, "synced_other_versions": 7}
+    panel._apply_repair_summary(synced, final=True)
+    assert "更新 3（另同步其他版本 7）" in panel.repair_summary_text.value
+    assert "同步其他版本：7 筆" in "\n".join(repair_summary_detail_lines(synced))
+    assert not any("同步其他版本" in line for line in repair_summary_detail_lines(base))
+
+
+def test_repair_completion_log_reports_synced_count(db_path, monkeypatch):
+    db = TranslationDB(db_path)
+    _ingest(db, "1.21.1", "foo", "k.sync", SRC_AI, "使用", en="Use %s")
+    _ingest(db, "1.20.1", "foo", "k.sync", SRC_AI, "使用", en="Use %s")
+    options = _options(write_cache=False, repair_sync_other_versions=True)
+    preview = moddb_retranslate_service.preview_same_source_ai_retranslation(
+        db, options, mode="quality_mismatch"
+    )
+    db.close()
+    monkeypatch.setattr(
+        moddb_retranslate_service,
+        "translate_batch_smart",
+        lambda batch, _total: ([{**i, "text": "使用 %s"} for i in batch], "AUTO"),
+    )
+
+    result = _run(db_path, preview.entries, options=options, mode="quality_mismatch")
+
+    assert any("更新 1（另同步其他版本 1）" in str(line) for line in result["logs"])
+
+
+def _review_group(db_path, *, sync):
+    """1.21.1 有 AI 與人工兩個待審來源；1.20.1 的 AI 來源舊譯文相同。"""
+    db = TranslationDB(db_path)
+    _ingest(db, "1.21.1", "foo", "k.sync", SRC_AI, "舊", en="Use %s")
+    _ingest(db, "1.21.1", "foo", "k.sync", SRC_MANUAL, "舊人工", en="Use %s")
+    _ingest(db, "1.20.1", "foo", "k.sync", SRC_AI, "舊", en="Use %s")
+    entry = next(
+        row
+        for row in db.list_entries("1.21.1")[0]
+        if row.mod_id == "foo" and row.key == "k.sync"
+    )
+    store = moddb_repair_review_store.create_run(db_path, "run-sync")
+
+    def item(source_id, old):
+        return {
+            "entry_id": entry.id,
+            "version": "1.21.1",
+            "mod_id": "foo",
+            "kind": entry.kind,
+            "source_id": source_id,
+            "key": "k.sync",
+            "en_us": "Use %s",
+            "old_translation": old,
+            "expected_revision": _translation_revision(db, entry.id, source_id),
+            "database_identity": str(db_path.resolve()),
+            "database_file_id": db_path.stat().st_ino,
+            "database_priority": db.priority,
+            "sync_other_versions": sync,
+        }
+
+    first = moddb_repair_review_store.append_item(store, "run-sync", item(SRC_AI, "舊"))
+    moddb_repair_review_store.append_item(store, "run-sync", item(SRC_MANUAL, "舊人工"))
+    loaded = moddb_repair_review_store.load_item(store, "run-sync", first)
+    db.close()
+    return store, loaded
+
+
+def test_review_apply_syncs_other_versions_when_the_run_had_sync_on(db_path):
+    store, item = _review_group(db_path, sync=True)
+
+    result = moddb_retranslate_service.apply_and_record_repair_review(
+        db_path, store, "run-sync", item, "新 %s"
+    )
+
+    check = TranslationDB(db_path)
+    assert result == "applied"
+    assert _stored(check, "1.21.1") == "新 %s"
+    assert _stored(check, "1.20.1") == "新 %s"
+    check.close()
+
+
+def test_review_apply_leaves_other_versions_alone_when_sync_was_off(db_path):
+    store, item = _review_group(db_path, sync=False)
+
+    moddb_retranslate_service.apply_and_record_repair_review(
+        db_path, store, "run-sync", item, "新 %s"
+    )
+
+    check = TranslationDB(db_path)
+    assert _stored(check, "1.20.1") == "舊"
+    check.close()
+
+
+def test_review_apply_reuses_one_database_connection_for_all_matching_items(
+    db_path, monkeypatch
+):
+    store, item = _review_group(db_path, sync=False)
+    opened = []
+    real = moddb_retranslate_service.TranslationDB
+
+    def counting(*args, **kwargs):
+        opened.append(1)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(moddb_retranslate_service, "TranslationDB", counting)
+
+    moddb_retranslate_service.apply_and_record_repair_review(
+        db_path, store, "run-sync", item, "新 %s"
+    )
+
+    assert len(opened) == 1

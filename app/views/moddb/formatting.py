@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import re
-
 from app.services_impl.moddb_service import (
     format_tokens,
     token_issues,
@@ -70,41 +68,8 @@ def impact_text(version: str, new_text: str, impacts) -> str:
     return text + " 原譯文保留在記錄中，可還原。"
 
 
-# --- 特殊字元：換行、格式碼、佔位符 -------------------------------------------------
-_TOKEN_RE = re.compile(
-    r"§[0-9a-fk-orA-FK-OR]|%(?:\d+\$)?[sdfxXeEgGcb%]|\$\([^)]*\)|\{\d*\}|\\n|\n"
-)
-_TOKEN_NAMES = {"\n": "換行", "\\n": "字面 \\n", "$(t:…)": "提示文字 $(t:…)"}
-
-
+# --- 特殊字元：換行 ---------------------------------------------------------------
 def visible_breaks(text: str) -> str:
     """清單預覽用：真正的換行顯示成 ¶（折成一行），其餘空白折疊。"""
     flat = (text or "").replace("\r\n", "\n").replace("\n", " ¶ ")
     return " ".join(flat.split())
-
-
-_VISIBLE_RE = re.compile(_TOKEN_RE.pattern + r"|^[ \t]+|[ \t]+$", re.MULTILINE)
-
-
-def visible_segments(text: str) -> list[tuple[str, str]]:
-    """把特殊字元攤開成 ``[(顯示文字, 種類)]``；種類為 text / token / newline / space。
-
-    換行顯示成 ``↵`` 並真的換行；行首行尾的空白顯示成 ``·``；格式碼、佔位符標成 token。
-    """
-    text = (text or "").replace("\r\n", "\n")
-    out: list[tuple[str, str]] = []
-    pos = 0
-    for m in _VISIBLE_RE.finditer(text):
-        if m.start() > pos:
-            out.append((text[pos : m.start()], "text"))
-        raw = m.group(0)
-        if raw == "\n":
-            out += [("↵", "newline"), ("\n", "text")]
-        elif raw.strip(" \t") == "":
-            out.append(("·" * len(raw.replace("\t", "    ")), "space"))
-        else:
-            out.append((raw, "token"))
-        pos = m.end()
-    if pos < len(text):
-        out.append((text[pos:], "text"))
-    return out

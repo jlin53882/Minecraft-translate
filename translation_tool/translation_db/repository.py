@@ -40,6 +40,7 @@ from translation_tool.translation_db.models import (
     HistoryRow,
     Impact,
     IngestStats,
+    QualityFilter,
     QualityIssueDelta,
     ReviewPreviewItem,
     SameKeyRow,
@@ -58,7 +59,9 @@ from translation_tool.translation_db.quality import (
     matches_quality,
     quality_state,
     repair_input_issues,
+    repair_input_issues_from_counts,
     repair_output_issues,
+    token_issues,
     token_quality_comparison,
     whitespace_note,
 )
@@ -86,7 +89,12 @@ from translation_tool.utils.cancellation import (
 
 _ENTRY_COLS = "e.id, e.kind, e.mc_version, e.mod_id, e.key, e.en_us"
 _CHUNK = 400  # SQLite 變數上限相容的批次大小
+_EFFECTIVE_PRIORITY_VERSION = "2"
 _QUALITY_FETCH_BATCH_SIZE = 4_000
+# quality.py 的 token 掃描只會在含 § % $ { \ 或換行的文字出現；GLOB 字元集是其超集，
+# 用來在 SQL 先排除「必定沒有格式 token」的列（Python 仍負責最終判斷）。
+_TOKEN_CHAR_GLOB_SQL = r"'*[§%${\]*'"
+
 _QUALITY_PAGE_BUFFER_LIMIT = 10_000
 _BATCH_REPLACE_STRIP_CHARS = "".join(
     chr(codepoint)
@@ -151,6 +159,11 @@ def _like(text: str) -> str:
 
 class TranslationDB:
     """資料庫存取物件（執行緒安全：單一連線 + 可重入鎖）。"""
+
+    # 品質篩選翻頁用：(條件鍵, 已排序的符合列, 符合總數)，整個程式只留最近一份。
+    # 篩選在背景 worker 的唯讀連線掃描、翻頁卻在主連線，所以不能放在連線物件上；
+    # 條件鍵含資料庫路徑與資料世代，資料一變就自然失效。
+    _quality_page_cache: tuple[tuple, list[tuple], int] | None = None
 
     def __init__(
         self,
@@ -319,7 +332,15 @@ class TranslationDB:
         """優先序與上次記錄不同時，重建所有條目的生效譯文。"""
         want = ",".join(str(s) for s in self.priority)
         row = self._one("SELECT value FROM meta WHERE key='priority'")
-        if row and row[0] == want:
+        rank_version = self._one(
+            "SELECT value FROM meta WHERE key='effective_priority_version'"
+        )
+        if (
+            row
+            and row[0] == want
+            and rank_version
+            and rank_version[0] == _EFFECTIVE_PRIORITY_VERSION
+        ):
             return
         with self._tx() as conn:
             self._rebuild_effective(conn)
@@ -327,6 +348,11 @@ class TranslationDB:
                 "INSERT INTO meta (key, value) VALUES ('priority', ?) "
                 "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
                 (want,),
+            )
+            conn.execute(
+                "INSERT INTO meta (key, value) VALUES ('effective_priority_version', ?) "
+                "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                (_EFFECTIVE_PRIORITY_VERSION,),
             )
 
     # ------------------------------------------------------------ 生效譯文
@@ -805,10 +831,16 @@ class TranslationDB:
         elif criteria.state == "diff":
             where.append(f"f.entry_id IS NOT NULL AND {self._DIFF_SQL}")
         elif criteria.state == "changed":
+            # 從幾百筆的 src_change 出發逐筆查 entry 唯一索引；寫成 EXISTS 會先掃過
+            # 整個版本的 entry（約 0.3 秒），所以固定連接順序與索引。
             where.append(
-                "EXISTS (SELECT 1 FROM src_change sc WHERE sc.kind=e.kind "
-                "AND sc.mc_version=e.mc_version AND sc.mod_id=e.mod_id AND sc.key=e.key)"
+                "e.id IN (SELECT e2.id FROM src_change sc CROSS JOIN entry e2 "
+                "INDEXED BY sqlite_autoindex_entry_1 "
+                "ON e2.kind=sc.kind AND e2.mc_version=sc.mc_version "
+                "AND e2.mod_id=sc.mod_id AND e2.key=sc.key "
+                "WHERE sc.mc_version=?)"
             )
+            params.append(criteria.version)
         elif criteria.state == "manual":
             where.append(f"f.source={SRC_MANUAL} AND NOT {self._DIFF_SQL}")
         elif criteria.state == "ok":
@@ -923,6 +955,31 @@ class TranslationDB:
             f"{activity} "
         )
 
+    @staticmethod
+    def _quality_prefilter_sql(quality: QualityFilter) -> str:
+        """SQL 預篩：只縮小交給 ``matches_quality`` 的候選列，不改變最終結果。"""
+        status = "mismatch" if quality.status == "all" else quality.status
+        has_text = "e.en_us <> '' AND f.zh_tw <> ''"
+        if status == "unknown_source":
+            return "(e.en_us IS NULL OR e.en_us = '')"
+        if status == "missing_translation":
+            return "e.en_us <> '' AND (f.zh_tw IS NULL OR f.zh_tw = '')"
+        if status == "whitespace":
+            # 與 Python str.strip() 相同的空白字元集：前後有任何空白即與 trim 後不同。
+            return (
+                "f.zh_tw <> '' AND "
+                f"f.zh_tw <> trim(f.zh_tw, '{_BATCH_REPLACE_STRIP_CHARS}')"
+            )
+        if status == "consistent":
+            return has_text
+        if status == "mismatch":
+            token_like = " OR ".join(
+                f"{column} GLOB {_TOKEN_CHAR_GLOB_SQL} OR instr({column}, char(10)) > 0"
+                for column in ("e.en_us", "f.zh_tw")
+            )
+            return f"{has_text} AND ({token_like})"
+        return "1"
+
     def _quality_filtered_page(
         self, criteria: EntryFilter, *, limit: int | None, offset: int
     ) -> tuple[list[tuple], int]:
@@ -931,11 +988,6 @@ class TranslationDB:
         raise_if_cancelled()
         offset = max(0, int(offset))
         page_limit = None if limit is None else max(0, int(limit))
-        retain_count = None if page_limit is None else offset + page_limit
-        buffered: list[tuple] = []
-        retained: list[_WorstFirstQualityRow] = []
-        streaming = False
-        total = 0
         with self._lock:
             cursor = None
             owns_transaction = not self._conn.in_transaction
@@ -943,62 +995,28 @@ class TranslationDB:
                 self._conn.execute("BEGIN")
             self._conn.set_progress_handler(lambda: int(is_cancelled()), 10_000)
             try:
-                select = (
-                    self._entry_select_sql()
-                    if page_limit is None
-                    else self._quality_candidate_select_sql(criteria.sort_by)
+                cache_key = (
+                    str(self.path),
+                    self._data_gen(),
+                    condition,
+                    tuple(params),
+                    repr(criteria.quality),
+                    criteria.sort_by,
                 )
-                query_source = (
-                    self._query_source()
-                    if page_limit is None
-                    else (
-                        "FROM entry e LEFT JOIN effective f ON f.entry_id=e.id "
-                        "LEFT JOIN translation et ON et.entry_id=e.id "
-                        "AND et.source=f.source"
+                cached = TranslationDB._quality_page_cache
+                if page_limit is not None and cached and cached[0] == cache_key:
+                    # 翻頁：條件與資料都沒變，直接用上次排好的符合清單，不重掃整個版本
+                    ordered, total = cached[1], cached[2]
+                else:
+                    ordered, total, complete = self._scan_quality_candidates(
+                        criteria, condition, params, page_limit, offset
                     )
-                )
-                cursor = self._conn.execute(
-                    f"{select} {query_source} WHERE {condition}", tuple(params)
-                )
-                while chunk := cursor.fetchmany(_QUALITY_FETCH_BATCH_SIZE):
-                    raise_if_cancelled()
-                    for row in chunk:
-                        if not matches_quality(
-                            row[5] or "", row[6] or "", criteria.quality
-                        ):
-                            continue
-                        total += 1
-                        if retain_count == 0:
-                            continue
-                        if page_limit is None:
-                            buffered.append(row)
-                            continue
-                        if not streaming:
-                            buffered.append(row)
-                            if len(buffered) > _QUALITY_PAGE_BUFFER_LIMIT:
-                                retained = [
-                                    _WorstFirstQualityRow(row, criteria.sort_by)
-                                    for row in buffered
-                                ]
-                                heapq.heapify(retained)
-                                while len(retained) > retain_count:
-                                    heapq.heappop(retained)
-                                buffered.clear()
-                                streaming = True
-                        else:
-                            candidate = _WorstFirstQualityRow(row, criteria.sort_by)
-                            if len(retained) < retain_count:
-                                heapq.heappush(retained, candidate)
-                            elif retained[0] < candidate:
-                                heapq.heapreplace(retained, candidate)
-                cursor.close()
-                cursor = None
-
-                ordered = (
-                    [row.row for row in sorted(retained, reverse=True)]
-                    if streaming
-                    else self._sort_filtered_rows(buffered, criteria.sort_by)
-                )
+                    if page_limit is not None and complete:
+                        TranslationDB._quality_page_cache = (
+                            cache_key,
+                            ordered,
+                            total,
+                        )
                 if page_limit is None:
                     return ordered[offset:], total
 
@@ -1032,6 +1050,85 @@ class TranslationDB:
                 self._conn.set_progress_handler(None, 0)
                 if owns_transaction and self._conn.in_transaction:
                     self._conn.rollback()
+
+    def _scan_quality_candidates(
+        self,
+        criteria: EntryFilter,
+        condition: str,
+        params: list,
+        page_limit: int | None,
+        offset: int,
+    ) -> tuple[list[tuple], int, bool]:
+        """掃描符合品質條件的列，回傳（已排序的候選、符合總數、是否含全部符合列）。
+
+        符合列太多時只保留要顯示的前 ``offset + limit`` 筆（堆積串流），此時候選不完整，
+        呼叫端不能把它當成可重複使用的翻頁快取。
+        """
+        retain_count = None if page_limit is None else offset + page_limit
+        buffered: list[tuple] = []
+        retained: list[_WorstFirstQualityRow] = []
+        streaming = False
+        total = 0
+        select = (
+            self._entry_select_sql()
+            if page_limit is None
+            else self._quality_candidate_select_sql(criteria.sort_by)
+        )
+        query_source = (
+            self._query_source()
+            if page_limit is None
+            else (
+                "FROM entry e LEFT JOIN effective f ON f.entry_id=e.id "
+                "LEFT JOIN translation et ON et.entry_id=e.id "
+                "AND et.source=f.source"
+            )
+        )
+        prefilter = self._quality_prefilter_sql(criteria.quality)
+        cursor = self._conn.execute(
+            f"{select} {query_source} WHERE ({condition}) AND {prefilter}",
+            tuple(params),
+        )
+        try:
+            while chunk := cursor.fetchmany(_QUALITY_FETCH_BATCH_SIZE):
+                raise_if_cancelled()
+                for row in chunk:
+                    if not matches_quality(
+                        row[5] or "", row[6] or "", criteria.quality
+                    ):
+                        continue
+                    total += 1
+                    if retain_count == 0:
+                        continue
+                    if page_limit is None:
+                        buffered.append(row)
+                        continue
+                    if not streaming:
+                        buffered.append(row)
+                        if len(buffered) > _QUALITY_PAGE_BUFFER_LIMIT:
+                            retained = [
+                                _WorstFirstQualityRow(row, criteria.sort_by)
+                                for row in buffered
+                            ]
+                            heapq.heapify(retained)
+                            while len(retained) > retain_count:
+                                heapq.heappop(retained)
+                            buffered.clear()
+                            streaming = True
+                    else:
+                        candidate = _WorstFirstQualityRow(row, criteria.sort_by)
+                        if len(retained) < retain_count:
+                            heapq.heappush(retained, candidate)
+                        elif retained[0] < candidate:
+                            heapq.heapreplace(retained, candidate)
+        finally:
+            cursor.close()
+        ordered = (
+            [row.row for row in sorted(retained, reverse=True)]
+            if streaming
+            else self._sort_filtered_rows(buffered, criteria.sort_by)
+        )
+        complete = not streaming and retain_count != 0
+        return ordered, total, complete
 
     def _entry_select_sql(self) -> str:
         translation_created = (
@@ -1096,6 +1193,11 @@ class TranslationDB:
             else self._entry_select_sql()
         )
         has_quality = criteria.quality.active
+        if has_quality and batch_replace_projection:
+            matched = self._quality_matched_batch_rows(
+                criteria, cond, params, conn, progress_callback
+            )
+            return self._sort_filtered_rows(matched, criteria.sort_by)
         if has_quality:
             sql = f"{select} {source} WHERE {cond}"
         else:
@@ -1148,6 +1250,60 @@ class TranslationDB:
                 rows = rows[
                     max(0, int(offset)) : max(0, int(offset)) + max(0, int(limit))
                 ]
+        return rows
+
+    def _quality_matched_batch_rows(
+        self,
+        criteria: EntryFilter,
+        cond: str,
+        params: list,
+        conn: sqlite3.Connection | None,
+        progress_callback: Callable[[str, float], None] | None,
+    ) -> list[tuple]:
+        """品質篩選的批次取代範圍：先用窄查詢找出符合的 id，再只讀這些列的完整欄位。
+
+        全版本預覽若先讀回每一列的完整投影（約 21 欄、三個 JOIN）再用 Python 篩選，
+        幾乎都花在搬運最後會被丟掉的列上。這裡的結果與舊流程相同。
+        """
+        connection = conn or self._conn
+        quality = criteria.quality
+        source = self._query_source()
+        narrow = (
+            f"SELECT e.id, e.en_us, f.zh_tw {source} "
+            f"WHERE ({cond}) AND {self._quality_prefilter_sql(quality)}"
+        )
+        matched_ids: list[int] = []
+        connection.set_progress_handler(lambda: int(is_cancelled()), 10_000)
+        try:
+            cursor = connection.execute(narrow, tuple(params))
+            scanned = 0
+            while chunk := cursor.fetchmany(_CHUNK * 10):
+                raise_if_cancelled()
+                scanned += len(chunk)
+                matched_ids.extend(
+                    int(row[0])
+                    for row in chunk
+                    if matches_quality(row[1] or "", row[2] or "", quality)
+                )
+                if progress_callback is not None:
+                    progress_callback(f"檢查品質條件（已檢查 {scanned:,} 筆）", 0.05)
+            rows: list[tuple] = []
+            select = self._batch_replace_select_sql()
+            for offset in range(0, len(matched_ids), 5000):
+                raise_if_cancelled()
+                rows.extend(
+                    connection.execute(
+                        f"{select} {source} WHERE e.id IN "
+                        "(SELECT value FROM json_each(?))",
+                        (json.dumps(matched_ids[offset : offset + 5000]),),
+                    ).fetchall()
+                )
+        except sqlite3.OperationalError:
+            if is_cancelled():
+                raise TaskCancelled() from None
+            raise
+        finally:
+            connection.set_progress_handler(None, 0)
         return rows
 
     def list_entries(
@@ -1226,11 +1382,16 @@ class TranslationDB:
                     "查詢跨版本候選", 0.45 + 0.15 * offset / max(1, len(keys))
                 )
             chunk = keys[offset : offset + 100]
-            tuple_sql = ",".join("(?,?,?,?)" for _ in chunk)
+            # 逐組 AND 再 OR：SQLite 才會對每組用 idx_entry_content 四欄索引查找。
+            # 寫成 ``(kind, mod_id, key, en_us) IN ((?,?,?,?), …)`` 時查詢計畫只用到 kind，
+            # 每批都掃過整個 kind 範圍（大版本上一批約 150 ms，對比約 2 ms）。
+            key_match = " OR ".join(
+                "(e.kind=? AND e.mod_id=? AND e.key=? AND e.en_us=?)" for _ in chunk
+            )
             params = [value for key in chunk for value in key]
             sql = (
                 f"{self._batch_replace_select_sql()} {self._query_source()} "
-                f"WHERE (e.kind,e.mod_id,e.key,e.en_us) IN ({tuple_sql}) "
+                f"WHERE ({key_match}) "
                 "AND e.en_us<>'' ORDER BY e.kind,e.mod_id,e.key,e.en_us,e.mc_version"
             )
             rows = (
@@ -1352,9 +1513,17 @@ class TranslationDB:
                 batch_replace_projection=True,
             )
             root_ids = tuple(sorted(int(row[0]) for row in roots))
+        # 只有譯文含尋找文字的根條目才會用到其他版本候選（見下方同步迴圈的 continue 條件）；
+        # 全版本預覽時這能把要查的 key 從所有條目縮到實際會被取代的那一小部分。
         siblings = (
             self._batch_sibling_rows(
-                roots, conn=conn, progress_callback=progress_callback
+                [
+                    row
+                    for row in roots
+                    if row[7] is not None and row[5] and find_text in (row[6] or "")
+                ],
+                conn=conn,
+                progress_callback=progress_callback,
             )
             if propagate
             else {}
@@ -2691,8 +2860,15 @@ class TranslationDB:
         expected_revision: int | None,
         actor: str = "AI 特殊字元修復",
         action: str = "quality_repair",
+        strict_newline: bool = False,
+        sync_other_versions: bool = False,
     ) -> AITranslationReplaceResult:
-        """Compare-and-set one mismatched source row without changing its identity."""
+        """Compare-and-set one mismatched source row without changing its identity.
+
+        ``strict_newline`` also requires the new text to keep the source's LF count.
+        ``sync_other_versions`` also rewrites the same source row of entries in other
+        versions that share kind/mod/key/source text and hold the identical old text.
+        """
         if action not in {"quality_repair", "quality_repair_review"}:
             raise ValueError("invalid quality repair history action")
         if not isinstance(new_zh_tw, str) or not new_zh_tw.strip():
@@ -2723,66 +2899,83 @@ class TranslationDB:
                 return AITranslationReplaceResult("skipped_changed")
             # Automated repair must pass output checks; an explicit human review
             # accepts the reviewed draft while retaining the same source CAS.
-            if action == "quality_repair" and repair_output_issues(
-                expected_en_us, new_zh_tw
-            ):
+            output_issues = token_issues if strict_newline else repair_output_issues
+            if action == "quality_repair" and output_issues(expected_en_us, new_zh_tw):
                 return AITranslationReplaceResult("skipped_changed")
             if new_zh_tw == current[0]:
                 return AITranslationReplaceResult("unchanged")
 
-            previous_checker, previous_review = current[2], current[3]
-            if source_id == SRC_MANUAL and action == "quality_repair":
-                new_checker, new_review = "", "unreviewed"
-            elif source_id == SRC_MANUAL and action == "quality_repair_review":
-                new_checker, new_review = actor, "reviewed"
-            else:
-                new_checker, new_review = previous_checker, previous_review
-            updated = conn.execute(
-                "UPDATE translation SET zh_tw=?, checker=?, review_status=?, "
-                "updated_at=CURRENT_TIMESTAMP WHERE entry_id=? AND source=? "
-                "AND zh_tw=? AND revision=? AND checker IS ? AND review_status IS ?",
-                (
-                    new_zh_tw,
-                    new_checker,
-                    new_review,
-                    entry_id,
-                    source_id,
-                    current[0],
-                    current[1],
-                    previous_checker,
-                    previous_review,
-                ),
-            )
-            if updated.rowcount != 1:
+            def apply_row(target_id, revision, checker, review) -> bool:
+                if source_id == SRC_MANUAL and action == "quality_repair":
+                    new_checker, new_review = "", "unreviewed"
+                elif source_id == SRC_MANUAL and action == "quality_repair_review":
+                    new_checker, new_review = actor, "reviewed"
+                else:
+                    new_checker, new_review = checker, review
+                updated = conn.execute(
+                    "UPDATE translation SET zh_tw=?, checker=?, review_status=?, "
+                    "updated_at=CURRENT_TIMESTAMP WHERE entry_id=? AND source=? "
+                    "AND zh_tw=? AND revision=? AND checker IS ? AND review_status IS ?",
+                    (
+                        new_zh_tw,
+                        new_checker,
+                        new_review,
+                        target_id,
+                        source_id,
+                        current[0],
+                        revision,
+                        checker,
+                        review,
+                    ),
+                )
+                if updated.rowcount != 1:
+                    return False
+                new_revision = conn.execute(
+                    "SELECT revision FROM translation WHERE entry_id=? AND source=?",
+                    (target_id, source_id),
+                ).fetchone()[0]
+                conn.execute(
+                    "INSERT INTO history (entry_id, batch, actor, action, old_zh_tw, "
+                    "new_zh_tw, prev_checker, prev_review_status, new_checker, "
+                    "new_review_status, prev_revision, new_revision, source_id, "
+                    "repair_prev_zh_tw) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (
+                        target_id,
+                        uuid.uuid4().hex,
+                        actor,
+                        action,
+                        current[0],
+                        new_zh_tw,
+                        checker or "",
+                        review,
+                        new_checker or "",
+                        new_review,
+                        revision,
+                        new_revision,
+                        source_id,
+                        None,
+                    ),
+                )
+                return True
+
+            if not apply_row(entry_id, current[1], current[2], current[3]):
                 return AITranslationReplaceResult("skipped_changed")
-            new_revision = conn.execute(
-                "SELECT revision FROM translation WHERE entry_id=? AND source=?",
-                (entry_id, source_id),
-            ).fetchone()[0]
-            conn.execute(
-                "INSERT INTO history (entry_id, batch, actor, action, old_zh_tw, "
-                "new_zh_tw, prev_checker, prev_review_status, new_checker, "
-                "new_review_status, prev_revision, new_revision, source_id, "
-                "repair_prev_zh_tw) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                (
-                    entry_id,
-                    uuid.uuid4().hex,
-                    actor,
-                    action,
-                    current[0],
-                    new_zh_tw,
-                    previous_checker or "",
-                    previous_review,
-                    new_checker or "",
-                    new_review,
-                    current[1],
-                    new_revision,
-                    source_id,
-                    None,
-                ),
-            )
-            self._refresh(conn, [entry_id])
-        return AITranslationReplaceResult("updated")
+            synced: list[int] = []
+            if sync_other_versions and action in {
+                "quality_repair",
+                "quality_repair_review",
+            }:
+                siblings = conn.execute(
+                    "SELECT t.entry_id, t.revision, t.checker, t.review_status "
+                    "FROM entry e0 JOIN entry e ON e.kind=e0.kind AND e.mod_id=e0.mod_id "
+                    "AND e.key=e0.key AND e.en_us=e0.en_us AND e.mc_version<>e0.mc_version "
+                    "JOIN translation t ON t.entry_id=e.id AND t.source=? AND t.zh_tw=? "
+                    "WHERE e0.id=?",
+                    (source_id, current[0], entry_id),
+                ).fetchall()
+                synced = [row[0] for row in siblings if apply_row(*row)]
+            self._refresh(conn, [entry_id, *synced])
+        return AITranslationReplaceResult("updated", len(synced))
 
     # --------------------------------------------------------- 批次機翻（資料庫內）
     def _untranslated_where(self, mod_ids: Sequence[str] | None) -> tuple[str, list]:
@@ -2949,11 +3142,21 @@ class TranslationDB:
         *,
         check: Callable[[], None] | None = None,
     ):
-        """Yield eligible repair rows and newline skip facts using bounded fetches."""
+        """Yield eligible repair rows (only the source row currently in effect).
+
+        Rows shadowed by a higher-priority source are not what users see, so they
+        are not repaired; newline skip facts ride along with each yielded row."""
+        # 兩邊都沒有任何格式字元（§ % $ { \ 換行）就不可能有 token，也就一定不是修復候選；
+        # 先在 SQL 排除，整個版本的譯文大多不必進 Python 逐列分析。
+        token_chars = " OR ".join(
+            f"{column} GLOB {_TOKEN_CHAR_GLOB_SQL} OR instr({column}, char(10)) > 0"
+            for column in ("e.en_us", "t.zh_tw")
+        )
         where = [
             "e.mc_version=?",
             "e.en_us<>''",
             "t.zh_tw<>''",
+            f"({token_chars})",
         ]
         params: list = [version]
         if mod_ids:
@@ -2963,6 +3166,7 @@ class TranslationDB:
             "SELECT e.id, e.kind, e.mod_id, e.key, e.en_us, t.zh_tw, "
             "e.mc_version, t.source, t.revision, t.checker, t.review_status "
             "FROM entry e JOIN translation t ON t.entry_id=e.id "
+            "JOIN effective f ON f.entry_id=e.id AND f.source=t.source "
             f"WHERE {' AND '.join(where)} ORDER BY e.mod_id, e.kind, e.key, t.source"
         )
         with self._lock:
@@ -2971,9 +3175,10 @@ class TranslationDB:
                 for row in rows:
                     if check is not None:
                         check()
-                    eligible, _issues, mixed = repair_input_issues(row[4], row[5])
-                    newline_mismatch = (
-                        format_tokens(row[4])["\n"] != format_tokens(row[5])["\n"]
+                    wanted, previous = format_tokens(row[4]), format_tokens(row[5])
+                    newline_mismatch = wanted["\n"] != previous["\n"]
+                    eligible, _issues, mixed = repair_input_issues_from_counts(
+                        wanted, previous
                     )
                     if eligible:
                         yield (

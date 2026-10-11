@@ -78,7 +78,7 @@ def load_replace_rules(path: str) -> list[dict[str, str]]:
     sorted_rules = ReplaceRules(fixed_rules + regex_rules)
 
     log_info(
-        "載入替換規則完成：固定字串 %d 條（已長詞優先排序），正則 %d 條",
+        "已載入自動替換規則：一般文字 %d 條（較長內容優先套用），正規表示式 %d 條",
         len(fixed_rules),
         len(regex_rules),
     )

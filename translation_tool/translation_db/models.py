@@ -65,6 +65,7 @@ class AITranslationReplaceResult:
     """專用 AI 譯文 compare-and-set 的結果。"""
 
     status: str  # updated / unchanged / skipped_changed
+    synced_other_versions: int = 0  # 同步更新的其他版本來源列數
 
 
 @dataclass(frozen=True)

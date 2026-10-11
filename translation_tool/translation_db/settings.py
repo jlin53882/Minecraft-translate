@@ -205,10 +205,114 @@ def ensure_custom_sources(path: Path, names: list[str]) -> dict[str, int]:
     return registry
 
 
+def _zip_source_codes(registry: dict[str, int]) -> set[int]:
+    """設定檔 ``zip_source`` 指到的來源代碼（ZIP 匯入預設來源，視為仍在使用）。"""
+    from translation_tool.utils.config_manager import load_config
+
+    try:
+        value = (load_config().get("translation_db") or {}).get("zip_source")
+    except (OSError, ValueError, AttributeError):
+        return set()
+    code = SourceCatalog.from_registry(registry).resolve(value)
+    return {int(code)} if code is not None else set()
+
+
+def prune_unused_custom_sources(path: Path) -> tuple[list[str], list[str]]:
+    """從資料庫登錄移除沒有任何資料引用的自訂來源；回傳 ``(已移除, 仍在使用)`` 名稱。
+
+    只改 ``meta.custom_sources`` 這一列，不動翻譯資料。引用檢查涵蓋翻譯列、
+    生效列與歷史紀錄；被引用的來源一律保留。移除前的登錄表另存在
+    ``meta.custom_sources_pruned``，需要時可手動還原。
+    """
+    registry = read_custom_sources(path)
+    if not registry or classify_database(path) != DB_VALID:
+        return [], []
+    conn = sqlite3.connect(path, timeout=5)
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        row = conn.execute(
+            "SELECT value FROM meta WHERE key = 'custom_sources'"
+        ).fetchone()
+        registry = (
+            {str(k): int(v) for k, v in json.loads(row[0]).items()} if row else {}
+        )
+        used: set[int] = set()
+        for sql in (
+            "SELECT DISTINCT source FROM translation",
+            "SELECT DISTINCT source FROM effective",
+            "SELECT DISTINCT source_id FROM history WHERE source_id IS NOT NULL",
+        ):
+            used.update(int(r[0]) for r in conn.execute(sql))
+        used.update(_zip_source_codes(registry))
+        removed = [n for n, code in registry.items() if code not in used]
+        kept = [n for n, code in registry.items() if code in used]
+        if removed:
+            conn.execute(
+                "INSERT INTO meta (key, value) VALUES ('custom_sources_pruned', ?) "
+                "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                (json.dumps(registry, ensure_ascii=False),),
+            )
+            conn.execute(
+                "UPDATE meta SET value = ? WHERE key = 'custom_sources'",
+                (
+                    json.dumps(
+                        {n: c for n, c in registry.items() if n in kept},
+                        ensure_ascii=False,
+                    ),
+                ),
+            )
+        conn.commit()
+    except (sqlite3.Error, ValueError) as exc:
+        conn.rollback()
+        log_warning(f"⚠️ 無法清除未使用的自訂來源：{exc!r}")
+        return [], []
+    finally:
+        conn.close()
+    if removed:
+        log_info(f"📚 已移除未使用的自訂來源：{'、'.join(removed)}")
+    return removed, kept
+
+
 def preview_new_source_names(text: str) -> tuple[list[str], list[str]]:
     """設定頁輸入框的即時預覽：``(已存在, 將新增)`` 的來源名稱（只讀，不登錄）。"""
-    registry = read_custom_sources(load_db_settings().resolved_path())
+    registry = read_custom_sources(configured_db_path())
     return split_new_source_names(text.splitlines(), registry)
+
+
+def configured_db_path(config: dict | None = None) -> Path:
+    """設定檔指定的資料庫路徑；只讀，不會登錄任何自訂來源。"""
+    if config is None:
+        from translation_tool.utils.config_manager import load_config
+
+        config = load_config()
+    cfg = config.get("translation_db", {}) or {}
+    return DbSettings(path=normalize_db_path(cfg.get("path"))).resolved_path()
+
+
+def forget_priority_lines(gone: set[str]) -> bool:
+    """把已儲存設定的來源優先順序中指向 ``gone`` 的行拿掉；有改動才寫檔。
+
+    清除自訂來源後若設定檔仍留著那些名稱，下次載入設定會把它們重新登錄回來。
+    """
+    from translation_tool.utils.config_manager import load_config, save_config
+
+    config = load_config()
+    cfg = config.get("translation_db") or {}
+    lines = cfg.get("priority")
+    if not isinstance(lines, list):
+        return False
+
+    def points_to(line: object) -> bool:
+        text = str(line).strip()
+        name, sep, _code = text.partition("（自訂 #")
+        return text in gone or (bool(sep) and name in gone)
+
+    kept = [line for line in lines if not points_to(line)]
+    if len(kept) == len(lines):
+        return False
+    cfg["priority"] = kept
+    config["translation_db"] = cfg
+    return save_config(config)
 
 
 def parse_priority(names: Any, custom: dict[str, int] | None = None) -> tuple[int, ...]:
@@ -228,13 +332,6 @@ def parse_priority(names: Any, custom: dict[str, int] | None = None) -> tuple[in
     return tuple(order)
 
 
-def priority_names(
-    priority: tuple[int, ...], catalog: SourceCatalog = DEFAULT_SOURCE_CATALOG
-) -> list[str]:
-    """Serialize source identity, never a potentially colliding display label."""
-    return [catalog.token_for(code) for code in priority]
-
-
 def serialize_priority_lines(
     names: Any, catalog: SourceCatalog = DEFAULT_SOURCE_CATALOG
 ) -> list[str]:
@@ -248,6 +345,8 @@ def serialize_priority_lines(
     seen_codes: set[int] = set()
     for name in clean_source_names(names):
         code = catalog.resolve(name)
+        if code is not None:
+            code = catalog.canonical_code(code)
         if code is None:
             if name not in serialized:
                 serialized.append(name)

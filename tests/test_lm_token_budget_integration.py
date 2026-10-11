@@ -23,6 +23,8 @@ LONG = "a" * 2000  # 約 500 value token；預設預算下一批約 31 條
 
 def _lm_cfg(**extra) -> dict:
     cfg = {
+        "max_output_token_budget": 24000,
+        "max_input_token_budget": 60000,
         "initial_batch_size_lang": 300,
         "initial_batch_size_patchouli": 100,
         "batch_shrink_factor": 0.5,

@@ -75,6 +75,16 @@ class SourceCatalog:
         )
 
     @property
+    def selectable_custom_codes(self) -> tuple[int, ...]:
+        """Custom codes to offer when tagging; names equal to a built-in are hidden.
+
+        Such a historical registration stays valid for existing rows, but the
+        built-in source of the same name is the one users should pick.
+        """
+        shadowed = set(BUILTIN_SOURCE_NAMES.values())
+        return tuple(sorted({c for n, c in self.custom_sources if n not in shadowed}))
+
+    @property
     def codes(self) -> tuple[int, ...]:
         return tuple(sorted(set(BUILTIN_SOURCE_NAMES) | set(self.custom_codes)))
 
@@ -116,6 +126,20 @@ class SourceCatalog:
             if text == source.display_name:
                 return source.code
         return None
+
+    def canonical_code(self, code: int) -> int:
+        """Map a custom code named like a built-in source onto that built-in.
+
+        Old databases may have registered a name that a later release made
+        built-in; the built-in wins when choosing priorities.
+        """
+        code = int(code)
+        for name, registered in self.custom_sources:
+            if registered == code:
+                for builtin, builtin_name in BUILTIN_SOURCE_NAMES.items():
+                    if name == builtin_name:
+                        return builtin
+        return code
 
     def label(self, code: int | None) -> str:
         if code is None:

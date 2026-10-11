@@ -63,9 +63,9 @@ class BudgetConfig:
     """token 預算相關設定（來自 config 的 ``lm_translator`` 區段）。"""
 
     enabled: bool = True
-    max_output_token_budget: int = 24_000
-    max_input_token_budget: int = 60_000
-    max_output_tokens: int = 32_768
+    max_output_token_budget: int = 65_536
+    max_input_token_budget: int = 264_000
+    max_output_tokens: int = 65_536
     output_token_factor: float = 1.5
     min_scale: float = 0.0625
     recover_after: int = 3

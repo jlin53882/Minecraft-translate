@@ -67,7 +67,7 @@ def test_default_max_output_tokens_is_sent(post):
     _call(post)
 
     assert _generation_config(post)["maxOutputTokens"] == DEFAULT_MAX_OUTPUT_TOKENS
-    assert DEFAULT_MAX_OUTPUT_TOKENS == 32768
+    assert DEFAULT_MAX_OUTPUT_TOKENS == 65536
 
 
 def test_config_overrides_default(post):

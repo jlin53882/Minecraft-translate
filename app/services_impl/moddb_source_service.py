@@ -12,7 +12,9 @@ from translation_tool.translation_db.schema import (
 from translation_tool.translation_db.settings import (
     DbSettings,
     clean_source_names,
+    forget_priority_lines,
     normalize_db_path,
+    prune_unused_custom_sources,
     read_custom_sources,
     serialize_priority_lines,
 )
@@ -46,18 +48,23 @@ def priority_display_lines(names, database_path: str | None = None) -> list[str]
     path = DbSettings(path=normalize_db_path(database_path)).resolved_path()
     catalog = SourceCatalog.from_registry(read_custom_sources(path))
     display_lines = []
+    seen: set[int] = set()
     for name in clean_source_names(names):
         code = catalog.resolve(name)
         if code is None:
             display_lines.append(name)
             continue
+        code = catalog.canonical_code(code)
+        if code in seen:
+            continue
+        seen.add(code)
         label = catalog.label(code)
-        # A custom source can reuse a newer built-in label. In that case the
-        # built-in's plain label resolves to the custom identity, so keep its
-        # stable token visible and editable instead of silently changing IDs.
-        display_lines.append(
-            catalog.token_for(code) if catalog.resolve(label) != code else label
-        )
+        # A custom source that reuses a built-in label is folded onto that
+        # built-in (canonical_code), so the plain label already means ``code``.
+        # Only show the stable token when the label would resolve elsewhere.
+        resolved = catalog.resolve(label)
+        same = resolved is not None and catalog.canonical_code(resolved) == code
+        display_lines.append(label if same else catalog.token_for(code))
     return display_lines
 
 
@@ -87,6 +94,21 @@ def priority_custom_source_lines(
         for name in clean_source_names(names)
         if (code := catalog.resolve(name)) is not None and code >= CUSTOM_SOURCE_BASE
     )
+
+
+def prune_unused_custom_sources_report(
+    database_path: str | None = None,
+) -> tuple[list[str], list[str], set[str]]:
+    """清除沒有資料引用的自訂來源；回傳 ``(已移除, 仍在使用, 設定中指向已移除來源的寫法)``。"""
+    path = DbSettings(path=normalize_db_path(database_path)).resolved_path()
+    before = SourceCatalog.from_registry(read_custom_sources(path))
+    removed, kept = prune_unused_custom_sources(path)
+    gone = {
+        token for name in removed for token in (name, f"custom:{before.resolve(name)}")
+    }
+    if gone:
+        forget_priority_lines(gone)
+    return removed, kept, gone
 
 
 def source_catalog_for(db) -> SourceCatalog:

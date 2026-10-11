@@ -98,6 +98,57 @@ def test_config_reload_preserves_valid_model_catalog_and_selection(monkeypatch):
     assert view.chatgpt_reasoning_effort_control.value == "high"
 
 
+def test_connected_chatgpt_mount_auto_loads_model_catalog(monkeypatch):
+    from app.views.config import chatgpt_oauth_panel as panel_module
+
+    config = deepcopy(DEFAULT_CONFIG)
+    config["lm_translator"]["provider"] = "chatgpt"
+    config["lm_translator"]["chatgpt_model"] = "gpt-alpha"
+    monkeypatch.setattr("app.views.config_view.load_config_json", lambda: config)
+    monkeypatch.setattr(
+        panel_module,
+        "chatgpt_account_status",
+        lambda: {
+            "connected": True,
+            "identity_connected": True,
+            "client_id_registered": True,
+            "oauth_session_present": True,
+            "plan_usage_authorized": True,
+            "reauth_required": False,
+            "email": "user@example.test",
+            "active_profile_id": "profile-a",
+            "accounts": [{"profile_id": "profile-a", "email": "user@example.test"}],
+        },
+    )
+    monkeypatch.setattr(
+        panel_module,
+        "list_chatgpt_models",
+        lambda *, profile_id=None: [
+            SimpleNamespace(slug="gpt-alpha", display_name="GPT Alpha"),
+            SimpleNamespace(slug="gpt-beta", display_name="GPT Beta"),
+        ],
+    )
+
+    page = mock_page()
+    view = ConfigView(page)
+    assert view.chatgpt_model_control.disabled is True
+    assert view.chatgpt_oauth_panel.login_button.content == "重新登入／重新授權"
+
+    view.did_mount()
+
+    assert len(page._tasks) == 1
+    handler, args = page._tasks.pop(0)
+    asyncio.run(handler(*args))
+
+    assert view.chatgpt_model_control.disabled is False
+    assert view._chatgpt_model_catalog_valid is True
+    assert view._chatgpt_model_catalog_profile_id == "profile-a"
+    assert [option.key for option in view.chatgpt_model_control.options] == [
+        "gpt-alpha",
+        "gpt-beta",
+    ]
+
+
 def test_save_keeps_configured_model_and_overrides_visible_without_catalog(
     monkeypatch,
 ):

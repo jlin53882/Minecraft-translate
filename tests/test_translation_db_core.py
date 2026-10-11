@@ -45,6 +45,7 @@ from translation_tool.translation_db.scanner import (
 )
 from translation_tool.translation_db.schema import (
     SRC_AI,
+    SRC_AI_REPAIR,
     SRC_JAR_CN,
     SRC_JAR_TW,
     SRC_MANUAL,
@@ -278,6 +279,76 @@ def test_manual_save_without_propagation_and_original_kept(db):
         SRC_MANUAL,
     }  # 原譯文保留
     assert detail.history[0].action == "manual"
+
+
+def test_manual_save_overrides_ai_repair_source_and_keeps_repair_history(db):
+    db.ingest(
+        "1.21.1",
+        [ScanItem(KIND_LANG, "foo", "item.ai-repair", "Use", "Use", source=SRC_AI)],
+    )
+    entry = db.list_entries("1.21.1")[0][0]
+    identity = {
+        "expected_version": entry.mc_version,
+        "expected_kind": entry.kind,
+        "expected_mod_id": entry.mod_id,
+        "expected_key": entry.key,
+        "expected_en_us": entry.en_us,
+    }
+
+    assert (
+        db.replace_ai_translation(entry.id, "Use", "AI repaired", **identity).status
+        == "updated"
+    )
+    assert db.get_entry(entry.id).source == SRC_AI_REPAIR
+
+    db.save_manual(entry.id, "Manual override", propagate=False)
+
+    current = db.get_entry(entry.id)
+    assert (current.zh_tw, current.source, current.review_status) == (
+        "Manual override",
+        SRC_MANUAL,
+        "unreviewed",
+    )
+    translations = {
+        row.source: row.zh_tw for row in db.entry_detail(entry.id).translations
+    }
+    assert translations[SRC_AI_REPAIR] == "AI repaired"
+    assert db.entry_detail(entry.id).history[0].action == "manual"
+
+
+def test_open_rebuilds_stale_effective_projection_after_priority_rule_change(tmp_path):
+    path = tmp_path / "stale-effective.db"
+    db = TranslationDB(path)
+    db.ingest(
+        "1.21.1",
+        [
+            ScanItem(
+                KIND_LANG, "foo", "item.stale-effective", "Use", "Use", source=SRC_AI
+            )
+        ],
+    )
+    entry = db.list_entries("1.21.1")[0][0]
+    identity = {
+        "expected_version": entry.mc_version,
+        "expected_kind": entry.kind,
+        "expected_mod_id": entry.mod_id,
+        "expected_key": entry.key,
+        "expected_en_us": entry.en_us,
+    }
+    db.replace_ai_translation(entry.id, "Use", "AI repaired", **identity)
+    db.save_manual(entry.id, "Manual override", propagate=False)
+    with db._tx() as conn:
+        conn.execute(
+            "UPDATE effective SET zh_tw='AI repaired', source=? WHERE entry_id=?",
+            (SRC_AI_REPAIR, entry.id),
+        )
+        conn.execute("DELETE FROM meta WHERE key='effective_priority_version'")
+    db.close()
+
+    reopened = TranslationDB(path)
+    current = reopened.get_entry(entry.id)
+    assert (current.zh_tw, current.source) == ("Manual override", SRC_MANUAL)
+    reopened.close()
 
 
 def test_revert_restores_previous_state_for_whole_batch(db):
@@ -597,13 +668,13 @@ def test_ingest_manual_source_is_explicitly_unreviewed(db):
     assert entry.review_status == "unreviewed"
 
 
-def test_priority_names_roundtrip_builtin_custom_collision():
-    from translation_tool.translation_db.settings import parse_priority, priority_names
+def test_priority_tokens_roundtrip_builtin_custom_collision():
+    from translation_tool.translation_db.settings import parse_priority
     from translation_tool.translation_db.source_catalog import SourceCatalog
 
     catalog = SourceCatalog.from_registry({"釘宮翻譯組": 100})
     priority = (SRC_SUBTITLE, 100)
-    names = priority_names(priority, catalog)
+    names = [catalog.token_for(code) for code in priority]
     assert names == ["builtin:subtitle", "custom:100"]
     assert parse_priority(names, {"釘宮翻譯組": 100})[:2] == priority
 

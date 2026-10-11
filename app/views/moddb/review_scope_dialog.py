@@ -7,7 +7,12 @@ import sqlite3
 import flet as ft
 
 from app.services_impl.moddb_service import EntryRow, ReviewPreviewItem, TranslationDB
-from app.services_impl.moddb_source_service import source_catalog_for, source_label
+from app.services_impl.moddb_source_service import (
+    source_catalog_for,
+    source_label,
+    source_tone,
+)
+from app.ui import design, kit
 from app.ui.design import C
 from app.ui.snack import show_snack
 from app.views.moddb.formatting import impact_text, shorten
@@ -128,72 +133,268 @@ class ReviewScopeController:
         panel = self.panel
         included = [item for item in preview if item.included]
         skipped = [item for item in preview if not item.included]
-        lines = [
-            f"審核：{item.mc_version}・{item.text}"
-            + (
-                f"（將取代非生效人工譯文：{shorten(item.manual_text or '', 36)}）"
-                if item.manual_text is not None and item.manual_text != item.text
-                else ""
-            )
-            for item in included
-        ]
-        lines.extend(f"略過：{item.mc_version}・{item.reason}" for item in skipped)
-        content = ft.Column(
-            [
-                ft.Text(
-                    "請確認下列版本與人工來源變更，再選擇審核範圍。",
-                    size=12.5,
-                    color=C.MUTED,
-                    selectable=True,
-                ),
-                ft.Column(
-                    [
-                        ft.Text(line, size=12, color=C.TEXT, selectable=True)
-                        for line in lines
-                    ],
-                    spacing=5,
-                    scroll=ft.ScrollMode.AUTO,
-                    height=280,
-                ),
-            ],
-            tight=True,
-            width=520,
-            spacing=10,
-        )
-        actions = [
-            ft.TextButton("取消", on_click=lambda _e=None: panel._page.pop_dialog())
-        ]
-        others = sum(item.included and item.entry_id != entry.id for item in preview)
-        if propagate and others:
-            actions.append(
-                ft.TextButton(
-                    "僅審核目前版本",
-                    on_click=lambda _e=None: self.execute(entry, db, False),
-                )
-            )
-            label = f"審核預覽範圍（{len(included)} 版）"
-        else:
-            label = "確認審核目前版本"
-        actions.append(
-            ft.TextButton(
-                label,
-                on_click=lambda _e=None: self.execute(entry, db, propagate, preview),
-            )
-        )
+        content = self._build_scope_content(entry, db, included, skipped)
+        actions = self._build_scope_actions(entry, db, preview, included, propagate)
         show_dialog = getattr(panel._page, "show_dialog", None)
         if callable(show_dialog):
             show_dialog(
                 ft.AlertDialog(
                     modal=True,
-                    title=ft.Text("確認審核範圍"),
+                    title=ft.Text(
+                        "確認條目審核", size=20, weight=ft.FontWeight.BOLD, color=C.TEXT
+                    ),
                     content=content,
                     actions=actions,
+                    actions_alignment=ft.MainAxisAlignment.END,
+                    scrollable=True,
+                    title_padding=ft.Padding(left=24, top=20, right=24, bottom=8),
+                    content_padding=ft.Padding(left=24, top=8, right=24, bottom=8),
+                    actions_padding=ft.Padding(left=24, top=8, right=24, bottom=20),
+                    inset_padding=ft.Padding.symmetric(horizontal=20, vertical=24),
+                    shape=ft.RoundedRectangleBorder(radius=design.RADIUS_CARD),
                 )
             )
         else:
             show_snack(
                 panel._page, "目前畫面無法顯示審核範圍確認視窗，未執行審核。", C.GOLD
             )
+
+    def _build_scope_content(
+        self,
+        entry: EntryRow,
+        db: TranslationDB,
+        included: list[ReviewPreviewItem],
+        skipped: list[ReviewPreviewItem],
+    ) -> ft.Column:
+        """Build the review explanation without changing the review scope."""
+        return ft.Column(
+            [
+                ft.Text(
+                    "確認原文、目前生效譯文與版本範圍；確認後會記錄為人工已審核。",
+                    size=12.5,
+                    color=C.MUTED,
+                    selectable=True,
+                ),
+                self._build_scope_summary(included, skipped),
+                ft.Divider(height=1, color=C.LINE),
+                self._build_entry_comparison(entry, db),
+                ft.Divider(height=1, color=C.LINE),
+                self._build_version_scope(entry, db, included, skipped),
+                ft.Text(
+                    "確認後會重新檢查資料是否被其他操作修改；只會處理列出的相同譯文版本，"
+                    "不會修改英文原文或略過版本。",
+                    size=11.5,
+                    color=C.MUTED,
+                    selectable=True,
+                ),
+            ],
+            width=760,
+            spacing=16,
+            tight=True,
+        )
+
+    @staticmethod
+    def _build_scope_summary(
+        included: list[ReviewPreviewItem], skipped: list[ReviewPreviewItem]
+    ) -> ft.Container:
+        return ft.Container(
+            content=ft.Row(
+                [
+                    kit.stat_card("本次審核條目", "1 筆", tone="dia", expand=True),
+                    kit.stat_card(
+                        "審核版本", str(len(included)), tone="em", expand=True
+                    ),
+                    kit.stat_card(
+                        "略過版本", str(len(skipped)), tone="gold", expand=True
+                    ),
+                ],
+                spacing=12,
+            ),
+            padding=ft.Padding.only(bottom=2),
+        )
+
+    def _build_entry_comparison(self, entry: EntryRow, db: TranslationDB) -> ft.Column:
+        catalog = source_catalog_for(db)
+        source_name = source_label(entry.source, catalog, entry.review_status)
+        quality = (
+            "格式檢查通過"
+            if not entry.quality_issues
+            else "格式檢查：" + "、".join(entry.quality_issues)
+        )
+        return ft.Column(
+            [
+                ft.Text("條目內容", size=15, weight=ft.FontWeight.BOLD, color=C.TEXT),
+                ft.Text(entry.mod_id, size=12.5, color=C.MUTED),
+                ft.Text(
+                    entry.key,
+                    size=13,
+                    color=C.DIA,
+                    font_family=design.FONT_MONO,
+                    selectable=True,
+                ),
+                ft.Row(
+                    [
+                        self._build_language_box(
+                            "英文原文", "en_us", entry.en_us, "dia"
+                        ),
+                        self._build_language_box(
+                            "繁體中文譯文", "zh_tw", entry.zh_tw, "em", quality
+                        ),
+                    ],
+                    spacing=12,
+                ),
+                ft.Row(
+                    [
+                        ft.Text("目前生效來源", size=12, color=C.MUTED),
+                        kit.chip(source_name, source_tone(entry.source)),
+                    ],
+                    spacing=8,
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                ),
+            ],
+            spacing=8,
+        )
+
+    @staticmethod
+    def _build_language_box(
+        label: str,
+        language: str,
+        value: str,
+        tone: str,
+        status: str | None = None,
+    ) -> ft.Container:
+        palette = design.tone(tone)
+        heading: list[ft.Control] = [
+            ft.Text(f"{label}・{language}", size=12, color=C.MUTED),
+        ]
+        if status:
+            heading.append(kit.chip(status, tone))
+        return ft.Container(
+            content=ft.Column(
+                [
+                    ft.Row(heading, spacing=8),
+                    ft.Text(
+                        value or "（內容為空）", size=15, color=C.TEXT, selectable=True
+                    ),
+                ],
+                spacing=8,
+                tight=True,
+            ),
+            width=360,
+            padding=12,
+            bgcolor=palette.bg,
+            border=ft.Border.all(1, palette.line),
+            border_radius=design.RADIUS_CONTROL,
+        )
+
+    def _build_version_scope(
+        self,
+        entry: EntryRow,
+        db: TranslationDB,
+        included: list[ReviewPreviewItem],
+        skipped: list[ReviewPreviewItem],
+    ) -> ft.Column:
+        items = [
+            self._build_version_item(entry, item) for item in [*included, *skipped]
+        ]
+        return ft.Column(
+            [
+                ft.Text(
+                    "版本審核範圍", size=15, weight=ft.FontWeight.BOLD, color=C.TEXT
+                ),
+                ft.Column(items, spacing=8, tight=True),
+            ],
+            spacing=10,
+            tight=True,
+        )
+
+    @staticmethod
+    def _build_version_item(entry: EntryRow, item: ReviewPreviewItem) -> ft.Container:
+        if item.included:
+            tone = "em"
+            status = "本次審核" if item.entry_id == entry.id else "同步審核"
+            icon = ft.Icons.CHECK_CIRCLE_OUTLINE
+            if item.entry_id == entry.id:
+                detail = "將審核目前顯示的繁體中文譯文"
+            else:
+                detail = "原文與目前譯文相同，將同步審核此版本"
+            if item.manual_text is not None and item.manual_text != item.text:
+                detail += f"；將取代非生效人工譯文：{shorten(item.manual_text, 36)}"
+        else:
+            tone = "neutral"
+            status = "略過"
+            icon = ft.Icons.REMOVE_CIRCLE_OUTLINE
+            detail = f"{item.reason}，不會同步審核此版本"
+        palette = design.tone(tone)
+        return ft.Container(
+            content=ft.Row(
+                [
+                    ft.Icon(icon, size=19, color=palette.fg),
+                    ft.Column(
+                        [
+                            ft.Row(
+                                [
+                                    ft.Text(
+                                        item.mc_version,
+                                        size=14,
+                                        weight=ft.FontWeight.BOLD,
+                                        color=C.TEXT,
+                                    ),
+                                    kit.chip(status, tone),
+                                ],
+                                spacing=8,
+                            ),
+                            ft.Text(detail, size=12, color=C.MUTED, selectable=True),
+                        ],
+                        spacing=5,
+                        tight=True,
+                        expand=True,
+                    ),
+                ],
+                spacing=10,
+                vertical_alignment=ft.CrossAxisAlignment.START,
+            ),
+            padding=12,
+            bgcolor=design.tone("em").bg if item.included else C.PANEL2,
+            border=ft.Border.all(1, palette.line),
+            border_radius=design.RADIUS_CONTROL,
+        )
+
+    def _build_scope_actions(
+        self,
+        entry: EntryRow,
+        db: TranslationDB,
+        preview: list[ReviewPreviewItem],
+        included: list[ReviewPreviewItem],
+        propagate: bool,
+    ) -> list[ft.Control]:
+        panel = self.panel
+        actions = [
+            kit.button(
+                "取消", "ghost", on_click=lambda _e=None: panel._page.pop_dialog()
+            )
+        ]
+        others = sum(item.included and item.entry_id != entry.id for item in preview)
+        if propagate and others:
+            actions.append(
+                kit.button(
+                    "僅審核目前版本",
+                    "secondary",
+                    on_click=lambda _e=None: self.execute(entry, db, False),
+                )
+            )
+            label = f"確認審核 {len(included)} 版"
+        else:
+            label = "確認審核目前版本"
+        actions.append(
+            kit.button(
+                label,
+                "primary",
+                icon=ft.Icons.VERIFIED_OUTLINED,
+                on_click=lambda _e=None: self.execute(entry, db, propagate, preview),
+            )
+        )
+        return actions
 
     def execute(
         self,

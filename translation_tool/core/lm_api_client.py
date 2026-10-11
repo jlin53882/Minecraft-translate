@@ -27,7 +27,7 @@ NETWORK_CONNECT_TIMEOUT_SEC = 30
 # 單次回應的輸出 token 上限（generationConfig.maxOutputTokens）。
 # 不設的話，模型重複輸出時會燒光整個輸出額度（issue #108）。
 # 設定檔 lm_translator.max_output_tokens 可覆寫；設為 0 代表不送這個欄位。
-DEFAULT_MAX_OUTPUT_TOKENS = 32768
+DEFAULT_MAX_OUTPUT_TOKENS = 65536
 
 # Gemini responseFormat.text.schema uses a JSON Schema subset.
 TRANSLATION_RESPONSE_SCHEMA = {
@@ -187,7 +187,7 @@ def call_gemini_requests(
 
     Args:
         max_output_tokens: 輸出 token 上限；None 時讀設定檔
-            ``lm_translator.max_output_tokens``（預設 32768）。
+            ``lm_translator.max_output_tokens``（預設 65536）。
         meta_out: 若提供，會以 ``extract_response_meta`` 的結果更新這個 dict
             （finish_reason、token 用量）。回傳值維持純文字，既有呼叫端不受影響。
     """

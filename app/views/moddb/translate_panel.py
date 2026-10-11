@@ -13,6 +13,7 @@ import flet as ft
 
 from app.services_impl.moddb_retranslate_service import (
     SameSourceAIRepairPreview,
+    format_repair_live,
     run_moddb_retranslate_service,
 )
 from app.services_impl.moddb_translate_service import (
@@ -63,6 +64,8 @@ class TranslatePanel(ft.Column):
         self._on_finished = on_finished
         self._repair_summary: dict | None = None
         self._repair_summary_final = True
+        self._flagged_total = 0
+        self._flagged_resolved = 0
         self.result_inspector = TranslationResultInspector(
             page,
             on_view_flagged,
@@ -153,11 +156,22 @@ class TranslatePanel(ft.Column):
         self.progress_bar = kit.progress_bar(0, "em", height=8)
         # 批次、已處理筆數、已用時間、預估剩餘時間、預計完成時刻（每批結束更新）
         self.live_text = ft.Text("", size=12.5, color=C.MUTED, selectable=True)
+        self._build_repair_progress_panel()
         ui_cfg = load_ui_logging_config(load_config)
         self.log_view = LogView(
-            page=self._page, mode="tail", tail_lines=ui_cfg.get("tail_lines", 250)
+            page=self._page,
+            mode="tail",
+            tail_lines=ui_cfg.get("tail_lines", 250),
+            height=0,
+            expand=False,
         )
-        self.log_view.height = 200
+        self.log_view.visible = False
+        self.log_explainer = kit.hint_text(
+            "執行紀錄說明：來源項目＝資料庫中需要處理的譯文；"
+            "AI 修復項目＝實際送給 AI 的工作；"
+            "規劃批次＝開始前依 token 上限估算的批次，不等於實際 HTTP 請求次數；"
+            "略過舊快取＝不沿用先前 AI 結果，會重新呼叫 AI。"
+        )
         self.start_btn = kit.button(
             "開始機翻", "primary", icon=ft.Icons.PLAY_ARROW, on_click=self.start_clicked
         )
@@ -228,14 +242,94 @@ class TranslatePanel(ft.Column):
                         vertical_alignment=ft.CrossAxisAlignment.CENTER,
                     ),
                     self.progress_bar,
+                    self.repair_progress_panel,
                     self.live_text,
                     self.log_view,
+                    self.log_explainer,
                     ft.Row(list(self._stat_cards), spacing=10),
                 ],
                 spacing=12,
             ),
             icon=ft.Icons.AUTO_AWESOME,
             tone="em",
+        )
+
+    def _build_repair_progress_panel(self) -> None:
+        self.repair_progress_source = ft.Text("0 / 0（0%）", size=15, color=C.TEXT)
+        self.repair_progress_ai = ft.Text("0 / 0", size=15, color=C.TEXT)
+        self.repair_progress_batches = ft.Text("0 / 0", size=15, color=C.TEXT)
+        self.repair_progress_elapsed = ft.Text("00:00", size=13, color=C.MUTED)
+        self.repair_progress_eta = ft.Text("計算中", size=13, color=C.MUTED)
+        self.repair_progress_current = ft.Text(
+            "等待開始", size=13, color=C.TEXT, selectable=True
+        )
+        self.repair_progress_panel = ft.Container(
+            visible=False,
+            padding=12,
+            bgcolor=C.PANEL2,
+            border=ft.Border.all(1, C.LINE),
+            border_radius=10,
+            content=ft.Column(
+                [
+                    ft.Row(
+                        [
+                            ft.Text(
+                                "Mod 資料庫｜譯文格式修復",
+                                size=14,
+                                weight=ft.FontWeight.W_600,
+                            ),
+                            ft.Text("AI 翻譯中", size=12, color=C.EM),
+                        ],
+                        alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                    ),
+                    ft.Row(
+                        [
+                            ft.Column(
+                                [
+                                    ft.Text("來源項目處理進度", size=11, color=C.MUTED),
+                                    self.repair_progress_source,
+                                ],
+                                expand=True,
+                                spacing=2,
+                            ),
+                            ft.Column(
+                                [
+                                    ft.Text("AI 修復項目", size=11, color=C.MUTED),
+                                    self.repair_progress_ai,
+                                ],
+                                expand=True,
+                                spacing=2,
+                            ),
+                            ft.Column(
+                                [
+                                    ft.Text("規劃批次", size=11, color=C.MUTED),
+                                    self.repair_progress_batches,
+                                ],
+                                expand=True,
+                                spacing=2,
+                            ),
+                        ],
+                        spacing=16,
+                    ),
+                    ft.Row(
+                        [
+                            ft.Text("目前執行：", size=11, color=C.MUTED),
+                            self.repair_progress_current,
+                        ],
+                        spacing=4,
+                    ),
+                    ft.Row(
+                        [
+                            ft.Text("已耗時", size=11, color=C.MUTED),
+                            self.repair_progress_elapsed,
+                            ft.Text("　預估剩餘：", size=11, color=C.MUTED),
+                            self.repair_progress_eta,
+                        ],
+                        spacing=2,
+                    ),
+                ],
+                spacing=8,
+            ),
         )
 
     def _bind_kpi_titles(self) -> None:
@@ -254,14 +348,29 @@ class TranslatePanel(ft.Column):
             on_mode_change=self._on_repair_mode_changed,
             on_preview=self.preview_retranslation,
             on_confirm=self.confirm_retranslation,
+            on_newline_change=lambda _e=None: self._on_repair_newline_changed(),
+            on_filter_change=lambda _e=None: (
+                retranslation_controller.refresh_preview_cards(self)
+            ),
+            on_page=lambda page: retranslation_controller.refresh_preview_cards(
+                self, page=page
+            ),
+            page_size=retranslation_controller.PREVIEW_PAGE_SIZE,
         )
         self.repair_card = controls.card
         self.repair_mode_group = controls.mode_group
         self.repair_preview_btn = controls.preview_button
         self.repair_start_btn = controls.start_button
+        self.repair_newline_row = controls.newline_row
+        self.repair_sync_row = controls.sync_row
         self.repair_preview_text = controls.preview_text
         self.repair_explainer = controls.explainer
         self.repair_samples = controls.samples
+        self.repair_preview_search = controls.preview_search
+        self.repair_preview_source_filter = controls.preview_source_filter
+        self.repair_preview_issue_filter = controls.preview_issue_filter
+        self.repair_preview_count = controls.preview_count
+        self.repair_preview_pager = controls.pager
         self.repair_summary_text = controls.summary
 
     def _repair_default_text(self) -> str:
@@ -277,7 +386,15 @@ class TranslatePanel(ft.Column):
         if value == self._repair_mode:
             return
         self._repair_mode = value
+        self.repair_newline_row.visible = value == "quality_mismatch"
+        self.repair_sync_row.visible = value == "quality_mismatch"
         self.repair_explainer.value = self._repair_explanation()
+        self._reset_stats(mode="repair")
+        self._clear_repair_preview()
+        self._safe_update()
+
+    def _on_repair_newline_changed(self) -> None:
+        """換行數規則變了，既有預覽不再代表實際會送 AI 的項目，需重新預覽。"""
         self._reset_stats(mode="repair")
         self._clear_repair_preview()
         self._safe_update()
@@ -406,6 +523,14 @@ class TranslatePanel(ft.Column):
             dry_run=dry_run,
             reuse_other_versions=bool(self.reuse_row.value),
             write_cache=bool(self.cache_row.value),
+            repair_newline_only=(
+                self._repair_mode == "quality_mismatch"
+                and bool(self.repair_newline_row.value)
+            ),
+            repair_sync_other_versions=(
+                self._repair_mode == "quality_mismatch"
+                and bool(self.repair_sync_row.value)
+            ),
         )
 
     def start_clicked(self, _e=None, *, dry_run: bool = False) -> None:
@@ -426,6 +551,8 @@ class TranslatePanel(ft.Column):
         self.progress_bar.value = 0
         self.live_text.value = ""
         self.log_view.clear()
+        self.log_view.height = 0
+        self.log_view.visible = False
         self._reset_stats(mode="normal")
         self._safe_update()
         launched = launch_page_operation(
@@ -494,6 +621,8 @@ class TranslatePanel(ft.Column):
         self.progress_bar.value = 0
         self.live_text.value = ""
         self.log_view.clear()
+        self.log_view.height = 0
+        self.log_view.visible = False
         self.repair_summary_text.value = (
             "正在修復所選來源譯文；結果仍不一致、失敗或資料已變動時會保留原譯文。"
             if preview.mode == "quality_mismatch"
@@ -592,16 +721,27 @@ class TranslatePanel(ft.Column):
             return
         snap = session.snapshot()
         self.progress_bar.value = float(snap.get("progress", 0) or 0)
-        self.log_view.sync_entries(snap.get("logs", []) or [], update=False)
+        log_entries = snap.get("logs", []) or []
+        self.log_view.sync_entries(log_entries, update=False)
+        has_logs = bool(log_entries)
+        self.log_view.height = 200 if has_logs else 0
+        self.log_view.visible = has_logs
         status = (snap.get("status") or "").upper()
         summary = snap.get("summary") or {}
         if summary:
             self._apply_summary(summary, final=status in ("DONE", "ERROR"))
         live = summary.get("live")
+        if summary.get("operation") in {
+            "retranslate_same_source_ai",
+            "repair_special_character_mismatch",
+        }:
+            self._apply_repair_live(live, summary=summary)
         if live and status not in ("DONE", "ERROR"):
-            self.live_text.value = format_live(
-                tick_live(live)
-            )  # 已用時間每次輪詢都更新
+            current_live = tick_live(live)
+            if summary.get("operation") == "repair_special_character_mismatch":
+                self.live_text.value = format_repair_live(current_live)
+            else:
+                self.live_text.value = format_live(current_live)
         if status in ("DONE", "ERROR"):
             if summary.get("batches"):
                 self.live_text.value = (
@@ -651,6 +791,7 @@ class TranslatePanel(ft.Column):
         self._repair_summary = dict(s)
         self._repair_summary_final = final
         quality_repair = s.get("operation") == "repair_special_character_mismatch"
+        self.repair_progress_panel.visible = True
         self.result_inspector.set_repair_results(s)
         self._set_kpi_mode(
             "repair",
@@ -689,7 +830,14 @@ class TranslatePanel(ft.Column):
             else f"；狀態 {status}，數字為已提交／已確認的部分結果"
         )
         self.repair_summary_text.value = (
-            f"{progress}：候選 {s.get('candidates', 0)}；更新 {s.get('updated', 0)}；"
+            f"{progress}：待處理來源項目 {s.get('candidates', 0)}；"
+            f"更新 {s.get('updated', 0)}"
+            + (
+                f"（另同步其他版本 {s.get('synced_other_versions', 0)}）"
+                if s.get("sync_other_versions")
+                else ""
+            )
+            + "；"
             f"重翻後仍相同 {s.get('unchanged', 0)}；待人工確認 {s.get('flagged', 0)}；"
             f"資料已變動跳過 {s.get('skipped_changed', 0)}；"
             f"失敗 {s.get('failed', 0)}；"
@@ -709,6 +857,55 @@ class TranslatePanel(ft.Column):
         detail_parts = repair_summary_detail_lines(s)
         if detail_parts:
             self.repair_summary_text.value += "\n" + "\n".join(detail_parts)
+
+    def _apply_repair_live(self, live: dict | None, *, summary: dict) -> None:
+        """Render repair-only counters without mixing them with normal translation KPIs."""
+        if not live:
+            live = {
+                "source_processed": summary.get("processed_candidates", 0),
+                "source_total": summary.get("candidates", 0),
+                "ai_completed": summary.get("ai_submitted_items", 0),
+                "ai_total": summary.get("candidates", 0),
+                "planned_batches_done": summary.get("batches", 0),
+                "planned_batches_total": summary.get(
+                    "planned_batches", summary.get("batches", 0)
+                ),
+                "actual_requests": summary.get("batches", 0),
+                "elapsed_sec": summary.get("elapsed_sec", 0),
+                "eta_sec": 0 if summary.get("status") == "DONE" else None,
+            }
+        source_done = int(live.get("source_processed", live.get("processed", 0)) or 0)
+        source_total = int(live.get("source_total", live.get("total", 0)) or 0)
+        source_percent = 100 * source_done / max(source_total, 1)
+        self.repair_progress_source.value = (
+            f"{source_done:,} / {source_total:,}（{source_percent:.0f}%）"
+        )
+        self.repair_progress_ai.value = (
+            f"{int(live.get('ai_completed', 0) or 0):,} / "
+            f"{int(live.get('ai_total', 0) or 0):,}"
+        )
+        self.repair_progress_batches.value = (
+            f"{int(live.get('planned_batches_done', live.get('batch_done', 0)) or 0):,} / "
+            f"{int(live.get('planned_batches_total', live.get('batch_est', 0)) or 0):,}"
+        )
+        self.repair_progress_elapsed.value = format_duration(live.get("elapsed_sec"))
+        self.repair_progress_eta.value = (
+            format_duration(live.get("eta_sec"))
+            if live.get("eta_sec") is not None
+            else "計算中"
+        )
+        profile = live.get("current_profile")
+        batch = live.get("current_batch")
+        batch_total = live.get("current_batch_total")
+        status = live.get("current_status") or "等待開始"
+        model = live.get("model_label")
+        if profile and batch:
+            current = f"{status}｜{profile} 項目（第 {batch} / {batch_total} 批）"
+        else:
+            current = str(status)
+        if model:
+            current += f"｜模型：{model}"
+        self.repair_progress_current.value = current
 
     def _on_repair_review_changed(self, unresolved_count: int) -> None:
         if (
@@ -735,12 +932,25 @@ class TranslatePanel(ft.Column):
             format_count(s.get("written")),
             delta=f"AI 回傳 {s.get('translated', 0):,} 筆",
         )
+        self._flagged_total = int(s.get("flagged") or 0)
+        self._flagged_resolved = 0
         self.stat_flagged.set_value(
             format_count(s.get("flagged")),
             delta="未寫入，詳見日誌" if s.get("flagged") else "",
         )
         self.result_inspector.set_normal_results(s, self._run_version)
         self.stat_remaining.set_value(format_count(s.get("remaining")))
+
+    def resolve_flagged(self, entry_id: int) -> None:
+        """條目校對裡手動修好一筆「特殊字元不一致」：卡片數量同步減少。"""
+        if not self.result_inspector.drop_normal_entry(entry_id):
+            return
+        self._flagged_resolved += 1
+        left = max(0, self._flagged_total - self._flagged_resolved)
+        self.stat_flagged.set_value(
+            format_count(left), delta="未寫入，詳見日誌" if left else "已全部處理"
+        )
+        self._safe_update()
 
     def _set_kpi_mode(self, mode: str, *, repair_condition: str | None = None) -> None:
         self._kpi_mode = mode
@@ -788,17 +998,17 @@ class TranslatePanel(ft.Column):
 
     def _reset_stats(self, *, mode: str = "normal") -> None:
         self._repair_summary = None
+        self.repair_progress_panel.visible = False
+        self.repair_progress_current.value = "等待開始"
+        self.repair_progress_source.value = "0 / 0（0%）"
+        self.repair_progress_ai.value = "0 / 0"
+        self.repair_progress_batches.value = "0 / 0"
+        self.repair_progress_elapsed.value = "00:00"
+        self.repair_progress_eta.value = "計算中"
         for card in self._stat_cards:
             card.set_value("—", delta="")
         self.result_inspector.clear()
         self._set_kpi_mode(mode)
-
-    @property
-    def _flagged(self) -> dict[int, str]:
-        return self.result_inspector.normal_entries
-
-    def _view_flagged(self) -> None:
-        self.result_inspector.inspect()
 
     def _set_running(self, running: bool) -> None:
         self.start_btn.disabled = running

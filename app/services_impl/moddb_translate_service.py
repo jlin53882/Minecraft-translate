@@ -79,6 +79,10 @@ class TranslateOptions:
     dry_run: bool = False
     reuse_other_versions: bool = True
     write_cache: bool = True  # 結果除了寫入資料庫，也寫入翻譯快取（「快取資料」資料夾）
+    # 格式修復：連「只有實際換行數不同」的項目也送 AI，且輸出必須與原文換行數一致
+    repair_newline_only: bool = False
+    # 格式修復：原文與舊譯文都相同的其他版本條目一併改成新譯文
+    repair_sync_other_versions: bool = False
 
 
 @dataclass

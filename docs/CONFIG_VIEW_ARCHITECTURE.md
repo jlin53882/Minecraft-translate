@@ -29,9 +29,11 @@ app/views/config/
 | `api_models` | API & 模型設定 | 「API 金鑰設定」卡（`_keys_panel`：標題「API 金鑰 (API Keys)」旁「+」新增；每列為遮罩輸入框＋顯示/隱藏眼睛＋刪除鈕）與「模型設定」卡（`_models_panel`：標題「模型清單 (Models List)」＋「新增模型名稱」輸入框＋「+」；輸入框文字只是草稿，按「+」加入後才成為設定變更；每列為序號、勾選啟用、模型名、`max_output_tokens`「模型上限」欄（空白表示用全域值）、上移／下移／刪除） |
 | `translation_behavior` | 翻譯行為設定 | 「基本設定」卡（temperature、`retry_same_as_source`、rate_limit.timeout、sleep_seconds_between_batches、`lm_translate_folder_name`）與「過濾條件與目錄」卡（skip_terms、translatable_keywords、patchouli 目錄名稱三個多行欄並排；`short_text_skip_len` 在其下方）。`retry_same_as_source` 開啟時，譯文與原文相同的候選會在 persistence 前單獨重新確認一次；第二次仍相同就接受。 |
 | `merger` | 語言合併器設定 | 單張「語言合併器設定 (Lang Merger)」卡，由上而下：pending 資料夾命名／整理資料夾名稱／key 最小出現次數／隔離資料夾名稱（兩欄兩列）、「語系過濾設定」（zh 英文含量閾值）、「Patchouli 進階設定」（翻譯來源優先級勾選、en_us 跳過門檻）、「檔案合併(階段 2)」（合併 XX_extracted → assets/） |
+| `mod_db` | Mod 資料庫 | 「Mod 資料庫 (Translation DB)」卡，分組：使用時機（翻譯時使用、語系合併補譯）、資料庫與版本（檔案路徑、預設目標版本）、沿用與寫回（跨版本沿用、翻譯結果寫入、手動儲存同步其他版本）、來源（ZIP 預設來源標記、來源優先順序） |
 | `prompts` | 提示詞管理 | 「提示詞 (System Prompts)」卡：Patchouli 與 Lang 兩個 system prompt 多行欄左右並排 |
 | `species_lookup` | 學名查詢管理 | 「學名查詢設定 (Species Cache)」卡，四欄單欄堆疊：species_cache 設定（cache_directory、cache_filename、wikipedia 語言與速率） |
-| `batch_limits` | 批次與限制 | 「批次大小與限制」卡（多列並排欄位，含「啟用 Token 預算切批」勾選）：initial_batch_size_* 各格式、min_batch_size、batch_shrink_factor、rpm_cooldown_sec、max_output_tokens、token 預算、金鑰失敗冷卻、batch_write_interval |
+| `batch_limits` | 批次與限制 | 「批次大小與限制」卡（多列並排欄位，含「啟用 Token 預算切批」勾選）：initial_batch_size_* 各格式、min_batch_size、batch_shrink_factor、rpm_cooldown_sec、max_output_tokens、金鑰失敗冷卻、batch_write_interval |
+| `token_budget` | Token 預算 | 「Token 預算切批」卡：啟用開關、單批輸出／輸入預算、輸出／輸入係數、預算最小縮放、回升前連續成功批次、預算回升倍率 |
 | `extractor` | Jar 提取設定 | 「JAR 輸出資料夾命名」卡：extractor.output_folder_names（extract / preview 各三種）、skip_zh_cn_extract；target_language 僅作舊設定相容，不宣稱會生效（版面中以 `Note` 說明） |
 
 ## 呼叫鏈

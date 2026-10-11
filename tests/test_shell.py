@@ -962,7 +962,68 @@ def test_config_saved_elsewhere_refreshes_topbar_and_statusbar(shell, env):
     env.snapshot = [_key(0), _key(1), _key(2)]
     env.config = {"lm_translator": {"models": {"other-model": {"enabled": True}}}}
     env.fire_config_saved()
+    assert shell.statusbar.model.value == "other-model"
+    env.config = {"lm_translator": {"models": {"new-model": {"enabled": True}}}}
+    env.fire_config_saved()
+    assert shell.statusbar.model.value == "new-model"
     _run_scheduled_ui_work(shell.page)  # 設定異動只排程，更新在 page event loop 上做
     assert shell.topbar.api_pill.count_text.value == "3/3 Key"
-    assert shell.statusbar.model.value == "other-model"
+    assert shell.statusbar.model.value == "new-model"
     assert shell.statusbar.workdir.value == ""  # 設定裡沒有快取資料夾 → 不顯示
+
+
+def test_statusbar_model_follows_the_model_actually_in_use(placeholder_views, env):
+    """配額用盡切換模型後，底部狀態列跟著顯示目前實際送請求的模型；任務結束後回到設定值。"""
+    active = {"name": None}
+    s = _make_shell(env, active_model=lambda _operation_id: active["name"])
+    s.mount()
+    try:
+        assert s.statusbar.model.value == "gemini-x"
+
+        session = TaskSession(name="機器翻譯", view_key="lm")
+        session.start()
+        active["name"] = "gemini-3.8-flash"
+        s.refresh_active_model()
+        assert s.statusbar.model.value == "gemini-3.8-flash"
+
+        active["name"] = "gemini-3.7-flash"  # 3.8 每日額度用盡 → 換下一個模型
+        s.refresh_active_model()
+        assert s.statusbar.model.value == "gemini-3.7-flash"
+
+        session.finish()
+        s.refresh_tasks()
+        s.refresh_active_model()
+        assert s.statusbar.model.value == "gemini-x"
+    finally:
+        s.dispose()
+
+
+def test_statusbar_does_not_carry_a_finished_translations_model_into_the_next_task(
+    placeholder_views, env
+):
+    """翻譯最後切到的模型屬於那個任務；之後執行 JAR 掃描時狀態列回到設定值。"""
+    from translation_tool.core import lm_key_health
+
+    owner = {"id": None}
+    lm_key_health.set_active_model_owner_resolver(lambda: owner["id"])
+    s = _make_shell(env, active_model=lm_key_health.get_active_model)
+    s.mount()
+    try:
+        translation = TaskSession(name="機器翻譯", view_key="lm")
+        translation.start()
+        owner["id"] = s.tasks.current().operation_id
+        lm_key_health.set_active_model("gemini-b")
+        s.refresh_active_model()
+        assert s.statusbar.model.value == "gemini-b"
+        translation.finish()
+
+        scan = TaskSession(name="JAR 掃描", view_key="moddb")
+        scan.start()
+        s.refresh_tasks()
+        s.refresh_active_model()
+        assert s.statusbar.model.value == "gemini-x"
+        scan.finish()
+    finally:
+        lm_key_health.set_active_model_owner_resolver(lambda: None)
+        lm_key_health.set_active_model(None)
+        s.dispose()

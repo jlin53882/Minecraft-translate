@@ -144,32 +144,12 @@ class LMView(ft.Column):
         self.db_card = self.lm_db_options.card
         self._database_missing = self.lm_db_options._summary is None
 
-    def _on_db_option_changed(self, _e=None) -> None:
-        """開關或版本變更：更新提示（沒有指定版本時，這次不會使用資料庫）。"""
-        self.lm_db_options.refresh_info()
-        self.lm_db_options._update()
-
-    def _on_db_version_focus(self, _e=None) -> None:
-        self.lm_db_options.sync_from_global()
-        self._database_missing = self.lm_db_options._summary is None
-        if self._database_missing:
-            self._show_db_setup_hint()
-        try:
-            self._page.update()
-        except Exception as exc:  # noqa: BLE001 - 頁面尚未掛載時略過即時更新
-            log_debug(f"LM 版本選項更新略過：{exc}")
-
     def _show_db_setup_hint(self) -> None:
         show_snack(
             self._page,
             "尚未建立 Mod 資料庫，請先到「Mod 資料庫」頁掃描 JAR 建立資料庫。",
             C.GOLD,
         )
-
-    def refresh_db_info(self) -> None:
-        """顯示資料庫目前的狀態（不存在時提示如何建立；開著卻沒有版本時提醒填寫）。"""
-        self.lm_db_options.sync_from_global()
-        self._database_missing = self.lm_db_options._summary is None
 
     def _build_lm_settings_card(self, batch_interval, cache_row, dry_run_row, lang_row):
         """機器翻譯設定卡片與執行按鈕。"""

@@ -12,6 +12,7 @@ import sqlite3
 
 import flet as ft
 
+from app.services_impl.moddb_format_diff_service import compare_format_diff
 from app.services_impl.moddb_service import (
     EntryDetail,
     EntryFilter,
@@ -33,9 +34,10 @@ from app.tasks.operation_registry import (
     launch_page_operation,
 )
 from app.ui import design, kit
+from app.ui.debounce import Debouncer
 from app.ui.design import C
 from app.ui.snack import show_snack
-from app.views.moddb.char_inspector import CharInspector, scrolling_list
+from app.views.moddb.char_inspector import scrolling_list
 from app.views.moddb.entry_filters import (
     ALL_KINDS,
     ALL_MODS,
@@ -49,10 +51,11 @@ from app.views.moddb.entry_filters import (
 )
 from app.views.moddb.entry_metadata import build_entry_metadata
 from app.views.moddb.entry_row_tile import build_entry_tile
+from app.views.moddb.format_diff_review import FormatDiffReview
+from app.views.moddb.format_diff_viewer import FormatDiffViewer
 from app.views.moddb.formatting import (
     format_count,
     kind_label,
-    token_issues,
     whitespace_note,
 )
 from app.views.moddb.history_renderer import render_history
@@ -68,6 +71,7 @@ from translation_tool.utils.log_unit import (
 )
 
 PAGE_SIZE = 50
+SEARCH_DEBOUNCE_SECONDS = 0.35  # 停止輸入多久後自動搜尋
 __all__ = ["EntriesPanel", "SourceFilter"]
 ALL_REVIEW_STATES = "__all__"
 ACTOR = "使用者"
@@ -77,21 +81,32 @@ NO_SOURCE_TEXT = "（原文未知：之後掃描同版本的 jar，會自動補�
 class EntriesPanel(ft.Column):
     """條目校對頁籤。"""
 
-    def __init__(self, page: ft.Page, get_db, on_changed=None, on_filter_changed=None):
+    def __init__(
+        self,
+        page: ft.Page,
+        get_db,
+        on_changed=None,
+        on_filter_changed=None,
+        on_flagged_resolved=None,
+    ):
         """``get_db()`` 回傳目前的 ``TranslationDB``（沒有資料庫時回傳 None）。"""
         super().__init__(expand=True, spacing=12)
         self._page = page
         self._get_db = get_db
         self._on_changed = on_changed
         self._on_filter_changed = on_filter_changed
+        self._on_flagged_resolved = on_flagged_resolved
         self._refresh_keep_selection = True
         self._filter_only_refresh = False
+        self._search_debounce = Debouncer(lambda: self._page, SEARCH_DEBOUNCE_SECONDS)
         self.version: str | None = None
         self.mod_id: str | None = None
         self.kind: str | None = None
         # 批次機翻「特殊字元不一致」的檢視：只列這些條目，並把 AI 譯文預填到譯文框供修正
         self.entry_ids: list[int] | None = None
         self.drafts: dict[int, str] = {}
+        # 每換一份清單（套用、清除、切換篩選）就加一；背景儲存完成時據此判斷清單是否還是同一份
+        self._flagged_batch = 0
         self.state = "all"
         self.query = ""
         self.rows: list[EntryRow] = []
@@ -113,7 +128,8 @@ class EntriesPanel(ft.Column):
         self._build_editor_card()
         self._build_history_card()
         self.controls = [
-            self.refresh_indicator,
+            # 固定高度：提示出現／消失不能改變版面，否則輸入搜尋時整個畫面會上下跳動
+            ft.Container(self.refresh_indicator, height=18),
             self.filter_card,
             self.flagged_banner,
             ft.Row(
@@ -167,8 +183,8 @@ class EntriesPanel(ft.Column):
             None,
             hint="請輸入繁體中文譯文",
             multiline=True,
-            min_lines=3,
-            max_lines=8,
+            min_lines=6,
+            max_lines=16,
             on_change=self._on_text_change,
         )
         self.source_chip = ft.Container()
@@ -218,7 +234,15 @@ class EntriesPanel(ft.Column):
             size="sm",
             on_click=lambda _e: self._copy_source(),
         )
-        self.chars = CharInspector(self._update_format_hints_and_refresh)
+        self.chars = FormatDiffViewer(
+            self._update_format_hints_and_refresh,
+            switch_label="顯示特殊字元",
+        )
+        self.format_review = FormatDiffReview(
+            context_label="條目校對",
+            editable_control=self.tw_field,
+            edit_notice=self.token_hint,
+        )
         self.confirm_btn = kit.button(
             "審核（確認目前譯文）",
             "gold",
@@ -247,19 +271,7 @@ class EntriesPanel(ft.Column):
         )
         self.editor_body = ft.Column(
             [
-                kit.section_label("原文 en_us"),
-                ft.Container(
-                    self.src_text,
-                    padding=12,
-                    bgcolor=C.PANEL2,
-                    border_radius=design.RADIUS_CONTROL,
-                    border=ft.Border.all(1, C.LINE),
-                ),
-                ft.Row([kit.section_label("譯文 zh_tw"), self.source_chip], spacing=8),
-                self.tw_field,
-                self.token_hint,
-                self.chars.row,
-                self.chars.box,
+                self.format_review.control,
                 self.mc_preview.control,
                 self.meta_col,
                 self.impact_box,
@@ -571,6 +583,11 @@ class EntriesPanel(ft.Column):
             source_tone(entry.source),
         )
         self.meta_col.controls = build_entry_metadata(detail)
+        self.format_review.render(
+            entry.en_us or NO_SOURCE_TEXT,
+            self.tw_field.value or "",
+            metadata=[self.source_chip],
+        )
         if calculate_impact:
             self._update_impact()
         else:
@@ -632,7 +649,22 @@ class EntriesPanel(ft.Column):
         self.state = key
         refresh_entry_filter(self)
 
+    def _on_search_input(self, e) -> None:
+        """輸入時即時搜尋：停止輸入一小段時間後才查詢，避免每個字都打資料庫。"""
+        if (e.control.value or "").strip() == self.query:
+            self._search_debounce.cancel()
+            return
+        self._search_debounce.call(self._apply_search, e.control)
+
+    def _apply_search(self, control) -> None:
+        query = (control.value or "").strip()
+        if query != self.query:
+            self.query = query
+            refresh_entry_filter(self)
+
     def _on_search(self, e) -> None:
+        """按 Enter：立即以目前輸入搜尋（取消尚在等待的即時搜尋）。"""
+        self._search_debounce.cancel()
         self.query = (e.control.value or "").strip()
         refresh_entry_filter(self)
 
@@ -685,17 +717,26 @@ class EntriesPanel(ft.Column):
         entry = self.selected
         text = self.tw_field.value or ""
         notes: list[str] = []
+        diff_result = None
         if entry is not None and entry.en_us and text.strip():
-            issues = token_issues(entry.en_us, text)
-            if issues:
-                notes.append("與原文的特殊字元不一致：" + "、".join(issues))
+            diff_result = compare_format_diff(entry.en_us, text)
+            if diff_result.legacy_messages:
+                notes.append(
+                    "與原文的特殊字元不一致：" + "、".join(diff_result.legacy_messages)
+                )
         space = whitespace_note(text)
         if space:
             notes.append(space)
         self.token_hint.value = "；".join(notes)
         self.token_hint.visible = bool(notes)
         self.mc_preview.render(text)
-        self.chars.render(entry.en_us if entry else "", text)
+        self.chars.render(entry.en_us if entry else "", text, diff_result)
+        self.format_review.render(
+            entry.en_us if entry else "",
+            text,
+            diff_result,
+            metadata=[self.source_chip],
+        )
 
     def _update_format_hints_and_refresh(self) -> None:
         self._update_format_hints()
@@ -716,6 +757,7 @@ class EntriesPanel(ft.Column):
         text = self.pending_text()
         if entry is None or db is None or not text or self._save_running:
             return
+        flagged_batch = self._flagged_batch
         propagate = bool(self.sync_row.value)
         self._save_running = True
         self.save_btn.disabled = True
@@ -738,14 +780,13 @@ class EntriesPanel(ft.Column):
                     f"{entry.mc_version} {entry.mod_id} {entry.key}"
                 )
 
+            result = (db, entry, text, done, error, flagged_batch)
             run_task = getattr(self._page, "run_task", None)
             try:
                 if callable(run_task):
-                    run_task(
-                        self._apply_save_result_async, db, entry, text, done, error
-                    )
+                    run_task(self._apply_save_result_async, *result)
                 else:
-                    self._apply_save_result(db, entry, text, done, error)
+                    self._apply_save_result(*result)
             except Exception as exc:  # noqa: BLE001 - a disposed page may reject the result callback
                 log_warning(f"Mod 資料庫儲存結果無法排回畫面：{exc!r}")
 
@@ -778,10 +819,10 @@ class EntriesPanel(ft.Column):
             self._update_impact()
             self._safe_update()
 
-    async def _apply_save_result_async(self, db, entry, text, done, error) -> None:
-        self._apply_save_result(db, entry, text, done, error)
+    async def _apply_save_result_async(self, *result) -> None:
+        self._apply_save_result(*result)
 
-    def _apply_save_result(self, db, entry, text, done, error) -> None:
+    def _apply_save_result(self, db, entry, text, done, error, flagged_batch) -> None:
         self._save_running = False
         if error is not None:
             kind, exc = error
@@ -822,6 +863,7 @@ class EntriesPanel(ft.Column):
         )
         show_snack(self._page, message, C.EM, text_color=C.ON_EM)
         if self.db() is db:
+            self._resolve_flagged(entry.id, flagged_batch)
             same_entry = self.selected is not None and self.selected.id == entry.id
             unchanged_editor = same_entry and self.pending_text() == text
             if unchanged_editor:
@@ -834,6 +876,21 @@ class EntriesPanel(ft.Column):
                 self._on_changed()
         self._update_impact()
         self._safe_update()
+
+    def _resolve_flagged(self, entry_id: int, flagged_batch: int) -> None:
+        """機翻「特殊字元不一致」清單裡的條目已手動儲存：移出清單並通知機翻頁扣掉數量。
+
+        條目編號只在同一個資料庫、同一份清單內有意義：儲存期間換過清單就不動新清單。
+        """
+        if flagged_batch != self._flagged_batch or entry_id not in (
+            self.entry_ids or ()
+        ):
+            return
+        self.entry_ids = [i for i in self.entry_ids if i != entry_id]
+        self.drafts = {k: v for k, v in self.drafts.items() if k != entry_id}
+        self._show_flagged_banner()
+        if self._on_flagged_resolved is not None:
+            self._on_flagged_resolved(entry_id)
 
     def _confirm(self, _e=None) -> None:
         self._review_controller.confirm(_e)
@@ -909,12 +966,16 @@ class EntriesPanel(ft.Column):
         refresh_entry_filter(self)
 
     def _set_flagged(self, entry_ids: list[int] | None, drafts: dict[int, str]) -> None:
+        self._flagged_batch += 1
         self.entry_ids = entry_ids
         self.drafts = drafts
-        self.flagged_banner.visible = entry_ids is not None
-        if entry_ids is not None:
+        self._show_flagged_banner()
+
+    def _show_flagged_banner(self) -> None:
+        self.flagged_banner.visible = self.entry_ids is not None
+        if self.entry_ids is not None:
             self.flagged_text.value = (
-                f"只顯示本次機翻「特殊字元與原文不一致」的 {len(entry_ids):,} 筆"
+                f"只顯示本次機翻「特殊字元與原文不一致」的 {len(self.entry_ids):,} 筆"
                 "（AI 譯文尚未寫入，已預填在譯文框；修正後儲存即可，或按「清除篩選」）"
             )
 

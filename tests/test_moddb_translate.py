@@ -379,7 +379,12 @@ def test_entries_panel_save_and_review_use_separate_manual_states(db_path):
     assert panel.confirm_btn.visible is True and panel.confirm_btn.disabled is False
 
     panel._confirm()
-    assert page.overlay and page.overlay[-1].title.value == "確認審核範圍"
+    assert page.overlay and page.overlay[-1].title.value == "確認條目審核"
+    dialog_text = "\n".join(texts_of(page.overlay[-1].content))
+    assert "英文原文・en_us" in dialog_text
+    assert "繁體中文譯文・zh_tw" in dialog_text
+    assert "條目內容" in dialog_text
+    assert "版本審核範圍" in dialog_text
     page.overlay[-1].actions[-1].on_click(None)
     detail = db.entry_detail(panel.selected.id)
     manual = next(row for row in detail.translations if row.source == SRC_MANUAL)
@@ -1270,7 +1275,8 @@ def test_entry_source_filter_hides_unreferenced_custom_sources(db_path, monkeypa
 
     scan = scan_panel.ScanPanel(mock_page(), mock_filepicker(), lambda: db)
     zip_source_keys = {option.key for option in scan.source_dd.options}
-    assert {"100", "101", "102"}.issubset(zip_source_keys)
+    assert {"100", "102"}.issubset(zip_source_keys)
+    assert "101" not in zip_source_keys  # 與內建「釘宮翻譯組」同名，不重複列出
     db.close()
 
 
@@ -1302,9 +1308,10 @@ def test_priority_field_previews_new_custom_sources(db_path, monkeypatch):
     from translation_tool.translation_db.settings import load_db_settings
 
     seed(db_path)
+    resolved = load_db_settings(_cfg(db_path, [])).resolved_path()
     monkeypatch.setattr(
-        "translation_tool.translation_db.settings.load_db_settings",
-        lambda *a, **k: load_db_settings(_cfg(db_path, [])),
+        "translation_tool.translation_db.settings.configured_db_path",
+        lambda *a, **k: resolved,
     )
     field = kit.field(label="優先序", multiline=True, helper="說明")
     check = attach_priority_hooks(field)
@@ -1821,7 +1828,7 @@ def test_flagged_entries_flow_from_translation_to_entries_review(db_path, monkey
     assert panel.view_flagged_btn.visible is False
     panel._apply_summary(summary)
     assert panel.view_flagged_btn.visible is True
-    panel._view_flagged()  # 按「檢視」
+    panel.result_inspector.inspect()  # 按「檢視」
 
     entries = view.entries
     assert view.tab == "entries" and entries.state == "none"
@@ -1837,7 +1844,10 @@ def test_flagged_entries_flow_from_translation_to_entries_review(db_path, monkey
 
     # 重新開始機翻會清掉上一次的「檢視」
     panel._reset_stats()
-    assert panel.view_flagged_btn.visible is False and panel._flagged == {}
+    assert (
+        panel.view_flagged_btn.visible is False
+        and panel.result_inspector.normal_entries == {}
+    )
     # 從總覽跳進來套用狀態篩選時，也會清掉「特殊字元不一致」篩選
     entries.show_flagged(list(flagged), flagged, "1.21.1")
     entries.show_filter("diff")
@@ -1880,11 +1890,8 @@ def test_translate_panel_switches_kpis_between_normal_and_ai_repair_modes():
         "cache_keys_changed": 80,
         "cache_keys_saved": None,
         "cache_stats_note": "1 個 key 落盤結果未確認",
-        "ai_representatives": 130,
         "ai_submitted_items": 128,
         "ai_validated_items": 120,
-        "dedup_mapped_candidates": 24,
-        "dedup_reused_candidates": 12,
         "processed_candidates": 400,
         "not_submitted_candidates": 10,
         "unprocessed_candidates": 44,
@@ -1908,10 +1915,9 @@ def test_translate_panel_switches_kpis_between_normal_and_ai_repair_modes():
             "失敗 1",
             "快取未同步事件 5",
             "CANCELLED",
-            "AI 代表計劃 130",
-            "實際送入引擎 128 items（不是 API/HTTP 次數）",
-            "等價映射候選 24；已共用驗證結果 12",
-            "來源列進度 400/444；未送出候選 10；未處理候選 44",
+            "AI 修復項目：預計 444 個",
+            "實際送入引擎 128 個（不等於實際 HTTP 請求次數）",
+            "來源項目進度 400/444；未送出的來源項目 10；未處理的來源項目 44",
             "快取 key 變更 80；成功落盤 未知",
             "新增失敗來源列 2；尚未確認落盤 keys 1",
         )
@@ -2182,3 +2188,77 @@ def test_same_as_source_count_and_pagination_share_the_condition(db_path):
     ]  # 三頁合起來沒有重複或混入其他資料
     assert db.list_entries("1.21.1", state="same", limit=3, offset=9)[0] == []
     db.close()
+
+
+def _flagged_entry_saved_by_hand(db_path, monkeypatch):
+    """機翻留下一筆「特殊字元不一致」，開啟檢視後在資料庫手動存好它（尚未排回畫面）。"""
+    from app.views import moddb_view
+
+    seed(db_path)
+    fake_engine(
+        monkeypatch,
+        lambda t: "§a注入合金" if t == "Infused Alloy" else "譯:" + t,
+    )
+    summary = run(TranslateOptions(version="1.21.1", mod_ids=("foo",)))["summary"]
+    assert summary["flagged"] == 1
+    entry_id = next(iter(summary["flagged_entries"]))
+
+    view = moddb_view.ModDbView(mock_page(), mock_filepicker())
+    panel = view.translate
+    panel._run_version = "1.21.1"
+    panel._apply_summary(summary)
+    assert panel.stat_flagged.value_text.value == "1"
+    panel.result_inspector.inspect()
+    entries = view.entries
+    batch = entries._flagged_batch
+
+    db = view.get_db()
+    entry = db.list_entries("1.21.1", entry_ids=[entry_id])[0][0]
+    done = db.save_manual(entry.id, "注入合金", actor="測試", propagate=False)
+    return view, panel, entries, db, entry, done, batch
+
+
+def test_manual_fix_of_a_flagged_entry_lowers_the_translate_card(db_path, monkeypatch):
+    """在條目校對修好「特殊字元不一致」的條目後，機翻頁的數量與「檢視」同步減少。"""
+    _, panel, entries, db, entry, done, batch = _flagged_entry_saved_by_hand(
+        db_path, monkeypatch
+    )
+    entries._apply_save_result(db, entry, "注入合金", done, None, batch)
+
+    assert panel.stat_flagged.value_text.value == "0"
+    assert panel.view_flagged_btn.visible is False
+    assert panel.result_inspector.normal_entries == {}
+    assert entries.entry_ids == []
+
+
+def test_late_save_does_not_touch_a_flagged_list_opened_after_it_started(
+    db_path, monkeypatch
+):
+    """儲存還在背景時又開了另一份清單：舊儲存完成不能把新清單裡同編號的條目拿掉。"""
+    _, panel, entries, db, entry, done, batch = _flagged_entry_saved_by_hand(
+        db_path, monkeypatch
+    )
+    entries.show_flagged([entry.id], {entry.id: "§a新一輪譯文"}, "1.21.1")
+
+    entries._apply_save_result(db, entry, "注入合金", done, None, batch)
+
+    assert entries.entry_ids == [entry.id]
+    assert entries.drafts == {entry.id: "§a新一輪譯文"}
+    assert panel.stat_flagged.value_text.value == "1"
+
+
+def test_late_save_from_another_database_does_not_touch_the_flagged_list(
+    db_path, monkeypatch
+):
+    """儲存還在背景時換了資料庫：舊資料庫的條目編號不代表目前清單裡的條目。"""
+    _, panel, entries, _, entry, done, batch = _flagged_entry_saved_by_hand(
+        db_path, monkeypatch
+    )
+    previous_db = TranslationDB(db_path)
+    try:
+        entries._apply_save_result(previous_db, entry, "注入合金", done, None, batch)
+    finally:
+        previous_db.close()
+
+    assert entries.entry_ids == [entry.id]
+    assert panel.stat_flagged.value_text.value == "1"

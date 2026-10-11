@@ -40,6 +40,7 @@ from translation_tool.core.lm_config_schema import (
 from translation_tool.core.lm_key_health import (
     PROBE_LEASE_MARGIN_SEC,
     get_model_quota_registry,
+    set_active_model,
 )
 from translation_tool.core.lm_response_parser import safe_json_loads
 from translation_tool.core.lm_same_source_retry import (
@@ -1356,6 +1357,7 @@ def _attempt_batch(
         )
         output_cap = None
         cap_source = "global"
+        set_active_model(model_name)  # UI 狀態列顯示實際使用中的模型
         started = quota.now()  # 只有「耗盡紀錄之後才開始」的成功能清除紀錄
         try:
             model_override = model_output_token_cap(runtime.lm_cfg, model_name)
@@ -1367,8 +1369,9 @@ def _attempt_batch(
             )
             api_meta: dict = {}
             log_info(
-                f"[→] 嘗試模型 {model_name} | Batch={len(round_data.current_batch)}"
-                f"/{runtime.batch_size} | 翻譯總量={runtime.original_total}"
+                f"[→] 送出至模型 {model_name}｜"
+                f"本批 {len(round_data.current_batch)} 個（每批上限 {runtime.batch_size}）｜"
+                f"本次唯一 AI 翻譯項目共 {runtime.original_total} 個"
             )
             with quota.hold_probe_lease(model_name, owner, lease_sec):
                 api_key = (

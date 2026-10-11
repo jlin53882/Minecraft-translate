@@ -28,7 +28,13 @@ def _macro_end(text: str, start: int) -> int | None:
     return None if first < 0 else first + 1
 
 
-def _iter_tokens(text: str):
+def _normalize_token(raw: str) -> str:
+    token = raw.replace("\r", "")
+    return _TOOLTIP_TOKEN if token.startswith(_TOOLTIP_PREFIX) else token
+
+
+def _iter_token_spans(text: str):
+    text = text or ""
     pos = 0
     while True:
         match = _SCAN_RE.search(text, pos)
@@ -39,21 +45,31 @@ def _iter_tokens(text: str):
             if end is None:
                 pos = match.end()
                 continue
-            yield text[match.start() : end]
+            yield text[match.start() : end], match.start(), end
             pos = end
         else:
-            yield match.group(0)
+            yield match.group(0), match.start(), match.end()
             pos = match.end()
+
+
+def _iter_tokens(text: str):
+    for raw, _start, _end in _iter_token_spans(text):
+        yield raw
+
+
+def format_token_spans(text: str) -> tuple[tuple[str, int, int], ...]:
+    """Return normalized format tokens with source offsets from the shared scanner."""
+    return tuple(
+        (_normalize_token(raw), start, end)
+        for raw, start, end in _iter_token_spans(text)
+    )
 
 
 def format_tokens(text: str) -> Counter[str]:
     """Count placeholders, Minecraft codes, Patchouli macros and line breaks."""
     tokens: Counter[str] = Counter()
     for raw in _iter_tokens(text or ""):
-        token = raw.replace("\r", "")
-        if token.startswith(_TOOLTIP_PREFIX):
-            token = _TOOLTIP_TOKEN
-        tokens[token] += 1
+        tokens[_normalize_token(raw)] += 1
     return tokens
 
 
@@ -67,11 +83,23 @@ def repair_input_issues(
 ) -> tuple[bool, tuple[str, ...], bool]:
     """Return whether a repair row is eligible, hard issues, and mixed-newline flag.
 
-    Real LF count mismatches are eligible for repair. CRLF is naturally counted
-    as one LF token by ``format_tokens``; literal ``\\n`` remains separate.
+    Real LF count mismatches are reported for diagnostics. A row with only that
+    mismatch is not an AI repair candidate; callers can skip it without spending
+    an AI slot. CRLF is naturally counted as one LF token by ``format_tokens``;
+    literal ``\\n`` remains separate.
     """
-    wanted = format_tokens(source)
-    previous = format_tokens(previous_translation)
+    return repair_input_issues_from_counts(
+        format_tokens(source), format_tokens(previous_translation)
+    )
+
+
+def repair_input_issues_from_counts(
+    wanted: Counter[str], previous: Counter[str]
+) -> tuple[bool, tuple[str, ...], bool]:
+    """``repair_input_issues`` for callers that already counted the tokens.
+
+    Removes the LF count from both counters, so read it first if it is needed.
+    """
     newline_mismatch = wanted["\n"] != previous["\n"]
     wanted.pop("\n", None)
     previous.pop("\n", None)
@@ -105,16 +133,6 @@ def _token_issues_from_counts(wanted: Counter[str], actual: Counter[str]) -> lis
                 f"{'多了' if delta > 0 else '少了'} {abs(delta)} 個「{name}」"
             )
     return issues
-
-
-def token_issue_deltas(
-    source: str, before: str, after: str
-) -> tuple[QualityIssueDelta, ...]:
-    """Return structural missing/extra token counts before and after an edit."""
-    wanted = format_tokens(source)
-    before_tokens = format_tokens(before)
-    after_tokens = format_tokens(after)
-    return _token_issue_deltas_from_counts(wanted, before_tokens, after_tokens)
 
 
 def _token_issue_deltas_from_counts(
@@ -187,22 +205,23 @@ def quality_state(source: str, translated: str) -> tuple[str, tuple[str, ...], s
 def matches_quality(source: str, translated: str, criteria: QualityFilter) -> bool:
     if not criteria.active:
         return True
-    _, _, whitespace = quality_state(source, translated)
     status = criteria.status
     if status == "all":
         status = "mismatch"
+    # 掃描整個版本時每列都會進來：只做該狀態需要的判斷，不先跑完整的 token 分析。
     if status == "unknown_source":
         return not source
     if status == "missing_translation":
         return bool(source) and not translated
     if status == "whitespace":
-        return bool(translated) and bool(whitespace)
-    if status == "consistent":
-        return bool(source and translated) and format_tokens(source) == format_tokens(
-            translated
-        )
-    if status != "mismatch" or not source or not translated:
+        return bool(translated) and bool(whitespace_note(translated))
+    if status not in {"consistent", "mismatch"} or not source or not translated:
         return False
+    if not (_SCAN_RE.search(source) or _SCAN_RE.search(translated)):
+        # 兩邊都沒有任何格式 token：token 計數必定相同。
+        return status == "consistent"
+    if status == "consistent":
+        return format_tokens(source) == format_tokens(translated)
 
     wanted, actual = format_tokens(source), format_tokens(translated)
     missing = wanted - actual

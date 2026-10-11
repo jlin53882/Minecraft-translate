@@ -286,7 +286,7 @@ def test_detach_keeps_admission_gate_until_last_operation_finishes(manager):
     page = SimpleNamespace(operation_registry=manager.operation_registry)
     session = tag_session(TaskSession(name="Web timeout drain"), "Web", page=page)
     session.start()
-    manager.stop_accepting()
+    manager.operation_registry.begin_shutdown()
     manager.detach()
 
     rejected = tag_session(TaskSession(name="late session"), "late", page=page)
@@ -312,7 +312,7 @@ def test_legacy_sessions_are_admitted_only_by_their_own_web_registry():
             TaskSession(name="A draining session"), "A", page=page_a
         )
         session_a.start()
-        first.stop_accepting()
+        first.operation_registry.begin_shutdown()
         first.detach()
 
         session_b = tag_session(TaskSession(name="B legacy session"), "B", page=page_b)
@@ -412,7 +412,7 @@ def test_detached_task_session_cannot_bypass_closed_registry_admission():
     manager.attach()
     page = SimpleNamespace(operation_registry=manager.operation_registry)
     session = tag_session(TaskSession(name="late callback"), "late", page=page)
-    manager.stop_accepting()
+    manager.operation_registry.begin_shutdown()
     manager.operation_registry.mark_closed()
     manager.detach()
 
@@ -443,7 +443,7 @@ def test_ownerless_legacy_session_is_rejected_by_multiple_workspaces():
     second = TaskManager()
     first.attach()
     second.attach()
-    first.stop_accepting()
+    first.operation_registry.begin_shutdown()
 
     session = TaskSession(name="ambiguous owner")
     with pytest.raises(TaskSessionAdmissionError):
@@ -456,17 +456,17 @@ def test_ownerless_legacy_session_is_rejected_by_multiple_workspaces():
     second.detach()
 
 
-def test_resume_accepting_reopens_registration_after_close_drain():
+def test_reopen_admission_restores_registration_after_close_drain():
     m = TaskManager()
     m.attach()
-    m.stop_accepting()
+    m.operation_registry.begin_shutdown()
     ignored = TaskSession(name="被拒絕")
     with pytest.raises(TaskSessionAdmissionError):
         ignored.start()
     assert m.active() == []
     assert ignored.status == "IDLE"
 
-    m.resume_accepting()
+    m.operation_registry.reopen_admission()
     accepted = TaskSession(name="恢復後")
     accepted.start()
     assert [task.name for task in m.active()] == ["恢復後"]
