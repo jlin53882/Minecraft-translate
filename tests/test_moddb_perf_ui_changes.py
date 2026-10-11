@@ -352,3 +352,18 @@ def test_dialog_select_all_and_clear_all_change_exclusions(db):
     dialog._select_all()
     assert dialog.excluded_roots == set()
     assert "2 / 2" in dialog.selection_bar.text.value
+
+
+def test_custom_source_named_like_builtin_is_shadowed_in_choices_and_priority():
+    from translation_tool.translation_db.settings import serialize_priority_lines
+    from translation_tool.translation_db.source_catalog import SourceCatalog
+
+    catalog = SourceCatalog.from_registry({"測試": 100, "釘宮翻譯組": 101})
+
+    assert catalog.canonical_code(101) == 3
+    assert catalog.canonical_code(100) == 100
+    assert catalog.selectable_custom_codes == (100,)
+    # 歷史登錄的 custom:101 存檔時改寫成內建來源，且不與內建重複
+    assert serialize_priority_lines(
+        ["custom:100", "custom:101", "builtin:subtitle"], catalog
+    ) == ["custom:100", "builtin:subtitle"]

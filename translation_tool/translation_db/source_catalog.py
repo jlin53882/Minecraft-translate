@@ -127,6 +127,20 @@ class SourceCatalog:
                 return source.code
         return None
 
+    def canonical_code(self, code: int) -> int:
+        """Map a custom code named like a built-in source onto that built-in.
+
+        Old databases may have registered a name that a later release made
+        built-in; the built-in wins when choosing priorities.
+        """
+        code = int(code)
+        for name, registered in self.custom_sources:
+            if registered == code:
+                for builtin, builtin_name in BUILTIN_SOURCE_NAMES.items():
+                    if name == builtin_name:
+                        return builtin
+        return code
+
     def label(self, code: int | None) -> str:
         if code is None:
             return "—"

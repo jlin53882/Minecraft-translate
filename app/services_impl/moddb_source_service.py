@@ -46,11 +46,16 @@ def priority_display_lines(names, database_path: str | None = None) -> list[str]
     path = DbSettings(path=normalize_db_path(database_path)).resolved_path()
     catalog = SourceCatalog.from_registry(read_custom_sources(path))
     display_lines = []
+    seen: set[int] = set()
     for name in clean_source_names(names):
         code = catalog.resolve(name)
         if code is None:
             display_lines.append(name)
             continue
+        code = catalog.canonical_code(code)
+        if code in seen:
+            continue
+        seen.add(code)
         label = catalog.label(code)
         # A custom source can reuse a newer built-in label. In that case the
         # built-in's plain label resolves to the custom identity, so keep its

@@ -1272,13 +1272,12 @@ def test_saved_translation_source_priority_uses_collision_proof_tokens(monkeypat
         validate_api_keys_from_ui_fn=lambda _keys: None,
     )
 
-    assert saved["translation_db"]["priority"] == [
-        "builtin:subtitle",
-        "custom:100",
-    ]
-    assert db_settings.parse_priority(saved["translation_db"]["priority"], registry)[
-        :2
-    ] == (3, 100)
+    # 與內建同名的歷史自訂來源由內建覆蓋，不會再寫回 custom:100
+    assert saved["translation_db"]["priority"] == ["builtin:subtitle"]
+    assert (
+        db_settings.parse_priority(saved["translation_db"]["priority"], registry)[0]
+        == 3
+    )
 
 
 def _create_priority_db(path, custom_sources):
@@ -1310,28 +1309,15 @@ def _priority_round_trip_config(path, priority):
 
 
 @pytest.mark.parametrize(
-    ("priority", "expected_display", "expected_codes"),
+    "priority",
     [
-        (
-            ["builtin:subtitle", "custom:100"],
-            [
-                "builtin:subtitle",
-                "\u91d8\u5bae\u7ffb\u8b6f\u7d44\uff08\u81ea\u8a02 #100\uff09",
-            ],
-            (3, 100),
-        ),
-        (
-            ["custom:100", "builtin:subtitle"],
-            [
-                "\u91d8\u5bae\u7ffb\u8b6f\u7d44\uff08\u81ea\u8a02 #100\uff09",
-                "builtin:subtitle",
-            ],
-            (100, 3),
-        ),
+        ["builtin:subtitle", "custom:100"],
+        ["custom:100", "builtin:subtitle"],
+        ["custom:100"],
     ],
 )
-def test_source_priority_load_save_reload_round_trip_keeps_colliding_ids(
-    tmp_path, priority, expected_display, expected_codes
+def test_source_priority_load_save_reload_round_trip_collapses_colliding_ids(
+    tmp_path, priority
 ):
     from app.views.config.config_actions import (
         load_config_into_view,
@@ -1353,7 +1339,8 @@ def test_source_priority_load_save_reload_round_trip_keeps_colliding_ids(
 
     load_config_into_view(view, config)
     actual_lines = view.controls_map["translation_db.priority"].value.splitlines()
-    assert actual_lines == expected_display
+    # 同名的歷史自訂來源顯示為內建來源，且不重複
+    assert actual_lines == ["builtin:subtitle"]
     view.models_column.controls = [
         SimpleNamespace(
             _model_name="enabled-test-model",
@@ -1382,10 +1369,10 @@ def test_source_priority_load_save_reload_round_trip_keeps_colliding_ids(
         parse_priority(
             reloaded.controls_map["translation_db.priority"].value.splitlines(),
             registry,
-        )[:2]
-        == expected_codes
+        )[0]
+        == 3
     )
-    assert saved["translation_db"]["priority"] == priority
+    assert saved["translation_db"]["priority"] == ["builtin:subtitle"]
 
 
 def test_source_priority_path_switch_requires_review_before_reusing_custom_ids(

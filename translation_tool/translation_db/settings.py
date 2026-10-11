@@ -248,6 +248,8 @@ def serialize_priority_lines(
     seen_codes: set[int] = set()
     for name in clean_source_names(names):
         code = catalog.resolve(name)
+        if code is not None:
+            code = catalog.canonical_code(code)
         if code is None:
             if name not in serialized:
                 serialized.append(name)
