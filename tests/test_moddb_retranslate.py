@@ -229,7 +229,53 @@ def test_preview_uses_effective_ai_source_scope_and_limit(db_path):
     db.close()
 
 
-def test_special_character_repair_covers_all_sources_and_can_be_undone(
+def test_repair_scan_follows_the_effective_source_including_ai_repair(db_path):
+    db = TranslationDB(db_path)
+    shadowed = _ai_entry(db, key="shadowed", en="Use %s")
+    db.save_manual(shadowed.id, "使用", propagate=False)
+    _ingest(db, "1.21.1", "foo", "shadowed", SRC_JAR_TW, "使用", en="Use %s")
+    repaired = _ai_entry(db, key="repaired", en="Use %s")
+    db._conn.execute(
+        "UPDATE translation SET zh_tw='使用' WHERE entry_id=? AND source=?",
+        (repaired.id, SRC_AI),
+    )
+    db._conn.commit()
+    _ingest(db, "1.21.1", "foo", "repaired", SRC_AI_REPAIR, "使用", en="Use %s")
+
+    scanned = {
+        (entry.key, entry.source_id)
+        for entry, _nl, _mixed in db.iter_repairable_translation_entries("1.21.1")
+    }
+    everything = {
+        (entry.key, entry.source_id)
+        for entry, _nl, _mixed in db.iter_repairable_translation_entries(
+            "1.21.1", only_effective=False
+        )
+    }
+    effective = {
+        row[0]: row[1]
+        for row in db._conn.execute(
+            "SELECT e.key, f.source FROM effective f JOIN entry e ON e.id=f.entry_id"
+        )
+    }
+    db.close()
+
+    assert scanned == {("shadowed", SRC_MANUAL), ("repaired", effective["repaired"])}
+    assert (("shadowed", SRC_JAR_TW)) in everything and len(everything) > len(scanned)
+
+
+@pytest.fixture
+def all_source_rows(monkeypatch):
+    """Scan every source row (not only the effective one) to exercise fan-out."""
+    original = TranslationDB.iter_repairable_translation_entries
+
+    def scan_all(self, *args, **kwargs):
+        return original(self, *args, **{**kwargs, "only_effective": False})
+
+    monkeypatch.setattr(TranslationDB, "iter_repairable_translation_entries", scan_all)
+
+
+def test_special_character_repair_only_touches_the_effective_source_and_can_be_undone(
     db_path, monkeypatch, repair_cache
 ):
     db = TranslationDB(db_path)
@@ -240,13 +286,12 @@ def test_special_character_repair_covers_all_sources_and_can_be_undone(
     preview = moddb_retranslate_service.preview_same_source_ai_retranslation(
         db, _options(), mode="quality_mismatch"
     )
+    # 人工（生效）以外的來源被蓋住、使用者看不到，不列入修復
     assert preview.mode == "quality_mismatch"
-    assert preview.total_candidates == 2
-    assert preview.selected_count == 2
-    assert preview.ai_representatives == 1
-    assert preview.dedup_reused_candidates == 1
-    assert preview.sources == (SRC_JAR_TW, SRC_MANUAL)
-    assert {row.source_id for row in preview.entries} == {SRC_JAR_TW, SRC_MANUAL}
+    assert preview.total_candidates == 1
+    assert preview.selected_count == 1
+    assert preview.sources == (SRC_MANUAL,)
+    assert {row.source_id for row in preview.entries} == {SRC_MANUAL}
     db.close()
 
     monkeypatch.setattr(
@@ -266,25 +311,17 @@ def test_special_character_repair_covers_all_sources_and_can_be_undone(
 
     check = TranslationDB(db_path)
     rows = {row.source: row for row in check.entry_detail(entry.id).translations}
-    assert rows[SRC_JAR_TW].zh_tw == "使用 %s"
     assert rows[SRC_MANUAL].zh_tw == "使用 %s"
+    assert rows[SRC_JAR_TW].zh_tw == "使用"
     assert rows[SRC_AI].zh_tw == "Use %s"
     history = check.entry_detail(entry.id).history
-    manual_repair = next(
-        row
-        for row in history
-        if row.action == "quality_repair" and row.source_id == SRC_MANUAL
-    )
-    assert snap["summary"]["operation"] == "repair_special_character_mismatch"
-    assert snap["summary"]["updated"] == 2
-    assert snap["summary"]["remaining"] == 0
     source_repairs = [row for row in history if row.action == "quality_repair"]
-    assert len(source_repairs) == 2
-    assert check.revert(manual_repair.id) == 1
-    other_repair = next(row for row in source_repairs if row.id != manual_repair.id)
-    assert check.revert(other_repair.id) == 1
+    assert len(source_repairs) == 1 and source_repairs[0].source_id == SRC_MANUAL
+    assert snap["summary"]["operation"] == "repair_special_character_mismatch"
+    assert snap["summary"]["updated"] == 1
+    assert snap["summary"]["remaining"] == 0
+    assert check.revert(source_repairs[0].id) == 1
     restored = {row.source: row for row in check.entry_detail(entry.id).translations}
-    assert restored[SRC_JAR_TW].zh_tw == "使用"
     assert restored[SRC_MANUAL].zh_tw == "使用"
     assert SRC_AI_REPAIR not in restored
     assert repair_cache == []
@@ -400,6 +437,7 @@ def test_quality_repair_skips_newline_only_input_mismatch(db_path, monkeypatch):
     assert summary["ai_submitted_items"] == 1
 
 
+@pytest.mark.usefixtures("all_source_rows")
 def test_quality_repair_representative_limit_keeps_all_mapped_sources(db_path):
     db = TranslationDB(db_path)
     entry = _ai_entry(db, en="Use %s", key="mapped")
@@ -1541,6 +1579,7 @@ def test_service_cancellation_preserves_old_translation(
     assert repair_cache == []
 
 
+@pytest.mark.usefixtures("all_source_rows")
 def test_quality_repair_deduplicates_equivalent_rows_and_keeps_source_cas(
     db_path, monkeypatch, repair_cache
 ):
@@ -1601,6 +1640,7 @@ def test_quality_repair_deduplicates_equivalent_rows_and_keeps_source_cas(
     assert "[key=a/very/long/path/item.name]" in logs
 
 
+@pytest.mark.usefixtures("all_source_rows")
 def test_invalid_representative_never_fans_out_to_source_rows(
     db_path, monkeypatch, repair_cache
 ):
@@ -1648,6 +1688,7 @@ def test_invalid_representative_never_fans_out_to_source_rows(
     assert snap["summary"]["updated"] == 0
 
 
+@pytest.mark.usefixtures("all_source_rows")
 def test_candidate_log_uses_database_local_source_catalog(
     db_path, monkeypatch, repair_cache
 ):
@@ -1690,6 +1731,7 @@ def test_candidate_log_uses_database_local_source_catalog(
     assert snap["summary"]["updated"] == 2
 
 
+@pytest.mark.usefixtures("all_source_rows")
 def test_fanout_stale_second_source_keeps_first_cas_and_checker(
     db_path, monkeypatch, repair_cache
 ):
@@ -1756,6 +1798,7 @@ def test_fanout_stale_second_source_keeps_first_cas_and_checker(
     assert snap["summary"]["dedup_reused_candidates"] == 1
 
 
+@pytest.mark.usefixtures("all_source_rows")
 def test_cancel_between_fanout_targets_preserves_committed_row_and_review_state(
     db_path, monkeypatch, repair_cache
 ):
@@ -1834,6 +1877,7 @@ def test_cancel_between_fanout_targets_preserves_committed_row_and_review_state(
     assert snap["summary"]["failed"] == 0
 
 
+@pytest.mark.usefixtures("all_source_rows")
 def test_cancel_after_result_before_fanout_leaves_all_source_rows_unchanged(
     db_path, monkeypatch, repair_cache
 ):
@@ -1885,6 +1929,7 @@ def test_cancel_after_result_before_fanout_leaves_all_source_rows_unchanged(
     assert snap["summary"]["unprocessed_candidates"] == 2
 
 
+@pytest.mark.usefixtures("all_source_rows")
 def test_quality_repair_dedup_is_limited_to_same_entry_and_profile(
     db_path, monkeypatch, repair_cache
 ):
@@ -2327,6 +2372,7 @@ def test_retranslation_preview_shows_ai_source_profiles_and_samples(
     db.close()
 
 
+@pytest.mark.usefixtures("all_source_rows")
 def test_retranslation_preview_groups_same_key_sources_and_filters(db_path):
     db = TranslationDB(db_path)
     entry = _ai_entry(db, key="shared", en="Use %s")
