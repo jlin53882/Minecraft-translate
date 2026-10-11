@@ -47,6 +47,7 @@ from app.views.moddb.entry_filters import (
     entry_filter,
     on_advanced_change,
     open_batch_replace,
+    open_bulk_review,
     refresh_entry_filter,
 )
 from app.views.moddb.entry_metadata import build_entry_metadata
@@ -332,6 +333,9 @@ class EntriesPanel(ft.Column):
     def _open_batch_replace(self, _e=None) -> None:
         open_batch_replace(self, _e)
 
+    def _open_bulk_review(self, _e=None) -> None:
+        open_bulk_review(self, _e)
+
     def _after_batch_replace(self, result) -> None:
         self._load_list(page=self.pager.current_page, keep_scroll=True)
         if self._on_changed:
@@ -482,6 +486,7 @@ class EntriesPanel(ft.Column):
             else f"{format_count(self.total)} 筆"
         )
         self.batch_replace_btn.disabled = bool(self._list_error)
+        self.bulk_review_btn.disabled = bool(self._list_error)
         self.advanced_filters.set_summary()
         tiles = [self._row_tile(r) for r in self.rows]
         if not tiles:

@@ -10,6 +10,7 @@ from app.ui.design import C
 from app.ui.snack import show_snack
 from app.views.moddb.advanced_filters import AdvancedFilters
 from app.views.moddb.batch_replace_dialog import BatchReplaceDialog
+from app.views.moddb.bulk_review_dialog import BulkReviewDialog
 from app.views.moddb.formatting import STATE_LABELS, kind_label
 from app.views.moddb.source_filter import ReviewStatusFilter, SourceFilter
 
@@ -86,6 +87,13 @@ def _build_controls(panel) -> None:
         size="sm",
         on_click=panel._open_batch_replace,
     )
+    panel.bulk_review_btn = kit.button(
+        "批量審核",
+        "secondary",
+        icon=ft.Icons.VERIFIED_OUTLINED,
+        size="sm",
+        on_click=panel._open_bulk_review,
+    )
 
 
 def _build_flagged_banner(panel) -> None:
@@ -138,6 +146,7 @@ def _build_filter_card(panel) -> None:
                         panel.advanced_filters.toggle_button,
                         panel.advanced_filters.active_text,
                         panel.batch_replace_btn,
+                        panel.bulk_review_btn,
                     ],
                     spacing=8,
                     vertical_alignment=ft.CrossAxisAlignment.CENTER,
@@ -221,4 +230,20 @@ def open_batch_replace(panel, _e=None) -> None:
         panel.db,
         criteria,
         panel._after_batch_replace,
+    ).open()
+
+
+def open_bulk_review(panel, _e=None) -> None:
+    if panel.drafts:
+        show_snack(
+            panel._page,
+            "目前清單含尚未寫入的機翻草稿；請先離開草稿檢視再執行批量審核。",
+            C.GOLD,
+        )
+        return
+    if panel.db() is None or not panel.version:
+        show_snack(panel._page, "目前沒有可用的資料庫版本。", C.GOLD)
+        return
+    BulkReviewDialog(
+        panel._page, panel.db, panel.version, panel._after_batch_replace
     ).open()

@@ -1,0 +1,188 @@
+"""批量審核（版本 + 目前生效來源）：選取範圍、同步其他版本、CAS 與還原。"""
+
+from __future__ import annotations
+
+import pytest
+
+from translation_tool.translation_db import KIND_LANG, ScanItem, TranslationDB
+from translation_tool.translation_db.schema import SRC_JAR_TW, SRC_MANUAL
+
+
+@pytest.fixture
+def db(tmp_path):
+    d = TranslationDB(tmp_path / "bulk.db")
+    yield d
+    d.close()
+
+
+def _item(key, en, tw, mod="foo"):
+    return ScanItem(KIND_LANG, mod, key, en, tw, "")
+
+
+def _entry(db, version, key):
+    return next(row for row in db.list_entries(version)[0] if row.key == key)
+
+
+def _manual(db, version, key):
+    detail = db.entry_detail(_entry(db, version, key).id)
+    return next((t for t in detail.translations if t.source == SRC_MANUAL), None)
+
+
+def _seed(db):
+    db.ingest(
+        "1.21.1",
+        [
+            _item("ok", "Steel", "鋼"),
+            _item("bad", "Hello %s", "你好"),
+            _item("done", "Iron", "鐵"),
+            _item("empty", "Gold", ""),
+        ],
+    )
+    done = _entry(db, "1.21.1", "done")
+    db.review_manual(done.id, expected_zh_tw="鐵", propagate=False)
+
+
+def test_candidates_follow_version_source_and_quality(db):
+    _seed(db)
+
+    passing = db.preview_bulk_review("1.21.1", SRC_JAR_TW, quality_pass_only=True)
+    assert {c.key for c in passing.candidates} == {"ok"}
+
+    everything = db.preview_bulk_review("1.21.1", SRC_JAR_TW, quality_pass_only=False)
+    assert {c.key for c in everything.candidates} == {"ok", "bad"}
+
+    # 已人工審核（生效來源 6）的條目不會出現；來源 6 只列未審核者
+    manual = db.preview_bulk_review("1.21.1", SRC_MANUAL, quality_pass_only=False)
+    assert manual.candidates == ()
+    db.save_manual(_entry(db, "1.21.1", "ok").id, "鋼材", propagate=False)
+    manual = db.preview_bulk_review("1.21.1", SRC_MANUAL, quality_pass_only=False)
+    assert {c.key for c in manual.candidates} == {"ok"}
+
+
+def test_execute_reviews_selected_entries_and_honours_exclusions(db):
+    db.ingest(
+        "1.21.1",
+        [_item("a", "A", "甲"), _item("b", "B", "乙"), _item("c", "C", "丙")],
+    )
+    plan = db.preview_bulk_review("1.21.1", SRC_JAR_TW)
+    excluded = _entry(db, "1.21.1", "b").id
+
+    result = db.execute_bulk_review(plan, excluded_ids=[excluded], actor="使用者")
+
+    assert (result.reviewed, result.synced, result.stale_skipped) == (2, 0, 0)
+    for key in ("a", "c"):
+        manual = _manual(db, "1.21.1", key)
+        assert manual.review_status == "reviewed" and manual.checker == "使用者"
+    assert _manual(db, "1.21.1", "b") is None
+
+
+def test_sync_replaces_other_versions_and_is_reverted_as_one_batch(db):
+    db.ingest("1.21.1", [_item("k", "Steel", "鋼")])
+    db.ingest("1.20.1", [_item("k", "Steel", "鋼鐵")])
+    db.ingest("1.19.2", [_item("k", "Steel", "鋼")])
+
+    off = db.preview_bulk_review("1.21.1", SRC_JAR_TW, propagate=False)
+    assert (off.sibling_count, off.sibling_replaced_count) == (0, 0)
+
+    plan = db.preview_bulk_review("1.21.1", SRC_JAR_TW, propagate=True)
+    assert (plan.sibling_count, plan.sibling_replaced_count) == (2, 1)
+
+    result = db.execute_bulk_review(plan, actor="使用者")
+    assert (result.reviewed, result.synced) == (1, 2)
+    for version in ("1.21.1", "1.20.1", "1.19.2"):
+        manual = _manual(db, version, "k")
+        assert manual.zh_tw == "鋼" and manual.review_status == "reviewed"
+
+    assert db.revert_review_batch(result.batch) == 3
+    assert _manual(db, "1.20.1", "k") is None
+    assert _entry(db, "1.20.1", "k").zh_tw == "鋼鐵"
+
+
+def test_sync_off_leaves_other_versions_alone(db):
+    db.ingest("1.21.1", [_item("k", "Steel", "鋼")])
+    db.ingest("1.20.1", [_item("k", "Steel", "鋼")])
+
+    db.execute_bulk_review(db.preview_bulk_review("1.21.1", SRC_JAR_TW))
+
+    assert _manual(db, "1.21.1", "k").review_status == "reviewed"
+    assert _manual(db, "1.20.1", "k") is None
+
+
+def test_execute_rejects_plan_when_entries_changed_after_preview(db):
+    db.ingest("1.21.1", [_item("a", "A", "甲"), _item("b", "B", "乙")])
+    plan = db.preview_bulk_review("1.21.1", SRC_JAR_TW)
+    db.save_manual(_entry(db, "1.21.1", "a").id, "甲甲", propagate=False)
+
+    with pytest.raises(ValueError, match="重新產生批量審核預覽"):
+        db.execute_bulk_review(plan)
+
+    assert _manual(db, "1.21.1", "b") is None  # 整批都沒寫入
+
+
+def _drain(page):
+    page._run_all_tasks()
+    page._tasks.clear()
+
+
+def test_dialog_previews_pages_excludes_and_reverts(db):
+    from app.views.moddb.bulk_review_dialog import BulkReviewDialog
+    from tests.conftest import mock_page
+
+    db.ingest(
+        "1.21.1",
+        [_item(f"k{i:03d}", f"Text {i}", f"文字 {i}") for i in range(120)],
+    )
+    page = mock_page()
+    page.run_thread = lambda target: target()
+    done: list = []
+    dialog = BulkReviewDialog(page, lambda: db, "1.21.1", done.append)
+
+    # 預設：格式檢查通過 = 勾選、同步其他版本 = 關閉
+    assert dialog.quality_check.value is True and dialog.sync_switch.value is False
+    assert dialog.apply_btn.disabled is True
+    assert [o.key for o in dialog.source_dd.options] == [str(SRC_JAR_TW)]
+
+    dialog.source_dd.value = str(SRC_JAR_TW)
+    dialog._preview()
+    _drain(page)
+    assert len(dialog.plan.candidates) == 120
+    assert len(dialog.rows.controls) == 50  # 一頁 50 筆
+    assert dialog.pager.visible and dialog.pager.total_pages == 3
+    assert dialog.apply_btn.content == "確認審核 120 筆"
+
+    dialog._on_page(3)
+    assert len(dialog.rows.controls) == 20
+
+    dialog.excluded = {dialog.plan.candidates[0].entry_id}
+    dialog._render_plan()
+    assert dialog.apply_btn.content == "確認審核 119 筆"
+
+    dialog._confirm()
+    _drain(page)
+    assert dialog.result.reviewed == 119 and dialog.revert_btn.visible
+    assert done and _manual(db, "1.21.1", "k001").review_status == "reviewed"
+    assert _manual(db, "1.21.1", "k000") is None
+
+    dialog._revert()
+    _drain(page)
+    assert _manual(db, "1.21.1", "k001") is None
+    assert dialog.revert_btn.visible is False
+
+
+def test_dialog_option_change_invalidates_preview(db):
+    from app.views.moddb.bulk_review_dialog import BulkReviewDialog
+    from tests.conftest import mock_page
+
+    db.ingest("1.21.1", [_item("a", "A", "甲")])
+    page = mock_page()
+    page.run_thread = lambda target: target()
+    dialog = BulkReviewDialog(page, lambda: db, "1.21.1", None)
+    dialog.source_dd.value = str(SRC_JAR_TW)
+    dialog._preview()
+    _drain(page)
+    assert dialog.plan is not None and dialog.apply_btn.disabled is False
+
+    dialog.sync_switch.value = True
+    dialog._invalidate()
+
+    assert dialog.plan is None and dialog.apply_btn.disabled is True

@@ -463,3 +463,41 @@ class EffectiveSourceStat:
     source: int | None
     review_status: str | None
     count: int
+
+
+@dataclass(frozen=True)
+class BulkReviewCandidate:
+    """批量審核預覽中的一筆條目快照（確認時逐欄比對，任何變動都要求重新預覽）。"""
+
+    entry_id: int
+    mod_id: str
+    key: str
+    en_us: str
+    zh_tw: str
+    source: int | None
+    checker: str | None
+    review_status: str | None
+    revision: int | None
+
+
+@dataclass(frozen=True)
+class BulkReviewPlan:
+    """「版本 + 目前生效來源」批量審核的預覽結果。"""
+
+    version: str
+    source: int
+    quality_pass_only: bool
+    propagate: bool
+    database_identity: str
+    candidates: tuple[BulkReviewCandidate, ...]
+    # 開啟同步時：原文相同的其他版本會被寫入的筆數，以及其中目前譯文不同（會被取代）的筆數
+    sibling_count: int = 0
+    sibling_replaced_count: int = 0
+
+
+@dataclass(frozen=True)
+class BulkReviewResult:
+    batch: str
+    reviewed: int  # 被審核的所選版本條目數
+    synced: int  # 同步審核的其他版本條目數
+    stale_skipped: int  # 確認當下已被其他操作改動而略過的條目數
