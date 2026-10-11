@@ -324,7 +324,7 @@ class ScanPanel(ft.Column):
         settings = current_settings()
         allowed = [
             *ZIP_SOURCES,
-            *settings.source_catalog.custom_codes,
+            *settings.source_catalog.selectable_custom_codes,
         ]  # 自訂來源也能當 ZIP 的來源標記
         order = [c for c in settings.priority if c in allowed]
         order += [c for c in allowed if c not in order]

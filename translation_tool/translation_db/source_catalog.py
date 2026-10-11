@@ -75,6 +75,16 @@ class SourceCatalog:
         )
 
     @property
+    def selectable_custom_codes(self) -> tuple[int, ...]:
+        """Custom codes to offer when tagging; names equal to a built-in are hidden.
+
+        Such a historical registration stays valid for existing rows, but the
+        built-in source of the same name is the one users should pick.
+        """
+        shadowed = set(BUILTIN_SOURCE_NAMES.values())
+        return tuple(sorted({c for n, c in self.custom_sources if n not in shadowed}))
+
+    @property
     def codes(self) -> tuple[int, ...]:
         return tuple(sorted(set(BUILTIN_SOURCE_NAMES) | set(self.custom_codes)))
 

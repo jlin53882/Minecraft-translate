@@ -1275,7 +1275,8 @@ def test_entry_source_filter_hides_unreferenced_custom_sources(db_path, monkeypa
 
     scan = scan_panel.ScanPanel(mock_page(), mock_filepicker(), lambda: db)
     zip_source_keys = {option.key for option in scan.source_dd.options}
-    assert {"100", "101", "102"}.issubset(zip_source_keys)
+    assert {"100", "102"}.issubset(zip_source_keys)
+    assert "101" not in zip_source_keys  # 與內建「釘宮翻譯組」同名，不重複列出
     db.close()
 
 
