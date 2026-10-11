@@ -32,7 +32,7 @@ from translation_tool.utils.log_unit import log_warning
 
 _PREVIEW_SOURCE_ALL = "__all__"
 _PREVIEW_ISSUE_ALL = "all"
-_PREVIEW_RENDER_LIMIT = 50
+PREVIEW_PAGE_SIZE = 50  # 預覽候選每頁顯示的翻譯 Key 數
 _PREVIEW_ISSUE_LABELS = {
     "all": "全部異常類型",
     "minecraft": "Minecraft 格式碼 §",
@@ -70,6 +70,7 @@ def clear_preview(panel) -> None:
     panel.repair_samples.controls = []
     panel.repair_samples.height = 0
     panel.repair_samples.visible = False
+    panel.repair_preview_pager.visible = False
     panel.repair_preview_search.value = ""
     kit.set_dropdown_options(
         panel.repair_preview_source_filter,
@@ -392,26 +393,10 @@ def _copy_preview_text(panel, text: str) -> None:
     panel._page.run_task(copy)
 
 
-def _build_preview_group_card(panel, group, index: int, total: int):
-    first_cache_type, first_row = group[0]
-    issue_categories = set().union(
-        *(_entry_issue_categories(row) for _cache, row in group)
-    )
-    issue_text = "、".join(
-        _PREVIEW_ISSUE_LABELS.get(category, category)
-        for category in sorted(issue_categories)
-    )
-    detail = ft.Column(spacing=8, visible=False)
-    toggle = ft.TextButton("查看詳細資料", icon=ft.Icons.EXPAND_MORE)
-
-    def toggle_detail(_e=None):
-        detail.visible = not detail.visible
-        toggle.text = "收合詳細資料" if detail.visible else "查看詳細資料"
-        toggle.icon = ft.Icons.EXPAND_LESS if detail.visible else ft.Icons.EXPAND_MORE
-        panel._safe_update()
-
-    toggle.on_click = toggle_detail
-    detail.controls = [
+def _build_preview_detail(panel, group) -> list:
+    """One card's expanded detail: copy button plus each source's format review."""
+    first_row = group[0][1]
+    controls: list = [
         ft.Row(
             [
                 ft.Text(f"來源譯文（{len(group)} 筆）", size=11.5, color=C.MUTED),
@@ -430,7 +415,7 @@ def _build_preview_group_card(panel, group, index: int, total: int):
         format_review = _build_preview_format_review(
             cache_type, row, show_source=source_index == 0
         )
-        detail.controls.append(
+        controls.append(
             ft.Container(
                 padding=8,
                 bgcolor=C.PANEL2,
@@ -454,6 +439,31 @@ def _build_preview_group_card(panel, group, index: int, total: int):
                 ),
             )
         )
+    return controls
+
+
+def _build_preview_group_card(panel, group, index: int, total: int):
+    first_cache_type, first_row = group[0]
+    issue_categories = set().union(
+        *(_entry_issue_categories(row) for _cache, row in group)
+    )
+    issue_text = "、".join(
+        _PREVIEW_ISSUE_LABELS.get(category, category)
+        for category in sorted(issue_categories)
+    )
+    detail = ft.Column(spacing=8, visible=False)
+    toggle = ft.TextButton("查看詳細資料", icon=ft.Icons.EXPAND_MORE)
+
+    def toggle_detail(_e=None):
+        if not detail.visible and not detail.controls:
+            # 一頁有幾十張卡片、每張可能有多個來源；展開時才建詳細內容，翻頁才不會卡
+            detail.controls = _build_preview_detail(panel, group)
+        detail.visible = not detail.visible
+        toggle.text = "收合詳細資料" if detail.visible else "查看詳細資料"
+        toggle.icon = ft.Icons.EXPAND_LESS if detail.visible else ft.Icons.EXPAND_MORE
+        panel._safe_update()
+
+    toggle.on_click = toggle_detail
     return ft.Container(
         padding=12,
         border=ft.Border.all(1, C.LINE),
@@ -515,13 +525,17 @@ def _build_preview_format_review(cache_type, row, *, show_source):
     return review.control
 
 
-def refresh_preview_cards(panel, *, update: bool = True) -> None:
-    """Filter and render the current immutable preview without changing execution entries."""
+def refresh_preview_cards(panel, *, update: bool = True, page: int = 1) -> None:
+    """Filter and render one page of the immutable preview without changing execution entries.
+
+    Changing a filter renders page 1; the pager passes the requested page.
+    """
     result = panel._repair_preview
     if result is None:
         panel.repair_samples.controls = []
         panel.repair_samples.height = 0
         panel.repair_samples.visible = False
+        panel.repair_preview_pager.visible = False
         panel.repair_preview_count.value = "尚未載入候選預覽。"
         return
     query = str(panel.repair_preview_search.value or "")
@@ -533,27 +547,24 @@ def refresh_preview_cards(panel, *, update: bool = True) -> None:
         if _preview_group_matches(group, query, source_filter, issue_filter)
     ]
     total_groups = len(_preview_groups(result))
-    render_groups = groups[:_PREVIEW_RENDER_LIMIT]
-    if len(groups) > _PREVIEW_RENDER_LIMIT:
-        count_text = (
-            f"符合 {len(groups):,} / {total_groups:,} 個翻譯 Key；"
-            f"涵蓋 {sum(len(group) for group in groups):,} 筆來源項目。"
-            f" 目前先顯示前 {_PREVIEW_RENDER_LIMIT:,} 筆；請使用搜尋或篩選查看其他候選。"
+    pager = panel.repair_preview_pager
+    pager.set_state(len(groups), page)
+    first = (pager.current_page - 1) * PREVIEW_PAGE_SIZE
+    render_groups = groups[first : first + PREVIEW_PAGE_SIZE]
+    pager.visible = len(groups) > PREVIEW_PAGE_SIZE
+    count_text = (
+        f"{'符合' if len(groups) > PREVIEW_PAGE_SIZE else '顯示'} {len(groups):,} / "
+        f"{total_groups:,} 個翻譯 Key；涵蓋 {sum(len(group) for group in groups):,} 筆來源項目。"
+        + (
+            " 可展開查看完整原文與各來源譯文。"
+            if groups
+            else " 沒有符合目前篩選條件的候選。"
         )
-    else:
-        count_text = (
-            f"顯示 {len(groups):,} / {total_groups:,} 個翻譯 Key；"
-            f"涵蓋 {sum(len(group) for group in groups):,} 筆來源項目。"
-            + (
-                " 可展開查看完整原文與各來源譯文。"
-                if groups
-                else " 沒有符合目前篩選條件的候選。"
-            )
-        )
+    )
     panel.repair_preview_count.value = count_text
     panel.repair_samples.controls = [
         _build_preview_group_card(panel, group, index, len(groups))
-        for index, group in enumerate(render_groups, start=1)
+        for index, group in enumerate(render_groups, start=first + 1)
     ]
     has_groups = bool(groups)
     panel.repair_samples.height = None if has_groups else 0

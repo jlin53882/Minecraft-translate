@@ -34,6 +34,7 @@ from app.tasks.operation_registry import (
     launch_page_operation,
 )
 from app.ui import design, kit
+from app.ui.debounce import Debouncer
 from app.ui.design import C
 from app.ui.snack import show_snack
 from app.views.moddb.char_inspector import scrolling_list
@@ -70,6 +71,7 @@ from translation_tool.utils.log_unit import (
 )
 
 PAGE_SIZE = 50
+SEARCH_DEBOUNCE_SECONDS = 0.35  # 停止輸入多久後自動搜尋
 __all__ = ["EntriesPanel", "SourceFilter"]
 ALL_REVIEW_STATES = "__all__"
 ACTOR = "使用者"
@@ -88,6 +90,7 @@ class EntriesPanel(ft.Column):
         self._on_filter_changed = on_filter_changed
         self._refresh_keep_selection = True
         self._filter_only_refresh = False
+        self._search_debounce = Debouncer(lambda: self._page, SEARCH_DEBOUNCE_SECONDS)
         self.version: str | None = None
         self.mod_id: str | None = None
         self.kind: str | None = None
@@ -115,7 +118,8 @@ class EntriesPanel(ft.Column):
         self._build_editor_card()
         self._build_history_card()
         self.controls = [
-            self.refresh_indicator,
+            # 固定高度：提示出現／消失不能改變版面，否則輸入搜尋時整個畫面會上下跳動
+            ft.Container(self.refresh_indicator, height=18),
             self.filter_card,
             self.flagged_banner,
             ft.Row(
@@ -169,8 +173,8 @@ class EntriesPanel(ft.Column):
             None,
             hint="請輸入繁體中文譯文",
             multiline=True,
-            min_lines=3,
-            max_lines=8,
+            min_lines=6,
+            max_lines=16,
             on_change=self._on_text_change,
         )
         self.source_chip = ft.Container()
@@ -635,7 +639,22 @@ class EntriesPanel(ft.Column):
         self.state = key
         refresh_entry_filter(self)
 
+    def _on_search_input(self, e) -> None:
+        """輸入時即時搜尋：停止輸入一小段時間後才查詢，避免每個字都打資料庫。"""
+        if (e.control.value or "").strip() == self.query:
+            self._search_debounce.cancel()
+            return
+        self._search_debounce.call(self._apply_search, e.control)
+
+    def _apply_search(self, control) -> None:
+        query = (control.value or "").strip()
+        if query != self.query:
+            self.query = query
+            refresh_entry_filter(self)
+
     def _on_search(self, e) -> None:
+        """按 Enter：立即以目前輸入搜尋（取消尚在等待的即時搜尋）。"""
+        self._search_debounce.cancel()
         self.query = (e.control.value or "").strip()
         refresh_entry_filter(self)
 

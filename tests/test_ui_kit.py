@@ -139,11 +139,13 @@ def test_pager_large_page_numbers_fit_without_wrapping():
 
     assert p.total_pages == 4862
     assert p.current_page == 4860
-    assert p.buttons.controls[0].width == 30
-    assert all(cell.width >= 40 for cell in numbered if len(cell.content.value) == 4)
-    assert all(cell.width >= 34 for cell in numbered)
+    # 按鈕平均分配列寬（擺滿），不再用固定寬度
+    assert p.buttons.controls[0].expand is True
+    assert all(cell.expand is True for cell in numbered)
     assert [int(cell.content.value) for cell in numbered] == [
         1,
+        4856,
+        4857,
         4858,
         4859,
         4860,

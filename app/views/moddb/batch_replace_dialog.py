@@ -32,7 +32,10 @@ from app.ui.dialogs import (
 )
 from app.ui.poller import PollerHandle
 from app.ui.snack import show_snack
-from app.views.moddb.batch_replace_preview import render_batch_preview_rows
+from app.views.moddb.batch_replace_preview import (
+    SelectionBar,
+    render_batch_preview_rows,
+)
 from translation_tool.utils.redaction import redact_secrets
 
 PREVIEW_PAGE_SIZE = 50
@@ -121,6 +124,7 @@ class BatchReplaceDialog:
             height=340,
         )
         self.page_text = ft.Text("尚未預覽", size=11.5, color=C.DIM)
+        self.selection_bar = SelectionBar(self._select_all, self._clear_all)
 
     def _build_buttons(self) -> None:
         self.preview_btn = kit.button("產生預覽", "secondary", on_click=self._preview)
@@ -211,6 +215,7 @@ class BatchReplaceDialog:
                         self.progress_text,
                         self.progress_bar,
                         self.summary,
+                        self.selection_bar.control,
                         self.rows,
                         self.page_nav,
                     ],
@@ -764,6 +769,32 @@ class BatchReplaceDialog:
             self.excluded_roots.add(entry_id)
         self._invalidate_selection("勾選範圍已變更，請重新預覽。")
 
+    def _root_ids_shown(self) -> set[int]:
+        plan = self.selection_plan
+        return {row.entry_id for row in plan.root_changes} if plan else set()
+
+    def _select_all(self) -> None:
+        if self._busy or not self.excluded_roots:
+            return
+        self.excluded_roots.clear()
+        self._invalidate_selection("勾選範圍已變更，請重新預覽。")
+
+    def _clear_all(self) -> None:
+        shown = self._root_ids_shown()
+        if self._busy or not shown or shown <= self.excluded_roots:
+            return
+        self.excluded_roots.update(shown)
+        self._invalidate_selection("勾選範圍已變更，請重新預覽。")
+
+    def _sync_selection_bar(self) -> None:
+        shown = self._root_ids_shown()
+        self.selection_bar.sync(
+            total=len(shown),
+            excluded=len(shown & self.excluded_roots),
+            visible=self.selection_plan is not None and not self.show_skipped,
+            busy=self._busy,
+        )
+
     def _display_rows(self):
         if self.show_skipped:
             if self.plan is None:
@@ -788,6 +819,7 @@ class BatchReplaceDialog:
             self.skipped_btn.disabled = True
             self.skipped_btn.text = self._skipped_button_label()
             self.apply_btn.disabled = True
+            self._sync_selection_bar()
             if update:
                 self._update_dialog()
             return
@@ -819,6 +851,7 @@ class BatchReplaceDialog:
         )
         self.skipped_btn.text = self._skipped_button_label()
         self.rows.controls = self._render_rows(visible)
+        self._sync_selection_bar()
         if self.plan is None:
             self.summary.value = "範圍已變更，請重新預覽。"
         else:

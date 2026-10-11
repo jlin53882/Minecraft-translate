@@ -67,7 +67,11 @@ def _build_controls(panel) -> None:
     panel.source_filter = SourceFilter(panel._on_source)
     panel.review_filter = ReviewStatusFilter(panel._on_review_status).dropdown
     panel.search = kit.text_field(
-        "搜尋", hint="原文、譯文或鍵值", expand=True, on_submit=panel._on_search
+        "搜尋",
+        hint="原文、譯文或鍵值（輸入後自動搜尋）",
+        expand=True,
+        on_change=panel._on_search_input,
+        on_submit=panel._on_search,
     )
     panel.state_seg = kit.Segmented(
         [(key, label) for key, label in STATE_LABELS.items()],

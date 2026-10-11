@@ -145,10 +145,23 @@ class FormatDiffReview:
     def _select_tab(self, value: str) -> None:
         self._tab = value
         self._refresh()
+        self._push()
 
     def _toggle_highlight(self, event) -> None:
         self._highlight = bool(event.control.value)
         self._refresh()
+        self._push()
+
+    def _push(self) -> None:
+        """使用者在面板內操作（切頁籤、標示開關）後立刻把新內容送到畫面。
+
+        ``Segmented`` 只更新自己的按鈕；內容容器若不在這裡更新，要等到下一次
+        不相關的 ``page.update`` 才會換畫面。
+        """
+        try:
+            self.control.update()
+        except RuntimeError:
+            pass  # 尚未加入頁面（例如單元測試）；之後的整頁更新會帶上
 
     def _refresh(self) -> None:
         result = self._result or compare_format_diff(
@@ -186,7 +199,8 @@ class FormatDiffReview:
                 vertical_alignment=ft.CrossAxisAlignment.CENTER,
             ),
         ]
-        if self._meta_controls:
+        edit_mode = self._tab == "edit" and has_editor
+        if self._meta_controls and not edit_mode:
             content.append(ft.Row(self._meta_controls, spacing=6, wrap=True))
         if self._tabs.visible:
             content.append(
@@ -206,20 +220,49 @@ class FormatDiffReview:
                     vertical_alignment=ft.CrossAxisAlignment.CENTER,
                 )
             )
-        if self._tab == "edit" and has_editor:
-            content.append(
-                ft.Column(
-                    [
-                        ft.Text(self.target_label, size=12, color=C.EM),
-                        self.editable_control,
-                        self._edit_notice,
-                    ],
-                    spacing=8,
-                )
-            )
+        if edit_mode:
+            content.extend(self._edit_content())
         else:
             content.extend(self._diff_content(result))
         self.control.content.controls = content
+
+    def _edit_content(self) -> list[ft.Control]:
+        """編輯分頁：原文唯讀框在上，譯文標題（含來源標籤）與輸入框在下。"""
+        controls: list[ft.Control] = []
+        if self.show_source:
+            controls += [
+                kit.section_label("原文 en_us"),
+                ft.Container(
+                    ft.Text(
+                        self._source_text or "（無）",
+                        size=15,
+                        selectable=True,
+                        color=C.TEXT,
+                    ),
+                    padding=14,
+                    bgcolor=C.PANEL2,
+                    border_radius=design.RADIUS_CONTROL,
+                    border=ft.Border.all(1, C.LINE),
+                ),
+            ]
+        controls.append(
+            ft.Row(
+                [kit.section_label("譯文 zh_tw"), *self._meta_controls],
+                spacing=8,
+                wrap=True,
+            )
+        )
+        controls.append(self.editable_control)
+        if self._edit_notice is not None:
+            controls.append(self._edit_notice)
+        # 撐滿卡片寬度、區塊間留空間；內容少時也不會縮成窄窄一條
+        return [
+            ft.Column(
+                controls,
+                spacing=12,
+                horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
+            )
+        ]
 
     def _diff_content(self, result: FormatDiffResult) -> list[ft.Control]:
         issue_controls = [
@@ -300,47 +343,70 @@ class FormatDiffReview:
         )
 
     def _result_table(self, result: FormatDiffResult) -> ft.Container:
+        """檢查項目表：項目／原文數量／譯文數量／差異，欄寬固定、差異欄吃剩餘空間。"""
+
+        def cell(text: str, *, width: float | None = None, expand=None, **style):
+            style.setdefault("size", 12)
+            return ft.Text(text, width=width, expand=expand, **style)
+
         rows: list[ft.Control] = [
             ft.Row(
                 [
-                    ft.Text("檢查項目", size=11.5, color=C.MUTED, expand=True),
-                    ft.Text("原文", size=11.5, color=C.MUTED, width=48),
-                    ft.Text("譯文", size=11.5, color=C.MUTED, width=48),
-                    ft.Text("結果", size=11.5, color=C.MUTED, width=150),
+                    cell("檢查項目", expand=2, color=C.MUTED, size=11.5),
+                    cell(
+                        "原文", width=56, color=C.MUTED, text_align=ft.TextAlign.CENTER
+                    ),
+                    cell(
+                        "譯文", width=56, color=C.MUTED, text_align=ft.TextAlign.CENTER
+                    ),
+                    cell("差異", expand=3, color=C.MUTED),
                 ],
                 spacing=8,
-            )
+            ),
+            ft.Divider(height=1, color=C.LINE),
         ]
         for issue in result.issues:
+            tone = C.RED if issue.direction == "extra" else C.GOLD
+            action = "缺少" if issue.direction == "missing" else "多出"
+            detail: list[ft.Control] = [
+                cell(
+                    f"{action} {abs(issue.delta)} 個",
+                    color=tone,
+                    weight=ft.FontWeight.W_600,
+                )
+            ]
+            if issue.location_confidence == "unknown":
+                detail.append(
+                    ft.Text("位置無法可靠判定", size=11, color=C.MUTED, no_wrap=False)
+                )
             rows.append(
                 ft.Row(
                     [
-                        ft.Text(
-                            issue.display_token, size=12, color=C.TEXT, expand=True
+                        cell(issue.display_token, expand=2, color=C.TEXT),
+                        cell(
+                            str(issue.source_count),
+                            width=56,
+                            color=C.TEXT,
+                            text_align=ft.TextAlign.CENTER,
                         ),
-                        ft.Text(
-                            str(issue.source_count), size=12, color=C.TEXT, width=48
+                        cell(
+                            str(issue.target_count),
+                            width=56,
+                            color=tone,
+                            weight=ft.FontWeight.W_600,
+                            text_align=ft.TextAlign.CENTER,
                         ),
-                        ft.Text(
-                            str(issue.target_count), size=12, color=C.TEXT, width=48
-                        ),
-                        ft.Text(
-                            f"{_issue_label(issue)}（位置無法可靠判定）"
-                            if issue.location_confidence == "unknown"
-                            else _issue_label(issue),
-                            size=11.5,
-                            color=C.RED if issue.direction == "extra" else C.GOLD,
-                            width=150,
-                        ),
+                        ft.Column(detail, spacing=1, expand=3),
                     ],
                     spacing=8,
+                    vertical_alignment=ft.CrossAxisAlignment.START,
                 )
             )
         if not result.issues:
             rows.append(ft.Text("所有格式標記數量一致。", size=12, color=C.EM))
         return ft.Container(
             content=ft.Column(rows, spacing=7),
-            padding=ft.Padding.symmetric(horizontal=10, vertical=9),
+            padding=ft.Padding.symmetric(horizontal=12, vertical=10),
             bgcolor=C.PANEL2,
             border=ft.Border.all(1, C.LINE),
             border_radius=design.RADIUS_CONTROL,

@@ -25,6 +25,7 @@ class RepairCardControls:
     preview_source_filter: ft.Dropdown
     preview_issue_filter: ft.Dropdown
     preview_count: ft.Text
+    pager: kit.Pager
 
 
 def repair_copy(mode: str) -> tuple[str, str]:
@@ -55,6 +56,8 @@ def create_repair_card(
     on_preview: Callable,
     on_confirm: Callable,
     on_filter_change: Callable,
+    on_page: Callable[[int], None],
+    page_size: int,
 ) -> RepairCardControls:
     """Build the repair mode selector, scope notes, preview and confirmation controls."""
     mode_group = ft.RadioGroup(
@@ -105,6 +108,8 @@ def create_repair_card(
     # viewport here makes Flet Web retain a blank nested viewport after the
     # preview is populated, so let the outer TranslatePanel scroll the cards.
     samples = ft.Column(spacing=8, height=0, visible=False)
+    pager = kit.Pager(0, page_size=page_size, on_change=on_page, unit="個 Key")
+    pager.visible = False  # 候選不超過一頁時不顯示
     summary = ft.Text(
         "預覽只列候選、不呼叫 AI；按「開始修復」才會呼叫 AI。只儲存通過特殊字元檢查的結果，"
         "未通過就保留舊譯文。版本、模組、上限或條件變更後需重新預覽。",
@@ -126,6 +131,7 @@ def create_repair_card(
                     wrap=True,
                 ),
                 preview_count,
+                pager,
                 samples,
                 summary,
             ],
@@ -147,4 +153,5 @@ def create_repair_card(
         preview_source_filter,
         preview_issue_filter,
         preview_count,
+        pager,
     )

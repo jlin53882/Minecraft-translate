@@ -349,6 +349,10 @@ class TranslatePanel(ft.Column):
             on_filter_change=lambda _e=None: (
                 retranslation_controller.refresh_preview_cards(self)
             ),
+            on_page=lambda page: retranslation_controller.refresh_preview_cards(
+                self, page=page
+            ),
+            page_size=retranslation_controller.PREVIEW_PAGE_SIZE,
         )
         self.repair_card = controls.card
         self.repair_mode_group = controls.mode_group
@@ -361,6 +365,7 @@ class TranslatePanel(ft.Column):
         self.repair_preview_source_filter = controls.preview_source_filter
         self.repair_preview_issue_filter = controls.preview_issue_filter
         self.repair_preview_count = controls.preview_count
+        self.repair_preview_pager = controls.pager
         self.repair_summary_text = controls.summary
 
     def _repair_default_text(self) -> str:

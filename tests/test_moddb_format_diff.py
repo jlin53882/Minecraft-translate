@@ -90,3 +90,19 @@ def test_shared_review_renders_same_contract_without_inserting_ui_markers():
     review._select_tab("edit")
     assert review._tab == "edit"
     assert review.control.content.controls
+
+
+def test_review_tab_switch_pushes_content_to_the_page_immediately():
+    """切「差異預覽／編輯譯文」要立刻更新內容容器，不能等下一次整頁更新。"""
+    import flet as ft
+
+    from app.views.moddb.format_diff_review import FormatDiffReview
+
+    review = FormatDiffReview(context_label="t", editable_control=ft.TextField())
+    updates: list[int] = []
+    review.control.update = lambda: updates.append(1)  # type: ignore[method-assign]
+
+    review._select_tab("edit")
+    review._toggle_highlight(type("E", (), {"control": ft.Switch(value=False)})())
+
+    assert len(updates) == 2

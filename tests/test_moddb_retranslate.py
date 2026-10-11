@@ -145,6 +145,24 @@ def _contains_control_text(control, expected):
     )
 
 
+def _find_control_by_text(control, expected):
+    content = getattr(control, "content", None)
+    if getattr(control, "text", None) == expected or content == expected:
+        return control
+    found = (
+        _find_control_by_text(content, expected)
+        if content is not None and not isinstance(content, str)
+        else None
+    )
+    if found is not None:
+        return found
+    for child in getattr(control, "controls", None) or []:
+        found = _find_control_by_text(child, expected)
+        if found is not None:
+            return found
+    return None
+
+
 def _select_repair_mode(panel, mode="same_source_ai"):
     panel._repair_mode = mode
     panel.repair_mode_group.value = mode
@@ -2296,7 +2314,11 @@ def test_retranslation_preview_shows_ai_source_profiles_and_samples(
     assert "規劃批次：2（不等於實際 HTTP 請求次數）" in text
     assert len(panel.repair_samples.controls) == 2
     assert panel.repair_samples.visible is True
-    assert _contains_control_text(panel.repair_samples.controls[0], "格式差異檢視")
+    first_card = panel.repair_samples.controls[0]
+    # 詳細內容（格式差異檢視）收合時不建立，展開才建，翻頁才不會卡
+    assert not _contains_control_text(first_card, "格式差異檢視")
+    _find_control_by_text(first_card, "查看詳細資料").on_click()
+    assert _contains_control_text(first_card, "格式差異檢視")
     assert "顯示 2 / 2 個翻譯 Key" in panel.repair_preview_count.value
     panel.repair_preview_search.value = "patchouli"
     retranslation_controller.refresh_preview_cards(panel)
@@ -2576,3 +2598,41 @@ def test_retranslation_admission_rejection_never_starts_service(db_path, monkeyp
     assert panel._running is False
     assert any("無法啟動新任務" in message for message in snacks)
     db.close()
+
+
+def test_repair_preview_cards_are_paged_and_filters_return_to_page_one(
+    db_path, monkeypatch
+):
+    """候選超過一頁時顯示頁碼列；換頁看到對應的 Key，改篩選則回到第 1 頁。"""
+    panel = translate_panel.TranslatePanel(mock_page(), lambda: TranslationDB(db_path))
+    size = retranslation_controller.PREVIEW_PAGE_SIZE
+    groups = [[object()] for _ in range(size * 2 + 20)]
+    panel._repair_preview = object()
+    monkeypatch.setattr(retranslation_controller, "_preview_groups", lambda _r: groups)
+    monkeypatch.setattr(
+        retranslation_controller, "_preview_group_matches", lambda *_a: True
+    )
+    monkeypatch.setattr(
+        retranslation_controller,
+        "_build_preview_group_card",
+        lambda _panel, _group, index, total: __import__("flet").Text(
+            f"{index}/{total}"
+        ),
+    )
+
+    retranslation_controller.refresh_preview_cards(panel, update=False)
+    pager = panel.repair_preview_pager
+    assert pager.visible is True and pager.total_pages == 3
+    assert [c.value for c in panel.repair_samples.controls][:1] == [f"1/{len(groups)}"]
+    assert len(panel.repair_samples.controls) == size
+
+    pager.goto(3)  # 按頁碼：最後一頁只剩 20 筆，卡片編號延續
+    assert len(panel.repair_samples.controls) == 20
+    assert panel.repair_samples.controls[0].value == f"{size * 2 + 1}/{len(groups)}"
+
+    retranslation_controller.refresh_preview_cards(panel, update=False)  # 改篩選
+    assert pager.current_page == 1
+
+    del groups[size:]  # 剩一頁：不顯示頁碼列
+    retranslation_controller.refresh_preview_cards(panel, update=False)
+    assert pager.visible is False

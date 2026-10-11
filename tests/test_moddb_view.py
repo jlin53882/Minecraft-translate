@@ -2261,3 +2261,27 @@ def test_patchouli_macros_with_nested_parentheses_are_one_token():
     # 沒有結尾的 `$(` 不是標記；括號沒配對完時退回第一個 `)`
     assert not fm.format_tokens("a $( b")
     assert fm.format_tokens("$(t:(未配對)")["$(t:…)"] == 1
+
+
+def test_entries_search_runs_live_after_typing_and_enter_is_immediate(entries):
+    """搜尋框輸入後自動搜尋（防抖），Enter 則立即搜尋並取消等待中的那次。"""
+    scheduled: list[tuple] = []
+    entries._search_debounce.call = lambda fn, *args: scheduled.append((fn, args))
+    field = type("C", (), {"value": "alloy"})()
+    event = type("E", (), {"control": field})()
+
+    entries._on_search_input(event)
+    assert entries.query == "" and len(scheduled) == 1  # 還沒查，只排程
+
+    fn, args = scheduled[-1]
+    fn(*args)  # 防抖時間到
+    assert entries.query == "alloy"
+    assert [r.key for r in entries.rows] == ["item.foo.b"]
+
+    entries._on_search_input(event)  # 內容沒變：不再排程
+    assert len(scheduled) == 1
+
+    field.value = ""
+    entries._on_search(event)  # Enter 立即生效
+    assert entries.query == ""
+    assert len(entries.rows) > 1

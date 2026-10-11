@@ -88,8 +88,18 @@ def repair_input_issues(
     an AI slot. CRLF is naturally counted as one LF token by ``format_tokens``;
     literal ``\\n`` remains separate.
     """
-    wanted = format_tokens(source)
-    previous = format_tokens(previous_translation)
+    return repair_input_issues_from_counts(
+        format_tokens(source), format_tokens(previous_translation)
+    )
+
+
+def repair_input_issues_from_counts(
+    wanted: Counter[str], previous: Counter[str]
+) -> tuple[bool, tuple[str, ...], bool]:
+    """``repair_input_issues`` for callers that already counted the tokens.
+
+    Removes the LF count from both counters, so read it first if it is needed.
+    """
     newline_mismatch = wanted["\n"] != previous["\n"]
     wanted.pop("\n", None)
     previous.pop("\n", None)
@@ -205,22 +215,23 @@ def quality_state(source: str, translated: str) -> tuple[str, tuple[str, ...], s
 def matches_quality(source: str, translated: str, criteria: QualityFilter) -> bool:
     if not criteria.active:
         return True
-    _, _, whitespace = quality_state(source, translated)
     status = criteria.status
     if status == "all":
         status = "mismatch"
+    # 掃描整個版本時每列都會進來：只做該狀態需要的判斷，不先跑完整的 token 分析。
     if status == "unknown_source":
         return not source
     if status == "missing_translation":
         return bool(source) and not translated
     if status == "whitespace":
-        return bool(translated) and bool(whitespace)
-    if status == "consistent":
-        return bool(source and translated) and format_tokens(source) == format_tokens(
-            translated
-        )
-    if status != "mismatch" or not source or not translated:
+        return bool(translated) and bool(whitespace_note(translated))
+    if status not in {"consistent", "mismatch"} or not source or not translated:
         return False
+    if not (_SCAN_RE.search(source) or _SCAN_RE.search(translated)):
+        # 兩邊都沒有任何格式 token：token 計數必定相同。
+        return status == "consistent"
+    if status == "consistent":
+        return format_tokens(source) == format_tokens(translated)
 
     wanted, actual = format_tokens(source), format_tokens(translated)
     missing = wanted - actual

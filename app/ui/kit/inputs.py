@@ -387,7 +387,7 @@ class Pager(ft.Container):
             content=ft.Column(
                 [self.summary, self.buttons],
                 spacing=6,
-                horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+                horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
             ),
             padding=ft.Padding.symmetric(horizontal=8, vertical=8),
             border=ft.Border.only(top=ft.BorderSide(1, C.LINE)),
@@ -429,9 +429,9 @@ class Pager(ft.Container):
                 ft.Icons.CHEVRON_LEFT, self._current - 1, enabled=self._current > 1
             )
         ]
-        # 一般頁數顯示目前頁附近 5 頁，接近端點時也能保留足夠的相鄰頁碼；
-        # 頁碼進入五位數後縮短按鈕列，避免擠壓清單欄位。
-        window_size = 1 if self.total_pages >= 10_000 else 5
+        # 頁碼按鈕平均分配整列寬度（擺滿），所以可以多顯示幾頁：一般 7 個中間頁碼，
+        # 接近端點時也保留足夠的相鄰頁碼；頁碼進入五位數後每顆按鈕變寬，縮到 3 個。
+        window_size = 3 if self.total_pages >= 10_000 else 7
         for item in page_window(self._current, self.total_pages, size=window_size):
             if item == "…":
                 controls.append(self._cell("…", None, enabled=False))
@@ -453,7 +453,8 @@ class Pager(ft.Container):
         row = ft.Row(
             controls,
             spacing=4,
-            tight=True,
+            alignment=ft.MainAxisAlignment.CENTER,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
             key=f"pagerrow{id(self)}-{self._render_gen}",
         )
         self.buttons = row
@@ -470,27 +471,36 @@ class Pager(ft.Container):
         enabled: bool = True,
     ) -> ft.Container:
         is_icon = label in (ft.Icons.CHEVRON_LEFT, ft.Icons.CHEVRON_RIGHT)
+        if label == "…":
+            # 省略號只是「這裡跳過了頁碼」的提示，不畫成按鈕框，避免被誤認成可點擊
+            return ft.Container(
+                width=18,
+                height=32,
+                alignment=ft.Alignment.CENTER,
+                content=ft.Text("…", size=13, color=C.DIM),
+            )
         content: ft.Control = (
-            ft.Icon(label, size=14, color=C.TEXT if enabled else C.DIM)
+            ft.Icon(label, size=16, color=C.TEXT if enabled else C.DIM)
             if is_icon
             else ft.Text(
                 label,
-                size=12,
-                weight=ft.FontWeight.BOLD if selected else ft.FontWeight.W_400,
+                size=13,
+                weight=ft.FontWeight.BOLD if selected else ft.FontWeight.W_500,
                 color=C.ON_EM if selected else (C.TEXT if enabled else C.DIM),
+                no_wrap=True,
             )
         )
+        # 不設固定寬度：由 Row 平均分配（expand），整列剛好填滿可用寬度
         return ft.Container(
-            width=(
-                30 if is_icon else 24 if label == "…" else max(34, 8 * len(label) + 8)
-            ),
+            expand=True,
             height=32,
-            border_radius=7,
+            border_radius=8,
             alignment=ft.Alignment.CENTER,
             bgcolor=C.EM if selected else None,
             border=None if selected else ft.Border.all(1, C.LINE),
             content=content,
             ink=enabled and not selected,
+            opacity=0.5 if is_icon and not enabled else 1.0,
             on_click=(lambda _e, t=target: self.goto(t))
             if enabled and target
             else None,
