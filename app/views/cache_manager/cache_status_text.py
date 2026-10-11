@@ -16,6 +16,11 @@ def active_shard_usage(state: dict) -> tuple[int, int]:
     return entries, capacity or DEFAULT_SHARD_CAPACITY
 
 
+def has_active_shard(state: dict) -> bool:
+    """``.active`` 指向的編號分片是否存在；舊資料只有時間戳分片時為 False。"""
+    return bool(state.get("active_shard_exists", True))
+
+
 def entries_line(state: dict) -> str:
     """整個分類的筆數；本次新增為 0 時不顯示。"""
     text = f"筆數 {int(state.get('entries_count', 0) or 0):,}"
@@ -30,6 +35,8 @@ def shard_line(state: dict) -> str:
     entries, capacity = active_shard_usage(state)
     shard_count = state.get("shard_count")
     total = f"（共 {int(shard_count):,} 片）" if shard_count else ""
+    if not has_active_shard(state):
+        return f"沒有可補滿的編號分片{total}　下次存檔會建立新分片"
     return (
         f"目前寫入分片 {state.get('active_shard_id') or '-'}{total}"
         f"　已寫入 {entries:,} / {capacity:,} 筆"

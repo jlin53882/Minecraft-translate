@@ -35,6 +35,7 @@ from app.views.cache_manager.cache_status_text import (
     active_shard_usage,
     dirty_label,
     entries_line,
+    has_active_shard,
     shard_line,
 )
 from translation_tool.utils.log_unit import log_warning
@@ -186,6 +187,7 @@ class CacheOverviewMixin:
         """單一快取類型的狀態卡片。"""
         dirty = bool(st.get("is_dirty", False))
         shard_entries, shard_capacity = active_shard_usage(st)
+        show_usage = has_active_shard(st)
         usage_ratio = min(1.0, shard_entries / shard_capacity)
         usage_tone = (
             "red" if usage_ratio >= 1.0 else "gold" if usage_ratio >= 0.9 else "dia"
@@ -216,7 +218,11 @@ class CacheOverviewMixin:
                         size=11,
                         color=get_tone(usage_tone).fg,
                     ),
-                    kit.progress_bar(usage_ratio, usage_tone, height=6),
+                    *(
+                        [kit.progress_bar(usage_ratio, usage_tone, height=6)]
+                        if show_usage
+                        else []
+                    ),
                     self._type_actions_row(ctype),
                 ],
                 spacing=8,

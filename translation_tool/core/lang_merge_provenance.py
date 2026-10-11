@@ -11,6 +11,8 @@ from typing import Any
 
 import orjson
 
+from translation_tool.utils.file_replace import replace_with_retry
+
 _MANIFEST_NAME = ".translation-provenance.json"
 _WRITE_LOCK = threading.RLock()
 
@@ -93,7 +95,7 @@ def _write_json_atomic(path: Path, payload: dict[str, Any]) -> None:
             stream.write(data)
             stream.flush()
             os.fsync(stream.fileno())
-        os.replace(temporary, path)
+        replace_with_retry(temporary, path)
     except BaseException:
         try:
             os.unlink(temporary)

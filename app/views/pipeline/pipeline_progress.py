@@ -33,18 +33,29 @@ class PipelineStepChip:
         self.step_num = step_num
         self.status = "waiting"
 
-        self.chip = ft.Chip(label=ft.Text(f"{step_num}. {name}"))
+        # ft.Chip 沒有 on_click／on_select 時 Flutter 視為停用並整個淡化，
+        # 狀態色就看不出來；改用一般容器做的膠囊。
+        self.label = ft.Text(f"{step_num}. {name}", size=12.5, no_wrap=True)
         self.icon = ft.Icon(ft.Icons.CIRCLE, size=12)
-        self.chip.leading = self.icon
+        self.chip = ft.Container(
+            padding=ft.Padding.symmetric(horizontal=10, vertical=5),
+            border_radius=16,
+            content=ft.Row(
+                [self.icon, self.label],
+                spacing=6,
+                tight=True,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            ),
+        )
         self._update_chip()
 
     def _update_chip(self):
         tone = get_tone(self._TONES.get(self.status, "neutral"))
         self.icon.name = self._ICONS[self.status]
         self.icon.color = tone.fg
+        self.label.color = tone.fg
         self.chip.bgcolor = tone.bg
-        self.chip.label_text_style = ft.TextStyle(color=tone.fg, size=12.5)
-        self.chip.side = ft.BorderSide(1, tone.line)
+        self.chip.border = ft.Border.all(1, tone.line)
 
     def set_status(self, status: str):
         self.status = status
