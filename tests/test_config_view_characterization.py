@@ -966,15 +966,16 @@ def test_config_view_page_property(cv, page, mock_controls_map):
 
 
 def test_nav_items_has_seven_categories(cv, page, mock_controls_map):
-    """測試 NAV_ITEMS 有 9 個分類導航項目"""
+    """測試 NAV_ITEMS 有 10 個分類導航項目"""
     view = cv.ConfigView(page)
     view.controls_map = mock_controls_map
-    assert len(cv.NAV_ITEMS) == 9
+    assert len(cv.NAV_ITEMS) == 10
     expected_ids = [
         "general",
         "api_models",
         "translation_behavior",
         "merger",
+        "mod_db",
         "prompts",
         "species_lookup",
         "batch_limits",

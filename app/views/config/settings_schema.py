@@ -42,6 +42,7 @@ NAV_PAGES: tuple[dict[str, str], ...] = (
     {"id": "api_models", "label": "API & 模型設定", "icon": "KEY"},
     {"id": "translation_behavior", "label": "翻譯行為設定", "icon": "TRANSLATE"},
     {"id": "merger", "label": "語言合併器設定", "icon": "MERGE_TYPE"},
+    {"id": "mod_db", "label": "Mod 資料庫", "icon": "DATASET"},
     {"id": "prompts", "label": "提示詞管理", "icon": "MESSAGE"},
     {"id": "species_lookup", "label": "學名查詢管理", "icon": "SEARCH"},
     {"id": "batch_limits", "label": "批次與限制", "icon": "DEVELOPER_BOARD"},
@@ -183,7 +184,6 @@ LAYOUT: dict[str, tuple[Card, ...]] = {
                 ),
             ),
         ),
-        Card(C_TDB),
         Card(C_BUNDLER),
     ),
     "api_models": (
@@ -286,6 +286,37 @@ LAYOUT: dict[str, tuple[Card, ...]] = {
                     "lm_translator.budget_recover_after",
                     "lm_translator.budget_recover_factor",
                 ),
+            ),
+        ),
+    ),
+    "mod_db": (
+        Card(
+            C_TDB,
+            (
+                Head("使用時機"),
+                R(
+                    "translation_db.enabled",
+                    "translation_db.merge_enabled",
+                    pad=1,
+                ),
+                Gap(),
+                Head("資料庫與版本"),
+                R(
+                    "translation_db.path",
+                    "translation_db.version",
+                    pad=1,
+                ),
+                Gap(),
+                Head("沿用與寫回"),
+                R(
+                    "translation_db.cross_version",
+                    "translation_db.write_back",
+                    "translation_db.sync_manual",
+                ),
+                Gap(),
+                Head("來源"),
+                F("translation_db.zip_source"),
+                F("translation_db.priority"),
             ),
         ),
     ),
