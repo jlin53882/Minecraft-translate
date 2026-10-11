@@ -85,6 +85,15 @@ class DbLocationBanner(ft.Container):
                 "無法使用" if path.is_file() else "找不到",
             ),
         }[level]
+        unsaved = normalize_db_path(path_text) != normalize_db_path(
+            current_settings().path
+        )
+        self.prune_btn.disabled = unsaved
+        self.prune_btn.tooltip = (
+            "資料庫路徑尚未儲存；請先儲存設定，再清除未使用的自訂來源"
+            if unsaved
+            else None
+        )
         self.folder_text.value = str(path.parent)
         self.file_text.value = f"檔案：{path.name}"
         self.status_box.content = kit.chip(label, tone)
@@ -107,6 +116,8 @@ class DbLocationBanner(ft.Container):
 
     def _on_prune(self, _e=None) -> None:
         """移除資料庫登錄裡沒有任何資料引用的自訂來源（有資料的一律保留）。"""
+        if self.prune_btn.disabled:
+            return
         removed, kept, gone_tokens = prune_unused_custom_sources_report(
             current_settings().path
         )

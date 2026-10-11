@@ -114,30 +114,19 @@ def matching_items(
     *,
     statuses: tuple[str, ...] = ("pending", "invalid"),
 ) -> list[dict[str, Any]]:
-    """Return unresolved review items that are the same review group as ``item``.
+    """Return unresolved review items in the same persisted review group as ``item``.
 
-    Same group = same database, version, mod, key, source text, old translation and
-    AI draft (see ``group_key``); a confirmation never reaches rows whose old text or
-    draft differs, nor rows without a reliable identity.
+    The group is the stored ``group_key`` (what the reviewer shows as one item), so a
+    confirmation never reaches a row the screen listed separately. Rows without a
+    stored key (older stores) and items without ``item_index`` stay single.
     """
-    if not statuses:
+    if not statuses or item.get("item_index") is None:
         return []
-    wanted = group_key(item)
-    if wanted is None:
-        return []
-
     matches: list[dict[str, Any]] = []
-    seen: set[int] = set()
-    for status in statuses:
-        for index in indices(path, run_id, status):
-            if index in seen:
-                continue
-            candidate = load_item(path, run_id, index)
-            if candidate is None:
-                continue
-            if group_key(candidate) == wanted:
-                matches.append(candidate)
-                seen.add(index)
+    for index in group_indices(path, run_id, int(item["item_index"])):
+        candidate = load_item(path, run_id, index)
+        if candidate is not None and candidate.get("review_status") in statuses:
+            matches.append(candidate)
     return matches
 
 

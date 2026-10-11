@@ -205,6 +205,18 @@ def ensure_custom_sources(path: Path, names: list[str]) -> dict[str, int]:
     return registry
 
 
+def _zip_source_codes(registry: dict[str, int]) -> set[int]:
+    """設定檔 ``zip_source`` 指到的來源代碼（ZIP 匯入預設來源，視為仍在使用）。"""
+    from translation_tool.utils.config_manager import load_config
+
+    try:
+        value = (load_config().get("translation_db") or {}).get("zip_source")
+    except (OSError, ValueError, AttributeError):
+        return set()
+    code = SourceCatalog.from_registry(registry).resolve(value)
+    return {int(code)} if code is not None else set()
+
+
 def prune_unused_custom_sources(path: Path) -> tuple[list[str], list[str]]:
     """從資料庫登錄移除沒有任何資料引用的自訂來源；回傳 ``(已移除, 仍在使用)`` 名稱。
 
@@ -231,6 +243,7 @@ def prune_unused_custom_sources(path: Path) -> tuple[list[str], list[str]]:
             "SELECT DISTINCT source_id FROM history WHERE source_id IS NOT NULL",
         ):
             used.update(int(r[0]) for r in conn.execute(sql))
+        used.update(_zip_source_codes(registry))
         removed = [n for n, code in registry.items() if code not in used]
         kept = [n for n, code in registry.items() if code in used]
         if removed:

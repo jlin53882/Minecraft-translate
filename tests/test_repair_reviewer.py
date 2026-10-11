@@ -508,8 +508,7 @@ def test_reviewer_lists_merged_sources_and_keep_old_covers_the_whole_group(tmp_p
 
 def test_matching_items_never_reaches_rows_with_other_old_text_or_draft(tmp_path):
     path = store.create_run(tmp_path / "match.db", "run-m")
-    mine = _identity(tmp_path, source_id=2)
-    store.append_item(path, "run-m", mine)
+    first = store.append_item(path, "run-m", _identity(tmp_path, source_id=2))
     same = store.append_item(path, "run-m", _identity(tmp_path, source_id=4))
     store.append_item(
         path, "run-m", _identity(tmp_path, source_id=1, old_translation="別的")
@@ -517,15 +516,37 @@ def test_matching_items_never_reaches_rows_with_other_old_text_or_draft(tmp_path
     store.append_item(
         path, "run-m", _identity(tmp_path, source_id=3, ai_translation="另一版")
     )
+    mine = store.load_item(path, "run-m", first)
 
     matched = store.matching_items(path, "run-m", mine)
 
-    assert sorted(item["item_index"] for item in matched) == [1, same]
+    assert sorted(item["item_index"] for item in matched) == [first, same]
 
 
 def test_matching_items_ignores_items_without_a_reliable_identity(tmp_path):
     path = store.create_run(tmp_path / "noid.db", "run-n")
-    store.append_item(path, "run-n", {"key": "a", "source_id": 0})
+    first = store.append_item(path, "run-n", {"key": "a", "source_id": 0})
     store.append_item(path, "run-n", {"key": "a", "source_id": 1})
+    mine = store.load_item(path, "run-n", first)
 
-    assert store.matching_items(path, "run-n", {"key": "a", "source_id": 0}) == []
+    assert [i["item_index"] for i in store.matching_items(path, "run-n", mine)] == [
+        first
+    ]
+
+
+def test_matching_items_keeps_old_store_rows_single_even_with_full_payloads(
+    tmp_path,
+):
+    import sqlite3
+
+    path = store.create_run(tmp_path / "legacy.db", "run-l")
+    first = store.append_item(path, "run-l", _identity(tmp_path, source_id=2))
+    second = store.append_item(path, "run-l", _identity(tmp_path, source_id=4))
+    with sqlite3.connect(path) as conn:
+        conn.execute("UPDATE repair_review SET group_key=NULL")
+    mine = store.load_item(path, "run-l", first)
+
+    matched = store.matching_items(path, "run-l", mine)
+
+    assert [item["item_index"] for item in matched] == [first]
+    assert store.group_indices(path, "run-l", second) == [second]

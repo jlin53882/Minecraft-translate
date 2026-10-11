@@ -507,3 +507,40 @@ def test_pruned_source_is_not_registered_again_by_the_saved_config(
     # 重新載入設定（等同重啟）不會把剛清掉的來源登錄回來
     load_db_settings()
     assert read_custom_sources(path) == {"Pack": 102}
+
+
+def test_prune_keeps_the_custom_source_used_as_zip_default(tmp_path, monkeypatch):
+    from translation_tool.translation_db.settings import (
+        prune_unused_custom_sources,
+        read_custom_sources,
+    )
+
+    path = _registry_db(tmp_path, {"我的翻譯包": 100, "閒置": 101}, used_codes=())
+    _fake_config(
+        monkeypatch,
+        {"translation_db": {"path": str(path), "zip_source": "custom:100"}},
+    )
+
+    removed, kept = prune_unused_custom_sources(path)
+
+    assert removed == ["閒置"]
+    assert kept == ["我的翻譯包"]
+    assert read_custom_sources(path) == {"我的翻譯包": 100}
+
+
+def test_prune_button_is_disabled_while_the_path_is_unsaved(tmp_path, monkeypatch):
+    from app.views.config import db_location
+
+    path = _registry_db(tmp_path, {"測試": 100}, used_codes=())
+    monkeypatch.setattr(
+        db_location, "current_settings", lambda: type("S", (), {"path": str(path)})()
+    )
+    banner = db_location.DbLocationBanner()
+    assert banner.prune_btn.disabled is False
+
+    banner.refresh(str(tmp_path / "other.sqlite3"))
+    assert banner.prune_btn.disabled is True
+    assert "尚未儲存" in banner.prune_btn.tooltip
+
+    banner.refresh(str(path))
+    assert banner.prune_btn.disabled is False
