@@ -229,8 +229,9 @@ class ReviewScopeController:
                     vertical_alignment=ft.CrossAxisAlignment.CENTER,
                 ),
                 ft.Text(
-                    "確認後會重新檢查資料是否被其他操作修改；只會處理列出的相同譯文版本，"
-                    "不會修改英文原文或略過版本。",
+                    "確認後會重新檢查資料是否被其他操作修改；只會處理上面列出的版本，"
+                    "不會修改英文原文或略過版本。開啟同步時，其他版本目前不同的譯文也會被取代"
+                    "（可從歷史還原）。",
                     size=11.5,
                     color=C.MUTED,
                     selectable=True,

@@ -82,10 +82,11 @@ def test_sync_replaces_other_versions_and_is_reverted_as_one_batch(db):
     db.ingest("1.19.2", [_item("k", "Steel", "鋼")])
 
     off = db.preview_bulk_review("1.21.1", SRC_JAR_TW, propagate=False)
-    assert (off.sibling_count, off.sibling_replaced_count) == (0, 0)
+    assert off.sibling_totals() == (0, 0)
 
     plan = db.preview_bulk_review("1.21.1", SRC_JAR_TW, propagate=True)
-    assert (plan.sibling_count, plan.sibling_replaced_count) == (2, 1)
+    assert plan.sibling_totals() == (2, 1)
+    assert plan.sibling_totals(excluded=[_entry(db, "1.21.1", "k").id]) == (0, 0)
 
     result = db.execute_bulk_review(plan, actor="使用者")
     assert (result.reviewed, result.synced) == (1, 2)
@@ -186,3 +187,35 @@ def test_dialog_option_change_invalidates_preview(db):
     dialog._invalidate()
 
     assert dialog.plan is None and dialog.apply_btn.disabled is True
+
+
+def test_sync_rejects_plan_when_another_version_changed_after_preview(db):
+    db.ingest("1.21.1", [_item("k", "Steel", "鋼")])
+    db.ingest("1.20.1", [_item("k", "Steel", "鋼鐵")])
+    plan = db.preview_bulk_review("1.21.1", SRC_JAR_TW, propagate=True)
+
+    # 預覽後，其他版本被另一個操作改過譯文
+    db.save_manual(_entry(db, "1.20.1", "k").id, "高級鋼材", propagate=False)
+
+    with pytest.raises(ValueError, match="其他版本"):
+        db.execute_bulk_review(plan)
+    assert _manual(db, "1.20.1", "k").zh_tw == "高級鋼材"
+    assert _manual(db, "1.21.1", "k") is None
+
+
+def test_sync_ignores_changes_to_siblings_of_excluded_entries(db):
+    db.ingest("1.21.1", [_item("a", "A", "甲"), _item("b", "B", "乙")])
+    db.ingest("1.20.1", [_item("a", "A", "甲甲"), _item("b", "B", "乙乙")])
+    plan = db.preview_bulk_review("1.21.1", SRC_JAR_TW, propagate=True)
+    db.save_manual(_entry(db, "1.20.1", "b").id, "改過", propagate=False)
+
+    result = db.execute_bulk_review(plan, excluded_ids=[_entry(db, "1.21.1", "b").id])
+
+    assert (result.reviewed, result.synced) == (1, 1)
+    assert _manual(db, "1.20.1", "b").zh_tw == "改過"
+
+
+def test_whitespace_only_translation_is_not_a_candidate(db):
+    db.ingest("1.21.1", [_item("blank", "Blank", " \n"), _item("ok", "Ok", "好")])
+    plan = db.preview_bulk_review("1.21.1", SRC_JAR_TW, quality_pass_only=False)
+    assert {c.key for c in plan.candidates} == {"ok"}

@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 
 
@@ -490,9 +491,16 @@ class BulkReviewPlan:
     propagate: bool
     database_identity: str
     candidates: tuple[BulkReviewCandidate, ...]
-    # 開啟同步時：原文相同的其他版本會被寫入的筆數，以及其中目前譯文不同（會被取代）的筆數
-    sibling_count: int = 0
-    sibling_replaced_count: int = 0
+    # 開啟同步時，每個候選條目的其他版本快照：
+    # (候選 entry_id, 會被寫入的其他版本筆數, 其中目前譯文不同（會被取代）的筆數, 狀態摘要)
+    # 摘要涵蓋所有原文相同的其他版本的譯文、來源與審核狀態，確認時逐筆比對
+    sibling_info: tuple[tuple[int, int, int, str], ...] = ()
+
+    def sibling_totals(self, excluded: Iterable[int] = ()) -> tuple[int, int]:
+        """扣掉被排除的條目後，同步會寫入的其他版本筆數與其中會取代不同譯文的筆數。"""
+        skip = set(excluded)
+        rows = [info for info in self.sibling_info if info[0] not in skip]
+        return sum(r[1] for r in rows), sum(r[2] for r in rows)
 
 
 @dataclass(frozen=True)

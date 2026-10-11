@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import sqlite3
 import uuid
@@ -60,40 +61,59 @@ class BulkReviewMixin:
                 revision=row[20],
             )
             for row in rows
-            if row[6]
+            if row[6] and row[6].strip()
         )
 
-    def _bulk_review_sibling_counts(
-        self, candidates: Sequence[BulkReviewCandidate], version: str
-    ) -> tuple[int, int]:
-        """開啟同步時其他版本會被寫入的筆數與其中譯文不同者（SQL 一次統計，不逐筆預覽）。"""
+    def _bulk_review_sibling_info(
+        self,
+        candidates: Sequence[BulkReviewCandidate],
+        version: str,
+        *,
+        conn: sqlite3.Connection | None = None,
+    ) -> tuple[tuple[int, int, int, str], ...]:
+        """開啟同步時每個候選條目的其他版本快照（SQL 分批查詢，不逐筆預覽）。
+
+        回傳 ``(候選 id, 會被寫入筆數, 其中譯文不同筆數, 狀態摘要)``；摘要涵蓋所有原文相同的
+        其他版本的生效譯文、來源與人工審核狀態，確認時重算並逐筆比對。
+        """
         manual_review = (
             "m.review_status"
             if self.has_review_state
             else f"CASE WHEN m.source={SRC_MANUAL} THEN 'legacy_unknown' END"
         )
-        total = replaced = 0
+        revision = "m.revision" if self.has_translation_revision else "NULL"
+        sql = (
+            "SELECT e.id, e2.id, f.zh_tw, f2.zh_tw, f2.source, m.zh_tw, "
+            f"{manual_review}, {revision} "
+            "FROM entry e JOIN effective f ON f.entry_id = e.id "
+            "JOIN entry e2 INDEXED BY idx_entry_content "
+            "ON e2.kind = e.kind AND e2.mod_id = e.mod_id AND e2.key = e.key "
+            "AND e2.en_us = e.en_us AND e2.mc_version <> ? "
+            "LEFT JOIN effective f2 ON f2.entry_id = e2.id "
+            f"LEFT JOIN translation m ON m.entry_id = e2.id AND m.source = {SRC_MANUAL} "
+            "WHERE e.id IN (SELECT value FROM json_each(?)) ORDER BY e.id, e2.id"
+        )
+        stats: dict[int, list] = {}
         ids = [c.entry_id for c in candidates if c.en_us]
         for start in range(0, len(ids), _ID_CHUNK):
-            chunk = ids[start : start + _ID_CHUNK]
-            row = self._one(
-                "SELECT COUNT(*), "
-                "COALESCE(SUM(CASE WHEN f2.zh_tw IS NULL OR f2.zh_tw <> f.zh_tw "
-                "THEN 1 ELSE 0 END), 0) "
-                "FROM entry e JOIN effective f ON f.entry_id = e.id "
-                "JOIN entry e2 INDEXED BY idx_entry_content "
-                "ON e2.kind = e.kind AND e2.mod_id = e.mod_id AND e2.key = e.key "
-                "AND e2.en_us = e.en_us AND e2.mc_version <> ? "
-                "LEFT JOIN effective f2 ON f2.entry_id = e2.id "
-                f"LEFT JOIN translation m ON m.entry_id = e2.id AND m.source = {SRC_MANUAL} "
-                "WHERE e.id IN (SELECT value FROM json_each(?)) "
-                f"AND NOT (COALESCE({manual_review}, '') = 'reviewed' "
-                "AND COALESCE(m.zh_tw, '') = f.zh_tw)",
-                (version, json.dumps(chunk)),
+            params = (version, json.dumps(ids[start : start + _ID_CHUNK]))
+            rows = (
+                conn.execute(sql, params).fetchall()
+                if conn is not None
+                else self._q(sql, params)
             )
-            total += int(row[0])
-            replaced += int(row[1])
-        return total, replaced
+            for row in rows:
+                eid, _sibling, mine, theirs, _source, manual, status, _rev = row
+                entry = stats.setdefault(int(eid), [0, 0, hashlib.sha256()])
+                entry[2].update(repr(tuple(row[1:])).encode("utf-8"))
+                if (status or "") == "reviewed" and (manual or "") == mine:
+                    continue  # 已審核相同譯文：不會被寫入
+                entry[0] += 1
+                entry[1] += 0 if theirs == mine else 1
+        return tuple(
+            (eid, total, replaced, digest.hexdigest())
+            for eid, (total, replaced, digest) in sorted(stats.items())
+        )
 
     def preview_bulk_review(
         self,
@@ -105,11 +125,9 @@ class BulkReviewMixin:
     ) -> BulkReviewPlan:
         """預覽批量審核範圍（不寫入）。"""
         candidates = self._bulk_review_candidates(version, source, quality_pass_only)
-        sibling_total = sibling_replaced = 0
-        if propagate and candidates:
-            sibling_total, sibling_replaced = self._bulk_review_sibling_counts(
-                candidates, version
-            )
+        sibling_info = (
+            self._bulk_review_sibling_info(candidates, version) if propagate else ()
+        )
         return BulkReviewPlan(
             version=version,
             source=int(source),
@@ -117,8 +135,7 @@ class BulkReviewMixin:
             propagate=propagate,
             database_identity=self._database_identity(),
             candidates=candidates,
-            sibling_count=sibling_total,
-            sibling_replaced_count=sibling_replaced,
+            sibling_info=sibling_info,
         )
 
     def execute_bulk_review(
@@ -149,6 +166,12 @@ class BulkReviewMixin:
             )
             if current != plan.candidates:
                 raise ValueError("預覽後條目已變動，請重新產生批量審核預覽")
+            if plan.propagate and not self._bulk_review_siblings_unchanged(
+                plan, todo, conn
+            ):
+                raise ValueError(
+                    "預覽後其他版本的譯文或審核狀態已變動，請重新產生批量審核預覽"
+                )
             total = max(1, len(todo))
             for index, candidate in enumerate(todo, 1):
                 if progress_callback is not None and index % 100 == 0:
@@ -188,6 +211,21 @@ class BulkReviewMixin:
         if progress_callback is not None:
             progress_callback("批量審核已提交", 1.0)
         return BulkReviewResult(batch, reviewed, synced, stale)
+
+    def _bulk_review_siblings_unchanged(
+        self,
+        plan: BulkReviewPlan,
+        todo: Sequence[BulkReviewCandidate],
+        conn: sqlite3.Connection,
+    ) -> bool:
+        """納入的條目，其他版本的譯文、來源與審核狀態是否與預覽時完全相同。"""
+        wanted = {c.entry_id for c in todo}
+        current = {
+            info[0]: info
+            for info in self._bulk_review_sibling_info(todo, plan.version, conn=conn)
+        }
+        previewed = {info[0]: info for info in plan.sibling_info if info[0] in wanted}
+        return current == previewed
 
     def revert_review_batch(self, batch_id: str) -> int:
         """還原一次批量審核（沿用單筆還原的 CAS 檢查；之後又被改過的條目不覆蓋）。"""

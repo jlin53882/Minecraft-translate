@@ -261,15 +261,17 @@ class BulkReviewDialog:
             self._safe_update()
             return
         parts = [f"符合 {format_count(total)} 筆，納入 {format_count(included)} 筆"]
+        # 同步影響範圍只計算仍納入的條目，排除後會跟著減少
+        sibling_total, sibling_replaced = plan.sibling_totals(self.excluded)
         if plan.propagate:
             parts.append(
-                f"同步其他版本約 {format_count(plan.sibling_count)} 筆"
-                f"（其中改寫不同譯文 {format_count(plan.sibling_replaced_count)} 筆）"
+                f"同步其他版本 {format_count(sibling_total)} 筆"
+                f"（其中改寫不同譯文 {format_count(sibling_replaced)} 筆）"
             )
         self.summary.value = "；".join(parts)
-        self.warning.visible = plan.propagate and plan.sibling_replaced_count > 0
+        self.warning.visible = plan.propagate and sibling_replaced > 0
         self.warning.value = (
-            f"同步會把 {format_count(plan.sibling_replaced_count)} 筆其他版本目前不同的譯文"
+            f"同步會把 {format_count(sibling_replaced)} 筆其他版本目前不同的譯文"
             "改寫為所選版本的譯文；被取代的譯文會留在歷史，可整批還原。"
         )
         self.apply_btn.disabled = included == 0 or self._busy
