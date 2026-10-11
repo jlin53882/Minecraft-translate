@@ -13,6 +13,7 @@ from translation_tool.core.lm_key_health import (
     STATUS_PROBING,
     KeyHealth,
     ModelQuotaHealth,
+    get_active_model,
 )
 
 __all__ = [
@@ -20,6 +21,7 @@ __all__ = [
     "STATUS_PROBING",
     "KeyHealth",
     "ModelQuotaHealth",
+    "get_active_model",
     "get_key_health_snapshot",
     "get_model_quota_snapshot",
     "validate_api_keys_from_ui",

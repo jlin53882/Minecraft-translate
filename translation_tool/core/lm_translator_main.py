@@ -40,6 +40,7 @@ from translation_tool.core.lm_config_schema import (
 from translation_tool.core.lm_key_health import (
     PROBE_LEASE_MARGIN_SEC,
     get_model_quota_registry,
+    set_active_model,
 )
 from translation_tool.core.lm_response_parser import safe_json_loads
 from translation_tool.core.lm_same_source_retry import (
@@ -1205,6 +1206,15 @@ def _probe_lease_sec(runtime: _BatchRuntime) -> float:
     return worst_case_request_sec(timeout) + PROBE_LEASE_MARGIN_SEC
 
 
+def _begin_model_request(quota, model_name: str) -> float:
+    """記下目前實際送請求的模型（UI 狀態列用），並回傳請求開始時間。
+
+    只有「耗盡紀錄之後才開始」的成功能清除該模型的耗盡紀錄。
+    """
+    set_active_model(model_name)
+    return quota.now()
+
+
 def _plan_model_indices(runtime: _BatchRuntime, quota) -> list[int] | None:
     """這一輪要走的模型索引；所有可用模型都被每日配額擋住時回傳 None（= 耗盡，不送請求）。"""
     owner = runtime.quota_owner
@@ -1356,7 +1366,7 @@ def _attempt_batch(
         )
         output_cap = None
         cap_source = "global"
-        started = quota.now()  # 只有「耗盡紀錄之後才開始」的成功能清除紀錄
+        started = _begin_model_request(quota, model_name)
         try:
             model_override = model_output_token_cap(runtime.lm_cfg, model_name)
             cap_source = "per_model" if model_override is not None else "global"

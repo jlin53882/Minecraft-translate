@@ -179,6 +179,23 @@ def get_key_health_registry() -> KeyHealthRegistry:
     return _REGISTRY
 
 
+# -- 目前實際送出請求的模型（給 UI 狀態列顯示；模型因配額切換時會跟著變）------------
+
+_active_model_lock = threading.Lock()
+_active_model: str | None = None
+
+
+def set_active_model(name: str | None) -> None:
+    global _active_model
+    with _active_model_lock:
+        _active_model = name or None
+
+
+def get_active_model() -> str | None:
+    with _active_model_lock:
+        return _active_model
+
+
 # -- 同專案模式：每日配額（RPD）以「模型」為單位 ---------------------------------
 #
 # Gemini 的 RPD 配額算在「專案 × 模型」，不是單一 API Key。所有 key 都屬於同一個專案時，
