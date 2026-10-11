@@ -102,6 +102,9 @@ class FormatDiffReview:
             on_change=self._toggle_highlight,
         )
         self.body = ft.Column(spacing=10)
+        self._edit_column = ft.Column(
+            spacing=12, horizontal_alignment=ft.CrossAxisAlignment.STRETCH
+        )
         self.control = ft.Container(
             content=ft.Column(spacing=12),
             padding=ft.Padding.symmetric(horizontal=14, vertical=14),
@@ -256,13 +259,10 @@ class FormatDiffReview:
         if self._edit_notice is not None:
             controls.append(self._edit_notice)
         # 撐滿卡片寬度、區塊間留空間；內容少時也不會縮成窄窄一條
-        return [
-            ft.Column(
-                controls,
-                spacing=12,
-                horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
-            )
-        ]
+        # 同一個 Column 重複使用：每次打字都會重繪，若換成新的容器，輸入框會被
+        # 重新掛載而失去游標。
+        self._edit_column.controls = controls
+        return [self._edit_column]
 
     def _diff_content(self, result: FormatDiffResult) -> list[ft.Control]:
         issue_controls = [

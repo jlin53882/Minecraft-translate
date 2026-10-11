@@ -367,3 +367,17 @@ def test_custom_source_named_like_builtin_is_shadowed_in_choices_and_priority():
     assert serialize_priority_lines(
         ["custom:100", "custom:101", "builtin:subtitle"], catalog
     ) == ["custom:100", "builtin:subtitle"]
+
+
+def test_edit_tab_keeps_same_container_across_rerenders_so_input_keeps_focus():
+    field = ft.TextField()
+    review = FormatDiffReview(context_label="t", editable_control=field)
+    review._select_tab("edit")
+    first = review.control.content.controls[-1]
+
+    review.render("Use %s", "使用")
+    review.render("Use %s", "使用 %")
+    last = review.control.content.controls[-1]
+
+    assert last is first
+    assert field in last.controls
