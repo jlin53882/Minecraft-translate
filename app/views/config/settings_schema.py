@@ -26,6 +26,7 @@ from translation_tool.utils.config_schema import (  # noqa: F401 - 重新匯出�
     C_PROMPTS,
     C_SPECIES,
     C_TDB,
+    C_TOKEN_BUDGET,
     C_TRANSLATOR,
     SETTINGS,
     SETTINGS_BY_PATH,
@@ -44,6 +45,7 @@ NAV_PAGES: tuple[dict[str, str], ...] = (
     {"id": "prompts", "label": "提示詞管理", "icon": "MESSAGE"},
     {"id": "species_lookup", "label": "學名查詢管理", "icon": "SEARCH"},
     {"id": "batch_limits", "label": "批次與限制", "icon": "DEVELOPER_BOARD"},
+    {"id": "token_budget", "label": "Token 預算", "icon": "SPEED"},
     {"id": "extractor", "label": "Jar 提取設定", "icon": "FOLDER_OPEN"},
 )
 
@@ -255,6 +257,14 @@ LAYOUT: dict[str, tuple[Card, ...]] = {
                     "lm_translator.max_output_tokens",
                     "lm_translator.key_failure_cooldown_sec",
                 ),
+                R("lm_translator.batch_write_interval"),
+            ),
+        ),
+    ),
+    "token_budget": (
+        Card(
+            C_TOKEN_BUDGET,
+            (
                 R(
                     "lm_translator.max_output_token_budget",
                     "lm_translator.max_input_token_budget",
@@ -267,7 +277,6 @@ LAYOUT: dict[str, tuple[Card, ...]] = {
                 R(
                     "lm_translator.budget_recover_after",
                     "lm_translator.budget_recover_factor",
-                    "lm_translator.batch_write_interval",
                 ),
             ),
         ),

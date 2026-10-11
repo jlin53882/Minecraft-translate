@@ -20,7 +20,8 @@ def _items(n: int, text: str = "Hello world") -> list[dict]:
     return [{"path": f"p{i}", "text": text, "cache_type": "lang"} for i in range(n)]
 
 
-CFG = BudgetConfig()  # 預設：輸出預算 24K、輸入預算 60K、係數 1.5
+# 明確指定預算（不跟著預設值走）：輸出 24K、輸入 60K、係數 1.5
+CFG = BudgetConfig(max_output_token_budget=24_000, max_input_token_budget=60_000)
 
 
 # ---------------------------------------------------------------------------

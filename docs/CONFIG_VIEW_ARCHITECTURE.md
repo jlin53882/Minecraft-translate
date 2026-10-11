@@ -31,7 +31,8 @@ app/views/config/
 | `merger` | 語言合併器設定 | 單張「語言合併器設定 (Lang Merger)」卡，由上而下：pending 資料夾命名／整理資料夾名稱／key 最小出現次數／隔離資料夾名稱（兩欄兩列）、「語系過濾設定」（zh 英文含量閾值）、「Patchouli 進階設定」（翻譯來源優先級勾選、en_us 跳過門檻）、「檔案合併(階段 2)」（合併 XX_extracted → assets/） |
 | `prompts` | 提示詞管理 | 「提示詞 (System Prompts)」卡：Patchouli 與 Lang 兩個 system prompt 多行欄左右並排 |
 | `species_lookup` | 學名查詢管理 | 「學名查詢設定 (Species Cache)」卡，四欄單欄堆疊：species_cache 設定（cache_directory、cache_filename、wikipedia 語言與速率） |
-| `batch_limits` | 批次與限制 | 「批次大小與限制」卡（多列並排欄位，含「啟用 Token 預算切批」勾選）：initial_batch_size_* 各格式、min_batch_size、batch_shrink_factor、rpm_cooldown_sec、max_output_tokens、token 預算、金鑰失敗冷卻、batch_write_interval |
+| `batch_limits` | 批次與限制 | 「批次大小與限制」卡（多列並排欄位，含「啟用 Token 預算切批」勾選）：initial_batch_size_* 各格式、min_batch_size、batch_shrink_factor、rpm_cooldown_sec、max_output_tokens、金鑰失敗冷卻、batch_write_interval |
+| `token_budget` | Token 預算 | 「Token 預算切批」卡：啟用開關、單批輸出／輸入預算、輸出／輸入係數、預算最小縮放、回升前連續成功批次、預算回升倍率 |
 | `extractor` | Jar 提取設定 | 「JAR 輸出資料夾命名」卡：extractor.output_folder_names（extract / preview 各三種）、skip_zh_cn_extract；target_language 僅作舊設定相容，不宣稱會生效（版面中以 `Note` 說明） |
 
 ## 呼叫鏈

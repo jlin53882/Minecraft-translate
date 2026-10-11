@@ -46,8 +46,8 @@
 | 鍵 | 預設 | 說明 |
 |---|---|---|
 | `token_budget_enabled` | `true` | `false` = 回到舊行為，只看項目數 |
-| `max_output_token_budget` | `24000` | 單批預期輸出 token 上限（保守值） |
-| `max_input_token_budget` | `60000` | 單批輸入 token 上限，避免單次呼叫吃掉太多 TPM |
+| `max_output_token_budget` | `65536` | 單批預期輸出 token 上限（保守值） |
+| `max_input_token_budget` | `264000` | 單批輸入 token 上限，避免單次呼叫吃掉太多 TPM |
 | `max_output_tokens` | `32768` | 送給 API 的 `maxOutputTokens`；`0` = 不送 |
 | `output_token_factor` | `1.5` | 預期輸出 / 輸入係數，範圍 0.3~6.0，會依實際用量校正 |
 | `budget_min_scale` | `0.0625` | 撞牆後輸出預算最多縮到設定值的幾倍 |

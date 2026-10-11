@@ -34,8 +34,8 @@ def test_defaults_exist_and_match_budget_config_defaults():
 
     assert all(k in lm for k in KEYS)
     assert lm["token_budget_enabled"] is d.enabled
-    assert lm["max_output_token_budget"] == d.max_output_token_budget == 24000
-    assert lm["max_input_token_budget"] == d.max_input_token_budget == 60000
+    assert lm["max_output_token_budget"] == d.max_output_token_budget == 65536
+    assert lm["max_input_token_budget"] == d.max_input_token_budget == 264000
     assert lm["max_output_tokens"] == d.max_output_tokens == 32768
     assert lm["output_token_factor"] == d.output_token_factor
     assert lm["budget_min_scale"] == d.min_scale
@@ -124,3 +124,32 @@ def test_user_config_without_the_keys_gets_defaults_after_merge(tmp_path):
         assert key in cfg["lm_translator"]
     assert cfg["lm_translator"]["temperature"] == 0.5
     cm.clear_config_cache()
+
+
+def test_token_budget_settings_live_on_their_own_settings_page():
+    from app.views.config.settings_schema import NAV_PAGES, resolved_layout
+    from translation_tool.utils.config_schema import C_TOKEN_BUDGET, SETTINGS_BY_PATH
+
+    moved = (
+        "max_output_token_budget",
+        "max_input_token_budget",
+        "token_budget_enabled",
+        "output_token_factor",
+        "budget_min_scale",
+        "budget_recover_after",
+        "budget_recover_factor",
+    )
+    assert "token_budget" in [page["id"] for page in NAV_PAGES]
+    for key in moved:
+        setting = SETTINGS_BY_PATH[f"lm_translator.{key}"]
+        assert (setting.page, setting.card) == ("token_budget", C_TOKEN_BUDGET)
+
+    layout = resolved_layout()
+    assert [card.title for card in layout["token_budget"]] == [C_TOKEN_BUDGET]
+    batch_paths = {
+        path
+        for card in layout["batch_limits"]
+        for block in card.blocks
+        for path in getattr(block, "paths", ())
+    }
+    assert not any(path.rsplit(".", 1)[1] in moved for path in batch_paths)

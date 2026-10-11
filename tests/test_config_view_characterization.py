@@ -966,10 +966,10 @@ def test_config_view_page_property(cv, page, mock_controls_map):
 
 
 def test_nav_items_has_seven_categories(cv, page, mock_controls_map):
-    """測試 NAV_ITEMS 有 8 個分類導航項目"""
+    """測試 NAV_ITEMS 有 9 個分類導航項目"""
     view = cv.ConfigView(page)
     view.controls_map = mock_controls_map
-    assert len(cv.NAV_ITEMS) == 8
+    assert len(cv.NAV_ITEMS) == 9
     expected_ids = [
         "general",
         "api_models",
@@ -978,6 +978,7 @@ def test_nav_items_has_seven_categories(cv, page, mock_controls_map):
         "prompts",
         "species_lookup",
         "batch_limits",
+        "token_budget",
         "extractor",
     ]
     actual_ids = [item["id"] for item in cv.NAV_ITEMS]
