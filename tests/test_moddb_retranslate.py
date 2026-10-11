@@ -246,12 +246,6 @@ def test_repair_scan_follows_the_effective_source_including_ai_repair(db_path):
         (entry.key, entry.source_id)
         for entry, _nl, _mixed in db.iter_repairable_translation_entries("1.21.1")
     }
-    everything = {
-        (entry.key, entry.source_id)
-        for entry, _nl, _mixed in db.iter_repairable_translation_entries(
-            "1.21.1", only_effective=False
-        )
-    }
     effective = {
         row[0]: row[1]
         for row in db._conn.execute(
@@ -261,18 +255,6 @@ def test_repair_scan_follows_the_effective_source_including_ai_repair(db_path):
     db.close()
 
     assert scanned == {("shadowed", SRC_MANUAL), ("repaired", effective["repaired"])}
-    assert (("shadowed", SRC_JAR_TW)) in everything and len(everything) > len(scanned)
-
-
-@pytest.fixture
-def all_source_rows(monkeypatch):
-    """Scan every source row (not only the effective one) to exercise fan-out."""
-    original = TranslationDB.iter_repairable_translation_entries
-
-    def scan_all(self, *args, **kwargs):
-        return original(self, *args, **{**kwargs, "only_effective": False})
-
-    monkeypatch.setattr(TranslationDB, "iter_repairable_translation_entries", scan_all)
 
 
 def test_special_character_repair_only_touches_the_effective_source_and_can_be_undone(
@@ -435,30 +417,6 @@ def test_quality_repair_skips_newline_only_input_mismatch(db_path, monkeypatch):
     assert summary["candidates"] == 1
     assert summary["skipped_newline_only_candidates"] == 1
     assert summary["ai_submitted_items"] == 1
-
-
-@pytest.mark.usefixtures("all_source_rows")
-def test_quality_repair_representative_limit_keeps_all_mapped_sources(db_path):
-    db = TranslationDB(db_path)
-    entry = _ai_entry(db, en="Use %s", key="mapped")
-    db.save_manual(entry.id, "Use", propagate=False)
-    _ingest(db, "1.21.1", "foo", "mapped", SRC_JAR_TW, "Use", en="Use %s")
-    db._conn.execute(
-        "UPDATE translation SET zh_tw='Use' WHERE entry_id=? AND source=?",
-        (entry.id, SRC_AI),
-    )
-    db._conn.commit()
-    preview = moddb_retranslate_service.preview_same_source_ai_retranslation(
-        db, _options(limit=1), mode="quality_mismatch"
-    )
-    assert preview.ai_representatives == 1
-    assert preview.selected_count == 3
-    assert {row.source_id for row in preview.entries} == {
-        SRC_AI,
-        SRC_MANUAL,
-        SRC_JAR_TW,
-    }
-    db.close()
 
 
 def test_manual_review_confirmation_skips_format_check_but_keeps_cas_history_and_undo(
@@ -1579,116 +1537,6 @@ def test_service_cancellation_preserves_old_translation(
     assert repair_cache == []
 
 
-@pytest.mark.usefixtures("all_source_rows")
-def test_quality_repair_deduplicates_equivalent_rows_and_keeps_source_cas(
-    db_path, monkeypatch, repair_cache
-):
-    db = TranslationDB(db_path)
-    entry = _ai_entry(db, en="Use %s", key="a/very/long/path/item.name")
-    db._conn.execute(
-        "UPDATE translation SET zh_tw='Use' WHERE entry_id=? AND source=?",
-        (entry.id, SRC_AI),
-    )
-    db._conn.commit()
-    db.save_manual(entry.id, "Use", propagate=False)
-    preview = moddb_retranslate_service.preview_same_source_ai_retranslation(
-        db, _options(), mode="quality_mismatch"
-    )
-    db.close()
-
-    assert preview.selected_count == 2
-    assert preview.ai_representatives == 1
-    assert preview.dedup_reused_candidates == 1
-    calls = []
-
-    def fake_translate(batch, _total):
-        calls.append(batch)
-        return [{**batch[0], "text": "Use %s：正確"}], "AUTO"
-
-    monkeypatch.setattr(
-        moddb_retranslate_service, "translate_batch_smart", fake_translate
-    )
-    snap = _run(db_path, preview.entries, mode="quality_mismatch")
-
-    assert [len(batch) for batch in calls] == [1]
-    summary = snap["summary"]
-    assert summary["candidates"] == 2
-    assert summary["ai_representatives"] == 1
-    assert summary["ai_submitted_items"] == 1
-    assert summary["ai_validated_items"] == 1
-    assert summary["dedup_reused_candidates"] == 1
-    assert summary["processed_candidates"] == 2
-    assert summary["updated"] == 2
-    assert summary["cache_keys_changed"] == 1
-    assert summary["cache_keys_saved"] == 1
-
-    check = TranslationDB(db_path)
-    rows = {row.source: row for row in check.entry_detail(entry.id).translations}
-    assert rows[SRC_AI].zh_tw == "Use %s：正確"
-    assert rows[SRC_MANUAL].zh_tw == "Use %s：正確"
-    history_sources = {
-        row.source_id
-        for row in check.entry_detail(entry.id).history
-        if row.action == "quality_repair"
-    }
-    assert history_sources == {SRC_AI, SRC_MANUAL}
-    check.close()
-
-    logs = "\n".join(row.text for row in snap["logs"])
-    assert f"[MC 1.21.1][mod=foo][kind=lang][source={SRC_AI}:AI 機翻]" in logs
-    assert f"[source={SRC_MANUAL}:人工-未審核]" in logs
-    assert "[key=a/very/long/path/item.name]" in logs
-
-
-@pytest.mark.usefixtures("all_source_rows")
-def test_invalid_representative_never_fans_out_to_source_rows(
-    db_path, monkeypatch, repair_cache
-):
-    db = TranslationDB(db_path)
-    entry = _ai_entry(db, en="Use %s", key="same.entry")
-    db._conn.execute(
-        "UPDATE translation SET zh_tw='Use' WHERE entry_id=? AND source=?",
-        (entry.id, SRC_AI),
-    )
-    db._conn.commit()
-    db.save_manual(entry.id, "Use", propagate=False)
-    history_before = db.entry_detail(entry.id).history
-    preview = moddb_retranslate_service.preview_same_source_ai_retranslation(
-        db, _options(), mode="quality_mismatch"
-    )
-    db.close()
-
-    monkeypatch.setattr(
-        moddb_retranslate_service,
-        "translate_batch_smart",
-        lambda batch, _total: (
-            [{**batch[0], "_entry_id": -1, "text": "Use %s：正確"}],
-            "AUTO",
-        ),
-    )
-    snap = _run(
-        db_path,
-        preview.entries,
-        options=_options(write_cache=False),
-        mode="quality_mismatch",
-    )
-
-    check = TranslationDB(db_path)
-    rows = {row.source: row for row in check.entry_detail(entry.id).translations}
-    assert rows[SRC_AI].zh_tw == "Use"
-    assert rows[SRC_MANUAL].zh_tw == "Use"
-    assert check.entry_detail(entry.id).history == history_before
-    check.close()
-    assert snap["summary"]["ai_representatives"] == 1
-    assert snap["summary"]["ai_submitted_items"] == 1
-    assert snap["summary"]["ai_validated_items"] == 0
-    assert snap["summary"]["dedup_mapped_candidates"] == 1
-    assert snap["summary"]["dedup_reused_candidates"] == 0
-    assert snap["summary"]["failed"] == 2
-    assert snap["summary"]["updated"] == 0
-
-
-@pytest.mark.usefixtures("all_source_rows")
 def test_candidate_log_uses_database_local_source_catalog(
     db_path, monkeypatch, repair_cache
 ):
@@ -1701,13 +1549,7 @@ def test_candidate_log_uses_database_local_source_catalog(
     db.close()
 
     db = TranslationDB(db_path)
-    entry = _ai_entry(db, en="Use %s", key="custom/source/path")
-    db._conn.execute(
-        "UPDATE translation SET zh_tw='Use' WHERE entry_id=? AND source=?",
-        (entry.id, SRC_AI),
-    )
-    db._conn.commit()
-    _ingest(db, "1.21.1", "foo", entry.key, 100, "Use", en="Use %s")
+    _ingest(db, "1.21.1", "foo", "custom/source/path", 100, "Use", en="Use %s")
     preview = moddb_retranslate_service.preview_same_source_ai_retranslation(
         db, _options(), mode="quality_mismatch"
     )
@@ -1728,262 +1570,7 @@ def test_candidate_log_uses_database_local_source_catalog(
     logs = "\n".join(row.text for row in snap["logs"])
     assert "[source=100:譯文團隊]" in logs
     assert "[key=custom/source/path]" in logs
-    assert snap["summary"]["updated"] == 2
-
-
-@pytest.mark.usefixtures("all_source_rows")
-def test_fanout_stale_second_source_keeps_first_cas_and_checker(
-    db_path, monkeypatch, repair_cache
-):
-    db = TranslationDB(db_path)
-    entry = _ai_entry(db, en="Use %s", key="same.entry")
-    db._conn.execute(
-        "UPDATE translation SET zh_tw='Use' WHERE entry_id=? AND source=?",
-        (entry.id, SRC_AI),
-    )
-    db._conn.commit()
-    db.save_manual(entry.id, "Use", propagate=False)
-    before = {row.source: row for row in db.entry_detail(entry.id).translations}[
-        SRC_MANUAL
-    ]
-    before_revision = db._conn.execute(
-        "SELECT revision FROM translation WHERE entry_id=? AND source=?",
-        (entry.id, SRC_MANUAL),
-    ).fetchone()[0]
-    preview = moddb_retranslate_service.preview_same_source_ai_retranslation(
-        db, _options(), mode="quality_mismatch"
-    )
-    db.close()
-
-    def stale_manual_then_translate(batch, _total):
-        external = TranslationDB(db_path)
-        external._conn.execute(
-            "UPDATE translation SET checker='external-writer', revision=revision+1 "
-            "WHERE entry_id=? AND source=?",
-            (entry.id, SRC_MANUAL),
-        )
-        external._conn.commit()
-        external.close()
-        return [{**batch[0], "text": "Use %s：正確"}], "AUTO"
-
-    monkeypatch.setattr(
-        moddb_retranslate_service, "translate_batch_smart", stale_manual_then_translate
-    )
-    snap = _run(
-        db_path,
-        preview.entries,
-        options=_options(write_cache=False),
-        mode="quality_mismatch",
-    )
-
-    check = TranslationDB(db_path)
-    detail = check.entry_detail(entry.id)
-    rows = {row.source: row for row in detail.translations}
-    assert rows[SRC_AI].zh_tw == "Use %s：正確"
-    assert SRC_AI_REPAIR not in rows
-    assert rows[SRC_MANUAL].zh_tw == before.zh_tw
-    assert rows[SRC_MANUAL].checker == "external-writer"
-    assert rows[SRC_MANUAL].review_status == before.review_status
-    current_revision = check._conn.execute(
-        "SELECT revision FROM translation WHERE entry_id=? AND source=?",
-        (entry.id, SRC_MANUAL),
-    ).fetchone()[0]
-    assert current_revision == before_revision + 1
-    assert {
-        row.source_id for row in detail.history if row.action == "quality_repair"
-    } == {SRC_AI}
-    check.close()
     assert snap["summary"]["updated"] == 1
-    assert snap["summary"]["skipped_changed"] == 1
-    assert snap["summary"]["dedup_reused_candidates"] == 1
-
-
-@pytest.mark.usefixtures("all_source_rows")
-def test_cancel_between_fanout_targets_preserves_committed_row_and_review_state(
-    db_path, monkeypatch, repair_cache
-):
-    db = TranslationDB(db_path)
-    entry = _ai_entry(db, en="Use %s", key="same.entry")
-    db._conn.execute(
-        "UPDATE translation SET zh_tw='Use' WHERE entry_id=? AND source=?",
-        (entry.id, SRC_AI),
-    )
-    db._conn.commit()
-    db.save_manual(entry.id, "Use", propagate=False)
-    before_manual = {row.source: row for row in db.entry_detail(entry.id).translations}[
-        SRC_MANUAL
-    ]
-    before_revision = db._conn.execute(
-        "SELECT revision FROM translation WHERE entry_id=? AND source=?",
-        (entry.id, SRC_MANUAL),
-    ).fetchone()[0]
-    preview = moddb_retranslate_service.preview_same_source_ai_retranslation(
-        db, _options(), mode="quality_mismatch"
-    )
-    db.close()
-
-    session = TaskSession()
-    original_replace = TranslationDB.replace_translation_quality_mismatch
-
-    def cancel_after_first_commit(self, *args, **kwargs):
-        result = original_replace(self, *args, **kwargs)
-        if result.status == "updated":
-            session.request_cancel()
-        return result
-
-    monkeypatch.setattr(
-        TranslationDB, "replace_translation_quality_mismatch", cancel_after_first_commit
-    )
-    monkeypatch.setattr(
-        moddb_retranslate_service,
-        "translate_batch_smart",
-        lambda batch, _total: ([{**batch[0], "text": "Use %s：正確"}], "AUTO"),
-    )
-    moddb_retranslate_service.run_moddb_retranslate_service(
-        _options(write_cache=False),
-        session,
-        preview.entries,
-        mode="quality_mismatch",
-    )
-    snap = session.snapshot()
-
-    check = TranslationDB(db_path)
-    detail = check.entry_detail(entry.id)
-    rows = {row.source: row for row in detail.translations}
-    assert rows[SRC_AI].zh_tw == "Use %s：正確"
-    assert SRC_AI_REPAIR not in rows
-    assert (
-        rows[SRC_MANUAL].zh_tw,
-        rows[SRC_MANUAL].checker,
-        rows[SRC_MANUAL].review_status,
-    ) == (
-        before_manual.zh_tw,
-        before_manual.checker,
-        before_manual.review_status,
-    )
-    current_revision = check._conn.execute(
-        "SELECT revision FROM translation WHERE entry_id=? AND source=?",
-        (entry.id, SRC_MANUAL),
-    ).fetchone()[0]
-    assert current_revision == before_revision
-    assert [
-        row.source_id for row in detail.history if row.action == "quality_repair"
-    ] == [SRC_AI]
-    check.close()
-    assert snap["summary"]["status"] == "CANCELLED"
-    assert snap["summary"]["updated"] == 1
-    assert snap["summary"]["processed_candidates"] == 1
-    assert snap["summary"]["unprocessed_candidates"] == 1
-    assert snap["summary"]["failed"] == 0
-
-
-@pytest.mark.usefixtures("all_source_rows")
-def test_cancel_after_result_before_fanout_leaves_all_source_rows_unchanged(
-    db_path, monkeypatch, repair_cache
-):
-    db = TranslationDB(db_path)
-    entry = _ai_entry(db, en="Use %s", key="same.entry")
-    db._conn.execute(
-        "UPDATE translation SET zh_tw='Use' WHERE entry_id=? AND source=?",
-        (entry.id, SRC_AI),
-    )
-    db._conn.commit()
-    db.save_manual(entry.id, "Use", propagate=False)
-    history_before = db.entry_detail(entry.id).history
-    preview = moddb_retranslate_service.preview_same_source_ai_retranslation(
-        db, _options(), mode="quality_mismatch"
-    )
-    db.close()
-
-    session = TaskSession()
-
-    def cancel_when_result_returns(batch, _total):
-        session.request_cancel()
-        return [{**batch[0], "text": "Use %s：正確"}], "AUTO"
-
-    monkeypatch.setattr(
-        moddb_retranslate_service,
-        "translate_batch_smart",
-        cancel_when_result_returns,
-    )
-    moddb_retranslate_service.run_moddb_retranslate_service(
-        _options(write_cache=False),
-        session,
-        preview.entries,
-        mode="quality_mismatch",
-    )
-    snap = session.snapshot()
-
-    check = TranslationDB(db_path)
-    detail = check.entry_detail(entry.id)
-    assert {row.source: row.zh_tw for row in detail.translations} == {
-        SRC_AI: "Use",
-        SRC_MANUAL: "Use",
-    }
-    assert detail.history == history_before
-    check.close()
-    assert snap["summary"]["status"] == "CANCELLED"
-    assert snap["summary"]["ai_submitted_items"] == 1
-    assert snap["summary"]["ai_validated_items"] == 0
-    assert snap["summary"]["processed_candidates"] == 0
-    assert snap["summary"]["unprocessed_candidates"] == 2
-
-
-@pytest.mark.usefixtures("all_source_rows")
-def test_quality_repair_dedup_is_limited_to_same_entry_and_profile(
-    db_path, monkeypatch, repair_cache
-):
-    db = TranslationDB(db_path)
-    first = _ai_entry(db, en="Use %s", key="same.source.first")
-    second = _ai_entry(db, en="Use %s", key="same.source.second")
-    for entry in (first, second):
-        db._conn.execute(
-            "UPDATE translation SET zh_tw='Use' WHERE entry_id=? AND source=?",
-            (entry.id, SRC_AI),
-        )
-        db._conn.commit()
-        db.save_manual(entry.id, "Use", propagate=False)
-    patch = _ai_entry(db, en="Use %s", key="same.source.patch", kind=KIND_PATCHOULI)
-    db._conn.execute(
-        "UPDATE translation SET zh_tw='Use' WHERE entry_id=? AND source=?",
-        (patch.id, SRC_AI),
-    )
-    db._conn.commit()
-    preview = moddb_retranslate_service.preview_same_source_ai_retranslation(
-        db, _options(), mode="quality_mismatch"
-    )
-    db.close()
-
-    assert preview.selected_count == 5
-    assert preview.ai_representatives == 3
-    assert preview.dedup_reused_candidates == 2
-    no_reuse_representatives, _fanout = (
-        moddb_retranslate_service._deduplicate_retranslation_items(
-            moddb_retranslate_service._build_retranslation_items(preview.entries),
-            enabled=False,
-        )
-    )
-    assert len(no_reuse_representatives) == 5
-    calls = []
-
-    def fake_translate(batch, _total):
-        calls.append((batch[0]["cache_type"], [item["path"] for item in batch]))
-        return [{**item, "text": "Use %s：正確"} for item in batch], "AUTO"
-
-    monkeypatch.setattr(
-        moddb_retranslate_service, "translate_batch_smart", fake_translate
-    )
-    _run(
-        db_path,
-        preview.entries,
-        options=_options(write_cache=False),
-        mode="quality_mismatch",
-    )
-
-    assert calls == [
-        ("lang", [first.key, second.key]),
-        ("patchouli", [patch.key]),
-    ]
 
 
 def test_repair_progress_does_not_apply_patchouli_sample_to_lang(monkeypatch):
@@ -1996,17 +1583,15 @@ def test_repair_progress_does_not_apply_patchouli_sample_to_lang(monkeypatch):
         *({"cache_type": "patchouli"} for _ in range(79)),
         *({"cache_type": "lang"} for _ in range(221)),
     ]
-    fanout = {id(item): (item,) for item in items}
     tracker = moddb_retranslate_service._RepairRunProgress(
         items,
-        fanout,
         total_candidates=300,
         lm_cfg={},
         started_mono=0.0,
         started_wall=100.0,
     )
 
-    tracker.update("patchouli", candidate_count=79, representative_count=79, elapsed=20)
+    tracker.update("patchouli", count=79, elapsed=20)
     live = tracker.live(processed=79, now_mono=20.0, now_wall=120.0)
 
     assert live["batch_done"] == 1
@@ -2016,14 +1601,14 @@ def test_repair_progress_does_not_apply_patchouli_sample_to_lang(monkeypatch):
     assert live["eta_sec"] is None
     assert "Lang 尚無耗時樣本" in live["eta_note"]
 
-    tracker.update("lang", candidate_count=100, representative_count=100, elapsed=10)
+    tracker.update("lang", count=100, elapsed=10)
     sampled = tracker.live(processed=179, now_mono=30.0, now_wall=130.0)
     assert sampled["eta_sec"] == pytest.approx(12.1)
     assert sampled["eta_note"] == ""
     assert sampled["profile_progress"]["lang"]["planned_remaining_batches"] == 1
     assert sampled["profile_progress"]["lang"]["ai_submitted_items"] == 100
 
-    tracker.update("lang", candidate_count=121, representative_count=121, elapsed=10)
+    tracker.update("lang", count=121, elapsed=10)
     done = tracker.live(processed=300, now_mono=40.0, now_wall=140.0)
     assert done["batch_done"] == 3
     assert done["batch_est"] == 3
@@ -2094,13 +1679,12 @@ def test_repair_progress_replans_only_when_profile_budget_changes(monkeypatch):
         lambda items, _profile, _cap, _cfg: min(len(items), selected_size),
     )
     items = [{"cache_type": "lang"} for _ in range(130)]
-    fanout = {id(item): (item,) for item in items}
     tracker = moddb_retranslate_service._RepairRunProgress(
-        items, fanout, total_candidates=130, lm_cfg={}
+        items, total_candidates=130, lm_cfg={}
     )
 
     assert tracker.live()["batch_est"] == 3
-    tracker.update("lang", candidate_count=64, representative_count=64, elapsed=1)
+    tracker.update("lang", count=64, elapsed=1)
     signature = 1
     selected_size = 32
 
@@ -2140,7 +1724,7 @@ def test_batch_planner_checks_cancellation_while_scanning_profile(monkeypatch):
 
 def test_repair_progress_empty_run_has_no_batches_or_eta(monkeypatch):
     tracker = moddb_retranslate_service._RepairRunProgress(
-        [], {}, total_candidates=0, lm_cfg={}
+        [], total_candidates=0, lm_cfg={}
     )
 
     live = tracker.live(processed=0)
@@ -2354,8 +1938,6 @@ def test_retranslation_preview_shows_ai_source_profiles_and_samples(
     assert "人工、模組自帶及其他來源不會被重新翻譯" in text
     assert "Lang：1 筆" in text
     assert "Patchouli：1 筆" in text
-    assert "唯一 AI 修復項目：2 個" in text
-    assert "預計共用結果給 0 個來源項目" in text
     assert "規劃批次：2（不等於實際 HTTP 請求次數）" in text
     assert len(panel.repair_samples.controls) == 2
     assert panel.repair_samples.visible is True
@@ -2372,8 +1954,7 @@ def test_retranslation_preview_shows_ai_source_profiles_and_samples(
     db.close()
 
 
-@pytest.mark.usefixtures("all_source_rows")
-def test_retranslation_preview_groups_same_key_sources_and_filters(db_path):
+def test_retranslation_preview_shows_one_card_per_key_and_filters(db_path):
     db = TranslationDB(db_path)
     entry = _ai_entry(db, key="shared", en="Use %s")
     db.save_manual(entry.id, "Use", propagate=False)
@@ -2392,8 +1973,7 @@ def test_retranslation_preview_groups_same_key_sources_and_filters(db_path):
         preview,
     )
 
-    assert preview.ai_representatives == 1
-    assert preview.selected_count == 2
+    assert preview.selected_count == 1
     assert len(panel.repair_samples.controls) == 1
     assert "顯示 1 / 1 個翻譯 Key" in panel.repair_preview_count.value
     panel.repair_preview_search.value = "not-found"

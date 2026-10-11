@@ -146,21 +146,20 @@ def format_live(live: dict) -> str:
     profile_progress = live.get("profile_progress")
     if profile_progress:
         representative_total = sum(
-            values["ai_representatives"] for values in profile_progress.values()
+            values["total_candidates"] for values in profile_progress.values()
         )
         representative_submitted = sum(
             values["ai_submitted_items"] for values in profile_progress.values()
         )
         parts.append(
-            f"唯一 AI 項目已送出 {representative_submitted:,}/"
-            f"{representative_total:,} 個"
+            f"AI 項目已送出 {representative_submitted:,}/{representative_total:,} 個"
         )
         for values in profile_progress.values():
             parts.append(
                 f"{values['label']} 來源項目 "
                 f"{values['processed_candidates']:,}/{values['total_candidates']:,}；"
-                f"唯一 AI 項目 {values['ai_submitted_items']:,}/"
-                f"{values['ai_representatives']:,}；API 批次已完成 "
+                f"AI 項目 {values['ai_submitted_items']:,}/"
+                f"{values['total_candidates']:,}；API 批次已完成 "
                 f"{values['completed_batches']:,}，預計剩餘 "
                 f"{values['planned_remaining_batches']:,} 批"
             )

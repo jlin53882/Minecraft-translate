@@ -278,31 +278,19 @@ def _display_preview_result(panel, options, db_identity, result):
         or "無符合類型"
     )
     catalog = source_catalog_for(panel._get_db())
-    ai_plan = (
-        f"本次唯一 AI 修復項目：{format_count(result.ai_representatives)} 個；"
-        f"預計共用結果給 {format_count(result.dedup_reused_candidates)} 個來源項目；"
-    )
-    representative_breakdown = (
-        "、".join(
-            f"{cache_profile_label(cache_type)}：{format_count(count)} 個唯一 AI 項目"
-            for cache_type, count in result.representative_profile_counts
-        )
-        or "無唯一 AI 項目"
-    )
     if result.mode == "quality_mismatch":
         sources = "、".join(source_label(source, catalog) for source in result.sources)
         panel.repair_preview_text.value = (
             f"修復候選預覽｜待處理來源項目 {format_count(result.total_candidates)} 筆；"
             f"候選中有 {format_count(result.input_newline_mismatch_candidates)} 筆輸入換行數不同"
             f"（其中另有硬格式問題 {format_count(result.input_newline_mismatch_with_other_hard_issues)} 筆）。\n"
-            f"本次唯一 AI 修復項目：{format_count(result.ai_representatives)} 個，"
-            f"涉及來源項目：{format_count(selected)} 筆；共用結果 {format_count(result.dedup_reused_candidates)} 筆。\n"
+            f"本次將送 AI 修復 {format_count(selected)} 筆來源項目。\n"
             + (
                 "已納入只有實際換行數不同的項目（AI 結果換行數須與原文一致）。\n"
                 if result.newline_only_included
                 else f"略過只有實際換行數不同：{format_count(result.skipped_newline_only_candidates)} 筆（不佔 AI 名額）。\n"
             )
-            + f"來源：{sources or '無'}；翻譯類型：{breakdown}；{representative_breakdown}；"
+            + f"來源：{sources or '無'}；翻譯類型：{breakdown}；"
             f"規劃批次：{format_count(result.estimated_batches)}（不等於實際 HTTP 請求次數）。"
         )
     else:
@@ -311,7 +299,7 @@ def _display_preview_result(panel, options, db_identity, result):
             f"本次將重翻 {format_count(selected)} 筆。\n"
             f"來源：{source_label(result.source, catalog)}；只處理目前生效來源為 AI 且譯文等於原文的項目；"
             "人工、模組自帶及其他來源不會被重新翻譯。\n"
-            f"{ai_plan}翻譯類型分布：{breakdown}；{representative_breakdown}；"
+            f"翻譯類型分布：{breakdown}；"
             f"規劃批次：{format_count(result.estimated_batches)}（不等於實際 HTTP 請求次數）。"
         )
     kit.set_dropdown_options(
@@ -604,8 +592,7 @@ def confirm(panel, _e=None) -> None:
             ),
             content=ft.Text(
                 (
-                    f"即將送出 {selected.ai_representatives:,} 個唯一 AI 修復項目，最多對應 "
-                    f"{selected.selected_count:,} 筆來源譯文；去重共用可能更新超過代表上限的來源列。"
+                    f"即將送出 {selected.selected_count:,} 筆目前生效的來源譯文給 AI 修復。"
                     "保留各筆原有來源標記；若 AI 輸出缺少受保護格式 token 或翻譯失敗，舊譯文會保留。"
                     "人工來源修復後會改為未審核。匯入 ZIP 檔案不會被修改。"
                 )

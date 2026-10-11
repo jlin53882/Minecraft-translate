@@ -3141,7 +3141,6 @@ class TranslationDB:
         mod_ids: Sequence[str] | None = None,
         *,
         check: Callable[[], None] | None = None,
-        only_effective: bool = True,
     ):
         """Yield eligible repair rows (only the source row currently in effect).
 
@@ -3163,16 +3162,11 @@ class TranslationDB:
         if mod_ids:
             where.append(f"e.mod_id IN ({','.join('?' * len(mod_ids))})")
             params.extend(mod_ids)
-        effective_join = (
-            "JOIN effective f ON f.entry_id=e.id AND f.source=t.source "
-            if only_effective
-            else ""
-        )
         sql = (
             "SELECT e.id, e.kind, e.mod_id, e.key, e.en_us, t.zh_tw, "
             "e.mc_version, t.source, t.revision, t.checker, t.review_status "
             "FROM entry e JOIN translation t ON t.entry_id=e.id "
-            f"{effective_join}"
+            "JOIN effective f ON f.entry_id=e.id AND f.source=t.source "
             f"WHERE {' AND '.join(where)} ORDER BY e.mod_id, e.kind, e.key, t.source"
         )
         with self._lock:

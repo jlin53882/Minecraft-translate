@@ -166,7 +166,7 @@ class TranslatePanel(ft.Column):
         self.log_view.visible = False
         self.log_explainer = kit.hint_text(
             "執行紀錄說明：來源項目＝資料庫中需要處理的譯文；"
-            "唯一 AI 修復項目＝相容來源只送一份 AI 工作；"
+            "AI 修復項目＝實際送給 AI 的工作；"
             "規劃批次＝開始前依 token 上限估算的批次，不等於實際 HTTP 請求次數；"
             "略過舊快取＝不沿用先前 AI 結果，會重新呼叫 AI。"
         )
@@ -292,7 +292,7 @@ class TranslatePanel(ft.Column):
                             ),
                             ft.Column(
                                 [
-                                    ft.Text("唯一 AI 修復項目", size=11, color=C.MUTED),
+                                    ft.Text("AI 修復項目", size=11, color=C.MUTED),
                                     self.repair_progress_ai,
                                 ],
                                 expand=True,
@@ -863,7 +863,7 @@ class TranslatePanel(ft.Column):
                 "source_processed": summary.get("processed_candidates", 0),
                 "source_total": summary.get("candidates", 0),
                 "ai_completed": summary.get("ai_submitted_items", 0),
-                "ai_total": summary.get("ai_representatives", 0),
+                "ai_total": summary.get("candidates", 0),
                 "planned_batches_done": summary.get("batches", 0),
                 "planned_batches_total": summary.get(
                     "planned_batches", summary.get("batches", 0)

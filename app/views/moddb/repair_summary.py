@@ -4,16 +4,14 @@ from __future__ import annotations
 
 
 def repair_summary_detail_lines(summary: dict) -> list[str]:
-    """Format representative units, source progress, newline candidates and cache receipts."""
+    """Format AI items, source progress, newline candidates and cache receipts."""
     lines = []
-    if "ai_representatives" in summary:
+    if "ai_submitted_items" in summary:
         lines.append(
-            f"唯一 AI 修復項目：預計 {summary.get('ai_representatives', 0)} 個；"
+            f"AI 修復項目：預計 {summary.get('candidates', 0)} 個；"
             f"實際送入引擎 {summary.get('ai_submitted_items', 0)} 個"
             "（不等於實際 HTTP 請求次數）；"
-            f"驗證通過 {summary.get('ai_validated_items', 0)}；"
-            f"共用 AI 結果的來源項目 {summary.get('dedup_mapped_candidates', 0)}；"
-            f"已成功套用共用結果 {summary.get('dedup_reused_candidates', 0)}"
+            f"驗證通過 {summary.get('ai_validated_items', 0)}"
         )
         lines.append(
             f"來源項目進度 {summary.get('processed_candidates', 0)}/"
