@@ -2961,7 +2961,10 @@ class TranslationDB:
             if not apply_row(entry_id, current[1], current[2], current[3]):
                 return AITranslationReplaceResult("skipped_changed")
             synced: list[int] = []
-            if sync_other_versions and action == "quality_repair":
+            if sync_other_versions and action in {
+                "quality_repair",
+                "quality_repair_review",
+            }:
                 siblings = conn.execute(
                     "SELECT t.entry_id, t.revision, t.checker, t.review_status "
                     "FROM entry e0 JOIN entry e ON e.kind=e0.kind AND e.mod_id=e0.mod_id "

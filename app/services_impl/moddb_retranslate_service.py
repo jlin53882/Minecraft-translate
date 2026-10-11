@@ -1172,6 +1172,7 @@ def _mark_batch_targets_flagged(
                 "issues": tuple(issues),
                 "expected_revision": target["_expected_revision"],
                 "strict_newline": report.strict_newline,
+                "sync_other_versions": report.sync_other_versions,
                 "database_identity": str(getattr(db, "path", "")),
                 "database_file_id": Path(getattr(db, "path", "")).stat().st_ino,
                 "database_priority": tuple(getattr(db, "priority", ())),
@@ -1274,41 +1275,53 @@ def _replace_candidate_translation(db, original, text, report):
     return db.replace_ai_translation(entry_id, old_text, text, **identity)
 
 
+def _open_review_db(database_path: str | Path, item: dict[str, Any]):
+    """Open the repair DB for review items, or ``None`` when the DB identity changed."""
+    if str(Path(database_path).resolve()) != str(
+        Path(item.get("database_identity", "")).resolve()
+    ):
+        return None
+    try:
+        if Path(database_path).stat().st_ino != int(item["database_file_id"]):
+            return None
+    except (KeyError, OSError, TypeError, ValueError):
+        return None
+    priority = tuple(int(value) for value in item.get("database_priority", ()))
+    db = TranslationDB(database_path, priority=priority, create=False)
+    if str(Path(db.path).resolve()) != str(Path(item["database_identity"]).resolve()):
+        db.close()
+        return None
+    return db
+
+
+def _apply_review_item_on(db, item: dict[str, Any], draft: str) -> str:
+    result = db.replace_translation_quality_mismatch(
+        int(item["entry_id"]),
+        int(item["source_id"]),
+        str(item["old_translation"]),
+        draft,
+        expected_version=str(item["version"]),
+        expected_kind=str(item["kind"]),
+        expected_mod_id=str(item["mod_id"]),
+        expected_key=str(item["key"]),
+        expected_en_us=str(item["en_us"]),
+        expected_revision=item.get("expected_revision"),
+        actor="AI 機翻修復・人工確認",
+        action="quality_repair_review",
+        sync_other_versions=bool(item.get("sync_other_versions")),
+    )
+    return "applied" if result.status == "updated" else "stale"
+
+
 def apply_repair_review_item(
     database_path: str | Path, item: dict[str, Any], draft: str
 ) -> str:
     """Apply one human-confirmed rejected draft using the original source CAS."""
-    if str(Path(database_path).resolve()) != str(
-        Path(item.get("database_identity", "")).resolve()
-    ):
+    db = _open_review_db(database_path, item)
+    if db is None:
         return "stale"
     try:
-        if Path(database_path).stat().st_ino != int(item["database_file_id"]):
-            return "stale"
-    except (KeyError, OSError, TypeError, ValueError):
-        return "stale"
-    priority = tuple(int(value) for value in item.get("database_priority", ()))
-    db = TranslationDB(database_path, priority=priority, create=False)
-    try:
-        if str(Path(db.path).resolve()) != str(
-            Path(item["database_identity"]).resolve()
-        ):
-            return "stale"
-        result = db.replace_translation_quality_mismatch(
-            int(item["entry_id"]),
-            int(item["source_id"]),
-            str(item["old_translation"]),
-            draft,
-            expected_version=str(item["version"]),
-            expected_kind=str(item["kind"]),
-            expected_mod_id=str(item["mod_id"]),
-            expected_key=str(item["key"]),
-            expected_en_us=str(item["en_us"]),
-            expected_revision=item.get("expected_revision"),
-            actor="AI 機翻修復・人工確認",
-            action="quality_repair_review",
-        )
-        return "applied" if result.status == "updated" else "stale"
+        return _apply_review_item_on(db, item, draft)
     finally:
         db.close()
 
@@ -1320,31 +1333,41 @@ def apply_and_record_repair_review(
     item: dict[str, Any],
     draft: str,
 ) -> str:
-    """Apply a draft and matching unresolved keys on the worker thread."""
-    result = apply_repair_review_item(database_path, item, draft)
-    moddb_repair_review_store.save_review_state(
-        store_path,
-        run_id,
-        int(item["item_index"]),
-        "applied" if result == "applied" else "stale",
-        draft,
-    )
-    if result != "applied":
-        return result
+    """Apply a draft and matching unresolved keys on the worker thread.
 
-    matching = moddb_repair_review_store.matching_items(store_path, run_id, item)
-    for sibling in matching:
-        if int(sibling["item_index"]) == int(item["item_index"]):
-            continue
-        sibling_result = apply_repair_review_item(database_path, sibling, draft)
+    One database connection serves the item and all its matching siblings;
+    opening a fresh connection per sibling made large groups noticeably slow.
+    """
+    db = _open_review_db(database_path, item)
+    try:
+        result = _apply_review_item_on(db, item, draft) if db is not None else "stale"
         moddb_repair_review_store.save_review_state(
             store_path,
             run_id,
-            int(sibling["item_index"]),
-            "applied" if sibling_result == "applied" else "stale",
+            int(item["item_index"]),
+            "applied" if result == "applied" else "stale",
             draft,
         )
-    return result
+        if result != "applied":
+            return result
+
+        for sibling in moddb_repair_review_store.matching_items(
+            store_path, run_id, item
+        ):
+            if int(sibling["item_index"]) == int(item["item_index"]):
+                continue
+            sibling_result = _apply_review_item_on(db, sibling, draft)
+            moddb_repair_review_store.save_review_state(
+                store_path,
+                run_id,
+                int(sibling["item_index"]),
+                "applied" if sibling_result == "applied" else "stale",
+                draft,
+            )
+        return result
+    finally:
+        if db is not None:
+            db.close()
 
 
 def _finish_snapshot(db, options, session, report, tracker) -> None:

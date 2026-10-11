@@ -2912,3 +2912,86 @@ def test_repair_completion_log_reports_synced_count(db_path, monkeypatch):
     result = _run(db_path, preview.entries, options=options, mode="quality_mismatch")
 
     assert any("更新 1（另同步其他版本 1）" in str(line) for line in result["logs"])
+
+
+def _review_group(db_path, *, sync):
+    """1.21.1 有 AI 與人工兩個待審來源；1.20.1 的 AI 來源舊譯文相同。"""
+    db = TranslationDB(db_path)
+    _ingest(db, "1.21.1", "foo", "k.sync", SRC_AI, "舊", en="Use %s")
+    _ingest(db, "1.21.1", "foo", "k.sync", SRC_MANUAL, "舊人工", en="Use %s")
+    _ingest(db, "1.20.1", "foo", "k.sync", SRC_AI, "舊", en="Use %s")
+    entry = next(
+        row
+        for row in db.list_entries("1.21.1")[0]
+        if row.mod_id == "foo" and row.key == "k.sync"
+    )
+    store = moddb_repair_review_store.create_run(db_path, "run-sync")
+
+    def item(source_id, old):
+        return {
+            "entry_id": entry.id,
+            "version": "1.21.1",
+            "mod_id": "foo",
+            "kind": entry.kind,
+            "source_id": source_id,
+            "key": "k.sync",
+            "en_us": "Use %s",
+            "old_translation": old,
+            "expected_revision": _translation_revision(db, entry.id, source_id),
+            "database_identity": str(db_path.resolve()),
+            "database_file_id": db_path.stat().st_ino,
+            "database_priority": db.priority,
+            "sync_other_versions": sync,
+        }
+
+    first = moddb_repair_review_store.append_item(store, "run-sync", item(SRC_AI, "舊"))
+    moddb_repair_review_store.append_item(store, "run-sync", item(SRC_MANUAL, "舊人工"))
+    loaded = moddb_repair_review_store.load_item(store, "run-sync", first)
+    db.close()
+    return store, loaded
+
+
+def test_review_apply_syncs_other_versions_when_the_run_had_sync_on(db_path):
+    store, item = _review_group(db_path, sync=True)
+
+    result = moddb_retranslate_service.apply_and_record_repair_review(
+        db_path, store, "run-sync", item, "新 %s"
+    )
+
+    check = TranslationDB(db_path)
+    assert result == "applied"
+    assert _stored(check, "1.21.1") == "新 %s"
+    assert _stored(check, "1.20.1") == "新 %s"
+    check.close()
+
+
+def test_review_apply_leaves_other_versions_alone_when_sync_was_off(db_path):
+    store, item = _review_group(db_path, sync=False)
+
+    moddb_retranslate_service.apply_and_record_repair_review(
+        db_path, store, "run-sync", item, "新 %s"
+    )
+
+    check = TranslationDB(db_path)
+    assert _stored(check, "1.20.1") == "舊"
+    check.close()
+
+
+def test_review_apply_reuses_one_database_connection_for_all_matching_items(
+    db_path, monkeypatch
+):
+    store, item = _review_group(db_path, sync=False)
+    opened = []
+    real = moddb_retranslate_service.TranslationDB
+
+    def counting(*args, **kwargs):
+        opened.append(1)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(moddb_retranslate_service, "TranslationDB", counting)
+
+    moddb_retranslate_service.apply_and_record_repair_review(
+        db_path, store, "run-sync", item, "新 %s"
+    )
+
+    assert len(opened) == 1

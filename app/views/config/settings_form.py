@@ -110,7 +110,7 @@ def _render_block(
         columns = [_weighted(controls_map, p) for p in block.paths]
         if block.pad:
             columns.append(ft.Column([], expand=block.pad))
-        return ft.Row(columns)
+        return ft.Row(columns, vertical_alignment=ft.CrossAxisAlignment.START)
     if isinstance(block, Side):
         items: list[ft.Control] = []
         for i, path in enumerate(block.paths):
