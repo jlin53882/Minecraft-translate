@@ -64,6 +64,8 @@ class TranslatePanel(ft.Column):
         self._on_finished = on_finished
         self._repair_summary: dict | None = None
         self._repair_summary_final = True
+        self._flagged_total = 0
+        self._flagged_resolved = 0
         self.result_inspector = TranslationResultInspector(
             page,
             on_view_flagged,
@@ -930,12 +932,25 @@ class TranslatePanel(ft.Column):
             format_count(s.get("written")),
             delta=f"AI 回傳 {s.get('translated', 0):,} 筆",
         )
+        self._flagged_total = int(s.get("flagged") or 0)
+        self._flagged_resolved = 0
         self.stat_flagged.set_value(
             format_count(s.get("flagged")),
             delta="未寫入，詳見日誌" if s.get("flagged") else "",
         )
         self.result_inspector.set_normal_results(s, self._run_version)
         self.stat_remaining.set_value(format_count(s.get("remaining")))
+
+    def resolve_flagged(self, entry_id: int) -> None:
+        """條目校對裡手動修好一筆「特殊字元不一致」：卡片數量同步減少。"""
+        if not self.result_inspector.drop_normal_entry(entry_id):
+            return
+        self._flagged_resolved += 1
+        left = max(0, self._flagged_total - self._flagged_resolved)
+        self.stat_flagged.set_value(
+            format_count(left), delta="未寫入，詳見日誌" if left else "已全部處理"
+        )
+        self._safe_update()
 
     def _set_kpi_mode(self, mode: str, *, repair_condition: str | None = None) -> None:
         self._kpi_mode = mode

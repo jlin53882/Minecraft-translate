@@ -2185,3 +2185,35 @@ def test_same_as_source_count_and_pagination_share_the_condition(db_path):
     ]  # 三頁合起來沒有重複或混入其他資料
     assert db.list_entries("1.21.1", state="same", limit=3, offset=9)[0] == []
     db.close()
+
+
+def test_manual_fix_of_a_flagged_entry_lowers_the_translate_card(db_path, monkeypatch):
+    """在條目校對修好「特殊字元不一致」的條目後，機翻頁的數量與「檢視」同步減少。"""
+    from app.views import moddb_view
+
+    seed(db_path)
+    fake_engine(
+        monkeypatch,
+        lambda t: "§a注入合金" if t == "Infused Alloy" else "譯:" + t,
+    )
+    summary = run(TranslateOptions(version="1.21.1", mod_ids=("foo",)))["summary"]
+    assert summary["flagged"] == 1
+    entry_id = next(iter(summary["flagged_entries"]))
+
+    view = moddb_view.ModDbView(mock_page(), mock_filepicker())
+    panel = view.translate
+    panel._run_version = "1.21.1"
+    panel._apply_summary(summary)
+    assert panel.stat_flagged.value_text.value == "1"
+    panel._view_flagged()
+    entries = view.entries
+
+    db = view.get_db()
+    entry = db.list_entries("1.21.1", entry_ids=[entry_id])[0][0]
+    done = db.save_manual(entry.id, "注入合金", actor="測試", propagate=False)
+    entries._apply_save_result(db, entry, "注入合金", done, None)
+
+    assert panel.stat_flagged.value_text.value == "0"
+    assert panel.view_flagged_btn.visible is False
+    assert panel._flagged == {}
+    assert entries.entry_ids == []

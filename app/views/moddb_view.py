@@ -116,6 +116,9 @@ class ModDbView(ft.Column):
             self.get_db,
             on_changed=self._on_entries_changed,
             on_filter_changed=self._on_entries_filter_changed,
+            on_flagged_resolved=lambda entry_id: self.translate.resolve_flagged(
+                entry_id
+            ),
         )
         self.scan = ScanPanel(
             page,

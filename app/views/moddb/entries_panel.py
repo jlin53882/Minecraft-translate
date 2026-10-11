@@ -81,13 +81,21 @@ NO_SOURCE_TEXT = "（原文未知：之後掃描同版本的 jar，會自動補�
 class EntriesPanel(ft.Column):
     """條目校對頁籤。"""
 
-    def __init__(self, page: ft.Page, get_db, on_changed=None, on_filter_changed=None):
+    def __init__(
+        self,
+        page: ft.Page,
+        get_db,
+        on_changed=None,
+        on_filter_changed=None,
+        on_flagged_resolved=None,
+    ):
         """``get_db()`` 回傳目前的 ``TranslationDB``（沒有資料庫時回傳 None）。"""
         super().__init__(expand=True, spacing=12)
         self._page = page
         self._get_db = get_db
         self._on_changed = on_changed
         self._on_filter_changed = on_filter_changed
+        self._on_flagged_resolved = on_flagged_resolved
         self._refresh_keep_selection = True
         self._filter_only_refresh = False
         self._search_debounce = Debouncer(lambda: self._page, SEARCH_DEBOUNCE_SECONDS)
@@ -852,6 +860,7 @@ class EntriesPanel(ft.Column):
             else "已儲存"
         )
         show_snack(self._page, message, C.EM, text_color=C.ON_EM)
+        self._resolve_flagged(entry.id)
         if self.db() is db:
             same_entry = self.selected is not None and self.selected.id == entry.id
             unchanged_editor = same_entry and self.pending_text() == text
@@ -865,6 +874,17 @@ class EntriesPanel(ft.Column):
                 self._on_changed()
         self._update_impact()
         self._safe_update()
+
+    def _resolve_flagged(self, entry_id: int) -> None:
+        """機翻「特殊字元不一致」清單裡的條目已手動儲存：移出清單並通知機翻頁扣掉數量。"""
+        if self.entry_ids is None or entry_id not in self.entry_ids:
+            return
+        self._set_flagged(
+            [i for i in self.entry_ids if i != entry_id],
+            {k: v for k, v in self.drafts.items() if k != entry_id},
+        )
+        if self._on_flagged_resolved is not None:
+            self._on_flagged_resolved(entry_id)
 
     def _confirm(self, _e=None) -> None:
         self._review_controller.confirm(_e)

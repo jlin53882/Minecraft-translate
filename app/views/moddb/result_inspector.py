@@ -83,6 +83,14 @@ class TranslationResultInspector:
         self._repair_reviewable_count = 0
         self._sync_button()
 
+    def drop_normal_entry(self, entry_id: int) -> bool:
+        """A flagged entry was fixed by hand; stop listing it. True when it was listed."""
+        if entry_id not in self._normal_entries:
+            return False
+        del self._normal_entries[entry_id]
+        self._sync_button()
+        return True
+
     def set_repair_results(self, summary: dict) -> None:
         self._repair_entries = list(summary.get("flagged_entries") or ())
         self._repair_omitted = int(summary.get("flagged_entries_omitted") or 0)
