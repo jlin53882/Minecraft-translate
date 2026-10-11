@@ -13,7 +13,6 @@
     "app/views/cache_manager/cache_view_history.py:CacheHistoryMixin._render_shard_history": 88,
     "app/views/cache_manager/cache_view_query.py:CacheQueryMixin._render_query_results": 84,
     "app/views/cache_manager/cache_view_shard.py:CacheShardMixin._render_shard_detail_keys": 82,
-    "app/views/cache_manager/cache_view_shard.py:CacheShardMixin._type_shard_card": 81,
     "app/views/cache_view.py:CacheView.__init__": 84,
     "app/views/config/config_actions.py:_collect_validated_config": 88,
     "app/views/icon_preview/icon_cache.py:_batch_extract_jar_icons": 103,

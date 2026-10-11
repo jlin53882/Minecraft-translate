@@ -33,6 +33,16 @@ def get_active_shard_id(
     return ""
 
 
+def count_shard_files(cache_file_path: dict[str, Path], cache_type: str) -> int:
+    """某類型資料夾內的分片檔數（不含 ``<type>_cache_main.json``）。"""
+    type_dir = cache_file_path.get(cache_type, Path(".")).parent
+    skip = f"{cache_type.lower()}_cache_main.json"
+    try:
+        return sum(1 for fp in type_dir.glob("*.json") if fp.name.lower() != skip)
+    except OSError:
+        return 0
+
+
 def build_cache_overview(
     *,
     cache_types: list[str],
@@ -79,6 +89,7 @@ def build_cache_overview(
             "is_dirty": dirty,
             "active_shard_id": active_id,
             "active_shard_entries": active_entries,
+            "shard_count": count_shard_files(cache_file_path, cache_type),
             "shard_capacity": rolling_shard_size,
         }
 
