@@ -15,8 +15,9 @@ import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-DOCS = sorted((ROOT / "docs").glob("*_VIEW_ARCHITECTURE.md")) + [
-    ROOT / "docs" / "UNTRANSLATED_CHECKER_ARCHITECTURE.md"
+VIEW_DOCS = ROOT / "docs" / "developer-guide" / "views"
+DOCS = sorted(VIEW_DOCS.glob("*_VIEW_ARCHITECTURE.md")) + [
+    VIEW_DOCS / "UNTRANSLATED_CHECKER_ARCHITECTURE.md"
 ]
 # 文件刻意提到、但不是程式識別字的詞（例如設定鍵、舊名稱的說明）
 NOT_CODE: set[str] = set()
@@ -117,6 +118,17 @@ def _candidates(text: str) -> set[str]:
     return out
 
 
+def _identifier_problems(text: str, own: set[str], shared: set[str]) -> list[str]:
+    problems: list[str] = []
+    for token in sorted(_candidates(text)):
+        if token in NOT_CODE:
+            continue
+        word = token.split(".")[-1]
+        if word not in own and word not in shared:
+            problems.append(f"{token}")
+    return problems
+
+
 def test_every_view_doc_has_a_code_scope():
     missing = [doc.name for doc in DOCS if doc.name not in DOC_SCOPES]
     assert missing == [], (
@@ -132,12 +144,12 @@ def test_view_docs_only_mention_identifiers_in_their_own_scope():
     problems: list[str] = []
     for doc in DOCS:
         own = _identifiers(DOC_SCOPES[doc.name])
-        for token in sorted(_candidates(doc.read_text(encoding="utf-8"))):
-            if token in NOT_CODE:
-                continue
-            word = token.split(".")[-1]
-            if word not in own and word not in shared:
-                problems.append(f"{doc.name}: `{token}`")
+        problems.extend(
+            f"{doc.name}: `{token}`"
+            for token in _identifier_problems(
+                doc.read_text(encoding="utf-8"), own, shared
+            )
+        )
     assert problems == [], (
         "文件提到了「自己的 View 範圍或共用層」裡不存在的識別字"
         "（可能只在別的 View 有同名）：\n" + "\n".join(problems)
@@ -152,3 +164,9 @@ def test_scope_is_stricter_than_the_global_identifier_set():
     private = "_on_cancel"
     assert private in _identifiers(DOC_SCOPES["TRANSLATION_VIEW_ARCHITECTURE.md"])
     assert private not in lm_scope and private not in shared
+
+
+def test_identifier_guard_rejects_an_unscoped_name():
+    assert _identifier_problems("`unscoped_private_name`", set(), set()) == [
+        "unscoped_private_name"
+    ]

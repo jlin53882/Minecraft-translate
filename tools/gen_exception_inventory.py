@@ -1,4 +1,4 @@
-"""產生 docs/EXCEPTION_INVENTORY.md：逐項列出所有寬鬆例外豁免。
+"""產生 docs/generated/exception-inventory.md：逐項列出所有寬鬆例外豁免。
 
 每一列：位置（檔案:函式）｜規則｜分類｜處理方式。分類由例外處理的內容判定：
 
@@ -19,7 +19,7 @@ import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-OUT = REPO_ROOT / "docs" / "EXCEPTION_INVENTORY.md"
+OUT = REPO_ROOT / "docs" / "generated" / "exception-inventory.md"
 NOQA = re.compile(r"noqa:\s*([A-Z0-9, ]+?)(?:\s+-\s+(.*))?\s*$")
 RULES = {"BLE001", "S110", "S112"}
 LOG_HINTS = (

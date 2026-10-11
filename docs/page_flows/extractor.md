@@ -1,6 +1,6 @@
 # JAR 提取（`extractor`）處理流程
 
-> 入口：`app/views/extractor_view.py` 的 `ExtractorView`。詳細元件說明見 [`EXTRACTOR_VIEW_ARCHITECTURE.md`](../EXTRACTOR_VIEW_ARCHITECTURE.md)。
+> 入口：`app/views/extractor_view.py` 的 `ExtractorView`。詳細元件說明見 [`View 架構文件`](../developer-guide/views/EXTRACTOR_VIEW_ARCHITECTURE.md)。
 
 ## 職責
 

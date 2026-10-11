@@ -1,6 +1,6 @@
 # 快取管理頁（`cache`）處理流程
 
-> 入口：`app/views/cache_view.py` 的 `CacheView`。詳細元件說明見 [`CACHE_VIEW_ARCHITECTURE.md`](../CACHE_VIEW_ARCHITECTURE.md)。
+> 入口：`app/views/cache_view.py` 的 `CacheView`。詳細元件說明見 [`View 架構文件`](../developer-guide/views/CACHE_VIEW_ARCHITECTURE.md)。
 
 ## 職責
 

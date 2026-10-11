@@ -1,6 +1,6 @@
 # 翻譯校對（`icon_preview`）處理流程
 
-> 入口：`app/views/icon_preview_view.py` 的 `IconPreviewView`。詳細元件說明見 [`ICON_VIEW_ARCHITECTURE.md`](../ICON_VIEW_ARCHITECTURE.md)。
+> 入口：`app/views/icon_preview_view.py` 的 `IconPreviewView`。詳細元件說明見 [`View 架構文件`](../developer-guide/views/ICON_VIEW_ARCHITECTURE.md)。
 
 ## 職責
 
