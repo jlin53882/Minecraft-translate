@@ -3,8 +3,6 @@
 由 ``app/views/cache_view.py`` 拆出（#114），方法內容未改；``CacheView`` 以多重繼承組合這些 mixin。
 """
 
-from pathlib import Path
-
 import flet as ft
 
 from app.services_impl.cache.cache_services import (
@@ -17,13 +15,9 @@ from app.services_impl.cache.cache_services import (
 from app.ui.design import C
 from app.ui.snack import show_snack
 from app.views.cache_manager.cache_history_store import (
-    history_active_default,
     history_append_event,
-    history_dirs,
-    history_load_active,
     history_load_recent,
     history_now_ts,
-    history_save_active,
 )
 
 
@@ -213,24 +207,6 @@ class CacheHistoryMixin:
     def _history_now_ts(self) -> str:
         """取得目前時間戳"""
         return history_now_ts()
-
-    def _history_dirs(self, cache_type: str):
-        """取得歷史記錄目錄"""
-        root = str((self._last_overview_data or {}).get("cache_root", "") or "").strip()
-        return history_dirs(root, cache_type)
-
-    def _history_active_default(self, cache_type: str) -> dict:
-        """取得預設的活跃记录"""
-        return history_active_default(cache_type)
-
-    def _history_load_active(self, cache_type: str):
-        """載入活跃记录"""
-        root = str((self._last_overview_data or {}).get("cache_root", "") or "").strip()
-        return history_load_active(root, cache_type)
-
-    def _history_save_active(self, active_path: Path, active: dict):
-        """儲存活跃记录"""
-        return history_save_active(active_path, active)
 
     def _history_append_event(self, cache_type: str, event: dict):
         """新增歷史事件"""

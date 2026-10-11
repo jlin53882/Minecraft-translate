@@ -1,6 +1,6 @@
 # Minecraft Translator Flet — 專案索引
 
-> 版本：0.8.0｜最後更新：2026-10-04
+> 版本號以 `pyproject.toml` 為準；變更記錄見 `CHANGELOG.md`。
 
 ---
 
@@ -297,10 +297,10 @@ app/
 | `pyproject.toml` | 專案依賴與版本（v0.8.0）|
 | `translation_tool/core/lm_config_rules.py` | LM API 行為設定（batch size / temperature 等）|
 | `translation_tool/utils/config_manager.py` | 應用程式設定管理 |
-| `docs/PR_WORKFLOW.md` | PR 工作流程規範 |
 | `docs/WEB_MODE_LIMITATIONS.md` | Flet Web 模式限制（不能選資料夾、只能輸入主機路徑）與未來擴充方向 |
 | `docs/CROSS_CUTTING_REVIEW_CHECKLIST.md` | 橫切改動（日誌／任務生命週期／併發）審查清單 |
 | `docs/PROJECT_STRUCTURE.md` | 專案結構與模組職責 |
+| `docs/page_flows/README.md` | 每個頁面的處理流程圖（共 14 頁，一頁一份） |
 
 ## 10. View 架構文件（docs/）
 
@@ -323,7 +323,7 @@ app/
 | `docs/TRANSLATION_VIEW_ARCHITECTURE.md` | TranslationView（`app/views/translation/`） |
 | `docs/UNTRANSLATED_CHECKER_ARCHITECTURE.md` | UntranslatedChecker（`app/views/untranslated_checker.py`） |
 
-相關系統文件：`JAR_PIPELINE.md`（抽取流程）、`CACHE_SYSTEM.md`（快取資料結構）、`cache_search_optimization.md`（搜尋效能）、`TRANSLATION_WORKFLOW.md`（翻譯流程）、`DOCSTRING_SPEC.md`（docstring 規範）、`GH_WORKFLOW.md`（GitHub 操作流程）、`PR_EXECUTION_TYPES.md`（PR 執行類型對照）、`RELEASE_WORKFLOW.md`（Release 操作流程）、`TEST_STRATEGY.md`（測試策略）。
+相關系統文件：`JAR_PIPELINE.md`（抽取流程）、`CACHE_SYSTEM.md`（快取資料結構）、`TRANSLATION_WORKFLOW.md`（翻譯流程）、`DOCSTRING_SPEC.md`（docstring 規範）、`GH_WORKFLOW.md`（GitHub 操作流程）、`RELEASE_WORKFLOW.md`（Release 操作流程）、`TEST_STRATEGY.md`（測試策略）。
 
 ---
 

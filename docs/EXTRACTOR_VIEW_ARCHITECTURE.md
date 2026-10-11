@@ -1,11 +1,13 @@
 # Extractor View 架構
 
+> 流程圖：[page_flows/extractor.md](page_flows/extractor.md)
+
 ## 定位
 
 ExtractorView 位於翻譯流程的**輸入端**：從 mods 資料夾的 JAR 檔案中，提取出語言檔（lang）與手冊檔（Patchouli book），作為後續翻譯流程的來源。提供兩種執行方式：**直接提取** 與 **先預覽再提取**。
 
-- 直接提取：`open_extractor_dialog()`（點擊「提取 Lang / Book / Lang+Book」）
-- 預覽：`open_preview_dialog()`（點擊「預覽 Lang / Book / Lang+Book」）
+- 直接提取：`open_extractor_dialog()`（按鈕「提取 Lang」「提取 Book」「提取 Lang + Book」）
+- 預覽：`open_preview_dialog()`（按鈕「預覽 Lang」「預覽 Book」「預覽 Lang + Book」；實作於 `extractor/extractor_preview_dialog.py`）
 
 > 核心提取邏輯（JAR 掃描 / 正則比對 / 寫檔）屬於 `translation_tool/core/`，UI 層不直接操作 JAR。兩個層級之間的橋接是 `app/services_impl/pipelines/extract_service.py`。
 
@@ -23,7 +25,9 @@ ExtractorView 位於翻譯流程的**輸入端**：從 mods 資料夾的 JAR 檔
 app/views/extractor_view.py                 ← 主視圖（`_init_extractor_inputs` 建輸入控制項與按鈕 / click handler 分派）
 app/views/extractor/
   ├─ extractor_panels.py                    ← 整頁內容 `build_settings_panel`（頁首 + 「提取設定」卡 + Lang / Book / Lang+Book 三張模式卡）
-  ├─ extractor_dialog.py                    ← `open_extractor_dialog` / `open_preview_dialog`（進度+日誌+統計）
+  ├─ extractor_dialog.py                    ← `open_extractor_dialog`（進度+日誌+統計）；`open_preview_dialog` 由模組 `__getattr__` 延遲轉出
+  ├─ extractor_dialog_ui.py                 ← 提取對話框的控制項建構與 UI 更新輔助
+  ├─ extractor_preview_dialog.py            ← `open_preview_dialog`（預覽掃描與結果對話框）
   ├─ extractor_state.py                     ← PreviewState / ExtractionState 資料類別
   └─ extractor_dialog_helpers.py            ← format_size() 大小格式化
 app/services_impl/pipelines/extract_service.py  ← Service 層（路徑準備 / generator 驅動）
@@ -47,26 +51,26 @@ ExtractorView._handle_extract_*_click()
       ├─ prepare_extraction_paths()      ← Service：有明確 output_path 就沿用；空白時在來源同層依 config 後綴產生輸出路徑
       ├─ get_lang_codes(skip_zh_cn=...)  ← Service：讀取語系清單
       ├─ page.show_dialog(dialog)
-      └─ on_start_click()                ← 點「開始提取」（auto_start=True 時自動呼叫）→ 背景 thread 跑 run_extraction()
-          └─ run_extraction()            ← [background thread]
-              ├─ 依 mode 選 generator：
+      └─ _extractor_on_start_click()     ← 點「開始提取」（auto_start=True 時自動呼叫）→ 背景 thread 跑 _extractor_run_extraction()
+          └─ _extractor_run_extraction() ← [background thread]
+              ├─ 依 mode 選 generator（`_extractor_make_generator`）：
               │    lang  → extract_lang_files_generator()
               │    book  → extract_book_files_generator()
               │    dual  → extract_dual_files_generator()
               ├─ run_extraction_loop(gen, cancelled_flag, on_update)
               │     ← Service：逐 update 呼叫 on_update + 累計 stats
-              └─ 完成 → log / 進度 / 統計經 UiBatcher 排到 event loop，最後由 ui_done 切換按鈕（關閉 / 開啟輸出資料夾 / 統計列）
+              └─ 完成 → log / 進度 / 統計經 UiBatcher 排到 event loop，最後由 `_extractor_ui_done`（UiBatcher 的 on_done）切換按鈕（關閉 / 開啟輸出資料夾 / 統計列）
 ```
 
 ### 預覽（先掃描，再確認提取）
 ```
-ExtractorView._handle_preview_*_click()    ← 只驗證 mods_dir，不自動填輸出路徑
+ExtractorView._handle_preview_*_click()    ← 驗證 mods_dir 後解析輸出路徑（preview=True，不自動填入欄位）
   └─ open_preview_dialog(mode, skip_zh_cn=...)
-      ├─ start_scan()                    ← 點「開始預覽」並快照確認執行後的輸出路徑
-      │   ├─ do_scan()  [thread]         ← 跑 preview_extraction_generator()，逐 update 寫入 preview_state (PreviewState)
-      │   └─ ui_poller()  [async, page.run_task]  ← 在 event loop 上每 0.2s 讀 preview_state 更新進度與日誌
-      └─ show_result_dialog()            ← 掃描完成 → 同一個 dialog 換成結果清單 +「確認執行」
-          └─ start_extraction()          ← 顯示同一個輸出快照 → pop_dialog → open_extractor_dialog(auto_start=True)
+      ├─ _preview_start_scan()           ← 點「開始預覽」並快照確認執行後的輸出路徑
+      │   ├─ _preview_do_scan()  [thread]    ← 跑 preview_extraction_generator()，逐 update 寫入 ctx.preview_state (PreviewState)
+      │   └─ _preview_ui_poller()  [async, page.run_task]  ← 在 event loop 上每 0.2s 讀 preview_state 更新進度與日誌
+      └─ _preview_show_result_dialog()   ← 掃描完成 → 同一個 dialog 換成結果清單 +「確認執行」
+          └─ _preview_start_extraction() ← 顯示同一個輸出快照 → pop_dialog → open_extractor_dialog(auto_start=True)
 ```
 
 ---
@@ -75,12 +79,12 @@ ExtractorView._handle_preview_*_click()    ← 只驗證 mods_dir，不自動填
 
 | 狀態 | 位置 | 用途 |
 |------|------|------|
-| `state` dict | `extractor_dialog.py` closure（提取與預覽各一份） | 提取：running / done / cancelled / stats / progress / current_file；預覽：running / cancelled / done |
-| `extraction_cancel_flag` (list) | `extractor_dialog.py` closure | 跨執行緒取消信號（thread-safe：list 內容共享） |
-| `preview_state` | `PreviewState` (`extractor_state.py`) | 預覽掃描的 progress / current / total / done / result / error |
+| `ctx.state` dict | 提取對話框（`extractor_dialog.py`）與預覽對話框（`extractor_preview_dialog.py`）各自的 `ctx` | 提取：running / done / cancelled / stats / progress / current_file；預覽：running / cancelled / done |
+| `ctx.extraction_cancel_flag` (list) | `extractor_dialog_ui.py` 建立，提取對話框的 `ctx` 持有 | 跨執行緒取消信號（thread-safe：list 內容共享） |
+| `ctx.preview_state` | `PreviewState` (`extractor_state.py`) | 預覽掃描的 progress / current / total / done / result / error |
 | `ExtractionState` | `extractor_state.py` | 目前未在 app 程式碼中使用（保留型別） |
 
-**取消機制要點**：`on_cancel_click` 同時設 `extraction_cancel_flag[0] = True`（給 `run_extraction_loop` 偵測）與 `state["cancelled"] = True`（UI 顯示）。兩份必須同步，否則背景 thread 不會真的停。dialog 被強制 dismiss（ESC 等）時 `on_dialog_dismiss` 也會設 cancel flag 防止背景 thread 空跑；預覽 dialog 的 `on_preview_dismiss` 則設 `state["cancelled"]`。
+**取消機制要點**：`_extractor_on_cancel_click` 同時設 `ctx.extraction_cancel_flag[0] = True`（給 `run_extraction_loop` 偵測）與 `ctx.state["cancelled"] = True`（UI 顯示）。兩份必須同步，否則背景 thread 不會真的停。dialog 被強制 dismiss（ESC 等）時 `_extractor_on_dialog_dismiss` 也會設 cancel flag 防止背景 thread 空跑；預覽 dialog 的 `_preview_on_preview_dismiss` 則設 `ctx.state["cancelled"]`。
 
 ---
 
@@ -98,12 +102,12 @@ ExtractorView._handle_preview_*_click()    ← 只驗證 mods_dir，不自動填
 | `get_target_language()` | 讀取 `extractor.target_language`（預設 zh_tw），僅為相容保留，沒有 production 呼叫端 |
 | `_select_extraction_generator(mode, ...)` | 依 mode 回傳對應 generator（lang 傳 `lang_codes`，dual 傳 `skip_zh_cn`，book 不傳參數） |
 | `_run_extraction_with_session(generator, session, mode_label)` | 透過 TaskSession 驅動 generator（GLOBAL_LOG_LIMITER 過濾 + add_log/set_progress/set_error） |
-| `run_lang/book/dual_extraction_service(...)` | 封裝 `_run_extraction_with_session`，用於 **pipeline_view** 的 TaskSession 流程 |
+| `run_lang/book/dual_extraction_service(...)` | 封裝 `_run_extraction_with_session`；`run_lang_extraction_service` / `run_book_extraction_service` 由 `PipelineActions` 呼叫；`run_dual_extraction_service` 目前沒有呼叫端 |
 | `run_extraction_loop(generator, cancelled_flag, on_update)` | 供 **dialog** 用：逐 update 回呼 + 累計 stats，不依賴 TaskSession |
 | `open_output_folder(path)` | 跨平台開啟資料夾（取代 UI 直接 os.startfile） |
 
 **兩條驅動路徑**：
-1. **TaskSession 路徑**（`pipeline_view` 用；`pipeline_extract_dialog` 僅用 `preview_extraction_generator` 與 `PreviewState`）：`run_*_extraction_service()` → `_run_extraction_with_session()`。輸出寫入 session，UI 端靠 poller 讀 snapshot。
+1. **TaskSession 路徑**（流水線的 `PipelineActions` 使用；`pipeline_extract_dialog` 僅用 `preview_extraction_generator` 與 `PreviewState`）：`run_*_extraction_service()` → `_run_extraction_with_session()`。輸出寫入 session，UI 端靠 poller 讀 snapshot。
 2. **Dialog 路徑**（`extractor_dialog` 用）：`run_extraction_loop()` → on_update callback 直接更新 dialog 元件。立即反應，不需 poller。
 
 `run_extraction_loop` 回傳的 stats 含 `lang` / `book` sub-dict（dual 模式時由 generator 的 `phase` 拆解填入），供 dialog 顯示 LANG/BOOK 分區統計。
@@ -151,9 +155,9 @@ ExtractorView._handle_preview_*_click()    ← 只驗證 mods_dir，不自動填
 
 `extract_dual_files_generator` 的 yield 設計，避免 UI 統計被誤導：
 - lang phase 的 update 帶 `phase: "lang"`，book phase 帶 `phase: "book"`。
-- **book phase 只 yield 純 book stats**（不把 lang+book 加總）— 原本的 bug 是 combined stats 被寫進 `stats["book"]` sub-dict，讓 user 看到「BOOK 成功 13」其實是 lang+book 合計。
+- **book phase 只 yield 純 book stats**（不把 lang+book 加總），BOOK 的 sub-dict 只含 book 自己的統計。
 - 最後補一個 `phase: "book_final"` 的 combined yield（含 `lang` / `book` sub-dict），`run_extraction_loop` 只認 `("lang", "book")` 兩個 phase 拆 sub-dict，所以 combined 只更新頂層 stats。
-- Dialog 端 `update_dual_stats(result_stats)` 透過 `key` 屬性找到 `lang_success` / `lang_warnings` / `book_success` / `book_warnings` 四個 Text 元件填入（`lang_row` / `book_row`，僅 dual 完成後顯示）。
+- Dialog 端 `_extractor_update_dual_stats(ctx, result_stats)`（`extractor_dialog_ui.py`）透過 `key` 屬性找到 `lang_success` / `lang_warnings` / `book_success` / `book_warnings` 四個 Text 元件填入（`lang_row` / `book_row`，僅 dual 完成後顯示）。
 
 ---
 
@@ -167,12 +171,12 @@ ExtractorView._handle_preview_*_click()    ← 只驗證 mods_dir，不自動填
 
 ## 常見陷阱（維護注意）
 
-1. **不要在 on_update 裡判斷「整段完成」**：generator 會逐 JAR yield 帶 `stats` 的 update，舊邏輯 `pct >= 1.0 or "stats" in update` 會逐 JAR 誤觸發「[完成] 0/0/0」。真正的完成只能等 `run_extraction_loop` 返回後用回傳的累計 stats。
-2. **背景 thread 更新 UI 必須排到 event loop**：提取 dialog 用 `UiBatcher`（`ui_done` 經 `on_done` 在最後一批後執行），預覽用 `ui_poller`；直接在 worker thread 改 `dialog.modal` 並 `page.update()` 不會確實同步到前端。
+1. **不要在 on_update 裡判斷「整段完成」**：generator 會逐 JAR yield 帶 `stats` 的 update，以 `pct >= 1.0` 或 `"stats" in update` 判斷會逐 JAR 誤觸發「[完成] 0/0/0」。真正的完成只能等 `run_extraction_loop` 返回後用回傳的累計 stats。
+2. **背景 thread 更新 UI 必須排到 event loop**：提取 dialog 用 `UiBatcher`（`_extractor_ui_done` 經 `on_done` 在最後一批後執行），預覽用 `_preview_ui_poller`；直接在 worker thread 改 `dialog.modal` 並 `page.update()` 不會確實同步到前端。
 3. **cancel flag 用 outer-scope list**：`on_cancel_click` 與 worker thread 要共享同一份 reference，否則取消只改 UI 不改執行。
 4. **`LogView.add()` 的 level 必須在白名單**（預設白名單為 system/info/warning/error）：傳顏色字串（如 `C.GOLD`）會 silent return，整行 log 不顯示。
-5. **預覽 dialog 用「單一 dialog mutate」**：不要把 result dialog 疊在 preview dialog 上（modal=False 可能被提前 dismiss 打破疊層假設）。掃描完成由 `show_result_dialog` 直接把 preview_dialog 的 title/content/actions 換成結果畫面。
-6. **`preview_state.done` 每次掃描前要重設 False**：否則上次的 `done=True` 讓新一輪 ui_poller 立刻退出，user 看到「按了沒反應」。
+5. **預覽 dialog 用「單一 dialog mutate」**：不要把 result dialog 疊在 preview dialog 上（modal=False 可能被提前 dismiss 打破疊層假設）。掃描完成由 `_preview_show_result_dialog` 直接把 preview_dialog 的 title/content/actions 換成結果畫面。
+6. **`preview_state.done` 每次掃描前要重設 False**（`_preview_reset_scan_state`）：否則上次的 `done=True` 讓新一輪 `_preview_ui_poller` 立刻退出，user 看到「按了沒反應」。
 7. **循環引入**：`jar_processor_preview.py` 的 `preview_extraction_generator_impl` 內使用 lazy import 讀 `build_lang_file_regex` / `build_book_path_regex`（避免反向 import jar_processor）。
 8. **新增提取模式時**：若走 dialog 流程，沿用 `run_extraction_loop` + on_update 模式；若走 TaskSession 流程，沿用 `_run_extraction_with_session`。不要讓 UI 直接迭代 generator。
 
@@ -187,7 +191,7 @@ ExtractorView._handle_preview_*_click()    ← 只驗證 mods_dir，不自動填
 - `tests/test_skip_zh_cn.py` — skip_zh_cn 過濾（lang/book/dual）
 - `tests/test_jar_processor.py` — 核心 generator
 
-## 對話框檔案結構（拆分後）
+## 對話框檔案結構
 
 - `app/views/extractor/extractor_dialog.py`：`open_extractor_dialog`（提取對話框）。以 `ctx`（`types.SimpleNamespace`）共享狀態與控制項，handler 為 `_extractor_*` 模組層級函式；`open_preview_dialog` 以模組 `__getattr__` 延遲轉出。
 - `app/views/extractor/extractor_dialog_ui.py`：提取對話框的控制項建構與 UI 更新輔助（log／進度／統計，皆只依賴 `ctx`）。

@@ -23,7 +23,6 @@ SCHEMA_VERSION = 5
 
 KIND_LANG = "lang"
 KIND_PATCHOULI = "patchouli"
-KINDS = (KIND_LANG, KIND_PATCHOULI)
 
 # 來源代碼（寫入資料庫後不可更動）
 SRC_AI = 0

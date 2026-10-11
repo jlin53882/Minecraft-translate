@@ -13,7 +13,6 @@ from app.ui.design import C
 from app.views.config.settings_schema import (
     NAV_PAGES,
     SETTINGS_BY_PATH,
-    Card,
     Cols,
     Custom,
     Div,
@@ -163,8 +162,3 @@ def build_pages(
             cards.append(build_card(card.title, blocks))
         pages[nav["id"]] = ft.Column(spacing=15, controls=cards)
     return pages
-
-
-def card_titles(layout: dict[str, tuple[Card, ...]] | None = None) -> list[str]:
-    layout = layout or resolved_layout()
-    return [card.title for cards in layout.values() for card in cards]

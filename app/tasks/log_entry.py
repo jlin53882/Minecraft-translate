@@ -22,16 +22,6 @@ class LogLevel(StrEnum):
     SYSTEM = "system"
 
 
-# 等級顯示順序（越小越重要）
-LEVEL_ORDER = {
-    LogLevel.SYSTEM: 0,
-    LogLevel.ERROR: 1,
-    LogLevel.WARNING: 2,
-    LogLevel.INFO: 3,
-    LogLevel.DEBUG: 4,
-}
-
-
 @dataclass(frozen=True, slots=True)
 class LogEntry:
     """

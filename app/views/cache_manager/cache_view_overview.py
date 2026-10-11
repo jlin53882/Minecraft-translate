@@ -144,11 +144,6 @@ class CacheOverviewMixin:
             return pairs
         return []
 
-    def _iter_type_states_safe(self, data: dict):
-        """_iter_type_states 的安全包裝：None 時回傳空列表，保持迭代語意一致。"""
-        result = self._iter_type_states(data)
-        return result if result is not None else []
-
     def _render_type_list(self, data: dict):
         """渲染快取類型列表 UI"""
         self.type_list.controls.clear()
@@ -335,27 +330,6 @@ class CacheOverviewMixin:
             "RELOADING",
             lambda: cache_reload_service(),
             "已重新載入全部快取",
-            show_progress=True,
-        )
-
-    def _on_save_all_new(self, e):
-        """觸發儲存所有新分片（長時間操作）"""
-        self._run_action(
-            "SAVING",
-            lambda: cache_save_all_service(write_new_shard=True),
-            "已儲存全部新分片",
-            show_progress=True,
-        )
-
-    def _on_save_all_fill(self, e):
-        """觸發補滿所有活躍分片（高風險，長時間操作）"""
-        if not self.chk_danger_confirm.value:
-            self._notify("尚未勾選高風險確認", "warn")
-            return
-        self._run_action(
-            "SAVING",
-            lambda: cache_save_all_service(write_new_shard=False),
-            "已補滿活躍分片",
             show_progress=True,
         )
 

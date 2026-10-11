@@ -49,15 +49,6 @@ RE_TOKEN_LINE = re.compile(
 # 另外：有些人會把多個 §stack 接在同一行，這行也視為 token 行（避免被當文字）
 RE_MOSTLY_TOKEN_LINE = re.compile(r"^\s*(§[0-9a-zA-Z]+\S*)\s*(§[0-9a-zA-Z]+\S*)*\s*$")
 
-# 標題：##### §nTITLE§n（這行是「文字」，要納入段落）
-# 我們保留整行進段落（讓翻譯有上下文），但也可以選擇只翻 TITLE（之後翻譯階段再做保護）
-RE_HEADING_N = re.compile(
-    r"^(?P<prefix>\s*#{1,6}\s+)(?P<pre>§n)(?P<title>.*?)(?P<post>§n)\s*$"
-)
-
-# 格式碼開頭行：§bStats 或 §4Warning...
-# 這行也是「文字」，要納入段落（但 § 前綴要保留）
-RE_FORMAT_PREFIX = re.compile(r"^(?P<prefix>\s*§[0-9a-zA-Z]+)(?P<text>.+)$")
 
 # Markdown 程式碼區塊圍欄（至多 3 個空白縮排，``` 或 ~~~ 三個以上）
 RE_CODE_FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
@@ -117,18 +108,6 @@ class BlockItem:
     content_hash: str  # 資料重複標記
     start_line: int  # 起始行（1-based）
     end_line: int  # 結束行（1-based）
-
-
-def is_splitter_line_old(line: str) -> bool:
-    """
-    只在「強分隔 token 行」才切段：
-      - §align/§stack/§rule/§recipe/§entity
-      - 幾乎整行都是 §token
-    空行不再切段（空行會被保留在 block 內，維持段落感）。
-    """
-    if RE_TOKEN_LINE.match(line):
-        return True
-    return bool(RE_MOSTLY_TOKEN_LINE.match(line.strip()))
 
 
 def is_splitter_line(line: str) -> bool:

@@ -1,46 +1,14 @@
 """PipelineView 的控制項與版面組裝（由 pipeline_view.py 拆出，#114）。"""
 
-import os
-
 import flet as ft
 
 from app.ui import design, kit
 from app.ui.design import C
 from app.ui.design import tone as get_tone
-from app.ui.sync_text_field import SyncTextField
-
-
-def _has_files(path: str) -> bool:
-    """資料夾存在且至少含有一個檔案。"""
-    if not os.path.isdir(path):
-        return False
-    return any(files for _, _, files in os.walk(path))
 
 
 class PipelineWidgetsMixin:
     """PipelineView 的控制項與版面組裝（由 pipeline_view.py 拆出，#114）。"""
-
-    def _delete_key_field(self, row_obj):
-        self.keys_container.controls.remove(row_obj)
-        self._page.update()
-
-    def _add_key_field(self, initial_value=""):
-        new_row = ft.Row(spacing=10)
-        key_tf = SyncTextField(
-            value=initial_value,
-            label=f"API Key {len(self.keys_container.controls) + 1}",
-            expand=True,
-            text_size=12,
-            border_color=C.DIA,
-        )
-        del_btn = ft.IconButton(
-            icon=ft.Icons.DELETE,
-            icon_color=C.RED,
-            on_click=lambda _: self._delete_key_field(new_row),
-        )
-        new_row.controls = [key_tf, del_btn]
-        self.keys_container.controls.append(new_row)
-        self._page.update()
 
     # =============================================================================
     # UI Layout
@@ -133,16 +101,6 @@ class PipelineWidgetsMixin:
             ],
             spacing=18,
             scroll=ft.ScrollMode.AUTO,
-            expand=True,
-        )
-
-        self.api_view = ft.Column(
-            [
-                ft.Text("API 金鑰管理", size=24, weight="bold", color=C.GOLD),
-                ft.Container(content=self.keys_container, expand=True),
-                ft.Button("儲存設定", icon=ft.Icons.SAVE, bgcolor=C.DIA, color=C.ON_EM),
-            ],
-            spacing=10,
             expand=True,
         )
 

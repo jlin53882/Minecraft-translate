@@ -4,6 +4,8 @@
 
 LookupView 是**學名（物種名稱）翻譯的快速查詢工具**，屬於翻譯前置準備工具。支援單筆與批次（JSON 陣列）兩種查詢，結果來自本地快取與線上查詢（`translation_tool.utils.species_cache`）。
 
+流程圖見 [page_flows/lookup.md](page_flows/lookup.md)。
+
 ## 主要 UI 元件
 
 `LookupView`（`ft.Column`）的控制項由 `_init_lookup_inputs` 建立，`__init__` 以 `kit` 的卡片組裝版面。
@@ -21,7 +23,7 @@ LookupView 是**學名（物種名稱）翻譯的快速查詢工具**，屬於�
 | `batch_button` | `kit.button` | 「批次查詢」（primary），位於 JSON 輸入框下方，與 `batch_progress_bar` 同一列 |
 | `batch_progress_bar` | `kit.progress_bar` | 批次進度（不確定進度時 `value=None`，預設隱藏） |
 
-**佈局**：頁首 `kit.page_header` + 左右兩欄（`ft.Column(scroll=ADAPTIVE)`）。左欄為「單筆查詢」卡（輸入 + 查詢按鈕同列，下接最近查詢）與「查詢結果」卡（標題右側「複製結果」），右欄為「批次查詢」卡（由上而下：JSON 輸入、「批次查詢」按鈕列、批次結果）。
+**佈局**：頁首 `kit.page_header` + 左右兩欄（`LookupView` 本身為 `scroll=ADAPTIVE`）。左欄為「單筆查詢」卡（輸入 + 查詢按鈕同列，下接最近查詢）與「查詢結果」卡（標題右側「複製結果」），右欄為「批次查詢」卡（由上而下：JSON 輸入、「批次查詢」按鈕列、批次結果）。
 
 ## 呼叫鏈
 
@@ -30,7 +32,7 @@ LookupView 是**學名（物種名稱）翻譯的快速查詢工具**，屬於�
 single_lookup_clicked(e)
   ├─ 驗證輸入非空（否則顯示錯誤）
   ├─ 鎖 UI：button/input disabled + ProgressRing 顯示 + 「查詢中...」，並 _remember(名稱)
-  ├─ threading.Thread(single_lookup_worker, daemon=True).start()
+  ├─ launch_page_operation(...)（name「單筆翻譯查詢」，owner `lookup`，於背景執行下列 worker）
   └─ single_lookup_worker(name)
        └─ run_manual_lookup_service(name) → 結果與復原 UI 的動作經 _run_on_ui 排到 event loop 套用
 ```
@@ -38,9 +40,9 @@ single_lookup_clicked(e)
 ### 批次查詢
 ```
 batch_lookup_clicked(e)
-  ├─ 驗證 JSON 非空
+  ├─ 驗證 JSON 非空（空值時結果區顯示錯誤）
   ├─ 鎖 UI：button disabled + ProgressBar 顯示（indeterminate）
-  ├─ threading.Thread(batch_lookup_worker, daemon=True).start()
+  ├─ launch_page_operation(...)（name「批次翻譯查詢」，owner `lookup`，於背景執行下列 worker）
   └─ batch_lookup_worker(json_text)
        └─ for update in run_batch_lookup_service(json_text):  # generator
             ├─ update.error → 記下 log 文字、break
@@ -49,7 +51,7 @@ batch_lookup_clicked(e)
         finally: 經 _run_on_ui 一次套用結果文字 / 進度，並復原 UI（button + ProgressBar）
 ```
 
-## Service 層（app/services_impl/pipelines/lookup_service.py，PR17 抽離）
+## Service 層（app/services_impl/pipelines/lookup_service.py）
 
 - `run_manual_lookup_service(name) -> str`
   - `is_potential_species_name(name)` 前置格式檢查（不合格式回錯誤訊息）
@@ -78,6 +80,7 @@ batch_lookup_clicked(e)
 - `wikipedia.page(name, auto_suggest=False)`，取 `page.title.split("(")[0]`（去括號註記）為俗名
 - **成功才寫檔**：記憶體快取 + 快取檔 append（config `species_cache.cache_directory` / `cache_filename`，預設 `學名資料庫/species_cache.tsv`；TSV：`學名\t俗名`）；失敗僅更新記憶體為 `""`（不重複查詢、不寫檔）
 - `PageError` → 回 None；`DisambiguationError` → 原名稱記為空值快取，取第一個選項遞迴查詢；其他例外 → 回 None（原名稱記為空值快取）
+- 未安裝 `wikipedia` 套件（`_WIKIPEDIA_AVAILABLE` 為 False）時不發出線上請求，`query_wikipedia_and_update_cache` 直接回 None，僅使用本地快取
 
 ## 檔案結構
 
@@ -87,6 +90,6 @@ batch_lookup_clicked(e)
 
 ## 維護注意
 
-1. 兩個 worker 都是一次性背景執行緒，不直接改控制項：結果經 `_run_on_ui`（`page.run_task`）排到 event loop 套用；與 Extractor/LM 頁的 TaskSession + UI timer 模式不同。
-2. `page` 屬性為 `@property`：必須是 Page 實例，`show_snack(self.page, ...)` 才收得到。
+1. 兩個 worker 皆由 `launch_page_operation` 啟動，不直接改控制項：結果經 `_run_on_ui`（`page.run_task`）排到 event loop 套用。
+2. `page` 屬性必須維持 `@property` 並回傳 Page 實例；`show_snack(self.page, ...)` 與 `run_task` 依賴此行為。
 3. 批次結果以 `ensure_ascii=False` dump 中文，結果區顯示原始 JSON。

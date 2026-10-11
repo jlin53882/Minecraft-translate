@@ -6,6 +6,8 @@
 
 **功能**：比較 en_us 與 zh_tw JSON 語言檔 → 找出 zh_tw 中缺失的翻譯鍵 → 輸出未翻譯報告至指定資料夾。
 
+流程圖見 [page_flows/qc.md](page_flows/qc.md)。
+
 ## 檔案結構
 
 - `app/views/untranslated_checker.py` — `UntranslatedChecker` 元件（`ft.Container`；`_build_content` 組出 UI）
@@ -16,7 +18,7 @@
 ## 與 QCView 的關係
 
 - `UntranslatedChecker(page, file_picker, task_runner)` 由 QCView 建立，放進 `mode_panels["untranslated"]`（標題「Key 缺失檢查」的 `kit.section_card`）；QCView 以模式卡切換顯示，預設選中的就是此模式
-- QCView 的 `start_task("untranslated")` 仍保留 `run_untranslated_check_service` 作為備用分派（讀 `self.untranslated_checker.en_dir/tw_dir/out_dir`）
+- QCView 的 `start_task("untranslated")` 另有備用分派（讀 `self.untranslated_checker.en_dir/tw_dir/out_dir`，呼叫 `run_untranslated_check_service`）；正常流程由本元件的 `_on_start` 直接呼叫 `task_worker`，不經過該分支
 
 ## 主要 UI 元件
 
@@ -25,7 +27,7 @@
 | `en_dir` (TextField) | 英文來源資料夾路徑 |
 | `tw_dir` (TextField) | 繁中來源資料夾路徑 |
 | `out_dir` (TextField) | 報告輸出資料夾路徑 |
-| `start_button` (ft.Button) | 開始檢查（SEARCH_OFF icon） |
+| `start_button` (kit.button) | 開始檢查（SEARCH_OFF icon） |
 
 面板由上而下：說明文字「比對 en_us 與 zh_tw 的 key，列出繁中缺漏的條目（值仍是英文的不在此檢查範圍）。」→ 三列欄位（標籤依序為「英文 (en_us) 來源資料夾」「繁中 (zh_tw) 來源資料夾」「未翻譯報告 輸出資料夾」，預設皆空）→ 「開始檢查」按鈕（主色）。
 
@@ -41,7 +43,7 @@ _on_start(e)
          controls_to_disable=[start_button, en_dir, tw_dir, out_dir],
      )
 ```
-`controls_to_disable` 任務期間禁用，`finally` 自動恢復（由 QCBase 處理）。
+`controls_to_disable` 於任務開始時禁用；任務進入 done 狀態時，由 QCBase 的 `apply_ui` 恢復。
 
 ## FilePicker 流程
 
@@ -69,4 +71,4 @@ Translation Workflow（翻譯執行） → UntranslatedChecker（QC 把關）→
 ## 維護注意
 
 1. 此元件**不自己開執行緒**；一律透過注入的 `task_runner`（QCBase）執行，沿用 QC 共用 progress_bar + log_view。
-2. service 必須是 generator；yield 的 log 逐行寫入 QCView 的 LogView，等級由 `qc_base._guess_level` 依文字推測（含「錯誤」「失敗」→ error，含「警告」→ warning，其餘 info）。
+2. service 必須是 generator；yield 的 log 逐行寫入 QCView 的 LogView，等級由 `qc_base._guess_level` 依文字推測（含「錯誤」「失敗」「ERROR」「❌」→ error，含「警告」「WARN」「⚠」→ warning，其餘 info）。

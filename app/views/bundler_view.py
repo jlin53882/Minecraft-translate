@@ -347,9 +347,6 @@ class BundlerView(BundlerWidgetsMixin, ft.Column):
             self.output_zip_field.value = result
             self._page.update()
 
-    def _on_output_zip_picked(self, e: ft.FilePickerUploadEvent):
-        pass
-
     def _pick_extra_folder(self, e: ft.ControlEvent):
         self._page.run_task(self._async_pick_extra_folder)
 
@@ -360,9 +357,6 @@ class BundlerView(BundlerWidgetsMixin, ft.Column):
             self.extra_folders.append(result)
             self._refresh_extra_folders()
             self._page.update()
-
-    def _on_extra_folder_picked(self, e: ft.FilePickerUploadEvent):
-        pass
 
     def _refresh_extra_folders(self):
         self.extra_folders_view.controls.clear()

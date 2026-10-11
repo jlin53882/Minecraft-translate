@@ -19,10 +19,7 @@ DOCS = sorted((ROOT / "docs").glob("*_VIEW_ARCHITECTURE.md")) + [
     ROOT / "docs" / "UNTRANSLATED_CHECKER_ARCHITECTURE.md"
 ]
 # 文件刻意提到、但不是程式識別字的詞（例如設定鍵、舊名稱的說明）
-NOT_CODE: set[str] = {
-    # MERGE 文件明確說明「舊版文件提到的 skip_zh_cn_switch 已不存在」（歷史名稱）
-    "skip_zh_cn_switch",
-}
+NOT_CODE: set[str] = set()
 
 # 所有 View 都可能引用的共用層（相對於 repo 根目錄的 glob）
 SHARED_SCOPE = (

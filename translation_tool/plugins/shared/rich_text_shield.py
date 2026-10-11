@@ -115,14 +115,6 @@ def _next_escaped_placeholder() -> str:
     return ph
 
 
-def _reset_counters() -> None:
-    """重置計數器（主要用於測試）。"""
-    global _counter_color, _counter_item, _counter_escaped
-    _counter_color = 0
-    _counter_item = 0
-    _counter_escaped = 0
-
-
 def shield_text(text: str) -> ShieldedText:
     """
     掃描 text 中的「不應翻譯」區段，用 Placeholder 取代後回傳乾淨文本。

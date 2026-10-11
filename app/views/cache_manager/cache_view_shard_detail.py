@@ -16,40 +16,6 @@ from app.ui.snack import show_snack
 class CacheShardDetailMixin:
     """CacheView 分片詳情的 SRC 預覽與 DST 編輯。（由 cache_view_shard.py 拆出，#114）"""
 
-    def _dynamic_shard_src_height(self) -> int:
-        """計算 shard src height（跟視窗 height 自適應）。
-
-        規則：
-        - 若 page.height 取得失敗或 <= 0 → 180
-        - 正常：int(page.height * 0.24)，clamp 120..320
-        """
-        try:
-            h = float(getattr(self.page, "height", 0) or 0)
-        except Exception:  # noqa: BLE001
-            h = 0
-
-        if h <= 0:
-            return 180
-
-        return max(120, min(320, int(h * 0.24)))
-
-    def _dynamic_shard_dst_height(self) -> int:
-        """計算 shard dst height（跟視窗 height 自適應）。
-
-        規則：
-        - 若 page.height 取得失敗或 <= 0 → 180
-        - 正常：int(page.height * 0.24)，clamp 120..320
-        """
-        try:
-            h = float(getattr(self.page, "height", 0) or 0)
-        except Exception:  # noqa: BLE001
-            h = 0
-
-        if h <= 0:
-            return 180
-
-        return max(120, min(320, int(h * 0.24)))
-
     def _format_shard_src_text(self, src_text: str, mode: str) -> str:
         """格式化來源文字（raw 或 preview 模式）"""
         src = str(src_text or "")

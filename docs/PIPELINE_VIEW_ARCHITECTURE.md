@@ -2,8 +2,10 @@
 
 ## 定位
 
-PipelineView（`app/views/pipeline/pipeline_view.py`，組版／事件委派／生命週期）是**翻譯工作台**：在單一頁面串起整條流水線（抽取 → 語系比對 → 翻譯 → 打包），可逐步執行或「一鍵製作」自動跑完。`PipelineView` 另建了一個 API 金鑰管理區塊（`api_view`），但目前並未掛到頁面上（`controls` 只含 `workbench_view`）。
+PipelineView（`app/views/pipeline/pipeline_view.py`，組版／事件委派／生命週期）是**翻譯工作台**：在單一頁面串起整條流水線（抽取 → 語系比對 → 翻譯 → 打包），可逐步執行或「一鍵製作」自動跑完。
 
+> 流程圖：[page_flows/pipeline.md](page_flows/pipeline.md)
+>
 > 與各單頁的關係：此頁經 `PipelineActions`（`pipeline_actions.py`）呼叫 service（`run_lang_extraction_service` / `run_book_extraction_service`、`run_merge_folder_batch_service` / `run_merge_zip_batch_service`、`run_lm_translation_service`、`build_bundle_staging` + `run_bundling_service`），不經由 ExtractorView / MergeView / LMView / BundlerView。
 
 ## 檔案結構（app/views/pipeline/）
@@ -18,6 +20,8 @@ PipelineView（`app/views/pipeline/pipeline_view.py`，組版／事件委派／�
 | `pipeline_translate_dialog.py` | `open_translate_dialog(...)` 翻譯參數對話框 |
 | `pipeline_bundle_dialog.py` | `open_bundle_dialog(...)` 打包參數對話框（含 `_load_version_data()`） |
 | `pipeline_one_click_dialog.py` | `open_one_click_dialog(...)` 一鍵製作參數對話框（含 `_load_version_data()`） |
+| `pipeline_forms.py` | 對話框共用的表單狀態（`ExtractFormState` 等）與 `build_*_form` 表單建構 |
+| `pipeline_one_click_bundle_widgets.py` | 一鍵製作步驟 4（打包）的版本與輸出控制項 |
 
 ## 核心類別
 
@@ -105,14 +109,14 @@ PipelineView（`app/views/pipeline/pipeline_view.py`，組版／事件委派／�
    - lang 輸出 → `only_process_lang` 取自對話框步驟 2 的「只處理 lang 檔案」開關（預設 True）
    - book 輸出 → `only_process_lang=False`（需處理 Patchouli 內容）
    - 兩者都輸出到 `merge_output_dir`；前一個來源失敗（`session_failed`）就不處理下一個。
-   - 一鍵對話框步驟 2 沒有「資料夾／ZIP」來源選項（來源固定為步驟 1 的提取輸出，原本的選項從未生效，已移除）。
+   - 一鍵對話框步驟 2 沒有「資料夾／ZIP」來源選項；來源固定為步驟 1 的提取輸出。
    - **不可把資料夾傳給 `run_merge_zip_batch_service`**：它逐一以 ZIP 開啟 `zip_paths`，資料夾會變成 `failed_zips`，實際上什麼都沒合併。
 3. **啟動翻譯**：只翻譯 `translate_input_dirs` 中有檔案的資料夾；沒有待翻譯內容 → 記錄並略過（步驟仍成功）。任一輸入 session.error → 停止。
 4. **打包資源**：
-   - `build_bundle_staging(bundle_sources, bundle_staging_dir)`：清空暫存後，依序疊加各來源的 `assets/`；同路徑 JSON 逐 key 合併（後者覆蓋），其他檔案直接覆蓋，略過待翻譯資料夾。
+   - `build_bundle_staging(bundle_sources, bundle_staging_dir)`（`app/services_impl/pipelines/bundle_service.py`）：增量更新暫存，依序疊加各來源的 `assets/`；同路徑 JSON 逐 key 合併（後者覆蓋），其他檔案直接覆蓋，略過待翻譯資料夾；內容未變的檔案沿用，不再屬於任何來源的殘留檔案由 `_prune_staging` 移除。
    - 暫存為空 → session.set_error()。
    - 否則 `PipelineActions.bundle(input_root_dir=bundle_staging_dir, ...)`；bundle generator 回傳 `error` → session.set_error()。
-   - 先建暫存的原因：打包 generator 遇到多個來源的同路徑檔案會改名（`_1`），不會合併；既有譯文與新譯文必須先疊成一份。
+   - 打包前必須先在暫存目錄中合併各來源：打包 generator 遇到多個來源的同路徑檔案會改名（`_1`）而不合併，因此既有譯文與新譯文須先疊成一份。
 
 全部成功 → `finish_all(True)`；失敗或取消 → `finish_all(False, cancelled=...)`，並恢復按鈕。
 
@@ -164,10 +168,6 @@ core generator 與 service 以 dict 回報進度，欄位皆為選用：
 - 語系比對：部分失敗寫入 summary 的 `failed_*` / `errored_files`（單頁維持批次語意，session 可能是 DONE），一鍵流程以 `session_failed` 視為失敗。
 - 打包：`PipelineActions.bundle` 見到 `error` 即 set_error 並停止迭代。
 
-## API 金鑰管理（api_view）
-
-`api_view` 內含 `keys_container`（以 `_add_key_field` / `_delete_key_field` 增刪 API Key 列）與「儲存設定」按鈕；該按鈕尚未綁定 `on_click`，且 `api_view` 未被加入頁面，所以目前不會顯示。
-
 ## 與其他 View 的關係
 
 - 共用 `TaskSession` + `LogView` widget + `_page.run_task()` 的 UI 更新模式
@@ -183,7 +183,7 @@ core generator 與 service 以 dict 回報進度，欄位皆為選用：
 4. 一鍵流程中資料夾型輸入一律走 folder batch service，不可包成 `zip_paths`。
 5. 新增步驟時要同步：`PipelineProgressPanel.steps`、`PipelineActions.one_click_steps` 的 steps、`PipelineConfig` 路徑 property、`_build_pipeline_steps_and_status_cards` 的步驟列。
 
-## 檔案結構（拆分後）
+## 檔案結構（模組職責）
 
 - `app/views/pipeline/pipeline_view.py`：`PipelineView`（組版、事件委派、按鈕狀態、`will_unmount`／`did_mount`）。
 - `app/views/pipeline/pipeline_actions.py`：`PipelineActions`／`PipelineServices`（service 邊界）。
@@ -191,10 +191,10 @@ core generator 與 service 以 dict 回報進度，欄位皆為選用：
 - `app/views/pipeline/pipeline_config.py`：`PipelineConfig`，由輸入／輸出根目錄推算各步驟的資料夾。
 - `app/views/pipeline/pipeline_progress.py`：`PipelineStepChip`、`PipelineProgressPanel`（步驟標籤與進度面板）。
 - `app/views/pipeline/pipeline_widgets.py`：`PipelineWidgetsMixin`，控制項與版面組裝（`_build_ui`、各 `_build_*` 卡片、`_step_row`）。
-- `app/views/pipeline/pipeline_*_dialog.py`：五個設定對話框（translate、bundle、extract、merge、one_click）。每個對話框用一個 `ctx`（`types.SimpleNamespace`）共享狀態與控制項，handler 是以 `ctx` 為第一個參數的模組層級函式（例如 `_extract_start_extraction`），畫面建構拆成 `_<對話框>_build_*` 函式；測試以 `open_*_dialog` 公開入口驅動（`tests/test_pipeline_*_dialog_behavior.py`）。
+- 五個設定對話框：`pipeline_translate_dialog.py`、`pipeline_bundle_dialog.py`、`pipeline_extract_dialog.py`、`pipeline_merge_dialog.py`、`pipeline_one_click_dialog.py`（皆在 `app/views/pipeline/`）。每個對話框用一個 `ctx`（`types.SimpleNamespace`）共享狀態與控制項，handler 是以 `ctx` 為第一個參數的模組層級函式（例如 `_extract_start_extraction`），畫面建構拆成 `_<對話框>_build_*` 函式；測試以 `open_*_dialog` 公開入口驅動（對應的 `tests/test_pipeline_*_dialog_behavior.py`）。
 
-## 提取對話框的預覽（pipeline_extract_dialog）執行緒契約（#114）
+## 提取對話框的預覽（pipeline_extract_dialog）執行緒契約
 
 「預覽結果」按鈕（sync handler）只建立對話框、`threading.Event`（`cancel_event`）與背景 worker；**JAR 探索（`find_jar_files`，會走訪資料夾）與預覽掃描都在 worker 內**，初始畫面顯示「正在搜尋 JAR...」，JAR 總數由 worker 寫入 `PreviewState.total`。event loop 上的 `_extract_preview_poll` 只讀 `preview_state`。
 
-按「取消」→ `_extract_close_preview_dialog`：設定 `cancel_event`、先送 `open=False` 再移出 overlay；worker 在探索完成後與每筆更新時檢查旗標並停止（結果丟棄）；輪詢在取消後立即結束、不再改動已關閉的對話框。連續開啟／取消不會累積 overlay 或輪詢 task。其餘設定對話框（translate／bundle／extract／merge）關閉時同樣走 `close_overlay_dialog`（`app/ui/dialogs.py`）；「瀏覽」按鈕經 `open_output_folder`（不等待外部程式）。
+按「取消」→ `_extract_close_preview_dialog`：設定 `cancel_event`，再以 `close_overlay_dialog` 關閉對話框；worker 在探索完成後與每筆更新時檢查旗標並停止（結果丟棄）；輪詢在取消後立即結束、不再改動已關閉的對話框。連續開啟／取消不會累積 overlay 或輪詢 task。其餘設定對話框（translate／bundle／extract／merge）關閉時同樣走 `close_overlay_dialog`（`app/ui/dialogs.py`）；「瀏覽」按鈕經 `open_output_folder`（不等待外部程式）。
