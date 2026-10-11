@@ -106,3 +106,27 @@ def test_review_tab_switch_pushes_content_to_the_page_immediately():
     review._toggle_highlight(type("E", (), {"control": ft.Switch(value=False)})())
 
     assert len(updates) == 2
+
+
+def test_highlight_switch_is_only_shown_on_the_diff_tab():
+    """編輯頁沒有可標示的內容；開關放著按了沒反應，所以只在差異預覽顯示。"""
+    import flet as ft
+
+    from app.views.moddb.format_diff_review import FormatDiffReview
+
+    review = FormatDiffReview(context_label="t", editable_control=ft.TextField())
+    review.render("§aHello %s", "你好")
+
+    def has_switch() -> bool:
+        def walk(c):
+            yield c
+            for child in getattr(c, "controls", None) or []:
+                yield from walk(child)
+
+        return any(c is review._highlight_switch for c in walk(review.control.content))
+
+    assert has_switch()
+    review._select_tab("edit")
+    assert not has_switch()
+    review._select_tab("diff")
+    assert has_switch()

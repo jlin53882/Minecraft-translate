@@ -131,33 +131,57 @@ class ReviewScopeController:
         propagate: bool,
     ) -> None:
         panel = self.panel
-        included = [item for item in preview if item.included]
-        skipped = [item for item in preview if not item.included]
-        content = self._build_scope_content(entry, db, included, skipped)
-        actions = self._build_scope_actions(entry, db, preview, included, propagate)
         show_dialog = getattr(panel._page, "show_dialog", None)
-        if callable(show_dialog):
-            show_dialog(
-                ft.AlertDialog(
-                    modal=True,
-                    title=ft.Text(
-                        "確認條目審核", size=20, weight=ft.FontWeight.BOLD, color=C.TEXT
-                    ),
-                    content=content,
-                    actions=actions,
-                    actions_alignment=ft.MainAxisAlignment.END,
-                    scrollable=True,
-                    title_padding=ft.Padding(left=24, top=20, right=24, bottom=8),
-                    content_padding=ft.Padding(left=24, top=8, right=24, bottom=8),
-                    actions_padding=ft.Padding(left=24, top=8, right=24, bottom=20),
-                    inset_padding=ft.Padding.symmetric(horizontal=20, vertical=24),
-                    shape=ft.RoundedRectangleBorder(radius=design.RADIUS_CARD),
-                )
-            )
-        else:
+        if not callable(show_dialog):
             show_snack(
                 panel._page, "目前畫面無法顯示審核範圍確認視窗，未執行審核。", C.GOLD
             )
+            return
+        dialog = ft.AlertDialog(
+            modal=True,
+            title=ft.Text(
+                "確認條目審核", size=20, weight=ft.FontWeight.BOLD, color=C.TEXT
+            ),
+            actions_alignment=ft.MainAxisAlignment.END,
+            scrollable=True,
+            title_padding=ft.Padding(left=24, top=20, right=24, bottom=8),
+            content_padding=ft.Padding(left=24, top=8, right=24, bottom=8),
+            actions_padding=ft.Padding(left=24, top=8, right=24, bottom=20),
+            inset_padding=ft.Padding.symmetric(horizontal=20, vertical=24),
+            shape=ft.RoundedRectangleBorder(radius=design.RADIUS_CARD),
+        )
+        # 開關預設沿用編輯面板的「同步其他版本」；在視窗內切換會重算審核範圍
+        sync_switch = ft.Switch(value=propagate)
+
+        def fill(items: list[ReviewPreviewItem], sync: bool) -> None:
+            included = [item for item in items if item.included]
+            skipped = [item for item in items if not item.included]
+            dialog.content = self._build_scope_content(
+                entry, db, included, skipped, sync_switch
+            )
+            dialog.actions = self._build_scope_actions(entry, db, items, included, sync)
+
+        def on_sync_change(_e=None) -> None:
+            sync = bool(sync_switch.value)
+            try:
+                items = db.preview_manual_review(
+                    entry.id,
+                    expected_zh_tw=entry.zh_tw,
+                    expected_source=entry.source,
+                    expected_review_status=entry.review_status,
+                    expected_checker=entry.checker,
+                    propagate=sync,
+                )
+            except ValueError as exc:
+                panel._page.pop_dialog()
+                self._reject(entry, exc)
+                return
+            fill(items, sync)
+            panel._page.update()
+
+        sync_switch.on_change = on_sync_change
+        fill(preview, propagate)
+        show_dialog(dialog)
 
     def _build_scope_content(
         self,
@@ -165,6 +189,7 @@ class ReviewScopeController:
         db: TranslationDB,
         included: list[ReviewPreviewItem],
         skipped: list[ReviewPreviewItem],
+        sync_switch: ft.Switch,
     ) -> ft.Column:
         """Build the review explanation without changing the review scope."""
         return ft.Column(
@@ -180,6 +205,29 @@ class ReviewScopeController:
                 self._build_entry_comparison(entry, db),
                 ft.Divider(height=1, color=C.LINE),
                 self._build_version_scope(entry, db, included, skipped),
+                ft.Row(
+                    [
+                        ft.Column(
+                            [
+                                ft.Text(
+                                    "同步審核其他版本",
+                                    size=14,
+                                    weight=ft.FontWeight.W_600,
+                                    color=C.TEXT,
+                                ),
+                                ft.Text(
+                                    "只同步原文與目前譯文都相同的版本；關閉則只審核目前版本。",
+                                    size=11.5,
+                                    color=C.MUTED,
+                                ),
+                            ],
+                            spacing=2,
+                            expand=True,
+                        ),
+                        sync_switch,
+                    ],
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                ),
                 ft.Text(
                     "確認後會重新檢查資料是否被其他操作修改；只會處理列出的相同譯文版本，"
                     "不會修改英文原文或略過版本。",
@@ -376,13 +424,6 @@ class ReviewScopeController:
         ]
         others = sum(item.included and item.entry_id != entry.id for item in preview)
         if propagate and others:
-            actions.append(
-                kit.button(
-                    "僅審核目前版本",
-                    "secondary",
-                    on_click=lambda _e=None: self.execute(entry, db, False),
-                )
-            )
             label = f"確認審核 {len(included)} 版"
         else:
             label = "確認審核目前版本"

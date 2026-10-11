@@ -2262,3 +2262,63 @@ def test_late_save_from_another_database_does_not_touch_the_flagged_list(
 
     assert entries.entry_ids == [entry.id]
     assert panel.stat_flagged.value_text.value == "1"
+
+
+def test_review_dialog_sync_switch_defaults_on_and_recomputes_scope(db_path):
+    """審核視窗內有「同步審核其他版本」開關：預設開啟（沿用編輯面板），切換會重算範圍。"""
+    from app.views.moddb.entries_panel import EntriesPanel
+    from tests.test_moddb_view import texts_of
+
+    db = TranslationDB(db_path)
+    for version in ("1.21.1", "1.20.1"):
+        db.ingest(
+            version,
+            [
+                ScanItem(
+                    KIND_LANG,
+                    "foo",
+                    "item.review",
+                    "Minecraft",
+                    "Minecraft",
+                    source=SRC_AI,
+                )
+            ],
+        )
+    page = mock_page()
+    page.run_thread = lambda target: target()
+    panel = EntriesPanel(page, lambda: db)
+    panel.refresh()
+    assert panel.sync_row.value is True
+    panel.tw_field.value = panel.selected.zh_tw
+    panel._on_text_change()
+
+    panel._confirm()
+    dialog = page.overlay[-1]
+    switches = [c for c in _walk(dialog.content) if type(c).__name__ == "Switch"]
+    assert len(switches) == 1 and switches[0].value is True
+    assert "同步審核其他版本" in "\n".join(texts_of(dialog.content))
+    assert dialog.actions[-1].content == "確認審核 2 版"
+
+    switches[0].value = False
+    switches[0].on_change(None)
+    assert dialog.actions[-1].content == "確認審核目前版本"
+    assert "已選擇僅審核目前版本" in "\n".join(texts_of(dialog.content))
+
+    dialog.actions[-1].on_click(None)
+    reviewed = [
+        version
+        for version in ("1.21.1", "1.20.1")
+        for row in db.list_entries(version)[0]
+        if row.review_status == "reviewed"
+    ]
+    assert reviewed == ["1.21.1"]
+    db.close()
+
+
+def _walk(control):
+    yield control
+    for child in getattr(control, "controls", None) or []:
+        yield from _walk(child)
+    inner = getattr(control, "content", None)
+    if inner is not None:
+        yield from _walk(inner)
