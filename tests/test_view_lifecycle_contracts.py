@@ -581,11 +581,10 @@ def test_every_open_folder_handler_goes_through_the_non_blocking_service():
 
 
 def test_views_with_debounced_work_cancel_it_on_unmount():
-    from app.views import cache_view, rules_view
+    from app.views import rules_view
     from app.views.icon_preview_view import IconPreviewView
 
     for cls, attrs in (
-        (cache_view.CacheView, ["_update_debouncer"]),
         (rules_view.RulesView, ["_search_debouncer"]),
         (IconPreviewView, ["_mod_search_debouncer", "_detail_search_debouncer"]),
     ):
