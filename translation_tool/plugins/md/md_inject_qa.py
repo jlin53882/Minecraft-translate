@@ -154,15 +154,6 @@ def is_token_line(line: str) -> bool:
     return False
 
 
-def is_text_line_old(line: str) -> bool:
-    """判斷是否為文字行（舊版）。
-    判斷「原始 md」中的某一行是否視為可翻文字行：
-      - 非空行
-      - 非 token 行
-    """
-    return bool(line.strip()) and (not is_token_line(line))
-
-
 def is_text_line(line: str) -> bool:
     """
     判斷「原始 md」中的某一行是否視為可回寫的文字行：
@@ -265,45 +256,6 @@ def load_items_from_json(json_path: Path) -> Tuple[str, List[Item]]:
             )
         )
     return source_md, items
-
-
-def apply_item_to_md_lines_old(md_lines: List[str], item: Item) -> None:
-    """
-    在 md_lines 上原地套用一個 item（只替換文字行，token/空行不動）
-    """
-    # Python list index：0-based
-    a = max(item.start_line - 1, 0)
-    b = min(item.end_line - 1, len(md_lines) - 1)
-    if a > b:
-        return
-
-    # 1) 找範圍內所有「文字行」的位置
-    text_line_indices: List[int] = []
-    for idx in range(a, b + 1):
-        if is_text_line(md_lines[idx]):
-            text_line_indices.append(idx)
-
-    if not text_line_indices:
-        return
-
-    # 2) 把翻譯文本 flatten 成段落級，再拆成「段落行」
-    #    注意：這裡的「段落行」是指我們準備拿來填回原 md 的文字行集合
-    flat = flatten_for_md(item.text)
-
-    # 3) 將 flat 轉成要寫回的「文字行序列」
-    #    - 原 md 的文字行可能本來是一行一段，也可能多行
-    #    - 我們採保守策略：用 flat 的每一行去對應原本的文字行
-    new_text_lines = flat.splitlines()
-    # 去掉空白行（空白行代表段落分隔；原 md 的空白行我們不動）
-    new_text_lines = [x for x in new_text_lines if x.strip()]
-
-    # 4) 一對一替換：只替換既有文字行數量範圍
-    n = min(len(text_line_indices), len(new_text_lines))
-    for i in range(n):
-        idx = text_line_indices[i]
-        # 保留原本縮排（如果有的話）
-        lead = re.match(r"^\s*", md_lines[idx]).group(0)
-        md_lines[idx] = lead + new_text_lines[i]
 
     # 5) 若翻譯後行數少於原文字行：剩下的文字行維持原樣（最保守，避免刪內容）
     #    若翻譯後行數多於原文字行：多的先不插入（避免破壞結構）

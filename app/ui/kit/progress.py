@@ -104,6 +104,3 @@ class ProgressRing(ft.Stack):
         if sub is not None:
             self.sub.value = sub
             self.sub.visible = bool(sub)
-
-    def set_tone(self, tone: str) -> None:
-        self.ring.color = get_tone(tone).fg

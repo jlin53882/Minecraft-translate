@@ -1,6 +1,6 @@
-"""app/views/moddb/char_inspector.py：條目校對的「顯示特殊字元」對照框。
+"""app/views/moddb/char_inspector.py：條目校對清單的捲軸外框。
 
-開關打開後，把原文與譯文的換行（↵）、行首行尾空白（·）、格式碼與佔位符攤開對照。
+特殊字元對照框本身在 ``format_diff_viewer.FormatDiffViewer``。
 """
 
 from __future__ import annotations
@@ -8,9 +8,6 @@ from __future__ import annotations
 import flet as ft
 
 from app.ui.design import C
-from app.views.moddb.format_diff_viewer import FormatDiffViewer
-
-CharInspector = FormatDiffViewer
 
 
 def scrolling_list(list_view: ft.ListView) -> ft.Container:

@@ -55,7 +55,6 @@ NESTED_DIRS = ("META-INF/jarjar/", "META-INF/jars/")
 # 書籍檔的「命名空間資源 ID」（如 patchouli:basics）是引用不是文字；直接匯入時只跳過這一種結構值
 _RESOURCE_ID = re.compile(r"^#?[a-z0-9_.-]+:[a-z0-9_./-]+$")
 MAX_NESTED_DEPTH = 3
-CONVERT_MODE = "s2twp"
 
 
 @dataclass(frozen=True)

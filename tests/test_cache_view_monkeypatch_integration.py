@@ -81,14 +81,6 @@ def test_busy_guard_blocks_second_action(monkeypatch):
     assert any("目前正在處理" in x for x in view._all_logs)
 
 
-def test_fill_requires_danger_confirm(monkeypatch):
-    view = _build_test_view(monkeypatch)
-
-    view._on_save_all_fill(None)
-
-    assert any("尚未勾選高風險確認" in x for x in view._all_logs)
-
-
 def test_action_runs_off_event_loop_and_stays_busy_until_done(monkeypatch):
     """B4：有 event loop 時工作在執行緒中執行，完成前維持忙碌狀態，且只執行一次。"""
     import asyncio

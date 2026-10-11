@@ -343,15 +343,6 @@ class CacheSearchEngine:
             for row in rows
         ]
 
-    def clear_index(self):
-        """清空索引（慎用！）"""
-        with self._lock:
-            try:
-                self.conn.execute("DELETE FROM cache_fts")
-            except sqlite3.OperationalError:
-                self.conn.execute("DELETE FROM cache_basic")
-            self.conn.commit()
-
     def clear_index_by_type(self, cache_type: str):
         """只清空指定類型的索引資料。"""
         with self._lock:

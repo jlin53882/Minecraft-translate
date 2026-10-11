@@ -161,16 +161,6 @@ class CacheView(
 
         self._build_query_widgets()
 
-    # =========================================================
-    # 效能優化：髒標記機制（PR5-7 整合）
-    # =========================================================
-    def _mark_dirty(self, area: str):
-        """標記某區域需要更新"""
-        if area not in self._dirty_flags:
-            return
-        self._dirty_flags[area] = True
-        self._schedule_update()
-
     def _schedule_update(self):
         """排程更新（debounce 100ms）"""
         # 防呆：確保已在 page 上
@@ -478,18 +468,6 @@ class CacheView(
                 self.ui_busy
                 or getattr(self, "shard_history_selected_event", None) is None
             )
-
-    # 與舊測試相容：集中提交 UI 更新
-    def commit_ui(self, controls=None):
-        """批次更新多個 UI 控制項"""
-        try:
-            for c in controls or []:
-                if hasattr(c, "update"):
-                    c.update()
-            if hasattr(self, "page") and self.page:
-                self.update()
-        except Exception as ex:  # noqa: BLE001
-            self._append_log(f"[WARN] UI refresh 異常: {ex}")
 
     def _append_log(self, text: str):
         """新增日誌訊息並根據等級記錄"""

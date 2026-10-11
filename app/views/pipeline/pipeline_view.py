@@ -55,7 +55,6 @@ class PipelineView(PipelineWidgetsMixin, ft.Column):
         )
         self.progress_bar = kit.progress_bar(0, "em", height=8)
         self.progress_status = ft.Text("等待任務啟動...", size=12, color=C.MUTED)
-        self.keys_container = ft.Column(spacing=10)
         self._run_buttons: list[ft.Button] = []
 
         self.actions = actions or PipelineActions()
