@@ -118,7 +118,6 @@ class CacheShardWidgetsMixin:
             border=ft.Border.all(1, C.LINE),
             border_radius=8,
             bgcolor=C.PANEL,
-            alignment=ft.alignment.Alignment(-1, -1),
             content=self.shard_src_field,
         )
 
@@ -158,7 +157,6 @@ class CacheShardWidgetsMixin:
             border=ft.Border.all(1, C.LINE),
             border_radius=8,
             bgcolor=C.PANEL,
-            alignment=ft.alignment.Alignment(-1, -1),
             content=self.shard_dst_field,
         )
 
@@ -268,7 +266,8 @@ class CacheShardWidgetsMixin:
                 ],
                 spacing=8,
                 expand=True,
-                horizontal_alignment=ft.CrossAxisAlignment.START,
+                # 輸入框隨視窗寬度延展，不用固定寬度
+                horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
             ),
         )
 

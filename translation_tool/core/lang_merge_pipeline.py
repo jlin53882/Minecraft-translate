@@ -289,9 +289,15 @@ def _process_single_mod(
             else:
                 _write_bytes_atomic(final_output_path, dump_json_bytes(final_tw))
 
-        write_translation_provenance(
-            output_dir, final_output_rel, source_provenance_by_key
-        )
+        try:
+            write_translation_provenance(
+                output_dir, final_output_rel, source_provenance_by_key
+            )
+        except OSError as exc:
+            # 譯文檔已寫入；來源標記只影響畫面標籤，不應讓整個模組失敗
+            log_warning(
+                f"{log_prefix}譯文已寫入，但來源標記檔更新失敗（已重試）: {exc}"
+            )
 
         log_info(f"{log_prefix}完成，pending 條目: {pending_count}")
         return {

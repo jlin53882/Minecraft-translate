@@ -37,7 +37,7 @@ from app.ui.design import C
 from app.ui.kit.inputs import BUTTON_HEIGHTS
 from app.ui.poller import PollerHandle
 from app.ui.snack import show_snack
-from app.ui.status_chip import apply_status_style, set_chip_status
+from app.ui.status_chip import apply_status_style, make_status_chip, set_chip_status
 from app.views._log import LogView, load_ui_logging_config
 from app.views.moddb import retranslation_controller
 from app.views.moddb.formatting import format_count
@@ -120,10 +120,10 @@ class TranslatePanel(ft.Column):
             on_change=lambda _e: self._on_limit_changed(),
         )
         self.cache_row = kit.SwitchRow(
-            "同時寫入翻譯快取",
-            "結果除了寫進資料庫，也寫入「快取資料」資料夾的翻譯快取，原本的機器翻譯頁也能直接命中。"
-            "（設定裡 enable_cache_saving 關閉時不會寫入）",
-            True,
+            "每次寫入新快取分片",
+            "結果一律也寫入「快取資料」資料夾的翻譯快取。關閉（預設）時寫入編號分片，滿 2,500 筆自動換下一片；"
+            "開啟時每次執行都另存成獨立的分片。（設定裡 enable_cache_saving 關閉時不會寫入）",
+            False,
         )
         self.scope_card = kit.section_card(
             "1　選擇要機翻的範圍",
@@ -151,7 +151,7 @@ class TranslatePanel(ft.Column):
         )
 
     def _build_run_card(self) -> None:
-        self.status_chip = ft.Chip(label=ft.Text("尚未開始"))
+        self.status_chip = make_status_chip("尚未開始")
         apply_status_style(self.status_chip, "neutral")
         self.progress_bar = kit.progress_bar(0, "em", height=8)
         # 批次、已處理筆數、已用時間、預估剩餘時間、預計完成時刻（每批結束更新）
@@ -522,7 +522,7 @@ class TranslatePanel(ft.Column):
             limit=self.limit(),
             dry_run=dry_run,
             reuse_other_versions=bool(self.reuse_row.value),
-            write_cache=bool(self.cache_row.value),
+            new_cache_shard=bool(self.cache_row.value),
             repair_newline_only=(
                 self._repair_mode == "quality_mismatch"
                 and bool(self.repair_newline_row.value)

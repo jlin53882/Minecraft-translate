@@ -24,7 +24,7 @@ LMView 是 **LM（Large Model）翻譯執行頁**，對已提取的 assets 資�
 | `stat_progress` / `stat_elapsed` | `kit.stat_card` | 進度百分比 / 已用時間（`format_elapsed`） |
 | `stat_keys` | `kit.stat_card` | 可用 API Key 數（`refresh_key_stat()`，經 `summarize_keys(get_key_health_snapshot())`，讀不到設定時不更新）；`lm_translator.provider` 為 `chatgpt` 時改顯示 ChatGPT 登入狀態（`chatgpt_account_status()`） |
 | `stat_cache` | `kit.stat_card` | 快取寫入頻率（每 N 批次寫入一次） |
-| `status_chip` | Chip | 狀態顯示（`_set_status(text, tone)`，tone 為色組名稱） |
+| `status_chip` | Container（`make_status_chip`） | 狀態顯示（`_set_status(text, tone)`，tone 為色組名稱） |
 | `start_button` / `cancel_button` | `kit.button` | 執行中 `_set_running(True)`：停用開始、啟用取消；`cancel_clicked` 呼叫 `session.request_cancel()` |
 | `progress_bar` | `kit.progress_bar` | 進度條 |
 | `log_view` | LogView | `mode="tail"`，`tail_lines` 由 `load_ui_logging_config()` 讀取（預設 250），每次開始任務時以 `set_tail_lines` 套用最新設定 |

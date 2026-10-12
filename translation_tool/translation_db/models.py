@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 
 
@@ -463,3 +464,53 @@ class EffectiveSourceStat:
     source: int | None
     review_status: str | None
     count: int
+
+
+@dataclass(frozen=True)
+class BulkReviewCandidate:
+    """批量審核預覽中的一筆條目快照（確認時逐欄比對，任何變動都要求重新預覽）。"""
+
+    entry_id: int
+    mod_id: str
+    key: str
+    en_us: str
+    zh_tw: str
+    source: int | None
+    checker: str | None
+    review_status: str | None
+    revision: int | None
+    # 同條目的人工譯文（來源 6）快照：生效來源不是人工時，人工譯文仍會被審核覆寫
+    manual_zh_tw: str | None = None
+    manual_checker: str | None = None
+    manual_review_status: str | None = None
+    manual_revision: int | None = None
+
+
+@dataclass(frozen=True)
+class BulkReviewPlan:
+    """「版本 + 目前生效來源」批量審核的預覽結果。"""
+
+    version: str
+    source: int
+    quality_pass_only: bool
+    propagate: bool
+    database_identity: str
+    candidates: tuple[BulkReviewCandidate, ...]
+    # 開啟同步時，每個候選條目的其他版本快照：
+    # (候選 entry_id, 會被寫入的其他版本筆數, 其中目前譯文不同（會被取代）的筆數, 狀態摘要)
+    # 摘要涵蓋所有原文相同的其他版本的譯文、來源與審核狀態，確認時逐筆比對
+    sibling_info: tuple[tuple[int, int, int, str], ...] = ()
+
+    def sibling_totals(self, excluded: Iterable[int] = ()) -> tuple[int, int]:
+        """扣掉被排除的條目後，同步會寫入的其他版本筆數與其中會取代不同譯文的筆數。"""
+        skip = set(excluded)
+        rows = [info for info in self.sibling_info if info[0] not in skip]
+        return sum(r[1] for r in rows), sum(r[2] for r in rows)
+
+
+@dataclass(frozen=True)
+class BulkReviewResult:
+    batch: str
+    reviewed: int  # 被審核的所選版本條目數
+    synced: int  # 同步審核的其他版本條目數
+    stale_skipped: int  # 確認當下已被其他操作改動而略過的條目數

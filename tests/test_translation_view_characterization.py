@@ -85,7 +85,7 @@ def test_reset_md_inputs_restores_defaults_and_appends_log(monkeypatch):
     view.md_step_extract.value = False
     view.md_step_translate.value = False
     view.md_step_inject.value = False
-    view.md_write_new_cache.value = False
+    view.md_write_new_cache.value = True
     view.md_lang_mode.value = "all"
 
     view._reset_md_inputs()
@@ -95,7 +95,7 @@ def test_reset_md_inputs_restores_defaults_and_appends_log(monkeypatch):
     assert view.md_step_extract.value is True
     assert view.md_step_translate.value is True
     assert view.md_step_inject.value is True
-    assert view.md_write_new_cache.value is True
+    assert view.md_write_new_cache.value is False
     assert view.md_lang_mode.value == "non_cjk_only"
     assert (
         view.log_view._list_view.controls[-1].value
@@ -115,7 +115,7 @@ def test_reset_kjs_inputs_restores_defaults_and_appends_log(monkeypatch):
     view.kjs_step_extract.value = False
     view.kjs_step_translate.value = False
     view.kjs_step_inject.value = False
-    view.kjs_write_new_cache.value = False
+    view.kjs_write_new_cache.value = True
 
     view._reset_kjs_inputs()
 
@@ -124,7 +124,7 @@ def test_reset_kjs_inputs_restores_defaults_and_appends_log(monkeypatch):
     assert view.kjs_step_extract.value is True
     assert view.kjs_step_translate.value is True
     assert view.kjs_step_inject.value is True
-    assert view.kjs_write_new_cache.value is True
+    assert view.kjs_write_new_cache.value is False
 
 
 def test_reset_ftb_inputs_restores_defaults(monkeypatch):
@@ -140,7 +140,7 @@ def test_reset_ftb_inputs_restores_defaults(monkeypatch):
     view.ftb_step_clean.value = False
     view.ftb_step_translate.value = False
     view.ftb_step_inject.value = False
-    view.ftb_write_new_cache.value = False
+    view.ftb_write_new_cache.value = True
 
     view._reset_ftb_inputs()
 
@@ -150,7 +150,7 @@ def test_reset_ftb_inputs_restores_defaults(monkeypatch):
     assert view.ftb_step_clean.value is True
     assert view.ftb_step_translate.value is True
     assert view.ftb_step_inject.value is True
-    assert view.ftb_write_new_cache.value is True
+    assert view.ftb_write_new_cache.value is False
     assert (
         view.log_view._list_view.controls[-1].value
         == "[UI] 已重置：FTB Quests 輸入已清空"
@@ -253,7 +253,7 @@ def test_kjs_controls_accessible_and_resettable(monkeypatch):
     view.kjs_step_extract.value = False
     view.kjs_step_translate.value = False
     view.kjs_step_inject.value = False
-    view.kjs_write_new_cache.value = False
+    view.kjs_write_new_cache.value = True
 
     view._reset_kjs_inputs()
 
@@ -262,7 +262,7 @@ def test_kjs_controls_accessible_and_resettable(monkeypatch):
     assert view.kjs_step_extract.value is True
     assert view.kjs_step_translate.value is True
     assert view.kjs_step_inject.value is True
-    assert view.kjs_write_new_cache.value is True
+    assert view.kjs_write_new_cache.value is False
 
 
 def test_run_kjs_calls_run_kjs_service(monkeypatch):

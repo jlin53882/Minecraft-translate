@@ -205,10 +205,12 @@ class FormatDiffReview:
         edit_mode = self._tab == "edit" and has_editor
         if self._meta_controls and not edit_mode:
             content.append(ft.Row(self._meta_controls, spacing=6, wrap=True))
+        # 「標示缺漏」只作用在差異預覽；編輯頁沒有可標示的內容，開關放著會像壞掉
+        switch = [] if edit_mode else [self._highlight_switch]
         if self._tabs.visible:
             content.append(
                 ft.Row(
-                    [self._tabs, ft.Container(expand=True), self._highlight_switch],
+                    [self._tabs, ft.Container(expand=True), *switch],
                     vertical_alignment=ft.CrossAxisAlignment.CENTER,
                 )
             )
@@ -218,7 +220,7 @@ class FormatDiffReview:
                     [
                         ft.Text("差異預覽", size=12, color=C.MUTED),
                         ft.Container(expand=True),
-                        self._highlight_switch,
+                        *switch,
                     ],
                     vertical_alignment=ft.CrossAxisAlignment.CENTER,
                 )

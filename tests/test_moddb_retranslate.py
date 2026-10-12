@@ -1105,7 +1105,7 @@ def repair_cache(monkeypatch):
     monkeypatch.setattr(
         moddb_retranslate_service,
         "save_translation_cache_keys",
-        lambda cache_type, keys, *, expected_versions: (
+        lambda cache_type, keys, *, expected_versions, write_new_shard=True: (
             events.append(("save", cache_type, set(keys), dict(expected_versions)))
             or SimpleNamespace(
                 saving_enabled=True,
@@ -1449,7 +1449,9 @@ def test_cache_exceptions_do_not_stop_later_repair_batches(
         fail_once("add")
         return SimpleNamespace(accepted=True, changed=True, generation=1)
 
-    def save_translation_cache_keys(_cache_type, keys, *, expected_versions):
+    def save_translation_cache_keys(
+        _cache_type, keys, *, expected_versions, write_new_shard=True
+    ):
         fail_once("save")
         assert set(expected_versions) == set(keys)
         return SimpleNamespace(

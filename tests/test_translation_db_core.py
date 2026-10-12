@@ -535,11 +535,13 @@ def test_review_preview_shows_sync_and_skipped_sibling_reasons(db):
         expected_review_status=None,
         propagate=True,
     )
-    assert {row.mc_version for row in preview if row.included} == {"1.21.1", "1.20.1"}
-    assert (
-        next(row for row in preview if row.mc_version == "1.19.2").reason
-        == "目前生效譯文不同"
-    )
+    assert {row.mc_version for row in preview if row.included} == {
+        "1.21.1",
+        "1.20.1",
+        "1.19.2",
+    }
+    different = next(row for row in preview if row.mc_version == "1.19.2")
+    assert different.included and different.reason == "原文相同但目前生效譯文不同"
 
     local_only = db.preview_manual_review(
         selected.id,
@@ -1259,7 +1261,7 @@ def test_manual_review_state_filter_matches_list_and_count(db):
     assert reviewed[0].review_status == "reviewed"
 
 
-def test_review_sync_only_marks_versions_currently_showing_same_text(db):
+def test_review_sync_replaces_other_versions_even_with_different_text(db):
     db.ingest("1.21.1", [item(tw="相同譯文")])
     db.ingest("1.20.1", [item(tw="相同譯文")])
     db.ingest("1.19.2", [item(tw="不同譯文")])
@@ -1271,18 +1273,21 @@ def test_review_sync_only_marks_versions_currently_showing_same_text(db):
         actor="reviewer",
         propagate=True,
     )
-    assert {change.mc_version for change in done} == {"1.21.1", "1.20.1"}
-    for version in ("1.21.1", "1.20.1"):
+    assert {change.mc_version for change in done} == {"1.21.1", "1.20.1", "1.19.2"}
+    for version in ("1.21.1", "1.20.1", "1.19.2"):
         manual = next(
             row
             for row in db.entry_detail(db.list_entries(version)[0][0].id).translations
             if row.source == SRC_MANUAL
         )
-        assert manual.review_status == "reviewed"
-    assert all(
-        row.source != SRC_MANUAL
-        for row in db.entry_detail(db.list_entries("1.19.2")[0][0].id).translations
-    )
+        assert manual.review_status == "reviewed" and manual.zh_tw == "相同譯文"
+
+    # 被取代的譯文留在歷史，整批還原後 1.19.2 回到原本的來源譯文
+    other = db.list_entries("1.19.2")[0][0]
+    history = db.entry_detail(other.id).history[0]
+    assert history.old_zh_tw == "不同譯文"
+    db.revert(history.id, whole_batch=True)
+    assert db.list_entries("1.19.2")[0][0].zh_tw == "不同譯文"
 
 
 def _make_v1_db(path):

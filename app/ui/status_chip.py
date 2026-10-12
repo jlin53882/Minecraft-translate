@@ -21,15 +21,32 @@ def resolve_tone_name(value) -> str:
     return snack_style(value)[0]
 
 
-def apply_status_style(chip: ft.Chip, tone) -> None:
+def make_status_chip(text: str = "尚未開始", tone="neutral") -> ft.Container:
+    """建立狀態晶片（膠囊容器，文字控制項在 ``.label``）。
+
+    不用 ``ft.Chip``：它沒有 ``on_click``／``on_select`` 時 Flutter 視為停用並整體淡化，
+    語意色看不出來。
+    """
+    label = ft.Text(text, size=12.5, no_wrap=True)
+    chip = ft.Container(
+        padding=ft.Padding.symmetric(horizontal=10, vertical=5),
+        border_radius=16,
+        content=label,
+    )
+    chip.label = label  # type: ignore[attr-defined]
+    apply_status_style(chip, tone)
+    return chip
+
+
+def apply_status_style(chip: ft.Container, tone) -> None:
     """把狀態晶片設成指定色組（接受色組名稱或舊背景色）。"""
     t = get_tone(resolve_tone_name(tone))
     chip.bgcolor = t.bg
-    chip.label_text_style = ft.TextStyle(color=t.fg, size=12.5)
-    chip.side = ft.BorderSide(1, t.line)
+    chip.label.color = t.fg
+    chip.border = ft.Border.all(1, t.line)
 
 
-def set_chip_status(chip: ft.Chip, text: str, tone="neutral") -> None:
+def set_chip_status(chip: ft.Container, text: str, tone="neutral") -> None:
     """更新晶片文字與色組。"""
-    chip.label = ft.Text(text)
+    chip.label.value = text
     apply_status_style(chip, tone)

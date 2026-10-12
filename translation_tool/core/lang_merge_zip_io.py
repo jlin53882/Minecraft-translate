@@ -13,6 +13,7 @@ from typing import Any
 import orjson as json
 
 from ..utils.config_manager import load_config
+from ..utils.file_replace import replace_with_retry
 from ..utils.log_unit import log_error, log_warning
 from ..utils.zip_safety import UnsafePathError, read_limited, safe_join
 
@@ -116,7 +117,7 @@ def _write_bytes_atomic(path: str, data: bytes) -> None:
         f.write(data)
     # 4. 原子性替換：將完整的臨時檔案替換為目標檔案。
     #    這個操作在大多數 OS 上是原子的，防止在寫入過程中斷電或崩潰導致檔案損壞。
-    os.replace(tmp, path)
+    replace_with_retry(tmp, path)
 
 
 def _write_text_atomic(path: str, text: str) -> None:
@@ -136,7 +137,7 @@ def _write_text_atomic(path: str, text: str) -> None:
     with open(tmp, "w", encoding="utf-8") as f:
         f.write(text)
     # 4. 原子性替換
-    os.replace(tmp, path)
+    replace_with_retry(tmp, path)
 
 
 def quarantine_copy_from_zip(

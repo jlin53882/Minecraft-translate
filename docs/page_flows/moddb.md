@@ -6,7 +6,7 @@
 
 - `ModDbView`（`app/views/moddb_view.py`）持有唯一的資料庫連線 `_db`、四個頁籤的顯示切換，以及跨頁籤的快照失效與背景刷新。
 - 四個頁籤位於 `app/views/moddb/`：`OverviewPanel`（`overview_panel.py`）、`EntriesPanel`（`entries_panel.py`）、`ScanPanel`（`scan_panel.py`）、`TranslatePanel`（`translate_panel.py`）。
-- 批次取代對話框 `BatchReplaceDialog`（`batch_replace_dialog.py`）由條目校對頁開啟；AI 修復逐筆審查 `RepairReviewer`（`repair_reviewer.py`）由批次機翻的結果檢視開啟。
+- 批次取代對話框 `BatchReplaceDialog`（`batch_replace_dialog.py`）與批量審核對話框 `BulkReviewDialog`（`bulk_review_dialog.py`）由條目校對頁開啟；AI 修復逐筆審查 `RepairReviewer`（`repair_reviewer.py`）由批次機翻的結果檢視開啟。
 - 實際寫入與掃描邏輯在 `app/services_impl/` 下的 moddb 系列模組（例如 `moddb_service.py`、`moddb_translate_service.py`、`moddb_retranslate_service.py`），資料庫方法在 `translation_tool/translation_db/repository.py`。
 
 ## 主要流程
@@ -73,7 +73,9 @@ flowchart TD
     I -- 否 --> L["僅顯示結果，不改動畫面狀態"]
 ```
 
-人工審核走 `ReviewScopeController`（`review_scope_dialog.py`）：`confirm` 先呼叫 `preview_manual_review` 顯示影響範圍，確定後 `execute` 呼叫 `review_manual`。還原單筆或整批分別由 `_revert`（`db.revert`）與 `_revert_batch`（`db.revert_batch_replace`）處理。
+人工審核走 `ReviewScopeController`（`review_scope_dialog.py`）：`confirm` 先呼叫 `preview_manual_review` 顯示影響範圍；確認視窗內有「同步審核其他版本」開關，預設沿用編輯面板的同步開關，切換時重算範圍；確定後 `execute` 呼叫 `review_manual`。批量審核由 `BulkReviewDialog` 負責：選一個版本與一個「目前生效來源」（皆單選），預設只審核格式檢查通過的條目、不同步其他版本；`_preview` 呼叫 `preview_bulk_review` 產生預覽（每頁 50 筆，可逐筆排除），`_confirm` 呼叫 `execute_bulk_review`，完成後可用 `_revert`（`revert_review_batch`）整批還原。選項改變時舊預覽立即失效；確認時資料庫會重算範圍，與預覽不同就拒絕並要求重新預覽。
+
+還原單筆或整批分別由 `_revert`（`db.revert`）與 `_revert_batch`（`db.revert_batch_replace`）處理。
 
 ### 批次機翻與異常清單
 
@@ -99,6 +101,8 @@ flowchart TD
 ### AI 修復既有譯文與逐筆審查
 
 修復有兩種模式：`quality_mismatch`（來源譯文特殊字元修復）與 `same_source_ai`（舊 AI 同原文重翻）。先預覽、再確認、最後才送 AI。
+
+修復與「1　選擇要機翻的範圍」共用同一組遊戲版本、模組與單次上限（`TranslatePanel.build_options`），AI 修復的快取寫入也遵循「每次寫入新快取分片」；「先沿用其他版本的相同譯文」只影響一般機翻。修復卡片頂端以 `repair_card.SCOPE_HINT` 說明這點。
 
 ```mermaid
 flowchart TD
