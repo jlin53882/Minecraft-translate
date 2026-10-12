@@ -31,6 +31,13 @@ from app.ui.design import tone as get_tone
 from app.ui.snack import show_snack
 from app.views.cache_manager.cache_actions import run_cache_action
 from app.views.cache_manager.cache_overview_panel import build_overview_page
+from app.views.cache_manager.cache_status_text import (
+    active_shard_usage,
+    dirty_label,
+    entries_line,
+    has_active_shard,
+    shard_line,
+)
 from translation_tool.utils.log_unit import log_warning
 
 
@@ -178,24 +185,24 @@ class CacheOverviewMixin:
 
     def _type_card(self, ctype: str, st: dict) -> ft.Container:
         """單一快取類型的狀態卡片。"""
-        entries_count = st.get("entries_count", 0)
-        new_count = st.get("session_new_count", 0)
         dirty = bool(st.get("is_dirty", False))
-        shard = st.get("active_shard_id", "-")
-        shard_entries = int(st.get("active_shard_entries", 0) or 0)
-        shard_capacity = int(st.get("shard_capacity", 2500) or 2500)
-        usage_ratio = (
-            min(1.0, shard_entries / shard_capacity) if shard_capacity > 0 else 0.0
-        )
-
+        shard_entries, shard_capacity = active_shard_usage(st)
+        show_usage = has_active_shard(st)
+        usage_ratio = min(1.0, shard_entries / shard_capacity)
         usage_tone = (
             "red" if usage_ratio >= 1.0 else "gold" if usage_ratio >= 0.9 else "dia"
         )
-        status_chip = kit.chip(
-            "有變更" if dirty else "無變更", "gold" if dirty else "em"
-        )
-
-        actions = self._type_actions_row(ctype)
+        header: list[ft.Control] = [
+            ft.Text(
+                ctype,
+                weight=ft.FontWeight.BOLD,
+                color=C.TEXT,
+                font_family=design.FONT_MONO,
+            ),
+            ft.Container(expand=True),
+        ]
+        if dirty:  # 只在需要處理時才標示，平常「無變更」不佔視覺
+            header.append(kit.chip(dirty_label(True), "gold"))
 
         return ft.Container(
             border=ft.Border.all(1, C.LINE),
@@ -204,69 +211,38 @@ class CacheOverviewMixin:
             padding=14,
             content=ft.Column(
                 [
-                    ft.Row(
-                        [
-                            ft.Text(
-                                ctype,
-                                weight=ft.FontWeight.BOLD,
-                                color=C.TEXT,
-                                font_family=design.FONT_MONO,
-                            ),
-                            ft.Container(expand=True),
-                            status_chip,
-                        ]
-                    ),
+                    ft.Row(header),
+                    ft.Text(entries_line(st), size=12, color=C.TEXT),
                     ft.Text(
-                        f"筆數 {entries_count:,}　新增 {new_count:,}　分片 {shard}",
-                        size=12,
-                        color=C.MUTED,
-                    ),
-                    ft.Text(
-                        f"分片使用率 {shard_entries:,} / {shard_capacity:,}",
+                        shard_line(st),
                         size=11,
                         color=get_tone(usage_tone).fg,
                     ),
-                    kit.progress_bar(usage_ratio, usage_tone, height=6),
-                    actions,
+                    *(
+                        [kit.progress_bar(usage_ratio, usage_tone, height=6)]
+                        if show_usage
+                        else []
+                    ),
+                    self._type_actions_row(ctype),
                 ],
                 spacing=8,
             ),
         )
 
     def _type_actions_row(self, ctype: str) -> ft.Row:
-        """單一類型的操作按鈕列。"""
+        """單一類型的操作按鈕列（全部直接展開）。"""
+        buttons = (
+            ("重新載入", ft.Icons.REFRESH, self._on_reload_one),
+            ("新分片", ft.Icons.SAVE, self._on_save_one_new),
+            ("補滿舊檔", ft.Icons.SAVE_AS, self._on_save_one_fill),
+            ("輪替分片", ft.Icons.ROTATE_RIGHT, self._on_rotate_one),
+            ("分析", ft.Icons.INSIGHTS, self._on_analyze_one),
+            ("切換查詢", ft.Icons.MANAGE_SEARCH, self._on_jump_to_query_type),
+        )
         return ft.Row(
             [
-                ft.TextButton(
-                    "重新載入",
-                    icon=ft.Icons.REFRESH,
-                    on_click=lambda e, t=ctype: self._on_reload_one(t),
-                ),
-                ft.TextButton(
-                    "新分片",
-                    icon=ft.Icons.SAVE,
-                    on_click=lambda e, t=ctype: self._on_save_one_new(t),
-                ),
-                ft.TextButton(
-                    "補滿舊檔",
-                    icon=ft.Icons.SAVE_AS,
-                    on_click=lambda e, t=ctype: self._on_save_one_fill(t),
-                ),
-                ft.TextButton(
-                    "輪替分片",
-                    icon=ft.Icons.ROTATE_RIGHT,
-                    on_click=lambda e, t=ctype: self._on_rotate_one(t),
-                ),
-                ft.TextButton(
-                    "分析",
-                    icon=ft.Icons.INSIGHTS,
-                    on_click=lambda e, t=ctype: self._on_analyze_one(t),
-                ),
-                ft.TextButton(
-                    "切換查詢",
-                    icon=ft.Icons.MANAGE_SEARCH,
-                    on_click=lambda e, t=ctype: self._on_jump_to_query_type(t),
-                ),
+                ft.TextButton(label, icon=icon, on_click=lambda e, h=handler: h(ctype))
+                for label, icon, handler in buttons
             ],
             wrap=True,
         )
@@ -465,7 +441,7 @@ class CacheOverviewMixin:
 
         entries_count = target.get("entries_count", 0)
         new_count = target.get("session_new_count", 0)
-        dirty = "有變更" if bool(target.get("is_dirty", False)) else "無變更"
+        dirty = dirty_label(bool(target.get("is_dirty", False)))
         shard = target.get("active_shard_id", "-")
         shard_entries = int(target.get("active_shard_entries", 0) or 0)
         shard_capacity = int(target.get("shard_capacity", 2500) or 2500)

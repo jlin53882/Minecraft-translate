@@ -906,13 +906,16 @@ def test_service_writes_translation_cache_by_default_and_can_skip(
     assert fake_cache == []
 
 
-def test_translate_panel_cache_switch_defaults_on(db_path):
+def test_translate_panel_new_cache_shard_switch_defaults_off(db_path):
+    """快取一律寫入；開關只決定寫入編號分片（預設）或每次另存新分片。"""
     seed(db_path)
     db = TranslationDB(db_path)
     panel = translate_panel.TranslatePanel(mock_page(), lambda: db)
-    assert panel.build_options().write_cache is True
-    panel.cache_row.value = False
-    assert panel.build_options().write_cache is False
+    options = panel.build_options()
+    assert options.write_cache is True and options.new_cache_shard is False
+    panel.cache_row.value = True
+    options = panel.build_options()
+    assert options.write_cache is True and options.new_cache_shard is True
     db.close()
 
 
@@ -2262,3 +2265,79 @@ def test_late_save_from_another_database_does_not_touch_the_flagged_list(
 
     assert entries.entry_ids == [entry.id]
     assert panel.stat_flagged.value_text.value == "1"
+
+
+def test_review_dialog_sync_switch_defaults_on_and_recomputes_scope(db_path):
+    """審核視窗內有「同步審核其他版本」開關：預設開啟（沿用編輯面板），切換會重算範圍。"""
+    from app.views.moddb.entries_panel import EntriesPanel
+    from tests.test_moddb_view import texts_of
+
+    db = TranslationDB(db_path)
+    for version in ("1.21.1", "1.20.1"):
+        db.ingest(
+            version,
+            [
+                ScanItem(
+                    KIND_LANG,
+                    "foo",
+                    "item.review",
+                    "Minecraft",
+                    "Minecraft",
+                    source=SRC_AI,
+                )
+            ],
+        )
+    page = mock_page()
+    page.run_thread = lambda target: target()
+    panel = EntriesPanel(page, lambda: db)
+    panel.refresh()
+    assert panel.sync_row.value is True
+    panel.tw_field.value = panel.selected.zh_tw
+    panel._on_text_change()
+
+    panel._confirm()
+    dialog = page.overlay[-1]
+    switches = [c for c in _walk(dialog.content) if type(c).__name__ == "Switch"]
+    assert len(switches) == 1 and switches[0].value is True
+    assert "同步審核其他版本" in "\n".join(texts_of(dialog.content))
+    assert dialog.actions[-1].content == "確認審核 2 版"
+
+    switches[0].value = False
+    switches[0].on_change(None)
+    assert dialog.actions[-1].content == "確認審核目前版本"
+    assert "已選擇僅審核目前版本" in "\n".join(texts_of(dialog.content))
+
+    dialog.actions[-1].on_click(None)
+    reviewed = [
+        version
+        for version in ("1.21.1", "1.20.1")
+        for row in db.list_entries(version)[0]
+        if row.review_status == "reviewed"
+    ]
+    assert reviewed == ["1.21.1"]
+    db.close()
+
+
+def _walk(control):
+    yield control
+    for child in getattr(control, "controls", None) or []:
+        yield from _walk(child)
+    inner = getattr(control, "content", None)
+    if inner is not None:
+        yield from _walk(inner)
+
+
+@pytest.mark.parametrize("new_shard", [False, True])
+def test_service_cache_save_uses_numbered_shard_unless_new_shard_requested(
+    db_path, monkeypatch, new_shard
+):
+    seed(db_path)
+    fake_engine(monkeypatch, lambda t: "翻:" + t)
+    saves: list[dict] = []
+    monkeypatch.setattr(
+        moddb_translate_service,
+        "save_translation_cache",
+        lambda cache_type, **kwargs: saves.append(kwargs) or True,
+    )
+    run(TranslateOptions(version="1.21.1", mod_ids=("foo",), new_cache_shard=new_shard))
+    assert saves and all(s["write_new_shard"] is new_shard for s in saves)

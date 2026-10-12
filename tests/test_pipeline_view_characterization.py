@@ -199,7 +199,7 @@ def test_pipeline_step_chip_default_status():
     """驗證預設狀態是 waiting"""
     chip = PipelineStepChip("抽取資源", 1)
     assert chip.status == "waiting"
-    assert chip.chip.label.value == "1. 抽取資源"
+    assert chip.label.value == "1. 抽取資源"
     assert chip.icon.name == ft.Icons.CIRCLE
 
 

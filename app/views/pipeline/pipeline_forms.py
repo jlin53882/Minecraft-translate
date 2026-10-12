@@ -38,7 +38,7 @@ class MergeFormState:
 @dataclass
 class TranslateFormState:
     dry_run: bool = False
-    write_new_cache: bool = True
+    write_new_cache: bool = False
 
 
 @dataclass
@@ -424,7 +424,8 @@ def build_translate_form(
     """Build the shared LM DB and translation execution options."""
     dry_run = ft.Switch(label="Dry Run（只分析不翻譯）", value=state.dry_run)
     write_cache = ft.Switch(
-        label="寫入新快取（每次回傳單獨快取）", value=state.write_new_cache
+        label="每次寫入新快取分片（關閉時寫入編號分片）",
+        value=state.write_new_cache,
     )
 
     def update(_event=None):

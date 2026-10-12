@@ -4,7 +4,7 @@
 
 ## 職責
 
-- 讓使用者選擇輸入／輸出資料夾，並設定本次任務選項（Dry-run、輸出 `.lang`、寫入新快取、Mod 資料庫）。
+- 讓使用者選擇輸入／輸出資料夾，並設定本次任務選項（Dry-run、輸出 `.lang`、每次寫入新快取分片（預設關閉，寫入編號分片）、Mod 資料庫）。
 - 按下開始後，透過 `launch_page_operation` 把 `run_lm_translation_service`（`app/services_impl/pipelines/lm_service.py`）放到背景執行緒執行。
 - 服務層呼叫 `translation_tool/core/lm_translator.py` 的 `translate_directory_generator`，負責掃描、Mod 資料庫／翻譯快取分流、批次 AI 翻譯與輸出。
 - 以 `TaskSession` 的 `snapshot()` 輪詢進度與日誌，右側統計卡顯示進度、已用時間、AI 認證狀態（金鑰健康或 ChatGPT 連線）與快取寫入頻率。

@@ -77,7 +77,10 @@ def _step_row(view, steps: list[tuple[ft.Checkbox, str, str, str, str]]) -> ft.R
 def _cache_switch(view, attr: str) -> ft.Control:
     """「寫入新快取」開關；Switch 本體掛到 ``view.<attr>`` 讓外部讀寫。"""
     row = kit.SwitchRow(
-        "寫入新快取", "翻譯結果同步存入快取（write_new_cache）", True, divider=False
+        "每次寫入新快取分片",
+        "關閉時寫入編號分片（滿 2,500 筆自動換下一片）；開啟時每批獨立存成一個分片（write_new_cache）",
+        False,
+        divider=False,
     )
     setattr(view, attr, row.switch)
     return row

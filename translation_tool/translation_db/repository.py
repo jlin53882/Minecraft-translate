@@ -26,6 +26,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
+from translation_tool.translation_db.bulk_review import BulkReviewMixin
 from translation_tool.translation_db.models import (
     AITranslationReplaceResult,
     BatchReplaceChange,
@@ -157,7 +158,7 @@ def _like(text: str) -> str:
     return f"%{esc}%"
 
 
-class TranslationDB:
+class TranslationDB(BulkReviewMixin):
     """資料庫存取物件（執行緒安全：單一連線 + 可重入鎖）。"""
 
     # 品質篩選翻頁用：(條件鍵, 已排序的符合列, 符合總數)，整個程式只留最近一份。
@@ -2219,12 +2220,10 @@ class TranslationDB:
                 reason = "目前版本" if included else "目前版本已審核"
             elif not propagate:
                 included, reason = False, "已選擇僅審核目前版本"
-            elif text != expected_zh_tw:
-                included, reason = False, "目前生效譯文不同"
-            elif row[9] == "reviewed" and (row[7] or "") != expected_zh_tw:
-                included, reason = False, "已有不同的已審核人工譯文"
-            elif row[9] == "reviewed":
+            elif row[9] == "reviewed" and (row[7] or "") == expected_zh_tw:
                 included, reason = False, "已審核相同譯文"
+            elif text != expected_zh_tw:
+                included, reason = True, "原文相同但目前生效譯文不同"
             else:
                 included, reason = True, "原文與目前譯文相同"
             result.append(
@@ -2357,8 +2356,9 @@ class TranslationDB:
         """Confirm the current effective text as reviewed manual translation.
 
         ``expected_zh_tw`` is a compare-and-set guard from the editor snapshot.
-        When propagation is enabled, only same-content versions currently showing
-        the same text are reviewed; a different sibling translation is preserved.
+        When propagation is enabled, every same-content version (same original
+        text) is reviewed with this text, even if it currently shows a different
+        translation; the replaced text is recorded in history and can be reverted.
         """
         if not expected_zh_tw.strip():
             raise ValueError("沒有可審核的譯文，請先輸入並儲存")
@@ -2378,69 +2378,81 @@ class TranslationDB:
                 expected_preview
             ):
                 raise ValueError("審核影響範圍已變動，請重新整理後再確認")
-            for item in preview:
-                if not item.included:
-                    continue
-                eid, ver = item.entry_id, item.mc_version
-                prev = conn.execute(
-                    "SELECT zh_tw, checker, review_status, revision FROM translation "
-                    "WHERE entry_id=? AND source=?",
-                    (eid, SRC_MANUAL),
-                ).fetchone()
-                if prev and prev[2] == "reviewed" and prev[0] == expected_zh_tw:
-                    continue
-                conn.execute(
-                    "INSERT INTO translation "
-                    "(entry_id, source, zh_tw, checker, review_status) "
-                    "VALUES (?,?,?,?, 'reviewed') "
-                    "ON CONFLICT(entry_id, source) DO UPDATE SET "
-                    "zh_tw=excluded.zh_tw, checker=excluded.checker, "
-                    "review_status='reviewed', updated_at=CURRENT_TIMESTAMP",
-                    (eid, SRC_MANUAL, expected_zh_tw, actor or "人工"),
-                )
-                new_revision = conn.execute(
-                    "SELECT revision FROM translation WHERE entry_id=? AND source=?",
-                    (eid, SRC_MANUAL),
-                ).fetchone()[0]
-                conn.execute(
-                    "INSERT INTO history "
-                    "(entry_id, batch, actor, action, old_zh_tw, new_zh_tw, "
-                    "prev_manual, note, prev_checker, prev_review_status, "
-                    "new_checker, new_review_status, prev_revision, new_revision) "
-                    "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                    (
-                        eid,
-                        batch,
-                        actor,
-                        "review",
-                        item.text,
-                        expected_zh_tw,
-                        prev[0] if prev else None,
-                        ""
-                        if eid == entry_id
-                        else f"同步審核自 {next((x.mc_version for x in preview if x.entry_id == entry_id), '')}",
-                        prev[1] if prev else None,
-                        prev[2] if prev else None,
-                        actor or "人工",
-                        "reviewed",
-                        prev[3] if prev else None,
-                        new_revision,
-                    ),
-                )
-                done.append(Impact(eid, ver, item.text, item.source, eid == entry_id))
-            if not any(change.is_self for change in done):
-                manual = conn.execute(
-                    "SELECT zh_tw, review_status FROM translation "
-                    "WHERE entry_id=? AND source=?",
-                    (entry_id, SRC_MANUAL),
-                ).fetchone()
-                if (
-                    manual is None
-                    or manual[0] != expected_zh_tw
-                    or manual[1] != "reviewed"
-                ):
-                    raise ValueError("目前譯文已變動，請重新整理後再審核")
+            done = self._apply_review_preview(
+                conn, entry_id, preview, expected_zh_tw, actor, batch
+            )
             self._refresh(conn, [change.entry_id for change in done])
+        return done
+
+    def _apply_review_preview(
+        self,
+        conn: sqlite3.Connection,
+        entry_id: int,
+        preview: Sequence[ReviewPreviewItem],
+        expected_zh_tw: str,
+        actor: str,
+        batch: str,
+    ) -> list[Impact]:
+        """Write the included preview rows as reviewed manual text (caller owns the transaction)."""
+        done: list[Impact] = []
+        for item in preview:
+            if not item.included:
+                continue
+            eid, ver = item.entry_id, item.mc_version
+            prev = conn.execute(
+                "SELECT zh_tw, checker, review_status, revision FROM translation "
+                "WHERE entry_id=? AND source=?",
+                (eid, SRC_MANUAL),
+            ).fetchone()
+            if prev and prev[2] == "reviewed" and prev[0] == expected_zh_tw:
+                continue
+            conn.execute(
+                "INSERT INTO translation "
+                "(entry_id, source, zh_tw, checker, review_status) "
+                "VALUES (?,?,?,?, 'reviewed') "
+                "ON CONFLICT(entry_id, source) DO UPDATE SET "
+                "zh_tw=excluded.zh_tw, checker=excluded.checker, "
+                "review_status='reviewed', updated_at=CURRENT_TIMESTAMP",
+                (eid, SRC_MANUAL, expected_zh_tw, actor or "人工"),
+            )
+            new_revision = conn.execute(
+                "SELECT revision FROM translation WHERE entry_id=? AND source=?",
+                (eid, SRC_MANUAL),
+            ).fetchone()[0]
+            conn.execute(
+                "INSERT INTO history "
+                "(entry_id, batch, actor, action, old_zh_tw, new_zh_tw, "
+                "prev_manual, note, prev_checker, prev_review_status, "
+                "new_checker, new_review_status, prev_revision, new_revision) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (
+                    eid,
+                    batch,
+                    actor,
+                    "review",
+                    item.text,
+                    expected_zh_tw,
+                    prev[0] if prev else None,
+                    ""
+                    if eid == entry_id
+                    else f"同步審核自 {next((x.mc_version for x in preview if x.entry_id == entry_id), '')}",
+                    prev[1] if prev else None,
+                    prev[2] if prev else None,
+                    actor or "人工",
+                    "reviewed",
+                    prev[3] if prev else None,
+                    new_revision,
+                ),
+            )
+            done.append(Impact(eid, ver, item.text, item.source, eid == entry_id))
+        if not any(change.is_self for change in done):
+            manual = conn.execute(
+                "SELECT zh_tw, review_status FROM translation "
+                "WHERE entry_id=? AND source=?",
+                (entry_id, SRC_MANUAL),
+            ).fetchone()
+            if manual is None or manual[0] != expected_zh_tw or manual[1] != "reviewed":
+                raise ValueError("目前譯文已變動，請重新整理後再審核")
         return done
 
     def revert(self, history_id: int, *, whole_batch: bool = True) -> int:

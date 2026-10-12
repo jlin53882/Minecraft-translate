@@ -52,7 +52,7 @@ class MergeView(MergeWidgetsMixin, ft.Column):
     output_dir_field: ft.TextField
     _zh_cn_disabled_note: ft.Text | None
     zip_list_view: ft.ListView
-    status_chip: ft.Chip
+    status_chip: ft.Container
     progress_bar: ft.ProgressBar
     pick_zip_button: ft.Button
     start_button: ft.Button

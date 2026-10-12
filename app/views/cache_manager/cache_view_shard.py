@@ -10,6 +10,7 @@ import flet as ft
 # UI 共用元件：總覽區使用新 UI kit。
 from app.ui.design import C
 from app.views.cache_manager.cache_history_store import warm_history_index
+from app.views.cache_manager.cache_status_text import entries_line, shard_line
 from app.views.cache_manager.shard_reader import (
     shard_raw,
     shard_rows,
@@ -383,11 +384,8 @@ class CacheShardMixin:
         self, ctype: str, st: dict, shard_panel_height: int, valid_selection_pairs: set
     ) -> ft.Container:
         """查詢頁的單一類型分片卡片（並登記有效的 shard 選取）。"""
-        entries_count = st.get("entries_count", 0)
         shard = st.get("active_shard_id", "-")
-        shard_entries = int(st.get("active_shard_entries", 0) or 0)
         shard_capacity = int(st.get("shard_capacity", 2500) or 2500)
-        dirty = "dirty" if bool(st.get("is_dirty", False)) else "clean"
 
         shard_rows = self._load_shard_rows(ctype, str(shard), shard_capacity)
         shard_controls = []
@@ -434,15 +432,8 @@ class CacheShardMixin:
                         ],
                         alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
                     ),
-                    ft.Text(
-                        f"分片: {shard} | 狀態: {dirty}",
-                        size=11,
-                        color=C.MUTED,
-                    ),
-                    ft.Text(
-                        f"筆數: {entries_count} | shard 使用: {shard_entries}/{shard_capacity}",
-                        size=11,
-                    ),
+                    ft.Text(entries_line(st), size=11, color=C.TEXT),
+                    ft.Text(shard_line(st), size=11, color=C.MUTED),
                     ft.ExpansionTile(
                         title=ft.Text(
                             f"分片清單（{len(shard_rows)}）",

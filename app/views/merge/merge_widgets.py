@@ -10,7 +10,7 @@ from app.ui import kit
 from app.ui.design import C
 from app.ui.poller import PollerHandle
 from app.ui.snack import show_snack
-from app.ui.status_chip import apply_status_style
+from app.ui.status_chip import apply_status_style, make_status_chip
 from app.ui.sync_text_field import SyncTextField
 from app.views._log import LogView
 from app.views.merge.merge_db_options import MergeDbOptions
@@ -132,7 +132,7 @@ class MergeWidgetsMixin:
         )
 
         self.zip_list_view = ft.ListView(height=160, spacing=4, auto_scroll=False)
-        self.status_chip = ft.Chip(label=ft.Text("尚未開始"))
+        self.status_chip = make_status_chip("尚未開始")
         apply_status_style(self.status_chip, "neutral")
         self.progress_bar = kit.progress_bar(0, "em", height=8)
         # LogView widget 接管 append + UI controls 數量控制（取代 LogPresenter）

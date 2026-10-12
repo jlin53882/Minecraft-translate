@@ -479,20 +479,20 @@ def test_step3_shows_paths_and_defaults(env):
         in texts
     )
     assert env.switch("Dry Run（只分析不翻譯）").value is False
-    assert env.switch("寫入新快取（每次回傳單獨快取）").value is True
+    assert env.switch("每次寫入新快取分片（關閉時寫入編號分片）").value is False
 
 
 def test_step3_switches_are_collected_and_persist(env):
     env.open()
     env.goto(3)
     env.set_switch("Dry Run（只分析不翻譯）", True)
-    env.set_switch("寫入新快取（每次回傳單獨快取）", False)
+    env.set_switch("每次寫入新快取分片（關閉時寫入編號分片）", True)
     env.click("上一個")
     env.click("下一個")
     assert env.switch("Dry Run（只分析不翻譯）").value is True
-    assert env.switch("寫入新快取（每次回傳單獨快取）").value is False
+    assert env.switch("每次寫入新快取分片（關閉時寫入編號分片）").value is True
     config = env.run_to_end_from(3)
-    assert config["dry_run"] is True and config["write_new_cache"] is False
+    assert config["dry_run"] is True and config["write_new_cache"] is True
 
 
 def test_step3_uses_custom_organized_folder_name(monkeypatch, tmp_path):
@@ -651,7 +651,7 @@ def test_confirm_calls_on_execute_once_with_default_config(env):
         "patchouli_threshold": 0.5,
         "zh_en_threshold": 2,
         "dry_run": False,
-        "write_new_cache": True,
+        "write_new_cache": False,
         "description": "",
         "version": "",
         "merge_db_snapshot": config["merge_db_snapshot"],

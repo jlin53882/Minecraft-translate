@@ -109,7 +109,7 @@ def test_initial_state(env):
     assert tin.value == str(env.organized)
     assert tout.value == str(env.translate_out)
     assert _switch(dialog, "Dry Run").value is False
-    assert _switch(dialog, "寫入新快取").value is True
+    assert _switch(dialog, "每次寫入新快取").value is False
 
 
 def test_mod_source_is_never_used_as_translate_input(env):
@@ -151,7 +151,7 @@ def test_start_passes_exact_kwargs_and_closes(env):
         "input_dir": str(env.organized),
         "output_dir": str(env.translate_out),
         "dry_run": False,
-        "write_new_cache": True,
+        "write_new_cache": False,
     }
     assert run["lm_db_snapshot"].database_settings.path
     assert run["lm_db_snapshot"].source == "global"
@@ -160,10 +160,10 @@ def test_start_passes_exact_kwargs_and_closes(env):
 def test_toggled_switches_are_passed(env):
     dialog = env.open()
     _switch(dialog, "Dry Run").value = True
-    _switch(dialog, "寫入新快取").value = False
+    _switch(dialog, "每次寫入新快取").value = True
     _button(dialog, "確定執行").on_click(None)
     assert env.runs[0]["dry_run"] is True
-    assert env.runs[0]["write_new_cache"] is False
+    assert env.runs[0]["write_new_cache"] is True
 
 
 def test_start_strips_whitespace(env):
