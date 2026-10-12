@@ -257,3 +257,15 @@ def test_project_rules_apply_directly_on_first_pass():
     assert direct, "沒有可直接驗證的規則"
     for rule in direct:
         assert apply_replace_rules(rule["from"], rules) == rule["to"], rule
+
+
+def test_adjacent_destinations_forming_longer_source_is_a_known_limit():
+    """相鄰目的詞交界形成更長來源詞時，不保證二次處理冪等（見 apply_replace_rules）。
+
+    無狀態替換分不出「原始輸入」與「上一次替換的結果」；比目的詞更長的來源詞
+    必須優先（鑽石礦石 → 鑽石礦），所以這個形狀的輸入只處理一次。
+    """
+    rules = [{"from": "煤礦石", "to": "煤礦"}, {"from": "石英塊", "to": "石英方塊"}]
+    first = apply_replace_rules("煤礦石石英塊", rules)
+    assert first == "煤礦石英方塊"
+    assert apply_replace_rules(first, rules) == "煤礦英方塊"
