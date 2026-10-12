@@ -94,6 +94,8 @@ CacheView（主入口）
 
 ### 分片（`translation_tool/utils/cache_shards.py`）
 - **分片命名**：編號分片 `{cache_type}_{id:05d}.json`（如 `lang_00001.json`），`.active` 指標檔記錄目前 active 分片 id；另有時間戳分片 `{cache_type}_{mmddHHMMSS}-{seq}.json`（`_write_timestamp_shard`），新舊順序記在 `.shard_order`，不依賴檔名
+- **`.active` 指向不存在的編號分片**：只用時間戳分片（「每次寫入新快取分片」）的類型，`.active` 可能指向從未建立的編號分片。總覽以 `active_shard_exists`（`build_cache_overview`）判斷，為 False 時卡片顯示「沒有可補滿的編號分片」並隱藏寫入量進度條（`cache_status_text.has_active_shard`），不再顯示「0 / 2,500」
+- **不提供合併分片**：分片只增不合併。載入時依 `.shard_order` 的寫入序號由舊到新覆蓋，大量小分片的載入成本很低（約 100 片、5 MB 只需數十毫秒），合併還得重寫 `.shard_order`、重建搜尋索引並保留備份，收益不抵風險；需要整理時用「輪替分片」與「補滿舊檔」
 - **`_get_active_shard_path`**：`.active` 不存在時自動掃描現有編號分片、取最大 id 初始化指標（無分片時預設 `00001`）
 - **`_rotate_shard_if_needed_locked`**：在 `.active.lock` 內判斷，`len(data) >= rolling_shard_size` 時切到下一片；`rolling_shard_size` 由 `cache_manager.py` 的常數 `ROLLING_SHARD_SIZE`（**2500**）傳入（不是設定項）
 - **手動輪替**：`force_rotate_active_shard`（總覽的「輪替分片」，經 `cache_rotate_service` → `force_rotate_shard`）把 `.active` 前進一號

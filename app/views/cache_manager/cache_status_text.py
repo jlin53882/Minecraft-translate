@@ -17,7 +17,12 @@ def active_shard_usage(state: dict) -> tuple[int, int]:
 
 
 def has_active_shard(state: dict) -> bool:
-    """``.active`` 指向的編號分片是否存在；舊資料只有時間戳分片時為 False。"""
+    """``.active`` 指向的編號分片是否存在；舊資料只有時間戳分片時為 False。
+
+    只用時間戳分片（「每次寫入新快取分片」）時 ``.active`` 可能指向從未建立的編號分片，
+    此時沒有「可補滿」的目標，不顯示寫入量進度條。分片只增不合併：載入依 ``.shard_order``
+    由舊到新覆蓋，分片多時載入成本仍很低，因此不提供合併分片。
+    """
     return bool(state.get("active_shard_exists", True))
 
 
