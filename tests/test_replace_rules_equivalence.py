@@ -48,7 +48,15 @@ def test_literal_replacement_is_atomic_by_default():
         {"from": "模組", "to": "模組件"},
     ]
 
-    assert apply_replace_rules("這是內存條", rules) == "這是回憶體模組件"
+    assert apply_replace_rules("這是內存條", rules) == "這是記憶體模組"
+
+
+def test_atomic_replacement_protects_adjacent_generated_destinations():
+    rules = [{"from": "熊貓", "to": "貓熊"}]
+
+    first = apply_replace_rules("熊貓熊貓", rules)
+    assert first == "貓熊貓熊"
+    assert apply_replace_rules(first, rules) == first
 
 
 def test_atomic_replacement_falls_back_when_longest_match_is_protected():
@@ -127,34 +135,36 @@ def test_project_literal_rules_are_idempotent():
     assert len(literal_rules) == 1324
 
     expected_canonical = {
-        "噴濺型力量藥水": "飛濺 強力藥水",
-        "噴濺型水肺藥水": "飛濺 水中呼吸藥水",
-        "噴濺型迅捷藥水": "飛濺 加速藥水",
-        "滯留型力量藥水": "滯留 強力藥水",
-        "滯留型水肺藥水": "滯留 水中呼吸藥水",
-        "滯留型迅捷藥水": "滯留 加速藥水",
-        "去皮緋紅菌核": "剝皮緋紅蕈菇絲體",
-        "去皮詭異菌核": "剝皮扭曲菌絲土",
-        "知識就是力量": "知書就是強力",
-        "雕紋樹脂磚塊": "浮雕樹脂磚頭",
-        "樹脂磚樓梯": "樹脂磚頭階梯",
-        "樹脂磚臺階": "樹脂磚頭半磚",
+        "噴濺型力量藥水": "飛濺 力量藥水",
+        "噴濺型水肺藥水": "飛濺 水下呼吸藥水",
+        "噴濺型迅捷藥水": "飛濺 迅捷藥水",
+        "滯留型力量藥水": "滯留 力量藥水",
+        "滯留型水肺藥水": "滯留 水下呼吸藥水",
+        "滯留型迅捷藥水": "滯留 迅捷藥水",
+        "去皮緋紅菌核": "剝皮緋紅菌絲體",
+        "去皮詭異菌核": "剝皮扭曲菌絲體",
+        "知識就是力量": "知書就是力量",
+        "雕紋樹脂磚塊": "浮雕樹脂磚",
+        "樹脂磚樓梯": "樹脂磚階梯",
+        "樹脂磚臺階": "樹脂磚半磚",
         "樹脂磚塊": "樹脂磚頭",
-        "水肺之箭": "水中呼吸之箭",
-        "水肺藥水": "水中呼吸藥水",
-        "皮革外套": "皮革盔甲",
-        "紅磚樓梯": "紅磚頭階梯",
-        "紅磚臺階": "紅磚頭半磚",
-        "緋紅菌巖": "緋紅蕈菇絲石",
-        "緋紅菌核": "緋紅蕈菇絲體",
-        "詭異菌核": "扭曲菌絲土",
+        "水肺之箭": "水下呼吸之箭",
+        "水肺藥水": "水下呼吸藥水",
+        "皮革外套": "皮革上衣",
+        "紅磚樓梯": "紅磚階梯",
+        "紅磚臺階": "紅磚半磚",
+        "緋紅菌巖": "緋紅菌絲石",
+        "緋紅菌核": "緋紅菌絲體",
+        "詭異菌核": "扭曲菌絲體",
         "紅磚塊": "紅磚頭",
-        "蜜脾塊": "蜂窩塊",
+        "蜜脾塊": "蜂巢塊",
         "蜜脾": "蜂窩",
     }
     assert len(expected_canonical) == 24
     for source, destination in expected_canonical.items():
         assert apply_replace_rules(source, rules) == destination
+
+    assert apply_replace_rules("熊貓熊貓", rules) == "貓熊貓熊"
 
     for rule in literal_rules:
         source = rule["from"]

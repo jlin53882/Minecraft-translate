@@ -314,34 +314,50 @@ class _CompiledRules:
         self.literal_trie = _build_literal_trie(
             ((src, idx) for idx, (src, _dst) in enumerate(literal_rules))
         )
-        # 先用原始目的詞正規化所有輸出，讓規則鏈在編譯階段收斂到最終譯名。
+        # 先用原始目的詞正規化精確的來源／目的鏈，讓衝突鏈在編譯階段收斂到
+        # 最終譯名；目的詞內部的其他來源詞則保留規則明確指定的結果。
+        raw_destination_trie = self._build_destination_trie(self.atomic_destinations)
         raw_output_trie = self._build_output_trie(self.atomic_destinations)
         self.atomic_destinations = self._normalize_destinations(
-            self.atomic_destinations, raw_output_trie
+            self.atomic_destinations,
+            output_trie=raw_output_trie,
+            destination_trie=raw_destination_trie,
         )
-        # 只保護「輸出包含自身來源詞」的完整詞組，因為這類規則具有遞迴風險。
-        # 正規化後的目的詞若只是另一條合法規則的來源詞，仍須允許該來源規則
-        # 直接套用；例如 ``蜜脾`` 與 ``蜂巢`` 最終都會得到 ``蜂窩``。
+        # 所有正規化後的目的詞都視為已轉換詞組，避免不同替換片段在相鄰處
+        # 重新組成來源詞；只有目的詞內含自身來源詞的遞迴風險片段，才需要
+        # 額外用於拒絕跨越保護範圍的來源匹配。
+        self.destination_trie = self._build_destination_trie(self.atomic_destinations)
         self.output_trie = self._build_output_trie(self.atomic_destinations)
 
+    def _build_destination_trie(self, destinations: Sequence[str]) -> dict[Any, Any]:
+        """建立所有目的詞的前綴樹，用於保護已轉換的完整詞組。"""
+        return _build_literal_trie(
+            (destination, True) for destination in destinations if destination
+        )
+
     def _build_output_trie(self, destinations: Sequence[str]) -> dict[Any, Any]:
-        """建立需要防止再次套用的目的詞前綴樹。"""
+        """建立目的詞內含自身來源詞時的遞迴保護前綴樹。"""
         return _build_literal_trie(
             (
-                (dst, True)
-                for (src, _original_dst), dst in zip(self.literal_rules, destinations)
-                if src and src in dst
+                (destination, True)
+                for (source, _original_destination), destination in zip(
+                    self.literal_rules, destinations
+                )
+                if source and destination and source in destination
             )
         )
 
     def _normalize_destinations(
         self,
         destinations: Sequence[str],
+        *,
         output_trie: dict[Any, Any],
+        destination_trie: dict[Any, Any],
     ) -> list[str]:
-        """將每個目的詞套用到穩定，並以循環中的最小值作為標準譯名。
+        """只沿著完整相等的來源／目的鏈正規化目的詞。
 
         正常規則應在少量輪次內收斂；輪次上限只用來避免異常規則造成無限增長。
+        目的詞內部的部分來源詞會受到完整目的詞保護，不會覆寫規則指定的譯名。
         """
         normalized: list[str] = []
         for destination in destinations:
@@ -353,6 +369,7 @@ class _CompiledRules:
                     current,
                     destinations=destinations,
                     output_trie=output_trie,
+                    destination_trie=destination_trie,
                 )
                 if next_value == current:
                     break
@@ -391,15 +408,16 @@ class _CompiledRules:
         grams.update(text[i : i + 2] for i in range(len(text) - 1))
         return grams
 
-    def _protected_until(
+    def _protected_spans(
         self, text: str, output_trie: dict[Any, Any] | None = None
-    ) -> list[int]:
-        """回傳覆蓋各索引的目標片語結束偏移量。"""
+    ) -> tuple[list[int], set[tuple[int, int]]]:
+        """回傳受保護詞組的覆蓋結束偏移量與完整區間。"""
         protected_until = [0] * len(text)
+        protected_spans: set[tuple[int, int]] = set()
         if output_trie is None:
             output_trie = self.output_trie
         if not output_trie:
-            return protected_until
+            return protected_until, protected_spans
 
         for start in range(len(text)):
             node = output_trie
@@ -410,9 +428,16 @@ class _CompiledRules:
                     break
                 end += 1
                 if _TRIE_TERMINAL in node:
+                    protected_spans.add((start, end))
                     for index in range(start, end):
                         protected_until[index] = max(protected_until[index], end)
-        return protected_until
+        return protected_until, protected_spans
+
+    def _protected_until(
+        self, text: str, output_trie: dict[Any, Any] | None = None
+    ) -> list[int]:
+        """回傳覆蓋各索引的目標片語結束偏移量。"""
+        return self._protected_spans(text, output_trie)[0]
 
     def _apply_literals_once(
         self,
@@ -420,6 +445,7 @@ class _CompiledRules:
         *,
         destinations: Sequence[str] | None = None,
         output_trie: dict[Any, Any] | None = None,
+        destination_trie: dict[Any, Any] | None = None,
     ) -> str:
         """只根據原始文字套用一次字面值規則。"""
         if not self.literal_trie:
@@ -427,7 +453,23 @@ class _CompiledRules:
 
         if destinations is None:
             destinations = self.atomic_destinations
-        protected_until = self._protected_until(text, output_trie)
+        if output_trie is None:
+            output_trie = self.output_trie
+        if destination_trie is None:
+            destination_trie = self.destination_trie
+        protected_until, protected_spans = self._protected_spans(text, output_trie)
+        destination_spans: dict[int, list[int]] = {}
+        for start in range(len(text)):
+            node = destination_trie
+            end = start
+            while end < len(text):
+                node = node.get(text[end])
+                if node is None:
+                    break
+                end += 1
+                if _TRIE_TERMINAL in node:
+                    destination_spans.setdefault(start, []).append(end)
+
         output: list[str] = []
         index = 0
         while index < len(text):
@@ -443,14 +485,35 @@ class _CompiledRules:
                 if candidate is not None:
                     candidates.append((cursor, candidate))
 
+            destination_ends = destination_spans.get(index, ())
+            if destination_ends:
+                longest_destination_end = max(destination_ends)
+                exact_candidates = [
+                    (candidate_end, candidate_idx)
+                    for candidate_end, candidate_idx in candidates
+                    if candidate_end == longest_destination_end
+                ]
+                if exact_candidates:
+                    end, matched_idx = exact_candidates[0]
+                    output.append(destinations[matched_idx])
+                    index = end
+                    continue
+
+                # 目的詞從目前位置開始時，直接複製最長完整目的詞，避免
+                # 目的詞內部或相鄰目的詞交界再次命中來源規則。
+                output.append(text[index:longest_destination_end])
+                index = longest_destination_end
+                continue
+
             matched_idx = None
             end = None
             # 從最長匹配開始嘗試；最長候選若碰到保護區，回退到下一個候選。
             for candidate_end, candidate_idx in reversed(candidates):
-                if not any(
+                overlaps_protected = any(
                     protected_until[offset] > offset
                     for offset in range(index, candidate_end)
-                ):
+                )
+                if not overlaps_protected or (index, candidate_end) in protected_spans:
                     matched_idx = candidate_idx
                     end = candidate_end
                     break
