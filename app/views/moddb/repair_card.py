@@ -30,6 +30,15 @@ class RepairCardControls:
     sync_row: kit.SwitchRow
 
 
+# 修復與上方「1　選擇要機翻的範圍」共用同一組版本、模組、單次上限，以及「每次寫入新快取分片」；
+# 「先沿用其他版本的相同譯文」只影響一般機翻，不影響修復。
+SCOPE_HINT = (
+    "修復的範圍沿用上方「1　選擇要機翻的範圍」的遊戲版本、模組與單次上限，"
+    "AI 修復的快取寫入也遵循其中的「每次寫入新快取分片」；"
+    "「先沿用其他版本的相同譯文」只影響一般機翻。要換範圍請改上方設定後重新預覽。"
+)
+
+
 def repair_copy(mode: str) -> tuple[str, str]:
     """Return concise condition and scope explanations for the selected mode."""
     if mode == "quality_mismatch":
@@ -87,6 +96,7 @@ def create_repair_card(
         icon=ft.Icons.AUTO_AWESOME,
         on_click=on_confirm,
     )
+    scope_hint = kit.hint_text(SCOPE_HINT)
     default_text, explanation = repair_copy(mode)
     preview_text = ft.Text(default_text, size=13, color=C.TEXT, selectable=True)
     explainer = kit.hint_text(explanation)
@@ -96,7 +106,6 @@ def create_repair_card(
         "且 AI 結果的換行數必須與原文一致才會寫入。",
         False,
         on_change=on_newline_change,
-        divider=False,
     )
     newline_row.visible = mode == "quality_mismatch"
     sync_row = kit.SwitchRow(
@@ -104,7 +113,6 @@ def create_repair_card(
         "同一模組、鍵值與原文的其他版本，若該來源的舊譯文跟這筆完全相同，"
         "一併改成新譯文（各自記錄歷史）。預設只修目前選的版本。",
         False,
-        divider=False,
     )
     sync_row.visible = mode == "quality_mismatch"
     preview_search = kit.text_field(
@@ -141,6 +149,7 @@ def create_repair_card(
         "3　修復既有譯文",
         ft.Column(
             [
+                scope_hint,
                 mode_group,
                 explainer,
                 newline_row,

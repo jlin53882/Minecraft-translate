@@ -102,6 +102,8 @@ flowchart TD
 
 修復有兩種模式：`quality_mismatch`（來源譯文特殊字元修復）與 `same_source_ai`（舊 AI 同原文重翻）。先預覽、再確認、最後才送 AI。
 
+修復與「1　選擇要機翻的範圍」共用同一組遊戲版本、模組與單次上限（`TranslatePanel.build_options`），AI 修復的快取寫入也遵循「每次寫入新快取分片」；「先沿用其他版本的相同譯文」只影響一般機翻。修復卡片頂端以 `repair_card.SCOPE_HINT` 說明這點。
+
 ```mermaid
 flowchart TD
     A["批次機翻頁籤選擇修復模式，按「預覽候選譯文」"] --> B["retranslation_controller.preview"]
