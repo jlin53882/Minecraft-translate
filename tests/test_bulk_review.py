@@ -219,3 +219,35 @@ def test_whitespace_only_translation_is_not_a_candidate(db):
     db.ingest("1.21.1", [_item("blank", "Blank", " \n"), _item("ok", "Ok", "好")])
     plan = db.preview_bulk_review("1.21.1", SRC_JAR_TW, quality_pass_only=False)
     assert {c.key for c in plan.candidates} == {"ok"}
+
+
+def test_rejects_plan_when_non_effective_manual_translation_changed(db):
+    """生效來源不是人工時，預覽後人工譯文被改也要拒絕，否則會被審核覆寫。"""
+    db.ingest("1.21.1", [_item("k", "Steel", "鋼")])
+    db.save_manual(_entry(db, "1.21.1", "k").id, "鋼材", propagate=False)
+    with db._tx() as conn:  # 讓模組自帶繁中的優先序高於人工譯文
+        conn.execute("UPDATE effective SET zh_tw='鋼', source=?", (SRC_JAR_TW,))
+    plan = db.preview_bulk_review("1.21.1", SRC_JAR_TW, quality_pass_only=False)
+    assert [c.key for c in plan.candidates] == ["k"]
+
+    db.save_manual(_entry(db, "1.21.1", "k").id, "高級鋼材", propagate=False)
+    with db._tx() as conn:
+        conn.execute("UPDATE effective SET zh_tw='鋼', source=?", (SRC_JAR_TW,))
+
+    with pytest.raises(ValueError, match="重新產生批量審核預覽"):
+        db.execute_bulk_review(plan)
+
+
+def test_sync_rejects_plan_when_sibling_review_metadata_changed(db):
+    db.ingest("1.21.1", [_item("k", "Steel", "鋼")])
+    db.ingest("1.20.1", [_item("k", "Steel", "鋼鐵")])
+    plan = db.preview_bulk_review("1.21.1", SRC_JAR_TW, propagate=True)
+
+    with db._tx() as conn:  # 只改審核者，文字與來源不變
+        conn.execute(
+            "UPDATE effective SET checker='別人' WHERE entry_id=?",
+            (_entry(db, "1.20.1", "k").id,),
+        )
+
+    with pytest.raises(ValueError, match="其他版本"):
+        db.execute_bulk_review(plan)

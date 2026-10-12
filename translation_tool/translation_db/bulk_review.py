@@ -59,6 +59,10 @@ class BulkReviewMixin:
                 checker=row[8],
                 review_status=row[9],
                 revision=row[20],
+                manual_zh_tw=row[15],
+                manual_checker=row[16],
+                manual_review_status=row[17],
+                manual_revision=row[18],
             )
             for row in rows
             if row[6] and row[6].strip()
@@ -82,15 +86,23 @@ class BulkReviewMixin:
             else f"CASE WHEN m.source={SRC_MANUAL} THEN 'legacy_unknown' END"
         )
         revision = "m.revision" if self.has_translation_revision else "NULL"
+        effective_review = (
+            "f2.review_status"
+            if self.has_review_state
+            else f"CASE WHEN f2.source={SRC_MANUAL} THEN 'legacy_unknown' END"
+        )
+        effective_revision = "et2.revision" if self.has_translation_revision else "NULL"
         sql = (
             "SELECT e.id, e2.id, f.zh_tw, f2.zh_tw, f2.source, m.zh_tw, "
-            f"{manual_review}, {revision} "
+            f"{manual_review}, {revision}, f2.checker, {effective_review}, "
+            f"{effective_revision} "
             "FROM entry e JOIN effective f ON f.entry_id = e.id "
             "JOIN entry e2 INDEXED BY idx_entry_content "
             "ON e2.kind = e.kind AND e2.mod_id = e.mod_id AND e2.key = e.key "
             "AND e2.en_us = e.en_us AND e2.mc_version <> ? "
             "LEFT JOIN effective f2 ON f2.entry_id = e2.id "
             f"LEFT JOIN translation m ON m.entry_id = e2.id AND m.source = {SRC_MANUAL} "
+            "LEFT JOIN translation et2 ON et2.entry_id = e2.id AND et2.source = f2.source "
             "WHERE e.id IN (SELECT value FROM json_each(?)) ORDER BY e.id, e2.id"
         )
         stats: dict[int, list] = {}
@@ -103,7 +115,7 @@ class BulkReviewMixin:
                 else self._q(sql, params)
             )
             for row in rows:
-                eid, _sibling, mine, theirs, _source, manual, status, _rev = row
+                eid, _sibling, mine, theirs, _source, manual, status = row[:7]
                 entry = stats.setdefault(int(eid), [0, 0, hashlib.sha256()])
                 entry[2].update(repr(tuple(row[1:])).encode("utf-8"))
                 if (status or "") == "reviewed" and (manual or "") == mine:

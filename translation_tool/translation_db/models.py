@@ -479,6 +479,11 @@ class BulkReviewCandidate:
     checker: str | None
     review_status: str | None
     revision: int | None
+    # 同條目的人工譯文（來源 6）快照：生效來源不是人工時，人工譯文仍會被審核覆寫
+    manual_zh_tw: str | None = None
+    manual_checker: str | None = None
+    manual_review_status: str | None = None
+    manual_revision: int | None = None
 
 
 @dataclass(frozen=True)
