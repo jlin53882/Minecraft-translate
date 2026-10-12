@@ -37,7 +37,7 @@ from app.ui.design import C
 from app.ui.kit.inputs import BUTTON_HEIGHTS
 from app.ui.poller import PollerHandle
 from app.ui.snack import show_snack
-from app.ui.status_chip import apply_status_style, set_chip_status
+from app.ui.status_chip import apply_status_style, make_status_chip, set_chip_status
 from app.views._log import LogView, load_ui_logging_config
 from app.views.moddb import retranslation_controller
 from app.views.moddb.formatting import format_count
@@ -151,7 +151,7 @@ class TranslatePanel(ft.Column):
         )
 
     def _build_run_card(self) -> None:
-        self.status_chip = ft.Chip(label=ft.Text("尚未開始"))
+        self.status_chip = make_status_chip("尚未開始")
         apply_status_style(self.status_chip, "neutral")
         self.progress_bar = kit.progress_bar(0, "em", height=8)
         # 批次、已處理筆數、已用時間、預估剩餘時間、預計完成時刻（每批結束更新）

@@ -39,7 +39,7 @@ PipelineView（`app/views/pipeline/pipeline_view.py`，組版／事件委派／�
 | 打包輸出 | `<output>/<output_bundler.output_zip_name>` |
 
 ### PipelineStepChip
-單一步驟晶片，`set_status("waiting"|"running"|"done"|"failed"|"cancelled")` 切換 icon（CIRCLE/PENDING/CHECK_CIRCLE/ERROR/STOP_CIRCLE）與顏色。晶片本體是一般 `ft.Container` 膠囊，不用 `ft.Chip`：`ft.Chip` 沒有 `on_click`／`on_select` 時 Flutter 視為停用並整體淡化，狀態色會看不出來。
+單一步驟晶片，`set_status("waiting"|"running"|"done"|"failed"|"cancelled")` 切換 icon（CIRCLE/PENDING/CHECK_CIRCLE/ERROR/STOP_CIRCLE）與顏色。晶片本體是一般 `ft.Container` 膠囊（各頁的 `status_chip` 由 `app.ui.status_chip.make_status_chip` 建立，同理），不用 `ft.Chip`：`ft.Chip` 沒有 `on_click`／`on_select` 時 Flutter 視為停用並整體淡化，狀態色會看不出來。
 
 ### PipelineProgressPanel
 四步驟狀態列（抽取資源→語系比對→啟動翻譯→打包資源，以 ARROW_FORWARD 相連）+ `current_label` + `LogView`（`mode="append"`、`max_lines=500`、`height=120`）。

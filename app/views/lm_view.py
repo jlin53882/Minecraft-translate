@@ -18,7 +18,7 @@ from app.ui import kit
 from app.ui.design import C
 from app.ui.poller import PollerHandle
 from app.ui.snack import show_snack
-from app.ui.status_chip import apply_status_style, set_chip_status
+from app.ui.status_chip import apply_status_style, make_status_chip, set_chip_status
 from app.views._log import LogView, load_ui_logging_config
 from app.views.moddb.lm_db_options import LmDbOptions, LmDbRunSnapshot
 from translation_tool.utils.config_manager import (
@@ -103,7 +103,7 @@ class LMView(ft.Column):
         )
 
         # 狀態與日誌
-        self.status_chip = ft.Chip(label=ft.Text("尚未開始"))
+        self.status_chip = make_status_chip("尚未開始")
         self._apply_status_style("neutral")
         self.progress_bar = kit.progress_bar(0, "em", height=8)
         # 統一的 LogView widget（取代裸 ListView + 寫死 hex 容器）

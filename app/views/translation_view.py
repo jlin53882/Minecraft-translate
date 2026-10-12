@@ -12,7 +12,7 @@ from app.ui import design, kit
 from app.ui.design import C
 from app.ui.poller import PollerHandle
 from app.ui.snack import show_snack
-from app.ui.status_chip import apply_status_style, set_chip_status
+from app.ui.status_chip import apply_status_style, make_status_chip, set_chip_status
 from app.views._log import LogView
 from app.views.translation.translation_actions import (
     resume_ui_timer,
@@ -104,7 +104,7 @@ class TranslationView(ft.Column):
         self._poller = PollerHandle()  # 輪詢的 owner：卸載時 stop、重新掛載時 resume
 
         # 右側共用狀態與日誌
-        self.status_chip = ft.Chip(label=ft.Text("尚未開始"))
+        self.status_chip = make_status_chip("尚未開始")
         self._apply_status_style("neutral")
         self.cancel_button = kit.button(
             "取消",
