@@ -1,4 +1,4 @@
-"""Replacement-rule ownership, compilation, and cache implementation."""
+"""替換規則的管理、編譯與快取實作。"""
 
 import heapq
 import re
@@ -8,17 +8,17 @@ from dataclasses import dataclass
 from typing import Any
 
 # =========================
-# replace rules 快取（執行緒安全）
+# 替換規則快取（執行緒安全）
 # =========================
 _RULES_CACHE_LOCK = threading.Lock()
-# id(規則清單) → (規則清單本身, 內容簽章, 編譯結果)；保留清單參考避免 id 被重用
+# 物件識別碼（id）→（規則清單本身、內容簽章、編譯結果）；保留清單參考避免識別碼被重用
 _RULES_CACHE: dict[int, tuple[Sequence, Any, "_CompiledRules"]] = {}
 _RULES_CACHE_MAX = 4
 _TRIE_TERMINAL = object()
 
 
 def _build_literal_trie(rows: Sequence[tuple[str, Any]]) -> dict[Any, Any]:
-    """Build a read-only-at-runtime trie for literal matching."""
+    """建立執行期間唯讀、用於字面值匹配的 trie。"""
     trie: dict[Any, Any] = {}
     for value, payload in rows:
         if not value:
@@ -33,11 +33,11 @@ def _build_literal_trie(rows: Sequence[tuple[str, Any]]) -> dict[Any, Any]:
 def find_replacement_conflicts(
     rules: Sequence[dict[str, str]],
 ) -> list[tuple[int, str, int, str]]:
-    """Find literal rules whose output contains another literal source.
+    """找出輸出包含其他字面值來源詞的規則。
 
-    Each tuple is ``(source_index, source, destination_index, destination)``.
-    The trie keeps this diagnostic linear in the total destination text rather
-    than comparing every pair of rules, which matters for large rule files.
+    每個 tuple 的格式為 ``(source_index, source, destination_index, destination)``。
+    這個 trie 讓診斷複雜度維持在所有目標文字的總長度，而不是比較每一對規則，
+    對大型規則檔案尤其重要。
     """
     source_trie: dict[Any, Any] = {}
     destinations: list[tuple[int, str]] = []
@@ -78,7 +78,7 @@ def find_replacement_conflicts(
 
 
 class _TrackedRule(dict):
-    """會在被修改時通知所屬 ReplaceRules 的規則 dict（其餘行為與 dict 相同）。"""
+    """會在被修改時通知所屬 ReplaceRules 的規則字典（其餘行為與字典相同）。"""
 
     __slots__ = ("_owner",)
 
@@ -128,9 +128,9 @@ class _TrackedRule(dict):
 
 
 class ReplaceRules(list):
-    """load_replace_rules 回傳的規則清單：任何修改（含規則 dict 就地修改）都會遞增 revision。
+    """load_replace_rules 回傳的規則清單：任何修改（含規則字典就地修改）都會遞增修訂版本號。
 
-    apply_replace_rules 以 (清單, revision) 判斷編譯快取是否仍有效，O(1)，
+    apply_replace_rules 以（清單、修訂版本號）判斷編譯快取是否仍有效，O(1)，
     3 萬條規則逐段文字套用時不必每次都比對整份規則內容。
     """
 
@@ -139,8 +139,8 @@ class ReplaceRules(list):
         self.revision = 0
 
     def _adopt(self, rule):
-        # 已屬於其他 ReplaceRules 的規則要複製一份：同一個物件只能通知一個 owner，
-        # 共用會讓另一個 owner 的編譯快取在規則被修改後過期。
+        # 已屬於其他 ReplaceRules 的規則要複製一份：同一個物件只能通知一個所有者，
+        # 共用會讓另一個所有者的編譯快取在規則被修改後過期。
         if isinstance(rule, _TrackedRule):
             if rule._owner is not None and rule._owner is not self:
                 rule = _TrackedRule(rule)
@@ -208,13 +208,13 @@ class ReplaceRules(list):
         self._bump()
 
     def snapshot(self):
-        """Freeze list membership while retaining O(1) invalidation tracking."""
+        """凍結清單成員，同時保留 O(1) 的失效追蹤。"""
         return _ReplaceRulesSnapshot(tuple(self), self)
 
 
 @dataclass(frozen=True, slots=True)
 class _ReplaceRulesSnapshot(Sequence[dict[str, str]]):
-    """Read-only shallow snapshot that follows edits to its source rule rows."""
+    """唯讀的淺層快照，會追蹤來源規則項目的修改。"""
 
     _items: tuple[dict[str, str], ...]
     _source: ReplaceRules
@@ -255,6 +255,10 @@ class _CompiledRules:
 
     固定字串規則預設只對原文做一次最長匹配掃描，避免替換結果再次成為
     後續規則的輸入。``cascade=True`` 時才使用舊的逐條串接語意。
+
+    只有輸出包含自身來源詞的規則才會受到輸出保護；若 A → B 且 B → C，
+    B 仍可作為新的直接輸入套用 B → C。原子模式不會在同一次掃描中串接
+    A → B → C；需要串接時必須明確指定 ``cascade=True``。
 
     兩種模式都只檢查「前兩個字（單字規則為該字）出現在文字中」的規則：
     - by_prefix：規則前綴 → 規則索引（遞增）
@@ -307,17 +311,17 @@ class _CompiledRules:
         self.literal_trie = _build_literal_trie(
             ((src, idx) for idx, (src, _dst) in enumerate(literal_rules))
         )
-        # 已存在的完整輸出詞視為已轉換內容。這會防止第二次處理
-        # ``青苔石磚`` 時再次命中其中的 ``苔石磚``，同時也保護
-        # ``記憶體模組`` 內的 ``記憶``／``模組``來源詞。
+        # 只保護「輸出包含自身來源詞」的完整詞組，因為這類規則具有遞迴風險。
+        # 若輸出只是另一條合法規則的來源詞，仍須允許該來源規則直接套用，
+        # 例如 ``蜜脾`` → ``蜂巢`` 與 ``蜂巢`` → ``蜂窩``。
         self.output_trie = _build_literal_trie(
-            ((dst, True) for _src, dst in literal_rules)
+            ((dst, True) for src, dst in literal_rules if src and src in dst)
         )
 
     def may_hit(self, text: str) -> bool:
         """等同舊版逐條 `k in text or k 去空白 in text 去空白` 的預檢（O(文字長度)）。"""
-        # Regex patterns do not have literal-prefix keywords; a fixed-rule miss
-        # must not suppress regex rules that can still match the input.
+        # 正規表示式沒有字面值前綴關鍵字；固定規則未命中時，不可抑制仍可能
+        # 匹配輸入的正規表示式規則。
         if self.regex_rules:
             return True
         if not self.spaceless_keywords:
@@ -340,7 +344,7 @@ class _CompiledRules:
         return grams
 
     def _protected_until(self, text: str) -> list[int]:
-        """Return the end offset of a destination phrase covering each index."""
+        """回傳覆蓋各索引的目標片語結束偏移量。"""
         protected_until = [0] * len(text)
         if not self.output_trie:
             return protected_until
@@ -359,7 +363,7 @@ class _CompiledRules:
         return protected_until
 
     def _apply_literals_once(self, text: str) -> str:
-        """Apply literal rules once against the original text."""
+        """只根據原始文字套用一次字面值規則。"""
         if not self.literal_trie:
             return text
 
@@ -386,7 +390,7 @@ class _CompiledRules:
 
             src, dst = self.literal_rules[matched_idx]
             end = index + len(src)
-            if protected_until[index] >= end:
+            if any(protected_until[offset] > offset for offset in range(index, end)):
                 output.append(text[index])
                 index += 1
                 continue
@@ -397,7 +401,7 @@ class _CompiledRules:
         return "".join(output)
 
     def _apply_literals_cascade(self, text: str) -> str:
-        """Apply literal rules using the legacy sequential/cascade semantics."""
+        """使用舊版逐條串接語意套用字面值規則。"""
         literal_rules = self.literal_rules
         by_prefix = self.by_prefix
         seen = self._grams(text)
@@ -424,7 +428,7 @@ class _CompiledRules:
         return text
 
     def apply_literals(self, text: str, *, cascade: bool = False) -> str:
-        """Apply literal rules in atomic mode, or cascade when explicitly asked."""
+        """以原子模式套用字面值規則；明確指定時才使用串接模式。"""
         if cascade:
             return self._apply_literals_cascade(text)
         return self._apply_literals_once(text)

@@ -1,4 +1,4 @@
-"""ModDB converter behavior and compiled-rule cache coverage."""
+"""ModDB 轉換器行為與編譯規則快取測試覆蓋。"""
 
 import subprocess
 import sys
@@ -23,13 +23,12 @@ def test_converter_keeps_outer_snapshot_and_tracks_inner_rule_mutation():
     rules = tp.ReplaceRules([{"from": "wire", "to": "FIRST"}])
     convert = make_converter(rules)
 
-    # The old converter snapshots list membership, so newly appended rules do
-    # not enter an in-flight scan's behavior.
+    # 舊版轉換器會快照清單成員，因此後續加入的規則不會影響進行中的掃描行為。
     rules.append({"from": "assembled", "to": "NEW RULE"})
     assert convert("wire assembled") == "FIRST assembled"
 
-    # The shallow snapshot still shares the tracked rule rows. Mutating one of
-    # those rows has historically affected the converter and must invalidate it.
+    # 淺層快照仍共用受追蹤的規則項目。修改這些項目在歷史行為上會影響轉換器，
+    # 且必須使快取失效。
     rules[0]["to"] = "SECOND"
     assert convert("wire assembled") == "SECOND assembled"
 
@@ -161,7 +160,7 @@ def test_converter_per_task_rule_snapshots_do_not_contaminate_each_other():
     first_rules = tp.ReplaceRules([{"from": "wire", "to": "OLD CONFIG"}])
     first_converter = make_converter(first_rules)
 
-    # A config reload gives the next task its own rules object and converter.
+    # 重新載入設定會讓下一個工作取得自己的規則物件與轉換器。
     second_rules = tp.ReplaceRules([{"from": "wire", "to": "NEW CONFIG"}])
     second_converter = make_converter(second_rules)
 

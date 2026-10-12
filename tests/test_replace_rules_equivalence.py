@@ -1,13 +1,15 @@
-"""Replacement-rule semantics and recursive-application regression coverage."""
+"""替換規則語意與遞迴套用回歸測試。"""
 
+import json
 import random
+from pathlib import Path
 
 from translation_tool.utils.replace_rules import find_replacement_conflicts
 from translation_tool.utils.text_processor import apply_replace_rules
 
 
 def _naive(text, rules):
-    """舊版語意：固定字串依長詞優先逐條 replace（可串接），整段無關鍵字時略過。"""
+    """舊版語意：固定字串依長詞優先逐條替換（可串接），整段無關鍵字時略過。"""
     literal = sorted(
         [(r["from"], r["to"]) for r in rules], key=lambda x: len(x[0]), reverse=True
     )
@@ -52,16 +54,50 @@ def test_literal_replacement_is_atomic_by_default():
 def test_atomic_replacement_protects_existing_destination_phrases():
     rules = [
         {"from": "苔石磚", "to": "青苔石磚"},
+        {"from": "苔石磚樓梯", "to": "青苔石磚階梯"},
         {"from": "苔石", "to": "青苔鵝卵石"},
+        {"from": "樓梯", "to": "階梯"},
+        {"from": "甲青苔", "to": "甲轉換"},
     ]
 
-    assert apply_replace_rules("苔石磚", []) == "苔石磚"  # no rules is a no-op
+    assert apply_replace_rules("苔石磚", []) == "苔石磚"  # 沒有規則時維持原文
     assert apply_replace_rules("苔石磚", rules) == "青苔石磚"
-    assert apply_replace_rules("苔石磚樓梯", rules) == "青苔石磚樓梯"
+    assert apply_replace_rules("苔石磚樓梯", rules) == "青苔石磚階梯"
     assert apply_replace_rules("青苔石磚", rules) == "青苔石磚"
+    assert apply_replace_rules("青苔石磚樓梯", rules) == "青苔石磚階梯"
+    assert apply_replace_rules("甲青苔石磚", rules) == "甲青苔石磚"
     converted = apply_replace_rules("苔石磚", rules)
     assert apply_replace_rules(converted, rules) == converted
     assert apply_replace_rules("苔石磚", rules, cascade=True) == "青青苔鵝卵石磚"
+
+
+def test_atomic_replacement_allows_a_destination_that_is_another_source():
+    rules = [
+        {"from": "蜜脾", "to": "蜂巢"},
+        {"from": "蜂巢", "to": "蜂窩"},
+    ]
+
+    assert apply_replace_rules("蜜脾", rules) == "蜂巢"
+    assert apply_replace_rules("蜂巢", rules) == "蜂窩"
+
+
+def test_project_rules_keep_real_overlapping_outputs_stable():
+    rules = json.loads(
+        (Path(__file__).parents[1] / "replace_rules.json").read_text(encoding="utf-8")
+    )
+
+    expected = {
+        "苔石磚": "青苔石磚",
+        "苔石磚樓梯": "青苔石磚階梯",
+        "青苔石磚": "青苔石磚",
+        "青苔石磚樓梯": "青苔石磚樓梯",
+        "蜂巢": "蜂窩",
+        "紅磚": "紅磚頭",
+        "樹脂磚": "樹脂磚頭",
+    }
+
+    for source, destination in expected.items():
+        assert apply_replace_rules(source, rules) == destination
 
 
 def test_conflict_report_finds_sources_inside_outputs():

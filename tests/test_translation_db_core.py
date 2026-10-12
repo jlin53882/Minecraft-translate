@@ -860,8 +860,7 @@ def test_batch_replace_preview_cancellation_stops_before_write(db):
 
 
 def test_batch_replace_quality_change_uses_structural_token_deltas(db):
-    # A smaller existing mismatch is an improvement even though its diagnostic
-    # sentence changes (the old string-comparison logic called this worsening).
+    # 既有較小的不一致即使讓診斷句子改變，也代表改善（舊的字串比較邏輯會將此判為惡化）。
     db.ingest(
         "1.21.1",
         [item(key="item.quality.improve", en="Token", tw="錯誤%s%s")],
@@ -872,7 +871,7 @@ def test_batch_replace_quality_change_uses_structural_token_deltas(db):
     assert improved.changes[0].quality_worsened is False
     assert improved.changes[0].quality_improved is True
 
-    # Adding another extra placeholder is a worsening and remains explicit.
+    # 再增加一個額外的佔位符代表惡化，且仍需明確指出。
     db.ingest(
         "1.21.1",
         [item(key="item.quality.worsen", en="Token", tw="錯誤%s")],
@@ -1052,11 +1051,11 @@ def test_repair_newline_policy_is_scoped_and_keeps_literal_backslash_n_strict():
         False,
     )
     assert repair_input_issues("a\r\nb", "甲\nb") == (False, (), False)
-    # The existing token canonicalizer treats lone CR as ordinary text, not an LF.
+    # 現有的標記正規化器會將單獨 CR 視為一般文字，而不是 LF。
     assert repair_output_issues("a\rb", "ab") == []
     assert repair_output_issues("Use %s\nnext", "使用 %s next") == []
     assert repair_output_issues("Use %s\\nnext", "使用 %s\nnext")
-    # General quality diagnostics intentionally retain exact newline counts.
+    # 一般品質診斷會刻意保留精確的換行數量。
     assert "換行" in " ".join(token_issues("a\nb", "甲"))
 
 
@@ -1337,7 +1336,7 @@ def test_schema_v1_migration_marks_legacy_manual_unknown_and_keeps_backup(tmp_pa
     assert list(tmp_path.glob("legacy.db.pre-schema-v5-*.bak"))
     db.close()
 
-    # Reopening is idempotent: no second migration backup is created.
+    # 重新開啟具冪等性：不會建立第二份遷移備份。
     backups_before = sorted(tmp_path.glob("legacy.db.pre-schema-v*.bak"))
     db = TranslationDB(path)
     backups_after = sorted(tmp_path.glob("legacy.db.pre-schema-v*.bak"))
@@ -1383,8 +1382,8 @@ def test_schema_v2_migration_keeps_first_seen_unknown_and_supports_readonly(tmp_
     entry_id = old.list_entries("1.21.1")[0][0].id
     old.close()
 
-    # Convert a current fixture to the v2 shape. v2 had review state but no
-    # first-seen timestamps or revision columns.
+    # 將目前的測試夾具轉換為 v2 形狀。v2 有審查狀態，但沒有首次看見時間戳或
+    # revision 欄位。
     with sqlite3.connect(path) as conn:
         conn.execute("DROP TRIGGER IF EXISTS translation_insert_timestamp_revision")
         conn.execute("DROP TRIGGER IF EXISTS translation_update_revision")
@@ -2052,7 +2051,7 @@ def test_nested_jars_are_charged_to_the_archive_budget(tmp_path, monkeypatch):
     assert limited.nested_jars < 5
 
 
-# ------------------------------------------------ 審查 #168：foreign SQLite、部分寫入、遞迴預算、取消
+# ------------------------------------------------ 審查 #168：外部 SQLite、部分寫入、遞迴預算、取消
 from translation_tool.translation_db import DbSettings, open_db  # noqa: E402
 from translation_tool.utils import zip_safety  # noqa: E402
 
@@ -2118,7 +2117,7 @@ def test_non_sqlite_and_empty_files(tmp_path):
 
 
 def test_database_from_a_newer_version_is_refused_without_touching_it(tmp_path):
-    """太新的資料庫在第一次可寫連線之前就拒絕：位元組不變、journal mode 不變、不產生 -wal/-shm。"""
+    """太新的資料庫在第一次可寫連線之前就拒絕：位元組不變、日誌模式不變、不產生 -wal/-shm。"""
     path = tmp_path / "new.db"
     TranslationDB(path).close()
     conn = sqlite3.connect(path)
@@ -2139,7 +2138,7 @@ def test_database_from_a_newer_version_is_refused_without_touching_it(tmp_path):
 
 
 def test_archive_that_hits_a_safety_limit_commits_nothing(db, tmp_path, monkeypatch):
-    """前面的語言檔讀成功、後面才超過上限：整個 archive 失敗，不寫入部分資料，也不算成功。"""
+    """前面的語言檔讀成功、後面才超過上限：整個壓縮檔失敗，不寫入部分資料，也不算成功。"""
     from translation_tool.translation_db import scanner
 
     make_jar(
@@ -2194,7 +2193,7 @@ def test_oversized_nested_jar_is_skipped_but_counted_not_silent(tmp_path, monkey
 
 
 def test_nested_archives_share_a_tree_wide_budget(tmp_path, monkeypatch):
-    """每個內嵌 jar 的 blob 很小（高壓縮），但解壓後加總超過整棵樹的預算 → 整包失敗。"""
+    """每個內嵌 jar 的二進位資料很小（高壓縮），但解壓後加總超過整棵樹的預算 → 整包失敗。"""
     from translation_tool.translation_db import scanner
 
     text = "word " * 30_000  # 約 150KB，壓縮後很小
