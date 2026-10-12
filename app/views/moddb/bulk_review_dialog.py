@@ -15,7 +15,7 @@ from app.tasks.operation_registry import (
     ShutdownPolicy,
     launch_page_operation,
 )
-from app.ui import kit
+from app.ui import design, kit
 from app.ui.design import C
 from app.ui.dialogs import (
     RESPONSIVE_DIALOG_MARKER,
@@ -81,9 +81,9 @@ class BulkReviewDialog:
         self.progress = ft.ProgressBar(visible=False)
         self.rows = ft.Column(
             [kit.hint_text("選好版本與來源後，按「產生預覽」。")],
-            spacing=4,
+            spacing=8,
             scroll=ft.ScrollMode.AUTO,
-            height=300,
+            height=420,
         )
         self.pager = kit.Pager(0, page_size=PAGE_SIZE, on_change=self._on_page)
         self.pager.visible = False
@@ -289,30 +289,66 @@ class BulkReviewDialog:
                 self.excluded.add(entry_id)
             self._render_plan()
 
+        included = candidate.entry_id not in self.excluded
+        return ft.Container(
+            opacity=1.0 if included else 0.5,
+            padding=ft.Padding.symmetric(horizontal=8, vertical=8),
+            border_radius=design.RADIUS_CONTROL,
+            bgcolor=C.PANEL2,
+            border=ft.Border.all(1, C.LINE if included else C.DIM),
+            content=ft.Row(
+                [
+                    ft.Checkbox(value=included, on_change=toggle),
+                    ft.Column(
+                        [
+                            ft.Row(
+                                [
+                                    ft.Text(
+                                        candidate.mod_id,
+                                        size=12,
+                                        weight=ft.FontWeight.BOLD,
+                                        color=C.TEXT,
+                                    ),
+                                    kit.mono_text(
+                                        shorten(candidate.key, 70),
+                                        size=11,
+                                        color=C.DIM,
+                                    ),
+                                ],
+                                spacing=8,
+                                wrap=True,
+                            ),
+                            self._text_line("原文", shorten(candidate.en_us, 80)),
+                            self._text_line(
+                                "譯文", shorten(candidate.zh_tw, 80), main=True
+                            ),
+                        ],
+                        spacing=4,
+                        tight=True,
+                        expand=True,
+                    ),
+                ],
+                vertical_alignment=ft.CrossAxisAlignment.START,
+            ),
+        )
+
+    @staticmethod
+    def _text_line(label: str, text: str, *, main: bool = False) -> ft.Control:
+        """卡片內的「原文／譯文」一行：左側小標籤，右側內容（譯文用主色、較大字）。"""
         return ft.Row(
             [
-                ft.Checkbox(
-                    value=candidate.entry_id not in self.excluded, on_change=toggle
+                ft.Container(
+                    ft.Text(label, size=10.5, color=C.DIM),
+                    width=30,
                 ),
-                ft.Column(
-                    [
-                        ft.Text(
-                            f"{candidate.mod_id}  {shorten(candidate.key, 70)}",
-                            size=11.5,
-                            color=C.DIM,
-                        ),
-                        ft.Text(
-                            shorten(candidate.en_us, 80) or "（無原文）",
-                            size=12.5,
-                            color=C.MUTED,
-                        ),
-                        ft.Text(shorten(candidate.zh_tw, 80), size=13, color=C.TEXT),
-                    ],
-                    spacing=1,
-                    tight=True,
+                ft.Text(
+                    text or "（無原文）",
+                    size=13 if main else 12.5,
+                    color=C.TEXT if main else C.MUTED,
                     expand=True,
                 ),
             ],
+            spacing=6,
             vertical_alignment=ft.CrossAxisAlignment.START,
         )
 
