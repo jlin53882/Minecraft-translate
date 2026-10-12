@@ -19,7 +19,7 @@ LMView 是 **LM（Large Model）翻譯執行頁**，對已提取的 assets 資�
 | `output_path` | `kit.text_field` | 輸出資料夾（留空則用 `get_lm_translate_folder_name()`，即設定 `lm_translator.lm_translate_folder_name`，預設 `LM翻譯後`） |
 | `dry_run_switch` | Switch（`SwitchRow.switch`） | Dry-run 模式：只分析、不送 API（預設關） |
 | `export_lang_checkbox` | Switch（`SwitchRow.switch`） | 輸出 `.lang` 檔而非 `.json`（預設關） |
-| `write_new_cache_switch` | Switch（`SwitchRow.switch`） | 每次 API 回傳單獨寫入一筆快取（UI 預設關） |
+| `write_new_cache_switch` | Switch（`SwitchRow.switch`） | 「每次寫入新快取分片」：關閉（預設）時寫入編號分片、滿 2,500 筆換下一片；開啟時每批另存成獨立的時間戳分片。快取本身一律寫入 |
 | `batch_interval_info` | Text | 顯示 `lm_translator.batch_write_interval` 目前值（`get_batch_write_interval()`） |
 | `stat_progress` / `stat_elapsed` | `kit.stat_card` | 進度百分比 / 已用時間（`format_elapsed`） |
 | `stat_keys` | `kit.stat_card` | 可用 API Key 數（`refresh_key_stat()`，經 `summarize_keys(get_key_health_snapshot())`，讀不到設定時不更新）；`lm_translator.provider` 為 `chatgpt` 時改顯示 ChatGPT 登入狀態（`chatgpt_account_status()`） |
@@ -83,7 +83,7 @@ run_lm_translation_service()               [lm_service.py，worker thread]
 
 ## 與 cache 的關係
 
-LMView 本身不直接操作 cache_manager，只透過 `write_new_cache_switch` 控制是否寫入快取；實際快取讀寫在 `lm_translator.py` 與共用迴圈 `lm_translator_shared_loop.py` 內部。
+LMView 本身不直接操作 cache_manager，只透過 `write_new_cache_switch` 控制快取的寫入方式（編號分片或每次新分片）；實際快取讀寫在 `lm_translator.py` 與共用迴圈 `lm_translator_shared_loop.py` 內部。
 
 ## 核心翻譯邏輯（`translate_directory_generator`）
 

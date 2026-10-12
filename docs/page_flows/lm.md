@@ -89,7 +89,7 @@ flowchart TD
   - UI 日誌行數（`load_ui_logging_config` 的 `tail_lines`）。
 - 產出檔案：
   - 輸出資料夾中的譯文 JSON；勾選「輸出 .lang」時，路徑含 `lang` 的來源檔另外輸出同名 `.lang`。另有 `translation_map.json`（逐筆對照紀錄）。
-  - 翻譯快取（`translation_tool/utils/cache_manager.py`）：由 `write_new_cache` 決定每批是否寫入新譯文。
+  - 翻譯快取（`translation_tool/utils/cache_manager.py`）：譯文一律寫入；`write_new_cache` 決定寫入方式：關閉時寫入編號分片，開啟時每批另存成獨立的時間戳分片。
   - Checkpoint：`get_data_root()/logs/translation_checkpoint.json`。只有 `translator.enable_cache_saving`（預設開啟）為真時才寫入；整批 `DONE` 且處理完畢才清除，中斷時保留供續跑使用。
   - Mod 資料庫寫回（`translation_tool/core/lm_translator_db.py` 的 `flush_write_back`）。
 - 續跑：`resume_interrupted(task)` 還原輸入、輸出、Dry-run 與 `.lang` 設定；Mod 資料庫設定依任務內的快照還原，不採用目前頁面值。若快照缺失但任務使用了資料庫，會顯示提示並停止續跑。
