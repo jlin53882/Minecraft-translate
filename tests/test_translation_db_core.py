@@ -1383,7 +1383,7 @@ def test_schema_v2_migration_keeps_first_seen_unknown_and_supports_readonly(tmp_
     old.close()
 
     # 將目前的測試夾具轉換為 v2 形狀。v2 有審查狀態，但沒有首次看見時間戳或
-    # revision 欄位。
+    # 修訂版本欄位。
     with sqlite3.connect(path) as conn:
         conn.execute("DROP TRIGGER IF EXISTS translation_insert_timestamp_revision")
         conn.execute("DROP TRIGGER IF EXISTS translation_update_revision")

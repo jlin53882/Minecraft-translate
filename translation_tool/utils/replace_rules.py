@@ -18,7 +18,7 @@ _TRIE_TERMINAL = object()
 
 
 def _build_literal_trie(rows: Sequence[tuple[str, Any]]) -> dict[Any, Any]:
-    """建立執行期間唯讀、用於字面值匹配的 trie。"""
+    """建立執行期間唯讀、用於字面值匹配的前綴樹。"""
     trie: dict[Any, Any] = {}
     for value, payload in rows:
         if not value:
@@ -35,8 +35,8 @@ def find_replacement_conflicts(
 ) -> list[tuple[int, str, int, str]]:
     """找出輸出包含其他字面值來源詞的規則。
 
-    每個 tuple 的格式為 ``(source_index, source, destination_index, destination)``。
-    這個 trie 讓診斷複雜度維持在所有目標文字的總長度，而不是比較每一對規則，
+    每個元組的格式為 ``(source_index, source, destination_index, destination)``。
+    這個前綴樹讓診斷複雜度維持在所有目標文字的總長度，而不是比較每一對規則，
     對大型規則檔案尤其重要。
     """
     source_trie: dict[Any, Any] = {}
