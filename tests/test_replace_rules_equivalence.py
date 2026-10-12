@@ -214,3 +214,46 @@ def test_regex_rules_are_not_hidden_by_unmatched_fixed_rule_keywords():
         {"from": r"\d+", "to": "number"},
     ]
     assert apply_replace_rules("item 42", rules) == "item number"
+
+
+def test_longer_source_is_not_hidden_by_shorter_destination():
+    """來源詞比以同樣開頭的目的詞更長時，仍要套用該規則。"""
+    rules = [{"from": "鑽石礦石", "to": "鑽石礦"}, {"from": "書架", "to": "書櫃"}]
+    assert apply_replace_rules("鑽石礦石", rules) == "鑽石礦"
+    assert apply_replace_rules("書架", rules) == "書櫃"
+    # 已是目的詞時維持不變（冪等）
+    assert apply_replace_rules("鑽石礦", rules) == "鑽石礦"
+    assert apply_replace_rules("書櫃", rules) == "書櫃"
+
+
+def test_project_rules_apply_directly_on_first_pass():
+    """真實規則的來源詞，第一次套用就要得到規則指定的目的詞（不能只是冪等）。
+
+    目的詞內含來源詞、或被其他規則改寫的鏈狀規則，結果由 expected_canonical
+    與冪等測試涵蓋，這裡排除它們。
+    """
+    rules = json.loads(
+        (Path(__file__).parents[1] / "replace_rules.json").read_text(encoding="utf-8")
+    )
+    literal = [
+        r
+        for r in rules
+        if isinstance(r, dict)
+        and isinstance(r.get("from"), str)
+        and isinstance(r.get("to"), str)
+        and len(r["from"]) >= 2  # 單字輸入本來就不套用規則
+        and not any(char in r["from"] for char in ".?*[]()\\")
+    ]
+    sources = {r["from"] for r in literal}
+    destinations = {r["to"] for r in literal}
+    direct = [
+        r
+        for r in literal
+        if r["from"] not in r["to"]
+        and not any(s in r["to"] for s in sources if s != r["from"])
+        and not any(d in r["from"] for d in destinations if d != r["to"])
+        and not any(s != r["from"] and r["from"] in s for s in sources)
+    ]
+    assert direct, "沒有可直接驗證的規則"
+    for rule in direct:
+        assert apply_replace_rules(rule["from"], rules) == rule["to"], rule

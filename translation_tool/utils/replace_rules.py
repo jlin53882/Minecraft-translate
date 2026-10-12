@@ -486,7 +486,11 @@ class _CompiledRules:
                     candidates.append((cursor, candidate))
 
             destination_ends = destination_spans.get(index, ())
-            if destination_ends:
+            # 比目的詞更長的來源詞（例如「鑽石礦石 → 鑽石礦」遇到以「鑽石礦」開頭的
+            # 文字）不可被目的詞保護遮蔽；這時交給下方一般的最長匹配處理。
+            if destination_ends and not (
+                candidates and candidates[-1][0] > max(destination_ends)
+            ):
                 longest_destination_end = max(destination_ends)
                 exact_candidates = [
                     (candidate_end, candidate_idx)
