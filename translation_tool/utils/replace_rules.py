@@ -15,6 +15,7 @@ _RULES_CACHE_LOCK = threading.Lock()
 _RULES_CACHE: dict[int, tuple[Sequence, Any, "_CompiledRules"]] = {}
 _RULES_CACHE_MAX = 4
 _TRIE_TERMINAL = object()
+_DESTINATION_NORMALIZATION_MAX_ROUNDS = 16
 
 
 def _build_literal_trie(rows: Sequence[tuple[str, Any]]) -> dict[Any, Any]:
@@ -253,12 +254,13 @@ def _rules_signature(rules: Sequence[dict[str, str]]):
 class _CompiledRules:
     """預先整理好的替換規則（依規則清單建立一次，所有執行緒共用、唯讀）。
 
-    固定字串規則預設只對原文做一次最長匹配掃描，避免替換結果再次成為
-    後續規則的輸入。``cascade=True`` 時才使用舊的逐條串接語意。
+    固定字串規則預設只對原文做一次匹配掃描，並將目的詞正規化到穩定的
+    最終譯名，避免替換結果在下一次處理時再次漂移。``cascade=True`` 時才
+    使用舊的逐條串接語意。
 
-    只有輸出包含自身來源詞的規則才會受到輸出保護；若 A → B 且 B → C，
-    B 仍可作為新的直接輸入套用 B → C。原子模式不會在同一次掃描中串接
-    A → B → C；需要串接時必須明確指定 ``cascade=True``。
+    正規化會把 A → B、B → C 收斂為 A → C，因此同一份輸入重複處理時
+    結果不會改變。只有正規化後的輸出包含自身來源詞時才會受到輸出保護。
+    ``cascade=True`` 仍保留舊的逐條串接語意。
 
     兩種模式都只檢查「前兩個字（單字規則為該字）出現在文字中」的規則：
     - by_prefix：規則前綴 → 規則索引（遞增）
@@ -299,6 +301,7 @@ class _CompiledRules:
         literal_rules.sort(key=lambda x: len(x[0]), reverse=True)
 
         self.literal_rules = literal_rules
+        self.atomic_destinations = [dst for _src, dst in literal_rules]
         self.regex_rules = regex_rules
         # 與舊版相同的「是否可能命中」預檢：規則前兩字（去空白後）出現在去空白的文字中
         self.spaceless_keywords = {k.replace(" ", "") for k in keywords}
@@ -311,12 +314,57 @@ class _CompiledRules:
         self.literal_trie = _build_literal_trie(
             ((src, idx) for idx, (src, _dst) in enumerate(literal_rules))
         )
-        # 只保護「輸出包含自身來源詞」的完整詞組，因為這類規則具有遞迴風險。
-        # 若輸出只是另一條合法規則的來源詞，仍須允許該來源規則直接套用，
-        # 例如 ``蜜脾`` → ``蜂巢`` 與 ``蜂巢`` → ``蜂窩``。
-        self.output_trie = _build_literal_trie(
-            ((dst, True) for src, dst in literal_rules if src and src in dst)
+        # 先用原始目的詞正規化所有輸出，讓規則鏈在編譯階段收斂到最終譯名。
+        raw_output_trie = self._build_output_trie(self.atomic_destinations)
+        self.atomic_destinations = self._normalize_destinations(
+            self.atomic_destinations, raw_output_trie
         )
+        # 只保護「輸出包含自身來源詞」的完整詞組，因為這類規則具有遞迴風險。
+        # 正規化後的目的詞若只是另一條合法規則的來源詞，仍須允許該來源規則
+        # 直接套用；例如 ``蜜脾`` 與 ``蜂巢`` 最終都會得到 ``蜂窩``。
+        self.output_trie = self._build_output_trie(self.atomic_destinations)
+
+    def _build_output_trie(self, destinations: Sequence[str]) -> dict[Any, Any]:
+        """建立需要防止再次套用的目的詞前綴樹。"""
+        return _build_literal_trie(
+            (
+                (dst, True)
+                for (src, _original_dst), dst in zip(self.literal_rules, destinations)
+                if src and src in dst
+            )
+        )
+
+    def _normalize_destinations(
+        self,
+        destinations: Sequence[str],
+        output_trie: dict[Any, Any],
+    ) -> list[str]:
+        """將每個目的詞套用到穩定，並以循環中的最小值作為標準譯名。
+
+        正常規則應在少量輪次內收斂；輪次上限只用來避免異常規則造成無限增長。
+        """
+        normalized: list[str] = []
+        for destination in destinations:
+            current = destination
+            seen: dict[str, int] = {current: 0}
+            states = [current]
+            for _ in range(_DESTINATION_NORMALIZATION_MAX_ROUNDS):
+                next_value = self._apply_literals_once(
+                    current,
+                    destinations=destinations,
+                    output_trie=output_trie,
+                )
+                if next_value == current:
+                    break
+                cycle_start = seen.get(next_value)
+                if cycle_start is not None:
+                    current = min(states[cycle_start:])
+                    break
+                seen[next_value] = len(states)
+                states.append(next_value)
+                current = next_value
+            normalized.append(current)
+        return normalized
 
     def may_hit(self, text: str) -> bool:
         """等同舊版逐條 `k in text or k 去空白 in text 去空白` 的預檢（O(文字長度)）。"""
@@ -343,14 +391,18 @@ class _CompiledRules:
         grams.update(text[i : i + 2] for i in range(len(text) - 1))
         return grams
 
-    def _protected_until(self, text: str) -> list[int]:
+    def _protected_until(
+        self, text: str, output_trie: dict[Any, Any] | None = None
+    ) -> list[int]:
         """回傳覆蓋各索引的目標片語結束偏移量。"""
         protected_until = [0] * len(text)
-        if not self.output_trie:
+        if output_trie is None:
+            output_trie = self.output_trie
+        if not output_trie:
             return protected_until
 
         for start in range(len(text)):
-            node = self.output_trie
+            node = output_trie
             end = start
             while end < len(text):
                 node = node.get(text[end])
@@ -362,18 +414,26 @@ class _CompiledRules:
                         protected_until[index] = max(protected_until[index], end)
         return protected_until
 
-    def _apply_literals_once(self, text: str) -> str:
+    def _apply_literals_once(
+        self,
+        text: str,
+        *,
+        destinations: Sequence[str] | None = None,
+        output_trie: dict[Any, Any] | None = None,
+    ) -> str:
         """只根據原始文字套用一次字面值規則。"""
         if not self.literal_trie:
             return text
 
-        protected_until = self._protected_until(text)
+        if destinations is None:
+            destinations = self.atomic_destinations
+        protected_until = self._protected_until(text, output_trie)
         output: list[str] = []
         index = 0
         while index < len(text):
             node = self.literal_trie
             cursor = index
-            matched_idx = None
+            candidates: list[tuple[int, int]] = []
             while cursor < len(text):
                 node = node.get(text[cursor])
                 if node is None:
@@ -381,21 +441,26 @@ class _CompiledRules:
                 cursor += 1
                 candidate = node.get(_TRIE_TERMINAL)
                 if candidate is not None:
-                    matched_idx = candidate
+                    candidates.append((cursor, candidate))
 
-            if matched_idx is None:
+            matched_idx = None
+            end = None
+            # 從最長匹配開始嘗試；最長候選若碰到保護區，回退到下一個候選。
+            for candidate_end, candidate_idx in reversed(candidates):
+                if not any(
+                    protected_until[offset] > offset
+                    for offset in range(index, candidate_end)
+                ):
+                    matched_idx = candidate_idx
+                    end = candidate_end
+                    break
+
+            if matched_idx is None or end is None:
                 output.append(text[index])
                 index += 1
                 continue
 
-            src, dst = self.literal_rules[matched_idx]
-            end = index + len(src)
-            if any(protected_until[offset] > offset for offset in range(index, end)):
-                output.append(text[index])
-                index += 1
-                continue
-
-            output.append(dst)
+            output.append(destinations[matched_idx])
             index = end
 
         return "".join(output)
@@ -459,10 +524,11 @@ def apply_replace_rules(
 ) -> str:
     """應用替換規則到給定的文字。
 
-    預設固定字串規則只對原文做一次最長匹配，替換結果不會再被其他固定
-    字串規則掃描；這避免來源詞出現在目標詞中時發生遞迴套用。
-    ``cascade=True`` 提供明確的舊版逐條串接語意。正則規則仍在固定字串
-    階段後依序套用；文字不含任何規則前兩字時整段略過。
+    預設固定字串規則只對原文做一次最長有效匹配；規則目的詞會在編譯時
+    正規化，因此重複處理同一份結果不會再次漂移。這避免來源詞出現在
+    目的詞中時發生遞迴套用。``cascade=True`` 提供明確的舊版逐條串接
+    語意。正則規則仍在固定字串階段後依序套用；文字不含任何規則前兩字
+    時整段略過。
     3 萬條規則時不再對每段文字掃過全部規則。
     """
 

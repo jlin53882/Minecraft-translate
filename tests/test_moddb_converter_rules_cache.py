@@ -125,7 +125,7 @@ def test_converter_uses_atomic_literals_and_keeps_regex_rules():
     convert = make_converter(rules)
 
     assert convert("capacitor block source gear-12 [") == (
-        "long first 12_gear left-bracket"
+        "long second 12_gear left-bracket"
     )
     assert (
         tp.apply_replace_rules("capacitor block source gear-12 [", rules, cascade=True)

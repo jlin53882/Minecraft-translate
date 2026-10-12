@@ -48,7 +48,17 @@ def test_literal_replacement_is_atomic_by_default():
         {"from": "模組", "to": "模組件"},
     ]
 
-    assert apply_replace_rules("這是內存條", rules) == "這是記憶體模組"
+    assert apply_replace_rules("這是內存條", rules) == "這是回憶體模組件"
+
+
+def test_atomic_replacement_falls_back_when_longest_match_is_protected():
+    rules = [
+        {"from": "石磚", "to": "青苔石磚"},
+        {"from": "前綴青苔", "to": "完整替換"},
+        {"from": "前綴", "to": "短詞替換"},
+    ]
+
+    assert apply_replace_rules("前綴青苔石磚", rules) == "短詞替換青苔石磚"
 
 
 def test_atomic_replacement_protects_existing_destination_phrases():
@@ -71,13 +81,13 @@ def test_atomic_replacement_protects_existing_destination_phrases():
     assert apply_replace_rules("苔石磚", rules, cascade=True) == "青青苔鵝卵石磚"
 
 
-def test_atomic_replacement_allows_a_destination_that_is_another_source():
+def test_atomic_replacement_normalizes_destination_chains():
     rules = [
         {"from": "蜜脾", "to": "蜂巢"},
         {"from": "蜂巢", "to": "蜂窩"},
     ]
 
-    assert apply_replace_rules("蜜脾", rules) == "蜂巢"
+    assert apply_replace_rules("蜜脾", rules) == "蜂窩"
     assert apply_replace_rules("蜂巢", rules) == "蜂窩"
 
 
@@ -91,6 +101,7 @@ def test_project_rules_keep_real_overlapping_outputs_stable():
         "苔石磚樓梯": "青苔石磚階梯",
         "青苔石磚": "青苔石磚",
         "青苔石磚樓梯": "青苔石磚樓梯",
+        "蜜脾": "蜂窩",
         "蜂巢": "蜂窩",
         "紅磚": "紅磚頭",
         "樹脂磚": "樹脂磚頭",
@@ -98,6 +109,61 @@ def test_project_rules_keep_real_overlapping_outputs_stable():
 
     for source, destination in expected.items():
         assert apply_replace_rules(source, rules) == destination
+
+
+def test_project_literal_rules_are_idempotent():
+    rules = json.loads(
+        (Path(__file__).parents[1] / "replace_rules.json").read_text(encoding="utf-8")
+    )
+
+    literal_rules = [
+        rule
+        for rule in rules
+        if isinstance(rule, dict)
+        and isinstance(rule.get("from"), str)
+        and isinstance(rule.get("to"), str)
+        and not any(char in rule["from"] for char in ".?*[]()\\")
+    ]
+    assert len(literal_rules) == 1324
+
+    expected_canonical = {
+        "噴濺型力量藥水": "飛濺 強力藥水",
+        "噴濺型水肺藥水": "飛濺 水中呼吸藥水",
+        "噴濺型迅捷藥水": "飛濺 加速藥水",
+        "滯留型力量藥水": "滯留 強力藥水",
+        "滯留型水肺藥水": "滯留 水中呼吸藥水",
+        "滯留型迅捷藥水": "滯留 加速藥水",
+        "去皮緋紅菌核": "剝皮緋紅蕈菇絲體",
+        "去皮詭異菌核": "剝皮扭曲菌絲土",
+        "知識就是力量": "知書就是強力",
+        "雕紋樹脂磚塊": "浮雕樹脂磚頭",
+        "樹脂磚樓梯": "樹脂磚頭階梯",
+        "樹脂磚臺階": "樹脂磚頭半磚",
+        "樹脂磚塊": "樹脂磚頭",
+        "水肺之箭": "水中呼吸之箭",
+        "水肺藥水": "水中呼吸藥水",
+        "皮革外套": "皮革盔甲",
+        "紅磚樓梯": "紅磚頭階梯",
+        "紅磚臺階": "紅磚頭半磚",
+        "緋紅菌巖": "緋紅蕈菇絲石",
+        "緋紅菌核": "緋紅蕈菇絲體",
+        "詭異菌核": "扭曲菌絲土",
+        "紅磚塊": "紅磚頭",
+        "蜜脾塊": "蜂窩塊",
+        "蜜脾": "蜂窩",
+    }
+    assert len(expected_canonical) == 24
+    for source, destination in expected_canonical.items():
+        assert apply_replace_rules(source, rules) == destination
+
+    for rule in literal_rules:
+        source = rule["from"]
+        first = apply_replace_rules(source, rules)
+        assert apply_replace_rules(first, rules) == first, (
+            source,
+            first,
+            apply_replace_rules(first, rules),
+        )
 
 
 def test_conflict_report_finds_sources_inside_outputs():
