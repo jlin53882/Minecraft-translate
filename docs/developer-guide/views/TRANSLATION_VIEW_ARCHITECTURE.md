@@ -125,4 +125,4 @@ TranslationView（ft.Column）
 ## 維護注意
 
 1. 新增 pipeline 目標：在 `translation_panels` 加 `build_*_tab()`、`translation_actions` 加 `run_*()`、`_build_translation_status_and_right_panel` 加 service seam、`_init_translation_state_and_tabs` 加 tab、`_reset_*_inputs()`，並在 `resume_interrupted` 加入對應的 `task.kind` 分支。
-2. `_reset_*_inputs` 會重設步驟為全 True + write_new_cache True（MD 的 lang_mode 回 non_cjk_only，KubeJS 的 source_mode 回 fresh）。
+2. `_reset_*_inputs` 會重設步驟為全 True + write_new_cache False（MD 的 lang_mode 回 non_cjk_only，KubeJS 的 source_mode 回 fresh）。

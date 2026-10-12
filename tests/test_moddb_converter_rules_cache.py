@@ -1,4 +1,4 @@
-"""ModDB converter behavior and compiled-rule cache coverage."""
+"""ModDB 轉換器行為與編譯規則快取測試覆蓋。"""
 
 import subprocess
 import sys
@@ -23,13 +23,12 @@ def test_converter_keeps_outer_snapshot_and_tracks_inner_rule_mutation():
     rules = tp.ReplaceRules([{"from": "wire", "to": "FIRST"}])
     convert = make_converter(rules)
 
-    # The old converter snapshots list membership, so newly appended rules do
-    # not enter an in-flight scan's behavior.
+    # 舊版轉換器會快照清單成員，因此後續加入的規則不會影響進行中的掃描行為。
     rules.append({"from": "assembled", "to": "NEW RULE"})
     assert convert("wire assembled") == "FIRST assembled"
 
-    # The shallow snapshot still shares the tracked rule rows. Mutating one of
-    # those rows has historically affected the converter and must invalidate it.
+    # 淺層快照仍共用受追蹤的規則項目。修改這些項目在歷史行為上會影響轉換器，
+    # 且必須使快取失效。
     rules[0]["to"] = "SECOND"
     assert convert("wire assembled") == "SECOND assembled"
 
@@ -112,22 +111,25 @@ def test_converter_none_and_empty_rules_keep_opencc_behavior():
     assert make_converter([])("wire") == "wire"
 
 
-def test_converter_preserves_long_first_chained_regex_and_invalid_regex_rules():
-    convert = make_converter(
-        tp.ReplaceRules(
-            [
-                {"from": "capacitor block", "to": "long"},
-                {"from": "capacitor", "to": "short"},
-                {"from": "source", "to": "first"},
-                {"from": "first", "to": "second"},
-                {"from": r"(gear)-(\d+)", "to": "$2_$1"},
-                {"from": "[", "to": "left-bracket"},
-            ]
-        )
+def test_converter_uses_atomic_literals_and_keeps_regex_rules():
+    rules = tp.ReplaceRules(
+        [
+            {"from": "capacitor block", "to": "long"},
+            {"from": "capacitor", "to": "short"},
+            {"from": "source", "to": "first"},
+            {"from": "first", "to": "second"},
+            {"from": r"(gear)-(\d+)", "to": "$2_$1"},
+            {"from": "[", "to": "left-bracket"},
+        ]
     )
+    convert = make_converter(rules)
 
     assert convert("capacitor block source gear-12 [") == (
         "long second 12_gear left-bracket"
+    )
+    assert (
+        tp.apply_replace_rules("capacitor block source gear-12 [", rules, cascade=True)
+        == "long second 12_gear left-bracket"
     )
 
 
@@ -158,7 +160,7 @@ def test_converter_per_task_rule_snapshots_do_not_contaminate_each_other():
     first_rules = tp.ReplaceRules([{"from": "wire", "to": "OLD CONFIG"}])
     first_converter = make_converter(first_rules)
 
-    # A config reload gives the next task its own rules object and converter.
+    # 重新載入設定會讓下一個工作取得自己的規則物件與轉換器。
     second_rules = tp.ReplaceRules([{"from": "wire", "to": "NEW CONFIG"}])
     second_converter = make_converter(second_rules)
 

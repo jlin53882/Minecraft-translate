@@ -15,7 +15,11 @@ from opencc import OpenCC
 
 from .config_manager import resolve_project_path
 from .log_unit import log_error, log_info, log_warning
-from .replace_rules import ReplaceRules, apply_replace_rules
+from .replace_rules import (
+    ReplaceRules,
+    apply_replace_rules,
+    find_replacement_conflicts,
+)
 
 
 def _resolve_rules_path(path: str):
@@ -76,6 +80,18 @@ def load_replace_rules(path: str) -> list[dict[str, str]]:
     fixed_rules.sort(key=lambda r: len(r["from"]), reverse=True)
     # ReplaceRules：規則被修改時會遞增 revision，讓 apply_replace_rules 的編譯快取失效
     sorted_rules = ReplaceRules(fixed_rules + regex_rules)
+
+    conflicts = find_replacement_conflicts(sorted_rules)
+    if conflicts:
+        examples = "、".join(
+            f"{source!r}->{destination!r}"
+            for _source_index, source, _destination_index, destination in conflicts[:3]
+        )
+        log_warning(
+            "替換規則有 %d 個輸出包含來源詞的衝突；固定文字預設只套用一次（例：%s）",
+            len(conflicts),
+            examples,
+        )
 
     log_info(
         "已載入自動替換規則：一般文字 %d 條（較長內容優先套用），正規表示式 %d 條",
