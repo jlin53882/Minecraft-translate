@@ -67,7 +67,7 @@ batch_lookup_clicked(e)
 
 ### 格式判定
 - 查詢前會去除前後空白並合併重複空白。
-- `_SPECIES_NAME_REGEX` 接受二名法、三名法、常見種下階級與雜交符號（例如 `Felis catus`、`Canis lupus familiaris`、`Quercus robur subsp. broteroana`、`Acer × freemanii`）。
+- `SPECIES_NAME_REGEX`（`translation_tool/utils/species_names.py`）接受二名法、三名法、常見種下階級與雜交符號（例如 `Felis catus`、`Canis lupus familiaris`、`Quercus robur subsp. broteroana`、`Acer × freemanii`）。
 - `is_potential_species_name(name)`：非 str 或格式不符 → False。
 
 ### lookup_species_name(name) 決策鏈
@@ -87,7 +87,7 @@ batch_lookup_clicked(e)
 
 - `app/views/lookup_view.py` — UI
 - `app/services_impl/pipelines/lookup_service.py` — service 封裝
-- `translation_tool/utils/species_cache.py` — `is_potential_species_name` / `lookup_species_name`（本地快取 + 線上查詢）
+- `translation_tool/utils/species_cache.py` — `lookup_species_name`（本地快取 + 線上查詢）；`translation_tool/utils/species_names.py` — `is_potential_species_name` 等不碰網路的判斷規則
 
 ## 維護注意
 

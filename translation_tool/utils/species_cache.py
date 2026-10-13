@@ -20,6 +20,7 @@ import requests
 from opencc import OpenCC
 
 from .config_manager import load_config, resolve_project_path
+from .species_names import is_potential_species_name, normalize_species_name
 
 log = logging.getLogger(__name__)
 
@@ -46,10 +47,6 @@ _RATE_LIMIT_DELAY = (
     load_config().get("species_cache", {}).get("wikipedia_rate_limit_delay", 0.5)
 )
 
-_SPECIES_NAME_REGEX = re.compile(
-    r"^[A-Z][a-z-]+ (?:× )?[a-z][a-z-]+"
-    r"(?: (?:(?:subsp|ssp|var|f)\. )?[a-z][a-z-]+)?$"
-)
 _WIKI_LANGUAGE_REGEX = re.compile(r"^[a-z][a-z0-9-]{0,19}$")
 _WIKI_REQUEST_TIMEOUT_SECONDS = 15
 _WIKI_REQUEST_ATTEMPTS = 3
@@ -161,18 +158,6 @@ def _initialize_species_cache_locked():
         log.exception("初始化學名快取時發生嚴重錯誤")
         _initialized = False
         return False
-
-
-def is_potential_species_name(name: str) -> bool:
-    """判斷是否可能是物種名稱。"""
-    if not isinstance(name, str):
-        return False
-    return bool(_SPECIES_NAME_REGEX.fullmatch(_normalize_species_name(name)))
-
-
-def _normalize_species_name(name: str) -> str:
-    """移除使用者輸入前後與重複空白，保留學名本身的大小寫。"""
-    return " ".join(name.split())
 
 
 def _wikipedia_api_url() -> str:
@@ -328,7 +313,7 @@ def query_wikipedia_and_update_cache(species_name: str) -> str | None:
     """線上查詢維基百科並更新快取。"""
     if _species_cache_data is None:
         return None
-    return _fetch_and_cache(_normalize_species_name(species_name)).value
+    return _fetch_and_cache(normalize_species_name(species_name)).value
 
 
 def lookup_species(name: str) -> SpeciesLookup:
@@ -342,7 +327,7 @@ def lookup_species(name: str) -> SpeciesLookup:
     if _species_cache_data is None:
         return SpeciesLookup(STATUS_ERROR, None, "學名快取不可用")
 
-    normalized_name = _normalize_species_name(name)
+    normalized_name = normalize_species_name(name)
     if cached := _cached_lookup(normalized_name):
         return cached
     if not is_potential_species_name(normalized_name):

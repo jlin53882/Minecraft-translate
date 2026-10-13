@@ -6,6 +6,7 @@ import re
 from collections import Counter
 
 from translation_tool.translation_db.models import QualityFilter, QualityIssueDelta
+from translation_tool.utils.species_names import is_species_candidate
 
 _SCAN_RE = re.compile(
     r"§[0-9a-fk-orA-FK-OR]|%(?:\d+\$)?[sdfxXeEgGcb%]|\$\(|\{\d*\}|\\n|\n"
@@ -202,12 +203,17 @@ def quality_state(source: str, translated: str) -> tuple[str, tuple[str, ...], s
     return ("whitespace" if note else "consistent"), issues, note
 
 
-def matches_quality(source: str, translated: str, criteria: QualityFilter) -> bool:
+def matches_quality(
+    source: str, translated: str, criteria: QualityFilter, key: str = ""
+) -> bool:
+    """``key`` 只有「疑似學名」狀態會用到；其他狀態只看原文與譯文。"""
     if not criteria.active:
         return True
     status = criteria.status
     if status == "all":
         status = "mismatch"
+    if status == "species_name":
+        return bool(source) and is_species_candidate(key, source)
     # 掃描整個版本時每列都會進來：只做該狀態需要的判斷，不先跑完整的 token 分析。
     if status == "unknown_source":
         return not source

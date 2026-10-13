@@ -353,3 +353,41 @@ def test_scan_skips_general_text_and_loose_mode_includes_it(tmp_path):
         "Energy usage",
         "Oak planks",
     }
+
+
+# ---------------------------------------------------------------- 進階篩選：疑似學名文字
+def test_species_name_quality_filter_lists_only_species_entries(tmp_path):
+    from translation_tool.translation_db import EntryFilter, QualityFilter
+
+    db = TranslationDB(tmp_path / "mod.db")
+    try:
+        db.ingest(
+            "1.21.1",
+            [
+                ScanItem(KIND_LANG, "m", "block.m.olive.latin", "Olea europaea"),
+                ScanItem(KIND_LANG, "m", "misc.mint", "Mentha × piperita"),
+                ScanItem(KIND_LANG, "m", "gui.energy_usage", "Energy usage"),
+                ScanItem(KIND_LANG, "m", "block.m.steel.latin", "Steel Casing"),
+                ScanItem(KIND_LANG, "m", "misc.oak", "Oak planks"),
+            ],
+        )
+        criteria = EntryFilter(
+            version="1.21.1", quality=QualityFilter(status="species_name")
+        )
+        rows, total = db.list_entries(criteria=criteria, limit=50)
+        unpaged, unpaged_total = db.list_entries(criteria=criteria, limit=None)
+    finally:
+        db.close()
+
+    assert total == unpaged_total == 2
+    assert {row.en_us for row in rows} == {"Olea europaea", "Mentha × piperita"}
+    assert {row.en_us for row in unpaged} == {row.en_us for row in rows}
+
+
+def test_species_names_module_is_pure_and_shared():
+    from translation_tool.utils import species_names
+
+    assert species_names.is_species_candidate("a.latin", "Olea europaea")
+    assert species_cache.is_potential_species_name is (
+        species_names.is_potential_species_name
+    )
