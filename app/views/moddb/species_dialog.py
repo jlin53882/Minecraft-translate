@@ -455,6 +455,8 @@ class SpeciesCandidateDialog:
         if lookup.status == STATUS_NOT_FOUND:
             if reference := bulk.parent_reference_text(lookup):
                 return f"找不到對應條目；{reference}（僅供參考）", C.GOLD
+            if failure := bulk.parent_failure_text(lookup):
+                return f"找不到對應條目；{failure}，可按「再查一次」", C.GOLD
             return "找不到對應條目", C.GOLD
         if lookup.status == STATUS_RATE_LIMITED:
             return f"請求過於頻繁，稍後可重試（{lookup.detail}）", C.RED

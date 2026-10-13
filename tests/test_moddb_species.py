@@ -1018,3 +1018,136 @@ def test_species_suggestion_offers_parent_reference(isolated_species_cache):
     button = next(b for c in controls if (b := _find_button(c, "套用參考名稱")))
     button.on_click(None)
     assert applied == ["歐洲山毛櫸"]
+
+
+# ---------------------------------------------------------------- 上一層物種的失敗與回應解析
+@pytest.mark.parametrize(
+    ("raised", "status"),
+    [
+        (_http_error(429), species_cache.STATUS_RATE_LIMITED),
+        (requests.Timeout(), species_cache.STATUS_ERROR),
+    ],
+)
+def test_parent_lookup_failure_is_reported_not_swallowed(
+    isolated_species_cache, monkeypatch, raised, status
+):
+    def fetch(name):
+        if name == "Fagus sylvatica":
+            raise raised
+
+    monkeypatch.setattr(species_cache, "_query_wikipedia_title", fetch)
+    result = species_cache.lookup_species("Fagus sylvatica purpurea")
+    assert result.status == species_cache.STATUS_NOT_FOUND  # 自己的結果不變
+    assert result.parent_status == status
+    assert result.parent_value is None
+    assert result.failed is True
+    assert result.rate_limited is (status == species_cache.STATUS_RATE_LIMITED)
+    # 上一層的暫時失敗不寫入快取，之後再查會重試
+    assert species_cache.cached_species_lookup("Fagus sylvatica") is None
+
+
+def _parent_failure(status):
+    return species_cache.SpeciesLookup(
+        species_cache.STATUS_NOT_FOUND,
+        parent_name="Agave americana",
+        parent_status=status,
+        parent_detail="HTTP 429" if status == "rate_limited" else "連線逾時",
+    )
+
+
+def test_bulk_lookup_stops_when_parent_lookup_is_rate_limited(tmp_path, monkeypatch):
+    db, dialog = _make_dialog(
+        tmp_path,
+        monkeypatch,
+        [_parent_failure(species_cache.STATUS_RATE_LIMITED), FOUND, FOUND],
+    )
+    try:
+        dialog._query_all()
+        assert dialog.job.stop_reason == "rate_limited"
+        states = list(dialog._states.values())
+        assert states[1].lookup is None and states[2].lookup is None
+        assert "過於頻繁" in dialog.status.value
+        status, _color = dialog._status_for(states[0])
+        assert "上一層物種 Agave americana 查詢失敗（HTTP 429）" in status
+    finally:
+        db.close()
+
+
+def test_bulk_lookup_counts_parent_errors_as_consecutive_failures(
+    tmp_path, monkeypatch
+):
+    failure = _parent_failure(species_cache.STATUS_ERROR)
+    db, dialog = _make_dialog(tmp_path, monkeypatch, [failure, failure, failure])
+    try:
+        dialog._query_all()
+        assert dialog.job.stop_reason == "failures"
+        assert "失敗可重試 3" in dialog.status.value
+    finally:
+        db.close()
+
+
+def test_species_suggestion_shows_parent_failure(isolated_species_cache):
+    from app.views.moddb.species_suggestion import SpeciesSuggestion
+
+    suggestion = SpeciesSuggestion(mock_page(), lambda _t: None, lambda: None)
+    suggestion._results["Fagus sylvatica purpurea"] = _parent_failure(
+        species_cache.STATUS_RATE_LIMITED
+    )
+    texts = _texts(
+        suggestion.build(_entry("block.m.x.latin", "Fagus sylvatica purpurea"))
+    )
+    assert any("查詢失敗（HTTP 429）" in text for text in texts)
+    assert "套用參考名稱" not in texts and "再查一次" in texts
+
+
+class _Response:
+    def __init__(self, payload):
+        self._payload = payload
+        self.status_code = 200
+        self.headers = {}
+
+    def raise_for_status(self):
+        return None
+
+    def json(self):
+        return self._payload
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"query": {}},
+        {"query": {"pages": []}},
+        {"query": {"pages": [{"pageid": 1}]}},
+        {"query": {"pages": [{"title": ""}]}},
+    ],
+)
+def test_incomplete_api_response_is_retryable_and_not_cached(
+    isolated_species_cache, monkeypatch, payload
+):
+    monkeypatch.setattr(species_cache, "_RATE_LIMIT_DELAY", 0)
+    monkeypatch.setattr(
+        species_cache.requests, "get", lambda *_a, **_k: _Response(payload)
+    )
+    result = species_cache.lookup_species("Olea europaea")
+    assert result.status == species_cache.STATUS_ERROR
+    assert "回應不完整" in result.detail
+    assert species_cache.cached_species_lookup("Olea europaea") is None
+
+
+@pytest.mark.parametrize(
+    "page", [{"title": "Olea europaea", "missing": True}, {"invalid": True}]
+)
+def test_explicit_missing_page_is_cached_not_found(
+    isolated_species_cache, monkeypatch, page
+):
+    monkeypatch.setattr(species_cache, "_RATE_LIMIT_DELAY", 0)
+    monkeypatch.setattr(
+        species_cache.requests,
+        "get",
+        lambda *_a, **_k: _Response({"query": {"pages": [page]}}),
+    )
+    result = species_cache.lookup_species("Olea europaea")
+    assert result.status == species_cache.STATUS_NOT_FOUND
+    cached = species_cache.cached_species_lookup("Olea europaea")
+    assert cached.status == species_cache.STATUS_NOT_FOUND

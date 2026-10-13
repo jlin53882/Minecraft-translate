@@ -87,7 +87,9 @@ class SpeciesLookup:
     """一次學名查詢的結果；``found`` 與 ``not_found`` 是確定結果，其餘可重試。
 
     種以下的名稱查無時，``parent_name``／``parent_value`` 帶上一層物種的名稱，
-    只供參考（變種的正確譯名通常不同）。
+    只供參考（變種的正確譯名通常不同）。上一層物種查詢遇到限流或錯誤時，
+    ``status`` 仍是這個名稱自己的查無，失敗另記在 ``parent_status``／``parent_detail``，
+    讓批次查詢能照樣偵測限流與連續失敗。
     """
 
     status: str
@@ -95,10 +97,25 @@ class SpeciesLookup:
     detail: str = ""
     parent_name: str | None = None
     parent_value: str | None = None
+    parent_status: str | None = None
+    parent_detail: str = ""
 
     @property
     def definitive(self) -> bool:
         return self.status in (STATUS_FOUND, STATUS_NOT_FOUND)
+
+    @property
+    def rate_limited(self) -> bool:
+        """這次查詢（含上一層物種）是否遇到限流。"""
+        return STATUS_RATE_LIMITED in (self.status, self.parent_status)
+
+    @property
+    def failed(self) -> bool:
+        """這次查詢（含上一層物種）是否有可重試的失敗。"""
+        return not self.definitive or self.parent_status in (
+            STATUS_RATE_LIMITED,
+            STATUS_ERROR,
+        )
 
 
 def initialize_species_cache():
@@ -264,12 +281,15 @@ def _query_wikipedia_title(species_name: str) -> str | None:
         pages = payload.get("query", {}).get("pages", [])
         if isinstance(pages, dict):
             pages = list(pages.values())
-        if not pages or pages[0].get("missing"):
+        if not pages or not isinstance(pages[0], dict):
+            # 回應結構不完整不是「查無」：當成錯誤，不寫入快取，之後可重試。
+            raise RuntimeError("Wikipedia API 回應不完整：缺少頁面資料")
+        if pages[0].get("missing") or pages[0].get("invalid"):
             return None
 
         title = pages[0].get("title")
-        if not isinstance(title, str):
-            return None
+        if not isinstance(title, str) or not title.strip():
+            raise RuntimeError("Wikipedia API 回應不完整：缺少頁面標題")
         normalized_title = title.split("(", 1)[0].strip()
         return _convert_wikipedia_title(normalized_title) or None
 
@@ -380,8 +400,15 @@ def _with_parent_reference(
     if parent is None:
         return lookup
     parent_lookup = _single_flight_lookup(parent) if fetch else _cached_lookup(parent)
-    if parent_lookup is None or parent_lookup.status != STATUS_FOUND:
+    if parent_lookup is None or parent_lookup.status == STATUS_NOT_FOUND:
         return lookup
+    if parent_lookup.status != STATUS_FOUND:
+        return replace(
+            lookup,
+            parent_name=parent,
+            parent_status=parent_lookup.status,
+            parent_detail=parent_lookup.detail,
+        )
     return replace(lookup, parent_name=parent, parent_value=parent_lookup.value)
 
 

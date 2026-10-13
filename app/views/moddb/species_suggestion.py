@@ -26,6 +26,7 @@ from app.ui.design import C
 from app.ui.snack import show_snack
 from app.views.moddb.species_bulk_lookup import (
     bulk_lookup_for,
+    parent_failure_text,
     parent_reference_text,
 )
 from app.views.moddb.species_bulk_lookup import safe_lookup as _safe_lookup
@@ -111,9 +112,11 @@ class SpeciesSuggestion:
         if found and lookup.value == entry.zh_tw:
             chips.append(kit.chip("與目前譯文相同", "em"))
         actions = [] if running else self._actions(entry, name, lookup)
-        reference = ""
-        if lookup and lookup.status == STATUS_NOT_FOUND and not running:
-            reference = parent_reference_text(lookup)
+        parent_lines = (
+            self._parent_lines(lookup)
+            if lookup and lookup.status == STATUS_NOT_FOUND and not running
+            else []
+        )
         return ft.Container(
             padding=ft.Padding.symmetric(vertical=8),
             border=ft.Border.only(bottom=ft.BorderSide(1, C.LINE)),
@@ -127,7 +130,7 @@ class SpeciesSuggestion:
                         color=color,
                         selectable=True,
                     ),
-                    *self._reference_lines(reference),
+                    *parent_lines,
                     ft.Row(chips, spacing=6, wrap=True),
                     ft.Row(actions, spacing=8, wrap=True),
                 ],
@@ -186,15 +189,25 @@ class SpeciesSuggestion:
         return actions
 
     @staticmethod
-    def _reference_lines(reference: str) -> list[ft.Control]:
-        if not reference:
-            return []
-        return [
-            ft.Text(reference, size=13, color=C.TEXT, selectable=True),
-            kit.hint_text(
-                "變種／品種的正確譯名通常不同，這只是上一層物種的名稱，僅供參考。"
-            ),
-        ]
+    def _parent_lines(lookup: SpeciesLookup) -> list[ft.Control]:
+        """查無時的上一層物種資訊：查到的參考名稱，或上一層查詢失敗的說明。"""
+        if reference := parent_reference_text(lookup):
+            return [
+                ft.Text(reference, size=13, color=C.TEXT, selectable=True),
+                kit.hint_text(
+                    "變種／品種的正確譯名通常不同，這只是上一層物種的名稱，僅供參考。"
+                ),
+            ]
+        if failure := parent_failure_text(lookup):
+            return [
+                ft.Text(
+                    f"{failure}，可按「再查一次」重試。",
+                    size=13,
+                    color=C.RED,
+                    selectable=True,
+                )
+            ]
+        return []
 
     # ------------------------------------------------------------------ 查詢
     def query(self, name: str, *, refresh: bool = False) -> None:

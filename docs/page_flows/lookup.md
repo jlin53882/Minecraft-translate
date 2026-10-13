@@ -73,7 +73,7 @@ flowchart TD
 - **`_recent`**：最近查詢名稱的清單，只保存在記憶體，程式關閉即清除。上限 `RECENT_LIMIT`（6）。
 - **單筆控制項狀態**：`single_input`、`single_button`、`single_progress_ring`、`single_result_text`、`recent_row`。查詢中會停用輸入與按鈕，完成後恢復。
 - **批次控制項狀態**：`batch_input`（JSON 字串）、`batch_result_textfield`（唯讀）、`batch_progress_bar`（預設隱藏）、`batch_button`。
-- **外部資料來源**：`lookup_species_name` 先查 `species_cache` 的記憶體字典（來源為本機快取檔，寫入時 append 到 tab 分隔檔）；未命中才呼叫 MediaWiki Action API，跟隨學名轉址取得條目標題，找到或查無時更新記憶體與快取檔（查無記為空的俗名）。
+- **外部資料來源**：`lookup_species_name` 先查 `species_cache` 的記憶體字典（來源為本機快取檔，寫入時 append 到 tab 分隔檔）；未命中才呼叫 MediaWiki Action API，跟隨學名轉址取得條目標題，找到或 API 明確標示頁面不存在時更新記憶體與快取檔（查無記為空的俗名）；回應不完整當成可重試的錯誤。
 - **查詢失敗**：查無是確定結果，會寫入快取，之後不再連線；暫時性錯誤（限流、逾時、連線失敗）不寫入快取，後續查詢會重新連線。
 - **語言與速率**：Wikipedia 語言與查詢間隔由設定檔的 `species_cache` 區段決定（預設語言 `zh`，每次線上查詢前等待 `wikipedia_rate_limit_delay`）；`zh` 條目標題會以 OpenCC `s2twp` 正規化為台灣繁體。
 

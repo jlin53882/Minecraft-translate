@@ -16,7 +16,6 @@ from app.services_impl.moddb_service import (
     STATUS_ERROR,
     STATUS_FOUND,
     STATUS_NOT_FOUND,
-    STATUS_RATE_LIMITED,
     SpeciesCandidate,
     SpeciesLookup,
     SpeciesScanResult,
@@ -71,12 +70,19 @@ def parent_reference_text(lookup: SpeciesLookup) -> str:
     return ""
 
 
+def parent_failure_text(lookup: SpeciesLookup) -> str:
+    """上一層物種查詢失敗的說明；可以按「再查一次」重試。"""
+    if lookup.parent_name and lookup.parent_status:
+        return f"上一層物種 {lookup.parent_name} 查詢失敗（{lookup.parent_detail}）"
+    return ""
+
+
 def summary_text(prefix: str, lookups) -> str:
     """把查詢結果整理成「找到 N、查無 N、失敗可重試 N」摘要。"""
     lookups = [item for item in lookups if item is not None]
     found = sum(1 for item in lookups if item.status == STATUS_FOUND)
     missing = sum(1 for item in lookups if item.status == STATUS_NOT_FOUND)
-    retry = sum(1 for item in lookups if not item.definitive)
+    retry = sum(1 for item in lookups if item.failed)
     parts = [f"找到 {found}", f"查無 {missing}"]
     if retry:
         parts.append(f"失敗可重試 {retry}")
@@ -220,10 +226,10 @@ class SpeciesBulkLookup:
                 lookups.append(lookup)
                 session.set_progress(index / total)
                 self._post(self._record, generation, candidate.entry_id, lookup, index)
-                if lookup.status == STATUS_RATE_LIMITED:
+                if lookup.rate_limited:  # 含上一層物種查詢遇到的限流
                     stop_reason = "rate_limited"
                     break
-                failures = 0 if lookup.definitive else failures + 1
+                failures = failures + 1 if lookup.failed else 0
                 if failures >= MAX_CONSECUTIVE_FAILURES:
                     stop_reason = "failures"
                     break
@@ -287,6 +293,7 @@ __all__ = [
     "STOP_MESSAGES",
     "SpeciesBulkLookup",
     "bulk_lookup_for",
+    "parent_failure_text",
     "parent_reference_text",
     "safe_lookup",
     "summary_text",
