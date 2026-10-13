@@ -461,3 +461,20 @@ def test_preview_card_uses_ui_values_without_source_files(tmp_path):
     assert "".join(s.text for s in view.preview_title.spans) == "UI 描述"
     assert view.preview_image.content.src == str(ui_png)
     assert not view.preview_source_note.visible
+
+
+def test_picking_a_pack_image_refreshes_the_preview(tmp_path):
+    import asyncio
+    from types import SimpleNamespace
+
+    png = tmp_path / "chosen.png"
+    png.write_bytes(b"\x89PNG")
+    view = BundlerView(mock_page(), mock_filepicker())
+
+    async def pick_files(**_kwargs):
+        return [SimpleNamespace(path=str(png))]
+
+    view.file_picker.pick_files = pick_files
+    asyncio.run(view._async_pick_pack_image())
+
+    assert view.preview_image.content.src == str(png)

@@ -578,7 +578,7 @@ def test_repair_removes_old_fields_when_only_new_formats_are_supported():
     )
     assert "pack_format" not in fixed and "supported_formats" not in fixed
     assert (fixed["min_format"], fixed["max_format"]) == (69, 75)
-    assert any("已移除 supported_formats" in n for n in notes)
+    assert any("已移除" in n and "supported_formats" in n for n in notes)
 
 
 def test_repair_adds_old_fields_when_the_range_starts_below_65():
@@ -631,3 +631,46 @@ def test_integer_max_format_uses_the_games_minor_ceiling():
     from translation_tool.core.pack_mcmeta import _ANY_MINOR
 
     assert _ANY_MINOR == 0x7FFFFFFF
+
+
+def test_repair_drops_old_fields_whose_range_contradicts_the_new_range():
+    fixed, notes = _repair(
+        {
+            "description": "d",
+            "pack_format": 34,
+            "supported_formats": {"min_inclusive": 34, "max_inclusive": 64},
+            "min_format": 69,
+            "max_format": 75,
+        }
+    )
+    assert "pack_format" not in fixed and "supported_formats" not in fixed
+    assert (fixed["min_format"], fixed["max_format"]) == (69, 75)
+    assert any("不一致" in n for n in notes)
+
+
+def test_repair_realigns_supported_formats_with_the_new_range():
+    fixed, notes = _repair(
+        {
+            "description": "d",
+            "pack_format": 34,
+            "supported_formats": {"min_inclusive": 34, "max_inclusive": 46},
+            "min_format": 34,
+            "max_format": 75,
+        }
+    )
+    assert fixed["supported_formats"] == {"min_inclusive": 34, "max_inclusive": 64}
+    assert fixed["pack_format"] == 34 and fixed["max_format"] == 75
+    assert any("supported_formats" in n for n in notes)
+
+
+def test_repair_moves_pack_format_into_the_new_range():
+    fixed, _ = _repair(
+        {
+            "description": "d",
+            "pack_format": 20,
+            "supported_formats": {"min_inclusive": 34, "max_inclusive": 64},
+            "min_format": 34,
+            "max_format": 75,
+        }
+    )
+    assert fixed["pack_format"] == 34

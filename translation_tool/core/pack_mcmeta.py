@@ -229,6 +229,44 @@ def _major(value: Any) -> int:
     return value[0] if isinstance(value, list) else value
 
 
+def _sync_old_fields_with_new(pack: dict[str, Any], notes: list[str]) -> None:
+    """新舊兩組欄位的範圍不一致時，以 ``min_format``／``max_format`` 為準校正舊欄位。
+
+    只在新欄位真的涵蓋 65 以上時才處理（此時舊欄位只是給舊版遊戲看的對應範圍）：
+    新範圍從 65 起，舊欄位移除；否則 ``supported_formats`` 必須等於新範圍截到 64 的部分，
+    ``pack_format`` 必須落在其中。
+    """
+    if "min_format" not in pack or _major(pack["max_format"]) < MIN_MAX_FORMAT_SINCE:
+        return
+    low = _major(pack["min_format"])
+    old_keys = [k for k in ("pack_format", "supported_formats") if k in pack]
+    if not old_keys:
+        return
+    if low >= MIN_MAX_FORMAT_SINCE:
+        for key in old_keys:
+            del pack[key]
+        notes.append(
+            f"min_format／max_format 從 {low} 起，與 {'／'.join(old_keys)} 的範圍不一致，"
+            f"已移除 {'／'.join(old_keys)}"
+        )
+        return
+    expected = (low, SUPPORTED_FORMATS_LAST)
+    if (
+        "supported_formats" in pack
+        and _format_range(pack["supported_formats"]) != expected
+    ):
+        pack["supported_formats"] = {
+            "min_inclusive": expected[0],
+            "max_inclusive": expected[1],
+        }
+        notes.append(
+            f"supported_formats 與 min_format／max_format 的範圍不一致，已改成 {expected[0]}–{expected[1]}"
+        )
+    if "pack_format" in pack and not expected[0] <= pack["pack_format"] <= expected[1]:
+        pack["pack_format"] = low
+        notes.append(f"pack_format 不在 min_format 起的範圍內，已改成 {low}")
+
+
 def _normalize_format_fields(pack: dict[str, Any], notes: list[str]) -> None:
     """依實際支援的版本範圍，讓新舊兩組欄位互相搭配（1.21.9 起的規則）。
 
@@ -320,6 +358,7 @@ def repair_source_pack_mcmeta(
             pack[key] = fixed
 
     _drop_inconsistent_formats(pack, notes)
+    _sync_old_fields_with_new(pack, notes)
     _normalize_format_fields(pack, notes)
     if "pack_format" not in pack and not (
         "min_format" in pack and "max_format" in pack

@@ -286,6 +286,7 @@ class BundlerView(BundlerWidgetsMixin, ft.Column):
         log_debug("_async_pick_pack_image result: {result}")
         if result:
             self.pack_image_field.value = result[0].path
+            self._update_preview()
             self._page.update()
 
     def _on_pack_image_picked(self, e: ft.FilePickerUploadEvent):
