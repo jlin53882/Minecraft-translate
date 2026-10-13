@@ -126,7 +126,7 @@ flowchart TD
 - **輸出檔名**：`_config_output_zip_name` 來自設定 `output_bundler.output_zip_name`，預設 `可使用翻譯.zip`（`OUTPUT_ZIP_NAME_PATH` 為訂閱的設定路徑）。
 - **打包狀態檔**：`_state_path(output_zip_path)` 記錄上次成功打包的指紋，供下次判斷是否可沿用既有 ZIP。
 - **暫存檔**：打包期間寫入 `<輸出路徑>.tmp`，成功後以 `os.replace` 替換正式檔案，未完成則在 `finally` 中刪除。
-- **pack.mcmeta**：內容來自 UI 的描述、`pack_format` 與選填的最大使用版本（整數；18～64 另有 `supported_formats`，最大使用版本 ≥ 65 時再加 `min_format`／`max_format`；`pack_format` 65 以上改用 `min_format`／`max_format`）；若來源資料夾或額外路徑中已有可用的 `pack.mcmeta`，會跳過 UI 設定並在日誌中說明，format 欄位寫成字串或無法使用時會修正（數字字串改成整數、無效欄位丟掉並用 UI 設定補上；`max_format` 小於 `min_format` 時兩者一併移除；`supported_formats` 不含 `pack_format` 時依 `pack_format` 重設；其他自訂欄位保留）並在日誌列出；來源檔讀不出來或不是有效 JSON 時改用 UI 設定產生。`pack.png` 的處理方式相同。已由專用步驟寫入的 `pack.mcmeta`／`pack.png` 不會再被一般檔案收集重複加入（不會出現 `pack_1.mcmeta`）。
+- **pack.mcmeta**：內容來自 UI 的描述、`pack_format` 與選填的最大使用版本（整數；18～64 另有 `supported_formats`，最大使用版本 ≥ 65 時再加 `min_format`／`max_format`；`pack_format` 65 以上改用 `min_format`／`max_format`）；若來源（根目錄第一層、名為 `root` 的子資料夾、直接加入的額外檔案、額外資料夾第一層及其子資料夾第一層，即會落在 ZIP 根目錄的檔案）中已有 `pack.mcmeta`，會跳過 UI 設定並在日誌中說明，format 欄位寫成字串或無法使用時會修正（數字字串改成整數、無效欄位丟掉並用 UI 設定補上；上下限比較時整數的 `max_format` 涵蓋該主版本所有次版本（`min_format` 整數視為次版本 0），`max_format` 小於 `min_format` 或只剩其中一個時移除；`pack_format` 65 以上缺少 `min_format`／`max_format` 時依 `pack_format` 補上；`supported_formats` 不含 `pack_format` 時依 `pack_format` 重設；其他自訂欄位保留）並在日誌列出；來源檔讀不出來或不是有效 JSON 時改用 UI 設定產生。`pack.png` 的處理方式相同。落在 ZIP 根目錄的 `pack.mcmeta`／`pack.png` 一律只由專用步驟寫入，一般檔案收集不會重複加入（不會出現 `pack_1.mcmeta`）。
 
 ## 錯誤處理
 

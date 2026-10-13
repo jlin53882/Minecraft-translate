@@ -10,6 +10,7 @@ import pytest
 from translation_tool.core.output_bundler import (
     BUNDLE_STATE_VERSION,
     bundle_outputs_generator,
+    preview_pack_mcmeta,
 )
 from translation_tool.core.pack_mcmeta import (
     build_pack_mcmeta,
@@ -465,3 +466,101 @@ def test_source_pack_files_are_not_added_again_as_numbered_copies(tmp_path, src_
         names = zf.namelist()
     assert not [n for n in names if n.startswith("pack_")]
     assert names.count("pack.mcmeta") == 1 and names.count("pack.png") == 1
+
+
+@pytest.mark.parametrize(
+    ("low", "high"),
+    [
+        ([75, 1], 75),  # 整數上限涵蓋該主版本所有次版本
+        ([75, 1], [75]),
+        (75, [75, 3]),
+        ([75], [75, 0]),
+        ([75, 2], [75, 2]),
+        (74, 75),
+    ],
+)
+def test_repair_keeps_min_max_format_that_overlap(low, high):
+    pack = {"description": "d", "min_format": low, "max_format": high}
+    fixed, notes = _repair(pack)
+    assert fixed == pack and notes == []
+
+
+@pytest.mark.parametrize(
+    ("low", "high"),
+    [(76, 75), ([75, 2], [75, 1]), ([75, 1], 74), (76, [75])],
+)
+def test_repair_drops_min_max_format_that_do_not_overlap(low, high):
+    fixed, _ = _repair({"description": "d", "min_format": low, "max_format": high})
+    assert "min_format" not in fixed and "max_format" not in fixed
+
+
+def test_repair_adds_min_max_format_to_pack_format_only_new_source():
+    fixed, notes = _repair({"description": "d", "pack_format": 69})
+    assert fixed["pack_format"] == 69
+    assert fixed["min_format"] == 69 and fixed["max_format"] == 9999
+    assert any("min_format" in n for n in notes)
+
+
+def test_repair_removes_a_lone_min_or_max_format():
+    fixed, _ = _repair({"description": "d", "pack_format": 34, "max_format": 80})
+    assert "max_format" not in fixed and fixed["pack_format"] == 34
+
+
+def _bundle_zip(tmp_path, src, **kwargs):
+    out = tmp_path / "out.zip"
+    list(bundle_outputs_generator(str(src), str(out), **kwargs))
+    with zipfile.ZipFile(out) as zf:
+        return {n: zf.read(n) for n in zf.namelist()}
+
+
+def test_pack_files_inside_an_extra_folder_become_the_pack_files(tmp_path, src_dir):
+    extra = tmp_path / "extra"
+    extra.mkdir()
+    (extra / "pack.mcmeta").write_text(
+        '{"pack":{"description":"extra","pack_format":15}}', encoding="utf-8"
+    )
+    (extra / "pack.png").write_bytes(b"EXTRA-PNG")
+    files = _bundle_zip(tmp_path, src_dir, pack_format=34, extra_folders=[str(extra)])
+    assert json.loads(files["pack.mcmeta"])["pack"]["description"] == "extra"
+    assert files["pack.png"] == b"EXTRA-PNG"
+    assert not [n for n in files if n.startswith("pack_")]
+
+
+def test_pack_files_in_a_subfolder_of_an_extra_folder_are_found(tmp_path, src_dir):
+    extra = tmp_path / "extra"
+    (extra / "child").mkdir(parents=True)
+    (extra / "child" / "pack.png").write_bytes(b"CHILD-PNG")
+    files = _bundle_zip(tmp_path, src_dir, pack_format=34, extra_folders=[str(extra)])
+    assert files["pack.png"] == b"CHILD-PNG"
+
+
+def test_root_subfolder_pack_files_are_used_not_renamed(tmp_path, src_dir):
+    (src_dir / "root").mkdir()
+    (src_dir / "root" / "pack.mcmeta").write_text(
+        '{"pack":{"description":"from root","pack_format":15}}', encoding="utf-8"
+    )
+    (src_dir / "root" / "pack.png").write_bytes(b"ROOT-PNG")
+    files = _bundle_zip(tmp_path, src_dir, pack_format=34)
+    assert json.loads(files["pack.mcmeta"])["pack"]["description"] == "from root"
+    assert files["pack.png"] == b"ROOT-PNG"
+    assert not [n for n in files if n.startswith("pack_")]
+
+
+def test_nested_pack_png_is_still_packed_normally(tmp_path, src_dir):
+    (src_dir / "assets").mkdir()
+    (src_dir / "assets" / "pack.png").write_bytes(b"NESTED")
+    files = _bundle_zip(tmp_path, src_dir, pack_format=34)
+    assert files["assets/pack.png"] == b"NESTED"
+
+
+def test_preview_finds_pack_files_in_extra_folder(tmp_path, src_dir):
+    extra = tmp_path / "extra"
+    extra.mkdir()
+    (extra / "pack.mcmeta").write_text(
+        '{"pack":{"description":"extra","pack_format":15}}', encoding="utf-8"
+    )
+    text, source, _notes, used = preview_pack_mcmeta(
+        str(src_dir), [str(extra)], "ui", 34
+    )
+    assert used and source == str(extra / "pack.mcmeta")
+    assert json.loads(text)["pack"]["description"] == "extra"

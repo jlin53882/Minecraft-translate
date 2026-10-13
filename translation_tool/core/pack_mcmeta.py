@@ -179,25 +179,49 @@ def _format_range(value: Any) -> tuple[Any, Any] | None:
     return value, value
 
 
-def _version_tuple(value: Any) -> tuple[int, int]:
-    """min_format／max_format 的比較值；整數視為 [主版本, 0]。"""
-    if isinstance(value, list):
-        return value[0], value[1] if len(value) > 1 else 0
-    return value, 0
+_ANY_MINOR = 10**9  # max_format 寫成整數時，涵蓋該主版本的所有次版本
+
+
+def _version_bound(value: Any, *, upper: bool) -> tuple[int, int]:
+    """min_format／max_format 的比較值（主版本, 次版本）。
+
+    整數（或單一元素的陣列）只指定主版本：當下限等於次版本 0，當上限則涵蓋該主版本的
+    所有次版本。
+    """
+    if isinstance(value, list) and len(value) > 1:
+        return value[0], value[1]
+    major = value[0] if isinstance(value, list) else value
+    return major, _ANY_MINOR if upper else 0
 
 
 def _drop_inconsistent_formats(pack: dict[str, Any], notes: list[str]) -> None:
-    """型別修好後檢查欄位之間的版本關係；矛盾的欄位移除，supported_formats 依 pack_format 重設。"""
-    if (
-        "min_format" in pack
-        and "max_format" in pack
-        and _version_tuple(pack["max_format"]) < _version_tuple(pack["min_format"])
-    ):
+    """型別修好後檢查欄位之間的版本關係；矛盾的欄位移除，缺少的欄位依 pack_format 補上。"""
+    if ("min_format" in pack) != ("max_format" in pack):
+        lone = "min_format" if "min_format" in pack else "max_format"
+        notes.append(f"{lone} 沒有搭配另一個上下限欄位，已移除")
+        del pack[lone]
+    if "min_format" in pack and _version_bound(
+        pack["max_format"], upper=True
+    ) < _version_bound(pack["min_format"], upper=False):
         notes.append(
             f"max_format {json.dumps(pack['max_format'])} 小於 min_format "
             f"{json.dumps(pack['min_format'])}，已移除 min_format／max_format"
         )
         del pack["min_format"], pack["max_format"]
+    version = pack.get("pack_format")
+    if (
+        version is not None
+        and version >= MIN_MAX_FORMAT_SINCE
+        and "min_format" not in pack
+    ):
+        built = build_pack_mcmeta("", version)["pack"]
+        pack["min_format"], pack["max_format"] = (
+            built["min_format"],
+            built["max_format"],
+        )
+        notes.append(
+            f"pack_format {version} 需要 min_format／max_format，已依 pack_format 補上"
+        )
     if "pack_format" in pack and "supported_formats" in pack:
         low, high = _format_range(pack["supported_formats"])
         if not low <= pack["pack_format"] <= high:

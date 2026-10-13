@@ -96,23 +96,45 @@ def _read_custom_pack_mcmeta(
     return repair_source_pack_mcmeta(content, generated)
 
 
+def _zip_root_files(input_root_dir: str, extra_folders: list[str] | None) -> list[str]:
+    """打包時會直接落在 ZIP 根目錄的檔案（依寫入順序，後寫入者優先）。
+
+    包含：名為 ``root`` 的子資料夾內的檔案、根目錄第一層的檔案、直接加入的額外檔案，
+    以及額外資料夾第一層與其子資料夾第一層的檔案。
+    """
+
+    def entries(folder: str, *, dirs: bool) -> list[str]:
+        try:
+            paths = [os.path.join(folder, n) for n in sorted(os.listdir(folder))]
+        except OSError:
+            return []
+        return [p for p in paths if os.path.isdir(p) == dirs]
+
+    found: list[str] = []
+    if os.path.isdir(input_root_dir):
+        for folder in entries(input_root_dir, dirs=True):
+            if os.path.basename(folder).lower() == "root":
+                found += entries(folder, dirs=False)
+        found += entries(input_root_dir, dirs=False)
+    for extra in extra_folders or []:
+        if os.path.isfile(extra):
+            found.append(extra)
+        elif os.path.isdir(extra):
+            found += entries(extra, dirs=False)
+            for child in entries(extra, dirs=True):
+                found += entries(child, dirs=False)
+    return found
+
+
 def find_source_pack_files(
     input_root_dir: str, extra_folders: list[str] | None
 ) -> tuple[str | None, str | None]:
-    """來源裡既有的 (pack.mcmeta, pack.png) 路徑：根目錄第一層與額外項目中的檔案；沒有則為 None。
+    """來源裡既有的 (pack.mcmeta, pack.png) 路徑：會落在 ZIP 根目錄的同名檔案；沒有則為 None。
 
-    額外項目比根目錄晚檢查，同名時取後者（與打包時的覆蓋順序一致）。
+    同名時取最後寫入者（與打包時的覆蓋順序一致）。
     """
     mcmeta = png = None
-    candidates = []
-    if os.path.isdir(input_root_dir):
-        candidates += [
-            os.path.join(input_root_dir, e) for e in os.listdir(input_root_dir)
-        ]
-    candidates += list(extra_folders or [])
-    for path in candidates:
-        if not os.path.isfile(path):
-            continue
+    for path in _zip_root_files(input_root_dir, extra_folders):
         name = os.path.basename(path).lower()
         if name == "pack.mcmeta":
             mcmeta = path
@@ -377,6 +399,8 @@ def _iter_add_folder_to_zip(
             archive_name = os.path.join(base_path_in_zip, relative_path).replace(
                 "\\", "/"
             )
+            if "/" not in archive_name and _is_pack_file(archive_name):
+                continue  # 根目錄的 pack.mcmeta／pack.png 由專用步驟寫入
 
             if archive_name in seen_files:
                 base, ext = os.path.splitext(archive_name)
