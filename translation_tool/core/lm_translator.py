@@ -44,6 +44,10 @@ from translation_tool.core.lm_translator_shared import (
     prepare_translator_items,
     run_translator_skeleton,
 )
+from translation_tool.core.patchouli_compat import (
+    find_patchouli_marker_issue,
+    find_patchouli_mismatch,
+)
 from translation_tool.core.translation_path_writer import (
     map_lang_output_path,
     set_by_path,
@@ -306,6 +310,24 @@ def _split_directory_items(
     )
 
 
+def _warn_patchouli_output_mismatch(src: Path, translated: dict) -> None:
+    """LM 寫出的手冊檔與來源 en_us 格式（結構、格式標記）不同時記警告。
+
+    輸出只是把 en_us 的文字換成譯文，仍照常寫出；警告讓使用者知道哪個檔案的標記被翻壞。
+    """
+    if "patchouli_books" not in src.parts:
+        return
+    try:
+        original = json_std.loads(src.read_text(encoding="utf-8-sig"))
+        reason = find_patchouli_mismatch(original, translated) or (
+            find_patchouli_marker_issue(original, translated)
+        )
+    except (OSError, ValueError):
+        return
+    if reason:
+        log_warning(f"⚠️ 手冊譯文與 en_us 格式不同（{reason}）：{src.name}")
+
+
 def _write_directory_outputs(
     file_cache: dict[str, dict],
     touched_files: set[str],
@@ -328,6 +350,7 @@ def _write_directory_outputs(
             )
             continue
 
+        _warn_patchouli_output_mismatch(src, file_cache[file_name])
         dst = out_root / rel
         dst.parent.mkdir(parents=True, exist_ok=True)
         dst.write_bytes(

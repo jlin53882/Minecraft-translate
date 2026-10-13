@@ -23,7 +23,10 @@ from typing import Any
 
 from translation_tool.core.lang_merge_dict import contains_cjk
 from translation_tool.core.lm_config_rules import is_translatable_field
-from translation_tool.core.patchouli_compat import find_patchouli_mismatch
+from translation_tool.core.patchouli_compat import (
+    find_patchouli_marker_issue,
+    find_patchouli_mismatch,
+)
 from translation_tool.core.translatable_extractor import extract_translatables
 from translation_tool.translation_db.identity import (
     FileIdentity,
@@ -274,6 +277,11 @@ def _drop_stale_book(zh: dict | None, en: dict, member: str | None) -> dict | No
     if reason:
         log_info(f"[ModDB] 手冊譯文與 en_us 格式不同（{reason}），不匯入譯文：{member}")
         return None
+    marker_issue = find_patchouli_marker_issue(en, zh)
+    if marker_issue:
+        log_warning(
+            f"[ModDB] 手冊譯文的格式標記與 en_us 不同（{marker_issue}），仍匯入譯文：{member}"
+        )
     return zh
 
 

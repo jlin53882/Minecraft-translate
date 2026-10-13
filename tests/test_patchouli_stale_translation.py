@@ -10,6 +10,7 @@ import pytest
 from translation_tool.core import lang_merge_content, lang_merge_pipeline, lang_merger
 from translation_tool.core.patchouli_compat import (
     count_old_nbt_items,
+    find_patchouli_marker_issue,
     find_patchouli_mismatch,
 )
 
@@ -202,3 +203,57 @@ def test_bundle_step_warns_about_old_nbt_items(tmp_path):
     list(step(session))
     texts = [e.text for e in session.snapshot()["logs"]]
     assert any("舊版 NBT" in t and "x.json" in t for t in texts)
+
+
+@pytest.mark.parametrize(
+    ("en_text", "zh_text", "expected"),
+    [
+        ("Hi$(br)there", "嗨$(br)你好", None),
+        ("Hi$(br)there", "嗨你好", "$(br)"),
+        ("$(item)Gear$()", "$(item)齒輪", "$()"),
+        ("§aGreen", "綠色", "§a"),
+        ("Use %s", "使用 %s", None),
+        ("Line one\nline two", "第一行第二行", None),
+        ("Same text", "Same text", None),
+    ],
+)
+def test_marker_count_difference_is_reported_but_not_a_mismatch(
+    en_text, zh_text, expected
+):
+    en = _entry(_spotlight(NEW_ITEM, en_text))
+    zh = _entry(_spotlight(NEW_ITEM, zh_text))
+    assert find_patchouli_mismatch(en, zh) is None  # 只影響排版，不丟棄譯文
+    reason = find_patchouli_marker_issue(en, zh)
+    if expected is None:
+        assert reason is None
+    else:
+        assert "格式標記" in reason and expected in reason
+        assert "pages[0].text" in reason
+
+
+def test_marker_issue_is_skipped_when_the_shape_differs():
+    en = _entry(_spotlight(NEW_ITEM, "a$(br)b"), _spotlight(NEW_ITEM, "c"))
+    zh = _entry(_spotlight(NEW_ITEM, "ab"))
+    assert find_patchouli_marker_issue(en, zh) is None
+    assert "項目數" in find_patchouli_mismatch(en, zh)
+
+
+def test_marker_mismatch_in_lm_output_is_warned_not_dropped(tmp_path, monkeypatch):
+    from translation_tool.core import lm_translator
+
+    src_dir = tmp_path / "assets" / "m" / "patchouli_books" / "b" / "en_us" / "entries"
+    src_dir.mkdir(parents=True)
+    src = src_dir / "e.json"
+    en = _entry(_spotlight(NEW_ITEM, "Hi$(br)there"))
+    src.write_bytes(orjson.dumps(en))
+    warnings: list[str] = []
+    monkeypatch.setattr(lm_translator, "log_warning", warnings.append)
+
+    broken = _entry(_spotlight(NEW_ITEM, "嗨你好"))
+    lm_translator._write_directory_outputs(
+        {str(src): broken}, {str(src)}, tmp_path, tmp_path / "out", False
+    )
+
+    assert any("格式標記" in w and "e.json" in w for w in warnings)
+    written = tmp_path / "out" / "assets" / "m" / "patchouli_books" / "b" / "zh_tw"
+    assert (written / "entries" / "e.json").exists()

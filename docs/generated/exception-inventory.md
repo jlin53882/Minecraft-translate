@@ -210,7 +210,7 @@
 | `translation_tool/core/kubejs_translator.py:step2_translate_lm._ProgressProxy.set_progress` | BLE001/S110 | 盡力而為（靜默） | UI 進度回報失敗不可中斷翻譯 |
 | `translation_tool/core/kubejs_translator.py:step2_translate_lm._ProgressProxy.set_status` | BLE001/S110 | 盡力而為（靜默） | UI 狀態回報失敗不可中斷翻譯 |
 | `translation_tool/core/kubejs_translator.py:step2_translate_lm` | BLE001/S110 | 盡力而為（靜默） | UI 進度回報失敗不可中斷翻譯 |
-| `translation_tool/core/lang_merge_content_copy.py:_patchouli_stale_reason` | BLE001 | 盡力而為（靜默） | 讀不出來就無從比對，維持原本流程 |
+| `translation_tool/core/lang_merge_content_copy.py:_patchouli_compare` | BLE001 | 盡力而為（靜默） | 讀不出來就無從比對，維持原本流程 |
 | `translation_tool/core/lang_merge_content_copy.py:_compute_patchouli_lang_effectiveness` | BLE001 | 已記錄／回報 | 解析失敗的檔案不計入有效翻譯，已留 debug 紀錄 |
 | `translation_tool/core/lang_merge_content_copy.py:_compute_patchouli_lang_effectiveness` | BLE001 | 已記錄／回報 | 單一檔案失敗不中斷整批統計，已留 debug 紀錄 |
 | `translation_tool/core/lang_merge_content_copy.py:process_content_or_copy_file_impl` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |

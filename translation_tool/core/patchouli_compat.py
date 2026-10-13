@@ -64,15 +64,55 @@ def _shape_difference(en: Any, zh: Any, path: str) -> str | None:
     return None
 
 
+def _marker_difference(en: Any, zh: Any, path: str) -> str | None:
+    """第一個格式標記（``$(br)``、``§a``、``%s`` 等）數量不同的文字欄位；沒有回傳 None。
+
+    只在 ``_shape_difference`` 確認兩邊結構相同後呼叫，所以同路徑的值型別一定相同。
+    換行數量允許不同，其餘標記和 LM 修復輸出的檢查規則一致。
+    """
+    if isinstance(en, str):
+        # 延遲匯入：translation_db 套件初始化時會回頭匯入本模組。
+        from translation_tool.translation_db.quality import repair_output_issues
+
+        issues = repair_output_issues(en, zh)
+        return (
+            f"{path or '根'} 的格式標記不同（{'、'.join(issues)}）" if issues else None
+        )
+    if isinstance(en, dict):
+        children = ((f"{path}.{key}" if path else key, en[key], zh[key]) for key in en)
+    elif isinstance(en, list):
+        children = ((f"{path}[{i}]", a, b) for i, (a, b) in enumerate(zip(en, zh)))
+    else:
+        return None
+    for child_path, en_child, zh_child in children:
+        found = _marker_difference(en_child, zh_child, child_path)
+        if found:
+            return found
+    return None
+
+
 def find_patchouli_mismatch(en_data: Any, zh_data: Any) -> str | None:
     """比對 en_us 與 zh_cn／zh_tw 的同一個 Patchouli 檔案。
 
     格式不一致（舊版物品 NBT、頁數或欄位不同）時回傳原因，一致回傳 None。
-    原文本身用舊 NBT 寫法時（舊版遊戲）不算差異。
+    原文本身用舊 NBT 寫法時（舊版遊戲）不算差異。這些差異會讓書載入失敗或譯文錯位，
+    所以呼叫端應該不採用該譯文。
     """
     if count_old_nbt_items(zh_data) > count_old_nbt_items(en_data):
         return "物品欄位仍是舊版 NBT 寫法"
     return _shape_difference(en_data, zh_data, "")
+
+
+def find_patchouli_marker_issue(en_data: Any, zh_data: Any) -> str | None:
+    """同一個文字欄位的格式標記數量和 en_us 不同時回傳原因，否則回傳 None。
+
+    只影響排版（譯者常把 ``$(br2)`` 改成 ``$(br)``），不會讓書載入失敗，所以呼叫端
+    只該提醒、不該丟棄譯文。結構不同時無從逐欄比對，回傳 None（由
+    ``find_patchouli_mismatch`` 負責）。
+    """
+    if _shape_difference(en_data, zh_data, ""):
+        return None
+    return _marker_difference(en_data, zh_data, "")
 
 
 def find_old_nbt_item_files(root: str) -> list[str]:
