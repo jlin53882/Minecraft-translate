@@ -147,6 +147,29 @@ def _repair_format(key: str, value: Any) -> Any | None:
     return pair if pair is not None and (len(pair) == 1 or pair[0] <= pair[1]) else None
 
 
+def pack_description_text(mcmeta_text: str) -> str | None:
+    """``pack.mcmeta`` 文字中 ``pack.description`` 的純文字（供預覽）；讀不出來回傳 None。
+
+    description 可以是字串，或文字元件（物件／陣列）；元件只取其中的 ``text`` 內容。
+    """
+    try:
+        pack = json.loads(mcmeta_text)["pack"]
+        description = pack["description"]
+    except (ValueError, KeyError, TypeError):
+        return None
+
+    def flatten(node: Any) -> str:
+        if isinstance(node, str):
+            return node
+        if isinstance(node, list):
+            return "".join(flatten(item) for item in node)
+        if isinstance(node, dict):
+            return flatten(node.get("text", "")) + flatten(node.get("extra", []))
+        return ""
+
+    return flatten(description)
+
+
 def _format_range(value: Any) -> tuple[Any, Any] | None:
     """supported_formats 的 (最小, 最大)；整數視為單一版本。"""
     if isinstance(value, dict):

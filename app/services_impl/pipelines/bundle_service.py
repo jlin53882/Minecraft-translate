@@ -16,10 +16,14 @@ from app.services_impl.logging_service import GLOBAL_LOG_LIMITER
 from translation_tool.core.output_bundler import (
     DEFAULT_OUTPUT_ZIP_NAME,  # noqa: F401 - View 由此取用
     bundle_outputs_generator,
+    find_source_pack_files,  # noqa: F401 - View 由此取用
     normalize_output_zip_name,  # noqa: F401 - View 由此取用
     preview_pack_mcmeta,  # noqa: F401 - View 由此取用
 )
-from translation_tool.core.pack_mcmeta import DEFAULT_PACK_FORMAT
+from translation_tool.core.pack_mcmeta import (
+    DEFAULT_PACK_FORMAT,
+    pack_description_text,  # noqa: F401 - View 由此取用
+)
 
 logger = logging.getLogger(__name__)
 

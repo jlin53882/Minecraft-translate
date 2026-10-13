@@ -121,6 +121,11 @@ def find_source_pack_files(
     return mcmeta, png
 
 
+def _is_pack_file(path: str) -> bool:
+    """pack.mcmeta／pack.png 已由專用步驟寫入 ZIP，一般檔案收集不可再加入。"""
+    return os.path.basename(path).lower() in ("pack.mcmeta", "pack.png")
+
+
 def preview_pack_mcmeta(
     input_root_dir: str,
     extra_folders: list[str] | None,
@@ -641,7 +646,11 @@ def bundle_outputs_generator(
 
             for entry in os.listdir(input_root_dir):
                 full_path = os.path.join(input_root_dir, entry)
-                if os.path.isfile(full_path) and not _is_artifact(full_path, exclude):
+                if (
+                    os.path.isfile(full_path)
+                    and not _is_pack_file(full_path)
+                    and not _is_artifact(full_path, exclude)
+                ):
                     archive_name = entry
                     if archive_name in seen_files:
                         base, ext = os.path.splitext(archive_name)
@@ -676,7 +685,9 @@ def bundle_outputs_generator(
                         continue
 
                     if os.path.isfile(extra_path):
-                        if _is_artifact(extra_path, exclude):
+                        if _is_pack_file(extra_path) or _is_artifact(
+                            extra_path, exclude
+                        ):
                             continue
                         file_name = os.path.basename(extra_path)
                         archive_name = file_name
@@ -713,7 +724,11 @@ def bundle_outputs_generator(
                                 log_debug(
                                     f"額外資料夾 '{parent_name}/{entry}': +{count} 個檔案"
                                 )
-                            elif os.path.isfile(src) and not _is_artifact(src, exclude):
+                            elif (
+                                os.path.isfile(src)
+                                and not _is_pack_file(src)
+                                and not _is_artifact(src, exclude)
+                            ):
                                 archive_name = entry
                                 if archive_name in seen_files:
                                     base, ext = os.path.splitext(archive_name)

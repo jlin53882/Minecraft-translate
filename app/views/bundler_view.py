@@ -20,7 +20,9 @@ from app.services_impl.pack_format_service import (
 )
 from app.services_impl.pipelines.bundle_service import (
     bundle_outputs_generator,
+    find_source_pack_files,
     normalize_output_zip_name,
+    pack_description_text,
     preview_pack_mcmeta,
 )
 from app.tasks.operation_registry import (
@@ -227,10 +229,6 @@ class BundlerView(BundlerWidgetsMixin, ft.Column):
 
     def _update_preview(self):
         """依描述 / 版本 / 圖片更新右側預覽。"""
-        description = self.description_field.value or ""
-        self.preview_title.spans = mc_text_spans(
-            description, default_color=C.TEXT, size=14
-        ) or [ft.TextSpan("（尚未輸入描述）", style=ft.TextStyle(color=C.DIM, size=13))]
         pack_format, message, valid = explain_version_input(
             self.version_field.value, self.max_format_field.value
         )
@@ -246,7 +244,26 @@ class BundlerView(BundlerWidgetsMixin, ft.Column):
         self.preview_format.value = _preview_format_label(
             mcmeta_text, self.preview_format.value
         )
-        image_path = (self.pack_image_field.value or "").strip()
+        self._update_preview_card(mcmeta_text)
+
+    def _update_preview_card(self, mcmeta_text: str) -> None:
+        """資源包預覽卡片的描述與圖片：與打包相同，來源資料夾的檔案優先於 UI 設定。"""
+        description = pack_description_text(mcmeta_text)
+        if description is None:  # 版本無效，預覽不到實際內容
+            description = self.description_field.value or ""
+        self.preview_title.spans = mc_text_spans(
+            description, default_color=C.TEXT, size=14
+        ) or [ft.TextSpan("（尚未輸入描述）", style=ft.TextStyle(color=C.DIM, size=13))]
+        _mcmeta, source_png = find_source_pack_files(
+            self.root_dir_field.value or "", self.extra_folders
+        )
+        image_path = source_png or (self.pack_image_field.value or "").strip()
+        self.preview_source_note.value = (
+            f"封面圖來自來源的 pack.png，會覆蓋上方選的圖片（{source_png}）"
+            if source_png
+            else ""
+        )
+        self.preview_source_note.visible = bool(source_png)
         if image_path and os.path.isfile(image_path):
             self.preview_image.content = ft.Image(
                 src=image_path, width=72, height=72, fit=ft.BoxFit.COVER

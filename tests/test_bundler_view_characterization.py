@@ -427,3 +427,37 @@ def test_preview_follows_root_dir_and_extra_folder_changes(tmp_path):
     view._refresh_extra_folders()
     view._update_preview()
     assert json.loads(view.mcmeta_view.value)["pack"]["pack_format"] == 9
+
+
+def test_preview_card_uses_source_description_and_png(tmp_path):
+    src = _source_with_mcmeta(
+        tmp_path, '{"pack":{"description":"來源描述","pack_format":15}}'
+    )
+    png = src / "pack.png"
+    png.write_bytes(b"\x89PNG")
+    ui_png = tmp_path / "ui.png"
+    ui_png.write_bytes(b"\x89PNG")
+    view = BundlerView(mock_page(), mock_filepicker())
+    view.description_field.value = "UI 描述"
+    view.pack_image_field.value = str(ui_png)
+    view.root_dir_field.value = str(src)
+    view._update_preview()
+
+    assert "".join(s.text for s in view.preview_title.spans) == "來源描述"
+    assert view.preview_image.content.src == str(png)
+    assert view.preview_source_note.visible
+    assert str(png) in view.preview_source_note.value
+
+
+def test_preview_card_uses_ui_values_without_source_files(tmp_path):
+    ui_png = tmp_path / "ui.png"
+    ui_png.write_bytes(b"\x89PNG")
+    view = BundlerView(mock_page(), mock_filepicker())
+    view.description_field.value = "UI 描述"
+    view.pack_image_field.value = str(ui_png)
+    view.root_dir_field.value = str(tmp_path)
+    view._update_preview()
+
+    assert "".join(s.text for s in view.preview_title.spans) == "UI 描述"
+    assert view.preview_image.content.src == str(ui_png)
+    assert not view.preview_source_note.visible

@@ -14,6 +14,7 @@ from translation_tool.core.output_bundler import (
 from translation_tool.core.pack_mcmeta import (
     build_pack_mcmeta,
     describe_pack_format,
+    pack_description_text,
     parse_pack_format,
     repair_source_pack_mcmeta,
 )
@@ -423,3 +424,44 @@ def test_repair_keeps_supported_formats_containing_pack_format(supported):
     pack = {"description": "d", "pack_format": 34, "supported_formats": supported}
     fixed, notes = _repair(pack)
     assert fixed == pack and notes == []
+
+
+@pytest.mark.parametrize(
+    ("description", "expected"),
+    [
+        ("plain", "plain"),
+        ({"text": "a", "extra": [{"text": "b"}]}, "ab"),
+        (["x", {"text": "y"}], "xy"),
+    ],
+)
+def test_pack_description_text_flattens_text_components(description, expected):
+    text = json.dumps({"pack": {"description": description}})
+    assert pack_description_text(text) == expected
+
+
+def test_pack_description_text_returns_none_when_unreadable():
+    assert pack_description_text("版本或 pack_format 無效") is None
+
+
+def test_source_pack_files_are_not_added_again_as_numbered_copies(tmp_path, src_dir):
+    (src_dir / "pack.mcmeta").write_text(
+        '{"pack":{"description":"d","pack_format":"34"}}', encoding="utf-8"
+    )
+    (src_dir / "pack.png").write_bytes(b"\x89PNG")
+    extra = tmp_path / "extra"
+    extra.mkdir()
+    (extra / "pack.mcmeta").write_text('{"bad', encoding="utf-8")
+    out = tmp_path / "out.zip"
+    list(
+        bundle_outputs_generator(
+            str(src_dir),
+            str(out),
+            description="d",
+            pack_format=34,
+            extra_folders=[str(extra / "pack.mcmeta")],
+        )
+    )
+    with zipfile.ZipFile(out) as zf:
+        names = zf.namelist()
+    assert not [n for n in names if n.startswith("pack_")]
+    assert names.count("pack.mcmeta") == 1 and names.count("pack.png") == 1

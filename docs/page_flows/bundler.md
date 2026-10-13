@@ -9,7 +9,7 @@
 - 選擇翻譯專案根目錄、輸出 ZIP 路徑（留空時自動帶入 `根目錄\<output_zip_name>`）、封面圖。
 - 在單一輸入框填 Minecraft 版本（如 `1.20.4`）或 `pack_format` 整數，換算出寫入 `pack.mcmeta` 的 `pack_format`（18～64 另寫 `supported_formats`；65 以上改寫 `min_format`／`max_format`）；選填「最大使用版本」取代預設上限。
 - 新增、移除額外資料夾或檔案。
-- 即時預覽描述（含 § 顏色碼）、版本格式與實際會寫進 ZIP 的 `pack.mcmeta` 內容；來源資料夾有 `pack.mcmeta` 時預覽顯示該檔（含修正）並提示會覆蓋 UI 設定。
+- 即時預覽描述（含 § 顏色碼）、封面圖、版本格式與實際會寫進 ZIP 的 `pack.mcmeta` 內容，描述與封面圖同樣以來源資料夾的 `pack.mcmeta`／`pack.png` 優先；來源資料夾有 `pack.mcmeta` 時預覽顯示該檔（含修正）並提示會覆蓋 UI 設定。
 - 顯示打包日誌與進度。
 
 打包本身由 `translation_tool/core/output_bundler.py` 的 `bundle_outputs_generator` 完成。`BundlerView` 直接呼叫它（經由 `app/services_impl/pipelines/bundle_service.py` 的 re-export），沒有使用 `run_bundling_service`，因此這一頁不經過 `GLOBAL_LOG_LIMITER` 節流。
@@ -50,12 +50,12 @@ flowchart TD
 ```mermaid
 flowchart TD
     A["描述、版本或封面圖路徑 on_change（_on_meta_change）；根目錄或額外資料夾變動"] --> B["_update_preview"]
-    B --> C["描述經 mc_text_spans 轉為彩色文字（空白時顯示「尚未輸入描述」）"]
+    B --> C["描述取自實際生效的 mcmeta（pack_description_text），經 mc_text_spans 轉為彩色文字（空白時顯示「尚未輸入描述」）"]
     B --> D["pack_format 與最大使用版本取自 version_field／max_format_field，空白時用預設"]
     B --> E["mcmeta_text：preview_pack_mcmeta 套用與打包相同的規則（來源 pack.mcmeta 優先，否則由 UI 設定組成 JSON，ensure_ascii=False，縮排 2）"]
     B --> I["mcmeta_source_note：來源檔會覆蓋、已修正或無法使用的提示"]
-    B --> F{"封面圖路徑是檔案？"}
-    F -- 是 --> G["顯示縮圖"]
+    B --> F{"來源有 pack.png（find_source_pack_files）或 UI 封面圖路徑是檔案？"}
+    F -- 是 --> G["顯示縮圖（來源 pack.png 優先，並以 preview_source_note 提示）"]
     F -- 否 --> H["顯示預設圖示"]
 ```
 
@@ -126,7 +126,7 @@ flowchart TD
 - **輸出檔名**：`_config_output_zip_name` 來自設定 `output_bundler.output_zip_name`，預設 `可使用翻譯.zip`（`OUTPUT_ZIP_NAME_PATH` 為訂閱的設定路徑）。
 - **打包狀態檔**：`_state_path(output_zip_path)` 記錄上次成功打包的指紋，供下次判斷是否可沿用既有 ZIP。
 - **暫存檔**：打包期間寫入 `<輸出路徑>.tmp`，成功後以 `os.replace` 替換正式檔案，未完成則在 `finally` 中刪除。
-- **pack.mcmeta**：內容來自 UI 的描述、`pack_format` 與選填的最大使用版本（整數；18～64 另有 `supported_formats`，最大使用版本 ≥ 65 時再加 `min_format`／`max_format`；`pack_format` 65 以上改用 `min_format`／`max_format`）；若來源資料夾或額外路徑中已有可用的 `pack.mcmeta`，會跳過 UI 設定並在日誌中說明，format 欄位寫成字串或無法使用時會修正（數字字串改成整數、無效欄位丟掉並用 UI 設定補上；`max_format` 小於 `min_format` 時兩者一併移除；`supported_formats` 不含 `pack_format` 時依 `pack_format` 重設；其他自訂欄位保留）並在日誌列出；來源檔讀不出來或不是有效 JSON 時改用 UI 設定產生。`pack.png` 的處理方式相同。
+- **pack.mcmeta**：內容來自 UI 的描述、`pack_format` 與選填的最大使用版本（整數；18～64 另有 `supported_formats`，最大使用版本 ≥ 65 時再加 `min_format`／`max_format`；`pack_format` 65 以上改用 `min_format`／`max_format`）；若來源資料夾或額外路徑中已有可用的 `pack.mcmeta`，會跳過 UI 設定並在日誌中說明，format 欄位寫成字串或無法使用時會修正（數字字串改成整數、無效欄位丟掉並用 UI 設定補上；`max_format` 小於 `min_format` 時兩者一併移除；`supported_formats` 不含 `pack_format` 時依 `pack_format` 重設；其他自訂欄位保留）並在日誌列出；來源檔讀不出來或不是有效 JSON 時改用 UI 設定產生。`pack.png` 的處理方式相同。已由專用步驟寫入的 `pack.mcmeta`／`pack.png` 不會再被一般檔案收集重複加入（不會出現 `pack_1.mcmeta`）。
 
 ## 錯誤處理
 

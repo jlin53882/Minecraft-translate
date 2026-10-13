@@ -213,6 +213,9 @@ class BundlerWidgetsMixin:
             alignment=ft.Alignment.CENTER,
             clip_behavior=ft.ClipBehavior.ANTI_ALIAS,
         )
+        self.preview_source_note = ft.Text(
+            "", size=11.5, color=C.GOLD, selectable=True, visible=False
+        )
         self.mcmeta_view = ft.Text(
             "", size=12, selectable=True, color=C.MUTED, font_family=design.FONT_MONO
         )
@@ -229,6 +232,7 @@ class BundlerWidgetsMixin:
                             ft.Text("zip 內的 pack.mcmeta", size=11.5, color=C.DIM),
                             self.preview_title,
                             self.preview_format,
+                            self.preview_source_note,
                         ],
                         spacing=3,
                         tight=True,
