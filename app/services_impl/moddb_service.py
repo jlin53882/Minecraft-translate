@@ -13,6 +13,15 @@ from pathlib import Path
 from typing import Any
 
 from app.services_impl.logging_service import UI_LOG_HANDLER
+from app.services_impl.moddb_species_service import (
+    DEFAULT_SCAN_LIMIT,
+    SCAN_PAGE_SIZE,
+    SpeciesCandidate,
+    SpeciesScanResult,
+    is_potential_species_name,
+    lookup_species_name,
+    scan_species_candidates,
+)
 from app.services_impl.pipelines._pipeline_logging import (
     ensure_pipeline_logging,
     mirror_session_log,
@@ -71,6 +80,8 @@ from translation_tool.utils.config_manager import load_config
 
 # View 經由本模組取用資料庫型別與常數（View 不直接 import translation_tool 引擎）
 __all__ = [
+    "DEFAULT_SCAN_LIMIT",
+    "SCAN_PAGE_SIZE",
     "SOURCE_NAMES",
     "SRC_AI",
     "SRC_CUSTOM",
@@ -92,6 +103,8 @@ __all__ = [
     "QualityFilter",
     "ReviewPreviewItem",
     "ScanOptions",
+    "SpeciesCandidate",
+    "SpeciesScanResult",
     "TimeFilter",
     "TranslationDB",
     "VersionStat",
@@ -103,13 +116,16 @@ __all__ = [
     "describe_db_path",
     "format_taipei_time",
     "format_tokens",
+    "is_potential_species_name",
     "load_db_settings",
+    "lookup_species_name",
     "normalize_db_path",
     "open_database",
     "pack_format_hint",
     "preview_new_source_names",
     "quick_date_bounds",
     "run_moddb_scan_service",
+    "scan_species_candidates",
     "strip_quotes",
     "summarize_database",
     "token_category",

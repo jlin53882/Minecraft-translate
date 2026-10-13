@@ -66,21 +66,22 @@ batch_lookup_clicked(e)
 ## species_cache 查詢邏輯（species_cache.py）
 
 ### 格式判定
-- `_SPECIES_NAME_REGEX = ^[A-Z][a-z]+ [a-z]+$`：大寫開頭 + 空格 + 小寫（如 `Felis catus`）
-- `is_potential_species_name(name)`：非 str 或格式不符 → False
+- 查詢前會去除前後空白並合併重複空白。
+- `_SPECIES_NAME_REGEX` 接受二名法、三名法、常見種下階級與雜交符號（例如 `Felis catus`、`Canis lupus familiaris`、`Quercus robur subsp. broteroana`、`Acer × freemanii`）。
+- `is_potential_species_name(name)`：非 str 或格式不符 → False。
 
 ### lookup_species_name(name) 決策鏈
 1. 未初始化 → `initialize_species_cache()`（失敗回 None）
-2. **快取命中**（`name in _species_cache_data`）→ 回傳快取值；**空值快取**（`""`，先前查詢失敗標記）→ 回 None（避免重複查詢）
+2. **快取命中**（`name in _species_cache_data`）→ 回傳快取值；舊版快取若有空值則回 None
 3. 未命中且格式合法 → `query_wikipedia_and_update_cache(name)` 線上查詢
 4. 格式不合法 → None（不發請求）
 
-### 線上查詢（wikipedia，`_WIKIPEDIA_AVAILABLE`）
+### 線上查詢（MediaWiki Action API）
 - 查詢前 `time.sleep(_RATE_LIMIT_DELAY)`（config `species_cache.wikipedia_rate_limit_delay`，預設 0.5s）做 rate limit；語言取自 `species_cache.wikipedia_language`（預設 `zh`）
-- `wikipedia.page(name, auto_suggest=False)`，取 `page.title.split("(")[0]`（去括號註記）為俗名
-- **成功才寫檔**：記憶體快取 + 快取檔 append（config `species_cache.cache_directory` / `cache_filename`，預設 `學名資料庫/species_cache.tsv`；TSV：`學名\t俗名`）；失敗僅更新記憶體為 `""`（不重複查詢、不寫檔）
-- `PageError` → 回 None；`DisambiguationError` → 原名稱記為空值快取，取第一個選項遞迴查詢；其他例外 → 回 None（原名稱記為空值快取）
-- 未安裝 `wikipedia` 套件（`_WIKIPEDIA_AVAILABLE` 為 False）時不發出線上請求，`query_wikipedia_and_update_cache` 直接回 None，僅使用本地快取
+- 使用官方 `action=query`、`titles` 與 `redirects=1` 解析學名條目和轉址，取最終條目標題（去括號註記）為俗名；預設 `zh` 語言會再以 OpenCC `s2twp` 正規化為台灣繁體。
+- 請求包含專案 User-Agent、15 秒逾時；HTTP 429/5xx、連線、逾時與非 JSON 暫時回應最多重試 3 次。
+- **成功才寫檔**：記憶體快取 + 快取檔 append（config `species_cache.cache_directory` / `cache_filename`，預設 `學名資料庫/species_cache.tsv`；TSV：`學名\t俗名`）。
+- 找不到頁面或暫時性 API 錯誤時回 None，而且不寫入失敗快取；使用者可稍後直接重試。
 
 ## 檔案結構
 

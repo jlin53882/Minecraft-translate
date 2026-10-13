@@ -14,6 +14,9 @@ import re
 import time
 from pathlib import Path
 
+import requests
+from opencc import OpenCC
+
 from .config_manager import load_config, resolve_project_path
 
 log = logging.getLogger(__name__)
@@ -41,30 +44,27 @@ _RATE_LIMIT_DELAY = (
     load_config().get("species_cache", {}).get("wikipedia_rate_limit_delay", 0.5)
 )
 
-_SPECIES_NAME_REGEX = re.compile(r"^[A-Z][a-z]+ [a-z]+$")
-
-# 表示是否成功 import wikipedia
-_WIKIPEDIA_AVAILABLE = False
+_SPECIES_NAME_REGEX = re.compile(
+    r"^[A-Z][a-z-]+ (?:× )?[a-z][a-z-]+"
+    r"(?: (?:(?:subsp|ssp|var|f)\. )?[a-z][a-z-]+)?$"
+)
+_WIKI_LANGUAGE_REGEX = re.compile(r"^[a-z][a-z0-9-]{0,19}$")
+_WIKI_REQUEST_TIMEOUT_SECONDS = 15
+_WIKI_REQUEST_ATTEMPTS = 3
+_WIKI_RETRYABLE_STATUS_CODES = frozenset({429, 500, 502, 503, 504})
+_WIKI_USER_AGENT = (
+    "Minecraft-translate/0.8.0 "
+    "(https://github.com/jlin53882/Minecraft-translate; species lookup)"
+)
 
 # --- 核心快取操作函式 ---
 _CACHE_DIR: Path | None = None
 _CACHE_FILE: Path | None = None
 _species_cache_data: dict[str, str] | None = None
+_tw_converter: OpenCC | None = None
 
 # 防止 initialize_species_cache() 被重複執行
 _initialized = False
-
-try:
-    import wikipedia
-
-    _WIKIPEDIA_AVAILABLE = True
-    log.info("Wikipedia 函式庫已成功載入。")
-except ImportError:
-    log.warning(
-        "未找到 Wikipedia 函式庫 (請執行 pip install wikipedia)。線上查詢功能將不可用。"
-    )
-except Exception as e:  # noqa: BLE001 - 選用的第三方套件匯入可能出現各種失敗
-    log.error(f"載入 Wikipedia 函式庫時發生未知錯誤: {e!r}")
 
 
 def initialize_species_cache():
@@ -102,15 +102,26 @@ def initialize_species_cache():
         else:
             log.info(f"快取檔案 {_CACHE_FILE} 不存在，將在查詢後自動建立。")
 
-        if _WIKIPEDIA_AVAILABLE:
-            _WIKI_LANG = species_config.get("wikipedia_language", _WIKI_LANG)
-            _RATE_LIMIT_DELAY = float(
-                species_config.get("wikipedia_rate_limit_delay", _RATE_LIMIT_DELAY)
+        configured_language = (
+            str(species_config.get("wikipedia_language", _WIKI_LANG)).strip().lower()
+        )
+        if _WIKI_LANGUAGE_REGEX.fullmatch(configured_language):
+            _WIKI_LANG = configured_language
+        else:
+            log.warning(
+                "Wikipedia 語言代碼 %r 無效，沿用 %r。",
+                configured_language,
+                _WIKI_LANG,
             )
-            wikipedia.set_lang(_WIKI_LANG)
-            log.info(
-                f"Wikipedia 語言已設定為 '{_WIKI_LANG}'，請求延遲為 {_RATE_LIMIT_DELAY} 秒。"
-            )
+        _RATE_LIMIT_DELAY = max(
+            0.0,
+            float(species_config.get("wikipedia_rate_limit_delay", _RATE_LIMIT_DELAY)),
+        )
+        log.info(
+            "Wikipedia 語言已設定為 '%s'，請求延遲為 %s 秒。",
+            _WIKI_LANG,
+            _RATE_LIMIT_DELAY,
+        )
 
         _initialized = True
         log.info("學名快取系統初始化完成。")
@@ -126,48 +137,140 @@ def is_potential_species_name(name: str) -> bool:
     """判斷是否可能是物種名稱。"""
     if not isinstance(name, str):
         return False
-    return bool(_SPECIES_NAME_REGEX.match(name))
+    return bool(_SPECIES_NAME_REGEX.fullmatch(_normalize_species_name(name)))
+
+
+def _normalize_species_name(name: str) -> str:
+    """移除使用者輸入前後與重複空白，保留學名本身的大小寫。"""
+    return " ".join(name.split())
+
+
+def _wikipedia_api_url() -> str:
+    """回傳已驗證語言代碼對應的 MediaWiki Action API URL。"""
+    if not _WIKI_LANGUAGE_REGEX.fullmatch(_WIKI_LANG):
+        raise ValueError(f"無效的 Wikipedia 語言代碼: {_WIKI_LANG!r}")
+    return f"https://{_WIKI_LANG}.wikipedia.org/w/api.php"
+
+
+def _convert_wikipedia_title(title: str) -> str:
+    """中文 Wikipedia 使用單一域名時，將條目標題正規化為台灣繁體。"""
+    global _tw_converter
+    if _WIKI_LANG != "zh":
+        return title
+    try:
+        if _tw_converter is None:
+            _tw_converter = OpenCC("s2twp")
+        return _tw_converter.convert(title)
+    except Exception as exc:  # noqa: BLE001 - 轉換失敗時仍可使用原始條目標題
+        log.warning("Wikipedia 條目標題轉為台灣繁體失敗，沿用原文: %r", exc)
+        return title
+
+
+def _query_wikipedia_title(species_name: str) -> str | None:
+    """透過 MediaWiki Action API 解析學名轉址並回傳條目標題。"""
+    params = {
+        "action": "query",
+        "format": "json",
+        "formatversion": "2",
+        "prop": "info",
+        "redirects": "1",
+        "titles": species_name,
+    }
+    headers = {"User-Agent": _WIKI_USER_AGENT}
+
+    for attempt in range(_WIKI_REQUEST_ATTEMPTS):
+        if attempt == 0:
+            time.sleep(_RATE_LIMIT_DELAY)
+        else:
+            time.sleep(min(2 ** (attempt - 1), 2))
+
+        try:
+            response = requests.get(
+                _wikipedia_api_url(),
+                params=params,
+                headers=headers,
+                timeout=_WIKI_REQUEST_TIMEOUT_SECONDS,
+            )
+            response.raise_for_status()
+            payload = response.json()
+        except requests.HTTPError as exc:
+            status_code = exc.response.status_code if exc.response is not None else None
+            if (
+                status_code not in _WIKI_RETRYABLE_STATUS_CODES
+                or attempt == _WIKI_REQUEST_ATTEMPTS - 1
+            ):
+                raise
+            log.warning(
+                "Wikipedia API 暫時回傳 HTTP %s，準備重試 '%s'。",
+                status_code,
+                species_name,
+            )
+            continue
+        except (
+            requests.ConnectionError,
+            requests.Timeout,
+            requests.exceptions.JSONDecodeError,
+        ) as exc:
+            if attempt == _WIKI_REQUEST_ATTEMPTS - 1:
+                raise
+            log.warning(
+                "Wikipedia API 暫時無法回應，準備重試 '%s': %r",
+                species_name,
+                exc,
+            )
+            continue
+
+        if error := payload.get("error"):
+            raise RuntimeError(f"Wikipedia API 錯誤: {error}")
+
+        pages = payload.get("query", {}).get("pages", [])
+        if isinstance(pages, dict):
+            pages = list(pages.values())
+        if not pages or pages[0].get("missing"):
+            return None
+
+        title = pages[0].get("title")
+        if not isinstance(title, str):
+            return None
+        normalized_title = title.split("(", 1)[0].strip()
+        return _convert_wikipedia_title(normalized_title) or None
+
+    return None
 
 
 def query_wikipedia_and_update_cache(species_name: str) -> str | None:
     """線上查詢維基百科並更新快取。"""
-    if not _WIKIPEDIA_AVAILABLE or _species_cache_data is None:
+    if _species_cache_data is None:
         return None
 
-    log.debug(f"開始線上查詢: {species_name}")
+    normalized_name = _normalize_species_name(species_name)
+    log.debug(f"開始線上查詢: {normalized_name}")
     try:
-        time.sleep(_RATE_LIMIT_DELAY)
-        page = wikipedia.page(species_name, auto_suggest=False)
-        common_name = page.title.split("(")[0].strip()
-        log.info(f"線上查詢成功: {species_name} -> {common_name}")
+        common_name = _query_wikipedia_title(normalized_name)
+        if common_name is None:
+            log.warning(
+                "線上查詢失敗：找不到 '%s' 的 Wikipedia 頁面。",
+                normalized_name,
+            )
+            return None
+        log.info(f"線上查詢成功: {normalized_name} -> {common_name}")
 
-        # *** 修改點：只有在查詢成功時，才更新記憶體快取並寫入檔案 ***
-        _species_cache_data[species_name] = common_name
+        _species_cache_data[normalized_name] = common_name
         if _CACHE_FILE:
             try:
                 with open(_CACHE_FILE, "a", encoding="utf-8", newline="") as f:
                     writer = csv.writer(f, delimiter="\t")
-                    writer.writerow([species_name, common_name])
+                    writer.writerow([normalized_name, common_name])
             except OSError as e:
                 log.error(f"寫入快取檔案 {_CACHE_FILE} 失敗: {e!r}")
 
         return common_name
-
-    except wikipedia.exceptions.PageError:
-        log.warning(f"線上查詢失敗：找不到 '{species_name}' 的 Wikipedia 頁面。")
-        _species_cache_data[species_name] = ""  # 僅更新記憶體快取，避免重複查詢
-        return None
-    except wikipedia.exceptions.DisambiguationError as e:
-        log.warning(
-            f"線上查詢 '{species_name}' 時遇到消歧義頁面，將嘗試選擇第一個選項: {e.options[0] if e.options else '無選項'}"
+    except Exception as e:  # noqa: BLE001 - 外部 API 與回應解析錯誤需降級為未找到
+        log.error(
+            "線上查詢 '%s' 時發生網路或 API 錯誤: %r",
+            normalized_name,
+            e,
         )
-        _species_cache_data[species_name] = ""  # 僅更新記憶體快取
-        if e.options:
-            return query_wikipedia_and_update_cache(e.options[0])
-        return None
-    except Exception as e:  # noqa: BLE001 - wikipedia 套件可能拋出多種執行期錯誤
-        log.error(f"線上查詢 '{species_name}' 時發生未知網路或API錯誤: {e!r}")
-        _species_cache_data[species_name] = ""  # 僅更新記憶體快取
         return None
 
 
@@ -180,12 +283,13 @@ def lookup_species_name(name: str) -> str | None:
     if _species_cache_data is None:
         return None
 
-    if name in _species_cache_data:
-        cached_result = _species_cache_data[name]
-        log.debug(f"從快取中找到 '{name}': '{cached_result}'")
+    normalized_name = _normalize_species_name(name)
+    if normalized_name in _species_cache_data:
+        cached_result = _species_cache_data[normalized_name]
+        log.debug(f"從快取中找到 '{normalized_name}': '{cached_result}'")
         return cached_result if cached_result else None
 
-    if is_potential_species_name(name):
-        return query_wikipedia_and_update_cache(name)
+    if is_potential_species_name(normalized_name):
+        return query_wikipedia_and_update_cache(normalized_name)
 
     return None

@@ -4,11 +4,11 @@
 > 範圍：`app/`、`translation_tool/`、`main.py` 內所有帶 `noqa: BLE001／S110／S112` 的位置。
 > 命令列 QA 工具（`md_extract_qa.py`、`md_inject_qa.py`）的 `print` 為刻意保留，不在此表。
 
-共 **319** 項；其中 **106** 項尚未在程式碼內寫明原因（以「分類」說明處理方式）。
+共 **324** 項；其中 **106** 項尚未在程式碼內寫明原因（以「分類」說明處理方式）。
 
 | 分類 | 數量 | 意義 |
 |---|---|---|
-| 已記錄／回報 | 285 | 例外處理本身有 log、提示、回報錯誤事件或重新丟出；寬鬆捕捉是為了不中斷整批流程 |
+| 已記錄／回報 | 290 | 例外處理本身有 log、提示、回報錯誤事件或重新丟出；寬鬆捕捉是為了不中斷整批流程 |
 | UI／畫面保護 | 18 | UI 層的畫面更新、icon 快取等；失敗只影響顯示，不影響資料 |
 | 盡力而為（靜默） | 16 | 引擎層、只有 `pass`／`continue`／回傳常數；失敗不影響結果（例如進度回報、還原失敗時以原始例外為準） |
 
@@ -151,6 +151,11 @@
 | `app/views/moddb/retranslation_controller.py:apply_preview_result` | BLE001 | 已記錄／回報 | unavailable database means stale result |
 | `app/views/moddb/scan_panel.py:ScanPanel._poll` | BLE001 | 已記錄／回報 | 輪詢失敗不能讓畫面永遠卡在「執行中」 |
 | `app/views/moddb/scan_panel.py:ScanPanel._safe_update` | BLE001 | 已記錄／回報 | 頁面已卸載時不影響掃描本身 |
+| `app/views/moddb/species_dialog.py:SpeciesCandidateDialog._scan.work` | BLE001 | 已記錄／回報 | worker boundary |
+| `app/views/moddb/species_dialog.py:SpeciesCandidateDialog._query_one.work` | BLE001 | 已記錄／回報 | worker boundary |
+| `app/views/moddb/species_dialog.py:SpeciesCandidateDialog._query_all.work` | BLE001 | 已記錄／回報 | worker boundary |
+| `app/views/moddb/species_dialog.py:SpeciesCandidateDialog._launch` | BLE001 | 已記錄／回報 | restore UI after launch failure |
+| `app/views/moddb/species_dialog.py:SpeciesCandidateDialog._post` | BLE001 | 已記錄／回報 | disposed page |
 | `app/views/moddb/translate_panel.py:TranslatePanel._launch_retranslation_worker` | BLE001 | 已記錄／回報 | caller restores the UI state |
 | `app/views/moddb/translate_panel.py:TranslatePanel._poll` | BLE001 | 已記錄／回報 | 輪詢失敗不能讓畫面永遠卡在「執行中」 |
 | `app/views/moddb/translate_panel.py:TranslatePanel._safe_update` | BLE001 | 已記錄／回報 | 頁面已卸載時不影響機翻本身 |
@@ -325,8 +330,8 @@
 | `translation_tool/utils/log_unit.py:log_exception` | BLE001/S110 | 盡力而為（靜默） | logging 自身失敗不可再記錄（會遞迴），也不可中斷呼叫端 |
 | `translation_tool/utils/log_unit.py:progress` | BLE001/S110 | 盡力而為（靜默） | UI 進度回報失敗不可中斷任務 |
 | `translation_tool/utils/safe_json_loader.py:load_json_auto_encoding` | BLE001/S112 | 盡力而為（靜默） | 逐一嘗試編碼；全部失敗才回傳 None |
-| `translation_tool/utils/species_cache.py:<module>` | BLE001 | 已記錄／回報 | 選用的第三方套件匯入可能出現各種失敗 |
-| `translation_tool/utils/species_cache.py:query_wikipedia_and_update_cache` | BLE001 | 已記錄／回報 | wikipedia 套件可能拋出多種執行期錯誤 |
+| `translation_tool/utils/species_cache.py:_convert_wikipedia_title` | BLE001 | 已記錄／回報 | 轉換失敗時仍可使用原始條目標題 |
+| `translation_tool/utils/species_cache.py:query_wikipedia_and_update_cache` | BLE001 | 已記錄／回報 | 外部 API 與回應解析錯誤需降級為未找到 |
 | `translation_tool/utils/text_processor.py:load_replace_rules` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `translation_tool/utils/text_processor.py:load_custom_translations` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `translation_tool/utils/text_processor.py:convert_snbt_file_inplace` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |

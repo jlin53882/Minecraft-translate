@@ -1,0 +1,18 @@
+# Mod DB View 架構
+
+`ModDbView`（`app/views/moddb_view.py`）維持資料庫連線與頁籤生命週期；`EntriesPanel`（`app/views/moddb/entries_panel.py`）負責條目篩選、編輯與背景刷新。資料庫查詢與寫入經由 `app/services_impl/moddb_service.py`，核心資料存取由 `translation_tool/translation_db/` 提供。
+
+## 學名候選流程
+
+條目校對的 `species_scan_btn` 依目前 `version`、`mod_id` 與 `kind` 開啟 `SpeciesCandidateDialog`。對話框分成兩個階段：
+
+1. `scan_species_candidates` 分頁讀取 `TranslationDB.list_entries`，用 `is_potential_species_name` 做本地格式判斷，最多保留 500 筆候選。
+2. 使用者按單筆「查詢」或「查詢全部候選」後，背景作業才呼叫 `lookup_species_name`。結果回到 UI 執行緒顯示中文名稱或找不到；不會寫入 `entry`、`translation` 或 `effective`。
+
+每個候選列同時提供 `開啟條目`，透過 `EntriesPanel.select` 回到編輯器。掃描與查詢使用 `launch_page_operation`、`CommitPolicy.EPHEMERAL` 與 generation 檢查；視窗關閉或範圍過期時丟棄晚到結果。
+
+## 維護邊界
+
+- `app/services_impl/moddb_species_service.py` 不依賴 Flet，只處理候選資料結構、資料庫分頁與學名規則。
+- `app/views/moddb/species_dialog.py` 只處理視窗控制項、背景作業生命週期與結果呈現。
+- 學名快取的網路請求與快取檔案格式由 `translation_tool/utils/species_cache.py` 管理；Mod DB 功能不重複實作 API 或快取。
