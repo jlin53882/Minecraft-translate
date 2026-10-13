@@ -87,6 +87,7 @@ flowchart TD
   - `lm_translator.rate_limit.sleep_seconds_between_batches`：批次之間的等待秒數。
   - `lm_translator` 區段的 `batch_shrink_factor`、`min_batch_size`：批次縮小參數。
   - UI 日誌行數（`load_ui_logging_config` 的 `tail_lines`）。
+- 抽取規則：Patchouli 檔案的 `multiblock` 物件（方塊圖樣的 `pattern`、`mapping`）整個不抽取，因為翻譯或削掉列內空白會讓每列長度不一致、整本書載入失敗；Mod 資料庫的 jar 掃描共用同一個抽取函式（`translatable_extractor.extract_translatables`），規則相同。
 - 產出檔案：
   - 輸出資料夾中的譯文 JSON；`lang/en_us.json` 寫成同資料夾的 `zh_tw.json`，Patchouli 書的 `patchouli_books/<書>/en_us/…` 寫進同書的 `zh_tw/…`（`translation_path_writer.map_lang_output_path`）；勾選「輸出 .lang」時，路徑含 `lang` 的來源檔另外輸出同名 `.lang`。另有 `translation_map.json`（逐筆對照紀錄）。Patchouli 書寫出前會與來源 `en_us` 比對（`patchouli_compat.find_patchouli_mismatch`），結構或格式標記數量不同時記警告，檔案仍照常寫出。
   - 翻譯快取（`translation_tool/utils/cache_manager.py`）：譯文一律寫入；`write_new_cache` 決定寫入方式：關閉時寫入編號分片，開啟時每批另存成獨立的時間戳分片。

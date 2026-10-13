@@ -15,6 +15,11 @@ from translation_tool.core.lm_config_rules import (
 )
 from translation_tool.utils.config_manager import load_config
 
+# Patchouli 結構性欄位：整個子樹只描述版面或方塊圖樣，沒有顯示文字。
+# 例如 ``multiblock.pattern`` 的列 ``" 0 "``，翻譯或削掉空白都會讓每列長度不一致，
+# 整本書載入失敗。
+NON_TEXT_PATCHOULI_KEYS = frozenset({"multiblock"})
+
 
 def find_patchouli_json(root: Path, dir_names=None):
     """
@@ -92,6 +97,8 @@ def extract_translatables(json_data, file_path):
         """遞迴遍歷物件提取可翻譯文字。"""
         if isinstance(obj, dict):
             for k, v in obj.items():
+                if not is_lang and k in NON_TEXT_PATCHOULI_KEYS:
+                    continue
                 new_path = f"{base_path}.{k}" if base_path else k
 
                 if is_lang and isinstance(v, str):

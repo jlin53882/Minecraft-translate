@@ -327,3 +327,40 @@ class TestTranslatableExtractorEdgeCases:
         # 不應該包含 pattern
         assert "minecraft:diamond" not in texts
         assert "some.mod.key.path" not in texts
+
+
+class TestMultiblockIsNotText:
+    """Patchouli 的 multiblock 結構圖不是文字，不可送去翻譯。"""
+
+    ENTRY = {
+        "name": "Your First Rocket",
+        "pages": [
+            {"type": "patchouli:text", "text": "Build a launch pad."},
+            {
+                "type": "patchouli:multiblock",
+                "name": "Launch Pad",
+                "multiblock": {
+                    "pattern": [["   ", " 0 ", "   "], ["GGG", "G G", "GGG"]],
+                    "mapping": {"0": "ad_astra:launch_pad"},
+                },
+                "text": "Place it flat.",
+            },
+        ],
+    }
+
+    def test_pattern_rows_are_not_extracted(self):
+        from translation_tool.core.translatable_extractor import extract_translatables
+
+        path = Path("assets/ad_astra/patchouli_books/astrodux/en_us/entries/x.json")
+        paths = {item["path"] for item in extract_translatables(self.ENTRY, path)}
+
+        assert paths == {"name", "pages[0].text", "pages[1].name", "pages[1].text"}
+        assert not any("multiblock" in p for p in paths)
+
+    def test_lang_file_key_named_multiblock_is_still_extracted(self):
+        from translation_tool.core.translatable_extractor import extract_translatables
+
+        path = Path("assets/m/lang/en_us.json")
+        items = extract_translatables({"multiblock": "Multiblock Structure"}, path)
+
+        assert [item["path"] for item in items] == ["multiblock"]
