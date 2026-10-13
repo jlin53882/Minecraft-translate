@@ -98,7 +98,7 @@ class TestBundleOutputsGenerator:
         (tmp_path / "lang" / "zh_tw.json").write_text('{"test": "value"}')
 
         (tmp_path / "pack.mcmeta").write_text(
-            '{"pack":{"description":"FolderVersion","min_format":"10","max_format":"15"}}'
+            '{"pack":{"description":"FolderVersion","pack_format":15}}'
         )
 
         output_zip = tmp_path / "output.zip"
@@ -107,8 +107,7 @@ class TestBundleOutputsGenerator:
                 str(tmp_path),
                 str(output_zip),
                 description="UIVersion",
-                min_format=20,
-                max_format=25,
+                pack_format=34,
             )
         )
 
@@ -116,8 +115,7 @@ class TestBundleOutputsGenerator:
         with zipfile.ZipFile(output_zip, "r") as zf:
             content = json.loads(zf.read("pack.mcmeta").decode("utf-8"))
             assert content["pack"]["description"] == "FolderVersion"
-            assert content["pack"]["min_format"] == "10"
-            assert content["pack"]["max_format"] == "15"
+            assert content["pack"]["pack_format"] == 15
 
         warning_logs = [r.get("log", "") for r in results if "警告" in r.get("log", "")]
         assert any("pack.mcmeta" in log for log in warning_logs)
@@ -166,13 +164,13 @@ class TestWritePackMcmeta:
 
         zip_path = tmp_path / "test.zip"
         with zipfile.ZipFile(zip_path, "w") as zf:
-            _write_pack_mcmeta(zf, "Test Description", 15, 15)
+            _write_pack_mcmeta(zf, "Test Description", 15)
 
         with zipfile.ZipFile(zip_path, "r") as zf:
             content = json.loads(zf.read("pack.mcmeta").decode("utf-8"))
             assert content["pack"]["description"] == "Test Description"
-            assert content["pack"]["min_format"] == "15"
-            assert content["pack"]["max_format"] == "15"
+            assert content["pack"]["pack_format"] == 15
+            assert "supported_formats" not in content["pack"]
 
     def test_write_pack_mcmeta_with_supported_formats(self, tmp_path):
         """測試 pack.mcmeta 包含 supported_formats 範圍"""
@@ -180,13 +178,16 @@ class TestWritePackMcmeta:
 
         zip_path = tmp_path / "test.zip"
         with zipfile.ZipFile(zip_path, "w") as zf:
-            _write_pack_mcmeta(zf, "Range Description", 9, 15)
+            _write_pack_mcmeta(zf, "Range Description", 34)
 
         with zipfile.ZipFile(zip_path, "r") as zf:
             content = json.loads(zf.read("pack.mcmeta").decode("utf-8"))
             assert content["pack"]["description"] == "Range Description"
-            assert content["pack"]["min_format"] == "9"
-            assert content["pack"]["max_format"] == "15"
+            assert content["pack"]["pack_format"] == 34
+            assert content["pack"]["supported_formats"] == {
+                "min_inclusive": 34,
+                "max_inclusive": 46,
+            }
 
 
 class TestAddFolderToZipDuplicateHandling:
@@ -234,8 +235,7 @@ class TestBundleOutputsGeneratorNewParams:
                 str(tmp_path),
                 str(output_zip),
                 description="My Translation Pack",
-                min_format=15,
-                max_format=15,
+                pack_format=15,
             )
         )
 
@@ -243,8 +243,7 @@ class TestBundleOutputsGeneratorNewParams:
         with zipfile.ZipFile(output_zip, "r") as zf:
             content = json.loads(zf.read("pack.mcmeta").decode("utf-8"))
             assert content["pack"]["description"] == "My Translation Pack"
-            assert content["pack"]["min_format"] == "15"
-            assert content["pack"]["max_format"] == "15"
+            assert content["pack"]["pack_format"] == 15
 
     def test_bundle_with_pack_image(self, tmp_path, monkeypatch):
         """測試 pack_image_path 複製圖片到 ZIP"""
@@ -493,8 +492,7 @@ class TestOutputBundlerIntegration:
                 str(tmp_path),
                 str(output_zip),
                 description="Full Test Pack",
-                min_format=9,
-                max_format=15,
+                pack_format=34,
                 pack_image_path=str(pack_img),
                 extra_folders=[str(extra)],
             )
@@ -510,7 +508,7 @@ class TestOutputBundlerIntegration:
             assert "pack.png" in names
             assert "extra.json" in names
             assert content["pack"]["description"] == "Full Test Pack"
-            assert content["pack"]["min_format"] == "9"
-            assert content["pack"]["max_format"] == "15"
+            assert content["pack"]["pack_format"] == 34
+            assert content["pack"]["supported_formats"]["min_inclusive"] == 34
 
         assert results[-1].get("progress") == 1.0

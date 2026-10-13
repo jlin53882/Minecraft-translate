@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import types
 from types import SimpleNamespace
 
 import flet as ft
@@ -100,10 +101,8 @@ class _Env:
         self.snacks: list[str] = []
         self.calls: list[dict] = []
         self.cfg: dict = {}
-        self.versions: dict = {"1.20.1": {}, "1.19.4": {}, "1.21": {}}
         self.picker = _Picker()
         monkeypatch.setattr(mod, "load_config", lambda: self.cfg)
-        monkeypatch.setattr(mod, "_load_version_data", lambda: self.versions)
 
     def open(self, input_path="", output_path=None):
         """input_path 是管線頁的 Mod 來源（對話框不使用）；要模擬使用者改輸入來源請用 ``type_input``。"""
@@ -281,8 +280,8 @@ def test_confirm_calls_back_with_exact_kwargs_and_closes(env):
             "input_root_dir": str(env.out),
             "output_zip_path": zip_path,
             "description": "§a測試翻譯",
-            "min_format": None,
-            "max_format": None,
+            "pack_format": 34,
+            "max_pack_format": None,
             "pack_image_path": None,
             "extra_folders": [],
         }
@@ -299,135 +298,83 @@ def test_blank_input_falls_back_to_default_input_dir(env):
     assert env.calls[0]["input_root_dir"] == default
 
 
-def test_no_version_selected_passes_no_formats(env):
-    dialog = env.open_typing_input(env.out)
-    _field(dialog, "輸出 ZIP 檔案").value = "z.zip"
-    _button(dialog, "確定執行").on_click(None)
-    assert env.calls[0]["min_format"] is None and env.calls[0]["max_format"] is None
+def _type(dialog, label, text):
+    field = _field(dialog, label)
+    field.value = text
+    field.on_change(types.SimpleNamespace(control=field))
 
 
-def test_selected_version_maps_to_pack_formats(env):
-    """所選 Minecraft 版本要轉成 pack_format 範圍（原本一律傳 None）。"""
-    env.versions["1.20.1"] = {"min_format": 9, "max_format": 15}
+MAX_LABEL = "最大使用版本（max_inclusive，選填）"
+
+
+def _start(env, version="", max_value=""):
     dialog = env.open_typing_input(env.out)
     _field(dialog, "輸出 ZIP 檔案").value = "z.zip"
-    _version_item(dialog, "1.20.1").on_click(None)
+    if version:
+        _type(dialog, "版本或 pack_format", version)
+    if max_value:
+        _type(dialog, MAX_LABEL, max_value)
     _button(dialog, "確定執行").on_click(None)
-    assert env.calls[0]["min_format"] == 9 and env.calls[0]["max_format"] == 15
+    return dialog
+
+
+def test_no_version_uses_default_pack_format_and_default_max(env):
+    _start(env)
+    assert env.calls[0]["pack_format"] == 34
+    assert env.calls[0]["max_pack_format"] is None
+
+
+@pytest.mark.parametrize(
+    ("typed", "expected"),
+    [("1.21.1", 34), ("1.20.4", 22), ("1.19.4", 13), ("42", 42)],
+)
+def test_typed_version_or_integer_maps_to_pack_format(env, typed, expected):
+    _start(env, typed)
+    assert env.calls[0]["pack_format"] == expected
+
+
+def test_user_max_is_forwarded_as_integer(env):
+    _start(env, "1.21.1", "999")
+    assert env.calls[0]["pack_format"] == 34
+    assert env.calls[0]["max_pack_format"] == 999
+
+
+def test_user_max_can_be_a_version(env):
+    _start(env, "1.21.1", "1.21.4")
+    assert env.calls[0]["max_pack_format"] == 46
+
+
+@pytest.mark.parametrize(
+    ("version", "max_value"),
+    [("abc", ""), ("1.21.1", "xyz"), ("1.21.1", "10"), ("1.99.9", "")],
+)
+def test_invalid_version_or_max_blocks_start(env, version, max_value):
+    dialog = _start(env, version, max_value)
+    assert env.calls == []
+    assert dialog.open is True
+
+
+def test_quick_version_button_fills_field_and_summary(env):
+    dialog = env.open()
+    _inner_button(dialog, "1.20.1").on_click(None)
+    assert _field(dialog, "版本或 pack_format").value == "1.20.1"
+    assert any("pack_format 15" in t for t in _texts(dialog))
+
+
+def test_summary_shows_written_fields_and_errors(env):
+    dialog = env.open()
+    _type(dialog, "版本或 pack_format", "1.20.4")
+    assert any("supported_formats 22–46" in t for t in _texts(dialog))
+    _type(dialog, MAX_LABEL, "999")
+    assert any("supported_formats 22–999" in t for t in _texts(dialog))
+    _type(dialog, "版本或 pack_format", "nope")
+    assert any(t.startswith("⚠️") for t in _texts(dialog))
 
 
 def test_cancel_closes_without_callback(env):
     dialog = env.open()
     _button(dialog, "取消").on_click(None)
     assert dialog.open is False and env.calls == [] and env.snacks == []
-
-
-# ---------- 版本清單 ----------
-
-
-def _version_items(dialog):
-    return [
-        c
-        for c in _walk(dialog)
-        if isinstance(c, ft.Container)
-        and c.on_click is not None
-        and isinstance(c.content, ft.Text)
-    ]
-
-
-def _version_item(dialog, name):
-    return next(c for c in _version_items(dialog) if c.content.value == name)
-
-
-def _toggle(dialog):
-    return next(
-        c
-        for c in _walk(dialog)
-        if isinstance(c, ft.Container)
-        and isinstance(c.content, ft.Row)
-        and any(isinstance(x, ft.Icon) for x in c.content.controls)
-    )
-
-
-def _dropdown(dialog):
-    return next(
-        c
-        for c in _walk(dialog)
-        if isinstance(c, ft.Container)
-        and isinstance(c.content, ft.ListView)
-        and c.height == 196
-    )
-
-
-def test_version_list_initially_lists_all_versions_and_is_collapsed(env):
-    dialog = env.open()
-    assert [c.content.value for c in _version_items(dialog)] == [
-        "1.20.1",
-        "1.19.4",
-        "1.21",
-    ]
-    assert _dropdown(dialog).visible is False
-
-
-def test_toggle_expands_and_collapses_version_list(env):
-    dialog = env.open()
-    _toggle(dialog).on_click(None)
-    assert _dropdown(dialog).visible is True
-    _toggle(dialog).on_click(None)
-    assert _dropdown(dialog).visible is False
-
-
-def test_version_search_filters_case_insensitively(env):
-    dialog = env.open()
-    search = _field(dialog, "搜尋版本")
-    search.on_change(SimpleNamespace(control=SimpleNamespace(value="1.2")))
-    assert [c.content.value for c in _version_items(dialog)] == ["1.20.1", "1.21"]
-
-
-def test_version_search_without_match_shows_placeholder(env):
-    dialog = env.open()
-    _field(dialog, "搜尋版本").on_change(
-        SimpleNamespace(control=SimpleNamespace(value="zzz"))
-    )
-    assert _version_items(dialog) == []
-    assert "無可用版本" in _texts(_dropdown(dialog))
-
-
-def test_selecting_version_updates_selected_label(env):
-    dialog = env.open()
-    _toggle(dialog).on_click(None)
-    assert _dropdown(dialog).visible is True
-    _version_item(dialog, "1.19.4").on_click(None)
-    assert _dropdown(dialog).visible is False  # 選完自動收合
-    _assert_selected_version_row(dialog, "1.19.4")
-
-
-def _assert_selected_version_row(dialog, version):
-    """用實際組合出的版面驗證：「已選擇：」只出現一次、版本只出現一次（不是重複前綴）。
-
-    版面是 ``Row([Text("已選擇："), Text(version), ...])``；測試找出那一列，
-    把列內所有文字串起來檢查。
-    """
-    row = next(
-        c
-        for c in _walk(dialog)
-        if isinstance(c, ft.Row)
-        and any(isinstance(x, ft.Text) and x.value == "已選擇：" for x in c.controls)
-    )
-    values = [x.value for x in row.controls if isinstance(x, ft.Text)]
-    assert values == ["已選擇：", version]
-    shown = "".join(values)
-    assert shown == f"已選擇：{version}"
-    assert shown.count("已選擇：") == 1 and shown.count(version) == 1
-    assert "已選擇：已選擇：" not in shown and "已選擇： 已選擇：" not in shown
-    # 整個對話框內也不存在重複前綴
-    assert not any("已選擇：已選擇" in t for t in _texts(dialog))
-
-
-def test_missing_version_data_still_opens_with_placeholder(env):
-    env.versions = {}
-    dialog = env.open()
-    assert "無可用版本" in _texts(_dropdown(dialog))
 
 
 # ---------- 封面圖片 / 額外資料夾 ----------

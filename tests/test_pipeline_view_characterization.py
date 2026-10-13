@@ -541,8 +541,8 @@ def test_run_bundle_calls_service_with_all_args(tmp_path):
         input_root_dir=str(tmp_path / "in"),
         output_zip_path=zip_path,
         description="測試描述",
-        min_format=10,
-        max_format=18,
+        pack_format=18,
+        max_pack_format=40,
         pack_image_path="C:/img/pack.png",
         extra_folders=["C:/extra1", "C:/extra2"],
     )
@@ -550,8 +550,8 @@ def test_run_bundle_calls_service_with_all_args(tmp_path):
     assert calls["input_root_dir"] == str(tmp_path / "in")
     assert calls["output_zip_path"] == zip_path
     assert calls["description"] == "測試描述"
-    assert calls["min_format"] == 10
-    assert calls["max_format"] == 18
+    assert calls["pack_format"] == 18
+    assert calls["max_pack_format"] == 40
     assert calls["pack_image_path"] == "C:/img/pack.png"
     assert calls["extra_folders"] == ["C:/extra1", "C:/extra2"]
 
@@ -578,8 +578,7 @@ def test_actions_bundle_passes_arguments_and_logs_to_session(tmp_path):
             input_root_dir=str(tmp_path / "bundle_in"),
             output_zip_path=str(tmp_path / "out" / "bundle.zip"),
             description="mydesc",
-            min_format=0,
-            max_format=0,
+            pack_format=34,
             pack_image_path="C:/pack.png",
             extra_folders=["C:/extra"],
         )

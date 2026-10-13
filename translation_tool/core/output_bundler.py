@@ -9,14 +9,21 @@
 import hashlib
 import json
 import os
+import re
 import time
 import zipfile
 from collections.abc import Generator, Iterator
 from typing import Any
 
+from translation_tool.core.pack_mcmeta import (
+    DEFAULT_PACK_FORMAT,
+    build_pack_mcmeta,
+    repair_source_pack_mcmeta,
+)
 from translation_tool.utils.config_manager import (
     load_config,  # noqa: F401 - 測試以 monkeypatch 取代的 seam
 )
+from translation_tool.utils.file_replace import replace_with_retry
 from translation_tool.utils.log_unit import log_debug, log_error, log_info, log_warning
 
 # ZIP 壓縮等級（zlib 1~9）。量測（150 個 mod、約 124 MB 的語言檔與貼圖）：
@@ -27,7 +34,7 @@ ZIP_COMPRESS_LEVEL = 6
 # 打包狀態 sidecar（#165 方向 2）：放在 ZIP 旁，記錄「上次成功打包」的輸入指紋與 ZIP 雜湊。
 # 絕不會進入資源包；格式版本不符一律視為無效並重建。
 BUNDLE_STATE_SUFFIX = ".bundle-state.json"
-BUNDLE_STATE_VERSION = 1
+BUNDLE_STATE_VERSION = 2
 _HASH_CHUNK = 1024 * 1024
 
 
@@ -42,6 +49,138 @@ def _hash_file(path: str) -> str:
 
 def _norm(path: str) -> str:
     return os.path.normcase(os.path.abspath(path))
+
+
+DEFAULT_OUTPUT_ZIP_NAME = "可使用翻譯.zip"
+_WINDOWS_ILLEGAL_NAME_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
+_WINDOWS_RESERVED_NAMES = frozenset(
+    {"CON", "PRN", "AUX", "NUL"}
+    | {f"COM{i}" for i in range(1, 10)}
+    | {f"LPT{i}" for i in range(1, 10)}
+)
+
+
+def normalize_output_zip_name(value: object) -> str:
+    """設定檔的輸出檔名 → 可安全接在資料夾後的 ZIP 檔名。
+
+    空白、不是字串、含路徑分隔字元或 Windows 不允許的字元／保留名稱時用預設；
+    缺少 ``.zip`` 副檔名時補上。
+    """
+    name = value.strip() if isinstance(value, str) else ""
+    if not name or _WINDOWS_ILLEGAL_NAME_CHARS.search(name):
+        return DEFAULT_OUTPUT_ZIP_NAME
+    if not name.lower().endswith(".zip"):
+        name += ".zip"
+    stem = name[: -len(".zip")]
+    if stem.endswith(".") or stem.split(".")[0].upper() in _WINDOWS_RESERVED_NAMES:
+        return DEFAULT_OUTPUT_ZIP_NAME
+    return name
+
+
+def _read_custom_pack_mcmeta(
+    path: str | None, generated: dict[str, Any]
+) -> tuple[str | None, list[str]]:
+    """讀取來源資料夾的 pack.mcmeta，回傳 (要寫入 ZIP 的內容, 說明)。
+
+    沒有來源檔：(None, [])。無法讀取、不是有效 JSON 或沒有 pack 物件：(None, [原因])，
+    由呼叫端改用 ``generated``（UI 設定產生的內容）。其他情況回傳可用的內容；format 欄位
+    寫成字串等問題會被修正，說明列出修正了什麼（見 ``repair_source_pack_mcmeta``）。
+    """
+    if not path:
+        return None, []
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            content = f.read()
+    except (OSError, UnicodeDecodeError) as ex:
+        return None, [f"讀取失敗：{ex}"]
+    return repair_source_pack_mcmeta(content, generated)
+
+
+def _zip_root_files(input_root_dir: str, extra_folders: list[str] | None) -> list[str]:
+    """打包時會直接落在 ZIP 根目錄的檔案（依寫入順序，後寫入者優先）。
+
+    包含：名為 ``root`` 的子資料夾內的檔案、根目錄第一層的檔案、直接加入的額外檔案，
+    以及額外資料夾第一層與其子資料夾第一層的檔案。
+    """
+
+    def entries(folder: str, *, dirs: bool) -> list[str]:
+        try:
+            paths = [os.path.join(folder, n) for n in sorted(os.listdir(folder))]
+        except OSError:
+            return []
+        return [p for p in paths if os.path.isdir(p) == dirs]
+
+    found: list[str] = []
+    if os.path.isdir(input_root_dir):
+        for folder in entries(input_root_dir, dirs=True):
+            if os.path.basename(folder).lower() == "root":
+                found += entries(folder, dirs=False)
+        found += entries(input_root_dir, dirs=False)
+    for extra in extra_folders or []:
+        if os.path.isfile(extra):
+            found.append(extra)
+        elif os.path.isdir(extra):
+            found += entries(extra, dirs=False)
+            for child in entries(extra, dirs=True):
+                found += entries(child, dirs=False)
+    return found
+
+
+def find_source_pack_files(
+    input_root_dir: str, extra_folders: list[str] | None
+) -> tuple[str | None, str | None]:
+    """來源裡既有的 (pack.mcmeta, pack.png) 路徑：會落在 ZIP 根目錄的同名檔案；沒有則為 None。
+
+    同名時取最後寫入者（與打包時的覆蓋順序一致）。
+    """
+    mcmeta = png = None
+    for path in _zip_root_files(input_root_dir, extra_folders):
+        name = os.path.basename(path).lower()
+        if name == "pack.mcmeta":
+            mcmeta = path
+        elif name == "pack.png":
+            png = path
+    return mcmeta, png
+
+
+def _is_pack_file(path: str) -> bool:
+    """pack.mcmeta／pack.png 已由專用步驟寫入 ZIP，一般檔案收集不可再加入。"""
+    return os.path.basename(path).lower() in ("pack.mcmeta", "pack.png")
+
+
+def preview_pack_mcmeta(
+    input_root_dir: str,
+    extra_folders: list[str] | None,
+    description: str,
+    pack_format: int,
+    max_pack_format: int | None = None,
+) -> tuple[str, str | None, list[str], bool]:
+    """打包後 ZIP 內 ``pack.mcmeta`` 的預覽：(內容文字, 來源檔路徑或 None, 說明, 是否採用來源檔)。
+
+    與打包完全相同的規則：來源有可用的 ``pack.mcmeta`` 就用它（可能經過修正，說明列出
+    修正內容）；來源檔不可用時說明給出原因，內容改用 UI 設定產生。版本無效時拋出 ValueError。
+    """
+    generated = build_pack_mcmeta(description, pack_format, max_pack_format)
+    generated_text = json.dumps(generated, ensure_ascii=False, indent=2)
+    source, _png = find_source_pack_files(input_root_dir, extra_folders)
+    if source is None:
+        return generated_text, None, [], False
+    content, notes = _read_custom_pack_mcmeta(source, generated)
+    if content is None:
+        return generated_text, source, notes, False
+    return content, source, notes, True
+
+
+def _output_path_problem(output_zip_path: str) -> str | None:
+    """輸出路徑必須是 ZIP「檔案」路徑；是資料夾或空白時回傳原因，否則 None。"""
+    if not (output_zip_path or "").strip():
+        return "輸出 ZIP 路徑不可空白"
+    if output_zip_path.endswith(("/", "\\")) or os.path.isdir(output_zip_path):
+        return (
+            f"輸出 ZIP 路徑是資料夾而不是檔案: {output_zip_path}"
+            f"（請指定檔名，例如 {DEFAULT_OUTPUT_ZIP_NAME}）"
+        )
+    return None
 
 
 def _output_artifacts(output_zip_path: str) -> frozenset[str]:
@@ -105,8 +244,8 @@ def _collect_sources(
 def _compute_fingerprint(
     sources: list[tuple[str, str, str]],
     description: str,
-    min_format: int,
-    max_format: int,
+    pack_format: int,
+    max_pack_format: int | None,
     pack_image_path: str | None,
 ) -> str | None:
     """計算打包輸入指紋；涵蓋內容（非 mtime）、相對路徑、pack 參數與壓縮設定。
@@ -126,8 +265,8 @@ def _compute_fingerprint(
             zipfile.ZIP_DEFLATED,
             ZIP_COMPRESS_LEVEL,
             description,
-            min_format,
-            max_format,
+            pack_format,
+            max_pack_format,
         ]
     )
     try:
@@ -260,6 +399,8 @@ def _iter_add_folder_to_zip(
             archive_name = os.path.join(base_path_in_zip, relative_path).replace(
                 "\\", "/"
             )
+            if "/" not in archive_name and _is_pack_file(archive_name):
+                continue  # 根目錄的 pack.mcmeta／pack.png 由專用步驟寫入
 
             if archive_name in seen_files:
                 base, ext = os.path.splitext(archive_name)
@@ -309,28 +450,17 @@ def _add_folder_to_zip(
 def _write_pack_mcmeta(
     zip_file: zipfile.ZipFile,
     description: str,
-    min_format: int,
-    max_format: int,
+    pack_format: int,
+    max_pack_format: int | None = None,
 ) -> None:
-    """將 pack.mcmeta 寫入 ZIP 檔案根目錄。
-
-    Args:
-        zip_file: 目標 ZIP 檔案物件。
-        description: 資源包描述，會寫入 pack.mcmeta.description。
-        min_format: 支援的最低 Minecraft 版本格式。
-        max_format: 支援的最高 Minecraft 版本格式。
-    """
-    pack_info = {
-        "pack": {
-            "description": description,
-            "min_format": str(min_format),
-            "max_format": str(max_format),
-        }
-    }
-
+    """將 pack.mcmeta 寫入 ZIP 檔案根目錄（內容規則見 ``pack_mcmeta``）。"""
     zip_file.writestr(
         "pack.mcmeta",
-        json.dumps(pack_info, ensure_ascii=False, indent=2),
+        json.dumps(
+            build_pack_mcmeta(description, pack_format, max_pack_format),
+            ensure_ascii=False,
+            indent=2,
+        ),
     )
 
 
@@ -338,8 +468,8 @@ def bundle_outputs_generator(
     input_root_dir: str,
     output_zip_path: str,
     description: str = "",
-    min_format: int = 0,
-    max_format: int = 0,
+    pack_format: int = DEFAULT_PACK_FORMAT,
+    max_pack_format: int | None = None,
     pack_image_path: str | None = None,
     extra_folders: list[str] | None = None,
     force_rebuild: bool = False,
@@ -350,8 +480,8 @@ def bundle_outputs_generator(
         input_root_dir: Root folder containing source subfolders
         output_zip_path: Output path for ZIP file
         description: pack.mcmeta description field
-        min_format: min_format for pack.mcmeta
-        max_format: max_format for pack.mcmeta
+        pack_format: pack.mcmeta 的 pack_format（整數）；1.20.2 以上另寫 supported_formats
+        max_pack_format: 最大使用版本（supported_formats.max_inclusive 或 max_format）；None 用預設
         pack_image_path: Optional path to pack.png to copy into ZIP root
         extra_folders: Optional list of extra folder paths to merge into ZIP root
         force_rebuild: True 時忽略上次打包狀態，一律重建 ZIP
@@ -360,6 +490,12 @@ def bundle_outputs_generator(
     直接沿用既有 ZIP。ZIP 先寫到暫存檔、完整關閉後才原子替換，最後才記錄新狀態。
     """
     start_time = time.time()
+
+    problem = _output_path_problem(output_zip_path)
+    if problem:
+        yield {"progress": 1.0, "log": f"錯誤：{problem}", "error": True}
+        log_error(problem)
+        return
 
     if not os.path.exists(input_root_dir):
         yield {
@@ -395,7 +531,7 @@ def bundle_outputs_generator(
     try:
         sources = _collect_sources(input_root_dir, extra_folders, exclude)
         fingerprint = _compute_fingerprint(
-            sources, description, min_format, max_format, pack_image_path
+            sources, description, pack_format, max_pack_format, pack_image_path
         )
         if (
             fingerprint is not None
@@ -418,24 +554,9 @@ def bundle_outputs_generator(
         pack_mcmeta_source = None
         pack_png_source = None
 
-        # Check input_root_dir for pack.png/pack.mcmeta
-        for entry in os.listdir(input_root_dir):
-            full_path = os.path.join(input_root_dir, entry)
-            if os.path.isfile(full_path):
-                if entry.lower() == "pack.mcmeta":
-                    pack_mcmeta_source = full_path
-                elif entry.lower() == "pack.png":
-                    pack_png_source = full_path
-
-        # Check extra_folders for pack.png/pack.mcmeta
-        if extra_folders:
-            for extra_path in extra_folders:
-                if os.path.isfile(extra_path):
-                    entry = os.path.basename(extra_path)
-                    if entry.lower() == "pack.mcmeta":
-                        pack_mcmeta_source = extra_path
-                    elif entry.lower() == "pack.png":
-                        pack_png_source = extra_path
+        pack_mcmeta_source, pack_png_source = find_source_pack_files(
+            input_root_dir, extra_folders
+        )
 
         # If pack.png/pack.mcmeta found in folders, skip UI settings and warn
         if pack_mcmeta_source:
@@ -461,23 +582,33 @@ def bundle_outputs_generator(
             compresslevel=ZIP_COMPRESS_LEVEL,
         ) as zf:
             # Write pack.mcmeta from folder if exists, otherwise from UI
-            if pack_mcmeta_source:
-                try:
-                    with open(pack_mcmeta_source, "r", encoding="utf-8") as f:
-                        content = f.read()
-                    seen_files["pack.mcmeta"] = 1
-                    zf.writestr("pack.mcmeta", content)
-                    total_files_added += 1
-                    tracker.advance()
-                    yield {"progress": 0.05, "log": "已寫入 pack.mcmeta（來自資料夾）"}
-                    log_info(f"寫入 pack.mcmeta（來自：{pack_mcmeta_source}）")
-                except Exception as ex:  # noqa: BLE001 - 錯誤已記錄或回報給呼叫端，不中斷整批流程
-                    yield {"progress": 0.05, "log": f"讀取 pack.mcmeta 失敗: {ex}"}
-            elif description or min_format > 0:
-                _write_pack_mcmeta(zf, description, min_format, max_format)
+            custom_content, custom_problems = _read_custom_pack_mcmeta(
+                pack_mcmeta_source,
+                build_pack_mcmeta(description, pack_format, max_pack_format),
+            )
+            if custom_content is not None:
+                seen_files["pack.mcmeta"] = 1
+                zf.writestr("pack.mcmeta", custom_content)
+                total_files_added += 1
+                tracker.advance()
+                yield {"progress": 0.05, "log": "已寫入 pack.mcmeta（來自資料夾）"}
+                log_info(f"寫入 pack.mcmeta（來自：{pack_mcmeta_source}）")
+            else:
+                if custom_problems:
+                    yield {
+                        "progress": 0.05,
+                        "log": f"警告：資料夾內的 pack.mcmeta 無法使用，改用 UI 設定產生（{custom_problems[0]}）",
+                    }
+                seen_files["pack.mcmeta"] = 1  # 來源的壞檔不能再被當一般檔案加入
+                _write_pack_mcmeta(zf, description, pack_format, max_pack_format)
                 total_files_added += 1
                 yield {"progress": 0.05, "log": "已寫入 pack.mcmeta"}
                 log_info("已寫入 pack.mcmeta")
+            for problem in custom_problems if custom_content is not None else ():
+                yield {
+                    "progress": 0.05,
+                    "log": f"警告：資料夾內的 pack.mcmeta 已修正：{problem}",
+                }
 
             # Write pack.png from folder if exists, otherwise from UI
             if pack_png_source:
@@ -539,7 +670,11 @@ def bundle_outputs_generator(
 
             for entry in os.listdir(input_root_dir):
                 full_path = os.path.join(input_root_dir, entry)
-                if os.path.isfile(full_path) and not _is_artifact(full_path, exclude):
+                if (
+                    os.path.isfile(full_path)
+                    and not _is_pack_file(full_path)
+                    and not _is_artifact(full_path, exclude)
+                ):
                     archive_name = entry
                     if archive_name in seen_files:
                         base, ext = os.path.splitext(archive_name)
@@ -574,7 +709,9 @@ def bundle_outputs_generator(
                         continue
 
                     if os.path.isfile(extra_path):
-                        if _is_artifact(extra_path, exclude):
+                        if _is_pack_file(extra_path) or _is_artifact(
+                            extra_path, exclude
+                        ):
                             continue
                         file_name = os.path.basename(extra_path)
                         archive_name = file_name
@@ -611,7 +748,11 @@ def bundle_outputs_generator(
                                 log_debug(
                                     f"額外資料夾 '{parent_name}/{entry}': +{count} 個檔案"
                                 )
-                            elif os.path.isfile(src) and not _is_artifact(src, exclude):
+                            elif (
+                                os.path.isfile(src)
+                                and not _is_pack_file(src)
+                                and not _is_artifact(src, exclude)
+                            ):
                                 archive_name = entry
                                 if archive_name in seen_files:
                                     base, ext = os.path.splitext(archive_name)
@@ -631,7 +772,7 @@ def bundle_outputs_generator(
 
         with zipfile.ZipFile(tmp_zip_path) as check:
             check.namelist()  # 中央目錄必須可讀，才允許替換正式 ZIP
-        os.replace(tmp_zip_path, output_zip_path)
+        replace_with_retry(tmp_zip_path, output_zip_path)
         committed = True
         state_warning = None
         if fingerprint is not None:

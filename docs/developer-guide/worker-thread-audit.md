@@ -136,7 +136,7 @@ merge 的取消檢查點（`merge_service`，經 `raise_if_cancelled()`；`Pipel
 
 - `load_config()`／`load_config_shared()`：有檔案簽名快取，handler 內每次只 2 次 `stat`。對話框初始化、`PipelineConfig` 建構使用。
 - `config_view` 存檔：單一設定檔寫入。
-- 一鍵／打包對話框的 `_load_version_data()`：讀隨程式附帶的小型 JSON（`resource_pack_version.json`）。
+- 一鍵／打包對話框與打包頁的版本換算：`pack_format_lookup.load_table()` 首次呼叫讀隨程式附帶的小型 JSON（`pack_format_table.json`），之後走快取。
 - 快取頁 `_load_shard_entry`：僅在記憶體快取找不到該筆時才 fallback 讀分片（LRU 只留最近 2 個）；正常路徑由 `cache_get_entry_service` 提供。
 - `icon_preview_row.LangItemRow` 未提供 `prepared_icon` 時的同步計算：**只剩沒有 event loop 的測試替身路徑**；正式路徑一律先 `prepare_row_icon`。
 - 對話框 `os.path.isdir` 之類的單次 `stat` 驗證。

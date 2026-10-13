@@ -18,8 +18,8 @@ PipelineView（`app/views/pipeline/pipeline_view.py`，組版／事件委派／�
 | `pipeline_extract_dialog.py` | `open_extract_dialog(...)` 抽取參數對話框 |
 | `pipeline_merge_dialog.py` | `open_merge_dialog(...)` 語系比對參數對話框 |
 | `pipeline_translate_dialog.py` | `open_translate_dialog(...)` 翻譯參數對話框 |
-| `pipeline_bundle_dialog.py` | `open_bundle_dialog(...)` 打包參數對話框（含 `_load_version_data()`） |
-| `pipeline_one_click_dialog.py` | `open_one_click_dialog(...)` 一鍵製作參數對話框（含 `_load_version_data()`） |
+| `pipeline_bundle_dialog.py` | `open_bundle_dialog(...)` 打包參數對話框（版本輸入框由 `pipeline_forms.build_version_input` 建立） |
+| `pipeline_one_click_dialog.py` | `open_one_click_dialog(...)` 一鍵製作參數對話框（步驟 4 的版本輸入框同上） |
 | `pipeline_forms.py` | 對話框共用的表單狀態（`ExtractFormState` 等）與 `build_*_form` 表單建構 |
 | `pipeline_one_click_bundle_widgets.py` | 一鍵製作步驟 4（打包）的版本與輸出控制項 |
 

@@ -13,7 +13,17 @@ import shutil
 import traceback
 
 from app.services_impl.logging_service import GLOBAL_LOG_LIMITER
-from translation_tool.core.output_bundler import bundle_outputs_generator
+from translation_tool.core.output_bundler import (
+    DEFAULT_OUTPUT_ZIP_NAME,  # noqa: F401 - View 由此取用
+    bundle_outputs_generator,
+    find_source_pack_files,  # noqa: F401 - View 由此取用
+    normalize_output_zip_name,  # noqa: F401 - View 由此取用
+    preview_pack_mcmeta,  # noqa: F401 - View 由此取用
+)
+from translation_tool.core.pack_mcmeta import (
+    DEFAULT_PACK_FORMAT,
+    pack_description_text,  # noqa: F401 - View 由此取用
+)
 from translation_tool.core.patchouli_compat import find_old_nbt_item_files
 
 logger = logging.getLogger(__name__)
@@ -259,8 +269,8 @@ def run_bundling_service(
     input_root_dir: str,
     output_zip_path: str,
     description: str = "",
-    min_format: int = 0,
-    max_format: int = 0,
+    pack_format: int = DEFAULT_PACK_FORMAT,
+    max_pack_format: int | None = None,
     pack_image_path: str | None = None,
     extra_folders: list[str] | None = None,
     force_rebuild: bool = False,
@@ -271,8 +281,8 @@ def run_bundling_service(
             input_root_dir,
             output_zip_path,
             description=description,
-            min_format=min_format,
-            max_format=max_format,
+            pack_format=pack_format,
+            max_pack_format=max_pack_format,
             pack_image_path=pack_image_path,
             extra_folders=extra_folders,
             force_rebuild=force_rebuild,

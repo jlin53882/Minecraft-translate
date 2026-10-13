@@ -151,47 +151,17 @@ def test_bundler_mcmeta_preview_matches_what_the_bundler_writes():
     import json
 
     from app.views.bundler_view import BundlerView
+    from translation_tool.core.pack_mcmeta import build_pack_mcmeta
 
     view = BundlerView(mock_page(), mock_filepicker())
-    version = next(iter(view.version_data))
-    view._select_version(version)
+    view.version_field.value = "1.21.1"
     view.description_field.value = "§a繁體中文"
     view._update_preview()
     data = json.loads(view.mcmeta_text())
-    info = view.version_data[version]
-    assert data == {
-        "pack": {
-            "description": "§a繁體中文",
-            "min_format": str(info["min_format"]),
-            "max_format": str(info["max_format"]),
-        }
-    }
+    assert data == build_pack_mcmeta("§a繁體中文", 34)
+    assert isinstance(data["pack"]["pack_format"], int)
     assert view.mcmeta_view.value == view.mcmeta_text()
     assert view.preview_title.spans[0].text == "繁體中文"
-
-
-def test_bundler_format_range_labels():
-    from app.views.bundler_view import BundlerView
-
-    assert (
-        BundlerView._format_range({"min_format": 9, "max_format": 15}) == "format 9–15"
-    )
-    assert BundlerView._format_range({"min_format": 3, "max_format": 3}) == "format 3"
-    assert BundlerView._format_range({}) == ""
-
-
-def test_bundler_version_toggle_updates_icon_and_dropdown():
-    from app.views.bundler_view import BundlerView
-
-    view = BundlerView(mock_page(), mock_filepicker())
-    view._toggle_version_expand(None)
-    assert view.version_dropdown_container_ref.visible is True
-    assert view._version_toggle_icon.name == ft.Icons.EXPAND_LESS
-    version = next(iter(view.version_data))
-    view._select_version(version)
-    assert view.version_dropdown_container_ref.visible is False
-    assert view._version_toggle_label.value == version
-    assert view._version_toggle_format.value.startswith("format")
 
 
 def test_bundler_missing_image_shows_placeholder():
