@@ -31,7 +31,12 @@ STATE_TONES = {
     "manual": "ench",
     "ok": "dia",
 }
-KIND_LABELS = {"lang": "語言檔", "patchouli": "Patchouli 手冊"}
+KIND_LABELS = {
+    "lang": "語言檔",
+    "patchouli": "Patchouli 手冊",
+    "guide": "指南文字",
+    "advancement": "進度文字",
+}
 
 
 def kind_label(kind: str) -> str:

@@ -14,17 +14,23 @@
 
 from __future__ import annotations
 
+import json
 import zipfile
 from collections.abc import Sequence
 
 from translation_tool.core.text_sniffer import (
     VANILLA_NON_TEXT_DIRS,
     is_project_doc_name,
+    looks_like_advancement,
     looks_like_book_json,
     sniff_text_file,
     split_locale,
 )
-from translation_tool.translation_db.schema import KIND_GUIDE, KIND_PATCHOULI
+from translation_tool.translation_db.schema import (
+    KIND_ADVANCEMENT,
+    KIND_GUIDE,
+    KIND_PATCHOULI,
+)
 from translation_tool.utils.zip_safety import (
     ArchiveBudgetError,
     ZipReadBudget,
@@ -46,6 +52,8 @@ def _candidates(names: Sequence[str], claimed: set[str]) -> dict[tuple[str, str]
         low = name.lower()
         if name in claimed or not low.endswith((".json", ".md", ".txt")):
             continue
+        if low.rsplit("/", 1)[-1] == "book.json":
+            continue  # 書本根設定：資源包能否覆寫尚未確認，不處理
         parts = name.split("/")
         if len(parts) < 4 or parts[0].lower() not in ("assets", "data"):
             continue
@@ -60,22 +68,32 @@ def _candidates(names: Sequence[str], claimed: set[str]) -> dict[tuple[str, str]
     return found
 
 
-def _passes(zf: zipfile.ZipFile, budget: ZipReadBudget, member: str) -> bool:
-    """抽樣檔案是否像手冊／指南。"""
+def _kind_of(zf: zipfile.ZipFile, budget: ZipReadBudget, member: str) -> str | None:
+    """抽樣檔案像什麼：手冊／進度（JSON）或指南（文字）；都不是回傳 None。"""
     raw = read_limited(zf, member, budget=budget)
     if member.lower().endswith(".json"):
-        import json
-
         try:
             data = json.loads(raw.decode("utf-8-sig"), strict=False)
         except (UnicodeDecodeError, ValueError):
-            return False
-        return looks_like_book_json(data, member.split("/")[2:])
+            return None
+        if looks_like_advancement(data):
+            return KIND_ADVANCEMENT
+        if looks_like_book_json(data, member.split("/")[2:]):
+            return KIND_PATCHOULI
+        return None
     try:
         text = raw.decode("utf-8-sig")
     except UnicodeDecodeError:
-        return False
-    return sniff_text_file(text, member[member.rfind(".") :], member) is not None
+        return None
+    if sniff_text_file(text, member[member.rfind(".") :], member) is not None:
+        return KIND_GUIDE
+    return None
+
+
+def _drop_advancement_root(neutral: str) -> str:
+    """進度資料夾在 1.21 由 ``advancements`` 改名 ``advancement``；去掉它，跨版本才是同一個鍵。"""
+    head, _, rest = neutral.partition("/")
+    return rest if rest and head.lower() in ("advancement", "advancements") else neutral
 
 
 def sniffed_groups(
@@ -98,12 +116,17 @@ def sniffed_groups(
             files.sort()
             step = max(1, len(files) // SAMPLES_PER_UNIT)
             samples = files[::step][:SAMPLES_PER_UNIT]
-            if not any(_passes(zf, budget, m["en_us"]) for _n, m in samples):
+            kind = next(
+                (k for _n, m in samples if (k := _kind_of(zf, budget, m["en_us"]))),
+                None,
+            )
+            if kind is None:
                 continue
-            kind = KIND_PATCHOULI if ext == ".json" else KIND_GUIDE
             for neutral, members in files:
                 if kind == KIND_GUIDE and is_project_doc_name(neutral):
                     continue
+                if kind == KIND_ADVANCEMENT:
+                    neutral = _drop_advancement_root(neutral)
                 groups[(kind, mod_id, neutral)] = members
     except (ZipSizeError, ArchiveBudgetError):
         pass  # 預算用盡：保留已判斷的結果，不影響其他匯入

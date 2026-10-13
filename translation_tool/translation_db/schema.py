@@ -24,6 +24,7 @@ SCHEMA_VERSION = 5
 KIND_LANG = "lang"
 KIND_PATCHOULI = "patchouli"
 KIND_GUIDE = "guide"  # 指南（.md／.txt 文字檔，依段落切成條目）
+KIND_ADVANCEMENT = "advancement"  # 進度的顯示文字（data/<模組>/advancement(s)/）
 
 # 來源代碼（寫入資料庫後不可更動）
 SRC_AI = 0

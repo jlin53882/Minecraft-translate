@@ -27,6 +27,7 @@ from translation_tool.core.patchouli_compat import (
     find_patchouli_marker_issue,
     find_patchouli_mismatch,
 )
+from translation_tool.core.text_sniffer import advancement_texts
 from translation_tool.core.translatable_extractor import extract_translatables
 from translation_tool.plugins.md.md_extract_qa import extract_blocks
 from translation_tool.translation_db.identity import (
@@ -37,7 +38,11 @@ from translation_tool.translation_db.identity import (
 )
 from translation_tool.translation_db.models import IngestStats, ScanItem
 from translation_tool.translation_db.repository import TranslationDB
-from translation_tool.translation_db.schema import KIND_GUIDE, SRC_CUSTOM
+from translation_tool.translation_db.schema import (
+    KIND_ADVANCEMENT,
+    KIND_GUIDE,
+    SRC_CUSTOM,
+)
 from translation_tool.translation_db.sniff_groups import sniffed_groups
 from translation_tool.utils.bounded_executor import bounded_as_completed
 from translation_tool.utils.config_manager import load_config
@@ -244,6 +249,13 @@ def extract_all_strings(data: Any, *, is_lang: bool) -> dict[str, str]:
     return found
 
 
+def _lang_rank(member: str) -> int:
+    """同一個語系有多個檔案時的取捨：新式 JSON 優先於舊式 ``.lang``，``assets`` 優先於 ``data``。"""
+    return (2 if member.lower().endswith(".lang") else 0) + (
+        1 if member.startswith("data/") else 0
+    )
+
+
 def _group_members(
     names: Sequence[str], options: ScanOptions, dir_names: Sequence[str]
 ) -> dict[tuple[str, str, str], dict[str, str]]:
@@ -255,11 +267,15 @@ def _group_members(
         ident: FileIdentity | None = classify_member(name, dir_names)
         if ident is None:
             continue
-        if ident.kind in ("patchouli", KIND_GUIDE) and not options.include_patchouli:
+        if (
+            ident.kind in ("patchouli", KIND_GUIDE, KIND_ADVANCEMENT)
+            and not options.include_patchouli
+        ):
             continue
-        groups.setdefault((ident.kind, ident.mod_id, ident.file_key), {})[
-            ident.lang
-        ] = name
+        members = groups.setdefault((ident.kind, ident.mod_id, ident.file_key), {})
+        previous = members.get(ident.lang)
+        if previous is None or _lang_rank(name) < _lang_rank(previous):
+            members[ident.lang] = name
     return groups
 
 
@@ -268,7 +284,27 @@ def _read_json_member(
 ) -> dict | None:
     if member is None:
         return None
-    return _load_json(read_limited(zf, member, budget=budget))
+    raw = read_limited(zf, member, budget=budget)
+    if member.lower().endswith(".lang"):
+        return _load_legacy_lang(raw)
+    return _load_json(raw)
+
+
+def _load_legacy_lang(data: bytes) -> dict | None:
+    """舊版 ``key=value`` 語言檔；空行與 ``#``／``//`` 開頭的註解略過，值逐字保留。"""
+    try:
+        text = data.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        return None
+    entries: dict[str, str] = {}
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith(("#", "//")):
+            continue
+        key, sep, value = line.partition("=")
+        if sep and key.strip():
+            entries[key.strip()] = value
+    return entries or None
 
 
 def _drop_stale_book(zh: dict | None, en: dict, member: str | None) -> dict | None:
@@ -365,6 +401,30 @@ def _guide_items(
     return out
 
 
+def _advancement_items(
+    zf: zipfile.ZipFile,
+    budget: ZipReadBudget,
+    ident_key: tuple[str, str, str],
+    members: dict[str, str],
+) -> list[ScanItem]:
+    """進度：``display.title``／``display.description`` 的字面文字（進度檔沒有語系變體）。"""
+    kind, mod_id, file_key = ident_key
+    data = _read_json_member(zf, budget, members.get("en_us"))
+    ident = FileIdentity(kind, mod_id, file_key, "en_us")
+    return [
+        ScanItem(
+            kind=kind,
+            mod_id=mod_id,
+            key=ident.item_key(path),
+            en_us=text,
+            zh_tw="",
+            zh_cn="",
+            source=None,
+        )
+        for path, text in advancement_texts(data).items()
+    ]
+
+
 def _items_for_group(
     zf: zipfile.ZipFile,
     budget: ZipReadBudget,
@@ -375,6 +435,8 @@ def _items_for_group(
     kind, mod_id, file_key = ident_key
     if kind == KIND_GUIDE:
         return _guide_items(zf, budget, ident_key, members, options)
+    if kind == KIND_ADVANCEMENT:
+        return _advancement_items(zf, budget, ident_key, members)
     is_lang = kind == "lang"
     en_member = members.get("en_us")
     en = _read_json_member(zf, budget, en_member)

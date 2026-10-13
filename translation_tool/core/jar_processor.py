@@ -20,6 +20,7 @@ from translation_tool.core.jar_processor_preview import (
     generate_preview_report,
     preview_extraction_generator_impl,
 )
+from translation_tool.core.jar_sniff_extract import extract_sniffed_book_files
 from translation_tool.utils.config_manager import load_config
 from translation_tool.utils.log_unit import log_error
 
@@ -221,6 +222,27 @@ def extract_lang_files_generator(
     )
 
 
+def _sniff_book_phase(
+    mods_dir: str,
+    output_dir: str,
+    name_regex: re.Pattern,
+    lang_codes: list[str] | None,
+    skip_zh_cn: bool,
+) -> Generator[dict[str, Any], None, None]:
+    """名稱規則之後的補充：依內容辨識手冊／指南（失敗只記錄，不影響已完成的提取）。"""
+    codes = lang_codes if lang_codes is not None else get_lang_codes()
+    try:
+        yield from extract_sniffed_book_files(
+            find_jar_files(mods_dir),
+            output_dir,
+            lambda name: bool(name_regex.search(name)),
+            lang_codes=codes,
+            skip_zh_cn=skip_zh_cn,
+        )
+    except Exception as exc:  # noqa: BLE001 - 補充階段失敗不影響已提取的檔案
+        log_error(f"[Book] 依內容辨識提取失敗：{exc!r}", exc_info=True)
+
+
 def extract_book_files_generator(
     mods_dir: str,
     output_dir: str,
@@ -246,6 +268,9 @@ def extract_book_files_generator(
         output_dir,
         book_regex,
         "Patchouli Book",
+    )
+    yield from _sniff_book_phase(
+        mods_dir, output_dir, book_regex, lang_codes, skip_zh_cn
     )
 
 
@@ -322,6 +347,10 @@ def extract_dual_files_generator(
     except Exception as e:  # noqa: BLE001 - 錯誤已記錄或回報給呼叫端，不中斷整批流程
         log_error(f"[Dual] Book 提取失敗：{e!r}", exc_info=True)
         book_error = str(e)
+    for update in _sniff_book_phase(
+        mods_dir, output_dir, BOOK_PATH_REGEX_DUAL_STRUCTURE, lang_codes, skip_zh_cn
+    ):
+        yield {**update, "phase": "book"}
     # Phase 3 fix: book phase 結束後補一個 combined yield(無 phase,不污染 sub-dict),
     # 確保 run_extraction_loop 頂層 stats["success"] 是 lang+book 合計。
     if lang_stats and last_book_stats:

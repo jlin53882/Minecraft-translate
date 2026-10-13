@@ -27,7 +27,7 @@ from translation_tool.utils.log_unit import log_debug
 
 DEFAULT_PATCHOULI_DIRS: tuple[str, ...] = DEFAULT_BOOK_DIRS
 
-_LANG_FILE = re.compile(r"^(en_us|zh_tw|zh_cn)\.json$", re.IGNORECASE)
+_LANG_FILE = re.compile(r"^(en_us|zh_tw|zh_cn)\.(json|lang)$", re.IGNORECASE)
 _LANG_DIR = re.compile(r"^_?(en_us|zh_tw|zh_cn)$", re.IGNORECASE)
 # 指南語系資料夾：``_zh_tw``（底線開頭，允許不加底線）。原文通常不放在語系資料夾裡
 _GUIDE_LANG_DIR = re.compile(r"^_?(en_us|zh_tw|zh_cn)$", re.IGNORECASE)
@@ -73,11 +73,10 @@ def classify_parts(
     """由「以 assets / data 開頭」的路徑片段判斷身分；不是語言檔或書籍檔時回傳 None。"""
     if len(parts) < 4 or parts[0].lower() not in _ROOT_DIRS:
         return None
-    root = parts[0].lower()
     mod_id = parts[1]
     name = parts[-1]
 
-    if root == "assets" and len(parts) == 4 and parts[2] == "lang":
+    if len(parts) == 4 and parts[2] == "lang":
         match = _LANG_FILE.match(name)
         if match:
             return FileIdentity(KIND_LANG, mod_id, "", match.group(1).lower())

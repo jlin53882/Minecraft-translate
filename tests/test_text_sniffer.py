@@ -171,8 +171,8 @@ def test_classify_book_string_by_value_shape(value, expected):
             ["a"],
             True,
         ),
-        ({"landing_text": "Hello there"}, ["book.json"], True),
-        ({"name": "B", "creative_tab": "t"}, ["book.json"], True),
+        ({"landing_text": "Hello there"}, ["book.json"], False),
+        ({"name": "B", "creative_tab": "t"}, ["book.json"], False),
         ({"name": "Cat", "icon": "x"}, ["categories", "c.json"], True),
         ({"components": [{"type": "x"}]}, ["templates", "t.json"], True),
         ({"text": [{"text": "A"}], "effects": []}, ["modifiers", "m.json"], True),
@@ -207,7 +207,7 @@ def test_scan_finds_book_json_without_any_directory_setting(tmp_path):
     )
     result = scan_jar(jar, ScanOptions(version="1.21.1"), dir_names=())
     keys = {i.key.split("#")[0] for i in result.items if i.kind == "patchouli"}
-    assert keys == {"whatever/book.json", "whatever/entries/basics.json"}
+    assert keys == {"whatever/entries/basics.json"}  # book.json 不處理
 
 
 def test_sniffing_does_not_fail_the_jar_when_the_read_budget_runs_out(tmp_path):
@@ -222,3 +222,177 @@ def test_sniffing_does_not_fail_the_jar_when_the_read_budget_runs_out(tmp_path):
     result = scan_jar(jar, ScanOptions(version="1.21.1"), dir_names=())
     assert not result.error
     assert any(i.kind == "lang" for i in result.items)
+
+
+def test_legacy_lang_files_are_imported_and_json_wins_over_lang(tmp_path):
+    jar = _jar(
+        tmp_path / "m.jar",
+        {
+            "assets/m/lang/en_US.lang": "# comment\nitem.m.a=Alpha Item\ntile.m.b=Beta Block\n\n",
+            "assets/m/lang/zh_CN.lang": "item.m.a=阿尔法物品\n",
+            "assets/old/lang/en_us.lang": "item.old.a=Old\n",
+            "assets/old/lang/en_us.json": '{"item.old.a": "Old From Json"}',
+            "data/dl/lang/en_us.json": '{"command.dl.hello": "Hello there friend"}',
+        },
+    )
+    result = scan_jar(jar, ScanOptions(version="1.12.2"), dir_names=())
+    rows = {(i.mod_id, i.key): (i.en_us, i.zh_cn) for i in result.items}
+    assert rows[("m", "item.m.a")] == ("Alpha Item", "阿尔法物品")
+    assert rows[("m", "tile.m.b")][0] == "Beta Block"
+    assert rows[("old", "item.old.a")][0] == "Old From Json"
+    assert rows[("dl", "command.dl.hello")][0] == "Hello there friend"
+
+
+def test_advancement_literal_display_text_is_imported(tmp_path):
+    import json
+
+    literal = {
+        "criteria": {"x": {"trigger": "minecraft:tick"}},
+        "display": {
+            "title": {"text": "Stone Age Begins"},
+            "description": "Mine your first stone block.",
+            "icon": {"id": "minecraft:stone"},
+        },
+    }
+    keyed = {
+        "criteria": {"x": {"trigger": "minecraft:tick"}},
+        "display": {
+            "title": {"translate": "adv.m.a.title"},
+            "description": {"translate": "adv.m.a.desc"},
+        },
+    }
+    recipe_unlock = {"criteria": {"has": {"trigger": "minecraft:inventory_changed"}}}
+    jar = _jar(
+        tmp_path / "m.jar",
+        {
+            "data/m/advancement/story/start.json": json.dumps(literal),
+            "data/m/advancement/story/keyed.json": json.dumps(keyed),
+            "data/m/advancement/recipes/a.json": json.dumps(recipe_unlock),
+        },
+    )
+    result = scan_jar(jar, ScanOptions(version="1.21.1"), dir_names=())
+    rows = {i.key: i.en_us for i in result.items if i.kind == "advancement"}
+    assert rows == {
+        "story/start.json#display.title.text": "Stone Age Begins",
+        "story/start.json#display.description": "Mine your first stone block.",
+    }
+
+
+def test_book_extraction_also_pulls_content_detected_books_and_guides(tmp_path):
+    import json
+
+    from translation_tool.core.jar_processor import extract_book_files_generator
+
+    entry = {
+        "name": "Basics",
+        "pages": [{"type": "patchouli:text", "text": "Plain English text here."}],
+    }
+    mods = tmp_path / "mods"
+    mods.mkdir()
+    _jar(
+        mods / "demo-1.0.jar",
+        {
+            "assets/demo/anyname/en_us/entries/basics.json": json.dumps(entry),
+            "assets/demo/guides/demo/guide/wireless.md": GUIDE,
+            "assets/demo/guides/demo/guide/_zh_cn/wireless.md": "# 无线\n\n终端让你远程访问。\n",
+            "assets/demo/textures/readme.txt": "This folder holds the textures of the mod.",
+        },
+    )
+    out = tmp_path / "out"
+    list(
+        extract_book_files_generator(str(mods), str(out), lang_codes=["en_us", "zh_cn"])
+    )
+    got = {p.relative_to(out).as_posix() for p in out.rglob("*") if p.is_file()}
+    assert "assets/demo/anyname/en_us/entries/basics.json" in got
+    assert "assets/demo/guides/demo/guide/wireless.md" in got
+    assert "assets/demo/guides/demo/guide/_zh_cn/wireless.md" in got
+    assert not any("readme" in g for g in got)
+
+
+def test_find_patchouli_json_detects_books_by_content_outside_configured_dirs(tmp_path):
+    import json
+
+    from translation_tool.core.translatable_extractor import find_patchouli_json
+
+    entry = {"name": "E", "pages": [{"type": "patchouli:text", "text": "Hello there."}]}
+    (tmp_path / "assets/m/anyname/en_us/entries").mkdir(parents=True)
+    (tmp_path / "assets/m/anyname/en_us/entries/e.json").write_text(json.dumps(entry))
+    (tmp_path / "assets/m/anyname/book.json").write_text(
+        json.dumps({"landing_text": "hi"})
+    )
+    (tmp_path / "assets/m/lang").mkdir(parents=True)
+    (tmp_path / "assets/m/lang/en_us.json").write_text('{"a": "b"}')
+    (tmp_path / "demo_extracted/data/m/books/en_us").mkdir(parents=True)
+    (tmp_path / "demo_extracted/data/m/books/en_us/f.json").write_text(
+        json.dumps(entry)
+    )
+
+    found = {p.relative_to(tmp_path).as_posix() for p in find_patchouli_json(tmp_path)}
+    assert found == {
+        "assets/m/anyname/en_us/entries/e.json",
+        "demo_extracted/data/m/books/en_us/f.json",
+    }
+    # 明確指定資料夾名稱時只用名稱規則
+    assert find_patchouli_json(tmp_path, dir_names=["nothing"]) == []
+
+
+def test_lm_directory_translation_translates_guides_and_writes_zh_tw_folder(
+    tmp_path, monkeypatch
+):
+    from translation_tool.core import lm_translator
+
+    root = tmp_path / "in"
+    guide = root / "assets/demo/ae2guide/wireless.md"
+    guide.parent.mkdir(parents=True)
+    guide.write_text(
+        "---\nnavigation:\n  title: Wireless\n---\n\n# Wireless\n\n"
+        "Terminals reach the network from far away.\n\n"
+        '<ItemLink id="demo:terminal" />\n',
+        encoding="utf-8",
+    )
+    (guide.parent / "_ru_ru").mkdir()
+    (guide.parent / "_ru_ru/wireless.md").write_text("# Privet\n\nTekst tut.\n")
+
+    def fake_translate(batch, total=None):
+        for item in batch:
+            item["text"] = "譯：" + item["text"]
+        return batch, "DONE"
+
+    monkeypatch.setattr(lm_translator, "validate_api_keys", lambda: None)
+    monkeypatch.setattr(lm_translator, "reload_translation_cache", lambda: None)
+    monkeypatch.setattr(lm_translator, "get_cache_dict_ref", lambda _t: {})
+    monkeypatch.setattr(lm_translator, "translate_batch_smart", fake_translate)
+    monkeypatch.setattr(lm_translator, "add_to_cache", lambda *a, **k: None)
+    monkeypatch.setattr(lm_translator, "save_translation_cache", lambda *a, **k: None)
+
+    out = tmp_path / "out"
+    list(
+        lm_translator.translate_directory_generator(
+            str(root), str(out), dry_run=False, use_translation_db=False
+        )
+    )
+    written = out / "assets/demo/ae2guide/_zh_tw/wireless.md"
+    assert written.exists()
+    text = written.read_text(encoding="utf-8")
+    assert "譯：Terminals reach the network from far away." in text
+    assert '<ItemLink id="demo:terminal" />' in text
+    assert text.startswith("---\nnavigation:\n  title: Wireless\n---")
+    assert not (out / "assets/demo/ae2guide/_zh_tw/_ru_ru").exists()
+
+
+def test_finish_guide_item_keeps_source_when_tags_or_links_change():
+    from translation_tool.core.guide_translation import finish_guide_item
+    from translation_tool.plugins.shared.rich_text_shield import shield_text
+
+    source = 'See <ItemLink id="demo:a" /> and [docs](https://x.y/z).'
+    ok = {"text": source.replace("See", "見"), "source_text": source}
+    ok["_shielded"] = shield_text(source)
+    ok["_shielded"].shields.clear()
+    finish_guide_item(ok)
+    assert ok["text"].startswith("見") and not ok.get("_untranslated")
+
+    bad = {"text": source.replace("demo:a", "demo:b"), "source_text": source}
+    bad["_shielded"] = shield_text(source)
+    bad["_shielded"].shields.clear()
+    finish_guide_item(bad)
+    assert bad["text"] == source and bad["_untranslated"] is True

@@ -17,6 +17,12 @@ from typing import Any
 import orjson as json
 
 import translation_tool.utils.cache_manager as _cache_manager
+from translation_tool.core.guide_translation import (
+    finish_guide_item,
+    guide_output_rel,
+    is_guide_document,
+    render_guide,
+)
 from translation_tool.core.lm_config_rules import (
     validate_api_keys,
     value_fully_translated,
@@ -338,6 +344,11 @@ def _write_directory_outputs(
     """寫出一個或多個已完成 batch 觸及的檔案。"""
     for file_name in touched_files:
         src = Path(file_name)
+        if is_guide_document(file_cache[file_name]):
+            dst = out_root / guide_output_rel(src.relative_to(root), root)
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            dst.write_text(render_guide(file_cache[file_name]), encoding="utf-8")
+            continue
         rel = map_lang_output_path(src.relative_to(root))
         if export_lang and "lang" in src.parts:
             dst = (out_root / rel).with_suffix(".lang")
@@ -588,7 +599,10 @@ def _run_directory_translation(
     def translate_batch(batch: list[dict[str, Any]], batch_total: int | None):
         if (should_cancel is not None and should_cancel()) or is_cancelled():
             raise TaskCancelled()
-        return translate_batch_smart(batch, total=batch_total)
+        translated, status = translate_batch_smart(batch, total=batch_total)
+        for item in translated or []:
+            finish_guide_item(item)  # 指南段落：還原行內保護、檢查標籤與連結
+        return translated, status
 
     result = run_translator_skeleton(
         remaining,

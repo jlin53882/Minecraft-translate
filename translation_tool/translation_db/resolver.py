@@ -119,6 +119,10 @@ class TranslationResolver:
 
 def item_identity(item: dict[str, Any], root: str | Path):
     """翻譯項目（``file`` / ``path`` / ``source_text``）→ ``(類型, 模組, 鍵值, 原文)``；不適用回傳 None。"""
+    hinted = item.get("db_ident")  # 掃描時已知身分（依內容辨識的指南）
+    if hinted is not None:
+        en = item.get("source_text") or ""
+        return (*hinted, en) if en else None
     ident = classify_file(item.get("file") or "", root)
     if ident is None or ident.lang != "en_us":
         return None

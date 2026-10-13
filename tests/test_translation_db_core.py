@@ -69,7 +69,9 @@ def test_classify_lang_and_patchouli_members():
     lang = classify_member("assets/foo/lang/en_us.json")
     assert (lang.kind, lang.mod_id, lang.lang) == (KIND_LANG, "foo", "en_us")
     assert classify_member("assets/foo/lang/ZH_TW.json").lang == "zh_tw"
-    assert classify_member("assets/foo/lang/en_us.lang") is None
+    legacy = classify_member("assets/foo/lang/en_US.lang")
+    assert (legacy.kind, legacy.lang) == (KIND_LANG, "en_us")
+    assert classify_member("data/foo/lang/en_us.json").kind == KIND_LANG
     assert classify_member("assets/foo/textures/a.json") is None
 
     book = classify_member("assets/foo/patchouli_books/guide/en_us/entries/a/b.json")

@@ -320,3 +320,23 @@ class TestPatchouliOutputPathMapping:
         assert map_lang_output_path(src) == src
         src = Path("assets/m/patchouli_books/b/entries/en_us/e.json")
         assert map_lang_output_path(src) == src
+
+
+class TestAnyBookDirectoryOutputPathMapping:
+    def test_en_us_slot_in_any_folder_becomes_zh_tw(self):
+        from translation_tool.core.translation_path_writer import map_lang_output_path
+
+        src = Path("assets/m/manual/en_us/a.txt")
+        assert map_lang_output_path(src) == Path("assets/m/manual/zh_tw/a.txt")
+        src = Path("assets/m/guides/m/guide/en_us/entries/e.json")
+        assert map_lang_output_path(src) == Path(
+            "assets/m/guides/m/guide/zh_tw/entries/e.json"
+        )
+        src = Path("assets/m/ae2guide/_en_us/x.md")
+        assert map_lang_output_path(src) == Path("assets/m/ae2guide/_zh_tw/x.md")
+
+    def test_files_without_a_locale_folder_stay(self):
+        from translation_tool.core.translation_path_writer import map_lang_output_path
+
+        src = Path("assets/m/books/chapters/a.json")
+        assert map_lang_output_path(src) == src

@@ -146,6 +146,12 @@ Mod DB 批次機翻預設只處理沒有生效譯文的條目，並透過 `write
 不必設定手冊資料夾：掃描 jar 時，設定的資料夾名稱（`lm_translator.patchouli.dir_names`，任何深度的資料夾名稱都算，例如 `guide`、`ae2guide`）之外，會依內容再找出手冊與指南——JSON 有 `pages`／`landing_text`／Patchouli 規格資料夾（`categories`、`templates`）結構，`.md`／`.txt` 是英文敘述文字（有 front matter，或段落像句子）。判斷以資料夾為單位抽樣讀取，有獨立的讀取上限，用盡時只停止判斷，不會讓整個 jar 失敗。`textures`、`models`、`worldgen`、`recipe` 等 Minecraft 規格的資料夾、`README`／`CHANGELOG` 類文件與其他語系資料夾（`ja_jp`、`_ru_ru`）不會被當成原文。
 指南（`.md`／`.txt`）以段落為單位匯入，鍵值是 `檔案路徑#段落序號`；`_zh_tw`／`_zh_cn` 資料夾裡的譯文在段落數相同時才配對。
 
+### 其他會匯入的內容
+
+- 舊版 `key=value` 語言檔（`assets/<模組>/lang/en_US.lang`、`zh_CN.lang`…）：與 `.json` 語言檔同一個身分；同一個語系兩種格式都有時用 `.json`，`assets` 與 `data` 都有時用 `assets`。`data/<模組>/lang/<語系>.json` 也算語言檔。
+- 進度（`data/<模組>/advancement(s)/…`）：只匯入 `display.title`／`display.description` 寫成**字面文字**的進度（類型 `advancement`）；寫成 `{"translate": "鍵"}` 的由語言檔負責，沒有顯示文字的配方解鎖進度不匯入。鍵值不含 `advancement`／`advancements` 資料夾，跨版本是同一個鍵。
+- 書本根目錄的 `book.json` 不匯入：Patchouli 官方文件說明 `book.json` 必須放在原位，資源包能否覆寫它沒有確認。
+
 Patchouli 與 lang 走同一個流程，只是身分不同。FTB Quests / KubeJS / Markdown 不使用資料庫。
 
 ## 設定（`translation_db`）

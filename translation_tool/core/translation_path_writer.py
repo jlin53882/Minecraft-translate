@@ -14,6 +14,7 @@ def map_lang_output_path(src: Path) -> Path:
 
     - ``…/lang/en_us.json`` → ``…/lang/zh_tw.json``
     - ``…/patchouli_books/<書>/en_us/…`` → ``…/patchouli_books/<書>/zh_tw/…``
+    - 其他手冊資料夾 ``assets/<模組>/<資料夾>/…/en_us/…`` → 同路徑換成 ``zh_tw``
     """
     if src.name.lower() == "en_us.json" and "lang" in src.parts:
         return src.with_name("zh_tw.json")
@@ -22,6 +23,14 @@ def map_lang_output_path(src: Path) -> Path:
         locale_index = parts.index("patchouli_books") + 2  # 其後依序是書名、語系資料夾
         if locale_index < len(parts) - 1 and parts[locale_index].lower() == "en_us":
             parts[locale_index] = "zh_tw"
+            return Path(*parts)
+        return src
+    # 其他手冊／指南資料夾（名稱不限）：模組資料夾之後，第一個 ``en_us``／``_en_us`` 資料夾
+    # 換成 zh_tw，且它前面至少隔著一層資料夾（``assets/<模組>/<資料夾>/…/en_us/…``）
+    for index in range(3, len(parts) - 1):
+        segment = parts[index].lower()
+        if segment in ("en_us", "_en_us"):
+            parts[index] = "_zh_tw" if segment.startswith("_") else "zh_tw"
             return Path(*parts)
     return src
 

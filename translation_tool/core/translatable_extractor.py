@@ -7,18 +7,24 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from translation_tool.core.book_dirs import DEFAULT_BOOK_DIRS, find_book_dir_index
 from translation_tool.core.lm_config_rules import (
     is_value_translatable,
 )
-from translation_tool.core.text_sniffer import classify_book_string
+from translation_tool.core.text_sniffer import (
+    VANILLA_NON_TEXT_DIRS,
+    classify_book_string,
+    looks_like_book_json,
+)
 from translation_tool.utils.config_manager import load_config
 
 # Patchouli 結構性欄位：整個子樹只描述版面或方塊圖樣，沒有顯示文字。
 # 例如 ``multiblock.pattern`` 的列 ``" 0 "``，翻譯或削掉空白都會讓每列長度不一致，
 # 整本書載入失敗。
+_MAX_SNIFF_BYTES = 2 * 1024 * 1024
 NON_TEXT_PATCHOULI_KEYS = frozenset({"multiblock"})
 
 
@@ -39,6 +45,7 @@ def find_patchouli_json(root: Path, dir_names=None):
         .get("patchouli", {})
         .get("dir_names", list(DEFAULT_BOOK_DIRS))
     )
+    detect_by_content = dir_names is None
     if dir_names is None:
         dir_names = patchouli_dir_names
 
@@ -46,13 +53,39 @@ def find_patchouli_json(root: Path, dir_names=None):
     seen: set[Path] = set()
     for path in root.rglob("*.json"):
         parts = path.relative_to(root).parts
-        if len(parts) < 4 or parts[0] != "assets":
+        if (
+            len(parts) >= 4
+            and parts[0] == "assets"
+            and find_book_dir_index(parts, dir_names) is not None
+            and path not in seen
+        ):
+            seen.add(path)
+            files.append(path)
             continue
-        if find_book_dir_index(parts, dir_names) is not None and path not in seen:
+        if detect_by_content and _is_book_json_by_content(path, parts):
             seen.add(path)
             files.append(path)
 
     return files
+
+
+def _is_book_json_by_content(path: Path, parts: tuple[str, ...]) -> bool:
+    """資料夾名稱沒對上時，依內容判斷是不是手冊檔（提取階段放的 ``<模組>_extracted/`` 前綴會先去掉）。"""
+    if parts and parts[0].endswith("_extracted"):
+        parts = parts[1:]
+    if len(parts) < 4 or parts[0] not in ("assets", "data"):
+        return False
+    if parts[2].lower() in VANILLA_NON_TEXT_DIRS or parts[-1].lower() == "book.json":
+        return False
+    if len(parts) == 4 and parts[2] == "lang":
+        return False
+    try:
+        if path.stat().st_size > _MAX_SNIFF_BYTES:
+            return False
+        data = json.loads(path.read_bytes())
+    except (OSError, ValueError):
+        return False
+    return looks_like_book_json(data, parts[2:])
 
 
 def find_lang_json(root: Path):

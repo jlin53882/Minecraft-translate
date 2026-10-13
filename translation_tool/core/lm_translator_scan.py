@@ -12,6 +12,11 @@ from typing import Any
 
 import orjson as json
 
+from translation_tool.core.guide_translation import (
+    GuidePath,
+    find_guide_files,
+    load_guide,
+)
 from translation_tool.core.translatable_extractor import (
     extract_translatables,
     find_lang_json,
@@ -48,7 +53,7 @@ def scan_translatable_files(root: Path) -> tuple[list[Path], list[Path], list[Pa
     若掃描過程中發生錯誤，只 log warning 並繼續，回傳空結果。
     """
     try:
-        patchouli_files = find_patchouli_json(root)
+        patchouli_files = find_patchouli_json(root) + find_guide_files(root)
         lang_files = find_lang_json(root)
         files = patchouli_files + lang_files
         return patchouli_files, lang_files, files
@@ -76,6 +81,9 @@ def extract_items_parallel(
     def process_file_task(f: Path):
         try:
             raise_if_cancelled()
+            if isinstance(f, GuidePath):
+                doc, guide_items = load_guide(f)
+                return {"file_path": str(f), "data": doc, "items": guide_items}
             data = json.loads(f.read_bytes())
             raise_if_cancelled()
 

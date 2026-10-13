@@ -333,7 +333,7 @@ def looks_like_book_json(data: object, parts: Sequence[str]) -> bool:
     """依內容結構判斷一個 JSON 是不是手冊的書本／分類／條目檔。
 
     - 條目：有 ``pages`` 陣列，且裡面是帶 ``type`` 或文字欄位的頁面物件。
-    - 書本設定：有 ``landing_text``，或 ``name`` 搭配書本專屬欄位。
+    - 書本根目錄的 ``book.json`` 不在此判斷（資源包能否覆寫它尚未確認，所以不處理）。
     - 分類：位於 Patchouli 規格的 ``categories`` 資料夾，且有 ``name``。
     """
     if not isinstance(data, dict):
@@ -347,8 +347,6 @@ def looks_like_book_json(data: object, parts: Sequence[str]) -> bool:
             for p in pages_ok
         ):
             return True
-    if "landing_text" in data:
-        return True
     text = data.get("text")
     if (
         isinstance(text, list)
@@ -360,9 +358,37 @@ def looks_like_book_json(data: object, parts: Sequence[str]) -> bool:
         p.lower() == "templates" for p in parts[:-1]
     ):
         return True  # Patchouli 模板
-    if "name" in data and any(
-        k in data for k in ("creative_tab", "book_texture", "show_progress", "i18n")
-    ):
-        return True
     in_spec_dir = any(p.lower() in _BOOK_SPEC_DIRS for p in parts[:-1])
     return in_spec_dir and isinstance(data.get("name"), str)
+
+
+# ---------------------------------------------------------------------------
+# 進度（advancement）的顯示文字
+# ---------------------------------------------------------------------------
+
+
+def advancement_texts(data: object) -> dict[str, str]:
+    """進度 ``display.title``／``display.description`` 裡的**字面**文字：``{JSON 路徑: 文字}``。
+
+    寫成 ``{"translate": "鍵"}`` 的是語言檔的鍵，由語言檔負責，這裡不收。
+    """
+    if not isinstance(data, dict) or not isinstance(data.get("display"), dict):
+        return {}
+    found: dict[str, str] = {}
+    for field in ("title", "description"):
+        value = data["display"].get(field)
+        path = f"display.{field}"
+        if isinstance(value, dict) and isinstance(value.get("text"), str):
+            value, path = value["text"], f"{path}.text"
+        if isinstance(value, str) and classify_book_string(value) == "text":
+            found[path] = value
+    return found
+
+
+def looks_like_advancement(data: object) -> bool:
+    """有 ``criteria`` 且 ``display`` 帶字面文字的 JSON。"""
+    return (
+        isinstance(data, dict)
+        and isinstance(data.get("criteria"), dict)
+        and bool(advancement_texts(data))
+    )
