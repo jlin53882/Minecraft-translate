@@ -353,3 +353,77 @@ def test_bundler_view_extra_folders_list():
     view = BundlerView(page, mock_filepicker())
     assert view.extra_folders is not None
     assert isinstance(view.extra_folders, list)
+
+
+def _source_with_mcmeta(tmp_path, content: str):
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "pack.mcmeta").write_text(content, encoding="utf-8")
+    return src
+
+
+def test_preview_shows_source_pack_mcmeta_that_overrides_the_ui(tmp_path):
+    src = _source_with_mcmeta(
+        tmp_path, '{"pack":{"description":"來源","pack_format":15}}'
+    )
+    view = BundlerView(mock_page(), mock_filepicker())
+    view.version_field.value = "1.21.1"
+    view.root_dir_field.value = str(src)
+    view._update_preview()
+
+    assert json.loads(view.mcmeta_view.value)["pack"]["pack_format"] == 15
+    assert view.preview_format.value == "pack_format 15"
+    assert view.mcmeta_source_note.visible
+    assert "覆蓋" in view.mcmeta_source_note.value
+    assert str(src / "pack.mcmeta") in view.mcmeta_source_note.value
+
+
+def test_preview_shows_the_repaired_source_and_what_was_fixed(tmp_path):
+    src = _source_with_mcmeta(
+        tmp_path, '{"pack":{"description":"d","pack_format":"34"}}'
+    )
+    view = BundlerView(mock_page(), mock_filepicker())
+    view.root_dir_field.value = str(src)
+    view._update_preview()
+
+    assert json.loads(view.mcmeta_view.value)["pack"]["pack_format"] == 34
+    assert "修正" in view.mcmeta_source_note.value
+
+
+def test_preview_falls_back_to_ui_when_source_is_unusable(tmp_path):
+    src = _source_with_mcmeta(tmp_path, "{not json")
+    view = BundlerView(mock_page(), mock_filepicker())
+    view.version_field.value = "1.21.1"
+    view.root_dir_field.value = str(src)
+    view._update_preview()
+
+    assert json.loads(view.mcmeta_view.value)["pack"]["pack_format"] == 34
+    assert "無法使用" in view.mcmeta_source_note.value
+
+
+def test_preview_has_no_note_without_a_source_file(tmp_path):
+    view = BundlerView(mock_page(), mock_filepicker())
+    view.root_dir_field.value = str(tmp_path)
+    view._update_preview()
+    assert not view.mcmeta_source_note.visible and view.mcmeta_source_note.value == ""
+
+
+def test_preview_follows_root_dir_and_extra_folder_changes(tmp_path):
+    src = _source_with_mcmeta(tmp_path, '{"pack":{"description":"d","pack_format":15}}')
+    view = BundlerView(mock_page(), mock_filepicker())
+    view.root_dir_field.value = str(tmp_path / "other")
+    view._on_root_dir_change(None)
+    assert not view.mcmeta_source_note.visible
+
+    view.root_dir_field.value = str(src)
+    view._on_root_dir_change(None)
+    assert view.mcmeta_source_note.visible
+
+    view.root_dir_field.value = str(tmp_path)
+    extra = tmp_path / "extra.mcmeta" / "pack.mcmeta"
+    extra.parent.mkdir()
+    extra.write_text('{"pack":{"description":"x","pack_format":9}}', encoding="utf-8")
+    view.extra_folders.append(str(extra))
+    view._refresh_extra_folders()
+    view._update_preview()
+    assert json.loads(view.mcmeta_view.value)["pack"]["pack_format"] == 9

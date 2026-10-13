@@ -216,6 +216,9 @@ class BundlerWidgetsMixin:
         self.mcmeta_view = ft.Text(
             "", size=12, selectable=True, color=C.MUTED, font_family=design.FONT_MONO
         )
+        self.mcmeta_source_note = ft.Text(
+            "", size=11.5, color=C.GOLD, selectable=True, visible=False
+        )
         preview_card = kit.section_card(
             "資源包預覽",
             ft.Row(
@@ -240,7 +243,7 @@ class BundlerWidgetsMixin:
         )
         mcmeta_card = kit.section_card(
             "pack.mcmeta",
-            self.mcmeta_view,
+            ft.Column([self.mcmeta_source_note, self.mcmeta_view], spacing=8),
             icon=ft.Icons.DATA_OBJECT,
             tone="gold",
         )

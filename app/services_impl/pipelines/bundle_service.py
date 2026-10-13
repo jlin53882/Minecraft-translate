@@ -17,6 +17,7 @@ from translation_tool.core.output_bundler import (
     DEFAULT_OUTPUT_ZIP_NAME,  # noqa: F401 - View 由此取用
     bundle_outputs_generator,
     normalize_output_zip_name,  # noqa: F401 - View 由此取用
+    preview_pack_mcmeta,  # noqa: F401 - View 由此取用
 )
 from translation_tool.core.pack_mcmeta import DEFAULT_PACK_FORMAT
 

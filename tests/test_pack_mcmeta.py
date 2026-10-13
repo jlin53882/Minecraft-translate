@@ -351,3 +351,35 @@ def test_old_state_sidecar_forces_one_rebuild_then_reuses(tmp_path, src_dir):
     state_file.write_text(json.dumps(state), encoding="utf-8")
     assert not any("沿用" in u.get("log", "") for u in run())
     assert any("沿用" in u.get("log", "") for u in run())
+
+
+def test_preview_matches_what_the_bundler_writes(tmp_path, src_dir):
+    from translation_tool.core.output_bundler import preview_pack_mcmeta
+
+    cases = [
+        None,
+        '{"pack":{"description":"mine","pack_format":15}}',
+        '{"pack":{"description":"mine","pack_format":"34","filter":{"block":[]}}}',
+        '{"pack": {}}',
+        "{not json",
+    ]
+    for index, custom in enumerate(cases):
+        work = tmp_path / f"case{index}"
+        work.mkdir()
+        (work / "lang").mkdir()
+        (work / "lang" / "zh_tw.json").write_text('{"k": "v"}', encoding="utf-8")
+        if custom is not None:
+            (work / "pack.mcmeta").write_text(custom, encoding="utf-8")
+        text, source, _notes, used = preview_pack_mcmeta(
+            str(work), None, "UI", 34, None
+        )
+        out = work / "out.zip"
+        list(
+            bundle_outputs_generator(
+                str(work), str(out), description="UI", pack_format=34
+            )
+        )
+        with zipfile.ZipFile(out) as zf:
+            assert json.loads(zf.read("pack.mcmeta")) == json.loads(text)
+        assert (source is None) == (custom is None)
+        assert used == (custom is not None and custom != "{not json")

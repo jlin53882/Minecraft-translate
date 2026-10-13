@@ -9,7 +9,7 @@
 - 選擇翻譯專案根目錄、輸出 ZIP 路徑（留空時自動帶入 `根目錄\<output_zip_name>`）、封面圖。
 - 在單一輸入框填 Minecraft 版本（如 `1.20.4`）或 `pack_format` 整數，換算出寫入 `pack.mcmeta` 的 `pack_format`（18～64 另寫 `supported_formats`；65 以上改寫 `min_format`／`max_format`）；選填「最大使用版本」取代預設上限。
 - 新增、移除額外資料夾或檔案。
-- 即時預覽描述（含 § 顏色碼）、版本格式與即將寫入的 `pack.mcmeta` 內容。
+- 即時預覽描述（含 § 顏色碼）、版本格式與實際會寫進 ZIP 的 `pack.mcmeta` 內容；來源資料夾有 `pack.mcmeta` 時預覽顯示該檔（含修正）並提示會覆蓋 UI 設定。
 - 顯示打包日誌與進度。
 
 打包本身由 `translation_tool/core/output_bundler.py` 的 `bundle_outputs_generator` 完成。`BundlerView` 直接呼叫它（經由 `app/services_impl/pipelines/bundle_service.py` 的 re-export），沒有使用 `run_bundling_service`，因此這一頁不經過 `GLOBAL_LOG_LIMITER` 節流。
@@ -49,10 +49,11 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-    A["描述或封面圖路徑 on_change（_on_meta_change）"] --> B["_update_preview"]
+    A["描述、版本或封面圖路徑 on_change（_on_meta_change）；根目錄或額外資料夾變動"] --> B["_update_preview"]
     B --> C["描述經 mc_text_spans 轉為彩色文字（空白時顯示「尚未輸入描述」）"]
     B --> D["pack_format 與最大使用版本取自 version_field／max_format_field，空白時用預設"]
-    B --> E["mcmeta_text：組成 pack.mcmeta JSON（ensure_ascii=False，縮排 2）"]
+    B --> E["mcmeta_text：preview_pack_mcmeta 套用與打包相同的規則（來源 pack.mcmeta 優先，否則由 UI 設定組成 JSON，ensure_ascii=False，縮排 2）"]
+    B --> I["mcmeta_source_note：來源檔會覆蓋、已修正或無法使用的提示"]
     B --> F{"封面圖路徑是檔案？"}
     F -- 是 --> G["顯示縮圖"]
     F -- 否 --> H["顯示預設圖示"]
@@ -138,4 +139,4 @@ flowchart TD
 - **狀態檔寫入失敗**：不影響已成功的 ZIP，只在日誌中記錄「無法保存打包狀態」，下次會重新打包。
 - **版本無法換算**：輸入格式不合、比表內最新還新、落在表的空隙，或最大使用版本小於 `pack_format` 時，說明列顯示原因，按「開始打包」以 snack 擋下、不啟動；改填 `pack_format` 整數即可繞過對照表。版本與最大版本皆空白時使用預設 `pack_format` 34。
 - **應用程式關閉中**：啟動失敗時恢復開始按鈕、狀態列顯示「應用程式正在關閉，未啟動打包」並提示 snack。
-- **注意（目前行為）**：`_async_pick_root_dir` 與 `_async_pick_pack_image` 設定欄位值後只呼叫 `page.update()`，不會重新計算輸出檔名提示或封面預覽，要等使用者再次輸入才會更新。
+- **注意（目前行為）**：`_async_pick_root_dir` 設定欄位值後會更新 pack.mcmeta 預覽，但不會重新計算輸出檔名提示；`_async_pick_pack_image` 只呼叫 `page.update()`，不會重新計算封面預覽，要等使用者再次輸入才會更新。

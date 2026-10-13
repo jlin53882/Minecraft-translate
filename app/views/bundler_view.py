@@ -21,6 +21,7 @@ from app.services_impl.pack_format_service import (
 from app.services_impl.pipelines.bundle_service import (
     bundle_outputs_generator,
     normalize_output_zip_name,
+    preview_pack_mcmeta,
 )
 from app.tasks.operation_registry import (
     CancellationPolicy,
@@ -40,6 +41,18 @@ from translation_tool.utils.log_unit import log_debug, log_error
 from translation_tool.utils.ui_mirror import in_new_task, mirror_lines
 
 OUTPUT_ZIP_NAME_PATH = "output_bundler.output_zip_name"
+
+
+def _preview_format_label(mcmeta_text: str, fallback: str) -> str:
+    """預覽卡上的版本標籤：取自實際會寫入的 pack.mcmeta；解析不出版本時沿用 ``fallback``。"""
+    try:
+        pack = json.loads(mcmeta_text)["pack"]
+    except (ValueError, KeyError, TypeError):
+        return fallback
+    for key in ("pack_format", "min_format"):
+        if key in pack:
+            return f"{key} {pack[key]}"
+    return fallback
 
 
 class BundlerView(BundlerWidgetsMixin, ft.Column):
@@ -152,7 +165,8 @@ class BundlerView(BundlerWidgetsMixin, ft.Column):
             logging.getLogger(__name__).debug("重新整理打包頁提示失敗", exc_info=True)
 
     def _on_root_dir_change(self, e: ft.ControlEvent):
-        """當翻譯專案根目錄變更時，更新 output_zip_field 的 hint_text"""
+        """當翻譯專案根目錄變更時，更新 output_zip_field 的 hint_text 與 pack.mcmeta 預覽"""
+        self._update_preview()
         root_dir = self.root_dir_field.value or ""
         if root_dir and not self.output_zip_field.value:
             self.output_zip_field.hint_text = (
@@ -181,16 +195,35 @@ class BundlerView(BundlerWidgetsMixin, ft.Column):
         self._update_preview()
         self._page.update()
 
-    def mcmeta_text(self) -> str:
-        """目前設定會寫進 pack.mcmeta 的內容（跟 output_bundler 寫入的格式一致）。"""
+    def _mcmeta_preview(self) -> tuple[str, str]:
+        """(pack.mcmeta 預覽內容, 來源檔說明)：與打包相同的規則，來源資料夾的檔案優先於 UI 設定。"""
         try:
             pack_format, max_pack_format = self._resolved_pack_format()
+            text, source, notes, source_used = preview_pack_mcmeta(
+                self.root_dir_field.value or "",
+                self.extra_folders,
+                self.description_field.value or "",
+                pack_format,
+                max_pack_format,
+            )
         except ValueError as exc:
-            return f"版本或 pack_format 無效：{exc}"
-        pack = build_pack_mcmeta(
-            self.description_field.value or "", pack_format, max_pack_format
-        )
-        return json.dumps(pack, ensure_ascii=False, indent=2)
+            return f"版本或 pack_format 無效：{exc}", ""
+        if source is None:
+            return text, ""
+        if not source_used:
+            detail = f"來源的 pack.mcmeta 無法使用（{notes[0]}），改用上方設定產生"
+        elif notes:
+            detail = (
+                "來源的 pack.mcmeta 會覆蓋上方的版本與描述設定，並修正："
+                + "；".join(notes)
+            )
+        else:
+            detail = "來源的 pack.mcmeta 會覆蓋上方的版本與描述設定"
+        return text, f"{detail}（{source}）"
+
+    def mcmeta_text(self) -> str:
+        """目前設定實際會寫進 ZIP 的 pack.mcmeta 內容（跟 output_bundler 寫入的一致）。"""
+        return self._mcmeta_preview()[0]
 
     def _update_preview(self):
         """依描述 / 版本 / 圖片更新右側預覽。"""
@@ -206,7 +239,13 @@ class BundlerView(BundlerWidgetsMixin, ft.Column):
         )
         self.version_summary.value = message if valid else f"⚠️ {message}"
         self.version_summary.color = C.MUTED if valid else C.GOLD
-        self.mcmeta_view.value = self.mcmeta_text()
+        mcmeta_text, source_note = self._mcmeta_preview()
+        self.mcmeta_view.value = mcmeta_text
+        self.mcmeta_source_note.value = source_note
+        self.mcmeta_source_note.visible = bool(source_note)
+        self.preview_format.value = _preview_format_label(
+            mcmeta_text, self.preview_format.value
+        )
         image_path = (self.pack_image_field.value or "").strip()
         if image_path and os.path.isfile(image_path):
             self.preview_image.content = ft.Image(
@@ -246,6 +285,7 @@ class BundlerView(BundlerWidgetsMixin, ft.Column):
         if result:
             path = result[0].path if hasattr(result[0], "path") else result
             self.root_dir_field.value = path
+            self._update_preview()
             self._page.update()
 
     def _pick_output_zip(self, e: ft.ControlEvent):
@@ -271,6 +311,7 @@ class BundlerView(BundlerWidgetsMixin, ft.Column):
         if result and result not in self.extra_folders:
             self.extra_folders.append(result)
             self._refresh_extra_folders()
+            self._update_preview()
             self._page.update()
 
     def _refresh_extra_folders(self):
@@ -317,6 +358,7 @@ class BundlerView(BundlerWidgetsMixin, ft.Column):
         if path in self.extra_folders:
             self.extra_folders.remove(path)
             self._refresh_extra_folders()
+            self._update_preview()
             self._page.update()
 
     def start_bundling_clicked(self, e: ft.ControlEvent):

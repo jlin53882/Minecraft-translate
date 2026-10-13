@@ -96,6 +96,54 @@ def _read_custom_pack_mcmeta(
     return repair_source_pack_mcmeta(content, generated)
 
 
+def find_source_pack_files(
+    input_root_dir: str, extra_folders: list[str] | None
+) -> tuple[str | None, str | None]:
+    """來源裡既有的 (pack.mcmeta, pack.png) 路徑：根目錄第一層與額外項目中的檔案；沒有則為 None。
+
+    額外項目比根目錄晚檢查，同名時取後者（與打包時的覆蓋順序一致）。
+    """
+    mcmeta = png = None
+    candidates = []
+    if os.path.isdir(input_root_dir):
+        candidates += [
+            os.path.join(input_root_dir, e) for e in os.listdir(input_root_dir)
+        ]
+    candidates += list(extra_folders or [])
+    for path in candidates:
+        if not os.path.isfile(path):
+            continue
+        name = os.path.basename(path).lower()
+        if name == "pack.mcmeta":
+            mcmeta = path
+        elif name == "pack.png":
+            png = path
+    return mcmeta, png
+
+
+def preview_pack_mcmeta(
+    input_root_dir: str,
+    extra_folders: list[str] | None,
+    description: str,
+    pack_format: int,
+    max_pack_format: int | None = None,
+) -> tuple[str, str | None, list[str], bool]:
+    """打包後 ZIP 內 ``pack.mcmeta`` 的預覽：(內容文字, 來源檔路徑或 None, 說明, 是否採用來源檔)。
+
+    與打包完全相同的規則：來源有可用的 ``pack.mcmeta`` 就用它（可能經過修正，說明列出
+    修正內容）；來源檔不可用時說明給出原因，內容改用 UI 設定產生。版本無效時拋出 ValueError。
+    """
+    generated = build_pack_mcmeta(description, pack_format, max_pack_format)
+    generated_text = json.dumps(generated, ensure_ascii=False, indent=2)
+    source, _png = find_source_pack_files(input_root_dir, extra_folders)
+    if source is None:
+        return generated_text, None, [], False
+    content, notes = _read_custom_pack_mcmeta(source, generated)
+    if content is None:
+        return generated_text, source, notes, False
+    return content, source, notes, True
+
+
 def _output_path_problem(output_zip_path: str) -> str | None:
     """輸出路徑必須是 ZIP「檔案」路徑；是資料夾或空白時回傳原因，否則 None。"""
     if not (output_zip_path or "").strip():
@@ -477,24 +525,9 @@ def bundle_outputs_generator(
         pack_mcmeta_source = None
         pack_png_source = None
 
-        # Check input_root_dir for pack.png/pack.mcmeta
-        for entry in os.listdir(input_root_dir):
-            full_path = os.path.join(input_root_dir, entry)
-            if os.path.isfile(full_path):
-                if entry.lower() == "pack.mcmeta":
-                    pack_mcmeta_source = full_path
-                elif entry.lower() == "pack.png":
-                    pack_png_source = full_path
-
-        # Check extra_folders for pack.png/pack.mcmeta
-        if extra_folders:
-            for extra_path in extra_folders:
-                if os.path.isfile(extra_path):
-                    entry = os.path.basename(extra_path)
-                    if entry.lower() == "pack.mcmeta":
-                        pack_mcmeta_source = extra_path
-                    elif entry.lower() == "pack.png":
-                        pack_png_source = extra_path
+        pack_mcmeta_source, pack_png_source = find_source_pack_files(
+            input_root_dir, extra_folders
+        )
 
         # If pack.png/pack.mcmeta found in folders, skip UI settings and warn
         if pack_mcmeta_source:
