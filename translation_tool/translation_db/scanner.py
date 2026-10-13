@@ -23,6 +23,7 @@ from typing import Any
 
 from translation_tool.core.lang_merge_dict import contains_cjk
 from translation_tool.core.lm_config_rules import is_translatable_field
+from translation_tool.core.patchouli_compat import find_patchouli_mismatch
 from translation_tool.core.translatable_extractor import extract_translatables
 from translation_tool.translation_db.identity import (
     FileIdentity,
@@ -35,7 +36,7 @@ from translation_tool.translation_db.repository import TranslationDB
 from translation_tool.translation_db.schema import SRC_CUSTOM
 from translation_tool.utils.bounded_executor import bounded_as_completed
 from translation_tool.utils.config_manager import load_config
-from translation_tool.utils.log_unit import log_warning
+from translation_tool.utils.log_unit import log_info, log_warning
 from translation_tool.utils.text_processor import (
     ReplaceRules,
     apply_replace_rules,
@@ -265,6 +266,17 @@ def _read_json_member(
     return _load_json(read_limited(zf, member, budget=budget))
 
 
+def _drop_stale_book(zh: dict | None, en: dict, member: str | None) -> dict | None:
+    """譯文檔和 en_us 格式不同時回傳 None（不採用），否則原樣回傳。"""
+    if zh is None:
+        return None
+    reason = find_patchouli_mismatch(en, zh)
+    if reason:
+        log_info(f"[ModDB] 手冊譯文與 en_us 格式不同（{reason}），不匯入譯文：{member}")
+        return None
+    return zh
+
+
 def _items_for_group(
     zf: zipfile.ZipFile,
     budget: ZipReadBudget,
@@ -292,6 +304,11 @@ def _items_for_group(
     if options.read_jar_translations or options.translated:
         tw_obj = _read_json_member(zf, budget, members.get("zh_tw"))
         cn_obj = _read_json_member(zf, budget, members.get("zh_cn"))
+        if kind == "patchouli" and en is not None:
+            # 手冊譯文以 JSON 路徑和原文對應；格式和 en_us 不同（頁數、欄位、舊版物品 NBT）
+            # 時路徑會對到別頁，匯入只會把錯位的譯文寫進資料庫，所以不採用。
+            tw_obj = _drop_stale_book(tw_obj, en, members.get("zh_tw"))
+            cn_obj = _drop_stale_book(cn_obj, en, members.get("zh_cn"))
 
     paths = list(en_items)
     tw_all: dict[str, str] = {}
