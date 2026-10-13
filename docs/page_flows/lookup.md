@@ -28,8 +28,8 @@ flowchart TD
     I --> J["run_manual_lookup_service(name)"]
     J --> K{"is_potential_species_name？"}
     K -- 否 --> L["回傳「不像是一個有效的學名格式」"]
-    K -- 是 --> M["lookup_species_name：本機快取，未命中才查 Wikipedia"]
-    M --> N["結果為空時回傳「在本地快取和線上查詢中均未找到結果」"]
+    K -- 是 --> M["lookup_species：本機快取，未命中才查 Wikipedia"]
+    M --> N["describe_lookup：名稱、查無、限流或查詢失敗分開說明"]
     L --> O["_run_on_ui(apply)：寫入結果，恢復按鈕"]
     N --> O
     I -. 例外 .-> P["log_error，結果設為「查詢失敗：…」並以紅字顯示"]
@@ -58,7 +58,7 @@ flowchart TD
     L --> M["寫入結果框與進度值，恢復按鈕，隱藏進度條"]
 ```
 
-`run_batch_lookup_service` 內部會先 `json.loads`：不是 list 時回報「必須是一個列表」，格式錯誤時回報「不是有效的 JSON 格式」。通過後，逐一對每個名稱判斷：不像學名者記為「格式錯誤」，查無結果者記為「未找到」，其餘記為查詢結果。全部完成後輸出 `--- 批次查詢完成 ---` 與結果 JSON（`ensure_ascii=False`，縮排 2）。
+`run_batch_lookup_service` 內部會先 `json.loads`：不是 list 時回報「必須是一個列表」，格式錯誤時回報「不是有效的 JSON 格式」。通過後，逐一對每個名稱判斷：不像學名者記為「格式錯誤」，查無結果者記為「未找到」，暫時失敗記為「查詢失敗：…」，其餘記為查詢結果。種以下名稱查無時，值會附上一層物種的參考名稱，或上一層查詢遭限流／失敗的提醒。遇到維基百科限流（包含上一層物種的查詢）時停止批次，其餘名稱記為「未查詢（已因限流停止）」，結束訊息改為 `--- 批次查詢已因限流停止（部分完成） ---`。全部完成後輸出 `--- 批次查詢完成 ---` 與結果 JSON（`ensure_ascii=False`，縮排 2）。
 
 ## 背景任務與 UI 更新
 
@@ -73,9 +73,9 @@ flowchart TD
 - **`_recent`**：最近查詢名稱的清單，只保存在記憶體，程式關閉即清除。上限 `RECENT_LIMIT`（6）。
 - **單筆控制項狀態**：`single_input`、`single_button`、`single_progress_ring`、`single_result_text`、`recent_row`。查詢中會停用輸入與按鈕，完成後恢復。
 - **批次控制項狀態**：`batch_input`（JSON 字串）、`batch_result_textfield`（唯讀）、`batch_progress_bar`（預設隱藏）、`batch_button`。
-- **外部資料來源**：`lookup_species_name` 先查 `species_cache` 的記憶體字典（來源為本機快取檔，寫入時 append 到 tab 分隔檔）；未命中才呼叫 `query_wikipedia_and_update_cache`，成功時更新記憶體與快取檔。
-- **負面快取**：查無結果的學名會以空字串寫入記憶體字典，本次執行期間再次查詢會直接回傳「未找到」，不會重新連線；這些空值不會寫入快取檔。
-- **語言與速率**：Wikipedia 語言與查詢間隔由設定檔的 `species_cache` 區段決定（預設語言 `zh`，每次線上查詢前等待 `wikipedia_rate_limit_delay`）。
+- **外部資料來源**：`lookup_species_name` 先查 `species_cache` 的記憶體字典（來源為本機快取檔，寫入時 append 到 tab 分隔檔）；未命中才呼叫 MediaWiki Action API，跟隨學名轉址取得條目標題，找到或 API 明確標示頁面不存在時更新記憶體與快取檔（查無記為空的俗名）；回應不完整當成可重試的錯誤。
+- **查詢失敗**：查無是確定結果，會寫入快取，之後不再連線；暫時性錯誤（限流、逾時、連線失敗）不寫入快取，後續查詢會重新連線。
+- **語言與速率**：Wikipedia 語言與查詢間隔由設定檔的 `species_cache` 區段決定（預設語言 `zh`，每次線上查詢前等待 `wikipedia_rate_limit_delay`）；`zh` 條目標題會以 OpenCC `s2twp` 正規化為台灣繁體。
 
 ## 錯誤處理
 
@@ -83,6 +83,6 @@ flowchart TD
 - **格式錯誤**：單筆格式不符學名規則時回傳提示字串，不呼叫 Wikipedia。批次則為該名稱記錄「格式錯誤」。
 - **查詢例外**：單筆在 worker 內捕捉（`log_error` 含 traceback），結果區顯示「查詢失敗：…」並以紅字呈現，按鈕與輸入框仍會恢復。
 - **批次例外**：`run_batch_lookup_service` 內部捕捉 JSON 與其他錯誤，轉為 `error` 更新；`batch_lookup_worker` 另外捕捉未預期例外，結果框顯示「批次查詢失敗：…」。
-- **Wikipedia 失敗**：`query_wikipedia_and_update_cache` 捕捉 `PageError`、`DisambiguationError`（會改用第一個候選選項重試）與其他網路錯誤，回傳 `None`，頁面顯示「未找到」類結果。
+- **Wikipedia 失敗**：HTTP 429/5xx、連線、逾時與非 JSON 暫時回應最多重試 3 次；仍失敗時不留下快取，單筆顯示「維基百科回應請求過於頻繁」或「查詢失敗」並允許稍後重試，不會顯示成查無。
 - **應用程式關閉中**：`launch_page_operation` 回傳假值時，單筆與批次都會恢復控制項狀態、顯示 snack 提示「應用程式正在關閉」。
 - **注意**：批次結果來自 `GLOBAL_LOG_LIMITER.filter` 過濾後的 update。目前 `LogLimiter` 的 `flush_interval` 設為 `0.0`，正常情況下不會丟棄 `result`，但若日後調整節流設定，最終結果可能不會顯示。

@@ -7,6 +7,7 @@
 - `ModDbView`（`app/views/moddb_view.py`）持有唯一的資料庫連線 `_db`、四個頁籤的顯示切換，以及跨頁籤的快照失效與背景刷新。
 - 四個頁籤位於 `app/views/moddb/`：`OverviewPanel`（`overview_panel.py`）、`EntriesPanel`（`entries_panel.py`）、`ScanPanel`（`scan_panel.py`）、`TranslatePanel`（`translate_panel.py`）。
 - 批次取代對話框 `BatchReplaceDialog`（`batch_replace_dialog.py`）與批量審核對話框 `BulkReviewDialog`（`bulk_review_dialog.py`）由條目校對頁開啟；AI 修復逐筆審查 `RepairReviewer`（`repair_reviewer.py`）由批次機翻的結果檢視開啟。
+- 學名候選對話框 `SpeciesCandidateDialog`（`species_dialog.py`）由條目校對頁開啟；它只讀取目前範圍的 `entry.en_us`，逐筆查詢時才使用學名快取／Wikipedia API，不寫入翻譯資料表。
 - 實際寫入與掃描邏輯在 `app/services_impl/` 下的 moddb 系列模組（例如 `moddb_service.py`、`moddb_translate_service.py`、`moddb_retranslate_service.py`），資料庫方法在 `translation_tool/translation_db/repository.py`。
 
 ## 主要流程
@@ -74,6 +75,30 @@ flowchart TD
 ```
 
 人工審核走 `ReviewScopeController`（`review_scope_dialog.py`）：`confirm` 先呼叫 `preview_manual_review` 顯示影響範圍；確認視窗內有「同步審核其他版本」開關，預設沿用編輯面板的同步開關，切換時重算範圍；確定後 `execute` 呼叫 `review_manual`。批量審核由 `BulkReviewDialog` 負責：選一個版本與一個「目前生效來源」（皆單選），預設只審核格式檢查通過的條目、不同步其他版本；`_preview` 呼叫 `preview_bulk_review` 產生預覽（每頁 50 筆，可逐筆排除），`_confirm` 呼叫 `execute_bulk_review`，完成後可用 `_revert`（`revert_review_batch`）整批還原。選項改變時舊預覽立即失效；確認時資料庫會重算範圍，與預覽不同就拒絕並要求重新預覽。
+
+#### 學名候選掃描
+
+```mermaid
+flowchart TD
+    A["條目校對按「掃描學名」"] --> B["SpeciesCandidateDialog"]
+    B --> C["scan_species_candidates 以品質篩選取出目前版本／模組／類型的候選"]
+    C --> D["is_species_candidate：格式判斷＋key 學名提示"]
+    D --> E["顯示候選、模組、類型與鍵值"]
+    E --> F{"按哪個操作？"}
+    F -- "查詢／重試" --> G["lookup_species 查快取／Wikipedia"]
+    F -- "查詢全部候選" --> H["SpeciesBulkLookup 在背景逐筆查詢；頂列任務顯示進度，可按停止或從任務取消"]
+    F -- "開啟條目" --> I["關閉視窗並 EntriesPanel.select"]
+    G --> J["顯示中文名稱、找不到或可重試的失敗"]
+    H --> J
+```
+
+進階篩選的「品質狀態 → 疑似學名文字」（`QualityFilter` 的 `species_name`）用同一組規則在條目清單列出疑似學名條目，不需開啟對話框。對話框預設只收 key 帶有 `latin`、`scientific` 等提示（或值含 ×、var.、subsp. 記號）且格式像學名的條目；勾選「包含沒有學名 key 的候選」才退回只看格式。候選數量不設上限，對話框以頁碼切換（每頁 50 筆）；掃描時學名快取裡已有確定結果的候選（查到名稱或查無）直接顯示，「查詢全部候選」只查其餘的；查無的列有「再查一次」，以 `refresh` 略過快取重新連線。種以下的名稱查無時，列上附上一層物種的名稱（`parent_name`／`parent_value`），只供參考；上一層查詢限流或失敗時改顯示失敗原因，批次查詢也會依 `SpeciesLookup.rate_limited`／`SpeciesLookup.failed` 停止或累計連續失敗。候選的完成狀態看 `SpeciesLookup.complete`：原名稱確定查無但上一層還沒查過或查詢失敗（`parent_resolved` 為 False，例如重新啟動後快取只有原名稱的查無）時，該列顯示「補查上一層」，「查詢全部候選」也會把它納入，只補查上一層物種，不重查原名稱。
+
+「查詢全部候選」交給頁面共用的 `SpeciesBulkLookup`（`species_bulk_lookup.py`，用 `bulk_lookup_for` 取得）執行：它有自己的 `TaskSession`，頂列任務膠囊顯示進度並可取消。查詢中對話框多一個「背景執行」：收起視窗、只退訂事件，查詢繼續進行；「關閉」會停止查詢再關閉視窗。「開啟條目」與 Esc 等非按鈕關閉都視同背景執行。完成或停止時以提示訊息回報摘要。重新開啟對話框時接回進行中的查詢與它的候選範圍；查詢期間不能重新掃描或逐筆查詢。遇到限流或連續 `MAX_CONSECUTIVE_FAILURES` 筆失敗會自動停止。掃描與單筆查詢的結果在視窗關閉後會被 generation 丟棄。查詢結果只更新學名快取，不會自動改寫翻譯。
+
+條目校對右側建議區有第三個分頁「學名」（`SpeciesSuggestion`）：目前條目原文像學名時，顯示學名快取中的中文名稱與「套用」（只把名稱帶入譯文框，不儲存）；還沒查過就顯示「查詢維基百科」，失敗顯示「重試」。上次查詢是暫時性失敗時（`retry_needs_refresh`），「重試」與對話框的「重試」、「查詢全部候選」都略過快取重新連線，所以「再查一次」逾時後的重試不會被舊的查無紀錄擋下；「補查上一層」仍走快取，不重查已確定查無的原名稱。背景批次查詢每查到一筆，這個分頁就重繪，目前條目的結果會即時出現；分頁自己的查詢結果（包含「再查一次」的失敗）優先；只有快取在那次查詢之後又被更新，且更新後查到名稱，或已完整（查無且上一層物種也有結果）而分頁的結果還是失敗或上一層待查時，才改顯示快取的結果。查無時顯示「再查一次」；有上一層物種的名稱時另顯示「套用參考名稱」，同樣只帶入譯文框；上一層還沒有確定結果時顯示「補查上一層」。從對話框按「開啟條目」會直接切到這個分頁（`EntriesPanel.open_species_entry`）。
+
+查詢結果分為找到、查無（確定結果）與請求過於頻繁、連線失敗（可重試，不寫入快取）。批次查詢遇到限流、連續 3 筆失敗或使用者按「停止查詢」時停止，已完成的結果保留；失敗的候選列顯示「重試」。
 
 還原單筆或整批分別由 `_revert`（`db.revert`）與 `_revert_batch`（`db.revert_batch_replace`）處理。
 

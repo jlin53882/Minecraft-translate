@@ -141,7 +141,11 @@ def test_pipeline_bundle_step_fails_when_input_missing(tmp_path):
 
 def test_batch_lookup_result_survives_limiter(monkeypatch):
     monkeypatch.setattr(lookup_service, "is_potential_species_name", lambda n: True)
-    monkeypatch.setattr(lookup_service, "lookup_species_name", lambda n: f"{n}-zh")
+    monkeypatch.setattr(
+        lookup_service,
+        "lookup_species",
+        lambda n: lookup_service.SpeciesLookup(lookup_service.STATUS_FOUND, f"{n}-zh"),
+    )
 
     updates = list(lookup_service.run_batch_lookup_service('["Canis lupus"]'))
 
