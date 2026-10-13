@@ -14,6 +14,7 @@ import traceback
 
 from app.services_impl.logging_service import GLOBAL_LOG_LIMITER
 from translation_tool.core.output_bundler import bundle_outputs_generator
+from translation_tool.core.patchouli_compat import find_old_nbt_item_files
 
 logger = logging.getLogger(__name__)
 
@@ -242,6 +243,11 @@ def build_bundle_staging(sources: list[str], staging_dir: str) -> dict:
         "unchanged": unchanged,
         "removed": removed,
     }
+
+
+def scan_staging_old_nbt_items(staging_dir: str) -> list[str]:
+    """列出暫存區內物品欄位仍是舊版 NBT 寫法的 Patchouli 檔案（1.20.5 以上的遊戲無法載入）。"""
+    return find_old_nbt_item_files(staging_dir)
 
 
 def run_bundling_service(

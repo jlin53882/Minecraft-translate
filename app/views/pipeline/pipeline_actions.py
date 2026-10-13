@@ -21,6 +21,7 @@ from typing import Any
 from app.services_impl.pipelines.bundle_service import (
     build_bundle_staging,
     run_bundling_service,
+    scan_staging_old_nbt_items,
 )
 from app.services_impl.pipelines.extract_service import (
     run_book_extraction_service,
@@ -47,6 +48,7 @@ class PipelineServices:
     translate: Callable[..., Any] = run_lm_translation_service
     bundle: Callable[..., Any] = run_bundling_service
     build_staging: Callable[..., Any] = build_bundle_staging
+    scan_old_nbt: Callable[..., Any] = scan_staging_old_nbt_items
 
 
 def _staging_reuse_note(stats: dict[str, Any]) -> str:
@@ -305,6 +307,13 @@ class PipelineActions:
                 session.add_log(message, level="error")
                 session.set_error()
                 return
+            old_nbt_files = self.services.scan_old_nbt(cfg.bundle_staging_dir)
+            if old_nbt_files:
+                session.add_log(
+                    f"⚠️ {len(old_nbt_files)} 個 Patchouli 檔案的物品欄位仍是舊版 NBT 寫法，"
+                    f"1.20.5 以上的遊戲會無法載入該手冊（例：{', '.join(old_nbt_files[:3])}）",
+                    level="warning",
+                )
             yield from self.bundle(
                 session,
                 manage_session=False,

@@ -2326,3 +2326,38 @@ def test_database_problem_explains_unusable_files(tmp_path):
     c.commit()
     c.close()
     assert "比本程式新" in database_problem(DbSettings(path=str(newer)))
+
+
+def test_scan_jar_ignores_book_translations_that_do_not_match_en_us(tmp_path):
+    """頁數不同的手冊譯文以路徑對應會錯位，不能匯入；格式一致的照常匯入。"""
+    book = "assets/foo/patchouli_books/guide"
+    jar = make_jar(
+        tmp_path / "foo.jar",
+        {
+            f"{book}/en_us/entries/stale.json": {
+                "name": "Modes",
+                "pages": [
+                    {"type": "text", "text": "First page text here."},
+                    {"type": "text", "text": "Second page text here."},
+                ],
+            },
+            f"{book}/zh_cn/entries/stale.json": {
+                "name": "模式",
+                "pages": [{"type": "text", "text": "只有一頁的舊譯文。"}],
+            },
+            f"{book}/en_us/entries/ok.json": {
+                "name": "Intro",
+                "pages": [{"type": "text", "text": "Welcome to the book."}],
+            },
+            f"{book}/zh_tw/entries/ok.json": {
+                "name": "簡介",
+                "pages": [{"type": "text", "text": "歡迎使用本書。"}],
+            },
+        },
+    )
+    res = scan_jar(jar, ScanOptions("1.21.1"), ("patchouli_books",))
+    by_key = {i.key: i for i in res.items}
+    stale = [i for k, i in by_key.items() if "stale.json" in k]
+    assert stale and all(i.zh_cn == "" and i.zh_tw == "" for i in stale)
+    ok = by_key["patchouli_books/guide/entries/ok.json#pages[0].text"]
+    assert ok.zh_tw == "歡迎使用本書。"
