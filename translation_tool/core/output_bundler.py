@@ -9,12 +9,17 @@
 import hashlib
 import json
 import os
+import re
 import time
 import zipfile
 from collections.abc import Generator, Iterator
 from typing import Any
 
-from translation_tool.core.pack_mcmeta import DEFAULT_PACK_FORMAT, build_pack_mcmeta
+from translation_tool.core.pack_mcmeta import (
+    DEFAULT_PACK_FORMAT,
+    build_pack_mcmeta,
+    inspect_pack_mcmeta_text,
+)
 from translation_tool.utils.config_manager import (
     load_config,  # noqa: F401 - 測試以 monkeypatch 取代的 seam
 )
@@ -29,7 +34,7 @@ ZIP_COMPRESS_LEVEL = 6
 # 打包狀態 sidecar（#165 方向 2）：放在 ZIP 旁，記錄「上次成功打包」的輸入指紋與 ZIP 雜湊。
 # 絕不會進入資源包；格式版本不符一律視為無效並重建。
 BUNDLE_STATE_SUFFIX = ".bundle-state.json"
-BUNDLE_STATE_VERSION = 1
+BUNDLE_STATE_VERSION = 2
 _HASH_CHUNK = 1024 * 1024
 
 
@@ -47,17 +52,47 @@ def _norm(path: str) -> str:
 
 
 DEFAULT_OUTPUT_ZIP_NAME = "可使用翻譯.zip"
+_WINDOWS_ILLEGAL_NAME_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
+_WINDOWS_RESERVED_NAMES = frozenset(
+    {"CON", "PRN", "AUX", "NUL"}
+    | {f"COM{i}" for i in range(1, 10)}
+    | {f"LPT{i}" for i in range(1, 10)}
+)
 
 
 def normalize_output_zip_name(value: object) -> str:
     """設定檔的輸出檔名 → 可安全接在資料夾後的 ZIP 檔名。
 
-    空白、不是字串、或含路徑分隔字元時用預設；缺少 ``.zip`` 副檔名時補上。
+    空白、不是字串、含路徑分隔字元或 Windows 不允許的字元／保留名稱時用預設；
+    缺少 ``.zip`` 副檔名時補上。
     """
     name = value.strip() if isinstance(value, str) else ""
-    if not name or "/" in name or "\\" in name:
+    if not name or _WINDOWS_ILLEGAL_NAME_CHARS.search(name):
         return DEFAULT_OUTPUT_ZIP_NAME
-    return name if name.lower().endswith(".zip") else name + ".zip"
+    if not name.lower().endswith(".zip"):
+        name += ".zip"
+    stem = name[: -len(".zip")]
+    if stem.endswith(".") or stem.split(".")[0].upper() in _WINDOWS_RESERVED_NAMES:
+        return DEFAULT_OUTPUT_ZIP_NAME
+    return name
+
+
+def _read_custom_pack_mcmeta(path: str | None) -> tuple[str | None, list[str]]:
+    """讀取來源資料夾的 pack.mcmeta：可用則回傳 (原文, 警告)；不可用回傳 (None, [原因])。
+
+    沒有來源檔時回傳 (None, [])。無法讀取或結構不對時不沿用，由產生器補上正確內容。
+    """
+    if not path:
+        return None, []
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            content = f.read()
+    except (OSError, UnicodeDecodeError) as ex:
+        return None, [f"讀取失敗：{ex}"]
+    data, problems = inspect_pack_mcmeta_text(content)
+    if data is None:
+        return None, problems
+    return content, problems
 
 
 def _output_path_problem(output_zip_path: str) -> str | None:
@@ -484,23 +519,32 @@ def bundle_outputs_generator(
             compresslevel=ZIP_COMPRESS_LEVEL,
         ) as zf:
             # Write pack.mcmeta from folder if exists, otherwise from UI
-            if pack_mcmeta_source:
-                try:
-                    with open(pack_mcmeta_source, "r", encoding="utf-8") as f:
-                        content = f.read()
-                    seen_files["pack.mcmeta"] = 1
-                    zf.writestr("pack.mcmeta", content)
-                    total_files_added += 1
-                    tracker.advance()
-                    yield {"progress": 0.05, "log": "已寫入 pack.mcmeta（來自資料夾）"}
-                    log_info(f"寫入 pack.mcmeta（來自：{pack_mcmeta_source}）")
-                except Exception as ex:  # noqa: BLE001 - 錯誤已記錄或回報給呼叫端，不中斷整批流程
-                    yield {"progress": 0.05, "log": f"讀取 pack.mcmeta 失敗: {ex}"}
+            custom_content, custom_problems = _read_custom_pack_mcmeta(
+                pack_mcmeta_source
+            )
+            if custom_content is not None:
+                seen_files["pack.mcmeta"] = 1
+                zf.writestr("pack.mcmeta", custom_content)
+                total_files_added += 1
+                tracker.advance()
+                yield {"progress": 0.05, "log": "已寫入 pack.mcmeta（來自資料夾）"}
+                log_info(f"寫入 pack.mcmeta（來自：{pack_mcmeta_source}）")
             else:
+                if custom_problems:
+                    yield {
+                        "progress": 0.05,
+                        "log": f"警告：資料夾內的 pack.mcmeta 無法使用，改用 UI 設定產生（{custom_problems[0]}）",
+                    }
+                seen_files["pack.mcmeta"] = 1  # 來源的壞檔不能再被當一般檔案加入
                 _write_pack_mcmeta(zf, description, pack_format, max_pack_format)
                 total_files_added += 1
                 yield {"progress": 0.05, "log": "已寫入 pack.mcmeta"}
                 log_info("已寫入 pack.mcmeta")
+            for problem in custom_problems if custom_content is not None else ():
+                yield {
+                    "progress": 0.05,
+                    "log": f"警告：資料夾內的 pack.mcmeta {problem}",
+                }
 
             # Write pack.png from folder if exists, otherwise from UI
             if pack_png_source:

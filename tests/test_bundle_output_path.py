@@ -39,6 +39,14 @@ def _errors(updates):
         ("pack.zip", "pack.zip"),
         ("Pack.ZIP", "Pack.ZIP"),
         (" pack ", "pack.zip"),
+        ("CON", DEFAULT_OUTPUT_ZIP_NAME),
+        ("con.zip", DEFAULT_OUTPUT_ZIP_NAME),
+        ("NUL.txt", DEFAULT_OUTPUT_ZIP_NAME),
+        ("lpt1", DEFAULT_OUTPUT_ZIP_NAME),
+        ("test?.zip", DEFAULT_OUTPUT_ZIP_NAME),
+        ("a:b.zip", DEFAULT_OUTPUT_ZIP_NAME),
+        ("name..zip", DEFAULT_OUTPUT_ZIP_NAME),
+        ("console.zip", "console.zip"),
     ],
 )
 def test_normalize_output_zip_name(value, expected):

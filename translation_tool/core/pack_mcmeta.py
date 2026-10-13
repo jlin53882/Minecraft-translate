@@ -7,10 +7,13 @@
   （``min_inclusive``／``max_inclusive``）。
 - 65 以上（1.21.9 起）：``supported_formats`` 已移除，改用必填的 ``min_format``／
   ``max_format``；不再寫 ``pack_format``。
+- 最大版本跨過 64（pack_format 18～64 卻要支援 65 以上）：同時寫 ``pack_format``、
+  ``supported_formats`` 與 ``min_format``／``max_format``（新舊版遊戲各讀自己認得的欄位）。
 """
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 DEFAULT_PACK_FORMAT = 34  # 1.21～1.21.1
@@ -78,19 +81,57 @@ def build_pack_mcmeta(
             "min_inclusive": value,
             "max_inclusive": max(value, ceiling),
         }
+        if ceiling >= MIN_MAX_FORMAT_SINCE:
+            pack["min_format"] = value
+            pack["max_format"] = ceiling
     return {"pack": pack}
 
 
 def describe_pack_format(pack_format: int, max_pack_format: int | None = None) -> str:
     """給使用者看的一行說明，例如「pack_format 34，supported_formats 34–46」。"""
     pack = build_pack_mcmeta("", pack_format, max_pack_format)["pack"]
-    if "min_format" in pack:
-        return f"min_format {pack['min_format']}，max_format {pack['max_format']}"
-    text = f"pack_format {pack['pack_format']}"
+    parts = []
+    if "pack_format" in pack:
+        parts.append(f"pack_format {pack['pack_format']}")
     supported = pack.get("supported_formats")
     if supported:
-        text += (
-            f"，supported_formats {supported['min_inclusive']}"
+        parts.append(
+            f"supported_formats {supported['min_inclusive']}"
             f"–{supported['max_inclusive']}"
         )
-    return text
+    if "min_format" in pack:
+        parts.append(
+            f"min_format {pack['min_format']}，max_format {pack['max_format']}"
+        )
+    return "，".join(parts)
+
+
+_FORMAT_KEYS = ("pack_format", "min_format", "max_format")
+
+
+def inspect_pack_mcmeta_text(text: str) -> tuple[dict[str, Any] | None, list[str]]:
+    """檢查來源資料夾裡既有的 ``pack.mcmeta`` 文字。
+
+    回傳 ``(內容, 警告)``：JSON 無法解析、或不是含 ``pack`` 物件時內容為 ``None``
+    （呼叫端改用產生器的內容）；format 欄位寫成字串之類的問題只列為警告。
+    """
+    try:
+        data = json.loads(text)
+    except ValueError as ex:
+        return None, [f"不是有效的 JSON：{ex}"]
+    pack = data.get("pack") if isinstance(data, dict) else None
+    if not isinstance(pack, dict):
+        return None, ["缺少 pack 物件"]
+    warnings = [
+        f"{key} 不是整數（{pack[key]!r}）"
+        for key in _FORMAT_KEYS
+        if key in pack and (type(pack[key]) is not int)
+    ]
+    supported = pack.get("supported_formats")
+    if isinstance(supported, dict):
+        warnings += [
+            f"supported_formats.{key} 不是整數（{value!r}）"
+            for key, value in supported.items()
+            if type(value) is not int
+        ]
+    return data, warnings

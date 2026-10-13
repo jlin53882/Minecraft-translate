@@ -7,10 +7,14 @@ import zipfile
 
 import pytest
 
-from translation_tool.core.output_bundler import bundle_outputs_generator
+from translation_tool.core.output_bundler import (
+    BUNDLE_STATE_VERSION,
+    bundle_outputs_generator,
+)
 from translation_tool.core.pack_mcmeta import (
     build_pack_mcmeta,
     describe_pack_format,
+    inspect_pack_mcmeta_text,
     parse_pack_format,
 )
 
@@ -92,14 +96,23 @@ def test_bundle_without_description_or_version_still_writes_valid_pack_mcmeta(
     }
 
 
-def test_user_max_replaces_default_max_inclusive():
+def test_user_max_across_1_21_9_boundary_writes_hybrid_metadata():
     assert build_pack_mcmeta("d", 34, 999) == {
         "pack": {
             "pack_format": 34,
             "description": "d",
             "supported_formats": {"min_inclusive": 34, "max_inclusive": 999},
+            "min_format": 34,
+            "max_format": 999,
         }
     }
+
+
+def test_user_max_below_boundary_has_no_min_max_format():
+    pack = build_pack_mcmeta("d", 34, 64)["pack"]
+    assert "min_format" not in pack and "max_format" not in pack
+    assert pack["supported_formats"]["max_inclusive"] == 64
+    assert "min_format" in build_pack_mcmeta("d", 34, 65)["pack"]
     assert build_pack_mcmeta("d", 34, 42)["pack"]["supported_formats"] == {
         "min_inclusive": 34,
         "max_inclusive": 42,
@@ -126,7 +139,10 @@ def test_user_max_is_ignored_before_1_20_2():
 
 
 def test_describe_with_user_max():
-    assert describe_pack_format(34, 999) == "pack_format 34，supported_formats 34–999"
+    assert describe_pack_format(34, 60) == "pack_format 34，supported_formats 34–60"
+    assert describe_pack_format(34, 999) == (
+        "pack_format 34，supported_formats 34–999，min_format 34，max_format 999"
+    )
 
 
 def test_bundle_writes_user_max(tmp_path):
@@ -161,3 +177,78 @@ def test_changing_only_max_rebuilds_zip(tmp_path):
     assert any("沿用" in u.get("log", "") for u in again)
     changed = run(100)
     assert not any("沿用" in u.get("log", "") for u in changed)
+
+
+def test_inspect_accepts_integer_metadata_without_warnings():
+    text = json.dumps(build_pack_mcmeta("d", 34))
+    data, warnings = inspect_pack_mcmeta_text(text)
+    assert data is not None and warnings == []
+
+
+def test_inspect_warns_about_quoted_numbers():
+    text = '{"pack":{"description":"d","min_format":"34","max_format":"46"}}'
+    data, warnings = inspect_pack_mcmeta_text(text)
+    assert data is not None
+    assert any("min_format" in w for w in warnings)
+    assert any("max_format" in w for w in warnings)
+
+
+@pytest.mark.parametrize("text", ["{not json", "[]", '{"pack": 1}', "{}"])
+def test_inspect_rejects_unusable_files(text):
+    data, warnings = inspect_pack_mcmeta_text(text)
+    assert data is None and warnings
+
+
+def _bundle(tmp_path, **kwargs):
+    out = tmp_path / "out.zip"
+    updates = list(bundle_outputs_generator(str(tmp_path / "src"), str(out), **kwargs))
+    with zipfile.ZipFile(out) as zf:
+        return json.loads(zf.read("pack.mcmeta").decode("utf-8")), updates
+
+
+@pytest.fixture
+def src_dir(tmp_path):
+    src = tmp_path / "src"
+    (src / "lang").mkdir(parents=True)
+    (src / "lang" / "zh_tw.json").write_text('{"k": "v"}', encoding="utf-8")
+    return src
+
+
+def test_valid_source_pack_mcmeta_is_kept_with_warnings(tmp_path, src_dir):
+    custom = '{"pack":{"description":"mine","pack_format":"34"}}'
+    (src_dir / "pack.mcmeta").write_text(custom, encoding="utf-8")
+    data, updates = _bundle(tmp_path, pack_format=34)
+    assert data == json.loads(custom)
+    assert any("pack_format 不是整數" in u.get("log", "") for u in updates)
+
+
+@pytest.mark.parametrize("content", ["{not json", "[]", "{}"])
+def test_unusable_source_pack_mcmeta_falls_back_to_generated(
+    tmp_path, src_dir, content
+):
+    (src_dir / "pack.mcmeta").write_text(content, encoding="utf-8")
+    data, updates = _bundle(tmp_path, pack_format=34)
+    assert data["pack"]["pack_format"] == 34
+    assert any("無法使用" in u.get("log", "") for u in updates)
+
+
+def test_undecodable_source_pack_mcmeta_falls_back_to_generated(tmp_path, src_dir):
+    (src_dir / "pack.mcmeta").write_bytes(b"\xff\xfe\x00bad")
+    data, _ = _bundle(tmp_path, pack_format=34)
+    assert data["pack"]["supported_formats"]["min_inclusive"] == 34
+
+
+def test_old_state_sidecar_forces_one_rebuild_then_reuses(tmp_path, src_dir):
+    out = tmp_path / "out.zip"
+
+    def run():
+        return list(bundle_outputs_generator(str(src_dir), str(out), pack_format=34))
+
+    run()
+    state_file = tmp_path / "out.zip.bundle-state.json"
+    state = json.loads(state_file.read_text(encoding="utf-8"))
+    assert state["version"] == BUNDLE_STATE_VERSION and BUNDLE_STATE_VERSION >= 2
+    state["version"] = 1
+    state_file.write_text(json.dumps(state), encoding="utf-8")
+    assert not any("沿用" in u.get("log", "") for u in run())
+    assert any("沿用" in u.get("log", "") for u in run())
