@@ -46,6 +46,8 @@ MergeView（頁面標題「語系比對合併」）整合 en_us、zh_cn、zh_tw 
 
 `_process_single_mod` 讀取來源、決定輸出路徑並寫檔；逐 key 決定最終 zh_tw 值與是否列為待翻譯的純函式是 `merge_lang_dicts`（階段 2 的 `merge_extracted_to_assets` 共用同一個）。優先序如下：
 
+每個 mod 的 `lang/` 資料夾內，zh_cn、zh_tw、en_us 各登記一個來源檔（`lang_merge_io.register_lang_source`）：同一語系同時有 `.json` 與 `.lang` 時一律用 `.json`，只有 `.lang` 才用 `.lang`（輸出也維持 `.lang`）。
+
 1. **人工 zh_tw 保護**：key 已存在於 output_dir 的既有 zh_tw.json（`merge_lang_dicts` 的 `is_from_output_dir`）且值含 CJK → 直接保留（外部 ZIP 內的 zh_tw 視為普通來源，仍會套用替換規則再處理）。
 2. **zh_tw（ZIP 來源）含中文** → `apply_replace_rules()`（字串）或 `recursive_translate_dict()`（結構）後採用。
 3. **zh_cn 含中文** → 以 `recursive_translate_dict`（內部走 S2TW 轉繁）後採用。
