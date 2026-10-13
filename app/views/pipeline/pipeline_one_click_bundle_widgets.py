@@ -9,8 +9,8 @@ import flet as ft
 from app.ui.design import C
 from app.ui.sync_text_field import SyncTextField
 from app.views.pipeline.pipeline_forms import (
-    VersionPickerControls,
-    build_version_picker,
+    VersionInputControls,
+    build_version_input,
     dialog_text_field,
 )
 
@@ -22,10 +22,10 @@ class Step4BundleWidgets:
     description_field: SyncTextField
     pack_image_field: SyncTextField
     extra_folders_view: ft.ListView
-    version_picker: VersionPickerControls
+    version_input: VersionInputControls
 
 
-def build_step4_version_widgets(ctx, version_data: dict):
+def build_step4_version_widgets(ctx):
     """Build wizard-owned values using the same picker/form controls as standalone."""
 
     def on_description(event):
@@ -67,11 +67,12 @@ def build_step4_version_widgets(ctx, version_data: dict):
         read_only=True,
     )
     extra_folders_view = ft.ListView(height=60, spacing=2, auto_scroll=False)
-    picker = build_version_picker(
+    version_input = build_version_input(
         page=ctx.page,
-        versions=tuple(version_data),
-        selected=ctx.state.bundle.version,
-        on_select=lambda value: setattr(ctx.state.bundle, "version", value),
+        value=ctx.state.bundle.version_input,
+        max_value=ctx.state.bundle.max_input,
+        on_change=lambda value: setattr(ctx.state.bundle, "version_input", value),
+        on_max_change=lambda value: setattr(ctx.state.bundle, "max_input", value),
         border_color=C.ENCH,
     )
     return Step4BundleWidgets(
@@ -80,5 +81,5 @@ def build_step4_version_widgets(ctx, version_data: dict):
         description_field,
         pack_image_field,
         extra_folders_view,
-        picker,
+        version_input,
     )

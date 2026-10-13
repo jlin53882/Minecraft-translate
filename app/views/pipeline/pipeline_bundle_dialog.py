@@ -3,25 +3,26 @@
 用途：
 - 選擇翻譯後的輸入資料夾（自動帶入 lm_translate 輸出）
 - 設定輸出 ZIP 檔案路徑
-- 設定檔案敘述、Minecraft 版本、封面圖片
+- 設定檔案敘述、Minecraft 版本（或 pack_format）、封面圖片
 - 新增其他指定資料夾
 - 執行打包（背景執行緒 + 進度輪詢）
 """
 
 import functools
-import json
 import os
 import types
 
 import flet as ft
 
+from app.services_impl.pack_format_service import build_pack_mcmeta
+from app.services_impl.pipelines.bundle_service import normalize_output_zip_name
 from app.services_impl.pipelines.extract_service import open_output_folder
 from app.ui.design import C
 from app.ui.dialogs import close_overlay_dialog, present_dialog, set_dialog_feedback
 from app.views.pipeline.pipeline_forms import (
     BundleFormState,
     build_bundle_form,
-    build_version_picker,
+    build_version_input,
     dialog_button,
     dialog_content,
     dialog_dimensions,
@@ -31,24 +32,6 @@ from translation_tool.utils.config_manager import (
     get_lm_translate_folder_name,
     load_config,
 )
-from translation_tool.utils.log_unit import log_warning
-
-
-def _load_version_data():
-    config_path = os.path.join(
-        os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))),
-        "translation_tool",
-        "core",
-        "resource_pack_version.json",
-    )
-    if os.path.exists(config_path):
-        try:
-            with open(config_path, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception as exc:  # noqa: BLE001 - 讀不到版本資料時使用空設定，UI 仍可開啟
-            log_warning(f"讀取版本資料失敗，使用空設定：{config_path}: {exc!r}")
-            return {}
-    return {}
 
 
 def open_bundle_dialog(
@@ -67,8 +50,8 @@ def open_bundle_dialog(
         input_path: 預填的輸入資料夾路徑
         output_path: 預填的輸出目錄路徑
         on_start_bundle: 回調函式，簽名：
-            on_start_bundle(input_root_dir, output_zip_path, description, min_format, max_format,
-                            pack_image_path, extra_folders)
+            on_start_bundle(input_root_dir, output_zip_path, description, pack_format,
+                            max_pack_format, pack_image_path, extra_folders)
         show_snack_bar: 回調：(message: str, color: str = RED_400) -> void
     """
     ctx = types.SimpleNamespace(
@@ -81,9 +64,9 @@ def open_bundle_dialog(
     )
     ctx.feedback = ft.Text("", size=12, color=C.GOLD, visible=False)
     _bundle_init_state_and_fields(ctx, input_path, output_path)
-    version_picker = _bundle_build_version_widgets(ctx)
+    version_input = _bundle_build_version_widgets(ctx)
     _bundle_build_extra_widgets(ctx)
-    content = _bundle_build_content(ctx, version_picker)
+    content = _bundle_build_content(ctx, version_input)
 
     dialog = ft.AlertDialog(
         modal=True,
@@ -115,7 +98,7 @@ def _bundle_init_state_and_fields(ctx, input_path, output_path):
 
     cfg = load_config()
     bundler_cfg = cfg.get("output_bundler", {})
-    output_zip_name = bundler_cfg.get("output_zip_name", "可使用翻譯.zip")
+    output_zip_name = normalize_output_zip_name(bundler_cfg.get("output_zip_name"))
     translate_output_subfolder = get_lm_translate_folder_name(cfg)
 
     ctx.default_input = (
@@ -155,7 +138,7 @@ def _bundle_init_state_and_fields(ctx, input_path, output_path):
 
 
 def _bundle_build_version_widgets(ctx):
-    """Build the shared searchable pack-version selector and description field."""
+    """檔案敘述與單一「版本或 pack_format」輸入框。"""
     ctx.description_field = dialog_text_field(
         ctx.page,
         reserved_width=80,
@@ -166,23 +149,14 @@ def _bundle_build_version_widgets(ctx):
         hint_text="直接輸入文字，或使用 § 顏色代碼",
         border_color=C.ENCH,
     )
-
-    ctx.version_data = _load_version_data()
-    ctx.version_picker = build_version_picker(
+    ctx.version_input = build_version_input(
         page=ctx.page,
-        versions=tuple(ctx.version_data),
-        selected="",
-        on_select=lambda value: setattr(ctx.bundle_form_state, "version", value),
+        value="",
+        on_change=lambda value: setattr(ctx.bundle_form_state, "version_input", value),
+        on_max_change=lambda value: setattr(ctx.bundle_form_state, "max_input", value),
         border_color=C.ENCH,
     )
-    ctx.version_search = ctx.version_picker.search
-    ctx.version_list = ctx.version_picker.list_view
-    ctx.version_toggle_label = ctx.version_picker.selected_label
-    ctx.version_dropdown_container = ctx.version_picker.list_container
-    ctx._refresh_version_list = ctx.version_picker.refresh
-    ctx._select_version = ctx.version_picker.select
-    ctx._toggle_version_expand = ctx.version_picker.toggle
-    return ctx.version_picker
+    return ctx.version_input
 
 
 def _bundle_build_extra_widgets(ctx) -> None:
@@ -219,7 +193,7 @@ def _bundle_build_extra_widgets(ctx) -> None:
     ctx.show_preview_result = functools.partial(_bundle_show_preview_result, ctx)
 
 
-def _bundle_build_content(ctx, _version_picker):
+def _bundle_build_content(ctx, _version_input):
     """Build editable standalone paths and compose the shared bundle form."""
     path_section = ft.Column(
         [
@@ -279,7 +253,7 @@ def _bundle_build_content(ctx, _version_picker):
     return build_bundle_form(
         path_section=path_section,
         description_field=ctx.description_field,
-        version_picker=ctx.version_picker,
+        version_input=ctx.version_input,
         pack_image_row=image_row,
         extra_folders_section=extra_section,
         feedback=ctx.feedback,
@@ -318,7 +292,13 @@ def _bundle_start_bundle(ctx, dialog):
 
     ctx.bundle_form_state.description = (ctx.description_field.value or "").strip()
     ctx.bundle_form_state.zip_output = output_zip
-    version_info = ctx.version_data.get(ctx.bundle_form_state.version or "", {})
+    try:
+        pack_format = ctx.version_input.pack_format()
+        max_pack_format = ctx.version_input.max_pack_format()
+        build_pack_mcmeta("", pack_format, max_pack_format)
+    except ValueError as exc:
+        set_dialog_feedback(ctx.page, ctx.feedback, f"⚠️ {exc}", C.GOLD)
+        return
 
     if not ctx.close_dialog(dialog):
         return
@@ -327,8 +307,8 @@ def _bundle_start_bundle(ctx, dialog):
         input_root_dir=input_dir or ctx.default_input,
         output_zip_path=output_zip or ctx.default_output_zip,
         description=(ctx.description_field.value or "").strip(),
-        min_format=version_info.get("min_format"),
-        max_format=version_info.get("max_format"),
+        pack_format=pack_format,
+        max_pack_format=max_pack_format,
         pack_image_path=pack_img or None,
         extra_folders=list(ctx.extra_folders),
     )

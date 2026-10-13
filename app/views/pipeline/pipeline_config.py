@@ -2,6 +2,7 @@
 
 import os
 
+from app.services_impl.pipelines.bundle_service import normalize_output_zip_name
 from translation_tool.utils.config_manager import (
     get_lm_translate_folder_name,
     load_config,
@@ -45,7 +46,7 @@ class PipelineConfig:
         self.lm_translate = "lm_translate"
         self.translate_output_subfolder = get_lm_translate_folder_name(cfg)
 
-        self.output_zip_name = bundler.get("output_zip_name", "可使用翻譯.zip")
+        self.output_zip_name = normalize_output_zip_name(bundler.get("output_zip_name"))
 
     @property
     def extract_lang_output_dir(self):

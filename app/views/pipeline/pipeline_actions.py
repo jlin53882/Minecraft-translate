@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from functools import partial
 from typing import Any
 
+from app.services_impl.pack_format_service import DEFAULT_PACK_FORMAT
 from app.services_impl.pipelines.bundle_service import (
     build_bundle_staging,
     run_bundling_service,
@@ -320,8 +321,8 @@ class PipelineActions:
                 input_root_dir=cfg.bundle_staging_dir,
                 output_zip_path=config.get("zip_output") or cfg.bundle_output_zip,
                 description=config.get("description", ""),
-                min_format=config.get("min_format") or 0,
-                max_format=config.get("max_format") or 0,
+                pack_format=config.get("pack_format") or DEFAULT_PACK_FORMAT,
+                max_pack_format=config.get("max_pack_format"),
                 pack_image_path=config.get("pack_image"),
                 extra_folders=config.get("extra_folders", []),
             )

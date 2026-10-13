@@ -78,7 +78,7 @@ def test_bundler_worker_restores_button_and_batches_ui(monkeypatch):
     )
     view._bundling_running = True
 
-    view._bundling_worker("C:/Root", "C:/out.zip", "", "", "")
+    view._bundling_worker("C:/Root", "C:/out.zip", 34, None, "", "")
     assert view._bundling_running is False
     # 背景執行緒不直接改控制項；51 次更新被節流/背壓成少量 event loop 任務
     ran = 0
