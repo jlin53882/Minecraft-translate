@@ -499,8 +499,8 @@ def test_view_delegates_every_step_to_injected_actions(tmp_path):
     kinds = [c[0] for c in actions.calls]
     assert kinds == ["extract", "merge", "translate", "bundle"]
     assert actions.calls[0] == ("extract", "m", "o", "dual", ["en_us"])
-    # min/max_format 的 None 會被正規化為 0（與原行為一致）
-    assert actions.calls[3][1]["min_format"] == 0
+    # pack_format 的 None 會改用預設（1.21.1 = 34）
+    assert actions.calls[3][1]["pack_format"] == 34
     assert actions.calls[3][1]["extra_folders"] is None
 
 

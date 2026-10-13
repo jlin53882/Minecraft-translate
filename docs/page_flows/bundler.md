@@ -7,7 +7,7 @@
 資源包打包頁把翻譯專案根目錄下各子資料夾的產出，連同額外資料夾與 `pack.mcmeta`、`pack.png`，打包成一個可直接放入遊戲的 ZIP。頁面負責：
 
 - 選擇翻譯專案根目錄、輸出 ZIP 路徑（留空時自動帶入 `根目錄\<output_zip_name>`）、封面圖。
-- 從 `resource_pack_version.json` 選擇 Minecraft 版本，決定寫入 `pack.mcmeta` 的 `min_format`、`max_format`。
+- 在單一輸入框填 Minecraft 版本（如 `1.20.4`）或 `pack_format` 整數，換算出寫入 `pack.mcmeta` 的 `pack_format`（18～64 另寫 `supported_formats`；65 以上改寫 `min_format`／`max_format`）；選填「最大使用版本」取代預設上限。
 - 新增、移除額外資料夾或檔案。
 - 即時預覽描述（含 § 顏色碼）、版本格式與即將寫入的 `pack.mcmeta` 內容。
 - 顯示打包日誌與進度。
@@ -32,19 +32,18 @@ flowchart TD
 
 `_on_config_paths` 可能在任何執行緒被呼叫，因此只排程，不直接改控制項。
 
-### 版本選擇
+### 版本輸入
 
 ```mermaid
 flowchart TD
-    A["版本切換列（_toggle_version_expand）"] --> B{"展開？"}
-    B -- 是 --> C["_refresh_version_list 依搜尋框過濾並顯示版本與 format 範圍"]
-    B -- 否 --> D["收起清單"]
-    E["搜尋框 on_change（_on_version_search_change）"] --> C
-    F["點選版本（_select_version）"] --> G["version_search 設為該版本，收起清單，更新切換列文字與 format 範圍"]
-    G --> H["_update_preview：刷新描述預覽與 mcmeta 內容"]
+    A["version_field 或 max_format_field on_change（_on_meta_change）"] --> B["_update_preview"]
+    C["常用版本按鈕（_use_quick_version）"] --> D["version_field 設為該版本"]
+    D --> B
+    B --> E["explain_version_input：含 . 當版本查表；純整數當 pack_format；空白用預設"]
+    E --> F["version_summary 顯示對應區間與實際寫入欄位；無效時顯示警示"]
 ```
 
-`version_search` 同時作為搜尋框與「目前選定版本」的儲存位置，清單中被選中的版本會以勾號標示。
+`version_field` 是「目前選定版本」的唯一儲存位置；最大使用版本放在 `max_format_field`，空白代表使用預設上限。
 
 ### 預覽與 pack.mcmeta
 
@@ -52,7 +51,7 @@ flowchart TD
 flowchart TD
     A["描述或封面圖路徑 on_change（_on_meta_change）"] --> B["_update_preview"]
     B --> C["描述經 mc_text_spans 轉為彩色文字（空白時顯示「尚未輸入描述」）"]
-    B --> D["format 範圍來自目前選定版本"]
+    B --> D["pack_format 與最大使用版本取自 version_field／max_format_field，空白時用預設"]
     B --> E["mcmeta_text：組成 pack.mcmeta JSON（ensure_ascii=False，縮排 2）"]
     B --> F{"封面圖路徑是檔案？"}
     F -- 是 --> G["顯示縮圖"]
@@ -82,7 +81,7 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-    A["_bundling_worker：建立 UiBatcher（間隔 0.2 秒）"] --> B["取得版本的 min_format、max_format（未指定時為 0）"]
+    A["_bundling_worker：建立 UiBatcher（間隔 0.2 秒）"] --> B["使用啟動前已決定的 pack_format 與最大使用版本"]
     B --> C["逐一迭代 bundle_outputs_generator"]
     C --> D["每行日誌加上「[打包]」前綴，mirror_lines 寫入後台記錄"]
     D --> E["batcher.add_lines；有 progress 則 set_state；有 error 則錯誤色"]
@@ -120,21 +119,23 @@ flowchart TD
 
 ## 狀態與資料
 
-- **`version_data`**：從 `translation_tool/core/resource_pack_version.json` 讀入，格式為版本字串 → `{min_format, max_format}`。檔案不存在或讀取失敗時使用空字典，讀取失敗會記錄 `log_warning`。
+- **版本對照表**：`translation_tool/core/pack_format_table.json`，由 `pack_format_lookup.load_table()` 讀入並快取。檔案不存在或損毀時使用空表並記錄 `log_warning`，此時輸入版本會提示改填 `pack_format` 整數。
 - **`extra_folders`**：使用者新增的額外資料夾或檔案路徑清單，只存在記憶體中，打包時以副本傳入。
-- **版本選擇**：`version_search.value` 即目前選定的版本；`version_expanded` 記錄清單是否展開。
+- **版本輸入**：`version_field.value` 為版本或 `pack_format`；`max_format_field.value` 為選填的最大使用版本。
 - **輸出檔名**：`_config_output_zip_name` 來自設定 `output_bundler.output_zip_name`，預設 `可使用翻譯.zip`（`OUTPUT_ZIP_NAME_PATH` 為訂閱的設定路徑）。
 - **打包狀態檔**：`_state_path(output_zip_path)` 記錄上次成功打包的指紋，供下次判斷是否可沿用既有 ZIP。
 - **暫存檔**：打包期間寫入 `<輸出路徑>.tmp`，成功後以 `os.replace` 替換正式檔案，未完成則在 `finally` 中刪除。
-- **pack.mcmeta**：內容來自 UI 的描述與版本 format；若來源資料夾或額外路徑中已有 `pack.mcmeta`，會跳過 UI 設定並在日誌中說明。`pack.png` 的處理方式相同。
+- **pack.mcmeta**：內容來自 UI 的描述、`pack_format` 與選填的最大使用版本（整數；18～64 另有 `supported_formats`，65 以上改用 `min_format`／`max_format`）；若來源資料夾或額外路徑中已有 `pack.mcmeta`，會跳過 UI 設定並在日誌中說明。`pack.png` 的處理方式相同。
 
 ## 錯誤處理
 
 - **輸入驗證**：根目錄為空時提示並不啟動；輸出路徑為空時自動帶入。
 - **重複執行**：`_bundling_running` 為真時，再次點擊只會提示「打包正在執行中」。
 - **輸入目錄錯誤**：不存在或沒有子資料夾時，核心 generator 以 `error` 更新回報，worker 將進度條改為錯誤色，狀態列顯示「打包失敗，請查看日誌」。
-- **打包中途失敗**：核心 generator 保留既有的有效 ZIP（尚未 `os.replace`），移除狀態檔使下次必定重建，並刪除暫存檔。worker 另外捕捉未預期例外，寫入「[錯誤]」行。
+- **輸出路徑不是檔案**：輸出 ZIP 路徑空白、以 `/` 或 `\\` 結尾、或指到既有資料夾時，核心 generator 一開始就回報「錯誤：輸出 ZIP 路徑是資料夾而不是檔案…（請指定檔名）」並結束，不建立任何檔案。設定 `output_bundler.output_zip_name` 為空白、含路徑分隔字元時改用預設檔名，缺少 `.zip` 時補上。
+- **最終替換被暫時拒絕**：暫存檔換成正式 ZIP 時遇到 `PermissionError`（OneDrive 或防毒掃描剛寫完的檔案）會短暫退避重試，仍失敗才視為打包失敗。
+- **打包中途失敗**：核心 generator 保留既有的有效 ZIP（尚未替換），移除狀態檔使下次必定重建，並刪除暫存檔。worker 另外捕捉未預期例外，寫入「[錯誤]」行。
 - **狀態檔寫入失敗**：不影響已成功的 ZIP，只在日誌中記錄「無法保存打包狀態」，下次會重新打包。
-- **版本資料讀取失敗**：改用空版本資料。之後若未選定版本，或選定的版本不在資料中，`min_format` 與 `max_format` 都以 0 寫入。
+- **版本無法換算**：輸入格式不合、比表內最新還新、落在表的空隙，或最大使用版本小於 `pack_format` 時，說明列顯示原因，按「開始打包」以 snack 擋下、不啟動；改填 `pack_format` 整數即可繞過對照表。版本與最大版本皆空白時使用預設 `pack_format` 34。
 - **應用程式關閉中**：啟動失敗時恢復開始按鈕、狀態列顯示「應用程式正在關閉，未啟動打包」並提示 snack。
 - **注意（目前行為）**：`_async_pick_root_dir` 與 `_async_pick_pack_image` 設定欄位值後只呼叫 `page.update()`，不會重新計算輸出檔名提示或封面預覽，要等使用者再次輸入才會更新。

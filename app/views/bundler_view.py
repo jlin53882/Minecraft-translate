@@ -12,7 +12,16 @@ import flet as ft
 
 from app import config_store
 from app.services_impl.config_service import load_config_json
-from app.services_impl.pipelines.bundle_service import bundle_outputs_generator
+from app.services_impl.pack_format_service import (
+    build_pack_mcmeta,
+    explain_version_input,
+    resolve_max_input,
+    resolve_version_input,
+)
+from app.services_impl.pipelines.bundle_service import (
+    bundle_outputs_generator,
+    normalize_output_zip_name,
+)
 from app.tasks.operation_registry import (
     CancellationPolicy,
     CommitPolicy,
@@ -27,7 +36,7 @@ from app.ui.snack import show_snack
 from app.ui.ui_batcher import UiBatcher
 from app.views._log import LogView
 from app.views.bundler.bundler_widgets import BundlerWidgetsMixin
-from translation_tool.utils.log_unit import log_debug, log_error, log_warning
+from translation_tool.utils.log_unit import log_debug, log_error
 from translation_tool.utils.ui_mirror import in_new_task, mirror_lines
 
 OUTPUT_ZIP_NAME_PATH = "output_bundler.output_zip_name"
@@ -42,22 +51,20 @@ class BundlerView(BundlerWidgetsMixin, ft.Column):
         self._page = page
         self.file_picker = file_picker
         self.extra_folders: list[str] = []
-        self.version_data: dict = {}
         self._bundling_running = False
 
-        self.version_search = kit.text_field(
-            hint="輸入版本關鍵字...",
-            icon=ft.Icons.SEARCH,
+        self.version_field = kit.text_field(
+            hint="輸入遊戲版本，例如 1.21.1；或直接輸入 pack_format 整數；留空使用預設",
+            mono=True,
             expand=True,
-            on_change=self._on_version_search_change,
+            on_change=self._on_meta_change,
         )
-        self.version_list = ft.ListView(
+        self.max_format_field = kit.text_field(
+            hint="最大使用版本（max_inclusive，選填）：填版本或整數，例如 1.21.4 或 999；留空使用預設",
+            mono=True,
             expand=True,
-            height=200,
-            spacing=2,
-            auto_scroll=False,
+            on_change=self._on_meta_change,
         )
-        self.version_expanded = False
         self.description_field = kit.text_field(
             hint="直接輸入文字，或使用 § 顏色代碼",
             expand=True,
@@ -97,16 +104,14 @@ class BundlerView(BundlerWidgetsMixin, ft.Column):
             tail_lines=250,
         )
 
-        self._load_version_data()
-        self._init_ui()
         self._load_output_zip_from_config()
         self._build_controls()
 
     def _load_output_zip_from_config(self):
         """從 config 載入 output_zip_name 並設定 hint_text"""
         config = load_config_json()
-        self._config_output_zip_name = config.get("output_bundler", {}).get(
-            "output_zip_name", "可使用翻譯.zip"
+        self._config_output_zip_name = normalize_output_zip_name(
+            config.get("output_bundler", {}).get("output_zip_name")
         )
         self.output_zip_field.hint_text = (
             f"留空則自動帶入：{{root_dir}}\\{self._config_output_zip_name}"
@@ -158,112 +163,18 @@ class BundlerView(BundlerWidgetsMixin, ft.Column):
                 f"留空則自動帶入：{{root_dir}}\\{self._config_output_zip_name}"
             )
 
-    def _load_version_data(self):
-        config_path = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
-            "translation_tool",
-            "core",
-            "resource_pack_version.json",
-        )
-        if os.path.exists(config_path):
-            try:
-                with open(config_path, "r", encoding="utf-8") as f:
-                    self.version_data = json.load(f)
-            except Exception as exc:  # noqa: BLE001 - 版本資料讀不到時用空設定，但要留下紀錄
-                log_warning(
-                    f"[Bundler] 讀取版本資料失敗，使用空設定：{config_path}: {exc!r}"
-                )
-                self.version_data = {}
-        else:
-            self.version_data = {}
-
-    def _init_ui(self):
-        self._refresh_version_list("")
-
-    def _refresh_version_list(self, search_text: str):
-        self.version_list.controls.clear()
-        filtered = [v for v in self.version_data if search_text.lower() in v.lower()]
-        if not filtered:
-            self.version_list.controls.append(
-                ft.Container(
-                    content=ft.Text(
-                        "找不到符合的版本" if search_text else "無可用版本",
-                        size=12,
-                        color=C.DIM,
-                    ),
-                    padding=8,
-                )
-            )
-        for version_key in filtered:
-            selected = version_key == self.version_search.value
-            info = self.version_data.get(version_key, {})
-            item = ft.Container(
-                content=ft.Row(
-                    [
-                        ft.Text(
-                            version_key,
-                            size=13,
-                            color=C.EM if selected else C.TEXT,
-                            weight=ft.FontWeight.W_600 if selected else None,
-                            expand=True,
-                        ),
-                        ft.Text(
-                            self._format_range(info),
-                            size=11.5,
-                            color=C.DIM,
-                            font_family=design.FONT_MONO,
-                        ),
-                        *(
-                            [ft.Icon(ft.Icons.CHECK, size=14, color=C.EM)]
-                            if selected
-                            else []
-                        ),
-                    ],
-                    spacing=8,
-                ),
-                padding=ft.Padding.symmetric(horizontal=10, vertical=8),
-                border_radius=8,
-                bgcolor=C.EM_BG if selected else None,
-                ink=True,
-                on_click=lambda e, v=version_key: self._select_version(v),
-            )
-            self.version_list.controls.append(item)
-        self._page.update()
-
-    @staticmethod
-    def _format_range(info: dict) -> str:
-        """版本資料 → 「format 9–15」這種顯示字串。"""
-        low, high = info.get("min_format"), info.get("max_format")
-        if low is None and high is None:
-            return ""
-        return f"format {low}" if low == high else f"format {low}–{high}"
-
-    def _on_version_search_change(self, e: ft.ControlEvent):
-        self._refresh_version_list(e.control.value or "")
-
-    def _select_version(self, version: str):
-        log_debug(f"_select_version called: {version}")
-        self.version_search.value = version
-        self.version_expanded = False
-        self._version_toggle_label.value = version
-        self.version_dropdown_container_ref.visible = False
-        self._version_toggle_format.value = self._format_range(
-            self.version_data.get(version, {})
-        )
-        self._version_toggle_icon.name = ft.Icons.EXPAND_MORE
+    def _use_quick_version(self, version: str) -> None:
+        """常用版本按鈕：填入版本並更新預覽。"""
+        self.version_field.value = version
         self._update_preview()
         self._page.update()
 
-    def _toggle_version_expand(self, e: ft.ControlEvent):
-        self.version_expanded = not self.version_expanded
-        log_debug(f"_toggle_version_expand: version_expanded={self.version_expanded}")
-        self.version_dropdown_container_ref.visible = self.version_expanded
-        self._version_toggle_icon.name = (
-            ft.Icons.EXPAND_LESS if self.version_expanded else ft.Icons.EXPAND_MORE
-        )
-        if self.version_expanded:
-            self._refresh_version_list(self.version_search.value or "")
-        self._page.update()
+    def _resolved_pack_format(self) -> tuple[int, int | None]:
+        """由輸入框換算 (pack_format, 最大使用版本或 None)；無效時拋出 ValueError。"""
+        pack_format = resolve_version_input(self.version_field.value).pack_format
+        max_pack_format = resolve_max_input(self.max_format_field.value)
+        build_pack_mcmeta("", pack_format, max_pack_format)  # 檢查最大不小於最小
+        return pack_format, max_pack_format
 
     # --- pack.mcmeta / 描述預覽 ---
     def _on_meta_change(self, e: ft.ControlEvent):
@@ -272,14 +183,13 @@ class BundlerView(BundlerWidgetsMixin, ft.Column):
 
     def mcmeta_text(self) -> str:
         """目前設定會寫進 pack.mcmeta 的內容（跟 output_bundler 寫入的格式一致）。"""
-        info = self.version_data.get(self.version_search.value or "", {})
-        pack = {
-            "pack": {
-                "description": self.description_field.value or "",
-                "min_format": str(info.get("min_format", 0)),
-                "max_format": str(info.get("max_format", 0)),
-            }
-        }
+        try:
+            pack_format, max_pack_format = self._resolved_pack_format()
+        except ValueError as exc:
+            return f"版本或 pack_format 無效：{exc}"
+        pack = build_pack_mcmeta(
+            self.description_field.value or "", pack_format, max_pack_format
+        )
         return json.dumps(pack, ensure_ascii=False, indent=2)
 
     def _update_preview(self):
@@ -288,9 +198,14 @@ class BundlerView(BundlerWidgetsMixin, ft.Column):
         self.preview_title.spans = mc_text_spans(
             description, default_color=C.TEXT, size=14
         ) or [ft.TextSpan("（尚未輸入描述）", style=ft.TextStyle(color=C.DIM, size=13))]
-        self.preview_format.value = self._format_range(
-            self.version_data.get(self.version_search.value or "", {})
+        pack_format, message, valid = explain_version_input(
+            self.version_field.value, self.max_format_field.value
         )
+        self.preview_format.value = (
+            f"pack_format {pack_format}" if valid else "版本或 pack_format 無效"
+        )
+        self.version_summary.value = message if valid else f"⚠️ {message}"
+        self.version_summary.color = C.MUTED if valid else C.GOLD
         self.mcmeta_view.value = self.mcmeta_text()
         image_path = (self.pack_image_field.value or "").strip()
         if image_path and os.path.isfile(image_path):
@@ -421,9 +336,14 @@ class BundlerView(BundlerWidgetsMixin, ft.Column):
             self._load_output_zip_from_config()
             output_zip = os.path.join(root_dir, self._config_output_zip_name)
 
-        version = self.version_search.value or ""
+        version = (self.version_field.value or "").strip()
         description = self.description_field.value or ""
         pack_image = self.pack_image_field.value or ""
+        try:
+            pack_format, max_pack_format = self._resolved_pack_format()
+        except ValueError as exc:
+            show_snack(self.page, f"版本或 pack_format 無效：{exc}")
+            return
 
         self._bundling_running = True
         self.start_button.disabled = True
@@ -435,7 +355,7 @@ class BundlerView(BundlerWidgetsMixin, ft.Column):
         self.progress_bar.color = C.EM
         message = (
             f"開始執行打包｜根目錄：{root_dir}｜輸出 ZIP：{output_zip}"
-            f"｜版本：{version or '（未指定）'}｜額外資料夾：{len(self.extra_folders)} 個"
+            f"｜版本輸入：{version or '（未指定）'}｜pack_format：{pack_format}｜最大版本：{max_pack_format or '（預設）'}｜額外資料夾：{len(self.extra_folders)} 個"
             f"｜封面圖：{pack_image or '（無）'}"
         )
         self._append_log(message, level="info")
@@ -446,7 +366,12 @@ class BundlerView(BundlerWidgetsMixin, ft.Column):
             in_new_task(
                 "bundler",
                 lambda: self._bundling_worker(
-                    root_dir, output_zip, version, description, pack_image
+                    root_dir,
+                    output_zip,
+                    pack_format,
+                    max_pack_format,
+                    description,
+                    pack_image,
                 ),
             ),
             name="資源包打包",
@@ -491,22 +416,26 @@ class BundlerView(BundlerWidgetsMixin, ft.Column):
             self.status_text.color = C.RED if failed else C.EM
         self._page.update()
 
-    def _bundling_worker(self, root_dir, output_zip, version, description, pack_image):
+    def _bundling_worker(
+        self,
+        root_dir,
+        output_zip,
+        pack_format,
+        max_pack_format,
+        description,
+        pack_image,
+    ):
         # 節流 + 背壓：背景執行緒只累積資料，UI 更新交給 event loop
         batcher = UiBatcher(
             self._page, self._apply_bundling_ui, interval=self._UI_FLUSH_INTERVAL_SEC
         )
         try:
-            version_info = self.version_data.get(version, {}) if version else {}
-            min_format = version_info.get("min_format", 0)
-            max_format = version_info.get("max_format", 0)
-
             generator_kwargs = {
                 "input_root_dir": root_dir,
                 "output_zip_path": output_zip,
                 "description": description,
-                "min_format": min_format,
-                "max_format": max_format,
+                "pack_format": pack_format,
+                "max_pack_format": max_pack_format,
                 "pack_image_path": pack_image if pack_image else None,
                 "extra_folders": self.extra_folders.copy(),
             }

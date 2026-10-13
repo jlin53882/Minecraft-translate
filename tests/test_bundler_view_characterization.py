@@ -1,3 +1,5 @@
+import json
+
 from app.ui.design import C
 from app.ui.snack import show_snack
 from app.views.bundler_view import BundlerView
@@ -17,20 +19,13 @@ def test_bundler_view_initializes_core_controls():
     view = BundlerView(mock_page(), mock_filepicker())
 
     assert view.progress_bar.visible is False
-    assert hasattr(view, "version_search")
-    assert hasattr(view, "version_list")
+    assert hasattr(view, "version_field")
+    assert hasattr(view, "max_format_field")
     assert hasattr(view, "description_field")
     assert hasattr(view, "pack_image_field")
     assert hasattr(view, "root_dir_field")
     assert hasattr(view, "output_zip_field")
     assert hasattr(view, "extra_folders_view")
-
-
-def test_bundler_view_loads_version_data():
-    page = mock_page()
-    view = BundlerView(page, mock_filepicker())
-
-    assert isinstance(view.version_data, dict)
 
 
 def test_bundler_view_extra_folders_list_initialized():
@@ -41,49 +36,57 @@ def test_bundler_view_extra_folders_list_initialized():
     assert len(view.extra_folders_view.controls) == 0
 
 
-def test_bundler_view_version_list():
-    page = mock_page()
-    view = BundlerView(page, mock_filepicker())
+def test_version_input_updates_preview_and_summary():
+    view = BundlerView(mock_page(), mock_filepicker())
 
-    assert hasattr(view, "version_search")
-    assert hasattr(view, "version_list")
-    assert hasattr(view, "version_data")
+    view.version_field.value = "1.20.4"
+    view._update_preview()
+    assert view.preview_format.value == "pack_format 22"
+    assert "supported_formats 22–46" in view.version_summary.value
 
-
-def test_bundler_view_version_list_starts_collapsed():
-    page = mock_page()
-    view = BundlerView(page, mock_filepicker())
-
-    assert hasattr(view, "version_list")
-    assert hasattr(view, "version_expanded")
-    assert view.version_expanded is False
-
-
-def test_version_toggle_expand():
-    page = mock_page()
-    view = BundlerView(page, mock_filepicker())
-
-    assert view.version_expanded is False
-    view._toggle_version_expand(None)
-    assert view.version_expanded is True
-    view._toggle_version_expand(None)
-    assert view.version_expanded is False
+    view.max_format_field.value = "999"
+    view._update_preview()
+    assert "supported_formats 22–999" in view.version_summary.value
+    data = json.loads(view.mcmeta_text())
+    assert data["pack"]["supported_formats"] == {
+        "min_inclusive": 22,
+        "max_inclusive": 999,
+    }
 
 
-def test_version_select():
-    page = mock_page()
-    view = BundlerView(page, mock_filepicker())
+def test_invalid_version_input_shows_warning_and_blocks_start():
+    view = BundlerView(mock_page(), mock_filepicker())
+    view.root_dir_field.value = "C:/Root"
+    view.version_field.value = "abc"
+    view._update_preview()
+    assert view.preview_format.value == "版本或 pack_format 無效"
+    assert view.version_summary.value.startswith("⚠️")
+    assert "無效" in view.mcmeta_text()
+    view.start_bundling_clicked(None)
+    assert view._bundling_running is False
 
-    view._select_version("1.20.1")
-    assert view.version_search.value == "1.20.1"
-    assert view.version_expanded is False
+
+def test_max_below_pack_format_is_rejected():
+    view = BundlerView(mock_page(), mock_filepicker())
+    view.version_field.value = "1.21.1"
+    view.max_format_field.value = "10"
+    view._update_preview()
+    assert view.version_summary.value.startswith("⚠️")
+
+
+def test_quick_version_button_fills_field():
+    view = BundlerView(mock_page(), mock_filepicker())
+    view._use_quick_version("1.20.1")
+    assert view.version_field.value == "1.20.1"
+    assert view.preview_format.value == "pack_format 15"
 
 
 def test_bundler_view_hint_texts():
     page = mock_page()
     view = BundlerView(page, mock_filepicker())
 
-    assert view.version_search.hint_text == "輸入版本關鍵字..."
+    assert "輸入遊戲版本" in view.version_field.hint_text
+    assert "最大使用版本" in view.max_format_field.hint_text
     assert view.description_field.hint_text == "直接輸入文字，或使用 § 顏色代碼"
     assert view.pack_image_field.hint_text == "選擇 pack.png 圖片（可選）"
     assert view.root_dir_field.hint_text == "包含所有翻譯產出的最上層資料夾"
@@ -168,7 +171,7 @@ def test_bundling_worker_updates_progress_and_reenables_controls(monkeypatch):
         mock_generator,
     )
 
-    view._bundling_worker("C:/Root", "C:/out.zip", "", "", "")
+    view._bundling_worker("C:/Root", "C:/out.zip", 34, None, "", "")
     _drain_ui_tasks(page)
 
     assert view.progress_bar.value == 1.0
@@ -177,7 +180,6 @@ def test_bundling_worker_updates_progress_and_reenables_controls(monkeypatch):
 def test_bundling_worker_with_version_info(monkeypatch):
     page = mock_page()
     view = BundlerView(page, mock_filepicker())
-    view.version_data = {"1.20.1": {"min_format": 15, "max_format": 15}}
     monkeypatch.setattr(view.log_view._list_view, "scroll_to", lambda **kwargs: None)
 
     captured_kwargs = {}
@@ -195,10 +197,10 @@ def test_bundling_worker_with_version_info(monkeypatch):
         mock_generator,
     )
 
-    view._bundling_worker("C:/Root", "C:/out.zip", "1.20.1", "Test Description", "")
+    view._bundling_worker("C:/Root", "C:/out.zip", 15, 999, "Test Description", "")
 
-    assert captured_kwargs["min_format"] == 15
-    assert captured_kwargs["max_format"] == 15
+    assert captured_kwargs["pack_format"] == 15
+    assert captured_kwargs["max_pack_format"] == 999
     assert captured_kwargs["description"] == "Test Description"
 
 
@@ -219,7 +221,7 @@ def test_bundling_worker_passes_extra_folders(monkeypatch):
         mock_generator,
     )
 
-    view._bundling_worker("C:/Root", "C:/out.zip", "", "", "")
+    view._bundling_worker("C:/Root", "C:/out.zip", 34, None, "", "")
 
     assert captured_kwargs["extra_folders"] == ["C:/extra1", "C:/extra2"]
 
@@ -240,7 +242,7 @@ def test_bundling_worker_passes_pack_image(monkeypatch):
         mock_generator,
     )
 
-    view._bundling_worker("C:/Root", "C:/out.zip", "", "", "C:/pack.png")
+    view._bundling_worker("C:/Root", "C:/out.zip", 34, None, "", "C:/pack.png")
 
     assert captured_kwargs["pack_image_path"] == "C:/pack.png"
 
@@ -262,7 +264,7 @@ def test_bundling_worker_empty_pack_image(monkeypatch):
         mock_generator,
     )
 
-    view._bundling_worker("C:/Root", "C:/out.zip", "", "", "")
+    view._bundling_worker("C:/Root", "C:/out.zip", 34, None, "", "")
 
     assert captured_kwargs["pack_image_path"] is None
 
@@ -311,7 +313,7 @@ def test_bundling_worker_with_error(monkeypatch):
         mock_generator,
     )
 
-    view._bundling_worker("C:/Root", "C:/out.zip", "", "", "")
+    view._bundling_worker("C:/Root", "C:/out.zip", 34, None, "", "")
     _drain_ui_tasks(page)
 
     assert view.progress_bar.color == C.RED
@@ -338,24 +340,6 @@ def test_bundler_view_append_log_adds_control():
 
     # PR refactor/unified-log-view: log_view 內部 ListView 透過 _list_view 存取
     assert len(view.log_view._list_view.controls) >= 1
-
-
-def test_bundler_view_version_list_exists():
-    page = mock_page()
-    view = BundlerView(page, mock_filepicker())
-    assert view.version_list is not None
-
-
-def test_bundler_view_version_search_exists():
-    page = mock_page()
-    view = BundlerView(page, mock_filepicker())
-    assert view.version_search is not None
-
-
-def test_bundler_view_version_data_exists():
-    page = mock_page()
-    view = BundlerView(page, mock_filepicker())
-    assert view.version_data is not None
 
 
 def test_bundler_view_pick_pack_image():

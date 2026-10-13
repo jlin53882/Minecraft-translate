@@ -12,13 +12,18 @@
 """
 
 import functools
-import json
 import os
 import types
 
 import flet as ft
 
 from app.services_impl.moddb_service import load_db_settings
+from app.services_impl.pack_format_service import (
+    build_pack_mcmeta,
+    resolve_max_input,
+    resolve_version_input,
+)
+from app.services_impl.pipelines.bundle_service import normalize_output_zip_name
 from app.ui.design import C
 from app.ui.dialogs import dispose_dialogs, present_dialog
 from app.views.merge.merge_db_options import MergeDbOptions
@@ -45,24 +50,6 @@ from translation_tool.utils.config_manager import (
     get_lm_translate_folder_name,
     load_config,
 )
-from translation_tool.utils.log_unit import log_warning
-
-
-def _load_version_data():
-    config_path = os.path.join(
-        os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))),
-        "translation_tool",
-        "core",
-        "resource_pack_version.json",
-    )
-    if os.path.exists(config_path):
-        try:
-            with open(config_path, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception as exc:  # noqa: BLE001 - 讀不到版本資料時使用空設定，UI 仍可開啟
-            log_warning(f"讀取版本資料失敗，使用空設定：{config_path}: {exc!r}")
-            return {}
-    return {}
 
 
 def open_one_click_dialog(
@@ -93,9 +80,9 @@ def open_one_click_dialog(
                 "dry_run": bool,
                 "write_new_cache": bool,
                 "description": str,
-                "version": str,
-                "min_format": int | None,   # 由所選版本對應；未選為 None
-                "max_format": int | None,
+                "version_input": str,   # 使用者輸入的版本或 pack_format；空白代表預設
+                "pack_format": int,     # 由 version_input 換算；空白為預設（1.21.1 = 34）
+                "max_pack_format": int | None,  # 使用者填的最大使用版本；None 用預設
                 "pack_image": str | None,
                 "extra_folders": list[str],
                 "zip_output": str,
@@ -185,7 +172,7 @@ def _one_click_init_config_defaults(ctx):
         "pending_organized_folder_name", "待翻譯整理需翻譯"
     )
     translate_output_subfolder = get_lm_translate_folder_name(cfg)
-    output_zip_name = bundler_cfg.get("output_zip_name", "可使用翻譯.zip")
+    output_zip_name = normalize_output_zip_name(bundler_cfg.get("output_zip_name"))
     ctx.translate_output_subfolder = translate_output_subfolder
     return lang_merger_cfg, output_zip_name, translate_output_subfolder
 
@@ -349,7 +336,7 @@ def _one_click__build_step3(ctx):
 
 
 def _one_click__build_step4(ctx):
-    widgets = build_step4_version_widgets(ctx, _load_version_data())
+    widgets = build_step4_version_widgets(ctx)
     ctx.bundle_widgets = widgets
 
     def _refresh_extra():
@@ -419,7 +406,7 @@ def _one_click__build_step4(ctx):
     return build_bundle_form(
         path_section=path_section,
         description_field=widgets.description_field,
-        version_picker=widgets.version_picker,
+        version_input=widgets.version_input,
         pack_image_row=_one_click_pack_image_row(ctx, widgets.pack_image_field),
         extra_folders_section=extras,
     )
@@ -588,6 +575,12 @@ def _one_click__sync_state_from_controls(ctx) -> None:
             ctx.bundle_widgets.description_field.value or ""
         ).strip()
         ctx.state.bundle.zip_output = ctx.bundle_widgets.zip_output_field.value or ""
+        ctx.state.bundle.version_input = (
+            ctx.bundle_widgets.version_input.field.value or ""
+        ).strip()
+        ctx.state.bundle.max_input = (
+            ctx.bundle_widgets.version_input.max_field.value or ""
+        ).strip()
         ctx.state.bundle.pack_image = (
             ctx.bundle_widgets.pack_image_field.value or ""
         ) or None
@@ -597,7 +590,6 @@ def _one_click__build_execute_config(ctx, lang_codes: list[str]) -> dict:
     global_settings = load_db_settings()
     merge_db_snapshot = ctx.merge_db_options.snapshot_for_run(global_settings)
     lm_db_snapshot = ctx.lm_db_options.snapshot_for_run(global_settings)
-    version_info = _load_version_data().get(ctx.state.bundle.version, {})
     return {
         "mode": normalize_extract_mode(ctx.state.extract.mode),
         "lang_codes": lang_codes,
@@ -609,11 +601,13 @@ def _one_click__build_execute_config(ctx, lang_codes: list[str]) -> dict:
         "dry_run": ctx.state.translate.dry_run,
         "write_new_cache": ctx.state.translate.write_new_cache,
         "description": ctx.state.bundle.description,
-        "version": ctx.state.bundle.version,
+        "version_input": ctx.state.bundle.version_input,
         "merge_db_snapshot": merge_db_snapshot,
         "lm_db_snapshot": lm_db_snapshot,
-        "min_format": version_info.get("min_format"),
-        "max_format": version_info.get("max_format"),
+        "pack_format": resolve_version_input(
+            ctx.state.bundle.version_input
+        ).pack_format,
+        "max_pack_format": resolve_max_input(ctx.state.bundle.max_input),
         "pack_image": ctx.state.bundle.pack_image,
         "extra_folders": list(ctx.state.bundle.extra_folders),
         "zip_output": ctx.state.bundle.zip_output,
@@ -635,6 +629,17 @@ def _one_click__do_execute(ctx, expected_step=4):
     ]
     if not lang_codes:
         ctx.feedback.value = "請至少勾選一個語言代碼，修正後再執行。"
+        ctx.feedback.visible = True
+        ctx.page.update()
+        return
+    try:
+        build_pack_mcmeta(
+            "",
+            resolve_version_input(ctx.state.bundle.version_input).pack_format,
+            resolve_max_input(ctx.state.bundle.max_input),
+        )
+    except ValueError as exc:
+        ctx.feedback.value = f"版本或 pack_format 無效：{exc}"
         ctx.feedback.visible = True
         ctx.page.update()
         return

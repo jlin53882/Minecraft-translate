@@ -30,7 +30,7 @@ dist\MinecraftTranslator\
 | 1.3 | 路徑判定 | 在 console 或日誌確認資料根目錄 | 資料根目錄為 `dist\MinecraftTranslator\data`（不是 `app\`）。若不符，記錄 `sys.argv[0]`、`__compiled__`、`sys.frozen` 與 `get_data_root()` 的實際值 |
 | 1.4 | 第一次啟動 | 刪除 `data\` 後啟動 | 自動建立 `data\config.json`（內容等同 `config.example.json`，**欄位完整**）、`data\logs\` 等；沒有錯誤提示 |
 | 1.5 | 存設定、重開 | 設定頁改一個值（例如 `log_level`）→ 存檔 → 關閉 → 重開 | 值保留；`data\config.json` 是合法 JSON |
-| 1.6 | 唯讀資源 | 檢查程式能讀到 `assets`、`config.example.json`、`pyproject.toml`、`resource_pack_version.json` | 圖示與版本資訊正常；`resource_pack_version.json` 有 4 處以 `__file__` 讀取（`app/views/bundler_view.py`、`app/views/pipeline/pipeline_bundle_dialog.py`、`app/views/pipeline/pipeline_one_click_dialog.py`、`app/services_impl/moddb_service.py`），確認打包版都能讀到（若找不到檔案請回報是哪一處） |
+| 1.6 | 唯讀資源 | 檢查程式能讀到 `assets`、`config.example.json`、`pyproject.toml`、`resource_pack_version.json`、`pack_format_table.json` | 圖示與版本資訊正常；`resource_pack_version.json`（`app/services_impl/moddb_service.py`）與 `pack_format_table.json`（`translation_tool/core/pack_format_lookup.py`）以 `__file__` 讀取，確認打包版都能讀到；在打包頁輸入 `1.21.1` 應顯示 `pack_format 34`（若找不到檔案請回報是哪一處） |
 | 1.7 | 舊安裝遷移 | 模擬舊版平面式安裝：把 `config.json`、`replace_rules.json`、`logs\`、`快取資料\` 放在 `dist\MinecraftTranslator\`（與 `app\` 同層），其中 `config.json` 填入可辨識的自訂值；再啟動新版 | 首次啟動後這些項目被搬進 `data\`，自訂值仍在，沒有被預設值覆蓋；`data\` 已有同名檔時**不覆蓋**、舊位置檔案保留 |
 | 1.8 | 更新（發佈腳本） | 在 `data\` 放一個標記檔，再次執行 `tools\build_exe.bat` | `app\` 被換成新版；`data\` 內容（含標記檔、`config.json`）完全不變 |
 | 1.9 | 更新時程式正在執行 | 保持 exe 執行中，執行 `build_exe.bat` 的發佈步驟 | 發佈失敗並提示先關閉程式；`app\` 被還原、仍可正常啟動 |

@@ -2,9 +2,9 @@
 
 import flet as ft
 
+from app.services_impl.pack_format_service import QUICK_VERSIONS
 from app.ui import design, kit
 from app.ui.design import C
-from translation_tool.utils.log_unit import log_debug
 
 
 class BundlerWidgetsMixin:
@@ -64,60 +64,30 @@ class BundlerWidgetsMixin:
         self._update_preview()
 
     def _build_bundler_version_section(self):
-        """版本選擇區塊。"""
-        log_debug(f"_build_controls: version_expanded={self.version_expanded}")
-        # --- 版本選擇（可展開的搜尋清單）---
-        current = self.version_search.value or ""
-        self._version_toggle_label = ft.Text(
-            current or "選擇遊戲版本",
-            size=13.5,
-            color=C.TEXT if current else C.DIM,
-            expand=True,
-        )
-        self._version_toggle_format = ft.Text(
-            self._format_range(self.version_data.get(current, {})),
-            size=12,
-            color=C.DIM,
-            font_family=design.FONT_MONO,
-        )
-        self._version_toggle_icon = ft.Icon(
-            ft.Icons.EXPAND_MORE, size=20, color=C.MUTED
-        )
-        version_toggle = ft.Container(
-            content=ft.Row(
-                [
-                    ft.Icon(ft.Icons.DIAMOND_OUTLINED, size=18, color=C.GOLD),
-                    self._version_toggle_label,
-                    self._version_toggle_format,
-                    self._version_toggle_icon,
+        """版本輸入區塊：單一輸入框 + 常用版本按鈕 + 即時換算說明。"""
+        self.version_summary = ft.Text("", size=11.5, color=C.MUTED)
+        quick_row = ft.Row(
+            [
+                ft.Text("常用：", size=11.5, color=C.MUTED),
+                *[
+                    ft.Button(
+                        version,
+                        on_click=lambda e, v=version: self._use_quick_version(v),
+                    )
+                    for version in QUICK_VERSIONS
                 ],
-                spacing=10,
-                vertical_alignment=ft.CrossAxisAlignment.CENTER,
-            ),
-            on_click=self._toggle_version_expand,
-            ink=True,
-            padding=ft.Padding.symmetric(horizontal=12, vertical=12),
-            bgcolor=C.PANEL2,
-            border=ft.Border.all(1, C.LINE2),
-            border_radius=design.RADIUS_CONTROL,
+            ],
+            spacing=6,
+            wrap=True,
         )
-        version_dropdown_container = ft.Container(
-            content=ft.Column(
-                [self.version_search, ft.Container(self.version_list, height=170)],
-                spacing=8,
-            ),
-            padding=10,
-            bgcolor=C.PANEL2,
-            border=ft.Border.all(1, C.LINE),
-            border_radius=design.RADIUS_CONTROL,
-            visible=False,
-        )
-        self.version_dropdown_container_ref = version_dropdown_container
         version_section = ft.Column(
             [
-                kit.section_label("遊戲版本 (pack_format)"),
-                version_toggle,
-                version_dropdown_container,
+                kit.section_label("遊戲版本或 pack_format"),
+                self.version_field,
+                quick_row,
+                kit.section_label("最大使用版本（選填）"),
+                self.max_format_field,
+                self.version_summary,
             ],
             spacing=6,
         )

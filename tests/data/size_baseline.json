@@ -23,7 +23,8 @@
     "app/views/moddb/scan_panel.py:ScanPanel._build_options_card": 99,
     "app/views/moddb/scan_panel.py:ScanPanel._build_run_card": 85,
     "app/views/moddb/translate_panel.py:TranslatePanel._build_run_card": 103,
-    "app/views/moddb_view.py:ModDbView.__init__": 81
+    "app/views/moddb_view.py:ModDbView.__init__": 81,
+    "app/views/pipeline/pipeline_forms.py:build_version_input": 82
   },
   "view_files": {
     "app/views/config_view.py": 1016,

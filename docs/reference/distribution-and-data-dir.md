@@ -31,7 +31,7 @@
 
 | 函式 | 用途 | 原始碼模式 | 打包（分離式） | 打包（平面式） |
 |---|---|---|---|---|
-| `get_resource_root()` | 隨程式附帶的**唯讀**檔案：`assets/`、`config.example.json`、`pyproject.toml`、`resource_pack_version.json` | 專案根目錄 | `app/` | exe 所在資料夾 |
+| `get_resource_root()` | 隨程式附帶的**唯讀**檔案：`assets/`、`config.example.json`、`pyproject.toml`、`resource_pack_version.json`、`pack_format_table.json` | 專案根目錄 | `app/` | exe 所在資料夾 |
 | `get_data_root()` | 使用者**可寫**資料：設定、規則、快取、日誌、checkpoint、icon 快取 | 專案根目錄 | `<根>/data` | exe 所在資料夾 |
 
 `get_data_root()` 的決定順序：
@@ -102,7 +102,7 @@
 
 ### 仍使用 `__file__` 的唯讀資源
 
-`resource_pack_version.json` 在 4 處以模組的 `__file__` 往上推算，**沒有使用 `get_resource_root()`**：`pipeline_bundle_dialog.py`、`pipeline_one_click_dialog.py`、`bundler_view.py`（`os.path.dirname(__file__)`）與 `app/services_impl/moddb_service.py` 的 `VERSION_FILE`（`Path(__file__).resolve().parents[2]`）。
+`resource_pack_version.json` 以模組的 `__file__` 往上推算，**沒有使用 `get_resource_root()`**：`app/services_impl/moddb_service.py` 的 `VERSION_FILE`（`Path(__file__).resolve().parents[2]`）。`pack_format_table.json` 同樣由 `translation_tool/core/pack_format_lookup.py` 的 `TABLE_FILE`（`Path(__file__).with_name(...)`）讀取。
 它們依賴 Nuitka 把模組的 `__file__` 對應到 `app/` 內的虛擬路徑，並由 `--include-data-files` 把該 JSON 放在 `app/translation_tool/core/`。這是推論，**需 Windows 實機確認**；有 `tests/test_app_paths.py::test_source_mode_resource_root_is_repo_root` 確保原始碼模式下檔案位置一致。
 
 ## 尚未驗證（需 Windows 實機）
@@ -110,7 +110,7 @@
 - Nuitka standalone 能否啟動 Flet 桌面視窗（`flet_desktop` 客戶端是否需要額外 `--include-package-data`）。
 - 打包後設定、快取、`logs/` 實際落在 exe 旁邊；關閉重開後仍在。
 - `__compiled__` 與 `sys.argv[0]` 在 Nuitka standalone / onefile 下的實際值。
-- `resource_pack_version.json`、`pyproject.toml` 打包後的讀取行為。
+- `resource_pack_version.json`、`pack_format_table.json`、`pyproject.toml` 打包後的讀取行為。
 - 分離式首次啟動的舊資料搬移（用真實舊安裝，含 Windows 檔案被占用的情況）。
 - 啟動器 `MinecraftTranslator.bat` 啟動 `app\\MinecraftTranslator.exe` 的行為。
 - 上述測試待其他功能完成後再進行。
