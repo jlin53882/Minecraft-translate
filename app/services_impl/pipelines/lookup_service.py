@@ -11,6 +11,7 @@ import logging
 
 from app.services_impl.logging_service import GLOBAL_LOG_LIMITER
 from translation_tool.utils.species_cache import (
+    STATUS_ERROR,
     STATUS_FOUND,
     STATUS_NOT_FOUND,
     STATUS_RATE_LIMITED,
@@ -25,8 +26,21 @@ NOT_FOUND_MESSAGE = "在本地快取和線上查詢中均未找到結果。"
 
 
 def _parent_note(lookup: SpeciesLookup) -> str:
-    if lookup.parent_name and lookup.parent_value:
+    """查無時上一層物種的結果：參考名稱，或上一層查詢受限流／失敗的提醒。"""
+    if not lookup.parent_name:
+        return ""
+    if lookup.parent_value:
         return f"（上一層物種 {lookup.parent_name}：{lookup.parent_value}，僅供參考）"
+    if lookup.parent_status == STATUS_RATE_LIMITED:
+        return (
+            f"（上一層物種 {lookup.parent_name} 查詢遭維基百科限流"
+            f"（{lookup.parent_detail}），請稍後再試）"
+        )
+    if lookup.parent_status == STATUS_ERROR:
+        return (
+            f"（上一層物種 {lookup.parent_name} 查詢失敗"
+            f"（{lookup.parent_detail}），請稍後再試）"
+        )
     return ""
 
 
@@ -69,6 +83,7 @@ def run_batch_lookup_service(json_text: str):
 
         results = {}
         total = len(names)
+        stopped = False
 
         first = GLOBAL_LOG_LIMITER.filter(
             {"log": f"開始批次查詢 {total} 個學名...", "progress": 0}
@@ -92,6 +107,7 @@ def run_batch_lookup_service(json_text: str):
                     )
                     logger.warning(message)
                     yield {"log": message, "progress": (i + 1) / total}
+                    stopped = True
                     break
 
             update = GLOBAL_LOG_LIMITER.filter(
@@ -105,7 +121,11 @@ def run_batch_lookup_service(json_text: str):
 
         final = GLOBAL_LOG_LIMITER.filter(
             {
-                "log": "--- 批次查詢完成 ---",
+                "log": (
+                    "--- 批次查詢已因限流停止（部分完成） ---"
+                    if stopped
+                    else "--- 批次查詢完成 ---"
+                ),
                 "result": json.dumps(results, indent=2, ensure_ascii=False),
             }
         )

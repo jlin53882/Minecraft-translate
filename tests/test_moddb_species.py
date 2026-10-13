@@ -1305,3 +1305,70 @@ def test_batch_lookup_stops_on_rate_limit(monkeypatch):
         "Ginkgo biloba": "查詢失敗：HTTP 429",
         "Abies alba": "未查詢（已因限流停止）",
     }
+
+
+def _beech_network(monkeypatch, parent_error):
+    """原名稱查無；上一層物種丟出 ``parent_error``，其他名稱都查得到。"""
+
+    def fetch(name):
+        if name == "Fagus sylvatica purpurea":
+            return None
+        if name == "Fagus sylvatica":
+            raise parent_error
+        return "油橄欖"
+
+    monkeypatch.setattr(species_cache, "_query_wikipedia_title", fetch)
+
+
+@pytest.mark.parametrize(
+    ("parent_error", "note"),
+    [
+        (
+            _http_error(429),
+            "（上一層物種 Fagus sylvatica 查詢遭維基百科限流（HTTP 429 請求過於頻繁），請稍後再試）",
+        ),
+        (
+            requests.Timeout(),
+            "（上一層物種 Fagus sylvatica 查詢失敗（連線逾時），請稍後再試）",
+        ),
+    ],
+)
+def test_manual_lookup_reports_parent_failure(
+    isolated_species_cache, monkeypatch, parent_error, note
+):
+    from app.services_impl.pipelines import lookup_service
+
+    _beech_network(monkeypatch, parent_error)
+    message = lookup_service.run_manual_lookup_service("Fagus sylvatica purpurea")
+    assert message == lookup_service.NOT_FOUND_MESSAGE + note
+
+
+@pytest.mark.parametrize(
+    ("parent_error", "stopped"),
+    [(_http_error(429), True), (requests.Timeout(), False)],
+)
+def test_batch_lookup_reports_parent_failure_and_partial_stop(
+    isolated_species_cache, monkeypatch, parent_error, stopped
+):
+    import json
+
+    from app.services_impl.pipelines import lookup_service
+
+    _beech_network(monkeypatch, parent_error)
+    updates = list(
+        lookup_service.run_batch_lookup_service(
+            '["Fagus sylvatica purpurea", "Olea europaea"]'
+        )
+    )
+    final = next(u for u in updates if u.get("result"))
+    result = json.loads(final["result"])
+    value = result["Fagus sylvatica purpurea"]
+    assert value.startswith("未找到（上一層物種 Fagus sylvatica 查詢")
+    if stopped:
+        assert "限流" in value
+        assert result["Olea europaea"] == "未查詢（已因限流停止）"
+        assert final["log"] == "--- 批次查詢已因限流停止（部分完成） ---"
+    else:
+        assert "查詢失敗（連線逾時）" in value
+        assert result["Olea europaea"] == "油橄欖"
+        assert final["log"] == "--- 批次查詢完成 ---"
