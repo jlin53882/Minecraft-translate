@@ -11,7 +11,9 @@ from __future__ import annotations
 import csv
 import logging
 import re
+import threading
 import time
+from dataclasses import dataclass
 from pathlib import Path
 
 import requests
@@ -65,10 +67,38 @@ _tw_converter: OpenCC | None = None
 
 # 防止 initialize_species_cache() 被重複執行
 _initialized = False
+_init_lock = threading.RLock()
+# 快取字典與 TSV 檔的寫入、以及同名學名的單一查詢（single-flight）
+_cache_write_lock = threading.Lock()
+_name_locks: dict[str, threading.Lock] = {}
+_name_locks_guard = threading.Lock()
+
+STATUS_FOUND = "found"
+STATUS_NOT_FOUND = "not_found"
+STATUS_RATE_LIMITED = "rate_limited"
+STATUS_ERROR = "error"
+
+
+@dataclass(frozen=True)
+class SpeciesLookup:
+    """一次學名查詢的結果；``found`` 與 ``not_found`` 是確定結果，其餘可重試。"""
+
+    status: str
+    value: str | None = None
+    detail: str = ""
+
+    @property
+    def definitive(self) -> bool:
+        return self.status in (STATUS_FOUND, STATUS_NOT_FOUND)
 
 
 def initialize_species_cache():
-    """初始化學名快取系統。"""
+    """初始化學名快取系統（多執行緒同時呼叫時只會初始化一次）。"""
+    with _init_lock:
+        return _initialize_species_cache_locked()
+
+
+def _initialize_species_cache_locked():
     global \
         _species_cache_data, \
         _CACHE_DIR, \
@@ -238,58 +268,92 @@ def _query_wikipedia_title(species_name: str) -> str | None:
     return None
 
 
+def _name_lock(name: str) -> threading.Lock:
+    with _name_locks_guard:
+        return _name_locks.setdefault(name, threading.Lock())
+
+
+def _cached_lookup(name: str) -> SpeciesLookup | None:
+    if _species_cache_data is None or name not in _species_cache_data:
+        return None
+    cached = _species_cache_data[name]
+    log.debug(f"從快取中找到 '{name}': '{cached}'")
+    if cached:
+        return SpeciesLookup(STATUS_FOUND, cached)
+    return SpeciesLookup(STATUS_NOT_FOUND)
+
+
+def _classify_lookup_error(exc: Exception) -> SpeciesLookup:
+    if isinstance(exc, requests.HTTPError):
+        status_code = exc.response.status_code if exc.response is not None else None
+        if status_code == 429:
+            return SpeciesLookup(STATUS_RATE_LIMITED, None, "HTTP 429 請求過於頻繁")
+        return SpeciesLookup(STATUS_ERROR, None, f"HTTP {status_code}")
+    if isinstance(exc, requests.Timeout):
+        return SpeciesLookup(STATUS_ERROR, None, "連線逾時")
+    if isinstance(exc, requests.ConnectionError):
+        return SpeciesLookup(STATUS_ERROR, None, "無法連線")
+    return SpeciesLookup(STATUS_ERROR, None, f"{type(exc).__name__}: {exc}")
+
+
+def _store_found_name(name: str, common_name: str) -> None:
+    with _cache_write_lock:
+        _species_cache_data[name] = common_name
+        if _CACHE_FILE:
+            try:
+                with open(_CACHE_FILE, "a", encoding="utf-8", newline="") as f:
+                    writer = csv.writer(f, delimiter="	")
+                    writer.writerow([name, common_name])
+            except OSError as e:
+                log.error(f"寫入快取檔案 {_CACHE_FILE} 失敗: {e!r}")
+
+
+def _fetch_and_cache(name: str) -> SpeciesLookup:
+    """線上查詢一個已正規化的學名；只有找到時才寫入快取。"""
+    log.debug(f"開始線上查詢: {name}")
+    try:
+        common_name = _query_wikipedia_title(name)
+    except Exception as e:  # noqa: BLE001 - 外部 API 與回應解析錯誤需分類回報
+        log.error("線上查詢 '%s' 時發生網路或 API 錯誤: %r", name, e)
+        return _classify_lookup_error(e)
+    if common_name is None:
+        log.warning("線上查詢失敗：找不到 '%s' 的 Wikipedia 頁面。", name)
+        return SpeciesLookup(STATUS_NOT_FOUND)
+    log.info(f"線上查詢成功: {name} -> {common_name}")
+    _store_found_name(name, common_name)
+    return SpeciesLookup(STATUS_FOUND, common_name)
+
+
 def query_wikipedia_and_update_cache(species_name: str) -> str | None:
     """線上查詢維基百科並更新快取。"""
     if _species_cache_data is None:
         return None
+    return _fetch_and_cache(_normalize_species_name(species_name)).value
 
-    normalized_name = _normalize_species_name(species_name)
-    log.debug(f"開始線上查詢: {normalized_name}")
-    try:
-        common_name = _query_wikipedia_title(normalized_name)
-        if common_name is None:
-            log.warning(
-                "線上查詢失敗：找不到 '%s' 的 Wikipedia 頁面。",
-                normalized_name,
-            )
-            return None
-        log.info(f"線上查詢成功: {normalized_name} -> {common_name}")
 
-        _species_cache_data[normalized_name] = common_name
-        if _CACHE_FILE:
-            try:
-                with open(_CACHE_FILE, "a", encoding="utf-8", newline="") as f:
-                    writer = csv.writer(f, delimiter="\t")
-                    writer.writerow([normalized_name, common_name])
-            except OSError as e:
-                log.error(f"寫入快取檔案 {_CACHE_FILE} 失敗: {e!r}")
+def lookup_species(name: str) -> SpeciesLookup:
+    """查詢物種名稱並回報結果類別（找到／查無／可重試的失敗）。
 
-        return common_name
-    except Exception as e:  # noqa: BLE001 - 外部 API 與回應解析錯誤需降級為未找到
-        log.error(
-            "線上查詢 '%s' 時發生網路或 API 錯誤: %r",
-            normalized_name,
-            e,
-        )
-        return None
+    同一個學名同時被多個執行緒查詢時，只會有一個實際送出請求。
+    """
+    if not _initialized and not initialize_species_cache():
+        log.error("學名快取系統初始化失敗，查詢功能無法使用。")
+        return SpeciesLookup(STATUS_ERROR, None, "學名快取初始化失敗")
+    if _species_cache_data is None:
+        return SpeciesLookup(STATUS_ERROR, None, "學名快取不可用")
+
+    normalized_name = _normalize_species_name(name)
+    if cached := _cached_lookup(normalized_name):
+        return cached
+    if not is_potential_species_name(normalized_name):
+        return SpeciesLookup(STATUS_NOT_FOUND)
+
+    with _name_lock(normalized_name):
+        if cached := _cached_lookup(normalized_name):
+            return cached
+        return _fetch_and_cache(normalized_name)
 
 
 def lookup_species_name(name: str) -> str | None:
-    """查詢物種名稱。"""
-    if not _initialized and not initialize_species_cache():
-        log.error("學名快取系統初始化失敗，查詢功能無法使用。")
-        return None
-
-    if _species_cache_data is None:
-        return None
-
-    normalized_name = _normalize_species_name(name)
-    if normalized_name in _species_cache_data:
-        cached_result = _species_cache_data[normalized_name]
-        log.debug(f"從快取中找到 '{normalized_name}': '{cached_result}'")
-        return cached_result if cached_result else None
-
-    if is_potential_species_name(normalized_name):
-        return query_wikipedia_and_update_cache(normalized_name)
-
-    return None
+    """查詢物種名稱；失敗與查無都回傳 ``None``（需要區分時用 ``lookup_species``）。"""
+    return lookup_species(name).value

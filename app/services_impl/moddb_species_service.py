@@ -10,7 +10,13 @@ from dataclasses import dataclass
 
 from translation_tool.translation_db import EntryRow, TranslationDB
 from translation_tool.utils.species_cache import (
+    STATUS_ERROR,
+    STATUS_FOUND,
+    STATUS_NOT_FOUND,
+    STATUS_RATE_LIMITED,
+    SpeciesLookup,
     is_potential_species_name,
+    lookup_species,
     lookup_species_name,
 )
 
@@ -112,9 +118,15 @@ def scan_species_candidates(
 __all__ = [
     "DEFAULT_SCAN_LIMIT",
     "SCAN_PAGE_SIZE",
+    "STATUS_ERROR",
+    "STATUS_FOUND",
+    "STATUS_NOT_FOUND",
+    "STATUS_RATE_LIMITED",
     "SpeciesCandidate",
+    "SpeciesLookup",
     "SpeciesScanResult",
     "is_potential_species_name",
+    "lookup_species",
     "lookup_species_name",
     "scan_species_candidates",
 ]
