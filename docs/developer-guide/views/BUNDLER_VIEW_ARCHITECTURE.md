@@ -78,7 +78,7 @@ BundlerView.start_bundling_clicked()
 
 ### generator 行為細節
 - **pack.mcmeta / pack.png 來源優先序**：若 root_dir 或 extra_folders 內已存在實際檔案 → 用檔案、跳過 UI 設定並 warn；否則用 UI 欄位。
-  - 來源 `pack.mcmeta` 經 `_read_custom_pack_mcmeta`（`pack_mcmeta.inspect_pack_mcmeta_text`）檢查：讀不出來、不是有效 JSON 或沒有 `pack` 物件時不沿用，改用 UI 設定產生並 warn；可用但 format 欄位不是整數（例如寫成字串）時照原文沿用，只 warn。
+  - 來源 `pack.mcmeta` 經 `_read_custom_pack_mcmeta`（`pack_mcmeta.repair_source_pack_mcmeta`）檢查：讀不出來、不是有效 JSON 或沒有 `pack` 物件時不沿用，改用 UI 設定產生並 warn；沒有問題時逐字沿用；`pack_format`、`min_format`／`max_format`、`supported_formats` 寫成數字字串時改成整數，值無法使用（非數字、負數、範圍反向）時丟掉該欄位，缺少可用的版本欄位或 `description` 時用 UI 設定補上，其他自訂欄位（overlays、filter 等）原樣保留，並逐項 warn 修正了什麼。
   - 來源沒有 pack.mcmeta 時一律寫入（`_write_pack_mcmeta`）：所有 format 數值皆為整數。`pack_format` 1～17 只寫 `pack_format`；18～64（1.20.2～1.21.8）寫 `pack_format` 加 `supported_formats`，`min_inclusive` 為 `pack_format`，`max_inclusive` 使用者未填時在 18～46 為 46、47～64 為 64；65 以上（1.21.9 起，`supported_formats` 已移除）不寫 `pack_format`，改寫 `min_format`（`pack_format`）與 `max_format`（未填為 9999）。使用者填的最大使用版本取代上述預設；`pack_format` 18～64 而最大使用版本 ≥ 65 時，另外寫入 `min_format`（`pack_format`）與 `max_format`（最大使用版本），新舊版遊戲各讀自己認得的欄位。小於 `pack_format` 時拋出 ValueError，1～17 沒有對應欄位而忽略。未指定版本時 `pack_format` 為 34（1.21～1.21.1）。規則集中在 `translation_tool/core/pack_mcmeta.py`（`build_pack_mcmeta`、`parse_pack_format`），輸入換算在 `translation_tool/core/pack_format_lookup.py`（`resolve_version_input`、`resolve_max_input`、`explain_version_input`）。
   - pack.png 僅接受 `.png/.jpg/.jpeg` 副檔名；UI 來源若與已寫入的 `pack.png` 衝突 → 改名 `pack_1.png`
 - ZIP 壓縮：`ZIP_DEFLATED` + `compresslevel=ZIP_COMPRESS_LEVEL`（常數值 6）。

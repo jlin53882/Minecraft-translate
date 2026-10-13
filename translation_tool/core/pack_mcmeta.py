@@ -106,14 +106,59 @@ def describe_pack_format(pack_format: int, max_pack_format: int | None = None) -
     return "，".join(parts)
 
 
-_FORMAT_KEYS = ("pack_format", "min_format", "max_format")
+_VERSION_KEYS = ("pack_format", "supported_formats", "min_format", "max_format")
 
 
-def inspect_pack_mcmeta_text(text: str) -> tuple[dict[str, Any] | None, list[str]]:
-    """檢查來源資料夾裡既有的 ``pack.mcmeta`` 文字。
+def _as_int(value: Any) -> int | None:
+    """非負整數（含全是 ASCII 數字的字串）轉成整數；其他回傳 None。bool 不算整數。"""
+    if type(value) is int:
+        return value if value >= 0 else None
+    if isinstance(value, str) and value.strip().isascii() and value.strip().isdigit():
+        return int(value.strip())
+    return None
 
-    回傳 ``(內容, 警告)``：JSON 無法解析、或不是含 ``pack`` 物件時內容為 ``None``
-    （呼叫端改用產生器的內容）；format 欄位寫成字串之類的問題只列為警告。
+
+def _repair_int_list(value: Any, max_len: int) -> list[int] | None:
+    """1～``max_len`` 個整數（或整數字串）的陣列；不合格回傳 None。"""
+    if not isinstance(value, list) or not 1 <= len(value) <= max_len:
+        return None
+    ints = [_as_int(item) for item in value]
+    return None if any(item is None for item in ints) else ints
+
+
+def _repair_format(key: str, value: Any) -> Any | None:
+    """修正單一 format 欄位的型別；無法修正回傳 None（呼叫端會丟掉該欄位）。"""
+    if key == "pack_format":
+        return _as_int(value)
+    if key in ("min_format", "max_format"):  # 1.21.9 起可寫整數或 [主版本, 次版本]
+        single = _as_int(value)
+        return single if single is not None else _repair_int_list(value, 2)
+    # supported_formats：整數、[最小, 最大]，或 {min_inclusive, max_inclusive}
+    if isinstance(value, dict):
+        low = _as_int(value.get("min_inclusive"))
+        high = _as_int(value.get("max_inclusive"))
+        if low is None or high is None or high < low:
+            return None
+        return {**value, "min_inclusive": low, "max_inclusive": high}
+    single = _as_int(value)
+    if single is not None:
+        return single
+    pair = _repair_int_list(value, 2)
+    return pair if pair is not None and (len(pair) == 1 or pair[0] <= pair[1]) else None
+
+
+def repair_source_pack_mcmeta(
+    text: str, generated: dict[str, Any]
+) -> tuple[str | None, list[str]]:
+    """檢查並修正來源資料夾裡既有的 ``pack.mcmeta`` 文字。
+
+    回傳 ``(內容, 說明)``：
+    - 內容為 ``None``：JSON 無法解析或沒有 ``pack`` 物件，說明只有一項原因；呼叫端改用
+      ``generated``（UI 設定產生的內容）。
+    - 沒有任何問題：內容是原文（逐字不變），說明為空。
+    - format 欄位寫成字串、範圍反向等問題：把數字字串改成整數、丟掉無法修正的欄位；
+      缺少可用的版本欄位或 ``description`` 時，用 ``generated`` 的補上。來源檔其他欄位
+      （overlays、filter 等自訂設定）原樣保留。
     """
     try:
         data = json.loads(text)
@@ -122,16 +167,30 @@ def inspect_pack_mcmeta_text(text: str) -> tuple[dict[str, Any] | None, list[str
     pack = data.get("pack") if isinstance(data, dict) else None
     if not isinstance(pack, dict):
         return None, ["缺少 pack 物件"]
-    warnings = [
-        f"{key} 不是整數（{pack[key]!r}）"
-        for key in _FORMAT_KEYS
-        if key in pack and (type(pack[key]) is not int)
-    ]
-    supported = pack.get("supported_formats")
-    if isinstance(supported, dict):
-        warnings += [
-            f"supported_formats.{key} 不是整數（{value!r}）"
-            for key, value in supported.items()
-            if type(value) is not int
-        ]
-    return data, warnings
+
+    notes: list[str] = []
+    for key in _VERSION_KEYS:
+        if key not in pack:
+            continue
+        original = pack[key]
+        fixed = _repair_format(key, original)
+        if fixed is None:
+            del pack[key]
+            notes.append(f"{key} 的值 {original!r} 無法使用，已移除")
+        elif fixed != pack[key]:
+            notes.append(f"{key} 已改成 {json.dumps(fixed)}")
+            pack[key] = fixed
+
+    if "pack_format" not in pack and not (
+        "min_format" in pack and "max_format" in pack
+    ):
+        for key in _VERSION_KEYS:
+            pack.pop(key, None)
+        pack.update({k: v for k, v in generated["pack"].items() if k in _VERSION_KEYS})
+        notes.append("缺少可用的版本欄位，已用 UI 設定補上")
+    if not isinstance(pack.get("description"), (str, dict, list)):
+        pack["description"] = generated["pack"]["description"]
+        notes.append("缺少 description，已用 UI 設定補上")
+    if not notes:
+        return text, []
+    return json.dumps(data, ensure_ascii=False, indent=2), notes

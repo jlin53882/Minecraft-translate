@@ -14,8 +14,8 @@ from translation_tool.core.output_bundler import (
 from translation_tool.core.pack_mcmeta import (
     build_pack_mcmeta,
     describe_pack_format,
-    inspect_pack_mcmeta_text,
     parse_pack_format,
+    repair_source_pack_mcmeta,
 )
 
 
@@ -179,24 +179,105 @@ def test_changing_only_max_rebuilds_zip(tmp_path):
     assert not any("沿用" in u.get("log", "") for u in changed)
 
 
-def test_inspect_accepts_integer_metadata_without_warnings():
-    text = json.dumps(build_pack_mcmeta("d", 34))
-    data, warnings = inspect_pack_mcmeta_text(text)
-    assert data is not None and warnings == []
+GENERATED = build_pack_mcmeta("UI 說明", 34)
 
 
-def test_inspect_warns_about_quoted_numbers():
-    text = '{"pack":{"description":"d","min_format":"34","max_format":"46"}}'
-    data, warnings = inspect_pack_mcmeta_text(text)
-    assert data is not None
-    assert any("min_format" in w for w in warnings)
-    assert any("max_format" in w for w in warnings)
+def _repair(pack: object) -> tuple[dict | None, list[str]]:
+    content, notes = repair_source_pack_mcmeta(
+        json.dumps({"pack": pack}, ensure_ascii=False), GENERATED
+    )
+    return (None if content is None else json.loads(content)["pack"]), notes
+
+
+def test_repair_keeps_valid_source_byte_for_byte():
+    text = json.dumps(build_pack_mcmeta("d", 34), indent=4)
+    assert repair_source_pack_mcmeta(text, GENERATED) == (text, [])
+
+
+@pytest.mark.parametrize(
+    "pack",
+    [
+        {"description": "d", "min_format": [69, 0], "max_format": 75},
+        {"description": "d", "pack_format": 15},
+        {
+            "description": "d",
+            "pack_format": 34,
+            "supported_formats": [34, 46],
+        },
+        {"description": {"text": "x"}, "pack_format": 34, "supported_formats": 34},
+    ],
+)
+def test_repair_accepts_all_valid_forms_unchanged(pack):
+    fixed, notes = _repair(pack)
+    assert fixed == pack and notes == []
+
+
+def test_repair_turns_quoted_numbers_into_integers_and_keeps_other_keys():
+    fixed, notes = _repair(
+        {
+            "description": "mine",
+            "pack_format": "34",
+            "supported_formats": {"min_inclusive": "34", "max_inclusive": "46"},
+            "overlays": {"entries": [{"formats": [1, 2], "directory": "o"}]},
+        }
+    )
+    assert fixed["pack_format"] == 34 and type(fixed["pack_format"]) is int
+    assert fixed["supported_formats"] == {"min_inclusive": 34, "max_inclusive": 46}
+    assert fixed["overlays"] == {"entries": [{"formats": [1, 2], "directory": "o"}]}
+    assert fixed["description"] == "mine" and notes
+
+
+def test_repair_fixes_min_max_format_strings():
+    fixed, _ = _repair(
+        {"description": "d", "min_format": "69", "max_format": ["75", "0"]}
+    )
+    assert (fixed["min_format"], fixed["max_format"]) == (69, [75, 0])
+
+
+@pytest.mark.parametrize("bad", ["abc", "3.4", True, None, -1, [], {}, [1, "x"]])
+def test_repair_drops_unusable_pack_format_and_fills_version_from_ui(bad):
+    fixed, notes = _repair({"description": "d", "pack_format": bad})
+    assert fixed["pack_format"] == 34
+    assert fixed["supported_formats"] == GENERATED["pack"]["supported_formats"]
+    assert any("無法使用" in n for n in notes) or any("補上" in n for n in notes)
+
+
+def test_repair_drops_reversed_supported_formats_range():
+    fixed, notes = _repair(
+        {
+            "description": "d",
+            "pack_format": 34,
+            "supported_formats": {"min_inclusive": 46, "max_inclusive": 34},
+        }
+    )
+    assert "supported_formats" not in fixed and fixed["pack_format"] == 34
+    assert any("supported_formats" in n for n in notes)
+
+
+def test_repair_fills_version_fields_when_pack_is_empty():
+    fixed, notes = _repair({})
+    assert fixed == {
+        "description": "UI 說明",
+        "pack_format": 34,
+        "supported_formats": {"min_inclusive": 34, "max_inclusive": 46},
+    }
+    assert len(notes) == 2
+
+
+def test_repair_requires_both_min_and_max_format():
+    fixed, _ = _repair({"description": "d", "min_format": 69})
+    assert fixed["pack_format"] == 34 and "min_format" not in fixed
+
+
+def test_repair_fills_missing_description():
+    fixed, notes = _repair({"pack_format": 34})
+    assert fixed["description"] == "UI 說明" and any("description" in n for n in notes)
 
 
 @pytest.mark.parametrize("text", ["{not json", "[]", '{"pack": 1}', "{}"])
-def test_inspect_rejects_unusable_files(text):
-    data, warnings = inspect_pack_mcmeta_text(text)
-    assert data is None and warnings
+def test_repair_rejects_unusable_files(text):
+    content, notes = repair_source_pack_mcmeta(text, GENERATED)
+    assert content is None and len(notes) == 1
 
 
 def _bundle(tmp_path, **kwargs):
@@ -214,12 +295,30 @@ def src_dir(tmp_path):
     return src
 
 
-def test_valid_source_pack_mcmeta_is_kept_with_warnings(tmp_path, src_dir):
-    custom = '{"pack":{"description":"mine","pack_format":"34"}}'
+def test_valid_source_pack_mcmeta_is_kept_unchanged(tmp_path, src_dir):
+    custom = '{"pack":{"description":"mine","pack_format":15}}'
     (src_dir / "pack.mcmeta").write_text(custom, encoding="utf-8")
     data, updates = _bundle(tmp_path, pack_format=34)
     assert data == json.loads(custom)
-    assert any("pack_format 不是整數" in u.get("log", "") for u in updates)
+    assert not any("已修正" in u.get("log", "") for u in updates)
+
+
+def test_source_pack_mcmeta_with_quoted_numbers_is_repaired_not_copied(
+    tmp_path, src_dir
+):
+    custom = '{"pack":{"description":"mine","pack_format":"34","filter":{"block":[]}}}'
+    (src_dir / "pack.mcmeta").write_text(custom, encoding="utf-8")
+    data, updates = _bundle(tmp_path, pack_format=34)
+    assert data["pack"]["pack_format"] == 34
+    assert type(data["pack"]["pack_format"]) is int
+    assert data["pack"]["filter"] == {"block": []}  # 其他自訂欄位保留
+    assert any("已修正" in u.get("log", "") for u in updates)
+
+
+def test_source_pack_mcmeta_without_version_gets_ui_version(tmp_path, src_dir):
+    (src_dir / "pack.mcmeta").write_text('{"pack": {}}', encoding="utf-8")
+    data, _ = _bundle(tmp_path, description="UI", pack_format=34)
+    assert data["pack"]["pack_format"] == 34 and data["pack"]["description"] == "UI"
 
 
 @pytest.mark.parametrize("content", ["{not json", "[]", "{}"])

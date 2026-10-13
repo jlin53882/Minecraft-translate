@@ -18,7 +18,7 @@ from typing import Any
 from translation_tool.core.pack_mcmeta import (
     DEFAULT_PACK_FORMAT,
     build_pack_mcmeta,
-    inspect_pack_mcmeta_text,
+    repair_source_pack_mcmeta,
 )
 from translation_tool.utils.config_manager import (
     load_config,  # noqa: F401 - 測試以 monkeypatch 取代的 seam
@@ -77,10 +77,14 @@ def normalize_output_zip_name(value: object) -> str:
     return name
 
 
-def _read_custom_pack_mcmeta(path: str | None) -> tuple[str | None, list[str]]:
-    """讀取來源資料夾的 pack.mcmeta：可用則回傳 (原文, 警告)；不可用回傳 (None, [原因])。
+def _read_custom_pack_mcmeta(
+    path: str | None, generated: dict[str, Any]
+) -> tuple[str | None, list[str]]:
+    """讀取來源資料夾的 pack.mcmeta，回傳 (要寫入 ZIP 的內容, 說明)。
 
-    沒有來源檔時回傳 (None, [])。無法讀取或結構不對時不沿用，由產生器補上正確內容。
+    沒有來源檔：(None, [])。無法讀取、不是有效 JSON 或沒有 pack 物件：(None, [原因])，
+    由呼叫端改用 ``generated``（UI 設定產生的內容）。其他情況回傳可用的內容；format 欄位
+    寫成字串等問題會被修正，說明列出修正了什麼（見 ``repair_source_pack_mcmeta``）。
     """
     if not path:
         return None, []
@@ -89,10 +93,7 @@ def _read_custom_pack_mcmeta(path: str | None) -> tuple[str | None, list[str]]:
             content = f.read()
     except (OSError, UnicodeDecodeError) as ex:
         return None, [f"讀取失敗：{ex}"]
-    data, problems = inspect_pack_mcmeta_text(content)
-    if data is None:
-        return None, problems
-    return content, problems
+    return repair_source_pack_mcmeta(content, generated)
 
 
 def _output_path_problem(output_zip_path: str) -> str | None:
@@ -520,7 +521,8 @@ def bundle_outputs_generator(
         ) as zf:
             # Write pack.mcmeta from folder if exists, otherwise from UI
             custom_content, custom_problems = _read_custom_pack_mcmeta(
-                pack_mcmeta_source
+                pack_mcmeta_source,
+                build_pack_mcmeta(description, pack_format, max_pack_format),
             )
             if custom_content is not None:
                 seen_files["pack.mcmeta"] = 1
@@ -543,7 +545,7 @@ def bundle_outputs_generator(
             for problem in custom_problems if custom_content is not None else ():
                 yield {
                     "progress": 0.05,
-                    "log": f"警告：資料夾內的 pack.mcmeta {problem}",
+                    "log": f"警告：資料夾內的 pack.mcmeta 已修正：{problem}",
                 }
 
             # Write pack.png from folder if exists, otherwise from UI
