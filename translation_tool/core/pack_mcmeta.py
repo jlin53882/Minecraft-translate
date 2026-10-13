@@ -332,6 +332,8 @@ def _overlay_view(
     where = f"overlays.entries[{index}]"
     if not isinstance(entry, dict):
         return None, f"{where} 不是物件"
+    if not isinstance(entry.get("directory"), str) or not entry["directory"]:
+        return None, f"{where} 缺少 directory"
     view: dict[str, Any] = {}
     for key, source_key in _OVERLAY_KEYS:
         if source_key not in entry:
@@ -367,13 +369,20 @@ def _repair_overlays(data: dict[str, Any], notes: list[str]) -> str | None:
     - 每個項目都要有 ``min_format``／``max_format``，缺少時由 ``formats`` 推得。
     - 只要有任何項目涵蓋 65 以下的版本，所有項目都要有 ``formats``；沒有項目涵蓋時
       ``formats`` 必須移除。
-    - 項目的版本欄位無法使用、範圍反向或完全沒有版本欄位時不猜測，整份來源改用 UI 設定。
+    - ``overlays``／``entries`` 的結構不對、項目缺少 ``directory``，或項目的版本欄位無法使用、
+      範圍反向、完全沒有版本欄位時不猜測，整份來源改用 UI 設定。
     其他欄位（``directory`` 等）原樣保留。
     """
-    overlays = data.get("overlays")
-    entries = overlays.get("entries") if isinstance(overlays, dict) else None
-    if not isinstance(entries, list):
+    if "overlays" not in data:
         return None
+    overlays = data["overlays"]
+    if not isinstance(overlays, dict):
+        return "overlays 不是物件"
+    if "entries" not in overlays:
+        return None
+    entries = overlays["entries"]
+    if not isinstance(entries, list):
+        return "overlays.entries 不是陣列"
     views = []
     for index, entry in enumerate(entries):
         view, problem = _overlay_view(entry, index, notes)

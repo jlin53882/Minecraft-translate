@@ -746,6 +746,9 @@ def test_overlay_formats_are_removed_when_no_overlay_covers_old_versions():
         {"directory": "x", "min_format": 80, "max_format": 70},
         {"directory": "x"},
         {"directory": "x", "formats": [46, 34]},
+        {"formats": [34, 46]},
+        {"directory": "", "formats": [34, 46]},
+        {"directory": 5, "formats": [34, 46]},
     ],
 )
 def test_unrepairable_overlay_makes_the_whole_source_fall_back(entry):
@@ -847,3 +850,25 @@ def test_bundle_and_preview_agree_on_repaired_overlays(tmp_path, src_dir):
         "max_format": 75,
     }
     assert any("overlays.entries[0]" in u.get("log", "") for u in updates)
+
+
+@pytest.mark.parametrize(
+    ("overlays", "reason"),
+    [
+        ({"entries": "invalid"}, "overlays.entries 不是陣列"),
+        ({"entries": {"directory": "x"}}, "overlays.entries 不是陣列"),
+        ("invalid", "overlays 不是物件"),
+        (["x"], "overlays 不是物件"),
+    ],
+)
+def test_malformed_overlays_structure_makes_the_source_fall_back(overlays, reason):
+    content, notes = repair_source_pack_mcmeta(
+        json.dumps({"pack": NEW_PACK, "overlays": overlays}), GENERATED
+    )
+    assert content is None and reason in notes[0] and "無法安全修復" in notes[0]
+
+
+@pytest.mark.parametrize("overlays", [{}, {"entries": []}])
+def test_empty_overlays_are_not_an_error(overlays):
+    text = json.dumps({"pack": NEW_PACK, "overlays": overlays})
+    assert repair_source_pack_mcmeta(text, GENERATED) == (text, [])
