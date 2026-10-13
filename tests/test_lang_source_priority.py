@@ -23,8 +23,6 @@ def _register(*paths: str) -> dict[str, str]:
     [
         ("a/lang/zh_cn.json", "a/lang/zh_cn.lang"),
         ("a/lang/zh_cn.lang", "a/lang/zh_cn.json"),
-        ("a/lang/zh_cn.lang", "a/lang/zh_cn.json"),
-        ("a/lang/zh_cn.json", "a/lang/zh_cn.lang"),
     ],
 )
 def test_json_wins_over_lang_in_any_order(order):
