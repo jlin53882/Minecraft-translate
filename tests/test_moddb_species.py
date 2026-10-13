@@ -1372,3 +1372,28 @@ def test_batch_lookup_reports_parent_failure_and_partial_stop(
         assert "查詢失敗（連線逾時）" in value
         assert result["Olea europaea"] == "油橄欖"
         assert final["log"] == "--- 批次查詢完成 ---"
+
+
+def test_species_suggestion_prefers_parent_completed_by_bulk(isolated_species_cache):
+    from app.views.moddb.species_bulk_lookup import bulk_lookup_for
+    from app.views.moddb.species_suggestion import SpeciesSuggestion
+
+    page = mock_page()
+    changes = []
+    suggestion = SpeciesSuggestion(page, lambda _t: None, lambda: changes.append(1))
+    name = "Fagus sylvatica purpurea"
+    suggestion._results[name] = species_cache.SpeciesLookup(
+        species_cache.STATUS_NOT_FOUND,
+        parent_name="Fagus sylvatica",
+        parent_status=species_cache.STATUS_RATE_LIMITED,
+        parent_detail="HTTP 429",
+    )
+    # 背景批次查詢之後把原名稱的查無與上一層物種的名稱寫入快取
+    species_cache._species_cache_data[name] = ""
+    species_cache._species_cache_data["Fagus sylvatica"] = "歐洲山毛櫸"
+    bulk_lookup_for(page)._notify("lookup", 1)
+    assert changes == [1]
+    texts = _texts(suggestion.build(_entry("block.m.x.latin", name)))
+    assert any("上一層物種 Fagus sylvatica：歐洲山毛櫸" in text for text in texts)
+    assert "套用參考名稱" in texts
+    assert not any("查詢失敗（HTTP 429）" in text for text in texts)

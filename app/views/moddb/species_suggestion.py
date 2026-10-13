@@ -71,12 +71,17 @@ class SpeciesSuggestion:
                 )
             ]
         name = normalize_species_name(value)
-        # 快取裡查到的名稱優先：背景批次查詢查到後要蓋過這裡先前的失敗結果。
+        # 快取已有完整結果（查到，或查無且上一層物種也有結果）時優先：背景批次查詢
+        # 補齊後要蓋過這裡先前的失敗或上一層待查結果；這裡已完整的結果則保留。
         cached = cached_species_lookup(name)
-        if cached is not None and cached.status == STATUS_FOUND:
+        fresh = self._results.get(name)
+        if cached is not None and (
+            cached.status == STATUS_FOUND
+            or (cached.complete and not (fresh and fresh.complete))
+        ):
             lookup = cached
         else:
-            lookup = self._results.get(name) or cached
+            lookup = fresh or cached
         controls: list[ft.Control] = [self._card(entry, name, lookup)]
         if not has_species_key_hint(entry.key):
             controls.append(
