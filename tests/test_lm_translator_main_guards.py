@@ -71,25 +71,18 @@ def test_extract_translatables_for_lang_file_handles_top_level_nested_text_and_l
     }
 
 
-def test_extract_translatables_for_patchouli_uses_translatable_field_rules(
-    monkeypatch,
-) -> None:
-    monkeypatch.setattr(
-        translatable_extractor,
-        "is_translatable_field",
-        lambda key: key in {"title", "text"},
-    )
-    monkeypatch.setattr(
-        translatable_extractor,
-        "is_value_translatable",
-        lambda value, is_lang=False: isinstance(value, str) and bool(value.strip()),
-    )
-
+def test_extract_translatables_for_patchouli_judges_by_value_shape() -> None:
+    """手冊欄位不看名稱，只看值是不是顯示文字。"""
     data = {
-        "title": "章節標題",
-        "text": "內文",
+        "title": "Chapter Title",
+        "text": "Body text for the page.",
         "icon": "minecraft:book",
-        "nested": {"text": "巢狀內文", "color": "blue"},
+        "category": "mod:basics",
+        "flag": "mod_unlocked",
+        "color": "FFAA00",
+        "weird_new_field": "Shown To Players",
+        "nested": {"text": "Nested body text.", "type": "patchouli:text"},
+        "tags": ["Rare Drop", "minecraft:stone"],
     }
 
     items = translatable_extractor.extract_translatables(
@@ -97,7 +90,13 @@ def test_extract_translatables_for_patchouli_uses_translatable_field_rules(
     )
     paths = {item["path"] for item in items}
 
-    assert paths == {"title", "text", "nested.text"}
+    assert paths == {
+        "title",
+        "text",
+        "weird_new_field",
+        "nested.text",
+        "tags[0]",
+    }
 
 
 def test_set_by_path_supports_nested_list_path() -> None:

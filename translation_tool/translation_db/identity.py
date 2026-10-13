@@ -17,18 +17,22 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from translation_tool.translation_db.schema import KIND_LANG, KIND_PATCHOULI
+from translation_tool.core.book_dirs import DEFAULT_BOOK_DIRS, find_book_dir_index
+from translation_tool.translation_db.schema import (
+    KIND_GUIDE,
+    KIND_LANG,
+    KIND_PATCHOULI,
+)
 from translation_tool.utils.log_unit import log_debug
 
-DEFAULT_PATCHOULI_DIRS: tuple[str, ...] = (
-    "patchouli_books",
-    "book",
-    "manual",
-    "guidebook",
-)
+DEFAULT_PATCHOULI_DIRS: tuple[str, ...] = DEFAULT_BOOK_DIRS
 
 _LANG_FILE = re.compile(r"^(en_us|zh_tw|zh_cn)\.json$", re.IGNORECASE)
 _LANG_DIR = re.compile(r"^_?(en_us|zh_tw|zh_cn)$", re.IGNORECASE)
+# 指南語系資料夾：``_zh_tw``（底線開頭，允許不加底線）。原文通常不放在語系資料夾裡
+_GUIDE_LANG_DIR = re.compile(r"^_?(en_us|zh_tw|zh_cn)$", re.IGNORECASE)
+_OTHER_LANG_DIR = re.compile(r"^_?[a-z]{2}_[a-z]{2}$", re.IGNORECASE)
+_GUIDE_SUFFIXES = (".md", ".txt")
 _ROOT_DIRS = ("assets", "data")
 
 
@@ -80,9 +84,14 @@ def classify_parts(
         return None
 
     dirs = tuple(dir_names) if dir_names is not None else patchouli_dir_names()
-    if parts[2] not in dirs or not name.lower().endswith(".json"):
+    book_index = find_book_dir_index(parts, dirs)
+    if book_index is None:
         return None
-    for idx in range(3, len(parts) - 1):
+    if name.lower().endswith(_GUIDE_SUFFIXES):
+        return _classify_guide(parts, book_index, mod_id)
+    if not name.lower().endswith(".json"):
+        return None
+    for idx in range(book_index + 1, len(parts) - 1):
         match = _LANG_DIR.match(parts[idx])
         if match:
             rel = [*parts[2:idx], *parts[idx + 1 :]]
@@ -90,6 +99,29 @@ def classify_parts(
                 KIND_PATCHOULI, mod_id, "/".join(rel), match.group(1).lower()
             )
     return None
+
+
+def _classify_guide(
+    parts: Sequence[str], book_index: int, mod_id: str
+) -> FileIdentity | None:
+    """指南文字檔（.md／.txt）的身分。
+
+    語系資料夾是 ``_en_us``／``_zh_tw``／``_zh_cn``；沒有語系資料夾的檔案是原文（AE2 與
+    GuideMe 指南把英文放在指南根目錄、譯文放進 ``_<語系>/``）。其他語言（``_ja_jp`` 等）
+    不處理。``README`` 不是指南內容。
+    """
+    if parts[-1].lower() in ("readme.md", "readme.txt"):
+        return None
+    lang = "en_us"
+    rel = list(parts[2:])
+    for idx in range(book_index + 1, len(parts) - 1):
+        if _GUIDE_LANG_DIR.match(parts[idx]):
+            lang = _GUIDE_LANG_DIR.match(parts[idx]).group(1).lower()
+            rel = [*parts[2:idx], *parts[idx + 1 :]]
+            break
+        if _OTHER_LANG_DIR.match(parts[idx]):
+            return None
+    return FileIdentity(KIND_GUIDE, mod_id, "/".join(rel), lang)
 
 
 def classify_member(

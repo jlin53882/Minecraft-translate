@@ -9,6 +9,7 @@ from collections.abc import Generator
 from pathlib import Path
 from typing import Any
 
+from translation_tool.core.book_dirs import DEFAULT_BOOK_DIRS
 from translation_tool.core.jar_processor_discovery import find_jar_files
 from translation_tool.core.jar_processor_extract import (
     extract_from_jar_impl,
@@ -24,6 +25,7 @@ from translation_tool.utils.log_unit import log_error
 
 BOOK_PATH_REGEX_DUAL_STRUCTURE = re.compile(
     r"^(assets|data)/([^/]+)/"
+    r"(?:[^/]+/)*?"
     r"(patchouli_books|book|manual|guidebook)/"
     r"(?:([^/]+)/)?"
     r"(?:"
@@ -33,6 +35,19 @@ BOOK_PATH_REGEX_DUAL_STRUCTURE = re.compile(
     r")$",
     re.IGNORECASE,
 )
+
+
+def get_book_dir_pattern() -> str:
+    """從 config 取得手冊資料夾名稱（相對名稱，任何深度），組成 regex 的 alternation。"""
+    configured = (
+        load_config().get("lm_translator", {}).get("patchouli", {}).get("dir_names")
+    )
+    names = (
+        [str(n).strip() for n in configured if str(n).strip()]
+        if isinstance(configured, list)
+        else []
+    )
+    return "|".join(map(re.escape, names or DEFAULT_BOOK_DIRS))
 
 
 def get_lang_codes(*, skip_zh_cn: bool = False) -> list[str]:
@@ -102,7 +117,7 @@ def build_book_path_regex(
     codes_str = "|".join(map(re.escape, codes))
     return re.compile(
         rf"(?:(?:assets|data)/([^/]+)/"
-        rf"(?:patchouli_books|book|manual|guidebook)/"
+        rf"(?:[^/]+/)*?(?:{get_book_dir_pattern()})/"
         rf"(?:([^/]+)/)?"
         # 🐛 2026-07-14 user review 修法:移除 |book\.json fallback
         # 之前 fallback 是讓 <modid>/book.json (沒 lang code) 也算 book,

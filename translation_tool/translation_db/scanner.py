@@ -28,6 +28,7 @@ from translation_tool.core.patchouli_compat import (
     find_patchouli_mismatch,
 )
 from translation_tool.core.translatable_extractor import extract_translatables
+from translation_tool.plugins.md.md_extract_qa import extract_blocks
 from translation_tool.translation_db.identity import (
     FileIdentity,
     classify_member,
@@ -36,7 +37,8 @@ from translation_tool.translation_db.identity import (
 )
 from translation_tool.translation_db.models import IngestStats, ScanItem
 from translation_tool.translation_db.repository import TranslationDB
-from translation_tool.translation_db.schema import SRC_CUSTOM
+from translation_tool.translation_db.schema import KIND_GUIDE, SRC_CUSTOM
+from translation_tool.translation_db.sniff_groups import sniffed_groups
 from translation_tool.utils.bounded_executor import bounded_as_completed
 from translation_tool.utils.config_manager import load_config
 from translation_tool.utils.log_unit import log_info, log_warning
@@ -253,7 +255,7 @@ def _group_members(
         ident: FileIdentity | None = classify_member(name, dir_names)
         if ident is None:
             continue
-        if ident.kind == "patchouli" and not options.include_patchouli:
+        if ident.kind in ("patchouli", KIND_GUIDE) and not options.include_patchouli:
             continue
         groups.setdefault((ident.kind, ident.mod_id, ident.file_key), {})[
             ident.lang
@@ -285,6 +287,84 @@ def _drop_stale_book(zh: dict | None, en: dict, member: str | None) -> dict | No
     return zh
 
 
+def _read_blocks(
+    zf: zipfile.ZipFile, budget: ZipReadBudget, member: str | None
+) -> list[str] | None:
+    """指南文字檔依段落切成的區塊文字（與 Markdown 翻譯流程同一套切法）；讀不出來回傳 None。"""
+    if member is None:
+        return None
+    try:
+        text = read_limited(zf, member, budget=budget).decode("utf-8-sig")
+    except UnicodeDecodeError:
+        return None
+    return [block.text for block in extract_blocks(text, member, "all")]
+
+
+def _aligned_blocks(
+    en: list[str] | None, other: list[str] | None, member: str | None
+) -> list[str] | None:
+    """譯文區塊數和原文相同才逐段對應；不同代表指南改版後譯文沒跟上，不匯入以免錯位。"""
+    if other is None or en is None:
+        return other
+    if len(other) != len(en):
+        log_info(
+            f"[ModDB] 指南譯文的段落數與原文不同（{len(en)} / {len(other)}），不匯入譯文：{member}"
+        )
+        return None
+    return other
+
+
+def _guide_items(
+    zf: zipfile.ZipFile,
+    budget: ZipReadBudget,
+    ident_key: tuple[str, str, str],
+    members: dict[str, str],
+    options: ScanOptions,
+) -> list[ScanItem]:
+    """指南（.md／.txt）：每個可翻譯段落一個條目，鍵值是 ``檔案鍵#段落序號``。"""
+    kind, mod_id, file_key = ident_key
+    en = _read_blocks(zf, budget, members.get("en_us"))
+    if en is None and not options.translated:
+        return []  # 掃描 jar 以原文為準；沒有原文就沒有可匯入的條目
+    tw = cn = None
+    if options.read_jar_translations or options.translated:
+        tw = _aligned_blocks(
+            en, _read_blocks(zf, budget, members.get("zh_tw")), members.get("zh_tw")
+        )
+        cn = _aligned_blocks(
+            en, _read_blocks(zf, budget, members.get("zh_cn")), members.get("zh_cn")
+        )
+    count = len(en) if en is not None else len(tw or [])
+    ident = FileIdentity(kind, mod_id, file_key, "en_us")
+    out: list[ScanItem] = []
+    for index in range(count):
+        source_text = en[index] if en is not None else ""
+        if source_text and contains_cjk(source_text):
+            continue  # 原文已是中文，不是要翻譯的內容
+        zh_tw = zh_cn = ""
+        source = None
+        if tw is not None:
+            raw = tw[index]
+            if options.translated:
+                zh_tw, source = raw, options.translation_source
+            elif contains_cjk(raw):
+                zh_tw = apply_replace_rules(raw, options.rules)
+        if cn is not None and contains_cjk(cn[index]):
+            zh_cn = cn[index]
+        out.append(
+            ScanItem(
+                kind=kind,
+                mod_id=mod_id,
+                key=ident.item_key(str(index)),
+                en_us=source_text,
+                zh_tw=zh_tw,
+                zh_cn=zh_cn,
+                source=source,
+            )
+        )
+    return out
+
+
 def _items_for_group(
     zf: zipfile.ZipFile,
     budget: ZipReadBudget,
@@ -293,6 +373,8 @@ def _items_for_group(
     options: ScanOptions,
 ) -> list[ScanItem]:
     kind, mod_id, file_key = ident_key
+    if kind == KIND_GUIDE:
+        return _guide_items(zf, budget, ident_key, members, options)
     is_lang = kind == "lang"
     en_member = members.get("en_us")
     en = _read_json_member(zf, budget, en_member)
@@ -378,7 +460,12 @@ def _scan_archive(
     """讀取一個 archive（含內嵌 jar）。安全上限（單一成員、archive、整棵樹）超過時設定 ``result.error``。"""
     budget = _DualBudget(_new_budget(options, label), tree, should_cancel)
     names = zf.namelist()
-    for ident_key, members in _group_members(names, options, dir_names).items():
+    groups = _group_members(names, options, dir_names)
+    if options.include_patchouli:
+        claimed = {n for members in groups.values() for n in members.values()}
+        for key, members in sniffed_groups(zf, names, claimed).items():
+            groups.setdefault(key, members)
+    for ident_key, members in groups.items():
         try:
             result.items.extend(
                 _items_for_group(zf, budget, ident_key, members, options)

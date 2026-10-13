@@ -34,6 +34,7 @@ from translation_tool.translation_db.resolver import (
 )
 from translation_tool.translation_db.schema import (
     DEFAULT_PRIORITY,
+    KIND_GUIDE,
     KIND_LANG,
     KIND_PATCHOULI,
     SOURCE_NAMES,
@@ -47,6 +48,7 @@ from translation_tool.translation_db.source_catalog import SourceCatalog
 
 __all__ = [
     "DEFAULT_PRIORITY",
+    "KIND_GUIDE",
     "KIND_LANG",
     "KIND_PATCHOULI",
     "SOURCE_NAMES",

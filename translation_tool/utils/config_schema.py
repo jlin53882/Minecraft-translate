@@ -464,7 +464,7 @@ SETTINGS: tuple[Setting, ...] = (
         "Patchouli 資料夾",
         "translation_behavior",
         C_LM_FILTER,
-        "用於：find_patchouli_json 掃描目錄",
+        "資料夾名稱（任何深度都算，如 guide、ae2guide）；模組資料庫掃描另外依內容自動找出未列出的手冊／指南",
         default=["patchouli_books", "book", "manual", "guidebook"],
     ),
     Setting(
