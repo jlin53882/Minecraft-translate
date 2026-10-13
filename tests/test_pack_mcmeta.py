@@ -600,18 +600,16 @@ def test_repair_adds_new_fields_when_supported_formats_reach_65():
     assert (fixed["min_format"], fixed["max_format"]) == (34, 70)
 
 
-def test_repair_removes_new_fields_when_only_old_formats_are_supported():
-    fixed, _ = _repair(
-        {
-            "description": "d",
-            "pack_format": 34,
-            "supported_formats": {"min_inclusive": 34, "max_inclusive": 46},
-            "min_format": 34,
-            "max_format": 46,
-        }
-    )
-    assert "min_format" not in fixed and "max_format" not in fixed
-    assert fixed["supported_formats"] == {"min_inclusive": 34, "max_inclusive": 46}
+def test_repair_keeps_existing_min_max_format_on_an_old_only_pack():
+    pack = {
+        "description": "d",
+        "pack_format": 34,
+        "supported_formats": {"min_inclusive": 34, "max_inclusive": 46},
+        "min_format": 34,
+        "max_format": 46,
+    }
+    fixed, notes = _repair(pack)
+    assert fixed == pack and notes == []
 
 
 def test_repair_keeps_valid_hybrid_and_old_only_sources_unchanged():
@@ -702,12 +700,84 @@ def test_overlay_crossing_64_65_gets_both_field_groups():
     assert (entries[0]["min_format"], entries[0]["max_format"]) == (34, 75)
 
 
-def test_overlay_old_only_range_drops_new_fields_and_keeps_formats():
+def test_overlay_old_only_entry_keeps_formats_and_gets_min_max_format():
+    entries, notes = _repair_with_overlays(
+        NEW_PACK, [{"directory": "x", "formats": [34, 46]}]
+    )
+    assert entries == [
+        {"directory": "x", "formats": [34, 46], "min_format": 34, "max_format": 46}
+    ]
+    assert notes
+
+
+def test_overlay_old_only_entry_keeps_its_min_max_format():
+    entry = {"directory": "x", "formats": [34, 46], "min_format": 34, "max_format": 46}
+    entries, notes = _repair_with_overlays(NEW_PACK, [entry])
+    assert entries == [entry] and notes == []
+
+
+def test_every_overlay_gets_formats_when_any_overlay_covers_old_versions():
     entries, _ = _repair_with_overlays(
         NEW_PACK,
-        [{"directory": "x", "formats": [34, 46], "min_format": 34, "max_format": 46}],
+        [
+            {"directory": "old", "formats": [34, 46]},
+            {"directory": "new", "min_format": 69, "max_format": 75},
+        ],
     )
-    assert entries == [{"directory": "x", "formats": [34, 46]}]
+    assert all("formats" in e and "min_format" in e for e in entries)
+    assert entries[1]["formats"] == {"min_inclusive": 69, "max_inclusive": 75}
+
+
+def test_overlay_formats_are_removed_when_no_overlay_covers_old_versions():
+    entries, _ = _repair_with_overlays(
+        NEW_PACK,
+        [
+            {"directory": "a", "formats": [69, 75], "min_format": 69, "max_format": 75},
+            {"directory": "b", "min_format": 70, "max_format": 75},
+        ],
+    )
+    assert all("formats" not in e for e in entries)
+
+
+@pytest.mark.parametrize(
+    "entry",
+    [
+        {"directory": "x", "formats": "invalid"},
+        {"directory": "x", "min_format": 80, "max_format": 70},
+        {"directory": "x"},
+        {"directory": "x", "formats": [46, 34]},
+    ],
+)
+def test_unrepairable_overlay_makes_the_whole_source_fall_back(entry):
+    content, notes = repair_source_pack_mcmeta(
+        json.dumps({"pack": NEW_PACK, "overlays": {"entries": [entry]}}), GENERATED
+    )
+    assert content is None
+    assert len(notes) == 1 and "overlays.entries[0]" in notes[0]
+    assert "無法安全修復" in notes[0]
+
+
+def test_non_object_overlay_entry_makes_the_source_fall_back():
+    content, notes = repair_source_pack_mcmeta(
+        json.dumps({"pack": NEW_PACK, "overlays": {"entries": ["x"]}}), GENERATED
+    )
+    assert content is None and "無法安全修復" in notes[0]
+
+
+def test_bundle_falls_back_to_ui_settings_for_unrepairable_overlay(tmp_path, src_dir):
+    (src_dir / "pack.mcmeta").write_text(
+        json.dumps(
+            {
+                "pack": NEW_PACK,
+                "overlays": {"entries": [{"directory": "x", "formats": "bad"}]},
+            }
+        ),
+        encoding="utf-8",
+    )
+    data, updates = _bundle(tmp_path, pack_format=34)
+    assert data == build_pack_mcmeta("", 34) | {"pack": data["pack"]}
+    assert "overlays" not in data and data["pack"]["pack_format"] == 34
+    assert any("無法安全修復" in u.get("log", "") for u in updates)
 
 
 def test_overlay_entry_gets_no_pack_format_and_other_keys_survive():
@@ -718,16 +788,11 @@ def test_overlay_entry_gets_no_pack_format_and_other_keys_survive():
     assert entries[0]["formats"] == 34
 
 
-def test_overlay_quoted_numbers_and_reversed_ranges_are_repaired():
+def test_overlay_quoted_numbers_are_repaired():
     entries, notes = _repair_with_overlays(
-        NEW_PACK,
-        [
-            {"directory": "a", "formats": ["34", "46"]},
-            {"directory": "b", "min_format": 80, "max_format": 70},
-        ],
+        NEW_PACK, [{"directory": "a", "formats": ["34", "46"]}]
     )
-    assert entries[0]["formats"] == [34, 46]
-    assert "min_format" not in entries[1] and "max_format" not in entries[1]
+    assert entries[0]["formats"] == [34, 46] and entries[0]["min_format"] == 34
     assert notes
 
 
@@ -737,8 +802,18 @@ def test_valid_overlays_leave_the_source_byte_for_byte():
             "pack": NEW_PACK,
             "overlays": {
                 "entries": [
-                    {"directory": "a", "min_format": 69, "max_format": 75},
-                    {"directory": "b", "formats": [34, 46]},
+                    {
+                        "directory": "a",
+                        "formats": {"min_inclusive": 69, "max_inclusive": 75},
+                        "min_format": 69,
+                        "max_format": 75,
+                    },
+                    {
+                        "directory": "b",
+                        "formats": [34, 46],
+                        "min_format": 34,
+                        "max_format": 46,
+                    },
                     {
                         "directory": "c",
                         "formats": {"min_inclusive": 34, "max_inclusive": 64},

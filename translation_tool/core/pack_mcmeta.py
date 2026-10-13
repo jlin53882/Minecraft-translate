@@ -267,13 +267,11 @@ def _sync_old_fields_with_new(pack: dict[str, Any], notes: list[str]) -> None:
         notes.append(f"pack_format 不在 min_format 起的範圍內，已改成 {low}")
 
 
-def _normalize_format_fields(
-    pack: dict[str, Any], notes: list[str], *, with_pack_format: bool = True
-) -> None:
+def _normalize_format_fields(pack: dict[str, Any], notes: list[str]) -> None:
     """依實際支援的版本範圍，讓新舊兩組欄位互相搭配（1.21.9 起的規則）。
 
     - 只支援 65 以上：不能保留 ``pack_format``／``supported_formats``。
-    - 只支援 64 以下：不能有 ``min_format``／``max_format``。
+    - 只支援 64 以下：保留來源已有的 ``min_format``／``max_format``，不主動補上。
     - 跨越 64／65：新舊兩組欄位都要有，缺的依範圍補上。
     """
     lows: list[int] = []
@@ -300,7 +298,7 @@ def _normalize_format_fields(
             if pack.pop(key, None) is not None:
                 notes.append(f"只支援 {MIN_MAX_FORMAT_SINCE} 以上的版本，已移除 {key}")
     else:
-        if with_pack_format and "pack_format" not in pack:
+        if "pack_format" not in pack:
             pack["pack_format"] = low
             notes.append(f"缺少 pack_format，已補上 {low}")
         if (
@@ -313,66 +311,98 @@ def _normalize_format_fields(
                 "max_inclusive": min(high, SUPPORTED_FORMATS_LAST),
             }
             notes.append("缺少 supported_formats，已依支援範圍補上")
-    if high < MIN_MAX_FORMAT_SINCE:
-        for key in ("min_format", "max_format"):
-            if pack.pop(key, None) is not None:
-                notes.append(
-                    f"只支援 {SUPPORTED_FORMATS_LAST} 以下的版本，已移除 {key}"
-                )
-    elif "min_format" not in pack:
+    if high >= MIN_MAX_FORMAT_SINCE and "min_format" not in pack:
         pack["min_format"] = low
         pack["max_format"] = high if high != low else default_max_format(high)
         notes.append("缺少 min_format／max_format，已依支援範圍補上")
 
 
-def _repair_overlay_entry(entry: dict[str, Any], notes: list[str]) -> None:
-    """修正單一 overlay 項目：``formats`` 對應 ``supported_formats``，另有 ``min_format``／
-    ``max_format``；規則與 ``pack`` 區塊相同（只是沒有 ``pack_format``）。"""
+_OVERLAY_KEYS = (
+    ("supported_formats", "formats"),
+    ("min_format", "min_format"),
+    ("max_format", "max_format"),
+)
+
+
+def _overlay_view(
+    entry: Any, index: int, notes: list[str]
+) -> tuple[dict[str, Any] | None, str | None]:
+    """overlay 項目的版本欄位（``formats`` 以 ``supported_formats`` 的名稱放進 view），
+    已修正型別與前後矛盾；無法安全修復時回傳 (None, 原因)。"""
+    where = f"overlays.entries[{index}]"
+    if not isinstance(entry, dict):
+        return None, f"{where} 不是物件"
     view: dict[str, Any] = {}
-    for key, source_key in (
-        ("supported_formats", "formats"),
-        ("min_format", "min_format"),
-        ("max_format", "max_format"),
-    ):
+    for key, source_key in _OVERLAY_KEYS:
         if source_key not in entry:
             continue
         fixed = _repair_format(key, entry[source_key])
         if fixed is None:
-            notes.append(f"{source_key} 的值 {entry[source_key]!r} 無法使用，已移除")
-        else:
-            view[key] = fixed
+            return None, f"{where} 的 {source_key} 值 {entry[source_key]!r} 無法使用"
+        if fixed != entry[source_key]:
+            notes.append(f"{where}：{source_key} 已改成 {json.dumps(fixed)}")
+        view[key] = fixed
+    local: list[str] = []
+    _drop_inconsistent_formats(view, local)
+    if "min_format" in view and _major(view["min_format"]) < MIN_MAX_FORMAT_SINCE:
+        _sync_old_fields_with_new(
+            view, local
+        )  # 新範圍從 65 起時 formats 是否保留由整份清單決定
+    notes.extend(f"{where}：{n}" for n in local)
     if not view:
-        return
-    _drop_inconsistent_formats(view, notes)
-    _sync_old_fields_with_new(view, notes)
-    _normalize_format_fields(view, notes, with_pack_format=False)
-    for key, target in (
-        ("supported_formats", "formats"),
-        ("min_format", "min_format"),
-        ("max_format", "max_format"),
-    ):
-        entry.pop(target, None)
-        if key in view:
-            entry[target] = view[key]
+        return None, f"{where} 沒有任何版本欄位"
+    return view, None
 
 
-def _repair_overlays(data: dict[str, Any], notes: list[str]) -> None:
-    """``overlays.entries`` 的版本欄位：與 ``pack`` 相同，依支援範圍決定用 ``formats``、
-    ``min_format``／``max_format`` 或兩者；其他欄位（``directory`` 等）原樣保留。"""
+def _overlay_range(view: dict[str, Any]) -> tuple[int, int]:
+    """overlay 項目涵蓋的 (最小, 最大) 主版本；min／max_format 優先，否則取 formats。"""
+    if "min_format" in view:
+        return _major(view["min_format"]), _major(view["max_format"])
+    return _format_range(view["supported_formats"])
+
+
+def _repair_overlays(data: dict[str, Any], notes: list[str]) -> str | None:
+    """``overlays.entries`` 的版本欄位（1.21.9 起的規則）；回傳不為 None 表示無法安全修復。
+
+    - 每個項目都要有 ``min_format``／``max_format``，缺少時由 ``formats`` 推得。
+    - 只要有任何項目涵蓋 65 以下的版本，所有項目都要有 ``formats``；沒有項目涵蓋時
+      ``formats`` 必須移除。
+    - 項目的版本欄位無法使用、範圍反向或完全沒有版本欄位時不猜測，整份來源改用 UI 設定。
+    其他欄位（``directory`` 等）原樣保留。
+    """
     overlays = data.get("overlays")
     entries = overlays.get("entries") if isinstance(overlays, dict) else None
     if not isinstance(entries, list):
-        return
+        return None
+    views = []
     for index, entry in enumerate(entries):
-        if not isinstance(entry, dict):
-            continue
-        entry_notes: list[str] = []
-        before = json.dumps(entry, sort_keys=True)
-        _repair_overlay_entry(entry, entry_notes)
-        if entry_notes or json.dumps(entry, sort_keys=True) != before:
-            notes.extend(f"overlays.entries[{index}]：{n}" for n in entry_notes)
-            if not entry_notes:
-                notes.append(f"overlays.entries[{index}] 的版本欄位已調整")
+        view, problem = _overlay_view(entry, index, notes)
+        if view is None:
+            return problem
+        views.append(view)
+    ranges = [_overlay_range(view) for view in views]
+    any_old = any(low < MIN_MAX_FORMAT_SINCE for low, _high in ranges)
+    for index, (entry, view, (low, high)) in enumerate(zip(entries, views, ranges)):
+        where = f"overlays.entries[{index}]"
+        if "min_format" not in view:
+            view["min_format"], view["max_format"] = low, high
+            notes.append(f"{where}：缺少 min_format／max_format，已依 formats 補上")
+        if any_old and "supported_formats" not in view:
+            view["supported_formats"] = {
+                "min_inclusive": low,
+                "max_inclusive": min(high, SUPPORTED_FORMATS_LAST)
+                if low < MIN_MAX_FORMAT_SINCE
+                else high,
+            }
+            notes.append(f"{where}：清單中有項目涵蓋舊版，已補上 formats")
+        elif not any_old and "supported_formats" in view:
+            del view["supported_formats"]
+            notes.append(f"{where}：沒有項目涵蓋舊版，已移除 formats")
+        for key, source_key in _OVERLAY_KEYS:
+            entry.pop(source_key, None)
+            if key in view:
+                entry[source_key] = view[key]
+    return None
 
 
 def repair_source_pack_mcmeta(
@@ -412,7 +442,9 @@ def repair_source_pack_mcmeta(
     _drop_inconsistent_formats(pack, notes)
     _sync_old_fields_with_new(pack, notes)
     _normalize_format_fields(pack, notes)
-    _repair_overlays(data, notes)
+    problem = _repair_overlays(data, notes)
+    if problem is not None:
+        return None, [f"{problem}，無法安全修復"]
     if "pack_format" not in pack and not (
         "min_format" in pack and "max_format" in pack
     ):
