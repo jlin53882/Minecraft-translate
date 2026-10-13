@@ -181,3 +181,28 @@ def quarantine_copy(
         log_warning(
             f"隔離檔案寫入失敗（原檔未被複製或說明檔缺漏）：{target_path}: {exc!r}"
         )
+
+
+_LANG_SLOTS = ("zh_cn", "zh_tw", "en_us")
+
+
+def register_lang_source(slots: dict[str, str], path: str) -> None:
+    """把 ``…/lang/<語系>.json|.lang`` 登記為該語系的來源（每個語系只留一個路徑）。
+
+    同一個語系同時有 ``.json`` 和 ``.lang`` 時一律以 ``.json`` 為準：1.13 之後的遊戲
+    只讀 ``.json``，有些 mod 會連同 1.12 以前的 ``.lang`` 一起發佈。只有 ``.lang`` 時
+    才使用 ``.lang``；兩者副檔名相同時，後登記的取代先登記的。
+    """
+    lowered = path.lower()
+    for slot in _LANG_SLOTS:
+        for suffix in (".json", ".lang"):
+            if lowered.endswith(slot + suffix):
+                current = slots.get(slot)
+                if (
+                    current is not None
+                    and current.lower().endswith(".json")
+                    and suffix == ".lang"
+                ):
+                    return
+                slots[slot] = path
+                return
