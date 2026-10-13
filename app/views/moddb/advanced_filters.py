@@ -87,6 +87,7 @@ class AdvancedFilters:
                 ("whitespace", "前後空白或換行"),
                 ("unknown_source", "原文未知"),
                 ("missing_translation", "尚無譯文"),
+                ("species_name", "疑似學名文字"),
             ],
             "all",
         )
