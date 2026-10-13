@@ -22,9 +22,9 @@ def _seed(path: Path) -> TranslationDB:
     db.ingest(
         "1.21.1",
         [
-            ScanItem(KIND_LANG, "plants", "item.agave", "Agave tequilana"),
-            ScanItem(KIND_LANG, "plants", "item.akebia", "Akebia quinata"),
-            ScanItem(KIND_LANG, "plants", "item.cucumber", "Cucumis sativus"),
+            ScanItem(KIND_LANG, "plants", "item.agave.latin", "Agave tequilana"),
+            ScanItem(KIND_LANG, "plants", "item.akebia.latin", "Akebia quinata"),
+            ScanItem(KIND_LANG, "plants", "item.cucumber.latin", "Cucumis sativus"),
             ScanItem(KIND_LANG, "plants", "item.steel", "Steel Casing"),
         ],
     )
@@ -283,3 +283,73 @@ def test_dialog_updates_only_the_finished_row(tmp_path, monkeypatch):
         assert changed == [dialog._row_index[candidate.entry_id]]
     finally:
         db.close()
+
+
+# ---------------------------------------------------------------- 候選判斷規則
+@pytest.mark.parametrize(
+    ("key", "expected"),
+    [
+        ("block.productivetrees.olive.latin", True),
+        ("tooltip.productivefarming.blueberry.latin", True),
+        ("entity.mod.wolf.scientificName", True),
+        ("entity.mod.wolf.scientific_name", True),
+        ("gui.translating.title", False),
+        ("gui.energy_usage", False),
+        ("subtitles.creeper.dies", False),
+    ],
+)
+def test_has_species_key_hint(key, expected):
+    assert moddb_species_service.has_species_key_hint(key) is expected
+
+
+@pytest.mark.parametrize(
+    ("key", "value"),
+    [
+        ("gui.energy_usage", "Energy usage"),
+        ("item.oak_planks", "Oak planks"),
+        ("subtitles.creeper.dies", "Creeper dies"),
+        ("gui.copy", "Copy to clipboard"),
+        ("block.mod.olive.latin", "Steel Casing"),
+    ],
+)
+def test_species_candidate_rejects_general_text_by_default(key, value):
+    assert not moddb_species_service.is_species_candidate(key, value)
+
+
+def test_species_candidate_accepts_key_hint_or_taxonomic_marker():
+    check = moddb_species_service.is_species_candidate
+    assert check("block.mod.olive.latin", "Olea europaea")
+    assert check("misc.unknown", "Apium graveolens var. dulce")
+    assert check("misc.unknown", "Mentha × piperita")
+    assert not check("misc.unknown", "Olea europaea")
+
+
+def test_species_candidate_loose_mode_only_checks_format():
+    check = moddb_species_service.is_species_candidate
+    assert check("misc.unknown", "Olea europaea", require_key_hint=False)
+    assert not check("misc.unknown", "Energy-Usage!", require_key_hint=False)
+
+
+def test_scan_skips_general_text_and_loose_mode_includes_it(tmp_path):
+    db = TranslationDB(tmp_path / "mod.db")
+    try:
+        db.ingest(
+            "1.21.1",
+            [
+                ScanItem(KIND_LANG, "m", "block.m.olive.latin", "Olea europaea"),
+                ScanItem(KIND_LANG, "m", "gui.energy_usage", "Energy usage"),
+                ScanItem(KIND_LANG, "m", "misc.oak", "Oak planks"),
+            ],
+        )
+        strict = moddb_species_service.scan_species_candidates(db, "1.21.1")
+        loose = moddb_species_service.scan_species_candidates(
+            db, "1.21.1", require_key_hint=False
+        )
+    finally:
+        db.close()
+    assert [c.value for c in strict.candidates] == ["Olea europaea"]
+    assert {c.value for c in loose.candidates} == {
+        "Olea europaea",
+        "Energy usage",
+        "Oak planks",
+    }

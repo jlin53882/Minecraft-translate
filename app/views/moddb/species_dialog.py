@@ -108,10 +108,15 @@ class SpeciesCandidateDialog:
     def _build_controls(self) -> None:
         self.scope = ft.Text(self._scope_text(), size=13, color=C.TEXT)
         self.hint = ft.Text(
-            "掃描只依格式找出候選；按「查詢全部」才會逐筆查詢學名資料庫。",
+            "掃描會找出 key 帶有 latin／scientific 等提示、且格式像學名的條目；"
+            "按「查詢全部」才會逐筆查詢學名資料庫。",
             size=12,
             color=C.MUTED,
             selectable=True,
+        )
+        self.loose_check = ft.Checkbox(
+            label="包含沒有學名 key 的候選（雜訊較多）",
+            value=False,
         )
         self.scan_btn = kit.button(
             "掃描候選",
@@ -154,6 +159,7 @@ class SpeciesCandidateDialog:
                     [
                         self.scope,
                         self.hint,
+                        self.loose_check,
                         ft.Row(
                             [self.scan_btn, self.query_all_btn, self.stop_btn],
                             spacing=8,
@@ -209,6 +215,7 @@ class SpeciesCandidateDialog:
             show_snack(self.page, "目前沒有可用的資料庫版本。", C.GOLD)
             return
         generation = self._generation
+        loose = bool(self.loose_check.value)
         self._set_busy(True, "掃描目前版本的英文原文…")
 
         def work() -> None:
@@ -219,6 +226,7 @@ class SpeciesCandidateDialog:
                     self.version,
                     mod_id=self.mod_id,
                     kind=self.kind,
+                    require_key_hint=not loose,
                 )
             except Exception as exc:  # noqa: BLE001 - worker boundary
                 error = exc
@@ -513,6 +521,7 @@ class SpeciesCandidateDialog:
     def _set_busy(self, busy: bool, text: str = "") -> None:
         self._busy = busy
         self.scan_btn.disabled = busy
+        self.loose_check.disabled = busy
         self._sync_query_all_enabled()
         self.progress.visible = busy
         self.progress.value = None if busy else 0

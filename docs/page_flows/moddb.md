@@ -82,7 +82,7 @@ flowchart TD
 flowchart TD
     A["條目校對按「掃描學名」"] --> B["SpeciesCandidateDialog"]
     B --> C["scan_species_candidates 讀取目前版本／模組／類型"]
-    C --> D["is_potential_species_name 本地格式判斷"]
+    C --> D["is_species_candidate：格式判斷＋key 學名提示"]
     D --> E["顯示候選、模組、類型與鍵值"]
     E --> F{"按哪個操作？"}
     F -- "查詢／重試" --> G["lookup_species 查快取／Wikipedia"]
@@ -92,7 +92,7 @@ flowchart TD
     H --> J
 ```
 
-候選上限為 500 筆；掃描結果過期或視窗關閉時，背景結果會被 generation 丟棄，關閉視窗也會停止批次查詢。查詢結果只更新學名快取，不會自動改寫翻譯。
+預設只收 key 帶有 `latin`、`scientific` 等提示（或值含 ×、var.、subsp. 記號）且格式像學名的條目；勾選「包含沒有學名 key 的候選」才退回只看格式。候選上限為 500 筆；掃描結果過期或視窗關閉時，背景結果會被 generation 丟棄，關閉視窗也會停止批次查詢。查詢結果只更新學名快取，不會自動改寫翻譯。
 
 查詢結果分為找到、查無（確定結果）與請求過於頻繁、連線失敗（可重試，不寫入快取）。批次查詢遇到限流、連續 3 筆失敗或使用者按「停止查詢」時停止，已完成的結果保留；失敗的候選列顯示「重試」。
 
