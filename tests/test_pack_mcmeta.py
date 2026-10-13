@@ -496,7 +496,7 @@ def test_repair_drops_min_max_format_that_do_not_overlap(low, high):
 
 def test_repair_adds_min_max_format_to_pack_format_only_new_source():
     fixed, notes = _repair({"description": "d", "pack_format": 69})
-    assert fixed["pack_format"] == 69
+    assert "pack_format" not in fixed  # 只支援 65 以上，不留舊欄位
     assert fixed["min_format"] == 69 and fixed["max_format"] == 9999
     assert any("min_format" in n for n in notes)
 
@@ -564,3 +564,70 @@ def test_preview_finds_pack_files_in_extra_folder(tmp_path, src_dir):
     )
     assert used and source == str(extra / "pack.mcmeta")
     assert json.loads(text)["pack"]["description"] == "extra"
+
+
+def test_repair_removes_old_fields_when_only_new_formats_are_supported():
+    fixed, notes = _repair(
+        {
+            "description": "d",
+            "pack_format": 69,
+            "supported_formats": 69,
+            "min_format": 69,
+            "max_format": 75,
+        }
+    )
+    assert "pack_format" not in fixed and "supported_formats" not in fixed
+    assert (fixed["min_format"], fixed["max_format"]) == (69, 75)
+    assert any("已移除 supported_formats" in n for n in notes)
+
+
+def test_repair_adds_old_fields_when_the_range_starts_below_65():
+    fixed, notes = _repair({"description": "d", "min_format": 34, "max_format": 75})
+    assert fixed["pack_format"] == 34
+    assert fixed["supported_formats"] == {"min_inclusive": 34, "max_inclusive": 64}
+    assert (fixed["min_format"], fixed["max_format"]) == (34, 75)
+    assert notes
+
+
+def test_repair_adds_new_fields_when_supported_formats_reach_65():
+    fixed, _ = _repair(
+        {
+            "description": "d",
+            "pack_format": 34,
+            "supported_formats": {"min_inclusive": 34, "max_inclusive": 70},
+        }
+    )
+    assert (fixed["min_format"], fixed["max_format"]) == (34, 70)
+
+
+def test_repair_removes_new_fields_when_only_old_formats_are_supported():
+    fixed, _ = _repair(
+        {
+            "description": "d",
+            "pack_format": 34,
+            "supported_formats": {"min_inclusive": 34, "max_inclusive": 46},
+            "min_format": 34,
+            "max_format": 46,
+        }
+    )
+    assert "min_format" not in fixed and "max_format" not in fixed
+    assert fixed["supported_formats"] == {"min_inclusive": 34, "max_inclusive": 46}
+
+
+def test_repair_keeps_valid_hybrid_and_old_only_sources_unchanged():
+    hybrid = {
+        "description": "d",
+        "pack_format": 34,
+        "supported_formats": {"min_inclusive": 34, "max_inclusive": 64},
+        "min_format": 34,
+        "max_format": 9999,
+    }
+    for pack in (hybrid, {"description": "d", "pack_format": 34}):
+        fixed, notes = _repair(pack)
+        assert fixed == pack and notes == []
+
+
+def test_integer_max_format_uses_the_games_minor_ceiling():
+    from translation_tool.core.pack_mcmeta import _ANY_MINOR
+
+    assert _ANY_MINOR == 0x7FFFFFFF

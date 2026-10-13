@@ -179,7 +179,9 @@ def _format_range(value: Any) -> tuple[Any, Any] | None:
     return value, value
 
 
-_ANY_MINOR = 10**9  # max_format 寫成整數時，涵蓋該主版本的所有次版本
+_ANY_MINOR = (
+    0x7FFFFFFF  # max_format 寫成整數時，涵蓋該主版本的所有次版本（遊戲定義的上限）
+)
 
 
 def _version_bound(value: Any, *, upper: bool) -> tuple[int, int]:
@@ -195,7 +197,7 @@ def _version_bound(value: Any, *, upper: bool) -> tuple[int, int]:
 
 
 def _drop_inconsistent_formats(pack: dict[str, Any], notes: list[str]) -> None:
-    """型別修好後檢查欄位之間的版本關係；矛盾的欄位移除，缺少的欄位依 pack_format 補上。"""
+    """型別修好後檢查欄位之間的版本關係；矛盾的欄位移除，supported_formats 依 pack_format 重設。"""
     if ("min_format" in pack) != ("max_format" in pack):
         lone = "min_format" if "min_format" in pack else "max_format"
         notes.append(f"{lone} 沒有搭配另一個上下限欄位，已移除")
@@ -208,20 +210,6 @@ def _drop_inconsistent_formats(pack: dict[str, Any], notes: list[str]) -> None:
             f"{json.dumps(pack['min_format'])}，已移除 min_format／max_format"
         )
         del pack["min_format"], pack["max_format"]
-    version = pack.get("pack_format")
-    if (
-        version is not None
-        and version >= MIN_MAX_FORMAT_SINCE
-        and "min_format" not in pack
-    ):
-        built = build_pack_mcmeta("", version)["pack"]
-        pack["min_format"], pack["max_format"] = (
-            built["min_format"],
-            built["max_format"],
-        )
-        notes.append(
-            f"pack_format {version} 需要 min_format／max_format，已依 pack_format 補上"
-        )
     if "pack_format" in pack and "supported_formats" in pack:
         low, high = _format_range(pack["supported_formats"])
         if not low <= pack["pack_format"] <= high:
@@ -235,6 +223,66 @@ def _drop_inconsistent_formats(pack: dict[str, Any], notes: list[str]) -> None:
                 pack["supported_formats"] = build_pack_mcmeta("", version)["pack"][
                     "supported_formats"
                 ]
+
+
+def _major(value: Any) -> int:
+    return value[0] if isinstance(value, list) else value
+
+
+def _normalize_format_fields(pack: dict[str, Any], notes: list[str]) -> None:
+    """依實際支援的版本範圍，讓新舊兩組欄位互相搭配（1.21.9 起的規則）。
+
+    - 只支援 65 以上：不能保留 ``pack_format``／``supported_formats``。
+    - 只支援 64 以下：不能有 ``min_format``／``max_format``。
+    - 跨越 64／65：新舊兩組欄位都要有，缺的依範圍補上。
+    """
+    lows: list[int] = []
+    highs: list[int] = []
+    if "supported_formats" in pack:
+        low, high = _format_range(pack["supported_formats"])
+        lows.append(low)
+        highs.append(high)
+    elif "pack_format" in pack:
+        lows.append(pack["pack_format"])
+        highs.append(pack["pack_format"])
+    if "pack_format" in pack and "supported_formats" in pack:
+        lows.append(pack["pack_format"])
+        highs.append(pack["pack_format"])
+    if "min_format" in pack:
+        lows.append(_major(pack["min_format"]))
+        highs.append(_major(pack["max_format"]))
+    if not lows:
+        return
+    low, high = min(lows), max(highs)
+
+    if low >= MIN_MAX_FORMAT_SINCE:
+        for key in ("pack_format", "supported_formats"):
+            if pack.pop(key, None) is not None:
+                notes.append(f"只支援 {MIN_MAX_FORMAT_SINCE} 以上的版本，已移除 {key}")
+    else:
+        if "pack_format" not in pack:
+            pack["pack_format"] = low
+            notes.append(f"缺少 pack_format，已補上 {low}")
+        if (
+            low >= SUPPORTED_FORMATS_SINCE
+            and high >= MIN_MAX_FORMAT_SINCE
+            and "supported_formats" not in pack
+        ):
+            pack["supported_formats"] = {
+                "min_inclusive": low,
+                "max_inclusive": min(high, SUPPORTED_FORMATS_LAST),
+            }
+            notes.append("缺少 supported_formats，已依支援範圍補上")
+    if high < MIN_MAX_FORMAT_SINCE:
+        for key in ("min_format", "max_format"):
+            if pack.pop(key, None) is not None:
+                notes.append(
+                    f"只支援 {SUPPORTED_FORMATS_LAST} 以下的版本，已移除 {key}"
+                )
+    elif "min_format" not in pack:
+        pack["min_format"] = low
+        pack["max_format"] = high if high != low else default_max_format(high)
+        notes.append("缺少 min_format／max_format，已依支援範圍補上")
 
 
 def repair_source_pack_mcmeta(
@@ -272,6 +320,7 @@ def repair_source_pack_mcmeta(
             pack[key] = fixed
 
     _drop_inconsistent_formats(pack, notes)
+    _normalize_format_fields(pack, notes)
     if "pack_format" not in pack and not (
         "min_format" in pack and "max_format" in pack
     ):
