@@ -50,8 +50,8 @@ class _LookupState:
 
     @property
     def done(self) -> bool:
-        """已有確定結果（找到或查無）；暫時性失敗不算完成，可以重試。"""
-        return self.lookup is not None and self.lookup.definitive
+        """已有確定結果，且上一層物種的參考也查完；暫時性失敗或上一層待查都可以再查。"""
+        return self.lookup is not None and self.lookup.complete
 
 
 def _grey_when_disabled(button: ft.Button) -> None:
@@ -455,8 +455,8 @@ class SpeciesCandidateDialog:
         if lookup.status == STATUS_NOT_FOUND:
             if reference := bulk.parent_reference_text(lookup):
                 return f"找不到對應條目；{reference}（僅供參考）", C.GOLD
-            if failure := bulk.parent_failure_text(lookup):
-                return f"找不到對應條目；{failure}，可按「再查一次」", C.GOLD
+            if issue := bulk.parent_issue_text(lookup):
+                return f"找不到對應條目；{issue}，可按「補查上一層」", C.GOLD
             return "找不到對應條目", C.GOLD
         if lookup.status == STATUS_RATE_LIMITED:
             return f"請求過於頻繁，稍後可重試（{lookup.detail}）", C.RED
@@ -468,15 +468,21 @@ class SpeciesCandidateDialog:
         metadata = (
             f"{candidate.mod_id} · {kind_label(candidate.kind)} · {candidate.key}"
         )
-        retry = state.lookup is not None and not state.lookup.definitive
+        lookup = state.lookup
+        if lookup is None:
+            label, icon = "查詢", ft.Icons.SEARCH
+        elif lookup.definitive:  # 原名稱已確定查無，只差上一層物種
+            label, icon = "補查上一層", ft.Icons.REFRESH
+        else:
+            label, icon = "重試", ft.Icons.REFRESH
         actions = []
         if not state.done:
             actions.append(
                 kit.button(
-                    "重試" if retry else "查詢",
+                    label,
                     "secondary",
                     size="sm",
-                    icon=ft.Icons.REFRESH if retry else ft.Icons.SEARCH,
+                    icon=icon,
                     on_click=lambda _e, item=candidate: self._query_one(item),
                     disabled=state.running or self._locked(),
                 )

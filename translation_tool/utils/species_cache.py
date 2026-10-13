@@ -110,6 +110,24 @@ class SpeciesLookup:
         return STATUS_RATE_LIMITED in (self.status, self.parent_status)
 
     @property
+    def parent_resolved(self) -> bool:
+        """上一層物種已有確定結果（查到或查無），或根本沒有上一層物種。
+
+        ``False`` 代表這筆是查無的種以下名稱，但上一層物種還沒查過或查詢失敗；
+        原名稱的查無已確定，補查時只需要查上一層。
+        """
+        return (
+            self.parent_name is None
+            or self.parent_value is not None
+            or self.parent_status == STATUS_NOT_FOUND
+        )
+
+    @property
+    def complete(self) -> bool:
+        """原名稱與上一層物種的參考都已有確定結果，不需要再查詢。"""
+        return self.definitive and self.parent_resolved
+
+    @property
     def failed(self) -> bool:
         """這次查詢（含上一層物種）是否有可重試的失敗。"""
         return not self.definitive or self.parent_status in (
@@ -393,15 +411,21 @@ def query_wikipedia_and_update_cache(species_name: str) -> str | None:
 def _with_parent_reference(
     name: str, lookup: SpeciesLookup, *, fetch: bool
 ) -> SpeciesLookup:
-    """種以下的名稱查無時，附上上一層物種查到的名稱當參考。"""
+    """種以下的名稱查無時，附上上一層物種的查詢結果。
+
+    ``fetch=False`` 只讀快取：上一層還沒有快取紀錄時只標上 ``parent_name``，
+    讓呼叫端知道上一層仍待查（見 :attr:`SpeciesLookup.parent_resolved`）。
+    """
     if lookup.status != STATUS_NOT_FOUND:
         return lookup
     parent = parent_species_name(name)
     if parent is None:
         return lookup
     parent_lookup = _single_flight_lookup(parent) if fetch else _cached_lookup(parent)
-    if parent_lookup is None or parent_lookup.status == STATUS_NOT_FOUND:
-        return lookup
+    if parent_lookup is None:
+        return replace(lookup, parent_name=parent)
+    if parent_lookup.status == STATUS_NOT_FOUND:
+        return replace(lookup, parent_name=parent, parent_status=STATUS_NOT_FOUND)
     if parent_lookup.status != STATUS_FOUND:
         return replace(
             lookup,

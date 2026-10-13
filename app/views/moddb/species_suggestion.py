@@ -26,7 +26,7 @@ from app.ui.design import C
 from app.ui.snack import show_snack
 from app.views.moddb.species_bulk_lookup import (
     bulk_lookup_for,
-    parent_failure_text,
+    parent_issue_text,
     parent_reference_text,
 )
 from app.views.moddb.species_bulk_lookup import safe_lookup as _safe_lookup
@@ -153,14 +153,19 @@ class SpeciesSuggestion:
                     on_click=lambda _e, text=lookup.value: self.on_apply(text),
                 )
             )
-        if not (lookup and lookup.definitive):
-            retry = lookup is not None
+        if not (lookup and lookup.complete):
+            if lookup is None:
+                label, icon = "查詢維基百科", ft.Icons.SEARCH
+            elif lookup.definitive:  # 原名稱已確定查無，只差上一層物種
+                label, icon = "補查上一層", ft.Icons.REFRESH
+            else:
+                label, icon = "重試", ft.Icons.REFRESH
             actions.append(
                 kit.button(
-                    "重試" if retry else "查詢維基百科",
+                    label,
                     "secondary",
                     size="sm",
-                    icon=ft.Icons.REFRESH if retry else ft.Icons.SEARCH,
+                    icon=icon,
                     on_click=lambda _e, item=name: self.query(item),
                 )
             )
@@ -198,12 +203,12 @@ class SpeciesSuggestion:
                     "變種／品種的正確譯名通常不同，這只是上一層物種的名稱，僅供參考。"
                 ),
             ]
-        if failure := parent_failure_text(lookup):
+        if issue := parent_issue_text(lookup):
             return [
                 ft.Text(
-                    f"{failure}，可按「再查一次」重試。",
+                    f"{issue}，可按「補查上一層」。",
                     size=13,
-                    color=C.RED,
+                    color=C.RED if lookup.parent_status else C.MUTED,
                     selectable=True,
                 )
             ]

@@ -1151,3 +1151,157 @@ def test_explicit_missing_page_is_cached_not_found(
     assert result.status == species_cache.STATUS_NOT_FOUND
     cached = species_cache.cached_species_lookup("Olea europaea")
     assert cached.status == species_cache.STATUS_NOT_FOUND
+
+
+# ---------------------------------------------------------------- 上一層物種待查的續查
+def _beech_dialog(tmp_path, monkeypatch):
+    """種以下名稱與一般學名各一筆；查詢走真的 lookup_species，只替換網路請求。"""
+    _isolate_species_cache(monkeypatch)
+    db = TranslationDB(tmp_path / "mod.db")
+    db.ingest(
+        "1.21.1",
+        [
+            ScanItem(KIND_LANG, "m", "block.m.beech.latin", "Fagus sylvatica purpurea"),
+            ScanItem(KIND_LANG, "m", "block.m.olive.latin", "Olea europaea"),
+        ],
+    )
+    monkeypatch.setattr(bulk_module, "launch_page_operation", _run_now)
+    dialog = _new_dialog(mock_page(), db)
+    dialog.open()
+    dialog._scan()
+    return db, dialog
+
+
+def _state_for(dialog, value):
+    candidate = next(c for c in dialog.result.candidates if c.value == value)
+    return dialog._states[candidate.entry_id]
+
+
+def test_bulk_resumes_parent_lookup_after_rate_limit(tmp_path, monkeypatch):
+    calls = []
+    limited = {"on": True}
+
+    def fetch(name):
+        calls.append(name)
+        if name == "Fagus sylvatica purpurea":
+            return None
+        if name == "Fagus sylvatica":
+            if limited["on"]:
+                raise _http_error(429)
+            return "歐洲山毛櫸"
+        return "油橄欖"
+
+    db, dialog = _beech_dialog(tmp_path, monkeypatch)
+    monkeypatch.setattr(species_cache, "_query_wikipedia_title", fetch)
+    try:
+        dialog._query_all()
+        beech = _state_for(dialog, "Fagus sylvatica purpurea")
+        assert dialog.job.stop_reason == "rate_limited"
+        assert beech.lookup.status == species_cache.STATUS_NOT_FOUND
+        assert beech.lookup.parent_status == species_cache.STATUS_RATE_LIMITED
+        assert beech.done is False  # 上一層待查：仍在批次範圍內
+        assert dialog.query_all_btn.disabled is False
+
+        limited["on"] = False
+        calls.clear()
+        dialog._query_all()
+        assert "Fagus sylvatica purpurea" not in calls  # 原名稱的查無不重查
+        assert "Fagus sylvatica" in calls
+        assert beech.lookup.parent_value == "歐洲山毛櫸"
+        assert beech.done is True
+    finally:
+        db.close()
+
+
+def test_parent_pending_survives_restart_and_offers_parent_lookup(
+    tmp_path, monkeypatch
+):
+    db, dialog = _beech_dialog(tmp_path, monkeypatch)
+    try:
+        # 模擬重新啟動：快取只有原名稱的查無，上一層物種沒有紀錄
+        species_cache._species_cache_data["Fagus sylvatica purpurea"] = ""
+        dialog._scan()
+        beech = _state_for(dialog, "Fagus sylvatica purpurea")
+        assert beech.lookup.status == species_cache.STATUS_NOT_FOUND
+        assert beech.lookup.parent_resolved is False
+        assert beech.done is False
+        status, _color = dialog._status_for(beech)
+        assert "上一層物種 Fagus sylvatica 尚未查詢" in status
+        index = dialog._row_index[
+            next(
+                c.entry_id
+                for c in dialog.result.candidates
+                if c.value == "Fagus sylvatica purpurea"
+            )
+        ]
+        assert "補查上一層" in _texts([dialog.rows.controls[index]])
+
+        # 上一層確定查無：參考查詢也算完成
+        species_cache._species_cache_data["Fagus sylvatica"] = ""
+        dialog._scan()
+        beech = _state_for(dialog, "Fagus sylvatica purpurea")
+        assert beech.lookup.parent_resolved is True and beech.done is True
+    finally:
+        db.close()
+
+
+def test_species_suggestion_offers_parent_lookup_when_pending(isolated_species_cache):
+    from app.views.moddb.species_suggestion import SpeciesSuggestion
+
+    species_cache._species_cache_data["Fagus sylvatica purpurea"] = ""
+    suggestion = SpeciesSuggestion(mock_page(), lambda _t: None, lambda: None)
+    texts = _texts(
+        suggestion.build(_entry("block.m.x.latin", "Fagus sylvatica purpurea"))
+    )
+    assert "補查上一層" in texts
+    assert any("上一層物種 Fagus sylvatica 尚未查詢" in text for text in texts)
+
+
+# ---------------------------------------------------------------- 學名查詢頁面
+def _patch_lookup(monkeypatch, results):
+    from app.services_impl.pipelines import lookup_service
+
+    calls = []
+
+    def fake(name):
+        calls.append(name)
+        return results[name]
+
+    monkeypatch.setattr(lookup_service, "lookup_species", fake)
+    return lookup_service, calls
+
+
+@pytest.mark.parametrize(
+    ("lookup", "expected"),
+    [
+        (FOUND, "名稱"),
+        (MISSING, "在本地快取和線上查詢中均未找到結果。"),
+        (LIMITED, "維基百科回應請求過於頻繁，請稍後再試（HTTP 429）。"),
+        (FAILED, "查詢失敗，請稍後再試（連線逾時）。"),
+    ],
+)
+def test_manual_lookup_distinguishes_failures(monkeypatch, lookup, expected):
+    service, _calls = _patch_lookup(monkeypatch, {"Olea europaea": lookup})
+    assert service.run_manual_lookup_service("Olea europaea") == expected
+
+
+def test_batch_lookup_stops_on_rate_limit(monkeypatch):
+    import json
+
+    service, calls = _patch_lookup(
+        monkeypatch,
+        {"Olea europaea": FOUND, "Ginkgo biloba": LIMITED, "Abies alba": FOUND},
+    )
+    updates = list(
+        service.run_batch_lookup_service(
+            '["Olea europaea", "Ginkgo biloba", "Abies alba"]'
+        )
+    )
+    assert calls == ["Olea europaea", "Ginkgo biloba"]
+    assert any("已停止批次查詢" in u.get("log", "") for u in updates)
+    result = json.loads(next(u["result"] for u in updates if u.get("result")))
+    assert result == {
+        "Olea europaea": "名稱",
+        "Ginkgo biloba": "查詢失敗：HTTP 429",
+        "Abies alba": "未查詢（已因限流停止）",
+    }

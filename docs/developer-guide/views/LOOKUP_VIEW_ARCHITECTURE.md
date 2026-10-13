@@ -55,10 +55,11 @@ batch_lookup_clicked(e)
 
 - `run_manual_lookup_service(name) -> str`
   - `is_potential_species_name(name)` 前置格式檢查（不合格式回錯誤訊息）
-  - `lookup_species_name(name)` → 有結果回傳，否則「在本地快取和線上查詢中均未找到結果。」
+  - `lookup_species(name)` 交給 `describe_lookup`：找到回傳名稱；查無回「在本地快取和線上查詢中均未找到結果。」（種以下名稱另附上一層物種參考）；限流回「維基百科回應請求過於頻繁，請稍後再試（…）。」；其他錯誤回「查詢失敗，請稍後再試（…）。」
 - `run_batch_lookup_service(json_text)`（generator，逐步 yield update dict）
   - `json.loads` 解析；非 list → yield `{log, error: True}`
-  - 逐筆：`is_potential_species_name` 判斷（`"格式錯誤"`）→ `lookup_species_name`（未找到 → `"未找到"`）
+  - 逐筆：`is_potential_species_name` 判斷（`"格式錯誤"`）→ `lookup_species`（查無 → `"未找到"`，暫時失敗 → `"查詢失敗：…"`）
+  - `SpeciesLookup.rate_limited`（含上一層物種）時停止：yield 一筆停止訊息，其餘名稱記為 `"未查詢（已因限流停止）"`，不再送出請求
   - 每筆 yield `{log: "(i/total) 已查詢: ...", progress}`，經 `GLOBAL_LOG_LIMITER.filter()` 過濾高頻日誌
   - 完成 yield `{log: "--- 批次查詢完成 ---", result: json.dumps(...)}`
   - JSONDecodeError / 其他例外 → yield `{log, error: True}`

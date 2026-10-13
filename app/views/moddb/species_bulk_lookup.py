@@ -70,11 +70,13 @@ def parent_reference_text(lookup: SpeciesLookup) -> str:
     return ""
 
 
-def parent_failure_text(lookup: SpeciesLookup) -> str:
-    """上一層物種查詢失敗的說明；可以按「再查一次」重試。"""
-    if lookup.parent_name and lookup.parent_status:
+def parent_issue_text(lookup: SpeciesLookup) -> str:
+    """上一層物種還沒有確定結果時的說明：查詢失敗，或尚未查詢。"""
+    if lookup.parent_resolved:
+        return ""
+    if lookup.parent_status:
         return f"上一層物種 {lookup.parent_name} 查詢失敗（{lookup.parent_detail}）"
-    return ""
+    return f"上一層物種 {lookup.parent_name} 尚未查詢"
 
 
 def summary_text(prefix: str, lookups) -> str:
@@ -293,7 +295,7 @@ __all__ = [
     "STOP_MESSAGES",
     "SpeciesBulkLookup",
     "bulk_lookup_for",
-    "parent_failure_text",
+    "parent_issue_text",
     "parent_reference_text",
     "safe_lookup",
     "summary_text",
