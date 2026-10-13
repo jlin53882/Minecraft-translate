@@ -269,5 +269,5 @@ def open_species_scan(panel, _e=None) -> None:
         panel.version,
         panel.mod_id,
         panel.kind,
-        on_open_entry=panel.select,
+        on_open_entry=panel.open_species_entry,
     ).open()

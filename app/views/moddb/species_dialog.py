@@ -9,7 +9,6 @@ from dataclasses import dataclass
 import flet as ft
 
 from app.services_impl.moddb_service import (
-    DEFAULT_SCAN_LIMIT,
     STATUS_ERROR,
     STATUS_FOUND,
     STATUS_NOT_FOUND,
@@ -39,6 +38,8 @@ from app.ui.snack import show_snack
 from app.views.moddb.formatting import kind_label
 from translation_tool.utils.log_unit import log_exception, log_warning
 
+# 候選列表每頁顯示幾筆（候選數量不設上限，用頁碼切換）。
+PAGE_SIZE = 50
 # 批次查詢連續幾筆失敗（非「查無」）就停止，避免離線時逐筆等待逾時。
 MAX_CONSECUTIVE_FAILURES = 3
 # 批次查詢時畫面最多每隔這麼久才重繪一次。
@@ -91,6 +92,7 @@ class SpeciesCandidateDialog:
         self.result: SpeciesScanResult | None = None
         self._states: dict[int, _LookupState] = {}
         self._row_index: dict[int, int] = {}
+        self._page_candidates: list[SpeciesCandidate] = []
         self._busy = False
         self._bulk_running = False
         self._cancel = threading.Event()
@@ -140,6 +142,10 @@ class SpeciesCandidateDialog:
         self.stop_btn.visible = False
         self.status = ft.Text("尚未掃描", size=12, color=C.MUTED)
         self.progress = ft.ProgressBar(visible=False)
+        self.pager = kit.Pager(
+            0, page_size=PAGE_SIZE, on_change=self._on_page, unit="筆"
+        )
+        self.pager.visible = False
         self.rows = ft.Column(
             spacing=8,
             expand=True,
@@ -161,13 +167,18 @@ class SpeciesCandidateDialog:
                         self.hint,
                         self.loose_check,
                         ft.Row(
-                            [self.scan_btn, self.query_all_btn, self.stop_btn],
+                            [
+                                self.scan_btn,
+                                self.query_all_btn,
+                                self.stop_btn,
+                            ],
                             spacing=8,
                             wrap=True,
                         ),
                         self.status,
                         self.progress,
                         self.rows,
+                        self.pager,
                     ],
                     spacing=10,
                     expand=True,
@@ -216,7 +227,7 @@ class SpeciesCandidateDialog:
             return
         generation = self._generation
         loose = bool(self.loose_check.value)
-        self._set_busy(True, "掃描目前版本的英文原文…")
+        self._set_busy(True, "掃描目前範圍的英文原文…")
 
         def work() -> None:
             result = error = None
@@ -254,16 +265,15 @@ class SpeciesCandidateDialog:
         self._states = {
             candidate.entry_id: _LookupState() for candidate in result.candidates
         }
-        suffix = (
-            f"；候選超過 {DEFAULT_SCAN_LIMIT} 筆，請縮小版本／模組／類型範圍"
-            if result.truncated
-            else ""
-        )
-        self.status.value = (
-            f"掃描 {result.scanned_entries:,} 筆，"
-            f"找到 {result.total_candidates:,} 個候選{suffix}"
-        )
+        self.status.value = f"找到 {result.total_candidates:,} 個候選"
         self.query_all_btn.disabled = not result.candidates
+        self.pager.set_state(result.total_candidates, 1)
+        self.pager.visible = result.total_candidates > PAGE_SIZE
+        self._render_rows()
+        self._flush(force=True)
+
+    def _on_page(self, page: int) -> None:
+        self.pager.set_state(self.pager.total_items, page)
         self._render_rows()
         self._flush(force=True)
 
@@ -371,8 +381,8 @@ class SpeciesCandidateDialog:
         state.running = False
         state.lookup = lookup
         index = self._row_index.get(entry_id)
-        if index is not None and self.result is not None:
-            self._refresh_row(self.result.candidates[index])
+        if index is not None:
+            self._refresh_row(self._page_candidates[index])
         self._sync_query_all_enabled()
         if self._bulk_running:
             self._flush()
@@ -445,14 +455,17 @@ class SpeciesCandidateDialog:
         result = self.result
         if result is None or not result.candidates:
             self._row_index = {}
-            self.rows.controls = [kit.hint_text("目前範圍沒有符合格式的學名候選。")]
+            self._page_candidates = []
+            self.rows.controls = [kit.hint_text("目前範圍沒有符合條件的學名候選。")]
             return
+        first = (self.pager.current_page - 1) * PAGE_SIZE
+        self._page_candidates = list(result.candidates[first : first + PAGE_SIZE])
         self._row_index = {
             candidate.entry_id: index
-            for index, candidate in enumerate(result.candidates)
+            for index, candidate in enumerate(self._page_candidates)
         }
         self.rows.controls = [
-            self._build_row(candidate) for candidate in result.candidates
+            self._build_row(candidate) for candidate in self._page_candidates
         ]
 
     def _refresh_row(self, candidate: SpeciesCandidate) -> None:

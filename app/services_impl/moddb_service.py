@@ -14,8 +14,6 @@ from typing import Any
 
 from app.services_impl.logging_service import UI_LOG_HANDLER
 from app.services_impl.moddb_species_service import (
-    DEFAULT_SCAN_LIMIT,
-    SCAN_PAGE_SIZE,
     STATUS_ERROR,
     STATUS_FOUND,
     STATUS_NOT_FOUND,
@@ -23,7 +21,9 @@ from app.services_impl.moddb_species_service import (
     SpeciesCandidate,
     SpeciesLookup,
     SpeciesScanResult,
+    cached_species_lookup,
     is_potential_species_name,
+    is_species_candidate,
     lookup_species,
     lookup_species_name,
     scan_species_candidates,
@@ -86,8 +86,6 @@ from translation_tool.utils.config_manager import load_config
 
 # View 經由本模組取用資料庫型別與常數（View 不直接 import translation_tool 引擎）
 __all__ = [
-    "DEFAULT_SCAN_LIMIT",
-    "SCAN_PAGE_SIZE",
     "SOURCE_NAMES",
     "SRC_AI",
     "SRC_CUSTOM",
@@ -119,6 +117,7 @@ __all__ = [
     "TimeFilter",
     "TranslationDB",
     "VersionStat",
+    "cached_species_lookup",
     "current_settings",
     "custom_date_bounds",
     "custom_source_codes",
@@ -128,6 +127,7 @@ __all__ = [
     "format_taipei_time",
     "format_tokens",
     "is_potential_species_name",
+    "is_species_candidate",
     "load_db_settings",
     "lookup_species",
     "lookup_species_name",

@@ -144,6 +144,7 @@ class QualityFilter:
             "missing_translation",
             "whitespace",
             "species_name",
+            "species_format",
         }:
             raise ValueError(f"未知翻譯品質狀態：{self.status}")
         if self.direction not in {"all", "missing", "extra"}:

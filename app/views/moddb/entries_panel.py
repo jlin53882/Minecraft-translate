@@ -63,6 +63,13 @@ from app.views.moddb.history_renderer import render_history
 from app.views.moddb.mc_text_preview import MinecraftTextPreview
 from app.views.moddb.review_scope_dialog import ReviewScopeController
 from app.views.moddb.source_filter import SourceFilter
+from app.views.moddb.species_suggestion import (
+    TAB_KEY as SPECIES_TAB_KEY,
+)
+from app.views.moddb.species_suggestion import (
+    TAB_LABEL as SPECIES_TAB_LABEL,
+)
+from app.views.moddb.species_suggestion import SpeciesSuggestion
 from app.views.moddb.suggestions import build_suggestions
 from translation_tool.utils.log_unit import (
     log_debug,
@@ -260,9 +267,16 @@ class EntriesPanel(ft.Column):
         self._build_editor_inputs()
         self._build_editor_actions()
         self.sug_seg = kit.Segmented(
-            [("key", "同鍵值・其他版本"), ("text", "相同原文・其他鍵值／模組")],
+            [
+                ("key", "同鍵值・其他版本"),
+                ("text", "相同原文・其他鍵值／模組"),
+                (SPECIES_TAB_KEY, SPECIES_TAB_LABEL),
+            ],
             "key",
             self._on_sug_tab,
+        )
+        self.species_suggestion = SpeciesSuggestion(
+            self._page, self._apply_suggestion, self._on_species_changed
         )
         self.sug_col = ft.Column(spacing=0)
         self.empty_editor = kit.empty_state(
@@ -616,6 +630,9 @@ class EntriesPanel(ft.Column):
     def _render_suggestions(self, *, catalog=None) -> None:
         if self.detail is None:
             return
+        if self.sug_tab == SPECIES_TAB_KEY:
+            self.sug_col.controls = self.species_suggestion.build(self.detail.entry)
+            return
         self.sug_col.controls = build_suggestions(
             self.detail,
             self.sug_tab,
@@ -675,6 +692,17 @@ class EntriesPanel(ft.Column):
 
     def _on_page(self, page: int) -> None:
         refresh_entry_filter(self, page=page, keep_selection=False, background=False)
+
+    def _on_species_changed(self) -> None:
+        if self.sug_tab == SPECIES_TAB_KEY:
+            self._render_suggestions()
+            self._safe_update()
+
+    def open_species_entry(self, entry_id: int) -> None:
+        """從學名掃描視窗跳到條目，並直接顯示「學名」建議分頁。"""
+        self.sug_tab = SPECIES_TAB_KEY
+        self.sug_seg.select(SPECIES_TAB_KEY)
+        self.select(entry_id)
 
     def _on_sug_tab(self, key: str) -> None:
         self.sug_tab = key

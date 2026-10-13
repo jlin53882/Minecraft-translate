@@ -51,6 +51,7 @@ _WIKI_LANGUAGE_REGEX = re.compile(r"^[a-z][a-z0-9-]{0,19}$")
 _WIKI_REQUEST_TIMEOUT_SECONDS = 15
 _WIKI_REQUEST_ATTEMPTS = 3
 _WIKI_RETRYABLE_STATUS_CODES = frozenset({429, 500, 502, 503, 504})
+_WIKI_RETRY_AFTER_CAP_SECONDS = 10.0
 _WIKI_USER_AGENT = (
     "Minecraft-translate/0.8.0 "
     "(https://github.com/jlin53882/Minecraft-translate; species lookup)"
@@ -181,6 +182,15 @@ def _convert_wikipedia_title(title: str) -> str:
         return title
 
 
+def _retry_after_seconds(response) -> float:
+    """讀取伺服器的 Retry-After（秒數）；無法解析或沒有時回傳 0，上限 10 秒。"""
+    try:
+        value = float(response.headers.get("Retry-After", 0))
+    except (AttributeError, TypeError, ValueError):
+        return 0.0
+    return min(max(value, 0.0), _WIKI_RETRY_AFTER_CAP_SECONDS)
+
+
 def _query_wikipedia_title(species_name: str) -> str | None:
     """透過 MediaWiki Action API 解析學名轉址並回傳條目標題。"""
     params = {
@@ -192,12 +202,13 @@ def _query_wikipedia_title(species_name: str) -> str | None:
         "titles": species_name,
     }
     headers = {"User-Agent": _WIKI_USER_AGENT}
+    server_delay = 0.0
 
     for attempt in range(_WIKI_REQUEST_ATTEMPTS):
         if attempt == 0:
             time.sleep(_RATE_LIMIT_DELAY)
         else:
-            time.sleep(min(2 ** (attempt - 1), 2))
+            time.sleep(max(min(2 ** (attempt - 1), 2), server_delay))
 
         try:
             response = requests.get(
@@ -215,6 +226,7 @@ def _query_wikipedia_title(species_name: str) -> str | None:
                 or attempt == _WIKI_REQUEST_ATTEMPTS - 1
             ):
                 raise
+            server_delay = _retry_after_seconds(exc.response)
             log.warning(
                 "Wikipedia API 暫時回傳 HTTP %s，準備重試 '%s'。",
                 status_code,
@@ -314,6 +326,13 @@ def query_wikipedia_and_update_cache(species_name: str) -> str | None:
     if _species_cache_data is None:
         return None
     return _fetch_and_cache(normalize_species_name(species_name)).value
+
+
+def cached_species_lookup(name: str) -> SpeciesLookup | None:
+    """只查本機快取（不連線）；沒有快取紀錄時回傳 ``None``。"""
+    if not _initialized and not initialize_species_cache():
+        return None
+    return _cached_lookup(normalize_species_name(name))
 
 
 def lookup_species(name: str) -> SpeciesLookup:

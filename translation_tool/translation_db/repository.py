@@ -973,6 +973,9 @@ class TranslationDB(BulkReviewMixin):
                 f"instr(e.en_us, '{mark}') > 0" for mark in TAXONOMIC_MARKERS
             )
             return f"e.en_us <> '' AND ({key_hint} OR {marker})"
+        if status == "species_format":
+            # 只看格式：首字大寫、含空白；正規表示式由 Python 做最終判斷。
+            return "e.en_us GLOB '[A-Z][a-z]*' AND instr(e.en_us, ' ') > 0"
         if status == "missing_translation":
             return "e.en_us <> '' AND (f.zh_tw IS NULL OR f.zh_tw = '')"
         if status == "whitespace":

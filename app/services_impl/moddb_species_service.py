@@ -12,13 +12,19 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from translation_tool.translation_db import EntryRow, TranslationDB
+from translation_tool.translation_db import (
+    EntryFilter,
+    EntryRow,
+    QualityFilter,
+    TranslationDB,
+)
 from translation_tool.utils.species_cache import (
     STATUS_ERROR,
     STATUS_FOUND,
     STATUS_NOT_FOUND,
     STATUS_RATE_LIMITED,
     SpeciesLookup,
+    cached_species_lookup,
     lookup_species,
     lookup_species_name,
 )
@@ -28,9 +34,6 @@ from translation_tool.utils.species_names import (
     is_potential_species_name,
     is_species_candidate,
 )
-
-SCAN_PAGE_SIZE = 1000
-DEFAULT_SCAN_LIMIT = 500
 
 
 @dataclass(frozen=True)
@@ -47,12 +50,13 @@ class SpeciesCandidate:
 
 @dataclass(frozen=True)
 class SpeciesScanResult:
-    """目前範圍的掃描結果與是否達到安全上限。"""
+    """目前範圍內所有的學名候選（不設上限，由 UI 分頁顯示）。"""
 
     candidates: tuple[SpeciesCandidate, ...]
-    scanned_entries: int
-    total_candidates: int
-    truncated: bool
+
+    @property
+    def total_candidates(self) -> int:
+        return len(self.candidates)
 
 
 def _candidate_from_row(
@@ -77,59 +81,31 @@ def scan_species_candidates(
     *,
     mod_id: str | None = None,
     kind: str | None = None,
-    limit: int = DEFAULT_SCAN_LIMIT,
     require_key_hint: bool = True,
 ) -> SpeciesScanResult:
-    """掃描指定版本／模組／類型中的英文原文，回傳可能的學名條目。
+    """找出指定版本／模組／類型中所有可能是學名的條目。
 
-    ``limit`` 只限制候選列數；``scanned_entries`` 仍記錄實際檢查過的條目數。
-    達到上限後停止繼續查詢，讓大型資料庫的 UI 操作有可預期的時間。
+    先用資料庫的品質篩選（SQL 預篩＋規則判斷）只取出可能的條目，不逐筆載入整個版本，
+    所以大型資料庫也能快速掃描；候選數量不設上限。
     """
     if db is None or not version:
-        return SpeciesScanResult((), 0, 0, False)
-    if limit < 1:
-        raise ValueError("學名候選上限必須大於 0")
-
-    candidates: list[SpeciesCandidate] = []
-    scanned = 0
-    offset = 0
-    truncated = False
-    while True:
-        rows, total = db.list_entries(
-            version,
-            mod_id=mod_id,
-            kind=kind,
-            state="all",
-            limit=SCAN_PAGE_SIZE,
-            offset=offset,
-        )
-        if not rows:
-            break
-        scanned += len(rows)
-        for row in rows:
-            candidate = _candidate_from_row(row, require_key_hint=require_key_hint)
-            if candidate is None:
-                continue
-            if len(candidates) < limit:
-                candidates.append(candidate)
-            else:
-                truncated = True
-                break
-        if truncated or offset + len(rows) >= total:
-            break
-        offset += len(rows)
-
-    return SpeciesScanResult(
-        tuple(candidates),
-        scanned,
-        len(candidates),
-        truncated,
+        return SpeciesScanResult(())
+    criteria = EntryFilter(
+        version=version,
+        mod_id=mod_id,
+        kind=kind,
+        quality=QualityFilter(
+            status="species_name" if require_key_hint else "species_format"
+        ),
     )
+    rows, _total = db.list_entries(criteria=criteria, limit=None)
+    candidates = (
+        _candidate_from_row(row, require_key_hint=require_key_hint) for row in rows
+    )
+    return SpeciesScanResult(tuple(c for c in candidates if c is not None))
 
 
 __all__ = [
-    "DEFAULT_SCAN_LIMIT",
-    "SCAN_PAGE_SIZE",
     "SPECIES_KEY_HINTS",
     "STATUS_ERROR",
     "STATUS_FOUND",
@@ -138,6 +114,7 @@ __all__ = [
     "SpeciesCandidate",
     "SpeciesLookup",
     "SpeciesScanResult",
+    "cached_species_lookup",
     "has_species_key_hint",
     "is_potential_species_name",
     "is_species_candidate",

@@ -6,7 +6,10 @@ import re
 from collections import Counter
 
 from translation_tool.translation_db.models import QualityFilter, QualityIssueDelta
-from translation_tool.utils.species_names import is_species_candidate
+from translation_tool.utils.species_names import (
+    is_potential_species_name,
+    is_species_candidate,
+)
 
 _SCAN_RE = re.compile(
     r"§[0-9a-fk-orA-FK-OR]|%(?:\d+\$)?[sdfxXeEgGcb%]|\$\(|\{\d*\}|\\n|\n"
@@ -214,6 +217,8 @@ def matches_quality(
         status = "mismatch"
     if status == "species_name":
         return bool(source) and is_species_candidate(key, source)
+    if status == "species_format":
+        return bool(source) and is_potential_species_name(source)
     # 掃描整個版本時每列都會進來：只做該狀態需要的判斷，不先跑完整的 token 分析。
     if status == "unknown_source":
         return not source

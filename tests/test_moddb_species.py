@@ -40,7 +40,6 @@ def test_scan_species_candidates_keeps_entry_scope_and_filters_values(tmp_path):
     finally:
         db.close()
 
-    assert result.scanned_entries == 4
     assert result.total_candidates == 3
     assert [candidate.value for candidate in result.candidates] == [
         "Agave tequilana",
@@ -48,16 +47,27 @@ def test_scan_species_candidates_keeps_entry_scope_and_filters_values(tmp_path):
         "Cucumis sativus",
     ]
     assert all(candidate.mod_id == "plants" for candidate in result.candidates)
-    assert result.truncated is False
 
 
-def test_scan_species_candidates_reports_limit_without_writing(tmp_path):
-    db = _seed(tmp_path / "mod.db")
+def test_scan_species_candidates_has_no_cap_and_does_not_write(tmp_path):
+    db = TranslationDB(tmp_path / "mod.db")
     try:
-        result = moddb_species_service.scan_species_candidates(db, "1.21.1", limit=2)
-        assert result.total_candidates == 2
-        assert result.truncated is True
-        assert db.count_entries() == 4
+        db.ingest(
+            "1.21.1",
+            [
+                ScanItem(
+                    KIND_LANG,
+                    "m",
+                    f"block.m.s{i}.latin",
+                    f"Genus species{chr(97 + i % 26)}",
+                )
+                for i in range(700)
+            ],
+        )
+        before = db.count_entries()
+        result = moddb_species_service.scan_species_candidates(db, "1.21.1")
+        assert result.total_candidates == 700
+        assert db.count_entries() == before
     finally:
         db.close()
 
@@ -391,3 +401,157 @@ def test_species_names_module_is_pure_and_shared():
     assert species_cache.is_potential_species_name is (
         species_names.is_potential_species_name
     )
+
+
+def test_dialog_pages_candidates_without_a_cap(tmp_path, monkeypatch):
+    from app.views.moddb.species_dialog import PAGE_SIZE
+
+    db = TranslationDB(tmp_path / "mod.db")
+    try:
+        db.ingest(
+            "1.21.1",
+            [
+                ScanItem(
+                    KIND_LANG,
+                    "m",
+                    f"block.m.s{i:03}.latin",
+                    f"Genus species{chr(97 + i % 26)}{chr(97 + i // 26)}",
+                )
+                for i in range(PAGE_SIZE * 2 + 5)
+            ],
+        )
+        dialog = SpeciesCandidateDialog(mock_page(), lambda: db, "1.21.1", None, None)
+        dialog._post = lambda callback, *args: callback(*args)
+        dialog._launch = lambda work, name, *, cancellable=False: (work(), True)[1]
+        dialog._scan()
+        assert dialog.result.total_candidates == PAGE_SIZE * 2 + 5
+        assert len(dialog.rows.controls) == PAGE_SIZE
+        assert dialog.pager.visible is True and dialog.pager.total_pages == 3
+        dialog._on_page(3)
+        assert len(dialog.rows.controls) == 5
+        first_on_last_page = dialog._page_candidates[0]
+        assert first_on_last_page is dialog.result.candidates[PAGE_SIZE * 2]
+    finally:
+        db.close()
+
+
+def test_species_format_filter_is_format_only(tmp_path):
+    from translation_tool.translation_db import EntryFilter, QualityFilter
+
+    db = TranslationDB(tmp_path / "mod.db")
+    try:
+        db.ingest(
+            "1.21.1",
+            [
+                ScanItem(KIND_LANG, "m", "misc.a", "Olea europaea"),
+                ScanItem(KIND_LANG, "m", "misc.b", "oak planks"),
+                ScanItem(KIND_LANG, "m", "misc.c", "Steel"),
+            ],
+        )
+        rows, total = db.list_entries(
+            criteria=EntryFilter(
+                version="1.21.1", quality=QualityFilter(status="species_format")
+            ),
+            limit=None,
+        )
+    finally:
+        db.close()
+    assert total == 1 and rows[0].en_us == "Olea europaea"
+
+
+# ---------------------------------------------------------------- 條目校對「學名」分頁
+def _entry(key, value, zh=""):
+    from types import SimpleNamespace
+
+    return SimpleNamespace(key=key, en_us=value, zh_tw=zh)
+
+
+def _texts(controls):
+    found = []
+
+    def walk(control):
+        for attr in ("value", "content", "text"):
+            value = getattr(control, attr, None)
+            if isinstance(value, str):
+                found.append(value)
+        for child in getattr(control, "controls", None) or [
+            getattr(control, "content", None)
+        ]:
+            if child is not None and not isinstance(child, str):
+                walk(child)
+
+    for control in controls:
+        walk(control)
+    return found
+
+
+def test_species_suggestion_shows_cached_name_and_applies_it(isolated_species_cache):
+    from app.views.moddb.species_suggestion import SpeciesSuggestion
+
+    species_cache._species_cache_data["Olea europaea"] = "油橄欖"
+    applied = []
+    suggestion = SpeciesSuggestion(mock_page(), applied.append, lambda: None)
+    texts = _texts(
+        suggestion.build(_entry("block.m.olive.latin", "Olea europaea", "橄欖"))
+    )
+    assert "油橄欖" in texts and "套用" in texts and "查詢維基百科" not in texts
+
+
+def test_species_suggestion_offers_query_when_not_cached(isolated_species_cache):
+    from app.views.moddb.species_suggestion import SpeciesSuggestion
+
+    suggestion = SpeciesSuggestion(mock_page(), lambda _t: None, lambda: None)
+    texts = _texts(suggestion.build(_entry("block.m.x.latin", "Ginkgo biloba")))
+    assert "尚未查詢" in texts and "查詢維基百科" in texts
+
+
+def test_species_suggestion_explains_non_species_entries(isolated_species_cache):
+    from app.views.moddb.species_suggestion import SpeciesSuggestion
+
+    suggestion = SpeciesSuggestion(mock_page(), lambda _t: None, lambda: None)
+    texts = _texts(suggestion.build(_entry("gui.energy", "Energy 100")))
+    assert any("不像學名" in text for text in texts)
+
+
+def test_species_suggestion_query_updates_and_allows_retry(
+    isolated_species_cache, monkeypatch
+):
+    from app.views.moddb import species_suggestion as module
+
+    changes = []
+    suggestion = module.SpeciesSuggestion(
+        mock_page(), lambda _t: None, lambda: changes.append(1)
+    )
+    suggestion._post = lambda callback, *args: callback(*args)
+    suggestion._launch = lambda work: (work(), True)[1]
+    monkeypatch.setattr(module, "_safe_lookup", lambda _name: FAILED)
+    suggestion.query("Ginkgo biloba")
+    texts = _texts(suggestion.build(_entry("block.m.x.latin", "Ginkgo biloba")))
+    assert "重試" in texts and changes
+
+
+def test_retry_after_is_capped_and_cached_lookup_never_connects(
+    isolated_species_cache,
+):
+    response = requests.Response()
+    response.headers["Retry-After"] = "999"
+    assert species_cache._retry_after_seconds(response) == 10.0
+    response.headers["Retry-After"] = "abc"
+    assert species_cache._retry_after_seconds(response) == 0.0
+    assert species_cache.cached_species_lookup("Olea europaea") is None
+
+
+def test_panel_open_species_entry_selects_species_tab(tmp_path):
+    from app.views.moddb.species_suggestion import TAB_KEY
+
+    db = _seed(tmp_path / "mod.db")
+    try:
+        panel = EntriesPanel(mock_page(), lambda: db)
+        panel.refresh()
+        entry_id = panel.rows[0].id
+        panel.open_species_entry(entry_id)
+        assert panel.sug_tab == TAB_KEY
+        assert panel.sug_seg.value == TAB_KEY
+        assert panel.selected.id == entry_id
+    finally:
+        db.close()
