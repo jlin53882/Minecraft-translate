@@ -1426,3 +1426,99 @@ def test_species_suggestion_keeps_failed_refresh_over_cached_not_found(
     # 背景批次查到其他條目：這個名稱的快取沒變，仍顯示這次重試的失敗
     bulk_lookup_for(page)._notify("lookup", 2)
     assert "重試" in _texts(suggestion.build(entry))
+
+
+# ---------------------------------------------------------------- 「再查一次」失敗後的重試
+class _FlakyOlive:
+    """``Olea europaea`` 第一次連線逾時，之後查到；記錄每次連線的名稱。"""
+
+    def __init__(self):
+        self.calls = []
+
+    def __call__(self, name):
+        self.calls.append(name)
+        if name == "Olea europaea" and self.calls.count(name) == 1:
+            raise requests.Timeout()
+        if name == "Olea europaea":
+            return "油橄欖"
+        return None
+
+
+class _Box:
+    """把 ``build()`` 回傳的控制項清單包起來，讓 ``_find_button`` 往下找。"""
+
+    def __init__(self, controls):
+        self.controls = controls
+
+
+def test_species_suggestion_retry_after_failed_refresh_reconnects(
+    isolated_species_cache, monkeypatch
+):
+    from app.views.moddb import species_suggestion as module
+
+    suggestion = module.SpeciesSuggestion(mock_page(), lambda _t: None, lambda: None)
+    suggestion._post = lambda callback, *args: callback(*args)
+    suggestion._launch = lambda work: (work(), True)[1]
+    species_cache._species_cache_data["Olea europaea"] = ""
+    network = _FlakyOlive()
+    monkeypatch.setattr(species_cache, "_query_wikipedia_title", network)
+    entry = _entry("block.m.x.latin", "Olea europaea")
+
+    _find_button(_Box(suggestion.build(entry)), "再查一次").on_click(None)
+    assert network.calls == ["Olea europaea"]
+    _find_button(_Box(suggestion.build(entry)), "重試").on_click(None)
+    assert network.calls == ["Olea europaea", "Olea europaea"]  # 沒被舊查無擋下
+    texts = _texts(suggestion.build(entry))
+    assert "油橄欖" in texts and "套用" in texts
+
+
+def _olive_row(dialog):
+    candidate = next(c for c in dialog.result.candidates if c.value == "Olea europaea")
+    return dialog.rows.controls[dialog._row_index[candidate.entry_id]]
+
+
+@pytest.mark.parametrize("via_query_all", [False, True])
+def test_dialog_retry_after_failed_refresh_reconnects(
+    tmp_path, monkeypatch, via_query_all
+):
+    db, dialog = _beech_dialog(tmp_path, monkeypatch)
+    try:
+        species_cache._species_cache_data["Olea europaea"] = ""
+        species_cache._species_cache_data["Fagus sylvatica purpurea"] = ""
+        species_cache._species_cache_data["Fagus sylvatica"] = ""
+        dialog._scan()
+        network = _FlakyOlive()
+        monkeypatch.setattr(species_cache, "_query_wikipedia_title", network)
+
+        _find_button(_olive_row(dialog), "再查一次").on_click(None)
+        olive = _state_for(dialog, "Olea europaea")
+        assert olive.lookup.status == species_cache.STATUS_ERROR
+        assert "重試" in _texts([_olive_row(dialog)])
+
+        if via_query_all:
+            dialog._query_all()
+        else:
+            _find_button(_olive_row(dialog), "重試").on_click(None)
+        assert network.calls == ["Olea europaea", "Olea europaea"]
+        olive = _state_for(dialog, "Olea europaea")
+        assert olive.lookup.value == "油橄欖" and olive.done
+    finally:
+        db.close()
+
+
+def test_parent_only_retry_does_not_refetch_child(tmp_path, monkeypatch):
+    db, dialog = _beech_dialog(tmp_path, monkeypatch)
+    try:
+        species_cache._species_cache_data["Fagus sylvatica purpurea"] = ""
+        species_cache._species_cache_data["Olea europaea"] = "油橄欖"
+        dialog._scan()
+        calls = []
+        monkeypatch.setattr(
+            species_cache,
+            "_query_wikipedia_title",
+            lambda name: calls.append(name) or "歐洲山毛櫸",
+        )
+        dialog._query_all()
+        assert calls == ["Fagus sylvatica"]
+    finally:
+        db.close()

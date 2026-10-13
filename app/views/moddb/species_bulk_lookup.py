@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import threading
 import weakref
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Collection, Sequence
 
 import flet as ft
 
@@ -61,6 +61,16 @@ def safe_lookup(value: str, *, refresh: bool = False) -> SpeciesLookup:
     except Exception as exc:  # noqa: BLE001 - worker boundary
         log_warning("學名查詢失敗 %r：%r", value, exc)
         return SpeciesLookup(STATUS_ERROR, None, f"{type(exc).__name__}: {exc}")
+
+
+def retry_needs_refresh(lookup: SpeciesLookup | None) -> bool:
+    """上次查詢是暫時性失敗：重試時要略過快取。
+
+    失敗結果不寫入快取，所以快取裡若有紀錄，一定比這次失敗更舊（例如「再查一次」
+    之前的查無），重試必須重新連線才算真的重試。上一層物種待查（原名稱已確定查無）
+    不在此列：補查上一層不需要重查原名稱。
+    """
+    return lookup is not None and not lookup.definitive
 
 
 def parent_reference_text(lookup: SpeciesLookup) -> str:
@@ -144,8 +154,12 @@ class SpeciesBulkLookup:
         result: SpeciesScanResult,
         pending: Sequence[SpeciesCandidate],
         scope_text: str,
+        refresh_ids: Collection[int] = (),
     ) -> bool:
-        """開始在背景查詢 ``pending``；已有工作在跑或無法啟動時回傳 ``False``。"""
+        """開始在背景查詢 ``pending``；已有工作在跑或無法啟動時回傳 ``False``。
+
+        ``refresh_ids`` 列出要略過快取重新連線的候選（上次查詢失敗的重試）。
+        """
         if self.running or not pending:
             return False
         self._generation += 1
@@ -161,9 +175,10 @@ class SpeciesBulkLookup:
         self.session = session
         self.running = True
         items = list(pending)
+        refresh = frozenset(refresh_ids)
 
         def work() -> None:
-            self._run(generation, session, items)
+            self._run(generation, session, items, refresh)
 
         try:
             handle = launch_page_operation(
@@ -207,6 +222,7 @@ class SpeciesBulkLookup:
         generation: int,
         session: TaskSession,
         pending: list[SpeciesCandidate],
+        refresh_ids: frozenset[int] = frozenset(),
     ) -> None:
         try:
             session.start()
@@ -224,7 +240,9 @@ class SpeciesBulkLookup:
                 if self._cancelled(session):
                     stop_reason = "cancelled"
                     break
-                lookup = safe_lookup(candidate.value)
+                lookup = safe_lookup(
+                    candidate.value, refresh=candidate.entry_id in refresh_ids
+                )
                 lookups.append(lookup)
                 session.set_progress(index / total)
                 self._post(self._record, generation, candidate.entry_id, lookup, index)
@@ -297,6 +315,7 @@ __all__ = [
     "bulk_lookup_for",
     "parent_issue_text",
     "parent_reference_text",
+    "retry_needs_refresh",
     "safe_lookup",
     "summary_text",
 ]

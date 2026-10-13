@@ -361,7 +361,14 @@ class SpeciesCandidateDialog:
         ]
         if not pending:
             return
-        if not self.job.start(self.result, pending, self._scope_text()):
+        refresh_ids = [
+            candidate.entry_id
+            for candidate in pending
+            if bulk.retry_needs_refresh(self._states[candidate.entry_id].lookup)
+        ]
+        if not self.job.start(
+            self.result, pending, self._scope_text(), refresh_ids=refresh_ids
+        ):
             self._flush(force=True)
             return
         if not self.job.running:  # 已經結束：結果由 finished 事件顯示
@@ -475,6 +482,7 @@ class SpeciesCandidateDialog:
             label, icon = "補查上一層", ft.Icons.REFRESH
         else:
             label, icon = "重試", ft.Icons.REFRESH
+        refresh = bulk.retry_needs_refresh(lookup)
         actions = []
         if not state.done:
             actions.append(
@@ -483,7 +491,9 @@ class SpeciesCandidateDialog:
                     "secondary",
                     size="sm",
                     icon=icon,
-                    on_click=lambda _e, item=candidate: self._query_one(item),
+                    on_click=lambda _e, item=candidate, refresh=refresh: (
+                        self._query_one(item, refresh=refresh)
+                    ),
                     disabled=state.running or self._locked(),
                 )
             )

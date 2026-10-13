@@ -28,6 +28,7 @@ from app.views.moddb.species_bulk_lookup import (
     bulk_lookup_for,
     parent_issue_text,
     parent_reference_text,
+    retry_needs_refresh,
 )
 from app.views.moddb.species_bulk_lookup import safe_lookup as _safe_lookup
 from translation_tool.utils.log_unit import log_warning
@@ -180,13 +181,16 @@ class SpeciesSuggestion:
                 label, icon = "補查上一層", ft.Icons.REFRESH
             else:
                 label, icon = "重試", ft.Icons.REFRESH
+            refresh = retry_needs_refresh(lookup)
             actions.append(
                 kit.button(
                     label,
                     "secondary",
                     size="sm",
                     icon=icon,
-                    on_click=lambda _e, item=name: self.query(item),
+                    on_click=lambda _e, item=name, refresh=refresh: self.query(
+                        item, refresh=refresh
+                    ),
                 )
             )
         if lookup and lookup.status == STATUS_NOT_FOUND:
