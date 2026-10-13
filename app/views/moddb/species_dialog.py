@@ -293,7 +293,7 @@ class SpeciesCandidateDialog:
         self._show_result(result)
         cached = sum(1 for state in self._states.values() if state.done)
         self.status.value = f"找到 {result.total_candidates:,} 個候選" + (
-            f"，其中 {cached:,} 個已有快取名稱" if cached else ""
+            f"，其中 {cached:,} 個已查過" if cached else ""
         )
         self._flush(force=True)
 
@@ -325,9 +325,14 @@ class SpeciesCandidateDialog:
     def _any_running(self) -> bool:
         return any(state.running for state in self._states.values())
 
-    def _query_one(self, candidate: SpeciesCandidate, _e=None) -> None:
+    def _query_one(
+        self, candidate: SpeciesCandidate, _e=None, *, refresh: bool = False
+    ) -> None:
+        """查詢一筆候選；``refresh`` 用於「再查一次」，略過快取裡的查無紀錄。"""
         state = self._states.get(candidate.entry_id)
-        if state is None or state.running or state.done or self._locked():
+        if state is None or state.running or self._locked():
+            return
+        if state.done and not refresh:
             return
         generation = self._generation
         state.running = True
@@ -336,7 +341,7 @@ class SpeciesCandidateDialog:
         self._flush(force=True)
 
         def work() -> None:
-            lookup = bulk.safe_lookup(candidate.value)
+            lookup = bulk.safe_lookup(candidate.value, refresh=refresh)
             self._post(self._apply_lookup, generation, candidate.entry_id, lookup)
 
         if not self._launch(work, "Mod 資料庫學名查詢"):
@@ -448,6 +453,8 @@ class SpeciesCandidateDialog:
         if lookup.status == STATUS_FOUND:
             return f"找到：{lookup.value}", C.EM
         if lookup.status == STATUS_NOT_FOUND:
+            if reference := bulk.parent_reference_text(lookup):
+                return f"找不到對應條目；{reference}（僅供參考）", C.GOLD
             return "找不到對應條目", C.GOLD
         if lookup.status == STATUS_RATE_LIMITED:
             return f"請求過於頻繁，稍後可重試（{lookup.detail}）", C.RED
@@ -470,6 +477,20 @@ class SpeciesCandidateDialog:
                     icon=ft.Icons.REFRESH if retry else ft.Icons.SEARCH,
                     on_click=lambda _e, item=candidate: self._query_one(item),
                     disabled=state.running or self._locked(),
+                )
+            )
+        elif state.lookup is not None and state.lookup.status == STATUS_NOT_FOUND:
+            actions.append(
+                kit.button(
+                    "再查一次",
+                    "ghost",
+                    size="sm",
+                    icon=ft.Icons.REFRESH,
+                    on_click=lambda _e, item=candidate: self._query_one(
+                        item, refresh=True
+                    ),
+                    disabled=state.running or self._locked(),
+                    tooltip="略過快取重新查詢維基百科",
                 )
             )
         actions.append(

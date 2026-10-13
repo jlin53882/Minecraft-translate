@@ -205,7 +205,7 @@ def _make_dialog(tmp_path, monkeypatch, lookups, *, launcher=_run_now):
     db = _seed(tmp_path / "mod.db")
     monkeypatch.setattr(bulk_module, "launch_page_operation", launcher)
     results = iter(lookups)
-    monkeypatch.setattr(bulk_module, "safe_lookup", lambda _value: next(results))
+    monkeypatch.setattr(bulk_module, "safe_lookup", lambda _value, **_kw: next(results))
     dialog = _new_dialog(mock_page(), db)
     dialog.open()
     dialog._scan()
@@ -227,8 +227,8 @@ def test_dialog_bulk_lookup_can_be_cancelled_and_keeps_finished_results(
     try:
         original = bulk_module.safe_lookup
 
-        def stop_after_first(value):
-            result = original(value)
+        def stop_after_first(value, **kwargs):
+            result = original(value, **kwargs)
             dialog._stop()
             return result
 
@@ -548,7 +548,7 @@ def test_species_suggestion_query_updates_and_allows_retry(
     )
     suggestion._post = lambda callback, *args: callback(*args)
     suggestion._launch = lambda work: (work(), True)[1]
-    monkeypatch.setattr(module, "_safe_lookup", lambda _name: FAILED)
+    monkeypatch.setattr(module, "_safe_lookup", lambda _name, **_kw: FAILED)
     suggestion.query("Ginkgo biloba")
     texts = _texts(suggestion.build(_entry("block.m.x.latin", "Ginkgo biloba")))
     assert "重試" in texts and changes
@@ -664,7 +664,7 @@ def test_scan_prefills_cached_names_and_skips_them_in_bulk(tmp_path, monkeypatch
         values = {c.entry_id: c.value for c in dialog.result.candidates}
         cached = [entry_id for entry_id, state in dialog._states.items() if state.done]
         assert [values[i] for i in cached] == ["Agave tequilana"]
-        assert "1 個已有快取名稱" in dialog.status.value
+        assert "1 個已查過" in dialog.status.value
         dialog._query_all()
         assert dialog.job.total == 2
         assert dialog.query_all_btn.disabled is True  # 全部都有結果
@@ -835,10 +835,16 @@ def test_concurrent_lookups_share_not_found_and_failures(
 
     assert len(calls) == 1
     assert [r.status for r in results] == [status] * 4
-    # 暫時失敗與查無都不持久保存：之後再查會重新連線
-    assert species_cache.cached_species_lookup("Olea europaea") is None
+    cached = species_cache.cached_species_lookup("Olea europaea")
     species_cache.lookup_species("Olea europaea")
-    assert len(calls) == 2
+    if status == species_cache.STATUS_NOT_FOUND:
+        # 查無是確定結果：寫入快取，之後不再連線
+        assert cached.status == species_cache.STATUS_NOT_FOUND
+        assert len(calls) == 1
+    else:
+        # 暫時失敗不保存：之後再查會重新連線
+        assert cached is None
+        assert len(calls) == 2
 
 
 def test_open_species_entry_redraws_page(tmp_path):
@@ -854,3 +860,161 @@ def test_open_species_entry_redraws_page(tmp_path):
         assert panel.selected.id == entry_id
     finally:
         db.close()
+
+
+# ---------------------------------------------------------------- 查無保存、再查一次、上一層物種
+def test_not_found_is_persisted_and_reloaded(
+    isolated_species_cache, monkeypatch, tmp_path
+):
+    cache_file = tmp_path / "species_cache.tsv"
+    monkeypatch.setattr(species_cache, "_CACHE_FILE", cache_file)
+    monkeypatch.setattr(species_cache, "_query_wikipedia_title", lambda _name: None)
+
+    result = species_cache.lookup_species("Olea europaea")
+    assert result.status == species_cache.STATUS_NOT_FOUND
+    assert cache_file.read_text(encoding="utf-8").splitlines() == ["Olea europaea\t"]
+
+    # 重新載入快取檔：查無仍是確定結果
+    monkeypatch.setattr(species_cache, "_initialized", False)
+    monkeypatch.setattr(species_cache, "_species_cache_data", None)
+    monkeypatch.setattr(species_cache, "resolve_project_path", lambda _p: tmp_path)
+    monkeypatch.setattr(
+        species_cache,
+        "load_config",
+        lambda: {"species_cache": {"cache_filename": cache_file.name}},
+    )
+    assert species_cache.initialize_species_cache()
+    cached = species_cache.cached_species_lookup("Olea europaea")
+    assert cached.status == species_cache.STATUS_NOT_FOUND
+
+
+def test_refresh_bypasses_cached_not_found(isolated_species_cache, monkeypatch):
+    species_cache._species_cache_data["Ginkgo biloba"] = ""
+    calls = []
+
+    def fetch(name):
+        calls.append(name)
+        return "銀杏"
+
+    monkeypatch.setattr(species_cache, "_query_wikipedia_title", fetch)
+    assert species_cache.lookup_species("Ginkgo biloba").status == "not_found"
+    assert calls == []
+    refreshed = species_cache.lookup_species("Ginkgo biloba", refresh=True)
+    assert refreshed.value == "銀杏" and calls == ["Ginkgo biloba"]
+    assert species_cache.cached_species_lookup("Ginkgo biloba").value == "銀杏"
+
+
+@pytest.mark.parametrize(
+    ("name", "parent"),
+    [
+        ("Fagus sylvatica purpurea", "Fagus sylvatica"),
+        ("Apium graveolens var. dulce", "Apium graveolens"),
+        ("Mentha × piperita citrata", "Mentha × piperita"),
+        ("Mentha × piperita", None),
+        ("Olea europaea", None),
+        ("Steel Casing", None),
+    ],
+)
+def test_parent_species_name(name, parent):
+    from translation_tool.utils.species_names import parent_species_name
+
+    assert parent_species_name(name) == parent
+
+
+def test_not_found_infraspecific_name_carries_parent_reference(
+    isolated_species_cache, monkeypatch
+):
+    species_cache._species_cache_data["Fagus sylvatica"] = "歐洲山毛櫸"
+    monkeypatch.setattr(species_cache, "_query_wikipedia_title", lambda _name: None)
+
+    result = species_cache.lookup_species("Fagus sylvatica purpurea")
+    assert result.status == species_cache.STATUS_NOT_FOUND
+    assert result.value is None  # 參考名稱不會變成答案
+    assert (result.parent_name, result.parent_value) == (
+        "Fagus sylvatica",
+        "歐洲山毛櫸",
+    )
+    cached = species_cache.cached_species_lookup("Fagus sylvatica purpurea")
+    assert cached.parent_value == "歐洲山毛櫸"
+
+
+def test_parent_reference_is_looked_up_when_not_cached(
+    isolated_species_cache, monkeypatch
+):
+    answers = {"Fagus sylvatica purpurea": None, "Fagus sylvatica": "歐洲山毛櫸"}
+    monkeypatch.setattr(species_cache, "_query_wikipedia_title", answers.get)
+    result = species_cache.lookup_species("Fagus sylvatica purpurea")
+    assert result.parent_value == "歐洲山毛櫸"
+    assert species_cache.cached_species_lookup("Fagus sylvatica").value == "歐洲山毛櫸"
+
+
+def test_dialog_shows_cached_not_found_and_offers_requery(tmp_path, monkeypatch):
+    db, dialog = _make_dialog(tmp_path, monkeypatch, [FOUND])
+    try:
+        species_cache._species_cache_data["Agave tequilana"] = ""
+        dialog._scan()
+        assert "1 個已查過" in dialog.status.value
+        candidate = dialog.result.candidates[0]
+        state = dialog._states[candidate.entry_id]
+        assert state.lookup.status == species_cache.STATUS_NOT_FOUND
+        row_texts = _texts([dialog.rows.controls[0]])
+        assert "再查一次" in row_texts and "查詢" not in row_texts
+        dialog._query_one(candidate)  # 已有確定結果：一般查詢不重查
+        assert state.lookup.status == species_cache.STATUS_NOT_FOUND
+        dialog._query_one(candidate, refresh=True)
+        assert state.lookup is FOUND
+    finally:
+        db.close()
+
+
+def test_dialog_row_shows_parent_reference(tmp_path, monkeypatch):
+    db, dialog = _make_dialog(tmp_path, monkeypatch, [])
+    try:
+        candidate = dialog.result.candidates[0]
+        state = dialog._states[candidate.entry_id]
+        state.lookup = species_cache.SpeciesLookup(
+            species_cache.STATUS_NOT_FOUND,
+            parent_name="Agave americana",
+            parent_value="龍舌蘭",
+        )
+        status, _color = dialog._status_for(state)
+        assert status == (
+            "找不到對應條目；上一層物種 Agave americana：龍舌蘭（僅供參考）"
+        )
+    finally:
+        db.close()
+
+
+def _find_button(control, label):
+    if getattr(control, "content", None) == label:
+        return control
+    for child in getattr(control, "controls", None) or [
+        getattr(control, "content", None)
+    ]:
+        if (
+            child is not None
+            and not isinstance(child, str)
+            and (found := _find_button(child, label))
+        ):
+            return found
+    return None
+
+
+def test_species_suggestion_offers_parent_reference(isolated_species_cache):
+    from app.views.moddb.species_suggestion import SpeciesSuggestion
+
+    applied = []
+    species_cache._species_cache_data["Fagus sylvatica purpurea"] = ""
+    species_cache._species_cache_data["Fagus sylvatica"] = "歐洲山毛櫸"
+    suggestion = SpeciesSuggestion(mock_page(), applied.append, lambda: None)
+    controls = suggestion.build(
+        _entry("block.m.copper_beech.latin", "Fagus sylvatica purpurea")
+    )
+    texts = _texts(controls)
+    assert "維基百科找不到對應條目" in texts
+    assert "上一層物種 Fagus sylvatica：歐洲山毛櫸" in texts
+    assert "套用參考名稱" in texts and "再查一次" in texts
+
+    button = next(b for c in controls if (b := _find_button(c, "套用參考名稱")))
+    button.on_click(None)
+    assert applied == ["歐洲山毛櫸"]

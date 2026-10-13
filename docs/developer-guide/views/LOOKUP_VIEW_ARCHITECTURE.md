@@ -72,7 +72,7 @@ batch_lookup_clicked(e)
 
 ### lookup_species_name(name) 決策鏈
 1. 未初始化 → `initialize_species_cache()`（失敗回 None）
-2. **快取命中**（`name in _species_cache_data`）→ 回傳快取值；舊版快取若有空值則回 None
+2. **快取命中**（`name in _species_cache_data`）→ 回傳快取值；空值代表已確定查無，回 None 且不再連線
 3. 未命中且格式合法 → `query_wikipedia_and_update_cache(name)` 線上查詢
 4. 格式不合法 → None（不發請求）
 
@@ -80,8 +80,10 @@ batch_lookup_clicked(e)
 - 查詢前 `time.sleep(_RATE_LIMIT_DELAY)`（config `species_cache.wikipedia_rate_limit_delay`，預設 0.5s）做 rate limit；語言取自 `species_cache.wikipedia_language`（預設 `zh`）
 - 使用官方 `action=query`、`titles` 與 `redirects=1` 解析學名條目和轉址，取最終條目標題（去括號註記）為俗名；預設 `zh` 語言會再以 OpenCC `s2twp` 正規化為台灣繁體。
 - 請求包含專案 User-Agent、15 秒逾時；HTTP 429/5xx、連線、逾時與非 JSON 暫時回應最多重試 3 次。
-- **成功才寫檔**：記憶體快取 + 快取檔 append（config `species_cache.cache_directory` / `cache_filename`，預設 `學名資料庫/species_cache.tsv`；TSV：`學名\t俗名`）。
-- 找不到頁面或暫時性 API 錯誤時回 None，而且不寫入失敗快取；使用者可稍後直接重試。
+- **確定結果才寫檔**：記憶體快取 + 快取檔 append（config `species_cache.cache_directory` / `cache_filename`，預設 `學名資料庫/species_cache.tsv`；TSV：`學名\t俗名`）。找不到頁面寫入空的俗名代表查無；同一學名有多列時，載入時以最後一列為準。
+- 暫時性 API 錯誤（限流、逾時、連線失敗）回 None 且不寫入快取，之後查詢會重新連線。
+- `lookup_species(name, refresh=True)` 略過快取重新連線，用於「再查一次」。
+- 種以下的名稱（例如 `Fagus sylvatica purpurea`）查無時，`lookup_species` 以 `parent_species_name` 取出上一層物種並查詢，把結果放在 `SpeciesLookup.parent_name`／`parent_value` 當參考；`value` 仍是 None。
 
 ## 檔案結構
 

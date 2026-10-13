@@ -52,13 +52,23 @@ Listener = Callable[[str, int | None], None]
 _PAGE_ATTR = "_moddb_species_bulk_lookup"
 
 
-def safe_lookup(value: str) -> SpeciesLookup:
-    """查詢學名；例外轉成可重試的失敗結果，不讓背景工作中斷。"""
+def safe_lookup(value: str, *, refresh: bool = False) -> SpeciesLookup:
+    """查詢學名；例外轉成可重試的失敗結果，不讓背景工作中斷。
+
+    ``refresh`` 略過快取重新連線（「再查一次」用）。
+    """
     try:
-        return lookup_species(value)
+        return lookup_species(value, refresh=refresh)
     except Exception as exc:  # noqa: BLE001 - worker boundary
         log_warning("學名查詢失敗 %r：%r", value, exc)
         return SpeciesLookup(STATUS_ERROR, None, f"{type(exc).__name__}: {exc}")
+
+
+def parent_reference_text(lookup: SpeciesLookup) -> str:
+    """查無時附上的上一層物種參考，例如「上一層物種 Fagus sylvatica：歐洲山毛櫸」。"""
+    if lookup.parent_name and lookup.parent_value:
+        return f"上一層物種 {lookup.parent_name}：{lookup.parent_value}"
+    return ""
 
 
 def summary_text(prefix: str, lookups) -> str:
@@ -277,6 +287,7 @@ __all__ = [
     "STOP_MESSAGES",
     "SpeciesBulkLookup",
     "bulk_lookup_for",
+    "parent_reference_text",
     "safe_lookup",
     "summary_text",
 ]

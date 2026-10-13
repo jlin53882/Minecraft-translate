@@ -4,7 +4,7 @@
 維護注意：本檔案的函式 docstring 用於維護說明，不代表行為變更。
 """
 
-# /minecraft_translator_flet/translation_tool/utils/species_cache.py (僅儲存成功查詢的修正版)
+# 快取檔記錄確定結果：查到的名稱，以及空字串代表的「查無」；暫時失敗不記錄。
 
 from __future__ import annotations
 
@@ -13,14 +13,18 @@ import logging
 import re
 import threading
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 import requests
 from opencc import OpenCC
 
 from .config_manager import load_config, resolve_project_path
-from .species_names import is_potential_species_name, normalize_species_name
+from .species_names import (
+    is_potential_species_name,
+    normalize_species_name,
+    parent_species_name,
+)
 
 log = logging.getLogger(__name__)
 
@@ -80,11 +84,17 @@ STATUS_ERROR = "error"
 
 @dataclass(frozen=True)
 class SpeciesLookup:
-    """一次學名查詢的結果；``found`` 與 ``not_found`` 是確定結果，其餘可重試。"""
+    """一次學名查詢的結果；``found`` 與 ``not_found`` 是確定結果，其餘可重試。
+
+    種以下的名稱查無時，``parent_name``／``parent_value`` 帶上一層物種的名稱，
+    只供參考（變種的正確譯名通常不同）。
+    """
 
     status: str
     value: str | None = None
     detail: str = ""
+    parent_name: str | None = None
+    parent_value: str | None = None
 
     @property
     def definitive(self) -> bool:
@@ -274,13 +284,14 @@ class _InFlight:
         self.result: SpeciesLookup | None = None
 
 
-def _single_flight_lookup(name: str) -> SpeciesLookup:
+def _single_flight_lookup(name: str, *, refresh: bool = False) -> SpeciesLookup:
     """同名學名同時查詢只送一次請求，等待者共用這次的結果（含查無與暫時失敗）。
 
     暫時失敗不寫入快取；查詢結束後再查詢同一學名會重新連線，所以仍可重試。
+    ``refresh`` 略過快取強制連線，但仍會加入同名進行中的查詢。
     """
     with _in_flight_guard:
-        if cached := _cached_lookup(name):
+        if not refresh and (cached := _cached_lookup(name)):
             return cached
         flight = _in_flight.get(name)
         leader = flight is None
@@ -322,7 +333,8 @@ def _classify_lookup_error(exc: Exception) -> SpeciesLookup:
     return SpeciesLookup(STATUS_ERROR, None, f"{type(exc).__name__}: {exc}")
 
 
-def _store_found_name(name: str, common_name: str) -> None:
+def _store_result(name: str, common_name: str) -> None:
+    """記錄確定結果；``common_name`` 為空字串代表查無。後寫的列在載入時覆蓋先前的。"""
     with _cache_write_lock:
         _species_cache_data[name] = common_name
         if _CACHE_FILE:
@@ -335,7 +347,7 @@ def _store_found_name(name: str, common_name: str) -> None:
 
 
 def _fetch_and_cache(name: str) -> SpeciesLookup:
-    """線上查詢一個已正規化的學名；只有找到時才寫入快取。"""
+    """線上查詢一個已正規化的學名；找到與查無寫入快取，暫時失敗不寫入。"""
     log.debug(f"開始線上查詢: {name}")
     try:
         common_name = _query_wikipedia_title(name)
@@ -344,9 +356,10 @@ def _fetch_and_cache(name: str) -> SpeciesLookup:
         return _classify_lookup_error(e)
     if common_name is None:
         log.warning("線上查詢失敗：找不到 '%s' 的 Wikipedia 頁面。", name)
+        _store_result(name, "")
         return SpeciesLookup(STATUS_NOT_FOUND)
     log.info(f"線上查詢成功: {name} -> {common_name}")
-    _store_found_name(name, common_name)
+    _store_result(name, common_name)
     return SpeciesLookup(STATUS_FOUND, common_name)
 
 
@@ -357,17 +370,38 @@ def query_wikipedia_and_update_cache(species_name: str) -> str | None:
     return _fetch_and_cache(normalize_species_name(species_name)).value
 
 
+def _with_parent_reference(
+    name: str, lookup: SpeciesLookup, *, fetch: bool
+) -> SpeciesLookup:
+    """種以下的名稱查無時，附上上一層物種查到的名稱當參考。"""
+    if lookup.status != STATUS_NOT_FOUND:
+        return lookup
+    parent = parent_species_name(name)
+    if parent is None:
+        return lookup
+    parent_lookup = _single_flight_lookup(parent) if fetch else _cached_lookup(parent)
+    if parent_lookup is None or parent_lookup.status != STATUS_FOUND:
+        return lookup
+    return replace(lookup, parent_name=parent, parent_value=parent_lookup.value)
+
+
 def cached_species_lookup(name: str) -> SpeciesLookup | None:
     """只查本機快取（不連線）；沒有快取紀錄時回傳 ``None``。"""
     if not _initialized and not initialize_species_cache():
         return None
-    return _cached_lookup(normalize_species_name(name))
+    normalized_name = normalize_species_name(name)
+    cached = _cached_lookup(normalized_name)
+    if cached is None:
+        return None
+    return _with_parent_reference(normalized_name, cached, fetch=False)
 
 
-def lookup_species(name: str) -> SpeciesLookup:
+def lookup_species(name: str, *, refresh: bool = False) -> SpeciesLookup:
     """查詢物種名稱並回報結果類別（找到／查無／可重試的失敗）。
 
     同一個學名同時被多個執行緒查詢時，只會有一個實際送出請求，其餘共用它的結果。
+    ``refresh`` 略過快取重新連線（例如快取記錄為查無，但維基百科可能已新增頁面）。
+    種以下的名稱查無時，會再查上一層物種當參考（見 :class:`SpeciesLookup`）。
     """
     if not _initialized and not initialize_species_cache():
         log.error("學名快取系統初始化失敗，查詢功能無法使用。")
@@ -376,12 +410,12 @@ def lookup_species(name: str) -> SpeciesLookup:
         return SpeciesLookup(STATUS_ERROR, None, "學名快取不可用")
 
     normalized_name = normalize_species_name(name)
-    if cached := _cached_lookup(normalized_name):
-        return cached
+    if not refresh and (cached := _cached_lookup(normalized_name)):
+        return _with_parent_reference(normalized_name, cached, fetch=True)
     if not is_potential_species_name(normalized_name):
         return SpeciesLookup(STATUS_NOT_FOUND)
-
-    return _single_flight_lookup(normalized_name)
+    lookup = _single_flight_lookup(normalized_name, refresh=refresh)
+    return _with_parent_reference(normalized_name, lookup, fetch=True)
 
 
 def lookup_species_name(name: str) -> str | None:

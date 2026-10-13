@@ -24,7 +24,10 @@ from app.tasks.operation_registry import (
 from app.ui import kit
 from app.ui.design import C
 from app.ui.snack import show_snack
-from app.views.moddb.species_bulk_lookup import bulk_lookup_for
+from app.views.moddb.species_bulk_lookup import (
+    bulk_lookup_for,
+    parent_reference_text,
+)
 from app.views.moddb.species_bulk_lookup import safe_lookup as _safe_lookup
 from translation_tool.utils.log_unit import log_warning
 from translation_tool.utils.species_names import (
@@ -107,37 +110,10 @@ class SpeciesSuggestion:
         chips: list[ft.Control] = [kit.chip("維基百科", "neutral")]
         if found and lookup.value == entry.zh_tw:
             chips.append(kit.chip("與目前譯文相同", "em"))
-        actions: list[ft.Control] = []
-        if found and lookup.value != entry.zh_tw:
-            actions.append(
-                kit.button(
-                    "套用",
-                    "primary",
-                    size="sm",
-                    icon=ft.Icons.CHECK,
-                    on_click=lambda _e, text=lookup.value: self.on_apply(text),
-                )
-            )
-        if not running and not (lookup and lookup.definitive):
-            retry = lookup is not None
-            actions.append(
-                kit.button(
-                    "重試" if retry else "查詢維基百科",
-                    "secondary",
-                    size="sm",
-                    icon=ft.Icons.REFRESH if retry else ft.Icons.SEARCH,
-                    on_click=lambda _e, item=name: self.query(item),
-                )
-            )
+        actions = [] if running else self._actions(entry, name, lookup)
+        reference = ""
         if lookup and lookup.status == STATUS_NOT_FOUND and not running:
-            actions.append(
-                kit.button(
-                    "再查一次",
-                    "ghost",
-                    size="sm",
-                    on_click=lambda _e, item=name: self.query(item),
-                )
-            )
+            reference = parent_reference_text(lookup)
         return ft.Container(
             padding=ft.Padding.symmetric(vertical=8),
             border=ft.Border.only(bottom=ft.BorderSide(1, C.LINE)),
@@ -151,6 +127,7 @@ class SpeciesSuggestion:
                         color=color,
                         selectable=True,
                     ),
+                    *self._reference_lines(reference),
                     ft.Row(chips, spacing=6, wrap=True),
                     ft.Row(actions, spacing=8, wrap=True),
                 ],
@@ -158,8 +135,70 @@ class SpeciesSuggestion:
             ),
         )
 
+    def _actions(
+        self, entry, name: str, lookup: SpeciesLookup | None
+    ) -> list[ft.Control]:
+        """依查詢結果決定這張卡片提供哪些操作（套用、查詢／重試、再查一次）。"""
+        actions: list[ft.Control] = []
+        if lookup and lookup.status == STATUS_FOUND and lookup.value != entry.zh_tw:
+            actions.append(
+                kit.button(
+                    "套用",
+                    "primary",
+                    size="sm",
+                    icon=ft.Icons.CHECK,
+                    on_click=lambda _e, text=lookup.value: self.on_apply(text),
+                )
+            )
+        if not (lookup and lookup.definitive):
+            retry = lookup is not None
+            actions.append(
+                kit.button(
+                    "重試" if retry else "查詢維基百科",
+                    "secondary",
+                    size="sm",
+                    icon=ft.Icons.REFRESH if retry else ft.Icons.SEARCH,
+                    on_click=lambda _e, item=name: self.query(item),
+                )
+            )
+        if lookup and lookup.status == STATUS_NOT_FOUND:
+            if parent_reference_text(lookup) and lookup.parent_value != entry.zh_tw:
+                actions.append(
+                    kit.button(
+                        "套用參考名稱",
+                        "secondary",
+                        size="sm",
+                        icon=ft.Icons.CHECK,
+                        on_click=lambda _e, text=lookup.parent_value: self.on_apply(
+                            text
+                        ),
+                    )
+                )
+            actions.append(
+                kit.button(
+                    "再查一次",
+                    "ghost",
+                    size="sm",
+                    icon=ft.Icons.REFRESH,
+                    on_click=lambda _e, item=name: self.query(item, refresh=True),
+                )
+            )
+        return actions
+
+    @staticmethod
+    def _reference_lines(reference: str) -> list[ft.Control]:
+        if not reference:
+            return []
+        return [
+            ft.Text(reference, size=13, color=C.TEXT, selectable=True),
+            kit.hint_text(
+                "變種／品種的正確譯名通常不同，這只是上一層物種的名稱，僅供參考。"
+            ),
+        ]
+
     # ------------------------------------------------------------------ 查詢
-    def query(self, name: str) -> None:
+    def query(self, name: str, *, refresh: bool = False) -> None:
+        """查詢學名；``refresh`` 略過快取裡的查無紀錄重新連線。"""
         if name in self._running:
             return
         self._running.add(name)
@@ -167,7 +206,7 @@ class SpeciesSuggestion:
         self.on_change()
 
         def work() -> None:
-            lookup = _safe_lookup(name)
+            lookup = _safe_lookup(name, refresh=refresh)
             self._post(self._finish, name, lookup)
 
         if not self._launch(work):

@@ -23,11 +23,22 @@ TAXONOMIC_MARKERS = ("×", "var.", "subsp.", "ssp.", "f.")
 
 _KEY_WORD_SPLIT = re.compile(r"(?<=[a-z])(?=[A-Z])|[^A-Za-z0-9]+")
 _TAXONOMIC_MARKER = re.compile(r" (?:× |(?:subsp|ssp|var|f)\. )")
+# 三段式名稱（種以下的亞種／變種／品種）拆出前兩段的物種名。
+_INFRASPECIFIC_NAME = re.compile(
+    r"^([A-Z][a-z-]+ (?:× )?[a-z][a-z-]+) (?:(?:subsp|ssp|var|f)\. )?[a-z][a-z-]+$"
+)
 
 
 def normalize_species_name(name: str) -> str:
     """移除前後與重複空白，保留學名本身的大小寫。"""
     return " ".join(name.split())
+
+
+def parent_species_name(name: str) -> str | None:
+    """種以下的名稱回傳上一層物種名，例如 ``Fagus sylvatica purpurea`` →
+    ``Fagus sylvatica``；本身就是物種名（含 ``Mentha × piperita``）時回傳 ``None``。"""
+    match = _INFRASPECIFIC_NAME.fullmatch(normalize_species_name(name))
+    return match.group(1) if match else None
 
 
 def is_potential_species_name(name: str) -> bool:
