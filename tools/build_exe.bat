@@ -59,6 +59,7 @@ uv run --frozen --with nuitka python -m nuitka ^
   --include-package=app ^
   --include-data-dir=assets=assets ^
   --include-data-files=translation_tool/core/resource_pack_version.json=translation_tool/core/resource_pack_version.json ^
+  --include-data-files=translation_tool/core/pack_format_table.json=translation_tool/core/pack_format_table.json ^
   --include-data-files=pyproject.toml=pyproject.toml ^
   --include-data-files=config.example.json=config.example.json ^
   --output-dir=%STAGING_DIR% ^

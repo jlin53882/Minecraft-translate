@@ -159,7 +159,7 @@ def test_any_change_triggers_rebuild(src, zip_path, mutate):
 def test_description_and_format_change_rebuild(src, zip_path):
     run(src, zip_path)
     assert not reused(run(src, zip_path, description="other"))
-    assert not reused(run(src, zip_path, description="other", min_format=5))
+    assert not reused(run(src, zip_path, description="other", pack_format=5))
 
 
 def test_extra_folders_change_rebuilds(src, zip_path, tmp_path):

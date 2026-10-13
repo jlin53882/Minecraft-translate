@@ -32,14 +32,13 @@ def test_standalone_and_wizard_import_the_same_form_factory(
     assert getattr(wizard, factory_name) is factory
 
 
-def test_bundle_entry_points_import_the_same_version_picker_factory():
+def test_bundle_entry_points_import_the_same_version_input_factory():
     assert (
-        pipeline_bundle_dialog.build_version_picker
-        is pipeline_forms.build_version_picker
+        pipeline_bundle_dialog.build_version_input is pipeline_forms.build_version_input
     )
     assert (
-        pipeline_one_click_bundle_widgets.build_version_picker
-        is pipeline_forms.build_version_picker
+        pipeline_one_click_bundle_widgets.build_version_input
+        is pipeline_forms.build_version_input
     )
 
 

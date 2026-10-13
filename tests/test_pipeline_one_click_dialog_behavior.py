@@ -79,9 +79,6 @@ class _Env:
         monkeypatch.setattr(
             version_picker, "target_version_choices", lambda: ["1.21.1", "1.20.1"]
         )
-        monkeypatch.setattr(
-            mod, "_load_version_data", lambda: {"1.20": {}, "1.21": {}, "1.19": {}}
-        )
 
     def open(self, **kwargs):
         kwargs.setdefault("input_path", str(self.mods))
@@ -527,7 +524,8 @@ def test_step4_defaults_from_config(monkeypatch, tmp_path):
     assert e.field("輸入來源").value == os.path.join(str(e.out), "_打包暫存")
     assert e.field("封面圖片（可留空）").value == ""
     assert e.field("封面圖片（可留空）").read_only is True
-    assert "點擊選擇版本" in e.texts()
+    assert e.field("版本或 pack_format").value == ""
+    assert e.field(MAX_LABEL).value == ""
 
 
 def test_step4_default_zip_name_when_config_empty(env):
@@ -552,45 +550,65 @@ def test_step4_text_fields_are_collected(env):
     assert config["zip_output"] == "/x/y.zip"
 
 
-def _version_items(env):
-    return [
-        c
-        for c in env.controls(ft.Container)
-        if c.on_click and isinstance(c.content, ft.Text) and c.content.value[0] == "1"
-    ]
+def _type_version(env, text, label="版本或 pack_format"):
+    field = env.field(label)
+    field.value = text
+    field.on_change(SimpleNamespace(control=field))
 
 
-def test_version_dropdown_toggle_and_select(env):
+MAX_LABEL = "最大使用版本（max_inclusive，選填）"
+
+
+def test_version_input_converts_and_reaches_config(env):
     env.open()
     env.goto(4)
-    dropdown = next(
-        c
-        for c in env.controls(ft.Container)
-        if isinstance(c.content, ft.ListView) and c.visible is False
-    )
-    toggle = next(
-        c
-        for c in env.controls(ft.Container)
-        if c.on_click and isinstance(c.content, ft.Row)
-    )
-    toggle.on_click(None)
-    assert dropdown.visible is True
-    toggle.on_click(None)
-    assert dropdown.visible is False
-    assert [i.content.value for i in _version_items(env)] == ["1.20", "1.21", "1.19"]
-    next(i for i in _version_items(env) if i.content.value == "1.21").on_click(None)
-    assert "1.21" in env.texts()
-    assert env.run_to_end_from(4)["version"] == "1.21"
+    _type_version(env, "1.20.4")
+    assert any("pack_format 22" in t for t in env.texts())
+    config = env.run_to_end_from(4)
+    assert config["version_input"] == "1.20.4"
+    assert config["pack_format"] == 22
+    assert config["max_pack_format"] is None
 
 
-def test_selected_version_persists_across_navigation(env):
+def test_user_max_reaches_config(env):
     env.open()
     env.goto(4)
-    _version_items(env)[0].on_click(None)
+    _type_version(env, "1.21.1")
+    _type_version(env, "999", MAX_LABEL)
+    config = env.run_to_end_from(4)
+    assert (config["pack_format"], config["max_pack_format"]) == (34, 999)
+
+
+def test_version_input_persists_across_navigation(env):
+    env.open()
+    env.goto(4)
+    _type_version(env, "1.20.1")
+    _type_version(env, "1.21.4", MAX_LABEL)
     env.click("上一個")
     env.click("下一個")
-    assert "1.20" in env.texts()
-    assert "點擊選擇版本" not in env.texts()
+    assert env.field("版本或 pack_format").value == "1.20.1"
+    assert env.field(MAX_LABEL).value == "1.21.4"
+
+
+def test_quick_version_button_fills_the_field(env):
+    env.open()
+    env.goto(4)
+    next(b for b in env.controls(ft.Button) if b.content == "1.20.1").on_click(None)
+    assert env.field("版本或 pack_format").value == "1.20.1"
+    assert env.run_to_end_from(4)["pack_format"] == 15
+
+
+@pytest.mark.parametrize(
+    ("version", "max_value"), [("abc", ""), ("1.21.1", "10"), ("1.99.9", "")]
+)
+def test_invalid_version_or_max_blocks_execute(env, version, max_value):
+    env.open()
+    env.goto(4)
+    _type_version(env, version)
+    _type_version(env, max_value, MAX_LABEL)
+    env.click("確定執行")
+    assert env.executed == []
+    assert any("無效" in t for t in env.texts())
 
 
 def test_add_extra_folder_via_picker_and_dedupe(env):
@@ -653,11 +671,11 @@ def test_confirm_calls_on_execute_once_with_default_config(env):
         "dry_run": False,
         "write_new_cache": False,
         "description": "",
-        "version": "",
+        "version_input": "",
         "merge_db_snapshot": config["merge_db_snapshot"],
         "lm_db_snapshot": config["lm_db_snapshot"],
-        "min_format": None,
-        "max_format": None,
+        "pack_format": 34,
+        "max_pack_format": None,
         "pack_image": None,
         "extra_folders": [],
         "zip_output": os.path.join(str(env.out), "可使用翻譯.zip"),
@@ -729,20 +747,6 @@ def test_wizard_merge_and_lm_version_overrides_are_independent(env):
     assert merge.database_settings.path == lm.database_settings.path
 
 
-def test_selected_version_maps_to_pack_formats(env, monkeypatch):
-    """所選版本要轉成 min/max pack_format 交給打包（原本只傳版本字串、格式一律 0）。"""
-    monkeypatch.setattr(
-        mod,
-        "_load_version_data",
-        lambda: {"1.20": {"min_format": 15, "max_format": 18}, "1.21": {}},
-    )
-    env.open()
-    env.goto(4)
-    next(i for i in _version_items(env) if i.content.value == "1.20").on_click(None)
-    config = env.confirm()
-    assert (config["min_format"], config["max_format"]) == (15, 18)
-
-
 def test_confirm_closes_current_dialog(env):
     env.open()
     env.goto(4)
@@ -797,14 +801,14 @@ def test_collected_values_flow_into_single_config(env):
     env.click("下一個")
     env.set_switch("Dry Run（只分析不翻譯）", True)
     env.click("下一個")
-    _version_items(env)[1].on_click(None)
+    _type_version(env, "1.21.1")
     config = env.run_to_end_from(4)
     assert (config["mode"], config["patchouli_skip"], config["dry_run"]) == (
         "dual",
         True,
         True,
     )
-    assert config["version"] == "1.21"
+    assert config["version_input"] == "1.21.1"
     assert len(env.executed) == 1
 
 

@@ -11,6 +11,12 @@ from dataclasses import dataclass, field
 
 import flet as ft
 
+from app.services_impl.pack_format_service import (
+    QUICK_VERSIONS,
+    explain_version_input,
+    resolve_max_input,
+    resolve_version_input,
+)
 from app.ui.design import C
 from app.ui.dialogs import (
     RESPONSIVE_DIALOG_MARKER,
@@ -44,7 +50,8 @@ class TranslateFormState:
 @dataclass
 class BundleFormState:
     description: str = ""
-    version: str = ""
+    version_input: str = ""
+    max_input: str = ""
     pack_image: str | None = None
     extra_folders: list[str] = field(default_factory=list)
     zip_output: str = ""
@@ -95,16 +102,13 @@ class TranslateFormControls:
 
 
 @dataclass
-class VersionPickerControls:
+class VersionInputControls:
     content: ft.Column
-    search: SyncTextField
-    selection: ft.Container
-    selected_label: ft.Text
-    list_container: ft.Container
-    list_view: ft.ListView
-    refresh: Callable[[str], None]
-    select: Callable[[str], None]
-    toggle: Callable[..., None]
+    field: SyncTextField
+    max_field: SyncTextField
+    summary: ft.Text
+    pack_format: Callable[[], int]
+    max_pack_format: Callable[[], int | None]
 
 
 def dialog_field_width(page: ft.Page, *, reserved_width: int = 340) -> int:
@@ -452,147 +456,135 @@ def build_translate_form(
     return TranslateFormControls(content, dry_run, write_cache)
 
 
-def _build_version_picker_triggers(
-    page: ft.Page,
-    border_color,
-    selected_label: ft.Text,
-    list_container: ft.Container,
-    refresh: Callable,
-    toggle: Callable,
-) -> tuple[ft.Control, ft.Control]:
-    search = dialog_text_field(
-        page,
-        reserved_width=80,
-        label="搜尋版本",
-        hint_text="輸入版本關鍵字...",
-        dense=True,
-        border_color=border_color,
-        on_change=lambda event: refresh(event.control.value or ""),
-    )
-    selection = ft.Container(
-        content=ft.Row(
-            [
-                ft.Text("已選擇：", size=11, color=C.MUTED),
-                selected_label,
-                ft.Icon(ft.Icons.EXPAND_MORE, size=18),
-            ]
-        ),
-        padding=8,
-        border=ft.Border.all(1, C.DIM),
-        border_radius=6,
-        on_click=toggle,
-    )
-    return search, selection
-
-
-def build_version_picker(
+def build_version_input(
     *,
     page: ft.Page,
-    versions: Sequence[str],
-    selected: str,
-    on_select: Callable[[str], None],
+    value: str,
+    max_value: str = "",
+    on_change: Callable[[str], None],
+    on_max_change: Callable[[str], None],
     border_color,
-) -> VersionPickerControls:
-    """Build the single searchable Minecraft pack-format picker for both UIs."""
-    selected_label = ft.Text(
-        selected or "點擊選擇版本", size=12, color=C.MUTED, expand=True
-    )
-    list_view = ft.ListView(expand=True, height=156, spacing=4, auto_scroll=False)
-    list_container = ft.Container(
-        content=list_view,
-        height=196,
-        border=ft.Border.all(1, C.DIM),
-        border_radius=6,
-        padding=4,
-        visible=False,
-    )
-    expanded = False
+) -> VersionInputControls:
+    """版本輸入框（1.20.4 或 pack_format 整數）+ 選填的最大使用版本，下方即時換算。
 
-    def refresh(query: str = "", *, update: bool = True):
-        _populate_version_list(list_view, versions, query, select)
-        if update:
-            try:
-                page.update()
-            except RuntimeError:
-                pass
+    ``pack_format()``／``max_pack_format()`` 回傳要寫入的整數（最大版本空白時為 None）；
+    輸入無效時拋出 ``ValueError``。
+    """
+    summary = ft.Text("", size=11, color=C.MUTED)
 
-    def select(version: str):
-        nonlocal expanded
-        on_select(version)
-        selected_label.value = version or "點擊選擇版本"
-        selected_label.color = None if version else C.MUTED
-        expanded = False
-        list_container.visible = False
-        page.update()
-
-    def toggle(_event=None):
-        nonlocal expanded
-        expanded = not expanded
-        list_container.visible = expanded
-        page.update()
-
-    search, selection = _build_version_picker_triggers(
-        page, border_color, selected_label, list_container, refresh, toggle
-    )
-    refresh(update=False)
-    content = ft.Column([search, selection, list_container], spacing=6, tight=False)
-    return VersionPickerControls(
-        content,
-        search,
-        selection,
-        selected_label,
-        list_container,
-        list_view,
-        refresh,
-        select,
-        toggle,
-    )
-
-
-def _populate_version_list(
-    list_view: ft.ListView,
-    versions: Sequence[str],
-    query: str,
-    select: Callable[[str], None],
-) -> None:
-    list_view.controls.clear()
-    normalized = (query or "").casefold().strip()
-    matches = [value for value in versions if normalized in value.casefold()]
-    if not matches:
-        list_view.controls.append(ft.Text("無可用版本", size=12, color=C.DIM))
-    for version in matches:
-        list_view.controls.append(
-            ft.Container(
-                content=ft.Text(version, size=13),
-                padding=8,
-                border=ft.Border.all(1, C.DIM),
-                border_radius=6,
-                on_click=lambda _event, value=version: select(value),
-            )
+    def refresh(*_args) -> None:
+        _pack_format, message, valid = explain_version_input(
+            version_field.value, max_field.value
         )
+        summary.value = message if valid else f"⚠️ {message}"
+        summary.color = C.MUTED if valid else C.GOLD
+
+    def handle_change(event) -> None:
+        on_change(event.control.value or "")
+        refresh()
+        page.update()
+
+    def handle_max_change(event) -> None:
+        on_max_change(event.control.value or "")
+        refresh()
+        page.update()
+
+    version_field = dialog_text_field(
+        page,
+        reserved_width=80,
+        label="版本或 pack_format",
+        hint_text="輸入遊戲版本，例如 1.21.1；或直接輸入 pack_format 整數；留空使用預設",
+        value=value,
+        dense=True,
+        border_color=border_color,
+        on_change=handle_change,
+    )
+    max_field = dialog_text_field(
+        page,
+        reserved_width=80,
+        label="最大使用版本（max_inclusive，選填）",
+        hint_text="填版本或整數，例如 1.21.4 或 999；留空使用預設",
+        value=max_value,
+        dense=True,
+        border_color=border_color,
+        on_change=handle_max_change,
+    )
+
+    def use_quick_version(version: str) -> None:
+        version_field.value = version
+        on_change(version)
+        refresh()
+        page.update()
+
+    quick_row = ft.Row(
+        [
+            ft.Text("常用：", size=11, color=C.MUTED),
+            *[
+                dialog_button(v, lambda _event, v=v: use_quick_version(v))
+                for v in QUICK_VERSIONS
+            ],
+        ],
+        wrap=True,
+        spacing=6,
+    )
+    refresh()
+    return VersionInputControls(
+        ft.Column(
+            [version_field, quick_row, max_field, summary], spacing=6, tight=False
+        ),
+        version_field,
+        max_field,
+        summary,
+        lambda: resolve_version_input(version_field.value).pack_format,
+        lambda: resolve_max_input(max_field.value),
+    )
+
+
+def _form_section(title: str, controls: Sequence[ft.Control]) -> ft.Container:
+    """一組相關欄位：標題加框線，讓長表單分成可掃讀的區塊。"""
+    return ft.Container(
+        content=ft.Column(
+            [ft.Text(title, weight="bold", size=14), *controls],
+            spacing=8,
+            tight=True,
+        ),
+        padding=12,
+        border=ft.Border.all(1, C.DIM),
+        border_radius=8,
+    )
 
 
 def build_bundle_form(
     *,
     path_section: ft.Control,
     description_field: ft.Control,
-    version_picker: VersionPickerControls,
+    version_input: VersionInputControls,
     pack_image_row: ft.Control,
     extra_folders_section: ft.Control,
     feedback: ft.Control | None = None,
 ) -> ft.Column:
     """Assemble the common bundle form and fixed ordering for both entry points."""
     controls = [
-        path_section,
-        ft.Text("檔案敘述", weight="bold", size=13),
-        description_field,
-        ft.Text("Minecraft 版本", weight="bold", size=13),
-        version_picker.content,
-        ft.Text("封面圖片（可留空）", weight="bold", size=13),
-        pack_image_row,
-        ft.Text("其他指定資料夾", weight="bold", size=13),
-        extra_folders_section,
+        _form_section("路徑", [path_section]),
+        _form_section(
+            "資源包資訊",
+            [
+                ft.Text("檔案敘述", size=12, color=C.MUTED),
+                description_field,
+                ft.Text("Minecraft 版本", size=12, color=C.MUTED),
+                version_input.content,
+            ],
+        ),
+        _form_section(
+            "封面與額外內容",
+            [
+                ft.Text("封面圖片（可留空）", size=12, color=C.MUTED),
+                pack_image_row,
+                ft.Text("其他指定資料夾", size=12, color=C.MUTED),
+                extra_folders_section,
+            ],
+        ),
     ]
     if feedback is not None:
         controls.append(feedback)
-    return ft.Column(controls, spacing=10, tight=False)
+    return ft.Column(controls, spacing=12, tight=False)

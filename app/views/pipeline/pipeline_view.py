@@ -11,6 +11,7 @@ from functools import partial
 
 import flet as ft
 
+from app.services_impl.pack_format_service import DEFAULT_PACK_FORMAT
 from app.tasks.operation_registry import OperationRegistry
 from app.ui import kit
 from app.ui.design import C
@@ -189,8 +190,8 @@ class PipelineView(PipelineWidgetsMixin, ft.Column):
         input_root_dir: str,
         output_zip_path: str,
         description: str,
-        min_format,
-        max_format,
+        pack_format: int | None,
+        max_pack_format: int | None,
         pack_image_path: str | None,
         extra_folders: list[str],
     ):
@@ -203,8 +204,8 @@ class PipelineView(PipelineWidgetsMixin, ft.Column):
                 input_root_dir=input_root_dir,
                 output_zip_path=output_zip_path,
                 description=description,
-                min_format=min_format or 0,
-                max_format=max_format or 0,
+                pack_format=pack_format or DEFAULT_PACK_FORMAT,
+                max_pack_format=max_pack_format,
                 pack_image_path=pack_image_path,
                 extra_folders=extra_folders or None,
             ),
