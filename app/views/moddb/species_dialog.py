@@ -54,6 +54,19 @@ class _LookupState:
         return self.lookup is not None and self.lookup.definitive
 
 
+def _grey_when_disabled(button: ft.Button) -> None:
+    """停用時改成灰底灰字；主要按鈕的實心底色在停用時看起來仍像可以按。"""
+    style = button.style
+    style.bgcolor = {
+        ft.ControlState.DISABLED: C.HOVER,
+        ft.ControlState.DEFAULT: style.bgcolor,
+    }
+    style.color = {
+        ft.ControlState.DISABLED: C.DIM,
+        ft.ControlState.DEFAULT: style.color,
+    }
+
+
 class SpeciesCandidateDialog:
     """在目前條目篩選範圍內找出並查詢可能的學名。
 
@@ -97,7 +110,8 @@ class SpeciesCandidateDialog:
         self.scope = ft.Text(self._scope_text(), size=13, color=C.TEXT)
         self.hint = ft.Text(
             "掃描會找出 key 帶有 latin／scientific 等提示、且格式像學名的條目；"
-            "按「查詢全部」會在背景逐筆查詢，可以關閉視窗，進度顯示在頂列任務。",
+            "按「查詢全部」會逐筆查詢；查詢中按「背景執行」可收起視窗繼續查詢，"
+            "進度顯示在頂列任務，按「關閉」則會停止查詢。",
             size=12,
             color=C.MUTED,
             selectable=True,
@@ -119,6 +133,7 @@ class SpeciesCandidateDialog:
             on_click=self._query_all,
             disabled=True,
         )
+        _grey_when_disabled(self.query_all_btn)
         self.stop_btn = kit.button(
             "停止查詢",
             "danger",
@@ -139,6 +154,14 @@ class SpeciesCandidateDialog:
             horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
             controls=[kit.hint_text("按「掃描候選」開始檢查目前範圍。")],
         )
+        self.background_btn = kit.button(
+            "背景執行",
+            "secondary",
+            icon=ft.Icons.OPEN_IN_BROWSER,
+            on_click=self._run_in_background,
+            tooltip="收起視窗，查詢在背景繼續；再按「掃描學名」可回到這裡",
+        )
+        self.background_btn.visible = False
         self.close_btn = ft.TextButton("關閉", on_click=self._close)
 
     def _build_dialog(self) -> None:
@@ -173,7 +196,7 @@ class SpeciesCandidateDialog:
                 height=height,
                 data=RESPONSIVE_DIALOG_MARKER,
             ),
-            actions=[self.close_btn],
+            actions=[self.background_btn, self.close_btn],
             on_dismiss=self._on_dismiss,
         )
 
@@ -192,11 +215,27 @@ class SpeciesCandidateDialog:
         self._generation += 1
         self.job.remove_listener(self._on_job_event)
 
-    def _close(self, _e=None) -> None:
+    def _hide(self) -> None:
         self._detach()
         close_page_dialog(self.page, self.dialog)
 
+    def _close(self, _e=None) -> None:
+        """「關閉」：停止進行中的批次查詢並關閉視窗。"""
+        self.job.stop()
+        self._hide()
+
+    def _run_in_background(self, _e=None) -> None:
+        """「背景執行」：收起視窗，批次查詢繼續，進度看頂列任務。"""
+        self._hide()
+        if self.job.running:
+            show_snack(
+                self.page,
+                "學名查詢在背景繼續，進度顯示在頂列任務；再按「掃描學名」可回到視窗。",
+                C.EM,
+            )
+
     def _on_dismiss(self, _e=None) -> None:
+        # Esc 等非按鈕關閉不視為「關閉」：只退訂，不停止背景查詢。
         self._detach()
 
     def _stop(self, _e=None) -> None:
@@ -339,6 +378,7 @@ class SpeciesCandidateDialog:
         """依背景查詢是否進行中切換按鈕與進度列。"""
         running = self.job.running
         self.stop_btn.visible = running
+        self.background_btn.visible = running
         self.stop_btn.disabled = self.job.stopping
         self.scan_btn.disabled = running or self._busy
         self.loose_check.disabled = running or self._busy
@@ -351,7 +391,9 @@ class SpeciesCandidateDialog:
         if job.stopping:
             self.status.value = "正在停止…（目前這一筆查完後停止）"
         else:
-            self.status.value = f"背景查詢學名 {job.done}/{job.total}…（可以關閉視窗）"
+            self.status.value = (
+                f"查詢學名 {job.done}/{job.total}…（按「背景執行」可收起視窗繼續查詢）"
+            )
         self.progress.value = job.done / job.total if job.total else None
 
     def _on_job_event(self, event: str, entry_id: int | None) -> None:
@@ -490,7 +532,7 @@ class SpeciesCandidateDialog:
         )
 
     def _open_entry(self, entry_id: int) -> None:
-        self._close()
+        self._hide()  # 開啟條目不中斷背景查詢
         if self.on_open_entry is not None:
             self.on_open_entry(entry_id)
 

@@ -612,15 +612,16 @@ def test_bulk_lookup_keeps_running_after_dialog_closes_and_reopens(
         assert launcher.kwargs["task_session"] is job.session
         assert job.session.name == "學名批次查詢"
         assert job.session.view_key == "moddb"
-        dialog._close()
-        assert job.running  # 關閉視窗不會停止查詢
+        assert dialog.background_btn.visible
+        dialog._run_in_background()
+        assert job.running  # 背景執行：收起視窗，查詢繼續
 
         reopened = _new_dialog(dialog.page, db)
         assert reopened.job is job
         reopened.open()
         assert reopened.result is job.result
         assert reopened.scan_btn.disabled and reopened.stop_btn.visible
-        assert "背景查詢學名 0/3" in reopened.status.value
+        assert "查詢學名 0/3" in reopened.status.value
 
         launcher.run()
         assert not job.running
@@ -632,6 +633,7 @@ def test_bulk_lookup_keeps_running_after_dialog_closes_and_reopens(
         assert "學名查詢完成" in reopened.status.value
         assert "找到 2" in reopened.status.value
         assert reopened.stop_btn.visible is False
+        assert reopened.background_btn.visible is False
         assert reopened.scan_btn.disabled is False
         # 已關閉的視窗不再接收事件
         assert all(s.lookup is None for s in dialog._states.values())
@@ -701,3 +703,45 @@ def test_bulk_lookup_listeners_do_not_keep_closed_views_alive():
     del view
     gc.collect()
     job._notify("finished")
+
+
+def test_close_button_stops_bulk_lookup(tmp_path, monkeypatch):
+    launcher = _DeferredLauncher()
+    db, dialog = _make_dialog(tmp_path, monkeypatch, [FOUND], launcher=launcher)
+    try:
+        dialog._query_all()
+        dialog._close()  # 「關閉」是真的結束：停止查詢
+        launcher.run()
+        assert dialog.job.stop_reason == "cancelled"
+        assert not dialog.job.running
+    finally:
+        db.close()
+
+
+def test_open_entry_and_dismiss_keep_bulk_lookup_running(tmp_path, monkeypatch):
+    launcher = _DeferredLauncher()
+    db, dialog = _make_dialog(tmp_path, monkeypatch, [FOUND] * 3, launcher=launcher)
+    try:
+        dialog._query_all()
+        dialog._open_entry(dialog.result.candidates[0].entry_id)
+        dialog._on_dismiss()
+        launcher.run()
+        assert dialog.job.stop_reason == "completed"
+    finally:
+        db.close()
+
+
+def test_query_all_button_turns_grey_when_disabled(tmp_path, monkeypatch):
+    import flet as ft
+
+    db, dialog = _make_dialog(tmp_path, monkeypatch, [])
+    try:
+        style = dialog.query_all_btn.style
+        assert ft.ControlState.DISABLED in style.bgcolor
+        assert (
+            style.bgcolor[ft.ControlState.DISABLED]
+            != style.bgcolor[ft.ControlState.DEFAULT]
+        )
+        assert ft.ControlState.DISABLED in style.color
+    finally:
+        db.close()
