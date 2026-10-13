@@ -307,10 +307,12 @@ class PipelineActions:
                 session.add_log(message, level="error")
                 session.set_error()
                 return
-            old_nbt_files = self.services.scan_old_nbt(cfg.bundle_staging_dir)
+            old_nbt_files = self.services.scan_old_nbt(
+                cfg.bundle_staging_dir, [cfg.extract_book_output_dir]
+            )
             if old_nbt_files:
                 session.add_log(
-                    f"⚠️ {len(old_nbt_files)} 個 Patchouli 檔案的物品欄位仍是舊版 NBT 寫法，"
+                    f"⚠️ {len(old_nbt_files)} 個 Patchouli 檔案的物品欄位的舊版 NBT 寫法比 en_us 原文多，"
                     f"1.20.5 以上的遊戲會無法載入該手冊（例：{', '.join(old_nbt_files[:3])}）",
                     level="warning",
                 )

@@ -115,8 +115,44 @@ def find_patchouli_marker_issue(en_data: Any, zh_data: Any) -> str | None:
     return _marker_difference(en_data, zh_data, "")
 
 
-def find_old_nbt_item_files(root: str) -> list[str]:
-    """``root`` 底下 ``patchouli_books`` 內仍含舊版物品 NBT 寫法的 JSON 檔（相對路徑）。"""
+def _load_json(path: str) -> Any:
+    """讀取 JSON；讀不出來回傳 None。"""
+    try:
+        with open(path, encoding="utf-8-sig") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return None
+
+
+def _source_old_nbt_count(root: str, rel_path: str, source_roots: list[str]) -> int:
+    """``rel_path`` 的 en_us 原文在 ``source_roots`` 內有幾個舊版物品 NBT；找不到原文回傳 0。
+
+    ``rel_path`` 形如 ``assets/<mod>/patchouli_books/<書>/<語系>/…``，原文是同書的 ``en_us/…``。
+    """
+    parts = Path(rel_path).parts
+    if "patchouli_books" not in parts:
+        return 0
+    locale_index = parts.index("patchouli_books") + 2
+    if locale_index >= len(parts) - 1:
+        return 0
+    source_rel = os.path.join(
+        *parts[:locale_index], "en_us", *parts[locale_index + 1 :]
+    )
+    for source_root in source_roots:
+        data = _load_json(os.path.join(source_root, source_rel))
+        if data is not None:
+            return count_old_nbt_items(data)
+    return 0
+
+
+def find_old_nbt_item_files(
+    root: str, source_roots: list[str] | None = None
+) -> list[str]:
+    """``root`` 底下 ``patchouli_books`` 內舊版物品 NBT 寫法比 en_us 原文多的 JSON 檔（相對路徑）。
+
+    ``source_roots`` 是存放 en_us 原文的資料夾（結構同 ``root``）；原文本身就用舊寫法的檔案
+    不是譯文落後，不列入。沒有提供或找不到原文時，只要檔案含舊寫法就列入。
+    """
     found: list[str] = []
     for folder, _dirs, files in os.walk(root):
         if "patchouli_books" not in Path(folder).parts:
@@ -125,11 +161,13 @@ def find_old_nbt_item_files(root: str) -> list[str]:
             if not name.lower().endswith(".json"):
                 continue
             path = os.path.join(folder, name)
-            try:
-                with open(path, encoding="utf-8-sig") as f:
-                    data = json.load(f)
-            except (OSError, ValueError):
+            data = _load_json(path)
+            if data is None:
                 continue
-            if count_old_nbt_items(data):
-                found.append(os.path.relpath(path, root).replace("\\", "/"))
+            old_count = count_old_nbt_items(data)
+            if not old_count:
+                continue
+            rel = os.path.relpath(path, root)
+            if old_count > _source_old_nbt_count(root, rel, source_roots or []):
+                found.append(rel.replace("\\", "/"))
     return sorted(found)

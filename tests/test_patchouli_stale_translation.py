@@ -194,7 +194,9 @@ def test_bundle_step_warns_about_old_nbt_items(tmp_path):
     actions = PipelineActions(
         PipelineServices(
             build_staging=lambda *a, **k: {"copied": 1, "merged": 0},
-            scan_old_nbt=lambda staging: ["assets/m/patchouli_books/b/zh_tw/x.json"],
+            scan_old_nbt=lambda staging, sources: [
+                "assets/m/patchouli_books/b/zh_tw/x.json"
+            ],
             bundle=lambda **k: iter([{"progress": 1.0}]),
         )
     )
@@ -257,3 +259,23 @@ def test_marker_mismatch_in_lm_output_is_warned_not_dropped(tmp_path, monkeypatc
     assert any("格式標記" in w and "e.json" in w for w in warnings)
     written = tmp_path / "out" / "assets" / "m" / "patchouli_books" / "b" / "zh_tw"
     assert (written / "entries" / "e.json").exists()
+
+
+def test_old_nbt_files_skip_those_whose_en_us_source_also_uses_it(tmp_path):
+    from translation_tool.core.patchouli_compat import find_old_nbt_item_files
+
+    staging, source = tmp_path / "staging", tmp_path / "source"
+    book = "assets/m/patchouli_books/b"
+    # x：原文就是舊寫法（mod 自己的問題）；y：原文是新寫法、譯文落後；z：找不到原文
+    _write(staging / book / "zh_tw/entries/x.json", _entry(_spotlight(OLD_ITEM, "舊")))
+    _write(staging / book / "zh_tw/entries/y.json", _entry(_spotlight(OLD_ITEM, "舊")))
+    _write(staging / book / "zh_tw/entries/z.json", _entry(_spotlight(OLD_ITEM, "舊")))
+    _write(source / book / "en_us/entries/x.json", _entry(_spotlight(OLD_ITEM, "old")))
+    _write(source / book / "en_us/entries/y.json", _entry(_spotlight(NEW_ITEM, "new")))
+
+    assert find_old_nbt_item_files(str(staging), [str(source)]) == [
+        f"{book}/zh_tw/entries/y.json",
+        f"{book}/zh_tw/entries/z.json",
+    ]
+    # 沒提供原文資料夾時，含舊寫法的檔案全部列入
+    assert len(find_old_nbt_item_files(str(staging))) == 3
