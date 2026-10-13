@@ -1397,3 +1397,32 @@ def test_species_suggestion_prefers_parent_completed_by_bulk(isolated_species_ca
     assert any("上一層物種 Fagus sylvatica：歐洲山毛櫸" in text for text in texts)
     assert "套用參考名稱" in texts
     assert not any("查詢失敗（HTTP 429）" in text for text in texts)
+
+
+def test_species_suggestion_keeps_failed_refresh_over_cached_not_found(
+    isolated_species_cache, monkeypatch
+):
+    from app.views.moddb import species_suggestion as module
+    from app.views.moddb.species_bulk_lookup import bulk_lookup_for
+
+    page = mock_page()
+    suggestion = module.SpeciesSuggestion(page, lambda _t: None, lambda: None)
+    suggestion._post = lambda callback, *args: callback(*args)
+    suggestion._launch = lambda work: (work(), True)[1]
+    species_cache._species_cache_data["Olea europaea"] = ""
+
+    def timeout(_name):
+        raise requests.Timeout()
+
+    monkeypatch.setattr(species_cache, "_query_wikipedia_title", timeout)
+    entry = _entry("block.m.x.latin", "Olea europaea")
+    assert "再查一次" in _texts(suggestion.build(entry))
+
+    suggestion.query("Olea europaea", refresh=True)
+    texts = _texts(suggestion.build(entry))
+    assert "重試" in texts and "再查一次" not in texts
+    assert not any("找不到對應條目" in text for text in texts)
+
+    # 背景批次查到其他條目：這個名稱的快取沒變，仍顯示這次重試的失敗
+    bulk_lookup_for(page)._notify("lookup", 2)
+    assert "重試" in _texts(suggestion.build(entry))

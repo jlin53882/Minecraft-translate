@@ -53,6 +53,8 @@ class SpeciesSuggestion:
         self.on_apply = on_apply
         self.on_change = on_change
         self._results: dict[str, SpeciesLookup] = {}
+        # 每筆自己查詢完成時快取裡的結果；快取之後變了才代表有更新的資料。
+        self._cache_seen: dict[str, SpeciesLookup | None] = {}
         self._running: set[str] = set()
         # 背景批次查詢每查到一筆就寫入快取；重繪讓目前條目的結果即時出現。
         bulk_lookup_for(page).add_listener(self._on_bulk_event)
@@ -61,6 +63,29 @@ class SpeciesSuggestion:
         self.on_change()
 
     # ------------------------------------------------------------------ 畫面
+    def _pick_lookup(self, name: str) -> SpeciesLookup | None:
+        """決定分頁顯示自己的查詢結果，還是快取中較新的結果。
+
+        自己的查詢（包含「再查一次」失敗）優先；只有快取在那次查詢完成後又被更新
+        （例如背景批次查到名稱或補齊上一層物種），且更新後的結果查到名稱，或已
+        完整而自己的結果還不完整時，才改用快取。
+        """
+        cached = cached_species_lookup(name)
+        fresh = self._results.get(name)
+        if fresh is None:
+            return cached
+        updated = name not in self._cache_seen or cached != self._cache_seen[name]
+        if (
+            cached is not None
+            and updated
+            and (
+                cached.status == STATUS_FOUND
+                or (cached.complete and not fresh.complete)
+            )
+        ):
+            return cached
+        return fresh
+
     def build(self, entry) -> list[ft.Control]:
         value = entry.en_us or ""
         if not is_species_candidate(entry.key, value, require_key_hint=False):
@@ -71,17 +96,7 @@ class SpeciesSuggestion:
                 )
             ]
         name = normalize_species_name(value)
-        # 快取已有完整結果（查到，或查無且上一層物種也有結果）時優先：背景批次查詢
-        # 補齊後要蓋過這裡先前的失敗或上一層待查結果；這裡已完整的結果則保留。
-        cached = cached_species_lookup(name)
-        fresh = self._results.get(name)
-        if cached is not None and (
-            cached.status == STATUS_FOUND
-            or (cached.complete and not (fresh and fresh.complete))
-        ):
-            lookup = cached
-        else:
-            lookup = fresh or cached
+        lookup = self._pick_lookup(name)
         controls: list[ft.Control] = [self._card(entry, name, lookup)]
         if not has_species_key_hint(entry.key):
             controls.append(
@@ -226,6 +241,7 @@ class SpeciesSuggestion:
             return
         self._running.add(name)
         self._results.pop(name, None)
+        self._cache_seen.pop(name, None)
         self.on_change()
 
         def work() -> None:
@@ -239,6 +255,7 @@ class SpeciesSuggestion:
     def _finish(self, name: str, lookup: SpeciesLookup) -> None:
         self._running.discard(name)
         self._results[name] = lookup
+        self._cache_seen[name] = cached_species_lookup(name)
         if not lookup.definitive:
             show_snack(self.page, f"學名查詢失敗：{lookup.detail}", C.GOLD)
         self.on_change()
