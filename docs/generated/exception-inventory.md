@@ -4,11 +4,11 @@
 > 範圍：`app/`、`translation_tool/`、`main.py` 內所有帶 `noqa: BLE001／S110／S112` 的位置。
 > 命令列 QA 工具（`md_extract_qa.py`、`md_inject_qa.py`）的 `print` 為刻意保留，不在此表。
 
-共 **326** 項；其中 **106** 項尚未在程式碼內寫明原因（以「分類」說明處理方式）。
+共 **330** 項；其中 **106** 項尚未在程式碼內寫明原因（以「分類」說明處理方式）。
 
 | 分類 | 數量 | 意義 |
 |---|---|---|
-| 已記錄／回報 | 292 | 例外處理本身有 log、提示、回報錯誤事件或重新丟出；寬鬆捕捉是為了不中斷整批流程 |
+| 已記錄／回報 | 296 | 例外處理本身有 log、提示、回報錯誤事件或重新丟出；寬鬆捕捉是為了不中斷整批流程 |
 | UI／畫面保護 | 18 | UI 層的畫面更新、icon 快取等；失敗只影響顯示，不影響資料 |
 | 盡力而為（靜默） | 16 | 引擎層、只有 `pass`／`continue`／回傳常數；失敗不影響結果（例如進度回報、還原失敗時以原始例外為準） |
 
@@ -151,11 +151,15 @@
 | `app/views/moddb/retranslation_controller.py:apply_preview_result` | BLE001 | 已記錄／回報 | unavailable database means stale result |
 | `app/views/moddb/scan_panel.py:ScanPanel._poll` | BLE001 | 已記錄／回報 | 輪詢失敗不能讓畫面永遠卡在「執行中」 |
 | `app/views/moddb/scan_panel.py:ScanPanel._safe_update` | BLE001 | 已記錄／回報 | 頁面已卸載時不影響掃描本身 |
-| `app/views/moddb/species_dialog.py:_safe_lookup` | BLE001 | 已記錄／回報 | worker boundary |
+| `app/views/moddb/species_bulk_lookup.py:safe_lookup` | BLE001 | 已記錄／回報 | worker boundary |
+| `app/views/moddb/species_bulk_lookup.py:SpeciesBulkLookup._notify` | BLE001 | 已記錄／回報 | one closed view must not stop others |
+| `app/views/moddb/species_bulk_lookup.py:SpeciesBulkLookup.start` | BLE001 | 已記錄／回報 | restore state after launch failure |
+| `app/views/moddb/species_bulk_lookup.py:SpeciesBulkLookup._run` | BLE001 | 已記錄／回報 | admission closed while app shuts down |
+| `app/views/moddb/species_bulk_lookup.py:SpeciesBulkLookup._run` | BLE001 | 已記錄／回報 | worker boundary |
+| `app/views/moddb/species_bulk_lookup.py:SpeciesBulkLookup._post` | BLE001 | 已記錄／回報 | disposed page |
 | `app/views/moddb/species_dialog.py:SpeciesCandidateDialog._scan.work` | BLE001 | 已記錄／回報 | worker boundary |
 | `app/views/moddb/species_dialog.py:SpeciesCandidateDialog._launch` | BLE001 | 已記錄／回報 | restore UI after launch failure |
 | `app/views/moddb/species_dialog.py:SpeciesCandidateDialog._post` | BLE001 | 已記錄／回報 | disposed page |
-| `app/views/moddb/species_suggestion.py:_safe_lookup` | BLE001 | 已記錄／回報 | worker boundary |
 | `app/views/moddb/species_suggestion.py:SpeciesSuggestion._launch` | BLE001 | 已記錄／回報 | restore UI after launch failure |
 | `app/views/moddb/species_suggestion.py:SpeciesSuggestion._post` | BLE001 | 已記錄／回報 | disposed page |
 | `app/views/moddb/translate_panel.py:TranslatePanel._launch_retranslation_worker` | BLE001 | 已記錄／回報 | caller restores the UI state |

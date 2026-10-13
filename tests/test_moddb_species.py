@@ -9,7 +9,7 @@ import pytest
 import requests
 
 from app.services_impl import moddb_species_service
-from app.views.moddb import species_dialog as species_dialog_module
+from app.views.moddb import species_bulk_lookup as bulk_module
 from app.views.moddb.entries_panel import EntriesPanel
 from app.views.moddb.species_dialog import SpeciesCandidateDialog
 from tests.conftest import mock_page
@@ -99,6 +99,10 @@ def test_entries_panel_adds_species_scan_button(tmp_path):
 
 @pytest.fixture
 def isolated_species_cache(monkeypatch):
+    return _isolate_species_cache(monkeypatch)
+
+
+def _isolate_species_cache(monkeypatch):
     monkeypatch.setattr(species_cache, "_initialized", True)
     monkeypatch.setattr(species_cache, "_species_cache_data", {})
     monkeypatch.setattr(species_cache, "_CACHE_FILE", None)
@@ -178,16 +182,32 @@ def test_lookup_species_merges_concurrent_requests_for_same_name(
 
 
 # ---------------------------------------------------------------- 對話框生命週期
-def _make_dialog(tmp_path, monkeypatch, lookups):
+def _sync(callback, *args):
+    callback(*args)
+
+
+def _run_now(_page, target, **_kwargs):
+    target()
+    return True
+
+
+def _new_dialog(page, db):
+    dialog = SpeciesCandidateDialog(page, lambda: db, "1.21.1", None, None)
+    dialog._post = _sync
+    dialog._launch = lambda work, name: (work(), True)[1]
+    dialog.job._post = _sync
+    return dialog
+
+
+def _make_dialog(tmp_path, monkeypatch, lookups, *, launcher=_run_now):
     """建立同步執行背景工作的對話框；``lookups`` 依序回傳每筆查詢結果。"""
+    _isolate_species_cache(monkeypatch)
     db = _seed(tmp_path / "mod.db")
-    dialog = SpeciesCandidateDialog(mock_page(), lambda: db, "1.21.1", None, None)
-    dialog._post = lambda callback, *args: callback(*args)
-    dialog._launch = lambda work, name, *, cancellable=False: (work(), True)[1]
+    monkeypatch.setattr(bulk_module, "launch_page_operation", launcher)
     results = iter(lookups)
-    monkeypatch.setattr(
-        species_dialog_module, "_safe_lookup", lambda _value: next(results)
-    )
+    monkeypatch.setattr(bulk_module, "safe_lookup", lambda _value: next(results))
+    dialog = _new_dialog(mock_page(), db)
+    dialog.open()
     dialog._scan()
     return db, dialog
 
@@ -205,19 +225,20 @@ def test_dialog_bulk_lookup_can_be_cancelled_and_keeps_finished_results(
 ):
     db, dialog = _make_dialog(tmp_path, monkeypatch, [FOUND, FOUND, FOUND])
     try:
-        original = species_dialog_module._safe_lookup
+        original = bulk_module.safe_lookup
 
         def stop_after_first(value):
             result = original(value)
             dialog._stop()
             return result
 
-        monkeypatch.setattr(species_dialog_module, "_safe_lookup", stop_after_first)
+        monkeypatch.setattr(bulk_module, "safe_lookup", stop_after_first)
         dialog._query_all()
         states = list(dialog._states.values())
         assert states[0].done is True
         assert all(state.lookup is None for state in states[1:])
-        assert dialog._busy is False and dialog._bulk_running is False
+        assert dialog._busy is False and dialog.job.running is False
+        assert dialog.job.session.snapshot()["status"] == "DONE"
         assert "已停止" in dialog.status.value
     finally:
         db.close()
@@ -252,12 +273,15 @@ def test_dialog_rate_limit_stops_bulk_without_marking_not_found(tmp_path, monkey
 def test_dialog_restores_state_when_operation_launch_is_rejected(tmp_path, monkeypatch):
     db, dialog = _make_dialog(tmp_path, monkeypatch, [])
     try:
-        dialog._launch = lambda work, name, *, cancellable=False: False
+        dialog._launch = lambda work, name: False
+        monkeypatch.setattr(
+            bulk_module, "launch_page_operation", lambda *_a, **_k: False
+        )
         candidate = dialog.result.candidates[0]
         dialog._query_one(candidate)
         assert dialog._states[candidate.entry_id].running is False
         dialog._query_all()
-        assert dialog._busy is False and dialog._bulk_running is False
+        assert dialog._busy is False and dialog.job.running is False
         assert dialog.query_all_btn.disabled is False
         dialog._scan()
         assert dialog._busy is False
@@ -273,7 +297,7 @@ def test_dialog_bulk_skips_running_candidates_and_blocks_while_running(
         first = dialog.result.candidates[0]
         dialog._states[first.entry_id].running = True
         dialog._query_all()  # 有單筆正在查詢時不啟動批次
-        assert dialog._bulk_running is False
+        assert dialog.job.running is False
         dialog._states[first.entry_id].running = False
         dialog._states[first.entry_id].lookup = FOUND
         dialog._query_all()
@@ -555,3 +579,125 @@ def test_panel_open_species_entry_selects_species_tab(tmp_path):
         assert panel.selected.id == entry_id
     finally:
         db.close()
+
+
+# ---------------------------------------------------------------- 背景批次查詢
+class _DeferredLauncher:
+    """記下背景工作但不立刻執行，模擬查詢還在跑的時候關閉視窗。"""
+
+    def __init__(self):
+        self.targets = []
+        self.kwargs = {}
+
+    def __call__(self, _page, target, **kwargs):
+        self.targets.append(target)
+        self.kwargs = kwargs
+        return True
+
+    def run(self):
+        self.targets.pop(0)()
+
+
+def test_bulk_lookup_keeps_running_after_dialog_closes_and_reopens(
+    tmp_path, monkeypatch
+):
+    launcher = _DeferredLauncher()
+    db, dialog = _make_dialog(
+        tmp_path, monkeypatch, [FOUND, MISSING, FOUND], launcher=launcher
+    )
+    try:
+        dialog._query_all()
+        job = dialog.job
+        assert job.running and dialog.stop_btn.visible
+        assert launcher.kwargs["task_session"] is job.session
+        assert job.session.name == "學名批次查詢"
+        assert job.session.view_key == "moddb"
+        dialog._close()
+        assert job.running  # 關閉視窗不會停止查詢
+
+        reopened = _new_dialog(dialog.page, db)
+        assert reopened.job is job
+        reopened.open()
+        assert reopened.result is job.result
+        assert reopened.scan_btn.disabled and reopened.stop_btn.visible
+        assert "背景查詢學名 0/3" in reopened.status.value
+
+        launcher.run()
+        assert not job.running
+        assert [s.lookup for s in reopened._states.values()] == [
+            FOUND,
+            MISSING,
+            FOUND,
+        ]
+        assert "學名查詢完成" in reopened.status.value
+        assert "找到 2" in reopened.status.value
+        assert reopened.stop_btn.visible is False
+        assert reopened.scan_btn.disabled is False
+        # 已關閉的視窗不再接收事件
+        assert all(s.lookup is None for s in dialog._states.values())
+        assert job.session.snapshot()["progress"] == 1.0
+    finally:
+        db.close()
+
+
+def test_bulk_lookup_stops_when_task_capsule_cancels(tmp_path, monkeypatch):
+    launcher = _DeferredLauncher()
+    db, dialog = _make_dialog(tmp_path, monkeypatch, [FOUND], launcher=launcher)
+    try:
+        dialog._query_all()
+        launcher.kwargs["on_cancel"]()  # 頂列任務膠囊的取消
+        launcher.run()
+        assert dialog.job.stop_reason == "cancelled"
+        assert all(s.lookup is None for s in dialog._states.values())
+        assert "已停止查詢" in dialog.status.value
+    finally:
+        db.close()
+
+
+def test_scan_prefills_cached_names_and_skips_them_in_bulk(tmp_path, monkeypatch):
+    db, dialog = _make_dialog(tmp_path, monkeypatch, [FOUND, FOUND])
+    try:
+        species_cache._species_cache_data["Agave tequilana"] = "龍舌蘭"
+        dialog._scan()
+        values = {c.entry_id: c.value for c in dialog.result.candidates}
+        cached = [entry_id for entry_id, state in dialog._states.items() if state.done]
+        assert [values[i] for i in cached] == ["Agave tequilana"]
+        assert "1 個已有快取名稱" in dialog.status.value
+        dialog._query_all()
+        assert dialog.job.total == 2
+        assert dialog.query_all_btn.disabled is True  # 全部都有結果
+    finally:
+        db.close()
+
+
+def test_species_suggestion_rerenders_on_bulk_results(isolated_species_cache):
+    from app.views.moddb.species_bulk_lookup import bulk_lookup_for
+    from app.views.moddb.species_suggestion import SpeciesSuggestion
+
+    page = mock_page()
+    changes = []
+    suggestion = SpeciesSuggestion(page, lambda _t: None, lambda: changes.append(1))
+    suggestion._results["Ginkgo biloba"] = FAILED
+    species_cache._species_cache_data["Ginkgo biloba"] = "銀杏"
+    bulk_lookup_for(page)._notify("lookup", 1)
+    assert changes == [1]
+    texts = _texts(suggestion.build(_entry("block.m.x.latin", "Ginkgo biloba")))
+    assert "銀杏" in texts and "套用" in texts
+
+
+def test_bulk_lookup_listeners_do_not_keep_closed_views_alive():
+    import gc
+
+    from app.views.moddb.species_bulk_lookup import SpeciesBulkLookup
+
+    job = SpeciesBulkLookup(mock_page())
+
+    class _View:
+        def on_event(self, _event, _entry_id):
+            raise AssertionError("released view must not be called")
+
+    view = _View()
+    job.add_listener(view.on_event)
+    del view
+    gc.collect()
+    job._notify("finished")

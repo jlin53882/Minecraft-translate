@@ -7,14 +7,12 @@ from collections.abc import Callable
 import flet as ft
 
 from app.services_impl.moddb_service import (
-    STATUS_ERROR,
     STATUS_FOUND,
     STATUS_NOT_FOUND,
     STATUS_RATE_LIMITED,
     SpeciesLookup,
     cached_species_lookup,
     is_species_candidate,
-    lookup_species,
 )
 from app.tasks.operation_registry import (
     CancellationPolicy,
@@ -26,6 +24,8 @@ from app.tasks.operation_registry import (
 from app.ui import kit
 from app.ui.design import C
 from app.ui.snack import show_snack
+from app.views.moddb.species_bulk_lookup import bulk_lookup_for
+from app.views.moddb.species_bulk_lookup import safe_lookup as _safe_lookup
 from translation_tool.utils.log_unit import log_warning
 from translation_tool.utils.species_names import (
     has_species_key_hint,
@@ -34,14 +34,6 @@ from translation_tool.utils.species_names import (
 
 TAB_KEY = "species"
 TAB_LABEL = "學名"
-
-
-def _safe_lookup(name: str) -> SpeciesLookup:
-    try:
-        return lookup_species(name)
-    except Exception as exc:  # noqa: BLE001 - worker boundary
-        log_warning("學名查詢失敗 %r：%r", name, exc)
-        return SpeciesLookup(STATUS_ERROR, None, f"{type(exc).__name__}: {exc}")
 
 
 class SpeciesSuggestion:
@@ -58,6 +50,11 @@ class SpeciesSuggestion:
         self.on_change = on_change
         self._results: dict[str, SpeciesLookup] = {}
         self._running: set[str] = set()
+        # 背景批次查詢每查到一筆就寫入快取；重繪讓目前條目的結果即時出現。
+        bulk_lookup_for(page).add_listener(self._on_bulk_event)
+
+    def _on_bulk_event(self, _event: str, _entry_id: int | None) -> None:
+        self.on_change()
 
     # ------------------------------------------------------------------ 畫面
     def build(self, entry) -> list[ft.Control]:
@@ -70,7 +67,12 @@ class SpeciesSuggestion:
                 )
             ]
         name = normalize_species_name(value)
-        lookup = self._results.get(name) or cached_species_lookup(name)
+        # 快取裡查到的名稱優先：背景批次查詢查到後要蓋過這裡先前的失敗結果。
+        cached = cached_species_lookup(name)
+        if cached is not None and cached.status == STATUS_FOUND:
+            lookup = cached
+        else:
+            lookup = self._results.get(name) or cached
         controls: list[ft.Control] = [self._card(entry, name, lookup)]
         if not has_species_key_hint(entry.key):
             controls.append(

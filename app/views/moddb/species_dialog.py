@@ -2,21 +2,19 @@
 
 from __future__ import annotations
 
-import threading
 import time
 from dataclasses import dataclass
 
 import flet as ft
 
 from app.services_impl.moddb_service import (
-    STATUS_ERROR,
     STATUS_FOUND,
     STATUS_NOT_FOUND,
     STATUS_RATE_LIMITED,
     SpeciesCandidate,
     SpeciesLookup,
     SpeciesScanResult,
-    lookup_species,
+    cached_species_lookup,
     scan_species_candidates,
 )
 from app.tasks.operation_registry import (
@@ -35,21 +33,14 @@ from app.ui.dialogs import (
     present_page_dialog,
 )
 from app.ui.snack import show_snack
+from app.views.moddb import species_bulk_lookup as bulk
 from app.views.moddb.formatting import kind_label
 from translation_tool.utils.log_unit import log_exception, log_warning
 
 # 候選列表每頁顯示幾筆（候選數量不設上限，用頁碼切換）。
 PAGE_SIZE = 50
-# 批次查詢連續幾筆失敗（非「查無」）就停止，避免離線時逐筆等待逾時。
-MAX_CONSECUTIVE_FAILURES = 3
 # 批次查詢時畫面最多每隔這麼久才重繪一次。
 UI_FLUSH_INTERVAL_SECONDS = 0.25
-
-_STOP_MESSAGES = {
-    "cancelled": "已停止查詢",
-    "rate_limited": "維基百科回應請求過於頻繁，已停止；稍後再按「查詢全部候選」繼續",
-    "failures": "連續查詢失敗，已停止；請檢查網路後再按「查詢全部候選」重試",
-}
 
 
 @dataclass
@@ -63,16 +54,12 @@ class _LookupState:
         return self.lookup is not None and self.lookup.definitive
 
 
-def _safe_lookup(value: str) -> SpeciesLookup:
-    try:
-        return lookup_species(value)
-    except Exception as exc:  # noqa: BLE001 - worker boundary
-        log_warning("學名查詢失敗 %r：%r", value, exc)
-        return SpeciesLookup(STATUS_ERROR, None, f"{type(exc).__name__}: {exc}")
-
-
 class SpeciesCandidateDialog:
-    """在目前條目篩選範圍內找出並查詢可能的學名。"""
+    """在目前條目篩選範圍內找出並查詢可能的學名。
+
+    「查詢全部候選」交給頁面共用的 :class:`SpeciesBulkLookup` 在背景執行；
+    視窗只是它的檢視，關閉視窗不會停止查詢，重新開啟會接回進行中的查詢。
+    """
 
     def __init__(
         self,
@@ -94,10 +81,9 @@ class SpeciesCandidateDialog:
         self._row_index: dict[int, int] = {}
         self._page_candidates: list[SpeciesCandidate] = []
         self._busy = False
-        self._bulk_running = False
-        self._cancel = threading.Event()
         self._last_flush = 0.0
         self._generation = 0
+        self.job = bulk.bulk_lookup_for(page)
         self._build_controls()
         self._build_dialog()
 
@@ -111,7 +97,7 @@ class SpeciesCandidateDialog:
         self.scope = ft.Text(self._scope_text(), size=13, color=C.TEXT)
         self.hint = ft.Text(
             "掃描會找出 key 帶有 latin／scientific 等提示、且格式像學名的條目；"
-            "按「查詢全部」才會逐筆查詢學名資料庫。",
+            "按「查詢全部」會在背景逐筆查詢，可以關閉視窗，進度顯示在頂列任務。",
             size=12,
             color=C.MUTED,
             selectable=True,
@@ -192,29 +178,33 @@ class SpeciesCandidateDialog:
         )
 
     def open(self) -> None:
+        self.job.add_listener(self._on_job_event)
+        if self.job.running:
+            self._attach_running_job()
         try:
             present_page_dialog(self.page, self.dialog)
         except (AttributeError, RuntimeError):
+            self.job.remove_listener(self._on_job_event)
             show_snack(self.page, "目前畫面無法開啟學名掃描視窗。", C.GOLD)
 
-    def _discard_pending_work(self) -> None:
-        """讓尚在背景執行的查詢停止，並忽略它們之後送回來的結果。"""
+    def _detach(self) -> None:
+        """忽略掃描與單筆查詢之後送回的結果；背景批次查詢照常進行。"""
         self._generation += 1
-        self._cancel.set()
+        self.job.remove_listener(self._on_job_event)
 
     def _close(self, _e=None) -> None:
-        self._discard_pending_work()
+        self._detach()
         close_page_dialog(self.page, self.dialog)
 
     def _on_dismiss(self, _e=None) -> None:
-        self._discard_pending_work()
+        self._detach()
 
     def _stop(self, _e=None) -> None:
-        if not self._bulk_running:
+        if not self.job.running:
             return
-        self._cancel.set()
-        self.stop_btn.disabled = True
-        self.status.value = "正在停止…（目前這一筆查完後停止）"
+        self.job.stop()
+        self._show_bulk_controls()
+        self._set_bulk_progress()
         self._flush(force=True)
 
     # ------------------------------------------------------------------ 掃描
@@ -261,16 +251,31 @@ class SpeciesCandidateDialog:
             show_snack(self.page, f"學名候選掃描失敗：{error}", C.RED)
             self._flush(force=True)
             return
+        self._show_result(result)
+        cached = sum(1 for state in self._states.values() if state.done)
+        self.status.value = f"找到 {result.total_candidates:,} 個候選" + (
+            f"，其中 {cached:,} 個已有快取名稱" if cached else ""
+        )
+        self._flush(force=True)
+
+    def _show_result(
+        self,
+        result: SpeciesScanResult,
+        lookups: dict[int, SpeciesLookup] | None = None,
+    ) -> None:
+        """顯示候選列；沒有本次查詢結果的候選先帶入本機快取裡已查到的名稱。"""
         self.result = result
-        self._states = {
-            candidate.entry_id: _LookupState() for candidate in result.candidates
-        }
-        self.status.value = f"找到 {result.total_candidates:,} 個候選"
-        self.query_all_btn.disabled = not result.candidates
+        lookups = lookups or {}
+        self._states = {}
+        for candidate in result.candidates:
+            lookup = lookups.get(candidate.entry_id) or cached_species_lookup(
+                candidate.value
+            )
+            self._states[candidate.entry_id] = _LookupState(lookup)
         self.pager.set_state(result.total_candidates, 1)
         self.pager.visible = result.total_candidates > PAGE_SIZE
+        self._sync_query_all_enabled()
         self._render_rows()
-        self._flush(force=True)
 
     def _on_page(self, page: int) -> None:
         self.pager.set_state(self.pager.total_items, page)
@@ -283,7 +288,7 @@ class SpeciesCandidateDialog:
 
     def _query_one(self, candidate: SpeciesCandidate, _e=None) -> None:
         state = self._states.get(candidate.entry_id)
-        if state is None or state.running or state.done or self._busy:
+        if state is None or state.running or state.done or self._locked():
             return
         generation = self._generation
         state.running = True
@@ -292,7 +297,7 @@ class SpeciesCandidateDialog:
         self._flush(force=True)
 
         def work() -> None:
-            lookup = _safe_lookup(candidate.value)
+            lookup = bulk.safe_lookup(candidate.value)
             self._post(self._apply_lookup, generation, candidate.entry_id, lookup)
 
         if not self._launch(work, "Mod 資料庫學名查詢"):
@@ -303,7 +308,7 @@ class SpeciesCandidateDialog:
 
     # ------------------------------------------------------------------ 批次查詢
     def _query_all(self, _e=None) -> None:
-        if self._busy or self._any_running() or self.result is None:
+        if self._locked() or self._any_running() or self.result is None:
             return
         pending = [
             candidate
@@ -312,63 +317,66 @@ class SpeciesCandidateDialog:
         ]
         if not pending:
             return
-        generation = self._generation
-        self._cancel.clear()
-        self._bulk_running = True
-        self.stop_btn.visible = True
-        self.stop_btn.disabled = False
-        self._set_busy(True, f"查詢學名 0/{len(pending)}…")
-
-        def work() -> None:
-            stop_reason = "completed"
-            failures = 0
-            for index, candidate in enumerate(pending, start=1):
-                if self._cancel.is_set():
-                    stop_reason = "cancelled"
-                    break
-                lookup = _safe_lookup(candidate.value)
-                self._post(self._apply_lookup, generation, candidate.entry_id, lookup)
-                self._post(self._set_query_progress, generation, index, len(pending))
-                if lookup.status == STATUS_RATE_LIMITED:
-                    stop_reason = "rate_limited"
-                    break
-                failures = 0 if lookup.definitive else failures + 1
-                if failures >= MAX_CONSECUTIVE_FAILURES:
-                    stop_reason = "failures"
-                    break
-            self._post(self._finish_bulk_lookup, generation, stop_reason)
-
-        if not self._launch(work, "Mod 資料庫學名批次查詢", cancellable=True):
-            self._finish_bulk_lookup(generation, "launch_failed")
-
-    def _set_query_progress(self, generation: int, done: int, total: int) -> None:
-        if generation == self._generation and not self._cancel.is_set():
-            self.status.value = f"查詢學名 {done}/{total}…"
-            self._flush()
-
-    def _finish_bulk_lookup(self, generation: int, stop_reason: str) -> None:
-        if generation != self._generation:
+        if not self.job.start(self.result, pending, self._scope_text()):
+            self._flush(force=True)
             return
-        self._bulk_running = False
-        self.stop_btn.visible = False
-        self._set_busy(False)
-        if stop_reason == "completed":
-            self.status.value = self._summary_text("學名查詢完成")
-        elif stop_reason == "launch_failed":
-            self.status.value = "批次查詢無法啟動"
-        else:
-            self.status.value = self._summary_text(_STOP_MESSAGES[stop_reason])
+        if not self.job.running:  # 已經結束：結果由 finished 事件顯示
+            return
+        self._show_bulk_controls()
+        self._set_bulk_progress()
         self._flush(force=True)
 
+    def _attach_running_job(self) -> None:
+        """重新開啟視窗時接回進行中的背景查詢與它的候選範圍。"""
+        job = self.job
+        self.scope.value = job.scope_text
+        if job.result is not None:
+            self._show_result(job.result, job.lookups)
+        self._show_bulk_controls()
+        self._set_bulk_progress()
+
+    def _show_bulk_controls(self) -> None:
+        """依背景查詢是否進行中切換按鈕與進度列。"""
+        running = self.job.running
+        self.stop_btn.visible = running
+        self.stop_btn.disabled = self.job.stopping
+        self.scan_btn.disabled = running or self._busy
+        self.loose_check.disabled = running or self._busy
+        self.progress.visible = running or self._busy
+        self._sync_query_all_enabled()
+        self._render_rows()
+
+    def _set_bulk_progress(self) -> None:
+        job = self.job
+        if job.stopping:
+            self.status.value = "正在停止…（目前這一筆查完後停止）"
+        else:
+            self.status.value = f"背景查詢學名 {job.done}/{job.total}…（可以關閉視窗）"
+        self.progress.value = job.done / job.total if job.total else None
+
+    def _on_job_event(self, event: str, entry_id: int | None) -> None:
+        if self.result is None or self.result is not self.job.result:
+            return
+        if event == "lookup" and entry_id is not None:
+            state = self._states.get(entry_id)
+            lookup = self.job.lookups.get(entry_id)
+            if state is not None and lookup is not None:
+                state.running = False
+                state.lookup = lookup
+                index = self._row_index.get(entry_id)
+                if index is not None:
+                    self._refresh_row(self._page_candidates[index])
+            self._set_bulk_progress()
+            self._flush()
+            return
+        if event == "finished":
+            self._show_bulk_controls()
+            reason = self.job.stop_reason or "completed"
+            self.status.value = self._summary_text(bulk.STOP_MESSAGES[reason])
+            self._flush(force=True)
+
     def _summary_text(self, prefix: str) -> str:
-        lookups = [s.lookup for s in self._states.values() if s.lookup is not None]
-        found = sum(1 for item in lookups if item.status == STATUS_FOUND)
-        missing = sum(1 for item in lookups if item.status == STATUS_NOT_FOUND)
-        retry = sum(1 for item in lookups if not item.definitive)
-        parts = [f"找到 {found}", f"查無 {missing}"]
-        if retry:
-            parts.append(f"失敗可重試 {retry}")
-        return f"{prefix}（{'、'.join(parts)}）"
+        return bulk.summary_text(prefix, (s.lookup for s in self._states.values()))
 
     def _apply_lookup(
         self, generation: int, entry_id: int, lookup: SpeciesLookup
@@ -384,9 +392,6 @@ class SpeciesCandidateDialog:
         if index is not None:
             self._refresh_row(self._page_candidates[index])
         self._sync_query_all_enabled()
-        if self._bulk_running:
-            self._flush()
-            return
         if not lookup.definitive:
             show_snack(self.page, f"學名查詢失敗：{lookup.detail}", C.GOLD)
         self._flush(force=True)
@@ -422,7 +427,7 @@ class SpeciesCandidateDialog:
                     size="sm",
                     icon=ft.Icons.REFRESH if retry else ft.Icons.SEARCH,
                     on_click=lambda _e, item=candidate: self._query_one(item),
-                    disabled=state.running or self._busy,
+                    disabled=state.running or self._locked(),
                 )
             )
         actions.append(
@@ -474,10 +479,14 @@ class SpeciesCandidateDialog:
         if index is not None and index < len(self.rows.controls):
             self.rows.controls[index] = self._build_row(candidate)
 
+    def _locked(self) -> bool:
+        """掃描中或背景批次查詢中，不接受新的掃描或查詢。"""
+        return self._busy or self.job.running
+
     def _sync_query_all_enabled(self) -> None:
-        has_candidates = bool(self.result and self.result.candidates)
+        has_pending = any(not state.done for state in self._states.values())
         self.query_all_btn.disabled = (
-            self._busy or self._any_running() or not has_candidates
+            self._locked() or self._any_running() or not has_pending
         )
 
     def _open_entry(self, entry_id: int) -> None:
@@ -486,7 +495,7 @@ class SpeciesCandidateDialog:
             self.on_open_entry(entry_id)
 
     # ------------------------------------------------------------------ 背景工作
-    def _launch(self, work, name: str, *, cancellable: bool = False) -> bool:
+    def _launch(self, work, name: str) -> bool:
         """啟動背景工作；被拒絕或啟動失敗時回傳 ``False``，由呼叫端還原畫面。"""
         try:
             handle = launch_page_operation(
@@ -494,19 +503,10 @@ class SpeciesCandidateDialog:
                 work,
                 name=name,
                 owner="moddb-species-dialog",
-                cancellation=(
-                    CancellationPolicy.COOPERATIVE
-                    if cancellable
-                    else CancellationPolicy.NON_CANCELLABLE
-                ),
+                cancellation=CancellationPolicy.NON_CANCELLABLE,
                 commit=CommitPolicy.EPHEMERAL,
                 durability=DurabilityPolicy.RECOMPUTABLE,
-                shutdown=(
-                    ShutdownPolicy.CANCEL_AND_DRAIN
-                    if cancellable
-                    else ShutdownPolicy.ALLOW_TO_FINISH
-                ),
-                on_cancel=self._cancel.set if cancellable else None,
+                shutdown=ShutdownPolicy.ALLOW_TO_FINISH,
             )
         except Exception as exc:  # noqa: BLE001 - restore UI after launch failure
             log_exception(f"{name}無法啟動")
@@ -533,10 +533,10 @@ class SpeciesCandidateDialog:
 
     def _set_busy(self, busy: bool, text: str = "") -> None:
         self._busy = busy
-        self.scan_btn.disabled = busy
-        self.loose_check.disabled = busy
+        self.scan_btn.disabled = busy or self.job.running
+        self.loose_check.disabled = busy or self.job.running
         self._sync_query_all_enabled()
-        self.progress.visible = busy
+        self.progress.visible = busy or self.job.running
         self.progress.value = None if busy else 0
         if text:
             self.status.value = text
