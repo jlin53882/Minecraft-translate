@@ -87,6 +87,7 @@ from translation_tool.utils.cancellation import (
     is_cancelled,
     raise_if_cancelled,
 )
+from translation_tool.utils.species_names import SPECIES_KEY_HINTS, TAXONOMIC_MARKERS
 
 _ENTRY_COLS = "e.id, e.kind, e.mc_version, e.mod_id, e.key, e.en_us"
 _CHUNK = 400  # SQLite 變數上限相容的批次大小
@@ -963,6 +964,20 @@ class TranslationDB(BulkReviewMixin):
         has_text = "e.en_us <> '' AND f.zh_tw <> ''"
         if status == "unknown_source":
             return "(e.en_us IS NULL OR e.en_us = '')"
+        if status == "species_name":
+            # 超集預篩：key 含學名提示詞，或值含雜交／亞種／變種記號。
+            key_hint = " OR ".join(
+                f"lower(e.key) LIKE '%{hint}%'" for hint in sorted(SPECIES_KEY_HINTS)
+            )
+            marker = " OR ".join(
+                f"instr(e.en_us, '{mark}') > 0" for mark in TAXONOMIC_MARKERS
+            )
+            return f"e.en_us <> '' AND ({key_hint} OR {marker})"
+        if status == "species_format":
+            # 超集預篩：去掉前後空白後首字大寫、第二字是小寫或連字號，且中間有任何
+            # 空白字元（Python 會把各種空白正規化成單一空格）；正規表示式由 Python 判斷。
+            ws = _BATCH_REPLACE_STRIP_CHARS
+            return f"trim(e.en_us, '{ws}') GLOB '[A-Z][a-z-]*[{ws}]*'"
         if status == "missing_translation":
             return "e.en_us <> '' AND (f.zh_tw IS NULL OR f.zh_tw = '')"
         if status == "whitespace":
@@ -1094,7 +1109,7 @@ class TranslationDB(BulkReviewMixin):
                 raise_if_cancelled()
                 for row in chunk:
                     if not matches_quality(
-                        row[5] or "", row[6] or "", criteria.quality
+                        row[5] or "", row[6] or "", criteria.quality, row[4]
                     ):
                         continue
                     total += 1
@@ -1243,7 +1258,9 @@ class TranslationDB(BulkReviewMixin):
                         progress_callback(
                             "檢查品質條件", 0.05 + 0.4 * index / max(1, total)
                         )
-                if matches_quality(row[5] or "", row[6] or "", criteria.quality):
+                if matches_quality(
+                    row[5] or "", row[6] or "", criteria.quality, row[4]
+                ):
                     filtered.append(row)
             rows = filtered
             rows = self._sort_filtered_rows(rows, criteria.sort_by)
@@ -1270,7 +1287,7 @@ class TranslationDB(BulkReviewMixin):
         quality = criteria.quality
         source = self._query_source()
         narrow = (
-            f"SELECT e.id, e.en_us, f.zh_tw {source} "
+            f"SELECT e.id, e.en_us, f.zh_tw, e.key {source} "
             f"WHERE ({cond}) AND {self._quality_prefilter_sql(quality)}"
         )
         matched_ids: list[int] = []
@@ -1284,7 +1301,7 @@ class TranslationDB(BulkReviewMixin):
                 matched_ids.extend(
                     int(row[0])
                     for row in chunk
-                    if matches_quality(row[1] or "", row[2] or "", quality)
+                    if matches_quality(row[1] or "", row[2] or "", quality, row[3])
                 )
                 if progress_callback is not None:
                     progress_callback(f"檢查品質條件（已檢查 {scanned:,} 筆）", 0.05)
