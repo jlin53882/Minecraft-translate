@@ -90,15 +90,17 @@ def merge_lang_dicts(
     contains_cjk: Callable[[Any], bool],
     is_pure_english: Callable[[Any], bool],
     is_from_output_dir: bool = False,
+    db_lookup: Callable[[str, Any], str | None] | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """合併 3 個 lang 檔來源成 (final_tw, pending) - 跟 Stage 1 邏輯一致。
 
     規則順序 (從 _process_single_mod Step 4 移植):
         1. 人工 zh_tw 保護:existing_tw 已有 CJK 跳過
-        2. zh_tw 來源含 CJK → apply_replace_rules
-        3. zh_cn 含 CJK → recursive_translate_dict (S2TW)
-        4. 全英文 → pending
-        5. fallback → final_tw
+        2. Mod 資料庫(db_lookup)有同原文的譯文 → 直接採用
+        3. zh_tw 來源含 CJK → apply_replace_rules
+        4. zh_cn 含 CJK → recursive_translate_dict (S2TW)
+        5. 全英文 → pending
+        6. fallback → final_tw
 
     Args:
         cn_data:        zh_cn.json 內容 (或 None/{} 表示無)
@@ -112,6 +114,7 @@ def merge_lang_dicts(
         is_pure_english: callable(value) -> bool
         is_from_output_dir: existing_tw 是否從 output_dir 來
                           (只在 True 時保護人工翻譯)
+        db_lookup:      callable(key, en_us) -> 資料庫譯文或 None;None 表示不使用資料庫
 
     Returns:
         (final_tw, pending) tuple
@@ -144,7 +147,14 @@ def merge_lang_dicts(
         cn_val = cn_data.get(key)
         en_val = en_data.get(key)
 
-        # 2. zh_tw 來源含 CJK → 用規則處理
+        # 2. 資料庫有同原文的譯文 → 優先於 jar 自帶 zh_tw 與 zh_cn
+        if db_lookup is not None:
+            db_tw = db_lookup(key, en_val)
+            if db_tw is not None:
+                final_tw[key] = db_tw
+                continue
+
+        # 3. zh_tw 來源含 CJK → 用規則處理
         if contains_cjk(tw_val):
             if isinstance(tw_val, str):
                 final_tw[key] = apply_replace_rules(tw_val, rules)
@@ -152,12 +162,12 @@ def merge_lang_dicts(
                 final_tw[key] = recursive_translate_dict(tw_val, rules)
             continue
 
-        # 3. zh_cn 含 CJK → S2TW 翻譯
+        # 4. zh_cn 含 CJK → S2TW 翻譯
         if contains_cjk(cn_val):
             final_tw[key] = recursive_translate_dict(cn_val, rules)
             continue
 
-        # 4. 全英文 → pending
+        # 5. 全英文 → pending
         english_source = next(
             (value for value in (en_val, cn_val, tw_val) if value is not None),
             "",
@@ -169,7 +179,7 @@ def merge_lang_dicts(
             pending[key] = english_source
             continue
 
-        # 5. fallback - 保留第一個非 None 的來源值
+        # 6. fallback - 保留第一個非 None 的來源值
         final_tw.setdefault(key, english_source)
 
     return final_tw, pending

@@ -5,6 +5,7 @@
 ## 職責
 
 - 提供兩種輸入模式：資料夾（`folder`）與 ZIP 清單（可加入手動輸入的單一 ZIP 路徑）；另有輸出資料夾與合併選項（只處理 lang、處理 zh_cn、略過 Patchouli en_us、各項門檻）。
+- 啟用 Mod DB 且有目標版本時，語系合併的 lang 條目譯文來源順序為：輸出資料夾既有譯文 → 資料庫（鍵值與英文原文相同）→ jar 的 zh_tw → zh_cn 簡轉繁 → 待翻譯。
 - Patchouli 手冊的 zh_cn／zh_tw 譯文會先和同書 `en_us` 比對格式（舊版物品 NBT、頁數或欄位不同）；格式不同的視為過時譯文，不寫入輸出，`en_us` 原文改列待翻譯。文字內格式標記數量和 `en_us` 不同的譯文只記警告、仍採用。
 - 實際合併交給 `app/services_impl/pipelines/merge_service.py` 的 `run_merge_folder_batch_service` 與 `run_merge_zip_batch_service`，兩者都是 generator，由 `MergeView._run_merge_service` 完整消耗。
 - 翻譯記憶庫選項由 `MergeDbOptions`（`app/views/merge/merge_db_options.py`）提供，點擊時產生不可變的 `MergeDbRunSnapshot`。

@@ -938,3 +938,43 @@ def test_resolver_stats_are_exact_under_concurrent_lookups(monkeypatch, db_path)
     assert resolver.stats.hit_target == 8 * 20
     assert resolver.stats.miss == 8 * 20
     db.close()
+
+
+def test_stage1_database_wins_over_source_zh_tw_and_zh_cn(
+    tmp_path, monkeypatch, db_path
+):
+    """資料庫（同原文）優先於 jar 自帶 zh_tw 與 zh_cn；原文不同時退回 jar 的譯文。"""
+    _settings(monkeypatch, db_path)
+    inp = tmp_path / "in"
+    lang = inp / "assets" / "foo" / "lang"
+    _write(
+        lang / "en_us.json",
+        {
+            "item.foo.a": "Steel Casing",  # 資料庫命中，jar 也有 zh_tw
+            "item.foo.b": "New Text",  # 原文不同 → 不命中，退回 jar zh_cn
+        },
+    )
+    _write(lang / "zh_tw.json", {"item.foo.a": "模組自帶繁中"})
+    _write(lang / "zh_cn.json", {"item.foo.a": "钢外壳", "item.foo.b": "新文本"})
+    out = tmp_path / "out"
+    list(merge_zhcn_to_zhtw_from_folder(str(inp), str(out), only_process_lang=True))
+    tw = json.loads(
+        next((out / "lang_output").rglob("zh_tw.json")).read_text(encoding="utf-8")
+    )
+    assert tw["item.foo.a"] == "鋼製外殼"
+    assert tw["item.foo.b"] == "新文字"  # zh_cn 經簡轉繁
+
+
+def test_stage2_database_wins_over_extracted_zh_cn(tmp_path, monkeypatch, db_path):
+    _settings(monkeypatch, db_path)
+    lang_output = tmp_path / "lang_output"
+    base = lang_output / "foo_extracted" / "assets" / "foo" / "lang"
+    _write(base / "en_us.json", {"item.foo.a": "Steel Casing"})
+    _write(base / "zh_cn.json", {"item.foo.a": "钢外壳"})
+    list(merge_extracted_to_assets(lang_output))
+    tw = json.loads(
+        (lang_output / "assets" / "foo" / "lang" / "zh_tw.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert tw["item.foo.a"] == "鋼製外殼"

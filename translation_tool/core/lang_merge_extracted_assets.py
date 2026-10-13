@@ -597,6 +597,11 @@ def _merge_extracted_to_assets(
                 continue
 
             try:
+                db_lookup = (
+                    db_fill.merge_lookup(modid, source_provenance_by_key)
+                    if db_fill is not None
+                    else None
+                )
                 final_tw, pending = merge_lang_dicts(
                     cn_data=cn_data,
                     tw_src_data=tw_src_data,
@@ -608,14 +613,8 @@ def _merge_extracted_to_assets(
                     contains_cjk=stage2_contains_cjk,
                     is_pure_english=stage2_is_pure_english,
                     is_from_output_dir=bool(existing_tw),
+                    db_lookup=db_lookup,
                 )
-                if db_fill is not None:
-                    final_tw, pending, _db_hits = db_fill.fill(
-                        modid,
-                        final_tw,
-                        pending,
-                        source_provenance_by_key=source_provenance_by_key,
-                    )
             except Exception as exc:  # noqa: BLE001 - 失敗已記錄，不中斷批次流程
                 mod_error = f"{modid}: merge failed: {exc}"
                 log_warning(f"[MergeExt→Assets] {mod_error}")

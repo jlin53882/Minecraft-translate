@@ -30,7 +30,7 @@
 - **入口**：語系合併頁或流水線的第二步；服務層為 `app/services_impl/pipelines/merge_service.py`，核心在 `translation_tool/core/lang_merger.py`。
 - **輸入**：可為資料夾或 ZIP。資料夾走 `run_merge_folder_batch_service`；ZIP 走 `run_merge_zip_batch_service`。
 - **處理**：依設定處理 `en_us`、`zh_cn`、`zh_tw`，保留既有繁中，將需要翻譯的內容整理到待翻譯輸出；Patchouli 和其他輸出有各自的子目錄。
-- **資料庫參與**：啟用 Mod DB 且有目標版本時，合併服務可用資料庫補上可用譯文；不存在資料庫或沒有版本時會依設定快照略過。
+- **資料庫參與**：啟用 Mod DB 且有目標版本時，合併時每個條目先查資料庫（鍵值與英文原文都相同才命中），命中的譯文優先於 jar 自帶 zh_tw 與 zh_cn；輸出資料夾裡已有的譯文不被覆蓋。譯文來源順序：輸出既有譯文 → 資料庫 → jar 的 zh_tw → zh_cn 簡轉繁 → 待翻譯。不存在資料庫或沒有版本時會依設定快照略過。
 
 不要把資料夾包成 ZIP 清單傳給 ZIP service；一鍵流程明確以 folder service 處理抽取結果。
 輸出與錯誤摘要見 [`../developer-guide/views/MERGE_VIEW_ARCHITECTURE.md`](../developer-guide/views/MERGE_VIEW_ARCHITECTURE.md)。

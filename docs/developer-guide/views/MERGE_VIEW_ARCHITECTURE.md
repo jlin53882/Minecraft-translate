@@ -71,6 +71,11 @@ MergeView（頁面標題「語系比對合併」）整合 en_us、zh_cn、zh_tw 
 - 用途：`patchouli_skip_zh_cn_switch` 開啟時，zh_cn 已達 effective 的 book 對應 en_us 才跳過；`process_zh_cn_switch` 關閉時一律不啟用
 - **注意**：threshold 同時是 service 的 `patchouli_threshold` 與 UI `patchouli_threshold_field` 的連動值（config `patchouli_effective_translation_threshold`，預設 0.5）
 
+## Mod 資料庫優先序（`lang_merge_dict.merge_lang_dicts` 的 `db_lookup` ← `MergeDbFill.merge_lookup`）
+
+- 階段 1（`lang_merge_pipeline`）與階段 2（`lang_merge_extracted_assets`）都把 `db_lookup` 傳進 `merge_lang_dicts`：輸出資料夾既有的 CJK 譯文先受保護，其次是資料庫命中，再來才是 jar 的 zh_tw 與 zh_cn。
+- 命中條件是鍵值與英文原文都相同；命中時來源標記寫進逐鍵來源檔。
+
 ## Patchouli 譯文格式檢查（`lang_merge_content_copy.py:_patchouli_stale_reason` → `patchouli_compat.find_patchouli_mismatch`）
 
 - 每個 `zh_cn/`、`zh_tw/` 的 `.json` 與同書 `en_us/` 的對應檔逐一比對：物品欄位的舊版 NBT 寫法（`id{…}`，`en_us` 沒有同樣寫法時）、頁數或欄位與 `en_us` 不同，都視為 mod 改版後沒跟上的過時譯文。
