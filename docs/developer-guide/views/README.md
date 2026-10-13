@@ -19,3 +19,4 @@
 | 學名查詢 | [Lookup](LOOKUP_VIEW_ARCHITECTURE.md) |
 | 資源包打包 | [Bundler](BUNDLER_VIEW_ARCHITECTURE.md) |
 | 設定 | [Config](CONFIG_VIEW_ARCHITECTURE.md) |
+| Mod 資料庫 | [Mod DB](MODDB_VIEW_ARCHITECTURE.md) |

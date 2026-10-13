@@ -72,6 +72,10 @@ DOC_SCOPES: dict[str, tuple[str, ...]] = {
         "app/views/merge_view.py",
         "app/views/merge/**/*.py",
     ),
+    "MODDB_VIEW_ARCHITECTURE.md": (
+        "app/views/moddb_view.py",
+        "app/views/moddb/**/*.py",
+    ),
     "PIPELINE_VIEW_ARCHITECTURE.md": ("app/views/pipeline/**/*.py",),
     "QC_VIEW_ARCHITECTURE.md": (
         "app/views/qc_view.py",

@@ -13,6 +13,7 @@ from app.views.moddb.batch_replace_dialog import BatchReplaceDialog
 from app.views.moddb.bulk_review_dialog import BulkReviewDialog
 from app.views.moddb.formatting import STATE_LABELS, kind_label
 from app.views.moddb.source_filter import ReviewStatusFilter, SourceFilter
+from app.views.moddb.species_dialog import SpeciesCandidateDialog
 
 ALL_REVIEW_STATES = "__all__"
 ALL_MODS = "全部模組"
@@ -94,6 +95,14 @@ def _build_controls(panel) -> None:
         size="sm",
         on_click=panel._open_bulk_review,
     )
+    panel.species_scan_btn = kit.button(
+        "掃描學名",
+        "secondary",
+        icon=ft.Icons.SCIENCE_OUTLINED,
+        size="sm",
+        on_click=lambda event: open_species_scan(panel, event),
+        tooltip="掃描目前版本／模組／類型範圍中的英文原文，找出可能的學名",
+    )
 
 
 def _build_flagged_banner(panel) -> None:
@@ -147,6 +156,7 @@ def _build_filter_card(panel) -> None:
                         panel.advanced_filters.active_text,
                         panel.batch_replace_btn,
                         panel.bulk_review_btn,
+                        panel.species_scan_btn,
                     ],
                     spacing=8,
                     vertical_alignment=ft.CrossAxisAlignment.CENTER,
@@ -246,4 +256,18 @@ def open_bulk_review(panel, _e=None) -> None:
         return
     BulkReviewDialog(
         panel._page, panel.db, panel.version, panel._after_batch_replace
+    ).open()
+
+
+def open_species_scan(panel, _e=None) -> None:
+    if panel.db() is None or not panel.version:
+        show_snack(panel._page, "目前沒有可用的資料庫版本。", C.GOLD)
+        return
+    SpeciesCandidateDialog(
+        panel._page,
+        panel.db,
+        panel.version,
+        panel.mod_id,
+        panel.kind,
+        on_open_entry=panel.open_species_entry,
     ).open()

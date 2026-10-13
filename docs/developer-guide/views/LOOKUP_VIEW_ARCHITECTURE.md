@@ -55,10 +55,12 @@ batch_lookup_clicked(e)
 
 - `run_manual_lookup_service(name) -> str`
   - `is_potential_species_name(name)` 前置格式檢查（不合格式回錯誤訊息）
-  - `lookup_species_name(name)` → 有結果回傳，否則「在本地快取和線上查詢中均未找到結果。」
+  - `lookup_species(name)` 交給 `describe_lookup`：找到回傳名稱；查無回「在本地快取和線上查詢中均未找到結果。」（種以下名稱另附上一層物種的參考名稱，或上一層查詢遭限流／失敗的提醒）；限流回「維基百科回應請求過於頻繁，請稍後再試（…）。」；其他錯誤回「查詢失敗，請稍後再試（…）。」
 - `run_batch_lookup_service(json_text)`（generator，逐步 yield update dict）
   - `json.loads` 解析；非 list → yield `{log, error: True}`
-  - 逐筆：`is_potential_species_name` 判斷（`"格式錯誤"`）→ `lookup_species_name`（未找到 → `"未找到"`）
+  - 逐筆：`is_potential_species_name` 判斷（`"格式錯誤"`）→ `lookup_species`（查無 → `"未找到"`，暫時失敗 → `"查詢失敗：…"`）
+  - `SpeciesLookup.rate_limited`（含上一層物種）時停止：yield 一筆停止訊息，其餘名稱記為 `"未查詢（已因限流停止）"`，不再送出請求；結束訊息為 `--- 批次查詢已因限流停止（部分完成） ---`，正常跑完才是 `--- 批次查詢完成 ---`
+  - 查無的值與單筆相同，會附上一層物種的參考名稱或查詢失敗提醒（例如 `"未找到（上一層物種 … 查詢遭維基百科限流（…），請稍後再試）"`）
   - 每筆 yield `{log: "(i/total) 已查詢: ...", progress}`，經 `GLOBAL_LOG_LIMITER.filter()` 過濾高頻日誌
   - 完成 yield `{log: "--- 批次查詢完成 ---", result: json.dumps(...)}`
   - JSONDecodeError / 其他例外 → yield `{log, error: True}`
@@ -66,27 +68,30 @@ batch_lookup_clicked(e)
 ## species_cache 查詢邏輯（species_cache.py）
 
 ### 格式判定
-- `_SPECIES_NAME_REGEX = ^[A-Z][a-z]+ [a-z]+$`：大寫開頭 + 空格 + 小寫（如 `Felis catus`）
-- `is_potential_species_name(name)`：非 str 或格式不符 → False
+- 查詢前會去除前後空白並合併重複空白。
+- `SPECIES_NAME_REGEX`（`translation_tool/utils/species_names.py`）接受二名法、三名法、常見種下階級與雜交符號（例如 `Felis catus`、`Canis lupus familiaris`、`Quercus robur subsp. broteroana`、`Acer × freemanii`）。
+- `is_potential_species_name(name)`：非 str 或格式不符 → False。
 
 ### lookup_species_name(name) 決策鏈
 1. 未初始化 → `initialize_species_cache()`（失敗回 None）
-2. **快取命中**（`name in _species_cache_data`）→ 回傳快取值；**空值快取**（`""`，先前查詢失敗標記）→ 回 None（避免重複查詢）
+2. **快取命中**（`name in _species_cache_data`）→ 回傳快取值；空值代表已確定查無，回 None 且不再連線
 3. 未命中且格式合法 → `query_wikipedia_and_update_cache(name)` 線上查詢
 4. 格式不合法 → None（不發請求）
 
-### 線上查詢（wikipedia，`_WIKIPEDIA_AVAILABLE`）
+### 線上查詢（MediaWiki Action API）
 - 查詢前 `time.sleep(_RATE_LIMIT_DELAY)`（config `species_cache.wikipedia_rate_limit_delay`，預設 0.5s）做 rate limit；語言取自 `species_cache.wikipedia_language`（預設 `zh`）
-- `wikipedia.page(name, auto_suggest=False)`，取 `page.title.split("(")[0]`（去括號註記）為俗名
-- **成功才寫檔**：記憶體快取 + 快取檔 append（config `species_cache.cache_directory` / `cache_filename`，預設 `學名資料庫/species_cache.tsv`；TSV：`學名\t俗名`）；失敗僅更新記憶體為 `""`（不重複查詢、不寫檔）
-- `PageError` → 回 None；`DisambiguationError` → 原名稱記為空值快取，取第一個選項遞迴查詢；其他例外 → 回 None（原名稱記為空值快取）
-- 未安裝 `wikipedia` 套件（`_WIKIPEDIA_AVAILABLE` 為 False）時不發出線上請求，`query_wikipedia_and_update_cache` 直接回 None，僅使用本地快取
+- 使用官方 `action=query`、`titles` 與 `redirects=1` 解析學名條目和轉址，取最終條目標題（去括號註記）為俗名；預設 `zh` 語言會再以 OpenCC `s2twp` 正規化為台灣繁體。
+- 請求包含專案 User-Agent、15 秒逾時；HTTP 429/5xx、連線、逾時與非 JSON 暫時回應最多重試 3 次。
+- **確定結果才寫檔**：記憶體快取 + 快取檔 append（config `species_cache.cache_directory` / `cache_filename`，預設 `學名資料庫/species_cache.tsv`；TSV：`學名\t俗名`）。API 明確標示頁面 `missing`／`invalid` 時寫入空的俗名代表查無；回應缺少頁面資料或標題屬於不完整回應，當成錯誤、不寫入快取；同一學名有多列時，載入時以最後一列為準。
+- 暫時性 API 錯誤（限流、逾時、連線失敗）回 None 且不寫入快取，之後查詢會重新連線。
+- `lookup_species(name, refresh=True)` 略過快取重新連線，用於「再查一次」。
+- 種以下的名稱（例如 `Fagus sylvatica purpurea`）查無時，`lookup_species` 以 `parent_species_name` 取出上一層物種並查詢，把結果放在 `SpeciesLookup.parent_name`／`parent_value` 當參考；`value` 仍是 None。上一層查詢遇到限流或錯誤時，`status` 仍是查無，失敗記在 `parent_status`／`parent_detail`；`SpeciesLookup.rate_limited` 與 `SpeciesLookup.failed` 會把上一層的失敗算進去。
 
 ## 檔案結構
 
 - `app/views/lookup_view.py` — UI
 - `app/services_impl/pipelines/lookup_service.py` — service 封裝
-- `translation_tool/utils/species_cache.py` — `is_potential_species_name` / `lookup_species_name`（本地快取 + 線上查詢）
+- `translation_tool/utils/species_cache.py` — `lookup_species_name`（本地快取 + 線上查詢）；`translation_tool/utils/species_names.py` — `is_potential_species_name` 等不碰網路的判斷規則
 
 ## 維護注意
 
