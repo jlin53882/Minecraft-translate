@@ -383,3 +383,43 @@ def test_preview_matches_what_the_bundler_writes(tmp_path, src_dir):
             assert json.loads(zf.read("pack.mcmeta")) == json.loads(text)
         assert (source is None) == (custom is None)
         assert used == (custom is not None and custom != "{not json")
+
+
+def test_repair_drops_min_max_format_when_max_below_min():
+    fixed, notes = _repair({"description": "d", "min_format": 75, "max_format": 69})
+    assert "min_format" not in fixed and "max_format" not in fixed
+    assert fixed["pack_format"] == 34 and any("max_format" in n for n in notes)
+
+
+def test_repair_compares_list_form_min_max_format():
+    fixed, _ = _repair(
+        {
+            "description": "d",
+            "pack_format": 34,
+            "min_format": [75, 1],
+            "max_format": [75, 0],
+        }
+    )
+    assert "min_format" not in fixed
+
+
+def test_repair_resets_supported_formats_that_exclude_pack_format():
+    fixed, notes = _repair(
+        {
+            "description": "d",
+            "pack_format": 34,
+            "supported_formats": {"min_inclusive": 46, "max_inclusive": 64},
+        }
+    )
+    assert fixed["pack_format"] == 34
+    assert fixed["supported_formats"] == {"min_inclusive": 34, "max_inclusive": 46}
+    assert any("不包含 pack_format" in n for n in notes)
+
+
+@pytest.mark.parametrize(
+    "supported", [34, [30, 40], {"min_inclusive": 34, "max_inclusive": 34}]
+)
+def test_repair_keeps_supported_formats_containing_pack_format(supported):
+    pack = {"description": "d", "pack_format": 34, "supported_formats": supported}
+    fixed, notes = _repair(pack)
+    assert fixed == pack and notes == []

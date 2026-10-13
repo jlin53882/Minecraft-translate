@@ -147,6 +147,49 @@ def _repair_format(key: str, value: Any) -> Any | None:
     return pair if pair is not None and (len(pair) == 1 or pair[0] <= pair[1]) else None
 
 
+def _format_range(value: Any) -> tuple[Any, Any] | None:
+    """supported_formats 的 (最小, 最大)；整數視為單一版本。"""
+    if isinstance(value, dict):
+        return value["min_inclusive"], value["max_inclusive"]
+    if isinstance(value, list):
+        return value[0], value[-1]
+    return value, value
+
+
+def _version_tuple(value: Any) -> tuple[int, int]:
+    """min_format／max_format 的比較值；整數視為 [主版本, 0]。"""
+    if isinstance(value, list):
+        return value[0], value[1] if len(value) > 1 else 0
+    return value, 0
+
+
+def _drop_inconsistent_formats(pack: dict[str, Any], notes: list[str]) -> None:
+    """型別修好後檢查欄位之間的版本關係；矛盾的欄位移除，supported_formats 依 pack_format 重設。"""
+    if (
+        "min_format" in pack
+        and "max_format" in pack
+        and _version_tuple(pack["max_format"]) < _version_tuple(pack["min_format"])
+    ):
+        notes.append(
+            f"max_format {json.dumps(pack['max_format'])} 小於 min_format "
+            f"{json.dumps(pack['min_format'])}，已移除 min_format／max_format"
+        )
+        del pack["min_format"], pack["max_format"]
+    if "pack_format" in pack and "supported_formats" in pack:
+        low, high = _format_range(pack["supported_formats"])
+        if not low <= pack["pack_format"] <= high:
+            notes.append(
+                f"supported_formats 不包含 pack_format {pack['pack_format']}，"
+                "已依 pack_format 重設 supported_formats"
+            )
+            del pack["supported_formats"]
+            version = pack["pack_format"]
+            if SUPPORTED_FORMATS_SINCE <= version < MIN_MAX_FORMAT_SINCE:
+                pack["supported_formats"] = build_pack_mcmeta("", version)["pack"][
+                    "supported_formats"
+                ]
+
+
 def repair_source_pack_mcmeta(
     text: str, generated: dict[str, Any]
 ) -> tuple[str | None, list[str]]:
@@ -181,6 +224,7 @@ def repair_source_pack_mcmeta(
             notes.append(f"{key} 已改成 {json.dumps(fixed)}")
             pack[key] = fixed
 
+    _drop_inconsistent_formats(pack, notes)
     if "pack_format" not in pack and not (
         "min_format" in pack and "max_format" in pack
     ):
