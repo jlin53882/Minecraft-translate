@@ -703,6 +703,7 @@ class EntriesPanel(ft.Column):
         self.sug_tab = SPECIES_TAB_KEY
         self.sug_seg.select(SPECIES_TAB_KEY)
         self.select(entry_id)
+        self._safe_update()  # 掃描視窗關閉時的重繪發生在選取之前
 
     def _on_sug_tab(self, key: str) -> None:
         self.sug_tab = key

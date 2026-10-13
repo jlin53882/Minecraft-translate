@@ -20,4 +20,4 @@
 - `app/services_impl/moddb_species_service.py` 不依賴 Flet，只處理候選資料結構、資料庫分頁與學名規則。
 - `app/views/moddb/species_dialog.py` 只處理視窗控制項、掃描與單筆查詢的背景作業，以及結果呈現。
 - `app/views/moddb/species_bulk_lookup.py` 負責批次查詢的背景工作、任務膠囊進度、停止條件與事件通知，不持有任何控制項。
-- 學名快取的網路請求與快取檔案格式由 `translation_tool/utils/species_cache.py` 管理（相同學名同時查詢只送一次請求，快取寫入有鎖）；Mod DB 功能不重複實作 API 或快取。
+- 學名快取的網路請求與快取檔案格式由 `translation_tool/utils/species_cache.py` 管理（相同學名同時查詢只送一次請求，等待者共用同一次結果，包括查無與暫時失敗；暫時失敗不寫入快取，之後仍可重試。快取寫入有鎖）；Mod DB 功能不重複實作 API 或快取。

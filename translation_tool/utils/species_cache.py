@@ -66,10 +66,11 @@ _tw_converter: OpenCC | None = None
 # 防止 initialize_species_cache() 被重複執行
 _initialized = False
 _init_lock = threading.RLock()
-# 快取字典與 TSV 檔的寫入、以及同名學名的單一查詢（single-flight）
+# 快取字典與 TSV 檔的寫入
 _cache_write_lock = threading.Lock()
-_name_locks: dict[str, threading.Lock] = {}
-_name_locks_guard = threading.Lock()
+# 進行中的線上查詢（single-flight）：同名學名同時查詢時共用同一次結果
+_in_flight: dict[str, _InFlight] = {}
+_in_flight_guard = threading.Lock()
 
 STATUS_FOUND = "found"
 STATUS_NOT_FOUND = "not_found"
@@ -265,9 +266,37 @@ def _query_wikipedia_title(species_name: str) -> str | None:
     return None
 
 
-def _name_lock(name: str) -> threading.Lock:
-    with _name_locks_guard:
-        return _name_locks.setdefault(name, threading.Lock())
+class _InFlight:
+    """一次進行中的線上查詢；結果只在這次查詢期間共用，不會持久保存。"""
+
+    def __init__(self) -> None:
+        self.done = threading.Event()
+        self.result: SpeciesLookup | None = None
+
+
+def _single_flight_lookup(name: str) -> SpeciesLookup:
+    """同名學名同時查詢只送一次請求，等待者共用這次的結果（含查無與暫時失敗）。
+
+    暫時失敗不寫入快取；查詢結束後再查詢同一學名會重新連線，所以仍可重試。
+    """
+    with _in_flight_guard:
+        if cached := _cached_lookup(name):
+            return cached
+        flight = _in_flight.get(name)
+        leader = flight is None
+        if leader:
+            flight = _InFlight()
+            _in_flight[name] = flight
+    if not leader:
+        flight.done.wait()
+        return flight.result or SpeciesLookup(STATUS_ERROR, None, "查詢中斷")
+    try:
+        flight.result = _fetch_and_cache(name)
+    finally:
+        with _in_flight_guard:
+            _in_flight.pop(name, None)
+        flight.done.set()
+    return flight.result
 
 
 def _cached_lookup(name: str) -> SpeciesLookup | None:
@@ -338,7 +367,7 @@ def cached_species_lookup(name: str) -> SpeciesLookup | None:
 def lookup_species(name: str) -> SpeciesLookup:
     """查詢物種名稱並回報結果類別（找到／查無／可重試的失敗）。
 
-    同一個學名同時被多個執行緒查詢時，只會有一個實際送出請求。
+    同一個學名同時被多個執行緒查詢時，只會有一個實際送出請求，其餘共用它的結果。
     """
     if not _initialized and not initialize_species_cache():
         log.error("學名快取系統初始化失敗，查詢功能無法使用。")
@@ -352,10 +381,7 @@ def lookup_species(name: str) -> SpeciesLookup:
     if not is_potential_species_name(normalized_name):
         return SpeciesLookup(STATUS_NOT_FOUND)
 
-    with _name_lock(normalized_name):
-        if cached := _cached_lookup(normalized_name):
-            return cached
-        return _fetch_and_cache(normalized_name)
+    return _single_flight_lookup(normalized_name)
 
 
 def lookup_species_name(name: str) -> str | None:

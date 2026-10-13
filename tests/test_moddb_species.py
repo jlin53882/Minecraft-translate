@@ -106,7 +106,7 @@ def _isolate_species_cache(monkeypatch):
     monkeypatch.setattr(species_cache, "_initialized", True)
     monkeypatch.setattr(species_cache, "_species_cache_data", {})
     monkeypatch.setattr(species_cache, "_CACHE_FILE", None)
-    monkeypatch.setattr(species_cache, "_name_locks", {})
+    monkeypatch.setattr(species_cache, "_in_flight", {})
     return species_cache
 
 
@@ -743,5 +743,114 @@ def test_query_all_button_turns_grey_when_disabled(tmp_path, monkeypatch):
             != style.bgcolor[ft.ControlState.DEFAULT]
         )
         assert ft.ControlState.DISABLED in style.color
+    finally:
+        db.close()
+
+
+# ---------------------------------------------------------------- 審查回歸
+def test_species_quality_filter_matches_between_list_and_batch_replace(tmp_path):
+    from translation_tool.translation_db import EntryFilter, QualityFilter
+
+    db = TranslationDB(tmp_path / "mod.db")
+    try:
+        db.ingest(
+            "1.21.1",
+            [
+                ScanItem(
+                    KIND_LANG, "m", "block.m.olive.latin", "Olea europaea", "橄欖"
+                ),
+                ScanItem(KIND_LANG, "m", "misc.mint", "Mentha × piperita", "橄欖薄荷"),
+                ScanItem(KIND_LANG, "m", "misc.olive", "Olea europaea", "橄欖"),
+                ScanItem(KIND_LANG, "m", "gui.energy", "Energy usage", "橄欖"),
+            ],
+        )
+        criteria = EntryFilter(
+            version="1.21.1", quality=QualityFilter(status="species_name")
+        )
+        rows, total = db.list_entries(criteria=criteria, limit=None)
+        plan = db.preview_batch_replace(criteria, "橄欖", "油橄欖")
+    finally:
+        db.close()
+    assert total == 2
+    assert len(plan.changes) == total
+    assert {change.entry_id for change in plan.changes} == {row.id for row in rows}
+
+
+@pytest.mark.parametrize(
+    "value",
+    [" Olea europaea", "Olea\teuropaea", "Olea  europaea", "Olea　europaea"],
+)
+def test_species_format_prefilter_keeps_whitespace_variants(tmp_path, value):
+    from translation_tool.translation_db import EntryFilter, QualityFilter
+
+    db = TranslationDB(tmp_path / "mod.db")
+    try:
+        db.ingest("1.21.1", [ScanItem(KIND_LANG, "m", "misc.a", value)])
+        criteria = EntryFilter(
+            version="1.21.1", quality=QualityFilter(status="species_format")
+        )
+        _rows, total = db.list_entries(criteria=criteria, limit=None)
+    finally:
+        db.close()
+    assert moddb_species_service.is_potential_species_name(value)
+    assert total == 1
+
+
+@pytest.mark.parametrize(
+    ("raised", "status"),
+    [
+        (None, species_cache.STATUS_NOT_FOUND),
+        (_http_error(429), species_cache.STATUS_RATE_LIMITED),
+        (requests.Timeout(), species_cache.STATUS_ERROR),
+    ],
+)
+def test_concurrent_lookups_share_not_found_and_failures(
+    isolated_species_cache, monkeypatch, raised, status
+):
+    calls = []
+    release = threading.Event()
+
+    def slow_fetch(name):
+        calls.append(name)
+        release.wait(2)
+        if raised is not None:
+            raise raised
+
+    monkeypatch.setattr(species_cache, "_query_wikipedia_title", slow_fetch)
+    results = []
+    threads = [
+        threading.Thread(
+            target=lambda: results.append(species_cache.lookup_species("Olea europaea"))
+        )
+        for _ in range(4)
+    ]
+    for thread in threads:
+        thread.start()
+    while not calls:
+        threading.Event().wait(0.01)
+    threading.Event().wait(0.1)  # 讓其他執行緒進入等待
+    release.set()
+    for thread in threads:
+        thread.join(5)
+
+    assert len(calls) == 1
+    assert [r.status for r in results] == [status] * 4
+    # 暫時失敗與查無都不持久保存：之後再查會重新連線
+    assert species_cache.cached_species_lookup("Olea europaea") is None
+    species_cache.lookup_species("Olea europaea")
+    assert len(calls) == 2
+
+
+def test_open_species_entry_redraws_page(tmp_path):
+    db = _seed(tmp_path / "mod.db")
+    try:
+        page = mock_page()
+        panel = EntriesPanel(page, lambda: db)
+        panel.refresh()
+        entry_id = panel.rows[1].id
+        before = page.updated
+        panel.open_species_entry(entry_id)
+        assert page.updated > before
+        assert panel.selected.id == entry_id
     finally:
         db.close()

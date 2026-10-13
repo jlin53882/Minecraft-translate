@@ -974,8 +974,10 @@ class TranslationDB(BulkReviewMixin):
             )
             return f"e.en_us <> '' AND ({key_hint} OR {marker})"
         if status == "species_format":
-            # 只看格式：首字大寫、含空白；正規表示式由 Python 做最終判斷。
-            return "e.en_us GLOB '[A-Z][a-z]*' AND instr(e.en_us, ' ') > 0"
+            # 超集預篩：去掉前後空白後首字大寫、第二字是小寫或連字號，且中間有任何
+            # 空白字元（Python 會把各種空白正規化成單一空格）；正規表示式由 Python 判斷。
+            ws = _BATCH_REPLACE_STRIP_CHARS
+            return f"trim(e.en_us, '{ws}') GLOB '[A-Z][a-z-]*[{ws}]*'"
         if status == "missing_translation":
             return "e.en_us <> '' AND (f.zh_tw IS NULL OR f.zh_tw = '')"
         if status == "whitespace":
@@ -1285,7 +1287,7 @@ class TranslationDB(BulkReviewMixin):
         quality = criteria.quality
         source = self._query_source()
         narrow = (
-            f"SELECT e.id, e.en_us, f.zh_tw {source} "
+            f"SELECT e.id, e.en_us, f.zh_tw, e.key {source} "
             f"WHERE ({cond}) AND {self._quality_prefilter_sql(quality)}"
         )
         matched_ids: list[int] = []
@@ -1299,7 +1301,7 @@ class TranslationDB(BulkReviewMixin):
                 matched_ids.extend(
                     int(row[0])
                     for row in chunk
-                    if matches_quality(row[1] or "", row[2] or "", quality)
+                    if matches_quality(row[1] or "", row[2] or "", quality, row[3])
                 )
                 if progress_callback is not None:
                     progress_callback(f"檢查品質條件（已檢查 {scanned:,} 筆）", 0.05)
