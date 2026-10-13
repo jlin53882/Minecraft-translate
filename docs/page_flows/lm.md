@@ -88,7 +88,7 @@ flowchart TD
   - `lm_translator` 區段的 `batch_shrink_factor`、`min_batch_size`：批次縮小參數。
   - UI 日誌行數（`load_ui_logging_config` 的 `tail_lines`）。
 - 產出檔案：
-  - 輸出資料夾中的譯文 JSON；勾選「輸出 .lang」時，路徑含 `lang` 的來源檔另外輸出同名 `.lang`。另有 `translation_map.json`（逐筆對照紀錄）。
+  - 輸出資料夾中的譯文 JSON；`lang/en_us.json` 寫成同資料夾的 `zh_tw.json`，Patchouli 書的 `patchouli_books/<書>/en_us/…` 寫進同書的 `zh_tw/…`（`translation_path_writer.map_lang_output_path`）；勾選「輸出 .lang」時，路徑含 `lang` 的來源檔另外輸出同名 `.lang`。另有 `translation_map.json`（逐筆對照紀錄）。
   - 翻譯快取（`translation_tool/utils/cache_manager.py`）：譯文一律寫入；`write_new_cache` 決定寫入方式：關閉時寫入編號分片，開啟時每批另存成獨立的時間戳分片。
   - Checkpoint：`get_data_root()/logs/translation_checkpoint.json`。只有 `translator.enable_cache_saving`（預設開啟）為真時才寫入；整批 `DONE` 且處理完畢才清除，中斷時保留供續跑使用。
   - Mod 資料庫寫回（`translation_tool/core/lm_translator_db.py` 的 `flush_write_back`）。

@@ -286,3 +286,37 @@ class TestTranslationPathWriterIntegration:
             src = Path(input_path)
             result = map_lang_output_path(src)
             assert result == src, f"Should not change for {input_path}"
+
+
+class TestPatchouliOutputPathMapping:
+    """Patchouli 書的譯文要寫進 zh_tw 語系資料夾，不能留在 en_us。"""
+
+    def test_book_entry_maps_en_us_folder_to_zh_tw(self):
+        from translation_tool.core.translation_path_writer import map_lang_output_path
+
+        src = Path(
+            "assets/laserio/patchouli_books/laseriobook/en_us/entries/modes.json"
+        )
+        assert map_lang_output_path(src) == Path(
+            "assets/laserio/patchouli_books/laseriobook/zh_tw/entries/modes.json"
+        )
+
+    def test_locale_folder_match_ignores_case(self):
+        from translation_tool.core.translation_path_writer import map_lang_output_path
+
+        src = Path("assets/m/patchouli_books/b/EN_US/categories/c.json")
+        assert map_lang_output_path(src).parts[4] == "zh_tw"
+
+    def test_other_locale_folders_stay(self):
+        from translation_tool.core.translation_path_writer import map_lang_output_path
+
+        src = Path("assets/m/patchouli_books/b/zh_cn/entries/e.json")
+        assert map_lang_output_path(src) == src
+
+    def test_en_us_folder_outside_the_locale_slot_stays(self):
+        from translation_tool.core.translation_path_writer import map_lang_output_path
+
+        src = Path("assets/m/patchouli_books/en_us/entries/e.json")
+        assert map_lang_output_path(src) == src
+        src = Path("assets/m/patchouli_books/b/entries/en_us/e.json")
+        assert map_lang_output_path(src) == src

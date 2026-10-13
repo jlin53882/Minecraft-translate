@@ -137,7 +137,7 @@ def test_db_hit_then_cache_then_ai_and_output_is_correct(run_env, tmp_path):
             / "foo"
             / "patchouli_books"
             / "guide"
-            / "en_us"
+            / "zh_tw"
             / "entries"
             / "intro.json"
         ).read_text(encoding="utf-8")
@@ -200,7 +200,7 @@ def test_explicit_database_snapshot_survives_global_path_change(run_env, tmp_pat
             / "foo"
             / "patchouli_books"
             / "guide"
-            / "en_us"
+            / "zh_tw"
             / "entries"
             / "intro.json"
         ).read_text(encoding="utf-8")

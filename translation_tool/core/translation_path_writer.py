@@ -10,9 +10,19 @@ from pathlib import Path
 
 
 def map_lang_output_path(src: Path) -> Path:
-    """根據來源路徑自動判定翻譯輸出的目標路徑（例如將 en_us.json 映射至 zh_tw.json）。"""
+    """根據來源路徑自動判定翻譯輸出的目標路徑。
+
+    - ``…/lang/en_us.json`` → ``…/lang/zh_tw.json``
+    - ``…/patchouli_books/<書>/en_us/…`` → ``…/patchouli_books/<書>/zh_tw/…``
+    """
     if src.name.lower() == "en_us.json" and "lang" in src.parts:
         return src.with_name("zh_tw.json")
+    parts = list(src.parts)
+    if "patchouli_books" in parts:
+        locale_index = parts.index("patchouli_books") + 2  # 其後依序是書名、語系資料夾
+        if locale_index < len(parts) - 1 and parts[locale_index].lower() == "en_us":
+            parts[locale_index] = "zh_tw"
+            return Path(*parts)
     return src
 
 
