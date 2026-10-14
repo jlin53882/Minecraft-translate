@@ -347,6 +347,9 @@ def _aligned_blocks(
     """譯文區塊數和原文相同才逐段對應；不同代表指南改版後譯文沒跟上，不匯入以免錯位。"""
     if other is None or en is None:
         return other
+    if len(en) == 1 and len(other) > 1:
+        # 原文整頁只有一個區塊（沒有空行分段）、譯文有分段：整頁對整頁
+        return ["\n\n".join(other)]
     if len(other) != len(en):
         log_info(
             f"[ModDB] 指南譯文的段落數與原文不同（{len(en)} / {len(other)}），不匯入譯文：{member}"

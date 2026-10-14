@@ -411,3 +411,17 @@ def test_mdx_guides_are_imported_like_markdown(tmp_path):
     assert [i.en_us for i in result.items] == [
         "The Scale Module can be placed in the upgrade slots of a device."
     ]
+
+
+def test_single_block_source_is_paired_with_the_whole_translated_page(tmp_path):
+    jar = _jar(
+        tmp_path / "m.jar",
+        {
+            "assets/m/manual/en_us/a.txt": "Line one of the page.\nLine two of the page.\n",
+            "assets/m/manual/zh_cn/a.txt": "第一行。\n\n第二行。\n",
+        },
+    )
+    result = scan_jar(jar, ScanOptions(version="1.21.1"), dir_names=("manual",))
+    assert [(i.en_us, i.zh_cn) for i in result.items] == [
+        ("Line one of the page.\nLine two of the page.", "第一行。\n\n第二行。")
+    ]
