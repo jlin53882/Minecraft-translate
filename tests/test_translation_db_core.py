@@ -2416,6 +2416,7 @@ def test_schema_v6_moves_only_review_created_manual_rows_back(tmp_path):
             item(key="k.hand", tw="手改文"),
             item(key="k.nohist", tw="無紀錄文"),
             item(key="k.edited", tw="來源文"),
+            item(key="k.batch", tw="批次文"),
         ],
     )
     rows = {row.key: row for row in old.list_entries("1.21.1")[0]}
@@ -2433,6 +2434,7 @@ def test_schema_v6_moves_only_review_created_manual_rows_back(tmp_path):
         "k.hand": "手改文",
         "k.nohist": "無紀錄文",
         "k.edited": "人工改過",
+        "k.batch": "批次文",
     }
     for key, text in manual_text.items():
         conn.execute(
@@ -2440,16 +2442,33 @@ def test_schema_v6_moves_only_review_created_manual_rows_back(tmp_path):
             "VALUES (?,?,?,?, 'reviewed')",
             (rows[key].id, SRC_MANUAL, text, "reviewer"),
         )
-    for key, action, prev in (
-        ("k.same", "review", None),
-        ("k.hand", "manual", None),
-        ("k.hand", "review", None),
-        ("k.edited", "review", None),
+    revisions = {
+        key: conn.execute(
+            "SELECT revision FROM translation WHERE entry_id=? AND source=?",
+            (rows[key].id, SRC_MANUAL),
+        ).fetchone()[0]
+        for key in manual_text
+    }
+    for key, action in (
+        ("k.same", "review"),
+        ("k.hand", "manual"),
+        ("k.hand", "review"),
+        ("k.batch", "review"),
+        ("k.batch", "batch_replace"),
+        ("k.edited", "review"),
     ):
         conn.execute(
             "INSERT INTO history (entry_id, batch, actor, action, old_zh_tw, "
-            "new_zh_tw, prev_manual) VALUES (?,?,?,?,?,?,?)",
-            (rows[key].id, "b", "reviewer", action, "", manual_text[key], prev),
+            "new_zh_tw, prev_manual, new_revision) VALUES (?,?,?,?,?,?,NULL,?)",
+            (
+                rows[key].id,
+                "b",
+                "reviewer",
+                action,
+                "",
+                manual_text[key],
+                revisions[key],
+            ),
         )
     conn.execute("UPDATE meta SET value='5' WHERE key='schema_version'")
     conn.commit()
@@ -2467,8 +2486,8 @@ def test_schema_v6_moves_only_review_created_manual_rows_back(tmp_path):
         for t in db.entry_detail(by_key["k.same"].id).translations
     )
     assert db.entry_detail(by_key["k.same"].id).history[0].action == "review_migrate"
-    # 手動儲存過、沒有紀錄、文字不同：維持人工來源
-    for key in ("k.hand", "k.nohist", "k.edited"):
+    # 手動儲存過、批次取代過、沒有紀錄、文字不同：維持人工來源
+    for key in ("k.hand", "k.nohist", "k.edited", "k.batch"):
         assert (by_key[key].source, by_key[key].review_status) == (
             SRC_MANUAL,
             "reviewed",

@@ -560,3 +560,21 @@ def test_exhausted_sniff_budget_keeps_only_files_that_were_verified(
     keys = {i.key.split("#")[0] for i in result.items}
     assert "docs/config.json" not in keys
     assert not result.error
+
+
+def test_one_folder_can_hold_both_a_book_and_an_advancement(tmp_path):
+    book = '{"name": "Intro", "pages": [{"type": "text", "text": "Some page text."}]}'
+    advancement = (
+        '{"display": {"title": "Welcome Aboard", "description": "Open the book."},'
+        ' "criteria": {"x": {"trigger": "minecraft:impossible"}}}'
+    )
+    jar = _jar(
+        tmp_path / "m.jar",
+        {
+            "assets/m/docs/en_us/entries/pages.json": book,
+            "assets/m/docs/en_us/entries/welcome.json": advancement,
+        },
+    )
+    result = scan_jar(jar, ScanOptions(version="1.21.1"), dir_names=())
+    kinds = {i.kind for i in result.items}
+    assert {"patchouli", "advancement"} <= kinds

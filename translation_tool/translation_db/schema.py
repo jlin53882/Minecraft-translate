@@ -457,8 +457,8 @@ def _migrate_independent_review_v6(conn: sqlite3.Connection) -> None:
     source. Now review is a flag on the row that wins, so a reviewed manual row
     whose text equals another source's text is folded back: that source's row is
     marked reviewed and the manual row is removed. Equal text alone is not proof,
-    so only rows that history shows were created by a review (and never saved by
-    hand) are folded; hand-edited or unverifiable rows stay manual, already
+    so only rows whose entire history is a single review that wrote the row's
+    current revision are folded; hand-edited or unverifiable rows stay manual, already
     reviewed. The target source follows the user's saved priority.
     """
     if "review_status" not in {
@@ -481,10 +481,13 @@ def _migrate_independent_review_v6(conn: sqlite3.Connection) -> None:
         "WHERE m.source=? AND m.review_status='reviewed' "
         # 只有「由審核建立」的人工列才能確定是同一份文字：從沒手動儲存過，
         # 且有一筆審核紀錄當時還沒有人工列
+        # 這個條目的歷史只能有審核（任何其他操作都可能改寫過人工列），而且
+        # 審核寫入時的版本就是人工列現在的版本（之後沒有被動過）
         "AND NOT EXISTS (SELECT 1 FROM history h "
-        "WHERE h.entry_id=m.entry_id AND h.action='manual') "
+        "WHERE h.entry_id=m.entry_id AND h.action<>'review') "
         "AND EXISTS (SELECT 1 FROM history h WHERE h.entry_id=m.entry_id "
-        "AND h.action='review' AND h.new_zh_tw=m.zh_tw AND h.prev_manual IS NULL)",
+        "AND h.action='review' AND h.new_zh_tw=m.zh_tw AND h.prev_manual IS NULL "
+        "AND h.new_revision=m.revision)",
         (SRC_MANUAL, SRC_MANUAL),
     ):
         matches.setdefault(manual_id, []).append(

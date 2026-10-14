@@ -161,11 +161,12 @@ def sniffed_groups(
                     own = _kind_of(zf, budget, _primary(members, translated))
                 except ArchiveBudgetError:
                     break  # 預算用盡：沒驗證過的檔案不收，保留已驗證的
-                if own != kind:
-                    continue
-                if kind == KIND_ADVANCEMENT:
+                if own is None:
+                    continue  # 設定檔、中繼資料不收
+                kind_of_file = own  # 同一資料夾可以同時有手冊與進度，各自分類
+                if kind_of_file == KIND_ADVANCEMENT:
                     neutral = _drop_advancement_root(neutral)
-                groups[(kind, mod_id, neutral)] = members
+                groups[(kind_of_file, mod_id, neutral)] = members
     except (ZipSizeError, ArchiveBudgetError):
         pass  # 預算用盡：保留已判斷的結果，不影響其他匯入
     return groups
