@@ -126,6 +126,21 @@ def test_items_removed_or_marked_false_in_the_report_are_kept(tmp_path):
     assert db.preview_cleanup(report_path).deletable == 3
 
 
+def test_only_an_explicit_true_delete_flag_deletes(tmp_path):
+    db = _db(tmp_path)
+    report_path = tmp_path / "r.json"
+    db.export_cleanup_report(VERSION, report_path)
+    data = json.loads(report_path.read_text(encoding="utf-8"))
+    data["items"][0]["delete"] = "false"
+    data["items"][1]["delete"] = 0
+    del data["items"][2]["delete"]
+    report_path.write_text(json.dumps(data), encoding="utf-8")
+    plan = db.preview_cleanup(report_path)
+    assert plan.deletable == len(data["items"]) - 3
+    assert plan.skipped["delete 欄位不是 true／false"] == 3
+    assert plan.requested == len(data["items"])
+
+
 def test_apply_revalidates_each_item_against_current_data(tmp_path):
     db = _db(tmp_path)
     report_path = tmp_path / "r.json"

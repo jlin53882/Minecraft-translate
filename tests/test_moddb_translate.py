@@ -2251,6 +2251,20 @@ def test_shadowed_manual_save_keeps_unresolved_flagged_entry(db_path, monkeypatc
     assert panel.stat_flagged.value_text.value == "1"
 
 
+def test_manual_save_with_still_mismatched_tokens_keeps_flagged_entry(
+    db_path, monkeypatch
+):
+    """儲存成功、人工譯文也生效，但特殊字元仍與原文不一致：問題還在，不能移出待處理清單。"""
+    _, panel, entries, db, entry, _done, batch = _flagged_entry_saved_by_hand(
+        db_path, monkeypatch
+    )
+    done = db.save_manual(entry.id, "§a注入合金", actor="測試", propagate=False)
+    entries._apply_save_result(db, entry, "§a注入合金", done, None, batch)
+
+    assert entry.id in entries.entry_ids
+    assert panel.stat_flagged.value_text.value == "1"
+
+
 def test_late_save_does_not_touch_a_flagged_list_opened_after_it_started(
     db_path, monkeypatch
 ):

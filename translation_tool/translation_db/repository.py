@@ -2326,9 +2326,13 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
         """人工寫入新譯文後，其他來源上「已審核」且譯文不同的列退回未審核。
 
         已審核的列優先於未審核的人工譯文；不退回的話，手動儲存／批次取代成功寫入
-        卻不會生效。退回的狀態以 ``review_clear`` 記錄在同一個 batch，還原人工寫入時
+        卻不會生效。來源優先序本來就排在人工之前的來源不退回：退回也不會讓人工生效，
+        只會白白丟掉審核標記。退回的狀態以 ``review_clear`` 記錄在同一個 batch，還原人工寫入時
         一併復原（譯文與版本都沒變才復原）。
         """
+        manual_rank = conn.execute(
+            f"SELECT {rank_sql(self.priority, '?')}", (SRC_MANUAL,)
+        ).fetchone()[0]
         for entry_id, text in changes:
             for source, zh_tw, checker, revision in conn.execute(
                 "SELECT source, zh_tw, checker, revision FROM translation "
@@ -2336,6 +2340,12 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
                 "AND zh_tw<>?",
                 (entry_id, SRC_MANUAL, text),
             ).fetchall():
+                source_rank = conn.execute(
+                    f"SELECT {rank_sql(self.priority, '?')}", (source,)
+                ).fetchone()[0]
+                if source_rank < manual_rank:
+                    # 自訂優先序讓這個來源本來就排在人工之前：退回審核也換不到人工生效
+                    continue
                 # 有校驗者的列即使沒有狀態也會優先，所以明確標成未審核
                 cleared = "unreviewed" if checker else None
                 conn.execute(

@@ -2739,3 +2739,28 @@ def test_batch_replace_reports_entries_shadowed_by_custom_priority(db):
     plan = db.preview_batch_replace(EntryFilter(version="1.21.1"), "下界", "冥界")
     result = db.execute_batch_replace(plan)
     assert (result.updated, result.shadowed) == (2, 0)
+
+
+def test_manual_save_keeps_review_of_source_that_outranks_manual(db):
+    from translation_tool.translation_db.schema import SRC_JAR_TW
+
+    db.ingest("1.21.1", [ScanItem(KIND_LANG, "foo", "k", "Hell", "甲", source=SRC_AI)])
+    entry = db.list_entries("1.21.1")[0][0]
+    db.set_priority((SRC_AI, SRC_MANUAL, SRC_JAR_TW))
+    db._conn.execute(
+        "UPDATE translation SET review_status='reviewed' WHERE entry_id=? AND source=?",
+        (entry.id, SRC_AI),
+    )
+    db._rebuild_effective(db._conn)
+    db._conn.commit()
+    assert db.get_entry(entry.id).review_status == "reviewed"
+
+    db.save_manual(entry.id, "乙", propagate=False)
+
+    row = db.get_entry(entry.id)
+    assert row.zh_tw == "甲" and row.source == SRC_AI
+    assert row.review_status == "reviewed"  # 退回也換不到人工生效，不丟審核標記
+
+    db.set_priority((SRC_MANUAL, SRC_AI, SRC_JAR_TW))
+    db.save_manual(entry.id, "丙", propagate=False)
+    assert db.get_entry(entry.id).zh_tw == "丙"

@@ -279,14 +279,22 @@ class CleanupMixin:
         version = str(data["version"])
         plan = CleanupPlan(version=version)
         wanted: dict[int, dict[str, Any]] = {}
+        invalid_delete = 0
         for item in data["items"]:
             if not isinstance(item, dict) or item.get("delete") is False:
+                continue
+            if item.get("delete") is not True:
+                invalid_delete += (
+                    1  # 只有明確的 true 才刪；缺欄位或字串 "false" 一律略過
+                )
                 continue
             try:
                 wanted[int(item["id"])] = item
             except (KeyError, TypeError, ValueError):
                 plan.skipped["項目格式錯誤"] += 1
-        plan.requested = len(wanted) + plan.skipped["項目格式錯誤"]
+        if invalid_delete:
+            plan.skipped["delete 欄位不是 true／false"] += invalid_delete
+        plan.requested = len(wanted) + plan.skipped["項目格式錯誤"] + invalid_delete
         rows: dict[int, tuple] = {}
         ids = list(wanted)
         for chunk in _chunks(ids):

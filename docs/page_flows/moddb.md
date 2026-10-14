@@ -69,7 +69,7 @@ flowchart TD
     F --> G{"有錯誤？"}
     G -- 是 --> H["依 validation、database、unexpected 分類顯示提示"]
     G -- 否 --> I{"self.db() 仍是同一個物件？"}
-    I -- 是 --> J["_resolve_flagged：batch 與條目編號皆相符才移出 AI 異常清單"]
+    I -- 是 --> J["_resolve_flagged：新譯文已生效、與原文特殊字元一致，且 batch 與條目編號皆相符才移出 AI 異常清單"]
     J --> K["保留捲動重載清單，並通知 ModDbView._on_entries_changed"]
     I -- 否 --> L["僅顯示結果，不改動畫面狀態"]
 ```
