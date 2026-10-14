@@ -473,7 +473,7 @@ SETTINGS: tuple[Setting, ...] = (
         "短字串略過長度",
         "translation_behavior",
         C_LM_FILTER,
-        "lang 值 ≤ 此長度且無空白時不翻譯（0 = 不略過，例如 Axe、Ore 也會翻）",
+        "lang 值 ≤ 此長度且無空白時不翻譯（0 = 不略過）；All、Off、Yes 這類大寫開頭的短單字與 on／off／ok／no／yes 一律會翻",
         default=3,
         weight=2,
         minimum=0,

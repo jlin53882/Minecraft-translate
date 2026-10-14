@@ -707,6 +707,10 @@ def build_skip_terms_pattern(terms: list[str]) -> re.Pattern:
 _RULES_CACHE: dict = {"config": None, "rules": None}
 
 
+# 短但是真的 UI 單字（All／Off／Yes／Red）：大寫開頭的 2～3 字母單字，或 on／off／ok／no／yes
+_SHORT_UI_WORD = re.compile(r"[A-Z][a-z]{1,2}|(?i:on|off|ok|no|yes)")
+
+
 def _short_text_skip_len() -> int:
     return _translator_rules()[2]
 
@@ -762,7 +766,12 @@ def is_value_translatable(value: Any, *, is_lang: bool = False) -> bool:
 
     # 太短且無空白，通常不是顯示文字（長度門檻可在設定調整；0 = 不略過，
     # 例如 Axe / Ore / Rod 這類短名稱也會送翻譯）
-    if is_lang and len(s) <= _short_text_skip_len() and " " not in s:
+    if (
+        is_lang
+        and len(s) <= _short_text_skip_len()
+        and " " not in s
+        and not _SHORT_UI_WORD.fullmatch(s)
+    ):
         return False
 
         # 避開 #...（#heading、#title）

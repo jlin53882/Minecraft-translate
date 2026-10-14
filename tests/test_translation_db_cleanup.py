@@ -200,3 +200,30 @@ def test_overview_counts_per_kind_and_category_without_deleting(tmp_path):
     assert protected == 1
     assert _count(db) == before
     assert svc.cleanup_overview(db, "9.9.9") == ({}, 0)
+
+
+def test_lang_metadata_and_code_values_are_cleanup_candidates():
+    for key, value, expected in (
+        ("_comment0", "Note to translators: DO NOT COPY ENTRIES", "meta_key"),
+        ("language.code", "en_us", "meta_key"),
+        ("biome.x.color", "AAC4D2", "code_value"),
+        ("item.m.oil.tooltip", "SEED_OIL_BUCKET", "code_value"),
+        ("painting.m.aztec.title", "de_aztec", "code_value"),
+        ("link", "https://bugs.mojang.com/browse/MC-1", "code_value"),
+    ):
+        assert entry_cleanup_category("lang", key, value) == expected, key
+    for key, value in (
+        ("item.m.a", "Seed Oil Bucket"),
+        ("gui.m.mode", "Off"),
+        ("biome.x.note", "Color: AAC4D2 is shown"),
+    ):
+        assert entry_cleanup_category("lang", key, value) is None, key
+
+
+def test_short_ui_words_are_translatable_but_acronyms_are_not():
+    from translation_tool.core.lm_config_rules import is_value_translatable
+
+    for word in ("All", "Off", "Yes", "Red", "no", "Top"):
+        assert is_value_translatable(word, is_lang=True), word
+    for word in ("NBT", "XP", "ab"):
+        assert not is_value_translatable(word, is_lang=True), word

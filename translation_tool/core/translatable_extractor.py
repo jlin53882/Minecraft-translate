@@ -17,6 +17,7 @@ from translation_tool.core.lm_config_rules import (
 from translation_tool.core.text_sniffer import (
     VANILLA_NON_TEXT_DIRS,
     classify_book_string,
+    lang_non_text_reason,
     looks_like_book_json,
 )
 from translation_tool.utils.config_manager import load_config
@@ -149,7 +150,10 @@ def extract_translatables(json_data, file_path):
 
                 if is_lang and isinstance(v, str):
                     if base_path == "":
-                        if is_value_translatable(v, is_lang=True):
+                        if (
+                            is_value_translatable(v, is_lang=True)
+                            and lang_non_text_reason(k, v) is None
+                        ):
                             items.append(
                                 {
                                     "file": str(file_path),

@@ -22,7 +22,11 @@ from pathlib import Path
 from typing import Any
 
 from translation_tool.core.guide_blocks import NON_TEXT_REASONS, non_text_reason
-from translation_tool.core.text_sniffer import classify_book_string, is_placeholder_text
+from translation_tool.core.text_sniffer import (
+    classify_book_string,
+    is_placeholder_text,
+    lang_non_text_reason,
+)
 from translation_tool.translation_db.schema import (
     KIND_ADVANCEMENT,
     KIND_GUIDE,
@@ -47,6 +51,8 @@ CLEANUP_CATEGORIES: dict[str, str] = {
     "not_text": "手冊中不是顯示文字的字串",
     "no_letters": "沒有文字的字串（只有符號或數字，不含格式碼）",
     "field_name": "內容就是欄位名稱（佔位字）",
+    "meta_key": "語言檔的翻譯者備註、語言代碼",
+    "code_value": "語言檔裡的色碼、識別字、常數或網址",
 }
 _CLEANUP_KINDS = (KIND_GUIDE, KIND_PATCHOULI, KIND_ADVANCEMENT, KIND_LANG)
 
@@ -76,6 +82,8 @@ def entry_cleanup_category(kind: str, key: str, en_us: str) -> str | None:
         # 語言檔與進度只用不看內容語意的保守規則（小寫單字如 ``on``／``off`` 是正常譯文）
         if is_placeholder_text(en_us):
             return "placeholder"
+        if kind == KIND_LANG and (reason := lang_non_text_reason(key, en_us)):
+            return reason
         if not _has_real_letter(en_us) and not _FORMAT_TOKEN.search(en_us):
             return "no_letters"  # 含 %s 之類的格式碼要保留：中文語序可能不同，需要翻譯
         if kind == KIND_ADVANCEMENT and _is_field_name(key, en_us):

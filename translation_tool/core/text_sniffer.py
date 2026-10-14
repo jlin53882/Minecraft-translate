@@ -206,6 +206,29 @@ def is_project_doc_name(path: str) -> bool:
     )
 
 
+_LANG_META_KEYS = frozenset({"language.code", "language.region"})
+_COLOR_VALUE = re.compile(r"#?[0-9a-fA-F]{6}(?:[0-9a-fA-F]{2})?")
+_CONST_VALUE = re.compile(r"[A-Z0-9]+(?:_[A-Z0-9]+)+")
+_SNAKE_VALUE = re.compile(r"[a-z0-9]+(?:_[a-z0-9]+)+")
+_URL_VALUE = re.compile(r"https?://\S+")
+
+
+def lang_non_text_reason(key: str, value: str) -> str | None:
+    """語言檔條目不是顯示文字時回傳原因：翻譯者備註鍵、語言代碼、色碼、``SEED_OIL_BUCKET``、單獨網址。"""
+    text = value.strip()
+    if key.startswith("_") or key.lower() in _LANG_META_KEYS:
+        return "meta_key"
+    if key.lower().endswith((".color", ".hex", "_color")) and _COLOR_VALUE.fullmatch(
+        text
+    ):
+        return "code_value"
+    if any(
+        pattern.fullmatch(text) for pattern in (_CONST_VALUE, _SNAKE_VALUE, _URL_VALUE)
+    ):
+        return "code_value"
+    return None
+
+
 def _is_json_text(text: str) -> bool:
     """整份內容能被當成 JSON 讀進來；``[c=#fff]標題`` 這類以括號開頭的敘述文字不算。"""
     try:
