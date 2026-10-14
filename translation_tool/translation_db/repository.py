@@ -2439,6 +2439,18 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
                 and previous.get(int(row[0])) is not None
             ]
             if switch_only:
+                # 人工列沒有改文字，但要有新的版本：之後才不會被更早的歷史紀錄越過
+                switch_revisions: dict[int, int] = {}
+                for (eid, *_rest), _prev in switch_only:
+                    conn.execute(
+                        "UPDATE translation SET updated_at=CURRENT_TIMESTAMP "
+                        "WHERE entry_id=? AND source=?",
+                        (eid, SRC_MANUAL),
+                    )
+                    switch_revisions[int(eid)] = conn.execute(
+                        "SELECT revision FROM translation WHERE entry_id=? AND source=?",
+                        (eid, SRC_MANUAL),
+                    ).fetchone()[0]
                 history_only = [
                     (
                         eid,
@@ -2454,7 +2466,7 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
                         prev[1],
                         prev[2],
                         prev[3],
-                        prev[3],
+                        switch_revisions[int(eid)],
                     )
                     for (eid, _ver, old, _src), prev in switch_only
                 ]

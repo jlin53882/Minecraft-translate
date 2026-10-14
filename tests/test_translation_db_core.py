@@ -2666,3 +2666,54 @@ def test_saving_text_the_manual_row_already_has_switches_the_effective_source(db
     db.revert(history.id)
     back = db.get_entry(entry.id)
     assert (back.zh_tw, back.source, back.review_status) == ("甲", SRC_AI, "reviewed")
+
+
+def test_switch_only_save_cannot_be_bypassed_by_reverting_an_older_save(db):
+    from translation_tool.translation_db.schema import SRC_AI
+
+    db.ingest("1.21.1", [item(tw="來源譯文")])
+    entry = db.list_entries("1.21.1")[0][0]
+    db.write_back(
+        "1.21.1",
+        [WriteBackItem(KIND_LANG, "foo", entry.key, entry.en_us, "甲")],
+        source=SRC_AI,
+        fill_other_versions=False,
+    )
+    db.save_manual(entry.id, "乙", propagate=False)  # 較舊的手動儲存
+    older = next(h for h in db.entry_detail(entry.id).history if h.action == "manual")
+    # 之後 AI「甲」成為已審核且生效
+    db._conn.execute(
+        "UPDATE translation SET review_status='reviewed' WHERE entry_id=? AND source=?",
+        (entry.id, SRC_AI),
+    )
+    db._rebuild_effective(db._conn)
+    db._conn.commit()
+    assert db.get_entry(entry.id).source == SRC_AI
+    # 再儲存同一段「乙」：切換回人工
+    assert db.save_manual(entry.id, "乙", propagate=False)
+    assert db.get_entry(entry.id).source == SRC_MANUAL
+
+    # 更早的歷史紀錄不能越過這次切換
+    assert db.revert(older.id) == 0
+    now = db.get_entry(entry.id)
+    assert (now.zh_tw, now.source) == ("乙", SRC_MANUAL)
+
+
+def test_custom_priority_above_manual_still_wins_after_save(db):
+    from translation_tool.translation_db.schema import SRC_AI
+
+    db.ingest("1.21.1", [item(tw="來源譯文")])
+    entry = db.list_entries("1.21.1")[0][0]
+    db.write_back(
+        "1.21.1",
+        [WriteBackItem(KIND_LANG, "foo", entry.key, entry.en_us, "甲")],
+        source=SRC_AI,
+        fill_other_versions=False,
+    )
+    db.set_priority((SRC_AI, SRC_MANUAL, SRC_JAR_TW))
+    db.save_manual(entry.id, "乙", propagate=False)
+    shown = db.get_entry(entry.id)
+    # 使用者自訂的來源優先序高於人工：人工譯文已存入，但生效仍是 AI（畫面會提示）
+    assert (shown.zh_tw, shown.source) == ("甲", SRC_AI)
+    rows = {t.source: t.zh_tw for t in db.entry_detail(entry.id).translations}
+    assert rows[SRC_MANUAL] == "乙"

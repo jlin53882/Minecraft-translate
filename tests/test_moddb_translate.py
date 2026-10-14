@@ -2330,3 +2330,24 @@ def test_service_cache_save_uses_numbered_shard_unless_new_shard_requested(
     )
     run(TranslateOptions(version="1.21.1", mod_ids=("foo",), new_cache_shard=new_shard))
     assert saves and all(s["write_new_shard"] is new_shard for s in saves)
+
+
+def test_entries_panel_warns_when_custom_priority_keeps_another_source_effective(
+    db_path,
+):
+    from app.views.moddb import entries_panel
+    from translation_tool.translation_db.schema import SRC_JAR_TW
+
+    db = TranslationDB(db_path)
+    db.ingest(
+        "1.21.1",
+        [ScanItem(KIND_LANG, "foo", "k", "Hell", "地獄", source=SRC_AI)],
+    )
+    entry = db.list_entries("1.21.1")[0][0]
+    db.set_priority((SRC_AI, SRC_MANUAL, SRC_JAR_TW))
+    db.save_manual(entry.id, "下界", propagate=False)
+    shadow = entries_panel.EntriesPanel._shadowing_source(db, entry.id, "下界")
+    assert shadow and "AI" in shadow
+    db.set_priority((SRC_MANUAL, SRC_AI, SRC_JAR_TW))
+    assert entries_panel.EntriesPanel._shadowing_source(db, entry.id, "下界") is None
+    db.close()

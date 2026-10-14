@@ -15,6 +15,7 @@ import flet as ft
 from app.services_impl.moddb_format_diff_service import compare_format_diff
 from app.services_impl.moddb_guide_service import guide_mark_issues, is_guide_kind
 from app.services_impl.moddb_service import (
+    SRC_MANUAL,
     EntryDetail,
     EntryFilter,
     EntryRow,
@@ -909,7 +910,13 @@ class EntriesPanel(ft.Column):
             if others
             else "已儲存"
         )
-        show_snack(self._page, message, C.EM, text_color=C.ON_EM)
+        shadow = self._shadowing_source(db, entry.id, text)
+        if shadow:
+            # 自訂的來源優先序把別的來源排在人工之前：譯文已存進人工來源，但畫面仍是別的
+            message += f"；但目前來源優先序讓「{shadow}」的譯文仍然生效"
+            show_snack(self._page, message, C.GOLD)
+        else:
+            show_snack(self._page, message, C.EM, text_color=C.ON_EM)
         if self.db() is db:
             self._resolve_flagged(entry.id, flagged_batch)
             same_entry = self.selected is not None and self.selected.id == entry.id
@@ -924,6 +931,19 @@ class EntriesPanel(ft.Column):
                 self._on_changed()
         self._update_impact()
         self._safe_update()
+
+    @staticmethod
+    def _shadowing_source(db, entry_id: int, saved_text: str) -> str | None:
+        """儲存後生效的若不是剛存的人工譯文，回傳仍在生效的來源名稱。"""
+        try:
+            current = db.get_entry(entry_id)
+        except sqlite3.Error:
+            return None
+        if current is None or current.source in (None, SRC_MANUAL):
+            return None
+        if current.zh_tw == saved_text:
+            return None
+        return source_label(current.source, db.source_catalog)
 
     def _resolve_flagged(self, entry_id: int, flagged_batch: int) -> None:
         """機翻「特殊字元不一致」清單裡的條目已手動儲存：移出清單並通知機翻頁扣掉數量。
