@@ -32,10 +32,10 @@ STATE_TONES = {
     "ok": "dia",
 }
 KIND_LABELS = {
-    "lang": "語言檔",
+    "lang": "Lang 語言檔",
     "patchouli": "Patchouli 手冊",
-    "guide": "指南文字",
-    "advancement": "進度文字",
+    "guide": "Guide 指南文字",
+    "advancement": "Advancement 進度文字",
 }
 
 
