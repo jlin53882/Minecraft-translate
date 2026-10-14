@@ -21,7 +21,10 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-from translation_tool.core.guide_blocks import extract_guide_blocks
+from translation_tool.core.guide_blocks import (
+    extract_guide_blocks,
+    has_translatable_text,
+)
 from translation_tool.core.lang_merge_dict import contains_cjk
 from translation_tool.core.lm_config_rules import is_translatable_field
 from translation_tool.core.patchouli_compat import (
@@ -377,6 +380,8 @@ def _guide_items(
         source_text = en[index] if en is not None else ""
         if source_text and contains_cjk(source_text):
             continue  # 原文已是中文，不是要翻譯的內容
+        if source_text and not has_translatable_text(source_text):
+            continue  # 只有元件標籤，沒有敘述文字
         zh_tw = zh_cn = ""
         source = None
         if tw is not None:

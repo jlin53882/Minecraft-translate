@@ -16,6 +16,8 @@ from translation_tool.plugins.md.md_extract_qa import extract_blocks
 _FRONT_RULE = re.compile(r"^---\s*$")
 _NAV_KEY = re.compile(r"^(\s*)navigation:\s*$")
 _TITLE_LINE = re.compile(r"^(\s+title:\s*)(.*?)\s*$")
+_ANY_TAG = re.compile(r"<[^<>]*>")
+_LETTER = re.compile(r"[^\W\d_]")
 _YAML_SPECIAL = re.compile(r"""^[\[\]{}&*!|>'"%@`#-]|: | #""")
 
 
@@ -55,6 +57,13 @@ def _front_title(lines: Sequence[str]) -> tuple[int, str, str] | None:
                 value = value[1:-1]
             return (number, title.group(1), value) if value else None
     return None
+
+
+def has_translatable_text(text: str) -> bool:
+    """去掉所有 ``<…>`` 標籤後還有文字的才值得翻譯；只有元件標籤的區塊（如
+    ``<ImportStructure src="…"></ImportStructure>``）不是敘述文字。區塊序號不因此位移，
+    呼叫端略過這種區塊即可。"""
+    return _LETTER.search(_ANY_TAG.sub("", text)) is not None
 
 
 def extract_guide_blocks(text: str, name: str) -> list[GuideBlock]:

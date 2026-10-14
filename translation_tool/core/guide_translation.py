@@ -18,7 +18,11 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
-from translation_tool.core.guide_blocks import extract_guide_blocks, front_title_line
+from translation_tool.core.guide_blocks import (
+    extract_guide_blocks,
+    front_title_line,
+    has_translatable_text,
+)
 from translation_tool.core.guide_format import guide_issues
 from translation_tool.core.lang_merge_dict import contains_cjk
 from translation_tool.core.text_sniffer import (
@@ -110,6 +114,8 @@ def load_guide(path: GuidePath) -> tuple[dict, list[dict[str, Any]]]:
     for index, block in enumerate(blocks):
         if contains_cjk(block.text):
             continue  # 原文已是中文
+        if not has_translatable_text(block.text):
+            continue  # 只有元件標籤，沒有敘述文字
         shielded = shield_text(block.text)
         if shielded.skip_reason is not None:
             continue

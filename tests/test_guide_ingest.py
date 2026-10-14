@@ -205,3 +205,23 @@ def test_front_title_line_quotes_yaml_special_characters():
 
     assert front_title_line("  title: ", "能源儲存") == "  title: 能源儲存"
     assert front_title_line("  title: ", "能源: 儲存") == '  title: "能源: 儲存"'
+
+
+def test_tag_only_blocks_are_not_translatable_but_keep_block_indexes():
+    from translation_tool.core.guide_blocks import (
+        extract_guide_blocks,
+        has_translatable_text,
+    )
+
+    assert not has_translatable_text(
+        '<ImportStructure src="../structure/x.snbt"></ImportStructure>'
+    )
+    assert not has_translatable_text('<ItemImage id="x" scale="2" />')
+    assert has_translatable_text('<ItemLink id="ae2:x" /> is great')
+    text = (
+        "# Title\n\n"
+        '<ImportStructure src="../s.snbt"></ImportStructure>\n\n'
+        "Real paragraph of English text here.\n"
+    )
+    blocks = extract_guide_blocks(text, "a.md")
+    assert [has_translatable_text(b.text) for b in blocks] == [True, False, True]
