@@ -6,7 +6,6 @@
 
 from __future__ import annotations
 
-import os
 import sqlite3
 from pathlib import Path
 
@@ -249,12 +248,12 @@ class CleanupDialog:
         db = self.get_db()
         if db is None:
             return
-        folder = svc.cleanup_report_dir(db)
-        try:
-            folder.mkdir(parents=True, exist_ok=True)
-            os.startfile(folder)
-        except (OSError, AttributeError) as exc:
-            show_snack(self.page, f"無法開啟資料夾：{folder}（{exc}）", C.GOLD)
+        if not svc.open_report_folder(db):
+            show_snack(
+                self.page,
+                f"無法開啟資料夾：{svc.cleanup_report_dir(db)}",
+                C.GOLD,
+            )
 
     # ------------------------------------------------------------------ 預覽與刪除
     def _selected_report(self) -> Path | None:

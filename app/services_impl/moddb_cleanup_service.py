@@ -9,6 +9,7 @@ from __future__ import annotations
 import time
 from pathlib import Path
 
+from app.services_impl.pipelines.extract_service import open_output_folder
 from translation_tool.translation_db import (
     CLEANUP_CATEGORIES,
     CleanupBatchInfo,
@@ -27,6 +28,7 @@ __all__ = [
     "export_cleanup",
     "last_cleanup_batch",
     "list_cleanup_reports",
+    "open_report_folder",
     "preview_cleanup",
     "revert_cleanup",
 ]
@@ -68,3 +70,13 @@ def last_cleanup_batch(db: TranslationDB) -> CleanupBatchInfo | None:
 
 def revert_cleanup(db: TranslationDB, batch_id: str) -> tuple[int, int]:
     return db.revert_cleanup(batch_id)
+
+
+def open_report_folder(db: TranslationDB) -> bool:
+    """用檔案管理員開啟檢查檔資料夾（資料夾不存在時先建立；不等待外部程式）。"""
+    folder = cleanup_report_dir(db)
+    try:
+        folder.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        return False
+    return open_output_folder(str(folder))
