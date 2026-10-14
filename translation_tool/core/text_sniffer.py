@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
@@ -192,7 +193,7 @@ VANILLA_NON_TEXT_DIRS = frozenset(
 
 # 給開發者／玩家說明專案本身的文件，不是遊戲內顯示的文字
 _PROJECT_DOC_STEM = re.compile(
-    r"(?:^|[_\-\d])(readme|changelog|license|licence|credits|notice|contributing)$",
+    r"(?:^|[_\-\d])(?:(?:readme)(?:[_\-].*)?|changelog|license|licence|credits|notice|contributing)$",
     re.IGNORECASE,
 )
 
@@ -203,6 +204,15 @@ def is_project_doc_name(path: str) -> bool:
     return any(
         _PROJECT_DOC_STEM.search(piece) for piece in base.split(".")[:-1] or [base]
     )
+
+
+def _is_json_text(text: str) -> bool:
+    """整份內容能被當成 JSON 讀進來；``[c=#fff]標題`` 這類以括號開頭的敘述文字不算。"""
+    try:
+        json.loads(text)
+    except ValueError:
+        return False
+    return True
 
 
 def sniff_text_file(text: str, suffix: str, name: str = "") -> str | None:
@@ -218,7 +228,9 @@ def sniff_text_file(text: str, suffix: str, name: str = "") -> str | None:
         if len(parts) > 3 and parts[2].lower() in VANILLA_NON_TEXT_DIRS:
             return None
     stripped = text.lstrip(BOM_AND_SPACE)
-    if stripped[:1] in ("{", "["):  # 副檔名是 .txt 的 JSON 資料
+    if stripped[:1] in ("{", "[") and _is_json_text(
+        stripped
+    ):  # 副檔名是 .txt 的 JSON 資料
         return None
     if suffix == ".md":
         meta, body = markdown_front_matter(text)

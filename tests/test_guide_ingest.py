@@ -293,3 +293,45 @@ def test_key_value_ignores_explanations_and_code_examples():
     assert not has_translatable_text(
         "ShouldSpawn: true\nSpawnBiomes: Jungle; Jungle Hills;\nSpawnWeight: 12"
     )
+
+
+def test_text_starting_with_a_bracket_is_not_mistaken_for_json():
+    from translation_tool.core.text_sniffer import sniff_text_file
+
+    story = "\n\nOnce upon a time there was a long story told right here."
+    assert sniff_text_file("[c=#2dba69]The Coral Chant" + story, ".txt") == "text"
+    assert sniff_text_file("{b}XNet Manual" + story, ".txt") == "text"
+    assert (
+        sniff_text_file('["a long enough string value for the sniffer"]', ".txt")
+        is None
+    )
+
+
+def test_horizontal_rule_inside_a_guide_is_not_front_matter():
+    from translation_tool.core.guide_blocks import extract_guide_blocks
+
+    text = "# T\n\nFirst paragraph.\n\n---\n\nSecond paragraph.\n\nThird one.\n"
+    assert [b.text for b in extract_guide_blocks(text, "a.md")][1:] == [
+        "First paragraph.",
+        "Second paragraph.",
+        "Third one.",
+    ]
+
+
+def test_readme_with_a_suffix_is_a_project_doc():
+    from translation_tool.core.text_sniffer import is_project_doc_name
+
+    assert is_project_doc_name("x/examples/README_Browser_Actions.md")
+    assert not is_project_doc_name("x/guide/notice_board.md")
+
+
+def test_lang_file_with_uppercase_name_loses_the_tie_to_the_lowercase_one(tmp_path):
+    jar = _jar(
+        tmp_path / "m.jar",
+        {
+            "assets/m/lang/en_US.json": '{"a": "Fewer items"}',
+            "assets/m/lang/en_us.json": '{"a": "Fewer items", "b": "More items"}',
+        },
+    )
+    result = scan_jar(jar, ScanOptions(version="1.21.1"))
+    assert sorted(i.key for i in result.items) == ["a", "b"]

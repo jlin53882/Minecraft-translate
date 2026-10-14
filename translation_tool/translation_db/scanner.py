@@ -254,8 +254,10 @@ def extract_all_strings(data: Any, *, is_lang: bool) -> dict[str, str]:
 
 def _lang_rank(member: str) -> int:
     """同一個語系有多個檔案時的取捨：新式 JSON 優先於舊式 ``.lang``，``assets`` 優先於 ``data``。"""
-    return (2 if member.lower().endswith(".lang") else 0) + (
-        1 if member.startswith("data/") else 0
+    return (
+        (4 if member.lower().endswith(".lang") else 0)
+        + (2 if member.startswith("data/") else 0)
+        + (0 if member.rsplit("/", 1)[-1].lower() == member.rsplit("/", 1)[-1] else 1)
     )
 
 

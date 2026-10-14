@@ -186,6 +186,7 @@ def extract_blocks(md_text: str, rel_file: str, lang_mode: str) -> list[BlockIte
     buf: list[str] = []
     start_ln: int | None = None
     in_frontmatter = False
+    seen_content = False  # 已出現過非空行（front matter 只能在檔案最前面）
     code_fence: str | None = None  # 目前所在程式碼區塊的圍欄字元（``` 或 ~~~）
 
     def flush(end_ln: int):
@@ -233,10 +234,18 @@ def extract_blocks(md_text: str, rel_file: str, lang_mode: str) -> list[BlockIte
         # 進入或離開 frontmatter 區段，整段不翻譯
         if stripped == "---":
             flush(end_ln=ln - 1)
-            in_frontmatter = not in_frontmatter
+            if in_frontmatter:
+                in_frontmatter = False
+            elif not seen_content:
+                in_frontmatter = (
+                    True  # 只有檔案開頭的 --- 才是 front matter，內文的是水平線
+                )
             continue
         if in_frontmatter:
             continue
+
+        if stripped:
+            seen_content = True
 
         # 2) 空行：結束目前段落
         if not stripped:
