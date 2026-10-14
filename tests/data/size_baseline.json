@@ -20,7 +20,7 @@
     "app/views/merge/merge_widgets.py:MergeWidgetsMixin._init_merge_io_controls": 80,
     "app/views/moddb/overview_panel.py:OverviewPanel.__init__": 92,
     "app/views/moddb/repair_card.py:create_repair_card": 128,
-    "app/views/moddb/scan_panel.py:ScanPanel._build_options_card": 99,
+    "app/views/moddb/scan_panel.py:ScanPanel._build_options_card": 102,
     "app/views/moddb/scan_panel.py:ScanPanel._build_run_card": 85,
     "app/views/moddb/translate_panel.py:TranslatePanel._build_run_card": 103,
     "app/views/moddb_view.py:ModDbView.__init__": 81,

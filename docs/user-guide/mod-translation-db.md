@@ -143,7 +143,7 @@ Mod DB 批次機翻預設只處理沒有生效譯文的條目，並透過 `write
 ### 手冊與指南的辨識
 
 手冊（Patchouli 類）的欄位**不看欄位名稱**，只看值的形狀：資源 id、旗標、錨點、路徑、網址、數字、色碼、模板變數（`#tier#`）、小寫或駝峰識別字、物品堆疊與 NBT 片段、已是中文或沒有英文字母的字串都不翻；`multiblock` 版面子樹整段略過；指向語言檔的鍵（`book.mod.entry`）不在手冊內翻譯。
-不必設定手冊資料夾：掃描 jar 時，設定的資料夾名稱（`lm_translator.patchouli.dir_names`，任何深度的資料夾名稱都算，例如 `guide`、`ae2guide`）之外，會依內容再找出手冊與指南——JSON 有 `pages`／`landing_text`／Patchouli 規格資料夾（`categories`、`templates`）結構，`.md`／`.txt` 是英文敘述文字（有 front matter，或段落像句子）。判斷以資料夾為單位抽樣讀取，有獨立的讀取上限，用盡時只停止判斷，不會讓整個 jar 失敗。`textures`、`models`、`worldgen`、`recipe` 等 Minecraft 規格的資料夾、`README`／`CHANGELOG` 類文件與其他語系資料夾（`ja_jp`、`_ru_ru`）不會被當成原文。
+不必設定手冊資料夾：掃描 jar 時，設定的資料夾名稱（`lm_translator.patchouli.dir_names`，任何深度的資料夾名稱都算，例如 `guide`、`ae2guide`）之外，會依內容再找出手冊與指南——JSON 有 `pages`／`landing_text`／Patchouli 規格資料夾（`categories`、`templates`）結構，`.md`／`.txt` 是英文敘述文字（有 front matter，或段落像句子）。匯入選項「包含手冊、指南與進度文字」關閉時，手冊、指南、進度文字與依內容辨識都不執行，只匯入語言檔。判斷以資料夾為單位抽樣讀取，有獨立的讀取上限，用盡時只停止判斷，不會讓整個 jar 失敗。`textures`、`models`、`worldgen`、`recipe` 等 Minecraft 規格的資料夾、`README`／`CHANGELOG` 類文件與其他語系資料夾（`ja_jp`、`_ru_ru`）不會被當成原文。
 指南（`.md`／`.txt`）以段落為單位匯入，鍵值是 `檔案路徑#段落序號`；`_zh_tw`／`_zh_cn` 資料夾裡的譯文在段落數相同時才配對。
 
 ### 其他會匯入的內容
