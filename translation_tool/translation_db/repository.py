@@ -1911,6 +1911,12 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
                         new_revision,
                     ),
                 )
+            self._clear_superseded_reviews(
+                conn,
+                [(change.entry_id, change.new_zh_tw) for change in plan.changes],
+                batch,
+                actor,
+            )
             self._refresh(conn, [change.entry_id for change in plan.changes])
         if progress_callback is not None:
             progress_callback("批次替換已提交", 1.0)
@@ -1997,6 +2003,7 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
                         restored[2] if restored else None,
                     ),
                 )
+                self._restore_cleared_reviews(conn, batch_id, eid)
                 reverted.append(eid)
             self._refresh(conn, reverted)
         return BatchRevertResult(len(reverted), skipped, len(reverted) + skipped)
@@ -2287,6 +2294,103 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
             )
         return result
 
+    def _clear_superseded_reviews(
+        self,
+        conn: sqlite3.Connection,
+        changes: Iterable[tuple[int, str]],
+        batch: str,
+        actor: str,
+    ) -> None:
+        """人工寫入新譯文後，其他來源上「已審核」且譯文不同的列退回未審核。
+
+        已審核的列優先於未審核的人工譯文；不退回的話，手動儲存／批次取代成功寫入
+        卻不會生效。退回的狀態以 ``review_clear`` 記錄在同一個 batch，還原人工寫入時
+        一併復原（譯文與版本都沒變才復原）。
+        """
+        for entry_id, text in changes:
+            for source, zh_tw, checker, revision in conn.execute(
+                "SELECT source, zh_tw, checker, revision FROM translation "
+                "WHERE entry_id=? AND source<>? AND review_status='reviewed' "
+                "AND zh_tw<>?",
+                (entry_id, SRC_MANUAL, text),
+            ).fetchall():
+                # 有校驗者的列即使沒有狀態也會優先，所以明確標成未審核
+                cleared = "unreviewed" if checker else None
+                conn.execute(
+                    "UPDATE translation SET review_status=? WHERE entry_id=? AND source=?",
+                    (cleared, entry_id, source),
+                )
+                new_revision = conn.execute(
+                    "SELECT revision FROM translation WHERE entry_id=? AND source=?",
+                    (entry_id, source),
+                ).fetchone()[0]
+                conn.execute(
+                    "INSERT INTO history (entry_id, batch, actor, action, old_zh_tw, "
+                    "new_zh_tw, note, prev_checker, prev_review_status, new_checker, "
+                    "new_review_status, prev_revision, new_revision, source_id) "
+                    "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (
+                        entry_id,
+                        batch,
+                        actor,
+                        "review_clear",
+                        zh_tw,
+                        zh_tw,
+                        "人工修改了譯文，原來源的已審核標記退回未審核",
+                        checker,
+                        "reviewed",
+                        checker,
+                        cleared or "",
+                        revision,
+                        new_revision,
+                        source,
+                    ),
+                )
+
+    def _restore_cleared_reviews(
+        self, conn: sqlite3.Connection, batch: str, entry_id: int
+    ) -> None:
+        """還原人工寫入時，把同一個 batch 退回的審核標記復原（列沒被動過才復原）。"""
+        for hid, source, zh_tw, prev_status, new_revision in conn.execute(
+            "SELECT id, source_id, new_zh_tw, prev_review_status, new_revision "
+            "FROM history WHERE batch=? AND entry_id=? AND action='review_clear' "
+            "ORDER BY id DESC",
+            (batch, entry_id),
+        ).fetchall():
+            cur = conn.execute(
+                "SELECT zh_tw, revision, review_status FROM translation "
+                "WHERE entry_id=? AND source=?",
+                (entry_id, source),
+            ).fetchone()
+            if cur is None or cur[0] != zh_tw or cur[1] != new_revision:
+                continue
+            conn.execute(
+                "UPDATE translation SET review_status=? WHERE entry_id=? AND source=?",
+                (prev_status, entry_id, source),
+            )
+            restored = conn.execute(
+                "SELECT revision FROM translation WHERE entry_id=? AND source=?",
+                (entry_id, source),
+            ).fetchone()[0]
+            conn.execute(
+                "INSERT INTO history (entry_id, batch, action, old_zh_tw, new_zh_tw, "
+                "note, prev_review_status, new_review_status, prev_revision, "
+                "new_revision, source_id) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                (
+                    entry_id,
+                    batch + "-restore",
+                    "revert",
+                    zh_tw,
+                    zh_tw,
+                    f"還原審核標記 #{hid}",
+                    cur[2] or "",
+                    prev_status,
+                    cur[1],
+                    restored,
+                    source,
+                ),
+            )
+
     def save_manual(
         self,
         entry_id: int,
@@ -2379,6 +2483,9 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
                     "new_checker, new_review_status, prev_revision, new_revision) "
                     "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                     history_rows,
+                )
+                self._clear_superseded_reviews(
+                    conn, [(int(row[0]), text) for row, _prev in changed], batch, actor
                 )
             self._refresh(conn, [i.entry_id for i in done])
         return done
@@ -2648,10 +2755,11 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
                 prev_revision,
                 new_revision,
                 row_source,
+                row_batch,
             ) in conn.execute(
                 f"SELECT id, entry_id, new_zh_tw, prev_manual, prev_checker, "
                 f"prev_review_status, new_checker, new_review_status, "
-                f"prev_revision, new_revision, source_id FROM history "
+                f"prev_revision, new_revision, source_id, batch FROM history "
                 f"WHERE action IN ('manual','review') AND {where} ORDER BY id DESC",
                 params,
             ).fetchall():
@@ -2733,6 +2841,7 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
                         rsrc,
                     ),
                 )
+                self._restore_cleared_reviews(conn, row_batch, eid)
                 reverted.append(eid)
             self._refresh(conn, reverted)
         return len(reverted)

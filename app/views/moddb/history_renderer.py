@@ -35,6 +35,7 @@ def _history_event(panel, event, catalog) -> ft.Control:
         "manual": "手動儲存（未審核）",
         "review": "人工審核",
         "review_migrate": "審核遷移",
+        "review_clear": "審核標記退回（人工已修改）",
         "revert": "還原",
         "batch_replace": "批次取代",
         "batch_revert": "批次還原",

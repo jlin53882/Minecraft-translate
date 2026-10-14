@@ -2513,3 +2513,92 @@ def test_simplified_only_translation_keeps_the_chosen_source(db):
     rows = {r.key: r for r in db.list_entries("1.21.1")[0]}
     assert rows["k"].source == SRC_SUBTITLE and rows["k"].zh_tw == "簡体文字"
     assert rows["plain"].source == SRC_JAR_CN  # 沒有指定來源時維持簡中轉繁
+
+
+def test_manual_edit_after_review_takes_effect_and_revert_restores_review(db):
+    db.ingest("1.21.1", [item(tw="舊譯文")])
+    entry = db.list_entries("1.21.1")[0][0]
+    db.review_manual(entry.id, expected_zh_tw="舊譯文", propagate=False)
+    assert db.get_entry(entry.id).review_status == "reviewed"
+
+    db.save_manual(entry.id, "新譯文", propagate=False)
+    now = db.get_entry(entry.id)
+    assert (now.zh_tw, now.source, now.review_status) == (
+        "新譯文",
+        SRC_MANUAL,
+        "unreviewed",
+    )
+    # 被取代的來源保留譯文，已審核標記退回
+    jar = next(
+        t for t in db.entry_detail(entry.id).translations if t.source == SRC_JAR_TW
+    )
+    assert jar.zh_tw == "舊譯文" and jar.review_status != "reviewed"
+
+    # 重新開啟、重建生效譯文後結果一致
+    path = db.path
+    db.close()
+    reopened = TranslationDB(path)
+    reopened._rebuild_effective(reopened._conn)
+    reopened._conn.commit()
+    again = reopened.get_entry(entry.id)
+    assert (again.zh_tw, again.source) == ("新譯文", SRC_MANUAL)
+
+    # 還原手動儲存：舊譯文與已審核標記一起回來
+    manual_history = next(
+        h for h in reopened.entry_detail(entry.id).history if h.action == "manual"
+    )
+    reopened.revert(manual_history.id)
+    back = reopened.get_entry(entry.id)
+    assert (back.zh_tw, back.source, back.review_status) == (
+        "舊譯文",
+        SRC_JAR_TW,
+        "reviewed",
+    )
+    reopened.close()
+
+
+def test_manual_edit_after_review_propagates_and_reverts_as_one_batch(db):
+    for version in ("1.21.1", "1.20.1"):
+        db.ingest(version, [item(tw="舊譯文")])
+    selected = db.list_entries("1.21.1")[0][0]
+    db.review_manual(selected.id, expected_zh_tw="舊譯文", propagate=True)
+
+    db.save_manual(selected.id, "新譯文", propagate=True)
+    for version in ("1.21.1", "1.20.1"):
+        row = db.list_entries(version)[0][0]
+        assert (row.zh_tw, row.source) == ("新譯文", SRC_MANUAL)
+
+    first = next(
+        h for h in db.entry_detail(selected.id).history if h.action == "manual"
+    )
+    db.revert(first.id, whole_batch=True)
+    for version in ("1.21.1", "1.20.1"):
+        row = db.list_entries(version)[0][0]
+        assert (row.zh_tw, row.source, row.review_status) == (
+            "舊譯文",
+            SRC_JAR_TW,
+            "reviewed",
+        )
+
+
+def test_batch_replace_after_review_takes_effect_and_reverts(db):
+    db.ingest(
+        "1.21.1",
+        [ScanItem(KIND_LANG, "foo", "k", "Hell", "地獄", "", source=SRC_AI)],
+    )
+    entry = db.list_entries("1.21.1")[0][0]
+    db.review_manual(entry.id, expected_zh_tw="地獄", propagate=False)
+
+    plan = db.preview_batch_replace(EntryFilter(version="1.21.1"), "地獄", "下界")
+    result = db.execute_batch_replace(plan)
+    assert result.updated == 1
+    now = db.get_entry(entry.id)
+    assert (now.zh_tw, now.source) == ("下界", SRC_MANUAL)
+
+    db.revert_batch_replace(result.batch_id)
+    back = db.get_entry(entry.id)
+    assert (back.zh_tw, back.source, back.review_status) == (
+        "地獄",
+        SRC_AI,
+        "reviewed",
+    )
