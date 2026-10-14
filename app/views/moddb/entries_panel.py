@@ -13,6 +13,7 @@ import sqlite3
 import flet as ft
 
 from app.services_impl.moddb_format_diff_service import compare_format_diff
+from app.services_impl.moddb_guide_service import guide_mark_issues, is_guide_kind
 from app.services_impl.moddb_service import (
     EntryDetail,
     EntryFilter,
@@ -71,8 +72,6 @@ from app.views.moddb.species_suggestion import (
 )
 from app.views.moddb.species_suggestion import SpeciesSuggestion
 from app.views.moddb.suggestions import build_suggestions
-from translation_tool.core.guide_format import guide_issues
-from translation_tool.translation_db.schema import KIND_GUIDE
 from translation_tool.utils.log_unit import (
     log_debug,
     log_exception,
@@ -760,9 +759,9 @@ class EntriesPanel(ft.Column):
                 notes.append(
                     "與原文的特殊字元不一致：" + "、".join(diff_result.legacy_messages)
                 )
-        is_guide = entry is not None and entry.kind == KIND_GUIDE
+        is_guide = entry is not None and is_guide_kind(entry.kind)
         if is_guide and entry.en_us and text.strip():
-            marks = guide_issues(entry.en_us, text)
+            marks = guide_mark_issues(entry.en_us, text)
             if marks:
                 notes.append("指南標記與原文不一致：" + "、".join(marks))
         space = whitespace_note(text)
