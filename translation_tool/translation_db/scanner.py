@@ -21,6 +21,7 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path, PurePosixPath
 from typing import Any
 
+from translation_tool.core.guide_blocks import extract_guide_blocks
 from translation_tool.core.lang_merge_dict import contains_cjk
 from translation_tool.core.lm_config_rules import is_translatable_field
 from translation_tool.core.patchouli_compat import (
@@ -29,7 +30,6 @@ from translation_tool.core.patchouli_compat import (
 )
 from translation_tool.core.text_sniffer import advancement_texts
 from translation_tool.core.translatable_extractor import extract_translatables
-from translation_tool.plugins.md.md_extract_qa import extract_blocks
 from translation_tool.translation_db.identity import (
     FileIdentity,
     classify_member,
@@ -333,7 +333,7 @@ def _read_blocks(
         text = read_limited(zf, member, budget=budget).decode("utf-8-sig")
     except UnicodeDecodeError:
         return None
-    return [block.text for block in extract_blocks(text, member, "all")]
+    return [block.text for block in extract_guide_blocks(text, member)]
 
 
 def _aligned_blocks(

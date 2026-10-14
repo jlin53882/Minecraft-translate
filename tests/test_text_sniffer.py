@@ -376,7 +376,7 @@ def test_lm_directory_translation_translates_guides_and_writes_zh_tw_folder(
     text = written.read_text(encoding="utf-8")
     assert "譯：Terminals reach the network from far away." in text
     assert '<ItemLink id="demo:terminal" />' in text
-    assert text.startswith("---\nnavigation:\n  title: Wireless\n---")
+    assert text.startswith("---\nnavigation:\n  title: 譯：Wireless\n---")
     assert not (out / "assets/demo/ae2guide/_zh_tw/_ru_ru").exists()
 
 

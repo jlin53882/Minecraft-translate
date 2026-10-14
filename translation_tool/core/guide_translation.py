@@ -7,7 +7,7 @@
 行號組回原檔，只替換文字行；標題以外的結構（front matter、程式碼區塊、圖片、元件標籤）不動。
 
 段落切法、行替換規則與 Markdown 外掛相同（``md_extract_qa.extract_blocks``、
-``md_inject_qa.apply_item_to_md_lines``），行內保護沿用 ``rich_text_shield``。
+``md_inject_qa.apply_item_to_md_lines``），另外翻譯 front matter 的 ``navigation.title``（``guide_blocks``），行內保護沿用 ``rich_text_shield``。
 翻完的段落會檢查元件標籤與連結目標沒被改動，不一致就保留原文。
 """
 
@@ -19,6 +19,7 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
+from translation_tool.core.guide_blocks import extract_guide_blocks, front_title_line
 from translation_tool.core.lang_merge_dict import contains_cjk
 from translation_tool.core.text_sniffer import (
     VANILLA_NON_TEXT_DIRS,
@@ -26,7 +27,6 @@ from translation_tool.core.text_sniffer import (
     sniff_text_file,
     split_locale,
 )
-from translation_tool.plugins.md.md_extract_qa import extract_blocks
 from translation_tool.plugins.md.md_inject_qa import Item, apply_item_to_md_lines
 from translation_tool.plugins.shared.rich_text_shield import shield_text, unshield_text
 from translation_tool.translation_db.schema import KIND_GUIDE
@@ -97,11 +97,12 @@ def load_guide(path: GuidePath) -> tuple[dict, list[dict[str, Any]]]:
     root = path.guide_root
     text = path.read_text(encoding="utf-8-sig")
     parts = _guide_parts(path, root) or ()
-    blocks = extract_blocks(text, path.name, "all")
+    blocks = extract_guide_blocks(text, path.name)
     doc = {
         GUIDE_MARKER: True,
         "source": text,
         "ranges": [[b.start_line, b.end_line] for b in blocks],
+        "prefixes": [b.prefix for b in blocks],
         "originals": [b.text for b in blocks],
         "blocks": [b.text for b in blocks],
     }
@@ -150,10 +151,14 @@ def finish_guide_item(item: dict[str, Any]) -> None:
 def render_guide(doc: dict) -> str:
     """把翻譯過的段落依行號組回原檔。"""
     lines = str(doc["source"]).splitlines()
-    for (start, end), original, current in zip(
-        doc["ranges"], doc["originals"], doc["blocks"], strict=True
+    for (start, end), prefix, original, current in zip(
+        doc["ranges"], doc["prefixes"], doc["originals"], doc["blocks"], strict=True
     ):
-        if current != original:
+        if current == original:
+            continue
+        if prefix:
+            lines[start - 1] = front_title_line(prefix, current)
+        else:
             apply_item_to_md_lines(lines, Item("", start, end, current))
     return "\n".join(lines) + ("\n" if str(doc["source"]).endswith("\n") else "")
 

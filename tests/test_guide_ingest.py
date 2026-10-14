@@ -177,3 +177,31 @@ def test_other_language_folders_without_underscore_are_not_source_text():
 
 
 GUIDE_DIRS_MANUAL = ("manual",)
+
+
+def test_guide_blocks_include_front_matter_navigation_title_after_paragraphs():
+    from translation_tool.core.guide_blocks import extract_guide_blocks
+
+    text = (
+        "---\nnavigation:\n  title: Energy Storage\n  icon: x\n---\n\n"
+        "# Energy\n\nBody text here for the guide.\n"
+    )
+    blocks = extract_guide_blocks(text, "energy.md")
+    assert [b.text for b in blocks][-1] == "Energy Storage"
+    assert blocks[-1].prefix == "  title: "
+    assert blocks[-1].start_line == 3
+    assert all(not b.prefix for b in blocks[:-1])
+
+
+def test_guide_without_navigation_title_has_no_extra_block():
+    from translation_tool.core.guide_blocks import extract_guide_blocks
+
+    text = "---\ntitle: Not Navigation\n---\n\n# Head\n\nBody text here.\n"
+    assert not any(b.prefix for b in extract_guide_blocks(text, "a.md"))
+
+
+def test_front_title_line_quotes_yaml_special_characters():
+    from translation_tool.core.guide_blocks import front_title_line
+
+    assert front_title_line("  title: ", "能源儲存") == "  title: 能源儲存"
+    assert front_title_line("  title: ", "能源: 儲存") == '  title: "能源: 儲存"'
