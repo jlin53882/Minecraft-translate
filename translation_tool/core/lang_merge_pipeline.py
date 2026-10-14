@@ -211,6 +211,17 @@ def _process_single_mod(
         # 確保 Stage 1 跟 Stage 2 邏輯一致。
         from .lang_merge_dict import merge_lang_dicts
 
+        # Mod 資料庫優先於 jar 自帶 zh_tw 與 zh_cn（輸出資料夾既有譯文仍受保護）
+        source_provenance_by_key: dict[str, dict[str, Any]] = {}
+        db_lookup = None
+        if db_fill is not None:
+            from ..translation_db.identity import classify_member
+
+            ident = classify_member(base_path_hint)
+            db_lookup = db_fill.merge_lookup(
+                ident.mod_id if ident else None, source_provenance_by_key
+            )
+
         final_tw, pending = merge_lang_dicts(
             cn_data=cn_data,
             tw_src_data=tw_src_data,
@@ -222,22 +233,10 @@ def _process_single_mod(
             contains_cjk=_contains_cjk,
             is_pure_english=_is_pure_english,
             is_from_output_dir=target_has_tw,
+            db_lookup=db_lookup,
         )
-
-        # Step 4.5 — 純英文條目先問 Mod 資料庫（只補沒有譯文的，不覆蓋既有譯文）
-        source_provenance_by_key: dict[str, dict[str, Any]] = {}
-        if db_fill is not None:
-            from ..translation_db.identity import classify_member
-
-            ident = classify_member(base_path_hint)
-            final_tw, pending, db_hits = db_fill.fill(
-                ident.mod_id if ident else None,
-                final_tw,
-                pending,
-                source_provenance_by_key=source_provenance_by_key,
-            )
-            if db_hits:
-                log_info(f"{log_prefix}資料庫補上 {db_hits} 筆譯文")
+        if source_provenance_by_key:
+            log_info(f"{log_prefix}資料庫採用 {len(source_provenance_by_key)} 筆譯文")
 
         # =============================
         # Step 5 — 寫入 pending.json

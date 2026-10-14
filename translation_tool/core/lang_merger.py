@@ -28,7 +28,7 @@ from .lang_merge_content import (
 )
 from .lang_merge_content_copy import detect_content_wrapper_prefix
 from .lang_merge_db import merge_db_fill
-from .lang_merge_io import FolderReader, ZipReader
+from .lang_merge_io import FolderReader, ZipReader, register_lang_source
 from .lang_merge_pipeline import _process_single_mod, detect_mod_wrapper_prefix
 
 # 掃描檔名清單時每隔多少筆檢查一次取消（逐筆檢查成本小，但清單可達數十萬筆）。
@@ -250,19 +250,7 @@ def _merge_zhcn_to_zhtw_from_zip(
                     norm_low.endswith(".json") or norm_low.endswith(".lang")  # noqa: PIE810
                 ):
                     mod_key = normalized.split("/lang/")[0] + "/lang/"
-
-                    if norm_low.endswith("zh_cn.json") or norm_low.endswith(  # noqa: PIE810
-                        "zh_cn.lang"
-                    ):
-                        lang_files_by_mod[mod_key]["zh_cn"] = normalized
-                    elif norm_low.endswith("zh_tw.json") or norm_low.endswith(  # noqa: PIE810
-                        "zh_tw.lang"
-                    ):
-                        lang_files_by_mod[mod_key]["zh_tw"] = normalized
-                    elif norm_low.endswith("en_us.json") or norm_low.endswith(  # noqa: PIE810
-                        "en_us.lang"
-                    ):
-                        lang_files_by_mod[mod_key]["en_us"] = normalized
+                    register_lang_source(lang_files_by_mod[mod_key], normalized)
                     # else:
                     #    other_files.append(normalized)  # 🔒 保險：避免直接消失
                 else:
@@ -623,13 +611,7 @@ def _merge_zhcn_to_zhtw_from_folder(
                 norm_low.endswith(".json") or norm_low.endswith(".lang")  # noqa: PIE810
             ):
                 mod_key = normalized.split("/lang/")[0] + "/lang/"
-
-                if norm_low.endswith("zh_cn.json") or norm_low.endswith("zh_cn.lang"):  # noqa: PIE810
-                    lang_files_by_mod[mod_key]["zh_cn"] = normalized
-                elif norm_low.endswith("zh_tw.json") or norm_low.endswith("zh_tw.lang"):  # noqa: PIE810
-                    lang_files_by_mod[mod_key]["zh_tw"] = normalized
-                elif norm_low.endswith("en_us.json") or norm_low.endswith("en_us.lang"):  # noqa: PIE810
-                    lang_files_by_mod[mod_key]["en_us"] = normalized
+                register_lang_source(lang_files_by_mod[mod_key], normalized)
             else:
                 other_files.append(normalized)
 

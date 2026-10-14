@@ -218,8 +218,8 @@ def test_translate_panel_runs_and_shows_summary(db_path, monkeypatch):
     db.close()
 
 
-def test_list_entries_filters_by_effective_source_after_manual_review(db_path):
-    """審核改變 effective source，但保留 AI row；count、搜尋與分頁一致。"""
+def test_list_entries_keeps_source_and_filters_review_independently(db_path):
+    """審核不改變生效來源；來源與審核狀態可獨立篩選，count、搜尋與分頁一致。"""
     db = TranslationDB(db_path)
     db.ingest(
         "1.21.1",
@@ -239,71 +239,43 @@ def test_list_entries_filters_by_effective_source_after_manual_review(db_path):
     assert ai_total == 7 and len(ai_rows) == 7
     target = next(row for row in ai_rows if row.key.endswith("00"))
 
-    # 明確審核會新增已審核人工列，並保留原 AI 譯文。
     db.review_manual(
         target.id, expected_zh_tw="Minecraft", actor="測試審核", propagate=False
     )
 
+    # 來源仍是 AI，只是多了「已審核」
     ai_rows, ai_total = db.list_entries("1.21.1", source=SRC_AI)
-    manual_rows, manual_total = db.list_entries("1.21.1", source=SRC_MANUAL)
-    assert ai_total == 6 and target.id not in {row.id for row in ai_rows}
-    assert manual_total == 1 and [row.id for row in manual_rows] == [target.id]
-    assert manual_rows[0].source == SRC_MANUAL
-
-    # state=manual 與 source=人工一致；與 AI 或「其他譯文」組合時不矛盾。
-    assert db.list_entries("1.21.1", state="manual", source=SRC_MANUAL)[1] == 1
-    assert db.list_entries("1.21.1", state="manual", source=SRC_AI)[1] == 0
-    assert db.list_entries("1.21.1", state="ok", source=SRC_MANUAL)[1] == 0
-
-    # same-source 使用 effective text，因此同文人工項目只會落在人工來源篩選。
-    assert db.list_entries("1.21.1", state="same", source=SRC_AI)[1] == 6
-    assert db.list_entries("1.21.1", state="same", source=SRC_MANUAL)[1] == 1
-    assert db.list_entries("1.21.1", source=SRC_AI, query="reviewed.00") == ([], 0)
-    found, found_total = db.list_entries(
-        "1.21.1", source=SRC_MANUAL, query="reviewed.00"
+    assert (
+        ai_total == 7 and next(r for r in ai_rows if r.id == target.id).source == SRC_AI
     )
-    assert found_total == 1 and [row.id for row in found] == [target.id]
+    assert db.list_entries("1.21.1", source=SRC_MANUAL)[1] == 0
+    reviewed, reviewed_total = db.list_entries("1.21.1", review_status="reviewed")
+    assert reviewed_total == 1 and [row.id for row in reviewed] == [target.id]
+    unreviewed_total = db.list_entries("1.21.1", review_status="unreviewed")[1]
+    assert unreviewed_total == 6
+    assert db.list_entries("1.21.1", source=SRC_AI, review_status="reviewed")[1] == 1
+    assert db.list_entries("1.21.1", source=SRC_AI, query="reviewed.00")[1] == 1
 
     # AI source filter 的 count 和分頁 rows 共用相同 predicate，無重複或漏項。
     seen_ids = []
-    for offset in (0, 2, 4):
+    for offset in (0, 2, 4, 6):
         page, total = db.list_entries(
             "1.21.1", source=SRC_AI, state="same", limit=2, offset=offset
         )
-        assert total == 6
+        assert total == 7
         seen_ids.extend(row.id for row in page)
-    assert len(seen_ids) == 6 and len(set(seen_ids)) == 6
-    assert set(seen_ids) == {row.id for row in ai_rows}
+    assert len(seen_ids) == 7 and len(set(seen_ids)) == 7
 
-    # 低優先序 AI row 仍保存，供右側「各來源譯文」列表展示。
-    detail = db.entry_detail(target.id)
-    translations = {row.source: row.zh_tw for row in detail.translations}
-    assert translations == {SRC_AI: "Minecraft", SRC_MANUAL: "Minecraft"}
+    # 審核只改自己那一列，不新增人工列
+    translations = {
+        row.source: row.zh_tw for row in db.entry_detail(target.id).translations
+    }
+    assert translations == {SRC_AI: "Minecraft"}
     db.close()
 
 
-def test_entries_panel_source_filter(db_path):
+def test_entries_panel_review_filter_is_independent_of_source(db_path):
     from app.views.moddb import entries_panel
-    from translation_tool.translation_db.schema import SRC_JAR_TW
-
-    seed(db_path)
-    db = TranslationDB(db_path)
-    panel = entries_panel.EntriesPanel(mock_page(), lambda: db)
-    assert panel.source_filter.dropdown.label == "目前生效來源"
-    panel.refresh()
-    assert panel.total == 4
-    panel.source_filter.dropdown.value = str(SRC_JAR_TW)
-    panel._on_source()
-    assert panel.total == 1  # 只有 foo.a 有「模組自帶繁中」
-    panel.source_filter.dropdown.value = "__all__"
-    panel._on_source()
-    assert panel.total == 4
-    db.close()
-
-
-def test_entries_panel_source_filter_tracks_reviewed_effective_source(db_path):
-    from app.views.moddb import entries_panel
-    from tests.test_moddb_view import texts_of
 
     db = TranslationDB(db_path)
     db.ingest(
@@ -333,14 +305,30 @@ def test_entries_panel_source_filter_tracks_reviewed_effective_source(db_path):
         propagate=False,
     )
     panel._on_source()
-    assert panel.total == 0
+    assert panel.total == 1  # 審核後來源仍是 AI
 
     panel.source_filter.dropdown.value = str(SRC_MANUAL)
     panel._on_source()
-    assert panel.total == 1 and [row.id for row in panel.rows] == [entry.id]
-    panel.select(entry.id)
-    shown_sources = "\n".join(texts_of(panel.history_col))
-    assert "AI 機翻" in shown_sources and "人工" in shown_sources
+    assert panel.total == 0
+    db.close()
+
+
+def test_entries_panel_source_filter(db_path):
+    from app.views.moddb import entries_panel
+    from translation_tool.translation_db.schema import SRC_JAR_TW
+
+    seed(db_path)
+    db = TranslationDB(db_path)
+    panel = entries_panel.EntriesPanel(mock_page(), lambda: db)
+    assert panel.source_filter.dropdown.label == "目前生效來源"
+    panel.refresh()
+    assert panel.total == 4
+    panel.source_filter.dropdown.value = str(SRC_JAR_TW)
+    panel._on_source()
+    assert panel.total == 1  # 只有 foo.a 有「模組自帶繁中」
+    panel.source_filter.dropdown.value = "__all__"
+    panel._on_source()
+    assert panel.total == 4
     db.close()
 
 
@@ -368,7 +356,8 @@ def test_entries_panel_save_and_review_use_separate_manual_states(db_path):
     detail = db.entry_detail(panel.selected.id)
     manual = next(row for row in detail.translations if row.source == SRC_MANUAL)
     assert manual.review_status == "unreviewed" and manual.checker == ""
-    assert "人工-未審核" in "\n".join(texts_of(panel))
+    assert "人工已審核" not in "\n".join(texts_of(panel))
+    assert panel.review_chip.content is None
     assert panel.confirm_btn.visible
 
     panel.tw_field.value = ""
@@ -390,7 +379,7 @@ def test_entries_panel_save_and_review_use_separate_manual_states(db_path):
     manual = next(row for row in detail.translations if row.source == SRC_MANUAL)
     assert manual.review_status == "reviewed"
     assert detail.history[0].action == "review"
-    assert "人工-已審核" in "\n".join(texts_of(panel))
+    assert "人工已審核" in "\n".join(texts_of(panel))
     assert panel.confirm_btn.visible is False
     db.close()
 
@@ -621,9 +610,9 @@ def test_overview_uses_dynamic_effective_source_catalog_and_priority(db_path):
     labels = texts_of(panel.legend)
     assert "釘宮翻譯組" in labels
     assert "釘宮翻譯組（自訂 #100）" in labels
-    assert "人工-未審核" in labels
-    assert "人工-已審核" in labels
-    assert "人工（歷史狀態待確認）" in labels
+    assert "人工" in labels
+    assert "人工已審核" in labels
+    assert labels.count("人工已審核") == 1  # 舊資料與已審核合併成一個圖例
     assert "未翻譯" in labels
     assert labels.index("釘宮翻譯組（自訂 #100）") < labels.index("模組自帶繁中")
 
@@ -636,8 +625,8 @@ def test_overview_uses_dynamic_effective_source_catalog_and_priority(db_path):
     db.set_priority((3, SRC_MANUAL, 1, 100))
     panel.refresh()
     labels = texts_of(panel.legend)
-    assert labels.index("釘宮翻譯組") < labels.index("人工-未審核")
-    assert labels.index("人工（歷史狀態待確認）") < labels.index("模組自帶繁中")
+    assert labels.index("釘宮翻譯組") < labels.index("人工")
+    assert labels.index("人工已審核") < labels.index("模組自帶繁中")
     db.close()
 
 
@@ -2234,6 +2223,48 @@ def test_manual_fix_of_a_flagged_entry_lowers_the_translate_card(db_path, monkey
     assert entries.entry_ids == []
 
 
+def test_shadowed_manual_save_keeps_unresolved_flagged_entry(db_path, monkeypatch):
+    """自訂優先序讓 AI 譯文仍然生效：人工存檔沒解決問題，不能移出待處理清單。"""
+    from translation_tool.translation_db.schema import SRC_JAR_TW
+
+    _, panel, entries, db, entry, done, batch = _flagged_entry_saved_by_hand(
+        db_path, monkeypatch
+    )
+    # 待處理期間模組自帶譯文進來，且優先序排在人工之前
+    db.ingest(
+        "1.21.1",
+        [
+            ScanItem(
+                KIND_LANG,
+                "foo",
+                "item.foo.b",
+                "Infused Alloy",
+                "§a注入合金",
+                source=SRC_JAR_TW,
+            )
+        ],
+    )
+    db.set_priority((SRC_JAR_TW, SRC_MANUAL, SRC_AI))
+    entries._apply_save_result(db, entry, "注入合金", done, None, batch)
+
+    assert entry.id in entries.entry_ids
+    assert panel.stat_flagged.value_text.value == "1"
+
+
+def test_manual_save_with_still_mismatched_tokens_keeps_flagged_entry(
+    db_path, monkeypatch
+):
+    """儲存成功、人工譯文也生效，但特殊字元仍與原文不一致：問題還在，不能移出待處理清單。"""
+    _, panel, entries, db, entry, _done, batch = _flagged_entry_saved_by_hand(
+        db_path, monkeypatch
+    )
+    done = db.save_manual(entry.id, "§a注入合金", actor="測試", propagate=False)
+    entries._apply_save_result(db, entry, "§a注入合金", done, None, batch)
+
+    assert entry.id in entries.entry_ids
+    assert panel.stat_flagged.value_text.value == "1"
+
+
 def test_late_save_does_not_touch_a_flagged_list_opened_after_it_started(
     db_path, monkeypatch
 ):
@@ -2341,3 +2372,51 @@ def test_service_cache_save_uses_numbered_shard_unless_new_shard_requested(
     )
     run(TranslateOptions(version="1.21.1", mod_ids=("foo",), new_cache_shard=new_shard))
     assert saves and all(s["write_new_shard"] is new_shard for s in saves)
+
+
+def test_entries_panel_warns_when_custom_priority_keeps_another_source_effective(
+    db_path,
+):
+    from app.views.moddb import entries_panel
+    from translation_tool.translation_db.schema import SRC_JAR_TW
+
+    db = TranslationDB(db_path)
+    db.ingest(
+        "1.21.1",
+        [ScanItem(KIND_LANG, "foo", "k", "Hell", "地獄", source=SRC_AI)],
+    )
+    entry = db.list_entries("1.21.1")[0][0]
+    db.set_priority((SRC_AI, SRC_MANUAL, SRC_JAR_TW))
+    db.save_manual(entry.id, "下界", propagate=False)
+    shadow = entries_panel.EntriesPanel._shadowing_source(db, entry.id, "下界")
+    assert shadow and "AI" in shadow
+    db.set_priority((SRC_MANUAL, SRC_AI, SRC_JAR_TW))
+    assert entries_panel.EntriesPanel._shadowing_source(db, entry.id, "下界") is None
+    db.close()
+
+
+def test_entries_panel_reports_synced_versions_held_back_by_custom_priority(db_path):
+    from app.views.moddb import entries_panel
+    from translation_tool.translation_db.schema import SRC_JAR_TW
+
+    db = TranslationDB(db_path)
+    db.ingest(
+        "1.21.1",
+        [ScanItem(KIND_LANG, "foo", "k", "Hell", "地獄", source=SRC_JAR_TW)],
+    )
+    db.ingest(
+        "1.20.1",
+        [ScanItem(KIND_LANG, "foo", "k", "Hell", "地獄", source=SRC_AI)],
+    )
+    db.set_priority((SRC_AI, SRC_MANUAL, SRC_JAR_TW))
+    selected = db.list_entries("1.21.1")[0][0]
+    done = db.save_manual(selected.id, "下界", propagate=True)
+    assert len(done) == 2
+    held = entries_panel.EntriesPanel._shadowed_versions(db, done, selected.id, "下界")
+    assert held == ["1.20.1"]
+    db.set_priority((SRC_MANUAL, SRC_AI, SRC_JAR_TW))
+    assert (
+        entries_panel.EntriesPanel._shadowed_versions(db, done, selected.id, "下界")
+        == []
+    )
+    db.close()

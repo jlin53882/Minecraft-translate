@@ -2,16 +2,16 @@
 
 用途：語系合併（階段 1／階段 2）以 Mod 資料庫為「額外的譯文來源」。
 
-``merge_lang_dicts`` 判定為純英文、本來要進「待翻譯」的條目，先到資料庫找同
-（模組、鍵值、原文）的既有譯文：命中就直接放進 ``zh_tw``、不再進待翻譯。
-只補「本來沒有譯文」的條目——jar 自帶繁中、簡中轉繁、輸出資料夾既有（含人工）譯文
-一律不被資料庫覆蓋。資料庫未啟用、沒指定版本或不存在時等同不存在，合併流程不變。
+``merge_lang_dicts`` 對每個條目先到資料庫找同（模組、鍵值、原文）的既有譯文：
+命中就直接放進 ``zh_tw``，優先於 jar 自帶繁中與簡中轉繁；輸出資料夾既有（含人工）
+的譯文不被資料庫覆蓋。英文原文不同（mod 改過原文）不算命中。資料庫未啟用、沒指定版本
+或不存在時等同不存在，合併流程不變。
 """
 
 from __future__ import annotations
 
 import threading
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from typing import Any
 
@@ -56,26 +56,42 @@ class MergeDbFill:
             return final_tw, pending, 0
         remaining: dict[str, Any] = {}
         hits = 0
+        lookup = self.merge_lookup(mod_id, source_provenance_by_key)
         for key, en in pending.items():
-            hit = (
-                self.resolver.lookup(KIND_LANG, mod_id, key, en)
-                if isinstance(en, str)
-                else None
-            )
-            if hit and hit.zh_tw and value_fully_translated(hit.zh_tw):
-                final_tw[key] = hit.zh_tw
-                if source_provenance_by_key is not None:
-                    source_provenance_by_key[key] = {
-                        **source_provenance(hit, self.db.source_catalog),
-                        "value": hit.zh_tw,
-                    }
-                hits += 1
-            else:
+            zh_tw = lookup(key, en)
+            if zh_tw is None:
                 remaining[key] = en
-        if hits:
-            with self._lock:
-                self.filled += hits
+            else:
+                final_tw[key] = zh_tw
+                hits += 1
         return final_tw, remaining, hits
+
+    def merge_lookup(
+        self,
+        mod_id: str | None,
+        source_provenance_by_key: dict[str, dict[str, Any]] | None = None,
+    ) -> Callable[[str, Any], str | None]:
+        """回傳 ``lookup(key, en_us) -> 譯文 | None``：英文原文相同且譯文已翻完才命中。
+
+        命中時把來源標記寫進 ``source_provenance_by_key``；沒有 ``mod_id`` 永遠不命中。
+        """
+
+        def lookup(key: str, en: Any) -> str | None:
+            if not mod_id or not isinstance(en, str):
+                return None
+            hit = self.resolver.lookup(KIND_LANG, mod_id, key, en)
+            if not (hit and hit.zh_tw and value_fully_translated(hit.zh_tw)):
+                return None
+            if source_provenance_by_key is not None:
+                source_provenance_by_key[key] = {
+                    **source_provenance(hit, self.db.source_catalog),
+                    "value": hit.zh_tw,
+                }
+            with self._lock:
+                self.filled += 1
+            return hit.zh_tw
+
+        return lookup
 
     def close(self) -> None:
         self.db.close()

@@ -19,10 +19,13 @@ import sqlite3
 import time
 from pathlib import Path
 
-SCHEMA_VERSION = 5
+KEEP_REVIEW_FLAG = "keep_review_on_text_change"  # 交易內暫時存在的 meta 旗標
+SCHEMA_VERSION = 6
 
 KIND_LANG = "lang"
 KIND_PATCHOULI = "patchouli"
+KIND_GUIDE = "guide"  # 指南（.md／.txt 文字檔，依段落切成條目）
+KIND_ADVANCEMENT = "advancement"  # 進度的顯示文字（data/<模組>/advancement(s)/）
 
 # 來源代碼（寫入資料庫後不可更動）
 SRC_AI = 0
@@ -149,6 +152,16 @@ CREATE TABLE IF NOT EXISTS stat_cache (
     value TEXT NOT NULL
 );
 
+-- 資料庫清理批次：刪除前的整批快照（JSON），供還原
+CREATE TABLE IF NOT EXISTS cleanup_batch (
+    id          TEXT PRIMARY KEY,
+    mc_version  TEXT NOT NULL,
+    created_at  TEXT NOT NULL,
+    entry_count INTEGER NOT NULL,
+    payload     TEXT NOT NULL,
+    reverted_at TEXT
+);
+
 CREATE TABLE IF NOT EXISTS scan_run (
     id          INTEGER PRIMARY KEY,
     mc_version  TEXT NOT NULL,
@@ -212,6 +225,8 @@ def init_schema(conn: sqlite3.Connection) -> None:
             _backup_before_source_history_migration(conn)
         elif next_version == 5:
             _backup_before_ai_repair_source_migration(conn)
+        elif next_version == 6:
+            _backup_before_independent_review_migration(conn)
         conn.execute("BEGIN IMMEDIATE")
         try:
             if next_version == 2:
@@ -222,6 +237,8 @@ def init_schema(conn: sqlite3.Connection) -> None:
                 _migrate_source_history_v4(conn)
             elif next_version == 5:
                 _migrate_ai_repair_source_v5(conn)
+            elif next_version == 6:
+                _migrate_independent_review_v6(conn)
             conn.execute(
                 "UPDATE meta SET value=? WHERE key='schema_version'",
                 (str(next_version),),
@@ -409,6 +426,108 @@ def _migrate_ai_repair_source_v5(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE history ADD COLUMN repair_prev_zh_tw TEXT")
 
 
+def _backup_before_independent_review_migration(
+    conn: sqlite3.Connection,
+) -> Path | None:
+    """Keep a sidecar backup before moving reviews back to their original source."""
+    main = next(
+        (row[2] for row in conn.execute("PRAGMA database_list") if row[1] == "main"),
+        "",
+    )
+    if not main:
+        return None
+    source_path = Path(main)
+    backup_path = source_path.with_name(
+        f"{source_path.name}.pre-schema-v6-{time.time_ns()}.bak"
+    )
+    target = sqlite3.connect(backup_path)
+    try:
+        conn.backup(target)
+    except BaseException:
+        target.close()
+        backup_path.unlink(missing_ok=True)
+        raise
+    target.close()
+    return backup_path
+
+
+def _migrate_independent_review_v6(conn: sqlite3.Connection) -> None:
+    """Move "manual reviewed" rows back to the source that supplied the same text.
+
+    Review used to write a reviewed source-6 row that replaced the effective
+    source. Now review is a flag on the row that wins, so a reviewed manual row
+    whose text equals another source's text is folded back: that source's row is
+    marked reviewed and the manual row is removed. Equal text alone is not proof,
+    so only rows whose entire history is a single review that wrote the row's
+    current revision are folded; hand-edited or unverifiable rows stay manual, already
+    reviewed. The target source follows the user's saved priority.
+    """
+    if "review_status" not in {
+        row[1] for row in conn.execute("PRAGMA table_info(translation)")
+    }:
+        return
+    saved = conn.execute("SELECT value FROM meta WHERE key='priority'").fetchone()
+    order = [
+        int(part)
+        for part in (saved[0] if saved else "").split(",")
+        if part.strip().lstrip("-").isdigit()
+    ]
+    order += [code for code in DEFAULT_PRIORITY if code not in order]
+    rank = {code: index for index, code in enumerate(order)}
+    matches: dict[int, list[tuple[int, int, int]]] = {}
+    for manual_id, entry_id, other_id, other_source in conn.execute(
+        "SELECT m.id, m.entry_id, o.id, o.source FROM translation m "
+        "JOIN translation o ON o.entry_id=m.entry_id AND o.source<>? "
+        "AND o.zh_tw=m.zh_tw "
+        "WHERE m.source=? AND m.review_status='reviewed' "
+        # 只有「由審核建立」的人工列才能確定是同一份文字：從沒手動儲存過，
+        # 且有一筆審核紀錄當時還沒有人工列
+        # 這個條目的歷史只能有審核（任何其他操作都可能改寫過人工列），而且
+        # 審核寫入時的版本就是人工列現在的版本（之後沒有被動過）
+        "AND NOT EXISTS (SELECT 1 FROM history h "
+        "WHERE h.entry_id=m.entry_id AND h.action<>'review') "
+        "AND EXISTS (SELECT 1 FROM history h WHERE h.entry_id=m.entry_id "
+        "AND h.action='review' AND h.new_zh_tw=m.zh_tw AND h.prev_manual IS NULL "
+        "AND h.new_revision=m.revision)",
+        (SRC_MANUAL, SRC_MANUAL),
+    ):
+        matches.setdefault(manual_id, []).append(
+            (rank.get(other_source, len(rank)), other_source, other_id)
+        )
+    batch = f"migrate-v6-{time.time_ns()}"
+    for manual_id, candidates in matches.items():
+        _rank, target_source, target_id = min(candidates)
+        manual = conn.execute(
+            "SELECT entry_id, zh_tw, checker FROM translation WHERE id=?",
+            (manual_id,),
+        ).fetchone()
+        conn.execute(
+            "UPDATE translation SET review_status='reviewed' WHERE id=?",
+            (target_id,),
+        )
+        conn.execute("DELETE FROM translation WHERE id=?", (manual_id,))
+        conn.execute(
+            "INSERT INTO history (entry_id, batch, actor, action, old_zh_tw, "
+            "new_zh_tw, prev_manual, note, source_id) "
+            "VALUES (?,?,?,?,?,?,?,?,?)",
+            (
+                manual[0],
+                batch,
+                manual[2] or "",
+                "review_migrate",
+                manual[1],
+                manual[1],
+                manual[1],
+                "資料庫遷移：審核狀態移回原來源，原人工列已移除",
+                target_source,
+            ),
+        )
+    conn.execute(
+        "INSERT INTO meta (key, value) VALUES ('effective_priority_version', 'stale') "
+        "ON CONFLICT(key) DO UPDATE SET value='stale'"
+    )
+
+
 def _install_schema_v3_objects(conn: sqlite3.Connection) -> None:
     """Install timestamp and revision triggers for fresh and migrated databases."""
     conn.execute(
@@ -438,6 +557,22 @@ def _install_schema_v3_objects(conn: sqlite3.Connection) -> None:
             SET revision=(SELECT CAST(value AS INTEGER) FROM meta
                           WHERE key='translation_revision_seq')
             WHERE id=NEW.id;
+        END;
+        """
+    )
+    # 非人工來源的譯文文字被改掉、審核狀態卻沒有一起改時，舊的「已審核」不再成立
+    # 審核、修復與還原流程（_tx(keep_review=True)）自己決定審核狀態並寫進歷史快照，不受此觸發器影響
+    conn.execute("DROP TRIGGER IF EXISTS translation_text_change_clears_review")
+    conn.execute(
+        f"""
+        CREATE TRIGGER translation_text_change_clears_review
+        AFTER UPDATE OF zh_tw ON translation
+        WHEN NEW.source <> 6 AND NEW.zh_tw IS NOT OLD.zh_tw
+             AND OLD.review_status = 'reviewed'
+             AND NEW.review_status IS OLD.review_status
+             AND NOT EXISTS (SELECT 1 FROM meta WHERE key='{KEEP_REVIEW_FLAG}')
+        BEGIN
+            UPDATE translation SET review_status=NULL WHERE id=NEW.id;
         END;
         """
     )

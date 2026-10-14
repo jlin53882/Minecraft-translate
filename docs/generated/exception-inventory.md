@@ -4,13 +4,13 @@
 > 範圍：`app/`、`translation_tool/`、`main.py` 內所有帶 `noqa: BLE001／S110／S112` 的位置。
 > 命令列 QA 工具（`md_extract_qa.py`、`md_inject_qa.py`）的 `print` 為刻意保留，不在此表。
 
-共 **326** 項；其中 **106** 項尚未在程式碼內寫明原因（以「分類」說明處理方式）。
+共 **335** 項；其中 **106** 項尚未在程式碼內寫明原因（以「分類」說明處理方式）。
 
 | 分類 | 數量 | 意義 |
 |---|---|---|
-| 已記錄／回報 | 292 | 例外處理本身有 log、提示、回報錯誤事件或重新丟出；寬鬆捕捉是為了不中斷整批流程 |
+| 已記錄／回報 | 300 | 例外處理本身有 log、提示、回報錯誤事件或重新丟出；寬鬆捕捉是為了不中斷整批流程 |
 | UI／畫面保護 | 18 | UI 層的畫面更新、icon 快取等；失敗只影響顯示，不影響資料 |
-| 盡力而為（靜默） | 16 | 引擎層、只有 `pass`／`continue`／回傳常數；失敗不影響結果（例如進度回報、還原失敗時以原始例外為準） |
+| 盡力而為（靜默） | 17 | 引擎層、只有 `pass`／`continue`／回傳常數；失敗不影響結果（例如進度回報、還原失敗時以原始例外為準） |
 
 | 位置 | 規則 | 分類 | 原因／處理 |
 |---|---|---|---|
@@ -134,6 +134,13 @@
 | `app/views/moddb/bulk_review_dialog.py:BulkReviewDialog._confirm.work` | BLE001 | 已記錄／回報 | worker boundary reports unexpected failures |
 | `app/views/moddb/bulk_review_dialog.py:BulkReviewDialog._launch` | BLE001 | 已記錄／回報 | restore the dialog if the worker cannot launch |
 | `app/views/moddb/bulk_review_dialog.py:BulkReviewDialog._post` | BLE001 | 已記錄／回報 | a disposed page may reject the callback |
+| `app/views/moddb/cleanup_dialog.py:CleanupDialog._refresh_overview.work` | BLE001 | 已記錄／回報 | worker boundary reports unexpected failures |
+| `app/views/moddb/cleanup_dialog.py:CleanupDialog._export.work` | BLE001 | 已記錄／回報 | worker boundary reports unexpected failures |
+| `app/views/moddb/cleanup_dialog.py:CleanupDialog._preview.work` | BLE001 | 已記錄／回報 | worker boundary reports unexpected failures |
+| `app/views/moddb/cleanup_dialog.py:CleanupDialog._apply.work` | BLE001 | 已記錄／回報 | worker boundary reports unexpected failures |
+| `app/views/moddb/cleanup_dialog.py:CleanupDialog._revert.work` | BLE001 | 已記錄／回報 | worker boundary reports unexpected failures |
+| `app/views/moddb/cleanup_dialog.py:CleanupDialog._launch` | BLE001 | 已記錄／回報 | restore the dialog if the worker cannot launch |
+| `app/views/moddb/cleanup_dialog.py:CleanupDialog._post` | BLE001 | 已記錄／回報 | a disposed page may reject the callback |
 | `app/views/moddb/entries_panel.py:EntriesPanel._scroll_list_to.scroll` | BLE001 | 已記錄／回報 | 尚未掛上頁面時不影響清單 |
 | `app/views/moddb/entries_panel.py:EntriesPanel._scroll_list_to` | BLE001 | 已記錄／回報 | 排程失敗不影響清單 |
 | `app/views/moddb/entries_panel.py:EntriesPanel._save.save_in_background` | BLE001 | 已記錄／回報 | worker boundary reports unexpected failures |
@@ -208,6 +215,7 @@
 | `translation_tool/core/ftb_translator.py:translate_directory_generator` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `translation_tool/core/ftb_translator.py:run_ftb_pipeline` | BLE001 | 已記錄／回報 | 預估批次數只是顯示資訊，失敗不影響翻譯 |
 | `translation_tool/core/ftb_translator.py:run_ftb_pipeline` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
+| `translation_tool/core/jar_processor.py:_sniff_book_phase` | BLE001 | 已記錄／回報 | 補充階段失敗不影響已提取的檔案 |
 | `translation_tool/core/jar_processor.py:extract_dual_files_generator` | BLE001 | 已記錄／回報 | 錯誤已記錄或回報給呼叫端，不中斷整批流程 |
 | `translation_tool/core/jar_processor.py:extract_dual_files_generator` | BLE001 | 已記錄／回報 | 錯誤已記錄或回報給呼叫端，不中斷整批流程 |
 | `translation_tool/core/jar_processor_extract.py:extract_from_jar_impl` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
@@ -218,6 +226,7 @@
 | `translation_tool/core/kubejs_translator.py:step2_translate_lm._ProgressProxy.set_progress` | BLE001/S110 | 盡力而為（靜默） | UI 進度回報失敗不可中斷翻譯 |
 | `translation_tool/core/kubejs_translator.py:step2_translate_lm._ProgressProxy.set_status` | BLE001/S110 | 盡力而為（靜默） | UI 狀態回報失敗不可中斷翻譯 |
 | `translation_tool/core/kubejs_translator.py:step2_translate_lm` | BLE001/S110 | 盡力而為（靜默） | UI 進度回報失敗不可中斷翻譯 |
+| `translation_tool/core/lang_merge_content_copy.py:_patchouli_compare` | BLE001 | 盡力而為（靜默） | 讀不出來就無從比對，維持原本流程 |
 | `translation_tool/core/lang_merge_content_copy.py:_compute_patchouli_lang_effectiveness` | BLE001 | 已記錄／回報 | 解析失敗的檔案不計入有效翻譯，已留 debug 紀錄 |
 | `translation_tool/core/lang_merge_content_copy.py:_compute_patchouli_lang_effectiveness` | BLE001 | 已記錄／回報 | 單一檔案失敗不中斷整批統計，已留 debug 紀錄 |
 | `translation_tool/core/lang_merge_content_copy.py:process_content_or_copy_file_impl` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |

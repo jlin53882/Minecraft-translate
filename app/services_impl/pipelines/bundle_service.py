@@ -24,6 +24,7 @@ from translation_tool.core.pack_mcmeta import (
     DEFAULT_PACK_FORMAT,
     pack_description_text,  # noqa: F401 - View 由此取用
 )
+from translation_tool.core.patchouli_compat import find_old_nbt_item_files
 
 logger = logging.getLogger(__name__)
 
@@ -252,6 +253,16 @@ def build_bundle_staging(sources: list[str], staging_dir: str) -> dict:
         "unchanged": unchanged,
         "removed": removed,
     }
+
+
+def scan_staging_old_nbt_items(
+    staging_dir: str, source_dirs: list[str] | None = None
+) -> list[str]:
+    """列出暫存區內物品欄位的舊版 NBT 寫法比 en_us 原文多的 Patchouli 檔案（譯文落後，1.20.5 以上的遊戲無法載入）。
+
+    ``source_dirs`` 是存放 en_us 原文的資料夾；原文本身就用舊寫法的檔案不列入。
+    """
+    return find_old_nbt_item_files(staging_dir, source_dirs)
 
 
 def run_bundling_service(

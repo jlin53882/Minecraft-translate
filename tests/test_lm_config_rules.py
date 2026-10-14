@@ -539,7 +539,8 @@ def test_short_text_skip_len_is_configurable(monkeypatch):
         "lm_translator": {"translator": {"skip_terms": [], "translatable_keywords": []}}
     }
     monkeypatch.setattr(rules, "load_config_shared", lambda: base)
-    assert rules.is_value_translatable("Axe", is_lang=True) is False
+    assert rules.is_value_translatable("axe", is_lang=True) is False
+    assert rules.is_value_translatable("All", is_lang=True) is True  # 短單字例外
 
     cfg0 = {
         "lm_translator": {
@@ -551,8 +552,8 @@ def test_short_text_skip_len_is_configurable(monkeypatch):
         }
     }
     monkeypatch.setattr(rules, "load_config_shared", lambda: cfg0)
-    assert rules.is_value_translatable("Axe", is_lang=True) is True
-    assert rules.is_value_translatable("Ore", is_lang=True) is True
+    assert rules.is_value_translatable("axe", is_lang=True) is True
+    assert rules.is_value_translatable("ore", is_lang=True) is True
 
 
 def test_chatgpt_provider_validates_model_and_oauth_token_without_gemini_keys(

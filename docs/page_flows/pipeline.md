@@ -66,7 +66,7 @@ flowchart TD
   - 抽取：`jar_mod_extract/_提取lang_輸出` 與 `jar_mod_extract/_提取book_輸出`。
   - 語系比對：`locale_sort/_整理輸出`；翻譯來源為 `lang_output/<pending_organized_folder_name>` 與 `patchouli_output/<pending_folder_name>`。
   - 翻譯輸出：`lm_translate/<lm_translate_folder_name>`。
-  - 打包：暫存目錄 `_打包暫存`，ZIP 輸出為 `output_bundler.output_zip_name` 指定的檔名（未設定時為預設值）。
+  - 打包：暫存目錄 `_打包暫存`；暫存完成後掃描 Patchouli 檔案，物品欄位的舊版 NBT 寫法比 `_提取book_輸出` 內的 `en_us` 原文多時在日誌警告（譯文落後，1.20.5 以上的遊戲無法載入該手冊；原文本身用舊寫法的檔案不警告）；ZIP 輸出為 `output_bundler.output_zip_name` 指定的檔名（未設定時為預設值）。
 - 讀取的設定鍵：`lang_merger.pending_folder_name`、`lang_merger.pending_organized_folder_name`、`lm_translator.lm_translate_folder_name`（經 `get_lm_translate_folder_name()`，與機器翻譯頁共用；不是單一資料夾名稱時記錄警告並改用預設 `LM翻譯後`）、`output_bundler.output_zip_name`、`jar_extractor.lang_codes`（精靈預設語系）。
 - 打包的 `pack_format` 由單一「版本或 pack_format」輸入框決定：含 `.` 當 Minecraft 版本，由 `translation_tool/core/pack_format_table.json` 換算；純整數直接使用；空白用預設 34（1.21～1.21.1）。選填的「最大使用版本」可填版本或整數，空白用預設上限。輸入無效或最大版本小於 `pack_format` 時，單步對話框與一鍵精靈都會擋下、不啟動打包。
 - 資料庫選項：`merge_db_snapshot` 與 `lm_db_snapshot` 在點擊當下由 `snapshot_for_run()` 取得，之後的 worker 只使用快照。

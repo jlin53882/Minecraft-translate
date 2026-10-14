@@ -46,6 +46,8 @@ MergeView（頁面標題「語系比對合併」）整合 en_us、zh_cn、zh_tw 
 
 `_process_single_mod` 讀取來源、決定輸出路徑並寫檔；逐 key 決定最終 zh_tw 值與是否列為待翻譯的純函式是 `merge_lang_dicts`（階段 2 的 `merge_extracted_to_assets` 共用同一個）。優先序如下：
 
+每個 mod 的 `lang/` 資料夾內，zh_cn、zh_tw、en_us 各登記一個來源檔（`lang_merge_io.register_lang_source`）：同一語系同時有 `.json` 與 `.lang` 時一律用 `.json`，只有 `.lang` 才用 `.lang`（輸出也維持 `.lang`）。
+
 1. **人工 zh_tw 保護**：key 已存在於 output_dir 的既有 zh_tw.json（`merge_lang_dicts` 的 `is_from_output_dir`）且值含 CJK → 直接保留（外部 ZIP 內的 zh_tw 視為普通來源，仍會套用替換規則再處理）。
 2. **zh_tw（ZIP 來源）含中文** → `apply_replace_rules()`（字串）或 `recursive_translate_dict()`（結構）後採用。
 3. **zh_cn 含中文** → 以 `recursive_translate_dict`（內部走 S2TW 轉繁）後採用。
@@ -68,6 +70,18 @@ MergeView（頁面標題「語系比對合併」）整合 en_us、zh_cn、zh_tw 
 - 結果存入 `_patchouli_eff_cache`（module-level，process 存活期間有效）；key 為 `(cache_namespace, book_root_lower, threshold)`。呼叫端傳入 `cache_store` 時改存於該 store，key 為 `(book_root_lower, threshold)`。同一 book 併發查詢時以 single-flight 只計算一次
 - 用途：`patchouli_skip_zh_cn_switch` 開啟時，zh_cn 已達 effective 的 book 對應 en_us 才跳過；`process_zh_cn_switch` 關閉時一律不啟用
 - **注意**：threshold 同時是 service 的 `patchouli_threshold` 與 UI `patchouli_threshold_field` 的連動值（config `patchouli_effective_translation_threshold`，預設 0.5）
+
+## Mod 資料庫優先序（`lang_merge_dict.merge_lang_dicts` 的 `db_lookup` ← `MergeDbFill.merge_lookup`）
+
+- 階段 1（`lang_merge_pipeline`）與階段 2（`lang_merge_extracted_assets`）都把 `db_lookup` 傳進 `merge_lang_dicts`：輸出資料夾既有的 CJK 譯文先受保護，其次是資料庫命中，再來才是 jar 的 zh_tw 與 zh_cn。
+- 命中條件是鍵值與英文原文都相同；命中時來源標記寫進逐鍵來源檔。
+
+## Patchouli 譯文格式檢查（`lang_merge_content_copy.py:_patchouli_stale_reason` → `patchouli_compat.find_patchouli_mismatch`）
+
+- 每個 `zh_cn/`、`zh_tw/` 的 `.json` 與同書 `en_us/` 的對應檔逐一比對：物品欄位的舊版 NBT 寫法（`id{…}`，`en_us` 沒有同樣寫法時）、頁數或欄位與 `en_us` 不同，都視為 mod 改版後沒跟上的過時譯文。
+- 過時的譯文不寫入輸出；對應的 `en_us` 檔案不會因為整本書翻譯比例達標而被跳過，會照常歸檔到待翻譯，交給 LM 重翻。格式一致的條目不受影響。
+- 同一個文字欄位的格式標記（`$(br)`、`§a`、`%s` 等，換行數量除外）數量與 `en_us` 不同時（`patchouli_compat.find_patchouli_marker_issue`），只記警告、仍採用譯文：這只影響排版，不會讓書載入失敗。
+- 沒有 `en_us` 對應檔，或任一邊無法解析為 JSON 時無從比對，維持原本流程。
 
 ## Merge 呼叫鏈
 

@@ -7,13 +7,26 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
+from translation_tool.core.book_dirs import DEFAULT_BOOK_DIRS, find_book_dir_index
 from translation_tool.core.lm_config_rules import (
-    is_translatable_field,
     is_value_translatable,
 )
+from translation_tool.core.text_sniffer import (
+    VANILLA_NON_TEXT_DIRS,
+    classify_book_string,
+    lang_non_text_reason,
+    looks_like_book_json,
+)
 from translation_tool.utils.config_manager import load_config
+
+# Patchouli 結構性欄位：整個子樹只描述版面或方塊圖樣，沒有顯示文字。
+# 例如 ``multiblock.pattern`` 的列 ``" 0 "``，翻譯或削掉空白都會讓每列長度不一致，
+# 整本書載入失敗。
+_MAX_SNIFF_BYTES = 2 * 1024 * 1024
+NON_TEXT_PATCHOULI_KEYS = frozenset({"multiblock"})
 
 
 def find_patchouli_json(root: Path, dir_names=None):
@@ -31,17 +44,49 @@ def find_patchouli_json(root: Path, dir_names=None):
         load_config()
         .get("lm_translator", {})
         .get("patchouli", {})
-        .get("dir_names", ["patchouli_books", "book", "manual", "guidebook"])
+        .get("dir_names", list(DEFAULT_BOOK_DIRS))
     )
+    detect_by_content = dir_names is None
     if dir_names is None:
         dir_names = patchouli_dir_names
 
     files = []
-    for dir_name in dir_names:
-        pattern = f"assets/*/{dir_name}/**/*.json"
-        files.extend(root.rglob(pattern))
+    seen: set[Path] = set()
+    for path in root.rglob("*.json"):
+        parts = path.relative_to(root).parts
+        if (
+            len(parts) >= 4
+            and parts[0] == "assets"
+            and find_book_dir_index(parts, dir_names) is not None
+            and path not in seen
+        ):
+            seen.add(path)
+            files.append(path)
+            continue
+        if detect_by_content and _is_book_json_by_content(path, parts):
+            seen.add(path)
+            files.append(path)
 
     return files
+
+
+def _is_book_json_by_content(path: Path, parts: tuple[str, ...]) -> bool:
+    """資料夾名稱沒對上時，依內容判斷是不是手冊檔（提取階段放的 ``<模組>_extracted/`` 前綴會先去掉）。"""
+    if parts and parts[0].endswith("_extracted"):
+        parts = parts[1:]
+    if len(parts) < 4 or parts[0] not in ("assets", "data"):
+        return False
+    if parts[2].lower() in VANILLA_NON_TEXT_DIRS or parts[-1].lower() == "book.json":
+        return False
+    if len(parts) == 4 and parts[2] == "lang":
+        return False
+    try:
+        if path.stat().st_size > _MAX_SNIFF_BYTES:
+            return False
+        data = json.loads(path.read_bytes())
+    except (OSError, ValueError):
+        return False
+    return looks_like_book_json(data, parts[2:])
 
 
 def find_lang_json(root: Path):
@@ -70,6 +115,13 @@ def is_lang_file(file_path: Path) -> bool:
     return "lang" in file_path.parts
 
 
+def _list_text_translatable(value: str, is_lang: bool) -> bool:
+    """陣列裡的字串是否要翻譯：lang 檔用既有規則，手冊檔看值的形狀。"""
+    if is_lang:
+        return is_value_translatable(value, is_lang=True)
+    return classify_book_string(value) == "text"
+
+
 def extract_translatables(json_data, file_path):
     """
     從 JSON 資料中抽取可翻譯的項目。
@@ -92,11 +144,16 @@ def extract_translatables(json_data, file_path):
         """遞迴遍歷物件提取可翻譯文字。"""
         if isinstance(obj, dict):
             for k, v in obj.items():
+                if not is_lang and k in NON_TEXT_PATCHOULI_KEYS:
+                    continue
                 new_path = f"{base_path}.{k}" if base_path else k
 
                 if is_lang and isinstance(v, str):
                     if base_path == "":
-                        if is_value_translatable(v, is_lang=True):
+                        if (
+                            is_value_translatable(v, is_lang=True)
+                            and lang_non_text_reason(k, v) is None
+                        ):
                             items.append(
                                 {
                                     "file": str(file_path),
@@ -122,8 +179,7 @@ def extract_translatables(json_data, file_path):
                     not is_lang
                     and isinstance(k, str)
                     and isinstance(v, str)
-                    and is_translatable_field(k)
-                    and is_value_translatable(v, is_lang=False)
+                    and classify_book_string(v) == "text"
                 ):
                     items.append(
                         {
@@ -139,7 +195,7 @@ def extract_translatables(json_data, file_path):
         elif isinstance(obj, list):
             for i, v in enumerate(obj):
                 new_path = f"{base_path}[{i}]"
-                if isinstance(v, str) and is_value_translatable(v, is_lang=is_lang):
+                if isinstance(v, str) and _list_text_translatable(v, is_lang):
                     items.append(
                         {
                             "file": str(file_path),

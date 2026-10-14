@@ -840,6 +840,52 @@ def test_replace_ai_translation_is_compare_and_set_and_does_not_propagate(db_pat
     db.close()
 
 
+def test_replace_ai_translation_reports_shadowed_by_custom_priority(db_path):
+    from translation_tool.translation_db.schema import SRC_AI_REPAIR
+
+    db = TranslationDB(db_path)
+    target = _ai_entry(db)
+    identity = _replace_identity(target)
+
+    db.set_priority((SRC_AI, SRC_AI_REPAIR, SRC_MANUAL))
+    shadowed = db.replace_ai_translation(target.id, "Minecraft", "我的世界", **identity)
+    assert shadowed.status == "updated"
+    assert shadowed.shadowed is True
+    assert db.get_entry(target.id).zh_tw == "Minecraft"
+
+    other = _ai_entry(db, version="1.20.1")
+    db.set_priority((SRC_AI_REPAIR, SRC_AI, SRC_MANUAL))
+    effective = db.replace_ai_translation(
+        other.id, "Minecraft", "我的世界", **_replace_identity(other)
+    )
+    assert effective.status == "updated"
+    assert effective.shadowed is False
+    assert db.get_entry(other.id).zh_tw == "我的世界"
+    db.close()
+
+
+def test_repair_summary_reports_shadowed_updates():
+    panel = translate_panel.TranslatePanel(mock_page(), lambda: None)
+    summary = {
+        "operation": "retranslate_same_source_ai",
+        "candidates": 3,
+        "updated": 3,
+        "shadowed": 2,
+        "unchanged": 0,
+        "flagged": 0,
+        "skipped_changed": 0,
+        "failed": 0,
+        "remaining": 0,
+        "status": "DONE",
+    }
+    panel._apply_repair_summary(summary, final=True)
+    assert "更新 3（其中 2 筆因來源優先序仍顯示原本的譯文）" in (
+        panel.repair_summary_text.value
+    )
+    panel._apply_repair_summary({**summary, "shadowed": 0}, final=True)
+    assert "來源優先序" not in panel.repair_summary_text.value
+
+
 @pytest.mark.parametrize(
     ("field", "wrong_value"),
     [
@@ -2624,3 +2670,133 @@ def test_review_apply_reuses_one_database_connection_for_all_matching_items(
     )
 
     assert len(opened) == 1
+
+
+def test_automatic_quality_repair_skips_a_source_that_stopped_being_effective(db_path):
+    db = TranslationDB(db_path)
+    _ingest(db, "1.21.1", "foo", "k.use", SRC_AI, "使用", en="Use %s")
+    _ingest(db, "1.21.1", "foo", "k.use", SRC_JAR_TW, "使用 %s", en="Use %s")
+    entry = db.list_entries("1.21.1")[0][0]
+    identity = {
+        "expected_version": "1.21.1",
+        "expected_kind": KIND_LANG,
+        "expected_mod_id": "foo",
+        "expected_key": "k.use",
+        "expected_en_us": "Use %s",
+        "expected_revision": None,
+    }
+    db.set_priority((SRC_JAR_TW, SRC_AI, SRC_MANUAL))  # 預覽之後優先序變了：JAR 生效
+
+    skipped = db.replace_translation_quality_mismatch(
+        entry.id, SRC_AI, "使用", "使用 %s", **identity
+    )
+
+    assert skipped.status == "skipped_changed"
+    assert _translation_row(db, entry.id, SRC_AI) == "使用"  # 沒生效的來源不被改寫
+
+    # 人工審查流程本來就列出每個來源，不受生效來源限制
+    reviewed = db.replace_translation_quality_mismatch(
+        entry.id,
+        SRC_AI,
+        "使用",
+        "使用 %s",
+        action="quality_repair_review",
+        **identity,
+    )
+    assert reviewed.status == "updated"
+
+    db.set_priority((SRC_AI, SRC_JAR_TW, SRC_MANUAL))
+    _ingest(db, "1.20.1", "foo", "k.use", SRC_AI, "使用", en="Use %s")
+    other = db.list_entries("1.20.1")[0][0]
+    ok = db.replace_translation_quality_mismatch(
+        other.id,
+        SRC_AI,
+        "使用",
+        "使用 %s",
+        **{**identity, "expected_version": "1.20.1"},
+    )
+    assert ok.status == "updated"
+    db.close()
+
+
+def _translation_row(db, entry_id, source):
+    return db._conn.execute(
+        "SELECT zh_tw FROM translation WHERE entry_id=? AND source=?",
+        (entry_id, source),
+    ).fetchone()[0]
+
+
+def test_replace_ai_translation_unchanged_still_reports_shadowed(db_path):
+    db = TranslationDB(db_path)
+    target = _ai_entry(db)
+    identity = _replace_identity(target)
+    db.set_priority((SRC_AI, SRC_AI_REPAIR, SRC_MANUAL))
+
+    first = db.replace_ai_translation(target.id, "Minecraft", "我的世界", **identity)
+    second = db.replace_ai_translation(target.id, "Minecraft", "我的世界", **identity)
+
+    assert (first.status, first.shadowed) == ("updated", True)
+    assert (second.status, second.shadowed) == ("unchanged", True)
+
+    db.set_priority((SRC_AI_REPAIR, SRC_AI, SRC_MANUAL))
+    # 修復來源已生效：Minecraft 不再符合「AI 生效且仍等於原文」，不屬於候選
+    assert (
+        db.replace_ai_translation(target.id, "Minecraft", "我的世界", **identity).status
+        == "skipped_changed"
+    )
+    db.close()
+
+
+def test_repair_summary_reports_unchanged_but_shadowed():
+    panel = translate_panel.TranslatePanel(mock_page(), lambda: None)
+    summary = {
+        "operation": "retranslate_same_source_ai",
+        "candidates": 2,
+        "updated": 0,
+        "unchanged": 2,
+        "unchanged_shadowed": 1,
+        "flagged": 0,
+        "skipped_changed": 0,
+        "failed": 0,
+        "remaining": 0,
+        "status": "DONE",
+    }
+    panel._apply_repair_summary(summary, final=True)
+    assert "仍相同 2（其中 1 筆已有修復譯文，但因來源優先序仍未生效）" in (
+        panel.repair_summary_text.value
+    )
+
+
+def test_automatic_repair_sync_skips_versions_where_the_source_is_not_effective(
+    db_path,
+):
+    db = TranslationDB(db_path)
+    _ingest(db, "1.21.1", "foo", "k.use", SRC_AI, "使用", en="Use %s")
+    _ingest(db, "1.20.1", "foo", "k.use", SRC_AI, "使用", en="Use %s")
+    _ingest(db, "1.19.2", "foo", "k.use", SRC_AI, "使用", en="Use %s")
+    # 只有 1.20.1 另有模組自帶譯文，優先序讓它蓋過 AI
+    _ingest(db, "1.20.1", "foo", "k.use", SRC_JAR_TW, "別的", en="Use %s")
+    db.set_priority((SRC_JAR_TW, SRC_AI, SRC_MANUAL))
+    main = next(r for r in db.list_entries("1.21.1")[0] if r.key == "k.use")
+    hidden = next(r for r in db.list_entries("1.20.1")[0] if r.key == "k.use")
+    other = next(r for r in db.list_entries("1.19.2")[0] if r.key == "k.use")
+
+    result = db.replace_translation_quality_mismatch(
+        main.id,
+        SRC_AI,
+        "使用",
+        "使用 %s",
+        expected_version="1.21.1",
+        expected_kind=KIND_LANG,
+        expected_mod_id="foo",
+        expected_key="k.use",
+        expected_en_us="Use %s",
+        expected_revision=None,
+        sync_other_versions=True,
+    )
+
+    assert result.status == "updated"
+    assert result.synced_other_versions == 1  # 只有 1.19.2；1.20.1 的 AI 沒生效
+    assert _translation_row(db, hidden.id, SRC_AI) == "使用"
+    assert _translation_row(db, other.id, SRC_AI) == "使用 %s"
+    db.close()

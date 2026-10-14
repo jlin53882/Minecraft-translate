@@ -837,8 +837,19 @@ class TranslatePanel(ft.Column):
                 if s.get("sync_other_versions")
                 else ""
             )
+            + (
+                f"（其中 {s['shadowed']} 筆因來源優先序仍顯示原本的譯文）"
+                if s.get("shadowed")
+                else ""
+            )
             + "；"
-            f"重翻後仍相同 {s.get('unchanged', 0)}；待人工確認 {s.get('flagged', 0)}；"
+            f"重翻後仍相同 {s.get('unchanged', 0)}"
+            + (
+                f"（其中 {s['unchanged_shadowed']} 筆已有修復譯文，但因來源優先序仍未生效）"
+                if s.get("unchanged_shadowed")
+                else ""
+            )
+            + f"；待人工確認 {s.get('flagged', 0)}；"
             f"資料已變動跳過 {s.get('skipped_changed', 0)}；"
             f"失敗 {s.get('failed', 0)}；"
             + (

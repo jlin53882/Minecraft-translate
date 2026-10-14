@@ -7,6 +7,7 @@ import flet as ft
 from app.ui import design
 from app.ui.design import C
 from app.ui.mc_text import mc_text_spans
+from app.ui.md_text import md_text_spans
 
 
 class MinecraftTextPreview:
@@ -53,10 +54,11 @@ class MinecraftTextPreview:
             tight=True,
         )
 
-    def render(self, value: str) -> None:
-        """Render plain text and Minecraft codes, or explain why the preview is empty."""
+    def render(self, value: str, *, markdown: bool = False) -> None:
+        """Render plain text and Minecraft codes (or guide Markdown), or explain why it is empty."""
         value = value or ""
-        spans = mc_text_spans(value, design.MC_PREVIEW_TEXT, 14)
+        build = md_text_spans if markdown else mc_text_spans
+        spans = build(value, design.MC_PREVIEW_TEXT, 14)
         visible_text = "".join(span.text or "" for span in spans).strip()
         self.text.value = ""
         self.text.spans = spans

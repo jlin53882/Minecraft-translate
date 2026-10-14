@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import Any
 
 from translation_tool.translation_db.bulk_review import BulkReviewMixin
+from translation_tool.translation_db.cleanup import CleanupMixin
 from translation_tool.translation_db.models import (
     AITranslationReplaceResult,
     BatchReplaceChange,
@@ -71,6 +72,7 @@ from translation_tool.translation_db.schema import (
     DB_FOREIGN,
     DB_NEWER,
     DEFAULT_PRIORITY,
+    KEEP_REVIEW_FLAG,
     SRC_AI,
     SRC_AI_REPAIR,
     SRC_JAR_CN,
@@ -159,7 +161,7 @@ def _like(text: str) -> str:
     return f"%{esc}%"
 
 
-class TranslationDB(BulkReviewMixin):
+class TranslationDB(BulkReviewMixin, CleanupMixin):
     """資料庫存取物件（執行緒安全：單一連線 + 可重入鎖）。"""
 
     # 品質篩選翻頁用：(條件鍵, 已排序的符合列, 符合總數)，整個程式只留最近一份。
@@ -259,11 +261,20 @@ class TranslationDB(BulkReviewMixin):
 
     @contextmanager
     def _tx(
-        self, *, bump_generation_on_noop: bool = True
+        self, *, bump_generation_on_noop: bool = True, keep_review: bool = False
     ) -> Iterator[sqlite3.Connection]:
-        """單一寫入交易（失敗自動回復）。"""
+        """單一寫入交易（失敗自動回復）。
+
+        ``keep_review`` 用在審核、修復與還原這類自己決定審核狀態與歷史快照的流程：
+        交易內改寫非人工來源的譯文時，不讓觸發器依「文字變了」自動清掉審核標記。
+        """
         with self._lock:
             self._conn.execute("BEGIN IMMEDIATE")
+            if keep_review:
+                self._conn.execute(
+                    "INSERT OR REPLACE INTO meta (key, value) VALUES (?, '1')",
+                    (KEEP_REVIEW_FLAG,),
+                )
             changes_before = self._conn.total_changes
             try:
                 yield self._conn
@@ -271,6 +282,11 @@ class TranslationDB(BulkReviewMixin):
                 self._conn.rollback()
                 raise
             else:
+                if keep_review:
+                    self._conn.execute(
+                        "DELETE FROM meta WHERE key=?", (KEEP_REVIEW_FLAG,)
+                    )
+                    changes_before += 1  # 旗標的寫入與刪除不算資料變動
                 # 資料有變動：遞增世代，讓統計快取（stat_cache）失效
                 if bump_generation_on_noop or self._conn.total_changes > changes_before:
                     self._conn.execute(
@@ -480,7 +496,9 @@ class TranslationDB(BulkReviewMixin):
                         if (
                             converted.strip()
                         ):  # 空白判斷用 strip，但存原樣（前後空白在遊戲內可能有意義）
-                            adds.append((SRC_JAR_CN, converted, item.zh_cn))
+                            # 翻譯 ZIP 指定了來源（提供者）時，轉繁後仍歸在該來源
+                            src_cn = SRC_JAR_CN if item.source is None else item.source
+                            adds.append((src_cn, converted, item.zh_cn))
                     added = False
                     for src, tw, cn in adds:
                         if (eid, src) in have:
@@ -631,11 +649,13 @@ class TranslationDB(BulkReviewMixin):
 
     def _effective_source_stats_by_version_rows(self) -> list[list]:
         if self.has_review_state:
+            # 審核狀態與生效來源各自獨立；非人工來源沒有狀態就是「未審核」
             review = (
-                f"CASE WHEN f.source = {SRC_MANUAL} THEN "
-                "CASE WHEN f.review_status IN "
+                f"CASE WHEN f.review_status IN "
                 "('unreviewed', 'reviewed', 'legacy_unknown') "
-                "THEN f.review_status ELSE 'legacy_unknown' END END"
+                "THEN f.review_status "
+                f"WHEN f.source = {SRC_MANUAL} THEN 'legacy_unknown' "
+                "WHEN f.source IS NOT NULL THEN 'unreviewed' END"
             )
         else:
             review = f"CASE WHEN f.source = {SRC_MANUAL} THEN 'legacy_unknown' END"
@@ -770,10 +790,13 @@ class TranslationDB(BulkReviewMixin):
 
     @property
     def _effective_review_sql(self) -> str:
+        """生效譯文的審核狀態：與來源各自獨立，非人工來源沒有狀態就是未審核。"""
+        if not self.has_review_state:
+            return f"CASE WHEN f.source={SRC_MANUAL} THEN 'legacy_unknown' END"
         return (
-            "f.review_status"
-            if self.has_review_state
-            else f"CASE WHEN f.source={SRC_MANUAL} THEN 'legacy_unknown' END"
+            "COALESCE(f.review_status, CASE "
+            f"WHEN f.source={SRC_MANUAL} THEN 'legacy_unknown' "
+            "WHEN f.source IS NOT NULL THEN 'unreviewed' END)"
         )
 
     # 有效譯文（``effective`` 視圖／表，已套用來源優先序）與 en_us 嚴格相等，且兩者都非空
@@ -810,10 +833,14 @@ class TranslationDB(BulkReviewMixin):
             where.append("f.source = ?")
             params.append(int(criteria.source))
         if criteria.review_status is not None:
-            where.append(
-                f"f.source = {SRC_MANUAL} AND {self._effective_review_sql} = ?"
-            )
-            params.append(criteria.review_status)
+            if criteria.review_status == "reviewed":
+                # 舊資料（歷史狀態待確認）畫面上同樣顯示「人工已審核」，篩選一併納入
+                where.append(
+                    f"{self._effective_review_sql} IN ('reviewed', 'legacy_unknown')"
+                )
+            else:
+                where.append(f"{self._effective_review_sql} = ?")
+                params.append(criteria.review_status)
         if criteria.mod_id:
             where.append("e.mod_id = ?")
             params.append(criteria.mod_id)
@@ -1899,12 +1926,40 @@ class TranslationDB(BulkReviewMixin):
                         new_revision,
                     ),
                 )
+            self._clear_superseded_reviews(
+                conn,
+                [(change.entry_id, change.new_zh_tw) for change in plan.changes],
+                batch,
+                actor,
+            )
             self._refresh(conn, [change.entry_id for change in plan.changes])
+            shadowed = self._count_shadowed_replacements(conn, plan.changes)
         if progress_callback is not None:
             progress_callback("批次替換已提交", 1.0)
         return BatchReplaceResult(
-            batch, len(plan.changes), plan.skipped_count, plan.total_unique_entries
+            batch,
+            len(plan.changes),
+            plan.skipped_count,
+            plan.total_unique_entries,
+            shadowed,
         )
+
+    @staticmethod
+    def _count_shadowed_replacements(conn: sqlite3.Connection, changes) -> int:
+        """寫入後生效譯文仍不是新譯文的條目數（來源優先序讓別的來源蓋過人工）。"""
+        wanted = {int(change.entry_id): change.new_zh_tw for change in changes}
+        ids = list(wanted)
+        shadowed = 0
+        for start in range(0, len(ids), _CHUNK):
+            chunk = ids[start : start + _CHUNK]
+            marks = ",".join("?" for _ in chunk)
+            for entry_id, zh_tw in conn.execute(
+                f"SELECT entry_id, zh_tw FROM effective WHERE entry_id IN ({marks})",
+                chunk,
+            ):
+                if zh_tw != wanted[int(entry_id)]:
+                    shadowed += 1
+        return shadowed
 
     def revert_batch_replace(self, batch_id: str) -> BatchRevertResult:
         """CAS-revert every still-current row in a batch, leaving newer edits intact."""
@@ -1985,6 +2040,7 @@ class TranslationDB(BulkReviewMixin):
                         restored[2] if restored else None,
                     ),
                 )
+                self._restore_cleared_reviews(conn, batch_id, eid)
                 reverted.append(eid)
             self._refresh(conn, reverted)
         return BatchRevertResult(len(reverted), skipped, len(reverted) + skipped)
@@ -2193,6 +2249,11 @@ class TranslationDB(BulkReviewMixin):
             raise ValueError("目前譯文已變動，請重新整理後再審核")
         siblings = self._same_content(conn, entry_id)
         ids = [int(row[0]) for row in siblings]
+        # 審核不改變生效來源：同步到其他版本、必須改寫譯文時，也寫進同一個來源
+        selected_source = conn.execute(
+            "SELECT source FROM effective WHERE entry_id=?", (entry_id,)
+        ).fetchone()
+        target_source = int(selected_source[0]) if selected_source else SRC_MANUAL
         records: dict[int, tuple] = {}
         for offset in range(0, len(ids), _CHUNK):
             chunk = ids[offset : offset + _CHUNK]
@@ -2210,7 +2271,7 @@ class TranslationDB(BulkReviewMixin):
                 "LEFT JOIN translation m ON m.entry_id=e.id AND m.source=? "
                 f"WHERE e.id IN ({marks}) ORDER BY e.mc_version"
             )
-            for row in conn.execute(query, (SRC_MANUAL, *chunk)).fetchall():
+            for row in conn.execute(query, (target_source, *chunk)).fetchall():
                 records[int(row[0])] = row
         current = records.get(entry_id)
         if (
@@ -2233,12 +2294,20 @@ class TranslationDB(BulkReviewMixin):
             review_status = row[5]
             checker = row[4]
             if eid == entry_id:
-                included = review_status != "reviewed" or source != SRC_MANUAL
+                included = review_status != "reviewed"
                 reason = "目前版本" if included else "目前版本已審核"
             elif not propagate:
                 included, reason = False, "已選擇僅審核目前版本"
-            elif row[9] == "reviewed" and (row[7] or "") == expected_zh_tw:
+            elif (review_status == "reviewed" and text == expected_zh_tw) or (
+                row[9] == "reviewed" and (row[7] or "") == expected_zh_tw
+            ):
                 included, reason = False, "已審核相同譯文"
+            elif (
+                text != expected_zh_tw
+                and review_status == "reviewed"
+                and source != target_source
+            ):
+                included, reason = False, "其他版本已有另一來源的已審核譯文"
             elif text != expected_zh_tw:
                 included, reason = True, "原文相同但目前生效譯文不同"
             else:
@@ -2261,6 +2330,121 @@ class TranslationDB(BulkReviewMixin):
                 )
             )
         return result
+
+    def _clear_superseded_reviews(
+        self,
+        conn: sqlite3.Connection,
+        changes: Iterable[tuple[int, str]],
+        batch: str,
+        actor: str,
+    ) -> None:
+        """人工寫入新譯文後，其他來源上「已審核」且譯文不同的列退回未審核。
+
+        已審核的列優先於未審核的人工譯文；不退回的話，手動儲存／批次取代成功寫入
+        卻不會生效。只有退回後人工譯文真的能生效才退回：若有排在人工之前的其他來源
+        （不論審核與否，譯文不同），或另有不會被退回的「視為已審核」的列，退回也換不到
+        人工生效，只會白白丟掉審核標記，所以整個條目都不退回。退回的狀態以 ``review_clear`` 記錄在同一個 batch，還原人工寫入時
+        一併復原（譯文與版本都沒變才復原）。
+        """
+        rank_of = lambda source: conn.execute(
+            f"SELECT {rank_sql(self.priority, '?')}", (source,)
+        ).fetchone()[0]
+        manual_rank = rank_of(SRC_MANUAL)
+        for entry_id, text in changes:
+            others = conn.execute(
+                "SELECT source, zh_tw, checker, review_status, revision "
+                "FROM translation WHERE entry_id=? AND source<>? AND zh_tw<>''",
+                (entry_id, SRC_MANUAL),
+            ).fetchall()
+            # 退回審核後人工仍贏不了（有排在人工前面、或同樣被視為已審核的其他譯文）就不退回
+            if any(
+                zh_tw != text
+                and (
+                    rank_of(source) < manual_rank
+                    or (bool(checker) and status not in ("unreviewed", "reviewed"))
+                )
+                for source, zh_tw, checker, status, _revision in others
+            ):
+                continue
+            for source, zh_tw, checker, status, revision in others:
+                if status != "reviewed" or zh_tw == text:
+                    continue
+                # 有校驗者的列即使沒有狀態也會優先，所以明確標成未審核
+                cleared = "unreviewed" if checker else None
+                conn.execute(
+                    "UPDATE translation SET review_status=? WHERE entry_id=? AND source=?",
+                    (cleared, entry_id, source),
+                )
+                new_revision = conn.execute(
+                    "SELECT revision FROM translation WHERE entry_id=? AND source=?",
+                    (entry_id, source),
+                ).fetchone()[0]
+                conn.execute(
+                    "INSERT INTO history (entry_id, batch, actor, action, old_zh_tw, "
+                    "new_zh_tw, note, prev_checker, prev_review_status, new_checker, "
+                    "new_review_status, prev_revision, new_revision, source_id) "
+                    "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (
+                        entry_id,
+                        batch,
+                        actor,
+                        "review_clear",
+                        zh_tw,
+                        zh_tw,
+                        "人工修改了譯文，原來源的已審核標記退回未審核",
+                        checker,
+                        "reviewed",
+                        checker,
+                        cleared or "",
+                        revision,
+                        new_revision,
+                        source,
+                    ),
+                )
+
+    def _restore_cleared_reviews(
+        self, conn: sqlite3.Connection, batch: str, entry_id: int
+    ) -> None:
+        """還原人工寫入時，把同一個 batch 退回的審核標記復原（列沒被動過才復原）。"""
+        for hid, source, zh_tw, prev_status, new_revision in conn.execute(
+            "SELECT id, source_id, new_zh_tw, prev_review_status, new_revision "
+            "FROM history WHERE batch=? AND entry_id=? AND action='review_clear' "
+            "ORDER BY id DESC",
+            (batch, entry_id),
+        ).fetchall():
+            cur = conn.execute(
+                "SELECT zh_tw, revision, review_status FROM translation "
+                "WHERE entry_id=? AND source=?",
+                (entry_id, source),
+            ).fetchone()
+            if cur is None or cur[0] != zh_tw or cur[1] != new_revision:
+                continue
+            conn.execute(
+                "UPDATE translation SET review_status=? WHERE entry_id=? AND source=?",
+                (prev_status, entry_id, source),
+            )
+            restored = conn.execute(
+                "SELECT revision FROM translation WHERE entry_id=? AND source=?",
+                (entry_id, source),
+            ).fetchone()[0]
+            conn.execute(
+                "INSERT INTO history (entry_id, batch, action, old_zh_tw, new_zh_tw, "
+                "note, prev_review_status, new_review_status, prev_revision, "
+                "new_revision, source_id) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                (
+                    entry_id,
+                    batch + "-restore",
+                    "revert",
+                    zh_tw,
+                    zh_tw,
+                    f"還原審核標記 #{hid}",
+                    cur[2] or "",
+                    prev_status,
+                    cur[1],
+                    restored,
+                    source,
+                ),
+            )
 
     def save_manual(
         self,
@@ -2300,6 +2484,64 @@ class TranslationDB(BulkReviewMixin):
                 for row in candidates
                 if previous.get(int(row[0])) is None or previous[int(row[0])][0] != text
             ]
+            # 人工列早就是這段文字、但生效的是別的譯文：不用改寫人工列，仍要切換生效
+            changed_ids_set = {int(row[0]) for row, _prev in changed}
+            switch_only = [
+                (row, previous[int(row[0])])
+                for row in candidates
+                if int(row[0]) not in changed_ids_set
+                and (row[2] or "") != text
+                and previous.get(int(row[0])) is not None
+            ]
+            if switch_only:
+                # 人工列沒有改文字，但要有新的版本：之後才不會被更早的歷史紀錄越過
+                switch_revisions: dict[int, int] = {}
+                for (eid, *_rest), _prev in switch_only:
+                    conn.execute(
+                        "UPDATE translation SET updated_at=CURRENT_TIMESTAMP "
+                        "WHERE entry_id=? AND source=?",
+                        (eid, SRC_MANUAL),
+                    )
+                    switch_revisions[int(eid)] = conn.execute(
+                        "SELECT revision FROM translation WHERE entry_id=? AND source=?",
+                        (eid, SRC_MANUAL),
+                    ).fetchone()[0]
+                history_only = [
+                    (
+                        eid,
+                        batch,
+                        actor,
+                        "manual",
+                        old or "",
+                        text,
+                        prev[0],
+                        "" if eid == entry_id else f"同步自 {ver_self}",
+                        prev[1],
+                        prev[2],
+                        prev[1],
+                        prev[2],
+                        prev[3],
+                        switch_revisions[int(eid)],
+                    )
+                    for (eid, _ver, old, _src), prev in switch_only
+                ]
+                conn.executemany(
+                    "INSERT INTO history (entry_id, batch, actor, action, old_zh_tw, "
+                    "new_zh_tw, prev_manual, note, prev_checker, prev_review_status, "
+                    "new_checker, new_review_status, prev_revision, new_revision) "
+                    "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    history_only,
+                )
+                self._clear_superseded_reviews(
+                    conn,
+                    [(int(row[0]), text) for row, _prev in switch_only],
+                    batch,
+                    actor,
+                )
+                done.extend(
+                    Impact(row[0], row[1], row[2] or "", row[3], row[0] == entry_id)
+                    for row, _prev in switch_only
+                )
             if changed:
                 conn.executemany(
                     "INSERT INTO translation (entry_id, source, zh_tw, checker, review_status) "
@@ -2355,6 +2597,9 @@ class TranslationDB(BulkReviewMixin):
                     "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                     history_rows,
                 )
+                self._clear_superseded_reviews(
+                    conn, [(int(row[0]), text) for row, _prev in changed], batch, actor
+                )
             self._refresh(conn, [i.entry_id for i in done])
         return done
 
@@ -2381,7 +2626,7 @@ class TranslationDB(BulkReviewMixin):
             raise ValueError("沒有可審核的譯文，請先輸入並儲存")
         batch = uuid.uuid4().hex
         done: list[Impact] = []
-        with self._tx(bump_generation_on_noop=False) as conn:
+        with self._tx(bump_generation_on_noop=False, keep_review=True) as conn:
             preview = self._review_preview_rows(
                 conn,
                 entry_id,
@@ -2410,38 +2655,63 @@ class TranslationDB(BulkReviewMixin):
         actor: str,
         batch: str,
     ) -> list[Impact]:
-        """Write the included preview rows as reviewed manual text (caller owns the transaction)."""
+        """Mark the included preview rows as reviewed (caller owns the transaction).
+
+        Review never changes the source: a sibling that already shows the reviewed
+        text is only marked reviewed on its own effective source; one that shows
+        a different text gets the reviewed text written to the reviewed entry's
+        source (the replaced text stays in history and can be reverted).
+        """
         done: list[Impact] = []
+        own = next((item for item in preview if item.entry_id == entry_id), None)
+        own_source = (
+            int(own.source)
+            if own is not None and own.source is not None
+            else SRC_MANUAL
+        )
         for item in preview:
             if not item.included:
                 continue
             eid, ver = item.entry_id, item.mc_version
+            same_text = item.text == expected_zh_tw and item.source is not None
+            target = int(item.source) if same_text else own_source
             prev = conn.execute(
                 "SELECT zh_tw, checker, review_status, revision FROM translation "
                 "WHERE entry_id=? AND source=?",
-                (eid, SRC_MANUAL),
+                (eid, target),
             ).fetchone()
             if prev and prev[2] == "reviewed" and prev[0] == expected_zh_tw:
                 continue
+            # 人工來源記錄審核者；其他來源沿用原本的校驗欄位，改寫譯文時清空
+            checker = (actor or "人工") if target == SRC_MANUAL else ""
             conn.execute(
                 "INSERT INTO translation "
                 "(entry_id, source, zh_tw, checker, review_status) "
                 "VALUES (?,?,?,?, 'reviewed') "
                 "ON CONFLICT(entry_id, source) DO UPDATE SET "
-                "zh_tw=excluded.zh_tw, checker=excluded.checker, "
+                "checker=CASE WHEN ?=1 OR translation.zh_tw IS NOT excluded.zh_tw "
+                "THEN excluded.checker ELSE translation.checker END, "
+                "zh_tw=excluded.zh_tw, "
                 "review_status='reviewed', updated_at=CURRENT_TIMESTAMP",
-                (eid, SRC_MANUAL, expected_zh_tw, actor or "人工"),
+                (
+                    eid,
+                    target,
+                    expected_zh_tw,
+                    checker,
+                    1 if target == SRC_MANUAL else 0,
+                ),
             )
-            new_revision = conn.execute(
-                "SELECT revision FROM translation WHERE entry_id=? AND source=?",
-                (eid, SRC_MANUAL),
-            ).fetchone()[0]
+            written = conn.execute(
+                "SELECT checker, revision FROM translation WHERE entry_id=? AND source=?",
+                (eid, target),
+            ).fetchone()
             conn.execute(
                 "INSERT INTO history "
                 "(entry_id, batch, actor, action, old_zh_tw, new_zh_tw, "
                 "prev_manual, note, prev_checker, prev_review_status, "
-                "new_checker, new_review_status, prev_revision, new_revision) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "new_checker, new_review_status, prev_revision, new_revision, "
+                "source_id) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (
                     eid,
                     batch,
@@ -2454,21 +2724,27 @@ class TranslationDB(BulkReviewMixin):
                     if eid == entry_id
                     else f"同步審核自 {next((x.mc_version for x in preview if x.entry_id == entry_id), '')}",
                     prev[1] if prev else None,
-                    prev[2] if prev else None,
-                    actor or "人工",
+                    # 非人工來源的審核欄位原本是 NULL；用空字串記錄，還原時換回 NULL
+                    (prev[2] if prev[2] is not None else "") if prev else None,
+                    written[0],
                     "reviewed",
                     prev[3] if prev else None,
-                    new_revision,
+                    written[1],
+                    target,
                 ),
             )
             done.append(Impact(eid, ver, item.text, item.source, eid == entry_id))
         if not any(change.is_self for change in done):
-            manual = conn.execute(
+            current = conn.execute(
                 "SELECT zh_tw, review_status FROM translation "
                 "WHERE entry_id=? AND source=?",
-                (entry_id, SRC_MANUAL),
+                (entry_id, own_source),
             ).fetchone()
-            if manual is None or manual[0] != expected_zh_tw or manual[1] != "reviewed":
+            if (
+                current is None
+                or current[0] != expected_zh_tw
+                or current[1] != "reviewed"
+            ):
                 raise ValueError("目前譯文已變動，請重新整理後再審核")
         return done
 
@@ -2483,7 +2759,7 @@ class TranslationDB(BulkReviewMixin):
             )
             reverted: list[int] = []
             new_batch = uuid.uuid4().hex
-            with self._tx(bump_generation_on_noop=False) as conn:
+            with self._tx(bump_generation_on_noop=False, keep_review=True) as conn:
                 rows = conn.execute(
                     "SELECT id, entry_id, old_zh_tw, new_zh_tw, source_id, "
                     "prev_checker, prev_review_status, new_checker, "
@@ -2579,7 +2855,7 @@ class TranslationDB(BulkReviewMixin):
         )
         reverted: list[int] = []
         new_batch = uuid.uuid4().hex
-        with self._tx(bump_generation_on_noop=False) as conn:
+        with self._tx(bump_generation_on_noop=False, keep_review=True) as conn:
             for (
                 hid,
                 eid,
@@ -2591,17 +2867,21 @@ class TranslationDB(BulkReviewMixin):
                 new_review_status,
                 prev_revision,
                 new_revision,
+                row_source,
+                row_batch,
             ) in conn.execute(
                 f"SELECT id, entry_id, new_zh_tw, prev_manual, prev_checker, "
                 f"prev_review_status, new_checker, new_review_status, "
-                f"prev_revision, new_revision FROM history "
+                f"prev_revision, new_revision, source_id, batch FROM history "
                 f"WHERE action IN ('manual','review') AND {where} ORDER BY id DESC",
                 params,
             ).fetchall():
+                # 審核不改變來源：history 記錄實際被改的來源，舊紀錄一律是人工
+                rsrc = SRC_MANUAL if row_source is None else int(row_source)
                 cur = conn.execute(
                     "SELECT zh_tw, checker, review_status, revision FROM translation "
                     "WHERE entry_id=? AND source=?",
-                    (eid, SRC_MANUAL),
+                    (eid, rsrc),
                 ).fetchone()
                 if cur is None or cur[0] != new_tw:
                     continue  # 之後又被改過，不覆蓋
@@ -2633,7 +2913,7 @@ class TranslationDB(BulkReviewMixin):
                 if prev_manual is None:
                     conn.execute(
                         "DELETE FROM translation WHERE entry_id=? AND source=?",
-                        (eid, SRC_MANUAL),
+                        (eid, rsrc),
                     )
                 else:
                     conn.execute(
@@ -2643,20 +2923,21 @@ class TranslationDB(BulkReviewMixin):
                         (
                             prev_manual,
                             prev_checker,
-                            prev_review_status,
+                            prev_review_status or None,
                             eid,
-                            SRC_MANUAL,
+                            rsrc,
                         ),
                     )
                 restored = conn.execute(
                     "SELECT checker, review_status, revision FROM translation "
                     "WHERE entry_id=? AND source=?",
-                    (eid, SRC_MANUAL),
+                    (eid, rsrc),
                 ).fetchone()
                 conn.execute(
                     "INSERT INTO history (entry_id, batch, action, old_zh_tw, new_zh_tw, "
                     "note, prev_checker, prev_review_status, new_checker, new_review_status, "
-                    "prev_revision, new_revision) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                    "prev_revision, new_revision, source_id) "
+                    "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
                     (
                         eid,
                         new_batch,
@@ -2670,8 +2951,10 @@ class TranslationDB(BulkReviewMixin):
                         restored[1] if restored else None,
                         cur[3],
                         restored[2] if restored else None,
+                        rsrc,
                     ),
                 )
+                self._restore_cleared_reviews(conn, row_batch, eid)
                 reverted.append(eid)
             self._refresh(conn, reverted)
         return len(reverted)
@@ -2823,7 +3106,13 @@ class TranslationDB(BulkReviewMixin):
                 (entry_id, SRC_AI_REPAIR),
             ).fetchone()
             if repair_row is not None and repair_row[0] == new_zh_tw:
-                return AITranslationReplaceResult("unchanged")
+                effective = conn.execute(
+                    "SELECT zh_tw FROM effective WHERE entry_id=?", (entry_id,)
+                ).fetchone()
+                return AITranslationReplaceResult(
+                    "unchanged",
+                    shadowed=effective is None or effective[0] != new_zh_tw,
+                )
             if repair_row is None:
                 conn.execute(
                     "INSERT INTO translation (entry_id, source, zh_tw) VALUES (?,?,?)",
@@ -2872,7 +3161,34 @@ class TranslationDB(BulkReviewMixin):
                 ),
             )
             self._refresh(conn, [entry_id])
-        return AITranslationReplaceResult("updated")
+            effective = conn.execute(
+                "SELECT zh_tw FROM effective WHERE entry_id=?", (entry_id,)
+            ).fetchone()
+        return AITranslationReplaceResult(
+            "updated", shadowed=effective is None or effective[0] != new_zh_tw
+        )
+
+    @staticmethod
+    def _reviewed_like(checker: str | None, review: str | None) -> bool:
+        """與 ``_priority_order`` 相同：這一列是否因審核而排在未審核列之前。"""
+        return review == "reviewed" or (bool(checker) and review != "unreviewed")
+
+    def _would_lose_effect_when_unreviewed(
+        self, conn: sqlite3.Connection, entry_id: int, source_id: int
+    ) -> bool:
+        """這一列退回未審核後，是否會被其他來源取代而不再生效。"""
+        rank_of = lambda source: conn.execute(
+            f"SELECT {rank_sql(self.priority, '?')}", (source,)
+        ).fetchone()[0]
+        own_rank = rank_of(source_id)
+        return any(
+            self._reviewed_like(checker, status) or rank_of(source) < own_rank
+            for source, checker, status in conn.execute(
+                "SELECT source, checker, review_status FROM translation "
+                "WHERE entry_id=? AND source<>? AND zh_tw<>''",
+                (entry_id, source_id),
+            )
+        )
 
     def replace_translation_quality_mismatch(
         self,
@@ -2903,7 +3219,7 @@ class TranslationDB(BulkReviewMixin):
         if not isinstance(new_zh_tw, str) or not new_zh_tw.strip():
             raise ValueError("AI 修復譯文不可為空")
 
-        with self._tx(bump_generation_on_noop=False) as conn:
+        with self._tx(bump_generation_on_noop=False, keep_review=True) as conn:
             current = conn.execute(
                 "SELECT t.zh_tw, t.revision, t.checker, t.review_status "
                 "FROM translation t JOIN entry e ON e.id=t.entry_id "
@@ -2923,6 +3239,14 @@ class TranslationDB(BulkReviewMixin):
                 return AITranslationReplaceResult("skipped_changed")
             if expected_revision is not None and current[1] != expected_revision:
                 return AITranslationReplaceResult("skipped_changed")
+            if action == "quality_repair":
+                # 自動修復只處理生效中的來源；人工審查會列出每個來源，不受此限
+                live = conn.execute(
+                    "SELECT source FROM effective WHERE entry_id=?", (entry_id,)
+                ).fetchone()
+                if live is None or live[0] != source_id:
+                    # 預覽之後來源優先序（或審核）變了，這個來源已不是畫面上生效的那個
+                    return AITranslationReplaceResult("skipped_changed")
             eligible, _issues, _mixed = repair_input_issues(expected_en_us, current[0])
             if not eligible:
                 return AITranslationReplaceResult("skipped_changed")
@@ -2935,12 +3259,21 @@ class TranslationDB(BulkReviewMixin):
                 return AITranslationReplaceResult("unchanged")
 
             def apply_row(target_id, revision, checker, review) -> bool:
-                if source_id == SRC_MANUAL and action == "quality_repair":
-                    new_checker, new_review = "", "unreviewed"
-                elif source_id == SRC_MANUAL and action == "quality_repair_review":
-                    new_checker, new_review = actor, "reviewed"
+                # 審核狀態跟著文字走：自動修復的新文字還沒人看過，人工確認草稿才算已審核
+                if action == "quality_repair":
+                    new_checker = ""
+                    new_review = "unreviewed" if source_id == SRC_MANUAL else None
+                    if (
+                        source_id != SRC_MANUAL
+                        and self._reviewed_like(checker, review)
+                        and self._would_lose_effect_when_unreviewed(
+                            conn, target_id, source_id
+                        )
+                    ):
+                        return False  # 退回審核後生效來源會換掉，保留原文
                 else:
-                    new_checker, new_review = checker, review
+                    new_checker = actor if source_id == SRC_MANUAL else ""
+                    new_review = "reviewed"
                 updated = conn.execute(
                     "UPDATE translation SET zh_tw=?, checker=?, review_status=?, "
                     "updated_at=CURRENT_TIMESTAMP WHERE entry_id=? AND source=? "
@@ -2994,11 +3327,18 @@ class TranslationDB(BulkReviewMixin):
                 "quality_repair",
                 "quality_repair_review",
             }:
+                # 自動修復只處理生效中的來源：其他版本裡這個來源沒在生效就不同步
+                live_only = (
+                    "JOIN effective f ON f.entry_id=t.entry_id AND f.source=t.source "
+                    if action == "quality_repair"
+                    else ""
+                )
                 siblings = conn.execute(
                     "SELECT t.entry_id, t.revision, t.checker, t.review_status "
                     "FROM entry e0 JOIN entry e ON e.kind=e0.kind AND e.mod_id=e0.mod_id "
                     "AND e.key=e0.key AND e.en_us=e0.en_us AND e.mc_version<>e0.mc_version "
                     "JOIN translation t ON t.entry_id=e.id AND t.source=? AND t.zh_tw=? "
+                    f"{live_only}"
                     "WHERE e0.id=?",
                     (source_id, current[0], entry_id),
                 ).fetchall()

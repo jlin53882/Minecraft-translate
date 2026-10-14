@@ -14,6 +14,7 @@ from typing import Any
 
 from ..utils.log_unit import log_debug, log_error, log_info, log_warning
 from ..utils.zip_safety import UnsafePathError, safe_join
+from .patchouli_compat import find_patchouli_marker_issue, find_patchouli_mismatch
 
 # ----------------------------------------------------------------------
 # Backwards-compatible fallback cache for direct helper callers. Production
@@ -28,6 +29,72 @@ class _PatchouliSingleFlight:
 
     def __init__(self) -> None:
         self.done = threading.Event()
+
+
+# ----------------------------------------------------------------------
+# Helper: Patchouli 譯文與 en_us 的格式比對
+# ----------------------------------------------------------------------
+def _patchouli_sibling_path(
+    input_path: str, normalized_path: str, book_root: str, lang_dir: str
+) -> str | None:
+    """同一本書、同一個檔案在另一個語系資料夾的路徑（保留原始大小寫）。
+
+    ``normalized_path`` 與 ``book_root`` 是小寫的 ``assets/…`` 相對路徑；
+    ``input_path`` 保留原始大小寫（可能帶有 ZIP 包裝前綴）。
+    """
+    original = input_path.replace("\\", "/")
+    start = original.lower().rfind(normalized_path)
+    if start == -1 or not normalized_path.startswith(book_root):
+        return None
+    rest = original[start + len(book_root) :]
+    _, _, remainder = rest.partition("/")
+    if not remainder:
+        return None
+    return original[: start + len(book_root)] + lang_dir + "/" + remainder
+
+
+def _patchouli_compare(
+    compare,
+    reader,
+    json_module,
+    input_path: str,
+    normalized_path: str,
+    book_root: str,
+    zh_dir: str | None = None,
+) -> str | None:
+    """讀出同書 en_us 與譯文對應檔，交給 ``compare(en, zh)``，回傳它的差異原因。
+
+    ``zh_dir`` 為 None 表示 ``input_path`` 本身就是譯文檔；否則比對同書 ``zh_dir`` 資料夾內的對應檔。
+
+    沒有 en_us 對應檔、任一邊不是可解析的 JSON 時無從比對，視為沒有問題。
+    """
+    zh_path = (
+        input_path
+        if zh_dir is None
+        else _patchouli_sibling_path(input_path, normalized_path, book_root, zh_dir)
+    )
+    en_path = _patchouli_sibling_path(input_path, normalized_path, book_root, "en_us")
+    if not zh_path or not en_path or not reader.exists(zh_path):
+        return None
+    if not reader.exists(en_path):
+        return None
+    try:
+        return compare(
+            json_module.loads(reader.read_text(en_path)),
+            json_module.loads(reader.read_text(zh_path)),
+        )
+    except Exception:  # noqa: BLE001 - 讀不出來就無從比對，維持原本流程
+        return None
+
+
+def _patchouli_stale_reason(*args, **kwargs) -> str | None:
+    """zh_cn／zh_tw 的檔案與同書 en_us 對應檔結構不同（會讓書載入失敗或譯文錯位）時回傳原因。"""
+    return _patchouli_compare(find_patchouli_mismatch, *args, **kwargs)
+
+
+def _patchouli_marker_issue(*args, **kwargs) -> str | None:
+    """譯文檔的格式標記數量和 en_us 不同時回傳原因；只影響排版，呼叫端只提醒不丟棄。"""
+    return _patchouli_compare(find_patchouli_marker_issue, *args, **kwargs)
 
 
 # ----------------------------------------------------------------------
@@ -355,6 +422,34 @@ def process_content_or_copy_file_impl(
         rel_low = rel_path.lower()
         normalized_root = normalize_patchouli_book_root_fn(book_root).strip("/")
         pending_name = merger_cfg.get("pending_folder_name", "待翻譯")
+
+        is_json = os.path.splitext(input_path)[1].lower() == ".json"
+        if is_json and rel_low.startswith(("zh_cn/", "zh_tw/")):
+            reason = _patchouli_stale_reason(
+                reader, json_module, input_path, normalized_path, book_root
+            )
+            if reason:
+                return {
+                    "success": True,
+                    "log": f"[Patchouli] 與 en_us 格式不同（{reason}），不採用譯文、改列待翻譯: {normalized_path}",
+                }
+            marker_issue = _patchouli_marker_issue(
+                reader, json_module, input_path, normalized_path, book_root
+            )
+            if marker_issue:
+                log_warning(
+                    f"[Patchouli] 譯文的格式標記與 en_us 不同（{marker_issue}），仍採用譯文: {normalized_path}"
+                )
+        if is_json and rel_low.startswith("en_us/"):
+            # 同一個檔案的譯文格式不對時，即使整本書的翻譯比例夠高也不能跳過英文原件
+            if has_eff_zh_tw and _patchouli_stale_reason(
+                reader, json_module, input_path, normalized_path, book_root, "zh_tw"
+            ):
+                has_eff_zh_tw = False
+            if has_eff_zh_cn and _patchouli_stale_reason(
+                reader, json_module, input_path, normalized_path, book_root, "zh_cn"
+            ):
+                has_eff_zh_cn = False
 
         if rel_low.startswith("en_us/") and (
             has_eff_zh_tw or (_allow_zh_cn and has_eff_zh_cn)

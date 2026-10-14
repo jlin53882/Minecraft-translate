@@ -195,7 +195,7 @@ class ReviewScopeController:
         return ft.Column(
             [
                 ft.Text(
-                    "確認原文、目前生效譯文與版本範圍；確認後會記錄為人工已審核。",
+                    "確認原文、目前生效譯文與版本範圍；確認後會標為人工已審核，生效來源不變。",
                     size=12.5,
                     color=C.MUTED,
                     selectable=True,
@@ -482,7 +482,7 @@ class ReviewScopeController:
         message = (
             f"已審核，並同步 {len(others)} 個版本：{'、'.join(others)}"
             if others
-            else "已標記為人工-已審核"
+            else "已標記為人工已審核（來源不變）"
         )
         panel._load_list(page=panel.pager.current_page, keep_scroll=True)
         panel.saved_text.value = message

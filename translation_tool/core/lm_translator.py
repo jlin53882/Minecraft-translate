@@ -17,6 +17,12 @@ from typing import Any
 import orjson as json
 
 import translation_tool.utils.cache_manager as _cache_manager
+from translation_tool.core.guide_translation import (
+    finish_guide_item,
+    guide_output_rel,
+    is_guide_document,
+    render_guide,
+)
 from translation_tool.core.lm_config_rules import (
     validate_api_keys,
     value_fully_translated,
@@ -43,6 +49,10 @@ from translation_tool.core.lm_translator_shared import (
     TranslatorHooks,
     prepare_translator_items,
     run_translator_skeleton,
+)
+from translation_tool.core.patchouli_compat import (
+    find_patchouli_marker_issue,
+    find_patchouli_mismatch,
 )
 from translation_tool.core.translation_path_writer import (
     map_lang_output_path,
@@ -306,6 +316,24 @@ def _split_directory_items(
     )
 
 
+def _warn_patchouli_output_mismatch(src: Path, translated: dict) -> None:
+    """LM 寫出的手冊檔與來源 en_us 格式（結構、格式標記）不同時記警告。
+
+    輸出只是把 en_us 的文字換成譯文，仍照常寫出；警告讓使用者知道哪個檔案的標記被翻壞。
+    """
+    if "patchouli_books" not in src.parts:
+        return
+    try:
+        original = json_std.loads(src.read_text(encoding="utf-8-sig"))
+        reason = find_patchouli_mismatch(original, translated) or (
+            find_patchouli_marker_issue(original, translated)
+        )
+    except (OSError, ValueError):
+        return
+    if reason:
+        log_warning(f"⚠️ 手冊譯文與 en_us 格式不同（{reason}）：{src.name}")
+
+
 def _write_directory_outputs(
     file_cache: dict[str, dict],
     touched_files: set[str],
@@ -316,6 +344,11 @@ def _write_directory_outputs(
     """寫出一個或多個已完成 batch 觸及的檔案。"""
     for file_name in touched_files:
         src = Path(file_name)
+        if is_guide_document(file_cache[file_name]):
+            dst = out_root / guide_output_rel(src.relative_to(root), root)
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            dst.write_text(render_guide(file_cache[file_name]), encoding="utf-8")
+            continue
         rel = map_lang_output_path(src.relative_to(root))
         if export_lang and "lang" in src.parts:
             dst = (out_root / rel).with_suffix(".lang")
@@ -328,6 +361,7 @@ def _write_directory_outputs(
             )
             continue
 
+        _warn_patchouli_output_mismatch(src, file_cache[file_name])
         dst = out_root / rel
         dst.parent.mkdir(parents=True, exist_ok=True)
         dst.write_bytes(
@@ -565,7 +599,10 @@ def _run_directory_translation(
     def translate_batch(batch: list[dict[str, Any]], batch_total: int | None):
         if (should_cancel is not None and should_cancel()) or is_cancelled():
             raise TaskCancelled()
-        return translate_batch_smart(batch, total=batch_total)
+        translated, status = translate_batch_smart(batch, total=batch_total)
+        for item in translated or []:
+            finish_guide_item(item)  # 指南段落：還原行內保護、檢查標籤與連結
+        return translated, status
 
     result = run_translator_skeleton(
         remaining,

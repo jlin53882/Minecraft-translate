@@ -183,7 +183,10 @@ class ScanPanel(ft.Column):
             True,
         )
         self.book_row = kit.SwitchRow(
-            "包含 Patchouli 手冊", "書籍內文也匯入，供跨版本沿用", True, divider=False
+            "包含手冊、指南與進度文字",
+            "Patchouli 手冊、Guide 指南、Advancement 進度內文也匯入，供跨版本沿用",
+            True,
+            divider=False,
         )
         self.options_card = kit.section_card(
             "2　選擇匯入來源與選項",

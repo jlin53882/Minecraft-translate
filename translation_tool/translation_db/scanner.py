@@ -21,8 +21,18 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path, PurePosixPath
 from typing import Any
 
+from translation_tool.core.guide_blocks import (
+    extract_guide_blocks,
+    has_translatable_text,
+)
+from translation_tool.core.lang_codec import parse_lang_text
 from translation_tool.core.lang_merge_dict import contains_cjk
 from translation_tool.core.lm_config_rules import is_translatable_field
+from translation_tool.core.patchouli_compat import (
+    find_patchouli_marker_issue,
+    find_patchouli_mismatch,
+)
+from translation_tool.core.text_sniffer import advancement_texts
 from translation_tool.core.translatable_extractor import extract_translatables
 from translation_tool.translation_db.identity import (
     FileIdentity,
@@ -32,10 +42,15 @@ from translation_tool.translation_db.identity import (
 )
 from translation_tool.translation_db.models import IngestStats, ScanItem
 from translation_tool.translation_db.repository import TranslationDB
-from translation_tool.translation_db.schema import SRC_CUSTOM
+from translation_tool.translation_db.schema import (
+    KIND_ADVANCEMENT,
+    KIND_GUIDE,
+    SRC_CUSTOM,
+)
+from translation_tool.translation_db.sniff_groups import sniffed_groups
 from translation_tool.utils.bounded_executor import bounded_as_completed
 from translation_tool.utils.config_manager import load_config
-from translation_tool.utils.log_unit import log_warning
+from translation_tool.utils.log_unit import log_info, log_warning
 from translation_tool.utils.text_processor import (
     ReplaceRules,
     apply_replace_rules,
@@ -238,6 +253,15 @@ def extract_all_strings(data: Any, *, is_lang: bool) -> dict[str, str]:
     return found
 
 
+def _lang_rank(member: str) -> int:
+    """同一個語系有多個檔案時的取捨：新式 JSON 優先於舊式 ``.lang``，``assets`` 優先於 ``data``。"""
+    return (
+        (4 if member.lower().endswith(".lang") else 0)
+        + (2 if member.startswith("data/") else 0)
+        + (0 if member.rsplit("/", 1)[-1].lower() == member.rsplit("/", 1)[-1] else 1)
+    )
+
+
 def _group_members(
     names: Sequence[str], options: ScanOptions, dir_names: Sequence[str]
 ) -> dict[tuple[str, str, str], dict[str, str]]:
@@ -249,11 +273,15 @@ def _group_members(
         ident: FileIdentity | None = classify_member(name, dir_names)
         if ident is None:
             continue
-        if ident.kind == "patchouli" and not options.include_patchouli:
+        if (
+            ident.kind in ("patchouli", KIND_GUIDE, KIND_ADVANCEMENT)
+            and not options.include_patchouli
+        ):
             continue
-        groups.setdefault((ident.kind, ident.mod_id, ident.file_key), {})[
-            ident.lang
-        ] = name
+        members = groups.setdefault((ident.kind, ident.mod_id, ident.file_key), {})
+        previous = members.get(ident.lang)
+        if previous is None or _lang_rank(name) < _lang_rank(previous):
+            members[ident.lang] = name
     return groups
 
 
@@ -262,7 +290,148 @@ def _read_json_member(
 ) -> dict | None:
     if member is None:
         return None
-    return _load_json(read_limited(zf, member, budget=budget))
+    raw = read_limited(zf, member, budget=budget)
+    if member.lower().endswith(".lang"):
+        return _load_legacy_lang(raw)
+    return _load_json(raw)
+
+
+def _load_legacy_lang(data: bytes) -> dict | None:
+    """舊版 ``key=value`` 語言檔；與語系合併共用 ``parse_lang_text``（續行、註解、空白規則一致）。"""
+    try:
+        text = data.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        return None
+    return parse_lang_text(text) or None
+
+
+def _drop_stale_book(zh: dict | None, en: dict, member: str | None) -> dict | None:
+    """譯文檔和 en_us 格式不同時回傳 None（不採用），否則原樣回傳。"""
+    if zh is None:
+        return None
+    reason = find_patchouli_mismatch(en, zh)
+    if reason:
+        log_info(f"[ModDB] 手冊譯文與 en_us 格式不同（{reason}），不匯入譯文：{member}")
+        return None
+    marker_issue = find_patchouli_marker_issue(en, zh)
+    if marker_issue:
+        log_warning(
+            f"[ModDB] 手冊譯文的格式標記與 en_us 不同（{marker_issue}），仍匯入譯文：{member}"
+        )
+    return zh
+
+
+def _read_blocks(
+    zf: zipfile.ZipFile, budget: ZipReadBudget, member: str | None
+) -> list[str] | None:
+    """指南文字檔依段落切成的區塊文字（與 Markdown 翻譯流程同一套切法）；讀不出來回傳 None。"""
+    if member is None:
+        return None
+    try:
+        text = read_limited(zf, member, budget=budget).decode("utf-8-sig")
+    except UnicodeDecodeError:
+        return None
+    return [block.text for block in extract_guide_blocks(text, member)]
+
+
+def _aligned_blocks(
+    en: list[str] | None, other: list[str] | None, member: str | None
+) -> list[str] | None:
+    """譯文區塊數和原文相同才逐段對應；不同代表指南改版後譯文沒跟上，不匯入以免錯位。"""
+    if other is None or en is None:
+        return other
+    if len(en) == 1 and len(other) > 1:
+        # 原文整頁只有一個區塊（沒有空行分段）、譯文有分段：整頁對整頁
+        return ["\n\n".join(other)]
+    if len(other) != len(en):
+        log_info(
+            f"[ModDB] 指南譯文的段落數與原文不同（{len(en)} / {len(other)}），不匯入譯文：{member}"
+        )
+        return None
+    return other
+
+
+def _guide_items(
+    zf: zipfile.ZipFile,
+    budget: ZipReadBudget,
+    ident_key: tuple[str, str, str],
+    members: dict[str, str],
+    options: ScanOptions,
+) -> list[ScanItem]:
+    """指南（.md／.txt）：每個可翻譯段落一個條目，鍵值是 ``檔案鍵#段落序號``。"""
+    kind, mod_id, file_key = ident_key
+    en = _read_blocks(zf, budget, members.get("en_us"))
+    if en is None and not options.translated:
+        return []  # 掃描 jar 以原文為準；沒有原文就沒有可匯入的條目
+    tw = cn = None
+    if options.read_jar_translations or options.translated:
+        tw = _aligned_blocks(
+            en, _read_blocks(zf, budget, members.get("zh_tw")), members.get("zh_tw")
+        )
+        cn = _aligned_blocks(
+            en, _read_blocks(zf, budget, members.get("zh_cn")), members.get("zh_cn")
+        )
+    if en is None and tw is not None and cn is not None and len(tw) != len(cn):
+        # 沒有原文可對齊，繁中與簡中段落數不同就無法逐段對應：只匯入繁中
+        log_info(
+            f"[ModDB] 指南繁中與簡中的段落數不同（{len(tw)} / {len(cn)}），不匯入簡中：{members.get('zh_cn')}"
+        )
+        cn = None
+    count = len(en) if en is not None else max(len(tw or []), len(cn or []))
+    ident = FileIdentity(kind, mod_id, file_key, "en_us")
+    out: list[ScanItem] = []
+    for index in range(count):
+        source_text = en[index] if en is not None else ""
+        if source_text and contains_cjk(source_text):
+            continue  # 原文已是中文，不是要翻譯的內容
+        if source_text and not has_translatable_text(source_text):
+            continue  # 只有元件標籤，沒有敘述文字
+        zh_tw = zh_cn = ""
+        source = options.translation_source if options.translated else None
+        if tw is not None:
+            raw = tw[index]
+            if options.translated:
+                zh_tw = raw
+            elif contains_cjk(raw):
+                zh_tw = apply_replace_rules(raw, options.rules)
+        if cn is not None and contains_cjk(cn[index]):
+            zh_cn = cn[index]
+        out.append(
+            ScanItem(
+                kind=kind,
+                mod_id=mod_id,
+                key=ident.item_key(str(index)),
+                en_us=source_text,
+                zh_tw=zh_tw,
+                zh_cn=zh_cn,
+                source=source,
+            )
+        )
+    return out
+
+
+def _advancement_items(
+    zf: zipfile.ZipFile,
+    budget: ZipReadBudget,
+    ident_key: tuple[str, str, str],
+    members: dict[str, str],
+) -> list[ScanItem]:
+    """進度：``display.title``／``display.description`` 的字面文字（進度檔沒有語系變體）。"""
+    kind, mod_id, file_key = ident_key
+    data = _read_json_member(zf, budget, members.get("en_us"))
+    ident = FileIdentity(kind, mod_id, file_key, "en_us")
+    return [
+        ScanItem(
+            kind=kind,
+            mod_id=mod_id,
+            key=ident.item_key(path),
+            en_us=text,
+            zh_tw="",
+            zh_cn="",
+            source=None,
+        )
+        for path, text in advancement_texts(data).items()
+    ]
 
 
 def _items_for_group(
@@ -273,6 +442,10 @@ def _items_for_group(
     options: ScanOptions,
 ) -> list[ScanItem]:
     kind, mod_id, file_key = ident_key
+    if kind == KIND_GUIDE:
+        return _guide_items(zf, budget, ident_key, members, options)
+    if kind == KIND_ADVANCEMENT:
+        return _advancement_items(zf, budget, ident_key, members)
     is_lang = kind == "lang"
     en_member = members.get("en_us")
     en = _read_json_member(zf, budget, en_member)
@@ -292,6 +465,11 @@ def _items_for_group(
     if options.read_jar_translations or options.translated:
         tw_obj = _read_json_member(zf, budget, members.get("zh_tw"))
         cn_obj = _read_json_member(zf, budget, members.get("zh_cn"))
+        if kind == "patchouli" and en is not None:
+            # 手冊譯文以 JSON 路徑和原文對應；格式和 en_us 不同（頁數、欄位、舊版物品 NBT）
+            # 時路徑會對到別頁，匯入只會把錯位的譯文寫進資料庫，所以不採用。
+            tw_obj = _drop_stale_book(tw_obj, en, members.get("zh_tw"))
+            cn_obj = _drop_stale_book(cn_obj, en, members.get("zh_cn"))
 
     paths = list(en_items)
     tw_all: dict[str, str] = {}
@@ -299,6 +477,10 @@ def _items_for_group(
         # 已翻譯來源：zh_tw 的每個字串都匯入，連 en_us 沒有的鍵值也收（原文先留空）
         tw_all = extract_all_strings(tw_obj, is_lang=is_lang)
         paths += [p for p in tw_all if p not in en_items]
+    if options.translated and tw_obj is None and cn_obj is not None:
+        # 翻譯來源只有簡中：條目照樣建立（沒有 en_us 的鍵值也收），簡中交給匯入轉繁
+        cn_all = extract_all_strings(cn_obj, is_lang=is_lang)
+        paths += [p for p in cn_all if p not in en_items]
     if not paths:
         return []
 
@@ -353,7 +535,14 @@ def _scan_archive(
     """讀取一個 archive（含內嵌 jar）。安全上限（單一成員、archive、整棵樹）超過時設定 ``result.error``。"""
     budget = _DualBudget(_new_budget(options, label), tree, should_cancel)
     names = zf.namelist()
-    for ident_key, members in _group_members(names, options, dir_names).items():
+    groups = _group_members(names, options, dir_names)
+    if options.include_patchouli:
+        claimed = {n for members in groups.values() for n in members.values()}
+        for key, members in sniffed_groups(
+            zf, names, claimed, translated=options.translated
+        ).items():
+            groups.setdefault(key, members)
+    for ident_key, members in groups.items():
         try:
             result.items.extend(
                 _items_for_group(zf, budget, ident_key, members, options)

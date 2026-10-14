@@ -82,9 +82,7 @@ class BulkReviewDialog:
         self.rows = ft.Column(
             [kit.hint_text("選好版本與來源後，按「產生預覽」。")],
             spacing=8,
-            scroll=ft.ScrollMode.AUTO,
-            height=420,
-        )
+        )  # 捲動交給外層對話框，避免兩層卷軸重疊
         self.pager = kit.Pager(0, page_size=PAGE_SIZE, on_change=self._on_page)
         self.pager.visible = False
         self.include_all_btn = kit.button(
@@ -118,7 +116,7 @@ class BulkReviewDialog:
                 content=ft.Column(
                     [
                         ft.Text(
-                            "把「所選版本、目前生效來源」的條目一次標為人工已審核；"
+                            "把「所選版本、目前生效來源」的條目一次標為人工已審核（來源不變）；"
                             "預覽不會寫入，確認後才會審核，且可整批還原。",
                             size=12,
                             color=C.MUTED,

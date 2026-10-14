@@ -6,6 +6,7 @@ import flet as ft
 
 from app.services_impl.moddb_service import format_taipei_time
 from app.services_impl.moddb_source_service import (
+    REVIEW_BADGE_LABELS,
     source_catalog_for,
     source_label,
     source_tone,
@@ -33,6 +34,8 @@ def _history_event(panel, event, catalog) -> ft.Control:
     action = {
         "manual": "手動儲存（未審核）",
         "review": "人工審核",
+        "review_migrate": "審核遷移",
+        "review_clear": "審核標記退回（人工已修改）",
         "revert": "還原",
         "batch_replace": "批次取代",
         "batch_revert": "批次還原",
@@ -162,8 +165,17 @@ def _translation_row(row, catalog, history) -> ft.Control:
             ft.Row(
                 [
                     kit.chip(
-                        source_label(row.source, catalog, row.review_status),
-                        source_tone(row.source),
+                        source_label(row.source, catalog), source_tone(row.source)
+                    ),
+                    *(
+                        [
+                            kit.chip(
+                                badge,
+                                "em" if row.review_status == "reviewed" else "gold",
+                            )
+                        ]
+                        if (badge := REVIEW_BADGE_LABELS.get(row.review_status or ""))
+                        else []
                     ),
                     *([kit.chip(provenance, "dia")] if provenance else []),
                     ft.Text(

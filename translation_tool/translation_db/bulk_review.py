@@ -1,6 +1,6 @@
-"""批量審核：依「版本 + 目前生效來源」把一批條目標成人工已審核。
+"""批量審核：依「版本 + 目前生效來源」把一批條目標成人工已審核（生效來源不變）。
 
-單筆審核的規則（寫入來源 6、記錄歷史、可還原、同步其他版本）完全沿用
+單筆審核的規則（只改審核狀態、記錄歷史、可還原、同步其他版本）完全沿用
 ``TranslationDB.review_manual``；這裡只負責選取範圍、預覽統計與逐筆套用。
 """
 
@@ -35,12 +35,12 @@ class BulkReviewMixin:
         *,
         conn: sqlite3.Connection | None = None,
     ) -> tuple[BulkReviewCandidate, ...]:
-        """所選版本中、目前生效來源為 ``source`` 且尚未人工審核的條目（有譯文者）。"""
+        """所選版本中、目前生效來源為 ``source`` 且尚未審核的條目（有譯文者）。"""
         criteria = EntryFilter(
             version=version,
             source=int(source),
-            # 來源 6 本身只列「人工-未審核」；其他來源的生效列不會是已審核人工
-            review_status="unreviewed" if int(source) == SRC_MANUAL else None,
+            # 審核狀態與來源各自獨立：任何來源都只列尚未審核的條目
+            review_status="unreviewed",
             quality=QualityFilter(status="consistent")
             if quality_pass_only
             else QualityFilter(),
@@ -95,13 +95,13 @@ class BulkReviewMixin:
         sql = (
             "SELECT e.id, e2.id, f.zh_tw, f2.zh_tw, f2.source, m.zh_tw, "
             f"{manual_review}, {revision}, f2.checker, {effective_review}, "
-            f"{effective_revision} "
+            f"{effective_revision}, f.source "
             "FROM entry e JOIN effective f ON f.entry_id = e.id "
             "JOIN entry e2 INDEXED BY idx_entry_content "
             "ON e2.kind = e.kind AND e2.mod_id = e.mod_id AND e2.key = e.key "
             "AND e2.en_us = e.en_us AND e2.mc_version <> ? "
             "LEFT JOIN effective f2 ON f2.entry_id = e2.id "
-            f"LEFT JOIN translation m ON m.entry_id = e2.id AND m.source = {SRC_MANUAL} "
+            "LEFT JOIN translation m ON m.entry_id = e2.id AND m.source = f.source "
             "LEFT JOIN translation et2 ON et2.entry_id = e2.id AND et2.source = f2.source "
             "WHERE e.id IN (SELECT value FROM json_each(?)) ORDER BY e.id, e2.id"
         )
@@ -120,6 +120,14 @@ class BulkReviewMixin:
                 entry[2].update(repr(tuple(row[1:])).encode("utf-8"))
                 if (status or "") == "reviewed" and (manual or "") == mine:
                     continue  # 已審核相同譯文：不會被寫入
+                if (row[9] or "") == "reviewed" and (theirs or "") == (mine or ""):
+                    continue
+                if (
+                    (row[9] or "") == "reviewed"
+                    and _source != row[11]
+                    and (theirs or "") != (mine or "")
+                ):
+                    continue  # 另一來源已審核的不同譯文：實際審核會保護它，不會寫入
                 entry[0] += 1
                 entry[1] += 0 if theirs == mine else 1
         return tuple(
@@ -168,7 +176,7 @@ class BulkReviewMixin:
         batch = uuid.uuid4().hex
         reviewed = synced = stale = 0
         touched: list[int] = []
-        with self._tx(bump_generation_on_noop=False) as conn:
+        with self._tx(bump_generation_on_noop=False, keep_review=True) as conn:
             if self._database_identity() != plan.database_identity:
                 raise ValueError("資料庫已切換，請重新預覽批量審核")
             if progress_callback is not None:

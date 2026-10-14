@@ -121,6 +121,8 @@ class SameSourceAIRepairReport:
     strict_newline: bool = False
     sync_other_versions: bool = False
     synced_other_versions: int = 0
+    shadowed: int = 0
+    unchanged_shadowed: int = 0
     review_run_id: str = ""
     review_store_path: str = ""
     reviewable_results: int = 0
@@ -1001,12 +1003,36 @@ def _finalize_source_target(
     if replace.status == "updated":
         report.updated += 1
         report.synced_other_versions += replace.synced_other_versions
-        _log_candidate(db, session, report, target, "updated", "✅ 更新成功")
+        if replace.shadowed:
+            report.shadowed += 1
+            _log_candidate(
+                db,
+                session,
+                report,
+                target,
+                "updated_shadowed",
+                "⚠️ 已寫入，但目前來源優先序讓別的譯文仍然生效",
+                "warning",
+            )
+        else:
+            _log_candidate(db, session, report, target, "updated", "✅ 更新成功")
     elif replace.status == "unchanged":
         report.unchanged += 1
-        _log_candidate(
-            db, session, report, target, "unchanged", "譯文已相同，未新增歷史"
-        )
+        if replace.shadowed:
+            report.unchanged_shadowed += 1
+            _log_candidate(
+                db,
+                session,
+                report,
+                target,
+                "unchanged_shadowed",
+                "⚠️ 修復來源已有相同譯文，但目前來源優先序讓別的譯文仍然生效",
+                "warning",
+            )
+        else:
+            _log_candidate(
+                db, session, report, target, "unchanged", "譯文已相同，未新增歷史"
+            )
     else:
         report.skipped_changed += 1
         report.processed_candidates += 1
@@ -1180,8 +1206,19 @@ def _finish_snapshot(db, options, session, report, tracker) -> None:
             if report.sync_other_versions
             else ""
         )
+        + (
+            f"（其中 {report.shadowed} 筆因來源優先序仍顯示原本的譯文）"
+            if report.shadowed
+            else ""
+        )
         + "，"
-        f"仍相同 {report.unchanged}，格式檢查未通過 {report.flagged}，"
+        f"仍相同 {report.unchanged}"
+        + (
+            f"（其中 {report.unchanged_shadowed} 筆已有修復譯文，但因來源優先序仍未生效）"
+            if report.unchanged_shadowed
+            else ""
+        )
+        + f"，格式檢查未通過 {report.flagged}，"
         f"資料已變動跳過 {report.skipped_changed}，失敗 {report.failed}，"
         f"未處理來源項目 {report.unprocessed_candidates}，未送出來源項目 {report.not_submitted_candidates}，"
         f"範圍內仍符合修復條件 {report.remaining}；快取 key 變更 "

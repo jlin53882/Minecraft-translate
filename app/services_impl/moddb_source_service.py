@@ -23,10 +23,17 @@ from translation_tool.translation_db.source_catalog import (
     SourceCatalog,
 )
 
-MANUAL_REVIEW_LABELS = {
-    "unreviewed": "人工-未審核",
-    "reviewed": "人工-已審核",
-    "legacy_unknown": "人工（歷史狀態待確認）",
+# 審核狀態與生效來源各自獨立：來源標籤只顯示來源，審核狀態另外顯示
+REVIEW_STATUS_LABELS = {
+    "unreviewed": "未審核",
+    "reviewed": "人工已審核",
+    "legacy_unknown": "人工已審核",
+}
+# 卡片上額外顯示的審核標籤；未審核是預設狀態，不顯示
+REVIEW_BADGE_LABELS = {
+    status: label
+    for status, label in REVIEW_STATUS_LABELS.items()
+    if status != "unreviewed"
 }
 
 
@@ -121,10 +128,15 @@ def source_label(
     catalog: SourceCatalog | None = None,
     review_status: str | None = None,
 ) -> str:
+    """來源名稱；帶 ``review_status`` 時在後面接審核標籤（純文字場合用，卡片用兩個標籤）。"""
     catalog = catalog or DEFAULT_SOURCE_CATALOG
-    if source == SRC_MANUAL and review_status:
-        return MANUAL_REVIEW_LABELS.get(review_status, catalog.label(source))
-    return catalog.label(source)
+    name = catalog.label(source)
+    badge = REVIEW_BADGE_LABELS.get(review_status or "")
+    if badge is None:
+        return name
+    if source == SRC_MANUAL and review_status in ("reviewed", "legacy_unknown"):
+        return badge  # 「人工」＋「人工已審核」合成一個詞
+    return f"{name}・{badge}"
 
 
 def source_tone(source: int | None) -> str:

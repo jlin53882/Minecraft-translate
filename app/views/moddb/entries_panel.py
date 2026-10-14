@@ -13,7 +13,9 @@ import sqlite3
 import flet as ft
 
 from app.services_impl.moddb_format_diff_service import compare_format_diff
+from app.services_impl.moddb_guide_service import guide_mark_issues, is_guide_kind
 from app.services_impl.moddb_service import (
+    SRC_MANUAL,
     EntryDetail,
     EntryFilter,
     EntryRow,
@@ -22,6 +24,7 @@ from app.services_impl.moddb_service import (
     current_settings,
 )
 from app.services_impl.moddb_source_service import (
+    REVIEW_BADGE_LABELS,
     source_catalog_for,
     source_label,
     source_tone,
@@ -196,6 +199,7 @@ class EntriesPanel(ft.Column):
             on_change=self._on_text_change,
         )
         self.source_chip = ft.Container()
+        self.review_chip = ft.Container()
         self.token_hint = ft.Text("", size=12, color=C.GOLD, visible=False)
         self.mc_preview = MinecraftTextPreview()
         self.meta_col = ft.Column(spacing=4)
@@ -257,7 +261,7 @@ class EntriesPanel(ft.Column):
             icon=ft.Icons.VERIFIED_OUTLINED,
             size="sm",
             on_click=self._confirm,
-            tooltip="確認目前譯文為人工-已審核；同步時只審核目前顯示相同譯文的版本",
+            tooltip="確認目前譯文為人工已審核（生效來源不變）；同步時只審核目前顯示相同譯文的版本",
         )
         self.save_btn = kit.button(
             "儲存", "primary", icon=ft.Icons.CHECK, on_click=self._save, disabled=True
@@ -596,16 +600,22 @@ class EntriesPanel(ft.Column):
             db = self.db() if calculate_impact else None
             catalog = source_catalog_for(db)
         self.source_chip.content = kit.chip(
-            source_label(entry.source, catalog, entry.review_status)
-            if entry.zh_tw
-            else "尚無譯文",
+            source_label(entry.source, catalog) if entry.zh_tw else "尚無譯文",
             source_tone(entry.source),
+        )
+        badge = (
+            REVIEW_BADGE_LABELS.get(entry.review_status or "") if entry.zh_tw else None
+        )
+        self.review_chip.content = (
+            kit.chip(badge, "em" if entry.review_status == "reviewed" else "gold")
+            if badge
+            else None
         )
         self.meta_col.controls = build_entry_metadata(detail)
         self.format_review.render(
             entry.en_us or NO_SOURCE_TEXT,
             self.tw_field.value or "",
-            metadata=[self.source_chip],
+            metadata=[self.source_chip, self.review_chip],
         )
         if calculate_impact:
             self._update_impact()
@@ -758,18 +768,23 @@ class EntriesPanel(ft.Column):
                 notes.append(
                     "與原文的特殊字元不一致：" + "、".join(diff_result.legacy_messages)
                 )
+        is_guide = entry is not None and is_guide_kind(entry.kind)
+        if is_guide and entry.en_us and text.strip():
+            marks = guide_mark_issues(entry.en_us, text)
+            if marks:
+                notes.append("指南標記與原文不一致：" + "、".join(marks))
         space = whitespace_note(text)
         if space:
             notes.append(space)
         self.token_hint.value = "；".join(notes)
         self.token_hint.visible = bool(notes)
-        self.mc_preview.render(text)
+        self.mc_preview.render(text, markdown=is_guide)
         self.chars.render(entry.en_us if entry else "", text, diff_result)
         self.format_review.render(
             entry.en_us if entry else "",
             text,
             diff_result,
-            metadata=[self.source_chip],
+            metadata=[self.source_chip, self.review_chip],
         )
 
     def _update_format_hints_and_refresh(self) -> None:
@@ -895,9 +910,24 @@ class EntriesPanel(ft.Column):
             if others
             else "已儲存"
         )
-        show_snack(self._page, message, C.EM, text_color=C.ON_EM)
+        shadow = self._shadowing_source(db, entry.id, text)
+        held_back = self._shadowed_versions(db, done, entry.id, text)
+        if shadow:
+            # 自訂的來源優先序把別的來源排在人工之前：譯文已存進人工來源，但畫面仍是別的
+            message += f"；但目前來源優先序讓「{shadow}」的譯文仍然生效"
+        if held_back:
+            message += (
+                f"；{'、'.join(held_back)} 因來源優先序仍顯示原本的譯文，"
+                "同步並未在這些版本生效"
+            )
+        if shadow or held_back:
+            show_snack(self._page, message, C.GOLD)
+        else:
+            show_snack(self._page, message, C.EM, text_color=C.ON_EM)
         if self.db() is db:
-            self._resolve_flagged(entry.id, flagged_batch)
+            if not shadow and not compare_format_diff(entry.en_us, text).has_issues:
+                # 新譯文沒生效、或仍與原文的特殊字元不一致時，問題還在，不能移出待處理清單
+                self._resolve_flagged(entry.id, flagged_batch)
             same_entry = self.selected is not None and self.selected.id == entry.id
             unchanged_editor = same_entry and self.pending_text() == text
             if unchanged_editor:
@@ -910,6 +940,34 @@ class EntriesPanel(ft.Column):
                 self._on_changed()
         self._update_impact()
         self._safe_update()
+
+    @staticmethod
+    def _shadowed_versions(db, done, entry_id: int, saved_text: str) -> list[str]:
+        """同步到的其他版本中，儲存後生效譯文仍不是新譯文的版本。"""
+        held_back: list[str] = []
+        for impact in done:
+            if impact.entry_id == entry_id:
+                continue
+            try:
+                current = db.get_entry(impact.entry_id)
+            except sqlite3.Error:
+                continue
+            if current is not None and current.zh_tw != saved_text:
+                held_back.append(impact.mc_version)
+        return held_back
+
+    @staticmethod
+    def _shadowing_source(db, entry_id: int, saved_text: str) -> str | None:
+        """儲存後生效的若不是剛存的人工譯文，回傳仍在生效的來源名稱。"""
+        try:
+            current = db.get_entry(entry_id)
+        except sqlite3.Error:
+            return None
+        if current is None or current.source in (None, SRC_MANUAL):
+            return None
+        if current.zh_tw == saved_text:
+            return None
+        return source_label(current.source, db.source_catalog)
 
     def _resolve_flagged(self, entry_id: int, flagged_batch: int) -> None:
         """機翻「特殊字元不一致」清單裡的條目已手動儲存：移出清單並通知機翻頁扣掉數量。
