@@ -71,6 +71,8 @@ from app.views.moddb.species_suggestion import (
 )
 from app.views.moddb.species_suggestion import SpeciesSuggestion
 from app.views.moddb.suggestions import build_suggestions
+from translation_tool.core.guide_format import guide_issues
+from translation_tool.translation_db.schema import KIND_GUIDE
 from translation_tool.utils.log_unit import (
     log_debug,
     log_exception,
@@ -758,12 +760,17 @@ class EntriesPanel(ft.Column):
                 notes.append(
                     "與原文的特殊字元不一致：" + "、".join(diff_result.legacy_messages)
                 )
+        is_guide = entry is not None and entry.kind == KIND_GUIDE
+        if is_guide and entry.en_us and text.strip():
+            marks = guide_issues(entry.en_us, text)
+            if marks:
+                notes.append("指南標記與原文不一致：" + "、".join(marks))
         space = whitespace_note(text)
         if space:
             notes.append(space)
         self.token_hint.value = "；".join(notes)
         self.token_hint.visible = bool(notes)
-        self.mc_preview.render(text)
+        self.mc_preview.render(text, markdown=is_guide)
         self.chars.render(entry.en_us if entry else "", text, diff_result)
         self.format_review.render(
             entry.en_us if entry else "",

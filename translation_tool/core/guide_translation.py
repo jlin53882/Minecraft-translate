@@ -14,12 +14,12 @@
 from __future__ import annotations
 
 import re
-from collections import Counter
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
 from translation_tool.core.guide_blocks import extract_guide_blocks, front_title_line
+from translation_tool.core.guide_format import guide_issues
 from translation_tool.core.lang_merge_dict import contains_cjk
 from translation_tool.core.text_sniffer import (
     VANILLA_NON_TEXT_DIRS,
@@ -35,8 +35,6 @@ from translation_tool.utils.log_unit import log_warning
 GUIDE_SUFFIXES = (".md", ".txt")
 GUIDE_MARKER = "__guide__"
 _LOCALE_DIR = re.compile(r"^_?[a-z]{2}_[a-z]{2}$", re.IGNORECASE)
-_TAG = re.compile(r"<[^<>]+>")
-_LINK_TARGET = re.compile(r"\]\(([^)]*)\)")
 _MAX_GUIDE_BYTES = 1024 * 1024
 
 
@@ -129,19 +127,18 @@ def load_guide(path: GuidePath) -> tuple[dict, list[dict[str, Any]]]:
     return doc, items
 
 
-def _structure(text: str) -> tuple[Counter, Counter]:
-    return Counter(_TAG.findall(text)), Counter(_LINK_TARGET.findall(text))
-
-
 def finish_guide_item(item: dict[str, Any]) -> None:
-    """LM 回傳後：還原行內保護；元件標籤或連結目標被改動時保留原文。"""
+    """LM 回傳後：還原行內保護；標籤、標題／清單前綴、粗體、程式碼標記或連結目標被改動時保留原文。"""
     shielded = item.pop("_shielded", None)
     if shielded is None:
         return
     translated = unshield_text(str(item.get("text", "")), shielded.shields)
     source = str(item.get("source_text", ""))
-    if _structure(translated) != _structure(source):
-        log_warning(f"⚠️ 指南段落的標籤或連結被改動，保留原文：{item.get('file')}")
+    issues = guide_issues(source, translated)
+    if issues:
+        log_warning(
+            f"⚠️ 指南段落的標記被改動，保留原文：{item.get('file')}（{'、'.join(issues[:3])}）"
+        )
         item["text"] = source
         item["_untranslated"] = True
         return
