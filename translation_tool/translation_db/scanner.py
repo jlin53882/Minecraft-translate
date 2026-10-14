@@ -528,7 +528,9 @@ def _scan_archive(
     groups = _group_members(names, options, dir_names)
     if options.include_patchouli:
         claimed = {n for members in groups.values() for n in members.values()}
-        for key, members in sniffed_groups(zf, names, claimed).items():
+        for key, members in sniffed_groups(
+            zf, names, claimed, translated=options.translated
+        ).items():
             groups.setdefault(key, members)
     for ident_key, members in groups.items():
         try:

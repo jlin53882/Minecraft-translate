@@ -227,3 +227,18 @@ def test_short_ui_words_are_translatable_but_acronyms_are_not():
         assert is_value_translatable(word, is_lang=True), word
     for word in ("NBT", "XP", "ab"):
         assert not is_value_translatable(word, is_lang=True), word
+
+
+def test_report_items_must_match_the_entry_identity(tmp_path):
+    db = _db(tmp_path)
+    report_path = tmp_path / "r.json"
+    db.export_cleanup_report(VERSION, report_path)
+    data = json.loads(report_path.read_text(encoding="utf-8"))
+    # 其他資料庫複本裡同一個 id 可能是別的條目：key／mod／kind 任一不符都不刪
+    data["items"][0]["key"] = "other/key.md#0"
+    data["items"][1]["mod"] = "other_mod"
+    data["items"][2].pop("kind")
+    report_path.write_text(json.dumps(data), encoding="utf-8")
+    plan = db.preview_cleanup(report_path)
+    assert plan.skipped["類型、模組或鍵值與檢查檔不符"] == 3
+    assert plan.deletable == len(data["items"]) - 3 - plan.skipped["已有譯文或歷史"]

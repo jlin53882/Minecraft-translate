@@ -241,8 +241,13 @@ def _is_json_text(text: str) -> bool:
     return True
 
 
-def sniff_text_file(text: str, suffix: str, name: str = "") -> str | None:
-    """依內容判斷 ``.md``／``.txt`` 是不是遊戲內顯示的敘述文字；是的話回傳類別。"""
+def sniff_text_file(
+    text: str, suffix: str, name: str = "", *, translated: bool = False
+) -> str | None:
+    """依內容判斷 ``.md``／``.txt`` 是不是遊戲內顯示的敘述文字；是的話回傳類別。
+
+    ``translated=True`` 時內容是繁中／簡中譯文，敘述文字改看中文字數，不要求英文停用字。
+    """
     suffix = suffix.lower()
     if suffix not in (".md", ".mdx", ".txt"):
         return None
@@ -262,18 +267,28 @@ def sniff_text_file(text: str, suffix: str, name: str = "") -> str | None:
         meta, body = markdown_front_matter(text)
         if meta.get("title") or any(k in meta for k in ("navigation", "categories")):
             return "guide"
-        return "guide" if _prose_paragraphs(body) >= 1 else None
-    return "text" if _prose_paragraphs(text) >= 1 else None
+        return "guide" if _prose_paragraphs(body, translated) >= 1 else None
+    return "text" if _prose_paragraphs(text, translated) >= 1 else None
 
 
-def _prose_paragraphs(text: str) -> int:
-    """像敘述文字的段落數；單段需夠長（>= 30 字元）才算，避免單行 id／標題。"""
+_CJK_RUN = re.compile(r"[㐀-鿿]")
+_CJK_PROSE_MIN = 8  # 譯文段落至少幾個中文字才算敘述
+
+
+def _prose_paragraphs(text: str, translated: bool = False) -> int:
+    """像敘述文字的段落數；單段需夠長（>= 30 字元）才算，避免單行 id／標題。
+
+    譯文（``translated``）以中文字數判斷：至少 8 個中文字。
+    """
     count = 0
     for block in _BLANK_LINE.split(text):
         stripped = block.strip()
         if not stripped or stripped.startswith(("```", "|", "#!")):
             continue
-        if is_prose(stripped) and len(stripped) >= 30:
+        if translated:
+            if len(_CJK_RUN.findall(stripped)) >= _CJK_PROSE_MIN:
+                count += 1
+        elif is_prose(stripped) and len(stripped) >= 30:
             count += 1
     return count
 

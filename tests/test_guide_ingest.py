@@ -452,3 +452,43 @@ def test_legacy_lang_files_use_the_same_parser_as_the_merge_flow(tmp_path):
         _load_legacy_lang(raw)["item.demo.tip"] == "Install the module\non the machine"
     )
     assert _load_legacy_lang(raw)["item.demo.b"] == "Value"
+
+
+def test_translation_zip_with_only_chinese_guides_is_imported_by_content(tmp_path):
+    zh_md = "# 無線終端\n\n用右鍵開啟，需要充滿電的電池才能使用。\n"
+    zh_txt = "第一段說明文字，介紹這台機器的用途。\n\n第二段說明文字，介紹如何連接。\n"
+    book = '{"name": "歡迎", "pages": [{"type": "text", "text": "這是一本很長的說明手冊內容。"}]}'
+    jar = _jar(
+        tmp_path / "pack.zip",
+        {
+            "assets/m/docs/_zh_tw/intro.md": zh_md,
+            "assets/m/docs/_zh_tw/more.mdx": zh_md,
+            "assets/m/notes/_zh_tw/a.txt": zh_txt,
+            "assets/m/mybook/zh_tw/entries/a.json": book,
+        },
+    )
+    result = scan_jar(jar, ScanOptions(version="1.21.1", translated=True), dir_names=())
+    kinds = {(i.kind, i.key.split("#")[0]) for i in result.items}
+    assert ("guide", "docs/intro.md") in kinds
+    assert ("guide", "docs/more.mdx") in kinds
+    assert ("guide", "notes/a.txt") in kinds
+    assert all(i.en_us == "" and i.zh_tw for i in result.items)
+
+
+def test_translated_mode_does_not_accept_chinese_config_text(tmp_path):
+    jar = _jar(tmp_path / "pack.zip", {"assets/m/data/_zh_tw/c.txt": "好\n"})
+    result = scan_jar(jar, ScanOptions(version="1.21.1", translated=True), dir_names=())
+    assert result.items == []
+
+
+def test_each_sniffed_file_is_checked_not_just_the_sampled_ones(tmp_path):
+    book = '{"name": "Intro", "pages": [{"type": "text", "text": "Some page text."}]}'
+    jar = _jar(
+        tmp_path / "m.jar",
+        {
+            "assets/m/docs/en_us/entries/pages.json": book,
+            "assets/m/docs/en_us/config.json": '{"enabled": true, "label": "Enable the feature for everyone"}',
+        },
+    )
+    result = scan_jar(jar, ScanOptions(version="1.21.1"), dir_names=())
+    assert {i.key.split("#")[0] for i in result.items} == {"docs/entries/pages.json"}

@@ -99,6 +99,11 @@ def _patchouli_category(key: str, en_us: str) -> str | None:
     return "not_text" if classify_book_string(en_us) == "not" else None
 
 
+def _item_identity(item: dict[str, Any]) -> tuple[Any, Any, Any]:
+    """檢查檔項目的 ``(類型, 模組, 鍵值)``；用來確認 id 指到的還是同一個條目。"""
+    return item.get("kind"), item.get("mod"), item.get("key")
+
+
 def _text_hash(text: str) -> str:
     return hashlib.sha1(text.encode("utf-8")).hexdigest()[:16]
 
@@ -298,6 +303,8 @@ class CleanupMixin:
                 plan.skipped["條目已不存在"] += 1
             elif row[2] != version or row[1] not in _CLEANUP_KINDS:
                 plan.skipped["版本或類型與檢查檔不符"] += 1
+            elif (row[1], row[3], row[4]) != _item_identity(wanted[entry_id]):
+                plan.skipped["類型、模組或鍵值與檢查檔不符"] += 1
             elif _text_hash(row[5]) != wanted[entry_id].get("en_us_hash"):
                 plan.skipped["原文已變動"] += 1
             elif entry_cleanup_category(row[1], row[4], row[5]) is None:
