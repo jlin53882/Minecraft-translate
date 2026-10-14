@@ -259,3 +259,11 @@ def test_sync_rejects_plan_when_sibling_review_metadata_changed(db):
 
     with pytest.raises(ValueError, match="其他版本"):
         db.execute_bulk_review(plan)
+
+
+def test_dialog_has_a_single_scroll_container(db):
+    from app.views.moddb.bulk_review_dialog import BulkReviewDialog
+    from tests.conftest import mock_page
+
+    dialog = BulkReviewDialog(mock_page(), lambda: db, "1.21.1", None)
+    assert dialog.rows.scroll is None and dialog.rows.height is None
