@@ -67,6 +67,7 @@ class AITranslationReplaceResult:
 
     status: str  # updated / unchanged / skipped_changed
     synced_other_versions: int = 0  # 同步更新的其他版本來源列數
+    shadowed: bool = False  # 已寫入，但來源優先序讓別的譯文仍然生效
 
 
 @dataclass(frozen=True)

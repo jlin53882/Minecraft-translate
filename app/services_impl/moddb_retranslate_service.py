@@ -121,6 +121,7 @@ class SameSourceAIRepairReport:
     strict_newline: bool = False
     sync_other_versions: bool = False
     synced_other_versions: int = 0
+    shadowed: int = 0
     review_run_id: str = ""
     review_store_path: str = ""
     reviewable_results: int = 0
@@ -1001,7 +1002,19 @@ def _finalize_source_target(
     if replace.status == "updated":
         report.updated += 1
         report.synced_other_versions += replace.synced_other_versions
-        _log_candidate(db, session, report, target, "updated", "✅ 更新成功")
+        if replace.shadowed:
+            report.shadowed += 1
+            _log_candidate(
+                db,
+                session,
+                report,
+                target,
+                "updated_shadowed",
+                "⚠️ 已寫入，但目前來源優先序讓別的譯文仍然生效",
+                "warning",
+            )
+        else:
+            _log_candidate(db, session, report, target, "updated", "✅ 更新成功")
     elif replace.status == "unchanged":
         report.unchanged += 1
         _log_candidate(
@@ -1178,6 +1191,11 @@ def _finish_snapshot(db, options, session, report, tracker) -> None:
         + (
             f"（另同步其他版本 {report.synced_other_versions}）"
             if report.sync_other_versions
+            else ""
+        )
+        + (
+            f"（其中 {report.shadowed} 筆因來源優先序仍顯示原本的譯文）"
+            if report.shadowed
             else ""
         )
         + "，"

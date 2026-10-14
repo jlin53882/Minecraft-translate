@@ -840,6 +840,52 @@ def test_replace_ai_translation_is_compare_and_set_and_does_not_propagate(db_pat
     db.close()
 
 
+def test_replace_ai_translation_reports_shadowed_by_custom_priority(db_path):
+    from translation_tool.translation_db.schema import SRC_AI_REPAIR
+
+    db = TranslationDB(db_path)
+    target = _ai_entry(db)
+    identity = _replace_identity(target)
+
+    db.set_priority((SRC_AI, SRC_AI_REPAIR, SRC_MANUAL))
+    shadowed = db.replace_ai_translation(target.id, "Minecraft", "我的世界", **identity)
+    assert shadowed.status == "updated"
+    assert shadowed.shadowed is True
+    assert db.get_entry(target.id).zh_tw == "Minecraft"
+
+    other = _ai_entry(db, version="1.20.1")
+    db.set_priority((SRC_AI_REPAIR, SRC_AI, SRC_MANUAL))
+    effective = db.replace_ai_translation(
+        other.id, "Minecraft", "我的世界", **_replace_identity(other)
+    )
+    assert effective.status == "updated"
+    assert effective.shadowed is False
+    assert db.get_entry(other.id).zh_tw == "我的世界"
+    db.close()
+
+
+def test_repair_summary_reports_shadowed_updates():
+    panel = translate_panel.TranslatePanel(mock_page(), lambda: None)
+    summary = {
+        "operation": "retranslate_same_source_ai",
+        "candidates": 3,
+        "updated": 3,
+        "shadowed": 2,
+        "unchanged": 0,
+        "flagged": 0,
+        "skipped_changed": 0,
+        "failed": 0,
+        "remaining": 0,
+        "status": "DONE",
+    }
+    panel._apply_repair_summary(summary, final=True)
+    assert "更新 3（其中 2 筆因來源優先序仍顯示原本的譯文）" in (
+        panel.repair_summary_text.value
+    )
+    panel._apply_repair_summary({**summary, "shadowed": 0}, final=True)
+    assert "來源優先序" not in panel.repair_summary_text.value
+
+
 @pytest.mark.parametrize(
     ("field", "wrong_value"),
     [

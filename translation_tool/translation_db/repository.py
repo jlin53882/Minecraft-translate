@@ -3122,7 +3122,12 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
                 ),
             )
             self._refresh(conn, [entry_id])
-        return AITranslationReplaceResult("updated")
+            effective = conn.execute(
+                "SELECT zh_tw FROM effective WHERE entry_id=?", (entry_id,)
+            ).fetchone()
+        return AITranslationReplaceResult(
+            "updated", shadowed=effective is None or effective[0] != new_zh_tw
+        )
 
     def replace_translation_quality_mismatch(
         self,
