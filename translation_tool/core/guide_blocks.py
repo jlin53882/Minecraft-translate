@@ -102,22 +102,43 @@ def _is_name_list(lines: list[str]) -> bool:
     )
 
 
-def has_translatable_text(text: str) -> bool:
-    """這個區塊是不是玩家會讀到的敘述文字、值得送去翻譯。
+NON_TEXT_REASONS = {
+    "tag_only": "只有標籤或符號",
+    "comment": "Markdown 註解",
+    "license": "授權條款",
+    "placeholder": "佔位字（TODO／Lorem ipsum）",
+    "key_value": "設定內容（key: value）",
+    "name_list": "名字清單",
+}
+
+
+def non_text_reason(text: str) -> str | None:
+    """區塊不是敘述文字時的原因代碼（見 ``NON_TEXT_REASONS``）；是敘述文字回傳 None。
 
     只看內容形狀：去掉所有 ``<…>`` 標籤後要有文字；Markdown 註解、授權條款、設定內容
-    （``key: value``）、名字清單、``TODO``／Lorem ipsum 佔位字不是敘述文字。區塊序號不因此
-    位移，呼叫端略過這種區塊即可。
+    （``key: value``）、名字清單、``TODO``／Lorem ipsum 佔位字不是玩家會讀到的敘述文字。
     """
     visible = _ANY_TAG.sub("", text)
     if _LETTER.search(visible) is None:
-        return False
+        return "tag_only"
     lines = [line for line in text.splitlines() if line.strip()]
-    if _is_comment_block(lines) or _LICENSE_PHRASE.search(text):
-        return False
+    if _is_comment_block(lines):
+        return "comment"
+    if _LICENSE_PHRASE.search(text):
+        return "license"
     if is_placeholder_text(visible):
-        return False
-    return not (_is_key_value_block(lines) or _is_name_list(lines))
+        return "placeholder"
+    if _is_key_value_block(lines):
+        return "key_value"
+    if _is_name_list(lines):
+        return "name_list"
+    return None
+
+
+def has_translatable_text(text: str) -> bool:
+    """這個區塊是不是玩家會讀到的敘述文字、值得送去翻譯。區塊序號不因此位移，
+    呼叫端略過不是敘述文字的區塊即可。"""
+    return non_text_reason(text) is None
 
 
 def extract_guide_blocks(text: str, name: str) -> list[GuideBlock]:

@@ -1,5 +1,11 @@
 """Mod 翻譯資料庫：分版本、可掃描 jar、與翻譯流程整合的 SQLite 翻譯記憶庫。"""
 
+from translation_tool.translation_db.cleanup import (
+    CLEANUP_CATEGORIES,
+    CleanupBatchInfo,
+    CleanupPlan,
+    CleanupReport,
+)
 from translation_tool.translation_db.models import (
     AITranslationReplaceResult,
     BatchReplaceChange,
@@ -48,6 +54,7 @@ from translation_tool.translation_db.settings import (
 from translation_tool.translation_db.source_catalog import SourceCatalog
 
 __all__ = [
+    "CLEANUP_CATEGORIES",
     "DEFAULT_PRIORITY",
     "KIND_ADVANCEMENT",
     "KIND_GUIDE",
@@ -63,6 +70,9 @@ __all__ = [
     "BulkReviewCandidate",
     "BulkReviewPlan",
     "BulkReviewResult",
+    "CleanupBatchInfo",
+    "CleanupPlan",
+    "CleanupReport",
     "DbSettings",
     "EffectiveSourceStat",
     "EntryDetail",

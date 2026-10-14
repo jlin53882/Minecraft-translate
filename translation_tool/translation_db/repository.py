@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import Any
 
 from translation_tool.translation_db.bulk_review import BulkReviewMixin
+from translation_tool.translation_db.cleanup import CleanupMixin
 from translation_tool.translation_db.models import (
     AITranslationReplaceResult,
     BatchReplaceChange,
@@ -159,7 +160,7 @@ def _like(text: str) -> str:
     return f"%{esc}%"
 
 
-class TranslationDB(BulkReviewMixin):
+class TranslationDB(BulkReviewMixin, CleanupMixin):
     """資料庫存取物件（執行緒安全：單一連線 + 可重入鎖）。"""
 
     # 品質篩選翻頁用：(條件鍵, 已排序的符合列, 符合總數)，整個程式只留最近一份。

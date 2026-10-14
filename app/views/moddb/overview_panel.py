@@ -11,6 +11,8 @@ from app.services_impl.moddb_source_service import source_label, source_tone
 from app.ui import design, kit
 from app.ui.design import C
 from app.ui.kit.inputs import BUTTON_HEIGHTS
+from app.ui.snack import show_snack
+from app.views.moddb.cleanup_dialog import CleanupDialog
 from app.views.moddb.formatting import format_count, percent
 from translation_tool.utils.log_unit import log_debug
 
@@ -100,6 +102,12 @@ class OverviewPanel(ft.Column):
             icon=ft.Icons.REFRESH,
             on_click=lambda _e: self.refresh(),
         )
+        self.cleanup_btn = kit.button(
+            "資料清理",
+            "secondary",
+            icon=ft.Icons.CLEANING_SERVICES_OUTLINED,
+            on_click=self._open_cleanup,
+        )
         self.problem = ft.Text(
             "", size=12.5, color=C.RED, selectable=True, visible=False
         )
@@ -151,7 +159,10 @@ class OverviewPanel(ft.Column):
             spacing=12,
         )
         self.controls = [
-            ft.Row([self.refresh_btn], alignment=ft.MainAxisAlignment.END),
+            ft.Row(
+                [self.cleanup_btn, self.refresh_btn],
+                alignment=ft.MainAxisAlignment.END,
+            ),
             self.loading,
             self.problem,
             self.empty,
@@ -469,6 +480,14 @@ class OverviewPanel(ft.Column):
         ] or [kit.hint_text("尚未有掃描記錄")]
 
     # ------------------------------------------------------------------ 導覽
+    def _open_cleanup(self, _e=None) -> None:
+        if self._get_db() is None:
+            show_snack(self._page, "目前沒有可用的資料庫。", C.GOLD)
+            return
+        CleanupDialog(
+            self._page, self._get_db, lambda: self.refresh(update=True)
+        ).open()
+
     def _goto_scan(self) -> None:
         if self._open_scan:
             self._open_scan()

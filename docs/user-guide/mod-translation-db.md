@@ -154,6 +154,17 @@ Mod DB 批次機翻預設只處理沒有生效譯文的條目，並透過 `write
 
 Patchouli 與 lang 走同一個流程，只是身分不同。FTB Quests / KubeJS / Markdown 不使用資料庫。
 
+### 資料清理（總覽頁「資料清理」）
+
+清理目前規則判定「不是要翻譯的內容」的舊條目（指南：只有標籤或符號、Markdown 註解、授權條款、設定內容、名字清單、`TODO`／Lorem ipsum 佔位字；Patchouli：多方塊圖案列、佔位字、不是顯示文字的字串）。語言檔與進度文字不清理。
+
+1. **匯出檢查檔**：選版本後按「匯出檢查檔」，在資料庫檔案旁的 `cleanup_reports` 資料夾寫出 JSON（只讀資料庫、不刪任何東西）。檔案內有每類的筆數與逐筆項目（編號、類別、模組、鍵值、原文）。
+2. **自行檢查**：用編輯器開啟，不想刪的項目整個移除，或把 `delete` 改成 `false`。
+3. **依檢查檔清理**：選檔案先「預覽刪除」，會依**目前資料與規則**逐筆重新檢查：條目已不存在、原文已變動、現在判為正常內容、或已有譯文／歷史紀錄的都會略過並列出原因；確認後才刪除。
+4. **還原上次清理**：刪除前整批（含關聯的譯文、生效譯文與歷史）存進 `cleanup_batch`，可整批還原；重新掃描後已有同一條目的會略過、不覆蓋。
+
+有任何譯文（包含模組自帶繁中）、生效譯文或歷史紀錄的條目一律不列入，所以不會刪到你翻過、審核過的內容。
+
 ## 設定（`translation_db`）
 
 | 設定 | 預設 | 說明 |
@@ -193,6 +204,7 @@ translation_tool/translation_db/
   scanner.py     讀 jar（含 META-INF/jarjar 內嵌 jar、Patchouli 書籍）並寫入
   resolver.py    翻譯流程用的查詢（TranslationResolver）與寫回緩衝（WriteBackBuffer）
   settings.py    讀取 translation_db 設定、開啟資料庫
+  cleanup.py     資料清理：匯出檢查檔、預覽與刪除、整批還原
 translation_tool/core/lm_translator_db.py   目錄翻譯的銜接（開啟、分流、寫回）
 app/services_impl/moddb_service.py          View 取用資料庫的服務層（View 不直接 import 引擎）
 app/views/moddb_view.py + app/views/moddb/  總覽 / 條目校對 / 掃描匯入

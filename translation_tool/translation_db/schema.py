@@ -151,6 +151,16 @@ CREATE TABLE IF NOT EXISTS stat_cache (
     value TEXT NOT NULL
 );
 
+-- 資料庫清理批次：刪除前的整批快照（JSON），供還原
+CREATE TABLE IF NOT EXISTS cleanup_batch (
+    id          TEXT PRIMARY KEY,
+    mc_version  TEXT NOT NULL,
+    created_at  TEXT NOT NULL,
+    entry_count INTEGER NOT NULL,
+    payload     TEXT NOT NULL,
+    reverted_at TEXT
+);
+
 CREATE TABLE IF NOT EXISTS scan_run (
     id          INTEGER PRIMARY KEY,
     mc_version  TEXT NOT NULL,
