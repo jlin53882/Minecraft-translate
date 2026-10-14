@@ -225,3 +225,46 @@ def test_tag_only_blocks_are_not_translatable_but_keep_block_indexes():
     )
     blocks = extract_guide_blocks(text, "a.md")
     assert [has_translatable_text(b.text) for b in blocks] == [True, False, True]
+
+
+def test_non_prose_guide_blocks_are_not_translatable():
+    from translation_tool.core.guide_blocks import has_translatable_text
+
+    comment = "[//]: # (navigation:)\n[//]: # (  title: X)"
+    license_text = "Permission is hereby granted, free of charge, to any person."
+    copyright_line = "Copyright (c) 2023 Someone"
+    settings = (
+        "Dragon ShouldSpawn: true\nDragon SpawnDebug: false\nDragon SpawnYFloor: -50"
+    )
+    names = "\n".join(f"Name{i}" for i in range(10))
+    todo = "[TODO: screenshot goes here]"
+    for text in (comment, license_text, copyright_line, settings, names, todo):
+        assert not has_translatable_text(text), text
+
+
+def test_prose_that_looks_a_little_like_the_excluded_shapes_is_kept():
+    from translation_tool.core.guide_blocks import has_translatable_text
+
+    keep = [
+        "- Blue cube: Normal ME devices, they have enough channel.\n"
+        "- Yellow cube: Dense ME devices, they can pass 32 channels.\n"
+        "- Red cube: Broken devices.",
+        "Note: the terminal needs power to work properly.",
+        "Alpha\nBeta\nGamma",  # 少於 8 行不算名字清單
+        "Use the **Terminal** to see items.",
+    ]
+    for text in keep:
+        assert has_translatable_text(text), text
+
+
+def test_placeholder_book_strings_are_not_text():
+    from translation_tool.core.text_sniffer import classify_book_string
+
+    for value in (
+        "TODO",
+        "[TODO: photo of GUI goes here]",
+        "$(italic)TODO: heat pipe image/$",
+        "Lorem ipsum dolor sit amet, consectetur adipiscing elit.",
+    ):
+        assert classify_book_string(value) == "not", value
+    assert classify_book_string("The todo list is on the board.") == "text"

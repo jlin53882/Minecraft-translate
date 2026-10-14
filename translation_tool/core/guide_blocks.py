@@ -11,6 +11,7 @@ import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 
+from translation_tool.core.text_sniffer import is_placeholder_text
 from translation_tool.plugins.md.md_extract_qa import extract_blocks
 
 _FRONT_RULE = re.compile(r"^---\s*$")
@@ -59,11 +60,64 @@ def _front_title(lines: Sequence[str]) -> tuple[int, str, str] | None:
     return None
 
 
+_COMMENT_LINE = re.compile(r"^\s*\[//\]:\s*#")
+_LICENSE_PHRASE = re.compile(
+    r"permission is hereby granted|without warranty of any kind"
+    r"|the above copyright notice|copyright \(c\)|©"
+    r"|licensed under the (?:apache|mit|gnu)|gnu (?:lesser |affero )?general public license"
+    r"|creative commons|redistribution and use in source and binary forms"
+    r"|^\s*(?:mit|bsd|isc|apache|mozilla public|gnu)[\w \s.,-]*licen[sc]e\s*$",
+    re.IGNORECASE,
+)
+_KEY_VALUE_LINE = re.compile(r"^\s*[A-Za-z_][\w.\-]*(?:[ ][\w.\-]+){0,2}\s*[:=]\s*\S")
+_SENTENCE_END = re.compile(r"[.!?。！？:;]\s*$")
+_LIST_OR_MARKUP_LINE = re.compile(r"^\s*(?:[-*+>|#]|\d+[.)])")
+_KEY_VALUE_SHARE = 0.6
+_NAME_LIST_MIN_LINES = 8
+_KEY_VALUE_MIN_LINES = 3
+
+
+def _is_comment_block(lines: list[str]) -> bool:
+    """``[//]: #`` 開頭的區塊是 Markdown 註解（不顯示給玩家）。"""
+    return bool(lines) and _COMMENT_LINE.match(lines[0]) is not None
+
+
+def _is_key_value_block(lines: list[str]) -> bool:
+    """多數行都是 ``key: value`` ／ ``key=value`` 的設定內容。"""
+    if len(lines) < _KEY_VALUE_MIN_LINES:
+        return False
+    hits = sum(1 for line in lines if _KEY_VALUE_LINE.match(line))
+    return hits / len(lines) >= _KEY_VALUE_SHARE
+
+
+def _is_name_list(lines: list[str]) -> bool:
+    """很多行、每行一到三個字、沒有句末標點、也不是清單或表格：名字清單。"""
+    if len(lines) < _NAME_LIST_MIN_LINES:
+        return False
+    return all(
+        not _LIST_OR_MARKUP_LINE.match(line)
+        and not _SENTENCE_END.search(line)
+        and len(line.split()) <= 3
+        for line in lines
+    )
+
+
 def has_translatable_text(text: str) -> bool:
-    """去掉所有 ``<…>`` 標籤後還有文字的才值得翻譯；只有元件標籤的區塊（如
-    ``<ImportStructure src="…"></ImportStructure>``）不是敘述文字。區塊序號不因此位移，
-    呼叫端略過這種區塊即可。"""
-    return _LETTER.search(_ANY_TAG.sub("", text)) is not None
+    """這個區塊是不是玩家會讀到的敘述文字、值得送去翻譯。
+
+    只看內容形狀：去掉所有 ``<…>`` 標籤後要有文字；Markdown 註解、授權條款、設定內容
+    （``key: value``）、名字清單、``TODO``／Lorem ipsum 佔位字不是敘述文字。區塊序號不因此
+    位移，呼叫端略過這種區塊即可。
+    """
+    visible = _ANY_TAG.sub("", text)
+    if _LETTER.search(visible) is None:
+        return False
+    lines = [line for line in text.splitlines() if line.strip()]
+    if _is_comment_block(lines) or _LICENSE_PHRASE.search(text):
+        return False
+    if is_placeholder_text(visible):
+        return False
+    return not (_is_key_value_block(lines) or _is_name_list(lines))
 
 
 def extract_guide_blocks(text: str, name: str) -> list[GuideBlock]:

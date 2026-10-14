@@ -278,6 +278,14 @@ _WHITESPACE = re.compile("[ \t\r\n]")
 _ASCII_LETTER = re.compile(r"[A-Za-z]")
 
 
+_PLACEHOLDER_TEXT = re.compile(r"^\W*(?:todo|tbd|fixme)\b|lorem\s+ipsum", re.IGNORECASE)
+
+
+def is_placeholder_text(text: str) -> bool:
+    """開發者留下的佔位字（``TODO``、``[TODO: … goes here]``、Lorem ipsum）。"""
+    return _PLACEHOLDER_TEXT.search(text) is not None
+
+
 def classify_book_string(value: str) -> str:
     """手冊 JSON 的字串值是什麼：``"text"``（要翻譯）、``"lang_key"``（指向語言檔的鍵）或 ``"not"``。
 
@@ -306,6 +314,8 @@ def classify_book_string(value: str) -> str:
     ):
         return "not"
     core = _BOOK_MARKUP.sub("", s)
+    if is_placeholder_text(core):
+        return "not"
     if not _WHITESPACE.search(s):
         if _ANY_RESLOC.fullmatch(s) or _PATHLIKE.fullmatch(s):
             return "not"
