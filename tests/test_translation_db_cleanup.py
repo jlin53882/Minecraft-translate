@@ -182,3 +182,21 @@ def test_service_exports_into_a_folder_next_to_the_database_and_lists_newest_fir
     assert svc.list_cleanup_reports(db)[0] == other
     plan = svc.preview_cleanup(db, other)
     assert plan.deletable == 5
+
+
+def test_overview_counts_per_kind_and_category_without_deleting(tmp_path):
+    from app.services_impl import moddb_cleanup_service as svc
+
+    db = _db(tmp_path)
+    before = _count(db)
+    counts, protected = svc.cleanup_overview(db, VERSION)
+    assert counts == {
+        ("guide", "tag_only"): 1,
+        ("guide", "license"): 1,
+        ("guide", "comment"): 1,
+        ("patchouli", "multiblock"): 1,
+        ("patchouli", "placeholder"): 1,
+    }
+    assert protected == 1
+    assert _count(db) == before
+    assert svc.cleanup_overview(db, "9.9.9") == ({}, 0)

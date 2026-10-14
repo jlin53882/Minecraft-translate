@@ -19,7 +19,7 @@ from app.tasks.operation_registry import (
     ShutdownPolicy,
     launch_page_operation,
 )
-from app.ui import kit
+from app.ui import design, kit
 from app.ui.design import C
 from app.ui.dialogs import (
     RESPONSIVE_DIALOG_MARKER,
@@ -28,7 +28,7 @@ from app.ui.dialogs import (
     present_page_dialog,
 )
 from app.ui.snack import show_snack
-from app.views.moddb.formatting import format_count
+from app.views.moddb.formatting import format_count, kind_label
 from translation_tool.utils.log_unit import log_exception, log_info, log_warning
 
 
@@ -56,7 +56,9 @@ class CleanupDialog:
 
     # ------------------------------------------------------------------ 版面
     def _build_controls(self) -> None:
-        self.version_dd = kit.dropdown(label="版本", dense=True, width=180)
+        self.version_dd = kit.dropdown(
+            label="版本", dense=True, width=180, on_select=self._on_version
+        )
         self.export_btn = kit.button(
             "匯出檢查檔",
             "secondary",
@@ -66,6 +68,11 @@ class CleanupDialog:
         self.open_folder_btn = kit.button(
             "開啟檢查檔資料夾", "ghost", size="sm", on_click=self._open_folder
         )
+        self.overview_title = ft.Text(
+            "", size=13, weight=ft.FontWeight.BOLD, color=C.TEXT
+        )
+        self.overview_body = ft.Column(spacing=2, tight=True)
+        self._overview_generation = 0
         self.export_summary = ft.Text(
             "", size=12.5, color=C.TEXT, selectable=True, visible=False
         )
@@ -103,16 +110,31 @@ class CleanupDialog:
                 content=ft.Column(
                     [
                         ft.Text(
-                            "找出目前規則判定「不是要翻譯的內容」的舊條目"
-                            "（指南、手冊、進度文字、語言檔裡只有標籤、註解、授權、設定內容、名字清單、佔位字、純符號等）。"
-                            "有任何譯文或歷史紀錄的條目不會被列入。",
+                            "找出目前規則判定「不是要翻譯的內容」的舊條目。",
+                            size=13,
+                            color=C.TEXT,
+                        ),
+                        ft.Text(
+                            "只有沒有任何譯文、生效譯文與歷史紀錄的條目才會列入，"
+                            "有人動過的不會碰。",
                             size=12,
                             color=C.MUTED,
-                            selectable=True,
+                        ),
+                        self.version_dd,
+                        ft.Container(
+                            ft.Column(
+                                [self.overview_title, self.overview_body],
+                                spacing=6,
+                                tight=True,
+                            ),
+                            padding=ft.Padding.symmetric(horizontal=14, vertical=12),
+                            bgcolor=C.PANEL2,
+                            border=ft.Border.all(1, C.LINE),
+                            border_radius=design.RADIUS_CONTROL,
                         ),
                         ft.Text("步驟 1　匯出檢查檔", weight=ft.FontWeight.BOLD),
                         ft.Row(
-                            [self.version_dd, self.export_btn, self.open_folder_btn],
+                            [self.export_btn, self.open_folder_btn],
                             spacing=10,
                             wrap=True,
                         ),
@@ -167,6 +189,73 @@ class CleanupDialog:
             self.version_dd.value = versions[0]
         self._load_reports()
         self._load_batch_info()
+        self._refresh_overview()
+
+    def _on_version(self, _e=None) -> None:
+        self.export_summary.visible = False
+        self._refresh_overview()
+
+    def _refresh_overview(self) -> None:
+        """依所選版本重新計算可清理的筆數（背景、只讀）；選項變動時舊結果作廢。"""
+        db, version = self.get_db(), self.version_dd.value
+        self._overview_generation += 1
+        generation = self._overview_generation
+        if db is None or not version:
+            self.overview_title.value = "請先選擇版本"
+            self.overview_body.controls = []
+            self._safe_update()
+            return
+        self.overview_title.value = f"版本 {version}：計算中…"
+        self.overview_body.controls = []
+        self._safe_update()
+
+        def work() -> None:
+            result = error = None
+            try:
+                result = svc.cleanup_overview(db, version)
+            except sqlite3.Error as exc:
+                error = exc
+            except Exception as exc:  # noqa: BLE001 - worker boundary reports unexpected failures
+                error = exc
+                log_exception(f"資料清理總覽計算失敗：{version}")
+            self._post(self._apply_overview, generation, version, result, error)
+
+        self._launch(work, "Mod 資料庫清理總覽", CommitPolicy.PARTIAL_ALLOWED)
+
+    def _apply_overview(self, generation: int, version: str, result, error) -> None:
+        if generation != self._overview_generation:
+            return  # 計算期間又換了版本
+        if error is not None:
+            self.overview_title.value = f"版本 {version}：無法計算（{error}）"
+            self.overview_body.controls = []
+            self._safe_update()
+            return
+        counts, protected = result
+        total = sum(counts.values())
+        self.overview_title.value = (
+            f"版本 {version}：可清理 {format_count(total)} 筆"
+            if total
+            else f"版本 {version}：沒有可清理的條目"
+        )
+        lines = [
+            ft.Text(
+                f"{kind_label(kind)}・{svc.CLEANUP_CATEGORIES.get(category, category)}"
+                f"　{format_count(n)} 筆",
+                size=12.5,
+                color=C.TEXT,
+            )
+            for (kind, category), n in sorted(counts.items(), key=lambda item: -item[1])
+        ]
+        if protected:
+            lines.append(
+                ft.Text(
+                    f"另有 {format_count(protected)} 筆符合條件但已有譯文或歷史，不會列入",
+                    size=12,
+                    color=C.MUTED,
+                )
+            )
+        self.overview_body.controls = lines
+        self._safe_update()
 
     def _load_reports(self, _e=None) -> None:
         db = self.get_db()
@@ -239,6 +328,7 @@ class CleanupDialog:
         self.export_summary.visible = True
         log_info(f"Mod 資料庫清理檢查檔：{report.path}（{report.total} 筆）")
         self._load_reports()
+        self._refresh_overview()
         if report.total:
             self.report_dd.value = str(report.path)
             self.preview_btn.disabled = False
@@ -346,6 +436,7 @@ class CleanupDialog:
         self.plan_summary.value = message
         self.plan_summary.visible = True
         self._load_batch_info()
+        self._refresh_overview()
         show_snack(self.page, message, C.EM, text_color=C.ON_EM)
         if self.on_complete:
             self.on_complete()
@@ -386,6 +477,7 @@ class CleanupDialog:
         if skipped:
             message += f"；{format_count(skipped)} 筆因已重新掃描出同一條目而略過"
         self._load_batch_info()
+        self._refresh_overview()
         show_snack(self.page, message, C.EM, text_color=C.ON_EM)
         if self.on_complete:
             self.on_complete()

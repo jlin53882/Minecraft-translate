@@ -7,6 +7,7 @@ View 不直接碰引擎，檔案位置與命名規則都在這裡。
 from __future__ import annotations
 
 import time
+from collections import Counter
 from pathlib import Path
 
 from app.services_impl.pipelines.extract_service import open_output_folder
@@ -24,6 +25,7 @@ __all__ = [
     "CleanupPlan",
     "CleanupReport",
     "apply_cleanup",
+    "cleanup_overview",
     "cleanup_report_dir",
     "export_cleanup",
     "last_cleanup_batch",
@@ -80,3 +82,12 @@ def open_report_folder(db: TranslationDB) -> bool:
     except OSError:
         return False
     return open_output_folder(str(folder))
+
+
+def cleanup_overview(
+    db: TranslationDB, version: str
+) -> tuple[dict[tuple[str, str], int], int]:
+    """所選版本可清理的筆數：``({(類型, 類別): 筆數}, 因有譯文或歷史而不列入的筆數)``（只讀）。"""
+    candidates, protected = db.cleanup_candidates(version)
+    counts = Counter((c.kind, c.category) for c in candidates)
+    return dict(counts), sum(protected.values())
