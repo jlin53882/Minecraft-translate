@@ -925,7 +925,9 @@ class EntriesPanel(ft.Column):
         else:
             show_snack(self._page, message, C.EM, text_color=C.ON_EM)
         if self.db() is db:
-            self._resolve_flagged(entry.id, flagged_batch)
+            if not shadow:
+                # 新譯文沒有生效時，原本的格式問題仍在，不能移出待處理清單
+                self._resolve_flagged(entry.id, flagged_batch)
             same_entry = self.selected is not None and self.selected.id == entry.id
             unchanged_editor = same_entry and self.pending_text() == text
             if unchanged_editor:

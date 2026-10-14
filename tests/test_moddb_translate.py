@@ -2223,6 +2223,34 @@ def test_manual_fix_of_a_flagged_entry_lowers_the_translate_card(db_path, monkey
     assert entries.entry_ids == []
 
 
+def test_shadowed_manual_save_keeps_unresolved_flagged_entry(db_path, monkeypatch):
+    """自訂優先序讓 AI 譯文仍然生效：人工存檔沒解決問題，不能移出待處理清單。"""
+    from translation_tool.translation_db.schema import SRC_JAR_TW
+
+    _, panel, entries, db, entry, done, batch = _flagged_entry_saved_by_hand(
+        db_path, monkeypatch
+    )
+    # 待處理期間模組自帶譯文進來，且優先序排在人工之前
+    db.ingest(
+        "1.21.1",
+        [
+            ScanItem(
+                KIND_LANG,
+                "foo",
+                "item.foo.b",
+                "Infused Alloy",
+                "§a注入合金",
+                source=SRC_JAR_TW,
+            )
+        ],
+    )
+    db.set_priority((SRC_JAR_TW, SRC_MANUAL, SRC_AI))
+    entries._apply_save_result(db, entry, "注入合金", done, None, batch)
+
+    assert entry.id in entries.entry_ids
+    assert panel.stat_flagged.value_text.value == "1"
+
+
 def test_late_save_does_not_touch_a_flagged_list_opened_after_it_started(
     db_path, monkeypatch
 ):
