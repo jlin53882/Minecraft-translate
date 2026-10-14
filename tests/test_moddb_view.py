@@ -1321,9 +1321,10 @@ def test_batch_replace_dialog_pages_all_rows_and_requires_preview_after_selectio
 
     first_id = dialog.plan.changes[0].entry_id
     dialog._toggle_root(first_id, False)
-    assert dialog.plan is None and dialog.apply_btn.disabled is True
-    dialog._preview()
+    # 勾選改變後用新範圍自動重新預覽，不必再按「產生預覽」
     assert dialog.plan is not None and dialog.plan.update_count == 54
+    assert dialog.apply_btn.disabled is False
+    assert first_id in dialog.excluded_roots
     db.close()
 
 
@@ -1431,11 +1432,6 @@ def test_batch_replace_pending_selection_never_displays_executable_stale_extras(
 
     root_id = dialog.plan.root_ids[0]
     dialog._toggle_root(root_id, False)
-    assert dialog.plan is None
-    assert all("跨版本" not in text for text in texts_of(dialog.rows))
-    assert dialog.apply_btn.disabled is True
-
-    dialog._preview()
     assert dialog.plan is not None and dialog.plan.root_ids == ()
     assert dialog.plan.update_count == 0
     assert dialog.apply_btn.disabled is True
@@ -1555,8 +1551,8 @@ def test_batch_replace_quality_ack_is_bound_to_one_exact_plan(db_path):
     # A selection change starts a distinct plan. Its consent must not inherit A.
     dialog._toggle_root(approved_a.root_ids[0], False)
     assert dialog.quality_ack.value is False
-    assert dialog.plan is None
-    dialog._preview()
+    assert dialog.plan is not approved_a
+    assert dialog.plan.confirmed_quality_worsening is False
     plan_b = dialog.plan
     assert plan_b is not None and plan_b.update_count == 1
     assert plan_b.confirmed_quality_worsening is False
@@ -1678,9 +1674,7 @@ def test_batch_replace_scope_change_invalidates_quality_ack(db_path):
 
     dialog.only_checked_control.value = False
     dialog._on_scope_change()
-    assert dialog.plan is None
     assert dialog.quality_ack.value is False
-    dialog._preview()
     assert dialog.plan.confirmed_quality_worsening is False
     db.close()
 
@@ -2275,3 +2269,41 @@ def test_entries_search_runs_live_after_typing_and_enter_is_immediate(entries):
     entries._on_search(event)  # Enter 立即生效
     assert entries.query == ""
     assert len(entries.rows) > 1
+
+
+def test_batch_replace_excluded_roots_stay_listed_and_can_be_reselected(db_path):
+    from app.services_impl.moddb_service import EntryFilter
+    from app.views.moddb.batch_replace_dialog import BatchReplaceDialog
+
+    db = TranslationDB(db_path)
+    db.ingest(
+        "1.21.1",
+        [
+            ScanItem(KIND_LANG, "keep", f"item.keep.{i}", f"Source {i}", f"舊{i}")
+            for i in range(3)
+        ],
+    )
+    dialog = BatchReplaceDialog(
+        mock_page(),
+        lambda: db,
+        EntryFilter(version="1.21.1"),
+        lambda _result: None,
+        operation_launcher=lambda target, **_kwargs: (target(), True)[1],
+    )
+    dialog.find_field.value = "舊"
+    dialog.replace_field.value = "新"
+    dialog._preview()
+    order = [row.entry_id for row in dialog.plan.changes]
+
+    dialog._toggle_root(order[1], False)
+    assert dialog.plan.update_count == 2 and dialog.apply_btn.disabled is False
+    assert [row.entry_id for row in dialog._display_rows()] == order  # 原位保留
+
+    dialog._toggle_root(order[1], True)  # 重新勾回
+    assert dialog.plan.update_count == 3 and not dialog.excluded_roots
+
+    dialog._clear_all()  # 全不選：沒有可寫入的項目，不會退回成處理全部
+    assert dialog.plan.update_count == 0 and dialog.apply_btn.disabled is True
+    assert [row.entry_id for row in dialog._display_rows()] == order
+    assert dialog.rows.scroll is None  # 捲動只留外層一個，避免卷軸重疊
+    db.close()

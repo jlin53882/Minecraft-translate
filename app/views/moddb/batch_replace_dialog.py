@@ -120,9 +120,7 @@ class BatchReplaceDialog:
         self.rows = ft.Column(
             [kit.hint_text("輸入尋找文字後，按「產生預覽」。")],
             spacing=4,
-            scroll=ft.ScrollMode.AUTO,
-            height=340,
-        )
+        )  # 捲動交給外層對話框，避免兩層卷軸重疊
         self.page_text = ft.Text("尚未預覽", size=11.5, color=C.DIM)
         self.selection_bar = SelectionBar(self._select_all, self._clear_all)
 
@@ -371,6 +369,7 @@ class BatchReplaceDialog:
         self.summary.value = message
         self.preview_page = 0
         self._render()
+        self._start_preview()  # 勾選改了就用新範圍自動重新預覽，不必再按「產生預覽」
 
     def _preview(self, _e=None) -> None:
         self._start_preview()
@@ -803,10 +802,28 @@ class BatchReplaceDialog:
                 return self.plan.skipped
             return self._skipped_pages.get(self.preview_page, ())
         if self.plan is not None:
-            return self.plan.changes
+            return self._changes_with_excluded_roots()
         if self.selection_plan is not None:
             return self.selection_plan.root_changes
         return ()
+
+    def _changes_with_excluded_roots(self):
+        """預覽清單；被個別排除的根條目仍留在原位（灰色、可重新勾選），其餘照預覽計畫。"""
+        plan, selection = self.plan, self.selection_plan
+        if plan is None or selection is None or not self.excluded_roots:
+            return plan.changes if plan is not None else ()
+        order = {row.entry_id: i for i, row in enumerate(selection.root_changes)}
+        excluded_rows = [
+            row for row in selection.root_changes if row.entry_id in self.excluded_roots
+        ]
+        keyed: list[tuple[int, int, object]] = []
+        position = -1
+        for n, row in enumerate(plan.changes):
+            if not row.is_extra_version:
+                position = order.get(row.entry_id, position)
+            keyed.append((position, n, row))
+        keyed += [(order[row.entry_id], -1, row) for row in excluded_rows]
+        return tuple(row for _, _, row in sorted(keyed, key=lambda k: k[:2]))
 
     def _render(self, *, update: bool = True) -> None:
         rows = self._display_rows()

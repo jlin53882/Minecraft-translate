@@ -98,7 +98,7 @@ def _row_selector(
 
 
 class SelectionBar:
-    """預覽清單上方的「全選／全不選」列；只改勾選，仍需重新預覽才會套用。"""
+    """預覽清單上方的「全選／全不選」列；勾選改變後自動用新範圍重新預覽。"""
 
     def __init__(
         self, on_select_all: Callable[[], None], on_clear_all: Callable[[], None]
