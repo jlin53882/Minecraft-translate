@@ -176,7 +176,7 @@ class BulkReviewMixin:
         batch = uuid.uuid4().hex
         reviewed = synced = stale = 0
         touched: list[int] = []
-        with self._tx(bump_generation_on_noop=False) as conn:
+        with self._tx(bump_generation_on_noop=False, keep_review=True) as conn:
             if self._database_identity() != plan.database_identity:
                 raise ValueError("資料庫已切換，請重新預覽批量審核")
             if progress_callback is not None:

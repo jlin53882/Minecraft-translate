@@ -19,6 +19,7 @@ import sqlite3
 import time
 from pathlib import Path
 
+KEEP_REVIEW_FLAG = "keep_review_on_text_change"  # 交易內暫時存在的 meta 旗標
 SCHEMA_VERSION = 6
 
 KIND_LANG = "lang"
@@ -560,13 +561,16 @@ def _install_schema_v3_objects(conn: sqlite3.Connection) -> None:
         """
     )
     # 非人工來源的譯文文字被改掉、審核狀態卻沒有一起改時，舊的「已審核」不再成立
+    # 審核、修復與還原流程（_tx(keep_review=True)）自己決定審核狀態並寫進歷史快照，不受此觸發器影響
+    conn.execute("DROP TRIGGER IF EXISTS translation_text_change_clears_review")
     conn.execute(
-        """
-        CREATE TRIGGER IF NOT EXISTS translation_text_change_clears_review
+        f"""
+        CREATE TRIGGER translation_text_change_clears_review
         AFTER UPDATE OF zh_tw ON translation
         WHEN NEW.source <> 6 AND NEW.zh_tw IS NOT OLD.zh_tw
              AND OLD.review_status = 'reviewed'
              AND NEW.review_status IS OLD.review_status
+             AND NOT EXISTS (SELECT 1 FROM meta WHERE key='{KEEP_REVIEW_FLAG}')
         BEGIN
             UPDATE translation SET review_status=NULL WHERE id=NEW.id;
         END;

@@ -2764,3 +2764,76 @@ def test_manual_save_keeps_review_of_source_that_outranks_manual(db):
     db.set_priority((SRC_MANUAL, SRC_AI, SRC_JAR_TW))
     db.save_manual(entry.id, "丙", propagate=False)
     assert db.get_entry(entry.id).zh_tw == "丙"
+
+
+def _reviewed_ai_entry(db, en, zh):
+    db.ingest("1.21.1", [ScanItem(KIND_LANG, "foo", "k", en, zh, source=SRC_AI)])
+    entry = db.list_entries("1.21.1")[0][0]
+    db._conn.execute(
+        "UPDATE translation SET review_status='reviewed' WHERE entry_id=? AND source=?",
+        (entry.id, SRC_AI),
+    )
+    db._rebuild_effective(db._conn)
+    db._conn.commit()
+    return entry
+
+
+def _ai_row(db, entry_id):
+    return db._conn.execute(
+        "SELECT zh_tw, review_status FROM translation WHERE entry_id=? AND source=?",
+        (entry_id, SRC_AI),
+    ).fetchone()
+
+
+def test_quality_repair_keeps_reviewed_status_and_history_can_revert(db):
+    entry = _reviewed_ai_entry(db, "Use %s", "使用")
+
+    result = db.replace_translation_quality_mismatch(
+        entry.id,
+        SRC_AI,
+        "使用",
+        "使用 %s",
+        expected_version="1.21.1",
+        expected_kind=KIND_LANG,
+        expected_mod_id="foo",
+        expected_key="k",
+        expected_en_us="Use %s",
+        expected_revision=None,
+    )
+
+    assert result.status == "updated"
+    assert tuple(_ai_row(db, entry.id)) == ("使用 %s", "reviewed")  # 與歷史快照一致
+    history = db.entry_detail(entry.id).history[0]
+    assert history.action == "quality_repair"
+    assert db.revert(history.id) == 1
+    assert tuple(_ai_row(db, entry.id)) == ("使用", "reviewed")
+
+
+def test_review_trigger_still_clears_stale_review_for_outside_edits_and_flag_is_gone(
+    db,
+):
+    entry = _reviewed_ai_entry(db, "Use %s", "使用")
+    db._conn.execute(
+        "UPDATE translation SET zh_tw='別的字' WHERE entry_id=? AND source=?",
+        (entry.id, SRC_AI),
+    )
+    db._conn.commit()
+    assert _ai_row(db, entry.id)[1] is None  # 一般外部改字仍清掉舊審核
+
+    db.replace_translation_quality_mismatch(
+        entry.id,
+        SRC_AI,
+        "別的字",
+        "別的字 %s",
+        expected_version="1.21.1",
+        expected_kind=KIND_LANG,
+        expected_mod_id="foo",
+        expected_key="k",
+        expected_en_us="Use %s",
+        expected_revision=None,
+        action="quality_repair_review",
+    )
+    flag = db._conn.execute(
+        "SELECT 1 FROM meta WHERE key='keep_review_on_text_change'"
+    ).fetchone()
+    assert flag is None  # 旗標只存在於交易內

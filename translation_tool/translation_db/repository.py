@@ -72,6 +72,7 @@ from translation_tool.translation_db.schema import (
     DB_FOREIGN,
     DB_NEWER,
     DEFAULT_PRIORITY,
+    KEEP_REVIEW_FLAG,
     SRC_AI,
     SRC_AI_REPAIR,
     SRC_JAR_CN,
@@ -260,11 +261,20 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
 
     @contextmanager
     def _tx(
-        self, *, bump_generation_on_noop: bool = True
+        self, *, bump_generation_on_noop: bool = True, keep_review: bool = False
     ) -> Iterator[sqlite3.Connection]:
-        """單一寫入交易（失敗自動回復）。"""
+        """單一寫入交易（失敗自動回復）。
+
+        ``keep_review`` 用在審核、修復與還原這類自己決定審核狀態與歷史快照的流程：
+        交易內改寫非人工來源的譯文時，不讓觸發器依「文字變了」自動清掉審核標記。
+        """
         with self._lock:
             self._conn.execute("BEGIN IMMEDIATE")
+            if keep_review:
+                self._conn.execute(
+                    "INSERT OR REPLACE INTO meta (key, value) VALUES (?, '1')",
+                    (KEEP_REVIEW_FLAG,),
+                )
             changes_before = self._conn.total_changes
             try:
                 yield self._conn
@@ -272,6 +282,11 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
                 self._conn.rollback()
                 raise
             else:
+                if keep_review:
+                    self._conn.execute(
+                        "DELETE FROM meta WHERE key=?", (KEEP_REVIEW_FLAG,)
+                    )
+                    changes_before += 1  # 旗標的寫入與刪除不算資料變動
                 # 資料有變動：遞增世代，讓統計快取（stat_cache）失效
                 if bump_generation_on_noop or self._conn.total_changes > changes_before:
                     self._conn.execute(
@@ -2603,7 +2618,7 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
             raise ValueError("沒有可審核的譯文，請先輸入並儲存")
         batch = uuid.uuid4().hex
         done: list[Impact] = []
-        with self._tx(bump_generation_on_noop=False) as conn:
+        with self._tx(bump_generation_on_noop=False, keep_review=True) as conn:
             preview = self._review_preview_rows(
                 conn,
                 entry_id,
@@ -2736,7 +2751,7 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
             )
             reverted: list[int] = []
             new_batch = uuid.uuid4().hex
-            with self._tx(bump_generation_on_noop=False) as conn:
+            with self._tx(bump_generation_on_noop=False, keep_review=True) as conn:
                 rows = conn.execute(
                     "SELECT id, entry_id, old_zh_tw, new_zh_tw, source_id, "
                     "prev_checker, prev_review_status, new_checker, "
@@ -2832,7 +2847,7 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
         )
         reverted: list[int] = []
         new_batch = uuid.uuid4().hex
-        with self._tx(bump_generation_on_noop=False) as conn:
+        with self._tx(bump_generation_on_noop=False, keep_review=True) as conn:
             for (
                 hid,
                 eid,
@@ -3168,7 +3183,7 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
         if not isinstance(new_zh_tw, str) or not new_zh_tw.strip():
             raise ValueError("AI 修復譯文不可為空")
 
-        with self._tx(bump_generation_on_noop=False) as conn:
+        with self._tx(bump_generation_on_noop=False, keep_review=True) as conn:
             current = conn.execute(
                 "SELECT t.zh_tw, t.revision, t.checker, t.review_status "
                 "FROM translation t JOIN entry e ON e.id=t.entry_id "
