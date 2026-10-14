@@ -23,10 +23,21 @@ from typing import Any
 
 from translation_tool.core.guide_blocks import NON_TEXT_REASONS, non_text_reason
 from translation_tool.core.text_sniffer import classify_book_string, is_placeholder_text
-from translation_tool.translation_db.schema import KIND_GUIDE, KIND_PATCHOULI
+from translation_tool.translation_db.schema import (
+    KIND_ADVANCEMENT,
+    KIND_GUIDE,
+    KIND_LANG,
+    KIND_PATCHOULI,
+)
 
 REPORT_FORMAT = "mod-db-cleanup-v1"
 _LOWERCASE = re.compile(r"[a-z]")
+_LETTER = re.compile(r"[^\W\d_]")
+_FORMAT_TOKEN = re.compile(
+    r"%(?:\d+\$)?[sdfxXeEgGcb%]|\{\d*\}|§[0-9a-fk-orA-FK-OR]|\$\([^)]*\)"
+)
+_KEY_SEGMENT = re.compile(r"[#./\[\]]+")
+_FIELD_NAMES = frozenset({"description", "title", "name", "text", "summary"})
 _CHUNK = 500
 _PREVIEW_CHARS = 300
 
@@ -34,8 +45,23 @@ CLEANUP_CATEGORIES: dict[str, str] = {
     **NON_TEXT_REASONS,
     "multiblock": "多方塊結構圖案列",
     "not_text": "手冊中不是顯示文字的字串",
+    "no_letters": "沒有文字的字串（只有符號或數字，不含格式碼）",
+    "field_name": "內容就是欄位名稱（佔位字）",
 }
-_CLEANUP_KINDS = (KIND_GUIDE, KIND_PATCHOULI)
+_CLEANUP_KINDS = (KIND_GUIDE, KIND_PATCHOULI, KIND_ADVANCEMENT, KIND_LANG)
+
+
+def _has_real_letter(text: str) -> bool:
+    """去掉 ``%s``、``{0}``、``§c``、``$(…)`` 這類格式碼後，還有沒有任何文字（含中日韓字元）。"""
+    return _LETTER.search(_FORMAT_TOKEN.sub("", text)) is not None
+
+
+def _is_field_name(key: str, en_us: str) -> bool:
+    """內容就是它所在的欄位名稱（例如進度的 ``description`` 欄位內容是 ``Description``）。"""
+    word = en_us.strip().lower()
+    return word in _FIELD_NAMES and word in {
+        part.lower() for part in _KEY_SEGMENT.split(key)
+    }
 
 
 def entry_cleanup_category(kind: str, key: str, en_us: str) -> str | None:
@@ -45,13 +71,24 @@ def entry_cleanup_category(kind: str, key: str, en_us: str) -> str | None:
     if kind == KIND_GUIDE:
         return non_text_reason(en_us)
     if kind == KIND_PATCHOULI:
-        if "multiblock.pattern" in key and not _LOWERCASE.search(en_us):
-            return "multiblock"
+        return _patchouli_category(key, en_us)
+    if kind in (KIND_LANG, KIND_ADVANCEMENT):
+        # 語言檔與進度只用不看內容語意的保守規則（小寫單字如 ``on``／``off`` 是正常譯文）
         if is_placeholder_text(en_us):
             return "placeholder"
-        if classify_book_string(en_us) == "not":
-            return "not_text"
+        if not _has_real_letter(en_us) and not _FORMAT_TOKEN.search(en_us):
+            return "no_letters"  # 含 %s 之類的格式碼要保留：中文語序可能不同，需要翻譯
+        if kind == KIND_ADVANCEMENT and _is_field_name(key, en_us):
+            return "field_name"
     return None
+
+
+def _patchouli_category(key: str, en_us: str) -> str | None:
+    if "multiblock.pattern" in key and not _LOWERCASE.search(en_us):
+        return "multiblock"
+    if is_placeholder_text(en_us):
+        return "placeholder"
+    return "not_text" if classify_book_string(en_us) == "not" else None
 
 
 def _text_hash(text: str) -> str:

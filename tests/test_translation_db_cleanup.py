@@ -53,7 +53,27 @@ def test_entry_cleanup_category_by_content_shape():
         "not_text"
     )
     assert entry_cleanup_category("patchouli", "x#text", REAL) is None
-    assert entry_cleanup_category("lang", "item.a", LICENSE) is None  # 語言檔不清
+    assert (
+        entry_cleanup_category("lang", "item.a", LICENSE) is None
+    )  # 語言檔只用保守規則
+    assert entry_cleanup_category("lang", "mirror.left_right", "← →") == "no_letters"
+    assert (
+        entry_cleanup_category("lang", "attribute.equals", "%s %s") is None
+    )  # 格式碼要保留
+    assert (
+        entry_cleanup_category("lang", "gui.off", "off") is None
+    )  # 小寫單字是正常譯文
+    assert entry_cleanup_category("lang", "k", "TODO: translate me") == "placeholder"
+    assert (
+        entry_cleanup_category(
+            "advancement", "a.json#display.description.text", "Description"
+        )
+        == "field_name"
+    )
+    assert (
+        entry_cleanup_category("advancement", "a.json#display.title.text", "Stone Age")
+        is None
+    )
     assert entry_cleanup_category("guide", "k", "") is None  # 沒有原文不處理
 
 
