@@ -2341,25 +2341,33 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
         """人工寫入新譯文後，其他來源上「已審核」且譯文不同的列退回未審核。
 
         已審核的列優先於未審核的人工譯文；不退回的話，手動儲存／批次取代成功寫入
-        卻不會生效。來源優先序本來就排在人工之前的來源不退回：退回也不會讓人工生效，
-        只會白白丟掉審核標記。退回的狀態以 ``review_clear`` 記錄在同一個 batch，還原人工寫入時
+        卻不會生效。只有退回後人工譯文真的能生效才退回：若有排在人工之前的其他來源
+        （不論審核與否，譯文不同），或另有不會被退回的「視為已審核」的列，退回也換不到
+        人工生效，只會白白丟掉審核標記，所以整個條目都不退回。退回的狀態以 ``review_clear`` 記錄在同一個 batch，還原人工寫入時
         一併復原（譯文與版本都沒變才復原）。
         """
-        manual_rank = conn.execute(
-            f"SELECT {rank_sql(self.priority, '?')}", (SRC_MANUAL,)
+        rank_of = lambda source: conn.execute(
+            f"SELECT {rank_sql(self.priority, '?')}", (source,)
         ).fetchone()[0]
+        manual_rank = rank_of(SRC_MANUAL)
         for entry_id, text in changes:
-            for source, zh_tw, checker, revision in conn.execute(
-                "SELECT source, zh_tw, checker, revision FROM translation "
-                "WHERE entry_id=? AND source<>? AND review_status='reviewed' "
-                "AND zh_tw<>?",
-                (entry_id, SRC_MANUAL, text),
-            ).fetchall():
-                source_rank = conn.execute(
-                    f"SELECT {rank_sql(self.priority, '?')}", (source,)
-                ).fetchone()[0]
-                if source_rank < manual_rank:
-                    # 自訂優先序讓這個來源本來就排在人工之前：退回審核也換不到人工生效
+            others = conn.execute(
+                "SELECT source, zh_tw, checker, review_status, revision "
+                "FROM translation WHERE entry_id=? AND source<>? AND zh_tw<>''",
+                (entry_id, SRC_MANUAL),
+            ).fetchall()
+            # 退回審核後人工仍贏不了（有排在人工前面、或同樣被視為已審核的其他譯文）就不退回
+            if any(
+                zh_tw != text
+                and (
+                    rank_of(source) < manual_rank
+                    or (bool(checker) and status not in ("unreviewed", "reviewed"))
+                )
+                for source, zh_tw, checker, status, _revision in others
+            ):
+                continue
+            for source, zh_tw, checker, status, revision in others:
+                if status != "reviewed" or zh_tw == text:
                     continue
                 # 有校驗者的列即使沒有狀態也會優先，所以明確標成未審核
                 cleared = "unreviewed" if checker else None
@@ -3098,7 +3106,13 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
                 (entry_id, SRC_AI_REPAIR),
             ).fetchone()
             if repair_row is not None and repair_row[0] == new_zh_tw:
-                return AITranslationReplaceResult("unchanged")
+                effective = conn.execute(
+                    "SELECT zh_tw FROM effective WHERE entry_id=?", (entry_id,)
+                ).fetchone()
+                return AITranslationReplaceResult(
+                    "unchanged",
+                    shadowed=effective is None or effective[0] != new_zh_tw,
+                )
             if repair_row is None:
                 conn.execute(
                     "INSERT INTO translation (entry_id, source, zh_tw) VALUES (?,?,?)",
@@ -3203,6 +3217,14 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
                 return AITranslationReplaceResult("skipped_changed")
             if expected_revision is not None and current[1] != expected_revision:
                 return AITranslationReplaceResult("skipped_changed")
+            if action == "quality_repair":
+                # 自動修復只處理生效中的來源；人工審查會列出每個來源，不受此限
+                live = conn.execute(
+                    "SELECT source FROM effective WHERE entry_id=?", (entry_id,)
+                ).fetchone()
+                if live is None or live[0] != source_id:
+                    # 預覽之後來源優先序（或審核）變了，這個來源已不是畫面上生效的那個
+                    return AITranslationReplaceResult("skipped_changed")
             eligible, _issues, _mixed = repair_input_issues(expected_en_us, current[0])
             if not eligible:
                 return AITranslationReplaceResult("skipped_changed")

@@ -2837,3 +2837,33 @@ def test_review_trigger_still_clears_stale_review_for_outside_edits_and_flag_is_
         "SELECT 1 FROM meta WHERE key='keep_review_on_text_change'"
     ).fetchone()
     assert flag is None  # 旗標只存在於交易內
+
+
+def test_manual_save_keeps_review_when_another_source_would_still_win(db):
+    from translation_tool.translation_db.schema import SRC_JAR_TW
+
+    db.ingest(
+        "1.21.1",
+        [
+            ScanItem(KIND_LANG, "foo", "k", "Hell", "甲", source=SRC_AI),
+            ScanItem(KIND_LANG, "foo", "k", "Hell", "丙", source=SRC_JAR_TW),
+        ],
+    )
+    entry = db.list_entries("1.21.1")[0][0]
+    db.set_priority((SRC_AI, SRC_MANUAL, SRC_JAR_TW))
+    db._conn.execute(
+        "UPDATE translation SET review_status='reviewed' WHERE entry_id=? AND source=?",
+        (entry.id, SRC_JAR_TW),
+    )
+    db._rebuild_effective(db._conn)
+    db._conn.commit()
+    assert db.get_entry(entry.id).zh_tw == "丙"
+
+    db.save_manual(entry.id, "乙", propagate=False)
+
+    jar = db._conn.execute(
+        "SELECT review_status FROM translation WHERE entry_id=? AND source=?",
+        (entry.id, SRC_JAR_TW),
+    ).fetchone()[0]
+    assert jar == "reviewed"  # 退回也換不到人工，不丟審核標記
+    assert db.get_entry(entry.id).zh_tw == "丙"  # 畫面不會莫名切成 AI 的甲

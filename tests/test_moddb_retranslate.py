@@ -2670,3 +2670,98 @@ def test_review_apply_reuses_one_database_connection_for_all_matching_items(
     )
 
     assert len(opened) == 1
+
+
+def test_automatic_quality_repair_skips_a_source_that_stopped_being_effective(db_path):
+    db = TranslationDB(db_path)
+    _ingest(db, "1.21.1", "foo", "k.use", SRC_AI, "使用", en="Use %s")
+    _ingest(db, "1.21.1", "foo", "k.use", SRC_JAR_TW, "使用 %s", en="Use %s")
+    entry = db.list_entries("1.21.1")[0][0]
+    identity = {
+        "expected_version": "1.21.1",
+        "expected_kind": KIND_LANG,
+        "expected_mod_id": "foo",
+        "expected_key": "k.use",
+        "expected_en_us": "Use %s",
+        "expected_revision": None,
+    }
+    db.set_priority((SRC_JAR_TW, SRC_AI, SRC_MANUAL))  # 預覽之後優先序變了：JAR 生效
+
+    skipped = db.replace_translation_quality_mismatch(
+        entry.id, SRC_AI, "使用", "使用 %s", **identity
+    )
+
+    assert skipped.status == "skipped_changed"
+    assert _translation_row(db, entry.id, SRC_AI) == "使用"  # 沒生效的來源不被改寫
+
+    # 人工審查流程本來就列出每個來源，不受生效來源限制
+    reviewed = db.replace_translation_quality_mismatch(
+        entry.id,
+        SRC_AI,
+        "使用",
+        "使用 %s",
+        action="quality_repair_review",
+        **identity,
+    )
+    assert reviewed.status == "updated"
+
+    db.set_priority((SRC_AI, SRC_JAR_TW, SRC_MANUAL))
+    _ingest(db, "1.20.1", "foo", "k.use", SRC_AI, "使用", en="Use %s")
+    other = db.list_entries("1.20.1")[0][0]
+    ok = db.replace_translation_quality_mismatch(
+        other.id,
+        SRC_AI,
+        "使用",
+        "使用 %s",
+        **{**identity, "expected_version": "1.20.1"},
+    )
+    assert ok.status == "updated"
+    db.close()
+
+
+def _translation_row(db, entry_id, source):
+    return db._conn.execute(
+        "SELECT zh_tw FROM translation WHERE entry_id=? AND source=?",
+        (entry_id, source),
+    ).fetchone()[0]
+
+
+def test_replace_ai_translation_unchanged_still_reports_shadowed(db_path):
+    db = TranslationDB(db_path)
+    target = _ai_entry(db)
+    identity = _replace_identity(target)
+    db.set_priority((SRC_AI, SRC_AI_REPAIR, SRC_MANUAL))
+
+    first = db.replace_ai_translation(target.id, "Minecraft", "我的世界", **identity)
+    second = db.replace_ai_translation(target.id, "Minecraft", "我的世界", **identity)
+
+    assert (first.status, first.shadowed) == ("updated", True)
+    assert (second.status, second.shadowed) == ("unchanged", True)
+
+    db.set_priority((SRC_AI_REPAIR, SRC_AI, SRC_MANUAL))
+    # 修復來源已生效：Minecraft 不再符合「AI 生效且仍等於原文」，不屬於候選
+    assert (
+        db.replace_ai_translation(target.id, "Minecraft", "我的世界", **identity).status
+        == "skipped_changed"
+    )
+    db.close()
+
+
+def test_repair_summary_reports_unchanged_but_shadowed():
+    panel = translate_panel.TranslatePanel(mock_page(), lambda: None)
+    summary = {
+        "operation": "retranslate_same_source_ai",
+        "candidates": 2,
+        "updated": 0,
+        "unchanged": 2,
+        "unchanged_shadowed": 1,
+        "flagged": 0,
+        "skipped_changed": 0,
+        "failed": 0,
+        "remaining": 0,
+        "status": "DONE",
+    }
+    panel._apply_repair_summary(summary, final=True)
+    assert "仍相同 2（其中 1 筆已有修復譯文，但因來源優先序仍未生效）" in (
+        panel.repair_summary_text.value
+    )
