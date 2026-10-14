@@ -25,6 +25,7 @@ from translation_tool.core.guide_blocks import (
     extract_guide_blocks,
     has_translatable_text,
 )
+from translation_tool.core.lang_codec import parse_lang_text
 from translation_tool.core.lang_merge_dict import contains_cjk
 from translation_tool.core.lm_config_rules import is_translatable_field
 from translation_tool.core.patchouli_compat import (
@@ -296,20 +297,12 @@ def _read_json_member(
 
 
 def _load_legacy_lang(data: bytes) -> dict | None:
-    """舊版 ``key=value`` 語言檔；空行與 ``#``／``//`` 開頭的註解略過，值逐字保留。"""
+    """舊版 ``key=value`` 語言檔；與語系合併共用 ``parse_lang_text``（續行、註解、空白規則一致）。"""
     try:
         text = data.decode("utf-8-sig")
     except UnicodeDecodeError:
         return None
-    entries: dict[str, str] = {}
-    for line in text.splitlines():
-        stripped = line.strip()
-        if not stripped or stripped.startswith(("#", "//")):
-            continue
-        key, sep, value = line.partition("=")
-        if sep and key.strip():
-            entries[key.strip()] = value
-    return entries or None
+    return parse_lang_text(text) or None
 
 
 def _drop_stale_book(zh: dict | None, en: dict, member: str | None) -> dict | None:

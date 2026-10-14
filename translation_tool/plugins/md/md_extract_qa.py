@@ -247,10 +247,12 @@ def extract_blocks(md_text: str, rel_file: str, lang_mode: str) -> list[BlockIte
             flush(end_ln=ln - 1)
             if in_frontmatter:
                 in_frontmatter = False
+                seen_content = True  # front matter 只有一段，之後的 --- 都是水平線
             elif not seen_content:
-                in_frontmatter = (
-                    True  # 只有檔案開頭的 --- 才是 front matter，內文的是水平線
-                )
+                # 只有檔案開頭、且後面真的有結尾 --- 才是 front matter
+                closes = any(rest.strip() == "---" for rest in lines[i + 1 :])
+                in_frontmatter = closes
+                seen_content = True
             continue
         if in_frontmatter:
             continue

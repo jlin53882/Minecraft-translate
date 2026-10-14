@@ -425,3 +425,30 @@ def test_single_block_source_is_paired_with_the_whole_translated_page(tmp_path):
     assert [(i.en_us, i.zh_cn) for i in result.items] == [
         ("Line one of the page.\nLine two of the page.", "第一行。\n\n第二行。")
     ]
+
+
+def test_only_one_front_matter_and_it_must_be_closed():
+    from translation_tool.core.guide_blocks import extract_guide_blocks
+
+    def texts(text):
+        return [b.text for b in extract_guide_blocks(text, "a.md") if not b.prefix]
+
+    after_fm = "---\ntitle: X\n---\n---\n# Chapter One\n\nThis is the first chapter.\n"
+    assert texts(after_fm) == ["# Chapter One", "This is the first chapter."]
+    no_fm = "---\n# Head\n\nBody text paragraph here.\n"  # 開頭是水平線、沒有結尾
+    assert texts(no_fm) == ["# Head", "Body text paragraph here."]
+    rule_inside = "# T\n\nFirst.\n\n---\n\nSecond.\n\n---\n\nThird.\n"
+    assert texts(rule_inside) == ["# T", "First.", "Second.", "Third."]
+
+
+def test_legacy_lang_files_use_the_same_parser_as_the_merge_flow(tmp_path):
+    from translation_tool.core.lang_codec import parse_lang_text
+    from translation_tool.translation_db.scanner import _load_legacy_lang
+
+    text = "# note\nitem.demo.tip=Install the module\non the machine\nitem.demo.b = Value \n"
+    raw = ("﻿" + text).encode("utf-8")
+    assert _load_legacy_lang(raw) == parse_lang_text(text)
+    assert (
+        _load_legacy_lang(raw)["item.demo.tip"] == "Install the module\non the machine"
+    )
+    assert _load_legacy_lang(raw)["item.demo.b"] == "Value"

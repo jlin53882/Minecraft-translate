@@ -73,3 +73,36 @@ def test_lm_finish_accepts_a_translation_with_all_marks():
     finish_guide_item(item)
     assert item["text"] == "## 進階裝置"
     assert "_untranslated" not in item
+
+
+def test_extra_translated_lines_are_merged_instead_of_dropped():
+    from translation_tool.core.guide_translation import render_guide
+    from translation_tool.plugins.shared.rich_text_shield import shield_text
+
+    source = "The machine consumes energy."
+    item = {
+        "file": "x",
+        "text": "這台機器需要\n消耗能量。",
+        "source_text": source,
+    }
+    item["_shielded"] = shield_text(source)
+    finish_guide_item(item)
+    assert item["text"] == "這台機器需要 消耗能量。"
+    assert "_untranslated" not in item
+
+    doc = {
+        "source": f"# T\n\n{source}\n",
+        "ranges": [(3, 3)],
+        "prefixes": [""],
+        "originals": [source],
+        "blocks": [item["text"]],
+    }
+    assert "消耗能量。" in render_guide(doc)
+
+
+def test_translation_with_fewer_or_equal_lines_is_unchanged():
+    from translation_tool.core.guide_translation import fit_to_source_lines
+
+    assert fit_to_source_lines("a b\nc d", "甲\n乙") == "甲\n乙"
+    assert fit_to_source_lines("a b\nc d", "甲乙") == "甲乙"
+    assert fit_to_source_lines("a\nb\nc", "1\n2\n3\n4") == "1\n2\n3 4"

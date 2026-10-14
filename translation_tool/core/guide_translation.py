@@ -31,7 +31,11 @@ from translation_tool.core.text_sniffer import (
     sniff_text_file,
     split_locale,
 )
-from translation_tool.plugins.md.md_inject_qa import Item, apply_item_to_md_lines
+from translation_tool.plugins.md.md_inject_qa import (
+    Item,
+    apply_item_to_md_lines,
+    is_text_line,
+)
 from translation_tool.plugins.shared.rich_text_shield import shield_text, unshield_text
 from translation_tool.translation_db.schema import KIND_GUIDE
 from translation_tool.utils.log_unit import log_warning
@@ -133,6 +137,20 @@ def load_guide(path: GuidePath) -> tuple[dict, list[dict[str, Any]]]:
     return doc, items
 
 
+def fit_to_source_lines(source: str, translated: str) -> str:
+    """譯文行數超過原文的文字行數時，把多出來的行併進最後一行。
+
+    寫回原檔時是一行對一行，多出的行會被丟掉（``apply_item_to_md_lines`` 不插入新行）；
+    LM 自行換行時，併行比默默遺失後半句安全。
+    """
+    slots = sum(1 for line in source.splitlines() if is_text_line(line))
+    lines = [line for line in translated.splitlines() if line.strip()]
+    if slots < 1 or len(lines) <= slots:
+        return translated
+    tail = " ".join(line.strip() for line in lines[slots - 1 :])
+    return "\n".join([*lines[: slots - 1], tail])
+
+
 def finish_guide_item(item: dict[str, Any]) -> None:
     """LM 回傳後：還原行內保護；標籤、標題／清單前綴、粗體、程式碼標記或連結目標被改動時保留原文。"""
     shielded = item.pop("_shielded", None)
@@ -140,6 +158,7 @@ def finish_guide_item(item: dict[str, Any]) -> None:
         return
     translated = unshield_text(str(item.get("text", "")), shielded.shields)
     source = str(item.get("source_text", ""))
+    translated = fit_to_source_lines(source, translated)
     issues = guide_issues(source, translated)
     if issues:
         log_warning(
