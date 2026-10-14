@@ -134,7 +134,7 @@ def source_label(
     badge = REVIEW_BADGE_LABELS.get(review_status or "")
     if badge is None:
         return name
-    if source == SRC_MANUAL and review_status == "reviewed":
+    if source == SRC_MANUAL and review_status in ("reviewed", "legacy_unknown"):
         return badge  # 「人工」＋「人工已審核」合成一個詞
     return f"{name}・{badge}"
 

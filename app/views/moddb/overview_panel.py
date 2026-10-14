@@ -54,12 +54,12 @@ def _source_breakdown(db, source_stats):
             key=lambda status: status_order.get(status, 3),
         )
         for status in statuses:
-            legend.append(
-                (
-                    source_label(source, db.source_catalog, status),
-                    source_tone(source),
-                )
+            item = (
+                source_label(source, db.source_catalog, status),
+                source_tone(source),
             )
+            if item not in legend:  # 歷史狀態待確認與已審核顯示相同，圖例只列一次
+                legend.append(item)
     if (None, None) in observed:
         legend.append(("未翻譯", "neutral"))
     return grouped, legend

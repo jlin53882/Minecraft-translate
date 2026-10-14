@@ -612,7 +612,7 @@ def test_overview_uses_dynamic_effective_source_catalog_and_priority(db_path):
     assert "釘宮翻譯組（自訂 #100）" in labels
     assert "人工" in labels
     assert "人工已審核" in labels
-    assert "人工・人工已審核" in labels
+    assert labels.count("人工已審核") == 1  # 舊資料與已審核合併成一個圖例
     assert "未翻譯" in labels
     assert labels.index("釘宮翻譯組（自訂 #100）") < labels.index("模組自帶繁中")
 
@@ -626,7 +626,7 @@ def test_overview_uses_dynamic_effective_source_catalog_and_priority(db_path):
     panel.refresh()
     labels = texts_of(panel.legend)
     assert labels.index("釘宮翻譯組") < labels.index("人工")
-    assert labels.index("人工・人工已審核") < labels.index("模組自帶繁中")
+    assert labels.index("人工已審核") < labels.index("模組自帶繁中")
     db.close()
 
 
