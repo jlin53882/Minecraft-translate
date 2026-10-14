@@ -133,6 +133,50 @@ def _is_name_list(lines: list[str]) -> bool:
     )
 
 
+_DATA_MIN_LINES = 5
+_DATA_SHARE = 0.6
+_DATA_MAX_WORDS = 6
+_CODE_MIN_LINES = 3
+_CODE_SHARE = 0.7
+_NAME_LIST_MIN_ITEMS = 8
+_LEADING_LABEL = re.compile(r"^\s*[\w ]{1,30}:\s+(?=\S+\s*,)")
+_CODE_LINE = re.compile(
+    r"^\s*(?:local\s|function\b|end\b|if\b.*\bthen\b|for\b.*\bdo\b|return\b"
+    r"|[\w.:]+\(.*\)\s*$|[\w.]+(?:\s*,\s*[\w.]+)*\s*=\s*[\w.:]+\()"
+)
+
+
+def _is_data_block(lines: list[str]) -> bool:
+    """多數行只有標籤或符號、可見英文字寥寥無幾：結構資料（手冊的版面指令、ASCII 圖）。"""
+    if len(lines) < _DATA_MIN_LINES:
+        return False
+    if any(line.lstrip().startswith("|") for line in lines):
+        return False  # 表格的標題欄是要翻譯的文字
+    stripped =[_ANY_TAG.sub("", line) for line in lines]
+    empty = sum(1 for line in stripped if _LETTER.search(line) is None)
+    words = sum(len(line.split()) for line in stripped if _LETTER.search(line))
+    return empty / len(lines) >= _DATA_SHARE and words < _DATA_MAX_WORDS
+
+
+def _is_comma_name_list(text: str) -> bool:
+    """一行以逗號隔開八個以上的短名稱（可有開頭的 ``Normal:`` 標籤），沒有句末標點。"""
+    body = _LEADING_LABEL.sub("", text.strip(), count=1)
+    if "\n" in body.strip() or _SENTENCE_END.search(body):
+        return False
+    parts = [part.strip() for part in body.split(",")]
+    return len(parts) >= _NAME_LIST_MIN_ITEMS and all(
+        part and len(part.split()) <= 3 and not part.endswith(".") for part in parts
+    )
+
+
+def _is_code_block(lines: list[str]) -> bool:
+    """多數行是程式碼（Lua 範例、函式呼叫）：不是敘述文字。"""
+    if len(lines) < _CODE_MIN_LINES:
+        return False
+    hits = sum(1 for line in lines if _CODE_LINE.match(line))
+    return hits / len(lines) >= _CODE_SHARE
+
+
 NON_TEXT_REASONS = {
     "tag_only": "只有標籤或符號",
     "comment": "Markdown 註解",
@@ -140,6 +184,8 @@ NON_TEXT_REASONS = {
     "placeholder": "佔位字（TODO／Lorem ipsum）",
     "key_value": "設定內容（key: value）",
     "name_list": "名字清單",
+    "data": "結構資料（版面指令、符號圖）",
+    "code": "程式碼範例",
 }
 
 
@@ -161,8 +207,12 @@ def non_text_reason(text: str) -> str | None:
         return "placeholder"
     if _is_key_value_block(lines):
         return "key_value"
-    if _is_name_list(lines):
+    if _is_name_list(lines) or _is_comma_name_list(text):
         return "name_list"
+    if _is_data_block(lines):
+        return "data"
+    if _is_code_block(lines):
+        return "code"
     return None
 
 

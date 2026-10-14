@@ -335,3 +335,37 @@ def test_lang_file_with_uppercase_name_loses_the_tie_to_the_lowercase_one(tmp_pa
     )
     result = scan_jar(jar, ScanOptions(version="1.21.1"))
     assert sorted(i.key for i in result.items) == ["a", "b"]
+
+
+def test_structure_data_code_and_comma_name_lists_are_not_text():
+    from translation_tool.core.guide_blocks import non_text_reason
+
+    layout = (
+        "\n".join(
+            f"<block><iceandfire:dragon_bone_block 0 {i} 38 1>" for i in range(10)
+        )
+        + "\nLayer 1"
+    )
+    pools = "Normal: " + ", ".join(
+        [
+            "Rattata",
+            "Raticate",
+            "Meowth",
+            "Persian",
+            "Pikachu",
+            "Raichu",
+            "Sandshrew",
+            "Sandslash",
+        ]
+    )
+    lua = (
+        "Functions in the HTTP API:\nhttp.checkURL( url )\nhttp.request( url, post )\n"
+        "http.get( url )\nhttp.post( url, data )"
+    )
+    assert non_text_reason(layout) == "data"
+    assert non_text_reason(pools) == "name_list"
+    assert non_text_reason(lua) == "code"
+    table = "| Layers | Range |\n|---|---|\n| 1 | 30 |\n| 2 | 50 |\n| 3 | 70 |"
+    assert non_text_reason(table) is None
+    sentence = "We mine Iron, Gold, Copper, Tin, Lead, Silver, Zinc, Nickel, Cobalt."
+    assert non_text_reason(sentence) is None
