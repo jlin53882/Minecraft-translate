@@ -267,3 +267,22 @@ def test_dialog_has_a_single_scroll_container(db):
 
     dialog = BulkReviewDialog(mock_page(), lambda: db, "1.21.1", None)
     assert dialog.rows.scroll is None and dialog.rows.height is None
+
+
+def test_sync_preview_matches_execution_when_another_source_is_reviewed(db):
+    from translation_tool.translation_db.schema import SRC_AI
+
+    db.ingest("1.21.1", [_item("k", "Steel", "甲")])
+    db.ingest(
+        "1.20.1",
+        [ScanItem(KIND_LANG, "foo", "k", "Steel", "乙", "", source=SRC_AI)],
+    )
+    # 另一版本是 AI 來源、已審核、譯文不同：實際審核會保護它
+    db.review_manual(_entry(db, "1.20.1", "k").id, expected_zh_tw="乙", propagate=False)
+
+    plan = db.preview_bulk_review("1.21.1", SRC_JAR_TW, propagate=True)
+    assert plan.sibling_totals() == (0, 0)
+
+    result = db.execute_bulk_review(plan, actor="使用者")
+    assert (result.reviewed, result.synced) == (1, 0)
+    assert _entry(db, "1.20.1", "k").zh_tw == "乙"

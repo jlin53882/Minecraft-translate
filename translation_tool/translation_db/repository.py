@@ -481,7 +481,9 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
                         if (
                             converted.strip()
                         ):  # 空白判斷用 strip，但存原樣（前後空白在遊戲內可能有意義）
-                            adds.append((SRC_JAR_CN, converted, item.zh_cn))
+                            # 翻譯 ZIP 指定了來源（提供者）時，轉繁後仍歸在該來源
+                            src_cn = SRC_JAR_CN if item.source is None else item.source
+                            adds.append((src_cn, converted, item.zh_cn))
                     added = False
                     for src, tw, cn in adds:
                         if (eid, src) in have:

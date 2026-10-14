@@ -2404,33 +2404,75 @@ def test_text_change_on_reviewed_non_manual_row_clears_review(db):
     assert row[0] is None
 
 
-def test_schema_v6_moves_reviewed_manual_rows_back_to_original_source(tmp_path):
-    from translation_tool.translation_db.schema import SRC_JAR_TW, SRC_MANUAL
+def test_schema_v6_moves_only_review_created_manual_rows_back(tmp_path):
+    from translation_tool.translation_db.schema import SRC_AI, SRC_JAR_TW, SRC_MANUAL
 
     path = tmp_path / "v5.db"
     old = TranslationDB(path)
     old.ingest(
         "1.21.1",
-        [item(key="k.same", tw="同文"), item(key="k.edited", tw="來源文")],
+        [
+            item(key="k.same", tw="同文"),
+            item(key="k.hand", tw="手改文"),
+            item(key="k.nohist", tw="無紀錄文"),
+            item(key="k.edited", tw="來源文"),
+        ],
     )
     rows = {row.key: row for row in old.list_entries("1.21.1")[0]}
-    for key, text in (("k.same", "同文"), ("k.edited", "人工改過")):
-        old.save_manual(rows[key].id, text, propagate=False)
-        old.review_manual(rows[key].id, expected_zh_tw=text, propagate=False)
-    # 舊版審核會讓生效來源變成人工
-    old._conn.execute("UPDATE meta SET value='5' WHERE key='schema_version'")
-    old._conn.commit()
+    old.write_back(
+        "1.21.1",
+        [WriteBackItem(KIND_LANG, "foo", "k.same", rows["k.same"].en_us, "同文")],
+        source=SRC_AI,
+        fill_other_versions=False,
+    )
+    old.set_priority((SRC_MANUAL, SRC_AI, SRC_JAR_TW))
+    conn = old._conn
+    # 舊版審核留下的資料：人工列已審核；歷史分別是「審核建立」「手動儲存過」「沒有紀錄」
+    manual_text = {
+        "k.same": "同文",
+        "k.hand": "手改文",
+        "k.nohist": "無紀錄文",
+        "k.edited": "人工改過",
+    }
+    for key, text in manual_text.items():
+        conn.execute(
+            "INSERT INTO translation (entry_id, source, zh_tw, checker, review_status) "
+            "VALUES (?,?,?,?, 'reviewed')",
+            (rows[key].id, SRC_MANUAL, text, "reviewer"),
+        )
+    for key, action, prev in (
+        ("k.same", "review", None),
+        ("k.hand", "manual", None),
+        ("k.hand", "review", None),
+        ("k.edited", "review", None),
+    ):
+        conn.execute(
+            "INSERT INTO history (entry_id, batch, actor, action, old_zh_tw, "
+            "new_zh_tw, prev_manual) VALUES (?,?,?,?,?,?,?)",
+            (rows[key].id, "b", "reviewer", action, "", manual_text[key], prev),
+        )
+    conn.execute("UPDATE meta SET value='5' WHERE key='schema_version'")
+    conn.commit()
     old.close()
 
     db = TranslationDB(path)
-    same = next(r for r in db.list_entries("1.21.1")[0] if r.key == "k.same")
-    edited = next(r for r in db.list_entries("1.21.1")[0] if r.key == "k.edited")
-    assert (same.source, same.review_status) == (SRC_JAR_TW, "reviewed")
-    assert (edited.source, edited.review_status) == (SRC_MANUAL, "reviewed")
-    assert not any(
-        t.source == SRC_MANUAL for t in db.entry_detail(same.id).translations
+    by_key = {r.key: r for r in db.list_entries("1.21.1")[0]}
+    # 審核建立、文字相同：移回使用者優先序中較前的來源（AI 在 JAR_TW 前面）
+    assert (by_key["k.same"].source, by_key["k.same"].review_status) == (
+        SRC_AI,
+        "reviewed",
     )
-    assert db.entry_detail(same.id).history[0].action == "review_migrate"
+    assert not any(
+        t.source == SRC_MANUAL
+        for t in db.entry_detail(by_key["k.same"].id).translations
+    )
+    assert db.entry_detail(by_key["k.same"].id).history[0].action == "review_migrate"
+    # 手動儲存過、沒有紀錄、文字不同：維持人工來源
+    for key in ("k.hand", "k.nohist", "k.edited"):
+        assert (by_key[key].source, by_key[key].review_status) == (
+            SRC_MANUAL,
+            "reviewed",
+        )
     assert list(tmp_path.glob("v5.db.pre-schema-v6-*.bak"))
     db.close()
 
@@ -2453,3 +2495,21 @@ def test_reviewed_filter_includes_legacy_unknown_rows(db):
 
     found, total = db.list_entries("1.21.1", review_status="reviewed")
     assert total == 2 and {r.key for r in found} == {"a", "b"}
+
+
+def test_simplified_only_translation_keeps_the_chosen_source(db):
+    from translation_tool.translation_db.schema import SRC_SUBTITLE
+
+    db.ingest(
+        "1.21.1",
+        [
+            ScanItem(
+                KIND_LANG, "foo", "k", "", "", zh_cn="简体文字", source=SRC_SUBTITLE
+            ),
+            ScanItem(KIND_LANG, "foo", "plain", "", "", zh_cn="简体"),
+        ],
+        convert=lambda text: text.replace("简", "簡"),
+    )
+    rows = {r.key: r for r in db.list_entries("1.21.1")[0]}
+    assert rows["k"].source == SRC_SUBTITLE and rows["k"].zh_tw == "簡体文字"
+    assert rows["plain"].source == SRC_JAR_CN  # 沒有指定來源時維持簡中轉繁

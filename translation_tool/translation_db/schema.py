@@ -456,20 +456,35 @@ def _migrate_independent_review_v6(conn: sqlite3.Connection) -> None:
     Review used to write a reviewed source-6 row that replaced the effective
     source. Now review is a flag on the row that wins, so a reviewed manual row
     whose text equals another source's text is folded back: that source's row is
-    marked reviewed and the manual row is removed. Manual rows with their own
-    text (a real human edit) stay as manual, already reviewed.
+    marked reviewed and the manual row is removed. Equal text alone is not proof,
+    so only rows that history shows were created by a review (and never saved by
+    hand) are folded; hand-edited or unverifiable rows stay manual, already
+    reviewed. The target source follows the user's saved priority.
     """
     if "review_status" not in {
         row[1] for row in conn.execute("PRAGMA table_info(translation)")
     }:
         return
-    rank = {code: index for index, code in enumerate(DEFAULT_PRIORITY)}
+    saved = conn.execute("SELECT value FROM meta WHERE key='priority'").fetchone()
+    order = [
+        int(part)
+        for part in (saved[0] if saved else "").split(",")
+        if part.strip().lstrip("-").isdigit()
+    ]
+    order += [code for code in DEFAULT_PRIORITY if code not in order]
+    rank = {code: index for index, code in enumerate(order)}
     matches: dict[int, list[tuple[int, int, int]]] = {}
     for manual_id, entry_id, other_id, other_source in conn.execute(
         "SELECT m.id, m.entry_id, o.id, o.source FROM translation m "
         "JOIN translation o ON o.entry_id=m.entry_id AND o.source<>? "
         "AND o.zh_tw=m.zh_tw "
-        "WHERE m.source=? AND m.review_status='reviewed'",
+        "WHERE m.source=? AND m.review_status='reviewed' "
+        # 只有「由審核建立」的人工列才能確定是同一份文字：從沒手動儲存過，
+        # 且有一筆審核紀錄當時還沒有人工列
+        "AND NOT EXISTS (SELECT 1 FROM history h "
+        "WHERE h.entry_id=m.entry_id AND h.action='manual') "
+        "AND EXISTS (SELECT 1 FROM history h WHERE h.entry_id=m.entry_id "
+        "AND h.action='review' AND h.new_zh_tw=m.zh_tw AND h.prev_manual IS NULL)",
         (SRC_MANUAL, SRC_MANUAL),
     ):
         matches.setdefault(manual_id, []).append(

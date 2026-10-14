@@ -95,7 +95,7 @@ class BulkReviewMixin:
         sql = (
             "SELECT e.id, e2.id, f.zh_tw, f2.zh_tw, f2.source, m.zh_tw, "
             f"{manual_review}, {revision}, f2.checker, {effective_review}, "
-            f"{effective_revision} "
+            f"{effective_revision}, f.source "
             "FROM entry e JOIN effective f ON f.entry_id = e.id "
             "JOIN entry e2 INDEXED BY idx_entry_content "
             "ON e2.kind = e.kind AND e2.mod_id = e.mod_id AND e2.key = e.key "
@@ -122,6 +122,12 @@ class BulkReviewMixin:
                     continue  # 已審核相同譯文：不會被寫入
                 if (row[9] or "") == "reviewed" and (theirs or "") == (mine or ""):
                     continue
+                if (
+                    (row[9] or "") == "reviewed"
+                    and _source != row[11]
+                    and (theirs or "") != (mine or "")
+                ):
+                    continue  # 另一來源已審核的不同譯文：實際審核會保護它，不會寫入
                 entry[0] += 1
                 entry[1] += 0 if theirs == mine else 1
         return tuple(

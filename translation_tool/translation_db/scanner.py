@@ -387,11 +387,11 @@ def _guide_items(
         if source_text and not has_translatable_text(source_text):
             continue  # 只有元件標籤，沒有敘述文字
         zh_tw = zh_cn = ""
-        source = None
+        source = options.translation_source if options.translated else None
         if tw is not None:
             raw = tw[index]
             if options.translated:
-                zh_tw, source = raw, options.translation_source
+                zh_tw = raw
             elif contains_cjk(raw):
                 zh_tw = apply_replace_rules(raw, options.rules)
         if cn is not None and contains_cjk(cn[index]):
