@@ -82,12 +82,43 @@ def _is_comment_block(lines: list[str]) -> bool:
     return bool(lines) and _COMMENT_LINE.match(lines[0]) is not None
 
 
+_CODE_SYMBOLS = re.compile(r"[=(){}\[\]_;\"\d]|\w\.\w")
+_PROSE_WORD = re.compile(r"[A-Za-z']+")
+_PROSE_MIN_WORDS = 5
+_PROSE_LEAD_WORDS = 4  # 設定值前後夾的說明句，字數門檻較低
+
+
+def _is_prose_line(text: str, min_words: int = _PROSE_MIN_WORDS) -> bool:
+    """純英文單字夠多、沒有程式碼符號：是敘述句，不是程式碼或設定值。"""
+    return (
+        len(_PROSE_WORD.findall(text)) >= min_words
+        and _CODE_SYMBOLS.search(text) is None
+    )
+
+
+def _is_setting_line(line: str) -> bool:
+    """``key: value`` ／ ``key=value`` 且值不是敘述句（``true: will set the entity …`` 是說明）。"""
+    if not _KEY_VALUE_LINE.match(line):
+        return False
+    value = re.split(r"[:=]", line, maxsplit=1)[1]
+    return not _is_prose_line(value)
+
+
 def _is_key_value_block(lines: list[str]) -> bool:
-    """多數行都是 ``key: value`` ／ ``key=value`` 的設定內容。"""
+    """多數行都是設定值，且沒有夾著敘述句：設定內容。
+
+    設定檔說明或程式碼範例前後的英文敘述（``To get bundled inputs:``）
+    是玩家會讀的文字，整段不算設定。
+    """
     if len(lines) < _KEY_VALUE_MIN_LINES:
         return False
-    hits = sum(1 for line in lines if _KEY_VALUE_LINE.match(line))
-    return hits / len(lines) >= _KEY_VALUE_SHARE
+    hits = sum(1 for line in lines if _is_setting_line(line))
+    if hits / len(lines) < _KEY_VALUE_SHARE:
+        return False
+    return not any(
+        not _is_setting_line(line) and _is_prose_line(line, _PROSE_LEAD_WORDS)
+        for line in lines
+    )
 
 
 def _is_name_list(lines: list[str]) -> bool:

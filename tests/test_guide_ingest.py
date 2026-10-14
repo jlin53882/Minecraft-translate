@@ -270,3 +270,26 @@ def test_placeholder_book_strings_are_not_text():
     ):
         assert classify_book_string(value) == "not", value
     assert classify_book_string("The todo list is on the board.") == "text"
+
+
+def test_key_value_ignores_explanations_and_code_examples():
+    from translation_tool.core.guide_blocks import has_translatable_text
+
+    prose = [
+        'To get bundled inputs:\nc = rs.getBundledInput( "right" )\nred = colors.test( c, colors.red )',
+        (
+            "Helpful when trying out different spawn configs for the weights\n"
+            "    true: will set the entity to glowing and add information to the logs.\n"
+            "    false: will not enable spawn debug features."
+        ),
+        (
+            "water: anywhere on the world's surface in water\n"
+            "subterranean: in caves only for the deep parts\n"
+            "nether: nether only and not in lava places"
+        ),
+    ]
+    for text in prose:
+        assert has_translatable_text(text), text
+    assert not has_translatable_text(
+        "ShouldSpawn: true\nSpawnBiomes: Jungle; Jungle Hills;\nSpawnWeight: 12"
+    )
