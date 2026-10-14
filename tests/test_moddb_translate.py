@@ -2351,3 +2351,30 @@ def test_entries_panel_warns_when_custom_priority_keeps_another_source_effective
     db.set_priority((SRC_MANUAL, SRC_AI, SRC_JAR_TW))
     assert entries_panel.EntriesPanel._shadowing_source(db, entry.id, "下界") is None
     db.close()
+
+
+def test_entries_panel_reports_synced_versions_held_back_by_custom_priority(db_path):
+    from app.views.moddb import entries_panel
+    from translation_tool.translation_db.schema import SRC_JAR_TW
+
+    db = TranslationDB(db_path)
+    db.ingest(
+        "1.21.1",
+        [ScanItem(KIND_LANG, "foo", "k", "Hell", "地獄", source=SRC_JAR_TW)],
+    )
+    db.ingest(
+        "1.20.1",
+        [ScanItem(KIND_LANG, "foo", "k", "Hell", "地獄", source=SRC_AI)],
+    )
+    db.set_priority((SRC_AI, SRC_MANUAL, SRC_JAR_TW))
+    selected = db.list_entries("1.21.1")[0][0]
+    done = db.save_manual(selected.id, "下界", propagate=True)
+    assert len(done) == 2
+    held = entries_panel.EntriesPanel._shadowed_versions(db, done, selected.id, "下界")
+    assert held == ["1.20.1"]
+    db.set_priority((SRC_MANUAL, SRC_AI, SRC_JAR_TW))
+    assert (
+        entries_panel.EntriesPanel._shadowed_versions(db, done, selected.id, "下界")
+        == []
+    )
+    db.close()

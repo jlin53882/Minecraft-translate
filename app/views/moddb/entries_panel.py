@@ -911,9 +911,16 @@ class EntriesPanel(ft.Column):
             else "已儲存"
         )
         shadow = self._shadowing_source(db, entry.id, text)
+        held_back = self._shadowed_versions(db, done, entry.id, text)
         if shadow:
             # 自訂的來源優先序把別的來源排在人工之前：譯文已存進人工來源，但畫面仍是別的
             message += f"；但目前來源優先序讓「{shadow}」的譯文仍然生效"
+        if held_back:
+            message += (
+                f"；{'、'.join(held_back)} 因來源優先序仍顯示原本的譯文，"
+                "同步並未在這些版本生效"
+            )
+        if shadow or held_back:
             show_snack(self._page, message, C.GOLD)
         else:
             show_snack(self._page, message, C.EM, text_color=C.ON_EM)
@@ -931,6 +938,21 @@ class EntriesPanel(ft.Column):
                 self._on_changed()
         self._update_impact()
         self._safe_update()
+
+    @staticmethod
+    def _shadowed_versions(db, done, entry_id: int, saved_text: str) -> list[str]:
+        """同步到的其他版本中，儲存後生效譯文仍不是新譯文的版本。"""
+        held_back: list[str] = []
+        for impact in done:
+            if impact.entry_id == entry_id:
+                continue
+            try:
+                current = db.get_entry(impact.entry_id)
+            except sqlite3.Error:
+                continue
+            if current is not None and current.zh_tw != saved_text:
+                held_back.append(impact.mc_version)
+        return held_back
 
     @staticmethod
     def _shadowing_source(db, entry_id: int, saved_text: str) -> str | None:
