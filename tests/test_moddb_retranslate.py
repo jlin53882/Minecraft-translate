@@ -2765,3 +2765,38 @@ def test_repair_summary_reports_unchanged_but_shadowed():
     assert "仍相同 2（其中 1 筆已有修復譯文，但因來源優先序仍未生效）" in (
         panel.repair_summary_text.value
     )
+
+
+def test_automatic_repair_sync_skips_versions_where_the_source_is_not_effective(
+    db_path,
+):
+    db = TranslationDB(db_path)
+    _ingest(db, "1.21.1", "foo", "k.use", SRC_AI, "使用", en="Use %s")
+    _ingest(db, "1.20.1", "foo", "k.use", SRC_AI, "使用", en="Use %s")
+    _ingest(db, "1.19.2", "foo", "k.use", SRC_AI, "使用", en="Use %s")
+    # 只有 1.20.1 另有模組自帶譯文，優先序讓它蓋過 AI
+    _ingest(db, "1.20.1", "foo", "k.use", SRC_JAR_TW, "別的", en="Use %s")
+    db.set_priority((SRC_JAR_TW, SRC_AI, SRC_MANUAL))
+    main = next(r for r in db.list_entries("1.21.1")[0] if r.key == "k.use")
+    hidden = next(r for r in db.list_entries("1.20.1")[0] if r.key == "k.use")
+    other = next(r for r in db.list_entries("1.19.2")[0] if r.key == "k.use")
+
+    result = db.replace_translation_quality_mismatch(
+        main.id,
+        SRC_AI,
+        "使用",
+        "使用 %s",
+        expected_version="1.21.1",
+        expected_kind=KIND_LANG,
+        expected_mod_id="foo",
+        expected_key="k.use",
+        expected_en_us="Use %s",
+        expected_revision=None,
+        sync_other_versions=True,
+    )
+
+    assert result.status == "updated"
+    assert result.synced_other_versions == 1  # 只有 1.19.2；1.20.1 的 AI 沒生效
+    assert _translation_row(db, hidden.id, SRC_AI) == "使用"
+    assert _translation_row(db, other.id, SRC_AI) == "使用 %s"
+    db.close()

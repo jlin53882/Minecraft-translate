@@ -3327,11 +3327,18 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
                 "quality_repair",
                 "quality_repair_review",
             }:
+                # 自動修復只處理生效中的來源：其他版本裡這個來源沒在生效就不同步
+                live_only = (
+                    "JOIN effective f ON f.entry_id=t.entry_id AND f.source=t.source "
+                    if action == "quality_repair"
+                    else ""
+                )
                 siblings = conn.execute(
                     "SELECT t.entry_id, t.revision, t.checker, t.review_status "
                     "FROM entry e0 JOIN entry e ON e.kind=e0.kind AND e.mod_id=e0.mod_id "
                     "AND e.key=e0.key AND e.en_us=e0.en_us AND e.mc_version<>e0.mc_version "
                     "JOIN translation t ON t.entry_id=e.id AND t.source=? AND t.zh_tw=? "
+                    f"{live_only}"
                     "WHERE e0.id=?",
                     (source_id, current[0], entry_id),
                 ).fetchall()
