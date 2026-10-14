@@ -36,7 +36,7 @@ from translation_tool.plugins.shared.rich_text_shield import shield_text, unshie
 from translation_tool.translation_db.schema import KIND_GUIDE
 from translation_tool.utils.log_unit import log_warning
 
-GUIDE_SUFFIXES = (".md", ".txt")
+GUIDE_SUFFIXES = (".md", ".mdx", ".txt")
 GUIDE_MARKER = "__guide__"
 _LOCALE_DIR = re.compile(r"^_?[a-z]{2}_[a-z]{2}$", re.IGNORECASE)
 _MAX_GUIDE_BYTES = 1024 * 1024

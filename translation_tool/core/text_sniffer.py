@@ -17,11 +17,14 @@ import re
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 
-TEXT_SUFFIXES = (".md", ".txt", ".json", ".lang", ".snbt")
+TEXT_SUFFIXES = (".md", ".mdx", ".txt", ".json", ".lang", ".snbt")
 
 _SOURCE_LANGS = ("en_us", "zh_tw", "zh_cn")
-_LOCALE_TOKEN = re.compile(r"^_?([a-z]{2}_[a-z]{2})(?:_\d+)?$", re.IGNORECASE)
-_LOCALE_SUFFIX = re.compile(r"^(.*?)_([a-z]{2}_[a-z]{2})(?:_\d+)?$", re.IGNORECASE)
+# 語系記號：``zh_tw``／``pt-br``，或常見的單獨語言碼資料夾（``de``、``ru``；兩字母的一般資料夾名如 ``ui`` 不算）
+_BARE_LOCALES = "de|fr|es|it|pt|ru|ja|ko|pl|nl|tr|cs|sv|uk"
+_LOCALE_CODE = rf"[a-z]{{2}}[_-][a-z]{{2}}|{_BARE_LOCALES}"
+_LOCALE_TOKEN = re.compile(rf"^_?({_LOCALE_CODE})(?:_\d+)?$", re.IGNORECASE)
+_LOCALE_SUFFIX = re.compile(rf"^(.*?)_({_LOCALE_CODE})(?:_\d+)?$", re.IGNORECASE)
 
 _RESOURCE_ID = re.compile(
     r"^#?[a-z0-9_.\-]+:[a-z0-9_./\-]+(?:[\[{].*)?$", re.IGNORECASE
@@ -89,7 +92,7 @@ def split_locale(parts: Sequence[str]) -> LocaleSplit:
         stem = part.rsplit(".", 1)[0] if idx == len(rest) - 1 else part
         match = _LOCALE_TOKEN.match(stem)
         if match:
-            code = match.group(1).lower()
+            code = match.group(1).lower().replace("-", "_")
             if idx == len(rest) - 1 and "." in part:
                 # 檔名就是語系（lang/en_us.json）：保留副檔名當中性名稱
                 neutral = "/".join([*rest[:idx], "*." + part.rsplit(".", 1)[1]])
@@ -104,7 +107,7 @@ def split_locale(parts: Sequence[str]) -> LocaleSplit:
     stem, dot, ext = last.rpartition(".")
     match = _LOCALE_SUFFIX.match(stem or last)
     if match:
-        code = match.group(2).lower()
+        code = match.group(2).lower().replace("-", "_")
         base = match.group(1) + (dot + ext if dot else "")
         neutral = "/".join([*rest[:-1], base])
         return LocaleSplit(
@@ -241,7 +244,7 @@ def _is_json_text(text: str) -> bool:
 def sniff_text_file(text: str, suffix: str, name: str = "") -> str | None:
     """依內容判斷 ``.md``／``.txt`` 是不是遊戲內顯示的敘述文字；是的話回傳類別。"""
     suffix = suffix.lower()
-    if suffix not in (".md", ".txt"):
+    if suffix not in (".md", ".mdx", ".txt"):
         return None
     if name:
         parts = name.replace("\\", "/").split("/")
@@ -255,7 +258,7 @@ def sniff_text_file(text: str, suffix: str, name: str = "") -> str | None:
         stripped
     ):  # 副檔名是 .txt 的 JSON 資料
         return None
-    if suffix == ".md":
+    if suffix in (".md", ".mdx"):
         meta, body = markdown_front_matter(text)
         if meta.get("title") or any(k in meta for k in ("navigation", "categories")):
             return "guide"

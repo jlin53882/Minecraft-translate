@@ -1969,7 +1969,7 @@ def test_clean_english_switch_controls_filtering_of_english_values(tmp_path):
         {
             "assets/foo/lang/en_us.json": {
                 "a.real": "Steel Casing Block",
-                "a.short": "Hi",
+                "a.short": "ab",
                 "a.id": "minecraft:stone",
             }
         },

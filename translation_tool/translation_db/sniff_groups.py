@@ -50,7 +50,7 @@ def _candidates(names: Sequence[str], claimed: set[str]) -> dict[tuple[str, str]
     found: dict[tuple[str, str], dict[str, str]] = {}
     for name in names:
         low = name.lower()
-        if name in claimed or not low.endswith((".json", ".md", ".txt")):
+        if name in claimed or not low.endswith((".json", ".md", ".mdx", ".txt")):
             continue
         if low.rsplit("/", 1)[-1] == "book.json":
             continue  # 書本根設定：資源包能否覆寫尚未確認，不處理

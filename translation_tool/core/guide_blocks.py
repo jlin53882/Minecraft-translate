@@ -152,7 +152,7 @@ def _is_data_block(lines: list[str]) -> bool:
         return False
     if any(line.lstrip().startswith("|") for line in lines):
         return False  # 表格的標題欄是要翻譯的文字
-    stripped =[_ANY_TAG.sub("", line) for line in lines]
+    stripped = [_ANY_TAG.sub("", line) for line in lines]
     empty = sum(1 for line in stripped if _LETTER.search(line) is None)
     words = sum(len(line.split()) for line in stripped if _LETTER.search(line))
     return empty / len(lines) >= _DATA_SHARE and words < _DATA_MAX_WORDS
@@ -211,6 +211,8 @@ def non_text_reason(text: str) -> str | None:
         return "name_list"
     if _is_data_block(lines):
         return "data"
+    if all(line.lstrip().startswith(("import ", "export ")) for line in lines):
+        return "code"  # MDX 的 import／export 行
     if _is_code_block(lines):
         return "code"
     return None

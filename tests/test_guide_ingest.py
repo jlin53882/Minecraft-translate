@@ -346,17 +346,9 @@ def test_structure_data_code_and_comma_name_lists_are_not_text():
         )
         + "\nLayer 1"
     )
-    pools = "Normal: " + ", ".join(
-        [
-            "Rattata",
-            "Raticate",
-            "Meowth",
-            "Persian",
-            "Pikachu",
-            "Raichu",
-            "Sandshrew",
-            "Sandslash",
-        ]
+    pools = (
+        "Normal: Rattata, Raticate, Meowth, Persian, Pikachu, Raichu, "
+        "Sandshrew, Sandslash"
     )
     lua = (
         "Functions in the HTTP API:\nhttp.checkURL( url )\nhttp.request( url, post )\n"
@@ -369,3 +361,53 @@ def test_structure_data_code_and_comma_name_lists_are_not_text():
     assert non_text_reason(table) is None
     sentence = "We mine Iron, Gold, Copper, Tin, Lead, Silver, Zinc, Nickel, Cobalt."
     assert non_text_reason(sentence) is None
+
+
+@pytest.mark.parametrize(
+    ("member", "expected"),
+    [
+        ("assets/m/guide/ru_ru_0/a.md", None),
+        ("assets/m/guide/de/a.md", None),
+        ("assets/m/guide/pt-br/a.md", None),
+        ("assets/m/guide/a_ru_ru.md", None),
+        ("assets/m/guide/a_zh_tw.md", ("zh_tw", "guide/a.md")),
+        ("assets/m/guide/ui/a.md", ("en_us", "guide/ui/a.md")),
+    ],
+)
+def test_guide_locale_markers_use_the_shared_locale_rules(member, expected):
+    ident = classify_member(member, GUIDE_DIRS)
+    if expected is None:
+        assert ident is None
+    else:
+        assert (ident.lang, ident.file_key) == expected
+
+
+def test_color_coded_text_lines_and_single_word_headings_are_kept():
+    from translation_tool.plugins.md.md_extract_qa import (
+        is_translatable_text_line,
+    )
+
+    assert not is_translatable_text_line("§token")
+    assert not is_translatable_text_line("§stack[minecraft:dirt] §rule{x}")
+    assert is_translatable_text_line("§2筛选器：标签§r，如果物品匹配")
+    assert is_translatable_text_line("§lInterface:§r")
+    assert is_translatable_text_line("Keybinds:")
+    assert not is_translatable_text_line("navigation:")
+    assert not is_translatable_text_line("item_ids:")
+
+
+def test_mdx_guides_are_imported_like_markdown(tmp_path):
+    jar = _jar(
+        tmp_path / "m.jar",
+        {
+            "assets/oracle_index/books/m/.content/scale.mdx": (
+                "---\ntitle: Scale Module\n---\n\n"
+                "import Foo from './foo'\n\n"
+                "The Scale Module can be placed in the upgrade slots of a device.\n"
+            ),
+        },
+    )
+    result = scan_jar(jar, ScanOptions(version="1.21.1"), dir_names=("books",))
+    assert [i.en_us for i in result.items] == [
+        "The Scale Module can be placed in the upgrade slots of a device."
+    ]

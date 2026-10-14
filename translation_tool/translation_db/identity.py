@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from translation_tool.core.book_dirs import DEFAULT_BOOK_DIRS, find_book_dir_index
+from translation_tool.core.text_sniffer import split_locale
 from translation_tool.translation_db.schema import (
     KIND_GUIDE,
     KIND_LANG,
@@ -29,10 +30,7 @@ DEFAULT_PATCHOULI_DIRS: tuple[str, ...] = DEFAULT_BOOK_DIRS
 
 _LANG_FILE = re.compile(r"^(en_us|zh_tw|zh_cn)\.(json|lang)$", re.IGNORECASE)
 _LANG_DIR = re.compile(r"^_?(en_us|zh_tw|zh_cn)$", re.IGNORECASE)
-# 指南語系資料夾：``_zh_tw``（底線開頭，允許不加底線）。原文通常不放在語系資料夾裡
-_GUIDE_LANG_DIR = re.compile(r"^_?(en_us|zh_tw|zh_cn)$", re.IGNORECASE)
-_OTHER_LANG_DIR = re.compile(r"^_?[a-z]{2}_[a-z]{2}$", re.IGNORECASE)
-_GUIDE_SUFFIXES = (".md", ".txt")
+_GUIDE_SUFFIXES = (".md", ".mdx", ".txt")
 _ROOT_DIRS = ("assets", "data")
 
 
@@ -109,18 +107,13 @@ def _classify_guide(
     GuideMe 指南把英文放在指南根目錄、譯文放進 ``_<語系>/``）。其他語言（``_ja_jp`` 等）
     不處理。``README`` 不是指南內容。
     """
-    if parts[-1].lower() in ("readme.md", "readme.txt"):
+    if parts[-1].lower() in ("readme.md", "readme.mdx", "readme.txt"):
         return None
-    lang = "en_us"
-    rel = list(parts[2:])
-    for idx in range(book_index + 1, len(parts) - 1):
-        if _GUIDE_LANG_DIR.match(parts[idx]):
-            lang = _GUIDE_LANG_DIR.match(parts[idx]).group(1).lower()
-            rel = [*parts[2:idx], *parts[idx + 1 :]]
-            break
-        if _OTHER_LANG_DIR.match(parts[idx]):
-            return None
-    return FileIdentity(KIND_GUIDE, mod_id, "/".join(rel), lang)
+    loc = split_locale(parts[book_index + 1 :])
+    if loc.other or loc.lang is None or loc.neutral.startswith("*."):
+        return None
+    rel = "/".join([*parts[2 : book_index + 1], loc.neutral])
+    return FileIdentity(KIND_GUIDE, mod_id, rel, loc.lang)
 
 
 def classify_member(

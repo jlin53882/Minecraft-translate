@@ -42,12 +42,18 @@ def _shield_item(item: dict) -> dict:
 
 # ========= 你那套 § 指令行（遇到就切段，且本行不納入段落翻譯） =========
 # 你貼的內容常見：§align, §stack, §rule, §recipe, §entity
+_YAML_KEYS = frozenset(
+    {"navigation", "categories", "item_ids", "icon", "position", "parent"}
+)
+
 RE_TOKEN_LINE = re.compile(
     r"^\s*§(align:|stack\[|rule\{|recipe\[|entity\[)", re.IGNORECASE
 )
 
 # 另外：有些人會把多個 §stack 接在同一行，這行也視為 token 行（避免被當文字）
-RE_MOSTLY_TOKEN_LINE = re.compile(r"^\s*(§[0-9a-zA-Z]+\S*)\s*(§[0-9a-zA-Z]+\S*)*\s*$")
+_TOKEN = r"§[0-9a-zA-Z]+(?:\[[^\]]*\]|\{[^}]*\})?"
+# 整行只有 § 指令 token（§token、§stack[…]）；§l粗體§r 這種夾著文字的行不算
+RE_MOSTLY_TOKEN_LINE = re.compile(rf"^\s*{_TOKEN}(?:\s+{_TOKEN})*\s*$")
 
 
 # Markdown 程式碼區塊圍欄（至多 3 個空白縮排，``` 或 ~~~ 三個以上）
@@ -153,9 +159,14 @@ def is_translatable_text_line(line: str) -> bool:
         return False
 
     # 類 YAML 的 key-only 行（保險用）
-    # 例如：navigation:、categories:、item_ids:
+    # 例如：navigation:、categories:、item_ids:（含底線的 key 也算）；
+    # Keybinds:、Steps: 這種單字標題是玩家讀得到的文字，不排除。
     # frontmatter 已在 extract_blocks() 處理，這裡只是防呆
-    return not re.match(r"^[A-Za-z0-9_\-]+:\s*$", s)
+    key_only = re.match(r"^([A-Za-z0-9_\-]+):\s*$", s)
+    if key_only is None:
+        return True
+    key = key_only.group(1)
+    return key not in _YAML_KEYS and "_" not in key
 
 
 def normalize_blank_lines(text: str) -> str:
