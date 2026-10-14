@@ -2429,6 +2429,52 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
                 for row in candidates
                 if previous.get(int(row[0])) is None or previous[int(row[0])][0] != text
             ]
+            # 人工列早就是這段文字、但生效的是別的譯文：不用改寫人工列，仍要切換生效
+            changed_ids_set = {int(row[0]) for row, _prev in changed}
+            switch_only = [
+                (row, previous[int(row[0])])
+                for row in candidates
+                if int(row[0]) not in changed_ids_set
+                and (row[2] or "") != text
+                and previous.get(int(row[0])) is not None
+            ]
+            if switch_only:
+                history_only = [
+                    (
+                        eid,
+                        batch,
+                        actor,
+                        "manual",
+                        old or "",
+                        text,
+                        prev[0],
+                        "" if eid == entry_id else f"同步自 {ver_self}",
+                        prev[1],
+                        prev[2],
+                        prev[1],
+                        prev[2],
+                        prev[3],
+                        prev[3],
+                    )
+                    for (eid, _ver, old, _src), prev in switch_only
+                ]
+                conn.executemany(
+                    "INSERT INTO history (entry_id, batch, actor, action, old_zh_tw, "
+                    "new_zh_tw, prev_manual, note, prev_checker, prev_review_status, "
+                    "new_checker, new_review_status, prev_revision, new_revision) "
+                    "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    history_only,
+                )
+                self._clear_superseded_reviews(
+                    conn,
+                    [(int(row[0]), text) for row, _prev in switch_only],
+                    batch,
+                    actor,
+                )
+                done.extend(
+                    Impact(row[0], row[1], row[2] or "", row[3], row[0] == entry_id)
+                    for row, _prev in switch_only
+                )
             if changed:
                 conn.executemany(
                     "INSERT INTO translation (entry_id, source, zh_tw, checker, review_status) "

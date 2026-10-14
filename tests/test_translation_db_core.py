@@ -2621,3 +2621,48 @@ def test_batch_replace_after_review_takes_effect_and_reverts(db):
         SRC_AI,
         "reviewed",
     )
+
+
+def test_saving_text_the_manual_row_already_has_switches_the_effective_source(db):
+    from translation_tool.translation_db.schema import SRC_AI
+
+    db.ingest("1.21.1", [item(tw="來源譯文")])
+    entry = db.list_entries("1.21.1")[0][0]
+    db.write_back(
+        "1.21.1",
+        [WriteBackItem(KIND_LANG, "foo", entry.key, entry.en_us, "甲")],
+        source=SRC_AI,
+        fill_other_versions=False,
+    )
+    # 人工列「乙」未審核；生效的是已審核的 AI「甲」
+    db.save_manual(entry.id, "乙", propagate=False)
+    db.review_manual(
+        entry.id, expected_zh_tw="乙", expected_source=SRC_MANUAL, propagate=False
+    )
+    db._conn.execute(
+        "UPDATE translation SET review_status='unreviewed' WHERE entry_id=? AND source=?",
+        (entry.id, SRC_MANUAL),
+    )
+    db._conn.execute(
+        "UPDATE translation SET review_status='reviewed' WHERE entry_id=? AND source=?",
+        (entry.id, SRC_AI),
+    )
+    db._rebuild_effective(db._conn)
+    db._conn.commit()
+    shown = db.get_entry(entry.id)
+    assert (shown.zh_tw, shown.source, shown.review_status) == (
+        "甲",
+        SRC_AI,
+        "reviewed",
+    )
+
+    # 人工列已經是「乙」，使用者再儲存一次「乙」：必須切換到人工
+    assert db.save_manual(entry.id, "乙", propagate=False)
+    now = db.get_entry(entry.id)
+    assert (now.zh_tw, now.source) == ("乙", SRC_MANUAL)
+
+    # 還原：回到原本生效的已審核來源
+    history = next(h for h in db.entry_detail(entry.id).history if h.action == "manual")
+    db.revert(history.id)
+    back = db.get_entry(entry.id)
+    assert (back.zh_tw, back.source, back.review_status) == ("甲", SRC_AI, "reviewed")
