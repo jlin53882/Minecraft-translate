@@ -1748,9 +1748,7 @@ def test_batch_replace_preview_shows_db_bound_identity_and_quality_details(db_pa
     assert "字面 \\n" in visible and "實際換行" in visible
     detail_lines = [text for text in texts if text.startswith("生效來源：")]
     assert len(detail_lines) == 5
-    assert all(
-        "審核：未審核" in text for text in detail_lines if "〔6〕" not in text
-    )
+    assert all("審核：未審核" in text for text in detail_lines if "〔6〕" not in text)
     assert not any(
         "歷史狀態待確認" in text and "〔6〕" not in text for text in detail_lines
     )
