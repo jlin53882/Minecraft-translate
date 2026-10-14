@@ -492,3 +492,71 @@ def test_each_sniffed_file_is_checked_not_just_the_sampled_ones(tmp_path):
     )
     result = scan_jar(jar, ScanOptions(version="1.21.1"), dir_names=())
     assert {i.key.split("#")[0] for i in result.items} == {"docs/entries/pages.json"}
+
+
+def test_translation_zip_with_english_and_chinese_guides_is_recognised(tmp_path):
+    en_md = "# Wireless Terminal\n\nUse right click to open it, and you need a charged battery.\n"
+    zh_md = "# 無線終端\n\n用右鍵開啟，需要充滿電的電池才能使用。\n"
+    jar = _jar(
+        tmp_path / "pack.zip",
+        {
+            "assets/m/docs/en_us/intro.md": en_md,
+            "assets/m/docs/zh_tw/intro.md": zh_md,
+        },
+    )
+    result = scan_jar(jar, ScanOptions(version="1.21.1", translated=True), dir_names=())
+    assert {i.key.split("#")[0] for i in result.items} == {"docs/intro.md"}
+    assert any(i.en_us and i.zh_tw for i in result.items)
+
+
+def test_translation_zip_with_only_simplified_chinese_guide_and_book(tmp_path):
+    zh_md = "# 无线终端\n\n用右键打开，需要充满电的电池才能使用。\n"
+    book = '{"name": "欢迎", "pages": [{"type": "text", "text": "这是一本很长的说明手册内容。"}]}'
+    jar = _jar(
+        tmp_path / "pack.zip",
+        {
+            "assets/m/docs/_zh_cn/intro.md": zh_md,
+            "assets/m/mybook/zh_cn/entries/a.json": book,
+        },
+    )
+    result = scan_jar(jar, ScanOptions(version="1.21.1", translated=True), dir_names=())
+    kinds = {i.kind for i in result.items}
+    assert {"guide", "patchouli"} <= kinds
+    assert all(i.zh_cn and not i.zh_tw for i in result.items)
+
+
+def test_translated_guide_without_source_and_different_paragraph_counts(tmp_path):
+    tw = "第一段說明文字，介紹這台機器的用途。\n\n第二段說明文字，介紹如何連接。\n\n第三段說明文字，介紹如何維修。\n"
+    cn = "第一段说明文字，介绍这台机器的用途。\n"
+    jar = _jar(
+        tmp_path / "pack.zip",
+        {
+            "assets/m/docs/_zh_tw/intro.md": tw,
+            "assets/m/docs/_zh_cn/intro.md": cn,
+        },
+    )
+    result = scan_jar(jar, ScanOptions(version="1.21.1", translated=True), dir_names=())
+    assert not result.error
+    assert len(result.items) == 3 and all(i.zh_tw and not i.zh_cn for i in result.items)
+
+
+def test_exhausted_sniff_budget_keeps_only_files_that_were_verified(
+    tmp_path, monkeypatch
+):
+    from translation_tool.translation_db import sniff_groups
+
+    book = '{"name": "Intro", "pages": [{"type": "text", "text": "Some page text."}]}'
+    jar = _jar(
+        tmp_path / "m.jar",
+        {
+            "assets/m/docs/en_us/entries/a.json": book,
+            "assets/m/docs/en_us/entries/b.json": book,
+            "assets/m/docs/en_us/entries/c.json": book,
+            "assets/m/docs/en_us/config.json": '{"enabled": true, "label": "Enable the feature for everyone"}',
+        },
+    )
+    monkeypatch.setattr(sniff_groups, "SNIFF_MAX_MEMBERS", 2)
+    result = scan_jar(jar, ScanOptions(version="1.21.1"), dir_names=())
+    keys = {i.key.split("#")[0] for i in result.items}
+    assert "docs/config.json" not in keys
+    assert not result.error

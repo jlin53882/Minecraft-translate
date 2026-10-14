@@ -68,11 +68,19 @@ def _candidates(names: Sequence[str], claimed: set[str]) -> dict[tuple[str, str]
     return found
 
 
-def _kind_of(
-    zf: zipfile.ZipFile, budget: ZipReadBudget, member: str, translated: bool = False
-) -> str | None:
-    """抽樣檔案像什麼：手冊／進度（JSON）或指南（文字）；都不是回傳 None。"""
-    raw = read_limited(zf, member, budget=budget)
+def _kind_of(zf: zipfile.ZipFile, budget: ZipReadBudget, member: str) -> str | None:
+    """檔案像什麼：手冊／進度（JSON）或指南（文字）；都不是回傳 None。
+
+    文字檔依「這個檔案自己的語系」判斷：英文看停用字，繁中／簡中看中文字數，
+    所以翻譯 ZIP 同時有英文與中文指南時，選到哪一份都能辨識。
+    單一檔案超過大小上限時視為不是（略過該檔）；整體預算用盡仍拋出 ``ArchiveBudgetError``。
+    """
+    try:
+        raw = read_limited(zf, member, budget=budget)
+    except ArchiveBudgetError:
+        raise
+    except ZipSizeError:
+        return None
     if member.lower().endswith(".json"):
         try:
             data = json.loads(raw.decode("utf-8-sig"), strict=False)
@@ -88,7 +96,11 @@ def _kind_of(
     except UnicodeDecodeError:
         return None
     suffix = member[member.rfind(".") :]
-    if sniff_text_file(text, suffix, member, translated=translated) is not None:
+    own_lang = split_locale(member.split("/")[2:]).lang
+    if (
+        sniff_text_file(text, suffix, member, translated=own_lang != "en_us")
+        is not None
+    ):
         return KIND_GUIDE
     return None
 
@@ -135,27 +147,22 @@ def sniffed_groups(
                 (
                     k
                     for _n, m in samples
-                    if (k := _kind_of(zf, budget, _primary(m, translated), translated))
+                    if (k := _kind_of(zf, budget, _primary(m, translated)))
                 ),
                 None,
             )
             if kind is None:
                 continue
-            validating = True
             for neutral, members in files:
                 if kind == KIND_GUIDE and is_project_doc_name(neutral):
                     continue
-                if validating:
-                    # 抽樣只決定這個資料夾像什麼；同資料夾的設定檔、中繼資料不能沿用結論
-                    try:
-                        own = _kind_of(
-                            zf, budget, _primary(members, translated), translated
-                        )
-                    except (ZipSizeError, ArchiveBudgetError):
-                        validating = False  # 預算用盡：其餘檔案沿用單元結論
-                        own = kind
-                    if own != kind:
-                        continue
+                # 抽樣只決定這個資料夾像什麼；同資料夾的設定檔、中繼資料不能沿用結論
+                try:
+                    own = _kind_of(zf, budget, _primary(members, translated))
+                except ArchiveBudgetError:
+                    break  # 預算用盡：沒驗證過的檔案不收，保留已驗證的
+                if own != kind:
+                    continue
                 if kind == KIND_ADVANCEMENT:
                     neutral = _drop_advancement_root(neutral)
                 groups[(kind, mod_id, neutral)] = members

@@ -371,7 +371,13 @@ def _guide_items(
         cn = _aligned_blocks(
             en, _read_blocks(zf, budget, members.get("zh_cn")), members.get("zh_cn")
         )
-    count = len(en) if en is not None else len(tw or [])
+    if en is None and tw is not None and cn is not None and len(tw) != len(cn):
+        # 沒有原文可對齊，繁中與簡中段落數不同就無法逐段對應：只匯入繁中
+        log_info(
+            f"[ModDB] 指南繁中與簡中的段落數不同（{len(tw)} / {len(cn)}），不匯入簡中：{members.get('zh_cn')}"
+        )
+        cn = None
+    count = len(en) if en is not None else max(len(tw or []), len(cn or []))
     ident = FileIdentity(kind, mod_id, file_key, "en_us")
     out: list[ScanItem] = []
     for index in range(count):
@@ -471,6 +477,10 @@ def _items_for_group(
         # 已翻譯來源：zh_tw 的每個字串都匯入，連 en_us 沒有的鍵值也收（原文先留空）
         tw_all = extract_all_strings(tw_obj, is_lang=is_lang)
         paths += [p for p in tw_all if p not in en_items]
+    if options.translated and tw_obj is None and cn_obj is not None:
+        # 翻譯來源只有簡中：條目照樣建立（沒有 en_us 的鍵值也收），簡中交給匯入轉繁
+        cn_all = extract_all_strings(cn_obj, is_lang=is_lang)
+        paths += [p for p in cn_all if p not in en_items]
     if not paths:
         return []
 

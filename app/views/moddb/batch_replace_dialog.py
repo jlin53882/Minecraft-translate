@@ -320,9 +320,11 @@ class BatchReplaceDialog:
         self._update_dialog()
 
     def _on_scope_change(self, _e=None) -> None:
-        if self._busy or self.selection_plan is None:
+        if self._busy:
             return
         self.only_checked = bool(self.only_checked_control.value)
+        if self.selection_plan is None:
+            return  # 首次預覽前切換：只同步選項，沒有舊預覽要作廢
         self._invalidate_selection("範圍已變更，請重新預覽。")
 
     def _on_quality_ack(self, _e=None) -> None:

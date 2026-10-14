@@ -2307,3 +2307,22 @@ def test_batch_replace_excluded_roots_stay_listed_and_can_be_reselected(db_path)
     assert [row.entry_id for row in dialog._display_rows()] == order
     assert dialog.rows.scroll is None  # 捲動只留外層一個，避免卷軸重疊
     db.close()
+
+
+def test_batch_replace_scope_toggle_before_first_preview_updates_state(db_path):
+    from app.services_impl.moddb_service import EntryFilter
+    from app.views.moddb.batch_replace_dialog import BatchReplaceDialog
+
+    db = TranslationDB(db_path)
+    dialog = BatchReplaceDialog(
+        mock_page(),
+        lambda: db,
+        EntryFilter(version="1.21.1"),
+        lambda _result: None,
+    )
+    assert dialog.selection_plan is None
+    dialog.only_checked_control.value = not dialog.only_checked
+    expected = bool(dialog.only_checked_control.value)
+    dialog._on_scope_change()
+    assert dialog.only_checked is expected
+    db.close()
