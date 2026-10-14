@@ -1918,11 +1918,33 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
                 actor,
             )
             self._refresh(conn, [change.entry_id for change in plan.changes])
+            shadowed = self._count_shadowed_replacements(conn, plan.changes)
         if progress_callback is not None:
             progress_callback("批次替換已提交", 1.0)
         return BatchReplaceResult(
-            batch, len(plan.changes), plan.skipped_count, plan.total_unique_entries
+            batch,
+            len(plan.changes),
+            plan.skipped_count,
+            plan.total_unique_entries,
+            shadowed,
         )
+
+    @staticmethod
+    def _count_shadowed_replacements(conn: sqlite3.Connection, changes) -> int:
+        """寫入後生效譯文仍不是新譯文的條目數（來源優先序讓別的來源蓋過人工）。"""
+        wanted = {int(change.entry_id): change.new_zh_tw for change in changes}
+        ids = list(wanted)
+        shadowed = 0
+        for start in range(0, len(ids), _CHUNK):
+            chunk = ids[start : start + _CHUNK]
+            marks = ",".join("?" for _ in chunk)
+            for entry_id, zh_tw in conn.execute(
+                f"SELECT entry_id, zh_tw FROM effective WHERE entry_id IN ({marks})",
+                chunk,
+            ):
+                if zh_tw != wanted[int(entry_id)]:
+                    shadowed += 1
+        return shadowed
 
     def revert_batch_replace(self, batch_id: str) -> BatchRevertResult:
         """CAS-revert every still-current row in a batch, leaving newer edits intact."""

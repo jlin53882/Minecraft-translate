@@ -360,6 +360,8 @@ class BatchReplaceResult:
     updated: int
     skipped: int
     total: int
+    # 已寫入人工來源、但生效譯文因來源優先序仍不是新譯文的條目數
+    shadowed: int = 0
 
 
 @dataclass(frozen=True)

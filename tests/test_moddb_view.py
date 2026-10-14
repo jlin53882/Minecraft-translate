@@ -2324,3 +2324,25 @@ def test_batch_replace_scope_toggle_before_first_preview_updates_state(db_path):
     dialog._on_scope_change()
     assert dialog.only_checked is expected
     db.close()
+
+
+def test_batch_replace_snack_reports_shadowed_entries(db_path, monkeypatch):
+    from app.services_impl.moddb_service import EntryFilter
+    from app.views.moddb import batch_replace_dialog as module
+    from translation_tool.translation_db.models import BatchReplaceResult
+
+    db = TranslationDB(db_path)
+    shown: list[str] = []
+    monkeypatch.setattr(
+        module, "show_snack", lambda _page, message, *a, **k: shown.append(message)
+    )
+    dialog = module.BatchReplaceDialog(
+        mock_page(), lambda: db, EntryFilter(version="1.21.1"), lambda _r: None
+    )
+    dialog._dialog_open = False
+    outcome = type("Outcome", (), {})()
+    outcome.result = BatchReplaceResult("b", 5, 1, 6, shadowed=2)
+    outcome.error = None
+    dialog._finish_apply({"state": "complete"}, outcome)
+    assert shown and "優先序" in shown[0] and "只改變 3 筆" in shown[0]
+    db.close()

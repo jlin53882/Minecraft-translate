@@ -2717,3 +2717,25 @@ def test_custom_priority_above_manual_still_wins_after_save(db):
     assert (shown.zh_tw, shown.source) == ("甲", SRC_AI)
     rows = {t.source: t.zh_tw for t in db.entry_detail(entry.id).translations}
     assert rows[SRC_MANUAL] == "乙"
+
+
+def test_batch_replace_reports_entries_shadowed_by_custom_priority(db):
+    from translation_tool.translation_db.schema import SRC_AI
+
+    db.ingest(
+        "1.21.1",
+        [
+            ScanItem(KIND_LANG, "foo", "k.a", "Hell", "地獄", "", source=SRC_AI),
+            ScanItem(KIND_LANG, "foo", "k.b", "Hell2", "地獄二", "", source=SRC_AI),
+        ],
+    )
+    db.set_priority((SRC_AI, SRC_MANUAL, SRC_JAR_TW))
+    plan = db.preview_batch_replace(EntryFilter(version="1.21.1"), "地獄", "下界")
+    result = db.execute_batch_replace(plan)
+    # 兩筆都寫入人工來源，但優先序讓 AI 仍然生效
+    assert (result.updated, result.shadowed) == (2, 2)
+
+    db.set_priority((SRC_MANUAL, SRC_AI, SRC_JAR_TW))
+    plan = db.preview_batch_replace(EntryFilter(version="1.21.1"), "下界", "冥界")
+    result = db.execute_batch_replace(plan)
+    assert (result.updated, result.shadowed) == (2, 0)

@@ -659,11 +659,23 @@ class BatchReplaceDialog:
             if self._dialog_open:
                 self._dialog_open = False
                 close_page_dialog(self.page, self.dialog)
+            message = (
+                f"已批次替換 {result.updated:,} 筆；略過 {result.skipped:,} 筆。"
+                "可在記錄中整批還原。"
+            )
+            if result.shadowed:
+                # 新譯文已存進人工來源，但自訂的來源優先序讓別的來源仍然生效
+                message = (
+                    f"已寫入人工來源 {result.updated:,} 筆，其中 {result.shadowed:,} 筆"
+                    f"因目前來源優先序仍顯示原本的譯文，生效譯文只改變 "
+                    f"{result.updated - result.shadowed:,} 筆；略過 {result.skipped:,} 筆。"
+                    "可在記錄中整批還原。"
+                )
             show_snack(
                 self.page,
-                f"已批次替換 {result.updated:,} 筆；略過 {result.skipped:,} 筆。可在記錄中整批還原。",
-                C.EM,
-                text_color=C.ON_EM,
+                message,
+                C.GOLD if result.shadowed else C.EM,
+                text_color=None if result.shadowed else C.ON_EM,
             )
             self.on_complete(result)
         else:
