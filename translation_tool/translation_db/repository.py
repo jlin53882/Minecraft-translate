@@ -3168,6 +3168,28 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
             "updated", shadowed=effective is None or effective[0] != new_zh_tw
         )
 
+    @staticmethod
+    def _reviewed_like(checker: str | None, review: str | None) -> bool:
+        """與 ``_priority_order`` 相同：這一列是否因審核而排在未審核列之前。"""
+        return review == "reviewed" or (bool(checker) and review != "unreviewed")
+
+    def _would_lose_effect_when_unreviewed(
+        self, conn: sqlite3.Connection, entry_id: int, source_id: int
+    ) -> bool:
+        """這一列退回未審核後，是否會被其他來源取代而不再生效。"""
+        rank_of = lambda source: conn.execute(
+            f"SELECT {rank_sql(self.priority, '?')}", (source,)
+        ).fetchone()[0]
+        own_rank = rank_of(source_id)
+        return any(
+            self._reviewed_like(checker, status) or rank_of(source) < own_rank
+            for source, checker, status in conn.execute(
+                "SELECT source, checker, review_status FROM translation "
+                "WHERE entry_id=? AND source<>? AND zh_tw<>''",
+                (entry_id, source_id),
+            )
+        )
+
     def replace_translation_quality_mismatch(
         self,
         entry_id: int,
@@ -3237,12 +3259,21 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
                 return AITranslationReplaceResult("unchanged")
 
             def apply_row(target_id, revision, checker, review) -> bool:
-                if source_id == SRC_MANUAL and action == "quality_repair":
-                    new_checker, new_review = "", "unreviewed"
-                elif source_id == SRC_MANUAL and action == "quality_repair_review":
-                    new_checker, new_review = actor, "reviewed"
+                # 審核狀態跟著文字走：自動修復的新文字還沒人看過，人工確認草稿才算已審核
+                if action == "quality_repair":
+                    new_checker = ""
+                    new_review = "unreviewed" if source_id == SRC_MANUAL else None
+                    if (
+                        source_id != SRC_MANUAL
+                        and self._reviewed_like(checker, review)
+                        and self._would_lose_effect_when_unreviewed(
+                            conn, target_id, source_id
+                        )
+                    ):
+                        return False  # 退回審核後生效來源會換掉，保留原文
                 else:
-                    new_checker, new_review = checker, review
+                    new_checker = actor if source_id == SRC_MANUAL else ""
+                    new_review = "reviewed"
                 updated = conn.execute(
                     "UPDATE translation SET zh_tw=?, checker=?, review_status=?, "
                     "updated_at=CURRENT_TIMESTAMP WHERE entry_id=? AND source=? "

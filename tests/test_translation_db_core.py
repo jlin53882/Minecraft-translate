@@ -2785,27 +2785,82 @@ def _ai_row(db, entry_id):
     ).fetchone()
 
 
-def test_quality_repair_keeps_reviewed_status_and_history_can_revert(db):
+_REPAIR_IDENTITY = {
+    "expected_version": "1.21.1",
+    "expected_kind": KIND_LANG,
+    "expected_mod_id": "foo",
+    "expected_key": "k",
+    "expected_en_us": "Use %s",
+    "expected_revision": None,
+}
+
+
+def test_automatic_repair_clears_review_and_history_can_revert(db):
     entry = _reviewed_ai_entry(db, "Use %s", "使用")
+
+    result = db.replace_translation_quality_mismatch(
+        entry.id, SRC_AI, "使用", "使用 %s", **_REPAIR_IDENTITY
+    )
+
+    assert result.status == "updated"
+    # 新文字還沒人看過：審核標記退回，資料庫與歷史快照一致
+    assert tuple(_ai_row(db, entry.id)) == ("使用 %s", None)
+    history = db.entry_detail(entry.id).history[0]
+    assert history.action == "quality_repair"
+    assert db.revert(history.id) == 1
+    assert tuple(_ai_row(db, entry.id)) == ("使用", "reviewed")
+
+
+def test_human_confirmed_repair_marks_non_manual_source_reviewed(db):
+    db.ingest(
+        "1.21.1", [ScanItem(KIND_LANG, "foo", "k", "Use %s", "使用", source=SRC_AI)]
+    )
+    entry = db.list_entries("1.21.1")[0][0]
 
     result = db.replace_translation_quality_mismatch(
         entry.id,
         SRC_AI,
         "使用",
         "使用 %s",
-        expected_version="1.21.1",
-        expected_kind=KIND_LANG,
-        expected_mod_id="foo",
-        expected_key="k",
-        expected_en_us="Use %s",
-        expected_revision=None,
+        action="quality_repair_review",
+        actor="人工",
+        **_REPAIR_IDENTITY,
     )
 
     assert result.status == "updated"
-    assert tuple(_ai_row(db, entry.id)) == ("使用 %s", "reviewed")  # 與歷史快照一致
-    history = db.entry_detail(entry.id).history[0]
-    assert history.action == "quality_repair"
-    assert db.revert(history.id) == 1
+    assert tuple(_ai_row(db, entry.id)) == ("使用 %s", "reviewed")
+    assert db.get_entry(entry.id).review_status == "reviewed"
+    assert db.revert(db.entry_detail(entry.id).history[0].id) == 1
+    assert tuple(_ai_row(db, entry.id)) == ("使用", None)
+
+
+def test_automatic_repair_of_reviewed_row_is_skipped_when_unreviewing_changes_effective(
+    db,
+):
+    from translation_tool.translation_db.schema import SRC_JAR_TW
+
+    db.ingest(
+        "1.21.1",
+        [
+            ScanItem(KIND_LANG, "foo", "k", "Use %s", "使用", source=SRC_AI),
+            ScanItem(KIND_LANG, "foo", "k", "Use %s", "別的", source=SRC_JAR_TW),
+        ],
+    )
+    entry = db.list_entries("1.21.1")[0][0]
+    db.set_priority((SRC_JAR_TW, SRC_AI, SRC_MANUAL))
+    db._conn.execute(
+        "UPDATE translation SET review_status='reviewed' WHERE entry_id=? AND source=?",
+        (entry.id, SRC_AI),
+    )
+    db._rebuild_effective(db._conn)
+    db._conn.commit()
+    assert db.get_entry(entry.id).source == SRC_AI  # 已審核的 AI 贏過排前面的 JAR
+
+    result = db.replace_translation_quality_mismatch(
+        entry.id, SRC_AI, "使用", "使用 %s", **_REPAIR_IDENTITY
+    )
+
+    assert result.status == "skipped_changed"  # 退回審核會讓 JAR 接手，保留原文
     assert tuple(_ai_row(db, entry.id)) == ("使用", "reviewed")
 
 
