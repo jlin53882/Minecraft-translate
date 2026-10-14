@@ -6,6 +6,7 @@ import flet as ft
 
 from app.services_impl.moddb_service import format_taipei_time
 from app.services_impl.moddb_source_service import (
+    REVIEW_BADGE_LABELS,
     source_catalog_for,
     source_label,
     source_tone,
@@ -162,8 +163,17 @@ def _translation_row(row, catalog, history) -> ft.Control:
             ft.Row(
                 [
                     kit.chip(
-                        source_label(row.source, catalog, row.review_status),
-                        source_tone(row.source),
+                        source_label(row.source, catalog), source_tone(row.source)
+                    ),
+                    *(
+                        [
+                            kit.chip(
+                                badge,
+                                "em" if row.review_status == "reviewed" else "gold",
+                            )
+                        ]
+                        if (badge := REVIEW_BADGE_LABELS.get(row.review_status or ""))
+                        else []
                     ),
                     *([kit.chip(provenance, "dia")] if provenance else []),
                     ft.Text(

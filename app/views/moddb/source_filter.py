@@ -7,7 +7,7 @@ from collections.abc import Callable
 from app.services_impl.moddb_service import current_settings
 from app.services_impl.moddb_source_service import (
     CUSTOM_SOURCE_BASE,
-    MANUAL_REVIEW_LABELS,
+    REVIEW_STATUS_LABELS,
     builtin_source_codes,
 )
 from app.ui import kit
@@ -73,7 +73,7 @@ class ReviewStatusFilter:
 
     def __init__(self, on_change: Callable[[], None]):
         self.dropdown = kit.dropdown(
-            label="人工審核狀態",
+            label="審核狀態",
             dense=True,
             width=190,
             value="__all__",
@@ -82,5 +82,5 @@ class ReviewStatusFilter:
         )
         kit.set_dropdown_options(
             self.dropdown,
-            [("__all__", "全部狀態"), *MANUAL_REVIEW_LABELS.items()],
+            [("__all__", "全部狀態"), *REVIEW_STATUS_LABELS.items()],
         )

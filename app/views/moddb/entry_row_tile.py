@@ -5,6 +5,7 @@ from __future__ import annotations
 import flet as ft
 
 from app.services_impl.moddb_source_service import (
+    REVIEW_BADGE_LABELS,
     source_catalog_for,
     source_label,
     source_tone,
@@ -75,12 +76,13 @@ def _tile_text(panel, row, catalog) -> ft.Control:
 def _source_controls(row, catalog) -> list[ft.Control]:
     if row.source is None:
         return []
-    return [
-        kit.chip(
-            source_label(row.source, catalog, row.review_status),
-            source_tone(row.source),
+    chips = [kit.chip(source_label(row.source, catalog), source_tone(row.source))]
+    badge = REVIEW_BADGE_LABELS.get(row.review_status or "")
+    if badge:
+        chips.append(
+            kit.chip(badge, "em" if row.review_status == "reviewed" else "gold")
         )
-    ]
+    return chips
 
 
 def _quality_controls(row) -> list[ft.Control]:

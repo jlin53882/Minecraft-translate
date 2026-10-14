@@ -23,6 +23,7 @@ from app.services_impl.moddb_service import (
     current_settings,
 )
 from app.services_impl.moddb_source_service import (
+    REVIEW_BADGE_LABELS,
     source_catalog_for,
     source_label,
     source_tone,
@@ -197,6 +198,7 @@ class EntriesPanel(ft.Column):
             on_change=self._on_text_change,
         )
         self.source_chip = ft.Container()
+        self.review_chip = ft.Container()
         self.token_hint = ft.Text("", size=12, color=C.GOLD, visible=False)
         self.mc_preview = MinecraftTextPreview()
         self.meta_col = ft.Column(spacing=4)
@@ -258,7 +260,7 @@ class EntriesPanel(ft.Column):
             icon=ft.Icons.VERIFIED_OUTLINED,
             size="sm",
             on_click=self._confirm,
-            tooltip="確認目前譯文為人工-已審核；同步時只審核目前顯示相同譯文的版本",
+            tooltip="確認目前譯文為人工已審核（生效來源不變）；同步時只審核目前顯示相同譯文的版本",
         )
         self.save_btn = kit.button(
             "儲存", "primary", icon=ft.Icons.CHECK, on_click=self._save, disabled=True
@@ -597,16 +599,22 @@ class EntriesPanel(ft.Column):
             db = self.db() if calculate_impact else None
             catalog = source_catalog_for(db)
         self.source_chip.content = kit.chip(
-            source_label(entry.source, catalog, entry.review_status)
-            if entry.zh_tw
-            else "尚無譯文",
+            source_label(entry.source, catalog) if entry.zh_tw else "尚無譯文",
             source_tone(entry.source),
+        )
+        badge = (
+            REVIEW_BADGE_LABELS.get(entry.review_status or "") if entry.zh_tw else None
+        )
+        self.review_chip.content = (
+            kit.chip(badge, "em" if entry.review_status == "reviewed" else "gold")
+            if badge
+            else None
         )
         self.meta_col.controls = build_entry_metadata(detail)
         self.format_review.render(
             entry.en_us or NO_SOURCE_TEXT,
             self.tw_field.value or "",
-            metadata=[self.source_chip],
+            metadata=[self.source_chip, self.review_chip],
         )
         if calculate_impact:
             self._update_impact()
@@ -775,7 +783,7 @@ class EntriesPanel(ft.Column):
             entry.en_us if entry else "",
             text,
             diff_result,
-            metadata=[self.source_chip],
+            metadata=[self.source_chip, self.review_chip],
         )
 
     def _update_format_hints_and_refresh(self) -> None:

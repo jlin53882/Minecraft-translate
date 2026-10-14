@@ -1739,8 +1739,8 @@ def test_batch_replace_preview_shows_db_bound_identity_and_quality_details(db_pa
     assert "English source 0\\nwith a second line" in visible
     assert "生效來源：釘宮翻譯組〔3〕" in visible
     assert "生效來源：釘宮翻譯組（自訂 #100）〔100〕" in visible
-    assert "人工（歷史狀態待確認）" in visible
-    assert "人工審核：不適用" in visible
+    assert "審核：歷史狀態待確認" in visible
+    assert "審核：未審核" in visible
     assert "跨版本額外項目" in visible
     assert "缺少佔位符 `%s`：2 → 1" in visible
     assert "多出 Minecraft 色碼 `§a`：0 → 1" in visible
@@ -1749,7 +1749,7 @@ def test_batch_replace_preview_shows_db_bound_identity_and_quality_details(db_pa
     detail_lines = [text for text in texts if text.startswith("生效來源：")]
     assert len(detail_lines) == 5
     assert all(
-        "人工審核：不適用" in text for text in detail_lines if "〔6〕" not in text
+        "審核：未審核" in text for text in detail_lines if "〔6〕" not in text
     )
     assert not any(
         "歷史狀態待確認" in text and "〔6〕" not in text for text in detail_lines

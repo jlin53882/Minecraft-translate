@@ -12,7 +12,7 @@ from app.services_impl.moddb_service import (
     token_category,
 )
 from app.services_impl.moddb_source_service import (
-    MANUAL_REVIEW_LABELS,
+    REVIEW_STATUS_LABELS,
     SourceCatalog,
     source_label,
 )
@@ -65,13 +65,10 @@ def _quality_details(row: BatchReplaceChange) -> list[str]:
 def _effective_source_detail(row: BatchReplaceChange, catalog: SourceCatalog) -> str:
     source_name = source_label(row.effective_source, catalog)
     source_code = "未知" if row.effective_source is None else row.effective_source
-    if row.effective_source == SRC_MANUAL:
-        state = row.effective_review_status
-        if state not in MANUAL_REVIEW_LABELS:
-            state = "legacy_unknown"
-        review = source_label(SRC_MANUAL, catalog, state)
-    else:
-        review = "人工審核：不適用"
+    state = row.effective_review_status
+    if state not in REVIEW_STATUS_LABELS:
+        state = "legacy_unknown" if row.effective_source == SRC_MANUAL else "unreviewed"
+    review = f"審核：{REVIEW_STATUS_LABELS[state]}"
     checker = row.effective_checker or "未知"
     return f"生效來源：{source_name}〔{source_code}〕 · checker {checker} · {review}"
 

@@ -453,6 +453,19 @@ def _install_schema_v3_objects(conn: sqlite3.Connection) -> None:
         END;
         """
     )
+    # 非人工來源的譯文文字被改掉、審核狀態卻沒有一起改時，舊的「已審核」不再成立
+    conn.execute(
+        """
+        CREATE TRIGGER IF NOT EXISTS translation_text_change_clears_review
+        AFTER UPDATE OF zh_tw ON translation
+        WHEN NEW.source <> 6 AND NEW.zh_tw IS NOT OLD.zh_tw
+             AND OLD.review_status = 'reviewed'
+             AND NEW.review_status IS OLD.review_status
+        BEGIN
+            UPDATE translation SET review_status=NULL WHERE id=NEW.id;
+        END;
+        """
+    )
 
 
 DB_EMPTY = "empty"  # 沒有任何資料表（新檔案或 0 位元組的檔案）

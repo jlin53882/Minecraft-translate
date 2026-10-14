@@ -118,7 +118,7 @@ class BulkReviewDialog:
                 content=ft.Column(
                     [
                         ft.Text(
-                            "把「所選版本、目前生效來源」的條目一次標為人工已審核；"
+                            "把「所選版本、目前生效來源」的條目一次標為人工已審核（來源不變）；"
                             "預覽不會寫入，確認後才會審核，且可整批還原。",
                             size=12,
                             color=C.MUTED,

@@ -28,6 +28,11 @@ def _manual(db, version, key):
     return next((t for t in detail.translations if t.source == SRC_MANUAL), None)
 
 
+def _reviewed(db, version, key):
+    """審核不改變生效來源：回傳生效列（來源、譯文、審核者、審核狀態）。"""
+    return _entry(db, version, key)
+
+
 def _seed(db):
     db.ingest(
         "1.21.1",
@@ -51,7 +56,8 @@ def test_candidates_follow_version_source_and_quality(db):
     everything = db.preview_bulk_review("1.21.1", SRC_JAR_TW, quality_pass_only=False)
     assert {c.key for c in everything.candidates} == {"ok", "bad"}
 
-    # 已人工審核（生效來源 6）的條目不會出現；來源 6 只列未審核者
+    # 已審核的條目不會出現（來源仍是模組自帶）；來源 6 只列人工未審核者
+    assert "done" not in {c.key for c in everything.candidates}
     manual = db.preview_bulk_review("1.21.1", SRC_MANUAL, quality_pass_only=False)
     assert manual.candidates == ()
     db.save_manual(_entry(db, "1.21.1", "ok").id, "鋼材", propagate=False)
@@ -71,9 +77,10 @@ def test_execute_reviews_selected_entries_and_honours_exclusions(db):
 
     assert (result.reviewed, result.synced, result.stale_skipped) == (2, 0, 0)
     for key in ("a", "c"):
-        manual = _manual(db, "1.21.1", key)
-        assert manual.review_status == "reviewed" and manual.checker == "使用者"
-    assert _manual(db, "1.21.1", "b") is None
+        row = _reviewed(db, "1.21.1", key)
+        assert row.review_status == "reviewed" and row.source == SRC_JAR_TW
+    assert _entry(db, "1.21.1", "b").review_status == "unreviewed"
+    assert _manual(db, "1.21.1", "a") is None  # 不新增人工列
 
 
 def test_sync_replaces_other_versions_and_is_reverted_as_one_batch(db):
@@ -91,12 +98,13 @@ def test_sync_replaces_other_versions_and_is_reverted_as_one_batch(db):
     result = db.execute_bulk_review(plan, actor="使用者")
     assert (result.reviewed, result.synced) == (1, 2)
     for version in ("1.21.1", "1.20.1", "1.19.2"):
-        manual = _manual(db, version, "k")
-        assert manual.zh_tw == "鋼" and manual.review_status == "reviewed"
+        row = _reviewed(db, version, "k")
+        assert row.zh_tw == "鋼" and row.review_status == "reviewed"
+        assert row.source == SRC_JAR_TW
 
     assert db.revert_review_batch(result.batch) == 3
-    assert _manual(db, "1.20.1", "k") is None
     assert _entry(db, "1.20.1", "k").zh_tw == "鋼鐵"
+    assert _entry(db, "1.20.1", "k").review_status == "unreviewed"
 
 
 def test_sync_off_leaves_other_versions_alone(db):
@@ -105,8 +113,8 @@ def test_sync_off_leaves_other_versions_alone(db):
 
     db.execute_bulk_review(db.preview_bulk_review("1.21.1", SRC_JAR_TW))
 
-    assert _manual(db, "1.21.1", "k").review_status == "reviewed"
-    assert _manual(db, "1.20.1", "k") is None
+    assert _entry(db, "1.21.1", "k").review_status == "reviewed"
+    assert _entry(db, "1.20.1", "k").review_status == "unreviewed"
 
 
 def test_execute_rejects_plan_when_entries_changed_after_preview(db):
@@ -117,7 +125,7 @@ def test_execute_rejects_plan_when_entries_changed_after_preview(db):
     with pytest.raises(ValueError, match="重新產生批量審核預覽"):
         db.execute_bulk_review(plan)
 
-    assert _manual(db, "1.21.1", "b") is None  # 整批都沒寫入
+    assert _entry(db, "1.21.1", "b").review_status == "unreviewed"  # 整批都沒寫入
 
 
 def _drain(page):
@@ -161,12 +169,12 @@ def test_dialog_previews_pages_excludes_and_reverts(db):
     dialog._confirm()
     _drain(page)
     assert dialog.result.reviewed == 119 and dialog.revert_btn.visible
-    assert done and _manual(db, "1.21.1", "k001").review_status == "reviewed"
-    assert _manual(db, "1.21.1", "k000") is None
+    assert done and _entry(db, "1.21.1", "k001").review_status == "reviewed"
+    assert _entry(db, "1.21.1", "k000").review_status == "unreviewed"
 
     dialog._revert()
     _drain(page)
-    assert _manual(db, "1.21.1", "k001") is None
+    assert _entry(db, "1.21.1", "k001").review_status == "unreviewed"
     assert dialog.revert_btn.visible is False
 
 

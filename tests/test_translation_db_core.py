@@ -458,7 +458,7 @@ def test_review_manual_compare_and_set_rejects_source_changed_with_same_text(db)
         )
 
 
-def test_reviewed_manual_wins_without_reordering_unreviewed_manual(db):
+def test_review_keeps_effective_source_and_marks_it_reviewed(db):
     db.ingest("1.21.1", [item(tw="同一譯文")])
     entry = db.list_entries("1.21.1")[0][0]
     db.write_back(
@@ -471,7 +471,7 @@ def test_reviewed_manual_wins_without_reordering_unreviewed_manual(db):
 
     db.save_manual(entry.id, "同一譯文", propagate=False)
     assert db.get_entry(entry.id).source == SRC_AI
-    assert db.get_entry(entry.id).review_status is None
+    assert db.get_entry(entry.id).review_status == "unreviewed"
 
     db.review_manual(
         entry.id,
@@ -479,12 +479,15 @@ def test_reviewed_manual_wins_without_reordering_unreviewed_manual(db):
         expected_source=SRC_AI,
         propagate=False,
     )
-    assert db.get_entry(entry.id).source == SRC_MANUAL
+    # 審核不改變來源：仍是 AI，只多了「已審核」；人工列維持未審核
+    assert db.get_entry(entry.id).source == SRC_AI
     assert db.get_entry(entry.id).review_status == "reviewed"
-    assert any(row.source == SRC_AI for row in db.entry_detail(entry.id).translations)
+    rows = {row.source: row for row in db.entry_detail(entry.id).translations}
+    assert rows[SRC_AI].review_status == "reviewed"
+    assert rows[SRC_MANUAL].review_status == "unreviewed"
 
 
-def test_reviewing_ai_text_overwrites_non_effective_manual_and_keeps_history(db):
+def test_reviewing_ai_text_leaves_non_effective_manual_alone_and_is_revertible(db):
     db.ingest("1.21.1", [item(tw="來源譯文")])
     entry = db.list_entries("1.21.1")[0][0]
     db.write_back(
@@ -500,11 +503,11 @@ def test_reviewing_ai_text_overwrites_non_effective_manual_and_keeps_history(db)
         entry.id,
         expected_zh_tw="AI 新譯文",
         expected_source=SRC_AI,
-        expected_review_status=None,
+        expected_review_status="unreviewed",
         expected_checker="",
         propagate=False,
     )
-    assert preview[0].included and preview[0].manual_text == "舊人工譯文"
+    assert preview[0].included
     reviewed = db.review_manual(
         entry.id,
         expected_zh_tw="AI 新譯文",
@@ -516,12 +519,18 @@ def test_reviewing_ai_text_overwrites_non_effective_manual_and_keeps_history(db)
     )
     assert [row.entry_id for row in reviewed] == [entry.id]
     detail = db.entry_detail(entry.id)
-    manual = next(row for row in detail.translations if row.source == SRC_MANUAL)
-    assert manual.zh_tw == "AI 新譯文" and manual.checker == "reviewer"
-    assert manual.review_status == "reviewed"
+    rows = {row.source: row for row in detail.translations}
+    assert (
+        rows[SRC_AI].zh_tw == "AI 新譯文" and rows[SRC_AI].review_status == "reviewed"
+    )
+    assert rows[SRC_MANUAL].zh_tw == "舊人工譯文"  # 沒被動到
+    assert db.get_entry(entry.id).source == SRC_AI
     history = detail.history[0]
-    assert history.action == "review" and history.prev_manual == "舊人工譯文"
-    assert history.prev_checker == "" and history.prev_review_status == "unreviewed"
+    assert history.action == "review" and history.source_id == SRC_AI
+
+    db.revert(history.id)
+    assert db.get_entry(entry.id).review_status == "unreviewed"
+    assert db.get_entry(entry.id).source == SRC_AI
 
 
 def test_review_preview_shows_sync_and_skipped_sibling_reasons(db):
@@ -1232,7 +1241,7 @@ def test_effective_source_stats_group_codes_review_states_and_untranslated(db):
     db.ingest("1.20.1", [item(key="item.other-version", tw="另一版譯文")])
     stats = db.effective_source_stats_by_version()
     buckets = {(row.source, row.review_status): row.count for row in stats}
-    assert all(buckets[(code, None)] == 1 for code in codes)
+    assert all(buckets[(code, "unreviewed")] == 1 for code in codes)
     assert buckets[(SRC_MANUAL, "unreviewed")] == 1
     assert buckets[(SRC_MANUAL, "reviewed")] == 1
     assert buckets[(SRC_MANUAL, "legacy_unknown")] == 1
@@ -1253,13 +1262,21 @@ def test_manual_review_state_filter_matches_list_and_count(db):
     unreviewed, unreviewed_count = db.list_entries(
         "1.21.1", source=SRC_MANUAL, review_status="unreviewed"
     )
-    reviewed, reviewed_count = db.list_entries(
-        "1.21.1", source=SRC_MANUAL, review_status="reviewed"
-    )
+    reviewed, reviewed_count = db.list_entries("1.21.1", review_status="reviewed")
     assert unreviewed_count == len(unreviewed) == 1
     assert reviewed_count == len(reviewed) == 1
     assert unreviewed[0].review_status == "unreviewed"
-    assert reviewed[0].review_status == "reviewed"
+    # 審核不改來源：已審核的那筆仍是模組自帶來源
+    assert reviewed[0].review_status == "reviewed" and reviewed[0].source == SRC_JAR_TW
+    # 來源與審核狀態各自獨立，可以組合篩選
+    combined, combined_count = db.list_entries(
+        "1.21.1", source=SRC_JAR_TW, review_status="reviewed"
+    )
+    assert combined_count == len(combined) == 1
+    _none, none_count = db.list_entries(
+        "1.21.1", source=SRC_MANUAL, review_status="reviewed"
+    )
+    assert none_count == 0
 
 
 def test_review_sync_replaces_other_versions_even_with_different_text(db):
@@ -1276,19 +1293,19 @@ def test_review_sync_replaces_other_versions_even_with_different_text(db):
     )
     assert {change.mc_version for change in done} == {"1.21.1", "1.20.1", "1.19.2"}
     for version in ("1.21.1", "1.20.1", "1.19.2"):
-        manual = next(
-            row
-            for row in db.entry_detail(db.list_entries(version)[0][0].id).translations
-            if row.source == SRC_MANUAL
-        )
-        assert manual.review_status == "reviewed" and manual.zh_tw == "相同譯文"
+        row = db.list_entries(version)[0][0]
+        # 來源不變（仍是模組自帶），譯文與審核狀態一致
+        assert row.source == SRC_JAR_TW
+        assert row.review_status == "reviewed" and row.zh_tw == "相同譯文"
 
     # 被取代的譯文留在歷史，整批還原後 1.19.2 回到原本的來源譯文
     other = db.list_entries("1.19.2")[0][0]
     history = db.entry_detail(other.id).history[0]
     assert history.old_zh_tw == "不同譯文"
     db.revert(history.id, whole_batch=True)
-    assert db.list_entries("1.19.2")[0][0].zh_tw == "不同譯文"
+    restored = db.list_entries("1.19.2")[0][0]
+    assert restored.zh_tw == "不同譯文" and restored.review_status == "unreviewed"
+    assert db.list_entries("1.21.1")[0][0].review_status == "unreviewed"
 
 
 def _make_v1_db(path):
@@ -1307,6 +1324,7 @@ def _make_v1_db(path):
     with sqlite3.connect(path) as conn:
         conn.execute("DROP TRIGGER IF EXISTS translation_insert_timestamp_revision")
         conn.execute("DROP TRIGGER IF EXISTS translation_update_revision")
+        conn.execute("DROP TRIGGER IF EXISTS translation_text_change_clears_review")
         conn.execute("DROP INDEX IF EXISTS idx_effective_source_review")
         conn.execute("ALTER TABLE translation DROP COLUMN review_status")
         conn.execute("ALTER TABLE translation DROP COLUMN created_at")
@@ -1394,6 +1412,7 @@ def test_schema_v2_migration_keeps_first_seen_unknown_and_supports_readonly(tmp_
     with sqlite3.connect(path) as conn:
         conn.execute("DROP TRIGGER IF EXISTS translation_insert_timestamp_revision")
         conn.execute("DROP TRIGGER IF EXISTS translation_update_revision")
+        conn.execute("DROP TRIGGER IF EXISTS translation_text_change_clears_review")
         conn.execute("ALTER TABLE translation DROP COLUMN created_at")
         conn.execute("ALTER TABLE translation DROP COLUMN revision")
         conn.execute("ALTER TABLE history DROP COLUMN prev_revision")
@@ -2363,3 +2382,22 @@ def test_scan_jar_ignores_book_translations_that_do_not_match_en_us(tmp_path):
     assert stale and all(i.zh_cn == "" and i.zh_tw == "" for i in stale)
     ok = by_key["patchouli_books/guide/entries/ok.json#pages[0].text"]
     assert ok.zh_tw == "歡迎使用本書。"
+
+
+def test_text_change_on_reviewed_non_manual_row_clears_review(db):
+    """非人工來源的譯文被改寫（例如重新匯入）時，舊的「已審核」不能沿用到新譯文。"""
+    db.ingest("1.21.1", [item(tw="舊譯文")])
+    entry = db.list_entries("1.21.1")[0][0]
+    db.review_manual(entry.id, expected_zh_tw="舊譯文", propagate=False)
+    assert db.get_entry(entry.id).review_status == "reviewed"
+
+    db._conn.execute(
+        "UPDATE translation SET zh_tw='新譯文' WHERE entry_id=? AND source=?",
+        (entry.id, SRC_JAR_TW),
+    )
+    db._conn.commit()
+    row = db._conn.execute(
+        "SELECT review_status FROM translation WHERE entry_id=? AND source=?",
+        (entry.id, SRC_JAR_TW),
+    ).fetchone()
+    assert row[0] is None
