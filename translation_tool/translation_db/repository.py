@@ -816,8 +816,14 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
             where.append("f.source = ?")
             params.append(int(criteria.source))
         if criteria.review_status is not None:
-            where.append(f"{self._effective_review_sql} = ?")
-            params.append(criteria.review_status)
+            if criteria.review_status == "reviewed":
+                # 舊資料（歷史狀態待確認）畫面上同樣顯示「人工已審核」，篩選一併納入
+                where.append(
+                    f"{self._effective_review_sql} IN ('reviewed', 'legacy_unknown')"
+                )
+            else:
+                where.append(f"{self._effective_review_sql} = ?")
+                params.append(criteria.review_status)
         if criteria.mod_id:
             where.append("e.mod_id = ?")
             params.append(criteria.mod_id)
@@ -2437,7 +2443,9 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
         done: list[Impact] = []
         own = next((item for item in preview if item.entry_id == entry_id), None)
         own_source = (
-            int(own.source) if own is not None and own.source is not None else SRC_MANUAL
+            int(own.source)
+            if own is not None and own.source is not None
+            else SRC_MANUAL
         )
         for item in preview:
             if not item.included:
@@ -2463,7 +2471,13 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
                 "THEN excluded.checker ELSE translation.checker END, "
                 "zh_tw=excluded.zh_tw, "
                 "review_status='reviewed', updated_at=CURRENT_TIMESTAMP",
-                (eid, target, expected_zh_tw, checker, 1 if target == SRC_MANUAL else 0),
+                (
+                    eid,
+                    target,
+                    expected_zh_tw,
+                    checker,
+                    1 if target == SRC_MANUAL else 0,
+                ),
             )
             written = conn.execute(
                 "SELECT checker, revision FROM translation WHERE entry_id=? AND source=?",
@@ -2504,7 +2518,11 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
                 "WHERE entry_id=? AND source=?",
                 (entry_id, own_source),
             ).fetchone()
-            if current is None or current[0] != expected_zh_tw or current[1] != "reviewed":
+            if (
+                current is None
+                or current[0] != expected_zh_tw
+                or current[1] != "reviewed"
+            ):
                 raise ValueError("目前譯文已變動，請重新整理後再審核")
         return done
 

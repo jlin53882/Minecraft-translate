@@ -2433,3 +2433,23 @@ def test_schema_v6_moves_reviewed_manual_rows_back_to_original_source(tmp_path):
     assert db.entry_detail(same.id).history[0].action == "review_migrate"
     assert list(tmp_path.glob("v5.db.pre-schema-v6-*.bak"))
     db.close()
+
+
+def test_reviewed_filter_includes_legacy_unknown_rows(db):
+    db.ingest("1.21.1", [item(key="a", tw="甲"), item(key="b", tw="乙")])
+    rows = {r.key: r for r in db.list_entries("1.21.1")[0]}
+    db.save_manual(rows["a"].id, "甲甲", propagate=False)
+    db._conn.execute(
+        "UPDATE translation SET review_status='legacy_unknown' "
+        "WHERE entry_id=? AND source=?",
+        (rows["a"].id, SRC_MANUAL),
+    )
+    db._conn.execute(
+        "UPDATE effective SET review_status='legacy_unknown' WHERE entry_id=?",
+        (rows["a"].id,),
+    )
+    db._conn.commit()
+    db.review_manual(rows["b"].id, expected_zh_tw="乙", propagate=False)
+
+    found, total = db.list_entries("1.21.1", review_status="reviewed")
+    assert total == 2 and {r.key for r in found} == {"a", "b"}

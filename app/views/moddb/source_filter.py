@@ -82,5 +82,12 @@ class ReviewStatusFilter:
         )
         kit.set_dropdown_options(
             self.dropdown,
-            [("__all__", "全部狀態"), *REVIEW_STATUS_LABELS.items()],
+            [
+                ("__all__", "全部狀態"),
+                *(
+                    (status, label)
+                    for status, label in REVIEW_STATUS_LABELS.items()
+                    if status != "legacy_unknown"  # 與「人工已審核」同名，併入該選項
+                ),
+            ],
         )
