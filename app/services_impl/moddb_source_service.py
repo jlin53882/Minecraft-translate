@@ -27,7 +27,7 @@ from translation_tool.translation_db.source_catalog import (
 REVIEW_STATUS_LABELS = {
     "unreviewed": "未審核",
     "reviewed": "人工已審核",
-    "legacy_unknown": "歷史狀態待確認",
+    "legacy_unknown": "人工已審核",
 }
 # 卡片上額外顯示的審核標籤；未審核是預設狀態，不顯示
 REVIEW_BADGE_LABELS = {

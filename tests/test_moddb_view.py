@@ -1739,7 +1739,7 @@ def test_batch_replace_preview_shows_db_bound_identity_and_quality_details(db_pa
     assert "English source 0\\nwith a second line" in visible
     assert "生效來源：釘宮翻譯組〔3〕" in visible
     assert "生效來源：釘宮翻譯組（自訂 #100）〔100〕" in visible
-    assert "審核：歷史狀態待確認" in visible
+    assert "審核：人工已審核" in visible
     assert "審核：未審核" in visible
     assert "跨版本額外項目" in visible
     assert "缺少佔位符 `%s`：2 → 1" in visible

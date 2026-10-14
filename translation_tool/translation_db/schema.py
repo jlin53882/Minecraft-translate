@@ -19,7 +19,7 @@ import sqlite3
 import time
 from pathlib import Path
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 KIND_LANG = "lang"
 KIND_PATCHOULI = "patchouli"
@@ -224,6 +224,8 @@ def init_schema(conn: sqlite3.Connection) -> None:
             _backup_before_source_history_migration(conn)
         elif next_version == 5:
             _backup_before_ai_repair_source_migration(conn)
+        elif next_version == 6:
+            _backup_before_independent_review_migration(conn)
         conn.execute("BEGIN IMMEDIATE")
         try:
             if next_version == 2:
@@ -234,6 +236,8 @@ def init_schema(conn: sqlite3.Connection) -> None:
                 _migrate_source_history_v4(conn)
             elif next_version == 5:
                 _migrate_ai_repair_source_v5(conn)
+            elif next_version == 6:
+                _migrate_independent_review_v6(conn)
             conn.execute(
                 "UPDATE meta SET value=? WHERE key='schema_version'",
                 (str(next_version),),
@@ -419,6 +423,90 @@ def _migrate_ai_repair_source_v5(conn: sqlite3.Connection) -> None:
     columns = {row[1] for row in conn.execute("PRAGMA table_info(history)")}
     if "repair_prev_zh_tw" not in columns:
         conn.execute("ALTER TABLE history ADD COLUMN repair_prev_zh_tw TEXT")
+
+
+def _backup_before_independent_review_migration(
+    conn: sqlite3.Connection,
+) -> Path | None:
+    """Keep a sidecar backup before moving reviews back to their original source."""
+    main = next(
+        (row[2] for row in conn.execute("PRAGMA database_list") if row[1] == "main"),
+        "",
+    )
+    if not main:
+        return None
+    source_path = Path(main)
+    backup_path = source_path.with_name(
+        f"{source_path.name}.pre-schema-v6-{time.time_ns()}.bak"
+    )
+    target = sqlite3.connect(backup_path)
+    try:
+        conn.backup(target)
+    except BaseException:
+        target.close()
+        backup_path.unlink(missing_ok=True)
+        raise
+    target.close()
+    return backup_path
+
+
+def _migrate_independent_review_v6(conn: sqlite3.Connection) -> None:
+    """Move "manual reviewed" rows back to the source that supplied the same text.
+
+    Review used to write a reviewed source-6 row that replaced the effective
+    source. Now review is a flag on the row that wins, so a reviewed manual row
+    whose text equals another source's text is folded back: that source's row is
+    marked reviewed and the manual row is removed. Manual rows with their own
+    text (a real human edit) stay as manual, already reviewed.
+    """
+    if "review_status" not in {
+        row[1] for row in conn.execute("PRAGMA table_info(translation)")
+    }:
+        return
+    rank = {code: index for index, code in enumerate(DEFAULT_PRIORITY)}
+    matches: dict[int, list[tuple[int, int, int]]] = {}
+    for manual_id, entry_id, other_id, other_source in conn.execute(
+        "SELECT m.id, m.entry_id, o.id, o.source FROM translation m "
+        "JOIN translation o ON o.entry_id=m.entry_id AND o.source<>? "
+        "AND o.zh_tw=m.zh_tw "
+        "WHERE m.source=? AND m.review_status='reviewed'",
+        (SRC_MANUAL, SRC_MANUAL),
+    ):
+        matches.setdefault(manual_id, []).append(
+            (rank.get(other_source, len(rank)), other_source, other_id)
+        )
+    batch = f"migrate-v6-{time.time_ns()}"
+    for manual_id, candidates in matches.items():
+        _rank, target_source, target_id = min(candidates)
+        manual = conn.execute(
+            "SELECT entry_id, zh_tw, checker FROM translation WHERE id=?",
+            (manual_id,),
+        ).fetchone()
+        conn.execute(
+            "UPDATE translation SET review_status='reviewed' WHERE id=?",
+            (target_id,),
+        )
+        conn.execute("DELETE FROM translation WHERE id=?", (manual_id,))
+        conn.execute(
+            "INSERT INTO history (entry_id, batch, actor, action, old_zh_tw, "
+            "new_zh_tw, prev_manual, note, source_id) "
+            "VALUES (?,?,?,?,?,?,?,?,?)",
+            (
+                manual[0],
+                batch,
+                manual[2] or "",
+                "review_migrate",
+                manual[1],
+                manual[1],
+                manual[1],
+                "資料庫遷移：審核狀態移回原來源，原人工列已移除",
+                target_source,
+            ),
+        )
+    conn.execute(
+        "INSERT INTO meta (key, value) VALUES ('effective_priority_version', 'stale') "
+        "ON CONFLICT(key) DO UPDATE SET value='stale'"
+    )
 
 
 def _install_schema_v3_objects(conn: sqlite3.Connection) -> None:

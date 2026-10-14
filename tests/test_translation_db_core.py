@@ -1352,13 +1352,14 @@ def test_schema_v1_migration_marks_legacy_manual_unknown_and_keeps_backup(tmp_pa
     db = TranslationDB(path)
     detail = db.entry_detail(entry_id)
     manual = next(row for row in detail.translations if row.source == SRC_MANUAL)
-    assert SCHEMA_VERSION == 5
+    assert SCHEMA_VERSION == 6
     assert manual.review_status == "legacy_unknown" and manual.checker == "old-checker"
     assert detail.entry.review_status == "legacy_unknown"
     assert list(tmp_path.glob("legacy.db.pre-schema-v2-*.bak"))
     assert list(tmp_path.glob("legacy.db.pre-schema-v3-*.bak"))
     assert list(tmp_path.glob("legacy.db.pre-schema-v4-*.bak"))
     assert list(tmp_path.glob("legacy.db.pre-schema-v5-*.bak"))
+    assert list(tmp_path.glob("legacy.db.pre-schema-v6-*.bak"))
     db.close()
 
     # 重新開啟具冪等性：不會建立第二份遷移備份。
@@ -1461,7 +1462,7 @@ def test_schema_v3_migration_backup_includes_committed_wal_snapshot(tmp_path):
         migrated._conn.execute(
             "SELECT value FROM meta WHERE key='schema_version'"
         ).fetchone()[0]
-        == "5"
+        == "6"
     )
     backups = list(tmp_path.glob("legacy-v3-wal.db.pre-schema-v4-*.bak"))
     assert len(backups) == 1
@@ -2401,3 +2402,34 @@ def test_text_change_on_reviewed_non_manual_row_clears_review(db):
         (entry.id, SRC_JAR_TW),
     ).fetchone()
     assert row[0] is None
+
+
+def test_schema_v6_moves_reviewed_manual_rows_back_to_original_source(tmp_path):
+    from translation_tool.translation_db.schema import SRC_JAR_TW, SRC_MANUAL
+
+    path = tmp_path / "v5.db"
+    old = TranslationDB(path)
+    old.ingest(
+        "1.21.1",
+        [item(key="k.same", tw="同文"), item(key="k.edited", tw="來源文")],
+    )
+    rows = {row.key: row for row in old.list_entries("1.21.1")[0]}
+    for key, text in (("k.same", "同文"), ("k.edited", "人工改過")):
+        old.save_manual(rows[key].id, text, propagate=False)
+        old.review_manual(rows[key].id, expected_zh_tw=text, propagate=False)
+    # 舊版審核會讓生效來源變成人工
+    old._conn.execute("UPDATE meta SET value='5' WHERE key='schema_version'")
+    old._conn.commit()
+    old.close()
+
+    db = TranslationDB(path)
+    same = next(r for r in db.list_entries("1.21.1")[0] if r.key == "k.same")
+    edited = next(r for r in db.list_entries("1.21.1")[0] if r.key == "k.edited")
+    assert (same.source, same.review_status) == (SRC_JAR_TW, "reviewed")
+    assert (edited.source, edited.review_status) == (SRC_MANUAL, "reviewed")
+    assert not any(
+        t.source == SRC_MANUAL for t in db.entry_detail(same.id).translations
+    )
+    assert db.entry_detail(same.id).history[0].action == "review_migrate"
+    assert list(tmp_path.glob("v5.db.pre-schema-v6-*.bak"))
+    db.close()
