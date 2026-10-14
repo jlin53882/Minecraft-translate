@@ -246,9 +246,11 @@ def test_prose_that_looks_a_little_like_the_excluded_shapes_is_kept():
     from translation_tool.core.guide_blocks import has_translatable_text
 
     keep = [
-        "- Blue cube: Normal ME devices, they have enough channel.\n"
-        "- Yellow cube: Dense ME devices, they can pass 32 channels.\n"
-        "- Red cube: Broken devices.",
+        (
+            "- Blue cube: Normal ME devices, they have enough channel.\n"
+            "- Yellow cube: Dense ME devices, they can pass 32 channels.\n"
+            "- Red cube: Broken devices."
+        ),
         "Note: the terminal needs power to work properly.",
         "Alpha\nBeta\nGamma",  # 少於 8 行不算名字清單
         "Use the **Terminal** to see items.",
