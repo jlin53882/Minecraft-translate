@@ -42,6 +42,14 @@ readers use the derived data only when its `meta` flags mark it valid and not
 frozen, and otherwise fall back to the original SQL. Bulk rewrites of
 `effective` run inside the modules' `frozen()` blocks and recompute once.
 
+`translation_tool/translation_db/quality_flags.py` keeps `entry.qflags` (one bit
+per quality status) for quality-filtered lists. Its triggers only mark affected
+entries pending (`qflags IS NULL`); `TranslationDB._tx` calls `settle()` before
+commit to recompute them with `translation_tool/translation_db/quality.py`, so
+the flags never duplicate the quality rules in SQL. Readers check for pending
+entries and use the row-by-row scan while any exist. Its `verify()` compares
+every entry with a recompute that calls `matches_quality` once per status.
+
 Measure list operations through `TranslationDB.list_entries` on independent
 copies of the same database, in a fresh process with the read-only connection
 and an empty `stat_cache`, comparing against the commit before the change.
