@@ -9,6 +9,7 @@ import pytest
 from translation_tool.translation_db import (
     KIND_LANG,
     EntryFilter,
+    QualityFilter,
     ScanItem,
     TranslationDB,
     change_tracker,
@@ -416,4 +417,46 @@ def test_marker_init_failure_rolls_back_and_allows_later_writes(db_path, marker)
         ).fetchone()[0]
         == 0
     )
+    db.close()
+
+
+# --- 衍生索引不見時，讀取端不走快路徑 ------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("index", "ready"),
+    [
+        ("idx_act_ver_at", "_activity_ready"),
+        ("idx_eff_ver_upd", "_effective_columns_ready"),
+        ("idx_qflags_mismatch", "_quality_flags_ready"),
+    ],
+)
+def test_missing_derived_index_disables_fast_path_and_results_match(
+    db_path, index, ready
+):
+    db = TranslationDB(db_path)
+    criteria = [
+        EntryFilter(version=VERSION, sort_by="manual_activity_newest"),
+        EntryFilter(version=VERSION, sort_by="effective_updated_newest"),
+        EntryFilter(version=VERSION, quality=QualityFilter(status="mismatch")),
+    ]
+    with_index = [db.list_entries(criteria=c, limit=50)[0] for c in criteria]
+    assert getattr(db, ready)()
+
+    db._conn.execute(f"DROP INDEX {index}")
+    assert not getattr(db, ready)()
+    without_index = [db.list_entries(criteria=c, limit=50)[0] for c in criteria]
+    assert without_index == with_index  # 退回原本的查詢，結果相同
+    db.close()
+
+
+def test_entry_activity_rebuild_replaces_same_name_index_with_wrong_definition(db_path):
+
+    db = TranslationDB(db_path)
+    db._conn.execute("DROP INDEX idx_act_ver_at")
+    db._conn.execute("CREATE INDEX idx_act_ver_at ON entry_activity (entry_id)")
+    assert not entry_activity.is_installed(db._conn)
+    entry_activity.install(db._conn)
+    assert entry_activity.is_installed(db._conn)
+    assert entry_activity.is_ready(db._conn)
     db.close()

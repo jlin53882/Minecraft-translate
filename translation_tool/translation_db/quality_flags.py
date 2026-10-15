@@ -49,6 +49,7 @@ _INDEXES = {
         "CREATE INDEX idx_qflags_pending ON entry (id) WHERE qflags IS NULL"
     ),
 }
+_INDEX_NAMES = ",".join(f"'{name}'" for name in _INDEXES)
 _PENDING = "UPDATE entry SET qflags=NULL WHERE id={} AND qflags IS NOT NULL;"
 _TRIGGERS = {
     "qflags_effective_insert": f"""
@@ -177,11 +178,13 @@ def is_ready(conn: sqlite3.Connection) -> bool:
             "SELECT "
             "(SELECT value FROM meta WHERE key='quality_schema_version'), "
             "(SELECT value FROM meta WHERE key='quality_valid'), "
-            "EXISTS (SELECT 1 FROM entry WHERE qflags IS NULL)"
+            "EXISTS (SELECT 1 FROM entry WHERE qflags IS NULL), "
+            "(SELECT COUNT(*) FROM sqlite_schema WHERE type='index' "
+            f"AND name IN ({_INDEX_NAMES}))"
         ).fetchone()
     except sqlite3.Error:
         return False
-    return row == (SCHEMA_VERSION, "1", 0)
+    return row == (SCHEMA_VERSION, "1", 0, len(_INDEXES))
 
 
 def install(conn: sqlite3.Connection) -> None:

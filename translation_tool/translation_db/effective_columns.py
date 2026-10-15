@@ -45,6 +45,7 @@ _INDEXES = {
         "CREATE INDEX idx_eff_ver_upd ON effective (mc_version, upd DESC, entry_id)"
     ),
 }
+_INDEX_NAMES = ",".join(f"'{name}'" for name in _INDEXES)
 
 
 def _regroup(content: dict[str, str], exclude: str | None = None) -> str:
@@ -204,11 +205,14 @@ def is_ready(conn: sqlite3.Connection) -> bool:
             "SELECT "
             "(SELECT value FROM meta WHERE key='effective_columns_schema_version'), "
             "(SELECT value FROM meta WHERE key='effective_columns_valid'), "
-            f"EXISTS (SELECT 1 FROM meta WHERE key='{_FROZEN}')"
+            f"EXISTS (SELECT 1 FROM meta WHERE key='{_FROZEN}'), "
+            "(SELECT COUNT(*) FROM sqlite_schema WHERE type='index' "
+            f"AND name IN ({_INDEX_NAMES}))"
         ).fetchone()
     except sqlite3.Error:
         return False
-    return row == (SCHEMA_VERSION, "1", 0)
+    # 排序／篩選索引不見時不走衍生欄位的快路徑（會退化成臨時排序）
+    return row == (SCHEMA_VERSION, "1", 0, len(_INDEXES))
 
 
 def install(conn: sqlite3.Connection) -> None:

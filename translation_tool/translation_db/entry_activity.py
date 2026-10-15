@@ -120,11 +120,14 @@ def is_ready(conn: sqlite3.Connection) -> bool:
         row = conn.execute(
             "SELECT "
             "(SELECT value FROM meta WHERE key='activity_schema_version'), "
-            "(SELECT value FROM meta WHERE key='activity_valid')"
+            "(SELECT value FROM meta WHERE key='activity_valid'), "
+            "(SELECT COUNT(*) FROM sqlite_schema WHERE type='index' "
+            f"AND name='{_INDEX_NAME}')"
         ).fetchone()
     except sqlite3.Error:
         return False
-    return row == (ACTIVITY_SCHEMA_VERSION, "1")
+    # 排序索引不見時不走衍生表的快路徑（會退化成臨時排序）
+    return row == (ACTIVITY_SCHEMA_VERSION, "1", 1)
 
 
 def install(conn: sqlite3.Connection) -> None:
@@ -147,6 +150,7 @@ def install(conn: sqlite3.Connection) -> None:
 def rebuild(conn: sqlite3.Connection) -> None:
     """（重新）建立資料表與觸發器並由歷史重新填入（在呼叫端的交易內執行）。"""
     # executescript 會先提交交易，所以逐句執行
+    conn.execute(f"DROP INDEX IF EXISTS {_INDEX_NAME}")  # 同名但定義不同的索引也要換掉
     for statement in _TABLES.split(";"):
         if statement.strip():
             conn.execute(statement)
