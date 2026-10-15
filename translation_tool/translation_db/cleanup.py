@@ -25,10 +25,10 @@ from typing import Any
 
 from translation_tool.core.guide_blocks import NON_TEXT_REASONS, non_text_reason
 from translation_tool.core.text_sniffer import (
+    book_field,
     classify_book_string,
     is_field_name_text,
     is_placeholder_text,
-    is_text_override_word,
     lang_non_text_reason,
     value_shape_reason,
 )
@@ -84,11 +84,9 @@ def entry_cleanup_category(kind: str, key: str, en_us: str) -> str | None:
 def _patchouli_category(key: str, en_us: str) -> str | None:
     if "multiblock.pattern" in key and not _LOWERCASE.search(en_us):
         return "multiblock"
-    if is_text_override_word(key, en_us):
-        return None  # 頁面替換詞（raw、item…）會顯示在畫面上，單字也要翻
     if is_placeholder_text(en_us):
         return "placeholder"
-    return "not_text" if classify_book_string(en_us) == "not" else None
+    return "not_text" if classify_book_string(en_us, book_field(key)) == "not" else None
 
 
 def _item_identity(item: dict[str, Any]) -> tuple[Any, Any, Any]:

@@ -17,7 +17,6 @@ from translation_tool.core.lm_config_rules import (
 from translation_tool.core.text_sniffer import (
     VANILLA_NON_TEXT_DIRS,
     classify_book_string,
-    is_text_override_word,
     lang_non_text_reason,
     looks_like_book_json,
     value_shape_reason,
@@ -182,10 +181,7 @@ def extract_translatables(json_data, file_path):
                     not is_lang
                     and isinstance(k, str)
                     and isinstance(v, str)
-                    and (
-                        classify_book_string(v) == "text"
-                        or is_text_override_word(new_path, v)
-                    )
+                    and classify_book_string(v, k) == "text"
                 ):
                     items.append(
                         {
@@ -201,10 +197,7 @@ def extract_translatables(json_data, file_path):
         elif isinstance(obj, list):
             for i, v in enumerate(obj):
                 new_path = f"{base_path}[{i}]"
-                if isinstance(v, str) and (
-                    _list_text_translatable(v, is_lang)
-                    or (not is_lang and is_text_override_word(new_path, v))
-                ):
+                if isinstance(v, str) and _list_text_translatable(v, is_lang):
                     items.append(
                         {
                             "file": str(file_path),

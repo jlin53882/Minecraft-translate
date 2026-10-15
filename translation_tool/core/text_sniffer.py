@@ -372,18 +372,20 @@ def is_field_name_text(path: str, text: str) -> bool:
     }
 
 
-_PLAIN_WORD = re.compile(r"[A-Za-z]+")
+# Patchouli 文件明寫會顯示給玩家的文字欄位（條目／分類名稱、頁面標題與內文、連結文字等）
+BOOK_DISPLAY_FIELDS = frozenset(
+    {"name", "title", "text", "description", "link_text", "subtitle", "landing_text"}
+)
+_INDEX = re.compile(r"\[\d+\]")
 
 
-def is_text_override_word(path: str, value: str) -> bool:
-    """手冊 ``text_overrides`` 裡的純英文單字（``raw``、``item``）：頁面替換詞，會顯示在畫面上。
-
-    單看字串是小寫識別字的形狀，所以要看它所在的路徑。
-    """
-    return "text_overrides" in path and _PLAIN_WORD.fullmatch(value.strip()) is not None
+def book_field(path: str) -> str:
+    """JSON 路徑最後一段的欄位名稱：``…/a.json#pages[0].title`` → ``title``。"""
+    tail = _INDEX.sub("", path.rsplit("#", 1)[-1])
+    return tail.rsplit(".", 1)[-1]
 
 
-def classify_book_string(value: str) -> str:
+def classify_book_string(value: str, field: str = "") -> str:
     """手冊 JSON 的字串值是什麼：``"text"``（要翻譯）、``"lang_key"``（指向語言檔的鍵）或 ``"not"``。
 
     不使用欄位名稱清單：資源 id、旗標、錨點、路徑、網址、數字、色碼、模板變數、
@@ -414,11 +416,14 @@ def classify_book_string(value: str) -> str:
     if is_placeholder_text(core):
         return "not"
     if not _WHITESPACE.search(s):
-        if _ANY_RESLOC.fullmatch(s) or _PATHLIKE.fullmatch(s):
+        shows = field in BOOK_DISPLAY_FIELDS  # 顯示欄位：單字或 A/B 寫法也是名稱
+        if _ANY_RESLOC.fullmatch(s) or (not shows and _PATHLIKE.fullmatch(s)):
             return "not"
         if _TEMPLATE_VAR.fullmatch(s) or len(s) <= 1:
             return "not"
-        if _LOWER_IDENT.fullmatch(core) or (core[:1].islower() and _CAMEL.search(core)):
+        if not shows and (
+            _LOWER_IDENT.fullmatch(core) or (core[:1].islower() and _CAMEL.search(core))
+        ):
             return "not"
         return "text" if _HAS_LETTER.search(s) else "not"
     tokens = _BOOK_MARKUP.sub("", s).split()

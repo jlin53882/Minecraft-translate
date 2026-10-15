@@ -385,12 +385,10 @@ def test_protected_export_with_nothing_protected_is_empty(tmp_path):
 
 
 # ---------------------------------------------------------------- 誤判防護
-def test_text_overrides_plain_words_and_language_region_are_normal_text():
+def test_text_overrides_ids_stay_out_and_language_region_is_normal_text():
     key = "b/e.json#pages[2].text_overrides[0][1]"
-    assert entry_cleanup_category("patchouli", key, "raw") is None
-    assert entry_cleanup_category("patchouli", "b/e.json#pages[2].x", "raw") == (
-        "not_text"
-    )
+    # Blood Magic 的 ["Raw Will", "raw"]：右邊是意志類型 id，翻了會壞，不能放行
+    assert entry_cleanup_category("patchouli", key, "raw") == "not_text"
     assert entry_cleanup_category("lang", "language.region", "United States") is None
     assert entry_cleanup_category("lang", "language.code", "en_us") == "meta_key"
 
@@ -400,14 +398,14 @@ def test_protected_export_does_not_delete_translated_shape_matches_by_default(tm
     db.ingest(
         VERSION,
         [
-            ScanItem("patchouli", "m", "b/e.json#name", "addArea()"),
+            ScanItem("patchouli", "m", "b/e.json#pages[0].anchor", "addArea"),
             ScanItem("lang", "m", "item.m.tip", "BARBED_WIRE"),
             ScanItem("lang", "m", "item.m.color", "FFFFFF"),
             ScanItem("lang", "m", "_comment", "Note", zh_tw="備註"),
         ],
     )
     for key, text in (
-        ("b/e.json#name", "新增區域()"),
+        ("b/e.json#pages[0].anchor", "新增區域()"),
         ("item.m.tip", "鐵絲網"),
         ("item.m.color", "FFFFFF"),
     ):
@@ -416,7 +414,8 @@ def test_protected_export_does_not_delete_translated_shape_matches_by_default(tm
     items = {i["key"]: i for i in json.loads(path.read_text("utf-8"))["items"]}
     assert report.review == 2
     assert (
-        items["b/e.json#name"]["delete"] is False and items["b/e.json#name"]["review"]
+        items["b/e.json#pages[0].anchor"]["delete"] is False
+        and items["b/e.json#pages[0].anchor"]["review"]
     )
     assert items["item.m.tip"]["delete"] is False
     assert items["item.m.color"]["delete"] is True  # 譯文沒有中文：照規則
@@ -424,19 +423,10 @@ def test_protected_export_does_not_delete_translated_shape_matches_by_default(tm
     assert report.counts == {"meta_key": 1, "code_value": 1}
     plan = db.apply_cleanup(path)
     assert plan.requested == 2 and plan.deletable == 2
-    assert db._one("SELECT COUNT(*) FROM entry WHERE key = 'b/e.json#name'")[0] == 1
-
-
-def test_extractor_picks_up_text_overrides_plain_words():
-    from translation_tool.core.translatable_extractor import extract_translatables
-
-    data = {
-        "pages": [{"type": "x", "text_overrides": [["chest", "raw"], ["a:b", "c"]]}]
-    }
-    found = {i["path"]: i["text"] for i in extract_translatables(data, "b/e.json")}
-    assert found["pages[0].text_overrides[0][0]"] == "chest"
-    assert found["pages[0].text_overrides[0][1]"] == "raw"
-    assert "pages[0].text_overrides[1][0]" not in found  # 資源 id 仍不收
+    assert (
+        db._one("SELECT COUNT(*) FROM entry WHERE key = 'b/e.json#pages[0].anchor'")[0]
+        == 1
+    )
 
 
 def test_extraction_skips_what_cleanup_would_remove():
@@ -475,3 +465,19 @@ def test_pascal_case_names_are_text_but_lower_camel_identifiers_are_not():
         assert classify_book_string(name) == "text", name
     for ident in ("addArea()", "blockPos", "setCanSteal()"):
         assert classify_book_string(ident) == "not", ident
+
+
+def test_display_fields_are_text_even_when_they_look_like_identifiers():
+    """Patchouli 文件明寫 name／title／text 會顯示：單字、A/B、駝峰都是名稱；id 欄位照舊排除。"""
+    pairs = {
+        "x.json#name": ("pollen_sifter", None),
+        "categories/s.json#name": ("Semiblocks/Gadgets", None),
+        "x.json#pages[0].title": ("CreeBee", None),
+        "x.json#pages[0].text": ("raw", None),
+        "x.json#pages[0].anchor": ("intro", "not_text"),
+        "x.json#pages[0].item": ("minecraft:stone", "not_text"),
+        "x.json#pages[1].images[0]": ("m:textures/a.png", "not_text"),
+        "x.json#pages[2].text_overrides[0][1]": ("raw", "not_text"),
+    }
+    for key, (value, expected) in pairs.items():
+        assert entry_cleanup_category("patchouli", key, value) == expected, key
