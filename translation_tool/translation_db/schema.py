@@ -87,6 +87,8 @@ CREATE INDEX IF NOT EXISTS idx_entry_mod ON entry (mc_version, mod_id);
 CREATE INDEX IF NOT EXISTS idx_entry_list_order
     ON entry (mc_version, mod_id, kind, key, id);
 CREATE INDEX IF NOT EXISTS idx_entry_mod_id ON entry (mod_id);
+-- 版本內依編號排序（兩段式排序的第二段：沒有活動時間或更新時間的條目）
+CREATE INDEX IF NOT EXISTS idx_entry_version ON entry (mc_version);
 CREATE INDEX IF NOT EXISTS idx_entry_en ON entry (en_us);
 
 CREATE TABLE IF NOT EXISTS translation (
@@ -215,7 +217,7 @@ def init_schema(conn: sqlite3.Connection) -> None:
         )
         _install_schema_v3_objects(conn)
         conn.commit()
-        _install_stat_summary(conn)
+        _install_derived_tables(conn)
         return
     version = stored_schema_version(conn)
     while version < SCHEMA_VERSION:
@@ -258,15 +260,19 @@ def init_schema(conn: sqlite3.Connection) -> None:
     )
     _install_schema_v3_objects(conn)
     conn.commit()
-    _install_stat_summary(conn)
+    _install_derived_tables(conn)
 
 
-def _install_stat_summary(conn: sqlite3.Connection) -> None:
-    """安裝並填入全庫統計摘要（衍生資料，可隨時重算，不需先備份）。"""
-    # stat_summary 引用本模組的來源代碼，延後載入以免循環匯入
-    from translation_tool.translation_db import stat_summary
+def _install_derived_tables(conn: sqlite3.Connection) -> None:
+    """安裝並填入觸發器維護的衍生資料（可隨時重算，不需先備份）。
+
+    全庫統計摘要（``stat_summary``）與條目最近人工活動（``entry_activity``）。
+    """
+    # 這些模組引用本模組的來源代碼，延後載入以免循環匯入
+    from translation_tool.translation_db import entry_activity, stat_summary
 
     stat_summary.install(conn)
+    entry_activity.install(conn)
 
 
 def _backup_before_review_migration(conn: sqlite3.Connection) -> Path | None:

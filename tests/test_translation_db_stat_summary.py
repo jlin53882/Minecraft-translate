@@ -55,6 +55,8 @@ def assert_summary_matches(db):
         [db_models_stat(row) for row in full_sources]
     )
     assert db._overview_uncached() == db._overview_full()
+    # 其他觸發器維護的衍生資料也在每條寫入路徑後與重算比對
+    assert db.verify_entry_activity() == []
 
 
 def db_models_stat(row):

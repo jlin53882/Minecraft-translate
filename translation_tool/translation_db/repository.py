@@ -17,6 +17,7 @@ from __future__ import annotations
 import hashlib
 import heapq
 import json
+import re
 import sqlite3
 import threading
 import uuid
@@ -26,7 +27,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
-from translation_tool.translation_db import stat_summary
+from translation_tool.translation_db import entry_activity, stat_summary
 from translation_tool.translation_db.bulk_review import BulkReviewMixin
 from translation_tool.translation_db.cleanup import CleanupMixin
 from translation_tool.translation_db.models import (
@@ -95,6 +96,13 @@ from translation_tool.utils.species_names import SPECIES_KEY_HINTS, TAXONOMIC_MA
 
 _ENTRY_COLS = "e.id, e.kind, e.mc_version, e.mod_id, e.key, e.en_us"
 _CHUNK = 400  # SQLite 變數上限相容的批次大小
+# 條目最近一次人工活動的時間（逐筆彙總歷史；entry_activity 是它的觸發器維護版本）
+_VERSION_CONDITION = "e.mc_version = ?"  # _filter_sql 的第一個條件
+_ENTRY_COLUMN_RE = re.compile(r"\be\.")  # 條件是否用到條目欄位
+_LAST_ACTIVITY_SQL = (
+    "(SELECT MAX(h.at) FROM history h WHERE h.entry_id=e.id AND "
+    f"h.action IN {entry_activity.ACTIONS_SQL})"
+)
 _EFFECTIVE_PRIORITY_VERSION = "2"
 _QUALITY_FETCH_BATCH_SIZE = 4_000
 # quality.py 的 token 掃描只會在含 § % $ { \ 或換行的文字出現；GLOB 字元集是其超集，
@@ -945,6 +953,11 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
         conn: sqlite3.Connection | None,
     ) -> list[tuple]:
         """Apply filtering, ordering and offset to IDs before loading editor fields."""
+        phases = self._two_phase_sort_sql(criteria.sort_by, condition)
+        if phases is not None:
+            return self._two_phase_page_rows(
+                phases, params, limit=limit, offset=offset, conn=conn
+            )
         order = self._sort_sql(criteria.sort_by)
         candidates = self._candidate_source(f"{condition} {order}")
         values = [*params, max(0, int(limit)), max(0, int(offset))]
@@ -992,8 +1005,151 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
             else conn.execute(sql, values).fetchall()
         )
 
+    def _two_phase_sort_sql(
+        self, sort_by: str, condition: str
+    ) -> tuple[str, str, str] | None:
+        """觸發器維護的排序欄位可用時，排序拆成兩段的 SQL；否則 None（用原本的排序）。
+
+        第一段依欄位索引取「有時間」的條目（時間新到舊、同時間依編號），第二段是
+        其餘條目依編號；與原本 ``時間 IS NULL, 時間 DESC, e.id`` 的順序相同，但兩段都
+        直接沿索引讀取，不必把整個版本排序。回傳（第一段分頁、第一段筆數、第二段分頁），
+        三者的參數都是條件參數（分頁再加上筆數與起點）。
+        """
+        if not condition.startswith(_VERSION_CONDITION):
+            return None
+        if sort_by == "manual_activity_newest" and self._activity_ready():
+            dated, dated_count = self._indexed_page_sql(
+                condition, "entry_activity act", "", "act.last_at DESC, act.entry_id"
+            )
+            undated = (
+                f"{condition} AND NOT EXISTS "
+                "(SELECT 1 FROM entry_activity act WHERE act.entry_id=e.id)"
+            )
+            return (
+                dated,
+                dated_count,
+                (
+                    f"SELECT e.id {self._candidate_source(undated)} WHERE {undated} "
+                    "ORDER BY e.id LIMIT ? OFFSET ?"
+                ),
+            )
+        return None
+
+    @staticmethod
+    def _indexed_page_sql(
+        condition: str, table: str, extra: str, order: str
+    ) -> tuple[str, str]:
+        """從帶版本欄的衍生表（別名 ``act`` 或 ``f``）沿索引取一頁條目編號的 SQL 與筆數 SQL。
+
+        條件開頭的條目版本改用衍生表的版本欄（觸發器維護成與條目相同），其餘條件
+        需要條目或譯文欄位時才連接；條目以 ``CROSS JOIN`` 接在衍生表之後，讓查詢
+        沿衍生表的排序索引讀取。
+        """
+        alias = table.rsplit(" ", 1)[1]
+        cond = f"{alias}.mc_version = ?{condition[len(_VERSION_CONDITION) :]}"
+        if extra:
+            cond += f" AND {extra}"
+        source = f"FROM {table}"
+        if _ENTRY_COLUMN_RE.search(cond):
+            source += f" CROSS JOIN entry e ON e.id={alias}.entry_id"
+        if alias != "f" and ("f." in cond or "et." in cond):
+            source += f" LEFT JOIN effective f ON f.entry_id={alias}.entry_id"
+        if "et." in cond:
+            source += (
+                f" LEFT JOIN translation et ON et.entry_id={alias}.entry_id "
+                "AND et.source=f.source"
+            )
+        return (
+            (
+                f"SELECT {alias}.entry_id {source} WHERE {cond} "
+                f"ORDER BY {order} LIMIT ? OFFSET ?"
+            ),
+            f"SELECT COUNT(*) {source} WHERE {cond}",
+        )
+
+    def _two_phase_page_rows(
+        self,
+        phases: tuple[str, str, str],
+        params: list,
+        *,
+        limit: int,
+        offset: int,
+        conn: sqlite3.Connection | None,
+    ) -> list[tuple]:
+        """依 :meth:`_two_phase_sort_sql` 取一頁條目編號，再讀取這些條目的完整欄位。"""
+        dated_sql, dated_count_sql, undated_sql = phases
+        limit, offset = max(0, int(limit)), max(0, int(offset))
+
+        def page_ids(connection: sqlite3.Connection) -> list[int]:
+            ids = [
+                row[0]
+                for row in connection.execute(dated_sql, (*params, limit, offset))
+            ]
+            if len(ids) >= limit:
+                return ids
+            # 第一段不足一頁：第二段從頭接上；第一段整頁落空時扣掉第一段的總筆數
+            undated_offset = 0
+            if not ids:
+                dated_total = connection.execute(dated_count_sql, params).fetchone()[0]
+                undated_offset = max(0, offset - dated_total)
+            return ids + [
+                row[0]
+                for row in connection.execute(
+                    undated_sql, (*params, limit - len(ids), undated_offset)
+                )
+            ]
+
+        def load(connection: sqlite3.Connection, ids: list[int]) -> list[tuple]:
+            if not ids:
+                return []
+            rows = connection.execute(
+                f"{self._entry_select_sql()} {self._query_source()} "
+                "WHERE e.id IN (SELECT value FROM json_each(?))",
+                (json.dumps(ids),),
+            ).fetchall()
+            by_id = {row[0]: row for row in rows}
+            return [by_id[entry_id] for entry_id in ids if entry_id in by_id]
+
+        if conn is not None:
+            return load(conn, page_ids(conn))
+        cache_key = (
+            "entry_page:"
+            + hashlib.sha1(
+                json.dumps([*phases, params, limit, offset]).encode("utf-8")
+            ).hexdigest()
+        )
+        with self._lock:
+            owns_transaction = not self._conn.in_transaction
+            if owns_transaction:
+                self._conn.execute("BEGIN")
+            try:
+                ids = self._cached(
+                    cache_key, lambda: page_ids(self._conn), persist=False
+                )
+                return load(self._conn, ids)
+            finally:
+                if owns_transaction:
+                    self._conn.rollback()
+
+    def _activity_ready(self) -> bool:
+        """``entry_activity`` 可用於排序；否則改用逐筆彙總歷史的原本排序。"""
+        with self._lock:
+            return entry_activity.is_ready(self._conn)
+
+    def rebuild_entry_activity(self) -> None:
+        """由歷史重建 ``entry_activity``（缺少或失準時的維護操作）。"""
+        if self.readonly:
+            raise PermissionError("唯讀連線不能重建最近人工活動")
+        with self._tx() as conn:
+            entry_activity.rebuild(conn)
+
+    def verify_entry_activity(self) -> list[tuple]:
+        """比對 ``entry_activity`` 與由歷史重算的結果；空清單表示一致（只供測試與維護）。"""
+        with self._lock:
+            return entry_activity.verify(self._conn)
+
     def _filter_sql(self, criteria: EntryFilter) -> tuple[str, list]:
-        where = ["e.mc_version = ?"]
+        where = [_VERSION_CONDITION]
         params: list = [criteria.version]
         if criteria.entry_ids is not None:
             where.append("e.id IN (SELECT value FROM json_each(?))")
@@ -1065,7 +1221,7 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
         params: list = []
         if spec.kind == "manual_activity":
             actions_by_kind = {
-                "all": ("manual", "review", "batch_replace", "revert", "batch_revert"),
+                "all": entry_activity.ACTIVITY_ACTIONS,
                 "edit": ("manual",),
                 "review": ("review",),
                 "batch": ("batch_replace", "batch_revert"),
@@ -1122,10 +1278,7 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
         if sort_by == "effective_updated_newest":
             return "et.updated_at IS NULL, et.updated_at DESC, e.id"
         if sort_by == "manual_activity_newest":
-            activity = (
-                "(SELECT MAX(h.at) FROM history h WHERE h.entry_id=e.id AND "
-                "h.action IN ('manual','review','batch_replace','revert','batch_revert'))"
-            )
+            activity = _LAST_ACTIVITY_SQL
             return f"{activity} IS NULL, {activity} DESC, e.id"
         return "e.mod_id, e.kind, e.key, e.id"
 
@@ -1149,10 +1302,7 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
     def _quality_candidate_select_sql(self, sort_by: str) -> str:
         activity = "NULL"
         if sort_by == "manual_activity_newest":
-            activity = (
-                "(SELECT MAX(h.at) FROM history h WHERE h.entry_id=e.id AND "
-                "h.action IN ('manual','review','batch_replace','revert','batch_revert'))"
-            )
+            activity = _LAST_ACTIVITY_SQL
         return (
             "SELECT e.id, e.kind, NULL, e.mod_id, e.key, e.en_us, f.zh_tw, "
             "NULL, NULL, NULL, NULL, e.created_at, NULL, et.updated_at, "
@@ -1407,9 +1557,7 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
             f"{self._effective_review_sql}, "
             f"CASE WHEN f.entry_id IS NULL THEN 0 ELSE {self._DIFF_SQL} END, "
             f"e.created_at, {translation_created}, et.updated_at, "
-            "(SELECT MAX(h.at) FROM history h WHERE h.entry_id=e.id AND "
-            "h.action IN ('manual','review','batch_replace','revert','batch_revert')), "
-            "man.zh_tw, man.checker, "
+            f"{_LAST_ACTIVITY_SQL}, man.zh_tw, man.checker, "
             f"{manual_review}, {manual_revision}, man.updated_at, "
             f"{('et.revision' if self.has_translation_revision else 'NULL')} "
         )
@@ -2272,10 +2420,7 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
         effective_created = (
             "et.created_at" if self.has_translation_created_at else "NULL"
         )
-        last_activity = (
-            "(SELECT MAX(h.at) FROM history h WHERE h.entry_id=e.id AND "
-            "h.action IN ('manual','review','batch_replace','revert','batch_revert'))"
-        )
+        last_activity = _LAST_ACTIVITY_SQL
         r = self._one(
             f"SELECT {_ENTRY_COLS}, f.zh_tw, f.source, f.checker, "
             f"{self._effective_review_sql}, "
