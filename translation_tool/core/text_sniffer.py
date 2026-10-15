@@ -331,7 +331,9 @@ _WHITESPACE = re.compile("[ \t\r\n]")
 _ASCII_LETTER = re.compile(r"[A-Za-z]")
 
 
-_PLACEHOLDER_TEXT = re.compile(r"^\W*(?:todo|tbd|fixme)\b|lorem\s+ipsum", re.IGNORECASE)
+_PLACEHOLDER_TEXT = re.compile(
+    r"^\W*(?:(?:todo|tbd|fixme)\b|lorem\s+ipsum)", re.IGNORECASE
+)
 
 
 def is_placeholder_text(text: str) -> bool:
