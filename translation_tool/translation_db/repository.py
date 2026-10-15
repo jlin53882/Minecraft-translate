@@ -616,7 +616,12 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
         return [
             r[0]
             for r in self._q(
-                "SELECT DISTINCT kind FROM entry WHERE mc_version=? ORDER BY kind",
+                "WITH RECURSIVE k(kind) AS (SELECT MIN(kind) FROM entry "
+                "UNION ALL SELECT (SELECT MIN(kind) FROM entry WHERE kind > k.kind) "
+                "FROM k WHERE kind IS NOT NULL) "
+                "SELECT kind FROM k WHERE kind IS NOT NULL AND EXISTS("
+                "SELECT 1 FROM entry e WHERE e.kind = k.kind AND e.mc_version = ?) "
+                "ORDER BY kind",
                 (version,),
             )
         ]
@@ -3528,14 +3533,39 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
         WHERE e2.kind = e.kind AND e2.mod_id = e.mod_id AND e2.key = e.key
           AND e2.en_us = e.en_us AND e2.mc_version <> e.mc_version) = 1"""
 
+    _REUSABLE_PEERS_SQL = """(
+        SELECT COUNT(DISTINCT f2.zh_tw) FROM entry e2 JOIN effective f2 ON f2.entry_id = e2.id
+        WHERE e2.kind = u.kind AND e2.mod_id = u.mod_id AND e2.key = u.key
+          AND e2.en_us = u.en_us)"""
+
+    def _untranslated_candidates_cte(
+        self, version: str, mod_ids: Sequence[str] | None
+    ) -> tuple[str, list]:
+        """依 (類型, 模組, 鍵值) 排序的未翻譯候選；先用窄索引找出 id，再讀寬欄位。
+
+        候選本身沒有生效譯文，所以同內容的 ``effective`` 列必定來自其他版本，
+        不必再比對 ``mc_version``。
+        """
+        mod_filter = ""
+        params: list = [version]
+        if mod_ids:
+            mod_filter = f" AND i.mod_id IN ({','.join('?' * len(mod_ids))})"
+            params.extend(mod_ids)
+        sql = (
+            "WITH u AS MATERIALIZED ("
+            "SELECT e.id, e.kind, e.mod_id, e.key, e.en_us "
+            "FROM (SELECT i.id FROM entry i WHERE i.mc_version = ?"
+            f"{mod_filter} AND i.id NOT IN (SELECT entry_id FROM effective)) c "
+            "JOIN entry e ON e.id = c.id WHERE e.en_us <> '' "
+            "ORDER BY e.kind, e.mod_id, e.key) "
+        )
+        return sql, params
+
     def count_reusable(self, version: str, mod_ids: Sequence[str] | None = None) -> int:
         """未翻譯條目中，其他版本已有相同內容譯文、開始機翻時會直接沿用的筆數。"""
-        where, extra = self._untranslated_where(mod_ids)
-        sql = (
-            "SELECT COUNT(*) FROM entry e LEFT JOIN effective f ON f.entry_id = e.id "
-            f"WHERE {where} AND {self._REUSABLE_SQL}"
-        )
-        return self._cached_count(sql, [version, *extra])
+        cte, params = self._untranslated_candidates_cte(version, mod_ids)
+        sql = f"{cte}SELECT COUNT(*) FROM u WHERE {self._REUSABLE_PEERS_SQL} = 1"
+        return self._cached_count(sql, params)
 
     def count_untranslated(
         self, version: str, mod_ids: Sequence[str] | None = None
@@ -3571,15 +3601,20 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
 
         ``exclude_reusable``：排除「其他版本已有相同內容譯文」的條目（那些會直接沿用，不送 AI）。
         """
-        where, extra = self._untranslated_where(mod_ids)
         if exclude_reusable:
-            where += f" AND NOT {self._REUSABLE_SQL}"
-        sql = (
-            "SELECT e.id, e.kind, e.mod_id, e.key, e.en_us "
-            "FROM entry e LEFT JOIN effective f ON f.entry_id = e.id "
-            f"WHERE {where} ORDER BY e.kind, e.mod_id, e.key"
-        )
-        params: list = [version, *extra]
+            cte, params = self._untranslated_candidates_cte(version, mod_ids)
+            sql = (
+                f"{cte}SELECT id, kind, mod_id, key, en_us FROM u "
+                f"WHERE {self._REUSABLE_PEERS_SQL} <> 1 ORDER BY kind, mod_id, key"
+            )
+        else:
+            where, extra = self._untranslated_where(mod_ids)
+            sql = (
+                "SELECT e.id, e.kind, e.mod_id, e.key, e.en_us "
+                "FROM entry e LEFT JOIN effective f ON f.entry_id = e.id "
+                f"WHERE {where} ORDER BY e.kind, e.mod_id, e.key"
+            )
+            params = [version, *extra]
         if limit is not None and limit > 0:
             sql += " LIMIT ?"
             params.append(limit)
@@ -3628,9 +3663,11 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
         sql = (
             "SELECT e.id, e.kind, e.mod_id, e.key, e.en_us, f.zh_tw, e.mc_version, "
             "f.source, t.revision, t.checker, t.review_status "
-            "FROM entry e LEFT JOIN effective f ON f.entry_id=e.id "
+            "FROM (SELECT e.id FROM entry e JOIN effective f ON f.entry_id = e.id "
+            f"WHERE {where}) c JOIN entry e ON e.id = c.id "
+            "JOIN effective f ON f.entry_id = e.id "
             "LEFT JOIN translation t ON t.entry_id=e.id AND t.source=f.source "
-            f"WHERE {where} ORDER BY e.mod_id, e.kind, e.key"
+            "ORDER BY e.mod_id, e.kind, e.key"
         )
         if limit is not None and limit > 0:
             sql += " LIMIT ?"
