@@ -307,7 +307,11 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
     def _read_cache_identity(self) -> tuple:
         """Include file incarnation and WAL changes, including external SQL writers."""
         path = self.path.resolve()
-        stat = path.stat()
+        try:
+            stat = path.stat()
+        except OSError:
+            # 檔案被改名或取代：用唯一值讓共用快取不命中，開著的連線照常查詢
+            return (str(path), object())
         try:
             wal = Path(f"{path}-wal").stat()
             wal_signature = (wal.st_size, wal.st_mtime_ns)
