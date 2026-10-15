@@ -31,6 +31,27 @@ raw UI timings separately from query timings, including slower or unstable
 first-load observations. No wall-clock threshold is asserted in unit tests;
 index installation, query-plan shape, and result parity are tested instead.
 
+### Mod DB trigger-maintained derived data
+
+`translation_tool/translation_db/stat_summary.py`,
+`translation_tool/translation_db/entry_activity.py` and
+`translation_tool/translation_db/effective_columns.py` keep derived tables and
+columns exact through SQLite triggers. Each module provides `verify()` (compare
+with a full recompute using the original query definition) and `rebuild()`;
+readers use the derived data only when its `meta` flags mark it valid and not
+frozen, and otherwise fall back to the original SQL. Bulk rewrites of
+`effective` run inside the modules' `frozen()` blocks and recompute once.
+
+Measure list operations through `TranslationDB.list_entries` on independent
+copies of the same database, in a fresh process with the read-only connection
+and an empty `stat_cache`, comparing against the commit before the change.
+Report first, middle and last pages for each affected state and sort, and
+write cost for single and repeated manual saves, ingest, and a full effective
+rebuild with and without a priority change. Tests assert result parity with the
+original queries, the absence of `USE TEMP B-TREE FOR ORDER BY` in the paged
+queries, and `verify()` after every write path; no wall-clock threshold is
+asserted.
+
 ### Other metrics
 
 - AppShell mount time and browser-ready time from the real Flet smoke report
