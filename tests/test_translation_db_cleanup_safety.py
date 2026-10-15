@@ -507,3 +507,37 @@ def test_advancement_cleanup_matches_what_the_scanner_collects():
         assert entry_cleanup_category("advancement", key, value) == expected, value
         found = advancement_texts({"display": {"title": {"text": value}}})
         assert (not found) == (expected is not None), value
+
+
+def test_src_change_added_after_the_preview_invalidates_the_plan(tmp_path):
+    db = _db(tmp_path)
+    path = _rule_report(db, tmp_path)
+    plan = db.preview_cleanup(path)
+    # 預覽後同一條目出現新的原文變更紀錄（沒有動到 entry 本身）
+    db._conn.execute(
+        "INSERT INTO src_change (kind, mc_version, mod_id, key, old_en, new_en) "
+        "VALUES ('guide', ?, 'm', 'g/a.md#1', 'old', 'new')",
+        (VERSION,),
+    )
+    db._conn.commit()
+    before = _count(db)
+    with pytest.raises(CleanupPlanChanged):
+        db.apply_cleanup(path, plan.token)
+    assert _count(db) == before
+
+
+def test_partial_revert_rechecks_entries_it_already_restored(tmp_path):
+    db = _db(tmp_path)
+    plan = _apply(db, _rule_report(db, tmp_path))
+    db.ingest(VERSION, [ScanItem("guide", "m", "g/a.md#1", LICENSE)])  # 其中一筆衝突
+    first = db.revert_cleanup(plan.batch_id)
+    assert not first.complete
+    # 已還原的另一筆之後被刪除，原編號也被新資料用掉
+    db._conn.execute("DELETE FROM entry WHERE key = 'g/a.md#0'")
+    db._conn.execute("DELETE FROM entry WHERE key = 'g/a.md#1'")
+    db._conn.commit()
+    db.ingest(VERSION, [ScanItem("lang", "m", "item.m.new", "New")])
+    second = db.revert_cleanup(plan.batch_id)
+    assert second.complete
+    keys = {r[0] for r in db._q("SELECT key FROM entry")}
+    assert {"g/a.md#0", "g/a.md#1"} <= keys  # 沒有因為「記得還原過」而漏掉

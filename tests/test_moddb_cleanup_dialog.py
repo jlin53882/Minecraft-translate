@@ -170,3 +170,13 @@ def test_older_unfinished_batches_can_be_reverted_from_the_dialog(
     assert dialog.revert_btn.disabled is False
     dialog._revert()
     assert dialog.revert_btn.disabled is True
+
+
+def test_any_apply_rejection_clears_the_plan_and_disables_delete(tmp_path, monkeypatch):
+    db = _db(tmp_path)
+    dialog = _dialog(monkeypatch, db, [])
+    dialog.export_translated_btn.on_click(None)
+    dialog._preview()
+    Path(dialog.report_dd.value).write_text("{broken", encoding="utf-8")
+    dialog._apply()
+    assert dialog._plan is None and dialog.apply_btn.disabled is True

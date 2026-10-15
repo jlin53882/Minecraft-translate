@@ -512,10 +512,9 @@ class CleanupDialog:
         self._set_busy(False)
         if error is not None:
             log_warning(f"Mod 資料庫清理失敗：{error!r}")
-            if isinstance(error, svc.CleanupPlanChanged):
-                self._reset_plan()
-                self.plan_summary.value = f"清理未執行：{error}"
-                self.plan_summary.visible = True
+            self._reset_plan()  # 檢查檔或資料已不是預覽時的樣子：要重新預覽
+            self.plan_summary.value = f"清理未執行：{error}"
+            self.plan_summary.visible = True
             show_snack(self.page, f"清理未執行：{error}", C.RED)
             self._safe_update()
             return

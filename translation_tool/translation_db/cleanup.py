@@ -318,6 +318,15 @@ def _item_problem(row: tuple | None, item: dict[str, Any], version: str) -> str 
     return None
 
 
+def _record_identity(record: dict[str, Any]) -> tuple[str, str, str, str]:
+    return (
+        record["kind"],
+        record["mc_version"],
+        record["mod_id"],
+        record["key"],
+    )
+
+
 def _has_cjk(*texts: Any) -> bool:
     return any(_CJK.search(t) for t in texts if t)
 
@@ -380,7 +389,10 @@ class CleanupMixin:
         except sqlite3.Error as exc:
             # 唯讀資料庫寫不進去：沒有身分就不能產生可套用的檢查檔
             raise ValueError("資料庫無法寫入，不能匯出清理檢查檔") from exc
-        return self._read_db_id() or value
+        stored = self._read_db_id()
+        if not stored:
+            raise ValueError("資料庫無法記錄身分，不能匯出清理檢查檔")
+        return stored
 
     # ------------------------------------------------------------------ 找出
     def _protected_ids(self, ids: Sequence[int]) -> set[int]:
@@ -414,6 +426,13 @@ class CleanupMixin:
                 owner = names.index(column)
                 for row in fetched:
                     parts[int(row[owner])][table].append(list(row))
+            names, fetched = self._select_with_columns(
+                f"SELECT e.id AS entry_id, sc.* {_SRC_CHANGE_FROM.format(m=marks)} "
+                "ORDER BY e.id, sc.id",
+                tuple(chunk),
+            )
+            for row in fetched:  # 沒有外鍵的原文變更紀錄也會隨條目刪除，要納入指紋
+                parts[int(row[0])]["src_change"].append(list(row[1:]))
             for entry_id in chunk:
                 states[int(entry_id)] = _digest(parts.get(int(entry_id), {}))
         return states
@@ -879,11 +898,22 @@ class CleanupMixin:
             mapping[int(values[id_index])] = int(cursor.lastrowid)
         return mapping
 
-    def _restored_ids(self, batch_id: str) -> set[int]:
+    def _restored_identities(self, batch_id: str) -> set[tuple[str, str, str, str]]:
+        """已還原條目的 ``(類型, 版本, 模組, 鍵值)``；用身分而不是編號，編號之後可能被重用。"""
         row = self._conn.execute(
             "SELECT value FROM meta WHERE key = ?", (_RESTORED_KEY + batch_id,)
         ).fetchone()
-        return set(json.loads(row[0])) if row else set()
+        return {tuple(item) for item in json.loads(row[0])} if row else set()
+
+    def _entry_exists(self, identity: tuple[str, str, str, str]) -> bool:
+        return (
+            self._conn.execute(
+                "SELECT 1 FROM entry WHERE kind = ? AND mc_version = ? "
+                "AND mod_id = ? AND key = ?",
+                identity,
+            ).fetchone()
+            is not None
+        )
 
     def revert_cleanup(self, batch_id: str) -> RevertResult:
         """還原一個批次；原位置已有同一條目的項目保留為待還原，批次要全部還原才算完成。
@@ -905,23 +935,16 @@ class CleanupMixin:
                 (dict(zip(columns, v, strict=True)) for v in snapshot["entry"]["rows"]),
                 key=lambda r: int(r["id"]),
             )
-            done = self._restored_ids(batch_id)
+            done = self._restored_identities(batch_id)
             result = RevertResult()
             todo: list[dict[str, Any]] = []
             for record in records:
-                if int(record["id"]) in done:
+                identity = _record_identity(record)
+                # 之前還原過、現在條目還在的才算完成；已經不見的重新當成待還原
+                if identity in done and self._entry_exists(identity):
                     continue
-                clash = self._conn.execute(
-                    "SELECT 1 FROM entry WHERE kind = ? AND mc_version = ? "
-                    "AND mod_id = ? AND key = ?",
-                    (
-                        record["kind"],
-                        record["mc_version"],
-                        record["mod_id"],
-                        record["key"],
-                    ),
-                ).fetchone()
-                if clash:
+                done.discard(identity)
+                if self._entry_exists(identity):
                     result.conflicts.append(
                         f"{record['kind']}/{record['mod_id']}/{record['key']}"
                     )
@@ -933,7 +956,7 @@ class CleanupMixin:
             result.restored = len(entry_map)
             result.remapped = sum(1 for old, new in entry_map.items() if old != new)
             self._restore_children(snapshot, entry_map, todo)
-            done |= set(entry_map)
+            done |= {_record_identity(r) for r in todo if int(r["id"]) in entry_map}
             result.pending = len(records) - len(done)
             result.complete = result.pending == 0
             if result.complete:
