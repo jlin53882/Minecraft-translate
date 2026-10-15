@@ -27,7 +27,11 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
-from translation_tool.translation_db import entry_activity, stat_summary
+from translation_tool.translation_db import (
+    effective_columns,
+    entry_activity,
+    stat_summary,
+)
 from translation_tool.translation_db.bulk_review import BulkReviewMixin
 from translation_tool.translation_db.cleanup import CleanupMixin
 from translation_tool.translation_db.models import (
@@ -429,20 +433,44 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
 
     # ------------------------------------------------------------ 生效譯文
     def _rebuild_effective(self, conn: sqlite3.Connection) -> None:
-        # 整批重建：暫停統計摘要的逐列觸發器，最後一次重算
-        with stat_summary.frozen(conn):
-            conn.execute("DELETE FROM effective")
+        """依目前優先序重選所有條目的生效譯文。
+
+        整批改寫：暫停統計摘要與生效列衍生欄位的逐列觸發器，最後各重算一次。只改寫
+        結果不同的列（沒有譯文的條目刪除、其餘以 upsert 比對後更新），結果與清空後
+        全部重新插入相同，但優先序只影響部分條目時寫入量小得多。
+        """
+        derived = effective_columns.has_columns(conn)
+        columns = "entry_id, zh_tw, source, checker, review_status"
+        values = columns
+        compared = ["zh_tw", "source", "checker", "review_status"]
+        if derived:
+            # 一併填入版本與更新時間，暫停結束的重算就只剩比對
+            columns += ", mc_version, upd"
+            values += ", (SELECT mc_version FROM entry WHERE id=entry_id), updated_at"
+            compared.append("upd")
+        changed = (
+            f"({', '.join(compared)}) IS NOT "
+            f"({', '.join('excluded.' + c for c in compared)})"
+        )
+        assignments = ", ".join(f"{c}=excluded.{c}" for c in compared)
+        with stat_summary.frozen(conn), effective_columns.frozen(conn):
+            conn.execute(
+                "DELETE FROM effective WHERE NOT EXISTS (SELECT 1 FROM translation t "
+                "WHERE t.entry_id=effective.entry_id AND t.zh_tw <> '')"
+            )
             conn.execute(
                 f"""
-                INSERT INTO effective (entry_id, zh_tw, source, checker, review_status)
-                SELECT entry_id, zh_tw, source, checker, review_status FROM (
+                INSERT INTO effective ({columns})
+                SELECT {values} FROM (
                     SELECT t.entry_id, t.zh_tw, t.source, t.checker, t.review_status,
+                           t.updated_at,
                            ROW_NUMBER() OVER (
                                PARTITION BY t.entry_id
                                ORDER BY {self._priority_order()}
                            ) AS rn
                     FROM translation t WHERE t.zh_tw <> ''
                 ) WHERE rn = 1
+                ON CONFLICT(entry_id) DO UPDATE SET {assignments} WHERE {changed}
                 """
             )
 
@@ -1033,6 +1061,20 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
                     "ORDER BY e.id LIMIT ? OFFSET ?"
                 ),
             )
+        if sort_by == "effective_updated_newest" and self._effective_columns_ready():
+            # f.upd 就是生效來源那一筆的 et.updated_at；沒有生效譯文或時間的條目在第二段
+            dated, dated_count = self._indexed_page_sql(
+                condition, "effective f", "f.upd IS NOT NULL", "f.upd DESC, f.entry_id"
+            )
+            undated = f"{condition} AND f.upd IS NULL"
+            return (
+                dated,
+                dated_count,
+                (
+                    f"SELECT e.id {self._candidate_source(undated)} WHERE {undated} "
+                    "ORDER BY e.id LIMIT ? OFFSET ?"
+                ),
+            )
         return None
 
     @staticmethod
@@ -1131,6 +1173,37 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
                 if owns_transaction:
                     self._conn.rollback()
 
+    def _effective_columns_ready(self) -> bool:
+        """``effective`` 的衍生欄位可用；否則狀態篩選與排序改用原本的查詢。"""
+        with self._lock:
+            return effective_columns.is_ready(self._conn)
+
+    def rebuild_effective_columns(self) -> None:
+        """全庫重算 ``effective`` 的衍生欄位（缺少或失準時的維護操作）。"""
+        if self.readonly:
+            raise PermissionError("唯讀連線不能重建生效譯文的衍生欄位")
+        with self._tx() as conn:
+            effective_columns.rebuild(conn)
+
+    def verify_effective_columns(self) -> list[tuple]:
+        """比對 ``effective`` 的衍生欄位與原本定義的重算；空清單表示一致（只供測試與維護）。"""
+        with self._lock:
+            return effective_columns.verify(self._conn)
+
+    def _count_sql(self, criteria: EntryFilter, condition: str) -> str:
+        """條目清單的筆數查詢。
+
+        狀態篩選要求有生效譯文且衍生欄位可用時，從 ``effective`` 的版本索引計數，
+        條件用到條目欄位時才連接條目；結果與從條目出發計數相同。
+        """
+        if (
+            criteria.state in ("diff", "manual", "ok")
+            and condition.startswith(_VERSION_CONDITION)
+            and self._effective_columns_ready()
+        ):
+            return self._indexed_page_sql(condition, "effective f", "", "f.entry_id")[1]
+        return f"SELECT COUNT(*) {self._candidate_source(condition)} WHERE {condition}"
+
     def _activity_ready(self) -> bool:
         """``entry_activity`` 可用於排序；否則改用逐筆彙總歷史的原本排序。"""
         with self._lock:
@@ -1188,6 +1261,18 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
 
         if criteria.state == "none":
             where.append("f.entry_id IS NULL")
+        elif (
+            criteria.state in ("diff", "manual", "ok")
+            and self._effective_columns_ready()
+        ):
+            # 觸發器維護的 f.diff 與下方的關聯子查詢定義相同
+            where.append(
+                {
+                    "diff": "f.diff = 1",
+                    "manual": f"f.source={SRC_MANUAL} AND f.diff = 0",
+                    "ok": f"f.source<>{SRC_MANUAL} AND f.diff = 0",
+                }[criteria.state]
+            )
         elif criteria.state == "diff":
             where.append(f"f.entry_id IS NOT NULL AND {self._DIFF_SQL}")
         elif criteria.state == "changed":
@@ -1772,9 +1857,7 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
             )
         else:
             cond, params = self._filter_sql(criteria)
-            total = self._cached_count(
-                f"SELECT COUNT(*) {self._candidate_source(cond)} WHERE {cond}", params
-            )
+            total = self._cached_count(self._count_sql(criteria, cond), params)
             rows = self._query_entry_rows(criteria, limit=limit, offset=offset)
         return [self._row(row) for row in rows], total
 
