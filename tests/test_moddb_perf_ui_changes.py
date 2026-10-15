@@ -347,6 +347,8 @@ def test_dialog_select_all_and_clear_all_change_exclusions(db):
     )
     dialog.plan = dialog.selection_plan = plan
     dialog._plan_catalog = db.source_catalog
+    # 勾選變更會自動啟動背景預覽；這裡只驗證排除集合，避免背景執行緒讓 _busy 競態
+    dialog._start_preview = lambda: None
     roots = {c.entry_id for c in plan.root_changes}
     assert len(roots) == 2
 
