@@ -170,13 +170,23 @@ def test_clean_english_off_still_skips_what_cleanup_removes(tmp_path):
     assert _report_keys(db, tmp_path, "r2.json") == set()
 
 
-def test_clean_english_off_drops_nested_and_list_lang_values(tmp_path):
-    """特徵：extract_all_strings 的 lang 只取頂層字串，所以逐字匯入反而比預設少巢狀值。"""
+def test_clean_english_off_keeps_nested_and_list_lang_values(tmp_path):
+    """關閉「清理」只會多收：鍵集合包含預設模式的鍵集合（巢狀 text、清單值也收）。"""
     jar = _jar(tmp_path / "m.jar")
     off = _keys(_scan(jar, clean_english=False))
     on = _keys(_scan(jar))
-    assert {"gui.m.nested.text", "gui.m.list[0]", "gui.m.list[1]"} <= on
-    assert not off & {"gui.m.nested.text", "gui.m.list[0]", "gui.m.list[1]"}
+    assert {"gui.m.nested.text", "gui.m.list[0]", "gui.m.list[1]"} <= off
+    assert on <= off
+
+
+def test_translated_zip_matches_nested_and_list_translations(tmp_path):
+    zh = {"gui.m.nested": {"text": "巢狀你好"}, "gui.m.list": ["第一行", "第二行"]}
+    jar = _jar(tmp_path / "m.jar", zh=zh)
+    for kw in ({"translated": True}, {"translated": True, "clean_english": False}):
+        rows = {i.key: i for i in _scan(jar, **kw)}
+        assert rows["gui.m.nested.text"].zh_tw == "巢狀你好"
+        assert rows["gui.m.nested.text"].en_us == "Nested hello world"
+        assert rows["gui.m.list[1]"].zh_tw == "第二行"
 
 
 def test_translated_zip_does_not_bring_cleaned_rows_back(tmp_path):

@@ -85,7 +85,7 @@ class ScanOptions:
     dry_run: bool = False  # 只讀 jar 並統計，不寫入資料庫
     apply_rules: bool = True  # 與語系合併相同：對 jar 自帶譯文套用「替換規則」
     rules: Any = field(default=(), compare=False, repr=False)  # 載入後的替換規則
-    clean_english: bool = True  # 判斷並清理英文內容；關閉則放寬機器翻譯篩選，其餘字串逐字匯入
+    clean_english: bool = True  # 關閉＝放寬機器翻譯篩選，其餘字串逐字匯入
     translated: bool = False  # 來源是已翻譯的內容（翻譯 ZIP）：zh_tw 不判讀、直接匯入
     translation_source: int = SRC_CUSTOM  # translated 時，zh_tw 的來源代碼
 
@@ -220,7 +220,7 @@ def _load_json(data: bytes) -> dict | None:
 def extract_all_strings(data: Any, *, is_lang: bool) -> dict[str, str]:
     """不判讀內容，取出全部字串值：``{JSON 路徑: 文字}``。
 
-    lang 檔取頂層所有字串；書籍檔沿用欄位名稱規則（``is_translatable_field``，只看欄位名、不看內容），
+    lang 檔取頂層所有字串，加上巢狀的 ``text`` 與陣列裡的字串（和預設抽取規則收的結構相同，只是不篩選內容）；書籍檔沿用欄位名稱規則（``is_translatable_field``，只看欄位名、不看內容），
     避免把 ``type``、``id`` 之類的結構欄位也當成文字；書籍檔另外略過 ``namespace:id`` 形式的資源引用。
     """
     found: dict[str, str] = {}
@@ -231,7 +231,7 @@ def extract_all_strings(data: Any, *, is_lang: bool) -> dict[str, str]:
                 path = f"{base}.{key}" if base else str(key)
                 if isinstance(value, str):
                     if value.strip() and (
-                        (is_lang and not base)
+                        (is_lang and (not base or str(key) == "text"))
                         or (
                             not is_lang
                             and is_translatable_field(str(key))
@@ -245,7 +245,7 @@ def extract_all_strings(data: Any, *, is_lang: bool) -> dict[str, str]:
             for idx, value in enumerate(node):
                 path = f"{base}[{idx}]"
                 if isinstance(value, str):
-                    if value.strip() and not is_lang:
+                    if value.strip():
                         found[path] = value
                 else:
                     walk(value, path)
