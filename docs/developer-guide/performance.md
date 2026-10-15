@@ -31,6 +31,31 @@ raw UI timings separately from query timings, including slower or unstable
 first-load observations. No wall-clock threshold is asserted in unit tests;
 index installation, query-plan shape, and result parity are tested instead.
 
+### Mod DB: no temporary sorts
+
+List, paging and candidate queries in `translation_tool/translation_db/` must not
+produce `USE TEMP B-TREE FOR ORDER BY` in `EXPLAIN QUERY PLAN`. A temporary sort
+reads the whole candidate set before returning the first row, so its cost grows
+with the table instead of with the page size. Obtain the order from an index
+whose column order matches the `ORDER BY`, from a two-phase query (select the page
+IDs first, then read the wide columns), or from a trigger-maintained derived
+column or table.
+
+`tests/test_moddb_no_temp_sort.py` runs the public read APIs over every state,
+sort, quality status and common filter, captures each SELECT through
+`sqlite3.Connection.set_trace_callback`, and fails when a plan contains the temporary
+sort. An exception is acceptable only when the sorted set has a hard bound that
+does not depend on the table size; record the bound in `ALLOWED_PLAN_MARKERS` or
+`ALLOWED` in that test. Current exceptions:
+
+- Sorting the page's own IDs in the second phase of a two-phase query (bounded by the page size).
+- `entry_newest` / `entry_oldest` sorts: `entry.created_at` has no index, and
+  adding one slows every import for a rarely used sort.
+- Untranslated candidate lists, reusable candidates and same-as-source AI entries: the sorted
+  set is the number of missing or matching rows in one version.
+- `kinds()`: sorts the distinct entry kinds only.
+- The mismatch list: sorts only rows that pass the special-character prefilter.
+
 ### Mod DB trigger-maintained derived data
 
 `translation_tool/translation_db/stat_summary.py`,

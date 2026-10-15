@@ -37,6 +37,16 @@
   修改設定 schema 後執行 `python tools/gen_config_example.py`
 - 後台記錄與畫面訊息成對出現時文字必須一致（見 `tests/test_log_pair_contract.py`）
 
+## 資料庫查詢：禁止臨時排序
+
+`translation_tool/translation_db/` 的列表、分頁與候選查詢，`EXPLAIN QUERY PLAN` 不得出現
+`USE TEMP B-TREE FOR ORDER BY`：臨時排序要先讀完整個候選集，成本隨資料量成長（70 萬筆時動輒數百 ms）。
+請用索引（排序欄位與索引欄位順序一致）、先選當頁 id 再讀完整欄位，或由觸發器維護的衍生欄位來取得順序。
+
+- 檢查在 `tests/test_moddb_no_temp_sort.py`。確實無法避免時，把查詢加進該檔的 `ALLOWED_PLAN_MARKERS`／`ALLOWED`，
+  並寫明原因（排序量有明確上界，例如頁大小、缺譯筆數、不同的 kind 數）。
+- 新增衍生資料或索引的規範與驗證方式見 `docs/developer-guide/performance.md`。
+
 ## 文件維護
 
 - 文件只描述「現在」的程式與規則：不寫 PR／issue 編號、「原本／改為／已移除」等演進過程，也不寫「為什麼要做這次修改」；
