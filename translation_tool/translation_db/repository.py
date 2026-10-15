@@ -67,6 +67,7 @@ from translation_tool.translation_db.quality import (
     token_quality_comparison,
     whitespace_note,
 )
+from translation_tool.translation_db.read_cache import READ_CACHE
 from translation_tool.translation_db.schema import (
     DB_EMPTY,
     DB_FOREIGN,
@@ -182,6 +183,7 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
         self.priority = tuple(priority)
         self.readonly = readonly
         self._lock = threading.RLock()
+        self._write_transaction = False
         self._rank = rank_sql(self.priority, "t.source")
         existed = self.path.is_file()
         if not existed and (readonly or not create):
@@ -276,6 +278,7 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
                     (KEEP_REVIEW_FLAG,),
                 )
             changes_before = self._conn.total_changes
+            self._write_transaction = True
             try:
                 yield self._conn
             except BaseException:
@@ -294,28 +297,66 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
                         "ON CONFLICT(key) DO UPDATE SET value = CAST(value AS INTEGER) + 1"
                     )
                 self._conn.commit()
+            finally:
+                self._write_transaction = False
 
     def _data_gen(self) -> str:
         row = self._one("SELECT value FROM meta WHERE key = 'data_gen'")
         return row[0] if row else "0"
 
-    def _cached(self, key: str, compute: Callable[[], Any]) -> Any:
+    def _read_cache_identity(self) -> tuple:
+        """Include file incarnation and WAL changes, including external SQL writers."""
+        path = self.path.resolve()
+        stat = path.stat()
+        try:
+            wal = Path(f"{path}-wal").stat()
+            wal_signature = (wal.st_size, wal.st_mtime_ns)
+        except FileNotFoundError:
+            wal_signature = None
+        return (
+            str(path),
+            stat.st_dev,
+            stat.st_ino,
+            stat.st_size,
+            stat.st_mtime_ns,
+            wal_signature,
+        )
+
+    def _cached(
+        self, key: str, compute: Callable[[], Any], *, persist: bool = True
+    ) -> Any:
         """昂貴統計的快取：資料世代沒變就直接回傳上次算好的結果（JSON 存在資料庫內）。
 
         數十萬筆條目的總覽統計要 1 秒以上；資料沒變時（切換頁籤、翻頁、重開程式）
-        直接讀快取。唯讀連線或舊資料庫沒有快取表時，退回每次重算。
+        直接讀快取。唯讀 worker 共用有容量上限的程序內快取，不需寫入資料庫；
+        資料世代、檔案身分或 WAL 改變就不重用舊的程序內結果。交易中的計算不共用。
         """
+        if self._write_transaction:
+            return compute()
         try:
             gen = self._data_gen()
-            row = self._one(
-                "SELECT value FROM stat_cache WHERE key = ? AND gen = ?", (key, gen)
+            cache_key = (self._read_cache_identity(), gen, key)
+            shared = READ_CACHE.get(cache_key)
+            if shared is not None:
+                return json.loads(shared)
+            row = (
+                self._one(
+                    "SELECT value FROM stat_cache WHERE key = ? AND gen = ?",
+                    (key, gen),
+                )
+                if persist
+                else None
             )
             if row is not None:
+                READ_CACHE.put(cache_key, row[0])
                 return json.loads(row[0])
-        except sqlite3.Error:
+        except (sqlite3.Error, OSError):
             return compute()
         value = compute()
-        if not self.readonly:
+        encoded = json.dumps(value, ensure_ascii=False)
+        if self._data_gen() == gen:
+            READ_CACHE.put(cache_key, encoded)
+        if persist and not self.readonly:
             try:
                 with self._lock:
                     if self._data_gen() != gen:
@@ -324,7 +365,7 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
                     self._conn.execute(
                         "INSERT OR REPLACE INTO stat_cache (key, gen, value) "
                         "VALUES (?,?,?)",
-                        (key, gen, json.dumps(value, ensure_ascii=False)),
+                        (key, gen, encoded),
                     )
                     self._conn.commit()
             except sqlite3.Error:
@@ -637,14 +678,17 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
     def effective_source_codes(self, version: str | None = None) -> tuple[int, ...]:
         """Return source IDs that currently win at least one effective entry."""
         if version is None:
-            rows = self._q("SELECT DISTINCT source FROM effective ORDER BY source")
+            sql, params = "SELECT DISTINCT source FROM effective ORDER BY source", ()
         else:
-            rows = self._q(
+            sql = (
                 "SELECT DISTINCT f.source FROM effective f "
                 "JOIN entry e ON e.id=f.entry_id "
-                "WHERE e.mc_version=? ORDER BY f.source",
-                (version,),
+                "WHERE e.mc_version=? ORDER BY f.source"
             )
+            params = (version,)
+        rows = self._cached(
+            f"effective_source_codes:{version!r}", lambda: self._q(sql, params)
+        )
         return tuple(int(row[0]) for row in rows)
 
     def _effective_source_stats_by_version_rows(self) -> list[list]:
@@ -815,6 +859,76 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
             "FROM entry e LEFT JOIN effective f ON f.entry_id=e.id "
             "LEFT JOIN translation et ON et.entry_id=e.id AND et.source=f.source "
             f"LEFT JOIN translation man ON man.entry_id=e.id AND man.source={SRC_MANUAL}"
+        )
+
+    @staticmethod
+    def _candidate_source(expressions: str) -> str:
+        """Join only tables used by a filter or sort, before projecting a page."""
+        source = "FROM entry e"
+        if "f." in expressions or "et." in expressions:
+            source += " LEFT JOIN effective f ON f.entry_id=e.id"
+        if "et." in expressions:
+            source += (
+                " LEFT JOIN translation et ON et.entry_id=e.id AND et.source=f.source"
+            )
+        return source
+
+    def _paged_entry_rows(
+        self,
+        criteria: EntryFilter,
+        condition: str,
+        params: list,
+        *,
+        limit: int,
+        offset: int,
+        conn: sqlite3.Connection | None,
+    ) -> list[tuple]:
+        """Apply filtering, ordering and offset to IDs before loading editor fields."""
+        order = self._sort_sql(criteria.sort_by)
+        candidates = self._candidate_source(f"{condition} {order}")
+        values = [*params, max(0, int(limit)), max(0, int(offset))]
+        if conn is None:
+            candidate_sql = (
+                f"SELECT e.id {candidates} WHERE {condition} "
+                f"ORDER BY {order} LIMIT ? OFFSET ?"
+            )
+            cache_key = (
+                "entry_page:"
+                + hashlib.sha1(
+                    json.dumps([candidate_sql, values]).encode("utf-8")
+                ).hexdigest()
+            )
+            with self._lock:
+                owns_transaction = not self._conn.in_transaction
+                if owns_transaction:
+                    self._conn.execute("BEGIN")
+                try:
+                    ids = self._cached(
+                        cache_key,
+                        lambda: self._q(candidate_sql, values),
+                        persist=False,
+                    )
+                    if not ids:
+                        return []
+                    return self._q(
+                        f"{self._entry_select_sql()} {self._query_source()} "
+                        "WHERE e.id IN (SELECT value FROM json_each(?)) "
+                        f"ORDER BY {order}",
+                        (json.dumps([row[0] for row in ids]),),
+                    )
+                finally:
+                    if owns_transaction:
+                        self._conn.rollback()
+        sql = (
+            f"WITH page AS MATERIALIZED (SELECT e.id {candidates} "
+            f"WHERE {condition} ORDER BY {order} LIMIT ? OFFSET ?) "
+            f"{self._entry_select_sql()} {self._query_source()} "
+            f"JOIN page ON page.id=e.id ORDER BY {order}"
+        )
+        return (
+            self._q(sql, values)
+            if conn is None
+            else conn.execute(sql, values).fetchall()
         )
 
     def _filter_sql(self, criteria: EntryFilter) -> tuple[str, list]:
@@ -1031,6 +1145,19 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
         raise_if_cancelled()
         offset = max(0, int(offset))
         page_limit = None if limit is None else max(0, int(limit))
+        if (
+            criteria.quality.status
+            in {"unknown_source", "missing_translation", "whitespace"}
+            and page_limit is not None
+        ):
+            condition += f" AND ({self._quality_prefilter_sql(criteria.quality)})"
+            total = self._cached_count(
+                f"SELECT COUNT(*) {self._candidate_source(condition)} WHERE {condition}",
+                params,
+            )
+            return self._paged_entry_rows(
+                criteria, condition, params, limit=page_limit, offset=offset, conn=None
+            ), total
         with self._lock:
             cursor = None
             owns_transaction = not self._conn.in_transaction
@@ -1039,31 +1166,62 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
             self._conn.set_progress_handler(lambda: int(is_cancelled()), 10_000)
             try:
                 cache_key = (
-                    str(self.path),
+                    self._read_cache_identity(),
                     self._data_gen(),
                     condition,
                     tuple(params),
                     repr(criteria.quality),
                     criteria.sort_by,
                 )
+                page_cache_key = (*cache_key, "quality-page", page_limit, offset)
+                shared = (
+                    READ_CACHE.get(page_cache_key)
+                    if not self._write_transaction and page_limit is not None
+                    else None
+                )
                 cached = TranslationDB._quality_page_cache
-                if page_limit is not None and cached and cached[0] == cache_key:
+                if shared is not None:
+                    saved = json.loads(shared)
+                    selected_ids, total = saved["ids"], saved["total"]
+                    selected = [(entry_id,) for entry_id in selected_ids]
+                elif (
+                    not self._write_transaction
+                    and page_limit is not None
+                    and cached
+                    and cached[0] == cache_key
+                ):
                     # 翻頁：條件與資料都沒變，直接用上次排好的符合清單，不重掃整個版本
                     ordered, total = cached[1], cached[2]
+                    selected = ordered[offset : offset + page_limit]
                 else:
                     ordered, total, complete = self._scan_quality_candidates(
                         criteria, condition, params, page_limit, offset
                     )
-                    if page_limit is not None and complete:
+                    if (
+                        not self._write_transaction
+                        and page_limit is not None
+                        and complete
+                    ):
                         TranslationDB._quality_page_cache = (
                             cache_key,
                             ordered,
                             total,
                         )
+                    selected = (
+                        ordered[offset : offset + page_limit]
+                        if page_limit is not None
+                        else ordered[offset:]
+                    )
                 if page_limit is None:
                     return ordered[offset:], total
 
-                selected = ordered[offset : offset + page_limit]
+                if not self._write_transaction and shared is None:
+                    READ_CACHE.put(
+                        page_cache_key,
+                        json.dumps(
+                            {"ids": [row[0] for row in selected], "total": total}
+                        ),
+                    )
                 if not selected:
                     return [], total
 
@@ -1236,6 +1394,10 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
             else self._entry_select_sql()
         )
         has_quality = criteria.quality.active
+        if not has_quality and not batch_replace_projection and limit is not None:
+            return self._paged_entry_rows(
+                criteria, cond, params, limit=limit, offset=offset, conn=conn
+            )
         if has_quality and batch_replace_projection:
             matched = self._quality_matched_batch_rows(
                 criteria, cond, params, conn, progress_callback
@@ -1402,7 +1564,7 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
         else:
             cond, params = self._filter_sql(criteria)
             total = self._cached_count(
-                f"SELECT COUNT(*) {self._query_source()} WHERE {cond}", params
+                f"SELECT COUNT(*) {self._candidate_source(cond)} WHERE {cond}", params
             )
             rows = self._query_entry_rows(criteria, limit=limit, offset=offset)
         return [self._row(row) for row in rows], total
@@ -3417,7 +3579,14 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
         if limit is not None and limit > 0:
             sql += " LIMIT ?"
             params.append(limit)
-        return self._q(sql, params)
+        key = (
+            "untranslated:"
+            + hashlib.sha1(json.dumps([sql, params]).encode("utf-8")).hexdigest()
+        )
+        return [
+            tuple(row)
+            for row in self._cached(key, lambda: self._q(sql, params), persist=False)
+        ]
 
     def _same_as_source_ai_where(
         self, version: str, mod_ids: Sequence[str] | None
@@ -3473,10 +3642,17 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
         check: Callable[[], None] | None = None,
     ) -> tuple[int, list[SameSourceAIEntry]]:
         """Find special-character mismatches in every stored source translation."""
+        if check is not None:
+            check()
+        token_chars = " OR ".join(
+            f"{column} GLOB {_TOKEN_CHAR_GLOB_SQL} OR instr({column}, char(10)) > 0"
+            for column in ("e.en_us", "t.zh_tw")
+        )
         where = [
             "e.mc_version=?",
             "e.en_us<>''",
             "t.zh_tw<>''",
+            f"({token_chars})",
         ]
         params: list = [version]
         if mod_ids:
@@ -3488,21 +3664,33 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
             "FROM entry e JOIN translation t ON t.entry_id=e.id "
             f"WHERE {' AND '.join(where)} ORDER BY e.mod_id, e.kind, e.key, t.source"
         )
-        count = 0
-        candidates: list[SameSourceAIEntry] = []
         selected_limit = limit if limit and limit > 0 else None
-        with self._lock:
-            cursor = self._conn.execute(sql, tuple(params))
-            while rows := cursor.fetchmany(512):
-                for row in rows:
-                    if check is not None:
-                        check()
-                    if quality_state(row[4], row[5])[0] != "mismatch":
-                        continue
-                    count += 1
-                    if selected_limit is None or len(candidates) < selected_limit:
-                        candidates.append(SameSourceAIEntry(*row))
-        return count, candidates
+
+        def load_candidates():
+            count = 0
+            candidates = []
+            with self._lock:
+                cursor = self._conn.execute(sql, tuple(params))
+                try:
+                    while rows := cursor.fetchmany(512):
+                        for row in rows:
+                            if check is not None:
+                                check()
+                            if quality_state(row[4], row[5])[0] != "mismatch":
+                                continue
+                            count += 1
+                            if (
+                                selected_limit is None
+                                or len(candidates) < selected_limit
+                            ):
+                                candidates.append(row)
+                finally:
+                    cursor.close()
+            return count, candidates
+
+        key = "mismatched_sources:" + json.dumps([version, mod_ids, selected_limit])
+        count, rows = self._cached(key, load_candidates, persist=False)
+        return count, [SameSourceAIEntry(*row) for row in rows]
 
     def iter_repairable_translation_entries(
         self,

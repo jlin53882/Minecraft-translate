@@ -564,9 +564,7 @@ def _install_schema_v3_objects(conn: sqlite3.Connection) -> None:
     )
     # 非人工來源的譯文文字被改掉、審核狀態卻沒有一起改時，舊的「已審核」不再成立
     # 審核、修復與還原流程（_tx(keep_review=True)）自己決定審核狀態並寫進歷史快照，不受此觸發器影響
-    conn.execute("DROP TRIGGER IF EXISTS translation_text_change_clears_review")
-    conn.execute(
-        f"""
+    review_trigger = f"""
         CREATE TRIGGER translation_text_change_clears_review
         AFTER UPDATE OF zh_tw ON translation
         WHEN NEW.source <> 6 AND NEW.zh_tw IS NOT OLD.zh_tw
@@ -577,7 +575,15 @@ def _install_schema_v3_objects(conn: sqlite3.Connection) -> None:
             UPDATE translation SET review_status=NULL WHERE id=NEW.id;
         END;
         """
-    )
+    existing = conn.execute(
+        "SELECT sql FROM sqlite_schema WHERE type='trigger' "
+        "AND name='translation_text_change_clears_review'"
+    ).fetchone()
+    normalize = lambda sql: " ".join(sql.rstrip().rstrip(";").split())
+    if existing is not None and normalize(existing[0]) == normalize(review_trigger):
+        return
+    conn.execute("DROP TRIGGER IF EXISTS translation_text_change_clears_review")
+    conn.execute(review_trigger)
 
 
 DB_EMPTY = "empty"  # 沒有任何資料表（新檔案或 0 位元組的檔案）

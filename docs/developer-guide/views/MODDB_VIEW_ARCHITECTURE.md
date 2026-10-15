@@ -2,6 +2,17 @@
 
 `ModDbView`（`app/views/moddb_view.py`）維持資料庫連線與頁籤生命週期；`EntriesPanel`（`app/views/moddb/entries_panel.py`）負責條目篩選、編輯與背景刷新。資料庫查詢與寫入經由 `app/services_impl/moddb_service.py`，核心資料存取由 `translation_tool/translation_db/` 提供。
 
+## 查詢快照與分頁
+
+背景 worker 的唯讀連線使用 `translation_tool/translation_db/read_cache.py` 的有界 JSON
+快取，每個消費者取得自己的解碼結果，不共用可變物件。快取鍵包含資料世代、資料庫檔案
+身分與 WAL 狀態；寫入交易不讀取或發布共用結果。統計仍可使用資料庫內的世代快取。
+
+一般條目分頁先以篩選、排序所需的最少資料表取得當頁 ID，再載入完整欄位；唯讀分頁的
+兩階段查詢位於同一讀取交易，避免中間寫入造成頁面不一致。品質掃描的結果可快取當頁 ID
+與總數，完整列仍從相同資料快照取得。快取有容量與筆數上限，不保證第一次查詢或大量批次
+工作的固定完成時間；資料變動後須重新計算。
+
 ## 學名候選流程
 
 條目校對的 `species_scan_btn` 依目前 `version`、`mod_id` 與 `kind` 開啟 `SpeciesCandidateDialog`。對話框分成兩個階段：
