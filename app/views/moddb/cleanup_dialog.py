@@ -1,6 +1,7 @@
 """資料清理視窗：匯出檢查檔 → 自行檢查 → 依檢查檔預覽並刪除 → 需要時整批還原。
 
-清理對象是目前規則判定「不是要翻譯的內容」、而且沒有任何譯文或歷史的舊條目。
+清理對象是目前規則判定「不是要翻譯的內容」的舊條目。一般檢查檔只列沒有任何譯文或歷史的；
+已經被翻譯或審核過的另外用「匯出已有譯文的項目」匯出，刪除時連同譯文與歷史一起移除。
 數量可能上千筆，所以不在畫面上逐筆檢查，而是匯出 JSON 檢查檔；刪除前會再依目前資料重新檢查。
 """
 
@@ -30,6 +31,12 @@ from app.ui.dialogs import (
 from app.ui.snack import show_snack
 from app.views.moddb.formatting import format_count, kind_label
 from translation_tool.utils.log_unit import log_exception, log_info, log_warning
+
+
+def _source_line(sources: dict[str, int]) -> str:
+    """依生效譯文來源分組的筆數，例如「譯文來源：人工 3、釘宮翻譯組 5」。"""
+    parts = [f"{name} {format_count(n)}" for name, n in sources.items()]
+    return "譯文來源：" + "、".join(parts) if parts else ""
 
 
 def _category_lines(counts: dict[str, int]) -> str:
@@ -64,6 +71,12 @@ class CleanupDialog:
             "secondary",
             icon=ft.Icons.FILE_DOWNLOAD_OUTLINED,
             on_click=self._export,
+        )
+        self.export_translated_btn = kit.button(
+            "匯出已有譯文的項目",
+            "secondary",
+            icon=ft.Icons.FILE_DOWNLOAD_OUTLINED,
+            on_click=lambda _e: self._export(with_translation=True),
         )
         self.open_folder_btn = kit.button(
             "開啟檢查檔資料夾", "ghost", size="sm", on_click=self._open_folder
@@ -115,8 +128,10 @@ class CleanupDialog:
                             color=C.TEXT,
                         ),
                         ft.Text(
-                            "只有沒有任何譯文、生效譯文與歷史紀錄的條目才會列入，"
-                            "有人動過的不會碰。",
+                            "「匯出檢查檔」只列入沒有任何譯文、生效譯文與歷史紀錄的條目，"
+                            "有人動過的不會碰。符合規則但已經被翻譯或審核過的條目，"
+                            "用「匯出已有譯文的項目」另外匯出檢查（檔案內附目前的譯文與來源）；"
+                            "刪除會連同所有來源的譯文與歷史一起移除，可以還原。",
                             size=12,
                             color=C.MUTED,
                         ),
@@ -134,7 +149,11 @@ class CleanupDialog:
                         ),
                         ft.Text("步驟 1　匯出檢查檔", weight=ft.FontWeight.BOLD),
                         ft.Row(
-                            [self.export_btn, self.open_folder_btn],
+                            [
+                                self.export_btn,
+                                self.export_translated_btn,
+                                self.open_folder_btn,
+                            ],
                             spacing=10,
                             wrap=True,
                         ),
@@ -249,7 +268,8 @@ class CleanupDialog:
         if protected:
             lines.append(
                 ft.Text(
-                    f"另有 {format_count(protected)} 筆符合條件但已有譯文或歷史，不會列入",
+                    f"另有 {format_count(protected)} 筆符合條件但已有譯文或歷史，"
+                    "不會列入一般檢查檔；可用「匯出已有譯文的項目」另外清理",
                     size=12,
                     color=C.MUTED,
                 )
@@ -290,7 +310,7 @@ class CleanupDialog:
         self.apply_btn.content = "確認刪除"
 
     # ------------------------------------------------------------------ 匯出
-    def _export(self, _e=None) -> None:
+    def _export(self, _e=None, *, with_translation: bool = False) -> None:
         db, version = self.get_db(), self.version_dd.value
         if db is None or not version or self._busy:
             show_snack(self.page, "請先選擇版本。", C.GOLD)
@@ -300,7 +320,9 @@ class CleanupDialog:
         def work() -> None:
             report = error = None
             try:
-                report = svc.export_cleanup(db, version)
+                report = svc.export_cleanup(
+                    db, version, with_translation=with_translation
+                )
             except (OSError, sqlite3.Error) as exc:
                 error = exc
             except Exception as exc:  # noqa: BLE001 - worker boundary reports unexpected failures
@@ -318,6 +340,8 @@ class CleanupDialog:
         lines = [f"版本 {report.version}：可清理 {format_count(report.total)} 筆"]
         if report.total:
             lines.append(_category_lines(report.counts))
+        if report.sources:
+            lines.append(_source_line(report.sources))
         skipped = sum(report.protected.values())
         if skipped:
             lines.append(
@@ -385,6 +409,11 @@ class CleanupDialog:
         ]
         if plan.deletable:
             lines.append(_category_lines(dict(plan.by_category)))
+        if plan.with_translation:
+            lines.append(
+                f"其中 {format_count(plan.with_translation)} 筆已有譯文或歷史："
+                "刪除會連同所有來源的譯文與歷史一起移除，可按「還原上次清理」復原"
+            )
         lines.extend(
             f"略過 {format_count(n)} 筆：{reason}" for reason, n in plan.skipped.items()
         )
@@ -532,6 +561,7 @@ class CleanupDialog:
         for control in (
             self.version_dd,
             self.export_btn,
+            self.export_translated_btn,
             self.report_dd,
             self.refresh_reports_btn,
             self.close_btn,

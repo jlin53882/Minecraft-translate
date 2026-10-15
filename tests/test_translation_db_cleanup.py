@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from translation_tool.translation_db import TranslationDB
-from translation_tool.translation_db.cleanup import entry_cleanup_category
+from translation_tool.translation_db.cleanup import _text_hash, entry_cleanup_category
 from translation_tool.translation_db.models import ScanItem
 
 VERSION = "1.21.1"
@@ -257,3 +257,128 @@ def test_report_items_must_match_the_entry_identity(tmp_path):
     plan = db.preview_cleanup(report_path)
     assert plan.skipped["類型、模組或鍵值與檢查檔不符"] == 3
     assert plan.deletable == len(data["items"]) - 3 - plan.skipped["已有譯文或歷史"]
+
+
+# ---------------------------------------------------------------- 符合規則但已有譯文或歷史
+def _with_translations(tmp_path: Path) -> TranslationDB:
+    """``_db`` 再加兩筆人工譯文：一筆是佔位字（垃圾條目），一筆是正常的 Alpha。
+
+    符合規則又有譯文的條目共兩筆：jar 繁中的授權條款、人工翻過的佔位字。
+    """
+    db = _db(tmp_path)
+    for key, text in (("b/e.json#pages[1].text", "[待補照片]"), ("item.m.a", "甲")):
+        db.save_manual(db._one("SELECT id FROM entry WHERE key = ?", (key,))[0], text)
+    return db
+
+
+def _protected_report(db: TranslationDB, tmp_path: Path):
+    path = tmp_path / "p.json"
+    return db.export_protected_report(VERSION, path), path
+
+
+def test_protected_export_lists_only_rule_matches_that_have_translations(tmp_path):
+    db = _with_translations(tmp_path)
+    before = _count(db)
+    report, path = _protected_report(db, tmp_path)
+    assert _count(db) == before  # 匯出不刪任何東西
+    assert report.counts == {"license": 1, "placeholder": 1}
+    assert report.protected == {}
+    assert report.sources == {"模組自帶繁中": 1, "人工": 1}
+    data = json.loads(path.read_text(encoding="utf-8"))
+    by_key = {item["key"]: item for item in data["items"]}
+    assert set(by_key) == {
+        "g/b.md#0",
+        "b/e.json#pages[1].text",
+    }  # 正常譯文 Alpha 不列入
+    item = by_key["b/e.json#pages[1].text"]
+    assert item["has_translation"] is True and item["delete"] is True
+    assert item["zh_tw"] == "[待補照片]" and item["source"] == "人工"
+    assert item["category"] == "placeholder" and item["state_hash"]
+    # 一般檢查檔照舊不列入這兩筆
+    rule = db.export_cleanup_report(VERSION, tmp_path / "r.json")
+    assert rule.protected == {"license": 1, "placeholder": 1}
+
+
+def test_protected_cleanup_deletes_translations_and_can_be_reverted(tmp_path):
+    db = _with_translations(tmp_path)
+    before = _count(db)
+    tables = {
+        t: db._one(f"SELECT COUNT(*) FROM {t}")[0]
+        for t in ("translation", "effective", "history")
+    }
+    _report, path = _protected_report(db, tmp_path)
+    plan = db.apply_cleanup(path)
+    assert plan.deletable == 2 and plan.with_translation == 2
+    assert plan.by_category == {"license": 1, "placeholder": 1}
+    assert _count(db) == before - 2
+    assert db._one("SELECT COUNT(*) FROM entry WHERE key = 'item.m.a'")[0] == 1
+    restored, skipped = db.revert_cleanup(plan.batch_id)
+    assert (restored, skipped) == (2, 0)
+    assert _count(db) == before
+    for table, count in tables.items():
+        assert db._one(f"SELECT COUNT(*) FROM {table}")[0] == count, table
+
+
+def test_protected_item_is_skipped_when_translation_or_history_changed(tmp_path):
+    db = _with_translations(tmp_path)
+    _report, path = _protected_report(db, tmp_path)
+    entry_id = db._one("SELECT id FROM entry WHERE key = 'g/b.md#0'")[0]
+    db.save_manual(entry_id, "授權條款（人工確認）")
+    plan = db.preview_cleanup(path)
+    assert plan.skipped["譯文或歷史已變動"] == 1
+    assert plan.deletable == 1 and plan.with_translation == 1
+
+
+def test_protected_item_still_needs_to_match_the_rules(tmp_path):
+    db = _with_translations(tmp_path)
+    _report, path = _protected_report(db, tmp_path)
+    data = json.loads(path.read_text(encoding="utf-8"))
+    # 把正常條目 Alpha 偽造成項目：規則不符，不會因為帶旗標就被刪
+    alpha = db._one("SELECT id, en_us FROM entry WHERE key = 'item.m.a'")
+    data["items"].append(
+        {
+            "id": alpha[0],
+            "delete": True,
+            "category": "placeholder",
+            "kind": "lang",
+            "mod": "m",
+            "key": "item.m.a",
+            "en_us_hash": _text_hash(alpha[1]),
+            "has_translation": True,
+        }
+    )
+    path.write_text(json.dumps(data), encoding="utf-8")
+    plan = db.preview_cleanup(path)
+    assert plan.deletable == 2
+    assert plan.skipped == {"目前規則判為正常內容": 1}
+
+
+def test_without_the_flag_translated_items_stay_protected(tmp_path):
+    db = _with_translations(tmp_path)
+    _report, path = _protected_report(db, tmp_path)
+    data = json.loads(path.read_text(encoding="utf-8"))
+    for item in data["items"]:
+        item.pop("has_translation")
+    path.write_text(json.dumps(data), encoding="utf-8")
+    plan = db.preview_cleanup(path)
+    assert plan.deletable == 0
+    assert plan.skipped["已有譯文或歷史"] == 2
+
+
+def test_service_exports_the_translated_report_next_to_the_rule_reports(tmp_path):
+    from app.services_impl import moddb_cleanup_service as svc
+
+    db = _with_translations(tmp_path)
+    report = svc.export_cleanup(db, VERSION, with_translation=True)
+    assert report.path.name.endswith("-translated.json")
+    assert report.path.parent == tmp_path / "cleanup_reports"
+    assert svc.list_cleanup_reports(db) == [report.path]
+    assert svc.preview_cleanup(db, report.path).deletable == 2
+
+
+def test_protected_export_with_nothing_protected_is_empty(tmp_path):
+    db = TranslationDB(tmp_path / "e.db")
+    db.ingest(VERSION, [ScanItem("lang", "m", "item.m.a", "Alpha", zh_tw="甲")])
+    report, path = _protected_report(db, tmp_path)
+    assert report.total == 0 and report.counts == {}
+    assert json.loads(path.read_text(encoding="utf-8"))["items"] == []

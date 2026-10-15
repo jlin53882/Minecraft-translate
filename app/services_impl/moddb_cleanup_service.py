@@ -42,10 +42,21 @@ def cleanup_report_dir(db: TranslationDB) -> Path:
     return db.path.parent / REPORT_DIR_NAME
 
 
-def export_cleanup(db: TranslationDB, version: str) -> CleanupReport:
-    """把可清理的條目寫成檢查檔（只讀資料庫）。"""
+def export_cleanup(
+    db: TranslationDB, version: str, *, with_translation: bool = False
+) -> CleanupReport:
+    """把可清理的條目寫成檢查檔（只讀資料庫）。
+
+    ``with_translation=True`` 改匯出「符合規則但已有譯文或歷史」的條目，
+    檔名多一個 ``-translated`` 後綴。
+    """
     stamp = time.strftime("%Y%m%d-%H%M%S")
     safe_version = "".join(c if c.isalnum() or c in "._-" else "_" for c in version)
+    if with_translation:
+        path = (
+            cleanup_report_dir(db) / f"cleanup-{safe_version}-{stamp}-translated.json"
+        )
+        return db.export_protected_report(version, path)
     path = cleanup_report_dir(db) / f"cleanup-{safe_version}-{stamp}.json"
     return db.export_cleanup_report(version, path)
 
