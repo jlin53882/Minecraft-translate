@@ -342,6 +342,11 @@ class CleanupDialog:
             lines.append(_category_lines(report.counts))
         if report.sources:
             lines.append(_source_line(report.sources))
+        if report.review:
+            lines.append(
+                f"其中 {format_count(report.review)} 筆已有中文譯文、可能是誤判，"
+                "檢查檔裡 delete 預設為 false，確認要刪再改成 true"
+            )
         skipped = sum(report.protected.values())
         if skipped:
             lines.append(

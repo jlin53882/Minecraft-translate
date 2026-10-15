@@ -382,3 +382,46 @@ def test_protected_export_with_nothing_protected_is_empty(tmp_path):
     report, path = _protected_report(db, tmp_path)
     assert report.total == 0 and report.counts == {}
     assert json.loads(path.read_text(encoding="utf-8"))["items"] == []
+
+
+# ---------------------------------------------------------------- 誤判防護
+def test_text_overrides_plain_words_and_language_region_are_normal_text():
+    key = "b/e.json#pages[2].text_overrides[0][1]"
+    assert entry_cleanup_category("patchouli", key, "raw") is None
+    assert entry_cleanup_category("patchouli", "b/e.json#pages[2].x", "raw") == (
+        "not_text"
+    )
+    assert entry_cleanup_category("lang", "language.region", "United States") is None
+    assert entry_cleanup_category("lang", "language.code", "en_us") == "meta_key"
+
+
+def test_protected_export_does_not_delete_translated_shape_matches_by_default(tmp_path):
+    db = TranslationDB(tmp_path / "t.db")
+    db.ingest(
+        VERSION,
+        [
+            ScanItem("patchouli", "m", "b/e.json#name", "CreeBee"),
+            ScanItem("lang", "m", "item.m.tip", "BARBED_WIRE"),
+            ScanItem("lang", "m", "item.m.color", "FFFFFF"),
+            ScanItem("lang", "m", "_comment", "Note", zh_tw="備註"),
+        ],
+    )
+    for key, text in (
+        ("b/e.json#name", "爬行蜂"),
+        ("item.m.tip", "鐵絲網"),
+        ("item.m.color", "FFFFFF"),
+    ):
+        db.save_manual(db._one("SELECT id FROM entry WHERE key = ?", (key,))[0], text)
+    report, path = _protected_report(db, tmp_path)
+    items = {i["key"]: i for i in json.loads(path.read_text("utf-8"))["items"]}
+    assert report.review == 2
+    assert (
+        items["b/e.json#name"]["delete"] is False and items["b/e.json#name"]["review"]
+    )
+    assert items["item.m.tip"]["delete"] is False
+    assert items["item.m.color"]["delete"] is True  # 譯文沒有中文：照規則
+    assert items["_comment"]["delete"] is True  # 語言檔備註靠鍵判斷，不看譯文
+    assert report.counts == {"meta_key": 1, "code_value": 1}
+    plan = db.apply_cleanup(path)
+    assert plan.requested == 2 and plan.deletable == 2
+    assert db._one("SELECT COUNT(*) FROM entry WHERE key = 'b/e.json#name'")[0] == 1

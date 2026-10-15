@@ -39,6 +39,10 @@ from translation_tool.translation_db.schema import (
 
 REPORT_FORMAT = "mod-db-cleanup-v1"
 _LOWERCASE = re.compile(r"[a-z]")
+_CJK = re.compile(r"[一-鿿]")
+_PLAIN_WORD = re.compile(r"[A-Za-z]+")
+# 這些類別是看內容形狀判斷的：已經有中文譯文時，可能是英文單字或名稱被誤判，預設不刪
+_SHAPE_CATEGORIES = frozenset({"not_text", "code_value", "no_letters", "field_name"})
 _LETTER = re.compile(r"[^\W\d_]")
 _FORMAT_TOKEN = re.compile(
     r"%(?:\d+\$)?[sdfxXeEgGcb%]|\{\d*\}|§[0-9a-fk-orA-FK-OR]|\$\([^)]*\)"
@@ -97,6 +101,8 @@ def entry_cleanup_category(kind: str, key: str, en_us: str) -> str | None:
 def _patchouli_category(key: str, en_us: str) -> str | None:
     if "multiblock.pattern" in key and not _LOWERCASE.search(en_us):
         return "multiblock"
+    if "text_overrides" in key and _PLAIN_WORD.fullmatch(en_us.strip()):
+        return None  # 頁面替換詞（raw、item…）會顯示在畫面上，單字也要翻
     if is_placeholder_text(en_us):
         return "placeholder"
     return "not_text" if classify_book_string(en_us) == "not" else None
@@ -130,6 +136,7 @@ class CleanupReport:
     counts: dict[str, int] = field(default_factory=dict)  # 類別 → 可清理筆數
     protected: dict[str, int] = field(default_factory=dict)  # 類別 → 有譯文或歷史而略過
     sources: dict[str, int] = field(default_factory=dict)  # 生效譯文來源名稱 → 筆數
+    review: int = 0  # 已有中文譯文、可能是誤判而預設不刪的筆數
 
     @property
     def total(self) -> int:
@@ -348,23 +355,31 @@ class CleanupMixin:
                 tuple(chunk),
             ):
                 effective[int(entry_id)] = (zh_tw, source)
-        counts = Counter(c.category for c in candidates)
+        counts: Counter = Counter()
         sources: Counter = Counter()
+        review = 0
         items = []
         for candidate in candidates:
             zh_tw, source = effective.get(candidate.entry_id, ("", None))
             source_name = SOURCE_NAMES.get(source, "") if source is not None else ""
             if zh_tw:
                 sources[source_name or str(source)] += 1
-            items.append(
-                {
-                    **_report_item(candidate),
-                    "has_translation": True,
-                    "zh_tw": zh_tw[:_PREVIEW_CHARS],
-                    "source": source_name,
-                    "state_hash": states[candidate.entry_id],
-                }
-            )
+            item = {
+                **_report_item(candidate),
+                "has_translation": True,
+                "zh_tw": zh_tw[:_PREVIEW_CHARS],
+                "source": source_name,
+                "state_hash": states[candidate.entry_id],
+            }
+            if candidate.category in _SHAPE_CATEGORIES and _CJK.search(zh_tw):
+                item["delete"] = False
+                item["review"] = (
+                    "已有中文譯文，可能是需要翻譯的文字；確認要刪再把 delete 改成 true"
+                )
+                review += 1
+            else:
+                counts[candidate.category] += 1
+            items.append(item)
         payload: dict[str, Any] = {
             "format": REPORT_FORMAT,
             "version": version,
@@ -374,6 +389,7 @@ class CleanupMixin:
                 "zh_tw 是目前的生效譯文、source 是它的來源。不想刪除的項目：整個移除，"
                 "或把 delete 改成 false。刪除會連同所有來源的譯文與歷史一起移除；"
                 "匯出後譯文或歷史有變動的項目會略過，並且可以整批還原。"
+                "有 review 欄位的項目已有中文譯文，可能是被誤判的文字，預設 delete 為 false。"
             ),
             "summary": {
                 cid: {"label": label, "count": counts[cid]}
@@ -383,7 +399,7 @@ class CleanupMixin:
             "items": items,
         }
         target = _write_report(path, payload)
-        return CleanupReport(version, target, dict(counts), {}, dict(sources))
+        return CleanupReport(version, target, dict(counts), {}, dict(sources), review)
 
     # ------------------------------------------------------------------ 預覽與套用
     @staticmethod

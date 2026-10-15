@@ -209,7 +209,7 @@ def is_project_doc_name(path: str) -> bool:
     )
 
 
-_LANG_META_KEYS = frozenset({"language.code", "language.region"})
+_LANG_META_KEYS = frozenset({"language.code"})
 _COLOR_VALUE = re.compile(r"#?[0-9a-fA-F]{6}(?:[0-9a-fA-F]{2})?")
 _CONST_VALUE = re.compile(r"[A-Z0-9]+(?:_[A-Z0-9]+)+")
 _SNAKE_VALUE = re.compile(r"[a-z0-9]+(?:_[a-z0-9]+)+")
