@@ -1,7 +1,6 @@
 """資料清理視窗：匯出檢查檔 → 自行檢查 → 依檢查檔預覽並刪除 → 需要時整批還原。
 
-清理對象有兩種檢查檔：目前規則判定「不是要翻譯的內容」、而且沒有任何譯文或歷史的舊條目；
-以及「已翻譯內容」——已有生效譯文的條目（連同所有來源的譯文與歷史）。
+清理對象是目前規則判定「不是要翻譯的內容」、而且沒有任何譯文或歷史的舊條目。
 數量可能上千筆，所以不在畫面上逐筆檢查，而是匯出 JSON 檢查檔；刪除前會再依目前資料重新檢查。
 """
 
@@ -31,19 +30,6 @@ from app.ui.dialogs import (
 from app.ui.snack import show_snack
 from app.views.moddb.formatting import format_count, kind_label
 from translation_tool.utils.log_unit import log_exception, log_info, log_warning
-
-
-def _source_line(sources: dict[str, int]) -> str:
-    """已翻譯內容依生效譯文來源分組的筆數，例如「來源：人工 3、模組自帶繁中 5」。"""
-    parts = [f"{name} {format_count(n)}" for name, n in sources.items()]
-    return "來源：" + "、".join(parts) if parts else ""
-
-
-def _report_label(path: Path) -> str:
-    """檢查檔下拉選單的文字；已翻譯內容是資料夾，標出還剩幾個模組檔。"""
-    if path.is_dir():
-        return f"{path.name}（資料夾，{svc.report_file_count(path)} 個模組檔）"
-    return path.name
 
 
 def _category_lines(counts: dict[str, int]) -> str:
@@ -78,12 +64,6 @@ class CleanupDialog:
             "secondary",
             icon=ft.Icons.FILE_DOWNLOAD_OUTLINED,
             on_click=self._export,
-        )
-        self.export_translated_btn = kit.button(
-            "匯出已翻譯內容檢查檔",
-            "secondary",
-            icon=ft.Icons.FILE_DOWNLOAD_OUTLINED,
-            on_click=lambda _e: self._export(translated=True),
         )
         self.open_folder_btn = kit.button(
             "開啟檢查檔資料夾", "ghost", size="sm", on_click=self._open_folder
@@ -135,16 +115,8 @@ class CleanupDialog:
                             color=C.TEXT,
                         ),
                         ft.Text(
-                            "「匯出檢查檔」只列入沒有任何譯文、生效譯文與歷史紀錄的條目，"
+                            "只有沒有任何譯文、生效譯文與歷史紀錄的條目才會列入，"
                             "有人動過的不會碰。",
-                            size=12,
-                            color=C.MUTED,
-                        ),
-                        ft.Text(
-                            "「匯出已翻譯內容檢查檔」相反：列出已有生效譯文的條目，依模組拆成"
-                            "一個資料夾（每個模組一個檢查檔，summary.txt 列出各模組筆數）。"
-                            "刪除會連同所有來源的譯文與歷史一起移除（可還原）。重新掃描時仍在"
-                            "模組裡的條目會重新收進來，但只有模組自帶的譯文會跟著回來。",
                             size=12,
                             color=C.MUTED,
                         ),
@@ -162,18 +134,14 @@ class CleanupDialog:
                         ),
                         ft.Text("步驟 1　匯出檢查檔", weight=ft.FontWeight.BOLD),
                         ft.Row(
-                            [
-                                self.export_btn,
-                                self.export_translated_btn,
-                                self.open_folder_btn,
-                            ],
+                            [self.export_btn, self.open_folder_btn],
                             spacing=10,
                             wrap=True,
                         ),
                         self.export_summary,
                         ft.Text(
                             "步驟 2　用編輯器開啟檢查檔，不想刪的項目整個刪掉，"
-                            "或把 delete 改成 false（已翻譯內容：整個模組不想清就刪掉那個模組檔）",
+                            "或把 delete 改成 false",
                             weight=ft.FontWeight.BOLD,
                         ),
                         ft.Text("步驟 3　依檢查檔清理", weight=ft.FontWeight.BOLD),
@@ -244,10 +212,7 @@ class CleanupDialog:
         def work() -> None:
             result = error = None
             try:
-                result = (
-                    svc.cleanup_overview(db, version),
-                    svc.translated_overview(db, version),
-                )
+                result = svc.cleanup_overview(db, version)
             except sqlite3.Error as exc:
                 error = exc
             except Exception as exc:  # noqa: BLE001 - worker boundary reports unexpected failures
@@ -265,7 +230,7 @@ class CleanupDialog:
             self.overview_body.controls = []
             self._safe_update()
             return
-        (counts, protected), translated = result
+        counts, protected = result
         total = sum(counts.values())
         self.overview_title.value = (
             f"版本 {version}：可清理 {format_count(total)} 筆"
@@ -289,28 +254,13 @@ class CleanupDialog:
                     color=C.MUTED,
                 )
             )
-        if translated:
-            by_kind = "、".join(
-                f"{kind_label(kind)} {format_count(n)}"
-                for kind, n in translated.items()
-            )
-            lines.append(
-                ft.Text(
-                    f"已有生效譯文 {format_count(sum(translated.values()))} 筆"
-                    f"（{by_kind}），可用「匯出已翻譯內容檢查檔」清理",
-                    size=12,
-                    color=C.MUTED,
-                )
-            )
         self.overview_body.controls = lines
         self._safe_update()
 
     def _load_reports(self, _e=None) -> None:
         db = self.get_db()
         reports = svc.list_cleanup_reports(db) if db else []
-        kit.set_dropdown_options(
-            self.report_dd, [(str(p), _report_label(p)) for p in reports]
-        )
+        kit.set_dropdown_options(self.report_dd, [(str(p), p.name) for p in reports])
         keys = {str(p) for p in reports}
         if self.report_dd.value not in keys:
             self.report_dd.value = str(reports[0]) if reports else None
@@ -340,7 +290,7 @@ class CleanupDialog:
         self.apply_btn.content = "確認刪除"
 
     # ------------------------------------------------------------------ 匯出
-    def _export(self, _e=None, *, translated: bool = False) -> None:
+    def _export(self, _e=None) -> None:
         db, version = self.get_db(), self.version_dd.value
         if db is None or not version or self._busy:
             show_snack(self.page, "請先選擇版本。", C.GOLD)
@@ -350,7 +300,7 @@ class CleanupDialog:
         def work() -> None:
             report = error = None
             try:
-                report = svc.export_cleanup(db, version, translated=translated)
+                report = svc.export_cleanup(db, version)
             except (OSError, sqlite3.Error) as exc:
                 error = exc
             except Exception as exc:  # noqa: BLE001 - worker boundary reports unexpected failures
@@ -368,20 +318,12 @@ class CleanupDialog:
         lines = [f"版本 {report.version}：可清理 {format_count(report.total)} 筆"]
         if report.total:
             lines.append(_category_lines(report.counts))
-        if report.sources:
-            lines.append(_source_line(report.sources))
         skipped = sum(report.protected.values())
         if skipped:
             lines.append(
                 f"另有 {format_count(skipped)} 筆符合條件但已有譯文或歷史，不會列入"
             )
-        if report.path.is_dir():
-            lines.append(
-                f"檢查檔資料夾：{report.path}（{format_count(report.files)} 個模組檔，"
-                "各模組筆數見 summary.txt；選這個資料夾預覽與刪除，整個資料夾是同一批）"
-            )
-        else:
-            lines.append(f"檢查檔：{report.path}")
+        lines.append(f"檢查檔：{report.path}")
         self.export_summary.value = "\n".join(lines)
         self.export_summary.visible = True
         log_info(f"Mod 資料庫清理檢查檔：{report.path}（{report.total} 筆）")
@@ -443,11 +385,6 @@ class CleanupDialog:
         ]
         if plan.deletable:
             lines.append(_category_lines(dict(plan.by_category)))
-        if translated := plan.by_category.get("translated"):
-            lines.append(
-                f"其中 {format_count(translated)} 筆已有譯文：刪除會連同所有來源的譯文"
-                "與歷史一起移除，可按「還原上次清理」復原"
-            )
         lines.extend(
             f"略過 {format_count(n)} 筆：{reason}" for reason, n in plan.skipped.items()
         )
@@ -595,7 +532,6 @@ class CleanupDialog:
         for control in (
             self.version_dd,
             self.export_btn,
-            self.export_translated_btn,
             self.report_dd,
             self.refresh_reports_btn,
             self.close_btn,

@@ -32,9 +32,7 @@ __all__ = [
     "list_cleanup_reports",
     "open_report_folder",
     "preview_cleanup",
-    "report_file_count",
     "revert_cleanup",
-    "translated_overview",
 ]
 
 REPORT_DIR_NAME = "cleanup_reports"
@@ -44,39 +42,20 @@ def cleanup_report_dir(db: TranslationDB) -> Path:
     return db.path.parent / REPORT_DIR_NAME
 
 
-def export_cleanup(
-    db: TranslationDB, version: str, *, translated: bool = False
-) -> CleanupReport:
-    """把可清理的條目寫成檢查檔（只讀資料庫）。
-
-    ``translated=True`` 匯出「已翻譯內容」（已有生效譯文的條目）：寫成依模組拆檔的資料夾，
-    名稱多一個 ``-translated`` 後綴，清單仍依時間排序。
-    """
+def export_cleanup(db: TranslationDB, version: str) -> CleanupReport:
+    """把可清理的條目寫成檢查檔（只讀資料庫）。"""
     stamp = time.strftime("%Y%m%d-%H%M%S")
     safe_version = "".join(c if c.isalnum() or c in "._-" else "_" for c in version)
-    base = cleanup_report_dir(db) / f"cleanup-{safe_version}-{stamp}"
-    if translated:
-        return db.export_translated_report(version, f"{base}-translated")
-    return db.export_cleanup_report(version, f"{base}.json")
+    path = cleanup_report_dir(db) / f"cleanup-{safe_version}-{stamp}.json"
+    return db.export_cleanup_report(version, path)
 
 
 def list_cleanup_reports(db: TranslationDB) -> list[Path]:
-    """檢查檔與已翻譯內容的檢查檔資料夾，最新的在前。"""
+    """檢查檔清單，最新的在前。"""
     folder = cleanup_report_dir(db)
     if not folder.is_dir():
         return []
-    reports = [
-        path
-        for path in folder.glob("cleanup-*")
-        if (path.is_file() and path.suffix == ".json")
-        or (path.is_dir() and path.name.endswith("-translated"))
-    ]
-    return sorted(reports, key=lambda p: p.name, reverse=True)
-
-
-def report_file_count(path: Path) -> int:
-    """檢查檔資料夾裡還有幾個模組檢查檔（單一檢查檔回傳 1）。"""
-    return len(list(path.glob("*.json"))) if path.is_dir() else 1
+    return sorted(folder.glob("cleanup-*.json"), key=lambda p: p.name, reverse=True)
 
 
 def preview_cleanup(db: TranslationDB, path: Path) -> CleanupPlan:
@@ -112,8 +91,3 @@ def cleanup_overview(
     candidates, protected = db.cleanup_candidates(version)
     counts = Counter((c.kind, c.category) for c in candidates)
     return dict(counts), sum(protected.values())
-
-
-def translated_overview(db: TranslationDB, version: str) -> dict[str, int]:
-    """所選版本已有生效譯文的條目數，依類型分（只讀；「已翻譯內容」可清理的筆數）。"""
-    return db.translated_counts(version)
