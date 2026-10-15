@@ -290,19 +290,20 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
         """
         with self._lock:
             self._conn.execute("BEGIN IMMEDIATE")
-            if keep_review:
+            try:
+                # BEGIN 之後的任何失敗（含旗標初始化）都要回復，不留開啟中的交易
+                if keep_review:
+                    self._conn.execute(
+                        "INSERT OR REPLACE INTO meta (key, value) VALUES (?, '1')",
+                        (KEEP_REVIEW_FLAG,),
+                    )
+                # 交易內的寫入由 data_gen 負責；標記讓變更序號觸發器略過（隨交易一起消失）
                 self._conn.execute(
                     "INSERT OR REPLACE INTO meta (key, value) VALUES (?, '1')",
-                    (KEEP_REVIEW_FLAG,),
+                    (change_tracker.TX_ACTIVE,),
                 )
-            # 交易內的寫入由 data_gen 負責；標記讓變更序號觸發器略過（隨交易一起消失）
-            self._conn.execute(
-                "INSERT OR REPLACE INTO meta (key, value) VALUES (?, '1')",
-                (change_tracker.TX_ACTIVE,),
-            )
-            changes_before = self._conn.total_changes
-            self._write_transaction = True
-            try:
+                changes_before = self._conn.total_changes
+                self._write_transaction = True
                 yield self._conn
                 if self._has_quality_flags:
                     # 觸發器只把受影響的條目標成待重算；提交前依 quality.py 重算

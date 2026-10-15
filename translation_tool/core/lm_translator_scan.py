@@ -77,6 +77,7 @@ def extract_items_parallel(
 
     file_cache: dict[str, dict] = {}
     all_items: list[dict[str, Any]] = []
+    items_by_file: dict[str, list[dict[str, Any]]] = {}
 
     def process_file_task(f: Path):
         try:
@@ -128,6 +129,15 @@ def extract_items_parallel(
             if not result:
                 continue
             file_cache[result["file_path"]] = result["data"]
+            items_by_file[result["file_path"]] = result["items"]
             all_items.extend(result["items"])
             # 每完成一個檔案就 yield，讓 caller 可以更新 UI 進度
             yield file_cache, all_items
+
+    # 完成順序取決於執行緒排程；結束前就地改回輸入檔案順序（呼叫端持有的是同一份
+    # list／dict），讓項目順序（批次切分、續跑指紋）在每次執行都相同。
+    ordered_cache = {str(f): file_cache[str(f)] for f in files if str(f) in file_cache}
+    ordered_items = [item for f in files for item in items_by_file.get(str(f), ())]
+    file_cache.clear()
+    file_cache.update(ordered_cache)
+    all_items[:] = ordered_items

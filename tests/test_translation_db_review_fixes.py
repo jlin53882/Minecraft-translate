@@ -385,3 +385,35 @@ def test_exceeds_capacity_is_cheaper_than_and_consistent_with_serialization():
     assert len(repository.json.dumps(rows)) > 10_000
     small = [[i, "t"] for i in range(10)]
     assert cache.exceeds_capacity(small) is False
+
+
+@pytest.mark.parametrize("marker", ["tx_active", "keep_review_on_text_change"])
+def test_marker_init_failure_rolls_back_and_allows_later_writes(db_path, marker):
+    db = TranslationDB(db_path)
+    entry_id = _first_id(db)
+    db._conn.execute(
+        "CREATE TEMP TRIGGER refuse_marker BEFORE INSERT ON meta "
+        f"WHEN NEW.key = '{marker}' BEGIN SELECT RAISE(ABORT, 'marker refused'); END"
+    )
+
+    with (
+        pytest.raises(sqlite3.DatabaseError, match="marker refused"),
+        db._tx(keep_review=(marker != "tx_active")),
+    ):
+        pass
+
+    assert not db._conn.in_transaction
+    assert db._write_transaction is False
+
+    db._conn.execute("DROP TRIGGER refuse_marker")
+    db.save_manual(
+        entry_id, "故障排除後寫入成功", actor="test"
+    )  # 不會 "within a transaction"
+    assert db.list_entries(VERSION, limit=1)[0][0].zh_tw == "故障排除後寫入成功"
+    assert (
+        db._conn.execute(
+            "SELECT COUNT(*) FROM meta WHERE key IN ('tx_active','keep_review_on_text_change')"
+        ).fetchone()[0]
+        == 0
+    )
+    db.close()
