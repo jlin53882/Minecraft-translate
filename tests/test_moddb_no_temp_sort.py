@@ -176,3 +176,38 @@ def test_candidate_and_listing_queries_avoid_temp_sort(db):
     for call in calls:
         offenders = _temp_sort_plans(db, call)
         assert not offenders, offenders
+
+
+def _all_plans(db: TranslationDB, call) -> list[str]:
+    seen: list[str] = []
+    db._conn.set_trace_callback(seen.append)
+    try:
+        call()
+    finally:
+        db._conn.set_trace_callback(None)
+    plans = []
+    for statement in seen:
+        if statement.lstrip().upper().startswith(("SELECT", "WITH")):
+            plans.extend(
+                str(row[-1])
+                for row in db._conn.execute(f"EXPLAIN QUERY PLAN {statement}")
+            )
+    return plans
+
+
+def test_count_reusable_does_not_sort_candidates(db):
+    """只回傳計數的查詢不需要排序；通用的 MATERIALIZED 例外不能遮蔽它。"""
+    plans = _all_plans(db, lambda: db.count_reusable("1.20.1"))
+    assert plans
+    assert not [p for p in plans if "TEMP B-TREE FOR ORDER BY" in p], plans
+
+
+def test_manual_activity_sort_fails_ready_check_without_its_index(db):
+    from translation_tool.translation_db import entry_activity
+
+    assert entry_activity.is_installed(db._conn)
+    db._conn.execute("DROP INDEX idx_act_ver_at")
+    assert not entry_activity.is_installed(db._conn)
+    entry_activity.install(db._conn)  # 重新安裝會補回索引
+    assert entry_activity.is_installed(db._conn)
+    assert entry_activity.verify(db._conn) == []

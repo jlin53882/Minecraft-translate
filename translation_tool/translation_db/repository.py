@@ -3886,9 +3886,11 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
           AND e2.en_us = u.en_us)"""
 
     def _untranslated_candidates_cte(
-        self, version: str, mod_ids: Sequence[str] | None
+        self, version: str, mod_ids: Sequence[str] | None, *, ordered: bool = True
     ) -> tuple[str, list]:
-        """依 (類型, 模組, 鍵值) 排序的未翻譯候選；先用窄索引找出 id，再讀寬欄位。
+        """未翻譯候選（``ordered`` 時依 (類型, 模組, 鍵值) 排序）；先用窄索引找出 id，再讀寬欄位。
+
+        只需計數時 ``ordered=False``，不建立用不到的臨時排序。
 
         候選本身沒有生效譯文，所以同內容的 ``effective`` 列必定來自其他版本，
         不必再比對 ``mc_version``。
@@ -3903,14 +3905,14 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
             "SELECT e.id, e.kind, e.mod_id, e.key, e.en_us "
             "FROM (SELECT i.id FROM entry i WHERE i.mc_version = ?"
             f"{mod_filter} AND i.id NOT IN (SELECT entry_id FROM effective)) c "
-            "JOIN entry e ON e.id = c.id WHERE e.en_us <> '' "
-            "ORDER BY e.kind, e.mod_id, e.key) "
+            "JOIN entry e ON e.id = c.id WHERE e.en_us <> ''"
+            f"{' ORDER BY e.kind, e.mod_id, e.key' if ordered else ''}) "
         )
         return sql, params
 
     def count_reusable(self, version: str, mod_ids: Sequence[str] | None = None) -> int:
         """未翻譯條目中，其他版本已有相同內容譯文、開始機翻時會直接沿用的筆數。"""
-        cte, params = self._untranslated_candidates_cte(version, mod_ids)
+        cte, params = self._untranslated_candidates_cte(version, mod_ids, ordered=False)
         sql = f"{cte}SELECT COUNT(*) FROM u WHERE {self._REUSABLE_PEERS_SQL} = 1"
         return self._cached_count(sql, params)
 

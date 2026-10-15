@@ -33,6 +33,12 @@ CREATE INDEX IF NOT EXISTS idx_act_ver_at
 """
 
 
+_INDEX_NAME = "idx_act_ver_at"
+_INDEX_SQL = (
+    "CREATE INDEX idx_act_ver_at ON entry_activity (mc_version, last_at DESC, entry_id)"
+)
+
+
 def _recompute(entry_id: str) -> str:
     """依目前的歷史重算單一條目的最近活動時間（沒有符合的紀錄就移除該列）。"""
     return f"""
@@ -93,10 +99,14 @@ def is_installed(conn: sqlite3.Connection) -> bool:
     stored = dict(
         conn.execute(
             "SELECT name, sql FROM sqlite_schema WHERE name='entry_activity' "
-            "OR (type='trigger' AND name LIKE 'activity%')"
+            "OR (type='trigger' AND name LIKE 'activity%') "
+            f"OR (type='index' AND name='{_INDEX_NAME}')"
         ).fetchall()
     )
     if "entry_activity" not in stored:
+        return False
+    # 排序索引不見或定義不同就視為未安裝，重建時會補回（否則排序退化成臨時排序）
+    if _normalized(stored.get(_INDEX_NAME) or "") != _normalized(_INDEX_SQL):
         return False
     return all(
         _normalized(stored.get(name) or "") == _normalized(sql)
