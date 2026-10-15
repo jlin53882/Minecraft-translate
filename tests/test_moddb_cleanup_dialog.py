@@ -65,7 +65,7 @@ def test_translated_export_preview_apply_and_revert_flow(tmp_path, monkeypatch):
 
     dialog.export_translated_btn.on_click(None)
     summary = dialog.export_summary.value
-    assert "可清理 2 筆" in summary
+    assert "匯出 2 筆" in summary
     assert (
         "譯文來源：" in summary and "人工 1" in summary and "模組自帶繁中 1" in summary
     )
@@ -90,7 +90,7 @@ def test_translated_export_preview_apply_and_revert_flow(tmp_path, monkeypatch):
 def test_rule_export_still_lists_only_untouched_entries(tmp_path, monkeypatch):
     dialog = _dialog(monkeypatch, _db(tmp_path), [])
     dialog.export_btn.on_click(None)
-    assert "可清理 1 筆" in dialog.export_summary.value
+    assert "匯出 1 筆" in dialog.export_summary.value
     assert "譯文來源：" not in dialog.export_summary.value
     assert not dialog.report_dd.value.endswith("-translated.json")
 
@@ -102,3 +102,71 @@ def test_busy_state_disables_both_export_buttons(tmp_path, monkeypatch):
     dialog._set_busy(False)
     assert not dialog.export_btn.disabled
     assert not dialog.export_translated_btn.disabled
+
+
+def test_changing_report_or_version_invalidates_the_previewed_plan(
+    tmp_path, monkeypatch
+):
+    db = _db(tmp_path)
+    dialog = _dialog(monkeypatch, db, [])
+    dialog.export_translated_btn.on_click(None)
+    dialog._preview()
+    assert dialog._plan is not None and dialog.apply_btn.disabled is False
+    dialog.report_dd.on_select(None)  # 換檢查檔
+    assert dialog._plan is None and dialog.apply_btn.disabled is True
+    dialog._preview()
+    assert dialog._plan is not None
+    dialog.version_dd.on_select(None)  # 換版本
+    assert dialog._plan is None and dialog.apply_btn.disabled is True
+
+
+def test_apply_refuses_a_report_that_changed_after_the_preview(tmp_path, monkeypatch):
+    import json
+
+    db = _db(tmp_path)
+    dialog = _dialog(monkeypatch, db, [])
+    dialog.export_translated_btn.on_click(None)
+    dialog._preview()
+    path = Path(dialog.report_dd.value)
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data["items"] = data["items"][:1]  # 預覽後有人改了檢查檔
+    path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    entries = db._one("SELECT COUNT(*) FROM entry")[0]
+    dialog._apply()
+    assert db._one("SELECT COUNT(*) FROM entry")[0] == entries
+    assert dialog._plan is None and "重新預覽" in dialog.plan_summary.value
+
+
+def test_apply_refuses_when_the_selected_report_is_not_the_previewed_one(
+    tmp_path, monkeypatch
+):
+    db = _db(tmp_path)
+    dialog = _dialog(monkeypatch, db, [])
+    dialog.export_translated_btn.on_click(None)
+    dialog._preview()
+    dialog.report_dd.value = str(Path(dialog.report_dd.value).with_name("other.json"))
+    entries = db._one("SELECT COUNT(*) FROM entry")[0]
+    dialog._apply()
+    assert db._one("SELECT COUNT(*) FROM entry")[0] == entries
+
+
+def test_older_unfinished_batches_can_be_reverted_from_the_dialog(
+    tmp_path, monkeypatch
+):
+    db = _db(tmp_path)
+    dialog = _dialog(monkeypatch, db, [])
+    dialog.export_translated_btn.on_click(None)
+    dialog._preview()
+    dialog._apply()
+    first = dialog.batch_dd.value
+    db.ingest(VERSION, [ScanItem("lang", "m", "item.m.todo", "TODO")])
+    dialog.export_btn.on_click(None)
+    dialog._preview()
+    dialog._apply()
+    second = dialog.batch_dd.value
+    assert first != second
+    dialog._revert()  # 還原最新的
+    assert dialog.batch_dd.value == first  # 較早未還原的批次仍有入口
+    assert dialog.revert_btn.disabled is False
+    dialog._revert()
+    assert dialog.revert_btn.disabled is True

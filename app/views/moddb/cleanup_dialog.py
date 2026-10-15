@@ -55,8 +55,10 @@ class CleanupDialog:
         self.get_db = get_db
         self.on_complete = on_complete
         self._busy = False
-        self._plan = None
-        self._batch = None
+        self._plan = (
+            None  # (檢查檔, 預覽結果, 預覽時的資料庫)；任何選項或資料庫變動都要作廢
+        )
+        self._batches = []
         self._build_controls()
         self._build_dialog()
         self._load_options()
@@ -89,7 +91,9 @@ class CleanupDialog:
         self.export_summary = ft.Text(
             "", size=12.5, color=C.TEXT, selectable=True, visible=False
         )
-        self.report_dd = kit.dropdown(label="檢查檔", dense=True, width=460)
+        self.report_dd = kit.dropdown(
+            label="檢查檔", dense=True, width=460, on_select=self._on_report
+        )
         self.refresh_reports_btn = kit.button(
             "重新整理清單", "ghost", size="sm", on_click=self._load_reports
         )
@@ -107,8 +111,9 @@ class CleanupDialog:
             disabled=True,
         )
         self.revert_info = ft.Text("", size=12, color=C.MUTED)
+        self.batch_dd = kit.dropdown(label="尚未還原的清理", dense=True, width=460)
         self.revert_btn = kit.button(
-            "還原上次清理", "secondary", on_click=self._revert, disabled=True
+            "還原選取的清理", "secondary", on_click=self._revert, disabled=True
         )
         self.status = ft.Text("", size=12, color=C.MUTED, visible=False)
         self.progress = ft.ProgressBar(visible=False)
@@ -172,7 +177,8 @@ class CleanupDialog:
                         ft.Row([self.preview_btn], spacing=8),
                         self.plan_summary,
                         ft.Text("還原", weight=ft.FontWeight.BOLD),
-                        ft.Row([self.revert_btn, self.revert_info], spacing=10),
+                        ft.Row([self.batch_dd, self.revert_btn], spacing=10, wrap=True),
+                        self.revert_info,
                         self.status,
                         self.progress,
                     ],
@@ -212,7 +218,13 @@ class CleanupDialog:
 
     def _on_version(self, _e=None) -> None:
         self.export_summary.visible = False
+        self._reset_plan()
         self._refresh_overview()
+        self._safe_update()
+
+    def _on_report(self, _e=None) -> None:
+        self._reset_plan()
+        self._safe_update()
 
     def _refresh_overview(self) -> None:
         """依所選版本重新計算可清理的筆數（背景、只讀）；選項變動時舊結果作廢。"""
@@ -289,19 +301,41 @@ class CleanupDialog:
         self._safe_update()
 
     def _load_batch_info(self) -> None:
+        """列出還沒完全還原的清理批次（新的在前）；部分還原的批次仍可再還原。"""
         db = self.get_db()
-        info = svc.last_cleanup_batch(db) if db else None
-        self._batch = info
-        usable = info is not None and info.reverted_at is None
-        self.revert_btn.disabled = not usable
-        if info is None:
+        batches = svc.cleanup_batches(db) if db else []
+        self._batches = [b for b in batches if not b.complete]
+        kit.set_dropdown_options(
+            self.batch_dd, [(b.batch_id, self._batch_label(b)) for b in self._batches]
+        )
+        keys = {b.batch_id for b in self._batches}
+        if self.batch_dd.value not in keys:
+            self.batch_dd.value = self._batches[0].batch_id if self._batches else None
+        self.revert_btn.disabled = not self._batches
+        if not batches:
             self.revert_info.value = "還沒有清理紀錄"
+        elif not self._batches:
+            self.revert_info.value = "所有清理都已還原"
         else:
-            state = "（已還原）" if info.reverted_at else ""
-            self.revert_info.value = (
-                f"上次：{info.created_at}（UTC）　版本 {info.version}　"
-                f"{format_count(info.count)} 筆{state}"
-            )
+            self.revert_info.value = ""
+
+    @staticmethod
+    def _batch_label(info) -> str:
+        state = (
+            f"，已還原 {format_count(info.restored)} 筆、"
+            f"待還原 {format_count(info.pending)} 筆"
+            if info.restored
+            else ""
+        )
+        return (
+            f"{info.created_at}（UTC）　版本 {info.version}　"
+            f"{format_count(info.count)} 筆{state}"
+        )
+
+    def _selected_batch(self):
+        return next(
+            (b for b in self._batches if b.batch_id == self.batch_dd.value), None
+        )
 
     def _reset_plan(self) -> None:
         self._plan = None
@@ -337,15 +371,17 @@ class CleanupDialog:
         if error is not None:
             show_snack(self.page, f"匯出失敗：{error}", C.RED)
             return
-        lines = [f"版本 {report.version}：可清理 {format_count(report.total)} 筆"]
-        if report.total:
+        total = report.exported_total
+        lines = [f"版本 {report.version}：匯出 {format_count(total)} 筆"]
+        if total:
             lines.append(_category_lines(report.counts))
         if report.sources:
             lines.append(_source_line(report.sources))
-        if report.review:
+        if report.review_required:
             lines.append(
-                f"其中 {format_count(report.review)} 筆已有中文譯文、可能是誤判，"
-                "檢查檔裡 delete 預設為 false，確認要刪再改成 true"
+                f"預設刪除 {format_count(report.default_selected)} 筆；"
+                f"{format_count(report.review_required)} 筆要人工確認"
+                "（可能是被誤判的文字，delete 預設為 false，確認要刪再改成 true）"
             )
         skipped = sum(report.protected.values())
         if skipped:
@@ -355,10 +391,10 @@ class CleanupDialog:
         lines.append(f"檢查檔：{report.path}")
         self.export_summary.value = "\n".join(lines)
         self.export_summary.visible = True
-        log_info(f"Mod 資料庫清理檢查檔：{report.path}（{report.total} 筆）")
+        log_info(f"Mod 資料庫清理檢查檔：{report.path}（{total} 筆）")
         self._load_reports()
         self._refresh_overview()
-        if report.total:
+        if total:
             self.report_dd.value = str(report.path)
             self.preview_btn.disabled = False
         self._safe_update()
@@ -405,7 +441,16 @@ class CleanupDialog:
             self.plan_summary.visible = True
             self._safe_update()
             return
-        self._plan = (path, plan)
+        if plan.version != self.version_dd.value:
+            self._reset_plan()
+            self.plan_summary.value = (
+                f"這份檢查檔是版本 {plan.version} 的，和目前選的版本不同，"
+                "請改選版本或檢查檔"
+            )
+            self.plan_summary.visible = True
+            self._safe_update()
+            return
+        self._plan = (path, plan, self.get_db())
         lines = [
             (
                 f"檢查檔標記要刪除 {format_count(plan.requested)} 筆；"
@@ -432,13 +477,23 @@ class CleanupDialog:
         db = self.get_db()
         if db is None or self._plan is None or self._busy:
             return
-        path, _plan = self._plan
+        path, previewed, previewed_db = self._plan
+        if (
+            db is not previewed_db
+            or previewed.version != self.version_dd.value
+            or str(path) != self.report_dd.value
+        ):
+            self._reset_plan()
+            self.plan_summary.value = "版本、檢查檔或資料庫已變動，請重新預覽"
+            self.plan_summary.visible = True
+            self._safe_update()
+            return
         self._set_busy(True, "刪除中…")
 
         def work() -> None:
             plan = error = None
             try:
-                plan = svc.apply_cleanup(db, path)
+                plan = svc.apply_cleanup(db, path, previewed.token)
             except (ValueError, OSError, sqlite3.Error) as exc:
                 error = exc
             except Exception as exc:  # noqa: BLE001 - worker boundary reports unexpected failures
@@ -457,10 +512,15 @@ class CleanupDialog:
         self._set_busy(False)
         if error is not None:
             log_warning(f"Mod 資料庫清理失敗：{error!r}")
+            if isinstance(error, svc.CleanupPlanChanged):
+                self._reset_plan()
+                self.plan_summary.value = f"清理未執行：{error}"
+                self.plan_summary.visible = True
             show_snack(self.page, f"清理未執行：{error}", C.RED)
+            self._safe_update()
             return
         message = (
-            f"已刪除 {format_count(plan.deletable)} 筆（可按「還原上次清理」復原）"
+            f"已刪除 {format_count(plan.deletable)} 筆（可在「還原」選取這次清理復原）"
         )
         skipped = sum(plan.skipped.values())
         if skipped:
@@ -470,6 +530,8 @@ class CleanupDialog:
         self.plan_summary.value = message
         self.plan_summary.visible = True
         self._load_batch_info()
+        if plan.batch_id:
+            self.batch_dd.value = plan.batch_id  # 預設還原剛做的這一次
         self._refresh_overview()
         show_snack(self.page, message, C.EM, text_color=C.ON_EM)
         if self.on_complete:
@@ -478,8 +540,8 @@ class CleanupDialog:
 
     # ------------------------------------------------------------------ 還原
     def _revert(self, _e=None) -> None:
-        db, info = self.get_db(), self._batch
-        if db is None or info is None or info.reverted_at or self._busy:
+        db, info = self.get_db(), self._selected_batch()
+        if db is None or info is None or self._busy:
             return
         self._set_busy(True, "還原中…")
 
@@ -506,10 +568,16 @@ class CleanupDialog:
         if error is not None:
             show_snack(self.page, f"還原失敗：{error}", C.RED)
             return
-        restored, skipped = result
-        message = f"已還原 {format_count(restored)} 筆"
-        if skipped:
-            message += f"；{format_count(skipped)} 筆因已重新掃描出同一條目而略過"
+        message = f"已還原 {format_count(result.restored)} 筆"
+        if result.remapped:
+            message += (
+                f"（{format_count(result.remapped)} 筆原編號已被佔用，改用新編號）"
+            )
+        if not result.complete:
+            message += (
+                f"；還有 {format_count(result.pending)} 筆因已重新掃描出同一條目而"
+                "保留為待還原，批次仍可再還原"
+            )
         self._load_batch_info()
         self._refresh_overview()
         show_snack(self.page, message, C.EM, text_color=C.ON_EM)
@@ -568,6 +636,7 @@ class CleanupDialog:
             self.export_btn,
             self.export_translated_btn,
             self.report_dd,
+            self.batch_dd,
             self.refresh_reports_btn,
             self.close_btn,
         ):
@@ -583,9 +652,7 @@ class CleanupDialog:
         else:
             self.preview_btn.disabled = self.report_dd.value is None
             self.apply_btn.disabled = self._plan is None or self._plan[1].deletable == 0
-            self.revert_btn.disabled = (
-                self._batch is None or self._batch.reverted_at is not None
-            )
+            self.revert_btn.disabled = not self._batches
         self._safe_update()
 
     def _safe_update(self) -> None:

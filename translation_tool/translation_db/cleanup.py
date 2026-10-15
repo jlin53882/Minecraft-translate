@@ -1,12 +1,16 @@
 """資料庫清理：找出目前規則判定「不是要翻譯的內容」的舊條目，先匯出檢查檔，確認後才刪除。
 
 流程：``export_cleanup_report`` 寫出 JSON 檢查檔 → 使用者檢查（刪掉不想清的項目，或把
-``delete`` 改成 ``false``）→ ``preview_cleanup`` 預覽 → ``apply_cleanup`` 刪除。
+``delete`` 改成 ``false``）→ ``preview_cleanup`` 預覽（得到 ``CleanupPlan.token``）→
+``apply_cleanup(path, expected_token)`` 刪除。套用時在寫入交易內重新計算同一份計畫，
+檢查檔、版本、資料庫或任何一筆的資料與預覽時不同，token 就對不上，拒絕刪除並要求重新預覽。
 
 一般檢查檔只清沒有人動過的條目：有任何譯文（含 jar 自帶繁中）、歷史紀錄或生效譯文的條目一律不碰。
 這些「符合規則但已有譯文或歷史」的條目另外用 ``export_protected_report`` 匯出：項目標記
-``has_translation``，並帶著匯出當下譯文與歷史的指紋，套用時指紋不同（有人又改過）就略過。
-刪除前整批存進 ``cleanup_batch``（含關聯的譯文、生效譯文與歷史），``revert_cleanup`` 可以整批還原。
+``has_translation``，列出所有來源的譯文與歷史摘要，並帶著匯出當下完整資料狀態的指紋，
+套用時指紋不同（有人又改過）就略過。
+刪除前整批存進 ``cleanup_batch``（含關聯的譯文、生效譯文、歷史與原文變更紀錄），
+``revert_cleanup`` 可以還原；原位置已有同一條目的項目保留為待還原，不覆蓋、也不標成已完成。
 套用時每筆都會依目前的資料與規則重新檢查，檢查檔過期或被改過的項目會略過，不會誤刪。
 """
 
@@ -14,10 +18,13 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
+import sqlite3
 import uuid
 from collections import Counter, defaultdict
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Iterator, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -37,26 +44,36 @@ from translation_tool.translation_db.schema import (
     KIND_GUIDE,
     KIND_LANG,
     KIND_PATCHOULI,
-    SOURCE_NAMES,
+    SRC_MANUAL,
 )
 
-REPORT_FORMAT = "mod-db-cleanup-v1"
+REPORT_FORMAT = "mod-db-cleanup-v2"
+_OLD_REPORT_FORMATS = ("mod-db-cleanup-v1",)
+MODE_RULE = "rule"  # 一般檢查檔：只列沒有譯文也沒有歷史的條目
+MODE_PROTECTED = "protected"  # 已有譯文或歷史的條目
+_MODES = (MODE_RULE, MODE_PROTECTED)
+_MAX_REPORT_BYTES = 256 * 1024 * 1024
 _LOWERCASE = re.compile(r"[a-z]")
 _CJK = re.compile(r"[一-鿿]")
-# 這些類別是看內容形狀判斷的：已經有中文譯文時，可能是英文單字或名稱被誤判，預設不刪
-_SHAPE_CATEGORIES = frozenset({"not_text", "code_value", "no_letters", "field_name"})
 _CHUNK = 500
 _PREVIEW_CHARS = 300
+_HISTORY_SUMMARY = 3
+_DB_ID_KEY = "cleanup_db_id"
+_RESTORED_KEY = "cleanup_restored:"
 
 CLEANUP_CATEGORIES: dict[str, str] = {
     **NON_TEXT_REASONS,
     "multiblock": "多方塊結構圖案列",
     "not_text": "手冊中不是顯示文字的字串",
+    "lang_key": "手冊裡指向語言檔鍵值的字串",
     "no_letters": "沒有文字的字串（只有符號或數字，不含格式碼）",
     "field_name": "內容就是欄位名稱（佔位字）",
     "meta_key": "語言檔的翻譯者備註、語言代碼",
     "code_value": "語言檔裡的色碼、識別字、常數或網址",
 }
+# 看結構就能確定不是文字的類別：已有 jar／第三方中文譯文時仍預設刪除；
+# 其他類別是看內容形狀推測的，只要有中文譯文或中文歷史就預設不刪，要人工確認
+STRONG_CATEGORIES = frozenset({"multiblock", "meta_key", "placeholder", "lang_key"})
 _CLEANUP_KINDS = (KIND_GUIDE, KIND_PATCHOULI, KIND_ADVANCEMENT, KIND_LANG)
 
 
@@ -86,7 +103,10 @@ def _patchouli_category(key: str, en_us: str) -> str | None:
         return "multiblock"
     if is_placeholder_text(en_us):
         return "placeholder"
-    return "not_text" if classify_book_string(en_us, book_field(key)) == "not" else None
+    verdict = classify_book_string(en_us, book_field(key))
+    if verdict == "text":
+        return None
+    return "lang_key" if verdict == "lang_key" else "not_text"
 
 
 def _item_identity(item: dict[str, Any]) -> tuple[Any, Any, Any]:
@@ -96,6 +116,28 @@ def _item_identity(item: dict[str, Any]) -> tuple[Any, Any, Any]:
 
 def _text_hash(text: str) -> str:
     return hashlib.sha1(text.encode("utf-8")).hexdigest()[:16]
+
+
+def _digest(payload: Any) -> str:
+    """任意 JSON 結構的完整 SHA-256（排序鍵值、固定格式）。"""
+    blob = json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str)
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()
+
+
+def _clip(text: Any) -> tuple[str, bool]:
+    value = "" if text is None else str(text)
+    return value[:_PREVIEW_CHARS], len(value) > _PREVIEW_CHARS
+
+
+def _positive_int(value: Any) -> int | None:
+    """檢查檔的 ``id`` 只接受正整數（排除 bool、小數、字串）。"""
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        return None
+    return value
+
+
+class CleanupPlanChanged(ValueError):
+    """套用時重新計算的清理範圍和預覽（token）不一致；要重新預覽。"""
 
 
 @dataclass(frozen=True)
@@ -114,13 +156,18 @@ class CleanupReport:
 
     version: str
     path: Path
-    counts: dict[str, int] = field(default_factory=dict)  # 類別 → 可清理筆數
-    protected: dict[str, int] = field(default_factory=dict)  # 類別 → 有譯文或歷史而略過
-    sources: dict[str, int] = field(default_factory=dict)  # 生效譯文來源名稱 → 筆數
-    review: int = 0  # 已有中文譯文、可能是誤判而預設不刪的筆數
+    counts: dict[str, int] = field(default_factory=dict)  # 類別 → 檢查檔列出的筆數
+    protected: dict[str, int] = field(
+        default_factory=dict
+    )  # 類別 → 有譯文或歷史而未列入
+    sources: dict[str, int] = field(
+        default_factory=dict
+    )  # 來源名稱 → 有該來源譯文的筆數
+    default_selected: int = 0  # 預設 delete 為 true 的筆數
+    review_required: int = 0  # 預設 delete 為 false、要人工確認的筆數
 
     @property
-    def total(self) -> int:
+    def exported_total(self) -> int:
         return sum(self.counts.values())
 
 
@@ -129,12 +176,14 @@ class CleanupPlan:
     """檢查檔套用前的預覽，或套用後的結果。"""
 
     version: str = ""
+    mode: str = MODE_RULE
     requested: int = 0  # 檢查檔中標記要刪除的筆數
     valid_ids: list[int] = field(default_factory=list)  # 現在仍可安全刪除
     skipped: Counter = field(default_factory=Counter)  # 略過原因 → 筆數
     by_category: Counter = field(default_factory=Counter)
     with_translation: int = 0  # 可刪除的項目中，已有譯文或歷史的筆數
     batch_id: str = ""
+    token: str = ""  # 預覽範圍的指紋；apply_cleanup 要帶回同一個值
 
     @property
     def deletable(self) -> int:
@@ -148,6 +197,28 @@ class CleanupBatchInfo:
     created_at: str
     count: int
     reverted_at: str | None
+    restored: int = 0  # 已經還原的條目數（部分還原時小於 count）
+
+    @property
+    def complete(self) -> bool:
+        return bool(self.reverted_at)
+
+    @property
+    def pending(self) -> int:
+        return 0 if self.complete else self.count - self.restored
+
+
+@dataclass
+class RevertResult:
+    """``revert_cleanup`` 的結果；``complete`` 為 False 時批次仍可再還原。"""
+
+    restored: int = 0
+    pending: int = 0  # 還沒還原的條目數
+    remapped: int = 0  # 原編號已被別的資料用掉、改用新編號的條目數
+    conflicts: list[str] = field(
+        default_factory=list
+    )  # 原位置已有同一條目：kind/mod/key
+    complete: bool = True
 
 
 _PROTECTED_SQL = (
@@ -158,12 +229,18 @@ _PROTECTED_SQL = (
     "SELECT DISTINCT entry_id FROM effective WHERE entry_id IN ({m}) AND zh_tw <> ''",
     "SELECT DISTINCT entry_id FROM history WHERE entry_id IN ({m})",
 )
-_SNAPSHOT_TABLES = {
-    "entry": "id",
-    "translation": "entry_id",
-    "effective": "entry_id",
-    "history": "entry_id",
-}
+# 資料表 → (關聯條目的欄位, 排序)；狀態指紋與快照都照這份清單
+_STATE_TABLES = (
+    ("entry", "id", "id"),
+    ("translation", "entry_id", "entry_id, source, id"),
+    ("effective", "entry_id", "entry_id"),
+    ("history", "entry_id", "entry_id, id"),
+)
+_SNAPSHOT_TABLES = {table: column for table, column, _order in _STATE_TABLES}
+_SRC_CHANGE_FROM = (
+    "FROM src_change sc JOIN entry e ON e.kind = sc.kind AND e.mc_version = sc.mc_version "
+    "AND e.mod_id = sc.mod_id AND e.key = sc.key WHERE e.id IN ({m})"
+)
 
 
 def _chunks(ids: Sequence[int]) -> Iterable[Sequence[int]]:
@@ -176,15 +253,23 @@ def _marks(count: int) -> str:
 
 
 def _write_report(path: str | Path, payload: dict[str, Any]) -> Path:
+    """先寫暫存檔再整個換過去；中途失敗不會留下寫一半的檢查檔，也不動到舊檔。"""
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=1), encoding="utf-8"
-    )
+    temp = target.with_name(f".{target.name}.{uuid.uuid4().hex}.tmp")
+    try:
+        with temp.open("w", encoding="utf-8") as handle:
+            json.dump(payload, handle, ensure_ascii=False, indent=1)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temp, target)
+    finally:
+        temp.unlink(missing_ok=True)
     return target
 
 
 def _report_item(candidate: CleanupCandidate) -> dict[str, Any]:
+    en_us, truncated = _clip(candidate.en_us)
     return {
         "id": candidate.entry_id,
         "delete": True,
@@ -192,7 +277,8 @@ def _report_item(candidate: CleanupCandidate) -> dict[str, Any]:
         "kind": candidate.kind,
         "mod": candidate.mod_id,
         "key": candidate.key,
-        "en_us": candidate.en_us[:_PREVIEW_CHARS],
+        "en_us": en_us,
+        "en_us_truncated": truncated,
         "en_us_hash": _text_hash(candidate.en_us),
     }
 
@@ -210,13 +296,76 @@ def _item_problem(row: tuple | None, item: dict[str, Any], version: str) -> str 
         return "類型、模組或鍵值與檢查檔不符"
     if _text_hash(row[5]) != item.get("en_us_hash"):
         return "原文已變動"
-    if entry_cleanup_category(row[1], row[4], row[5]) is None:
+    category = entry_cleanup_category(row[1], row[4], row[5])
+    if category is None:
         return "目前規則判為正常內容"
+    if category != item.get("category"):
+        return "清理類別已變動，請重新匯出"
     return None
+
+
+def _has_cjk(*texts: Any) -> bool:
+    return any(_CJK.search(t) for t in texts if t)
+
+
+@dataclass
+class _EntryDetail:
+    """匯出已有譯文的檢查檔時，某個條目要給人看的譯文與歷史資料。"""
+
+    sources: list[dict[str, Any]] = field(default_factory=list)
+    effective: tuple[str, int] | None = None
+    history_count: int = 0
+    history: list[dict[str, Any]] = field(default_factory=list)
+    any_cjk: bool = False  # 任何來源的譯文或歷史含中文
+    human_cjk: bool = False  # 人工來源的譯文或歷史含中文
+
+    def default_delete(self, category: str) -> bool:
+        if category in STRONG_CATEGORIES:
+            return not self.human_cjk
+        return not self.any_cjk
+
+    def review_note(self, category: str) -> str:
+        if category in STRONG_CATEGORIES:
+            return "人工譯文或歷史紀錄含中文，可能是需要翻譯的文字；確認要刪再把 delete 改成 true"
+        return "已有中文譯文或歷史，這個類別是看內容形狀判斷的，可能是被誤判的文字；確認要刪再把 delete 改成 true"
 
 
 class CleanupMixin:
     """``TranslationDB`` 的清理方法（使用其連線與交易）。"""
+
+    # ------------------------------------------------------------------ 一致讀取與身分
+    @contextmanager
+    def _read_snapshot(self) -> Iterator[None]:
+        """讓區塊內的多次讀取看到同一份資料（其他連線的寫入不會插進來）。"""
+        with self._lock:
+            if self._conn.in_transaction:
+                yield
+                return
+            self._conn.execute("BEGIN")
+            try:
+                yield
+            finally:
+                self._conn.rollback()
+
+    def _read_db_id(self) -> str | None:
+        row = self._one("SELECT value FROM meta WHERE key = ?", (_DB_ID_KEY,))
+        return row[0] if row else None
+
+    def _ensure_db_id(self) -> str:
+        """這個資料庫的身分；檢查檔記錄它，避免拿別的資料庫的檢查檔來刪（編號碰巧相同）。"""
+        existing = self._read_db_id()
+        if existing:
+            return existing
+        value = uuid.uuid4().hex
+        try:
+            with self._tx(bump_generation_on_noop=False) as conn:
+                conn.execute(
+                    "INSERT OR IGNORE INTO meta (key, value) VALUES (?, ?)",
+                    (_DB_ID_KEY, value),
+                )
+        except sqlite3.Error:
+            return self._read_db_id() or ""  # 唯讀資料庫寫不進去：沒有身分可記
+        return self._read_db_id() or value
 
     # ------------------------------------------------------------------ 找出
     def _protected_ids(self, ids: Sequence[int]) -> set[int]:
@@ -231,38 +380,35 @@ class CleanupMixin:
         return found
 
     def _translation_states(self, ids: Sequence[int]) -> dict[int, str]:
-        """條目編號 → 譯文、生效譯文與歷史的指紋；任何一筆改動指紋就不同。"""
-        parts: dict[int, list[Any]] = defaultdict(list)
-        queries = (
-            (
-                "t",
-                (
-                    "SELECT entry_id, source, zh_tw, zh_cn, revision FROM translation "
-                    "WHERE entry_id IN ({m}) ORDER BY entry_id, source"
-                ),
-            ),
-            (
-                "e",
-                "SELECT entry_id, source, zh_tw FROM effective WHERE entry_id IN ({m})",
-            ),
-            (
-                "h",
-                (
-                    "SELECT entry_id, COUNT(*), MAX(id) FROM history "
-                    "WHERE entry_id IN ({m}) GROUP BY entry_id"
-                ),
-            ),
-        )
+        """條目編號 → 條目、所有來源譯文、生效譯文與歷史的完整 SHA-256 指紋。
+
+        每個表的全部欄位（含審核狀態、checker、列編號、時間、歷史內容）照固定順序納入，
+        任何一個欄位改動指紋就不同。
+        """
+        states: dict[int, str] = {}
         for chunk in _chunks(list(ids)):
-            for tag, sql in queries:
-                for row in self._q(sql.format(m=_marks(len(chunk))), tuple(chunk)):
-                    parts[int(row[0])].append([tag, *row[1:]])
-        return {
-            entry_id: _text_hash(
-                json.dumps(parts.get(entry_id, []), ensure_ascii=False)
+            marks = _marks(len(chunk))
+            parts: dict[int, dict[str, list[Any]]] = defaultdict(
+                lambda: defaultdict(list)
             )
-            for entry_id in ids
-        }
+            for table, column, order in _STATE_TABLES:
+                names, fetched = self._select_with_columns(
+                    f"SELECT * FROM {table} WHERE {column} IN ({marks}) ORDER BY {order}",
+                    tuple(chunk),
+                )
+                owner = names.index(column)
+                for row in fetched:
+                    parts[int(row[owner])][table].append(list(row))
+            for entry_id in chunk:
+                states[int(entry_id)] = _digest(parts.get(int(entry_id), {}))
+        return states
+
+    def _select_with_columns(
+        self, sql: str, params: tuple = ()
+    ) -> tuple[list[str], list[tuple]]:
+        with self._lock:
+            cursor = self._conn.execute(sql, params)
+            return [d[0] for d in cursor.description], cursor.fetchall()
 
     def _flagged_candidates(self, version: str) -> list[CleanupCandidate]:
         """目前規則判定「不該收」的條目（不看有沒有譯文）。"""
@@ -284,29 +430,34 @@ class CleanupMixin:
         self, version: str
     ) -> tuple[list[CleanupCandidate], Counter]:
         """``(可清理的條目, 因有譯文或歷史而略過的類別計數)``。"""
-        flagged = self._flagged_candidates(version)
-        protected = self._protected_ids([c.entry_id for c in flagged])
+        with self._read_snapshot():
+            flagged = self._flagged_candidates(version)
+            protected = self._protected_ids([c.entry_id for c in flagged])
         skipped = Counter(c.category for c in flagged if c.entry_id in protected)
         return [c for c in flagged if c.entry_id not in protected], skipped
 
     # ------------------------------------------------------------------ 匯出
     def export_cleanup_report(self, version: str, path: str | Path) -> CleanupReport:
-        """把可清理的條目寫成 JSON 檢查檔（只讀資料庫，不刪任何東西）。"""
+        """把可清理的條目寫成 JSON 檢查檔（不刪任何東西）。"""
+        db_id = self._ensure_db_id()
         candidates, protected = self.cleanup_candidates(version)
         counts = Counter(c.category for c in candidates)
         payload: dict[str, Any] = {
             "format": REPORT_FORMAT,
+            "mode": MODE_RULE,
             "version": version,
+            "db_id": db_id,
             "created_at": datetime.now(UTC).isoformat(timespec="seconds"),
             "how_to_use": (
                 "請檢查 items。不想刪除的項目：整個移除，或把 delete 改成 false。"
                 "檢查完回到程式按「依檢查檔清理」；刪除前會再依目前資料重新檢查，"
-                "並且可以整批還原。"
+                "並且可以還原。"
             ),
             "summary": {
                 cid: {
                     "label": label,
                     "count": counts.get(cid, 0),
+                    "default_delete": counts.get(cid, 0),
                     "skipped_has_translation_or_history": protected.get(cid, 0),
                 }
                 for cid, label in CLEANUP_CATEGORIES.items()
@@ -315,109 +466,224 @@ class CleanupMixin:
             "items": [_report_item(c) for c in candidates],
         }
         target = _write_report(path, payload)
-        return CleanupReport(version, target, dict(counts), dict(protected))
+        return CleanupReport(
+            version,
+            target,
+            dict(counts),
+            dict(protected),
+            default_selected=len(candidates),
+        )
 
-    def export_protected_report(self, version: str, path: str | Path) -> CleanupReport:
-        """把「符合清理規則但已有譯文或歷史」的條目寫成 JSON 檢查檔（只讀資料庫）。
-
-        一般檢查檔不會列入這些條目。每筆附上目前的生效譯文與來源方便檢查，並帶著
-        譯文與歷史的指紋：匯出後有人改過譯文或審核，套用時就略過。
-        """
-        flagged = self._flagged_candidates(version)
-        protected_ids = self._protected_ids([c.entry_id for c in flagged])
-        candidates = [c for c in flagged if c.entry_id in protected_ids]
-        ids = [c.entry_id for c in candidates]
-        states = self._translation_states(ids)
-        effective: dict[int, tuple[str, int]] = {}
-        for chunk in _chunks(ids):
-            for entry_id, zh_tw, source in self._q(
-                "SELECT entry_id, zh_tw, source FROM effective "
-                f"WHERE entry_id IN ({_marks(len(chunk))})",
+    def _entry_details(self, ids: Sequence[int]) -> dict[int, _EntryDetail]:
+        """每個條目所有來源的譯文、生效來源與歷史摘要（匯出已有譯文的檢查檔用）。"""
+        details = {int(i): _EntryDetail() for i in ids}
+        label = self.source_catalog.label
+        for chunk in _chunks(list(ids)):
+            marks = _marks(len(chunk))
+            effective_source: dict[int, int] = {}
+            for entry_id, source in self._q(
+                f"SELECT entry_id, source FROM effective WHERE entry_id IN ({marks})",
                 tuple(chunk),
             ):
-                effective[int(entry_id)] = (zh_tw, source)
+                effective_source[int(entry_id)] = int(source)
+            for entry_id, source, zh_tw, zh_cn, checker, status in self._q(
+                "SELECT entry_id, source, zh_tw, zh_cn, checker, review_status "
+                f"FROM translation WHERE entry_id IN ({marks}) "
+                "ORDER BY entry_id, source",
+                tuple(chunk),
+            ):
+                detail = details[int(entry_id)]
+                zh_tw_text, tw_cut = _clip(zh_tw)
+                zh_cn_text, cn_cut = _clip(zh_cn)
+                is_effective = effective_source.get(int(entry_id)) == int(source)
+                detail.sources.append(
+                    {
+                        "code": int(source),
+                        "label": label(source),
+                        "effective": is_effective,
+                        "zh_tw": zh_tw_text,
+                        "zh_cn": zh_cn_text,
+                        "checker": checker or "",
+                        "review_status": status,
+                        "truncated": tw_cut or cn_cut,
+                    }
+                )
+                if is_effective:
+                    detail.effective = (zh_tw_text, int(source))
+                if _has_cjk(zh_tw, zh_cn):
+                    detail.any_cjk = True
+                    detail.human_cjk |= int(source) == SRC_MANUAL
+            for entry_id, at, actor, action, old, new in self._q(
+                "SELECT entry_id, at, actor, action, old_zh_tw, new_zh_tw FROM history "
+                f"WHERE entry_id IN ({marks}) ORDER BY entry_id, id",
+                tuple(chunk),
+            ):
+                detail = details[int(entry_id)]
+                detail.history_count += 1
+                detail.history.append(
+                    {
+                        "at": at,
+                        "actor": actor,
+                        "action": action,
+                        "old_zh_tw": _clip(old)[0][:100],
+                        "new_zh_tw": _clip(new)[0][:100],
+                    }
+                )
+                del detail.history[:-_HISTORY_SUMMARY]
+                if _has_cjk(old, new):
+                    detail.any_cjk = detail.human_cjk = True
+        return details
+
+    def export_protected_report(self, version: str, path: str | Path) -> CleanupReport:
+        """把「符合清理規則但已有譯文或歷史」的條目寫成 JSON 檢查檔。
+
+        一般檢查檔不會列入這些條目。每筆列出刪除時會一起丟掉的全部資料：每個來源的
+        譯文（含來源代碼、簡繁、checker、審核狀態）與歷史摘要，並帶著完整資料狀態的指紋：
+        匯出後有人改過譯文或審核，套用時就略過。預設 ``delete`` 採保守策略：
+        非確定性類別只要有中文譯文或中文歷史、確定性類別有人工中文，就預設不刪。
+        """
+        db_id = self._ensure_db_id()
+        with self._read_snapshot():
+            flagged = self._flagged_candidates(version)
+            protected_ids = self._protected_ids([c.entry_id for c in flagged])
+            candidates = [c for c in flagged if c.entry_id in protected_ids]
+            ids = [c.entry_id for c in candidates]
+            states = self._translation_states(ids)
+            details = self._entry_details(ids)
         counts: Counter = Counter()
+        defaults: Counter = Counter()
         sources: Counter = Counter()
-        review = 0
         items = []
         for candidate in candidates:
-            zh_tw, source = effective.get(candidate.entry_id, ("", None))
-            source_name = SOURCE_NAMES.get(source, "") if source is not None else ""
-            if zh_tw:
-                sources[source_name or str(source)] += 1
+            detail = details[candidate.entry_id]
+            effective_zh, effective_code = detail.effective or ("", None)
+            for source in detail.sources:
+                if source["zh_tw"] or source["zh_cn"]:
+                    sources[source["label"]] += 1
             item = {
                 **_report_item(candidate),
                 "has_translation": True,
-                "zh_tw": zh_tw[:_PREVIEW_CHARS],
-                "source": source_name,
+                "zh_tw": effective_zh,
+                "source": (
+                    self.source_catalog.label(effective_code)
+                    if effective_code is not None
+                    else ""
+                ),
+                "source_code": effective_code,
+                "sources": detail.sources,
+                "history_count": detail.history_count,
+                "history": detail.history,
                 "state_hash": states[candidate.entry_id],
             }
-            if candidate.category in _SHAPE_CATEGORIES and _CJK.search(zh_tw):
-                item["delete"] = False
-                item["review"] = (
-                    "已有中文譯文，可能是需要翻譯的文字；確認要刪再把 delete 改成 true"
-                )
-                review += 1
+            counts[candidate.category] += 1
+            if detail.default_delete(candidate.category):
+                defaults[candidate.category] += 1
             else:
-                counts[candidate.category] += 1
+                item["delete"] = False
+                item["review"] = detail.review_note(candidate.category)
             items.append(item)
+        selected = sum(defaults.values())
         payload: dict[str, Any] = {
             "format": REPORT_FORMAT,
+            "mode": MODE_PROTECTED,
             "version": version,
+            "db_id": db_id,
             "created_at": datetime.now(UTC).isoformat(timespec="seconds"),
             "how_to_use": (
-                "這些條目符合清理規則（不是要翻譯的內容），但已經有譯文或歷史紀錄；"
-                "zh_tw 是目前的生效譯文、source 是它的來源。不想刪除的項目：整個移除，"
-                "或把 delete 改成 false。刪除會連同所有來源的譯文與歷史一起移除；"
-                "匯出後譯文或歷史有變動的項目會略過，並且可以整批還原。"
-                "有 review 欄位的項目已有中文譯文，可能是被誤判的文字，預設 delete 為 false。"
+                "這些條目符合清理規則（不是要翻譯的內容），但已經有譯文或歷史紀錄。"
+                "sources 列出每個來源的譯文（zh_tw／zh_cn 超過長度會截斷，truncated 為 true），"
+                "history 是最近幾筆歷史。刪除會連同所有來源的譯文與全部歷史一起移除；"
+                "不想刪除的項目：整個移除，或把 delete 改成 false。"
+                "有 review 欄位的項目預設 delete 為 false，確認後才改成 true。"
+                "匯出後譯文或歷史有變動的項目會略過，並且可以還原。"
             ),
             "summary": {
-                cid: {"label": label, "count": counts[cid]}
+                cid: {
+                    "label": label,
+                    "count": counts[cid],
+                    "default_delete": defaults[cid],
+                    "review": counts[cid] - defaults[cid],
+                }
                 for cid, label in CLEANUP_CATEGORIES.items()
                 if counts.get(cid)
             },
             "items": items,
         }
         target = _write_report(path, payload)
-        return CleanupReport(version, target, dict(counts), {}, dict(sources), review)
+        return CleanupReport(
+            version,
+            target,
+            dict(counts),
+            {},
+            dict(sources),
+            default_selected=selected,
+            review_required=len(items) - selected,
+        )
 
     # ------------------------------------------------------------------ 預覽與套用
     @staticmethod
-    def _load_report(path: str | Path) -> dict[str, Any]:
+    def _load_report(path: str | Path) -> tuple[dict[str, Any], str]:
+        """讀檢查檔；回傳 ``(內容, 檔案內容的 SHA-256)``。格式不對就丟 ``ValueError``。"""
         try:
-            data = json.loads(Path(path).read_text(encoding="utf-8"))
+            target = Path(path)
+            if target.stat().st_size > _MAX_REPORT_BYTES:
+                raise ValueError("檢查檔過大")
+            raw = target.read_bytes()
+            data = json.loads(raw.decode("utf-8"))
         except (OSError, ValueError) as exc:
             raise ValueError(f"無法讀取檢查檔：{exc}") from exc
+        if isinstance(data, dict) and data.get("format") in _OLD_REPORT_FORMATS:
+            raise ValueError("這是舊版檢查檔，請重新匯出")
         if not isinstance(data, dict) or data.get("format") != REPORT_FORMAT:
             raise ValueError("這不是資料庫清理的檢查檔（格式標記不符）")
-        if not isinstance(data.get("items"), list) or not data.get("version"):
-            raise ValueError("檢查檔缺少版本或項目清單")
-        return data
+        if data.get("mode") not in _MODES:
+            raise ValueError("檢查檔缺少類型（mode）")
+        if not isinstance(data.get("version"), str) or not data["version"]:
+            raise ValueError("檢查檔缺少版本")
+        if not isinstance(data.get("db_id"), str) or not isinstance(
+            data.get("items"), list
+        ):
+            raise ValueError("檢查檔缺少資料庫身分或項目清單")  # noqa: TRY004
+        return data, hashlib.sha256(raw).hexdigest()
 
-    def _validate_cleanup_items(self, data: dict[str, Any]) -> CleanupPlan:
-        """逐筆依目前資料與規則重新檢查檢查檔裡標記要刪除的項目。"""
-        version = str(data["version"])
-        plan = CleanupPlan(version=version)
+    def _wanted_items(
+        self, data: dict[str, Any], plan: CleanupPlan
+    ) -> dict[int, dict[str, Any]]:
+        """檢查檔裡明確標記要刪除（``delete`` 為 true）且格式正確的項目。"""
         wanted: dict[int, dict[str, Any]] = {}
-        invalid_delete = 0
         for item in data["items"]:
-            if not isinstance(item, dict) or item.get("delete") is False:
-                continue
-            if item.get("delete") is not True:
-                invalid_delete += (
-                    1  # 只有明確的 true 才刪；缺欄位或字串 "false" 一律略過
-                )
-                continue
-            try:
-                wanted[int(item["id"])] = item
-            except (KeyError, TypeError, ValueError):
+            if not isinstance(item, dict):
+                plan.requested += 1
                 plan.skipped["項目格式錯誤"] += 1
-        if invalid_delete:
-            plan.skipped["delete 欄位不是 true／false"] += invalid_delete
-        plan.requested = len(wanted) + plan.skipped["項目格式錯誤"] + invalid_delete
-        rows: dict[int, tuple] = {}
+                continue
+            flag = item.get("delete")
+            if flag is False:
+                continue
+            plan.requested += 1
+            if flag is not True:
+                plan.skipped["delete 欄位不是 true／false"] += 1
+                continue  # 只有明確的 true 才刪；缺欄位或字串 "false" 一律略過
+            entry_id = _positive_int(item.get("id"))
+            if entry_id is None:
+                plan.skipped["項目格式錯誤"] += 1
+            elif entry_id in wanted:
+                plan.skipped["重複的 id"] += 1
+            else:
+                wanted[entry_id] = item
+        return wanted
+
+    def _validate_cleanup_items(
+        self, data: dict[str, Any], report_sha: str
+    ) -> CleanupPlan:
+        """逐筆依目前資料與規則重新檢查檔案裡標記要刪除的項目，並算出 token。"""
+        version, mode = data["version"], data["mode"]
+        db_id = self._read_db_id() or ""
+        if data["db_id"] != db_id:
+            raise ValueError("這份檢查檔不是從目前的資料庫匯出的")
+        plan = CleanupPlan(version=version, mode=mode)
+        wanted = self._wanted_items(data, plan)
         ids = list(wanted)
+        rows: dict[int, tuple] = {}
         for chunk in _chunks(ids):
             for row in self._q(
                 "SELECT id, kind, mc_version, mod_id, key, en_us FROM entry "
@@ -425,18 +691,19 @@ class CleanupMixin:
                 tuple(chunk),
             ):
                 rows[int(row[0])] = row
-        # 已有譯文的項目（has_translation）：譯文與歷史要和匯出時一樣，不再套用譯文保護
-        translated = {i for i in ids if wanted[i].get("has_translation") is True}
-        states = self._translation_states(sorted(translated))
+        states = self._translation_states(sorted(rows))
         passed: list[int] = []
+        translated: set[int] = set()
         for entry_id in ids:
-            reason = _item_problem(rows.get(entry_id), wanted[entry_id], version)
-            if (
-                reason is None
-                and entry_id in translated
-                and states[entry_id] != wanted[entry_id].get("state_hash")
-            ):
-                reason = "譯文或歷史已變動"
+            item = wanted[entry_id]
+            reason = _item_problem(rows.get(entry_id), item, version)
+            if reason is None and item.get("has_translation") is True:
+                if mode != MODE_PROTECTED:
+                    reason = "一般檢查檔不能標記已有譯文的項目"
+                elif states[entry_id] != item.get("state_hash"):
+                    reason = "譯文或歷史已變動"
+                else:
+                    translated.add(entry_id)
             if reason:
                 plan.skipped[reason] += 1
             else:
@@ -450,17 +717,35 @@ class CleanupMixin:
             plan.with_translation += entry_id in translated
             row = rows[entry_id]
             plan.by_category[entry_cleanup_category(row[1], row[4], row[5])] += 1
+        plan.token = _digest(
+            {
+                "report": report_sha,
+                "db": db_id,
+                "version": version,
+                "mode": mode,
+                "entries": [[i, states[i]] for i in sorted(plan.valid_ids)],
+                "with_translation": plan.with_translation,
+            }
+        )
         return plan
 
     def preview_cleanup(self, path: str | Path) -> CleanupPlan:
         """讀檢查檔並預覽：現在實際會刪幾筆、哪些會略過（不寫入）。"""
-        return self._validate_cleanup_items(self._load_report(path))
+        data, report_sha = self._load_report(path)
+        with self._read_snapshot():
+            return self._validate_cleanup_items(data, report_sha)
 
-    def apply_cleanup(self, path: str | Path) -> CleanupPlan:
-        """刪除檢查檔中仍然安全的項目；刪除前整批存進 ``cleanup_batch`` 供還原。"""
-        data = self._load_report(path)
+    def apply_cleanup(self, path: str | Path, expected_token: str) -> CleanupPlan:
+        """刪除預覽過的範圍；刪除前整批存進 ``cleanup_batch`` 供還原。
+
+        ``expected_token`` 是 ``preview_cleanup`` 回傳的 ``token``。在寫入交易內重新計算，
+        檢查檔、版本、資料庫或任何一筆資料和預覽時不同就丟 ``CleanupPlanChanged``，不刪任何東西。
+        """
+        data, report_sha = self._load_report(path)
         with self._tx():
-            plan = self._validate_cleanup_items(data)
+            plan = self._validate_cleanup_items(data, report_sha)
+            if not expected_token or plan.token != expected_token:
+                raise CleanupPlanChanged("檢查檔或資料已和預覽時不同，請重新預覽")
             if not plan.valid_ids:
                 return plan
             plan.batch_id = uuid.uuid4().hex
@@ -477,9 +762,14 @@ class CleanupMixin:
                 ),
             )
             for chunk in _chunks(plan.valid_ids):
+                marks = _marks(len(chunk))
                 self._conn.execute(
-                    f"DELETE FROM entry WHERE id IN ({_marks(len(chunk))})",
+                    f"DELETE FROM src_change WHERE id IN "
+                    f"(SELECT sc.id {_SRC_CHANGE_FROM.format(m=marks)})",
                     tuple(chunk),
+                )
+                self._conn.execute(
+                    f"DELETE FROM entry WHERE id IN ({marks})", tuple(chunk)
                 )
         return plan
 
@@ -497,18 +787,87 @@ class CleanupMixin:
                 columns = [d[0] for d in cursor.description]
                 rows.extend(list(r) for r in cursor.fetchall())
             snapshot[table] = {"columns": columns, "rows": rows}
+        # 原文變更紀錄沒有外鍵，依 (類型, 版本, 模組, 鍵值) 對到條目；條目刪除時一起存、一起刪
+        columns, rows = [], []
+        for chunk in _chunks(list(ids)):
+            cursor = self._conn.execute(
+                f"SELECT sc.* {_SRC_CHANGE_FROM.format(m=_marks(len(chunk)))}",
+                tuple(chunk),
+            )
+            columns = [d[0] for d in cursor.description]
+            rows.extend(list(r) for r in cursor.fetchall())
+        snapshot["src_change"] = {"columns": columns, "rows": rows}
         return snapshot
+
+    def cleanup_batches(self) -> list[CleanupBatchInfo]:
+        """所有清理批次，新的在前（含已完成、部分還原的）。"""
+        restored = {
+            key[len(_RESTORED_KEY) :]: len(json.loads(value))
+            for key, value in self._q(
+                "SELECT key, value FROM meta WHERE key LIKE ?", (_RESTORED_KEY + "%",)
+            )
+        }
+        return [
+            CleanupBatchInfo(*row, restored.get(row[0], 0))
+            for row in self._q(
+                "SELECT id, mc_version, created_at, entry_count, reverted_at "
+                "FROM cleanup_batch ORDER BY created_at DESC, rowid DESC"
+            )
+        ]
 
     def last_cleanup_batch(self) -> CleanupBatchInfo | None:
         """最近一次清理（含已還原的）；沒有清理紀錄回傳 None。"""
-        row = self._one(
-            "SELECT id, mc_version, created_at, entry_count, reverted_at "
-            "FROM cleanup_batch ORDER BY created_at DESC, rowid DESC LIMIT 1"
-        )
-        return None if row is None else CleanupBatchInfo(*row)
+        batches = self.cleanup_batches()
+        return batches[0] if batches else None
 
-    def revert_cleanup(self, batch_id: str) -> tuple[int, int]:
-        """整批還原；回傳 ``(還原筆數, 因原位置已有同一條目而略過的筆數)``。"""
+    def _free_ids(self, table: str, ids: Sequence[int]) -> set[int]:
+        """``ids`` 之中，``table`` 目前沒有被別的資料用掉的編號。"""
+        used: set[int] = set()
+        for chunk in _chunks(list(ids)):
+            used.update(
+                int(r[0])
+                for r in self._conn.execute(
+                    f"SELECT id FROM {table} WHERE id IN ({_marks(len(chunk))})",
+                    tuple(chunk),
+                )
+            )
+        return set(ids) - used
+
+    def _insert_rows(
+        self, table: str, columns: Sequence[str], rows: Sequence[Sequence]
+    ) -> dict[int, int]:
+        """寫入列；原編號沒被用掉就沿用，被用掉就換新編號。回傳 原編號 → 實際編號。"""
+        id_index = list(columns).index("id")
+        free = self._free_ids(table, [int(r[id_index]) for r in rows])
+        kept = [r for r in rows if int(r[id_index]) in free]
+        moved = [r for r in rows if int(r[id_index]) not in free]
+        mapping: dict[int, int] = {}
+        for (
+            values
+        ) in kept:  # 先寫沿用原編號的，再讓其餘的自動取新編號，才不會搶到還沒寫的原編號
+            self._insert_row(table, columns, values)
+            mapping[int(values[id_index])] = int(values[id_index])
+        names = [c for c in columns if c != "id"]
+        for values in moved:
+            rest = [v for c, v in zip(columns, values, strict=True) if c != "id"]
+            cursor = self._conn.execute(
+                f"INSERT INTO {table} ({','.join(names)}) VALUES ({_marks(len(names))})",
+                tuple(rest),
+            )
+            mapping[int(values[id_index])] = int(cursor.lastrowid)
+        return mapping
+
+    def _restored_ids(self, batch_id: str) -> set[int]:
+        row = self._conn.execute(
+            "SELECT value FROM meta WHERE key = ?", (_RESTORED_KEY + batch_id,)
+        ).fetchone()
+        return set(json.loads(row[0])) if row else set()
+
+    def revert_cleanup(self, batch_id: str) -> RevertResult:
+        """還原一個批次；原位置已有同一條目的項目保留為待還原，批次要全部還原才算完成。
+
+        不覆蓋較新的資料。原編號被別的資料用掉時改用新編號，譯文、歷史與審核狀態照樣恢復。
+        """
         with self._tx():
             row = self._conn.execute(
                 "SELECT payload, reverted_at FROM cleanup_batch WHERE id = ?",
@@ -519,17 +878,21 @@ class CleanupMixin:
             if row[1]:
                 raise ValueError("這次清理已經還原過了")
             snapshot = json.loads(row[0])
-            entry_table = snapshot["entry"]
-            columns = entry_table["columns"]
-            restored = skipped = 0
-            kept_ids: set[int] = set()
-            for values in entry_table["rows"]:
-                record = dict(zip(columns, values, strict=True))
+            columns = snapshot["entry"]["columns"]
+            records = sorted(
+                (dict(zip(columns, v, strict=True)) for v in snapshot["entry"]["rows"]),
+                key=lambda r: int(r["id"]),
+            )
+            done = self._restored_ids(batch_id)
+            result = RevertResult()
+            todo: list[dict[str, Any]] = []
+            for record in records:
+                if int(record["id"]) in done:
+                    continue
                 clash = self._conn.execute(
-                    "SELECT 1 FROM entry WHERE id = ? OR (kind = ? AND mc_version = ? "
-                    "AND mod_id = ? AND key = ?)",
+                    "SELECT 1 FROM entry WHERE kind = ? AND mc_version = ? "
+                    "AND mod_id = ? AND key = ?",
                     (
-                        record["id"],
                         record["kind"],
                         record["mc_version"],
                         record["mod_id"],
@@ -537,22 +900,95 @@ class CleanupMixin:
                     ),
                 ).fetchone()
                 if clash:
-                    skipped += 1  # 重新掃描後已有同一條目，不覆蓋
-                    continue
-                self._insert_row("entry", columns, values)
-                kept_ids.add(int(record["id"]))
-                restored += 1
-            for table in ("translation", "effective", "history"):
-                part = snapshot[table]
-                id_index = part["columns"].index("entry_id")
-                for values in part["rows"]:
-                    if int(values[id_index]) in kept_ids:
-                        self._insert_row(table, part["columns"], values)
-            self._conn.execute(
-                "UPDATE cleanup_batch SET reverted_at = ? WHERE id = ?",
-                (datetime.now(UTC).isoformat(timespec="seconds"), batch_id),
+                    result.conflicts.append(
+                        f"{record['kind']}/{record['mod_id']}/{record['key']}"
+                    )
+                else:
+                    todo.append(record)
+            entry_map = self._insert_rows(
+                "entry", columns, [[r[c] for c in columns] for r in todo]
             )
-        return restored, skipped
+            result.restored = len(entry_map)
+            result.remapped = sum(1 for old, new in entry_map.items() if old != new)
+            self._restore_children(snapshot, entry_map, todo)
+            done |= set(entry_map)
+            result.pending = len(records) - len(done)
+            result.complete = result.pending == 0
+            if result.complete:
+                self._conn.execute(
+                    "UPDATE cleanup_batch SET reverted_at = ? WHERE id = ?",
+                    (datetime.now(UTC).isoformat(timespec="seconds"), batch_id),
+                )
+                self._conn.execute(
+                    "DELETE FROM meta WHERE key = ?", (_RESTORED_KEY + batch_id,)
+                )
+            else:
+                self._conn.execute(
+                    "INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)",
+                    (_RESTORED_KEY + batch_id, json.dumps(sorted(done))),
+                )
+        return result
+
+    def _restore_children(
+        self,
+        snapshot: dict[str, Any],
+        entry_map: dict[int, int],
+        restored_entries: Sequence[dict[str, Any]],
+    ) -> None:
+        """把快照裡已還原條目的譯文、歷史與原文變更紀錄寫回，生效譯文依目前優先序重算。"""
+        for table in ("translation", "history"):
+            part = snapshot[table]
+            columns = part["columns"]
+            owner = columns.index("entry_id")
+            rows = []
+            for values in part["rows"]:
+                if int(values[owner]) in entry_map:
+                    remapped = list(values)
+                    remapped[owner] = entry_map[int(values[owner])]
+                    rows.append(remapped)
+            mapping = self._insert_rows(table, columns, rows)
+            if table == "translation":
+                self._restore_revisions(columns, rows, mapping)
+        self._refresh(self._conn, entry_map.values())
+        part = snapshot.get("src_change") or {"columns": [], "rows": []}
+        restored_keys = {
+            (r["kind"], r["mc_version"], r["mod_id"], r["key"])
+            for r in restored_entries
+            if int(r["id"]) in entry_map
+        }
+        columns = [c for c in part["columns"] if c != "id"]
+        for values in part["rows"]:
+            record = dict(zip(part["columns"], values, strict=True))
+            if (
+                record["kind"],
+                record["mc_version"],
+                record["mod_id"],
+                record["key"],
+            ) in restored_keys:
+                self._conn.execute(
+                    f"INSERT OR IGNORE INTO src_change ({','.join(columns)}) "
+                    f"VALUES ({_marks(len(columns))})",
+                    tuple(record[c] for c in columns),
+                )
+
+    def _restore_revisions(
+        self,
+        columns: Sequence[str],
+        rows: Sequence[Sequence],
+        mapping: dict[int, int],
+    ) -> None:
+        """寫入譯文的觸發器會重新編 revision；改回快照當時的值，歷史裡記的 revision 才對得上。"""
+        id_index = list(columns).index("id")
+        revision_index = list(columns).index("revision")
+        for values in rows:
+            self._conn.execute(
+                "UPDATE translation SET revision = ? WHERE id = ? AND revision <> ?",
+                (
+                    values[revision_index],
+                    mapping[int(values[id_index])],
+                    values[revision_index],
+                ),
+            )
 
     def _insert_row(self, table: str, columns: Sequence[str], values: Sequence) -> None:
         self._conn.execute(

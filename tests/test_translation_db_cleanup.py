@@ -37,6 +37,11 @@ def _db(tmp_path: Path) -> TranslationDB:
     return db
 
 
+def _apply(db: TranslationDB, path):
+    """預覽後帶著 token 套用（核心 API 一定要帶預覽的 token）。"""
+    return db.apply_cleanup(path, db.preview_cleanup(path).token)
+
+
 def _count(db: TranslationDB) -> int:
     return db._one("SELECT COUNT(*) FROM entry")[0]
 
@@ -91,7 +96,7 @@ def test_export_lists_only_untouched_candidates_and_does_not_delete(tmp_path):
     }
     assert report.protected == {"license": 1}  # 有繁中的授權條款略過
     data = json.loads((tmp_path / "r.json").read_text(encoding="utf-8"))
-    assert data["format"] == "mod-db-cleanup-v1"
+    assert data["format"] == "mod-db-cleanup-v2"
     assert len(data["items"]) == 5
     assert all(item["delete"] is True for item in data["items"])
 
@@ -101,14 +106,14 @@ def test_apply_deletes_checked_items_and_can_be_reverted(tmp_path):
     before = _count(db)
     report_path = tmp_path / "r.json"
     db.export_cleanup_report(VERSION, report_path)
-    plan = db.apply_cleanup(report_path)
+    plan = _apply(db, report_path)
     assert plan.deletable == 5
     assert _count(db) == before - 5
     assert db._one("SELECT COUNT(*) FROM entry WHERE en_us = ?", (REAL,))[0] == 2
     info = db.last_cleanup_batch()
     assert info is not None and info.count == 5 and info.reverted_at is None
-    restored, skipped = db.revert_cleanup(info.batch_id)
-    assert (restored, skipped) == (5, 0)
+    result = db.revert_cleanup(info.batch_id)
+    assert (result.restored, result.pending, result.complete) == (5, 0, True)
     assert _count(db) == before
     assert db.last_cleanup_batch().reverted_at is not None
     with pytest.raises(ValueError):
@@ -178,10 +183,11 @@ def test_revert_skips_entries_that_were_scanned_again(tmp_path):
     db = _db(tmp_path)
     report_path = tmp_path / "r.json"
     db.export_cleanup_report(VERSION, report_path)
-    plan = db.apply_cleanup(report_path)
+    plan = _apply(db, report_path)
     db.ingest(VERSION, [ScanItem("guide", "m", "g/a.md#1", LICENSE)])
-    restored, skipped = db.revert_cleanup(plan.batch_id)
-    assert (restored, skipped) == (4, 1)
+    result = db.revert_cleanup(plan.batch_id)
+    assert (result.restored, len(result.conflicts), result.complete) == (4, 1, False)
+    assert db.last_cleanup_batch().reverted_at is None  # 沒全部還原就不算完成
 
 
 def test_service_exports_into_a_folder_next_to_the_database_and_lists_newest_first(
@@ -271,15 +277,22 @@ def _with_translations(tmp_path: Path) -> TranslationDB:
     return db
 
 
-def _protected_report(db: TranslationDB, tmp_path: Path):
+def _protected_report(db: TranslationDB, tmp_path: Path, *, confirm: bool = True):
+    """匯出已有譯文的檢查檔；``confirm`` 模擬使用者看過後把所有項目都改成要刪。"""
     path = tmp_path / "p.json"
-    return db.export_protected_report(VERSION, path), path
+    report = db.export_protected_report(VERSION, path)
+    if confirm:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        for item in data["items"]:
+            item["delete"] = True
+        path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    return report, path
 
 
 def test_protected_export_lists_only_rule_matches_that_have_translations(tmp_path):
     db = _with_translations(tmp_path)
     before = _count(db)
-    report, path = _protected_report(db, tmp_path)
+    report, path = _protected_report(db, tmp_path, confirm=False)
     assert _count(db) == before  # 匯出不刪任何東西
     assert report.counts == {"license": 1, "placeholder": 1}
     assert report.protected == {}
@@ -291,7 +304,14 @@ def test_protected_export_lists_only_rule_matches_that_have_translations(tmp_pat
         "b/e.json#pages[1].text",
     }  # 正常譯文 Alpha 不列入
     item = by_key["b/e.json#pages[1].text"]
-    assert item["has_translation"] is True and item["delete"] is True
+    assert item["has_translation"] is True
+    # 人工寫的中文譯文：即使是確定性類別也預設不刪，要人工確認
+    assert item["delete"] is False and item["review"]
+    assert (
+        by_key["g/b.md#0"]["delete"] is False
+    )  # 授權條款是推測類別，有中文譯文也預設不刪
+    assert (report.default_selected, report.review_required) == (0, 2)
+    assert report.exported_total == 2
     assert item["zh_tw"] == "[待補照片]" and item["source"] == "人工"
     assert item["category"] == "placeholder" and item["state_hash"]
     # 一般檢查檔照舊不列入這兩筆
@@ -307,13 +327,13 @@ def test_protected_cleanup_deletes_translations_and_can_be_reverted(tmp_path):
         for t in ("translation", "effective", "history")
     }
     _report, path = _protected_report(db, tmp_path)
-    plan = db.apply_cleanup(path)
+    plan = _apply(db, path)
     assert plan.deletable == 2 and plan.with_translation == 2
     assert plan.by_category == {"license": 1, "placeholder": 1}
     assert _count(db) == before - 2
     assert db._one("SELECT COUNT(*) FROM entry WHERE key = 'item.m.a'")[0] == 1
-    restored, skipped = db.revert_cleanup(plan.batch_id)
-    assert (restored, skipped) == (2, 0)
+    result = db.revert_cleanup(plan.batch_id)
+    assert (result.restored, result.complete) == (2, True)
     assert _count(db) == before
     for table, count in tables.items():
         assert db._one(f"SELECT COUNT(*) FROM {table}")[0] == count, table
@@ -373,14 +393,14 @@ def test_service_exports_the_translated_report_next_to_the_rule_reports(tmp_path
     assert report.path.name.endswith("-translated.json")
     assert report.path.parent == tmp_path / "cleanup_reports"
     assert svc.list_cleanup_reports(db) == [report.path]
-    assert svc.preview_cleanup(db, report.path).deletable == 2
+    assert svc.preview_cleanup(db, report.path).deletable == 0  # 預設都要人工確認
 
 
 def test_protected_export_with_nothing_protected_is_empty(tmp_path):
     db = TranslationDB(tmp_path / "e.db")
     db.ingest(VERSION, [ScanItem("lang", "m", "item.m.a", "Alpha", zh_tw="甲")])
     report, path = _protected_report(db, tmp_path)
-    assert report.total == 0 and report.counts == {}
+    assert report.exported_total == 0 and report.counts == {}
     assert json.loads(path.read_text(encoding="utf-8"))["items"] == []
 
 
@@ -410,9 +430,9 @@ def test_protected_export_does_not_delete_translated_shape_matches_by_default(tm
         ("item.m.color", "FFFFFF"),
     ):
         db.save_manual(db._one("SELECT id FROM entry WHERE key = ?", (key,))[0], text)
-    report, path = _protected_report(db, tmp_path)
+    report, path = _protected_report(db, tmp_path, confirm=False)
     items = {i["key"]: i for i in json.loads(path.read_text("utf-8"))["items"]}
-    assert report.review == 2
+    assert report.review_required == 2 and report.default_selected == 2
     assert (
         items["b/e.json#pages[0].anchor"]["delete"] is False
         and items["b/e.json#pages[0].anchor"]["review"]
@@ -420,8 +440,8 @@ def test_protected_export_does_not_delete_translated_shape_matches_by_default(tm
     assert items["item.m.tip"]["delete"] is False
     assert items["item.m.color"]["delete"] is True  # 譯文沒有中文：照規則
     assert items["_comment"]["delete"] is True  # 語言檔備註靠鍵判斷，不看譯文
-    assert report.counts == {"meta_key": 1, "code_value": 1}
-    plan = db.apply_cleanup(path)
+    assert report.exported_total == 4  # 待確認的也算匯出筆數
+    plan = _apply(db, path)
     assert plan.requested == 2 and plan.deletable == 2
     assert (
         db._one("SELECT COUNT(*) FROM entry WHERE key = 'b/e.json#pages[0].anchor'")[0]
@@ -462,7 +482,8 @@ def test_pascal_case_names_are_text_but_lower_camel_identifiers_are_not():
     from translation_tool.core.text_sniffer import classify_book_string
 
     for name in ("CreeBee", "GraviChestPlate", "CraftTweaker", "FluxoMagnet"):
-        assert classify_book_string(name) == "text", name
+        assert classify_book_string(name, "name") == "text", name  # 顯示欄位
+        assert classify_book_string(name) == "not", name  # 欄位未知：保守不收
     for ident in ("addArea()", "blockPos", "setCanSteal()"):
         assert classify_book_string(ident) == "not", ident
 
