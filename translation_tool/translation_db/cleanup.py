@@ -27,6 +27,7 @@ from translation_tool.core.guide_blocks import NON_TEXT_REASONS, non_text_reason
 from translation_tool.core.text_sniffer import (
     classify_book_string,
     is_placeholder_text,
+    is_text_override_word,
     lang_non_text_reason,
 )
 from translation_tool.translation_db.schema import (
@@ -40,7 +41,6 @@ from translation_tool.translation_db.schema import (
 REPORT_FORMAT = "mod-db-cleanup-v1"
 _LOWERCASE = re.compile(r"[a-z]")
 _CJK = re.compile(r"[一-鿿]")
-_PLAIN_WORD = re.compile(r"[A-Za-z]+")
 # 這些類別是看內容形狀判斷的：已經有中文譯文時，可能是英文單字或名稱被誤判，預設不刪
 _SHAPE_CATEGORIES = frozenset({"not_text", "code_value", "no_letters", "field_name"})
 _LETTER = re.compile(r"[^\W\d_]")
@@ -101,7 +101,7 @@ def entry_cleanup_category(kind: str, key: str, en_us: str) -> str | None:
 def _patchouli_category(key: str, en_us: str) -> str | None:
     if "multiblock.pattern" in key and not _LOWERCASE.search(en_us):
         return "multiblock"
-    if "text_overrides" in key and _PLAIN_WORD.fullmatch(en_us.strip()):
+    if is_text_override_word(key, en_us):
         return None  # 頁面替換詞（raw、item…）會顯示在畫面上，單字也要翻
     if is_placeholder_text(en_us):
         return "placeholder"

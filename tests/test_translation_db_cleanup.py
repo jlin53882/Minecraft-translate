@@ -425,3 +425,15 @@ def test_protected_export_does_not_delete_translated_shape_matches_by_default(tm
     plan = db.apply_cleanup(path)
     assert plan.requested == 2 and plan.deletable == 2
     assert db._one("SELECT COUNT(*) FROM entry WHERE key = 'b/e.json#name'")[0] == 1
+
+
+def test_extractor_picks_up_text_overrides_plain_words():
+    from translation_tool.core.translatable_extractor import extract_translatables
+
+    data = {
+        "pages": [{"type": "x", "text_overrides": [["chest", "raw"], ["a:b", "c"]]}]
+    }
+    found = {i["path"]: i["text"] for i in extract_translatables(data, "b/e.json")}
+    assert found["pages[0].text_overrides[0][0]"] == "chest"
+    assert found["pages[0].text_overrides[0][1]"] == "raw"
+    assert "pages[0].text_overrides[1][0]" not in found  # 資源 id 仍不收

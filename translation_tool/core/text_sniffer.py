@@ -339,6 +339,17 @@ def is_placeholder_text(text: str) -> bool:
     return _PLACEHOLDER_TEXT.search(text) is not None
 
 
+_PLAIN_WORD = re.compile(r"[A-Za-z]+")
+
+
+def is_text_override_word(path: str, value: str) -> bool:
+    """手冊 ``text_overrides`` 裡的純英文單字（``raw``、``item``）：頁面替換詞，會顯示在畫面上。
+
+    單看字串是小寫識別字的形狀，所以要看它所在的路徑。
+    """
+    return "text_overrides" in path and _PLAIN_WORD.fullmatch(value.strip()) is not None
+
+
 def classify_book_string(value: str) -> str:
     """手冊 JSON 的字串值是什麼：``"text"``（要翻譯）、``"lang_key"``（指向語言檔的鍵）或 ``"not"``。
 
