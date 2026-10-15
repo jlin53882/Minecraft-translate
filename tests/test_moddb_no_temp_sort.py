@@ -154,7 +154,10 @@ def test_list_entries_with_filters_avoids_temp_sort(db, extra):
         except (TypeError, ValueError):
             pytest.skip("此篩選組合不存在")
         offenders = _temp_sort_plans(
-            db, lambda: db.list_entries(criteria=criteria, limit=5, offset=2)
+            db,
+            lambda criteria=criteria: db.list_entries(
+                criteria=criteria, limit=5, offset=2
+            ),
         )
         assert not offenders, (extra, sort_by, state, offenders)
 
