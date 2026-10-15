@@ -192,6 +192,8 @@ def test_streaming_quality_page_reused_and_invalidated(tmp_path, monkeypatch):
     monkeypatch.setattr(repository, "_QUALITY_PAGE_BUFFER_LIMIT", 3)
     db = seed(tmp_path / "db.sqlite")
     reader = TranslationDB(db.path, readonly=True)
+    # 逐列掃描的翻頁快取：品質旗標不可用（舊資料庫、有待重算條目）時走這條路
+    monkeypatch.setattr(reader, "_quality_flags_ready", lambda conn=None: False)
     criteria = EntryFilter(
         version="1.20.1", quality=repository.QualityFilter(status="consistent")
     )

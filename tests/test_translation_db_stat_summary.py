@@ -58,6 +58,8 @@ def assert_summary_matches(db):
     # 其他觸發器維護的衍生資料也在每條寫入路徑後與重算比對
     assert db.verify_entry_activity() == []
     assert db.verify_effective_columns() == []
+    assert db.verify_quality_flags() == []
+    assert db._quality_flags_ready()
 
 
 def db_models_stat(row):

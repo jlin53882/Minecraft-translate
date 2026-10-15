@@ -30,6 +30,7 @@ from typing import Any
 from translation_tool.translation_db import (
     effective_columns,
     entry_activity,
+    quality_flags,
     stat_summary,
 )
 from translation_tool.translation_db.bulk_review import BulkReviewMixin
@@ -182,6 +183,8 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
     # 篩選在背景 worker 的唯讀連線掃描、翻頁卻在主連線，所以不能放在連線物件上；
     # 條件鍵含資料庫路徑與資料世代，資料一變就自然失效。
     _quality_page_cache: tuple[tuple, list[tuple], int] | None = None
+    # 連線上已有品質旗標欄位：寫入交易提交前要重算待重算的條目（見 ``quality_flags``）
+    _has_quality_flags = False
 
     def __init__(
         self,
@@ -222,6 +225,7 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
         try:
             if not readonly:
                 init_schema(self._conn)
+                self._has_quality_flags = quality_flags.has_column(self._conn)
             self.has_review_state = "review_status" in {
                 row[1] for row in self._conn.execute("PRAGMA table_info(translation)")
             }
@@ -298,6 +302,9 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
                 self._conn.rollback()
                 raise
             else:
+                if self._has_quality_flags:
+                    # 觸發器只把受影響的條目標成待重算；提交前依 quality.py 重算
+                    quality_flags.settle(self._conn)
                 if keep_review:
                     self._conn.execute(
                         "DELETE FROM meta WHERE key=?", (KEEP_REVIEW_FLAG,)
@@ -1221,6 +1228,24 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
         with self._lock:
             return entry_activity.verify(self._conn)
 
+    def _quality_flags_ready(self, conn: sqlite3.Connection | None = None) -> bool:
+        """品質旗標可直接篩選（見 ``quality_flags.is_ready``）；否則改用逐列判斷。"""
+        with self._lock:
+            return quality_flags.is_ready(conn or self._conn)
+
+    def rebuild_quality_flags(self) -> None:
+        """全部重算條目品質旗標（缺少或失準時的維護操作）。"""
+        if self.readonly:
+            raise PermissionError("唯讀連線不能重建品質旗標")
+        with self._tx() as conn:
+            quality_flags.rebuild(conn)
+        self._has_quality_flags = True
+
+    def verify_quality_flags(self) -> list[tuple]:
+        """比對品質旗標與逐一判斷的重算；空清單表示一致（只供測試與維護）。"""
+        with self._lock:
+            return quality_flags.verify(self._conn)
+
     def _filter_sql(self, criteria: EntryFilter) -> tuple[str, list]:
         where = [_VERSION_CONDITION]
         params: list = [criteria.version]
@@ -1395,8 +1420,17 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
         )
 
     @staticmethod
-    def _quality_prefilter_sql(quality: QualityFilter) -> str:
-        """SQL 預篩：只縮小交給 ``matches_quality`` 的候選列，不改變最終結果。"""
+    def _quality_prefilter_sql(
+        quality: QualityFilter, flags_ready: bool = False
+    ) -> str:
+        """SQL 預篩：只縮小交給 ``matches_quality`` 的候選列，不改變最終結果。
+
+        ``flags_ready`` 時用品質旗標（``quality_flags``）：方向與類別都是「全部」時
+        即為完整結果，否則是「token 不一致」的超集。
+        """
+        flag = quality_flags.filter_sql(quality) if flags_ready else None
+        if flag is not None:
+            return flag
         status = "mismatch" if quality.status == "all" else quality.status
         has_text = "e.en_us <> '' AND f.zh_tw <> ''"
         if status == "unknown_source":
@@ -1441,12 +1475,18 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
         raise_if_cancelled()
         offset = max(0, int(offset))
         page_limit = None if limit is None else max(0, int(limit))
-        if (
-            criteria.quality.status
-            in {"unknown_source", "missing_translation", "whitespace"}
-            and page_limit is not None
-        ):
-            condition += f" AND ({self._quality_prefilter_sql(criteria.quality)})"
+        flags_ready = self._quality_flags_ready()
+        prefilter = self._quality_prefilter_sql(criteria.quality, flags_ready)
+        # 這些條件就是完整結果：直接沿索引分頁，不必逐列判斷
+        exact = (
+            flags_ready and quality_flags.is_exact(criteria.quality)
+        ) or criteria.quality.status in {
+            "unknown_source",
+            "missing_translation",
+            "whitespace",
+        }
+        if exact and page_limit is not None:
+            condition += f" AND ({prefilter})"
             total = self._cached_count(
                 f"SELECT COUNT(*) {self._candidate_source(condition)} WHERE {condition}",
                 params,
@@ -1491,7 +1531,7 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
                     selected = ordered[offset : offset + page_limit]
                 else:
                     ordered, total, complete = self._scan_quality_candidates(
-                        criteria, condition, params, page_limit, offset
+                        criteria, condition, params, page_limit, offset, prefilter
                     )
                     if (
                         not self._write_transaction
@@ -1555,6 +1595,7 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
         params: list,
         page_limit: int | None,
         offset: int,
+        prefilter: str,
     ) -> tuple[list[tuple], int, bool]:
         """掃描符合品質條件的列，回傳（已排序的候選、符合總數、是否含全部符合列）。
 
@@ -1580,7 +1621,6 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
                 "AND et.source=f.source"
             )
         )
-        prefilter = self._quality_prefilter_sql(criteria.quality)
         cursor = self._conn.execute(
             f"{select} {query_source} WHERE ({condition}) AND {prefilter}",
             tuple(params),
@@ -1771,7 +1811,8 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
         source = self._query_source()
         narrow = (
             f"SELECT e.id, e.en_us, f.zh_tw, e.key {source} "
-            f"WHERE ({cond}) AND {self._quality_prefilter_sql(quality)}"
+            f"WHERE ({cond}) AND "
+            f"{self._quality_prefilter_sql(quality, self._quality_flags_ready(conn))}"
         )
         matched_ids: list[int] = []
         connection.set_progress_handler(lambda: int(is_cancelled()), 10_000)

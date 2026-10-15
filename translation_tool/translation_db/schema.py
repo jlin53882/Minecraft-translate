@@ -266,19 +266,21 @@ def init_schema(conn: sqlite3.Connection) -> None:
 def _install_derived_tables(conn: sqlite3.Connection) -> None:
     """安裝並填入觸發器維護的衍生資料（可隨時重算，不需先備份）。
 
-    全庫統計摘要（``stat_summary``）、條目最近人工活動（``entry_activity``）與
-    ``effective`` 的衍生欄位（``effective_columns``）。
+    全庫統計摘要（``stat_summary``）、條目最近人工活動（``entry_activity``）、
+    ``effective`` 的衍生欄位（``effective_columns``）與條目品質旗標（``quality_flags``）。
     """
     # 這些模組引用本模組的來源代碼，延後載入以免循環匯入
     from translation_tool.translation_db import (
         effective_columns,
         entry_activity,
+        quality_flags,
         stat_summary,
     )
 
     stat_summary.install(conn)
     entry_activity.install(conn)
     effective_columns.install(conn)
+    quality_flags.install(conn)
 
 
 def _backup_before_review_migration(conn: sqlite3.Connection) -> Path | None:
