@@ -339,6 +339,36 @@ def is_placeholder_text(text: str) -> bool:
     return _PLACEHOLDER_TEXT.search(text) is not None
 
 
+_FORMAT_TOKEN = re.compile(
+    r"%(?:\d+\$)?[sdfxXeEgGcb%]|\{\d*\}|§[0-9a-fk-orA-FK-OR]|\$\([^)]*\)"
+)
+_KEY_SEGMENT = re.compile(r"[#./\[\]]+")
+_FIELD_NAMES = frozenset({"description", "title", "name", "text", "summary"})
+
+
+def value_shape_reason(text: str) -> str | None:
+    """語言檔與進度的值不是文字時回傳 ``"placeholder"`` 或 ``"no_letters"``。
+
+    只有符號或數字的值（``← →``、``180°``）沒有東西可翻；含 ``%s`` 之類格式碼的要保留，
+    因為中文語序可能不同。
+    """
+    if is_placeholder_text(text):
+        return "placeholder"
+    if not _HAS_LETTER.search(_FORMAT_TOKEN.sub("", text)) and not _FORMAT_TOKEN.search(
+        text
+    ):
+        return "no_letters"
+    return None
+
+
+def is_field_name_text(path: str, text: str) -> bool:
+    """內容就是它所在的欄位名稱（進度 ``description`` 欄位的內容是 ``Description``）。"""
+    word = text.strip().lower()
+    return word in _FIELD_NAMES and word in {
+        part.lower() for part in _KEY_SEGMENT.split(path)
+    }
+
+
 _PLAIN_WORD = re.compile(r"[A-Za-z]+")
 
 
@@ -454,7 +484,11 @@ def advancement_texts(data: object) -> dict[str, str]:
         path = f"display.{field}"
         if isinstance(value, dict) and isinstance(value.get("text"), str):
             value, path = value["text"], f"{path}.text"
-        if isinstance(value, str) and classify_book_string(value) == "text":
+        if (
+            isinstance(value, str)
+            and classify_book_string(value) == "text"
+            and not is_field_name_text(path, value)
+        ):
             found[path] = value
     return found
 

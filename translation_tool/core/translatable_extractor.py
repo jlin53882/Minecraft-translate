@@ -20,6 +20,7 @@ from translation_tool.core.text_sniffer import (
     is_text_override_word,
     lang_non_text_reason,
     looks_like_book_json,
+    value_shape_reason,
 )
 from translation_tool.utils.config_manager import load_config
 
@@ -154,6 +155,7 @@ def extract_translatables(json_data, file_path):
                         if (
                             is_value_translatable(v, is_lang=True)
                             and lang_non_text_reason(k, v) is None
+                            and value_shape_reason(v) is None
                         ):
                             items.append(
                                 {

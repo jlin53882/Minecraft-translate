@@ -437,3 +437,32 @@ def test_extractor_picks_up_text_overrides_plain_words():
     assert found["pages[0].text_overrides[0][0]"] == "chest"
     assert found["pages[0].text_overrides[0][1]"] == "raw"
     assert "pages[0].text_overrides[1][0]" not in found  # 資源 id 仍不收
+
+
+def test_extraction_skips_what_cleanup_would_remove():
+    """掃描與清理用同一套規則：清掉的條目不會在下次掃描又被收進來。"""
+    from translation_tool.core.text_sniffer import advancement_texts
+    from translation_tool.core.translatable_extractor import extract_translatables
+
+    lang = {
+        "a.todo": "TODO",
+        "a.arrows": "← →",
+        "a.deg": "180°",
+        "a.fmt": "%s",
+        "a.real": "Iron Ingot",
+    }
+    found = {
+        i["path"] for i in extract_translatables(lang, Path("assets/m/lang/en_us.json"))
+    }
+    assert "a.real" in found and "a.fmt" not in found
+    assert not found & {"a.todo", "a.arrows", "a.deg"}
+    adv = {
+        "criteria": {"x": {}},
+        "display": {
+            "title": {"text": "Title"},
+            "description": {"text": "Real description here"},
+        },
+    }
+    assert advancement_texts(adv) == {
+        "display.description.text": "Real description here"
+    }
