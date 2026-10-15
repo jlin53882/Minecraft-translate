@@ -102,8 +102,13 @@ def entry_cleanup_category(
             return reason
         if reason := value_shape_reason(en_us):
             return reason
-        if kind == KIND_ADVANCEMENT and is_field_name_text(key, en_us):
-            return "field_name"
+        if kind == KIND_ADVANCEMENT:
+            if is_field_name_text(key, en_us):
+                return "field_name"
+            # 進度掃描用同一個分類（advancement_texts）：資源 ID、語言檔鍵值、網址不收
+            verdict = classify_book_string(en_us, book_field(key))
+            if verdict != "text":
+                return "lang_key" if verdict == "lang_key" else "not_text"
     return None
 
 
@@ -372,8 +377,9 @@ class CleanupMixin:
                     "INSERT OR IGNORE INTO meta (key, value) VALUES (?, ?)",
                     (_DB_ID_KEY, value),
                 )
-        except sqlite3.Error:
-            return self._read_db_id() or ""  # 唯讀資料庫寫不進去：沒有身分可記
+        except sqlite3.Error as exc:
+            # 唯讀資料庫寫不進去：沒有身分就不能產生可套用的檢查檔
+            raise ValueError("資料庫無法寫入，不能匯出清理檢查檔") from exc
         return self._read_db_id() or value
 
     # ------------------------------------------------------------------ 找出
@@ -650,10 +656,12 @@ class CleanupMixin:
             raise ValueError("檢查檔缺少類型（mode）")
         if not isinstance(data.get("version"), str) or not data["version"]:
             raise ValueError("檢查檔缺少版本")
-        if not isinstance(data.get("db_id"), str) or not isinstance(
-            data.get("items"), list
+        if (
+            not isinstance(data.get("db_id"), str)
+            or not data["db_id"]
+            or not isinstance(data.get("items"), list)
         ):
-            raise ValueError("檢查檔缺少資料庫身分或項目清單")  # noqa: TRY004
+            raise ValueError("檢查檔缺少資料庫身分或項目清單")
         return data, hashlib.sha256(raw).hexdigest()
 
     def _wanted_items(
@@ -687,8 +695,8 @@ class CleanupMixin:
     ) -> CleanupPlan:
         """逐筆依目前資料與規則重新檢查檔案裡標記要刪除的項目，並算出 token。"""
         version, mode = data["version"], data["mode"]
-        db_id = self._read_db_id() or ""
-        if data["db_id"] != db_id:
+        db_id = self._read_db_id()
+        if not db_id or data["db_id"] != db_id:
             raise ValueError("這份檢查檔不是從目前的資料庫匯出的")
         plan = CleanupPlan(version=version, mode=mode)
         wanted = self._wanted_items(data, plan)

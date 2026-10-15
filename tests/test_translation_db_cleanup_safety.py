@@ -473,3 +473,37 @@ def test_patchouli_lang_key_strings_are_cleaned_like_scanning_skips_them():
         entry_cleanup_category("patchouli", "b/e.json#pages[0].text", "Hello there")
         is None
     )
+
+
+def test_empty_db_id_never_passes_the_cross_database_check(tmp_path):
+    db = _db(tmp_path)
+    path = _rule_report(db, tmp_path)
+    data = _read(path)
+    data["db_id"] = ""
+    _write(path, data)
+    other = _db(tmp_path, "other.db")  # 沒有 cleanup_db_id 的資料庫
+    for target in (db, other):
+        with pytest.raises(ValueError):
+            target.preview_cleanup(path)
+    fresh = _db(tmp_path, "fresh.db")
+    data["db_id"] = "x"
+    _write(path, data)
+    with pytest.raises(ValueError, match="不是從目前的資料庫匯出"):
+        fresh.preview_cleanup(path)  # 資料庫沒有身分也不能套用任何檢查檔
+
+
+def test_advancement_cleanup_matches_what_the_scanner_collects():
+    from translation_tool.core.text_sniffer import advancement_texts
+    from translation_tool.translation_db.cleanup import entry_cleanup_category
+
+    values = {
+        "minecraft:stone": "not_text",
+        "https://example.com/x": "not_text",
+        "book.mod.entry.page": "lang_key",
+        "Stone Age": None,
+    }
+    for value, expected in values.items():
+        key = "a.json#display.title.text"
+        assert entry_cleanup_category("advancement", key, value) == expected, value
+        found = advancement_texts({"display": {"title": {"text": value}}})
+        assert (not found) == (expected is not None), value
