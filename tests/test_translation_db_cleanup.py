@@ -400,14 +400,14 @@ def test_protected_export_does_not_delete_translated_shape_matches_by_default(tm
     db.ingest(
         VERSION,
         [
-            ScanItem("patchouli", "m", "b/e.json#name", "CreeBee"),
+            ScanItem("patchouli", "m", "b/e.json#name", "addArea()"),
             ScanItem("lang", "m", "item.m.tip", "BARBED_WIRE"),
             ScanItem("lang", "m", "item.m.color", "FFFFFF"),
             ScanItem("lang", "m", "_comment", "Note", zh_tw="備註"),
         ],
     )
     for key, text in (
-        ("b/e.json#name", "爬行蜂"),
+        ("b/e.json#name", "新增區域()"),
         ("item.m.tip", "鐵絲網"),
         ("item.m.color", "FFFFFF"),
     ):
@@ -466,3 +466,12 @@ def test_extraction_skips_what_cleanup_would_remove():
     assert advancement_texts(adv) == {
         "display.description.text": "Real description here"
     }
+
+
+def test_pascal_case_names_are_text_but_lower_camel_identifiers_are_not():
+    from translation_tool.core.text_sniffer import classify_book_string
+
+    for name in ("CreeBee", "GraviChestPlate", "CraftTweaker", "FluxoMagnet"):
+        assert classify_book_string(name) == "text", name
+    for ident in ("addArea()", "blockPos", "setCanSteal()"):
+        assert classify_book_string(ident) == "not", ident

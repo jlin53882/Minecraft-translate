@@ -325,6 +325,7 @@ _BOOL = re.compile(r"^(true|false)$", re.IGNORECASE)
 _HEX = re.compile(r"^#?[0-9a-fA-F]{3,8}$")
 _HEX_UPPER_ONLY = re.compile(r"^[0-9A-F]{6}$")
 _LOWER_IDENT = re.compile(r"^#?[a-z0-9_\-./]+$")
+# 小駝峰（addArea、blockPos）是識別字；大駝峰（CreeBee、CraftTweaker）是名稱，要翻
 _CAMEL = re.compile(r"[a-z][A-Z]")
 _HAS_LETTER = re.compile(r"[^\W\d_]")
 _WHITESPACE = re.compile("[ \t\r\n]")
@@ -417,7 +418,7 @@ def classify_book_string(value: str) -> str:
             return "not"
         if _TEMPLATE_VAR.fullmatch(s) or len(s) <= 1:
             return "not"
-        if _LOWER_IDENT.fullmatch(core) or _CAMEL.search(core):
+        if _LOWER_IDENT.fullmatch(core) or (core[:1].islower() and _CAMEL.search(core)):
             return "not"
         return "text" if _HAS_LETTER.search(s) else "not"
     tokens = _BOOK_MARKUP.sub("", s).split()
