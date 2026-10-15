@@ -33,6 +33,7 @@ __all__ = [
     "open_report_folder",
     "preview_cleanup",
     "revert_cleanup",
+    "translated_overview",
 ]
 
 REPORT_DIR_NAME = "cleanup_reports"
@@ -42,11 +43,20 @@ def cleanup_report_dir(db: TranslationDB) -> Path:
     return db.path.parent / REPORT_DIR_NAME
 
 
-def export_cleanup(db: TranslationDB, version: str) -> CleanupReport:
-    """把可清理的條目寫成檢查檔（只讀資料庫）。"""
+def export_cleanup(
+    db: TranslationDB, version: str, *, translated: bool = False
+) -> CleanupReport:
+    """把可清理的條目寫成檢查檔（只讀資料庫）。
+
+    ``translated=True`` 匯出「已翻譯內容」（已有生效譯文的條目）；檔名多一個
+    ``-translated`` 後綴，清單仍依時間排序。
+    """
     stamp = time.strftime("%Y%m%d-%H%M%S")
     safe_version = "".join(c if c.isalnum() or c in "._-" else "_" for c in version)
-    path = cleanup_report_dir(db) / f"cleanup-{safe_version}-{stamp}.json"
+    suffix = "-translated" if translated else ""
+    path = cleanup_report_dir(db) / f"cleanup-{safe_version}-{stamp}{suffix}.json"
+    if translated:
+        return db.export_translated_report(version, path)
     return db.export_cleanup_report(version, path)
 
 
@@ -91,3 +101,8 @@ def cleanup_overview(
     candidates, protected = db.cleanup_candidates(version)
     counts = Counter((c.kind, c.category) for c in candidates)
     return dict(counts), sum(protected.values())
+
+
+def translated_overview(db: TranslationDB, version: str) -> dict[str, int]:
+    """所選版本已有生效譯文的條目數，依類型分（只讀；「已翻譯內容」可清理的筆數）。"""
+    return db.translated_counts(version)

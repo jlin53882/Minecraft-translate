@@ -257,3 +257,118 @@ def test_report_items_must_match_the_entry_identity(tmp_path):
     plan = db.preview_cleanup(report_path)
     assert plan.skipped["類型、模組或鍵值與檢查檔不符"] == 3
     assert plan.deletable == len(data["items"]) - 3 - plan.skipped["已有譯文或歷史"]
+
+
+# ---------------------------------------------------------------- 已翻譯內容
+def _translated_db(tmp_path: Path) -> TranslationDB:
+    """``_db`` 加上一筆人工譯文：已翻譯的條目有兩筆（jar 繁中的授權條款、人工的 Alpha）。"""
+    db = _db(tmp_path)
+    entry_id = db._one("SELECT id FROM entry WHERE key = 'item.m.a'")[0]
+    db.save_manual(entry_id, "甲")
+    return db
+
+
+def _translated_report(db: TranslationDB, tmp_path: Path):
+    path = tmp_path / "t.json"
+    return db.export_translated_report(VERSION, path), path
+
+
+def test_translated_export_lists_only_entries_with_an_effective_translation(tmp_path):
+    db = _translated_db(tmp_path)
+    before = _count(db)
+    report, path = _translated_report(db, tmp_path)
+    assert _count(db) == before  # 匯出不刪任何東西
+    assert report.counts == {"translated": 2}
+    assert report.protected == {}
+    assert report.sources == {"模組自帶繁中": 1, "人工": 1}
+    data = json.loads(path.read_text(encoding="utf-8"))
+    assert {item["key"] for item in data["items"]} == {"g/b.md#0", "item.m.a"}
+    manual = next(i for i in data["items"] if i["key"] == "item.m.a")
+    assert manual["category"] == "translated" and manual["delete"] is True
+    assert manual["zh_tw"] == "甲" and manual["source"] == "人工"
+    assert manual["zh_tw_hash"] and manual["en_us_hash"]
+
+
+def test_translated_cleanup_deletes_translations_and_can_be_reverted(tmp_path):
+    db = _translated_db(tmp_path)
+    before = _count(db)
+    translations = db._one("SELECT COUNT(*) FROM translation")[0]
+    effective = db._one("SELECT COUNT(*) FROM effective")[0]
+    history = db._one("SELECT COUNT(*) FROM history")[0]
+    assert history >= 1  # 人工儲存會留下歷史
+    _report, path = _translated_report(db, tmp_path)
+    plan = db.apply_cleanup(path)
+    assert plan.deletable == 2 and plan.by_category == {"translated": 2}
+    assert _count(db) == before - 2
+    # 還沒翻譯的條目與一般規則的垃圾條目都不碰
+    assert db._one("SELECT COUNT(*) FROM entry WHERE en_us = ?", (REAL,))[0] == 2
+    assert db._one("SELECT COUNT(*) FROM effective")[0] == effective - 2
+    restored, skipped = db.revert_cleanup(plan.batch_id)
+    assert (restored, skipped) == (2, 0)
+    assert _count(db) == before
+    assert db._one("SELECT COUNT(*) FROM translation")[0] == translations
+    assert db._one("SELECT COUNT(*) FROM effective")[0] == effective
+    assert db._one("SELECT COUNT(*) FROM history")[0] == history
+
+
+def test_translated_item_is_skipped_when_its_translation_changed_since_export(tmp_path):
+    db = _translated_db(tmp_path)
+    _report, path = _translated_report(db, tmp_path)
+    entry_id = db._one("SELECT id FROM entry WHERE key = 'item.m.a'")[0]
+    db.save_manual(entry_id, "甲（改過）")
+    plan = db.preview_cleanup(path)
+    assert plan.skipped["譯文已變動"] == 1
+    assert plan.deletable == 1
+
+
+def test_translated_item_is_skipped_when_it_no_longer_has_a_translation(tmp_path):
+    db = _translated_db(tmp_path)
+    _report, path = _translated_report(db, tmp_path)
+    with db._tx() as conn:
+        conn.execute(
+            "DELETE FROM effective WHERE entry_id IN (SELECT id FROM entry WHERE key = 'item.m.a')"
+        )
+    plan = db.preview_cleanup(path)
+    assert plan.skipped["目前沒有生效譯文"] == 1
+    assert plan.deletable == 1
+
+
+def test_a_rule_report_item_can_never_delete_a_translated_entry(tmp_path):
+    db = _translated_db(tmp_path)
+    _report, path = _translated_report(db, tmp_path)
+    data = json.loads(path.read_text(encoding="utf-8"))
+    for item in data["items"]:
+        item["category"] = "license"  # 改成一般規則的類別：保護規則照舊
+    path.write_text(json.dumps(data), encoding="utf-8")
+    plan = db.preview_cleanup(path)
+    assert plan.deletable == 0
+    assert plan.skipped["已有譯文或歷史"] == 1  # 授權條款
+    assert plan.skipped["目前規則判為正常內容"] == 1  # Alpha
+
+
+def test_the_rule_report_still_leaves_translated_entries_alone(tmp_path):
+    db = _translated_db(tmp_path)
+    report = db.export_cleanup_report(VERSION, tmp_path / "r.json")
+    assert "translated" not in report.counts
+    assert report.protected == {"license": 1}
+
+
+def test_translated_counts_and_service_export(tmp_path):
+    from app.services_impl import moddb_cleanup_service as svc
+
+    db = _translated_db(tmp_path)
+    assert svc.translated_overview(db, VERSION) == {"guide": 1, "lang": 1}
+    assert svc.translated_overview(db, "9.9.9") == {}
+    report = svc.export_cleanup(db, VERSION, translated=True)
+    assert report.path.name.endswith("-translated.json")
+    assert report.path.parent == tmp_path / "cleanup_reports"
+    assert svc.list_cleanup_reports(db) == [report.path]
+    assert svc.preview_cleanup(db, report.path).deletable == 2
+
+
+def test_translated_export_with_nothing_translated_is_empty(tmp_path):
+    db = TranslationDB(tmp_path / "e.db")
+    db.ingest(VERSION, [ScanItem("lang", "m", "item.m.a", "Alpha")])
+    report, path = _translated_report(db, tmp_path)
+    assert report.total == 0 and report.counts == {}
+    assert json.loads(path.read_text(encoding="utf-8"))["items"] == []
