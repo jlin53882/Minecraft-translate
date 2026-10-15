@@ -77,10 +77,19 @@ STRONG_CATEGORIES = frozenset({"multiblock", "meta_key", "placeholder", "lang_ke
 _CLEANUP_KINDS = (KIND_GUIDE, KIND_PATCHOULI, KIND_ADVANCEMENT, KIND_LANG)
 
 
-def entry_cleanup_category(kind: str, key: str, en_us: str) -> str | None:
-    """依目前規則判斷這個條目屬於哪一類「不該收」；正常條目回傳 None。"""
+def entry_cleanup_category(
+    kind: str, key: str, en_us: str, zh_text: str = ""
+) -> str | None:
+    """依目前規則判斷這個條目屬於哪一類「不該收」；正常條目回傳 None。
+
+    語言檔條目沒有原文（翻譯 ZIP 先建立的）時，改用鍵與 ``zh_text``（目前譯文）判斷。
+    """
     if not en_us or not en_us.strip():
-        return None  # 沒有原文的條目（只有譯文來源）不在這裡處理
+        if kind != KIND_LANG:
+            return None  # 其他類型沒有原文就沒有可判斷的內容
+        en_us = zh_text
+        if not en_us.strip():
+            return "meta_key" if lang_non_text_reason(key, "") == "meta_key" else None
     if kind == KIND_GUIDE:
         return non_text_reason(en_us)
     if kind == KIND_PATCHOULI:
@@ -286,7 +295,7 @@ def _report_item(candidate: CleanupCandidate) -> dict[str, Any]:
 def _item_problem(row: tuple | None, item: dict[str, Any], version: str) -> str | None:
     """檢查檔項目和資料庫目前的條目還對得上嗎；對得上回傳 None，否則回傳略過原因。
 
-    ``row`` 是 ``(id, kind, mc_version, mod_id, key, en_us)``。
+    ``row`` 是 ``(id, kind, mc_version, mod_id, key, en_us, 目前譯文)``。
     """
     if row is None:
         return "條目已不存在"
@@ -296,7 +305,7 @@ def _item_problem(row: tuple | None, item: dict[str, Any], version: str) -> str 
         return "類型、模組或鍵值與檢查檔不符"
     if _text_hash(row[5]) != item.get("en_us_hash"):
         return "原文已變動"
-    category = entry_cleanup_category(row[1], row[4], row[5])
+    category = entry_cleanup_category(row[1], row[4], row[5], row[6])
     if category is None:
         return "目前規則判為正常內容"
     if category != item.get("category"):
@@ -413,13 +422,14 @@ class CleanupMixin:
     def _flagged_candidates(self, version: str) -> list[CleanupCandidate]:
         """目前規則判定「不該收」的條目（不看有沒有譯文）。"""
         flagged: list[CleanupCandidate] = []
-        for entry_id, kind, mod_id, key, en_us in self._q(
-            "SELECT id, kind, mod_id, key, en_us FROM entry "
-            f"WHERE mc_version = ? AND kind IN ({_marks(len(_CLEANUP_KINDS))}) "
-            "ORDER BY kind, mod_id, key",
+        for entry_id, kind, mod_id, key, en_us, zh_text in self._q(
+            "SELECT e.id, e.kind, e.mod_id, e.key, e.en_us, COALESCE(f.zh_tw, '') "
+            "FROM entry e LEFT JOIN effective f ON f.entry_id = e.id "
+            f"WHERE e.mc_version = ? AND e.kind IN ({_marks(len(_CLEANUP_KINDS))}) "
+            "ORDER BY e.kind, e.mod_id, e.key",
             (version, *_CLEANUP_KINDS),
         ):
-            category = entry_cleanup_category(kind, key, en_us)
+            category = entry_cleanup_category(kind, key, en_us, zh_text)
             if category is not None:
                 flagged.append(
                     CleanupCandidate(entry_id, kind, mod_id, key, en_us, category)
@@ -686,8 +696,10 @@ class CleanupMixin:
         rows: dict[int, tuple] = {}
         for chunk in _chunks(ids):
             for row in self._q(
-                "SELECT id, kind, mc_version, mod_id, key, en_us FROM entry "
-                f"WHERE id IN ({_marks(len(chunk))})",
+                "SELECT e.id, e.kind, e.mc_version, e.mod_id, e.key, e.en_us, "
+                "COALESCE(f.zh_tw, '') FROM entry e "
+                "LEFT JOIN effective f ON f.entry_id = e.id "
+                f"WHERE e.id IN ({_marks(len(chunk))})",
                 tuple(chunk),
             ):
                 rows[int(row[0])] = row
@@ -716,7 +728,9 @@ class CleanupMixin:
             plan.valid_ids.append(entry_id)
             plan.with_translation += entry_id in translated
             row = rows[entry_id]
-            plan.by_category[entry_cleanup_category(row[1], row[4], row[5])] += 1
+            plan.by_category[
+                entry_cleanup_category(row[1], row[4], row[5], row[6])
+            ] += 1
         plan.token = _digest(
             {
                 "report": report_sha,

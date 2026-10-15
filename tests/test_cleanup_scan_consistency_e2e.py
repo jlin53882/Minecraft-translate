@@ -96,8 +96,12 @@ OLD_JUNK = JUNK_LANG | {LICENSE_KEY, ANCHOR_KEY}
 
 
 def _legacy_items(jar: Path) -> list[ScanItem]:
-    """舊版掃描不過濾的結果：全部字串逐字匯入，再加上舊版會收的授權段落與 anchor。"""
-    return _scan(jar, clean_english=False) + [
+    """舊版掃描不過濾的結果：lang 全部頂層字串逐字匯入，再加上舊版會收的授權段落與 anchor。"""
+    return [
+        ScanItem("lang", "m", key, value)
+        for key, value in LANG.items()
+        if isinstance(value, str)
+    ] + [
         ScanItem("guide", "m", LICENSE_KEY, LICENSE),
         ScanItem("patchouli", "m", ANCHOR_KEY, "QuickStart"),
     ]
@@ -148,26 +152,22 @@ def test_old_unfiltered_data_is_cleaned_and_rescan_does_not_readd_it(tmp_path):
     # 重掃同一個 jar（預設清理）：被清掉的不會回來，原本留下的也不會重複或遺失
     db.ingest(VERSION, _scan(jar))
     assert not OLD_JUNK & _all_keys(db)
-    assert _all_keys(db) - kept == {  # 只多出舊資料沒有的巢狀／清單值
-        "gui.m.nested.text",
-        "gui.m.list[0]",
-        "gui.m.list[1]",
-    }
+    added = _all_keys(db) - kept
+    assert {"gui.m.nested.text", "gui.m.list[0]", "gui.m.list[1]"} <= added
     assert _report_keys(db, tmp_path, "r2.json") == set()
 
 
-def test_clean_english_off_ingests_flagged_rows_and_cleanup_is_not_permanent(tmp_path):
-    """已知契約：關閉「清理」＝逐字匯入，清理過的資料重掃會再出現。"""
+def test_clean_english_off_still_skips_what_cleanup_removes(tmp_path):
+    """關閉「清理」只放寬機器翻譯的篩選；清理規則判定不是文字的仍不收，清理後重掃不會回來。"""
     jar = _jar(tmp_path / "m.jar")
     db = TranslationDB(tmp_path / "t.db")
-    db.ingest(VERSION, _scan(jar, clean_english=False))
-    assert _report_keys(db, tmp_path, "r.json") == JUNK_LANG
+    items = _scan(jar, clean_english=False)
+    assert not _keys(items) & JUNK_LANG
+    db.ingest(VERSION, _legacy_items(jar))
     _clean(db, tmp_path)
+    db.ingest(VERSION, items)
     assert not JUNK_LANG & _all_keys(db)
-
-    db.ingest(VERSION, _scan(jar, clean_english=False))
-    assert JUNK_LANG <= _all_keys(db)
-    assert _report_keys(db, tmp_path, "r2.json") == JUNK_LANG
+    assert _report_keys(db, tmp_path, "r2.json") == set()
 
 
 def test_clean_english_off_drops_nested_and_list_lang_values(tmp_path):
@@ -179,39 +179,40 @@ def test_clean_english_off_drops_nested_and_list_lang_values(tmp_path):
     assert not off & {"gui.m.nested.text", "gui.m.list[0]", "gui.m.list[1]"}
 
 
-def test_translated_zip_with_junk_source_is_listed_as_protected_again_after_rescan(
-    tmp_path,
-):
-    """翻譯 ZIP（translated）逐字收 zh_tw；搭配逐字原文時，清理規則會把它們列為受保護。"""
+def test_translated_zip_does_not_bring_cleaned_rows_back(tmp_path):
+    """翻譯 ZIP 逐字收 zh_tw，但清理規則判定不是文字的列（含原文為空、只能看鍵與譯文的）不收。"""
     jar = _jar(tmp_path / "m.jar", zh=ZH)
-    kw = {"translated": True, "clean_english": False}
-    db = TranslationDB(tmp_path / "t.db")
-    db.ingest(VERSION, _scan(jar, **kw))
-    assert JUNK_LANG <= _all_keys(db)
-    protected = _report_keys(db, tmp_path, "p.json", protected=True)
-    assert JUNK_LANG <= protected
-    assert (
-        _report_keys(db, tmp_path, "r.json") & JUNK_LANG == set()
-    )  # 有譯文，不在一般檢查檔
+    for kw in (
+        {"translated": True, "clean_english": False},
+        {"translated": True},
+    ):
+        items = _scan(jar, **kw)
+        keys = _keys(items)
+        assert not keys & JUNK_LANG, kw
+        assert "item.m.sword" in keys  # 正常譯文照收
+        db = TranslationDB(tmp_path / f"t{len(kw)}.db")
+        db.ingest(VERSION, items)
+        assert _report_keys(db, tmp_path, f"r{len(kw)}.json") == set()
+        assert _report_keys(db, tmp_path, f"p{len(kw)}.json", protected=True) == set()
 
+
+def test_existing_rows_without_original_are_cleaned_by_key_and_translation(tmp_path):
+    """舊資料裡原文為空的垃圾列（翻譯 ZIP 先建立的）：看鍵與目前譯文，列在已有譯文的檢查檔。"""
+    db = TranslationDB(tmp_path / "t.db")
+    db.ingest(
+        VERSION,
+        [
+            ScanItem("lang", "m", "_comment", "", zh_tw="備註", source=5),
+            ScanItem("lang", "m", "gui.m.arrows", "", zh_tw="← →", source=5),
+            ScanItem("lang", "m", "gui.m.angle", "", zh_tw="180°", source=5),
+            ScanItem("lang", "m", "item.m.sword", "", zh_tw="鐵劍", source=5),
+        ],
+    )
+    protected = _report_keys(db, tmp_path, "p.json", protected=True)
+    assert protected == {"_comment", "gui.m.arrows", "gui.m.angle"}
     path = tmp_path / "p.json"
     _delete_all(path)
-    db.apply_cleanup(path, db.preview_cleanup(path).token)
-    assert not JUNK_LANG & _all_keys(db)
-
-    db.ingest(VERSION, _scan(jar, **kw))  # 重掃：又回來了
-    assert JUNK_LANG <= _all_keys(db)
-    assert JUNK_LANG <= _report_keys(db, tmp_path, "p2.json", protected=True)
-
-
-def test_translated_zip_default_clean_english_keeps_junk_zh_rows_unflagged(tmp_path):
-    """特徵：translated 但仍清理原文時，垃圾原文被濾掉、zh_tw 逐字收，原文為空的條目清理不處理。"""
-    jar = _jar(tmp_path / "m.jar", zh=ZH)
-    items = _scan(jar, translated=True)
-    rows = {i.key: i for i in items}
-    assert JUNK_LANG <= set(rows)
-    assert all(rows[k].en_us == "" and rows[k].zh_tw for k in JUNK_LANG)
-    db = TranslationDB(tmp_path / "t.db")
-    db.ingest(VERSION, items)
-    assert _report_keys(db, tmp_path, "r.json") == set()
-    assert _report_keys(db, tmp_path, "p.json", protected=True) == set()
+    plan = db.preview_cleanup(path)
+    assert plan.deletable == 3
+    db.apply_cleanup(path, plan.token)
+    assert _all_keys(db) == {"item.m.sword"}

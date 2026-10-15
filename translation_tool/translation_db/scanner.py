@@ -34,6 +34,7 @@ from translation_tool.core.patchouli_compat import (
 )
 from translation_tool.core.text_sniffer import advancement_texts
 from translation_tool.core.translatable_extractor import extract_translatables
+from translation_tool.translation_db.cleanup import entry_cleanup_category
 from translation_tool.translation_db.identity import (
     FileIdentity,
     classify_member,
@@ -84,7 +85,7 @@ class ScanOptions:
     dry_run: bool = False  # 只讀 jar 並統計，不寫入資料庫
     apply_rules: bool = True  # 與語系合併相同：對 jar 自帶譯文套用「替換規則」
     rules: Any = field(default=(), compare=False, repr=False)  # 載入後的替換規則
-    clean_english: bool = True  # 判斷並清理英文內容；關閉則所有英文字串逐字匯入
+    clean_english: bool = True  # 判斷並清理英文內容；關閉則放寬機器翻譯篩選，其餘字串逐字匯入
     translated: bool = False  # 來源是已翻譯的內容（翻譯 ZIP）：zh_tw 不判讀、直接匯入
     translation_source: int = SRC_CUSTOM  # translated 時，zh_tw 的來源代碼
 
@@ -485,12 +486,19 @@ def _items_for_group(
         return []
 
     ident = FileIdentity(kind, mod_id, file_key, "en_us")
+    # 翻譯 ZIP 的譯文即使原文被抽取規則濾掉，仍要用原文判斷是不是垃圾條目
+    en_raw = (
+        extract_all_strings(en, is_lang=is_lang)
+        if options.translated and en is not None
+        else {}
+    )
     out: list[ScanItem] = []
     for path in paths:
+        key = ident.item_key(path)
         tw = cn = ""
         source = None
         if options.translated:
-            tw = tw_all.get(path, "")  # 不判讀、不套規則，逐字匯入
+            tw = tw_all.get(path, "")  # 不判讀、不套替換規則，逐字匯入
             source = options.translation_source
         elif tw_obj is not None:
             raw = get_by_path(tw_obj, path)
@@ -501,11 +509,20 @@ def _items_for_group(
             raw_cn = get_by_path(cn_obj, path)
             if isinstance(raw_cn, str) and contains_cjk(raw_cn):
                 cn = raw_cn
+        # 不論來源或「清理英文」開關，清理規則判定不是文字的條目都不收（沒有原文時看鍵與譯文），
+        # 否則清理過的資料重新掃描、匯入翻譯 ZIP 後又會回來
+        if (
+            entry_cleanup_category(
+                kind, key, en_items.get(path) or en_raw.get(path, ""), tw or cn
+            )
+            is not None
+        ):
+            continue
         out.append(
             ScanItem(
                 kind=kind,
                 mod_id=mod_id,
-                key=ident.item_key(path),
+                key=key,
                 en_us=en_items.get(path, ""),
                 zh_tw=tw,
                 zh_cn=cn,
