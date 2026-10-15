@@ -19,9 +19,10 @@ ADR-0003 之後，條目清單仍有三類查詢要對整個版本逐筆計算�
 ### `entry_activity`（`translation_tool/translation_db/entry_activity.py`）
 
 `entry_activity(entry_id, mc_version, last_at)`，索引 `(mc_version, last_at DESC, entry_id)`。
-`history` 只會新增（條目刪除時串聯刪除），所以只用 `AFTER INSERT ON history` 觸發器
-對 `ACTIVITY_ACTIONS`（與排序、時間篩選「全部」共用的同一組動作）做 upsert、取較大時間；
-條目刪除由外鍵串聯刪除，條目改版本時同步版本欄。
+`history` 正常只會新增（條目刪除時串聯刪除）：`AFTER INSERT ON history` 觸發器
+對 `ACTIVITY_ACTIONS`（與排序、時間篩選「全部」共用的同一組動作）做 upsert、取較大時間。
+單筆紀錄被外部 SQL 修改或刪除時，更新與刪除觸發器依剩餘紀錄重算該條目的最近活動時間
+（沒有符合的紀錄就移除該列）；條目刪除由外鍵串聯刪除，條目改版本時同步版本欄。
 
 ### `effective` 衍生欄位（`translation_tool/translation_db/effective_columns.py`）
 

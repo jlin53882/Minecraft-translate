@@ -5,8 +5,9 @@
 
 - ``entry_activity``：``(條目, 版本, 最近活動時間)``；只收 :data:`ACTIVITY_ACTIONS`
   的歷史紀錄，時間取 ``MAX(history.at)``，與排序原本的定義相同。沒有這些紀錄的條目不在表內。
-- 條目刪除時由外鍵串聯刪除；條目改版本時同步版本欄。``history`` 只會新增
-  （條目刪除時串聯刪除），所以只需要插入觸發器。
+- 條目刪除時由外鍵串聯刪除；條目改版本時同步版本欄。``history`` 正常只會新增
+  （條目刪除時串聯刪除）；被修改或刪除單筆紀錄時（例如外部 SQL 修復），
+  更新與刪除觸發器會依剩餘紀錄重算該條目的最近活動時間。
 
 ``meta`` 的 ``activity_schema_version`` 記錄結構版本，``activity_valid='1'`` 表示內容可用；
 沒有這兩個值的資料庫（較舊的唯讀檔案等）由讀取端改用原本的歷史彙總查詢。
@@ -31,6 +32,18 @@ CREATE INDEX IF NOT EXISTS idx_act_ver_at
     ON entry_activity (mc_version, last_at DESC, entry_id);
 """
 
+
+def _recompute(entry_id: str) -> str:
+    """依目前的歷史重算單一條目的最近活動時間（沒有符合的紀錄就移除該列）。"""
+    return f"""
+            DELETE FROM entry_activity WHERE entry_id={entry_id};
+            INSERT INTO entry_activity (entry_id, mc_version, last_at)
+            SELECT e.id, e.mc_version, MAX(h.at) FROM entry e
+            JOIN history h ON h.entry_id=e.id
+            WHERE e.id={entry_id} AND h.action IN {ACTIONS_SQL}
+            HAVING MAX(h.at) IS NOT NULL;"""
+
+
 _TRIGGERS = {
     "activity_history_insert": f"""
         CREATE TRIGGER activity_history_insert AFTER INSERT ON history
@@ -38,6 +51,15 @@ _TRIGGERS = {
             INSERT INTO entry_activity (entry_id, mc_version, last_at)
             SELECT id, mc_version, NEW.at FROM entry WHERE id=NEW.entry_id
             ON CONFLICT(entry_id) DO UPDATE SET last_at=max(last_at, excluded.last_at);
+        END""",
+    "activity_history_delete": f"""
+        CREATE TRIGGER activity_history_delete AFTER DELETE ON history
+        WHEN OLD.action IN {ACTIONS_SQL} BEGIN{_recompute("OLD.entry_id")}
+        END""",
+    "activity_history_update": f"""
+        CREATE TRIGGER activity_history_update
+        AFTER UPDATE OF entry_id, action, at ON history
+        WHEN OLD.action IN {ACTIONS_SQL} OR NEW.action IN {ACTIONS_SQL} BEGIN{_recompute("OLD.entry_id")}{_recompute("NEW.entry_id")}
         END""",
     "activity_entry_version": """
         CREATE TRIGGER activity_entry_version AFTER UPDATE OF mc_version ON entry

@@ -110,6 +110,8 @@ _LAST_ACTIVITY_SQL = (
 )
 _EFFECTIVE_PRIORITY_VERSION = "2"
 _QUALITY_FETCH_BATCH_SIZE = 4_000
+# 超過這個筆數的清單結果必定大於共用快取容量（約 100 位元組／筆 × 16 MB 上限），不序列化也不快取
+_MAX_CACHED_ROWS = 100_000
 # quality.py 的 token 掃描只會在含 § % $ { \ 或換行的文字出現；GLOB 字元集是其超集，
 # 用來在 SQL 先排除「必定沒有格式 token」的列（Python 仍負責最終判斷）。
 _TOKEN_CHAR_GLOB_SQL = r"'*[§%${\]*'"
@@ -298,10 +300,6 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
             self._write_transaction = True
             try:
                 yield self._conn
-            except BaseException:
-                self._conn.rollback()
-                raise
-            else:
                 if self._has_quality_flags:
                     # 觸發器只把受影響的條目標成待重算；提交前依 quality.py 重算
                     quality_flags.settle(self._conn)
@@ -317,12 +315,34 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
                         "ON CONFLICT(key) DO UPDATE SET value = CAST(value AS INTEGER) + 1"
                     )
                 self._conn.commit()
+            except BaseException:
+                # 提交前的任何失敗（含品質旗標重算）都回復，不留開啟中的交易
+                self._conn.rollback()
+                raise
             finally:
                 self._write_transaction = False
 
     def _data_gen(self) -> str:
         row = self._one("SELECT value FROM meta WHERE key = 'data_gen'")
         return row[0] if row else "0"
+
+    def _cache_generation(self) -> str:
+        """快取世代：``data_gen`` 加上由觸發器維護的內容簽章。
+
+        外部 SQL 直接寫入時不會遞增 ``data_gen``，但譯文修訂序號、歷史最大 id 與統計摘要
+        （筆數與計數器）都會隨觸發器改變，所以簽章不同就不會沿用舊的持久化統計。
+        """
+        gen = self._data_gen()
+        try:
+            row = self._one(
+                "SELECT (SELECT value FROM meta WHERE key='translation_revision_seq'), "
+                "(SELECT MAX(id) FROM history), "
+                "(SELECT SUM(cnt) FROM stat_src), "
+                "(SELECT group_concat(v) FROM stat_counter)"
+            )
+        except sqlite3.Error:
+            return gen  # 沒有統計摘要的舊資料庫：只能依 data_gen
+        return f"{gen}.{'.'.join(str(part) for part in row)}"
 
     def _read_cache_identity(self) -> tuple:
         """Include file incarnation and WAL changes, including external SQL writers."""
@@ -358,7 +378,7 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
         if self._write_transaction:
             return compute()
         try:
-            gen = self._data_gen()
+            gen = self._cache_generation()
             cache_key = (self._read_cache_identity(), gen, key)
             shared = READ_CACHE.get(cache_key)
             if shared is not None:
@@ -377,13 +397,15 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
         except (sqlite3.Error, OSError):
             return compute()
         value = compute()
+        if isinstance(value, list) and len(value) > _MAX_CACHED_ROWS:
+            return value  # 大量候選清單超過快取容量：不白做序列化，下次重算
         encoded = json.dumps(value, ensure_ascii=False)
-        if self._data_gen() == gen:
+        if self._cache_generation() == gen:
             READ_CACHE.put(cache_key, encoded)
         if persist and not self.readonly:
             try:
                 with self._lock:
-                    if self._data_gen() != gen:
+                    if self._cache_generation() != gen:
                         return value  # 計算期間資料又變了：不寫舊世代，也不清掉新世代的快取
                     self._conn.execute("DELETE FROM stat_cache WHERE gen <> ?", (gen,))
                     self._conn.execute(
