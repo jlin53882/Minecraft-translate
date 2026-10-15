@@ -28,6 +28,7 @@ from pathlib import Path
 from typing import Any
 
 from translation_tool.translation_db import (
+    change_tracker,
     effective_columns,
     entry_activity,
     quality_flags,
@@ -110,8 +111,6 @@ _LAST_ACTIVITY_SQL = (
 )
 _EFFECTIVE_PRIORITY_VERSION = "2"
 _QUALITY_FETCH_BATCH_SIZE = 4_000
-# 超過這個筆數的清單結果必定大於共用快取容量（約 100 位元組／筆 × 16 MB 上限），不序列化也不快取
-_MAX_CACHED_ROWS = 100_000
 # quality.py 的 token 掃描只會在含 § % $ { \ 或換行的文字出現；GLOB 字元集是其超集，
 # 用來在 SQL 先排除「必定沒有格式 token」的列（Python 仍負責最終判斷）。
 _TOKEN_CHAR_GLOB_SQL = r"'*[§%${\]*'"
@@ -296,6 +295,11 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
                     "INSERT OR REPLACE INTO meta (key, value) VALUES (?, '1')",
                     (KEEP_REVIEW_FLAG,),
                 )
+            # 交易內的寫入由 data_gen 負責；標記讓變更序號觸發器略過（隨交易一起消失）
+            self._conn.execute(
+                "INSERT OR REPLACE INTO meta (key, value) VALUES (?, '1')",
+                (change_tracker.TX_ACTIVE,),
+            )
             changes_before = self._conn.total_changes
             self._write_transaction = True
             try:
@@ -308,8 +312,12 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
                         "DELETE FROM meta WHERE key=?", (KEEP_REVIEW_FLAG,)
                     )
                     changes_before += 1  # 旗標的寫入與刪除不算資料變動
+                changed = self._conn.total_changes > changes_before
+                self._conn.execute(
+                    "DELETE FROM meta WHERE key=?", (change_tracker.TX_ACTIVE,)
+                )
                 # 資料有變動：遞增世代，讓統計快取（stat_cache）失效
-                if bump_generation_on_noop or self._conn.total_changes > changes_before:
+                if bump_generation_on_noop or changed:
                     self._conn.execute(
                         "INSERT INTO meta (key, value) VALUES ('data_gen', '1') "
                         "ON CONFLICT(key) DO UPDATE SET value = CAST(value AS INTEGER) + 1"
@@ -327,22 +335,17 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
         return row[0] if row else "0"
 
     def _cache_generation(self) -> str:
-        """快取世代：``data_gen`` 加上由觸發器維護的內容簽章。
+        """快取世代：``data_gen`` 加上外部寫入的變更序號。
 
-        外部 SQL 直接寫入時不會遞增 ``data_gen``，但譯文修訂序號、歷史最大 id 與統計摘要
-        （筆數與計數器）都會隨觸發器改變，所以簽章不同就不會沿用舊的持久化統計。
+        外部 SQL 直接寫入不會遞增 ``data_gen``，但 ``change_tracker`` 的觸發器會遞增
+        ``meta.ext_change_seq``，所以序號不同就不會沿用舊的持久化統計。
+        沒有安裝觸發器的舊資料庫只能依 ``data_gen``。
         """
         gen = self._data_gen()
-        try:
-            row = self._one(
-                "SELECT (SELECT value FROM meta WHERE key='translation_revision_seq'), "
-                "(SELECT MAX(id) FROM history), "
-                "(SELECT SUM(cnt) FROM stat_src), "
-                "(SELECT group_concat(v) FROM stat_counter)"
-            )
-        except sqlite3.Error:
-            return gen  # 沒有統計摘要的舊資料庫：只能依 data_gen
-        return f"{gen}.{'.'.join(str(part) for part in row)}"
+        row = self._one(
+            "SELECT value FROM meta WHERE key = ?", (change_tracker.SEQ_KEY,)
+        )
+        return gen if row is None else f"{gen}.{row[0]}"
 
     def _read_cache_identity(self) -> tuple:
         """Include file incarnation and WAL changes, including external SQL writers."""
@@ -397,8 +400,8 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
         except (sqlite3.Error, OSError):
             return compute()
         value = compute()
-        if isinstance(value, list) and len(value) > _MAX_CACHED_ROWS:
-            return value  # 大量候選清單超過快取容量：不白做序列化，下次重算
+        if READ_CACHE.exceeds_capacity(value):
+            return value  # 結果超過快取容量（含巢狀清單、超長文字）：不白做序列化，下次重算
         encoded = json.dumps(value, ensure_ascii=False)
         if self._cache_generation() == gen:
             READ_CACHE.put(cache_key, encoded)

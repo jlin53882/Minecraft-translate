@@ -271,6 +271,7 @@ def _install_derived_tables(conn: sqlite3.Connection) -> None:
     """
     # 這些模組引用本模組的來源代碼，延後載入以免循環匯入
     from translation_tool.translation_db import (
+        change_tracker,
         effective_columns,
         entry_activity,
         quality_flags,
@@ -281,6 +282,8 @@ def _install_derived_tables(conn: sqlite3.Connection) -> None:
     entry_activity.install(conn)
     effective_columns.install(conn)
     quality_flags.install(conn)
+    # 最後安裝：前面各模組的回填寫入不應被當成外部寫入
+    change_tracker.install(conn)
 
 
 def _backup_before_review_migration(conn: sqlite3.Connection) -> Path | None:

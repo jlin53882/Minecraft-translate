@@ -2,6 +2,7 @@
 
 from collections import OrderedDict
 from threading import RLock
+from typing import Any
 
 
 class ReadCache:
@@ -13,6 +14,32 @@ class ReadCache:
         self._max_entries = max_entries
         self._max_bytes = max_bytes
         self._lock = RLock()
+
+    def exceeds_capacity(self, value: Any) -> bool:
+        """估計 JSON 序列化後是否超過單筆上限；超過就不必白做序列化。
+
+        走訪巢狀的 list／tuple／dict，字串依實際位元組數、數字與 null 以固定值估算，
+        一超過上限就提早結束，成本遠低於完整序列化。估計刻意不低估字串內容。
+        """
+        budget = self._max_bytes
+        stack = [value]
+        while stack:
+            item = stack.pop()
+            if isinstance(item, str):
+                budget -= len(item) + 2 if item.isascii() else len(item.encode()) + 2
+            elif isinstance(item, dict):
+                budget -= 2 + len(item)
+                for key, child in item.items():
+                    stack.append(key)
+                    stack.append(child)
+            elif isinstance(item, (list, tuple)):
+                budget -= 2 + len(item)
+                stack.extend(item)
+            else:
+                budget -= 8
+            if budget < 0:
+                return True
+        return False
 
     def get(self, key: tuple) -> str | None:
         with self._lock:

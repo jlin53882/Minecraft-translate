@@ -30,11 +30,13 @@
   照常維護摘要（但整批重建不會暫停觸發器，較慢）。
 - 讀取端在摘要可用（已安裝、`stats_valid='1'`、不在暫停中）時讀摘要，否則退回原本的
   全庫重算查詢；唯讀開啟的舊資料庫與寫入交易中暫停的狀態都走退回路徑。`_cached`、
-  程序內快取與 `stat_cache` 的分層不變。快取世代是 `data_gen` 加上由觸發器維護的內容簽章
-  （譯文修訂序號、歷史最大 id、統計摘要的筆數與計數器），所以不經 `_tx()` 的外部 SQL
-  寫入雖然不會遞增 `data_gen`，也不會沿用舊的持久化統計；超過程序內快取容量的大型清單
-  （`_MAX_CACHED_ROWS` 筆以上）不序列化也不快取。簽章不涵蓋不改變這些值的外部修改
-  （例如直接改寫 `effective.zh_tw`）。
+  程序內快取與 `stat_cache` 的分層不變。快取世代是 `data_gen` 加上 `meta.ext_change_seq`。`ext_change_seq` 由
+  `change_tracker` 在 `entry`、`translation`、`effective`、`history`、`src_change` 上安裝的觸發器遞增，
+  只在寫入不在 `_tx()` 內（`meta` 沒有 `tx_active`）時才遞增；`_tx()` 內的寫入由 `data_gen` 負責。
+  所以外部 SQL 的任何資料變更（包含總數不變的版本搬移、`src_change` 新增）都會讓持久化統計
+  失效，不需逐項比對內容。快取入列前以 `ReadCache.exceeds_capacity()` 依位元組預算估算整個
+  結果（含巢狀 list／tuple／dict 與長文字），超過容量的結果不序列化也不快取。
+  衍生欄位（`qflags`、`effective.diff` 等）隨來源資料一起變，不另外追蹤。
 - `rebuild_stat_summary()` 在寫入交易中重建摘要並遞增資料世代；`verify_stat_summary()`
   以 `EXCEPT` 比對摘要與全庫重算，只供測試與維護使用（70 萬條目約 1.1 s）。
 

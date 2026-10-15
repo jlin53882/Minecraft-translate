@@ -11,6 +11,7 @@ from translation_tool.translation_db import (
     EntryFilter,
     ScanItem,
     TranslationDB,
+    change_tracker,
     entry_activity,
     quality_flags,
     repository,
@@ -96,6 +97,14 @@ _ENTRY_SQL = (
 _EXTERNAL_ENTRY = (
     _ENTRY_SQL,
     (KIND_LANG, VERSION, "alpha", "external.key", "From outside", "2026-01-01"),
+)
+_MOVE_SQL = (
+    "UPDATE entry SET mc_version='1.21.1' WHERE id="
+    "(SELECT MIN(id) FROM entry WHERE mc_version='1.20.1')"
+)
+_SRC_CHANGE_SQL = (
+    "INSERT INTO src_change (kind, mc_version, mod_id, key, old_en, new_en, "
+    "detected_at) VALUES ('lang', '1.20.1', 'alpha', 'k', 'a', 'b', '2026-01-01')"
 )
 _HISTORY_SQL = (
     "INSERT INTO history (entry_id, action, at, batch) "
@@ -250,34 +259,129 @@ def test_activity_history_triggers_are_installed(db_path):
     assert {"activity_history_delete", "activity_history_update"} <= names
 
 
-# --- 大型候選清單：不白做 JSON 序列化 ----------------------------------------
+# --- 外部 SQL 的其他寫法：總數不變的搬移、src_change ---------------------------
 
 
-def test_oversized_list_result_skips_serialization(db_path, monkeypatch):
+def test_external_version_move_with_equal_totals_changes_generation(db_path):
     db = TranslationDB(db_path)
+    db.ingest(
+        "1.21.1",
+        [ScanItem(KIND_LANG, "beta", f"other{i}", f"Other {i}") for i in range(2)],
+    )
+    before_stats = [(s.mc_version, s.total) for s in db.version_stats()]
+    before_gen = db._cache_generation()
+    db.close()
+
+    # 兩個版本各有條目；把 1.20.1 的一筆搬到 1.21.1，全庫筆數與各項總和都不變
+    _external(db_path, (_MOVE_SQL, ()))
+    reopened = TranslationDB(db_path, readonly=True)
+    assert reopened._cache_generation() != before_gen
+    after_stats = [(s.mc_version, s.total) for s in reopened.version_stats()]
+    assert after_stats != before_stats
+    reopened.close()
+
+
+def test_external_src_change_insert_changes_generation_and_overview(db_path):
+    db = TranslationDB(db_path)
+    first = db.overview()["src_changed"]
+    before_gen = db._cache_generation()
+    db.close()
+    _external(db_path, (_SRC_CHANGE_SQL, ()))
+    reopened = TranslationDB(db_path, readonly=True)
+    assert reopened._cache_generation() != before_gen
+    assert reopened.overview()["src_changed"] == first + 1
+    reopened.close()
+
+
+def test_own_writes_do_not_bump_external_sequence(db_path):
+    db = TranslationDB(db_path)
+    seq = db._one("SELECT value FROM meta WHERE key='ext_change_seq'")[0]
+    db.ingest(VERSION, _items(20))
+    db.save_manual(_first_id(db), "自己的寫入", actor="test")
+    with db._tx() as conn:
+        conn.execute("UPDATE entry SET en_us=en_us || '!' WHERE id=1")
+    assert db._one("SELECT value FROM meta WHERE key='ext_change_seq'")[0] == seq
+    assert db._one("SELECT 1 FROM meta WHERE key='tx_active'") is None
+    db.close()
+
+
+def test_failed_transaction_leaves_no_tx_marker(db_path):
+    db = TranslationDB(db_path)
+    with pytest.raises(RuntimeError), db._tx():
+        raise RuntimeError("fail")
+    assert db._one("SELECT 1 FROM meta WHERE key='tx_active'") is None
+    db.close()
+
+
+def test_change_tracker_triggers_are_installed_and_idempotent(db_path):
+    conn = sqlite3.connect(db_path)
+    names = {
+        row[0]
+        for row in conn.execute(
+            "SELECT name FROM sqlite_schema WHERE type='trigger' AND name GLOB 'chg_*'"
+        )
+    }
+    assert {"chg_entry_insert", "chg_history_delete", "chg_src_change_update"} <= names
+    assert change_tracker.is_installed(conn)
+    conn.close()
+
+
+# --- 大型結果：不白做 JSON 序列化（含巢狀結果與超長文字）-------------------------
+
+
+def _spy_dumps(monkeypatch):
     calls = []
     real_dumps = repository.json.dumps
 
     def spy(value, *args, **kwargs):
-        calls.append(len(value) if isinstance(value, list) else None)
+        calls.append(1)
         return real_dumps(value, *args, **kwargs)
 
     monkeypatch.setattr(repository.json, "dumps", spy)
-    big = [[i] for i in range(repository._MAX_CACHED_ROWS + 1)]
-    assert db._cached("big-list", lambda: big, persist=False) is big
-    assert calls == []  # 超過上限：沒有序列化
+    return calls
 
-    small = [[i] for i in range(10)]
-    assert db._cached("small-list", lambda: small, persist=False) == small
-    assert calls == [10]
 
+def test_oversized_nested_tuple_result_skips_serialization(db_path, monkeypatch):
+    db = TranslationDB(db_path)
+    calls = _spy_dumps(monkeypatch)
+    monkeypatch.setattr(repository.READ_CACHE, "_max_bytes", 50_000)
+    # 與 mismatched_translation_entries 相同的 (筆數, 候選清單) 形狀
+    big = (3000, [[i, "x" * 30, "譯" * 10] for i in range(3000)])
+    assert db._cached("nested", lambda: big, persist=False) is big
+    assert calls == []
+    db.close()
+
+
+def test_few_rows_with_huge_text_skip_serialization(db_path, monkeypatch):
+    db = TranslationDB(db_path)
+    calls = _spy_dumps(monkeypatch)
+    monkeypatch.setattr(repository.READ_CACHE, "_max_bytes", 50_000)
+    long_text = [[1, "譯" * 40_000]]  # 一列、但內容超過上限
+    assert db._cached("long-text", lambda: long_text, persist=False) is long_text
+    assert calls == []
+    db.close()
+
+
+def test_small_results_are_still_cached_once(db_path, monkeypatch):
+    db = TranslationDB(db_path)
+    calls = _spy_dumps(monkeypatch)
     runs = []
 
     def compute():
         runs.append(1)
-        return small
+        return (2, [[1, "a"], [2, "b"]])
 
-    db._cached("small-again", compute, persist=False)
-    db._cached("small-again", compute, persist=False)
-    assert runs == [1]  # 小結果仍可被快取重用
+    db._cached("small", compute, persist=False)
+    db._cached("small", compute, persist=False)
+    assert runs == [1]
+    assert calls == [1]
     db.close()
+
+
+def test_exceeds_capacity_is_cheaper_than_and_consistent_with_serialization():
+    cache = repository.READ_CACHE.__class__(max_entries=4, max_bytes=10_000)
+    rows = [[i, "text " * 5] for i in range(500)]
+    assert cache.exceeds_capacity(rows) is True  # 序列化後確實超過
+    assert len(repository.json.dumps(rows)) > 10_000
+    small = [[i, "t"] for i in range(10)]
+    assert cache.exceeds_capacity(small) is False
