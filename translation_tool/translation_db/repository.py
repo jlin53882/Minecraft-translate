@@ -26,6 +26,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
+from translation_tool.translation_db import stat_summary
 from translation_tool.translation_db.bulk_review import BulkReviewMixin
 from translation_tool.translation_db.cleanup import CleanupMixin
 from translation_tool.translation_db.models import (
@@ -420,20 +421,22 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
 
     # ------------------------------------------------------------ 生效譯文
     def _rebuild_effective(self, conn: sqlite3.Connection) -> None:
-        conn.execute("DELETE FROM effective")
-        conn.execute(
-            f"""
-            INSERT INTO effective (entry_id, zh_tw, source, checker, review_status)
-            SELECT entry_id, zh_tw, source, checker, review_status FROM (
-                SELECT t.entry_id, t.zh_tw, t.source, t.checker, t.review_status,
-                       ROW_NUMBER() OVER (
-                           PARTITION BY t.entry_id
-                           ORDER BY {self._priority_order()}
-                       ) AS rn
-                FROM translation t WHERE t.zh_tw <> ''
-            ) WHERE rn = 1
-            """
-        )
+        # 整批重建：暫停統計摘要的逐列觸發器，最後一次重算
+        with stat_summary.frozen(conn):
+            conn.execute("DELETE FROM effective")
+            conn.execute(
+                f"""
+                INSERT INTO effective (entry_id, zh_tw, source, checker, review_status)
+                SELECT entry_id, zh_tw, source, checker, review_status FROM (
+                    SELECT t.entry_id, t.zh_tw, t.source, t.checker, t.review_status,
+                           ROW_NUMBER() OVER (
+                               PARTITION BY t.entry_id
+                               ORDER BY {self._priority_order()}
+                           ) AS rn
+                    FROM translation t WHERE t.zh_tw <> ''
+                ) WHERE rn = 1
+                """
+            )
 
     def _refresh(
         self,
@@ -639,6 +642,26 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
         rows = self._cached("version_stats", self._version_stats_rows)
         return [VersionStat(*r) for r in rows]
 
+    def _stat_summary_ready(self) -> bool:
+        """全庫統計摘要可用（見 ``stat_summary``）；否則讀取端改用全庫重算。"""
+        if not self.has_review_state:
+            return False
+        with self._lock:
+            return stat_summary.is_ready(self._conn)
+
+    def rebuild_stat_summary(self) -> None:
+        """以全庫重算重建統計摘要（摘要缺少或失準時的維護操作）。"""
+        if self.readonly:
+            raise PermissionError("唯讀連線不能重建統計摘要")
+        # 經由寫入交易遞增資料世代，讓依舊摘要算出的統計快取一併失效
+        with self._tx() as conn:
+            stat_summary.rebuild(conn)
+
+    def verify_stat_summary(self) -> list[tuple]:
+        """比對統計摘要與全庫重算；空清單表示一致（只供測試與維護，需要全庫掃描）。"""
+        with self._lock:
+            return stat_summary.verify(self._conn)
+
     def version_stats_from_effective_sources(
         self, source_stats: Sequence[EffectiveSourceStat]
     ) -> list[VersionStat]:
@@ -701,6 +724,12 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
         return tuple(int(row[0]) for row in rows)
 
     def _effective_source_stats_by_version_rows(self) -> list[list]:
+        if self._stat_summary_ready():
+            with self._lock:
+                return stat_summary.source_rows(self._conn)
+        return self._effective_source_stats_by_version_full()
+
+    def _effective_source_stats_by_version_full(self) -> list[list]:
         if self.has_review_state:
             # 審核狀態與生效來源各自獨立；非人工來源沒有狀態就是「未審核」
             review = (
@@ -724,6 +753,15 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
         ]
 
     def _version_stats_rows(self) -> list[list]:
+        if self._stat_summary_ready():
+            with self._lock:
+                source_rows = stat_summary.source_rows(self._conn)
+            return self._version_stats_from_source_stats(
+                [EffectiveSourceStat(*row) for row in source_rows]
+            )
+        return self._version_stats_full()
+
+    def _version_stats_full(self) -> list[list]:
         rows = self._q(
             """
             SELECT e.mc_version,
@@ -749,6 +787,20 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
         return self._cached("overview", self._overview_uncached)
 
     def _overview_uncached(self) -> dict:
+        if self._stat_summary_ready():
+            with self._lock:
+                counts = stat_summary.counters(self._conn)
+            changed = self._one("SELECT COUNT(*) FROM src_change")[0]
+            return {
+                "no_source": counts["no_source"],
+                "mods": counts["mods"],
+                "content": counts["content"],
+                "diff": counts["diff"],
+                "src_changed": changed,
+            }
+        return self._overview_full()
+
+    def _overview_full(self) -> dict:
         mods = self._one("SELECT COUNT(DISTINCT mod_id) FROM entry")[0]
         content = self._one(
             "SELECT COUNT(*) FROM (SELECT 1 FROM entry GROUP BY kind, mod_id, key, en_us)"

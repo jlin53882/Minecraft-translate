@@ -215,6 +215,7 @@ def init_schema(conn: sqlite3.Connection) -> None:
         )
         _install_schema_v3_objects(conn)
         conn.commit()
+        _install_stat_summary(conn)
         return
     version = stored_schema_version(conn)
     while version < SCHEMA_VERSION:
@@ -257,6 +258,15 @@ def init_schema(conn: sqlite3.Connection) -> None:
     )
     _install_schema_v3_objects(conn)
     conn.commit()
+    _install_stat_summary(conn)
+
+
+def _install_stat_summary(conn: sqlite3.Connection) -> None:
+    """安裝並填入全庫統計摘要（衍生資料，可隨時重算，不需先備份）。"""
+    # stat_summary 引用本模組的來源代碼，延後載入以免循環匯入
+    from translation_tool.translation_db import stat_summary
+
+    stat_summary.install(conn)
 
 
 def _backup_before_review_migration(conn: sqlite3.Connection) -> Path | None:
