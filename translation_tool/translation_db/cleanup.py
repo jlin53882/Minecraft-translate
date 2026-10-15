@@ -5,7 +5,8 @@
 
 一般規則只清沒有人動過的條目：有任何譯文（含 jar 自帶繁中）、歷史紀錄或生效譯文的條目一律不碰。
 另有「已翻譯內容」一類（``export_translated_report``）：清的正是已有生效譯文的條目，只列入、
-只能由這類檢查檔刪除，並要求譯文與匯出時一致。
+只能由這類檢查檔刪除，並要求譯文與匯出時一致。筆數可能多達數十萬，所以依模組拆成一個資料夾
+（每個模組一個檢查檔）；預覽與刪除可以指定整個資料夾，整個資料夾是同一批、可以一起還原。
 刪除前整批存進 ``cleanup_batch``（含關聯的譯文、生效譯文與歷史），``revert_cleanup`` 可以整批還原。
 套用時每筆都會依目前的資料與規則重新檢查，檢查檔過期或被改過的項目會略過，不會誤刪。
 """
@@ -44,6 +45,8 @@ _FORMAT_TOKEN = re.compile(
     r"%(?:\d+\$)?[sdfxXeEgGcb%]|\{\d*\}|§[0-9a-fk-orA-FK-OR]|\$\([^)]*\)"
 )
 _KEY_SEGMENT = re.compile(r"[#./\[\]]+")
+_UNSAFE_FILE_CHARS = re.compile(r"[^A-Za-z0-9._-]")
+SUMMARY_FILE_NAME = "summary.txt"
 _FIELD_NAMES = frozenset({"description", "title", "name", "text", "summary"})
 _CHUNK = 500
 _PREVIEW_CHARS = 300
@@ -192,6 +195,7 @@ class CleanupReport:
     sources: dict[str, int] = field(
         default_factory=dict
     )  # 已翻譯內容：生效來源名稱 → 筆數
+    files: int = 0  # 已翻譯內容：資料夾裡的模組檢查檔數
 
     @property
     def total(self) -> int:
@@ -239,6 +243,46 @@ _SNAPSHOT_TABLES = {
 }
 
 
+def _mod_file_name(mod_id: str, used: set[str]) -> str:
+    """模組檢查檔的檔名：只留安全字元，大小寫不同或替換後撞名時加編號。"""
+    stem = _UNSAFE_FILE_CHARS.sub("_", mod_id) or "_"
+    name, number = f"{stem}.json", 2
+    while name.lower() in used:
+        name, number = f"{stem}-{number}.json", number + 1
+    used.add(name.lower())
+    return name
+
+
+def _source_counts(candidates: Iterable[CleanupCandidate]) -> Counter:
+    return Counter(SOURCE_NAMES.get(c.source, str(c.source)) for c in candidates)
+
+
+def _translated_summary_text(
+    version: str, by_mod: dict[str, list[CleanupCandidate]], files: dict[str, str]
+) -> str:
+    """資料夾裡的 summary.txt：用法與各模組的筆數、譯文來源。"""
+    total = sum(len(items) for items in by_mod.values())
+    lines = [
+        f"已翻譯內容檢查檔　版本 {version}　共 {total} 筆、{len(by_mod)} 個模組",
+        "",
+        (
+            "每個模組一個檢查檔（.json）。整個模組不想清：直接刪掉那個檔案；"
+            "只保留部分條目：在檔案裡移除項目，或把 delete 改成 false。"
+        ),
+        (
+            "檢查完回到程式，在「依檢查檔清理」選這個資料夾預覽並刪除："
+            "整個資料夾是同一批，可以用「還原上次清理」一次還原。"
+        ),
+        "刪除會連同條目所有來源的譯文與歷史一起移除；原文或譯文在匯出後有變動的項目會略過。",
+        "",
+        "筆數\t模組\t檢查檔\t譯文來源",
+    ]
+    for mod_id, items in sorted(by_mod.items(), key=lambda kv: (-len(kv[1]), kv[0])):
+        sources = "、".join(f"{name} {n}" for name, n in _source_counts(items).items())
+        lines.append(f"{len(items)}\t{mod_id}\t{files[mod_id]}\t{sources}")
+    return "\n".join(lines) + "\n"
+
+
 def _report_item(candidate: CleanupCandidate) -> dict[str, Any]:
     item: dict[str, Any] = {
         "id": candidate.entry_id,
@@ -255,6 +299,18 @@ def _report_item(candidate: CleanupCandidate) -> dict[str, Any]:
         item["zh_tw"] = candidate.zh_tw[:_PREVIEW_CHARS]
         item["zh_tw_hash"] = _text_hash(candidate.zh_tw)
     return item
+
+
+def _load_report_file(path: Path) -> dict[str, Any]:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise ValueError(f"無法讀取檢查檔：{exc}") from exc
+    if not isinstance(data, dict) or data.get("format") != REPORT_FORMAT:
+        raise ValueError("這不是資料庫清理的檢查檔（格式標記不符）")
+    if not isinstance(data.get("items"), list) or not data.get("version"):
+        raise ValueError("檢查檔缺少版本或項目清單")
+    return data
 
 
 def _chunks(ids: Sequence[int]) -> Iterable[Sequence[int]]:
@@ -352,44 +408,77 @@ class CleanupMixin:
         )
         return {kind: int(count) for kind, count in rows}
 
-    def export_translated_report(self, version: str, path: str | Path) -> CleanupReport:
-        """把已有生效譯文的條目寫成 JSON 檢查檔（只讀資料庫，不刪任何東西）。
+    def export_translated_report(
+        self, version: str, folder: str | Path
+    ) -> CleanupReport:
+        """把已有生效譯文的條目依模組寫成檢查檔資料夾（只讀資料庫，不刪任何東西）。
 
+        ``folder`` 裡每個模組一個 JSON 檢查檔，另有 ``summary.txt`` 列出各模組筆數。
         每筆帶著生效譯文的雜湊：套用時譯文被改過的項目會略過，不會刪到匯出之後才改的內容。
         """
         candidates = self.translated_candidates(version)
-        sources = Counter(SOURCE_NAMES.get(c.source, str(c.source)) for c in candidates)
-        payload = _report_payload(
-            version,
-            "請檢查 items：每一筆都已經有生效譯文（source 是譯文來源）。不想刪除的項目："
-            "整個移除，或把 delete 改成 false。刪除會連同這個條目所有來源的譯文與歷史一起移除；"
-            "刪除前會再依目前資料重新檢查（原文或譯文有變動的項目會略過），並且可以整批還原。"
-            "重新掃描時仍在模組裡的條目會重新收進來。",
-            {
-                TRANSLATED_CATEGORY: {
-                    "label": CLEANUP_CATEGORIES[TRANSLATED_CATEGORY],
-                    "count": len(candidates),
-                    "by_source": dict(sources),
-                }
-            },
-            [_report_item(c) for c in candidates],
+        by_mod: dict[str, list[CleanupCandidate]] = {}
+        for candidate in candidates:
+            by_mod.setdefault(candidate.mod_id, []).append(candidate)
+        target = Path(folder)
+        target.mkdir(parents=True, exist_ok=True)
+        used: set[str] = set()
+        files: dict[str, str] = {}
+        for mod_id in sorted(by_mod):
+            items = by_mod[mod_id]
+            files[mod_id] = _mod_file_name(mod_id, used)
+            payload = _report_payload(
+                version,
+                f"模組 {mod_id} 已有生效譯文的條目（source 是譯文來源）。整個模組不想清："
+                "刪掉這個檔案；只保留部分：移除項目或把 delete 改成 false。"
+                "刪除會連同條目所有來源的譯文與歷史一起移除；原文或譯文有變動的項目會略過，"
+                "並且可以整批還原。重新掃描時仍在模組裡的條目會重新收進來。",
+                {
+                    TRANSLATED_CATEGORY: {
+                        "label": CLEANUP_CATEGORIES[TRANSLATED_CATEGORY],
+                        "mod": mod_id,
+                        "count": len(items),
+                        "by_source": dict(_source_counts(items)),
+                    }
+                },
+                [_report_item(c) for c in items],
+            )
+            _write_report(target / files[mod_id], payload)
+        (target / SUMMARY_FILE_NAME).write_text(
+            _translated_summary_text(version, by_mod, files), encoding="utf-8"
         )
-        target = _write_report(path, payload)
         counts = {TRANSLATED_CATEGORY: len(candidates)} if candidates else {}
-        return CleanupReport(version, target, counts, {}, dict(sources))
+        return CleanupReport(
+            version,
+            target,
+            counts,
+            {},
+            dict(_source_counts(candidates)),
+            files=len(files),
+        )
 
     # ------------------------------------------------------------------ 預覽與套用
     @staticmethod
     def _load_report(path: str | Path) -> dict[str, Any]:
-        try:
-            data = json.loads(Path(path).read_text(encoding="utf-8"))
-        except (OSError, ValueError) as exc:
-            raise ValueError(f"無法讀取檢查檔：{exc}") from exc
-        if not isinstance(data, dict) or data.get("format") != REPORT_FORMAT:
-            raise ValueError("這不是資料庫清理的檢查檔（格式標記不符）")
-        if not isinstance(data.get("items"), list) or not data.get("version"):
-            raise ValueError("檢查檔缺少版本或項目清單")
-        return data
+        """讀一個檢查檔，或一個檢查檔資料夾（裡面所有 ``.json`` 合併成同一批）。"""
+        target = Path(path)
+        if not target.is_dir():
+            return _load_report_file(target)
+        files = sorted(target.glob("*.json"))
+        if not files:
+            raise ValueError("資料夾裡沒有檢查檔（.json），可能已全部刪除")
+        parts = []
+        for file in files:
+            try:
+                parts.append(_load_report_file(file))
+            except ValueError as exc:
+                raise ValueError(f"{file.name}：{exc}") from exc
+        if len({str(part["version"]) for part in parts}) != 1:
+            raise ValueError("資料夾裡的檢查檔版本不一致")
+        return {
+            "version": parts[0]["version"],
+            "items": [item for part in parts for item in part["items"]],
+        }
 
     def _validate_cleanup_items(self, data: dict[str, Any]) -> CleanupPlan:
         """逐筆依目前資料與規則重新檢查檢查檔裡標記要刪除的項目。"""

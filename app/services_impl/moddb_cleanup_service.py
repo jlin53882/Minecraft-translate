@@ -32,6 +32,7 @@ __all__ = [
     "list_cleanup_reports",
     "open_report_folder",
     "preview_cleanup",
+    "report_file_count",
     "revert_cleanup",
     "translated_overview",
 ]
@@ -48,24 +49,34 @@ def export_cleanup(
 ) -> CleanupReport:
     """把可清理的條目寫成檢查檔（只讀資料庫）。
 
-    ``translated=True`` 匯出「已翻譯內容」（已有生效譯文的條目）；檔名多一個
-    ``-translated`` 後綴，清單仍依時間排序。
+    ``translated=True`` 匯出「已翻譯內容」（已有生效譯文的條目）：寫成依模組拆檔的資料夾，
+    名稱多一個 ``-translated`` 後綴，清單仍依時間排序。
     """
     stamp = time.strftime("%Y%m%d-%H%M%S")
     safe_version = "".join(c if c.isalnum() or c in "._-" else "_" for c in version)
-    suffix = "-translated" if translated else ""
-    path = cleanup_report_dir(db) / f"cleanup-{safe_version}-{stamp}{suffix}.json"
+    base = cleanup_report_dir(db) / f"cleanup-{safe_version}-{stamp}"
     if translated:
-        return db.export_translated_report(version, path)
-    return db.export_cleanup_report(version, path)
+        return db.export_translated_report(version, f"{base}-translated")
+    return db.export_cleanup_report(version, f"{base}.json")
 
 
 def list_cleanup_reports(db: TranslationDB) -> list[Path]:
-    """檢查檔清單，最新的在前。"""
+    """檢查檔與已翻譯內容的檢查檔資料夾，最新的在前。"""
     folder = cleanup_report_dir(db)
     if not folder.is_dir():
         return []
-    return sorted(folder.glob("cleanup-*.json"), key=lambda p: p.name, reverse=True)
+    reports = [
+        path
+        for path in folder.glob("cleanup-*")
+        if (path.is_file() and path.suffix == ".json")
+        or (path.is_dir() and path.name.endswith("-translated"))
+    ]
+    return sorted(reports, key=lambda p: p.name, reverse=True)
+
+
+def report_file_count(path: Path) -> int:
+    """檢查檔資料夾裡還有幾個模組檢查檔（單一檢查檔回傳 1）。"""
+    return len(list(path.glob("*.json"))) if path.is_dir() else 1
 
 
 def preview_cleanup(db: TranslationDB, path: Path) -> CleanupPlan:

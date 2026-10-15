@@ -39,6 +39,13 @@ def _source_line(sources: dict[str, int]) -> str:
     return "來源：" + "、".join(parts) if parts else ""
 
 
+def _report_label(path: Path) -> str:
+    """檢查檔下拉選單的文字；已翻譯內容是資料夾，標出還剩幾個模組檔。"""
+    if path.is_dir():
+        return f"{path.name}（資料夾，{svc.report_file_count(path)} 個模組檔）"
+    return path.name
+
+
 def _category_lines(counts: dict[str, int]) -> str:
     return "\n".join(
         f"　{svc.CLEANUP_CATEGORIES.get(cid, cid)}：{format_count(n)} 筆"
@@ -134,9 +141,10 @@ class CleanupDialog:
                             color=C.MUTED,
                         ),
                         ft.Text(
-                            "「匯出已翻譯內容檢查檔」相反：列出已有生效譯文的條目，刪除會連同"
-                            "所有來源的譯文與歷史一起移除（可還原）。重新掃描時仍在模組裡的條目"
-                            "會重新收進來，但只有模組自帶的譯文會跟著回來。",
+                            "「匯出已翻譯內容檢查檔」相反：列出已有生效譯文的條目，依模組拆成"
+                            "一個資料夾（每個模組一個檢查檔，summary.txt 列出各模組筆數）。"
+                            "刪除會連同所有來源的譯文與歷史一起移除（可還原）。重新掃描時仍在"
+                            "模組裡的條目會重新收進來，但只有模組自帶的譯文會跟著回來。",
                             size=12,
                             color=C.MUTED,
                         ),
@@ -165,7 +173,7 @@ class CleanupDialog:
                         self.export_summary,
                         ft.Text(
                             "步驟 2　用編輯器開啟檢查檔，不想刪的項目整個刪掉，"
-                            "或把 delete 改成 false",
+                            "或把 delete 改成 false（已翻譯內容：整個模組不想清就刪掉那個模組檔）",
                             weight=ft.FontWeight.BOLD,
                         ),
                         ft.Text("步驟 3　依檢查檔清理", weight=ft.FontWeight.BOLD),
@@ -300,7 +308,9 @@ class CleanupDialog:
     def _load_reports(self, _e=None) -> None:
         db = self.get_db()
         reports = svc.list_cleanup_reports(db) if db else []
-        kit.set_dropdown_options(self.report_dd, [(str(p), p.name) for p in reports])
+        kit.set_dropdown_options(
+            self.report_dd, [(str(p), _report_label(p)) for p in reports]
+        )
         keys = {str(p) for p in reports}
         if self.report_dd.value not in keys:
             self.report_dd.value = str(reports[0]) if reports else None
@@ -365,7 +375,13 @@ class CleanupDialog:
             lines.append(
                 f"另有 {format_count(skipped)} 筆符合條件但已有譯文或歷史，不會列入"
             )
-        lines.append(f"檢查檔：{report.path}")
+        if report.path.is_dir():
+            lines.append(
+                f"檢查檔資料夾：{report.path}（{format_count(report.files)} 個模組檔，"
+                "各模組筆數見 summary.txt；選這個資料夾預覽與刪除，整個資料夾是同一批）"
+            )
+        else:
+            lines.append(f"檢查檔：{report.path}")
         self.export_summary.value = "\n".join(lines)
         self.export_summary.visible = True
         log_info(f"Mod 資料庫清理檢查檔：{report.path}（{report.total} 筆）")
