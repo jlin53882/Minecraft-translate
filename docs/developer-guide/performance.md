@@ -8,6 +8,31 @@ different platforms or browser versions are not directly comparable.
 
 ## Metrics
 
+### Mod DB entry-list ordering
+
+`translation_tool/translation_db/schema.py` installs `idx_entry_list_order` on
+`entry (mc_version, mod_id, kind, key, id)`. The leading version column constrains
+the selected Minecraft version; the remaining columns follow the default entry
+list ordering, including its deterministic ID tie-breaker.
+
+Writable database initialization uses `CREATE INDEX IF NOT EXISTS`, including
+for databases already at the current schema version. An existing index is not
+rebuilt on every open. Read-only repository connections do not install indexes;
+a database must be initialized through a writable connection to obtain it.
+This index does not require a schema-version change or rewrite entry,
+translation, review, or history data.
+
+Compare the complete public entry-list operation, including its total count,
+on independent SQLite-backup copies with and without this index. Check first,
+middle, and partial final pages, IDs/order/totals, multi-version filters, query
+plans, index-installation cost, database size, and ingest/update cost. Do not
+report an OFFSET selecting the last 50 rows as a partial final UI page. Retain
+raw UI timings separately from query timings, including slower or unstable
+first-load observations. No wall-clock threshold is asserted in unit tests;
+index installation, query-plan shape, and result parity are tested instead.
+
+### Other metrics
+
 - AppShell mount time and browser-ready time from the real Flet smoke report
 - First lazy build and same-session warm revisit for every registered view
 - Dashboard cache-overview assembly/active-shard read, replace-rule file read,
