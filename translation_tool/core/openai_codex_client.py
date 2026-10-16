@@ -93,17 +93,28 @@ def _stream_request(
     payload: dict,
     timeout: int,
     reasoning_effort: str | None = None,
+    conversation_history: list[dict] | None = None,
 ) -> requests.Response:
     response_schema = _build_translation_response_schema(payload)
+    input_history = []
+    for turn in conversation_history or []:
+        role = turn.get("role")
+        if role == "model":
+            role = "assistant"
+        text = turn.get("text")
+        if role not in {"user", "assistant"} or not isinstance(text, str):
+            raise ValueError("ChatGPT conversation history turns must contain role/text")
+        input_history.append({"role": role, "content": text})
+    input_history.append(
+        {
+            "role": "user",
+            "content": json.dumps(payload, ensure_ascii=False),
+        }
+    )
     body = {
         "model": model_name,
         "instructions": system_prompt,
-        "input": [
-            {
-                "role": "user",
-                "content": json.dumps(payload, ensure_ascii=False),
-            }
-        ],
+        "input": input_history,
         "text": {
             "format": {
                 "type": "json_schema",
@@ -286,6 +297,7 @@ def call_chatgpt_responses(
     meta_out: dict | None = None,
     reasoning_effort: str | None = None,
     profile_id: str | None = None,
+    conversation_history: list[dict] | None = None,
 ) -> str:
     """Call Responses with the locally stored ChatGPT OAuth token and SSE stream."""
     token_kwargs = {"profile_id": profile_id} if profile_id is not None else {}
@@ -297,6 +309,8 @@ def call_chatgpt_responses(
         "payload": payload,
         "timeout": timeout,
     }
+    if conversation_history:
+        request_kwargs["conversation_history"] = conversation_history
     if reasoning_effort is not None:
         request_kwargs["reasoning_effort"] = reasoning_effort
     try:

@@ -82,6 +82,36 @@ def test_stream_request_sends_configured_reasoning_effort(monkeypatch):
     assert captured["json"]["reasoning"] == {"effort": "high"}
 
 
+def test_stream_request_preserves_conversation_history_for_retry(monkeypatch):
+    captured = {}
+    monkeypatch.setattr(
+        client.requests,
+        "post",
+        lambda _url, **kwargs: captured.update(kwargs) or requests.Response(),
+    )
+
+    client._stream_request(
+        token="access-token",
+        model_name="gpt-5-codex",
+        system_prompt="Translate.",
+        payload={"items": [{"id": "0", "value": "修復原文"}]},
+        timeout=30,
+        conversation_history=[
+            {"role": "user", "text": "原始 request"},
+            {"role": "model", "text": "第一次 response"},
+        ],
+    )
+
+    assert captured["json"]["input"] == [
+        {"role": "user", "content": "原始 request"},
+        {"role": "assistant", "content": "第一次 response"},
+        {
+            "role": "user",
+            "content": '{"items": [{"id": "0", "value": "修復原文"}]}',
+        },
+    ]
+
+
 def test_call_retries_once_after_unauthorized_and_keeps_reasoning(monkeypatch):
     class _UnauthorizedResponse:
         status_code = 401

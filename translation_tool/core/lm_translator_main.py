@@ -4,6 +4,7 @@
 維護注意：本檔案的函式 docstring 用於維護說明，不代表行為變更。
 """
 
+import json
 import math
 import random
 from copy import deepcopy
@@ -102,6 +103,7 @@ DEFAULT_BATCH_SIZE = 50  # 預設批次大小
 # =========================================================
 DEFAULT_DRY_RUN = False  # 預設不跳過 API
 DEFAULT_EXPORT_CACHE_ONLY = False  # 預設進行完整翻譯
+CONVERSATION_TURN_OVERHEAD_TOKENS = 4
 
 
 def _detect_batch_profile(items):
@@ -453,6 +455,17 @@ def _prompt_text(value: object, fallback: str) -> str:
     if isinstance(value, dict):
         return str(value.get("content") or value.get("text") or value)
     return str(value or fallback)
+
+
+def _estimate_conversation_history_tokens(
+    conversation_history: list[dict[str, str]],
+) -> float:
+    """Estimate retry input tokens already carried by prior conversation turns."""
+    return sum(
+        estimate_text_tokens(turn.get("text", ""))
+        + CONVERSATION_TURN_OVERHEAD_TOKENS
+        for turn in conversation_history
+    )
 
 
 def _build_batch_runtime(
@@ -1080,6 +1093,7 @@ def _retry_same_source_translations(
     model_name: str,
     api_key: str,
     output_cap: int | None,
+    conversation_history: list[dict[str, str]],
 ) -> list[dict]:
     """Reconfirm only same-as-source candidates; keep the first valid result on failure."""
     candidates = build_same_source_retry_batch(
@@ -1096,7 +1110,10 @@ def _retry_same_source_translations(
 
     retry_prompt = f"{prompt.rstrip()}\n\n{SAME_SOURCE_RETRY_INSTRUCTION}"
     retry_estimate = runtime.budget_tracker.estimate(
-        candidates.items, runtime.budget_cfg, runtime.retry_fixed_input_tokens
+        candidates.items,
+        runtime.budget_cfg,
+        runtime.retry_fixed_input_tokens
+        + _estimate_conversation_history_tokens(conversation_history),
     )
     retry_round = _BatchRound(
         current_batch=list(candidates.items),
@@ -1121,6 +1138,7 @@ def _retry_same_source_translations(
             output_cap,
             retry_meta,
             api_key,
+            conversation_history=conversation_history,
         )
         retry_text = call_gemini_requests(**request_kwargs).strip()
         raise_if_cancelled()
@@ -1141,6 +1159,15 @@ def _retry_same_source_translations(
                 f"[⚠️ 相同譯文重新確認失敗，保留第一次翻譯結果：{candidate_count} 筆]"
             )
             return result
+        conversation_history.extend(
+            [
+                {
+                    "role": "user",
+                    "text": json.dumps(retry_round.payload, ensure_ascii=False),
+                },
+                {"role": "model", "text": retry_text},
+            ]
+        )
     except Exception:  # noqa: BLE001 - optional quality retry must not fail the valid batch
         log_warning(
             f"[⚠️ 相同譯文重新確認失敗，保留第一次翻譯結果：{candidate_count} 筆]"
@@ -1187,6 +1214,7 @@ def _retry_format_mismatch_translations(
     model_name: str,
     api_key: str,
     output_cap: int | None,
+    conversation_history: list[dict[str, str]],
 ) -> list[dict]:
     """Send only format-invalid rows back with the detected issues as feedback."""
     candidates = build_format_mismatch_retry_batch(
@@ -1199,7 +1227,8 @@ def _retry_format_mismatch_translations(
     retry_estimate = runtime.budget_tracker.estimate(
         candidates.items,
         runtime.budget_cfg,
-        runtime.format_retry_fixed_input_tokens,
+        runtime.format_retry_fixed_input_tokens
+        + _estimate_conversation_history_tokens(conversation_history),
     )
     retry_round = _BatchRound(
         current_batch=list(candidates.items),
@@ -1225,6 +1254,7 @@ def _retry_format_mismatch_translations(
             output_cap,
             retry_meta,
             api_key,
+            conversation_history=conversation_history,
         )
         retry_text = call_gemini_requests(**request_kwargs).strip()
         raise_if_cancelled()
@@ -1241,6 +1271,15 @@ def _retry_format_mismatch_translations(
         if invalid or retried is None:
             log_warning("[format retry] response did not satisfy the structured contract")
             return result
+        conversation_history.extend(
+            [
+                {
+                    "role": "user",
+                    "text": json.dumps(retry_round.payload, ensure_ascii=False),
+                },
+                {"role": "model", "text": retry_text},
+            ]
+        )
     except Exception:  # noqa: BLE001 - optional quality retry must not fail a valid batch
         log_warning("[format retry] request failed; keeping the original translations")
         return result
@@ -1378,8 +1417,16 @@ def _finish_successful_batch(
     model_name: str,
     api_key: str,
     output_cap: int | None,
+    initial_response_text: str,
 ) -> _BatchRoundOutcome:
     """Reconfirm optional candidates, then advance the validated batch exactly once."""
+    conversation_history = [
+        {
+            "role": "user",
+            "text": json.dumps(round_data.payload, ensure_ascii=False),
+        },
+        {"role": "model", "text": initial_response_text},
+    ]
     finalized = _retry_same_source_translations(
         runtime,
         round_data,
@@ -1388,6 +1435,7 @@ def _finish_successful_batch(
         model_name=model_name,
         api_key=api_key,
         output_cap=output_cap,
+        conversation_history=conversation_history,
     )
     finalized = _retry_format_mismatch_translations(
         runtime,
@@ -1397,6 +1445,7 @@ def _finish_successful_batch(
         model_name=model_name,
         api_key=api_key,
         output_cap=output_cap,
+        conversation_history=conversation_history,
     )
     runtime.completed_calls += 1
     runtime.all_results.extend(finalized)
@@ -1419,7 +1468,15 @@ def _finish_successful_batch(
 
 
 def _provider_request_kwargs(
-    runtime, model_name, prompt, payload, output_cap, meta_out, api_key
+    runtime,
+    model_name,
+    prompt,
+    payload,
+    output_cap,
+    meta_out,
+    api_key,
+    *,
+    conversation_history=None,
 ):
     """Build shared and ChatGPT-specific arguments for one provider request."""
     kwargs = {
@@ -1435,6 +1492,8 @@ def _provider_request_kwargs(
         ),
         "lm_config": runtime.lm_cfg,
     }
+    if conversation_history:
+        kwargs["conversation_history"] = list(conversation_history)
     if kwargs["provider"] == "chatgpt":
         kwargs["reasoning_effort"] = runtime.reasoning_effort
         profile_id = getattr(runtime, "chatgpt_profile_id", None)
@@ -1541,6 +1600,7 @@ def _attempt_batch(
                 model_name=model_name,
                 api_key=api_key,
                 output_cap=output_cap,
+                initial_response_text=raw_text,
             )
         except Exception as error:  # noqa: BLE001
             _clear_quota_on_http_success(quota, error, model_name, started)

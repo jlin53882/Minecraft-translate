@@ -148,6 +148,28 @@ def _resolve_max_output_tokens(explicit: int | None, lm_cfg: dict) -> int | None
     return value if value > 0 else None
 
 
+def _build_gemini_contents(
+    payload: dict, conversation_history: list[dict] | None
+) -> list[dict]:
+    """Build the current user turn, optionally continuing a client-side conversation."""
+    contents: list[dict] = []
+    for turn in conversation_history or []:
+        if not isinstance(turn, dict):
+            raise TypeError("Gemini conversation history turns must be objects")
+        role = turn.get("role")
+        text = turn.get("text")
+        if role not in {"user", "model"} or not isinstance(text, str):
+            raise ValueError("Gemini conversation history turns must contain role/text")
+        contents.append({"role": role, "parts": [{"text": text}]})
+    contents.append(
+        {
+            "role": "user",
+            "parts": [{"text": json.dumps(payload, ensure_ascii=False)}],
+        }
+    )
+    return contents
+
+
 def extract_response_meta(result: dict) -> dict:
     """從 generateContent 回應取出截斷診斷所需的欄位。
 
@@ -180,6 +202,7 @@ def call_gemini_requests(
     meta_out: dict | None = None,
     reasoning_effort: str | None = None,
     profile_id: str | None = None,
+    conversation_history: list[dict] | None = None,
     provider: str | None = None,
     lm_config: dict | None = None,
 ) -> str:
@@ -210,6 +233,8 @@ def call_gemini_requests(
             "meta_out": meta_out,
             "reasoning_effort": reasoning_effort,
         }
+        if conversation_history:
+            chatgpt_kwargs["conversation_history"] = conversation_history
         if profile_id is not None:
             chatgpt_kwargs["profile_id"] = profile_id
         return call_chatgpt_responses(**chatgpt_kwargs)
@@ -228,12 +253,7 @@ def call_gemini_requests(
 
     data = {
         "systemInstruction": {"parts": [{"text": system_prompt}]},
-        "contents": [
-            {
-                "role": "user",
-                "parts": [{"text": json.dumps(payload, ensure_ascii=False)}],
-            }
-        ],
+        "contents": _build_gemini_contents(payload, conversation_history),
         "generationConfig": {
             "temperature": temperature,
             "responseFormat": {

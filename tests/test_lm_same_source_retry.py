@@ -481,6 +481,13 @@ def test_format_mismatch_is_sent_back_with_detected_issues_and_repaired(
     assert retry_item["format_issues"]
     assert calls[1]["system_prompt"].startswith("LANG PROFILE PROMPT")
     assert "格式不一致問題" in calls[1]["system_prompt"]
+    assert [turn["role"] for turn in calls[1]["conversation_history"]] == [
+        "user",
+        "model",
+    ]
+    assert json.loads(calls[1]["conversation_history"][0]["text"]) == calls[0][
+        "payload"
+    ]
     assert result == [{**item, "text": "§a使用 %s\n下一個"}]
 
 
