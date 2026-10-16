@@ -540,6 +540,31 @@ def test_format_repair_runs_before_the_next_batch_is_requested(
     assert [entry["text"] for entry in result] == ["§a使用 %s\n下一個", "第二個"]
 
 
+def test_one_batch_uses_at_most_one_quality_retry(monkeypatch, configure_batch):
+    configure_batch()
+    items = [_item("Minecraft", 0), _item("Use %s\nnext", 1)]
+
+    result, status, calls = _run_with_api(
+        monkeypatch,
+        items,
+        [
+            lambda call: _reply(
+                call,
+                {"Minecraft": "Minecraft", "Use %s\nnext": "使用 next"},
+            ),
+            lambda call: _reply(call, {"Minecraft": "Minecraft 翻譯"}),
+            lambda call: _reply(call, {"Use %s\nnext": "使用 %s\n下一個"}),
+        ],
+    )
+
+    assert status == "AUTO"
+    assert len(calls) == 2
+    assert [item["value"] for item in calls[1]["payload"]["items"]] == [
+        "Minecraft"
+    ]
+    assert [entry["text"] for entry in result] == ["Minecraft 翻譯", "使用 next"]
+
+
 def test_batch_input_fit_reserves_retry_prompt_only_when_enabled(
     monkeypatch, configure_batch
 ):

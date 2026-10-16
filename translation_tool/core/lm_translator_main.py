@@ -425,6 +425,13 @@ class _BatchRound:
     id_to_item: dict[str, dict]
 
 
+@dataclass
+class _BatchRetryBudget:
+    """Allow at most one application-level translation retry per batch."""
+
+    used: bool = False
+
+
 @dataclass(frozen=True)
 class _BatchRoundOutcome:
     action: BatchAction | None = None
@@ -1094,6 +1101,7 @@ def _retry_same_source_translations(
     api_key: str,
     output_cap: int | None,
     conversation_history: list[dict[str, str]],
+    retry_budget: _BatchRetryBudget,
 ) -> list[dict]:
     """Reconfirm only same-as-source candidates; keep the first valid result on failure."""
     candidates = build_same_source_retry_batch(
@@ -1107,6 +1115,10 @@ def _retry_same_source_translations(
             f"{len(candidates.positions)}/{len(round_data.current_batch)}]"
         )
         return result
+    if retry_budget.used:
+        log_info("[translation retry] batch retry limit reached; skipping same-source retry")
+        return result
+    retry_budget.used = True
 
     retry_prompt = f"{prompt.rstrip()}\n\n{SAME_SOURCE_RETRY_INSTRUCTION}"
     retry_estimate = runtime.budget_tracker.estimate(
@@ -1215,6 +1227,7 @@ def _retry_format_mismatch_translations(
     api_key: str,
     output_cap: int | None,
     conversation_history: list[dict[str, str]],
+    retry_budget: _BatchRetryBudget,
 ) -> list[dict]:
     """Send only format-invalid rows back with the detected issues as feedback."""
     candidates = build_format_mismatch_retry_batch(
@@ -1222,6 +1235,10 @@ def _retry_format_mismatch_translations(
     )
     if not candidates.positions:
         return result
+    if retry_budget.used:
+        log_info("[translation retry] batch retry limit reached; skipping format retry")
+        return result
+    retry_budget.used = True
 
     retry_prompt = f"{prompt.rstrip()}\n\n{FORMAT_MISMATCH_RETRY_INSTRUCTION}"
     retry_estimate = runtime.budget_tracker.estimate(
@@ -1427,6 +1444,7 @@ def _finish_successful_batch(
         },
         {"role": "model", "text": initial_response_text},
     ]
+    retry_budget = _BatchRetryBudget()
     finalized = _retry_same_source_translations(
         runtime,
         round_data,
@@ -1436,6 +1454,7 @@ def _finish_successful_batch(
         api_key=api_key,
         output_cap=output_cap,
         conversation_history=conversation_history,
+        retry_budget=retry_budget,
     )
     finalized = _retry_format_mismatch_translations(
         runtime,
@@ -1446,6 +1465,7 @@ def _finish_successful_batch(
         api_key=api_key,
         output_cap=output_cap,
         conversation_history=conversation_history,
+        retry_budget=retry_budget,
     )
     runtime.completed_calls += 1
     runtime.all_results.extend(finalized)
