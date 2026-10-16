@@ -39,6 +39,8 @@
   衍生欄位（`qflags`、`effective.diff` 等）隨來源資料一起變，不另外追蹤。
   程式本身不會把生效列移到別的條目；外部 SQL 這樣改（`effective.entry_id`）時摘要無法逐項
   調整，`stat_effective_move` 觸發器把 `stats_valid` 設為 0，讀取改用原本的查詢，下次可寫開啟時重建。
+  衍生資料的結構版本（`stats_schema_version` 等）在觸發器定義增減時遞增，舊安裝在唯讀開啟下因版本不符
+  退回原本的查詢；唯讀路徑不逐一驗證觸發器是否被人為刪除，這類破壞要靠可寫開啟時的安裝檢查與 `verify_*()` 發現。
 - `rebuild_stat_summary()` 在寫入交易中重建摘要並遞增資料世代；`verify_stat_summary()`
   以 `EXCEPT` 比對摘要與全庫重算，只供測試與維護使用（70 萬條目約 1.1 s）。
 

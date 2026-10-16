@@ -23,7 +23,7 @@ class ReadCache:
     def exceeds_capacity(self, value: Any) -> bool:
         """估計 JSON 序列化後是否超過單筆上限；超過就不必白做序列化。
 
-        走訪巢狀的 list／tuple／dict，字串依實際位元組數、數字與 null 以固定值估算，
+        走訪巢狀的 list／tuple／dict，字串依實際位元組數、整數依位數、其他值以固定值估算，
         一超過上限就提早結束，成本遠低於完整序列化。需要跳脫的字元（控制字元、引號、反斜線）以最壞情況計入，估計不低估字串內容。
         """
         budget = self._max_bytes
@@ -42,8 +42,10 @@ class ReadCache:
             elif isinstance(item, (list, tuple)):
                 budget -= 2 + 2 * len(item)  # 每項 ', '
                 stack.extend(item)
+            elif isinstance(item, int):
+                budget -= len(str(item))
             else:
-                budget -= 8
+                budget -= 24  # 浮點數、null、其他
             if budget < 0:
                 return True
         return False

@@ -578,3 +578,27 @@ def test_old_derived_data_definition_is_not_ready_before_a_writable_open(
     assert reopened._effective_columns_ready()
     assert reopened.verify_stat_summary() == []
     reopened.close()
+
+
+def test_cache_capacity_estimate_counts_big_integers():
+    import json
+
+    from translation_tool.translation_db.read_cache import ReadCache
+
+    value = 10**20
+    actual = len(json.dumps(value).encode("utf-8"))
+    assert ReadCache(max_bytes=actual - 1).exceeds_capacity(value)
+
+
+def test_activity_installed_with_old_version_is_not_ready_read_only(two_version_path):
+    db = TranslationDB(two_version_path)
+    db._conn.execute("UPDATE meta SET value='1' WHERE key='activity_schema_version'")
+    db._conn.commit()
+    db.close()
+    reader = TranslationDB(two_version_path, readonly=True)
+    assert not reader._activity_ready()
+    reader.close()
+    reopened = TranslationDB(two_version_path)
+    assert reopened._activity_ready()
+    assert reopened.verify_entry_activity() == []
+    reopened.close()
