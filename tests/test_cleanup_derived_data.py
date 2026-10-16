@@ -231,3 +231,51 @@ def test_cleanup_works_when_derived_data_is_missing(db, tmp_path):
     plan = _clean(db, _protected_path(db, tmp_path, "p.json"))
     db.revert_cleanup(plan.batch_id)
     assert [db._q(sql) for sql in user_data] == before
+
+
+def _strip_columns(part: dict, drop: set[str]) -> None:
+    keep = [i for i, c in enumerate(part["columns"]) if c not in drop]
+    part["columns"] = [part["columns"][i] for i in keep]
+    part["rows"] = [[row[i] for i in keep] for row in part["rows"]]
+
+
+def test_batch_made_before_derived_columns_existed_still_reverts(db, tmp_path):
+    """衍生欄位出現之前建立的清理快照（沒有 qflags 等欄位）要能還原並重算衍生資料。"""
+    before = _dump(db)
+    plan = _clean(db, _protected_path(db, tmp_path, "p.json"))
+    payload = json.loads(
+        db._one("SELECT payload FROM cleanup_batch WHERE id = ?", (plan.batch_id,))[0]
+    )
+    _strip_columns(payload["entry"], {"qflags"})
+    if "effective" in payload:
+        _strip_columns(payload["effective"], {"mc_version", "diff", "upd"})
+    with db._tx() as conn:
+        conn.execute(
+            "UPDATE cleanup_batch SET payload = ? WHERE id = ?",
+            (json.dumps(payload, ensure_ascii=False), plan.batch_id),
+        )
+
+    assert db.revert_cleanup(plan.batch_id).complete
+    _assert_derived_consistent(db)
+    assert _dump(db) == before
+
+
+def test_reader_connection_sees_stats_after_delete_and_revert(db, tmp_path):
+    reader = TranslationDB(db.path, readonly=True)
+    try:
+
+        def numbers() -> tuple:
+            return (
+                [tuple(vars(s).values()) for s in reader.version_stats()],
+                reader.count_reusable(V1),
+                reader.count_reusable(V2),
+                reader.overview(),
+            )
+
+        before = numbers()
+        plan = _clean(db, _protected_path(db, tmp_path, "p.json"))
+        assert numbers() != before  # 刪除後立即反映，不是舊快取
+        db.revert_cleanup(plan.batch_id)
+        assert numbers() == before
+    finally:
+        reader.close()
