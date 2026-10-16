@@ -458,6 +458,81 @@ def test_retry_token_estimate_uses_only_candidates_and_extended_prompt(
     assert observations[1][1] > observations[0][1]
 
 
+def test_format_mismatch_is_sent_back_with_detected_issues_and_repaired(
+    monkeypatch, configure_batch
+):
+    configure_batch(retry=False)
+    item = _item("§aUse %s\nnext", 0)
+
+    result, status, calls = _run_with_api(
+        monkeypatch,
+        [item],
+        [
+            lambda call: _reply(call, {"§aUse %s\nnext": "使用 next"}),
+            lambda call: _reply(call, {"§aUse %s\nnext": "§a使用 %s\n下一個"}),
+        ],
+    )
+
+    assert status == "AUTO"
+    assert len(calls) == 2
+    retry_item = calls[1]["payload"]["items"][0]
+    assert retry_item["id"] == "0"
+    assert retry_item["value"] == "§aUse %s\nnext"
+    assert retry_item["format_issues"]
+    assert calls[1]["system_prompt"].startswith("LANG PROFILE PROMPT")
+    assert "format mismatches" in calls[1]["system_prompt"]
+    assert result == [{**item, "text": "§a使用 %s\n下一個"}]
+
+
+def test_format_mismatch_retry_keeps_original_when_issue_remains(
+    monkeypatch, configure_batch
+):
+    configure_batch(retry=False)
+    item = _item("§aUse %s\nnext", 0)
+
+    result, status, calls = _run_with_api(
+        monkeypatch,
+        [item],
+        [
+            lambda call: _reply(call, {"§aUse %s\nnext": "使用 next"}),
+            lambda call: _reply(call, {"§aUse %s\nnext": "使用 next"}),
+        ],
+    )
+
+    assert status == "AUTO"
+    assert len(calls) == 2
+    assert result == [{**item, "text": "使用 next"}]
+
+
+def test_format_repair_runs_before_the_next_batch_is_requested(
+    monkeypatch, configure_batch
+):
+    config = configure_batch(retry=False)
+    config["lm_translator"]["initial_batch_size_lang"] = 1
+    items = [_item("§aUse %s\nnext", 0), _item("Second", 1)]
+
+    result, status, calls = _run_with_api(
+        monkeypatch,
+        items,
+        [
+            lambda call: _reply(call, {"§aUse %s\nnext": "使用 next"}),
+            lambda call: _reply(call, {"§aUse %s\nnext": "§a使用 %s\n下一個"}),
+            lambda call: _reply(call, {"Second": "第二個"}),
+        ],
+    )
+
+    assert status == "AUTO"
+    assert len(calls) == 3
+    assert [item["value"] for item in calls[0]["payload"]["items"]] == [
+        "§aUse %s\nnext"
+    ]
+    assert [item["value"] for item in calls[1]["payload"]["items"]] == [
+        "§aUse %s\nnext"
+    ]
+    assert [item["value"] for item in calls[2]["payload"]["items"]] == ["Second"]
+    assert [entry["text"] for entry in result] == ["§a使用 %s\n下一個", "第二個"]
+
+
 def test_batch_input_fit_reserves_retry_prompt_only_when_enabled(
     monkeypatch, configure_batch
 ):

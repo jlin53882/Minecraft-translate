@@ -37,6 +37,10 @@ from translation_tool.core.lm_config_schema import (
     chatgpt_model_reasoning_effort,
     model_output_token_cap,
 )
+from translation_tool.core.lm_format_retry import (
+    FORMAT_MISMATCH_RETRY_INSTRUCTION,
+    build_format_mismatch_retry_batch,
+)
 from translation_tool.core.lm_key_health import (
     PROBE_LEASE_MARGIN_SEC,
     get_model_quota_registry,
@@ -48,6 +52,7 @@ from translation_tool.core.lm_same_source_retry import (
     build_same_source_retry_batch,
     merge_same_source_retry_results,
 )
+from translation_tool.translation_db.quality import token_issues
 from translation_tool.utils.cancellation import interruptible_sleep, raise_if_cancelled
 from translation_tool.utils.config_manager import get_models_config, load_config
 from translation_tool.utils.log_unit import log_error, log_info, log_warning
@@ -387,6 +392,7 @@ class _BatchRuntime:
     fixed_input_tokens: float
     batch_fit_input_tokens: float
     retry_fixed_input_tokens: float
+    format_retry_fixed_input_tokens: float
     retry_same_as_source: bool
     original_total: int | None
     remaining_items: list[dict]
@@ -519,6 +525,9 @@ def _build_batch_runtime(
     retry_fixed_input_tokens = estimate_text_tokens(
         f"{fixed_prompt.rstrip()}\n\n{SAME_SOURCE_RETRY_INSTRUCTION}"
     )
+    format_retry_fixed_input_tokens = estimate_text_tokens(
+        f"{fixed_prompt.rstrip()}\n\n{FORMAT_MISMATCH_RETRY_INSTRUCTION}"
+    )
     return _BatchRuntime(
         batch_items=batch_items,
         total=total,
@@ -538,6 +547,7 @@ def _build_batch_runtime(
             retry_fixed_input_tokens if retry_same_as_source else fixed_input_tokens
         ),
         retry_fixed_input_tokens=retry_fixed_input_tokens,
+        format_retry_fixed_input_tokens=format_retry_fixed_input_tokens,
         retry_same_as_source=retry_same_as_source,
         original_total=total,
         remaining_items=list(batch_items),
@@ -1168,6 +1178,101 @@ def _retry_same_source_translations(
     return merged
 
 
+def _retry_format_mismatch_translations(
+    runtime: _BatchRuntime,
+    round_data: _BatchRound,
+    result: list[dict],
+    *,
+    prompt: str,
+    model_name: str,
+    api_key: str,
+    output_cap: int | None,
+) -> list[dict]:
+    """Send only format-invalid rows back with the detected issues as feedback."""
+    candidates = build_format_mismatch_retry_batch(
+        round_data.current_batch, result, list(round_data.id_to_item)
+    )
+    if not candidates.positions:
+        return result
+
+    retry_prompt = f"{prompt.rstrip()}\n\n{FORMAT_MISMATCH_RETRY_INSTRUCTION}"
+    retry_estimate = runtime.budget_tracker.estimate(
+        candidates.items,
+        runtime.budget_cfg,
+        runtime.format_retry_fixed_input_tokens,
+    )
+    retry_round = _BatchRound(
+        current_batch=list(candidates.items),
+        fit_count=len(candidates.items),
+        estimate=retry_estimate,
+        payload=candidates.payload,
+        id_to_item=candidates.id_to_item,
+    )
+    candidate_count = len(candidates.positions)
+    log_info(
+        f"[format retry] {candidate_count}/{len(round_data.current_batch)} rows; "
+        f"estimated input={round(retry_estimate.input_tokens)} tokens"
+    )
+
+    try:
+        raise_if_cancelled()
+        retry_meta: dict = {}
+        request_kwargs = _provider_request_kwargs(
+            runtime,
+            model_name,
+            retry_prompt,
+            retry_round.payload,
+            output_cap,
+            retry_meta,
+            api_key,
+        )
+        retry_text = call_gemini_requests(**request_kwargs).strip()
+        raise_if_cancelled()
+        if (
+            not retry_text
+            or retry_meta.get("finish_reason") == "MAX_TOKENS"
+            or _is_truncated_response(retry_text)
+        ):
+            log_warning("[format retry] response was empty or truncated")
+            return result
+        retried, invalid = _merge_batch_response(
+            runtime, retry_round, retry_text, retry_meta, optional_retry=True
+        )
+        if invalid or retried is None:
+            log_warning("[format retry] response did not satisfy the structured contract")
+            return result
+    except Exception:  # noqa: BLE001 - optional quality retry must not fail a valid batch
+        log_warning("[format retry] request failed; keeping the original translations")
+        return result
+
+    accepted_positions: list[int] = []
+    accepted_results: list[dict] = []
+    unresolved = 0
+    for position, retry_item in zip(candidates.positions, retried, strict=True):
+        source_text = round_data.current_batch[position].get("text")
+        translated_text = retry_item.get("text")
+        if (
+            not isinstance(source_text, str)
+            or not isinstance(translated_text, str)
+            or token_issues(source_text, translated_text)
+        ):
+            unresolved += 1
+            continue
+        accepted_positions.append(position)
+        accepted_results.append(retry_item)
+
+    if unresolved:
+        log_warning(f"[format retry] {unresolved} rows still have format mismatches")
+
+    merged = merge_same_source_retry_results(
+        result, tuple(accepted_positions), accepted_results
+    )
+    log_info(
+        f"[format retry] repaired {len(accepted_positions)}/{candidate_count} rows"
+    )
+    return merged
+
+
 def _clear_quota_on_http_success(
     quota, error: Exception, model_name: str, started: float
 ) -> None:
@@ -1279,6 +1384,15 @@ def _finish_successful_batch(
         runtime,
         round_data,
         result,
+        prompt=prompt,
+        model_name=model_name,
+        api_key=api_key,
+        output_cap=output_cap,
+    )
+    finalized = _retry_format_mismatch_translations(
+        runtime,
+        round_data,
+        finalized,
         prompt=prompt,
         model_name=model_name,
         api_key=api_key,
