@@ -23,7 +23,7 @@ from contextlib import contextmanager
 
 from translation_tool.translation_db.schema import SRC_MANUAL
 
-STAT_SCHEMA_VERSION = "1"
+STAT_SCHEMA_VERSION = "2"
 NO_SOURCE = -1  # 沒有生效譯文的條目在 stat_src 的來源值
 COUNTER_NAMES = ("content", "mods", "no_source", "diff")
 

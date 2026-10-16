@@ -26,7 +26,7 @@ import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
 
-SCHEMA_VERSION = "1"
+SCHEMA_VERSION = "2"
 COLUMNS = {
     "mc_version": "TEXT",
     "diff": "INTEGER NOT NULL DEFAULT 0",

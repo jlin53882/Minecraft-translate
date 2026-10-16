@@ -35,12 +35,12 @@ class ReadCache:
                 if _NEEDS_ESCAPE.search(item):
                     budget -= _ESCAPE_EXTRA * len(_NEEDS_ESCAPE.findall(item))
             elif isinstance(item, dict):
-                budget -= 2 + len(item)
+                budget -= 2 + 4 * len(item)  # 每組 ': ' 與 ', '
                 for key, child in item.items():
                     stack.append(key)
                     stack.append(child)
             elif isinstance(item, (list, tuple)):
-                budget -= 2 + len(item)
+                budget -= 2 + 2 * len(item)  # 每項 ', '
                 stack.extend(item)
             else:
                 budget -= 8

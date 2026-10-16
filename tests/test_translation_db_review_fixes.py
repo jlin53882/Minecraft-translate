@@ -546,3 +546,35 @@ def test_cache_capacity_estimate_counts_json_escapes():
     for payload in ("\x00" * 3_000_000, '"' * 9_000_000, "x" * 3_000_000):
         actual = len(json.dumps([payload], ensure_ascii=False).encode("utf-8"))
         assert cache.exceeds_capacity([payload]) == (actual > 16_000_000), len(payload)
+
+
+def test_cache_capacity_estimate_counts_json_separators():
+    import json
+
+    from translation_tool.translation_db.read_cache import ReadCache
+
+    for value in (["a"] * 21, {f"k{i}": "v" for i in range(10)}):
+        actual = len(json.dumps(value, ensure_ascii=False).encode("utf-8"))
+        assert ReadCache(max_bytes=actual - 1).exceeds_capacity(value)
+
+
+def test_old_derived_data_definition_is_not_ready_before_a_writable_open(
+    two_version_path,
+):
+    """舊版安裝的衍生資料（沒有新觸發器）在唯讀開啟時不能被當成可用。"""
+    db = TranslationDB(two_version_path)
+    db._conn.execute(
+        "UPDATE meta SET value = '1' WHERE key IN "
+        "('stats_schema_version', 'effective_columns_schema_version')"
+    )
+    db._conn.commit()
+    db.close()
+    reader = TranslationDB(two_version_path, readonly=True)
+    assert not reader._stat_summary_ready()
+    assert not reader._effective_columns_ready()
+    reader.close()
+    reopened = TranslationDB(two_version_path)
+    assert reopened._stat_summary_ready()
+    assert reopened._effective_columns_ready()
+    assert reopened.verify_stat_summary() == []
+    reopened.close()
