@@ -4,7 +4,9 @@ from translation_tool.translation_db.cleanup import (
     CLEANUP_CATEGORIES,
     CleanupBatchInfo,
     CleanupPlan,
+    CleanupPlanChanged,
     CleanupReport,
+    RevertResult,
 )
 from translation_tool.translation_db.models import (
     AITranslationReplaceResult,
@@ -72,6 +74,7 @@ __all__ = [
     "BulkReviewResult",
     "CleanupBatchInfo",
     "CleanupPlan",
+    "CleanupPlanChanged",
     "CleanupReport",
     "DbSettings",
     "EffectiveSourceStat",
@@ -82,6 +85,7 @@ __all__ = [
     "IngestStats",
     "QualityFilter",
     "QualityIssueDelta",
+    "RevertResult",
     "ReviewPreviewItem",
     "SameSourceAIEntry",
     "ScanItem",

@@ -270,6 +270,9 @@ def test_placeholder_book_strings_are_not_text():
     ):
         assert classify_book_string(value) == "not", value
     assert classify_book_string("The todo list is on the board.") == "text"
+    # 說明文字裡舉例用的 Lorem ipsum 不讓整段變成佔位字
+    demo = "This page disables splitting.\nLorem ipsum dolor sit amet, consectetur."
+    assert classify_book_string(demo) == "text"
 
 
 def test_key_value_ignores_explanations_and_code_examples():

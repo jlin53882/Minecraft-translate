@@ -16,9 +16,11 @@ from translation_tool.core.lm_config_rules import (
 )
 from translation_tool.core.text_sniffer import (
     VANILLA_NON_TEXT_DIRS,
+    book_field,
     classify_book_string,
     lang_non_text_reason,
     looks_like_book_json,
+    value_shape_reason,
 )
 from translation_tool.utils.config_manager import load_config
 
@@ -115,11 +117,18 @@ def is_lang_file(file_path: Path) -> bool:
     return "lang" in file_path.parts
 
 
-def _list_text_translatable(value: str, is_lang: bool) -> bool:
-    """陣列裡的字串是否要翻譯：lang 檔用既有規則，手冊檔看值的形狀。"""
+def _lang_nested_translatable(value: str) -> bool:
+    """語言檔巢狀 ``text`` 與陣列裡的字串是否要翻譯；只有符號、數字或佔位字的值不收。"""
+    return (
+        is_value_translatable(value, is_lang=True) and value_shape_reason(value) is None
+    )
+
+
+def _list_text_translatable(value: str, is_lang: bool, path: str) -> bool:
+    """陣列裡的字串是否要翻譯：lang 檔用既有規則，手冊檔依上層欄位與值的形狀。"""
     if is_lang:
-        return is_value_translatable(value, is_lang=True)
-    return classify_book_string(value) == "text"
+        return _lang_nested_translatable(value)
+    return classify_book_string(value, book_field(path)) == "text"
 
 
 def extract_translatables(json_data, file_path):
@@ -153,6 +162,7 @@ def extract_translatables(json_data, file_path):
                         if (
                             is_value_translatable(v, is_lang=True)
                             and lang_non_text_reason(k, v) is None
+                            and value_shape_reason(v) is None
                         ):
                             items.append(
                                 {
@@ -164,7 +174,7 @@ def extract_translatables(json_data, file_path):
                             )
                         continue
 
-                    if k == "text" and is_value_translatable(v, is_lang=True):
+                    if k == "text" and _lang_nested_translatable(v):
                         items.append(
                             {
                                 "file": str(file_path),
@@ -179,7 +189,7 @@ def extract_translatables(json_data, file_path):
                     not is_lang
                     and isinstance(k, str)
                     and isinstance(v, str)
-                    and classify_book_string(v) == "text"
+                    and classify_book_string(v, k) == "text"
                 ):
                     items.append(
                         {
@@ -195,7 +205,7 @@ def extract_translatables(json_data, file_path):
         elif isinstance(obj, list):
             for i, v in enumerate(obj):
                 new_path = f"{base_path}[{i}]"
-                if isinstance(v, str) and _list_text_translatable(v, is_lang):
+                if isinstance(v, str) and _list_text_translatable(v, is_lang, new_path):
                     items.append(
                         {
                             "file": str(file_path),

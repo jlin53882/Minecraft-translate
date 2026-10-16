@@ -7,6 +7,7 @@ View 不直接碰引擎，檔案位置與命名規則都在這裡。
 from __future__ import annotations
 
 import time
+import uuid
 from collections import Counter
 from pathlib import Path
 
@@ -15,7 +16,9 @@ from translation_tool.translation_db import (
     CLEANUP_CATEGORIES,
     CleanupBatchInfo,
     CleanupPlan,
+    CleanupPlanChanged,
     CleanupReport,
+    RevertResult,
     TranslationDB,
 )
 
@@ -23,8 +26,11 @@ __all__ = [
     "CLEANUP_CATEGORIES",
     "CleanupBatchInfo",
     "CleanupPlan",
+    "CleanupPlanChanged",
     "CleanupReport",
+    "RevertResult",
     "apply_cleanup",
+    "cleanup_batches",
     "cleanup_overview",
     "cleanup_report_dir",
     "export_cleanup",
@@ -42,12 +48,31 @@ def cleanup_report_dir(db: TranslationDB) -> Path:
     return db.path.parent / REPORT_DIR_NAME
 
 
-def export_cleanup(db: TranslationDB, version: str) -> CleanupReport:
-    """把可清理的條目寫成檢查檔（只讀資料庫）。"""
+def export_cleanup(
+    db: TranslationDB, version: str, *, with_translation: bool = False
+) -> CleanupReport:
+    """把可清理的條目寫成檢查檔（只讀資料庫）。
+
+    ``with_translation=True`` 改匯出「符合規則但已有譯文或歷史」的條目，
+    檔名多一個 ``-translated`` 後綴。
+    """
     stamp = time.strftime("%Y%m%d-%H%M%S")
     safe_version = "".join(c if c.isalnum() or c in "._-" else "_" for c in version)
-    path = cleanup_report_dir(db) / f"cleanup-{safe_version}-{stamp}.json"
+    suffix = "-translated" if with_translation else ""
+    path = _unique_path(
+        cleanup_report_dir(db), f"cleanup-{safe_version}-{stamp}{suffix}"
+    )
+    if with_translation:
+        return db.export_protected_report(version, path)
     return db.export_cleanup_report(version, path)
+
+
+def _unique_path(folder: Path, stem: str) -> Path:
+    """不會蓋掉既有檢查檔的檔名（同一秒匯出兩次、使用者已經編輯過的檔案都不能被覆蓋）。"""
+    path = folder / f"{stem}.json"
+    while path.exists():
+        path = folder / f"{stem}-{uuid.uuid4().hex[:6]}.json"
+    return path
 
 
 def list_cleanup_reports(db: TranslationDB) -> list[Path]:
@@ -62,15 +87,21 @@ def preview_cleanup(db: TranslationDB, path: Path) -> CleanupPlan:
     return db.preview_cleanup(path)
 
 
-def apply_cleanup(db: TranslationDB, path: Path) -> CleanupPlan:
-    return db.apply_cleanup(path)
+def apply_cleanup(db: TranslationDB, path: Path, token: str) -> CleanupPlan:
+    """刪除預覽過的範圍；``token`` 是 ``preview_cleanup`` 回傳計畫的 ``token``。"""
+    return db.apply_cleanup(path, token)
 
 
 def last_cleanup_batch(db: TranslationDB) -> CleanupBatchInfo | None:
     return db.last_cleanup_batch()
 
 
-def revert_cleanup(db: TranslationDB, batch_id: str) -> tuple[int, int]:
+def cleanup_batches(db: TranslationDB) -> list[CleanupBatchInfo]:
+    """所有清理批次，新的在前。"""
+    return db.cleanup_batches()
+
+
+def revert_cleanup(db: TranslationDB, batch_id: str) -> RevertResult:
     return db.revert_cleanup(batch_id)
 
 

@@ -337,7 +337,13 @@ def test_dialog_select_all_and_clear_all_change_exclusions(db):
     )
     plan = db.preview_batch_replace(EntryFilter(version="1.21.1"), "地獄", "下界")
     dialog = BatchReplaceDialog(
-        mock_page(), lambda: db, EntryFilter(version="1.21.1"), lambda _r: None
+        mock_page(),
+        lambda: db,
+        EntryFilter(version="1.21.1"),
+        lambda _r: None,
+        # 勾選變更會自動重新預覽；用同步 launcher，避免背景執行緒尚未結束時
+        # _busy 仍為 True 而讓 _select_all 提早返回
+        operation_launcher=lambda target, **_kwargs: (target(), True)[1],
     )
     dialog.plan = dialog.selection_plan = plan
     dialog._plan_catalog = db.source_catalog

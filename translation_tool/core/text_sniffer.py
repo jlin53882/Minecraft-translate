@@ -7,7 +7,7 @@
 2. 副檔名與內容：文字類副檔名才讀；內容要像一段英文敘述（``is_prose``），
    不是資源 id、路徑、數字、色碼、模板。
 3. 結構：JSON 內不碰 ``multiblock`` 這類版面子樹，也不碰 ``type``、``id`` 這類值型別的欄位
-   （由值的形狀判斷，不靠欄位名稱清單）。
+   （由值的形狀判斷；手冊另依 Patchouli 官方文件的欄位定義區分 id 欄位與顯示欄位）。
 """
 
 from __future__ import annotations
@@ -209,7 +209,7 @@ def is_project_doc_name(path: str) -> bool:
     )
 
 
-_LANG_META_KEYS = frozenset({"language.code", "language.region"})
+_LANG_META_KEYS = frozenset({"language.code"})
 _COLOR_VALUE = re.compile(r"#?[0-9a-fA-F]{6}(?:[0-9a-fA-F]{2})?")
 _CONST_VALUE = re.compile(r"[A-Z0-9]+(?:_[A-Z0-9]+)+")
 _SNAKE_VALUE = re.compile(r"[a-z0-9]+(?:_[a-z0-9]+)+")
@@ -306,7 +306,7 @@ def iter_json_strings(node: object, path: str = "") -> Iterator[tuple[str, str]]
 
 
 # ---------------------------------------------------------------------------
-# 手冊（Patchouli 類）JSON 字串：只看值的形狀，不看欄位名稱
+# 手冊（Patchouli 類）JSON 字串：先看欄位名稱，再看值的形狀
 # ---------------------------------------------------------------------------
 
 _CJK = re.compile(r"[一-鿿぀-ヿ가-힯]")
@@ -325,13 +325,16 @@ _BOOL = re.compile(r"^(true|false)$", re.IGNORECASE)
 _HEX = re.compile(r"^#?[0-9a-fA-F]{3,8}$")
 _HEX_UPPER_ONLY = re.compile(r"^[0-9A-F]{6}$")
 _LOWER_IDENT = re.compile(r"^#?[a-z0-9_\-./]+$")
+# 駝峰（addArea、MasterXort）：顯示欄位裡是名稱，其他欄位當識別字
 _CAMEL = re.compile(r"[a-z][A-Z]")
 _HAS_LETTER = re.compile(r"[^\W\d_]")
 _WHITESPACE = re.compile("[ \t\r\n]")
 _ASCII_LETTER = re.compile(r"[A-Za-z]")
 
 
-_PLACEHOLDER_TEXT = re.compile(r"^\W*(?:todo|tbd|fixme)\b|lorem\s+ipsum", re.IGNORECASE)
+_PLACEHOLDER_TEXT = re.compile(
+    r"^\W*(?:(?:todo|tbd|fixme)\b|lorem\s+ipsum)", re.IGNORECASE
+)
 
 
 def is_placeholder_text(text: str) -> bool:
@@ -339,12 +342,123 @@ def is_placeholder_text(text: str) -> bool:
     return _PLACEHOLDER_TEXT.search(text) is not None
 
 
-def classify_book_string(value: str) -> str:
+_FORMAT_TOKEN = re.compile(
+    r"%(?:\d+\$)?[sdfxXeEgGcb%]|\{\d*\}|§[0-9a-fk-orA-FK-OR]|\$\([^)]*\)"
+)
+_KEY_SEGMENT = re.compile(r"[#./\[\]]+")
+_FIELD_NAMES = frozenset({"description", "title", "name", "text", "summary"})
+
+
+def value_shape_reason(text: str) -> str | None:
+    """語言檔與進度的值不是文字時回傳 ``"placeholder"`` 或 ``"no_letters"``。
+
+    只有符號或數字的值（``← →``、``180°``）沒有東西可翻；含 ``%s`` 之類格式碼的要保留，
+    因為中文語序可能不同。
+    """
+    if is_placeholder_text(text):
+        return "placeholder"
+    if not _HAS_LETTER.search(_FORMAT_TOKEN.sub("", text)) and not _FORMAT_TOKEN.search(
+        text
+    ):
+        return "no_letters"
+    return None
+
+
+def is_field_name_text(path: str, text: str) -> bool:
+    """內容就是它所在的欄位名稱（進度 ``description`` 欄位的內容是 ``Description``）。"""
+    word = text.strip().lower()
+    return word in _FIELD_NAMES and word in {
+        part.lower() for part in _KEY_SEGMENT.split(path)
+    }
+
+
+# Patchouli 官方文件明寫會顯示給玩家的文字欄位（條目／分類名稱、頁面標題與內文、連結文字、
+# 模板 ``patchouli:tooltip`` 元件的 ``tooltip[]`` 等）
+BOOK_DISPLAY_FIELDS = frozenset(
+    {
+        "name",
+        "title",
+        "text",
+        "description",
+        "link_text",
+        "subtitle",
+        "landing_text",
+        "tooltip",
+    }
+)
+# Patchouli 官方文件明寫是 id、路徑、旗標、結構或版面數值、不會顯示的欄位：
+# 錨點、旗標、成就、分類／父分類、圖示、排序、頁面型別、物品／配方／實體／多方塊 id、
+# 圖片與網址、relations 的 entries、書本材質／模型／音效、多方塊 pattern／mapping、
+# 模板 include 的 template／as／x／y 與元件的 guard／processor／class。
+# ``text_overrides`` 與 ``include[].using`` 不在官方文件的定義裡，不列入，交給值的形狀判斷。
+BOOK_ID_FIELDS = frozenset(
+    {
+        "anchor",
+        "flag",
+        "advancement",
+        "negate_advancement",
+        "parent",
+        "category",
+        "icon",
+        "index_icon",
+        "sortnum",
+        "turnin",
+        "type",
+        "item",
+        "recipe",
+        "recipe2",
+        "entity",
+        "multiblock_id",
+        "image",
+        "images",
+        "url",
+        "trigger",
+        "entries",
+        "book_texture",
+        "filler_texture",
+        "crafting_texture",
+        "model",
+        "open_sound",
+        "flip_sound",
+        "custom_book_item",
+        "creative_tab",
+        "advancements_tab",
+        "extend",
+        "pattern",
+        "mapping",
+        "template",
+        "as",
+        "x",
+        "y",
+        "guard",
+        "processor",
+        "class",
+    }
+)
+_INDEX = re.compile(r"\[\d+\]")
+
+
+def book_field(path: str) -> str:
+    """JSON 路徑最後一段的欄位名稱：``…/a.json#pages[0].title`` → ``title``。"""
+    tail = _INDEX.sub("", path.rsplit("#", 1)[-1])
+    return tail.rsplit(".", 1)[-1]
+
+
+def classify_book_string(value: str, field: str = "") -> str:
     """手冊 JSON 的字串值是什麼：``"text"``（要翻譯）、``"lang_key"``（指向語言檔的鍵）或 ``"not"``。
 
-    不使用欄位名稱清單：資源 id、旗標、錨點、路徑、網址、數字、色碼、模板變數、
-    小寫識別字與駝峰識別字都不是顯示文字。呼叫端負責排除 ``multiblock`` 這類版面子樹。
+    ``field`` 是值所在的欄位名稱（``book_field`` 取得；陣列元素用上層欄位）：
+
+    - ``BOOK_ID_FIELDS``：一律 ``"not"``，值長得像名稱或語言檔鍵也一樣。
+    - ``BOOK_DISPLAY_FIELDS``：單一 token（單字、``A/B``、駝峰、``addArea()``）也是名稱。
+    - 其他欄位與空字串（沒有欄位資訊）：單一 token 保守判斷，小寫識別字、任何駝峰、
+      路徑形狀、全大寫常數都不是文字；含空白的句子照常判斷。
+
+    資源 id、網址、數字、色碼、模板變數在任何欄位都不是顯示文字。
+    呼叫端負責排除 ``multiblock`` 這類版面子樹。
     """
+    if field in BOOK_ID_FIELDS:
+        return "not"
     s = value.strip()
     if not s or _CJK.search(s):
         return "not"
@@ -370,11 +484,16 @@ def classify_book_string(value: str) -> str:
     if is_placeholder_text(core):
         return "not"
     if not _WHITESPACE.search(s):
-        if _ANY_RESLOC.fullmatch(s) or _PATHLIKE.fullmatch(s):
+        shows = field in BOOK_DISPLAY_FIELDS  # 顯示欄位：單字或 A/B 寫法也是名稱
+        if _ANY_RESLOC.fullmatch(s) or (not shows and _PATHLIKE.fullmatch(s)):
             return "not"
         if _TEMPLATE_VAR.fullmatch(s) or len(s) <= 1:
             return "not"
-        if _LOWER_IDENT.fullmatch(core) or _CAMEL.search(core):
+        if not shows and (
+            _LOWER_IDENT.fullmatch(core)
+            or _CAMEL.search(core)
+            or _CONST_VALUE.fullmatch(core)
+        ):
             return "not"
         return "text" if _HAS_LETTER.search(s) else "not"
     tokens = _BOOK_MARKUP.sub("", s).split()
@@ -443,7 +562,11 @@ def advancement_texts(data: object) -> dict[str, str]:
         path = f"display.{field}"
         if isinstance(value, dict) and isinstance(value.get("text"), str):
             value, path = value["text"], f"{path}.text"
-        if isinstance(value, str) and classify_book_string(value) == "text":
+        if (
+            isinstance(value, str)
+            and classify_book_string(value, book_field(path)) == "text"
+            and not is_field_name_text(path, value)
+        ):
             found[path] = value
     return found
 
