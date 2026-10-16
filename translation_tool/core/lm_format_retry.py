@@ -4,7 +4,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from translation_tool.translation_db.quality import token_issues
+from translation_tool.plugins.shared.rich_text_shield import unshield_text
+from translation_tool.translation_db.quality import (
+    guide_structure_issues,
+    token_issues,
+)
 
 QUALITY_RETRY_INSTRUCTION = """這是目前批次唯一一次的翻譯品質修復重試，請同時處理每個項目列出的問題。
 如果 retry_reasons 表示翻譯結果與原文相同，請重新翻譯，不要直接複製原文。
@@ -24,6 +28,36 @@ class QualityRetryBatch:
     items: tuple[dict, ...]
     payload: dict
     id_to_item: dict[str, dict]
+
+
+def _item_kind(item: dict) -> str | None:
+    kind = item.get("_kind")
+    if not kind:
+        ident = item.get("db_ident")
+        kind = ident[0] if ident else None
+    return str(kind) if kind else None
+
+
+def quality_issues(source_item: dict, translated_text: str) -> list[str]:
+    """LM 結果的品質判斷：佔位符空間的數量標記，加上還原後的指南結構標記。
+
+    ``source_item`` 是送出的批次項目。帶有 ``_shielded`` 的指南段落，數量標記在佔位符
+    空間比對；指南結構標記則先還原行內保護，與寫入與審查用的規則相同。
+    """
+    issues = token_issues(source_item.get("text"), translated_text)
+    shielded = source_item.get("_shielded")
+    raw_translated = (
+        unshield_text(translated_text, shielded.shields)
+        if shielded is not None
+        else translated_text
+    )
+    raw_source = str(source_item.get("source_text") or "")
+    return [
+        *issues,
+        *guide_structure_issues(
+            raw_source, raw_translated, kind=_item_kind(source_item)
+        ),
+    ]
 
 
 def build_quality_retry_batch(
@@ -57,7 +91,7 @@ def build_quality_retry_batch(
         ):
             retry_reasons.append("翻譯結果與原文相同")
 
-        issues = token_issues(source_text, translated_text)
+        issues = quality_issues(source, translated_text)
         if not retry_reasons and not issues:
             continue
 

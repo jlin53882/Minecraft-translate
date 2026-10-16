@@ -8,6 +8,7 @@ from typing import Literal
 
 from translation_tool.translation_db.quality import (
     format_token_spans,
+    guide_structure_issues,
     token_category,
 )
 
@@ -68,14 +69,17 @@ class FormatDiffResult:
     source_occurrences: tuple[FormatTokenOccurrence, ...]
     target_occurrences: tuple[FormatTokenOccurrence, ...]
     issues: tuple[FormatDiffIssue, ...]
+    # 指南條目的結構標記（連結目標、標籤、前綴）；非指南條目為空
+    guide_issues: tuple[str, ...] = ()
 
     @property
     def has_issues(self) -> bool:
-        return bool(self.issues)
+        return bool(self.issues or self.guide_issues)
 
     @property
     def summary_lines(self) -> tuple[str, ...]:
-        return tuple(issue.summary for issue in self.issues) or ("格式檢查通過。",)
+        lines = (*(issue.summary for issue in self.issues), *self.guide_issues)
+        return lines or ("格式檢查通過。",)
 
     @property
     def legacy_messages(self) -> tuple[str, ...]:
@@ -93,8 +97,13 @@ def format_token_label(token: str) -> str:
     return token
 
 
-def compare_format_diff(source_text: str, target_text: str) -> FormatDiffResult:
-    """Compare only the existing format-token contract, never natural language."""
+def compare_format_diff(
+    source_text: str, target_text: str, *, kind: str | None = None
+) -> FormatDiffResult:
+    """Compare the format-token contract, plus guide structure for guide entries.
+
+    Natural language is never compared. ``kind`` selects the guide rules.
+    """
     source_text = source_text or ""
     target_text = target_text or ""
     source_occurrences = _occurrences(source_text)
@@ -128,6 +137,7 @@ def compare_format_diff(source_text: str, target_text: str) -> FormatDiffResult:
         source_occurrences=source_occurrences,
         target_occurrences=target_occurrences,
         issues=tuple(issues),
+        guide_issues=tuple(guide_structure_issues(source_text, target_text, kind=kind)),
     )
 
 

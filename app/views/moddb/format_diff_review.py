@@ -85,6 +85,7 @@ class FormatDiffReview:
         self.panel_width = panel_width or (320 if compact else 340)
         self.show_source = show_source
         self._result: FormatDiffResult | None = None
+        self._kind: str | None = None
         self._highlight = True
         self._tab = "diff"
         self._meta_controls: list[ft.Control] = []
@@ -128,6 +129,7 @@ class FormatDiffReview:
         diff_result: FormatDiffResult | None = None,
         *,
         metadata: Sequence[ft.Control] = (),
+        kind: str | None = None,
     ) -> FormatDiffResult:
         source_text = source_text or ""
         target_text = target_text or ""
@@ -137,8 +139,9 @@ class FormatDiffReview:
             or result.source_text != source_text
             or result.target_text != target_text
         ):
-            result = compare_format_diff(source_text, target_text)
+            result = compare_format_diff(source_text, target_text, kind=kind)
         self._result = result
+        self._kind = kind
         self._source_text = source_text
         self._target_text = target_text
         self._meta_controls = list(metadata)
@@ -168,7 +171,7 @@ class FormatDiffReview:
 
     def _refresh(self) -> None:
         result = self._result or compare_format_diff(
-            self._source_text, self._target_text
+            self._source_text, self._target_text, kind=self._kind
         )
         has_editor = self.editable_control is not None
         self._tabs.visible = has_editor and not self.compact
@@ -273,6 +276,11 @@ class FormatDiffReview:
             )
             for issue in result.issues
         ]
+        # 指南標記（連結目標、標籤等）與編輯頁的提醒共用同一份比對結果
+        issue_controls += [
+            kit.chip(message, "gold", icon=ft.Icons.WARNING_AMBER)
+            for message in result.guide_issues
+        ]
         issue_summary: ft.Control = (
             ft.Row(issue_controls, spacing=6, wrap=True)
             if issue_controls
@@ -332,9 +340,13 @@ class FormatDiffReview:
                 affected_tokens,
                 highlight=True,
             )
+        # 固定高度的面板內捲動：長文字超出時可以用卷軸看完整內容
         return ft.Container(
             content=ft.Column(
-                [ft.Text(title, size=12, color=palette.fg), rendered], spacing=8
+                [ft.Text(title, size=12, color=palette.fg), rendered],
+                spacing=8,
+                scroll=ft.ScrollMode.AUTO,
+                expand=True,
             ),
             padding=12,
             bgcolor=C.PANEL2,
@@ -404,7 +416,7 @@ class FormatDiffReview:
                     vertical_alignment=ft.CrossAxisAlignment.START,
                 )
             )
-        if not result.issues:
+        if not result.issues and not result.guide_issues:
             rows.append(ft.Text("所有格式標記數量一致。", size=12, color=C.EM))
         return ft.Container(
             content=ft.Column(rows, spacing=7),

@@ -66,6 +66,7 @@ from translation_tool.translation_db.models import (
 )
 from translation_tool.translation_db.quality import (
     format_tokens,
+    guide_structure_issues,
     matches_quality,
     quality_state,
     repair_input_issues,
@@ -82,6 +83,7 @@ from translation_tool.translation_db.schema import (
     DB_NEWER,
     DEFAULT_PRIORITY,
     KEEP_REVIEW_FLAG,
+    KIND_GUIDE,
     SRC_AI,
     SRC_AI_REPAIR,
     SRC_JAR_CN,
@@ -940,7 +942,7 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
         if r[7] == SRC_MANUAL and review_status is None:
             review_status = "legacy_unknown"
         en_us, zh_tw = r[5] or "", r[6] or ""
-        quality, issues, whitespace = quality_state(en_us, zh_tw)
+        quality, issues, whitespace = quality_state(en_us, zh_tw, kind=r[1])
         return EntryRow(
             id=r[0],
             kind=r[1],
@@ -1490,7 +1492,8 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
                 f"{column} GLOB {_TOKEN_CHAR_GLOB_SQL} OR instr({column}, char(10)) > 0"
                 for column in ("e.en_us", "f.zh_tw")
             )
-            return f"{has_text} AND ({token_like})"
+            # 指南的結構標記（連結目標等）不一定含格式符號，所以指南條目整批列入候選
+            return f"{has_text} AND (({token_like}) OR e.kind = '{KIND_GUIDE}')"
         return "1"
 
     def _quality_filtered_page(
@@ -1656,7 +1659,11 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
                 raise_if_cancelled()
                 for row in chunk:
                     if not matches_quality(
-                        row[5] or "", row[6] or "", criteria.quality, row[4]
+                        row[5] or "",
+                        row[6] or "",
+                        criteria.quality,
+                        row[4],
+                        kind=row[1],
                     ):
                         continue
                     total += 1
@@ -1808,7 +1815,11 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
                             "檢查品質條件", 0.05 + 0.4 * index / max(1, total)
                         )
                 if matches_quality(
-                    row[5] or "", row[6] or "", criteria.quality, row[4]
+                    row[5] or "",
+                    row[6] or "",
+                    criteria.quality,
+                    row[4],
+                    kind=row[1],
                 ):
                     filtered.append(row)
             rows = filtered
@@ -1836,7 +1847,7 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
         quality = criteria.quality
         source = self._query_source()
         narrow = (
-            f"SELECT e.id, e.en_us, f.zh_tw, e.key {source} "
+            f"SELECT e.id, e.en_us, f.zh_tw, e.key, e.kind {source} "
             f"WHERE ({cond}) AND "
             f"{self._quality_prefilter_sql(quality, self._quality_flags_ready(conn))}"
         )
@@ -1851,7 +1862,9 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
                 matched_ids.extend(
                     int(row[0])
                     for row in chunk
-                    if matches_quality(row[1] or "", row[2] or "", quality, row[3])
+                    if matches_quality(
+                        row[1] or "", row[2] or "", quality, row[3], kind=row[4]
+                    )
                 )
                 if progress_callback is not None:
                     progress_callback(f"檢查品質條件（已檢查 {scanned:,} 筆）", 0.05)
@@ -2100,9 +2113,11 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
 
         @lru_cache(maxsize=4096)
         def quality_comparison(
-            source: str, before: str, after: str
+            source: str, before: str, after: str, kind: str | None
         ) -> tuple[tuple[str, ...], tuple[str, ...], tuple[QualityIssueDelta, ...]]:
-            old, new, deltas = token_quality_comparison(source, before, after)
+            old, new, deltas = token_quality_comparison(
+                source, before, after, kind=kind
+            )
             return tuple(old), tuple(new), deltas
 
         def add_candidate(
@@ -2141,7 +2156,7 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
                 return
             source_text = row[5] or ""
             old_issues, new_issues, quality_deltas = quality_comparison(
-                source_text, old_text, new_text
+                source_text, old_text, new_text, row[1]
             )
             old_space = whitespace_note(old_text)
             new_space = whitespace_note(new_text)
@@ -4066,7 +4081,9 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
                         for row in rows:
                             if check is not None:
                                 check()
-                            if quality_state(row[4], row[5])[0] != "mismatch":
+                            if quality_state(row[4], row[5], kind=row[1])[0] != (
+                                "mismatch"
+                            ):
                                 continue
                             count += 1
                             if (
@@ -4126,6 +4143,10 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
                     newline_mismatch = wanted["\n"] != previous["\n"]
                     eligible, _issues, mixed = repair_input_issues_from_counts(
                         wanted, previous
+                    )
+                    # 指南的結構標記不一致也是可修復的候選（與 quality_state 的判斷一致）
+                    eligible = eligible or bool(
+                        guide_structure_issues(row[4], row[5], kind=row[1])
                     )
                     if eligible:
                         yield (

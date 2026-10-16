@@ -18,6 +18,9 @@
 - 每個品質狀態一個位元：未翻譯 1、前後空白 2、token 不一致 4、相符 8、疑似學名 16、
   學名格式 32；值與 `matches_quality(en_us, 生效譯文, QualityFilter(status=狀態), key)`
   相同。原文未知仍以 `en_us=''` 篩選，不佔位元。
+- 指南條目（`kind=guide`）的結構標記（連結目標、元件標籤、標題與清單前綴，見
+  `quality.guide_structure_issues`）也計入「token 不一致」與「相符」，與條目校對頁、修復審查與
+  寫入判斷使用同一份規則；因此觸發器也監看 `entry.kind`，定義版本為 2。
 - 每個位元一個部分索引 `entry(mc_version, mod_id, kind, key, id) WHERE qflags & 位元`，
   欄位順序與清單預設排序相同；另有 `entry(id) WHERE qflags IS NULL` 找出待重算的條目。
 - 觸發器只把受影響的條目設為 `NULL`（待重算）：生效譯文新增、刪除、文字或條目改變，

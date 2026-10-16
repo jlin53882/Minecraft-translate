@@ -30,7 +30,6 @@ from app.services_impl.pipelines._pipeline_logging import (
     mirror_session_log,
 )
 from app.tasks.task_session import add_log_unmirrored
-from app.views.moddb.formatting import token_issues
 from translation_tool.core.lm_batch_budget import (
     BudgetConfig,
     get_tracker,
@@ -44,7 +43,7 @@ from translation_tool.translation_db import TranslationDB
 from translation_tool.translation_db.models import SameSourceAIEntry
 from translation_tool.translation_db.quality import (
     repair_input_issues,
-    repair_output_issues,
+    translation_issues,
 )
 from translation_tool.translation_db.run_progress import format_repair_live
 from translation_tool.translation_db.schema import SRC_AI
@@ -933,10 +932,11 @@ def _finalize_result(
         )
         return True
     translated_text = result["text"]
-    issues = (
-        repair_output_issues(original["source_text"], translated_text)
-        if report.mode == "quality_mismatch" and not report.strict_newline
-        else token_issues(original["source_text"], translated_text)
+    issues = translation_issues(
+        original["source_text"],
+        translated_text,
+        kind=original.get("_kind"),
+        repair=report.mode == "quality_mismatch" and not report.strict_newline,
     )
     if issues:
         _mark_flagged(db, session, report, original, translated_text, issues)

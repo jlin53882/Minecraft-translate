@@ -130,3 +130,45 @@ def test_highlight_switch_is_only_shown_on_the_diff_tab():
     assert not has_switch()
     review._select_tab("diff")
     assert has_switch()
+
+
+def test_comparison_panels_scroll_inside_their_fixed_height():
+    """長譯文超出固定高度的面板時，面板內要能捲動，不能把後面的內容截掉。"""
+    import flet as ft
+
+    from app.views.moddb.format_diff_review import FormatDiffReview
+
+    review = FormatDiffReview(context_label="t", editable_control=ft.TextField())
+    review.render("A " * 400, "B " * 400)
+
+    panel = review._text_panel("譯文", "B " * 400, (), set(), "em")
+    column = panel.content
+    assert column.scroll == ft.ScrollMode.AUTO
+    assert panel.height == 260
+
+
+def test_guide_mark_issues_are_shown_in_the_diff_panel_not_only_the_editor_hint():
+    """指南連結目標被改壞時，差異預覽要顯示問題，不能和編輯頁的提醒互相矛盾地寫「通過」。"""
+    import flet as ft
+
+    from app.views.moddb.format_diff_review import FormatDiffReview
+
+    review = FormatDiffReview(context_label="條目校對", editable_control=ft.TextField())
+    source = "[Crafting](../items/crafting.md)"
+    target = "[合成](/../items/crafting.md)"
+    review.render(source, target, kind="guide")
+
+    texts: list[str] = []
+
+    def walk(control):
+        if isinstance(control, ft.Text) and control.value:
+            texts.append(control.value)
+        if isinstance(control, ft.Container):
+            walk(control.content)
+        for child in getattr(control, "controls", None) or []:
+            walk(child)
+
+    walk(review.control.content)
+    assert any("連結目標" in text for text in texts)
+    assert "格式檢查通過" not in texts
+    assert "所有格式標記數量一致。" not in texts

@@ -23,7 +23,7 @@ import sqlite3
 from translation_tool.translation_db.models import QualityFilter
 from translation_tool.translation_db.quality import matches_quality
 
-SCHEMA_VERSION = "1"
+SCHEMA_VERSION = "2"  # 2：指南條目的結構標記計入「格式不一致／一致」
 BITS = {
     "missing_translation": 1,
     "whitespace": 2,
@@ -68,8 +68,8 @@ _TRIGGERS = {
             {_PENDING.format("NEW.entry_id")}
         END""",
     "qflags_entry_update": f"""
-        CREATE TRIGGER qflags_entry_update AFTER UPDATE OF key, en_us ON entry
-        WHEN (OLD.key, OLD.en_us) IS NOT (NEW.key, NEW.en_us) BEGIN
+        CREATE TRIGGER qflags_entry_update AFTER UPDATE OF key, en_us, kind ON entry
+        WHEN (OLD.key, OLD.en_us, OLD.kind) IS NOT (NEW.key, NEW.en_us, NEW.kind) BEGIN
             {_PENDING.format("NEW.id")}
         END""",
     # 一般新增時欄位預設為 NULL；還原清理快照等帶入舊值的新增也要重算
@@ -80,36 +80,40 @@ _TRIGGERS = {
         END""",
 }
 _ROWS = (
-    "SELECT e.id, e.key, e.en_us, f.zh_tw FROM entry e "
+    "SELECT e.id, e.key, e.en_us, f.zh_tw, e.kind FROM entry e "
     "LEFT JOIN effective f ON f.entry_id = e.id"
 )
 
 
-def compute(key: str, en_us: str | None, zh_tw: str | None) -> int:
-    """一個條目的品質旗標（原文、生效譯文與 key 決定）。"""
+def compute(
+    key: str, en_us: str | None, zh_tw: str | None, kind: str | None = None
+) -> int:
+    """一個條目的品質旗標（原文、生效譯文、key 與種類決定）。"""
     source, translated = en_us or "", zh_tw or ""
     flags = 0
     for status in ("missing_translation", "whitespace"):
-        if matches_quality(source, translated, _FILTERS[status], key):
+        if matches_quality(source, translated, _FILTERS[status], key, kind=kind):
             flags |= BITS[status]
     # 兩者都要求原文與譯文非空，且 token 計數不同即不一致、相同即一致：互斥
-    if matches_quality(source, translated, _FILTERS["mismatch"], key):
+    if matches_quality(source, translated, _FILTERS["mismatch"], key, kind=kind):
         flags |= BITS["mismatch"]
-    elif matches_quality(source, translated, _FILTERS["consistent"], key):
+    elif matches_quality(source, translated, _FILTERS["consistent"], key, kind=kind):
         flags |= BITS["consistent"]
     if source:
         for status in ("species_name", "species_format"):
-            if matches_quality(source, translated, _FILTERS[status], key):
+            if matches_quality(source, translated, _FILTERS[status], key, kind=kind):
                 flags |= BITS[status]
     return flags
 
 
-def _reference(key: str, en_us: str | None, zh_tw: str | None) -> int:
+def _reference(
+    key: str, en_us: str | None, zh_tw: str | None, kind: str | None = None
+) -> int:
     """驗證用：逐一呼叫每個狀態的判斷，不依賴 :func:`compute` 的互斥與略過。"""
     return sum(
         bit
         for status, bit in BITS.items()
-        if matches_quality(en_us or "", zh_tw or "", _FILTERS[status], key)
+        if matches_quality(en_us or "", zh_tw or "", _FILTERS[status], key, kind=kind)
     )
 
 
@@ -255,8 +259,8 @@ def settle(conn: sqlite3.Connection, *, limit: int | None = None) -> int:
         conn.executemany(
             "UPDATE entry SET qflags=? WHERE id=?",
             [
-                (compute(key, en_us, zh_tw), entry_id)
-                for entry_id, key, en_us, zh_tw in rows
+                (compute(key, en_us, zh_tw, kind), entry_id)
+                for entry_id, key, en_us, zh_tw, kind in rows
             ],
         )
         done += len(rows)
@@ -271,6 +275,6 @@ def verify(conn: sqlite3.Connection) -> list[tuple]:
     cursor = conn.execute(_ROWS.replace("e.id,", "e.id, e.qflags,", 1))
     return [
         (entry_id, stored, expected)
-        for entry_id, stored, key, en_us, zh_tw in cursor
-        if stored != (expected := _reference(key, en_us, zh_tw))
+        for entry_id, stored, key, en_us, zh_tw, kind in cursor
+        if stored != (expected := _reference(key, en_us, zh_tw, kind))
     ]

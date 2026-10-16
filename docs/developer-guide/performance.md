@@ -71,7 +71,9 @@ frozen, and otherwise fall back to the original SQL. Bulk rewrites of
 per quality status) for quality-filtered lists. Its triggers only mark affected
 entries pending (`qflags IS NULL`); `TranslationDB._tx` calls `settle()` before
 commit to recompute them with `translation_tool/translation_db/quality.py`, so
-the flags never duplicate the quality rules in SQL. Readers check for pending
+the flags never duplicate the quality rules in SQL. Guide structure rules depend
+on `entry.kind`, so the triggers also watch `kind`; a rule change bumps
+`quality_flags.SCHEMA_VERSION`, which recomputes every entry on the next open. Readers check for pending
 entries and use the row-by-row scan while any exist. Its `verify()` compares
 every entry with a recompute that calls `matches_quality` once per status.
 

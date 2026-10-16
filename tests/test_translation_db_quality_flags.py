@@ -21,7 +21,12 @@ from translation_tool.translation_db import (
 )
 from translation_tool.translation_db.models import QualityFilter
 from translation_tool.translation_db.read_cache import ReadCache
-from translation_tool.translation_db.schema import SRC_AI, SRC_JAR_CN, SRC_MANUAL
+from translation_tool.translation_db.schema import (
+    KIND_GUIDE,
+    SRC_AI,
+    SRC_JAR_CN,
+    SRC_MANUAL,
+)
 
 VERSIONS = ("1.20.1", "1.21.1", "1.22", "26.1")
 STATUSES = tuple(quality_flags.BITS)
@@ -41,6 +46,12 @@ SPECIES = [
     ("tip", "Energy usage"),
     ("tip2", " Spaced  name "),
 ]
+# 指南條目：連結目標一致、連結目標被改壞（不含格式符號，只有結構標記）、純文字
+GUIDE = [
+    ("[Crafting](../items/crafting.md)", "[合成](../items/crafting.md)"),
+    ("[Crafting](../items/crafting.md)", "[合成](/../items/crafting.md)"),
+    ("Plain text", "純文字"),
+]
 
 
 def _seed(db: TranslationDB) -> None:
@@ -56,6 +67,8 @@ def _seed(db: TranslationDB) -> None:
             )
         for key, en in SPECIES:
             items.append(ScanItem(KIND_LANG, "flora", key, en, "譯" if index else ""))
+        for gi, (en, tw) in enumerate(GUIDE):
+            items.append(ScanItem(KIND_GUIDE, "guidemod", f"g{gi}", en, tw))
         db.ingest(version, items)
     rows = db.list_entries("1.21.1", limit=500)[0]
     for row in rows[::7]:
@@ -94,7 +107,10 @@ def _page(db, criteria, offset, limit, *, flags=True):
 
 def test_new_database_installs_ready_flags(db):
     meta = dict(db._q("SELECT key, value FROM meta WHERE key LIKE 'quality%'"))
-    assert meta == {"quality_schema_version": "1", "quality_valid": "1"}
+    assert meta == {
+        "quality_schema_version": quality_flags.SCHEMA_VERSION,
+        "quality_valid": "1",
+    }
     assert quality_flags.is_installed(db._conn)
     _seed(db)
     assert db.verify_quality_flags() == []
@@ -392,3 +408,25 @@ def test_definition_version_change_recomputes_every_entry(tmp_path):
         assert reopened.verify_quality_flags() == []
     finally:
         reopened.close()
+
+
+def test_guide_link_breakage_is_mismatch_in_flags_pages_and_rows(db):
+    """指南連結目標被改壞時，條目清單的「格式不一致」要列出它，不能顯示為「一致」。"""
+    _seed(db)
+    rows = {
+        row.key: row
+        for row in db.list_entries("1.21.1", limit=10_000)[0]
+        if row.kind == KIND_GUIDE
+    }
+    assert rows["g1"].quality_state == "mismatch"
+    assert any("連結目標" in issue for issue in rows["g1"].quality_issues)
+    assert rows["g0"].quality_state == "consistent"
+    assert rows["g2"].quality_state == "consistent"
+
+    criteria = EntryFilter(
+        version="1.21.1", quality=QualityFilter(status="mismatch"), sort_by="default"
+    )
+    mismatch_ids, _ = _page(db, criteria, 0, 10_000)
+    assert rows["g1"].id in mismatch_ids
+    assert rows["g0"].id not in mismatch_ids
+    assert db.verify_quality_flags() == []

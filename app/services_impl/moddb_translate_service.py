@@ -24,7 +24,6 @@ from app.services_impl.pipelines._pipeline_logging import (
     mirror_session_log,
 )
 from app.tasks.task_session import add_log_unmirrored
-from app.views.moddb.formatting import token_issues
 from translation_tool.core.lm_translator_main import translate_batch_smart
 from translation_tool.core.lm_translator_shared_loop import _get_default_batch_size
 from translation_tool.core.lm_translator_skeleton import (
@@ -32,6 +31,7 @@ from translation_tool.core.lm_translator_skeleton import (
     run_translator_skeleton,
 )
 from translation_tool.translation_db.models import WriteBackItem
+from translation_tool.translation_db.quality import translation_issues
 from translation_tool.translation_db.run_progress import (
     RunProgress,
     estimate_batches,
@@ -296,7 +296,7 @@ def _translate_rows(
         failures["streak"] = 0
         report.translated += 1
         source, text = item["source_text"], item["text"]
-        issues = token_issues(source, text)
+        issues = translation_issues(source, text, kind=item.get("_kind"))
         if issues:
             report.flagged += 1
             report.flagged_entries[item["_entry_id"]] = text

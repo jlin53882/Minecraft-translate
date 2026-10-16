@@ -43,6 +43,7 @@ from translation_tool.core.lm_format_retry import (
     QUALITY_RETRY_INSTRUCTION,
     build_format_mismatch_retry_batch,
     build_quality_retry_batch,
+    quality_issues,
 )
 from translation_tool.core.lm_key_health import (
     PROBE_LEASE_MARGIN_SEC,
@@ -55,7 +56,6 @@ from translation_tool.core.lm_same_source_retry import (
     build_same_source_retry_batch,
     merge_same_source_retry_results,
 )
-from translation_tool.translation_db.quality import token_issues
 from translation_tool.utils.cancellation import interruptible_sleep, raise_if_cancelled
 from translation_tool.utils.config_manager import get_models_config, load_config
 from translation_tool.utils.log_unit import log_error, log_info, log_warning
@@ -1121,6 +1121,11 @@ def _merge_batch_response(
     return merged, False
 
 
+def _retry_error_detail(exc: Exception) -> str:
+    """重試失敗的例外摘要（類型與經遮蔽的訊息），寫入後台 log 方便追查原因。"""
+    return f"{type(exc).__name__}: {redact_text(exc)[:300]}"
+
+
 def _retry_same_source_translations(
     runtime: _BatchRuntime,
     round_data: _BatchRound,
@@ -1147,7 +1152,7 @@ def _retry_same_source_translations(
         return result
     if retry_budget.used:
         log_info(
-            "[translation retry] batch retry limit reached; skipping same-source retry"
+            "[翻譯重試] 本批次已用完重試額度（每批最多 1 次），略過相同譯文的重新確認"
         )
         return result
     retry_budget.used = True
@@ -1268,7 +1273,10 @@ def _retry_format_mismatch_translations(
     if not candidates.positions:
         return result
     if retry_budget.used:
-        log_info("[translation retry] batch retry limit reached; skipping format retry")
+        log_info(
+            "[翻譯重試] 本批次已用完重試額度（每批最多 1 次），略過格式重試；"
+            f"{len(candidates.positions)} 筆格式不一致的譯文保留第一次結果"
+        )
         return result
     retry_budget.used = True
 
@@ -1288,8 +1296,8 @@ def _retry_format_mismatch_translations(
     )
     candidate_count = len(candidates.positions)
     log_info(
-        f"[format retry] {candidate_count}/{len(round_data.current_batch)} rows; "
-        f"estimated input={round(retry_estimate.input_tokens)} tokens"
+        f"[格式重試] 送出 {candidate_count}/{len(round_data.current_batch)} 筆格式不一致的譯文，"
+        f"估計輸入 {round(retry_estimate.input_tokens)} tokens"
     )
 
     try:
@@ -1312,14 +1320,19 @@ def _retry_format_mismatch_translations(
             or retry_meta.get("finish_reason") == "MAX_TOKENS"
             or _is_truncated_response(retry_text)
         ):
-            log_warning("[format retry] response was empty or truncated")
+            log_warning(
+                "[格式重試] 重試回應為空或被截斷"
+                f"（finish_reason={retry_meta.get('finish_reason')}），"
+                f"{candidate_count} 筆保留第一次譯文"
+            )
             return result
         retried, invalid = _merge_batch_response(
             runtime, retry_round, retry_text, retry_meta, optional_retry=True
         )
         if invalid or retried is None:
             log_warning(
-                "[format retry] response did not satisfy the structured contract"
+                "[格式重試] 重試回應不符合結構化格式（缺少項目、ID 不一致，或譯文不是字串），"
+                f"{candidate_count} 筆保留第一次譯文"
             )
             return result
         conversation_history.extend(
@@ -1331,8 +1344,11 @@ def _retry_format_mismatch_translations(
                 {"role": "model", "text": retry_text},
             ]
         )
-    except Exception:  # noqa: BLE001 - optional quality retry must not fail a valid batch
-        log_warning("[format retry] request failed; keeping the original translations")
+    except Exception as exc:  # noqa: BLE001 - optional format retry must not fail a valid batch
+        log_warning(
+            f"[格式重試] 重試請求失敗，{candidate_count} 筆保留第一次譯文"
+            f"（{_retry_error_detail(exc)}）"
+        )
         return result
 
     accepted_positions: list[int] = []
@@ -1344,7 +1360,7 @@ def _retry_format_mismatch_translations(
         if (
             not isinstance(source_text, str)
             or not isinstance(translated_text, str)
-            or token_issues(source_text, translated_text)
+            or quality_issues(round_data.current_batch[position], translated_text)
         ):
             unresolved += 1
             continue
@@ -1352,13 +1368,16 @@ def _retry_format_mismatch_translations(
         accepted_results.append(retry_item)
 
     if unresolved:
-        log_warning(f"[format retry] {unresolved} rows still have format mismatches")
+        log_warning(
+            f"[格式重試] 重試後仍有 {unresolved}/{candidate_count} 筆格式不一致，"
+            "這些筆保留第一次譯文"
+        )
 
     merged = merge_same_source_retry_results(
         result, tuple(accepted_positions), accepted_results
     )
     log_info(
-        f"[format retry] repaired {len(accepted_positions)}/{candidate_count} rows"
+        f"[格式重試] 已修正 {len(accepted_positions)}/{candidate_count} 筆格式不一致的譯文"
     )
     return merged
 
@@ -1398,9 +1417,10 @@ def _retry_quality_translations(
         retry_input_tokens > runtime.budget_cfg.max_input_token_budget
     ):
         log_warning(
-            "[quality retry] input budget exceeded; keeping the original translations "
-            f"(estimated={round(retry_input_tokens)}, "
-            f"budget={runtime.budget_cfg.max_input_token_budget})"
+            "[品質重試] 重試輸入超過 token 預算，略過重試，"
+            f"{len(candidates.positions)} 筆保留第一次譯文"
+            f"（估計 {round(retry_input_tokens)} tokens，預算 "
+            f"{runtime.budget_cfg.max_input_token_budget} tokens）"
         )
         return result
     retry_round = _BatchRound(
@@ -1412,8 +1432,9 @@ def _retry_quality_translations(
     )
     candidate_count = len(candidates.positions)
     log_info(
-        f"[quality retry] {candidate_count}/{len(round_data.current_batch)} rows; "
-        f"estimated input={round(retry_input_tokens)} tokens"
+        f"[品質重試] 送出 {candidate_count}/{len(round_data.current_batch)} 筆需要重新確認的譯文"
+        "（與原文相同或格式不一致），"
+        f"估計輸入 {round(retry_input_tokens)} tokens"
     )
 
     try:
@@ -1436,14 +1457,19 @@ def _retry_quality_translations(
             or retry_meta.get("finish_reason") == "MAX_TOKENS"
             or _is_truncated_response(retry_text)
         ):
-            log_warning("[quality retry] response was empty or truncated")
+            log_warning(
+                "[品質重試] 重試回應為空或被截斷"
+                f"（finish_reason={retry_meta.get('finish_reason')}），"
+                f"{candidate_count} 筆保留第一次譯文"
+            )
             return result
         retried, invalid = _merge_batch_response(
             runtime, retry_round, retry_text, retry_meta, optional_retry=True
         )
         if invalid or retried is None:
             log_warning(
-                "[quality retry] response did not satisfy the structured contract"
+                "[品質重試] 重試回應不符合結構化格式（缺少項目、ID 不一致，或譯文不是字串），"
+                f"{candidate_count} 筆保留第一次譯文"
             )
             return result
         conversation_history.extend(
@@ -1455,8 +1481,11 @@ def _retry_quality_translations(
                 {"role": "model", "text": retry_text},
             ]
         )
-    except Exception:  # noqa: BLE001 - optional quality retry must not fail a valid batch
-        log_warning("[quality retry] request failed; keeping the original translations")
+    except Exception as exc:  # noqa: BLE001 - optional quality retry must not fail a valid batch
+        log_warning(
+            f"[品質重試] 重試請求失敗，{candidate_count} 筆保留第一次譯文"
+            f"（{_retry_error_detail(exc)}）"
+        )
         return result
 
     accepted_positions: list[int] = []
@@ -1469,7 +1498,7 @@ def _retry_quality_translations(
             not isinstance(translated_text, str)
             or not translated_text.strip()
             or not isinstance(source_text, str)
-            or token_issues(source_text, translated_text)
+            or quality_issues(round_data.current_batch[position], translated_text)
         ):
             unresolved += 1
             continue
@@ -1477,13 +1506,16 @@ def _retry_quality_translations(
         accepted_results.append(retry_item)
 
     if unresolved:
-        log_warning(f"[quality retry] {unresolved} rows still have quality issues")
+        log_warning(
+            f"[品質重試] 重試後仍有 {unresolved}/{candidate_count} 筆品質問題"
+            "（格式不一致或譯文為空），這些筆保留第一次譯文"
+        )
 
     merged = merge_same_source_retry_results(
         result, tuple(accepted_positions), accepted_results
     )
     log_info(
-        f"[quality retry] repaired {len(accepted_positions)}/{candidate_count} rows"
+        f"[品質重試] 已修正 {len(accepted_positions)}/{candidate_count} 筆需要重新確認的譯文"
     )
     return merged
 

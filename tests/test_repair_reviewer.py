@@ -550,3 +550,31 @@ def test_matching_items_keeps_old_store_rows_single_even_with_full_payloads(
 
     assert [item["item_index"] for item in matched] == [first]
     assert store.group_indices(path, "run-l", second) == [second]
+
+
+def test_guide_repair_draft_with_broken_link_is_flagged_not_reported_as_passing(
+    tmp_path,
+):
+    """指南草稿的連結目標被改壞時，修復審查頁要標示，不能顯示「格式檢查通過」。"""
+    path = store.create_run(tmp_path / "review.db", "run-guide-link")
+    store.append_item(
+        path,
+        "run-guide-link",
+        {
+            "key": "guide.crafting",
+            "version": "1.21.1",
+            "mod_id": "foo",
+            "kind": "guide",
+            "source_id": 0,
+            "en_us": "[Crafting](../items/crafting.md)",
+            "old_translation": "[合成](../items/crafting.md)",
+            "ai_translation": "[合成](/../items/crafting.md)",
+            "draft": "[合成](/../items/crafting.md)",
+            "issues": (),
+        },
+    )
+    reviewer = RepairReviewer(mock_page(), str(path), "run-guide-link")
+    reviewer.open()
+
+    assert "連結目標" in reviewer.format_status.value
+    assert reviewer.format_status.value != "格式檢查通過。"

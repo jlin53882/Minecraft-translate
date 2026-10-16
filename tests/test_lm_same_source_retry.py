@@ -531,6 +531,33 @@ def test_format_mismatch_retry_keeps_original_when_issue_remains(
     assert result == [{**item, "text": "使用 next"}]
 
 
+def test_quality_retry_request_failure_keeps_original_and_logs_exception_detail(
+    monkeypatch, configure_batch
+):
+    configure_batch(retry=False)
+    warnings = []
+    monkeypatch.setattr(main, "log_warning", warnings.append)
+    item = _item("§aUse %s\nnext", 0)
+
+    result, status, calls = _run_with_api(
+        monkeypatch,
+        [item],
+        [
+            lambda call: _reply(call, {"§aUse %s\nnext": "使用 next"}),
+            _http_error(429),
+        ],
+    )
+
+    assert status == "AUTO"
+    assert len(calls) == 2
+    assert result == [{**item, "text": "使用 next"}]
+    quality_warnings = [message for message in warnings if "[品質重試]" in message]
+    assert len(quality_warnings) == 1
+    assert "HTTPError" in quality_warnings[0]
+    assert "429" in quality_warnings[0]
+    assert "保留第一次譯文" in quality_warnings[0]
+
+
 def test_format_repair_runs_before_the_next_batch_is_requested(
     monkeypatch, configure_batch
 ):
