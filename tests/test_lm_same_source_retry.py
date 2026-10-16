@@ -480,7 +480,7 @@ def test_format_mismatch_is_sent_back_with_detected_issues_and_repaired(
     assert retry_item["value"] == "§aUse %s\nnext"
     assert retry_item["format_issues"]
     assert calls[1]["system_prompt"].startswith("LANG PROFILE PROMPT")
-    assert "format mismatches" in calls[1]["system_prompt"]
+    assert "格式不一致問題" in calls[1]["system_prompt"]
     assert result == [{**item, "text": "§a使用 %s\n下一個"}]
 
 

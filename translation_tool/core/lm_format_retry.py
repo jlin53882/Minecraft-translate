@@ -6,14 +6,10 @@ from dataclasses import dataclass
 
 from translation_tool.translation_db.quality import token_issues
 
-FORMAT_MISMATCH_RETRY_INSTRUCTION = """Repair only the format mismatches listed in each item.
-For newline issues, inspect the source yourself and output the required number and
-placement of real newline characters. Do not replace real newlines with the text
-\\n. For special-format issues, retranslate the item as needed while preserving
-every Minecraft formatting code, printf-style placeholder, Patchouli macro, and
-literal backslash-n sequence (\\n) from the source.
-Do not add explanations. Return only the structured JSON response with the same
-item IDs and one translated value for each item."""
+FORMAT_MISMATCH_RETRY_INSTRUCTION = """請只修正每個項目列出的格式不一致問題。
+如果是換行問題，請自行比對原文，判斷並輸出正確數量與位置的實際換行字元；不要把實際換行改成文字形式的 \\n。
+如果是特殊格式問題，請視需要重新翻譯該項目，同時完整保留原文中的每一個 Minecraft 格式碼、printf 佔位符、Patchouli 巨集，以及文字形式的 \\n。
+不要輸出說明文字。只回傳符合結構化 JSON 格式的結果，保留相同的項目 ID，並為每個項目輸出一個翻譯值。"""
 
 
 @dataclass(frozen=True)
