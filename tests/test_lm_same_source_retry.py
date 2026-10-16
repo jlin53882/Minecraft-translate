@@ -459,6 +459,25 @@ def test_retry_token_estimate_uses_only_candidates_and_extended_prompt(
     assert observations[1][1] > observations[0][1]
 
 
+def test_quality_retry_is_skipped_when_history_exceeds_input_budget(
+    monkeypatch, configure_batch
+):
+    config = configure_batch()
+    config["lm_translator"].update(
+        {"token_budget_enabled": True, "max_input_token_budget": 1}
+    )
+    item = _item("Minecraft", 0)
+    result, status, calls = _run_with_api(
+        monkeypatch,
+        [item],
+        [lambda call: _reply(call, {})],
+    )
+
+    assert status == "AUTO"
+    assert len(calls) == 1
+    assert result == [{**item, "text": "Minecraft"}]
+
+
 def test_format_mismatch_is_sent_back_with_detected_issues_and_repaired(
     monkeypatch, configure_batch
 ):

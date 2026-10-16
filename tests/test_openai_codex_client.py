@@ -51,6 +51,8 @@ def test_stream_request_uses_responses_structured_outputs(monkeypatch):
     assert captured["headers"]["Authorization"] == "Bearer access-token"
     assert body["stream"] is True
     assert body["store"] is False
+    assert "max_output_tokens" not in body
+    assert "service_tier" not in body
     assert body["text"]["format"]["type"] == "json_schema"
     assert body["text"]["format"]["strict"] is True
     schema = body["text"]["format"]["schema"]
@@ -60,6 +62,48 @@ def test_stream_request_uses_responses_structured_outputs(monkeypatch):
     assert item_schema["required"] == ["id", "value"]
     assert item_schema["additionalProperties"] is False
     assert item_schema["properties"]["id"]["enum"] == ["line-1"]
+
+
+def test_stream_request_sends_output_cap_and_fast_service_tier(monkeypatch):
+    captured = {}
+    monkeypatch.setattr(
+        client.requests,
+        "post",
+        lambda _url, **kwargs: captured.update(kwargs) or requests.Response(),
+    )
+
+    client._stream_request(
+        token="access-token",
+        model_name="gpt-5-codex",
+        system_prompt="Translate.",
+        payload={"items": [{"id": "line-1", "value": "Hello"}]},
+        timeout=30,
+        max_output_tokens=1234,
+        service_tier="fast",
+    )
+
+    assert captured["json"]["max_output_tokens"] == 1234
+    assert captured["json"]["service_tier"] == "fast"
+
+
+def test_stream_request_omits_responses_output_caps_below_api_minimum(monkeypatch):
+    captured = {}
+    monkeypatch.setattr(
+        client.requests,
+        "post",
+        lambda _url, **kwargs: captured.update(kwargs) or requests.Response(),
+    )
+
+    client._stream_request(
+        token="access-token",
+        model_name="gpt-5-codex",
+        system_prompt="Translate.",
+        payload={"items": [{"id": "line-1", "value": "Hello"}]},
+        timeout=30,
+        max_output_tokens=8,
+    )
+
+    assert "max_output_tokens" not in captured["json"]
 
 
 def test_stream_request_sends_configured_reasoning_effort(monkeypatch):
@@ -178,6 +222,7 @@ def test_consume_stream_returns_structured_output_and_usage():
                         "output_tokens_details": {"reasoning_tokens": 2},
                         "total_tokens": 13,
                     },
+                    "service_tier": "priority",
                 },
             },
         ]
@@ -193,6 +238,7 @@ def test_consume_stream_returns_structured_output_and_usage():
         "candidates_tokens": 3,
         "thoughts_tokens": 2,
         "total_tokens": 13,
+        "service_tier": "priority",
     }
     assert response.closed is True
 

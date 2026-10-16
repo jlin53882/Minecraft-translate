@@ -92,7 +92,9 @@ def _stream_request(
     system_prompt: str,
     payload: dict,
     timeout: int,
+    max_output_tokens: int | None = None,
     reasoning_effort: str | None = None,
+    service_tier: str | None = None,
     conversation_history: list[dict] | None = None,
 ) -> requests.Response:
     response_schema = _build_translation_response_schema(payload)
@@ -126,8 +128,14 @@ def _stream_request(
         "store": False,
         "stream": True,
     }
+    # Responses API requires at least 16 output tokens. Zero/invalid values
+    # retain the provider default; never send a request the API will reject.
+    if isinstance(max_output_tokens, int) and max_output_tokens >= 16:
+        body["max_output_tokens"] = max_output_tokens
     if reasoning_effort is not None:
         body["reasoning"] = {"effort": reasoning_effort}
+    if service_tier:
+        body["service_tier"] = service_tier
     response = requests.post(
         _RESPONSES_URL,
         headers={
@@ -285,6 +293,9 @@ def _consume_stream(response: requests.Response, meta_out: dict | None) -> str:
                 "total_tokens": usage.get("total_tokens"),
             }
         )
+        response_tier = completed_response.get("service_tier")
+        if isinstance(response_tier, str) and response_tier:
+            meta_out["service_tier"] = response_tier
     return "".join(chunks)
 
 
@@ -294,8 +305,10 @@ def call_chatgpt_responses(
     system_prompt: str,
     payload: dict,
     timeout: int,
+    max_output_tokens: int | None = None,
     meta_out: dict | None = None,
     reasoning_effort: str | None = None,
+    fast: bool = False,
     profile_id: str | None = None,
     conversation_history: list[dict] | None = None,
 ) -> str:
@@ -308,11 +321,14 @@ def call_chatgpt_responses(
         "system_prompt": system_prompt,
         "payload": payload,
         "timeout": timeout,
+        "max_output_tokens": max_output_tokens,
     }
     if conversation_history:
         request_kwargs["conversation_history"] = conversation_history
     if reasoning_effort is not None:
         request_kwargs["reasoning_effort"] = reasoning_effort
+    if fast:
+        request_kwargs["service_tier"] = "fast"
     try:
         response = _stream_request(**request_kwargs)
     except requests.RequestException as exc:

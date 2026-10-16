@@ -478,6 +478,25 @@ def _estimate_conversation_history_tokens(
     )
 
 
+def _estimate_retry_input_tokens(
+    prompt: str,
+    payload: dict,
+    conversation_history: list[dict[str, str]],
+) -> float:
+    """Estimate the complete input sent by a quality-retry request.
+
+    The normal batch estimator counts only source values plus a fixed JSON
+    overhead. A retry also carries the previous conversation and per-item
+    ``retry_reasons``/``format_issues`` fields, so estimate the serialized
+    request payload as well to enforce the configured input budget.
+    """
+    return (
+        estimate_text_tokens(prompt)
+        + _estimate_conversation_history_tokens(conversation_history)
+        + estimate_text_tokens(json.dumps(payload, ensure_ascii=False))
+    )
+
+
 def _build_batch_runtime(
     batch_items: list[dict],
     total: int | None,
@@ -1367,6 +1386,18 @@ def _retry_quality_translations(
         runtime.quality_retry_fixed_input_tokens
         + _estimate_conversation_history_tokens(conversation_history),
     )
+    retry_input_tokens = _estimate_retry_input_tokens(
+        retry_prompt, candidates.payload, conversation_history
+    )
+    if runtime.budget_cfg.enabled and (
+        retry_input_tokens > runtime.budget_cfg.max_input_token_budget
+    ):
+        log_warning(
+            "[quality retry] input budget exceeded; keeping the original translations "
+            f"(estimated={round(retry_input_tokens)}, "
+            f"budget={runtime.budget_cfg.max_input_token_budget})"
+        )
+        return result
     retry_round = _BatchRound(
         current_batch=list(candidates.items),
         fit_count=len(candidates.items),
@@ -1377,7 +1408,7 @@ def _retry_quality_translations(
     candidate_count = len(candidates.positions)
     log_info(
         f"[quality retry] {candidate_count}/{len(round_data.current_batch)} rows; "
-        f"estimated input={round(retry_estimate.input_tokens)} tokens"
+        f"estimated input={round(retry_input_tokens)} tokens"
     )
 
     try:
@@ -1619,6 +1650,7 @@ def _provider_request_kwargs(
             runtime, "provider", runtime.lm_cfg.get("provider", "gemini")
         ),
         "lm_config": runtime.lm_cfg,
+        "fast": bool(runtime.lm_cfg.get("fast", False)),
     }
     if conversation_history:
         kwargs["conversation_history"] = list(conversation_history)

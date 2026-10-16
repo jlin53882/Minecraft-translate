@@ -635,7 +635,27 @@ def _validate_lm_translator_config(lm: dict) -> None:
                     f"必須為非負整數或 null，目前為 {model_cap!r}"
                 )
 
+            if (
+                lm.get("provider", "gemini") == "chatgpt"
+                and isinstance(model_cap, int)
+                and 0 < model_cap < 16
+            ):
+                raise ConfigValidationError(
+                    f"lm_translator.models.{model_name}.max_output_tokens "
+                    "在 ChatGPT Responses API 必須為 0 或至少 16"
+                )
+
     # 6. token 預算切批設定（issue #108）
+    if (
+        lm.get("provider", "gemini") == "chatgpt"
+        and isinstance(lm.get("max_output_tokens"), int)
+        and 0 < lm["max_output_tokens"] < 16
+    ):
+        raise ConfigValidationError(
+            "lm_translator.max_output_tokens "
+            "在 ChatGPT Responses API 必須為 0 或至少 16"
+        )
+
     _validate_token_budget_config(lm)
 
     # 7. API Key 失敗冷卻（issue #113）：數字且 >= 0

@@ -74,6 +74,25 @@ def test_valid_custom_values_are_accepted():
     )
 
 
+@pytest.mark.parametrize("value", [1, 8, 15])
+def test_chatgpt_responses_rejects_output_caps_below_api_minimum(value):
+    with pytest.raises(ConfigValidationError, match="max_output_tokens"):
+        _validate_lm_translator_config(
+            {"provider": "chatgpt", "max_output_tokens": value}
+        )
+
+
+@pytest.mark.parametrize("value", [1, 8, 15])
+def test_chatgpt_model_overrides_reject_output_caps_below_api_minimum(value):
+    with pytest.raises(ConfigValidationError, match="max_output_tokens"):
+        _validate_lm_translator_config(
+            {
+                "provider": "chatgpt",
+                "models": {"gpt-5-codex": {"max_output_tokens": value}},
+            }
+        )
+
+
 @pytest.mark.parametrize(
     "key,value",
     [

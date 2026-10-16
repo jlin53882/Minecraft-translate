@@ -315,6 +315,9 @@ def _split_directory_items(
         cache_rules=_directory_cache_rules(),
         is_valid_hit=is_valid_hit,
         cache_provider=get_cache_dict_ref,
+        # Guides used to be stored in patchouli; read that namespace once
+        # after moving .md/.txt guides to the md bucket.
+        cache_fallbacks={"md": ("patchouli",)},
     )
 
 

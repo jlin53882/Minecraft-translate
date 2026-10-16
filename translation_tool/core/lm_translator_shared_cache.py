@@ -76,6 +76,7 @@ def fast_split_items_by_cache(
     cache_rules: dict[str, CacheRule] | None = None,
     is_valid_hit: ValidHitFn | None = None,
     cache_provider: Callable[[str], dict[str, Any]] | None = None,
+    cache_fallbacks: dict[str, tuple[str, ...]] | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """依據 shared 規則分為 cache hit/miss；provider 只注入既有 cache ownership。"""
     if cache_rules is None:
@@ -86,6 +87,7 @@ def fast_split_items_by_cache(
     checker = is_valid_hit or _is_valid_hit
     provider = cache_provider or get_cache_dict_ref
     cache_refs: dict[str, dict[str, Any]] = {}
+    fallbacks = cache_fallbacks or {}
 
     for it in all_items:
         if not isinstance(it, dict):
@@ -95,18 +97,20 @@ def fast_split_items_by_cache(
         rule = cache_rules.get(ctype) or CacheRule("path|source_text")
         key = rule.make_key(it)
 
-        if ctype not in cache_refs:
-            cache_refs[ctype] = provider(ctype)
-
-        entry = cache_refs[ctype].get(key)
-        if isinstance(entry, dict):
-            dst = entry.get("dst")
-            if isinstance(dst, str) and checker(dst, entry, it):
-                new_it = dict(it)
-                new_it["text"] = dst
-                cached_items.append(new_it)
-                continue
-
-        items_to_translate.append(dict(it))
+        lookup_types = (ctype, *fallbacks.get(ctype, ()))
+        for lookup_type in lookup_types:
+            if lookup_type not in cache_refs:
+                cache_refs[lookup_type] = provider(lookup_type)
+            entry = cache_refs[lookup_type].get(key)
+            if isinstance(entry, dict):
+                dst = entry.get("dst")
+                if isinstance(dst, str) and checker(dst, entry, it):
+                    new_it = dict(it)
+                    new_it["text"] = dst
+                    cached_items.append(new_it)
+                    break
+        else:
+            items_to_translate.append(dict(it))
+            continue
 
     return cached_items, items_to_translate

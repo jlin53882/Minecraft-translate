@@ -12,7 +12,7 @@
 |---|---|
 | 觀測 | `call_gemini_requests(..., meta_out=dict)` 回報 `finishReason`、`promptTokenCount`、`candidatesTokenCount`、`thoughtsTokenCount`；回傳值仍是字串 |
 | 截斷診斷 | 截斷時 log 一行 `[截斷診斷]`：原因（`MAX_TOKENS` 或 `STOP` 但 JSON 壞）、送出筆數、估算與實際 token |
-| 上限 | 一律送 `generationConfig.maxOutputTokens`（預設 65536），避免模型重複輸出燒光額度 |
+| 上限 | Gemini 送 `generationConfig.maxOutputTokens`、OpenAI Responses 送 `max_output_tokens`（預設 65536），避免模型重複輸出燒光額度 |
 | 切批 | `lm_batch_budget.select_batch_size`：由前往後累加，項目數上限 / 輸出 token 預算 / 輸入 token 預算，先到者為準，永遠只取輸入的**前綴** |
 | 學習 | 依 profile（lang / ftb / kubejs / md / patch）保存。`MAX_TOKENS` 截斷 → 輸出預算減半；連續成功 → 緩慢回升到設定值 |
 | 校正 | 成功回應後，以實際輸出（`candidates` + 思考 token）用 EMA 校正「輸出 / 輸入」係數 |
@@ -48,7 +48,7 @@
 | `token_budget_enabled` | `true` | `false` = 回到舊行為，只看項目數 |
 | `max_output_token_budget` | `65536` | 單批預期輸出 token 上限（保守值） |
 | `max_input_token_budget` | `264000` | 單批輸入 token 上限，避免單次呼叫吃掉太多 TPM |
-| `max_output_tokens` | `65536` | 送給 API 的 `maxOutputTokens`；`0` = 不送 |
+| `max_output_tokens` | `65536` | 送給 Gemini／OpenAI Responses 的輸出上限；`0` = 不送，ChatGPT 使用 `1～15` 會被拒絕 |
 | `output_token_factor` | `1.5` | 預期輸出 / 輸入係數，範圍 0.3~6.0，會依實際用量校正 |
 | `budget_min_scale` | `0.0625` | 撞牆後輸出預算最多縮到設定值的幾倍 |
 | `budget_recover_after` | `3` | 連續成功幾批後開始回升 |
@@ -61,7 +61,7 @@
 ### 注意：`max_output_tokens` 不可超過模型上限
 
 65536 等於 Gemini 2.5 Flash 與 3.1 Flash Lite 的上限 65,536，但**高於** Gemini 2.0 Flash 的 8,192。
-啟用會超限的模型時 API 會回 400；偵測到 `maxOutputTokens` 相關的 400 時會直接拋出明確錯誤
+啟用會超限的模型時 API 會回 400；偵測到 `maxOutputTokens` 或 `max_output_tokens` 相關的 400 時會直接拋出明確錯誤
 （請調低 `max_output_tokens`，或設為 `0`），不會一路縮小批次後把每一批都放棄。
 
 ## 已知限制
@@ -74,7 +74,7 @@
 
 `lm_translator.retry_same_as_source` 預設為 `true`。每個成功批次中，完全等於原文且含有 alphabetic character 的項目會單獨組成候選 payload；不使用 whitelist、字串長度或格式 heuristic。第二次沿用同一 profile prompt、model、API key、temperature 與 structured-output contract，並附加一次確認說明。`lang`、`patchouli`、`ftbquests`、`kubejs` 與 `md` 都走共用 batch contract。
 
-批次切分估算會在功能開啟時預留 retry prompt 的輸入 token；實際 retry 估算只包含候選項目及追加後的 prompt。結果依原 ID 與位置合併回第一批，processed/checkpoint 數量不變。此步驟在 shared loop 寫 Cache、Mod DB 建立 write-back 前完成。第二次仍相同會作為一般結果接受，並可正常寫入 Cache 與 Mod DB；技術錯誤或 structured response 無效時保留第一次結果。使用者取消仍依既有 cancellation contract 中止。
+批次切分估算會在功能開啟時預留 retry prompt 的輸入 token；實際 retry 估算會包含追加後的 prompt、同批初始 user/model conversation history，以及帶有 `retry_reasons`／`format_issues` 的完整候選 payload。若超過 `max_input_token_budget` 就保留第一次結果，不發出 retry。結果依原 ID 與位置合併回第一批，processed/checkpoint 數量不變。此步驟在 shared loop 寫 Cache、Mod DB 建立 write-back 前完成。第二次仍相同會作為一般結果接受，並可正常寫入 Cache 與 Mod DB；技術錯誤或 structured response 無效時保留第一次結果。使用者取消仍依既有 cancellation contract 中止。
 
 ## 相關檔案
 
@@ -85,5 +85,5 @@
 
 ### Per-model 上限（PR-5）
 
-`lm_translator.models.<model>.max_output_tokens` 是 optional override。未設定或為 `null` 時回退到全域 `lm_translator.max_output_tokens`；設為 `0` 時不送 `generationConfig.maxOutputTokens`。舊版只含 `enabled` 的 models schema 不需要 migration。
+`lm_translator.models.<model>.max_output_tokens` 是 optional override。未設定或為 `null` 時回退到全域 `lm_translator.max_output_tokens`；設為 `0` 時不送輸出上限。使用 ChatGPT Responses provider 時，非零值必須至少為 16；Gemini 仍依模型限制處理。舊版只含 `enabled` 的 models schema 不需要 migration。
 - 根目錄 `conftest.py`：測試間重置學到的預算

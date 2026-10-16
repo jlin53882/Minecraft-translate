@@ -54,6 +54,7 @@
         },
         "temperature": 0.3,
         "retry_same_as_source": true,
+        "fast": false,
         "rate_limit": {
             "timeout": 600,
             "sleep_seconds_between_batches": 0.0

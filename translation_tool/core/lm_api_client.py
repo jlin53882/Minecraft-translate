@@ -205,6 +205,7 @@ def call_gemini_requests(
     conversation_history: list[dict] | None = None,
     provider: str | None = None,
     lm_config: dict | None = None,
+    fast: bool = False,
 ) -> str:
     """以同步 requests 方式呼叫 Gemini generateContent API，並回傳純文字回應。
 
@@ -233,6 +234,10 @@ def call_gemini_requests(
             "meta_out": meta_out,
             "reasoning_effort": reasoning_effort,
         }
+        if max_output_tokens is not None:
+            chatgpt_kwargs["max_output_tokens"] = max_output_tokens
+        if fast:
+            chatgpt_kwargs["fast"] = True
         if conversation_history:
             chatgpt_kwargs["conversation_history"] = conversation_history
         if profile_id is not None:

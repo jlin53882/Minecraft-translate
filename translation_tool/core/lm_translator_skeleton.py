@@ -47,6 +47,7 @@ def prepare_translator_items(
     cache_rules: dict[str, CacheRule] | None = None,
     is_valid_hit: Callable[[str, dict[str, Any], dict[str, Any]], bool] | None = None,
     cache_provider: Callable[[str], dict[str, Any]] | None = None,
+    cache_fallbacks: dict[str, tuple[str, ...]] | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Shared cache split seam used before the common batch loop."""
     from translation_tool.core.lm_translator_shared_cache import (
@@ -58,6 +59,7 @@ def prepare_translator_items(
         cache_rules=cache_rules,
         is_valid_hit=is_valid_hit,
         cache_provider=cache_provider,
+        cache_fallbacks=cache_fallbacks,
     )
 
 
