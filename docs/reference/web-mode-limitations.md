@@ -47,17 +47,16 @@ Flet 1.0.1 的 `FilePicker.get_directory_path()` 在 Web 模式會拋出 `FletUn
 1. 只在 Web 模式啟用，桌面版繼續用原生選擇器。
 2. 以 `SafeFilePicker` 為入口（在 `get_directory_path` 的 Web 分支改為開啟自製對話框），呼叫端不必改。
 3. 限制可瀏覽的根目錄，避免把整個檔案系統暴露給任何連得上的瀏覽器。
-4. 補上 `docs/user-guide/windows-verification.md` 的驗證項目。
+4. 在 Windows 實機補驗證這個瀏覽器的行為。
 
 ## 5. 測試時的注意事項
 
 - **Playwright 的 `fill()` 不可靠**：Flet Web 的畫面由 Flutter 繪製，欄位文字顯示在畫面上，不代表 Flutter 的輸入控制器收到了值。`fill()` 直接改 DOM 值、不經過真實的鍵盤事件，所以「畫面看得到路徑、後端卻是空字串或被截斷」是這種輸入方式的典型現象，不一定是應用程式的同步問題。
 - 驗證欄位同步請用**真實按鍵事件**：先點擊欄位，再用 `page.keyboard.type(文字, delay=20)` 逐字輸入，等約 300 ms（或按 Tab 失焦）後再按按鈕。
 - 判斷根因看後台 log：合併頁按下「開始合併」會記一行 `[合併] 開始按鈕：mode=…, folder=…, zips=…, output=…`，是後端當下實際收到的欄位值；一鍵流程有 `Pipeline one_click: input=[…], output=[…]`。畫面有值而 log 是空的才是同步問題。
-- Web 模式驗證**不能取代**桌面版（視窗事件、原生選擇器、打包與檔案鎖只存在於桌面版），見 [Windows 實機驗證](../user-guide/windows-verification.md)。
+- Web 模式驗證**不能取代**桌面版（視窗事件、原生選擇器、打包與檔案鎖只存在於桌面版）。
 
 ## 相關文件
 
-- [Windows 實機驗證](../user-guide/windows-verification.md)：Windows 實機驗證清單
 - [Review 審查清單](../contributing/review-checklist.md)：橫切改動審查清單（平台差異）
 - [UI 視覺驗收](../contributing/ui-visual-acceptance.md)：UI 視覺驗收

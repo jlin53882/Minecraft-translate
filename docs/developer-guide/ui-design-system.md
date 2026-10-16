@@ -1,6 +1,6 @@
 # UI 設計系統與外殼
 
-「Deepslate & Emerald」深色為主、淺色完整對應。設計稿在 `docs/design/ui-redesign/`，
+「Deepslate & Emerald」深色為主、淺色完整對應。設計稿由維護者另行保存（不在 repo 內），
 本文說明設計稿在程式碼中的落點。Flet 版本：1.0.1。
 
 ## 分層

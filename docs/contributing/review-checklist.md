@@ -107,4 +107,3 @@
 - [`../generated/exception-inventory.md`](../generated/exception-inventory.md)：例外處理盤點
 - [`../developer-guide/worker-thread-audit.md`](../developer-guide/worker-thread-audit.md)：背景執行緒稽核
 - [`../reference/web-mode-limitations.md`](../reference/web-mode-limitations.md)：Flet Web 模式限制
-- [`../user-guide/windows-verification.md`](../user-guide/windows-verification.md)：Windows 實機驗證

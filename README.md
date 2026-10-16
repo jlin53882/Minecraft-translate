@@ -23,7 +23,7 @@
 - **學名查詢**：生物學名的 Wikipedia 查詢與快取
 - **輸出打包**：產出可直接使用的資源包 ZIP
 - **工作台與任務追蹤**：頂列任務膠囊、側欄執行中標記、狀態列；任務執行中切換頁面不會中斷
-- **深色 / 淺色主題**，設計稿見 [`docs/design/ui-redesign/`](docs/design/ui-redesign/)
+- **深色 / 淺色主題**
 
 ## 支援的翻譯來源格式
 
@@ -132,7 +132,7 @@ translation_tool/       核心翻譯引擎（不含 UI）
   checkers/             品管檢查器
   utils/                設定管理、快取（SQLite FTS5）、文字處理…
 tests/                  單元與整合測試
-docs/                   架構、設計與維護文件
+docs/                   長期維護文件（架構、契約、操作說明、ADR）
 ```
 
 設計重點：
@@ -170,7 +170,7 @@ uv run pytest -q --basetemp=.pytest-tmp\full -o cache_dir=.pytest-cache\full
 
 ## 已知限制與後續規劃
 
-後續工作以 [GitHub Issues](https://github.com/jlin53882/Minecraft-translate/issues) 追蹤；Windows 才能驗證的項目見 [`docs/user-guide/windows-verification.md`](docs/user-guide/windows-verification.md)。
+後續工作以 [GitHub Issues](https://github.com/jlin53882/Minecraft-translate/issues) 追蹤；Windows 才能驗證的項目（打包版、檔案落盤、強制結束）由維護者在 Windows 實機確認。
 
 ## 文件索引
 

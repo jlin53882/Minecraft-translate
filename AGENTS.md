@@ -51,6 +51,8 @@
 
 - 文件只描述「現在」的程式與規則：不寫 PR／issue 編號、「原本／改為／已移除」等演進過程，也不寫「為什麼要做這次修改」；
   這些放在 commit message 與 PR 說明。例外：`CHANGELOG.md` 與 `docs/adr/`（決策紀錄）。
+- `docs/` 只放長期維護文件（架構、契約、操作說明、ADR、產生文件）。測試風險盤點、實機驗證清單、UI 設計稿、審查與收尾紀錄這類
+  「某個時間點的作業紀錄」不放進 repo，放在維護者的 Obsidian 筆記。
 - 修改頁面（`app/views/`）的使用者流程、背景工作或錯誤處理時，同步更新 `docs/page_flows/<key>.md`
   與對應的 `docs/developer-guide/views/*_VIEW_ARCHITECTURE.md`；新增頁面時一併新增流程文件並列入 `docs/page_flows/README.md`。
 - 文件中的程式路徑、`docs/page_flows/` 中反引號標示的識別字，以及 PR／issue 編號由 `tests/test_docs_code_paths.py` 檢查；

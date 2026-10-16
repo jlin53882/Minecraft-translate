@@ -85,8 +85,8 @@ Production bug
 目前 `pyproject.toml` 與 `uv.lock` **沒有安裝 pytest-cov**，因此不得把
 `pytest --cov` 當成既定命令。若日後核准 coverage 工具，先加入 dev
 dependency、更新 lock，再以「風險 × 覆蓋」使用，不設全專案百分比門檻。
-引擎風險路徑、現有行為證據與尚缺邊界見 `docs/contributing/test-risk-coverage.md`；
-該 inventory 不以測試數量或 import 測試推論行為覆蓋率。
+引擎風險路徑的行為證據以對應測試的 assertion 為準（輸出、狀態、事件或檔案內容），
+不以測試數量、import 測試或 mock 被呼叫推論行為覆蓋率。
 
 ## 真實 UI 與效能驗收
 

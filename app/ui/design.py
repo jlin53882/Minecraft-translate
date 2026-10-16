@@ -1,6 +1,6 @@
 """設計系統：Deepslate & Emerald（深板岩底色、祖母綠主色）。
 
-這個模組是新 UI 的「顏色與主題」唯一來源，對應 ``docs/design/ui-redesign/`` 的設計稿。
+這個模組是新 UI 的「顏色與主題」唯一來源，對應 Deepslate & Emerald 設計稿（設計稿不在 repo 內）。
 
 核心做法
 - 設計稿的 token（bg / side / panel / panel2 / raised / line / 強調色…）對應到 Flet 的

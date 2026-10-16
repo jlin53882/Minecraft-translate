@@ -1,7 +1,6 @@
 # 重開後續跑：行為與各流程的續跑能力盤點
 
 > 決策：`docs/adr/0001-long-running-tasks-after-window-close.md`（方案 C：只做重開後續跑，**不得自動繼續**）。
-> 驗證清單：`docs/user-guide/windows-verification.md` 第 3 節。
 
 ## 核心觀念：快取是續跑的依據，checkpoint 是「沒做完」的標記
 
@@ -91,4 +90,4 @@ UI 與文件說明「可恢復的進度」時一律以 checkpoint 為準，不�
 - **FTB／KubeJS／MD 的初始標記**：任務一開始（確認會翻譯、指紋計算成功後）就 durable 寫入版本 2 初始標記（`completed_count` 0、`status` `STARTED`），之後每個 durable 批次由 `JsonCheckpointAdapter` 更新進度。所以抽取／清理途中、第一個 API 批次完成前被強制結束，重開後也偵測得到、可續跑（機器翻譯頁維持「第一批 durable 後才有標記」，因為它沒有可重新執行的前置步驟）。例外離開（含 `KeyboardInterrupt`）一律保留標記，只有正常結束且所有迴圈 DONE 才清除。初始標記寫入失敗只記錄警告，不影響翻譯。
 - FTB／KubeJS／MD 續跑會重新執行抽取與清理步驟（輸入很大時需要一點時間）；只有翻譯結果由快取還原。
 - 以 `untranslated`（批次縮到極限而回填原文）收尾的項目不寫入快取，續跑時會再試一次。
-- 關閉視窗時任務會停止（確認、取消、flush；見 `docs/user-guide/windows-verification.md` 第 2 節）；打包 exe 後關閉不保證執行任何清理，所以落盤都在每批完成時完成，不依賴關閉流程。
+- 關閉視窗時任務會停止（確認、取消、flush；需在 Windows 實機確認）；打包 exe 後關閉不保證執行任何清理，所以落盤都在每批完成時完成，不依賴關閉流程。
