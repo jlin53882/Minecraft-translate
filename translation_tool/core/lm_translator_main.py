@@ -472,8 +472,7 @@ def _estimate_conversation_history_tokens(
 ) -> float:
     """Estimate retry input tokens already carried by prior conversation turns."""
     return sum(
-        estimate_text_tokens(turn.get("text", ""))
-        + CONVERSATION_TURN_OVERHEAD_TOKENS
+        estimate_text_tokens(turn.get("text", "")) + CONVERSATION_TURN_OVERHEAD_TOKENS
         for turn in conversation_history
     )
 
@@ -590,7 +589,9 @@ def _build_batch_runtime(
         fixed_input_tokens=fixed_input_tokens,
         batch_fit_input_tokens=(
             max(
-                retry_fixed_input_tokens if retry_same_as_source else fixed_input_tokens,
+                retry_fixed_input_tokens
+                if retry_same_as_source
+                else fixed_input_tokens,
                 quality_retry_fixed_input_tokens,
             )
         ),
@@ -1145,7 +1146,9 @@ def _retry_same_source_translations(
         )
         return result
     if retry_budget.used:
-        log_info("[translation retry] batch retry limit reached; skipping same-source retry")
+        log_info(
+            "[translation retry] batch retry limit reached; skipping same-source retry"
+        )
         return result
     retry_budget.used = True
 
@@ -1315,7 +1318,9 @@ def _retry_format_mismatch_translations(
             runtime, retry_round, retry_text, retry_meta, optional_retry=True
         )
         if invalid or retried is None:
-            log_warning("[format retry] response did not satisfy the structured contract")
+            log_warning(
+                "[format retry] response did not satisfy the structured contract"
+            )
             return result
         conversation_history.extend(
             [
@@ -1437,7 +1442,9 @@ def _retry_quality_translations(
             runtime, retry_round, retry_text, retry_meta, optional_retry=True
         )
         if invalid or retried is None:
-            log_warning("[quality retry] response did not satisfy the structured contract")
+            log_warning(
+                "[quality retry] response did not satisfy the structured contract"
+            )
             return result
         conversation_history.extend(
             [

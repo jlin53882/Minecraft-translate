@@ -171,9 +171,7 @@ def test_conversation_history_is_sent_before_the_retry_user_turn(post):
         {"role": "model", "parts": [{"text": history[1]["text"]}]},
         {
             "role": "user",
-            "parts": [
-                {"text": '{"items": [{"id": "0", "value": "修復後原文"}]}' }
-            ],
+            "parts": [{"text": '{"items": [{"id": "0", "value": "修復後原文"}]}'}],
         },
     ]
 

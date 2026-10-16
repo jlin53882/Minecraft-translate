@@ -36,7 +36,9 @@ def test_fast_split_items_by_cache_requires_src_match_for_lang(monkeypatch) -> N
     assert items_to_translate[0]["source_text"] == "Emerald"
 
 
-def test_fast_split_items_by_cache_uses_path_plus_source_for_patchouli(monkeypatch) -> None:
+def test_fast_split_items_by_cache_uses_path_plus_source_for_patchouli(
+    monkeypatch,
+) -> None:
     monkeypatch.setattr(shared_cache, "value_fully_translated", lambda value: True)
 
     def fake_get_cache_dict_ref(cache_type: str):

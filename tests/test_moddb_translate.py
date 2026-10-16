@@ -1883,7 +1883,9 @@ def test_live_remaining_decreases_by_written_items_and_keeps_flagged_items(
         monkeypatch,
         lambda t: "§a注入合金" if t == "Infused Alloy" else "譯:" + t,
     )
-    monkeypatch.setattr(moddb_translate_service, "_get_default_batch_size", lambda *_: 1)
+    monkeypatch.setattr(
+        moddb_translate_service, "_get_default_batch_size", lambda *_: 1
+    )
     monkeypatch.setattr(
         moddb_translate_service,
         "run_translator_skeleton",

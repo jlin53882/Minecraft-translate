@@ -105,7 +105,9 @@ def _stream_request(
             role = "assistant"
         text = turn.get("text")
         if role not in {"user", "assistant"} or not isinstance(text, str):
-            raise ValueError("ChatGPT conversation history turns must contain role/text")
+            raise ValueError(
+                "ChatGPT conversation history turns must contain role/text"
+            )
         input_history.append({"role": role, "content": text})
     input_history.append(
         {
