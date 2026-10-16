@@ -172,7 +172,8 @@ def test_same_as_source_is_reconfirmed_and_second_translation_is_used(
     assert calls[1]["temperature"] == calls[0]["temperature"]
     retry_prompt = calls[1]["system_prompt"]
     assert retry_prompt.startswith("LANG PROFILE PROMPT")
-    assert "再次確認" in retry_prompt and "繁體中文（台灣用語）" in retry_prompt
+    assert "retry_reasons" in retry_prompt and "format_issues" in retry_prompt
+    assert calls[1]["payload"]["items"][0]["retry_reasons"]
     assert result == [{**item, "text": "壓力室"}]
 
 
@@ -480,7 +481,7 @@ def test_format_mismatch_is_sent_back_with_detected_issues_and_repaired(
     assert retry_item["value"] == "§aUse %s\nnext"
     assert retry_item["format_issues"]
     assert calls[1]["system_prompt"].startswith("LANG PROFILE PROMPT")
-    assert "格式不一致問題" in calls[1]["system_prompt"]
+    assert "format_issues" in calls[1]["system_prompt"]
     assert [turn["role"] for turn in calls[1]["conversation_history"]] == [
         "user",
         "model",
@@ -540,7 +541,9 @@ def test_format_repair_runs_before_the_next_batch_is_requested(
     assert [entry["text"] for entry in result] == ["§a使用 %s\n下一個", "第二個"]
 
 
-def test_one_batch_uses_at_most_one_quality_retry(monkeypatch, configure_batch):
+def test_one_batch_combines_quality_candidates_into_one_retry(
+    monkeypatch, configure_batch
+):
     configure_batch()
     items = [_item("Minecraft", 0), _item("Use %s\nnext", 1)]
 
@@ -552,17 +555,26 @@ def test_one_batch_uses_at_most_one_quality_retry(monkeypatch, configure_batch):
                 call,
                 {"Minecraft": "Minecraft", "Use %s\nnext": "使用 next"},
             ),
-            lambda call: _reply(call, {"Minecraft": "Minecraft 翻譯"}),
-            lambda call: _reply(call, {"Use %s\nnext": "使用 %s\n下一個"}),
+            lambda call: _reply(
+                call,
+                {
+                    "Minecraft": "Minecraft 翻譯",
+                    "Use %s\nnext": "使用 %s\n下一個",
+                },
+            ),
         ],
     )
 
     assert status == "AUTO"
     assert len(calls) == 2
     assert [item["value"] for item in calls[1]["payload"]["items"]] == [
-        "Minecraft"
+        "Minecraft",
+        "Use %s\nnext",
     ]
-    assert [entry["text"] for entry in result] == ["Minecraft 翻譯", "使用 next"]
+    assert [entry["text"] for entry in result] == [
+        "Minecraft 翻譯",
+        "使用 %s\n下一個",
+    ]
 
 
 def test_batch_input_fit_reserves_retry_prompt_only_when_enabled(
@@ -571,16 +583,17 @@ def test_batch_input_fit_reserves_retry_prompt_only_when_enabled(
     item = _item("Minecraft", 0)
     config = configure_batch(retry=True)
     enabled_runtime = main._build_batch_runtime([item], 1)
-    assert (
-        enabled_runtime.batch_fit_input_tokens
-        == enabled_runtime.retry_fixed_input_tokens
+    assert enabled_runtime.batch_fit_input_tokens == max(
+        enabled_runtime.retry_fixed_input_tokens,
+        enabled_runtime.quality_retry_fixed_input_tokens,
     )
     assert enabled_runtime.batch_fit_input_tokens > enabled_runtime.fixed_input_tokens
 
     config["lm_translator"]["retry_same_as_source"] = False
     disabled_runtime = main._build_batch_runtime([item], 1)
-    assert (
-        disabled_runtime.batch_fit_input_tokens == disabled_runtime.fixed_input_tokens
+    assert disabled_runtime.batch_fit_input_tokens == max(
+        disabled_runtime.fixed_input_tokens,
+        disabled_runtime.quality_retry_fixed_input_tokens,
     )
 
 

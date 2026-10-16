@@ -1,4 +1,4 @@
-"""Utilities for repairing format-token and newline mismatches."""
+"""Build one quality-repair retry for a translated batch."""
 
 from __future__ import annotations
 
@@ -6,36 +6,39 @@ from dataclasses import dataclass
 
 from translation_tool.translation_db.quality import token_issues
 
-FORMAT_MISMATCH_RETRY_INSTRUCTION = """請只修正每個項目列出的格式不一致問題。
-如果是換行問題，請自行比對原文，判斷並輸出正確數量與位置的實際換行字元；不要把實際換行改成文字形式的 \\n。
-如果是特殊格式問題，請視需要重新翻譯該項目，同時完整保留原文中的每一個 Minecraft 格式碼、printf 佔位符、Patchouli 巨集，以及文字形式的 \\n。
-不要輸出說明文字。只回傳符合結構化 JSON 格式的結果，保留相同的項目 ID，並為每個項目輸出一個翻譯值。"""
+QUALITY_RETRY_INSTRUCTION = """這是目前批次唯一一次的翻譯品質修復重試，請同時處理每個項目列出的問題。
+如果 retry_reasons 表示翻譯結果與原文相同，請重新翻譯，不要直接複製原文。
+如果 format_issues 有內容，請依照原文自行判斷並修正格式；換行問題要輸出正確數量與位置的實際換行，特殊格式問題要完整保留 Minecraft 格式碼、printf 佔位符、Patchouli 巨集，以及文字形式的 \\n。
+請維持原本翻譯語意，不要輸出說明文字，只回傳相同項目 ID 的結構化 JSON 翻譯結果。"""
+
+# Kept for private legacy helpers while the public batch flow uses the combined retry.
+FORMAT_MISMATCH_RETRY_INSTRUCTION = QUALITY_RETRY_INSTRUCTION
 
 
 @dataclass(frozen=True)
-class FormatMismatchRetryBatch:
-    """A candidate-only format repair request and its original batch positions."""
+class QualityRetryBatch:
+    """A candidate-only retry containing all quality failure categories."""
 
     positions: tuple[int, ...]
     item_ids: tuple[str, ...]
     items: tuple[dict, ...]
     payload: dict
     id_to_item: dict[str, dict]
-    issues_by_id: dict[str, tuple[str, ...]]
 
 
-def build_format_mismatch_retry_batch(
+def build_quality_retry_batch(
     source_items: list[dict],
     translated_items: list[dict],
     item_ids: list[str],
-) -> FormatMismatchRetryBatch:
-    """Select translated rows whose format-token or newline counts are invalid."""
+    *,
+    retry_same_as_source: bool,
+) -> QualityRetryBatch:
+    """Combine same-as-source and format-invalid rows into one retry payload."""
     positions: list[int] = []
     candidate_ids: list[str] = []
     candidate_items: list[dict] = []
     payload_items: list[dict[str, object]] = []
     id_to_item: dict[str, dict] = {}
-    issues_by_id: dict[str, tuple[str, ...]] = {}
 
     for position, (source, translated, item_id) in enumerate(
         zip(source_items, translated_items, item_ids, strict=True)
@@ -44,27 +47,53 @@ def build_format_mismatch_retry_batch(
         translated_text = translated.get("text")
         if not isinstance(source_text, str) or not isinstance(translated_text, str):
             continue
-        issues = tuple(token_issues(source_text, translated_text))
-        if not issues:
+
+        retry_reasons: list[str] = []
+        if (
+            retry_same_as_source
+            and not translated.get("_untranslated")
+            and translated_text == source_text
+            and any(char.isalpha() for char in source_text)
+        ):
+            retry_reasons.append("翻譯結果與原文相同")
+
+        issues = token_issues(source_text, translated_text)
+        if not retry_reasons and not issues:
             continue
+
+        payload_item: dict[str, object] = {
+            "id": item_id,
+            "value": source_text,
+        }
+        if retry_reasons:
+            payload_item["retry_reasons"] = retry_reasons
+        if issues:
+            payload_item["format_issues"] = issues
+
         positions.append(position)
         candidate_ids.append(item_id)
         candidate_items.append(source)
-        payload_items.append(
-            {
-                "id": item_id,
-                "value": source_text,
-                "format_issues": list(issues),
-            }
-        )
+        payload_items.append(payload_item)
         id_to_item[item_id] = source
-        issues_by_id[item_id] = issues
 
-    return FormatMismatchRetryBatch(
+    return QualityRetryBatch(
         positions=tuple(positions),
         item_ids=tuple(candidate_ids),
         items=tuple(candidate_items),
         payload={"items": payload_items},
         id_to_item=id_to_item,
-        issues_by_id=issues_by_id,
+    )
+
+
+def build_format_mismatch_retry_batch(
+    source_items: list[dict],
+    translated_items: list[dict],
+    item_ids: list[str],
+) -> QualityRetryBatch:
+    """Compatibility wrapper for private legacy callers."""
+    return build_quality_retry_batch(
+        source_items,
+        translated_items,
+        item_ids,
+        retry_same_as_source=False,
     )
