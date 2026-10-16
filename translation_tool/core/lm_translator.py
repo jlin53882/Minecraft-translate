@@ -291,6 +291,8 @@ def _directory_cache_rules() -> dict[str, CacheRule]:
     """回傳目錄翻譯使用的 shared cache split contract。"""
     return {
         "lang": CacheRule("path"),
+        # Guide .md/.txt items use the Patchouli prompt but the md cache bucket.
+        "md": CacheRule("path|source_text"),
         "patchouli": CacheRule("path|source_text"),
     }
 

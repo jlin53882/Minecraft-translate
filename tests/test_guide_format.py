@@ -1,5 +1,11 @@
+import pytest
+
 from translation_tool.core.guide_format import guide_issues, guide_marks
-from translation_tool.core.guide_translation import finish_guide_item
+from translation_tool.core.guide_translation import (
+    GuidePath,
+    finish_guide_item,
+    load_guide,
+)
 
 ENGINEER = (
     "Electromagnet\nUnnaturally attractive\n"
@@ -7,6 +13,15 @@ ENGINEER = (
     "This field attracts nearby items.<br>\n"
     "The magnet runs continuously."
 )
+
+
+@pytest.mark.parametrize("suffix", [".md", ".txt"])
+def test_guide_items_use_md_cache_bucket_for_both_supported_suffixes(tmp_path, suffix):
+    path = GuidePath(tmp_path / f"entry{suffix}")
+    path.write_text("A translatable guide paragraph.\n", encoding="utf-8")
+    path.guide_root = tmp_path
+    _doc, items = load_guide(path)
+    assert items and items[0]["cache_type"] == "md"
 
 
 def test_identical_marks_have_no_issues():

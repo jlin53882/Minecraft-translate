@@ -1045,11 +1045,16 @@ class EntriesPanel(ft.Column):
         self.version = version
         self.mod_id = None
         self.kind = None
+        self.version_dd.value = version
+        self.mod_dd.value = ALL_MODS
+        self.kind_dd.value = ALL_KINDS
         self.query = ""
         self.search.value = ""
         self.state = "none"
         self.state_seg.select("none")
         self.source_filter.reset()
+        self.review_filter.value = ALL_REVIEW_STATES
+        self.advanced_filters.reset()
         self._set_flagged(list(entry_ids), dict(drafts))
 
     def clear_flagged(self) -> None:

@@ -39,7 +39,7 @@ from translation_tool.translation_db.run_progress import (
     format_live,
     tick_live,
 )
-from translation_tool.translation_db.schema import KIND_LANG
+from translation_tool.translation_db.schema import KIND_GUIDE, KIND_LANG
 from translation_tool.utils.cache_manager import add_to_cache, save_translation_cache
 from translation_tool.utils.cancellation import (
     TaskCancelled,
@@ -121,6 +121,15 @@ class TranslateReport:
         }
 
 
+def _update_remaining(report: TranslateReport) -> None:
+    """Keep the KPI scoped to this run and retain items that were not written.
+
+    Flagged results are processed but deliberately not written back, so
+    ``candidates - written`` includes both unprocessed and flagged items.
+    """
+    report.remaining = max(0, report.candidates - report.written)
+
+
 def build_items(
     rows: list[tuple[int, str, str, str, str]],
     *,
@@ -137,7 +146,15 @@ def build_items(
                 "path": key,
                 "text": en_us,
                 "source_text": en_us,
-                "cache_type": "lang" if kind == KIND_LANG else "patchouli",
+                # Guide (.md/.txt) keeps the Patchouli prompt flow but belongs
+                # to the md cache bucket; .txt is intentionally included.
+                "cache_type": (
+                    "lang"
+                    if kind == KIND_LANG
+                    else "md"
+                    if kind == KIND_GUIDE
+                    else "patchouli"
+                ),
                 "_entry_id": eid,
                 "_kind": kind,
                 "_mod_id": mod_id,
@@ -193,7 +210,11 @@ def _select_rows(session, db, options: TranslateOptions, report: TranslateReport
         options.version, mods, options.limit or None, exclude_reusable=preview_reuse
     )
     report.candidates = len(rows)
-    report.remaining = db.count_untranslated(options.version, mods)
+    report.remaining = (
+        db.count_untranslated(options.version, mods)
+        if options.dry_run
+        else report.candidates
+    )
     if options.dry_run:
         if preview_reuse:
             report.reused = db.count_reusable(options.version, mods)
@@ -297,7 +318,7 @@ def _translate_rows(
             _log(session, message)
         if tracker.update(round(progress * len(items))):
             _log(session, f"⏱ {tracker.line()}")
-        # 即時資料交給畫面（任務結束時會被最終摘要取代）
+        _update_remaining(report)
         session.set_summary({**report.as_dict(), "live": tracker.live()})
 
     def translate_batch(batch, batch_total):
@@ -346,7 +367,7 @@ def _translate_rows(
             "已翻成功的部分已寫入資料庫。",
             "error",
         )
-    report.remaining = db.count_untranslated(options.version, list(options.mod_ids))
+    _update_remaining(report)
     _log(
         session,
         f"完成（狀態 {report.status}）：AI 回傳 {report.translated} 筆、"

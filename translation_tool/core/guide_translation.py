@@ -129,7 +129,9 @@ def load_guide(path: GuidePath) -> tuple[dict, list[dict[str, Any]]]:
                 "path": f"blocks[{index}]",
                 "text": shielded.clean,
                 "source_text": block.text,
-                "cache_type": "patchouli",
+                # Guide (.md/.txt) still uses the Patchouli prompt, but its
+                # cache is stored under md; .txt is part of the md bucket too.
+                "cache_type": "md",
                 "_shielded": shielded,
                 "db_ident": (KIND_GUIDE, mod_id, f"{file_key}#{index}"),
             }

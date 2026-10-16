@@ -66,6 +66,7 @@ class TranslatePanel(ft.Column):
         self._repair_summary_final = True
         self._flagged_total = 0
         self._flagged_resolved = 0
+        self._resolved_flagged_ids: set[int] = set()
         self.result_inspector = TranslationResultInspector(
             page,
             on_view_flagged,
@@ -930,6 +931,18 @@ class TranslatePanel(ft.Column):
         self._apply_repair_summary(summary, final=self._repair_summary_final)
         self._safe_update()
 
+    def _normal_flagged_state(self, summary: dict) -> tuple[int, dict[int, str]]:
+        all_entries = dict(summary.get("flagged_entries") or {})
+        resolved = len(self._resolved_flagged_ids.intersection(all_entries))
+        self._flagged_total = int(summary.get("flagged") or 0)
+        self._flagged_resolved = resolved
+        visible = max(0, self._flagged_total - resolved)
+        return visible, {
+            entry_id: text
+            for entry_id, text in all_entries.items()
+            if entry_id not in self._resolved_flagged_ids
+        }
+
     def _apply_translation_summary(self, s: dict) -> None:
         self._set_kpi_mode("normal")
         if s.get("dry_run"):
@@ -943,19 +956,21 @@ class TranslatePanel(ft.Column):
             format_count(s.get("written")),
             delta=f"AI 回傳 {s.get('translated', 0):,} 筆",
         )
-        self._flagged_total = int(s.get("flagged") or 0)
-        self._flagged_resolved = 0
+        flagged, flagged_entries = self._normal_flagged_state(s)
         self.stat_flagged.set_value(
-            format_count(s.get("flagged")),
-            delta="未寫入，詳見日誌" if s.get("flagged") else "",
+            format_count(flagged),
+            delta="未寫入，詳見日誌" if flagged else "",
         )
-        self.result_inspector.set_normal_results(s, self._run_version)
+        self.result_inspector.set_normal_results(
+            {**s, "flagged_entries": flagged_entries}, self._run_version
+        )
         self.stat_remaining.set_value(format_count(s.get("remaining")))
 
     def resolve_flagged(self, entry_id: int) -> None:
         """條目校對裡手動修好一筆「特殊字元不一致」：卡片數量同步減少。"""
         if not self.result_inspector.drop_normal_entry(entry_id):
             return
+        self._resolved_flagged_ids.add(entry_id)
         self._flagged_resolved += 1
         left = max(0, self._flagged_total - self._flagged_resolved)
         self.stat_flagged.set_value(
@@ -1019,6 +1034,7 @@ class TranslatePanel(ft.Column):
         for card in self._stat_cards:
             card.set_value("—", delta="")
         self.result_inspector.clear()
+        self._resolved_flagged_ids.clear()
         self._set_kpi_mode(mode)
 
     def _set_running(self, running: bool) -> None:
