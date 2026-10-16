@@ -184,11 +184,11 @@ def test_cleanup_apply_and_restore(db, tmp_path):
     )
     report = tmp_path / "cleanup.json"
     db.export_cleanup_report("1.21.1", report)
-    plan = db.apply_cleanup(report)
+    plan = db.apply_cleanup(report, db.preview_cleanup(report).token)
     assert plan.deletable
     assert_summary_matches(db)
-    restored, _skipped = db.revert_cleanup(db.last_cleanup_batch().batch_id)
-    assert restored == plan.deletable
+    result = db.revert_cleanup(db.last_cleanup_batch().batch_id)
+    assert result.restored == plan.deletable
     assert_summary_matches(db)
 
 
