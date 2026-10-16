@@ -17,6 +17,7 @@ from __future__ import annotations
 import hashlib
 import heapq
 import json
+import re
 import sqlite3
 import threading
 import uuid
@@ -26,6 +27,13 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
+from translation_tool.translation_db import (
+    change_tracker,
+    effective_columns,
+    entry_activity,
+    quality_flags,
+    stat_summary,
+)
 from translation_tool.translation_db.bulk_review import BulkReviewMixin
 from translation_tool.translation_db.cleanup import CleanupMixin
 from translation_tool.translation_db.models import (
@@ -67,6 +75,7 @@ from translation_tool.translation_db.quality import (
     token_quality_comparison,
     whitespace_note,
 )
+from translation_tool.translation_db.read_cache import READ_CACHE
 from translation_tool.translation_db.schema import (
     DB_EMPTY,
     DB_FOREIGN,
@@ -93,6 +102,13 @@ from translation_tool.utils.species_names import SPECIES_KEY_HINTS, TAXONOMIC_MA
 
 _ENTRY_COLS = "e.id, e.kind, e.mc_version, e.mod_id, e.key, e.en_us"
 _CHUNK = 400  # SQLite 變數上限相容的批次大小
+# 條目最近一次人工活動的時間（逐筆彙總歷史；entry_activity 是它的觸發器維護版本）
+_VERSION_CONDITION = "e.mc_version = ?"  # _filter_sql 的第一個條件
+_ENTRY_COLUMN_RE = re.compile(r"\be\.")  # 條件是否用到條目欄位
+_LAST_ACTIVITY_SQL = (
+    "(SELECT MAX(h.at) FROM history h WHERE h.entry_id=e.id AND "
+    f"h.action IN {entry_activity.ACTIONS_SQL})"
+)
 _EFFECTIVE_PRIORITY_VERSION = "2"
 _QUALITY_FETCH_BATCH_SIZE = 4_000
 # quality.py 的 token 掃描只會在含 § % $ { \ 或換行的文字出現；GLOB 字元集是其超集，
@@ -168,6 +184,8 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
     # 篩選在背景 worker 的唯讀連線掃描、翻頁卻在主連線，所以不能放在連線物件上；
     # 條件鍵含資料庫路徑與資料世代，資料一變就自然失效。
     _quality_page_cache: tuple[tuple, list[tuple], int] | None = None
+    # 連線上已有品質旗標欄位：寫入交易提交前要重算待重算的條目（見 ``quality_flags``）
+    _has_quality_flags = False
 
     def __init__(
         self,
@@ -182,6 +200,7 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
         self.priority = tuple(priority)
         self.readonly = readonly
         self._lock = threading.RLock()
+        self._write_transaction = False
         self._rank = rank_sql(self.priority, "t.source")
         existed = self.path.is_file()
         if not existed and (readonly or not create):
@@ -207,6 +226,7 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
         try:
             if not readonly:
                 init_schema(self._conn)
+                self._has_quality_flags = quality_flags.has_column(self._conn)
             self.has_review_state = "review_status" in {
                 row[1] for row in self._conn.execute("PRAGMA table_info(translation)")
             }
@@ -270,61 +290,132 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
         """
         with self._lock:
             self._conn.execute("BEGIN IMMEDIATE")
-            if keep_review:
+            try:
+                # BEGIN 之後的任何失敗（含旗標初始化）都要回復，不留開啟中的交易
+                if keep_review:
+                    self._conn.execute(
+                        "INSERT OR REPLACE INTO meta (key, value) VALUES (?, '1')",
+                        (KEEP_REVIEW_FLAG,),
+                    )
+                # 交易內的寫入由 data_gen 負責；標記讓變更序號觸發器略過（隨交易一起消失）
                 self._conn.execute(
                     "INSERT OR REPLACE INTO meta (key, value) VALUES (?, '1')",
-                    (KEEP_REVIEW_FLAG,),
+                    (change_tracker.TX_ACTIVE,),
                 )
-            changes_before = self._conn.total_changes
-            try:
+                changes_before = self._conn.total_changes
+                self._write_transaction = True
                 yield self._conn
-            except BaseException:
-                self._conn.rollback()
-                raise
-            else:
+                if self._has_quality_flags:
+                    # 觸發器只把受影響的條目標成待重算；提交前依 quality.py 重算
+                    quality_flags.settle(self._conn)
                 if keep_review:
                     self._conn.execute(
                         "DELETE FROM meta WHERE key=?", (KEEP_REVIEW_FLAG,)
                     )
                     changes_before += 1  # 旗標的寫入與刪除不算資料變動
+                changed = self._conn.total_changes > changes_before
+                self._conn.execute(
+                    "DELETE FROM meta WHERE key=?", (change_tracker.TX_ACTIVE,)
+                )
                 # 資料有變動：遞增世代，讓統計快取（stat_cache）失效
-                if bump_generation_on_noop or self._conn.total_changes > changes_before:
+                if bump_generation_on_noop or changed:
                     self._conn.execute(
                         "INSERT INTO meta (key, value) VALUES ('data_gen', '1') "
                         "ON CONFLICT(key) DO UPDATE SET value = CAST(value AS INTEGER) + 1"
                     )
                 self._conn.commit()
+            except BaseException:
+                # 提交前的任何失敗（含品質旗標重算）都回復，不留開啟中的交易
+                self._conn.rollback()
+                raise
+            finally:
+                self._write_transaction = False
 
     def _data_gen(self) -> str:
         row = self._one("SELECT value FROM meta WHERE key = 'data_gen'")
         return row[0] if row else "0"
 
-    def _cached(self, key: str, compute: Callable[[], Any]) -> Any:
+    def _cache_generation(self) -> str:
+        """快取世代：``data_gen`` 加上外部寫入的變更序號。
+
+        外部 SQL 直接寫入不會遞增 ``data_gen``，但 ``change_tracker`` 的觸發器會遞增
+        ``meta.ext_change_seq``，所以序號不同就不會沿用舊的持久化統計。
+        沒有安裝觸發器的舊資料庫只能依 ``data_gen``。
+        """
+        gen = self._data_gen()
+        row = self._one(
+            "SELECT value FROM meta WHERE key = ?", (change_tracker.SEQ_KEY,)
+        )
+        return gen if row is None else f"{gen}.{row[0]}"
+
+    def _read_cache_identity(self) -> tuple:
+        """Include file incarnation and WAL changes, including external SQL writers."""
+        path = self.path.resolve()
+        try:
+            stat = path.stat()
+        except OSError:
+            # 檔案被改名或取代：用唯一值讓共用快取不命中，開著的連線照常查詢
+            return (str(path), object())
+        try:
+            wal = Path(f"{path}-wal").stat()
+            wal_signature = (wal.st_size, wal.st_mtime_ns)
+        except FileNotFoundError:
+            wal_signature = None
+        return (
+            str(path),
+            stat.st_dev,
+            stat.st_ino,
+            stat.st_size,
+            stat.st_mtime_ns,
+            wal_signature,
+        )
+
+    def _cached(
+        self, key: str, compute: Callable[[], Any], *, persist: bool = True
+    ) -> Any:
         """昂貴統計的快取：資料世代沒變就直接回傳上次算好的結果（JSON 存在資料庫內）。
 
         數十萬筆條目的總覽統計要 1 秒以上；資料沒變時（切換頁籤、翻頁、重開程式）
-        直接讀快取。唯讀連線或舊資料庫沒有快取表時，退回每次重算。
+        直接讀快取。唯讀 worker 共用有容量上限的程序內快取，不需寫入資料庫；
+        資料世代、檔案身分或 WAL 改變就不重用舊的程序內結果。交易中的計算不共用。
         """
+        if self._write_transaction:
+            return compute()
         try:
-            gen = self._data_gen()
-            row = self._one(
-                "SELECT value FROM stat_cache WHERE key = ? AND gen = ?", (key, gen)
+            gen = self._cache_generation()
+            cache_key = (self._read_cache_identity(), gen, key)
+            shared = READ_CACHE.get(cache_key)
+            if shared is not None:
+                return json.loads(shared)
+            row = (
+                self._one(
+                    "SELECT value FROM stat_cache WHERE key = ? AND gen = ?",
+                    (key, gen),
+                )
+                if persist
+                else None
             )
             if row is not None:
+                READ_CACHE.put(cache_key, row[0])
                 return json.loads(row[0])
-        except sqlite3.Error:
+        except (sqlite3.Error, OSError):
             return compute()
         value = compute()
-        if not self.readonly:
+        if READ_CACHE.exceeds_capacity(value):
+            return value  # 結果超過快取容量（含巢狀清單、超長文字）：不白做序列化，下次重算
+        encoded = json.dumps(value, ensure_ascii=False)
+        if self._cache_generation() == gen:
+            READ_CACHE.put(cache_key, encoded)
+        if persist and not self.readonly:
             try:
                 with self._lock:
-                    if self._data_gen() != gen:
+                    if self._cache_generation() != gen:
                         return value  # 計算期間資料又變了：不寫舊世代，也不清掉新世代的快取
                     self._conn.execute("DELETE FROM stat_cache WHERE gen <> ?", (gen,))
                     self._conn.execute(
                         "INSERT OR REPLACE INTO stat_cache (key, gen, value) "
                         "VALUES (?,?,?)",
-                        (key, gen, json.dumps(value, ensure_ascii=False)),
+                        (key, gen, encoded),
                     )
                     self._conn.commit()
             except sqlite3.Error:
@@ -375,20 +466,46 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
 
     # ------------------------------------------------------------ 生效譯文
     def _rebuild_effective(self, conn: sqlite3.Connection) -> None:
-        conn.execute("DELETE FROM effective")
-        conn.execute(
-            f"""
-            INSERT INTO effective (entry_id, zh_tw, source, checker, review_status)
-            SELECT entry_id, zh_tw, source, checker, review_status FROM (
-                SELECT t.entry_id, t.zh_tw, t.source, t.checker, t.review_status,
-                       ROW_NUMBER() OVER (
-                           PARTITION BY t.entry_id
-                           ORDER BY {self._priority_order()}
-                       ) AS rn
-                FROM translation t WHERE t.zh_tw <> ''
-            ) WHERE rn = 1
-            """
+        """依目前優先序重選所有條目的生效譯文。
+
+        整批改寫：暫停統計摘要與生效列衍生欄位的逐列觸發器，最後各重算一次。只改寫
+        結果不同的列（沒有譯文的條目刪除、其餘以 upsert 比對後更新），結果與清空後
+        全部重新插入相同，但優先序只影響部分條目時寫入量小得多。
+        """
+        derived = effective_columns.has_columns(conn)
+        columns = "entry_id, zh_tw, source, checker, review_status"
+        values = columns
+        compared = ["zh_tw", "source", "checker", "review_status"]
+        if derived:
+            # 一併填入版本與更新時間，暫停結束的重算就只剩比對
+            columns += ", mc_version, upd"
+            values += ", (SELECT mc_version FROM entry WHERE id=entry_id), updated_at"
+            compared.append("upd")
+        changed = (
+            f"({', '.join(compared)}) IS NOT "
+            f"({', '.join('excluded.' + c for c in compared)})"
         )
+        assignments = ", ".join(f"{c}=excluded.{c}" for c in compared)
+        with stat_summary.frozen(conn), effective_columns.frozen(conn):
+            conn.execute(
+                "DELETE FROM effective WHERE NOT EXISTS (SELECT 1 FROM translation t "
+                "WHERE t.entry_id=effective.entry_id AND t.zh_tw <> '')"
+            )
+            conn.execute(
+                f"""
+                INSERT INTO effective ({columns})
+                SELECT {values} FROM (
+                    SELECT t.entry_id, t.zh_tw, t.source, t.checker, t.review_status,
+                           t.updated_at,
+                           ROW_NUMBER() OVER (
+                               PARTITION BY t.entry_id
+                               ORDER BY {self._priority_order()}
+                           ) AS rn
+                    FROM translation t WHERE t.zh_tw <> ''
+                ) WHERE rn = 1
+                ON CONFLICT(entry_id) DO UPDATE SET {assignments} WHERE {changed}
+                """
+            )
 
     def _refresh(
         self,
@@ -571,7 +688,12 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
         return [
             r[0]
             for r in self._q(
-                "SELECT DISTINCT kind FROM entry WHERE mc_version=? ORDER BY kind",
+                "WITH RECURSIVE k(kind) AS (SELECT MIN(kind) FROM entry "
+                "UNION ALL SELECT (SELECT MIN(kind) FROM entry WHERE kind > k.kind) "
+                "FROM k WHERE kind IS NOT NULL) "
+                "SELECT kind FROM k WHERE kind IS NOT NULL AND EXISTS("
+                "SELECT 1 FROM entry e WHERE e.kind = k.kind AND e.mc_version = ?) "
+                "ORDER BY kind",
                 (version,),
             )
         ]
@@ -588,6 +710,26 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
     def version_stats(self) -> list[VersionStat]:
         rows = self._cached("version_stats", self._version_stats_rows)
         return [VersionStat(*r) for r in rows]
+
+    def _stat_summary_ready(self) -> bool:
+        """全庫統計摘要可用（見 ``stat_summary``）；否則讀取端改用全庫重算。"""
+        if not self.has_review_state:
+            return False
+        with self._lock:
+            return stat_summary.is_ready(self._conn)
+
+    def rebuild_stat_summary(self) -> None:
+        """以全庫重算重建統計摘要（摘要缺少或失準時的維護操作）。"""
+        if self.readonly:
+            raise PermissionError("唯讀連線不能重建統計摘要")
+        # 經由寫入交易遞增資料世代，讓依舊摘要算出的統計快取一併失效
+        with self._tx() as conn:
+            stat_summary.rebuild(conn)
+
+    def verify_stat_summary(self) -> list[tuple]:
+        """比對統計摘要與全庫重算；空清單表示一致（只供測試與維護，需要全庫掃描）。"""
+        with self._lock:
+            return stat_summary.verify(self._conn)
 
     def version_stats_from_effective_sources(
         self, source_stats: Sequence[EffectiveSourceStat]
@@ -637,17 +779,26 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
     def effective_source_codes(self, version: str | None = None) -> tuple[int, ...]:
         """Return source IDs that currently win at least one effective entry."""
         if version is None:
-            rows = self._q("SELECT DISTINCT source FROM effective ORDER BY source")
+            sql, params = "SELECT DISTINCT source FROM effective ORDER BY source", ()
         else:
-            rows = self._q(
+            sql = (
                 "SELECT DISTINCT f.source FROM effective f "
                 "JOIN entry e ON e.id=f.entry_id "
-                "WHERE e.mc_version=? ORDER BY f.source",
-                (version,),
+                "WHERE e.mc_version=? ORDER BY f.source"
             )
+            params = (version,)
+        rows = self._cached(
+            f"effective_source_codes:{version!r}", lambda: self._q(sql, params)
+        )
         return tuple(int(row[0]) for row in rows)
 
     def _effective_source_stats_by_version_rows(self) -> list[list]:
+        if self._stat_summary_ready():
+            with self._lock:
+                return stat_summary.source_rows(self._conn)
+        return self._effective_source_stats_by_version_full()
+
+    def _effective_source_stats_by_version_full(self) -> list[list]:
         if self.has_review_state:
             # 審核狀態與生效來源各自獨立；非人工來源沒有狀態就是「未審核」
             review = (
@@ -671,6 +822,15 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
         ]
 
     def _version_stats_rows(self) -> list[list]:
+        if self._stat_summary_ready():
+            with self._lock:
+                source_rows = stat_summary.source_rows(self._conn)
+            return self._version_stats_from_source_stats(
+                [EffectiveSourceStat(*row) for row in source_rows]
+            )
+        return self._version_stats_full()
+
+    def _version_stats_full(self) -> list[list]:
         rows = self._q(
             """
             SELECT e.mc_version,
@@ -696,6 +856,20 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
         return self._cached("overview", self._overview_uncached)
 
     def _overview_uncached(self) -> dict:
+        if self._stat_summary_ready():
+            with self._lock:
+                counts = stat_summary.counters(self._conn)
+            changed = self._one("SELECT COUNT(*) FROM src_change")[0]
+            return {
+                "no_source": counts["no_source"],
+                "mods": counts["mods"],
+                "content": counts["content"],
+                "diff": counts["diff"],
+                "src_changed": changed,
+            }
+        return self._overview_full()
+
+    def _overview_full(self) -> dict:
         mods = self._one("SELECT COUNT(DISTINCT mod_id) FROM entry")[0]
         content = self._one(
             "SELECT COUNT(*) FROM (SELECT 1 FROM entry GROUP BY kind, mod_id, key, en_us)"
@@ -817,8 +991,289 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
             f"LEFT JOIN translation man ON man.entry_id=e.id AND man.source={SRC_MANUAL}"
         )
 
+    @staticmethod
+    def _candidate_source(expressions: str) -> str:
+        """Join only tables used by a filter or sort, before projecting a page."""
+        source = "FROM entry e"
+        if "f." in expressions or "et." in expressions:
+            source += " LEFT JOIN effective f ON f.entry_id=e.id"
+        if "et." in expressions:
+            source += (
+                " LEFT JOIN translation et ON et.entry_id=e.id AND et.source=f.source"
+            )
+        return source
+
+    def _paged_entry_rows(
+        self,
+        criteria: EntryFilter,
+        condition: str,
+        params: list,
+        *,
+        limit: int,
+        offset: int,
+        conn: sqlite3.Connection | None,
+    ) -> list[tuple]:
+        """Apply filtering, ordering and offset to IDs before loading editor fields."""
+        phases = self._two_phase_sort_sql(criteria.sort_by, condition)
+        if phases is not None:
+            return self._two_phase_page_rows(
+                phases, params, limit=limit, offset=offset, conn=conn
+            )
+        order = self._sort_sql(criteria.sort_by)
+        candidates = self._candidate_source(f"{condition} {order}")
+        values = [*params, max(0, int(limit)), max(0, int(offset))]
+        if conn is None:
+            candidate_sql = (
+                f"SELECT e.id {candidates} WHERE {condition} "
+                f"ORDER BY {order} LIMIT ? OFFSET ?"
+            )
+            cache_key = (
+                "entry_page:"
+                + hashlib.sha1(
+                    json.dumps([candidate_sql, values]).encode("utf-8")
+                ).hexdigest()
+            )
+            with self._lock:
+                owns_transaction = not self._conn.in_transaction
+                if owns_transaction:
+                    self._conn.execute("BEGIN")
+                try:
+                    ids = self._cached(
+                        cache_key,
+                        lambda: self._q(candidate_sql, values),
+                        persist=False,
+                    )
+                    if not ids:
+                        return []
+                    return self._q(
+                        f"{self._entry_select_sql()} {self._query_source()} "
+                        "WHERE e.id IN (SELECT value FROM json_each(?)) "
+                        f"ORDER BY {order}",
+                        (json.dumps([row[0] for row in ids]),),
+                    )
+                finally:
+                    if owns_transaction:
+                        self._conn.rollback()
+        sql = (
+            f"WITH page AS MATERIALIZED (SELECT e.id {candidates} "
+            f"WHERE {condition} ORDER BY {order} LIMIT ? OFFSET ?) "
+            f"{self._entry_select_sql()} {self._query_source()} "
+            f"JOIN page ON page.id=e.id ORDER BY {order}"
+        )
+        return (
+            self._q(sql, values)
+            if conn is None
+            else conn.execute(sql, values).fetchall()
+        )
+
+    def _two_phase_sort_sql(
+        self, sort_by: str, condition: str
+    ) -> tuple[str, str, str] | None:
+        """觸發器維護的排序欄位可用時，排序拆成兩段的 SQL；否則 None（用原本的排序）。
+
+        第一段依欄位索引取「有時間」的條目（時間新到舊、同時間依編號），第二段是
+        其餘條目依編號；與原本 ``時間 IS NULL, 時間 DESC, e.id`` 的順序相同，但兩段都
+        直接沿索引讀取，不必把整個版本排序。回傳（第一段分頁、第一段筆數、第二段分頁），
+        三者的參數都是條件參數（分頁再加上筆數與起點）。
+        """
+        if not condition.startswith(_VERSION_CONDITION):
+            return None
+        if sort_by == "manual_activity_newest" and self._activity_ready():
+            dated, dated_count = self._indexed_page_sql(
+                condition, "entry_activity act", "", "act.last_at DESC, act.entry_id"
+            )
+            undated = (
+                f"{condition} AND NOT EXISTS "
+                "(SELECT 1 FROM entry_activity act WHERE act.entry_id=e.id)"
+            )
+            return (
+                dated,
+                dated_count,
+                (
+                    f"SELECT e.id {self._candidate_source(undated)} WHERE {undated} "
+                    "ORDER BY e.id LIMIT ? OFFSET ?"
+                ),
+            )
+        if sort_by == "effective_updated_newest" and self._effective_columns_ready():
+            # f.upd 就是生效來源那一筆的 et.updated_at；沒有生效譯文或時間的條目在第二段
+            dated, dated_count = self._indexed_page_sql(
+                condition, "effective f", "f.upd IS NOT NULL", "f.upd DESC, f.entry_id"
+            )
+            undated = f"{condition} AND f.upd IS NULL"
+            return (
+                dated,
+                dated_count,
+                (
+                    f"SELECT e.id {self._candidate_source(undated)} WHERE {undated} "
+                    "ORDER BY e.id LIMIT ? OFFSET ?"
+                ),
+            )
+        return None
+
+    @staticmethod
+    def _indexed_page_sql(
+        condition: str, table: str, extra: str, order: str
+    ) -> tuple[str, str]:
+        """從帶版本欄的衍生表（別名 ``act`` 或 ``f``）沿索引取一頁條目編號的 SQL 與筆數 SQL。
+
+        條件開頭的條目版本改用衍生表的版本欄（觸發器維護成與條目相同），其餘條件
+        需要條目或譯文欄位時才連接；條目以 ``CROSS JOIN`` 接在衍生表之後，讓查詢
+        沿衍生表的排序索引讀取。
+        """
+        alias = table.rsplit(" ", 1)[1]
+        cond = f"{alias}.mc_version = ?{condition[len(_VERSION_CONDITION) :]}"
+        if extra:
+            cond += f" AND {extra}"
+        source = f"FROM {table}"
+        if _ENTRY_COLUMN_RE.search(cond):
+            source += f" CROSS JOIN entry e ON e.id={alias}.entry_id"
+        if alias != "f" and ("f." in cond or "et." in cond):
+            source += f" LEFT JOIN effective f ON f.entry_id={alias}.entry_id"
+        if "et." in cond:
+            source += (
+                f" LEFT JOIN translation et ON et.entry_id={alias}.entry_id "
+                "AND et.source=f.source"
+            )
+        return (
+            (
+                f"SELECT {alias}.entry_id {source} WHERE {cond} "
+                f"ORDER BY {order} LIMIT ? OFFSET ?"
+            ),
+            f"SELECT COUNT(*) {source} WHERE {cond}",
+        )
+
+    def _two_phase_page_rows(
+        self,
+        phases: tuple[str, str, str],
+        params: list,
+        *,
+        limit: int,
+        offset: int,
+        conn: sqlite3.Connection | None,
+    ) -> list[tuple]:
+        """依 :meth:`_two_phase_sort_sql` 取一頁條目編號，再讀取這些條目的完整欄位。"""
+        dated_sql, dated_count_sql, undated_sql = phases
+        limit, offset = max(0, int(limit)), max(0, int(offset))
+
+        def page_ids(connection: sqlite3.Connection) -> list[int]:
+            ids = [
+                row[0]
+                for row in connection.execute(dated_sql, (*params, limit, offset))
+            ]
+            if len(ids) >= limit:
+                return ids
+            # 第一段不足一頁：第二段從頭接上；第一段整頁落空時扣掉第一段的總筆數
+            undated_offset = 0
+            if not ids:
+                dated_total = connection.execute(dated_count_sql, params).fetchone()[0]
+                undated_offset = max(0, offset - dated_total)
+            return ids + [
+                row[0]
+                for row in connection.execute(
+                    undated_sql, (*params, limit - len(ids), undated_offset)
+                )
+            ]
+
+        def load(connection: sqlite3.Connection, ids: list[int]) -> list[tuple]:
+            if not ids:
+                return []
+            rows = connection.execute(
+                f"{self._entry_select_sql()} {self._query_source()} "
+                "WHERE e.id IN (SELECT value FROM json_each(?))",
+                (json.dumps(ids),),
+            ).fetchall()
+            by_id = {row[0]: row for row in rows}
+            return [by_id[entry_id] for entry_id in ids if entry_id in by_id]
+
+        if conn is not None:
+            return load(conn, page_ids(conn))
+        cache_key = (
+            "entry_page:"
+            + hashlib.sha1(
+                json.dumps([*phases, params, limit, offset]).encode("utf-8")
+            ).hexdigest()
+        )
+        with self._lock:
+            owns_transaction = not self._conn.in_transaction
+            if owns_transaction:
+                self._conn.execute("BEGIN")
+            try:
+                ids = self._cached(
+                    cache_key, lambda: page_ids(self._conn), persist=False
+                )
+                return load(self._conn, ids)
+            finally:
+                if owns_transaction:
+                    self._conn.rollback()
+
+    def _effective_columns_ready(self) -> bool:
+        """``effective`` 的衍生欄位可用；否則狀態篩選與排序改用原本的查詢。"""
+        with self._lock:
+            return effective_columns.is_ready(self._conn)
+
+    def rebuild_effective_columns(self) -> None:
+        """全庫重算 ``effective`` 的衍生欄位（缺少或失準時的維護操作）。"""
+        if self.readonly:
+            raise PermissionError("唯讀連線不能重建生效譯文的衍生欄位")
+        with self._tx() as conn:
+            effective_columns.rebuild(conn)
+
+    def verify_effective_columns(self) -> list[tuple]:
+        """比對 ``effective`` 的衍生欄位與原本定義的重算；空清單表示一致（只供測試與維護）。"""
+        with self._lock:
+            return effective_columns.verify(self._conn)
+
+    def _count_sql(self, criteria: EntryFilter, condition: str) -> str:
+        """條目清單的筆數查詢。
+
+        狀態篩選要求有生效譯文且衍生欄位可用時，從 ``effective`` 的版本索引計數，
+        條件用到條目欄位時才連接條目；結果與從條目出發計數相同。
+        """
+        if (
+            criteria.state in ("diff", "manual", "ok")
+            and condition.startswith(_VERSION_CONDITION)
+            and self._effective_columns_ready()
+        ):
+            return self._indexed_page_sql(condition, "effective f", "", "f.entry_id")[1]
+        return f"SELECT COUNT(*) {self._candidate_source(condition)} WHERE {condition}"
+
+    def _activity_ready(self) -> bool:
+        """``entry_activity`` 可用於排序；否則改用逐筆彙總歷史的原本排序。"""
+        with self._lock:
+            return entry_activity.is_ready(self._conn)
+
+    def rebuild_entry_activity(self) -> None:
+        """由歷史重建 ``entry_activity``（缺少或失準時的維護操作）。"""
+        if self.readonly:
+            raise PermissionError("唯讀連線不能重建最近人工活動")
+        with self._tx() as conn:
+            entry_activity.rebuild(conn)
+
+    def verify_entry_activity(self) -> list[tuple]:
+        """比對 ``entry_activity`` 與由歷史重算的結果；空清單表示一致（只供測試與維護）。"""
+        with self._lock:
+            return entry_activity.verify(self._conn)
+
+    def _quality_flags_ready(self, conn: sqlite3.Connection | None = None) -> bool:
+        """品質旗標可直接篩選（見 ``quality_flags.is_ready``）；否則改用逐列判斷。"""
+        with self._lock:
+            return quality_flags.is_ready(conn or self._conn)
+
+    def rebuild_quality_flags(self) -> None:
+        """全部重算條目品質旗標（缺少或失準時的維護操作）。"""
+        if self.readonly:
+            raise PermissionError("唯讀連線不能重建品質旗標")
+        with self._tx() as conn:
+            quality_flags.rebuild(conn)
+        self._has_quality_flags = True
+
+    def verify_quality_flags(self) -> list[tuple]:
+        """比對品質旗標與逐一判斷的重算；空清單表示一致（只供測試與維護）。"""
+        with self._lock:
+            return quality_flags.verify(self._conn)
+
     def _filter_sql(self, criteria: EntryFilter) -> tuple[str, list]:
-        where = ["e.mc_version = ?"]
+        where = [_VERSION_CONDITION]
         params: list = [criteria.version]
         if criteria.entry_ids is not None:
             where.append("e.id IN (SELECT value FROM json_each(?))")
@@ -857,6 +1312,18 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
 
         if criteria.state == "none":
             where.append("f.entry_id IS NULL")
+        elif (
+            criteria.state in ("diff", "manual", "ok")
+            and self._effective_columns_ready()
+        ):
+            # 觸發器維護的 f.diff 與下方的關聯子查詢定義相同
+            where.append(
+                {
+                    "diff": "f.diff = 1",
+                    "manual": f"f.source={SRC_MANUAL} AND f.diff = 0",
+                    "ok": f"f.source<>{SRC_MANUAL} AND f.diff = 0",
+                }[criteria.state]
+            )
         elif criteria.state == "diff":
             where.append(f"f.entry_id IS NOT NULL AND {self._DIFF_SQL}")
         elif criteria.state == "changed":
@@ -890,7 +1357,7 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
         params: list = []
         if spec.kind == "manual_activity":
             actions_by_kind = {
-                "all": ("manual", "review", "batch_replace", "revert", "batch_revert"),
+                "all": entry_activity.ACTIVITY_ACTIONS,
                 "edit": ("manual",),
                 "review": ("review",),
                 "batch": ("batch_replace", "batch_revert"),
@@ -947,10 +1414,7 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
         if sort_by == "effective_updated_newest":
             return "et.updated_at IS NULL, et.updated_at DESC, e.id"
         if sort_by == "manual_activity_newest":
-            activity = (
-                "(SELECT MAX(h.at) FROM history h WHERE h.entry_id=e.id AND "
-                "h.action IN ('manual','review','batch_replace','revert','batch_revert'))"
-            )
+            activity = _LAST_ACTIVITY_SQL
             return f"{activity} IS NULL, {activity} DESC, e.id"
         return "e.mod_id, e.kind, e.key, e.id"
 
@@ -974,10 +1438,7 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
     def _quality_candidate_select_sql(self, sort_by: str) -> str:
         activity = "NULL"
         if sort_by == "manual_activity_newest":
-            activity = (
-                "(SELECT MAX(h.at) FROM history h WHERE h.entry_id=e.id AND "
-                "h.action IN ('manual','review','batch_replace','revert','batch_revert'))"
-            )
+            activity = _LAST_ACTIVITY_SQL
         return (
             "SELECT e.id, e.kind, NULL, e.mod_id, e.key, e.en_us, f.zh_tw, "
             "NULL, NULL, NULL, NULL, e.created_at, NULL, et.updated_at, "
@@ -985,8 +1446,17 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
         )
 
     @staticmethod
-    def _quality_prefilter_sql(quality: QualityFilter) -> str:
-        """SQL 預篩：只縮小交給 ``matches_quality`` 的候選列，不改變最終結果。"""
+    def _quality_prefilter_sql(
+        quality: QualityFilter, flags_ready: bool = False
+    ) -> str:
+        """SQL 預篩：只縮小交給 ``matches_quality`` 的候選列，不改變最終結果。
+
+        ``flags_ready`` 時用品質旗標（``quality_flags``）：方向與類別都是「全部」時
+        即為完整結果，否則是「token 不一致」的超集。
+        """
+        flag = quality_flags.filter_sql(quality) if flags_ready else None
+        if flag is not None:
+            return flag
         status = "mismatch" if quality.status == "all" else quality.status
         has_text = "e.en_us <> '' AND f.zh_tw <> ''"
         if status == "unknown_source":
@@ -1031,6 +1501,25 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
         raise_if_cancelled()
         offset = max(0, int(offset))
         page_limit = None if limit is None else max(0, int(limit))
+        flags_ready = self._quality_flags_ready()
+        prefilter = self._quality_prefilter_sql(criteria.quality, flags_ready)
+        # 這些條件就是完整結果：直接沿索引分頁，不必逐列判斷
+        exact = (
+            flags_ready and quality_flags.is_exact(criteria.quality)
+        ) or criteria.quality.status in {
+            "unknown_source",
+            "missing_translation",
+            "whitespace",
+        }
+        if exact and page_limit is not None:
+            condition += f" AND ({prefilter})"
+            total = self._cached_count(
+                f"SELECT COUNT(*) {self._candidate_source(condition)} WHERE {condition}",
+                params,
+            )
+            return self._paged_entry_rows(
+                criteria, condition, params, limit=page_limit, offset=offset, conn=None
+            ), total
         with self._lock:
             cursor = None
             owns_transaction = not self._conn.in_transaction
@@ -1039,31 +1528,62 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
             self._conn.set_progress_handler(lambda: int(is_cancelled()), 10_000)
             try:
                 cache_key = (
-                    str(self.path),
+                    self._read_cache_identity(),
                     self._data_gen(),
                     condition,
                     tuple(params),
                     repr(criteria.quality),
                     criteria.sort_by,
                 )
+                page_cache_key = (*cache_key, "quality-page", page_limit, offset)
+                shared = (
+                    READ_CACHE.get(page_cache_key)
+                    if not self._write_transaction and page_limit is not None
+                    else None
+                )
                 cached = TranslationDB._quality_page_cache
-                if page_limit is not None and cached and cached[0] == cache_key:
+                if shared is not None:
+                    saved = json.loads(shared)
+                    selected_ids, total = saved["ids"], saved["total"]
+                    selected = [(entry_id,) for entry_id in selected_ids]
+                elif (
+                    not self._write_transaction
+                    and page_limit is not None
+                    and cached
+                    and cached[0] == cache_key
+                ):
                     # 翻頁：條件與資料都沒變，直接用上次排好的符合清單，不重掃整個版本
                     ordered, total = cached[1], cached[2]
+                    selected = ordered[offset : offset + page_limit]
                 else:
                     ordered, total, complete = self._scan_quality_candidates(
-                        criteria, condition, params, page_limit, offset
+                        criteria, condition, params, page_limit, offset, prefilter
                     )
-                    if page_limit is not None and complete:
+                    if (
+                        not self._write_transaction
+                        and page_limit is not None
+                        and complete
+                    ):
                         TranslationDB._quality_page_cache = (
                             cache_key,
                             ordered,
                             total,
                         )
+                    selected = (
+                        ordered[offset : offset + page_limit]
+                        if page_limit is not None
+                        else ordered[offset:]
+                    )
                 if page_limit is None:
                     return ordered[offset:], total
 
-                selected = ordered[offset : offset + page_limit]
+                if not self._write_transaction and shared is None:
+                    READ_CACHE.put(
+                        page_cache_key,
+                        json.dumps(
+                            {"ids": [row[0] for row in selected], "total": total}
+                        ),
+                    )
                 if not selected:
                     return [], total
 
@@ -1101,6 +1621,7 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
         params: list,
         page_limit: int | None,
         offset: int,
+        prefilter: str,
     ) -> tuple[list[tuple], int, bool]:
         """掃描符合品質條件的列，回傳（已排序的候選、符合總數、是否含全部符合列）。
 
@@ -1126,7 +1647,6 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
                 "AND et.source=f.source"
             )
         )
-        prefilter = self._quality_prefilter_sql(criteria.quality)
         cursor = self._conn.execute(
             f"{select} {query_source} WHERE ({condition}) AND {prefilter}",
             tuple(params),
@@ -1188,9 +1708,7 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
             f"{self._effective_review_sql}, "
             f"CASE WHEN f.entry_id IS NULL THEN 0 ELSE {self._DIFF_SQL} END, "
             f"e.created_at, {translation_created}, et.updated_at, "
-            "(SELECT MAX(h.at) FROM history h WHERE h.entry_id=e.id AND "
-            "h.action IN ('manual','review','batch_replace','revert','batch_revert')), "
-            "man.zh_tw, man.checker, "
+            f"{_LAST_ACTIVITY_SQL}, man.zh_tw, man.checker, "
             f"{manual_review}, {manual_revision}, man.updated_at, "
             f"{('et.revision' if self.has_translation_revision else 'NULL')} "
         )
@@ -1236,6 +1754,10 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
             else self._entry_select_sql()
         )
         has_quality = criteria.quality.active
+        if not has_quality and not batch_replace_projection and limit is not None:
+            return self._paged_entry_rows(
+                criteria, cond, params, limit=limit, offset=offset, conn=conn
+            )
         if has_quality and batch_replace_projection:
             matched = self._quality_matched_batch_rows(
                 criteria, cond, params, conn, progress_callback
@@ -1315,7 +1837,8 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
         source = self._query_source()
         narrow = (
             f"SELECT e.id, e.en_us, f.zh_tw, e.key {source} "
-            f"WHERE ({cond}) AND {self._quality_prefilter_sql(quality)}"
+            f"WHERE ({cond}) AND "
+            f"{self._quality_prefilter_sql(quality, self._quality_flags_ready(conn))}"
         )
         matched_ids: list[int] = []
         connection.set_progress_handler(lambda: int(is_cancelled()), 10_000)
@@ -1401,9 +1924,7 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
             )
         else:
             cond, params = self._filter_sql(criteria)
-            total = self._cached_count(
-                f"SELECT COUNT(*) {self._query_source()} WHERE {cond}", params
-            )
+            total = self._cached_count(self._count_sql(criteria, cond), params)
             rows = self._query_entry_rows(criteria, limit=limit, offset=offset)
         return [self._row(row) for row in rows], total
 
@@ -2049,10 +2570,7 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
         effective_created = (
             "et.created_at" if self.has_translation_created_at else "NULL"
         )
-        last_activity = (
-            "(SELECT MAX(h.at) FROM history h WHERE h.entry_id=e.id AND "
-            "h.action IN ('manual','review','batch_replace','revert','batch_revert'))"
-        )
+        last_activity = _LAST_ACTIVITY_SQL
         r = self._one(
             f"SELECT {_ENTRY_COLS}, f.zh_tw, f.source, f.checker, "
             f"{self._effective_review_sql}, "
@@ -3362,14 +3880,41 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
         WHERE e2.kind = e.kind AND e2.mod_id = e.mod_id AND e2.key = e.key
           AND e2.en_us = e.en_us AND e2.mc_version <> e.mc_version) = 1"""
 
+    _REUSABLE_PEERS_SQL = """(
+        SELECT COUNT(DISTINCT f2.zh_tw) FROM entry e2 JOIN effective f2 ON f2.entry_id = e2.id
+        WHERE e2.kind = u.kind AND e2.mod_id = u.mod_id AND e2.key = u.key
+          AND e2.en_us = u.en_us)"""
+
+    def _untranslated_candidates_cte(
+        self, version: str, mod_ids: Sequence[str] | None, *, ordered: bool = True
+    ) -> tuple[str, list]:
+        """未翻譯候選（``ordered`` 時依 (類型, 模組, 鍵值) 排序）；先用窄索引找出 id，再讀寬欄位。
+
+        只需計數時 ``ordered=False``，不建立用不到的臨時排序。
+
+        候選本身沒有生效譯文，所以同內容的 ``effective`` 列必定來自其他版本，
+        不必再比對 ``mc_version``。
+        """
+        mod_filter = ""
+        params: list = [version]
+        if mod_ids:
+            mod_filter = f" AND i.mod_id IN ({','.join('?' * len(mod_ids))})"
+            params.extend(mod_ids)
+        sql = (
+            "WITH u AS MATERIALIZED ("
+            "SELECT e.id, e.kind, e.mod_id, e.key, e.en_us "
+            "FROM (SELECT i.id FROM entry i WHERE i.mc_version = ?"
+            f"{mod_filter} AND i.id NOT IN (SELECT entry_id FROM effective)) c "
+            "JOIN entry e ON e.id = c.id WHERE e.en_us <> ''"
+            f"{' ORDER BY e.kind, e.mod_id, e.key' if ordered else ''}) "
+        )
+        return sql, params
+
     def count_reusable(self, version: str, mod_ids: Sequence[str] | None = None) -> int:
         """未翻譯條目中，其他版本已有相同內容譯文、開始機翻時會直接沿用的筆數。"""
-        where, extra = self._untranslated_where(mod_ids)
-        sql = (
-            "SELECT COUNT(*) FROM entry e LEFT JOIN effective f ON f.entry_id = e.id "
-            f"WHERE {where} AND {self._REUSABLE_SQL}"
-        )
-        return self._cached_count(sql, [version, *extra])
+        cte, params = self._untranslated_candidates_cte(version, mod_ids, ordered=False)
+        sql = f"{cte}SELECT COUNT(*) FROM u WHERE {self._REUSABLE_PEERS_SQL} = 1"
+        return self._cached_count(sql, params)
 
     def count_untranslated(
         self, version: str, mod_ids: Sequence[str] | None = None
@@ -3405,19 +3950,31 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
 
         ``exclude_reusable``：排除「其他版本已有相同內容譯文」的條目（那些會直接沿用，不送 AI）。
         """
-        where, extra = self._untranslated_where(mod_ids)
         if exclude_reusable:
-            where += f" AND NOT {self._REUSABLE_SQL}"
-        sql = (
-            "SELECT e.id, e.kind, e.mod_id, e.key, e.en_us "
-            "FROM entry e LEFT JOIN effective f ON f.entry_id = e.id "
-            f"WHERE {where} ORDER BY e.kind, e.mod_id, e.key"
-        )
-        params: list = [version, *extra]
+            cte, params = self._untranslated_candidates_cte(version, mod_ids)
+            sql = (
+                f"{cte}SELECT id, kind, mod_id, key, en_us FROM u "
+                f"WHERE {self._REUSABLE_PEERS_SQL} <> 1 ORDER BY kind, mod_id, key"
+            )
+        else:
+            where, extra = self._untranslated_where(mod_ids)
+            sql = (
+                "SELECT e.id, e.kind, e.mod_id, e.key, e.en_us "
+                "FROM entry e LEFT JOIN effective f ON f.entry_id = e.id "
+                f"WHERE {where} ORDER BY e.kind, e.mod_id, e.key"
+            )
+            params = [version, *extra]
         if limit is not None and limit > 0:
             sql += " LIMIT ?"
             params.append(limit)
-        return self._q(sql, params)
+        key = (
+            "untranslated:"
+            + hashlib.sha1(json.dumps([sql, params]).encode("utf-8")).hexdigest()
+        )
+        return [
+            tuple(row)
+            for row in self._cached(key, lambda: self._q(sql, params), persist=False)
+        ]
 
     def _same_as_source_ai_where(
         self, version: str, mod_ids: Sequence[str] | None
@@ -3455,9 +4012,11 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
         sql = (
             "SELECT e.id, e.kind, e.mod_id, e.key, e.en_us, f.zh_tw, e.mc_version, "
             "f.source, t.revision, t.checker, t.review_status "
-            "FROM entry e LEFT JOIN effective f ON f.entry_id=e.id "
+            "FROM (SELECT e.id FROM entry e JOIN effective f ON f.entry_id = e.id "
+            f"WHERE {where}) c JOIN entry e ON e.id = c.id "
+            "JOIN effective f ON f.entry_id = e.id "
             "LEFT JOIN translation t ON t.entry_id=e.id AND t.source=f.source "
-            f"WHERE {where} ORDER BY e.mod_id, e.kind, e.key"
+            "ORDER BY e.mod_id, e.kind, e.key"
         )
         if limit is not None and limit > 0:
             sql += " LIMIT ?"
@@ -3473,10 +4032,17 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
         check: Callable[[], None] | None = None,
     ) -> tuple[int, list[SameSourceAIEntry]]:
         """Find special-character mismatches in every stored source translation."""
+        if check is not None:
+            check()
+        token_chars = " OR ".join(
+            f"{column} GLOB {_TOKEN_CHAR_GLOB_SQL} OR instr({column}, char(10)) > 0"
+            for column in ("e.en_us", "t.zh_tw")
+        )
         where = [
             "e.mc_version=?",
             "e.en_us<>''",
             "t.zh_tw<>''",
+            f"({token_chars})",
         ]
         params: list = [version]
         if mod_ids:
@@ -3488,21 +4054,33 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
             "FROM entry e JOIN translation t ON t.entry_id=e.id "
             f"WHERE {' AND '.join(where)} ORDER BY e.mod_id, e.kind, e.key, t.source"
         )
-        count = 0
-        candidates: list[SameSourceAIEntry] = []
         selected_limit = limit if limit and limit > 0 else None
-        with self._lock:
-            cursor = self._conn.execute(sql, tuple(params))
-            while rows := cursor.fetchmany(512):
-                for row in rows:
-                    if check is not None:
-                        check()
-                    if quality_state(row[4], row[5])[0] != "mismatch":
-                        continue
-                    count += 1
-                    if selected_limit is None or len(candidates) < selected_limit:
-                        candidates.append(SameSourceAIEntry(*row))
-        return count, candidates
+
+        def load_candidates():
+            count = 0
+            candidates = []
+            with self._lock:
+                cursor = self._conn.execute(sql, tuple(params))
+                try:
+                    while rows := cursor.fetchmany(512):
+                        for row in rows:
+                            if check is not None:
+                                check()
+                            if quality_state(row[4], row[5])[0] != "mismatch":
+                                continue
+                            count += 1
+                            if (
+                                selected_limit is None
+                                or len(candidates) < selected_limit
+                            ):
+                                candidates.append(row)
+                finally:
+                    cursor.close()
+            return count, candidates
+
+        key = "mismatched_sources:" + json.dumps([version, mod_ids, selected_limit])
+        count, rows = self._cached(key, load_candidates, persist=False)
+        return count, [SameSourceAIEntry(*row) for row in rows]
 
     def iter_repairable_translation_entries(
         self,

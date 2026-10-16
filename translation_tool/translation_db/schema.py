@@ -84,7 +84,11 @@ CREATE TABLE IF NOT EXISTS entry (
 );
 CREATE INDEX IF NOT EXISTS idx_entry_content ON entry (kind, mod_id, key, en_us);
 CREATE INDEX IF NOT EXISTS idx_entry_mod ON entry (mc_version, mod_id);
+CREATE INDEX IF NOT EXISTS idx_entry_list_order
+    ON entry (mc_version, mod_id, kind, key, id);
 CREATE INDEX IF NOT EXISTS idx_entry_mod_id ON entry (mod_id);
+-- 版本內依編號排序（兩段式排序的第二段：沒有活動時間或更新時間的條目）
+CREATE INDEX IF NOT EXISTS idx_entry_version ON entry (mc_version);
 CREATE INDEX IF NOT EXISTS idx_entry_en ON entry (en_us);
 
 CREATE TABLE IF NOT EXISTS translation (
@@ -213,6 +217,7 @@ def init_schema(conn: sqlite3.Connection) -> None:
         )
         _install_schema_v3_objects(conn)
         conn.commit()
+        _install_derived_tables(conn)
         return
     version = stored_schema_version(conn)
     while version < SCHEMA_VERSION:
@@ -255,6 +260,30 @@ def init_schema(conn: sqlite3.Connection) -> None:
     )
     _install_schema_v3_objects(conn)
     conn.commit()
+    _install_derived_tables(conn)
+
+
+def _install_derived_tables(conn: sqlite3.Connection) -> None:
+    """安裝並填入觸發器維護的衍生資料（可隨時重算，不需先備份）。
+
+    全庫統計摘要（``stat_summary``）、條目最近人工活動（``entry_activity``）、
+    ``effective`` 的衍生欄位（``effective_columns``）與條目品質旗標（``quality_flags``）。
+    """
+    # 這些模組引用本模組的來源代碼，延後載入以免循環匯入
+    from translation_tool.translation_db import (
+        change_tracker,
+        effective_columns,
+        entry_activity,
+        quality_flags,
+        stat_summary,
+    )
+
+    stat_summary.install(conn)
+    entry_activity.install(conn)
+    effective_columns.install(conn)
+    quality_flags.install(conn)
+    # 最後安裝：前面各模組的回填寫入不應被當成外部寫入
+    change_tracker.install(conn)
 
 
 def _backup_before_review_migration(conn: sqlite3.Connection) -> Path | None:
@@ -562,9 +591,7 @@ def _install_schema_v3_objects(conn: sqlite3.Connection) -> None:
     )
     # 非人工來源的譯文文字被改掉、審核狀態卻沒有一起改時，舊的「已審核」不再成立
     # 審核、修復與還原流程（_tx(keep_review=True)）自己決定審核狀態並寫進歷史快照，不受此觸發器影響
-    conn.execute("DROP TRIGGER IF EXISTS translation_text_change_clears_review")
-    conn.execute(
-        f"""
+    review_trigger = f"""
         CREATE TRIGGER translation_text_change_clears_review
         AFTER UPDATE OF zh_tw ON translation
         WHEN NEW.source <> 6 AND NEW.zh_tw IS NOT OLD.zh_tw
@@ -575,7 +602,15 @@ def _install_schema_v3_objects(conn: sqlite3.Connection) -> None:
             UPDATE translation SET review_status=NULL WHERE id=NEW.id;
         END;
         """
-    )
+    existing = conn.execute(
+        "SELECT sql FROM sqlite_schema WHERE type='trigger' "
+        "AND name='translation_text_change_clears_review'"
+    ).fetchone()
+    normalize = lambda sql: " ".join(sql.rstrip().rstrip(";").split())
+    if existing is not None and normalize(existing[0]) == normalize(review_trigger):
+        return
+    conn.execute("DROP TRIGGER IF EXISTS translation_text_change_clears_review")
+    conn.execute(review_trigger)
 
 
 DB_EMPTY = "empty"  # 沒有任何資料表（新檔案或 0 位元組的檔案）

@@ -227,7 +227,10 @@ def test_batch_projection_with_quality_matches_full_scan(db, quality):
 
 
 def test_quality_page_turns_reuse_scan_and_invalidate_after_writes(db):
-    """品質篩選翻頁沿用上次的符合清單；資料一變就重新掃描。"""
+    """品質篩選翻頁沿用上次的符合清單；資料一變就重新掃描。
+
+    方向或類別不是「全部」的 token 不一致仍要逐列判斷（品質旗標只縮小候選）。
+    """
     db.ingest(
         "1.21.1",
         [
@@ -235,7 +238,9 @@ def test_quality_page_turns_reuse_scan_and_invalidate_after_writes(db):
             for i in range(30)
         ],
     )
-    criteria = EntryFilter(version="1.21.1", quality=QualityFilter(status="mismatch"))
+    criteria = EntryFilter(
+        version="1.21.1", quality=QualityFilter(status="mismatch", direction="missing")
+    )
     scans = []
     original = db._scan_quality_candidates
     db._scan_quality_candidates = lambda *a, **k: (scans.append(1), original(*a, **k))[

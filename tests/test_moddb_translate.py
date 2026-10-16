@@ -938,7 +938,10 @@ def test_list_counts_are_cached_per_filter_and_invalidated_by_writes(db_path):
     real_one = db._one
 
     def spy(sql, params=()):
-        if sql.startswith("SELECT COUNT(*) FROM entry e"):
+        # 狀態篩選要求有生效譯文時從 effective 計數
+        if sql.startswith(
+            ("SELECT COUNT(*) FROM entry e", "SELECT COUNT(*) FROM effective f")
+        ):
             counted.append(sql)
         return real_one(sql, params)
 

@@ -1308,6 +1308,19 @@ def test_review_sync_replaces_other_versions_even_with_different_text(db):
     assert db.list_entries("1.21.1")[0][0].review_status == "unreviewed"
 
 
+def _drop_stat_summary(conn):
+    """舊版資料庫沒有統計摘要：移除摘要表、觸發器與 meta 標記。"""
+    for (name,) in conn.execute(
+        "SELECT name FROM sqlite_schema WHERE type='trigger' AND name LIKE 'stat_%'"
+    ).fetchall():
+        conn.execute(f"DROP TRIGGER {name}")
+    conn.execute("DROP TABLE IF EXISTS stat_src")
+    conn.execute("DROP TABLE IF EXISTS stat_counter")
+    conn.execute(
+        "DELETE FROM meta WHERE key IN ('stats_schema_version', 'stats_valid')"
+    )
+
+
 def _make_v1_db(path):
     from translation_tool.translation_db.schema import SRC_MANUAL
 
@@ -1326,6 +1339,7 @@ def _make_v1_db(path):
         conn.execute("DROP TRIGGER IF EXISTS translation_update_revision")
         conn.execute("DROP TRIGGER IF EXISTS translation_text_change_clears_review")
         conn.execute("DROP INDEX IF EXISTS idx_effective_source_review")
+        _drop_stat_summary(conn)
         conn.execute("ALTER TABLE translation DROP COLUMN review_status")
         conn.execute("ALTER TABLE translation DROP COLUMN created_at")
         conn.execute("ALTER TABLE translation DROP COLUMN revision")

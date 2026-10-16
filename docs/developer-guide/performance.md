@@ -8,6 +8,85 @@ different platforms or browser versions are not directly comparable.
 
 ## Metrics
 
+### Mod DB entry-list ordering
+
+`translation_tool/translation_db/schema.py` installs `idx_entry_list_order` on
+`entry (mc_version, mod_id, kind, key, id)`. The leading version column constrains
+the selected Minecraft version; the remaining columns follow the default entry
+list ordering, including its deterministic ID tie-breaker.
+
+Writable database initialization uses `CREATE INDEX IF NOT EXISTS`, including
+for databases already at the current schema version. An existing index is not
+rebuilt on every open. Read-only repository connections do not install indexes;
+a database must be initialized through a writable connection to obtain it.
+This index does not require a schema-version change or rewrite entry,
+translation, review, or history data.
+
+Compare the complete public entry-list operation, including its total count,
+on independent SQLite-backup copies with and without this index. Check first,
+middle, and partial final pages, IDs/order/totals, multi-version filters, query
+plans, index-installation cost, database size, and ingest/update cost. Do not
+report an OFFSET selecting the last 50 rows as a partial final UI page. Retain
+raw UI timings separately from query timings, including slower or unstable
+first-load observations. No wall-clock threshold is asserted in unit tests;
+index installation, query-plan shape, and result parity are tested instead.
+
+### Mod DB: no temporary sorts
+
+List, paging and candidate queries in `translation_tool/translation_db/` must not
+produce `USE TEMP B-TREE FOR ORDER BY` in `EXPLAIN QUERY PLAN`. A temporary sort
+reads the whole candidate set before returning the first row, so its cost grows
+with the table instead of with the page size. Obtain the order from an index
+whose column order matches the `ORDER BY`, from a two-phase query (select the page
+IDs first, then read the wide columns), or from a trigger-maintained derived
+column or table.
+
+`tests/test_moddb_no_temp_sort.py` runs the public read APIs over every state,
+sort, quality status and common filter, captures each SELECT through
+`sqlite3.Connection.set_trace_callback`, and fails when a plan contains the temporary
+sort. An exception is acceptable only when the sorted set has a hard bound that
+does not depend on the table size; record the bound in `ALLOWED_PLAN_MARKERS` or
+`ALLOWED` in that test. Current exceptions:
+
+- Sorting the page's own IDs in the second phase of a two-phase query (bounded by the page size).
+- `entry_newest` / `entry_oldest` sorts: `entry.created_at` has no index, and
+  adding one slows every import for a rarely used sort.
+- Untranslated candidate lists, reusable candidates and same-as-source AI entries: the sorted
+  set is the number of missing or matching rows in one version.
+- `kinds()`: sorts the distinct entry kinds only.
+- The mismatch list: sorts only rows that pass the special-character prefilter.
+
+### Mod DB trigger-maintained derived data
+
+`translation_tool/translation_db/stat_summary.py`,
+`translation_tool/translation_db/entry_activity.py` and
+`translation_tool/translation_db/effective_columns.py` keep derived tables and
+columns exact through SQLite triggers. Each module provides `verify()` (compare
+with a full recompute using the original query definition) and `rebuild()`;
+readers use the derived data only when its `meta` flags mark it valid and not
+frozen, and otherwise fall back to the original SQL. Bulk rewrites of
+`effective` run inside the modules' `frozen()` blocks and recompute once.
+
+`translation_tool/translation_db/quality_flags.py` keeps `entry.qflags` (one bit
+per quality status) for quality-filtered lists. Its triggers only mark affected
+entries pending (`qflags IS NULL`); `TranslationDB._tx` calls `settle()` before
+commit to recompute them with `translation_tool/translation_db/quality.py`, so
+the flags never duplicate the quality rules in SQL. Readers check for pending
+entries and use the row-by-row scan while any exist. Its `verify()` compares
+every entry with a recompute that calls `matches_quality` once per status.
+
+Measure list operations through `TranslationDB.list_entries` on independent
+copies of the same database, in a fresh process with the read-only connection
+and an empty `stat_cache`, comparing against the commit before the change.
+Report first, middle and last pages for each affected state and sort, and
+write cost for single and repeated manual saves, ingest, and a full effective
+rebuild with and without a priority change. Tests assert result parity with the
+original queries, the absence of `USE TEMP B-TREE FOR ORDER BY` in the paged
+queries, and `verify()` after every write path; no wall-clock threshold is
+asserted.
+
+### Other metrics
+
 - AppShell mount time and browser-ready time from the real Flet smoke report
 - First lazy build and same-session warm revisit for every registered view
 - Dashboard cache-overview assembly/active-shard read, replace-rule file read,
