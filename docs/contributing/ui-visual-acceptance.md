@@ -144,7 +144,7 @@ case does not claim a distinct completed-cancelled Dashboard state.
    screenshot in both themes. Include desktop, the 1100×720 supported minimum, and
    narrow/portrait probes. Look for clipping, overflow, overlap, missing CJK
    glyphs, unreadable contrast, stale progress, and Flutter error panels.
-4. Compare intentional visual changes with the approved design reference; do not
+4. Compare intentional visual changes with the approved design reference (kept by the maintainer in Obsidian under `2-Projects/Minecraft-translate/docs-archive/ui-redesign/`, not in this repo); do not
    accept a new screenshot merely because the harness generated it.
 5. Preserve the report and screenshots as CI artifacts or task evidence. Do not
    commit generated PNG files.
