@@ -135,6 +135,22 @@ def _trigger_sql() -> dict[str, str]:
                 UPDATE effective SET mc_version=NEW.mc_version WHERE entry_id=NEW.id;
                 {_regroup(_row_content("NEW"))}
             END""",
+        # 程式本身不會改生效列的條目編號或譯文列的條目／來源；外部 SQL 這樣改時
+        # 衍生欄位無法逐項調整，標成無效，讀取改用原本的查詢，下次可寫開啟時重建
+        "effcol_effective_move": f"""
+            CREATE TRIGGER effcol_effective_move AFTER UPDATE OF entry_id ON effective
+            WHEN {_NOT_FROZEN} AND OLD.entry_id IS NOT NEW.entry_id BEGIN
+                INSERT INTO meta (key, value) VALUES ('effective_columns_valid', '0')
+                ON CONFLICT(key) DO UPDATE SET value = '0';
+            END""",
+        "effcol_translation_identity": f"""
+            CREATE TRIGGER effcol_translation_identity
+            AFTER UPDATE OF entry_id, source ON translation
+            WHEN {_NOT_FROZEN}
+                AND (OLD.entry_id IS NOT NEW.entry_id OR OLD.source IS NOT NEW.source) BEGIN
+                INSERT INTO meta (key, value) VALUES ('effective_columns_valid', '0')
+                ON CONFLICT(key) DO UPDATE SET value = '0';
+            END""",
         "effcol_translation_insert": f"""
             CREATE TRIGGER effcol_translation_insert AFTER INSERT ON translation
             WHEN {_NOT_FROZEN} BEGIN

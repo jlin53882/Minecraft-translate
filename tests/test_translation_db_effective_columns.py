@@ -235,7 +235,14 @@ def test_every_write_trigger_keeps_columns_exact(db):
     assert all(result == [] for result in _exercise_triggers(db))
 
 
-@pytest.mark.parametrize("trigger", sorted(effective_columns._trigger_sql()))
+# 這兩個觸發器不維護欄位內容，而是在外部 SQL 改變身分時把欄位標成無效；
+# 它們的必要性由 tests/test_translation_db_review_fixes.py 的外部寫入測試驗證
+_INVALIDATING_TRIGGERS = {"effcol_effective_move", "effcol_translation_identity"}
+
+
+@pytest.mark.parametrize(
+    "trigger", sorted(set(effective_columns._trigger_sql()) - _INVALIDATING_TRIGGERS)
+)
 def test_each_trigger_is_needed(db, trigger):
     _seed(db)
     with db._tx() as conn:

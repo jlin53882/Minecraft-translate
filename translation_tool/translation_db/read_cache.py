@@ -1,8 +1,13 @@
 """Bounded, generation-scoped JSON results shared by read-only workers."""
 
+import re
 from collections import OrderedDict
 from threading import RLock
 from typing import Any
+
+# JSON 會把控制字元跳脫成最長 6 個位元組，引號與反斜線跳脫成 2 個位元組
+_NEEDS_ESCAPE = re.compile(r'[\x00-\x1f"\\]')
+_ESCAPE_EXTRA = 5
 
 
 class ReadCache:
@@ -19,7 +24,7 @@ class ReadCache:
         """估計 JSON 序列化後是否超過單筆上限；超過就不必白做序列化。
 
         走訪巢狀的 list／tuple／dict，字串依實際位元組數、數字與 null 以固定值估算，
-        一超過上限就提早結束，成本遠低於完整序列化。估計刻意不低估字串內容。
+        一超過上限就提早結束，成本遠低於完整序列化。需要跳脫的字元（控制字元、引號、反斜線）以最壞情況計入，估計不低估字串內容。
         """
         budget = self._max_bytes
         stack = [value]
@@ -27,6 +32,8 @@ class ReadCache:
             item = stack.pop()
             if isinstance(item, str):
                 budget -= len(item) + 2 if item.isascii() else len(item.encode()) + 2
+                if _NEEDS_ESCAPE.search(item):
+                    budget -= _ESCAPE_EXTRA * len(_NEEDS_ESCAPE.findall(item))
             elif isinstance(item, dict):
                 budget -= 2 + len(item)
                 for key, child in item.items():

@@ -188,6 +188,14 @@ def _trigger_sql() -> dict[str, str]:
                 {_bump(_entry_version("NEW.entry_id"), "NEW.source", _review("NEW"), review_changed)}
                 {_counter("diff", _diff_if_replaced("OLD.zh_tw", "NEW.zh_tw", "NEW.entry_id"))}
             END""",
+        # 程式本身不會把生效列移到別的條目；外部 SQL 這樣改時摘要無法逐項調整，
+        # 標成無效，讀取改用原本的查詢，下次可寫開啟時重建
+        "stat_effective_move": f"""
+            CREATE TRIGGER stat_effective_move AFTER UPDATE OF entry_id ON effective
+            WHEN {_NOT_FROZEN} AND OLD.entry_id IS NOT NEW.entry_id BEGIN
+                INSERT INTO meta (key, value) VALUES ('stats_valid', '0')
+                ON CONFLICT(key) DO UPDATE SET value = '0';
+            END""",
     }
 
 

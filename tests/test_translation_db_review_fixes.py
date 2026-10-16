@@ -460,3 +460,89 @@ def test_entry_activity_rebuild_replaces_same_name_index_with_wrong_definition(d
     assert entry_activity.is_installed(db._conn)
     assert entry_activity.is_ready(db._conn)
     db.close()
+
+
+# --- 外部 SQL 改變生效列／譯文列的身分：衍生資料不可靜默失準 ------------------
+
+_MOVE_EFFECTIVE_SQL = (
+    "UPDATE effective SET entry_id = (SELECT id FROM entry WHERE mc_version = '1.21.1' "
+    "ORDER BY id LIMIT 1) WHERE entry_id = (SELECT entry_id FROM effective "
+    "ORDER BY entry_id LIMIT 1)"
+)
+_RETARGET_TRANSLATION_SQL = (
+    "UPDATE translation SET source = 3 WHERE id = (SELECT MIN(id) FROM translation)"
+)
+
+
+@pytest.fixture
+def two_version_path(tmp_path):
+    path = tmp_path / "moved.db"
+    db = TranslationDB(path)
+    db.ingest(VERSION, _items())
+    db.ingest("1.21.1", _items(6)[:3])  # 另一個版本：部分條目沒有譯文
+    db.close()
+    return path
+
+
+def _external_sql(path, sql: str) -> None:
+    connection = sqlite3.connect(path)
+    connection.execute(sql)
+    connection.commit()
+    connection.close()
+
+
+def test_external_move_of_effective_row_disables_derived_reads_until_rebuilt(
+    two_version_path,
+):
+    db = TranslationDB(two_version_path)
+    generation = db._cache_generation()
+    db.close()
+    _external_sql(two_version_path, _MOVE_EFFECTIVE_SQL)
+
+    reader = TranslationDB(two_version_path, readonly=True)
+    assert reader._cache_generation() != generation
+    assert not reader._stat_summary_ready()
+    assert not reader._effective_columns_ready()
+    # 退回原本的查詢，結果與全庫重算相同
+    assert reader.overview() == reader._overview_full()
+    reader.close()
+
+    reopened = TranslationDB(two_version_path)  # 可寫開啟時重建
+    assert reopened._stat_summary_ready()
+    assert reopened._effective_columns_ready()
+    assert reopened.verify_stat_summary() == []
+    assert reopened.verify_effective_columns() == []
+    reopened.close()
+
+
+def test_external_translation_source_change_disables_effective_columns(
+    two_version_path,
+):
+    _external_sql(two_version_path, _RETARGET_TRANSLATION_SQL)
+    reader = TranslationDB(two_version_path, readonly=True)
+    assert not reader._effective_columns_ready()
+    reader.close()
+    reopened = TranslationDB(two_version_path)
+    assert reopened._effective_columns_ready()
+    assert reopened.verify_effective_columns() == []
+    reopened.close()
+
+
+def test_own_writes_never_disable_derived_data(two_version_path):
+    db = TranslationDB(two_version_path)
+    db.save_manual(_first_id(db), "自己的寫入", actor="test")
+    db.ingest(VERSION, _items(14))
+    assert db._stat_summary_ready()
+    assert db._effective_columns_ready()
+    db.close()
+
+
+def test_cache_capacity_estimate_counts_json_escapes():
+    import json
+
+    from translation_tool.translation_db.read_cache import ReadCache
+
+    cache = ReadCache(max_bytes=16_000_000)
+    for payload in ("\x00" * 3_000_000, '"' * 9_000_000, "x" * 3_000_000):
+        actual = len(json.dumps([payload], ensure_ascii=False).encode("utf-8"))
+        assert cache.exceeds_capacity([payload]) == (actual > 16_000_000), len(payload)
