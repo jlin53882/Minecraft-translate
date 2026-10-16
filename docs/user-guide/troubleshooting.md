@@ -26,7 +26,7 @@
 
 ## Windows 或 Web 模式差異
 
-- Windows 打包版、檔案落盤和強制結束的驗證清單見 [`windows-verification.md`](windows-verification.md)。
+- Windows 打包版、檔案落盤與強制結束需要在 Windows 實機或打包版確認，Web 模式無法取代；驗證項目由維護者在 PR 或 issue 中逐項回報。
 - Flet Web 模式的資料夾選擇與主機路徑限制見 [`../reference/web-mode-limitations.md`](../reference/web-mode-limitations.md)。
 
 若以上資訊不足，請保留輸入設定、任務日誌、錯誤 traceback 與產生的輸出路徑；不要把 API Key 放進回報。

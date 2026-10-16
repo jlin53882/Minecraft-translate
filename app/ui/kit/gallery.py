@@ -3,7 +3,7 @@
     uv run python -m app.ui.kit.gallery
 
 一次看完所有共用元件；右上角可切換深淺色。新增元件時，也在這裡加一個區塊，
-方便檢查外觀是否與 ``docs/design/ui-redesign/`` 一致。
+方便檢查外觀是否與設計稿一致（設計稿不在 repo 內）。
 """
 
 from __future__ import annotations

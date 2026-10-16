@@ -145,4 +145,4 @@ merge 的取消檢查點（`merge_service`，經 `raise_if_cancelled()`；`Pipel
 
 - 把 `PollerHandle` 推廣到其他一次性 `run_task`（目前不需要）。
 - `ConfigView` 未儲存導覽確認使用 `page.show_dialog`／`pop_dialog` 的 LIFO 契約；save/reload 的提示延後到自己的 AlertDialog pop 後，驗證／寫入錯誤留在該對話框內，外部 dismiss 只視為留在原頁。其他設定對話框仍依各自 owner 關閉，不在此條目宣稱已統一。
-- 真實 Windows 桌面版的卸載時序與大型 Mods 資料夾（>400 個 JAR）驗證：見 `docs/user-guide/windows-verification.md`；目前以 Flet 網頁版與行為測試驗證。
+- 真實 Windows 桌面版的卸載時序與大型 Mods 資料夾（>400 個 JAR）驗證需要 Windows 實機；目前以 Flet 網頁版與行為測試驗證。
