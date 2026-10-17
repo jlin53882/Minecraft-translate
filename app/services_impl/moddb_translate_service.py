@@ -39,7 +39,7 @@ from translation_tool.translation_db.run_progress import (
     format_live,
     tick_live,
 )
-from translation_tool.translation_db.schema import KIND_GUIDE, KIND_LANG
+from translation_tool.translation_db.schema import cache_type_for_kind
 from translation_tool.utils.cache_manager import add_to_cache, save_translation_cache
 from translation_tool.utils.cancellation import (
     TaskCancelled,
@@ -148,13 +148,7 @@ def build_items(
                 "source_text": en_us,
                 # Guide (.md/.txt) keeps the Patchouli prompt flow but belongs
                 # to the md cache bucket; .txt is intentionally included.
-                "cache_type": (
-                    "lang"
-                    if kind == KIND_LANG
-                    else "md"
-                    if kind == KIND_GUIDE
-                    else "patchouli"
-                ),
+                "cache_type": cache_type_for_kind(kind),
                 "_entry_id": eid,
                 "_kind": kind,
                 "_mod_id": mod_id,

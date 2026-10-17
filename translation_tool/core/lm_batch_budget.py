@@ -46,11 +46,17 @@ PROFILE_BY_CACHE_TYPE = {
     "md": "md",
     "patchouli": "patch",
 }
+LANG_PROMPT_PROFILES = frozenset({"lang", "kubejs"})
 
 
 def profile_for_cache_type(cache_type: str | None) -> str:
     """把 cache_type 轉成 profile 名稱；未知或空值視為 lang（與共用迴圈的預設一致）。"""
     return PROFILE_BY_CACHE_TYPE.get(str(cache_type or "").lower(), "lang")
+
+
+def uses_lang_prompt(profile: str | None) -> bool:
+    """Return whether a batch profile uses the language-file prompt."""
+    return str(profile or "").lower() in LANG_PROMPT_PROFILES
 
 
 # ---------------------------------------------------------------------------

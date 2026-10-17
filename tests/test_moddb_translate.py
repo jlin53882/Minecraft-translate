@@ -24,6 +24,7 @@ from translation_tool.translation_db import (
 )
 from translation_tool.translation_db.models import WriteBackItem
 from translation_tool.translation_db.schema import (
+    KIND_ADVANCEMENT,
     KIND_GUIDE,
     KIND_PATCHOULI,
     SRC_AI,
@@ -119,9 +120,19 @@ def test_reuse_from_other_versions_fills_without_ai(db_path):
     db.close()
 
 
-def test_build_items_carries_entry_identity():
-    items = build_items([(7, KIND_LANG, "foo", "item.foo.b", "Infused Alloy")])
-    assert items[0]["_entry_id"] == 7 and items[0]["cache_type"] == "lang"
+@pytest.mark.parametrize(
+    ("kind", "expected_cache_type"),
+    [
+        (KIND_LANG, "lang"),
+        (KIND_PATCHOULI, "patchouli"),
+        (KIND_GUIDE, "md"),
+        (KIND_ADVANCEMENT, "patchouli"),
+    ],
+)
+def test_build_items_uses_the_shared_kind_cache_route(kind, expected_cache_type):
+    items = build_items([(7, kind, "foo", "item.foo.b", "Infused Alloy")])
+    assert items[0]["_entry_id"] == 7
+    assert items[0]["cache_type"] == expected_cache_type
     assert (
         items[0]["path"] == "item.foo.b" and items[0]["source_text"] == "Infused Alloy"
     )

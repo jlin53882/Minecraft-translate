@@ -22,10 +22,13 @@ from translation_tool.core.lm_api_client import (
 )
 from translation_tool.core.lm_batch_actions import BatchAction, decide_batch_action
 from translation_tool.core.lm_batch_budget import (
+    PROFILE_BY_CACHE_TYPE,
     BudgetConfig,
     estimate_text_tokens,
     get_tracker,
+    profile_for_cache_type,
     select_batch_size,
+    uses_lang_prompt,
 )
 from translation_tool.core.lm_config_rules import (
     ApiKeyCycle,
@@ -39,9 +42,7 @@ from translation_tool.core.lm_config_schema import (
     model_output_token_cap,
 )
 from translation_tool.core.lm_format_retry import (
-    FORMAT_MISMATCH_RETRY_INSTRUCTION,
     QUALITY_RETRY_INSTRUCTION,
-    build_format_mismatch_retry_batch,
     build_quality_retry_batch,
     quality_issues,
 )
@@ -119,15 +120,11 @@ def _detect_batch_profile(items):
         unique = set(cache_types)
         if len(unique) == 1:
             cache_type = next(iter(unique))
-            if cache_type in {"lang", "patchouli", "ftbquests", "kubejs", "md"}:
-                return (
-                    "lang"
-                    if cache_type == "lang"
-                    else ("ftb" if cache_type == "ftbquests" else cache_type)
-                )
-        for cache_type in ("lang", "ftbquests", "kubejs", "md", "patchouli"):
+            if cache_type in PROFILE_BY_CACHE_TYPE:
+                return profile_for_cache_type(cache_type)
+        for cache_type in PROFILE_BY_CACHE_TYPE:
             if cache_type in cache_types:
-                return "ftb" if cache_type == "ftbquests" else cache_type
+                return profile_for_cache_type(cache_type)
 
     files = [
         str(item.get("file", "")).replace("\\", "/").lower()
@@ -396,7 +393,6 @@ class _BatchRuntime:
     fixed_input_tokens: float
     batch_fit_input_tokens: float
     retry_fixed_input_tokens: float
-    format_retry_fixed_input_tokens: float
     quality_retry_fixed_input_tokens: float
     retry_same_as_source: bool
     original_total: int | None
@@ -560,14 +556,11 @@ def _build_batch_runtime(
         lm_cfg.get("patchouli_system_prompt"),
         "你是專業的 Minecraft Patchouli 手冊翻譯員",
     )
-    fixed_prompt = lang_prompt if profile in {"lang", "kubejs"} else patchouli_prompt
+    fixed_prompt = lang_prompt if uses_lang_prompt(profile) else patchouli_prompt
     retry_same_as_source = bool(lm_cfg.get("retry_same_as_source", True))
     fixed_input_tokens = estimate_text_tokens(fixed_prompt)
     retry_fixed_input_tokens = estimate_text_tokens(
         f"{fixed_prompt.rstrip()}\n\n{SAME_SOURCE_RETRY_INSTRUCTION}"
-    )
-    format_retry_fixed_input_tokens = estimate_text_tokens(
-        f"{fixed_prompt.rstrip()}\n\n{FORMAT_MISMATCH_RETRY_INSTRUCTION}"
     )
     quality_retry_fixed_input_tokens = estimate_text_tokens(
         f"{fixed_prompt.rstrip()}\n\n{QUALITY_RETRY_INSTRUCTION}"
@@ -596,7 +589,6 @@ def _build_batch_runtime(
             )
         ),
         retry_fixed_input_tokens=retry_fixed_input_tokens,
-        format_retry_fixed_input_tokens=format_retry_fixed_input_tokens,
         quality_retry_fixed_input_tokens=quality_retry_fixed_input_tokens,
         retry_same_as_source=retry_same_as_source,
         original_total=total,
@@ -1254,134 +1246,6 @@ def _retry_same_source_translations(
     return merged
 
 
-def _retry_format_mismatch_translations(
-    runtime: _BatchRuntime,
-    round_data: _BatchRound,
-    result: list[dict],
-    *,
-    prompt: str,
-    model_name: str,
-    api_key: str,
-    output_cap: int | None,
-    conversation_history: list[dict[str, str]],
-    retry_budget: _BatchRetryBudget,
-) -> list[dict]:
-    """Send only format-invalid rows back with the detected issues as feedback."""
-    candidates = build_format_mismatch_retry_batch(
-        round_data.current_batch, result, list(round_data.id_to_item)
-    )
-    if not candidates.positions:
-        return result
-    if retry_budget.used:
-        log_info(
-            "[翻譯重試] 本批次已用完重試額度（每批最多 1 次），略過格式重試；"
-            f"{len(candidates.positions)} 筆格式不一致的譯文保留第一次結果"
-        )
-        return result
-    retry_budget.used = True
-
-    retry_prompt = f"{prompt.rstrip()}\n\n{FORMAT_MISMATCH_RETRY_INSTRUCTION}"
-    retry_estimate = runtime.budget_tracker.estimate(
-        candidates.items,
-        runtime.budget_cfg,
-        runtime.format_retry_fixed_input_tokens
-        + _estimate_conversation_history_tokens(conversation_history),
-    )
-    retry_round = _BatchRound(
-        current_batch=list(candidates.items),
-        fit_count=len(candidates.items),
-        estimate=retry_estimate,
-        payload=candidates.payload,
-        id_to_item=candidates.id_to_item,
-    )
-    candidate_count = len(candidates.positions)
-    log_info(
-        f"[格式重試] 送出 {candidate_count}/{len(round_data.current_batch)} 筆格式不一致的譯文，"
-        f"估計輸入 {round(retry_estimate.input_tokens)} tokens"
-    )
-
-    try:
-        raise_if_cancelled()
-        retry_meta: dict = {}
-        request_kwargs = _provider_request_kwargs(
-            runtime,
-            model_name,
-            retry_prompt,
-            retry_round.payload,
-            output_cap,
-            retry_meta,
-            api_key,
-            conversation_history=conversation_history,
-        )
-        retry_text = call_gemini_requests(**request_kwargs).strip()
-        raise_if_cancelled()
-        if (
-            not retry_text
-            or retry_meta.get("finish_reason") == "MAX_TOKENS"
-            or _is_truncated_response(retry_text)
-        ):
-            log_warning(
-                "[格式重試] 重試回應為空或被截斷"
-                f"（finish_reason={retry_meta.get('finish_reason')}），"
-                f"{candidate_count} 筆保留第一次譯文"
-            )
-            return result
-        retried, invalid = _merge_batch_response(
-            runtime, retry_round, retry_text, retry_meta, optional_retry=True
-        )
-        if invalid or retried is None:
-            log_warning(
-                "[格式重試] 重試回應不符合結構化格式（缺少項目、ID 不一致，或譯文不是字串），"
-                f"{candidate_count} 筆保留第一次譯文"
-            )
-            return result
-        conversation_history.extend(
-            [
-                {
-                    "role": "user",
-                    "text": json.dumps(retry_round.payload, ensure_ascii=False),
-                },
-                {"role": "model", "text": retry_text},
-            ]
-        )
-    except Exception as exc:  # noqa: BLE001 - optional format retry must not fail a valid batch
-        log_warning(
-            f"[格式重試] 重試請求失敗，{candidate_count} 筆保留第一次譯文"
-            f"（{_retry_error_detail(exc)}）"
-        )
-        return result
-
-    accepted_positions: list[int] = []
-    accepted_results: list[dict] = []
-    unresolved = 0
-    for position, retry_item in zip(candidates.positions, retried, strict=True):
-        source_text = round_data.current_batch[position].get("text")
-        translated_text = retry_item.get("text")
-        if (
-            not isinstance(source_text, str)
-            or not isinstance(translated_text, str)
-            or quality_issues(round_data.current_batch[position], translated_text)
-        ):
-            unresolved += 1
-            continue
-        accepted_positions.append(position)
-        accepted_results.append(retry_item)
-
-    if unresolved:
-        log_warning(
-            f"[格式重試] 重試後仍有 {unresolved}/{candidate_count} 筆格式不一致，"
-            "這些筆保留第一次譯文"
-        )
-
-    merged = merge_same_source_retry_results(
-        result, tuple(accepted_positions), accepted_results
-    )
-    log_info(
-        f"[格式重試] 已修正 {len(accepted_positions)}/{candidate_count} 筆格式不一致的譯文"
-    )
-    return merged
-
-
 def _retry_quality_translations(
     runtime: _BatchRuntime,
     round_data: _BatchRound,
@@ -1724,7 +1588,7 @@ def _attempt_batch(
             continue
         prompt = (
             runtime.lang_prompt
-            if runtime.batch_profile in {"lang", "kubejs"}
+            if uses_lang_prompt(runtime.batch_profile)
             else runtime.patchouli_prompt
         )
         output_cap = None

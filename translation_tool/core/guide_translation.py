@@ -37,7 +37,7 @@ from translation_tool.plugins.md.md_inject_qa import (
 )
 from translation_tool.plugins.shared.rich_text_shield import shield_text, unshield_text
 from translation_tool.translation_db.quality import guide_structure_issues
-from translation_tool.translation_db.schema import KIND_GUIDE
+from translation_tool.translation_db.schema import KIND_GUIDE, cache_type_for_kind
 from translation_tool.utils.log_unit import log_warning
 
 GUIDE_SUFFIXES = (".md", ".mdx", ".txt")
@@ -131,7 +131,7 @@ def load_guide(path: GuidePath) -> tuple[dict, list[dict[str, Any]]]:
                 "source_text": block.text,
                 # Guide (.md/.txt) still uses the Patchouli prompt, but its
                 # cache is stored under md; .txt is part of the md bucket too.
-                "cache_type": "md",
+                "cache_type": cache_type_for_kind(KIND_GUIDE),
                 "_shielded": shielded,
                 "db_ident": (KIND_GUIDE, mod_id, f"{file_key}#{index}"),
             }

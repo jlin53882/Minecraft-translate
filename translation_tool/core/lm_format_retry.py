@@ -15,7 +15,8 @@ QUALITY_RETRY_INSTRUCTION = """這是目前批次唯一一次的翻譯品質修�
 如果 format_issues 有內容，請依照原文自行判斷並修正格式；換行問題要輸出正確數量與位置的實際換行，特殊格式問題要完整保留 Minecraft 格式碼、printf 佔位符、Patchouli 巨集，以及文字形式的 \\n。
 請維持原本翻譯語意，不要輸出說明文字，只回傳相同項目 ID 的結構化 JSON 翻譯結果。"""
 
-# Kept for private legacy helpers while the public batch flow uses the combined retry.
+# Keep this compatibility name for private/external imports; active batch flow uses
+# the combined quality retry instruction below.
 FORMAT_MISMATCH_RETRY_INSTRUCTION = QUALITY_RETRY_INSTRUCTION
 
 
@@ -116,18 +117,4 @@ def build_quality_retry_batch(
         items=tuple(candidate_items),
         payload={"items": payload_items},
         id_to_item=id_to_item,
-    )
-
-
-def build_format_mismatch_retry_batch(
-    source_items: list[dict],
-    translated_items: list[dict],
-    item_ids: list[str],
-) -> QualityRetryBatch:
-    """Compatibility wrapper for private legacy callers."""
-    return build_quality_retry_batch(
-        source_items,
-        translated_items,
-        item_ids,
-        retry_same_as_source=False,
     )

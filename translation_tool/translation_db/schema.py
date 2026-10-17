@@ -27,6 +27,21 @@ KIND_PATCHOULI = "patchouli"
 KIND_GUIDE = "guide"  # 指南（.md／.txt 文字檔，依段落切成條目）
 KIND_ADVANCEMENT = "advancement"  # 進度的顯示文字（data/<模組>/advancement(s)/）
 
+# DB kind → translation cache bucket. The LM prompt is selected from this
+# bucket, so all producers of DB-backed translation items must use this map.
+_CACHE_TYPE_BY_KIND = {
+    KIND_LANG: KIND_LANG,
+    KIND_PATCHOULI: KIND_PATCHOULI,
+    KIND_GUIDE: "md",
+    KIND_ADVANCEMENT: KIND_PATCHOULI,
+}
+
+
+def cache_type_for_kind(kind: str | None) -> str:
+    """Return the shared translation cache bucket for a DB entry kind."""
+    return _CACHE_TYPE_BY_KIND.get(str(kind or ""), KIND_PATCHOULI)
+
+
 # 來源代碼（寫入資料庫後不可更動）
 SRC_AI = 0
 SRC_JAR_TW = 1
