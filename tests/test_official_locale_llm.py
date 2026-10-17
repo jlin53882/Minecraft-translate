@@ -141,6 +141,25 @@ def test_semantic_newline_policies_are_precise_and_kind_scoped() -> None:
     assert PATCHOULI_SEMANTIC_FORMAT_POLICY_PROMPT not in lang_prompt
 
 
+def test_advancement_kind_does_not_inherit_patchouli_soft_reflow_policy() -> None:
+    prompt = build_translation_prompt(
+        "基礎",
+        [
+            {
+                "text": "First line\\nsecond line.",
+                "source_text": "First line\\nsecond line.",
+                "cache_type": "patchouli",
+                "_kind": KIND_ADVANCEMENT,
+            }
+        ],
+        profile="patch",
+    )
+
+    assert FORMAT_POLICY_PROMPT in prompt
+    assert STRUCTURED_FORMAT_POLICY_PROMPT not in prompt
+    assert PATCHOULI_SEMANTIC_FORMAT_POLICY_PROMPT not in prompt
+
+
 def test_missing_prompt_uses_new_builtin_prompt() -> None:
     from translation_tool.core import lm_translator_main as main
 

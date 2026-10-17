@@ -19,7 +19,12 @@ from translation_tool.translation_db.quality import (
     repair_input_issues_for_kind,
     translation_issues,
 )
-from translation_tool.translation_db.schema import KIND_GUIDE, KIND_LANG, KIND_PATCHOULI
+from translation_tool.translation_db.schema import (
+    KIND_ADVANCEMENT,
+    KIND_GUIDE,
+    KIND_LANG,
+    KIND_PATCHOULI,
+)
 
 SOURCE = "[Crafting](../items/crafting.md)"
 BROKEN = "[合成](/../items/crafting.md)"
@@ -125,6 +130,17 @@ def test_soft_line_reflow_is_not_a_quality_repair_candidate():
 
 def test_lang_keeps_actual_newline_count_as_a_hard_quality_token():
     assert "換行" in " ".join(translation_issues("one\ntwo", "一二", kind=KIND_LANG))
+
+
+def test_advancement_keeps_actual_newline_count_when_using_patchouli_cache():
+    item = {
+        "text": "one\ntwo",
+        "source_text": "one\ntwo",
+        "cache_type": "patchouli",
+        "_kind": KIND_ADVANCEMENT,
+    }
+
+    assert "換行" in " ".join(quality_issues(item, "一二"))
 
 
 def test_diff_panel_and_write_gate_agree_on_guide_breakage():

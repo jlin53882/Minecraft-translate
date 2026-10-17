@@ -96,7 +96,8 @@ def format_policy_for_items(
     kinds = {kind_for_item(item) for item in values}
     normalized_profile = str(profile or "").lower()
     has_structured_route = any(structured_kind(kind) for kind in kinds) or (
-        normalized_profile in {"md", "patch"}
+        not any(kind is not None for kind in kinds)
+        and normalized_profile in {"md", "patch"}
     )
     has_lang_route = KIND_LANG in kinds or normalized_profile == KIND_LANG
 
