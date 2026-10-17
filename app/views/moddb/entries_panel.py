@@ -13,7 +13,7 @@ import sqlite3
 import flet as ft
 
 from app.services_impl.moddb_format_diff_service import compare_format_diff
-from app.services_impl.moddb_guide_service import guide_mark_issues, is_guide_kind
+from app.services_impl.moddb_guide_service import is_guide_kind
 from app.services_impl.moddb_service import (
     SRC_MANUAL,
     EntryDetail,
@@ -616,6 +616,7 @@ class EntriesPanel(ft.Column):
             entry.en_us or NO_SOURCE_TEXT,
             self.tw_field.value or "",
             metadata=[self.source_chip, self.review_chip],
+            kind=entry.kind,
         )
         if calculate_impact:
             self._update_impact()
@@ -763,28 +764,36 @@ class EntriesPanel(ft.Column):
         notes: list[str] = []
         diff_result = None
         if entry is not None and entry.en_us and text.strip():
-            diff_result = compare_format_diff(entry.en_us, text)
+            diff_result = compare_format_diff(entry.en_us, text, kind=entry.kind)
             if diff_result.legacy_messages:
                 notes.append(
                     "與原文的特殊字元不一致：" + "、".join(diff_result.legacy_messages)
                 )
+            if diff_result.soft_newline_counts is not None:
+                notes.append(diff_result.summary_lines[-1])
+            if diff_result.guide_issues:
+                notes.append(
+                    "指南標記與原文不一致：" + "、".join(diff_result.guide_issues)
+                )
         is_guide = entry is not None and is_guide_kind(entry.kind)
-        if is_guide and entry.en_us and text.strip():
-            marks = guide_mark_issues(entry.en_us, text)
-            if marks:
-                notes.append("指南標記與原文不一致：" + "、".join(marks))
         space = whitespace_note(text)
         if space:
             notes.append(space)
         self.token_hint.value = "；".join(notes)
         self.token_hint.visible = bool(notes)
         self.mc_preview.render(text, markdown=is_guide)
-        self.chars.render(entry.en_us if entry else "", text, diff_result)
+        self.chars.render(
+            entry.en_us if entry else "",
+            text,
+            diff_result,
+            kind=entry.kind if entry else None,
+        )
         self.format_review.render(
             entry.en_us if entry else "",
             text,
             diff_result,
             metadata=[self.source_chip, self.review_chip],
+            kind=entry.kind if entry else None,
         )
 
     def _update_format_hints_and_refresh(self) -> None:
@@ -925,7 +934,12 @@ class EntriesPanel(ft.Column):
         else:
             show_snack(self._page, message, C.EM, text_color=C.ON_EM)
         if self.db() is db:
-            if not shadow and not compare_format_diff(entry.en_us, text).has_issues:
+            if (
+                not shadow
+                and not compare_format_diff(
+                    entry.en_us, text, kind=entry.kind
+                ).has_issues
+            ):
                 # 新譯文沒生效、或仍與原文的特殊字元不一致時，問題還在，不能移出待處理清單
                 self._resolve_flagged(entry.id, flagged_batch)
             same_entry = self.selected is not None and self.selected.id == entry.id
@@ -1045,11 +1059,16 @@ class EntriesPanel(ft.Column):
         self.version = version
         self.mod_id = None
         self.kind = None
+        self.version_dd.value = version
+        self.mod_dd.value = ALL_MODS
+        self.kind_dd.value = ALL_KINDS
         self.query = ""
         self.search.value = ""
         self.state = "none"
         self.state_seg.select("none")
         self.source_filter.reset()
+        self.review_filter.value = ALL_REVIEW_STATES
+        self.advanced_filters.reset()
         self._set_flagged(list(entry_ids), dict(drafts))
 
     def clear_flagged(self) -> None:

@@ -67,6 +67,9 @@ flowchart TD
   E -- "PARTIAL" --> J["回傳 PARTIAL"]
 ```
 
+- 每批提示詞會依輸入項目加入官方 Minecraft 術語；Mod DB 的已審核 `lang` 翻譯參考會限制在同一模組、目前 Minecraft 版本與本批原文，提供給 `lang`、Patchouli、Guide、Advancement 與 `md`／`.txt` 路線參考。術語出現在句子中時也會注入，但使用大小寫不敏感的詞界判斷，避免錯誤命中較長單字。同一英文有互相衝突的已審核譯文時不注入任何一筆；沒有本批來源時不掃描整個模組。資料庫先一次取得模組／版本範圍內的候選，再由共享前綴索引對本批原文匹配，避免重複建立來源分批 SQL。提示詞與同模組的 session 歷史會計入輸入 token 預算，但不計入翻譯輸出 KPI。
+- Mod DB 翻譯以 `(cache_type, batch_group)` 分組，避免把不同模組或不同種類混在同一個 payload；同一模組的不同 kind 批次沿用同一個 client-side session。預覽與實際執行共用同一個批次 planner 與固定 prompt token 估算；開始前的批次數是依當下提示詞與 session 狀態計算的下界，session 歷史增長或錯誤縮小批次時實際請求數可能增加。`.md` 與 `.txt` 指南仍走 Patchouli 提示詞，但使用 `md` 快取分類。
+
 ## 背景任務與 UI 更新
 
 - 開始時以 `launch_page_operation(..., owner="lm")` 登錄任務，使用預設的 `CancellationPolicy.COOPERATIVE` 與 `ShutdownPolicy.CANCEL_AND_DRAIN`（定義於 `app/tasks/operation_registry.py`）。
@@ -84,13 +87,13 @@ flowchart TD
   - `lm_translator.batch_write_interval`：快取寫入頻率。
   - `lm_translator.provider`：決定統計卡顯示 ChatGPT 或金鑰健康。
   - `translator.parallel_execution_workers`：抽取時的並行數。
-  - `lm_translator.rate_limit.sleep_seconds_between_batches`：批次之間的等待秒數。
+  - `lm_translator.rate_limit.sleep_seconds_between_batches`：provider／model 共用的請求最小間隔，預設 `4` 秒，適合每分鐘 15 次（RPM 15）的模型；正常批次、內部縮批與同批品質 retry 都使用同一個可取消 request slot。等待中的任務取消時會釋放尚未送出的預約；API 回傳 `Retry-After` 時會推遲共用時鐘。明確設定 `0` 才會停用本地間隔等待。
   - `lm_translator` 區段的 `batch_shrink_factor`、`min_batch_size`：批次縮小參數。
   - UI 日誌行數（`load_ui_logging_config` 的 `tail_lines`）。
 - 抽取規則：Patchouli 檔案的 `multiblock` 物件（方塊圖樣的 `pattern`、`mapping`）整個不抽取，因為翻譯或削掉列內空白會讓每列長度不一致、整本書載入失敗；Mod 資料庫的 jar 掃描共用同一個抽取函式（`translatable_extractor.extract_translatables`），規則相同。
 - 手冊欄位判斷：Patchouli 類 JSON 的字串依所在欄位與值的形狀判斷（`text_sniffer.classify_book_string`，陣列元素用上層欄位）；`text_sniffer.BOOK_ID_FIELDS` 的 id 欄位一律不抽取，`text_sniffer.BOOK_DISPLAY_FIELDS` 的顯示欄位連單字、駝峰名稱也抽取，其他欄位的單一 token 若是小寫或駝峰識別字、路徑、全大寫常數就不抽取；資源 id、網址、數字、色碼、`#模板變數#`、物品堆疊、NBT 片段、已是中文或沒有半形英文字母的字串、指向語言檔的鍵在任何欄位都不抽取。
 - 手冊檔案發現：`translatable_extractor.find_patchouli_json` 除了設定的資料夾名稱（`lm_translator.patchouli.dir_names`，任何深度的資料夾名稱都算），也依內容找（`text_sniffer.looks_like_book_json`：有 `pages` 頁面、Patchouli 規格的 `categories`／`templates` 結構）；書本根目錄的 `book.json` 不處理。提取階段（`jar_processor.extract_book_files_generator`）在名稱規則之後，用同一套內容判斷補提取（`jar_sniff_extract`）。
-- 指南（`.md`／`.txt`）：`guide_translation.find_guide_files` 依內容找出英文原文（有 front matter，或段落像英文句子；README、CHANGELOG 這類專案說明文件、`textures` 等規格資料夾、其他語系資料夾與簡繁中文變體不收），以段落為單位（與 Markdown 外掛相同的切法）進入目錄翻譯；段落鍵值是 `blocks[<序號>]`，Mod 資料庫身分是 `檔案路徑#序號`。譯文回來後還原行內保護，`guide_format.guide_issues` 比對標籤（含 `<br>`）、標題／清單／引用前綴、`**`、行內程式碼標記與連結目標，任何一項和原文不一致的段落保留原文；front matter 的 `navigation.title`（指南側邊欄標題）由 `guide_blocks.extract_guide_blocks` 排在所有段落之後一起翻譯，其他 front matter 欄位不動；輸出由 `render_guide` 依行號組回，只替換文字行。輸出位置：有 `en_us`／`_en_us` 資料夾就換成 `zh_tw`／`_zh_tw`，英文放在指南根目錄的（AE2、GuideME）寫進指南根目錄下的 `_zh_tw/`。
+- 指南（`.md`／`.txt`）：`guide_translation.find_guide_files` 依內容找出英文原文（有 front matter，或段落像英文句子；README、CHANGELOG 這類專案說明文件、`textures` 等規格資料夾、其他語系資料夾與簡繁中文變體不收），以段落為單位（與 Markdown 外掛相同的切法）進入目錄翻譯；段落鍵值是 `blocks[<序號>]`，Mod 資料庫身分是 `檔案路徑#序號`。譯文回來後還原行內保護，`quality.guide_structure_issues`（底層為 `guide_format.guide_issues`）比對標籤（含 `<br>`）、標題／清單／引用前綴、`**`、行內程式碼標記與連結目標，任何一項和原文不一致的段落保留原文；front matter 的 `navigation.title`（指南側邊欄標題）由 `guide_blocks.extract_guide_blocks` 排在所有段落之後一起翻譯，其他 front matter 欄位不動；輸出由 `render_guide` 依行號組回，只替換文字行。輸出位置：有 `en_us`／`_en_us` 資料夾就換成 `zh_tw`／`_zh_tw`，英文放在指南根目錄的（AE2、GuideME）寫進指南根目錄下的 `_zh_tw/`。
 - 產出檔案：
   - 輸出資料夾中的譯文 JSON；`lang/en_us.json` 寫成同資料夾的 `zh_tw.json`，Patchouli 書的 `patchouli_books/<書>/en_us/…` 寫進同書的 `zh_tw/…`（`translation_path_writer.map_lang_output_path`）；勾選「輸出 .lang」時，路徑含 `lang` 的來源檔另外輸出同名 `.lang`。另有 `translation_map.json`（逐筆對照紀錄）。Patchouli 書寫出前會與來源 `en_us` 比對（`patchouli_compat.find_patchouli_mismatch`），結構或格式標記數量不同時記警告，檔案仍照常寫出。
   - 翻譯快取（`translation_tool/utils/cache_manager.py`）：譯文一律寫入；`write_new_cache` 決定寫入方式：關閉時寫入編號分片，開啟時每批另存成獨立的時間戳分片。

@@ -195,6 +195,8 @@ def _load_translate_snapshot(db, request: dict, snapshot: dict) -> dict:
         if db and version and request.get("reuse")
         else 0
     )
+    # 背景刷新只更新快速計數；完整批次規劃由預覽／開始翻譯時的 service
+    # 使用同一份 items、session 與 planner 計算，避免每次範圍變更都掃完整版本。
     snapshot.update(
         versions=versions,
         version=version,
@@ -202,6 +204,8 @@ def _load_translate_snapshot(db, request: dict, snapshot: dict) -> dict:
         mod=mod,
         missing=missing,
         reusable=reusable,
+        planned_items=None,
+        planned_batches=None,
     )
     return snapshot
 

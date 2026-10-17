@@ -62,8 +62,10 @@ class TestCallGeminiRequests:
             payload=payload,
             api_key="unused-for-oauth",
             temperature=0.2,
+            max_output_tokens=1234,
             meta_out=meta,
             reasoning_effort="high",
+            fast=True,
             profile_id="profile-a",
             provider="chatgpt",
             lm_config={"provider": "chatgpt", "rate_limit": {"timeout": 45}},
@@ -75,8 +77,10 @@ class TestCallGeminiRequests:
             system_prompt="Translate.",
             payload=payload,
             timeout=45,
+            max_output_tokens=1234,
             meta_out=meta,
             reasoning_effort="high",
+            fast=True,
             profile_id="profile-a",
         )
 

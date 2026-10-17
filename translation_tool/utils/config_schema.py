@@ -365,6 +365,39 @@ SETTINGS: tuple[Setting, ...] = (
         timing_note="下一批次讀取。",
     ),
     Setting(
+        "lm_translator.fast",
+        "bool",
+        "OpenAI Fast mode",
+        "api_models",
+        C_KEYS,
+        "僅 ChatGPT/OpenAI Responses provider 會啟用 service_tier=fast；Gemini 會忽略此設定。",
+        default=False,
+        timing="next_request",
+        timing_note="下一次 API request 套用；關閉時不會送出 service_tier 欄位。",
+    ),
+    Setting(
+        "lm_translator.official_glossary",
+        "bool",
+        "注入官方 Minecraft 術語",
+        "translation_behavior",
+        C_LM_BASIC,
+        "把 assets/official_locales/minecraft 的官方繁中術語加入所有種類的 LLM 提示詞；關閉後仍保留簡繁轉換與 fallback。",
+        default=True,
+        timing="next_batch",
+        timing_note="下一批次讀取。",
+    ),
+    Setting(
+        "lm_translator.moddb_reviewed_glossary",
+        "bool",
+        "注入 Mod DB 已審核術語",
+        "translation_behavior",
+        C_LM_BASIC,
+        "把目前模組、kind=lang 且已審核的條目作為參考加入 lang、Patchouli、Guide、Advancement 與 md/txt 的 LLM 提示詞；不直接取代目前條目翻譯。",
+        default=True,
+        timing="next_batch",
+        timing_note="下一批次讀取。",
+    ),
+    Setting(
         "lm_translator.rate_limit.timeout",
         "int",
         "API 請求 Timeout",
@@ -382,8 +415,8 @@ SETTINGS: tuple[Setting, ...] = (
         "批次間延遲 (秒)",
         "translation_behavior",
         C_LM_BASIC,
-        "用於：翻譯批次間延遲",
-        default=0.0,
+        "用於：翻譯批次間延遲；預設 4 秒，適合每分鐘 15 次（RPM 15）的模型",
+        default=4.0,
         blank="error",
         timing="next_request",
         timing_note="下次 API 請求讀取。",
@@ -513,8 +546,6 @@ SETTINGS: tuple[Setting, ...] = (
             "10. 每一筆 value 必須只根據該筆原文自身內容翻譯\n"
             "11. 只要 value 包含人類語言就必須翻譯\n"
             "12. 學名請翻譯為台灣常用語（如 Creeper → 苦力怕）,(Spawn Egg-> 生怪蛋),(cobblestone->鵝卵石)\n"
-            "13. 保留每筆 value 原有的實際換行數量；可依譯文語意調整換行位置，但不可新增或刪除實際換行\n"
-            "14. 字面上的反斜線+n（\\n）必須原樣保留，不可轉成實際換行；實際換行也不可改成字面上的反斜線+n。"
         ),
         timing="next_batch",
         timing_note="下一批次讀取。",
@@ -550,8 +581,6 @@ SETTINGS: tuple[Setting, ...] = (
             "9. Minecraft 請保持原文\n"
             "10. 每一筆 value 只依該筆原文翻譯\n"
             "11. 只要 value 包含人類語言就必須翻譯\n"
-            "12. 保留每筆 value 原有的實際換行數量；可依譯文語意調整換行位置，但不可新增或刪除實際換行\n"
-            "13. 字面上的反斜線+n（\\n）必須原樣保留，不可轉成實際換行；實際換行也不可改成字面上的反斜線+n。\n"
         ),
         timing="next_batch",
         timing_note="下一批次讀取。",
@@ -683,11 +712,11 @@ SETTINGS: tuple[Setting, ...] = (
         "全域最大輸出 Tokens",
         "batch_limits",
         C_BATCH,
-        "Gemini 請求的輸出上限；ChatGPT 方案 OAuth 流程不支援 max_output_tokens，因此會忽略此設定。",
+        "Gemini 與 ChatGPT Responses 請求的輸出上限；ChatGPT 設為 1～15 會被拒絕，請使用 0（不送欄位）或至少 16。",
         default=65536,
         blank="zero",
         timing="next_batch",
-        timing_note="下一批次讀取；per-model override 優先於全域值；0 表示不送 maxOutputTokens。",
+        timing_note="下一批次讀取；per-model override 優先於全域值；0 表示不送輸出上限。",
     ),
     Setting(
         "lm_translator.key_failure_cooldown_sec",
@@ -721,7 +750,7 @@ SETTINGS: tuple[Setting, ...] = (
         "token_budget",
         C_TOKEN_BUDGET,
         "控制每批翻譯內容的預估輸入 Token 數。請依模型的 Context Window 調整，並為系統指示與輸出預留空間；此值不是模型本身的 Context 上限。ChatGPT 可在 API & 模型設定依各模型覆寫。",
-        default=264000,
+        default=256000,
         blank="zero",
         timing="next_batch",
         timing_note="下一批次讀取；用於切批估算。",

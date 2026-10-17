@@ -49,9 +49,10 @@ MergeView（頁面標題「語系比對合併」）整合 en_us、zh_cn、zh_tw 
 每個 mod 的 `lang/` 資料夾內，zh_cn、zh_tw、en_us 各登記一個來源檔（`lang_merge_io.register_lang_source`）：同一語系同時有 `.json` 與 `.lang` 時一律用 `.json`，只有 `.lang` 才用 `.lang`（輸出也維持 `.lang`）。
 
 1. **人工 zh_tw 保護**：key 已存在於 output_dir 的既有 zh_tw.json（`merge_lang_dicts` 的 `is_from_output_dir`）且值含 CJK → 直接保留（外部 ZIP 內的 zh_tw 視為普通來源，仍會套用替換規則再處理）。
-2. **zh_tw（ZIP 來源）含中文** → `apply_replace_rules()`（字串）或 `recursive_translate_dict()`（結構）後採用。
-3. **zh_cn 含中文** → 以 `recursive_translate_dict`（內部走 S2TW 轉繁）後採用。
-4. **皆非中文（或 zh_tw/zh_cn 缺值）** → 依 en_us、zh_cn、zh_tw 順序取第一個非 None 的值作為英文來源（皆無則為空字串）：
+2. **zh_tw（ZIP 來源）含中文** → `apply_replace_rules()`（字串）或 `recursive_translate_dict()`（結構）後採用；模組自帶的有效繁中優先於官方對照。
+3. **官方三欄精確命中** → 以 `key + en_us + zh_cn` 查找官方 zh_tw，只有沒有有效模組 zh_tw 時才採用。
+4. **zh_cn 含中文** → 以 `recursive_translate_dict`（內部走 S2TW 轉繁）後採用。
+5. **皆非中文（或 zh_tw/zh_cn 缺值）** → 依 en_us、zh_cn、zh_tw 順序取第一個非 None 的值作為英文來源（皆無則為空字串）：
    - 空白字串（`strip()` 後為空）→ **跳過**（非待翻譯內容）
    - `is_pure_english()`（有文字且全不含 CJK）→ 寫入 **pending**（`en_us.json` → must_translate_dir）
    - 含 CJK 但非純英文 → fallback `final_tw.setdefault(key, english_source)` 保留原值

@@ -1,5 +1,13 @@
+import pytest
+
+from app.services_impl.moddb_translate_service import build_items
 from translation_tool.core.guide_format import guide_issues, guide_marks
-from translation_tool.core.guide_translation import finish_guide_item
+from translation_tool.core.guide_translation import (
+    GuidePath,
+    finish_guide_item,
+    load_guide,
+)
+from translation_tool.translation_db.schema import KIND_GUIDE, cache_type_for_kind
 
 ENGINEER = (
     "Electromagnet\nUnnaturally attractive\n"
@@ -7,6 +15,26 @@ ENGINEER = (
     "This field attracts nearby items.<br>\n"
     "The magnet runs continuously."
 )
+
+
+@pytest.mark.parametrize("suffix", [".md", ".txt"])
+def test_guide_items_use_md_cache_bucket_for_both_supported_suffixes(tmp_path, suffix):
+    path = GuidePath(tmp_path / f"entry{suffix}")
+    path.write_text("A translatable guide paragraph.\n", encoding="utf-8")
+    path.guide_root = tmp_path
+    _doc, items = load_guide(path)
+    assert items and items[0]["cache_type"] == cache_type_for_kind(KIND_GUIDE)
+
+
+def test_moddb_and_guide_producers_share_the_guide_cache_route(tmp_path):
+    path = GuidePath(tmp_path / "entry.md")
+    path.write_text("A translatable guide paragraph.\n", encoding="utf-8")
+    path.guide_root = tmp_path
+    _doc, guide_items = load_guide(path)
+    moddb_items = build_items([(7, KIND_GUIDE, "foo", "entry.md#0", "Guide")])
+
+    assert guide_items and moddb_items
+    assert guide_items[0]["cache_type"] == moddb_items[0]["cache_type"]
 
 
 def test_identical_marks_have_no_issues():

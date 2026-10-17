@@ -486,14 +486,22 @@ class TestTranslateItemsWithCacheLoop:
     @patch("translation_tool.core.lm_translator_shared_loop.reload_translation_cache")
     @patch("translation_tool.core.lm_translator_shared_loop.save_translation_cache")
     @patch("translation_tool.core.lm_translator_shared_loop.add_to_cache")
+    @patch("translation_tool.core.lm_translator_shared_loop.load_config")
     @patch("translation_tool.core.lm_translator_shared_loop.time.sleep")
     def test_translate_items_with_sleep(
-        self, mock_sleep, mock_add_cache, mock_save_cache, mock_reload
+        self,
+        mock_sleep,
+        mock_load_config,
+        mock_add_cache,
+        mock_save_cache,
+        mock_reload,
     ):
-        """測試批次間 sleep。"""
+        """未明確設定時，批次間隔使用 RPM 15 對應的 4 秒預設值。"""
         from translation_tool.core.lm_translator_shared_loop import (
             translate_items_with_cache_loop,
         )
+
+        mock_load_config.return_value = {"lm_translator": {"rate_limit": {}}}
 
         def mock_translate(batch, total):
             translated = []
@@ -515,9 +523,7 @@ class TestTranslateItemsWithCacheLoop:
         result = translate_items_with_cache_loop(
             items,
             translate_batch_smart=mock_translate,
-            sleep_seconds_between_batches=1.0,
         )
 
         assert result.status == "DONE"
-        # 驗證 sleep 被調用
-        # mock_sleep 可能不被調用取決於實現
+        mock_sleep.assert_called_once_with(4.0)

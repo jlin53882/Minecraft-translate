@@ -266,6 +266,17 @@ PROBE_LEASE_MARGIN_SEC = 60.0
 DEFAULT_PROBE_LEASE_SEC = 660.0
 
 
+@dataclass
+class _RequestSlotReservation:
+    """A not-yet-sent scheduler slot that can be returned on cancellation."""
+
+    key: tuple[str, str]
+    target_at: float
+    interval_sec: float
+    committed: bool = False
+    cancelled: bool = False
+
+
 class ModelQuotaRegistry:
     """已確定每日配額（RPD）用盡的模型（執行緒安全）。
 
@@ -295,6 +306,7 @@ class ModelQuotaRegistry:
         self._marked_at: dict[str, float] = {}
         self._next_probe: dict[str, float] = {}
         self._lease: dict[str, tuple[object, float]] = {}  # model -> (owner, 到期時間)
+        self._next_request_at: dict[tuple[str, str], float] = {}
 
     def now(self) -> float:
         return self._clock()
@@ -394,6 +406,63 @@ class ModelQuotaRegistry:
         with self._lock:
             lease = self._lease.get(model)
             return lease is not None and lease[0] is owner
+
+    def reserve_request_slot(
+        self, provider: str, model: str, interval_sec: float
+    ) -> float:
+        """Reserve the next provider/model request slot and return its wait time.
+
+        The reservation is shared by translation tasks in this process, so normal
+        batches, internal token-shrunk batches, and quality retries use one
+        provider/model clock. The caller performs the interruptible sleep.
+        """
+        wait_sec, _reservation = self.reserve_request_slot_with_token(
+            provider, model, interval_sec
+        )
+        return wait_sec
+
+    def reserve_request_slot_with_token(
+        self, provider: str, model: str, interval_sec: float
+    ) -> tuple[float, _RequestSlotReservation]:
+        """Reserve a slot and return a token that can be cancelled before send."""
+        interval = max(0.0, float(interval_sec))
+        now = time.monotonic()
+        key = (str(provider), str(model))
+        with self._lock:
+            target = max(now, self._next_request_at.get(key, now))
+            self._next_request_at[key] = target + interval
+        return max(0.0, target - now), _RequestSlotReservation(
+            key=key, target_at=target, interval_sec=interval
+        )
+
+    def commit_request_slot(self, reservation: _RequestSlotReservation) -> None:
+        """Mark a reservation as sent so later cancellation cannot reclaim it."""
+        reservation.committed = True
+
+    def cancel_request_slot(self, reservation: _RequestSlotReservation) -> None:
+        """Return one queued slot and shift later reservations forward."""
+        if reservation.committed or reservation.cancelled:
+            return
+        now = time.monotonic()
+        with self._lock:
+            current = self._next_request_at.get(reservation.key)
+            if current is not None and current >= reservation.target_at:
+                self._next_request_at[reservation.key] = max(
+                    now, current - reservation.interval_sec
+                )
+            reservation.cancelled = True
+
+    def defer_request_slot(self, provider: str, model: str, delay_sec: float) -> None:
+        """Push the shared clock forward when a provider supplies Retry-After."""
+        delay = max(0.0, float(delay_sec))
+        if delay <= 0:
+            return
+        now = time.monotonic()
+        key = (str(provider), str(model))
+        with self._lock:
+            self._next_request_at[key] = max(
+                self._next_request_at.get(key, now), now + delay
+            )
 
     def renew(self, model: str, owner: object, lease_sec: float) -> bool:
         """``owner`` 仍持有這個模型的探測租約時續租；租約已被收回或換人則不動。"""
@@ -498,6 +567,7 @@ class ModelQuotaRegistry:
             self._marked_at.clear()
             self._next_probe.clear()
             self._lease.clear()
+            self._next_request_at.clear()
 
 
 _MODEL_QUOTA_REGISTRY = ModelQuotaRegistry()

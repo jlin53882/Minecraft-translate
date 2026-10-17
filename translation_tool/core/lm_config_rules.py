@@ -252,7 +252,7 @@ class ApiKeyCycle:
       試探 key 若回 429 RPM 這類暫時性錯誤，同一個 cycle 重試時仍只用這把，不會改領其他冷卻中的 key。
     - 只有 mark_failed(reason=...) 帶了 "rpd" / "forbidden" 才會記錄；429 RPM、503 overload
       與未帶原因的 mark_failed() 不會長期排除任何 key。
-    - 成功時呼叫 record_success()（= 清除該把 key 的紀錄 + reset()）。
+    - 成功時呼叫 record_success()；只有本輪沒有標記失敗的 key 才會清除健康紀錄，之後一律 reset()。
 
     耗盡只依據「實際嘗試過並失敗的 key」，不依賴 tracker index 恰好在最後一格。
     """
@@ -373,8 +373,12 @@ class ApiKeyCycle:
         return bool(unfailed) and not self._probed
 
     def record_success(self) -> None:
-        """本輪成功：這把 key 確定可用（清除它的失敗紀錄），並開始新的 cycle。"""
-        if self._current_key:
+        """本輪成功：清除未在本輪失敗的 key 紀錄，並開始新的 cycle。
+
+        品質 retry 可能在第一次請求成功後才回報同一把 key 的 403；該失敗比批次
+        成功更新更晚，不能被本方法立即清掉。
+        """
+        if self._current_key and self.current_index not in self._failed:
             get_key_health_registry().mark_ok(self._current_key)
         self.reset()
 

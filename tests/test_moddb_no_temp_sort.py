@@ -169,6 +169,7 @@ def test_candidate_and_listing_queries_avoid_temp_sort(db):
         lambda: db.count_reusable("1.20.1"),
         lambda: db.same_as_source_ai_entries("1.20.1"),
         lambda: db.mismatched_translation_entries("1.20.1"),
+        lambda: db.reviewed_lang_glossary("alpha", source_texts=("alpha",)),
         lambda: db.missing_by_mod("1.20.1"),
         lambda: db.kinds("1.20.1"),
         lambda: db.mods("1.20.1"),

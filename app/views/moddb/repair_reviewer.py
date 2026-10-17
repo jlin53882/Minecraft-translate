@@ -10,8 +10,7 @@ from app.services_impl import moddb_repair_review_store
 from app.services_impl.moddb_format_diff_service import compare_format_diff
 from app.services_impl.moddb_retranslate_service import (
     apply_and_record_repair_review,
-    repair_output_issues,
-    token_issues,
+    translation_issues,
 )
 from app.ui import design
 from app.ui.design import C
@@ -383,17 +382,17 @@ class RepairReviewer:
         return status_filter
 
     def _update_format_status(self, source: str, draft: str) -> None:
-        diff_result = compare_format_diff(source, draft)
-        if diff_result.legacy_messages:
-            self.format_status.value = "格式檢查：" + "；".join(
-                diff_result.legacy_messages
-            )
+        kind = str((self.item or {}).get("kind") or "")
+        diff_result = compare_format_diff(source, draft, kind=kind)
+        messages = [*diff_result.legacy_messages, *diff_result.guide_issues]
+        if messages:
+            self.format_status.value = "格式檢查：" + "；".join(messages)
             self.format_status.color = C.GOLD
         else:
             self.format_status.value = "格式檢查通過。"
             self.format_status.color = C.EM
-        self.format_diff_viewer.render(source, draft, diff_result)
-        self.format_review.render(source, draft, diff_result)
+        self.format_diff_viewer.render(source, draft, diff_result, kind=kind)
+        self.format_review.render(source, draft, diff_result, kind=kind)
 
     def _draft_changed(self, _event=None) -> None:
         if self.applying or self.item is None or self.draft is None:
@@ -512,10 +511,12 @@ class RepairReviewer:
         if not value.strip():
             show_snack(self.page, "AI 草稿不能是空白，請先輸入翻譯內容。", C.GOLD)
             return
-        check = (
-            token_issues if self.item.get("strict_newline") else repair_output_issues
+        issues = translation_issues(
+            str(self.item.get("en_us") or ""),
+            value,
+            kind=str(self.item.get("kind") or ""),
+            repair=not self.item.get("strict_newline"),
         )
-        issues = check(str(self.item.get("en_us") or ""), value)
         if issues:
             self._open_apply_confirmation(value, issues)
             return

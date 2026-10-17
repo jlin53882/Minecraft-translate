@@ -121,6 +121,8 @@ flowchart TD
 
 ### 批次機翻與異常清單
 
+翻譯頁的範圍刷新只查詢未翻譯與可沿用筆數，畫面上的批次數是快速估算；不會在每次版本或模組篩選變更時建立完整翻譯項目。按「預覽」或「開始機翻」後，服務層才依篩選後的項目、`cache_type`／`_batch_group`、session 與固定提示詞 token 重新執行精確批次規劃。
+
 ```mermaid
 flowchart TD
     A["按「開始機翻」或「預覽」→ TranslatePanel.start_clicked"] --> B["build_options 建立 TranslateOptions"]
@@ -133,7 +135,7 @@ flowchart TD
     G --> H{"預覽或無待翻列？"}
     H -- 是 --> I["寫入摘要後結束"]
     H -- 否 --> J["_translate_rows 分批送 AI"]
-    J --> K{"token_issues 特殊字元是否一致？"}
+    J --> K{"translation_issues 特殊字元與指南標記是否一致？"}
     K -- 是 --> L["放入 buffer，_flush_buffer 呼叫 db.write_back"]
     K -- 否 --> M["記入 report.flagged_entries，不寫入"]
     M --> N["結果檢視的異常按鈕 → ModDbView.open_flagged"]
@@ -216,7 +218,7 @@ flowchart TD
 
 - 開啟資料庫失敗時，服務層回傳 `database_problem()` 的說明並呼叫 `session.set_error()`；總覽則顯示錯誤並保留頁面。
 - 手動儲存：`ValueError` 顯示驗證訊息；`sqlite3.Error` 提示資料庫可能被鎖定；其他例外記錄後台 log。
-- 機翻：單一批次 `token_issues` 不一致的譯文不寫入，只記錄；寫入失敗最多重試 `DB_FLUSH_RETRIES` 次，仍失敗則停止後續翻譯。連續 `ABORT_AFTER_FAILURES` 筆未成功會中止，通常代表 API 金鑰或模型設定有問題。
+- 機翻：單一批次經 `translation_issues` 判斷不一致的譯文不寫入，只記錄（指南條目另檢查連結目標、標籤與前綴）；寫入失敗最多重試 `DB_FLUSH_RETRIES` 次，仍失敗則停止後續翻譯。連續 `ABORT_AFTER_FAILURES` 筆未成功會中止，通常代表 API 金鑰或模型設定有問題。
 - 修復：寫入時以 compare-and-set 比對舊譯文與 revision，資料已變動時記為 `cas_changed` 並跳過；審查套用時若版本已變動，該筆記為 `stale` 且草稿保留。
 - 取消：掃描、機翻與修復都以 `session.request_cancel()` 請求取消，已提交的批次保留。
 - 輪詢或畫面更新失敗時 `_abort_polling` 會恢復按鈕並顯示「畫面更新失敗」，不會永久停在執行中。

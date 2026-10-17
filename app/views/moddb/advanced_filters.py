@@ -199,6 +199,23 @@ class AdvancedFilters:
             self.error_text.value = str(exc)
         self._on_change()
 
+    def reset(self) -> None:
+        """Clear all advanced conditions without triggering a database refresh."""
+        self.time_kind.value = "none"
+        self.time_preset.value = "all"
+        self.start_date.value = ""
+        self.end_date.value = ""
+        self.unknown_policy.value = "include"
+        self.activity_action.value = "all"
+        self.quality_status.value = "all"
+        self.direction.value = "all"
+        self.category.value = "all"
+        self.sort.value = "default"
+        self._time_bounds = None
+        self.error_text.value = ""
+        self.error_text.visible = False
+        self.set_summary()
+
     def time_filter(self) -> TimeFilter | None:
         # Invalid custom dates remain an error even if another filter control is
         # changed or the time-kind dropdown is temporarily set to "none".

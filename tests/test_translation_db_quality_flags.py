@@ -21,7 +21,13 @@ from translation_tool.translation_db import (
 )
 from translation_tool.translation_db.models import QualityFilter
 from translation_tool.translation_db.read_cache import ReadCache
-from translation_tool.translation_db.schema import SRC_AI, SRC_JAR_CN, SRC_MANUAL
+from translation_tool.translation_db.schema import (
+    KIND_GUIDE,
+    KIND_PATCHOULI,
+    SRC_AI,
+    SRC_JAR_CN,
+    SRC_MANUAL,
+)
 
 VERSIONS = ("1.20.1", "1.21.1", "1.22", "26.1")
 STATUSES = tuple(quality_flags.BITS)
@@ -41,6 +47,12 @@ SPECIES = [
     ("tip", "Energy usage"),
     ("tip2", " Spaced  name "),
 ]
+# 指南條目：連結目標一致、連結目標被改壞（不含格式符號，只有結構標記）、純文字
+GUIDE = [
+    ("[Crafting](../items/crafting.md)", "[合成](../items/crafting.md)"),
+    ("[Crafting](../items/crafting.md)", "[合成](/../items/crafting.md)"),
+    ("Plain text", "純文字"),
+]
 
 
 def _seed(db: TranslationDB) -> None:
@@ -56,6 +68,8 @@ def _seed(db: TranslationDB) -> None:
             )
         for key, en in SPECIES:
             items.append(ScanItem(KIND_LANG, "flora", key, en, "譯" if index else ""))
+        for gi, (en, tw) in enumerate(GUIDE):
+            items.append(ScanItem(KIND_GUIDE, "guidemod", f"g{gi}", en, tw))
         db.ingest(version, items)
     rows = db.list_entries("1.21.1", limit=500)[0]
     for row in rows[::7]:
@@ -69,6 +83,29 @@ def _seed(db: TranslationDB) -> None:
             "UPDATE translation SET updated_at='2030-02-0' || (id % 3 + 1) "
             "WHERE id % 5 = 0"
         )
+
+
+def test_patchouli_structure_only_mismatch_reaches_flags_and_repair_candidates(db):
+    db.ingest(
+        "1.21.1",
+        [
+            ScanItem(
+                KIND_PATCHOULI,
+                "patchmod",
+                "entry",
+                '<ItemLink id="example:item" />\nText',
+                "錯誤格式",
+                source=SRC_AI,
+            )
+        ],
+    )
+
+    rows = db.list_entries("1.21.1", limit=100)[0]
+    assert rows[0].quality_state == "mismatch"
+    assert rows[0].quality_issues
+    assert db.mismatched_translation_entries("1.21.1")[0] == 1
+    repairable = list(db.iter_repairable_translation_entries("1.21.1"))
+    assert len(repairable) == 1
 
 
 @pytest.fixture
@@ -94,7 +131,10 @@ def _page(db, criteria, offset, limit, *, flags=True):
 
 def test_new_database_installs_ready_flags(db):
     meta = dict(db._q("SELECT key, value FROM meta WHERE key LIKE 'quality%'"))
-    assert meta == {"quality_schema_version": "1", "quality_valid": "1"}
+    assert meta == {
+        "quality_schema_version": quality_flags.SCHEMA_VERSION,
+        "quality_valid": "1",
+    }
     assert quality_flags.is_installed(db._conn)
     _seed(db)
     assert db.verify_quality_flags() == []
@@ -392,3 +432,147 @@ def test_definition_version_change_recomputes_every_entry(tmp_path):
         assert reopened.verify_quality_flags() == []
     finally:
         reopened.close()
+
+
+def test_guide_link_breakage_is_mismatch_in_flags_pages_and_rows(db):
+    """指南連結目標被改壞時，條目清單的「格式不一致」要列出它，不能顯示為「一致」。"""
+    _seed(db)
+    rows = {
+        row.key: row
+        for row in db.list_entries("1.21.1", limit=10_000)[0]
+        if row.kind == KIND_GUIDE
+    }
+    assert rows["g1"].quality_state == "mismatch"
+    assert any("連結目標" in issue for issue in rows["g1"].quality_issues)
+    assert rows["g0"].quality_state == "consistent"
+    assert rows["g2"].quality_state == "consistent"
+
+    criteria = EntryFilter(
+        version="1.21.1", quality=QualityFilter(status="mismatch"), sort_by="default"
+    )
+    mismatch_ids, _ = _page(db, criteria, 0, 10_000)
+    assert rows["g1"].id in mismatch_ids
+    assert rows["g0"].id not in mismatch_ids
+    assert db.verify_quality_flags() == []
+
+
+def test_guide_structure_only_mismatch_is_discovered_and_repaired(db):
+    """純 Markdown 結構差異也要能進入候選、混合換行差異不能被跳過。"""
+    db.ingest(
+        "1.21.1",
+        [
+            ScanItem(
+                KIND_GUIDE,
+                "guidemod",
+                "broken_link",
+                "[Crafting](../items/crafting.md)",
+                "[合成](/../items/crafting.md)",
+                source=SRC_AI,
+            ),
+            ScanItem(
+                KIND_GUIDE,
+                "guidemod",
+                "broken_link_with_newline",
+                "[Crafting](../items/crafting.md)\nNext",
+                "[合成](/../items/crafting.md)",
+                source=SRC_AI,
+            ),
+        ],
+    )
+
+    count, candidates = db.mismatched_translation_entries("1.21.1")
+    assert count == 2
+    assert {candidate.key for candidate in candidates} == {
+        "broken_link",
+        "broken_link_with_newline",
+    }
+
+    repairable = {
+        entry.key: (entry, newline_mismatch, mixed)
+        for entry, newline_mismatch, mixed in db.iter_repairable_translation_entries(
+            "1.21.1"
+        )
+    }
+    assert repairable["broken_link"][1:] == (False, False)
+    assert repairable["broken_link_with_newline"][1:] == (True, True)
+
+    entry = repairable["broken_link"][0]
+    result = db.replace_translation_quality_mismatch(
+        entry.entry_id,
+        int(entry.source_id),
+        entry.current_ai_translation,
+        "[合成](../items/crafting.md)",
+        expected_version=entry.mc_version,
+        expected_kind=entry.kind,
+        expected_mod_id=entry.mod_id,
+        expected_key=entry.key,
+        expected_en_us=entry.en_us,
+        expected_revision=entry.revision,
+    )
+    assert result.status == "updated"
+
+
+def test_reviewed_lang_glossary_excludes_quality_mismatches(db):
+    """已審核但格式錯誤的 lang 譯文不能成為 LLM 術語提示。"""
+    db.ingest(
+        "1.21.1",
+        [
+            ScanItem(KIND_LANG, "foo", "good", "Cobblestone", "鵝卵石", source=SRC_AI),
+            ScanItem(KIND_LANG, "foo", "bad", "Use %s", "使用", source=SRC_AI),
+        ],
+    )
+    rows = {row.key: row for row in db.list_entries("1.21.1", limit=10)[0]}
+    for row in rows.values():
+        db.review_manual(row.id, expected_zh_tw=row.zh_tw, actor="tester")
+
+    assert db.reviewed_lang_glossary("foo", source_texts=("Cobblestone",)) == [
+        {"key": "good", "en_us": "Cobblestone", "zh_tw": "鵝卵石"}
+    ]
+
+
+def test_reviewed_lang_glossary_matches_terms_inside_source_sentences(db):
+    db.ingest(
+        "1.21.1",
+        [
+            ScanItem(KIND_LANG, "foo", "pressure", "Pressure Chamber", "壓力室"),
+            ScanItem(KIND_LANG, "foo", "pressured", "Pressured", "受壓"),
+        ],
+    )
+    for row in db.list_entries("1.21.1", limit=10)[0]:
+        db.review_manual(row.id, expected_zh_tw=row.zh_tw, actor="tester")
+
+    assert db.reviewed_lang_glossary(
+        "foo", "1.21.1", ("The Pressure Chamber processes air.",)
+    ) == [{"key": "pressure", "en_us": "Pressure Chamber", "zh_tw": "壓力室"}]
+
+
+def test_reviewed_lang_glossary_without_source_scope_does_not_scan_module(db):
+    assert db.reviewed_lang_glossary("foo") == []
+
+
+def test_reviewed_lang_glossary_is_version_scoped_and_omits_conflicts(db):
+    db.ingest(
+        "1.20.1",
+        [
+            ScanItem(KIND_LANG, "foo", "pressure.old", "Pressure Chamber", "壓力室"),
+        ],
+    )
+    db.ingest(
+        "1.21.1",
+        [
+            ScanItem(KIND_LANG, "foo", "pressure.a", "Pressure Chamber", "壓力室"),
+            ScanItem(KIND_LANG, "foo", "pressure.b", "Pressure Chamber", "氣壓室"),
+            ScanItem(KIND_LANG, "foo", "cobble", "Cobblestone", "鵝卵石"),
+        ],
+    )
+    for row in (
+        db.list_entries("1.20.1", limit=10)[0] + db.list_entries("1.21.1", limit=10)[0]
+    ):
+        db.review_manual(row.id, expected_zh_tw=row.zh_tw, actor="tester")
+
+    assert db.reviewed_lang_glossary(
+        "foo", "1.21.1", ("Pressure Chamber", "Cobblestone"), limit=None
+    ) == [{"key": "cobble", "en_us": "Cobblestone", "zh_tw": "鵝卵石"}]
+    assert db.reviewed_lang_glossary(
+        "foo", "1.20.1", source_texts=("Pressure Chamber",)
+    ) == [{"key": "pressure.old", "en_us": "Pressure Chamber", "zh_tw": "壓力室"}]

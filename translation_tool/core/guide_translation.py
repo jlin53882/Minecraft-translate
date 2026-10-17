@@ -23,7 +23,6 @@ from translation_tool.core.guide_blocks import (
     front_title_line,
     has_translatable_text,
 )
-from translation_tool.core.guide_format import guide_issues
 from translation_tool.core.lang_merge_dict import contains_cjk
 from translation_tool.core.text_sniffer import (
     VANILLA_NON_TEXT_DIRS,
@@ -37,7 +36,8 @@ from translation_tool.plugins.md.md_inject_qa import (
     is_text_line,
 )
 from translation_tool.plugins.shared.rich_text_shield import shield_text, unshield_text
-from translation_tool.translation_db.schema import KIND_GUIDE
+from translation_tool.translation_db.quality import guide_structure_issues
+from translation_tool.translation_db.schema import KIND_GUIDE, cache_type_for_kind
 from translation_tool.utils.log_unit import log_warning
 
 GUIDE_SUFFIXES = (".md", ".mdx", ".txt")
@@ -129,7 +129,9 @@ def load_guide(path: GuidePath) -> tuple[dict, list[dict[str, Any]]]:
                 "path": f"blocks[{index}]",
                 "text": shielded.clean,
                 "source_text": block.text,
-                "cache_type": "patchouli",
+                # Guide (.md/.txt) still uses the Patchouli prompt, but its
+                # cache is stored under md; .txt is part of the md bucket too.
+                "cache_type": cache_type_for_kind(KIND_GUIDE),
                 "_shielded": shielded,
                 "db_ident": (KIND_GUIDE, mod_id, f"{file_key}#{index}"),
             }
@@ -159,7 +161,7 @@ def finish_guide_item(item: dict[str, Any]) -> None:
     translated = unshield_text(str(item.get("text", "")), shielded.shields)
     source = str(item.get("source_text", ""))
     translated = fit_to_source_lines(source, translated)
-    issues = guide_issues(source, translated)
+    issues = guide_structure_issues(source, translated, kind=KIND_GUIDE)
     if issues:
         log_warning(
             f"⚠️ 指南段落的標記被改動，保留原文：{item.get('file')}（{'、'.join(issues[:3])}）"

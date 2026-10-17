@@ -16,6 +16,12 @@ import pytest
 
 from translation_tool.core import lm_batch_budget as bb
 from translation_tool.core import lm_translator_shared_loop as loop_mod
+from translation_tool.core.lm_batch_budget import (
+    BatchBudgetTracker,
+    BudgetConfig,
+    estimate_text_tokens,
+)
+from translation_tool.core.lm_format_policy import estimate_format_spec_tokens
 from translation_tool.core.lm_translator_main import translate_batch_smart
 
 LONG = "a" * 2000  # 約 500 value token；預設預算下一批約 31 條
@@ -121,6 +127,27 @@ def _assert_translated_in_order(results, items):
     assert not any(r.get("_untranslated") for r in results)
 
 
+def test_structured_format_spec_counts_only_in_input_estimate():
+    item = {
+        "text": '# Title\n\n<ItemLink id="example:item" />',
+        "source_text": '# Title\n\n<ItemLink id="example:item" />',
+        "cache_type": "patchouli",
+    }
+    estimate = BatchBudgetTracker("patch").estimate(
+        [item], BudgetConfig(output_token_factor=1.5), fixed_input_tokens=100
+    )
+    value_tokens = estimate_text_tokens(item["text"])
+    spec_tokens = estimate_format_spec_tokens(item, estimate_text_tokens)
+
+    assert estimate.value_tokens == pytest.approx(value_tokens)
+    assert estimate.input_tokens == pytest.approx(
+        100 + value_tokens + spec_tokens + bb.JSON_ITEM_OVERHEAD_TOKENS
+    )
+    assert estimate.output_tokens == pytest.approx(
+        value_tokens * 1.5 + bb.JSON_ITEM_OVERHEAD_TOKENS
+    )
+
+
 # ---------------------------------------------------------------------------
 # 長內容依 token 預算切批
 # ---------------------------------------------------------------------------
@@ -146,7 +173,7 @@ def test_reported_usage_calibrates_the_output_factor(env):
 
     translate_batch_smart(items, len(items))
 
-    assert fake.calls[-2] > fake.calls[0]  # 校正後批次變大
+    assert fake.calls[1] > fake.calls[0]  # 校正後第一個後續批次變大
     assert bb.get_tracker("lang").output_factor(bb.BudgetConfig()) < 1.5
 
 

@@ -1,0 +1,19 @@
+{
+  "schema": 1,
+  "locale": "minecraft",
+  "files": {
+    "en_us.json": {
+      "sha256": "b0dff75d40225a2e1351e45422ad7d7d62cfbb98314ada51d3d24f90a234696b",
+      "keys": 8559
+    },
+    "zh_cn.json": {
+      "sha256": "10da480179ef720771e27aebec6f33a6d4cec5063401310ceb82bb576a6b7af0",
+      "keys": 8560
+    },
+    "zh_tw.json": {
+      "sha256": "20fa2b19210947d1ac4b7596260c6b6cd3c22fcc2a12ebf3037a9a3f9da138c1",
+      "keys": 8560
+    }
+  },
+  "common_keys": 8557
+}

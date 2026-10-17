@@ -51,6 +51,8 @@ def test_stream_request_uses_responses_structured_outputs(monkeypatch):
     assert captured["headers"]["Authorization"] == "Bearer access-token"
     assert body["stream"] is True
     assert body["store"] is False
+    assert "max_output_tokens" not in body
+    assert "service_tier" not in body
     assert body["text"]["format"]["type"] == "json_schema"
     assert body["text"]["format"]["strict"] is True
     schema = body["text"]["format"]["schema"]
@@ -60,6 +62,48 @@ def test_stream_request_uses_responses_structured_outputs(monkeypatch):
     assert item_schema["required"] == ["id", "value"]
     assert item_schema["additionalProperties"] is False
     assert item_schema["properties"]["id"]["enum"] == ["line-1"]
+
+
+def test_stream_request_sends_output_cap_and_fast_service_tier(monkeypatch):
+    captured = {}
+    monkeypatch.setattr(
+        client.requests,
+        "post",
+        lambda _url, **kwargs: captured.update(kwargs) or requests.Response(),
+    )
+
+    client._stream_request(
+        token="access-token",
+        model_name="gpt-5-codex",
+        system_prompt="Translate.",
+        payload={"items": [{"id": "line-1", "value": "Hello"}]},
+        timeout=30,
+        max_output_tokens=1234,
+        service_tier="fast",
+    )
+
+    assert captured["json"]["max_output_tokens"] == 1234
+    assert captured["json"]["service_tier"] == "fast"
+
+
+def test_stream_request_omits_responses_output_caps_below_api_minimum(monkeypatch):
+    captured = {}
+    monkeypatch.setattr(
+        client.requests,
+        "post",
+        lambda _url, **kwargs: captured.update(kwargs) or requests.Response(),
+    )
+
+    client._stream_request(
+        token="access-token",
+        model_name="gpt-5-codex",
+        system_prompt="Translate.",
+        payload={"items": [{"id": "line-1", "value": "Hello"}]},
+        timeout=30,
+        max_output_tokens=8,
+    )
+
+    assert "max_output_tokens" not in captured["json"]
 
 
 def test_stream_request_sends_configured_reasoning_effort(monkeypatch):
@@ -80,6 +124,36 @@ def test_stream_request_sends_configured_reasoning_effort(monkeypatch):
     )
 
     assert captured["json"]["reasoning"] == {"effort": "high"}
+
+
+def test_stream_request_preserves_conversation_history_for_retry(monkeypatch):
+    captured = {}
+    monkeypatch.setattr(
+        client.requests,
+        "post",
+        lambda _url, **kwargs: captured.update(kwargs) or requests.Response(),
+    )
+
+    client._stream_request(
+        token="access-token",
+        model_name="gpt-5-codex",
+        system_prompt="Translate.",
+        payload={"items": [{"id": "0", "value": "修復原文"}]},
+        timeout=30,
+        conversation_history=[
+            {"role": "user", "text": "原始 request"},
+            {"role": "model", "text": "第一次 response"},
+        ],
+    )
+
+    assert captured["json"]["input"] == [
+        {"role": "user", "content": "原始 request"},
+        {"role": "assistant", "content": "第一次 response"},
+        {
+            "role": "user",
+            "content": '{"items": [{"id": "0", "value": "修復原文"}]}',
+        },
+    ]
 
 
 def test_call_retries_once_after_unauthorized_and_keeps_reasoning(monkeypatch):
@@ -148,6 +222,7 @@ def test_consume_stream_returns_structured_output_and_usage():
                         "output_tokens_details": {"reasoning_tokens": 2},
                         "total_tokens": 13,
                     },
+                    "service_tier": "priority",
                 },
             },
         ]
@@ -163,6 +238,7 @@ def test_consume_stream_returns_structured_output_and_usage():
         "candidates_tokens": 3,
         "thoughts_tokens": 2,
         "total_tokens": 13,
+        "service_tier": "priority",
     }
     assert response.closed is True
 
@@ -704,7 +780,9 @@ def test_sse_retry_then_success_uses_same_batch_and_pinned_profile(monkeypatch):
     assert [call["json"]["input"] for call in posts] == [
         posts[0]["json"]["input"]
     ] * len(posts)
-    assert waits == [1]
+    assert waits[0] == pytest.approx(1)
+    assert waits[1] == pytest.approx(4, abs=0.01)
+    assert len(waits) == 2
     assert len(posts) == 3
     assert all(response.closed for response in stream_responses)
 

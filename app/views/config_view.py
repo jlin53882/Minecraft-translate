@@ -679,7 +679,7 @@ class ConfigView(ft.Column):
         )
         self.chatgpt_context_budget_control.hint_text = (
             "留空沿用全域 "
-            f"{self.controls_map['lm_translator.max_input_token_budget'].value or '264000'}"
+            f"{self.controls_map['lm_translator.max_input_token_budget'].value or '256000'}"
         )
         effort = settings.get("reasoning_effort", "model_default")
         if not isinstance(effort, str) or effort not in {

@@ -79,6 +79,42 @@ class TestMergeLangDicts:
         # 看 caller 給的 callable 怎麼處理
         assert final_tw["k"] == "車輛"  # 原值
 
+    def test_module_zh_tw_precedes_official_exact_match(self):
+        final_tw, pending = merge_lang_dicts(
+            cn_data={"k": "圆石"},
+            tw_src_data={"k": "模組自訂譯名"},
+            en_data={"k": "Cobblestone"},
+            existing_tw=None,
+            rules=[],
+            apply_replace_rules=fake_replace_rules,
+            recursive_translate_dict=fake_recursive_translate_dict,
+            contains_cjk=contains_cjk,
+            is_pure_english=is_pure_english,
+            is_from_output_dir=False,
+            official_lookup=lambda _key, _en, _cn: "官方譯名",
+        )
+
+        assert final_tw == {"k": "模組自訂譯名"}
+        assert pending == {}
+
+    def test_official_exact_match_is_used_when_module_zh_tw_is_missing(self):
+        final_tw, pending = merge_lang_dicts(
+            cn_data={"k": "圆石"},
+            tw_src_data={},
+            en_data={"k": "Cobblestone"},
+            existing_tw=None,
+            rules=[],
+            apply_replace_rules=fake_replace_rules,
+            recursive_translate_dict=fake_recursive_translate_dict,
+            contains_cjk=contains_cjk,
+            is_pure_english=is_pure_english,
+            is_from_output_dir=False,
+            official_lookup=lambda _key, _en, _cn: "官方譯名",
+        )
+
+        assert final_tw == {"k": "官方譯名"}
+        assert pending == {}
+
     def test_rule_4_pure_english_to_pending(self):
         """4. 全英文進 pending。"""
         en_data = {"k_en": "Hello"}

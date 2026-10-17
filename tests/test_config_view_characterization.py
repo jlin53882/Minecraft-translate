@@ -633,7 +633,7 @@ def test_config_view_save_click_maps_rows_back_to_config(monkeypatch):
     assert saved["lm_translator"]["keys"] == ["k1"]
     assert saved["lm_translator"]["models"]["demo-model"]["enabled"] is True
     assert saved["lm_translator"]["models"]["disabled-model"]["enabled"] is False
-    assert saved["lm_translator"]["rate_limit"]["sleep_seconds_between_batches"] == 0.0
+    assert saved["lm_translator"]["rate_limit"]["sleep_seconds_between_batches"] == 4.0
 
 
 def test_config_view_show_snack_bar_adds_to_overlay(monkeypatch):

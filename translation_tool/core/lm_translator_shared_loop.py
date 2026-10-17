@@ -11,14 +11,15 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
-from translation_tool.core.lm_batch_budget import (
-    profile_for_cache_type,
-    select_batch_size,
-)
+from translation_tool.core.lm_batch_budget import select_batch_size
+from translation_tool.core.lm_batch_planner import next_batch
+from translation_tool.core.lm_format_policy import kind_for_item
 from translation_tool.core.lm_translator_shared_cache import (
     CacheRule,
     get_default_cache_rules,
 )
+from translation_tool.plugins.shared.rich_text_shield import unshield_text
+from translation_tool.translation_db.quality import translation_issues
 from translation_tool.utils.cache_manager import (
     add_to_cache,
     reload_translation_cache,
@@ -51,6 +52,19 @@ def _is_valid_result(it: Any) -> bool:
         and isinstance(it.get("text"), str)
         and isinstance(it.get("source_text"), str)
     )
+
+
+def _quality_issues_for_cache(it: dict[str, Any]) -> list[str]:
+    """Run the shared quality gate before any plugin can write translation cache."""
+    kind = kind_for_item(it)
+    if not kind:
+        return []
+    source = str(it.get("source_text") or "")
+    translated = str(it.get("text") or "")
+    shielded = it.get("_shielded")
+    if shielded is not None and getattr(shielded, "shields", None):
+        translated = unshield_text(translated, shielded.shields)
+    return translation_issues(source, translated, kind=kind)
 
 
 def _lm_config() -> dict[str, Any]:
@@ -100,6 +114,7 @@ def translate_items_with_cache_loop(
     reload_cache: bool = True,
     cache_add: Callable[..., bool] | None = None,
     cache_save: Callable[..., bool] | None = None,
+    fixed_input_tokens_for_batch: Callable[[list[dict[str, Any]]], float] | None = None,
 ) -> TranslateLoopResult:
     """執行翻譯主迴圈，分批呼叫翻譯 API、寫入快取、回報進度與 ETA，支援中斷與額度耗盡處理。"""
     if cache_rules is None:
@@ -113,7 +128,7 @@ def translate_items_with_cache_loop(
             load_config()
             .get("lm_translator", {})
             .get("rate_limit", {})
-            .get("sleep_seconds_between_batches", 0.0)
+            .get("sleep_seconds_between_batches", 4.0)
         )
 
     if reload_cache:
@@ -167,28 +182,15 @@ def translate_items_with_cache_loop(
         # 取消檢查點：在批次之間停止，已完成的批次照常保留
         if is_cancelled():
             return cancelled_result()
-        cache_type = str(remaining[0].get("cache_type") or "lang")
-        batch_size = _get_default_batch_size(cache_type, batch_size_by_type)
-        if batch_size <= 0:
-            batch_size = 50
-
-        # 同一批只能有一種 cache_type：提示詞 profile、快取分片與 cache_save 都以它為準，
-        # 混批會讓後面的類型用錯提示詞、快取寫到錯的分片。只取開頭連續同型的區段。
-        homogeneous = 1
-        while (
-            homogeneous < len(remaining)
-            and str(remaining[homogeneous].get("cache_type") or "lang") == cache_type
-        ):
-            homogeneous += 1
-
-        # 項目數上限之外，再依 token 預算取前綴（與 lm_translator_main 共用同一個估算與學到的預算）
-        fit_count = select_batch_size(
-            remaining[:homogeneous],
-            profile_for_cache_type(cache_type),
-            batch_size,
-            _lm_config(),
+        batch, cache_type = next_batch(
+            remaining,
+            lm_cfg=_lm_config(),
+            batch_size_for_type=lambda value: _get_default_batch_size(
+                value, batch_size_by_type
+            ),
+            fixed_input_tokens_for_batch=fixed_input_tokens_for_batch,
+            select_size=select_batch_size,
         )
-        batch = remaining[:fit_count]
 
         try:
             translated, status = translate_batch_smart(batch, total_for_smart)
@@ -253,13 +255,18 @@ def translate_items_with_cache_loop(
             actual_processed_in_this_batch += 1
             processed += 1
 
+            issues = _quality_issues_for_cache(it)
+            if issues:
+                it["_cache_rejected"] = True
+                it["_quality_issues"] = tuple(issues)
+
             if on_translated_item is not None:
                 try:
                     on_translated_item(it)
                 except Exception as e:  # noqa: BLE001
                     log_info(f"[SharedLM] 處理翻譯結果失敗: {redact_text(e)}")
 
-            if it.get("_untranslated"):
+            if it.get("_untranslated") or it.get("_cache_rejected"):
                 # 批次縮到極限回填的原文 / 格式無效回填的原文：保留在輸出，但不寫入快取
                 untranslated_fallback += 1
                 continue
