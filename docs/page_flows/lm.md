@@ -67,6 +67,9 @@ flowchart TD
   E -- "PARTIAL" --> J["回傳 PARTIAL"]
 ```
 
+- 每批提示詞會依輸入項目加入官方 Minecraft 術語；Mod DB 的已審核翻譯參考只對 `lang` 且只取同一模組。提示詞與同模組的 session 歷史會計入輸入 token 預算，但不計入翻譯輸出 KPI。
+- Mod DB 翻譯以 `(mod_id, kind)` 分組，避免把不同模組或不同種類混在同一個 payload；同一模組的後續批次沿用同一個 client-side session。`.md` 與 `.txt` 指南仍走 Patchouli 提示詞，但使用 `md` 快取分類。
+
 ## 背景任務與 UI 更新
 
 - 開始時以 `launch_page_operation(..., owner="lm")` 登錄任務，使用預設的 `CancellationPolicy.COOPERATIVE` 與 `ShutdownPolicy.CANCEL_AND_DRAIN`（定義於 `app/tasks/operation_registry.py`）。

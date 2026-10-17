@@ -55,6 +55,8 @@
         "temperature": 0.3,
         "retry_same_as_source": true,
         "fast": false,
+        "official_glossary": true,
+        "moddb_reviewed_glossary": true,
         "rate_limit": {
             "timeout": 600,
             "sleep_seconds_between_batches": 0.0
@@ -128,7 +130,7 @@
         "max_output_tokens": 65536,
         "key_failure_cooldown_sec": 3600,
         "max_output_token_budget": 65536,
-        "max_input_token_budget": 264000,
+        "max_input_token_budget": 256000,
         "token_budget_enabled": true,
         "output_token_factor": 1.5,
         "budget_min_scale": 0.0625,

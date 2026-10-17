@@ -168,6 +168,7 @@ def translate_items_with_cache_loop(
         if is_cancelled():
             return cancelled_result()
         cache_type = str(remaining[0].get("cache_type") or "lang")
+        batch_group = remaining[0].get("_batch_group")
         batch_size = _get_default_batch_size(cache_type, batch_size_by_type)
         if batch_size <= 0:
             batch_size = 50
@@ -178,6 +179,7 @@ def translate_items_with_cache_loop(
         while (
             homogeneous < len(remaining)
             and str(remaining[homogeneous].get("cache_type") or "lang") == cache_type
+            and remaining[homogeneous].get("_batch_group") == batch_group
         ):
             homogeneous += 1
 

@@ -24,6 +24,7 @@ from app.services_impl.pipelines._pipeline_logging import (
     mirror_session_log,
 )
 from app.tasks.task_session import add_log_unmirrored
+from translation_tool.core.lm_session import TranslationSessionState
 from translation_tool.core.lm_translator_main import translate_batch_smart
 from translation_tool.core.lm_translator_shared_loop import _get_default_batch_size
 from translation_tool.core.lm_translator_skeleton import (
@@ -39,7 +40,7 @@ from translation_tool.translation_db.run_progress import (
     format_live,
     tick_live,
 )
-from translation_tool.translation_db.schema import cache_type_for_kind
+from translation_tool.translation_db.schema import KIND_LANG, cache_type_for_kind
 from translation_tool.utils.cache_manager import add_to_cache, save_translation_cache
 from translation_tool.utils.cancellation import (
     TaskCancelled,
@@ -149,6 +150,10 @@ def build_items(
                 # Guide (.md/.txt) keeps the Patchouli prompt flow but belongs
                 # to the md cache bucket; .txt is intentionally included.
                 "cache_type": cache_type_for_kind(kind),
+                # The shared loop uses this boundary to prevent cross-module or
+                # cross-kind payloads. Session state is attached later because
+                # build_items is also used by preview/tests without a TaskSession.
+                "_batch_group": (str(mod_id), str(kind)),
                 "_entry_id": eid,
                 "_kind": kind,
                 "_mod_id": mod_id,
@@ -164,13 +169,23 @@ def plan_batches(
 
     ``check`` 若提供，會在處理每列前呼叫，供 deadline/cancel 檢查使用。
     """
-    counts: dict[str, int] = {}
+    counts: dict[tuple[str, str], int] = {}
     for item in items:
         if check is not None:
             check()
-        kind = str(item.get("cache_type") or "lang")
-        counts[kind] = counts.get(kind, 0) + 1
-    return estimate_batches(counts, lambda kind: _get_default_batch_size(kind, None))
+        group = item.get("_batch_group")
+        if isinstance(group, tuple) and len(group) == 2:
+            group_key = (str(group[0]), str(group[1]))
+        else:
+            group_key = ("", str(item.get("cache_type") or "lang"))
+        counts[group_key] = counts.get(group_key, 0) + 1
+    return sum(
+        estimate_batches(
+            {cache_type: count},
+            lambda cache_type: _get_default_batch_size(cache_type, None),
+        )
+        for (_mod_id, cache_type), count in counts.items()
+    )
 
 
 def estimate_batch_count(total: int, cache_type: str = "lang") -> int:
@@ -323,6 +338,20 @@ def _translate_rows(
         return translate_batch_smart(batch, total=batch_total)
 
     items = build_items(rows)
+    operation_id = str(getattr(session, "id", "") or id(session))
+    session_by_mod: dict[str, TranslationSessionState] = {}
+    reviewed_by_mod: dict[str, list[dict[str, str]]] = {}
+    for item in items:
+        mod_id = str(item["_mod_id"])
+        session_by_mod.setdefault(
+            mod_id,
+            TranslationSessionState(f"moddb:{operation_id}:{mod_id}"),
+        )
+        item["_translation_session"] = session_by_mod[mod_id]
+        if item.get("_kind") == KIND_LANG and mod_id not in reviewed_by_mod:
+            reviewed_by_mod[mod_id] = db.reviewed_lang_glossary(mod_id)
+        if item.get("_kind") == KIND_LANG:
+            item["_reviewed_glossary"] = reviewed_by_mod.get(mod_id, [])
     tracker = RunProgress(total=len(items), planned_batches=plan_batches(items))
     _log(session, tracker.start_line())
     # 第一批結束前也先給畫面即時資料（已用時間從開始就會跳動）

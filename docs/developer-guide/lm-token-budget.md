@@ -25,7 +25,7 @@
 - ASCII 字元約 0.25 token、CJK 約 1.2 token、其他非 ASCII 約 0.5 token
 - 每個項目加約 12 token 的 JSON 包裝
 - 預期輸出 ≈ 原文 token × `output_token_factor`（預設 1.5）+ 包裝
-- 輸入另外計入 system prompt
+- 輸入另外計入 system prompt、批次相關的官方／已審核術語提示，以及同一模組 session 保留的對話歷史；這些都只影響輸入預算，不會混入翻譯輸出 KPI。
 
 ### 什麼時候縮小學到的預算
 
@@ -47,7 +47,7 @@
 |---|---|---|
 | `token_budget_enabled` | `true` | `false` = 回到舊行為，只看項目數 |
 | `max_output_token_budget` | `65536` | 單批預期輸出 token 上限（保守值） |
-| `max_input_token_budget` | `264000` | 單批輸入 token 上限，避免單次呼叫吃掉太多 TPM |
+| `max_input_token_budget` | `256000` | 單批輸入 token 上限，避免單次呼叫吃掉太多 TPM；ChatGPT 實際使用值還會取全域值與模型覆寫上限的較小值 |
 | `max_output_tokens` | `65536` | 送給 Gemini／OpenAI Responses 的輸出上限；`0` = 不送，ChatGPT 使用 `1～15` 會被拒絕 |
 | `output_token_factor` | `1.5` | 預期輸出 / 輸入係數，範圍 0.3~6.0，會依實際用量校正 |
 | `budget_min_scale` | `0.0625` | 撞牆後輸出預算最多縮到設定值的幾倍 |
@@ -72,9 +72,16 @@
 
 ## 譯文與原文相同時重新確認
 
-`lm_translator.retry_same_as_source` 預設為 `true`。每個成功批次中，完全等於原文且含有 alphabetic character 的項目會單獨組成候選 payload；不使用 whitelist、字串長度或格式 heuristic。第二次沿用同一 profile prompt、model、API key、temperature 與 structured-output contract，並附加一次確認說明。`lang`、`patchouli`、`ftbquests`、`kubejs` 與 `md` 都走共用 batch contract。
+`lm_translator.retry_same_as_source` 預設為 `true`。每個成功批次中，完全等於原文且含有 alphabetic character 的項目會單獨組成候選 payload；不使用 whitelist、字串長度或格式 heuristic。第二次沿用同一 profile prompt、model、API key、temperature、structured-output contract 與同一模組的 client-side session history，並附加一次確認說明。相同批次內的「相同譯文」與「格式不一致」候選會合併為一次品質 retry；`lang`、`patchouli`、`ftbquests`、`kubejs` 與 `md` 都走共用 batch contract。
 
 批次切分估算會在功能開啟時預留 retry prompt 的輸入 token；實際 retry 估算會包含追加後的 prompt、同批初始 user/model conversation history，以及帶有 `retry_reasons`／`format_issues` 的完整候選 payload。若超過 `max_input_token_budget` 就保留第一次結果，不發出 retry。結果依原 ID 與位置合併回第一批，processed/checkpoint 數量不變。此步驟在 shared loop 寫 Cache、Mod DB 建立 write-back 前完成。第二次仍相同會作為一般結果接受，並可正常寫入 Cache 與 Mod DB；技術錯誤或 structured response 無效時保留第一次結果。使用者取消仍依既有 cancellation contract 中止。
+
+### 官方語系與模組術語
+
+- `assets/official_locales/minecraft/` 固定保存 `en_us.json`、`zh_cn.json`、`zh_tw.json` 與完整性 `manifest.json`，不依 Minecraft 版本分資料夾。
+- 語系合併對所有種類共用 `key + en_us + zh_cn` 的官方精確命中；沒有命中時才回到既有 OpenCC 與 `replace_rules.json`。既有輸出資料夾人工譯文與資料庫有效譯文仍優先保留。
+- LLM 每批會把相關官方 Minecraft 術語加入中文提示詞。Mod DB 已審核譯文只在 `kind=lang`、同一模組範圍內加入，不會污染 Patchouli、指南或其他種類。
+- Mod DB 批次以 `(mod_id, kind)` 分界；同一模組的不同批次共用一個 client-side session，模型收到的是同一段歷史，不同模組彼此隔離。批次內容與動態提示詞的 token 會計入輸入預算，但翻譯輸出 KPI 只計算原始 key/value 內容。
 
 ## 相關檔案
 

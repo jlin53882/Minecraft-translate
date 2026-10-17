@@ -57,6 +57,11 @@ from translation_tool.core.lm_same_source_retry import (
     build_same_source_retry_batch,
     merge_same_source_retry_results,
 )
+from translation_tool.core.lm_session import TranslationSessionState
+from translation_tool.core.official_locale import (
+    build_translation_prompt,
+    official_translation_for_item,
+)
 from translation_tool.utils.cancellation import interruptible_sleep, raise_if_cancelled
 from translation_tool.utils.config_manager import get_models_config, load_config
 from translation_tool.utils.log_unit import log_error, log_info, log_warning
@@ -258,11 +263,51 @@ def translate_batch_smart(
     items = _validate_batch_items(batch_items)
     if not items:
         return [], "AUTO"
+    # 官方三欄資料若隨項目提供，先做 key-aware exact lookup；命中項目不呼叫 API。
+    # 沒有 zh_cn 的待翻譯項目仍會走 LLM，並可使用同一份官方術語提示。
     if not dry_run:
+        resolved: dict[int, dict] = {}
+        pending: list[tuple[int, dict]] = []
+        for index, item in enumerate(items):
+            official_text = official_translation_for_item(item)
+            if official_text is None:
+                pending.append((index, item))
+            else:
+                resolved[index] = {
+                    **item,
+                    "text": official_text,
+                    "_official_exact": True,
+                }
+        if resolved and not pending:
+            return [resolved[index] for index in range(len(items))], "AUTO"
         if get_translation_provider() == "chatgpt":
             validate_translation_credentials()
         elif get_api_key_count() == 0:
             raise RuntimeError("❌ 設定檔中沒有找到任何 API Key，請先設定金鑰。")
+        if resolved:
+            translated, status = _execute_translation(
+                [item for _index, item in pending], total, dry_run
+            )
+            translated = list(translated or [])
+            merged: list[dict] = []
+            pending_index = 0
+            for index in range(len(items)):
+                if index in resolved:
+                    merged.append(resolved[index])
+                else:
+                    source_item = pending[pending_index][1]
+                    translated_item = (
+                        translated[pending_index]
+                        if pending_index < len(translated)
+                        else {
+                            **source_item,
+                            "text": source_item.get("source_text", source_item["text"]),
+                            "_untranslated": True,
+                        }
+                    )
+                    merged.append(translated_item)
+                    pending_index += 1
+            return _process_output(merged, status)
 
     # 批次 profile 與批次大小由 _execute_translation 內部決定（舊版在這裡重複計算後丟棄，已移除）。
 
@@ -390,6 +435,7 @@ class _BatchRuntime:
     model_temperature: float
     lang_prompt: str
     patchouli_prompt: str
+    effective_prompt: str
     fixed_input_tokens: float
     batch_fit_input_tokens: float
     retry_fixed_input_tokens: float
@@ -398,6 +444,8 @@ class _BatchRuntime:
     original_total: int | None
     remaining_items: list[dict]
     all_results: list[dict]
+    conversation_history: list[dict[str, str]] = field(default_factory=list)
+    session_state: TranslationSessionState | None = None
     completed_calls: int = 0
     pinned_model_index: int | None = None
     # 同專案模式的模型配額：本次呼叫用來持有「探測租約」的身分（見 ModelQuotaRegistry）、
@@ -522,7 +570,16 @@ def _build_batch_runtime(
         if chatgpt_model:
             context_budget = chatgpt_model_input_token_budget(lm_cfg, chatgpt_model)
             if context_budget is not None:
-                lm_cfg = {**lm_cfg, "max_input_token_budget": context_budget}
+                try:
+                    configured_budget = int(
+                        lm_cfg.get("max_input_token_budget", 256_000) or 256_000
+                    )
+                except (TypeError, ValueError):
+                    configured_budget = 256_000
+                lm_cfg = {
+                    **lm_cfg,
+                    "max_input_token_budget": min(configured_budget, context_budget),
+                }
             reasoning_effort = chatgpt_model_reasoning_effort(lm_cfg, chatgpt_model)
     else:
         models_cfg = get_models_config(config_snapshot)
@@ -557,13 +614,35 @@ def _build_batch_runtime(
         "你是專業的 Minecraft Patchouli 手冊翻譯員",
     )
     fixed_prompt = lang_prompt if uses_lang_prompt(profile) else patchouli_prompt
+    session_state = next(
+        (
+            item.get("_translation_session")
+            for item in batch_items
+            if isinstance(item.get("_translation_session"), TranslationSessionState)
+        ),
+        None,
+    )
+    conversation_history = session_state.snapshot() if session_state is not None else []
+    effective_prompt = build_translation_prompt(
+        fixed_prompt,
+        batch_items,
+        profile=profile,
+        include_official=bool(lm_cfg.get("official_glossary", True)),
+        include_moddb_reviewed=bool(lm_cfg.get("moddb_reviewed_glossary", True)),
+    )
     retry_same_as_source = bool(lm_cfg.get("retry_same_as_source", True))
-    fixed_input_tokens = estimate_text_tokens(fixed_prompt)
+    history_input_tokens = _estimate_conversation_history_tokens(conversation_history)
+    fixed_input_tokens = estimate_text_tokens(effective_prompt) + history_input_tokens
     retry_fixed_input_tokens = estimate_text_tokens(
-        f"{fixed_prompt.rstrip()}\n\n{SAME_SOURCE_RETRY_INSTRUCTION}"
+        f"{effective_prompt.rstrip()}\n\n{SAME_SOURCE_RETRY_INSTRUCTION}"
     )
     quality_retry_fixed_input_tokens = estimate_text_tokens(
-        f"{fixed_prompt.rstrip()}\n\n{QUALITY_RETRY_INSTRUCTION}"
+        f"{effective_prompt.rstrip()}\n\n{QUALITY_RETRY_INSTRUCTION}"
+    )
+    batch_prompt_fit_tokens = (
+        retry_fixed_input_tokens
+        if retry_same_as_source
+        else estimate_text_tokens(effective_prompt)
     )
     return _BatchRuntime(
         batch_items=batch_items,
@@ -579,14 +658,11 @@ def _build_batch_runtime(
         model_temperature=lm_cfg.get("temperature", 0.2),
         lang_prompt=lang_prompt,
         patchouli_prompt=patchouli_prompt,
+        effective_prompt=effective_prompt,
         fixed_input_tokens=fixed_input_tokens,
         batch_fit_input_tokens=(
-            max(
-                retry_fixed_input_tokens
-                if retry_same_as_source
-                else fixed_input_tokens,
-                quality_retry_fixed_input_tokens,
-            )
+            max(batch_prompt_fit_tokens, quality_retry_fixed_input_tokens)
+            + history_input_tokens
         ),
         retry_fixed_input_tokens=retry_fixed_input_tokens,
         quality_retry_fixed_input_tokens=quality_retry_fixed_input_tokens,
@@ -594,6 +670,8 @@ def _build_batch_runtime(
         original_total=total,
         remaining_items=list(batch_items),
         all_results=[],
+        conversation_history=conversation_history,
+        session_state=session_state,
         rpm_cooldown_sec=rpm_cooldown,
         key_rotation_buffer_sec=lm_cfg.get("key_rotation_buffer_sec", 5),
         overload_retry_sec=lm_cfg.get("overload_retry_sec", OVERLOAD_RETRY_WAIT_SEC),
@@ -1493,6 +1571,7 @@ def _finish_successful_batch(
 ) -> _BatchRoundOutcome:
     """Reconfirm optional candidates, then advance the validated batch exactly once."""
     conversation_history = [
+        *runtime.conversation_history,
         {
             "role": "user",
             "text": json.dumps(round_data.payload, ensure_ascii=False),
@@ -1509,6 +1588,9 @@ def _finish_successful_batch(
         output_cap=output_cap,
         conversation_history=conversation_history,
     )
+    runtime.conversation_history = conversation_history
+    if runtime.session_state is not None:
+        runtime.session_state.replace(conversation_history)
     runtime.completed_calls += 1
     runtime.all_results.extend(finalized)
     actual_output = api_meta.get("candidates_tokens")
@@ -1586,11 +1668,7 @@ def _attempt_batch(
             # 今日配額已用盡且還沒輪到探測（或探測名額被其他 worker 領走）：不白打請求
             skipped_by_quota.add(model_index)
             continue
-        prompt = (
-            runtime.lang_prompt
-            if uses_lang_prompt(runtime.batch_profile)
-            else runtime.patchouli_prompt
-        )
+        prompt = runtime.effective_prompt
         output_cap = None
         cap_source = "global"
         set_active_model(model_name)  # UI 狀態列顯示實際使用中的模型
@@ -1621,6 +1699,7 @@ def _attempt_batch(
                     output_cap,
                     api_meta,
                     api_key,
+                    conversation_history=runtime.conversation_history,
                 )
                 raw_text = call_gemini_requests(**request_kwargs).strip()
             # A synchronous provider request cannot be interrupted in flight.

@@ -4202,6 +4202,38 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
             (mod_id,),
         )
 
+    def reviewed_lang_glossary(
+        self, mod_id: str, *, limit: int = 240
+    ) -> list[dict[str, str]]:
+        """Return reviewed, quality-clean lang terms for one module.
+
+        This is a prompt reference only; it never becomes a translation source or
+        changes the effective database value. Keeping it module-scoped prevents
+        unrelated mods from contaminating a batch's terminology.
+        """
+        rows = self._q(
+            """
+            SELECT e.key, e.en_us, f.zh_tw
+            FROM entry e
+            JOIN effective f ON f.entry_id = e.id
+            WHERE e.mod_id = ? AND e.kind = 'lang'
+              AND f.review_status = 'reviewed'
+              AND e.en_us <> '' AND f.zh_tw <> ''
+              AND e.en_us <> f.zh_tw
+            ORDER BY e.key, e.id
+            LIMIT ?
+            """,
+            (mod_id, max(0, int(limit))),
+        )
+        return [
+            {"key": key, "en_us": en_us, "zh_tw": zh_tw}
+            for key, en_us, zh_tw in rows
+            if isinstance(en_us, str)
+            and isinstance(zh_tw, str)
+            and en_us.strip()
+            and zh_tw.strip()
+        ]
+
     def load_mod_for_priority(
         self, mod_id: str, priority: tuple[int, ...]
     ) -> list[tuple[str, str, str, str, str, int]]:
