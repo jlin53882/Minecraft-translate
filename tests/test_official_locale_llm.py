@@ -8,6 +8,11 @@ from app.services_impl.moddb_translate_service import (
     _attach_translation_sessions,
     build_items,
 )
+from translation_tool.core.lm_format_policy import (
+    FORMAT_POLICY_PROMPT,
+    STRUCTURED_FORMAT_POLICY_PROMPT,
+    normalize_legacy_prompt,
+)
 from translation_tool.core.lm_session import TranslationSessionState
 from translation_tool.core.lm_translator_shared_loop import (
     translate_items_with_cache_loop,
@@ -67,6 +72,92 @@ def test_official_terms_are_injected_for_every_translation_profile() -> None:
         prompt = build_translation_prompt("基礎提示詞", items, profile=profile)
         assert "官方 Minecraft 術語" in prompt
         assert "Cobblestone → 鵝卵石" in prompt
+
+
+def test_legacy_prompt_normalization_preserves_custom_rules() -> None:
+    legacy_breaks = (
+        "13. 保留每筆 value 原有的實際換行數量；可依譯文語意調整換行位置，但不可新增或刪除實際換行\n"
+        "14. 字面上的反斜線+n（\\n）必須原樣保留，不可轉成實際換行；實際換行也不可改成字面上的反斜線+n。"
+    )
+    custom = "專有名詞 Cobblestone 一律翻譯為鵝卵石。"
+
+    normalized = normalize_legacy_prompt(f"自訂翻譯規則\n{legacy_breaks}\n{custom}\n")
+
+    assert custom in normalized
+    assert "保留每筆 value 原有的實際換行數量" not in normalized
+    assert "字面上的反斜線+n" not in normalized
+
+    effective = build_translation_prompt(normalized, [], profile="lang")
+    assert FORMAT_POLICY_PROMPT in effective
+    assert "以下格式契約優先於前文任何互相衝突的換行或格式規則。" in effective
+
+
+def test_existing_prompt_normalization_is_exact_line_scoped() -> None:
+    custom_variant = "我的規則：保留每筆 value 原有的實際換行數量，但允許語意重排。"
+
+    assert normalize_legacy_prompt(custom_variant) == custom_variant
+
+
+def test_patchouli_structure_policy_is_kind_scoped() -> None:
+    prompt = build_translation_prompt(
+        "基礎",
+        [{"text": "Book", "source_text": "Book", "cache_type": "patchouli"}],
+        profile="patch",
+    )
+
+    assert FORMAT_POLICY_PROMPT in prompt
+    assert STRUCTURED_FORMAT_POLICY_PROMPT in prompt
+
+    lang_prompt = build_translation_prompt(
+        "基礎",
+        [{"text": "Hello", "source_text": "Hello", "cache_type": "lang"}],
+        profile="lang",
+    )
+    assert STRUCTURED_FORMAT_POLICY_PROMPT not in lang_prompt
+
+
+def test_missing_prompt_uses_new_builtin_prompt() -> None:
+    from translation_tool.core import lm_translator_main as main
+
+    context = main._build_batch_prompt_context(
+        [
+            {
+                "path": "key",
+                "source_text": "Hello",
+                "text": "Hello",
+                "cache_type": "lang",
+            }
+        ],
+        {},
+    )
+
+    assert "你正在翻譯 Minecraft 語言檔案" in context.effective_prompt
+    assert "以下格式契約優先於前文任何互相衝突的換行或格式規則。" in (
+        context.effective_prompt
+    )
+
+
+def test_gemini_and_openai_share_the_same_effective_prompt() -> None:
+    from translation_tool.core import lm_translator_main as main
+
+    items = [
+        {
+            "path": "key",
+            "source_text": "Hello",
+            "text": "Hello",
+            "cache_type": "lang",
+        }
+    ]
+    base = {
+        "lang_system_prompt": "自訂 prompt\n保留專有名詞 Cobblestone",
+        "patchouli_system_prompt": "Patchouli prompt",
+    }
+
+    gemini = main._build_batch_prompt_context(items, {**base, "provider": "gemini"})
+    openai = main._build_batch_prompt_context(items, {**base, "provider": "chatgpt"})
+
+    assert gemini.effective_prompt == openai.effective_prompt
+    assert "保留專有名詞 Cobblestone" in gemini.effective_prompt
 
 
 def test_moddb_reviewed_lang_glossary_is_injected_for_patchouli_routes() -> None:

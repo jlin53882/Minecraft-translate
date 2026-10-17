@@ -4,16 +4,24 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from translation_tool.core.lm_format_policy import (
+    build_payload_item,
+    kind_for_item,
+)
 from translation_tool.plugins.shared.rich_text_shield import unshield_text
 from translation_tool.translation_db.quality import (
     guide_structure_issues,
-    token_issues,
+    token_issues_for_kind,
 )
 
-QUALITY_RETRY_INSTRUCTION = """這是目前批次唯一一次的翻譯品質修復重試，請同時處理每個項目列出的問題。
-如果 retry_reasons 表示翻譯結果與原文相同，請重新翻譯，不要直接複製原文。
-如果 format_issues 有內容，請依照原文自行判斷並修正格式；換行問題要輸出正確數量與位置的實際換行，特殊格式問題要完整保留 Minecraft 格式碼、printf 佔位符、Patchouli 巨集，以及文字形式的 \\n。
-請維持原本翻譯語意，不要輸出說明文字，只回傳相同項目 ID 的結構化 JSON 翻譯結果。"""
+QUALITY_RETRY_INSTRUCTION = (
+    "這是目前批次唯一一次的翻譯品質修復重試，請同時處理每個項目列出的問題。\n"
+    "如果 retry_reasons 表示翻譯結果與原文相同，請重新翻譯，不要直接複製原文。\n"
+    "format_issues 是程式依原文與譯文比對產生的硬性問題，不可以忽略或重新解讀；"
+    "請依目前 payload 的原文重新翻譯，不要沿用上一版錯誤格式。\n"
+    "合法的同一段落軟折行不需要恢復成英文原本的行數；只有 format_issues 指出的硬結構需要修正。\n"
+    "請維持原本翻譯語意，不要輸出說明文字，只回傳相同項目 ID 的結構化 JSON 翻譯結果。"
+)
 
 # Keep this compatibility name for private/external imports; active batch flow uses
 # the combined quality retry instruction below.
@@ -45,7 +53,8 @@ def quality_issues(source_item: dict, translated_text: str) -> list[str]:
     ``source_item`` 是送出的批次項目。帶有 ``_shielded`` 的指南段落，數量標記在佔位符
     空間比對；指南結構標記則先還原行內保護，與寫入與審查用的規則相同。
     """
-    issues = token_issues(source_item.get("text"), translated_text)
+    kind = kind_for_item(source_item)
+    issues = token_issues_for_kind(source_item.get("text"), translated_text, kind=kind)
     shielded = source_item.get("_shielded")
     raw_translated = (
         unshield_text(translated_text, shielded.shields)
@@ -55,9 +64,7 @@ def quality_issues(source_item: dict, translated_text: str) -> list[str]:
     raw_source = str(source_item.get("source_text") or "")
     return [
         *issues,
-        *guide_structure_issues(
-            raw_source, raw_translated, kind=_item_kind(source_item)
-        ),
+        *guide_structure_issues(raw_source, raw_translated, kind=kind),
     ]
 
 
@@ -96,14 +103,12 @@ def build_quality_retry_batch(
         if not retry_reasons and not issues:
             continue
 
-        payload_item: dict[str, object] = {
-            "id": item_id,
-            "value": source_text,
-        }
-        if retry_reasons:
-            payload_item["retry_reasons"] = retry_reasons
-        if issues:
-            payload_item["format_issues"] = issues
+        payload_item = build_payload_item(
+            source,
+            item_id,
+            retry_reasons=retry_reasons,
+            format_issues=issues,
+        )
 
         positions.append(position)
         candidate_ids.append(item_id)

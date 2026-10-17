@@ -81,6 +81,7 @@ from translation_tool.translation_db.schema import (
     DEFAULT_PRIORITY,
     KEEP_REVIEW_FLAG,
     KIND_GUIDE,
+    KIND_PATCHOULI,
     SRC_AI,
     SRC_AI_REPAIR,
     SRC_JAR_CN,
@@ -1489,8 +1490,9 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
                 f"{column} GLOB {_TOKEN_CHAR_GLOB_SQL} OR instr({column}, char(10)) > 0"
                 for column in ("e.en_us", "f.zh_tw")
             )
-            # 指南的結構標記（連結目標等）不一定含格式符號，所以指南條目整批列入候選
-            return f"{has_text} AND (({token_like}) OR e.kind = '{KIND_GUIDE}')"
+            # Guide／Patchouli 的結構標記不一定含格式符號，所以整批列入候選
+            structured_kinds = f"('{KIND_GUIDE}', '{KIND_PATCHOULI}')"
+            return f"{has_text} AND (({token_like}) OR e.kind IN {structured_kinds})"
         return "1"
 
     def _quality_filtered_page(
@@ -4060,7 +4062,7 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
             "e.mc_version=?",
             "e.en_us<>''",
             "t.zh_tw<>''",
-            f"(({token_chars}) OR e.kind = '{KIND_GUIDE}')",
+            f"(({token_chars}) OR e.kind IN ('{KIND_GUIDE}', '{KIND_PATCHOULI}'))",
         ]
         params: list = [version]
         if mod_ids:
@@ -4123,7 +4125,7 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
             "e.mc_version=?",
             "e.en_us<>''",
             "t.zh_tw<>''",
-            f"(({token_chars}) OR e.kind = '{KIND_GUIDE}')",
+            f"(({token_chars}) OR e.kind IN ('{KIND_GUIDE}', '{KIND_PATCHOULI}'))",
         ]
         params: list = [version]
         if mod_ids:

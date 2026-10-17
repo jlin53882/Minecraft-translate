@@ -41,6 +41,7 @@ from translation_tool.core.lm_config_schema import (
     chatgpt_model_reasoning_effort,
     model_output_token_cap,
 )
+from translation_tool.core.lm_format_policy import build_translation_payload
 from translation_tool.core.lm_format_retry import (
     QUALITY_RETRY_INSTRUCTION,
     build_quality_retry_batch,
@@ -754,12 +755,10 @@ def _prepare_batch(runtime: _BatchRuntime) -> _BatchRound:
         estimate=runtime.budget_tracker.estimate(
             current_batch, runtime.budget_cfg, runtime.fixed_input_tokens
         ),
-        payload={
-            "items": [
-                {"id": str(index), "value": item["text"]}
-                for index, item in enumerate(current_batch)
-            ]
-        },
+        payload=build_translation_payload(
+            current_batch,
+            item_ids=[str(index) for index in range(len(current_batch))],
+        ),
         id_to_item={str(index): item for index, item in enumerate(current_batch)},
     )
 

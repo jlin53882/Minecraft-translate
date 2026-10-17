@@ -15,6 +15,10 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
+from translation_tool.core.lm_format_policy import (
+    format_policy_for_items,
+    normalize_legacy_prompt,
+)
 from translation_tool.utils.app_paths import get_resource_root
 
 logger = logging.getLogger(__name__)
@@ -190,7 +194,10 @@ def build_translation_prompt(
     include_moddb_reviewed: bool = True,
 ) -> str:
     """Append Chinese, batch-scoped glossary instructions to a base prompt."""
-    sections = [base_prompt.rstrip()]
+    sections = [
+        normalize_legacy_prompt(base_prompt).rstrip(),
+        format_policy_for_items(items),
+    ]
     index = load_official_locale_index()
     official_terms = (
         index.glossary_for_items(items) if include_official and index.available else []

@@ -23,6 +23,7 @@ from translation_tool.translation_db.models import QualityFilter
 from translation_tool.translation_db.read_cache import ReadCache
 from translation_tool.translation_db.schema import (
     KIND_GUIDE,
+    KIND_PATCHOULI,
     SRC_AI,
     SRC_JAR_CN,
     SRC_MANUAL,
@@ -82,6 +83,29 @@ def _seed(db: TranslationDB) -> None:
             "UPDATE translation SET updated_at='2030-02-0' || (id % 3 + 1) "
             "WHERE id % 5 = 0"
         )
+
+
+def test_patchouli_structure_only_mismatch_reaches_flags_and_repair_candidates(db):
+    db.ingest(
+        "1.21.1",
+        [
+            ScanItem(
+                KIND_PATCHOULI,
+                "patchmod",
+                "entry",
+                '<ItemLink id="example:item" />\nText',
+                "錯誤格式",
+                source=SRC_AI,
+            )
+        ],
+    )
+
+    rows = db.list_entries("1.21.1", limit=100)[0]
+    assert rows[0].quality_state == "mismatch"
+    assert rows[0].quality_issues
+    assert db.mismatched_translation_entries("1.21.1")[0] == 1
+    repairable = list(db.iter_repairable_translation_entries("1.21.1"))
+    assert len(repairable) == 1
 
 
 @pytest.fixture

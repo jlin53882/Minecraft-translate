@@ -10,6 +10,7 @@ from __future__ import annotations
 import contextlib
 import importlib
 import json
+import re
 import shutil
 import sys
 from pathlib import Path
@@ -45,9 +46,19 @@ class SimulatedCrash(BaseException):
 
 def _fake_translation(source: str) -> str:
     """確定性的假譯文：只含中日韓字元，快取層才會把它判定為「已完整翻譯」而命中。"""
-    return "譯" + "".join(
-        chr(0x4E00 + (ord(c) * 7) % 400) if not c.isspace() else c for c in source
-    )
+
+    def translate_line(line: str) -> str:
+        prefix = re.match(r"^(\s*(?:#{1,6}\s|[-*+]\s|>\s|\d+[.)]\s))", line)
+        preserved = prefix.group(1) if prefix else ""
+        body = line[len(preserved) :]
+        if body.strip().startswith("<") and body.strip().endswith(">"):
+            return line
+        translated = "".join(
+            chr(0x4E00 + (ord(c) * 7) % 400) if not c.isspace() else c for c in body
+        )
+        return preserved + "譯" + translated
+
+    return "\n".join(translate_line(line) for line in source.split("\n"))
 
 
 class Runtime:

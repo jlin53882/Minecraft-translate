@@ -22,6 +22,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
 
+from translation_tool.core.lm_format_policy import estimate_format_spec_tokens
 from translation_tool.utils.log_unit import log_debug, log_info
 
 # 每個項目的 JSON 包裝（id、value 鍵、括號、逗號）約佔的 token。
@@ -174,6 +175,13 @@ def estimate_value_tokens(item: dict[str, Any]) -> float:
     return estimate_text_tokens(str(item.get("text") or ""))
 
 
+def estimate_input_item_tokens(item: dict[str, Any]) -> float:
+    """Estimate the translated value plus request-only format metadata."""
+    return estimate_value_tokens(item) + estimate_format_spec_tokens(
+        item, estimate_text_tokens
+    )
+
+
 @dataclass(frozen=True)
 class BatchEstimate:
     """一個批次的估算結果。"""
@@ -258,7 +266,9 @@ class BatchBudgetTracker:
         return BatchEstimate(
             count=n,
             value_tokens=value,
-            input_tokens=fixed_input_tokens + value + n * JSON_ITEM_OVERHEAD_TOKENS,
+            input_tokens=fixed_input_tokens
+            + sum(estimate_input_item_tokens(item) for item in items)
+            + n * JSON_ITEM_OVERHEAD_TOKENS,
             output_tokens=value * factor + n * JSON_ITEM_OVERHEAD_TOKENS,
         )
 
@@ -285,7 +295,7 @@ class BatchBudgetTracker:
         taken = 0
         for item in items[:cap]:
             value = estimate_value_tokens(item)
-            in_t = value + JSON_ITEM_OVERHEAD_TOKENS
+            in_t = estimate_input_item_tokens(item) + JSON_ITEM_OVERHEAD_TOKENS
             out_t = value * factor + JSON_ITEM_OVERHEAD_TOKENS
             if taken > 0 and (
                 used_in + in_t > in_budget or used_out + out_t > out_budget

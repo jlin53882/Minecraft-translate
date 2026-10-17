@@ -295,7 +295,8 @@ def test_all_batch_profiles_use_their_existing_prompt_route(
 
     assert status == "AUTO"
     assert len(calls) == 2
-    assert calls[0]["system_prompt"] == expected_prompt
+    assert calls[0]["system_prompt"].startswith(expected_prompt + "\n")
+    assert "【格式契約（程式驗證的硬性規則）】" in calls[0]["system_prompt"]
     assert calls[1]["system_prompt"].startswith(expected_prompt)
 
 

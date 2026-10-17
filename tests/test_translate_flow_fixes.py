@@ -210,6 +210,34 @@ def test_shared_loop_does_not_cache_untranslated_fallback(monkeypatch):
     assert sorted(a[1].split("|")[0] for a in added) == ["k0", "k2"]
 
 
+def test_shared_loop_rejects_structurally_invalid_patchouli_before_cache(monkeypatch):
+    added = _patch_loop(monkeypatch)
+    delivered: list[dict] = []
+    item = {
+        "path": "entry",
+        "text": '<ItemLink id="example:item" />\nText',
+        "source_text": '<ItemLink id="example:item" />\nText',
+        "cache_type": "patchouli",
+        "_kind": "patchouli",
+    }
+
+    def fake_translate(batch, _total):
+        return [{**batch[0], "text": "錯誤格式"}], "AUTO"
+
+    result = loop_mod.translate_items_with_cache_loop(
+        [item],
+        translate_batch_smart=fake_translate,
+        batch_size_by_type={"patchouli": 10},
+        sleep_seconds_between_batches=0,
+        on_translated_item=delivered.append,
+    )
+
+    assert result.status == "DONE"
+    assert delivered[0]["_cache_rejected"] is True
+    assert delivered[0]["_quality_issues"]
+    assert added == []
+
+
 # ---------------------------------------------------------------------------
 # C-1：以實際回傳筆數切片
 # ---------------------------------------------------------------------------

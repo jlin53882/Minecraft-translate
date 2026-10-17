@@ -6,8 +6,8 @@ import re
 from collections import Counter
 
 from translation_tool.core.guide_format import guide_issues
+from translation_tool.core.lm_format_policy import structured_kind
 from translation_tool.translation_db.models import QualityFilter, QualityIssueDelta
-from translation_tool.translation_db.schema import KIND_GUIDE
 from translation_tool.utils.species_names import (
     is_potential_species_name,
     is_species_candidate,
@@ -84,6 +84,22 @@ def token_issues(source: str, translated: str) -> list[str]:
     return _token_issues_from_counts(format_tokens(source), format_tokens(translated))
 
 
+def _token_counts_for_kind(text: str, kind: str | None) -> Counter[str]:
+    counts = format_tokens(text)
+    if structured_kind(kind):
+        counts.pop("\n", None)
+    return counts
+
+
+def token_issues_for_kind(
+    source: str, translated: str, *, kind: str | None = None
+) -> list[str]:
+    """Validate protected tokens while allowing soft paragraph line reflow."""
+    wanted = _token_counts_for_kind(source, kind)
+    actual = _token_counts_for_kind(translated, kind)
+    return _token_issues_from_counts(wanted, actual)
+
+
 def repair_input_issues(
     source: str, previous_translation: str
 ) -> tuple[bool, tuple[str, ...], bool]:
@@ -111,12 +127,21 @@ def repair_input_issues_for_kind(
     """
     wanted, previous = format_tokens(source), format_tokens(previous_translation)
     newline_mismatch = wanted["\n"] != previous["\n"]
-    _eligible, token_issues_found, _mixed = repair_input_issues_from_counts(
-        wanted, previous
-    )
+    if structured_kind(kind):
+        token_issues_found = token_issues_for_kind(
+            source, previous_translation, kind=kind
+        )
+    else:
+        newline_mismatch = wanted["\n"] != previous["\n"]
+        _eligible, token_issues_found, _mixed = repair_input_issues_from_counts(
+            wanted, previous
+        )
     structure_issues = guide_structure_issues(source, previous_translation, kind=kind)
     issues = (*token_issues_found, *structure_issues)
-    return bool(newline_mismatch or issues), issues, bool(newline_mismatch and issues)
+    eligible = (
+        bool(issues) if structured_kind(kind) else bool(newline_mismatch or issues)
+    )
+    return eligible, issues, bool(newline_mismatch and issues)
 
 
 def repair_input_issues_from_counts(
@@ -153,7 +178,7 @@ def guide_structure_issues(
     這是指南規則的唯一入口：差異預覽、條目校對、修復審查、機翻寫入與 LM 重試都呼叫它，
     其他種類回傳空串列。
     """
-    if kind != KIND_GUIDE or not source:
+    if not structured_kind(kind) or not source:
         return []
     # Keep missing structural marks visible even when an LLM returns an empty
     # guide value; the caller's empty-translation validation remains separate.
@@ -170,7 +195,7 @@ def translation_issues(
     base = (
         repair_output_issues(source, translated)
         if repair
-        else token_issues(source, translated)
+        else token_issues_for_kind(source, translated, kind=kind)
     )
     return [*base, *guide_structure_issues(source, translated, kind=kind)]
 
@@ -219,19 +244,20 @@ def token_quality_comparison(
 
     問題清單含指南條目的結構標記；數量差異（deltas）只描述格式標記。
     """
-    wanted = format_tokens(source)
-    before_tokens = format_tokens(before)
-    after_tokens = format_tokens(after)
     return (
         [
-            *_token_issues_from_counts(wanted, before_tokens),
+            *token_issues_for_kind(source, before, kind=kind),
             *guide_structure_issues(source, before, kind=kind),
         ],
         [
-            *_token_issues_from_counts(wanted, after_tokens),
+            *token_issues_for_kind(source, after, kind=kind),
             *guide_structure_issues(source, after, kind=kind),
         ],
-        _token_issue_deltas_from_counts(wanted, before_tokens, after_tokens),
+        _token_issue_deltas_from_counts(
+            _token_counts_for_kind(source, kind),
+            _token_counts_for_kind(before, kind),
+            _token_counts_for_kind(after, kind),
+        ),
     )
 
 
@@ -266,7 +292,7 @@ def quality_state(
     if not translated:
         return "missing_translation", (), ""
     issues = (
-        *token_issues(source, translated),
+        *token_issues_for_kind(source, translated, kind=kind),
         *guide_structure_issues(source, translated, kind=kind),
     )
     note = whitespace_note(translated)
@@ -315,7 +341,7 @@ def matches_quality(
         if not has_scan:
             # 兩邊都沒有任何格式 token：token 計數必定相同。
             return True
-        return format_tokens(source) == format_tokens(translated)
+        return not translation_issues(source, translated, kind=kind)
 
     direction = criteria.direction
     if direction not in {"all", "missing", "extra"}:
@@ -328,7 +354,10 @@ def matches_quality(
     if not has_scan:
         return False
 
-    wanted, actual = format_tokens(source), format_tokens(translated)
+    wanted, actual = (
+        _token_counts_for_kind(source, kind),
+        _token_counts_for_kind(translated, kind),
+    )
     missing = wanted - actual
     extra = actual - wanted
 

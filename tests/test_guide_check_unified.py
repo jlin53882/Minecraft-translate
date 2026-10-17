@@ -8,6 +8,7 @@ from app.services_impl.moddb_format_diff_service import compare_format_diff
 from app.services_impl.moddb_retranslate_service import (
     _filter_newline_only_repair_entries,
 )
+from translation_tool.core.lm_format_policy import build_translation_payload
 from translation_tool.core.lm_format_retry import (
     build_quality_retry_batch,
     quality_issues,
@@ -15,9 +16,10 @@ from translation_tool.core.lm_format_retry import (
 from translation_tool.plugins.shared.rich_text_shield import shield_text
 from translation_tool.translation_db.quality import (
     guide_structure_issues,
+    repair_input_issues_for_kind,
     translation_issues,
 )
-from translation_tool.translation_db.schema import KIND_GUIDE, KIND_LANG
+from translation_tool.translation_db.schema import KIND_GUIDE, KIND_LANG, KIND_PATCHOULI
 
 SOURCE = "[Crafting](../items/crafting.md)"
 BROKEN = "[合成](/../items/crafting.md)"
@@ -33,6 +35,43 @@ def test_translation_issues_adds_guide_rule_for_guide_entries_only():
     assert translation_issues(SOURCE, BROKEN, kind=KIND_GUIDE) != []
     assert translation_issues(SOURCE, BROKEN, kind=KIND_LANG) == []
     assert translation_issues(SOURCE, SOURCE, kind=KIND_GUIDE) == []
+
+
+def test_soft_paragraph_line_reflow_is_valid_for_guide_and_patchouli():
+    source = "one\ntwo\nthree\nfour\nfive\nsix\nseven\neight"
+    translated = "一二\n三四\n五六\n七\n八"
+
+    assert translation_issues(source, translated, kind=KIND_GUIDE) == []
+    assert translation_issues(source, translated, kind=KIND_PATCHOULI) == []
+
+
+def test_hard_structure_issues_are_precise_and_patchouli_uses_them():
+    source = '# Title\n\n<ItemLink id="example:item" />\n\nText<br>'
+    broken = '# 標題\n<ItemLink id="example:other" />\nText'
+
+    issues = translation_issues(source, broken, kind=KIND_PATCHOULI)
+
+    assert any("段落分隔空行" in issue for issue in issues)
+    assert any("ItemLink" in issue for issue in issues)
+    assert any("<br>" in issue for issue in issues)
+
+
+def test_normal_and_retry_payloads_share_patchouli_format_spec():
+    item = {
+        "text": '# Title\n\n<ItemLink id="example:item" />',
+        "source_text": '# Title\n\n<ItemLink id="example:item" />',
+        "cache_type": "patchouli",
+    }
+
+    payload = build_translation_payload([item])
+    retry = build_quality_retry_batch(
+        [item], [{**item, "text": "# 標題"}], ["0"], retry_same_as_source=False
+    )
+
+    assert payload["items"][0]["format_spec"]
+    assert (
+        retry.payload["items"][0]["format_spec"] == payload["items"][0]["format_spec"]
+    )
 
 
 def test_empty_guide_translation_keeps_missing_structure_visible():
@@ -58,6 +97,14 @@ def test_repair_filter_keeps_mixed_guide_mismatch_for_ai_repair():
 
     assert selected == [entry]
     assert skipped == 0
+
+
+def test_soft_line_reflow_is_not_a_quality_repair_candidate():
+    eligible, issues, mixed = repair_input_issues_for_kind(
+        "one\ntwo\nthree", "一二\n三", kind=KIND_GUIDE
+    )
+
+    assert (eligible, issues, mixed) == (False, (), False)
 
 
 def test_diff_panel_and_write_gate_agree_on_guide_breakage():
