@@ -237,6 +237,9 @@ class _RepairRunProgress:
         self._canonical_item_cache_types = tuple(
             str(item.get("cache_type") or "lang") for item in items
         )
+        self._canonical_cache_type_order = tuple(
+            dict.fromkeys(self._canonical_item_cache_types)
+        )
         self._canonical_item_sessions = tuple(
             item.get("_translation_session")
             if isinstance(item.get("_translation_session"), TranslationSessionState)
@@ -427,7 +430,7 @@ class _RepairRunProgress:
         self._sync_canonical_metadata(submitted)
         cache_types = tuple(
             cache_type
-            for cache_type in dict.fromkeys(self._canonical_item_cache_types)
+            for cache_type in self._canonical_cache_type_order
             if self._canonical_remaining_cache_types.get(cache_type, 0) > 0
         )
         hard_signature = tuple(

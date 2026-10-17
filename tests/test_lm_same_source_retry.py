@@ -560,7 +560,13 @@ def test_quality_retry_request_failure_keeps_original_and_logs_exception_detail(
 ):
     configure_batch(retry=False)
     warnings = []
+    normal_error_handler_calls = []
     monkeypatch.setattr(main, "log_warning", warnings.append)
+    monkeypatch.setattr(
+        main,
+        "_handle_batch_error",
+        lambda *args, **kwargs: normal_error_handler_calls.append((args, kwargs)),
+    )
     item = _item("§aUse %s\nnext", 0)
 
     result, status, calls = _run_with_api(
@@ -580,6 +586,7 @@ def test_quality_retry_request_failure_keeps_original_and_logs_exception_detail(
     assert "HTTPError" in quality_warnings[0]
     assert "429" in quality_warnings[0]
     assert "保留第一次譯文" in quality_warnings[0]
+    assert normal_error_handler_calls == []
 
 
 def test_format_repair_runs_before_the_next_batch_is_requested(

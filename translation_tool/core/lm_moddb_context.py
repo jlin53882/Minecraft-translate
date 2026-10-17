@@ -68,7 +68,7 @@ def attach_moddb_context(
             reviewed_glossary_loader = None
     sessions: dict[str, TranslationSessionState] = {}
     glossaries: dict[tuple[str, str | None], list[dict[str, str]]] = {}
-    source_texts_by_context: dict[tuple[str, str | None], tuple[str, ...]] = {}
+    source_texts_by_context: dict[tuple[str, str | None], dict[str, None]] = {}
     for candidate in items:
         candidate_mod = _infer_module_id(candidate)
         candidate_version = (
@@ -83,9 +83,7 @@ def attach_moddb_context(
         )
         source = candidate.get("source_text") or candidate.get("text")
         if isinstance(source, str) and source.strip():
-            source_texts_by_context[context_key] = tuple(
-                dict.fromkeys((*source_texts_by_context.get(context_key, ()), source))
-            )
+            source_texts_by_context.setdefault(context_key, {}).setdefault(source, None)
     for item in items:
         kind = _infer_kind(item)
         mod_id = _infer_module_id(item)
@@ -108,8 +106,8 @@ def attach_moddb_context(
         if reviewed_glossary_loader is not None and mod_id:
             glossary_key = (mod_id, item_version)
             if glossary_key not in glossaries:
-                source_texts: Sequence[str] = source_texts_by_context.get(
-                    glossary_key, ()
+                source_texts: Sequence[str] = tuple(
+                    source_texts_by_context.get(glossary_key, {})
                 )
                 glossaries[glossary_key] = reviewed_glossary_loader(
                     mod_id, item_version, source_texts

@@ -525,9 +525,29 @@ def test_reviewed_lang_glossary_excludes_quality_mismatches(db):
     for row in rows.values():
         db.review_manual(row.id, expected_zh_tw=row.zh_tw, actor="tester")
 
-    assert db.reviewed_lang_glossary("foo") == [
+    assert db.reviewed_lang_glossary("foo", source_texts=("Cobblestone",)) == [
         {"key": "good", "en_us": "Cobblestone", "zh_tw": "鵝卵石"}
     ]
+
+
+def test_reviewed_lang_glossary_matches_terms_inside_source_sentences(db):
+    db.ingest(
+        "1.21.1",
+        [
+            ScanItem(KIND_LANG, "foo", "pressure", "Pressure Chamber", "壓力室"),
+            ScanItem(KIND_LANG, "foo", "pressured", "Pressured", "受壓"),
+        ],
+    )
+    for row in db.list_entries("1.21.1", limit=10)[0]:
+        db.review_manual(row.id, expected_zh_tw=row.zh_tw, actor="tester")
+
+    assert db.reviewed_lang_glossary(
+        "foo", "1.21.1", ("The Pressure Chamber processes air.",)
+    ) == [{"key": "pressure", "en_us": "Pressure Chamber", "zh_tw": "壓力室"}]
+
+
+def test_reviewed_lang_glossary_without_source_scope_does_not_scan_module(db):
+    assert db.reviewed_lang_glossary("foo") == []
 
 
 def test_reviewed_lang_glossary_is_version_scoped_and_omits_conflicts(db):
@@ -553,6 +573,6 @@ def test_reviewed_lang_glossary_is_version_scoped_and_omits_conflicts(db):
     assert db.reviewed_lang_glossary(
         "foo", "1.21.1", ("Pressure Chamber", "Cobblestone"), limit=None
     ) == [{"key": "cobble", "en_us": "Cobblestone", "zh_tw": "鵝卵石"}]
-    assert db.reviewed_lang_glossary("foo", "1.20.1") == [
-        {"key": "pressure.old", "en_us": "Pressure Chamber", "zh_tw": "壓力室"}
-    ]
+    assert db.reviewed_lang_glossary(
+        "foo", "1.20.1", source_texts=("Pressure Chamber",)
+    ) == [{"key": "pressure.old", "en_us": "Pressure Chamber", "zh_tw": "壓力室"}]

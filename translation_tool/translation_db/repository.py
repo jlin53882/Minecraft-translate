@@ -99,7 +99,9 @@ from translation_tool.utils.cancellation import (
     raise_if_cancelled,
 )
 from translation_tool.utils.species_names import SPECIES_KEY_HINTS, TAXONOMIC_MARKERS
+from translation_tool.utils.text_matching import contains_term
 
+_GLOSSARY_SOURCE_CHUNK_SIZE = 200
 _ENTRY_COLS = "e.id, e.kind, e.mc_version, e.mod_id, e.key, e.en_us"
 _CHUNK = 400  # SQLite 變數上限相容的批次大小
 # 條目最近一次人工活動的時間（逐筆彙總歷史；entry_activity 是它的觸發器維護版本）
@@ -4232,27 +4234,41 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
             params.append(mc_version)
         normalized_sources = tuple(
             dict.fromkeys(
-                source.strip()
+                source
                 for source in source_texts or ()
                 if isinstance(source, str) and source.strip()
             )
         )
         if limit is not None and int(limit) <= 0:
             return []
-        if normalized_sources:
-            placeholders = ", ".join("?" for _ in normalized_sources)
-            clauses.append(f"e.en_us IN ({placeholders})")
-            params.extend(normalized_sources)
-        rows = self._q(
-            f"""
-            SELECT e.key, e.en_us, f.zh_tw
-            FROM entry e
-            JOIN effective f ON f.entry_id = e.id
-            WHERE {" AND ".join(clauses)}
-            ORDER BY e.key, e.id
-            """,
-            tuple(params),
-        )
+        if not normalized_sources:
+            return []
+
+        rows: list[tuple[str, str, str]] = []
+        seen_rows: set[tuple[str, str, str]] = set()
+        for offset in range(0, len(normalized_sources), _GLOSSARY_SOURCE_CHUNK_SIZE):
+            source_chunk = normalized_sources[
+                offset : offset + _GLOSSARY_SOURCE_CHUNK_SIZE
+            ]
+            source_matches = " OR ".join(
+                "instr(lower(?), lower(trim(e.en_us))) > 0" for _source in source_chunk
+            )
+            chunk_rows = self._q(
+                f"""
+                SELECT e.key, e.en_us, f.zh_tw
+                FROM entry e
+                JOIN effective f ON f.entry_id = e.id
+                WHERE {" AND ".join(clauses)}
+                  AND ({source_matches})
+                ORDER BY e.key, e.id
+                """,
+                (*params, *source_chunk),
+            )
+            for row in chunk_rows:
+                identity = tuple(row)
+                if identity not in seen_rows:
+                    seen_rows.add(identity)
+                    rows.append(identity)
         by_source: dict[str, list[dict[str, str]]] = {}
         for key, en_us, zh_tw in rows:
             if not (
@@ -4262,6 +4278,7 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
                 and en_us.strip()
                 and zh_tw.strip()
                 and quality_state(en_us, zh_tw, kind="lang")[0] == "consistent"
+                and any(contains_term(source, en_us) for source in normalized_sources)
             ):
                 continue
             by_source.setdefault(en_us, []).append(

@@ -20,6 +20,7 @@ from translation_tool.core.lm_format_policy import (
     normalize_legacy_prompt,
 )
 from translation_tool.utils.app_paths import get_resource_root
+from translation_tool.utils.text_matching import contains_term
 
 logger = logging.getLogger(__name__)
 
@@ -232,13 +233,15 @@ def _reviewed_glossary_for_items(
     items: list[dict[str, Any]],
 ) -> list[tuple[str, str]]:
     """Keep only unambiguous reviewed terms that occur in the current batch."""
-    batch_sources = {
-        source
-        for item in items
-        if isinstance(item, dict)
-        for source in (item.get("source_text") or item.get("text"),)
-        if isinstance(source, str) and source.strip()
-    }
+    batch_sources = tuple(
+        dict.fromkeys(
+            source
+            for item in items
+            if isinstance(item, dict)
+            for source in (item.get("source_text") or item.get("text"),)
+            if isinstance(source, str) and source.strip()
+        )
+    )
     by_source: dict[str, set[str]] = {}
     for item in items:
         reviewed = item.get("_reviewed_glossary")
@@ -251,9 +254,12 @@ def _reviewed_glossary_for_items(
             if (
                 isinstance(source, str)
                 and isinstance(target, str)
-                and source in batch_sources
                 and source.strip()
                 and target.strip()
+                and any(
+                    contains_term(batch_source, source)
+                    for batch_source in batch_sources
+                )
             ):
                 by_source.setdefault(source, set()).add(target)
 

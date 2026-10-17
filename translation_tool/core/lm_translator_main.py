@@ -1300,6 +1300,55 @@ def _retry_error_detail(exc: Exception) -> str:
     return f"{type(exc).__name__}: {redact_text(exc)[:300]}"
 
 
+def _record_quality_retry_failure(
+    runtime: _BatchRuntime,
+    error: Exception,
+    model_index: int,
+    model_name: str,
+) -> None:
+    """Update health signals without invoking the normal retry state machine."""
+    from translation_tool.core.openai_codex_client import ChatGPTAPIError
+
+    quota = get_model_quota_registry()
+    try:
+        if isinstance(error, ChatGPTAPIError):
+            return
+        status = (
+            error.response.status_code
+            if isinstance(error, requests.HTTPError) and error.response is not None
+            else None
+        )
+        error_kind = _classify_batch_error(error, status)
+        if error_kind == "model_missing":
+            runtime.missing_models.add(model_index)
+            return
+        if error_kind == "key_forbidden":
+            runtime.key_cycle.mark_failed(reason="forbidden")
+            return
+        if error_kind == "rate_limited":
+            try:
+                quota_kind, _retry_after, remote_message = _parse_rate_limit_error(
+                    error
+                )
+            except (AttributeError, IndexError, KeyError, TypeError, ValueError):
+                quota_kind, remote_message = "quota", redact_text(error).upper()
+            if quota_kind == "rpd":
+                quota.mark_exhausted(model_name)
+            elif quota_kind == "rpm":
+                log_warning(
+                    f"[品質重試] RPM 限制（{remote_message or 'unknown'}），不額外等待"
+                )
+            else:
+                runtime.key_cycle.mark_failed()
+            return
+        if error_kind == "service_unavailable" and runtime.provider == "gemini":
+            runtime.key_cycle.record_overload()
+    finally:
+        # A failed optional retry must not leave a probe lease alive for a request
+        # that will never be retried in this path.
+        quota.release(model_name, runtime.quota_owner)
+
+
 def _retry_same_source_translations(
     runtime: _BatchRuntime,
     round_data: _BatchRound,
@@ -1548,19 +1597,7 @@ def _retry_quality_translations(
         )
     except Exception as exc:  # noqa: BLE001 - optional quality retry must not fail a valid batch
         _clear_quota_on_http_success(quota, exc, model_name, started)
-        try:
-            # Reuse the normal classifier so 429/503 still update key/model
-            # health; the returned action is intentionally not retried here.
-            _handle_batch_error(
-                runtime,
-                exc,
-                model_index,
-                model_output_cap=output_cap,
-            )
-        except Exception as health_exc:  # noqa: BLE001 - keep the first result
-            log_warning(
-                f"[品質重試] 更新模型配額狀態失敗：{_retry_error_detail(health_exc)}"
-            )
+        _record_quality_retry_failure(runtime, exc, model_index, model_name)
         log_warning(
             f"[品質重試] 重試請求失敗，{candidate_count} 筆保留第一次譯文"
             f"（{_retry_error_detail(exc)}）"
