@@ -58,14 +58,16 @@ class OfficialLocaleIndex:
             return None
         return self.unique_by_text_pair.get((en_us, zh_cn))
 
-    def glossary_for_items(self, items: list[dict[str, Any]]) -> list[tuple[str, str]]:
+    def glossary_for_items(
+        self, items: list[dict[str, Any]]
+    ) -> list[tuple[str, str, str]]:
         """Collect only official terms relevant to this batch.
 
         Key matches win. A text-only fallback is accepted only for a unique official
         English value, so one-to-many Chinese sources cannot silently overwrite one
         another.
         """
-        terms: dict[str, str] = {}
+        terms: dict[tuple[str, str], str] = {}
         for item in items:
             key = item.get("path") or item.get("key")
             en_us = item.get("source_text") or item.get("text")
@@ -76,9 +78,15 @@ class OfficialLocaleIndex:
             if target is None and isinstance(en_us, str):
                 target = self.unique_tw_by_en.get(en_us)
             if isinstance(en_us, str) and target and en_us != target:
-                terms.setdefault(en_us, target)
+                # The official table can map the same English source to
+                # different Traditional Chinese values by key. Keep that key
+                # in the deduplication identity and in the prompt.
+                terms[(str(key) if isinstance(key, str) else "", en_us)] = target
 
-        ordered = sorted(terms.items(), key=lambda pair: (-len(pair[0]), pair[0]))
+        ordered = sorted(
+            ((key, source, target) for (key, source), target in terms.items()),
+            key=lambda entry: (-len(entry[1]), entry[0], entry[1]),
+        )
         return ordered[:_MAX_PROMPT_TERMS]
 
 
@@ -189,7 +197,14 @@ def build_translation_prompt(
     )
     if official_terms:
         lines = ["\n【官方 Minecraft 術語（本批相關）】"]
-        lines.extend(f"- {source} → {target}" for source, target in official_terms)
+        lines.extend(
+            (
+                f"- key「{key}」：{source} → {target}"
+                if key
+                else f"- {source} → {target}"
+            )
+            for key, source, target in official_terms
+        )
         sections.append("\n".join(lines))
 
     if profile == "lang" and include_moddb_reviewed:

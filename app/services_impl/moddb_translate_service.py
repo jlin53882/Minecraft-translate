@@ -190,6 +190,34 @@ def plan_batches(
     )
 
 
+def _attach_translation_sessions(
+    items: list[dict[str, Any]], *, operation_id: str, db
+) -> None:
+    """Attach one conversation history to each Mod DB ``(module, kind)`` group.
+
+    A module can contain both language entries and Patchouli/guide entries, but
+    those groups use different prompts and cache routes. Sharing their history
+    would leak one kind's payload and terminology into the other kind.
+    Reviewed language terminology remains module-scoped because it is only
+    loaded and injected for ``lang`` entries.
+    """
+    session_by_group: dict[tuple[str, str], TranslationSessionState] = {}
+    reviewed_by_mod: dict[str, list[dict[str, str]]] = {}
+    for item in items:
+        mod_id = str(item["_mod_id"])
+        kind = str(item["_kind"])
+        group = (mod_id, kind)
+        session_by_group.setdefault(
+            group,
+            TranslationSessionState(f"moddb:{operation_id}:{mod_id}:{kind}"),
+        )
+        item["_translation_session"] = session_by_group[group]
+        if kind == KIND_LANG and mod_id not in reviewed_by_mod:
+            reviewed_by_mod[mod_id] = db.reviewed_lang_glossary(mod_id)
+        if kind == KIND_LANG:
+            item["_reviewed_glossary"] = reviewed_by_mod.get(mod_id, [])
+
+
 def estimate_batch_count(total: int, cache_type: str = "lang") -> int:
     """筆數 → 預估批數（畫面在開始前顯示；依設定的每批筆數）。"""
     if total <= 0:
@@ -341,19 +369,7 @@ def _translate_rows(
 
     items = build_items(rows)
     operation_id = str(getattr(session, "id", "") or id(session))
-    session_by_mod: dict[str, TranslationSessionState] = {}
-    reviewed_by_mod: dict[str, list[dict[str, str]]] = {}
-    for item in items:
-        mod_id = str(item["_mod_id"])
-        session_by_mod.setdefault(
-            mod_id,
-            TranslationSessionState(f"moddb:{operation_id}:{mod_id}"),
-        )
-        item["_translation_session"] = session_by_mod[mod_id]
-        if item.get("_kind") == KIND_LANG and mod_id not in reviewed_by_mod:
-            reviewed_by_mod[mod_id] = db.reviewed_lang_glossary(mod_id)
-        if item.get("_kind") == KIND_LANG:
-            item["_reviewed_glossary"] = reviewed_by_mod.get(mod_id, [])
+    _attach_translation_sessions(items, operation_id=operation_id, db=db)
     tracker = RunProgress(total=len(items), planned_batches=plan_batches(items))
     _log(session, tracker.start_line())
     # 第一批結束前也先給畫面即時資料（已用時間從開始就會跳動）

@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import json
 
-from app.services_impl.moddb_translate_service import build_items
+from app.services_impl.moddb_translate_service import (
+    _attach_translation_sessions,
+    build_items,
+)
 from translation_tool.core.lm_session import TranslationSessionState
 from translation_tool.core.lm_translator_shared_loop import (
     translate_items_with_cache_loop,
@@ -119,6 +122,65 @@ def test_moddb_items_form_module_and_kind_batch_boundaries() -> None:
         {("mod-b", KIND_PATCHOULI)},
         {("mod-b", KIND_ADVANCEMENT)},
     ]
+
+
+def test_moddb_sessions_are_isolated_by_module_and_kind() -> None:
+    items = build_items(
+        [
+            (1, KIND_LANG, "mod-a", "lang.key", "Language"),
+            (2, KIND_GUIDE, "mod-a", "guide.md#0", "Guide"),
+            (3, KIND_LANG, "mod-a", "lang.other", "Other"),
+            (4, KIND_LANG, "mod-b", "lang.key", "Language"),
+        ]
+    )
+    glossary_calls: list[str] = []
+
+    class FakeDB:
+        def reviewed_lang_glossary(self, mod_id: str) -> list[dict[str, str]]:
+            glossary_calls.append(mod_id)
+            return []
+
+    _attach_translation_sessions(items, operation_id="op-1", db=FakeDB())
+
+    assert items[0]["_translation_session"] is items[2]["_translation_session"]
+    assert items[0]["_translation_session"] is not items[1]["_translation_session"]
+    assert items[0]["_translation_session"] is not items[3]["_translation_session"]
+    assert items[0]["_translation_session"].key.endswith(":mod-a:lang")
+    assert items[1]["_translation_session"].key.endswith(":mod-a:guide")
+    assert glossary_calls == ["mod-a", "mod-b"]
+
+
+def test_official_glossary_keeps_key_specific_duplicate_english_values(
+    monkeypatch,
+) -> None:
+    from translation_tool.core import official_locale
+
+    index = official_locale.OfficialLocaleIndex(
+        records_by_key={
+            "key.a": official_locale.OfficialLocaleRecord(
+                "key.a", "Charge", "充能", "充電"
+            ),
+            "key.b": official_locale.OfficialLocaleRecord(
+                "key.b", "Charge", "充能", "收費"
+            ),
+        },
+        unique_by_text_pair={},
+        unique_tw_by_en={},
+        revision="test",
+    )
+    monkeypatch.setattr(official_locale, "load_official_locale_index", lambda: index)
+
+    items = [
+        {"path": "key.a", "source_text": "Charge"},
+        {"path": "key.b", "source_text": "Charge"},
+    ]
+    assert index.glossary_for_items(items) == [
+        ("key.a", "Charge", "充電"),
+        ("key.b", "Charge", "收費"),
+    ]
+    prompt = official_locale.build_translation_prompt("基礎", items, profile="lang")
+    assert "key「key.a」：Charge → 充電" in prompt
+    assert "key「key.b」：Charge → 收費" in prompt
 
 
 def test_official_exact_items_can_finish_without_api_credentials(monkeypatch) -> None:
