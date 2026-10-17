@@ -98,6 +98,8 @@ CREATE TABLE IF NOT EXISTS entry (
     UNIQUE (kind, mc_version, mod_id, key)
 );
 CREATE INDEX IF NOT EXISTS idx_entry_content ON entry (kind, mod_id, key, en_us);
+-- Mod DB 已審核術語提示依模組與 key 穩定取前 N 筆；不要讓 ORDER BY 退化成全量臨時排序。
+CREATE INDEX IF NOT EXISTS idx_entry_kind_mod_key ON entry (kind, mod_id, key);
 CREATE INDEX IF NOT EXISTS idx_entry_mod ON entry (mc_version, mod_id);
 CREATE INDEX IF NOT EXISTS idx_entry_list_order
     ON entry (mc_version, mod_id, kind, key, id);
