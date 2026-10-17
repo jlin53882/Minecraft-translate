@@ -41,6 +41,7 @@ from translation_tool.core.lang_merge_dict import (
     merge_lang_dicts,
 )
 from translation_tool.core.lang_merge_provenance import write_translation_provenance
+from translation_tool.core.official_locale import official_exact_translation
 from translation_tool.translation_db import DbSettings
 from translation_tool.utils.log_unit import log_debug, log_info, log_warning
 from translation_tool.utils.safe_json_loader import load_json_auto_encoding
@@ -614,6 +615,7 @@ def _merge_extracted_to_assets(
                     is_pure_english=stage2_is_pure_english,
                     is_from_output_dir=bool(existing_tw),
                     db_lookup=db_lookup,
+                    official_lookup=official_exact_translation,
                 )
             except Exception as exc:  # noqa: BLE001 - 失敗已記錄，不中斷批次流程
                 mod_error = f"{modid}: merge failed: {exc}"
