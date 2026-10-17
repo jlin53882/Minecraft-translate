@@ -114,7 +114,7 @@ LMView 本身不直接操作 cache_manager，只透過 `write_new_cache_switch` 
 - 其他等待秒數可由 `config.json` 的 `lm_translator` 覆寫：`rpm_cooldown_sec`（無效值退回預設）、`overload_retry_sec`、`key_rotation_buffer_sec`（預設 5）、`request_interval_sec`（預設 4）。其中只有 `rpm_cooldown_sec` 在設定頁有欄位，其餘需手動編輯 `config.json`
 - **每批項目數上限**：共用迴圈以 `_get_default_batch_size`（`lm_translator_shared_loop.py`）依 cache_type 讀 `initial_batch_size_*`（ftbquests / kubejs / patchouli / md / lang），再由 `select_batch_size` 依 token 預算取前綴；同一批只取開頭連續、同一 cache_type 的項目。`translate_batch_smart` 內另以 `_build_batch_runtime` 讀同一組設定。預設值以設定頁（`config_schema.py`）為準
 - 每批成功後 `batch_size = min(batch_size, remaining_count)` 動態縮小；批次間隔由 `sleep_seconds_between_batches` 控制。全部項目完成且 `rpm_cooldown_sec > 0` 時另外執行 `interruptible_sleep(rpm_cooldown_sec)`（免費層 RPM 保護）。
-- API 限流冷卻、429 `retry_after`、overload 重試、品質 retry 間隔與換 Key 緩衝使用 `interruptible_sleep()`，可被取消打斷；正常批次間隔由共用迴圈的 `sleep_seconds_between_batches` 執行。每次準備下一個內部批次前，會依最新的 session history 重新計算固定 prompt token 預算，取消會在下一個批次邊界檢查。
+- API 限流冷卻、429 `retry_after`、overload 重試、品質 retry 間隔與換 Key 緩衝使用 `interruptible_sleep()`，可被取消打斷；provider／model 的正常批次間隔由共用 request slot 管理，等待中的取消會釋放尚未送出的預約，API `Retry-After` 會推遲同一共用時鐘。每次準備下一個內部批次前，會依最新的 session history 重新計算固定 prompt token 預算，取消會在下一個批次邊界檢查。
 - 縮小 batch（`BatchAction.SHRINK_BATCH`）的情況：400 INVALID_ARGUMENT（payload 過大 / 格式錯誤）、回應被截斷或漏翻、逾時 / 5xx 類錯誤；縮小係數 `batch_shrink_factor`（預設 0.75）、下限 `min_batch_size`（預設 50；lang 類型下限為 `MIN_LANG_BATCH_SIZE`）。縮到極限時以原文回填（標記 `_untranslated`，不寫入快取）並繼續後續項目
 - `provider` 為 `chatgpt` 時，ChatGPT API 錯誤交由 `_handle_chatgpt_api_error` 處理：暫時性錯誤最多重試 `CHATGPT_MAX_RETRIES`（3）次，等待時間上限為 `CHATGPT_MAX_RETRY_AFTER_SEC`（120 秒），超過即回報錯誤
 

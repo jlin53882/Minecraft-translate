@@ -12,6 +12,10 @@ import requests
 from translation_tool.core import lm_translator_main as main
 from translation_tool.core.lm_batch_budget import get_tracker
 from translation_tool.core.lm_format_policy import LANG_SEMANTIC_FORMAT_POLICY_PROMPT
+from translation_tool.core.lm_key_health import (
+    get_key_health_registry,
+    get_model_quota_registry,
+)
 from translation_tool.utils.cancellation import TaskCancelled, cancel_scope
 
 
@@ -587,6 +591,75 @@ def test_quality_retry_request_failure_keeps_original_and_logs_exception_detail(
     assert "429" in quality_warnings[0]
     assert "保留第一次譯文" in quality_warnings[0]
     assert normal_error_handler_calls == []
+
+
+def test_quality_retry_forbidden_key_stays_cooling_after_batch_success(
+    monkeypatch, configure_batch
+):
+    configure_batch(retry=False)
+    key_health = get_key_health_registry()
+    key_health.clear()
+    try:
+        item = _item("Use %s\nnext", 0)
+        result, status, calls = _run_with_api(
+            monkeypatch,
+            [item],
+            [
+                lambda call: _reply(call, {"Use %s\nnext": "使用 next"}),
+                _http_error(403),
+            ],
+        )
+
+        assert status == "AUTO"
+        assert len(calls) == 2
+        assert result == [{**item, "text": "使用 next"}]
+        assert key_health.is_cooling("test-key")
+    finally:
+        key_health.clear()
+
+
+def test_quality_retry_rpm_retry_after_updates_shared_scheduler(
+    monkeypatch, configure_batch
+):
+    configure_batch(retry=False)
+    quota = get_model_quota_registry()
+    quota.clear()
+    response = requests.Response()
+    response.status_code = 429
+    response._content = json.dumps(
+        {
+            "error": {
+                "message": "RPM limit",
+                "details": [
+                    {
+                        "@type": "type.googleapis.com/google.rpc.QuotaFailure",
+                        "violations": [{"quotaId": "GenerateRequestsPerMinute"}],
+                    },
+                    {
+                        "@type": "type.googleapis.com/google.rpc.RetryInfo",
+                        "retryDelay": "30s",
+                    },
+                ],
+            }
+        }
+    ).encode()
+    try:
+        item = _item("Use %s\nnext", 0)
+        result, status, calls = _run_with_api(
+            monkeypatch,
+            [item],
+            [
+                lambda call: _reply(call, {"Use %s\nnext": "使用 next"}),
+                requests.HTTPError("429", response=response),
+            ],
+        )
+
+        assert status == "AUTO"
+        assert len(calls) == 2
+        assert result == [{**item, "text": "使用 next"}]
+        assert quota.reserve_request_slot("gemini", "same-source-test-model", 4) > 29
+    finally:
+        quota.clear()
 
 
 def test_format_repair_runs_before_the_next_batch_is_requested(

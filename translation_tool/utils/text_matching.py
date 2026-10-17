@@ -38,8 +38,45 @@ def contains_term(source: str, term: str) -> bool:
         start = index + 1
 
 
+def matching_terms(sources: tuple[str, ...], terms: tuple[str, ...]) -> set[str]:
+    """Return terms that occur in at least one source using a prefix index.
+
+    The index avoids testing every term against every source.  A final
+    ``contains_term`` call keeps the word-boundary contract authoritative.
+    """
+    normalized_terms: dict[str, str] = {}
+    for term in terms:
+        if not isinstance(term, str):
+            continue
+        normalized = term.strip().casefold()
+        if normalized:
+            normalized_terms.setdefault(normalized, term)
+    if not normalized_terms:
+        return set()
+
+    prefix_index: dict[str, list[tuple[str, str]]] = {}
+    for normalized, original in normalized_terms.items():
+        prefix_index.setdefault(normalized[:3], []).append((original, normalized))
+
+    matched: set[str] = set()
+    for source in sources:
+        if not isinstance(source, str):
+            continue
+        normalized_source = source.casefold()
+        prefixes = {
+            normalized_source[index : index + size]
+            for size in (1, 2, 3)
+            for index in range(len(normalized_source) - size + 1)
+        }
+        for prefix in prefixes:
+            for original, normalized in prefix_index.get(prefix, ()):
+                if contains_term(source, original):
+                    matched.add(original)
+    return matched
+
+
 def _is_word_char(char: str) -> bool:
     return bool(char) and (char.isalnum() or char == "_")
 
 
-__all__ = ["contains_term"]
+__all__ = ["contains_term", "matching_terms"]

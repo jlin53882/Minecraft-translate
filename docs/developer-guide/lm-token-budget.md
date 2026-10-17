@@ -72,7 +72,7 @@
 
 ### 批次間隔與 RPM
 
-`lm_translator.rate_limit.sleep_seconds_between_batches` 是 provider／model 共用的請求最小間隔，預設為 `4` 秒，對每分鐘 15 次（RPM 15）的模型提供基本節流。正常批次、同一次翻譯因 token 或截斷而縮成的內部批次，以及品質 retry 都經過同一個 request slot；因此品質 retry 與下一個內部批次不會繞過間隔，也不會為同一請求路徑重複 sleep。設定為 `0` 才會停用這個間隔。它不會覆蓋 API 回傳的 `Retry-After`、429／503 重試等待、換 Key 緩衝或其他錯誤退避；這些等待仍由各自的限流與錯誤處理流程負責。
+`lm_translator.rate_limit.sleep_seconds_between_batches` 是 provider／model 共用的請求最小間隔，預設為 `4` 秒，對每分鐘 15 次（RPM 15）的模型提供基本節流。正常批次、同一次翻譯因 token 或截斷而縮成的內部批次，以及品質 retry 都經過同一個可取消的 request slot；等待中的任務取消時會歸還尚未送出的 slot，已送出的請求不會回收。設定為 `0` 才會停用這個間隔。API 回傳的 `Retry-After` 會推遲同一 provider／model 的共用時鐘，不會讓品質 retry 直接進入第二輪重試；換 Key 緩衝或其他錯誤退避仍由各自流程負責。
 
 ## 譯文與原文相同時重新確認
 
@@ -84,7 +84,7 @@
 
 - `assets/official_locales/minecraft/` 固定保存 `en_us.json`、`zh_cn.json`、`zh_tw.json` 與完整性 `manifest.json`，不依 Minecraft 版本分資料夾。
 - 語系合併對所有種類共用 `key + en_us + zh_cn` 的官方精確命中；沒有命中時才回到既有 OpenCC 與 `replace_rules.json`。既有輸出資料夾人工譯文與資料庫有效譯文仍優先保留。
-- LLM 每批會把相關官方 Minecraft 術語加入中文提示詞。Mod DB 已審核 `lang` 譯文以同一模組與目前 Minecraft 版本為範圍，只有本批原文中出現的術語才會注入 `lang`、Patchouli、Guide、Advancement 與 `md`／`.txt` 路線；術語可出現在句子中，使用大小寫不敏感的詞界判斷，避免把 `Pressured` 誤當成 `Pressure`。同一英文在目前範圍內有多個繁中譯文時會隔離，不任意選第一筆，也不直接覆蓋目前翻譯。資料庫查詢以來源分批建立候選，不在沒有本批來源時掃描整個模組，也不超過 SQLite 綁定參數上限。
+- LLM 每批會把相關官方 Minecraft 術語加入中文提示詞。Mod DB 已審核 `lang` 譯文以同一模組與目前 Minecraft 版本為範圍，只有本批原文中出現的術語才會注入 `lang`、Patchouli、Guide、Advancement 與 `md`／`.txt` 路線；術語可出現在句子中，使用大小寫不敏感的詞界判斷，避免把 `Pressured` 誤當成 `Pressure`。同一英文在目前範圍內有多個繁中譯文時會隔離，不任意選第一筆，也不直接覆蓋目前翻譯。資料庫先以模組與版本一次取得有界的已審核候選，再用共享前綴索引做批次文字匹配，避免每 200 筆來源重跑一組 SQL `OR` 條件；沒有本批來源時不查詢整個模組。
 - Mod DB 批次以 `(cache_type, batch_group)` 分界；同一模組的不同 kind 批次共用一個 client-side session，模型收到的是同一段歷史，不同模組彼此隔離。預覽、AI 翻譯與 AI 修正翻譯共用相同的 planner 與固定 prompt token 估算；批次內容與動態提示詞的 token 會計入輸入預算，但翻譯輸出 KPI 只計算原始 key/value 內容。開始前的批次數是以當下 session 歷史為基準的下界估算；成功批次會增加 session 歷史，錯誤處理也可能縮小後續批次，因此實際 HTTP 請求數可能高於預估。
 
 ## 相關檔案

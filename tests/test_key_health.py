@@ -900,6 +900,29 @@ def test_request_slot_is_shared_by_provider_and_model():
     assert other_provider == 0
 
 
+def test_cancelled_request_slot_releases_queued_time():
+    from translation_tool.core.lm_key_health import ModelQuotaRegistry
+
+    reg = ModelQuotaRegistry()
+    reg.reserve_request_slot("gemini", "m1", 4)
+    queued_wait, reservation = reg.reserve_request_slot_with_token("gemini", "m1", 4)
+    assert queued_wait > 0
+
+    reg.cancel_request_slot(reservation)
+
+    following_wait = reg.reserve_request_slot("gemini", "m1", 4)
+    assert following_wait < 6
+
+
+def test_retry_after_defers_the_shared_request_slot():
+    from translation_tool.core.lm_key_health import ModelQuotaRegistry
+
+    reg = ModelQuotaRegistry()
+    reg.defer_request_slot("gemini", "m1", 30)
+
+    assert reg.reserve_request_slot("gemini", "m1", 4) > 29
+
+
 def test_uncertain_window_is_visible_to_readers_and_consistent_with_gating():
     """不確定視窗（沒有 tzdata）：快照／is_exhausted 與實際門控一致，並標示「確認中」。"""
     from translation_tool.core.lm_key_health import ModelQuotaRegistry

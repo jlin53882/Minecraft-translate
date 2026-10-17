@@ -11,7 +11,8 @@
 `(provider, model)` 為鍵，在程序內共享 `sleep_seconds_between_batches` 的最小間隔。
 正常批次、內部縮批與品質 retry 使用同一個 slot；品質 retry 仍只嘗試一次，且先取得
 同一模型的 quota claim／probe lease。429／503 只更新必要的 key／模型健康訊號，不會呼叫
-會等待、縮批或切換模型的完整錯誤狀態機，也不會因此增加品質 retry 次數。
+會等待、縮批或切換模型的完整錯誤狀態機，也不會因此增加品質 retry 次數。等待中的取消會
+回收尚未送出的 slot；品質 retry 收到 `Retry-After` 時會把時間寫回共用 scheduler。
 
 | 項目 | 說明 |
 |---|---|
@@ -39,7 +40,7 @@
 | 識別 | 以 key 的 SHA-256 前 16 碼識別，不是 index。設定檔增減 / 調換 key 後狀態仍對得上；狀態與日誌只會出現遮罩後的字串（前 4 後 4） |
 | 領取 | `ApiKeyCycle.claim()` 跳過「本輪已失敗」與「冷卻中」的 key；並發分散（ATK-009）不變 |
 | 全部冷卻 | 每個 cycle 最多**試探一次**冷卻最快到期的那把。失敗 → `ALL_KEYS_EXHAUSTED`；成功 → 恢復 |
-| 成功 | `ApiKeyCycle.record_success()`：清除這把 key 的紀錄並開始新的 cycle（`reset()` 本身不會清除共用狀態） |
+| 成功 | `ApiKeyCycle.record_success()`：清除本輪未標記失敗的 key 紀錄並開始新的 cycle；若品質 retry 在同一輪回報 403，該 key 的冷卻優先保留（`reset()` 本身不會清除共用狀態） |
 
 ## 給 UI 使用
 

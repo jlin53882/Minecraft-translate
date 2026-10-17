@@ -63,7 +63,10 @@ from translation_tool.core.official_locale import (
     build_translation_prompt,
     official_translation_for_item,
 )
-from translation_tool.utils.cancellation import interruptible_sleep, raise_if_cancelled
+from translation_tool.utils.cancellation import (
+    interruptible_sleep,
+    raise_if_cancelled,
+)
 from translation_tool.utils.config_manager import get_models_config, load_config
 from translation_tool.utils.log_unit import log_error, log_info, log_warning
 from translation_tool.utils.redaction import redact_text
@@ -594,14 +597,21 @@ def _batch_interval_seconds(lm_cfg: dict) -> float:
 
 def _wait_for_request_slot(runtime: _BatchRuntime, model_name: str) -> None:
     """Throttle every provider request through the shared model clock."""
-    wait_sec = get_model_quota_registry().reserve_request_slot(
-        getattr(runtime, "provider", runtime.lm_cfg.get("provider", "gemini")),
+    quota = get_model_quota_registry()
+    provider = getattr(runtime, "provider", runtime.lm_cfg.get("provider", "gemini"))
+    wait_sec, reservation = quota.reserve_request_slot_with_token(
+        provider,
         model_name,
         runtime.batch_interval_sec,
     )
-    if wait_sec > 0:
-        interruptible_sleep(wait_sec)
-    raise_if_cancelled()
+    try:
+        if wait_sec > 0:
+            interruptible_sleep(wait_sec)
+        raise_if_cancelled()
+    except BaseException:
+        quota.cancel_request_slot(reservation)
+        raise
+    quota.commit_request_slot(reservation)
 
 
 def _build_batch_prompt_context(
@@ -1327,16 +1337,16 @@ def _record_quality_retry_failure(
             return
         if error_kind == "rate_limited":
             try:
-                quota_kind, _retry_after, remote_message = _parse_rate_limit_error(
-                    error
-                )
+                quota_kind, retry_after, remote_message = _parse_rate_limit_error(error)
             except (AttributeError, IndexError, KeyError, TypeError, ValueError):
                 quota_kind, remote_message = "quota", redact_text(error).upper()
             if quota_kind == "rpd":
                 quota.mark_exhausted(model_name)
             elif quota_kind == "rpm":
+                quota.defer_request_slot(runtime.provider, model_name, retry_after)
                 log_warning(
-                    f"[品質重試] RPM 限制（{remote_message or 'unknown'}），不額外等待"
+                    f"[品質重試] RPM 限制（{remote_message or 'unknown'}），"
+                    f"共用 scheduler 延後 {retry_after} 秒"
                 )
             else:
                 runtime.key_cycle.mark_failed()

@@ -20,7 +20,7 @@ from translation_tool.core.lm_format_policy import (
     normalize_legacy_prompt,
 )
 from translation_tool.utils.app_paths import get_resource_root
-from translation_tool.utils.text_matching import contains_term
+from translation_tool.utils.text_matching import matching_terms
 
 logger = logging.getLogger(__name__)
 
@@ -256,17 +256,14 @@ def _reviewed_glossary_for_items(
                 and isinstance(target, str)
                 and source.strip()
                 and target.strip()
-                and any(
-                    contains_term(batch_source, source)
-                    for batch_source in batch_sources
-                )
             ):
                 by_source.setdefault(source, set()).add(target)
 
+    matched_sources = matching_terms(batch_sources, tuple(by_source))
     return [
         (source, next(iter(targets)))
         for source, targets in sorted(by_source.items())
-        if len(targets) == 1
+        if source in matched_sources and len(targets) == 1
     ][:_MAX_PROMPT_TERMS]
 
 
