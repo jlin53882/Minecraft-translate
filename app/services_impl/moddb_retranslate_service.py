@@ -42,7 +42,7 @@ from translation_tool.core.lm_translator_shared_loop import _get_default_batch_s
 from translation_tool.translation_db import TranslationDB
 from translation_tool.translation_db.models import SameSourceAIEntry
 from translation_tool.translation_db.quality import (
-    repair_input_issues,
+    repair_input_issues_for_kind,
     translation_issues,
 )
 from translation_tool.translation_db.run_progress import format_repair_live
@@ -1591,8 +1591,10 @@ def _filter_newline_only_repair_entries(
     selected: list[SameSourceAIEntry] = []
     skipped = 0
     for entry in entries:
-        eligible, hard_issues, mixed = repair_input_issues(
-            entry.en_us, entry.current_ai_translation
+        eligible, hard_issues, mixed = repair_input_issues_for_kind(
+            entry.en_us,
+            entry.current_ai_translation,
+            kind=entry.kind,
         )
         if eligible and not hard_issues and not mixed:
             skipped += 1

@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 from app.services_impl.moddb_format_diff_service import compare_format_diff
+from app.services_impl.moddb_retranslate_service import (
+    _filter_newline_only_repair_entries,
+)
 from translation_tool.core.lm_format_retry import (
     build_quality_retry_batch,
     quality_issues,
@@ -40,6 +45,19 @@ def test_repair_mode_keeps_its_lf_allowance_and_still_checks_guide_links():
     translated = "第一行第二行 [合成](/../items/crafting.md)"
     issues = translation_issues(source, translated, kind=KIND_GUIDE, repair=True)
     assert issues and all("換行" not in issue for issue in issues)
+
+
+def test_repair_filter_keeps_mixed_guide_mismatch_for_ai_repair():
+    entry = SimpleNamespace(
+        kind=KIND_GUIDE,
+        en_us="[Crafting](../items/crafting.md)\nNext",
+        current_ai_translation="[合成](/../items/crafting.md)",
+    )
+
+    selected, skipped = _filter_newline_only_repair_entries([entry])
+
+    assert selected == [entry]
+    assert skipped == 0
 
 
 def test_diff_panel_and_write_gate_agree_on_guide_breakage():
