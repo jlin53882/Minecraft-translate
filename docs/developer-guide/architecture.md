@@ -177,6 +177,7 @@ Minecraft-translate/
 | 模組 | 職責 |
 |------|------|
 | `lm_translator.py` + `_main.py` | LM API 呼叫、翻譯核心邏輯 |
+| `lm_batch_planner.py` + `lm_moddb_context.py` | 統一批次邊界／token 預估，以及同模組 session／已審核 lang 參考詞彙 |
 | `lm_translator_shared_loop.py` | 翻譯批次迴圈、cache 命中分流 |
 | `lm_translator_shared_cache.py` | Cache 讀寫與 split 邏輯 |
 | `lm_translator_shared_recording.py` | 翻譯結果寫入 cache |

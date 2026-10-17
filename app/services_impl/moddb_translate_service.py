@@ -11,6 +11,7 @@ import logging
 import traceback
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from functools import partial
 from typing import Any
 
 from app.services_impl.logging_service import UI_LOG_HANDLER
@@ -24,8 +25,15 @@ from app.services_impl.pipelines._pipeline_logging import (
     mirror_session_log,
 )
 from app.tasks.task_session import add_log_unmirrored
-from translation_tool.core.lm_session import TranslationSessionState
-from translation_tool.core.lm_translator_main import translate_batch_smart
+from translation_tool.core.lm_batch_planner import (
+    count_planned_batches,
+    group_items_by_batch_key,
+)
+from translation_tool.core.lm_moddb_context import attach_moddb_context
+from translation_tool.core.lm_translator_main import (
+    estimate_batch_fixed_input_tokens,
+    translate_batch_smart,
+)
 from translation_tool.core.lm_translator_shared_loop import _get_default_batch_size
 from translation_tool.core.lm_translator_skeleton import (
     TranslatorHooks,
@@ -40,13 +48,14 @@ from translation_tool.translation_db.run_progress import (
     format_live,
     tick_live,
 )
-from translation_tool.translation_db.schema import KIND_LANG, cache_type_for_kind
+from translation_tool.translation_db.schema import cache_type_for_kind
 from translation_tool.utils.cache_manager import add_to_cache, save_translation_cache
 from translation_tool.utils.cancellation import (
     TaskCancelled,
     cancel_scope,
     is_cancelled,
 )
+from translation_tool.utils.config_manager import load_config
 
 # View 經由本模組取用進度格式化函式（View 不直接 import translation_tool 引擎）
 __all__ = [
@@ -55,6 +64,8 @@ __all__ = [
     "TranslateOptions",
     "TranslateReport",
     "estimate_batch_count",
+    "estimate_scope_batches",
+    "estimate_scope_plan",
     "format_duration",
     "format_live",
     "plan_batches",
@@ -104,6 +115,7 @@ class TranslateReport:
     # 特殊字元不一致而沒寫入的條目：條目 id → AI 回傳的譯文（畫面「檢視」用，預填給人工修正）
     flagged_entries: dict[int, str] = field(default_factory=dict)
     batches: int = 0  # 實際完成的批數
+    planned_batches: int = 0  # 開始時依相同 planner 估出的批數下界
     elapsed_sec: float = 0.0
 
     def as_dict(self) -> dict[str, Any]:
@@ -118,6 +130,7 @@ class TranslateReport:
             "dry_run": self.dry_run,
             "remaining": self.remaining,
             "batches": self.batches,
+            "planned_batches": self.planned_batches,
             "elapsed_sec": self.elapsed_sec,
         }
 
@@ -163,59 +176,41 @@ def build_items(
 
 
 def plan_batches(
-    items: list[dict[str, Any]], *, check: Callable[[], None] | None = None
+    items: list[dict[str, Any]],
+    *,
+    check: Callable[[], None] | None = None,
+    lm_cfg: dict[str, Any] | None = None,
+    fixed_input_tokens_for_batch: Callable[[list[dict[str, Any]]], float] | None = None,
 ) -> int:
-    """依設定的每批筆數估計總批數（各類型分開算；遇錯縮小批次時實際會更多）。
+    """依實際 cache/profile、模組種類邊界與固定 prompt token 規劃批次。"""
+    if lm_cfg is None:
+        from translation_tool.utils.config_manager import load_config
 
-    ``check`` 若提供，會在處理每列前呼叫，供 deadline/cancel 檢查使用。
-    """
-    counts: dict[tuple[str, str], tuple[str, int]] = {}
-    for item in items:
-        if check is not None:
-            check()
-        group = item.get("_batch_group")
-        if isinstance(group, tuple) and len(group) == 2:
-            group_key = (str(group[0]), str(group[1]))
-        else:
-            group_key = ("", str(item.get("cache_type") or "lang"))
-        cache_type = str(item.get("cache_type") or "lang")
-        previous_cache_type, previous_count = counts.get(group_key, (cache_type, 0))
-        counts[group_key] = (previous_cache_type, previous_count + 1)
-    return sum(
-        estimate_batches(
-            {cache_type: count},
-            lambda cache_type: _get_default_batch_size(cache_type, None),
-        )
-        for (_mod_id, _kind), (cache_type, count) in counts.items()
+        config = load_config()
+        lm_cfg = config.get("lm_translator", {}) if isinstance(config, dict) else {}
+    fixed = fixed_input_tokens_for_batch
+    if fixed is None and lm_cfg.get("token_budget_enabled", True):
+        fixed = partial(estimate_batch_fixed_input_tokens, lm_cfg=lm_cfg)
+    return count_planned_batches(
+        items,
+        lm_cfg=lm_cfg,
+        batch_size_for_type=lambda cache_type: _get_default_batch_size(
+            cache_type, None
+        ),
+        fixed_input_tokens_for_batch=fixed,
+        check=check,
     )
 
 
 def _attach_translation_sessions(
     items: list[dict[str, Any]], *, operation_id: str, db
 ) -> None:
-    """Attach one conversation history to each Mod DB ``(module, kind)`` group.
-
-    A module can contain both language entries and Patchouli/guide entries, but
-    those groups use different prompts and cache routes. Sharing their history
-    would leak one kind's payload and terminology into the other kind.
-    Reviewed language terminology remains module-scoped because it is only
-    loaded and injected for ``lang`` entries.
-    """
-    session_by_group: dict[tuple[str, str], TranslationSessionState] = {}
-    reviewed_by_mod: dict[str, list[dict[str, str]]] = {}
-    for item in items:
-        mod_id = str(item["_mod_id"])
-        kind = str(item["_kind"])
-        group = (mod_id, kind)
-        session_by_group.setdefault(
-            group,
-            TranslationSessionState(f"moddb:{operation_id}:{mod_id}:{kind}"),
-        )
-        item["_translation_session"] = session_by_group[group]
-        if kind == KIND_LANG and mod_id not in reviewed_by_mod:
-            reviewed_by_mod[mod_id] = db.reviewed_lang_glossary(mod_id)
-        if kind == KIND_LANG:
-            item["_reviewed_glossary"] = reviewed_by_mod.get(mod_id, [])
+    """Attach one session/glossary to every kind belonging to the same module."""
+    attach_moddb_context(
+        items,
+        operation_id=operation_id,
+        reviewed_glossary_loader=db.reviewed_lang_glossary,
+    )
 
 
 def estimate_batch_count(total: int, cache_type: str = "lang") -> int:
@@ -225,6 +220,48 @@ def estimate_batch_count(total: int, cache_type: str = "lang") -> int:
     return estimate_batches(
         {cache_type: total}, lambda k: _get_default_batch_size(k, None)
     )
+
+
+def estimate_scope_plan(
+    db,
+    *,
+    version: str,
+    mod_ids: tuple[str, ...] | list[str] = (),
+    limit: int = 0,
+    reuse_other_versions: bool = True,
+) -> tuple[int, int]:
+    """Return the exact selected AI rows and their shared planned batch count."""
+    rows = db.untranslated_entries(
+        version,
+        list(mod_ids),
+        limit or None,
+        exclude_reusable=reuse_other_versions,
+    )
+    items = group_items_by_batch_key(build_items(rows))
+    _attach_translation_sessions(
+        items,
+        operation_id=f"count:{version}:{','.join(mod_ids)}",
+        db=db,
+    )
+    return len(rows), plan_batches(items)
+
+
+def estimate_scope_batches(
+    db,
+    *,
+    version: str,
+    mod_ids: tuple[str, ...] | list[str] = (),
+    limit: int = 0,
+    reuse_other_versions: bool = True,
+) -> int:
+    """Return the planned batch count for the exact filtered AI rows."""
+    return estimate_scope_plan(
+        db,
+        version=version,
+        mod_ids=mod_ids,
+        limit=limit,
+        reuse_other_versions=reuse_other_versions,
+    )[1]
 
 
 def _log(session, text: str, level: str = "info") -> None:
@@ -263,10 +300,17 @@ def _select_rows(session, db, options: TranslateOptions, report: TranslateReport
                 "開始機翻時會直接沿用（不呼叫 AI）；"
                 "只有「模組、鍵值、原文都相同」才算，原文不同的不會沿用",
             )
+        preview_items = group_items_by_batch_key(build_items(rows), check=None)
+        _attach_translation_sessions(
+            preview_items,
+            operation_id=f"preview:{getattr(session, 'id', '') or id(session)}",
+            db=db,
+        )
+        report.planned_batches = plan_batches(preview_items)
         _log(
             session,
             f"🔎 預覽：{report.remaining:,} 筆未翻譯，本次將送 AI 翻譯 {len(rows):,} 筆"
-            f"，預估約 {plan_batches(build_items(rows)):,} 批（未呼叫 AI、未寫入；"
+            f"，預估約 {report.planned_batches:,} 批（未呼叫 AI、未寫入；"
             "實際時間依 API 速度而定，開始後每批結束會更新預估）",
         )
         for _eid, _kind, mod_id, key, en_us in rows[:5]:
@@ -367,13 +411,21 @@ def _translate_rows(
             raise TaskCancelled()
         return translate_batch_smart(batch, total=batch_total)
 
-    items = build_items(rows)
+    items = group_items_by_batch_key(build_items(rows))
     operation_id = str(getattr(session, "id", "") or id(session))
     _attach_translation_sessions(items, operation_id=operation_id, db=db)
-    tracker = RunProgress(total=len(items), planned_batches=plan_batches(items))
+    report.planned_batches = plan_batches(items)
+    tracker = RunProgress(total=len(items), planned_batches=report.planned_batches)
     _log(session, tracker.start_line())
     # 第一批結束前也先給畫面即時資料（已用時間從開始就會跳動）
     session.set_summary({**report.as_dict(), "live": tracker.live()})
+    lm_config = load_config()
+    lm_cfg = lm_config.get("lm_translator", {}) if isinstance(lm_config, dict) else {}
+    fixed_input_tokens_for_batch = (
+        estimate_batch_fixed_input_tokens
+        if isinstance(lm_cfg, dict) and lm_cfg.get("token_budget_enabled", True)
+        else None
+    )
     with cancel_scope(cancelled):
         result = run_translator_skeleton(
             items,
@@ -383,6 +435,7 @@ def _translate_rows(
             reload_cache=options.write_cache,
             cache_add=add_to_cache if options.write_cache else _noop_cache,
             cache_save=save_translation_cache if options.write_cache else _noop_cache,
+            fixed_input_tokens_for_batch=fixed_input_tokens_for_batch,
             hooks=TranslatorHooks(
                 on_translated_item=on_translated_item,
                 on_batch_flushed=flush,

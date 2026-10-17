@@ -80,8 +80,8 @@
 
 - `assets/official_locales/minecraft/` 固定保存 `en_us.json`、`zh_cn.json`、`zh_tw.json` 與完整性 `manifest.json`，不依 Minecraft 版本分資料夾。
 - 語系合併對所有種類共用 `key + en_us + zh_cn` 的官方精確命中；沒有命中時才回到既有 OpenCC 與 `replace_rules.json`。既有輸出資料夾人工譯文與資料庫有效譯文仍優先保留。
-- LLM 每批會把相關官方 Minecraft 術語加入中文提示詞。Mod DB 已審核譯文只在 `kind=lang`、同一模組範圍內加入，不會污染 Patchouli、指南或其他種類。
-- Mod DB 批次以 `(mod_id, kind)` 分界；同一模組的不同批次共用一個 client-side session，模型收到的是同一段歷史，不同模組彼此隔離。批次內容與動態提示詞的 token 會計入輸入預算，但翻譯輸出 KPI 只計算原始 key/value 內容。
+- LLM 每批會把相關官方 Minecraft 術語加入中文提示詞。Mod DB 已審核 `lang` 譯文以同一模組為範圍，提供給 `lang`、Patchouli、Guide、Advancement 與 `md`／`.txt` 路線作為參考，不直接覆蓋目前翻譯。
+- Mod DB 批次以 `(cache_type, batch_group)` 分界；同一模組的不同 kind 批次共用一個 client-side session，模型收到的是同一段歷史，不同模組彼此隔離。預覽、AI 翻譯與 AI 修正翻譯共用相同的 planner 與固定 prompt token 估算；批次內容與動態提示詞的 token 會計入輸入預算，但翻譯輸出 KPI 只計算原始 key/value 內容。開始前的批次數是以當下 session 歷史為基準的下界估算；成功批次會增加 session 歷史，錯誤處理也可能縮小後續批次，因此實際 HTTP 請求數可能高於預估。
 
 ## 相關檔案
 

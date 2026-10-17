@@ -228,6 +228,7 @@ class TranslatorSkeleton:
     reload_cache: bool = True
     cache_add: Callable[..., bool] | None = None
     cache_save: Callable[..., bool] | None = None
+    fixed_input_tokens_for_batch: Callable[[list[dict[str, Any]]], float] | None = None
     hooks: TranslatorHooks = field(default_factory=TranslatorHooks)
 
     def run(self) -> TranslateLoopResult:
@@ -247,6 +248,7 @@ class TranslatorSkeleton:
             reload_cache=self.reload_cache,
             cache_add=self.cache_add or _default_cache_add,
             cache_save=self.cache_save or _default_cache_save,
+            fixed_input_tokens_for_batch=self.fixed_input_tokens_for_batch,
         )
 
 
@@ -265,6 +267,7 @@ def run_translator_skeleton(
     reload_cache: bool = True,
     cache_add: Callable[..., bool] | None = None,
     cache_save: Callable[..., bool] | None = None,
+    fixed_input_tokens_for_batch: Callable[[list[dict[str, Any]]], float] | None = None,
     hooks: TranslatorHooks | None = None,
 ) -> TranslateLoopResult:
     """以函式介面執行 skeleton，供 plugin 保持簡潔且容易 mock。"""
@@ -279,5 +282,6 @@ def run_translator_skeleton(
         reload_cache=reload_cache,
         cache_add=cache_add,
         cache_save=cache_save,
+        fixed_input_tokens_for_batch=fixed_input_tokens_for_batch,
         hooks=hooks or TranslatorHooks(),
     ).run()

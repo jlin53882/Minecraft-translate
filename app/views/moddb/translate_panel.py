@@ -57,11 +57,19 @@ LARGE_RUN_WARNING = 5000  # 不限筆數且超過這個數量時提醒額度
 class TranslatePanel(ft.Column):
     """批次機翻頁籤。"""
 
-    def __init__(self, page: ft.Page, get_db, on_finished=None, on_view_flagged=None):
+    def __init__(
+        self,
+        page: ft.Page,
+        get_db,
+        on_finished=None,
+        on_view_flagged=None,
+        request_refresh=None,
+    ):
         super().__init__(expand=True, spacing=12, scroll=ft.ScrollMode.AUTO)
         self._page = page
         self._get_db = get_db
         self._on_finished = on_finished
+        self._request_scope_refresh = request_refresh
         self._repair_summary: dict | None = None
         self._repair_summary_final = True
         self._flagged_total = 0
@@ -170,7 +178,7 @@ class TranslatePanel(ft.Column):
         self.log_explainer = kit.hint_text(
             "執行紀錄說明：來源項目＝資料庫中需要處理的譯文；"
             "AI 修復項目＝實際送給 AI 的工作；"
-            "規劃批次＝開始前依 token 上限估算的批次，不等於實際 HTTP 請求次數；"
+            "規劃批次＝開始前依 token／prompt／session 狀態估算的下界，不等於實際 HTTP 請求次數；"
             "略過舊快取＝不沿用先前 AI 結果，會重新呼叫 AI。"
         )
         self.start_btn = kit.button(
@@ -438,7 +446,10 @@ class TranslatePanel(ft.Column):
             self.count_text.value = "資料庫還沒有資料，請先到「掃描匯入」建立"
         else:
             self._set_count_text(
-                snapshot.get("missing", 0), snapshot.get("reusable", 0)
+                snapshot.get("missing", 0),
+                snapshot.get("reusable", 0),
+                snapshot.get("planned_batches"),
+                snapshot.get("planned_items"),
             )
         self.refresh_indicator.value = str(snapshot.get("error") or "")
         self.refresh_indicator.visible = bool(snapshot.get("error"))
@@ -464,6 +475,8 @@ class TranslatePanel(ft.Column):
         self._clear_repair_preview()
         self._refresh_counts()
         self._safe_update()
+        if callable(self._request_scope_refresh):
+            self._request_scope_refresh()
 
     def mod_ids(self) -> tuple[str, ...]:
         value = self.mod_dd.value
@@ -486,10 +499,22 @@ class TranslatePanel(ft.Column):
         )
         self._set_count_text(missing, reusable)
 
-    def _set_count_text(self, missing: int, reusable: int) -> None:
+    def _set_count_text(
+        self,
+        missing: int,
+        reusable: int,
+        planned_batches: int | None = None,
+        planned_items: int | None = None,
+    ) -> None:
         limit = self.limit()
         to_ai = max(0, missing - reusable)  # 沿用其他版本的不送 AI
-        will = min(to_ai, limit) if limit else to_ai
+        # 背景查詢已在排除可沿用條目後套用 limit；使用它回報的精確筆數，
+        # 避免「未翻譯總數 - 可沿用數」與 SQL LIMIT 順序不同而顯示不一致。
+        will = (
+            planned_items
+            if planned_items is not None
+            else (min(to_ai, limit) if limit else to_ai)
+        )
         text = f"此範圍有 {format_count(missing)} 筆未翻譯"
         if reusable:
             text += (
@@ -497,9 +522,12 @@ class TranslatePanel(ft.Column):
                 "開始時會直接沿用（原文不同的不算）"
             )
         text += f"；上限 {format_count(limit)} 筆" if limit else "；上限為 0（不限）"
+        planned_batches = (
+            estimate_batch_count(will) if planned_batches is None else planned_batches
+        )
         text += (
             f"，本次送 AI 翻譯{'最多 ' if limit else '全部 '}{format_count(will)} 筆"
-            f"（預估約 {estimate_batch_count(will):,} 批）"
+            f"（預估約 {planned_batches:,} 批）"
         )
         if not limit and will > LARGE_RUN_WARNING:
             text += "；筆數很多，會消耗大量 API 額度，建議先按「先預覽」確認"
@@ -509,6 +537,8 @@ class TranslatePanel(ft.Column):
         self._clear_repair_preview()
         self._refresh_counts()
         self._safe_update()
+        if callable(self._request_scope_refresh):
+            self._request_scope_refresh()
 
     def _clear_repair_preview(self) -> None:
         retranslation_controller.clear_preview(self)

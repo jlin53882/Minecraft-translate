@@ -93,6 +93,8 @@ Minecraft-translate/
 | 模組 | 職責 | 對外函式 |
 |---|---|---|
 | `core/lm_translator_main.py` | AI 翻譯入口調度，支援批次大小自動調整、錯誤重試、API Key 輪替 | `translate_batch_smart()`；`translate_batch_smart_old` 僅為相容 alias |
+| `core/lm_batch_planner.py` | 預覽與執行共用的 `(cache_type, batch_group)` 批次規劃與固定 prompt token 預估入口 | `next_batch()`, `count_planned_batches()` |
+| `core/lm_moddb_context.py` | 同模組 session、批次邊界與 Mod DB 已審核 lang 參考詞彙的共用 context | `attach_moddb_context()` |
 | `core/lm_translator.py` | AI 翻譯主邏輯，支援 Gemini API 目錄批次翻譯、斷點續傳 | `translate_directory_generator()`, `save_checkpoint()`, `load_checkpoint()`, `clear_checkpoint()` |
 | `core/lang_merger.py` | 智慧合併 en_us / zh_cn / zh_tw，保留已翻譯內容 | `merge_zhcn_to_zhtw_from_zip()`, `get_lang_codes()`, `build_lang_file_regex()` |
 | `core/jar_processor.py` | 從 mod JAR 提取語言檔與 Patchouli 手冊（ Generator 介面） | `extract_lang_files_generator()`, `extract_book_files_generator()`, `preview_extraction_generator()` |

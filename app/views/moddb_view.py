@@ -132,6 +132,7 @@ class ModDbView(ft.Column):
             self.get_db,
             on_finished=self._on_scan_finished,
             on_view_flagged=self.open_flagged,
+            request_refresh=lambda: self._request_panel_refresh("translate"),
         )
         self._panels = {
             "overview": self.overview,
@@ -410,6 +411,7 @@ class ModDbView(ft.Column):
     def _request_panel_refresh(self, key: str, *, message: str | None = None) -> None:
         """Load the selected tab's database data off the UI thread."""
         if key in self._panel_refresh_loading:
+            self._panel_refresh_needed[key] = True
             if self.tab == key and message is None:
                 self._safe_update()
             return
@@ -638,6 +640,7 @@ class ModDbView(ft.Column):
             return {
                 "version": self.translate.version_dd.value,
                 "mod": self.translate.mod_dd.value,
+                "limit": self.translate.limit(),
                 "reuse": bool(self.translate.reuse_row.value),
             }
         raise ValueError(f"未知 Mod DB 頁籤：{key}")

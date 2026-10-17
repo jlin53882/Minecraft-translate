@@ -207,10 +207,13 @@ def build_translation_prompt(
         )
         sections.append("\n".join(lines))
 
-    if profile == "lang" and include_moddb_reviewed:
+    # Reviewed Mod DB lang entries are terminology references for every
+    # Patchouli-compatible route as well.  They are never written directly;
+    # the model still translates the current source item.
+    if profile in {"lang", "patch", "md"} and include_moddb_reviewed:
         reviewed = items[0].get("_reviewed_glossary") if items else None
         if isinstance(reviewed, list):
-            lines = ["\n【Mod DB 已審核翻譯參考（僅 lang）】"]
+            lines = ["\n【Mod DB 已審核 lang 翻譯參考（目前模組）】"]
             for entry in reviewed[:_MAX_PROMPT_TERMS]:
                 if not isinstance(entry, dict):
                     continue

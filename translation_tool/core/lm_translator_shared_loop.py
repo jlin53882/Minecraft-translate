@@ -11,10 +11,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
-from translation_tool.core.lm_batch_budget import (
-    profile_for_cache_type,
-    select_batch_size,
-)
+from translation_tool.core.lm_batch_budget import select_batch_size
+from translation_tool.core.lm_batch_planner import next_batch
 from translation_tool.core.lm_translator_shared_cache import (
     CacheRule,
     get_default_cache_rules,
@@ -100,6 +98,7 @@ def translate_items_with_cache_loop(
     reload_cache: bool = True,
     cache_add: Callable[..., bool] | None = None,
     cache_save: Callable[..., bool] | None = None,
+    fixed_input_tokens_for_batch: Callable[[list[dict[str, Any]]], float] | None = None,
 ) -> TranslateLoopResult:
     """執行翻譯主迴圈，分批呼叫翻譯 API、寫入快取、回報進度與 ETA，支援中斷與額度耗盡處理。"""
     if cache_rules is None:
@@ -167,30 +166,15 @@ def translate_items_with_cache_loop(
         # 取消檢查點：在批次之間停止，已完成的批次照常保留
         if is_cancelled():
             return cancelled_result()
-        cache_type = str(remaining[0].get("cache_type") or "lang")
-        batch_group = remaining[0].get("_batch_group")
-        batch_size = _get_default_batch_size(cache_type, batch_size_by_type)
-        if batch_size <= 0:
-            batch_size = 50
-
-        # 同一批只能有一種 cache_type：提示詞 profile、快取分片與 cache_save 都以它為準，
-        # 混批會讓後面的類型用錯提示詞、快取寫到錯的分片。只取開頭連續同型的區段。
-        homogeneous = 1
-        while (
-            homogeneous < len(remaining)
-            and str(remaining[homogeneous].get("cache_type") or "lang") == cache_type
-            and remaining[homogeneous].get("_batch_group") == batch_group
-        ):
-            homogeneous += 1
-
-        # 項目數上限之外，再依 token 預算取前綴（與 lm_translator_main 共用同一個估算與學到的預算）
-        fit_count = select_batch_size(
-            remaining[:homogeneous],
-            profile_for_cache_type(cache_type),
-            batch_size,
-            _lm_config(),
+        batch, cache_type = next_batch(
+            remaining,
+            lm_cfg=_lm_config(),
+            batch_size_for_type=lambda value: _get_default_batch_size(
+                value, batch_size_by_type
+            ),
+            fixed_input_tokens_for_batch=fixed_input_tokens_for_batch,
+            select_size=select_batch_size,
         )
-        batch = remaining[:fit_count]
 
         try:
             translated, status = translate_batch_smart(batch, total_for_smart)

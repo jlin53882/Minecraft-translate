@@ -9,6 +9,7 @@ import traceback
 import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass, field
+from functools import partial
 from pathlib import Path
 from time import monotonic
 from typing import Any
@@ -36,7 +37,16 @@ from translation_tool.core.lm_batch_budget import (
     profile_for_cache_type,
     select_batch_size,
 )
-from translation_tool.core.lm_translator_main import translate_batch_smart
+from translation_tool.core.lm_batch_planner import (
+    count_planned_batches,
+    group_items_by_batch_key,
+    next_batch,
+)
+from translation_tool.core.lm_moddb_context import attach_moddb_context
+from translation_tool.core.lm_translator_main import (
+    estimate_batch_fixed_input_tokens,
+    translate_batch_smart,
+)
 from translation_tool.core.lm_translator_shared_cache import get_default_cache_rules
 from translation_tool.core.lm_translator_shared_loop import _get_default_batch_size
 from translation_tool.translation_db import TranslationDB
@@ -265,7 +275,7 @@ class _RepairRunProgress:
         remaining, remaining_candidates, remaining_batches_by_profile = (
             self._remaining_profile_state(check)
         )
-        remaining_batches = sum(remaining_batches_by_profile.values())
+        remaining_batches = self._remaining_canonical_batches(check)
         eta = 0.0
         unknown_profiles = []
         for cache_type, count in remaining.items():
@@ -344,9 +354,9 @@ class _RepairRunProgress:
 
     def start_line(self, items: Sequence[dict[str, Any]]) -> str:
         counts = _cache_type_counts(items)
-        planned = sum(self._planned_batches_by_profile.values())
+        planned = self._remaining_canonical_batches(None)
         return (
-            f"📦 批次規劃｜預計 {planned:,} 批，共 {len(items):,} 筆需由 AI 處理"
+            f"📦 批次規劃｜開始時預估下界 {planned:,} 批，共 {len(items):,} 筆需由 AI 處理"
             f"（{_format_profile_breakdown(counts)}）"
         )
 
@@ -355,6 +365,26 @@ class _RepairRunProgress:
 
     def elapsed(self) -> float:
         return max(0.0, monotonic() - self.started_mono)
+
+    def _remaining_canonical_batches(self, check) -> int:
+        """Use the exact live prefix planner for the headline batch total."""
+        submitted = sum(self.profile_items_submitted.values())
+        remaining = self._items[submitted:]
+        fixed = (
+            partial(estimate_batch_fixed_input_tokens, lm_cfg=self.lm_cfg)
+            if self.lm_cfg.get("token_budget_enabled", True)
+            else None
+        )
+        return count_planned_batches(
+            remaining,
+            lm_cfg=self.lm_cfg,
+            batch_size_for_type=lambda cache_type: _get_default_batch_size(
+                cache_type, None
+            ),
+            fixed_input_tokens_for_batch=fixed,
+            select_size=select_batch_size,
+            check=lambda: _check_batch_planning(None, check),
+        )
 
     def _remaining_batch_plan(
         self, cache_type: str, submitted: int, remaining_count: int, check
@@ -476,6 +506,11 @@ def preview_same_source_ai_retranslation(
         raise ValueError(f"未知既有譯文修復條件：{mode}")
     _raise_preview_timeout(deadline)
     items = _build_retranslation_items(entries, deadline=deadline)
+    attach_moddb_context(
+        items,
+        operation_id=f"retranslate-preview:{id(db)}",
+        reviewed_glossary_loader=db.reviewed_lang_glossary,
+    )
     items = _group_retranslation_items_by_cache_type(items, deadline=deadline)
     _raise_preview_timeout(deadline)
     entry_cache_types = [_retranslation_cache_type(item) for item in items]
@@ -567,17 +602,10 @@ def _retranslation_cache_type(item: dict[str, Any]) -> str:
 def _group_retranslation_items_by_cache_type(
     items: list[dict[str, Any]], *, deadline: float | None = None
 ) -> list[dict[str, Any]]:
-    """Stable-group engine items by their actual cache/profile key."""
-    groups: dict[str, list[dict[str, Any]]] = {}
-    for item in items:
-        _raise_preview_timeout(deadline)
-        groups.setdefault(_retranslation_cache_type(item), []).append(item)
-    grouped = []
-    for group in groups.values():
-        for item in group:
-            _raise_preview_timeout(deadline)
-            grouped.append(item)
-    return grouped
+    """Stable-group engine items by cache type and module/kind boundary."""
+    return group_items_by_batch_key(
+        items, check=lambda: _raise_preview_timeout(deadline)
+    )
 
 
 def _cache_type_counts(
@@ -602,25 +630,21 @@ def _format_profile_breakdown(counts: dict[str, int]) -> str:
 
 
 def _same_batch_prefix(items: list[dict[str, Any]], lm_cfg: dict[str, Any]):
-    """Choose a homogeneous, token-budgeted prefix without touching the cache."""
-    cache_type = _retranslation_cache_type(items[0])
-    preferred = _get_default_batch_size(cache_type, None)
-    if preferred <= 0:
-        preferred = 50
-    profile_limit = min(len(items), preferred)
-    homogeneous = 1
-    while (
-        homogeneous < profile_limit
-        and _retranslation_cache_type(items[homogeneous]) == cache_type
-    ):
-        homogeneous += 1
-    fit_count = select_batch_size(
-        items[:homogeneous],
-        profile_for_cache_type(cache_type),
-        preferred,
-        lm_cfg,
+    """Choose the same homogeneous, token-budgeted prefix as preview planning."""
+    fixed = (
+        partial(estimate_batch_fixed_input_tokens, lm_cfg=lm_cfg)
+        if lm_cfg.get("token_budget_enabled", True)
+        else None
     )
-    return items[: max(1, fit_count)], cache_type
+    return next_batch(
+        items,
+        lm_cfg=lm_cfg,
+        batch_size_for_type=lambda cache_type: _get_default_batch_size(
+            cache_type, None
+        ),
+        fixed_input_tokens_for_batch=fixed,
+        select_size=select_batch_size,
+    )
 
 
 def _load_lm_config() -> dict[str, Any]:
@@ -653,11 +677,21 @@ def _count_planned_batches(
     deadline: float | None = None,
     check=None,
 ) -> int:
-    """Count bounded windows without repeatedly copying the unplanned suffix."""
-    return sum(
-        _count_planned_batches_by_profile(
-            items, lm_cfg, deadline=deadline, check=check
-        ).values()
+    """Count the exact windows used by ``_same_batch_prefix``."""
+    fixed = (
+        partial(estimate_batch_fixed_input_tokens, lm_cfg=lm_cfg)
+        if lm_cfg.get("token_budget_enabled", True)
+        else None
+    )
+    return count_planned_batches(
+        items,
+        lm_cfg=lm_cfg,
+        batch_size_for_type=lambda cache_type: _get_default_batch_size(
+            cache_type, None
+        ),
+        fixed_input_tokens_for_batch=fixed,
+        select_size=select_batch_size,
+        check=lambda: _check_batch_planning(deadline, check),
     )
 
 
@@ -1361,7 +1395,7 @@ def _translate_snapshot(
     cancelled,
 ) -> None:
     items, tracker, lm_cfg, sleep_seconds = _initialize_snapshot_run(
-        entries, session, report, options
+        db, entries, session, report, options
     )
     cache_keys_to_save: dict[str, dict[str, int | None]] = {}
     while items:
@@ -1528,15 +1562,19 @@ def _flush_after_interrupted_batch(options, session, report, cache_keys_to_save)
         logger.exception("Mod DB repair cache flush failed while stopping a batch")
 
 
-def _initialize_snapshot_run(entries, session, report, options):
+def _initialize_snapshot_run(db, entries, session, report, options):
     """Group candidates and prepare the rate-limited translator run."""
     if report.mode == "quality_mismatch" and not options.repair_newline_only:
         entries, skipped_newline_only = _filter_newline_only_repair_entries(entries)
         report.skipped_newline_only_candidates += skipped_newline_only
         report.candidates = len(entries)
-    candidates = _group_retranslation_items_by_cache_type(
-        _build_retranslation_items(entries)
+    candidates = _build_retranslation_items(entries)
+    attach_moddb_context(
+        candidates,
+        operation_id=f"retranslate:{getattr(session, 'id', '') or id(session)}",
+        reviewed_glossary_loader=db.reviewed_lang_glossary,
     )
+    candidates = _group_retranslation_items_by_cache_type(candidates)
     items = candidates
     report.candidate_profile_counts = _cache_type_counts(candidates)
     lm_cfg = _load_lm_config()

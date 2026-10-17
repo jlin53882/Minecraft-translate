@@ -69,7 +69,7 @@ def test_official_terms_are_injected_for_every_translation_profile() -> None:
         assert "Cobblestone → 鵝卵石" in prompt
 
 
-def test_moddb_reviewed_glossary_is_lang_only() -> None:
+def test_moddb_reviewed_lang_glossary_is_injected_for_patchouli_routes() -> None:
     item = {
         "path": "item.example",
         "source_text": "Example",
@@ -82,9 +82,10 @@ def test_moddb_reviewed_glossary_is_lang_only() -> None:
     assert "Copper Gate → 銅製閘門" in build_translation_prompt(
         "基礎", [item], profile="lang"
     )
-    assert "Copper Gate → 銅製閘門" not in build_translation_prompt(
-        "基礎", [{**item}], profile="patch"
-    )
+    for profile in ("patch", "md"):
+        assert "Copper Gate → 銅製閘門" in build_translation_prompt(
+            "基礎", [{**item}], profile=profile
+        )
 
 
 def test_moddb_items_form_module_and_kind_batch_boundaries() -> None:
@@ -124,7 +125,7 @@ def test_moddb_items_form_module_and_kind_batch_boundaries() -> None:
     ]
 
 
-def test_moddb_sessions_are_isolated_by_module_and_kind() -> None:
+def test_moddb_sessions_are_shared_by_module_and_isolated_between_modules() -> None:
     items = build_items(
         [
             (1, KIND_LANG, "mod-a", "lang.key", "Language"),
@@ -143,11 +144,38 @@ def test_moddb_sessions_are_isolated_by_module_and_kind() -> None:
     _attach_translation_sessions(items, operation_id="op-1", db=FakeDB())
 
     assert items[0]["_translation_session"] is items[2]["_translation_session"]
-    assert items[0]["_translation_session"] is not items[1]["_translation_session"]
+    assert items[0]["_translation_session"] is items[1]["_translation_session"]
     assert items[0]["_translation_session"] is not items[3]["_translation_session"]
-    assert items[0]["_translation_session"].key.endswith(":mod-a:lang")
-    assert items[1]["_translation_session"].key.endswith(":mod-a:guide")
+    assert items[0]["_translation_session"].key.endswith(":mod-a")
+    assert items[1]["_translation_session"].key.endswith(":mod-a")
     assert glossary_calls == ["mod-a", "mod-b"]
+
+
+def test_moddb_context_skips_reviewed_glossary_when_disabled(monkeypatch) -> None:
+    from translation_tool.core import lm_moddb_context
+
+    monkeypatch.setattr(
+        lm_moddb_context,
+        "load_config",
+        lambda: {"lm_translator": {"moddb_reviewed_glossary": False}},
+    )
+    items = build_items([(1, KIND_LANG, "mod-a", "lang.key", "Language")])
+    calls: list[str] = []
+
+    _attach_translation_sessions(
+        items,
+        operation_id="disabled-glossary",
+        db=type(
+            "FakeDB",
+            (),
+            {
+                "reviewed_lang_glossary": lambda _self, mod_id: calls.append(mod_id),
+            },
+        )(),
+    )
+
+    assert calls == []
+    assert "_reviewed_glossary" not in items[0]
 
 
 def test_official_glossary_keeps_key_specific_duplicate_english_values(

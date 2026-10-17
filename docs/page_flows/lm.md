@@ -67,8 +67,8 @@ flowchart TD
   E -- "PARTIAL" --> J["回傳 PARTIAL"]
 ```
 
-- 每批提示詞會依輸入項目加入官方 Minecraft 術語；Mod DB 的已審核翻譯參考只對 `lang` 且只取同一模組。提示詞與同模組的 session 歷史會計入輸入 token 預算，但不計入翻譯輸出 KPI。
-- Mod DB 翻譯以 `(mod_id, kind)` 分組，避免把不同模組或不同種類混在同一個 payload；同一模組的後續批次沿用同一個 client-side session。`.md` 與 `.txt` 指南仍走 Patchouli 提示詞，但使用 `md` 快取分類。
+- 每批提示詞會依輸入項目加入官方 Minecraft 術語；Mod DB 的已審核 `lang` 翻譯參考會在同一模組的 `lang`、Patchouli、Guide、Advancement 與 `md`／`.txt` 路線提供給模型參考。提示詞與同模組的 session 歷史會計入輸入 token 預算，但不計入翻譯輸出 KPI。
+- Mod DB 翻譯以 `(cache_type, batch_group)` 分組，避免把不同模組或不同種類混在同一個 payload；同一模組的不同 kind 批次沿用同一個 client-side session。預覽與實際執行共用同一個批次 planner 與固定 prompt token 估算；開始前的批次數是依當下提示詞與 session 狀態計算的下界，session 歷史增長或錯誤縮小批次時實際請求數可能增加。`.md` 與 `.txt` 指南仍走 Patchouli 提示詞，但使用 `md` 快取分類。
 
 ## 背景任務與 UI 更新
 

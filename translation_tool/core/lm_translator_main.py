@@ -472,6 +472,23 @@ class _BatchRound:
     id_to_item: dict[str, dict]
 
 
+@dataclass(frozen=True)
+class _BatchPromptContext:
+    """Prompt and fixed-token values shared by preview and live batching."""
+
+    profile: str
+    lang_prompt: str
+    patchouli_prompt: str
+    effective_prompt: str
+    conversation_history: list[dict[str, str]]
+    history_input_tokens: float
+    fixed_input_tokens: float
+    batch_fit_input_tokens: float
+    retry_fixed_input_tokens: float
+    quality_retry_fixed_input_tokens: float
+    retry_same_as_source: bool
+
+
 @dataclass
 class _BatchRetryBudget:
     """Allow at most one application-level translation retry per batch."""
@@ -540,6 +557,80 @@ def _estimate_retry_input_tokens(
     )
 
 
+def _build_batch_prompt_context(
+    batch_items: list[dict], lm_cfg: dict
+) -> _BatchPromptContext:
+    """Build the one prompt budget contract used by every planner."""
+    profile = _detect_batch_profile(batch_items)
+    lang_prompt = _prompt_text(
+        lm_cfg.get("lang_system_prompt"),
+        "你正在翻譯 Minecraft 語言檔案（JSON格式）。",
+    )
+    patchouli_prompt = _prompt_text(
+        lm_cfg.get("patchouli_system_prompt"),
+        "你是專業的 Minecraft Patchouli 手冊翻譯員",
+    )
+    fixed_prompt = lang_prompt if uses_lang_prompt(profile) else patchouli_prompt
+    session_state = next(
+        (
+            item.get("_translation_session")
+            for item in batch_items
+            if isinstance(item.get("_translation_session"), TranslationSessionState)
+        ),
+        None,
+    )
+    conversation_history = session_state.snapshot() if session_state is not None else []
+    effective_prompt = build_translation_prompt(
+        fixed_prompt,
+        batch_items,
+        profile=profile,
+        include_official=bool(lm_cfg.get("official_glossary", True)),
+        include_moddb_reviewed=bool(lm_cfg.get("moddb_reviewed_glossary", True)),
+    )
+    retry_same_as_source = bool(lm_cfg.get("retry_same_as_source", True))
+    history_input_tokens = _estimate_conversation_history_tokens(conversation_history)
+    fixed_input_tokens = estimate_text_tokens(effective_prompt) + history_input_tokens
+    retry_fixed_input_tokens = estimate_text_tokens(
+        f"{effective_prompt.rstrip()}\n\n{SAME_SOURCE_RETRY_INSTRUCTION}"
+    )
+    quality_retry_fixed_input_tokens = estimate_text_tokens(
+        f"{effective_prompt.rstrip()}\n\n{QUALITY_RETRY_INSTRUCTION}"
+    )
+    batch_prompt_fit_tokens = (
+        retry_fixed_input_tokens
+        if retry_same_as_source
+        else estimate_text_tokens(effective_prompt)
+    )
+    return _BatchPromptContext(
+        profile=profile,
+        lang_prompt=lang_prompt,
+        patchouli_prompt=patchouli_prompt,
+        effective_prompt=effective_prompt,
+        conversation_history=conversation_history,
+        history_input_tokens=history_input_tokens,
+        fixed_input_tokens=fixed_input_tokens,
+        batch_fit_input_tokens=max(
+            batch_prompt_fit_tokens, quality_retry_fixed_input_tokens
+        )
+        + history_input_tokens,
+        retry_fixed_input_tokens=retry_fixed_input_tokens,
+        quality_retry_fixed_input_tokens=quality_retry_fixed_input_tokens,
+        retry_same_as_source=retry_same_as_source,
+    )
+
+
+def estimate_batch_fixed_input_tokens(
+    batch_items: list[dict], *, lm_cfg: dict | None = None
+) -> float:
+    """Estimate fixed input tokens exactly as the live batch runtime does."""
+    if lm_cfg is None:
+        config_snapshot = load_config()
+        lm_cfg = config_snapshot.get("lm_translator", {})
+    if not isinstance(lm_cfg, dict):
+        lm_cfg = {}
+    return _build_batch_prompt_context(batch_items, lm_cfg).batch_fit_input_tokens
+
+
 def _build_batch_runtime(
     batch_items: list[dict],
     total: int | None,
@@ -605,73 +696,39 @@ def _build_batch_runtime(
             )
             return None
 
-    lang_prompt = _prompt_text(
-        lm_cfg.get("lang_system_prompt"),
-        "你正在翻譯 Minecraft 語言檔案（JSON格式）。",
-    )
-    patchouli_prompt = _prompt_text(
-        lm_cfg.get("patchouli_system_prompt"),
-        "你是專業的 Minecraft Patchouli 手冊翻譯員",
-    )
-    fixed_prompt = lang_prompt if uses_lang_prompt(profile) else patchouli_prompt
-    session_state = next(
-        (
-            item.get("_translation_session")
-            for item in batch_items
-            if isinstance(item.get("_translation_session"), TranslationSessionState)
-        ),
-        None,
-    )
-    conversation_history = session_state.snapshot() if session_state is not None else []
-    effective_prompt = build_translation_prompt(
-        fixed_prompt,
-        batch_items,
-        profile=profile,
-        include_official=bool(lm_cfg.get("official_glossary", True)),
-        include_moddb_reviewed=bool(lm_cfg.get("moddb_reviewed_glossary", True)),
-    )
-    retry_same_as_source = bool(lm_cfg.get("retry_same_as_source", True))
-    history_input_tokens = _estimate_conversation_history_tokens(conversation_history)
-    fixed_input_tokens = estimate_text_tokens(effective_prompt) + history_input_tokens
-    retry_fixed_input_tokens = estimate_text_tokens(
-        f"{effective_prompt.rstrip()}\n\n{SAME_SOURCE_RETRY_INSTRUCTION}"
-    )
-    quality_retry_fixed_input_tokens = estimate_text_tokens(
-        f"{effective_prompt.rstrip()}\n\n{QUALITY_RETRY_INSTRUCTION}"
-    )
-    batch_prompt_fit_tokens = (
-        retry_fixed_input_tokens
-        if retry_same_as_source
-        else estimate_text_tokens(effective_prompt)
-    )
+    prompt_context = _build_batch_prompt_context(batch_items, lm_cfg)
     return _BatchRuntime(
         batch_items=batch_items,
         total=total,
         lm_cfg=lm_cfg,
         provider=provider,
-        batch_profile=profile,
+        batch_profile=prompt_context.profile,
         batch_size=min(len(batch_items), max_size),
         budget_cfg=BudgetConfig.from_config(lm_cfg),
         budget_tracker=get_tracker(profile),
         key_cycle=ApiKeyCycle(),
         model_pool=model_pool,
         model_temperature=lm_cfg.get("temperature", 0.2),
-        lang_prompt=lang_prompt,
-        patchouli_prompt=patchouli_prompt,
-        effective_prompt=effective_prompt,
-        fixed_input_tokens=fixed_input_tokens,
-        batch_fit_input_tokens=(
-            max(batch_prompt_fit_tokens, quality_retry_fixed_input_tokens)
-            + history_input_tokens
-        ),
-        retry_fixed_input_tokens=retry_fixed_input_tokens,
-        quality_retry_fixed_input_tokens=quality_retry_fixed_input_tokens,
-        retry_same_as_source=retry_same_as_source,
+        lang_prompt=prompt_context.lang_prompt,
+        patchouli_prompt=prompt_context.patchouli_prompt,
+        effective_prompt=prompt_context.effective_prompt,
+        fixed_input_tokens=prompt_context.fixed_input_tokens,
+        batch_fit_input_tokens=prompt_context.batch_fit_input_tokens,
+        retry_fixed_input_tokens=prompt_context.retry_fixed_input_tokens,
+        quality_retry_fixed_input_tokens=prompt_context.quality_retry_fixed_input_tokens,
+        retry_same_as_source=prompt_context.retry_same_as_source,
         original_total=total,
         remaining_items=list(batch_items),
         all_results=[],
-        conversation_history=conversation_history,
-        session_state=session_state,
+        conversation_history=prompt_context.conversation_history,
+        session_state=next(
+            (
+                item.get("_translation_session")
+                for item in batch_items
+                if isinstance(item.get("_translation_session"), TranslationSessionState)
+            ),
+            None,
+        ),
         rpm_cooldown_sec=rpm_cooldown,
         key_rotation_buffer_sec=lm_cfg.get("key_rotation_buffer_sec", 5),
         overload_retry_sec=lm_cfg.get("overload_retry_sec", OVERLOAD_RETRY_WAIT_SEC),

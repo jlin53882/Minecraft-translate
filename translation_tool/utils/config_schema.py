@@ -392,7 +392,7 @@ SETTINGS: tuple[Setting, ...] = (
         "注入 Mod DB 已審核術語",
         "translation_behavior",
         C_LM_BASIC,
-        "只把目前模組、kind=lang 且已審核的條目加入 LLM 提示詞；Patchouli、Guide、Advancement 與 md/txt 不會注入。",
+        "把目前模組、kind=lang 且已審核的條目作為參考加入 lang、Patchouli、Guide、Advancement 與 md/txt 的 LLM 提示詞；不直接取代目前條目翻譯。",
         default=True,
         timing="next_batch",
         timing_note="下一批次讀取。",
