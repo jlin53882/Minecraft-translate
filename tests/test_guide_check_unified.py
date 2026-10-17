@@ -30,6 +30,11 @@ def test_translation_issues_adds_guide_rule_for_guide_entries_only():
     assert translation_issues(SOURCE, SOURCE, kind=KIND_GUIDE) == []
 
 
+def test_empty_guide_translation_keeps_missing_structure_visible():
+    assert guide_structure_issues(SOURCE, "", kind=KIND_GUIDE)
+    assert translation_issues(SOURCE, "", kind=KIND_GUIDE)
+
+
 def test_repair_mode_keeps_its_lf_allowance_and_still_checks_guide_links():
     source = "Line one\nLine two\n[Crafting](../items/crafting.md)"
     translated = "第一行第二行 [合成](/../items/crafting.md)"

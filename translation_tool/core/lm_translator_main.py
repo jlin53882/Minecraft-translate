@@ -1588,9 +1588,11 @@ def _finish_successful_batch(
         output_cap=output_cap,
         conversation_history=conversation_history,
     )
-    runtime.conversation_history = conversation_history
     if runtime.session_state is not None:
         runtime.session_state.replace(conversation_history)
+        runtime.conversation_history = runtime.session_state.snapshot()
+    else:
+        runtime.conversation_history = conversation_history
     runtime.completed_calls += 1
     runtime.all_results.extend(finalized)
     actual_output = api_meta.get("candidates_tokens")

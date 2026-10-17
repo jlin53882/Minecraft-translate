@@ -153,9 +153,11 @@ def guide_structure_issues(
     這是指南規則的唯一入口：差異預覽、條目校對、修復審查、機翻寫入與 LM 重試都呼叫它，
     其他種類回傳空串列。
     """
-    if kind != KIND_GUIDE or not source or not translated:
+    if kind != KIND_GUIDE or not source:
         return []
-    return guide_issues(source, translated)
+    # Keep missing structural marks visible even when an LLM returns an empty
+    # guide value; the caller's empty-translation validation remains separate.
+    return guide_issues(source, translated or "")
 
 
 def translation_issues(

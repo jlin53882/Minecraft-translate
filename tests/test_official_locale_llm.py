@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 from app.services_impl.moddb_translate_service import build_items
 from translation_tool.core.lm_session import TranslationSessionState
 from translation_tool.core.lm_translator_shared_loop import (
@@ -156,3 +158,63 @@ def test_translation_session_rolls_history_without_changing_session_key() -> Non
     assert state.key == "moddb:operation-1:mod-a"
     assert state.history[-1]["text"] == "第二批譯文"
     assert all(turn["role"] in {"user", "model"} for turn in state.history)
+
+
+def test_translation_runtime_uses_trimmed_session_history_between_internal_batches(
+    monkeypatch,
+) -> None:
+    from translation_tool.core import lm_translator_main as main
+
+    config = {
+        "lm_translator": {
+            "models": {"m": {"enabled": True}},
+            "temperature": 0.2,
+            "retry_same_as_source": False,
+            "token_budget_enabled": False,
+            "max_output_tokens": 2048,
+            "initial_batch_size_lang": 1,
+            "initial_batch_size_patchouli": 1,
+            "initial_batch_size_md": 1,
+            "initial_batch_size_ftb": 1,
+            "initial_batch_size_kubejs": 1,
+            "lang_system_prompt": "P",
+            "patchouli_system_prompt": "P",
+        }
+    }
+    monkeypatch.setattr(main, "load_config", lambda: config)
+    monkeypatch.setattr(main, "get_translation_provider", lambda: "gemini")
+    monkeypatch.setattr(main, "get_api_key_count", lambda: 1)
+    monkeypatch.setattr(main, "interruptible_sleep", lambda _seconds: None)
+    monkeypatch.setattr(main, "raise_if_cancelled", lambda: None)
+    state = TranslationSessionState("moddb:operation-1:mod-a", max_history_tokens=1)
+    calls = []
+
+    def fake_api(**kwargs):
+        calls.append(kwargs)
+        return json.dumps(
+            {
+                "items": [
+                    {"id": item["id"], "value": "T"}
+                    for item in kwargs["payload"]["items"]
+                ]
+            }
+        )
+
+    monkeypatch.setattr(main, "call_gemini_requests", fake_api)
+    items = [
+        {
+            "path": str(index),
+            "text": f"source{index}",
+            "source_text": f"source{index}",
+            "cache_type": "lang",
+            "_translation_session": state,
+        }
+        for index in range(3)
+    ]
+
+    result, status = main.translate_batch_smart(items, 3)
+
+    assert status == "AUTO"
+    assert len(result) == 3
+    assert [len(call.get("conversation_history", [])) for call in calls] == [0, 2, 2]
+    assert len(state.history) == 2
