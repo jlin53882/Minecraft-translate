@@ -513,7 +513,7 @@ def _build_preview_format_review(cache_type, row, *, show_source):
         compact=True,
         show_source=show_source,
     )
-    review.render(row.en_us, row.current_ai_translation)
+    review.render(row.en_us, row.current_ai_translation, kind=row.kind)
     return review.control
 
 

@@ -145,6 +145,22 @@ def test_build_items_puts_guides_in_md_cache_bucket(key):
     assert item["_kind"] == KIND_GUIDE
 
 
+def test_plan_batches_uses_kind_cache_bucket(monkeypatch):
+    monkeypatch.setattr(
+        moddb_translate_service,
+        "_get_default_batch_size",
+        lambda cache_type, _batch_sizes: {"lang": 300, "md": 100}[cache_type],
+    )
+    items = build_items(
+        [
+            (index, KIND_GUIDE, "foo", f"guide/{index}.md", "Guide text")
+            for index in range(101)
+        ]
+    )
+
+    assert moddb_translate_service.plan_batches(items) == 2
+
+
 def test_update_remaining_counts_unwritten_flagged_items():
     report = moddb_translate_service.TranslateReport(
         candidates=300, translated=100, written=80, flagged=20

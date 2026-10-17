@@ -99,6 +99,26 @@ def repair_input_issues(
     )
 
 
+def repair_input_issues_for_kind(
+    source: str, previous_translation: str, *, kind: str | None = None
+) -> tuple[bool, tuple[str, ...], bool]:
+    """Return repair eligibility including kind-specific structure checks.
+
+    The normal repair predicate covers protected tokens and line breaks. Guide
+    rows also need Markdown/Patchouli structure validation; keeping that
+    combination here prevents discovery, preview, and CAS writes from drifting
+    apart.
+    """
+    wanted, previous = format_tokens(source), format_tokens(previous_translation)
+    newline_mismatch = wanted["\n"] != previous["\n"]
+    _eligible, token_issues_found, _mixed = repair_input_issues_from_counts(
+        wanted, previous
+    )
+    structure_issues = guide_structure_issues(source, previous_translation, kind=kind)
+    issues = (*token_issues_found, *structure_issues)
+    return bool(newline_mismatch or issues), issues, bool(newline_mismatch and issues)
+
+
 def repair_input_issues_from_counts(
     wanted: Counter[str], previous: Counter[str]
 ) -> tuple[bool, tuple[str, ...], bool]:

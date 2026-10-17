@@ -430,3 +430,77 @@ def test_guide_link_breakage_is_mismatch_in_flags_pages_and_rows(db):
     assert rows["g1"].id in mismatch_ids
     assert rows["g0"].id not in mismatch_ids
     assert db.verify_quality_flags() == []
+
+
+def test_guide_structure_only_mismatch_is_discovered_and_repaired(db):
+    """純 Markdown 結構差異也要能進入候選、混合換行差異不能被跳過。"""
+    db.ingest(
+        "1.21.1",
+        [
+            ScanItem(
+                KIND_GUIDE,
+                "guidemod",
+                "broken_link",
+                "[Crafting](../items/crafting.md)",
+                "[合成](/../items/crafting.md)",
+                source=SRC_AI,
+            ),
+            ScanItem(
+                KIND_GUIDE,
+                "guidemod",
+                "broken_link_with_newline",
+                "[Crafting](../items/crafting.md)\nNext",
+                "[合成](/../items/crafting.md)",
+                source=SRC_AI,
+            ),
+        ],
+    )
+
+    count, candidates = db.mismatched_translation_entries("1.21.1")
+    assert count == 2
+    assert {candidate.key for candidate in candidates} == {
+        "broken_link",
+        "broken_link_with_newline",
+    }
+
+    repairable = {
+        entry.key: (entry, newline_mismatch, mixed)
+        for entry, newline_mismatch, mixed in db.iter_repairable_translation_entries(
+            "1.21.1"
+        )
+    }
+    assert repairable["broken_link"][1:] == (False, False)
+    assert repairable["broken_link_with_newline"][1:] == (True, True)
+
+    entry = repairable["broken_link"][0]
+    result = db.replace_translation_quality_mismatch(
+        entry.entry_id,
+        int(entry.source_id),
+        entry.current_ai_translation,
+        "[合成](../items/crafting.md)",
+        expected_version=entry.mc_version,
+        expected_kind=entry.kind,
+        expected_mod_id=entry.mod_id,
+        expected_key=entry.key,
+        expected_en_us=entry.en_us,
+        expected_revision=entry.revision,
+    )
+    assert result.status == "updated"
+
+
+def test_reviewed_lang_glossary_excludes_quality_mismatches(db):
+    """已審核但格式錯誤的 lang 譯文不能成為 LLM 術語提示。"""
+    db.ingest(
+        "1.21.1",
+        [
+            ScanItem(KIND_LANG, "foo", "good", "Cobblestone", "鵝卵石", source=SRC_AI),
+            ScanItem(KIND_LANG, "foo", "bad", "Use %s", "使用", source=SRC_AI),
+        ],
+    )
+    rows = {row.key: row for row in db.list_entries("1.21.1", limit=10)[0]}
+    for row in rows.values():
+        db.review_manual(row.id, expected_zh_tw=row.zh_tw, actor="tester")
+
+    assert db.reviewed_lang_glossary("foo") == [
+        {"key": "good", "en_us": "Cobblestone", "zh_tw": "鵝卵石"}
+    ]

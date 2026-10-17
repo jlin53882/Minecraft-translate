@@ -169,7 +169,7 @@ def plan_batches(
 
     ``check`` 若提供，會在處理每列前呼叫，供 deadline/cancel 檢查使用。
     """
-    counts: dict[tuple[str, str], int] = {}
+    counts: dict[tuple[str, str], tuple[str, int]] = {}
     for item in items:
         if check is not None:
             check()
@@ -178,13 +178,15 @@ def plan_batches(
             group_key = (str(group[0]), str(group[1]))
         else:
             group_key = ("", str(item.get("cache_type") or "lang"))
-        counts[group_key] = counts.get(group_key, 0) + 1
+        cache_type = str(item.get("cache_type") or "lang")
+        previous_cache_type, previous_count = counts.get(group_key, (cache_type, 0))
+        counts[group_key] = (previous_cache_type, previous_count + 1)
     return sum(
         estimate_batches(
             {cache_type: count},
             lambda cache_type: _get_default_batch_size(cache_type, None),
         )
-        for (_mod_id, cache_type), count in counts.items()
+        for (_mod_id, _kind), (cache_type, count) in counts.items()
     )
 
 

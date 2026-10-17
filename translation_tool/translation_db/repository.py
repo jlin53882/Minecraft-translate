@@ -66,14 +66,11 @@ from translation_tool.translation_db.models import (
 )
 from translation_tool.translation_db.quality import (
     format_tokens,
-    guide_structure_issues,
     matches_quality,
     quality_state,
-    repair_input_issues,
-    repair_input_issues_from_counts,
-    repair_output_issues,
-    token_issues,
+    repair_input_issues_for_kind,
     token_quality_comparison,
+    translation_issues,
     whitespace_note,
 )
 from translation_tool.translation_db.read_cache import READ_CACHE
@@ -3780,13 +3777,19 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
                 if live is None or live[0] != source_id:
                     # 預覽之後來源優先序（或審核）變了，這個來源已不是畫面上生效的那個
                     return AITranslationReplaceResult("skipped_changed")
-            eligible, _issues, _mixed = repair_input_issues(expected_en_us, current[0])
+            eligible, _issues, _mixed = repair_input_issues_for_kind(
+                expected_en_us, current[0], kind=expected_kind
+            )
             if not eligible:
                 return AITranslationReplaceResult("skipped_changed")
             # Automated repair must pass output checks; an explicit human review
             # accepts the reviewed draft while retaining the same source CAS.
-            output_issues = token_issues if strict_newline else repair_output_issues
-            if action == "quality_repair" and output_issues(expected_en_us, new_zh_tw):
+            if action == "quality_repair" and translation_issues(
+                expected_en_us,
+                new_zh_tw,
+                kind=expected_kind,
+                repair=not strict_newline,
+            ):
                 return AITranslationReplaceResult("skipped_changed")
             if new_zh_tw == current[0]:
                 return AITranslationReplaceResult("unchanged")
@@ -4057,7 +4060,7 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
             "e.mc_version=?",
             "e.en_us<>''",
             "t.zh_tw<>''",
-            f"({token_chars})",
+            f"(({token_chars}) OR e.kind = '{KIND_GUIDE}')",
         ]
         params: list = [version]
         if mod_ids:
@@ -4110,8 +4113,8 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
 
         Rows shadowed by a higher-priority source are not what users see, so they
         are not repaired; newline skip facts ride along with each yielded row."""
-        # 兩邊都沒有任何格式字元（§ % $ { \ 換行）就不可能有 token，也就一定不是修復候選；
-        # 先在 SQL 排除，整個版本的譯文大多不必進 Python 逐列分析。
+        # 一般條目兩邊都沒有任何格式字元（§ % $ { \ 換行）就不可能有 token，
+        # 但 guide 還要保留純 Markdown 結構差異；其餘大量條目仍先在 SQL 排除。
         token_chars = " OR ".join(
             f"{column} GLOB {_TOKEN_CHAR_GLOB_SQL} OR instr({column}, char(10)) > 0"
             for column in ("e.en_us", "t.zh_tw")
@@ -4120,7 +4123,7 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
             "e.mc_version=?",
             "e.en_us<>''",
             "t.zh_tw<>''",
-            f"({token_chars})",
+            f"(({token_chars}) OR e.kind = '{KIND_GUIDE}')",
         ]
         params: list = [version]
         if mod_ids:
@@ -4141,12 +4144,8 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
                         check()
                     wanted, previous = format_tokens(row[4]), format_tokens(row[5])
                     newline_mismatch = wanted["\n"] != previous["\n"]
-                    eligible, _issues, mixed = repair_input_issues_from_counts(
-                        wanted, previous
-                    )
-                    # 指南的結構標記不一致也是可修復的候選（與 quality_state 的判斷一致）
-                    eligible = eligible or bool(
-                        guide_structure_issues(row[4], row[5], kind=row[1])
+                    eligible, _issues, mixed = repair_input_issues_for_kind(
+                        row[4], row[5], kind=row[1]
                     )
                     if eligible:
                         yield (
@@ -4232,6 +4231,7 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
             and isinstance(zh_tw, str)
             and en_us.strip()
             and zh_tw.strip()
+            and quality_state(en_us, zh_tw, kind="lang")[0] == "consistent"
         ]
 
     def load_mod_for_priority(
