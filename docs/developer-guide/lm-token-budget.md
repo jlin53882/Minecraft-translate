@@ -70,6 +70,10 @@
 - 學到的預算依 profile 保存，不分模型；同一 profile 換模型時不會重置。
 - Token budget 欄位可在設定頁「批次與限制」編輯；same-as-source 確認開關位於「翻譯行為設定」的「基本設定」卡。
 
+### 批次間隔與 RPM
+
+`lm_translator.rate_limit.sleep_seconds_between_batches` 是每批成功後、下一批送出前的本地間隔，預設為 `4` 秒，對每分鐘 15 次（RPM 15）的模型提供基本節流。設定為 `0` 才會停用這個間隔。它只控制正常批次之間的等待，不會覆蓋 API 回傳的 `Retry-After`、429／503 重試等待、換 Key 緩衝或其他錯誤退避；這些等待仍由各自的限流與錯誤處理流程負責。
+
 ## 譯文與原文相同時重新確認
 
 `lm_translator.retry_same_as_source` 預設為 `true`。每個成功批次中，完全等於原文且含有 alphabetic character 的項目會單獨組成候選 payload；不使用 whitelist、字串長度或格式 heuristic。第二次沿用同一 profile prompt、model、API key、temperature、structured-output contract 與同一模組的 client-side session history，並附加一次確認說明。相同批次內的「相同譯文」與「格式不一致」候選會合併為一次品質 retry；`lang`、`patchouli`、`ftbquests`、`kubejs` 與 `md` 都走共用 batch contract。

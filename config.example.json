@@ -59,7 +59,7 @@
         "moddb_reviewed_glossary": true,
         "rate_limit": {
             "timeout": 600,
-            "sleep_seconds_between_batches": 0.0
+            "sleep_seconds_between_batches": 4.0
         },
         "lm_translate_folder_name": "LM翻譯後",
         "translator": {

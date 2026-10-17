@@ -128,7 +128,7 @@ def translate_items_with_cache_loop(
             load_config()
             .get("lm_translator", {})
             .get("rate_limit", {})
-            .get("sleep_seconds_between_batches", 0.0)
+            .get("sleep_seconds_between_batches", 4.0)
         )
 
     if reload_cache:

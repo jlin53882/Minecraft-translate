@@ -784,7 +784,7 @@ class TestSaveConfigFromViewPatchouliFields:
 
 
 class TestRpmCooldownSetting:
-    """B8：每批翻譯後等待秒數可在設定頁調整（預設 0 = 不等待）。"""
+    """B8：每批翻譯後等待秒數可在設定頁調整（預設 4 秒，明確設 0 才不等待）。"""
 
     def _view(self):
         view = _make_full_save_view()
