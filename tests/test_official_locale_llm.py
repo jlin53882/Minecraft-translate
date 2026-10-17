@@ -10,6 +10,8 @@ from app.services_impl.moddb_translate_service import (
 )
 from translation_tool.core.lm_format_policy import (
     FORMAT_POLICY_PROMPT,
+    LANG_SEMANTIC_FORMAT_POLICY_PROMPT,
+    PATCHOULI_SEMANTIC_FORMAT_POLICY_PROMPT,
     STRUCTURED_FORMAT_POLICY_PROMPT,
     normalize_legacy_prompt,
 )
@@ -107,6 +109,7 @@ def test_patchouli_structure_policy_is_kind_scoped() -> None:
 
     assert FORMAT_POLICY_PROMPT in prompt
     assert STRUCTURED_FORMAT_POLICY_PROMPT in prompt
+    assert PATCHOULI_SEMANTIC_FORMAT_POLICY_PROMPT in prompt
 
     lang_prompt = build_translation_prompt(
         "基礎",
@@ -114,6 +117,28 @@ def test_patchouli_structure_policy_is_kind_scoped() -> None:
         profile="lang",
     )
     assert STRUCTURED_FORMAT_POLICY_PROMPT not in lang_prompt
+    assert LANG_SEMANTIC_FORMAT_POLICY_PROMPT in lang_prompt
+    assert PATCHOULI_SEMANTIC_FORMAT_POLICY_PROMPT not in lang_prompt
+
+
+def test_semantic_newline_policies_are_precise_and_kind_scoped() -> None:
+    patchouli_prompt = build_translation_prompt(
+        "基礎",
+        [{"text": "了解 this", "source_text": "了解 this", "cache_type": "patchouli"}],
+        profile="patch",
+    )
+    lang_prompt = build_translation_prompt(
+        "基礎",
+        [{"text": "了解 this", "source_text": "了解 this", "cache_type": "lang"}],
+        profile="lang",
+    )
+
+    assert "了解\\n這個" in patchouli_prompt
+    assert "護甲和\\n武器" in patchouli_prompt
+    assert "完整句子、完整段落" in patchouli_prompt
+    assert "了解\\n這個" in lang_prompt
+    assert "護甲和\\n武器" in lang_prompt
+    assert PATCHOULI_SEMANTIC_FORMAT_POLICY_PROMPT not in lang_prompt
 
 
 def test_missing_prompt_uses_new_builtin_prompt() -> None:

@@ -196,7 +196,7 @@ def build_translation_prompt(
     """Append Chinese, batch-scoped glossary instructions to a base prompt."""
     sections = [
         normalize_legacy_prompt(base_prompt).rstrip(),
-        format_policy_for_items(items),
+        format_policy_for_items(items, profile=profile),
     ]
     index = load_official_locale_index()
     official_terms = (

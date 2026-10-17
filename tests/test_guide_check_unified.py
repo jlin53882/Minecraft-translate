@@ -45,6 +45,22 @@ def test_soft_paragraph_line_reflow_is_valid_for_guide_and_patchouli():
     assert translation_issues(source, translated, kind=KIND_PATCHOULI) == []
 
 
+def test_sentence_boundary_newline_can_be_preserved_for_guide_and_patchouli():
+    source = "First sentence.\nSecond sentence."
+    translated = "第一個句子。\n第二個句子。"
+
+    for kind in (KIND_GUIDE, KIND_PATCHOULI):
+        assert translation_issues(source, translated, kind=kind) == []
+
+
+def test_sentence_internal_soft_line_reflow_can_be_merged():
+    source = "This sentence is split\nin the middle."
+    translated = "這個句子在中間合併。"
+
+    for kind in (KIND_GUIDE, KIND_PATCHOULI):
+        assert translation_issues(source, translated, kind=kind) == []
+
+
 def test_hard_structure_issues_are_precise_and_patchouli_uses_them():
     source = '# Title\n\n<ItemLink id="example:item" />\n\nText<br>'
     broken = '# 標題\n<ItemLink id="example:other" />\nText'
@@ -100,11 +116,15 @@ def test_repair_filter_keeps_mixed_guide_mismatch_for_ai_repair():
 
 
 def test_soft_line_reflow_is_not_a_quality_repair_candidate():
-    eligible, issues, mixed = repair_input_issues_for_kind(
-        "one\ntwo\nthree", "一二\n三", kind=KIND_GUIDE
-    )
+    for kind in (KIND_GUIDE, KIND_PATCHOULI):
+        eligible, issues, mixed = repair_input_issues_for_kind(
+            "one\ntwo\nthree", "一二\n三", kind=kind
+        )
+        assert (eligible, issues, mixed) == (False, (), False)
 
-    assert (eligible, issues, mixed) == (False, (), False)
+
+def test_lang_keeps_actual_newline_count_as_a_hard_quality_token():
+    assert "換行" in " ".join(translation_issues("one\ntwo", "一二", kind=KIND_LANG))
 
 
 def test_diff_panel_and_write_gate_agree_on_guide_breakage():

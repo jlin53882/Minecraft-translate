@@ -12,6 +12,7 @@ from translation_tool.core.guide_format import format_spec
 # These are stable DB wire values.  Keep this low-level policy module free of
 # ``translation_db`` imports: that package eagerly imports its repository and
 # quality modules, which would create a cycle through the shared LM budget.
+KIND_LANG = "lang"
 KIND_GUIDE = "guide"
 KIND_PATCHOULI = "patchouli"
 STRUCTURED_KINDS = frozenset({KIND_GUIDE, KIND_PATCHOULI})
@@ -42,6 +43,26 @@ STRUCTURED_FORMAT_POLICY_PROMPT = r"""【Guide/Patchouli 結構補充契約】
 - 只翻譯 Patchouli 標籤以外的人類語言文字。
 """
 
+PATCHOULI_SEMANTIC_FORMAT_POLICY_PROMPT = r"""【Patchouli 語意換行契約】
+- 先將原文中位於句子或詞語中間的排版折行視為同一段落內容，翻譯時必須合併，不可在對應的中文詞語或短語中間換行。
+- 原文若在完整句子結束處已有換行，可以保留該換行；原文若沒有在句子結束處換行，不要自行新增換行。
+- 換行只能放在完整句子、完整段落或其他明確硬格式邊界，不得依固定字數、英文原始欄寬或模型輸出長度切行。
+- 每一行都必須是完整的繁體中文語意單位。
+- 禁止出現「了解\n這個」、「護甲和\n武器」這類詞語或短語中間斷行。
+- 保留空白行、段落分隔、Markdown 結構、Patchouli 元件、<br> 與其他硬格式。
+- 不要為了湊足英文原文的行數新增換行。
+"""
+
+LANG_SEMANTIC_FORMAT_POLICY_PROMPT = r"""【lang 語意換行契約】
+- 先將原文中位於句子或詞語中間的排版折行視為同一段落內容；在保留 lang value 實際換行數量的前提下調整換行位置，不可在對應的中文詞語或短語中間換行。
+- 原文若在完整句子結束處已有換行，可以保留該換行；原文若沒有在句子結束處換行，不要自行新增換行。
+- 換行只能放在完整句子、完整段落或其他明確硬格式邊界，不得依固定字數、英文原始欄寬或模型輸出長度切行。
+- 每一行都必須是完整的繁體中文語意單位。
+- 禁止出現「了解\n這個」、「護甲和\n武器」這類詞語或短語中間斷行。
+- 保留空白行、段落分隔、文字形式的 \n、格式符號與其他硬格式。
+- 不要為了湊足英文原文的行數新增換行。
+"""
+
 
 def normalize_legacy_prompt(prompt: str) -> str:
     """Remove only exact legacy newline-rule lines from a configured prompt."""
@@ -67,12 +88,26 @@ def structured_kind(kind: object) -> bool:
     return str(kind or "") in STRUCTURED_KINDS
 
 
-def format_policy_for_items(items: Iterable[dict[str, Any]]) -> str:
-    """Return common policy plus the structure section only for Guide/Patchouli."""
+def format_policy_for_items(
+    items: Iterable[dict[str, Any]], *, profile: str | None = None
+) -> str:
+    """Return common and kind-scoped semantic format policies."""
     values = list(items)
-    if any(structured_kind(kind_for_item(item)) for item in values):
-        return f"{FORMAT_POLICY_PROMPT}\n{STRUCTURED_FORMAT_POLICY_PROMPT}"
-    return FORMAT_POLICY_PROMPT
+    kinds = {kind_for_item(item) for item in values}
+    normalized_profile = str(profile or "").lower()
+    has_structured_route = any(structured_kind(kind) for kind in kinds) or (
+        normalized_profile in {"md", "patch"}
+    )
+    has_lang_route = KIND_LANG in kinds or normalized_profile == KIND_LANG
+
+    sections = [FORMAT_POLICY_PROMPT]
+    if has_structured_route:
+        sections.extend(
+            [STRUCTURED_FORMAT_POLICY_PROMPT, PATCHOULI_SEMANTIC_FORMAT_POLICY_PROMPT]
+        )
+    if has_lang_route:
+        sections.append(LANG_SEMANTIC_FORMAT_POLICY_PROMPT)
+    return "\n".join(sections)
 
 
 def kind_for_item(item: dict[str, Any]) -> str | None:
@@ -88,6 +123,8 @@ def kind_for_item(item: dict[str, Any]) -> str | None:
         return KIND_GUIDE
     if cache_type == "patchouli":
         return KIND_PATCHOULI
+    if cache_type == KIND_LANG:
+        return KIND_LANG
     return None
 
 
@@ -154,6 +191,9 @@ def estimate_format_spec_tokens(item: dict[str, Any], estimate_text_tokens) -> f
 
 __all__ = [
     "FORMAT_POLICY_PROMPT",
+    "KIND_LANG",
+    "LANG_SEMANTIC_FORMAT_POLICY_PROMPT",
+    "PATCHOULI_SEMANTIC_FORMAT_POLICY_PROMPT",
     "STRUCTURED_FORMAT_POLICY_PROMPT",
     "STRUCTURED_KINDS",
     "build_payload_item",

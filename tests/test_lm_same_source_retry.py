@@ -11,6 +11,7 @@ import requests
 
 from translation_tool.core import lm_translator_main as main
 from translation_tool.core.lm_batch_budget import get_tracker
+from translation_tool.core.lm_format_policy import LANG_SEMANTIC_FORMAT_POLICY_PROMPT
 from translation_tool.utils.cancellation import TaskCancelled, cancel_scope
 
 
@@ -501,6 +502,8 @@ def test_format_mismatch_is_sent_back_with_detected_issues_and_repaired(
     assert retry_item["value"] == "§aUse %s\nnext"
     assert retry_item["format_issues"]
     assert calls[1]["system_prompt"].startswith("LANG PROFILE PROMPT")
+    assert LANG_SEMANTIC_FORMAT_POLICY_PROMPT in calls[0]["system_prompt"]
+    assert LANG_SEMANTIC_FORMAT_POLICY_PROMPT in calls[1]["system_prompt"]
     assert "format_issues" in calls[1]["system_prompt"]
     assert [turn["role"] for turn in calls[1]["conversation_history"]] == [
         "user",
