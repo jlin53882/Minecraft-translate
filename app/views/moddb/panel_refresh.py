@@ -9,7 +9,6 @@ from app.services_impl.moddb_source_service import (
     CUSTOM_SOURCE_BASE,
     source_catalog_for,
 )
-from app.services_impl.moddb_translate_service import estimate_scope_plan
 from app.views.moddb.entries_panel import PAGE_SIZE
 from app.views.moddb.entry_filters import database_identity
 
@@ -196,17 +195,8 @@ def _load_translate_snapshot(db, request: dict, snapshot: dict) -> dict:
         if db and version and request.get("reuse")
         else 0
     )
-    planned_items, planned_batches = (
-        estimate_scope_plan(
-            db,
-            version=version,
-            mod_ids=mod_ids,
-            limit=int(request.get("limit", 0) or 0),
-            reuse_other_versions=bool(request.get("reuse")),
-        )
-        if db is not None and version
-        else (0, 0)
-    )
+    # 背景刷新只更新快速計數；完整批次規劃由預覽／開始翻譯時的 service
+    # 使用同一份 items、session 與 planner 計算，避免每次範圍變更都掃完整版本。
     snapshot.update(
         versions=versions,
         version=version,
@@ -214,8 +204,8 @@ def _load_translate_snapshot(db, request: dict, snapshot: dict) -> dict:
         mod=mod,
         missing=missing,
         reusable=reusable,
-        planned_items=planned_items,
-        planned_batches=planned_batches,
+        planned_items=None,
+        planned_batches=None,
     )
     return snapshot
 

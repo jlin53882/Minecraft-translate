@@ -6,6 +6,7 @@ from collections import Counter
 from dataclasses import dataclass
 from typing import Literal
 
+from translation_tool.core.lm_format_policy import structured_kind
 from translation_tool.translation_db.quality import (
     format_token_spans,
     guide_structure_issues,
@@ -71,6 +72,8 @@ class FormatDiffResult:
     issues: tuple[FormatDiffIssue, ...]
     # 指南條目的結構標記（連結目標、標籤、前綴）；非指南條目為空
     guide_issues: tuple[str, ...] = ()
+    # Guide/Patchouli 的一般段落換行可依語意重排；保留數量供 UI 顯示資訊。
+    soft_newline_counts: tuple[int, int] | None = None
 
     @property
     def has_issues(self) -> bool:
@@ -78,8 +81,13 @@ class FormatDiffResult:
 
     @property
     def summary_lines(self) -> tuple[str, ...]:
-        lines = (*(issue.summary for issue in self.issues), *self.guide_issues)
-        return lines or ("格式檢查通過。",)
+        lines = [*(issue.summary for issue in self.issues), *self.guide_issues]
+        if self.soft_newline_counts is not None:
+            source_count, target_count = self.soft_newline_counts
+            lines.append(
+                f"一般段落換行可依語意重排：原文 {source_count}、譯文 {target_count}"
+            )
+        return tuple(lines) or ("格式檢查通過。",)
 
     @property
     def legacy_messages(self) -> tuple[str, ...]:
@@ -112,10 +120,19 @@ def compare_format_diff(
     target_counts = Counter(item.token for item in target_occurrences)
     source_by_token = _group_occurrences(source_occurrences)
     target_by_token = _group_occurrences(target_occurrences)
+    allow_soft_newlines = structured_kind(kind)
+    soft_newline_counts = (
+        (source_counts.get("\n", 0), target_counts.get("\n", 0))
+        if allow_soft_newlines
+        and source_counts.get("\n", 0) != target_counts.get("\n", 0)
+        else None
+    )
     issues = []
     for token in sorted(set(source_counts) | set(target_counts)):
         delta = target_counts[token] - source_counts[token]
         if not delta:
+            continue
+        if token == "\n" and allow_soft_newlines:
             continue
         issues.append(
             FormatDiffIssue(
@@ -138,6 +155,7 @@ def compare_format_diff(
         target_occurrences=target_occurrences,
         issues=tuple(issues),
         guide_issues=tuple(guide_structure_issues(source_text, target_text, kind=kind)),
+        soft_newline_counts=soft_newline_counts,
     )
 
 

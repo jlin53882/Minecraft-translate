@@ -391,8 +391,8 @@ class RepairReviewer:
         else:
             self.format_status.value = "格式檢查通過。"
             self.format_status.color = C.EM
-        self.format_diff_viewer.render(source, draft, diff_result)
-        self.format_review.render(source, draft, diff_result)
+        self.format_diff_viewer.render(source, draft, diff_result, kind=kind)
+        self.format_review.render(source, draft, diff_result, kind=kind)
 
     def _draft_changed(self, _event=None) -> None:
         if self.applying or self.item is None or self.draft is None:

@@ -769,6 +769,8 @@ class EntriesPanel(ft.Column):
                 notes.append(
                     "與原文的特殊字元不一致：" + "、".join(diff_result.legacy_messages)
                 )
+            if diff_result.soft_newline_counts is not None:
+                notes.append(diff_result.summary_lines[-1])
             if diff_result.guide_issues:
                 notes.append(
                     "指南標記與原文不一致：" + "、".join(diff_result.guide_issues)
@@ -780,7 +782,12 @@ class EntriesPanel(ft.Column):
         self.token_hint.value = "；".join(notes)
         self.token_hint.visible = bool(notes)
         self.mc_preview.render(text, markdown=is_guide)
-        self.chars.render(entry.en_us if entry else "", text, diff_result)
+        self.chars.render(
+            entry.en_us if entry else "",
+            text,
+            diff_result,
+            kind=entry.kind if entry else None,
+        )
         self.format_review.render(
             entry.en_us if entry else "",
             text,

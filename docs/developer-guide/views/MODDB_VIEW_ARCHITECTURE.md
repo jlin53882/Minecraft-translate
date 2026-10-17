@@ -28,6 +28,10 @@
 
 ## 維護邊界
 
+### 翻譯範圍計數與批次規劃
+
+`panel_refresh._load_translate_snapshot` 在背景刷新時只讀取版本／模組清單、未翻譯筆數與可沿用筆數，避免每次範圍變更都載入整個版本並建立翻譯 session。`TranslatePanel` 以這些數字顯示快速批次估算；按下預覽或開始機翻後，`moddb_translate_service` 才建立完整 items、附加同模組 session 與已審核術語，並由共用 planner 產生精確批次數。預覽與實際翻譯仍使用相同的批次規劃路徑。
+
 - `app/services_impl/moddb_species_service.py` 不依賴 Flet，只處理候選資料結構、資料庫分頁與學名規則。
 - `app/views/moddb/species_dialog.py` 只處理視窗控制項、掃描與單筆查詢的背景作業，以及結果呈現。
 - `app/views/moddb/species_bulk_lookup.py` 負責批次查詢的背景工作、任務膠囊進度、停止條件與事件通知，不持有任何控制項。

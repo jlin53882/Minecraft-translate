@@ -64,7 +64,8 @@ def next_batch(
         preferred = 50
     group = batch_group_key(items[start])
     homogeneous = 1
-    while start + homogeneous < len(items):
+    # 只探查本批可能使用的窗口；下一批會從新的 start 重新確認邊界。
+    while start + homogeneous < len(items) and homogeneous < preferred:
         if check is not None and homogeneous % 128 == 0:
             check()
         candidate = items[start + homogeneous]

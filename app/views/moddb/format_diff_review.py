@@ -281,14 +281,19 @@ class FormatDiffReview:
             kit.chip(message, "gold", icon=ft.Icons.WARNING_AMBER)
             for message in result.guide_issues
         ]
-        issue_summary: ft.Control = (
-            ft.Row(issue_controls, spacing=6, wrap=True)
-            if issue_controls
-            else ft.Row(
-                [kit.chip("格式檢查通過", "em", icon=ft.Icons.CHECK_CIRCLE_OUTLINE)],
-                spacing=6,
+        if result.soft_newline_counts is not None:
+            issue_controls.append(
+                kit.chip(
+                    result.summary_lines[-1],
+                    "neutral",
+                    icon=ft.Icons.INFO_OUTLINE,
+                )
             )
-        )
+        if not result.has_issues:
+            issue_controls.append(
+                kit.chip("格式檢查通過", "em", icon=ft.Icons.CHECK_CIRCLE_OUTLINE)
+            )
+        issue_summary: ft.Control = ft.Row(issue_controls, spacing=6, wrap=True)
         source_tokens = {
             issue.token for issue in result.issues if issue.source_occurrences
         }
@@ -414,6 +419,14 @@ class FormatDiffReview:
                     ],
                     spacing=8,
                     vertical_alignment=ft.CrossAxisAlignment.START,
+                )
+            )
+        if result.soft_newline_counts is not None:
+            rows.append(
+                ft.Text(
+                    result.summary_lines[-1],
+                    size=12,
+                    color=C.MUTED,
                 )
             )
         if not result.issues and not result.guide_issues:

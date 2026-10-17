@@ -121,6 +121,8 @@ flowchart TD
 
 ### 批次機翻與異常清單
 
+翻譯頁的範圍刷新只查詢未翻譯與可沿用筆數，畫面上的批次數是快速估算；不會在每次版本或模組篩選變更時建立完整翻譯項目。按「預覽」或「開始機翻」後，服務層才依篩選後的項目、`cache_type`／`_batch_group`、session 與固定提示詞 token 重新執行精確批次規劃。
+
 ```mermaid
 flowchart TD
     A["按「開始機翻」或「預覽」→ TranslatePanel.start_clicked"] --> B["build_options 建立 TranslateOptions"]
