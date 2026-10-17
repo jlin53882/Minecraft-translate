@@ -87,7 +87,7 @@ flowchart TD
   - `lm_translator.batch_write_interval`：快取寫入頻率。
   - `lm_translator.provider`：決定統計卡顯示 ChatGPT 或金鑰健康。
   - `translator.parallel_execution_workers`：抽取時的並行數。
-  - `lm_translator.rate_limit.sleep_seconds_between_batches`：批次之間的等待秒數，預設 `4` 秒，適合每分鐘 15 次（RPM 15）的模型；明確設定 `0` 才會停用批次間隔等待。這是本地批次間隔，不取代 API 回傳 `Retry-After` 時的限流等待。
+  - `lm_translator.rate_limit.sleep_seconds_between_batches`：批次之間的等待秒數，預設 `4` 秒，適合每分鐘 15 次（RPM 15）的模型；同一批發生品質 retry 時，第一次請求與 retry 請求之間也使用這個間隔。明確設定 `0` 才會停用批次間隔等待。這是本地批次間隔，不取代 API 回傳 `Retry-After` 時的限流等待。
   - `lm_translator` 區段的 `batch_shrink_factor`、`min_batch_size`：批次縮小參數。
   - UI 日誌行數（`load_ui_logging_config` 的 `tail_lines`）。
 - 抽取規則：Patchouli 檔案的 `multiblock` 物件（方塊圖樣的 `pattern`、`mapping`）整個不抽取，因為翻譯或削掉列內空白會讓每列長度不一致、整本書載入失敗；Mod 資料庫的 jar 掃描共用同一個抽取函式（`translatable_extractor.extract_translatables`），規則相同。

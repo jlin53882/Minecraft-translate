@@ -173,7 +173,7 @@ def test_reported_usage_calibrates_the_output_factor(env):
 
     translate_batch_smart(items, len(items))
 
-    assert fake.calls[-2] > fake.calls[0]  # 校正後批次變大
+    assert fake.calls[1] > fake.calls[0]  # 校正後第一個後續批次變大
     assert bb.get_tracker("lang").output_factor(bb.BudgetConfig()) < 1.5
 
 

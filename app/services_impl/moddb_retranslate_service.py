@@ -33,6 +33,7 @@ from app.services_impl.pipelines._pipeline_logging import (
 from app.tasks.task_session import add_log_unmirrored
 from translation_tool.core.lm_batch_budget import (
     BudgetConfig,
+    estimate_text_tokens,
     get_tracker,
     profile_for_cache_type,
     select_batch_size,
@@ -43,6 +44,7 @@ from translation_tool.core.lm_batch_planner import (
     next_batch,
 )
 from translation_tool.core.lm_moddb_context import attach_moddb_context
+from translation_tool.core.lm_session import TranslationSessionState
 from translation_tool.core.lm_translator_main import (
     estimate_batch_fixed_input_tokens,
     translate_batch_smart,
@@ -227,6 +229,11 @@ class _RepairRunProgress:
         self._planned_first_sizes: dict[str, int] = {}
         self._planned_signatures: dict[str, tuple[Any, ...]] = {}
         self._last_batch_sizes: dict[str, int] = {}
+        self._planned_canonical_batches = 0
+        self._planned_canonical_first_size = 0
+        self._planned_canonical_submitted = 0
+        self._planned_canonical_hard_signature: tuple[Any, ...] = ()
+        self._planned_canonical_session_signature: tuple[Any, ...] = ()
         for cache_type, ranges in self._profile_ranges.items():
             batches, first_size = _plan_profile_ranges(
                 self._items, cache_type, ranges, self.lm_cfg
@@ -236,6 +243,7 @@ class _RepairRunProgress:
             self._planned_signatures[cache_type] = _batch_plan_signature(
                 cache_type, self.lm_cfg
             )
+        self._replan_canonical(None)
 
     def update(
         self,
@@ -261,6 +269,7 @@ class _RepairRunProgress:
             cache_type, 0.0
         ) + max(0.0, elapsed)
         self._last_batch_sizes[cache_type] = count
+        self._advance_canonical_plan(count)
 
     def live(
         self,
@@ -367,15 +376,83 @@ class _RepairRunProgress:
         return max(0.0, monotonic() - self.started_mono)
 
     def _remaining_canonical_batches(self, check) -> int:
-        """Use the exact live prefix planner for the headline batch total."""
+        """Return the cached canonical plan, refreshing only when its inputs change."""
         submitted = sum(self.profile_items_submitted.values())
-        remaining = self._items[submitted:]
-        fixed = (
+        if submitted != self._planned_canonical_submitted:
+            self._replan_canonical(check)
+            return self._planned_canonical_batches
+
+        hard_signature, session_signature = self._canonical_plan_signatures(submitted)
+        if hard_signature != self._planned_canonical_hard_signature:
+            self._replan_canonical(check)
+        elif session_signature != self._planned_canonical_session_signature:
+            first_size = self._first_canonical_batch_size(submitted, check=check)
+            if first_size != self._planned_canonical_first_size:
+                self._replan_canonical(check)
+            else:
+                self._planned_canonical_session_signature = session_signature
+        return self._planned_canonical_batches
+
+    def _canonical_fixed_input_tokens(self):
+        return (
             partial(estimate_batch_fixed_input_tokens, lm_cfg=self.lm_cfg)
             if self.lm_cfg.get("token_budget_enabled", True)
             else None
         )
-        return count_planned_batches(
+
+    def _canonical_plan_signatures(self, submitted: int):
+        remaining = self._items[submitted:]
+        cache_types = tuple(
+            dict.fromkeys(str(item.get("cache_type") or "lang") for item in remaining)
+        )
+        hard_signature = tuple(
+            (cache_type, _batch_plan_signature(cache_type, self.lm_cfg))
+            for cache_type in cache_types
+        )
+        sessions = []
+        seen_sessions = set()
+        for item in remaining:
+            session = item.get("_translation_session")
+            if (
+                not isinstance(session, TranslationSessionState)
+                or id(session) in seen_sessions
+            ):
+                continue
+            seen_sessions.add(id(session))
+            sessions.append(
+                (
+                    id(session),
+                    len(session.history),
+                    sum(
+                        estimate_text_tokens(turn.get("text", ""))
+                        for turn in session.history
+                    ),
+                    session.max_history_tokens,
+                )
+            )
+        return hard_signature, tuple(sessions)
+
+    def _first_canonical_batch_size(self, submitted: int, *, check=None) -> int:
+        remaining = self._items[submitted:]
+        if not remaining:
+            return 0
+        batch, _cache_type = next_batch(
+            remaining,
+            lm_cfg=self.lm_cfg,
+            batch_size_for_type=lambda cache_type: _get_default_batch_size(
+                cache_type, None
+            ),
+            fixed_input_tokens_for_batch=self._canonical_fixed_input_tokens(),
+            select_size=select_batch_size,
+            check=lambda: _check_batch_planning(None, check),
+        )
+        return len(batch)
+
+    def _replan_canonical(self, check) -> None:
+        submitted = sum(self.profile_items_submitted.values())
+        remaining = self._items[submitted:]
+        fixed = self._canonical_fixed_input_tokens()
+        first_batch, _cache_type = next_batch(
             remaining,
             lm_cfg=self.lm_cfg,
             batch_size_for_type=lambda cache_type: _get_default_batch_size(
@@ -385,6 +462,40 @@ class _RepairRunProgress:
             select_size=select_batch_size,
             check=lambda: _check_batch_planning(None, check),
         )
+        remaining_after_first = remaining[len(first_batch) :] if first_batch else []
+        batches = 0
+        if first_batch:
+            batches = 1 + count_planned_batches(
+                remaining_after_first,
+                lm_cfg=self.lm_cfg,
+                batch_size_for_type=lambda cache_type: _get_default_batch_size(
+                    cache_type, None
+                ),
+                fixed_input_tokens_for_batch=fixed,
+                select_size=select_batch_size,
+                check=lambda: _check_batch_planning(None, check),
+            )
+        hard_signature, session_signature = self._canonical_plan_signatures(submitted)
+        self._planned_canonical_batches = batches
+        self._planned_canonical_first_size = len(first_batch)
+        self._planned_canonical_submitted = submitted
+        self._planned_canonical_hard_signature = hard_signature
+        self._planned_canonical_session_signature = session_signature
+
+    def _advance_canonical_plan(self, count: int) -> None:
+        submitted = sum(self.profile_items_submitted.values())
+        hard_signature, session_signature = self._canonical_plan_signatures(submitted)
+        if (
+            count != self._planned_canonical_first_size
+            or hard_signature != self._planned_canonical_hard_signature
+        ):
+            self._replan_canonical(None)
+            return
+        self._planned_canonical_batches = max(0, self._planned_canonical_batches - 1)
+        self._planned_canonical_submitted = submitted
+        self._planned_canonical_hard_signature = hard_signature
+        self._planned_canonical_session_signature = session_signature
+        self._planned_canonical_first_size = self._first_canonical_batch_size(submitted)
 
     def _remaining_batch_plan(
         self, cache_type: str, submitted: int, remaining_count: int, check

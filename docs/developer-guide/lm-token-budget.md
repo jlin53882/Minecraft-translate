@@ -72,7 +72,7 @@
 
 ### 批次間隔與 RPM
 
-`lm_translator.rate_limit.sleep_seconds_between_batches` 是每批成功後、下一批送出前的本地間隔，預設為 `4` 秒，對每分鐘 15 次（RPM 15）的模型提供基本節流。設定為 `0` 才會停用這個間隔。它只控制正常批次之間的等待，不會覆蓋 API 回傳的 `Retry-After`、429／503 重試等待、換 Key 緩衝或其他錯誤退避；這些等待仍由各自的限流與錯誤處理流程負責。
+`lm_translator.rate_limit.sleep_seconds_between_batches` 是每批成功後、下一批送出前的本地間隔，預設為 `4` 秒，對每分鐘 15 次（RPM 15）的模型提供基本節流。品質 retry 也會在同一批的第一次請求與 retry 請求之間使用這個間隔。設定為 `0` 才會停用這個間隔。它不會覆蓋 API 回傳的 `Retry-After`、429／503 重試等待、換 Key 緩衝或其他錯誤退避；這些等待仍由各自的限流與錯誤處理流程負責。
 
 ## 譯文與原文相同時重新確認
 

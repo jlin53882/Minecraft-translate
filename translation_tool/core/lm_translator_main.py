@@ -457,6 +457,7 @@ class _BatchRuntime:
     key_rotation_buffer_sec: float = 5
     overload_retry_sec: float = OVERLOAD_RETRY_WAIT_SEC
     request_interval_sec: float = 4
+    batch_interval_sec: float = 4
     reasoning_effort: str | None = None
     chatgpt_profile_id: str | None = None
     chatgpt_retry_count: int = 0
@@ -556,6 +557,39 @@ def _estimate_retry_input_tokens(
         + _estimate_conversation_history_tokens(conversation_history)
         + estimate_text_tokens(json.dumps(payload, ensure_ascii=False))
     )
+
+
+def _refresh_runtime_prompt_budget(runtime: _BatchRuntime) -> None:
+    """Recalculate fixed prompt tokens after the shared session history grows."""
+    history_input_tokens = _estimate_conversation_history_tokens(
+        runtime.conversation_history
+    )
+    prompt_tokens = estimate_text_tokens(runtime.effective_prompt)
+    retry_prompt_tokens = estimate_text_tokens(
+        f"{runtime.effective_prompt.rstrip()}\n\n{SAME_SOURCE_RETRY_INSTRUCTION}"
+    )
+    quality_retry_prompt_tokens = estimate_text_tokens(
+        f"{runtime.effective_prompt.rstrip()}\n\n{QUALITY_RETRY_INSTRUCTION}"
+    )
+    runtime.fixed_input_tokens = prompt_tokens + history_input_tokens
+    runtime.retry_fixed_input_tokens = retry_prompt_tokens
+    runtime.quality_retry_fixed_input_tokens = quality_retry_prompt_tokens
+    batch_prompt_fit_tokens = (
+        retry_prompt_tokens if runtime.retry_same_as_source else prompt_tokens
+    )
+    runtime.batch_fit_input_tokens = (
+        max(batch_prompt_fit_tokens, quality_retry_prompt_tokens) + history_input_tokens
+    )
+
+
+def _batch_interval_seconds(lm_cfg: dict) -> float:
+    rate_cfg = lm_cfg.get("rate_limit", {})
+    if not isinstance(rate_cfg, dict):
+        rate_cfg = {}
+    try:
+        return max(0.0, float(rate_cfg.get("sleep_seconds_between_batches", 4.0)))
+    except (TypeError, ValueError):
+        return 4.0
 
 
 def _build_batch_prompt_context(
@@ -734,6 +768,7 @@ def _build_batch_runtime(
         key_rotation_buffer_sec=lm_cfg.get("key_rotation_buffer_sec", 5),
         overload_retry_sec=lm_cfg.get("overload_retry_sec", OVERLOAD_RETRY_WAIT_SEC),
         request_interval_sec=lm_cfg.get("request_interval_sec", 4),
+        batch_interval_sec=_batch_interval_seconds(lm_cfg),
         reasoning_effort=reasoning_effort,
         chatgpt_profile_id=chatgpt_profile_id,
     )
@@ -741,6 +776,7 @@ def _build_batch_runtime(
 
 def _prepare_batch(runtime: _BatchRuntime) -> _BatchRound:
     """Select a prefix by item and token budget and build the API payload."""
+    _refresh_runtime_prompt_budget(runtime)
     fit_count = select_batch_size(
         runtime.remaining_items,
         runtime.batch_profile,
@@ -1304,6 +1340,8 @@ def _retry_same_source_translations(
     )
     try:
         raise_if_cancelled()
+        if runtime.batch_interval_sec > 0:
+            interruptible_sleep(runtime.batch_interval_sec)
         retry_meta: dict = {}
         request_kwargs = _provider_request_kwargs(
             runtime,
@@ -1437,6 +1475,8 @@ def _retry_quality_translations(
 
     try:
         raise_if_cancelled()
+        if runtime.batch_interval_sec > 0:
+            interruptible_sleep(runtime.batch_interval_sec)
         retry_meta: dict = {}
         request_kwargs = _provider_request_kwargs(
             runtime,
@@ -1489,13 +1529,32 @@ def _retry_quality_translations(
     accepted_positions: list[int] = []
     accepted_results: list[dict] = []
     unresolved = 0
+    initially_same_source_ids = {
+        str(item.get("id"))
+        for item in candidates.payload.get("items", [])
+        if "翻譯結果與原文相同" in (item.get("retry_reasons") or [])
+    }
+    initially_same_source_positions = {
+        position
+        for position, item_id in zip(
+            candidates.positions, candidates.item_ids, strict=True
+        )
+        if str(item_id) in initially_same_source_ids
+    }
     for position, retry_item in zip(candidates.positions, retried, strict=True):
         source_text = round_data.current_batch[position].get("text")
         translated_text = retry_item.get("text")
+        still_suspect_same_source = (
+            position not in initially_same_source_positions
+            and isinstance(source_text, str)
+            and translated_text == source_text
+            and any(char.isalpha() for char in source_text)
+        )
         if (
             not isinstance(translated_text, str)
             or not translated_text.strip()
             or not isinstance(source_text, str)
+            or still_suspect_same_source
             or quality_issues(round_data.current_batch[position], translated_text)
         ):
             unresolved += 1

@@ -535,6 +535,26 @@ def test_format_mismatch_retry_keeps_original_when_issue_remains(
     assert result == [{**item, "text": "使用 next"}]
 
 
+def test_quality_retry_does_not_accept_source_after_format_failure(
+    monkeypatch, configure_batch
+):
+    configure_batch(retry=False)
+    item = _item("Hello %s", 0)
+
+    result, status, calls = _run_with_api(
+        monkeypatch,
+        [item],
+        [
+            lambda call: _reply(call, {"Hello %s": "你好"}),
+            lambda call: _reply(call, {"Hello %s": "Hello %s"}),
+        ],
+    )
+
+    assert status == "AUTO"
+    assert len(calls) == 2
+    assert result == [{**item, "text": "你好"}]
+
+
 def test_quality_retry_request_failure_keeps_original_and_logs_exception_detail(
     monkeypatch, configure_batch
 ):
@@ -627,6 +647,27 @@ def test_one_batch_combines_quality_candidates_into_one_retry(
     ]
 
 
+def test_quality_retry_uses_the_configured_batch_interval(monkeypatch, configure_batch):
+    config = configure_batch(retry=False)
+    config["lm_translator"]["rate_limit"] = {"sleep_seconds_between_batches": 3.5}
+    waits = []
+    monkeypatch.setattr(main, "interruptible_sleep", waits.append)
+    item = _item("Use %s\nnext", 0)
+
+    _result, status, calls = _run_with_api(
+        monkeypatch,
+        [item],
+        [
+            lambda call: _reply(call, {"Use %s\nnext": "使用 next"}),
+            lambda call: _reply(call, {"Use %s\nnext": "使用 %s\n下一個"}),
+        ],
+    )
+
+    assert status == "AUTO"
+    assert len(calls) == 2
+    assert 3.5 in waits
+
+
 def test_batch_input_fit_reserves_retry_prompt_only_when_enabled(
     monkeypatch, configure_batch
 ):
@@ -645,6 +686,29 @@ def test_batch_input_fit_reserves_retry_prompt_only_when_enabled(
         disabled_runtime.fixed_input_tokens,
         disabled_runtime.quality_retry_fixed_input_tokens,
     )
+
+
+def test_prepare_batch_refreshes_token_budget_after_session_history_grows(
+    monkeypatch, configure_batch
+):
+    configure_batch()
+    items = [_item("First", 0), _item("Second", 1)]
+    runtime = main._build_batch_runtime(items, len(items))
+    runtime.batch_size = 1
+
+    main._prepare_batch(runtime)
+    first_budget = runtime.batch_fit_input_tokens
+    runtime.remaining_items = runtime.remaining_items[1:]
+    runtime.conversation_history.extend(
+        [
+            {"role": "user", "text": '{"items":[{"id":"0","value":"First"}]}'},
+            {"role": "model", "text": '{"items":[{"id":"0","value":"第一"}]}'},
+        ]
+    )
+
+    main._prepare_batch(runtime)
+
+    assert runtime.batch_fit_input_tokens > first_budget
 
 
 @pytest.mark.parametrize(

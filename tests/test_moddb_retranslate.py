@@ -1750,6 +1750,41 @@ def test_repair_progress_replans_only_when_profile_budget_changes(monkeypatch):
     assert live["batch_est"] == 4
 
 
+def test_repair_progress_reuses_canonical_plan_between_live_updates(monkeypatch):
+    monkeypatch.setattr(
+        moddb_retranslate_service,
+        "_get_default_batch_size",
+        lambda _cache_type, _sizes: 64,
+    )
+    original_count = moddb_retranslate_service.count_planned_batches
+    count_calls = 0
+
+    def count_planned(*args, **kwargs):
+        nonlocal count_calls
+        count_calls += 1
+        return original_count(*args, **kwargs)
+
+    monkeypatch.setattr(
+        moddb_retranslate_service, "count_planned_batches", count_planned
+    )
+    tracker = moddb_retranslate_service._RepairRunProgress(
+        [{"cache_type": "lang"} for _ in range(130)],
+        total_candidates=130,
+        lm_cfg={"token_budget_enabled": False},
+    )
+    planned_calls = count_calls
+
+    tracker.live()
+    tracker.live()
+    assert count_calls == planned_calls
+
+    tracker.update("lang", count=64, elapsed=1)
+    after_update_calls = count_calls
+    tracker.live()
+    tracker.live()
+    assert count_calls == after_update_calls
+
+
 def test_batch_planner_checks_cancellation_while_scanning_profile(monkeypatch):
     from translation_tool.utils.cancellation import TaskCancelled
 
