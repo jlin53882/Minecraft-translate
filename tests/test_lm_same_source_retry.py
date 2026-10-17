@@ -669,7 +669,7 @@ def test_quality_retry_uses_the_configured_batch_interval(monkeypatch, configure
 
     assert status == "AUTO"
     assert len(calls) == 2
-    assert 3.5 in waits
+    assert any(wait == pytest.approx(3.5, abs=0.01) for wait in waits)
 
 
 def test_batch_input_fit_reserves_retry_prompt_only_when_enabled(

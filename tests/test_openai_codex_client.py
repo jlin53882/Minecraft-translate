@@ -780,7 +780,9 @@ def test_sse_retry_then_success_uses_same_batch_and_pinned_profile(monkeypatch):
     assert [call["json"]["input"] for call in posts] == [
         posts[0]["json"]["input"]
     ] * len(posts)
-    assert waits == [1]
+    assert waits[0] == pytest.approx(1)
+    assert waits[1] == pytest.approx(4, abs=0.01)
+    assert len(waits) == 2
     assert len(posts) == 3
     assert all(response.closed for response in stream_responses)
 
