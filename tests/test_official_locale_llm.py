@@ -207,8 +207,8 @@ def test_gemini_and_openai_share_the_same_effective_prompt() -> None:
 def test_moddb_reviewed_lang_glossary_is_injected_for_patchouli_routes() -> None:
     item = {
         "path": "item.example",
-        "source_text": "Example",
-        "text": "Example",
+        "source_text": "Copper Gate",
+        "text": "Copper Gate",
         "_reviewed_glossary": [
             {"en_us": "Copper Gate", "zh_tw": "銅製閘門"},
         ],
@@ -272,7 +272,9 @@ def test_moddb_sessions_are_shared_by_module_and_isolated_between_modules() -> N
     glossary_calls: list[str] = []
 
     class FakeDB:
-        def reviewed_lang_glossary(self, mod_id: str) -> list[dict[str, str]]:
+        def reviewed_lang_glossary(
+            self, mod_id: str, _version=None, _source_texts=()
+        ) -> list[dict[str, str]]:
             glossary_calls.append(mod_id)
             return []
 
@@ -304,13 +306,50 @@ def test_moddb_context_skips_reviewed_glossary_when_disabled(monkeypatch) -> Non
             "FakeDB",
             (),
             {
-                "reviewed_lang_glossary": lambda _self, mod_id: calls.append(mod_id),
+                "reviewed_lang_glossary": lambda _self, mod_id, *_args: calls.append(
+                    mod_id
+                ),
             },
         )(),
     )
 
     assert calls == []
     assert "_reviewed_glossary" not in items[0]
+
+
+def test_reviewed_glossary_is_batch_scoped_and_conflicts_are_omitted() -> None:
+    items = [
+        {
+            "source_text": "Cobblestone",
+            "text": "Cobblestone",
+            "_reviewed_glossary": [
+                {"en_us": "Cobblestone", "zh_tw": "鵝卵石"},
+                {"en_us": "Pressure Chamber", "zh_tw": "壓力室"},
+                {"en_us": "Pressure Chamber", "zh_tw": "氣壓室"},
+            ],
+        }
+    ]
+
+    prompt = build_translation_prompt("基礎", items, profile="lang")
+
+    assert "Cobblestone → 鵝卵石" in prompt
+    assert "Pressure Chamber" not in prompt
+
+
+def test_moddb_context_passes_version_and_source_scope_to_glossary_loader() -> None:
+    items = build_items([(1, KIND_LANG, "mod-a", "a", "Cobblestone")])
+    calls = []
+
+    class FakeDB:
+        def reviewed_lang_glossary(self, mod_id, version, source_texts):
+            calls.append((mod_id, version, tuple(source_texts)))
+            return []
+
+    _attach_translation_sessions(
+        items, operation_id="versioned", db=FakeDB(), version="1.21.1"
+    )
+
+    assert calls == [("mod-a", "1.21.1", ("Cobblestone",))]
 
 
 def test_official_glossary_keeps_key_specific_duplicate_english_values(

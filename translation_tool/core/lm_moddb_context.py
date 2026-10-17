@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from pathlib import PurePath
 from typing import Any
 
@@ -50,7 +50,8 @@ def attach_moddb_context(
     items: list[dict[str, Any]],
     *,
     operation_id: str,
-    reviewed_glossary_loader: Callable[[str], list[dict[str, str]]] | None = None,
+    mc_version: str | None = None,
+    reviewed_glossary_loader: Callable[..., list[dict[str, str]]] | None = None,
 ) -> None:
     """Attach module-wide session/glossary while preserving kind batch boundaries.
 
@@ -66,10 +67,35 @@ def attach_moddb_context(
         ):
             reviewed_glossary_loader = None
     sessions: dict[str, TranslationSessionState] = {}
-    glossaries: dict[str, list[dict[str, str]]] = {}
+    glossaries: dict[tuple[str, str | None], list[dict[str, str]]] = {}
+    source_texts_by_context: dict[tuple[str, str | None], tuple[str, ...]] = {}
+    for candidate in items:
+        candidate_mod = _infer_module_id(candidate)
+        candidate_version = (
+            candidate.get("_expected_version")
+            or candidate.get("mc_version")
+            or candidate.get("version")
+            or mc_version
+        )
+        context_key = (
+            candidate_mod,
+            str(candidate_version) if candidate_version else None,
+        )
+        source = candidate.get("source_text") or candidate.get("text")
+        if isinstance(source, str) and source.strip():
+            source_texts_by_context[context_key] = tuple(
+                dict.fromkeys((*source_texts_by_context.get(context_key, ()), source))
+            )
     for item in items:
         kind = _infer_kind(item)
         mod_id = _infer_module_id(item)
+        item_version = (
+            item.get("_expected_version")
+            or item.get("mc_version")
+            or item.get("version")
+            or mc_version
+        )
+        item_version = str(item_version) if item_version else None
         item.setdefault("_kind", kind)
         item.setdefault("_mod_id", mod_id)
         item.setdefault("_batch_group", (mod_id, kind))
@@ -80,9 +106,15 @@ def attach_moddb_context(
         )
         item["_translation_session"] = sessions[session_key]
         if reviewed_glossary_loader is not None and mod_id:
-            if mod_id not in glossaries:
-                glossaries[mod_id] = reviewed_glossary_loader(mod_id)
-            item["_reviewed_glossary"] = glossaries[mod_id]
+            glossary_key = (mod_id, item_version)
+            if glossary_key not in glossaries:
+                source_texts: Sequence[str] = source_texts_by_context.get(
+                    glossary_key, ()
+                )
+                glossaries[glossary_key] = reviewed_glossary_loader(
+                    mod_id, item_version, source_texts
+                )
+            item["_reviewed_glossary"] = glossaries[glossary_key]
 
 
 def strip_runtime_context(item: dict[str, Any]) -> dict[str, Any]:

@@ -1785,6 +1785,32 @@ def test_repair_progress_reuses_canonical_plan_between_live_updates(monkeypatch)
     assert count_calls == after_update_calls
 
 
+def test_repair_progress_live_uses_incremental_canonical_metadata(monkeypatch):
+    monkeypatch.setattr(
+        moddb_retranslate_service,
+        "_get_default_batch_size",
+        lambda _cache_type, _sizes: 64,
+    )
+
+    class CountingItem(dict):
+        reads = 0
+
+        def get(self, *args, **kwargs):
+            type(self).reads += 1
+            return super().get(*args, **kwargs)
+
+    items = [CountingItem(cache_type="lang") for _ in range(2_000)]
+    tracker = moddb_retranslate_service._RepairRunProgress(
+        items, total_candidates=len(items), lm_cfg={"token_budget_enabled": False}
+    )
+    CountingItem.reads = 0
+
+    tracker.live()
+    tracker.live()
+
+    assert CountingItem.reads == 0
+
+
 def test_batch_planner_checks_cancellation_while_scanning_profile(monkeypatch):
     from translation_tool.utils.cancellation import TaskCancelled
 

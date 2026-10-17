@@ -7,6 +7,12 @@
 
 ## 模型每日配額（RPD）
 
+所有 provider 請求也會經過 `ModelQuotaRegistry.reserve_request_slot()`：以
+`(provider, model)` 為鍵，在程序內共享 `sleep_seconds_between_batches` 的最小間隔。
+正常批次、內部縮批與品質 retry 使用同一個 slot；品質 retry 仍只嘗試一次，且先取得
+同一模型的 quota claim／probe lease。429／503 會回到既有錯誤分類器更新 key／模型狀態，
+但不會因此增加品質 retry 次數。
+
 | 項目 | 說明 |
 |---|---|
 | 輪替 | 模型 1 回 429 RPD → 標記該模型今日耗盡 → 換模型 2 → … → 所有啟用的模型都耗盡才回傳 `ALL_KEYS_EXHAUSTED`。**不會因為 RPD 換 key**（額度共用，換了也一樣 429） |

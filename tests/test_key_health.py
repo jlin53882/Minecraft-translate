@@ -885,6 +885,21 @@ def test_probe_lease_heartbeat_does_nothing_for_a_model_that_is_not_probing():
         assert threading.active_count() == before  # 沒有耗盡紀錄、沒有租約：不開執行緒
 
 
+def test_request_slot_is_shared_by_provider_and_model():
+    from translation_tool.core.lm_key_health import ModelQuotaRegistry
+
+    reg = ModelQuotaRegistry()
+    first = reg.reserve_request_slot("gemini", "m1", 4)
+    second = reg.reserve_request_slot("gemini", "m1", 4)
+    other_model = reg.reserve_request_slot("gemini", "m2", 4)
+    other_provider = reg.reserve_request_slot("chatgpt", "m1", 4)
+
+    assert first == 0
+    assert second > 0
+    assert other_model == 0
+    assert other_provider == 0
+
+
 def test_uncertain_window_is_visible_to_readers_and_consistent_with_gating():
     """不確定視窗（沒有 tzdata）：快照／is_exhausted 與實際門控一致，並標示「確認中」。"""
     from translation_tool.core.lm_key_health import ModelQuotaRegistry

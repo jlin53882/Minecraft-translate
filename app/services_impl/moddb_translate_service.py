@@ -203,12 +203,13 @@ def plan_batches(
 
 
 def _attach_translation_sessions(
-    items: list[dict[str, Any]], *, operation_id: str, db
+    items: list[dict[str, Any]], *, operation_id: str, db, version: str | None = None
 ) -> None:
     """Attach one session/glossary to every kind belonging to the same module."""
     attach_moddb_context(
         items,
         operation_id=operation_id,
+        mc_version=version,
         reviewed_glossary_loader=db.reviewed_lang_glossary,
     )
 
@@ -242,6 +243,7 @@ def estimate_scope_plan(
         items,
         operation_id=f"count:{version}:{','.join(mod_ids)}",
         db=db,
+        version=version,
     )
     return len(rows), plan_batches(items)
 
@@ -305,6 +307,7 @@ def _select_rows(session, db, options: TranslateOptions, report: TranslateReport
             preview_items,
             operation_id=f"preview:{getattr(session, 'id', '') or id(session)}",
             db=db,
+            version=options.version,
         )
         report.planned_batches = plan_batches(preview_items)
         _log(
@@ -413,7 +416,9 @@ def _translate_rows(
 
     items = group_items_by_batch_key(build_items(rows))
     operation_id = str(getattr(session, "id", "") or id(session))
-    _attach_translation_sessions(items, operation_id=operation_id, db=db)
+    _attach_translation_sessions(
+        items, operation_id=operation_id, db=db, version=options.version
+    )
     report.planned_batches = plan_batches(items)
     tracker = RunProgress(total=len(items), planned_batches=report.planned_batches)
     _log(session, tracker.start_line())

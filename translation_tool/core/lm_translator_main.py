@@ -592,6 +592,18 @@ def _batch_interval_seconds(lm_cfg: dict) -> float:
         return 4.0
 
 
+def _wait_for_request_slot(runtime: _BatchRuntime, model_name: str) -> None:
+    """Throttle every provider request through the shared model clock."""
+    wait_sec = get_model_quota_registry().reserve_request_slot(
+        getattr(runtime, "provider", runtime.lm_cfg.get("provider", "gemini")),
+        model_name,
+        runtime.batch_interval_sec,
+    )
+    if wait_sec > 0:
+        interruptible_sleep(wait_sec)
+    raise_if_cancelled()
+
+
 def _build_batch_prompt_context(
     batch_items: list[dict], lm_cfg: dict
 ) -> _BatchPromptContext:
@@ -1340,8 +1352,6 @@ def _retry_same_source_translations(
     )
     try:
         raise_if_cancelled()
-        if runtime.batch_interval_sec > 0:
-            interruptible_sleep(runtime.batch_interval_sec)
         retry_meta: dict = {}
         request_kwargs = _provider_request_kwargs(
             runtime,
@@ -1353,6 +1363,7 @@ def _retry_same_source_translations(
             api_key,
             conversation_history=conversation_history,
         )
+        _wait_for_request_slot(runtime, model_name)
         retry_text = call_gemini_requests(**request_kwargs).strip()
         raise_if_cancelled()
         if (
@@ -1473,10 +1484,23 @@ def _retry_quality_translations(
         f"估計輸入 {round(retry_input_tokens)} tokens"
     )
 
+    quota = get_model_quota_registry()
+    try:
+        model_index = runtime.model_pool.index(model_name)
+    except ValueError:
+        log_warning(f"[品質重試] 找不到模型 {model_name} 的配額索引，保留第一次譯文")
+        return result
+    lease_sec = _probe_lease_sec(runtime)
+    if not quota.claim(model_name, runtime.quota_owner, lease_sec):
+        log_warning(
+            f"[品質重試] 模型 {model_name} 目前沒有可用的配額探測租約，"
+            f"{candidate_count} 筆保留第一次譯文"
+        )
+        return result
+    started = quota.now()
+
     try:
         raise_if_cancelled()
-        if runtime.batch_interval_sec > 0:
-            interruptible_sleep(runtime.batch_interval_sec)
         retry_meta: dict = {}
         request_kwargs = _provider_request_kwargs(
             runtime,
@@ -1488,8 +1512,11 @@ def _retry_quality_translations(
             api_key,
             conversation_history=conversation_history,
         )
-        retry_text = call_gemini_requests(**request_kwargs).strip()
+        with quota.hold_probe_lease(model_name, runtime.quota_owner, lease_sec):
+            _wait_for_request_slot(runtime, model_name)
+            retry_text = call_gemini_requests(**request_kwargs).strip()
         raise_if_cancelled()
+        quota.mark_ok(model_name, started_at=started)
         if (
             not retry_text
             or retry_meta.get("finish_reason") == "MAX_TOKENS"
@@ -1520,6 +1547,20 @@ def _retry_quality_translations(
             ]
         )
     except Exception as exc:  # noqa: BLE001 - optional quality retry must not fail a valid batch
+        _clear_quota_on_http_success(quota, exc, model_name, started)
+        try:
+            # Reuse the normal classifier so 429/503 still update key/model
+            # health; the returned action is intentionally not retried here.
+            _handle_batch_error(
+                runtime,
+                exc,
+                model_index,
+                model_output_cap=output_cap,
+            )
+        except Exception as health_exc:  # noqa: BLE001 - keep the first result
+            log_warning(
+                f"[品質重試] 更新模型配額狀態失敗：{_retry_error_detail(health_exc)}"
+            )
         log_warning(
             f"[品質重試] 重試請求失敗，{candidate_count} 筆保留第一次譯文"
             f"（{_retry_error_detail(exc)}）"
@@ -1818,6 +1859,7 @@ def _attempt_batch(
                     api_key,
                     conversation_history=runtime.conversation_history,
                 )
+                _wait_for_request_slot(runtime, model_name)
                 raw_text = call_gemini_requests(**request_kwargs).strip()
             # A synchronous provider request cannot be interrupted in flight.
             # If cancellation arrived while it was blocked, discard its result

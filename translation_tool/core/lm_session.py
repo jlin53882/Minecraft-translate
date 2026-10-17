@@ -22,6 +22,7 @@ class TranslationSessionState:
     key: str
     max_history_tokens: int = DEFAULT_SESSION_HISTORY_TOKEN_LIMIT
     history: list[dict[str, str]] = field(default_factory=list)
+    generation: int = 0
 
     def snapshot(self) -> list[dict[str, str]]:
         return [dict(turn) for turn in self.history]
@@ -35,6 +36,7 @@ class TranslationSessionState:
             and isinstance(turn.get("text"), str)
         ]
         self._trim()
+        self.generation += 1
 
     def _trim(self) -> None:
         while len(self.history) > 2 and self._token_count() > self.max_history_tokens:

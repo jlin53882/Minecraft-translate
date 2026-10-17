@@ -528,3 +528,31 @@ def test_reviewed_lang_glossary_excludes_quality_mismatches(db):
     assert db.reviewed_lang_glossary("foo") == [
         {"key": "good", "en_us": "Cobblestone", "zh_tw": "鵝卵石"}
     ]
+
+
+def test_reviewed_lang_glossary_is_version_scoped_and_omits_conflicts(db):
+    db.ingest(
+        "1.20.1",
+        [
+            ScanItem(KIND_LANG, "foo", "pressure.old", "Pressure Chamber", "壓力室"),
+        ],
+    )
+    db.ingest(
+        "1.21.1",
+        [
+            ScanItem(KIND_LANG, "foo", "pressure.a", "Pressure Chamber", "壓力室"),
+            ScanItem(KIND_LANG, "foo", "pressure.b", "Pressure Chamber", "氣壓室"),
+            ScanItem(KIND_LANG, "foo", "cobble", "Cobblestone", "鵝卵石"),
+        ],
+    )
+    for row in (
+        db.list_entries("1.20.1", limit=10)[0] + db.list_entries("1.21.1", limit=10)[0]
+    ):
+        db.review_manual(row.id, expected_zh_tw=row.zh_tw, actor="tester")
+
+    assert db.reviewed_lang_glossary(
+        "foo", "1.21.1", ("Pressure Chamber", "Cobblestone"), limit=None
+    ) == [{"key": "cobble", "en_us": "Cobblestone", "zh_tw": "鵝卵石"}]
+    assert db.reviewed_lang_glossary("foo", "1.20.1") == [
+        {"key": "pressure.old", "en_us": "Pressure Chamber", "zh_tw": "壓力室"}
+    ]

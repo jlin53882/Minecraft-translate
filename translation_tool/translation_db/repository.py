@@ -4204,37 +4204,80 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
         )
 
     def reviewed_lang_glossary(
-        self, mod_id: str, *, limit: int = 240
+        self,
+        mod_id: str,
+        mc_version: str | None = None,
+        source_texts: Sequence[str] | None = None,
+        *,
+        limit: int | None = 240,
     ) -> list[dict[str, str]]:
         """Return reviewed, quality-clean lang terms for one module.
 
         This is a prompt reference only; it never becomes a translation source or
-        changes the effective database value. Keeping it module-scoped prevents
-        unrelated mods from contaminating a batch's terminology.
+        changes the effective database value. Keeping it module/version scoped and
+        limiting it to the current source set prevents unrelated terminology or
+        cross-version conflicts from contaminating a batch.
         """
+        clauses = [
+            "e.mod_id = ?",
+            "e.kind = 'lang'",
+            "f.review_status = 'reviewed'",
+            "e.en_us <> ''",
+            "f.zh_tw <> ''",
+            "e.en_us <> f.zh_tw",
+        ]
+        params: list[object] = [mod_id]
+        if mc_version:
+            clauses.append("e.mc_version = ?")
+            params.append(mc_version)
+        normalized_sources = tuple(
+            dict.fromkeys(
+                source.strip()
+                for source in source_texts or ()
+                if isinstance(source, str) and source.strip()
+            )
+        )
+        if limit is not None and int(limit) <= 0:
+            return []
+        if normalized_sources:
+            placeholders = ", ".join("?" for _ in normalized_sources)
+            clauses.append(f"e.en_us IN ({placeholders})")
+            params.extend(normalized_sources)
         rows = self._q(
-            """
+            f"""
             SELECT e.key, e.en_us, f.zh_tw
             FROM entry e
             JOIN effective f ON f.entry_id = e.id
-            WHERE e.mod_id = ? AND e.kind = 'lang'
-              AND f.review_status = 'reviewed'
-              AND e.en_us <> '' AND f.zh_tw <> ''
-              AND e.en_us <> f.zh_tw
+            WHERE {" AND ".join(clauses)}
             ORDER BY e.key, e.id
-            LIMIT ?
             """,
-            (mod_id, max(0, int(limit))),
+            tuple(params),
         )
-        return [
-            {"key": key, "en_us": en_us, "zh_tw": zh_tw}
-            for key, en_us, zh_tw in rows
-            if isinstance(en_us, str)
-            and isinstance(zh_tw, str)
-            and en_us.strip()
-            and zh_tw.strip()
-            and quality_state(en_us, zh_tw, kind="lang")[0] == "consistent"
-        ]
+        by_source: dict[str, list[dict[str, str]]] = {}
+        for key, en_us, zh_tw in rows:
+            if not (
+                isinstance(key, str)
+                and isinstance(en_us, str)
+                and isinstance(zh_tw, str)
+                and en_us.strip()
+                and zh_tw.strip()
+                and quality_state(en_us, zh_tw, kind="lang")[0] == "consistent"
+            ):
+                continue
+            by_source.setdefault(en_us, []).append(
+                {"key": key, "en_us": en_us, "zh_tw": zh_tw}
+            )
+
+        result: list[dict[str, str]] = []
+        for source in sorted(by_source):
+            candidates = by_source[source]
+            targets = {entry["zh_tw"] for entry in candidates}
+            if len(targets) != 1:
+                continue
+            result.append(candidates[0])
+            if limit is not None and len(result) >= max(0, int(limit)):
+                break
+        return result
 
     def load_mod_for_priority(
         self, mod_id: str, priority: tuple[int, ...]

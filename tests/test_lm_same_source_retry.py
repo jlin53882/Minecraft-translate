@@ -586,6 +586,8 @@ def test_format_repair_runs_before_the_next_batch_is_requested(
     monkeypatch, configure_batch
 ):
     config = configure_batch(retry=False)
+    waits = []
+    monkeypatch.setattr(main, "interruptible_sleep", waits.append)
     config["lm_translator"]["initial_batch_size_lang"] = 1
     items = [_item("§aUse %s\nnext", 0), _item("Second", 1)]
 
@@ -609,6 +611,8 @@ def test_format_repair_runs_before_the_next_batch_is_requested(
     ]
     assert [item["value"] for item in calls[2]["payload"]["items"]] == ["Second"]
     assert [entry["text"] for entry in result] == ["§a使用 %s\n下一個", "第二個"]
+    assert len(waits) >= 2
+    assert all(wait >= 0 for wait in waits)
 
 
 def test_one_batch_combines_quality_candidates_into_one_retry(

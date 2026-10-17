@@ -7,6 +7,7 @@ import sqlite3
 import time
 import traceback
 import uuid
+from collections import Counter
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from functools import partial
@@ -33,7 +34,6 @@ from app.services_impl.pipelines._pipeline_logging import (
 from app.tasks.task_session import add_log_unmirrored
 from translation_tool.core.lm_batch_budget import (
     BudgetConfig,
-    estimate_text_tokens,
     get_tracker,
     profile_for_cache_type,
     select_batch_size,
@@ -234,6 +234,29 @@ class _RepairRunProgress:
         self._planned_canonical_submitted = 0
         self._planned_canonical_hard_signature: tuple[Any, ...] = ()
         self._planned_canonical_session_signature: tuple[Any, ...] = ()
+        self._canonical_item_cache_types = tuple(
+            str(item.get("cache_type") or "lang") for item in items
+        )
+        self._canonical_item_sessions = tuple(
+            item.get("_translation_session")
+            if isinstance(item.get("_translation_session"), TranslationSessionState)
+            else None
+            for item in items
+        )
+        self._canonical_remaining_cache_types = Counter(
+            self._canonical_item_cache_types
+        )
+        self._canonical_remaining_sessions = Counter(
+            id(session)
+            for session in self._canonical_item_sessions
+            if session is not None
+        )
+        self._canonical_sessions = {
+            id(session): session
+            for session in self._canonical_item_sessions
+            if session is not None
+        }
+        self._canonical_metadata_submitted = 0
         for cache_type, ranges in self._profile_ranges.items():
             batches, first_size = _plan_profile_ranges(
                 self._items, cache_type, ranges, self.lm_cfg
@@ -401,36 +424,50 @@ class _RepairRunProgress:
         )
 
     def _canonical_plan_signatures(self, submitted: int):
-        remaining = self._items[submitted:]
+        self._sync_canonical_metadata(submitted)
         cache_types = tuple(
-            dict.fromkeys(str(item.get("cache_type") or "lang") for item in remaining)
+            cache_type
+            for cache_type in dict.fromkeys(self._canonical_item_cache_types)
+            if self._canonical_remaining_cache_types.get(cache_type, 0) > 0
         )
         hard_signature = tuple(
             (cache_type, _batch_plan_signature(cache_type, self.lm_cfg))
             for cache_type in cache_types
         )
         sessions = []
-        seen_sessions = set()
-        for item in remaining:
-            session = item.get("_translation_session")
-            if (
-                not isinstance(session, TranslationSessionState)
-                or id(session) in seen_sessions
-            ):
+        for session_id, session in self._canonical_sessions.items():
+            if self._canonical_remaining_sessions.get(session_id, 0) <= 0:
                 continue
-            seen_sessions.add(id(session))
             sessions.append(
                 (
-                    id(session),
+                    session_id,
+                    getattr(session, "generation", 0),
                     len(session.history),
-                    sum(
-                        estimate_text_tokens(turn.get("text", ""))
-                        for turn in session.history
-                    ),
                     session.max_history_tokens,
                 )
             )
         return hard_signature, tuple(sessions)
+
+    def _sync_canonical_metadata(self, submitted: int) -> None:
+        """Advance suffix metadata without rescanning the remaining item list."""
+        target = max(0, min(int(submitted), len(self._items)))
+        while self._canonical_metadata_submitted < target:
+            index = self._canonical_metadata_submitted
+            cache_type = self._canonical_item_cache_types[index]
+            remaining = self._canonical_remaining_cache_types[cache_type] - 1
+            if remaining:
+                self._canonical_remaining_cache_types[cache_type] = remaining
+            else:
+                self._canonical_remaining_cache_types.pop(cache_type, None)
+            session = self._canonical_item_sessions[index]
+            if session is not None:
+                session_id = id(session)
+                remaining_sessions = self._canonical_remaining_sessions[session_id] - 1
+                if remaining_sessions:
+                    self._canonical_remaining_sessions[session_id] = remaining_sessions
+                else:
+                    self._canonical_remaining_sessions.pop(session_id, None)
+            self._canonical_metadata_submitted += 1
 
     def _first_canonical_batch_size(self, submitted: int, *, check=None) -> int:
         remaining = self._items[submitted:]
@@ -620,6 +657,7 @@ def preview_same_source_ai_retranslation(
     attach_moddb_context(
         items,
         operation_id=f"retranslate-preview:{id(db)}",
+        mc_version=options.version,
         reviewed_glossary_loader=db.reviewed_lang_glossary,
     )
     items = _group_retranslation_items_by_cache_type(items, deadline=deadline)
@@ -1683,6 +1721,7 @@ def _initialize_snapshot_run(db, entries, session, report, options):
     attach_moddb_context(
         candidates,
         operation_id=f"retranslate:{getattr(session, 'id', '') or id(session)}",
+        mc_version=options.version,
         reviewed_glossary_loader=db.reviewed_lang_glossary,
     )
     candidates = _group_retranslation_items_by_cache_type(candidates)

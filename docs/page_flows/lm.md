@@ -67,7 +67,7 @@ flowchart TD
   E -- "PARTIAL" --> J["回傳 PARTIAL"]
 ```
 
-- 每批提示詞會依輸入項目加入官方 Minecraft 術語；Mod DB 的已審核 `lang` 翻譯參考會在同一模組的 `lang`、Patchouli、Guide、Advancement 與 `md`／`.txt` 路線提供給模型參考。提示詞與同模組的 session 歷史會計入輸入 token 預算，但不計入翻譯輸出 KPI。
+- 每批提示詞會依輸入項目加入官方 Minecraft 術語；Mod DB 的已審核 `lang` 翻譯參考會限制在同一模組、目前 Minecraft 版本與本批原文，提供給 `lang`、Patchouli、Guide、Advancement 與 `md`／`.txt` 路線參考。同一英文有互相衝突的已審核譯文時不注入任何一筆。提示詞與同模組的 session 歷史會計入輸入 token 預算，但不計入翻譯輸出 KPI。
 - Mod DB 翻譯以 `(cache_type, batch_group)` 分組，避免把不同模組或不同種類混在同一個 payload；同一模組的不同 kind 批次沿用同一個 client-side session。預覽與實際執行共用同一個批次 planner 與固定 prompt token 估算；開始前的批次數是依當下提示詞與 session 狀態計算的下界，session 歷史增長或錯誤縮小批次時實際請求數可能增加。`.md` 與 `.txt` 指南仍走 Patchouli 提示詞，但使用 `md` 快取分類。
 
 ## 背景任務與 UI 更新
@@ -87,7 +87,7 @@ flowchart TD
   - `lm_translator.batch_write_interval`：快取寫入頻率。
   - `lm_translator.provider`：決定統計卡顯示 ChatGPT 或金鑰健康。
   - `translator.parallel_execution_workers`：抽取時的並行數。
-  - `lm_translator.rate_limit.sleep_seconds_between_batches`：批次之間的等待秒數，預設 `4` 秒，適合每分鐘 15 次（RPM 15）的模型；同一批發生品質 retry 時，第一次請求與 retry 請求之間也使用這個間隔。明確設定 `0` 才會停用批次間隔等待。這是本地批次間隔，不取代 API 回傳 `Retry-After` 時的限流等待。
+  - `lm_translator.rate_limit.sleep_seconds_between_batches`：provider／model 共用的請求最小間隔，預設 `4` 秒，適合每分鐘 15 次（RPM 15）的模型；正常批次、內部縮批與同批品質 retry 都使用同一個 request slot。明確設定 `0` 才會停用本地間隔等待；它不取代 API 回傳 `Retry-After` 時的限流等待。
   - `lm_translator` 區段的 `batch_shrink_factor`、`min_batch_size`：批次縮小參數。
   - UI 日誌行數（`load_ui_logging_config` 的 `tail_lines`）。
 - 抽取規則：Patchouli 檔案的 `multiblock` 物件（方塊圖樣的 `pattern`、`mapping`）整個不抽取，因為翻譯或削掉列內空白會讓每列長度不一致、整本書載入失敗；Mod 資料庫的 jar 掃描共用同一個抽取函式（`translatable_extractor.extract_translatables`），規則相同。

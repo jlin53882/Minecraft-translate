@@ -218,25 +218,50 @@ def build_translation_prompt(
     # Patchouli-compatible route as well.  They are never written directly;
     # the model still translates the current source item.
     if profile in {"lang", "patch", "md"} and include_moddb_reviewed:
-        reviewed = items[0].get("_reviewed_glossary") if items else None
-        if isinstance(reviewed, list):
-            lines = ["\n【Mod DB 已審核 lang 翻譯參考（目前模組）】"]
-            for entry in reviewed[:_MAX_PROMPT_TERMS]:
-                if not isinstance(entry, dict):
-                    continue
-                source, target = entry.get("en_us"), entry.get("zh_tw")
-                if (
-                    isinstance(source, str)
-                    and isinstance(target, str)
-                    and source
-                    and target
-                ):
-                    lines.append(f"- {source} → {target}")
-            if len(lines) > 1:
-                sections.append("\n".join(lines))
+        reviewed = _reviewed_glossary_for_items(items)
+        if reviewed:
+            lines = ["\n【Mod DB 已審核 lang 翻譯參考（目前版本、本批相關）】"]
+            lines.extend(f"- {source} → {target}" for source, target in reviewed)
+            sections.append("\n".join(lines))
 
     prompt = "\n\n".join(sections)
     return prompt[: len(base_prompt) + _MAX_PROMPT_CHARS]
+
+
+def _reviewed_glossary_for_items(
+    items: list[dict[str, Any]],
+) -> list[tuple[str, str]]:
+    """Keep only unambiguous reviewed terms that occur in the current batch."""
+    batch_sources = {
+        source
+        for item in items
+        if isinstance(item, dict)
+        for source in (item.get("source_text") or item.get("text"),)
+        if isinstance(source, str) and source.strip()
+    }
+    by_source: dict[str, set[str]] = {}
+    for item in items:
+        reviewed = item.get("_reviewed_glossary")
+        if not isinstance(reviewed, list):
+            continue
+        for entry in reviewed:
+            if not isinstance(entry, dict):
+                continue
+            source, target = entry.get("en_us"), entry.get("zh_tw")
+            if (
+                isinstance(source, str)
+                and isinstance(target, str)
+                and source in batch_sources
+                and source.strip()
+                and target.strip()
+            ):
+                by_source.setdefault(source, set()).add(target)
+
+    return [
+        (source, next(iter(targets)))
+        for source, targets in sorted(by_source.items())
+        if len(targets) == 1
+    ][:_MAX_PROMPT_TERMS]
 
 
 __all__ = [
