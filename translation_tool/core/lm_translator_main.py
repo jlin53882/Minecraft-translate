@@ -1359,10 +1359,10 @@ def _merge_batch_response(
     ):
         contract_error = "one or more translation values are not strings"
     if contract_error is not None:
-        contract_errors = getattr(runtime, "contract_errors", None)
-        if isinstance(contract_errors, list):
-            contract_errors.append(contract_error)
         if not optional_retry:
+            contract_errors = getattr(runtime, "contract_errors", None)
+            if isinstance(contract_errors, list):
+                contract_errors.append(contract_error)
             _note_contract_error(runtime, round_data, contract_error)
             log_warning(
                 f"[❌ 回應契約不符] {contract_error}；本批次將重試/縮小",
@@ -2220,6 +2220,9 @@ def _run_batch_state_machine(
                     fixed_input_tokens=runtime.batch_fit_input_tokens,
                 )
                 if next_fit < len(round_data.current_batch):
+                    _note_contract_progress(
+                        runtime, len(round_data.current_batch), next_fit
+                    )
                     continue
 
             shrink_factor = float(

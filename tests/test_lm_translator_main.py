@@ -910,3 +910,19 @@ def test_quality_retry_quota_failure_reads_http_error_response_status():
 
     assert main._is_quality_retry_quota_failure(error) is True
     assert main._is_quality_retry_quota_failure(ValueError("other")) is False
+
+
+def test_quality_retry_contract_error_is_not_recorded_as_batch_contract_error():
+    from types import SimpleNamespace
+
+    from translation_tool.core import lm_translator_main as main
+
+    runtime = SimpleNamespace(contract_errors=[], pending_contract_event=None)
+    round_data = SimpleNamespace(id_to_item={"0": {"path": "a"}})
+
+    result, retry = main._merge_batch_response(
+        runtime, round_data, '{"x": 1}', {}, optional_retry=True
+    )
+
+    assert result is None and retry is True
+    assert runtime.contract_errors == []

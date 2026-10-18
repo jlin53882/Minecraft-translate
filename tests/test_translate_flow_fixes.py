@@ -716,3 +716,45 @@ def test_timestamp_shard_does_not_touch_active_pointer(tmp_path):
     before = (type_dir / ".active").read_text()
     _save(type_dir, {"b": 2}, force_new_shard=True)
     assert (type_dir / ".active").read_text() == before
+
+
+def test_shared_loop_skips_quality_gate_for_source_fallback(monkeypatch):
+    """回填原文的項目沒有譯文，不可被品質檢查誤標成品質拒絕。"""
+    added = _patch_loop(monkeypatch)
+    delivered: list[dict] = []
+    from translation_tool.plugins.shared.rich_text_shield import shield_text
+
+    source = "&a&#12AB34Use #minecraft:stone %s now"
+    shielded = shield_text(source)
+    item = {
+        "path": "kubejs/entry",
+        "text": shielded.clean,
+        "source_text": source,
+        "cache_type": "kubejs",
+        "_shielded": shielded,
+    }
+
+    def fake_translate(batch, _total):
+        return [
+            {
+                **batch[0],
+                "text": "原文",
+                "_untranslated": True,
+                "_fallback_reason": "max_tokens",
+            }
+        ], "AUTO"
+
+    result = loop_mod.translate_items_with_cache_loop(
+        [item],
+        translate_batch_smart=fake_translate,
+        batch_size_by_type={"kubejs": 10},
+        sleep_seconds_between_batches=0,
+        on_translated_item=delivered.append,
+    )
+
+    assert result.status == "DONE"
+    assert delivered[0].get("_cache_rejected") is not True
+    assert delivered[0]["_fallback_reason"] == "max_tokens"
+    assert result.quality_rejected == 0
+    assert result.source_fallback == 1
+    assert added == []

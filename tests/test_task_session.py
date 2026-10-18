@@ -273,7 +273,7 @@ def test_finish_log_marks_done_with_warnings_from_summary(monkeypatch):
     assert lifecycle[0][1] == "warning"
 
 
-def test_finish_log_summary_is_chinese_and_skips_nested_details(monkeypatch):
+def test_finish_log_summary_is_chinese_and_keeps_nested_details_short(monkeypatch):
     session = TaskSession()
     session.start()
     lifecycle = []
@@ -296,4 +296,21 @@ def test_finish_log_summary_is_chinese_and_skips_nested_details(monkeypatch):
     assert text.startswith("任務結束：DONE（已取消），耗時")
     assert "\n  摘要：候選 2000｜已寫入資料庫 254｜" in text
     assert "狀態 CANCELLED（已取消）" in text and "僅預覽 否" in text
-    assert "耗時（秒） 53.6" in text and "flagged_entries" not in text
+    assert "耗時（秒） 53.6" in text and "flagged_entries {1: 'x'}" in text
+
+
+def test_finish_log_ignores_unknown_summary_status(monkeypatch):
+    """其他管線的摘要 status（例如 success）不可把結束紀錄升成警告。"""
+    session = TaskSession()
+    session.start()
+    lifecycle = []
+    monkeypatch.setattr(
+        session,
+        "_log_lifecycle",
+        lambda text, level="info": lifecycle.append((text, level)),
+    )
+    session.set_summary({"status": "success"})
+    session.finish()
+
+    assert lifecycle[0][1] == "info"
+    assert lifecycle[0][0].startswith("任務結束：DONE（完成）")

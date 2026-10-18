@@ -89,7 +89,7 @@ DEFAULT_LIMIT = 2000
 _FLAGGED_LOG_LIMIT = 20
 DB_FLUSH_RETRIES = 3  # 寫入資料庫失敗時的重試次數
 # 回填原因屬於單一項目本身（不是 API 連線或設定問題）時，不計入連續失敗
-_ITEM_SPECIFIC_FALLBACKS = frozenset({"oversized_item", "max_tokens"})
+_ITEM_SPECIFIC_FALLBACKS = frozenset({"oversized_item"})
 ABORT_AFTER_FAILURES = 500  # 連續這麼多筆都沒翻成功就中止（API Key／模型設定有問題）
 
 
@@ -644,17 +644,7 @@ def _batch_ui_line(
 
 
 def _log_final_summary(session, report: TranslateReport) -> None:
-    """依報告決定最終狀態（有警告則 DONE_WITH_WARNINGS），並寫出畫面與後台兩種摘要。"""
-    if report.status == "DONE" and any(
-        (
-            report.quality_rejected,
-            report.source_fallback,
-            report.max_tokens_items,
-            report.contract_failed_items,
-            report.quality_retry_unresolved,
-        )
-    ):
-        report.status = "DONE_WITH_WARNINGS"
+    """依 ``_settle_report`` 已定案的狀態，寫出畫面與後台兩種摘要。"""
     final_level = "warning" if report.status != "DONE" else "info"
     quality_hint = (
         f" | 品質未通過 {report.quality_rejected} 筆，完整清單：{report.quality_issues_file}（同名 .csv 為表格版）"
@@ -697,6 +687,16 @@ def _settle_report(session, report, options, result, failures, buffer, tracker) 
         report.status = "ABORTED" if failures["aborted"] else result.status
     report.batches = tracker.batches_done
     report.elapsed_sec = tracker.elapsed()
+    if report.status == "DONE" and any(
+        (
+            report.quality_rejected,
+            report.source_fallback,
+            report.max_tokens_items,
+            report.contract_failed_items,
+            report.quality_retry_unresolved,
+        )
+    ):
+        report.status = "DONE_WITH_WARNINGS"
     if report.status in ("FAILED", "ABORTED", "ALL_KEYS_EXHAUSTED"):
         session.set_error()  # 未完成不可記成 DONE（P2-5）
     if failures["aborted"]:

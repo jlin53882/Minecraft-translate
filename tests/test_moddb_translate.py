@@ -2682,10 +2682,11 @@ def test_final_summary_points_to_quality_file_and_flags_remaining(monkeypatch):
     report.remaining = 1
     report.quality_rejected = 1
     report.quality_issues_file = "logs/x/quality-issues-t.json"
+    report.status = "DONE_WITH_WARNINGS"
 
     moddb_translate_service._log_final_summary(None, report)
 
-    assert report.status == "DONE_WITH_WARNINGS"
+    assert logs[0][2] == "warning"
     assert "quality-issues-t.json" in logs[0][0]
     assert "品質未通過 1 筆" in logs[0][0]
 
@@ -2865,3 +2866,48 @@ def test_replace_rule_conflict_scan_never_fails_the_task(monkeypatch):
     monkeypatch.setattr(moddb_translate_service, "load_replace_rules", broken)
 
     assert moddb_translate_service._collect_replace_rule_conflicts() == []
+
+
+def test_max_tokens_fallbacks_still_trigger_abort_streak(db_path, monkeypatch):
+    seed(db_path)
+    monkeypatch.setattr(moddb_translate_service, "ABORT_AFTER_FAILURES", 1)
+
+    def max_tokens_all(batch, total=None, dry_run=False):
+        return [
+            {**item, "_untranslated": True, "_fallback_reason": "max_tokens"}
+            for item in batch
+        ], "DONE"
+
+    monkeypatch.setattr(
+        moddb_translate_service, "translate_batch_smart", max_tokens_all
+    )
+    session = TaskSession()
+    run_moddb_translate_service(
+        TranslateOptions(version="1.21.1", mod_ids=("foo",)), session
+    )
+
+    assert session.snapshot()["summary"]["status"] == "ABORTED"
+
+
+def test_settle_report_upgrades_done_to_done_with_warnings(monkeypatch):
+    report = moddb_translate_service.TranslateReport()
+    report.status = "DONE"
+    report.source_fallback = 1
+    failures = {"db_error": None, "db_stop": False, "aborted": False}
+    result = SimpleNamespace(status="DONE")
+    monkeypatch.setattr(moddb_translate_service, "_sync_loop_result", lambda r, x: None)
+    monkeypatch.setattr(
+        moddb_translate_service, "_collect_replace_rule_conflicts", list
+    )
+    monkeypatch.setattr(
+        moddb_translate_service, "_write_quality_issue_file", lambda s, r: None
+    )
+    tracker = SimpleNamespace(batches_done=1, elapsed=lambda: 1.0)
+    options = SimpleNamespace(write_cache=True)
+    report.status = "DONE"
+
+    moddb_translate_service._settle_report(
+        TaskSession(), report, options, result, failures, None, tracker
+    )
+
+    assert report.status == "DONE_WITH_WARNINGS"

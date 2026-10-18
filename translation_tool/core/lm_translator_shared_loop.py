@@ -307,7 +307,8 @@ def translate_items_with_cache_loop(
             actual_processed_in_this_batch += 1
             processed += 1
 
-            issues = _quality_issues_for_cache(it)
+            # 回填原文的項目沒有 AI 譯文，不做品質檢查（否則會被誤標成品質拒絕）
+            issues = [] if it.get("_untranslated") else _quality_issues_for_cache(it)
             if issues:
                 # 格式不合格仍要把 AI 譯文交給上層人工檢視；只有真正的
                 # 原文回填才標記 _untranslated。這也讓 Mod DB 能正確累計
