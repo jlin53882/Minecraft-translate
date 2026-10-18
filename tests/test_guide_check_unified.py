@@ -195,3 +195,28 @@ def test_shielded_guide_link_breakage_is_still_caught_after_unshielding():
         "db_ident": (KIND_GUIDE, "foo", "crafting.md#0"),
     }
     assert quality_issues(item, broken)
+
+
+def test_quality_retry_detects_missing_shield_placeholders_before_unshielding():
+    """品質 retry 與最終快取閘門必須使用同一套 Shield 完整性規則。"""
+    source = "&aUse #minecraft:stone here"
+    shielded = shield_text(source)
+    item = {
+        "path": "blocks[0]",
+        "text": shielded.clean,
+        "source_text": source,
+        "_shielded": shielded,
+        "db_ident": (KIND_GUIDE, "foo", "crafting.md#0"),
+    }
+    translated = {**item, "text": "使用物品"}
+
+    issues = quality_issues(item, translated["text"])
+    batch = build_quality_retry_batch(
+        [item], [translated], ["0"], retry_same_as_source=False
+    )
+
+    assert any("保護格式" in issue for issue in issues)
+    assert batch.positions == (0,)
+    assert any(
+        "保護格式" in issue for issue in batch.payload["items"][0]["format_issues"]
+    )

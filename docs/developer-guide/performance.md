@@ -68,6 +68,18 @@ does not depend on the table size; record the bound in `ALLOWED_PLAN_MARKERS` or
 掃描整個模組；資料庫寫入或外部變更使世代改變時，舊快照自動失效。來源相關性、
 多譯文衝突排除與最終數量上限仍在 Python 端執行，不得提前在候選 SQL 階段截斷。
 
+### 共用 Rich Text Shield 快取契約
+
+翻譯中的 `$C...$`、`$P...$` 與 `$E...$` 只是單次執行的暫時佔位符，不能
+直接成為跨執行快取的正式內容。共用翻譯迴圈在通過品質閘門後，將保護片段
+還原成原始 Rich Text，再寫入快取；快取命中在輸出前會依目前原文的 Shield
+資訊驗證並還原。
+
+品質閘門同時支援兩種既有資料：新快取的已還原文字會比對原始保護片段，舊
+快取若仍含全域計數器產生的佔位符，則依保護類別與原文位置對齊到本次佔位符
+後再驗證。缺少、重複或新增保護片段都會使 AI 重試與快取命中檢查失敗；因此
+FTB Quests、KubeJS、Guide／Patchouli 與一般共用迴圈必須使用同一套檢查。
+
 ### Mod DB trigger-maintained derived data
 
 `translation_tool/translation_db/stat_summary.py`,

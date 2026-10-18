@@ -238,6 +238,36 @@ def test_shared_loop_rejects_structurally_invalid_patchouli_before_cache(monkeyp
     assert added == []
 
 
+def test_shared_loop_stores_unshielded_text_in_cache(monkeypatch):
+    """快取儲存不應綁定本次執行產生的暫時 Shield placeholder。"""
+    added = _patch_loop(monkeypatch)
+    from translation_tool.plugins.shared.rich_text_shield import shield_text
+
+    source = "&aUse #minecraft:stone now"
+    shielded = shield_text(source)
+    item = {
+        "path": "quest.title",
+        "text": shielded.clean,
+        "source_text": source,
+        "cache_type": "ftbquests",
+        "_shielded": shielded,
+    }
+
+    def fake_translate(batch, _total):
+        translated = shielded.clean.replace("Use", "使用")
+        return [{**batch[0], "text": translated}], "AUTO"
+
+    result = loop_mod.translate_items_with_cache_loop(
+        [item],
+        translate_batch_smart=fake_translate,
+        batch_size_by_type={"ftbquests": 10},
+        sleep_seconds_between_batches=0,
+    )
+
+    assert result.status == "DONE"
+    assert added[0][3] == "&a使用 #minecraft:stone now"
+
+
 @pytest.mark.parametrize("cache_type", ["ftbquests", "kubejs"])
 def test_shared_loop_rejects_plugin_translation_missing_protected_token(
     monkeypatch, cache_type

@@ -13,6 +13,9 @@ from typing import Any
 from translation_tool.core.lm_config_rules import value_fully_translated
 from translation_tool.core.lm_format_policy import kind_for_item
 from translation_tool.plugins.shared.rich_text_shield import (
+    SHIELD_PLACEHOLDER_PATTERN,
+    normalize_cached_shield_text,
+    raw_shield_issues,
     shield_placeholder_issues,
     unshield_text,
 )
@@ -53,11 +56,35 @@ def cache_quality_issues(item: dict[str, Any], translated: str) -> list[str]:
     shield_issues: list[str] = []
     if shielded is not None and getattr(shielded, "shields", None):
         shields = shielded.shields
-        shield_issues = shield_placeholder_issues(candidate, shields)
-        candidate = unshield_text(candidate, shields)
+        candidate = normalize_cached_shield_text(candidate, shielded)
+        if SHIELD_PLACEHOLDER_PATTERN.search(candidate):
+            shield_issues = shield_placeholder_issues(candidate, shields)
+            candidate = unshield_text(candidate, shields)
+        else:
+            # 新快取保存還原後的正式文字；它仍必須保留原文的 Rich Text。
+            shield_issues = raw_shield_issues(candidate, shields)
     return shield_issues + translation_issues(
         str(item.get("source_text") or ""), candidate, kind=kind
     )
+
+
+def restore_cache_hit_text(item: dict[str, Any]) -> str:
+    """將快取命中轉為可寫入正式輸出的文字，兼容舊 placeholder 快取。"""
+    text = item.get("text")
+    if not isinstance(text, str):
+        return ""
+    shielded = item.get("_shielded")
+    if shielded is None or not getattr(shielded, "shields", None):
+        return text
+    normalized = normalize_cached_shield_text(text, shielded)
+    if SHIELD_PLACEHOLDER_PATTERN.search(normalized):
+        return unshield_text(normalized, shielded.shields)
+    return normalized
+
+
+def cache_storage_text(item: dict[str, Any]) -> str:
+    """回傳與暫時 placeholder 解耦、可跨執行重用的快取文字。"""
+    return restore_cache_hit_text(item)
 
 
 def safe_output_text(item: dict[str, Any]) -> str:
@@ -143,7 +170,9 @@ def fast_split_items_by_cache(
                 dst = entry.get("dst")
                 if isinstance(dst, str) and checker(dst, entry, it):
                     new_it = dict(it)
-                    new_it["text"] = dst
+                    new_it["text"] = normalize_cached_shield_text(
+                        dst, it.get("_shielded") or []
+                    )
                     cached_items.append(new_it)
                     break
         else:

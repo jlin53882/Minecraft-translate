@@ -16,6 +16,7 @@ from translation_tool.core.lm_batch_planner import next_batch
 from translation_tool.core.lm_translator_shared_cache import (
     CacheRule,
     cache_quality_issues,
+    cache_storage_text,
     get_default_cache_rules,
 )
 from translation_tool.utils.cache_manager import (
@@ -238,7 +239,6 @@ def translate_items_with_cache_loop(
                 malformed_fallback += 1
 
             pth = it["path"]
-            txt = it["text"]
             src = it["source_text"]
             ctype = str(it.get("cache_type") or cache_type)
 
@@ -270,7 +270,7 @@ def translate_items_with_cache_loop(
             rule = cache_rules.get(ctype) or CacheRule("path|source_text")
             cache_key = rule.make_key({"path": pth, "source_text": src})
             try:
-                cache_written = cache_add(ctype, cache_key, src, txt)
+                cache_written = cache_add(ctype, cache_key, src, cache_storage_text(it))
                 if cache_written is False:
                     cache_write_failed = True
                     last_error = f"快取寫入被拒絕：{ctype}:{cache_key}"

@@ -8,7 +8,13 @@ from translation_tool.core.lm_format_policy import (
     build_payload_item,
     kind_for_item,
 )
-from translation_tool.plugins.shared.rich_text_shield import unshield_text
+from translation_tool.plugins.shared.rich_text_shield import (
+    SHIELD_PLACEHOLDER_PATTERN,
+    normalize_cached_shield_text,
+    raw_shield_issues,
+    shield_placeholder_issues,
+    unshield_text,
+)
 from translation_tool.translation_db.quality import (
     guide_structure_issues,
     token_issues_for_kind,
@@ -54,15 +60,23 @@ def quality_issues(source_item: dict, translated_text: str) -> list[str]:
     空間比對；指南結構標記則先還原行內保護，與寫入與審查用的規則相同。
     """
     kind = kind_for_item(source_item)
-    issues = token_issues_for_kind(source_item.get("text"), translated_text, kind=kind)
     shielded = source_item.get("_shielded")
-    raw_translated = (
-        unshield_text(translated_text, shielded.shields)
-        if shielded is not None
-        else translated_text
-    )
+    candidate = translated_text
+    shield_issues: list[str] = []
+    if shielded is not None and getattr(shielded, "shields", None):
+        candidate = normalize_cached_shield_text(candidate, shielded)
+        if SHIELD_PLACEHOLDER_PATTERN.search(candidate):
+            shield_issues = shield_placeholder_issues(candidate, shielded.shields)
+            raw_translated = unshield_text(candidate, shielded.shields)
+        else:
+            raw_translated = candidate
+            shield_issues = raw_shield_issues(raw_translated, shielded.shields)
+    else:
+        raw_translated = candidate
+    issues = token_issues_for_kind(source_item.get("text"), candidate, kind=kind)
     raw_source = str(source_item.get("source_text") or "")
     return [
+        *shield_issues,
         *issues,
         *guide_structure_issues(raw_source, raw_translated, kind=kind),
     ]

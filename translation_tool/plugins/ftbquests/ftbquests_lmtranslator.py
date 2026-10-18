@@ -33,6 +33,7 @@ from translation_tool.core.lm_translator_shared import (
     make_checkpoint_adapter,
     make_progress_hook,
     prepare_translator_items,
+    restore_cache_hit_text,
     run_translator_skeleton,
     safe_output_text,
     write_cache_hit_preview,  # ✅ 新增：cache hit preview 檔
@@ -529,7 +530,7 @@ def translate_ftb_pending_to_zh_tw(
         # cache hits 覆蓋
         for it in cached_items:
             p = it.get("path")
-            t = it.get("text")
+            t = restore_cache_hit_text(it)
             if isinstance(p, str) and isinstance(t, str):
                 out_map[p] = t
                 try:

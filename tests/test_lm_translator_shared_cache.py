@@ -185,6 +185,54 @@ class TestIsValidHit:
 
         assert _is_valid_hit(entry["dst"], entry, item) is False
 
+    @pytest.mark.parametrize("cache_type", ["ftbquests", "kubejs"])
+    def test_is_valid_hit_accepts_canonical_unshielded_cache_value(self, cache_type):
+        """新快取保存正式文字時，仍驗證並保留 Rich Text 格式。"""
+        from translation_tool.core.lm_translator_shared_cache import _is_valid_hit
+        from translation_tool.plugins.shared.rich_text_shield import shield_text
+
+        source = "&aUse #minecraft:stone now"
+        shielded = shield_text(source)
+        item = {
+            "cache_type": cache_type,
+            "source_text": source,
+            "text": shielded.clean,
+            "_shielded": shielded,
+        }
+        entry = {"dst": "使用 &a#minecraft:stone now", "src": source}
+
+        assert _is_valid_hit(entry["dst"], entry, item) is True
+
+    def test_legacy_placeholder_cache_is_normalized_before_output(self):
+        """既有全域計數器 placeholder 快取仍可重用，不會寫出 $C/$P。"""
+        from translation_tool.core.lm_translator_shared_cache import (
+            _is_valid_hit,
+            fast_split_items_by_cache,
+            restore_cache_hit_text,
+        )
+        from translation_tool.plugins.shared.rich_text_shield import shield_text
+
+        source = "&aUse #minecraft:stone now"
+        shielded = shield_text(source)
+        item = {
+            "cache_type": "ftbquests",
+            "path": "quest.title",
+            "source_text": source,
+            "text": shielded.clean,
+            "_shielded": shielded,
+        }
+        legacy_entry = {"dst": "使用 $C0$ $P0$ now", "src": source}
+
+        assert _is_valid_hit(legacy_entry["dst"], legacy_entry, item) is True
+        cached, pending = fast_split_items_by_cache(
+            [item],
+            cache_provider=lambda _cache_type: {"quest.title|" + source: legacy_entry},
+        )
+
+        assert pending == []
+        assert len(cached) == 1
+        assert restore_cache_hit_text(cached[0]) == "使用 &a #minecraft:stone now"
+
 
 class TestFastSplitItemsByCache:
     """測試 fast_split_items_by_cache 函數。"""

@@ -132,6 +132,104 @@ def shield_placeholder_issues(
     return issues
 
 
+def _ordered_placeholders(
+    shielded_or_pieces: ShieldedText | list[ShieldPiece],
+) -> list[str]:
+    """取得依原文位置排序的目前 placeholder；舊快取相容需要這個順序。"""
+    clean = getattr(shielded_or_pieces, "clean", "")
+    if isinstance(clean, str):
+        ordered = SHIELD_PLACEHOLDER_PATTERN.findall(clean)
+        if ordered:
+            return ordered
+    pieces = getattr(shielded_or_pieces, "shields", shielded_or_pieces)
+    return [
+        piece.placeholder
+        for piece in pieces
+        if isinstance(getattr(piece, "placeholder", None), str) and piece.placeholder
+    ]
+
+
+def normalize_cached_shield_text(
+    clean_translated: str,
+    shielded_or_pieces: ShieldedText | list[ShieldPiece],
+) -> str:
+    """將舊快取中的暫時 placeholder 對齊本次掃描結果。
+
+    新快取保存還原後的正式文字，因此沒有 placeholder 時直接回傳；舊快取
+    仍可能保存全域計數器產生的 ``$C0$``／``$P1$``，則依類別與原文位置
+    重新對應目前 placeholder，避免既有快取因掃描時機不同而失效。
+    """
+    if not isinstance(clean_translated, str):
+        return str(clean_translated or "")
+
+    actual = SHIELD_PLACEHOLDER_PATTERN.findall(clean_translated)
+    expected = _ordered_placeholders(shielded_or_pieces)
+    if not actual or not expected:
+        return clean_translated
+
+    expected_by_kind: dict[str, list[str]] = {"C": [], "P": [], "E": []}
+    for placeholder in expected:
+        expected_by_kind[placeholder[1]].append(placeholder)
+    actual_by_kind: dict[str, list[str]] = {"C": [], "P": [], "E": []}
+    for placeholder in actual:
+        actual_by_kind[placeholder[1]].append(placeholder)
+
+    if any(
+        len(actual_by_kind[kind]) != len(expected_by_kind[kind])
+        for kind in expected_by_kind
+    ) or any(
+        actual_by_kind[kind] for kind in set(actual_by_kind) - set(expected_by_kind)
+    ):
+        return clean_translated
+
+    replacements: dict[str, list[str]] = {
+        kind: list(values) for kind, values in expected_by_kind.items()
+    }
+    indexes = {kind: 0 for kind in expected_by_kind}
+
+    def replace(match: re.Match[str]) -> str:
+        placeholder = match.group(0)
+        kind = placeholder[1]
+        index = indexes[kind]
+        indexes[kind] += 1
+        return replacements[kind][index]
+
+    return SHIELD_PLACEHOLDER_PATTERN.sub(replace, clean_translated)
+
+
+def raw_shield_issues(
+    translated_text: str, shield_pieces: list[ShieldPiece]
+) -> list[str]:
+    """檢查已還原快取文字是否仍保留原文 Rich Text 片段。"""
+    if not shield_pieces:
+        return []
+
+    expected = Counter(
+        (piece.category, piece.original)
+        for piece in shield_pieces
+        if isinstance(getattr(piece, "original", None), str) and piece.original
+    )
+    actual_shielded = shield_text(translated_text)
+    actual = Counter(
+        (piece.category, piece.original) for piece in actual_shielded.shields
+    )
+    issues: list[str] = []
+    for token, expected_count in expected.items():
+        actual_count = actual.get(token, 0)
+        if actual_count < expected_count:
+            issues.append(
+                f"少了 {expected_count - actual_count} 個保護格式「{token[1]}」"
+            )
+        elif actual_count > expected_count:
+            issues.append(
+                f"多了 {actual_count - expected_count} 個保護格式「{token[1]}」"
+            )
+    for token, actual_count in actual.items():
+        if token not in expected:
+            issues.append(f"多了 {actual_count} 個未預期保護格式「{token[1]}」")
+    return issues
+
+
 # =============================================================================
 # Pre-process（shield）
 # =============================================================================
