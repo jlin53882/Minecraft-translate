@@ -574,6 +574,150 @@ def _quality_issues_for_item(
     return issues
 
 
+def _record_quality_rejection(report: TranslateReport, item: dict[str, Any]) -> None:
+    """把共享迴圈判定品質不符的項目計入報告（計數、樣本與完整清單）。"""
+    report.translated += 1
+    report.ai_response = report.translated
+    report.quality_rejected += 1
+    report.flagged = report.quality_rejected
+    source = str(item.get("source_text") or "")
+    translated = str(item.get("_quality_translation_text", item.get("text") or ""))
+    issues = list(item.get("_quality_issues") or ())
+    if not issues:
+        issues = list(_quality_issues_for_item(item, source, translated))
+    entry_id = item.get("_entry_id")
+    if isinstance(entry_id, int):
+        report.flagged_entries[entry_id] = translated
+    if len(report.flagged_samples) < _FLAGGED_LOG_LIMIT:
+        report.flagged_samples.append(
+            f"{item.get('_mod_id', '')} / {item.get('path', '')}：{'、'.join(issues)}"
+        )
+    report.quality_issue_records.append(
+        {
+            "kind": item.get("_kind", ""),
+            "mod_id": item.get("_mod_id", ""),
+            "key": item.get("path", ""),
+            "issues": issues,
+            "source_text": source,
+            "translated_text": translated,
+            "status": "QUALITY_REJECTED",
+        }
+    )
+
+
+def _batch_ui_line(
+    message: str,
+    report: TranslateReport,
+    current: dict[str, int],
+    previous: dict[str, int],
+) -> str:
+    """由同一份報告計數組出單行批次摘要；正常批次不帶診斷欄位。"""
+    batch_ai = current["ai_response"] - previous["ai_response"]
+    batch_written = current["written"] - previous["written"]
+    batch_fallback = current["source_fallback"] - previous["source_fallback"]
+    batch_quality = current["quality_rejected"] - previous["quality_rejected"]
+    batch_total = batch_ai + batch_fallback
+    cache_type = message.partition("(")[2].partition(")")[0]
+    progress = f"{report.ai_response + report.source_fallback}/{report.candidates}"
+    if batch_fallback:
+        return (
+            f"⚠️ 批次完成 ({cache_type}) | 寫入: {batch_written}/{batch_total} | "
+            f"{batch_fallback} 筆回填原文，未寫入 | 總進度: {progress}"
+        )
+    if batch_quality:
+        return (
+            f"⚠️ 批次完成 ({cache_type}) | 寫入: {batch_written}/{batch_total} | "
+            f"{batch_quality} 筆品質不符，未寫入 | 總進度: {progress}"
+        )
+    return f"✅ 批次完成 ({cache_type}) | 成功: {batch_written} | 總進度: {progress}"
+
+
+def _log_final_summary(session, report: TranslateReport) -> None:
+    """依報告決定最終狀態（有警告則 DONE_WITH_WARNINGS），並寫出畫面與後台兩種摘要。"""
+    if report.status == "DONE" and any(
+        (
+            report.flagged,
+            report.source_fallback,
+            report.max_tokens_items,
+            report.contract_failed_items,
+            report.quality_retry_unresolved,
+        )
+    ):
+        report.status = "DONE_WITH_WARNINGS"
+    final_level = "warning" if report.status != "DONE" else "info"
+    _log_split(
+        session,
+        (
+            f"{'⚠️' if final_level == 'warning' else '✅'} 翻譯完成 | "
+            f"寫入 {report.written}/{report.candidates} | "
+            f"仍有 {report.remaining} 筆需要處理 | 共送出 {report.batches:,} 批"
+        ),
+        f"完成（狀態 {report.status}）：AI 回傳 {report.ai_response} 筆、"
+        f"寫入 {report.written} 筆、品質拒絕 {report.quality_rejected} 筆、"
+        f"來源回填 {report.source_fallback} 筆、MAX_TOKENS {report.max_tokens_items} 筆、"
+        f"契約失敗 {report.contract_failed_items} 筆、快取寫入 {report.cache_written} 筆、"
+        f"replace_rules 衝突 {report.replace_rule_conflicts} 筆；"
+        f"此範圍仍有 {report.remaining} 筆未翻譯；"
+        f"共送出 {report.batches:,} 批，耗時 {format_duration(report.elapsed_sec)}",
+        final_level,
+    )
+
+
+def _settle_report(session, report, options, result, failures, buffer, tracker) -> None:
+    """共享迴圈結束後，把迴圈結果、資料庫失敗與中止狀態收斂成最終報告。"""
+    _sync_loop_result(report, result)
+    if not options.write_cache:
+        # The shared loop still invokes a no-op callback to preserve its
+        # generic contract; it must not be reported as a real cache write.
+        report.cache_written = 0
+    report.flagged = report.quality_rejected
+    report.db_written = report.written
+    report.quality_issue_records = [
+        dict(record) for record in report.quality_issue_records
+    ]
+    if failures["db_error"] or failures["db_stop"]:
+        report.status = "FAILED"
+        session.set_error()
+        _log_db_failure(session, buffer, failures)
+    else:
+        report.status = "ABORTED" if failures["aborted"] else result.status
+    report.batches = tracker.batches_done
+    report.elapsed_sec = tracker.elapsed()
+    if report.status in ("FAILED", "ABORTED", "ALL_KEYS_EXHAUSTED"):
+        session.set_error()  # 未完成不可記成 DONE（P2-5）
+    if failures["aborted"]:
+        _log(
+            session,
+            f"❌ 連續 {ABORT_AFTER_FAILURES} 筆都翻譯失敗，已中止（避免白白耗用額度與時間）。"
+            "請檢查設定頁的 API Key 與模型名稱，並查看日誌中的「伺服器回應」了解原因；"
+            "已翻成功的部分已寫入資料庫。",
+            "error",
+        )
+    report.replace_rule_conflict_details = _collect_replace_rule_conflicts()
+    report.replace_rule_conflicts = len(report.replace_rule_conflict_details)
+    _write_quality_issue_file(session, report)
+    _update_remaining(report)
+
+
+def _batch_backend_line(
+    message: str,
+    report: TranslateReport,
+    current: dict[str, int],
+    previous: dict[str, int],
+) -> str:
+    """與畫面同一份計數的後台批次紀錄（取代共享迴圈的原始「成功」字樣）。"""
+    cache_type = message.partition("(")[2].partition(")")[0]
+    return (
+        f"[BatchResult] kind={cache_type} "
+        f"ai_response={current['ai_response'] - previous['ai_response']} "
+        f"quality_rejected={current['quality_rejected'] - previous['quality_rejected']} "
+        f"source_fallback={current['source_fallback'] - previous['source_fallback']} "
+        f"db_written={current['written'] - previous['written']} "
+        f"progress={report.ai_response + report.source_fallback}/{report.candidates} "
+        f"raw={message}"
+    )
+
+
 def _translate_rows(
     session, db, options: TranslateOptions, report: TranslateReport, rows, cancelled
 ) -> None:
@@ -608,36 +752,7 @@ def _translate_rows(
         )
         if quality_rejected:
             failures["streak"] = 0
-            report.translated += 1
-            report.ai_response = report.translated
-            report.quality_rejected += 1
-            report.flagged = report.quality_rejected
-            source = str(item.get("source_text") or "")
-            translated = str(
-                item.get("_quality_translation_text", item.get("text") or "")
-            )
-            issues = list(item.get("_quality_issues") or ())
-            if not issues:
-                issues = list(_quality_issues_for_item(item, source, translated))
-            entry_id = item.get("_entry_id")
-            if isinstance(entry_id, int):
-                report.flagged_entries[entry_id] = translated
-            if len(report.flagged_samples) < _FLAGGED_LOG_LIMIT:
-                report.flagged_samples.append(
-                    f"{item.get('_mod_id', '')} / {item.get('path', '')}："
-                    f"{'、'.join(issues)}"
-                )
-            report.quality_issue_records.append(
-                {
-                    "kind": item.get("_kind", ""),
-                    "mod_id": item.get("_mod_id", ""),
-                    "key": item.get("path", ""),
-                    "issues": issues,
-                    "source_text": source,
-                    "translated_text": translated,
-                    "status": "QUALITY_REJECTED",
-                }
-            )
+            _record_quality_rejection(report, item)
             return
         if item.get("_untranslated"):
             failures["streak"] += 1
@@ -669,32 +784,11 @@ def _translate_rows(
                     "source_fallback": report.source_fallback,
                     "quality_rejected": report.quality_rejected,
                 }
-                batch_ai = current["ai_response"] - last_batch_counts["ai_response"]
-                batch_written = current["written"] - last_batch_counts["written"]
-                batch_fallback = (
-                    current["source_fallback"] - last_batch_counts["source_fallback"]
+                ui_text = _batch_ui_line(message, report, current, last_batch_counts)
+                backend_text = _batch_backend_line(
+                    message, report, current, last_batch_counts
                 )
-                batch_quality = (
-                    current["quality_rejected"] - last_batch_counts["quality_rejected"]
-                )
-                batch_total = batch_ai + batch_fallback
-                cache_type = message.partition("(")[2].partition(")")[0]
-                if batch_fallback:
-                    ui_text = (
-                        f"⚠️ 批次完成 ({cache_type}) | 寫入: {batch_written}/{batch_total} | "
-                        f"{batch_fallback} 筆回填原文，未寫入"
-                    )
-                elif batch_quality:
-                    ui_text = (
-                        f"⚠️ 批次完成 ({cache_type}) | 寫入: {batch_written}/{batch_total} | "
-                        f"{batch_quality} 筆品質不符，未寫入"
-                    )
-                else:
-                    ui_text = (
-                        f"✅ 批次完成 ({cache_type}) | 成功: {batch_written} | "
-                        f"總進度: {report.ai_response + report.source_fallback}/{report.candidates}"
-                    )
-                _log_split(session, ui_text, message)
+                _log_split(session, ui_text, backend_text)
                 last_batch_counts.update(current)
             else:
                 _log(session, message)
@@ -746,65 +840,8 @@ def _translate_rows(
             ),
         )
     flush()
-    _sync_loop_result(report, result)
-    if not options.write_cache:
-        # The shared loop still invokes a no-op callback to preserve its
-        # generic contract; it must not be reported as a real cache write.
-        report.cache_written = 0
-    report.flagged = report.quality_rejected
-    report.db_written = report.written
-    report.quality_issue_records = [
-        dict(record) for record in report.quality_issue_records
-    ]
-    if failures["db_error"] or failures["db_stop"]:
-        report.status = "FAILED"
-        session.set_error()
-        _log_db_failure(session, buffer, failures)
-    else:
-        report.status = "ABORTED" if failures["aborted"] else result.status
-    report.batches = tracker.batches_done
-    report.elapsed_sec = tracker.elapsed()
-    if report.status in ("FAILED", "ABORTED", "ALL_KEYS_EXHAUSTED"):
-        session.set_error()  # 未完成不可記成 DONE（P2-5）
-    if failures["aborted"]:
-        _log(
-            session,
-            f"❌ 連續 {ABORT_AFTER_FAILURES} 筆都翻譯失敗，已中止（避免白白耗用額度與時間）。"
-            "請檢查設定頁的 API Key 與模型名稱，並查看日誌中的「伺服器回應」了解原因；"
-            "已翻成功的部分已寫入資料庫。",
-            "error",
-        )
-    report.replace_rule_conflict_details = _collect_replace_rule_conflicts()
-    report.replace_rule_conflicts = len(report.replace_rule_conflict_details)
-    _write_quality_issue_file(session, report)
-    _update_remaining(report)
-    if report.status == "DONE" and any(
-        (
-            report.flagged,
-            report.source_fallback,
-            report.max_tokens_items,
-            report.contract_failed_items,
-            report.quality_retry_unresolved,
-        )
-    ):
-        report.status = "DONE_WITH_WARNINGS"
-    final_level = "warning" if report.status != "DONE" else "info"
-    _log_split(
-        session,
-        (
-            f"{'⚠️' if final_level == 'warning' else '✅'} 翻譯完成 | "
-            f"寫入 {report.written}/{report.candidates} | "
-            f"仍有 {report.remaining} 筆需要處理 | 共送出 {report.batches:,} 批"
-        ),
-        f"完成（狀態 {report.status}）：AI 回傳 {report.ai_response} 筆、"
-        f"寫入 {report.written} 筆、品質拒絕 {report.quality_rejected} 筆、"
-        f"來源回填 {report.source_fallback} 筆、MAX_TOKENS {report.max_tokens_items} 筆、"
-        f"契約失敗 {report.contract_failed_items} 筆、快取寫入 {report.cache_written} 筆、"
-        f"replace_rules 衝突 {report.replace_rule_conflicts} 筆；"
-        f"此範圍仍有 {report.remaining} 筆未翻譯；"
-        f"共送出 {report.batches:,} 批，耗時 {format_duration(report.elapsed_sec)}",
-        final_level,
-    )
+    _settle_report(session, report, options, result, failures, buffer, tracker)
+    _log_final_summary(session, report)
     _record_backend_summary(report)
     if result.last_error:
         _log(session, f"最後一次錯誤：{result.last_error}", "warning")
