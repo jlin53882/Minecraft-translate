@@ -274,9 +274,8 @@ class MergeView(MergeWidgetsMixin, ft.Column):
             self.session.add_log("[取消] 合併已停止", level="warning")
         except Exception as ex:  # noqa: BLE001 - 背景執行緒邊界：失敗要寫進 session，否則輪詢永遠等不到結束
             # 完整堆疊寫後台；畫面顯示例外類型與訊息，並指向後台 log
-            # 服務結束時已 set_session(None) 清掉這條執行緒的任務歸屬；沒有歸屬的記錄會
-            # 退回「最近綁定的 session」，可能把這個任務的完整堆疊送進別的任務畫面，
-            # 所以邊界上重新歸屬到自己的任務再寫
+            # 服務結束時已 set_session(None) 清掉這條執行緒的任務歸屬；沒有重新歸屬的記錄
+            # 只留在後台，不會進入任務畫面，所以邊界上重新歸屬到自己的任務再寫
             with session_task_scope(self.session):
                 log_error(
                     f"[MergeView] 合併執行失敗（模式：{input_mode}，"

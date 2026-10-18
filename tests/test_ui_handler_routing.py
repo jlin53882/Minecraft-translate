@@ -10,6 +10,8 @@ import pytest
 
 from app.services_impl.pipelines.merge_service import run_merge_folder_batch_service
 from app.tasks.task_session import TaskSession
+from app.ui.snack import show_snack
+from tests.conftest import mock_page
 from translation_tool.utils import ui_mirror
 from translation_tool.utils.ui_logging_handler import UISessionLogHandler
 from translation_tool.utils.ui_mirror import ContextThreadPoolExecutor, task_scope
@@ -84,7 +86,7 @@ def test_pool_worker_records_go_to_the_submitting_task(routed):
     assert _texts(b) == ["池內 B"]
 
 
-def test_record_without_a_task_falls_back_to_the_latest_bound_session(routed):
+def test_record_without_a_task_is_not_delivered_to_any_bound_session(routed):
     handler, logger = routed
     first, second = TaskSession(name="1"), TaskSession(name="2")
     handler.set_session(first)
@@ -93,8 +95,66 @@ def test_record_without_a_task_falls_back_to_the_latest_bound_session(routed):
 
     logger.info("沒有歸屬")
 
-    assert _texts(second) == ["沒有歸屬"]
+    assert _texts(second) == []
     assert _texts(first) == []
+
+
+def test_explicit_task_context_routes_only_to_the_matching_session(routed):
+    handler, logger = routed
+    first, second = TaskSession(name="1"), TaskSession(name="2")
+    handler.set_session(first)
+    handler.set_session(second)
+
+    with task_scope(first.task_id):
+        logger.info("來自第一個明確任務")
+    with task_scope(second.task_id):
+        logger.info("來自第二個明確任務")
+
+    assert _texts(first) == ["來自第一個明確任務"]
+    assert _texts(second) == ["來自第二個明確任務"]
+
+
+def test_config_and_snackbar_logs_without_task_stay_backend_only(routed):
+    """Config/UI 記錄仍進後台，但不可猜測最近的背景任務。"""
+    handler, _ = routed
+    first, second = TaskSession(name="1"), TaskSession(name="2")
+    handler.set_session(first)
+    handler.set_session(second)
+    ui_mirror.set_current_task(None)
+
+    captured = []
+
+    class Capture(logging.Handler):
+        def emit(self, record):
+            captured.append(record.getMessage())
+
+    capture = Capture()
+    config_logger = logging.getLogger("app.views.config.config_actions")
+    snack_logger = logging.getLogger("app.ui.snack")
+    loggers = (config_logger, snack_logger)
+    previous = [(logger, logger.level, logger.propagate) for logger in loggers]
+    try:
+        for logger in loggers:
+            logger.setLevel(logging.INFO)
+            logger.propagate = False
+            logger.addHandler(handler)
+            logger.addHandler(capture)
+
+        config_logger.info("設定已成功儲存並驗證")
+        config_logger.error("錯誤：儲存或驗證設定檔失敗")
+        show_snack(mock_page(), "設定頁提示")
+    finally:
+        for logger, level, propagate in previous:
+            logger.removeHandler(handler)
+            logger.removeHandler(capture)
+            logger.setLevel(level)
+            logger.propagate = propagate
+
+    assert _texts(first) == []
+    assert _texts(second) == []
+    assert "設定已成功儲存並驗證" in captured
+    assert "錯誤：儲存或驗證設定檔失敗" in captured
+    assert "[UI] SnackBar: 設定頁提示" in captured
 
 
 def test_record_of_a_known_but_unregistered_task_is_not_delivered(routed):
@@ -107,7 +167,7 @@ def test_record_of_a_known_but_unregistered_task_is_not_delivered(routed):
     assert _texts(bound) == []
 
 
-def test_unbinding_removes_only_the_current_task_and_restores_the_previous_latest(
+def test_unbinding_removes_only_the_current_task_without_implicit_fallback(
     routed,
 ):
     handler, logger = routed
@@ -125,10 +185,11 @@ def test_unbinding_removes_only_the_current_task_and_restores_the_previous_lates
     t.start()
     t.join()
     ui_mirror.set_current_task(None)
-    logger.info("B 結束後的無歸屬記錄")  # 退回最近綁定且仍存在的 A
+    logger.info("B 結束後的無歸屬記錄")  # 無歸屬記錄不應猜測 A
 
     assert _texts(b) == ["B 執行中"]
-    assert _texts(a) == ["B 結束後的無歸屬記錄"]
+    assert _texts(a) == []
+    assert handler._session is a
 
 
 def test_unbinding_from_a_taskless_thread_only_prunes_finished_sessions(routed):

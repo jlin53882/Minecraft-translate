@@ -26,7 +26,7 @@ class UISessionLogHandler(logging.Handler):
 
     - 記錄的任務已登記 → 送到該任務的 session。
     - 記錄沒有任務歸屬（``None``：UI 執行緒本身、不經專案 helper 的第三方執行緒）
-      → 退回「最近綁定的 session」（與過去單一全域 session 的行為一致）。
+      → 不送進任何 TaskSession，只留在後台 logger。
     - 記錄的任務已知但沒有登記（例如已結束的任務留在池裡的延遲記錄、不掛 session 的 UI 工作
       執行緒）→ 不送，避免顯示在不相干任務的畫面上。
     """
@@ -84,7 +84,7 @@ class UISessionLogHandler(logging.Handler):
         task = current_task()
         with self._registry_lock:
             if task is None:
-                return self._latest
+                return None
             return self._sessions.get(task)
 
     def emit(self, record: logging.LogRecord) -> None:

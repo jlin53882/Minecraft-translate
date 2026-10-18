@@ -50,10 +50,10 @@
 ## 4. 任務、執行緒與併發
 
 - [ ] 背景執行緒是否繼承任務歸屬？一律用 `ContextThreadPoolExecutor` / `run_in_context`，**不要**直接用 `ThreadPoolExecutor`（池內執行緒不會繼承 `contextvars`）。
-- [ ] 是否假設「UI 執行緒有任務歸屬」？沒有；未知歸屬走「最近綁定的 session」退回行為。
+- [ ] 是否假設「UI 執行緒有任務歸屬」？沒有；未知歸屬只留在後台，不得猜測最近綁定的 session。
 - [ ] 路由用**任務識別**，不用文字內容或全域「目前的 session」。
 - [ ] `task_id` 是否每次 `start()` 重新產生（同一個 session 重跑不可沿用舊 ID）？
-- [ ] 工作執行緒邊界的 `except` 寫錯誤 log 前，是否用 `session_task_scope(session)` 重新歸屬？服務結束時已 `set_session(None)` 清掉歸屬，沒有歸屬的記錄會退回「最近綁定的 session」，完整堆疊可能送進別的任務畫面。
+- [ ] 工作執行緒邊界的 `except` 寫錯誤 log 前，是否用 `session_task_scope(session)` 重新歸屬？服務結束時已 `set_session(None)` 清掉歸屬；沒有歸屬的記錄只留在後台，不會送進任何任務畫面，因此邊界若要保留自己的 UI log 必須明確重新歸屬。
 - [ ] 同時執行兩個任務且訊息文字相同時，去重是否仍各自成立？（要有真正的多任務測試，不是單元 mock。）
 
 ## 5. 任務生命週期（狀態機）
