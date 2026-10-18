@@ -255,7 +255,8 @@ class SpeciesBulkLookup:
                     stop_reason = "failures"
                     break
         except Exception:  # noqa: BLE001 - worker boundary
-            # 此工作執行緒沒有任務歸屬；邊界上重新歸屬，完整堆疊才進自己的任務畫面
+            # 此工作執行緒沒有任務歸屬；重新歸屬讓 app.log 的完整堆疊帶 [task=…]，
+            # 畫面只顯示下方 add_log 的摘要
             with session_task_scope(session):
                 log_exception(f"{TASK_NAME}失敗")
             stop_reason = "error"
