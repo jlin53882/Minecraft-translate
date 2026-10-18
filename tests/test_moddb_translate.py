@@ -2756,9 +2756,9 @@ def test_backend_summary_is_multiline_chinese():
     [(0, "00:01"), (1, "明天 00:01"), (2, "後天 00:01"), (3, "10/21（3 天後）00:01")],
 )
 def test_finish_time_wording_names_the_day_when_it_crosses_midnight(days, expected):
-    from datetime import datetime
+    from datetime import UTC, datetime
 
     from translation_tool.translation_db.run_progress import _finish_stamp
 
-    finish = datetime(2026, 10, 21, 0, 1)
+    finish = datetime(2026, 10, 21, 0, 1, tzinfo=UTC)
     assert _finish_stamp(finish, days) == expected
