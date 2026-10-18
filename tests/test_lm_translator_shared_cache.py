@@ -231,7 +231,42 @@ class TestIsValidHit:
 
         assert pending == []
         assert len(cached) == 1
+        assert cached[0]["text"] == "使用 &a #minecraft:stone now"
         assert restore_cache_hit_text(cached[0]) == "使用 &a #minecraft:stone now"
+
+    def test_cache_hit_uses_formal_text_for_each_new_shield_scan(self):
+        """不同掃描批次的 placeholder 不應影響正式快取命中。"""
+        from translation_tool.core.lm_translator_shared_cache import (
+            _is_valid_hit,
+            cache_storage_text,
+            fast_split_items_by_cache,
+        )
+        from translation_tool.plugins.shared.rich_text_shield import shield_text
+
+        source = "&aUse #minecraft:stone now"
+        first = shield_text(source)
+        first_item = {"text": first.clean.replace("Use", "使用"), "_shielded": first}
+        stored = cache_storage_text(first_item)
+
+        second = shield_text(source)
+        assert first.shields[0].placeholder != second.shields[0].placeholder
+        item = {
+            "cache_type": "ftbquests",
+            "path": "quest.title",
+            "source_text": source,
+            "text": second.clean,
+            "_shielded": second,
+        }
+        entry = {"dst": stored, "src": source}
+
+        assert _is_valid_hit(stored, entry, item) is True
+        cached, pending = fast_split_items_by_cache(
+            [item],
+            cache_provider=lambda _cache_type: {"quest.title|" + source: entry},
+        )
+
+        assert pending == []
+        assert cached[0]["text"] == "&a使用 #minecraft:stone now"
 
 
 class TestFastSplitItemsByCache:

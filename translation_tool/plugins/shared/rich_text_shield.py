@@ -86,6 +86,21 @@ class ShieldedText:
     had_item_ref: bool = False
 
 
+@dataclass(frozen=True)
+class ShieldTranslationCheck:
+    """Shield 翻譯結果的共用檢查結果。
+
+    ``normalized_text`` 保留供 token 品質檢查使用的 placeholder 形式，
+    ``restored_text`` 則是可以交給正式輸出與結構檢查的文字。快取命中、
+    初次 AI 回應與品質 retry 必須共用這個結果，避免各路線對舊快取或
+    遺失 placeholder 採用不同判斷。
+    """
+
+    normalized_text: str
+    restored_text: str
+    issues: tuple[str, ...] = ()
+
+
 def shield_placeholder_issues(
     clean_translated: str, shield_pieces: list[ShieldPiece]
 ) -> list[str]:
@@ -390,6 +405,42 @@ def unshield_text(clean_translated: str, shield_pieces: list[ShieldPiece]) -> st
         result = result.replace(sp.placeholder, sp.original)
 
     return result
+
+
+def inspect_shielded_translation(
+    translated_text: str,
+    shielded_or_pieces: ShieldedText | list[ShieldPiece] | None,
+) -> ShieldTranslationCheck:
+    """正規化、驗證並還原一個 Shield 翻譯結果。
+
+    快取的新契約保存已還原文字；舊契約可能保存與當次掃描計數器不同的
+    placeholder。這裡先用位置與類別相容規則正規化，再檢查 placeholder，
+    最後還原成正式文字，讓快取閘門、AI retry 與輸出 callback 使用同一套
+    行為。
+    """
+    if not isinstance(translated_text, str):
+        translated_text = str(translated_text or "")
+
+    pieces = getattr(shielded_or_pieces, "shields", shielded_or_pieces)
+    if not pieces:
+        return ShieldTranslationCheck(
+            normalized_text=translated_text,
+            restored_text=translated_text,
+        )
+
+    normalized = normalize_cached_shield_text(translated_text, shielded_or_pieces)
+    if SHIELD_PLACEHOLDER_PATTERN.search(normalized):
+        issues = shield_placeholder_issues(normalized, pieces)
+        restored = unshield_text(normalized, pieces)
+    else:
+        restored = normalized
+        issues = raw_shield_issues(restored, pieces)
+
+    return ShieldTranslationCheck(
+        normalized_text=normalized,
+        restored_text=restored,
+        issues=tuple(issues),
+    )
 
 
 # =============================================================================

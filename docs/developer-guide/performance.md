@@ -72,8 +72,9 @@ does not depend on the table size; record the bound in `ALLOWED_PLAN_MARKERS` or
 
 翻譯中的 `$C...$`、`$P...$` 與 `$E...$` 只是單次執行的暫時佔位符，不能
 直接成為跨執行快取的正式內容。共用翻譯迴圈在通過品質閘門後，將保護片段
-還原成原始 Rich Text，再寫入快取；快取命中在輸出前會依目前原文的 Shield
-資訊驗證並還原。
+還原成原始 Rich Text，再寫入快取；快取分流命中時會先依目前原文的 Shield
+資訊驗證並還原，再把正式文字交給 FTB Quests、KubeJS、Guide／Patchouli
+與其他輸出端，避免任何輸出端直接取得暫時 placeholder。
 
 品質閘門同時支援兩種既有資料：新快取的已還原文字會比對原始保護片段，舊
 快取若仍含全域計數器產生的佔位符，則依保護類別與原文位置對齊到本次佔位符

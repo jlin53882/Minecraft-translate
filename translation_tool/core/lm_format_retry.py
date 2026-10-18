@@ -9,11 +9,7 @@ from translation_tool.core.lm_format_policy import (
     kind_for_item,
 )
 from translation_tool.plugins.shared.rich_text_shield import (
-    SHIELD_PLACEHOLDER_PATTERN,
-    normalize_cached_shield_text,
-    raw_shield_issues,
-    shield_placeholder_issues,
-    unshield_text,
+    inspect_shielded_translation,
 )
 from translation_tool.translation_db.quality import (
     guide_structure_issues,
@@ -62,17 +58,14 @@ def quality_issues(source_item: dict, translated_text: str) -> list[str]:
     kind = kind_for_item(source_item)
     shielded = source_item.get("_shielded")
     candidate = translated_text
-    shield_issues: list[str] = []
     if shielded is not None and getattr(shielded, "shields", None):
-        candidate = normalize_cached_shield_text(candidate, shielded)
-        if SHIELD_PLACEHOLDER_PATTERN.search(candidate):
-            shield_issues = shield_placeholder_issues(candidate, shielded.shields)
-            raw_translated = unshield_text(candidate, shielded.shields)
-        else:
-            raw_translated = candidate
-            shield_issues = raw_shield_issues(raw_translated, shielded.shields)
+        checked = inspect_shielded_translation(candidate, shielded)
+        candidate = checked.normalized_text
+        raw_translated = checked.restored_text
+        shield_issues = list(checked.issues)
     else:
         raw_translated = candidate
+        shield_issues = []
     issues = token_issues_for_kind(source_item.get("text"), candidate, kind=kind)
     raw_source = str(source_item.get("source_text") or "")
     return [
