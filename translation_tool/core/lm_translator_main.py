@@ -467,6 +467,7 @@ class _BatchRuntime:
     gemini_503_retry_count: int = 0
     gemini_503_attempted_models: set[int] = field(default_factory=set)
     contract_errors: list[str] = field(default_factory=list)
+    pending_contract_event: dict | None = None
 
 
 @dataclass(frozen=True)
@@ -1264,6 +1265,65 @@ def _handle_batch_error(
     return BatchAction.FAIL
 
 
+def _is_moddb_batch(items: list[dict]) -> bool:
+    """Mod DB items carry ``_batch_group``; other pipelines keep their old logging."""
+    return any("_batch_group" in item for item in items)
+
+
+def _contract_error_type(detail: str) -> str:
+    if detail.startswith("duplicate id"):
+        return "duplicate_id"
+    if detail.startswith("missing IDs"):
+        return "id_mismatch"
+    return "invalid_shape"
+
+
+def _note_contract_error(
+    runtime: _BatchRuntime, round_data: _BatchRound, detail: str
+) -> None:
+    """Backend-only structured record for a Mod DB response contract violation."""
+    if not _is_moddb_batch(list(round_data.id_to_item.values())):
+        return
+    size = len(round_data.id_to_item)
+    runtime.pending_contract_event = {"batch_size": size}
+    log_warning(
+        f"[ResponseContractError] type={_contract_error_type(detail)} "
+        f"batch_size={size} detail={detail}",
+        extra={"ui_mirrored": True},
+    )
+
+
+def _note_contract_progress(runtime: _BatchRuntime, basis: int, new_size: int) -> None:
+    """Record how a contract failure was handled: shrunk, or given up (source kept)."""
+    if getattr(runtime, "pending_contract_event", None) is None:
+        return
+    if new_size <= 0 or new_size == basis:
+        runtime.pending_contract_event = None
+        log_warning(
+            f"[ResponseContractError] resolved=false batch_size={basis} "
+            "action=source_fallback",
+            extra={"ui_mirrored": True},
+        )
+        return
+    log_warning(
+        f"[ResponseContractError] action=shrink batch_size={basis}->{new_size}",
+        extra={"ui_mirrored": True},
+    )
+
+
+def _note_contract_resolved(runtime: _BatchRuntime, round_data: _BatchRound) -> None:
+    """A later response for the same Mod DB batch passed validation."""
+    event = getattr(runtime, "pending_contract_event", None)
+    if event is None:
+        return
+    runtime.pending_contract_event = None
+    log_info(
+        f"[ResponseContractError] resolved=true original_batch_size={event['batch_size']} "
+        f"final_batch_size={len(round_data.id_to_item)}",
+        extra={"ui_mirrored": True},
+    )
+
+
 def _merge_batch_response(
     runtime: _BatchRuntime,
     round_data: _BatchRound,
@@ -1295,15 +1355,21 @@ def _merge_batch_response(
         if isinstance(contract_errors, list):
             contract_errors.append(contract_error)
         if not optional_retry:
+            _note_contract_error(runtime, round_data, contract_error)
             log_warning(
                 f"[❌ 回應契約不符] {contract_error}；本批次將重試/縮小",
-                extra={"ui_mirrored": True},
+                extra=(
+                    {"ui_mirrored": True}
+                    if _is_moddb_batch(list(round_data.id_to_item.values()))
+                    else None
+                ),
             )
             runtime.budget_tracker.on_truncated(
                 api_meta.get("finish_reason"), kind="missing"
             )
         return None, True
 
+    _note_contract_resolved(runtime, round_data)
     merged: list[dict] = []
     for temp_id, original_item in round_data.id_to_item.items():
         translated_text = normalized.get(temp_id, original_item["text"])
@@ -2157,6 +2223,7 @@ def _run_batch_state_machine(
             elif new_size < min_size:
                 new_size = min_size if basis > min_size else 0
 
+            _note_contract_progress(runtime, basis, new_size)
             if new_size <= 0 or new_size == basis:
                 log_warning(
                     f"[⚠️] Batch Size 已縮至極限 ({basis})，回填原文並繼續後續項目"

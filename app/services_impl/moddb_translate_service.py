@@ -619,15 +619,15 @@ def _batch_ui_line(
     batch_total = batch_ai + batch_fallback
     cache_type = message.partition("(")[2].partition(")")[0]
     progress = f"{report.ai_response + report.source_fallback}/{report.candidates}"
+    unwritten = []
     if batch_fallback:
-        return (
-            f"⚠️ 批次完成 ({cache_type}) | 寫入: {batch_written}/{batch_total} | "
-            f"{batch_fallback} 筆回填原文，未寫入 | 總進度: {progress}"
-        )
+        unwritten.append(f"{batch_fallback} 筆回填原文")
     if batch_quality:
+        unwritten.append(f"{batch_quality} 筆品質不符")
+    if unwritten:
         return (
             f"⚠️ 批次完成 ({cache_type}) | 寫入: {batch_written}/{batch_total} | "
-            f"{batch_quality} 筆品質不符，未寫入 | 總進度: {progress}"
+            f"{'、'.join(unwritten)}，未寫入 | 總進度: {progress}"
         )
     return f"✅ 批次完成 ({cache_type}) | 成功: {batch_written} | 總進度: {progress}"
 
@@ -641,16 +641,23 @@ def _log_final_summary(session, report: TranslateReport) -> None:
             report.max_tokens_items,
             report.contract_failed_items,
             report.quality_retry_unresolved,
+            report.remaining,
         )
     ):
         report.status = "DONE_WITH_WARNINGS"
     final_level = "warning" if report.status != "DONE" else "info"
+    quality_hint = (
+        f" | 品質未通過 {report.quality_rejected} 筆，完整清單：{report.quality_issues_file}"
+        if report.quality_rejected and report.quality_issues_file
+        else ""
+    )
     _log_split(
         session,
         (
             f"{'⚠️' if final_level == 'warning' else '✅'} 翻譯完成 | "
             f"寫入 {report.written}/{report.candidates} | "
             f"仍有 {report.remaining} 筆需要處理 | 共送出 {report.batches:,} 批"
+            f"{quality_hint}"
         ),
         f"完成（狀態 {report.status}）：AI 回傳 {report.ai_response} 筆、"
         f"寫入 {report.written} 筆、品質拒絕 {report.quality_rejected} 筆、"

@@ -853,3 +853,47 @@ class TestBatchProfileDetection:
         _result, status = translate_batch_smart(items, 1)
 
         assert status in ["AUTO", "PARTIAL", "FAILED"]
+
+
+def test_moddb_contract_error_is_classified_and_tracked(monkeypatch):
+    from types import SimpleNamespace
+
+    from translation_tool.core import lm_translator_main as main
+
+    warnings: list[str] = []
+    infos: list[str] = []
+    monkeypatch.setattr(main, "log_warning", lambda msg, **kw: warnings.append(msg))
+    monkeypatch.setattr(main, "log_info", lambda msg, **kw: infos.append(msg))
+    runtime = SimpleNamespace(pending_contract_event=None)
+    batch = [{"_batch_group": ("m", "lang")} for _ in range(8)]
+    round_data = SimpleNamespace(id_to_item=dict(enumerate(batch)))
+
+    main._note_contract_error(runtime, round_data, "duplicate id 'a'")
+    main._note_contract_progress(runtime, 8, 6)
+    main._note_contract_resolved(runtime, round_data)
+
+    assert "type=duplicate_id" in warnings[0] and "batch_size=8" in warnings[0]
+    assert "batch_size=8->6" in warnings[1]
+    assert "resolved=true" in infos[0]
+    assert runtime.pending_contract_event is None
+
+    main._note_contract_error(runtime, round_data, "duplicate id 'a'")
+    main._note_contract_progress(runtime, 3, 0)
+    assert "resolved=false" in warnings[-1]
+    assert runtime.pending_contract_event is None
+
+
+def test_generic_batches_do_not_get_moddb_contract_records(monkeypatch):
+    from types import SimpleNamespace
+
+    from translation_tool.core import lm_translator_main as main
+
+    warnings: list[str] = []
+    monkeypatch.setattr(main, "log_warning", lambda msg, **kw: warnings.append(msg))
+    runtime = SimpleNamespace(pending_contract_event=None)
+    round_data = SimpleNamespace(id_to_item={"0": {"path": "a"}})
+
+    main._note_contract_error(runtime, round_data, "duplicate id 'a'")
+
+    assert warnings == []
+    assert runtime.pending_contract_event is None

@@ -251,3 +251,23 @@ def test_new_session_has_no_summary():
     from app.tasks.task_session import TaskSession
 
     assert TaskSession().summary is None
+
+
+def test_finish_log_marks_done_with_warnings_from_summary(monkeypatch):
+    """session.status 維持 DONE，但後台結束紀錄要帶出摘要的 DONE_WITH_WARNINGS。"""
+    from app.tasks.task_session import TaskSession
+
+    session = TaskSession()
+    session.start()
+    lifecycle = []
+    monkeypatch.setattr(
+        session,
+        "_log_lifecycle",
+        lambda text, level="info": lifecycle.append((text, level)),
+    )
+    session.set_summary({"status": "DONE_WITH_WARNINGS"})
+    session.finish()
+
+    assert session.status == "DONE"
+    assert "DONE（DONE_WITH_WARNINGS）" in lifecycle[0][0]
+    assert lifecycle[0][1] == "warning"

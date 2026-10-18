@@ -229,5 +229,7 @@ flowchart TD
 - 手動儲存：`ValueError` 顯示驗證訊息；`sqlite3.Error` 提示資料庫可能被鎖定；其他例外記錄後台 log。
 - 機翻：單一批次經 `translation_issues` 判斷不一致的譯文不寫入，只記錄（指南條目另檢查連結目標、標籤與前綴）；寫入失敗最多重試 `DB_FLUSH_RETRIES` 次，仍失敗則停止後續翻譯。連續 `ABORT_AFTER_FAILURES` 筆未成功會中止，通常代表 API 金鑰或模型設定有問題。
 - 修復：寫入時以 compare-and-set 比對舊譯文與 revision，資料已變動時記為 `cas_changed` 並跳過；審查套用時若版本已變動，該筆記為 `stale` 且草稿保留。
+- 機翻日誌分流：畫面日誌每批只有一行（正常批次「成功 | 總進度」；有回填原文或品質不符時「寫入 N/M」與未寫入數量），後台 `[BatchResult]` 與最終摘要由同一份 `TranslateReport` 計數產生。品質不符的完整清單寫入 `logs/<日期>/quality-issues-<task_id>.json`，畫面只顯示數量與檔案路徑。回應契約錯誤（重複 id、id 不符、結構無效）只記後台 `[ResponseContractError]`（類型、批次大小、縮批前後、是否最終成功）。
+- 機翻最終狀態：有品質拒絕、來源回填、MAX_TOKENS、契約失敗、未解決的品質 retry 或仍有未翻譯項目時，摘要狀態為 `DONE_WITH_WARNINGS`；`TaskSession.status` 仍是 `DONE`，後台「任務結束」紀錄會同時標出摘要狀態。單筆超出安全預算的政策（原文回填、不寫快取與資料庫）只套用於帶 `_batch_group` 的 Mod DB 項目。
 - 取消：掃描、機翻與修復都以 `session.request_cancel()` 請求取消，已提交的批次保留。
 - 輪詢或畫面更新失敗時 `_abort_polling` 會恢復按鈕並顯示「畫面更新失敗」，不會永久停在執行中。

@@ -298,9 +298,14 @@ class TaskSession:
         if len(summary_text) > 500:
             summary_text = summary_text[:500] + "…（已截斷）"
         extra = f"，摘要：{summary_text}" if summary_text else ""
+        # session.status 維持 DONE／ERROR 兩態（多個頁面依此判斷結束）；服務層若在摘要
+        # 標了 DONE_WITH_WARNINGS，後台結束紀錄要一併標出，避免與摘要互相矛盾。
+        summary_status = summary.get("status") if isinstance(summary, dict) else None
+        warned = status == "DONE" and summary_status == "DONE_WITH_WARNINGS"
+        status_text = f"{status}（{summary_status}）" if warned else status
         self._log_lifecycle(
-            f"任務結束：{status}{elapsed}，畫面日誌 {log_count} 筆{extra}",
-            "error" if status == "ERROR" else "info",
+            f"任務結束：{status_text}{elapsed}，畫面日誌 {log_count} 筆{extra}",
+            "error" if status == "ERROR" else "warning" if warned else "info",
         )
         _notify(self, "finish")
         # TaskManager is only a UI projection. A legacy reservation belongs to

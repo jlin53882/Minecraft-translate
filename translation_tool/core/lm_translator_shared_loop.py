@@ -238,11 +238,16 @@ def translate_items_with_cache_loop(
             if fixed_input_tokens_for_batch is not None
             else 0.0
         )
-        oversized = len(batch) == 1 and is_item_oversized(
-            batch[0],
-            profile_for_cache_type(cache_type),
-            _lm_config(),
-            fixed_input_tokens=fixed_input_tokens,
+        # 單筆超限直接回填的政策只屬於 Mod DB（有 _batch_group）；其他管線維持原行為。
+        oversized = (
+            len(batch) == 1
+            and "_batch_group" in batch[0]
+            and is_item_oversized(
+                batch[0],
+                profile_for_cache_type(cache_type),
+                _lm_config(),
+                fixed_input_tokens=fixed_input_tokens,
+            )
         )
         if oversized:
             oversized_items += 1
@@ -378,7 +383,8 @@ def translate_items_with_cache_loop(
         if untranslated_fallback:
             log_info(
                 f"[SharedLM] {untranslated_fallback} 筆未寫入快取（來源回填或品質檢查拒絕）",
-                extra={"ui_mirrored": True},
+                # Mod DB 的畫面已有單行批次摘要，後台才記這則詳細訊息。
+                extra={"ui_mirrored": True} if "_batch_group" in batch[0] else None,
             )
         if malformed_fallback:
             last_error = f"{malformed_fallback} 筆回傳格式無效，已回填原文且未翻譯"

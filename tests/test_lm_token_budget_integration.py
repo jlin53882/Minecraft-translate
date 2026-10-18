@@ -164,6 +164,7 @@ def test_shared_loop_falls_back_oversized_item_without_api_or_cache(monkeypatch)
         "text": "x" * 1000,
         "source_text": "x" * 1000,
         "cache_type": "lang",
+        "_batch_group": ("mod", "lang"),
     }
     api_calls = []
     cache_writes = []
@@ -570,3 +571,37 @@ def test_other_400_errors_still_shrink_batches(env, monkeypatch):
 
     assert status == "AUTO"
     assert all(r["_untranslated"] for r in results)  # 既有行為：縮到極限後放棄該批
+
+
+def test_shared_loop_oversized_policy_is_limited_to_moddb_items(monkeypatch):
+    config = {
+        "lm_translator": {
+            "token_budget_enabled": True,
+            "max_input_token_budget": 40,
+            "max_output_token_budget": 40,
+            "output_token_factor": 1.5,
+            "initial_batch_size_lang": 10,
+        }
+    }
+    monkeypatch.setattr(loop_mod, "load_config", lambda: config)
+    item = {
+        "path": "generic",
+        "text": "x" * 1000,
+        "source_text": "x" * 1000,
+        "cache_type": "lang",
+    }
+    api_calls = []
+
+    result = loop_mod.translate_items_with_cache_loop(
+        [item],
+        translate_batch_smart=lambda batch, total: (
+            api_calls.append(batch) or ([{**batch[0], "text": "譯"}], "DONE")
+        ),
+        cache_add=lambda *args, **kwargs: True,
+        cache_save=lambda *args, **kwargs: True,
+        reload_cache=False,
+        sleep_seconds_between_batches=0,
+    )
+
+    assert len(api_calls) == 1
+    assert result.oversized_items == 0

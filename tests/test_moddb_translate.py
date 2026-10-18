@@ -2639,3 +2639,51 @@ def test_entries_panel_reports_synced_versions_held_back_by_custom_priority(db_p
         == []
     )
     db.close()
+
+
+def test_batch_ui_line_shows_fallback_and_quality_counts_together():
+    report = moddb_translate_service.TranslateReport()
+    report.candidates = 10
+    report.ai_response = 6
+    report.source_fallback = 2
+    previous = {
+        "ai_response": 0,
+        "written": 0,
+        "source_fallback": 0,
+        "quality_rejected": 0,
+    }
+    current = {
+        "ai_response": 6,
+        "written": 3,
+        "source_fallback": 2,
+        "quality_rejected": 3,
+    }
+
+    line = moddb_translate_service._batch_ui_line(
+        "✅ 批次完成 (lang)", report, current, previous
+    )
+
+    assert "2 筆回填原文" in line
+    assert "3 筆品質不符" in line
+    assert "總進度: 8/10" in line
+
+
+def test_final_summary_points_to_quality_file_and_flags_remaining(monkeypatch):
+    logs = []
+    monkeypatch.setattr(
+        moddb_translate_service,
+        "_log_split",
+        lambda session, ui, backend, level="info": logs.append((ui, backend, level)),
+    )
+    report = moddb_translate_service.TranslateReport()
+    report.candidates = 10
+    report.written = 9
+    report.remaining = 1
+    report.quality_rejected = 1
+    report.quality_issues_file = "logs/x/quality-issues-t.json"
+
+    moddb_translate_service._log_final_summary(None, report)
+
+    assert report.status == "DONE_WITH_WARNINGS"
+    assert "quality-issues-t.json" in logs[0][0]
+    assert "品質未通過 1 筆" in logs[0][0]
