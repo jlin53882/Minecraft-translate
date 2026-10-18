@@ -771,9 +771,9 @@ class EntriesPanel(ft.Column):
                 )
             if diff_result.soft_newline_counts is not None:
                 notes.append(diff_result.summary_lines[-1])
-            if diff_result.guide_issues:
+            if diff_result.extra_guide_issues:
                 notes.append(
-                    "指南標記與原文不一致：" + "、".join(diff_result.guide_issues)
+                    "指南標記與原文不一致：" + "、".join(diff_result.extra_guide_issues)
                 )
         is_guide = entry is not None and is_guide_kind(entry.kind)
         space = whitespace_note(text)

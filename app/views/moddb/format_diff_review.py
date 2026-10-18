@@ -246,7 +246,7 @@ class FormatDiffReview:
         # 指南標記（連結目標、標籤等）與編輯頁的提醒共用同一份比對結果
         issue_controls += [
             kit.chip(message, "gold", icon=ft.Icons.WARNING_AMBER)
-            for message in result.guide_issues
+            for message in result.extra_guide_issues
         ]
         if result.soft_newline_counts is not None:
             issue_controls.append(

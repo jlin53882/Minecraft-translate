@@ -387,7 +387,7 @@ class RepairReviewer:
         self, source: str, draft: str, *, kind: str = "lang"
     ) -> None:
         diff_result = analyze_format_diagnostics(source, draft, kind=kind)
-        messages = [*diff_result.legacy_messages, *diff_result.guide_issues]
+        messages = [*diff_result.legacy_messages, *diff_result.extra_guide_issues]
         if messages:
             self.format_status.value = "格式檢查：" + "；".join(messages)
             self.format_status.color = C.GOLD

@@ -189,3 +189,12 @@ def test_unknown_kind_is_an_explicit_legacy_fallback_and_scanner_has_one_owner()
     assert policy.is_legacy_fallback
     assert policy.analyzer_name == "token"
     assert core_format_tokens is quality_format_tokens
+
+
+def test_guide_only_legacy_issue_is_not_duplicated_and_has_guide_category():
+    from translation_tool.core.format_diagnostics import analyze_format_diagnostics
+
+    dup = analyze_format_diagnostics("# Title", "Title", kind="guide")
+    assert dup.extra_guide_issues == ()
+    legacy = analyze_format_diagnostics("A\n\nB", "A\nB", kind="guide")
+    assert legacy.issues == () and legacy.extra_guide_issues

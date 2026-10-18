@@ -109,12 +109,15 @@ class FormatDiagnosticsResult:
         return bool(self.diagnostics or self.guide_issues)
 
     @property
+    def extra_guide_issues(self) -> tuple[str, ...]:
+        """Guide issues not already represented by a structured diagnostic."""
+        represented = set(self.legacy_messages)
+        return tuple(issue for issue in self.guide_issues if issue not in represented)
+
+    @property
     def summary_lines(self) -> tuple[str, ...]:
         lines = [item.summary for item in self.diagnostics]
-        diagnostic_messages = set(self.legacy_messages)
-        lines.extend(
-            issue for issue in self.guide_issues if issue not in diagnostic_messages
-        )
+        lines.extend(self.extra_guide_issues)
         if self.soft_newline_counts is not None:
             source_count, target_count = self.soft_newline_counts
             lines.append(

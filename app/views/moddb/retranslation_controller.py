@@ -329,12 +329,12 @@ def _display_preview_result(panel, options, db_identity, result):
 
 def _entry_issue_categories(row) -> set[str]:
     """Return filter categories from the common repair validation contract."""
-    categories = {
-        issue.category
-        for issue in analyze_format_diagnostics(
-            row.en_us, row.current_ai_translation, kind=row.kind
-        ).issues
-    }
+    result = analyze_format_diagnostics(
+        row.en_us, row.current_ai_translation, kind=row.kind
+    )
+    categories = {issue.category for issue in result.issues}
+    if result.extra_guide_issues:
+        categories.add("guide")
     return categories or {"other"}
 
 
