@@ -76,6 +76,11 @@ does not depend on the table size; record the bound in `ALLOWED_PLAN_MARKERS` or
 資訊驗證並還原，再把正式文字交給 FTB Quests、KubeJS、Guide／Patchouli
 與其他輸出端，避免任何輸出端直接取得暫時 placeholder。
 
+Shield 預期的 placeholder 映射只能來自 `ShieldPiece`；`clean` 文字中原本就存在的
+`$P99$`、`$C17$` 等普通文字不得被正規表示式誤認為程式產生的保護片段。
+Shield 生成器會避開原文已占用的 `$C...$`、`$P...$`、`$E...$` 名稱，避免程式產生
+的暫時 ID 與原文普通文字碰撞。
+
 品質閘門同時支援兩種既有資料：新快取的已還原文字會比對原始保護片段，舊
 快取若仍含全域計數器產生的佔位符，只能在快取讀取路徑依保護類別與原文位置
 做受限制的相容對齊；每個類別超過一個片段時沒有完整映射，必須視為 cache

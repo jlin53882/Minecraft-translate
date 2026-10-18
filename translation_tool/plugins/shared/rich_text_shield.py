@@ -11,6 +11,7 @@ from __future__ import annotations
 import re
 import threading
 from collections import Counter
+from collections.abc import Callable
 from dataclasses import dataclass, field
 
 # =============================================================================
@@ -104,12 +105,7 @@ class ShieldTranslationCheck:
 def _ordered_placeholders(
     shielded_or_pieces: ShieldedText | list[ShieldPiece],
 ) -> list[str]:
-    """取得依原文位置排序的 placeholder。"""
-    clean = getattr(shielded_or_pieces, "clean", "")
-    if isinstance(clean, str):
-        ordered = SHIELD_PLACEHOLDER_PATTERN.findall(clean)
-        if ordered:
-            return ordered
+    """從 ShieldPiece 真實映射取得 placeholder，不掃描普通原文文字。"""
     pieces = getattr(shielded_or_pieces, "shields", shielded_or_pieces)
     return [
         piece.placeholder
@@ -133,8 +129,22 @@ def shield_placeholder_issues(
     if not expected_sequence:
         return []
 
-    actual_sequence = SHIELD_PLACEHOLDER_PATTERN.findall(clean_translated or "")
     expected = Counter(expected_sequence)
+    source_clean = getattr(shielded_or_pieces, "clean", "")
+    source_literals = (
+        {
+            placeholder
+            for placeholder in SHIELD_PLACEHOLDER_PATTERN.findall(source_clean)
+            if placeholder not in expected
+        }
+        if isinstance(source_clean, str)
+        else set()
+    )
+    actual_sequence = [
+        placeholder
+        for placeholder in SHIELD_PLACEHOLDER_PATTERN.findall(clean_translated or "")
+        if placeholder not in source_literals
+    ]
     actual = Counter(actual_sequence)
     issues: list[str] = []
     originals = {
@@ -181,8 +191,8 @@ def normalize_cached_shield_text(
     if not actual or not expected:
         return clean_translated
 
-    # 完全相同的目前 ID 已經證明身分，不需要走 legacy 位置對齊。
-    if actual == expected:
+    # 目前 ID 集合與數量完全相同，已經證明身分，不需要走 legacy 位置對齊。
+    if Counter(actual) == Counter(expected):
         return clean_translated
 
     expected_by_kind: dict[str, list[str]] = {"C": [], "P": [], "E": []}
@@ -295,6 +305,15 @@ def _next_escaped_placeholder() -> str:
     return ph
 
 
+def _next_available_placeholder(factory: Callable[[], str], occupied: set[str]) -> str:
+    """取得不會撞到原文或同次 Shield 結果的 placeholder。"""
+    while True:
+        placeholder = factory()
+        if placeholder not in occupied:
+            occupied.add(placeholder)
+            return placeholder
+
+
 def shield_text(text: str) -> ShieldedText:
     """
     掃描 text 中的「不應翻譯」區段，用 Placeholder 取代後回傳乾淨文本。
@@ -344,11 +363,14 @@ def shield_text(text: str) -> ShieldedText:
 
     # ── 處理型：開始掃描各類保護片段 ─────────────────────────────────────────
     shields: list[ShieldPiece] = []
+    occupied_placeholders = set(SHIELD_PLACEHOLDER_PATTERN.findall(text))
     result = text
 
     # 5. 逸出 \\& → PPP
     for match in reversed(list(ESCAPED_AND_PATTERN.finditer(result))):
-        ph = _next_escaped_placeholder()
+        ph = _next_available_placeholder(
+            _next_escaped_placeholder, occupied_placeholders
+        )
         original = match.group()
         shields.append(
             ShieldPiece(placeholder=ph, original=original, category="escaped_and")
@@ -357,7 +379,7 @@ def shield_text(text: str) -> ShieldedText:
 
     # 6. &#RRGGBB 十六進位顏色
     for match in reversed(list(HEX_COLOR_PATTERN.finditer(result))):
-        ph = _next_color_placeholder()
+        ph = _next_available_placeholder(_next_color_placeholder, occupied_placeholders)
         original = match.group()
         shields.append(
             ShieldPiece(placeholder=ph, original=original, category="hex_color")
@@ -366,14 +388,14 @@ def shield_text(text: str) -> ShieldedText:
 
     # 7. &a~f 標準彩色碼
     for match in reversed(list(COLOR_CODE_PATTERN.finditer(result))):
-        ph = _next_color_placeholder()
+        ph = _next_available_placeholder(_next_color_placeholder, occupied_placeholders)
         original = match.group()
         shields.append(ShieldPiece(placeholder=ph, original=original, category="color"))
         result = result[: match.start()] + ph + result[match.end() :]
 
     # 8. 物品ID #namespace/item
     for match in reversed(list(ITEM_ID_PATTERN.finditer(result))):
-        ph = _next_item_placeholder()
+        ph = _next_available_placeholder(_next_item_placeholder, occupied_placeholders)
         original = match.group()
         shields.append(
             ShieldPiece(placeholder=ph, original=original, category="item_id")

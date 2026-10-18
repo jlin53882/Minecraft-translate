@@ -15,6 +15,7 @@ from translation_tool.core.lm_format_retry import (
     build_quality_retry_batch,
     quality_issues,
 )
+from translation_tool.plugins.shared import rich_text_shield
 from translation_tool.plugins.shared.rich_text_shield import (
     SHIELD_PLACEHOLDER_PATTERN,
     shield_text,
@@ -272,3 +273,38 @@ def test_quality_retry_allows_exact_shield_ids_in_natural_language_order():
     translated = f"製作 {second} 需要 {first}。"
 
     assert quality_issues(item, translated) == []
+
+
+def test_literal_placeholder_text_is_not_used_as_shield_mapping():
+    """原文中的普通 $P99$ 不得造成 Shield 驗證例外。"""
+    source = "Keep $P99$ and &aHello"
+    shielded = shield_text(source)
+    color_placeholder = next(
+        piece.placeholder for piece in shielded.shields if piece.category == "color"
+    )
+    item = {
+        "path": "blocks[0]",
+        "text": shielded.clean,
+        "source_text": source,
+        "_shielded": shielded,
+        "db_ident": (KIND_GUIDE, "foo", "crafting.md#0"),
+    }
+
+    translated = f"保留文字，然後 {color_placeholder}你好"
+
+    assert quality_issues(item, translated) == []
+
+
+def test_shield_generated_placeholder_avoids_literal_collision(monkeypatch):
+    """程式產生的 placeholder 不得覆蓋原文既有的同名文字。"""
+    candidates = iter(("$C17$", "$C18$"))
+    monkeypatch.setattr(
+        rich_text_shield,
+        "_next_color_placeholder",
+        lambda: next(candidates),
+    )
+
+    shielded = rich_text_shield.shield_text("Keep $C17$ and &aHello")
+
+    assert shielded.clean == "Keep $C17$ and $C18$Hello"
+    assert [piece.placeholder for piece in shielded.shields] == ["$C18$"]
