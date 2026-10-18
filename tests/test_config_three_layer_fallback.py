@@ -529,11 +529,11 @@ class TestLoadConfigIntoView:
         }
         view = self._load_into_view(user_cfg)
 
-        # Should not crash, should use default values (600, 0.0)
+        # Should not crash, should use default values (600, 4.0)
         assert view.controls_map["lm_translator.rate_limit.timeout"].value == "600"
         assert (
             view.controls_map[
                 "lm_translator.rate_limit.sleep_seconds_between_batches"
             ].value
-            == "0.0"
+            == "4.0"
         )

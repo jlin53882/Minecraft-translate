@@ -11,6 +11,11 @@ import requests
 
 from translation_tool.core import lm_translator_main as main
 from translation_tool.core.lm_batch_budget import get_tracker
+from translation_tool.core.lm_format_policy import LANG_SEMANTIC_FORMAT_POLICY_PROMPT
+from translation_tool.core.lm_key_health import (
+    get_key_health_registry,
+    get_model_quota_registry,
+)
 from translation_tool.utils.cancellation import TaskCancelled, cancel_scope
 
 
@@ -172,7 +177,8 @@ def test_same_as_source_is_reconfirmed_and_second_translation_is_used(
     assert calls[1]["temperature"] == calls[0]["temperature"]
     retry_prompt = calls[1]["system_prompt"]
     assert retry_prompt.startswith("LANG PROFILE PROMPT")
-    assert "再次確認" in retry_prompt and "繁體中文（台灣用語）" in retry_prompt
+    assert "retry_reasons" in retry_prompt and "format_issues" in retry_prompt
+    assert calls[1]["payload"]["items"][0]["retry_reasons"]
     assert result == [{**item, "text": "壓力室"}]
 
 
@@ -294,7 +300,8 @@ def test_all_batch_profiles_use_their_existing_prompt_route(
 
     assert status == "AUTO"
     assert len(calls) == 2
-    assert calls[0]["system_prompt"] == expected_prompt
+    assert calls[0]["system_prompt"].startswith(expected_prompt + "\n")
+    assert "【格式契約（程式驗證的硬性規則）】" in calls[0]["system_prompt"]
     assert calls[1]["system_prompt"].startswith(expected_prompt)
 
 
@@ -458,23 +465,393 @@ def test_retry_token_estimate_uses_only_candidates_and_extended_prompt(
     assert observations[1][1] > observations[0][1]
 
 
+def test_quality_retry_is_skipped_when_history_exceeds_input_budget(
+    monkeypatch, configure_batch
+):
+    config = configure_batch()
+    config["lm_translator"].update(
+        {"token_budget_enabled": True, "max_input_token_budget": 1}
+    )
+    item = _item("Minecraft", 0)
+    result, status, calls = _run_with_api(
+        monkeypatch,
+        [item],
+        [lambda call: _reply(call, {})],
+    )
+
+    assert status == "AUTO"
+    assert len(calls) == 1
+    assert result == [{**item, "text": "Minecraft"}]
+
+
+def test_format_mismatch_is_sent_back_with_detected_issues_and_repaired(
+    monkeypatch, configure_batch
+):
+    configure_batch(retry=False)
+    item = _item("§aUse %s\nnext", 0)
+
+    result, status, calls = _run_with_api(
+        monkeypatch,
+        [item],
+        [
+            lambda call: _reply(call, {"§aUse %s\nnext": "使用 next"}),
+            lambda call: _reply(call, {"§aUse %s\nnext": "§a使用 %s\n下一個"}),
+        ],
+    )
+
+    assert status == "AUTO"
+    assert len(calls) == 2
+    retry_item = calls[1]["payload"]["items"][0]
+    assert retry_item["id"] == "0"
+    assert retry_item["value"] == "§aUse %s\nnext"
+    assert retry_item["format_issues"]
+    assert calls[1]["system_prompt"].startswith("LANG PROFILE PROMPT")
+    assert LANG_SEMANTIC_FORMAT_POLICY_PROMPT in calls[0]["system_prompt"]
+    assert LANG_SEMANTIC_FORMAT_POLICY_PROMPT in calls[1]["system_prompt"]
+    assert "format_issues" in calls[1]["system_prompt"]
+    assert [turn["role"] for turn in calls[1]["conversation_history"]] == [
+        "user",
+        "model",
+    ]
+    assert (
+        json.loads(calls[1]["conversation_history"][0]["text"]) == calls[0]["payload"]
+    )
+    assert result == [{**item, "text": "§a使用 %s\n下一個"}]
+
+
+def test_format_mismatch_retry_keeps_original_when_issue_remains(
+    monkeypatch, configure_batch
+):
+    configure_batch(retry=False)
+    item = _item("§aUse %s\nnext", 0)
+
+    result, status, calls = _run_with_api(
+        monkeypatch,
+        [item],
+        [
+            lambda call: _reply(call, {"§aUse %s\nnext": "使用 next"}),
+            lambda call: _reply(call, {"§aUse %s\nnext": "使用 next"}),
+        ],
+    )
+
+    assert status == "AUTO"
+    assert len(calls) == 2
+    assert result == [{**item, "text": "使用 next"}]
+
+
+def test_quality_retry_does_not_accept_source_after_format_failure(
+    monkeypatch, configure_batch
+):
+    configure_batch(retry=False)
+    item = _item("Hello %s", 0)
+
+    result, status, calls = _run_with_api(
+        monkeypatch,
+        [item],
+        [
+            lambda call: _reply(call, {"Hello %s": "你好"}),
+            lambda call: _reply(call, {"Hello %s": "Hello %s"}),
+        ],
+    )
+
+    assert status == "AUTO"
+    assert len(calls) == 2
+    assert result == [{**item, "text": "你好"}]
+
+
+def test_quality_retry_request_failure_keeps_original_and_logs_exception_detail(
+    monkeypatch, configure_batch
+):
+    configure_batch(retry=False)
+    warnings = []
+    normal_error_handler_calls = []
+    monkeypatch.setattr(main, "log_warning", warnings.append)
+    monkeypatch.setattr(
+        main,
+        "_handle_batch_error",
+        lambda *args, **kwargs: normal_error_handler_calls.append((args, kwargs)),
+    )
+    item = _item("§aUse %s\nnext", 0)
+
+    result, status, calls = _run_with_api(
+        monkeypatch,
+        [item],
+        [
+            lambda call: _reply(call, {"§aUse %s\nnext": "使用 next"}),
+            _http_error(429),
+        ],
+    )
+
+    assert status == "AUTO"
+    assert len(calls) == 2
+    assert result == [{**item, "text": "使用 next"}]
+    quality_warnings = [message for message in warnings if "[品質重試]" in message]
+    assert len(quality_warnings) == 1
+    assert "HTTPError" in quality_warnings[0]
+    assert "429" in quality_warnings[0]
+    assert "保留第一次譯文" in quality_warnings[0]
+    assert normal_error_handler_calls == []
+
+
+def test_quality_retry_forbidden_key_stays_cooling_after_batch_success(
+    monkeypatch, configure_batch
+):
+    configure_batch(retry=False)
+    key_health = get_key_health_registry()
+    key_health.clear()
+    try:
+        item = _item("Use %s\nnext", 0)
+        result, status, calls = _run_with_api(
+            monkeypatch,
+            [item],
+            [
+                lambda call: _reply(call, {"Use %s\nnext": "使用 next"}),
+                _http_error(403),
+            ],
+        )
+
+        assert status == "AUTO"
+        assert len(calls) == 2
+        assert result == [{**item, "text": "使用 next"}]
+        assert key_health.is_cooling("test-key")
+    finally:
+        key_health.clear()
+
+
+def test_quality_retry_rpm_retry_after_updates_shared_scheduler(
+    monkeypatch, configure_batch
+):
+    configure_batch(retry=False)
+    quota = get_model_quota_registry()
+    quota.clear()
+    response = requests.Response()
+    response.status_code = 429
+    response._content = json.dumps(
+        {
+            "error": {
+                "message": "RPM limit",
+                "details": [
+                    {
+                        "@type": "type.googleapis.com/google.rpc.QuotaFailure",
+                        "violations": [{"quotaId": "GenerateRequestsPerMinute"}],
+                    },
+                    {
+                        "@type": "type.googleapis.com/google.rpc.RetryInfo",
+                        "retryDelay": "30s",
+                    },
+                ],
+            }
+        }
+    ).encode()
+    try:
+        item = _item("Use %s\nnext", 0)
+        result, status, calls = _run_with_api(
+            monkeypatch,
+            [item],
+            [
+                lambda call: _reply(call, {"Use %s\nnext": "使用 next"}),
+                requests.HTTPError("429", response=response),
+            ],
+        )
+
+        assert status == "AUTO"
+        assert len(calls) == 2
+        assert result == [{**item, "text": "使用 next"}]
+        assert quota.reserve_request_slot("gemini", "same-source-test-model", 4) > 29
+    finally:
+        quota.clear()
+
+
+def test_chatgpt_quality_retry_retry_after_updates_shared_scheduler(
+    monkeypatch, configure_batch
+):
+    from types import SimpleNamespace
+
+    from translation_tool.core.openai_codex_client import ChatGPTAPIError
+
+    configure_batch(retry=False)
+    quota = get_model_quota_registry()
+    quota.clear()
+    runtime = SimpleNamespace(
+        provider="chatgpt",
+        batch_interval_sec=4.0,
+        missing_models=set(),
+        quota_owner=object(),
+        key_cycle=SimpleNamespace(mark_failed=lambda **_kwargs: None),
+    )
+    try:
+        main._record_quality_retry_failure(
+            runtime,
+            ChatGPTAPIError(
+                "rate_limit_exceeded",
+                status=429,
+                error_type="rate_limit_error",
+                retry_after=30,
+            ),
+            0,
+            "same-source-test-model",
+        )
+        assert quota.reserve_request_slot("chatgpt", "same-source-test-model", 4) > 29
+    finally:
+        quota.clear()
+
+
+def test_quality_retry_health_update_failure_keeps_first_translation(
+    monkeypatch, configure_batch
+):
+    configure_batch(retry=False)
+    monkeypatch.setattr(
+        main,
+        "_record_quality_retry_failure",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("health")),
+    )
+    item = _item("Use %s\nnext", 0)
+
+    result, status, calls = _run_with_api(
+        monkeypatch,
+        [item],
+        [
+            lambda call: _reply(call, {"Use %s\nnext": "使用 next"}),
+            _http_error(429),
+        ],
+    )
+
+    assert status == "AUTO"
+    assert len(calls) == 2
+    assert result == [{**item, "text": "使用 next"}]
+
+
+def test_format_repair_runs_before_the_next_batch_is_requested(
+    monkeypatch, configure_batch
+):
+    config = configure_batch(retry=False)
+    waits = []
+    monkeypatch.setattr(main, "interruptible_sleep", waits.append)
+    config["lm_translator"]["initial_batch_size_lang"] = 1
+    items = [_item("§aUse %s\nnext", 0), _item("Second", 1)]
+
+    result, status, calls = _run_with_api(
+        monkeypatch,
+        items,
+        [
+            lambda call: _reply(call, {"§aUse %s\nnext": "使用 next"}),
+            lambda call: _reply(call, {"§aUse %s\nnext": "§a使用 %s\n下一個"}),
+            lambda call: _reply(call, {"Second": "第二個"}),
+        ],
+    )
+
+    assert status == "AUTO"
+    assert len(calls) == 3
+    assert [item["value"] for item in calls[0]["payload"]["items"]] == [
+        "§aUse %s\nnext"
+    ]
+    assert [item["value"] for item in calls[1]["payload"]["items"]] == [
+        "§aUse %s\nnext"
+    ]
+    assert [item["value"] for item in calls[2]["payload"]["items"]] == ["Second"]
+    assert [entry["text"] for entry in result] == ["§a使用 %s\n下一個", "第二個"]
+    assert len(waits) >= 2
+    assert all(wait >= 0 for wait in waits)
+
+
+def test_one_batch_combines_quality_candidates_into_one_retry(
+    monkeypatch, configure_batch
+):
+    configure_batch()
+    items = [_item("Minecraft", 0), _item("Use %s\nnext", 1)]
+
+    result, status, calls = _run_with_api(
+        monkeypatch,
+        items,
+        [
+            lambda call: _reply(
+                call,
+                {"Minecraft": "Minecraft", "Use %s\nnext": "使用 next"},
+            ),
+            lambda call: _reply(
+                call,
+                {
+                    "Minecraft": "Minecraft 翻譯",
+                    "Use %s\nnext": "使用 %s\n下一個",
+                },
+            ),
+        ],
+    )
+
+    assert status == "AUTO"
+    assert len(calls) == 2
+    assert [item["value"] for item in calls[1]["payload"]["items"]] == [
+        "Minecraft",
+        "Use %s\nnext",
+    ]
+    assert [entry["text"] for entry in result] == [
+        "Minecraft 翻譯",
+        "使用 %s\n下一個",
+    ]
+
+
+def test_quality_retry_uses_the_configured_batch_interval(monkeypatch, configure_batch):
+    config = configure_batch(retry=False)
+    config["lm_translator"]["rate_limit"] = {"sleep_seconds_between_batches": 3.5}
+    waits = []
+    monkeypatch.setattr(main, "interruptible_sleep", waits.append)
+    item = _item("Use %s\nnext", 0)
+
+    _result, status, calls = _run_with_api(
+        monkeypatch,
+        [item],
+        [
+            lambda call: _reply(call, {"Use %s\nnext": "使用 next"}),
+            lambda call: _reply(call, {"Use %s\nnext": "使用 %s\n下一個"}),
+        ],
+    )
+
+    assert status == "AUTO"
+    assert len(calls) == 2
+    assert any(wait == pytest.approx(3.5, abs=0.01) for wait in waits)
+
+
 def test_batch_input_fit_reserves_retry_prompt_only_when_enabled(
     monkeypatch, configure_batch
 ):
     item = _item("Minecraft", 0)
     config = configure_batch(retry=True)
     enabled_runtime = main._build_batch_runtime([item], 1)
-    assert (
-        enabled_runtime.batch_fit_input_tokens
-        == enabled_runtime.retry_fixed_input_tokens
+    assert enabled_runtime.batch_fit_input_tokens == max(
+        enabled_runtime.retry_fixed_input_tokens,
+        enabled_runtime.quality_retry_fixed_input_tokens,
     )
     assert enabled_runtime.batch_fit_input_tokens > enabled_runtime.fixed_input_tokens
 
     config["lm_translator"]["retry_same_as_source"] = False
     disabled_runtime = main._build_batch_runtime([item], 1)
-    assert (
-        disabled_runtime.batch_fit_input_tokens == disabled_runtime.fixed_input_tokens
+    assert disabled_runtime.batch_fit_input_tokens == max(
+        disabled_runtime.fixed_input_tokens,
+        disabled_runtime.quality_retry_fixed_input_tokens,
     )
+
+
+def test_prepare_batch_refreshes_token_budget_after_session_history_grows(
+    monkeypatch, configure_batch
+):
+    configure_batch()
+    items = [_item("First", 0), _item("Second", 1)]
+    runtime = main._build_batch_runtime(items, len(items))
+    runtime.batch_size = 1
+
+    main._prepare_batch(runtime)
+    first_budget = runtime.batch_fit_input_tokens
+    runtime.remaining_items = runtime.remaining_items[1:]
+    runtime.conversation_history.extend(
+        [
+            {"role": "user", "text": '{"items":[{"id":"0","value":"First"}]}'},
+            {"role": "model", "text": '{"items":[{"id":"0","value":"第一"}]}'},
+        ]
+    )
+
+    main._prepare_batch(runtime)
+
+    assert runtime.batch_fit_input_tokens > first_budget
 
 
 @pytest.mark.parametrize(

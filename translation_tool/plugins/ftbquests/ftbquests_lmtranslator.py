@@ -33,7 +33,9 @@ from translation_tool.core.lm_translator_shared import (
     make_checkpoint_adapter,
     make_progress_hook,
     prepare_translator_items,
+    restore_cache_hit_text,
     run_translator_skeleton,
+    safe_output_text,
     write_cache_hit_preview,  # ✅ 新增：cache hit preview 檔
     write_dry_run_preview,  # ✅ 新增：dry-run preview 檔
 )
@@ -158,30 +160,33 @@ def _make_on_translated_item(rel_src, dst, out_map, rec, out_dir):
     def on_translated_item(it: Dict[str, Any]) -> None:
         """處理翻譯結果並寫入映射。"""
         p = it.get("path")
-        t = it.get("text")
+        rejected = bool(it.get("_cache_rejected"))
+        t = safe_output_text(it)
         src_text = str(it.get("source_text") or "")
         if isinstance(p, str) and isinstance(t, str):
             try:
-                shielded_src = it.get("_shielded") or shield_text(src_text)
-                shields = getattr(shielded_src, "shields", [])
-                if shields:
-                    t = unshield_text(t, shields)
+                if not rejected:
+                    shielded_src = it.get("_shielded") or shield_text(src_text)
+                    shields = getattr(shielded_src, "shields", [])
+                    if shields:
+                        t = unshield_text(t, shields)
             except Exception as exc:  # noqa: BLE001 - 失敗已記錄，不中斷翻譯批次
                 # 還原失敗會讓輸出殘留保護標記，必須留下紀錄（#135）
                 log_warning(f"[FTB-LM] 還原保護標記失敗 path={p}: {exc!r}")
             out_map[p] = t
-            try:
-                rec.record(
-                    cache_type="ftbquests",
-                    file_id=rel_src,
-                    path=p,
-                    src=src_text,
-                    dst=t,
-                    cache_hit=False,
-                    extra={"dst_file": dst.relative_to(out_dir).as_posix()},
-                )
-            except Exception as exc:  # noqa: BLE001 - 失敗已記錄，不中斷翻譯批次
-                log_warning(f"[FTB-LM] 記錄翻譯結果失敗 path={p}: {exc!r}")
+            if not rejected:
+                try:
+                    rec.record(
+                        cache_type="ftbquests",
+                        file_id=rel_src,
+                        path=p,
+                        src=src_text,
+                        dst=t,
+                        cache_hit=False,
+                        extra={"dst_file": dst.relative_to(out_dir).as_posix()},
+                    )
+                except Exception as exc:  # noqa: BLE001 - 失敗已記錄，不中斷翻譯批次
+                    log_warning(f"[FTB-LM] 記錄翻譯結果失敗 path={p}: {exc!r}")
 
     return on_translated_item
 
@@ -525,7 +530,7 @@ def translate_ftb_pending_to_zh_tw(
         # cache hits 覆蓋
         for it in cached_items:
             p = it.get("path")
-            t = it.get("text")
+            t = restore_cache_hit_text(it)
             if isinstance(p, str) and isinstance(t, str):
                 out_map[p] = t
                 try:
@@ -590,6 +595,7 @@ def translate_ftb_pending_to_zh_tw(
             translate_batch_smart=lambda batch, total: translate_batch_smart(
                 batch, total=total
             ),
+            sleep_seconds_between_batches=0.0,
             write_new_cache=bool(write_new_cache),  # ✅ 改成吃參數
             cache_rules=cache_rules,
             hooks=TranslatorHooks(

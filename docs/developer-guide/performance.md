@@ -56,6 +56,39 @@ does not depend on the table size; record the bound in `ALLOWED_PLAN_MARKERS` or
 - `kinds()`: sorts the distinct entry kinds only.
 - The mismatch list: sorts only rows that pass the special-character prefilter.
 
+### Mod DB 已審核 lang 術語候選
+
+`TranslationDB.reviewed_lang_glossary` 先依模組、Minecraft 版本、`lang` 種類、
+已審核狀態與有效譯文載入候選快照，再由 Python 的 `casefold()` 與既有詞界／
+子字串匹配器依目前批次挑選術語。SQLite 的 `lower()` 不得作為 Unicode 候選的
+排除條件，因為它不能完整涵蓋 Python 的大小寫折疊結果。
+
+候選快照透過 `TranslationDB._cached` 儲存，快取鍵包含模組與版本，快取世代包含
+`data_gen` 及外部寫入序號。相同資料世代的後續翻譯任務會重用候選集合，不會再次
+掃描整個模組；資料庫寫入或外部變更使世代改變時，舊快照自動失效。來源相關性、
+多譯文衝突排除與最終數量上限仍在 Python 端執行，不得提前在候選 SQL 階段截斷。
+
+### 共用 Rich Text Shield 快取契約
+
+翻譯中的 `$C...$`、`$P...$` 與 `$E...$` 只是單次執行的暫時佔位符，不能
+直接成為跨執行快取的正式內容。共用翻譯迴圈在通過品質閘門後，將保護片段
+還原成原始 Rich Text，再寫入快取；快取分流命中時會先依目前原文的 Shield
+資訊驗證並還原，再把正式文字交給 FTB Quests、KubeJS、Guide／Patchouli
+與其他輸出端，避免任何輸出端直接取得暫時 placeholder。
+
+Shield 預期的 placeholder 映射只能來自 `ShieldPiece`；`clean` 文字中原本就存在的
+`$P99$`、`$C17$` 等普通文字不得被正規表示式誤認為程式產生的保護片段。
+Shield 生成器會避開原文已占用的 `$C...$`、`$P...$`、`$E...$` 名稱，避免程式產生
+的暫時 ID 與原文普通文字碰撞。
+
+品質閘門同時支援兩種既有資料：新快取的已還原文字會比對原始保護片段，舊
+快取若仍含全域計數器產生的佔位符，只能在快取讀取路徑依保護類別與原文位置
+做受限制的相容對齊；每個類別超過一個片段時沒有完整映射，必須視為 cache
+miss。當次 AI 回應與品質重試一律使用目前 Shield 的精確 placeholder 身分與
+數量，但允許翻譯因自然語序改變 placeholder 出現順序。缺少、重複、新增或
+未知 placeholder 都會使 AI 重試與快取命中檢查失敗；因此 FTB Quests、KubeJS、
+Guide／Patchouli 與一般共用迴圈必須使用同一套檢查。
+
 ### Mod DB trigger-maintained derived data
 
 `translation_tool/translation_db/stat_summary.py`,
@@ -71,7 +104,9 @@ frozen, and otherwise fall back to the original SQL. Bulk rewrites of
 per quality status) for quality-filtered lists. Its triggers only mark affected
 entries pending (`qflags IS NULL`); `TranslationDB._tx` calls `settle()` before
 commit to recompute them with `translation_tool/translation_db/quality.py`, so
-the flags never duplicate the quality rules in SQL. Readers check for pending
+the flags never duplicate the quality rules in SQL. Guide structure rules depend
+on `entry.kind`, so the triggers also watch `kind`; a rule change bumps
+`quality_flags.SCHEMA_VERSION`, which recomputes every entry on the next open. Readers check for pending
 entries and use the row-by-row scan while any exist. Its `verify()` compares
 every entry with a recompute that calls `matches_quality` once per status.
 

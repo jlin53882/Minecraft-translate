@@ -12,7 +12,7 @@
 |---|---|
 | 觀測 | `call_gemini_requests(..., meta_out=dict)` 回報 `finishReason`、`promptTokenCount`、`candidatesTokenCount`、`thoughtsTokenCount`；回傳值仍是字串 |
 | 截斷診斷 | 截斷時 log 一行 `[截斷診斷]`：原因（`MAX_TOKENS` 或 `STOP` 但 JSON 壞）、送出筆數、估算與實際 token |
-| 上限 | 一律送 `generationConfig.maxOutputTokens`（預設 65536），避免模型重複輸出燒光額度 |
+| 上限 | Gemini 送 `generationConfig.maxOutputTokens`、OpenAI Responses 送 `max_output_tokens`（預設 65536），避免模型重複輸出燒光額度 |
 | 切批 | `lm_batch_budget.select_batch_size`：由前往後累加，項目數上限 / 輸出 token 預算 / 輸入 token 預算，先到者為準，永遠只取輸入的**前綴** |
 | 學習 | 依 profile（lang / ftb / kubejs / md / patch）保存。`MAX_TOKENS` 截斷 → 輸出預算減半；連續成功 → 緩慢回升到設定值 |
 | 校正 | 成功回應後，以實際輸出（`candidates` + 思考 token）用 EMA 校正「輸出 / 輸入」係數 |
@@ -25,7 +25,7 @@
 - ASCII 字元約 0.25 token、CJK 約 1.2 token、其他非 ASCII 約 0.5 token
 - 每個項目加約 12 token 的 JSON 包裝
 - 預期輸出 ≈ 原文 token × `output_token_factor`（預設 1.5）+ 包裝
-- 輸入另外計入 system prompt
+- 輸入另外計入 system prompt、批次相關的官方／已審核術語提示，以及同一模組 session 保留的對話歷史；這些都只影響輸入預算，不會混入翻譯輸出 KPI。
 
 ### 什麼時候縮小學到的預算
 
@@ -47,8 +47,8 @@
 |---|---|---|
 | `token_budget_enabled` | `true` | `false` = 回到舊行為，只看項目數 |
 | `max_output_token_budget` | `65536` | 單批預期輸出 token 上限（保守值） |
-| `max_input_token_budget` | `264000` | 單批輸入 token 上限，避免單次呼叫吃掉太多 TPM |
-| `max_output_tokens` | `65536` | 送給 API 的 `maxOutputTokens`；`0` = 不送 |
+| `max_input_token_budget` | `256000` | 單批輸入 token 上限，避免單次呼叫吃掉太多 TPM；ChatGPT 實際使用值還會取全域值與模型覆寫上限的較小值 |
+| `max_output_tokens` | `65536` | 送給 Gemini／OpenAI Responses 的輸出上限；`0` = 不送，ChatGPT 使用 `1～15` 會被拒絕 |
 | `output_token_factor` | `1.5` | 預期輸出 / 輸入係數，範圍 0.3~6.0，會依實際用量校正 |
 | `budget_min_scale` | `0.0625` | 撞牆後輸出預算最多縮到設定值的幾倍 |
 | `budget_recover_after` | `3` | 連續成功幾批後開始回升 |
@@ -61,7 +61,7 @@
 ### 注意：`max_output_tokens` 不可超過模型上限
 
 65536 等於 Gemini 2.5 Flash 與 3.1 Flash Lite 的上限 65,536，但**高於** Gemini 2.0 Flash 的 8,192。
-啟用會超限的模型時 API 會回 400；偵測到 `maxOutputTokens` 相關的 400 時會直接拋出明確錯誤
+啟用會超限的模型時 API 會回 400；偵測到 `maxOutputTokens` 或 `max_output_tokens` 相關的 400 時會直接拋出明確錯誤
 （請調低 `max_output_tokens`，或設為 `0`），不會一路縮小批次後把每一批都放棄。
 
 ## 已知限制
@@ -70,11 +70,25 @@
 - 學到的預算依 profile 保存，不分模型；同一 profile 換模型時不會重置。
 - Token budget 欄位可在設定頁「批次與限制」編輯；same-as-source 確認開關位於「翻譯行為設定」的「基本設定」卡。
 
+### 批次間隔與 RPM
+
+`lm_translator.rate_limit.sleep_seconds_between_batches` 是 provider／model 共用的請求最小間隔，預設為 `4` 秒，對每分鐘 15 次（RPM 15）的模型提供基本節流。正常批次、同一次翻譯因 token 或截斷而縮成的內部批次，以及品質 retry 都經過同一個可取消的 request slot；等待中的任務取消時會歸還尚未送出的 slot，已送出的請求不會回收。設定為 `0` 才會停用這個間隔。API 回傳的 `Retry-After` 會推遲同一 provider／model 的共用時鐘，不會讓品質 retry 直接進入第二輪重試；換 Key 緩衝或其他錯誤退避仍由各自流程負責。
+
+request slot 在真正發送前仍可取消，但一旦提交就固定保留，不能被另一個等待者重用。中間等待者取消時，後續未提交的等待者會重新排列；新的 `Retry-After` 也會重新推遲尚未送出的等待者。正式 Gemini／OpenAI 路線將 shared loop 的額外 sleep 設為 `0`，避免與 request slot 雙重等待；shared loop 的 sleep 參數只保留給自訂或測試 translator。
+
 ## 譯文與原文相同時重新確認
 
-`lm_translator.retry_same_as_source` 預設為 `true`。每個成功批次中，完全等於原文且含有 alphabetic character 的項目會單獨組成候選 payload；不使用 whitelist、字串長度或格式 heuristic。第二次沿用同一 profile prompt、model、API key、temperature 與 structured-output contract，並附加一次確認說明。`lang`、`patchouli`、`ftbquests`、`kubejs` 與 `md` 都走共用 batch contract。
+`lm_translator.retry_same_as_source` 預設為 `true`。每個成功批次中，完全等於原文且含有 alphabetic character 的項目會單獨組成候選 payload；不使用 whitelist、字串長度或格式 heuristic。第二次沿用同一 profile prompt、model、API key、temperature、structured-output contract 與同一模組的 client-side session history，並附加一次確認說明。相同批次內的「相同譯文」與「格式不一致」候選會合併為一次品質 retry；`lang`、`patchouli`、`ftbquests`、`kubejs` 與 `md` 都走共用 batch contract。
 
-批次切分估算會在功能開啟時預留 retry prompt 的輸入 token；實際 retry 估算只包含候選項目及追加後的 prompt。結果依原 ID 與位置合併回第一批，processed/checkpoint 數量不變。此步驟在 shared loop 寫 Cache、Mod DB 建立 write-back 前完成。第二次仍相同會作為一般結果接受，並可正常寫入 Cache 與 Mod DB；技術錯誤或 structured response 無效時保留第一次結果。使用者取消仍依既有 cancellation contract 中止。
+批次切分估算會在功能開啟時預留 retry prompt 的輸入 token；實際 retry 估算會包含追加後的 prompt、同批初始 user/model conversation history，以及帶有 `retry_reasons`／`format_issues` 的完整候選 payload。若超過 `max_input_token_budget` 就保留第一次結果，不發出 retry。結果依原 ID 與位置合併回第一批，processed/checkpoint 數量不變。此步驟在 shared loop 寫 Cache、Mod DB 建立 write-back 前完成。第二次仍相同會作為一般結果接受，並可正常寫入 Cache 與 Mod DB；技術錯誤或 structured response 無效時保留第一次結果。使用者取消仍依既有 cancellation contract 中止。
+
+### 官方語系與模組術語
+
+- `assets/official_locales/minecraft/` 固定保存 `en_us.json`、`zh_cn.json`、`zh_tw.json` 與完整性 `manifest.json`，不依 Minecraft 版本分資料夾。
+- 語系合併對所有種類共用 `key + en_us + zh_cn` 的官方精確命中；沒有命中時才回到既有 OpenCC 與 `replace_rules.json`。既有輸出資料夾人工譯文與資料庫有效譯文仍優先保留。
+- LLM 每批會把相關官方 Minecraft 術語加入中文提示詞。Mod DB 已審核 `lang` 譯文以同一模組與目前 Minecraft 版本為範圍，只有本批原文中出現的術語才會注入 `lang`、Patchouli、Guide、Advancement 與 `md`／`.txt` 路線；術語可出現在句子中，使用大小寫不敏感的詞界判斷，避免把 `Pressured` 誤當成 `Pressure`。同一英文在目前範圍內有多個繁中譯文時會隔離，不任意選第一筆，也不直接覆蓋目前翻譯。資料庫先以模組與版本一次取得有界的已審核候選，再用共享前綴索引做批次文字匹配，避免每 200 筆來源重跑一組 SQL `OR` 條件；沒有本批來源時不查詢整個模組。
+- Mod DB 批次以 `(cache_type, batch_group)` 分界；同一模組的不同 kind 批次共用一個 client-side session，模型收到的是同一段歷史，不同模組彼此隔離。預覽、AI 翻譯與 AI 修正翻譯共用相同的 planner 與固定 prompt token 估算；批次內容與動態提示詞的 token 會計入輸入預算，但翻譯輸出 KPI 只計算原始 key/value 內容。開始前的批次數是以當下 session 歷史為基準的下界估算；成功批次會增加 session 歷史，錯誤處理也可能縮小後續批次，因此實際 HTTP 請求數可能高於預估。
+- 所有翻譯來源的命中都必須通過同一個品質准入。AI 回應、Mod DB 命中、一般快取命中與 `.md` 舊 `patchouli` fallback 都會檢查 token 與 Guide/Patchouli 硬結構；不一致的命中會回到 AI 待翻譯清單，並禁止寫入快取或 Mod DB。品質 retry 若發生 provider 錯誤，只更新必要的健康狀態與共用冷卻，不進入一般錯誤狀態機，也不增加 retry 次數；第一次有效譯文仍是回退值。
 
 ## 相關檔案
 
@@ -85,5 +99,5 @@
 
 ### Per-model 上限（PR-5）
 
-`lm_translator.models.<model>.max_output_tokens` 是 optional override。未設定或為 `null` 時回退到全域 `lm_translator.max_output_tokens`；設為 `0` 時不送 `generationConfig.maxOutputTokens`。舊版只含 `enabled` 的 models schema 不需要 migration。
+`lm_translator.models.<model>.max_output_tokens` 是 optional override。未設定或為 `null` 時回退到全域 `lm_translator.max_output_tokens`；設為 `0` 時不送輸出上限。使用 ChatGPT Responses provider 時，非零值必須至少為 16；Gemini 仍依模型限制處理。舊版只含 `enabled` 的 models schema 不需要 migration。
 - 根目錄 `conftest.py`：測試間重置學到的預算

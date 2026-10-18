@@ -92,18 +92,33 @@ def _stream_request(
     system_prompt: str,
     payload: dict,
     timeout: int,
+    max_output_tokens: int | None = None,
     reasoning_effort: str | None = None,
+    service_tier: str | None = None,
+    conversation_history: list[dict] | None = None,
 ) -> requests.Response:
     response_schema = _build_translation_response_schema(payload)
+    input_history = []
+    for turn in conversation_history or []:
+        role = turn.get("role")
+        if role == "model":
+            role = "assistant"
+        text = turn.get("text")
+        if role not in {"user", "assistant"} or not isinstance(text, str):
+            raise ValueError(
+                "ChatGPT conversation history turns must contain role/text"
+            )
+        input_history.append({"role": role, "content": text})
+    input_history.append(
+        {
+            "role": "user",
+            "content": json.dumps(payload, ensure_ascii=False),
+        }
+    )
     body = {
         "model": model_name,
         "instructions": system_prompt,
-        "input": [
-            {
-                "role": "user",
-                "content": json.dumps(payload, ensure_ascii=False),
-            }
-        ],
+        "input": input_history,
         "text": {
             "format": {
                 "type": "json_schema",
@@ -115,8 +130,14 @@ def _stream_request(
         "store": False,
         "stream": True,
     }
+    # Responses API requires at least 16 output tokens. Zero/invalid values
+    # retain the provider default; never send a request the API will reject.
+    if isinstance(max_output_tokens, int) and max_output_tokens >= 16:
+        body["max_output_tokens"] = max_output_tokens
     if reasoning_effort is not None:
         body["reasoning"] = {"effort": reasoning_effort}
+    if service_tier:
+        body["service_tier"] = service_tier
     response = requests.post(
         _RESPONSES_URL,
         headers={
@@ -197,11 +218,19 @@ def _consume_stream(response: requests.Response, meta_out: dict | None) -> str:
             raise ChatGPTAPIError(
                 str(error.get("code") or error_type or "stream_error"),
                 str(error.get("message") or ""),
+                status=(
+                    int(error["status"])
+                    if str(error.get("status") or "").isdigit()
+                    else None
+                ),
                 error_type=str(error_type or ""),
                 param=str(error.get("param") or ""),
                 request_id=str(
                     payload.get("request_id")
                     or response.headers.get("x-request-id", "")
+                ),
+                retry_after=_parse_retry_after(
+                    error.get("retry_after") or response.headers.get("Retry-After")
                 ),
             )
         elif event_type == "response.failed":
@@ -212,9 +241,22 @@ def _consume_stream(response: requests.Response, meta_out: dict | None) -> str:
             raise ChatGPTAPIError(
                 str(error.get("code") or error.get("type") or "response_failed"),
                 str(error.get("message") or ""),
+                status=(
+                    int(error["status"])
+                    if str(error.get("status") or "").isdigit()
+                    else (
+                        429
+                        if "rate"
+                        in f"{error.get('type') or ''} {error.get('code') or ''}".lower()
+                        else None
+                    )
+                ),
                 error_type=str(error.get("type") or ""),
                 param=str(error.get("param") or ""),
                 request_id=response.headers.get("x-request-id", ""),
+                retry_after=_parse_retry_after(
+                    error.get("retry_after") or response.headers.get("Retry-After")
+                ),
             )
         elif event_type == "response.incomplete":
             incomplete = payload.get("response", {})
@@ -274,6 +316,9 @@ def _consume_stream(response: requests.Response, meta_out: dict | None) -> str:
                 "total_tokens": usage.get("total_tokens"),
             }
         )
+        response_tier = completed_response.get("service_tier")
+        if isinstance(response_tier, str) and response_tier:
+            meta_out["service_tier"] = response_tier
     return "".join(chunks)
 
 
@@ -283,9 +328,12 @@ def call_chatgpt_responses(
     system_prompt: str,
     payload: dict,
     timeout: int,
+    max_output_tokens: int | None = None,
     meta_out: dict | None = None,
     reasoning_effort: str | None = None,
+    fast: bool = False,
     profile_id: str | None = None,
+    conversation_history: list[dict] | None = None,
 ) -> str:
     """Call Responses with the locally stored ChatGPT OAuth token and SSE stream."""
     token_kwargs = {"profile_id": profile_id} if profile_id is not None else {}
@@ -296,9 +344,14 @@ def call_chatgpt_responses(
         "system_prompt": system_prompt,
         "payload": payload,
         "timeout": timeout,
+        "max_output_tokens": max_output_tokens,
     }
+    if conversation_history:
+        request_kwargs["conversation_history"] = conversation_history
     if reasoning_effort is not None:
         request_kwargs["reasoning_effort"] = reasoning_effort
+    if fast:
+        request_kwargs["service_tier"] = "fast"
     try:
         response = _stream_request(**request_kwargs)
     except requests.RequestException as exc:

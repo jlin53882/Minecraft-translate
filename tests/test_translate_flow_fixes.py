@@ -210,6 +210,102 @@ def test_shared_loop_does_not_cache_untranslated_fallback(monkeypatch):
     assert sorted(a[1].split("|")[0] for a in added) == ["k0", "k2"]
 
 
+def test_shared_loop_rejects_structurally_invalid_patchouli_before_cache(monkeypatch):
+    added = _patch_loop(monkeypatch)
+    delivered: list[dict] = []
+    item = {
+        "path": "entry",
+        "text": '<ItemLink id="example:item" />\nText',
+        "source_text": '<ItemLink id="example:item" />\nText',
+        "cache_type": "patchouli",
+        "_kind": "patchouli",
+    }
+
+    def fake_translate(batch, _total):
+        return [{**batch[0], "text": "錯誤格式"}], "AUTO"
+
+    result = loop_mod.translate_items_with_cache_loop(
+        [item],
+        translate_batch_smart=fake_translate,
+        batch_size_by_type={"patchouli": 10},
+        sleep_seconds_between_batches=0,
+        on_translated_item=delivered.append,
+    )
+
+    assert result.status == "DONE"
+    assert delivered[0]["_cache_rejected"] is True
+    assert delivered[0]["_quality_issues"]
+    assert added == []
+
+
+def test_shared_loop_stores_unshielded_text_in_cache(monkeypatch):
+    """快取儲存不應綁定本次執行產生的暫時 Shield placeholder。"""
+    added = _patch_loop(monkeypatch)
+    from translation_tool.plugins.shared.rich_text_shield import shield_text
+
+    source = "&aUse #minecraft:stone now"
+    shielded = shield_text(source)
+    item = {
+        "path": "quest.title",
+        "text": shielded.clean,
+        "source_text": source,
+        "cache_type": "ftbquests",
+        "_shielded": shielded,
+    }
+
+    def fake_translate(batch, _total):
+        translated = shielded.clean.replace("Use", "使用")
+        return [{**batch[0], "text": translated}], "AUTO"
+
+    result = loop_mod.translate_items_with_cache_loop(
+        [item],
+        translate_batch_smart=fake_translate,
+        batch_size_by_type={"ftbquests": 10},
+        sleep_seconds_between_batches=0,
+    )
+
+    assert result.status == "DONE"
+    assert added[0][3] == "&a使用 #minecraft:stone now"
+
+
+@pytest.mark.parametrize("cache_type", ["ftbquests", "kubejs"])
+def test_shared_loop_rejects_plugin_translation_missing_protected_token(
+    monkeypatch, cache_type
+):
+    """FTB/KubeJS 的 AI 回應缺少格式 token 時不可寫入快取。"""
+    added = _patch_loop(monkeypatch)
+    delivered: list[dict] = []
+    from translation_tool.plugins.shared.rich_text_shield import shield_text
+
+    source = "&a&#12AB34Use #minecraft:stone %s now"
+    shielded = shield_text(source)
+    item = {
+        "path": f"{cache_type}/entry",
+        "text": shielded.clean,
+        "source_text": source,
+        "cache_type": cache_type,
+        "_shielded": shielded,
+    }
+
+    def fake_translate(batch, _total):
+        return [{**batch[0], "text": "現在使用"}], "AUTO"
+
+    result = loop_mod.translate_items_with_cache_loop(
+        [item],
+        translate_batch_smart=fake_translate,
+        batch_size_by_type={cache_type: 10},
+        sleep_seconds_between_batches=0,
+        on_translated_item=delivered.append,
+    )
+
+    assert result.status == "DONE"
+    assert delivered[0]["_cache_rejected"] is True
+    assert delivered[0]["text"] == "現在使用"
+    assert delivered[0].get("_untranslated") is not True
+    assert delivered[0]["_quality_issues"]
+    assert added == []
+
+
 # ---------------------------------------------------------------------------
 # C-1：以實際回傳筆數切片
 # ---------------------------------------------------------------------------

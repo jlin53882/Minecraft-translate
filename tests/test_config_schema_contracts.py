@@ -120,6 +120,7 @@ class TestSchema型別合約:
         assert isinstance(
             lm["rate_limit"]["sleep_seconds_between_batches"], (int, float)
         )
+        assert lm["rate_limit"]["sleep_seconds_between_batches"] == 4.0
 
     def test_lm_translator_models_is_dict(self):
         """models 必須是 dict（key = model name），不是 list。"""

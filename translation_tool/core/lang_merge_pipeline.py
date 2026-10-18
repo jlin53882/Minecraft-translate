@@ -30,6 +30,7 @@ from .lang_merge_zip_io import (
     _write_text_atomic,
 )
 from .lang_processing_format import dump_json_bytes
+from .official_locale import official_exact_translation
 
 CJK_RE = re.compile(
     r"[\u4e00-\u9fff\u3400-\u4dbf\U00020000-\U0002a6df\U0002a700-\U0002ebef\U00030000-\U0003134f]"
@@ -234,6 +235,7 @@ def _process_single_mod(
             is_pure_english=_is_pure_english,
             is_from_output_dir=target_has_tw,
             db_lookup=db_lookup,
+            official_lookup=official_exact_translation,
         )
         if source_provenance_by_key:
             log_info(f"{log_prefix}資料庫採用 {len(source_provenance_by_key)} 筆譯文")

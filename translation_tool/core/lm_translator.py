@@ -11,6 +11,7 @@ import os
 import time
 from collections.abc import Callable, Generator
 from dataclasses import asdict, replace
+from functools import partial
 from pathlib import Path
 from typing import Any
 
@@ -23,10 +24,12 @@ from translation_tool.core.guide_translation import (
     is_guide_document,
     render_guide,
 )
+from translation_tool.core.lm_batch_planner import count_planned_batches
 from translation_tool.core.lm_config_rules import (
     validate_api_keys,
-    value_fully_translated,
+    value_fully_translated,  # noqa: F401 - retained for existing test seams
 )
+from translation_tool.core.lm_moddb_context import strip_runtime_context
 from translation_tool.core.lm_translator_db import (
     DirectoryDbContext,
     directory_db,
@@ -38,6 +41,7 @@ from translation_tool.core.lm_translator_db import (
 from translation_tool.core.lm_translator_main import (
     DEFAULT_DRY_RUN,
     DEFAULT_EXPORT_CACHE_ONLY,
+    estimate_batch_fixed_input_tokens,
     translate_batch_smart,
 )
 from translation_tool.core.lm_translator_scan import (
@@ -47,9 +51,12 @@ from translation_tool.core.lm_translator_scan import (
 from translation_tool.core.lm_translator_shared import (
     CacheRule,
     TranslatorHooks,
+    _is_valid_hit,
     prepare_translator_items,
     run_translator_skeleton,
+    safe_output_text,
 )
+from translation_tool.core.lm_translator_shared_loop import _get_default_batch_size
 from translation_tool.core.patchouli_compat import (
     find_patchouli_marker_issue,
     find_patchouli_mismatch,
@@ -163,7 +170,9 @@ def save_checkpoint(
         "batch_index": batch_index,
         "completed_count": completed_count,
         "total": total,
-        "remaining_sample": remaining[:3] if remaining else [],
+        "remaining_sample": (
+            [strip_runtime_context(item) for item in remaining[:3]] if remaining else []
+        ),
         "output_dir": output_dir,
         "input_dir": input_dir,
         "fingerprint": fingerprint,
@@ -291,6 +300,8 @@ def _directory_cache_rules() -> dict[str, CacheRule]:
     """回傳目錄翻譯使用的 shared cache split contract。"""
     return {
         "lang": CacheRule("path"),
+        # Guide .md/.txt items use the Patchouli prompt but the md cache bucket.
+        "md": CacheRule("path|source_text"),
         "patchouli": CacheRule("path|source_text"),
     }
 
@@ -299,20 +310,14 @@ def _split_directory_items(
     all_items: list[dict[str, Any]],
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """由 shared cache layer 統一拆分 hit/miss，避免 generator 自行重複比對。"""
-
-    def is_valid_hit(dst: str, entry: dict[str, Any], item: dict[str, Any]) -> bool:
-        if not value_fully_translated(dst):
-            return False
-        if item.get("cache_type") == "lang":
-            source = item.get("source_text") or item.get("text") or ""
-            return bool(source) and entry.get("src") == source
-        return True
-
     return prepare_translator_items(
         all_items,
         cache_rules=_directory_cache_rules(),
-        is_valid_hit=is_valid_hit,
+        is_valid_hit=_is_valid_hit,
         cache_provider=get_cache_dict_ref,
+        # Guides used to be stored in patchouli; read that namespace once
+        # after moving .md/.txt guides to the md bucket.
+        cache_fallbacks={"md": ("patchouli",)},
     )
 
 
@@ -476,13 +481,15 @@ def _write_directory_previews(
     items_to_translate: list[dict[str, Any]],
     cached_items: list[dict[str, Any]],
     out_root: Path,
+    planned_batches: int = 0,
 ) -> None:
     """輸出 dry-run 的待翻譯與 cache 命中預覽。"""
     preview_path = out_root / "_dry_run_preview.json"
     cache_hit_preview_path = out_root / "_dry_run_cache_hit_preview.json"
+    plan_path = out_root / "_dry_run_batch_plan.json"
     preview_path.write_bytes(
         json.dumps(
-            items_to_translate,
+            [strip_runtime_context(item) for item in items_to_translate],
             option=json.OPT_INDENT_2 | json.OPT_NON_STR_KEYS,
         )
     )
@@ -501,10 +508,20 @@ def _write_directory_previews(
             option=json.OPT_INDENT_2 | json.OPT_NON_STR_KEYS,
         )
     )
+    plan_path.write_bytes(
+        json.dumps(
+            {
+                "items_to_translate": len(items_to_translate),
+                "planned_batches": planned_batches,
+            },
+            option=json.OPT_INDENT_2,
+        )
+    )
     log_info(
         f"\\n🚧 DRY-RUN 完成，預覽檔已產生\\n"
         f"📄 待翻譯預覽：{preview_path}\\n"
-        f"🎯 Cache 命中預覽：{cache_hit_preview_path}"
+        f"🎯 Cache 命中預覽：{cache_hit_preview_path}\\n"
+        f"📦 批次規劃：{plan_path}（{planned_batches:,} 批）"
     )
 
 
@@ -540,23 +557,26 @@ def _run_directory_translation(
         file_name = item.get("file")
         if file_name not in file_cache:
             return
-        set_by_path(file_cache[file_name], item["path"], item["text"])
+        rejected = bool(item.get("_cache_rejected"))
+        output_text = safe_output_text(item)
+        set_by_path(file_cache[file_name], item["path"], output_text)
         touched_files.add(file_name)
         if (
             db_ctx is not None
             and db_ctx.buffer is not None
             and not item.get("_untranslated")
+            and not rejected
         ):
             db_ctx.buffer.add(item)
         source_text = item.get("source_text") or item.get("text") or ""
-        if source_text:
+        if source_text and not rejected:
             translation_log.append(
                 {
                     "file": file_name,
                     "path": item["path"],
                     "cache_type": item.get("cache_type"),
                     "source": source_text,
-                    "translated": item["text"],
+                    "translated": output_text,
                 }
             )
 
@@ -604,15 +624,33 @@ def _run_directory_translation(
             finish_guide_item(item)  # 指南段落：還原行內保護、檢查標籤與連結
         return translated, status
 
+    planned_batches = _plan_directory_batches(remaining)
+    pending_events.append(
+        {
+            "progress": 0.2,
+            "log": f"📦 批次規劃｜預計 {planned_batches:,} 批，共 {len(remaining):,} 筆需由 AI 處理",
+        }
+    )
+
+    config = load_config()
+    lm_cfg = config.get("lm_translator", {}) if isinstance(config, dict) else {}
+    fixed_input_tokens_for_batch = (
+        partial(estimate_batch_fixed_input_tokens, lm_cfg=lm_cfg)
+        if isinstance(lm_cfg, dict) and lm_cfg.get("token_budget_enabled", True)
+        else None
+    )
     result = run_translator_skeleton(
         remaining,
         total_for_smart=total,
         translate_batch_smart=translate_batch,
+        # Real provider requests are throttled by ModelQuotaRegistry.
+        sleep_seconds_between_batches=0.0,
         write_new_cache=write_new_cache,
         cache_rules=_directory_cache_rules(),
         reload_cache=False,
         cache_add=add_to_cache,
         cache_save=save_translation_cache,
+        fixed_input_tokens_for_batch=fixed_input_tokens_for_batch,
         hooks=TranslatorHooks(
             on_translated_item=on_translated_item,
             on_batch_flushed=on_batch_flushed,
@@ -755,6 +793,25 @@ def _split_db_cache(
     return db_hits + cached_items, items_to_translate
 
 
+def _plan_directory_batches(items: list[dict[str, Any]]) -> int:
+    """Return the preview/live batch count with one frozen config snapshot."""
+    config = load_config()
+    lm_cfg = config.get("lm_translator", {}) if isinstance(config, dict) else {}
+    fixed_input_tokens_for_batch = (
+        partial(estimate_batch_fixed_input_tokens, lm_cfg=lm_cfg)
+        if isinstance(lm_cfg, dict) and lm_cfg.get("token_budget_enabled", True)
+        else None
+    )
+    return count_planned_batches(
+        items,
+        lm_cfg=lm_cfg,
+        batch_size_for_type=lambda cache_type: _get_default_batch_size(
+            cache_type, None
+        ),
+        fixed_input_tokens_for_batch=fixed_input_tokens_for_batch,
+    )
+
+
 def translate_directory_generator(
     input_dir: str,
     output_dir: str,
@@ -835,7 +892,10 @@ def translate_directory_generator(
             return
 
         if dry_run:
-            _write_directory_previews(items_to_translate, cached_items, out_root)
+            planned_batches = _plan_directory_batches(items_to_translate)
+            _write_directory_previews(
+                items_to_translate, cached_items, out_root, planned_batches
+            )
             yield {"progress": 1.0}
             return
 

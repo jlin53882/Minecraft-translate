@@ -3,6 +3,7 @@ import flet as ft
 from app.services_impl.moddb_format_diff_service import compare_format_diff
 from app.views.moddb.format_diff_review import FormatDiffReview
 from app.views.moddb.format_diff_viewer import FormatDiffViewer
+from translation_tool.translation_db.schema import KIND_GUIDE, KIND_LANG, KIND_PATCHOULI
 
 
 def test_repeated_tokens_report_counts_without_fake_missing_positions():
@@ -53,6 +54,19 @@ def test_natural_language_changes_do_not_create_a_format_diff():
     assert result.summary_lines == ("格式檢查通過。",)
 
 
+def test_guide_soft_newline_reflow_is_informational_not_a_format_issue():
+    for kind in (KIND_GUIDE, KIND_PATCHOULI):
+        result = compare_format_diff("Hello\nworld", "你好世界", kind=kind)
+
+        assert result.has_issues is False
+        assert result.soft_newline_counts == (1, 0)
+        assert result.summary_lines == ("一般段落換行可依語意重排：原文 1、譯文 0",)
+
+    lang_result = compare_format_diff("Hello\nworld", "你好世界", kind=KIND_LANG)
+    assert lang_result.has_issues is True
+    assert lang_result.issues[0].token == "\n"
+
+
 def test_viewer_keeps_markers_out_of_text_and_can_toggle_highlights():
     viewer = FormatDiffViewer()
     result = viewer.render("Use %s", "使用")
@@ -90,6 +104,29 @@ def test_shared_review_renders_same_contract_without_inserting_ui_markers():
     review._select_tab("edit")
     assert review._tab == "edit"
     assert review.control.content.controls
+
+
+def test_review_shows_allowed_soft_newline_count_without_warning():
+    review = FormatDiffReview(
+        context_label="條目校對",
+        editable_control=ft.TextField(value="你好世界"),
+    )
+    result = review.render("Hello\nworld", "你好世界", kind=KIND_GUIDE)
+
+    assert result.has_issues is False
+    texts: list[str] = []
+
+    def walk(control):
+        if isinstance(control, ft.Text) and control.value:
+            texts.append(control.value)
+        if isinstance(control, ft.Container):
+            walk(control.content)
+        for child in getattr(control, "controls", None) or []:
+            walk(child)
+
+    walk(review.control.content)
+    assert any("一般段落換行可依語意重排" in text for text in texts)
+    assert any("格式檢查通過" in text for text in texts)
 
 
 def test_review_tab_switch_pushes_content_to_the_page_immediately():
@@ -130,3 +167,45 @@ def test_highlight_switch_is_only_shown_on_the_diff_tab():
     assert not has_switch()
     review._select_tab("diff")
     assert has_switch()
+
+
+def test_comparison_panels_scroll_inside_their_fixed_height():
+    """長譯文超出固定高度的面板時，面板內要能捲動，不能把後面的內容截掉。"""
+    import flet as ft
+
+    from app.views.moddb.format_diff_review import FormatDiffReview
+
+    review = FormatDiffReview(context_label="t", editable_control=ft.TextField())
+    review.render("A " * 400, "B " * 400)
+
+    panel = review._text_panel("譯文", "B " * 400, (), set(), "em")
+    column = panel.content
+    assert column.scroll == ft.ScrollMode.AUTO
+    assert panel.height == 260
+
+
+def test_guide_mark_issues_are_shown_in_the_diff_panel_not_only_the_editor_hint():
+    """指南連結目標被改壞時，差異預覽要顯示問題，不能和編輯頁的提醒互相矛盾地寫「通過」。"""
+    import flet as ft
+
+    from app.views.moddb.format_diff_review import FormatDiffReview
+
+    review = FormatDiffReview(context_label="條目校對", editable_control=ft.TextField())
+    source = "[Crafting](../items/crafting.md)"
+    target = "[合成](/../items/crafting.md)"
+    review.render(source, target, kind="guide")
+
+    texts: list[str] = []
+
+    def walk(control):
+        if isinstance(control, ft.Text) and control.value:
+            texts.append(control.value)
+        if isinstance(control, ft.Container):
+            walk(control.content)
+        for child in getattr(control, "controls", None) or []:
+            walk(child)
+
+    walk(review.control.content)
+    assert any("連結目標" in text for text in texts)
+    assert "格式檢查通過" not in texts
+    assert "所有格式標記數量一致。" not in texts

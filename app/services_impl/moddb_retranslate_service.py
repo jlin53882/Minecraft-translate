@@ -7,8 +7,10 @@ import sqlite3
 import time
 import traceback
 import uuid
+from collections import Counter
 from collections.abc import Sequence
 from dataclasses import dataclass, field
+from functools import partial
 from pathlib import Path
 from time import monotonic
 from typing import Any
@@ -30,21 +32,30 @@ from app.services_impl.pipelines._pipeline_logging import (
     mirror_session_log,
 )
 from app.tasks.task_session import add_log_unmirrored
-from app.views.moddb.formatting import token_issues
 from translation_tool.core.lm_batch_budget import (
     BudgetConfig,
     get_tracker,
     profile_for_cache_type,
     select_batch_size,
 )
-from translation_tool.core.lm_translator_main import translate_batch_smart
+from translation_tool.core.lm_batch_planner import (
+    count_planned_batches,
+    group_items_by_batch_key,
+    next_batch,
+)
+from translation_tool.core.lm_moddb_context import attach_moddb_context
+from translation_tool.core.lm_session import TranslationSessionState
+from translation_tool.core.lm_translator_main import (
+    estimate_batch_fixed_input_tokens,
+    translate_batch_smart,
+)
 from translation_tool.core.lm_translator_shared_cache import get_default_cache_rules
 from translation_tool.core.lm_translator_shared_loop import _get_default_batch_size
 from translation_tool.translation_db import TranslationDB
 from translation_tool.translation_db.models import SameSourceAIEntry
 from translation_tool.translation_db.quality import (
-    repair_input_issues,
-    repair_output_issues,
+    repair_input_issues_for_kind,
+    translation_issues,
 )
 from translation_tool.translation_db.run_progress import format_repair_live
 from translation_tool.translation_db.schema import SRC_AI
@@ -56,7 +67,6 @@ from translation_tool.utils.cache_manager import (
 from translation_tool.utils.cancellation import (
     TaskCancelled,
     cancel_scope,
-    interruptible_sleep,
     is_cancelled,
 )
 from translation_tool.utils.config_manager import load_config
@@ -76,6 +86,29 @@ _PROFILE_LABELS = {
     "kubejs": "KubeJS",
     "md": "Markdown",
 }
+
+
+class _SequenceSuffixView(Sequence[dict[str, Any]]):
+    """Read-only suffix view that avoids copying the full remaining item list."""
+
+    def __init__(self, items: Sequence[dict[str, Any]], start: int) -> None:
+        self._items = items
+        self._start = max(0, int(start))
+
+    def __len__(self) -> int:
+        return max(0, len(self._items) - self._start)
+
+    def __getitem__(self, index: int):
+        if isinstance(index, slice):
+            start, stop, step = index.indices(len(self))
+            return [
+                self._items[self._start + offset] for offset in range(start, stop, step)
+            ]
+        if index < 0:
+            index += len(self)
+        if index < 0 or index >= len(self):
+            raise IndexError(index)
+        return self._items[self._start + index]
 
 
 def cache_profile_label(cache_type: str | None) -> str:
@@ -218,6 +251,37 @@ class _RepairRunProgress:
         self._planned_first_sizes: dict[str, int] = {}
         self._planned_signatures: dict[str, tuple[Any, ...]] = {}
         self._last_batch_sizes: dict[str, int] = {}
+        self._planned_canonical_batches = 0
+        self._planned_canonical_first_size = 0
+        self._planned_canonical_submitted = 0
+        self._planned_canonical_hard_signature: tuple[Any, ...] = ()
+        self._planned_canonical_session_signature: tuple[Any, ...] = ()
+        self._canonical_item_cache_types = tuple(
+            str(item.get("cache_type") or "lang") for item in items
+        )
+        self._canonical_cache_type_order = tuple(
+            dict.fromkeys(self._canonical_item_cache_types)
+        )
+        self._canonical_item_sessions = tuple(
+            item.get("_translation_session")
+            if isinstance(item.get("_translation_session"), TranslationSessionState)
+            else None
+            for item in items
+        )
+        self._canonical_remaining_cache_types = Counter(
+            self._canonical_item_cache_types
+        )
+        self._canonical_remaining_sessions = Counter(
+            id(session)
+            for session in self._canonical_item_sessions
+            if session is not None
+        )
+        self._canonical_sessions = {
+            id(session): session
+            for session in self._canonical_item_sessions
+            if session is not None
+        }
+        self._canonical_metadata_submitted = 0
         for cache_type, ranges in self._profile_ranges.items():
             batches, first_size = _plan_profile_ranges(
                 self._items, cache_type, ranges, self.lm_cfg
@@ -227,6 +291,7 @@ class _RepairRunProgress:
             self._planned_signatures[cache_type] = _batch_plan_signature(
                 cache_type, self.lm_cfg
             )
+        self._replan_canonical(None)
 
     def update(
         self,
@@ -252,6 +317,7 @@ class _RepairRunProgress:
             cache_type, 0.0
         ) + max(0.0, elapsed)
         self._last_batch_sizes[cache_type] = count
+        self._advance_canonical_plan(count)
 
     def live(
         self,
@@ -266,7 +332,7 @@ class _RepairRunProgress:
         remaining, remaining_candidates, remaining_batches_by_profile = (
             self._remaining_profile_state(check)
         )
-        remaining_batches = sum(remaining_batches_by_profile.values())
+        remaining_batches = self._remaining_canonical_batches(check)
         eta = 0.0
         unknown_profiles = []
         for cache_type, count in remaining.items():
@@ -345,9 +411,9 @@ class _RepairRunProgress:
 
     def start_line(self, items: Sequence[dict[str, Any]]) -> str:
         counts = _cache_type_counts(items)
-        planned = sum(self._planned_batches_by_profile.values())
+        planned = self._remaining_canonical_batches(None)
         return (
-            f"📦 批次規劃｜預計 {planned:,} 批，共 {len(items):,} 筆需由 AI 處理"
+            f"📦 批次規劃｜開始時預估下界 {planned:,} 批，共 {len(items):,} 筆需由 AI 處理"
             f"（{_format_profile_breakdown(counts)}）"
         )
 
@@ -356,6 +422,144 @@ class _RepairRunProgress:
 
     def elapsed(self) -> float:
         return max(0.0, monotonic() - self.started_mono)
+
+    def _remaining_canonical_batches(self, check) -> int:
+        """Return the cached canonical plan, refreshing only when its inputs change."""
+        submitted = sum(self.profile_items_submitted.values())
+        if submitted != self._planned_canonical_submitted:
+            self._replan_canonical(check)
+            return self._planned_canonical_batches
+
+        hard_signature, session_signature = self._canonical_plan_signatures(submitted)
+        if hard_signature != self._planned_canonical_hard_signature:
+            self._replan_canonical(check)
+        elif session_signature != self._planned_canonical_session_signature:
+            first_size = self._first_canonical_batch_size(submitted, check=check)
+            if first_size != self._planned_canonical_first_size:
+                self._replan_canonical(check)
+            else:
+                self._planned_canonical_session_signature = session_signature
+        return self._planned_canonical_batches
+
+    def _canonical_fixed_input_tokens(self):
+        return (
+            partial(estimate_batch_fixed_input_tokens, lm_cfg=self.lm_cfg)
+            if self.lm_cfg.get("token_budget_enabled", True)
+            else None
+        )
+
+    def _canonical_plan_signatures(self, submitted: int):
+        self._sync_canonical_metadata(submitted)
+        cache_types = tuple(
+            cache_type
+            for cache_type in self._canonical_cache_type_order
+            if self._canonical_remaining_cache_types.get(cache_type, 0) > 0
+        )
+        hard_signature = tuple(
+            (cache_type, _batch_plan_signature(cache_type, self.lm_cfg))
+            for cache_type in cache_types
+        )
+        sessions = []
+        for session_id, session in self._canonical_sessions.items():
+            if self._canonical_remaining_sessions.get(session_id, 0) <= 0:
+                continue
+            sessions.append(
+                (
+                    session_id,
+                    getattr(session, "generation", 0),
+                    len(session.history),
+                    session.max_history_tokens,
+                )
+            )
+        return hard_signature, tuple(sessions)
+
+    def _sync_canonical_metadata(self, submitted: int) -> None:
+        """Advance suffix metadata without rescanning the remaining item list."""
+        target = max(0, min(int(submitted), len(self._items)))
+        while self._canonical_metadata_submitted < target:
+            index = self._canonical_metadata_submitted
+            cache_type = self._canonical_item_cache_types[index]
+            remaining = self._canonical_remaining_cache_types[cache_type] - 1
+            if remaining:
+                self._canonical_remaining_cache_types[cache_type] = remaining
+            else:
+                self._canonical_remaining_cache_types.pop(cache_type, None)
+            session = self._canonical_item_sessions[index]
+            if session is not None:
+                session_id = id(session)
+                remaining_sessions = self._canonical_remaining_sessions[session_id] - 1
+                if remaining_sessions:
+                    self._canonical_remaining_sessions[session_id] = remaining_sessions
+                else:
+                    self._canonical_remaining_sessions.pop(session_id, None)
+            self._canonical_metadata_submitted += 1
+
+    def _first_canonical_batch_size(self, submitted: int, *, check=None) -> int:
+        if submitted >= len(self._items):
+            return 0
+        batch, _cache_type = next_batch(
+            self._items,
+            start=submitted,
+            lm_cfg=self.lm_cfg,
+            batch_size_for_type=lambda cache_type: _get_default_batch_size(
+                cache_type, None
+            ),
+            fixed_input_tokens_for_batch=self._canonical_fixed_input_tokens(),
+            select_size=select_batch_size,
+            check=lambda: _check_batch_planning(None, check),
+        )
+        return len(batch)
+
+    def _replan_canonical(self, check) -> None:
+        submitted = sum(self.profile_items_submitted.values())
+        remaining = _SequenceSuffixView(self._items, submitted)
+        fixed = self._canonical_fixed_input_tokens()
+        first_batch, _cache_type = next_batch(
+            remaining,
+            lm_cfg=self.lm_cfg,
+            batch_size_for_type=lambda cache_type: _get_default_batch_size(
+                cache_type, None
+            ),
+            fixed_input_tokens_for_batch=fixed,
+            select_size=select_batch_size,
+            check=lambda: _check_batch_planning(None, check),
+        )
+        remaining_after_first = _SequenceSuffixView(
+            self._items, submitted + len(first_batch)
+        )
+        batches = 0
+        if first_batch:
+            batches = 1 + count_planned_batches(
+                remaining_after_first,
+                lm_cfg=self.lm_cfg,
+                batch_size_for_type=lambda cache_type: _get_default_batch_size(
+                    cache_type, None
+                ),
+                fixed_input_tokens_for_batch=fixed,
+                select_size=select_batch_size,
+                check=lambda: _check_batch_planning(None, check),
+            )
+        hard_signature, session_signature = self._canonical_plan_signatures(submitted)
+        self._planned_canonical_batches = batches
+        self._planned_canonical_first_size = len(first_batch)
+        self._planned_canonical_submitted = submitted
+        self._planned_canonical_hard_signature = hard_signature
+        self._planned_canonical_session_signature = session_signature
+
+    def _advance_canonical_plan(self, count: int) -> None:
+        submitted = sum(self.profile_items_submitted.values())
+        hard_signature, session_signature = self._canonical_plan_signatures(submitted)
+        if (
+            count != self._planned_canonical_first_size
+            or hard_signature != self._planned_canonical_hard_signature
+        ):
+            self._replan_canonical(None)
+            return
+        self._planned_canonical_batches = max(0, self._planned_canonical_batches - 1)
+        self._planned_canonical_submitted = submitted
+        self._planned_canonical_hard_signature = hard_signature
+        self._planned_canonical_session_signature = session_signature
+        self._planned_canonical_first_size = self._first_canonical_batch_size(submitted)
 
     def _remaining_batch_plan(
         self, cache_type: str, submitted: int, remaining_count: int, check
@@ -477,6 +681,12 @@ def preview_same_source_ai_retranslation(
         raise ValueError(f"未知既有譯文修復條件：{mode}")
     _raise_preview_timeout(deadline)
     items = _build_retranslation_items(entries, deadline=deadline)
+    attach_moddb_context(
+        items,
+        operation_id=f"retranslate-preview:{id(db)}",
+        mc_version=options.version,
+        reviewed_glossary_loader=db.reviewed_lang_glossary,
+    )
     items = _group_retranslation_items_by_cache_type(items, deadline=deadline)
     _raise_preview_timeout(deadline)
     entry_cache_types = [_retranslation_cache_type(item) for item in items]
@@ -568,17 +778,10 @@ def _retranslation_cache_type(item: dict[str, Any]) -> str:
 def _group_retranslation_items_by_cache_type(
     items: list[dict[str, Any]], *, deadline: float | None = None
 ) -> list[dict[str, Any]]:
-    """Stable-group engine items by their actual cache/profile key."""
-    groups: dict[str, list[dict[str, Any]]] = {}
-    for item in items:
-        _raise_preview_timeout(deadline)
-        groups.setdefault(_retranslation_cache_type(item), []).append(item)
-    grouped = []
-    for group in groups.values():
-        for item in group:
-            _raise_preview_timeout(deadline)
-            grouped.append(item)
-    return grouped
+    """Stable-group engine items by cache type and module/kind boundary."""
+    return group_items_by_batch_key(
+        items, check=lambda: _raise_preview_timeout(deadline)
+    )
 
 
 def _cache_type_counts(
@@ -603,25 +806,21 @@ def _format_profile_breakdown(counts: dict[str, int]) -> str:
 
 
 def _same_batch_prefix(items: list[dict[str, Any]], lm_cfg: dict[str, Any]):
-    """Choose a homogeneous, token-budgeted prefix without touching the cache."""
-    cache_type = _retranslation_cache_type(items[0])
-    preferred = _get_default_batch_size(cache_type, None)
-    if preferred <= 0:
-        preferred = 50
-    profile_limit = min(len(items), preferred)
-    homogeneous = 1
-    while (
-        homogeneous < profile_limit
-        and _retranslation_cache_type(items[homogeneous]) == cache_type
-    ):
-        homogeneous += 1
-    fit_count = select_batch_size(
-        items[:homogeneous],
-        profile_for_cache_type(cache_type),
-        preferred,
-        lm_cfg,
+    """Choose the same homogeneous, token-budgeted prefix as preview planning."""
+    fixed = (
+        partial(estimate_batch_fixed_input_tokens, lm_cfg=lm_cfg)
+        if lm_cfg.get("token_budget_enabled", True)
+        else None
     )
-    return items[: max(1, fit_count)], cache_type
+    return next_batch(
+        items,
+        lm_cfg=lm_cfg,
+        batch_size_for_type=lambda cache_type: _get_default_batch_size(
+            cache_type, None
+        ),
+        fixed_input_tokens_for_batch=fixed,
+        select_size=select_batch_size,
+    )
 
 
 def _load_lm_config() -> dict[str, Any]:
@@ -654,11 +853,21 @@ def _count_planned_batches(
     deadline: float | None = None,
     check=None,
 ) -> int:
-    """Count bounded windows without repeatedly copying the unplanned suffix."""
-    return sum(
-        _count_planned_batches_by_profile(
-            items, lm_cfg, deadline=deadline, check=check
-        ).values()
+    """Count the exact windows used by ``_same_batch_prefix``."""
+    fixed = (
+        partial(estimate_batch_fixed_input_tokens, lm_cfg=lm_cfg)
+        if lm_cfg.get("token_budget_enabled", True)
+        else None
+    )
+    return count_planned_batches(
+        items,
+        lm_cfg=lm_cfg,
+        batch_size_for_type=lambda cache_type: _get_default_batch_size(
+            cache_type, None
+        ),
+        fixed_input_tokens_for_batch=fixed,
+        select_size=select_batch_size,
+        check=lambda: _check_batch_planning(deadline, check),
     )
 
 
@@ -933,10 +1142,11 @@ def _finalize_result(
         )
         return True
     translated_text = result["text"]
-    issues = (
-        repair_output_issues(original["source_text"], translated_text)
-        if report.mode == "quality_mismatch" and not report.strict_newline
-        else token_issues(original["source_text"], translated_text)
+    issues = translation_issues(
+        original["source_text"],
+        translated_text,
+        kind=original.get("_kind"),
+        repair=report.mode == "quality_mismatch" and not report.strict_newline,
     )
     if issues:
         _mark_flagged(db, session, report, original, translated_text, issues)
@@ -1360,8 +1570,8 @@ def _translate_snapshot(
     report: SameSourceAIRepairReport,
     cancelled,
 ) -> None:
-    items, tracker, lm_cfg, sleep_seconds = _initialize_snapshot_run(
-        entries, session, report, options
+    items, tracker, lm_cfg = _initialize_snapshot_run(
+        db, entries, session, report, options
     )
     cache_keys_to_save: dict[str, dict[str, int | None]] = {}
     while items:
@@ -1382,12 +1592,6 @@ def _translate_snapshot(
         if stop_after_batch:
             break
         items = remainder
-        if items and sleep_seconds > 0:
-            try:
-                interruptible_sleep(sleep_seconds)
-            except TaskCancelled:
-                _set_not_submitted_candidates(report, items)
-                raise
     _finish_snapshot(db, options, session, report, tracker)
 
 
@@ -1528,15 +1732,20 @@ def _flush_after_interrupted_batch(options, session, report, cache_keys_to_save)
         logger.exception("Mod DB repair cache flush failed while stopping a batch")
 
 
-def _initialize_snapshot_run(entries, session, report, options):
+def _initialize_snapshot_run(db, entries, session, report, options):
     """Group candidates and prepare the rate-limited translator run."""
     if report.mode == "quality_mismatch" and not options.repair_newline_only:
         entries, skipped_newline_only = _filter_newline_only_repair_entries(entries)
         report.skipped_newline_only_candidates += skipped_newline_only
         report.candidates = len(entries)
-    candidates = _group_retranslation_items_by_cache_type(
-        _build_retranslation_items(entries)
+    candidates = _build_retranslation_items(entries)
+    attach_moddb_context(
+        candidates,
+        operation_id=f"retranslate:{getattr(session, 'id', '') or id(session)}",
+        mc_version=options.version,
+        reviewed_glossary_loader=db.reviewed_lang_glossary,
     )
+    candidates = _group_retranslation_items_by_cache_type(candidates)
     items = candidates
     report.candidate_profile_counts = _cache_type_counts(candidates)
     lm_cfg = _load_lm_config()
@@ -1546,8 +1755,6 @@ def _initialize_snapshot_run(entries, session, report, options):
         lm_cfg=lm_cfg,
     )
     report.planned_batches = tracker.live()["planned_batches_total"]
-    rate_cfg = lm_cfg.get("rate_limit", {}) if isinstance(lm_cfg, dict) else {}
-    sleep_seconds = float(rate_cfg.get("sleep_seconds_between_batches", 0.0) or 0.0)
     total = len(candidates)
     operation = "格式修復" if report.mode == "quality_mismatch" else "舊 AI 重翻"
     if report.mode == "quality_mismatch":
@@ -1581,7 +1788,7 @@ def _initialize_snapshot_run(entries, session, report, options):
     if not options.write_cache:
         report.cache_stats_note = "本次未啟用快取寫入"
     session.set_summary({**report.as_dict(), "live": tracker.live()})
-    return items, tracker, lm_cfg, sleep_seconds
+    return items, tracker, lm_cfg
 
 
 def _filter_newline_only_repair_entries(
@@ -1591,8 +1798,10 @@ def _filter_newline_only_repair_entries(
     selected: list[SameSourceAIEntry] = []
     skipped = 0
     for entry in entries:
-        eligible, hard_issues, mixed = repair_input_issues(
-            entry.en_us, entry.current_ai_translation
+        eligible, hard_issues, mixed = repair_input_issues_for_kind(
+            entry.en_us,
+            entry.current_ai_translation,
+            kind=entry.kind,
         )
         if eligible and not hard_issues and not mixed:
             skipped += 1

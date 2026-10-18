@@ -24,6 +24,8 @@ from translation_tool.translation_db import (
 )
 from translation_tool.translation_db.models import WriteBackItem
 from translation_tool.translation_db.schema import (
+    KIND_ADVANCEMENT,
+    KIND_GUIDE,
     KIND_PATCHOULI,
     SRC_AI,
     SRC_JAR_TW,
@@ -118,12 +120,53 @@ def test_reuse_from_other_versions_fills_without_ai(db_path):
     db.close()
 
 
-def test_build_items_carries_entry_identity():
-    items = build_items([(7, KIND_LANG, "foo", "item.foo.b", "Infused Alloy")])
-    assert items[0]["_entry_id"] == 7 and items[0]["cache_type"] == "lang"
+@pytest.mark.parametrize(
+    ("kind", "expected_cache_type"),
+    [
+        (KIND_LANG, "lang"),
+        (KIND_PATCHOULI, "patchouli"),
+        (KIND_GUIDE, "md"),
+        (KIND_ADVANCEMENT, "patchouli"),
+    ],
+)
+def test_build_items_uses_the_shared_kind_cache_route(kind, expected_cache_type):
+    items = build_items([(7, kind, "foo", "item.foo.b", "Infused Alloy")])
+    assert items[0]["_entry_id"] == 7
+    assert items[0]["cache_type"] == expected_cache_type
     assert (
         items[0]["path"] == "item.foo.b" and items[0]["source_text"] == "Infused Alloy"
     )
+
+
+@pytest.mark.parametrize("key", ["guide/entry.md#0", "guide/entry.txt#0"])
+def test_build_items_puts_guides_in_md_cache_bucket(key):
+    item = build_items([(8, KIND_GUIDE, "foo", key, "Guide text")])[0]
+    assert item["cache_type"] == "md"
+    assert item["_kind"] == KIND_GUIDE
+
+
+def test_plan_batches_uses_kind_cache_bucket(monkeypatch):
+    monkeypatch.setattr(
+        moddb_translate_service,
+        "_get_default_batch_size",
+        lambda cache_type, _batch_sizes: {"lang": 300, "md": 100}[cache_type],
+    )
+    items = build_items(
+        [
+            (index, KIND_GUIDE, "foo", f"guide/{index}.md", "Guide text")
+            for index in range(101)
+        ]
+    )
+
+    assert moddb_translate_service.plan_batches(items) == 2
+
+
+def test_update_remaining_counts_unwritten_flagged_items():
+    report = moddb_translate_service.TranslateReport(
+        candidates=300, translated=100, written=80, flagged=20
+    )
+    moddb_translate_service._update_remaining(report)
+    assert report.remaining == 220
 
 
 def test_service_translates_and_writes_back_as_ai(db_path, monkeypatch):
@@ -153,6 +196,31 @@ def test_service_does_not_write_when_special_chars_differ(db_path, monkeypatch):
     rows = {r.key: r for r in db.list_entries("1.21.1")[0]}
     assert rows["item.foo.c"].zh_tw == ""
     assert rows["item.foo.b"].zh_tw.startswith("翻:")
+    db.close()
+
+
+def test_service_does_not_write_cache_rejected_candidate(db_path, monkeypatch):
+    seed(db_path)
+
+    def rejected_batch(batch, total=None, dry_run=False):
+        return [
+            {
+                **item,
+                "text": "錯誤草稿" if item["path"] == "item.foo.b" else item["text"],
+                "_cache_rejected": item["path"] == "item.foo.b",
+            }
+            for item in batch
+        ], "DONE"
+
+    monkeypatch.setattr(
+        moddb_translate_service, "translate_batch_smart", rejected_batch
+    )
+    summary = run(TranslateOptions(version="1.21.1", mod_ids=("foo",)))["summary"]
+
+    assert summary["flagged"] == 1 and summary["written"] == 1
+    db = TranslationDB(db_path)
+    row = next(row for row in db.list_entries("1.21.1")[0] if row.key == "item.foo.b")
+    assert row.zh_tw == ""
     db.close()
 
 
@@ -1823,10 +1891,20 @@ def test_flagged_entries_flow_from_translation_to_entries_review(db_path, monkey
     assert panel.view_flagged_btn.visible is False
     panel._apply_summary(summary)
     assert panel.view_flagged_btn.visible is True
+    entries = view.entries
+    entries.show_filter("diff")
+    entries.query = "old-filter"
+    entries.search.value = "old-filter"
+    entries.review_filter.value = "reviewed"
+    entries.advanced_filters.quality_status.value = "mismatch"
+    entries.advanced_filters.sort.value = "entry_newest"
     panel.result_inspector.inspect()  # 按「檢視」
 
-    entries = view.entries
     assert view.tab == "entries" and entries.state == "none"
+    assert entries.query == ""
+    assert entries.review_filter.value == "__all__"
+    assert entries.advanced_filters.quality_status.value == "all"
+    assert entries.advanced_filters.sort.value == "default"
     assert [r.key for r in entries.rows] == ["item.foo.b"]
     assert entries.flagged_banner.visible is True
     assert entries.tw_field.value == "§a注入合金"  # 預填 AI 譯文
@@ -1847,6 +1925,76 @@ def test_flagged_entries_flow_from_translation_to_entries_review(db_path, monkey
     entries.show_flagged(list(flagged), flagged, "1.21.1")
     entries.show_filter("diff")
     assert entries.entry_ids is None and entries.drafts == {}
+
+
+def test_live_remaining_decreases_by_written_items_and_keeps_flagged_items(
+    db_path, monkeypatch
+):
+    seed(db_path)
+    fake_engine(
+        monkeypatch,
+        lambda t: "§a注入合金" if t == "Infused Alloy" else "譯:" + t,
+    )
+    monkeypatch.setattr(
+        moddb_translate_service, "_get_default_batch_size", lambda *_: 1
+    )
+    monkeypatch.setattr(
+        moddb_translate_service,
+        "run_translator_skeleton",
+        _skeleton_one_per_batch(None, report_progress=True),
+    )
+    session = TaskSession()
+    snapshots = []
+    original_set_summary = session.set_summary
+
+    def capture(summary):
+        if summary.get("live"):
+            snapshots.append(dict(summary))
+        original_set_summary(summary)
+
+    monkeypatch.setattr(session, "set_summary", capture)
+    run_moddb_translate_service(
+        TranslateOptions(version="1.21.1", mod_ids=("foo",)), session
+    )
+    assert any(
+        s["written"] == 0 and s["flagged"] == 1 and s["remaining"] == 2
+        for s in snapshots
+    )
+    assert any(
+        s["written"] == 1 and s["flagged"] == 1 and s["remaining"] == 1
+        for s in snapshots
+    )
+
+
+def test_translation_kpi_keeps_manually_resolved_flagged_items_out_after_refresh():
+    panel = translate_panel.TranslatePanel(mock_page(), lambda: None)
+    first = {
+        "flagged": 2,
+        "flagged_entries": {1: "AI one", 2: "AI two"},
+        "remaining": 2,
+    }
+    panel._apply_summary(first)
+    panel.resolve_flagged(1)
+    assert panel.stat_flagged.value_text.value == "1"
+
+    panel._apply_summary(
+        {
+            "flagged": 4,
+            "flagged_entries": {
+                1: "AI one",
+                2: "AI two",
+                3: "AI three",
+                4: "AI four",
+            },
+            "remaining": 4,
+        }
+    )
+    assert panel.stat_flagged.value_text.value == "3"
+    assert set(panel.result_inspector.normal_entries) == {2, 3, 4}
+
+    panel._reset_stats()
+    panel._apply_summary(first)
+    assert panel.stat_flagged.value_text.value == "2"
 
 
 def test_translate_panel_switches_kpis_between_normal_and_ai_repair_modes():

@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from translation_tool.core.lm_config_rules import value_fully_translated
+from translation_tool.core.lm_translator_shared_cache import cache_quality_issues
 from translation_tool.translation_db import (
     DbSettings,
     TranslationDB,
@@ -140,7 +141,11 @@ def split_db_hits(
     if ctx is None:
         return [], items
     hits, rest = split_items_by_db(
-        ctx.resolver, items, ctx.root, is_translated=value_fully_translated
+        ctx.resolver,
+        items,
+        ctx.root,
+        is_translated=value_fully_translated,
+        is_valid_hit=lambda item, text: not cache_quality_issues(item, text),
     )
     stats = ctx.resolver.stats
     log_info(

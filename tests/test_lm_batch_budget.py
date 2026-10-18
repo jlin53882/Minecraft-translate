@@ -56,6 +56,17 @@ def test_estimate_includes_json_wrapper_and_fixed_input():
     )
 
 
+def test_fixed_prompt_tokens_are_input_only():
+    tracker = BatchBudgetTracker("lang")
+    items = _items(2, "a" * 40)
+
+    without_prompt = tracker.estimate(items, CFG)
+    with_prompt = tracker.estimate(items, CFG, fixed_input_tokens=250)
+
+    assert with_prompt.input_tokens - without_prompt.input_tokens == pytest.approx(250)
+    assert with_prompt.output_tokens == pytest.approx(without_prompt.output_tokens)
+
+
 def test_profile_mapping():
     assert profile_for_cache_type("lang") == "lang"
     assert profile_for_cache_type("ftbquests") == "ftb"

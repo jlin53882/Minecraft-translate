@@ -96,6 +96,8 @@ class FormatDiffViewer:
         source_text: str,
         target_text: str,
         diff_result: FormatDiffResult | None = None,
+        *,
+        kind: str | None = None,
     ) -> FormatDiffResult:
         """Render current texts; stale results are discarded and recomputed."""
         result = diff_result
@@ -104,7 +106,7 @@ class FormatDiffViewer:
             or result.source_text != (source_text or "")
             or result.target_text != (target_text or "")
         ):
-            result = compare_format_diff(source_text, target_text)
+            result = compare_format_diff(source_text, target_text, kind=kind)
         self._result = result
         self.summary.value = "；".join(result.summary_lines)
         self.summary.color = C.GOLD if result.has_issues else C.EM

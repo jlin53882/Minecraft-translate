@@ -11,6 +11,7 @@ import logging
 import traceback
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from functools import partial
 from typing import Any
 
 from app.services_impl.logging_service import UI_LOG_HANDLER
@@ -24,14 +25,22 @@ from app.services_impl.pipelines._pipeline_logging import (
     mirror_session_log,
 )
 from app.tasks.task_session import add_log_unmirrored
-from app.views.moddb.formatting import token_issues
-from translation_tool.core.lm_translator_main import translate_batch_smart
+from translation_tool.core.lm_batch_planner import (
+    count_planned_batches,
+    group_items_by_batch_key,
+)
+from translation_tool.core.lm_moddb_context import attach_moddb_context
+from translation_tool.core.lm_translator_main import (
+    estimate_batch_fixed_input_tokens,
+    translate_batch_smart,
+)
 from translation_tool.core.lm_translator_shared_loop import _get_default_batch_size
 from translation_tool.core.lm_translator_skeleton import (
     TranslatorHooks,
     run_translator_skeleton,
 )
 from translation_tool.translation_db.models import WriteBackItem
+from translation_tool.translation_db.quality import translation_issues
 from translation_tool.translation_db.run_progress import (
     RunProgress,
     estimate_batches,
@@ -39,13 +48,14 @@ from translation_tool.translation_db.run_progress import (
     format_live,
     tick_live,
 )
-from translation_tool.translation_db.schema import KIND_LANG
+from translation_tool.translation_db.schema import cache_type_for_kind
 from translation_tool.utils.cache_manager import add_to_cache, save_translation_cache
 from translation_tool.utils.cancellation import (
     TaskCancelled,
     cancel_scope,
     is_cancelled,
 )
+from translation_tool.utils.config_manager import load_config
 
 # View 經由本模組取用進度格式化函式（View 不直接 import translation_tool 引擎）
 __all__ = [
@@ -54,6 +64,8 @@ __all__ = [
     "TranslateOptions",
     "TranslateReport",
     "estimate_batch_count",
+    "estimate_scope_batches",
+    "estimate_scope_plan",
     "format_duration",
     "format_live",
     "plan_batches",
@@ -103,6 +115,7 @@ class TranslateReport:
     # 特殊字元不一致而沒寫入的條目：條目 id → AI 回傳的譯文（畫面「檢視」用，預填給人工修正）
     flagged_entries: dict[int, str] = field(default_factory=dict)
     batches: int = 0  # 實際完成的批數
+    planned_batches: int = 0  # 開始時依相同 planner 估出的批數下界
     elapsed_sec: float = 0.0
 
     def as_dict(self) -> dict[str, Any]:
@@ -117,8 +130,18 @@ class TranslateReport:
             "dry_run": self.dry_run,
             "remaining": self.remaining,
             "batches": self.batches,
+            "planned_batches": self.planned_batches,
             "elapsed_sec": self.elapsed_sec,
         }
+
+
+def _update_remaining(report: TranslateReport) -> None:
+    """Keep the KPI scoped to this run and retain items that were not written.
+
+    Flagged results are processed but deliberately not written back, so
+    ``candidates - written`` includes both unprocessed and flagged items.
+    """
+    report.remaining = max(0, report.candidates - report.written)
 
 
 def build_items(
@@ -137,7 +160,13 @@ def build_items(
                 "path": key,
                 "text": en_us,
                 "source_text": en_us,
-                "cache_type": "lang" if kind == KIND_LANG else "patchouli",
+                # Guide (.md/.txt) keeps the Patchouli prompt flow but belongs
+                # to the md cache bucket; .txt is intentionally included.
+                "cache_type": cache_type_for_kind(kind),
+                # The shared loop uses this boundary to prevent cross-module or
+                # cross-kind payloads. Session state is attached later because
+                # build_items is also used by preview/tests without a TaskSession.
+                "_batch_group": (str(mod_id), str(kind)),
                 "_entry_id": eid,
                 "_kind": kind,
                 "_mod_id": mod_id,
@@ -147,19 +176,42 @@ def build_items(
 
 
 def plan_batches(
-    items: list[dict[str, Any]], *, check: Callable[[], None] | None = None
+    items: list[dict[str, Any]],
+    *,
+    check: Callable[[], None] | None = None,
+    lm_cfg: dict[str, Any] | None = None,
+    fixed_input_tokens_for_batch: Callable[[list[dict[str, Any]]], float] | None = None,
 ) -> int:
-    """依設定的每批筆數估計總批數（各類型分開算；遇錯縮小批次時實際會更多）。
+    """依實際 cache/profile、模組種類邊界與固定 prompt token 規劃批次。"""
+    if lm_cfg is None:
+        from translation_tool.utils.config_manager import load_config
 
-    ``check`` 若提供，會在處理每列前呼叫，供 deadline/cancel 檢查使用。
-    """
-    counts: dict[str, int] = {}
-    for item in items:
-        if check is not None:
-            check()
-        kind = str(item.get("cache_type") or "lang")
-        counts[kind] = counts.get(kind, 0) + 1
-    return estimate_batches(counts, lambda kind: _get_default_batch_size(kind, None))
+        config = load_config()
+        lm_cfg = config.get("lm_translator", {}) if isinstance(config, dict) else {}
+    fixed = fixed_input_tokens_for_batch
+    if fixed is None and lm_cfg.get("token_budget_enabled", True):
+        fixed = partial(estimate_batch_fixed_input_tokens, lm_cfg=lm_cfg)
+    return count_planned_batches(
+        items,
+        lm_cfg=lm_cfg,
+        batch_size_for_type=lambda cache_type: _get_default_batch_size(
+            cache_type, None
+        ),
+        fixed_input_tokens_for_batch=fixed,
+        check=check,
+    )
+
+
+def _attach_translation_sessions(
+    items: list[dict[str, Any]], *, operation_id: str, db, version: str | None = None
+) -> None:
+    """Attach one session/glossary to every kind belonging to the same module."""
+    attach_moddb_context(
+        items,
+        operation_id=operation_id,
+        mc_version=version,
+        reviewed_glossary_loader=db.reviewed_lang_glossary,
+    )
 
 
 def estimate_batch_count(total: int, cache_type: str = "lang") -> int:
@@ -169,6 +221,49 @@ def estimate_batch_count(total: int, cache_type: str = "lang") -> int:
     return estimate_batches(
         {cache_type: total}, lambda k: _get_default_batch_size(k, None)
     )
+
+
+def estimate_scope_plan(
+    db,
+    *,
+    version: str,
+    mod_ids: tuple[str, ...] | list[str] = (),
+    limit: int = 0,
+    reuse_other_versions: bool = True,
+) -> tuple[int, int]:
+    """Return the exact selected AI rows and their shared planned batch count."""
+    rows = db.untranslated_entries(
+        version,
+        list(mod_ids),
+        limit or None,
+        exclude_reusable=reuse_other_versions,
+    )
+    items = group_items_by_batch_key(build_items(rows))
+    _attach_translation_sessions(
+        items,
+        operation_id=f"count:{version}:{','.join(mod_ids)}",
+        db=db,
+        version=version,
+    )
+    return len(rows), plan_batches(items)
+
+
+def estimate_scope_batches(
+    db,
+    *,
+    version: str,
+    mod_ids: tuple[str, ...] | list[str] = (),
+    limit: int = 0,
+    reuse_other_versions: bool = True,
+) -> int:
+    """Return the planned batch count for the exact filtered AI rows."""
+    return estimate_scope_plan(
+        db,
+        version=version,
+        mod_ids=mod_ids,
+        limit=limit,
+        reuse_other_versions=reuse_other_versions,
+    )[1]
 
 
 def _log(session, text: str, level: str = "info") -> None:
@@ -193,7 +288,11 @@ def _select_rows(session, db, options: TranslateOptions, report: TranslateReport
         options.version, mods, options.limit or None, exclude_reusable=preview_reuse
     )
     report.candidates = len(rows)
-    report.remaining = db.count_untranslated(options.version, mods)
+    report.remaining = (
+        db.count_untranslated(options.version, mods)
+        if options.dry_run
+        else report.candidates
+    )
     if options.dry_run:
         if preview_reuse:
             report.reused = db.count_reusable(options.version, mods)
@@ -203,10 +302,18 @@ def _select_rows(session, db, options: TranslateOptions, report: TranslateReport
                 "開始機翻時會直接沿用（不呼叫 AI）；"
                 "只有「模組、鍵值、原文都相同」才算，原文不同的不會沿用",
             )
+        preview_items = group_items_by_batch_key(build_items(rows), check=None)
+        _attach_translation_sessions(
+            preview_items,
+            operation_id=f"preview:{getattr(session, 'id', '') or id(session)}",
+            db=db,
+            version=options.version,
+        )
+        report.planned_batches = plan_batches(preview_items)
         _log(
             session,
             f"🔎 預覽：{report.remaining:,} 筆未翻譯，本次將送 AI 翻譯 {len(rows):,} 筆"
-            f"，預估約 {plan_batches(build_items(rows)):,} 批（未呼叫 AI、未寫入；"
+            f"，預估約 {report.planned_batches:,} 批（未呼叫 AI、未寫入；"
             "實際時間依 API 速度而定，開始後每批結束會更新預估）",
         )
         for _eid, _kind, mod_id, key, en_us in rows[:5]:
@@ -259,6 +366,33 @@ def _log_db_failure(session, buffer, failures) -> None:
     )
 
 
+def _record_flagged_translation(
+    session,
+    report: TranslateReport,
+    item: dict[str, Any],
+    issues: list[str] | tuple[str, ...],
+) -> None:
+    """記錄格式不一致結果，供校對畫面保留 AI 譯文草稿。"""
+    report.flagged += 1
+    report.flagged_entries[item["_entry_id"]] = item["text"]
+    if len(report.flagged_samples) < _FLAGGED_LOG_LIMIT:
+        note = f"{item['_mod_id']} / {item['path']}：{'、'.join(issues)}"
+        report.flagged_samples.append(note)
+        _log(session, f"⚠️ 特殊字元不一致，未寫入：{note}", "warning")
+
+
+def _quality_issues_for_item(
+    item: dict[str, Any], source: str, text: str
+) -> list[str] | tuple[str, ...]:
+    """Normalize the shared quality rejection before Mod DB write-back."""
+    issues = item.get("_quality_issues") or translation_issues(
+        source, text, kind=item.get("_kind")
+    )
+    if item.get("_cache_rejected") and not issues:
+        return ("格式驗證失敗",)
+    return issues
+
+
 def _translate_rows(
     session, db, options: TranslateOptions, report: TranslateReport, rows, cancelled
 ) -> None:
@@ -275,14 +409,9 @@ def _translate_rows(
         failures["streak"] = 0
         report.translated += 1
         source, text = item["source_text"], item["text"]
-        issues = token_issues(source, text)
+        issues = _quality_issues_for_item(item, source, text)
         if issues:
-            report.flagged += 1
-            report.flagged_entries[item["_entry_id"]] = text
-            if len(report.flagged_samples) < _FLAGGED_LOG_LIMIT:
-                note = f"{item['_mod_id']} / {item['path']}：{'、'.join(issues)}"
-                report.flagged_samples.append(note)
-                _log(session, f"⚠️ 特殊字元不一致，未寫入：{note}", "warning")
+            _record_flagged_translation(session, report, item, issues)
             return
         buffer.append(
             WriteBackItem(item["_kind"], item["_mod_id"], item["path"], source, text)
@@ -297,7 +426,7 @@ def _translate_rows(
             _log(session, message)
         if tracker.update(round(progress * len(items))):
             _log(session, f"⏱ {tracker.line()}")
-        # 即時資料交給畫面（任務結束時會被最終摘要取代）
+        _update_remaining(report)
         session.set_summary({**report.as_dict(), "live": tracker.live()})
 
     def translate_batch(batch, batch_total):
@@ -307,20 +436,35 @@ def _translate_rows(
             raise TaskCancelled()
         return translate_batch_smart(batch, total=batch_total)
 
-    items = build_items(rows)
-    tracker = RunProgress(total=len(items), planned_batches=plan_batches(items))
+    items = group_items_by_batch_key(build_items(rows))
+    operation_id = str(getattr(session, "id", "") or id(session))
+    _attach_translation_sessions(
+        items, operation_id=operation_id, db=db, version=options.version
+    )
+    report.planned_batches = plan_batches(items)
+    tracker = RunProgress(total=len(items), planned_batches=report.planned_batches)
     _log(session, tracker.start_line())
     # 第一批結束前也先給畫面即時資料（已用時間從開始就會跳動）
     session.set_summary({**report.as_dict(), "live": tracker.live()})
+    lm_config = load_config()
+    lm_cfg = lm_config.get("lm_translator", {}) if isinstance(lm_config, dict) else {}
+    fixed_input_tokens_for_batch = (
+        estimate_batch_fixed_input_tokens
+        if isinstance(lm_cfg, dict) and lm_cfg.get("token_budget_enabled", True)
+        else None
+    )
     with cancel_scope(cancelled):
         result = run_translator_skeleton(
             items,
             total_for_smart=len(items),
             translate_batch_smart=translate_batch,
+            # Real provider requests are throttled by ModelQuotaRegistry.
+            sleep_seconds_between_batches=0.0,
             write_new_cache=options.new_cache_shard,
             reload_cache=options.write_cache,
             cache_add=add_to_cache if options.write_cache else _noop_cache,
             cache_save=save_translation_cache if options.write_cache else _noop_cache,
+            fixed_input_tokens_for_batch=fixed_input_tokens_for_batch,
             hooks=TranslatorHooks(
                 on_translated_item=on_translated_item,
                 on_batch_flushed=flush,
@@ -346,7 +490,7 @@ def _translate_rows(
             "已翻成功的部分已寫入資料庫。",
             "error",
         )
-    report.remaining = db.count_untranslated(options.version, list(options.mod_ids))
+    _update_remaining(report)
     _log(
         session,
         f"完成（狀態 {report.status}）：AI 回傳 {report.translated} 筆、"

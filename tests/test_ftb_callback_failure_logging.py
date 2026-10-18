@@ -65,6 +65,19 @@ def test_recorder_failure_is_logged_and_does_not_break_translation(
     assert any("記錄翻譯結果失敗" in w for w in warnings)
 
 
+def test_rejected_translation_keeps_source_and_skips_formal_record(tmp_path):
+    out_map: dict = {}
+    rec = _Rec()
+    cb = ftb._make_on_translated_item(
+        "a.json", tmp_path / "out" / "a.json", out_map, rec, tmp_path / "out"
+    )
+
+    cb({**_item(), "_cache_rejected": True})
+
+    assert out_map == {"quest.title": "Quest"}
+    assert rec.calls == 0
+
+
 def test_batch_flush_failure_falls_back_to_direct_write_and_logs(monkeypatch, tmp_path):
     warnings: list[str] = []
     monkeypatch.setattr(ftb, "log_warning", warnings.append)

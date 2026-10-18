@@ -710,7 +710,7 @@ def test_repair_batches_group_profiles_and_preview_reports_breakdown(
     assert preview.selected_count == 66
     assert preview.source == SRC_AI
     assert dict(preview.profile_counts) == {"lang": 60, "patchouli": 6}
-    assert preview.estimated_batches == 2
+    assert preview.estimated_batches == 6
     assert preview.entry_cache_types.count("lang") == 60
     assert preview.entry_cache_types.count("patchouli") == 6
 
@@ -726,8 +726,15 @@ def test_repair_batches_group_profiles_and_preview_reports_breakdown(
     )
     snap = _run(db_path, preview.entries, options=_options(write_cache=False))
 
-    assert calls == [(60, {"lang"}), (6, {"patchouli"})]
-    assert snap["summary"]["batches"] == 2
+    assert calls == [
+        (20, {"lang"}),
+        (2, {"patchouli"}),
+        (20, {"lang"}),
+        (3, {"patchouli"}),
+        (20, {"lang"}),
+        (1, {"patchouli"}),
+    ]
+    assert snap["summary"]["batches"] == 6
     assert snap["summary"]["updated"] == 66
     logs = "\n".join(entry.text for entry in snap["logs"])
     assert "找到 66 筆待處理來源項目" in logs
@@ -768,7 +775,7 @@ def test_retranslation_token_budget_still_caps_grouped_profile(
     )
     budget_calls = []
 
-    def token_budget(items, profile, preferred, lm_cfg):
+    def token_budget(items, profile, preferred, lm_cfg, *, fixed_input_tokens=0.0):
         budget_calls.append((len(items), profile, preferred, lm_cfg))
         return min(len(items), 25)
 
@@ -1725,7 +1732,7 @@ def test_repair_progress_replans_only_when_profile_budget_changes(monkeypatch):
     monkeypatch.setattr(
         moddb_retranslate_service,
         "select_batch_size",
-        lambda items, _profile, _cap, _cfg: min(len(items), selected_size),
+        lambda items, _profile, _cap, _cfg, **_kwargs: min(len(items), selected_size),
     )
     items = [{"cache_type": "lang"} for _ in range(130)]
     tracker = moddb_retranslate_service._RepairRunProgress(
@@ -1741,6 +1748,67 @@ def test_repair_progress_replans_only_when_profile_budget_changes(monkeypatch):
 
     assert live["profile_progress"]["lang"]["planned_remaining_batches"] == 3
     assert live["batch_est"] == 4
+
+
+def test_repair_progress_reuses_canonical_plan_between_live_updates(monkeypatch):
+    monkeypatch.setattr(
+        moddb_retranslate_service,
+        "_get_default_batch_size",
+        lambda _cache_type, _sizes: 64,
+    )
+    original_count = moddb_retranslate_service.count_planned_batches
+    count_calls = 0
+
+    def count_planned(*args, **kwargs):
+        nonlocal count_calls
+        count_calls += 1
+        return original_count(*args, **kwargs)
+
+    monkeypatch.setattr(
+        moddb_retranslate_service, "count_planned_batches", count_planned
+    )
+    tracker = moddb_retranslate_service._RepairRunProgress(
+        [{"cache_type": "lang"} for _ in range(130)],
+        total_candidates=130,
+        lm_cfg={"token_budget_enabled": False},
+    )
+    planned_calls = count_calls
+
+    tracker.live()
+    tracker.live()
+    assert count_calls == planned_calls
+
+    tracker.update("lang", count=64, elapsed=1)
+    after_update_calls = count_calls
+    tracker.live()
+    tracker.live()
+    assert count_calls == after_update_calls
+
+
+def test_repair_progress_live_uses_incremental_canonical_metadata(monkeypatch):
+    monkeypatch.setattr(
+        moddb_retranslate_service,
+        "_get_default_batch_size",
+        lambda _cache_type, _sizes: 64,
+    )
+
+    class CountingItem(dict):
+        reads = 0
+
+        def get(self, *args, **kwargs):
+            type(self).reads += 1
+            return super().get(*args, **kwargs)
+
+    items = [CountingItem(cache_type="lang") for _ in range(2_000)]
+    tracker = moddb_retranslate_service._RepairRunProgress(
+        items, total_candidates=len(items), lm_cfg={"token_budget_enabled": False}
+    )
+    CountingItem.reads = 0
+
+    tracker.live()
+    tracker.live()
+
+    assert CountingItem.reads == 0
 
 
 def test_batch_planner_checks_cancellation_while_scanning_profile(monkeypatch):

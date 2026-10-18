@@ -5,6 +5,8 @@
 
 from unittest.mock import patch
 
+import pytest
+
 
 class TestCacheRule:
     """測試 CacheRule 資料類別。"""
@@ -46,6 +48,22 @@ class TestCacheRule:
         key = rule.make_key(item)
 
         assert key == "test.path|Hello"
+
+
+def test_safe_output_text_falls_back_to_source_for_rejected_ai_candidate():
+    from translation_tool.core.lm_translator_shared_cache import safe_output_text
+
+    assert (
+        safe_output_text(
+            {
+                "source_text": "Use %s now",
+                "text": "現在使用",
+                "_cache_rejected": True,
+            }
+        )
+        == "Use %s now"
+    )
+    assert safe_output_text({"source_text": "Hello", "text": "你好"}) == "你好"
 
 
 class TestGetDefaultCacheRules:
@@ -117,6 +135,182 @@ class TestIsValidHit:
 
         # 空的 source_text 應該回傳 False
         assert _is_valid_hit("你好", entry, item) is False
+
+    def test_is_valid_hit_rejects_invalid_patchouli_structure(self):
+        """快取命中也必須通過 Patchouli 元件結構檢查。"""
+        from translation_tool.core.lm_translator_shared_cache import _is_valid_hit
+
+        source = '<ItemLink id="example:item" />\nText'
+        item = {
+            "cache_type": "patchouli",
+            "_kind": "patchouli",
+            "source_text": source,
+        }
+        entry = {"dst": "錯誤\nText"}
+
+        assert _is_valid_hit(entry["dst"], entry, item) is False
+
+    @pytest.mark.parametrize("cache_type", ["ftbquests", "kubejs"])
+    def test_is_valid_hit_rejects_missing_protected_tokens_for_plugins(
+        self, cache_type
+    ):
+        """非 Guide 類型也必須通過共用 token 品質閘門。"""
+        from translation_tool.core.lm_translator_shared_cache import _is_valid_hit
+
+        item = {
+            "cache_type": cache_type,
+            "source_text": "Use %s now",
+        }
+        entry = {"dst": "現在使用", "src": item["source_text"]}
+
+        assert _is_valid_hit(entry["dst"], entry, item) is False
+
+    @pytest.mark.parametrize("cache_type", ["ftbquests", "kubejs"])
+    def test_is_valid_hit_rejects_missing_rich_text_shield_placeholders(
+        self, cache_type
+    ):
+        """Shield 遺失時，即使還原後沒有可掃描 token 也不能命中快取。"""
+        from translation_tool.core.lm_translator_shared_cache import _is_valid_hit
+        from translation_tool.plugins.shared.rich_text_shield import shield_text
+
+        source = "&aUse #minecraft:stone now"
+        shielded = shield_text(source)
+        item = {
+            "cache_type": cache_type,
+            "source_text": source,
+            "text": shielded.clean,
+            "_shielded": shielded,
+        }
+        entry = {"dst": "現在使用", "src": source}
+
+        assert _is_valid_hit(entry["dst"], entry, item) is False
+
+    @pytest.mark.parametrize("cache_type", ["ftbquests", "kubejs"])
+    def test_is_valid_hit_accepts_canonical_unshielded_cache_value(self, cache_type):
+        """新快取保存正式文字時，仍驗證並保留 Rich Text 格式。"""
+        from translation_tool.core.lm_translator_shared_cache import _is_valid_hit
+        from translation_tool.plugins.shared.rich_text_shield import shield_text
+
+        source = "&aUse #minecraft:stone now"
+        shielded = shield_text(source)
+        item = {
+            "cache_type": cache_type,
+            "source_text": source,
+            "text": shielded.clean,
+            "_shielded": shielded,
+        }
+        entry = {"dst": "使用 &a#minecraft:stone now", "src": source}
+
+        assert _is_valid_hit(entry["dst"], entry, item) is True
+
+    def test_shared_quality_gate_allows_current_shield_reordering(self):
+        """當次 AI／Retry 回應可重排自然語序，但必須保留精確 Shield ID。"""
+        from translation_tool.core.lm_translator_shared_cache import (
+            cache_quality_issues,
+        )
+        from translation_tool.plugins.shared.rich_text_shield import shield_text
+
+        source = "Use #minecraft:stone then #minecraft:dirt"
+        shielded = shield_text(source)
+        first, second = [piece.placeholder for piece in shielded.shields]
+        translated = f"製作 {second} 需要 {first}。"
+        item = {
+            "cache_type": "ftbquests",
+            "source_text": source,
+            "text": shielded.clean,
+            "_shielded": shielded,
+        }
+
+        assert cache_quality_issues(item, translated) == []
+
+    def test_legacy_placeholder_cache_is_normalized_before_output(self):
+        """既有全域計數器 placeholder 快取仍可重用，不會寫出 $C/$P。"""
+        from translation_tool.core.lm_translator_shared_cache import (
+            _is_valid_hit,
+            fast_split_items_by_cache,
+            restore_cache_hit_text,
+        )
+        from translation_tool.plugins.shared.rich_text_shield import shield_text
+
+        source = "&aUse #minecraft:stone now"
+        shielded = shield_text(source)
+        item = {
+            "cache_type": "ftbquests",
+            "path": "quest.title",
+            "source_text": source,
+            "text": shielded.clean,
+            "_shielded": shielded,
+        }
+        legacy_entry = {"dst": "使用 $C0$ $P0$ now", "src": source}
+
+        assert _is_valid_hit(legacy_entry["dst"], legacy_entry, item) is True
+        cached, pending = fast_split_items_by_cache(
+            [item],
+            cache_provider=lambda _cache_type: {"quest.title|" + source: legacy_entry},
+        )
+
+        assert pending == []
+        assert len(cached) == 1
+        assert cached[0]["text"] == "使用 &a #minecraft:stone now"
+        assert restore_cache_hit_text(cached[0]) == "使用 &a #minecraft:stone now"
+
+    def test_cache_hit_uses_formal_text_for_each_new_shield_scan(self):
+        """不同掃描批次的 placeholder 不應影響正式快取命中。"""
+        from translation_tool.core.lm_translator_shared_cache import (
+            _is_valid_hit,
+            cache_storage_text,
+            fast_split_items_by_cache,
+        )
+        from translation_tool.plugins.shared.rich_text_shield import shield_text
+
+        source = "&aUse #minecraft:stone now"
+        first = shield_text(source)
+        first_item = {"text": first.clean.replace("Use", "使用"), "_shielded": first}
+        stored = cache_storage_text(first_item)
+
+        second = shield_text(source)
+        assert first.shields[0].placeholder != second.shields[0].placeholder
+        item = {
+            "cache_type": "ftbquests",
+            "path": "quest.title",
+            "source_text": source,
+            "text": second.clean,
+            "_shielded": second,
+        }
+        entry = {"dst": stored, "src": source}
+
+        assert _is_valid_hit(stored, entry, item) is True
+        cached, pending = fast_split_items_by_cache(
+            [item],
+            cache_provider=lambda _cache_type: {"quest.title|" + source: entry},
+        )
+
+        assert pending == []
+        assert cached[0]["text"] == "&a使用 #minecraft:stone now"
+
+    @pytest.mark.parametrize(
+        "legacy_dst",
+        [
+            "使用 $P999$ 與 $P999$",
+            "使用 $P9000$ 與 $P9001$",
+        ],
+    )
+    def test_ambiguous_legacy_placeholder_cache_is_a_miss(self, legacy_dst):
+        """舊快取缺少完整映射時必須重新翻譯，不可按位置猜測。"""
+        from translation_tool.core.lm_translator_shared_cache import _is_valid_hit
+        from translation_tool.plugins.shared.rich_text_shield import shield_text
+
+        source = "Use #minecraft:stone and #minecraft:dirt"
+        shielded = shield_text(source)
+        item = {
+            "cache_type": "ftbquests",
+            "source_text": source,
+            "text": shielded.clean,
+            "_shielded": shielded,
+        }
+        legacy_entry = {"dst": legacy_dst, "src": source}
+
+        assert _is_valid_hit(legacy_entry["dst"], legacy_entry, item) is False
 
 
 class TestFastSplitItemsByCache:

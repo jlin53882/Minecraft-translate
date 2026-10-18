@@ -27,6 +27,21 @@ KIND_PATCHOULI = "patchouli"
 KIND_GUIDE = "guide"  # 指南（.md／.txt 文字檔，依段落切成條目）
 KIND_ADVANCEMENT = "advancement"  # 進度的顯示文字（data/<模組>/advancement(s)/）
 
+# DB kind → translation cache bucket. The LM prompt is selected from this
+# bucket, so all producers of DB-backed translation items must use this map.
+_CACHE_TYPE_BY_KIND = {
+    KIND_LANG: KIND_LANG,
+    KIND_PATCHOULI: KIND_PATCHOULI,
+    KIND_GUIDE: "md",
+    KIND_ADVANCEMENT: KIND_PATCHOULI,
+}
+
+
+def cache_type_for_kind(kind: str | None) -> str:
+    """Return the shared translation cache bucket for a DB entry kind."""
+    return _CACHE_TYPE_BY_KIND.get(str(kind or ""), KIND_PATCHOULI)
+
+
 # 來源代碼（寫入資料庫後不可更動）
 SRC_AI = 0
 SRC_JAR_TW = 1
@@ -83,6 +98,8 @@ CREATE TABLE IF NOT EXISTS entry (
     UNIQUE (kind, mc_version, mod_id, key)
 );
 CREATE INDEX IF NOT EXISTS idx_entry_content ON entry (kind, mod_id, key, en_us);
+-- Mod DB 已審核術語候選依模組與版本快取；最終術語上限在 Python 衝突排除後套用。
+CREATE INDEX IF NOT EXISTS idx_entry_kind_mod_key ON entry (kind, mod_id, key);
 CREATE INDEX IF NOT EXISTS idx_entry_mod ON entry (mc_version, mod_id);
 CREATE INDEX IF NOT EXISTS idx_entry_list_order
     ON entry (mc_version, mod_id, kind, key, id);

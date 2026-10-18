@@ -36,7 +36,9 @@ def test_fast_split_items_by_cache_requires_src_match_for_lang(monkeypatch) -> N
     assert items_to_translate[0]["source_text"] == "Emerald"
 
 
-def test_fast_split_items_by_cache_uses_path_plus_source_for_patchouli(monkeypatch) -> None:
+def test_fast_split_items_by_cache_uses_path_plus_source_for_patchouli(
+    monkeypatch,
+) -> None:
     monkeypatch.setattr(shared_cache, "value_fully_translated", lambda value: True)
 
     def fake_get_cache_dict_ref(cache_type: str):
@@ -61,4 +63,30 @@ def test_fast_split_items_by_cache_uses_path_plus_source_for_patchouli(monkeypat
 
     assert len(cached_items) == 1
     assert cached_items[0]["text"] == "哈囉"
+    assert items_to_translate == []
+
+
+def test_md_guides_fall_back_to_legacy_patchouli_cache(monkeypatch) -> None:
+    monkeypatch.setattr(shared_cache, "value_fully_translated", lambda value: True)
+
+    def fake_get_cache_dict_ref(cache_type: str):
+        if cache_type == "patchouli":
+            return {"entry.text|Hello": {"src": "Hello", "dst": "??"}}
+        return {}
+
+    monkeypatch.setattr(shared_cache, "get_cache_dict_ref", fake_get_cache_dict_ref)
+
+    cached_items, items_to_translate = shared_cache.fast_split_items_by_cache(
+        [
+            {
+                "cache_type": "md",
+                "path": "entry.text",
+                "source_text": "Hello",
+                "text": "Hello",
+            }
+        ],
+        cache_fallbacks={"md": ("patchouli",)},
+    )
+
+    assert [item["text"] for item in cached_items] == ["??"]
     assert items_to_translate == []

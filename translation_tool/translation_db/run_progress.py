@@ -36,7 +36,7 @@ class RunProgress:
     """一次批次機翻的即時進度。"""
 
     total: int
-    planned_batches: int  # 開始前依設定估的批數
+    planned_batches: int  # 開始時依當下 prompt/session 狀態估出的批數下界
     started: float = field(
         default_factory=lambda: time.time()
     )  # 牆上時鐘：只用來算預計完成時刻
@@ -98,7 +98,7 @@ class RunProgress:
     def start_line(self) -> str:
         return (
             f"📦 共 {self.total:,} 筆，預估約 {self.planned_batches:,} 批"
-            "（依設定的每批筆數；遇到錯誤批次縮小時實際批數會增加，"
+            "（依開始時的每批筆數、提示詞與 session 狀態；session 歷史增長或遇到錯誤批次縮小時實際批數會增加，"
             "完成時間會在第一批結束後開始估算）"
         )
 

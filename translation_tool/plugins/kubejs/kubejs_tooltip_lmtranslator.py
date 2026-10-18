@@ -38,6 +38,7 @@ from translation_tool.core.lm_translator_shared import (
     make_progress_hook,
     prepare_translator_items,
     run_translator_skeleton,
+    safe_output_text,
     write_cache_hit_preview,  # ✅ 新增：cache hit preview 檔
     write_dry_run_preview,
 )
@@ -529,7 +530,8 @@ def translate_kubejs_pending_to_zh_tw(
             """處理翻譯結果。"""
             rel_src = it.get("file_rel")
             p = it.get("path")
-            t = it.get("text")
+            rejected = bool(it.get("_cache_rejected"))
+            t = safe_output_text(it)
             s = it.get("source_text")
 
             if not (isinstance(rel_src, str) and rel_src in file_states):
@@ -539,7 +541,7 @@ def translate_kubejs_pending_to_zh_tw(
 
             # ✅ Rich Text Shield：翻譯後還原被保護的格式片段
             shielded = it.get("_shielded")
-            if shielded is not None and shielded.shields:
+            if not rejected and shielded is not None and shielded.shields:
                 final_text = unshield_text(t, shielded.shields)
             else:
                 final_text = t
@@ -547,18 +549,19 @@ def translate_kubejs_pending_to_zh_tw(
             st = file_states[rel_src]
             st["out_map"][p] = final_text
 
-            try:
-                rec.record(
-                    cache_type="kubejs",
-                    file_id=rel_src,
-                    path=p,
-                    src=str(s or ""),
-                    dst=t,
-                    cache_hit=False,
-                    extra={"dst_file": st["dst"].relative_to(out_dir).as_posix()},
-                )
-            except Exception as e:  # noqa: BLE001 - 失敗已記錄，不中斷翻譯批次
-                log_warning(f"[KubeJS-LM] 記錄翻譯結果失敗: {e!r}")
+            if not rejected:
+                try:
+                    rec.record(
+                        cache_type="kubejs",
+                        file_id=rel_src,
+                        path=p,
+                        src=str(s or ""),
+                        dst=final_text,
+                        cache_hit=False,
+                        extra={"dst_file": st["dst"].relative_to(out_dir).as_posix()},
+                    )
+                except Exception as e:  # noqa: BLE001 - 失敗已記錄，不中斷翻譯批次
+                    log_warning(f"[KubeJS-LM] 記錄翻譯結果失敗: {e!r}")
 
             try:
                 touch.touch(st["file_id"])
@@ -587,6 +590,7 @@ def translate_kubejs_pending_to_zh_tw(
             translate_batch_smart=lambda batch, total: translate_batch_smart(
                 batch, total=total
             ),
+            sleep_seconds_between_batches=0.0,
             write_new_cache=bool(write_new_cache),
             cache_rules=cache_rules,
             hooks=TranslatorHooks(

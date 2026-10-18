@@ -68,11 +68,9 @@ from translation_tool.translation_db.quality import (
     format_tokens,
     matches_quality,
     quality_state,
-    repair_input_issues,
-    repair_input_issues_from_counts,
-    repair_output_issues,
-    token_issues,
+    repair_input_issues_for_kind,
     token_quality_comparison,
+    translation_issues,
     whitespace_note,
 )
 from translation_tool.translation_db.read_cache import READ_CACHE
@@ -82,6 +80,8 @@ from translation_tool.translation_db.schema import (
     DB_NEWER,
     DEFAULT_PRIORITY,
     KEEP_REVIEW_FLAG,
+    KIND_GUIDE,
+    KIND_PATCHOULI,
     SRC_AI,
     SRC_AI_REPAIR,
     SRC_JAR_CN,
@@ -99,6 +99,10 @@ from translation_tool.utils.cancellation import (
     raise_if_cancelled,
 )
 from translation_tool.utils.species_names import SPECIES_KEY_HINTS, TAXONOMIC_MARKERS
+from translation_tool.utils.text_matching import (
+    matching_terms,
+    term_canonical_key,
+)
 
 _ENTRY_COLS = "e.id, e.kind, e.mc_version, e.mod_id, e.key, e.en_us"
 _CHUNK = 400  # SQLite 變數上限相容的批次大小
@@ -940,7 +944,7 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
         if r[7] == SRC_MANUAL and review_status is None:
             review_status = "legacy_unknown"
         en_us, zh_tw = r[5] or "", r[6] or ""
-        quality, issues, whitespace = quality_state(en_us, zh_tw)
+        quality, issues, whitespace = quality_state(en_us, zh_tw, kind=r[1])
         return EntryRow(
             id=r[0],
             kind=r[1],
@@ -1490,7 +1494,9 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
                 f"{column} GLOB {_TOKEN_CHAR_GLOB_SQL} OR instr({column}, char(10)) > 0"
                 for column in ("e.en_us", "f.zh_tw")
             )
-            return f"{has_text} AND ({token_like})"
+            # Guide／Patchouli 的結構標記不一定含格式符號，所以整批列入候選
+            structured_kinds = f"('{KIND_GUIDE}', '{KIND_PATCHOULI}')"
+            return f"{has_text} AND (({token_like}) OR e.kind IN {structured_kinds})"
         return "1"
 
     def _quality_filtered_page(
@@ -1656,7 +1662,11 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
                 raise_if_cancelled()
                 for row in chunk:
                     if not matches_quality(
-                        row[5] or "", row[6] or "", criteria.quality, row[4]
+                        row[5] or "",
+                        row[6] or "",
+                        criteria.quality,
+                        row[4],
+                        kind=row[1],
                     ):
                         continue
                     total += 1
@@ -1808,7 +1818,11 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
                             "檢查品質條件", 0.05 + 0.4 * index / max(1, total)
                         )
                 if matches_quality(
-                    row[5] or "", row[6] or "", criteria.quality, row[4]
+                    row[5] or "",
+                    row[6] or "",
+                    criteria.quality,
+                    row[4],
+                    kind=row[1],
                 ):
                     filtered.append(row)
             rows = filtered
@@ -1836,7 +1850,7 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
         quality = criteria.quality
         source = self._query_source()
         narrow = (
-            f"SELECT e.id, e.en_us, f.zh_tw, e.key {source} "
+            f"SELECT e.id, e.en_us, f.zh_tw, e.key, e.kind {source} "
             f"WHERE ({cond}) AND "
             f"{self._quality_prefilter_sql(quality, self._quality_flags_ready(conn))}"
         )
@@ -1851,7 +1865,9 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
                 matched_ids.extend(
                     int(row[0])
                     for row in chunk
-                    if matches_quality(row[1] or "", row[2] or "", quality, row[3])
+                    if matches_quality(
+                        row[1] or "", row[2] or "", quality, row[3], kind=row[4]
+                    )
                 )
                 if progress_callback is not None:
                     progress_callback(f"檢查品質條件（已檢查 {scanned:,} 筆）", 0.05)
@@ -2100,9 +2116,11 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
 
         @lru_cache(maxsize=4096)
         def quality_comparison(
-            source: str, before: str, after: str
+            source: str, before: str, after: str, kind: str | None
         ) -> tuple[tuple[str, ...], tuple[str, ...], tuple[QualityIssueDelta, ...]]:
-            old, new, deltas = token_quality_comparison(source, before, after)
+            old, new, deltas = token_quality_comparison(
+                source, before, after, kind=kind
+            )
             return tuple(old), tuple(new), deltas
 
         def add_candidate(
@@ -2141,7 +2159,7 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
                 return
             source_text = row[5] or ""
             old_issues, new_issues, quality_deltas = quality_comparison(
-                source_text, old_text, new_text
+                source_text, old_text, new_text, row[1]
             )
             old_space = whitespace_note(old_text)
             new_space = whitespace_note(new_text)
@@ -3765,13 +3783,19 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
                 if live is None or live[0] != source_id:
                     # 預覽之後來源優先序（或審核）變了，這個來源已不是畫面上生效的那個
                     return AITranslationReplaceResult("skipped_changed")
-            eligible, _issues, _mixed = repair_input_issues(expected_en_us, current[0])
+            eligible, _issues, _mixed = repair_input_issues_for_kind(
+                expected_en_us, current[0], kind=expected_kind
+            )
             if not eligible:
                 return AITranslationReplaceResult("skipped_changed")
             # Automated repair must pass output checks; an explicit human review
             # accepts the reviewed draft while retaining the same source CAS.
-            output_issues = token_issues if strict_newline else repair_output_issues
-            if action == "quality_repair" and output_issues(expected_en_us, new_zh_tw):
+            if action == "quality_repair" and translation_issues(
+                expected_en_us,
+                new_zh_tw,
+                kind=expected_kind,
+                repair=not strict_newline,
+            ):
                 return AITranslationReplaceResult("skipped_changed")
             if new_zh_tw == current[0]:
                 return AITranslationReplaceResult("unchanged")
@@ -4042,7 +4066,7 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
             "e.mc_version=?",
             "e.en_us<>''",
             "t.zh_tw<>''",
-            f"({token_chars})",
+            f"(({token_chars}) OR e.kind IN ('{KIND_GUIDE}', '{KIND_PATCHOULI}'))",
         ]
         params: list = [version]
         if mod_ids:
@@ -4066,7 +4090,9 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
                         for row in rows:
                             if check is not None:
                                 check()
-                            if quality_state(row[4], row[5])[0] != "mismatch":
+                            if quality_state(row[4], row[5], kind=row[1])[0] != (
+                                "mismatch"
+                            ):
                                 continue
                             count += 1
                             if (
@@ -4093,8 +4119,8 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
 
         Rows shadowed by a higher-priority source are not what users see, so they
         are not repaired; newline skip facts ride along with each yielded row."""
-        # 兩邊都沒有任何格式字元（§ % $ { \ 換行）就不可能有 token，也就一定不是修復候選；
-        # 先在 SQL 排除，整個版本的譯文大多不必進 Python 逐列分析。
+        # 一般條目兩邊都沒有任何格式字元（§ % $ { \ 換行）就不可能有 token，
+        # 但 guide 還要保留純 Markdown 結構差異；其餘大量條目仍先在 SQL 排除。
         token_chars = " OR ".join(
             f"{column} GLOB {_TOKEN_CHAR_GLOB_SQL} OR instr({column}, char(10)) > 0"
             for column in ("e.en_us", "t.zh_tw")
@@ -4103,7 +4129,7 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
             "e.mc_version=?",
             "e.en_us<>''",
             "t.zh_tw<>''",
-            f"({token_chars})",
+            f"(({token_chars}) OR e.kind IN ('{KIND_GUIDE}', '{KIND_PATCHOULI}'))",
         ]
         params: list = [version]
         if mod_ids:
@@ -4124,8 +4150,8 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
                         check()
                     wanted, previous = format_tokens(row[4]), format_tokens(row[5])
                     newline_mismatch = wanted["\n"] != previous["\n"]
-                    eligible, _issues, mixed = repair_input_issues_from_counts(
-                        wanted, previous
+                    eligible, _issues, mixed = repair_input_issues_for_kind(
+                        row[4], row[5], kind=row[1]
                     )
                     if eligible:
                         yield (
@@ -4180,6 +4206,116 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
             "FROM entry e JOIN effective f ON f.entry_id = e.id WHERE e.mod_id = ?",
             (mod_id,),
         )
+
+    def _reviewed_lang_candidate_rows(
+        self, mod_id: str, mc_version: str | None
+    ) -> list[list[str]]:
+        """Load one module/version candidate snapshot for repeated glossary matches.
+
+        The snapshot is stored through ``_cached`` so the SQL scan is reused by
+        later translation tasks and invalidated by ``data_gen`` or the external
+        write sequence. Source matching remains in Python to preserve Unicode
+        ``casefold()`` semantics and to keep source-specific filtering out of the
+        reusable candidate snapshot.
+        """
+        clauses = [
+            "e.mod_id = ?",
+            "e.kind = 'lang'",
+            "f.review_status = 'reviewed'",
+            "e.en_us <> ''",
+            "f.zh_tw <> ''",
+            "e.en_us <> f.zh_tw",
+        ]
+        params: list[object] = [mod_id]
+        if mc_version:
+            clauses.append("e.mc_version = ?")
+            params.append(mc_version)
+        cache_key = "reviewed_lang_candidates:" + json.dumps(
+            [mod_id, mc_version], ensure_ascii=False, separators=(",", ":")
+        )
+
+        def load() -> list[list[str]]:
+            rows = self._q(
+                f"""
+                SELECT e.key, e.en_us, f.zh_tw
+                FROM entry e
+                JOIN effective f ON f.entry_id = e.id
+                WHERE {" AND ".join(clauses)}
+                ORDER BY e.key, e.id
+                """,
+                params,
+            )
+            return [
+                list(row)
+                for row in rows
+                if all(isinstance(value, str) for value in row)
+                and row[1].strip()
+                and row[2].strip()
+                and quality_state(row[1], row[2], kind="lang")[0] == "consistent"
+            ]
+
+        return self._cached(cache_key, load)
+
+    def reviewed_lang_glossary(
+        self,
+        mod_id: str,
+        mc_version: str | None = None,
+        source_texts: Sequence[str] | None = None,
+        *,
+        limit: int | None = 240,
+    ) -> list[dict[str, str]]:
+        """Return reviewed, quality-clean lang terms for one module.
+
+        This is a prompt reference only; it never becomes a translation source or
+        changes the effective database value. Keeping it module/version scoped and
+        limiting it to the current source set prevents unrelated terminology or
+        cross-version conflicts from contaminating a batch.
+        """
+        normalized_sources = tuple(
+            dict.fromkeys(
+                source
+                for source in source_texts or ()
+                if isinstance(source, str) and source.strip()
+            )
+        )
+        if limit is not None and int(limit) <= 0:
+            return []
+        if not normalized_sources:
+            return []
+
+        # 跨語言大小寫折疊由 Python ``casefold`` 負責；SQLite ``lower`` 只
+        # 保證 ASCII，不能拿來當 Unicode 的排除式預篩。候選集合依模組、
+        # 版本與資料世代快取，來源相關性仍由每次呼叫的 matcher 判斷。
+        rows = self._reviewed_lang_candidate_rows(mod_id, mc_version)
+        matched_sources = matching_terms(
+            normalized_sources, tuple(row[1] for row in rows)
+        )
+        matched_source_keys = {
+            term_canonical_key(matched) for matched in matched_sources
+        }
+        by_source: dict[str, list[dict[str, str]]] = {}
+        for key, en_us, zh_tw in rows:
+            if not (
+                isinstance(key, str)
+                and isinstance(en_us, str)
+                and isinstance(zh_tw, str)
+                and term_canonical_key(en_us) in matched_source_keys
+            ):
+                continue
+            by_source.setdefault(term_canonical_key(en_us), []).append(
+                {"key": key, "en_us": en_us, "zh_tw": zh_tw}
+            )
+
+        result: list[dict[str, str]] = []
+        for source in sorted(by_source):
+            candidates = by_source[source]
+            targets = {entry["zh_tw"] for entry in candidates}
+            if len(targets) != 1:
+                continue
+            result.append(candidates[0])
+            if limit is not None and len(result) >= max(0, int(limit)):
+                break
+        return result
 
     def load_mod_for_priority(
         self, mod_id: str, priority: tuple[int, ...]

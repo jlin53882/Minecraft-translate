@@ -153,6 +153,29 @@ def test_translation_input_payload_shape_is_unchanged(post):
     assert payload == {"items": [{"id": "0", "value": "Iron Ingot"}]}
 
 
+def test_conversation_history_is_sent_before_the_retry_user_turn(post):
+    payload = {"items": [{"id": "0", "value": "修復後原文"}]}
+    history = [
+        {
+            "role": "user",
+            "text": '{"items": [{"id": "0", "value": "原文"}]}',
+        },
+        {"role": "model", "text": '{"items": [{"id": "0", "value": "翻譯"}]}'},
+    ]
+
+    _call(post, payload=payload, conversation_history=history)
+
+    contents = post.call_args.kwargs["json"]["contents"]
+    assert contents == [
+        {"role": "user", "parts": [{"text": history[0]["text"]}]},
+        {"role": "model", "parts": [{"text": history[1]["text"]}]},
+        {
+            "role": "user",
+            "parts": [{"text": '{"items": [{"id": "0", "value": "修復後原文"}]}'}],
+        },
+    ]
+
+
 def test_dynamic_schema_is_fresh_for_each_batch(post):
     _call(post, payload={"items": [{"id": "a", "value": "A"}]})
     first_schema = _generation_config(post)["responseFormat"]["text"]["schema"]

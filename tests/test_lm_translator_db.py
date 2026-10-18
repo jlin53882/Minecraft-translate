@@ -145,6 +145,72 @@ def test_db_hit_then_cache_then_ai_and_output_is_correct(run_env, tmp_path):
     assert book["pages"][0]["text"] == "書本譯文"  # Patchouli 也走資料庫
 
 
+def test_rejected_ai_candidate_stays_source_in_directory_output_and_db(
+    run_env, tmp_path, monkeypatch
+):
+    inp, db_path, _seen, _ = run_env
+    _seed(db_path)
+
+    def rejected_ai(batch, total=None):
+        return [
+            {
+                **item,
+                "text": "現在使用" if item["path"] == "item.foo.ai" else item["text"],
+                "_cache_rejected": item["path"] == "item.foo.ai",
+            }
+            for item in batch
+        ], "DONE"
+
+    monkeypatch.setattr(lm_translator, "translate_batch_smart", rejected_ai)
+    out = _run(inp, tmp_path)
+
+    lang = json.loads(
+        (out / "assets" / "foo" / "lang" / "zh_tw.json").read_text(encoding="utf-8")
+    )
+    assert lang["item.foo.ai"] == "Needs Machine Translation"
+
+    db = TranslationDB(db_path)
+    assert (
+        db._one("SELECT 1 FROM entry WHERE mod_id='foo' AND key='item.foo.ai'") is None
+    )
+    db.close()
+
+
+def test_db_hit_with_invalid_patchouli_structure_returns_to_ai(tmp_path):
+    source = '<ItemLink id="example:item" />\nText'
+    db_path = tmp_path / "mod.db"
+    db = TranslationDB(db_path)
+    db.ingest(
+        "1.21.1",
+        [
+            ScanItem(
+                KIND_PATCHOULI,
+                "foo",
+                BOOK_KEY,
+                source,
+                "錯誤\nText",
+            )
+        ],
+    )
+    resolver = lm_translator_db.TranslationResolver(db, "1.21.1")
+    ctx = lm_translator_db.DirectoryDbContext(db, "1.21.1", resolver, None, tmp_path)
+    item = {
+        "db_ident": (KIND_PATCHOULI, "foo", BOOK_KEY),
+        "source_text": source,
+        "text": source,
+        "cache_type": "patchouli",
+        "_kind": KIND_PATCHOULI,
+    }
+
+    try:
+        hits, rest = lm_translator_db.split_db_hits(ctx, [item])
+    finally:
+        ctx.close()
+
+    assert hits == []
+    assert rest == [item]
+
+
 def test_explicit_database_snapshot_survives_global_path_change(run_env, tmp_path):
     """A/B 同版本譯文不同；任務啟動快照固定後，全域路徑改成 B 仍讀 A。"""
     inp, database_a, seen, settings = run_env

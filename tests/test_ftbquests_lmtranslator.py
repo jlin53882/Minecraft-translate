@@ -139,6 +139,21 @@ def test_ftb_dry_run_preview_items_can_drop_runtime_fields() -> None:
     assert sanitized[0]["text"] != sanitized[0]["source_text"]
 
 
+def test_ftb_cache_hit_restores_canonical_rich_text_before_output() -> None:
+    """FTB 快取命中不可把 Shield placeholder 寫進正式 JSON。"""
+    from translation_tool.plugins.shared.rich_text_shield import shield_text
+
+    source = "&aUse #minecraft:stone now"
+    shielded = shield_text(source)
+    item = {
+        "text": "&a使用 #minecraft:stone now",
+        "source_text": source,
+        "_shielded": shielded,
+    }
+
+    assert ftbquests_lmtranslator.restore_cache_hit_text(item) == item["text"]
+
+
 def test_ftb_callback_factories_bind_each_project_for_late_calls(
     tmp_path: Path,
 ) -> None:

@@ -815,7 +815,9 @@ class TestSystemPromptConversion:
         json_body = call_kwargs.get("json", {})
         system_instruction = json_body.get("systemInstruction", {})
         actual_prompt = system_instruction.get("parts", [{}])[0].get("text", "")
-        assert actual_prompt == prompt_text, "string 類型的 system_prompt 應保持不變"
+
+        assert actual_prompt.startswith(prompt_text + "\n")
+        assert "【格式契約（程式驗證的硬性規則）】" in actual_prompt
 
 
 class TestBatchProfileDetection:

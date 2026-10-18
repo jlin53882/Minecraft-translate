@@ -17,7 +17,7 @@ import json
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any
 
 from translation_tool.core.lm_config_rules import validate_api_keys
 from translation_tool.core.lm_translator_main import translate_batch_smart
@@ -36,6 +36,7 @@ from translation_tool.core.lm_translator_shared import (
 )
 from translation_tool.plugins.shared.lang_text_rules import is_already_zh
 from translation_tool.plugins.shared.rich_text_shield import shield_text, unshield_text
+from translation_tool.translation_db.schema import KIND_GUIDE
 from translation_tool.utils.log_unit import (
     get_formatted_duration,
     log_info,
@@ -48,20 +49,20 @@ from translation_tool.utils.log_unit import (
 # -------------------------
 
 
-def read_json(path: Path) -> Dict[str, Any]:
+def read_json(path: Path) -> dict[str, Any]:
     """讀取 JSON 檔案並回傳字典。"""
     with path.open("r", encoding="utf-8") as f:
         return json.load(f)
 
 
-def write_json(path: Path, data: Dict[str, Any]) -> None:
+def write_json(path: Path, data: dict[str, Any]) -> None:
     """寫入 JSON 檔案。"""
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
 
-def collect_pending_json_files(pending_root: Path) -> List[Path]:
+def collect_pending_json_files(pending_root: Path) -> list[Path]:
     """收集所有待翻譯的 JSON 檔案路徑。"""
     files = sorted(pending_root.rglob("*.json"))
     # 跳過 manifest
@@ -93,13 +94,13 @@ class PendingItem:
     end_line: int
 
 
-def load_pending_doc(path: Path) -> Tuple[Dict[str, Any], List[PendingItem]]:
+def load_pending_doc(path: Path) -> tuple[dict[str, Any], list[PendingItem]]:
     """載入待翻譯的 Markdown 文件。"""
     data = read_json(path)
     if data.get("schema") != "md_pending_blocks_v1":
         raise ValueError(f"schema 不符：{path}")
 
-    items: List[PendingItem] = []
+    items: list[PendingItem] = []
     for it in data.get("items", []):
         items.append(
             PendingItem(
@@ -128,8 +129,8 @@ def translate_md_pending(
     write_new_cache: bool = True,
     dry_run: bool = False,
     session=None,
-) -> Dict[str, Any]:
-    """ """
+) -> dict[str, Any]:
+    """Translate extracted Markdown blocks and write only quality-approved results."""
     validate_api_keys()
     start_time = time.perf_counter()
 
@@ -147,7 +148,7 @@ def translate_md_pending(
     # -------------------------
     # 1) 全域收集：hash -> 原文（去重基礎）
     # -------------------------
-    hash_to_src: Dict[str, str] = {}
+    hash_to_src: dict[str, str] = {}
     total_blocks = 0
     empty_blocks = 0
 
@@ -193,7 +194,7 @@ def translate_md_pending(
     # -------------------------
     cache_rules = {"md": CacheRule("path|source_text")}
 
-    all_unique_items: List[Dict[str, Any]] = []
+    all_unique_items: list[dict[str, Any]] = []
     already_zh_skipped = 0
     skip_skipped = 0
 
@@ -214,6 +215,7 @@ def translate_md_pending(
                     "source_text": src,
                     "text": src,
                     "_shielded": shielded,
+                    "_kind": KIND_GUIDE,
                     "_skip_reason": shielded.skip_reason,
                 }
             )
@@ -227,6 +229,7 @@ def translate_md_pending(
                 "source_text": src,
                 "text": shielded.clean,
                 "_shielded": shielded,
+                "_kind": KIND_GUIDE,
             }
         )
 
@@ -301,7 +304,7 @@ def translate_md_pending(
     # -------------------------
     # 3) 翻譯：建立 hash -> dst（先塞 cache hit，再跑 shared loop 補 miss）
     # -------------------------
-    hash_to_dst: Dict[str, str] = {}
+    hash_to_dst: dict[str, str] = {}
     for it in cached_items:
         h = str(it.get("path") or "")
         dst = str(it.get("text") or "")
@@ -313,7 +316,8 @@ def translate_md_pending(
                 except Exception as exc:  # noqa: BLE001 - 失敗已記錄，不中斷翻譯批次
                     # 還原失敗會讓輸出殘留保護標記，必須留下紀錄（#135）
                     log_warning(f"[MD-LM] 還原保護標記失敗 h={h}: {exc!r}")
-            hash_to_dst[h] = dst
+            if not it.get("_cache_rejected"):
+                hash_to_dst[h] = dst
 
     rec = TranslationRecorder()
     touch = TouchSet()
@@ -323,11 +327,14 @@ def translate_md_pending(
         """空寫入函數（MD 模式不需要即時寫入）。"""
         return
 
-    def on_translated_item(it: Dict[str, Any]) -> None:
+    def on_translated_item(it: dict[str, Any]) -> None:
         """處理翻譯結果。"""
         h = str(it.get("path") or "")
         dst = str(it.get("text") or "")
         src_text = str(it.get("source_text") or "")
+        if it.get("_cache_rejected"):
+            # 品質失敗只保留原文輸出；錯誤譯文不得進輸出 map 或快取。
+            dst = src_text
         if h and dst:
             shielded = it.get("_shielded")
             if shielded is not None and getattr(shielded, "shields", None):
@@ -375,6 +382,7 @@ def translate_md_pending(
             translate_batch_smart=lambda batch, total: translate_batch_smart(
                 batch, total=total
             ),
+            sleep_seconds_between_batches=0.0,
             write_new_cache=bool(
                 write_new_cache
             ),  # ✅ 這裡會走 add_to_cache('md') + save_translation_cache('md')
@@ -414,7 +422,7 @@ def translate_md_pending(
             log_warning(f"[MD-LM] 略過讀取失敗：{jp} ({e!r})")
             continue
 
-        out_items: List[Dict[str, Any]] = []
+        out_items: list[dict[str, Any]] = []
         for it in items:
             new_text = it.text
             if it.text.strip() and (not is_already_zh(it.text)):

@@ -299,6 +299,7 @@ def test_database_tab_refreshes_run_queries_in_worker_threads(db_path, monkeypat
         assert view.entries.total == 3
         assert view.scan._db_versions == {"1.21.1", "1.20.1"}
         assert "未翻譯" in view.translate.count_text.value
+        assert "預估約 1 批" in view.translate.count_text.value
         assert query_threads
         assert all(name != threading.current_thread().name for _, name in query_threads)
 
@@ -323,6 +324,23 @@ def test_database_tab_refreshes_run_queries_in_worker_threads(db_path, monkeypat
         assert page.operation_registry.wait_for_idle(timeout=2)
         if view._db is not None:
             view._db.close()
+
+
+def test_translate_count_uses_worker_selected_ai_rows_when_reuse_is_large(
+    db_path,
+):
+    seed(db_path)
+    view = moddb_view.ModDbView(mock_page(), mock_filepicker())
+    view.translate.limit_field.value = "2000"
+
+    view.translate._set_count_text(
+        10_000,
+        9_000,
+        planned_batches=3,
+        planned_items=2_000,
+    )
+
+    assert "本次送 AI 翻譯最多 2,000 筆" in view.translate.count_text.value
 
 
 def test_quality_filter_worker_owns_readonly_connection_and_does_not_block_select(
