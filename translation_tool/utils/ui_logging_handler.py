@@ -35,13 +35,7 @@ class UISessionLogHandler(logging.Handler):
         """初始化 UISessionLogHandler。"""
         super().__init__()
         self._sessions: dict[Any, Any] = {}  # 任務識別 -> session（依綁定順序）
-        self._latest: Any = None  # 最近綁定、尚未解除的 session
         self._registry_lock = threading.RLock()
-
-    @property
-    def _session(self) -> Any:
-        """目前「最近綁定的 session」（相容舊的單一 session 介面）。"""
-        return self._latest
 
     def set_session(self, session: Any) -> None:
         """綁定（或解除）TaskSession，並把目前 context（執行緒）歸屬到該任務。
@@ -58,7 +52,6 @@ class UISessionLogHandler(logging.Handler):
                 key = task_key(session)
                 self._sessions.pop(key, None)  # 重新綁定移到最後
                 self._sessions[key] = session
-                self._latest = session
                 set_current_task(key, getattr(session, "name", None))
                 return
             current = current_task()
@@ -70,14 +63,12 @@ class UISessionLogHandler(logging.Handler):
                 # ``is True``：替身（MagicMock）的屬性是真值物件，不能當成已結束。
                 if getattr(bound, "is_finished", False) is True:
                     del self._sessions[key]
-            self._latest = next(reversed(self._sessions.values()), None)
         set_current_task(None)
 
     def clear(self) -> None:
         """清掉所有綁定（測試用）。"""
         with self._registry_lock:
             self._sessions.clear()
-            self._latest = None
         set_current_task(None)
 
     def _target_session(self) -> Any:

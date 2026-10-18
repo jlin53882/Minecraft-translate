@@ -189,7 +189,7 @@ def test_unbinding_removes_only_the_current_task_without_implicit_fallback(
 
     assert _texts(b) == ["B 執行中"]
     assert _texts(a) == []
-    assert handler._session is a
+    assert a.task_id in handler._sessions
 
 
 def test_unbinding_from_a_taskless_thread_only_prunes_finished_sessions(routed):
@@ -206,7 +206,6 @@ def test_unbinding_from_a_taskless_thread_only_prunes_finished_sessions(routed):
 
     assert running.task_id in handler._sessions
     assert finished.task_id not in handler._sessions
-    assert handler._session is running
 
 
 def test_mirrored_records_are_still_skipped(routed):

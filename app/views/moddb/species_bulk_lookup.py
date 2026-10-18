@@ -32,6 +32,7 @@ from app.tasks.task_session import TaskSession, tag_session
 from app.ui.design import C
 from app.ui.snack import show_snack
 from translation_tool.utils.log_unit import log_exception, log_warning
+from translation_tool.utils.ui_mirror import session_task_scope
 
 TASK_NAME = "學名批次查詢"
 # 連續幾筆失敗（非「查無」）就停止，避免離線時逐筆等待逾時。
@@ -254,7 +255,9 @@ class SpeciesBulkLookup:
                     stop_reason = "failures"
                     break
         except Exception:  # noqa: BLE001 - worker boundary
-            log_exception(f"{TASK_NAME}失敗")
+            # 此工作執行緒沒有任務歸屬；邊界上重新歸屬，完整堆疊才進自己的任務畫面
+            with session_task_scope(session):
+                log_exception(f"{TASK_NAME}失敗")
             stop_reason = "error"
             session.set_error()
         message = summary_text(STOP_MESSAGES[stop_reason], lookups)
