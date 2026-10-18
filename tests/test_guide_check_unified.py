@@ -227,20 +227,9 @@ def test_quality_retry_detects_missing_shield_placeholders_before_unshielding():
     )
 
 
-def _swap_shield_placeholders(shielded):
-    placeholders = SHIELD_PLACEHOLDER_PATTERN.findall(shielded.clean)
-    first, second = placeholders[:2]
-    return (
-        shielded.clean.replace(first, "__SWAP_SENTINEL__", 1)
-        .replace(second, first, 1)
-        .replace("__SWAP_SENTINEL__", second, 1)
-    )
-
-
 @pytest.mark.parametrize(
     "translated_builder",
     [
-        _swap_shield_placeholders,
         lambda shielded: shielded.clean.replace(
             shielded.shields[0].placeholder, shielded.shields[1].placeholder
         ),
@@ -250,7 +239,7 @@ def _swap_shield_placeholders(shielded):
     ],
 )
 def test_quality_retry_rejects_shield_identity_changes(translated_builder):
-    """目前 AI 回應不可用位置重配掩蓋 Shield 身分變更。"""
+    """目前 AI 回應不可遺失、重複或新增 Shield 身分。"""
     source = "Use #minecraft:stone then #minecraft:dirt"
     shielded = shield_text(source)
     item = {
@@ -265,3 +254,21 @@ def test_quality_retry_rejects_shield_identity_changes(translated_builder):
 
     assert issues
     assert any("保護格式" in issue or "placeholder" in issue for issue in issues)
+
+
+def test_quality_retry_allows_exact_shield_ids_in_natural_language_order():
+    """合法中文語序可以重排，但每個 Shield ID 必須完整保留。"""
+    source = "You need #minecraft:stone to craft #minecraft:dirt."
+    shielded = shield_text(source)
+    first, second = SHIELD_PLACEHOLDER_PATTERN.findall(shielded.clean)
+    item = {
+        "path": "blocks[0]",
+        "text": shielded.clean,
+        "source_text": source,
+        "_shielded": shielded,
+        "db_ident": (KIND_GUIDE, "foo", "crafting.md#0"),
+    }
+
+    translated = f"製作 {second} 需要 {first}。"
+
+    assert quality_issues(item, translated) == []

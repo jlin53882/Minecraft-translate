@@ -159,12 +159,6 @@ def shield_placeholder_issues(
         if placeholder not in expected:
             issues.append(f"多了 {actual_count} 個未知保護格式佔位符「{placeholder}」")
 
-    if actual == expected and actual_sequence != expected_sequence:
-        issues.append(
-            "保護格式佔位符順序或身分不一致"
-            f"（預期：{'、'.join(expected_sequence)}；"
-            f"實際：{'、'.join(actual_sequence)}）"
-        )
     return issues
 
 
@@ -176,7 +170,8 @@ def normalize_cached_shield_text(
 
     新快取保存還原後的正式文字，因此沒有 placeholder 時直接回傳；舊快取
     仍可能保存全域計數器產生的 ``$C0$``／``$P1$``，則依類別與原文位置
-    重新對應目前 placeholder，避免既有快取因掃描時機不同而失效。
+    重新對應目前 placeholder。只有每個類別最多一個片段時才可安全對齊；
+    同類型有多個片段但沒有完整映射時，直接保留原值讓快取閘門判定 miss。
     """
     if not isinstance(clean_translated, str):
         return str(clean_translated or "")
@@ -184,6 +179,10 @@ def normalize_cached_shield_text(
     actual = SHIELD_PLACEHOLDER_PATTERN.findall(clean_translated)
     expected = _ordered_placeholders(shielded_or_pieces)
     if not actual or not expected:
+        return clean_translated
+
+    # 完全相同的目前 ID 已經證明身分，不需要走 legacy 位置對齊。
+    if actual == expected:
         return clean_translated
 
     expected_by_kind: dict[str, list[str]] = {"C": [], "P": [], "E": []}
@@ -199,6 +198,11 @@ def normalize_cached_shield_text(
     ) or any(
         actual_by_kind[kind] for kind in set(actual_by_kind) - set(expected_by_kind)
     ):
+        return clean_translated
+
+    # 舊快取沒有保存 placeholder 與原始片段的完整映射；同類型出現多個
+    # 片段時，依位置重配可能把兩個不同物品對調，因此不可猜測。
+    if any(len(values) > 1 for values in expected_by_kind.values()):
         return clean_translated
 
     # 舊快取只保留暫時 ID，必須先確認每個同類型 ID 都唯一，才可以
@@ -429,7 +433,7 @@ def inspect_shielded_translation(
 
     快取的新契約保存已還原文字；舊契約可能保存與當次掃描計數器不同的
     placeholder。只有快取讀取路徑可以明確開啟 legacy 相容轉換；AI 回應
-    預設直接進行精確 ID、數量與順序檢查，最後還原成正式文字，讓快取閘門、
+    預設直接進行精確 ID 集合與數量檢查，最後還原成正式文字，讓快取閘門、
     AI retry 與輸出 callback 使用同一套驗證結果。
     """
     if not isinstance(translated_text, str):
