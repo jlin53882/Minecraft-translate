@@ -269,5 +269,31 @@ def test_finish_log_marks_done_with_warnings_from_summary(monkeypatch):
     session.finish()
 
     assert session.status == "DONE"
-    assert "DONE（DONE_WITH_WARNINGS）" in lifecycle[0][0]
+    assert "DONE（完成但有警告）" in lifecycle[0][0]
     assert lifecycle[0][1] == "warning"
+
+
+def test_finish_log_summary_is_chinese_and_skips_nested_details(monkeypatch):
+    session = TaskSession()
+    session.start()
+    lifecycle = []
+    monkeypatch.setattr(
+        session, "_log_lifecycle", lambda text, level="info": lifecycle.append(text)
+    )
+    session.set_summary(
+        {
+            "candidates": 2000,
+            "written": 254,
+            "flagged_entries": {1: "x"},
+            "status": "CANCELLED",
+            "dry_run": False,
+            "elapsed_sec": 53.625,
+        }
+    )
+    session.finish()
+
+    text = lifecycle[0]
+    assert text.startswith("任務結束：DONE（已取消），耗時")
+    assert "\n  摘要：候選 2000｜已寫入資料庫 254｜" in text
+    assert "狀態 CANCELLED（已取消）" in text and "僅預覽 否" in text
+    assert "耗時（秒） 53.6" in text and "flagged_entries" not in text

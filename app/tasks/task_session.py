@@ -109,20 +109,70 @@ class TaskSessionAdmissionError(RuntimeError):
     """Raised when shutdown has closed admission before a session can start."""
 
 
-def _summary_brief(summary) -> str:
-    """摘要過長時的精簡版：只留數字與狀態等單值，巢狀明細（清單、字典）不印。"""
+_STATUS_LABELS = {
+    "DONE": "完成",
+    "ERROR": "失敗",
+    "DONE_WITH_WARNINGS": "完成但有警告",
+    "CANCELLED": "已取消",
+    "ABORTED": "已中止",
+    "FAILED": "失敗",
+    "ALL_KEYS_EXHAUSTED": "API Key 全數耗盡",
+}
+
+_SUMMARY_LABELS = {
+    "status": "狀態",
+    "candidates": "候選",
+    "reused": "沿用其他版本",
+    "translated": "AI 已回傳",
+    "written": "已寫入資料庫",
+    "flagged": "特殊字元不一致",
+    "dry_run": "僅預覽",
+    "remaining": "仍未翻譯",
+    "batches": "已完成批數",
+    "planned_batches": "預估批數",
+    "elapsed_sec": "耗時（秒）",
+    "ai_response": "AI 回傳",
+    "quality_rejected": "品質拒絕",
+    "source_fallback": "回填原文",
+    "cache_written": "寫入快取",
+    "db_written": "寫入資料庫",
+    "untranslated": "未翻譯",
+    "max_tokens_items": "MAX_TOKENS",
+    "contract_failed_items": "回應格式錯誤",
+    "oversized_items": "單筆超限",
+    "quality_retry_candidates": "品質重試候選",
+    "quality_retry_fixed": "品質重試已修正",
+    "quality_retry_unresolved": "品質重試未解決",
+    "quality_retry_quota_failed": "品質重試配額失敗",
+    "quota_failed_items": "配額失敗",
+    "replace_rule_conflicts": "替換規則衝突",
+}
+
+
+def _status_label(status) -> str:
+    return f"{status}（{_STATUS_LABELS.get(str(status), str(status))}）"
+
+
+def _format_summary(summary) -> str:
+    """把任務摘要排成中文的「名稱 值」清單；巢狀明細（清單、字典）與空值不印。"""
     if not summary:
         return ""
     if not isinstance(summary, dict):
         return str(summary)
     parts = []
     for key, value in summary.items():
-        if isinstance(value, bool) or value is None:
-            parts.append(f"{key}={value}")
+        if value is None or isinstance(value, (dict, list, tuple, set)):
+            continue
+        label = _SUMMARY_LABELS.get(key, key)
+        if key == "status":
+            text = _status_label(value)
+        elif isinstance(value, bool):
+            text = "是" if value else "否"
         elif isinstance(value, float):
-            parts.append(f"{key}={value:.1f}")
-        elif isinstance(value, (int, str)):
-            parts.append(f"{key}={value}")
+            text = f"{value:.1f}"
+        else:
+            text = str(value)
+        parts.append(f"{label} {text}")
     return "｜".join(parts)
 
 
@@ -310,19 +360,20 @@ class TaskSession:
             # 狀態仍照上面更新（set_error 之後的第二次 finish 要維持 ERROR），
             # 但後台的「任務結束」紀錄與觀察者通知只送一次。
             return
-        elapsed = f"，耗時 {time.monotonic() - started:.1f}s" if started else ""
-        summary_text = str(summary) if summary else ""
-        if len(summary_text) > 500:
-            # 過長時改印只含單值欄位的精簡版，避免整串字典被截斷在中間
-            summary_text = _summary_brief(summary)
-        if len(summary_text) > 500:
-            summary_text = summary_text[:500] + "…（已截斷）"
-        extra = f"，摘要：{summary_text}" if summary_text else ""
+        elapsed = f"，耗時 {time.monotonic() - started:.1f} 秒" if started else ""
+        summary_text = _format_summary(summary)
+        if len(summary_text) > 1000:
+            summary_text = summary_text[:1000] + "…（已截斷）"
+        extra = f"\n  摘要：{summary_text}" if summary_text else ""
         # session.status 維持 DONE／ERROR 兩態（多個頁面依此判斷結束）；服務層若在摘要
         # 標了 DONE_WITH_WARNINGS／CANCELLED 等，後台結束紀錄要一併標出，避免互相矛盾。
         summary_status = summary.get("status") if isinstance(summary, dict) else None
         warned = status == "DONE" and summary_status not in (None, "DONE")
-        status_text = f"{status}（{summary_status}）" if warned else status
+        status_text = (
+            f"{status}（{_STATUS_LABELS.get(str(summary_status), summary_status)}）"
+            if warned
+            else _status_label(status)
+        )
         self._log_lifecycle(
             f"任務結束：{status_text}{elapsed}，畫面日誌 {log_count} 筆{extra}",
             "error" if status == "ERROR" else "warning" if warned else "info",
