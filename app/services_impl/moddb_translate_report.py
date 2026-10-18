@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import csv
 import json
+import os
 import re
 from collections import Counter
 from datetime import UTC, datetime
@@ -166,11 +167,21 @@ def write_quality_report(
     day_dir.mkdir(parents=True, exist_ok=True)
     report = build_quality_report(task_id, records)
     json_path = day_dir / f"quality-issues-{task_id}.json"
-    json_path.write_text(
-        json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
+    csv_path = json_path.with_suffix(".csv")
     flat = [item for group in report["批次"] for item in group["項目"]]
-    _write_csv(json_path.with_suffix(".csv"), flat)
+    json_tmp = json_path.with_name(json_path.name + ".tmp")
+    csv_tmp = csv_path.with_name(csv_path.name + ".tmp")
+    try:
+        json_tmp.write_text(
+            json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        _write_csv(csv_tmp, flat)
+        # 兩個暫存檔都寫成功才換上正式檔，避免留下 JSON／CSV 不一致的組合
+        os.replace(json_tmp, json_path)
+        os.replace(csv_tmp, csv_path)
+    finally:
+        json_tmp.unlink(missing_ok=True)
+        csv_tmp.unlink(missing_ok=True)
     return json_path
 
 
@@ -178,10 +189,10 @@ def write_replace_rule_conflicts(
     day_dir: Path, conflicts: list[dict[str, Any]]
 ) -> Path | None:
     """每天只維護一份衝突明細；內容沒變就不重寫。規則檔本身不會被修改。"""
-    if not conflicts:
-        return None
-    day_dir.mkdir(parents=True, exist_ok=True)
     path = day_dir / "replace-rule-conflicts.json"
+    if not conflicts and not path.exists():
+        return None  # 沒有衝突也沒有舊報告：不必建立檔案
+    day_dir.mkdir(parents=True, exist_ok=True)
     payload = {
         "說明": {
             "用途": "替換規則中「輸出內容包含來源詞」的衝突明細，只做偵測，"
@@ -199,7 +210,12 @@ def write_replace_rule_conflicts(
     text = json.dumps(payload, ensure_ascii=False, indent=2)
     if path.exists() and path.read_text(encoding="utf-8") == text:
         return path
-    path.write_text(text, encoding="utf-8")
+    tmp = path.with_name(path.name + ".tmp")
+    try:
+        tmp.write_text(text, encoding="utf-8")
+        os.replace(tmp, path)
+    finally:
+        tmp.unlink(missing_ok=True)
     return path
 
 

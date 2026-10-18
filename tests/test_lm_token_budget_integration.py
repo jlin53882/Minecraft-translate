@@ -617,7 +617,21 @@ def test_fixed_input_over_budget_is_not_an_oversized_item():
     }
     item = {"path": "p", "text": "short", "source_text": "short"}
 
-    assert is_item_oversized(item, "lang", cfg, fixed_input_tokens=5000) is False
-    assert is_item_oversized(
-        {**item, "text": "x" * 20000}, "lang", cfg, fixed_input_tokens=0
-    )
+    assert is_item_oversized(item, "lang", cfg) is False
+    assert is_item_oversized({**item, "text": "x" * 20000}, "lang", cfg)
+
+
+def test_learned_output_scale_does_not_make_normal_items_oversized():
+    from translation_tool.core.lm_batch_budget import get_tracker, is_item_oversized
+
+    cfg = {
+        "token_budget_enabled": True,
+        "max_input_token_budget": 100000,
+        "max_output_token_budget": 1000,
+    }
+    item = {"path": "p", "text": "a short line", "source_text": "a short line"}
+    tracker = get_tracker("lang")
+    for _ in range(20):
+        tracker.on_truncated("MAX_TOKENS")
+
+    assert is_item_oversized(item, "lang", cfg) is False

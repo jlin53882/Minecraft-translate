@@ -51,8 +51,11 @@ def fake_cache(monkeypatch):
     added: list[tuple] = []
     monkeypatch.setattr(
         moddb_translate_service,
-        "add_to_cache",
-        lambda ctype, key, src, dst, **kw: added.append((ctype, key, src, dst)) or True,
+        "add_to_cache_with_receipt",
+        lambda ctype, key, src, dst, **kw: (
+            added.append((ctype, key, src, dst))
+            or SimpleNamespace(accepted=True, changed=True)
+        ),
     )
     monkeypatch.setattr(
         moddb_translate_service, "save_translation_cache", lambda *a, **k: True
@@ -2756,7 +2759,7 @@ def test_replace_rule_conflict_file_is_one_per_day_and_not_rewritten(tmp_path):
     second = report_mod.write_replace_rule_conflicts(tmp_path, conflicts)
 
     assert first == second and second.stat().st_mtime_ns == stamp
-    assert report_mod.write_replace_rule_conflicts(tmp_path, []) is None
+    assert report_mod.write_replace_rule_conflicts(tmp_path / "empty", []) is None
 
 
 def test_backend_summary_is_multiline_chinese():
@@ -2911,3 +2914,58 @@ def test_settle_report_upgrades_done_to_done_with_warnings(monkeypatch):
     )
 
     assert report.status == "DONE_WITH_WARNINGS"
+
+
+def test_replace_rule_conflict_report_is_refreshed_when_conflicts_clear(tmp_path):
+    from app.services_impl import moddb_translate_report as report_mod
+
+    conflict = {
+        "source_index": 0,
+        "source": "a",
+        "destination_index": 1,
+        "destination": "ab",
+    }
+    path = report_mod.write_replace_rule_conflicts(tmp_path, [conflict])
+    assert json.loads(path.read_text(encoding="utf-8"))["數量"] == 1
+
+    path = report_mod.write_replace_rule_conflicts(tmp_path, [])
+
+    assert json.loads(path.read_text(encoding="utf-8"))["數量"] == 0
+    assert report_mod.write_replace_rule_conflicts(tmp_path / "none", []) is None
+
+
+def test_quality_report_leaves_no_partial_files_when_csv_fails(tmp_path, monkeypatch):
+    from app.services_impl import moddb_translate_report as report_mod
+
+    def broken_csv(path, items):
+        path.write_text("partial", encoding="utf-8")
+        raise OSError("disk full")
+
+    monkeypatch.setattr(report_mod, "_write_csv", broken_csv)
+    record = {
+        "batch": 1,
+        "kind": "lang",
+        "mod_id": "m",
+        "key": "k",
+        "issues": ["x"],
+        "source_text": "s",
+        "translated_text": "t",
+    }
+
+    with pytest.raises(OSError):
+        report_mod.write_quality_report(tmp_path, "task", [record])
+
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_report_directory_config_failure_does_not_fail_the_task(monkeypatch):
+    def broken():
+        raise AttributeError("config unavailable")
+
+    monkeypatch.setattr(moddb_translate_service, "_report_day_dir", broken)
+    monkeypatch.setattr(moddb_translate_service, "load_config", broken)
+    report = moddb_translate_service.TranslateReport()
+    report.replace_rule_conflict_details = []
+
+    moddb_translate_service._write_quality_issue_file(TaskSession(), report)
+    assert moddb_translate_service._collect_replace_rule_conflicts() == []

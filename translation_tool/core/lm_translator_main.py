@@ -1301,6 +1301,24 @@ def _note_contract_error(
     )
 
 
+def _truncation_fallback_reason(
+    runtime: _BatchRuntime, round_data: _BatchRound, finish_reason: str | None
+) -> str:
+    """JSON 不完整時的回填原因：只有供應商回報 MAX_TOKENS 才算 token 不足。
+
+    模型正常結束（STOP）或沒有 finish_reason，JSON 卻不完整，屬於回應格式問題，
+    記為契約錯誤，後台統計才不會把它誤報成 token 不足。
+    """
+    if finish_reason == "MAX_TOKENS":
+        return "max_tokens"
+    detail = f"incomplete JSON (finish_reason={finish_reason})"
+    contract_errors = getattr(runtime, "contract_errors", None)
+    if isinstance(contract_errors, list):
+        contract_errors.append(detail)
+    _note_contract_error(runtime, round_data, detail)
+    return "response_contract"
+
+
 def _note_contract_progress(runtime: _BatchRuntime, basis: int, new_size: int) -> None:
     """Record how a contract failure was handled: shrunk, or given up (source kept)."""
     if getattr(runtime, "pending_contract_event", None) is None:
@@ -2134,7 +2152,9 @@ def _attempt_batch(
                 return _BatchRoundOutcome(
                     BatchAction.SHRINK_BATCH,
                     learned_budget=True,
-                    fallback_reason="max_tokens",
+                    fallback_reason=_truncation_fallback_reason(
+                        runtime, round_data, finish_reason
+                    ),
                 )
 
             result, missing = _merge_batch_response(

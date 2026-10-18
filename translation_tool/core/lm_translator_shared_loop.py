@@ -230,11 +230,6 @@ def translate_items_with_cache_loop(
             select_size=select_batch_size,
         )
 
-        fixed_input_tokens = (
-            fixed_input_tokens_for_batch(batch)
-            if fixed_input_tokens_for_batch is not None
-            else 0.0
-        )
         # 單筆超限直接回填的政策只屬於 Mod DB（有 _batch_group）；其他管線維持原行為。
         oversized = (
             len(batch) == 1
@@ -243,7 +238,6 @@ def translate_items_with_cache_loop(
                 batch[0],
                 profile_for_cache_type(cache_type),
                 _lm_config(),
-                fixed_input_tokens=fixed_input_tokens,
             )
         )
         if oversized:

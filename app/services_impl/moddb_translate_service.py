@@ -57,7 +57,10 @@ from translation_tool.translation_db.run_progress import (
     tick_live,
 )
 from translation_tool.translation_db.schema import cache_type_for_kind
-from translation_tool.utils.cache_manager import add_to_cache, save_translation_cache
+from translation_tool.utils.cache_manager import (
+    add_to_cache_with_receipt,
+    save_translation_cache,
+)
 from translation_tool.utils.cancellation import (
     TaskCancelled,
     cancel_scope,
@@ -395,13 +398,12 @@ def _report_day_dir() -> Path:
 
 def _write_quality_issue_file(session, report: TranslateReport) -> None:
     """寫出品質問題清單（JSON＋CSV）與替換規則衝突明細；畫面只保留數量。"""
-    day_dir = _report_day_dir()
     try:
-        if report.replace_rule_conflict_details:
-            path = write_replace_rule_conflicts(
-                day_dir, report.replace_rule_conflict_details
-            )
-            report.replace_rule_conflicts_file = str(path) if path else None
+        day_dir = _report_day_dir()
+        path = write_replace_rule_conflicts(
+            day_dir, report.replace_rule_conflict_details
+        )
+        report.replace_rule_conflicts_file = str(path) if path else None
         if report.quality_issue_records:
             raw_task_id = str(
                 getattr(session, "task_id", None)
@@ -411,20 +413,20 @@ def _write_quality_issue_file(session, report: TranslateReport) -> None:
             report.quality_issues_file = str(
                 write_quality_report(day_dir, raw_task_id, report.quality_issue_records)
             )
-    except (OSError, TypeError, ValueError) as exc:
+    except (OSError, TypeError, ValueError, AttributeError) as exc:
         _log_backend(f"後台報告檔寫入失敗：{type(exc).__name__}: {exc}", "warning")
 
 
 def _collect_replace_rule_conflicts() -> list[dict[str, Any]]:
     """Read-only conflict detection on the rules the translator actually applies."""
-    config = load_config()
-    translator = config.get("translator", {}) if isinstance(config, dict) else {}
-    configured_path = (
-        translator.get("replace_rules_path", "replace_rules.json")
-        if isinstance(translator, dict)
-        else "replace_rules.json"
-    )
     try:
+        config = load_config()
+        translator = config.get("translator", {}) if isinstance(config, dict) else {}
+        configured_path = (
+            translator.get("replace_rules_path", "replace_rules.json")
+            if isinstance(translator, dict)
+            else "replace_rules.json"
+        )
         rules = load_replace_rules(str(configured_path))
         conflicts = find_replacement_conflicts(rules)
     except (OSError, TypeError, ValueError, AttributeError) as exc:
@@ -747,10 +749,10 @@ def _translate_rows(
     last_batch_counts = dict.fromkeys(_BATCH_COUNT_KEYS, 0)
 
     def counted_cache_add(*args, **kwargs):
-        written = add_to_cache(*args, **kwargs)
-        if written is not False:
+        receipt = add_to_cache_with_receipt(*args, **kwargs)
+        if receipt.changed:  # 快取裡本來就有相同譯文時不算新寫入
             report.cache_written += 1
-        return written
+        return receipt.accepted
 
     def on_translated_item(item: dict[str, Any]) -> None:
         _count_quality_retry(report, item)
