@@ -198,3 +198,10 @@ def test_guide_only_legacy_issue_is_not_duplicated_and_has_guide_category():
     assert dup.extra_guide_issues == ()
     legacy = analyze_format_diagnostics("A\n\nB", "A\nB", kind="guide")
     assert legacy.issues == () and legacy.extra_guide_issues
+
+
+def test_quality_issue_summary_is_empty_when_nothing_to_report():
+    from app.views.moddb.format_issue_rendering import quality_issue_summary
+
+    assert quality_issue_summary((), "") == ()
+    assert quality_issue_summary(("a",), "空白") == ("a", "空白")

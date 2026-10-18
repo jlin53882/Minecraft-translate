@@ -270,9 +270,9 @@ class ReviewScopeController:
             entry.quality_issues, entry.whitespace_note
         )
         quality = (
-            quality_messages[0]
-            if quality_messages == ("格式檢查通過",)
-            else "格式檢查：" + "、".join(quality_messages)
+            "格式檢查：" + "、".join(quality_messages)
+            if quality_messages
+            else "格式檢查通過"
         )
         return ft.Column(
             [

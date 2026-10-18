@@ -70,7 +70,7 @@ def quality_issue_summary(
     values = [*issues]
     if whitespace_note:
         values.append(whitespace_note)
-    return tuple(values) or ("格式檢查通過",)
+    return tuple(values)
 
 
 __all__ = [
