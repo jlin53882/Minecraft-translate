@@ -7,10 +7,13 @@
 
 from __future__ import annotations
 
+import json
 import logging
+import re
 import traceback
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from functools import partial
 from typing import Any
 
@@ -49,13 +52,15 @@ from translation_tool.translation_db.run_progress import (
     tick_live,
 )
 from translation_tool.translation_db.schema import cache_type_for_kind
+from translation_tool.utils.app_paths import get_data_root
 from translation_tool.utils.cache_manager import add_to_cache, save_translation_cache
 from translation_tool.utils.cancellation import (
     TaskCancelled,
     cancel_scope,
     is_cancelled,
 )
-from translation_tool.utils.config_manager import load_config
+from translation_tool.utils.config_manager import load_config, resolve_project_path
+from translation_tool.utils.replace_rules import find_replacement_conflicts
 
 # View 經由本模組取用進度格式化函式（View 不直接 import translation_tool 引擎）
 __all__ = [
@@ -117,6 +122,26 @@ class TranslateReport:
     batches: int = 0  # 實際完成的批數
     planned_batches: int = 0  # 開始時依相同 planner 估出的批數下界
     elapsed_sec: float = 0.0
+    # Structured counters shared by the batch loop, backend log, and UI summary.
+    ai_response: int = 0
+    quality_retry_candidates: int = 0
+    quality_retry_fixed: int = 0
+    quality_retry_unresolved: int = 0
+    quality_retry_quota_failed: int = 0
+    quota_failed_items: int = 0
+    contract_failed_items: int = 0
+    max_tokens_items: int = 0
+    quality_rejected: int = 0
+    source_fallback: int = 0
+    cache_written: int = 0
+    db_written: int = 0
+    untranslated: int = 0
+    oversized_items: int = 0
+    quality_issue_records: list[dict[str, Any]] = field(default_factory=list)
+    quality_issues_file: str | None = None
+    replace_rule_conflicts: int = 0
+    replace_rule_conflict_details: list[dict[str, Any]] = field(default_factory=list)
+    contract_errors: list[str] = field(default_factory=list)
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -132,6 +157,22 @@ class TranslateReport:
             "batches": self.batches,
             "planned_batches": self.planned_batches,
             "elapsed_sec": self.elapsed_sec,
+            "ai_response": self.ai_response,
+            "quality_retry_candidates": self.quality_retry_candidates,
+            "quality_retry_fixed": self.quality_retry_fixed,
+            "quality_retry_unresolved": self.quality_retry_unresolved,
+            "quality_retry_quota_failed": self.quality_retry_quota_failed,
+            "quota_failed_items": self.quota_failed_items,
+            "contract_failed_items": self.contract_failed_items,
+            "max_tokens_items": self.max_tokens_items,
+            "quality_rejected": self.quality_rejected,
+            "source_fallback": self.source_fallback,
+            "cache_written": self.cache_written,
+            "db_written": self.db_written,
+            "untranslated": self.untranslated,
+            "oversized_items": self.oversized_items,
+            "quality_issues_file": self.quality_issues_file,
+            "replace_rule_conflicts": self.replace_rule_conflicts,
         }
 
 
@@ -270,6 +311,146 @@ def _log(session, text: str, level: str = "info") -> None:
     mirror_session_log(session, logger, text, level, prefix="[Mod 資料庫機翻] ")
 
 
+def _log_backend(text: str, level: str = "info") -> None:
+    """Write detail to the backend without feeding it back into the UI."""
+    logger.log(
+        getattr(logging, level.upper(), logging.INFO),
+        text,
+        extra={"ui_mirrored": True},
+    )
+
+
+def _log_split(session, ui_text: str, backend_text: str, level: str = "info") -> None:
+    """Emit one concise UI line and one detailed backend record."""
+    add_log_unmirrored(session, ui_text, level)
+    _log_backend(backend_text, level)
+
+
+def _sync_loop_result(report: TranslateReport, result) -> None:
+    """Copy shared-loop accounting into the single Mod DB report object."""
+    report.ai_response = int(getattr(result, "ai_response", report.translated) or 0)
+    report.translated = report.ai_response
+    report.cache_written = int(
+        getattr(result, "cache_written", report.cache_written) or 0
+    )
+    report.source_fallback = int(
+        getattr(result, "source_fallback", report.source_fallback) or 0
+    )
+    report.quality_rejected = int(
+        getattr(result, "quality_rejected", report.quality_rejected) or 0
+    )
+    report.untranslated = int(getattr(result, "untranslated", report.untranslated) or 0)
+    report.max_tokens_items = int(
+        getattr(result, "max_tokens_items", report.max_tokens_items) or 0
+    )
+    report.contract_failed_items = int(
+        getattr(result, "contract_failed_items", report.contract_failed_items) or 0
+    )
+    report.quota_failed_items = int(
+        getattr(result, "quota_failed_items", report.quota_failed_items) or 0
+    )
+    report.oversized_items = int(
+        getattr(result, "oversized_items", report.oversized_items) or 0
+    )
+    report.quality_retry_candidates = int(
+        getattr(result, "quality_retry_candidates", report.quality_retry_candidates)
+        or 0
+    )
+    report.quality_retry_fixed = int(
+        getattr(result, "quality_retry_fixed", report.quality_retry_fixed) or 0
+    )
+    report.quality_retry_unresolved = int(
+        getattr(result, "quality_retry_unresolved", report.quality_retry_unresolved)
+        or 0
+    )
+    report.quality_retry_quota_failed = int(
+        getattr(
+            result,
+            "quality_retry_quota_failed",
+            report.quality_retry_quota_failed,
+        )
+        or 0
+    )
+    report.contract_errors = list(
+        getattr(result, "contract_errors", report.contract_errors) or ()
+    )
+
+
+def _write_quality_issue_file(session, report: TranslateReport) -> None:
+    """Persist every quality issue while keeping the UI to a bounded summary."""
+    if not report.quality_issue_records:
+        return
+    raw_task_id = str(
+        getattr(session, "task_id", None)
+        or getattr(session, "id", None)
+        or "unknown-task"
+    )
+    task_id = re.sub(r"[^A-Za-z0-9._-]+", "_", raw_task_id)
+    path = (
+        get_data_root()
+        / "logs"
+        / datetime.now(UTC).astimezone().strftime("%Y-%m-%d")
+        / f"quality-issues-{task_id}.json"
+    )
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps(report.quality_issue_records, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+    except (OSError, TypeError, ValueError) as exc:
+        _log_backend(
+            f"品質問題完整清單寫入失敗：{type(exc).__name__}: {exc}", "warning"
+        )
+        return
+    report.quality_issues_file = str(path)
+
+
+def _collect_replace_rule_conflicts() -> list[dict[str, Any]]:
+    """Read-only conflict detection for the active replace-rules file."""
+    config = load_config()
+    translator = config.get("translator", {}) if isinstance(config, dict) else {}
+    configured_path = (
+        translator.get("replace_rules_path", "replace_rules.json")
+        if isinstance(translator, dict)
+        else "replace_rules.json"
+    )
+    try:
+        path = resolve_project_path(str(configured_path))
+        raw_rules = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, TypeError, ValueError):
+        return []
+    if not isinstance(raw_rules, list):
+        return []
+    conflicts = find_replacement_conflicts(raw_rules)
+    return [
+        {
+            "source_index": source_index,
+            "source": source,
+            "destination_index": destination_index,
+            "destination": destination,
+        }
+        for source_index, source, destination_index, destination in conflicts
+    ]
+
+
+def _record_backend_summary(report: TranslateReport) -> None:
+    """Record the full structured summary and non-UI diagnostic details."""
+    payload = report.as_dict()
+    payload.update(
+        {
+            "quality_issue_records": report.quality_issue_records,
+            "contract_errors": report.contract_errors,
+            "replace_rule_conflict_details": report.replace_rule_conflict_details,
+        }
+    )
+    _log_backend(
+        "Mod DB translation summary "
+        + json.dumps(payload, ensure_ascii=False, sort_keys=True),
+        "warning" if report.status != "DONE" else "info",
+    )
+
+
 def _noop_cache(*_args, **_kwargs) -> bool:
     """不寫翻譯快取時使用（結果只存進資料庫）。"""
     return True
@@ -399,20 +580,78 @@ def _translate_rows(
     """分批機翻並寫回；每批先檢查特殊字元，一致者才寫入。"""
     buffer: list[WriteBackItem] = []
     failures = {"streak": 0, "aborted": False, "db_error": "", "db_stop": False}
+    last_batch_counts = {
+        "ai_response": 0,
+        "written": 0,
+        "source_fallback": 0,
+        "quality_rejected": 0,
+    }
 
     def on_translated_item(item: dict[str, Any]) -> None:
+        if not item.get("_quality_checked") and not item.get("_untranslated"):
+            issues = translation_issues(
+                str(item.get("source_text") or ""),
+                str(item.get("text") or ""),
+                kind=item.get("_kind"),
+            )
+            if issues:
+                item = {
+                    **item,
+                    "text": item.get("source_text", ""),
+                    "_untranslated": True,
+                    "_quality_rejected": True,
+                    "_quality_translation_text": item.get("text", ""),
+                    "_quality_issues": tuple(issues),
+                }
+        quality_rejected = bool(
+            item.get("_quality_rejected") or item.get("_cache_rejected")
+        )
+        if quality_rejected:
+            failures["streak"] = 0
+            report.translated += 1
+            report.ai_response = report.translated
+            report.quality_rejected += 1
+            report.flagged = report.quality_rejected
+            source = str(item.get("source_text") or "")
+            translated = str(
+                item.get("_quality_translation_text", item.get("text") or "")
+            )
+            issues = list(item.get("_quality_issues") or ())
+            if not issues:
+                issues = list(_quality_issues_for_item(item, source, translated))
+            entry_id = item.get("_entry_id")
+            if isinstance(entry_id, int):
+                report.flagged_entries[entry_id] = translated
+            if len(report.flagged_samples) < _FLAGGED_LOG_LIMIT:
+                report.flagged_samples.append(
+                    f"{item.get('_mod_id', '')} / {item.get('path', '')}："
+                    f"{'、'.join(issues)}"
+                )
+            report.quality_issue_records.append(
+                {
+                    "kind": item.get("_kind", ""),
+                    "mod_id": item.get("_mod_id", ""),
+                    "key": item.get("path", ""),
+                    "issues": issues,
+                    "source_text": source,
+                    "translated_text": translated,
+                    "status": "QUALITY_REJECTED",
+                }
+            )
+            return
         if item.get("_untranslated"):
             failures["streak"] += 1
+            report.source_fallback += 1
             if failures["streak"] >= ABORT_AFTER_FAILURES:
                 failures["aborted"] = True
             return
         failures["streak"] = 0
         report.translated += 1
+        report.ai_response = report.translated
         source, text = item["source_text"], item["text"]
-        issues = _quality_issues_for_item(item, source, text)
-        if issues:
-            _record_flagged_translation(session, report, item, issues)
-            return
+        # The shared loop owns the quality gate. Keep this callback focused on
+        # DB write candidates so quality rejection cannot be mistaken for an
+        # ordinary source fallback or validated twice.
         buffer.append(
             WriteBackItem(item["_kind"], item["_mod_id"], item["path"], source, text)
         )
@@ -423,7 +662,42 @@ def _translate_rows(
     def on_progress(progress: float, message: str, _eta: float) -> None:
         session.set_progress(progress)
         if message:
-            _log(session, message)
+            if message.startswith("✅ 批次完成"):
+                current = {
+                    "ai_response": report.ai_response,
+                    "written": report.written,
+                    "source_fallback": report.source_fallback,
+                    "quality_rejected": report.quality_rejected,
+                }
+                batch_ai = current["ai_response"] - last_batch_counts["ai_response"]
+                batch_written = current["written"] - last_batch_counts["written"]
+                batch_fallback = (
+                    current["source_fallback"] - last_batch_counts["source_fallback"]
+                )
+                batch_quality = (
+                    current["quality_rejected"] - last_batch_counts["quality_rejected"]
+                )
+                batch_total = batch_ai + batch_fallback
+                cache_type = message.partition("(")[2].partition(")")[0]
+                if batch_fallback:
+                    ui_text = (
+                        f"⚠️ 批次完成 ({cache_type}) | 寫入: {batch_written}/{batch_total} | "
+                        f"{batch_fallback} 筆回填原文，未寫入"
+                    )
+                elif batch_quality:
+                    ui_text = (
+                        f"⚠️ 批次完成 ({cache_type}) | 寫入: {batch_written}/{batch_total} | "
+                        f"{batch_quality} 筆品質不符，未寫入"
+                    )
+                else:
+                    ui_text = (
+                        f"✅ 批次完成 ({cache_type}) | 成功: {batch_written} | "
+                        f"總進度: {report.ai_response + report.source_fallback}/{report.candidates}"
+                    )
+                _log_split(session, ui_text, message)
+                last_batch_counts.update(current)
+            else:
+                _log(session, message)
         if tracker.update(round(progress * len(items))):
             _log(session, f"⏱ {tracker.line()}")
         _update_remaining(report)
@@ -472,6 +746,16 @@ def _translate_rows(
             ),
         )
     flush()
+    _sync_loop_result(report, result)
+    if not options.write_cache:
+        # The shared loop still invokes a no-op callback to preserve its
+        # generic contract; it must not be reported as a real cache write.
+        report.cache_written = 0
+    report.flagged = report.quality_rejected
+    report.db_written = report.written
+    report.quality_issue_records = [
+        dict(record) for record in report.quality_issue_records
+    ]
     if failures["db_error"] or failures["db_stop"]:
         report.status = "FAILED"
         session.set_error()
@@ -490,15 +774,38 @@ def _translate_rows(
             "已翻成功的部分已寫入資料庫。",
             "error",
         )
+    report.replace_rule_conflict_details = _collect_replace_rule_conflicts()
+    report.replace_rule_conflicts = len(report.replace_rule_conflict_details)
+    _write_quality_issue_file(session, report)
     _update_remaining(report)
-    _log(
+    if report.status == "DONE" and any(
+        (
+            report.flagged,
+            report.source_fallback,
+            report.max_tokens_items,
+            report.contract_failed_items,
+            report.quality_retry_unresolved,
+        )
+    ):
+        report.status = "DONE_WITH_WARNINGS"
+    final_level = "warning" if report.status != "DONE" else "info"
+    _log_split(
         session,
-        f"完成（狀態 {report.status}）：AI 回傳 {report.translated} 筆、"
-        f"寫入 {report.written} 筆、特殊字元不一致未寫入 {report.flagged} 筆；"
+        (
+            f"{'⚠️' if final_level == 'warning' else '✅'} 翻譯完成 | "
+            f"寫入 {report.written}/{report.candidates} | "
+            f"仍有 {report.remaining} 筆需要處理 | 共送出 {report.batches:,} 批"
+        ),
+        f"完成（狀態 {report.status}）：AI 回傳 {report.ai_response} 筆、"
+        f"寫入 {report.written} 筆、品質拒絕 {report.quality_rejected} 筆、"
+        f"來源回填 {report.source_fallback} 筆、MAX_TOKENS {report.max_tokens_items} 筆、"
+        f"契約失敗 {report.contract_failed_items} 筆、快取寫入 {report.cache_written} 筆、"
+        f"replace_rules 衝突 {report.replace_rule_conflicts} 筆；"
         f"此範圍仍有 {report.remaining} 筆未翻譯；"
         f"共送出 {report.batches:,} 批，耗時 {format_duration(report.elapsed_sec)}",
-        "warning" if report.status != "DONE" or report.flagged else "info",
+        final_level,
     )
+    _record_backend_summary(report)
     if result.last_error:
         _log(session, f"最後一次錯誤：{result.last_error}", "warning")
     session.set_summary(report.as_dict())

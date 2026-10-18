@@ -148,6 +148,46 @@ def test_structured_format_spec_counts_only_in_input_estimate():
     )
 
 
+def test_shared_loop_falls_back_oversized_item_without_api_or_cache(monkeypatch):
+    config = {
+        "lm_translator": {
+            "token_budget_enabled": True,
+            "max_input_token_budget": 40,
+            "max_output_token_budget": 40,
+            "output_token_factor": 1.5,
+            "initial_batch_size_lang": 10,
+        }
+    }
+    monkeypatch.setattr(loop_mod, "load_config", lambda: config)
+    item = {
+        "path": "oversized",
+        "text": "x" * 1000,
+        "source_text": "x" * 1000,
+        "cache_type": "lang",
+    }
+    api_calls = []
+    cache_writes = []
+
+    result = loop_mod.translate_items_with_cache_loop(
+        [item],
+        translate_batch_smart=lambda batch, total: (
+            api_calls.append(batch) or ([], "DONE")
+        ),
+        cache_add=lambda *args, **kwargs: cache_writes.append(args) or True,
+        cache_save=lambda *args, **kwargs: True,
+        reload_cache=False,
+        sleep_seconds_between_batches=0,
+    )
+
+    assert api_calls == []
+    assert cache_writes == []
+    assert result.status == "DONE"
+    assert result.processed == 1
+    assert result.oversized_items == 1
+    assert result.source_fallback == 1
+    assert result.untranslated == 1
+
+
 # ---------------------------------------------------------------------------
 # 長內容依 token 預算切批
 # ---------------------------------------------------------------------------

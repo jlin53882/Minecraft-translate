@@ -466,6 +466,7 @@ class _BatchRuntime:
     chatgpt_retry_count: int = 0
     gemini_503_retry_count: int = 0
     gemini_503_attempted_models: set[int] = field(default_factory=set)
+    contract_errors: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -505,6 +506,7 @@ class _BatchRetryBudget:
 class _BatchRoundOutcome:
     action: BatchAction | None = None
     learned_budget: bool = False
+    fallback_reason: str | None = None
 
 
 def _format_remaining(seconds: float) -> str:
@@ -1289,8 +1291,14 @@ def _merge_batch_response(
     ):
         contract_error = "one or more translation values are not strings"
     if contract_error is not None:
+        contract_errors = getattr(runtime, "contract_errors", None)
+        if isinstance(contract_errors, list):
+            contract_errors.append(contract_error)
         if not optional_retry:
-            log_warning(f"[❌ 回應契約不符] {contract_error}；本批次將重試/縮小")
+            log_warning(
+                f"[❌ 回應契約不符] {contract_error}；本批次將重試/縮小",
+                extra={"ui_mirrored": True},
+            )
             runtime.budget_tracker.on_truncated(
                 api_meta.get("finish_reason"), kind="missing"
             )
@@ -1523,6 +1531,52 @@ def _retry_same_source_translations(
     return merged
 
 
+def _mark_quality_retry_result(
+    result: list[dict],
+    candidate_positions: tuple[int, ...],
+    *,
+    fixed_positions: tuple[int, ...] = (),
+    unresolved_positions: tuple[int, ...] | None = None,
+    quota_failed: bool = False,
+) -> list[dict]:
+    """Attach one-batch quality-retry accounting without changing output text."""
+    candidates = set(candidate_positions)
+    fixed = set(fixed_positions)
+    unresolved = (
+        set(unresolved_positions)
+        if unresolved_positions is not None
+        else candidates - fixed
+    )
+    marked: list[dict] = []
+    for position, item in enumerate(result):
+        if not isinstance(item, dict) or position not in candidates:
+            marked.append(item)
+            continue
+        # Keep the public generic translator result unchanged. Mod DB items
+        # opt in through their explicit batch-group metadata.
+        if "_batch_group" not in item:
+            marked.append(item)
+            continue
+        updated = {**item, "_quality_retry_candidate": True}
+        if position in fixed:
+            updated["_quality_retry_fixed"] = True
+        if position in unresolved:
+            updated["_quality_retry_unresolved"] = True
+        if quota_failed:
+            updated["_quality_retry_quota_failed"] = True
+        marked.append(updated)
+    return marked
+
+
+def _is_quality_retry_quota_failure(error: Exception) -> bool:
+    """Recognize quota/rate-limit failures for structured retry accounting."""
+    status = getattr(error, "status", None)
+    if status == 429:
+        return True
+    text = str(error).lower()
+    return any(token in text for token in ("quota", "rate limit", "rate_limit"))
+
+
 def _retry_quality_translations(
     runtime: _BatchRuntime,
     round_data: _BatchRound,
@@ -1543,6 +1597,7 @@ def _retry_quality_translations(
     )
     if not candidates.positions:
         return result
+    candidate_positions = tuple(candidates.positions)
 
     retry_prompt = f"{prompt.rstrip()}\n\n{QUALITY_RETRY_INSTRUCTION}"
     retry_estimate = runtime.budget_tracker.estimate(
@@ -1563,7 +1618,9 @@ def _retry_quality_translations(
             f"（估計 {round(retry_input_tokens)} tokens，預算 "
             f"{runtime.budget_cfg.max_input_token_budget} tokens）"
         )
-        return result
+        return _mark_quality_retry_result(
+            result, candidate_positions, unresolved_positions=candidate_positions
+        )
     retry_round = _BatchRound(
         current_batch=list(candidates.items),
         fit_count=len(candidates.items),
@@ -1583,14 +1640,21 @@ def _retry_quality_translations(
         model_index = runtime.model_pool.index(model_name)
     except ValueError:
         log_warning(f"[品質重試] 找不到模型 {model_name} 的配額索引，保留第一次譯文")
-        return result
+        return _mark_quality_retry_result(
+            result, candidate_positions, unresolved_positions=candidate_positions
+        )
     lease_sec = _probe_lease_sec(runtime)
     if not quota.claim(model_name, runtime.quota_owner, lease_sec):
         log_warning(
             f"[品質重試] 模型 {model_name} 目前沒有可用的配額探測租約，"
             f"{candidate_count} 筆保留第一次譯文"
         )
-        return result
+        return _mark_quality_retry_result(
+            result,
+            candidate_positions,
+            unresolved_positions=candidate_positions,
+            quota_failed=True,
+        )
     started = quota.now()
 
     try:
@@ -1621,7 +1685,9 @@ def _retry_quality_translations(
                 f"（finish_reason={retry_meta.get('finish_reason')}），"
                 f"{candidate_count} 筆保留第一次譯文"
             )
-            return result
+            return _mark_quality_retry_result(
+                result, candidate_positions, unresolved_positions=candidate_positions
+            )
         retried, invalid = _merge_batch_response(
             runtime, retry_round, retry_text, retry_meta, optional_retry=True
         )
@@ -1630,7 +1696,9 @@ def _retry_quality_translations(
                 "[品質重試] 重試回應不符合結構化格式（缺少項目、ID 不一致，或譯文不是字串），"
                 f"{candidate_count} 筆保留第一次譯文"
             )
-            return result
+            return _mark_quality_retry_result(
+                result, candidate_positions, unresolved_positions=candidate_positions
+            )
         conversation_history.extend(
             [
                 {
@@ -1652,7 +1720,12 @@ def _retry_quality_translations(
             f"[品質重試] 重試請求失敗，{candidate_count} 筆保留第一次譯文"
             f"（{_retry_error_detail(exc)}）"
         )
-        return result
+        return _mark_quality_retry_result(
+            result,
+            candidate_positions,
+            unresolved_positions=candidate_positions,
+            quota_failed=_is_quality_retry_quota_failure(exc),
+        )
 
     accepted_positions: list[int] = []
     accepted_results: list[dict] = []
@@ -1702,7 +1775,17 @@ def _retry_quality_translations(
     log_info(
         f"[品質重試] 已修正 {len(accepted_positions)}/{candidate_count} 筆需要重新確認的譯文"
     )
-    return merged
+    unresolved_positions = tuple(
+        position
+        for position in candidate_positions
+        if position not in accepted_positions
+    )
+    return _mark_quality_retry_result(
+        merged,
+        candidate_positions,
+        fixed_positions=tuple(accepted_positions),
+        unresolved_positions=unresolved_positions,
+    )
 
 
 def _clear_quota_on_http_success(
@@ -1972,13 +2055,21 @@ def _attempt_batch(
             if _is_truncated_response(raw_text):
                 runtime.key_cycle.clear_overload()
                 runtime.budget_tracker.on_truncated(finish_reason)
-                return _BatchRoundOutcome(BatchAction.SHRINK_BATCH, learned_budget=True)
+                return _BatchRoundOutcome(
+                    BatchAction.SHRINK_BATCH,
+                    learned_budget=True,
+                    fallback_reason="max_tokens",
+                )
 
             result, missing = _merge_batch_response(
                 runtime, round_data, raw_text, api_meta
             )
             if missing:
-                return _BatchRoundOutcome(BatchAction.SHRINK_BATCH, learned_budget=True)
+                return _BatchRoundOutcome(
+                    BatchAction.SHRINK_BATCH,
+                    learned_budget=True,
+                    fallback_reason="response_contract",
+                )
             return _finish_successful_batch(
                 runtime,
                 round_data,
@@ -2070,8 +2161,22 @@ def _run_batch_state_machine(
                 log_warning(
                     f"[⚠️] Batch Size 已縮至極限 ({basis})，回填原文並繼續後續項目"
                 )
+                fallback_reason = outcome.fallback_reason or "batch_shrink"
+                contract_error = (
+                    runtime.contract_errors[-1] if runtime.contract_errors else None
+                )
                 runtime.all_results.extend(
-                    {**item, "_untranslated": True} for item in round_data.current_batch
+                    {
+                        **item,
+                        "_untranslated": True,
+                        "_fallback_reason": fallback_reason,
+                        **(
+                            {"_contract_error": contract_error}
+                            if contract_error
+                            else {}
+                        ),
+                    }
+                    for item in round_data.current_batch
                 )
                 runtime.remaining_items = runtime.remaining_items[
                     len(round_data.current_batch) :

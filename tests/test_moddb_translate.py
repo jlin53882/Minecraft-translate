@@ -224,6 +224,74 @@ def test_service_does_not_write_cache_rejected_candidate(db_path, monkeypatch):
     db.close()
 
 
+def test_quality_rejection_is_split_from_source_fallback_and_saved_fully(
+    db_path, monkeypatch, tmp_path
+):
+    seed(db_path)
+    monkeypatch.setattr(moddb_translate_service, "get_data_root", lambda: tmp_path)
+    fake_engine(
+        monkeypatch,
+        lambda text: "§a注入合金" if text == "Infused Alloy" else "譯:" + text,
+    )
+
+    session = TaskSession()
+    run_moddb_translate_service(
+        TranslateOptions(version="1.21.1", mod_ids=("foo",)), session
+    )
+    snapshot = session.snapshot()
+    summary = snapshot["summary"]
+
+    assert summary["status"] == "DONE_WITH_WARNINGS"
+    assert summary["ai_response"] == 2
+    assert summary["quality_rejected"] == 1
+    assert summary["source_fallback"] == 0
+    assert summary["written"] == 1 and summary["db_written"] == 1
+    assert summary["quality_issues_file"]
+
+    issue_file = (
+        tmp_path
+        / "logs"
+        / "2026-10-18"
+        / (
+            "quality-issues-"
+            + summary["quality_issues_file"].rsplit("quality-issues-", 1)[1]
+        )
+    )
+    records = json.loads(issue_file.read_text(encoding="utf-8"))
+    assert records == [
+        {
+            "kind": "lang",
+            "mod_id": "foo",
+            "key": "item.foo.b",
+            "issues": ["多了 1 個「§a」"],
+            "source_text": "Infused Alloy",
+            "translated_text": "§a注入合金",
+            "status": "QUALITY_REJECTED",
+        }
+    ]
+    ui_text = "\n".join(entry.text for entry in snapshot["logs"])
+    assert "§a注入合金" not in ui_text
+    assert "品質不符" in ui_text
+
+
+def test_source_fallback_is_not_counted_as_ai_response(db_path, monkeypatch):
+    seed(db_path)
+
+    def fallback_one(batch, total=None, dry_run=False):
+        return [
+            {**item, "_untranslated": item["path"] == "item.foo.b"} for item in batch
+        ], "DONE"
+
+    monkeypatch.setattr(moddb_translate_service, "translate_batch_smart", fallback_one)
+    summary = run(TranslateOptions(version="1.21.1", mod_ids=("foo",)))["summary"]
+
+    assert summary["status"] == "DONE_WITH_WARNINGS"
+    assert summary["ai_response"] == 1
+    assert summary["source_fallback"] == 1
+    assert summary["quality_rejected"] == 0
+    assert summary["written"] == 1
+
+
 def test_service_limit_and_dry_run(db_path, monkeypatch):
     seed(db_path)
     called = []

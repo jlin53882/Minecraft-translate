@@ -791,6 +791,8 @@ class TranslatePanel(ft.Column):
                 self._set_status("已取消", "gold")
             elif summary.get("dry_run"):
                 self._set_status("預覽完成", "em")
+            elif summary.get("status") == "DONE_WITH_WARNINGS":
+                self._set_status("機翻完成（有警告）", "gold")
             elif summary.get("status") not in (None, "DONE"):
                 self._set_status(f"未完成（{summary.get('status')}）", "gold")
             else:
