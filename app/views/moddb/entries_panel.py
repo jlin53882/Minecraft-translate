@@ -39,7 +39,6 @@ from app.ui import design, kit
 from app.ui.debounce import Debouncer
 from app.ui.design import C
 from app.ui.snack import show_snack
-from translation_tool.core.format_diagnostics import analyze_format_diagnostics
 from app.views.moddb.char_inspector import scrolling_list
 from app.views.moddb.entry_filters import (
     ALL_KINDS,
@@ -72,11 +71,9 @@ from app.views.moddb.species_suggestion import (
 from app.views.moddb.species_suggestion import (
     TAB_LABEL as SPECIES_TAB_LABEL,
 )
-from app.views.moddb.species_suggestion import (
-    SpeciesSuggestion,
-)
+from app.views.moddb.species_suggestion import SpeciesSuggestion
 from app.views.moddb.suggestions import build_suggestions
-from translation_tool.core.format_diagnostics import analyze_format_diagnostics as ad
+from translation_tool.core.format_diagnostics import analyze_format_diagnostics
 from translation_tool.utils.log_unit import (
     log_debug,
     log_exception,

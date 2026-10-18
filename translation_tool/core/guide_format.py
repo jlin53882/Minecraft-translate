@@ -80,6 +80,8 @@ def _component_lines(text: str) -> tuple[str, ...]:
         for line in (text or "").splitlines()
         if line.strip() and _COMPONENT_LINE.fullmatch(line.strip())
     )
+
+
 def describe_guide_mark(mark: tuple[str, str]) -> str:
     """Stable human-facing label shared by diagnostics and legacy messages."""
     return _describe(mark)

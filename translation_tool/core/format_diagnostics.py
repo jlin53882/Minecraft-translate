@@ -111,7 +111,10 @@ class FormatDiagnosticsResult:
     @property
     def summary_lines(self) -> tuple[str, ...]:
         lines = [item.summary for item in self.diagnostics]
-        lines.extend(self.guide_issues)
+        diagnostic_messages = set(self.legacy_messages)
+        lines.extend(
+            issue for issue in self.guide_issues if issue not in diagnostic_messages
+        )
         if self.soft_newline_counts is not None:
             source_count, target_count = self.soft_newline_counts
             lines.append(
@@ -266,20 +269,12 @@ def _analyze_guide_format(
     )
     source_occurrences.sort(key=lambda item: (item.start, item.end))
     target_occurrences.sort(key=lambda item: (item.start, item.end))
+    guide_diagnostics = tuple(collect_guide_diagnostics(source, translated))
     return FormatAnalysis(
         source_occurrences=tuple(source_occurrences),
         target_occurrences=tuple(target_occurrences),
-        diagnostics=token_result.diagnostics
-        + tuple(collect_guide_diagnostics(source, translated)),
-        guide_issues=tuple(
-            issue
-            for issue in guide_issues(source, translated)
-            if issue
-            not in {
-                diagnostic.legacy_message
-                for diagnostic in collect_guide_diagnostics(source, translated)
-            }
-        ),
+        diagnostics=token_result.diagnostics + guide_diagnostics,
+        guide_issues=tuple(guide_issues(source, translated)),
     )
 
 

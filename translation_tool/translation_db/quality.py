@@ -11,7 +11,7 @@ from translation_tool.core.format_diagnostics import (
 )
 from translation_tool.core.format_tokens import (
     format_token_spans,
-    format_tokens,  # noqa: F401 - compatibility re-export
+    format_tokens,
     token_category,
 )
 from translation_tool.core.guide_format import guide_issues
@@ -29,9 +29,7 @@ def _token_counts_for_kind(text: str, kind: str | None) -> Counter[str]:
     return counts
 
 
-def _token_issues_from_counts(
-    wanted: Counter[str], actual: Counter[str]
-) -> list[str]:
+def _token_issues_from_counts(wanted: Counter[str], actual: Counter[str]) -> list[str]:
     """Compatibility adapter for callers that already computed token counts."""
     issues: list[str] = []
     for token in sorted(set(wanted) | set(actual)):
@@ -87,16 +85,20 @@ def repair_input_issues_for_kind(
         token_issues_found = token_issues_for_kind(
             source, previous_translation, kind=kind
         )
+        eligible = bool(
+            token_issues_found
+            or guide_structure_issues(source, previous_translation, kind=kind)
+        )
     else:
-        token_issues_found = _token_issues_from_counts(wanted, previous)
-    structure_issues = guide_structure_issues(
-        source, previous_translation, kind=kind
-    )
+        eligible, token_issues_tuple, mixed = repair_input_issues_from_counts(
+            wanted, previous
+        )
+        token_issues_found = list(token_issues_tuple)
+    structure_issues = guide_structure_issues(source, previous_translation, kind=kind)
     issues = (*token_issues_found, *structure_issues)
-    eligible = bool(issues) if policy.newline_policy == "soft" else bool(
-        newline_mismatch or issues
-    )
-    return eligible, issues, bool(newline_mismatch and issues)
+    if policy.has_structured_marks:
+        return bool(issues), issues, bool(newline_mismatch and issues)
+    return eligible, issues, mixed
 
 
 def repair_input_issues_from_counts(
@@ -160,9 +162,7 @@ def translation_issues(
             kind=kind,
             allow_actual_newlines=True,
         )
-    result = analyze_format_diagnostics(
-        source, translated, kind=kind or "lang"
-    )
+    result = analyze_format_diagnostics(source, translated, kind=kind or "lang")
     return list(result.legacy_messages) + [
         issue
         for issue in guide_structure_issues(source, translated, kind=kind)
@@ -212,9 +212,7 @@ def format_quality_comparison(
     kind: str | None = None,
 ) -> tuple[list[str], list[str], tuple[QualityIssueDelta, ...]]:
     """Compare batch quality through the common kind-aware diagnostics contract."""
-    before_result = analyze_format_diagnostics(
-        source, before, kind=kind or "lang"
-    )
+    before_result = analyze_format_diagnostics(source, before, kind=kind or "lang")
     after_result = analyze_format_diagnostics(source, after, kind=kind or "lang")
     return (
         translation_issues(source, before, kind=kind),
@@ -325,10 +323,10 @@ __all__ = [
     "repair_input_issues_from_counts",
     "repair_output_issues",
     "repair_output_issues_for_kind",
+    "token_category",
     "token_issues",
     "token_issues_for_kind",
     "token_quality_comparison",
-    "token_category",
     "translation_issues",
     "whitespace_note",
 ]

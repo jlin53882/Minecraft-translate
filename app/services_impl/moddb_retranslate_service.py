@@ -56,7 +56,6 @@ from translation_tool.translation_db import TranslationDB
 from translation_tool.translation_db.models import SameSourceAIEntry
 from translation_tool.translation_db.quality import (
     repair_input_issues_for_kind,
-    translation_issues,
     repair_output_issues_for_kind,
 )
 from translation_tool.translation_db.run_progress import format_repair_live

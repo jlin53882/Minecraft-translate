@@ -70,8 +70,6 @@ from translation_tool.translation_db.quality import (
     matches_quality,
     quality_state,
     repair_input_issues_for_kind,
-    token_quality_comparison,
-    translation_issues,
     repair_output_issues_for_kind,
     whitespace_note,
 )
