@@ -2238,7 +2238,10 @@ def _run_batch_state_machine(
                 )
                 fallback_reason = outcome.fallback_reason or "batch_shrink"
                 contract_error = (
-                    runtime.contract_errors[-1] if runtime.contract_errors else None
+                    runtime.contract_errors[-1]
+                    if fallback_reason == "response_contract"
+                    and runtime.contract_errors
+                    else None
                 )
                 runtime.all_results.extend(
                     {

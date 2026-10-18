@@ -605,3 +605,19 @@ def test_shared_loop_oversized_policy_is_limited_to_moddb_items(monkeypatch):
 
     assert len(api_calls) == 1
     assert result.oversized_items == 0
+
+
+def test_fixed_input_over_budget_is_not_an_oversized_item():
+    from translation_tool.core.lm_batch_budget import is_item_oversized
+
+    cfg = {
+        "token_budget_enabled": True,
+        "max_input_token_budget": 1000,
+        "max_output_token_budget": 100000,
+    }
+    item = {"path": "p", "text": "short", "source_text": "short"}
+
+    assert is_item_oversized(item, "lang", cfg, fixed_input_tokens=5000) is False
+    assert is_item_oversized(
+        {**item, "text": "x" * 20000}, "lang", cfg, fixed_input_tokens=0
+    )

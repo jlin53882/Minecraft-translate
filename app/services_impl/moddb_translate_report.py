@@ -126,6 +126,13 @@ def build_quality_report(
     }
 
 
+def _csv_safe(value: Any) -> Any:
+    """Excel 會把 = + - @ 開頭的儲存格當公式；加上單引號讓它顯示成原本的文字。"""
+    if isinstance(value, str) and value[:1] in ("=", "+", "-", "@", "\t", "\r"):
+        return "'" + value
+    return value
+
+
 def _write_csv(path: Path, items: list[dict[str, Any]]) -> None:
     # utf-8-sig：Excel 才不會把中文開成亂碼
     with path.open("w", encoding="utf-8-sig", newline="") as handle:
@@ -136,14 +143,17 @@ def _write_csv(path: Path, items: list[dict[str, Any]]) -> None:
         for item in items:
             writer.writerow(
                 [
-                    "、".join(str(b) for b in item["batches"]),
-                    item["kind"],
-                    item["mod_id"],
-                    item["key"],
-                    "；".join(item["issues"]),
-                    item["source_text"],
-                    item["translated_text"],
-                    item["count"],
+                    _csv_safe(value)
+                    for value in (
+                        "、".join(str(b) for b in item["batches"]),
+                        item["kind"],
+                        item["mod_id"],
+                        item["key"],
+                        "；".join(item["issues"]),
+                        item["source_text"],
+                        item["translated_text"],
+                        item["count"],
+                    )
                 ]
             )
 

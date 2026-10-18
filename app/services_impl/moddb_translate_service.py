@@ -7,13 +7,13 @@
 
 from __future__ import annotations
 
-import json
 import logging
 import traceback
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import datetime
 from functools import partial
+from pathlib import Path
 from typing import Any
 
 from app.services_impl.logging_service import UI_LOG_HANDLER
@@ -57,7 +57,6 @@ from translation_tool.translation_db.run_progress import (
     tick_live,
 )
 from translation_tool.translation_db.schema import cache_type_for_kind
-from translation_tool.utils.app_paths import get_data_root
 from translation_tool.utils.cache_manager import add_to_cache, save_translation_cache
 from translation_tool.utils.cancellation import (
     TaskCancelled,
@@ -66,6 +65,7 @@ from translation_tool.utils.cancellation import (
 )
 from translation_tool.utils.config_manager import load_config, resolve_project_path
 from translation_tool.utils.replace_rules import find_replacement_conflicts
+from translation_tool.utils.text_processor import load_replace_rules
 
 # View 經由本模組取用進度格式化函式（View 不直接 import translation_tool 引擎）
 __all__ = [
@@ -88,6 +88,8 @@ logger = logging.getLogger(__name__)
 DEFAULT_LIMIT = 2000
 _FLAGGED_LOG_LIMIT = 20
 DB_FLUSH_RETRIES = 3  # 寫入資料庫失敗時的重試次數
+# 回填原因屬於單一項目本身（不是 API 連線或設定問題）時，不計入連續失敗
+_ITEM_SPECIFIC_FALLBACKS = frozenset({"oversized_item", "max_tokens"})
 ABORT_AFTER_FAILURES = 500  # 連續這麼多筆都沒翻成功就中止（API Key／模型設定有問題）
 
 
@@ -133,7 +135,6 @@ class TranslateReport:
     quality_retry_fixed: int = 0
     quality_retry_unresolved: int = 0
     quality_retry_quota_failed: int = 0
-    quota_failed_items: int = 0
     contract_failed_items: int = 0
     max_tokens_items: int = 0
     quality_rejected: int = 0
@@ -169,7 +170,6 @@ class TranslateReport:
             "quality_retry_fixed": self.quality_retry_fixed,
             "quality_retry_unresolved": self.quality_retry_unresolved,
             "quality_retry_quota_failed": self.quality_retry_quota_failed,
-            "quota_failed_items": self.quota_failed_items,
             "contract_failed_items": self.contract_failed_items,
             "max_tokens_items": self.max_tokens_items,
             "quality_rejected": self.quality_rejected,
@@ -328,7 +328,10 @@ def _log_backend(text: str, level: str = "info") -> None:
 
 
 def _log_split(session, ui_text: str, backend_text: str, level: str = "info") -> None:
-    """Emit one concise UI line and one detailed backend record."""
+    """Emit one concise UI line and one detailed backend record.
+
+    畫面行以 ``add_log_unmirrored`` 寫入，不會被鏡像到後台，所以兩邊文字可以不同
+    （符合 ``tests/test_log_pair_contract.py`` 的「不鏡像」例外）。"""
     add_log_unmirrored(session, ui_text, level)
     _log_backend(backend_text, level)
 
@@ -352,9 +355,6 @@ def _sync_loop_result(report: TranslateReport, result) -> None:
     )
     report.contract_failed_items = int(
         getattr(result, "contract_failed_items", report.contract_failed_items) or 0
-    )
-    report.quota_failed_items = int(
-        getattr(result, "quota_failed_items", report.quota_failed_items) or 0
     )
     report.oversized_items = int(
         getattr(result, "oversized_items", report.oversized_items) or 0
@@ -383,11 +383,19 @@ def _sync_loop_result(report: TranslateReport, result) -> None:
     )
 
 
+def _report_day_dir() -> Path:
+    """報告檔資料夾：與 app.log 同一個 ``logging.log_dir``／本地日期（YYYYMMDD）資料夾。"""
+    config = load_config()
+    logging_cfg = config.get("logging") if isinstance(config, dict) else None
+    log_dir = (logging_cfg or {}).get("log_dir") or "logs"
+    return resolve_project_path(str(log_dir)) / datetime.now().astimezone().strftime(
+        "%Y%m%d"
+    )
+
+
 def _write_quality_issue_file(session, report: TranslateReport) -> None:
     """寫出品質問題清單（JSON＋CSV）與替換規則衝突明細；畫面只保留數量。"""
-    day_dir = (
-        get_data_root() / "logs" / datetime.now(UTC).astimezone().strftime("%Y-%m-%d")
-    )
+    day_dir = _report_day_dir()
     try:
         if report.replace_rule_conflict_details:
             path = write_replace_rule_conflicts(
@@ -408,7 +416,7 @@ def _write_quality_issue_file(session, report: TranslateReport) -> None:
 
 
 def _collect_replace_rule_conflicts() -> list[dict[str, Any]]:
-    """Read-only conflict detection for the active replace-rules file."""
+    """Read-only conflict detection on the rules the translator actually applies."""
     config = load_config()
     translator = config.get("translator", {}) if isinstance(config, dict) else {}
     configured_path = (
@@ -416,14 +424,7 @@ def _collect_replace_rule_conflicts() -> list[dict[str, Any]]:
         if isinstance(translator, dict)
         else "replace_rules.json"
     )
-    try:
-        path = resolve_project_path(str(configured_path))
-        raw_rules = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, TypeError, ValueError):
-        return []
-    if not isinstance(raw_rules, list):
-        return []
-    conflicts = find_replacement_conflicts(raw_rules)
+    rules = load_replace_rules(str(configured_path))
     return [
         {
             "source_index": source_index,
@@ -431,7 +432,9 @@ def _collect_replace_rule_conflicts() -> list[dict[str, Any]]:
             "destination_index": destination_index,
             "destination": destination,
         }
-        for source_index, source, destination_index, destination in conflicts
+        for source_index, source, destination_index, destination in (
+            find_replacement_conflicts(rules)
+        )
     ]
 
 
@@ -539,21 +542,6 @@ def _log_db_failure(session, buffer, failures) -> None:
     )
 
 
-def _record_flagged_translation(
-    session,
-    report: TranslateReport,
-    item: dict[str, Any],
-    issues: list[str] | tuple[str, ...],
-) -> None:
-    """記錄格式不一致結果，供校對畫面保留 AI 譯文草稿。"""
-    report.flagged += 1
-    report.flagged_entries[item["_entry_id"]] = item["text"]
-    if len(report.flagged_samples) < _FLAGGED_LOG_LIMIT:
-        note = f"{item['_mod_id']} / {item['path']}：{'、'.join(issues)}"
-        report.flagged_samples.append(note)
-        _log(session, f"⚠️ 特殊字元不一致，未寫入：{note}", "warning")
-
-
 def _quality_issues_for_item(
     item: dict[str, Any], source: str, text: str
 ) -> list[str] | tuple[str, ...]:
@@ -634,7 +622,6 @@ def _log_final_summary(session, report: TranslateReport) -> None:
             report.max_tokens_items,
             report.contract_failed_items,
             report.quality_retry_unresolved,
-            report.remaining,
         )
     ):
         report.status = "DONE_WITH_WARNINGS"
@@ -672,9 +659,6 @@ def _settle_report(session, report, options, result, failures, buffer, tracker) 
         report.cache_written = 0
     report.flagged = report.quality_rejected
     report.db_written = report.written
-    report.quality_issue_records = [
-        dict(record) for record in report.quality_issue_records
-    ]
     if failures["db_error"] or failures["db_stop"]:
         report.status = "FAILED"
         session.set_error()
@@ -754,8 +738,10 @@ def _translate_rows(
             _record_quality_rejection(report, item)
             return
         if item.get("_untranslated"):
-            failures["streak"] += 1
             report.source_fallback += 1
+            if item.get("_fallback_reason") in _ITEM_SPECIFIC_FALLBACKS:
+                return  # 單筆太長等個別項目的問題，不代表 API Key／模型設定有誤
+            failures["streak"] += 1
             if failures["streak"] >= ABORT_AFTER_FAILURES:
                 failures["aborted"] = True
             return

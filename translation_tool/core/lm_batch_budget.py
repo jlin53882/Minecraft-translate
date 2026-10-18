@@ -452,4 +452,8 @@ def is_item_oversized(
     output_tokens = (
         value_tokens * tracker.output_factor(cfg) + JSON_ITEM_OVERHEAD_TOKENS
     )
-    return input_tokens > input_budget or output_tokens > output_budget
+    # 提示詞與 session 歷史本身就超過輸入預算時，問題不在這個項目；不能把後面每一筆
+    # 都判成單筆超限而跳過 API。
+    fixed_alone = fixed_input_tokens + JSON_ITEM_OVERHEAD_TOKENS
+    input_oversized = fixed_alone <= input_budget and input_tokens > input_budget
+    return input_oversized or output_tokens > output_budget

@@ -144,7 +144,6 @@ _SUMMARY_LABELS = {
     "quality_retry_fixed": "品質重試已修正",
     "quality_retry_unresolved": "品質重試未解決",
     "quality_retry_quota_failed": "品質重試配額失敗",
-    "quota_failed_items": "配額失敗",
     "replace_rule_conflicts": "替換規則衝突",
 }
 

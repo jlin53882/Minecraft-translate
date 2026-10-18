@@ -229,7 +229,7 @@ def test_quality_rejection_is_split_from_source_fallback_and_saved_fully(
     db_path, monkeypatch, tmp_path
 ):
     seed(db_path)
-    monkeypatch.setattr(moddb_translate_service, "get_data_root", lambda: tmp_path)
+    monkeypatch.setattr(moddb_translate_service, "_report_day_dir", lambda: tmp_path)
     fake_engine(
         monkeypatch,
         lambda text: "§a注入合金" if text == "Infused Alloy" else "譯:" + text,
@@ -250,7 +250,7 @@ def test_quality_rejection_is_split_from_source_fallback_and_saved_fully(
     assert summary["quality_issues_file"]
 
     issue_file = Path(summary["quality_issues_file"])
-    assert issue_file.parent.parent == tmp_path / "logs"
+    assert issue_file.parent == tmp_path
     report_data = json.loads(issue_file.read_text(encoding="utf-8"))
     assert report_data["統計"]["去重後項目數"] == 1
     assert report_data["批次"][0]["批次"] == 1
@@ -2693,8 +2693,8 @@ def test_final_summary_points_to_quality_file_and_flags_remaining(monkeypatch):
 @pytest.fixture(autouse=True)
 def _isolated_data_root(monkeypatch, tmp_path_factory):
     """報告檔不可寫進真正的 logs 資料夾。"""
-    root = tmp_path_factory.mktemp("data_root")
-    monkeypatch.setattr(moddb_translate_service, "get_data_root", lambda: root)
+    root = tmp_path_factory.mktemp("report_dir")
+    monkeypatch.setattr(moddb_translate_service, "_report_day_dir", lambda: root)
 
 
 def test_quality_report_dedupes_and_groups_by_batch(tmp_path):
@@ -2725,6 +2725,25 @@ def test_quality_report_dedupes_and_groups_by_batch(tmp_path):
     assert first["count"] == 2 and first["batches"] == [1, 2]
     csv_lines = path.with_suffix(".csv").read_text(encoding="utf-8-sig").splitlines()
     assert len(csv_lines) == 3
+
+
+def test_csv_cells_starting_with_formula_chars_are_escaped(tmp_path):
+    from app.services_impl import moddb_translate_report as report_mod
+
+    record = {
+        "kind": "lang",
+        "mod_id": "m",
+        "key": "k",
+        "issues": ["x"],
+        "source_text": "+1 Damage",
+        "translated_text": "-5% 速度",
+        "status": "QUALITY_REJECTED",
+        "batch": 1,
+    }
+    path = report_mod.write_quality_report(tmp_path, "t", [record])
+    text = path.with_suffix(".csv").read_text(encoding="utf-8-sig")
+
+    assert "'+1 Damage" in text and "'-5% 速度" in text
 
 
 def test_replace_rule_conflict_file_is_one_per_day_and_not_rewritten(tmp_path):
@@ -2762,3 +2781,45 @@ def test_finish_time_wording_names_the_day_when_it_crosses_midnight(days, expect
 
     finish = datetime(2026, 10, 21, 0, 1, tzinfo=UTC)
     assert _finish_stamp(finish, days) == expected
+
+
+def test_report_dir_follows_log_dir_config_and_app_log_date(monkeypatch, tmp_path):
+    monkeypatch.undo()
+    monkeypatch.setattr(
+        moddb_translate_service,
+        "load_config",
+        lambda: {"logging": {"log_dir": str(tmp_path / "mylogs")}},
+    )
+    day = moddb_translate_service._report_day_dir()
+
+    assert day.parent == tmp_path / "mylogs"
+    assert len(day.name) == 8 and day.name.isdigit()
+
+
+def test_item_specific_fallbacks_do_not_trigger_abort_streak(db_path, monkeypatch):
+    seed(db_path)
+    monkeypatch.setattr(moddb_translate_service, "ABORT_AFTER_FAILURES", 1)
+
+    def oversized_all(batch, total=None, dry_run=False):
+        return [
+            {**item, "_untranslated": True, "_fallback_reason": "oversized_item"}
+            for item in batch
+        ], "DONE"
+
+    monkeypatch.setattr(moddb_translate_service, "translate_batch_smart", oversized_all)
+    session = TaskSession()
+    run_moddb_translate_service(
+        TranslateOptions(version="1.21.1", mod_ids=("foo",)), session
+    )
+
+    assert session.snapshot()["summary"]["status"] != "ABORTED"
+
+
+def test_success_with_remaining_items_is_not_a_warning():
+    report = moddb_translate_service.TranslateReport()
+    report.candidates = 2000
+    report.written = 2000
+    report.remaining = 27000
+    moddb_translate_service._log_final_summary(TaskSession(), report)
+
+    assert report.status == "DONE"

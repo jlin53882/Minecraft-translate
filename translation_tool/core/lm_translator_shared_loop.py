@@ -52,7 +52,6 @@ class TranslateLoopResult:
     untranslated: int = 0
     max_tokens_items: int = 0
     contract_failed_items: int = 0
-    quota_failed_items: int = 0
     oversized_items: int = 0
     quality_retry_candidates: int = 0
     quality_retry_fixed: int = 0
@@ -163,7 +162,6 @@ def translate_items_with_cache_loop(
     untranslated = 0
     max_tokens_items = 0
     contract_failed_items = 0
-    quota_failed_items = 0
     oversized_items = 0
     quality_retry_candidates = 0
     quality_retry_fixed = 0
@@ -187,7 +185,6 @@ def translate_items_with_cache_loop(
             untranslated=untranslated,
             max_tokens_items=max_tokens_items,
             contract_failed_items=contract_failed_items,
-            quota_failed_items=quota_failed_items,
             oversized_items=oversized_items,
             quality_retry_candidates=quality_retry_candidates,
             quality_retry_fixed=quality_retry_fixed,
@@ -348,8 +345,6 @@ def translate_items_with_cache_loop(
                 max_tokens_items += 1
             if reason == "response_contract":
                 contract_failed_items += 1
-            if it.get("_quota_failed") or it.get("_quality_retry_quota_failed"):
-                quota_failed_items += 1
             contract_error = it.get("_contract_error")
             if isinstance(contract_error, str) and contract_error:
                 contract_errors.append(contract_error)
