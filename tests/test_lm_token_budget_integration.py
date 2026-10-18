@@ -617,8 +617,8 @@ def test_fixed_input_over_budget_is_not_an_oversized_item():
     }
     item = {"path": "p", "text": "short", "source_text": "short"}
 
-    assert is_item_oversized(item, "lang", cfg) is False
-    assert is_item_oversized({**item, "text": "x" * 20000}, "lang", cfg)
+    assert is_item_oversized(item, cfg) is False
+    assert is_item_oversized({**item, "text": "x" * 20000}, cfg)
 
 
 def test_learned_output_scale_does_not_make_normal_items_oversized():
@@ -634,4 +634,4 @@ def test_learned_output_scale_does_not_make_normal_items_oversized():
     for _ in range(20):
         tracker.on_truncated("MAX_TOKENS")
 
-    assert is_item_oversized(item, "lang", cfg) is False
+    assert is_item_oversized(item, cfg) is False

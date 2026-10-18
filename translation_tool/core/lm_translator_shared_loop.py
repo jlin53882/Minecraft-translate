@@ -13,7 +13,6 @@ from typing import Any
 
 from translation_tool.core.lm_batch_budget import (
     is_item_oversized,
-    profile_for_cache_type,
     select_batch_size,
 )
 from translation_tool.core.lm_batch_planner import next_batch
@@ -234,11 +233,7 @@ def translate_items_with_cache_loop(
         oversized = (
             len(batch) == 1
             and "_batch_group" in batch[0]
-            and is_item_oversized(
-                batch[0],
-                profile_for_cache_type(cache_type),
-                _lm_config(),
-            )
+            and is_item_oversized(batch[0], _lm_config())
         )
         if oversized:
             oversized_items += 1

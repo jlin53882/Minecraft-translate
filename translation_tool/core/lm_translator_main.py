@@ -1311,11 +1311,12 @@ def _truncation_fallback_reason(
     """
     if finish_reason == "MAX_TOKENS":
         return "max_tokens"
-    detail = f"incomplete JSON (finish_reason={finish_reason})"
-    contract_errors = getattr(runtime, "contract_errors", None)
-    if isinstance(contract_errors, list):
-        contract_errors.append(detail)
-    _note_contract_error(runtime, round_data, detail)
+    if _is_moddb_batch(list(round_data.id_to_item.values())):
+        detail = f"incomplete JSON (finish_reason={finish_reason})"
+        contract_errors = getattr(runtime, "contract_errors", None)
+        if isinstance(contract_errors, list):
+            contract_errors.append(detail)
+        _note_contract_error(runtime, round_data, detail)
     return "response_contract"
 
 

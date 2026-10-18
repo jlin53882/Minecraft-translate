@@ -426,7 +426,6 @@ def select_batch_size(
 
 def is_item_oversized(
     item: dict[str, Any],
-    profile: str,
     lm_cfg: dict[str, Any] | None,
 ) -> bool:
     """Return whether one item cannot fit even as a single-item batch.
