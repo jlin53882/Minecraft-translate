@@ -567,6 +567,8 @@ def test_reviewed_lang_glossary_loads_scoped_candidates_once(db, monkeypatch):
         "foo", "1.21.1", ("The Pressure Chamber processes air.",)
     ) == [{"key": "pressure", "en_us": "Pressure Chamber", "zh_tw": "壓力室"}]
     assert len(calls) == 1
+    assert "LIMIT ? OFFSET ?" in calls[0]
+    assert "instr(" in calls[0]
 
 
 def test_reviewed_lang_glossary_without_source_scope_does_not_scan_module(db):

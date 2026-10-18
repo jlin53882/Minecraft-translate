@@ -45,8 +45,6 @@ ValidHitFn = Callable[[str, dict[str, Any], dict[str, Any]], bool]
 def cache_quality_issues(item: dict[str, Any], translated: str) -> list[str]:
     """Return the shared quality gate used by AI, cache, and DB translation hits."""
     kind = kind_for_item(item)
-    if not kind:
-        return []
     candidate = str(translated or "")
     shielded = item.get("_shielded")
     if shielded is not None and getattr(shielded, "shields", None):

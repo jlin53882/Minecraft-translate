@@ -238,6 +238,38 @@ def test_shared_loop_rejects_structurally_invalid_patchouli_before_cache(monkeyp
     assert added == []
 
 
+@pytest.mark.parametrize("cache_type", ["ftbquests", "kubejs"])
+def test_shared_loop_rejects_plugin_translation_missing_protected_token(
+    monkeypatch, cache_type
+):
+    """FTB/KubeJS 的 AI 回應缺少格式 token 時不可寫入快取。"""
+    added = _patch_loop(monkeypatch)
+    delivered: list[dict] = []
+    item = {
+        "path": f"{cache_type}/entry",
+        "text": "Use %s now",
+        "source_text": "Use %s now",
+        "cache_type": cache_type,
+    }
+
+    def fake_translate(batch, _total):
+        return [{**batch[0], "text": "現在使用"}], "AUTO"
+
+    result = loop_mod.translate_items_with_cache_loop(
+        [item],
+        translate_batch_smart=fake_translate,
+        batch_size_by_type={cache_type: 10},
+        sleep_seconds_between_batches=0,
+        on_translated_item=delivered.append,
+    )
+
+    assert result.status == "DONE"
+    assert delivered[0]["_cache_rejected"] is True
+    assert delivered[0]["text"] == item["source_text"]
+    assert delivered[0]["_quality_issues"]
+    assert added == []
+
+
 # ---------------------------------------------------------------------------
 # C-1：以實際回傳筆數切片
 # ---------------------------------------------------------------------------

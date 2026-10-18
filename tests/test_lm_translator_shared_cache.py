@@ -5,6 +5,8 @@
 
 from unittest.mock import patch
 
+import pytest
+
 
 class TestCacheRule:
     """測試 CacheRule 資料類別。"""
@@ -129,6 +131,21 @@ class TestIsValidHit:
             "source_text": source,
         }
         entry = {"dst": "錯誤\nText"}
+
+        assert _is_valid_hit(entry["dst"], entry, item) is False
+
+    @pytest.mark.parametrize("cache_type", ["ftbquests", "kubejs"])
+    def test_is_valid_hit_rejects_missing_protected_tokens_for_plugins(
+        self, cache_type
+    ):
+        """非 Guide 類型也必須通過共用 token 品質閘門。"""
+        from translation_tool.core.lm_translator_shared_cache import _is_valid_hit
+
+        item = {
+            "cache_type": cache_type,
+            "source_text": "Use %s now",
+        }
+        entry = {"dst": "現在使用", "src": item["source_text"]}
 
         assert _is_valid_hit(entry["dst"], entry, item) is False
 

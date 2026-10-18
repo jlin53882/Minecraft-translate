@@ -106,6 +106,8 @@ from translation_tool.utils.text_matching import (
 
 _ENTRY_COLS = "e.id, e.kind, e.mc_version, e.mod_id, e.key, e.en_us"
 _CHUNK = 400  # SQLite 變數上限相容的批次大小
+_GLOSSARY_SOURCE_CHUNK = 200  # 保留 SQLite 綁定參數上限的安全餘裕
+_GLOSSARY_PAGE_SIZE = 400  # 每次候選查詢的硬上限，避免把整個模組載入記憶體
 # 條目最近一次人工活動的時間（逐筆彙總歷史；entry_activity 是它的觸發器維護版本）
 _VERSION_CONDITION = "e.mc_version = ?"  # _filter_sql 的第一個條件
 _ENTRY_COLUMN_RE = re.compile(r"\be\.")  # 條件是否用到條目欄位
@@ -4246,23 +4248,49 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
         if not normalized_sources:
             return []
 
-        # Fetch the already bounded module/version candidate set once.  The
-        # in-memory prefix index in matching_terms then filters this set against
-        # the current source batch without rebuilding a large SQL OR expression
-        # for every 200 source strings.
-        rows = self._q(
-            f"""
-            SELECT e.key, e.en_us, f.zh_tw
-            FROM entry e
-            JOIN effective f ON f.entry_id = e.id
-            WHERE {" AND ".join(clauses)}
-            ORDER BY e.key, e.id
-            """,
-            tuple(params),
-        )
+        # Push the broad substring filter into SQLite so an entire module is
+        # not materialized for every prompt batch.  The Python matcher remains
+        # authoritative for word boundaries and case-folding; the SQL clause
+        # is deliberately a superset filter only.  Paging keeps every query
+        # bounded even when a module contains many related reviewed terms.
+        candidate_rows: dict[tuple[str, str, str], tuple[str, str, str]] = {}
+        for start in range(0, len(normalized_sources), _GLOSSARY_SOURCE_CHUNK):
+            source_chunk = normalized_sources[start : start + _GLOSSARY_SOURCE_CHUNK]
+            source_match = " OR ".join(
+                "(instr(?, trim(e.en_us)) > 0 OR "
+                "instr(lower(?), lower(trim(e.en_us))) > 0)"
+                for _source in source_chunk
+            )
+            chunk_params = [*params]
+            for source in source_chunk:
+                chunk_params.extend((source, source))
+            offset = 0
+            while True:
+                rows_page = self._q(
+                    f"""
+                    SELECT e.key, e.en_us, f.zh_tw
+                    FROM entry e
+                    JOIN effective f ON f.entry_id = e.id
+                    WHERE {" AND ".join([*clauses, f"({source_match})"])}
+                    ORDER BY e.key, e.id
+                    LIMIT ? OFFSET ?
+                    """,
+                    (*chunk_params, _GLOSSARY_PAGE_SIZE, offset),
+                )
+                for row in rows_page:
+                    if all(isinstance(value, str) for value in row):
+                        candidate_rows.setdefault((row[0], row[1], row[2]), row)
+                if len(rows_page) < _GLOSSARY_PAGE_SIZE:
+                    break
+                offset += len(rows_page)
+
+        rows = list(candidate_rows.values())
         matched_sources = matching_terms(
             normalized_sources, tuple(row[1] for row in rows)
         )
+        matched_source_keys = {
+            term_canonical_key(matched) for matched in matched_sources
+        }
         by_source: dict[str, list[dict[str, str]]] = {}
         for key, en_us, zh_tw in rows:
             if not (
@@ -4272,10 +4300,7 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
                 and en_us.strip()
                 and zh_tw.strip()
                 and quality_state(en_us, zh_tw, kind="lang")[0] == "consistent"
-                and any(
-                    term_canonical_key(en_us) == term_canonical_key(matched)
-                    for matched in matched_sources
-                )
+                and term_canonical_key(en_us) in matched_source_keys
             ):
                 continue
             by_source.setdefault(term_canonical_key(en_us), []).append(

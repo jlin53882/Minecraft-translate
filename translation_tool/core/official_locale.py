@@ -267,13 +267,11 @@ def _reviewed_glossary_for_items(
         batch_sources,
         tuple(display_source for display_source, _targets in by_source.values()),
     )
+    matched_source_keys = {term_canonical_key(matched) for matched in matched_sources}
     return [
         (display_source, next(iter(targets)))
         for canonical, (display_source, targets) in sorted(by_source.items())
-        if any(
-            term_canonical_key(str(matched)) == canonical for matched in matched_sources
-        )
-        and len(targets) == 1
+        if canonical in matched_source_keys and len(targets) == 1
     ][:_MAX_PROMPT_TERMS]
 
 
