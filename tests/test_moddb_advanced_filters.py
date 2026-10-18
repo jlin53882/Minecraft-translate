@@ -59,8 +59,15 @@ def test_programmatic_sort_value_uses_that_basis_natural_direction():
     assert filters.sort_by == "entry_newest"
 
 
+def _calendar_value(year, month, day):
+    """日曆選到某天時回傳的值：該日本地零點換算成 UTC（與執行環境的時區無關）。"""
+    from datetime import datetime
+
+    return datetime(year, month, day).astimezone(UTC)
+
+
 def test_picked_date_without_time_basis_selects_one_and_applies_filter():
-    from datetime import date, datetime
+    from datetime import date
 
     filters, changes = _filters()
     shown = {}
@@ -80,7 +87,7 @@ def test_picked_date_without_time_basis_selects_one_and_applies_filter():
     picker = shown["dialog"]
     assert str(picker.locale) == "zh_TW"
     event = SimpleNamespace(
-        control=SimpleNamespace(value=datetime(2026, 10, 10, 16, tzinfo=UTC))
+        control=SimpleNamespace(value=_calendar_value(2026, 10, 11))
     )
     with mock.patch.object(advanced_filters, "show_snack") as snack:
         picker.on_change(event)
@@ -92,7 +99,7 @@ def test_picked_date_without_time_basis_selects_one_and_applies_filter():
 
     filters._pick_date(filters.end_date, "結束日")
     end_event = SimpleNamespace(
-        control=SimpleNamespace(value=datetime(2026, 10, 12, 16, tzinfo=UTC))
+        control=SimpleNamespace(value=_calendar_value(2026, 10, 13))
     )
     with mock.patch.object(advanced_filters, "show_snack") as snack:
         shown["dialog"].on_change(end_event)
