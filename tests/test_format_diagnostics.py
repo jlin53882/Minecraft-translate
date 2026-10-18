@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import UTC
+
 import pytest
 
 from app.services_impl.moddb_format_diff_service import compare_format_diff
@@ -223,3 +225,18 @@ def test_inline_component_moved_to_own_line_explains_the_cause():
     translated = '<ItemLink id="a:b" />\n新增。\n它運作。'
     result = analyze_format_diagnostics(source, translated, kind="guide")
     assert any("單獨成一行" in m and "ItemLink" in m for m in result.extra_guide_issues)
+
+
+def test_picked_date_converts_utc_calendar_value_back_to_local_day():
+    from datetime import date, datetime, timedelta, timezone
+
+    from app.views.moddb.advanced_filters import picked_date
+
+    local = datetime(2026, 10, 11, tzinfo=timezone(timedelta(hours=8)))
+    assert picked_date(local.astimezone(UTC)) in (
+        local.astimezone().date(),
+        date(2026, 10, 11),
+    )
+    assert picked_date(datetime(2026, 10, 11, tzinfo=UTC)) == date(2026, 10, 11)
+    assert picked_date(datetime(2026, 10, 11)) == date(2026, 10, 11)  # noqa: DTZ001
+    assert picked_date(date(2026, 10, 11)) == date(2026, 10, 11)

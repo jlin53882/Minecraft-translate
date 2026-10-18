@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from datetime import date
+from datetime import date, datetime
 
 import flet as ft
 
@@ -16,6 +16,18 @@ from app.services_impl.moddb_service import (
 from app.ui import kit
 from app.ui.design import C
 from app.ui.snack import show_snack
+
+
+def picked_date(value: date | datetime) -> date:
+    """日曆回傳的時間是 UTC（台灣的 10/11 00:00 會是 10/10 16:00Z），要換回本地日期。"""
+    if not isinstance(value, datetime):
+        return value
+    if value.tzinfo is None:
+        return value.date()
+    offset = value.utcoffset()
+    if offset is not None and not offset and value.time() == datetime.min.time():
+        return value.date()  # 已經是「當天 UTC 零點」，直接就是選到的日期
+    return value.astimezone().date()
 
 
 class AdvancedFilters:
@@ -215,7 +227,7 @@ class AdvancedFilters:
             value = event.control.value
             if not isinstance(value, date):
                 return
-            field.value = value.strftime("%Y-%m-%d")
+            field.value = picked_date(value).isoformat()
             page.update()
             self._custom_changed()
             if not self.error_text.visible:
