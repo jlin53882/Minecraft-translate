@@ -204,7 +204,7 @@ class AdvancedFilters:
         self.toggle_button.text = "收合進階篩選" if self.panel.visible else "進階篩選"
 
     def _pick_date(self, field: ft.TextField, label: str) -> None:
-        """用日曆選日期；選完填入欄位並提醒按 Enter 才會套用。"""
+        """用日曆選日期；選完填入欄位並立即套用篩選。"""
         page = self.panel.page
         try:
             initial = date.fromisoformat((field.value or "").strip())
@@ -216,16 +216,10 @@ class AdvancedFilters:
             if not isinstance(value, date):
                 return
             field.value = value.strftime("%Y-%m-%d")
-            self.time_preset.value = "custom"
-            self.error_text.visible = False
-            self.error_text.value = ""
-            field.focus()
             page.update()
-            show_snack(
-                page,
-                f"已選擇{label} {field.value}，請在日期欄位按 Enter 套用篩選",
-                C.EM,
-            )
+            self._custom_changed()
+            if not self.error_text.visible:
+                show_snack(page, f"已套用{label} {field.value}", C.EM)
 
         page.show_dialog(
             ft.DatePicker(
