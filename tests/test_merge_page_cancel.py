@@ -288,7 +288,7 @@ def test_worker_boundary_error_stays_attributed_to_its_own_task(monkeypatch):
 
     monkeypatch.setattr(view, "_run_merge_service", service_that_cleans_up_then_fails)
     try:
-        handler.set_session(other_session)  # 另一個任務是「最近綁定」的 session
+        handler.set_session(other_session)  # 另一個任務是最後綁定的 session
         worker = threading.Thread(target=view._run_merge_worker, args=("folder",))
         worker.start()
         worker.join()
