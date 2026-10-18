@@ -99,7 +99,10 @@ from translation_tool.utils.cancellation import (
     raise_if_cancelled,
 )
 from translation_tool.utils.species_names import SPECIES_KEY_HINTS, TAXONOMIC_MARKERS
-from translation_tool.utils.text_matching import matching_terms
+from translation_tool.utils.text_matching import (
+    matching_terms,
+    term_canonical_key,
+)
 
 _ENTRY_COLS = "e.id, e.kind, e.mc_version, e.mod_id, e.key, e.en_us"
 _CHUNK = 400  # SQLite 變數上限相容的批次大小
@@ -4243,6 +4246,10 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
         if not normalized_sources:
             return []
 
+        # Fetch the already bounded module/version candidate set once.  The
+        # in-memory prefix index in matching_terms then filters this set against
+        # the current source batch without rebuilding a large SQL OR expression
+        # for every 200 source strings.
         rows = self._q(
             f"""
             SELECT e.key, e.en_us, f.zh_tw
@@ -4265,10 +4272,13 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
                 and en_us.strip()
                 and zh_tw.strip()
                 and quality_state(en_us, zh_tw, kind="lang")[0] == "consistent"
-                and en_us in matched_sources
+                and any(
+                    term_canonical_key(en_us) == term_canonical_key(matched)
+                    for matched in matched_sources
+                )
             ):
                 continue
-            by_source.setdefault(en_us, []).append(
+            by_source.setdefault(term_canonical_key(en_us), []).append(
                 {"key": key, "en_us": en_us, "zh_tw": zh_tw}
             )
 

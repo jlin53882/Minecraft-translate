@@ -27,7 +27,7 @@ from translation_tool.core.guide_translation import (
 from translation_tool.core.lm_batch_planner import count_planned_batches
 from translation_tool.core.lm_config_rules import (
     validate_api_keys,
-    value_fully_translated,
+    value_fully_translated,  # noqa: F401 - retained for existing test seams
 )
 from translation_tool.core.lm_moddb_context import strip_runtime_context
 from translation_tool.core.lm_translator_db import (
@@ -51,6 +51,7 @@ from translation_tool.core.lm_translator_scan import (
 from translation_tool.core.lm_translator_shared import (
     CacheRule,
     TranslatorHooks,
+    _is_valid_hit,
     prepare_translator_items,
     run_translator_skeleton,
 )
@@ -308,19 +309,10 @@ def _split_directory_items(
     all_items: list[dict[str, Any]],
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """由 shared cache layer 統一拆分 hit/miss，避免 generator 自行重複比對。"""
-
-    def is_valid_hit(dst: str, entry: dict[str, Any], item: dict[str, Any]) -> bool:
-        if not value_fully_translated(dst):
-            return False
-        if item.get("cache_type") == "lang":
-            source = item.get("source_text") or item.get("text") or ""
-            return bool(source) and entry.get("src") == source
-        return True
-
     return prepare_translator_items(
         all_items,
         cache_rules=_directory_cache_rules(),
-        is_valid_hit=is_valid_hit,
+        is_valid_hit=_is_valid_hit,
         cache_provider=get_cache_dict_ref,
         # Guides used to be stored in patchouli; read that namespace once
         # after moving .md/.txt guides to the md bucket.
@@ -647,6 +639,8 @@ def _run_directory_translation(
         remaining,
         total_for_smart=total,
         translate_batch_smart=translate_batch,
+        # Real provider requests are throttled by ModelQuotaRegistry.
+        sleep_seconds_between_batches=0.0,
         write_new_cache=write_new_cache,
         cache_rules=_directory_cache_rules(),
         reload_cache=False,

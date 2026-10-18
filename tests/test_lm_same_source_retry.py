@@ -662,6 +662,65 @@ def test_quality_retry_rpm_retry_after_updates_shared_scheduler(
         quota.clear()
 
 
+def test_chatgpt_quality_retry_retry_after_updates_shared_scheduler(
+    monkeypatch, configure_batch
+):
+    from types import SimpleNamespace
+
+    from translation_tool.core.openai_codex_client import ChatGPTAPIError
+
+    configure_batch(retry=False)
+    quota = get_model_quota_registry()
+    quota.clear()
+    runtime = SimpleNamespace(
+        provider="chatgpt",
+        batch_interval_sec=4.0,
+        missing_models=set(),
+        quota_owner=object(),
+        key_cycle=SimpleNamespace(mark_failed=lambda **_kwargs: None),
+    )
+    try:
+        main._record_quality_retry_failure(
+            runtime,
+            ChatGPTAPIError(
+                "rate_limit_exceeded",
+                status=429,
+                error_type="rate_limit_error",
+                retry_after=30,
+            ),
+            0,
+            "same-source-test-model",
+        )
+        assert quota.reserve_request_slot("chatgpt", "same-source-test-model", 4) > 29
+    finally:
+        quota.clear()
+
+
+def test_quality_retry_health_update_failure_keeps_first_translation(
+    monkeypatch, configure_batch
+):
+    configure_batch(retry=False)
+    monkeypatch.setattr(
+        main,
+        "_record_quality_retry_failure",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("health")),
+    )
+    item = _item("Use %s\nnext", 0)
+
+    result, status, calls = _run_with_api(
+        monkeypatch,
+        [item],
+        [
+            lambda call: _reply(call, {"Use %s\nnext": "使用 next"}),
+            _http_error(429),
+        ],
+    )
+
+    assert status == "AUTO"
+    assert len(calls) == 2
+    assert result == [{**item, "text": "使用 next"}]
+
+
 def test_format_repair_runs_before_the_next_batch_is_requested(
     monkeypatch, configure_batch
 ):

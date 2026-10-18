@@ -436,6 +436,8 @@ def _translate_rows(
             items,
             total_for_smart=len(items),
             translate_batch_smart=translate_batch,
+            # Real provider requests are throttled by ModelQuotaRegistry.
+            sleep_seconds_between_batches=0.0,
             write_new_cache=options.new_cache_shard,
             reload_cache=options.write_cache,
             cache_add=add_to_cache if options.write_cache else _noop_cache,

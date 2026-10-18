@@ -12,7 +12,10 @@
 正常批次、內部縮批與品質 retry 使用同一個 slot；品質 retry 仍只嘗試一次，且先取得
 同一模型的 quota claim／probe lease。429／503 只更新必要的 key／模型健康訊號，不會呼叫
 會等待、縮批或切換模型的完整錯誤狀態機，也不會因此增加品質 retry 次數。等待中的取消會
-回收尚未送出的 slot；品質 retry 收到 `Retry-After` 時會把時間寫回共用 scheduler。
+回收尚未送出的 slot；已提交的 slot 不會回收或重用。取消中間等待者時，後面的未提交 slot
+會依序前移；品質 retry 收到 `Retry-After` 時，所有尚未送出的 slot 會依新的冷卻時間重排。
+正式 provider 路線把 shared loop 的額外 sleep 設為 `0`，避免與 scheduler 雙重等待；自訂
+或測試 translator 仍可使用 shared loop 的明確 sleep 參數。
 
 | 項目 | 說明 |
 |---|---|
@@ -65,6 +68,18 @@ for h in get_key_health_snapshot():   # 依設定檔順序
 - key 層級（403）的冷卻是固定秒數；模型層級的 RPD 才對齊太平洋時間午夜。
 - 假設所有 key 同專案；若日後要支援多專案，RPD 需改記在（專案 × 模型）。
 - 設定頁尚未提供 `key_failure_cooldown_sec` 欄位，目前需直接編輯 `config.json`。
+
+## 品質重試與共用品質准入
+
+品質 retry 的請求失敗時，只更新必要的 provider／模型／key 健康訊號，不會再次進入一般
+批次的錯誤狀態機。ChatGPT Responses 的 429 與 `Retry-After` 會寫入同一個 provider/model
+的 scheduler；Gemini 則讀取回應標頭或 `RetryInfo`，沒有可解析的值時使用本批間隔作為保守
+延後。品質 retry 的健康更新是 best effort：更新狀態本身失敗時仍保留第一次有效譯文，
+且不增加第二次品質 retry。
+
+AI 回應、Mod DB 命中、一般快取命中與 `.md` 舊 `patchouli` fallback 都共用 token／指南
+結構品質准入。未通過者回到 AI 待翻譯清單，不會寫入快取或 Mod DB；Patchouli 元件遺失
+等硬格式問題不會因為來源是快取或資料庫而被繞過。
 
 ## 相關檔案
 

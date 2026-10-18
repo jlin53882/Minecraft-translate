@@ -139,8 +139,9 @@ def split_items_by_db(
     root: str | Path,
     *,
     is_translated=None,
+    is_valid_hit=None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    """把待翻譯項目拆成「資料庫命中」與「未命中」；命中項目的 ``text`` 換成譯文。"""
+    """拆分資料庫命中；命中也必須通過呼叫端提供的品質准入。"""
     if resolver is None:
         return [], items
     hits: list[dict[str, Any]] = []
@@ -151,7 +152,10 @@ def split_items_by_db(
         if hit and hit.zh_tw and (is_translated is None or is_translated(hit.zh_tw)):
             new_item = dict(item)
             new_item["text"] = hit.zh_tw
-            hits.append(new_item)
+            if is_valid_hit is None or is_valid_hit(new_item, hit.zh_tw):
+                hits.append(new_item)
+            else:
+                rest.append(item)
         else:
             rest.append(item)
     return hits, rest

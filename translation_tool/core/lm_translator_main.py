@@ -599,19 +599,23 @@ def _wait_for_request_slot(runtime: _BatchRuntime, model_name: str) -> None:
     """Throttle every provider request through the shared model clock."""
     quota = get_model_quota_registry()
     provider = getattr(runtime, "provider", runtime.lm_cfg.get("provider", "gemini"))
-    wait_sec, reservation = quota.reserve_request_slot_with_token(
+    _wait_sec, reservation = quota.reserve_request_slot_with_token(
         provider,
         model_name,
         runtime.batch_interval_sec,
     )
     try:
-        if wait_sec > 0:
-            interruptible_sleep(wait_sec)
-        raise_if_cancelled()
+        while True:
+            wait_sec = quota.request_slot_wait(reservation)
+            waited_target = reservation.target_at if wait_sec > 0 else None
+            if wait_sec > 0:
+                interruptible_sleep(wait_sec)
+            raise_if_cancelled()
+            if quota.commit_request_slot(reservation, waited_target=waited_target):
+                return
     except BaseException:
         quota.cancel_request_slot(reservation)
         raise
-    quota.commit_request_slot(reservation)
 
 
 def _build_batch_prompt_context(
@@ -1322,6 +1326,24 @@ def _record_quality_retry_failure(
     quota = get_model_quota_registry()
     try:
         if isinstance(error, ChatGPTAPIError):
+            code = str(error.code or "").lower()
+            error_type = str(error.error_type or "").lower()
+            is_rate_limited = (
+                error.status == 429
+                or code in {"rate_limit_exceeded", "rate_limit_error", "slow_down"}
+                or error_type == "rate_limit_error"
+            )
+            if is_rate_limited and not _is_chatgpt_quota_exhaustion(error):
+                try:
+                    retry_after = max(0.0, float(error.retry_after or 0.0))
+                except (TypeError, ValueError):
+                    retry_after = 0.0
+                if retry_after <= 0:
+                    retry_after = max(1.0, runtime.batch_interval_sec)
+                quota.defer_request_slot(runtime.provider, model_name, retry_after)
+                log_warning(
+                    f"[品質重試] ChatGPT RPM 限制，已將共用 scheduler 延後 {retry_after:g} 秒"
+                )
             return
         status = (
             error.response.status_code
@@ -1343,10 +1365,23 @@ def _record_quality_retry_failure(
             if quota_kind == "rpd":
                 quota.mark_exhausted(model_name)
             elif quota_kind == "rpm":
-                quota.defer_request_slot(runtime.provider, model_name, retry_after)
+                response = getattr(error, "response", None)
+                error_json = {}
+                try:
+                    error_json = response.json() if response is not None else {}
+                except (AttributeError, ValueError):
+                    error_json = {}
+                retry_after_value = _parse_gemini_retry_after_seconds(
+                    response, error_json
+                )
+                if retry_after_value is None or retry_after_value <= 0:
+                    retry_after_value = max(1.0, runtime.batch_interval_sec)
+                quota.defer_request_slot(
+                    runtime.provider, model_name, retry_after_value
+                )
                 log_warning(
                     f"[品質重試] RPM 限制（{remote_message or 'unknown'}），"
-                    f"共用 scheduler 延後 {retry_after} 秒"
+                    f"共用 scheduler 延後 {retry_after_value:g} 秒"
                 )
             else:
                 runtime.key_cycle.mark_failed()
@@ -1607,7 +1642,12 @@ def _retry_quality_translations(
         )
     except Exception as exc:  # noqa: BLE001 - optional quality retry must not fail a valid batch
         _clear_quota_on_http_success(quota, exc, model_name, started)
-        _record_quality_retry_failure(runtime, exc, model_index, model_name)
+        try:
+            _record_quality_retry_failure(runtime, exc, model_index, model_name)
+        except Exception as health_error:  # noqa: BLE001 - health is best effort
+            log_warning(
+                f"[品質重試] 更新模型健康狀態失敗，仍保留第一次譯文：{_retry_error_detail(health_error)}"
+            )
         log_warning(
             f"[品質重試] 重試請求失敗，{candidate_count} 筆保留第一次譯文"
             f"（{_retry_error_detail(exc)}）"

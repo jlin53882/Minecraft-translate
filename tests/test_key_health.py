@@ -923,6 +923,45 @@ def test_retry_after_defers_the_shared_request_slot():
     assert reg.reserve_request_slot("gemini", "m1", 4) > 29
 
 
+def test_cancelled_middle_slot_reflows_later_waiters_without_collision():
+    from translation_tool.core.lm_key_health import ModelQuotaRegistry
+
+    clock = Clock()
+    reg = ModelQuotaRegistry(request_clock=clock)
+    _wait_a, slot_a = reg.reserve_request_slot_with_token("gemini", "m1", 4)
+    _wait_b, slot_b = reg.reserve_request_slot_with_token("gemini", "m1", 4)
+    _wait_c, slot_c = reg.reserve_request_slot_with_token("gemini", "m1", 4)
+
+    assert reg.commit_request_slot(slot_a) is True
+    reg.cancel_request_slot(slot_b)
+    assert reg.request_slot_wait(slot_c) == pytest.approx(4)
+
+    clock.advance(4)
+    assert reg.commit_request_slot(slot_c) is True
+    _wait_d, slot_d = reg.reserve_request_slot_with_token("gemini", "m1", 4)
+    assert reg.request_slot_wait(slot_d) == pytest.approx(4)
+
+
+def test_retry_after_reflows_already_queued_slots_before_they_send():
+    from translation_tool.core.lm_key_health import ModelQuotaRegistry
+
+    clock = Clock()
+    reg = ModelQuotaRegistry(request_clock=clock)
+    _wait_a, slot_a = reg.reserve_request_slot_with_token("gemini", "m1", 4)
+    _wait_b, slot_b = reg.reserve_request_slot_with_token("gemini", "m1", 4)
+    _wait_c, slot_c = reg.reserve_request_slot_with_token("gemini", "m1", 4)
+
+    assert reg.commit_request_slot(slot_a) is True
+    reg.defer_request_slot("gemini", "m1", 30)
+    assert reg.request_slot_wait(slot_b) == pytest.approx(30)
+    assert reg.request_slot_wait(slot_c) == pytest.approx(34)
+
+    clock.advance(30)
+    assert reg.commit_request_slot(slot_b) is True
+    clock.advance(4)
+    assert reg.commit_request_slot(slot_c) is True
+
+
 def test_uncertain_window_is_visible_to_readers_and_consistent_with_gating():
     """不確定視窗（沒有 tzdata）：快照／is_exhausted 與實際門控一致，並標示「確認中」。"""
     from translation_tool.core.lm_key_health import ModelQuotaRegistry

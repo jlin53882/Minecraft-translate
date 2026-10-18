@@ -13,13 +13,11 @@ from typing import Any
 
 from translation_tool.core.lm_batch_budget import select_batch_size
 from translation_tool.core.lm_batch_planner import next_batch
-from translation_tool.core.lm_format_policy import kind_for_item
 from translation_tool.core.lm_translator_shared_cache import (
     CacheRule,
+    cache_quality_issues,
     get_default_cache_rules,
 )
-from translation_tool.plugins.shared.rich_text_shield import unshield_text
-from translation_tool.translation_db.quality import translation_issues
 from translation_tool.utils.cache_manager import (
     add_to_cache,
     reload_translation_cache,
@@ -56,15 +54,7 @@ def _is_valid_result(it: Any) -> bool:
 
 def _quality_issues_for_cache(it: dict[str, Any]) -> list[str]:
     """Run the shared quality gate before any plugin can write translation cache."""
-    kind = kind_for_item(it)
-    if not kind:
-        return []
-    source = str(it.get("source_text") or "")
-    translated = str(it.get("text") or "")
-    shielded = it.get("_shielded")
-    if shielded is not None and getattr(shielded, "shields", None):
-        translated = unshield_text(translated, shielded.shields)
-    return translation_issues(source, translated, kind=kind)
+    return cache_quality_issues(it, str(it.get("text") or ""))
 
 
 def _lm_config() -> dict[str, Any]:
@@ -257,8 +247,13 @@ def translate_items_with_cache_loop(
 
             issues = _quality_issues_for_cache(it)
             if issues:
-                it["_cache_rejected"] = True
-                it["_quality_issues"] = tuple(issues)
+                it = {
+                    **it,
+                    "text": src,
+                    "_untranslated": True,
+                    "_cache_rejected": True,
+                    "_quality_issues": tuple(issues),
+                }
 
             if on_translated_item is not None:
                 try:
@@ -381,7 +376,11 @@ def translate_items_with_cache_loop(
             )
 
         if sleep_seconds_between_batches > 0:
-            time.sleep(sleep_seconds_between_batches)
+            # This parameter remains for callers that inject a non-provider
+            # translator. Real providers pass 0 and use the shared scheduler.
+            from translation_tool.utils.cancellation import interruptible_sleep
+
+            interruptible_sleep(sleep_seconds_between_batches)
 
         if actual_processed_in_this_batch == 0:
             last_error = f"此批次未能翻譯任何內容 (Status: {status})"

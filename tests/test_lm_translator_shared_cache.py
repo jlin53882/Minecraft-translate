@@ -118,6 +118,20 @@ class TestIsValidHit:
         # 空的 source_text 應該回傳 False
         assert _is_valid_hit("你好", entry, item) is False
 
+    def test_is_valid_hit_rejects_invalid_patchouli_structure(self):
+        """快取命中也必須通過 Patchouli 元件結構檢查。"""
+        from translation_tool.core.lm_translator_shared_cache import _is_valid_hit
+
+        source = '<ItemLink id="example:item" />\nText'
+        item = {
+            "cache_type": "patchouli",
+            "_kind": "patchouli",
+            "source_text": source,
+        }
+        entry = {"dst": "錯誤\nText"}
+
+        assert _is_valid_hit(entry["dst"], entry, item) is False
+
 
 class TestFastSplitItemsByCache:
     """測試 fast_split_items_by_cache 函數。"""

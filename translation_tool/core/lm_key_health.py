@@ -268,7 +268,7 @@ DEFAULT_PROBE_LEASE_SEC = 660.0
 
 @dataclass
 class _RequestSlotReservation:
-    """A not-yet-sent scheduler slot that can be returned on cancellation."""
+    """A scheduler slot that can be cancelled until the request is sent."""
 
     key: tuple[str, str]
     target_at: float
@@ -296,8 +296,10 @@ class ModelQuotaRegistry:
         clock: Callable[[], float] = time.time,
         probe_interval: float = DEFAULT_PROBE_INTERVAL_SEC,
         lease_ttl: float = DEFAULT_PROBE_LEASE_SEC,
+        request_clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self._clock = clock
+        self._request_clock = request_clock
         self._probe_interval = probe_interval
         self._lease_ttl = lease_ttl
         self._lock = threading.Lock()
@@ -307,6 +309,8 @@ class ModelQuotaRegistry:
         self._next_probe: dict[str, float] = {}
         self._lease: dict[str, tuple[object, float]] = {}  # model -> (owner, 到期時間)
         self._next_request_at: dict[tuple[str, str], float] = {}
+        self._request_slots: dict[tuple[str, str], list[_RequestSlotReservation]] = {}
+        self._request_cooldown_until: dict[tuple[str, str], float] = {}
 
     def now(self) -> float:
         return self._clock()
@@ -416,9 +420,12 @@ class ModelQuotaRegistry:
         batches, internal token-shrunk batches, and quality retries use one
         provider/model clock. The caller performs the interruptible sleep.
         """
-        wait_sec, _reservation = self.reserve_request_slot_with_token(
+        wait_sec, reservation = self.reserve_request_slot_with_token(
             provider, model, interval_sec
         )
+        # The legacy API has no cancellation handle.  Preserve its historical
+        # meaning: reserving the slot consumes it immediately.
+        self.commit_request_slot(reservation, force=True)
         return wait_sec
 
     def reserve_request_slot_with_token(
@@ -426,43 +433,109 @@ class ModelQuotaRegistry:
     ) -> tuple[float, _RequestSlotReservation]:
         """Reserve a slot and return a token that can be cancelled before send."""
         interval = max(0.0, float(interval_sec))
-        now = time.monotonic()
+        now = self._request_clock()
         key = (str(provider), str(model))
         with self._lock:
-            target = max(now, self._next_request_at.get(key, now))
+            slots = self._request_slots.setdefault(key, [])
+            self._prune_request_slots_locked(key, now)
+            slots = self._request_slots.setdefault(key, [])
+            target = max(
+                now,
+                self._next_request_at.get(key, now),
+                self._request_cooldown_until.get(key, now),
+            )
             self._next_request_at[key] = target + interval
-        return max(0.0, target - now), _RequestSlotReservation(
-            key=key, target_at=target, interval_sec=interval
-        )
+            reservation = _RequestSlotReservation(
+                key=key, target_at=target, interval_sec=interval
+            )
+            slots.append(reservation)
+        return max(0.0, target - now), reservation
 
-    def commit_request_slot(self, reservation: _RequestSlotReservation) -> None:
-        """Mark a reservation as sent so later cancellation cannot reclaim it."""
-        reservation.committed = True
+    def request_slot_wait(self, reservation: _RequestSlotReservation) -> float:
+        """Return the current wait, reflecting cancellations and cooldown changes."""
+        now = self._request_clock()
+        with self._lock:
+            if reservation.cancelled or reservation.committed:
+                return 0.0
+            self._prune_request_slots_locked(reservation.key, now)
+            return max(0.0, reservation.target_at - now)
+
+    def commit_request_slot(
+        self,
+        reservation: _RequestSlotReservation,
+        *,
+        waited_target: float | None = None,
+        force: bool = False,
+    ) -> bool:
+        """Commit a slot after its target arrives or an unchanged wait completes."""
+        now = self._request_clock()
+        with self._lock:
+            if reservation.cancelled or reservation.committed:
+                return False
+            self._prune_request_slots_locked(reservation.key, now)
+            target_unchanged = (
+                waited_target is not None and reservation.target_at == waited_target
+            )
+            if not force and now < reservation.target_at and not target_unchanged:
+                return False
+            reservation.committed = True
+            return True
 
     def cancel_request_slot(self, reservation: _RequestSlotReservation) -> None:
         """Return one queued slot and shift later reservations forward."""
         if reservation.committed or reservation.cancelled:
             return
-        now = time.monotonic()
+        now = self._request_clock()
         with self._lock:
-            current = self._next_request_at.get(reservation.key)
-            if current is not None and current >= reservation.target_at:
-                self._next_request_at[reservation.key] = max(
-                    now, current - reservation.interval_sec
-                )
+            if reservation.committed or reservation.cancelled:
+                return
             reservation.cancelled = True
+            self._recompute_request_slots_locked(reservation.key, now)
 
     def defer_request_slot(self, provider: str, model: str, delay_sec: float) -> None:
         """Push the shared clock forward when a provider supplies Retry-After."""
         delay = max(0.0, float(delay_sec))
         if delay <= 0:
             return
-        now = time.monotonic()
+        now = self._request_clock()
         key = (str(provider), str(model))
         with self._lock:
-            self._next_request_at[key] = max(
-                self._next_request_at.get(key, now), now + delay
+            self._request_cooldown_until[key] = max(
+                self._request_cooldown_until.get(key, now), now + delay
             )
+            self._recompute_request_slots_locked(key, now)
+
+    def _prune_request_slots_locked(self, key: tuple[str, str], now: float) -> None:
+        slots = self._request_slots.get(key)
+        if not slots:
+            return
+        retained = [
+            slot
+            for slot in slots
+            if not slot.cancelled
+            and (not slot.committed or slot.target_at + slot.interval_sec >= now)
+        ]
+        if retained:
+            self._request_slots[key] = retained
+        else:
+            self._request_slots.pop(key, None)
+            self._next_request_at.pop(key, None)
+
+    def _recompute_request_slots_locked(self, key: tuple[str, str], now: float) -> None:
+        """Rebuild only unsent targets after a cancellation or provider cooldown."""
+        self._prune_request_slots_locked(key, now)
+        slots = self._request_slots.get(key, [])
+        target = max(now, self._request_cooldown_until.get(key, now))
+        for slot in slots:
+            if slot.committed:
+                target = max(target, slot.target_at + slot.interval_sec)
+                continue
+            slot.target_at = target
+            target = slot.target_at + slot.interval_sec
+        if slots:
+            self._next_request_at[key] = target
+        else:
+            self._next_request_at.pop(key, None)
 
     def renew(self, model: str, owner: object, lease_sec: float) -> bool:
         """``owner`` 仍持有這個模型的探測租約時續租；租約已被收回或換人則不動。"""
@@ -568,6 +641,8 @@ class ModelQuotaRegistry:
             self._next_probe.clear()
             self._lease.clear()
             self._next_request_at.clear()
+            self._request_slots.clear()
+            self._request_cooldown_until.clear()
 
 
 _MODEL_QUOTA_REGISTRY = ModelQuotaRegistry()

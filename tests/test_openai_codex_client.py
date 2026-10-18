@@ -371,6 +371,28 @@ def test_sse_temporary_usage_errors_reach_bounded_batch_retry(monkeypatch, event
     assert waits == [1]
 
 
+def test_sse_rate_limit_code_is_classified_as_http_429():
+    response = _FakeStreamResponse(
+        [
+            {
+                "type": "response.failed",
+                "response": {
+                    "status": "failed",
+                    "error": {
+                        "code": "rate_limit_exceeded",
+                        "message": "Too many requests",
+                    },
+                },
+            }
+        ]
+    )
+
+    with pytest.raises(client.ChatGPTAPIError) as exc_info:
+        client._consume_stream(response, None)
+
+    assert exc_info.value.status == 429
+
+
 @pytest.mark.parametrize(
     "code",
     [

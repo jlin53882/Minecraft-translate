@@ -354,6 +354,23 @@ def test_reviewed_glossary_matches_terms_inside_patchouli_sentences() -> None:
     assert "Pressured → 受壓" not in prompt
 
 
+def test_reviewed_glossary_omits_casefolded_conflicts() -> None:
+    items = [
+        {
+            "source_text": "The Pressure Chamber processes compressed air.",
+            "text": "The Pressure Chamber processes compressed air.",
+            "_reviewed_glossary": [
+                {"en_us": "Pressure Chamber", "zh_tw": "壓力室"},
+                {"en_us": "pressure chamber", "zh_tw": "氣壓室"},
+            ],
+        }
+    ]
+
+    prompt = build_translation_prompt("基礎", items, profile="patch")
+
+    assert "Pressure Chamber" not in prompt
+
+
 def test_moddb_context_passes_version_and_source_scope_to_glossary_loader() -> None:
     items = build_items([(1, KIND_LANG, "mod-a", "a", "Cobblestone")])
     calls = []

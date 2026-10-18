@@ -546,6 +546,29 @@ def test_reviewed_lang_glossary_matches_terms_inside_source_sentences(db):
     ) == [{"key": "pressure", "en_us": "Pressure Chamber", "zh_tw": "壓力室"}]
 
 
+def test_reviewed_lang_glossary_loads_scoped_candidates_once(db, monkeypatch):
+    db.ingest(
+        "1.21.1",
+        [ScanItem(KIND_LANG, "foo", "pressure", "Pressure Chamber", "壓力室")],
+    )
+    row = db.list_entries("1.21.1", limit=10)[0][0]
+    db.review_manual(row.id, expected_zh_tw=row.zh_tw, actor="tester")
+    calls = []
+    real_query = db._q
+
+    def query(sql, params=()):
+        if "FROM entry e" in sql and "f.review_status = 'reviewed'" in sql:
+            calls.append(sql)
+        return real_query(sql, params)
+
+    monkeypatch.setattr(db, "_q", query)
+
+    assert db.reviewed_lang_glossary(
+        "foo", "1.21.1", ("The Pressure Chamber processes air.",)
+    ) == [{"key": "pressure", "en_us": "Pressure Chamber", "zh_tw": "壓力室"}]
+    assert len(calls) == 1
+
+
 def test_reviewed_lang_glossary_without_source_scope_does_not_scan_module(db):
     assert db.reviewed_lang_glossary("foo") == []
 
@@ -576,3 +599,24 @@ def test_reviewed_lang_glossary_is_version_scoped_and_omits_conflicts(db):
     assert db.reviewed_lang_glossary(
         "foo", "1.20.1", source_texts=("Pressure Chamber",)
     ) == [{"key": "pressure.old", "en_us": "Pressure Chamber", "zh_tw": "壓力室"}]
+
+
+def test_reviewed_lang_glossary_matches_case_and_outer_space_variants(db):
+    db.ingest(
+        "1.21.1",
+        [
+            ScanItem(
+                KIND_LANG,
+                "foo",
+                "pressure",
+                " Pressure Chamber ",
+                "壓力室",
+            )
+        ],
+    )
+    row = db.list_entries("1.21.1", limit=10)[0][0]
+    db.review_manual(row.id, expected_zh_tw=row.zh_tw, actor="tester")
+
+    assert db.reviewed_lang_glossary(
+        "foo", "1.21.1", ("The pressure chamber processes air.",)
+    ) == [{"key": "pressure", "en_us": " Pressure Chamber ", "zh_tw": "壓力室"}]

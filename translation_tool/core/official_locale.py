@@ -20,7 +20,7 @@ from translation_tool.core.lm_format_policy import (
     normalize_legacy_prompt,
 )
 from translation_tool.utils.app_paths import get_resource_root
-from translation_tool.utils.text_matching import matching_terms
+from translation_tool.utils.text_matching import matching_terms, term_canonical_key
 
 logger = logging.getLogger(__name__)
 
@@ -242,7 +242,7 @@ def _reviewed_glossary_for_items(
             if isinstance(source, str) and source.strip()
         )
     )
-    by_source: dict[str, set[str]] = {}
+    by_source: dict[str, tuple[str, set[str]]] = {}
     for item in items:
         reviewed = item.get("_reviewed_glossary")
         if not isinstance(reviewed, list):
@@ -257,13 +257,23 @@ def _reviewed_glossary_for_items(
                 and source.strip()
                 and target.strip()
             ):
-                by_source.setdefault(source, set()).add(target)
+                canonical = term_canonical_key(source)
+                _display_source, targets = by_source.setdefault(
+                    canonical, (source, set())
+                )
+                targets.add(target)
 
-    matched_sources = matching_terms(batch_sources, tuple(by_source))
+    matched_sources = matching_terms(
+        batch_sources,
+        tuple(display_source for display_source, _targets in by_source.values()),
+    )
     return [
-        (source, next(iter(targets)))
-        for source, targets in sorted(by_source.items())
-        if source in matched_sources and len(targets) == 1
+        (display_source, next(iter(targets)))
+        for canonical, (display_source, targets) in sorted(by_source.items())
+        if any(
+            term_canonical_key(str(matched)) == canonical for matched in matched_sources
+        )
+        and len(targets) == 1
     ][:_MAX_PROMPT_TERMS]
 
 

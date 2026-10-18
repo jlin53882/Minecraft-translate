@@ -38,25 +38,32 @@ def contains_term(source: str, term: str) -> bool:
         start = index + 1
 
 
+def term_canonical_key(term: str) -> str:
+    """Normalize a glossary source without losing the original display text."""
+    return term.strip().casefold() if isinstance(term, str) else ""
+
+
 def matching_terms(sources: tuple[str, ...], terms: tuple[str, ...]) -> set[str]:
     """Return terms that occur in at least one source using a prefix index.
 
     The index avoids testing every term against every source.  A final
     ``contains_term`` call keeps the word-boundary contract authoritative.
     """
-    normalized_terms: dict[str, str] = {}
+    normalized_terms: dict[str, list[str]] = {}
     for term in terms:
         if not isinstance(term, str):
             continue
-        normalized = term.strip().casefold()
+        normalized = term_canonical_key(term)
         if normalized:
-            normalized_terms.setdefault(normalized, term)
+            normalized_terms.setdefault(normalized, []).append(term)
     if not normalized_terms:
         return set()
 
     prefix_index: dict[str, list[tuple[str, str]]] = {}
-    for normalized, original in normalized_terms.items():
-        prefix_index.setdefault(normalized[:3], []).append((original, normalized))
+    for normalized, originals in normalized_terms.items():
+        prefix_index.setdefault(normalized[:3], []).extend(
+            (original, normalized) for original in originals
+        )
 
     matched: set[str] = set()
     for source in sources:
@@ -79,4 +86,8 @@ def _is_word_char(char: str) -> bool:
     return bool(char) and (char.isalnum() or char == "_")
 
 
-__all__ = ["contains_term", "matching_terms"]
+__all__ = [
+    "contains_term",
+    "matching_terms",
+    "term_canonical_key",
+]

@@ -67,7 +67,6 @@ from translation_tool.utils.cache_manager import (
 from translation_tool.utils.cancellation import (
     TaskCancelled,
     cancel_scope,
-    interruptible_sleep,
     is_cancelled,
 )
 from translation_tool.utils.config_manager import load_config
@@ -87,6 +86,29 @@ _PROFILE_LABELS = {
     "kubejs": "KubeJS",
     "md": "Markdown",
 }
+
+
+class _SequenceSuffixView(Sequence[dict[str, Any]]):
+    """Read-only suffix view that avoids copying the full remaining item list."""
+
+    def __init__(self, items: Sequence[dict[str, Any]], start: int) -> None:
+        self._items = items
+        self._start = max(0, int(start))
+
+    def __len__(self) -> int:
+        return max(0, len(self._items) - self._start)
+
+    def __getitem__(self, index: int):
+        if isinstance(index, slice):
+            start, stop, step = index.indices(len(self))
+            return [
+                self._items[self._start + offset] for offset in range(start, stop, step)
+            ]
+        if index < 0:
+            index += len(self)
+        if index < 0 or index >= len(self):
+            raise IndexError(index)
+        return self._items[self._start + index]
 
 
 def cache_profile_label(cache_type: str | None) -> str:
@@ -473,11 +495,11 @@ class _RepairRunProgress:
             self._canonical_metadata_submitted += 1
 
     def _first_canonical_batch_size(self, submitted: int, *, check=None) -> int:
-        remaining = self._items[submitted:]
-        if not remaining:
+        if submitted >= len(self._items):
             return 0
         batch, _cache_type = next_batch(
-            remaining,
+            self._items,
+            start=submitted,
             lm_cfg=self.lm_cfg,
             batch_size_for_type=lambda cache_type: _get_default_batch_size(
                 cache_type, None
@@ -490,7 +512,7 @@ class _RepairRunProgress:
 
     def _replan_canonical(self, check) -> None:
         submitted = sum(self.profile_items_submitted.values())
-        remaining = self._items[submitted:]
+        remaining = _SequenceSuffixView(self._items, submitted)
         fixed = self._canonical_fixed_input_tokens()
         first_batch, _cache_type = next_batch(
             remaining,
@@ -502,7 +524,9 @@ class _RepairRunProgress:
             select_size=select_batch_size,
             check=lambda: _check_batch_planning(None, check),
         )
-        remaining_after_first = remaining[len(first_batch) :] if first_batch else []
+        remaining_after_first = _SequenceSuffixView(
+            self._items, submitted + len(first_batch)
+        )
         batches = 0
         if first_batch:
             batches = 1 + count_planned_batches(
@@ -1546,7 +1570,7 @@ def _translate_snapshot(
     report: SameSourceAIRepairReport,
     cancelled,
 ) -> None:
-    items, tracker, lm_cfg, sleep_seconds = _initialize_snapshot_run(
+    items, tracker, lm_cfg = _initialize_snapshot_run(
         db, entries, session, report, options
     )
     cache_keys_to_save: dict[str, dict[str, int | None]] = {}
@@ -1568,12 +1592,6 @@ def _translate_snapshot(
         if stop_after_batch:
             break
         items = remainder
-        if items and sleep_seconds > 0:
-            try:
-                interruptible_sleep(sleep_seconds)
-            except TaskCancelled:
-                _set_not_submitted_candidates(report, items)
-                raise
     _finish_snapshot(db, options, session, report, tracker)
 
 
@@ -1737,8 +1755,6 @@ def _initialize_snapshot_run(db, entries, session, report, options):
         lm_cfg=lm_cfg,
     )
     report.planned_batches = tracker.live()["planned_batches_total"]
-    rate_cfg = lm_cfg.get("rate_limit", {}) if isinstance(lm_cfg, dict) else {}
-    sleep_seconds = float(rate_cfg.get("sleep_seconds_between_batches", 0.0) or 0.0)
     total = len(candidates)
     operation = "格式修復" if report.mode == "quality_mismatch" else "舊 AI 重翻"
     if report.mode == "quality_mismatch":
@@ -1772,7 +1788,7 @@ def _initialize_snapshot_run(db, entries, session, report, options):
     if not options.write_cache:
         report.cache_stats_note = "本次未啟用快取寫入"
     session.set_summary({**report.as_dict(), "live": tracker.live()})
-    return items, tracker, lm_cfg, sleep_seconds
+    return items, tracker, lm_cfg
 
 
 def _filter_newline_only_repair_entries(

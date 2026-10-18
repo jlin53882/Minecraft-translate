@@ -69,6 +69,7 @@ flowchart TD
 
 - 每批提示詞會依輸入項目加入官方 Minecraft 術語；Mod DB 的已審核 `lang` 翻譯參考會限制在同一模組、目前 Minecraft 版本與本批原文，提供給 `lang`、Patchouli、Guide、Advancement 與 `md`／`.txt` 路線參考。術語出現在句子中時也會注入，但使用大小寫不敏感的詞界判斷，避免錯誤命中較長單字。同一英文有互相衝突的已審核譯文時不注入任何一筆；沒有本批來源時不掃描整個模組。資料庫先一次取得模組／版本範圍內的候選，再由共享前綴索引對本批原文匹配，避免重複建立來源分批 SQL。提示詞與同模組的 session 歷史會計入輸入 token 預算，但不計入翻譯輸出 KPI。
 - Mod DB 翻譯以 `(cache_type, batch_group)` 分組，避免把不同模組或不同種類混在同一個 payload；同一模組的不同 kind 批次沿用同一個 client-side session。預覽與實際執行共用同一個批次 planner 與固定 prompt token 估算；開始前的批次數是依當下提示詞與 session 狀態計算的下界，session 歷史增長或錯誤縮小批次時實際請求數可能增加。`.md` 與 `.txt` 指南仍走 Patchouli 提示詞，但使用 `md` 快取分類。
+- AI 回應、Mod DB 命中、一般快取命中與 `.md` 舊 `patchouli` fallback 都在寫出或寫入前通過同一個 token／結構品質准入；Patchouli 元件遺失等硬格式問題會回到 AI，不會寫入快取或 Mod DB。品質 retry 只嘗試一次；若 provider 回傳 429／Retry-After，更新同一 provider/model 的共用 scheduler，不進入一般錯誤狀態機。
 
 ## 背景任務與 UI 更新
 

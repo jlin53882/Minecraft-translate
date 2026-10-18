@@ -590,6 +590,7 @@ def translate_ftb_pending_to_zh_tw(
             translate_batch_smart=lambda batch, total: translate_batch_smart(
                 batch, total=total
             ),
+            sleep_seconds_between_batches=0.0,
             write_new_cache=bool(write_new_cache),  # ✅ 改成吃參數
             cache_rules=cache_rules,
             hooks=TranslatorHooks(

@@ -382,6 +382,7 @@ def translate_md_pending(
             translate_batch_smart=lambda batch, total: translate_batch_smart(
                 batch, total=total
             ),
+            sleep_seconds_between_batches=0.0,
             write_new_cache=bool(
                 write_new_cache
             ),  # ✅ 這裡會走 add_to_cache('md') + save_translation_cache('md')

@@ -11,6 +11,9 @@ from dataclasses import dataclass
 from typing import Any
 
 from translation_tool.core.lm_config_rules import value_fully_translated
+from translation_tool.core.lm_format_policy import kind_for_item
+from translation_tool.plugins.shared.rich_text_shield import unshield_text
+from translation_tool.translation_db.quality import translation_issues
 from translation_tool.utils.cache_manager import get_cache_dict_ref
 
 
@@ -39,6 +42,18 @@ STRICT_SRC_TYPES = {
 ValidHitFn = Callable[[str, dict[str, Any], dict[str, Any]], bool]
 
 
+def cache_quality_issues(item: dict[str, Any], translated: str) -> list[str]:
+    """Return the shared quality gate used by AI, cache, and DB translation hits."""
+    kind = kind_for_item(item)
+    if not kind:
+        return []
+    candidate = str(translated or "")
+    shielded = item.get("_shielded")
+    if shielded is not None and getattr(shielded, "shields", None):
+        candidate = unshield_text(candidate, shielded.shields)
+    return translation_issues(str(item.get("source_text") or ""), candidate, kind=kind)
+
+
 def get_default_cache_rules() -> dict[str, CacheRule]:
     """回傳預設 cache rule map。"""
     return {
@@ -53,6 +68,8 @@ def get_default_cache_rules() -> dict[str, CacheRule]:
 def _is_valid_hit(dst: str, entry: dict, item: dict) -> bool:
     """判斷 cache 命中是否可信。"""
     if not value_fully_translated(dst):
+        return False
+    if cache_quality_issues(item, dst):
         return False
 
     ctype = item.get("cache_type") or "lang"

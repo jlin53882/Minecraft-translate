@@ -218,11 +218,19 @@ def _consume_stream(response: requests.Response, meta_out: dict | None) -> str:
             raise ChatGPTAPIError(
                 str(error.get("code") or error_type or "stream_error"),
                 str(error.get("message") or ""),
+                status=(
+                    int(error["status"])
+                    if str(error.get("status") or "").isdigit()
+                    else None
+                ),
                 error_type=str(error_type or ""),
                 param=str(error.get("param") or ""),
                 request_id=str(
                     payload.get("request_id")
                     or response.headers.get("x-request-id", "")
+                ),
+                retry_after=_parse_retry_after(
+                    error.get("retry_after") or response.headers.get("Retry-After")
                 ),
             )
         elif event_type == "response.failed":
@@ -233,9 +241,22 @@ def _consume_stream(response: requests.Response, meta_out: dict | None) -> str:
             raise ChatGPTAPIError(
                 str(error.get("code") or error.get("type") or "response_failed"),
                 str(error.get("message") or ""),
+                status=(
+                    int(error["status"])
+                    if str(error.get("status") or "").isdigit()
+                    else (
+                        429
+                        if "rate"
+                        in f"{error.get('type') or ''} {error.get('code') or ''}".lower()
+                        else None
+                    )
+                ),
                 error_type=str(error.get("type") or ""),
                 param=str(error.get("param") or ""),
                 request_id=response.headers.get("x-request-id", ""),
+                retry_after=_parse_retry_after(
+                    error.get("retry_after") or response.headers.get("Retry-After")
+                ),
             )
         elif event_type == "response.incomplete":
             incomplete = payload.get("response", {})
