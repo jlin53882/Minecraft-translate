@@ -221,8 +221,16 @@ class AdvancedFilters:
             if not self.error_text.visible:
                 show_snack(page, f"已套用{label} {field.value}", C.EM)
 
+        locale = ft.Locale("zh", "TW")
+        configuration = page.locale_configuration or ft.LocaleConfiguration()
+        supported = list(configuration.supported_locales or [])
+        if not any(str(item) == str(locale) for item in supported):
+            # 日曆的月份與星期要中文，Flutter 需要該語系先列入支援清單。
+            configuration.supported_locales = [*supported, locale]
+            page.locale_configuration = configuration
         page.show_dialog(
             ft.DatePicker(
+                locale=locale,
                 value=initial,
                 first_date=date(2015, 1, 1),
                 last_date=date(2100, 12, 31),
