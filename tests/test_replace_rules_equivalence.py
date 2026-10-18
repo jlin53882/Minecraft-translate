@@ -269,3 +269,23 @@ def test_adjacent_destinations_forming_longer_source_is_a_known_limit():
     first = apply_replace_rules("煤礦石石英塊", rules)
     assert first == "煤礦石英方塊"
     assert apply_replace_rules(first, rules) == "煤礦英方塊"
+
+
+def test_load_replace_rules_skips_non_string_rules(tmp_path):
+    import json
+
+    from translation_tool.utils.text_processor import load_replace_rules
+
+    path = tmp_path / "rules.json"
+    path.write_text(
+        json.dumps(
+            [
+                {"from": 123, "to": "x"},
+                {"from": "a", "to": 5},
+                {"from": "ok", "to": "好"},
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    assert [rule["from"] for rule in load_replace_rules(str(path))] == ["ok"]

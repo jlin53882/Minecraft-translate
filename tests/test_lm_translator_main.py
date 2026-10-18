@@ -897,3 +897,16 @@ def test_generic_batches_do_not_get_moddb_contract_records(monkeypatch):
 
     assert warnings == []
     assert runtime.pending_contract_event is None
+
+
+def test_quality_retry_quota_failure_reads_http_error_response_status():
+    import requests
+
+    from translation_tool.core import lm_translator_main as main
+
+    response = requests.Response()
+    response.status_code = 429
+    error = requests.HTTPError("RPM limit", response=response)
+
+    assert main._is_quality_retry_quota_failure(error) is True
+    assert main._is_quality_retry_quota_failure(ValueError("other")) is False

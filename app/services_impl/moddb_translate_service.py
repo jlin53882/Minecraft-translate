@@ -424,7 +424,13 @@ def _collect_replace_rule_conflicts() -> list[dict[str, Any]]:
         if isinstance(translator, dict)
         else "replace_rules.json"
     )
-    rules = load_replace_rules(str(configured_path))
+    try:
+        rules = load_replace_rules(str(configured_path))
+        conflicts = find_replacement_conflicts(rules)
+    except (OSError, TypeError, ValueError, AttributeError) as exc:
+        # 衝突偵測只是診斷；失敗不可讓已寫入資料庫的翻譯任務變成錯誤。
+        _log_backend(f"替換規則衝突偵測失敗：{type(exc).__name__}: {exc}", "warning")
+        return []
     return [
         {
             "source_index": source_index,
@@ -432,9 +438,7 @@ def _collect_replace_rule_conflicts() -> list[dict[str, Any]]:
             "destination_index": destination_index,
             "destination": destination,
         }
-        for source_index, source, destination_index, destination in (
-            find_replacement_conflicts(rules)
-        )
+        for source_index, source, destination_index, destination in conflicts
     ]
 
 
@@ -728,6 +732,8 @@ def _batch_backend_line(
         f"{current['quality_retry_candidates'] - previous['quality_retry_candidates']}／"
         f"{current['quality_retry_fixed'] - previous['quality_retry_fixed']}／"
         f"{current['quality_retry_unresolved'] - previous['quality_retry_unresolved']}｜"
+        f"品質重試配額失敗 "
+        f"{current['quality_retry_quota_failed'] - previous['quality_retry_quota_failed']}｜"
         f"總進度 {report.ai_response + report.source_fallback}/{report.candidates}"
     )
 

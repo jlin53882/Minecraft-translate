@@ -72,6 +72,8 @@ def load_replace_rules(path: str) -> list[dict[str, str]]:
             continue
 
         src = rule["from"]
+        if not isinstance(src, str) or not isinstance(rule["to"], str):
+            continue
         looks_like_regex = any(ch in src for ch in ".?*[]()\\")
         if looks_like_regex:
             regex_rules.append(rule)

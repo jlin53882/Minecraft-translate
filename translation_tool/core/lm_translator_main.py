@@ -1644,7 +1644,9 @@ def _mark_quality_retry_result(
 
 def _is_quality_retry_quota_failure(error: Exception) -> bool:
     """Recognize quota/rate-limit failures for structured retry accounting."""
-    status = getattr(error, "status", None)
+    status = getattr(error, "status", None) or getattr(
+        getattr(error, "response", None), "status_code", None
+    )
     if status == 429:
         return True
     text = str(error).lower()

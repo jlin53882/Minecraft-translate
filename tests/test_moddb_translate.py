@@ -2856,3 +2856,12 @@ def test_quality_retry_flags_are_counted_per_item():
         report.quality_retry_fixed,
         report.quality_retry_unresolved,
     ) == (2, 1, 1)
+
+
+def test_replace_rule_conflict_scan_never_fails_the_task(monkeypatch):
+    def broken(_path):
+        raise TypeError("argument of type 'int' is not iterable")
+
+    monkeypatch.setattr(moddb_translate_service, "load_replace_rules", broken)
+
+    assert moddb_translate_service._collect_replace_rule_conflicts() == []
