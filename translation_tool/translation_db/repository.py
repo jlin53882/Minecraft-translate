@@ -150,7 +150,9 @@ class _WorstFirstQualityRow:
             "entry_newest": 11,
             "entry_oldest": 11,
             "effective_updated_newest": 13,
+            "effective_updated_oldest": 13,
             "manual_activity_newest": 14,
+            "manual_activity_oldest": 14,
         }.get(sort_by)
         if self.date_index is None:
             self.date = None
@@ -166,12 +168,13 @@ class _WorstFirstQualityRow:
             return self.key > other.key
         if (self.date is None) != (other.date is None):
             return self.date is None
+        ascending = self.sort_by.endswith("_oldest")
         if self.date != other.date:
-            return (
-                self.date < other.date
-                if self.sort_by != "entry_oldest"
-                else self.date > other.date
-            )
+            return self.date > other.date if ascending else self.date < other.date
+        # 由舊到新的新排序同時間時編號由大到小（與衍生表索引反向掃描的順序相同）；
+        # 既有的 entry_oldest 維持編號由小到大。
+        if ascending and self.sort_by != "entry_oldest":
+            return self.entry_id < other.entry_id
         return self.entry_id > other.entry_id
 
 
@@ -1082,9 +1085,17 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
         """
         if not condition.startswith(_VERSION_CONDITION):
             return None
-        if sort_by == "manual_activity_newest" and self._activity_ready():
+        if (
+            sort_by in ("manual_activity_newest", "manual_activity_oldest")
+            and self._activity_ready()
+        ):
             dated, dated_count = self._indexed_page_sql(
-                condition, "entry_activity act", "", "act.last_at DESC, act.entry_id"
+                condition,
+                "entry_activity act",
+                "",
+                "act.last_at DESC, act.entry_id"
+                if sort_by == "manual_activity_newest"
+                else "act.last_at, act.entry_id DESC",
             )
             undated = (
                 f"{condition} AND NOT EXISTS "
@@ -1098,10 +1109,18 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
                     "ORDER BY e.id LIMIT ? OFFSET ?"
                 ),
             )
-        if sort_by == "effective_updated_newest" and self._effective_columns_ready():
+        if (
+            sort_by in ("effective_updated_newest", "effective_updated_oldest")
+            and self._effective_columns_ready()
+        ):
             # f.upd 就是生效來源那一筆的 et.updated_at；沒有生效譯文或時間的條目在第二段
             dated, dated_count = self._indexed_page_sql(
-                condition, "effective f", "f.upd IS NOT NULL", "f.upd DESC, f.entry_id"
+                condition,
+                "effective f",
+                "f.upd IS NOT NULL",
+                "f.upd DESC, f.entry_id"
+                if sort_by == "effective_updated_newest"
+                else "f.upd, f.entry_id DESC",
             )
             undated = f"{condition} AND f.upd IS NULL"
             return (
@@ -1417,9 +1436,20 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
             return "e.created_at IS NULL, e.created_at, e.id"
         if sort_by == "effective_updated_newest":
             return "et.updated_at IS NULL, et.updated_at DESC, e.id"
+        if sort_by == "effective_updated_oldest":
+            return (
+                "et.updated_at IS NULL, et.updated_at, "
+                "CASE WHEN et.updated_at IS NULL THEN e.id ELSE -e.id END"
+            )
         if sort_by == "manual_activity_newest":
             activity = _LAST_ACTIVITY_SQL
             return f"{activity} IS NULL, {activity} DESC, e.id"
+        if sort_by == "manual_activity_oldest":
+            activity = _LAST_ACTIVITY_SQL
+            return (
+                f"{activity} IS NULL, {activity}, "
+                f"CASE WHEN {activity} IS NULL THEN e.id ELSE -e.id END"
+            )
         return "e.mod_id, e.kind, e.key, e.id"
 
     @staticmethod
@@ -1428,20 +1458,27 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
             "entry_newest": 11,
             "entry_oldest": 11,
             "effective_updated_newest": 13,
+            "effective_updated_oldest": 13,
             "manual_activity_newest": 14,
+            "manual_activity_oldest": 14,
         }.get(sort_by)
         if index is None:
             return sorted(rows, key=lambda row: (row[3], row[1], row[4], row[0]))
         dated = [row for row in rows if row[index] is not None]
         undated = [row for row in rows if row[index] is None]
-        dated.sort(key=lambda row: row[0])
-        dated.sort(key=lambda row: row[index], reverse=sort_by != "entry_oldest")
+        newest_first = not sort_by.endswith("_oldest")
+        # entry_oldest 同時間編號由小到大；其餘由舊到新同時間編號由大到小。
+        dated.sort(
+            key=lambda row: row[0],
+            reverse=sort_by.endswith("_oldest") and sort_by != "entry_oldest",
+        )
+        dated.sort(key=lambda row: row[index], reverse=newest_first)
         undated.sort(key=lambda row: row[0])
         return [*dated, *undated]
 
     def _quality_candidate_select_sql(self, sort_by: str) -> str:
         activity = "NULL"
-        if sort_by == "manual_activity_newest":
+        if sort_by in ("manual_activity_newest", "manual_activity_oldest"):
             activity = _LAST_ACTIVITY_SQL
         return (
             "SELECT e.id, e.kind, NULL, e.mod_id, e.key, e.en_us, f.zh_tw, "

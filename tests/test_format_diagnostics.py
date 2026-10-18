@@ -205,3 +205,21 @@ def test_quality_issue_summary_is_empty_when_nothing_to_report():
 
     assert quality_issue_summary((), "") == ()
     assert quality_issue_summary(("a",), "空白") == ("a", "空白")
+
+
+def test_comparison_symbols_are_not_guide_tags():
+    from translation_tool.core.format_diagnostics import analyze_format_diagnostics
+
+    source = "$(italic)<0°C = 0 redstone, >1000°C = 15 redstone/$"
+    translated = "$(italic)<0°C = 0 紅石訊號強度；>1000°C = 15 紅石訊號強度/$"
+    result = analyze_format_diagnostics(source, translated, kind="guide")
+    assert result.issues == () and result.guide_issues == ()
+
+
+def test_inline_component_moved_to_own_line_explains_the_cause():
+    from translation_tool.core.format_diagnostics import analyze_format_diagnostics
+
+    source = 'The <ItemLink id="a:b" /> adds a cell.\nit works.'
+    translated = '<ItemLink id="a:b" />\n新增。\n它運作。'
+    result = analyze_format_diagnostics(source, translated, kind="guide")
+    assert any("單獨成一行" in m and "ItemLink" in m for m in result.extra_guide_issues)

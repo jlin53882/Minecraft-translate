@@ -26,7 +26,9 @@ SORTS = (
     "entry_newest",
     "entry_oldest",
     "effective_updated_newest",
+    "effective_updated_oldest",
     "manual_activity_newest",
+    "manual_activity_oldest",
 )
 QUALITY = (
     "all",
@@ -144,7 +146,13 @@ def test_list_entries_quality_filters_avoid_temp_sort(db, status):
 )
 def test_list_entries_with_filters_avoids_temp_sort(db, extra):
     for sort_by, state in itertools.product(
-        ("default", "effective_updated_newest", "manual_activity_newest"),
+        (
+            "default",
+            "effective_updated_newest",
+            "effective_updated_oldest",
+            "manual_activity_newest",
+            "manual_activity_oldest",
+        ),
         ("all", "ok", "diff"),
     ):
         try:

@@ -10,14 +10,15 @@ import re
 from collections import Counter
 from dataclasses import dataclass
 
-_TAG = re.compile(r"<[^<>\n]+>")
+# 標籤必須以英文字母或 / 開頭；「<0°C = 0, >」這類比較符號文字不是標籤。
+_TAG = re.compile(r"<[A-Za-z/][^<>\n]*>")
 _LINK_TARGET = re.compile(r"\]\(([^)\n]*)\)")
 _HEADING = re.compile(r"^\s{0,3}(#{1,6})\s")
 _BULLET = re.compile(r"^\s*([-*+])\s+\S")
 _ORDERED = re.compile(r"^\s*\d+[.)]\s+\S")
 _QUOTE = re.compile(r"^\s*>")
 _HARD_BREAK = re.compile(r"(?: {2,}|\\)\n")
-_COMPONENT_LINE = re.compile(r"^(?:(?:<[^<>\n]+>)|(?:\$\([^\n]*?\)))+$")
+_COMPONENT_LINE = re.compile(r"^(?:(?:<[A-Za-z/][^<>\n]*>)|(?:\$\([^\n]*?\)))+$")
 
 _LABELS = {
     "tag": "標籤",
@@ -229,6 +230,25 @@ def collect_guide_diagnostics(source: str, translated: str):
     return tuple(diagnostics)
 
 
+def _component_line_issues(source: str, translated: str) -> list[str]:
+    """說明獨立成行的元件（例如 <ItemLink .../>）在哪一邊被移動或改動。"""
+    wanted = Counter(_component_lines(source))
+    actual = Counter(_component_lines(translated))
+    issues = [
+        f"原文把 {component} 單獨放在一行，譯文卻把它接進句子或改動了內容；"
+        "請讓它在譯文中也單獨成一行"
+        for component in sorted(wanted - actual)
+    ]
+    issues += [
+        f"譯文把 {component} 單獨成一行，但原文它是接在句子中間；"
+        "請把它放回句子裡，不要獨立成行"
+        for component in sorted(actual - wanted)
+    ]
+    if not issues and _component_lines(source) != _component_lines(translated):
+        issues.append("獨立成行的 Patchouli 元件，先後順序與原文不同")
+    return issues
+
+
 def guide_issues(source: str, translated: str) -> list[str]:
     """Compare hard structure while allowing soft paragraph line reflow."""
     wanted, actual = guide_marks(source), guide_marks(translated)
@@ -241,7 +261,7 @@ def guide_issues(source: str, translated: str) -> list[str]:
             issues.append(f"多了 {delta} 個「{_describe(mark)}」")
 
     blank_issue = _count_issue(
-        "段落分隔空行",
+        "段落分隔空行（段落之間的空白行）",
         _blank_line_count(source or ""),
         _blank_line_count(translated or ""),
     )
@@ -255,18 +275,19 @@ def guide_issues(source: str, translated: str) -> list[str]:
     ):
         # Count differences are already reported by guide_marks; this extra
         # issue is only for a reorder, which the counters cannot describe.
-        issues.append("Markdown 區塊前綴順序不一致")
+        issues.append(
+            "Markdown 區塊前綴（# 標題、- 清單、1. 編號等）的先後順序與原文不同"
+        )
 
     hard_break_issue = _count_issue(
-        "Markdown 硬換行",
+        "Markdown 硬換行（行尾兩個空白或反斜線）",
         len(_HARD_BREAK.findall(source or "")),
         len(_HARD_BREAK.findall(translated or "")),
     )
     if hard_break_issue:
         issues.append(hard_break_issue)
 
-    if _component_lines(source) != _component_lines(translated):
-        issues.append("Patchouli 元件獨立行不一致")
+    issues.extend(_component_line_issues(source, translated))
     return issues
 
 

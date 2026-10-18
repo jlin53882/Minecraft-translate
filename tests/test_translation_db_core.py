@@ -1112,7 +1112,9 @@ def test_quality_repair_history_does_not_count_as_manual_activity(db):
         "entry_newest",
         "entry_oldest",
         "effective_updated_newest",
+        "effective_updated_oldest",
         "manual_activity_newest",
+        "manual_activity_oldest",
         "default",
     ],
 )

@@ -12,6 +12,7 @@ from collections.abc import Sequence
 import flet as ft
 
 from app.services_impl.moddb_format_diff_service import (
+    FormatDiagnostic,
     FormatDiagnosticsResult,
     FormatSpan,
     analyze_format_diagnostics,
@@ -23,6 +24,71 @@ from app.views.moddb.format_issue_rendering import (
     diagnostic_spans,
     diagnostic_tone,
 )
+
+
+def _table_cell(text: str, *, width: float | None = None, expand=None, **style):
+    style.setdefault("size", 12)
+    return ft.Text(text, width=width, expand=expand, **style)
+
+
+def _count_cell(text: str, **style) -> ft.Text:
+    return _table_cell(text, width=56, text_align=ft.TextAlign.CENTER, **style)
+
+
+def _diagnostic_row(issue: FormatDiagnostic) -> ft.Row:
+    """One table row for a structured diagnostic, with the cause spelled out."""
+    tone = C.RED if issue.direction == "extra" else C.GOLD
+    action = "缺少" if issue.direction == "missing" else "多出"
+    detail: list[ft.Control] = [
+        _table_cell(
+            f"{action} {abs(issue.delta)} 個", color=tone, weight=ft.FontWeight.W_600
+        ),
+        ft.Text(
+            "譯文少了原文有的標記，請補回。"
+            if issue.direction == "missing"
+            else "譯文多出原文沒有的標記，請移除。",
+            size=11,
+            color=C.MUTED,
+            no_wrap=False,
+        ),
+    ]
+    if issue.location_confidence == "unknown":
+        detail.append(
+            ft.Text("位置無法可靠判定", size=11, color=C.MUTED, no_wrap=False)
+        )
+    return ft.Row(
+        [
+            _table_cell(issue.display_token, expand=2, color=C.TEXT),
+            _count_cell(str(issue.source_count), color=C.TEXT),
+            _count_cell(
+                str(issue.target_count), color=tone, weight=ft.FontWeight.W_600
+            ),
+            ft.Column(detail, spacing=1, expand=3),
+        ],
+        spacing=8,
+        vertical_alignment=ft.CrossAxisAlignment.START,
+    )
+
+
+def _guide_message_row(message: str) -> ft.Row:
+    """One table row for a Guide structure problem that has no countable mark."""
+    return ft.Row(
+        [
+            _table_cell("指南結構", expand=2, color=C.TEXT),
+            _count_cell("—", color=C.MUTED),
+            _count_cell("—", color=C.MUTED),
+            ft.Column(
+                [
+                    _table_cell(message, color=C.GOLD, weight=ft.FontWeight.W_600),
+                    ft.Text("位置無法可靠判定", size=11, color=C.MUTED, no_wrap=False),
+                ],
+                spacing=1,
+                expand=3,
+            ),
+        ],
+        spacing=8,
+        vertical_alignment=ft.CrossAxisAlignment.START,
+    )
 
 
 class FormatDiffReview:
@@ -331,9 +397,7 @@ class FormatDiffReview:
     def _result_table(self, result: FormatDiagnosticsResult) -> ft.Container:
         """檢查項目表：項目／原文數量／譯文數量／差異，欄寬固定、差異欄吃剩餘空間。"""
 
-        def cell(text: str, *, width: float | None = None, expand=None, **style):
-            style.setdefault("size", 12)
-            return ft.Text(text, width=width, expand=expand, **style)
+        cell = _table_cell
 
         rows: list[ft.Control] = [
             ft.Row(
@@ -351,43 +415,8 @@ class FormatDiffReview:
             ),
             ft.Divider(height=1, color=C.LINE),
         ]
-        for issue in result.issues:
-            tone = C.RED if issue.direction == "extra" else C.GOLD
-            action = "缺少" if issue.direction == "missing" else "多出"
-            detail: list[ft.Control] = [
-                cell(
-                    f"{action} {abs(issue.delta)} 個",
-                    color=tone,
-                    weight=ft.FontWeight.W_600,
-                )
-            ]
-            if issue.location_confidence == "unknown":
-                detail.append(
-                    ft.Text("位置無法可靠判定", size=11, color=C.MUTED, no_wrap=False)
-                )
-            rows.append(
-                ft.Row(
-                    [
-                        cell(issue.display_token, expand=2, color=C.TEXT),
-                        cell(
-                            str(issue.source_count),
-                            width=56,
-                            color=C.TEXT,
-                            text_align=ft.TextAlign.CENTER,
-                        ),
-                        cell(
-                            str(issue.target_count),
-                            width=56,
-                            color=tone,
-                            weight=ft.FontWeight.W_600,
-                            text_align=ft.TextAlign.CENTER,
-                        ),
-                        ft.Column(detail, spacing=1, expand=3),
-                    ],
-                    spacing=8,
-                    vertical_alignment=ft.CrossAxisAlignment.START,
-                )
-            )
+        rows.extend(_diagnostic_row(issue) for issue in result.issues)
+        rows.extend(_guide_message_row(msg) for msg in result.extra_guide_issues)
         if result.soft_newline_counts is not None:
             rows.append(
                 ft.Text(

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from datetime import date
 
 import flet as ft
 
@@ -14,12 +15,14 @@ from app.services_impl.moddb_service import (
 )
 from app.ui import kit
 from app.ui.design import C
+from app.ui.snack import show_snack
 
 
 class AdvancedFilters:
     def __init__(self, on_change: Callable[[], None]):
         self._on_change = on_change
         self._time_bounds: tuple[str, str] | None = None
+        self._sort_desc = True
         self._build_time_controls()
         self._build_quality_controls()
         self._build_sort_control()
@@ -59,6 +62,22 @@ class AdvancedFilters:
         )
         self.end_date = kit.text_field(
             "結束日", hint="YYYY-MM-DD", width=150, on_submit=self._custom_changed
+        )
+        self.start_pick = kit.button(
+            "選起始日",
+            "ghost",
+            size="sm",
+            icon=ft.Icons.CALENDAR_MONTH,
+            on_click=lambda _e: self._pick_date(self.start_date, "起始日"),
+            tooltip="用日曆選日期，不必手動輸入",
+        )
+        self.end_pick = kit.button(
+            "選結束日",
+            "ghost",
+            size="sm",
+            icon=ft.Icons.CALENDAR_MONTH,
+            on_click=lambda _e: self._pick_date(self.end_date, "結束日"),
+            tooltip="用日曆選日期，不必手動輸入",
         )
         self.unknown_policy = self._dropdown(
             "未知日期",
@@ -113,13 +132,20 @@ class AdvancedFilters:
             "排序",
             [
                 ("default", "模組／鍵值"),
-                ("entry_newest", "新匯入優先"),
-                ("entry_oldest", "舊匯入優先"),
-                ("effective_updated_newest", "譯文最近更新"),
-                ("manual_activity_newest", "人工操作最近"),
+                ("entry_newest", "依匯入時間"),
+                ("effective_updated_newest", "依譯文更新時間"),
+                ("manual_activity_newest", "依人工操作時間"),
             ],
             "default",
         )
+        self.sort_direction = kit.button(
+            "",
+            "ghost",
+            size="sm",
+            on_click=self._toggle_sort_direction,
+            tooltip="切換日期排序方向",
+        )
+        self._refresh_sort_direction()
 
     def _build_panel(self) -> None:
         for control in (
@@ -136,7 +162,14 @@ class AdvancedFilters:
         self.panel = ft.Column(
             [
                 ft.Row(
-                    [self.time_kind, self.time_preset, self.start_date, self.end_date],
+                    [
+                        self.time_kind,
+                        self.time_preset,
+                        self.start_date,
+                        self.start_pick,
+                        self.end_date,
+                        self.end_pick,
+                    ],
                     spacing=8,
                     wrap=True,
                 ),
@@ -146,7 +179,9 @@ class AdvancedFilters:
                     wrap=True,
                 ),
                 ft.Row(
-                    [self.direction, self.category, self.sort], spacing=8, wrap=True
+                    [self.direction, self.category, self.sort, self.sort_direction],
+                    spacing=8,
+                    wrap=True,
                 ),
                 self.error_text,
             ],
@@ -168,7 +203,56 @@ class AdvancedFilters:
         self.panel.visible = not self.panel.visible
         self.toggle_button.text = "收合進階篩選" if self.panel.visible else "進階篩選"
 
+    def _pick_date(self, field: ft.TextField, label: str) -> None:
+        """用日曆選日期；選完填入欄位並提醒按 Enter 才會套用。"""
+        page = self.panel.page
+        try:
+            initial = date.fromisoformat((field.value or "").strip())
+        except ValueError:
+            initial = None
+
+        def chosen(event: ft.ControlEvent) -> None:
+            value = event.control.value
+            if not isinstance(value, date):
+                return
+            field.value = value.strftime("%Y-%m-%d")
+            self.time_preset.value = "custom"
+            self.error_text.visible = False
+            self.error_text.value = ""
+            field.focus()
+            page.update()
+            show_snack(
+                page,
+                f"已選擇{label} {field.value}，請在日期欄位按 Enter 套用篩選",
+                C.EM,
+            )
+
+        page.show_dialog(
+            ft.DatePicker(
+                value=initial,
+                first_date=date(2015, 1, 1),
+                last_date=date(2100, 12, 31),
+                help_text=f"選擇{label}",
+                confirm_text="確定",
+                cancel_text="取消",
+                on_change=chosen,
+            )
+        )
+
+    def _refresh_sort_direction(self) -> None:
+        self.sort_direction.text = "遞減：新→舊" if self._sort_desc else "遞增：舊→新"
+        self.sort_direction.icon = (
+            ft.Icons.ARROW_DOWNWARD if self._sort_desc else ft.Icons.ARROW_UPWARD
+        )
+        self.sort_direction.disabled = str(self.sort.value or "default") == "default"
+
+    def _toggle_sort_direction(self, _e=None) -> None:
+        self._sort_desc = not self._sort_desc
+        self._refresh_sort_direction()
+        self._on_change()
+
     def _selection_changed(self, _e=None) -> None:
+        self._refresh_sort_direction()
         if self.time_preset.value == "custom":
             self._time_bounds = None
             self.error_text.visible = False
@@ -211,6 +295,8 @@ class AdvancedFilters:
         self.direction.value = "all"
         self.category.value = "all"
         self.sort.value = "default"
+        self._sort_desc = True
+        self._refresh_sort_direction()
         self._time_bounds = None
         self.error_text.value = ""
         self.error_text.visible = False
@@ -267,7 +353,10 @@ class AdvancedFilters:
 
     @property
     def sort_by(self) -> str:
-        return str(self.sort.value or "default")
+        value = str(self.sort.value or "default")
+        if value != "default" and not self._sort_desc:
+            return value.replace("_newest", "_oldest")
+        return value
 
     def set_summary(self) -> int:
         count = 0

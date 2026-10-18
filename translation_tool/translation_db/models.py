@@ -222,7 +222,9 @@ class EntryFilter:
             "entry_newest",
             "entry_oldest",
             "effective_updated_newest",
+            "effective_updated_oldest",
             "manual_activity_newest",
+            "manual_activity_oldest",
         }:
             raise ValueError(f"未知條目排序：{self.sort_by}")
         for name in ("entry_ids", "include_ids", "exclude_ids"):
