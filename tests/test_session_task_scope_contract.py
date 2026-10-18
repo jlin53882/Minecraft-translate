@@ -18,34 +18,40 @@ EXPECTED_USERS = {
 }
 
 
-def _called_names(node: ast.AST) -> set[str]:
-    names: set[str] = set()
-    for child in ast.walk(node):
-        if isinstance(child, ast.Call):
-            func = child.func
-            if isinstance(func, ast.Attribute):
-                names.add(func.attr)
-            elif isinstance(func, ast.Name):
-                names.add(func.id)
-    return names
+def _calls(fn: ast.AST) -> list[tuple[str, int]]:
+    found: list[tuple[str, int]] = []
+    for node in ast.walk(fn):
+        if isinstance(node, ast.Call):
+            func = node.func
+            name = (
+                func.attr
+                if isinstance(func, ast.Attribute)
+                else getattr(func, "id", "")
+            )
+            found.append((name, node.lineno))
+    return found
 
 
-def _scope_users() -> dict[str, set[str]]:
-    users: dict[str, set[str]] = {}
+def _scope_users() -> dict[str, bool]:
+    """函式名稱 -> 最後一個 ``session_task_scope`` 之後是否還有 ``add_log`` 系列呼叫。"""
+    users: dict[str, bool] = {}
     for path in APP_DIR.rglob("*.py"):
         tree = ast.parse(path.read_text(encoding="utf-8"))
-        for cls_or_mod in [
-            tree,
-            *[n for n in ast.walk(tree) if isinstance(n, ast.ClassDef)],
-        ]:
-            owner = getattr(cls_or_mod, "name", None)
-            for fn in cls_or_mod.body:
+        containers = [tree, *[n for n in ast.walk(tree) if isinstance(n, ast.ClassDef)]]
+        for container in containers:
+            owner = getattr(container, "name", None)
+            for fn in container.body:
                 if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
                     continue
-                names = _called_names(fn)
-                if "session_task_scope" in names:
-                    key = f"{owner}.{fn.name}" if owner else fn.name
-                    users[key] = names
+                calls = _calls(fn)
+                scope_lines = [
+                    line for name, line in calls if name == "session_task_scope"
+                ]
+                if scope_lines:
+                    last = max(scope_lines)
+                    users[f"{owner}.{fn.name}" if owner else fn.name] = any(
+                        "add_log" in name and line >= last for name, line in calls
+                    )
     return users
 
 
@@ -54,12 +60,8 @@ def test_functions_using_session_task_scope_also_write_a_screen_summary():
     assert EXPECTED_USERS <= users.keys(), (
         "掃描範圍失效或呼叫端改名，請同步更新 EXPECTED_USERS"
     )
-    missing = sorted(
-        name
-        for name, called in users.items()
-        if not any("add_log" in called_name for called_name in called)
-    )
+    missing = sorted(name for name, has_summary in users.items() if not has_summary)
     assert not missing, (
-        "使用 session_task_scope 的函式沒有 add_log 系列呼叫，"
-        f"失敗時畫面不會有任何訊息：{missing}"
+        "session_task_scope 之後沒有 add_log 系列呼叫，失敗時畫面不會有任何訊息："
+        f"{missing}"
     )
