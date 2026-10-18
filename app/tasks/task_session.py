@@ -109,6 +109,23 @@ class TaskSessionAdmissionError(RuntimeError):
     """Raised when shutdown has closed admission before a session can start."""
 
 
+def _summary_brief(summary) -> str:
+    """摘要過長時的精簡版：只留數字與狀態等單值，巢狀明細（清單、字典）不印。"""
+    if not summary:
+        return ""
+    if not isinstance(summary, dict):
+        return str(summary)
+    parts = []
+    for key, value in summary.items():
+        if isinstance(value, bool) or value is None:
+            parts.append(f"{key}={value}")
+        elif isinstance(value, float):
+            parts.append(f"{key}={value:.1f}")
+        elif isinstance(value, (int, str)):
+            parts.append(f"{key}={value}")
+    return "｜".join(parts)
+
+
 class TaskSession:
     """
     單一長任務的 UI 狀態容器（Single Source of Truth）。
@@ -296,12 +313,15 @@ class TaskSession:
         elapsed = f"，耗時 {time.monotonic() - started:.1f}s" if started else ""
         summary_text = str(summary) if summary else ""
         if len(summary_text) > 500:
+            # 過長時改印只含單值欄位的精簡版，避免整串字典被截斷在中間
+            summary_text = _summary_brief(summary)
+        if len(summary_text) > 500:
             summary_text = summary_text[:500] + "…（已截斷）"
         extra = f"，摘要：{summary_text}" if summary_text else ""
         # session.status 維持 DONE／ERROR 兩態（多個頁面依此判斷結束）；服務層若在摘要
-        # 標了 DONE_WITH_WARNINGS，後台結束紀錄要一併標出，避免與摘要互相矛盾。
+        # 標了 DONE_WITH_WARNINGS／CANCELLED 等，後台結束紀錄要一併標出，避免互相矛盾。
         summary_status = summary.get("status") if isinstance(summary, dict) else None
-        warned = status == "DONE" and summary_status == "DONE_WITH_WARNINGS"
+        warned = status == "DONE" and summary_status not in (None, "DONE")
         status_text = f"{status}（{summary_status}）" if warned else status
         self._log_lifecycle(
             f"任務結束：{status_text}{elapsed}，畫面日誌 {log_count} 筆{extra}",

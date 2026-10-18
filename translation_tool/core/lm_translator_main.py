@@ -1270,6 +1270,13 @@ def _is_moddb_batch(items: list[dict]) -> bool:
     return any("_batch_group" in item for item in items)
 
 
+_CONTRACT_TYPE_LABELS = {
+    "duplicate_id": "重複 id：模型對同一個 id 回傳了兩次",
+    "id_mismatch": "id 缺漏或多出：回傳的 id 與送出的不一致",
+    "invalid_shape": "回傳結構無效：不是約定的 items/id/value 格式",
+}
+
+
 def _contract_error_type(detail: str) -> str:
     if detail.startswith("duplicate id"):
         return "duplicate_id"
@@ -1287,8 +1294,9 @@ def _note_contract_error(
     size = len(round_data.id_to_item)
     runtime.pending_contract_event = {"batch_size": size}
     log_warning(
-        f"[ResponseContractError] type={_contract_error_type(detail)} "
-        f"batch_size={size} detail={detail}",
+        f"[ResponseContractError 回應格式錯誤] 批次 {size} 筆｜類型："
+        f"{_CONTRACT_TYPE_LABELS[_contract_error_type(detail)]}｜細節：{detail}｜"
+        "處理：縮小批次後重送（不算品質重試）",
         extra={"ui_mirrored": True},
     )
 
@@ -1300,13 +1308,13 @@ def _note_contract_progress(runtime: _BatchRuntime, basis: int, new_size: int) -
     if new_size <= 0 or new_size == basis:
         runtime.pending_contract_event = None
         log_warning(
-            f"[ResponseContractError] resolved=false batch_size={basis} "
-            "action=source_fallback",
+            f"[ResponseContractError 回應格式錯誤] 批次 {basis} 筆已縮到極限仍失敗｜"
+            "結果：回填原文、不寫入快取與資料庫",
             extra={"ui_mirrored": True},
         )
         return
     log_warning(
-        f"[ResponseContractError] action=shrink batch_size={basis}->{new_size}",
+        f"[ResponseContractError 回應格式錯誤] 縮小批次重送：{basis} 筆 → {new_size} 筆",
         extra={"ui_mirrored": True},
     )
 
@@ -1318,8 +1326,8 @@ def _note_contract_resolved(runtime: _BatchRuntime, round_data: _BatchRound) -> 
         return
     runtime.pending_contract_event = None
     log_info(
-        f"[ResponseContractError] resolved=true original_batch_size={event['batch_size']} "
-        f"final_batch_size={len(round_data.id_to_item)}",
+        f"[ResponseContractError 回應格式錯誤] 已排除｜原批次 {event['batch_size']} 筆，"
+        f"成功批次 {len(round_data.id_to_item)} 筆",
         extra={"ui_mirrored": True},
     )
 

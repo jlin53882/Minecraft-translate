@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 import traceback
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -22,6 +21,12 @@ from app.services_impl.moddb_service import (
     database_problem,
     open_database,
     warm_stats_quietly,
+)
+from app.services_impl.moddb_translate_report import (
+    QUALITY_STATUS,
+    format_backend_summary,
+    write_quality_report,
+    write_replace_rule_conflicts,
 )
 from app.services_impl.pipelines._pipeline_logging import (
     ensure_pipeline_logging,
@@ -139,6 +144,8 @@ class TranslateReport:
     oversized_items: int = 0
     quality_issue_records: list[dict[str, Any]] = field(default_factory=list)
     quality_issues_file: str | None = None
+    replace_rule_conflicts_file: str | None = None
+    batch_no: int = 0  # 已完成的批次數（品質問題清單用來標示所屬批次）
     replace_rule_conflicts: int = 0
     replace_rule_conflict_details: list[dict[str, Any]] = field(default_factory=list)
     contract_errors: list[str] = field(default_factory=list)
@@ -377,33 +384,27 @@ def _sync_loop_result(report: TranslateReport, result) -> None:
 
 
 def _write_quality_issue_file(session, report: TranslateReport) -> None:
-    """Persist every quality issue while keeping the UI to a bounded summary."""
-    if not report.quality_issue_records:
-        return
-    raw_task_id = str(
-        getattr(session, "task_id", None)
-        or getattr(session, "id", None)
-        or "unknown-task"
-    )
-    task_id = re.sub(r"[^A-Za-z0-9._-]+", "_", raw_task_id)
-    path = (
-        get_data_root()
-        / "logs"
-        / datetime.now(UTC).astimezone().strftime("%Y-%m-%d")
-        / f"quality-issues-{task_id}.json"
+    """寫出品質問題清單（JSON＋CSV）與替換規則衝突明細；畫面只保留數量。"""
+    day_dir = (
+        get_data_root() / "logs" / datetime.now(UTC).astimezone().strftime("%Y-%m-%d")
     )
     try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(
-            json.dumps(report.quality_issue_records, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
+        if report.replace_rule_conflict_details:
+            path = write_replace_rule_conflicts(
+                day_dir, report.replace_rule_conflict_details
+            )
+            report.replace_rule_conflicts_file = str(path) if path else None
+        if report.quality_issue_records:
+            raw_task_id = str(
+                getattr(session, "task_id", None)
+                or getattr(session, "id", None)
+                or "unknown-task"
+            )
+            report.quality_issues_file = str(
+                write_quality_report(day_dir, raw_task_id, report.quality_issue_records)
+            )
     except (OSError, TypeError, ValueError) as exc:
-        _log_backend(
-            f"品質問題完整清單寫入失敗：{type(exc).__name__}: {exc}", "warning"
-        )
-        return
-    report.quality_issues_file = str(path)
+        _log_backend(f"後台報告檔寫入失敗：{type(exc).__name__}: {exc}", "warning")
 
 
 def _collect_replace_rule_conflicts() -> list[dict[str, Any]]:
@@ -435,18 +436,9 @@ def _collect_replace_rule_conflicts() -> list[dict[str, Any]]:
 
 
 def _record_backend_summary(report: TranslateReport) -> None:
-    """Record the full structured summary and non-UI diagnostic details."""
-    payload = report.as_dict()
-    payload.update(
-        {
-            "quality_issue_records": report.quality_issue_records,
-            "contract_errors": report.contract_errors,
-            "replace_rule_conflict_details": report.replace_rule_conflict_details,
-        }
-    )
+    """後台結束摘要：多行中文，完整明細在報告檔，不再塞單行 JSON。"""
     _log_backend(
-        "Mod DB translation summary "
-        + json.dumps(payload, ensure_ascii=False, sort_keys=True),
+        format_backend_summary(report),
         "warning" if report.status != "DONE" else "info",
     )
 
@@ -600,7 +592,8 @@ def _record_quality_rejection(report: TranslateReport, item: dict[str, Any]) -> 
             "issues": issues,
             "source_text": source,
             "translated_text": translated,
-            "status": "QUALITY_REJECTED",
+            "status": QUALITY_STATUS,
+            "batch": report.batch_no + 1,
         }
     )
 
@@ -647,7 +640,7 @@ def _log_final_summary(session, report: TranslateReport) -> None:
         report.status = "DONE_WITH_WARNINGS"
     final_level = "warning" if report.status != "DONE" else "info"
     quality_hint = (
-        f" | 品質未通過 {report.quality_rejected} 筆，完整清單：{report.quality_issues_file}"
+        f" | 品質未通過 {report.quality_rejected} 筆，完整清單：{report.quality_issues_file}（同名 .csv 為表格版）"
         if report.quality_rejected and report.quality_issues_file
         else ""
     )
@@ -712,16 +705,15 @@ def _batch_backend_line(
     current: dict[str, int],
     previous: dict[str, int],
 ) -> str:
-    """與畫面同一份計數的後台批次紀錄（取代共享迴圈的原始「成功」字樣）。"""
+    """與畫面同一份計數的後台批次紀錄。"""
     cache_type = message.partition("(")[2].partition(")")[0]
     return (
-        f"[BatchResult] kind={cache_type} "
-        f"ai_response={current['ai_response'] - previous['ai_response']} "
-        f"quality_rejected={current['quality_rejected'] - previous['quality_rejected']} "
-        f"source_fallback={current['source_fallback'] - previous['source_fallback']} "
-        f"db_written={current['written'] - previous['written']} "
-        f"progress={report.ai_response + report.source_fallback}/{report.candidates} "
-        f"raw={message}"
+        f"[BatchResult 批次結果] 第 {report.batch_no} 批｜類型 {cache_type}｜"
+        f"AI 回傳 {current['ai_response'] - previous['ai_response']}｜"
+        f"品質拒絕 {current['quality_rejected'] - previous['quality_rejected']}｜"
+        f"回填原文 {current['source_fallback'] - previous['source_fallback']}｜"
+        f"寫入資料庫 {current['written'] - previous['written']}｜"
+        f"總進度 {report.ai_response + report.source_fallback}/{report.candidates}"
     )
 
 
@@ -791,6 +783,7 @@ def _translate_rows(
                     "source_fallback": report.source_fallback,
                     "quality_rejected": report.quality_rejected,
                 }
+                report.batch_no += 1
                 ui_text = _batch_ui_line(message, report, current, last_batch_counts)
                 backend_text = _batch_backend_line(
                     message, report, current, last_batch_counts

@@ -872,14 +872,14 @@ def test_moddb_contract_error_is_classified_and_tracked(monkeypatch):
     main._note_contract_progress(runtime, 8, 6)
     main._note_contract_resolved(runtime, round_data)
 
-    assert "type=duplicate_id" in warnings[0] and "batch_size=8" in warnings[0]
-    assert "batch_size=8->6" in warnings[1]
-    assert "resolved=true" in infos[0]
+    assert "重複 id" in warnings[0] and "批次 8 筆" in warnings[0]
+    assert "8 筆 → 6 筆" in warnings[1]
+    assert "已排除" in infos[0]
     assert runtime.pending_contract_event is None
 
     main._note_contract_error(runtime, round_data, "duplicate id 'a'")
     main._note_contract_progress(runtime, 3, 0)
-    assert "resolved=false" in warnings[-1]
+    assert "縮到極限仍失敗" in warnings[-1]
     assert runtime.pending_contract_event is None
 
 

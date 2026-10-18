@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -248,16 +249,12 @@ def test_quality_rejection_is_split_from_source_fallback_and_saved_fully(
     assert summary["written"] == 1 and summary["db_written"] == 1
     assert summary["quality_issues_file"]
 
-    issue_file = (
-        tmp_path
-        / "logs"
-        / "2026-10-18"
-        / (
-            "quality-issues-"
-            + summary["quality_issues_file"].rsplit("quality-issues-", 1)[1]
-        )
-    )
-    records = json.loads(issue_file.read_text(encoding="utf-8"))
+    issue_file = Path(summary["quality_issues_file"])
+    assert issue_file.parent.parent == tmp_path / "logs"
+    report_data = json.loads(issue_file.read_text(encoding="utf-8"))
+    assert report_data["統計"]["去重後項目數"] == 1
+    assert report_data["批次"][0]["批次"] == 1
+    records = report_data["批次"][0]["項目"]
     assert records == [
         {
             "kind": "lang",
@@ -267,8 +264,12 @@ def test_quality_rejection_is_split_from_source_fallback_and_saved_fully(
             "source_text": "Infused Alloy",
             "translated_text": "§a注入合金",
             "status": "QUALITY_REJECTED",
+            "count": 1,
+            "batches": [1],
         }
     ]
+    csv_text = issue_file.with_suffix(".csv").read_text(encoding="utf-8-sig")
+    assert "item.foo.b" in csv_text and "出現次數" in csv_text
     ui_text = "\n".join(entry.text for entry in snapshot["logs"])
     assert "§a注入合金" not in ui_text
     assert "品質不符" in ui_text
@@ -2687,3 +2688,64 @@ def test_final_summary_points_to_quality_file_and_flags_remaining(monkeypatch):
     assert report.status == "DONE_WITH_WARNINGS"
     assert "quality-issues-t.json" in logs[0][0]
     assert "品質未通過 1 筆" in logs[0][0]
+
+
+@pytest.fixture(autouse=True)
+def _isolated_data_root(monkeypatch, tmp_path_factory):
+    """報告檔不可寫進真正的 logs 資料夾。"""
+    root = tmp_path_factory.mktemp("data_root")
+    monkeypatch.setattr(moddb_translate_service, "get_data_root", lambda: root)
+
+
+def test_quality_report_dedupes_and_groups_by_batch(tmp_path):
+    from app.services_impl import moddb_translate_report as report_mod
+
+    record = {
+        "kind": "lang",
+        "mod_id": "m",
+        "key": "k",
+        "issues": ["少了 1 個 %s"],
+        "source_text": "a %s",
+        "translated_text": "甲",
+        "status": "QUALITY_REJECTED",
+    }
+    records = [
+        {**record, "batch": 1},
+        {**record, "batch": 2},
+        {**record, "key": "k2", "batch": 2},
+    ]
+    path = report_mod.write_quality_report(tmp_path, "task/1", records)
+
+    data = json.loads(path.read_text(encoding="utf-8"))
+    assert path.name == "quality-issues-task_1.json"
+    assert data["統計"]["品質不符筆數（含重複）"] == 3
+    assert data["統計"]["去重後項目數"] == 2
+    assert data["統計"]["依問題類型"] == {"少了 1 個 %s": 3}
+    first = data["批次"][0]["項目"][0]
+    assert first["count"] == 2 and first["batches"] == [1, 2]
+    csv_lines = path.with_suffix(".csv").read_text(encoding="utf-8-sig").splitlines()
+    assert len(csv_lines) == 3
+
+
+def test_replace_rule_conflict_file_is_one_per_day_and_not_rewritten(tmp_path):
+    from app.services_impl import moddb_translate_report as report_mod
+
+    conflicts = [{"source": "力量", "destination": "飛濺 力量藥水"}]
+    first = report_mod.write_replace_rule_conflicts(tmp_path, conflicts)
+    stamp = first.stat().st_mtime_ns
+    second = report_mod.write_replace_rule_conflicts(tmp_path, conflicts)
+
+    assert first == second and second.stat().st_mtime_ns == stamp
+    assert report_mod.write_replace_rule_conflicts(tmp_path, []) is None
+
+
+def test_backend_summary_is_multiline_chinese():
+    from app.services_impl import moddb_translate_report as report_mod
+
+    report = moddb_translate_service.TranslateReport()
+    report.status = "CANCELLED"
+    report.candidates = 10
+    text = report_mod.format_backend_summary(report)
+
+    assert "已取消" in text and len(text.splitlines()) >= 5
+    assert "{" not in text
