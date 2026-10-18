@@ -617,7 +617,7 @@ def _log_final_summary(session, report: TranslateReport) -> None:
     """依報告決定最終狀態（有警告則 DONE_WITH_WARNINGS），並寫出畫面與後台兩種摘要。"""
     if report.status == "DONE" and any(
         (
-            report.flagged,
+            report.quality_rejected,
             report.source_fallback,
             report.max_tokens_items,
             report.contract_failed_items,
