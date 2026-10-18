@@ -1,6 +1,6 @@
 """Shared format-difference review surface for Mod DB screens.
 
-The comparison contract lives in ``translation_tool.core.format_diagnostics``.
+The comparison contract lives in ``moddb_format_diff_service``.
 This module only turns that result into a small, reusable Flet view; markers and issue
 chips never become part of the editable or persisted translation text.
 """
@@ -11,17 +11,17 @@ from collections.abc import Sequence
 
 import flet as ft
 
+from app.services_impl.moddb_format_diff_service import (
+    FormatDiagnosticsResult,
+    FormatSpan,
+    analyze_format_diagnostics,
+)
 from app.ui import design, kit
 from app.ui.design import C
 from app.views.moddb.format_issue_rendering import (
     diagnostic_label,
     diagnostic_spans,
     diagnostic_tone,
-)
-from translation_tool.core.format_diagnostics import (
-    FormatDiagnosticsResult,
-    FormatSpan,
-    analyze_format_diagnostics,
 )
 
 

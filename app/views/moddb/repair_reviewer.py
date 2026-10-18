@@ -7,8 +7,10 @@ import asyncio
 import flet as ft
 
 from app.services_impl import moddb_repair_review_store
+from app.services_impl.moddb_format_diff_service import analyze_format_diagnostics
 from app.services_impl.moddb_retranslate_service import (
     apply_and_record_repair_review,
+    repair_output_issues_for_kind,
 )
 from app.ui import design
 from app.ui.design import C
@@ -17,8 +19,6 @@ from app.ui.sync_text_field import SyncTextField
 from app.views.moddb.format_diff_review import FormatDiffReview
 from app.views.moddb.format_diff_viewer import FormatDiffViewer
 from app.views.moddb.formatting import format_count
-from translation_tool.core.format_diagnostics import analyze_format_diagnostics
-from translation_tool.translation_db.quality import repair_output_issues_for_kind
 
 
 class RepairReviewer:

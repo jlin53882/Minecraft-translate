@@ -8,6 +8,7 @@ from pathlib import Path
 
 import flet as ft
 
+from app.services_impl.moddb_format_diff_service import analyze_format_diagnostics
 from app.services_impl.moddb_retranslate_service import (
     SameSourceAIRepairPreview,
     cache_profile_label,
@@ -27,7 +28,6 @@ from app.ui.design import C
 from app.ui.snack import show_snack
 from app.views.moddb.format_diff_review import FormatDiffReview
 from app.views.moddb.formatting import format_count, visible_breaks
-from translation_tool.core.format_diagnostics import analyze_format_diagnostics
 from translation_tool.utils.log_unit import log_warning
 
 _PREVIEW_SOURCE_ALL = "__all__"

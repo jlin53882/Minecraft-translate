@@ -6,13 +6,13 @@ from collections.abc import Callable
 
 import flet as ft
 
-from app.ui import design, kit
-from app.ui.design import C
-from app.views.moddb.format_issue_rendering import diagnostic_spans
-from translation_tool.core.format_diagnostics import (
+from app.services_impl.moddb_format_diff_service import (
     FormatDiagnosticsResult,
     analyze_format_diagnostics,
 )
+from app.ui import design, kit
+from app.ui.design import C
+from app.views.moddb.format_issue_rendering import diagnostic_spans
 
 
 class FormatDiffViewer:

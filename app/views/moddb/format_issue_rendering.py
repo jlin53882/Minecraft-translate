@@ -6,8 +6,8 @@ from collections.abc import Iterable
 
 import flet as ft
 
+from app.services_impl.moddb_format_diff_service import FormatDiagnostic, FormatSpan
 from app.ui.design import C
-from translation_tool.core.format_diagnostics import FormatDiagnostic, FormatSpan
 
 
 def diagnostic_tone(issue: FormatDiagnostic) -> str:

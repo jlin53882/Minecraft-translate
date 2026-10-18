@@ -85,10 +85,6 @@ def repair_input_issues_for_kind(
         token_issues_found = token_issues_for_kind(
             source, previous_translation, kind=kind
         )
-        eligible = bool(
-            token_issues_found
-            or guide_structure_issues(source, previous_translation, kind=kind)
-        )
     else:
         eligible, token_issues_tuple, mixed = repair_input_issues_from_counts(
             wanted, previous
@@ -285,10 +281,10 @@ def matches_quality(
     ):
         return status == "consistent"
 
-    result = analyze_format_diagnostics(source, translated, kind=kind or "lang")
     if status == "consistent":
         return not translation_issues(source, translated, kind=kind)
 
+    result = analyze_format_diagnostics(source, translated, kind=kind or "lang")
     structure_issues = guide_structure_issues(source, translated, kind=kind)
     direction = criteria.direction
     if direction not in {"all", "missing", "extra"}:

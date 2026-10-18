@@ -12,6 +12,7 @@ import sqlite3
 
 import flet as ft
 
+from app.services_impl.moddb_format_diff_service import analyze_format_diagnostics
 from app.services_impl.moddb_guide_service import is_guide_kind
 from app.services_impl.moddb_service import (
     SRC_MANUAL,
@@ -73,7 +74,6 @@ from app.views.moddb.species_suggestion import (
 )
 from app.views.moddb.species_suggestion import SpeciesSuggestion
 from app.views.moddb.suggestions import build_suggestions
-from translation_tool.core.format_diagnostics import analyze_format_diagnostics
 from translation_tool.utils.log_unit import (
     log_debug,
     log_exception,
