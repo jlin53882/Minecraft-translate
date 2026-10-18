@@ -246,12 +246,25 @@ class AdvancedFilters:
         self.sort_direction.icon = (
             ft.Icons.ARROW_DOWNWARD if self._sort_desc else ft.Icons.ARROW_UPWARD
         )
-        self.sort_direction.disabled = str(self.sort.value or "default") == "default"
 
     def _toggle_sort_direction(self, _e=None) -> None:
+        page = self.panel.page
+        if str(self.sort.value or "default") == "default":
+            show_snack(
+                page,
+                "請先在「排序」選擇依匯入時間、譯文更新時間或人工操作時間，再切換遞增／遞減",
+                C.GOLD,
+            )
+            return
         self._sort_desc = not self._sort_desc
         self._refresh_sort_direction()
+        self.sort_direction.update()
         self._on_change()
+        show_snack(
+            page,
+            "已改為遞減：新的在前" if self._sort_desc else "已改為遞增：舊的在前",
+            C.EM,
+        )
 
     def _selection_changed(self, _e=None) -> None:
         self._refresh_sort_direction()
