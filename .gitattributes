@@ -1,1 +1,4 @@
 /tools/build_exe.bat text eol=crlf
+
+# 官方語系以位元組計算 sha256 並與 manifest 比對；autocrlf 轉成 CRLF 會讓驗證失敗
+/assets/official_locales/** -text
