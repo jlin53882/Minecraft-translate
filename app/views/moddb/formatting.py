@@ -2,11 +2,8 @@
 
 from __future__ import annotations
 
-from app.services_impl.moddb_service import (
-    format_tokens,
-    token_issues,
-    whitespace_note,
-)
+from translation_tool.core.format_tokens import format_tokens
+from translation_tool.translation_db.quality import token_issues, whitespace_note
 
 __all__ = [
     "format_tokens",

@@ -72,9 +72,11 @@ def _marker_difference(en: Any, zh: Any, path: str) -> str | None:
     """
     if isinstance(en, str):
         # 延遲匯入：translation_db 套件初始化時會回頭匯入本模組。
-        from translation_tool.translation_db.quality import repair_output_issues
+        from translation_tool.translation_db.quality import (
+            repair_output_issues_for_kind,
+        )
 
-        issues = repair_output_issues(en, zh)
+        issues = repair_output_issues_for_kind(en, zh, kind="patchouli")
         return (
             f"{path or '根'} 的格式標記不同（{'、'.join(issues)}）" if issues else None
         )

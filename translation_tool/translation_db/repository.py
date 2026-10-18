@@ -65,12 +65,14 @@ from translation_tool.translation_db.models import (
     WriteBackStats,
 )
 from translation_tool.translation_db.quality import (
+    format_quality_comparison,
     format_tokens,
     matches_quality,
     quality_state,
     repair_input_issues_for_kind,
     token_quality_comparison,
     translation_issues,
+    repair_output_issues_for_kind,
     whitespace_note,
 )
 from translation_tool.translation_db.read_cache import READ_CACHE
@@ -2118,7 +2120,7 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
         def quality_comparison(
             source: str, before: str, after: str, kind: str | None
         ) -> tuple[tuple[str, ...], tuple[str, ...], tuple[QualityIssueDelta, ...]]:
-            old, new, deltas = token_quality_comparison(
+            old, new, deltas = format_quality_comparison(
                 source, before, after, kind=kind
             )
             return tuple(old), tuple(new), deltas
@@ -3790,11 +3792,11 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
                 return AITranslationReplaceResult("skipped_changed")
             # Automated repair must pass output checks; an explicit human review
             # accepts the reviewed draft while retaining the same source CAS.
-            if action == "quality_repair" and translation_issues(
+            if action == "quality_repair" and repair_output_issues_for_kind(
                 expected_en_us,
                 new_zh_tw,
                 kind=expected_kind,
-                repair=not strict_newline,
+                allow_actual_newlines=not strict_newline,
             ):
                 return AITranslationReplaceResult("skipped_changed")
             if new_zh_tw == current[0]:
@@ -4090,8 +4092,9 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
                         for row in rows:
                             if check is not None:
                                 check()
-                            if quality_state(row[4], row[5], kind=row[1])[0] != (
-                                "mismatch"
+                            if (
+                                quality_state(row[4], row[5], kind=row[1])[0]
+                                != "mismatch"
                             ):
                                 continue
                             count += 1

@@ -306,12 +306,37 @@ class BatchReplaceChange:
 
 @dataclass(frozen=True)
 class QualityIssueDelta:
-    """Count change for one missing/extra source token in a replacement."""
+    """Count change for one stable format diagnostic in a replacement."""
 
     token: str
     direction: str
     before: int
     after: int
+    category: str | None = None
+    identifier: str | None = None
+    display: str | None = None
+
+    @property
+    def diagnostic_category(self) -> str:
+        if self.category:
+            return self.category
+        from translation_tool.core.format_tokens import token_category
+
+        return token_category(self.token)
+
+    @property
+    def diagnostic_identifier(self) -> str:
+        return self.identifier or self.token
+
+    @property
+    def display_token(self) -> str:
+        if self.display:
+            return self.display
+        from translation_tool.core.format_diagnostics import format_identifier_label
+
+        return format_identifier_label(
+            self.diagnostic_identifier, self.diagnostic_category
+        )
 
 
 @dataclass(frozen=True)

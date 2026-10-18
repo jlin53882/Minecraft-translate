@@ -1,65 +1,28 @@
 """Shared format-difference review surface for Mod DB screens.
 
-The comparison contract lives in ``moddb_format_diff_service``.  This module
-only turns that result into a small, reusable Flet view; markers and issue
+The comparison contract lives in ``translation_tool.core.format_diagnostics``.
+This module only turns that result into a small, reusable Flet view; markers and issue
 chips never become part of the editable or persisted translation text.
 """
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Sequence
+from collections.abc import Sequence
 
 import flet as ft
 
-from app.services_impl.moddb_format_diff_service import (
-    FormatDiffIssue,
-    FormatDiffResult,
-    FormatTokenOccurrence,
-    compare_format_diff,
-)
 from app.ui import design, kit
 from app.ui.design import C
-
-
-def _token_spans(
-    text: str,
-    occurrences: Iterable[FormatTokenOccurrence],
-    affected_tokens: set[str],
-    *,
-    highlight: bool,
-) -> list[ft.TextSpan]:
-    """Render real text with optional token emphasis, without inserting markers."""
-    if not highlight:
-        return [ft.TextSpan(text or "（無）")]
-    spans: list[ft.TextSpan] = []
-    cursor = 0
-    for occurrence in occurrences:
-        if occurrence.start < cursor:
-            continue
-        if occurrence.start > cursor:
-            spans.append(ft.TextSpan(text[cursor : occurrence.start]))
-        raw = text[occurrence.start : occurrence.end]
-        style = ft.TextStyle(
-            color=C.RED if occurrence.token in affected_tokens else C.TEXT,
-            weight=ft.FontWeight.W_700 if occurrence.token in affected_tokens else None,
-            bgcolor=C.RED_BG if occurrence.token in affected_tokens else None,
-        )
-        spans.append(ft.TextSpan(raw, style=style))
-        cursor = occurrence.end
-    if cursor < len(text):
-        spans.append(ft.TextSpan(text[cursor:]))
-    return spans or [ft.TextSpan(text or "（無）")]
-
-
-def _issue_tone(issue: FormatDiffIssue) -> str:
-    return "red" if issue.direction == "extra" else "gold"
-
-
-def _issue_label(issue: FormatDiffIssue) -> str:
-    if issue.token == "\n":
-        return f"換行數量不一致 · 原文 {issue.source_count} / 譯文 {issue.target_count}"
-    action = "缺少" if issue.direction == "missing" else "多出"
-    return f"{action} {issue.display_token} × {abs(issue.delta)}"
+from app.views.moddb.format_issue_rendering import (
+    diagnostic_label,
+    diagnostic_spans,
+    diagnostic_tone,
+)
+from translation_tool.core.format_diagnostics import (
+    FormatDiagnosticsResult,
+    FormatSpan,
+    analyze_format_diagnostics,
+)
 
 
 class FormatDiffReview:
@@ -84,8 +47,8 @@ class FormatDiffReview:
         self.compact = compact
         self.panel_width = panel_width or (320 if compact else 340)
         self.show_source = show_source
-        self._result: FormatDiffResult | None = None
-        self._kind: str | None = None
+        self._result: FormatDiagnosticsResult | None = None
+        self._kind: str = "lang"
         self._highlight = True
         self._tab = "diff"
         self._meta_controls: list[ft.Control] = []
@@ -126,20 +89,22 @@ class FormatDiffReview:
         self,
         source_text: str,
         target_text: str,
-        diff_result: FormatDiffResult | None = None,
+        diff_result: FormatDiagnosticsResult | None = None,
         *,
         metadata: Sequence[ft.Control] = (),
         kind: str | None = None,
-    ) -> FormatDiffResult:
+    ) -> FormatDiagnosticsResult:
         source_text = source_text or ""
         target_text = target_text or ""
+        kind = kind or "lang"
         result = diff_result
         if (
             result is None
             or result.source_text != source_text
             or result.target_text != target_text
+            or result.kind != kind
         ):
-            result = compare_format_diff(source_text, target_text, kind=kind)
+            result = analyze_format_diagnostics(source_text, target_text, kind=kind)
         self._result = result
         self._kind = kind
         self._source_text = source_text
@@ -170,7 +135,7 @@ class FormatDiffReview:
             pass  # 尚未加入頁面（例如單元測試）；之後的整頁更新會帶上
 
     def _refresh(self) -> None:
-        result = self._result or compare_format_diff(
+        result = self._result or analyze_format_diagnostics(
             self._source_text, self._target_text, kind=self._kind
         )
         has_editor = self.editable_control is not None
@@ -269,10 +234,12 @@ class FormatDiffReview:
         self._edit_column.controls = controls
         return [self._edit_column]
 
-    def _diff_content(self, result: FormatDiffResult) -> list[ft.Control]:
+    def _diff_content(self, result: FormatDiagnosticsResult) -> list[ft.Control]:
         issue_controls = [
             kit.chip(
-                _issue_label(issue), _issue_tone(issue), icon=ft.Icons.WARNING_AMBER
+                diagnostic_label(issue),
+                diagnostic_tone(issue),
+                icon=ft.Icons.WARNING_AMBER,
             )
             for issue in result.issues
         ]
@@ -331,7 +298,7 @@ class FormatDiffReview:
         self,
         title: str,
         text: str,
-        occurrences: Sequence[FormatTokenOccurrence],
+        occurrences: Sequence[FormatSpan],
         affected_tokens: set[str],
         tone: str,
     ) -> ft.Container:
@@ -339,7 +306,7 @@ class FormatDiffReview:
         rendered = ft.Text(text or "（無）", size=13, color=C.TEXT, selectable=True)
         if self._highlight:
             rendered.value = ""
-            rendered.spans = _token_spans(
+            rendered.spans = diagnostic_spans(
                 text,
                 occurrences,
                 affected_tokens,
@@ -361,7 +328,7 @@ class FormatDiffReview:
             height=220 if self.compact else 260,
         )
 
-    def _result_table(self, result: FormatDiffResult) -> ft.Container:
+    def _result_table(self, result: FormatDiagnosticsResult) -> ft.Container:
         """檢查項目表：項目／原文數量／譯文數量／差異，欄寬固定、差異欄吃剩餘空間。"""
 
         def cell(text: str, *, width: float | None = None, expand=None, **style):

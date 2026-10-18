@@ -7,10 +7,8 @@ import asyncio
 import flet as ft
 
 from app.services_impl import moddb_repair_review_store
-from app.services_impl.moddb_format_diff_service import compare_format_diff
 from app.services_impl.moddb_retranslate_service import (
     apply_and_record_repair_review,
-    translation_issues,
 )
 from app.ui import design
 from app.ui.design import C
@@ -19,6 +17,8 @@ from app.ui.sync_text_field import SyncTextField
 from app.views.moddb.format_diff_review import FormatDiffReview
 from app.views.moddb.format_diff_viewer import FormatDiffViewer
 from app.views.moddb.formatting import format_count
+from translation_tool.core.format_diagnostics import analyze_format_diagnostics
+from translation_tool.translation_db.quality import repair_output_issues_for_kind
 
 
 class RepairReviewer:
@@ -339,7 +339,9 @@ class RepairReviewer:
         )
         self.format_review.set_editable_control(self.draft)
         self._update_format_status(
-            str(item.get("en_us") or ""), str(item.get("draft") or "")
+            str(item.get("en_us") or ""),
+            str(item.get("draft") or ""),
+            kind=str(item.get("kind") or "lang"),
         )
         status_filter = self._filter_control()
         self.body.controls = [
@@ -381,12 +383,15 @@ class RepairReviewer:
         status_filter.disabled = self.applying
         return status_filter
 
-    def _update_format_status(self, source: str, draft: str) -> None:
-        kind = str((self.item or {}).get("kind") or "")
-        diff_result = compare_format_diff(source, draft, kind=kind)
+    def _update_format_status(
+        self, source: str, draft: str, *, kind: str = "lang"
+    ) -> None:
+        diff_result = analyze_format_diagnostics(source, draft, kind=kind)
         messages = [*diff_result.legacy_messages, *diff_result.guide_issues]
         if messages:
-            self.format_status.value = "格式檢查：" + "；".join(messages)
+            self.format_status.value = "格式檢查：" + "；".join(
+                messages
+            )
             self.format_status.color = C.GOLD
         else:
             self.format_status.value = "格式檢查通過。"
@@ -399,7 +404,9 @@ class RepairReviewer:
             return
         self._save_draft(status="pending")
         self._update_format_status(
-            str(self.item.get("en_us") or ""), self.draft.value or ""
+            str(self.item.get("en_us") or ""),
+            self.draft.value or "",
+            kind=str(self.item.get("kind") or "lang"),
         )
         self.page.update()
 
@@ -511,11 +518,11 @@ class RepairReviewer:
         if not value.strip():
             show_snack(self.page, "AI 草稿不能是空白，請先輸入翻譯內容。", C.GOLD)
             return
-        issues = translation_issues(
+        issues = repair_output_issues_for_kind(
             str(self.item.get("en_us") or ""),
             value,
-            kind=str(self.item.get("kind") or ""),
-            repair=not self.item.get("strict_newline"),
+            kind=str(self.item.get("kind") or "lang"),
+            allow_actual_newlines=not self.item.get("strict_newline"),
         )
         if issues:
             self._open_apply_confirmation(value, issues)

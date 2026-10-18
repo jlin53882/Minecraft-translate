@@ -32,6 +32,7 @@ from app.services_impl.pipelines._pipeline_logging import (
     mirror_session_log,
 )
 from app.tasks.task_session import add_log_unmirrored
+from translation_tool.core.format_diagnostics import analyze_format_diagnostics
 from translation_tool.core.lm_batch_budget import (
     BudgetConfig,
     get_tracker,
@@ -56,6 +57,7 @@ from translation_tool.translation_db.models import SameSourceAIEntry
 from translation_tool.translation_db.quality import (
     repair_input_issues_for_kind,
     translation_issues,
+    repair_output_issues_for_kind,
 )
 from translation_tool.translation_db.run_progress import format_repair_live
 from translation_tool.translation_db.schema import SRC_AI
@@ -1142,11 +1144,20 @@ def _finalize_result(
         )
         return True
     translated_text = result["text"]
-    issues = translation_issues(
-        original["source_text"],
-        translated_text,
-        kind=original.get("_kind"),
-        repair=report.mode == "quality_mismatch" and not report.strict_newline,
+    kind = str(original.get("_kind") or "lang")
+    issues = (
+        repair_output_issues_for_kind(
+            original["source_text"],
+            translated_text,
+            kind=kind,
+            allow_actual_newlines=not report.strict_newline,
+        )
+        if report.mode == "quality_mismatch"
+        else list(
+            analyze_format_diagnostics(
+                original["source_text"], translated_text, kind=kind
+            ).legacy_messages
+        )
     )
     if issues:
         _mark_flagged(db, session, report, original, translated_text, issues)

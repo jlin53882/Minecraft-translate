@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import re
 from collections import Counter
+from dataclasses import dataclass
 
 _TAG = re.compile(r"<[^<>\n]+>")
 _LINK_TARGET = re.compile(r"\]\(([^)\n]*)\)")
@@ -28,6 +29,22 @@ _LABELS = {
     "code": "行內程式碼標記",
     "link": "連結目標",
 }
+
+
+@dataclass(frozen=True)
+class GuideMark:
+    """A structured Guide/Markdown mark with an exact source span."""
+
+    kind: str
+    value: str
+    start: int
+    end: int
+    line: int
+    column: int
+
+    @property
+    def identifier(self) -> str:
+        return f"{self.kind}:{self.value}"
 
 
 def _line_marks(line: str) -> list[tuple[str, str]]:
@@ -63,17 +80,79 @@ def _component_lines(text: str) -> tuple[str, ...]:
         for line in (text or "").splitlines()
         if line.strip() and _COMPONENT_LINE.fullmatch(line.strip())
     )
+def describe_guide_mark(mark: tuple[str, str]) -> str:
+    """Stable human-facing label shared by diagnostics and legacy messages."""
+    return _describe(mark)
+
+
+def collect_guide_marks(text: str) -> tuple[GuideMark, ...]:
+    """Collect Guide/Markdown structure with offsets for UI highlighting."""
+    text = text or ""
+    marks: list[GuideMark] = []
+    offset = 0
+    for line_number, line in enumerate(text.splitlines(keepends=True), 1):
+        content = line.rstrip("\r\n")
+        line_mark = _line_marks(content)
+        if line_mark:
+            kind, value = line_mark[0]
+            start = len(content) - len(content.lstrip())
+            if kind == "heading":
+                end = start + len(value) + 1
+            elif kind == "bullet":
+                end = start + 1
+            elif kind == "ordered":
+                match = _ORDERED.match(content)
+                end = match.end() if match else start + len(value)
+            else:
+                end = start + 1
+            marks.append(
+                GuideMark(
+                    kind, value, offset + start, offset + end, line_number, start + 1
+                )
+            )
+        for pattern, kind, group in (
+            (_TAG, "tag", 0),
+            (_LINK_TARGET, "link", 1),
+        ):
+            for match in pattern.finditer(content):
+                value = match.group(group)
+                start, end = match.span(group)
+                marks.append(
+                    GuideMark(
+                        kind,
+                        value,
+                        offset + start,
+                        offset + end,
+                        line_number,
+                        start + 1,
+                    )
+                )
+        for kind, value, needle in (("bold", "**", "**"), ("code", "`", "`")):
+            start = 0
+            while True:
+                found = content.find(needle, start)
+                if found < 0:
+                    break
+                marks.append(
+                    GuideMark(
+                        kind,
+                        value,
+                        offset + found,
+                        offset + found + len(needle),
+                        line_number,
+                        found + 1,
+                    )
+                )
+                start = found + len(needle)
+        offset += len(line)
+    return tuple(marks)
 
 
 def guide_marks(text: str) -> Counter[tuple[str, str]]:
     """``(種類, 內容)`` 的出現次數。"""
-    marks: Counter[tuple[str, str]] = Counter()
-    for line in (text or "").splitlines():
-        marks.update(_line_marks(line))
-    marks.update(("tag", tag) for tag in _TAG.findall(text or ""))
-    marks.update(("link", target) for target in _LINK_TARGET.findall(text or ""))
-    marks[("bold", "**")] += (text or "").count("**")
-    marks[("code", "`")] += (text or "").count("`")
+    marks: Counter[tuple[str, str]] = Counter(
+        (mark.kind, mark.value) for mark in collect_guide_marks(text)
+    )
     return +marks  # 去掉次數為 0 的項目
 
 
@@ -105,6 +184,47 @@ def _count_issue(label: str, wanted: int, actual: int) -> str | None:
 def _describe(mark: tuple[str, str]) -> str:
     kind, value = mark
     return f"{_LABELS[kind]} {value}"
+
+
+def collect_guide_diagnostics(source: str, translated: str):
+    """Return immutable structured diagnostics for Guide/Markdown marks."""
+    from translation_tool.core.format_diagnostics import FormatDiagnostic, FormatSpan
+
+    source_marks = collect_guide_marks(source)
+    target_marks = collect_guide_marks(translated)
+    wanted = Counter(mark.identifier for mark in source_marks)
+    actual = Counter(mark.identifier for mark in target_marks)
+    source_by_id: dict[str, list[FormatSpan]] = {}
+    target_by_id: dict[str, list[FormatSpan]] = {}
+    for mark in source_marks:
+        source_by_id.setdefault(mark.identifier, []).append(
+            FormatSpan(mark.identifier, mark.start, mark.end, mark.line, mark.column)
+        )
+    for mark in target_marks:
+        target_by_id.setdefault(mark.identifier, []).append(
+            FormatSpan(mark.identifier, mark.start, mark.end, mark.line, mark.column)
+        )
+    diagnostics = []
+    for identifier in sorted(set(wanted) | set(actual)):
+        delta = actual[identifier] - wanted[identifier]
+        if not delta:
+            continue
+        mark_kind, value = identifier.split(":", 1)
+        diagnostics.append(
+            FormatDiagnostic(
+                identifier=identifier,
+                category="guide",
+                direction="extra" if delta > 0 else "missing",
+                source_count=wanted[identifier],
+                target_count=actual[identifier],
+                delta=delta,
+                location_confidence="exact",
+                source_occurrences=tuple(source_by_id.get(identifier, ())),
+                target_occurrences=tuple(target_by_id.get(identifier, ())),
+                display_label=_describe((mark_kind, value)),
+            )
+        )
+    return tuple(diagnostics)
 
 
 def guide_issues(source: str, translated: str) -> list[str]:
@@ -148,4 +268,11 @@ def guide_issues(source: str, translated: str) -> list[str]:
     return issues
 
 
-__all__ = ["format_spec", "guide_issues", "guide_marks"]
+__all__ = [
+    "GuideMark",
+    "collect_guide_diagnostics",
+    "collect_guide_marks",
+    "describe_guide_mark",
+    "guide_issues",
+    "guide_marks",
+]

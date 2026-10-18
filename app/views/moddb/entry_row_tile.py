@@ -12,6 +12,7 @@ from app.services_impl.moddb_source_service import (
 )
 from app.ui import design, kit
 from app.ui.design import C
+from app.views.moddb.format_issue_rendering import quality_issue_summary
 from app.views.moddb.formatting import STATE_TONES, shorten
 
 
@@ -98,7 +99,9 @@ def _quality_controls(row) -> list[ft.Control]:
             ft.Icons.WARNING_AMBER,
             size=15,
             color=C.GOLD,
-            tooltip="；".join((*row.quality_issues, row.whitespace_note))
+            tooltip="；".join(
+                quality_issue_summary(row.quality_issues, row.whitespace_note)
+            )
             or "原文或譯文尚未完整，無法檢查特殊字元",
         )
     ]

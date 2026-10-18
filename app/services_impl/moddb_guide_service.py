@@ -6,8 +6,16 @@
 
 from __future__ import annotations
 
+from translation_tool.core.format_diagnostics import analyze_format_diagnostics
 from translation_tool.translation_db.schema import KIND_GUIDE
 
 
 def is_guide_kind(kind: str) -> bool:
     return kind == KIND_GUIDE
+
+
+def guide_mark_issues(source: str, translated: str) -> list[str]:
+    """譯文與原文的指南標記差異（繁體中文說明）；沒有差異回傳空串列。"""
+    return list(
+        analyze_format_diagnostics(source, translated, kind=KIND_GUIDE).legacy_messages
+    )
