@@ -165,6 +165,26 @@ class TestIsValidHit:
 
         assert _is_valid_hit(entry["dst"], entry, item) is False
 
+    @pytest.mark.parametrize("cache_type", ["ftbquests", "kubejs"])
+    def test_is_valid_hit_rejects_missing_rich_text_shield_placeholders(
+        self, cache_type
+    ):
+        """Shield 遺失時，即使還原後沒有可掃描 token 也不能命中快取。"""
+        from translation_tool.core.lm_translator_shared_cache import _is_valid_hit
+        from translation_tool.plugins.shared.rich_text_shield import shield_text
+
+        source = "&aUse #minecraft:stone now"
+        shielded = shield_text(source)
+        item = {
+            "cache_type": cache_type,
+            "source_text": source,
+            "text": shielded.clean,
+            "_shielded": shielded,
+        }
+        entry = {"dst": "現在使用", "src": source}
+
+        assert _is_valid_hit(entry["dst"], entry, item) is False
+
 
 class TestFastSplitItemsByCache:
     """測試 fast_split_items_by_cache 函數。"""

@@ -4207,6 +4207,55 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
             (mod_id,),
         )
 
+    def _reviewed_lang_candidate_rows(
+        self, mod_id: str, mc_version: str | None
+    ) -> list[list[str]]:
+        """Load one module/version candidate snapshot for repeated glossary matches.
+
+        The snapshot is stored through ``_cached`` so the SQL scan is reused by
+        later translation tasks and invalidated by ``data_gen`` or the external
+        write sequence. Source matching remains in Python to preserve Unicode
+        ``casefold()`` semantics and to keep source-specific filtering out of the
+        reusable candidate snapshot.
+        """
+        clauses = [
+            "e.mod_id = ?",
+            "e.kind = 'lang'",
+            "f.review_status = 'reviewed'",
+            "e.en_us <> ''",
+            "f.zh_tw <> ''",
+            "e.en_us <> f.zh_tw",
+        ]
+        params: list[object] = [mod_id]
+        if mc_version:
+            clauses.append("e.mc_version = ?")
+            params.append(mc_version)
+        cache_key = "reviewed_lang_candidates:" + json.dumps(
+            [mod_id, mc_version], ensure_ascii=False, separators=(",", ":")
+        )
+
+        def load() -> list[list[str]]:
+            rows = self._q(
+                f"""
+                SELECT e.key, e.en_us, f.zh_tw
+                FROM entry e
+                JOIN effective f ON f.entry_id = e.id
+                WHERE {" AND ".join(clauses)}
+                ORDER BY e.key, e.id
+                """,
+                params,
+            )
+            return [
+                list(row)
+                for row in rows
+                if all(isinstance(value, str) for value in row)
+                and row[1].strip()
+                and row[2].strip()
+                and quality_state(row[1], row[2], kind="lang")[0] == "consistent"
+            ]
+
+        return self._cached(cache_key, load)
+
     def reviewed_lang_glossary(
         self,
         mod_id: str,
@@ -4222,18 +4271,6 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
         limiting it to the current source set prevents unrelated terminology or
         cross-version conflicts from contaminating a batch.
         """
-        clauses = [
-            "e.mod_id = ?",
-            "e.kind = 'lang'",
-            "f.review_status = 'reviewed'",
-            "e.en_us <> ''",
-            "f.zh_tw <> ''",
-            "e.en_us <> f.zh_tw",
-        ]
-        params: list[object] = [mod_id]
-        if mc_version:
-            clauses.append("e.mc_version = ?")
-            params.append(mc_version)
         normalized_sources = tuple(
             dict.fromkeys(
                 source
@@ -4247,20 +4284,9 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
             return []
 
         # 跨語言大小寫折疊由 Python ``casefold`` 負責；SQLite ``lower`` 只
-        # 保證 ASCII，不能拿來當 Unicode 的排除式預篩。先以模組、版本與
-        # reviewed 狀態建立一次有界候選集合，再由 prefix matcher 做一次
-        # Unicode-aware 子字串與詞界判斷，避免每 200 筆來源重掃 SQL。
-        rows = self._q(
-            f"""
-            SELECT e.key, e.en_us, f.zh_tw
-            FROM entry e
-            JOIN effective f ON f.entry_id = e.id
-            WHERE {" AND ".join(clauses)}
-            ORDER BY e.key, e.id
-            """,
-            params,
-        )
-        rows = [row for row in rows if all(isinstance(value, str) for value in row)]
+        # 保證 ASCII，不能拿來當 Unicode 的排除式預篩。候選集合依模組、
+        # 版本與資料世代快取，來源相關性仍由每次呼叫的 matcher 判斷。
+        rows = self._reviewed_lang_candidate_rows(mod_id, mc_version)
         matched_sources = matching_terms(
             normalized_sources, tuple(row[1] for row in rows)
         )
@@ -4273,9 +4299,6 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
                 isinstance(key, str)
                 and isinstance(en_us, str)
                 and isinstance(zh_tw, str)
-                and en_us.strip()
-                and zh_tw.strip()
-                and quality_state(en_us, zh_tw, kind="lang")[0] == "consistent"
                 and term_canonical_key(en_us) in matched_source_keys
             ):
                 continue

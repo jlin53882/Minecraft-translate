@@ -12,7 +12,10 @@ from typing import Any
 
 from translation_tool.core.lm_config_rules import value_fully_translated
 from translation_tool.core.lm_format_policy import kind_for_item
-from translation_tool.plugins.shared.rich_text_shield import unshield_text
+from translation_tool.plugins.shared.rich_text_shield import (
+    shield_placeholder_issues,
+    unshield_text,
+)
 from translation_tool.translation_db.quality import translation_issues
 from translation_tool.utils.cache_manager import get_cache_dict_ref
 
@@ -47,9 +50,14 @@ def cache_quality_issues(item: dict[str, Any], translated: str) -> list[str]:
     kind = kind_for_item(item)
     candidate = str(translated or "")
     shielded = item.get("_shielded")
+    shield_issues: list[str] = []
     if shielded is not None and getattr(shielded, "shields", None):
-        candidate = unshield_text(candidate, shielded.shields)
-    return translation_issues(str(item.get("source_text") or ""), candidate, kind=kind)
+        shields = shielded.shields
+        shield_issues = shield_placeholder_issues(candidate, shields)
+        candidate = unshield_text(candidate, shields)
+    return shield_issues + translation_issues(
+        str(item.get("source_text") or ""), candidate, kind=kind
+    )
 
 
 def safe_output_text(item: dict[str, Any]) -> str:

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import re
 import threading
+from collections import Counter
 from dataclasses import dataclass, field
 
 # =============================================================================
@@ -33,6 +34,10 @@ IMAGE_PATTERN = re.compile(r"\.(?:jpe?g|png|gif|bmp|webp|svg|ico)$", re.IGNORECA
 
 # 特殊事件 JSON 片段：{\" 開頭
 EVENT_JSON_PATTERN = re.compile(r'^\{\\"')
+
+# Shield 佔位符只由本模組產生；品質閘門用它確認模型沒有遺失或重複
+# 受保護的 Rich Text 片段。一般文字中的 ``$`` 不會被這個模式誤判。
+SHIELD_PLACEHOLDER_PATTERN = re.compile(r"\$(?:C|P|E)\d+\$")
 
 # 翻頁/點擊事件：{@...}
 PAGEBREAK_PATTERN = re.compile(r"\{@[a-zA-Z_][a-zA-Z0-9_]*\}")
@@ -79,6 +84,52 @@ class ShieldedText:
     skip_reason: str | None = None  # None = 需要翻譯
     had_color: bool = False
     had_item_ref: bool = False
+
+
+def shield_placeholder_issues(
+    clean_translated: str, shield_pieces: list[ShieldPiece]
+) -> list[str]:
+    """檢查翻譯結果是否完整保留 Shield 佔位符。
+
+    ``unshield_text`` 對缺少的佔位符採取寬容行為，會直接留下缺少格式的
+    譯文。品質閘門必須在還原前比較精確數量，才能攔住顏色碼、物品 ID 等
+    不會被一般 Minecraft token 掃描器辨識的 Rich Text 格式。
+    """
+    if not shield_pieces:
+        return []
+
+    expected = Counter(
+        piece.placeholder
+        for piece in shield_pieces
+        if isinstance(getattr(piece, "placeholder", None), str) and piece.placeholder
+    )
+    if not expected:
+        return []
+
+    actual = Counter(SHIELD_PLACEHOLDER_PATTERN.findall(clean_translated or ""))
+    issues: list[str] = []
+    originals = {
+        piece.placeholder: piece.original
+        for piece in shield_pieces
+        if isinstance(getattr(piece, "placeholder", None), str) and piece.placeholder
+    }
+    for placeholder, expected_count in expected.items():
+        actual_count = actual.get(placeholder, 0)
+        if actual_count < expected_count:
+            issues.append(
+                f"少了 {expected_count - actual_count} 個保護格式佔位符"
+                f"「{placeholder}」（原文：{originals[placeholder]}）"
+            )
+        elif actual_count > expected_count:
+            issues.append(
+                f"多了 {actual_count - expected_count} 個保護格式佔位符"
+                f"「{placeholder}」"
+            )
+
+    for placeholder, actual_count in actual.items():
+        if placeholder not in expected:
+            issues.append(f"多了 {actual_count} 個未知保護格式佔位符「{placeholder}」")
+    return issues
 
 
 # =============================================================================

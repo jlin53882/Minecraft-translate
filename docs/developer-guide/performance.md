@@ -56,6 +56,18 @@ does not depend on the table size; record the bound in `ALLOWED_PLAN_MARKERS` or
 - `kinds()`: sorts the distinct entry kinds only.
 - The mismatch list: sorts only rows that pass the special-character prefilter.
 
+### Mod DB 已審核 lang 術語候選
+
+`TranslationDB.reviewed_lang_glossary` 先依模組、Minecraft 版本、`lang` 種類、
+已審核狀態與有效譯文載入候選快照，再由 Python 的 `casefold()` 與既有詞界／
+子字串匹配器依目前批次挑選術語。SQLite 的 `lower()` 不得作為 Unicode 候選的
+排除條件，因為它不能完整涵蓋 Python 的大小寫折疊結果。
+
+候選快照透過 `TranslationDB._cached` 儲存，快取鍵包含模組與版本，快取世代包含
+`data_gen` 及外部寫入序號。相同資料世代的後續翻譯任務會重用候選集合，不會再次
+掃描整個模組；資料庫寫入或外部變更使世代改變時，舊快照自動失效。來源相關性、
+多譯文衝突排除與最終數量上限仍在 Python 端執行，不得提前在候選 SQL 階段截斷。
+
 ### Mod DB trigger-maintained derived data
 
 `translation_tool/translation_db/stat_summary.py`,

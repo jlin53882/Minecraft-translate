@@ -245,11 +245,16 @@ def test_shared_loop_rejects_plugin_translation_missing_protected_token(
     """FTB/KubeJS 的 AI 回應缺少格式 token 時不可寫入快取。"""
     added = _patch_loop(monkeypatch)
     delivered: list[dict] = []
+    from translation_tool.plugins.shared.rich_text_shield import shield_text
+
+    source = "&a&#12AB34Use #minecraft:stone %s now"
+    shielded = shield_text(source)
     item = {
         "path": f"{cache_type}/entry",
-        "text": "Use %s now",
-        "source_text": "Use %s now",
+        "text": shielded.clean,
+        "source_text": source,
         "cache_type": cache_type,
+        "_shielded": shielded,
     }
 
     def fake_translate(batch, _total):
