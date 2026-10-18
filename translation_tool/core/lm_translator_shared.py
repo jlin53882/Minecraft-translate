@@ -11,6 +11,7 @@ from translation_tool.core.lm_translator_shared_cache import (
     _is_valid_hit,
     fast_split_items_by_cache,
     get_default_cache_rules,
+    safe_output_text,
 )
 from translation_tool.core.lm_translator_shared_loop import (
     TranslateLoopResult,
@@ -53,6 +54,7 @@ __all__ = [
     "make_progress_hook",
     "prepare_translator_items",
     "run_translator_skeleton",
+    "safe_output_text",
     "translate_items_with_cache_loop",
     "write_cache_hit_preview",
     "write_dry_run_preview",

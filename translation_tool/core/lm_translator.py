@@ -54,6 +54,7 @@ from translation_tool.core.lm_translator_shared import (
     _is_valid_hit,
     prepare_translator_items,
     run_translator_skeleton,
+    safe_output_text,
 )
 from translation_tool.core.lm_translator_shared_loop import _get_default_batch_size
 from translation_tool.core.patchouli_compat import (
@@ -556,23 +557,26 @@ def _run_directory_translation(
         file_name = item.get("file")
         if file_name not in file_cache:
             return
-        set_by_path(file_cache[file_name], item["path"], item["text"])
+        rejected = bool(item.get("_cache_rejected"))
+        output_text = safe_output_text(item)
+        set_by_path(file_cache[file_name], item["path"], output_text)
         touched_files.add(file_name)
         if (
             db_ctx is not None
             and db_ctx.buffer is not None
             and not item.get("_untranslated")
+            and not rejected
         ):
             db_ctx.buffer.add(item)
         source_text = item.get("source_text") or item.get("text") or ""
-        if source_text:
+        if source_text and not rejected:
             translation_log.append(
                 {
                     "file": file_name,
                     "path": item["path"],
                     "cache_type": item.get("cache_type"),
                     "source": source_text,
-                    "translated": item["text"],
+                    "translated": output_text,
                 }
             )
 

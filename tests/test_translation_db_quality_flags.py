@@ -567,8 +567,27 @@ def test_reviewed_lang_glossary_loads_scoped_candidates_once(db, monkeypatch):
         "foo", "1.21.1", ("The Pressure Chamber processes air.",)
     ) == [{"key": "pressure", "en_us": "Pressure Chamber", "zh_tw": "壓力室"}]
     assert len(calls) == 1
-    assert "LIMIT ? OFFSET ?" in calls[0]
-    assert "instr(" in calls[0]
+    assert "LIMIT ? OFFSET ?" not in calls[0]
+    assert "instr(" not in calls[0]
+    assert "lower(" not in calls[0]
+
+
+def test_reviewed_lang_glossary_matches_unicode_casefold_terms(db):
+    """SQLite lower() 不可排除 Python casefold() 能辨識的 Unicode 術語。"""
+    db.ingest(
+        "1.21.1",
+        [
+            ScanItem(KIND_LANG, "foo", "cafe", "café", "咖啡館"),
+            ScanItem(KIND_LANG, "foo", "street", "Straße", "街道"),
+        ],
+    )
+    for row in db.list_entries("1.21.1", limit=10)[0]:
+        db.review_manual(row.id, expected_zh_tw=row.zh_tw, actor="tester")
+
+    assert db.reviewed_lang_glossary("foo", "1.21.1", ("CAFÉ STRASSE",)) == [
+        {"key": "cafe", "en_us": "café", "zh_tw": "咖啡館"},
+        {"key": "street", "en_us": "Straße", "zh_tw": "街道"},
+    ]
 
 
 def test_reviewed_lang_glossary_without_source_scope_does_not_scan_module(db):

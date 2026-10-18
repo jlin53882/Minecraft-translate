@@ -52,6 +52,20 @@ def cache_quality_issues(item: dict[str, Any], translated: str) -> list[str]:
     return translation_issues(str(item.get("source_text") or ""), candidate, kind=kind)
 
 
+def safe_output_text(item: dict[str, Any]) -> str:
+    """Return text allowed to enter a formal output file or database buffer.
+
+    A rejected AI candidate remains on the item for Mod DB manual review, but
+    must never be treated as a valid translation by a formal-output callback.
+    Such callbacks fall back to the original source text instead.
+    """
+    if item.get("_cache_rejected"):
+        source = item.get("source_text")
+        return source if isinstance(source, str) else ""
+    text = item.get("text")
+    return text if isinstance(text, str) else ""
+
+
 def get_default_cache_rules() -> dict[str, CacheRule]:
     """回傳預設 cache rule map。"""
     return {

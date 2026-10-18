@@ -381,6 +381,18 @@ def _record_flagged_translation(
         _log(session, f"⚠️ 特殊字元不一致，未寫入：{note}", "warning")
 
 
+def _quality_issues_for_item(
+    item: dict[str, Any], source: str, text: str
+) -> list[str] | tuple[str, ...]:
+    """Normalize the shared quality rejection before Mod DB write-back."""
+    issues = item.get("_quality_issues") or translation_issues(
+        source, text, kind=item.get("_kind")
+    )
+    if item.get("_cache_rejected") and not issues:
+        return ("格式驗證失敗",)
+    return issues
+
+
 def _translate_rows(
     session, db, options: TranslateOptions, report: TranslateReport, rows, cancelled
 ) -> None:
@@ -397,9 +409,7 @@ def _translate_rows(
         failures["streak"] = 0
         report.translated += 1
         source, text = item["source_text"], item["text"]
-        issues = item.get("_quality_issues") or translation_issues(
-            source, text, kind=item.get("_kind")
-        )
+        issues = _quality_issues_for_item(item, source, text)
         if issues:
             _record_flagged_translation(session, report, item, issues)
             return

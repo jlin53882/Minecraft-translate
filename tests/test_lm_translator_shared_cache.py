@@ -50,6 +50,22 @@ class TestCacheRule:
         assert key == "test.path|Hello"
 
 
+def test_safe_output_text_falls_back_to_source_for_rejected_ai_candidate():
+    from translation_tool.core.lm_translator_shared_cache import safe_output_text
+
+    assert (
+        safe_output_text(
+            {
+                "source_text": "Use %s now",
+                "text": "現在使用",
+                "_cache_rejected": True,
+            }
+        )
+        == "Use %s now"
+    )
+    assert safe_output_text({"source_text": "Hello", "text": "你好"}) == "你好"
+
+
 class TestGetDefaultCacheRules:
     """測試 get_default_cache_rules 函數。"""
 

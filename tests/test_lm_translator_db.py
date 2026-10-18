@@ -145,6 +145,37 @@ def test_db_hit_then_cache_then_ai_and_output_is_correct(run_env, tmp_path):
     assert book["pages"][0]["text"] == "書本譯文"  # Patchouli 也走資料庫
 
 
+def test_rejected_ai_candidate_stays_source_in_directory_output_and_db(
+    run_env, tmp_path, monkeypatch
+):
+    inp, db_path, _seen, _ = run_env
+    _seed(db_path)
+
+    def rejected_ai(batch, total=None):
+        return [
+            {
+                **item,
+                "text": "現在使用" if item["path"] == "item.foo.ai" else item["text"],
+                "_cache_rejected": item["path"] == "item.foo.ai",
+            }
+            for item in batch
+        ], "DONE"
+
+    monkeypatch.setattr(lm_translator, "translate_batch_smart", rejected_ai)
+    out = _run(inp, tmp_path)
+
+    lang = json.loads(
+        (out / "assets" / "foo" / "lang" / "zh_tw.json").read_text(encoding="utf-8")
+    )
+    assert lang["item.foo.ai"] == "Needs Machine Translation"
+
+    db = TranslationDB(db_path)
+    assert (
+        db._one("SELECT 1 FROM entry WHERE mod_id='foo' AND key='item.foo.ai'") is None
+    )
+    db.close()
+
+
 def test_db_hit_with_invalid_patchouli_structure_returns_to_ai(tmp_path):
     source = '<ItemLink id="example:item" />\nText'
     db_path = tmp_path / "mod.db"

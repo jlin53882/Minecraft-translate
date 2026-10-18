@@ -199,6 +199,31 @@ def test_service_does_not_write_when_special_chars_differ(db_path, monkeypatch):
     db.close()
 
 
+def test_service_does_not_write_cache_rejected_candidate(db_path, monkeypatch):
+    seed(db_path)
+
+    def rejected_batch(batch, total=None, dry_run=False):
+        return [
+            {
+                **item,
+                "text": "錯誤草稿" if item["path"] == "item.foo.b" else item["text"],
+                "_cache_rejected": item["path"] == "item.foo.b",
+            }
+            for item in batch
+        ], "DONE"
+
+    monkeypatch.setattr(
+        moddb_translate_service, "translate_batch_smart", rejected_batch
+    )
+    summary = run(TranslateOptions(version="1.21.1", mod_ids=("foo",)))["summary"]
+
+    assert summary["flagged"] == 1 and summary["written"] == 1
+    db = TranslationDB(db_path)
+    row = next(row for row in db.list_entries("1.21.1")[0] if row.key == "item.foo.b")
+    assert row.zh_tw == ""
+    db.close()
+
+
 def test_service_limit_and_dry_run(db_path, monkeypatch):
     seed(db_path)
     called = []
