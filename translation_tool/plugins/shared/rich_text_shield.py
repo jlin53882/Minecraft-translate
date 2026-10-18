@@ -101,8 +101,26 @@ class ShieldTranslationCheck:
     issues: tuple[str, ...] = ()
 
 
+def _ordered_placeholders(
+    shielded_or_pieces: ShieldedText | list[ShieldPiece],
+) -> list[str]:
+    """取得依原文位置排序的 placeholder。"""
+    clean = getattr(shielded_or_pieces, "clean", "")
+    if isinstance(clean, str):
+        ordered = SHIELD_PLACEHOLDER_PATTERN.findall(clean)
+        if ordered:
+            return ordered
+    pieces = getattr(shielded_or_pieces, "shields", shielded_or_pieces)
+    return [
+        piece.placeholder
+        for piece in pieces
+        if isinstance(getattr(piece, "placeholder", None), str) and piece.placeholder
+    ]
+
+
 def shield_placeholder_issues(
-    clean_translated: str, shield_pieces: list[ShieldPiece]
+    clean_translated: str,
+    shielded_or_pieces: ShieldedText | list[ShieldPiece],
 ) -> list[str]:
     """檢查翻譯結果是否完整保留 Shield 佔位符。
 
@@ -110,22 +128,18 @@ def shield_placeholder_issues(
     譯文。品質閘門必須在還原前比較精確數量，才能攔住顏色碼、物品 ID 等
     不會被一般 Minecraft token 掃描器辨識的 Rich Text 格式。
     """
-    if not shield_pieces:
+    pieces = getattr(shielded_or_pieces, "shields", shielded_or_pieces)
+    expected_sequence = _ordered_placeholders(shielded_or_pieces)
+    if not expected_sequence:
         return []
 
-    expected = Counter(
-        piece.placeholder
-        for piece in shield_pieces
-        if isinstance(getattr(piece, "placeholder", None), str) and piece.placeholder
-    )
-    if not expected:
-        return []
-
-    actual = Counter(SHIELD_PLACEHOLDER_PATTERN.findall(clean_translated or ""))
+    actual_sequence = SHIELD_PLACEHOLDER_PATTERN.findall(clean_translated or "")
+    expected = Counter(expected_sequence)
+    actual = Counter(actual_sequence)
     issues: list[str] = []
     originals = {
         piece.placeholder: piece.original
-        for piece in shield_pieces
+        for piece in pieces
         if isinstance(getattr(piece, "placeholder", None), str) and piece.placeholder
     }
     for placeholder, expected_count in expected.items():
@@ -144,24 +158,14 @@ def shield_placeholder_issues(
     for placeholder, actual_count in actual.items():
         if placeholder not in expected:
             issues.append(f"多了 {actual_count} 個未知保護格式佔位符「{placeholder}」")
+
+    if actual == expected and actual_sequence != expected_sequence:
+        issues.append(
+            "保護格式佔位符順序或身分不一致"
+            f"（預期：{'、'.join(expected_sequence)}；"
+            f"實際：{'、'.join(actual_sequence)}）"
+        )
     return issues
-
-
-def _ordered_placeholders(
-    shielded_or_pieces: ShieldedText | list[ShieldPiece],
-) -> list[str]:
-    """取得依原文位置排序的目前 placeholder；舊快取相容需要這個順序。"""
-    clean = getattr(shielded_or_pieces, "clean", "")
-    if isinstance(clean, str):
-        ordered = SHIELD_PLACEHOLDER_PATTERN.findall(clean)
-        if ordered:
-            return ordered
-    pieces = getattr(shielded_or_pieces, "shields", shielded_or_pieces)
-    return [
-        piece.placeholder
-        for piece in pieces
-        if isinstance(getattr(piece, "placeholder", None), str) and piece.placeholder
-    ]
 
 
 def normalize_cached_shield_text(
@@ -194,6 +198,14 @@ def normalize_cached_shield_text(
         for kind in expected_by_kind
     ) or any(
         actual_by_kind[kind] for kind in set(actual_by_kind) - set(expected_by_kind)
+    ):
+        return clean_translated
+
+    # 舊快取只保留暫時 ID，必須先確認每個同類型 ID 都唯一，才可以
+    # 依原文位置做相容對齊。重複 ID 代表原快取已無法無歧義還原，
+    # 直接保留原值讓後續品質閘門拒絕，避免猜測並寫入錯誤的正式文字。
+    if any(
+        len(values) != len(set(values)) for values in actual_by_kind.values() if values
     ):
         return clean_translated
 
@@ -410,13 +422,15 @@ def unshield_text(clean_translated: str, shield_pieces: list[ShieldPiece]) -> st
 def inspect_shielded_translation(
     translated_text: str,
     shielded_or_pieces: ShieldedText | list[ShieldPiece] | None,
+    *,
+    allow_legacy_placeholders: bool = False,
 ) -> ShieldTranslationCheck:
     """正規化、驗證並還原一個 Shield 翻譯結果。
 
     快取的新契約保存已還原文字；舊契約可能保存與當次掃描計數器不同的
-    placeholder。這裡先用位置與類別相容規則正規化，再檢查 placeholder，
-    最後還原成正式文字，讓快取閘門、AI retry 與輸出 callback 使用同一套
-    行為。
+    placeholder。只有快取讀取路徑可以明確開啟 legacy 相容轉換；AI 回應
+    預設直接進行精確 ID、數量與順序檢查，最後還原成正式文字，讓快取閘門、
+    AI retry 與輸出 callback 使用同一套驗證結果。
     """
     if not isinstance(translated_text, str):
         translated_text = str(translated_text or "")
@@ -428,9 +442,13 @@ def inspect_shielded_translation(
             restored_text=translated_text,
         )
 
-    normalized = normalize_cached_shield_text(translated_text, shielded_or_pieces)
+    normalized = (
+        normalize_cached_shield_text(translated_text, shielded_or_pieces)
+        if allow_legacy_placeholders
+        else translated_text
+    )
     if SHIELD_PLACEHOLDER_PATTERN.search(normalized):
-        issues = shield_placeholder_issues(normalized, pieces)
+        issues = shield_placeholder_issues(normalized, shielded_or_pieces)
         restored = unshield_text(normalized, pieces)
     else:
         restored = normalized

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
+
 from app.services_impl.moddb_format_diff_service import compare_format_diff
 from app.services_impl.moddb_retranslate_service import (
     _filter_newline_only_repair_entries,
@@ -13,7 +15,10 @@ from translation_tool.core.lm_format_retry import (
     build_quality_retry_batch,
     quality_issues,
 )
-from translation_tool.plugins.shared.rich_text_shield import shield_text
+from translation_tool.plugins.shared.rich_text_shield import (
+    SHIELD_PLACEHOLDER_PATTERN,
+    shield_text,
+)
 from translation_tool.translation_db.quality import (
     guide_structure_issues,
     repair_input_issues_for_kind,
@@ -220,3 +225,43 @@ def test_quality_retry_detects_missing_shield_placeholders_before_unshielding():
     assert any(
         "保護格式" in issue for issue in batch.payload["items"][0]["format_issues"]
     )
+
+
+def _swap_shield_placeholders(shielded):
+    placeholders = SHIELD_PLACEHOLDER_PATTERN.findall(shielded.clean)
+    first, second = placeholders[:2]
+    return (
+        shielded.clean.replace(first, "__SWAP_SENTINEL__", 1)
+        .replace(second, first, 1)
+        .replace("__SWAP_SENTINEL__", second, 1)
+    )
+
+
+@pytest.mark.parametrize(
+    "translated_builder",
+    [
+        _swap_shield_placeholders,
+        lambda shielded: shielded.clean.replace(
+            shielded.shields[0].placeholder, shielded.shields[1].placeholder
+        ),
+        lambda shielded: shielded.clean.replace(
+            shielded.shields[0].placeholder, "$P999$"
+        ),
+    ],
+)
+def test_quality_retry_rejects_shield_identity_changes(translated_builder):
+    """目前 AI 回應不可用位置重配掩蓋 Shield 身分變更。"""
+    source = "Use #minecraft:stone then #minecraft:dirt"
+    shielded = shield_text(source)
+    item = {
+        "path": "blocks[0]",
+        "text": shielded.clean,
+        "source_text": source,
+        "_shielded": shielded,
+        "db_ident": (KIND_GUIDE, "foo", "crafting.md#0"),
+    }
+
+    issues = quality_issues(item, translated_builder(shielded))
+
+    assert issues
+    assert any("保護格式" in issue or "placeholder" in issue for issue in issues)

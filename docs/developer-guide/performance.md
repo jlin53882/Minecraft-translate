@@ -77,9 +77,12 @@ does not depend on the table size; record the bound in `ALLOWED_PLAN_MARKERS` or
 與其他輸出端，避免任何輸出端直接取得暫時 placeholder。
 
 品質閘門同時支援兩種既有資料：新快取的已還原文字會比對原始保護片段，舊
-快取若仍含全域計數器產生的佔位符，則依保護類別與原文位置對齊到本次佔位符
-後再驗證。缺少、重複或新增保護片段都會使 AI 重試與快取命中檢查失敗；因此
-FTB Quests、KubeJS、Guide／Patchouli 與一般共用迴圈必須使用同一套檢查。
+快取若仍含全域計數器產生的佔位符，只能在快取讀取路徑依保護類別與原文位置
+做受限制的相容對齊。當次 AI 回應與品質重試一律使用目前 Shield 的精確
+placeholder 身分、數量與順序，不得用相容對齊掩蓋遺失、重複、交換或未知
+placeholder。缺少、重複、新增或順序錯誤的保護片段都會使 AI 重試與快取命中
+檢查失敗；因此 FTB Quests、KubeJS、Guide／Patchouli 與一般共用迴圈必須使用
+同一套檢查。
 
 ### Mod DB trigger-maintained derived data
 

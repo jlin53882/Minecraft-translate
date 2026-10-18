@@ -203,6 +203,30 @@ class TestIsValidHit:
 
         assert _is_valid_hit(entry["dst"], entry, item) is True
 
+    def test_shared_quality_gate_rejects_current_shield_identity_changes(self):
+        """當次 AI／Retry 回應不可透過位置重配掩蓋 Shield 身分交換。"""
+        from translation_tool.core.lm_translator_shared_cache import (
+            cache_quality_issues,
+        )
+        from translation_tool.plugins.shared.rich_text_shield import shield_text
+
+        source = "Use #minecraft:stone then #minecraft:dirt"
+        shielded = shield_text(source)
+        first, second = [piece.placeholder for piece in shielded.shields]
+        translated = (
+            shielded.clean.replace(first, "__SWAP_SENTINEL__", 1)
+            .replace(second, first, 1)
+            .replace("__SWAP_SENTINEL__", second, 1)
+        )
+        item = {
+            "cache_type": "ftbquests",
+            "source_text": source,
+            "text": shielded.clean,
+            "_shielded": shielded,
+        }
+
+        assert cache_quality_issues(item, translated)
+
     def test_legacy_placeholder_cache_is_normalized_before_output(self):
         """既有全域計數器 placeholder 快取仍可重用，不會寫出 $C/$P。"""
         from translation_tool.core.lm_translator_shared_cache import (
@@ -267,6 +291,23 @@ class TestIsValidHit:
 
         assert pending == []
         assert cached[0]["text"] == "&a使用 #minecraft:stone now"
+
+    def test_ambiguous_legacy_placeholder_cache_is_a_miss(self):
+        """舊快取的重複 placeholder 無法安全還原時必須重新翻譯。"""
+        from translation_tool.core.lm_translator_shared_cache import _is_valid_hit
+        from translation_tool.plugins.shared.rich_text_shield import shield_text
+
+        source = "Use #minecraft:stone and #minecraft:dirt"
+        shielded = shield_text(source)
+        item = {
+            "cache_type": "ftbquests",
+            "source_text": source,
+            "text": shielded.clean,
+            "_shielded": shielded,
+        }
+        legacy_entry = {"dst": "使用 $P999$ 與 $P999$", "src": source}
+
+        assert _is_valid_hit(legacy_entry["dst"], legacy_entry, item) is False
 
 
 class TestFastSplitItemsByCache:

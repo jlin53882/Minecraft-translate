@@ -44,13 +44,22 @@ STRICT_SRC_TYPES = {
 ValidHitFn = Callable[[str, dict[str, Any], dict[str, Any]], bool]
 
 
-def cache_quality_issues(item: dict[str, Any], translated: str) -> list[str]:
+def cache_quality_issues(
+    item: dict[str, Any],
+    translated: str,
+    *,
+    allow_legacy_placeholders: bool = False,
+) -> list[str]:
     """Return the shared quality gate used by AI, cache, and DB translation hits."""
     kind = kind_for_item(item)
     candidate = str(translated or "")
     shielded = item.get("_shielded")
     if shielded is not None and getattr(shielded, "shields", None):
-        checked = inspect_shielded_translation(candidate, shielded)
+        checked = inspect_shielded_translation(
+            candidate,
+            shielded,
+            allow_legacy_placeholders=allow_legacy_placeholders,
+        )
         candidate = checked.restored_text
         shield_issues = list(checked.issues)
     else:
@@ -68,12 +77,20 @@ def restore_cache_hit_text(item: dict[str, Any]) -> str:
     shielded = item.get("_shielded")
     if shielded is None or not getattr(shielded, "shields", None):
         return text
-    return inspect_shielded_translation(text, shielded).restored_text
+    return inspect_shielded_translation(
+        text, shielded, allow_legacy_placeholders=True
+    ).restored_text
 
 
 def cache_storage_text(item: dict[str, Any]) -> str:
     """回傳與暫時 placeholder 解耦、可跨執行重用的快取文字。"""
-    return restore_cache_hit_text(item)
+    text = item.get("text")
+    if not isinstance(text, str):
+        return ""
+    shielded = item.get("_shielded")
+    if shielded is None or not getattr(shielded, "shields", None):
+        return text
+    return inspect_shielded_translation(text, shielded).restored_text
 
 
 def safe_output_text(item: dict[str, Any]) -> str:
@@ -105,7 +122,7 @@ def _is_valid_hit(dst: str, entry: dict, item: dict) -> bool:
     """判斷 cache 命中是否可信。"""
     if not value_fully_translated(dst):
         return False
-    if cache_quality_issues(item, dst):
+    if cache_quality_issues(item, dst, allow_legacy_placeholders=True):
         return False
 
     ctype = item.get("cache_type") or "lang"
