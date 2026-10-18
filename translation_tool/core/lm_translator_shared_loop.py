@@ -8,10 +8,13 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
-from translation_tool.core.lm_batch_budget import select_batch_size
+from translation_tool.core.lm_batch_budget import (
+    is_item_oversized,
+    select_batch_size,
+)
 from translation_tool.core.lm_batch_planner import next_batch
 from translation_tool.core.lm_translator_shared_cache import (
     CacheRule,
@@ -41,6 +44,19 @@ class TranslateLoopResult:
     elapsed_sec: float
     exhausted: bool
     last_error: str | None = None
+    ai_response: int = 0
+    cache_written: int = 0
+    source_fallback: int = 0
+    quality_rejected: int = 0
+    untranslated: int = 0
+    max_tokens_items: int = 0
+    contract_failed_items: int = 0
+    oversized_items: int = 0
+    quality_retry_candidates: int = 0
+    quality_retry_fixed: int = 0
+    quality_retry_unresolved: int = 0
+    quality_retry_quota_failed: int = 0
+    contract_errors: list[str] = field(default_factory=list)
 
 
 def _is_valid_result(it: Any) -> bool:
@@ -138,6 +154,44 @@ def translate_items_with_cache_loop(
     last_error: str | None = None
     exhausted = False
 
+    ai_response = 0
+    cache_written_count = 0
+    source_fallback = 0
+    quality_rejected = 0
+    untranslated = 0
+    max_tokens_items = 0
+    contract_failed_items = 0
+    oversized_items = 0
+    quality_retry_candidates = 0
+    quality_retry_fixed = 0
+    quality_retry_unresolved = 0
+    quality_retry_quota_failed = 0
+    contract_errors: list[str] = []
+
+    def make_result(status: str) -> TranslateLoopResult:
+        return TranslateLoopResult(
+            status=status,
+            processed=processed,
+            total=total,
+            completed_calls=completed_calls,
+            elapsed_sec=time.time() - start_time,
+            exhausted=exhausted,
+            last_error=last_error,
+            ai_response=ai_response,
+            cache_written=cache_written_count,
+            source_fallback=source_fallback,
+            quality_rejected=quality_rejected,
+            untranslated=untranslated,
+            max_tokens_items=max_tokens_items,
+            contract_failed_items=contract_failed_items,
+            oversized_items=oversized_items,
+            quality_retry_candidates=quality_retry_candidates,
+            quality_retry_fixed=quality_retry_fixed,
+            quality_retry_unresolved=quality_retry_unresolved,
+            quality_retry_quota_failed=quality_retry_quota_failed,
+            contract_errors=list(contract_errors),
+        )
+
     def emit_progress(msg: str) -> None:
         if on_progress is None:
             return
@@ -159,15 +213,7 @@ def translate_items_with_cache_loop(
         emit_progress(
             f"⏹ 已取消翻譯，剩餘 {len(remaining)} 筆未翻譯（已完成的批次已寫入快取）"
         )
-        return TranslateLoopResult(
-            status="CANCELLED",
-            processed=processed,
-            total=total,
-            completed_calls=completed_calls,
-            elapsed_sec=time.time() - start_time,
-            exhausted=False,
-            last_error=None,
-        )
+        return make_result("CANCELLED")
 
     while remaining:
         # 取消檢查點：在批次之間停止，已完成的批次照常保留
@@ -183,27 +229,38 @@ def translate_items_with_cache_loop(
             select_size=select_batch_size,
         )
 
-        try:
-            translated, status = translate_batch_smart(batch, total_for_smart)
-        except TaskCancelled:
-            # 等待 API 限流時被取消
-            return cancelled_result()
-        except Exception as e:  # noqa: BLE001
-            last_error = redact_text(e)
-            # 堆疊只寫後台（經 RedactingFormatter 遮蔽機密）；畫面顯示一行摘要
-            log_error(f"[SharedLM] 翻譯發生異常: {last_error}", exc_info=True)
-            emit_progress(f"❌ [SharedLM] 翻譯發生異常: {last_error}")
-            return TranslateLoopResult(
-                status="FAILED",
-                processed=processed,
-                total=total,
-                completed_calls=completed_calls,
-                elapsed_sec=time.time() - start_time,
-                exhausted=False,
-                last_error=last_error,
-            )
-
-        completed_calls += 1
+        # 單筆超限直接回填的政策只屬於 Mod DB（有 _batch_group）；其他管線維持原行為。
+        oversized = (
+            len(batch) == 1
+            and "_batch_group" in batch[0]
+            and is_item_oversized(batch[0], _lm_config())
+        )
+        if oversized:
+            oversized_items += 1
+            original = batch[0]
+            source = original.get("source_text", original.get("text"))
+            translated = [
+                {
+                    **original,
+                    "text": source if isinstance(source, str) else "",
+                    "_untranslated": True,
+                    "_fallback_reason": "oversized_item",
+                }
+            ]
+            status = "OVERSIZED_ITEM"
+        else:
+            try:
+                translated, status = translate_batch_smart(batch, total_for_smart)
+            except TaskCancelled:
+                # 等待 API 限流時被取消
+                return cancelled_result()
+            except Exception as e:  # noqa: BLE001
+                last_error = redact_text(e)
+                # 堆疊只寫後台（經 RedactingFormatter 遮蔽機密）；畫面顯示一行摘要
+                log_error(f"[SharedLM] 翻譯發生異常: {last_error}", exc_info=True)
+                emit_progress(f"❌ [SharedLM] 翻譯發生異常: {last_error}")
+                return make_result("FAILED")
+            completed_calls += 1
         safe_translated = list(translated or [])[: len(batch)]
         actual_processed_in_this_batch = 0
         untranslated_fallback = 0
@@ -227,25 +284,20 @@ def translate_items_with_cache_loop(
                     # 原始項目本身缺欄位：無法輸出也無法快取，不能算完成
                     last_error = f"批次第 {position} 筆缺少 path/source_text，無法回填"
                     emit_progress(f"❌ [SharedLM] {last_error}")
-                    return TranslateLoopResult(
-                        status="FAILED",
-                        processed=processed,
-                        total=total,
-                        completed_calls=completed_calls,
-                        elapsed_sec=time.time() - start_time,
-                        exhausted=False,
-                        last_error=last_error,
-                    )
+                    return make_result("FAILED")
                 malformed_fallback += 1
+                it["_fallback_reason"] = "response_contract"
 
             pth = it["path"]
+            txt = it["text"]
             src = it["source_text"]
             ctype = str(it.get("cache_type") or cache_type)
 
             actual_processed_in_this_batch += 1
             processed += 1
 
-            issues = _quality_issues_for_cache(it)
+            # 回填原文的項目沒有 AI 譯文，不做品質檢查（否則會被誤標成品質拒絕）
+            issues = [] if it.get("_untranslated") else _quality_issues_for_cache(it)
             if issues:
                 # 格式不合格仍要把 AI 譯文交給上層人工檢視；只有真正的
                 # 原文回填才標記 _untranslated。這也讓 Mod DB 能正確累計
@@ -253,8 +305,39 @@ def translate_items_with_cache_loop(
                 it = {
                     **it,
                     "_cache_rejected": True,
+                    "_quality_rejected": True,
+                    "_quality_translation_text": txt,
+                    "_fallback_reason": "quality_rejection",
                     "_quality_issues": tuple(issues),
                 }
+            if "_batch_group" in it:
+                it = {**it, "_quality_checked": True}
+
+            if it.get("_quality_retry_candidate"):
+                quality_retry_candidates += 1
+            if it.get("_quality_retry_fixed"):
+                quality_retry_fixed += 1
+            if it.get("_quality_retry_unresolved"):
+                quality_retry_unresolved += 1
+            if it.get("_quality_retry_quota_failed"):
+                quality_retry_quota_failed += 1
+            if it.get("_quality_rejected") or it.get("_cache_rejected"):
+                quality_rejected += 1
+                ai_response += 1
+            elif it.get("_untranslated") or it.get("_cache_rejected"):
+                source_fallback += 1
+            else:
+                ai_response += 1
+            if it.get("_untranslated") or it.get("_cache_rejected"):
+                untranslated += 1
+            reason = str(it.get("_fallback_reason") or "")
+            if reason == "max_tokens":
+                max_tokens_items += 1
+            if reason == "response_contract":
+                contract_failed_items += 1
+            contract_error = it.get("_contract_error")
+            if isinstance(contract_error, str) and contract_error:
+                contract_errors.append(contract_error)
 
             if on_translated_item is not None:
                 try:
@@ -275,6 +358,8 @@ def translate_items_with_cache_loop(
                     cache_write_failed = True
                     last_error = f"快取寫入被拒絕：{ctype}:{cache_key}"
                     log_info(f"[SharedLM] {last_error}")
+                else:
+                    cache_written_count += 1
             except Exception as e:  # noqa: BLE001
                 cache_write_failed = True
                 last_error = f"新增快取失敗: {redact_text(e)}"
@@ -282,7 +367,9 @@ def translate_items_with_cache_loop(
 
         if untranslated_fallback:
             log_info(
-                f"[SharedLM] {untranslated_fallback} 筆結果未寫入快取（原文回填或格式不合格）"
+                f"[SharedLM] {untranslated_fallback} 筆未寫入快取（來源回填或品質檢查拒絕）",
+                # Mod DB 的畫面已有單行批次摘要，後台才記這則詳細訊息。
+                extra={"ui_mirrored": True} if "_batch_group" in batch[0] else None,
             )
         if malformed_fallback:
             last_error = f"{malformed_fallback} 筆回傳格式無效，已回填原文且未翻譯"
@@ -314,15 +401,7 @@ def translate_items_with_cache_loop(
             # checkpoint 宣稱完成、快取卻沒有這批，已翻譯的項目會被重新送 API（#151）。
             # 輸出檔已在上面寫出；checkpoint 維持上一個 durable 批次的狀態。
             emit_progress(f"❌ [SharedLM] {last_error}")
-            return TranslateLoopResult(
-                status="FAILED",
-                processed=processed,
-                total=total,
-                completed_calls=completed_calls,
-                elapsed_sec=time.time() - start_time,
-                exhausted=False,
-                last_error=last_error,
-            )
+            return make_result("FAILED")
 
         if on_batch_checkpoint is not None:
             checkpoint_failed = False
@@ -334,6 +413,14 @@ def translate_items_with_cache_loop(
                         "total": total,
                         "completed_calls": completed_calls,
                         "status": status,
+                        "ai_response": ai_response,
+                        "cache_written": cache_written_count,
+                        "source_fallback": source_fallback,
+                        "quality_rejected": quality_rejected,
+                        "untranslated": untranslated,
+                        "max_tokens_items": max_tokens_items,
+                        "contract_failed_items": contract_failed_items,
+                        "oversized_items": oversized_items,
                     }
                 )
             except Exception as e:  # noqa: BLE001
@@ -343,15 +430,7 @@ def translate_items_with_cache_loop(
 
             if checkpoint_failed:
                 emit_progress(f"❌ [SharedLM] {last_error}")
-                return TranslateLoopResult(
-                    status="FAILED",
-                    processed=processed,
-                    total=total,
-                    completed_calls=completed_calls,
-                    elapsed_sec=time.time() - start_time,
-                    exhausted=False,
-                    last_error=last_error,
-                )
+                return make_result("FAILED")
 
         emit_progress(
             f"✅ 批次完成 ({cache_type}) | 成功: {actual_processed_in_this_batch} | 總進度: {processed}/{total}"
@@ -366,15 +445,7 @@ def translate_items_with_cache_loop(
         if st in ("FAILED", "FATAL", "ERROR"):
             last_error = f"API 回傳失敗狀態: {status}"
             emit_progress(f"❌ [SharedLM] 終止: {last_error}")
-            return TranslateLoopResult(
-                status="FAILED",
-                processed=processed,
-                total=total,
-                completed_calls=completed_calls,
-                elapsed_sec=time.time() - start_time,
-                exhausted=False,
-                last_error=last_error,
-            )
+            return make_result("FAILED")
 
         if sleep_seconds_between_batches > 0:
             # This parameter remains for callers that inject a non-provider
@@ -386,25 +457,9 @@ def translate_items_with_cache_loop(
         if actual_processed_in_this_batch == 0:
             last_error = f"此批次未能翻譯任何內容 (Status: {status})"
             emit_progress(f"❌ [SharedLM] {last_error}")
-            return TranslateLoopResult(
-                status="FAILED",
-                processed=processed,
-                total=total,
-                completed_calls=completed_calls,
-                elapsed_sec=time.time() - start_time,
-                exhausted=False,
-                last_error=last_error,
-            )
+            return make_result("FAILED")
 
     final_status = "ALL_KEYS_EXHAUSTED" if exhausted else "DONE"
     emit_progress(f"🏁 任務結束 | 狀態: {final_status}")
 
-    return TranslateLoopResult(
-        status=final_status,
-        processed=processed,
-        total=total,
-        completed_calls=completed_calls,
-        elapsed_sec=time.time() - start_time,
-        exhausted=exhausted,
-        last_error=last_error,
-    )
+    return make_result(final_status)

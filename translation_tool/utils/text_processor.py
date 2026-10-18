@@ -28,6 +28,7 @@ def _resolve_rules_path(path: str):
 
 
 _thread_local = threading.local()
+_WARNED_CONFLICT_SIGNATURES: set[tuple] = set()
 _CJK_PATTERN = re.compile(r"([\u4e00-\u9fff]+)")
 
 
@@ -71,6 +72,8 @@ def load_replace_rules(path: str) -> list[dict[str, str]]:
             continue
 
         src = rule["from"]
+        if not isinstance(src, str) or not isinstance(rule["to"], str):
+            continue
         looks_like_regex = any(ch in src for ch in ".?*[]()\\")
         if looks_like_regex:
             regex_rules.append(rule)
@@ -82,7 +85,10 @@ def load_replace_rules(path: str) -> list[dict[str, str]]:
     sorted_rules = ReplaceRules(fixed_rules + regex_rules)
 
     conflicts = find_replacement_conflicts(sorted_rules)
-    if conflicts:
+    # 同一份規則每次載入都會重算；相同內容的衝突警告整個程式只記一次，避免洗版。
+    signature = tuple(conflicts)
+    if conflicts and signature not in _WARNED_CONFLICT_SIGNATURES:
+        _WARNED_CONFLICT_SIGNATURES.add(signature)
         examples = "、".join(
             f"{source!r}->{destination!r}"
             for _source_index, source, _destination_index, destination in conflicts[:3]

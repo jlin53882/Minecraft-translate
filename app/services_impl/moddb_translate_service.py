@@ -11,7 +11,9 @@ import logging
 import traceback
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from datetime import datetime
 from functools import partial
+from pathlib import Path
 from typing import Any
 
 from app.services_impl.logging_service import UI_LOG_HANDLER
@@ -19,6 +21,12 @@ from app.services_impl.moddb_service import (
     database_problem,
     open_database,
     warm_stats_quietly,
+)
+from app.services_impl.moddb_translate_report import (
+    QUALITY_STATUS,
+    format_backend_summary,
+    write_quality_report,
+    write_replace_rule_conflicts,
 )
 from app.services_impl.pipelines._pipeline_logging import (
     ensure_pipeline_logging,
@@ -49,13 +57,18 @@ from translation_tool.translation_db.run_progress import (
     tick_live,
 )
 from translation_tool.translation_db.schema import cache_type_for_kind
-from translation_tool.utils.cache_manager import add_to_cache, save_translation_cache
+from translation_tool.utils.cache_manager import (
+    add_to_cache_with_receipt,
+    save_translation_cache,
+)
 from translation_tool.utils.cancellation import (
     TaskCancelled,
     cancel_scope,
     is_cancelled,
 )
-from translation_tool.utils.config_manager import load_config
+from translation_tool.utils.config_manager import load_config, resolve_project_path
+from translation_tool.utils.replace_rules import find_replacement_conflicts
+from translation_tool.utils.text_processor import load_replace_rules
 
 # View 經由本模組取用進度格式化函式（View 不直接 import translation_tool 引擎）
 __all__ = [
@@ -78,6 +91,8 @@ logger = logging.getLogger(__name__)
 DEFAULT_LIMIT = 2000
 _FLAGGED_LOG_LIMIT = 20
 DB_FLUSH_RETRIES = 3  # 寫入資料庫失敗時的重試次數
+# 回填原因屬於單一項目本身（不是 API 連線或設定問題）時，不計入連續失敗
+_ITEM_SPECIFIC_FALLBACKS = frozenset({"oversized_item"})
 ABORT_AFTER_FAILURES = 500  # 連續這麼多筆都沒翻成功就中止（API Key／模型設定有問題）
 
 
@@ -117,6 +132,28 @@ class TranslateReport:
     batches: int = 0  # 實際完成的批數
     planned_batches: int = 0  # 開始時依相同 planner 估出的批數下界
     elapsed_sec: float = 0.0
+    # Structured counters shared by the batch loop, backend log, and UI summary.
+    ai_response: int = 0
+    quality_retry_candidates: int = 0
+    quality_retry_fixed: int = 0
+    quality_retry_unresolved: int = 0
+    quality_retry_quota_failed: int = 0
+    contract_failed_items: int = 0
+    max_tokens_items: int = 0
+    quality_rejected: int = 0
+    source_fallback: int = 0
+    cache_written: int = 0
+    db_written: int = 0
+    untranslated: int = 0
+    oversized_items: int = 0
+    quality_issue_records: list[dict[str, Any]] = field(default_factory=list)
+    quality_issues_file: str | None = None
+    replace_rule_conflicts_file: str | None = None
+    batch_no: int = 0  # 已完成的批次數（品質問題清單用來標示所屬批次）
+    replace_rule_conflicts: int = 0
+    replace_rule_conflict_details: list[dict[str, Any]] = field(default_factory=list)
+    replace_rule_scan_ok: bool = True
+    contract_errors: list[str] = field(default_factory=list)
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -132,6 +169,21 @@ class TranslateReport:
             "batches": self.batches,
             "planned_batches": self.planned_batches,
             "elapsed_sec": self.elapsed_sec,
+            "ai_response": self.ai_response,
+            "quality_retry_candidates": self.quality_retry_candidates,
+            "quality_retry_fixed": self.quality_retry_fixed,
+            "quality_retry_unresolved": self.quality_retry_unresolved,
+            "quality_retry_quota_failed": self.quality_retry_quota_failed,
+            "contract_failed_items": self.contract_failed_items,
+            "max_tokens_items": self.max_tokens_items,
+            "quality_rejected": self.quality_rejected,
+            "source_fallback": self.source_fallback,
+            "cache_written": self.cache_written,
+            "db_written": self.db_written,
+            "untranslated": self.untranslated,
+            "oversized_items": self.oversized_items,
+            "quality_issues_file": self.quality_issues_file,
+            "replace_rule_conflicts": self.replace_rule_conflicts,
         }
 
 
@@ -270,6 +322,149 @@ def _log(session, text: str, level: str = "info") -> None:
     mirror_session_log(session, logger, text, level, prefix="[Mod 資料庫機翻] ")
 
 
+def _log_backend(text: str, level: str = "info") -> None:
+    """Write detail to the backend without feeding it back into the UI."""
+    logger.log(
+        getattr(logging, level.upper(), logging.INFO),
+        text,
+        extra={"ui_mirrored": True},
+    )
+
+
+def _log_split(session, ui_text: str, backend_text: str, level: str = "info") -> None:
+    """Emit one concise UI line and one detailed backend record.
+
+    畫面行以 ``add_log_unmirrored`` 寫入，不會被鏡像到後台，所以兩邊文字可以不同
+    （符合 ``tests/test_log_pair_contract.py`` 的「不鏡像」例外）。"""
+    add_log_unmirrored(session, ui_text, level)
+    _log_backend(backend_text, level)
+
+
+def _sync_loop_result(report: TranslateReport, result) -> None:
+    """Copy shared-loop accounting into the single Mod DB report object."""
+    report.ai_response = int(getattr(result, "ai_response", report.translated) or 0)
+    report.translated = report.ai_response
+    # cache_written 由 counted_cache_add 依 CacheAddReceipt.changed 累計；共享迴圈
+    # 只知道「已接受」，不可用它的數字覆蓋。
+    report.source_fallback = int(
+        getattr(result, "source_fallback", report.source_fallback) or 0
+    )
+    report.quality_rejected = int(
+        getattr(result, "quality_rejected", report.quality_rejected) or 0
+    )
+    report.untranslated = int(getattr(result, "untranslated", report.untranslated) or 0)
+    report.max_tokens_items = int(
+        getattr(result, "max_tokens_items", report.max_tokens_items) or 0
+    )
+    report.contract_failed_items = int(
+        getattr(result, "contract_failed_items", report.contract_failed_items) or 0
+    )
+    report.oversized_items = int(
+        getattr(result, "oversized_items", report.oversized_items) or 0
+    )
+    report.quality_retry_candidates = int(
+        getattr(result, "quality_retry_candidates", report.quality_retry_candidates)
+        or 0
+    )
+    report.quality_retry_fixed = int(
+        getattr(result, "quality_retry_fixed", report.quality_retry_fixed) or 0
+    )
+    report.quality_retry_unresolved = int(
+        getattr(result, "quality_retry_unresolved", report.quality_retry_unresolved)
+        or 0
+    )
+    report.quality_retry_quota_failed = int(
+        getattr(
+            result,
+            "quality_retry_quota_failed",
+            report.quality_retry_quota_failed,
+        )
+        or 0
+    )
+    report.contract_errors = list(
+        getattr(result, "contract_errors", report.contract_errors) or ()
+    )
+
+
+def _report_day_dir() -> Path:
+    """報告檔資料夾：與 app.log 同一個 ``logging.log_dir``／本地日期（YYYYMMDD）資料夾。"""
+    config = load_config()
+    logging_cfg = config.get("logging") if isinstance(config, dict) else None
+    log_dir = (logging_cfg or {}).get("log_dir") or "logs"
+    return resolve_project_path(str(log_dir)) / datetime.now().astimezone().strftime(
+        "%Y%m%d"
+    )
+
+
+def _write_quality_issue_file(session, report: TranslateReport) -> None:
+    """寫出品質問題清單（JSON＋CSV）與替換規則衝突明細；畫面只保留數量。"""
+    try:
+        day_dir = _report_day_dir()
+    except (OSError, TypeError, ValueError, AttributeError) as exc:
+        _log_backend(f"後台報告資料夾無法決定：{type(exc).__name__}: {exc}", "warning")
+        return
+    if report.replace_rule_scan_ok:  # 掃描失敗時保留當天原有的衝突報告
+        try:
+            path = write_replace_rule_conflicts(
+                day_dir, report.replace_rule_conflict_details
+            )
+            report.replace_rule_conflicts_file = str(path) if path else None
+        except (OSError, TypeError, ValueError) as exc:
+            _log_backend(
+                f"替換規則衝突報告寫入失敗：{type(exc).__name__}: {exc}", "warning"
+            )
+    if not report.quality_issue_records:
+        return
+    raw_task_id = str(
+        getattr(session, "task_id", None)
+        or getattr(session, "id", None)
+        or "unknown-task"
+    )
+    try:
+        report.quality_issues_file = str(
+            write_quality_report(day_dir, raw_task_id, report.quality_issue_records)
+        )
+    except (OSError, TypeError, ValueError) as exc:
+        _log_backend(f"品質問題報告寫入失敗：{type(exc).__name__}: {exc}", "warning")
+
+
+def _collect_replace_rule_conflicts() -> list[dict[str, Any]] | None:
+    """Read-only conflict detection on the rules the translator actually applies.
+
+    掃描失敗回傳 ``None``（與「掃描成功、沒有衝突」的 ``[]`` 不同）。"""
+    try:
+        config = load_config()
+        translator = config.get("translator", {}) if isinstance(config, dict) else {}
+        configured_path = (
+            translator.get("replace_rules_path", "replace_rules.json")
+            if isinstance(translator, dict)
+            else "replace_rules.json"
+        )
+        rules = load_replace_rules(str(configured_path))
+        conflicts = find_replacement_conflicts(rules)
+    except (OSError, TypeError, ValueError, AttributeError) as exc:
+        # 衝突偵測只是診斷；失敗不可讓已寫入資料庫的翻譯任務變成錯誤。
+        _log_backend(f"替換規則衝突偵測失敗：{type(exc).__name__}: {exc}", "warning")
+        return None
+    return [
+        {
+            "source_index": source_index,
+            "source": source,
+            "destination_index": destination_index,
+            "destination": destination,
+        }
+        for source_index, source, destination_index, destination in conflicts
+    ]
+
+
+def _record_backend_summary(report: TranslateReport) -> None:
+    """後台結束摘要：多行中文，完整明細在報告檔，不再塞單行 JSON。"""
+    _log_backend(
+        format_backend_summary(report),
+        "warning" if report.status != "DONE" else "info",
+    )
+
+
 def _noop_cache(*_args, **_kwargs) -> bool:
     """不寫翻譯快取時使用（結果只存進資料庫）。"""
     return True
@@ -366,21 +561,6 @@ def _log_db_failure(session, buffer, failures) -> None:
     )
 
 
-def _record_flagged_translation(
-    session,
-    report: TranslateReport,
-    item: dict[str, Any],
-    issues: list[str] | tuple[str, ...],
-) -> None:
-    """記錄格式不一致結果，供校對畫面保留 AI 譯文草稿。"""
-    report.flagged += 1
-    report.flagged_entries[item["_entry_id"]] = item["text"]
-    if len(report.flagged_samples) < _FLAGGED_LOG_LIMIT:
-        note = f"{item['_mod_id']} / {item['path']}：{'、'.join(issues)}"
-        report.flagged_samples.append(note)
-        _log(session, f"⚠️ 特殊字元不一致，未寫入：{note}", "warning")
-
-
 def _quality_issues_for_item(
     item: dict[str, Any], source: str, text: str
 ) -> list[str] | tuple[str, ...]:
@@ -393,26 +573,241 @@ def _quality_issues_for_item(
     return issues
 
 
+def _record_quality_rejection(report: TranslateReport, item: dict[str, Any]) -> None:
+    """把共享迴圈判定品質不符的項目計入報告（計數、樣本與完整清單）。"""
+    report.translated += 1
+    report.ai_response = report.translated
+    report.quality_rejected += 1
+    report.flagged = report.quality_rejected
+    source = str(item.get("source_text") or "")
+    translated = str(item.get("_quality_translation_text", item.get("text") or ""))
+    issues = list(item.get("_quality_issues") or ())
+    if not issues:
+        issues = list(_quality_issues_for_item(item, source, translated))
+    entry_id = item.get("_entry_id")
+    if isinstance(entry_id, int):
+        report.flagged_entries[entry_id] = translated
+    if len(report.flagged_samples) < _FLAGGED_LOG_LIMIT:
+        report.flagged_samples.append(
+            f"{item.get('_mod_id', '')} / {item.get('path', '')}：{'、'.join(issues)}"
+        )
+    report.quality_issue_records.append(
+        {
+            "kind": item.get("_kind", ""),
+            "mod_id": item.get("_mod_id", ""),
+            "key": item.get("path", ""),
+            "issues": issues,
+            "source_text": source,
+            "translated_text": translated,
+            "status": QUALITY_STATUS,
+            "batch": report.batch_no + 1,
+        }
+    )
+
+
+# 逐批差額要用到的報告計數（畫面行與後台行共用）
+_BATCH_COUNT_KEYS = (
+    "ai_response",
+    "written",
+    "source_fallback",
+    "quality_rejected",
+    "cache_written",
+    "quality_retry_candidates",
+    "quality_retry_fixed",
+    "quality_retry_unresolved",
+    "quality_retry_quota_failed",
+)
+
+
+def _count_quality_retry(report: TranslateReport, item: dict[str, Any]) -> None:
+    """依共享迴圈標在項目上的旗標，即時累計品質重試結果（批次結束時就能顯示）。"""
+    for flag, field_name in (
+        ("_quality_retry_candidate", "quality_retry_candidates"),
+        ("_quality_retry_fixed", "quality_retry_fixed"),
+        ("_quality_retry_unresolved", "quality_retry_unresolved"),
+        ("_quality_retry_quota_failed", "quality_retry_quota_failed"),
+    ):
+        if item.get(flag):
+            setattr(report, field_name, getattr(report, field_name) + 1)
+
+
+def _batch_ui_line(
+    message: str,
+    report: TranslateReport,
+    current: dict[str, int],
+    previous: dict[str, int],
+) -> str:
+    """由同一份報告計數組出單行批次摘要；正常批次不帶診斷欄位。"""
+    batch_ai = current["ai_response"] - previous["ai_response"]
+    batch_written = current["written"] - previous["written"]
+    batch_fallback = current["source_fallback"] - previous["source_fallback"]
+    batch_quality = current["quality_rejected"] - previous["quality_rejected"]
+    batch_total = batch_ai + batch_fallback
+    cache_type = message.partition("(")[2].partition(")")[0]
+    progress = f"{report.ai_response + report.source_fallback}/{report.candidates}"
+    unwritten = []
+    if batch_fallback:
+        unwritten.append(f"{batch_fallback} 筆回填原文")
+    if batch_quality:
+        unwritten.append(f"{batch_quality} 筆品質不符")
+    if unwritten:
+        return (
+            f"⚠️ 批次完成 ({cache_type}) | 寫入: {batch_written}/{batch_total} | "
+            f"{'、'.join(unwritten)}，未寫入 | 總進度: {progress}"
+        )
+    return f"✅ 批次完成 ({cache_type}) | 成功: {batch_written} | 總進度: {progress}"
+
+
+def _log_final_summary(session, report: TranslateReport) -> None:
+    """依 ``_settle_report`` 已定案的狀態，寫出畫面與後台兩種摘要。"""
+    final_level = "warning" if report.status != "DONE" else "info"
+    quality_hint = (
+        f" | 品質未通過 {report.quality_rejected} 筆，完整清單：{report.quality_issues_file}（同名 .csv 為表格版）"
+        if report.quality_rejected and report.quality_issues_file
+        else ""
+    )
+    _log_split(
+        session,
+        (
+            f"{'⚠️' if final_level == 'warning' else '✅'} 翻譯完成 | "
+            f"寫入 {report.written}/{report.candidates} | "
+            f"仍有 {report.remaining} 筆需要處理 | 共送出 {report.batches:,} 批"
+            f"{quality_hint}"
+        ),
+        f"完成（狀態 {report.status}）：AI 回傳 {report.ai_response} 筆、"
+        f"寫入 {report.written} 筆、品質拒絕 {report.quality_rejected} 筆、"
+        f"來源回填 {report.source_fallback} 筆、MAX_TOKENS {report.max_tokens_items} 筆、"
+        f"契約失敗 {report.contract_failed_items} 筆、快取寫入 {report.cache_written} 筆、"
+        f"replace_rules 衝突 {report.replace_rule_conflicts} 筆；"
+        f"此範圍仍有 {report.remaining} 筆未翻譯；"
+        f"共送出 {report.batches:,} 批，耗時 {format_duration(report.elapsed_sec)}",
+        final_level,
+    )
+
+
+def _settle_report(session, report, options, result, failures, buffer, tracker) -> None:
+    """共享迴圈結束後，把迴圈結果、資料庫失敗與中止狀態收斂成最終報告。"""
+    _sync_loop_result(report, result)
+    if not options.write_cache:
+        # The shared loop still invokes a no-op callback to preserve its
+        # generic contract; it must not be reported as a real cache write.
+        report.cache_written = 0
+    report.flagged = report.quality_rejected
+    report.db_written = report.written
+    if failures["db_error"] or failures["db_stop"]:
+        report.status = "FAILED"
+        session.set_error()
+        _log_db_failure(session, buffer, failures)
+    else:
+        report.status = "ABORTED" if failures["aborted"] else result.status
+    report.batches = tracker.batches_done
+    report.elapsed_sec = tracker.elapsed()
+    if report.status == "DONE" and any(
+        (
+            report.quality_rejected,
+            report.source_fallback,
+            report.max_tokens_items,
+            report.contract_failed_items,
+            report.quality_retry_unresolved,
+        )
+    ):
+        report.status = "DONE_WITH_WARNINGS"
+    if report.status in ("FAILED", "ABORTED", "ALL_KEYS_EXHAUSTED"):
+        session.set_error()  # 未完成不可記成 DONE（P2-5）
+    if failures["aborted"]:
+        _log(
+            session,
+            f"❌ 連續 {ABORT_AFTER_FAILURES} 筆都翻譯失敗，已中止（避免白白耗用額度與時間）。"
+            "請檢查設定頁的 API Key 與模型名稱，並查看日誌中的「伺服器回應」了解原因；"
+            "已翻成功的部分已寫入資料庫。",
+            "error",
+        )
+    conflicts = _collect_replace_rule_conflicts()
+    report.replace_rule_scan_ok = conflicts is not None
+    report.replace_rule_conflict_details = conflicts or []
+    report.replace_rule_conflicts = len(report.replace_rule_conflict_details)
+    _write_quality_issue_file(session, report)
+    _update_remaining(report)
+
+
+def _batch_backend_line(
+    message: str,
+    report: TranslateReport,
+    current: dict[str, int],
+    previous: dict[str, int],
+) -> str:
+    """與畫面同一份計數的後台批次紀錄。"""
+    cache_type = message.partition("(")[2].partition(")")[0]
+    return (
+        f"[BatchResult 批次結果] 第 {report.batch_no} 批｜類型 {cache_type}｜"
+        f"AI 回傳 {current['ai_response'] - previous['ai_response']}｜"
+        f"品質拒絕 {current['quality_rejected'] - previous['quality_rejected']}｜"
+        f"回填原文 {current['source_fallback'] - previous['source_fallback']}｜"
+        f"寫入資料庫 {current['written'] - previous['written']}｜"
+        f"寫入快取 {current['cache_written'] - previous['cache_written']}｜"
+        f"品質重試（候選／已修正／未解決） "
+        f"{current['quality_retry_candidates'] - previous['quality_retry_candidates']}／"
+        f"{current['quality_retry_fixed'] - previous['quality_retry_fixed']}／"
+        f"{current['quality_retry_unresolved'] - previous['quality_retry_unresolved']}｜"
+        f"品質重試配額失敗 "
+        f"{current['quality_retry_quota_failed'] - previous['quality_retry_quota_failed']}｜"
+        f"總進度 {report.ai_response + report.source_fallback}/{report.candidates}"
+    )
+
+
 def _translate_rows(
     session, db, options: TranslateOptions, report: TranslateReport, rows, cancelled
 ) -> None:
     """分批機翻並寫回；每批先檢查特殊字元，一致者才寫入。"""
     buffer: list[WriteBackItem] = []
     failures = {"streak": 0, "aborted": False, "db_error": "", "db_stop": False}
+    last_batch_counts = dict.fromkeys(_BATCH_COUNT_KEYS, 0)
+
+    def counted_cache_add(*args, **kwargs):
+        receipt = add_to_cache_with_receipt(*args, **kwargs)
+        if receipt.changed:  # 快取裡本來就有相同譯文時不算新寫入
+            report.cache_written += 1
+        return receipt.accepted
 
     def on_translated_item(item: dict[str, Any]) -> None:
+        _count_quality_retry(report, item)
+        if not item.get("_quality_checked") and not item.get("_untranslated"):
+            issues = translation_issues(
+                str(item.get("source_text") or ""),
+                str(item.get("text") or ""),
+                kind=item.get("_kind"),
+            )
+            if issues:
+                item = {
+                    **item,
+                    "text": item.get("source_text", ""),
+                    "_untranslated": True,
+                    "_quality_rejected": True,
+                    "_quality_translation_text": item.get("text", ""),
+                    "_quality_issues": tuple(issues),
+                }
+        quality_rejected = bool(
+            item.get("_quality_rejected") or item.get("_cache_rejected")
+        )
+        if quality_rejected:
+            failures["streak"] = 0
+            _record_quality_rejection(report, item)
+            return
         if item.get("_untranslated"):
+            report.source_fallback += 1
+            if item.get("_fallback_reason") in _ITEM_SPECIFIC_FALLBACKS:
+                return  # 單筆太長等個別項目的問題，不代表 API Key／模型設定有誤
             failures["streak"] += 1
             if failures["streak"] >= ABORT_AFTER_FAILURES:
                 failures["aborted"] = True
             return
         failures["streak"] = 0
         report.translated += 1
+        report.ai_response = report.translated
         source, text = item["source_text"], item["text"]
-        issues = _quality_issues_for_item(item, source, text)
-        if issues:
-            _record_flagged_translation(session, report, item, issues)
-            return
+        # The shared loop owns the quality gate. Keep this callback focused on
+        # DB write candidates so quality rejection cannot be mistaken for an
+        # ordinary source fallback or validated twice.
         buffer.append(
             WriteBackItem(item["_kind"], item["_mod_id"], item["path"], source, text)
         )
@@ -423,7 +818,17 @@ def _translate_rows(
     def on_progress(progress: float, message: str, _eta: float) -> None:
         session.set_progress(progress)
         if message:
-            _log(session, message)
+            if message.startswith("✅ 批次完成"):
+                current = {key: getattr(report, key) for key in _BATCH_COUNT_KEYS}
+                report.batch_no += 1
+                ui_text = _batch_ui_line(message, report, current, last_batch_counts)
+                backend_text = _batch_backend_line(
+                    message, report, current, last_batch_counts
+                )
+                _log_split(session, ui_text, backend_text)
+                last_batch_counts.update(current)
+            else:
+                _log(session, message)
         if tracker.update(round(progress * len(items))):
             _log(session, f"⏱ {tracker.line()}")
         _update_remaining(report)
@@ -462,7 +867,7 @@ def _translate_rows(
             sleep_seconds_between_batches=0.0,
             write_new_cache=options.new_cache_shard,
             reload_cache=options.write_cache,
-            cache_add=add_to_cache if options.write_cache else _noop_cache,
+            cache_add=counted_cache_add if options.write_cache else _noop_cache,
             cache_save=save_translation_cache if options.write_cache else _noop_cache,
             fixed_input_tokens_for_batch=fixed_input_tokens_for_batch,
             hooks=TranslatorHooks(
@@ -472,33 +877,9 @@ def _translate_rows(
             ),
         )
     flush()
-    if failures["db_error"] or failures["db_stop"]:
-        report.status = "FAILED"
-        session.set_error()
-        _log_db_failure(session, buffer, failures)
-    else:
-        report.status = "ABORTED" if failures["aborted"] else result.status
-    report.batches = tracker.batches_done
-    report.elapsed_sec = tracker.elapsed()
-    if report.status in ("FAILED", "ABORTED", "ALL_KEYS_EXHAUSTED"):
-        session.set_error()  # 未完成不可記成 DONE（P2-5）
-    if failures["aborted"]:
-        _log(
-            session,
-            f"❌ 連續 {ABORT_AFTER_FAILURES} 筆都翻譯失敗，已中止（避免白白耗用額度與時間）。"
-            "請檢查設定頁的 API Key 與模型名稱，並查看日誌中的「伺服器回應」了解原因；"
-            "已翻成功的部分已寫入資料庫。",
-            "error",
-        )
-    _update_remaining(report)
-    _log(
-        session,
-        f"完成（狀態 {report.status}）：AI 回傳 {report.translated} 筆、"
-        f"寫入 {report.written} 筆、特殊字元不一致未寫入 {report.flagged} 筆；"
-        f"此範圍仍有 {report.remaining} 筆未翻譯；"
-        f"共送出 {report.batches:,} 批，耗時 {format_duration(report.elapsed_sec)}",
-        "warning" if report.status != "DONE" or report.flagged else "info",
-    )
+    _settle_report(session, report, options, result, failures, buffer, tracker)
+    _log_final_summary(session, report)
+    _record_backend_summary(report)
     if result.last_error:
         _log(session, f"最後一次錯誤：{result.last_error}", "warning")
     session.set_summary(report.as_dict())

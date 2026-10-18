@@ -59,8 +59,8 @@ def test_batch_state_machine_has_separate_state_action_and_response_layers():
         )
     }
     assert function_lengths["_run_batch_state_machine"] < 100
-    # 125：多一行 set_active_model（給 UI 狀態列），職責仍是同一個批次嘗試流程
-    assert function_lengths["_attempt_batch"] < 125
+    # 130：多一行 set_active_model（給 UI 狀態列），以及縮批結果帶 fallback_reason；職責仍是同一個批次嘗試流程
+    assert function_lengths["_attempt_batch"] < 130
     assert function_lengths["_merge_batch_response"] < 60
     assert function_lengths["_handle_batch_error"] < 160
 
@@ -853,3 +853,76 @@ class TestBatchProfileDetection:
         _result, status = translate_batch_smart(items, 1)
 
         assert status in ["AUTO", "PARTIAL", "FAILED"]
+
+
+def test_moddb_contract_error_is_classified_and_tracked(monkeypatch):
+    from types import SimpleNamespace
+
+    from translation_tool.core import lm_translator_main as main
+
+    warnings: list[str] = []
+    infos: list[str] = []
+    monkeypatch.setattr(main, "log_warning", lambda msg, **kw: warnings.append(msg))
+    monkeypatch.setattr(main, "log_info", lambda msg, **kw: infos.append(msg))
+    runtime = SimpleNamespace(pending_contract_event=None)
+    batch = [{"_batch_group": ("m", "lang")} for _ in range(8)]
+    round_data = SimpleNamespace(id_to_item=dict(enumerate(batch)))
+
+    main._note_contract_error(runtime, round_data, "duplicate id 'a'")
+    main._note_contract_progress(runtime, 8, 6)
+    main._note_contract_resolved(runtime, round_data)
+
+    assert "重複 id" in warnings[0] and "批次 8 筆" in warnings[0]
+    assert "8 筆 → 6 筆" in warnings[1]
+    assert "已排除" in infos[0]
+    assert runtime.pending_contract_event is None
+
+    main._note_contract_error(runtime, round_data, "duplicate id 'a'")
+    main._note_contract_progress(runtime, 3, 0)
+    assert "縮到極限仍失敗" in warnings[-1]
+    assert runtime.pending_contract_event is None
+
+
+def test_generic_batches_do_not_get_moddb_contract_records(monkeypatch):
+    from types import SimpleNamespace
+
+    from translation_tool.core import lm_translator_main as main
+
+    warnings: list[str] = []
+    monkeypatch.setattr(main, "log_warning", lambda msg, **kw: warnings.append(msg))
+    runtime = SimpleNamespace(pending_contract_event=None)
+    round_data = SimpleNamespace(id_to_item={"0": {"path": "a"}})
+
+    main._note_contract_error(runtime, round_data, "duplicate id 'a'")
+
+    assert warnings == []
+    assert runtime.pending_contract_event is None
+
+
+def test_quality_retry_quota_failure_reads_http_error_response_status():
+    import requests
+
+    from translation_tool.core import lm_translator_main as main
+
+    response = requests.Response()
+    response.status_code = 429
+    error = requests.HTTPError("RPM limit", response=response)
+
+    assert main._is_quality_retry_quota_failure(error) is True
+    assert main._is_quality_retry_quota_failure(ValueError("other")) is False
+
+
+def test_quality_retry_contract_error_is_not_recorded_as_batch_contract_error():
+    from types import SimpleNamespace
+
+    from translation_tool.core import lm_translator_main as main
+
+    runtime = SimpleNamespace(contract_errors=[], pending_contract_event=None)
+    round_data = SimpleNamespace(id_to_item={"0": {"path": "a"}})
+
+    result, retry = main._merge_batch_response(
+        runtime, round_data, '{"x": 1}', {}, optional_retry=True
+    )
+
+    assert result is None and retry is True
+    assert runtime.contract_errors == []

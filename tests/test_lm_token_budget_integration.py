@@ -148,6 +148,47 @@ def test_structured_format_spec_counts_only_in_input_estimate():
     )
 
 
+def test_shared_loop_falls_back_oversized_item_without_api_or_cache(monkeypatch):
+    config = {
+        "lm_translator": {
+            "token_budget_enabled": True,
+            "max_input_token_budget": 40,
+            "max_output_token_budget": 40,
+            "output_token_factor": 1.5,
+            "initial_batch_size_lang": 10,
+        }
+    }
+    monkeypatch.setattr(loop_mod, "load_config", lambda: config)
+    item = {
+        "path": "oversized",
+        "text": "x" * 1000,
+        "source_text": "x" * 1000,
+        "cache_type": "lang",
+        "_batch_group": ("mod", "lang"),
+    }
+    api_calls = []
+    cache_writes = []
+
+    result = loop_mod.translate_items_with_cache_loop(
+        [item],
+        translate_batch_smart=lambda batch, total: (
+            api_calls.append(batch) or ([], "DONE")
+        ),
+        cache_add=lambda *args, **kwargs: cache_writes.append(args) or True,
+        cache_save=lambda *args, **kwargs: True,
+        reload_cache=False,
+        sleep_seconds_between_batches=0,
+    )
+
+    assert api_calls == []
+    assert cache_writes == []
+    assert result.status == "DONE"
+    assert result.processed == 1
+    assert result.oversized_items == 1
+    assert result.source_fallback == 1
+    assert result.untranslated == 1
+
+
 # ---------------------------------------------------------------------------
 # 長內容依 token 預算切批
 # ---------------------------------------------------------------------------
@@ -530,3 +571,67 @@ def test_other_400_errors_still_shrink_batches(env, monkeypatch):
 
     assert status == "AUTO"
     assert all(r["_untranslated"] for r in results)  # 既有行為：縮到極限後放棄該批
+
+
+def test_shared_loop_oversized_policy_is_limited_to_moddb_items(monkeypatch):
+    config = {
+        "lm_translator": {
+            "token_budget_enabled": True,
+            "max_input_token_budget": 40,
+            "max_output_token_budget": 40,
+            "output_token_factor": 1.5,
+            "initial_batch_size_lang": 10,
+        }
+    }
+    monkeypatch.setattr(loop_mod, "load_config", lambda: config)
+    item = {
+        "path": "generic",
+        "text": "x" * 1000,
+        "source_text": "x" * 1000,
+        "cache_type": "lang",
+    }
+    api_calls = []
+
+    result = loop_mod.translate_items_with_cache_loop(
+        [item],
+        translate_batch_smart=lambda batch, total: (
+            api_calls.append(batch) or ([{**batch[0], "text": "譯"}], "DONE")
+        ),
+        cache_add=lambda *args, **kwargs: True,
+        cache_save=lambda *args, **kwargs: True,
+        reload_cache=False,
+        sleep_seconds_between_batches=0,
+    )
+
+    assert len(api_calls) == 1
+    assert result.oversized_items == 0
+
+
+def test_fixed_input_over_budget_is_not_an_oversized_item():
+    from translation_tool.core.lm_batch_budget import is_item_oversized
+
+    cfg = {
+        "token_budget_enabled": True,
+        "max_input_token_budget": 1000,
+        "max_output_token_budget": 100000,
+    }
+    item = {"path": "p", "text": "short", "source_text": "short"}
+
+    assert is_item_oversized(item, cfg) is False
+    assert is_item_oversized({**item, "text": "x" * 20000}, cfg)
+
+
+def test_learned_output_scale_does_not_make_normal_items_oversized():
+    from translation_tool.core.lm_batch_budget import get_tracker, is_item_oversized
+
+    cfg = {
+        "token_budget_enabled": True,
+        "max_input_token_budget": 100000,
+        "max_output_token_budget": 1000,
+    }
+    item = {"path": "p", "text": "a short line", "source_text": "a short line"}
+    tracker = get_tracker("lang")
+    for _ in range(20):
+        tracker.on_truncated("MAX_TOKENS")
+
+    assert is_item_oversized(item, cfg) is False

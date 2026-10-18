@@ -131,6 +131,18 @@ def tick_live(live: dict, now: float | None = None) -> dict:
     return out
 
 
+def _finish_stamp(finish: datetime, days: int) -> str:
+    """完成時刻的說法：跨日時直接說明是哪一天，不用容易誤解的「+1 天」。"""
+    clock = finish.strftime("%H:%M")
+    if days <= 0:
+        return clock
+    if days == 1:
+        return f"明天 {clock}"
+    if days == 2:
+        return f"後天 {clock}"
+    return f"{finish.month}/{finish.day}（{days} 天後）{clock}"
+
+
 def format_live(live: dict) -> str:
     """即時資料 → 一行文字：批次、筆數、已用時間、預估剩餘、預計完成時刻。"""
     total = live["total"] or 1
@@ -167,8 +179,7 @@ def format_live(live: dict) -> str:
         # 顯示本機時間：先以 UTC 建立再轉成本機時區
         finish = datetime.fromtimestamp(live["finish_ts"], tz=UTC).astimezone()
         days = (finish.date() - datetime.now(tz=UTC).astimezone().date()).days
-        stamp = finish.strftime("%H:%M") + (f"（+{days} 天）" if days > 0 else "")
-        parts.append(f"預計 {stamp} 完成")
+        parts.append(f"預計 {_finish_stamp(finish, days)} 完成")
     return "｜".join(parts)
 
 

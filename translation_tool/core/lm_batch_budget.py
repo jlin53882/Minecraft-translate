@@ -422,3 +422,32 @@ def select_batch_size(
     if not cfg.enabled:
         return cap
     return get_tracker(profile).fit(items, cap, cfg, fixed_input_tokens)
+
+
+def is_item_oversized(
+    item: dict[str, Any],
+    lm_cfg: dict[str, Any] | None,
+) -> bool:
+    """Return whether one item cannot fit even as a single-item batch.
+
+    只用設定的硬上限比較「項目本身」：提示詞與 session 歷史（會隨批次成長）、
+    以及由截斷學到的輸出預算縮放／倍率都不算在內，否則前一批的失敗會讓後面
+    正常大小的項目被永久略過。
+
+    ``BatchBudgetTracker.fit`` intentionally returns one for this case so the
+    caller can decide how to handle the item.  Mod DB needs a different
+    policy from the generic translators: preserve the source, skip API/cache/
+    DB writes, and continue with the following item.
+    """
+    cfg = BudgetConfig.from_config(lm_cfg)
+    if not cfg.enabled:
+        return False
+    input_tokens = estimate_input_item_tokens(item) + JSON_ITEM_OVERHEAD_TOKENS
+    output_tokens = (
+        estimate_value_tokens(item) * cfg.output_token_factor
+        + JSON_ITEM_OVERHEAD_TOKENS
+    )
+    return (
+        input_tokens > cfg.max_input_token_budget
+        or output_tokens > cfg.max_output_token_budget
+    )

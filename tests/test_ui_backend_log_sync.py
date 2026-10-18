@@ -126,7 +126,7 @@ def test_session_lifecycle_is_written_to_backend(caplog):
     messages = [r.getMessage() for r in mine]
     assert "任務開始" in messages
     ended = [m for m in messages if m.startswith("任務結束：ERROR")]
-    assert ended and "耗時" in ended[0] and "'success': 3" in ended[0]
+    assert ended and "耗時" in ended[0] and "success 3" in ended[0]
 
 
 def test_start_logs_replayed_by_start_are_not_mirrored_twice(caplog):
