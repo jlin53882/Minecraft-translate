@@ -259,6 +259,9 @@ def _analyze_guide_format(
     )
 
     token_result = _analyze_token_format(source, translated, newline_policy)
+    if not source:
+        # 原文是空的就沒有結構可對照；只檢查一般 token（與舊的 guide_structure_issues 相同）
+        return token_result
     source_marks = collect_guide_marks(source)
     target_marks = collect_guide_marks(translated)
     source_occurrences = list(token_result.source_occurrences)

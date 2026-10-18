@@ -240,3 +240,31 @@ def test_picked_date_converts_utc_calendar_value_back_to_local_day():
     assert picked_date(datetime(2026, 10, 11, tzinfo=UTC)) == date(2026, 10, 11)
     assert picked_date(datetime(2026, 10, 11)) == date(2026, 10, 11)  # noqa: DTZ001
     assert picked_date(date(2026, 10, 11)) == date(2026, 10, 11)
+
+
+def test_empty_source_guide_and_patchouli_have_no_structure_diagnostics():
+    from translation_tool.core.format_diagnostics import analyze_format_diagnostics
+    from translation_tool.translation_db.quality import (
+        repair_output_issues_for_kind,
+        translation_issues,
+    )
+
+    for kind, translated in (("guide", "# Title"), ("patchouli", "<br>")):
+        result = analyze_format_diagnostics("", translated, kind=kind)
+        assert not result.has_issues
+        assert translation_issues("", translated, kind=kind) == []
+        assert repair_output_issues_for_kind("", translated, kind=kind) == []
+
+
+def test_format_quality_comparison_analyzes_each_text_once():
+    from unittest import mock
+
+    from translation_tool.translation_db import quality
+
+    with mock.patch.object(
+        quality, "analyze_format_diagnostics", wraps=quality.analyze_format_diagnostics
+    ) as spy:
+        quality.format_quality_comparison(
+            "# A\n[l](u)", "A\n[l](u)", "# A\n[l](v)", kind="guide"
+        )
+    assert spy.call_count == 2

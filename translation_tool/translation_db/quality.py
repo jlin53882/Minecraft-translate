@@ -110,6 +110,10 @@ def repair_output_issues(source: str, translated: str) -> list[str]:
     return repair_output_issues_for_kind(source, translated, kind="lang")
 
 
+def _result_messages(result, source: str) -> list[str]:
+    return [*result.legacy_messages, *_extra_guide_issues(result, source)]
+
+
 def _extra_guide_issues(result, source: str) -> tuple[str, ...]:
     """Guide 硬結構訊息（分析結果已算好）；原文為空時與舊行為一致，不檢查結構。"""
     return result.extra_guide_issues if source else ()
@@ -153,7 +157,7 @@ def translation_issues(
             allow_actual_newlines=True,
         )
     result = analyze_format_diagnostics(source, translated, kind=kind or "lang")
-    return [*result.legacy_messages, *_extra_guide_issues(result, source)]
+    return _result_messages(result, source)
 
 
 def _diagnostic_map(result):
@@ -201,8 +205,8 @@ def format_quality_comparison(
     before_result = analyze_format_diagnostics(source, before, kind=kind or "lang")
     after_result = analyze_format_diagnostics(source, after, kind=kind or "lang")
     return (
-        translation_issues(source, before, kind=kind),
-        translation_issues(source, after, kind=kind),
+        _result_messages(before_result, source),
+        _result_messages(after_result, source),
         _token_issue_deltas_from_results(before_result, after_result),
     )
 
