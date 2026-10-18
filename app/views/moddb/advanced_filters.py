@@ -229,10 +229,26 @@ class AdvancedFilters:
             if not isinstance(value, date):
                 return
             field.value = picked_date(value).isoformat()
+            auto_basis = self._ensure_time_kind()
+            note = (
+                "；「時間依據」原本是不限時間，已自動設為「條目匯入時間」，可在左邊更改"
+                if auto_basis
+                else ""
+            )
+            self.time_preset.value = "custom"
             page.update()
+            if not (self.start_date.value and self.end_date.value):
+                # 自訂區間需要起訖兩個日期；另一個還沒選時不套用，也不顯示錯誤
+                other = "結束日" if field is self.start_date else "起始日"
+                show_snack(
+                    page,
+                    f"已選擇{label} {field.value}，還需要選擇{other}，兩個日期都選好才會套用篩選{note}",
+                    C.GOLD,
+                )
+                return
             self._custom_changed()
             if not self.error_text.visible:
-                show_snack(page, f"已套用{label} {field.value}", C.EM)
+                show_snack(page, f"已套用{label} {field.value}{note}", C.EM)
 
         locale = ft.Locale("zh", "TW")
         configuration = page.locale_configuration or ft.LocaleConfiguration()
@@ -308,8 +324,18 @@ class AdvancedFilters:
                 self.error_text.value = str(exc)
         self._on_change()
 
+    def _ensure_time_kind(self) -> bool:
+        """日期條件需要「時間依據」才會生效；沒選時自動用條目匯入時間。"""
+        if str(self.time_kind.value or "none") != "none":
+            return False
+        if not (self.start_date.value or self.end_date.value):
+            return False
+        self.time_kind.value = "entry_created"
+        return True
+
     def _custom_changed(self, _e=None) -> None:
         self.time_preset.value = "custom"
+        self._ensure_time_kind()
         try:
             self._time_bounds = custom_date_bounds(
                 self.start_date.value or "", self.end_date.value or ""
@@ -394,9 +420,11 @@ class AdvancedFilters:
     @property
     def sort_by(self) -> str:
         value = str(self.sort.value or "default")
+        # 下拉選單被程式直接改值、還沒走 _selection_changed 時，方向用該依據的預設方向
+        descending = self._sort_desc if value == self._last_sort else value != "default"
         if value == "default":
-            return "default_desc" if self._sort_desc else "default"
-        if not self._sort_desc:
+            return "default_desc" if descending else "default"
+        if not descending:
             return value.replace("_newest", "_oldest")
         return value
 

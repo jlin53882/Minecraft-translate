@@ -16,7 +16,6 @@ from typing import Literal
 
 from translation_tool.core.format_tokens import (
     format_token_spans,
-    format_tokens,
     token_category,
 )
 
@@ -260,24 +259,39 @@ def _analyze_guide_format(
     )
 
     token_result = _analyze_token_format(source, translated, newline_policy)
+    source_marks = collect_guide_marks(source)
+    target_marks = collect_guide_marks(translated)
     source_occurrences = list(token_result.source_occurrences)
     target_occurrences = list(token_result.target_occurrences)
     source_occurrences.extend(
-        _span(mark.identifier, mark.start, mark.end, source)
-        for mark in collect_guide_marks(source)
+        _span(mark.identifier, mark.start, mark.end, source) for mark in source_marks
     )
     target_occurrences.extend(
         _span(mark.identifier, mark.start, mark.end, translated)
-        for mark in collect_guide_marks(translated)
+        for mark in target_marks
     )
     source_occurrences.sort(key=lambda item: (item.start, item.end))
     target_occurrences.sort(key=lambda item: (item.start, item.end))
-    guide_diagnostics = tuple(collect_guide_diagnostics(source, translated))
+    guide_diagnostics = tuple(
+        collect_guide_diagnostics(
+            source,
+            translated,
+            source_marks=source_marks,
+            target_marks=target_marks,
+        )
+    )
     return FormatAnalysis(
         source_occurrences=tuple(source_occurrences),
         target_occurrences=tuple(target_occurrences),
         diagnostics=token_result.diagnostics + guide_diagnostics,
-        guide_issues=tuple(guide_issues(source, translated)),
+        guide_issues=tuple(
+            guide_issues(
+                source,
+                translated,
+                source_marks=source_marks,
+                target_marks=target_marks,
+            )
+        ),
     )
 
 
@@ -424,6 +438,12 @@ def analyze_format_diagnostics(
     analysis = analyzer(source, translated, policy.newline_policy)
     source_counts = Counter(item.token for item in analysis.source_occurrences)
     target_counts = Counter(item.token for item in analysis.target_occurrences)
+    soft_newline_counts = None
+    if policy.newline_policy == "soft":
+        # 實際換行數量取自分析器已掃描的 token，不必再掃描一次文字
+        lf_counts = (source_counts["\n"], target_counts["\n"])
+        if lf_counts[0] != lf_counts[1]:
+            soft_newline_counts = lf_counts
     return FormatDiagnosticsResult(
         source_text=source,
         target_text=translated,
@@ -434,13 +454,7 @@ def analyze_format_diagnostics(
         target_occurrences=analysis.target_occurrences,
         diagnostics=analysis.diagnostics,
         guide_issues=analysis.guide_issues,
-        soft_newline_counts=(
-            (format_tokens(source).get("\n", 0), format_tokens(translated).get("\n", 0))
-            if policy.newline_policy == "soft"
-            and format_tokens(source).get("\n", 0)
-            != format_tokens(translated).get("\n", 0)
-            else None
-        ),
+        soft_newline_counts=soft_newline_counts,
     )
 
 

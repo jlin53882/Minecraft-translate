@@ -79,22 +79,15 @@ def repair_input_issues_for_kind(
     """Return repair eligibility, hard issues, and mixed-newline status."""
     wanted = format_tokens(source)
     previous = format_tokens(previous_translation)
+    if not format_kind_policy(kind).has_structured_marks:
+        return repair_input_issues_from_counts(wanted, previous)
+    # 指南類的實際換行可重排，只有硬結構（標記、元件、前綴）不符才需要修復
+    issues = (
+        *token_issues_for_kind(source, previous_translation, kind=kind),
+        *guide_structure_issues(source, previous_translation, kind=kind),
+    )
     newline_mismatch = wanted["\n"] != previous["\n"]
-    policy = format_kind_policy(kind)
-    if policy.has_structured_marks:
-        token_issues_found = token_issues_for_kind(
-            source, previous_translation, kind=kind
-        )
-    else:
-        eligible, token_issues_tuple, mixed = repair_input_issues_from_counts(
-            wanted, previous
-        )
-        token_issues_found = list(token_issues_tuple)
-    structure_issues = guide_structure_issues(source, previous_translation, kind=kind)
-    issues = (*token_issues_found, *structure_issues)
-    if policy.has_structured_marks:
-        return bool(issues), issues, bool(newline_mismatch and issues)
-    return eligible, issues, mixed
+    return bool(issues), issues, bool(newline_mismatch and issues)
 
 
 def repair_input_issues_from_counts(
@@ -117,6 +110,11 @@ def repair_output_issues(source: str, translated: str) -> list[str]:
     return repair_output_issues_for_kind(source, translated, kind="lang")
 
 
+def _extra_guide_issues(result, source: str) -> tuple[str, ...]:
+    """Guide 硬結構訊息（分析結果已算好）；原文為空時與舊行為一致，不檢查結構。"""
+    return result.extra_guide_issues if source else ()
+
+
 def repair_output_issues_for_kind(
     source: str,
     translated: str,
@@ -136,11 +134,7 @@ def repair_output_issues_for_kind(
             and issue.category == "newline"
             and issue.identifier == "\n"
         )
-    ] + [
-        issue
-        for issue in guide_structure_issues(source, translated, kind=kind)
-        if issue not in result.legacy_messages
-    ]
+    ] + list(_extra_guide_issues(result, source))
 
 
 def translation_issues(
@@ -159,11 +153,7 @@ def translation_issues(
             allow_actual_newlines=True,
         )
     result = analyze_format_diagnostics(source, translated, kind=kind or "lang")
-    return list(result.legacy_messages) + [
-        issue
-        for issue in guide_structure_issues(source, translated, kind=kind)
-        if issue not in result.legacy_messages
-    ]
+    return [*result.legacy_messages, *_extra_guide_issues(result, source)]
 
 
 def _diagnostic_map(result):
@@ -285,7 +275,7 @@ def matches_quality(
         return not translation_issues(source, translated, kind=kind)
 
     result = analyze_format_diagnostics(source, translated, kind=kind or "lang")
-    structure_issues = guide_structure_issues(source, translated, kind=kind)
+    structure_issues = result.guide_issues
     direction = criteria.direction
     if direction not in {"all", "missing", "extra"}:
         raise ValueError(f"未知 token 不一致方向：{direction}")

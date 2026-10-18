@@ -189,12 +189,23 @@ def _describe(mark: tuple[str, str]) -> str:
     return f"{_LABELS[kind]} {value}"
 
 
-def collect_guide_diagnostics(source: str, translated: str):
-    """Return immutable structured diagnostics for Guide/Markdown marks."""
+def collect_guide_diagnostics(
+    source: str,
+    translated: str,
+    *,
+    source_marks: tuple[GuideMark, ...] | None = None,
+    target_marks: tuple[GuideMark, ...] | None = None,
+):
+    """Return immutable structured diagnostics for Guide/Markdown marks.
+
+    Callers that already collected the marks pass them in to avoid rescanning.
+    """
     from translation_tool.core.format_diagnostics import FormatDiagnostic, FormatSpan
 
-    source_marks = collect_guide_marks(source)
-    target_marks = collect_guide_marks(translated)
+    if source_marks is None:
+        source_marks = collect_guide_marks(source)
+    if target_marks is None:
+        target_marks = collect_guide_marks(translated)
     wanted = Counter(mark.identifier for mark in source_marks)
     actual = Counter(mark.identifier for mark in target_marks)
     source_by_id: dict[str, list[FormatSpan]] = {}
@@ -249,9 +260,22 @@ def _component_line_issues(source: str, translated: str) -> list[str]:
     return issues
 
 
-def guide_issues(source: str, translated: str) -> list[str]:
+def _mark_counts(marks: tuple[GuideMark, ...]) -> Counter[tuple[str, str]]:
+    return +Counter((mark.kind, mark.value) for mark in marks)
+
+
+def guide_issues(
+    source: str,
+    translated: str,
+    *,
+    source_marks: tuple[GuideMark, ...] | None = None,
+    target_marks: tuple[GuideMark, ...] | None = None,
+) -> list[str]:
     """Compare hard structure while allowing soft paragraph line reflow."""
-    wanted, actual = guide_marks(source), guide_marks(translated)
+    wanted = guide_marks(source) if source_marks is None else _mark_counts(source_marks)
+    actual = (
+        guide_marks(translated) if target_marks is None else _mark_counts(target_marks)
+    )
     issues: list[str] = []
     for mark in sorted(wanted.keys() | actual.keys()):
         delta = actual[mark] - wanted[mark]

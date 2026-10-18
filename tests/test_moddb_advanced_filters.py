@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import UTC
 from types import SimpleNamespace
 from unittest import mock
 
@@ -50,3 +51,55 @@ def test_changing_sort_basis_resets_to_its_natural_direction_and_reset_clears():
     filters.reset()
     assert filters.sort_by == "default"
     assert "A→Z" in filters.sort_direction.tooltip
+
+
+def test_programmatic_sort_value_uses_that_basis_natural_direction():
+    filters, _ = _filters()
+    filters.sort.value = "entry_newest"  # 沒有走 _selection_changed
+    assert filters.sort_by == "entry_newest"
+
+
+def test_picked_date_without_time_basis_selects_one_and_applies_filter():
+    from datetime import date, datetime
+
+    filters, changes = _filters()
+    shown = {}
+
+    class Page:
+        locale_configuration = None
+
+        def update(self):
+            pass
+
+        def show_dialog(self, dialog):
+            shown["dialog"] = dialog
+
+    filters.panel = SimpleNamespace(page=Page(), visible=False)
+    assert filters.time_kind.value == "none"
+    filters._pick_date(filters.start_date, "起始日")
+    picker = shown["dialog"]
+    assert str(picker.locale) == "zh_TW"
+    event = SimpleNamespace(
+        control=SimpleNamespace(value=datetime(2026, 10, 10, 16, tzinfo=UTC))
+    )
+    with mock.patch.object(advanced_filters, "show_snack") as snack:
+        picker.on_change(event)
+    assert filters.start_date.value == "2026-10-11"
+    assert changes == []  # 只選了起始日：先提醒還要選結束日，不顯示錯誤
+    assert not filters.error_text.visible
+    assert "結束日" in snack.call_args.args[1]
+    assert "條目匯入時間" in snack.call_args.args[1]
+
+    filters._pick_date(filters.end_date, "結束日")
+    end_event = SimpleNamespace(
+        control=SimpleNamespace(value=datetime(2026, 10, 12, 16, tzinfo=UTC))
+    )
+    with mock.patch.object(advanced_filters, "show_snack") as snack:
+        shown["dialog"].on_change(end_event)
+    assert filters.end_date.value == "2026-10-13"
+    assert filters.time_kind.value == "entry_created"
+    assert filters.time_preset.value == "custom"
+    assert changes == ["changed"]
+    assert "已套用結束日" in snack.call_args.args[1]
+    assert filters.time_filter() is not None
+    assert date.fromisoformat(filters.start_date.value) == date(2026, 10, 11)
