@@ -265,7 +265,8 @@ def test_shared_loop_rejects_plugin_translation_missing_protected_token(
 
     assert result.status == "DONE"
     assert delivered[0]["_cache_rejected"] is True
-    assert delivered[0]["text"] == item["source_text"]
+    assert delivered[0]["text"] == "現在使用"
+    assert delivered[0].get("_untranslated") is not True
     assert delivered[0]["_quality_issues"]
     assert added == []
 

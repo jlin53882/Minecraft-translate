@@ -366,6 +366,21 @@ def _log_db_failure(session, buffer, failures) -> None:
     )
 
 
+def _record_flagged_translation(
+    session,
+    report: TranslateReport,
+    item: dict[str, Any],
+    issues: list[str] | tuple[str, ...],
+) -> None:
+    """記錄格式不一致結果，供校對畫面保留 AI 譯文草稿。"""
+    report.flagged += 1
+    report.flagged_entries[item["_entry_id"]] = item["text"]
+    if len(report.flagged_samples) < _FLAGGED_LOG_LIMIT:
+        note = f"{item['_mod_id']} / {item['path']}：{'、'.join(issues)}"
+        report.flagged_samples.append(note)
+        _log(session, f"⚠️ 特殊字元不一致，未寫入：{note}", "warning")
+
+
 def _translate_rows(
     session, db, options: TranslateOptions, report: TranslateReport, rows, cancelled
 ) -> None:
@@ -382,14 +397,11 @@ def _translate_rows(
         failures["streak"] = 0
         report.translated += 1
         source, text = item["source_text"], item["text"]
-        issues = translation_issues(source, text, kind=item.get("_kind"))
+        issues = item.get("_quality_issues") or translation_issues(
+            source, text, kind=item.get("_kind")
+        )
         if issues:
-            report.flagged += 1
-            report.flagged_entries[item["_entry_id"]] = text
-            if len(report.flagged_samples) < _FLAGGED_LOG_LIMIT:
-                note = f"{item['_mod_id']} / {item['path']}：{'、'.join(issues)}"
-                report.flagged_samples.append(note)
-                _log(session, f"⚠️ 特殊字元不一致，未寫入：{note}", "warning")
+            _record_flagged_translation(session, report, item, issues)
             return
         buffer.append(
             WriteBackItem(item["_kind"], item["_mod_id"], item["path"], source, text)

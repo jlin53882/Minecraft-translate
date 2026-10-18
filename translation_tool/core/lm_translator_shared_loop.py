@@ -247,10 +247,11 @@ def translate_items_with_cache_loop(
 
             issues = _quality_issues_for_cache(it)
             if issues:
+                # 格式不合格仍要把 AI 譯文交給上層人工檢視；只有真正的
+                # 原文回填才標記 _untranslated。這也讓 Mod DB 能正確累計
+                # flagged，並保留原始 AI 譯文供校對。
                 it = {
                     **it,
-                    "text": src,
-                    "_untranslated": True,
                     "_cache_rejected": True,
                     "_quality_issues": tuple(issues),
                 }
@@ -262,7 +263,7 @@ def translate_items_with_cache_loop(
                     log_info(f"[SharedLM] 處理翻譯結果失敗: {redact_text(e)}")
 
             if it.get("_untranslated") or it.get("_cache_rejected"):
-                # 批次縮到極限回填的原文 / 格式無效回填的原文：保留在輸出，但不寫入快取
+                # 原文回填或格式不合格的結果保留在輸出，但不寫入快取。
                 untranslated_fallback += 1
                 continue
 
@@ -281,7 +282,7 @@ def translate_items_with_cache_loop(
 
         if untranslated_fallback:
             log_info(
-                f"[SharedLM] {untranslated_fallback} 筆回填原文（批次縮至極限或回傳格式無效），未寫入快取"
+                f"[SharedLM] {untranslated_fallback} 筆結果未寫入快取（原文回填或格式不合格）"
             )
         if malformed_fallback:
             last_error = f"{malformed_fallback} 筆回傳格式無效，已回填原文且未翻譯"
