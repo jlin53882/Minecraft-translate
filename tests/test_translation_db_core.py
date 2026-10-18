@@ -1008,6 +1008,44 @@ def test_time_filter_half_open_unknown_values_and_history_exists(db):
     db.close()
 
 
+def test_time_data_range_reports_where_the_data_actually_is(db):
+    db.ingest(
+        "1.21.1",
+        [item(key=f"item.range.{n}", tw=f"譯文 {n}", mod="range") for n in range(2)],
+    )
+    rows = db.list_entries("1.21.1", mod_id="range", limit=10)[0]
+    with db._tx() as conn:
+        for row, stamp in zip(
+            rows, ("2026-10-08 16:00:00", "2026-10-16 03:00:00"), strict=True
+        ):
+            conn.execute(
+                "UPDATE entry SET created_at=? WHERE id=?",
+                (stamp, row.id),
+            )
+    after_data = TimeFilter(
+        kind="entry_created",
+        start_utc="2026-10-16 16:00:00",
+        end_utc="2026-10-19 16:00:00",
+        unknown_policy="exclude",
+    )
+    criteria = EntryFilter(version="1.21.1", mod_id="range", time=after_data)
+    assert db.list_entries(criteria=criteria)[1] == 0
+    assert db.time_data_range(criteria) == (
+        "2026-10-08 16:00:00",
+        "2026-10-16 03:00:00",
+    )
+    assert db.time_data_range(EntryFilter(version="1.21.1", mod_id="range")) == (
+        None,
+        None,
+    )
+    manual = EntryFilter(
+        version="1.21.1",
+        mod_id="range",
+        time=TimeFilter(kind="manual_activity", action="edit"),
+    )
+    assert db.time_data_range(manual) == (None, None)
+
+
 def test_quality_filter_evaluates_before_pagination_and_uses_core_tokens(db):
     assert (
         token_issues(

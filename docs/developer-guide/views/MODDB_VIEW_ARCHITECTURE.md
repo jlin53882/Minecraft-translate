@@ -30,7 +30,7 @@
 
 View 不自行判斷格式，一律透過 `app/services_impl/moddb_format_diff_service` 取得 `analyze_format_diagnostics` 的 `FormatDiagnosticsResult`（使用者：`FormatDiffReview`、`FormatDiffViewer`、`RepairReviewer`、`EntriesPanel` 共用）。表格列由 `format_diff_review` 的診斷列與 `extra_guide_issues` 列組成，高亮、標籤與色調共用 `format_issue_rendering`；新增種類只需在診斷層登記策略，不需要在 view 加分支。
 
-`AdvancedFilters` 的 `sort_by` 由排序下拉值與方向狀態組合：`default`／`default_desc` 與各日期排序的 `*_newest`／`*_oldest`；日期欄位由 `picked_date` 轉成本地日期，日期條件在「時間依據」為不限時間時會自動改用條目匯入時間。
+`AdvancedFilters` 的 `sort_by` 由排序下拉值與方向狀態組合：`default`／`default_desc` 與各日期排序的 `*_newest`／`*_oldest`；日期欄位由 `picked_date` 轉成本地日期，日期條件在「時間依據」為不限時間時會自動改用條目匯入時間。。清單因日期範圍而為空時，`EntriesPanel._render_list` 呼叫 `AdvancedFilters.announce_no_data`：由 `TranslationDB.time_data_range` 查出該時間依據實際最早／最晚時間，顯示在空狀態並彈出提示。
 
 ## 維護邊界
 

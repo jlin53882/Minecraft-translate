@@ -110,3 +110,56 @@ def test_picked_date_without_time_basis_selects_one_and_applies_filter():
     assert "已套用結束日" in snack.call_args.args[1]
     assert filters.time_filter() is not None
     assert date.fromisoformat(filters.start_date.value) == date(2026, 10, 11)
+
+
+def test_no_data_hint_names_the_basis_and_where_the_data_actually_is():
+    filters, _ = _filters()
+    filters.time_kind.value = "entry_created"
+    hint = filters._range_message("2026-10-08 16:00:00", "2026-10-16 03:00:00")
+    assert "條目匯入時間" in hint
+    assert "2026-10-09 ～ 2026-10-16" in hint
+    assert "沒有資料" in hint
+    none_hint = filters._range_message(None, None)
+    assert "沒有任何時間資料" in none_hint
+
+
+def test_no_data_hint_only_for_date_bounded_filters():
+    from translation_tool.translation_db.models import EntryFilter, TimeFilter
+
+    filters, _ = _filters()
+    filters.time_kind.value = "entry_created"
+    db = SimpleNamespace(time_data_range=lambda criteria: ("2026-10-01", "2026-10-02"))
+    plain = EntryFilter(version="1.21.1")
+    unbounded = EntryFilter(
+        version="1.21.1", time=TimeFilter(kind="entry_created", unknown_policy="only")
+    )
+    bounded = EntryFilter(
+        version="1.21.1",
+        time=TimeFilter(kind="entry_created", start_utc="2026-10-16 16:00:00"),
+    )
+    assert filters.no_data_hint(db, plain) is None
+    assert filters.no_data_hint(db, unbounded) is None
+    assert "條目匯入時間" in filters.no_data_hint(db, bounded)
+
+
+def test_announce_no_data_shows_snack_and_ignores_invalid_criteria():
+    from translation_tool.translation_db.models import EntryFilter, TimeFilter
+
+    filters, _ = _filters()
+    filters.time_kind.value = "entry_created"
+    db = SimpleNamespace(time_data_range=lambda criteria: ("2026-10-01", "2026-10-02"))
+    bounded = EntryFilter(
+        version="1.21.1",
+        time=TimeFilter(kind="entry_created", start_utc="2026-10-16 16:00:00"),
+    )
+    with mock.patch.object(advanced_filters, "show_snack") as snack:
+        hint = filters.announce_no_data(lambda: db, lambda: bounded)
+        assert hint and snack.call_args.args[1] == hint
+        snack.reset_mock()
+
+        def invalid():
+            raise ValueError("日期格式請使用 YYYY-MM-DD")
+
+        assert filters.announce_no_data(lambda: db, invalid) is None
+        assert filters.announce_no_data(lambda: None, lambda: bounded) is None
+        snack.assert_not_called()

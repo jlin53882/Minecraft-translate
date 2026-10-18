@@ -23,6 +23,7 @@ import threading
 import uuid
 from collections.abc import Callable, Iterable, Iterator, Sequence
 from contextlib import contextmanager
+from dataclasses import replace
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -1430,6 +1431,45 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
         elif spec.unknown_policy == "exclude":
             where.append(f"{column} IS NOT NULL")
         return where, params
+
+    def time_data_range(self, criteria: EntryFilter) -> tuple[str | None, str | None]:
+        """其他條件不變、只拿掉時間條件後，所選時間依據實際有資料的最早／最晚時間（UTC）。
+
+        只在時間篩選查無資料時，用來告訴使用者資料實際落在哪段期間；沒有任何時間資料回傳 (None, None)。
+        """
+        spec = criteria.time
+        if spec is None:
+            return None, None
+        without_time = replace(criteria, time=None)
+        condition, params = self._filter_sql(without_time)
+        if spec.kind == "manual_activity":
+            actions = {
+                "all": entry_activity.ACTIVITY_ACTIONS,
+                "edit": ("manual",),
+                "review": ("review",),
+                "batch": ("batch_replace", "batch_revert"),
+                "revert": ("revert", "batch_revert"),
+            }[spec.action]
+            marks = ",".join("?" for _ in actions)
+            sql = (
+                f"SELECT MIN(h.at), MAX(h.at) {self._candidate_source(condition)} "
+                f"JOIN history h ON h.entry_id=e.id AND h.action IN ({marks}) "
+                f"WHERE {condition}"
+            )
+            params = [*actions, *params]
+        else:
+            column = {
+                "entry_created": "e.created_at",
+                "translation_created": (
+                    "et.created_at" if self.has_translation_created_at else "NULL"
+                ),
+            }.get(spec.kind, "et.updated_at")
+            sql = (
+                f"SELECT MIN({column}), MAX({column}) "
+                f"{self._candidate_source(condition + ' ' + column)} WHERE {condition}"
+            )
+        row = self._one(sql, params)
+        return (row[0], row[1]) if row else (None, None)
 
     def _sort_sql(self, sort_by: str) -> str:
         if sort_by == "entry_newest":

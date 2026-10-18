@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sqlite3
 from collections.abc import Callable
 from datetime import date, datetime
 
@@ -11,6 +12,7 @@ from app.services_impl.moddb_service import (
     QualityFilter,
     TimeFilter,
     custom_date_bounds,
+    format_taipei_time,
     quick_date_bounds,
 )
 from app.ui import kit
@@ -367,6 +369,37 @@ class AdvancedFilters:
         self.error_text.value = ""
         self.error_text.visible = False
         self.set_summary()
+
+    def announce_no_data(self, get_db, get_criteria) -> str | None:
+        """清單為空時：有日期條件就提示資料實際落在哪段期間（彈出提醒並回傳同一段文字）。"""
+        try:
+            db = get_db()
+            hint = None if db is None else self.no_data_hint(db, get_criteria())
+        except (ValueError, sqlite3.Error):
+            return None  # 條件本身無效時，清單已另外顯示錯誤
+        if hint:
+            show_snack(self.panel.page, hint, C.GOLD)
+        return hint
+
+    def no_data_hint(self, db, criteria) -> str | None:
+        """日期範圍查無資料時，說明所選時間依據的資料實際落在哪段期間；沒有日期條件則不提示。"""
+        spec = criteria.time
+        if spec is None or (spec.start_utc is None and spec.end_utc is None):
+            return None
+        return self._range_message(*db.time_data_range(criteria))
+
+    def _range_message(self, earliest: str | None, latest: str | None) -> str:
+        basis = next(
+            (o.text for o in self.time_kind.options if o.key == self.time_kind.value),
+            "所選時間依據",
+        )
+        if earliest is None or latest is None:
+            return f"「{basis}」在目前的其他篩選條件下沒有任何時間資料，請改選其他時間依據。"
+        return (
+            f"所選日期範圍內沒有資料。「{basis}」的資料只落在 "
+            f"{format_taipei_time(earliest)[:10]} ～ {format_taipei_time(latest)[:10]}"
+            "，請把日期調整到這段期間內。"
+        )
 
     def time_filter(self) -> TimeFilter | None:
         # Invalid custom dates remain an error even if another filter control is

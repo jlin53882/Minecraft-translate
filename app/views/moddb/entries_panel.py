@@ -508,9 +508,16 @@ class EntriesPanel(ft.Column):
         self.advanced_filters.set_summary()
         tiles = [self._row_tile(r) for r in self.rows]
         if not tiles:
+            time_hint = (
+                None
+                if self._list_error or not self.version
+                else self.advanced_filters.announce_no_data(self.db, self._entry_filter)
+            )
             empty = kit.empty_state(
                 "無法套用日期篩選" if self._list_error else "沒有符合的條目",
-                self._list_error or "調整上方篩選，或先到「掃描匯入」建立資料",
+                self._list_error
+                or time_hint
+                or "調整上方篩選，或先到「掃描匯入」建立資料",
                 icon=ft.Icons.ERROR_OUTLINE
                 if self._list_error
                 else ft.Icons.SEARCH_OFF,
