@@ -152,6 +152,7 @@ class TranslateReport:
     batch_no: int = 0  # 已完成的批次數（品質問題清單用來標示所屬批次）
     replace_rule_conflicts: int = 0
     replace_rule_conflict_details: list[dict[str, Any]] = field(default_factory=list)
+    replace_rule_scan_ok: bool = True
     contract_errors: list[str] = field(default_factory=list)
 
     def as_dict(self) -> dict[str, Any]:
@@ -343,9 +344,8 @@ def _sync_loop_result(report: TranslateReport, result) -> None:
     """Copy shared-loop accounting into the single Mod DB report object."""
     report.ai_response = int(getattr(result, "ai_response", report.translated) or 0)
     report.translated = report.ai_response
-    report.cache_written = int(
-        getattr(result, "cache_written", report.cache_written) or 0
-    )
+    # cache_written 由 counted_cache_add 依 CacheAddReceipt.changed 累計；共享迴圈
+    # 只知道「已接受」，不可用它的數字覆蓋。
     report.source_fallback = int(
         getattr(result, "source_fallback", report.source_fallback) or 0
     )
@@ -400,25 +400,38 @@ def _write_quality_issue_file(session, report: TranslateReport) -> None:
     """寫出品質問題清單（JSON＋CSV）與替換規則衝突明細；畫面只保留數量。"""
     try:
         day_dir = _report_day_dir()
-        path = write_replace_rule_conflicts(
-            day_dir, report.replace_rule_conflict_details
-        )
-        report.replace_rule_conflicts_file = str(path) if path else None
-        if report.quality_issue_records:
-            raw_task_id = str(
-                getattr(session, "task_id", None)
-                or getattr(session, "id", None)
-                or "unknown-task"
-            )
-            report.quality_issues_file = str(
-                write_quality_report(day_dir, raw_task_id, report.quality_issue_records)
-            )
     except (OSError, TypeError, ValueError, AttributeError) as exc:
-        _log_backend(f"後台報告檔寫入失敗：{type(exc).__name__}: {exc}", "warning")
+        _log_backend(f"後台報告資料夾無法決定：{type(exc).__name__}: {exc}", "warning")
+        return
+    if report.replace_rule_scan_ok:  # 掃描失敗時保留當天原有的衝突報告
+        try:
+            path = write_replace_rule_conflicts(
+                day_dir, report.replace_rule_conflict_details
+            )
+            report.replace_rule_conflicts_file = str(path) if path else None
+        except (OSError, TypeError, ValueError) as exc:
+            _log_backend(
+                f"替換規則衝突報告寫入失敗：{type(exc).__name__}: {exc}", "warning"
+            )
+    if not report.quality_issue_records:
+        return
+    raw_task_id = str(
+        getattr(session, "task_id", None)
+        or getattr(session, "id", None)
+        or "unknown-task"
+    )
+    try:
+        report.quality_issues_file = str(
+            write_quality_report(day_dir, raw_task_id, report.quality_issue_records)
+        )
+    except (OSError, TypeError, ValueError) as exc:
+        _log_backend(f"品質問題報告寫入失敗：{type(exc).__name__}: {exc}", "warning")
 
 
-def _collect_replace_rule_conflicts() -> list[dict[str, Any]]:
-    """Read-only conflict detection on the rules the translator actually applies."""
+def _collect_replace_rule_conflicts() -> list[dict[str, Any]] | None:
+    """Read-only conflict detection on the rules the translator actually applies.
+
+    掃描失敗回傳 ``None``（與「掃描成功、沒有衝突」的 ``[]`` 不同）。"""
     try:
         config = load_config()
         translator = config.get("translator", {}) if isinstance(config, dict) else {}
@@ -432,7 +445,7 @@ def _collect_replace_rule_conflicts() -> list[dict[str, Any]]:
     except (OSError, TypeError, ValueError, AttributeError) as exc:
         # 衝突偵測只是診斷；失敗不可讓已寫入資料庫的翻譯任務變成錯誤。
         _log_backend(f"替換規則衝突偵測失敗：{type(exc).__name__}: {exc}", "warning")
-        return []
+        return None
     return [
         {
             "source_index": source_index,
@@ -709,7 +722,9 @@ def _settle_report(session, report, options, result, failures, buffer, tracker) 
             "已翻成功的部分已寫入資料庫。",
             "error",
         )
-    report.replace_rule_conflict_details = _collect_replace_rule_conflicts()
+    conflicts = _collect_replace_rule_conflicts()
+    report.replace_rule_scan_ok = conflicts is not None
+    report.replace_rule_conflict_details = conflicts or []
     report.replace_rule_conflicts = len(report.replace_rule_conflict_details)
     _write_quality_issue_file(session, report)
     _update_remaining(report)

@@ -13,6 +13,7 @@ import csv
 import json
 import os
 import re
+import uuid
 from collections import Counter
 from datetime import UTC, datetime
 from pathlib import Path
@@ -127,6 +128,11 @@ def build_quality_report(
     }
 
 
+def _tmp_path(path: Path) -> Path:
+    """同資料夾、每次呼叫獨一無二的暫存檔名，多個程式實例同時寫入也不會互相覆蓋。"""
+    return path.with_name(f"{path.name}.{os.getpid()}.{uuid.uuid4().hex}.tmp")
+
+
 def _csv_safe(value: Any) -> Any:
     """Excel 會把 = + - @ 開頭的儲存格當公式；加上單引號讓它顯示成原本的文字。"""
     if isinstance(value, str) and value[:1] in ("=", "+", "-", "@", "\t", "\r"):
@@ -169,14 +175,15 @@ def write_quality_report(
     json_path = day_dir / f"quality-issues-{task_id}.json"
     csv_path = json_path.with_suffix(".csv")
     flat = [item for group in report["批次"] for item in group["項目"]]
-    json_tmp = json_path.with_name(json_path.name + ".tmp")
-    csv_tmp = csv_path.with_name(csv_path.name + ".tmp")
+    json_tmp = _tmp_path(json_path)
+    csv_tmp = _tmp_path(csv_path)
     try:
         json_tmp.write_text(
             json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8"
         )
         _write_csv(csv_tmp, flat)
-        # 兩個暫存檔都寫成功才換上正式檔，避免留下 JSON／CSV 不一致的組合
+        # 兩個暫存檔都寫成功才換上正式檔。JSON 是主要報告，先換；CSV 是由同一份
+        # 資料產生的表格版，若第二次替換失敗只會是舊版（下次任務會重新產生）。
         os.replace(json_tmp, json_path)
         os.replace(csv_tmp, csv_path)
     finally:
@@ -210,7 +217,7 @@ def write_replace_rule_conflicts(
     text = json.dumps(payload, ensure_ascii=False, indent=2)
     if path.exists() and path.read_text(encoding="utf-8") == text:
         return path
-    tmp = path.with_name(path.name + ".tmp")
+    tmp = _tmp_path(path)
     try:
         tmp.write_text(text, encoding="utf-8")
         os.replace(tmp, path)

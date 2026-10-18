@@ -2868,7 +2868,7 @@ def test_replace_rule_conflict_scan_never_fails_the_task(monkeypatch):
 
     monkeypatch.setattr(moddb_translate_service, "load_replace_rules", broken)
 
-    assert moddb_translate_service._collect_replace_rule_conflicts() == []
+    assert moddb_translate_service._collect_replace_rule_conflicts() is None
 
 
 def test_max_tokens_fallbacks_still_trigger_abort_streak(db_path, monkeypatch):
@@ -2968,4 +2968,96 @@ def test_report_directory_config_failure_does_not_fail_the_task(monkeypatch):
     report.replace_rule_conflict_details = []
 
     moddb_translate_service._write_quality_issue_file(TaskSession(), report)
-    assert moddb_translate_service._collect_replace_rule_conflicts() == []
+    assert moddb_translate_service._collect_replace_rule_conflicts() is None
+
+
+def test_sync_loop_result_keeps_receipt_based_cache_written():
+    report = moddb_translate_service.TranslateReport()
+    report.cache_written = 20  # 依 CacheAddReceipt.changed 累計
+    loop_result = SimpleNamespace(cache_written=100)  # 共享迴圈只數「已接受」
+
+    moddb_translate_service._sync_loop_result(report, loop_result)
+
+    assert report.cache_written == 20
+
+
+def test_failed_conflict_scan_keeps_existing_conflict_report(tmp_path, monkeypatch):
+    from app.services_impl import moddb_translate_report as report_mod
+
+    existing = report_mod.write_replace_rule_conflicts(
+        tmp_path,
+        [
+            {
+                "source_index": 0,
+                "source": "a",
+                "destination_index": 1,
+                "destination": "ab",
+            }
+        ],
+    )
+    before = existing.read_text(encoding="utf-8")
+    monkeypatch.setattr(moddb_translate_service, "_report_day_dir", lambda: tmp_path)
+    report = moddb_translate_service.TranslateReport()
+    report.replace_rule_scan_ok = False
+
+    moddb_translate_service._write_quality_issue_file(TaskSession(), report)
+
+    assert existing.read_text(encoding="utf-8") == before
+
+
+def test_conflict_report_failure_does_not_block_quality_report(tmp_path, monkeypatch):
+    monkeypatch.setattr(moddb_translate_service, "_report_day_dir", lambda: tmp_path)
+
+    def broken(*_args, **_kwargs):
+        raise OSError("locked")
+
+    monkeypatch.setattr(moddb_translate_service, "write_replace_rule_conflicts", broken)
+    report = moddb_translate_service.TranslateReport()
+    report.quality_issue_records = [
+        {
+            "batch": 1,
+            "kind": "lang",
+            "mod_id": "m",
+            "key": "k",
+            "issues": ["x"],
+            "source_text": "s",
+            "translated_text": "t",
+        }
+    ]
+
+    moddb_translate_service._write_quality_issue_file(TaskSession(), report)
+
+    assert report.quality_issues_file and Path(report.quality_issues_file).exists()
+
+
+def test_second_replace_failure_keeps_valid_json_and_no_temp_files(
+    tmp_path, monkeypatch
+):
+    from app.services_impl import moddb_translate_report as report_mod
+
+    real_replace = report_mod.os.replace
+    calls = []
+
+    def flaky(src, dst):
+        calls.append(dst)
+        if len(calls) == 2:
+            raise OSError("locked")
+        return real_replace(src, dst)
+
+    monkeypatch.setattr(report_mod.os, "replace", flaky)
+    record = {
+        "batch": 1,
+        "kind": "lang",
+        "mod_id": "m",
+        "key": "k",
+        "issues": ["x"],
+        "source_text": "s",
+        "translated_text": "t",
+    }
+
+    with pytest.raises(OSError):
+        report_mod.write_quality_report(tmp_path, "task", [record])
+
+    names = sorted(p.name for p in tmp_path.iterdir())
+    assert names == ["quality-issues-task.json"]
+    json.loads((tmp_path / names[0]).read_text(encoding="utf-8"))
