@@ -34,7 +34,8 @@ class AdvancedFilters:
     def __init__(self, on_change: Callable[[], None]):
         self._on_change = on_change
         self._time_bounds: tuple[str, str] | None = None
-        self._sort_desc = True
+        self._sort_desc = False
+        self._last_sort = "default"
         self._build_time_controls()
         self._build_quality_controls()
         self._build_sort_control()
@@ -253,32 +254,43 @@ class AdvancedFilters:
             )
         )
 
+    def _direction_names(self) -> tuple[str, str]:
+        """(遞減, 遞增) 的完整說明；模組／鍵值依字母，其他依日期。"""
+        if str(self.sort.value or "default") == "default":
+            return "遞減（Z→A，模組與鍵值由後往前）", "遞增（A→Z，模組與鍵值由前往後）"
+        return "遞減（新→舊，最近的在最上面）", "遞增（舊→新，最早的在最上面）"
+
     def _refresh_sort_direction(self) -> None:
-        self.sort_direction.text = "遞減：新→舊" if self._sort_desc else "遞增：舊→新"
+        desc, asc = self._direction_names()
+        current, other = (desc, asc) if self._sort_desc else (asc, desc)
+        self.sort_direction.text = "遞減 ↓" if self._sort_desc else "遞增 ↑"
         self.sort_direction.icon = (
             ft.Icons.ARROW_DOWNWARD if self._sort_desc else ft.Icons.ARROW_UPWARD
+        )
+        self.sort_direction.tooltip = (
+            f"目前排序方向：{current}。點一下切換為{other}。"
+            "方向套用在左邊「排序」所選的依據上。"
         )
 
     def _toggle_sort_direction(self, _e=None) -> None:
         page = self.panel.page
-        if str(self.sort.value or "default") == "default":
-            show_snack(
-                page,
-                "請先在「排序」選擇依匯入時間、譯文更新時間或人工操作時間，再切換遞增／遞減",
-                C.GOLD,
-            )
-            return
         self._sort_desc = not self._sort_desc
         self._refresh_sort_direction()
         self.sort_direction.update()
         self._on_change()
+        desc, asc = self._direction_names()
         show_snack(
             page,
-            "已改為遞減：新的在前" if self._sort_desc else "已改為遞增：舊的在前",
+            f"排序已改為{desc if self._sort_desc else asc}；清單已依新方向重新載入",
             C.EM,
         )
 
     def _selection_changed(self, _e=None) -> None:
+        current_sort = str(self.sort.value or "default")
+        if current_sort != self._last_sort:
+            # 換排序依據時回到該依據的自然方向：模組／鍵值由 A 到 Z，日期由新到舊
+            self._last_sort = current_sort
+            self._sort_desc = current_sort != "default"
         self._refresh_sort_direction()
         if self.time_preset.value == "custom":
             self._time_bounds = None
@@ -322,7 +334,8 @@ class AdvancedFilters:
         self.direction.value = "all"
         self.category.value = "all"
         self.sort.value = "default"
-        self._sort_desc = True
+        self._sort_desc = False
+        self._last_sort = "default"
         self._refresh_sort_direction()
         self._time_bounds = None
         self.error_text.value = ""
@@ -381,7 +394,9 @@ class AdvancedFilters:
     @property
     def sort_by(self) -> str:
         value = str(self.sort.value or "default")
-        if value != "default" and not self._sort_desc:
+        if value == "default":
+            return "default_desc" if self._sort_desc else "default"
+        if not self._sort_desc:
             return value.replace("_newest", "_oldest")
         return value
 

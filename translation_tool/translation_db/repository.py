@@ -165,6 +165,8 @@ class _WorstFirstQualityRow:
 
     def __lt__(self, other: _WorstFirstQualityRow) -> bool:
         if self.date_index is None:
+            if self.sort_by == "default_desc":
+                return self.key < other.key
             return self.key > other.key
         if (self.date is None) != (other.date is None):
             return self.date is None
@@ -1450,6 +1452,9 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
                 f"{activity} IS NULL, {activity}, "
                 f"CASE WHEN {activity} IS NULL THEN e.id ELSE -e.id END"
             )
+        if sort_by == "default_desc":
+            # idx_entry_list_order 反向掃描，不需要暫存排序
+            return "e.mod_id DESC, e.kind DESC, e.key DESC, e.id DESC"
         return "e.mod_id, e.kind, e.key, e.id"
 
     @staticmethod
@@ -1463,7 +1468,11 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
             "manual_activity_oldest": 14,
         }.get(sort_by)
         if index is None:
-            return sorted(rows, key=lambda row: (row[3], row[1], row[4], row[0]))
+            return sorted(
+                rows,
+                key=lambda row: (row[3], row[1], row[4], row[0]),
+                reverse=sort_by == "default_desc",
+            )
         dated = [row for row in rows if row[index] is not None]
         undated = [row for row in rows if row[index] is None]
         newest_first = not sort_by.endswith("_oldest")

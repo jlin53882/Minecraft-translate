@@ -219,6 +219,7 @@ class EntryFilter:
             raise ValueError(f"未知人工審核狀態：{self.review_status}")
         if self.sort_by not in {
             "default",
+            "default_desc",
             "entry_newest",
             "entry_oldest",
             "effective_updated_newest",

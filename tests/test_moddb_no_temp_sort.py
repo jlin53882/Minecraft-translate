@@ -23,6 +23,7 @@ VERSIONS = ("1.20.1", "1.21.1")
 STATES = ("all", "none", "diff", "changed", "manual", "ok", "same")
 SORTS = (
     "default",
+    "default_desc",
     "entry_newest",
     "entry_oldest",
     "effective_updated_newest",
@@ -148,6 +149,7 @@ def test_list_entries_with_filters_avoids_temp_sort(db, extra):
     for sort_by, state in itertools.product(
         (
             "default",
+            "default_desc",
             "effective_updated_newest",
             "effective_updated_oldest",
             "manual_activity_newest",
