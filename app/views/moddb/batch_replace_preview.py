@@ -9,7 +9,6 @@ import flet as ft
 from app.services_impl.moddb_service import (
     SRC_MANUAL,
     BatchReplaceChange,
-    token_category,
 )
 from app.services_impl.moddb_source_service import (
     REVIEW_STATUS_LABELS,
@@ -35,6 +34,7 @@ _CATEGORY_LABELS = {
     "placeholder": "佔位符",
     "minecraft": " Minecraft 色碼",
     "patchouli": " Patchouli 巨集",
+    "guide": " 指南結構",
     "newline": "換行",
     "other": "特殊 token",
 }
@@ -51,8 +51,9 @@ def _token_label(token: str) -> str:
 def _quality_details(row: BatchReplaceChange) -> list[str]:
     details = [
         f"{'缺少' if delta.direction == 'missing' else '多出'}"
-        f"{_CATEGORY_LABELS.get(token_category(delta.token), '特殊 token')}"
-        f" `{_token_label(delta.token)}`：{delta.before} → {delta.after}"
+        f"{_CATEGORY_LABELS.get(delta.diagnostic_category, '特殊 token')}"
+        f" `{_token_label(delta.token) if delta.diagnostic_category != 'guide' else delta.display_token}`："
+        f"{delta.before} → {delta.after}"
         for delta in row.quality_deltas
     ]
     if row.old_whitespace_note or row.new_whitespace_note:

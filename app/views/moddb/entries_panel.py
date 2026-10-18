@@ -12,7 +12,7 @@ import sqlite3
 
 import flet as ft
 
-from app.services_impl.moddb_format_diff_service import compare_format_diff
+from app.services_impl.moddb_format_diff_service import analyze_format_diagnostics
 from app.services_impl.moddb_guide_service import is_guide_kind
 from app.services_impl.moddb_service import (
     SRC_MANUAL,
@@ -508,9 +508,16 @@ class EntriesPanel(ft.Column):
         self.advanced_filters.set_summary()
         tiles = [self._row_tile(r) for r in self.rows]
         if not tiles:
+            time_hint = (
+                None
+                if self._list_error or not self.version
+                else self.advanced_filters.announce_no_data(self.db, self._entry_filter)
+            )
             empty = kit.empty_state(
                 "無法套用日期篩選" if self._list_error else "沒有符合的條目",
-                self._list_error or "調整上方篩選，或先到「掃描匯入」建立資料",
+                self._list_error
+                or time_hint
+                or "調整上方篩選，或先到「掃描匯入」建立資料",
                 icon=ft.Icons.ERROR_OUTLINE
                 if self._list_error
                 else ft.Icons.SEARCH_OFF,
@@ -764,16 +771,16 @@ class EntriesPanel(ft.Column):
         notes: list[str] = []
         diff_result = None
         if entry is not None and entry.en_us and text.strip():
-            diff_result = compare_format_diff(entry.en_us, text, kind=entry.kind)
+            diff_result = analyze_format_diagnostics(entry.en_us, text, kind=entry.kind)
             if diff_result.legacy_messages:
                 notes.append(
                     "與原文的特殊字元不一致：" + "、".join(diff_result.legacy_messages)
                 )
             if diff_result.soft_newline_counts is not None:
                 notes.append(diff_result.summary_lines[-1])
-            if diff_result.guide_issues:
+            if diff_result.extra_guide_issues:
                 notes.append(
-                    "指南標記與原文不一致：" + "、".join(diff_result.guide_issues)
+                    "指南標記與原文不一致：" + "、".join(diff_result.extra_guide_issues)
                 )
         is_guide = entry is not None and is_guide_kind(entry.kind)
         space = whitespace_note(text)
@@ -793,7 +800,7 @@ class EntriesPanel(ft.Column):
             text,
             diff_result,
             metadata=[self.source_chip, self.review_chip],
-            kind=entry.kind if entry else None,
+            kind=entry.kind if entry else "lang",
         )
 
     def _update_format_hints_and_refresh(self) -> None:
@@ -936,7 +943,7 @@ class EntriesPanel(ft.Column):
         if self.db() is db:
             if (
                 not shadow
-                and not compare_format_diff(
+                and not analyze_format_diagnostics(
                     entry.en_us, text, kind=entry.kind
                 ).has_issues
             ):

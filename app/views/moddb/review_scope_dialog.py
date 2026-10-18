@@ -15,6 +15,7 @@ from app.services_impl.moddb_source_service import (
 from app.ui import design, kit
 from app.ui.design import C
 from app.ui.snack import show_snack
+from app.views.moddb.format_issue_rendering import quality_issue_summary
 from app.views.moddb.formatting import impact_text, shorten
 from translation_tool.utils.log_unit import log_exception, log_info, log_warning
 
@@ -265,10 +266,13 @@ class ReviewScopeController:
     def _build_entry_comparison(self, entry: EntryRow, db: TranslationDB) -> ft.Column:
         catalog = source_catalog_for(db)
         source_name = source_label(entry.source, catalog, entry.review_status)
+        quality_messages = quality_issue_summary(
+            entry.quality_issues, entry.whitespace_note
+        )
         quality = (
-            "格式檢查通過"
-            if not entry.quality_issues
-            else "格式檢查：" + "、".join(entry.quality_issues)
+            "格式檢查：" + "、".join(quality_messages)
+            if quality_messages
+            else "格式檢查通過"
         )
         return ft.Column(
             [

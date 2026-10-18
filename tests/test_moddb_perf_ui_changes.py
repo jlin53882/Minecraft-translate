@@ -585,3 +585,15 @@ def test_priority_display_shows_plain_names_for_folded_custom_sources(tmp_path):
         "custom:102",
         "builtin:ai",
     ]
+
+
+def test_result_table_has_row_for_guide_only_structure_issue():
+    from translation_tool.core.format_diagnostics import analyze_format_diagnostics
+
+    result = analyze_format_diagnostics("A\n\nB", "A\nB", kind="guide")
+    assert result.issues == () and result.extra_guide_issues
+    review = FormatDiffReview(context_label="t", editable_control=ft.TextField())
+    table_text = " ".join(texts_of(review._result_table(result)))
+    assert "指南結構" in table_text
+    assert "位置無法可靠判定" in table_text
+    assert "段落分隔空行" in table_text

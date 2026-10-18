@@ -55,6 +55,7 @@ from translation_tool.translation_db import TranslationDB
 from translation_tool.translation_db.models import SameSourceAIEntry
 from translation_tool.translation_db.quality import (
     repair_input_issues_for_kind,
+    repair_output_issues_for_kind,
     translation_issues,
 )
 from translation_tool.translation_db.run_progress import format_repair_live
@@ -1142,11 +1143,16 @@ def _finalize_result(
         )
         return True
     translated_text = result["text"]
-    issues = translation_issues(
-        original["source_text"],
-        translated_text,
-        kind=original.get("_kind"),
-        repair=report.mode == "quality_mismatch" and not report.strict_newline,
+    kind = str(original.get("_kind") or "lang")
+    issues = (
+        repair_output_issues_for_kind(
+            original["source_text"],
+            translated_text,
+            kind=kind,
+            allow_actual_newlines=not report.strict_newline,
+        )
+        if report.mode == "quality_mismatch"
+        else translation_issues(original["source_text"], translated_text, kind=kind)
     )
     if issues:
         _mark_flagged(db, session, report, original, translated_text, issues)

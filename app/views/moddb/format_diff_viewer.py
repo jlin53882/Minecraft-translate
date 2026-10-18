@@ -2,52 +2,17 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable
+from collections.abc import Callable
 
 import flet as ft
 
 from app.services_impl.moddb_format_diff_service import (
-    FormatDiffResult,
-    FormatTokenOccurrence,
-    compare_format_diff,
+    FormatDiagnosticsResult,
+    analyze_format_diagnostics,
 )
 from app.ui import design, kit
 from app.ui.design import C
-
-
-def _text_style(color: str | None = None) -> ft.TextStyle:
-    return ft.TextStyle(color=color or C.DIA, weight=ft.FontWeight.W_600)
-
-
-def _display_text(text: str) -> str:
-    """Make real line breaks visible without changing the stored text."""
-    return (text or "").replace("\r\n", "\n").replace("\n", "↵\n")
-
-
-def _spans(
-    text: str,
-    occurrences: Iterable[FormatTokenOccurrence],
-    affected_tokens: set[str],
-    issue_color: str,
-) -> list[ft.TextSpan]:
-    spans: list[ft.TextSpan] = []
-    cursor = 0
-    for occurrence in occurrences:
-        if occurrence.start < cursor:
-            continue
-        if occurrence.start > cursor:
-            spans.append(ft.TextSpan(_display_text(text[cursor : occurrence.start])))
-        raw = text[occurrence.start : occurrence.end]
-        style = (
-            _text_style(issue_color)
-            if occurrence.token in affected_tokens
-            else _text_style()
-        )
-        spans.append(ft.TextSpan(_display_text(raw), style))
-        cursor = occurrence.end
-    if cursor < len(text):
-        spans.append(ft.TextSpan(_display_text(text[cursor:])))
-    return spans or [ft.TextSpan("（無）")]
+from app.views.moddb.format_issue_rendering import diagnostic_spans
 
 
 class FormatDiffViewer:
@@ -60,7 +25,7 @@ class FormatDiffViewer:
         switch_label: str = "顯示格式差異",
     ) -> None:
         self._on_toggle = on_toggle
-        self._result: FormatDiffResult | None = None
+        self._result: FormatDiagnosticsResult | None = None
         self.row = kit.SwitchRow(
             switch_label,
             "只標示格式標記；不會把提示文字寫入譯文或資料庫",
@@ -95,18 +60,20 @@ class FormatDiffViewer:
         self,
         source_text: str,
         target_text: str,
-        diff_result: FormatDiffResult | None = None,
+        diff_result: FormatDiagnosticsResult | None = None,
         *,
         kind: str | None = None,
-    ) -> FormatDiffResult:
+    ) -> FormatDiagnosticsResult:
         """Render current texts; stale results are discarded and recomputed."""
+        kind = kind or "lang"
         result = diff_result
         if (
             result is None
             or result.source_text != (source_text or "")
             or result.target_text != (target_text or "")
+            or result.kind != kind
         ):
-            result = compare_format_diff(source_text, target_text, kind=kind)
+            result = analyze_format_diagnostics(source_text, target_text, kind=kind)
         self._result = result
         self.summary.value = "；".join(result.summary_lines)
         self.summary.color = C.GOLD if result.has_issues else C.EM
@@ -114,7 +81,7 @@ class FormatDiffViewer:
         self._render_texts(result)
         return result
 
-    def _render_texts(self, result: FormatDiffResult) -> None:
+    def _render_texts(self, result: FormatDiagnosticsResult) -> None:
         if not self.box.visible:
             self.src.value = result.source_text or "（無）"
             self.tw.value = result.target_text or "（尚無譯文）"
@@ -130,12 +97,20 @@ class FormatDiffViewer:
             issue.token for issue in result.issues if issue.target_occurrences
         }
         self.src.value = ""
-        self.src.spans = _spans(
-            result.source_text, source_occurrences, source_tokens, C.GOLD
+        self.src.spans = diagnostic_spans(
+            result.source_text,
+            source_occurrences,
+            source_tokens,
+            issue_color=C.GOLD,
+            show_line_breaks=True,
         )
         self.tw.value = ""
-        self.tw.spans = _spans(
-            result.target_text, target_occurrences, target_tokens, C.RED
+        self.tw.spans = diagnostic_spans(
+            result.target_text,
+            target_occurrences,
+            target_tokens,
+            issue_color=C.RED,
+            show_line_breaks=True,
         )
 
     def _toggle(self) -> None:

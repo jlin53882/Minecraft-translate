@@ -219,10 +219,13 @@ class EntryFilter:
             raise ValueError(f"未知人工審核狀態：{self.review_status}")
         if self.sort_by not in {
             "default",
+            "default_desc",
             "entry_newest",
             "entry_oldest",
             "effective_updated_newest",
+            "effective_updated_oldest",
             "manual_activity_newest",
+            "manual_activity_oldest",
         }:
             raise ValueError(f"未知條目排序：{self.sort_by}")
         for name in ("entry_ids", "include_ids", "exclude_ids"):
@@ -306,12 +309,37 @@ class BatchReplaceChange:
 
 @dataclass(frozen=True)
 class QualityIssueDelta:
-    """Count change for one missing/extra source token in a replacement."""
+    """Count change for one stable format diagnostic in a replacement."""
 
     token: str
     direction: str
     before: int
     after: int
+    category: str | None = None
+    identifier: str | None = None
+    display: str | None = None
+
+    @property
+    def diagnostic_category(self) -> str:
+        if self.category:
+            return self.category
+        from translation_tool.core.format_tokens import token_category
+
+        return token_category(self.token)
+
+    @property
+    def diagnostic_identifier(self) -> str:
+        return self.identifier or self.token
+
+    @property
+    def display_token(self) -> str:
+        if self.display:
+            return self.display
+        from translation_tool.core.format_diagnostics import format_identifier_label
+
+        return format_identifier_label(
+            self.diagnostic_identifier, self.diagnostic_category
+        )
 
 
 @dataclass(frozen=True)

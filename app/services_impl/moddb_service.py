@@ -33,6 +33,7 @@ from app.services_impl.pipelines._pipeline_logging import (
     mirror_session_log,
 )
 from app.tasks.task_session import add_log_unmirrored
+from translation_tool.core.format_tokens import format_tokens, token_category
 from translation_tool.translation_db import (
     SOURCE_NAMES,
     BatchReplaceChange,
@@ -53,12 +54,7 @@ from translation_tool.translation_db import (
     load_db_settings,
     open_db,
 )
-from translation_tool.translation_db.quality import (
-    format_tokens,
-    token_category,
-    token_issues,
-    whitespace_note,
-)
+from translation_tool.translation_db.quality import token_issues, whitespace_note
 from translation_tool.translation_db.scanner import ScanOptions, scan_folder_generator
 from translation_tool.translation_db.schema import (
     SRC_AI,

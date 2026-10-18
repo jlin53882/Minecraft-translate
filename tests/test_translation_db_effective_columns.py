@@ -27,7 +27,14 @@ from translation_tool.translation_db.schema import (
 
 VERSIONS = ("1.20.1", "1.21.1", "1.22")
 STATES = ("all", "ok", "diff", "manual", "none", "same", "changed")
-SORTS = ("default", "effective_updated_newest", "manual_activity_newest")
+SORTS = (
+    "default",
+    "default_desc",
+    "effective_updated_newest",
+    "effective_updated_oldest",
+    "manual_activity_newest",
+    "manual_activity_oldest",
+)
 
 
 def _seed(db: TranslationDB) -> None:

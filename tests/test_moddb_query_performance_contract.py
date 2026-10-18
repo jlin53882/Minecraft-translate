@@ -95,10 +95,13 @@ def test_read_cache_detects_external_writes_without_generation_bump(tmp_path):
     "sort",
     [
         "default",
+        "default_desc",
         "entry_newest",
         "entry_oldest",
         "effective_updated_newest",
+        "effective_updated_oldest",
         "manual_activity_newest",
+        "manual_activity_oldest",
     ],
 )
 @pytest.mark.parametrize(

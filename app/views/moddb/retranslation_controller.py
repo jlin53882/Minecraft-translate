@@ -8,12 +8,12 @@ from pathlib import Path
 
 import flet as ft
 
+from app.services_impl.moddb_format_diff_service import analyze_format_diagnostics
 from app.services_impl.moddb_retranslate_service import (
     SameSourceAIRepairPreview,
     cache_profile_label,
     preview_same_source_ai_retranslation_from_path,
 )
-from app.services_impl.moddb_service import format_tokens, token_category
 from app.services_impl.moddb_source_service import source_catalog_for, source_label
 from app.services_impl.moddb_translate_service import TranslateOptions
 from app.tasks.operation_registry import (
@@ -39,6 +39,7 @@ _PREVIEW_ISSUE_LABELS = {
     "newline": "實際換行",
     "placeholder": "佔位符",
     "patchouli": "Patchouli 標記",
+    "guide": "指南結構",
     "other": "其他格式",
 }
 
@@ -327,13 +328,13 @@ def _display_preview_result(panel, options, db_identity, result):
 
 
 def _entry_issue_categories(row) -> set[str]:
-    """Return filter categories from the same token comparison used by repair validation."""
-    wanted = format_tokens(row.en_us)
-    actual = format_tokens(row.current_ai_translation)
-    categories = set()
-    for token in set(wanted) | set(actual):
-        if wanted[token] != actual[token]:
-            categories.add(token_category(token))
+    """Return filter categories from the common repair validation contract."""
+    result = analyze_format_diagnostics(
+        row.en_us, row.current_ai_translation, kind=row.kind
+    )
+    categories = {issue.category for issue in result.issues}
+    if result.extra_guide_issues:
+        categories.add("guide")
     return categories or {"other"}
 
 

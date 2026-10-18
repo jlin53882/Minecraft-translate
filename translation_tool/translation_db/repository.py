@@ -23,6 +23,7 @@ import threading
 import uuid
 from collections.abc import Callable, Iterable, Iterator, Sequence
 from contextlib import contextmanager
+from dataclasses import replace
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -65,12 +66,12 @@ from translation_tool.translation_db.models import (
     WriteBackStats,
 )
 from translation_tool.translation_db.quality import (
+    format_quality_comparison,
     format_tokens,
     matches_quality,
     quality_state,
     repair_input_issues_for_kind,
-    token_quality_comparison,
-    translation_issues,
+    repair_output_issues_for_kind,
     whitespace_note,
 )
 from translation_tool.translation_db.read_cache import READ_CACHE
@@ -150,7 +151,9 @@ class _WorstFirstQualityRow:
             "entry_newest": 11,
             "entry_oldest": 11,
             "effective_updated_newest": 13,
+            "effective_updated_oldest": 13,
             "manual_activity_newest": 14,
+            "manual_activity_oldest": 14,
         }.get(sort_by)
         if self.date_index is None:
             self.date = None
@@ -163,15 +166,18 @@ class _WorstFirstQualityRow:
 
     def __lt__(self, other: _WorstFirstQualityRow) -> bool:
         if self.date_index is None:
+            if self.sort_by == "default_desc":
+                return self.key < other.key
             return self.key > other.key
         if (self.date is None) != (other.date is None):
             return self.date is None
+        ascending = self.sort_by.endswith("_oldest")
         if self.date != other.date:
-            return (
-                self.date < other.date
-                if self.sort_by != "entry_oldest"
-                else self.date > other.date
-            )
+            return self.date > other.date if ascending else self.date < other.date
+        # 由舊到新的新排序同時間時編號由大到小（與衍生表索引反向掃描的順序相同）；
+        # 既有的 entry_oldest 維持編號由小到大。
+        if ascending and self.sort_by != "entry_oldest":
+            return self.entry_id < other.entry_id
         return self.entry_id > other.entry_id
 
 
@@ -1082,9 +1088,17 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
         """
         if not condition.startswith(_VERSION_CONDITION):
             return None
-        if sort_by == "manual_activity_newest" and self._activity_ready():
+        if (
+            sort_by in ("manual_activity_newest", "manual_activity_oldest")
+            and self._activity_ready()
+        ):
             dated, dated_count = self._indexed_page_sql(
-                condition, "entry_activity act", "", "act.last_at DESC, act.entry_id"
+                condition,
+                "entry_activity act",
+                "",
+                "act.last_at DESC, act.entry_id"
+                if sort_by == "manual_activity_newest"
+                else "act.last_at, act.entry_id DESC",
             )
             undated = (
                 f"{condition} AND NOT EXISTS "
@@ -1098,10 +1112,18 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
                     "ORDER BY e.id LIMIT ? OFFSET ?"
                 ),
             )
-        if sort_by == "effective_updated_newest" and self._effective_columns_ready():
+        if (
+            sort_by in ("effective_updated_newest", "effective_updated_oldest")
+            and self._effective_columns_ready()
+        ):
             # f.upd 就是生效來源那一筆的 et.updated_at；沒有生效譯文或時間的條目在第二段
             dated, dated_count = self._indexed_page_sql(
-                condition, "effective f", "f.upd IS NOT NULL", "f.upd DESC, f.entry_id"
+                condition,
+                "effective f",
+                "f.upd IS NOT NULL",
+                "f.upd DESC, f.entry_id"
+                if sort_by == "effective_updated_newest"
+                else "f.upd, f.entry_id DESC",
             )
             undated = f"{condition} AND f.upd IS NULL"
             return (
@@ -1410,6 +1432,45 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
             where.append(f"{column} IS NOT NULL")
         return where, params
 
+    def time_data_range(self, criteria: EntryFilter) -> tuple[str | None, str | None]:
+        """其他條件不變、只拿掉時間條件後，所選時間依據實際有資料的最早／最晚時間（UTC）。
+
+        只在時間篩選查無資料時，用來告訴使用者資料實際落在哪段期間；沒有任何時間資料回傳 (None, None)。
+        """
+        spec = criteria.time
+        if spec is None:
+            return None, None
+        without_time = replace(criteria, time=None)
+        condition, params = self._filter_sql(without_time)
+        if spec.kind == "manual_activity":
+            actions = {
+                "all": entry_activity.ACTIVITY_ACTIONS,
+                "edit": ("manual",),
+                "review": ("review",),
+                "batch": ("batch_replace", "batch_revert"),
+                "revert": ("revert", "batch_revert"),
+            }[spec.action]
+            marks = ",".join("?" for _ in actions)
+            sql = (
+                f"SELECT MIN(h.at), MAX(h.at) {self._candidate_source(condition)} "
+                f"JOIN history h ON h.entry_id=e.id AND h.action IN ({marks}) "
+                f"WHERE {condition}"
+            )
+            params = [*actions, *params]
+        else:
+            column = {
+                "entry_created": "e.created_at",
+                "translation_created": (
+                    "et.created_at" if self.has_translation_created_at else "NULL"
+                ),
+            }.get(spec.kind, "et.updated_at")
+            sql = (
+                f"SELECT MIN({column}), MAX({column}) "
+                f"{self._candidate_source(condition + ' ' + column)} WHERE {condition}"
+            )
+        row = self._one(sql, params)
+        return (row[0], row[1]) if row else (None, None)
+
     def _sort_sql(self, sort_by: str) -> str:
         if sort_by == "entry_newest":
             return "e.created_at IS NULL, e.created_at DESC, e.id"
@@ -1417,9 +1478,23 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
             return "e.created_at IS NULL, e.created_at, e.id"
         if sort_by == "effective_updated_newest":
             return "et.updated_at IS NULL, et.updated_at DESC, e.id"
+        if sort_by == "effective_updated_oldest":
+            return (
+                "et.updated_at IS NULL, et.updated_at, "
+                "CASE WHEN et.updated_at IS NULL THEN e.id ELSE -e.id END"
+            )
         if sort_by == "manual_activity_newest":
             activity = _LAST_ACTIVITY_SQL
             return f"{activity} IS NULL, {activity} DESC, e.id"
+        if sort_by == "manual_activity_oldest":
+            activity = _LAST_ACTIVITY_SQL
+            return (
+                f"{activity} IS NULL, {activity}, "
+                f"CASE WHEN {activity} IS NULL THEN e.id ELSE -e.id END"
+            )
+        if sort_by == "default_desc":
+            # idx_entry_list_order 反向掃描，不需要暫存排序
+            return "e.mod_id DESC, e.kind DESC, e.key DESC, e.id DESC"
         return "e.mod_id, e.kind, e.key, e.id"
 
     @staticmethod
@@ -1428,20 +1503,31 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
             "entry_newest": 11,
             "entry_oldest": 11,
             "effective_updated_newest": 13,
+            "effective_updated_oldest": 13,
             "manual_activity_newest": 14,
+            "manual_activity_oldest": 14,
         }.get(sort_by)
         if index is None:
-            return sorted(rows, key=lambda row: (row[3], row[1], row[4], row[0]))
+            return sorted(
+                rows,
+                key=lambda row: (row[3], row[1], row[4], row[0]),
+                reverse=sort_by == "default_desc",
+            )
         dated = [row for row in rows if row[index] is not None]
         undated = [row for row in rows if row[index] is None]
-        dated.sort(key=lambda row: row[0])
-        dated.sort(key=lambda row: row[index], reverse=sort_by != "entry_oldest")
+        newest_first = not sort_by.endswith("_oldest")
+        # entry_oldest 同時間編號由小到大；其餘由舊到新同時間編號由大到小。
+        dated.sort(
+            key=lambda row: row[0],
+            reverse=sort_by.endswith("_oldest") and sort_by != "entry_oldest",
+        )
+        dated.sort(key=lambda row: row[index], reverse=newest_first)
         undated.sort(key=lambda row: row[0])
         return [*dated, *undated]
 
     def _quality_candidate_select_sql(self, sort_by: str) -> str:
         activity = "NULL"
-        if sort_by == "manual_activity_newest":
+        if sort_by in ("manual_activity_newest", "manual_activity_oldest"):
             activity = _LAST_ACTIVITY_SQL
         return (
             "SELECT e.id, e.kind, NULL, e.mod_id, e.key, e.en_us, f.zh_tw, "
@@ -2118,7 +2204,7 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
         def quality_comparison(
             source: str, before: str, after: str, kind: str | None
         ) -> tuple[tuple[str, ...], tuple[str, ...], tuple[QualityIssueDelta, ...]]:
-            old, new, deltas = token_quality_comparison(
+            old, new, deltas = format_quality_comparison(
                 source, before, after, kind=kind
             )
             return tuple(old), tuple(new), deltas
@@ -3790,11 +3876,11 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
                 return AITranslationReplaceResult("skipped_changed")
             # Automated repair must pass output checks; an explicit human review
             # accepts the reviewed draft while retaining the same source CAS.
-            if action == "quality_repair" and translation_issues(
+            if action == "quality_repair" and repair_output_issues_for_kind(
                 expected_en_us,
                 new_zh_tw,
                 kind=expected_kind,
-                repair=not strict_newline,
+                allow_actual_newlines=not strict_newline,
             ):
                 return AITranslationReplaceResult("skipped_changed")
             if new_zh_tw == current[0]:
@@ -4090,8 +4176,9 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
                         for row in rows:
                             if check is not None:
                                 check()
-                            if quality_state(row[4], row[5], kind=row[1])[0] != (
-                                "mismatch"
+                            if (
+                                quality_state(row[4], row[5], kind=row[1])[0]
+                                != "mismatch"
                             ):
                                 continue
                             count += 1

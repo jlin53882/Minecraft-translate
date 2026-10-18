@@ -8,15 +8,17 @@ from __future__ import annotations
 
 import re
 from collections import Counter
+from dataclasses import dataclass
 
-_TAG = re.compile(r"<[^<>\n]+>")
+# 標籤必須以英文字母或 / 開頭；「<0°C = 0, >」這類比較符號文字不是標籤。
+_TAG = re.compile(r"<[A-Za-z/][^<>\n]*>")
 _LINK_TARGET = re.compile(r"\]\(([^)\n]*)\)")
 _HEADING = re.compile(r"^\s{0,3}(#{1,6})\s")
 _BULLET = re.compile(r"^\s*([-*+])\s+\S")
 _ORDERED = re.compile(r"^\s*\d+[.)]\s+\S")
 _QUOTE = re.compile(r"^\s*>")
 _HARD_BREAK = re.compile(r"(?: {2,}|\\)\n")
-_COMPONENT_LINE = re.compile(r"^(?:(?:<[^<>\n]+>)|(?:\$\([^\n]*?\)))+$")
+_COMPONENT_LINE = re.compile(r"^(?:(?:<[A-Za-z/][^<>\n]*>)|(?:\$\([^\n]*?\)))+$")
 
 _LABELS = {
     "tag": "標籤",
@@ -28,6 +30,22 @@ _LABELS = {
     "code": "行內程式碼標記",
     "link": "連結目標",
 }
+
+
+@dataclass(frozen=True)
+class GuideMark:
+    """A structured Guide/Markdown mark with an exact source span."""
+
+    kind: str
+    value: str
+    start: int
+    end: int
+    line: int
+    column: int
+
+    @property
+    def identifier(self) -> str:
+        return f"{self.kind}:{self.value}"
 
 
 def _line_marks(line: str) -> list[tuple[str, str]]:
@@ -65,15 +83,79 @@ def _component_lines(text: str) -> tuple[str, ...]:
     )
 
 
+def describe_guide_mark(mark: tuple[str, str]) -> str:
+    """Stable human-facing label shared by diagnostics and legacy messages."""
+    return _describe(mark)
+
+
+def collect_guide_marks(text: str) -> tuple[GuideMark, ...]:
+    """Collect Guide/Markdown structure with offsets for UI highlighting."""
+    text = text or ""
+    marks: list[GuideMark] = []
+    offset = 0
+    for line_number, line in enumerate(text.splitlines(keepends=True), 1):
+        content = line.rstrip("\r\n")
+        line_mark = _line_marks(content)
+        if line_mark:
+            kind, value = line_mark[0]
+            start = len(content) - len(content.lstrip())
+            if kind == "heading":
+                end = start + len(value) + 1
+            elif kind == "bullet":
+                end = start + 1
+            elif kind == "ordered":
+                match = _ORDERED.match(content)
+                end = match.end() if match else start + len(value)
+            else:
+                end = start + 1
+            marks.append(
+                GuideMark(
+                    kind, value, offset + start, offset + end, line_number, start + 1
+                )
+            )
+        for pattern, kind, group in (
+            (_TAG, "tag", 0),
+            (_LINK_TARGET, "link", 1),
+        ):
+            for match in pattern.finditer(content):
+                value = match.group(group)
+                start, end = match.span(group)
+                marks.append(
+                    GuideMark(
+                        kind,
+                        value,
+                        offset + start,
+                        offset + end,
+                        line_number,
+                        start + 1,
+                    )
+                )
+        for kind, value, needle in (("bold", "**", "**"), ("code", "`", "`")):
+            start = 0
+            while True:
+                found = content.find(needle, start)
+                if found < 0:
+                    break
+                marks.append(
+                    GuideMark(
+                        kind,
+                        value,
+                        offset + found,
+                        offset + found + len(needle),
+                        line_number,
+                        found + 1,
+                    )
+                )
+                start = found + len(needle)
+        offset += len(line)
+    return tuple(marks)
+
+
 def guide_marks(text: str) -> Counter[tuple[str, str]]:
     """``(種類, 內容)`` 的出現次數。"""
-    marks: Counter[tuple[str, str]] = Counter()
-    for line in (text or "").splitlines():
-        marks.update(_line_marks(line))
-    marks.update(("tag", tag) for tag in _TAG.findall(text or ""))
-    marks.update(("link", target) for target in _LINK_TARGET.findall(text or ""))
-    marks[("bold", "**")] += (text or "").count("**")
-    marks[("code", "`")] += (text or "").count("`")
+    marks: Counter[tuple[str, str]] = Counter(
+        (mark.kind, mark.value) for mark in collect_guide_marks(text)
+    )
     return +marks  # 去掉次數為 0 的項目
 
 
@@ -107,9 +189,93 @@ def _describe(mark: tuple[str, str]) -> str:
     return f"{_LABELS[kind]} {value}"
 
 
-def guide_issues(source: str, translated: str) -> list[str]:
+def collect_guide_diagnostics(
+    source: str,
+    translated: str,
+    *,
+    source_marks: tuple[GuideMark, ...] | None = None,
+    target_marks: tuple[GuideMark, ...] | None = None,
+):
+    """Return immutable structured diagnostics for Guide/Markdown marks.
+
+    Callers that already collected the marks pass them in to avoid rescanning.
+    """
+    from translation_tool.core.format_diagnostics import FormatDiagnostic, FormatSpan
+
+    if source_marks is None:
+        source_marks = collect_guide_marks(source)
+    if target_marks is None:
+        target_marks = collect_guide_marks(translated)
+    wanted = Counter(mark.identifier for mark in source_marks)
+    actual = Counter(mark.identifier for mark in target_marks)
+    source_by_id: dict[str, list[FormatSpan]] = {}
+    target_by_id: dict[str, list[FormatSpan]] = {}
+    for mark in source_marks:
+        source_by_id.setdefault(mark.identifier, []).append(
+            FormatSpan(mark.identifier, mark.start, mark.end, mark.line, mark.column)
+        )
+    for mark in target_marks:
+        target_by_id.setdefault(mark.identifier, []).append(
+            FormatSpan(mark.identifier, mark.start, mark.end, mark.line, mark.column)
+        )
+    diagnostics = []
+    for identifier in sorted(set(wanted) | set(actual)):
+        delta = actual[identifier] - wanted[identifier]
+        if not delta:
+            continue
+        mark_kind, value = identifier.split(":", 1)
+        diagnostics.append(
+            FormatDiagnostic(
+                identifier=identifier,
+                category="guide",
+                direction="extra" if delta > 0 else "missing",
+                source_count=wanted[identifier],
+                target_count=actual[identifier],
+                delta=delta,
+                location_confidence="exact",
+                source_occurrences=tuple(source_by_id.get(identifier, ())),
+                target_occurrences=tuple(target_by_id.get(identifier, ())),
+                display_label=_describe((mark_kind, value)),
+            )
+        )
+    return tuple(diagnostics)
+
+
+def _component_line_issues(source: str, translated: str) -> list[str]:
+    """說明獨立成行的元件（例如 <ItemLink .../>）在哪一邊被移動或改動。"""
+    wanted = Counter(_component_lines(source))
+    actual = Counter(_component_lines(translated))
+    issues = [
+        f"原文把 {component} 單獨放在一行，譯文卻把它接進句子或改動了內容；"
+        "請讓它在譯文中也單獨成一行"
+        for component in sorted(wanted - actual)
+    ]
+    issues += [
+        f"譯文把 {component} 單獨成一行，但原文它是接在句子中間；"
+        "請把它放回句子裡，不要獨立成行"
+        for component in sorted(actual - wanted)
+    ]
+    if not issues and _component_lines(source) != _component_lines(translated):
+        issues.append("獨立成行的 Patchouli 元件，先後順序與原文不同")
+    return issues
+
+
+def _mark_counts(marks: tuple[GuideMark, ...]) -> Counter[tuple[str, str]]:
+    return +Counter((mark.kind, mark.value) for mark in marks)
+
+
+def guide_issues(
+    source: str,
+    translated: str,
+    *,
+    source_marks: tuple[GuideMark, ...] | None = None,
+    target_marks: tuple[GuideMark, ...] | None = None,
+) -> list[str]:
     """Compare hard structure while allowing soft paragraph line reflow."""
-    wanted, actual = guide_marks(source), guide_marks(translated)
+    wanted = guide_marks(source) if source_marks is None else _mark_counts(source_marks)
+    actual = (
+        guide_marks(translated) if target_marks is None else _mark_counts(target_marks)
+    )
     issues: list[str] = []
     for mark in sorted(wanted.keys() | actual.keys()):
         delta = actual[mark] - wanted[mark]
@@ -119,7 +285,7 @@ def guide_issues(source: str, translated: str) -> list[str]:
             issues.append(f"多了 {delta} 個「{_describe(mark)}」")
 
     blank_issue = _count_issue(
-        "段落分隔空行",
+        "段落分隔空行（段落之間的空白行）",
         _blank_line_count(source or ""),
         _blank_line_count(translated or ""),
     )
@@ -133,19 +299,27 @@ def guide_issues(source: str, translated: str) -> list[str]:
     ):
         # Count differences are already reported by guide_marks; this extra
         # issue is only for a reorder, which the counters cannot describe.
-        issues.append("Markdown 區塊前綴順序不一致")
+        issues.append(
+            "Markdown 區塊前綴（# 標題、- 清單、1. 編號等）的先後順序與原文不同"
+        )
 
     hard_break_issue = _count_issue(
-        "Markdown 硬換行",
+        "Markdown 硬換行（行尾兩個空白或反斜線）",
         len(_HARD_BREAK.findall(source or "")),
         len(_HARD_BREAK.findall(translated or "")),
     )
     if hard_break_issue:
         issues.append(hard_break_issue)
 
-    if _component_lines(source) != _component_lines(translated):
-        issues.append("Patchouli 元件獨立行不一致")
+    issues.extend(_component_line_issues(source, translated))
     return issues
 
 
-__all__ = ["format_spec", "guide_issues", "guide_marks"]
+__all__ = [
+    "GuideMark",
+    "collect_guide_diagnostics",
+    "collect_guide_marks",
+    "describe_guide_mark",
+    "guide_issues",
+    "guide_marks",
+]

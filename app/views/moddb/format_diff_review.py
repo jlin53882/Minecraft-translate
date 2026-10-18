@@ -1,65 +1,94 @@
 """Shared format-difference review surface for Mod DB screens.
 
-The comparison contract lives in ``moddb_format_diff_service``.  This module
-only turns that result into a small, reusable Flet view; markers and issue
+The comparison contract lives in ``moddb_format_diff_service``.
+This module only turns that result into a small, reusable Flet view; markers and issue
 chips never become part of the editable or persisted translation text.
 """
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Sequence
+from collections.abc import Sequence
 
 import flet as ft
 
 from app.services_impl.moddb_format_diff_service import (
-    FormatDiffIssue,
-    FormatDiffResult,
-    FormatTokenOccurrence,
-    compare_format_diff,
+    FormatDiagnostic,
+    FormatDiagnosticsResult,
+    FormatSpan,
+    analyze_format_diagnostics,
 )
 from app.ui import design, kit
 from app.ui.design import C
+from app.views.moddb.format_issue_rendering import (
+    diagnostic_label,
+    diagnostic_spans,
+    diagnostic_tone,
+)
 
 
-def _token_spans(
-    text: str,
-    occurrences: Iterable[FormatTokenOccurrence],
-    affected_tokens: set[str],
-    *,
-    highlight: bool,
-) -> list[ft.TextSpan]:
-    """Render real text with optional token emphasis, without inserting markers."""
-    if not highlight:
-        return [ft.TextSpan(text or "（無）")]
-    spans: list[ft.TextSpan] = []
-    cursor = 0
-    for occurrence in occurrences:
-        if occurrence.start < cursor:
-            continue
-        if occurrence.start > cursor:
-            spans.append(ft.TextSpan(text[cursor : occurrence.start]))
-        raw = text[occurrence.start : occurrence.end]
-        style = ft.TextStyle(
-            color=C.RED if occurrence.token in affected_tokens else C.TEXT,
-            weight=ft.FontWeight.W_700 if occurrence.token in affected_tokens else None,
-            bgcolor=C.RED_BG if occurrence.token in affected_tokens else None,
-        )
-        spans.append(ft.TextSpan(raw, style=style))
-        cursor = occurrence.end
-    if cursor < len(text):
-        spans.append(ft.TextSpan(text[cursor:]))
-    return spans or [ft.TextSpan(text or "（無）")]
+def _table_cell(text: str, *, width: float | None = None, expand=None, **style):
+    style.setdefault("size", 12)
+    return ft.Text(text, width=width, expand=expand, **style)
 
 
-def _issue_tone(issue: FormatDiffIssue) -> str:
-    return "red" if issue.direction == "extra" else "gold"
+def _count_cell(text: str, **style) -> ft.Text:
+    return _table_cell(text, width=56, text_align=ft.TextAlign.CENTER, **style)
 
 
-def _issue_label(issue: FormatDiffIssue) -> str:
-    if issue.token == "\n":
-        return f"換行數量不一致 · 原文 {issue.source_count} / 譯文 {issue.target_count}"
+def _diagnostic_row(issue: FormatDiagnostic) -> ft.Row:
+    """One table row for a structured diagnostic, with the cause spelled out."""
+    tone = C.RED if issue.direction == "extra" else C.GOLD
     action = "缺少" if issue.direction == "missing" else "多出"
-    return f"{action} {issue.display_token} × {abs(issue.delta)}"
+    detail: list[ft.Control] = [
+        _table_cell(
+            f"{action} {abs(issue.delta)} 個", color=tone, weight=ft.FontWeight.W_600
+        ),
+        ft.Text(
+            "譯文少了原文有的標記，請補回。"
+            if issue.direction == "missing"
+            else "譯文多出原文沒有的標記，請移除。",
+            size=11,
+            color=C.MUTED,
+            no_wrap=False,
+        ),
+    ]
+    if issue.location_confidence == "unknown":
+        detail.append(
+            ft.Text("位置無法可靠判定", size=11, color=C.MUTED, no_wrap=False)
+        )
+    return ft.Row(
+        [
+            _table_cell(issue.display_token, expand=2, color=C.TEXT),
+            _count_cell(str(issue.source_count), color=C.TEXT),
+            _count_cell(
+                str(issue.target_count), color=tone, weight=ft.FontWeight.W_600
+            ),
+            ft.Column(detail, spacing=1, expand=3),
+        ],
+        spacing=8,
+        vertical_alignment=ft.CrossAxisAlignment.START,
+    )
+
+
+def _guide_message_row(message: str) -> ft.Row:
+    """One table row for a Guide structure problem that has no countable mark."""
+    return ft.Row(
+        [
+            _table_cell("指南結構", expand=2, color=C.TEXT),
+            _count_cell("—", color=C.MUTED),
+            _count_cell("—", color=C.MUTED),
+            ft.Column(
+                [
+                    _table_cell(message, color=C.GOLD, weight=ft.FontWeight.W_600),
+                    ft.Text("位置無法可靠判定", size=11, color=C.MUTED, no_wrap=False),
+                ],
+                spacing=1,
+                expand=3,
+            ),
+        ],
+        spacing=8,
+        vertical_alignment=ft.CrossAxisAlignment.START,
+    )
 
 
 class FormatDiffReview:
@@ -84,8 +113,8 @@ class FormatDiffReview:
         self.compact = compact
         self.panel_width = panel_width or (320 if compact else 340)
         self.show_source = show_source
-        self._result: FormatDiffResult | None = None
-        self._kind: str | None = None
+        self._result: FormatDiagnosticsResult | None = None
+        self._kind: str = "lang"
         self._highlight = True
         self._tab = "diff"
         self._meta_controls: list[ft.Control] = []
@@ -126,20 +155,22 @@ class FormatDiffReview:
         self,
         source_text: str,
         target_text: str,
-        diff_result: FormatDiffResult | None = None,
+        diff_result: FormatDiagnosticsResult | None = None,
         *,
         metadata: Sequence[ft.Control] = (),
         kind: str | None = None,
-    ) -> FormatDiffResult:
+    ) -> FormatDiagnosticsResult:
         source_text = source_text or ""
         target_text = target_text or ""
+        kind = kind or "lang"
         result = diff_result
         if (
             result is None
             or result.source_text != source_text
             or result.target_text != target_text
+            or result.kind != kind
         ):
-            result = compare_format_diff(source_text, target_text, kind=kind)
+            result = analyze_format_diagnostics(source_text, target_text, kind=kind)
         self._result = result
         self._kind = kind
         self._source_text = source_text
@@ -170,7 +201,7 @@ class FormatDiffReview:
             pass  # 尚未加入頁面（例如單元測試）；之後的整頁更新會帶上
 
     def _refresh(self) -> None:
-        result = self._result or compare_format_diff(
+        result = self._result or analyze_format_diagnostics(
             self._source_text, self._target_text, kind=self._kind
         )
         has_editor = self.editable_control is not None
@@ -269,17 +300,19 @@ class FormatDiffReview:
         self._edit_column.controls = controls
         return [self._edit_column]
 
-    def _diff_content(self, result: FormatDiffResult) -> list[ft.Control]:
+    def _diff_content(self, result: FormatDiagnosticsResult) -> list[ft.Control]:
         issue_controls = [
             kit.chip(
-                _issue_label(issue), _issue_tone(issue), icon=ft.Icons.WARNING_AMBER
+                diagnostic_label(issue),
+                diagnostic_tone(issue),
+                icon=ft.Icons.WARNING_AMBER,
             )
             for issue in result.issues
         ]
         # 指南標記（連結目標、標籤等）與編輯頁的提醒共用同一份比對結果
         issue_controls += [
             kit.chip(message, "gold", icon=ft.Icons.WARNING_AMBER)
-            for message in result.guide_issues
+            for message in result.extra_guide_issues
         ]
         if result.soft_newline_counts is not None:
             issue_controls.append(
@@ -331,7 +364,7 @@ class FormatDiffReview:
         self,
         title: str,
         text: str,
-        occurrences: Sequence[FormatTokenOccurrence],
+        occurrences: Sequence[FormatSpan],
         affected_tokens: set[str],
         tone: str,
     ) -> ft.Container:
@@ -339,7 +372,7 @@ class FormatDiffReview:
         rendered = ft.Text(text or "（無）", size=13, color=C.TEXT, selectable=True)
         if self._highlight:
             rendered.value = ""
-            rendered.spans = _token_spans(
+            rendered.spans = diagnostic_spans(
                 text,
                 occurrences,
                 affected_tokens,
@@ -361,12 +394,10 @@ class FormatDiffReview:
             height=220 if self.compact else 260,
         )
 
-    def _result_table(self, result: FormatDiffResult) -> ft.Container:
+    def _result_table(self, result: FormatDiagnosticsResult) -> ft.Container:
         """檢查項目表：項目／原文數量／譯文數量／差異，欄寬固定、差異欄吃剩餘空間。"""
 
-        def cell(text: str, *, width: float | None = None, expand=None, **style):
-            style.setdefault("size", 12)
-            return ft.Text(text, width=width, expand=expand, **style)
+        cell = _table_cell
 
         rows: list[ft.Control] = [
             ft.Row(
@@ -384,43 +415,8 @@ class FormatDiffReview:
             ),
             ft.Divider(height=1, color=C.LINE),
         ]
-        for issue in result.issues:
-            tone = C.RED if issue.direction == "extra" else C.GOLD
-            action = "缺少" if issue.direction == "missing" else "多出"
-            detail: list[ft.Control] = [
-                cell(
-                    f"{action} {abs(issue.delta)} 個",
-                    color=tone,
-                    weight=ft.FontWeight.W_600,
-                )
-            ]
-            if issue.location_confidence == "unknown":
-                detail.append(
-                    ft.Text("位置無法可靠判定", size=11, color=C.MUTED, no_wrap=False)
-                )
-            rows.append(
-                ft.Row(
-                    [
-                        cell(issue.display_token, expand=2, color=C.TEXT),
-                        cell(
-                            str(issue.source_count),
-                            width=56,
-                            color=C.TEXT,
-                            text_align=ft.TextAlign.CENTER,
-                        ),
-                        cell(
-                            str(issue.target_count),
-                            width=56,
-                            color=tone,
-                            weight=ft.FontWeight.W_600,
-                            text_align=ft.TextAlign.CENTER,
-                        ),
-                        ft.Column(detail, spacing=1, expand=3),
-                    ],
-                    spacing=8,
-                    vertical_alignment=ft.CrossAxisAlignment.START,
-                )
-            )
+        rows.extend(_diagnostic_row(issue) for issue in result.issues)
+        rows.extend(_guide_message_row(msg) for msg in result.extra_guide_issues)
         if result.soft_newline_counts is not None:
             rows.append(
                 ft.Text(
