@@ -586,6 +586,32 @@ def _record_quality_rejection(report: TranslateReport, item: dict[str, Any]) -> 
     )
 
 
+# 逐批差額要用到的報告計數（畫面行與後台行共用）
+_BATCH_COUNT_KEYS = (
+    "ai_response",
+    "written",
+    "source_fallback",
+    "quality_rejected",
+    "cache_written",
+    "quality_retry_candidates",
+    "quality_retry_fixed",
+    "quality_retry_unresolved",
+    "quality_retry_quota_failed",
+)
+
+
+def _count_quality_retry(report: TranslateReport, item: dict[str, Any]) -> None:
+    """依共享迴圈標在項目上的旗標，即時累計品質重試結果（批次結束時就能顯示）。"""
+    for flag, field_name in (
+        ("_quality_retry_candidate", "quality_retry_candidates"),
+        ("_quality_retry_fixed", "quality_retry_fixed"),
+        ("_quality_retry_unresolved", "quality_retry_unresolved"),
+        ("_quality_retry_quota_failed", "quality_retry_quota_failed"),
+    ):
+        if item.get(flag):
+            setattr(report, field_name, getattr(report, field_name) + 1)
+
+
 def _batch_ui_line(
     message: str,
     report: TranslateReport,
@@ -697,6 +723,11 @@ def _batch_backend_line(
         f"品質拒絕 {current['quality_rejected'] - previous['quality_rejected']}｜"
         f"回填原文 {current['source_fallback'] - previous['source_fallback']}｜"
         f"寫入資料庫 {current['written'] - previous['written']}｜"
+        f"寫入快取 {current['cache_written'] - previous['cache_written']}｜"
+        f"品質重試（候選／已修正／未解決） "
+        f"{current['quality_retry_candidates'] - previous['quality_retry_candidates']}／"
+        f"{current['quality_retry_fixed'] - previous['quality_retry_fixed']}／"
+        f"{current['quality_retry_unresolved'] - previous['quality_retry_unresolved']}｜"
         f"總進度 {report.ai_response + report.source_fallback}/{report.candidates}"
     )
 
@@ -707,14 +738,16 @@ def _translate_rows(
     """分批機翻並寫回；每批先檢查特殊字元，一致者才寫入。"""
     buffer: list[WriteBackItem] = []
     failures = {"streak": 0, "aborted": False, "db_error": "", "db_stop": False}
-    last_batch_counts = {
-        "ai_response": 0,
-        "written": 0,
-        "source_fallback": 0,
-        "quality_rejected": 0,
-    }
+    last_batch_counts = dict.fromkeys(_BATCH_COUNT_KEYS, 0)
+
+    def counted_cache_add(*args, **kwargs):
+        written = add_to_cache(*args, **kwargs)
+        if written is not False:
+            report.cache_written += 1
+        return written
 
     def on_translated_item(item: dict[str, Any]) -> None:
+        _count_quality_retry(report, item)
         if not item.get("_quality_checked") and not item.get("_untranslated"):
             issues = translation_issues(
                 str(item.get("source_text") or ""),
@@ -763,12 +796,7 @@ def _translate_rows(
         session.set_progress(progress)
         if message:
             if message.startswith("✅ 批次完成"):
-                current = {
-                    "ai_response": report.ai_response,
-                    "written": report.written,
-                    "source_fallback": report.source_fallback,
-                    "quality_rejected": report.quality_rejected,
-                }
+                current = {key: getattr(report, key) for key in _BATCH_COUNT_KEYS}
                 report.batch_no += 1
                 ui_text = _batch_ui_line(message, report, current, last_batch_counts)
                 backend_text = _batch_backend_line(
@@ -816,7 +844,7 @@ def _translate_rows(
             sleep_seconds_between_batches=0.0,
             write_new_cache=options.new_cache_shard,
             reload_cache=options.write_cache,
-            cache_add=add_to_cache if options.write_cache else _noop_cache,
+            cache_add=counted_cache_add if options.write_cache else _noop_cache,
             cache_save=save_translation_cache if options.write_cache else _noop_cache,
             fixed_input_tokens_for_batch=fixed_input_tokens_for_batch,
             hooks=TranslatorHooks(

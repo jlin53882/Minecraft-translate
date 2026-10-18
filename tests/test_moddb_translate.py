@@ -2823,3 +2823,36 @@ def test_success_with_remaining_items_is_not_a_warning():
     moddb_translate_service._log_final_summary(TaskSession(), report)
 
     assert report.status == "DONE"
+
+
+def test_batch_backend_line_has_cache_and_quality_retry_fields():
+    report = moddb_translate_service.TranslateReport()
+    report.candidates = 10
+    keys = moddb_translate_service._BATCH_COUNT_KEYS
+    previous = dict.fromkeys(keys, 0)
+    current = {**previous, "ai_response": 5, "cache_written": 4}
+    current.update(quality_retry_candidates=2, quality_retry_fixed=1)
+    current.update(quality_retry_unresolved=1)
+
+    line = moddb_translate_service._batch_backend_line(
+        "✅ 批次完成 (lang)", report, current, previous
+    )
+
+    assert "寫入快取 4" in line
+    assert "品質重試（候選／已修正／未解決） 2／1／1" in line
+
+
+def test_quality_retry_flags_are_counted_per_item():
+    report = moddb_translate_service.TranslateReport()
+    moddb_translate_service._count_quality_retry(
+        report, {"_quality_retry_candidate": True, "_quality_retry_fixed": True}
+    )
+    moddb_translate_service._count_quality_retry(
+        report, {"_quality_retry_candidate": True, "_quality_retry_unresolved": True}
+    )
+
+    assert (
+        report.quality_retry_candidates,
+        report.quality_retry_fixed,
+        report.quality_retry_unresolved,
+    ) == (2, 1, 1)
