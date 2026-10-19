@@ -6,6 +6,9 @@ Examples (run from the repository root)::
         --model gemini-3.1-flash-lite --limit 1000
     uv run python -m tools.benchmark_smart_review \
         --provider chatgpt --model gpt-5.6-luna --limit 1000
+    uv run python -m tools.benchmark_smart_review \
+        --model gemini-3.1-flash-lite --limit 1000 \
+        --reference-mode same-key-reviewed
 
 The benchmark never applies candidates. It persists only the candidate run and
 writes aggregate, credential-free metrics under ``.artifacts/``.
@@ -43,6 +46,17 @@ def _args() -> argparse.Namespace:
     parser.add_argument("--version", default=None)
     parser.add_argument("--limit", type=int, default=1000)
     parser.add_argument("--batch-size", type=int, default=40)
+    parser.add_argument(
+        "--reference-mode",
+        choices=("all", "same-key-reviewed"),
+        default="all",
+        help="只選取有唯一已審核同 key 譯文可作 gold 的未審核項目",
+    )
+    parser.add_argument(
+        "--terminology-first",
+        action="store_true",
+        help="優先選取 item/block/entity 等命名 key，再補足其他 gold 項目",
+    )
     parser.add_argument("--output", type=Path, default=None)
     return parser.parse_args()
 
@@ -64,7 +78,7 @@ def main() -> int:
         ROOT
         / ".artifacts"
         / "smart-review"
-        / f"{provider}-{args.model.replace('/', '_')}.json"
+        / (f"{provider}-{args.model.replace('/', '_')}-{args.reference_mode}.json")
     )
     output.parent.mkdir(parents=True, exist_ok=True)
     db = TranslationDB(db_path, priority=settings.priority, create=False)
@@ -77,6 +91,8 @@ def main() -> int:
             version=args.version or settings.version or None,
             limit=args.limit,
             batch_size=args.batch_size,
+            require_reviewed_reference=args.reference_mode == "same-key-reviewed",
+            prioritize_named_keys=args.terminology_first,
             lm_config=config,
             progress=lambda snapshot: print(
                 f"[{args.model}] {snapshot['processed']}/{snapshot['selected']} "
@@ -96,6 +112,8 @@ def main() -> int:
         "model": args.model,
         "version": args.version or settings.version or None,
         "requested_limit": args.limit,
+        "reference_mode": args.reference_mode,
+        "terminology_first": args.terminology_first,
         "run_id": result.run_id,
         "run": run,
         "status_counts": status_counts,

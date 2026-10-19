@@ -62,6 +62,8 @@ def run_moddb_smart_review_from_path(
     limit: int = 1000,
     batch_size: int = 40,
     progress: Callable[[dict[str, Any]], None] | None = None,
+    require_reviewed_reference: bool = False,
+    prioritize_named_keys: bool = False,
 ) -> SmartReviewRunResult:
     cfg = load_config()
     provider = get_translation_provider()
@@ -78,6 +80,8 @@ def run_moddb_smart_review_from_path(
             batch_size=batch_size,
             progress=progress,
             lm_config=cfg,
+            require_reviewed_reference=require_reviewed_reference,
+            prioritize_named_keys=prioritize_named_keys,
         )
     finally:
         db.close()

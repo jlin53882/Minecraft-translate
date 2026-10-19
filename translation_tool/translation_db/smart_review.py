@@ -241,8 +241,10 @@ class SmartReviewMixin:
         version: str | None = None,
         limit: int = 1000,
         offset: int = 0,
+        require_reviewed_reference: bool = False,
+        prioritize_named_keys: bool = False,
     ) -> list[SmartReviewSnapshot]:
-        """Select a bounded, current-effective unreviewed snapshot with local context."""
+        """Select bounded unreviewed snapshots with optional reviewed references."""
         bounded_limit = max(0, min(int(limit), 10_000))
         if bounded_limit == 0:
             return []
@@ -260,15 +262,46 @@ class SmartReviewMixin:
         if version:
             where.append("e.mc_version = ?")
             params.append(version)
+        reference_cte = ""
+        reference_join = ""
+        order_prefix = ""
+        if require_reviewed_reference:
+            reference_cte = (
+                "WITH reviewed_reference AS ("
+                "SELECT r.kind, r.mod_id, r.key "
+                "FROM entry r JOIN effective rf ON rf.entry_id=r.id "
+                "WHERE rf.review_status='reviewed' AND trim(rf.zh_tw)<>'' "
+                "AND r.en_us<>'' "
+                "GROUP BY r.kind, r.mod_id, r.key "
+                "HAVING COUNT(DISTINCT trim(rf.zh_tw))=1"
+                ") "
+            )
+            reference_join = (
+                "JOIN reviewed_reference rr "
+                "ON rr.kind=e.kind AND rr.mod_id=e.mod_id AND rr.key=e.key "
+            )
+        if prioritize_named_keys:
+            order_prefix = (
+                "CASE WHEN e.kind='lang' AND ("
+                "e.key LIKE 'item.%' OR e.key LIKE 'block.%' OR "
+                "e.key LIKE 'entity.%' OR e.key LIKE 'biome.%' OR "
+                "e.key LIKE 'effect.%' OR e.key LIKE 'fluid.%' OR "
+                "e.key LIKE 'enchantment.%' OR e.key LIKE 'dimension.%' OR "
+                "e.key LIKE 'painting.%' OR e.key LIKE 'trim_pattern.%' OR "
+                "e.key LIKE 'instrument.%' OR e.key LIKE 'banner.%'"
+                ") THEN 0 ELSE 1 END, "
+            )
         rows = self._q(
-            "SELECT e.id, e.kind, e.mc_version, e.mod_id, e.key, e.en_us, "
+            reference_cte
+            + "SELECT e.id, e.kind, e.mc_version, e.mod_id, e.key, e.en_us, "
             f"f.zh_tw, f.source, ({effective_review}), t.revision, "
             "tm.zh_tw, tm.checker, tm.review_status, tm.revision "
             "FROM entry e JOIN effective f ON f.entry_id=e.id "
-            "LEFT JOIN translation t ON t.entry_id=e.id AND t.source=f.source "
+            + reference_join
+            + "LEFT JOIN translation t ON t.entry_id=e.id AND t.source=f.source "
             f"LEFT JOIN translation tm ON tm.entry_id=e.id AND tm.source={SRC_MANUAL} "
             f"WHERE {' AND '.join(where)} "
-            "ORDER BY e.mc_version, e.mod_id, e.kind, e.key, e.id "
+            f"ORDER BY {order_prefix}e.mc_version, e.mod_id, e.kind, e.key, e.id "
             "LIMIT ? OFFSET ?",
             (*params, bounded_limit, max(0, int(offset))),
         )
@@ -741,13 +774,20 @@ def run_smart_review(
     batch_size: int = 40,
     progress: Callable[[dict[str, Any]], None] | None = None,
     lm_config: dict[str, Any] | None = None,
+    require_reviewed_reference: bool = False,
+    prioritize_named_keys: bool = False,
 ) -> SmartReviewRunResult:
     """Run bounded AI proofreading and persist only candidates, never translations."""
     if not model_name.strip():
         raise ValueError("smart review 必須指定模型")
     if provider == "gemini" and not api_key.strip():
         raise ValueError("Gemini smart review 必須指定 API key")
-    snapshots = db.smart_review_candidates(version=version, limit=limit)
+    snapshots = db.smart_review_candidates(
+        version=version,
+        limit=limit,
+        require_reviewed_reference=require_reviewed_reference,
+        prioritize_named_keys=prioritize_named_keys,
+    )
     batch_size = max(1, min(int(batch_size), 100))
     run_id = db.create_smart_review_run(
         snapshots,

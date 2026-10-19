@@ -39,6 +39,23 @@ def test_snapshot_uses_implicit_unreviewed_for_non_manual_sources(db):
     assert all(item.effective_source != SRC_MANUAL for item in snapshots)
 
 
+def test_snapshot_can_require_unique_reviewed_same_key_reference(db):
+    db.write_back(
+        "1.20.1",
+        [WriteBackItem(KIND_LANG, "demo", "hello", "Hello %s", "嗨 %s")],
+        fill_other_versions=False,
+    )
+    reviewed = next(
+        item for item in db.list_entries("1.21.1")[0] if item.key == "hello"
+    )
+    db.review_manual(reviewed.id, expected_zh_tw="你好 %s", propagate=False)
+
+    snapshots = db.smart_review_candidates(
+        version="1.20.1", limit=1000, require_reviewed_reference=True
+    )
+    assert [item.key for item in snapshots] == ["hello"]
+
+
 def test_response_validation_requires_exact_ids_and_format_safe_suggestion(db):
     snapshot = db.smart_review_candidates(version="1.21.1", limit=2)[1]
     valid = {
