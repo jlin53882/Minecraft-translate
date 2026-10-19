@@ -218,3 +218,8 @@ def test_space_separated_components_line_stays_standalone():
 def test_deeply_nested_macro_line_stays_standalone():
     source = "Intro\n$(tooltip:text (note (deep)))\nTail"
     assert guide_issues(source, "Intro$(tooltip:text (note (deep)))Tail")
+
+
+def test_unpaired_nested_parenthesis_macro_is_not_a_component_line():
+    source = "Intro\n$(t:(unpaired)\nTail"
+    assert guide_issues(source, "Intro$(t:(unpaired)Tail") == []

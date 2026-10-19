@@ -85,7 +85,7 @@ def _blank_line_count(text: str) -> int:
 
 
 def _is_component_line(line: str) -> bool:
-    """整行只有標籤與 Patchouli 巨集（可用空白分隔）；巨集括號配對與共用掃描器一致。"""
+    """整行只有標籤與 Patchouli 巨集（可用空白分隔）；巨集括號配對與共用掃描器一致；括號未完整配對的不算。"""
     pos = 0
     found = False
     while pos < len(line):
@@ -95,7 +95,11 @@ def _is_component_line(line: str) -> bool:
         tag = _TAG.match(line, pos)
         if tag:
             pos = tag.end()
-        elif line.startswith("$(", pos) and (end := macro_end(line, pos + 2)):
+        elif (
+            line.startswith("$(", pos)
+            and (end := macro_end(line, pos + 2))
+            and line.count("(", pos, end) == line.count(")", pos, end)
+        ):
             pos = end
         else:
             return False
