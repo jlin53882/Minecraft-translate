@@ -18,7 +18,7 @@ _TOOLTIP_PREFIX = "$(t:"
 _TOOLTIP_TOKEN = "$(t:…)"
 
 
-def _macro_end(text: str, start: int) -> int | None:
+def macro_end(text: str, start: int) -> int | None:
     depth = 1
     for i in range(start, len(text)):
         char = text[i]
@@ -45,7 +45,7 @@ def _iter_token_spans(text: str):
         if match is None:
             return
         if match.group(0) == "$(":
-            end = _macro_end(text, match.end())
+            end = macro_end(text, match.end())
             if end is None:
                 pos = match.end()
                 continue
@@ -85,4 +85,4 @@ def token_category(token: str) -> str:
     return "other"
 
 
-__all__ = ["format_token_spans", "format_tokens", "token_category"]
+__all__ = ["format_token_spans", "format_tokens", "macro_end", "token_category"]

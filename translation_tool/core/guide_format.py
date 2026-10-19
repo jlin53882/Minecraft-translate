@@ -10,6 +10,8 @@ import re
 from collections import Counter
 from dataclasses import dataclass
 
+from translation_tool.core.format_tokens import macro_end
+
 # 標籤必須以英文字母或 / 開頭；「<0°C = 0, >」這類比較符號文字不是標籤。
 _TAG = re.compile(r"<[A-Za-z/][^<>\n]*>")
 _LINK_TARGET = re.compile(r"\]\(([^)\n]*)\)")
@@ -20,9 +22,6 @@ _BULLET = re.compile(r"^\s*([-*+])\s+\S")
 _ORDERED = re.compile(r"^\s*\d+[.)]\s+\S")
 _QUOTE = re.compile(r"^\s*>")
 _HARD_BREAK = re.compile(r"(?: {2,}|\\)\n")
-_COMPONENT_LINE = re.compile(
-    r"^(?:(?:<[A-Za-z/][^<>\n]*>)|(?:\$\((?:[^()\n]|\([^()\n]*\))*\)))+$"
-)
 
 _LABELS = {
     "tag": "標籤",
@@ -85,12 +84,31 @@ def _blank_line_count(text: str) -> int:
     return sum(not line.strip() for line in (text or "").strip().splitlines())
 
 
+def _is_component_line(line: str) -> bool:
+    """整行只有標籤與 Patchouli 巨集（可用空白分隔）；巨集括號配對與共用掃描器一致。"""
+    pos = 0
+    found = False
+    while pos < len(line):
+        if line[pos].isspace():
+            pos += 1
+            continue
+        tag = _TAG.match(line, pos)
+        if tag:
+            pos = tag.end()
+        elif line.startswith("$(", pos) and (end := macro_end(line, pos + 2)):
+            pos = end
+        else:
+            return False
+        found = True
+    return found
+
+
 def _component_lines(text: str) -> tuple[str, ...]:
     """Return standalone Patchouli component lines in their original order."""
     return tuple(
         _tag_identity(line.strip())
         for line in (text or "").splitlines()
-        if line.strip() and _COMPONENT_LINE.fullmatch(line.strip())
+        if _is_component_line(line)
     )
 
 

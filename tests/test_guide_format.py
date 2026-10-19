@@ -207,3 +207,14 @@ def test_format_spec_marks_link_display_text_as_slot():
         "<link;chemicals;{顯示文字}>",
         "<link;a;{顯示文字};start>",
     ]
+
+
+def test_space_separated_components_line_stays_standalone():
+    source = 'Intro\n<ItemLink id="a" /> <ItemLink id="b" />\nTail'
+    translated = 'Intro <ItemLink id="a" /> <ItemLink id="b" />\nTail'
+    assert guide_issues(source, translated)
+
+
+def test_deeply_nested_macro_line_stays_standalone():
+    source = "Intro\n$(tooltip:text (note (deep)))\nTail"
+    assert guide_issues(source, "Intro$(tooltip:text (note (deep)))Tail")
