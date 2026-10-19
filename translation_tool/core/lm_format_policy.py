@@ -40,7 +40,8 @@ FORMAT_POLICY_PROMPT = r"""以下格式契約優先於前文任何互相衝突�
 STRUCTURED_FORMAT_POLICY_PROMPT = r"""【Guide/Patchouli 結構補充契約】
 - 空白行、段落分隔、<br>、文字形式的 \n、Markdown 標題／清單／引用與 Patchouli 元件結構必須保留。
 - <ItemLink ... /> 的標籤名稱、屬性名稱、id、冒號、括號與斜線必須原樣保留。
-- 只翻譯 Patchouli 標籤以外的人類語言文字。
+- <link;分類;顯示文字> 與 <link;分類;顯示文字;start> 的「顯示文字」要翻譯；其餘欄位（link、分類、start）與分號必須原樣保留。
+- 除 <link> 的顯示文字外，只翻譯 Patchouli 標籤以外的人類語言文字。
 """
 
 PATCHOULI_SEMANTIC_FORMAT_POLICY_PROMPT = r"""【Patchouli 語意換行契約】

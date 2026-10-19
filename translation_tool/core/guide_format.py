@@ -13,6 +13,8 @@ from dataclasses import dataclass
 # 標籤必須以英文字母或 / 開頭；「<0°C = 0, >」這類比較符號文字不是標籤。
 _TAG = re.compile(r"<[A-Za-z/][^<>\n]*>")
 _LINK_TARGET = re.compile(r"\]\(([^)\n]*)\)")
+# <link;分類;顯示文字[;start]>：第三欄是玩家看到的文字，可以翻譯；其餘欄位是硬結構。
+_LINK_TAG = re.compile(r"<link;([^;<>\n]*);[^;<>\n]*((?:;[^<>\n]*)?)>")
 _HEADING = re.compile(r"^\s{0,3}(#{1,6})\s")
 _BULLET = re.compile(r"^\s*([-*+])\s+\S")
 _ORDERED = re.compile(r"^\s*\d+[.)]\s+\S")
@@ -48,6 +50,11 @@ class GuideMark:
     @property
     def identifier(self) -> str:
         return f"{self.kind}:{self.value}"
+
+
+def _tag_identity(tag: str) -> str:
+    """標籤比對用的身分：<link> 的顯示文字可翻譯，不納入比對。"""
+    return _LINK_TAG.sub(r"<link;\1;…\2>", tag)
 
 
 def _line_marks(line: str) -> list[tuple[str, str]]:
@@ -123,6 +130,8 @@ def collect_guide_marks(text: str) -> tuple[GuideMark, ...]:
         ):
             for match in pattern.finditer(content):
                 value = match.group(group)
+                if kind == "tag":
+                    value = _tag_identity(value)
                 start, end = match.span(group)
                 marks.append(
                     GuideMark(
@@ -175,7 +184,7 @@ def format_spec(text: str) -> dict[str, object]:
             {"kind": kind, "value": marker} for kind, marker in _line_prefixes(value)
         ],
         "markdown_hard_break_count": len(_HARD_BREAK.findall(value)),
-        "protected_components": list(_TAG.findall(value)),
+        "protected_components": [_tag_identity(tag) for tag in _TAG.findall(value)],
         "standalone_component_lines": list(_component_lines(value)),
     }
 

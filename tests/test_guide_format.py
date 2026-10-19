@@ -175,3 +175,15 @@ def test_format_spec_contract_for_llm():
     spec = format_spec('A\n\n$(br2)\n<ItemLink id="a:b" />\n$(thing)X$()\nend\n\n')
     assert spec["blank_line_count"] == 1
     assert spec["standalone_component_lines"] == ["$(br2)", '<ItemLink id="a:b" />']
+
+
+def test_link_tag_display_text_is_translatable():
+    source = "<link;squeezer;Plant Oil;start> and <link;chemicals;Nitrate Dust>"
+    translated = "<link;squeezer;植物油;start>和<link;chemicals;硝酸鹽粉>"
+    assert guide_issues(source, translated) == []
+
+
+def test_link_tag_category_and_start_marker_stay_protected():
+    source = "<link;squeezer;Plant Oil;start>"
+    assert guide_issues(source, "<link;squeezer2;植物油;start>")
+    assert guide_issues(source, "<link;squeezer;植物油>")
