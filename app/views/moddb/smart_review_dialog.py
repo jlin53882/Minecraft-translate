@@ -7,6 +7,7 @@ from pathlib import Path
 import flet as ft
 
 from app.services_impl.moddb_smart_review_service import (
+    SmartReviewCandidate,
     apply_moddb_smart_review_candidate_from_path,
     list_moddb_smart_review_candidates_from_path,
     preview_moddb_smart_review_from_path,
@@ -30,7 +31,6 @@ from app.ui.dialogs import (
 )
 from app.ui.snack import show_snack
 from app.views.moddb.formatting import format_count, shorten
-from translation_tool.translation_db.models import SmartReviewCandidate
 
 
 class SmartReviewDialog:

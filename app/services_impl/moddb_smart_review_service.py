@@ -122,6 +122,7 @@ def reject_moddb_smart_review_candidate_from_path(
 
 
 __all__ = [
+    "SmartReviewCandidate",
     "apply_moddb_smart_review_candidate_from_path",
     "list_moddb_smart_review_candidates_from_path",
     "preview_moddb_smart_review_from_path",
