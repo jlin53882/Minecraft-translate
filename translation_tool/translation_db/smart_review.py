@@ -202,9 +202,7 @@ def parse_smart_review_response(
     parsed = _strict_json_object(raw)
     items = parsed["items"]
     expected = {str(item.ordinal): item for item in snapshots}
-    actual_ids = [
-        item.get("id") if isinstance(item, dict) else None for item in items
-    ]
+    actual_ids = [item.get("id") if isinstance(item, dict) else None for item in items]
     if len(items) != len(expected) or any(
         not isinstance(item_id, str) or item_id not in expected
         for item_id in actual_ids

@@ -60,9 +60,11 @@ class SmartReviewDialog:
         )
         options = smart_review_model_options()
         kit.set_dropdown_options(self.model_dd, options)
-        self.model_dd.value = "gemini-3.1-flash-lite" if any(
-            key == "gemini-3.1-flash-lite" for key, _ in options
-        ) else (options[0][0] if options else None)
+        self.model_dd.value = (
+            "gemini-3.1-flash-lite"
+            if any(key == "gemini-3.1-flash-lite" for key, _ in options)
+            else (options[0][0] if options else None)
+        )
         self.limit_field = kit.text_field(
             "上限（筆）", value="1000", width=150, on_change=self._invalidate
         )
@@ -204,14 +206,20 @@ class SmartReviewDialog:
             self.summary.value = f"預覽失敗：{error}"
             self.candidates.controls = []
         else:
-            self.summary.value = f"目前符合候選：{format_count(len(rows))} 筆（預覽不寫入）"
-            self.candidates.controls = [
-                ft.Text(
-                    f"範例：{shorten(rows[0].en_us, 100)} → {shorten(rows[0].current_zh_tw, 100)}",
-                    size=12,
-                    color=C.MUTED,
-                )
-            ] if rows else [kit.hint_text("目前條件沒有未審核且有譯文的條目。")]
+            self.summary.value = (
+                f"目前符合候選：{format_count(len(rows))} 筆（預覽不寫入）"
+            )
+            self.candidates.controls = (
+                [
+                    ft.Text(
+                        f"範例：{shorten(rows[0].en_us, 100)} → {shorten(rows[0].current_zh_tw, 100)}",
+                        size=12,
+                        color=C.MUTED,
+                    )
+                ]
+                if rows
+                else [kit.hint_text("目前條件沒有未審核且有譯文的條目。")]
+            )
         self._safe_update()
 
     def _run(self, _e=None) -> None:
@@ -282,17 +290,23 @@ class SmartReviewDialog:
                 self.on_complete(result)
         self._safe_update()
 
-    def _load_candidates(self, path: Path, priority: tuple[int, ...], run_id: str) -> None:
+    def _load_candidates(
+        self, path: Path, priority: tuple[int, ...], run_id: str
+    ) -> None:
         try:
             rows = list_moddb_smart_review_candidates_from_path(path, priority, run_id)
         except Exception as exc:  # noqa: BLE001 - UI reports bounded failure
             self.candidates.controls = [ft.Text(f"候選載入失敗：{exc}", color=C.RED)]
             return
-        self.candidates.controls = [self._candidate_card(path, priority, row) for row in rows]
+        self.candidates.controls = [
+            self._candidate_card(path, priority, row) for row in rows
+        ]
         if not rows:
             self.candidates.controls = [kit.hint_text("此 run 沒有候選結果。")]
 
-    def _candidate_card(self, path: Path, priority: tuple[int, ...], row: SmartReviewCandidate):
+    def _candidate_card(
+        self, path: Path, priority: tuple[int, ...], row: SmartReviewCandidate
+    ):
         suggestion = row.suggested_zh_tw or "（無修改建議）"
         apply_btn = kit.button(
             "套用這筆",
@@ -353,9 +367,13 @@ class SmartReviewDialog:
                     path, priority, run_id, ordinal
                 )
             except Exception as exc:  # noqa: BLE001 - UI reports bounded failure
-                self._post(self._apply_candidate_result, path, priority, run_id, None, str(exc))
+                self._post(
+                    self._apply_candidate_result, path, priority, run_id, None, str(exc)
+                )
                 return
-            self._post(self._apply_candidate_result, path, priority, run_id, status, None)
+            self._post(
+                self._apply_candidate_result, path, priority, run_id, status, None
+            )
 
         self._launch(
             work,
@@ -372,7 +390,9 @@ class SmartReviewDialog:
             show_snack(self.page, "已套用 1 筆人工未審核譯文。", C.EM)
             self._load_candidates(path, priority, run_id)
         elif status == "stale":
-            show_snack(self.page, "候選已過期，資料庫內容已變更；未覆蓋目前譯文。", C.GOLD)
+            show_snack(
+                self.page, "候選已過期，資料庫內容已變更；未覆蓋目前譯文。", C.GOLD
+            )
             self._load_candidates(path, priority, run_id)
         else:
             show_snack(self.page, f"此候選目前無法套用：{status}", C.GOLD)
@@ -391,7 +411,9 @@ class SmartReviewDialog:
                     path, priority, run_id, ordinal
                 )
             except Exception as exc:  # noqa: BLE001 - UI reports bounded failure
-                self._post(self._apply_reject_result, path, priority, run_id, None, str(exc))
+                self._post(
+                    self._apply_reject_result, path, priority, run_id, None, str(exc)
+                )
                 return
             self._post(self._apply_reject_result, path, priority, run_id, status, None)
 

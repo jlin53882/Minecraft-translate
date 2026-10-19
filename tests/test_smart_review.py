@@ -53,9 +53,9 @@ def test_response_validation_requires_exact_ids_and_format_safe_suggestion(db):
             }
         ]
     }
-    assert parse_smart_review_response(json.dumps(valid), [snapshot])[0]["decision"] == (
-        "suggest_revision"
-    )
+    assert parse_smart_review_response(json.dumps(valid), [snapshot])[0][
+        "decision"
+    ] == ("suggest_revision")
 
     invalid = dict(valid)
     invalid["items"] = [dict(valid["items"][0], suggested_zh_tw="你好啊")]
@@ -92,7 +92,9 @@ def test_run_persists_candidates_without_writing_translation(db, monkeypatch):
         "translation_tool.translation_db.smart_review.call_gemini_requests",
         fake_call,
     )
-    before = db._q("SELECT COUNT(*) FROM translation WHERE source=?", (SRC_MANUAL,))[0][0]
+    before = db._q("SELECT COUNT(*) FROM translation WHERE source=?", (SRC_MANUAL,))[0][
+        0
+    ]
     result = run_smart_review(
         db,
         model_name="gemini-test",
@@ -103,7 +105,10 @@ def test_run_persists_candidates_without_writing_translation(db, monkeypatch):
     assert result.selected_count == result.processed_count == 2
     assert result.valid_count == 2
     assert result.no_change_count == 2
-    assert db._q("SELECT COUNT(*) FROM translation WHERE source=?", (SRC_MANUAL,))[0][0] == before
+    assert (
+        db._q("SELECT COUNT(*) FROM translation WHERE source=?", (SRC_MANUAL,))[0][0]
+        == before
+    )
     stored = db.list_smart_review_candidates(result.run_id)
     assert [item.status for item in stored] == ["no_change", "no_change"]
 
@@ -178,10 +183,13 @@ def test_reject_candidate_keeps_translation_unchanged(db, monkeypatch):
     result = run_smart_review(db, model_name="gemini-test", api_key="test-key", limit=1)
     assert db.reject_smart_review_candidate(result.run_id, 1) == "rejected"
     assert db.reject_smart_review_candidate(result.run_id, 1) == "not_ready"
-    assert db._q(
-        "SELECT zh_tw FROM translation WHERE entry_id=1 AND source=?",
-        (SRC_MANUAL,),
-    ) == before
+    assert (
+        db._q(
+            "SELECT zh_tw FROM translation WHERE entry_id=1 AND source=?",
+            (SRC_MANUAL,),
+        )
+        == before
+    )
 
 
 def test_smart_review_snapshot_is_immutable_value_object():

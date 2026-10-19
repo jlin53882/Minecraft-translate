@@ -29,7 +29,10 @@ def _config_key(config: dict[str, Any]) -> str:
     keys = config.get("lm_translator", {}).get("keys", [])
     if not isinstance(keys, list):
         return ""
-    return next((value.strip() for value in keys if isinstance(value, str) and value.strip()), "")
+    return next(
+        (value.strip() for value in keys if isinstance(value, str) and value.strip()),
+        "",
+    )
 
 
 def _args() -> argparse.Namespace:
@@ -99,7 +102,9 @@ def main() -> int:
         "applied_count": 0,
         "note": "Candidates were persisted for review; no candidate was applied.",
     }
-    output.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+    output.write_text(
+        json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
     print(json.dumps(report, ensure_ascii=False, indent=2))
     print(f"report={output}")
     return 0

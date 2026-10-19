@@ -33,7 +33,9 @@ def smart_review_model_options(config: dict | None = None) -> list[tuple[str, st
     ]
 
 
-def _open(path: str | Path, priority: tuple[int, ...], *, readonly: bool) -> TranslationDB:
+def _open(
+    path: str | Path, priority: tuple[int, ...], *, readonly: bool
+) -> TranslationDB:
     return TranslationDB(path, priority=priority, readonly=readonly, create=False)
 
 
