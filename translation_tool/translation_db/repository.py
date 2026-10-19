@@ -93,6 +93,7 @@ from translation_tool.translation_db.schema import (
     init_schema,
     rank_sql,
 )
+from translation_tool.translation_db.smart_review import SmartReviewMixin
 from translation_tool.translation_db.source_catalog import SourceCatalog
 from translation_tool.utils.cancellation import (
     TaskCancelled,
@@ -187,7 +188,7 @@ def _like(text: str) -> str:
     return f"%{esc}%"
 
 
-class TranslationDB(BulkReviewMixin, CleanupMixin):
+class TranslationDB(SmartReviewMixin, BulkReviewMixin, CleanupMixin):
     """資料庫存取物件（執行緒安全：單一連線 + 可重入鎖）。"""
 
     # 品質篩選翻頁用：(條件鍵, 已排序的符合列, 符合總數)，整個程式只留最近一份。
@@ -3495,7 +3496,8 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
                 f"SELECT id, entry_id, new_zh_tw, prev_manual, prev_checker, "
                 f"prev_review_status, new_checker, new_review_status, "
                 f"prev_revision, new_revision, source_id, batch FROM history "
-                f"WHERE action IN ('manual','review') AND {where} ORDER BY id DESC",
+                f"WHERE action IN ('manual','review','smart_review_apply') AND {where} "
+                "ORDER BY id DESC",
                 params,
             ).fetchall():
                 # 審核不改變來源：history 記錄實際被改的來源，舊紀錄一律是人工
@@ -3517,7 +3519,7 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
                     # manual mutation and refuse to invent missing old metadata.
                     later = conn.execute(
                         "SELECT 1 FROM history WHERE entry_id=? AND id>? "
-                        "AND action IN ('manual','review','revert','batch_replace',"
+                        "AND action IN ('manual','review','smart_review_apply','revert','batch_replace',"
                         "'batch_revert','quality_repair','quality_repair_review') LIMIT 1",
                         (eid, hid),
                     ).fetchone()

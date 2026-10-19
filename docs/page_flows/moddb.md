@@ -93,6 +93,27 @@ flowchart TD
 
 人工審核走 `ReviewScopeController`（`review_scope_dialog.py`）：`confirm` 先呼叫 `preview_manual_review` 顯示影響範圍；確認視窗內有「同步審核其他版本」開關，預設沿用編輯面板的同步開關，切換時重算範圍；確定後 `execute` 呼叫 `review_manual`。批量審核由 `BulkReviewDialog` 負責：選一個版本與一個「目前生效來源」（皆單選），預設只審核格式檢查通過的條目、不同步其他版本；`_preview` 呼叫 `preview_bulk_review` 產生預覽（每頁 50 筆，可逐筆排除），`_confirm` 呼叫 `execute_bulk_review`，完成後可用 `_revert`（`revert_review_batch`）整批還原。選項改變時舊預覽立即失效；確認時資料庫會重算範圍，與預覽不同就拒絕並要求重新預覽。審核只標示審核狀態，不改變生效來源：編輯面板以 `source_chip`（來源）與 `review_chip`（人工已審核）兩個標籤並列，條目列表與來源譯文列表同樣分開顯示；「審核狀態」篩選與「目前生效來源」篩選互相獨立、可組合。
 
+#### AI 智慧校對（本地候選）
+
+條目校對工具列的「智慧校對」開啟 `SmartReviewDialog`。它只使用目前選定版本中有生效譯文且仍未審核的條目，預覽階段唯讀查詢；執行時以每批最多 100 筆呼叫既有 provider，模型輸出先經嚴格 JSON、證據 ID、決策值與 `translation_issues` 驗證，再寫入 `smart_review_run`／`smart_review_candidate`。候選含同鍵已審核資料與受限的 reviewed glossary context，明確標示為本地證據、未做網路查證。
+
+```mermaid
+flowchart TD
+    A[條目校對按「智慧校對」] --> B[SmartReviewDialog]
+    B --> C[預覽：唯讀、限定版本與上限]
+    C --> D[背景分批呼叫本地 AI]
+    D --> E{嚴格驗證回應}
+    E -- 通過 --> F[保存 no_change／needs_context／ready 候選]
+    E -- 失敗 --> G[保存 invalid 或 request error]
+    F --> H{人工決定}
+    H -- 保留原譯文 --> I[rejected，不改翻譯]
+    H -- 套用 --> J[CAS 比對完整快照與 manual row]
+    J -- 成功 --> K[SRC_MANUAL 未審核＋history]
+    J -- 變動 --> L[stale，拒絕覆蓋]
+```
+
+「套用」只新增或更新來源 6 的未審核人工譯文，原 AI／其他來源列保留；不會自動標記人工已審核。套用前會再次驗證條目身份、effective 值、revision、既有 manual 快照與格式，成功後可從該筆 `smart_review_apply` history 使用既有還原流程回復。關閉視窗不會取消已啟動的背景作業；背景結果帶 generation，過期結果不更新目前畫面。
+
 #### 學名候選掃描
 
 ```mermaid

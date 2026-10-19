@@ -206,6 +206,7 @@ def call_gemini_requests(
     provider: str | None = None,
     lm_config: dict | None = None,
     fast: bool = False,
+    response_schema: dict | None = None,
 ) -> str:
     """以同步 requests 方式呼叫 Gemini generateContent API，並回傳純文字回應。
 
@@ -242,6 +243,8 @@ def call_gemini_requests(
             chatgpt_kwargs["conversation_history"] = conversation_history
         if profile_id is not None:
             chatgpt_kwargs["profile_id"] = profile_id
+        if response_schema is not None:
+            chatgpt_kwargs["response_schema"] = response_schema
         return call_chatgpt_responses(**chatgpt_kwargs)
     if provider != "gemini":
         raise RuntimeError(f"不支援的翻譯服務供應商：{provider}")
@@ -264,7 +267,9 @@ def call_gemini_requests(
             "responseFormat": {
                 "text": {
                     "mimeType": "APPLICATION_JSON",
-                    "schema": _build_translation_response_schema(payload),
+                    "schema": response_schema
+                    if response_schema is not None
+                    else _build_translation_response_schema(payload),
                 }
             },
         },

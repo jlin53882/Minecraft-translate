@@ -64,6 +64,32 @@ def test_stream_request_uses_responses_structured_outputs(monkeypatch):
     assert item_schema["properties"]["id"]["enum"] == ["line-1"]
 
 
+def test_stream_request_accepts_a_custom_smart_review_schema(monkeypatch):
+    captured = {}
+    monkeypatch.setattr(
+        client.requests,
+        "post",
+        lambda _url, **kwargs: captured.update(kwargs) or requests.Response(),
+    )
+    custom = {
+        "type": "object",
+        "properties": {"items": {"type": "array"}},
+        "required": ["items"],
+        "additionalProperties": False,
+    }
+
+    client._stream_request(
+        token="access-token",
+        model_name="gpt-5.6-luna",
+        system_prompt="Review.",
+        payload={"items": [{"id": "1"}]},
+        timeout=30,
+        response_schema=custom,
+    )
+
+    assert captured["json"]["text"]["format"]["schema"] == custom
+
+
 def test_stream_request_sends_output_cap_and_fast_service_tier(monkeypatch):
     captured = {}
     monkeypatch.setattr(

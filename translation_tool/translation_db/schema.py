@@ -20,7 +20,7 @@ import time
 from pathlib import Path
 
 KEEP_REVIEW_FLAG = "keep_review_on_text_change"  # 交易內暫時存在的 meta 旗標
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 
 KIND_LANG = "lang"
 KIND_PATCHOULI = "patchouli"
@@ -234,6 +234,7 @@ def init_schema(conn: sqlite3.Connection) -> None:
         )
         _install_schema_v3_objects(conn)
         conn.commit()
+        _install_smart_review_objects(conn)
         _install_derived_tables(conn)
         return
     version = stored_schema_version(conn)
@@ -249,6 +250,8 @@ def init_schema(conn: sqlite3.Connection) -> None:
             _backup_before_ai_repair_source_migration(conn)
         elif next_version == 6:
             _backup_before_independent_review_migration(conn)
+        elif next_version == 7:
+            _backup_before_smart_review_migration(conn)
         conn.execute("BEGIN IMMEDIATE")
         try:
             if next_version == 2:
@@ -261,6 +264,8 @@ def init_schema(conn: sqlite3.Connection) -> None:
                 _migrate_ai_repair_source_v5(conn)
             elif next_version == 6:
                 _migrate_independent_review_v6(conn)
+            elif next_version == 7:
+                _migrate_smart_review_v7(conn)
             conn.execute(
                 "UPDATE meta SET value=? WHERE key='schema_version'",
                 (str(next_version),),
@@ -277,6 +282,7 @@ def init_schema(conn: sqlite3.Connection) -> None:
     )
     _install_schema_v3_objects(conn)
     conn.commit()
+    _install_smart_review_objects(conn)
     _install_derived_tables(conn)
 
 
@@ -571,6 +577,102 @@ def _migrate_independent_review_v6(conn: sqlite3.Connection) -> None:
     conn.execute(
         "INSERT INTO meta (key, value) VALUES ('effective_priority_version', 'stale') "
         "ON CONFLICT(key) DO UPDATE SET value='stale'"
+    )
+
+
+def _backup_before_smart_review_migration(
+    conn: sqlite3.Connection,
+) -> Path | None:
+    """Keep a consistent sidecar before adding smart-review persistence."""
+    main = next(
+        (row[2] for row in conn.execute("PRAGMA database_list") if row[1] == "main"),
+        "",
+    )
+    if not main:
+        return None
+    source_path = Path(main)
+    backup_path = source_path.with_name(
+        f"{source_path.name}.pre-schema-v7-{time.time_ns()}.bak"
+    )
+    target = sqlite3.connect(backup_path)
+    try:
+        conn.backup(target)
+    except BaseException:
+        target.close()
+        backup_path.unlink(missing_ok=True)
+        raise
+    target.close()
+    return backup_path
+
+
+def _migrate_smart_review_v7(conn: sqlite3.Connection) -> None:
+    """Install durable, non-destructive AI proofreading candidate storage."""
+    _install_smart_review_objects(conn)
+
+
+def _install_smart_review_objects(conn: sqlite3.Connection) -> None:
+    """Install the smart-review run/candidate tables for fresh and old DBs."""
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS smart_review_run (
+            id TEXT PRIMARY KEY,
+            provider TEXT NOT NULL,
+            model TEXT NOT NULL,
+            scope_version TEXT,
+            requested_limit INTEGER NOT NULL,
+            batch_size INTEGER NOT NULL,
+            started_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            finished_at TEXT,
+            status TEXT NOT NULL DEFAULT 'running',
+            selected_count INTEGER NOT NULL DEFAULT 0,
+            processed_count INTEGER NOT NULL DEFAULT 0,
+            valid_count INTEGER NOT NULL DEFAULT 0,
+            invalid_count INTEGER NOT NULL DEFAULT 0,
+            request_error_count INTEGER NOT NULL DEFAULT 0,
+            metrics TEXT NOT NULL DEFAULT '{}'
+        );
+        CREATE INDEX IF NOT EXISTS idx_smart_review_run_status
+            ON smart_review_run (status, started_at);
+
+        CREATE TABLE IF NOT EXISTS smart_review_candidate (
+            run_id TEXT NOT NULL REFERENCES smart_review_run (id) ON DELETE CASCADE,
+            ordinal INTEGER NOT NULL,
+            entry_id INTEGER NOT NULL REFERENCES entry (id) ON DELETE CASCADE,
+            kind TEXT NOT NULL,
+            mc_version TEXT NOT NULL,
+            mod_id TEXT NOT NULL,
+            entry_key TEXT NOT NULL,
+            en_us TEXT NOT NULL,
+            current_zh_tw TEXT NOT NULL,
+            effective_source INTEGER,
+            review_status TEXT,
+            effective_revision INTEGER,
+            manual_zh_tw TEXT,
+            manual_checker TEXT,
+            manual_review_status TEXT,
+            manual_revision INTEGER,
+            context_json TEXT NOT NULL DEFAULT '[]',
+            decision TEXT,
+            suggested_zh_tw TEXT,
+            issue_types_json TEXT NOT NULL DEFAULT '[]',
+            evidence_ids_json TEXT NOT NULL DEFAULT '[]',
+            confidence REAL,
+            response_json TEXT,
+            validation_error TEXT,
+            status TEXT NOT NULL DEFAULT 'pending',
+            applied_batch TEXT,
+            applied_at TEXT,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (run_id, ordinal),
+            UNIQUE (run_id, entry_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_smart_review_candidate_status
+            ON smart_review_candidate (run_id, status, ordinal);
+        CREATE INDEX IF NOT EXISTS idx_smart_review_candidate_entry
+            ON smart_review_candidate (entry_id, run_id);
+        CREATE INDEX IF NOT EXISTS idx_smart_review_context_key
+            ON entry (kind, mod_id, key, mc_version, id);
+        """
     )
 
 

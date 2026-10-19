@@ -12,6 +12,7 @@ from app.views.moddb.advanced_filters import AdvancedFilters
 from app.views.moddb.batch_replace_dialog import BatchReplaceDialog
 from app.views.moddb.bulk_review_dialog import BulkReviewDialog
 from app.views.moddb.formatting import STATE_LABELS, kind_label
+from app.views.moddb.smart_review_dialog import SmartReviewDialog
 from app.views.moddb.source_filter import ReviewStatusFilter, SourceFilter
 from app.views.moddb.species_dialog import SpeciesCandidateDialog
 
@@ -95,6 +96,14 @@ def _build_controls(panel) -> None:
         size="sm",
         on_click=panel._open_bulk_review,
     )
+    panel.smart_review_btn = kit.button(
+        "智慧校對",
+        "secondary",
+        icon=ft.Icons.AUTO_AWESOME,
+        size="sm",
+        on_click=lambda event: open_smart_review(panel, event),
+        tooltip="以本地 AI 產生未審核譯文的人工校對候選",
+    )
     panel.species_scan_btn = kit.button(
         "掃描學名",
         "secondary",
@@ -156,6 +165,7 @@ def _build_filter_card(panel) -> None:
                         panel.advanced_filters.active_text,
                         panel.batch_replace_btn,
                         panel.bulk_review_btn,
+                        panel.smart_review_btn,
                         panel.species_scan_btn,
                     ],
                     spacing=8,
@@ -270,4 +280,28 @@ def open_species_scan(panel, _e=None) -> None:
         panel.mod_id,
         panel.kind,
         on_open_entry=panel.open_species_entry,
+    ).open()
+
+
+def open_smart_review(panel, _e=None) -> None:
+    if panel.drafts:
+        show_snack(
+            panel._page,
+            "目前清單含尚未寫入的機翻草稿；請先離開草稿檢視再執行智慧校對。",
+            C.GOLD,
+        )
+        return
+    if panel.db() is None or not panel.version:
+        show_snack(panel._page, "目前沒有可用的資料庫版本。", C.GOLD)
+        return
+
+    def after_complete(_result=None) -> None:
+        if panel._on_changed:
+            panel._on_changed()
+
+    SmartReviewDialog(
+        panel._page,
+        panel.db,
+        panel.version,
+        after_complete,
     ).open()

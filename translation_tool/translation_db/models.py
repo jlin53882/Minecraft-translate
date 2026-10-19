@@ -400,6 +400,79 @@ class BatchRevertResult:
     total: int
 
 
+@dataclass(frozen=True)
+class SmartReviewSnapshot:
+    """Immutable source/effective snapshot sent to a local proofreading model."""
+
+    run_id: str
+    ordinal: int
+    entry_id: int
+    kind: str
+    mc_version: str
+    mod_id: str
+    key: str
+    en_us: str
+    current_zh_tw: str
+    effective_source: int | None
+    review_status: str | None
+    effective_revision: int | None
+    context: tuple[dict[str, str], ...] = ()
+    manual_zh_tw: str | None = None
+    manual_checker: str | None = None
+    manual_review_status: str | None = None
+    manual_revision: int | None = None
+
+
+@dataclass(frozen=True)
+class SmartReviewCandidate:
+    """Persisted AI result; it is a candidate until a user explicitly applies it."""
+
+    run_id: str
+    ordinal: int
+    entry_id: int
+    kind: str
+    mc_version: str
+    mod_id: str
+    key: str
+    en_us: str
+    current_zh_tw: str
+    effective_source: int | None
+    review_status: str | None
+    effective_revision: int | None
+    context: tuple[dict[str, str], ...]
+    manual_zh_tw: str | None = None
+    manual_checker: str | None = None
+    manual_review_status: str | None = None
+    manual_revision: int | None = None
+    decision: str | None = None
+    suggested_zh_tw: str | None = None
+    issue_types: tuple[str, ...] = ()
+    evidence_ids: tuple[str, ...] = ()
+    confidence: float | None = None
+    validation_error: str | None = None
+    status: str = "pending"
+    applied_batch: str | None = None
+    applied_at: str | None = None
+
+
+@dataclass(frozen=True)
+class SmartReviewRunResult:
+    """Aggregate outcome of one bounded smart-review run."""
+
+    run_id: str
+    provider: str
+    model: str
+    selected_count: int
+    processed_count: int
+    valid_count: int
+    invalid_count: int
+    request_error_count: int
+    no_change_count: int
+    suggestion_count: int
+    needs_context_count: int
+    metrics: dict[str, object] = field(default_factory=dict)
+
+
 @dataclass
 class EntryDetail:
     entry: EntryRow

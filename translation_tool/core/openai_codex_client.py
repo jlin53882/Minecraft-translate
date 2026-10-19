@@ -96,8 +96,9 @@ def _stream_request(
     reasoning_effort: str | None = None,
     service_tier: str | None = None,
     conversation_history: list[dict] | None = None,
+    response_schema: dict | None = None,
 ) -> requests.Response:
-    response_schema = _build_translation_response_schema(payload)
+    response_schema = response_schema or _build_translation_response_schema(payload)
     input_history = []
     for turn in conversation_history or []:
         role = turn.get("role")
@@ -334,6 +335,7 @@ def call_chatgpt_responses(
     fast: bool = False,
     profile_id: str | None = None,
     conversation_history: list[dict] | None = None,
+    response_schema: dict | None = None,
 ) -> str:
     """Call Responses with the locally stored ChatGPT OAuth token and SSE stream."""
     token_kwargs = {"profile_id": profile_id} if profile_id is not None else {}
@@ -352,6 +354,8 @@ def call_chatgpt_responses(
         request_kwargs["reasoning_effort"] = reasoning_effort
     if fast:
         request_kwargs["service_tier"] = "fast"
+    if response_schema is not None:
+        request_kwargs["response_schema"] = response_schema
     try:
         response = _stream_request(**request_kwargs)
     except requests.RequestException as exc:

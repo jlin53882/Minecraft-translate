@@ -24,6 +24,12 @@
 
 每個候選列同時提供 `開啟條目`，透過 `EntriesPanel.select` 回到編輯器。掃描與查詢使用 `launch_page_operation`、`CommitPolicy.EPHEMERAL` 與 generation 檢查；視窗關閉或範圍過期時丟棄晚到結果。批次查詢使用 `CancellationPolicy.COOPERATIVE`，每筆查詢前檢查 `_cancel` 事件；`launch_page_operation` 拒絕啟動時由呼叫端還原忙碌狀態。每次只重建完成的那一筆候選列，批次進度由 `_flush` 節流重繪。
 
+## AI 智慧校對候選
+
+`entry_filters.py` 的 `智慧校對` 按鈕只建立 `SmartReviewDialog`，不把模型流程塞入 `EntriesPanel`。服務層 `moddb_smart_review_service.py` 重新以資料庫 path、priority 與 config 開啟連線；`smart_review.py` 負責 bounded candidate snapshot、local context、provider structured output、結果持久化與 CAS apply。預覽使用唯讀連線，執行與套用透過 `launch_page_operation` 在背景進行，UI callback 只在 generation 仍相同時更新控制項。
+
+候選與原有 `translation`／`effective` 解耦，`smart_review_candidate` 保存 effective 及 manual 快照。`apply_smart_review_candidate` 在單一交易內重新比對條目身份、原文、effective source/value/review/revision、manual row 與格式；任何差異都標成 `stale` 或 `invalid_format`，不覆蓋目前資料。套用只寫 `SRC_MANUAL` 的未審核列和 `smart_review_apply` history；`revert()` 與 `entry_activity` 已納入此 action。`保留原譯文` 只把候選標成 `rejected`，不觸碰翻譯與快取。
+
 候選列的狀態文字與按鈕必須分開放：帶 `expand` 的文字放進 `wrap=True` 的 `Row` 時 Flutter 無法排版，畫面會出現灰色圖塊。
 
 ## 格式診斷與進階篩選
