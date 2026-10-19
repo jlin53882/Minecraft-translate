@@ -641,3 +641,29 @@ def test_reviewed_lang_glossary_matches_case_and_outer_space_variants(db):
     assert db.reviewed_lang_glossary(
         "foo", "1.21.1", ("The pressure chamber processes air.",)
     ) == [{"key": "pressure", "en_us": " Pressure Chamber ", "zh_tw": "壓力室"}]
+
+
+# 規則快照：判斷結果改變時這個測試會失敗。失敗代表已存的 entry.qflags 與新規則不一致，
+# 請遞增 quality_flags.SCHEMA_VERSION，並同步更新下面的版本與預期結果。
+_RULE_SNAPSHOT_VERSION = "3"
+_RULE_SNAPSHOT_CASES = (
+    ("$(italic)HOT! DO NOT EAT$()", "$(italic)燙！請勿食用$()", "patchouli", False),
+    ("A$(br2)B\n\n", "甲\n$(br2)乙", "patchouli", False),
+    ("前\n$(br2)\n後", "前$(br2)後", "patchouli", True),
+    ("%s items", "%s 個物品", "lang", False),
+    ("# Title\n\n- a", "# 標題\n- 甲", "guide", True),
+)
+
+
+def test_quality_rule_snapshot_matches_schema_version():
+    from translation_tool.translation_db import quality_flags
+    from translation_tool.translation_db.quality import translation_issues
+
+    actual = tuple(
+        bool(translation_issues(source, translated, kind=kind))
+        for source, translated, kind, _expected in _RULE_SNAPSHOT_CASES
+    )
+    expected = tuple(case[3] for case in _RULE_SNAPSHOT_CASES)
+
+    assert actual == expected, "品質判斷規則改變：請遞增 quality_flags.SCHEMA_VERSION"
+    assert quality_flags.SCHEMA_VERSION == _RULE_SNAPSHOT_VERSION

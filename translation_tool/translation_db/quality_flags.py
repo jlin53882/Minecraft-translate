@@ -23,7 +23,11 @@ import sqlite3
 from translation_tool.translation_db.models import QualityFilter
 from translation_tool.translation_db.quality import matches_quality
 
-SCHEMA_VERSION = "2"  # 2：指南條目的結構標記計入「格式不一致／一致」
+# 旗標定義版本；``quality.py``／``guide_format.py`` 的判斷結果改變時遞增
+# （``tests/test_translation_db_quality_flags.py`` 的規則快照會在規則改變時失敗提醒）。
+# 3：獨立成行元件不含文字、段落空行不計文字首尾的空行
+# 2：指南條目的結構標記計入「格式不一致／一致」
+SCHEMA_VERSION = "3"
 BITS = {
     "missing_translation": 1,
     "whitespace": 2,

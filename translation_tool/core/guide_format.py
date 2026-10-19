@@ -18,7 +18,9 @@ _BULLET = re.compile(r"^\s*([-*+])\s+\S")
 _ORDERED = re.compile(r"^\s*\d+[.)]\s+\S")
 _QUOTE = re.compile(r"^\s*>")
 _HARD_BREAK = re.compile(r"(?: {2,}|\\)\n")
-_COMPONENT_LINE = re.compile(r"^(?:(?:<[A-Za-z/][^<>\n]*>)|(?:\$\([^\n]*?\)))+$")
+_COMPONENT_LINE = re.compile(
+    r"^(?:(?:<[A-Za-z/][^<>\n]*>)|(?:\$\((?:[^()\n]|\([^()\n]*\))*\)))+$"
+)
 
 _LABELS = {
     "tag": "標籤",
@@ -70,8 +72,10 @@ def _line_prefixes(text: str) -> tuple[tuple[str, str], ...]:
 
 
 def _blank_line_count(text: str) -> int:
-    """Count blank physical lines, which separate paragraphs and blocks."""
-    return sum(not line.strip() for line in (text or "").splitlines())
+    """Count blank physical lines between content, which separate paragraphs and blocks.
+
+    文字開頭與結尾的空行只是空白（Patchouli JSON 常以空行結尾），不分隔任何段落。"""
+    return sum(not line.strip() for line in (text or "").strip().splitlines())
 
 
 def _component_lines(text: str) -> tuple[str, ...]:

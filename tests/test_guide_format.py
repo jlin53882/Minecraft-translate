@@ -134,3 +134,44 @@ def test_translation_with_fewer_or_equal_lines_is_unchanged():
     assert fit_to_source_lines("a b\nc d", "甲\n乙") == "甲\n乙"
     assert fit_to_source_lines("a b\nc d", "甲乙") == "甲乙"
     assert fit_to_source_lines("a\nb\nc", "1\n2\n3\n4") == "1\n2\n3 4"
+
+
+def test_formatted_text_line_is_not_a_standalone_component_line():
+    """整行只有 $(italic)文字$() 的格式化文字不是獨立元件；翻譯文字不能觸發互相矛盾的警告。"""
+    assert guide_issues("$(italic)HOT! DO NOT EAT$()", "$(italic)燙！請勿食用$()") == []
+
+
+def test_pure_macro_line_is_still_a_standalone_component_line():
+    source = "Intro\n$(br2)\nText"
+    assert guide_issues(source, "前言\n$(br2)\n文字") == []
+    issues = guide_issues(source, "前言$(br2)文字")
+    assert any("單獨" in issue for issue in issues)
+
+
+def test_br2_kept_while_clause_order_changes_has_no_issue():
+    source = (
+        "The Steam Generator is a creative-only part.$(br2)"
+        "It produces power, but only when the Turbine is active."
+    )
+    translated = (
+        "蒸汽發電機是僅限創造模式的零件。$(br2)當渦輪機運作時，它才會產生電力。"
+    )
+    assert guide_issues(source, translated) == []
+
+
+def test_trailing_blank_lines_are_not_paragraph_separators():
+    source = "A$(br2)B\n\n"
+    assert guide_issues(source, "甲\n$(br2)乙") == []
+
+
+def test_macro_line_with_parentheses_is_still_a_standalone_component_line():
+    source = "前\n$(tooltip:text (note))\n後"
+    assert guide_issues(source, "前$(tooltip:text (note))後")
+
+
+def test_format_spec_contract_for_llm():
+    from translation_tool.core.guide_format import format_spec
+
+    spec = format_spec('A\n\n$(br2)\n<ItemLink id="a:b" />\n$(thing)X$()\nend\n\n')
+    assert spec["blank_line_count"] == 1
+    assert spec["standalone_component_lines"] == ["$(br2)", '<ItemLink id="a:b" />']
