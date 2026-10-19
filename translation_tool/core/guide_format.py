@@ -14,7 +14,7 @@ from dataclasses import dataclass
 _TAG = re.compile(r"<[A-Za-z/][^<>\n]*>")
 _LINK_TARGET = re.compile(r"\]\(([^)\n]*)\)")
 # <link;分類;顯示文字[;start]>：第三欄是玩家看到的文字，可以翻譯；其餘欄位是硬結構。
-_LINK_TAG = re.compile(r"<link;([^;<>\n]*);[^;<>\n]*((?:;[^<>\n]*)?)>")
+_LINK_TAG = re.compile(r"<link;([^;<>\n]*);[^<>\n]*?(;start)?>")
 _HEADING = re.compile(r"^\s{0,3}(#{1,6})\s")
 _BULLET = re.compile(r"^\s*([-*+])\s+\S")
 _ORDERED = re.compile(r"^\s*\d+[.)]\s+\S")
@@ -52,9 +52,9 @@ class GuideMark:
         return f"{self.kind}:{self.value}"
 
 
-def _tag_identity(tag: str) -> str:
-    """標籤比對用的身分：<link> 的顯示文字可翻譯，不納入比對。"""
-    return _LINK_TAG.sub(r"<link;\1;…\2>", tag)
+def _tag_identity(tag: str, text_slot: str = "…") -> str:
+    """標籤比對用的身分：<link> 的顯示文字可翻譯，以 ``text_slot`` 取代，不納入比對。"""
+    return _LINK_TAG.sub(lambda m: f"<link;{m[1]};{text_slot}{m[2] or ''}>", tag)
 
 
 def _line_marks(line: str) -> list[tuple[str, str]]:
@@ -88,7 +88,7 @@ def _blank_line_count(text: str) -> int:
 def _component_lines(text: str) -> tuple[str, ...]:
     """Return standalone Patchouli component lines in their original order."""
     return tuple(
-        line.strip()
+        _tag_identity(line.strip())
         for line in (text or "").splitlines()
         if line.strip() and _COMPONENT_LINE.fullmatch(line.strip())
     )
@@ -184,7 +184,9 @@ def format_spec(text: str) -> dict[str, object]:
             {"kind": kind, "value": marker} for kind, marker in _line_prefixes(value)
         ],
         "markdown_hard_break_count": len(_HARD_BREAK.findall(value)),
-        "protected_components": [_tag_identity(tag) for tag in _TAG.findall(value)],
+        "protected_components": [
+            _tag_identity(tag, "{顯示文字}") for tag in _TAG.findall(value)
+        ],
         "standalone_component_lines": list(_component_lines(value)),
     }
 

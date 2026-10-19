@@ -187,3 +187,23 @@ def test_link_tag_category_and_start_marker_stay_protected():
     source = "<link;squeezer;Plant Oil;start>"
     assert guide_issues(source, "<link;squeezer2;植物油;start>")
     assert guide_issues(source, "<link;squeezer;植物油>")
+
+
+def test_standalone_link_line_with_translated_text_has_no_issue():
+    source = "<link;chemicals;Nitrate Dust>"
+    assert guide_issues(source, "<link;chemicals;硝酸鹽粉>") == []
+
+
+def test_link_display_text_may_contain_semicolon():
+    source = "A <link;a;Foo; Bar;start> b"
+    assert guide_issues(source, "甲 <link;a;富; 巴;start> 乙") == []
+
+
+def test_format_spec_marks_link_display_text_as_slot():
+    from translation_tool.core.guide_format import format_spec
+
+    spec = format_spec("<link;chemicals;Nitrate Dust> and <link;a;B;start>")
+    assert spec["protected_components"] == [
+        "<link;chemicals;{顯示文字}>",
+        "<link;a;{顯示文字};start>",
+    ]

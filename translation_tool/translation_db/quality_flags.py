@@ -25,10 +25,11 @@ from translation_tool.translation_db.quality import matches_quality
 
 # 旗標定義版本；``quality.py``／``guide_format.py`` 的判斷結果改變時遞增
 # （``tests/test_translation_db_quality_flags.py`` 的規則快照會在規則改變時失敗提醒）。
+# 5：獨立成行的 <link> 與含分號的顯示文字也可翻譯
 # 4：<link;分類;顯示文字> 的顯示文字可翻譯
 # 3：獨立成行元件不含文字、段落空行不計文字首尾的空行
 # 2：指南條目的結構標記計入「格式不一致／一致」
-SCHEMA_VERSION = "4"
+SCHEMA_VERSION = "5"
 BITS = {
     "missing_translation": 1,
     "whitespace": 2,
