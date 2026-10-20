@@ -1894,6 +1894,18 @@ def _smart_review_token_value(value: object) -> int | None:
     return number if number >= 0 else None
 
 
+def _smart_review_response_item_count(raw: object) -> int | None:
+    """只讀回應的 items 數量，不把模型內容寫入診斷事件。"""
+    if not isinstance(raw, str):
+        return None
+    try:
+        parsed = json.loads(raw)
+    except (TypeError, ValueError):
+        return None
+    items = parsed.get("items") if isinstance(parsed, dict) else None
+    return len(items) if isinstance(items, list) else None
+
+
 def _smart_review_error_code(error: Exception, status: int | None = None) -> str:
     """建立不含 provider 原文、金鑰或個資的候選錯誤代碼。"""
     from translation_tool.core.lm_translator_main import _classify_batch_error
@@ -1956,6 +1968,7 @@ def _smart_review_transient_retry(
     status: int | None,
     *,
     cancel_check: Callable[[], bool] | None,
+    event_callback: Callable[[dict[str, Any]], None] | None = None,
 ) -> bool:
     """依既有 Gemini 503 policy 對 500/502/503/504 做有限次重試。"""
     from translation_tool.core.lm_translator_main import (
@@ -1966,13 +1979,16 @@ def _smart_review_transient_retry(
     )
 
     error_kind = _classify_batch_error(error, status)
-    if isinstance(error, (requests.Timeout, requests.ConnectionError)):
+    if isinstance(error, requests.Timeout):
         error_kind = "timeout"
+    elif isinstance(error, requests.ConnectionError):
+        error_kind = "connection_error"
     if error_kind not in {
         "server_error",
         "service_unavailable",
         "deadline_exceeded",
         "timeout",
+        "connection_error",
     }:
         return False
     if runtime.gemini_transient_retry_count >= len(GEMINI_503_RETRY_DELAYS_SEC):
@@ -1992,9 +2008,38 @@ def _smart_review_transient_retry(
     wait_sec = GEMINI_503_RETRY_DELAYS_SEC[retry_index]
     if retry_after is not None:
         wait_sec = max(wait_sec, retry_after)
+    if event_callback is not None:
+        event_callback(
+            {
+                "kind": "retry_wait",
+                "retry_number": retry_index + 1,
+                "retry_total": len(GEMINI_503_RETRY_DELAYS_SEC),
+                "wait_seconds": wait_sec,
+                "retry_after_seconds": retry_after,
+                "error_kind": error_kind,
+                "http_status": status,
+                "exception_type": type(error).__name__,
+                "provider_overload": bool(
+                    status == 503 or error_kind == "service_unavailable"
+                ),
+                "quota_or_rate_limit": bool(status == 429),
+                "timeout": bool(error_kind == "timeout"),
+            }
+        )
+    wait_started = time.monotonic()
     quota = get_model_quota_registry()
     quota.defer_request_slot(runtime.provider, model_name, wait_sec)
     _smart_review_sleep(wait_sec, cancel_check)
+    if event_callback is not None:
+        event_callback(
+            {
+                "kind": "retry_resume",
+                "retry_number": retry_index + 1,
+                "retry_total": len(GEMINI_503_RETRY_DELAYS_SEC),
+                "wait_seconds": wait_sec,
+                "elapsed_seconds": time.monotonic() - wait_started,
+            }
+        )
     return True
 
 
@@ -2054,6 +2099,7 @@ def run_smart_review(
     )
     selection_seconds = round(time.monotonic() - selection_started, 3)
     batch_size = max(1, min(int(batch_size), 100))
+    planned_batch_count = max(1, (len(snapshots) + batch_size - 1) // batch_size)
     run_record_started = time.monotonic()
     run_id = db.create_smart_review_run(
         snapshots,
@@ -2087,11 +2133,14 @@ def run_smart_review(
     }
     metrics: dict[str, Any] = {
         "duration_seconds": 0.0,
+        "total_duration_seconds": 0.0,
         "setup_seconds": round(max(0.0, selection_started - workflow_started), 3),
         "selection_seconds": selection_seconds,
         "run_record_seconds": run_record_seconds,
         "preparation_seconds": 0.0,
         "rate_limit_wait_seconds": 0.0,
+        "retry_wait_seconds": 0.0,
+        "network_retry_wait_seconds": 0.0,
         "api_seconds": 0.0,
         "parse_seconds": 0.0,
         "result_write_seconds": 0.0,
@@ -2101,10 +2150,15 @@ def run_smart_review(
         "output_tokens": None,
         "no_change_count": 0,
         "suggestion_count": 0,
+        "suggest_revision_count": 0,
         "needs_context_count": 0,
         "request_attempts": 0,
+        "smart_review_attempts": 0,
+        "network_attempts": 0,
+        "network_retry_count": 0,
         "retry_count": 0,
         "transient_retry_count": 0,
+        "overload_count": 0,
         "key_rotation_count": 0,
         "shrink_count": 0,
         "input_budget_shrink_count": 0,
@@ -2114,11 +2168,13 @@ def run_smart_review(
         "usage_missing_output_attempts": 0,
         "permanent_error_count": 0,
         "failure_classes": {},
+        "validation_errors": {},
         "input_token_budget": input_token_budget,
     }
     # 延遲取得主翻譯流程的共用 policy，避免 translation_db 初始化時形成循環 import。
     from translation_tool.core.lm_translator_main import (
         _batch_interval_seconds,
+        _classify_batch_error,
         _handle_chatgpt_api_error,
         _parse_gemini_retry_after_seconds,
         _payload_error_allows_shrink,
@@ -2147,7 +2203,10 @@ def run_smart_review(
         return code
 
     def report_progress(
-        *, phase: str = "batch", timing: dict[str, Any] | None = None
+        *,
+        phase: str = "batch",
+        timing: dict[str, Any] | None = None,
+        event: dict[str, Any] | None = None,
     ) -> None:
         """回報目前已處理數量、階段與可診斷的耗時。"""
         if progress is not None:
@@ -2163,13 +2222,28 @@ def run_smart_review(
             }
             if timing is not None:
                 snapshot["timing"] = timing
+            if event is not None:
+                snapshot["event"] = event
             progress(snapshot)
+
+    def emit_event(kind: str, **fields: Any) -> None:
+        """回報不含 prompt、response、key 或錯誤原文的結構化事件。"""
+        if progress is None:
+            return
+        report_progress(
+            phase="event",
+            event={"kind": kind, **fields},
+        )
 
     def finish_batch_timing(
         timing: dict[str, Any],
         started_at: float,
         attempts_before: int,
         status: str,
+        *,
+        counters_before: dict[str, int],
+        retry_before: dict[str, int],
+        validation_errors: dict[str, int] | None = None,
     ) -> dict[str, Any]:
         """結算一個邏輯批次的耗時並回傳不含敏感資料的診斷摘要。"""
         elapsed = round(time.monotonic() - started_at, 3)
@@ -2178,12 +2252,115 @@ def run_smart_review(
         finalized["attempts"] = max(
             0, int(metrics["request_attempts"]) - attempts_before
         )
+        finalized["smart_review_attempts"] = max(
+            0,
+            int(metrics["smart_review_attempts"])
+            - retry_before.get("smart_review_attempts", 0),
+        )
+        for key in (
+            "retry_count",
+            "transient_retry_count",
+            "overload_count",
+            "key_rotation_count",
+        ):
+            finalized[key] = max(
+                0, int(metrics[key]) - retry_before.get(key, int(metrics[key]))
+            )
+        finalized.update(
+            {
+                "valid_count": max(0, valid - counters_before.get("valid", valid)),
+                "invalid_count": max(
+                    0, invalid - counters_before.get("invalid", invalid)
+                ),
+                "needs_context_count": max(
+                    0, needs_context - counters_before.get("needs_context", needs_context)
+                ),
+                "no_change_count": max(
+                    0, no_change - counters_before.get("no_change", no_change)
+                ),
+                "suggestion_count": max(
+                    0, suggestions - counters_before.get("suggestions", suggestions)
+                ),
+                "suggest_revision_count": max(
+                    0, suggestions - counters_before.get("suggestions", suggestions)
+                ),
+                "validation_errors": dict(validation_errors or {}),
+            }
+        )
         finalized["status"] = status
         metrics["batch_count"] = int(metrics["batch_count"]) + 1
         metrics["batch_seconds"] = round(
             float(metrics["batch_seconds"]) + elapsed, 3
         )
         return finalized
+
+    def report_batch_complete(timing: dict[str, Any]) -> None:
+        """同時送出舊版批次進度與可供 UI 即時顯示的完整事件。"""
+        event = {
+            "kind": "batch_complete",
+            "batch_number": timing.get("batch_number"),
+            "batch_total": timing.get("batch_total"),
+            "ordinal_start": timing.get("ordinal_start"),
+            "ordinal_end": timing.get("ordinal_end"),
+            "actual_count": timing.get("actual_count"),
+            "attempts": timing.get("attempts", 0),
+            "smart_review_attempts": timing.get("smart_review_attempts", 0),
+            "retry_count": timing.get("retry_count", 0),
+            "rate_limit_wait_seconds": timing.get("rate_limit_wait_seconds", 0.0),
+            "retry_wait_seconds": timing.get("retry_wait_seconds", 0.0),
+            "network_retry_wait_seconds": timing.get(
+                "network_retry_wait_seconds", 0.0
+            ),
+            "api_seconds": timing.get("api_seconds", 0.0),
+            "parse_seconds": timing.get("parse_seconds", 0.0),
+            "result_write_seconds": timing.get("result_write_seconds", 0.0),
+            "elapsed_seconds": timing.get("elapsed_seconds", 0.0),
+            "valid_count": timing.get("valid_count", 0),
+            "invalid_count": timing.get("invalid_count", 0),
+            "needs_context_count": timing.get("needs_context_count", 0),
+            "no_change_count": timing.get("no_change_count", 0),
+            "suggestion_count": timing.get("suggestion_count", 0),
+            "suggest_revision_count": timing.get("suggest_revision_count", 0),
+            "validation_errors": timing.get("validation_errors", {}),
+            "request_errors": request_errors,
+        }
+        report_progress(phase="batch_complete", timing=timing, event=event)
+
+    def emit_attempt_failure(
+        error: Exception,
+        *,
+        batch_number: int,
+        smart_review_attempt: int,
+        status: int | None = None,
+        retry_after_seconds: float | None = None,
+        key_rotated: bool = False,
+        error_kind: str | None = None,
+    ) -> None:
+        """送出可供診斷的錯誤分類；不使用 provider 的完整錯誤內容。"""
+        kind = error_kind or _classify_batch_error(error, status)
+        if isinstance(error, requests.Timeout):
+            kind = "timeout"
+        elif isinstance(error, requests.ConnectionError):
+            kind = "connection_error"
+        if status == 503 or kind == "service_unavailable":
+            metrics["overload_count"] = int(metrics["overload_count"]) + 1
+        code = str(getattr(error, "code", "") or "").lower()
+        emit_event(
+            "attempt_failure",
+            batch_number=batch_number,
+            batch_total=planned_batch_count,
+            smart_review_attempt=smart_review_attempt,
+            http_status=status,
+            error_kind=kind,
+            exception_type=type(error).__name__,
+            provider_overload=bool(status == 503 or kind == "service_unavailable"),
+            quota_or_rate_limit=bool(status == 429 or "quota" in code),
+            timeout=bool(isinstance(error, requests.Timeout) or kind == "timeout"),
+            retry_after_seconds=retry_after_seconds,
+            key_rotated=key_rotated,
+            network_attempts=int(metrics.get("network_attempts", 0)),
+            network_retry_count=int(metrics.get("network_retry_count", 0)),
+        )
 
     report_progress(
         phase="selection_complete",
@@ -2205,19 +2382,51 @@ def run_smart_review(
             batch_number += 1
             batch_started = time.monotonic()
             attempts_before = int(metrics["request_attempts"])
+            counters_before = {
+                "valid": valid,
+                "invalid": invalid,
+                "needs_context": needs_context,
+                "no_change": no_change,
+                "suggestions": suggestions,
+            }
+            retry_before = {
+                key: int(metrics[key])
+                for key in (
+                    "smart_review_attempts",
+                    "retry_count",
+                    "transient_retry_count",
+                    "overload_count",
+                    "key_rotation_count",
+                )
+            }
             batch_timing: dict[str, Any] = {
                 "batch_number": batch_number,
+                "batch_total": max(planned_batch_count, batch_number),
                 "ordinal_start": int(snapshots[position].ordinal),
                 "ordinal_end": int(
                     snapshots[min(len(snapshots) - 1, position + current_size - 1)].ordinal
                 ),
+                "actual_count": current_size,
                 "preparation_seconds": 0.0,
                 "rate_limit_wait_seconds": 0.0,
+                "retry_wait_seconds": 0.0,
+                "network_retry_wait_seconds": 0.0,
                 "api_seconds": 0.0,
                 "parse_seconds": 0.0,
                 "result_write_seconds": 0.0,
             }
+            emit_event(
+                "batch_start",
+                batch_number=batch_number,
+                batch_total=max(planned_batch_count, batch_number),
+                ordinal_start=batch_timing["ordinal_start"],
+                ordinal_end=batch_timing["ordinal_end"],
+                expected_count=current_size,
+                provider=provider,
+                model=model_name,
+            )
             abort_remaining = False
+            batch_validation_errors: dict[str, int] = {}
             while True:
                 if is_cancelled() or (cancel_check is not None and cancel_check()):
                     cancelled = True
@@ -2259,20 +2468,23 @@ def run_smart_review(
                     metrics["input_budget_exceeded_count"] = int(
                         metrics["input_budget_exceeded_count"]
                     ) + len(batch)
+                    batch_timing["actual_count"] = len(batch)
                     mark_request_failure(
                         [item.ordinal for item in batch],
                         error_code="request_failed:input_budget_exceeded",
                     )
                     processed += len(batch)
                     position += len(batch)
-                    report_progress(
-                        phase="batch_complete",
-                        timing=finish_batch_timing(
+                    report_batch_complete(
+                        finish_batch_timing(
                             batch_timing,
                             batch_started,
                             attempts_before,
                             "input_budget_exceeded",
-                        ),
+                            counters_before=counters_before,
+                            retry_before=retry_before,
+                            validation_errors=batch_validation_errors,
+                        )
                     )
                     break
 
@@ -2283,6 +2495,7 @@ def run_smart_review(
                 request_failed = False
                 shrink_requested = False
                 raw = ""
+                smart_review_attempt = 0
                 while True:
                     request_api_key = ""
                     if key_cycle is not None:
@@ -2301,6 +2514,121 @@ def run_smart_review(
                         abort_remaining = True
                         break
 
+                    smart_review_attempt += 1
+                    metrics["smart_review_attempts"] = (
+                        int(metrics["smart_review_attempts"]) + 1
+                    )
+
+                    def record_retry_event(
+                        event: dict[str, Any],
+                        *,
+                        _batch_timing: dict[str, Any] = batch_timing,
+                        _batch_number: int = batch_number,
+                        _smart_review_attempt: int = smart_review_attempt,
+                    ) -> None:
+                        """累計 retry wait 並把安全事件轉回 Smart Review。"""
+                        kind = str(event.get("kind") or "retry")
+                        wait_value = event.get("wait_seconds")
+                        try:
+                            wait_seconds = max(0.0, float(wait_value or 0.0))
+                        except (TypeError, ValueError):
+                            wait_seconds = 0.0
+                        if kind == "retry_wait":
+                            metrics["retry_wait_seconds"] = round(
+                                float(metrics["retry_wait_seconds"]) + wait_seconds,
+                                3,
+                            )
+                            _batch_timing["retry_wait_seconds"] = round(
+                                float(_batch_timing["retry_wait_seconds"])
+                                + wait_seconds,
+                                3,
+                            )
+                        elif kind == "network_retry_wait":
+                            metrics["network_retry_count"] = (
+                                int(metrics["network_retry_count"]) + 1
+                            )
+                            metrics["network_retry_wait_seconds"] = round(
+                                float(metrics["network_retry_wait_seconds"])
+                                + wait_seconds,
+                                3,
+                            )
+                            metrics["retry_wait_seconds"] = round(
+                                float(metrics["retry_wait_seconds"]) + wait_seconds,
+                                3,
+                            )
+                            _batch_timing["network_retry_wait_seconds"] = round(
+                                float(_batch_timing["network_retry_wait_seconds"])
+                                + wait_seconds,
+                                3,
+                            )
+                            _batch_timing["retry_wait_seconds"] = round(
+                                float(_batch_timing["retry_wait_seconds"])
+                                + wait_seconds,
+                                3,
+                            )
+                        fields = {
+                            key: value
+                            for key, value in event.items()
+                            if key != "kind"
+                        }
+                        emit_event(
+                            kind,
+                            batch_number=_batch_number,
+                            batch_total=max(planned_batch_count, _batch_number),
+                            smart_review_attempt=_smart_review_attempt,
+                            **fields,
+                        )
+
+                    def on_network_event(
+                        event: dict[str, object],
+                        *,
+                        _batch_number: int = batch_number,
+                        _smart_review_attempt: int = smart_review_attempt,
+                        _record_retry_event: Callable[[dict[str, Any]], None] = record_retry_event,
+                    ) -> None:
+                        """接收 API client 的 network attempt 診斷。"""
+                        kind = str(event.get("kind") or "network_event")
+                        if kind == "network_attempt_start":
+                            metrics["network_attempts"] = (
+                                int(metrics["network_attempts"]) + 1
+                            )
+                        if kind == "network_retry_wait":
+                            _record_retry_event(event)
+                            return
+                        fields = {
+                            key: value
+                            for key, value in event.items()
+                            if key != "kind"
+                        }
+                        emit_event(
+                            kind,
+                            batch_number=_batch_number,
+                            batch_total=max(planned_batch_count, _batch_number),
+                            smart_review_attempt=_smart_review_attempt,
+                            **fields,
+                        )
+
+                    def on_rate_limit_event(
+                        event: dict[str, object],
+                        *,
+                        _batch_number: int = batch_number,
+                        _smart_review_attempt: int = smart_review_attempt,
+                    ) -> None:
+                        """把配額時鐘等待轉成 UI 可顯示的事件。"""
+                        kind = str(event.get("kind") or "rate_limit_wait")
+                        fields = {
+                            key: value
+                            for key, value in event.items()
+                            if key != "kind"
+                        }
+                        emit_event(
+                            kind,
+                            batch_number=_batch_number,
+                            batch_total=max(planned_batch_count, _batch_number),
+                            smart_review_attempt=_smart_review_attempt,
+                            **fields,
+                        )
+
                     attempt_meta: dict[str, Any] | None = None
                     try:
                         wait_started = time.monotonic()
@@ -2309,6 +2637,7 @@ def run_smart_review(
                                 retry_runtime,
                                 model_name,
                                 cancel_check=cancel_check,
+                                wait_event_callback=on_rate_limit_event,
                             )
                         finally:
                             wait_seconds = time.monotonic() - wait_started
@@ -2323,6 +2652,16 @@ def run_smart_review(
                                 3,
                             )
                         attempt_meta = {}
+                        emit_event(
+                            "attempt_start",
+                            batch_number=batch_number,
+                            batch_total=max(planned_batch_count, batch_number),
+                            smart_review_attempt=smart_review_attempt,
+                            expected_count=len(batch),
+                            provider=provider,
+                            model=model_name,
+                            network_attempts=int(metrics["network_attempts"]),
+                        )
                         api_started = time.monotonic()
                         try:
                             raw = call_gemini_requests(
@@ -2336,6 +2675,7 @@ def run_smart_review(
                                 provider=provider,
                                 lm_config=lm_config,
                                 response_schema=response_schema,
+                                network_event_callback=on_network_event,
                                 **chatgpt_options,
                             )
                         finally:
@@ -2360,6 +2700,12 @@ def run_smart_review(
                             _smart_review_record_usage(
                                 metrics, attempt_meta, token_totals
                             )
+                        emit_attempt_failure(
+                            exc,
+                            batch_number=batch_number,
+                            smart_review_attempt=smart_review_attempt,
+                            error_kind="oauth",
+                        )
                         mark_request_failure(
                             [item.ordinal for item in batch],
                             exc,
@@ -2373,13 +2719,24 @@ def run_smart_review(
                         _smart_review_record_usage(
                             metrics, attempt_meta or {}, token_totals
                         )
+                        emit_attempt_failure(
+                            exc,
+                            batch_number=batch_number,
+                            smart_review_attempt=smart_review_attempt,
+                            status=exc.status,
+                            retry_after_seconds=getattr(exc, "retry_after", None),
+                        )
                         try:
                             with (
                                 cancel_scope(cancel_check)
                                 if cancel_check is not None
                                 else nullcontext()
                             ):
-                                action = _handle_chatgpt_api_error(retry_runtime, exc)
+                                action = _handle_chatgpt_api_error(
+                                    retry_runtime,
+                                    exc,
+                                    retry_event_callback=record_retry_event,
+                                )
                         except TaskCancelled:
                             cancelled = True
                             break
@@ -2428,25 +2785,25 @@ def run_smart_review(
                             if exc.response is not None
                             else None
                         )
-                        if status_code == 429:
-                            error_json: dict[str, Any] = {}
-                            try:
-                                decoded = (
-                                    exc.response.json()
-                                    if exc.response is not None
-                                    else {}
-                                )
-                                if isinstance(decoded, dict):
-                                    error_json = decoded
-                            except (AttributeError, TypeError, ValueError):
-                                error_json = {}
-                            retry_after = _parse_gemini_retry_after_seconds(
-                                exc.response, error_json
+                        error_json: dict[str, Any] = {}
+                        try:
+                            decoded = (
+                                exc.response.json()
+                                if exc.response is not None
+                                else {}
                             )
-                            if retry_after:
-                                get_model_quota_registry().defer_request_slot(
-                                    provider, model_name, retry_after
-                                )
+                            if isinstance(decoded, dict):
+                                error_json = decoded
+                        except (AttributeError, TypeError, ValueError):
+                            error_json = {}
+                        retry_after = _parse_gemini_retry_after_seconds(
+                            exc.response, error_json
+                        )
+                        if status_code == 429 and retry_after:
+                            get_model_quota_registry().defer_request_slot(
+                                provider, model_name, retry_after
+                            )
+                        key_rotated = False
                         if (
                             key_cycle is not None
                             and status_code in {403, 429}
@@ -2454,15 +2811,31 @@ def run_smart_review(
                                 reason="forbidden" if status_code == 403 else None
                             )
                         ):
+                            key_rotated = True
                             metrics["key_rotation_count"] = (
                                 int(metrics["key_rotation_count"]) + 1
                             )
                             metrics["retry_count"] = int(metrics["retry_count"]) + 1
+                            emit_attempt_failure(
+                                exc,
+                                batch_number=batch_number,
+                                smart_review_attempt=smart_review_attempt,
+                                status=status_code,
+                                retry_after_seconds=retry_after,
+                                key_rotated=key_rotated,
+                            )
                             continue
                         if (
                             _payload_error_allows_shrink(exc, status_code)
                             and current_size > 1
                         ):
+                            emit_attempt_failure(
+                                exc,
+                                batch_number=batch_number,
+                                smart_review_attempt=smart_review_attempt,
+                                status=status_code,
+                                retry_after_seconds=retry_after,
+                            )
                             shrink_requested = True
                             break
                         if status_code in {500, 502, 503, 504}:
@@ -2475,13 +2848,29 @@ def run_smart_review(
                                     metrics["retry_count"] = (
                                         int(metrics["retry_count"]) + 1
                                     )
+                                    emit_attempt_failure(
+                                        exc,
+                                        batch_number=batch_number,
+                                        smart_review_attempt=smart_review_attempt,
+                                        status=status_code,
+                                        retry_after_seconds=retry_after,
+                                        key_rotated=True,
+                                    )
                                     continue
+                            emit_attempt_failure(
+                                exc,
+                                batch_number=batch_number,
+                                smart_review_attempt=smart_review_attempt,
+                                status=status_code,
+                                retry_after_seconds=retry_after,
+                            )
                             if _smart_review_transient_retry(
                                 retry_runtime,
                                 model_name,
                                 exc,
                                 status_code,
                                 cancel_check=cancel_check,
+                                event_callback=record_retry_event,
                             ):
                                 metrics["retry_count"] = int(metrics["retry_count"]) + 1
                                 metrics["transient_retry_count"] = (
@@ -2496,6 +2885,13 @@ def run_smart_review(
                             request_failed = True
                             abort_remaining = True
                             break
+                        emit_attempt_failure(
+                            exc,
+                            batch_number=batch_number,
+                            smart_review_attempt=smart_review_attempt,
+                            status=status_code,
+                            retry_after_seconds=retry_after,
+                        )
                         mark_request_failure(
                             [item.ordinal for item in batch],
                             exc,
@@ -2509,12 +2905,18 @@ def run_smart_review(
                         _smart_review_record_usage(
                             metrics, attempt_meta or {}, token_totals
                         )
+                        emit_attempt_failure(
+                            exc,
+                            batch_number=batch_number,
+                            smart_review_attempt=smart_review_attempt,
+                        )
                         if _smart_review_transient_retry(
                             retry_runtime,
                             model_name,
                             exc,
                             None,
                             cancel_check=cancel_check,
+                            event_callback=record_retry_event,
                         ):
                             metrics["retry_count"] = int(metrics["retry_count"]) + 1
                             metrics["transient_retry_count"] = (
@@ -2529,12 +2931,35 @@ def run_smart_review(
                         _smart_review_record_usage(
                             metrics, attempt_meta or {}, token_totals
                         )
+                        emit_attempt_failure(
+                            exc,
+                            batch_number=batch_number,
+                            smart_review_attempt=smart_review_attempt,
+                        )
                         mark_request_failure([item.ordinal for item in batch], exc)
                         request_failed = True
                         break
                     else:
                         _smart_review_record_usage(
                             metrics, attempt_meta or {}, token_totals
+                        )
+                        emit_event(
+                            "attempt_success",
+                            batch_number=batch_number,
+                            batch_total=max(planned_batch_count, batch_number),
+                            smart_review_attempt=smart_review_attempt,
+                            api_elapsed_seconds=api_seconds,
+                            http_status=(attempt_meta or {}).get("http_status", 200),
+                            finish_reason=(attempt_meta or {}).get("finish_reason"),
+                            expected_count=len(batch),
+                            actual_count=_smart_review_response_item_count(raw),
+                            prompt_tokens=(attempt_meta or {}).get("prompt_tokens"),
+                            output_tokens=(attempt_meta or {}).get(
+                                "output_tokens"
+                            )
+                            or (attempt_meta or {}).get("candidates_tokens"),
+                            network_attempts=int(metrics["network_attempts"]),
+                            network_retry_count=int(metrics["network_retry_count"]),
                         )
                         if key_cycle is not None:
                             key_cycle.record_success()
@@ -2561,14 +2986,17 @@ def run_smart_review(
                         )
                         processed = len(snapshots)
                         position = len(snapshots)
-                    report_progress(
-                        phase="batch_complete",
-                        timing=finish_batch_timing(
+                    batch_timing["actual_count"] = len(batch)
+                    report_batch_complete(
+                        finish_batch_timing(
                             batch_timing,
                             batch_started,
                             attempts_before,
                             "request_failed",
-                        ),
+                            counters_before=counters_before,
+                            retry_before=retry_before,
+                            validation_errors=batch_validation_errors,
+                        )
                     )
                     break
                 if shrink_requested:
@@ -2628,6 +3056,14 @@ def run_smart_review(
                 for result in results:
                     if result.get("validation_error"):
                         invalid += 1
+                        reason = str(result["validation_error"])[:160]
+                        batch_validation_errors[reason] = (
+                            batch_validation_errors.get(reason, 0) + 1
+                        )
+                        validation_errors = metrics["validation_errors"]
+                        validation_errors[reason] = (
+                            int(validation_errors.get(reason, 0)) + 1
+                        )
                         continue
                     valid += 1
                     if result["decision"] == "no_change":
@@ -2639,14 +3075,17 @@ def run_smart_review(
                 processed += len(batch)
                 position += len(batch)
                 adaptive_batch_size = min(adaptive_batch_size, current_size)
-                report_progress(
-                    phase="batch_complete",
-                    timing=finish_batch_timing(
+                batch_timing["actual_count"] = len(batch)
+                report_batch_complete(
+                    finish_batch_timing(
                         batch_timing,
                         batch_started,
                         attempts_before,
                         "completed",
-                    ),
+                        counters_before=counters_before,
+                        retry_before=retry_before,
+                        validation_errors=batch_validation_errors,
+                    )
                 )
                 break
             if cancelled:
@@ -2656,9 +3095,11 @@ def run_smart_review(
     except BaseException:
         failed = True
         db.mark_smart_review_pending_cancelled(run_id)
+        total_seconds = round(time.monotonic() - started, 3)
         metrics.update(
             {
-                "duration_seconds": round(time.monotonic() - started, 3),
+                "duration_seconds": total_seconds,
+                "total_duration_seconds": total_seconds,
                 "prompt_tokens": token_totals["prompt_tokens"],
                 "output_tokens": token_totals["output_tokens"],
                 "status": "failed",
@@ -2695,13 +3136,16 @@ def run_smart_review(
         if request_errors
         else "completed"
     )
+    total_seconds = round(time.monotonic() - started, 3)
     metrics.update(
         {
-            "duration_seconds": round(time.monotonic() - started, 3),
+            "duration_seconds": total_seconds,
+            "total_duration_seconds": total_seconds,
             "prompt_tokens": token_totals["prompt_tokens"],
             "output_tokens": token_totals["output_tokens"],
             "no_change_count": no_change,
             "suggestion_count": suggestions,
+            "suggest_revision_count": suggestions,
             "needs_context_count": needs_context,
             "status": status,
             "token_counts": (

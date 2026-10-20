@@ -648,6 +648,54 @@ def test_smart_review_reports_search_and_api_timing(db, monkeypatch):
     assert result.metrics["batch_count"] == 2
 
 
+def test_smart_review_batch_event_reports_validation_distribution(db, monkeypatch):
+    """批次事件與持久化 metrics 都保留 validation error 分布。"""
+    events = []
+
+    def invalid_response(**kwargs):
+        """回傳 id 正確但缺少 reason 的候選，模擬模型格式錯誤。"""
+        return json.dumps(
+            {
+                "items": [
+                    {
+                        "id": item["id"],
+                        "decision": "no_change",
+                        "suggested_zh_tw": "",
+                        "issue_types": [],
+                        "evidence_ids": [],
+                        "confidence": 0.8,
+                    }
+                    for item in kwargs["payload"]["items"]
+                ]
+            }
+        )
+
+    monkeypatch.setattr(
+        "translation_tool.translation_db.smart_review.call_gemini_requests",
+        invalid_response,
+    )
+    result = run_smart_review(
+        db,
+        model_name="gemini-test",
+        api_key="test-key",
+        limit=2,
+        batch_size=2,
+        progress=events.append,
+        lm_config={"rate_limit": {"sleep_seconds_between_batches": 0}},
+    )
+
+    batch_event = next(
+        snapshot["event"]
+        for snapshot in events
+        if snapshot.get("event", {}).get("kind") == "batch_complete"
+    )
+    assert batch_event["valid_count"] == 0
+    assert batch_event["invalid_count"] == 2
+    assert batch_event["validation_errors"] == {"item 欄位不符合 strict schema": 2}
+    assert result.metrics["validation_errors"] == batch_event["validation_errors"]
+    assert result.metrics["suggest_revision_count"] == 0
+
+
 def test_request_failures_and_cancellation_are_distinct_from_invalid(db, monkeypatch):
     """驗證請求失敗、取消與無效回應會被正確區分。"""
 
@@ -736,6 +784,100 @@ def test_smart_review_retries_gemini_503_with_bounded_shared_backoff(db, monkeyp
     assert result.status == "completed"
     assert result.metrics["transient_retry_count"] == 1
     assert result.metrics["request_attempts"] == 2
+
+
+@pytest.mark.parametrize("status", [500, 502, 503, 504])
+def test_smart_review_retry_events_classify_server_errors(db, monkeypatch, status):
+    """Gemini 暫時性 HTTP 錯誤會產生 failure、retry wait 與 resume 事件。"""
+    calls = []
+    events = []
+
+    def fake_call(**kwargs):
+        """第一次回傳指定的暫時性 HTTP 錯誤，下一次成功。"""
+        calls.append(1)
+        if len(calls) == 1:
+            error = _http_error(status, "provider overload secret detail")
+            error.response.headers["Retry-After"] = "45"
+            raise error
+        return _review_response(kwargs["payload"]["items"])
+
+    monkeypatch.setattr(
+        "translation_tool.translation_db.smart_review.call_gemini_requests",
+        fake_call,
+    )
+    monkeypatch.setattr(
+        "translation_tool.translation_db.smart_review.interruptible_sleep",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        "translation_tool.core.lm_translator_main.interruptible_sleep",
+        lambda *_args, **_kwargs: None,
+    )
+
+    result = run_smart_review(
+        db,
+        model_name="gemini-test",
+        api_key="AIza-secret-key",
+        limit=1,
+        batch_size=1,
+        progress=events.append,
+        lm_config={"rate_limit": {"sleep_seconds_between_batches": 0}},
+    )
+
+    event_rows = [event["event"] for event in events if "event" in event]
+    kinds = [event["kind"] for event in event_rows]
+    assert result.status == "completed"
+    assert calls == [1, 1]
+    assert {"batch_start", "attempt_start", "attempt_failure", "retry_wait", "retry_resume", "attempt_success", "batch_complete"} <= set(kinds)
+    failure = next(event for event in event_rows if event["kind"] == "attempt_failure")
+    assert failure["http_status"] == status
+    assert failure["provider_overload"] is (status == 503)
+    retry = next(event for event in event_rows if event["kind"] == "retry_wait")
+    assert retry["wait_seconds"] == 45
+    assert result.metrics["retry_wait_seconds"] >= 45
+    assert result.metrics["rate_limit_wait_seconds"] < 45
+    assert result.metrics["overload_count"] == (1 if status == 503 else 0)
+    assert all(secret not in repr(event_rows) for secret in ("AIza-secret-key", "provider overload secret detail"))
+
+
+def test_smart_review_timeout_events_are_visible_and_safe(db, monkeypatch):
+    """timeout 也要顯示分類與 retry wait，且不記錄例外原文。"""
+    calls = []
+    events = []
+
+    def fake_call(**kwargs):
+        """第一次 timeout，第二次回傳有效結果。"""
+        calls.append(1)
+        if len(calls) == 1:
+            raise requests.Timeout("timeout contains private prompt")
+        return _review_response(kwargs["payload"]["items"])
+
+    monkeypatch.setattr(
+        "translation_tool.translation_db.smart_review.call_gemini_requests",
+        fake_call,
+    )
+    monkeypatch.setattr(
+        "translation_tool.translation_db.smart_review.interruptible_sleep",
+        lambda *_args, **_kwargs: None,
+    )
+
+    result = run_smart_review(
+        db,
+        model_name="gemini-test",
+        api_key="test-key",
+        limit=1,
+        batch_size=1,
+        progress=events.append,
+        lm_config={"rate_limit": {"sleep_seconds_between_batches": 0}},
+    )
+
+    event_rows = [event["event"] for event in events if "event" in event]
+    failure = next(event for event in event_rows if event["kind"] == "attempt_failure")
+    assert failure["error_kind"] == "timeout"
+    assert failure["timeout"] is True
+    assert result.metrics["transient_retry_count"] == 1
+    assert result.metrics["retry_wait_seconds"] > 0
+    assert "timeout contains private prompt" not in repr(event_rows)
 
 
 def test_smart_review_bounds_continuous_gemini_503_and_stops_pending_batches(

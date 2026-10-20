@@ -7,6 +7,7 @@
 import json
 import math
 import random
+import time
 from contextlib import nullcontext
 from copy import deepcopy
 from dataclasses import dataclass, field
@@ -688,6 +689,7 @@ def _wait_for_request_slot(
     model_name: str,
     *,
     cancel_check=None,
+    wait_event_callback=None,
 ) -> None:
     """透過共用模型時鐘節流每一次 provider 請求。"""
     quota = get_model_quota_registry()
@@ -706,6 +708,14 @@ def _wait_for_request_slot(
             wait_sec = quota.request_slot_wait(reservation)
             waited_target = reservation.target_at if wait_sec > 0 else None
             if wait_sec > 0:
+                if wait_event_callback is not None:
+                    wait_event_callback(
+                        {
+                            "kind": "rate_limit_wait",
+                            "wait_seconds": wait_sec,
+                        }
+                    )
+                wait_started = quota.now()
                 sleep_context = (
                     cancel_scope(cancel_check)
                     if cancel_check is not None
@@ -713,6 +723,14 @@ def _wait_for_request_slot(
                 )
                 with sleep_context:
                     interruptible_sleep(wait_sec)
+                if wait_event_callback is not None:
+                    wait_event_callback(
+                        {
+                            "kind": "rate_limit_resume",
+                            "wait_seconds": wait_sec,
+                            "elapsed_seconds": max(0.0, quota.now() - wait_started),
+                        }
+                    )
             raise_if_cancelled()
             if cancel_check is not None and cancel_check():
                 raise TaskCancelled()
@@ -1150,7 +1168,12 @@ def _chatgpt_retryable_error(error) -> bool:
     } or error_type in {"rate_limit_error", "service_unavailable_error"}
 
 
-def _handle_chatgpt_api_error(runtime: _BatchRuntime, error) -> BatchAction:
+def _handle_chatgpt_api_error(
+    runtime: _BatchRuntime,
+    error,
+    *,
+    retry_event_callback=None,
+) -> BatchAction:
     """對暫時性 ChatGPT 請求錯誤執行有界且可取消的退避。"""
     if error.code == "incomplete":
         log_warning(f"[ChatGPT] 回應未完整完成，縮小批次後重試：{error}")
@@ -1178,11 +1201,37 @@ def _handle_chatgpt_api_error(runtime: _BatchRuntime, error) -> BatchAction:
         ) from error
 
     runtime.chatgpt_retry_count += 1
+    if retry_event_callback is not None:
+        retry_event_callback(
+            {
+                "kind": "retry_wait",
+                "retry_number": runtime.chatgpt_retry_count,
+                "retry_total": CHATGPT_MAX_RETRIES,
+                "wait_seconds": wait_sec,
+                "retry_after_seconds": retry_after,
+                "error_kind": "chatgpt_transient",
+                "http_status": error.status,
+                "provider_overload": bool(error.status in {500, 502, 503, 504}),
+                "quota_or_rate_limit": bool(error.status == 429),
+                "timeout": bool(error.status == 408),
+            }
+        )
+    wait_started = time.monotonic()
     log_warning(
         f"[ChatGPT] 暫時性錯誤，{wait_sec:g} 秒後重試 "
         f"({runtime.chatgpt_retry_count}/{CHATGPT_MAX_RETRIES})：{error}"
     )
     interruptible_sleep(wait_sec)
+    if retry_event_callback is not None:
+        retry_event_callback(
+            {
+                "kind": "retry_resume",
+                "retry_number": runtime.chatgpt_retry_count,
+                "retry_total": CHATGPT_MAX_RETRIES,
+                "wait_seconds": wait_sec,
+                "elapsed_seconds": max(0.0, time.monotonic() - wait_started),
+            }
+        )
     return BatchAction.RETRY_SAME_MODEL
 
 
