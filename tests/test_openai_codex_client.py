@@ -234,6 +234,37 @@ def test_call_retries_once_after_unauthorized_and_keeps_reasoning(monkeypatch):
     ]
 
 
+def test_call_fast_mode_uses_chatgpt_oauth_default_service_tier(monkeypatch):
+    class _SuccessResponse:
+        status_code = 200
+        ok = True
+
+    requests_seen = []
+    monkeypatch.setattr(
+        client, "get_chatgpt_access_token", lambda **_kwargs: "access-token"
+    )
+
+    def stream_request(**kwargs):
+        requests_seen.append(kwargs)
+        return _SuccessResponse()
+
+    monkeypatch.setattr(client, "_stream_request", stream_request)
+    monkeypatch.setattr(client, "_consume_stream", lambda _response, _meta: "done")
+
+    assert (
+        client.call_chatgpt_responses(
+            model_name="gpt-5.6-luna",
+            system_prompt="Translate.",
+            payload={"items": []},
+            timeout=30,
+            fast=True,
+        )
+        == "done"
+    )
+    assert len(requests_seen) == 1
+    assert "service_tier" not in requests_seen[0]
+
+
 def test_consume_stream_returns_structured_output_and_usage():
     response = _FakeStreamResponse(
         [
@@ -859,6 +890,22 @@ def test_http_error_preserves_status_type_param_and_request_id():
     assert error.request_id == "req_example"
     assert "HTTP 403" in str(error)
     assert "region_not_supported" in str(error)
+
+
+def test_http_error_preserves_top_level_detail_from_direct_route():
+    response = requests.Response()
+    response.status_code = 400
+    response.headers["x-request-id"] = "req_direct_route"
+    response._content = json.dumps(
+        {"detail": "Plan usage is not authorized for this request."}
+    ).encode()
+
+    error = client._response_error(response)
+
+    assert error.status == 400
+    assert error.code == "http_400"
+    assert error.request_id == "req_direct_route"
+    assert "Plan usage is not authorized for this request." in str(error)
 
 
 def test_http_error_carries_retry_after_for_batch_backoff():

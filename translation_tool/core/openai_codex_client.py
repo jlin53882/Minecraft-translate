@@ -57,13 +57,31 @@ def _response_error(response: requests.Response) -> ChatGPTAPIError:
     error = payload.get("error", {}) if isinstance(payload, dict) else {}
     if not isinstance(error, dict):
         error = {}
+    # ChatGPT's OAuth direct route may reject a request before the Responses
+    # API envelope is created.  That route returns FastAPI-style top-level
+    # fields such as {"detail": "..."}, rather than {"error": {...}}.
+    top_level = payload if isinstance(payload, dict) else {}
+    raw_message = (
+        error.get("message")
+        or top_level.get("detail")
+        or top_level.get("message")
+        or ""
+    )
+    if not isinstance(raw_message, str):
+        try:
+            raw_message = json.dumps(raw_message, ensure_ascii=False, sort_keys=True)
+        except (TypeError, ValueError):
+            raw_message = str(raw_message)
+    raw_code = error.get("code") or top_level.get("code")
+    raw_type = error.get("type") or top_level.get("type")
+    raw_param = error.get("param") or top_level.get("param")
     retry_after = _parse_retry_after(response.headers.get("Retry-After"))
     return ChatGPTAPIError(
-        str(error.get("code") or error.get("type") or f"http_{response.status_code}"),
-        str(error.get("message") or ""),
+        str(raw_code or raw_type or f"http_{response.status_code}"),
+        raw_message,
         status=response.status_code,
-        error_type=str(error.get("type") or ""),
-        param=str(error.get("param") or ""),
+        error_type=str(raw_type or ""),
+        param=str(raw_param or ""),
         request_id=response.headers.get("x-request-id", ""),
         retry_after=retry_after,
     )
@@ -352,8 +370,10 @@ def call_chatgpt_responses(
         request_kwargs["conversation_history"] = conversation_history
     if reasoning_effort is not None:
         request_kwargs["reasoning_effort"] = reasoning_effort
-    if fast:
-        request_kwargs["service_tier"] = "fast"
+    # ChatGPT OAuth plan-usage requests currently reject the Responses API
+    # service_tier=fast field (the direct route returns
+    # {"detail": "Unsupported service_tier: fast"}). Keep the provider-level
+    # flag for API compatibility, but let this route use its default tier.
     if response_schema is not None:
         request_kwargs["response_schema"] = response_schema
     try:
