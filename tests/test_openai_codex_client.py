@@ -228,13 +228,14 @@ def test_call_retries_once_after_unauthorized_and_keeps_reasoning(monkeypatch):
         "refreshed-token",
     ]
     assert all(request["reasoning_effort"] == "medium" for request in requests_seen)
+    assert all("service_tier" not in request for request in requests_seen)
     assert token_requests == [
         {"profile_id": "profile-a"},
         {"force_refresh": True, "profile_id": "profile-a"},
     ]
 
 
-def test_call_fast_mode_uses_chatgpt_oauth_default_service_tier(monkeypatch):
+def test_call_fast_mode_uses_codex_priority_service_tier(monkeypatch):
     class _SuccessResponse:
         status_code = 200
         ok = True
@@ -262,7 +263,7 @@ def test_call_fast_mode_uses_chatgpt_oauth_default_service_tier(monkeypatch):
         == "done"
     )
     assert len(requests_seen) == 1
-    assert "service_tier" not in requests_seen[0]
+    assert requests_seen[0]["service_tier"] == "priority"
 
 
 def test_consume_stream_returns_structured_output_and_usage():

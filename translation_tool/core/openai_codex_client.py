@@ -370,10 +370,11 @@ def call_chatgpt_responses(
         request_kwargs["conversation_history"] = conversation_history
     if reasoning_effort is not None:
         request_kwargs["reasoning_effort"] = reasoning_effort
-    # ChatGPT OAuth plan-usage requests currently reject the Responses API
-    # service_tier=fast field (the direct route returns
-    # {"detail": "Unsupported service_tier: fast"}). Keep the provider-level
-    # flag for API compatibility, but let this route use its default tier.
+    # Codex maps its provider-level fast flag to the Responses API's
+    # service_tier=priority request value. The public ChatGPT OAuth route
+    # rejects the literal service_tier=fast value, but accepts priority.
+    if fast:
+        request_kwargs["service_tier"] = "priority"
     if response_schema is not None:
         request_kwargs["response_schema"] = response_schema
     try:
