@@ -717,8 +717,7 @@ def _migrate_smart_review_v8(conn: sqlite3.Connection) -> None:
             "ALTER TABLE smart_review_run ADD COLUMN scope_json TEXT NOT NULL DEFAULT '{}'"
         )
     candidate_columns = {
-        row[1]
-        for row in conn.execute("PRAGMA table_info(smart_review_candidate)")
+        row[1] for row in conn.execute("PRAGMA table_info(smart_review_candidate)")
     }
     if "draft_zh_tw" not in candidate_columns:
         conn.execute("ALTER TABLE smart_review_candidate ADD COLUMN draft_zh_tw TEXT")

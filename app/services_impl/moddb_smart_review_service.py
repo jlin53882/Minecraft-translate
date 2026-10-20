@@ -6,6 +6,10 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from translation_tool.core.format_diagnostics import (
+    FormatDiagnosticsResult,
+    analyze_format_diagnostics,
+)
 from translation_tool.core.lm_config_rules import (
     get_current_api_key,
     get_translation_provider,
@@ -19,6 +23,15 @@ from translation_tool.translation_db import (
 from translation_tool.translation_db.schema import SRC_AI
 from translation_tool.translation_db.smart_review import run_smart_review
 from translation_tool.utils.config_manager import load_config
+
+SMART_REVIEW_DEFAULT_SOURCE = SRC_AI
+
+
+def smart_review_format_diagnostics(
+    source: str, translated: str, *, kind: str = "lang"
+) -> FormatDiagnosticsResult:
+    """Expose bounded format diagnostics to the ModDB view layer."""
+    return analyze_format_diagnostics(source, translated, kind=kind)
 
 
 def smart_review_model_options(config: dict | None = None) -> list[tuple[str, str]]:
@@ -219,9 +232,7 @@ def apply_moddb_smart_review_candidate_from_path(
 ) -> str:
     db = _open(path, priority, readonly=False)
     try:
-        return db.apply_smart_review_candidate(
-            run_id, ordinal, draft_zh_tw=draft_zh_tw
-        )
+        return db.apply_smart_review_candidate(run_id, ordinal, draft_zh_tw=draft_zh_tw)
     finally:
         db.close()
 
@@ -240,6 +251,7 @@ def reject_moddb_smart_review_candidate_from_path(
 
 
 __all__ = [
+    "SMART_REVIEW_DEFAULT_SOURCE",
     "SmartReviewCandidate",
     "apply_moddb_smart_review_candidate_from_path",
     "count_moddb_smart_review_candidates_for_run_from_path",
@@ -251,5 +263,6 @@ __all__ = [
     "reject_moddb_smart_review_candidate_from_path",
     "run_moddb_smart_review_from_path",
     "save_moddb_smart_review_draft_from_path",
+    "smart_review_format_diagnostics",
     "smart_review_model_options",
 ]

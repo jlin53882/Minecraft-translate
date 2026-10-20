@@ -229,9 +229,7 @@ def _accepted_terms(label: dict[str, object]) -> list[tuple[str, tuple[str, ...]
             accepted = [accepted]
         if not source or not isinstance(accepted, list):
             continue
-        values = tuple(
-            _compact(str(item)) for item in accepted if _compact(str(item))
-        )
+        values = tuple(_compact(str(item)) for item in accepted if _compact(str(item)))
         if values:
             result.append((source, values))
     return result
@@ -317,10 +315,13 @@ def main() -> int:
     gold_rows = [
         (
             candidate,
-            references[(candidate.kind, candidate.mod_id, candidate.key, candidate.en_us)],
+            references[
+                (candidate.kind, candidate.mod_id, candidate.key, candidate.en_us)
+            ],
         )
         for candidate in candidates
-        if (candidate.kind, candidate.mod_id, candidate.key, candidate.en_us) in references
+        if (candidate.kind, candidate.mod_id, candidate.key, candidate.en_us)
+        in references
     ]
     named_rows = [
         (candidate, reference)

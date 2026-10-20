@@ -29,19 +29,13 @@ def _candidate(
 def test_manual_terminology_metrics_distinguish_correction_false_revision_and_abstention():
     labels = {
         ("lang", "demo", "correct", "Phenolic Resin is useful"): {
-            "expected_terms": [
-                {"source": "Phenolic Resin", "accepted": ["酚醛樹脂"]}
-            ]
+            "expected_terms": [{"source": "Phenolic Resin", "accepted": ["酚醛樹脂"]}]
         },
         ("lang", "demo", "wrong", "Phenolic Resin is useful"): {
-            "expected_terms": [
-                {"source": "Phenolic Resin", "accepted": ["酚醛樹脂"]}
-            ]
+            "expected_terms": [{"source": "Phenolic Resin", "accepted": ["酚醛樹脂"]}]
         },
         ("lang", "demo", "abstain", "Phenolic Resin is useful"): {
-            "expected_terms": [
-                {"source": "Phenolic Resin", "accepted": ["酚醛樹脂"]}
-            ]
+            "expected_terms": [{"source": "Phenolic Resin", "accepted": ["酚醛樹脂"]}]
         },
     }
     candidates = [

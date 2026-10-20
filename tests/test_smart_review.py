@@ -70,14 +70,15 @@ def test_reviewed_reference_requires_same_english_source(db):
         [WriteBackItem(KIND_LANG, "demo", "hello", "Hello changed", "嗨")],
         fill_other_versions=False,
     )
-    changed = next(
-        item for item in db.list_entries("1.20.1")[0] if item.key == "hello"
-    )
+    changed = next(item for item in db.list_entries("1.20.1")[0] if item.key == "hello")
     db.review_manual(changed.id, expected_zh_tw="嗨", propagate=False)
 
-    assert db.smart_review_candidates(
-        version="1.21.1", limit=1000, require_reviewed_reference=True
-    ) == []
+    assert (
+        db.smart_review_candidates(
+            version="1.21.1", limit=1000, require_reviewed_reference=True
+        )
+        == []
+    )
 
 
 def test_local_context_covers_non_lang_terms_and_preserves_traceability(db):
@@ -127,7 +128,9 @@ def test_local_context_covers_non_lang_terms_and_preserves_traceability(db):
         limit=1000,
     )[0]
     glossary = [
-        item for item in candidate.context if item["reference_type"] == "reviewed_lang_glossary"
+        item
+        for item in candidate.context
+        if item["reference_type"] == "reviewed_lang_glossary"
     ]
     assert glossary
     assert glossary[0]["id"].startswith("db:")

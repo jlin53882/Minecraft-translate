@@ -8,6 +8,7 @@ from pathlib import Path
 import flet as ft
 
 from app.services_impl.moddb_smart_review_service import (
+    SMART_REVIEW_DEFAULT_SOURCE,
     SmartReviewCandidate,
     apply_moddb_smart_review_candidate_from_path,
     count_moddb_smart_review_candidates_for_run_from_path,
@@ -18,6 +19,7 @@ from app.services_impl.moddb_smart_review_service import (
     reject_moddb_smart_review_candidate_from_path,
     run_moddb_smart_review_from_path,
     save_moddb_smart_review_draft_from_path,
+    smart_review_format_diagnostics,
     smart_review_model_options,
 )
 from app.tasks.operation_registry import (
@@ -37,8 +39,6 @@ from app.ui.dialogs import (
 )
 from app.ui.snack import show_snack
 from app.views.moddb.formatting import format_count, shorten
-from translation_tool.core.format_diagnostics import analyze_format_diagnostics
-from translation_tool.translation_db.schema import SRC_AI
 
 
 class SmartReviewDialog:
@@ -52,7 +52,7 @@ class SmartReviewDialog:
         on_complete,
         mod_id: str | None = None,
         kind: str | None = None,
-        effective_source: int | None = SRC_AI,
+        effective_source: int | None = SMART_REVIEW_DEFAULT_SOURCE,
         query: str = "",
     ):
         self.page = page
@@ -114,7 +114,7 @@ class SmartReviewDialog:
         self.source_dd = kit.dropdown(
             label="目前生效來源", dense=True, width=180, on_select=self._invalidate
         )
-        codes = tuple(dict.fromkeys((SRC_AI, *source_codes)))
+        codes = tuple(dict.fromkeys((SMART_REVIEW_DEFAULT_SOURCE, *source_codes)))
         catalog = getattr(db, "source_catalog", None)
         labels = {
             code: catalog.label(code) if catalog is not None else str(code)
@@ -129,7 +129,7 @@ class SmartReviewDialog:
             if effective_source is None
             else str(effective_source)
             if effective_source in codes
-            else str(SRC_AI)
+            else str(SMART_REVIEW_DEFAULT_SOURCE)
         )
         self.query_field = kit.text_field(
             "條目搜尋",
@@ -271,7 +271,7 @@ class SmartReviewDialog:
             [("__all__", "全部類型"), *((k, k) for k in kinds)],
         )
         catalog = getattr(db, "source_catalog", None)
-        codes = tuple(dict.fromkeys((SRC_AI, *source_codes)))
+        codes = tuple(dict.fromkeys((SMART_REVIEW_DEFAULT_SOURCE, *source_codes)))
         kit.set_dropdown_options(
             self.source_dd,
             [
@@ -287,7 +287,7 @@ class SmartReviewDialog:
         )
         self.mod_dd.value = "__all__"
         self.kind_dd.value = "__all__"
-        self.source_dd.value = str(SRC_AI)
+        self.source_dd.value = str(SMART_REVIEW_DEFAULT_SOURCE)
         self._invalidate()
 
     def _invalidate(self, _e=None) -> None:
@@ -309,7 +309,9 @@ class SmartReviewDialog:
             raise ValueError(f"{label} 必須至少為 {minimum}")
         return value
 
-    def _scope(self) -> tuple[
+    def _scope(
+        self,
+    ) -> tuple[
         Path,
         tuple[int, ...],
         str,
@@ -468,7 +470,7 @@ class SmartReviewDialog:
             if source is None
             else str(source)
             if any(option.key == str(source) for option in self.source_dd.options)
-            else str(SRC_AI)
+            else str(SMART_REVIEW_DEFAULT_SOURCE)
         )
         self.query_field.value = str(scope.get("query") or "")
         if run.get("requested_limit"):
@@ -551,9 +553,7 @@ class SmartReviewDialog:
         self, generation: int, processed: int, selected: int, status: str
     ) -> None:
         if generation == self._generation:
-            self.status.value = (
-                f"AI 校對中：{processed:,} / {selected:,} 筆 · {status}"
-            )
+            self.status.value = f"AI 校對中：{processed:,} / {selected:,} 筆 · {status}"
             self._safe_update()
 
     def _apply_run(self, generation, path, priority, result, error) -> None:
@@ -648,21 +648,17 @@ class SmartReviewDialog:
         )
         self._safe_update()
 
-    def _candidate_card(
-        self, path: Path, priority: tuple[int, ...], row: SmartReviewCandidate
-    ):
+    def _candidate_source_label(self, row: SmartReviewCandidate) -> str:
         db = self.get_db()
-        source_label = (
+        return (
             db.source_catalog.label(row.effective_source)
             if db is not None
             and row.effective_source is not None
             and getattr(db, "source_catalog", None) is not None
-            else (
-                "無"
-                if row.effective_source is None
-                else str(row.effective_source)
-            )
+            else ("無" if row.effective_source is None else str(row.effective_source))
         )
+
+    def _candidate_draft_controls(self, row: SmartReviewCandidate):
         draft_control = kit.text_field(
             "人工修正草稿",
             value=row.draft_zh_tw or row.suggested_zh_tw or "",
@@ -681,7 +677,7 @@ class SmartReviewDialog:
                 format_text.color = C.MUTED
                 return
             try:
-                diagnostics = analyze_format_diagnostics(
+                diagnostics = smart_review_format_diagnostics(
                     row.en_us, value, kind=row.kind
                 )
             except (TypeError, ValueError) as exc:
@@ -690,14 +686,16 @@ class SmartReviewDialog:
                 return
             lines = diagnostics.summary_lines
             format_text.value = (
-                "格式診斷：" + "；".join(lines)
-                if lines
-                else "格式診斷：未發現格式問題"
+                "格式診斷：" + "；".join(lines) if lines else "格式診斷：未發現格式問題"
             )
             format_text.color = C.RED if diagnostics.has_issues else C.EM
 
         draft_control.on_change = refresh_format
         refresh_format()
+        return draft_control, format_text
+
+    @staticmethod
+    def _candidate_evidence_text(row: SmartReviewCandidate) -> str:
         evidence_by_id = {str(item.get("id")): item for item in row.context}
         evidence_ids = row.evidence_ids or tuple(evidence_by_id)[:6]
         evidence_lines = []
@@ -716,6 +714,15 @@ class SmartReviewDialog:
             if evidence_lines
             else "無本地術語證據；請視為需要人工確認。"
         )
+        return evidence_text
+
+    def _candidate_action_row(
+        self,
+        path: Path,
+        priority: tuple[int, ...],
+        row: SmartReviewCandidate,
+        draft_control,
+    ):
         apply_btn = kit.button(
             "套用這筆",
             "primary",
@@ -747,6 +754,33 @@ class SmartReviewDialog:
             ),
             disabled=row.status != "ready",
         )
+        return ft.Row(
+            [
+                ft.TextButton(
+                    "上一筆",
+                    on_click=lambda _e: self._focus_candidate(row.ordinal - 1),
+                    disabled=row.ordinal <= 1,
+                ),
+                ft.TextButton(
+                    "下一筆",
+                    on_click=lambda _e: self._focus_candidate(row.ordinal + 1),
+                    disabled=row.ordinal >= self._candidate_total,
+                ),
+                reject_btn,
+                save_btn,
+                apply_btn,
+            ],
+            spacing=8,
+            wrap=True,
+        )
+
+    def _candidate_card(
+        self, path: Path, priority: tuple[int, ...], row: SmartReviewCandidate
+    ):
+        source_label = self._candidate_source_label(row)
+        draft_control, format_text = self._candidate_draft_controls(row)
+        evidence_text = self._candidate_evidence_text(row)
+        action_row = self._candidate_action_row(path, priority, row, draft_control)
         return ft.Container(
             content=ft.Column(
                 [
@@ -765,29 +799,7 @@ class SmartReviewDialog:
                         spacing=8,
                         wrap=True,
                     ),
-                    ft.Row(
-                        [
-                            ft.TextButton(
-                                "上一筆",
-                                on_click=lambda _e: self._focus_candidate(
-                                    row.ordinal - 1
-                                ),
-                                disabled=row.ordinal <= 1,
-                            ),
-                            ft.TextButton(
-                                "下一筆",
-                                on_click=lambda _e: self._focus_candidate(
-                                    row.ordinal + 1
-                                ),
-                                disabled=row.ordinal >= self._candidate_total,
-                            ),
-                            reject_btn,
-                            save_btn,
-                            apply_btn,
-                        ],
-                        spacing=8,
-                        wrap=True,
-                    ),
+                    action_row,
                     ft.Text(f"原文：{row.en_us}", size=12, selectable=True),
                     ft.Text(f"目前：{row.current_zh_tw}", size=12, selectable=True),
                     ft.Text(
@@ -807,7 +819,9 @@ class SmartReviewDialog:
                         color=C.MUTED,
                         selectable=True,
                     ),
-                    ft.Text("本地 evidence：" + evidence_text, size=12, selectable=True),
+                    ft.Text(
+                        "本地 evidence：" + evidence_text, size=12, selectable=True
+                    ),
                     draft_control,
                     format_text,
                 ],
@@ -838,7 +852,9 @@ class SmartReviewDialog:
                     path, priority, run_id, ordinal, draft
                 )
             except Exception as exc:  # noqa: BLE001 - UI reports bounded failure
-                self._post(self._apply_draft_result, path, priority, run_id, None, str(exc))
+                self._post(
+                    self._apply_draft_result, path, priority, run_id, None, str(exc)
+                )
                 return
             self._post(self._apply_draft_result, path, priority, run_id, status, None)
 

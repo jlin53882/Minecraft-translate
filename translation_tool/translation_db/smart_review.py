@@ -155,7 +155,9 @@ def _validate_text(value: object, field: str, *, max_length: int) -> str:
     return value
 
 
-def _validate_reason(reason: object, snapshot: SmartReviewSnapshot, decision: str) -> str:
+def _validate_reason(
+    reason: object, snapshot: SmartReviewSnapshot, decision: str
+) -> str:
     value = _validate_text(reason, "reason", max_length=_MAX_REASON_LENGTH).strip()
     if not value:
         raise ValueError("reason 不可為空")
@@ -179,7 +181,9 @@ def _validate_reason(reason: object, snapshot: SmartReviewSnapshot, decision: st
                     for index in range(max(1, len(run) - 3))
                 )
         if not any(anchor and anchor in value for anchor in meaningful_anchors):
-            raise ValueError("suggest_revision 的 reason 必須指出可核對的原文或目前譯文差異")
+            raise ValueError(
+                "suggest_revision 的 reason 必須指出可核對的原文或目前譯文差異"
+            )
     return value
 
 
@@ -305,10 +309,7 @@ class SmartReviewMixin:
     """SQLite operations mixed into :class:`TranslationDB`."""
 
     def _smart_review_has_column(self, table: str, column: str) -> bool:
-        return any(
-            row[1] == column
-            for row in self._q(f"PRAGMA table_info({table})")
-        )
+        return any(row[1] == column for row in self._q(f"PRAGMA table_info({table})"))
 
     def smart_review_candidates(
         self,
@@ -581,7 +582,9 @@ class SmartReviewMixin:
                 }
             )
 
-        def cached_rows(cache_name: str, sql: str, params: tuple[Any, ...]) -> list[tuple]:
+        def cached_rows(
+            cache_name: str, sql: str, params: tuple[Any, ...]
+        ) -> list[tuple]:
             bucket = cache.setdefault(cache_name, {})
             cache_key = params
             if cache_key not in bucket:
@@ -671,7 +674,9 @@ class SmartReviewMixin:
             for source, target in official.unique_tw_by_en.items()
             if source in official_terms and target and source != target
         }
-        for source in sorted(official_by_source, key=lambda value: (-len(value), value))[:8]:
+        for source in sorted(
+            official_by_source, key=lambda value: (-len(value), value)
+        )[:8]:
             record = next(
                 (
                     item
