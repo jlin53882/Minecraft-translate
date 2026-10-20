@@ -221,6 +221,36 @@ def group_indices(path: str | Path, run_id: str, index: int) -> list[int]:
         ]
 
 
+def rebase_item(
+    path: str | Path,
+    run_id: str,
+    index: int,
+    old_translation: str,
+    expected_revision: int,
+) -> bool:
+    """Point an item at the database's current text and revision; it becomes pending again."""
+    with sqlite3.connect(path, timeout=10) as conn:
+        row = conn.execute(
+            "SELECT payload FROM repair_review WHERE run_id=? AND item_index=?",
+            (run_id, index),
+        ).fetchone()
+        if row is None:
+            return False
+        payload = json.loads(row[0])
+        payload["old_translation"] = old_translation
+        payload["expected_revision"] = expected_revision
+        conn.execute(
+            "UPDATE repair_review SET payload=?, status='pending', "
+            "updated_at=CURRENT_TIMESTAMP WHERE run_id=? AND item_index=?",
+            (
+                json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
+                run_id,
+                index,
+            ),
+        )
+    return True
+
+
 def save_review_state(
     path: str | Path, run_id: str, index: int, status: str, draft: str
 ) -> bool:

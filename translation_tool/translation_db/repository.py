@@ -3812,6 +3812,35 @@ class TranslationDB(BulkReviewMixin, CleanupMixin):
             )
         )
 
+    def current_translation_row(
+        self,
+        entry_id: int,
+        source_id: int,
+        *,
+        expected_version: str,
+        expected_kind: str,
+        expected_mod_id: str,
+        expected_key: str,
+        expected_en_us: str,
+    ) -> tuple[str, int] | None:
+        """``(譯文, revision)`` of one source row, or ``None`` when it no longer matches."""
+        row = self._conn.execute(
+            "SELECT t.zh_tw, t.revision FROM translation t "
+            "JOIN entry e ON e.id=t.entry_id "
+            "WHERE t.entry_id=? AND t.source=? AND e.mc_version=? "
+            "AND e.kind=? AND e.mod_id=? AND e.key=? AND e.en_us=?",
+            (
+                entry_id,
+                source_id,
+                expected_version,
+                expected_kind,
+                expected_mod_id,
+                expected_key,
+                expected_en_us,
+            ),
+        ).fetchone()
+        return None if row is None else (row[0], int(row[1]))
+
     def replace_translation_quality_mismatch(
         self,
         entry_id: int,

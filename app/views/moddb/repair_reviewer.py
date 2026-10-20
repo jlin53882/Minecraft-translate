@@ -10,6 +10,7 @@ from app.services_impl import moddb_repair_review_store
 from app.services_impl.moddb_format_diff_service import analyze_format_diagnostics
 from app.services_impl.moddb_retranslate_service import (
     apply_and_record_repair_review,
+    rebase_repair_review_item,
     repair_output_issues_for_kind,
 )
 from app.ui import design
@@ -19,6 +20,19 @@ from app.ui.sync_text_field import SyncTextField
 from app.views.moddb.format_diff_review import FormatDiffReview
 from app.views.moddb.format_diff_viewer import FormatDiffViewer
 from app.views.moddb.formatting import format_count
+
+# 套用被拒絕時的原因說明（``stale:<原因>`` 的原因部分）；空字串是沒有可歸類的原因。
+_STALE_MESSAGES = {
+    "changed": "目前譯文已和審查時不同（可能已被其他操作改過）；草稿保留，請按「重新讀取」以目前譯文為基準。",
+    "not_needed": "目前譯文已經沒有格式問題，不需要修復；草稿保留。",
+    "missing": "找不到這筆譯文，或資料庫已不是建立這次審查的那一個；草稿保留。",
+    "": "沒有寫入：草稿與目前譯文相同，或資料已變動；草稿保留，可按「重新讀取」以目前譯文為基準。",
+}
+_REBASE_MESSAGES = {
+    "rebased": ("已重新讀取：以目前譯文為基準，草稿保留，可再次套用。", C.EM),
+    "not_needed": ("目前譯文已經沒有格式問題，不需要修復。", C.GOLD),
+    "missing": ("找不到這筆譯文，或資料庫已不是建立這次審查的那一個。", C.GOLD),
+}
 
 
 class RepairReviewer:
@@ -54,6 +68,9 @@ class RepairReviewer:
         self.keep_button = ft.OutlinedButton(
             "保留舊譯文", icon=ft.Icons.RESTORE, on_click=self._keep_old
         )
+        self.reload_button = ft.OutlinedButton(
+            "重新讀取", icon=ft.Icons.REFRESH, on_click=self._reload
+        )
         self.apply_button = ft.FilledButton(
             "確認套用", icon=ft.Icons.CHECK, on_click=self._apply
         )
@@ -64,6 +81,7 @@ class RepairReviewer:
             self.previous_button,
             self.next_button,
             self.keep_button,
+            self.reload_button,
             self.apply_button,
             self.close_button,
         ]
@@ -128,7 +146,12 @@ class RepairReviewer:
                         wrap=True,
                     ),
                     ft.Row(
-                        [self.keep_button, self.close_button, self.apply_button],
+                        [
+                            self.keep_button,
+                            self.reload_button,
+                            self.close_button,
+                            self.apply_button,
+                        ],
                         spacing=6,
                         wrap=True,
                     ),
@@ -397,10 +420,22 @@ class RepairReviewer:
         self.format_diff_viewer.render(source, draft, diff_result, kind=kind)
         self.format_review.render(source, draft, diff_result, kind=kind)
 
+    def _is_finished(self) -> bool:
+        return bool(self.item) and self.item.get("review_status") in {
+            "applied",
+            "kept_old",
+        }
+
     def _draft_changed(self, _event=None) -> None:
         if self.applying or self.item is None or self.draft is None:
             return
-        self._save_draft(status="pending")
+        if self._is_finished():
+            self.status.value = (
+                "這筆已完成審查，修改不會保存；要再次套用請先按「重新讀取」。"
+            )
+            self.status.color = C.GOLD
+        else:
+            self._save_draft(status="pending")
         self._update_format_status(
             str(self.item.get("en_us") or ""),
             self.draft.value or "",
@@ -416,7 +451,10 @@ class RepairReviewer:
                 C.EM,
             ),
             "kept_old": ("已保留舊譯文；沒有寫入翻譯資料，也沒有新增歷史。", C.EM),
-            "stale": ("資料已變動；草稿保留，請重新讀取並比較。", C.GOLD),
+            "stale": (
+                _STALE_MESSAGES[""],
+                C.GOLD,
+            ),
             "invalid": ("此筆草稿待確認，可由你決定是否套用。", C.GOLD),
             "pending": ("待審查：尚未套用。", C.MUTED),
         }
@@ -427,7 +465,7 @@ class RepairReviewer:
     def _save_draft(self, _event=None, status=None) -> None:
         if self.applying:
             return
-        if self.item is None or self.draft is None:
+        if self.item is None or self.draft is None or self._is_finished():
             return
         value = self.draft.value or ""
         if status is None:
@@ -626,13 +664,17 @@ class RepairReviewer:
             return
         self.applying = False
         self._set_controls_disabled(False)
-        status = "applied" if result == "applied" else "stale"
-        self.status.value = (
-            "已套用，原來源與歷史均已保留。"
+        status = "applied" if result in ("applied", "already_applied") else "stale"
+        reason = result.partition(":")[2]
+        if result == "already_applied":
+            applied_text = "目前譯文已經等於這份草稿（先前已套用過），不需要再寫入。"
+        else:
+            applied_text = "已套用，原來源與歷史均已保留。"
+        outcome_text = (
+            applied_text
             if status == "applied"
-            else "資料已變動；草稿保留，請重新讀取並比較。"
+            else _STALE_MESSAGES.get(reason, _STALE_MESSAGES[""])
         )
-        self.status.color = C.EM if status == "applied" else C.GOLD
         self.filtered_count = moddb_repair_review_store.index_count(
             self.store_path, self.run_id, self.status_filter, grouped=True
         )
@@ -644,6 +686,10 @@ class RepairReviewer:
         if self.item_indices:
             self.position = min(self.position, len(self.item_indices) - 1)
         self._render()
+        if self.item and self.item.get("item_index") == item.get("item_index"):
+            self.status.value = outcome_text
+            self.status.color = C.EM if status == "applied" else C.GOLD
+            self.page.update()
         counts = moddb_repair_review_store.status_counts(
             self.store_path, self.run_id, grouped=True
         )
@@ -658,10 +704,52 @@ class RepairReviewer:
         else:
             show_snack(
                 self.page,
-                "資料已變動，這次沒有覆蓋原內容；草稿已保留。",
+                f"這次沒有覆蓋原內容。{outcome_text}",
                 C.GOLD,
                 duration=3600,
             )
+
+    def _reload(self, _event=None) -> None:
+        """以資料庫目前的譯文重設這筆審查的基準（草稿保留），讓它可以再次套用。"""
+        if self.applying or self.item is None:
+            return
+        self.applying = True
+        self._set_controls_disabled(True)
+        self.status.value = "正在重新讀取目前譯文…"
+        self.page.update()
+        run_task = getattr(self.page, "run_task", None)
+        if callable(run_task):
+            run_task(self._reload_async, dict(self.item))
+        else:
+            self.applying = False
+            self._set_controls_disabled(False)
+            self.status.value = "目前頁面無法啟動背景工作。"
+            self.page.update()
+
+    async def _reload_async(self, item: dict) -> None:
+        try:
+            result = await asyncio.to_thread(
+                rebase_repair_review_item,
+                item.get("database_identity", ""),
+                self.store_path,
+                self.run_id,
+                item,
+            )
+        except Exception as exc:  # noqa: BLE001 - keep the review as it was
+            result = ""
+            message, color = f"重新讀取失敗，審查資料沒有變動：{exc}", C.GOLD
+        else:
+            message, color = _REBASE_MESSAGES[result]
+        if self.closed:
+            return
+        self.applying = False
+        self._set_controls_disabled(False)
+        if result == "rebased":
+            self._load_index_page()
+            self._render()
+        self.status.value = message
+        self.status.color = color
+        self.page.update()
 
     def _close(self) -> None:
         if self.applying:

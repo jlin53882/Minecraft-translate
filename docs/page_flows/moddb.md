@@ -187,6 +187,10 @@ flowchart TD
     X --> Y["同組 matching_items 的其他條目一併套用，save_review_state 記錄 applied 或 stale"]
 ```
 
+套用被拒絕時，`_diagnose_stale_review_item` 依資料庫現值分類原因並隨結果回傳（`stale:changed`、`stale:not_needed`、`stale:missing`；沒有可歸類原因時是 `stale`），畫面逐項說明：`changed` 現值與審查時不同、`not_needed` 現值已沒有格式問題、`missing` 找不到該列或資料庫已不是建立審查的那一個。現值已等於草稿（先前已套用過）時回傳 `already_applied`，狀態記為 `applied`。
+
+「重新讀取」（`RepairReviewer._reload`）呼叫 `rebase_repair_review_item`：以資料庫現值取代審查項目記錄的舊譯文與 revision，狀態回到待審查、草稿保留，之後可再次套用；現值已沒有格式問題時不改審查資料。已套用或保留舊譯文的項目，修改草稿不會保存也不會降回待審查，要再次套用須先重新讀取。
+
 ### 批次取代
 
 ```mermaid

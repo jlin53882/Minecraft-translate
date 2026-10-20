@@ -1353,6 +1353,70 @@ def _apply_review_item_on(db, item: dict[str, Any], draft: str) -> str:
     return "applied" if result.status == "updated" else "stale"
 
 
+def _review_item_identity(item: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "expected_version": str(item["version"]),
+        "expected_kind": str(item["kind"]),
+        "expected_mod_id": str(item["mod_id"]),
+        "expected_key": str(item["key"]),
+        "expected_en_us": str(item["en_us"]),
+    }
+
+
+def _diagnose_stale_review_item(db, item: dict[str, Any], draft: str) -> str:
+    """Why a review apply was refused: the reason code that follows ``stale:``.
+
+    ``already_applied`` 資料庫現值已等於草稿（先前套用過）；``not_needed`` 現值已沒有格式問題；
+    ``changed`` 現值與審查項目記錄的舊譯文或 revision 不同；``missing`` 找不到這一列；
+    空字串代表沒有可歸類的原因（例如草稿與現值相同）。
+    """
+    if db is None:
+        return "missing"
+    row = db.current_translation_row(
+        int(item["entry_id"]), int(item["source_id"]), **_review_item_identity(item)
+    )
+    if row is None:
+        return "missing"
+    current, revision = row
+    old = str(item["old_translation"])
+    if current == draft:
+        return "already_applied" if current != old else ""
+    eligible, _issues, _mixed = repair_input_issues_for_kind(
+        str(item["en_us"]), current, kind=str(item["kind"])
+    )
+    if not eligible:
+        return "not_needed"
+    expected = item.get("expected_revision")
+    if current != old or (expected is not None and revision != expected):
+        return "changed"
+    return ""
+
+
+_REVIEW_DONE = ("applied", "already_applied")
+
+
+def _apply_review_outcome(db, item: dict[str, Any], draft: str) -> str:
+    """``applied`` / ``already_applied`` / ``stale`` / ``stale:<原因>``（見 ``_diagnose_stale_review_item``）。"""
+    if db is not None and _apply_review_item_on(db, item, draft) == "applied":
+        return "applied"
+    reason = _diagnose_stale_review_item(db, item, draft)
+    if reason == "already_applied":
+        return reason
+    return f"stale:{reason}" if reason else "stale"
+
+
+def _save_review_outcome(
+    store_path: str | Path, run_id: str, item: dict[str, Any], outcome: str, draft: str
+) -> None:
+    moddb_repair_review_store.save_review_state(
+        store_path,
+        run_id,
+        int(item["item_index"]),
+        "applied" if outcome in _REVIEW_DONE else "stale",
+        draft,
+    )
+
+
 def apply_and_record_repair_review(
     database_path: str | Path,
     store_path: str | Path,
@@ -1367,15 +1431,9 @@ def apply_and_record_repair_review(
     """
     db = _open_review_db(database_path, item)
     try:
-        result = _apply_review_item_on(db, item, draft) if db is not None else "stale"
-        moddb_repair_review_store.save_review_state(
-            store_path,
-            run_id,
-            int(item["item_index"]),
-            "applied" if result == "applied" else "stale",
-            draft,
-        )
-        if result != "applied":
+        result = _apply_review_outcome(db, item, draft)
+        _save_review_outcome(store_path, run_id, item, result, draft)
+        if result not in _REVIEW_DONE:
             return result
 
         for sibling in moddb_repair_review_store.matching_items(
@@ -1383,18 +1441,62 @@ def apply_and_record_repair_review(
         ):
             if int(sibling["item_index"]) == int(item["item_index"]):
                 continue
-            sibling_result = _apply_review_item_on(db, sibling, draft)
-            moddb_repair_review_store.save_review_state(
-                store_path,
-                run_id,
-                int(sibling["item_index"]),
-                "applied" if sibling_result == "applied" else "stale",
-                draft,
-            )
+            outcome = _apply_review_outcome(db, sibling, draft)
+            _save_review_outcome(store_path, run_id, sibling, outcome, draft)
         return result
     finally:
         if db is not None:
             db.close()
+
+
+def rebase_repair_review_item(
+    database_path: str | Path,
+    store_path: str | Path,
+    run_id: str,
+    item: dict[str, Any],
+) -> str:
+    """Re-read the database and make its current text the baseline of this review.
+
+    Returns ``rebased``, ``not_needed`` (目前譯文已沒有格式問題，不改審查資料) or
+    ``missing`` (找不到這一列，或資料庫已不是建立這次審查的那一個)。
+    重設後狀態回到待審查，草稿保留，可以對現值重新套用。
+    """
+    db = _open_review_db(database_path, item)
+    if db is None:
+        return "missing"
+    try:
+        members = [
+            member
+            for member in moddb_repair_review_store.matching_items(
+                store_path, run_id, item, statuses=("pending", "invalid", "stale")
+            )
+            if int(member["item_index"]) != int(item["item_index"])
+        ]
+        outcomes = [
+            _rebase_one_review_item(db, store_path, run_id, member)
+            for member in [item, *members]
+        ]
+    finally:
+        db.close()
+    return outcomes[0]
+
+
+def _rebase_one_review_item(db, store_path, run_id, item: dict[str, Any]) -> str:
+    row = db.current_translation_row(
+        int(item["entry_id"]), int(item["source_id"]), **_review_item_identity(item)
+    )
+    if row is None:
+        return "missing"
+    current, revision = row
+    eligible, _issues, _mixed = repair_input_issues_for_kind(
+        str(item["en_us"]), current, kind=str(item["kind"])
+    )
+    if not eligible:
+        return "not_needed"
+    moddb_repair_review_store.rebase_item(
+        store_path, run_id, int(item["item_index"]), current, revision
+    )
+    return "rebased"
 
 
 def _finish_snapshot(db, options, session, report, tracker) -> None:

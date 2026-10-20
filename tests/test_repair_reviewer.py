@@ -578,3 +578,89 @@ def test_guide_repair_draft_with_broken_link_is_flagged_not_reported_as_passing(
 
     assert "連結目標" in reviewer.format_status.value
     assert reviewer.format_status.value != "格式檢查通過。"
+
+
+def _finished_item(tmp_path, run_id, status):
+    path = store.create_run(tmp_path / f"{run_id}.db", run_id)
+    index = store.append_item(
+        path,
+        run_id,
+        {
+            "key": "repair.done",
+            "version": "1.21.1",
+            "mod_id": "foo",
+            "kind": "lang",
+            "source_id": 0,
+            "en_us": "Use %s",
+            "old_translation": "使用",
+            "ai_translation": "使用 %s",
+            "draft": "使用 %s",
+        },
+    )
+    store.save_review_state(path, run_id, index, status, "使用 %s")
+    return path, index
+
+
+def test_editing_an_applied_item_does_not_reopen_it(tmp_path):
+    path, index = _finished_item(tmp_path, "run-edit-applied", "applied")
+    reviewer = RepairReviewer(mock_page(), str(path), "run-edit-applied")
+    reviewer.status_filter = "all"
+    reviewer.open()
+
+    reviewer.draft.value = "改過的草稿 %s"
+    reviewer._draft_changed()
+    reviewer._save_draft()
+
+    saved = store.load_item(path, "run-edit-applied", index)
+    assert saved["review_status"] == "applied"
+    assert saved["draft"] == "使用 %s"
+    assert "重新讀取" in reviewer.status.value
+
+
+def test_reload_button_rebases_the_item_and_shows_the_result(tmp_path, monkeypatch):
+    import asyncio
+
+    path, index = _finished_item(tmp_path, "run-reload", "stale")
+    seen = []
+
+    def fake_rebase(database_path, store_path, run_id, item):
+        seen.append(item["item_index"])
+        store.rebase_item(store_path, run_id, item["item_index"], "目前", 7)
+        return "rebased"
+
+    monkeypatch.setattr(
+        "app.views.moddb.repair_reviewer.rebase_repair_review_item", fake_rebase
+    )
+    page = mock_page()
+    reviewer = RepairReviewer(page, str(path), "run-reload")
+    reviewer.status_filter = "all"
+    reviewer.open()
+
+    reviewer._reload()
+    task_coro, args = page._tasks.pop()
+    asyncio.run(task_coro(*args))
+
+    assert seen == [index]
+    loaded = store.load_item(path, "run-reload", index)
+    assert loaded["review_status"] == "pending"
+    assert loaded["old_translation"] == "目前"
+    assert reviewer.applying is False
+    assert "已重新讀取" in reviewer.status.value
+
+
+def test_stale_apply_shows_the_specific_reason(tmp_path, monkeypatch):
+    import asyncio
+
+    path, _index = _finished_item(tmp_path, "run-reason", "pending")
+    monkeypatch.setattr(
+        "app.views.moddb.repair_reviewer.apply_and_record_repair_review",
+        lambda *_args: "stale:not_needed",
+    )
+    page = mock_page()
+    reviewer = RepairReviewer(page, str(path), "run-reason")
+    reviewer.status_filter = "all"
+    reviewer.open()
+
+    asyncio.run(reviewer._apply_async(dict(reviewer.item), "使用 %s"))
+
+    assert "已經沒有格式問題" in reviewer.status.value

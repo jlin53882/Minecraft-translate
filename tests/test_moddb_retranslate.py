@@ -2868,3 +2868,134 @@ def test_automatic_repair_sync_skips_versions_where_the_source_is_not_effective(
     assert _translation_row(db, hidden.id, SRC_AI) == "使用"
     assert _translation_row(db, other.id, SRC_AI) == "使用 %s"
     db.close()
+
+
+def _stale_review(db_path, run_id, *, old="Use"):
+    """A review item whose entry holds ``old`` (a placeholder-less text, so it needs repair)."""
+    db = TranslationDB(db_path)
+    entry = _ai_entry(db, key=f"review-{run_id}", en="Use %s")
+    db._conn.execute(
+        "UPDATE translation SET zh_tw=? WHERE entry_id=? AND source=?",
+        (old, entry.id, SRC_AI),
+    )
+    db._conn.commit()
+    item = {
+        "entry_id": entry.id,
+        "version": entry.mc_version,
+        "mod_id": entry.mod_id,
+        "kind": entry.kind,
+        "source_id": SRC_AI,
+        "key": entry.key,
+        "en_us": entry.en_us,
+        "old_translation": old,
+        "expected_revision": _translation_revision(db, entry.id, SRC_AI),
+        "database_identity": str(db_path.resolve()),
+        "database_file_id": db_path.stat().st_ino,
+        "database_priority": db.priority,
+    }
+    db.close()
+    store = moddb_repair_review_store.create_run(db_path, run_id)
+    index = moddb_repair_review_store.append_item(store, run_id, item)
+    return store, moddb_repair_review_store.load_item(store, run_id, index)
+
+
+def _review_apply(db_path, store, run_id, item, draft):
+    return moddb_retranslate_service.apply_and_record_repair_review(
+        db_path, store, run_id, item, draft
+    )
+
+
+def test_review_reapplying_the_same_draft_reports_already_applied(db_path):
+    store, item = _stale_review(db_path, "run-again")
+
+    assert _review_apply(db_path, store, "run-again", item, "人工草稿") == "applied"
+    assert (
+        _review_apply(db_path, store, "run-again", item, "人工草稿")
+        == "already_applied"
+    )
+    status = moddb_repair_review_store.load_item(store, "run-again", item["item_index"])
+    assert status["review_status"] == "applied"
+
+
+def test_review_apply_with_a_different_draft_after_apply_says_text_changed(db_path):
+    store, item = _stale_review(db_path, "run-changed")
+    _review_apply(db_path, store, "run-changed", item, "人工草稿")
+
+    assert (
+        _review_apply(db_path, store, "run-changed", item, "另一份草稿")
+        == "stale:changed"
+    )
+    status = moddb_repair_review_store.load_item(
+        store, "run-changed", item["item_index"]
+    )
+    assert status["review_status"] == "stale"
+    assert status["draft"] == "另一份草稿"
+
+
+def test_review_apply_says_not_needed_when_current_text_has_no_issue(db_path):
+    store, item = _stale_review(db_path, "run-fine")
+    db = TranslationDB(db_path)
+    db._conn.execute(
+        "UPDATE translation SET zh_tw='使用 %s', revision=revision+1 "
+        "WHERE entry_id=? AND source=?",
+        (item["entry_id"], SRC_AI),
+    )
+    db._conn.commit()
+    db.close()
+
+    assert _review_apply(db_path, store, "run-fine", item, "草稿") == "stale:not_needed"
+
+
+def test_review_apply_says_missing_when_the_database_is_not_the_reviewed_one(db_path):
+    store, item = _stale_review(db_path, "run-gone")
+    item["database_identity"] = str(db_path.with_name("other.db"))
+
+    assert _review_apply(db_path, store, "run-gone", item, "草稿") == "stale:missing"
+
+
+def test_review_apply_without_a_reason_stays_plain_stale(db_path):
+    store, item = _stale_review(db_path, "run-same")
+
+    assert _review_apply(db_path, store, "run-same", item, "Use") == "stale"
+
+
+def test_rebase_lets_an_applied_item_be_applied_again_with_a_new_draft(db_path):
+    store, item = _stale_review(db_path, "run-rebase")
+    _review_apply(db_path, store, "run-rebase", item, "人工草稿")
+
+    assert (
+        moddb_retranslate_service.rebase_repair_review_item(
+            db_path, store, "run-rebase", item
+        )
+        == "rebased"
+    )
+    fresh = moddb_repair_review_store.load_item(store, "run-rebase", item["item_index"])
+    assert fresh["review_status"] == "pending"
+    assert fresh["old_translation"] == "人工草稿"
+    assert _review_apply(db_path, store, "run-rebase", fresh, "再次修改") == "applied"
+    check = TranslationDB(db_path)
+    stored = check.entry_detail(item["entry_id"]).translations
+    assert next(row for row in stored if row.source == SRC_AI).zh_tw == "再次修改"
+    check.close()
+
+
+def test_rebase_leaves_the_review_alone_when_the_text_needs_no_repair(db_path):
+    store, item = _stale_review(db_path, "run-rebase-fine")
+    db = TranslationDB(db_path)
+    db._conn.execute(
+        "UPDATE translation SET zh_tw='使用 %s' WHERE entry_id=? AND source=?",
+        (item["entry_id"], SRC_AI),
+    )
+    db._conn.commit()
+    db.close()
+
+    assert (
+        moddb_retranslate_service.rebase_repair_review_item(
+            db_path, store, "run-rebase-fine", item
+        )
+        == "not_needed"
+    )
+    same = moddb_repair_review_store.load_item(
+        store, "run-rebase-fine", item["item_index"]
+    )
+    assert same["old_translation"] == "Use"
