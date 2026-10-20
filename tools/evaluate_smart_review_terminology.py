@@ -90,7 +90,9 @@ def _is_named_key(candidate) -> bool:
     return candidate.kind == "lang" and candidate.key.startswith(NAMED_KEY_PREFIXES)
 
 
-def _summary(rows: list[tuple[object, str]]) -> dict[str, object]:
+def _summary(
+    rows: list[tuple[object, str]], *, evaluation_available: bool = True
+) -> dict[str, object]:
     total = len(rows)
     emitted = 0
     exact = 0
@@ -101,6 +103,8 @@ def _summary(rows: list[tuple[object, str]]) -> dict[str, object]:
         baseline_hit = _compact(candidate.current_zh_tw) == reference
         if baseline_hit:
             baseline_exact += 1
+        if not evaluation_available:
+            continue
         output = _candidate_output(candidate)
         if output is None:
             continue
@@ -112,7 +116,7 @@ def _summary(rows: list[tuple[object, str]]) -> dict[str, object]:
             improved += 1
         elif baseline_hit and not model_hit:
             regressed += 1
-    return {
+    result = {
         "gold_scored": total,
         "emitted_output": emitted,
         "invalid_or_no_output": total - emitted,
@@ -123,10 +127,26 @@ def _summary(rows: list[tuple[object, str]]) -> dict[str, object]:
         "model_exact_rate_on_emitted": (round(exact / emitted, 4) if emitted else None),
         "improved": improved,
         "regressed": regressed,
+        "evaluation_available": evaluation_available,
     }
+    if not evaluation_available:
+        result.update(
+            {
+                "emitted_output": None,
+                "invalid_or_no_output": None,
+                "model_exact": None,
+                "model_exact_rate_on_all": None,
+                "model_exact_rate_on_emitted": None,
+                "improved": None,
+                "regressed": None,
+            }
+        )
+    return result
 
 
-def _glossary_summary(candidates: list[object]) -> dict[str, object]:
+def _glossary_summary(
+    candidates: list[object], *, evaluation_available: bool = True
+) -> dict[str, object]:
     total = emitted = baseline_hits = baseline_emitted_hits = model_hits = 0
     corrected = false_revision = abstained = 0
     seen: set[tuple[str, str, str, str, str, str, str]] = set()
@@ -157,6 +177,8 @@ def _glossary_summary(candidates: list[object]) -> dict[str, object]:
             baseline_hit = expected in _compact(candidate.current_zh_tw)
             if baseline_hit:
                 baseline_hits += 1
+            if not evaluation_available:
+                continue
             if output is None:
                 abstained += 1
                 continue
@@ -168,7 +190,7 @@ def _glossary_summary(candidates: list[object]) -> dict[str, object]:
                 model_hits += 1
             corrected += int(not baseline_hit and model_hit)
             false_revision += int(baseline_hit and not model_hit)
-    return {
+    result = {
         "term_references": total,
         "term_emitted": emitted,
         "term_abstained": abstained,
@@ -185,7 +207,23 @@ def _glossary_summary(candidates: list[object]) -> dict[str, object]:
         ),
         "corrected": corrected,
         "false_revision": false_revision,
+        "evaluation_available": evaluation_available,
     }
+    if not evaluation_available:
+        result.update(
+            {
+                "term_emitted": None,
+                "term_abstained": None,
+                "term_coverage": None,
+                "model_term_hits": None,
+                "model_term_hit_rate_on_all": None,
+                "model_term_hit_rate_on_emitted": None,
+                "baseline_term_hit_rate_on_emitted": None,
+                "corrected": None,
+                "false_revision": None,
+            }
+        )
+    return result
 
 
 def _label_key(item: dict[str, object]) -> tuple[str, str, str, str]:
@@ -238,9 +276,12 @@ def _accepted_terms(label: dict[str, object]) -> list[tuple[str, tuple[str, ...]
 def _manual_terminology_summary(
     candidates: list[object],
     labels: dict[tuple[str, str, str, str], dict[str, object]],
+    *,
+    evaluation_available: bool = True,
 ) -> dict[str, object]:
     matched = scored = correct = incorrect = abstained = 0
-    baseline_correct = corrected = false_revision = term_total = term_correct = 0
+    baseline_correct = corrected = false_revision = term_total = 0
+    emitted_term_total = term_correct = 0
     for candidate in candidates:
         label = labels.get(
             (candidate.kind, candidate.mod_id, candidate.key, candidate.en_us)
@@ -258,11 +299,14 @@ def _manual_terminology_summary(
             for _source, accepted in terms
         )
         baseline_correct += int(baseline_ok)
+        if not evaluation_available:
+            continue
         output = _candidate_output(candidate)
         if output is None:
             abstained += 1
             continue
         scored += 1
+        emitted_term_total += len(terms)
         compact_output = _compact(output)
         model_ok = all(
             any(expected in compact_output for expected in accepted)
@@ -278,7 +322,7 @@ def _manual_terminology_summary(
             incorrect += 1
         corrected += int(not baseline_ok and model_ok)
         false_revision += int(baseline_ok and not model_ok)
-    return {
+    result = {
         "labelled_candidates": matched,
         "model_scored": scored,
         "abstained_or_no_output": abstained,
@@ -289,12 +333,52 @@ def _manual_terminology_summary(
             round(correct / scored, 4) if scored else None
         ),
         "model_term_accuracy_on_emitted": (
-            round(term_correct / term_total, 4) if term_total and scored else None
+            round(term_correct / emitted_term_total, 4)
+            if emitted_term_total
+            else None
         ),
         "corrected": corrected,
         "false_revision": false_revision,
         "incorrect": incorrect,
+        "evaluation_available": evaluation_available,
     }
+    if not evaluation_available:
+        result.update(
+            {
+                "model_scored": None,
+                "abstained_or_no_output": None,
+                "coverage_on_labels": None,
+                "model_terminology_correct": None,
+                "model_terminology_accuracy_on_emitted": None,
+                "model_term_accuracy_on_emitted": None,
+                "corrected": None,
+                "false_revision": None,
+                "incorrect": None,
+            }
+        )
+    return result
+
+
+def _evaluation_state(
+    run: dict[str, object], candidates: list[object]
+) -> tuple[bool, str | None]:
+    """Keep provider failures out of model-accuracy denominators."""
+    if not candidates:
+        return True, None
+    valid_count = int(run.get("valid_count") or 0)
+    request_errors = int(run.get("request_error_count") or 0)
+    status = str(run.get("status") or "")
+    if status not in {"completed", "failed", "cancelled", "partial"}:
+        return False, f"run is not finished (status={status or 'unknown'})"
+    if valid_count > 0:
+        return True, None
+    if request_errors:
+        return False, f"provider requests failed ({request_errors})"
+    if status in {"failed", "cancelled", "partial"}:
+        return False, f"run ended without valid model output (status={status})"
+    if int(run.get("invalid_count") or 0) > 0:
+        return False, "provider returned no valid candidate output"
+    return True, None
 
 
 def main() -> int:
@@ -311,6 +395,9 @@ def main() -> int:
     finally:
         db.close()
 
+    evaluation_available, evaluation_unavailable_reason = _evaluation_state(
+        run, candidates
+    )
     references = _references(db_path)
     gold_rows = [
         (
@@ -350,14 +437,26 @@ def main() -> int:
         "gold_reference_candidates": len(gold_rows),
         "no_reference_candidates": len(candidates) - len(gold_rows),
         "decision_counts": dict(decision_counts),
-        "unique_reviewed_reference_exact_match": _summary(gold_rows),
-        "named_key_unique_reference_exact_match": _summary(named_rows),
-        "suggestion_unique_reference_exact_match": _summary(suggestion_rows),
-        "named_key_suggestion_unique_reference_exact_match": _summary(
-            named_suggestion_rows
+        "evaluation_available": evaluation_available,
+        "evaluation_unavailable_reason": evaluation_unavailable_reason,
+        "unique_reviewed_reference_exact_match": _summary(
+            gold_rows, evaluation_available=evaluation_available
         ),
-        "reviewed_glossary_term_match": _glossary_summary(candidates),
-        "manual_terminology_labels": _manual_terminology_summary(candidates, labels),
+        "named_key_unique_reference_exact_match": _summary(
+            named_rows, evaluation_available=evaluation_available
+        ),
+        "suggestion_unique_reference_exact_match": _summary(
+            suggestion_rows, evaluation_available=evaluation_available
+        ),
+        "named_key_suggestion_unique_reference_exact_match": _summary(
+            named_suggestion_rows, evaluation_available=evaluation_available
+        ),
+        "reviewed_glossary_term_match": _glossary_summary(
+            candidates, evaluation_available=evaluation_available
+        ),
+        "manual_terminology_labels": _manual_terminology_summary(
+            candidates, labels, evaluation_available=evaluation_available
+        ),
         "note": (
             "Unique reviewed reference matching requires the same kind, module, key, "
             "and English source text. It is reference evidence, not semantic accuracy. "

@@ -4,6 +4,7 @@ import json
 import sqlite3
 
 import pytest
+import requests
 
 from translation_tool.translation_db import (
     KIND_ADVANCEMENT,
@@ -18,6 +19,7 @@ from translation_tool.translation_db.schema import SRC_AI, SRC_MANUAL
 from translation_tool.translation_db.smart_review import (
     parse_smart_review_response,
     run_smart_review,
+    smart_review_response_schema,
 )
 
 
@@ -47,6 +49,22 @@ def test_snapshot_uses_implicit_unreviewed_for_non_manual_sources(db):
     assert all(item.effective_source != SRC_MANUAL for item in snapshots)
 
 
+@pytest.mark.parametrize(
+    "filters",
+    [
+        {"effective_source": SRC_AI},
+        {"kind": KIND_LANG, "query": "hello"},
+        {"review_status": "unreviewed", "mod_id": "demo"},
+    ],
+)
+def test_candidate_count_uses_the_same_scope_as_rows(db, filters):
+    snapshots = db.smart_review_candidates(version="1.21.1", limit=1000, **filters)
+
+    assert db.count_smart_review_candidates(version="1.21.1", **filters) == len(
+        snapshots
+    )
+
+
 def test_snapshot_can_require_unique_reviewed_same_key_reference(db):
     db.write_back(
         "1.20.1",
@@ -62,6 +80,12 @@ def test_snapshot_can_require_unique_reviewed_same_key_reference(db):
         version="1.20.1", limit=1000, require_reviewed_reference=True
     )
     assert [item.key for item in snapshots] == ["hello"]
+    assert (
+        db.count_smart_review_candidates(
+            version="1.20.1", require_reviewed_reference=True
+        )
+        == len(snapshots)
+    )
 
 
 def test_reviewed_reference_requires_same_english_source(db):
@@ -390,6 +414,114 @@ def test_request_failures_and_cancellation_are_distinct_from_invalid(db, monkeyp
     ] == ["cancelled", "cancelled"]
 
 
+def test_smart_review_schema_keeps_provider_unsupported_limits_local():
+    reason_schema = smart_review_response_schema(["1"])["properties"]["items"][
+        "items"
+    ]["properties"]["reason"]
+
+    assert reason_schema == {"type": "string"}
+
+
+def test_smart_review_forwards_chatgpt_runtime_options(db, monkeypatch):
+    captured = {}
+
+    def fake_call(**kwargs):
+        captured.update(kwargs)
+        item = kwargs["payload"]["items"][0]
+        return json.dumps(
+            {
+                "items": [
+                    {
+                        "id": item["id"],
+                        "decision": "no_change",
+                        "suggested_zh_tw": "",
+                        "issue_types": [],
+                        "evidence_ids": [],
+                        "confidence": 0.8,
+                        "reason": "目前譯文可保留。",
+                    }
+                ]
+            }
+        )
+
+    monkeypatch.setattr(
+        "translation_tool.translation_db.smart_review.call_gemini_requests",
+        fake_call,
+    )
+    monkeypatch.setattr(
+        "translation_tool.translation_db.smart_review.chatgpt_account_status",
+        lambda: {"active_profile_id": "profile-a"},
+    )
+
+    result = run_smart_review(
+        db,
+        model_name="gpt-5.6-luna",
+        provider="chatgpt",
+        api_key="",
+        lm_config={
+            "fast": True,
+            "chatgpt_model_profile_id": "profile-a",
+            "chatgpt_model_settings": {
+                "gpt-5.6-luna": {"reasoning_effort": "high"}
+            },
+        },
+        limit=1,
+    )
+
+    assert result.valid_count == 1
+    assert captured["fast"] is True
+    assert captured["reasoning_effort"] == "high"
+    assert captured["profile_id"] == "profile-a"
+
+
+def test_smart_review_rotates_gemini_key_for_retryable_http_error(db, monkeypatch):
+    from translation_tool.core import lm_config_rules
+
+    calls = []
+
+    def fake_call(**kwargs):
+        calls.append(kwargs["api_key"])
+        if len(calls) == 1:
+            response = requests.Response()
+            response.status_code = 429
+            raise requests.HTTPError(response=response)
+        item = kwargs["payload"]["items"][0]
+        return json.dumps(
+            {
+                "items": [
+                    {
+                        "id": item["id"],
+                        "decision": "no_change",
+                        "suggested_zh_tw": "",
+                        "issue_types": [],
+                        "evidence_ids": [],
+                        "confidence": 0.8,
+                        "reason": "目前譯文可保留。",
+                    }
+                ]
+            }
+        )
+
+    monkeypatch.setattr(
+        "translation_tool.translation_db.smart_review.call_gemini_requests",
+        fake_call,
+    )
+    monkeypatch.setattr(lm_config_rules, "_get_all_keys", lambda: ["key0", "key1"])
+    lm_config_rules._key_tracker.reset()
+
+    result = run_smart_review(
+        db,
+        model_name="gemini-test",
+        api_key="",
+        limit=1,
+    )
+
+    assert result.valid_count == 1
+    assert result.request_error_count == 0
+    assert calls == ["key0", "key1"]
+    lm_config_rules._key_tracker.reset()
+
+
 def test_apply_candidate_is_cas_guarded_and_writes_history(db, monkeypatch):
     def fake_call(**kwargs):
         return json.dumps(
@@ -554,6 +686,37 @@ def test_smart_review_model_options_keep_gemini_preference_for_gemini():
     ]
 
 
+def test_smart_review_service_passes_nested_lm_config(monkeypatch, tmp_path):
+    from app.services_impl import moddb_smart_review_service as service
+
+    config = {"lm_translator": {"request_interval_sec": 0}, "unrelated": True}
+    captured = {}
+
+    class FakeDB:
+        def close(self):
+            captured["closed"] = True
+
+    def fake_run(db, **kwargs):
+        captured.update(kwargs)
+        assert db is fake_db
+        return "result"
+
+    fake_db = FakeDB()
+    monkeypatch.setattr(service, "load_config", lambda: config)
+    monkeypatch.setattr(service, "get_translation_provider", lambda: "gemini")
+    monkeypatch.setattr(service, "_open", lambda *args, **kwargs: fake_db)
+    monkeypatch.setattr(service, "run_smart_review", fake_run)
+
+    result = service.run_moddb_smart_review_from_path(
+        tmp_path / "db.sqlite", (), model_name="gemini-test", limit=1
+    )
+
+    assert result == "result"
+    assert captured["lm_config"] == config["lm_translator"]
+    assert captured["api_key"] == ""
+    assert captured["closed"] is True
+
+
 def test_smart_review_dialog_builds_preview_and_run_controls(db, monkeypatch):
     monkeypatch.setattr(
         "app.services_impl.moddb_smart_review_service.load_config",
@@ -572,6 +735,24 @@ def test_smart_review_dialog_builds_preview_and_run_controls(db, monkeypatch):
     assert dialog.model_dd.value == "gemini-3.1-flash-lite"
     assert dialog.limit_field.value == "1000"
     assert dialog.run_btn.disabled is False
+
+
+def test_smart_review_apply_notifies_parent_after_reloading_candidates(monkeypatch):
+    from app.views.moddb import smart_review_dialog as module
+
+    dialog = module.SmartReviewDialog.__new__(module.SmartReviewDialog)
+    calls = []
+    dialog.page = None
+    dialog.on_complete = lambda: calls.append("parent")
+    dialog._set_busy = lambda busy, message: calls.append((busy, message))
+    dialog._load_candidates = lambda *args: calls.append(("reload", args))
+    dialog._safe_update = lambda: calls.append("update")
+    monkeypatch.setattr(module, "show_snack", lambda *args: None)
+
+    dialog._apply_candidate_result("db", (1,), "run", "applied", None)
+
+    assert calls[1] == ("reload", ("db", (1,), "run"))
+    assert calls[2] == "parent"
 
 
 def test_v7_smart_review_is_readable_and_migrates_to_v8(tmp_path):

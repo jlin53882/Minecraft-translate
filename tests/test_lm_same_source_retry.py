@@ -842,6 +842,7 @@ def test_prepare_batch_refreshes_token_budget_after_session_history_grows(
     main._prepare_batch(runtime)
     first_budget = runtime.batch_fit_input_tokens
     runtime.remaining_items = runtime.remaining_items[1:]
+    runtime.remaining_item_ids = runtime.remaining_item_ids[1:]
     runtime.conversation_history.extend(
         [
             {"role": "user", "text": '{"items":[{"id":"0","value":"First"}]}'},
@@ -852,6 +853,36 @@ def test_prepare_batch_refreshes_token_budget_after_session_history_grows(
     main._prepare_batch(runtime)
 
     assert runtime.batch_fit_input_tokens > first_budget
+
+
+def test_prepare_batch_keeps_payload_ids_stable_across_internal_slices(
+    configure_batch,
+):
+    configure_batch()
+    items = [_item("First", 0), _item("Second", 1)]
+    runtime = main._build_batch_runtime(items, len(items))
+    runtime.batch_size = 1
+
+    first = main._prepare_batch(runtime)
+    runtime.remaining_items = runtime.remaining_items[1:]
+    runtime.remaining_item_ids = runtime.remaining_item_ids[1:]
+    second = main._prepare_batch(runtime)
+
+    assert first.payload["items"][0]["id"] == "0"
+    assert second.payload["items"][0]["id"] == "1"
+    assert second.id_to_item["1"] is items[1]
+
+
+def test_prepare_batch_keeps_repeated_item_references_distinct(configure_batch):
+    configure_batch()
+    item = _item("Repeated", 0)
+    runtime = main._build_batch_runtime([item, item], 2)
+    runtime.batch_size = 2
+
+    round_data = main._prepare_batch(runtime)
+
+    assert [entry["id"] for entry in round_data.payload["items"]] == ["0", "1"]
+    assert round_data.id_to_item == {"0": item, "1": item}
 
 
 @pytest.mark.parametrize(

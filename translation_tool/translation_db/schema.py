@@ -638,6 +638,8 @@ def _install_smart_review_objects(conn: sqlite3.Connection) -> None:
         );
         CREATE INDEX IF NOT EXISTS idx_smart_review_run_status
             ON smart_review_run (status, started_at);
+        CREATE INDEX IF NOT EXISTS idx_smart_review_run_order
+            ON smart_review_run (started_at DESC, id DESC);
 
         CREATE TABLE IF NOT EXISTS smart_review_candidate (
             run_id TEXT NOT NULL REFERENCES smart_review_run (id) ON DELETE CASCADE,
@@ -678,6 +680,22 @@ def _install_smart_review_objects(conn: sqlite3.Connection) -> None:
             ON smart_review_candidate (entry_id, run_id);
         CREATE INDEX IF NOT EXISTS idx_smart_review_context_key
             ON entry (kind, mod_id, key, mc_version, id);
+        CREATE INDEX IF NOT EXISTS idx_smart_review_named_order
+            ON entry (
+                (CASE WHEN kind='lang' AND (
+                    key LIKE 'item.%' OR key LIKE 'block.%' OR
+                    key LIKE 'entity.%' OR key LIKE 'biome.%' OR
+                    key LIKE 'effect.%' OR key LIKE 'fluid.%' OR
+                    key LIKE 'enchantment.%' OR key LIKE 'dimension.%' OR
+                    key LIKE 'painting.%' OR key LIKE 'trim_pattern.%' OR
+                    key LIKE 'instrument.%' OR key LIKE 'banner.%'
+                ) THEN 0 ELSE 1 END),
+                mc_version, mod_id, kind, key, id
+            );
+        CREATE INDEX IF NOT EXISTS idx_smart_review_glossary_order
+            ON entry (kind, mod_id, mc_version, id);
+        CREATE INDEX IF NOT EXISTS idx_smart_review_same_text_order
+            ON entry (en_us, mod_id, kind, key, id);
         """
     )
 

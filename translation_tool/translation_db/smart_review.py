@@ -16,9 +16,15 @@ import re
 import time
 import uuid
 from collections.abc import Callable, Sequence
+from dataclasses import dataclass
 from typing import Any
 
+import requests
+
+from translation_tool.core.codex_oauth import chatgpt_account_status
 from translation_tool.core.lm_api_client import call_gemini_requests
+from translation_tool.core.lm_config_rules import ApiKeyCycle, get_api_key_count
+from translation_tool.core.lm_config_schema import chatgpt_model_reasoning_effort
 from translation_tool.core.official_locale import (
     load_official_locale_index,
     normalize_terminology_text,
@@ -93,7 +99,10 @@ def smart_review_response_schema(ids: Sequence[str]) -> dict[str, Any]:
                             "items": {"type": "string"},
                         },
                         "confidence": {"type": "number"},
-                        "reason": {"type": "string", "maxLength": _MAX_REASON_LENGTH},
+                        # Keep length enforcement local in ``_validate_reason``.
+                        # Gemini's structured-output schema supports only a
+                        # subset of JSON Schema and rejects ``maxLength``.
+                        "reason": {"type": "string"},
                     },
                     "required": [
                         "id",
@@ -310,6 +319,119 @@ def _response_reason(raw: object) -> str | None:
     return reason if isinstance(reason, str) else None
 
 
+def _effective_review_sql(alias: str = "f") -> str:
+    """Return the one effective review-status rule used by smart-review SQL."""
+    return (
+        f"CASE WHEN {alias}.review_status IN ('unreviewed', 'reviewed', 'legacy_unknown') "
+        f"THEN {alias}.review_status WHEN {alias}.source={SRC_MANUAL} "
+        f"THEN 'legacy_unknown' WHEN {alias}.source IS NOT NULL THEN 'unreviewed' END"
+    )
+
+
+def _smart_review_current_snapshot_sql() -> str:
+    """Return the CAS snapshot query shared by draft-save and apply paths."""
+    return (
+        "SELECT e.kind, e.mc_version, e.mod_id, e.key, e.en_us, f.zh_tw, f.source, "
+        + _effective_review_sql()
+        + ", t.revision FROM entry e JOIN effective f ON f.entry_id=e.id "
+        "LEFT JOIN translation t ON t.entry_id=f.entry_id AND t.source=f.source "
+        "WHERE f.entry_id=?"
+    )
+
+
+@dataclass(frozen=True)
+class _SmartReviewSelection:
+    """Shared SQL fragments for candidate rows and their count."""
+
+    effective_review: str
+    where_sql: str
+    params: tuple[Any, ...]
+    reference_cte: str
+    reference_join: str
+    order_sql: str
+
+
+def _build_smart_review_selection(
+    *,
+    version: str | None,
+    mod_id: str | None,
+    kind: str | None,
+    effective_source: int | None,
+    review_status: str,
+    query: str | None,
+    require_reviewed_reference: bool,
+    prioritize_named_keys: bool = False,
+) -> _SmartReviewSelection:
+    """Build one authoritative candidate scope for rows and count queries."""
+    effective_review = _effective_review_sql()
+    if review_status not in {"unreviewed", "reviewed", "legacy_unknown"}:
+        raise ValueError("smart review 不支援的審核狀態")
+
+    where = [
+        f"({effective_review}) = ?",
+        "f.zh_tw <> ''",
+        "e.en_us <> ''",
+    ]
+    params: list[Any] = [review_status]
+    if version:
+        where.append("e.mc_version = ?")
+        params.append(version)
+    if mod_id:
+        where.append("e.mod_id = ?")
+        params.append(mod_id)
+    if kind:
+        where.append("e.kind = ?")
+        params.append(kind)
+    if effective_source is not None:
+        where.append("f.source = ?")
+        params.append(int(effective_source))
+    if query and query.strip():
+        needle = f"%{query.strip()}%"
+        where.append("(e.key LIKE ? OR e.en_us LIKE ? OR f.zh_tw LIKE ?)")
+        params.extend((needle, needle, needle))
+
+    reference_cte = ""
+    reference_join = ""
+    if require_reviewed_reference:
+        reference_cte = (
+            "WITH reviewed_reference AS ("
+            "SELECT r.kind, r.mod_id, r.key, r.en_us "
+            "FROM entry r JOIN translation rf ON rf.entry_id=r.id "
+            "WHERE rf.review_status='reviewed' AND trim(rf.zh_tw)<>'' "
+            "AND r.en_us<>'' "
+            "GROUP BY r.kind, r.mod_id, r.key, r.en_us "
+            "HAVING COUNT(DISTINCT trim(rf.zh_tw))=1"
+            ") "
+        )
+        reference_join = (
+            "JOIN reviewed_reference rr "
+            "ON rr.kind=e.kind AND rr.mod_id=e.mod_id AND rr.key=e.key "
+            "AND rr.en_us=e.en_us "
+        )
+
+    order_prefix = ""
+    if prioritize_named_keys:
+        order_prefix = (
+            "CASE WHEN e.kind='lang' AND ("
+            "e.key LIKE 'item.%' OR e.key LIKE 'block.%' OR "
+            "e.key LIKE 'entity.%' OR e.key LIKE 'biome.%' OR "
+            "e.key LIKE 'effect.%' OR e.key LIKE 'fluid.%' OR "
+            "e.key LIKE 'enchantment.%' OR e.key LIKE 'dimension.%' OR "
+            "e.key LIKE 'painting.%' OR e.key LIKE 'trim_pattern.%' OR "
+            "e.key LIKE 'instrument.%' OR e.key LIKE 'banner.%'"
+            ") THEN 0 ELSE 1 END, "
+        )
+
+    return _SmartReviewSelection(
+        effective_review=effective_review,
+        where_sql=" AND ".join(where),
+        params=tuple(params),
+        reference_cte=reference_cte,
+        reference_join=reference_join,
+        order_sql=f"{order_prefix}e.mc_version, e.mod_id, e.kind, e.key, e.id",
+    )
+
+
 class SmartReviewMixin:
     """SQLite operations mixed into :class:`TranslationDB`."""
 
@@ -340,79 +462,38 @@ class SmartReviewMixin:
         if bounded_limit == 0:
             return []
         self._smart_review_context_cache = {}
-        params: list[Any] = []
-        effective_review = (
-            "CASE WHEN f.review_status IN ('unreviewed', 'reviewed', 'legacy_unknown') "
-            f"THEN f.review_status WHEN f.source={SRC_MANUAL} THEN 'legacy_unknown' "
-            "WHEN f.source IS NOT NULL THEN 'unreviewed' END"
+        selection = _build_smart_review_selection(
+            version=version,
+            mod_id=mod_id,
+            kind=kind,
+            effective_source=effective_source,
+            review_status=review_status,
+            query=query,
+            require_reviewed_reference=require_reviewed_reference,
+            prioritize_named_keys=prioritize_named_keys,
         )
-        if review_status not in {"unreviewed", "reviewed", "legacy_unknown"}:
-            raise ValueError("smart review 不支援的審核狀態")
-        where = [
-            f"({effective_review}) = ?",
-            "f.zh_tw <> ''",
-            "e.en_us <> ''",
-        ]
-        params.append(review_status)
-        if version:
-            where.append("e.mc_version = ?")
-            params.append(version)
-        if mod_id:
-            where.append("e.mod_id = ?")
-            params.append(mod_id)
-        if kind:
-            where.append("e.kind = ?")
-            params.append(kind)
-        if effective_source is not None:
-            where.append("f.source = ?")
-            params.append(int(effective_source))
-        if query and query.strip():
-            needle = f"%{query.strip()}%"
-            where.append("(e.key LIKE ? OR e.en_us LIKE ? OR f.zh_tw LIKE ?)")
-            params.extend((needle, needle, needle))
-        reference_cte = ""
-        reference_join = ""
-        order_prefix = ""
-        if require_reviewed_reference:
-            reference_cte = (
-                "WITH reviewed_reference AS ("
-                "SELECT r.kind, r.mod_id, r.key, r.en_us "
-                "FROM entry r JOIN translation rf ON rf.entry_id=r.id "
-                "WHERE rf.review_status='reviewed' AND trim(rf.zh_tw)<>'' "
-                "AND r.en_us<>'' "
-                "GROUP BY r.kind, r.mod_id, r.key, r.en_us "
-                "HAVING COUNT(DISTINCT trim(rf.zh_tw))=1"
-                ") "
-            )
-            reference_join = (
-                "JOIN reviewed_reference rr "
-                "ON rr.kind=e.kind AND rr.mod_id=e.mod_id AND rr.key=e.key "
-                "AND rr.en_us=e.en_us "
-            )
-        if prioritize_named_keys:
-            order_prefix = (
-                "CASE WHEN e.kind='lang' AND ("
-                "e.key LIKE 'item.%' OR e.key LIKE 'block.%' OR "
-                "e.key LIKE 'entity.%' OR e.key LIKE 'biome.%' OR "
-                "e.key LIKE 'effect.%' OR e.key LIKE 'fluid.%' OR "
-                "e.key LIKE 'enchantment.%' OR e.key LIKE 'dimension.%' OR "
-                "e.key LIKE 'painting.%' OR e.key LIKE 'trim_pattern.%' OR "
-                "e.key LIKE 'instrument.%' OR e.key LIKE 'banner.%'"
-                ") THEN 0 ELSE 1 END, "
-            )
+        entry_source = "entry e"
+        if prioritize_named_keys and self._one(
+            "SELECT 1 FROM sqlite_schema WHERE type='index' "
+            "AND name=?",
+            ("idx_smart_review_named_order",),
+        ):
+            entry_source = "entry e INDEXED BY idx_smart_review_named_order"
         rows = self._q(
-            reference_cte
+            selection.reference_cte
             + "SELECT e.id, e.kind, e.mc_version, e.mod_id, e.key, e.en_us, "
-            f"f.zh_tw, f.source, ({effective_review}), t.revision, "
+            f"f.zh_tw, f.source, ({selection.effective_review}), t.revision, "
             "tm.zh_tw, tm.checker, tm.review_status, tm.revision "
-            "FROM entry e JOIN effective f ON f.entry_id=e.id "
-            + reference_join
+            "FROM "
+            + entry_source
+            + " JOIN effective f ON f.entry_id=e.id "
+            + selection.reference_join
             + "LEFT JOIN translation t ON t.entry_id=e.id AND t.source=f.source "
             f"LEFT JOIN translation tm ON tm.entry_id=e.id AND tm.source={SRC_MANUAL} "
-            f"WHERE {' AND '.join(where)} "
-            f"ORDER BY {order_prefix}e.mc_version, e.mod_id, e.kind, e.key, e.id "
+            f"WHERE {selection.where_sql} "
+            f"ORDER BY {selection.order_sql} "
             "LIMIT ? OFFSET ?",
-            (*params, bounded_limit, max(0, int(offset))),
+            (*selection.params, bounded_limit, max(0, int(offset))),
         )
         snapshots: list[SmartReviewSnapshot] = []
         for ordinal, row in enumerate(rows, 1):
@@ -477,51 +558,21 @@ class SmartReviewMixin:
         require_reviewed_reference: bool = False,
     ) -> int:
         """Count the same selection used by ``smart_review_candidates``."""
-        effective_review = (
-            "CASE WHEN f.review_status IN ('unreviewed', 'reviewed', 'legacy_unknown') "
-            f"THEN f.review_status WHEN f.source={SRC_MANUAL} THEN 'legacy_unknown' "
-            "WHEN f.source IS NOT NULL THEN 'unreviewed' END"
+        selection = _build_smart_review_selection(
+            version=version,
+            mod_id=mod_id,
+            kind=kind,
+            effective_source=effective_source,
+            review_status=review_status,
+            query=query,
+            require_reviewed_reference=require_reviewed_reference,
         )
-        if review_status not in {"unreviewed", "reviewed", "legacy_unknown"}:
-            raise ValueError("smart review 不支援的審核狀態")
-        clauses = [
-            f"({effective_review}) = ?",
-            "f.zh_tw <> ''",
-            "e.en_us <> ''",
-        ]
-        params: list[Any] = [review_status]
-        if version:
-            clauses.append("e.mc_version=?")
-            params.append(version)
-        if mod_id:
-            clauses.append("e.mod_id=?")
-            params.append(mod_id)
-        if kind:
-            clauses.append("e.kind=?")
-            params.append(kind)
-        if effective_source is not None:
-            clauses.append("f.source=?")
-            params.append(int(effective_source))
-        if query and query.strip():
-            needle = f"%{query.strip()}%"
-            clauses.append("(e.key LIKE ? OR e.en_us LIKE ? OR f.zh_tw LIKE ?)")
-            params.extend((needle, needle, needle))
-        reference_join = ""
-        if require_reviewed_reference:
-            reference_join = (
-                "JOIN (SELECT r.kind, r.mod_id, r.key, r.en_us "
-                "FROM entry r JOIN translation rf ON rf.entry_id=r.id "
-                "WHERE rf.review_status='reviewed' AND trim(rf.zh_tw)<>'' "
-                "AND r.en_us<>'' GROUP BY r.kind, r.mod_id, r.key, r.en_us "
-                "HAVING COUNT(DISTINCT trim(rf.zh_tw))=1) rr "
-                "ON rr.kind=e.kind AND rr.mod_id=e.mod_id AND rr.key=e.key "
-                "AND rr.en_us=e.en_us "
-            )
         row = self._one(
-            "SELECT COUNT(*) FROM entry e JOIN effective f ON f.entry_id=e.id "
-            + reference_join
-            + f"WHERE {' AND '.join(clauses)}",
-            params,
+            selection.reference_cte
+            + "SELECT COUNT(*) FROM entry e JOIN effective f ON f.entry_id=e.id "
+            + selection.reference_join
+            + f"WHERE {selection.where_sql}",
+            selection.params,
         )
         return int(row[0]) if row else 0
 
@@ -596,17 +647,32 @@ class SmartReviewMixin:
                 bucket[cache_key] = self._q(sql, params)
             return bucket[cache_key]
 
-        glossary_rows = cached_rows(
-            "glossary_rows",
+        glossary_current_rows = cached_rows(
+            "glossary_current_rows",
             "SELECT e.id, e.kind, e.mc_version, e.mod_id, e.key, e.en_us, "
             "f.zh_tw, f.source, f.review_status, f.revision "
             "FROM entry e JOIN translation f ON f.entry_id=e.id "
-            "WHERE e.kind='lang' AND e.mod_id=? AND f.review_status='reviewed' "
-            "AND e.en_us<>'' AND trim(f.zh_tw)<>'' "
-            "ORDER BY CASE WHEN e.mc_version=? THEN 0 ELSE 1 END, e.mc_version, e.id "
-            "LIMIT 5000",
+            "WHERE e.kind='lang' AND e.mod_id=? AND e.mc_version=? "
+            "AND f.review_status='reviewed' AND e.en_us<>'' "
+            "AND trim(f.zh_tw)<>'' ORDER BY e.id LIMIT 5000",
             (mod_id, mc_version),
         )
+        glossary_remaining = 5000 - len(glossary_current_rows)
+        glossary_other_rows = (
+            cached_rows(
+                "glossary_other_rows",
+                "SELECT e.id, e.kind, e.mc_version, e.mod_id, e.key, e.en_us, "
+                "f.zh_tw, f.source, f.review_status, f.revision "
+                "FROM entry e JOIN translation f ON f.entry_id=e.id "
+                "WHERE e.kind='lang' AND e.mod_id=? AND e.mc_version<>? "
+                "AND f.review_status='reviewed' AND e.en_us<>'' "
+                "AND trim(f.zh_tw)<>'' ORDER BY e.mc_version, e.id LIMIT ?",
+                (mod_id, mc_version, glossary_remaining),
+            )
+            if glossary_remaining
+            else []
+        )
+        glossary_rows = glossary_current_rows + glossary_other_rows
         official = load_official_locale_index()
         reviewed_entries = [
             {
@@ -1057,13 +1123,7 @@ class SmartReviewMixin:
             if not draft:
                 return "invalid_draft"
             current = conn.execute(
-                "SELECT e.kind, e.mc_version, e.mod_id, e.key, e.en_us, f.zh_tw, f.source, "
-                "CASE WHEN f.review_status IN ('unreviewed', 'reviewed', 'legacy_unknown') "
-                f"THEN f.review_status WHEN f.source={SRC_MANUAL} THEN 'legacy_unknown' "
-                "WHEN f.source IS NOT NULL THEN 'unreviewed' END, t.revision "
-                "FROM entry e JOIN effective f ON f.entry_id=e.id "
-                "LEFT JOIN translation t ON t.entry_id=f.entry_id AND t.source=f.source "
-                "WHERE f.entry_id=?",
+                _smart_review_current_snapshot_sql(),
                 (row[0],),
             ).fetchone()
             if current is None or tuple(current) != tuple(row[1:10]):
@@ -1176,13 +1236,7 @@ class SmartReviewMixin:
                 if not proposed:
                     return "invalid_draft"
             current = conn.execute(
-                "SELECT e.kind, e.mc_version, e.mod_id, e.key, e.en_us, f.zh_tw, f.source, "
-                "CASE WHEN f.review_status IN ('unreviewed', 'reviewed', 'legacy_unknown') "
-                f"THEN f.review_status WHEN f.source={SRC_MANUAL} THEN 'legacy_unknown' "
-                "WHEN f.source IS NOT NULL THEN 'unreviewed' END, t.revision "
-                "FROM entry e JOIN effective f ON f.entry_id=e.id "
-                "LEFT JOIN translation t ON t.entry_id=f.entry_id AND t.source=f.source "
-                "WHERE f.entry_id=?",
+                _smart_review_current_snapshot_sql(),
                 (candidate[0],),
             ).fetchone()
             if current is None or (
@@ -1335,8 +1389,28 @@ def run_smart_review(
     """Run bounded AI proofreading and persist only candidates, never translations."""
     if not model_name.strip():
         raise ValueError("smart review 必須指定模型")
-    if provider == "gemini" and not api_key.strip():
+    lm_config = lm_config if isinstance(lm_config, dict) else {}
+    # The service path passes no preselected key so the shared cycle can rotate
+    # between configured Gemini keys. Explicit keys remain a useful injection
+    # point for unit tests and callers that already own key selection.
+    key_cycle = (
+        ApiKeyCycle() if provider == "gemini" and not api_key.strip() else None
+    )
+    if provider == "gemini" and not api_key.strip() and not get_api_key_count():
         raise ValueError("Gemini smart review 必須指定 API key")
+    chatgpt_options: dict[str, Any] = {}
+    if provider == "chatgpt":
+        chatgpt_options["fast"] = bool(lm_config.get("fast", False))
+        chatgpt_options["reasoning_effort"] = chatgpt_model_reasoning_effort(
+            lm_config, model_name
+        )
+        profile_id = str(
+            chatgpt_account_status().get("active_profile_id")
+            or lm_config.get("chatgpt_model_profile_id")
+            or ""
+        ).strip()
+        if profile_id:
+            chatgpt_options["profile_id"] = profile_id
     snapshots = db.smart_review_candidates(
         version=version,
         mod_id=mod_id,
@@ -1381,59 +1455,122 @@ def run_smart_review(
             batch = snapshots[start : start + batch_size]
             payload = build_smart_review_payload(batch)
             meta: dict[str, Any] = {}
-            try:
-                raw = call_gemini_requests(
-                    model_name=model_name,
-                    system_prompt=SMART_REVIEW_SYSTEM_PROMPT,
-                    payload=payload,
-                    api_key=api_key,
-                    temperature=0.2,
-                    max_output_tokens=16_384,
-                    meta_out=meta,
-                    provider=provider,
-                    lm_config=lm_config,
-                    response_schema=smart_review_response_schema(
-                        [str(item.ordinal) for item in batch]
-                    ),
-                )
-            except TaskCancelled:
-                cancelled = True
-                break
-            except Exception as exc:  # noqa: BLE001 - persist only a credential-free class
-                request_errors += 1
-                db.mark_smart_review_request_error(
-                    run_id,
-                    [item.ordinal for item in batch],
-                    error_code=f"request_failed:{type(exc).__name__}",
-                )
-                results = []
-            else:
+            request_failed = False
+            while True:
+                request_api_key = ""
+                if key_cycle is not None:
+                    request_api_key = key_cycle.claim()
+                    if not request_api_key and not key_cycle.failed_indexes:
+                        request_api_key = api_key.strip()
+                else:
+                    request_api_key = api_key.strip()
+                if provider == "gemini" and not request_api_key:
+                    exc = RuntimeError("Gemini API key cycle exhausted")
+                    request_errors += 1
+                    db.mark_smart_review_request_error(
+                        run_id,
+                        [item.ordinal for item in batch],
+                        error_code=f"request_failed:{type(exc).__name__}",
+                    )
+                    request_failed = True
+                    break
                 try:
-                    results = parse_smart_review_response(raw, batch)
-                except Exception as exc:  # noqa: BLE001 - credential-free validation class
-                    results = [
-                        {
-                            "id": str(item.ordinal),
-                            "validation_error": f"response_invalid:{type(exc).__name__}",
-                        }
-                        for item in batch
-                    ]
-                db.record_smart_review_results(run_id, results)
-                for result in results:
-                    if result.get("validation_error"):
-                        invalid += 1
+                    raw = call_gemini_requests(
+                        model_name=model_name,
+                        system_prompt=SMART_REVIEW_SYSTEM_PROMPT,
+                        payload=payload,
+                        api_key=request_api_key,
+                        temperature=0.2,
+                        max_output_tokens=16_384,
+                        meta_out=meta,
+                        provider=provider,
+                        lm_config=lm_config,
+                        response_schema=smart_review_response_schema(
+                            [str(item.ordinal) for item in batch]
+                        ),
+                        **chatgpt_options,
+                    )
+                except TaskCancelled:
+                    cancelled = True
+                    break
+                except requests.HTTPError as exc:
+                    status_code = (
+                        exc.response.status_code
+                        if exc.response is not None
+                        else None
+                    )
+                    if (
+                        key_cycle is not None
+                        and status_code in {403, 429}
+                        and key_cycle.mark_failed(
+                            reason="forbidden" if status_code == 403 else None
+                        )
+                    ):
                         continue
-                    valid += 1
-                    if result["decision"] == "no_change":
-                        no_change += 1
-                    elif result["decision"] == "suggest_revision":
-                        suggestions += 1
-                    else:
-                        needs_context += 1
-                prompt_tokens += int(meta.get("prompt_tokens") or 0)
-                output_tokens += int(
-                    meta.get("output_tokens") or meta.get("candidates_tokens") or 0
-                )
+                    request_errors += 1
+                    db.mark_smart_review_request_error(
+                        run_id,
+                        [item.ordinal for item in batch],
+                        error_code=f"request_failed:{type(exc).__name__}",
+                    )
+                    request_failed = True
+                    break
+                except Exception as exc:  # noqa: BLE001 - persist only a credential-free class
+                    request_errors += 1
+                    db.mark_smart_review_request_error(
+                        run_id,
+                        [item.ordinal for item in batch],
+                        error_code=f"request_failed:{type(exc).__name__}",
+                    )
+                    request_failed = True
+                    break
+                else:
+                    if key_cycle is not None:
+                        key_cycle.record_success()
+                    break
+            if cancelled:
+                break
+            if request_failed:
+                processed += len(batch)
+                if progress is not None:
+                    progress(
+                        {
+                            "run_id": run_id,
+                            "processed": processed,
+                            "selected": len(snapshots),
+                            "valid": valid,
+                            "invalid": invalid,
+                            "request_errors": request_errors,
+                            "status": "running",
+                        }
+                    )
+                continue
+            try:
+                results = parse_smart_review_response(raw, batch)
+            except Exception as exc:  # noqa: BLE001 - credential-free validation class
+                results = [
+                    {
+                        "id": str(item.ordinal),
+                        "validation_error": f"response_invalid:{type(exc).__name__}",
+                    }
+                    for item in batch
+                ]
+            db.record_smart_review_results(run_id, results)
+            for result in results:
+                if result.get("validation_error"):
+                    invalid += 1
+                    continue
+                valid += 1
+                if result["decision"] == "no_change":
+                    no_change += 1
+                elif result["decision"] == "suggest_revision":
+                    suggestions += 1
+                else:
+                    needs_context += 1
+            prompt_tokens += int(meta.get("prompt_tokens") or 0)
+            output_tokens += int(
+                meta.get("output_tokens") or meta.get("candidates_tokens") or 0
+            )
             processed += len(batch)
             if progress is not None:
                 progress(

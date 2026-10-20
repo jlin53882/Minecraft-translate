@@ -11,7 +11,6 @@ from translation_tool.core.format_diagnostics import (
     analyze_format_diagnostics,
 )
 from translation_tool.core.lm_config_rules import (
-    get_current_api_key,
     get_translation_provider,
 )
 from translation_tool.translation_db import (
@@ -116,20 +115,24 @@ def run_moddb_smart_review_from_path(
     cancel_check: Callable[[], bool] | None = None,
 ) -> SmartReviewRunResult:
     cfg = load_config()
+    lm_config = cfg.get("lm_translator", {}) if isinstance(cfg, dict) else {}
+    if not isinstance(lm_config, dict):
+        lm_config = {}
     provider = get_translation_provider()
-    api_key = get_current_api_key() if provider == "gemini" else ""
     db = _open(path, priority, readonly=False)
     try:
         return run_smart_review(
             db,
             model_name=model_name,
-            api_key=api_key,
+            # Gemini key selection/rotation belongs to the shared smart-review
+            # runner; do not claim one key here and reuse it for every batch.
+            api_key="",
             provider=provider,
             version=version,
             limit=limit,
             batch_size=batch_size,
             progress=progress,
-            lm_config=cfg,
+            lm_config=lm_config,
             require_reviewed_reference=require_reviewed_reference,
             prioritize_named_keys=prioritize_named_keys,
             mod_id=mod_id,

@@ -470,6 +470,7 @@ class _BatchRuntime:
     gemini_503_attempted_models: set[int] = field(default_factory=set)
     contract_errors: list[str] = field(default_factory=list)
     pending_contract_event: dict | None = None
+    remaining_item_ids: list[str] = field(default_factory=list)
     terminology_cache: dict[int, tuple[tuple[str, str], ...]] = field(
         default_factory=dict
     )
@@ -805,6 +806,7 @@ def _build_batch_runtime(
         batch_interval_sec=_batch_interval_seconds(lm_cfg),
         reasoning_effort=reasoning_effort,
         chatgpt_profile_id=chatgpt_profile_id,
+        remaining_item_ids=[str(index) for index in range(len(batch_items))],
         terminology_cache={
             id(item): tuple(
                 terminology_terms_for_item(
@@ -831,6 +833,7 @@ def _prepare_batch(runtime: _BatchRuntime) -> _BatchRound:
         fixed_input_tokens=runtime.batch_fit_input_tokens,
     )
     current_batch = runtime.remaining_items[:fit_count]
+    current_ids = runtime.remaining_item_ids[:fit_count]
     return _BatchRound(
         current_batch=current_batch,
         fit_count=fit_count,
@@ -839,9 +842,9 @@ def _prepare_batch(runtime: _BatchRuntime) -> _BatchRound:
         ),
         payload=build_translation_payload(
             current_batch,
-            item_ids=[str(index) for index in range(len(current_batch))],
+            item_ids=current_ids,
         ),
-        id_to_item={str(index): item for index, item in enumerate(current_batch)},
+        id_to_item=dict(zip(current_ids, current_batch, strict=True)),
     )
 
 
@@ -2059,6 +2062,9 @@ def _finish_successful_batch(
         actual_output_tokens=actual_output,
     )
     runtime.remaining_items = runtime.remaining_items[len(round_data.current_batch) :]
+    runtime.remaining_item_ids = runtime.remaining_item_ids[
+        len(round_data.current_batch) :
+    ]
     runtime.batch_size = min(runtime.batch_size, len(runtime.remaining_items))
     runtime.key_cycle.record_success()
     runtime.pinned_model_index = None
@@ -2234,6 +2240,71 @@ def _attempt_batch(
     return _BatchRoundOutcome(BatchAction.SHRINK_BATCH)
 
 
+def _apply_batch_shrink(
+    runtime: _BatchRuntime, round_data: _BatchRound, outcome: _BatchRoundOutcome
+) -> None:
+    """Apply a learned or fallback batch shrink and keep item/id state aligned."""
+    if outcome.learned_budget:
+        next_fit = select_batch_size(
+            runtime.remaining_items,
+            runtime.batch_profile,
+            runtime.batch_size,
+            runtime.lm_cfg,
+            fixed_input_tokens=runtime.batch_fit_input_tokens,
+        )
+        if next_fit < len(round_data.current_batch):
+            _note_contract_progress(
+                runtime, len(round_data.current_batch), next_fit
+            )
+            return
+
+    shrink_factor = float(runtime.lm_cfg.get("batch_shrink_factor", 0.75) or 0.75)
+    basis = min(runtime.batch_size, len(round_data.current_batch))
+    new_size = int(basis * shrink_factor)
+    min_size = int(runtime.lm_cfg.get("min_batch_size", 50) or 50)
+    if runtime.batch_profile == "lang" and new_size < MIN_LANG_BATCH_SIZE:
+        new_size = MIN_LANG_BATCH_SIZE if basis > MIN_LANG_BATCH_SIZE else 0
+    elif new_size < min_size:
+        new_size = min_size if basis > min_size else 0
+
+    _note_contract_progress(runtime, basis, new_size)
+    if new_size <= 0 or new_size == basis:
+        log_warning(
+            f"[⚠️] Batch Size 已縮至極限 ({basis})，回填原文並繼續後續項目"
+        )
+        fallback_reason = outcome.fallback_reason or "batch_shrink"
+        contract_error = (
+            runtime.contract_errors[-1]
+            if fallback_reason == "response_contract" and runtime.contract_errors
+            else None
+        )
+        runtime.all_results.extend(
+            {
+                **item,
+                "_untranslated": True,
+                "_fallback_reason": fallback_reason,
+                **(
+                    {"_contract_error": contract_error}
+                    if contract_error
+                    else {}
+                ),
+            }
+            for item in round_data.current_batch
+        )
+        item_count = len(round_data.current_batch)
+        runtime.remaining_items = runtime.remaining_items[item_count:]
+        runtime.remaining_item_ids = runtime.remaining_item_ids[item_count:]
+        runtime.batch_size = min(
+            len(runtime.remaining_items),
+            MIN_LANG_BATCH_SIZE
+            if runtime.batch_profile == "lang"
+            else min_size,
+        )
+        return
+    log_info(f"[↓] 調整 Batch：{basis} → {new_size}")
+    runtime.batch_size = new_size
+
+
 def _run_batch_state_machine(
     batch_items: list[dict],
     total: int | None = None,
@@ -2264,69 +2335,7 @@ def _run_batch_state_machine(
                 return runtime.all_results, "PARTIAL"
             if outcome.action is not BatchAction.SHRINK_BATCH:
                 continue
-
-            if outcome.learned_budget:
-                next_fit = select_batch_size(
-                    runtime.remaining_items,
-                    runtime.batch_profile,
-                    runtime.batch_size,
-                    runtime.lm_cfg,
-                    fixed_input_tokens=runtime.batch_fit_input_tokens,
-                )
-                if next_fit < len(round_data.current_batch):
-                    _note_contract_progress(
-                        runtime, len(round_data.current_batch), next_fit
-                    )
-                    continue
-
-            shrink_factor = float(
-                runtime.lm_cfg.get("batch_shrink_factor", 0.75) or 0.75
-            )
-            basis = min(runtime.batch_size, len(round_data.current_batch))
-            new_size = int(basis * shrink_factor)
-            min_size = int(runtime.lm_cfg.get("min_batch_size", 50) or 50)
-            if runtime.batch_profile == "lang" and new_size < MIN_LANG_BATCH_SIZE:
-                new_size = MIN_LANG_BATCH_SIZE if basis > MIN_LANG_BATCH_SIZE else 0
-            elif new_size < min_size:
-                new_size = min_size if basis > min_size else 0
-
-            _note_contract_progress(runtime, basis, new_size)
-            if new_size <= 0 or new_size == basis:
-                log_warning(
-                    f"[⚠️] Batch Size 已縮至極限 ({basis})，回填原文並繼續後續項目"
-                )
-                fallback_reason = outcome.fallback_reason or "batch_shrink"
-                contract_error = (
-                    runtime.contract_errors[-1]
-                    if fallback_reason == "response_contract"
-                    and runtime.contract_errors
-                    else None
-                )
-                runtime.all_results.extend(
-                    {
-                        **item,
-                        "_untranslated": True,
-                        "_fallback_reason": fallback_reason,
-                        **(
-                            {"_contract_error": contract_error}
-                            if contract_error
-                            else {}
-                        ),
-                    }
-                    for item in round_data.current_batch
-                )
-                runtime.remaining_items = runtime.remaining_items[
-                    len(round_data.current_batch) :
-                ]
-                runtime.batch_size = min(
-                    len(runtime.remaining_items),
-                    MIN_LANG_BATCH_SIZE
-                    if runtime.batch_profile == "lang"
-                    else min_size,
-                )
-                continue
-            log_info(f"[↓] 調整 Batch：{basis} → {new_size}")
-            runtime.batch_size = new_size
+            _apply_batch_shrink(runtime, round_data, outcome)
 
         return runtime.all_results, "AUTO"
     finally:

@@ -20,7 +20,9 @@ import argparse
 import json
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
+from translation_tool.core import lm_config_rules
 from translation_tool.translation_db import TranslationDB, load_db_settings
 from translation_tool.translation_db.smart_review import run_smart_review
 from translation_tool.utils.config_manager import load_config
@@ -83,22 +85,25 @@ def main() -> int:
     output.parent.mkdir(parents=True, exist_ok=True)
     db = TranslationDB(db_path, priority=settings.priority, create=False)
     try:
-        result = run_smart_review(
-            db,
-            model_name=args.model,
-            api_key=_config_key(config),
-            provider=provider,
-            version=args.version or settings.version or None,
-            limit=args.limit,
-            batch_size=args.batch_size,
-            require_reviewed_reference=args.reference_mode == "same-key-reviewed",
-            prioritize_named_keys=args.terminology_first,
-            lm_config=config,
-            progress=lambda snapshot: print(
-                f"[{args.model}] {snapshot['processed']}/{snapshot['selected']} "
-                f"valid={snapshot['valid']} invalid={snapshot['invalid']}"
-            ),
-        )
+        with patch.object(lm_config_rules, "load_config", return_value=config):
+            result = run_smart_review(
+                db,
+                model_name=args.model,
+                # Let the shared ApiKeyCycle use the selected config and rotate
+                # keys between batches when a request is rate-limited.
+                api_key="",
+                provider=provider,
+                version=args.version or settings.version or None,
+                limit=args.limit,
+                batch_size=args.batch_size,
+                require_reviewed_reference=args.reference_mode == "same-key-reviewed",
+                prioritize_named_keys=args.terminology_first,
+                lm_config=config.get("lm_translator", {}),
+                progress=lambda snapshot: print(
+                    f"[{args.model}] {snapshot['processed']}/{snapshot['selected']} "
+                    f"valid={snapshot['valid']} invalid={snapshot['invalid']}"
+                ),
+            )
         run = db.get_smart_review_run(result.run_id) or {}
         status_counts: dict[str, int] = {}
         for candidate in db.list_smart_review_candidates(result.run_id):

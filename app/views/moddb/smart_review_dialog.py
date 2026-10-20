@@ -917,6 +917,8 @@ class SmartReviewDialog:
         elif status == "applied":
             show_snack(self.page, "已套用 1 筆人工未審核譯文。", C.EM)
             self._load_candidates(path, priority, run_id)
+            if callable(self.on_complete):
+                self.on_complete()
         elif status == "stale":
             show_snack(
                 self.page, "候選已過期，資料庫內容已變更；未覆蓋目前譯文。", C.GOLD

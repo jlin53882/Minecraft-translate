@@ -25,10 +25,11 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
-from translation_tool.core import lm_translator_main
+from translation_tool.core import lm_config_rules, lm_translator_main
 from translation_tool.core.official_locale import terminology_terms_for_item
 from translation_tool.translation_db import TranslationDB, load_db_settings
 from translation_tool.translation_db.models import SmartReviewCandidate
+from translation_tool.translation_db.schema import cache_type_for_kind
 from translation_tool.utils.config_manager import load_config
 from translation_tool.utils.text_matching import contains_term
 
@@ -109,7 +110,7 @@ def _build_items(
                 "_kind": candidate.kind,
                 "_mod_id": candidate.mod_id,
                 "_expected_version": candidate.mc_version,
-                "cache_type": "lang" if candidate.kind == "lang" else candidate.kind,
+                "cache_type": cache_type_for_kind(candidate.kind),
                 "file": f"assets/{candidate.mod_id}/lang/en_us.json",
                 "path": candidate.key,
                 "key": candidate.key,
@@ -261,12 +262,12 @@ def run_benchmark() -> int:
                 return_value={args.model: {"enabled": True}},
             )
         )
-        if args.temperature is not None or args.initial_batch_size is not None:
-            stack.enter_context(
-                patch.object(
-                    lm_translator_main, "load_config", return_value=runtime_config
-                )
-            )
+        stack.enter_context(
+            patch.object(lm_translator_main, "load_config", return_value=runtime_config)
+        )
+        stack.enter_context(
+            patch.object(lm_config_rules, "load_config", return_value=runtime_config)
+        )
         results, status = lm_translator_main.translate_batch_smart(
             items, total=len(items), dry_run=False
         )
