@@ -65,6 +65,31 @@ def test_candidates_follow_version_source_and_quality(db):
     assert {c.key for c in manual.candidates} == {"ok"}
 
 
+def test_candidates_and_execution_follow_module_scope(db):
+    db.ingest(
+        "1.21.1",
+        [
+            _item("foo-key", "Foo", "甲", mod="foo"),
+            _item("bar-key", "Bar", "乙", mod="bar"),
+        ],
+    )
+
+    plan = db.preview_bulk_review(
+        "1.21.1", SRC_JAR_TW, mod_id="foo", quality_pass_only=False
+    )
+
+    assert plan.mod_id == "foo"
+    assert [(candidate.mod_id, candidate.key) for candidate in plan.candidates] == [
+        ("foo", "foo-key")
+    ]
+
+    result = db.execute_bulk_review(plan, actor="使用者")
+
+    assert result.reviewed == 1
+    assert _entry(db, "1.21.1", "foo-key").review_status == "reviewed"
+    assert _entry(db, "1.21.1", "bar-key").review_status == "unreviewed"
+
+
 def test_execute_reviews_selected_entries_and_honours_exclusions(db):
     db.ingest(
         "1.21.1",
@@ -195,6 +220,31 @@ def test_dialog_option_change_invalidates_preview(db):
     dialog._invalidate()
 
     assert dialog.plan is None and dialog.apply_btn.disabled is True
+
+
+def test_dialog_filters_preview_by_module(db):
+    from app.views.moddb.bulk_review_dialog import BulkReviewDialog
+    from tests.conftest import mock_page
+
+    db.ingest(
+        "1.21.1",
+        [
+            _item("foo-key", "Foo", "甲", mod="foo"),
+            _item("bar-key", "Bar", "乙", mod="bar"),
+        ],
+    )
+    page = mock_page()
+    page.run_thread = lambda target: target()
+    dialog = BulkReviewDialog(page, lambda: db, "1.21.1", None)
+
+    assert dialog.mod_dd.value == "__all__"
+    dialog.mod_dd.value = "foo"
+    dialog.source_dd.value = str(SRC_JAR_TW)
+    dialog._preview()
+    _drain(page)
+
+    assert dialog.plan.mod_id == "foo"
+    assert {candidate.mod_id for candidate in dialog.plan.candidates} == {"foo"}
 
 
 def test_sync_rejects_plan_when_another_version_changed_after_preview(db):

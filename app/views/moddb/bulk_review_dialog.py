@@ -1,4 +1,4 @@
-"""Bulk review dialog: pick a version and its current effective source, preview, confirm."""
+"""Bulk review dialog: pick a version, module and source, then preview and confirm."""
 
 from __future__ import annotations
 
@@ -29,10 +29,11 @@ from translation_tool.utils.log_unit import log_exception, log_info, log_warning
 
 PAGE_SIZE = 50
 ACTOR = "使用者"
+ALL_MODS = "__all__"
 
 
 class BulkReviewDialog:
-    """Review every unreviewed entry of one version whose effective source matches.
+    """Review entries in one version/module whose effective source matches.
 
     The scope is recomputed and compared with the preview inside the write
     transaction, so nothing outside the previewed list can be touched.
@@ -60,9 +61,13 @@ class BulkReviewDialog:
         )
         kit.set_dropdown_options(self.version_dd, [(v, v) for v in versions])
         self.version_dd.value = version if version in versions else None
+        self.mod_dd = kit.dropdown(
+            label="模組", dense=True, width=220, on_select=self._invalidate
+        )
         self.source_dd = kit.dropdown(
             label="目前生效來源", dense=True, width=260, on_select=self._invalidate
         )
+        self._refresh_mods()
         self._refresh_sources()
         self.quality_check = ft.Checkbox(
             label="只審核格式檢查通過的條目",
@@ -80,7 +85,7 @@ class BulkReviewDialog:
         self.status = ft.Text("", size=12, color=C.MUTED, visible=False)
         self.progress = ft.ProgressBar(visible=False)
         self.rows = ft.Column(
-            [kit.hint_text("選好版本與來源後，按「產生預覽」。")],
+            [kit.hint_text("選好版本、模組與來源後，按「產生預覽」。")],
             spacing=8,
         )  # 捲動交給外層對話框，避免兩層卷軸重疊
         self.pager = kit.Pager(0, page_size=PAGE_SIZE, on_change=self._on_page)
@@ -116,14 +121,14 @@ class BulkReviewDialog:
                 content=ft.Column(
                     [
                         ft.Text(
-                            "把「所選版本、目前生效來源」的條目一次標為人工已審核（來源不變）；"
+                            "把「所選版本、模組、目前生效來源」的條目一次標為人工已審核（來源不變）；"
                             "預覽不會寫入，確認後才會審核，且可整批還原。",
                             size=12,
                             color=C.MUTED,
                             selectable=True,
                         ),
                         ft.Row(
-                            [self.version_dd, self.source_dd],
+                            [self.version_dd, self.mod_dd, self.source_dd],
                             spacing=12,
                             wrap=True,
                         ),
@@ -167,6 +172,16 @@ class BulkReviewDialog:
         self._generation += 1
 
     # ------------------------------------------------------------------ 選項
+    def _refresh_mods(self) -> None:
+        db = self.get_db()
+        version = self.version_dd.value
+        mods = db.mods(version) if db and version else ()
+        options = [(ALL_MODS, "全部模組"), *((mod, mod) for mod in mods)]
+        kit.set_dropdown_options(self.mod_dd, options)
+        keys = {key for key, _label in options}
+        if self.mod_dd.value not in keys:
+            self.mod_dd.value = ALL_MODS
+
     def _refresh_sources(self) -> None:
         db = self.get_db()
         version = self.version_dd.value
@@ -180,6 +195,7 @@ class BulkReviewDialog:
             self.source_dd.value = None
 
     def _on_version(self, _e=None) -> None:
+        self._refresh_mods()
         self._refresh_sources()
         self._invalidate()
 
@@ -191,7 +207,7 @@ class BulkReviewDialog:
         self.result = None
         self.summary.value = "選項已變更，請重新產生預覽"
         self.warning.visible = False
-        self.rows.controls = [kit.hint_text("選好版本與來源後，按「產生預覽」。")]
+        self.rows.controls = [kit.hint_text("選好版本、模組與來源後，按「產生預覽」。")]
         self.pager.visible = False
         self.selection_row.visible = False
         self.apply_btn.disabled = True
@@ -208,6 +224,7 @@ class BulkReviewDialog:
         if self._busy:
             return
         source = int(self.source_dd.value)
+        mod_id = self.mod_dd.value if self.mod_dd.value != ALL_MODS else None
         quality = bool(self.quality_check.value)
         propagate = bool(self.sync_switch.value)
         generation = self._generation
@@ -217,13 +234,19 @@ class BulkReviewDialog:
             plan = error = None
             try:
                 plan = db.preview_bulk_review(
-                    version, source, quality_pass_only=quality, propagate=propagate
+                    version,
+                    source,
+                    mod_id=mod_id,
+                    quality_pass_only=quality,
+                    propagate=propagate,
                 )
             except (ValueError, sqlite3.Error) as exc:
                 error = exc
             except Exception as exc:  # noqa: BLE001 - worker boundary reports unexpected failures
                 error = exc
-                log_exception(f"Mod 資料庫批量審核預覽失敗：{version} 來源 {source}")
+                log_exception(
+                    f"Mod 資料庫批量審核預覽失敗：{version} 模組 {mod_id or '全部'} 來源 {source}"
+                )
             self._post(self._apply_preview, generation, plan, error)
 
         self._launch(work, "Mod 資料庫批量審核預覽", CommitPolicy.PARTIAL_ALLOWED)
@@ -386,12 +409,12 @@ class BulkReviewDialog:
             except sqlite3.Error as exc:
                 error = exc
                 log_exception(
-                    f"Mod 資料庫批量審核失敗：{plan.version} 來源 {plan.source}"
+                    f"Mod 資料庫批量審核失敗：{plan.version} 模組 {plan.mod_id or '全部'} 來源 {plan.source}"
                 )
             except Exception as exc:  # noqa: BLE001 - worker boundary reports unexpected failures
                 error = exc
                 log_exception(
-                    f"Mod 資料庫批量審核發生未預期錯誤：{plan.version} 來源 {plan.source}"
+                    f"Mod 資料庫批量審核發生未預期錯誤：{plan.version} 模組 {plan.mod_id or '全部'} 來源 {plan.source}"
                 )
             self._post(self._apply_result, generation, plan, result, error)
 
@@ -433,7 +456,10 @@ class BulkReviewDialog:
             message += (
                 f"（{format_count(result.stale_skipped)} 筆已被其他操作改動而略過）"
             )
-        log_info(f"Mod 資料庫批量審核：{plan.version} 來源 {plan.source}；{message}")
+        log_info(
+            f"Mod 資料庫批量審核：{plan.version} 模組 {plan.mod_id or '全部'} "
+            f"來源 {plan.source}；{message}"
+        )
         self.summary.value = message
         self.warning.visible = False
         self.rows.controls = [kit.hint_text("完成。可按「還原本次批量審核」整批復原。")]

@@ -1,4 +1,4 @@
-"""批量審核：依「版本 + 目前生效來源」把一批條目標成人工已審核（生效來源不變）。
+"""批量審核：依「版本 + 模組 + 目前生效來源」把一批條目標成人工已審核（生效來源不變）。
 
 單筆審核的規則（只改審核狀態、記錄歷史、可還原、同步其他版本）完全沿用
 ``TranslationDB.review_manual``；這裡只負責選取範圍、預覽統計與逐筆套用。
@@ -33,11 +33,13 @@ class BulkReviewMixin:
         source: int,
         quality_pass_only: bool,
         *,
+        mod_id: str | None = None,
         conn: sqlite3.Connection | None = None,
     ) -> tuple[BulkReviewCandidate, ...]:
-        """所選版本中、目前生效來源為 ``source`` 且尚未審核的條目（有譯文者）。"""
+        """所選版本／模組中、來源為 ``source`` 且尚未審核的條目（有譯文者）。"""
         criteria = EntryFilter(
             version=version,
+            mod_id=mod_id or None,
             source=int(source),
             # 審核狀態與來源各自獨立：任何來源都只列尚未審核的條目
             review_status="unreviewed",
@@ -140,17 +142,23 @@ class BulkReviewMixin:
         version: str,
         source: int,
         *,
+        mod_id: str | None = None,
         quality_pass_only: bool = True,
         propagate: bool = False,
     ) -> BulkReviewPlan:
         """預覽批量審核範圍（不寫入）。"""
-        candidates = self._bulk_review_candidates(version, source, quality_pass_only)
+        mod_id = str(mod_id).strip() if mod_id is not None else None
+        mod_id = mod_id or None
+        candidates = self._bulk_review_candidates(
+            version, source, quality_pass_only, mod_id=mod_id
+        )
         sibling_info = (
             self._bulk_review_sibling_info(candidates, version) if propagate else ()
         )
         return BulkReviewPlan(
             version=version,
             source=int(source),
+            mod_id=mod_id,
             quality_pass_only=quality_pass_only,
             propagate=propagate,
             database_identity=self._database_identity(),
@@ -182,7 +190,11 @@ class BulkReviewMixin:
             if progress_callback is not None:
                 progress_callback("重新檢查資料庫快照", 0.02)
             current = self._bulk_review_candidates(
-                plan.version, plan.source, plan.quality_pass_only, conn=conn
+                plan.version,
+                plan.source,
+                plan.quality_pass_only,
+                mod_id=plan.mod_id,
+                conn=conn,
             )
             if current != plan.candidates:
                 raise ValueError("預覽後條目已變動，請重新產生批量審核預覽")
