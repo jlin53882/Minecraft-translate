@@ -323,6 +323,63 @@ def test_terminology_plan_handles_format_codes_and_contextual_short_words():
     )
 
 
+def test_reviewed_terminology_uses_the_same_context_filter_as_official_terms():
+    from translation_tool.core import official_locale
+
+    index = official_locale.OfficialLocaleIndex(
+        records_by_key={},
+        unique_by_text_pair={},
+        unique_tw_by_en={},
+        revision="test",
+    )
+
+    item = {
+        "path": "tooltip.fire_resistance",
+        "source_text": "§9Fire Resistance (1:00)",
+        "_reviewed_glossary": [
+            {
+                "key": "tooltip.fire_resistance",
+                "en_us": "Fire Resistance",
+                "zh_tw": "抗火",
+            },
+            {"key": "tooltip.air", "en_us": "Air", "zh_tw": "空氣"},
+        ],
+    }
+    assert official_locale.terminology_terms_for_item(
+        item, index=index, include_official=False
+    ) == [("Fire Resistance", "抗火")]
+
+    assert (
+        official_locale.terminology_terms_for_item(
+            {
+                "path": "tooltip.close",
+                "source_text": "Calms attacking Piglins when Player gets close",
+                "_reviewed_glossary": [
+                    {"key": "tooltip.close", "en_us": "Close", "zh_tw": "關閉"}
+                ],
+            },
+            index=index,
+            include_official=False,
+        )
+        == []
+    )
+
+    assert (
+        official_locale.terminology_terms_for_item(
+            {
+                "path": "tooltip.air",
+                "source_text": "§78 Mid-Air Jumps§r",
+                "_reviewed_glossary": [
+                    {"key": "tooltip.air", "en_us": "Air", "zh_tw": "空氣"}
+                ],
+            },
+            index=index,
+            include_official=False,
+        )
+        == []
+    )
+
+
 def test_moddb_items_form_module_and_kind_batch_boundaries() -> None:
     items = build_items(
         [

@@ -19,7 +19,12 @@ from collections.abc import Callable, Sequence
 from typing import Any
 
 from translation_tool.core.lm_api_client import call_gemini_requests
-from translation_tool.core.official_locale import load_official_locale_index
+from translation_tool.core.official_locale import (
+    load_official_locale_index,
+    normalize_terminology_text,
+    terminology_term_allowed,
+    terminology_terms_for_item,
+)
 from translation_tool.translation_db.models import (
     SmartReviewCandidate,
     SmartReviewRunResult,
@@ -28,7 +33,7 @@ from translation_tool.translation_db.models import (
 from translation_tool.translation_db.quality import translation_issues
 from translation_tool.translation_db.schema import SRC_AI, SRC_MANUAL
 from translation_tool.utils.cancellation import TaskCancelled, is_cancelled
-from translation_tool.utils.text_matching import contains_term, matching_terms
+from translation_tool.utils.text_matching import contains_term, term_canonical_key
 
 SMART_REVIEW_DECISIONS = ("no_change", "suggest_revision", "needs_context")
 SMART_REVIEW_ISSUE_TYPES = (
@@ -602,17 +607,71 @@ class SmartReviewMixin:
             "LIMIT 5000",
             (mod_id, mc_version),
         )
-        matched_glossary = [
-            row for row in glossary_rows if contains_term(en_us, str(row[5]))
+        official = load_official_locale_index()
+        reviewed_entries = [
+            {
+                "key": str(row[4]),
+                "en_us": str(row[5]),
+                "zh_tw": str(row[6]),
+            }
+            for row in glossary_rows
         ]
+        terminology_plan = terminology_terms_for_item(
+            {
+                "path": key,
+                "source_text": en_us,
+                "_reviewed_glossary": reviewed_entries,
+            },
+            index=official,
+        )
+        selected_pairs = {
+            (
+                term_canonical_key(normalize_terminology_text(source)),
+                target.strip(),
+            )
+            for source, target in terminology_plan
+        }
+        selected_sources = [
+            (
+                normalize_terminology_text(source),
+                term_canonical_key(normalize_terminology_text(source)),
+            )
+            for source, _target in terminology_plan
+        ]
+        normalized_en_us = normalize_terminology_text(en_us)
+        matched_glossary = []
+        for row in glossary_rows:
+            normalized_term = normalize_terminology_text(str(row[5])).strip()
+            if not contains_term(normalized_en_us, normalized_term):
+                continue
+            if not terminology_term_allowed(
+                en_us,
+                normalized_term,
+                key=str(row[4]),
+                index=official,
+            ):
+                continue
+            matched_glossary.append(row)
         by_term: dict[str, list[tuple]] = {}
         for row in matched_glossary:
-            by_term.setdefault(str(row[5]).casefold().strip(), []).append(row)
+            normalized_term = normalize_terminology_text(str(row[5])).strip()
+            by_term.setdefault(term_canonical_key(normalized_term), []).append(row)
         for term in sorted(by_term, key=lambda value: (-len(value), value))[:12]:
             term_rows = by_term[term]
             term_targets = {str(row[6]).strip() for row in term_rows}
             term_conflict = len(term_targets) != 1
+            if (
+                not term_conflict
+                and (term, next(iter(term_targets))) not in selected_pairs
+            ):
+                continue
+            if term_conflict and any(
+                selected_key != term and contains_term(selected_source, term)
+                for selected_source, selected_key in selected_sources
+            ):
+                continue
             for row in term_rows[:4]:
+                normalized_term = normalize_terminology_text(str(row[5])).strip()
                 context.append(
                     {
                         "id": f"db:{row[0]}",
@@ -621,7 +680,7 @@ class SmartReviewMixin:
                         "kind": str(row[1]),
                         "key": str(row[4]),
                         "mc_version": str(row[2]),
-                        "en_us": str(row[5]),
+                        "en_us": normalized_term,
                         "zh_tw": str(row[6]),
                         "review_status": str(row[8] or "reviewed"),
                         "source": row[7],
@@ -667,26 +726,24 @@ class SmartReviewMixin:
                 }
             )
 
-        official = load_official_locale_index()
-        official_terms = matching_terms((en_us,), tuple(official.unique_tw_by_en))
-        official_by_source = {
-            str(source): target
-            for source, target in official.unique_tw_by_en.items()
-            if source in official_terms and target and source != target
-        }
-        for source in sorted(
-            official_by_source, key=lambda value: (-len(value), value)
-        )[:8]:
+        official_by_pair: dict[tuple[str, str], Any] = {}
+        for source, target in terminology_plan:
+            normalized_source = normalize_terminology_text(source).strip()
             record = next(
                 (
                     item
                     for item in official.records_by_key.values()
-                    if item.en_us == source and item.zh_tw == official_by_source[source]
+                    if normalize_terminology_text(item.en_us) == normalized_source
+                    and item.zh_tw.strip() == target.strip()
                 ),
                 None,
             )
             if record is None:
                 continue
+            official_by_pair.setdefault((normalized_source, target), record)
+        for (source, target), record in sorted(
+            official_by_pair.items(), key=lambda entry: (-len(entry[0][0]), entry[0])
+        )[:8]:
             context.append(
                 {
                     "id": f"official:{record.key}",
@@ -696,7 +753,7 @@ class SmartReviewMixin:
                     "key": record.key,
                     "mc_version": "bundled",
                     "en_us": record.en_us,
-                    "zh_tw": record.zh_tw,
+                    "zh_tw": target,
                     "review_status": "reviewed",
                     "source": "bundled_official_locale",
                     "match_type": "whole_term",

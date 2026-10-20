@@ -140,6 +140,99 @@ def test_local_context_covers_non_lang_terms_and_preserves_traceability(db):
     assert glossary[0]["review_status"] == "reviewed"
 
 
+def test_local_context_uses_shared_terminology_filter(db, monkeypatch):
+    import translation_tool.translation_db.smart_review as smart_review_module
+    from translation_tool.core.official_locale import OfficialLocaleIndex
+
+    monkeypatch.setattr(
+        smart_review_module,
+        "load_official_locale_index",
+        lambda: OfficialLocaleIndex({}, {}, {}, "test"),
+    )
+    db.write_back(
+        "1.21.1",
+        [
+            WriteBackItem(
+                KIND_LANG,
+                "demo",
+                "fire_resistance",
+                "Fire Resistance",
+                "抗火",
+            ),
+            WriteBackItem(
+                KIND_LANG,
+                "demo",
+                "close",
+                "Close",
+                "關閉",
+            ),
+            WriteBackItem(
+                KIND_PATCHOULI,
+                "demo",
+                "fire_context",
+                "§9Fire Resistance (1:00)",
+                "§9抗火 (1:00)",
+            ),
+            WriteBackItem(
+                KIND_PATCHOULI,
+                "demo",
+                "close_context",
+                "Calms attacking Piglins when Player gets close",
+                "當玩家靠近時能安撫攻擊中的豬布林",
+            ),
+        ],
+        fill_other_versions=False,
+    )
+    entries = db.list_entries("1.21.1")[0]
+    db.review_manual(
+        next(item for item in entries if item.key == "fire_resistance").id,
+        expected_zh_tw="抗火",
+        propagate=False,
+    )
+    db.review_manual(
+        next(item for item in entries if item.key == "close").id,
+        expected_zh_tw="關閉",
+        propagate=False,
+    )
+
+    fire = next(
+        item
+        for item in db.smart_review_candidates(
+            version="1.21.1",
+            mod_id="demo",
+            kind=KIND_PATCHOULI,
+            effective_source=SRC_AI,
+            limit=1000,
+        )
+        if item.key == "fire_context"
+    )
+    fire_terms = [
+        item
+        for item in fire.context
+        if item["reference_type"] == "reviewed_lang_glossary"
+    ]
+    assert [(item["en_us"], item["zh_tw"]) for item in fire_terms] == [
+        ("Fire Resistance", "抗火")
+    ]
+
+    close = next(
+        item
+        for item in db.smart_review_candidates(
+            version="1.21.1",
+            mod_id="demo",
+            kind=KIND_PATCHOULI,
+            effective_source=SRC_AI,
+            limit=1000,
+        )
+        if item.key == "close_context"
+    )
+    assert not [
+        item
+        for item in close.context
+        if item["reference_type"] in {"reviewed_lang_glossary", "official_locale"}
+    ]
+
+
 def test_response_validation_requires_exact_ids_and_format_safe_suggestion(db):
     snapshot = db.smart_review_candidates(version="1.21.1", limit=2)[1]
     valid = {
@@ -438,9 +531,7 @@ def test_smart_review_model_options_use_configured_chatgpt_model():
         }
     }
 
-    assert smart_review_model_options(config) == [
-        ("gpt-configured", "gpt-configured")
-    ]
+    assert smart_review_model_options(config) == [("gpt-configured", "gpt-configured")]
 
 
 def test_smart_review_model_options_keep_gemini_preference_for_gemini():

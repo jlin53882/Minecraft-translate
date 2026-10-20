@@ -44,7 +44,11 @@ _NAME_LIKE_KEY_PREFIXES = frozenset(
         "effect",
         "enchantment",
         "entity",
+        "fluid",
         "item",
+        "instrument",
+        "dimension",
+        "banner",
         "painting",
         "particle",
         "potion",
@@ -111,15 +115,28 @@ class OfficialLocaleIndex:
             en_us = item.get("source_text") or item.get("text")
             record = self.records_by_key.get(key) if isinstance(key, str) else None
             target = None
-            if record is not None and record.en_us == en_us:
+            normalized_en_us = (
+                normalize_terminology_text(en_us) if isinstance(en_us, str) else None
+            )
+            if (
+                record is not None
+                and normalized_en_us is not None
+                and normalize_terminology_text(record.en_us) == normalized_en_us
+            ):
                 target = record.zh_tw or None
             if target is None and isinstance(en_us, str):
                 target = self.unique_tw_by_en.get(en_us)
-            if isinstance(en_us, str) and target and en_us != target:
+            if (
+                isinstance(normalized_en_us, str)
+                and target
+                and normalized_en_us != target
+            ):
                 # The official table can map the same English source to
                 # different Traditional Chinese values by key. Keep that key
                 # in the deduplication identity and in the prompt.
-                terms[(str(key) if isinstance(key, str) else "", en_us)] = target
+                terms[(str(key) if isinstance(key, str) else "", normalized_en_us)] = (
+                    target
+                )
 
         ordered = sorted(
             ((key, source, target) for (key, source), target in terms.items()),
@@ -144,6 +161,11 @@ def _strip_minecraft_format_codes(value: str) -> str:
     return _MINECRAFT_FORMAT_CODE_RE.sub("", value)
 
 
+def normalize_terminology_text(value: str) -> str:
+    """Normalize source/term text before applying the shared terminology plan."""
+    return _strip_minecraft_format_codes(value)
+
+
 def _is_hyphenated_occurrence(source: str, term: str) -> bool:
     normalized_source = _strip_minecraft_format_codes(source).casefold()
     normalized_term = term.strip().casefold()
@@ -165,17 +187,42 @@ def _is_hyphenated_occurrence(source: str, term: str) -> bool:
     return False
 
 
-def _official_subterm_allowed(
-    source: str, term: str, index: OfficialLocaleIndex
+def _terminology_term_allowed(
+    source: str,
+    term: str,
+    index: OfficialLocaleIndex,
+    *,
+    key: str | None = None,
 ) -> bool:
     """Avoid forcing generic UI words into sentence or hyphenated contexts."""
-    normalized_source = _strip_minecraft_format_codes(source)
-    normalized_term = term.strip()
+    normalized_source = normalize_terminology_text(source)
+    normalized_term = normalize_terminology_text(term).strip()
     if term_canonical_key(normalized_source) == term_canonical_key(normalized_term):
         return True
-    if " " in normalized_term or _is_hyphenated_occurrence(source, normalized_term):
-        return " " in normalized_term
+    if " " in normalized_term:
+        return not _is_hyphenated_occurrence(source, normalized_term)
+    if _is_hyphenated_occurrence(source, normalized_term):
+        return False
+    key_prefix = key.split(".", 1)[0] if isinstance(key, str) else ""
+    if key_prefix in _NAME_LIKE_KEY_PREFIXES:
+        return True
     return term_canonical_key(normalized_term) in index.name_like_terms
+
+
+def terminology_term_allowed(
+    source: str,
+    term: str,
+    *,
+    key: str | None = None,
+    index: OfficialLocaleIndex | None = None,
+) -> bool:
+    """Expose the production context filter to review/evidence consumers."""
+    return _terminology_term_allowed(
+        source,
+        term,
+        index or load_official_locale_index(),
+        key=key,
+    )
 
 
 def _load_index(root: Path) -> OfficialLocaleIndex:
@@ -307,7 +354,7 @@ def build_translation_prompt(
     # Patchouli-compatible route as well.  They are never written directly;
     # the model still translates the current source item.
     if profile in {"lang", "patch", "md"} and include_moddb_reviewed:
-        reviewed = _reviewed_glossary_for_items(items)
+        reviewed = _reviewed_glossary_for_items(items, index)
         if reviewed:
             lines = ["\n【Mod DB 已審核 lang 翻譯參考（目前版本、本批相關）】"]
             lines.extend(f"- {source} → {target}" for source, target in reviewed)
@@ -319,47 +366,36 @@ def build_translation_prompt(
 
 def _reviewed_glossary_for_items(
     items: list[dict[str, Any]],
+    index: OfficialLocaleIndex,
 ) -> list[tuple[str, str]]:
     """Keep only unambiguous reviewed terms that occur in the current batch."""
-    batch_sources = tuple(
-        dict.fromkeys(
-            source
-            for item in items
-            if isinstance(item, dict)
-            for source in (item.get("source_text") or item.get("text"),)
-            if isinstance(source, str) and source.strip()
-        )
-    )
     by_source: dict[str, tuple[str, set[str]]] = {}
     for item in items:
-        reviewed = item.get("_reviewed_glossary")
-        if not isinstance(reviewed, list):
+        if not isinstance(item, dict):
             continue
-        for entry in reviewed:
-            if not isinstance(entry, dict):
-                continue
-            source, target = entry.get("en_us"), entry.get("zh_tw")
-            if (
-                isinstance(source, str)
-                and isinstance(target, str)
-                and source.strip()
-                and target.strip()
-            ):
-                canonical = term_canonical_key(source)
-                _display_source, targets = by_source.setdefault(
-                    canonical, (source, set())
-                )
-                targets.add(target)
-
-    matched_sources = matching_terms(
-        tuple(_strip_minecraft_format_codes(source) for source in batch_sources),
-        tuple(display_source for display_source, _targets in by_source.values()),
-    )
-    matched_source_keys = {term_canonical_key(matched) for matched in matched_sources}
+        # Reuse the same per-item filtering and longest-term selection as the
+        # payload-bound directives.  A batch-wide raw substring scan could
+        # reintroduce generic words or nested, conflicting terms.
+        selected = _item_terminology_terms(
+            item,
+            index,
+            include_official=False,
+            include_moddb_reviewed=True,
+        )
+        for source, target in selected:
+            normalized_source = normalize_terminology_text(source).strip()
+            canonical = term_canonical_key(normalized_source)
+            display_source, targets = by_source.setdefault(
+                canonical, (normalized_source, set())
+            )
+            targets.add(target.strip())
+            by_source[canonical] = (display_source, targets)
     return [
         (display_source, next(iter(targets)))
-        for canonical, (display_source, targets) in sorted(by_source.items())
-        if canonical in matched_source_keys and len(targets) == 1
+        for _canonical, (display_source, targets) in sorted(
+            by_source.items(), key=lambda entry: (-len(entry[1][0]), entry[0])
+        )
+        if len(targets) == 1
     ][:_MAX_PROMPT_TERMS]
 
 
@@ -374,16 +410,21 @@ def _item_terminology_terms(
     source_text = item.get("source_text") or item.get("text")
     if not isinstance(source_text, str) or not source_text.strip():
         return []
-    normalized_source = _strip_minecraft_format_codes(source_text)
+    normalized_source = normalize_terminology_text(source_text)
+    item_key = item.get("path") or item.get("key")
 
     candidates: dict[str, tuple[str, set[str]]] = {}
 
     if include_official and index.available:
         key = item.get("path") or item.get("key")
         record = index.records_by_key.get(key) if isinstance(key, str) else None
-        if record is not None and record.en_us == source_text and record.zh_tw:
-            candidates[term_canonical_key(source_text)] = (
-                source_text,
+        if (
+            record is not None
+            and normalize_terminology_text(record.en_us) == normalized_source
+            and record.zh_tw
+        ):
+            candidates[term_canonical_key(normalized_source)] = (
+                normalized_source,
                 {record.zh_tw.strip()},
             )
 
@@ -395,7 +436,12 @@ def _item_terminology_terms(
             (normalized_source,), tuple(index.unique_tw_by_en)
         )
         for term in sorted(official_terms, key=lambda value: (-len(value), value)):
-            if not _official_subterm_allowed(source_text, term, index):
+            if not _terminology_term_allowed(
+                source_text,
+                term,
+                index,
+                key=item_key if isinstance(item_key, str) else None,
+            ):
                 continue
             target = index.unique_tw_by_en.get(term)
             if not isinstance(target, str) or not target.strip() or target == term:
@@ -416,11 +462,20 @@ def _item_terminology_terms(
                 and isinstance(target, str)
                 and term.strip()
                 and target.strip()
-                and contains_term(normalized_source, term)
+                and contains_term(normalized_source, normalize_terminology_text(term))
+                and _terminology_term_allowed(
+                    source_text,
+                    normalize_terminology_text(term),
+                    index,
+                    key=entry.get("key") if isinstance(entry.get("key"), str) else None,
+                )
             ):
                 continue
-            canonical = term_canonical_key(term)
-            display, targets = candidates.setdefault(canonical, (term, set()))
+            normalized_term = normalize_terminology_text(term).strip()
+            canonical = term_canonical_key(normalized_term)
+            display, targets = candidates.setdefault(
+                canonical, (normalized_term, set())
+            )
             targets.add(target.strip())
             candidates[canonical] = (display, targets)
 
@@ -478,11 +533,12 @@ def terminology_terms_for_item(
     *,
     include_official: bool = True,
     include_moddb_reviewed: bool = True,
+    index: OfficialLocaleIndex | None = None,
 ) -> list[tuple[str, str]]:
     """Resolve the cached-input terminology plan for one translation item."""
     return _item_terminology_terms(
         item,
-        load_official_locale_index(),
+        index or load_official_locale_index(),
         include_official=include_official,
         include_moddb_reviewed=include_moddb_reviewed,
     )
@@ -518,8 +574,10 @@ __all__ = [
     "OfficialLocaleRecord",
     "build_translation_prompt",
     "load_official_locale_index",
+    "normalize_terminology_text",
     "official_exact_translation",
     "official_translation_for_item",
     "terminology_issues",
+    "terminology_term_allowed",
     "terminology_terms_for_item",
 ]
