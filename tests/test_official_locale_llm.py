@@ -246,8 +246,8 @@ def test_terminology_directives_bind_reviewed_terms_to_payload_ids() -> None:
     prompt = build_translation_prompt("基礎", items, profile="lang")
 
     assert "不要因為不確定就把整個 value 原樣回傳" in prompt
-    assert 'id「0」 key「first」：Copper Gate → 銅製閘門' in prompt
-    assert 'id「1」 key「second」：Pressure Chamber → 壓力室' in prompt
+    assert "id「0」 key「first」：Copper Gate → 銅製閘門" in prompt
+    assert "id「1」 key「second」：Pressure Chamber → 壓力室" in prompt
 
 
 def test_terminology_directives_use_official_subterms_and_prefer_longest(
@@ -264,6 +264,7 @@ def test_terminology_directives_use_official_subterms_and_prefer_longest(
             "Brick": "紅磚頭",
         },
         revision="test",
+        name_like_terms=frozenset({"crossbow", "brick"}),
     )
     monkeypatch.setattr(official_locale, "load_official_locale_index", lambda: index)
 
@@ -284,9 +285,42 @@ def test_terminology_directives_use_official_subterms_and_prefer_longest(
         profile="lang",
     )
 
-    assert 'id「0」 key「item.crossbow」：Crossbow → 弩' in prompt
-    assert 'id「1」 key「block.slab」：Brick Slab → 紅磚半磚' in prompt
-    assert 'id「1」 key「block.slab」：Brick → 紅磚頭' not in prompt
+    assert "id「0」 key「item.crossbow」：Crossbow → 弩" in prompt
+    assert "id「1」 key「block.slab」：Brick Slab → 紅磚半磚" in prompt
+    assert "id「1」 key「block.slab」：Brick → 紅磚頭" not in prompt
+
+
+def test_terminology_plan_handles_format_codes_and_contextual_short_words():
+    from translation_tool.core import official_locale
+
+    index = official_locale.OfficialLocaleIndex(
+        records_by_key={},
+        unique_by_text_pair={},
+        unique_tw_by_en={
+            "Fire Resistance": "抗火",
+            "Resistance": "抗性",
+            "Air": "空氣",
+            "Close": "關閉",
+        },
+        revision="test",
+        name_like_terms=frozenset({"resistance", "air"}),
+    )
+
+    assert official_locale._item_terminology_terms(
+        {"source_text": "§9Fire Resistance (1:00)"}, index
+    ) == [("Fire Resistance", "抗火")]
+    assert (
+        official_locale._item_terminology_terms(
+            {"source_text": "§78 Mid-Air Jumps§r"}, index
+        )
+        == []
+    )
+    assert (
+        official_locale._item_terminology_terms(
+            {"source_text": "Calms attacking Piglins when Player gets close"}, index
+        )
+        == []
+    )
 
 
 def test_moddb_items_form_module_and_kind_batch_boundaries() -> None:

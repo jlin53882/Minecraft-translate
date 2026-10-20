@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 from functools import lru_cache
@@ -34,6 +35,23 @@ _LOCALE_FILES = ("en_us.json", "zh_cn.json", "zh_tw.json")
 _MAX_PROMPT_TERMS = 240
 _MAX_PROMPT_CHARS = 24_000
 _MAX_TERMS_PER_ITEM = 6
+_MINECRAFT_FORMAT_CODE_RE = re.compile(r"§[0-9a-fk-or]", re.IGNORECASE)
+_NAME_LIKE_KEY_PREFIXES = frozenset(
+    {
+        "attribute",
+        "biome",
+        "block",
+        "effect",
+        "enchantment",
+        "entity",
+        "item",
+        "painting",
+        "particle",
+        "potion",
+        "trim_material",
+        "trim_pattern",
+    }
+)
 
 _TERMINOLOGY_INSTRUCTION = (
     "\n【翻譯原則：術語優先、不要無故保留英文】\n"
@@ -61,6 +79,7 @@ class OfficialLocaleIndex:
     unique_tw_by_en: dict[str, str]
     revision: str
     available: bool = True
+    name_like_terms: frozenset[str] = frozenset()
 
     def lookup_exact(self, key: object, en_us: object, zh_cn: object) -> str | None:
         """Return official zh_tw only for an exact ``key + en + cn`` match."""
@@ -121,6 +140,44 @@ def _empty_index() -> OfficialLocaleIndex:
     return OfficialLocaleIndex({}, {}, {}, "missing", available=False)
 
 
+def _strip_minecraft_format_codes(value: str) -> str:
+    return _MINECRAFT_FORMAT_CODE_RE.sub("", value)
+
+
+def _is_hyphenated_occurrence(source: str, term: str) -> bool:
+    normalized_source = _strip_minecraft_format_codes(source).casefold()
+    normalized_term = term.strip().casefold()
+    start = 0
+    while (
+        normalized_term
+        and (index := normalized_source.find(normalized_term, start)) >= 0
+    ):
+        before = normalized_source[index - 1] if index else ""
+        after_index = index + len(normalized_term)
+        after = (
+            normalized_source[after_index]
+            if after_index < len(normalized_source)
+            else ""
+        )
+        if before == "-" or after == "-":
+            return True
+        start = index + 1
+    return False
+
+
+def _official_subterm_allowed(
+    source: str, term: str, index: OfficialLocaleIndex
+) -> bool:
+    """Avoid forcing generic UI words into sentence or hyphenated contexts."""
+    normalized_source = _strip_minecraft_format_codes(source)
+    normalized_term = term.strip()
+    if term_canonical_key(normalized_source) == term_canonical_key(normalized_term):
+        return True
+    if " " in normalized_term or _is_hyphenated_occurrence(source, normalized_term):
+        return " " in normalized_term
+    return term_canonical_key(normalized_term) in index.name_like_terms
+
+
 def _load_index(root: Path) -> OfficialLocaleIndex:
     locale_root = root / _OFFICIAL_RELATIVE_ROOT
     try:
@@ -173,8 +230,16 @@ def _load_index(root: Path) -> OfficialLocaleIndex:
         for source, targets in en_values.items()
         if len(targets) == 1
     }
+    name_like_terms = frozenset(
+        term_canonical_key(record.en_us)
+        for record in records.values()
+        if record.en_us in unique_en
+        and record.key.split(".", 1)[0] in _NAME_LIKE_KEY_PREFIXES
+    )
     revision = ":".join(_file_sha256(locale_root / name)[:16] for name in _LOCALE_FILES)
-    return OfficialLocaleIndex(records, unique_pairs, unique_en, revision)
+    return OfficialLocaleIndex(
+        records, unique_pairs, unique_en, revision, name_like_terms=name_like_terms
+    )
 
 
 @lru_cache(maxsize=4)
@@ -287,7 +352,7 @@ def _reviewed_glossary_for_items(
                 targets.add(target)
 
     matched_sources = matching_terms(
-        batch_sources,
+        tuple(_strip_minecraft_format_codes(source) for source in batch_sources),
         tuple(display_source for display_source, _targets in by_source.values()),
     )
     matched_source_keys = {term_canonical_key(matched) for matched in matched_sources}
@@ -309,6 +374,7 @@ def _item_terminology_terms(
     source_text = item.get("source_text") or item.get("text")
     if not isinstance(source_text, str) or not source_text.strip():
         return []
+    normalized_source = _strip_minecraft_format_codes(source_text)
 
     candidates: dict[str, tuple[str, set[str]]] = {}
 
@@ -326,9 +392,11 @@ def _item_terminology_terms(
         # whole-value lookup alone cannot enforce Minecraft's established
         # terminology inside a newly introduced key.
         official_terms = matching_terms(
-            (source_text,), tuple(index.unique_tw_by_en)
+            (normalized_source,), tuple(index.unique_tw_by_en)
         )
         for term in sorted(official_terms, key=lambda value: (-len(value), value)):
+            if not _official_subterm_allowed(source_text, term, index):
+                continue
             target = index.unique_tw_by_en.get(term)
             if not isinstance(target, str) or not target.strip() or target == term:
                 continue
@@ -348,7 +416,7 @@ def _item_terminology_terms(
                 and isinstance(target, str)
                 and term.strip()
                 and target.strip()
-                and contains_term(source_text, term)
+                and contains_term(normalized_source, term)
             ):
                 continue
             canonical = term_canonical_key(term)
@@ -398,9 +466,7 @@ def _terminology_directives(
         )
         key = item.get("path") or item.get("key") or ""
         for source, target in terms:
-            lines.append(
-                f'- id「{item_id}」 key「{key}」：{source} → {target}'
-            )
+            lines.append(f"- id「{item_id}」 key「{key}」：{source} → {target}")
             count += 1
             if count >= _MAX_PROMPT_TERMS:
                 return lines
@@ -439,10 +505,7 @@ def terminology_issues(
             include_moddb_reviewed=include_moddb_reviewed,
         )
     if not isinstance(translated_text, str) or not translated_text.strip():
-        return [
-            f"術語未校對：{source} → {target}"
-            for source, target in expected_terms
-        ]
+        return [f"術語未校對：{source} → {target}" for source, target in expected_terms]
     return [
         f"術語未命中：{source} → {target}"
         for source, target in expected_terms

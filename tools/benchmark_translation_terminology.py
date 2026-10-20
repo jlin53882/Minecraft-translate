@@ -26,6 +26,7 @@ from typing import Any
 from unittest.mock import patch
 
 from translation_tool.core import lm_translator_main
+from translation_tool.core.official_locale import terminology_terms_for_item
 from translation_tool.translation_db import TranslationDB, load_db_settings
 from translation_tool.translation_db.models import SmartReviewCandidate
 from translation_tool.utils.config_manager import load_config
@@ -53,8 +54,8 @@ def _compact(value: str) -> str:
     return re.sub(r"\s+", " ", value).strip()
 
 
-def _reference_terms(candidate: SmartReviewCandidate) -> list[dict[str, str]]:
-    """Return deduplicated reviewed/official term references for one row."""
+def _raw_reference_terms(candidate: SmartReviewCandidate) -> list[dict[str, str]]:
+    """Return raw context references for diagnostic comparison only."""
     result: list[dict[str, str]] = []
     seen: set[tuple[str, str, str]] = set()
     for raw in candidate.context:
@@ -63,11 +64,7 @@ def _reference_terms(candidate: SmartReviewCandidate) -> list[dict[str, str]]:
         source = str(raw.get("en_us", "")).strip()
         target = _compact(str(raw.get("zh_tw", "")))
         reference_type = str(raw.get("reference_type", ""))
-        if (
-            not source
-            or not target
-            or not contains_term(candidate.en_us, source)
-        ):
+        if not source or not target or not contains_term(candidate.en_us, source):
             continue
         key = (source.casefold(), target, reference_type)
         if key in seen:
@@ -81,6 +78,18 @@ def _reference_terms(candidate: SmartReviewCandidate) -> list[dict[str, str]]:
             }
         )
     return result
+
+
+def _authoritative_reference_terms(item: dict[str, Any]) -> list[dict[str, str]]:
+    """Use the same ambiguity-filtered plan that production sends to the model."""
+    return [
+        {
+            "source": source,
+            "expected": target,
+            "reference_type": "production_terminology_plan",
+        }
+        for source, target in terminology_terms_for_item(item)
+    ]
 
 
 def _build_items(
@@ -125,19 +134,16 @@ def _output_map(results: list[dict[str, Any]] | None) -> dict[str, str | None]:
     return mapped
 
 
-def _metrics(
-    candidates: list[SmartReviewCandidate], outputs: dict[str, str | None]
+def _term_metrics(
+    candidates: list[SmartReviewCandidate],
+    outputs: dict[str, str | None],
+    references_by_ordinal: dict[int, list[dict[str, str]]],
 ) -> dict[str, Any]:
     total_terms = emitted_terms = term_hits = 0
-    output_rows = 0
-    unchanged_rows = 0
     rows_with_references = 0
     for candidate in candidates:
         output = outputs.get(str(candidate.ordinal))
-        if isinstance(output, str) and output.strip():
-            output_rows += 1
-            unchanged_rows += int(_compact(output) == _compact(candidate.en_us))
-        references = _reference_terms(candidate)
+        references = references_by_ordinal.get(candidate.ordinal, [])
         if references:
             rows_with_references += 1
         for reference in references:
@@ -147,26 +153,61 @@ def _metrics(
             emitted_terms += 1
             term_hits += int(reference["expected"] in _compact(output))
     return {
-        "input_rows": len(candidates),
-        "output_rows": output_rows,
-        "output_coverage": round(output_rows / len(candidates), 4)
-        if candidates
-        else None,
-        "source_unchanged_rows": unchanged_rows,
         "reference_rows": rows_with_references,
         "term_references": total_terms,
         "term_emitted": emitted_terms,
         "term_hits": term_hits,
         "term_misses": emitted_terms - term_hits,
-        "term_coverage": round(emitted_terms / total_terms, 4)
-        if total_terms
-        else None,
+        "term_coverage": round(emitted_terms / total_terms, 4) if total_terms else None,
         "term_hit_rate_on_all": round(term_hits / total_terms, 4)
         if total_terms
         else None,
         "term_hit_rate_on_emitted": round(term_hits / emitted_terms, 4)
         if emitted_terms
         else None,
+    }
+
+
+def _metrics(
+    candidates: list[SmartReviewCandidate],
+    items: list[dict[str, Any]],
+    outputs: dict[str, str | None],
+) -> dict[str, Any]:
+    authoritative_by_ordinal = {
+        candidate.ordinal: _authoritative_reference_terms(item)
+        for candidate, item in zip(candidates, items, strict=True)
+    }
+    raw_by_ordinal = {
+        candidate.ordinal: _raw_reference_terms(candidate) for candidate in candidates
+    }
+    authoritative = _term_metrics(candidates, outputs, authoritative_by_ordinal)
+    raw = _term_metrics(candidates, outputs, raw_by_ordinal)
+    output_rows = sum(
+        isinstance(outputs.get(str(candidate.ordinal)), str)
+        and bool(outputs.get(str(candidate.ordinal), "").strip())
+        for candidate in candidates
+    )
+    unchanged_rows = sum(
+        _compact(outputs.get(str(candidate.ordinal), "")) == _compact(candidate.en_us)
+        for candidate in candidates
+        if isinstance(outputs.get(str(candidate.ordinal)), str)
+        and outputs.get(str(candidate.ordinal), "").strip()
+    )
+    return {
+        "input_rows": len(candidates),
+        "output_rows": output_rows,
+        "output_coverage": round(output_rows / len(candidates), 4)
+        if candidates
+        else None,
+        "source_unchanged_rows": unchanged_rows,
+        **authoritative,
+        "evaluable_row_coverage": round(
+            authoritative["reference_rows"] / len(candidates), 4
+        )
+        if candidates
+        else None,
+        "theoretical_term_ceiling": 1.0 if authoritative["term_references"] else None,
+        "raw_context": raw,
     }
 
 
@@ -210,9 +251,7 @@ def run_benchmark() -> int:
     if args.temperature is not None:
         runtime_lm_config["temperature"] = args.temperature
     if args.initial_batch_size is not None:
-        runtime_lm_config["initial_batch_size_lang"] = max(
-            1, args.initial_batch_size
-        )
+        runtime_lm_config["initial_batch_size_lang"] = max(1, args.initial_batch_size)
 
     with ExitStack() as stack:
         stack.enter_context(
@@ -224,7 +263,9 @@ def run_benchmark() -> int:
         )
         if args.temperature is not None or args.initial_batch_size is not None:
             stack.enter_context(
-                patch.object(lm_translator_main, "load_config", return_value=runtime_config)
+                patch.object(
+                    lm_translator_main, "load_config", return_value=runtime_config
+                )
             )
         results, status = lm_translator_main.translate_batch_smart(
             items, total=len(items), dry_run=False
@@ -243,7 +284,7 @@ def run_benchmark() -> int:
         "source_only_input": True,
         "current_zh_tw_sent_to_model": False,
         "status": status,
-        "metrics": _metrics(candidates, outputs),
+        "metrics": _metrics(candidates, items, outputs),
         "rows": [
             {
                 "ordinal": candidate.ordinal,
@@ -252,10 +293,11 @@ def run_benchmark() -> int:
                 "mod_id": candidate.mod_id,
                 "key": candidate.key,
                 "en_us": candidate.en_us,
-                "references": _reference_terms(candidate),
+                "references": _authoritative_reference_terms(item),
+                "raw_context_references": _raw_reference_terms(candidate),
                 "output": outputs.get(str(candidate.ordinal)),
             }
-            for candidate in candidates
+            for candidate, item in zip(candidates, items, strict=True)
         ],
     }
     output = args.output or (
@@ -265,8 +307,16 @@ def run_benchmark() -> int:
         / f"{args.model}-{args.label}.json"
     )
     output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
-    print(json.dumps({key: value for key, value in report.items() if key != "rows"}, ensure_ascii=False, indent=2))
+    output.write_text(
+        json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    print(
+        json.dumps(
+            {key: value for key, value in report.items() if key != "rows"},
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
     print(f"report={output}")
     return 0
 
