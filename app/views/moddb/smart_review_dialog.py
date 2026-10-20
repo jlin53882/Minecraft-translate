@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sqlite3
 import threading
 from pathlib import Path
 
@@ -71,6 +72,7 @@ class SmartReviewDialog:
         self._candidate_path: Path | None = None
         self._candidate_db_identity: str | None = None
         self._candidate_priority: tuple[int, ...] = ()
+        self._candidate_query_id = 0
         self._build_controls(version, mod_id, kind, effective_source, query)
         self._build_dialog()
 
@@ -265,6 +267,45 @@ class SmartReviewDialog:
             self._cancel()
         self._generation += 1
 
+    def _current_db_identity(self, path: Path | None = None) -> str | None:
+        """回傳目前資料庫路徑與 cache generation 組成的身分。"""
+        db = self.get_db()
+        current_path = path
+        if current_path is None and db is not None and getattr(db, "path", None):
+            current_path = Path(db.path)
+        if current_path is None:
+            return None
+        identity = str(current_path.resolve())
+        generation_getter = getattr(db, "_cache_generation", None)
+        if callable(generation_getter):
+            try:
+                identity += f"::{generation_getter()}"
+            except (OSError, RuntimeError, sqlite3.Error):
+                pass
+        return identity
+
+    def _is_current_operation(
+        self,
+        generation: int,
+        db_identity: str | None = None,
+        run_id: str | None = None,
+        *,
+        query_id: int | None = None,
+        page: int | None = None,
+    ) -> bool:
+        """統一驗證 UI 世代、資料庫、run、查詢序號與頁碼。"""
+        if generation != self._generation:
+            return False
+        if db_identity is not None and self._current_db_identity() != db_identity:
+            return False
+        if run_id is not None and self._run_id != run_id:
+            return False
+        if query_id is not None and query_id != getattr(self, "_candidate_query_id", 0):
+            return False
+        if page is not None and page != getattr(self, "_candidate_page", page):
+            return False
+        return True
+
     def _cancel(self, _e=None) -> None:
         """取消目前智慧校對執行並更新按鈕狀態。"""
         if not self._busy:
@@ -396,6 +437,7 @@ class SmartReviewDialog:
             return
         self._set_busy(True, "正在唯讀查詢候選…")
         generation = self._generation
+        db_identity = self._current_db_identity(path)
 
         def work() -> None:
             """在背景執行目前的智慧校對工作。"""
@@ -422,18 +464,29 @@ class SmartReviewDialog:
                     limit=min(limit, 3),
                 )
             except Exception as exc:  # noqa: BLE001 - UI reports bounded failure
-                self._post(self._apply_preview, generation, None, None, str(exc))
+                self._post(
+                    self._apply_preview,
+                    generation,
+                    db_identity,
+                    None,
+                    None,
+                    str(exc),
+                )
                 return
-            self._post(self._apply_preview, generation, total, rows, None)
+            self._post(self._apply_preview, generation, db_identity, total, rows, None)
 
         self._launch(work, "Mod 資料庫智慧校對預覽", CommitPolicy.EPHEMERAL)
 
     def _apply_preview(
-        self, generation: int, total: int | None, rows, error: str | None
+        self,
+        generation: int,
+        db_identity: str | None,
+        total: int | None,
+        rows,
+        error: str | None,
     ) -> None:
         """把預覽結果套用到智慧校對對話框的狀態與控制項。"""
-        if generation != self._generation:
-            self._set_busy(False, "預覽已過期，請重新查詢。")
+        if not self._is_current_operation(generation, db_identity):
             return
         self._set_busy(False, "")
         if error:
@@ -473,7 +526,7 @@ class SmartReviewDialog:
         path = Path(db.path).resolve()
         priority = tuple(getattr(db, "priority", ()))
         generation = self._generation
-        db_identity = str(path)
+        db_identity = self._current_db_identity(path)
         self._set_busy(True, "正在背景載入歷史批次…")
 
         def work() -> None:
@@ -516,14 +569,7 @@ class SmartReviewDialog:
         error: str | None,
     ) -> None:
         """驗證世代與資料庫身分後把歷史批次套用到 UI。"""
-        db = self.get_db()
-        current_identity = (
-            str(Path(db.path).resolve())
-            if db is not None and getattr(db, "path", None)
-            else None
-        )
-        if generation != self._generation or current_identity != db_identity:
-            self._set_busy(False, "歷史批次結果已過期。")
+        if not self._is_current_operation(generation, db_identity):
             return
         self._set_busy(False, "")
         if error:
@@ -579,7 +625,7 @@ class SmartReviewDialog:
         path = Path(db.path).resolve()
         priority = tuple(getattr(db, "priority", ()))
         generation = self._generation
-        db_identity = str(path)
+        db_identity = self._current_db_identity(path)
 
         def work() -> None:
             """在背景唯讀取得最近智慧校對批次。"""
@@ -612,13 +658,7 @@ class SmartReviewDialog:
         error: str | None,
     ) -> None:
         """只在目前 UI 世代與資料庫身分相同時更新批次下拉選單。"""
-        db = self.get_db()
-        current_identity = (
-            str(Path(db.path).resolve())
-            if db is not None and getattr(db, "path", None)
-            else None
-        )
-        if generation != self._generation or current_identity != db_identity:
+        if not self._is_current_operation(generation, db_identity):
             return
         if error:
             self.status.value = f"批次清單載入失敗：{error}"
@@ -679,12 +719,14 @@ class SmartReviewDialog:
             return
         self._set_busy(True, "AI 校對執行中；候選會分批保存…")
         generation = self._generation
+        db_identity = self._current_db_identity(path)
 
         def progress(snapshot: dict) -> None:
             """回報背景智慧校對的進度更新。"""
             self._post(
                 self._apply_progress,
                 generation,
+                db_identity,
                 snapshot.get("processed", 0),
                 snapshot.get("selected", 0),
                 snapshot.get("status", "running"),
@@ -709,9 +751,25 @@ class SmartReviewDialog:
                     cancel_check=self._cancel_event.is_set,
                 )
             except Exception as exc:  # noqa: BLE001 - UI reports bounded failure
-                self._post(self._apply_run, generation, path, priority, None, str(exc))
+                self._post(
+                    self._apply_run,
+                    generation,
+                    db_identity,
+                    path,
+                    priority,
+                    None,
+                    str(exc),
+                )
                 return
-            self._post(self._apply_run, generation, path, priority, result, None)
+            self._post(
+                self._apply_run,
+                generation,
+                db_identity,
+                path,
+                priority,
+                result,
+                None,
+            )
 
         self._launch(
             work,
@@ -721,17 +779,24 @@ class SmartReviewDialog:
         )
 
     def _apply_progress(
-        self, generation: int, processed: int, selected: int, status: str
+        self,
+        generation: int,
+        db_identity: str | None,
+        processed: int,
+        selected: int,
+        status: str,
     ) -> None:
         """把後端智慧校對進度套用到 UI。"""
-        if generation == self._generation:
-            self.status.value = f"AI 校對中：{processed:,} / {selected:,} 筆 · {status}"
-            self._safe_update()
+        if not self._is_current_operation(generation, db_identity):
+            return
+        self.status.value = f"AI 校對中：{processed:,} / {selected:,} 筆 · {status}"
+        self._safe_update()
 
-    def _apply_run(self, generation, path, priority, result, error) -> None:
+    def _apply_run(
+        self, generation, db_identity, path, priority, result, error
+    ) -> None:
         """把智慧校對完成結果套用到對話框並重新載入候選。"""
-        if generation != self._generation:
-            self._set_busy(False, "執行結果已過期。")
+        if not self._is_current_operation(generation, db_identity):
             return
         self._set_busy(False, "")
         if error:
@@ -767,10 +832,12 @@ class SmartReviewDialog:
     ) -> None:
         """在背景載入候選，並以世代與資料庫身分丟棄過期結果。"""
         self._candidate_path = path
-        self._candidate_db_identity = str(path.resolve())
+        self._candidate_db_identity = self._current_db_identity(path)
         self._candidate_priority = priority
         if page is not None:
             self._candidate_page = max(1, int(page))
+        self._candidate_query_id = getattr(self, "_candidate_query_id", 0) + 1
+        query_id = self._candidate_query_id
         generation = self._generation
         db_identity = self._candidate_db_identity
         selected_page = self._candidate_page
@@ -804,6 +871,7 @@ class SmartReviewDialog:
                     selected_page,
                     None,
                     str(exc),
+                    query_id,
                 )
                 return
             self._post(
@@ -816,6 +884,7 @@ class SmartReviewDialog:
                 selected_page,
                 (int(selected_total), rows),
                 None,
+                query_id,
             )
 
         self._launch(work, "載入智慧校對候選", CommitPolicy.EPHEMERAL)
@@ -830,21 +899,19 @@ class SmartReviewDialog:
         page: int,
         result: tuple[int, list[SmartReviewCandidate]] | None,
         error: str | None,
+        query_id: int | None = None,
     ) -> None:
-        """只在候選查詢仍屬於目前 run 時更新卡片與分頁。"""
-        if (
-            generation != self._generation
-            or self._candidate_db_identity != db_identity
-            or self._run_id != run_id
-        ):
-            return
-        db = self.get_db()
-        current_identity = (
-            str(Path(db.path).resolve())
-            if db is not None and getattr(db, "path", None)
-            else None
+        """只套用最新的世代、資料庫、run、查詢序號與頁碼結果。"""
+        query_id = (
+            getattr(self, "_candidate_query_id", 0) if query_id is None else query_id
         )
-        if current_identity != db_identity:
+        if self._candidate_db_identity != db_identity or not self._is_current_operation(
+            generation,
+            db_identity,
+            run_id,
+            query_id=query_id,
+            page=page,
+        ):
             return
         if error:
             self.candidates.controls = [ft.Text(f"候選載入失敗：{error}", color=C.RED)]
@@ -1128,6 +1195,8 @@ class SmartReviewDialog:
         if self._busy:
             return
         draft = str(draft_control.value or "")
+        generation = self._generation
+        db_identity = self._current_db_identity(path)
         self._set_busy(True, f"儲存候選 #{ordinal} 草稿…")
 
         def work() -> None:
@@ -1138,10 +1207,26 @@ class SmartReviewDialog:
                 )
             except Exception as exc:  # noqa: BLE001 - UI reports bounded failure
                 self._post(
-                    self._apply_draft_result, path, priority, run_id, None, str(exc)
+                    self._apply_draft_result,
+                    path,
+                    priority,
+                    run_id,
+                    None,
+                    str(exc),
+                    generation,
+                    db_identity,
                 )
                 return
-            self._post(self._apply_draft_result, path, priority, run_id, status, None)
+            self._post(
+                self._apply_draft_result,
+                path,
+                priority,
+                run_id,
+                status,
+                None,
+                generation,
+                db_identity,
+            )
 
         self._launch(
             work,
@@ -1150,8 +1235,21 @@ class SmartReviewDialog:
             durability=DurabilityPolicy.USER_ACTION,
         )
 
-    def _apply_draft_result(self, path, priority, run_id, status, error) -> None:
+    def _apply_draft_result(
+        self,
+        path,
+        priority,
+        run_id,
+        status,
+        error,
+        generation: int | None = None,
+        db_identity: str | None = None,
+    ) -> None:
         """處理保存草稿後的回應並更新候選卡片。"""
+        if generation is not None and not self._is_current_operation(
+            generation, db_identity, run_id
+        ):
+            return
         self._set_busy(False, "")
         if error:
             show_snack(self.page, f"草稿儲存失敗：{error}", C.RED)
@@ -1174,6 +1272,8 @@ class SmartReviewDialog:
         """送出目前候選的套用請求。"""
         if self._busy:
             return
+        generation = self._generation
+        db_identity = self._current_db_identity(path)
         self._set_busy(True, f"套用候選 #{ordinal}…")
 
         def work() -> None:
@@ -1188,11 +1288,25 @@ class SmartReviewDialog:
                 )
             except Exception as exc:  # noqa: BLE001 - UI reports bounded failure
                 self._post(
-                    self._apply_candidate_result, path, priority, run_id, None, str(exc)
+                    self._apply_candidate_result,
+                    path,
+                    priority,
+                    run_id,
+                    None,
+                    str(exc),
+                    generation,
+                    db_identity,
                 )
                 return
             self._post(
-                self._apply_candidate_result, path, priority, run_id, status, None
+                self._apply_candidate_result,
+                path,
+                priority,
+                run_id,
+                status,
+                None,
+                generation,
+                db_identity,
             )
 
         self._launch(
@@ -1202,8 +1316,21 @@ class SmartReviewDialog:
             durability=DurabilityPolicy.USER_ACTION,
         )
 
-    def _apply_candidate_result(self, path, priority, run_id, status, error) -> None:
+    def _apply_candidate_result(
+        self,
+        path,
+        priority,
+        run_id,
+        status,
+        error,
+        generation: int | None = None,
+        db_identity: str | None = None,
+    ) -> None:
         """處理套用候選後的回應並通知上層頁面。"""
+        if generation is not None and not self._is_current_operation(
+            generation, db_identity, run_id
+        ):
+            return
         self._set_busy(False, "")
         if error:
             show_snack(self.page, f"套用失敗：{error}", C.RED)
@@ -1227,6 +1354,8 @@ class SmartReviewDialog:
         """送出目前候選的拒絕請求。"""
         if self._busy:
             return
+        generation = self._generation
+        db_identity = self._current_db_identity(path)
         self._set_busy(True, f"保留候選 #{ordinal} 的原譯文…")
 
         def work() -> None:
@@ -1237,10 +1366,26 @@ class SmartReviewDialog:
                 )
             except Exception as exc:  # noqa: BLE001 - UI reports bounded failure
                 self._post(
-                    self._apply_reject_result, path, priority, run_id, None, str(exc)
+                    self._apply_reject_result,
+                    path,
+                    priority,
+                    run_id,
+                    None,
+                    str(exc),
+                    generation,
+                    db_identity,
                 )
                 return
-            self._post(self._apply_reject_result, path, priority, run_id, status, None)
+            self._post(
+                self._apply_reject_result,
+                path,
+                priority,
+                run_id,
+                status,
+                None,
+                generation,
+                db_identity,
+            )
 
         self._launch(
             work,
@@ -1249,8 +1394,21 @@ class SmartReviewDialog:
             durability=DurabilityPolicy.USER_ACTION,
         )
 
-    def _apply_reject_result(self, path, priority, run_id, status, error) -> None:
+    def _apply_reject_result(
+        self,
+        path,
+        priority,
+        run_id,
+        status,
+        error,
+        generation: int | None = None,
+        db_identity: str | None = None,
+    ) -> None:
         """處理拒絕候選後的回應並重新整理列表。"""
+        if generation is not None and not self._is_current_operation(
+            generation, db_identity, run_id
+        ):
+            return
         self._set_busy(False, "")
         if error:
             show_snack(self.page, f"保留失敗：{error}", C.RED)

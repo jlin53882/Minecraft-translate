@@ -16,15 +16,23 @@ import re
 import time
 import uuid
 from collections.abc import Callable, Sequence
+from contextlib import nullcontext
 from dataclasses import dataclass
 from typing import Any
 
 import requests
 
-from translation_tool.core.codex_oauth import chatgpt_account_status
+from translation_tool.core.codex_oauth import ChatGPTOAuthError, chatgpt_account_status
+from translation_tool.core.lm_batch_actions import BatchAction
+from translation_tool.core.lm_batch_budget import BudgetConfig, estimate_text_tokens
 from translation_tool.core.lm_api_client import call_gemini_requests
 from translation_tool.core.lm_config_rules import ApiKeyCycle, get_api_key_count
-from translation_tool.core.lm_config_schema import chatgpt_model_reasoning_effort
+from translation_tool.core.lm_config_schema import (
+    chatgpt_model_input_token_budget,
+    chatgpt_model_reasoning_effort,
+)
+from translation_tool.core.lm_key_health import get_model_quota_registry
+from translation_tool.core.openai_codex_client import ChatGPTAPIError
 from translation_tool.core.official_locale import (
     load_official_locale_index,
     normalize_terminology_text,
@@ -39,7 +47,12 @@ from translation_tool.translation_db.models import (
 from translation_tool.translation_db.quality import quality_state, translation_issues
 from translation_tool.translation_db.sql_helpers import like_pattern
 from translation_tool.translation_db.schema import SRC_AI, SRC_MANUAL
-from translation_tool.utils.cancellation import TaskCancelled, is_cancelled
+from translation_tool.utils.cancellation import (
+    TaskCancelled,
+    cancel_scope,
+    interruptible_sleep,
+    is_cancelled,
+)
 from translation_tool.utils.text_matching import contains_term, term_canonical_key
 
 SMART_REVIEW_DECISIONS = ("no_change", "suggest_revision", "needs_context")
@@ -501,7 +514,9 @@ class SmartReviewMixin:
             (*selection.params, bounded_limit, max(0, int(offset))),
         )
         snapshots: list[SmartReviewSnapshot] = []
-        for ordinal, row in enumerate(rows, 1):
+        absolute_offset = max(0, int(offset))
+        for row_index, row in enumerate(rows, 1):
+            ordinal = absolute_offset + row_index
             (
                 entry_id,
                 kind,
@@ -595,18 +610,6 @@ class SmartReviewMixin:
         key_rows_cache = cache.setdefault("key_rows", {})
         quality_cache = cache.setdefault("quality", {})
         cache_key = (kind, mod_id, key)
-        if cache_key not in key_rows_cache:
-            key_rows_cache[cache_key] = self._q(
-                "SELECT e.id, e.kind, e.mc_version, e.mod_id, e.key, e.en_us, "
-                "f.zh_tw, f.source, f.review_status, f.revision "
-                "FROM entry e JOIN translation f ON f.entry_id=e.id "
-                "WHERE e.kind=? AND e.mod_id=? AND e.key=? "
-                "AND f.review_status='reviewed' AND trim(f.zh_tw)<>'' "
-                "ORDER BY e.mc_version, e.id LIMIT 24",
-                (kind, mod_id, key),
-            )
-        rows = [row for row in key_rows_cache[cache_key] if int(row[0]) != entry_id]
-        context: list[dict[str, Any]] = []
 
         def quality_details(row: tuple) -> tuple[str, tuple[str, ...], str]:
             """取得 reviewed row 的格式品質狀態與可顯示診斷。"""
@@ -616,6 +619,55 @@ class SmartReviewMixin:
                     str(row[5]), str(row[6]), kind=str(row[1])
                 )
             return quality_cache[quality_key]
+
+        if cache_key not in key_rows_cache:
+            base_sql = (
+                "SELECT e.id, e.kind, e.mc_version, e.mod_id, e.key, e.en_us, "
+                "f.zh_tw, f.source, f.review_status, f.revision "
+                "FROM entry e JOIN translation f ON f.entry_id=e.id "
+                "WHERE e.kind=? AND e.mod_id=? AND e.key=? "
+                "AND f.review_status='reviewed' AND trim(f.zh_tw)<>'' "
+            )
+            # 先分層抓取，再在本地把品質合格的資料排到 LIMIT 前面；
+            # 不讓 24 筆舊版本或格式不合格資料吃掉目前版本的參考名額。
+            tier_queries = (
+                (
+                    "AND e.mc_version=? AND e.en_us=? ORDER BY e.id LIMIT 96",
+                    (mc_version, en_us),
+                ),
+                (
+                    "AND e.mc_version=? AND e.en_us<>? ORDER BY e.id LIMIT 96",
+                    (mc_version, en_us),
+                ),
+                (
+                    "AND e.mc_version<>? AND e.en_us=? ORDER BY e.id LIMIT 96",
+                    (mc_version, en_us),
+                ),
+                (
+                    "AND e.mc_version<>? AND e.en_us<>? ORDER BY e.mc_version, e.id LIMIT 96",
+                    (mc_version, en_us),
+                ),
+            )
+            candidates: list[tuple] = []
+            seen_ids: set[int] = set()
+            for suffix, tier_params in tier_queries:
+                for row in self._q(
+                    base_sql + suffix,
+                    (kind, mod_id, key, *tier_params),
+                ):
+                    row_id = int(row[0])
+                    if row_id not in seen_ids:
+                        seen_ids.add(row_id)
+                        candidates.append(row)
+            consistent = [
+                row for row in candidates if quality_details(row)[0] == "consistent"
+            ]
+            lower_quality = [
+                row for row in candidates if quality_details(row)[0] != "consistent"
+            ]
+            key_rows_cache[cache_key] = (consistent + lower_quality)[:24]
+        rows = [row for row in key_rows_cache[cache_key] if int(row[0]) != entry_id]
+        context: list[dict[str, Any]] = []
 
         def db_context_item(
             row: tuple,
@@ -700,6 +752,50 @@ class SmartReviewMixin:
                 bucket[cache_key] = self._q(sql, params)
             return bucket[cache_key]
 
+        normalized_source = normalize_terminology_text(en_us).strip()
+        source_words = re.findall(r"[A-Za-z0-9][A-Za-z0-9'’:+._/-]*", normalized_source)
+        lookup_phrases: list[str] = []
+        if normalized_source:
+            lookup_phrases.append(normalized_source)
+        # 有界 n-gram 精確查詢補足 bulk LIMIT；因此 id > 5000 的
+        # reviewed lang 專有名詞仍能被找回，不需要掃描整張 glossary。
+        for width in range(min(6, len(source_words)), 0, -1):
+            for start in range(len(source_words) - width + 1):
+                phrase = " ".join(source_words[start : start + width]).strip()
+                if len(phrase) >= 2 and phrase not in lookup_phrases:
+                    lookup_phrases.append(phrase)
+                if len(lookup_phrases) >= 96:
+                    break
+            if len(lookup_phrases) >= 96:
+                break
+        glossary_target_rows: list[tuple] = []
+        if lookup_phrases:
+            placeholders = ",".join("?" for _ in lookup_phrases)
+            # 分成目前版本與其他版本兩段查詢，讓 glossary_order 索引直接
+            # 提供 LIMIT 前的順序；不要用 CASE 排序把整批候選放進暫存 B-tree。
+            glossary_target_current = cached_rows(
+                "glossary_target_current_rows",
+                "SELECT e.id, e.kind, e.mc_version, e.mod_id, e.key, e.en_us, "
+                "f.zh_tw, f.source, f.review_status, f.revision "
+                "FROM entry e JOIN translation f ON f.entry_id=e.id "
+                "WHERE e.kind='lang' AND e.mod_id=? AND e.mc_version=? "
+                "AND e.en_us IN (" + placeholders + ") "
+                "AND f.review_status='reviewed' AND trim(f.zh_tw)<>'' "
+                "ORDER BY e.id LIMIT 96",
+                (mod_id, mc_version, *lookup_phrases),
+            )
+            glossary_target_other = cached_rows(
+                "glossary_target_other_rows",
+                "SELECT e.id, e.kind, e.mc_version, e.mod_id, e.key, e.en_us, "
+                "f.zh_tw, f.source, f.review_status, f.revision "
+                "FROM entry e JOIN translation f ON f.entry_id=e.id "
+                "WHERE e.kind='lang' AND e.mod_id=? AND e.mc_version<>? "
+                "AND e.en_us IN (" + placeholders + ") "
+                "AND f.review_status='reviewed' AND trim(f.zh_tw)<>'' "
+                "ORDER BY e.mc_version, e.id LIMIT 96",
+                (mod_id, mc_version, *lookup_phrases),
+            )
+            glossary_target_rows = glossary_target_current + glossary_target_other
         glossary_current_rows = cached_rows(
             "glossary_current_rows",
             "SELECT e.id, e.kind, e.mc_version, e.mod_id, e.key, e.en_us, "
@@ -725,7 +821,13 @@ class SmartReviewMixin:
             if glossary_remaining
             else []
         )
-        glossary_rows = glossary_current_rows + glossary_other_rows
+        glossary_rows: list[tuple] = []
+        seen_glossary_ids: set[int] = set()
+        for row in glossary_target_rows + glossary_current_rows + glossary_other_rows:
+            row_id = int(row[0])
+            if row_id not in seen_glossary_ids:
+                seen_glossary_ids.add(row_id)
+                glossary_rows.append(row)
         official = load_official_locale_index()
         official_pairs_cache = cache.setdefault("official_pairs", {})
         official_cache_key = str(getattr(official, "revision", "default"))
@@ -1455,6 +1557,169 @@ def _smart_review_output_token_cap(lm_config: dict[str, Any]) -> int:
     return max(1, min(configured, 65_536))
 
 
+@dataclass
+class _SmartReviewRetryRuntime:
+    """保存智慧校對重試所需的共用 provider 狀態。"""
+
+    provider: str
+    lm_cfg: dict[str, Any]
+    batch_interval_sec: float
+    chatgpt_retry_count: int = 0
+    gemini_transient_retry_count: int = 0
+
+
+def _smart_review_request_interval(lm_config: dict[str, Any]) -> float:
+    """讀取與翻譯主流程相同的 provider/model 請求節流設定。"""
+    rate_config = lm_config.get("rate_limit", {})
+    if not isinstance(rate_config, dict):
+        return 0.0
+    try:
+        return max(0.0, float(rate_config.get("sleep_seconds_between_batches", 0.0)))
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _smart_review_input_budget(
+    lm_config: dict[str, Any], provider: str, model_name: str
+) -> int | None:
+    """建立本次執行固定的輸入 token 預算快照。"""
+    budget = BudgetConfig.from_config(lm_config)
+    if not budget.enabled:
+        return None
+    limit = int(budget.max_input_token_budget)
+    if provider == "chatgpt":
+        model_limit = chatgpt_model_input_token_budget(lm_config, model_name)
+        if model_limit is not None:
+            limit = min(limit, int(model_limit))
+    return max(1, limit)
+
+
+def _smart_review_estimated_input_tokens(
+    payload: dict[str, Any], response_schema: dict[str, Any]
+) -> float:
+    """使用翻譯主流程的本地 estimator 估算完整 provider 輸入。"""
+    return estimate_text_tokens(
+        SMART_REVIEW_SYSTEM_PROMPT
+        + json.dumps(payload, ensure_ascii=False)
+        + json.dumps(response_schema, ensure_ascii=False)
+    )
+
+
+def _smart_review_token_value(value: object) -> int | None:
+    """將 provider usage 欄位轉成可累加的非負整數，未知時保留 None。"""
+    if isinstance(value, bool) or value is None:
+        return None
+    try:
+        number = int(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return number if number >= 0 else None
+
+
+def _smart_review_error_code(error: Exception, status: int | None = None) -> str:
+    """建立不含 provider 原文、金鑰或個資的候選錯誤代碼。"""
+    from translation_tool.core.lm_translator_main import _classify_batch_error
+
+    if isinstance(error, ChatGPTAPIError):
+        code = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(error.code or "unknown"))[:80]
+        return f"request_failed:chatgpt:{error.status or 'unknown'}:{code}"
+    error_kind = _classify_batch_error(error, status)
+    if status is not None:
+        return f"request_failed:http_{int(status)}:{error_kind}"
+    return f"request_failed:{type(error).__name__}"
+
+
+def _smart_review_record_usage(
+    metrics: dict[str, Any],
+    meta: dict[str, Any],
+    token_totals: dict[str, int | None],
+) -> None:
+    """記錄一次 API 嘗試的 provider usage，包含失敗或截斷回應。"""
+    metrics["request_attempts"] = int(metrics.get("request_attempts", 0)) + 1
+    prompt = _smart_review_token_value(meta.get("prompt_tokens"))
+    output = _smart_review_token_value(
+        meta.get("output_tokens") or meta.get("candidates_tokens")
+    )
+    if prompt is None:
+        metrics["usage_missing_attempts"] = (
+            int(metrics.get("usage_missing_attempts", 0)) + 1
+        )
+    else:
+        token_totals["prompt_tokens"] = (
+            token_totals.get("prompt_tokens") or 0
+        ) + prompt
+    if output is None:
+        metrics["usage_missing_output_attempts"] = (
+            int(metrics.get("usage_missing_output_attempts", 0)) + 1
+        )
+    else:
+        token_totals["output_tokens"] = (
+            token_totals.get("output_tokens") or 0
+        ) + output
+
+
+def _smart_review_sleep(
+    seconds: float, cancel_check: Callable[[], bool] | None
+) -> None:
+    """以既有可取消 sleep 等待 provider 的重試延遲。"""
+    if cancel_check is not None and cancel_check():
+        raise TaskCancelled()
+    context = cancel_scope(cancel_check) if cancel_check is not None else nullcontext()
+    with context:
+        interruptible_sleep(seconds)
+    if cancel_check is not None and cancel_check():
+        raise TaskCancelled()
+
+
+def _smart_review_transient_retry(
+    runtime: _SmartReviewRetryRuntime,
+    model_name: str,
+    error: Exception,
+    status: int | None,
+    *,
+    cancel_check: Callable[[], bool] | None,
+) -> bool:
+    """依既有 Gemini 503 policy 對 500/502/503/504 做有限次重試。"""
+    from translation_tool.core.lm_translator_main import (
+        GEMINI_503_MAX_RETRY_AFTER_SEC,
+        GEMINI_503_RETRY_DELAYS_SEC,
+        _classify_batch_error,
+        _parse_gemini_retry_after_seconds,
+    )
+
+    error_kind = _classify_batch_error(error, status)
+    if isinstance(error, (requests.Timeout, requests.ConnectionError)):
+        error_kind = "timeout"
+    if error_kind not in {
+        "server_error",
+        "service_unavailable",
+        "deadline_exceeded",
+        "timeout",
+    }:
+        return False
+    if runtime.gemini_transient_retry_count >= len(GEMINI_503_RETRY_DELAYS_SEC):
+        return False
+    response = getattr(error, "response", None)
+    error_json: dict[str, Any] = {}
+    try:
+        value = response.json() if response is not None else {}
+        error_json = value if isinstance(value, dict) else {}
+    except (AttributeError, TypeError, ValueError):
+        error_json = {}
+    retry_after = _parse_gemini_retry_after_seconds(response, error_json)
+    if retry_after is not None and retry_after > GEMINI_503_MAX_RETRY_AFTER_SEC:
+        return False
+    retry_index = runtime.gemini_transient_retry_count
+    runtime.gemini_transient_retry_count += 1
+    wait_sec = GEMINI_503_RETRY_DELAYS_SEC[retry_index]
+    if retry_after is not None:
+        wait_sec = max(wait_sec, retry_after)
+    quota = get_model_quota_registry()
+    quota.defer_request_slot(runtime.provider, model_name, wait_sec)
+    _smart_review_sleep(wait_sec, cancel_check)
+    return True
+
+
 def run_smart_review(
     db,
     *,
@@ -1479,9 +1744,7 @@ def run_smart_review(
     if not model_name.strip():
         raise ValueError("smart review 必須指定模型")
     lm_config = lm_config if isinstance(lm_config, dict) else {}
-    # The service path passes no preselected key so the shared cycle can rotate
-    # between configured Gemini keys. Explicit keys remain a useful injection
-    # point for unit tests and callers that already own key selection.
+    # service path 不預先選 key，仍由既有 ApiKeyCycle 負責 Gemini 輪替。
     key_cycle = ApiKeyCycle() if provider == "gemini" and not api_key.strip() else None
     if provider == "gemini" and not api_key.strip() and not get_api_key_count():
         raise ValueError("Gemini smart review 必須指定 API key")
@@ -1530,11 +1793,80 @@ def run_smart_review(
     )
     processed = valid = invalid = request_errors = 0
     no_change = suggestions = needs_context = 0
-    prompt_tokens = output_tokens = 0
     output_token_cap = _smart_review_output_token_cap(lm_config)
+    input_token_budget = _smart_review_input_budget(lm_config, provider, model_name)
     started = time.monotonic()
     cancelled = False
     failed = False
+    token_totals: dict[str, int | None] = {
+        "prompt_tokens": None,
+        "output_tokens": None,
+    }
+    metrics: dict[str, Any] = {
+        "duration_seconds": 0.0,
+        "prompt_tokens": None,
+        "output_tokens": None,
+        "no_change_count": 0,
+        "suggestion_count": 0,
+        "needs_context_count": 0,
+        "request_attempts": 0,
+        "retry_count": 0,
+        "transient_retry_count": 0,
+        "key_rotation_count": 0,
+        "shrink_count": 0,
+        "input_budget_shrink_count": 0,
+        "input_budget_exceeded_count": 0,
+        "response_invalid_count": 0,
+        "usage_missing_attempts": 0,
+        "usage_missing_output_attempts": 0,
+        "permanent_error_count": 0,
+        "failure_classes": {},
+        "input_token_budget": input_token_budget,
+    }
+    # 延遲取得主翻譯流程的共用 policy，避免 translation_db 初始化時形成循環 import。
+    from translation_tool.core.lm_translator_main import (
+        _handle_chatgpt_api_error,
+        _parse_gemini_retry_after_seconds,
+        _payload_error_allows_shrink,
+        _wait_for_request_slot,
+    )
+
+    def mark_request_failure(
+        ordinals: Sequence[int],
+        error: Exception | None = None,
+        status: int | None = None,
+        *,
+        error_code: str | None = None,
+        permanent: bool = False,
+    ) -> str:
+        """保存安全錯誤代碼並更新錯誤分類統計。"""
+        nonlocal request_errors
+        code = error_code or _smart_review_error_code(
+            error or RuntimeError("request_failed"), status
+        )
+        db.mark_smart_review_request_error(run_id, ordinals, error_code=code)
+        request_errors += 1
+        if permanent:
+            metrics["permanent_error_count"] = int(metrics["permanent_error_count"]) + 1
+        classes = metrics["failure_classes"]
+        classes[code] = int(classes.get(code, 0)) + 1
+        return code
+
+    def report_progress() -> None:
+        """回報目前已處理數量與統計。"""
+        if progress is not None:
+            progress(
+                {
+                    "run_id": run_id,
+                    "processed": processed,
+                    "selected": len(snapshots),
+                    "valid": valid,
+                    "invalid": invalid,
+                    "request_errors": request_errors,
+                    "status": "running",
+                }
+            )
+
     try:
         position = 0
         adaptive_batch_size = batch_size
@@ -1543,13 +1875,51 @@ def run_smart_review(
                 cancelled = True
                 break
             current_size = min(adaptive_batch_size, len(snapshots) - position)
+            abort_remaining = False
             while True:
                 if is_cancelled() or (cancel_check is not None and cancel_check()):
                     cancelled = True
                     break
                 batch = snapshots[position : position + current_size]
                 payload = build_smart_review_payload(batch)
-                meta: dict[str, Any] = {}
+                response_schema = smart_review_response_schema(
+                    [str(item.ordinal) for item in batch]
+                )
+                estimated_input = _smart_review_estimated_input_tokens(
+                    payload, response_schema
+                )
+                metrics["last_estimated_input_tokens"] = round(estimated_input, 2)
+                if (
+                    input_token_budget is not None
+                    and estimated_input > input_token_budget
+                ):
+                    if current_size > 1:
+                        smaller = _next_smart_review_batch_size(current_size)
+                        if smaller < current_size:
+                            current_size = smaller
+                            adaptive_batch_size = min(adaptive_batch_size, current_size)
+                            metrics["input_budget_shrink_count"] = (
+                                int(metrics["input_budget_shrink_count"]) + 1
+                            )
+                            metrics["shrink_count"] = int(metrics["shrink_count"]) + 1
+                            continue
+                    metrics["input_budget_exceeded_count"] = int(
+                        metrics["input_budget_exceeded_count"]
+                    ) + len(batch)
+                    mark_request_failure(
+                        [item.ordinal for item in batch],
+                        error_code="request_failed:input_budget_exceeded",
+                    )
+                    processed += len(batch)
+                    position += len(batch)
+                    report_progress()
+                    break
+
+                retry_runtime = _SmartReviewRetryRuntime(
+                    provider=provider,
+                    lm_cfg=lm_config,
+                    batch_interval_sec=_smart_review_request_interval(lm_config),
+                )
                 request_failed = False
                 shrink_requested = False
                 raw = ""
@@ -1562,16 +1932,23 @@ def run_smart_review(
                     else:
                         request_api_key = api_key.strip()
                     if provider == "gemini" and not request_api_key:
-                        exc = RuntimeError("Gemini API key cycle exhausted")
-                        request_errors += 1
-                        db.mark_smart_review_request_error(
-                            run_id,
+                        mark_request_failure(
                             [item.ordinal for item in batch],
-                            error_code=f"request_failed:{type(exc).__name__}",
+                            error_code="request_failed:ApiKeyCycleExhausted",
+                            permanent=True,
                         )
                         request_failed = True
+                        abort_remaining = True
                         break
+
+                    attempt_meta: dict[str, Any] | None = None
                     try:
+                        _wait_for_request_slot(
+                            retry_runtime,
+                            model_name,
+                            cancel_check=cancel_check,
+                        )
+                        attempt_meta = {}
                         raw = call_gemini_requests(
                             model_name=model_name,
                             system_prompt=SMART_REVIEW_SYSTEM_PROMPT,
@@ -1579,23 +1956,111 @@ def run_smart_review(
                             api_key=request_api_key,
                             temperature=0.2,
                             max_output_tokens=output_token_cap,
-                            meta_out=meta,
+                            meta_out=attempt_meta,
                             provider=provider,
                             lm_config=lm_config,
-                            response_schema=smart_review_response_schema(
-                                [str(item.ordinal) for item in batch]
-                            ),
+                            response_schema=response_schema,
                             **chatgpt_options,
                         )
                     except TaskCancelled:
+                        if attempt_meta is not None:
+                            _smart_review_record_usage(
+                                metrics, attempt_meta, token_totals
+                            )
                         cancelled = True
                         break
+                    except ChatGPTOAuthError as exc:
+                        if attempt_meta is not None:
+                            _smart_review_record_usage(
+                                metrics, attempt_meta, token_totals
+                            )
+                        mark_request_failure(
+                            [item.ordinal for item in batch],
+                            exc,
+                            error_code="request_failed:chatgpt_oauth",
+                            permanent=True,
+                        )
+                        request_failed = True
+                        abort_remaining = True
+                        break
+                    except ChatGPTAPIError as exc:
+                        _smart_review_record_usage(
+                            metrics, attempt_meta or {}, token_totals
+                        )
+                        try:
+                            with (
+                                cancel_scope(cancel_check)
+                                if cancel_check is not None
+                                else nullcontext()
+                            ):
+                                action = _handle_chatgpt_api_error(retry_runtime, exc)
+                        except TaskCancelled:
+                            cancelled = True
+                            break
+                        except Exception:
+                            mark_request_failure(
+                                [item.ordinal for item in batch],
+                                exc,
+                                status=exc.status,
+                                permanent=True,
+                            )
+                            request_failed = True
+                            abort_remaining = exc.status in {400, 401, 403, 404, 422}
+                            break
+                        if action is BatchAction.SHRINK_BATCH:
+                            if current_size > 1:
+                                shrink_requested = True
+                                break
+                            mark_request_failure(
+                                [item.ordinal for item in batch],
+                                exc,
+                                status=exc.status,
+                            )
+                            request_failed = True
+                            break
+                        if action is BatchAction.RETRY_SAME_MODEL:
+                            metrics["retry_count"] = int(metrics["retry_count"]) + 1
+                            metrics["transient_retry_count"] = (
+                                int(metrics["transient_retry_count"]) + 1
+                            )
+                            continue
+                        mark_request_failure(
+                            [item.ordinal for item in batch],
+                            exc,
+                            status=exc.status,
+                            permanent=True,
+                        )
+                        request_failed = True
+                        abort_remaining = True
+                        break
                     except requests.HTTPError as exc:
+                        _smart_review_record_usage(
+                            metrics, attempt_meta or {}, token_totals
+                        )
                         status_code = (
                             exc.response.status_code
                             if exc.response is not None
                             else None
                         )
+                        if status_code == 429:
+                            error_json: dict[str, Any] = {}
+                            try:
+                                decoded = (
+                                    exc.response.json()
+                                    if exc.response is not None
+                                    else {}
+                                )
+                                if isinstance(decoded, dict):
+                                    error_json = decoded
+                            except (AttributeError, TypeError, ValueError):
+                                error_json = {}
+                            retry_after = _parse_gemini_retry_after_seconds(
+                                exc.response, error_json
+                            )
+                            if retry_after:
+                                get_model_quota_registry().defer_request_slot(
+                                    provider, model_name, retry_after
+                                )
                         if (
                             key_cycle is not None
                             and status_code in {403, 429}
@@ -1603,68 +2068,138 @@ def run_smart_review(
                                 reason="forbidden" if status_code == 403 else None
                             )
                         ):
+                            metrics["key_rotation_count"] = (
+                                int(metrics["key_rotation_count"]) + 1
+                            )
+                            metrics["retry_count"] = int(metrics["retry_count"]) + 1
                             continue
-                        if status_code in {400, 413, 422} and current_size > 1:
+                        if (
+                            _payload_error_allows_shrink(exc, status_code)
+                            and current_size > 1
+                        ):
                             shrink_requested = True
                             break
-                        request_errors += 1
-                        db.mark_smart_review_request_error(
-                            run_id,
+                        if status_code in {500, 502, 503, 504}:
+                            if status_code == 503 and key_cycle is not None:
+                                overload_count = key_cycle.record_overload()
+                                if overload_count >= 3 and key_cycle.mark_failed():
+                                    metrics["key_rotation_count"] = (
+                                        int(metrics["key_rotation_count"]) + 1
+                                    )
+                                    metrics["retry_count"] = (
+                                        int(metrics["retry_count"]) + 1
+                                    )
+                                    continue
+                            if _smart_review_transient_retry(
+                                retry_runtime,
+                                model_name,
+                                exc,
+                                status_code,
+                                cancel_check=cancel_check,
+                            ):
+                                metrics["retry_count"] = int(metrics["retry_count"]) + 1
+                                metrics["transient_retry_count"] = (
+                                    int(metrics["transient_retry_count"]) + 1
+                                )
+                                continue
+                            mark_request_failure(
+                                [item.ordinal for item in batch],
+                                exc,
+                                status=status_code,
+                            )
+                            request_failed = True
+                            abort_remaining = True
+                            break
+                        mark_request_failure(
                             [item.ordinal for item in batch],
-                            error_code=f"request_failed:{type(exc).__name__}",
+                            exc,
+                            status=status_code,
+                            permanent=status_code in {400, 404, 422},
                         )
                         request_failed = True
+                        abort_remaining = status_code in {400, 404, 422}
+                        break
+                    except (requests.Timeout, requests.ConnectionError) as exc:
+                        _smart_review_record_usage(
+                            metrics, attempt_meta or {}, token_totals
+                        )
+                        if _smart_review_transient_retry(
+                            retry_runtime,
+                            model_name,
+                            exc,
+                            None,
+                            cancel_check=cancel_check,
+                        ):
+                            metrics["retry_count"] = int(metrics["retry_count"]) + 1
+                            metrics["transient_retry_count"] = (
+                                int(metrics["transient_retry_count"]) + 1
+                            )
+                            continue
+                        mark_request_failure([item.ordinal for item in batch], exc)
+                        request_failed = True
+                        abort_remaining = True
                         break
                     except Exception as exc:  # noqa: BLE001 - credential-free class
-                        request_errors += 1
-                        db.mark_smart_review_request_error(
-                            run_id,
-                            [item.ordinal for item in batch],
-                            error_code=f"request_failed:{type(exc).__name__}",
+                        _smart_review_record_usage(
+                            metrics, attempt_meta or {}, token_totals
                         )
+                        mark_request_failure([item.ordinal for item in batch], exc)
                         request_failed = True
                         break
                     else:
+                        _smart_review_record_usage(
+                            metrics, attempt_meta or {}, token_totals
+                        )
                         if key_cycle is not None:
                             key_cycle.record_success()
+                        retry_runtime.gemini_transient_retry_count = 0
                         shrink_requested = (
-                            _smart_review_response_needs_shrink(raw, meta)
+                            _smart_review_response_needs_shrink(raw, attempt_meta or {})
                             and current_size > 1
                         )
                         break
+
                 if cancelled:
                     break
                 if request_failed:
                     processed += len(batch)
                     position += len(batch)
-                    if progress is not None:
-                        progress(
-                            {
-                                "run_id": run_id,
-                                "processed": processed,
-                                "selected": len(snapshots),
-                                "valid": valid,
-                                "invalid": invalid,
-                                "request_errors": request_errors,
-                                "status": "running",
-                            }
+                    if abort_remaining and position < len(snapshots):
+                        remaining_ordinals = [
+                            item.ordinal for item in snapshots[position:]
+                        ]
+                        db.mark_smart_review_request_error(
+                            run_id,
+                            remaining_ordinals,
+                            error_code="request_failed:aborted_after_provider_error",
                         )
+                        processed = len(snapshots)
+                        position = len(snapshots)
+                    report_progress()
                     break
                 if shrink_requested:
                     smaller = _next_smart_review_batch_size(current_size)
                     if smaller < current_size:
                         current_size = smaller
                         adaptive_batch_size = min(adaptive_batch_size, current_size)
+                        metrics["shrink_count"] = int(metrics["shrink_count"]) + 1
                         continue
                 try:
                     results = parse_smart_review_response(raw, batch)
-                except Exception as exc:  # noqa: BLE001 - credential-free validation class
+                except Exception as exc:  # noqa: BLE001 - response contract class
                     if current_size > 1:
                         smaller = _next_smart_review_batch_size(current_size)
                         if smaller < current_size:
                             current_size = smaller
                             adaptive_batch_size = min(adaptive_batch_size, current_size)
+                            metrics["shrink_count"] = int(metrics["shrink_count"]) + 1
+                            metrics["response_invalid_count"] = (
+                                int(metrics["response_invalid_count"]) + 1
+                            )
                             continue
+                    metrics["response_invalid_count"] = int(
+                        metrics["response_invalid_count"]
+                    ) + len(batch)
                     results = [
                         {
                             "id": str(item.ordinal),
@@ -1684,25 +2219,10 @@ def run_smart_review(
                         suggestions += 1
                     else:
                         needs_context += 1
-                prompt_tokens += int(meta.get("prompt_tokens") or 0)
-                output_tokens += int(
-                    meta.get("output_tokens") or meta.get("candidates_tokens") or 0
-                )
                 processed += len(batch)
                 position += len(batch)
                 adaptive_batch_size = min(adaptive_batch_size, current_size)
-                if progress is not None:
-                    progress(
-                        {
-                            "run_id": run_id,
-                            "processed": processed,
-                            "selected": len(snapshots),
-                            "valid": valid,
-                            "invalid": invalid,
-                            "request_errors": request_errors,
-                            "status": "running",
-                        }
-                    )
+                report_progress()
                 break
             if cancelled:
                 break
@@ -1711,13 +2231,29 @@ def run_smart_review(
     except BaseException:
         failed = True
         db.mark_smart_review_pending_cancelled(run_id)
+        metrics.update(
+            {
+                "duration_seconds": round(time.monotonic() - started, 3),
+                "prompt_tokens": token_totals["prompt_tokens"],
+                "output_tokens": token_totals["output_tokens"],
+                "status": "failed",
+                "token_counts": (
+                    "not_reported"
+                    if metrics["request_attempts"] == 0
+                    else "provider_reported_partial"
+                    if metrics["usage_missing_attempts"]
+                    or metrics["usage_missing_output_attempts"]
+                    else "provider_reported"
+                ),
+            }
+        )
         db.finish_smart_review_run(
             run_id,
             processed_count=processed,
             valid_count=valid,
             invalid_count=invalid,
             request_error_count=request_errors,
-            metrics={"duration_seconds": round(time.monotonic() - started, 3)},
+            metrics=metrics,
             status="failed",
         )
         raise
@@ -1725,25 +2261,34 @@ def run_smart_review(
     if cancelled:
         db.mark_smart_review_pending_cancelled(run_id)
 
-    metrics = {
-        "duration_seconds": round(time.monotonic() - started, 3),
-        "prompt_tokens": prompt_tokens,
-        "output_tokens": output_tokens,
-        "no_change_count": no_change,
-        "suggestion_count": suggestions,
-        "needs_context_count": needs_context,
-        "status": (
-            "cancelled"
-            if cancelled
-            else "failed"
-            if failed
-            else "partial"
-            if request_errors
-            else "completed"
-        ),
-        "token_counts": "provider_reported",
-    }
-    status = metrics["status"]
+    status = (
+        "cancelled"
+        if cancelled
+        else "failed"
+        if failed
+        else "partial"
+        if request_errors
+        else "completed"
+    )
+    metrics.update(
+        {
+            "duration_seconds": round(time.monotonic() - started, 3),
+            "prompt_tokens": token_totals["prompt_tokens"],
+            "output_tokens": token_totals["output_tokens"],
+            "no_change_count": no_change,
+            "suggestion_count": suggestions,
+            "needs_context_count": needs_context,
+            "status": status,
+            "token_counts": (
+                "not_reported"
+                if metrics["request_attempts"] == 0
+                else "provider_reported_partial"
+                if metrics["usage_missing_attempts"]
+                or metrics["usage_missing_output_attempts"]
+                else "provider_reported"
+            ),
+        }
+    )
     db.finish_smart_review_run(
         run_id,
         processed_count=processed,
@@ -1751,7 +2296,7 @@ def run_smart_review(
         invalid_count=invalid,
         request_error_count=request_errors,
         metrics=metrics,
-        status=str(status),
+        status=status,
     )
     return SmartReviewRunResult(
         run_id=run_id,
@@ -1766,7 +2311,7 @@ def run_smart_review(
         suggestion_count=suggestions,
         needs_context_count=needs_context,
         metrics=metrics,
-        status=str(status),
+        status=status,
     )
 
 

@@ -7,6 +7,7 @@
 import json
 import math
 import random
+from contextlib import nullcontext
 from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -66,6 +67,8 @@ from translation_tool.core.official_locale import (
     terminology_terms_for_item,
 )
 from translation_tool.utils.cancellation import (
+    TaskCancelled,
+    cancel_scope,
     interruptible_sleep,
     raise_if_cancelled,
 )
@@ -407,11 +410,58 @@ def _classify_batch_error(error, status: int | None = None) -> str:
         400: "invalid_argument",
         403: "key_forbidden",
         404: "model_missing",
+        408: "deadline_exceeded",
         429: "rate_limited",
         500: "server_error",
+        502: "server_error",
         503: "service_unavailable",
         504: "deadline_exceeded",
     }.get(status, "unknown")
+
+
+def _payload_error_allows_shrink(error, status: int | None = None) -> bool:
+    """只在供應商明確指出 payload/context 過大時允許縮小批次。
+
+    這是翻譯主迴圈與智慧校對共用的保守判斷。400/422 也可能代表
+    schema、權限或模型設定錯誤；若訊息沒有明確的大小證據，必須一次失敗，
+    不得把同一個永久錯誤重打成一堆單筆請求。
+    """
+    if status is None and isinstance(error, requests.HTTPError):
+        response = error.response
+        status = response.status_code if response is not None else None
+    if status == 413:
+        return True
+    if status not in {400, 422}:
+        return False
+
+    parts = [str(error)]
+    try:
+        parts.append(_remote_error_detail(error, limit=500))
+    except Exception:  # noqa: BLE001 - 判斷本身不能遮蔽原始錯誤
+        pass
+    code = getattr(error, "code", "")
+    error_type = getattr(error, "error_type", "")
+    param = getattr(error, "param", "")
+    parts.extend(str(value) for value in (code, error_type, param))
+    text = " ".join(parts).lower()
+    size_markers = (
+        "too large",
+        "payload",
+        "request too large",
+        "context length",
+        "context window",
+        "input too long",
+        "maximum context",
+        "token limit",
+        "content length",
+        "exceeds the limit",
+        "exceed.*limit",
+        "max_tokens",
+        "maxoutputtokens",
+    )
+    return any(marker in text for marker in size_markers) or (
+        "context" in text and ("too long" in text or "exceed" in text)
+    )
 
 
 # =========================================================
@@ -619,7 +669,12 @@ def _batch_interval_seconds(lm_cfg: dict) -> float:
         return 4.0
 
 
-def _wait_for_request_slot(runtime: _BatchRuntime, model_name: str) -> None:
+def _wait_for_request_slot(
+    runtime: _BatchRuntime,
+    model_name: str,
+    *,
+    cancel_check=None,
+) -> None:
     """透過共用模型時鐘節流每一次 provider 請求。"""
     quota = get_model_quota_registry()
     provider = getattr(runtime, "provider", runtime.lm_cfg.get("provider", "gemini"))
@@ -630,11 +685,21 @@ def _wait_for_request_slot(runtime: _BatchRuntime, model_name: str) -> None:
     )
     try:
         while True:
+            if cancel_check is not None and cancel_check():
+                raise TaskCancelled()
             wait_sec = quota.request_slot_wait(reservation)
             waited_target = reservation.target_at if wait_sec > 0 else None
             if wait_sec > 0:
-                interruptible_sleep(wait_sec)
+                sleep_context = (
+                    cancel_scope(cancel_check)
+                    if cancel_check is not None
+                    else nullcontext()
+                )
+                with sleep_context:
+                    interruptible_sleep(wait_sec)
             raise_if_cancelled()
+            if cancel_check is not None and cancel_check():
+                raise TaskCancelled()
             if quota.commit_request_slot(reservation, waited_target=waited_target):
                 return
     except BaseException:

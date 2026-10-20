@@ -36,6 +36,36 @@ def _seed(db: TranslationDB) -> None:
     )
 
 
+def _review_response(items) -> str:
+    """建立測試用的全量 no_change 校對回應。"""
+    return json.dumps(
+        {
+            "items": [
+                {
+                    "id": item["id"],
+                    "decision": "no_change",
+                    "suggested_zh_tw": "",
+                    "issue_types": [],
+                    "evidence_ids": [],
+                    "confidence": 0.8,
+                    "reason": "目前譯文可保留。",
+                }
+                for item in items
+            ]
+        }
+    )
+
+
+def _http_error(status: int, message: str = "") -> requests.HTTPError:
+    """建立帶安全 provider JSON 的測試 HTTP 錯誤。"""
+    response = requests.Response()
+    response.status_code = status
+    response._content = json.dumps(
+        {"error": {"message": message, "status": "INVALID_ARGUMENT"}}
+    ).encode()
+    return requests.HTTPError(response=response)
+
+
 @pytest.fixture
 def db(tmp_path):
     """建立測試用資料庫並在測試結束後清理。"""
@@ -201,6 +231,105 @@ def test_local_context_quality_and_evidence_ids_keep_source_identity(db):
         and "格式問題" in item["limitations"]
         for item in database_rows
     )
+
+
+def test_smart_review_context_prioritizes_current_version_and_text_before_limit(db):
+    """驗證同鍵 context 在 LIMIT 前先選目前版本與相同英文且品質合格資料。"""
+    versions = [f"1.{index}" for index in range(30)] + ["1.21.1"]
+    db.write_back(
+        versions[0],
+        [WriteBackItem(KIND_LANG, "demo", "shared", "Old 0", "舊 0")],
+        fill_other_versions=False,
+    )
+    for index, version in enumerate(versions[1:], 1):
+        db.write_back(
+            version,
+            [
+                WriteBackItem(
+                    KIND_LANG,
+                    "demo",
+                    "shared",
+                    "Current text" if version == "1.21.1" else f"Old {index}",
+                    "目前文字" if version == "1.21.1" else f"舊 {index}",
+                )
+            ],
+            fill_other_versions=False,
+        )
+    for version in versions:
+        rows, _total = db.list_entries(version)
+        for row in rows:
+            if row.key == "shared":
+                db.review_manual(row.id, expected_zh_tw=row.zh_tw, propagate=False)
+
+    context = db._smart_review_context(
+        0, KIND_LANG, "1.21.1", "demo", "shared", "Current text"
+    )
+    same_key = [
+        item for item in context if item["reference_type"] == "same_key_reviewed"
+    ]
+    assert same_key
+    assert same_key[0]["mc_version"] == "1.21.1"
+    assert same_key[0]["en_us"] == "Current text"
+
+
+def test_smart_review_glossary_target_beyond_bulk_limit_is_retrievable(db):
+    """驗證 id 超過 5000 的 reviewed glossary term 仍可透過 bounded exact lookup 找到。"""
+    rows = [
+        WriteBackItem(
+            KIND_LANG,
+            "demo",
+            f"term_{index}",
+            f"Term {index}",
+            f"詞語 {index}",
+        )
+        for index in range(5000)
+    ]
+    rows.extend(
+        [
+            WriteBackItem(
+                KIND_LANG,
+                "demo",
+                "target_term",
+                "Target Term",
+                "目標術語",
+            ),
+            WriteBackItem(
+                KIND_PATCHOULI,
+                "demo",
+                "target_page",
+                "Target Term is useful",
+                "目標術語很有用",
+            ),
+        ]
+    )
+    db.write_back("1.21.1", rows, fill_other_versions=False)
+    target = next(
+        row for row in db.list_entries("1.21.1")[0] if row.key == "target_term"
+    )
+    db.review_manual(target.id, expected_zh_tw="目標術語", propagate=False)
+
+    candidate = db.smart_review_candidates(
+        version="1.21.1",
+        mod_id="demo",
+        kind=KIND_PATCHOULI,
+        effective_source=SRC_AI,
+        limit=1,
+    )[0]
+    glossary = [
+        item
+        for item in candidate.context
+        if item["reference_type"] == "reviewed_lang_glossary"
+    ]
+    assert any(
+        item["en_us"] == "Target Term" and item["zh_tw"] == "目標術語"
+        for item in glossary
+    )
+
+
+def test_smart_review_candidate_offset_keeps_absolute_ordinals(db):
+    """驗證候選 offset 分頁回傳的 ordinal 是全域序號而非頁內序號。"""
+    page = db.smart_review_candidates(version="1.21.1", limit=1, offset=1)
+    assert [item.ordinal for item in page] == [2]
 
 
 def test_smart_review_query_escapes_like_wildcards(db):
@@ -480,6 +609,296 @@ def test_request_failures_and_cancellation_are_distinct_from_invalid(db, monkeyp
     ] == ["cancelled", "cancelled"]
 
 
+def test_smart_review_retries_gemini_503_with_bounded_shared_backoff(db, monkeypatch):
+    """驗證 Gemini 503 使用共用 policy 重試，成功後只保存一次結果。"""
+    calls = []
+
+    def fake_call(**kwargs):
+        """第一次回傳 503，下一次回傳有效結果。"""
+        calls.append(len(kwargs["payload"]["items"]))
+        if len(calls) == 1:
+            raise _http_error(503, "UNAVAILABLE: high demand")
+        return _review_response(kwargs["payload"]["items"])
+
+    monkeypatch.setattr(
+        "translation_tool.translation_db.smart_review.call_gemini_requests",
+        fake_call,
+    )
+    monkeypatch.setattr(
+        "translation_tool.translation_db.smart_review.interruptible_sleep",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        "translation_tool.core.lm_translator_main.interruptible_sleep",
+        lambda *_args, **_kwargs: None,
+    )
+
+    result = run_smart_review(
+        db,
+        model_name="gemini-test",
+        api_key="test-key",
+        limit=1,
+        batch_size=1,
+    )
+
+    assert calls == [1, 1]
+    assert result.status == "completed"
+    assert result.metrics["transient_retry_count"] == 1
+    assert result.metrics["request_attempts"] == 2
+
+
+def test_smart_review_bounds_continuous_gemini_503_and_stops_pending_batches(
+    db, monkeypatch
+):
+    """驗證連續 503 最多重試既有上限，不會無限重打後續批次。"""
+    calls = []
+
+    def fail_call(**_kwargs):
+        """固定回傳 503。"""
+        calls.append(1)
+        raise _http_error(503, "UNAVAILABLE")
+
+    monkeypatch.setattr(
+        "translation_tool.translation_db.smart_review.call_gemini_requests",
+        fail_call,
+    )
+    monkeypatch.setattr(
+        "translation_tool.translation_db.smart_review.interruptible_sleep",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        "translation_tool.core.lm_translator_main.interruptible_sleep",
+        lambda *_args, **_kwargs: None,
+    )
+
+    result = run_smart_review(
+        db,
+        model_name="gemini-test",
+        api_key="test-key",
+        limit=2,
+        batch_size=1,
+    )
+
+    assert len(calls) == 4
+    assert result.status == "partial"
+    assert result.request_error_count == 1
+    assert result.metrics["transient_retry_count"] == 3
+    assert all(
+        item.status == "request_failed"
+        for item in db.list_smart_review_candidates(result.run_id)
+    )
+
+
+def test_smart_review_cancel_during_provider_backoff_is_cooperative(db, monkeypatch):
+    """驗證 provider 退避期間取消會停止後續請求。"""
+    import threading
+
+    cancelled = threading.Event()
+    calls = []
+
+    def fail_call(**_kwargs):
+        """第一次請求回傳 503。"""
+        calls.append(1)
+        raise _http_error(503, "UNAVAILABLE")
+
+    def cancel_during_sleep(*_args, **_kwargs):
+        """模擬 UI 在退避等待期間按下停止。"""
+        cancelled.set()
+
+    monkeypatch.setattr(
+        "translation_tool.translation_db.smart_review.call_gemini_requests",
+        fail_call,
+    )
+    monkeypatch.setattr(
+        "translation_tool.translation_db.smart_review.interruptible_sleep",
+        cancel_during_sleep,
+    )
+    monkeypatch.setattr(
+        "translation_tool.core.lm_translator_main.interruptible_sleep",
+        cancel_during_sleep,
+    )
+
+    result = run_smart_review(
+        db,
+        model_name="gemini-test",
+        api_key="test-key",
+        limit=1,
+        batch_size=1,
+        cancel_check=cancelled.is_set,
+    )
+
+    assert calls == [1]
+    assert result.status == "cancelled"
+    assert db.list_smart_review_candidates(result.run_id)[0].status == "cancelled"
+
+
+def test_smart_review_does_not_shrink_invalid_400_schema(db, monkeypatch):
+    """驗證沒有大小證據的 400 schema 錯誤不會拆成單筆請求。"""
+    calls = []
+
+    def fail_call(**kwargs):
+        """回傳 schema 錯誤，記錄實際批次大小。"""
+        calls.append(len(kwargs["payload"]["items"]))
+        raise _http_error(400, "Invalid JSON schema")
+
+    monkeypatch.setattr(
+        "translation_tool.translation_db.smart_review.call_gemini_requests",
+        fail_call,
+    )
+
+    result = run_smart_review(
+        db,
+        model_name="gemini-test",
+        api_key="test-key",
+        limit=2,
+        batch_size=2,
+    )
+
+    assert calls == [2]
+    assert result.request_error_count == 1
+    assert result.metrics["shrink_count"] == 0
+    assert (
+        result.metrics["failure_classes"]["request_failed:http_400:invalid_argument"]
+        == 1
+    )
+
+
+def test_smart_review_shrinks_explicit_payload_too_large_413(db, monkeypatch):
+    """驗證 413 明確代表 payload 過大時才縮小批次。"""
+    calls = []
+
+    def fake_call(**kwargs):
+        """第一次回傳 413，單筆後回傳有效結果。"""
+        items = kwargs["payload"]["items"]
+        calls.append(len(items))
+        if len(calls) == 1:
+            raise _http_error(413, "request payload too large")
+        return _review_response(items)
+
+    monkeypatch.setattr(
+        "translation_tool.translation_db.smart_review.call_gemini_requests",
+        fake_call,
+    )
+
+    result = run_smart_review(
+        db,
+        model_name="gemini-test",
+        api_key="test-key",
+        limit=2,
+        batch_size=2,
+    )
+
+    assert calls == [2, 1, 1]
+    assert result.status == "completed"
+    assert result.metrics["shrink_count"] == 1
+
+
+def test_smart_review_shrinks_400_only_when_context_size_is_explicit(db, monkeypatch):
+    """驗證 400 context-too-long 有明確大小證據時才縮批。"""
+    calls = []
+
+    def fake_call(**kwargs):
+        """第一次回傳 context 過長，單筆後成功。"""
+        items = kwargs["payload"]["items"]
+        calls.append(len(items))
+        if len(calls) == 1:
+            raise _http_error(400, "context too long")
+        return _review_response(items)
+
+    monkeypatch.setattr(
+        "translation_tool.translation_db.smart_review.call_gemini_requests",
+        fake_call,
+    )
+
+    result = run_smart_review(
+        db,
+        model_name="gemini-test",
+        api_key="test-key",
+        limit=2,
+        batch_size=2,
+    )
+
+    assert calls == [2, 1, 1]
+    assert result.status == "completed"
+
+
+def test_smart_review_metrics_count_usage_for_truncated_retry(db, monkeypatch):
+    """驗證截斷請求與後續成功重試的 usage 都各計一次。"""
+    calls = []
+
+    def fake_call(**kwargs):
+        """批次回傳截斷，單筆回傳帶 usage 的成功結果。"""
+        items = kwargs["payload"]["items"]
+        calls.append(len(items))
+        if len(items) > 1:
+            kwargs["meta_out"].update(
+                {
+                    "prompt_tokens": 10,
+                    "candidates_tokens": 20,
+                    "finish_reason": "MAX_TOKENS",
+                }
+            )
+            return ""
+        kwargs["meta_out"].update(
+            {"prompt_tokens": 5, "candidates_tokens": 6, "finish_reason": "STOP"}
+        )
+        return _review_response(items)
+
+    monkeypatch.setattr(
+        "translation_tool.translation_db.smart_review.call_gemini_requests",
+        fake_call,
+    )
+
+    result = run_smart_review(
+        db,
+        model_name="gemini-test",
+        api_key="test-key",
+        limit=2,
+        batch_size=2,
+    )
+
+    assert calls == [2, 1, 1]
+    assert result.metrics["request_attempts"] == 3
+    assert result.metrics["prompt_tokens"] == 20
+    assert result.metrics["output_tokens"] == 32
+    assert result.metrics["usage_missing_attempts"] == 0
+    assert result.metrics["token_counts"] == "provider_reported"
+
+
+def test_smart_review_enforces_shared_input_token_budget_before_send(db, monkeypatch):
+    """驗證超過共用輸入 token 預算時單筆安全失敗且不呼叫 provider。"""
+    called = False
+
+    def should_not_call(**_kwargs):
+        """預算擋下請求時不應執行。"""
+        nonlocal called
+        called = True
+
+    monkeypatch.setattr(
+        "translation_tool.translation_db.smart_review.call_gemini_requests",
+        should_not_call,
+    )
+
+    result = run_smart_review(
+        db,
+        model_name="gemini-test",
+        api_key="test-key",
+        limit=1,
+        batch_size=1,
+        lm_config={"max_input_token_budget": 1},
+    )
+
+    assert not called
+    assert result.status == "partial"
+    assert result.request_error_count == 1
+    assert result.metrics["request_attempts"] == 0
+    assert result.metrics["input_budget_exceeded_count"] == 1
+    assert (
+        db.list_smart_review_candidates(result.run_id)[0].validation_error
+        == "request_failed:input_budget_exceeded"
+    )
+
+
 def test_smart_review_schema_keeps_provider_unsupported_limits_local():
     """驗證智慧校對結構讓提供者不支援的限制留在本地驗證。"""
     reason_schema = smart_review_response_schema(["1"])["properties"]["items"]["items"][
@@ -539,6 +958,49 @@ def test_smart_review_forwards_chatgpt_runtime_options(db, monkeypatch):
     assert captured["fast"] is True
     assert captured["reasoning_effort"] == "high"
     assert captured["profile_id"] == "profile-a"
+
+
+def test_smart_review_chatgpt_404_uses_shared_api_error_classification(db, monkeypatch):
+    """驗證 ChatGPT 404 使用既有 Responses 錯誤分類且不拆批重打。"""
+    from translation_tool.core.openai_codex_client import ChatGPTAPIError
+
+    calls = []
+
+    def fail_call(**_kwargs):
+        """模擬找不到模型。"""
+        calls.append(1)
+        raise ChatGPTAPIError(
+            "model_not_found",
+            "The model does not exist.",
+            status=404,
+            error_type="invalid_request_error",
+        )
+
+    monkeypatch.setattr(
+        "translation_tool.translation_db.smart_review.call_gemini_requests",
+        fail_call,
+    )
+    monkeypatch.setattr(
+        "translation_tool.translation_db.smart_review.chatgpt_account_status",
+        lambda: {},
+    )
+
+    result = run_smart_review(
+        db,
+        model_name="missing-model",
+        provider="chatgpt",
+        api_key="",
+        limit=2,
+        batch_size=2,
+    )
+
+    assert calls == [1]
+    assert result.status == "partial"
+    assert result.request_error_count == 1
+    assert any(
+        code.startswith("request_failed:chatgpt:404:model_not_found")
+        for code in result.metrics["failure_classes"]
+    )
 
 
 def test_smart_review_rotates_gemini_key_for_retryable_http_error(db, monkeypatch):
@@ -994,6 +1456,98 @@ def test_smart_review_candidate_query_is_deferred_and_guarded(monkeypatch, tmp_p
         None,
     )
     assert dialog.candidates.controls == before
+
+
+def test_smart_review_candidate_latest_page_wins_when_results_return_out_of_order(
+    monkeypatch, tmp_path
+):
+    """驗證快速切頁時只有最新 query/page 的背景結果可以更新 UI。"""
+    from app.views.moddb import smart_review_dialog as module
+
+    class Pager:
+        """提供分頁狀態。"""
+
+        def set_state(self, total, page):
+            """保存分頁狀態。"""
+            self.state = (total, page)
+
+    class Container:
+        """提供候選控制項容器。"""
+
+        def __init__(self):
+            self.controls = []
+
+    path = tmp_path / "smart-review.db"
+    db = type("DB", (), {"path": path})()
+    dialog = module.SmartReviewDialog.__new__(module.SmartReviewDialog)
+    dialog.get_db = lambda: db
+    dialog._generation = 1
+    dialog._run_id = "run-1"
+    dialog._candidate_page = 1
+    dialog._candidate_page_size = 50
+    dialog._candidate_path = None
+    dialog._candidate_db_identity = None
+    dialog._candidate_priority = ()
+    dialog._candidate_query_id = 0
+    dialog._candidate_total = 0
+    dialog.candidates = Container()
+    dialog.candidate_pager = Pager()
+    dialog._safe_update = lambda: None
+    dialog._candidate_card = lambda _path, _priority, row: row
+    dialog._post = lambda callback, *args: callback(*args)
+    scheduled = []
+
+    def capture_launch(work, *_args, **_kwargs):
+        """保留每次查詢，手動反轉完成順序。"""
+        scheduled.append(work)
+
+    dialog._launch = capture_launch
+    monkeypatch.setattr(
+        module,
+        "count_moddb_smart_review_candidates_for_run_from_path",
+        lambda *_args, **_kwargs: 0,
+    )
+    monkeypatch.setattr(
+        module,
+        "list_moddb_smart_review_candidates_from_path",
+        lambda *_args, **_kwargs: [],
+    )
+
+    dialog._load_candidates(path, (1,), "run-1", page=1)
+    dialog._load_candidates(path, (1,), "run-1", page=2)
+    scheduled[0]()
+    assert not hasattr(dialog.candidate_pager, "state")
+    scheduled[1]()
+    assert dialog.candidate_pager.state == (0, 2)
+
+
+def test_smart_review_action_result_rejects_old_database_context(tmp_path):
+    """驗證資料庫切換後舊 action 結果不會更新新資料庫 UI。"""
+    from app.views.moddb import smart_review_dialog as module
+
+    old_path = tmp_path / "old.db"
+    new_path = tmp_path / "new.db"
+    db = type("DB", (), {"path": new_path})()
+    dialog = module.SmartReviewDialog.__new__(module.SmartReviewDialog)
+    dialog.get_db = lambda: db
+    dialog._generation = 4
+    dialog._run_id = "run-new"
+    calls = []
+    dialog._set_busy = lambda *args: calls.append(("busy", args))
+    dialog._safe_update = lambda: calls.append(("update",))
+    dialog.on_complete = lambda: calls.append(("parent",))
+
+    dialog._apply_candidate_result(
+        old_path,
+        (1,),
+        "run-old",
+        "applied",
+        None,
+        generation=4,
+        db_identity=str(old_path.resolve()),
+    )
+
+    assert calls == []
 
 
 def test_smart_review_apply_notifies_parent_after_reloading_candidates(monkeypatch):
