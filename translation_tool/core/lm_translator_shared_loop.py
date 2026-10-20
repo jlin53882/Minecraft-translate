@@ -6,11 +6,13 @@
 
 from __future__ import annotations
 
+import inspect
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
+from translation_tool.core.common_batch_executor import CommonBatchExecutor
 from translation_tool.core.lm_batch_budget import (
     is_item_oversized,
     select_batch_size,
@@ -31,6 +33,31 @@ from translation_tool.utils.cancellation import TaskCancelled, is_cancelled
 from translation_tool.utils.config_manager import load_config
 from translation_tool.utils.log_unit import log_error, log_info
 from translation_tool.utils.redaction import redact_text
+
+
+def _call_translate_batch(
+    translate_batch_smart,
+    batch: list[dict[str, Any]],
+    total: int | None,
+    event_callback,
+):
+    """Call legacy test doubles while passing telemetry to the real provider."""
+    if event_callback is None:
+        return translate_batch_smart(batch, total)
+    try:
+        parameters = inspect.signature(translate_batch_smart).parameters.values()
+        accepts_callback = any(
+            parameter.name == "event_callback"
+            or parameter.kind is inspect.Parameter.VAR_KEYWORD
+            for parameter in parameters
+        )
+    except (TypeError, ValueError):
+        accepts_callback = False
+    if accepts_callback:
+        return translate_batch_smart(
+            batch, total, event_callback=event_callback
+        )
+    return translate_batch_smart(batch, total)
 
 
 @dataclass
@@ -57,6 +84,7 @@ class TranslateLoopResult:
     quality_retry_unresolved: int = 0
     quality_retry_quota_failed: int = 0
     contract_errors: list[str] = field(default_factory=list)
+    metrics: dict[str, Any] = field(default_factory=dict)
 
 
 def _is_valid_result(it: Any) -> bool:
@@ -116,6 +144,14 @@ def translate_items_with_cache_loop(
     on_batch_flushed: Callable[[], None] | None = None,
     on_batch_checkpoint: Callable[[dict[str, Any]], None] | None = None,
     on_progress: Callable[[float, str, float], None] | None = None,
+    event_sink: Callable[[dict[str, Any]], None] | None = None,
+    event_task_id: str | None = None,
+    event_run_id: str | None = None,
+    event_operation: str = "translate",
+    event_provider: str = "",
+    event_model: str = "",
+    event_batch_total: int = 0,
+    initial_timings: Mapping[str, float] | None = None,
     cache_rules: dict[str, CacheRule] | None = None,
     sleep_seconds_between_batches: float | None = None,
     reload_cache: bool = True,
@@ -141,7 +177,7 @@ def translate_items_with_cache_loop(
     if reload_cache:
         reload_translation_cache()
         log_info("[Translator Gen]: 重新載入快取完成")
-    start_time = time.time()
+    start_time = time.monotonic()
 
     total = (
         int(total_for_smart)
@@ -167,14 +203,30 @@ def translate_items_with_cache_loop(
     quality_retry_unresolved = 0
     quality_retry_quota_failed = 0
     contract_errors: list[str] = []
+    executor = CommonBatchExecutor(
+        operation=event_operation,
+        provider=event_provider,
+        model=event_model,
+        task_id=event_task_id,
+        run_id=event_run_id,
+        event_sink=event_sink,
+        cancel_check=is_cancelled,
+    )
+    for field_name, elapsed_ms in (initial_timings or {}).items():
+        executor.add_timing(field_name, elapsed_ms)
+    run_event_finished = False
 
     def make_result(status: str) -> TranslateLoopResult:
+        nonlocal run_event_finished
+        if not run_event_finished:
+            executor.finish(status=status)
+            run_event_finished = True
         return TranslateLoopResult(
             status=status,
             processed=processed,
             total=total,
             completed_calls=completed_calls,
-            elapsed_sec=time.time() - start_time,
+            elapsed_sec=time.monotonic() - start_time,
             exhausted=exhausted,
             last_error=last_error,
             ai_response=ai_response,
@@ -190,6 +242,7 @@ def translate_items_with_cache_loop(
             quality_retry_unresolved=quality_retry_unresolved,
             quality_retry_quota_failed=quality_retry_quota_failed,
             contract_errors=list(contract_errors),
+            metrics=executor.metrics_snapshot(),
         )
 
     def emit_progress(msg: str) -> None:
@@ -197,7 +250,7 @@ def translate_items_with_cache_loop(
             return
         try:
             progress = min(processed / max(total, 1), 1.0)
-            elapsed = time.time() - start_time
+            elapsed = time.monotonic() - start_time
             if processed > 0 and elapsed > 0:
                 speed = processed / elapsed
                 eta_sec = (total - processed) / speed
@@ -215,10 +268,12 @@ def translate_items_with_cache_loop(
         )
         return make_result("CANCELLED")
 
+    batch_index = 0
     while remaining:
         # 取消檢查點：在批次之間停止，已完成的批次照常保留
         if is_cancelled():
             return cancelled_result()
+        planning_started = time.monotonic()
         batch, cache_type = next_batch(
             remaining,
             lm_cfg=_lm_config(),
@@ -228,6 +283,22 @@ def translate_items_with_cache_loop(
             fixed_input_tokens_for_batch=fixed_input_tokens_for_batch,
             select_size=select_batch_size,
         )
+        executor.add_timing(
+            "planning_ms", (time.monotonic() - planning_started) * 1000
+        )
+        batch_index += 1
+        batch_handle = executor.begin_batch(
+            batch_index=batch_index,
+            batch_total=max(event_batch_total, batch_index),
+            batch_size=len(batch),
+            selected_count=total,
+            processed_count=processed,
+            cache_type=cache_type,
+        )
+        batch_api_before = executor.metrics.api_ms
+        batch_parse_before = executor.metrics.response_parse_ms
+        batch_validation_before = executor.metrics.validation_ms
+        batch_commit_before = executor.metrics.commit_ms
 
         # 單筆超限直接回填的政策只屬於 Mod DB（有 _batch_group）；其他管線維持原行為。
         oversized = (
@@ -249,28 +320,70 @@ def translate_items_with_cache_loop(
             ]
             status = "OVERSIZED_ITEM"
         else:
+            request_wait_before = (
+                executor.metrics.quota_wait_ms
+                + executor.metrics.retry_backoff_ms
+                + executor.metrics.network_retry_wait_ms
+            )
+            api_started = time.monotonic()
+            batch_handle.attempt_start(expected_count=len(batch), max_attempts=0)
             try:
-                translated, status = translate_batch_smart(batch, total_for_smart)
+                translated, status = _call_translate_batch(
+                    translate_batch_smart,
+                    batch,
+                    total_for_smart,
+                    batch_handle.forward_provider_event,
+                )
             except TaskCancelled:
                 # 等待 API 限流時被取消
+                batch_handle.emit("cancelled", status="cancelled")
+                batch_handle.complete(
+                    status="cancelled", processed_count=processed, actual_count=0
+                )
                 return cancelled_result()
             except Exception as e:  # noqa: BLE001
                 last_error = redact_text(e)
+                batch_handle.attempt_failure(e, will_retry=False)
+                batch_handle.complete(
+                    status="failed", processed_count=processed, actual_count=0
+                )
                 # 堆疊只寫後台（經 RedactingFormatter 遮蔽機密）；畫面顯示一行摘要
                 log_error(f"[SharedLM] 翻譯發生異常: {last_error}", exc_info=True)
                 emit_progress(f"❌ [SharedLM] 翻譯發生異常: {last_error}")
                 return make_result("FAILED")
+            else:
+                request_elapsed_ms = (time.monotonic() - api_started) * 1000
+                request_wait_ms = (
+                    executor.metrics.quota_wait_ms
+                    + executor.metrics.retry_backoff_ms
+                    + executor.metrics.network_retry_wait_ms
+                    - request_wait_before
+                )
+                batch_handle.attempt_success(
+                    elapsed_ms=max(0.0, request_elapsed_ms - request_wait_ms),
+                    http_status=200,
+                    expected_count=len(batch),
+                    actual_count=len(translated or []),
+                    request_elapsed_ms=round(request_elapsed_ms),
+                    retry_wait_ms=round(request_wait_ms),
+                )
             completed_calls += 1
+        parse_started = time.monotonic()
         safe_translated = list(translated or [])[: len(batch)]
+        batch_handle.add_timing(
+            "response_parse_ms", (time.monotonic() - parse_started) * 1000
+        )
         actual_processed_in_this_batch = 0
         untranslated_fallback = 0
         malformed_fallback = 0
         cache_write_failed = False
+        cache_item_write_ms = 0.0
 
         # 對應契約：translate_batch_smart 依輸入順序回傳，第 i 筆結果對應 batch[i]；
         # 未完成時只回傳前綴（剩下的留在 remaining 下一輪重送）。
         # 格式無效的結果不可靜默丟棄：以 batch[i] 原文回填並標記 _untranslated，
         # 輸出仍完整、不寫入快取，且計入 processed，讓 DONE 時 processed == total。
+        processing_started = time.monotonic()
         for position, it in enumerate(safe_translated):
             original = batch[position]
             if not _is_valid_result(it):
@@ -284,6 +397,11 @@ def translate_items_with_cache_loop(
                     # 原始項目本身缺欄位：無法輸出也無法快取，不能算完成
                     last_error = f"批次第 {position} 筆缺少 path/source_text，無法回填"
                     emit_progress(f"❌ [SharedLM] {last_error}")
+                    batch_handle.complete(
+                        status="failed",
+                        processed_count=processed,
+                        actual_count=actual_processed_in_this_batch,
+                    )
                     return make_result("FAILED")
                 malformed_fallback += 1
                 it["_fallback_reason"] = "response_contract"
@@ -352,6 +470,7 @@ def translate_items_with_cache_loop(
 
             rule = cache_rules.get(ctype) or CacheRule("path|source_text")
             cache_key = rule.make_key({"path": pth, "source_text": src})
+            cache_started = time.monotonic()
             try:
                 cache_written = cache_add(ctype, cache_key, src, cache_storage_text(it))
                 if cache_written is False:
@@ -364,6 +483,14 @@ def translate_items_with_cache_loop(
                 cache_write_failed = True
                 last_error = f"新增快取失敗: {redact_text(e)}"
                 log_info(f"[SharedLM] {last_error}")
+            finally:
+                cache_item_write_ms += (time.monotonic() - cache_started) * 1000
+
+        processing_ms = (time.monotonic() - processing_started) * 1000
+        batch_handle.add_timing(
+            "validation_ms", max(0.0, processing_ms - cache_item_write_ms)
+        )
+        batch_handle.add_timing("commit_ms", cache_item_write_ms)
 
         if untranslated_fallback:
             log_info(
@@ -378,6 +505,7 @@ def translate_items_with_cache_loop(
         remaining = remaining[len(safe_translated) :]
 
         save_ok = True
+        save_started = time.monotonic()
         try:
             save_result = cache_save(cache_type, write_new_shard=write_new_cache)
             save_ok = save_result is not False
@@ -385,22 +513,36 @@ def translate_items_with_cache_loop(
             save_ok = False
             last_error = f"儲存快取失敗: {redact_text(e)}"
             log_info(f"[SharedLM] {last_error}")
+        finally:
+            batch_handle.add_timing(
+                "commit_ms", (time.monotonic() - save_started) * 1000
+            )
 
         if not save_ok:
             cache_write_failed = True
             last_error = last_error or f"快取 {cache_type} 儲存失敗"
 
         if on_batch_flushed is not None:
+            flush_started = time.monotonic()
             try:
                 on_batch_flushed()
             except Exception as e:  # noqa: BLE001
                 log_info(f"[SharedLM] 批次刷新回調失敗: {redact_text(e)}")
+            finally:
+                batch_handle.add_timing(
+                    "commit_ms", (time.monotonic() - flush_started) * 1000
+                )
 
         if cache_write_failed:
             # 只有快取 durable 之後才算完成的批次：checkpoint 不得領先快取，否則重開後
             # checkpoint 宣稱完成、快取卻沒有這批，已翻譯的項目會被重新送 API（#151）。
             # 輸出檔已在上面寫出；checkpoint 維持上一個 durable 批次的狀態。
             emit_progress(f"❌ [SharedLM] {last_error}")
+            batch_handle.complete(
+                status="failed",
+                processed_count=processed,
+                actual_count=actual_processed_in_this_batch,
+            )
             return make_result("FAILED")
 
         if on_batch_checkpoint is not None:
@@ -430,10 +572,26 @@ def translate_items_with_cache_loop(
 
             if checkpoint_failed:
                 emit_progress(f"❌ [SharedLM] {last_error}")
+                batch_handle.complete(
+                    status="failed",
+                    processed_count=processed,
+                    actual_count=actual_processed_in_this_batch,
+                )
                 return make_result("FAILED")
 
         emit_progress(
             f"✅ 批次完成 ({cache_type}) | 成功: {actual_processed_in_this_batch} | 總進度: {processed}/{total}"
+        )
+
+        batch_handle.complete(
+            status=(status or "completed").upper(),
+            processed_count=processed,
+            actual_count=actual_processed_in_this_batch,
+            api_ms=executor.metrics.api_ms - batch_api_before,
+            response_parse_ms=executor.metrics.response_parse_ms - batch_parse_before,
+            validation_ms=executor.metrics.validation_ms - batch_validation_before,
+            commit_ms=executor.metrics.commit_ms - batch_commit_before,
+            retry_count=batch_handle.retry_count,
         )
 
         st = (status or "").upper()

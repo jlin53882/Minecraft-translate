@@ -23,6 +23,10 @@ from typing import Any
 import requests
 
 from translation_tool.core.codex_oauth import ChatGPTOAuthError, chatgpt_account_status
+from translation_tool.core.common_batch_executor import (
+    CommonBatchExecutor,
+    classify_provider_error,
+)
 from translation_tool.core.lm_api_client import call_gemini_requests
 from translation_tool.core.lm_batch_actions import BatchAction
 from translation_tool.core.lm_batch_budget import BudgetConfig, estimate_text_tokens
@@ -2087,6 +2091,7 @@ def run_smart_review(
     review_status: str = "unreviewed",
     query: str | None = None,
     cancel_check: Callable[[], bool] | None = None,
+    task_id: str | None = None,
 ) -> SmartReviewRunResult:
     """執行有界的 AI 智慧校對，只保存候選，不直接寫入翻譯。"""
     if not model_name.strip():
@@ -2124,7 +2129,9 @@ def run_smart_review(
     )
     selection_seconds = round(time.monotonic() - selection_started, 3)
     batch_size = max(1, min(int(batch_size), 100))
+    planning_started = time.monotonic()
     planned_batch_count = max(1, (len(snapshots) + batch_size - 1) // batch_size)
+    planning_seconds = round(time.monotonic() - planning_started, 3)
     run_record_started = time.monotonic()
     run_id = db.create_smart_review_run(
         snapshots,
@@ -2145,6 +2152,17 @@ def run_smart_review(
         },
     )
     run_record_seconds = round(time.monotonic() - run_record_started, 3)
+    executor = CommonBatchExecutor(
+        operation="smart_review",
+        provider=provider,
+        model=model_name,
+        task_id=task_id,
+        run_id=run_id,
+        cancel_check=cancel_check,
+    )
+    executor.add_timing("selection_ms", selection_seconds * 1000)
+    executor.add_timing("planning_ms", planning_seconds * 1000)
+    executor.add_timing("history_write_ms", run_record_seconds * 1000)
     processed = valid = invalid = request_errors = 0
     no_change = suggestions = needs_context = 0
     output_token_cap = _smart_review_output_token_cap(lm_config)
@@ -2196,6 +2214,37 @@ def run_smart_review(
         "validation_errors": {},
         "input_token_budget": input_token_budget,
     }
+    current_batch_handle = None
+
+    def merge_common_metrics() -> None:
+        """Add common timing/identity fields without changing legacy counters."""
+        common = executor.metrics_snapshot()
+        for key in (
+            "selection_ms",
+            "planning_ms",
+            "prompt_build_ms",
+            "quota_wait_ms",
+            "retry_backoff_ms",
+            "api_ms",
+            "response_parse_ms",
+            "validation_ms",
+            "commit_ms",
+            "history_write_ms",
+            "network_retry_wait_ms",
+            "total_ms",
+            "batch_count",
+            "error_batches",
+            "task_id",
+            "run_id",
+            "operation",
+            "provider",
+            "model",
+        ):
+            metrics[key] = common[key]
+        metrics["common_request_attempts"] = common["request_attempts"]
+        metrics["common_provider_attempts"] = common["provider_attempts"]
+        metrics["common_retry_count"] = common["retry_count"]
+        metrics["common_transient_retry_count"] = common["transient_retry_count"]
     # 延遲取得主翻譯流程的共用 policy，避免 translation_db 初始化時形成循環 import。
     from translation_tool.core.lm_translator_main import (
         _batch_interval_seconds,
@@ -2253,11 +2302,65 @@ def run_smart_review(
 
     def emit_event(kind: str, **fields: Any) -> None:
         """回報不含 prompt、response、key 或錯誤原文的結構化事件。"""
+        if current_batch_handle is not None:
+            if kind == "attempt_start":
+                current_batch_handle.attempt = int(
+                    fields.get("smart_review_attempt") or current_batch_handle.attempt + 1
+                )
+                executor.metrics.request_attempts += 1
+            elif kind == "attempt_success":
+                elapsed_value = fields.get("api_elapsed_seconds")
+                try:
+                    elapsed_ms = float(elapsed_value or 0) * 1000
+                    executor.metrics.add_ms("api_ms", elapsed_ms)
+                    fields.setdefault("elapsed_ms", round(elapsed_ms))
+                except (TypeError, ValueError):
+                    pass
+            elif kind == "network_attempt_start":
+                executor.metrics.network_attempts += 1
+            elif kind == "network_retry_wait":
+                executor.metrics.network_retry_count += 1
+                try:
+                    wait_ms = max(
+                        0, float(fields.get("wait_seconds") or 0) * 1000
+                    )
+                    executor.metrics.add_ms("network_retry_wait_ms", wait_ms)
+                    fields.setdefault(
+                        "wait_ms", round(wait_ms)
+                    )
+                except (TypeError, ValueError):
+                    pass
+            elif kind == "retry_wait":
+                wait_value = fields.get("wait_seconds")
+                try:
+                    wait_ms = max(0, float(wait_value or 0) * 1000)
+                except (TypeError, ValueError):
+                    wait_ms = 0
+                current_batch_handle.retry_count += 1
+                executor.metrics.retry_count += 1
+                executor.metrics.transient_retry_count += 1
+                executor.metrics.add_ms("retry_backoff_ms", wait_ms)
+                fields.setdefault("wait_ms", round(wait_ms))
+                fields.setdefault("backoff_ms", round(wait_ms))
+            elif kind == "rate_limit_wait":
+                wait_value = fields.get("wait_seconds")
+                try:
+                    executor.metrics.add_ms(
+                        "quota_wait_ms", max(0, float(wait_value or 0) * 1000)
+                    )
+                except (TypeError, ValueError):
+                    pass
+            elif kind == "attempt_failure" and fields.get("key_rotated"):
+                executor.metrics.key_rotation_count += 1
         if progress is None:
             return
+        if current_batch_handle is not None:
+            event = current_batch_handle.emit(kind, **fields)
+        else:
+            event = executor.emit(kind, **fields)
         report_progress(
             phase="event",
-            event={"kind": kind, **fields},
+            event=event,
         )
 
     def finish_batch_timing(
@@ -2321,8 +2424,7 @@ def run_smart_review(
 
     def report_batch_complete(timing: dict[str, Any]) -> None:
         """同時送出舊版批次進度與可供 UI 即時顯示的完整事件。"""
-        event = {
-            "kind": "batch_complete",
+        event_fields = {
             "batch_number": timing.get("batch_number"),
             "batch_total": timing.get("batch_total"),
             "ordinal_start": timing.get("ordinal_start"),
@@ -2349,6 +2451,18 @@ def run_smart_review(
             "validation_errors": timing.get("validation_errors", {}),
             "request_errors": request_errors,
         }
+        if current_batch_handle is not None:
+            current_batch_handle.complete(
+                status=str(timing.get("status") or "completed"),
+                processed_count=processed,
+                emit=False,
+                **event_fields,
+            )
+            event = current_batch_handle.emit(
+                "batch_complete", processed_count=processed, **event_fields
+            )
+        else:
+            event = executor.emit("batch_complete", **event_fields)
         report_progress(phase="batch_complete", timing=timing, event=event)
 
     def emit_attempt_failure(
@@ -2367,8 +2481,11 @@ def run_smart_review(
             kind = "timeout"
         elif isinstance(error, requests.ConnectionError):
             kind = "connection_error"
+        classification = classify_provider_error(error, status)
         if status == 503 or kind == "service_unavailable":
             metrics["overload_count"] = int(metrics["overload_count"]) + 1
+            executor.metrics.overload_count += 1
+        executor.metrics.error_batches.append(batch_number)
         code = str(getattr(error, "code", "") or "").lower()
         emit_event(
             "attempt_failure",
@@ -2377,11 +2494,24 @@ def run_smart_review(
             smart_review_attempt=smart_review_attempt,
             http_status=status,
             error_kind=kind,
+            error_class=classification["error_class"],
+            provider_error_code=classification["provider_error_code"],
             exception_type=type(error).__name__,
             provider_overload=bool(status == 503 or kind == "service_unavailable"),
             quota_or_rate_limit=bool(status == 429 or "quota" in code),
             timeout=bool(isinstance(error, requests.Timeout) or kind == "timeout"),
+            connection=classification["connection"],
             retry_after_seconds=retry_after_seconds,
+            retry_after_ms=(
+                round(float(retry_after_seconds) * 1000)
+                if retry_after_seconds is not None
+                else None
+            ),
+            will_retry=bool(
+                key_rotated
+                or status in {408, 429, 500, 502, 503, 504}
+                or isinstance(error, (requests.Timeout, requests.ConnectionError))
+            ),
             key_rotated=key_rotated,
             network_attempts=int(metrics.get("network_attempts", 0)),
             network_retry_count=int(metrics.get("network_retry_count", 0)),
@@ -2391,6 +2521,7 @@ def run_smart_review(
         phase="selection_complete",
         timing={
             "selection_seconds": selection_seconds,
+            "planning_seconds": planning_seconds,
             "run_record_seconds": run_record_seconds,
         },
     )
@@ -2440,6 +2571,15 @@ def run_smart_review(
                 "parse_seconds": 0.0,
                 "result_write_seconds": 0.0,
             }
+            current_batch_handle = executor.begin_batch(
+                batch_index=batch_number,
+                batch_total=max(planned_batch_count, batch_number),
+                batch_size=current_size,
+                selected_count=len(snapshots),
+                processed_count=processed,
+                ordinal_start=batch_timing["ordinal_start"],
+                ordinal_end=batch_timing["ordinal_end"],
+            )
             emit_event(
                 "batch_start",
                 batch_number=batch_number,
@@ -2476,6 +2616,7 @@ def run_smart_review(
                     float(metrics["preparation_seconds"]) + preparation_seconds,
                     3,
                 )
+                executor.add_timing("prompt_build_ms", preparation_seconds * 1000)
                 if (
                     input_token_budget is not None
                     and estimated_input > input_token_budget
@@ -2577,17 +2718,8 @@ def run_smart_review(
                                 + wait_seconds,
                                 3,
                             )
-                            metrics["retry_wait_seconds"] = round(
-                                float(metrics["retry_wait_seconds"]) + wait_seconds,
-                                3,
-                            )
                             _batch_timing["network_retry_wait_seconds"] = round(
                                 float(_batch_timing["network_retry_wait_seconds"])
-                                + wait_seconds,
-                                3,
-                            )
-                            _batch_timing["retry_wait_seconds"] = round(
-                                float(_batch_timing["retry_wait_seconds"])
                                 + wait_seconds,
                                 3,
                             )
@@ -3065,6 +3197,7 @@ def run_smart_review(
                         float(metrics["parse_seconds"]) + parse_seconds,
                         3,
                     )
+                    executor.add_timing("response_parse_ms", parse_seconds * 1000)
                 write_started = time.monotonic()
                 try:
                     db.record_smart_review_results(run_id, results)
@@ -3078,6 +3211,9 @@ def run_smart_review(
                         float(metrics["result_write_seconds"]) + write_seconds,
                         3,
                     )
+                    executor.add_timing("history_write_ms", write_seconds * 1000)
+                    executor.add_timing("commit_ms", write_seconds * 1000)
+                validation_started = time.monotonic()
                 for result in results:
                     if result.get("validation_error"):
                         invalid += 1
@@ -3097,6 +3233,9 @@ def run_smart_review(
                         suggestions += 1
                     else:
                         needs_context += 1
+                executor.add_timing(
+                    "validation_ms", (time.monotonic() - validation_started) * 1000
+                )
                 processed += len(batch)
                 position += len(batch)
                 adaptive_batch_size = min(adaptive_batch_size, current_size)
@@ -3121,6 +3260,11 @@ def run_smart_review(
         failed = True
         db.mark_smart_review_pending_cancelled(run_id)
         total_seconds = round(time.monotonic() - started, 3)
+        executor.metrics.total_ms = max(
+            executor.metrics.total_ms, round(total_seconds * 1000)
+        )
+        executor.finish(status="failed")
+        merge_common_metrics()
         metrics.update(
             {
                 "duration_seconds": total_seconds,
@@ -3162,6 +3306,11 @@ def run_smart_review(
         else "completed"
     )
     total_seconds = round(time.monotonic() - started, 3)
+    executor.metrics.total_ms = max(
+        executor.metrics.total_ms, round(total_seconds * 1000)
+    )
+    executor.finish(status=status)
+    merge_common_metrics()
     metrics.update(
         {
             "duration_seconds": total_seconds,

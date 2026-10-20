@@ -244,6 +244,7 @@ class SmartReviewJob:
                 batch_size=request.batch_size,
                 progress=self._progress_handler(session),
                 cancel_check=self._should_cancel,
+                task_id=session.task_id,
             )
         except Exception as exc:  # noqa: BLE001 - job reports bounded failure
             state.error = str(exc) or type(exc).__name__
@@ -565,27 +566,31 @@ class SmartReviewJob:
         metrics = getattr(result, "metrics", None)
         if not isinstance(metrics, dict) or "selection_seconds" not in metrics:
             return
-        setup_and_selection_keys = (
-            "setup_seconds",
-            "selection_seconds",
-            "run_record_seconds",
-        )
-        setup_seconds = sum(
-            float(metrics.get(key) or 0) for key in setup_and_selection_keys
-        )
-        total = float(metrics.get("duration_seconds") or 0)
-        batch_seconds = float(metrics.get("batch_seconds") or 0)
-        unclassified = max(0.0, total - setup_seconds - batch_seconds)
+
+        def seconds(common_key: str, legacy_key: str | None = None) -> float:
+            value = metrics.get(common_key)
+            if value is not None:
+                try:
+                    return max(0.0, float(value) / 1000)
+                except (TypeError, ValueError):
+                    pass
+            return max(0.0, float(metrics.get(legacy_key or common_key) or 0))
+
+        total = seconds("total_ms", "duration_seconds")
         session.add_log(
             f"耗時拆解：搜尋 {_format_timing(metrics.get('selection_seconds'))}、"
-            f"API {_format_timing(metrics.get('api_seconds'))}、"
-            f"等待配額 {_format_timing(metrics.get('rate_limit_wait_seconds'))}、"
-            f"重試等待 {_format_timing(metrics.get('retry_wait_seconds'))}、"
-            f"解析 {_format_timing(metrics.get('parse_seconds'))}、"
-            f"寫入 JSON {_format_timing(metrics.get('result_write_seconds'))}、"
-            f"未分類 {_format_timing(unclassified)}；"
+            f"規劃 {_format_timing(seconds('planning_ms', 'planning_seconds'))}、"
+            f"提示詞 {_format_timing(seconds('prompt_build_ms', 'preparation_seconds'))}、"
+            f"API {_format_timing(seconds('api_ms', 'api_seconds'))}、"
+            f"等待配額 {_format_timing(seconds('quota_wait_ms', 'rate_limit_wait_seconds'))}、"
+            f"重試等待 {_format_timing(seconds('retry_backoff_ms', 'retry_wait_seconds'))}、"
+            f"網路重試等待 {_format_timing(seconds('network_retry_wait_ms'))}、"
+            f"解析 {_format_timing(seconds('response_parse_ms', 'parse_seconds'))}、"
+            f"驗證 {_format_timing(seconds('validation_ms'))}、"
+            f"寫入 JSON {_format_timing(seconds('history_write_ms', 'result_write_seconds'))}、"
+            f"總計 {_format_timing(total)}；"
             f"共 {metrics.get('batch_count', 0)} 批、"
-            f"校對請求 {metrics.get('request_attempts', 0)} 次、"
+            f"校對請求 {metrics.get('request_attempts', metrics.get('smart_review_attempts', 0))} 次、"
             f"網路請求 {metrics.get('network_attempts', 0)} 次、"
             f"重試 {metrics.get('retry_count', 0)} 次、"
             f"網路重試 {metrics.get('network_retry_count', 0)} 次、"

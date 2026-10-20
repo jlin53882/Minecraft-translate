@@ -17,6 +17,7 @@ from email.utils import parsedate_to_datetime
 import requests
 
 from translation_tool.core.codex_oauth import chatgpt_account_status
+from translation_tool.core.common_batch_executor import classify_provider_error
 from translation_tool.core.lm_api_client import (
     GeminiResponseFormatError,
     call_gemini_requests,
@@ -258,6 +259,8 @@ def translate_batch_smart(
     batch_items,
     total=None,
     dry_run: bool = DEFAULT_DRY_RUN,
+    *,
+    event_callback=None,
 ):
     """
     智慧批次翻譯函數（主入口）
@@ -296,7 +299,10 @@ def translate_batch_smart(
             raise RuntimeError("❌ 設定檔中沒有找到任何 API Key，請先設定金鑰。")
         if resolved:
             translated, status = _execute_translation(
-                [item for _index, item in pending], total, dry_run
+                [item for _index, item in pending],
+                total,
+                dry_run,
+                event_callback=event_callback,
             )
             translated = list(translated or [])
             merged: list[dict] = []
@@ -322,7 +328,9 @@ def translate_batch_smart(
     # 批次 profile 與批次大小由 _execute_translation 內部決定（舊版在這裡重複計算後丟棄，已移除）。
 
     # 2. 執行翻譯
-    results, status = _execute_translation(items, total, dry_run)
+    results, status = _execute_translation(
+        items, total, dry_run, event_callback=event_callback
+    )
 
     # 5. 處理輸出
     return _process_output(results, status)
@@ -359,7 +367,7 @@ def _validate_batch_items(items):
     return validated
 
 
-def _execute_translation(items, total, dry_run=False):
+def _execute_translation(items, total, dry_run=False, *, event_callback=None):
     """
     執行翻譯主循環
 
@@ -371,7 +379,9 @@ def _execute_translation(items, total, dry_run=False):
         (結果列表, 狀態字串)
     """
     # 代理到舊函數（正確傳遞所有參數）
-    return _translate_batch_smart_impl(items, total, dry_run)
+    return _translate_batch_smart_impl(
+        items, total, dry_run, event_callback=event_callback
+    )
 
 
 def _process_output(results, status):
@@ -402,22 +412,56 @@ def _classify_batch_error(error, status: int | None = None) -> str:
     保留既有 retry 行為，但讓狀態判定不再散落在主迴圈的例外處理中；
     這個 helper 也能用固定輸入直接測試，不需要真正呼叫 API。
     """
-    if isinstance(error, requests.Timeout):
-        return "timeout"
-    if status is None and isinstance(error, requests.HTTPError):
-        response = error.response
-        status = response.status_code if response is not None else None
+    classified = classify_provider_error(error, status)
     return {
-        400: "invalid_argument",
-        403: "key_forbidden",
-        404: "model_missing",
-        408: "deadline_exceeded",
-        429: "rate_limited",
-        500: "server_error",
-        502: "server_error",
-        503: "service_unavailable",
-        504: "deadline_exceeded",
-    }.get(status, "unknown")
+        "invalid_request": "invalid_argument",
+        "rate_limit": "rate_limited",
+        "provider_transient": "server_error",
+        "provider_timeout": "deadline_exceeded",
+        "context_too_large": "invalid_argument",
+    }.get(classified["error_class"], classified["error_class"])
+
+
+def _emit_runtime_event(callback, kind: str, **fields) -> None:
+    if callback is None:
+        return
+    try:
+        callback({"kind": kind, **fields})
+    except Exception:  # noqa: BLE001 - telemetry must never break translation
+        log_info("[SharedLM] provider telemetry callback failed")
+
+
+def _sleep_with_runtime_event(
+    runtime,
+    wait_seconds: float,
+    *,
+    reason: str,
+    callback=None,
+    kind: str = "retry_wait",
+) -> None:
+    wait_seconds = max(0.0, float(wait_seconds or 0))
+    if wait_seconds <= 0:
+        return
+    _emit_runtime_event(
+        callback,
+        kind,
+        wait_seconds=wait_seconds,
+        retry_reason=reason,
+        provider_retry=True,
+    )
+    started = time.monotonic()
+    interruptible_sleep(wait_seconds)
+    resume_kind = {
+        "rate_limit_wait": "rate_limit_resume",
+        "retry_wait": "retry_resume",
+    }.get(kind, "retry_resume")
+    _emit_runtime_event(
+        callback,
+        resume_kind,
+        wait_seconds=wait_seconds,
+        elapsed_seconds=max(0.0, time.monotonic() - started),
+        retry_reason=reason,
+    )
 
 
 def _payload_error_allows_shrink(error, status: int | None = None) -> bool:
@@ -484,9 +528,13 @@ def _payload_error_allows_shrink(error, status: int | None = None) -> bool:
 # =========================================================
 
 
-def _translate_batch_smart_impl(batch_items, total=None, dry_run=False):
+def _translate_batch_smart_impl(
+    batch_items, total=None, dry_run=False, *, event_callback=None
+):
     """執行既有翻譯 contract；詳細 state machine 由命名 helper 承擔。"""
-    return _run_batch_state_machine(batch_items, total, dry_run)
+    return _run_batch_state_machine(
+        batch_items, total, dry_run, event_callback=event_callback
+    )
 
 
 @dataclass
@@ -535,6 +583,8 @@ class _BatchRuntime:
     gemini_503_attempted_models: set[int] = field(default_factory=set)
     contract_errors: list[str] = field(default_factory=list)
     pending_contract_event: dict | None = None
+    event_callback: object | None = None
+    provider_attempts: int = 0
     remaining_item_ids: list[str] = field(default_factory=list)
     terminology_cache: dict[int, tuple[tuple[str, str], ...]] = field(
         default_factory=dict
@@ -822,6 +872,8 @@ def estimate_batch_fixed_input_tokens(
 def _build_batch_runtime(
     batch_items: list[dict],
     total: int | None,
+    *,
+    event_callback=None,
 ) -> _BatchRuntime | None:
     """建立單次批次翻譯共用的設定與可變執行狀態。"""
     config_snapshot = deepcopy(load_config())
@@ -884,7 +936,14 @@ def _build_batch_runtime(
             )
             return None
 
+    prompt_started = time.monotonic()
     prompt_context = _build_batch_prompt_context(batch_items, lm_cfg)
+    _emit_runtime_event(
+        event_callback,
+        "timing",
+        field_name="prompt_build_ms",
+        elapsed_ms=round((time.monotonic() - prompt_started) * 1000),
+    )
     return _BatchRuntime(
         batch_items=batch_items,
         total=total,
@@ -908,6 +967,7 @@ def _build_batch_runtime(
         original_total=total,
         remaining_items=list(batch_items),
         all_results=[],
+        event_callback=event_callback,
         conversation_history=prompt_context.conversation_history,
         session_state=next(
             (
@@ -1240,6 +1300,8 @@ def _handle_service_unavailable_error(
     error: Exception,
     model_index: int,
     status: int | None,
+    *,
+    retry_event_callback=None,
 ) -> BatchAction:
     response = error.response if isinstance(error, requests.HTTPError) else None
     error_json = {}
@@ -1261,10 +1323,20 @@ def _handle_service_unavailable_error(
             if not runtime.key_cycle.mark_failed():
                 return BatchAction.PARTIAL
             runtime.pinned_model_index = None
-            interruptible_sleep(runtime.key_rotation_buffer_sec)
+            _sleep_with_runtime_event(
+                runtime,
+                runtime.key_rotation_buffer_sec,
+                reason="key_rotation",
+                callback=retry_event_callback,
+            )
             return BatchAction.ROTATE_KEY
         runtime.pinned_model_index = model_index
-        interruptible_sleep(runtime.overload_retry_sec)
+        _sleep_with_runtime_event(
+            runtime,
+            runtime.overload_retry_sec,
+            reason="provider_overload",
+            callback=retry_event_callback,
+        )
         return decide_batch_action(
             "service_unavailable",
             quota_kind="overloaded",
@@ -1321,13 +1393,20 @@ def _handle_service_unavailable_error(
             f"({runtime.gemini_503_retry_count}/{len(GEMINI_503_RETRY_DELAYS_SEC)})；"
             f"保留 batch={runtime.batch_size}"
         )
-        interruptible_sleep(wait_sec)
+        _sleep_with_runtime_event(
+            runtime, wait_sec, reason="provider_unavailable", callback=retry_event_callback
+        )
         return action
 
     if runtime.provider == "gemini":
         _reset_gemini_503_retry_state(runtime)
     runtime.pinned_model_index = None
-    interruptible_sleep(runtime.request_interval_sec)
+    _sleep_with_runtime_event(
+        runtime,
+        runtime.request_interval_sec,
+        reason="provider_unavailable",
+        callback=retry_event_callback,
+    )
     return decide_batch_action(
         "service_unavailable", has_next_model=model_index + 1 < len(runtime.model_pool)
     ).action
@@ -1340,6 +1419,7 @@ def _handle_batch_error(
     *,
     model_output_cap: int | None = None,
     cap_source: str = "global",
+    retry_event_callback=None,
 ) -> BatchAction:
     """分類單次模型失敗並執行狀態化的金鑰與等待處理。"""
     from translation_tool.core.codex_oauth import ChatGPTOAuthError
@@ -1348,7 +1428,9 @@ def _handle_batch_error(
     if isinstance(error, ChatGPTOAuthError):
         raise ChatGPTOAuthError(f"ChatGPT OAuth 登入需要處理：{error}") from error
     if isinstance(error, ChatGPTAPIError):
-        return _handle_chatgpt_api_error(runtime, error)
+        return _handle_chatgpt_api_error(
+            runtime, error, retry_event_callback=retry_event_callback
+        )
 
     status = (
         error.response.status_code
@@ -1435,7 +1517,13 @@ def _handle_batch_error(
         if quota_kind == "rpm":
             wait_time = retry_after or 10
             log_info(f"[⏳] 每分鐘頻率限制 (RPM)：等待 {wait_time} 秒")
-            interruptible_sleep(wait_time)
+            _sleep_with_runtime_event(
+                runtime,
+                wait_time,
+                reason=f"rate_limit_{quota_kind}",
+                callback=retry_event_callback,
+                kind="rate_limit_wait",
+            )
             return BatchAction.RETRY_SAME_KEY
         log_warning(
             f"[❓] 偵測到 429 限制 ({remote_message or 'unknown'}), 嘗試切換 Key"
@@ -1445,7 +1533,13 @@ def _handle_batch_error(
         return BatchAction.ROTATE_KEY
 
     if error_kind == "service_unavailable":
-        return _handle_service_unavailable_error(runtime, error, model_index, status)
+        return _handle_service_unavailable_error(
+            runtime,
+            error,
+            model_index,
+            status,
+            retry_event_callback=retry_event_callback,
+        )
 
     if error_kind in {"deadline_exceeded", "server_error", "timeout"}:
         if runtime.provider == "gemini":
@@ -2255,6 +2349,7 @@ def _provider_request_kwargs(
     api_key,
     *,
     conversation_history=None,
+    network_event_callback=None,
 ):
     """建立單次 provider 請求共用與 ChatGPT 專用的參數。"""
     kwargs = {
@@ -2273,12 +2368,87 @@ def _provider_request_kwargs(
     }
     if conversation_history:
         kwargs["conversation_history"] = list(conversation_history)
+    if network_event_callback is not None:
+        kwargs["network_event_callback"] = network_event_callback
     if kwargs["provider"] == "chatgpt":
         kwargs["reasoning_effort"] = runtime.reasoning_effort
         profile_id = getattr(runtime, "chatgpt_profile_id", None)
         if profile_id:
             kwargs["profile_id"] = profile_id
     return kwargs
+
+
+def _perform_provider_request(
+    runtime: _BatchRuntime,
+    round_data: _BatchRound,
+    model_name: str,
+    quota,
+    owner,
+    lease_sec: float,
+):
+    """Execute one provider request and publish inner attempt telemetry."""
+    prompt = runtime.effective_prompt
+    model_override = model_output_token_cap(runtime.lm_cfg, model_name)
+    cap_source = "per_model" if model_override is not None else "global"
+    output_cap = (
+        model_override
+        if model_override is not None
+        else runtime.budget_cfg.max_output_tokens
+    )
+    api_meta: dict = {}
+    started = quota.now()
+    try:
+        log_info(
+            f"[→] 送出至模型 {model_name}｜"
+            f"本批 {len(round_data.current_batch)} 個（每批上限 {runtime.batch_size}）｜"
+            f"本次唯一 AI 翻譯項目共 {runtime.original_total} 個"
+        )
+        with quota.hold_probe_lease(model_name, owner, lease_sec):
+            runtime.provider_attempts += 1
+            _emit_runtime_event(
+                runtime.event_callback,
+                "provider_attempt_start",
+                provider_attempt=runtime.provider_attempts,
+                provider_model=model_name,
+                expected_count=len(round_data.current_batch),
+            )
+            api_key = runtime.key_cycle.claim() if runtime.provider == "gemini" else ""
+            request_kwargs = _provider_request_kwargs(
+                runtime,
+                model_name,
+                prompt,
+                round_data.payload,
+                output_cap,
+                api_meta,
+                api_key,
+                conversation_history=runtime.conversation_history,
+                network_event_callback=runtime.event_callback,
+            )
+            _wait_for_request_slot(
+                runtime,
+                model_name,
+                wait_event_callback=runtime.event_callback,
+            )
+            raw_text = call_gemini_requests(**request_kwargs).strip()
+        raise_if_cancelled()
+        _reset_provider_retry_state_after_success(runtime)
+        quota.mark_ok(model_name, started_at=started)
+        return raw_text, api_meta, api_key, output_cap, cap_source
+    except Exception as error:
+        _clear_quota_on_http_success(quota, error, model_name, started)
+        status = (
+            error.response.status_code
+            if isinstance(error, requests.HTTPError) and error.response is not None
+            else None
+        )
+        _emit_runtime_event(
+            runtime.event_callback,
+            "provider_attempt_failure",
+            provider_attempt=runtime.provider_attempts,
+            provider_model=model_name,
+            **classify_provider_error(error, status),
+        )
+        raise
 
 
 def _attempt_batch(
@@ -2306,45 +2476,10 @@ def _attempt_batch(
         output_cap = None
         cap_source = "global"
         set_active_model(model_name)  # UI 狀態列顯示實際使用中的模型
-        started = quota.now()  # 只有「耗盡紀錄之後才開始」的成功能清除紀錄
         try:
-            model_override = model_output_token_cap(runtime.lm_cfg, model_name)
-            cap_source = "per_model" if model_override is not None else "global"
-            output_cap = (
-                model_override
-                if model_override is not None
-                else runtime.budget_cfg.max_output_tokens
+            raw_text, api_meta, api_key, output_cap, cap_source = _perform_provider_request(
+                runtime, round_data, model_name, quota, owner, lease_sec
             )
-            api_meta: dict = {}
-            log_info(
-                f"[→] 送出至模型 {model_name}｜"
-                f"本批 {len(round_data.current_batch)} 個（每批上限 {runtime.batch_size}）｜"
-                f"本次唯一 AI 翻譯項目共 {runtime.original_total} 個"
-            )
-            with quota.hold_probe_lease(model_name, owner, lease_sec):
-                api_key = (
-                    runtime.key_cycle.claim() if runtime.provider == "gemini" else ""
-                )
-                request_kwargs = _provider_request_kwargs(
-                    runtime,
-                    model_name,
-                    prompt,
-                    round_data.payload,
-                    output_cap,
-                    api_meta,
-                    api_key,
-                    conversation_history=runtime.conversation_history,
-                )
-                _wait_for_request_slot(runtime, model_name)
-                raw_text = call_gemini_requests(**request_kwargs).strip()
-            # A synchronous provider request cannot be interrupted in flight.
-            # If cancellation arrived while it was blocked, discard its result
-            # before quota state, retries, or downstream writes can observe it.
-            raise_if_cancelled()
-            _reset_provider_retry_state_after_success(runtime)
-            # HTTP 200 已證明沒有被 RPD 拒絕：配額紀錄在這裡就清除；回應內容的問題（空、截斷、
-            # 格式不符）由 batch 流程自己處理，不影響配額狀態。
-            quota.mark_ok(model_name, started_at=started)
             if not raw_text:
                 _abandon_model(runtime, quota, model_index, model_indices, pinned_round)
                 continue
@@ -2372,6 +2507,18 @@ def _attempt_batch(
             result, missing = _merge_batch_response(
                 runtime, round_data, raw_text, api_meta
             )
+            _emit_runtime_event(
+                runtime.event_callback,
+                "provider_attempt_success",
+                provider_attempt=runtime.provider_attempts,
+                provider_model=model_name,
+                http_status=api_meta.get("http_status", 200),
+                finish_reason=api_meta.get("finish_reason"),
+                expected_count=len(round_data.current_batch),
+                actual_count=len(result or []),
+                prompt_tokens=api_meta.get("prompt_tokens"),
+                output_tokens=api_meta.get("candidates_tokens"),
+            )
             if missing:
                 return _BatchRoundOutcome(
                     BatchAction.SHRINK_BATCH,
@@ -2390,14 +2537,21 @@ def _attempt_batch(
                 initial_response_text=raw_text,
             )
         except Exception as error:  # noqa: BLE001
-            _clear_quota_on_http_success(quota, error, model_name, started)
             action = _handle_batch_error(
                 runtime,
                 error,
                 model_index,
                 model_output_cap=output_cap,
                 cap_source=cap_source,
+                retry_event_callback=runtime.event_callback,
             )
+            if action is BatchAction.ROTATE_KEY:
+                _emit_runtime_event(
+                    runtime.event_callback,
+                    "key_rotation",
+                    provider_attempt=runtime.provider_attempts,
+                    reason="retry_policy",
+                )
             if action is BatchAction.NEXT_MODEL:
                 _abandon_model(runtime, quota, model_index, model_indices, pinned_round)
                 continue
@@ -2471,11 +2625,15 @@ def _run_batch_state_machine(
     batch_items: list[dict],
     total: int | None = None,
     dry_run: bool = False,
+    *,
+    event_callback=None,
 ):
     """協調批次準備、請求、錯誤處理與前綴前進。"""
     if dry_run:
         return [], "DRY_RUN"
-    runtime = _build_batch_runtime(batch_items, total)
+    runtime = _build_batch_runtime(
+        batch_items, total, event_callback=event_callback
+    )
     if runtime is None:
         return [], "FAILED"
     try:

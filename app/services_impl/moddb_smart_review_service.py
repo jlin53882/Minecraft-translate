@@ -110,6 +110,7 @@ def run_moddb_smart_review_from_path(
     review_status: str = "unreviewed",
     query: str | None = None,
     cancel_check: Callable[[], bool] | None = None,
+    task_id: str | None = None,
 ) -> SmartReviewRunResult:
     """從指定資料庫執行智慧校對並逐步回傳執行進度。"""
     cfg = load_config()
@@ -139,6 +140,7 @@ def run_moddb_smart_review_from_path(
             review_status=review_status,
             query=query,
             cancel_check=cancel_check,
+            task_id=task_id,
         )
     finally:
         db.close()

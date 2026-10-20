@@ -39,6 +39,16 @@ class TranslatorHooks:
     on_batch_flushed: Callable[[], None] | None = None
     on_batch_checkpoint: Callable[[dict[str, Any]], None] | None = None
     on_progress: Callable[[float, str, float], None] | None = None
+    # Structured events are emitted once by the shared execution layer.  The
+    # service/UI decides how to render them; plugin callers may leave this off.
+    on_event: Callable[[dict[str, Any]], None] | None = None
+    task_id: str | None = None
+    run_id: str | None = None
+    operation: str = "translate"
+    provider: str = ""
+    model: str = ""
+    batch_total: int = 0
+    initial_timings: dict[str, float] = field(default_factory=dict)
 
 
 def prepare_translator_items(
@@ -243,6 +253,14 @@ class TranslatorSkeleton:
             on_batch_flushed=self.hooks.on_batch_flushed,
             on_batch_checkpoint=self.hooks.on_batch_checkpoint,
             on_progress=self.hooks.on_progress,
+            event_sink=self.hooks.on_event,
+            event_task_id=self.hooks.task_id,
+            event_run_id=self.hooks.run_id,
+            event_operation=self.hooks.operation,
+            event_provider=self.hooks.provider,
+            event_model=self.hooks.model,
+            event_batch_total=self.hooks.batch_total,
+            initial_timings=self.hooks.initial_timings,
             cache_rules=self.cache_rules,
             sleep_seconds_between_batches=self.sleep_seconds_between_batches,
             reload_cache=self.reload_cache,
