@@ -12,7 +12,7 @@ import json
 import logging
 import re
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -25,6 +25,7 @@ from translation_tool.utils.app_paths import get_resource_root
 from translation_tool.utils.text_matching import (
     contains_term,
     matching_terms,
+    normalize_term_text,
     term_canonical_key,
 )
 
@@ -36,6 +37,26 @@ _MAX_PROMPT_TERMS = 240
 _MAX_PROMPT_CHARS = 24_000
 _MAX_TERMS_PER_ITEM = 6
 _MINECRAFT_FORMAT_CODE_RE = re.compile(r"§[0-9a-fk-or]", re.IGNORECASE)
+_TERM_TOKEN_RE = re.compile(r"[A-Za-z0-9]+")
+_DERIVED_TERM_STOPWORDS = frozenset(
+    {
+        "a",
+        "an",
+        "and",
+        "at",
+        "by",
+        "for",
+        "from",
+        "in",
+        "into",
+        "of",
+        "on",
+        "or",
+        "the",
+        "to",
+        "with",
+    }
+)
 _NAME_LIKE_KEY_PREFIXES = frozenset(
     {
         "attribute",
@@ -75,6 +96,29 @@ class OfficialLocaleRecord:
 
 
 @dataclass(frozen=True)
+class OfficialTerminologyMatch:
+    """一筆可同時供翻譯提示詞與 Smart Review 使用的官方術語命中。"""
+
+    source_text: str
+    target_text: str
+    key: str | None = None
+    match_type: str = "source_substring"
+    term_origin: str = "official_term"
+
+    @property
+    def stable_id(self) -> str:
+        """以官方 key／來源／目標建立不依賴排序的 evidence id。"""
+        identity = "\x00".join(
+            (
+                self.key or "",
+                term_canonical_key(self.source_text),
+                self.target_text.strip(),
+            )
+        )
+        return f"official-term:{hashlib.sha256(identity.encode('utf-8')).hexdigest()[:20]}"
+
+
+@dataclass(frozen=True)
 class OfficialLocaleIndex:
     """Immutable in-memory view of the bundled official locale files."""
 
@@ -84,6 +128,13 @@ class OfficialLocaleIndex:
     revision: str
     available: bool = True
     name_like_terms: frozenset[str] = frozenset()
+    unique_tw_by_normalized_en: dict[str, str] = field(default_factory=dict)
+    unique_record_by_normalized_en: dict[str, OfficialLocaleRecord] = field(
+        default_factory=dict
+    )
+    derived_terms_by_en: dict[str, tuple[str, str, str | None]] = field(
+        default_factory=dict
+    )
 
     def lookup_exact(self, key: object, en_us: object, zh_cn: object) -> str | None:
         """只有在 key、英文與簡中完全匹配時回傳官方繁中。"""
@@ -104,40 +155,236 @@ class OfficialLocaleIndex:
         self, items: list[dict[str, Any]]
     ) -> list[tuple[str, str, str]]:
         """收集與目前批次相關的官方術語，供提示詞使用。"""
-        terms: dict[tuple[str, str], str] = {}
+        terms: dict[tuple[str, str, str], tuple[str, str]] = {}
         for item in items:
-            key = item.get("path") or item.get("key")
-            en_us = item.get("source_text") or item.get("text")
-            record = self.records_by_key.get(key) if isinstance(key, str) else None
-            target = None
-            normalized_en_us = (
-                normalize_terminology_text(en_us) if isinstance(en_us, str) else None
-            )
-            if (
-                record is not None
-                and normalized_en_us is not None
-                and normalize_terminology_text(record.en_us) == normalized_en_us
-            ):
-                target = record.zh_tw or None
-            if target is None and isinstance(en_us, str):
-                target = self.unique_tw_by_en.get(en_us)
-            if (
-                isinstance(normalized_en_us, str)
-                and target
-                and normalized_en_us != target
-            ):
-                # The official table can map the same English source to
-                # different Traditional Chinese values by key. Keep that key
-                # in the deduplication identity and in the prompt.
-                terms[(str(key) if isinstance(key, str) else "", normalized_en_us)] = (
-                    target
+            for match in self.official_terminology_matches_for_item(item):
+                # Keep key-specific full translations distinguishable.  A
+                # substring/compound term is deliberately shown without a
+                # misleading full-entry key.
+                prompt_key = (
+                    match.key
+                    if match.match_type in {"exact_key", "exact_text"}
+                    else ""
                 )
+                terms[
+                    (
+                        str(prompt_key or ""),
+                        term_canonical_key(match.source_text),
+                        match.target_text.strip(),
+                    )
+                ] = (match.source_text, match.target_text.strip())
 
         ordered = sorted(
-            ((key, source, target) for (key, source), target in terms.items()),
+            (
+                (key, display_source, target)
+                for (key, _canonical_source, _target), (display_source, target) in terms.items()
+            ),
             key=lambda entry: (-len(entry[1]), entry[0], entry[1]),
         )
         return ordered[:_MAX_PROMPT_TERMS]
+
+    def official_terminology_matches_for_item(
+        self, item: dict[str, Any]
+    ) -> list[OfficialTerminologyMatch]:
+        """以固定優先順序解析一筆來源中的官方完整翻譯與術語。
+
+        這是原本機翻提示詞與 Smart Review context 共用的唯一官方匹配入口。
+        結果只包含目前來源真正命中的少量術語，不會把整份官方語系送給模型。
+        """
+        source_text = item.get("source_text") or item.get("text")
+        if not isinstance(source_text, str) or not source_text.strip() or not self.available:
+            return []
+
+        normalized_source = normalize_terminology_text(source_text)
+        source_key = item.get("path") or item.get("key")
+        candidates: list[tuple[int, OfficialTerminologyMatch]] = []
+
+        def add(
+            source: str,
+            target: str,
+            *,
+            key: str | None,
+            match_type: str,
+            term_origin: str,
+        ) -> None:
+            source = normalize_terminology_text(source).strip()
+            target = str(target).strip()
+            if not source or not target or term_canonical_key(source) == term_canonical_key(target):
+                return
+            if not _terminology_term_allowed(source_text, source, self, key=key):
+                return
+            priority = {
+                "exact_key": 0,
+                "exact_text": 1,
+                "official_phrase": 2,
+                "source_substring": 3,
+            }.get(match_type, 4)
+            candidates.append(
+                (
+                    priority,
+                    OfficialTerminologyMatch(
+                        source,
+                        target,
+                        key=key,
+                        match_type=match_type,
+                        term_origin=term_origin,
+                    ),
+                )
+            )
+
+        record = (
+            self.records_by_key.get(source_key)
+            if isinstance(source_key, str)
+            else None
+        )
+        if (
+            record is not None
+            and term_canonical_key(record.en_us) == term_canonical_key(normalized_source)
+            and record.zh_tw.strip()
+        ):
+            add(
+                record.en_us,
+                record.zh_tw,
+                key=record.key,
+                match_type="exact_key",
+                term_origin="official_full_translation",
+            )
+
+        full_target = self._unique_target_for_source(normalized_source)
+        full_record = self._unique_record_for_source(normalized_source)
+        if full_target:
+            add(
+                full_record.en_us if full_record is not None else normalized_source,
+                full_target,
+                key=full_record.key if full_record is not None else None,
+                match_type="exact_text",
+                term_origin="official_full_translation",
+            )
+
+        term_values = tuple(
+            dict.fromkeys(
+                (
+                    *self.unique_tw_by_en.keys(),
+                    *(value[0] for value in self._derived_terms().values()),
+                )
+            )
+        )
+        for term in matching_terms((normalized_source,), term_values):
+            canonical = term_canonical_key(term)
+            if canonical == term_canonical_key(normalized_source):
+                continue
+            definition = self._term_definition(term)
+            if definition is None:
+                continue
+            display, target, term_key, origin = definition
+            token_count = len(_TERM_TOKEN_RE.findall(display))
+            add(
+                display,
+                target,
+                key=term_key,
+                match_type="official_phrase" if token_count > 1 else "source_substring",
+                term_origin=("official_phrase" if token_count > 1 else origin),
+            )
+
+        # One canonical source must not produce two competing targets.  An
+        # exact key is allowed to win because it is the highest-priority
+        # evidence; otherwise an ambiguous global term is omitted.
+        by_source: dict[str, list[tuple[int, OfficialTerminologyMatch]]] = {}
+        for priority, match in candidates:
+            by_source.setdefault(term_canonical_key(match.source_text), []).append(
+                (priority, match)
+            )
+        filtered: list[tuple[int, OfficialTerminologyMatch]] = []
+        for values in by_source.values():
+            exact = [value for value in values if value[1].match_type == "exact_key"]
+            if exact:
+                filtered.append(min(exact, key=lambda value: value[0]))
+                continue
+            targets = {value[1].target_text for value in values}
+            if len(targets) == 1:
+                filtered.append(min(values, key=lambda value: value[0]))
+
+        selected: list[tuple[int, OfficialTerminologyMatch]] = []
+        for priority, match in sorted(
+            filtered,
+            key=lambda value: (
+                value[0],
+                -len(term_canonical_key(value[1].source_text)),
+                term_canonical_key(value[1].source_text),
+            ),
+        ):
+            if any(
+                contains_term(selected_match.source_text, match.source_text)
+                for _selected_priority, selected_match in selected
+            ):
+                continue
+            selected.append((priority, match))
+            if len(selected) >= _MAX_TERMS_PER_ITEM:
+                break
+        return [match for _priority, match in selected]
+
+    def _unique_target_for_source(self, source: str) -> str | None:
+        canonical = term_canonical_key(source)
+        target = self.unique_tw_by_normalized_en.get(canonical)
+        if target:
+            return target
+        exact = self.unique_tw_by_en.get(source)
+        if exact:
+            return exact
+        matches = {
+            value
+            for raw_source, value in self.unique_tw_by_en.items()
+            if term_canonical_key(raw_source) == canonical
+        }
+        return next(iter(matches)) if len(matches) == 1 else None
+
+    def _unique_record_for_source(self, source: str) -> OfficialLocaleRecord | None:
+        canonical = term_canonical_key(source)
+        record = self.unique_record_by_normalized_en.get(canonical)
+        if record is not None:
+            return record
+        records = sorted(
+            (
+                record
+                for record in self.records_by_key.values()
+                if term_canonical_key(record.en_us) == canonical
+            ),
+            key=lambda value: value.key,
+        )
+        return records[0] if records else None
+
+    def _derived_terms(self) -> dict[str, tuple[str, str, str | None]]:
+        if self.derived_terms_by_en:
+            return self.derived_terms_by_en
+        if not self.records_by_key:
+            return {}
+        return _derive_component_terms(
+            tuple(self.records_by_key.values()),
+            self.unique_tw_by_normalized_en
+            or {
+                term_canonical_key(source): target
+                for source, target in self.unique_tw_by_en.items()
+            },
+        )
+
+    def _term_definition(
+        self, term: str
+    ) -> tuple[str, str, str | None, str] | None:
+        canonical = term_canonical_key(term)
+        target = self._unique_target_for_source(term)
+        if target:
+            record = self._unique_record_for_source(term)
+            return (
+                record.en_us if record is not None else term,
+                target,
+                record.key if record is not None else None,
+                "official_term",
+            )
+        derived = self._derived_terms().get(canonical)
+        if derived is None:
+            return None
+        display, target, key = derived
+        return display, target, key, "compound_component"
 
 
 def _file_sha256(path: Path) -> str:
@@ -159,29 +406,7 @@ def _strip_minecraft_format_codes(value: str) -> str:
 
 def normalize_terminology_text(value: str) -> str:
     """正規化來源與術語文字後套用共用術語規劃。"""
-    return _strip_minecraft_format_codes(value)
-
-
-def _is_hyphenated_occurrence(source: str, term: str) -> bool:
-    """判斷術語是否出現在連字號詞組中。"""
-    normalized_source = _strip_minecraft_format_codes(source).casefold()
-    normalized_term = term.strip().casefold()
-    start = 0
-    while (
-        normalized_term
-        and (index := normalized_source.find(normalized_term, start)) >= 0
-    ):
-        before = normalized_source[index - 1] if index else ""
-        after_index = index + len(normalized_term)
-        after = (
-            normalized_source[after_index]
-            if after_index < len(normalized_source)
-            else ""
-        )
-        if before == "-" or after == "-":
-            return True
-        start = index + 1
-    return False
+    return normalize_term_text(_strip_minecraft_format_codes(value))
 
 
 def _terminology_term_allowed(
@@ -196,10 +421,10 @@ def _terminology_term_allowed(
     normalized_term = normalize_terminology_text(term).strip()
     if term_canonical_key(normalized_source) == term_canonical_key(normalized_term):
         return True
-    if " " in normalized_term:
-        return not _is_hyphenated_occurrence(source, normalized_term)
-    if _is_hyphenated_occurrence(source, normalized_term):
-        return False
+    # A multi-word phrase carries enough context to be safe even when its
+    # source key is from a tooltip or a custom module namespace.
+    if len(_TERM_TOKEN_RE.findall(normalized_term)) > 1:
+        return True
     key_prefix = key.split(".", 1)[0] if isinstance(key, str) else ""
     if key_prefix in _NAME_LIKE_KEY_PREFIXES:
         return True
@@ -220,6 +445,126 @@ def terminology_term_allowed(
         index or load_official_locale_index(),
         key=key,
     )
+
+
+def _terminology_tokens(value: str) -> tuple[str, ...]:
+    """回傳可用於官方複合詞拆解的英文字詞。"""
+    return tuple(
+        token.casefold()
+        for token in _TERM_TOKEN_RE.findall(normalize_terminology_text(value))
+    )
+
+
+def _remove_known_translation(value: str, target: str) -> str | None:
+    """從官方目標文字移除一個已知術語，找不到時不猜測。"""
+    if not target:
+        return None
+    index = value.casefold().find(target.casefold())
+    if index < 0:
+        return None
+    return value[:index] + value[index + len(target) :]
+
+
+def _clean_derived_target(value: str) -> str:
+    """清理由官方複合對照消去後留下的目標詞。"""
+    return value.strip(" \t\r\n.,:;!?()[]{}\"'“”‘’")
+
+
+def _derive_component_terms(
+    records: Sequence[OfficialLocaleRecord],
+    unique_targets: dict[str, str],
+) -> dict[str, tuple[str, str, str | None]]:
+    """從互相對照的官方複合名稱推導穩定的單詞術語。
+
+    官方語系不一定提供 ``Netherite`` 或 ``Block`` 的獨立 value；但同一
+    namespace 內通常有多個可比較的複合名稱。這裡只在同一條官方記錄中，
+    其他詞已有唯一官方目標、且消去後只剩一個未知詞與一個目標片段時推導，
+    並要求來源 key 屬於 Minecraft 名稱型 namespace，避免從一般句子猜術語。
+    """
+    known: dict[str, str] = {
+        canonical: target.strip()
+        for canonical, target in unique_targets.items()
+        if len(_terminology_tokens(canonical)) == 1
+        and isinstance(target, str)
+        and target.strip()
+        and canonical != term_canonical_key(target)
+    }
+    derived: dict[str, tuple[str, str, str | None]] = {}
+    candidate_keys: dict[str, dict[str, list[str]]] = {}
+    candidate_display: dict[str, str] = {}
+
+    for _round in range(8):
+        candidate_keys.clear()
+        candidate_display.clear()
+        for record in sorted(records, key=lambda value: value.key):
+            namespace = record.key.split(".", 1)[0]
+            if namespace not in _NAME_LIKE_KEY_PREFIXES:
+                continue
+            tokens = _terminology_tokens(record.en_us)
+            if len(tokens) < 2 or len(tokens) > 6:
+                continue
+            remaining = record.zh_tw.strip()
+            unknown: list[tuple[str, str]] = []
+            recognized = 0
+            for raw_token, canonical in zip(
+                _TERM_TOKEN_RE.findall(normalize_terminology_text(record.en_us)),
+                tokens,
+                strict=True,
+            ):
+                if canonical in _DERIVED_TERM_STOPWORDS:
+                    continue
+                target = known.get(canonical)
+                if target:
+                    reduced = _remove_known_translation(remaining, target)
+                    if reduced is not None:
+                        remaining = reduced
+                        recognized += 1
+                        continue
+                unknown.append((canonical, raw_token))
+            unknown_keys = {canonical for canonical, _raw in unknown}
+            if recognized == 0 or len(unknown) != 1 or len(unknown_keys) != 1:
+                continue
+            canonical, raw_token = unknown[0]
+            target = _clean_derived_target(remaining)
+            if not target or target.casefold() == canonical:
+                continue
+            if len(target) > 40:
+                continue
+            candidate_keys.setdefault(canonical, {}).setdefault(target, []).append(
+                record.key
+            )
+            candidate_display.setdefault(canonical, raw_token)
+
+        additions = 0
+        for canonical, target_candidates in candidate_keys.items():
+            if not target_candidates:
+                continue
+            ranked_targets = sorted(
+                target_candidates.items(),
+                key=lambda value: (-len(value[1]), value[0]),
+            )
+            target, keys = ranked_targets[0]
+            # Require repeated official evidence before inventing a component
+            # mapping; one sentence can contain a context-specific translation.
+            if len(keys) < 2:
+                continue
+            if len(ranked_targets) > 1:
+                second_count = len(ranked_targets[1][1])
+                if len(keys) <= second_count:
+                    continue
+            existing = known.get(canonical)
+            if existing is not None and existing != target:
+                continue
+            if existing is None:
+                known[canonical] = target
+                additions += 1
+            # Prefer a name-like namespace key as the evidence identity. The
+            # candidates are already restricted to that namespace, so the
+            # first stable key is sufficient and deterministic.
+            derived[canonical] = (candidate_display[canonical], target, min(keys))
+        if additions == 0:
+            break
+    return derived
 
 
 def _load_index(root: Path) -> OfficialLocaleIndex:
@@ -253,6 +598,8 @@ def _load_index(root: Path) -> OfficialLocaleIndex:
     records: dict[str, OfficialLocaleRecord] = {}
     text_pairs: dict[tuple[str, str], set[str]] = {}
     en_values: dict[str, set[str]] = {}
+    normalized_en_values: dict[str, set[str]] = {}
+    normalized_records: dict[str, list[OfficialLocaleRecord]] = {}
     for key in set(data["en_us"]) & set(data["zh_cn"]) & set(data["zh_tw"]):
         en_us, zh_cn, zh_tw = (
             data["en_us"].get(key),
@@ -264,6 +611,9 @@ def _load_index(root: Path) -> OfficialLocaleIndex:
         records[key] = OfficialLocaleRecord(key, en_us, zh_cn, zh_tw)
         text_pairs.setdefault((en_us, zh_cn), set()).add(zh_tw)
         en_values.setdefault(en_us, set()).add(zh_tw)
+        normalized_source = term_canonical_key(en_us)
+        normalized_en_values.setdefault(normalized_source, set()).add(zh_tw)
+        normalized_records.setdefault(normalized_source, []).append(records[key])
 
     unique_pairs = {
         pair: next(iter(targets))
@@ -275,15 +625,34 @@ def _load_index(root: Path) -> OfficialLocaleIndex:
         for source, targets in en_values.items()
         if len(targets) == 1
     }
-    name_like_terms = frozenset(
+    unique_en_normalized = {
+        source: next(iter(targets))
+        for source, targets in normalized_en_values.items()
+        if len(targets) == 1
+    }
+    unique_records_normalized = {
+        source: min(values, key=lambda value: value.key)
+        for source, values in normalized_records.items()
+        if source in unique_en_normalized and values
+    }
+    derived_terms = _derive_component_terms(records.values(), unique_en_normalized)
+    name_like_terms = {
         term_canonical_key(record.en_us)
         for record in records.values()
-        if record.en_us in unique_en
+        if term_canonical_key(record.en_us) in unique_en_normalized
         and record.key.split(".", 1)[0] in _NAME_LIKE_KEY_PREFIXES
-    )
+    }
+    name_like_terms.update(derived_terms)
     revision = ":".join(_file_sha256(locale_root / name)[:16] for name in _LOCALE_FILES)
     return OfficialLocaleIndex(
-        records, unique_pairs, unique_en, revision, name_like_terms=name_like_terms
+        records,
+        unique_pairs,
+        unique_en,
+        revision,
+        name_like_terms=frozenset(name_like_terms),
+        unique_tw_by_normalized_en=unique_en_normalized,
+        unique_record_by_normalized_en=unique_records_normalized,
+        derived_terms_by_en=derived_terms,
     )
 
 
@@ -411,44 +780,15 @@ def _item_terminology_terms(
     if not isinstance(source_text, str) or not source_text.strip():
         return []
     normalized_source = normalize_terminology_text(source_text)
-    item_key = item.get("path") or item.get("key")
-
     candidates: dict[str, tuple[str, set[str]]] = {}
 
     if include_official and index.available:
-        key = item.get("path") or item.get("key")
-        record = index.records_by_key.get(key) if isinstance(key, str) else None
-        if (
-            record is not None
-            and normalize_terminology_text(record.en_us) == normalized_source
-            and record.zh_tw
-        ):
-            candidates[term_canonical_key(normalized_source)] = (
-                normalized_source,
-                {record.zh_tw.strip()},
+        for match in index.official_terminology_matches_for_item(item):
+            canonical = term_canonical_key(match.source_text)
+            display, targets = candidates.setdefault(
+                canonical, (match.source_text, set())
             )
-
-        # The source item is often a compound name (for example, ``Ruby Heavy
-        # Crossbow``).  Match the unique official sub-terms as well; exact
-        # whole-value lookup alone cannot enforce Minecraft's established
-        # terminology inside a newly introduced key.
-        official_terms = matching_terms(
-            (normalized_source,), tuple(index.unique_tw_by_en)
-        )
-        for term in sorted(official_terms, key=lambda value: (-len(value), value)):
-            if not _terminology_term_allowed(
-                source_text,
-                term,
-                index,
-                key=item_key if isinstance(item_key, str) else None,
-            ):
-                continue
-            target = index.unique_tw_by_en.get(term)
-            if not isinstance(target, str) or not target.strip() or target == term:
-                continue
-            canonical = term_canonical_key(term)
-            display, targets = candidates.setdefault(canonical, (term, set()))
-            targets.add(target.strip())
+            targets.add(match.target_text.strip())
             candidates[canonical] = (display, targets)
 
     reviewed = item.get("_reviewed_glossary")
@@ -552,6 +892,15 @@ def terminology_terms_for_item(
     )
 
 
+def official_terminology_matches_for_item(
+    item: dict[str, Any], *, index: OfficialLocaleIndex | None = None
+) -> list[OfficialTerminologyMatch]:
+    """取得原本機翻與 Smart Review 共用的官方命中結果。"""
+    return (index or load_official_locale_index()).official_terminology_matches_for_item(
+        item
+    )
+
+
 def terminology_issues(
     item: dict[str, Any],
     translated_text: str,
@@ -580,10 +929,12 @@ def terminology_issues(
 __all__ = [
     "OfficialLocaleIndex",
     "OfficialLocaleRecord",
+    "OfficialTerminologyMatch",
     "build_translation_prompt",
     "load_official_locale_index",
     "normalize_terminology_text",
     "official_exact_translation",
+    "official_terminology_matches_for_item",
     "official_translation_for_item",
     "terminology_issues",
     "terminology_term_allowed",

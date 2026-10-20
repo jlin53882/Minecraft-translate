@@ -15,7 +15,7 @@ from translation_tool.translation_db import (
     WriteBackItem,
 )
 from translation_tool.translation_db.models import SmartReviewSnapshot
-from translation_tool.translation_db.schema import SRC_AI, SRC_MANUAL
+from translation_tool.translation_db.schema import SRC_AI, SRC_JAR_TW, SRC_MANUAL
 from translation_tool.translation_db.smart_review import (
     build_smart_review_payload,
     parse_smart_review_response,
@@ -211,6 +211,78 @@ def test_local_context_covers_non_lang_terms_and_preserves_traceability(db):
     assert glossary[0]["zh_tw"] == "酚醛樹脂"
     assert glossary[0]["mod_id"] == "demo"
     assert glossary[0]["review_status"] == "reviewed"
+
+
+def test_local_context_includes_shared_official_compound_terms(db):
+    """Smart Review context 使用與原本機翻相同的官方術語 resolver。"""
+    db.write_back(
+        "1.21.1",
+        [
+            WriteBackItem(
+                KIND_PATCHOULI,
+                "demo",
+                "custom.obtain",
+                "Obtain a Netherite-Diamond Block",
+                "取得一個獄髓鑽石方塊",
+            )
+        ],
+        fill_other_versions=False,
+    )
+    entry = next(
+        item
+        for item in db.list_entries("1.21.1")[0]
+        if item.key == "custom.obtain"
+    )
+
+    context = db._smart_review_context(
+        entry.id,
+        KIND_PATCHOULI,
+        "1.21.1",
+        "demo",
+        entry.key,
+        entry.en_us,
+    )
+    official = [item for item in context if item["reference_type"] == "official_locale"]
+    pairs = {(item["source_text"], item["target_text"]) for item in official}
+
+    assert {("Netherite", "獄髓"), ("Diamond", "鑽石"), ("Block", "方塊")} <= pairs
+    assert all(item["id"].startswith("official-term:") for item in official)
+
+
+def test_local_context_marks_unreviewed_module_locale_as_low_confidence(db):
+    """未審核模組 zh_tw 只能作參考，不能冒充官方 context。"""
+    db.write_back(
+        "1.21.1",
+        [
+            WriteBackItem(
+                KIND_LANG,
+                "demo",
+                "module.term",
+                "Module-only phrase",
+                "模組自帶譯文",
+            )
+        ],
+        fill_other_versions=False,
+        source=SRC_JAR_TW,
+    )
+    entry = next(
+        item for item in db.list_entries("1.21.1")[0] if item.key == "module.term"
+    )
+
+    context = db._smart_review_context(
+        entry.id,
+        KIND_LANG,
+        "1.21.1",
+        "demo",
+        entry.key,
+        entry.en_us,
+    )
+    module = [item for item in context if item["reference_type"] == "module_locale"]
+
+    assert module
+    assert module[0]["confidence"] == "low"
+    assert "不是官方標準" in module[0]["limitations"]
+    assert not [item for item in module if item["reference_type"] == "official_locale"]
 
 
 def test_local_context_quality_and_evidence_ids_keep_source_identity(db):

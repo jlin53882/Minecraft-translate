@@ -2,6 +2,25 @@
 
 from __future__ import annotations
 
+import re
+
+_TERM_SEPARATOR_RE = re.compile(r"[-_]+")
+_TERM_WHITESPACE_RE = re.compile(r"\s+")
+
+
+def normalize_term_text(value: str, *, casefold: bool = False) -> str:
+    """Normalize separators used by Minecraft identifiers and English terms.
+
+    A hyphen and an underscore are both common ways to join the same Minecraft
+    compound name.  Treating them as a single space lets callers compare
+    ``Netherite-Diamond Block`` with ``netherite_diamond_block`` while the
+    boundary checks still prevent ``block`` from matching ``blocker``.
+    """
+    if not isinstance(value, str):
+        return ""
+    normalized = _TERM_SEPARATOR_RE.sub(" ", value.strip())
+    normalized = _TERM_WHITESPACE_RE.sub(" ", normalized)
+    return normalized.casefold() if casefold else normalized
 
 def contains_term(source: str, term: str) -> bool:
     """Return whether ``term`` occurs in ``source`` as a case-insensitive term.
@@ -12,8 +31,8 @@ def contains_term(source: str, term: str) -> bool:
     """
     if not isinstance(source, str) or not isinstance(term, str):
         return False
-    normalized_source = source.casefold()
-    normalized_term = term.strip().casefold()
+    normalized_source = normalize_term_text(source, casefold=True)
+    normalized_term = normalize_term_text(term, casefold=True)
     if not normalized_source or not normalized_term:
         return False
 
@@ -40,7 +59,7 @@ def contains_term(source: str, term: str) -> bool:
 
 def term_canonical_key(term: str) -> str:
     """Normalize a glossary source without losing the original display text."""
-    return term.strip().casefold() if isinstance(term, str) else ""
+    return normalize_term_text(term, casefold=True)
 
 
 def matching_terms(sources: tuple[str, ...], terms: tuple[str, ...]) -> set[str]:
@@ -69,7 +88,7 @@ def matching_terms(sources: tuple[str, ...], terms: tuple[str, ...]) -> set[str]
     for source in sources:
         if not isinstance(source, str):
             continue
-        normalized_source = source.casefold()
+        normalized_source = normalize_term_text(source, casefold=True)
         prefixes = {
             normalized_source[index : index + size]
             for size in (1, 2, 3)
@@ -89,5 +108,6 @@ def _is_word_char(char: str) -> bool:
 __all__ = [
     "contains_term",
     "matching_terms",
+    "normalize_term_text",
     "term_canonical_key",
 ]

@@ -25,6 +25,7 @@ from translation_tool.core.official_locale import (
     build_translation_prompt,
     load_official_locale_index,
     terminology_issues,
+    terminology_terms_for_item,
 )
 from translation_tool.translation_db.schema import (
     KIND_ADVANCEMENT,
@@ -75,6 +76,39 @@ def test_official_terms_are_injected_for_every_translation_profile() -> None:
         prompt = build_translation_prompt("基礎提示詞", items, profile=profile)
         assert "官方 Minecraft 術語" in prompt
         assert "Cobblestone → 鵝卵石" in prompt
+
+
+def test_official_compound_terms_are_shared_by_prompt_and_match_resolver() -> None:
+    """完整 key 不存在時仍解析官方複合詞，且提示詞與 resolver 結果一致。"""
+    index = load_official_locale_index()
+    item = {
+        "path": "advancednetherite:custom.obtain_block",
+        "source_text": "Obtain a Netherite-Diamond Block",
+        "text": "Obtain a Netherite-Diamond Block",
+    }
+
+    matches = index.official_terminology_matches_for_item(item)
+    pairs = {(match.source_text, match.target_text) for match in matches}
+
+    assert {("Netherite", "獄髓"), ("Diamond", "鑽石"), ("Block", "方塊")} <= pairs
+    assert len({match.stable_id for match in matches}) == len(matches)
+    assert pairs == set(terminology_terms_for_item(item, index=index))
+    assert "Netherite → 獄髓" in build_translation_prompt(
+        "基礎", [item], profile="lang"
+    )
+    assert "Diamond → 鑽石" in build_translation_prompt("基礎", [item], profile="lang")
+    assert "Block → 方塊" in build_translation_prompt("基礎", [item], profile="lang")
+
+
+def test_official_compound_matching_keeps_boundaries_and_empty_fallback() -> None:
+    index = load_official_locale_index()
+
+    assert index.official_terminology_matches_for_item(
+        {"path": "custom:blocker", "source_text": "Blocker"}
+    ) == []
+    assert index.official_terminology_matches_for_item(
+        {"path": "custom:unknown", "source_text": "Zzqv Qwrtv Plmn"}
+    ) == []
 
 
 def test_legacy_prompt_normalization_preserves_custom_rules() -> None:
@@ -364,8 +398,11 @@ def test_terminology_plan_handles_format_codes_and_contextual_short_words():
         official_locale._item_terminology_terms(
             {"source_text": "§78 Mid-Air Jumps§r"}, index
         )
-        == []
+        == [("Air", "空氣")]
     )
+    assert official_locale._item_terminology_terms(
+        {"source_text": "Blocker"}, index
+    ) == []
     assert (
         official_locale._item_terminology_terms(
             {"source_text": "Calms attacking Piglins when Player gets close"}, index

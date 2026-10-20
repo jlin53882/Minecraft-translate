@@ -53,6 +53,7 @@ _DECISION_LABEL = {
     "suggest_revision": "建議修改",
     "needs_context": "需補 context",
 }
+_CONFIDENCE_LABEL = {"high": "高", "medium": "中", "low": "低"}
 # 為什麼某筆不能套用：讓灰掉的按鈕有明確的說明。
 _NOT_APPLICABLE = {
     "applied": "這筆已經套用，不能重複套用；要再修改請到條目校對編輯。",
@@ -87,13 +88,29 @@ def candidate_evidence_text(row: SmartReviewCandidate) -> str:
         if legacy_id:
             legacy_by_id.setdefault(str(legacy_id), []).append(item)
 
+    def reference_label(item: dict) -> str:
+        """將 context 來源轉成審查者看得懂的可信度分層。"""
+        reference_type = str(item.get("reference_type", "local"))
+        match_type = str(item.get("match_type", ""))
+        if reference_type == "official_locale":
+            if match_type in {"exact_key", "exact_text", "official_phrase"}:
+                return "官方完整翻譯"
+            return "官方術語"
+        if reference_type == "reviewed_lang_glossary":
+            return "已審核 lang 參考"
+        if reference_type in {"same_key_reviewed", "same_text_reviewed"}:
+            return "已審核資料庫參考"
+        if reference_type == "module_locale":
+            return "未審核模組翻譯（低信心，非官方標準）"
+        return "本地參考"
+
     def format_item(display_id: str, item: dict) -> str:
         """格式化單筆證據及其版本、來源與品質限制。"""
         return (
-            f"{display_id} · {item.get('reference_type', 'local')} · "
+            f"{display_id} · {reference_label(item)} · "
             f"來源={item.get('source_label', item.get('source', ''))} · "
             f"版本={item.get('mc_version', '-')} · "
-            f"信心={item.get('confidence', 'low')} · "
+            f"信心={_CONFIDENCE_LABEL.get(str(item.get('confidence', 'low')), '未知')} · "
             f"{item.get('en_us', '')} → {item.get('zh_tw', '')} · "
             f"{item.get('limitations', '')}"
         )
@@ -103,9 +120,66 @@ def candidate_evidence_text(row: SmartReviewCandidate) -> str:
         lines = ["AI 未引用任何本地證據。"]
         if context:
             lines.append("可參考資料（非本次 AI 證據）：")
-            lines.extend(format_item(str(item.get("id")), item) for item in context[:6])
+            groups = (
+                (
+                    "官方完整翻譯參考",
+                    [
+                        item
+                        for item in context
+                        if item.get("reference_type") == "official_locale"
+                        and item.get("match_type")
+                        in {"exact_key", "exact_text", "official_phrase"}
+                    ],
+                ),
+                (
+                    "官方術語參考",
+                    [
+                        item
+                        for item in context
+                        if item.get("reference_type") == "official_locale"
+                        and item.get("match_type")
+                        not in {"exact_key", "exact_text", "official_phrase"}
+                    ],
+                ),
+                (
+                    "已審核參考",
+                    [
+                        item
+                        for item in context
+                        if item.get("reference_type")
+                        in {"reviewed_lang_glossary", "same_key_reviewed", "same_text_reviewed"}
+                    ],
+                ),
+                (
+                    "模組語系參考",
+                    [item for item in context if item.get("reference_type") == "module_locale"],
+                ),
+                (
+                    "其他本地參考",
+                    [
+                        item
+                        for item in context
+                        if item.get("reference_type")
+                        not in {
+                            "official_locale",
+                            "reviewed_lang_glossary",
+                            "same_key_reviewed",
+                            "same_text_reviewed",
+                            "module_locale",
+                        }
+                    ],
+                ),
+            )
+            remaining = 6
+            for label, grouped in groups:
+                if not grouped or remaining <= 0:
+                    continue
+                lines.append(f"{label}：")
+                selected = grouped[:remaining]
+                lines.extend(format_item(str(item.get("id")), item) for item in selected)
+                remaining -= len(selected)
         else:
-            lines.append("沒有可供參考的本地 context；請人工確認。")
+            lines.append("完全沒有可供參考的本地 context；請人工確認。")
         return "\n".join(lines)
     lines = []
     for evidence_id in evidence_ids[:8]:

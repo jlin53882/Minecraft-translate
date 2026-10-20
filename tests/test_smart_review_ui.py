@@ -773,6 +773,43 @@ def test_candidate_evidence_text_separates_cited_from_reference():
     assert "找不到本地證據" in missing
 
 
+def test_candidate_evidence_text_distinguishes_official_and_module_references():
+    """未引用時分開顯示官方完整翻譯、官方術語與模組低信心參考。"""
+    context = (
+        {
+            "id": "official-term:full",
+            "reference_type": "official_locale",
+            "match_type": "exact_key",
+            "en_us": "Diamond Axe",
+            "zh_tw": "鑽石斧",
+            "confidence": "high",
+        },
+        {
+            "id": "official-term:term",
+            "reference_type": "official_locale",
+            "match_type": "source_substring",
+            "en_us": "Netherite",
+            "zh_tw": "獄髓",
+            "confidence": "high",
+        },
+        {
+            "id": "module-locale:1",
+            "reference_type": "module_locale",
+            "match_type": "same_entry_unreviewed",
+            "en_us": "Diamond Axe",
+            "zh_tw": "模組斧",
+            "confidence": "low",
+        },
+    )
+
+    text = candidate_evidence_text(_candidate(1, context=context, evidence_ids=()))
+
+    assert "AI 未引用任何本地證據。" in text
+    assert "官方完整翻譯參考：" in text
+    assert "官方術語參考：" in text
+    assert "未審核模組翻譯（低信心，非官方標準）" in text
+
+
 def test_history_shows_interrupted_status_and_opens_run(ctx, monkeypatch):
     """驗證歷史清單把沒在跑的 running 標為可能中斷，並能開啟批次。"""
     assert run_status_label("running", active=False) == ("可能已中斷", "red")

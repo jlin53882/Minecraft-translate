@@ -45,7 +45,7 @@ from translation_tool.translation_db.models import (
     SmartReviewSnapshot,
 )
 from translation_tool.translation_db.quality import quality_state, translation_issues
-from translation_tool.translation_db.schema import SRC_AI, SRC_MANUAL
+from translation_tool.translation_db.schema import SRC_AI, SRC_JAR_TW, SRC_MANUAL
 from translation_tool.translation_db.smart_review_history import SmartReviewHistoryStore
 from translation_tool.translation_db.sql_helpers import like_pattern
 from translation_tool.utils.cancellation import (
@@ -745,7 +745,7 @@ class SmartReviewMixin:
                     confidence=(
                         "high"
                         if same_version and same_text and not version_conflict
-                        else "low"
+                          else "medium"
                     ),
                     limitations=limitations,
                 )
@@ -838,19 +838,39 @@ class SmartReviewMixin:
                 seen_glossary_ids.add(row_id)
                 glossary_rows.append(row)
         official = load_official_locale_index()
-        official_pairs_cache = cache.setdefault("official_pairs", {})
-        official_cache_key = str(getattr(official, "revision", "default"))
-        if official_cache_key not in official_pairs_cache:
-            pairs: dict[tuple[str, str], Any] = {}
-            for record in official.records_by_key.values():
-                pair = (
-                    normalize_terminology_text(record.en_us).strip(),
-                    record.zh_tw.strip(),
-                )
-                if pair[1]:
-                    pairs.setdefault(pair, record)
-            official_pairs_cache[official_cache_key] = pairs
-        official_pairs = official_pairs_cache[official_cache_key]
+        official_context: list[dict[str, Any]] = []
+        for match in official.official_terminology_matches_for_item(
+            {"path": key, "source_text": en_us, "text": en_us}
+        ):
+            if match.match_type in {"exact_key", "exact_text"}:
+                limitations = "官方 Minecraft 完整翻譯；高信心"
+            elif match.match_type == "official_phrase":
+                limitations = "官方 Minecraft 完整片語；高信心"
+            elif match.term_origin == "compound_component":
+                limitations = "官方 Minecraft 術語；由官方複合詞拆解；高信心"
+            else:
+                limitations = "官方 Minecraft 術語；高信心"
+            official_context.append(
+                {
+                    "id": match.stable_id,
+                    "reference_type": "official_locale",
+                    "mod_id": "minecraft",
+                    "kind": "lang",
+                    "key": match.key or "",
+                    "mc_version": "bundled",
+                    "en_us": match.source_text,
+                    "zh_tw": match.target_text,
+                    "source_text": match.source_text,
+                    "target_text": match.target_text,
+                    "review_status": "reviewed",
+                    "source": "bundled_official_locale",
+                    "source_label": "官方 Minecraft",
+                    "match_type": match.match_type,
+                    "term_origin": match.term_origin,
+                    "confidence": "high",
+                    "limitations": limitations,
+                }
+            )
         reviewed_entries = [
             {
                 "key": str(row[4]),
@@ -930,7 +950,7 @@ class SmartReviewMixin:
                         confidence=(
                             "high"
                             if str(row[2]) == mc_version and not term_conflict
-                            else "low"
+                            else "medium"
                         ),
                         limitations=(
                             "conflicting reviewed glossary terms; not a unique answer"
@@ -960,44 +980,49 @@ class SmartReviewMixin:
                     row,
                     reference_type="same_text_reviewed",
                     match_type="same_text",
-                    confidence="low",
+                    confidence="medium",
                     limitations="cross-module auxiliary reference; not this module's canonical name",
                 )
             )
 
-        wanted_pairs = {
-            (normalize_terminology_text(source).strip(), target.strip())
-            for source, target in terminology_plan
-        }
-        official_by_pair = {
-            pair: official_pairs[pair]
-            for pair in wanted_pairs
-            if pair in official_pairs
-        }
-        for (source, target), record in sorted(
-            official_by_pair.items(), key=lambda entry: (-len(entry[0][0]), entry[0])
-        )[:8]:
-            context.append(
+        module_locale_context: list[dict[str, Any]] = []
+        for zh_tw, source, review_status, revision in cached_rows(
+            "module_locale_rows",
+            "SELECT zh_tw, source, review_status, revision "
+            "FROM translation WHERE entry_id=? AND source=? "
+            "AND trim(zh_tw)<>'' "
+            "AND (review_status IS NULL OR review_status<>'reviewed') "
+            "ORDER BY revision DESC LIMIT 2",
+            (entry_id, SRC_JAR_TW),
+        ):
+            value = str(zh_tw).strip()
+            if not value or value == str(en_us).strip():
+                continue
+            module_locale_context.append(
                 {
-                    "id": f"official:{record.key}",
-                    "reference_type": "official_locale",
-                    "mod_id": "minecraft",
-                    "kind": "lang",
-                    "key": record.key,
-                    "mc_version": "bundled",
-                    "en_us": record.en_us,
-                    "zh_tw": target,
-                    "review_status": "reviewed",
-                    "source": "bundled_official_locale",
-                    "match_type": "whole_term",
-                    "confidence": "high",
-                    "limitations": "bundled local Minecraft glossary; not an external lookup",
+                    "id": f"module-locale:{entry_id}:source:{source}:revision:{revision or '-'}",
+                    "reference_type": "module_locale",
+                    "entry_id": entry_id,
+                    "mod_id": mod_id,
+                    "kind": kind,
+                    "key": key,
+                    "mc_version": mc_version,
+                    "en_us": en_us,
+                    "zh_tw": value,
+                    "source_text": en_us,
+                    "target_text": value,
+                    "review_status": review_status or "unreviewed",
+                    "source": source,
+                    "source_label": self.source_catalog.label(source),
+                    "match_type": "same_entry_unreviewed",
+                    "confidence": "low",
+                    "limitations": "模組自帶 zh_tw.json，尚未人工審核；僅供參考，不是官方標準",
                 }
             )
 
         # 同一資料庫列可能同時由 same-key 與 glossary 路徑取得；保留第一個較具體的路徑。
         unique: dict[str, dict[str, Any]] = {}
-        for item in context:
+        for item in (*official_context, *module_locale_context, *context):
             unique.setdefault(str(item["id"]), item)
         return list(unique.values())[:48]
 
