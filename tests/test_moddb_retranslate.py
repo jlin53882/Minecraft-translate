@@ -2999,3 +2999,77 @@ def test_rebase_leaves_the_review_alone_when_the_text_needs_no_repair(db_path):
         store, "run-rebase-fine", item["item_index"]
     )
     assert same["old_translation"] == "Use"
+
+
+def _same_text_pair(db_path, run_id):
+    """AI 與人工兩個來源的舊譯文相同，所以審查把它們當成同一組。"""
+    db = TranslationDB(db_path)
+    _ingest(db, "1.21.1", "foo", "k.pair", SRC_AI, "舊", en="Use %s")
+    _ingest(db, "1.21.1", "foo", "k.pair", SRC_MANUAL, "舊", en="Use %s")
+    entry = next(
+        row
+        for row in db.list_entries("1.21.1")[0]
+        if row.mod_id == "foo" and row.key == "k.pair"
+    )
+    store = moddb_repair_review_store.create_run(db_path, run_id)
+
+    def item(source_id):
+        return {
+            "entry_id": entry.id,
+            "version": "1.21.1",
+            "mod_id": "foo",
+            "kind": entry.kind,
+            "source_id": source_id,
+            "key": "k.pair",
+            "en_us": "Use %s",
+            "old_translation": "舊",
+            "expected_revision": _translation_revision(db, entry.id, source_id),
+            "database_identity": str(db_path.resolve()),
+            "database_file_id": db_path.stat().st_ino,
+            "database_priority": db.priority,
+        }
+
+    first = moddb_repair_review_store.append_item(store, run_id, item(SRC_AI))
+    second = moddb_repair_review_store.append_item(store, run_id, item(SRC_MANUAL))
+    loaded = moddb_repair_review_store.load_item(store, run_id, first)
+    db.close()
+    return store, loaded, second
+
+
+def test_review_group_sibling_already_written_is_recorded_as_applied(db_path):
+    store, item, sibling = _same_text_pair(db_path, "run-pair-again")
+    _review_apply(db_path, store, "run-pair-again", item, "人工草稿")
+    moddb_repair_review_store.save_review_state(
+        store, "run-pair-again", sibling, "pending", "人工草稿"
+    )
+
+    result = _review_apply(db_path, store, "run-pair-again", item, "人工草稿")
+
+    loaded = moddb_repair_review_store.load_item(store, "run-pair-again", sibling)
+    assert result == "already_applied"
+    assert loaded["review_status"] == "applied"
+
+
+def test_rebase_also_resets_unfinished_members_of_the_same_group(db_path):
+    store, item, sibling = _same_text_pair(db_path, "run-pair-rebase")
+    _review_apply(db_path, store, "run-pair-rebase", item, "人工草稿")
+    moddb_repair_review_store.save_review_state(
+        store, "run-pair-rebase", sibling, "stale", "人工草稿"
+    )
+
+    result = moddb_retranslate_service.rebase_repair_review_item(
+        db_path, store, "run-pair-rebase", item
+    )
+
+    other = moddb_repair_review_store.load_item(store, "run-pair-rebase", sibling)
+    assert result == "rebased"
+    assert other["review_status"] == "pending"
+    assert other["old_translation"] == "人工草稿"
+
+
+def test_rebase_item_reports_a_missing_review_row(tmp_path):
+    store = moddb_repair_review_store.create_run(tmp_path / "x.db", "run-none")
+
+    assert (
+        moddb_repair_review_store.rebase_item(store, "run-none", 99, "舊", 1) is False
+    )

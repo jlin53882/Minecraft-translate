@@ -1363,6 +1363,14 @@ def _review_item_identity(item: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _review_needs_repair(item: dict[str, Any], current: str) -> bool:
+    """目前譯文仍有格式問題，才需要（也才允許）AI 修復或人工確認套用。"""
+    eligible, _issues, _mixed = repair_input_issues_for_kind(
+        str(item["en_us"]), current, kind=str(item["kind"])
+    )
+    return eligible
+
+
 def _diagnose_stale_review_item(db, item: dict[str, Any], draft: str) -> str:
     """Why a review apply was refused: the reason code that follows ``stale:``.
 
@@ -1381,10 +1389,7 @@ def _diagnose_stale_review_item(db, item: dict[str, Any], draft: str) -> str:
     old = str(item["old_translation"])
     if current == draft:
         return "already_applied" if current != old else ""
-    eligible, _issues, _mixed = repair_input_issues_for_kind(
-        str(item["en_us"]), current, kind=str(item["kind"])
-    )
-    if not eligible:
+    if not _review_needs_repair(item, current):
         return "not_needed"
     expected = item.get("expected_revision")
     if current != old or (expected is not None and revision != expected):
@@ -1457,28 +1462,24 @@ def rebase_repair_review_item(
 ) -> str:
     """Re-read the database and make its current text the baseline of this review.
 
-    Returns ``rebased``, ``not_needed`` (目前譯文已沒有格式問題，不改審查資料) or
-    ``missing`` (找不到這一列，或資料庫已不是建立這次審查的那一個)。
+    Returns the result for ``item`` itself: ``rebased``, ``not_needed`` (目前譯文已沒有
+    格式問題，不改審查資料) or ``missing`` (找不到這一列，或資料庫已不是建立這次審查的
+    那一個)。同組尚未完成的其他來源各自重設，結果不影響回傳值。
     重設後狀態回到待審查，草稿保留，可以對現值重新套用。
     """
     db = _open_review_db(database_path, item)
     if db is None:
         return "missing"
     try:
-        members = [
-            member
-            for member in moddb_repair_review_store.matching_items(
-                store_path, run_id, item, statuses=("pending", "invalid", "stale")
-            )
-            if int(member["item_index"]) != int(item["item_index"])
-        ]
-        outcomes = [
-            _rebase_one_review_item(db, store_path, run_id, member)
-            for member in [item, *members]
-        ]
+        result = _rebase_one_review_item(db, store_path, run_id, item)
+        for member in moddb_repair_review_store.matching_items(
+            store_path, run_id, item, statuses=("pending", "invalid", "stale")
+        ):
+            if int(member["item_index"]) != int(item["item_index"]):
+                _rebase_one_review_item(db, store_path, run_id, member)
     finally:
         db.close()
-    return outcomes[0]
+    return result
 
 
 def _rebase_one_review_item(db, store_path, run_id, item: dict[str, Any]) -> str:
@@ -1488,10 +1489,7 @@ def _rebase_one_review_item(db, store_path, run_id, item: dict[str, Any]) -> str
     if row is None:
         return "missing"
     current, revision = row
-    eligible, _issues, _mixed = repair_input_issues_for_kind(
-        str(item["en_us"]), current, kind=str(item["kind"])
-    )
-    if not eligible:
+    if not _review_needs_repair(item, current):
         return "not_needed"
     moddb_repair_review_store.rebase_item(
         store_path, run_id, int(item["item_index"]), current, revision

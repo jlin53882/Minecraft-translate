@@ -28,6 +28,7 @@ _STALE_MESSAGES = {
     "missing": "找不到這筆譯文，或資料庫已不是建立這次審查的那一個；草稿保留。",
     "": "沒有寫入：草稿與目前譯文相同，或資料已變動；草稿保留，可按「重新讀取」以目前譯文為基準。",
 }
+_FINISHED_MESSAGE = "這筆已完成審查，不能再從這裡修改；要再修改譯文，請到條目校對編輯。"
 _REBASE_MESSAGES = {
     "rebased": ("已重新讀取：以目前譯文為基準，草稿保留，可再次套用。", C.EM),
     "not_needed": ("目前譯文已經沒有格式問題，不需要修復。", C.GOLD),
@@ -168,7 +169,7 @@ class RepairReviewer:
             f"待確認 {format_count(pending)} · "
             f"已套用 {format_count(counts.get('applied', 0))} · "
             f"保留舊譯文 {format_count(counts.get('kept_old', 0))} · "
-            f"資料已變動 {format_count(counts.get('stale', 0))} / {total}"
+            f"未寫入 {format_count(counts.get('stale', 0))} / {total}"
         )
 
     def _update_progress(self, counts: dict[str, int], total: int) -> None:
@@ -357,6 +358,7 @@ class RepairReviewer:
             min_lines=10,
             max_lines=16,
             height=360,
+            read_only=self._is_finished(),
             width=max(240.0, float(self.content_box.width or 1120) / 2 - 36),
             on_change=self._draft_changed,
         )
@@ -395,7 +397,7 @@ class RepairReviewer:
                     ("pending", "待審查"),
                     ("applied", "已套用"),
                     ("kept_old", "保留舊譯文"),
-                    ("stale", "資料已變動"),
+                    ("stale", "未寫入（見原因）"),
                     ("invalid", "待確認草稿"),
                     ("all", "全部狀態"),
                 )
@@ -429,13 +431,7 @@ class RepairReviewer:
     def _draft_changed(self, _event=None) -> None:
         if self.applying or self.item is None or self.draft is None:
             return
-        if self._is_finished():
-            self.status.value = (
-                "這筆已完成審查，修改不會保存；要再次套用請先按「重新讀取」。"
-            )
-            self.status.color = C.GOLD
-        else:
-            self._save_draft(status="pending")
+        self._save_draft(status="pending")
         self._update_format_status(
             str(self.item.get("en_us") or ""),
             self.draft.value or "",
@@ -713,6 +709,11 @@ class RepairReviewer:
         """以資料庫目前的譯文重設這筆審查的基準（草稿保留），讓它可以再次套用。"""
         if self.applying or self.item is None:
             return
+        if self._is_finished():
+            self.status.value = _FINISHED_MESSAGE
+            self.status.color = C.GOLD
+            self.page.update()
+            return
         self.applying = True
         self._set_controls_disabled(True)
         self.status.value = "正在重新讀取目前譯文…"
@@ -739,7 +740,9 @@ class RepairReviewer:
             result = ""
             message, color = f"重新讀取失敗，審查資料沒有變動：{exc}", C.GOLD
         else:
-            message, color = _REBASE_MESSAGES[result]
+            message, color = _REBASE_MESSAGES.get(
+                result, ("重新讀取沒有變更審查資料。", C.GOLD)
+            )
         if self.closed:
             return
         self.applying = False
@@ -770,7 +773,7 @@ class RepairReviewer:
         if self.status_filter_control is not None:
             self.status_filter_control.disabled = disabled
         if self.draft is not None:
-            self.draft.read_only = disabled
+            self.draft.read_only = disabled or self._is_finished()
 
 
 def open_repair_reviewer(page, store_path: str, run_id: str, on_close=None) -> None:

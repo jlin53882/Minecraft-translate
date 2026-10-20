@@ -614,7 +614,6 @@ def test_editing_an_applied_item_does_not_reopen_it(tmp_path):
     saved = store.load_item(path, "run-edit-applied", index)
     assert saved["review_status"] == "applied"
     assert saved["draft"] == "使用 %s"
-    assert "重新讀取" in reviewer.status.value
 
 
 def test_reload_button_rebases_the_item_and_shows_the_result(tmp_path, monkeypatch):
@@ -664,3 +663,44 @@ def test_stale_apply_shows_the_specific_reason(tmp_path, monkeypatch):
     asyncio.run(reviewer._apply_async(dict(reviewer.item), "使用 %s"))
 
     assert "已經沒有格式問題" in reviewer.status.value
+
+
+def test_finished_item_has_a_read_only_draft_and_reload_only_explains(tmp_path):
+    path, _index = _finished_item(tmp_path, "run-finished-reload", "applied")
+    page = mock_page()
+    reviewer = RepairReviewer(page, str(path), "run-finished-reload")
+    reviewer.status_filter = "all"
+    reviewer.open()
+
+    assert reviewer.draft.read_only is True
+    reviewer._reload()
+
+    assert not page._tasks
+    assert reviewer.applying is False
+    assert "條目校對" in reviewer.status.value
+
+
+def test_reload_failure_keeps_the_review_and_reenables_controls(tmp_path, monkeypatch):
+    import asyncio
+
+    path, index = _finished_item(tmp_path, "run-reload-fail", "stale")
+
+    def boom(*_args):
+        raise OSError("disk gone")
+
+    monkeypatch.setattr(
+        "app.views.moddb.repair_reviewer.rebase_repair_review_item", boom
+    )
+    page = mock_page()
+    reviewer = RepairReviewer(page, str(path), "run-reload-fail")
+    reviewer.status_filter = "all"
+    reviewer.open()
+
+    reviewer._reload()
+    task_coro, args = page._tasks.pop()
+    asyncio.run(task_coro(*args))
+
+    assert "重新讀取失敗" in reviewer.status.value
+    assert reviewer.applying is False
+    assert reviewer.draft.read_only is False
+    assert store.load_item(path, "run-reload-fail", index)["review_status"] == "stale"
