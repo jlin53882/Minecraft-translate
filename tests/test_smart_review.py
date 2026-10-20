@@ -695,6 +695,115 @@ def test_run_persists_candidates_without_writing_translation(db, monkeypatch):
     assert db._q("SELECT COUNT(*) FROM smart_review_candidate")[0][0] == 0
 
 
+def test_smart_review_run_history_merges_legacy_pages_without_double_offset(db):
+    """驗證合併 JSON／SQLite 歷史後只套用一次 offset，且可超過 100 筆。"""
+    rows = []
+    for index in range(125):
+        day = index // 24 + 1
+        hour = index % 24
+        rows.append(
+            (
+                f"legacy-{index:03d}",
+                "gemini",
+                "test-model",
+                "1.21.1",
+                1,
+                1,
+                "{}",
+                f"2026-01-{day:02d} {hour:02d}:00:00",
+                f"2026-01-{day:02d} {hour:02d}:00:01",
+                "completed",
+                1,
+                1,
+                1,
+                0,
+                0,
+                "{}",
+            )
+        )
+    with db._tx(bump_generation_on_noop=False) as conn:
+        conn.executemany(
+            "INSERT INTO smart_review_run ("
+            "id, provider, model, scope_version, requested_limit, batch_size, "
+            "scope_json, started_at, finished_at, status, selected_count, "
+            "processed_count, valid_count, invalid_count, request_error_count, metrics"
+            ") VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            rows,
+        )
+
+    page = db.list_smart_review_runs(limit=20, offset=100)
+    assert len(page) == 20
+    assert len({run["id"] for run in page}) == 20
+    assert page[0]["id"] == "legacy-024"
+    assert db.list_smart_review_runs(limit=2, offset=2)[0]["id"] == "legacy-122"
+
+
+def test_json_apply_reconciles_sqlite_commit_when_history_write_fails(db, monkeypatch):
+    """SQLite 已提交但 JSON 回寫失敗時，下一次讀取會安全標記 applied。"""
+
+    def fake_call(**kwargs):
+        """建立可供套用的建議回應。"""
+        item = kwargs["payload"]["items"][0]
+        return json.dumps(
+            {
+                "items": [
+                    {
+                        "id": item["id"],
+                        "decision": "suggest_revision",
+                        "suggested_zh_tw": f"{item['current_translation']}（修訂）",
+                        "issue_types": ["style"],
+                        "evidence_ids": [],
+                        "confidence": 0.9,
+                        "reason": (
+                            f"原文 {item['source_text']} 與目前譯文 "
+                            f"{item['current_translation']} 的語氣需要人工確認。"
+                        ),
+                    }
+                ]
+            }
+        )
+
+    monkeypatch.setattr(
+        "translation_tool.translation_db.smart_review.call_gemini_requests",
+        fake_call,
+    )
+    result = run_smart_review(db, model_name="gemini-test", api_key="test-key", limit=1)
+    candidate = db.list_smart_review_candidates(result.run_id)[0]
+    assert candidate.status == "ready", candidate
+    from translation_tool.translation_db.smart_review_history import (
+        SmartReviewHistoryStore,
+    )
+
+    original_update = SmartReviewHistoryStore.update_candidate
+
+    def fail_after_sqlite_commit(self, run_id, ordinal, **updates):
+        """模擬 SQLite 套用完成後的 JSON 原子替換失敗。"""
+        if updates.get("status") == "applied":
+            raise OSError("simulated history write failure")
+        return original_update(self, run_id, ordinal, **updates)
+
+    monkeypatch.setattr(
+        SmartReviewHistoryStore, "update_candidate", fail_after_sqlite_commit
+    )
+    assert (
+        db.apply_smart_review_candidate(result.run_id, candidate.ordinal) == "applied"
+    )
+    assert (
+        db.entry_detail(candidate.entry_id).entry.zh_tw
+        == f"{candidate.current_zh_tw}（修訂）"
+    )
+    assert (
+        SmartReviewHistoryStore(db.path)
+        .get_candidate(result.run_id, candidate.ordinal)
+        .get("status")
+        == "ready"
+    )
+
+    monkeypatch.setattr(SmartReviewHistoryStore, "update_candidate", original_update)
+    reconciled = db.list_smart_review_candidates(result.run_id)[0]
+    assert reconciled.status == "applied"
+
+
 def test_smart_review_reports_search_and_api_timing(db, monkeypatch):
     """驗證進度與持久化 metrics 能區分搜尋、API 與批次處理耗時。"""
     events = []

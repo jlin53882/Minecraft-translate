@@ -703,19 +703,33 @@ class SmartReviewReviewer:
 
     def _dirty(self) -> bool:
         """草稿是否與已儲存內容不同且可儲存。"""
+        return (
+            self._draft_changed()
+            and bool(str(self.draft.value or "").strip())
+            and not self._has_format_issue
+        )
+
+    def _draft_changed(self) -> bool:
+        """判斷目前可編輯候選是否有尚未保存的文字變更。"""
         row = self.row
         return (
             row is not None
             and row.status == "ready"
             and str(self.draft.value or "") != self._stored_draft
-            and bool(str(self.draft.value or "").strip())
-            and not self._has_format_issue
         )
 
     def _flush_then(self, then) -> None:
-        """換筆前先保存沒問題的草稿，再繼續；有格式問題的草稿不保存。"""
-        if not self._dirty():
+        """換筆前保存草稿；格式錯誤或空白草稿會停留在目前候選。"""
+        if not self._draft_changed():
             then()
+            return
+        if not str(self.draft.value or "").strip() or self._has_format_issue:
+            show_snack(
+                self.ctx.page,
+                "草稿尚未保存：請先修正格式問題或填入內容。",
+                C.GOLD,
+                duration=2600,
+            )
             return
         self._write_draft(
             lambda status: then() if status == "saved" else None,

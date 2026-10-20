@@ -14,7 +14,7 @@ import re
 import threading
 import uuid
 from collections import Counter
-from collections.abc import Iterator, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
@@ -470,6 +470,45 @@ class SmartReviewHistoryStore:
             candidate.update(updates)
             self._write_unlocked(run_id, payload)
             return True
+
+    def reconcile_applied(
+        self, run_id: str, records: Mapping[int, Mapping[str, Any]]
+    ) -> int:
+        """依 SQLite 套用歷史，補回尚未標記為 applied 的 JSON 候選。
+
+        SQLite 翻譯與 JSON 歷史分屬兩個儲存邊界；若前者已提交、後者在
+        原子替換時遇到 I/O 錯誤，下一次讀取可以用同一個 run／ordinal 的
+        SQLite audit marker 對帳，而不會再次把候選當成 ready 套用。
+        """
+        with self._lock:
+            try:
+                payload = self._read_unlocked(run_id)
+            except FileNotFoundError:
+                return 0
+            updated = 0
+            for candidate in payload.get("candidates") or []:
+                if (
+                    not isinstance(candidate, dict)
+                    or candidate.get("status") != "ready"
+                ):
+                    continue
+                ordinal = int(candidate.get("ordinal") or 0)
+                record = records.get(ordinal)
+                if record is None or int(record.get("entry_id") or 0) != int(
+                    candidate.get("entry_id") or 0
+                ):
+                    continue
+                candidate.update(
+                    {
+                        "status": "applied",
+                        "applied_batch": str(record.get("batch") or "") or None,
+                        "applied_at": record.get("applied_at"),
+                    }
+                )
+                updated += 1
+            if updated:
+                self._write_unlocked(run_id, payload)
+            return updated
 
 
 def _candidate_status(result: dict[str, Any]) -> str:

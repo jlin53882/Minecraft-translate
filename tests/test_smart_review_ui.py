@@ -658,6 +658,39 @@ def test_reviewer_blocks_apply_when_draft_has_format_issue(reviewer, monkeypatch
     assert reviewer.apply_btn.disabled is False
 
 
+def test_reviewer_keeps_invalid_unsaved_draft_when_navigating(reviewer, monkeypatch):
+    """格式不符的未保存草稿也必須阻止換筆，避免繞過保存失敗保護。"""
+
+    class Diagnostics:
+        """模擬格式診斷結果。"""
+
+        def __init__(self, issues):
+            """初始化診斷結果。"""
+            self.summary_lines = issues
+            self.has_issues = bool(issues)
+
+    monkeypatch.setattr(
+        reviewer_module,
+        "smart_review_format_diagnostics",
+        lambda _en, value, kind="lang": Diagnostics(
+            ["缺少佔位符 %s"] if "%s" not in value else []
+        ),
+    )
+    reviewer.fake.rows = [
+        _candidate(1, "ready", en_us="Hello %s", suggested_zh_tw="你好 %s"),
+        _candidate(2, "ready", en_us="Bye", suggested_zh_tw="再見"),
+    ]
+    reviewer.load_run("run-1")
+    reviewer.draft.value = "尚未補回之前的草稿"
+    reviewer._on_draft_change()
+
+    reviewer._move(1)
+
+    assert reviewer.row.ordinal == 1
+    assert reviewer.draft.value == "尚未補回之前的草稿"
+    assert "尚未保存" in reviewer.ctx.page.snacks[-1]
+
+
 def test_smart_review_completion_refreshes_entry_list_before_parent_changed(
     monkeypatch,
 ):

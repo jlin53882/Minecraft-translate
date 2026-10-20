@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 import time
 import uuid
@@ -59,6 +60,8 @@ from translation_tool.utils.cancellation import (
     is_cancelled,
 )
 from translation_tool.utils.text_matching import contains_term, term_canonical_key
+
+logger = logging.getLogger(__name__)
 
 SMART_REVIEW_DECISIONS = ("no_change", "suggest_revision", "needs_context")
 SMART_REVIEW_ISSUE_TYPES = (
@@ -834,13 +837,91 @@ class SmartReviewMixin:
             if glossary_remaining
             else []
         )
-        glossary_rows: list[tuple] = []
-        seen_glossary_ids: set[int] = set()
-        for row in glossary_target_rows + glossary_current_rows + glossary_other_rows:
-            row_id = int(row[0])
-            if row_id not in seen_glossary_ids:
-                seen_glossary_ids.add(row_id)
-                glossary_rows.append(row)
+        # 同一模組／版本的候選會共用相同 bulk glossary。先把目前版本與
+        # 其他版本合併一次，再建立詞元倒排索引；每筆候選只取可能命中的列，
+        # 之後仍交給 contains_term 做最後的詞界確認。選擇最少命中的詞元
+        # 作為錨點，避免像 ``term`` 這類常見前綴把整個 glossary 拉回來。
+        glossary_scope = (mod_id, mc_version)
+        glossary_rows_cache = cache.setdefault("glossary_rows", {})
+        if glossary_scope not in glossary_rows_cache:
+            glossary_rows: list[tuple] = []
+            seen_glossary_ids: set[int] = set()
+            for row in glossary_current_rows + glossary_other_rows:
+                row_id = int(row[0])
+                if row_id not in seen_glossary_ids:
+                    seen_glossary_ids.add(row_id)
+                    glossary_rows.append(row)
+            glossary_rows_cache[glossary_scope] = tuple(glossary_rows)
+        glossary_rows = glossary_rows_cache[glossary_scope]
+
+        # 這不改變術語篩選規則，但避免每筆候選重掃最多 5,000 列。
+        glossary_index_cache = cache.setdefault("glossary_term_index", {})
+        if glossary_scope not in glossary_index_cache:
+            indexed_tokens: dict[str, list[tuple]] = {}
+            fallback_rows: dict[str, list[tuple]] = {}
+            row_order = {int(row[0]): index for index, row in enumerate(glossary_rows)}
+            for row in glossary_rows:
+                normalized_term = term_canonical_key(
+                    normalize_terminology_text(str(row[5])).strip()
+                )
+                if not normalized_term:
+                    continue
+                tokens = tuple(re.findall(r"[A-Za-z0-9]+", normalized_term))
+                if tokens:
+                    for token in set(tokens):
+                        indexed_tokens.setdefault(token, []).append(row)
+                else:
+                    fallback_rows.setdefault(normalized_term[:3], []).append(row)
+            glossary_index_cache[glossary_scope] = (
+                indexed_tokens,
+                fallback_rows,
+                row_order,
+            )
+        indexed_tokens, fallback_rows, row_order = glossary_index_cache[glossary_scope]
+        source_canonical = term_canonical_key(normalized_source)
+        source_tokens = tuple(
+            dict.fromkeys(re.findall(r"[A-Za-z0-9]+", source_canonical))
+        )
+        token_candidates = [
+            indexed_tokens[token] for token in source_tokens if token in indexed_tokens
+        ]
+        relevant_glossary: dict[int, tuple] = {}
+        if token_candidates:
+            for row in min(token_candidates, key=len):
+                relevant_glossary[int(row[0])] = row
+        else:
+            source_prefixes = {
+                source_canonical[index : index + width]
+                for width in (1, 2, 3)
+                for index in range(len(source_canonical) - width + 1)
+            }
+            for prefix in source_prefixes:
+                for row in fallback_rows.get(prefix, ()):
+                    relevant_glossary[int(row[0])] = row
+        relevant_target: list[tuple] = []
+        relevant_ids: set[int] = set()
+        for row in glossary_target_rows:
+            normalized_term = term_canonical_key(
+                normalize_terminology_text(str(row[5])).strip()
+            )
+            target_tokens = tuple(
+                dict.fromkeys(re.findall(r"[A-Za-z0-9]+", normalized_term))
+            )
+            if not target_tokens or all(
+                token in source_tokens for token in target_tokens
+            ):
+                relevant_target.append(row)
+                relevant_ids.add(int(row[0]))
+        for row in relevant_target:
+            relevant_glossary[int(row[0])] = row
+        glossary_rows_for_item = relevant_target + sorted(
+            (
+                row
+                for row_id, row in relevant_glossary.items()
+                if row_id not in relevant_ids
+            ),
+            key=lambda row: row_order[int(row[0])],
+        )
         official = load_official_locale_index()
         official_context: list[dict[str, Any]] = []
         for match in official.official_terminology_matches_for_item(
@@ -881,7 +962,7 @@ class SmartReviewMixin:
                 "en_us": str(row[5]),
                 "zh_tw": str(row[6]),
             }
-            for row in glossary_rows
+            for row in glossary_rows_for_item
             if quality_details(row)[0] == "consistent"
         ]
         terminology_plan = terminology_terms_for_item(
@@ -908,7 +989,7 @@ class SmartReviewMixin:
         ]
         normalized_en_us = normalize_terminology_text(en_us)
         matched_glossary = []
-        for row in glossary_rows:
+        for row in glossary_rows_for_item:
             if quality_details(row)[0] != "consistent":
                 continue
             normalized_term = normalize_terminology_text(str(row[5])).strip()
@@ -1221,6 +1302,7 @@ class SmartReviewMixin:
         """列出指定智慧校對執行中的候選資料。"""
         history = SmartReviewHistoryStore(self.path)
         if history.exists(run_id):
+            self._reconcile_json_applied_candidates(history, run_id)
             return history.list_candidates(
                 run_id, status=status, limit=limit, offset=offset
             )
@@ -1281,12 +1363,43 @@ class SmartReviewMixin:
             )
         return result
 
+    def _reconcile_json_applied_candidates(
+        self, history: SmartReviewHistoryStore, run_id: str
+    ) -> None:
+        """以 SQLite audit marker 對帳已提交但尚未回寫 JSON 的候選。"""
+        note_prefix = f"run={run_id}; ordinal="
+        rows = self._q(
+            "SELECT note, entry_id, batch, at FROM history "
+            "WHERE action='smart_review_apply' AND note LIKE ? ORDER BY id DESC",
+            (note_prefix + "%",),
+        )
+        records: dict[int, dict[str, Any]] = {}
+        for note, entry_id, batch, applied_at in rows:
+            value = str(note or "")
+            if not value.startswith(note_prefix):
+                continue
+            try:
+                ordinal = int(value[len(note_prefix) :])
+            except ValueError:
+                continue
+            records.setdefault(
+                ordinal,
+                {
+                    "entry_id": int(entry_id),
+                    "batch": batch,
+                    "applied_at": applied_at,
+                },
+            )
+        if records:
+            history.reconcile_applied(run_id, records)
+
     def count_smart_review_candidates_for_run(
         self, run_id: str, *, status: str | None = None
     ) -> int:
         """計算指定智慧校對執行中的候選資料數量。"""
         history = SmartReviewHistoryStore(self.path)
         if history.exists(run_id):
+            self._reconcile_json_applied_candidates(history, run_id)
             return history.count_candidates(run_id, status=status)
         clauses = ["run_id=?"]
         params: list[Any] = [run_id]
@@ -1308,6 +1421,7 @@ class SmartReviewMixin:
         """
         history = SmartReviewHistoryStore(self.path)
         if history.exists(run_id):
+            self._reconcile_json_applied_candidates(history, run_id)
             return history.breakdown(run_id, error_limit=error_limit)
         status_rows = self._q(
             "SELECT status, COUNT(*) FROM smart_review_candidate "
@@ -1490,16 +1604,21 @@ class SmartReviewMixin:
     ) -> list[dict[str, Any]]:
         """列出 JSON 批次與舊版 SQLite 批次，依時間合併分頁。"""
         history_runs = SmartReviewHistoryStore(self.path).all_runs()
+        start = max(0, int(offset))
+        bounded_limit = max(1, int(limit))
         has_scope = self._smart_review_has_column("smart_review_run", "scope_json")
         scope_column = "scope_json" if has_scope else "NULL AS scope_json"
+        # SQLite 舊批次必須先抓取足以填滿合併後頁面的前置資料；不能先套用
+        # OFFSET，否則與 JSON 批次合併排序後會被再次偏移而漏資料。
+        legacy_limit = max(1, start + bounded_limit + 1)
         rows = self._q(
             "SELECT id, provider, model, scope_version, "
             + scope_column
             + ", started_at, "
             "finished_at, status, selected_count, processed_count, valid_count, "
             "invalid_count, request_error_count, metrics "
-            "FROM smart_review_run ORDER BY started_at DESC, id DESC LIMIT ? OFFSET ?",
-            (max(1, min(int(limit), 100)), max(0, int(offset))),
+            "FROM smart_review_run ORDER BY started_at DESC, id DESC LIMIT ?",
+            (legacy_limit,),
         )
         result = []
         for row in rows:
@@ -1531,8 +1650,6 @@ class SmartReviewMixin:
             ),
             reverse=True,
         )
-        start = max(0, int(offset))
-        bounded_limit = max(1, min(int(limit), 100))
         return ordered[start : start + bounded_limit]
 
     def _apply_smart_review_candidate_json(
@@ -1547,6 +1664,7 @@ class SmartReviewMixin:
         """以資料庫 CAS 套用 JSON 候選，再回寫候選狀態。"""
         batch = uuid.uuid4().hex
         with history.locked():
+            self._reconcile_json_applied_candidates(history, run_id)
             candidate = history.get_candidate(run_id, ordinal)
             if candidate is None:
                 return "missing"
@@ -1669,16 +1787,34 @@ class SmartReviewMixin:
                 return (
                     "manual_reviewed" if result_status == "manual_reviewed" else "stale"
                 )
-            history.update_candidate(
-                run_id,
-                ordinal,
-                draft_zh_tw=proposed
-                if draft_zh_tw is not None
-                else candidate.get("draft_zh_tw"),
-                status="applied",
-                applied_batch=batch,
-                applied_at=history.timestamp(),
-            )
+            try:
+                updated = history.update_candidate(
+                    run_id,
+                    ordinal,
+                    draft_zh_tw=proposed
+                    if draft_zh_tw is not None
+                    else candidate.get("draft_zh_tw"),
+                    status="applied",
+                    applied_batch=batch,
+                    applied_at=history.timestamp(),
+                )
+            except Exception:
+                # SQLite 已經提交；JSON 是另一個儲存邊界，失敗時回報已套用，
+                # 並由下一次讀取依 SQLite audit marker 對帳，而不是讓 UI 誤報
+                # 翻譯未寫入或讓使用者重複套用。
+                logger.warning(
+                    "Smart Review JSON 狀態回寫失敗，將於下次讀取對帳：run=%s ordinal=%s",
+                    run_id,
+                    ordinal,
+                    exc_info=True,
+                )
+                return "applied"
+            if not updated:
+                logger.warning(
+                    "Smart Review JSON 候選不存在，SQLite 已套用：run=%s ordinal=%s",
+                    run_id,
+                    ordinal,
+                )
             return "applied"
 
     def apply_smart_review_candidate(
@@ -1844,11 +1980,15 @@ class SmartReviewMixin:
         """保留目前翻譯並將智慧校對候選標記為拒絕。"""
         history = SmartReviewHistoryStore(self.path)
         if history.exists(run_id):
-            candidate = history.get_candidate(run_id, ordinal)
-            if candidate is None or candidate.get("status") != "ready":
-                return "not_ready"
-            history.update_candidate(run_id, ordinal, status="rejected")
-            return "rejected"
+            self._reconcile_json_applied_candidates(history, run_id)
+            # 讀取與狀態轉移必須在同一個檔案鎖內，避免 reject 讀到 ready
+            # 後，apply 先完成並把同一候選改成 applied，最後又被覆寫成 rejected。
+            with history.locked():
+                candidate = history.get_candidate(run_id, ordinal)
+                if candidate is None or candidate.get("status") != "ready":
+                    return "not_ready"
+                updated = history.update_candidate(run_id, ordinal, status="rejected")
+                return "rejected" if updated else "not_ready"
         with self._tx(bump_generation_on_noop=False) as conn:
             updated = conn.execute(
                 "UPDATE smart_review_candidate SET status='rejected', "

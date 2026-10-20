@@ -453,8 +453,8 @@ def test_dashboard_mount_reload_does_not_create_a_task_lifecycle_loop():
         manager.detach()
 
 
-def test_dashboard_task_changes_do_not_reload_dashboard_data():
-    """驗證此測試案例的預期結果與相容性。"""
+def test_dashboard_task_completion_reloads_summary_without_rules_reload():
+    """驗證任務完成會更新摘要，但不會重新讀取替換規則。"""
     import threading
 
     from app.tasks.operation_registry import OperationDescriptor
@@ -463,6 +463,7 @@ def test_dashboard_task_changes_do_not_reload_dashboard_data():
     first_load_started = threading.Event()
     release_first_load = threading.Event()
     load_count = 0
+    rules_load_count = 0
 
     def load_cache():
         nonlocal load_count
@@ -473,6 +474,13 @@ def test_dashboard_task_changes_do_not_reload_dashboard_data():
         return {"total_entries": load_count, "types": {}}
 
     view, manager, registry = _dashboard_with_registry(load_cache)
+
+    def load_rules():
+        nonlocal rules_load_count
+        rules_load_count += 1
+        return 10
+
+    view._rules_count_loader = load_rules
     session = TaskSession(name="使用者操作", view_key="test")
     handle = registry.reserve(
         OperationDescriptor(name="使用者操作", owner="test"),
@@ -503,13 +511,38 @@ def test_dashboard_task_changes_do_not_reload_dashboard_data():
         assert handle.done_event.wait(timeout=1)
         release_first_load.set()
         assert registry.wait_for_idle(timeout=1)
-        assert load_count == 1
+        assert load_count == 2
+        assert rules_load_count == 1
         assert manager.active() == []
         assert [task.name for task in manager.recent()] == ["使用者操作"]
     finally:
         release_first_load.set()
         registry.begin_shutdown()
         registry.wait_for_idle(timeout=2)
+        manager.detach()
+
+
+def test_dashboard_resubscribes_tasks_after_remount(monkeypatch):
+    """驗證重用的 Dashboard 返回頁面後會恢復任務事件訂閱。"""
+    from app.shell.task_manager import TaskManager
+    from app.tasks.task_session import TaskSession
+
+    manager = TaskManager()
+    manager.attach()
+    view = _dashboard()
+    view.set_task_manager(manager)
+    view.will_unmount()
+    calls = []
+    monkeypatch.setattr(view, "_on_tasks_changed", lambda: calls.append(True))
+    monkeypatch.setattr(view, "reload", lambda **_kwargs: None)
+    try:
+        view.did_mount()
+        session = TaskSession(name="返回頁面測試", view_key="test")
+        session.start()
+        session.finish()
+        assert calls
+    finally:
+        view.will_unmount()
         manager.detach()
 
 

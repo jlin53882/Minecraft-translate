@@ -210,6 +210,7 @@ class DashboardView(ft.Column):
         self._rules_count: int | None = None
         self._loading = False
         self._reload_dirty = False
+        self._reload_rules_dirty = False
         self._reload_state_lock = threading.Lock()
         self._active_task_ids: set[str | int] = set()
         self._task_state_lock = threading.Lock()
@@ -370,6 +371,10 @@ class DashboardView(ft.Column):
     def did_mount(self) -> None:
         """掛載 Dashboard，初始化快取資料、規則訂閱與任務狀態更新。"""
         self._subscribe_rules()
+        # AppShell 會重用同一個 Dashboard instance；換頁時 will_unmount
+        # 會解除任務訂閱，因此重新掛載必須補回，而且不能重複訂閱。
+        if self._tasks is not None and self._unsubscribe is None:
+            self.set_task_manager(self._tasks)
         self.reload()
 
     def will_unmount(self) -> None:
@@ -428,19 +433,22 @@ class DashboardView(ft.Column):
             recent=tasks.recent(20) if tasks else [],
         )
 
-    def reload(self, *, sync: bool = False) -> None:
-        """重新讀取快取概覽與規則數（背景執行緒），讀完更新畫面。"""
+    def reload(self, *, sync: bool = False, include_rules: bool = True) -> None:
+        """重新讀取快取概覽與資料庫摘要；可選擇略過規則數量讀取。"""
         with self._reload_state_lock:
             if self._loading:
                 # Keep a single flight, but do not lose a real task boundary or
                 # an explicit refresh that arrives while the current snapshot is
                 # being read. The worker performs one coalesced follow-up pass.
                 self._reload_dirty = True
+                self._reload_rules_dirty = self._reload_rules_dirty or include_rules
                 return
             self._loading = True
             self._reload_dirty = False
+            self._reload_rules_dirty = False
 
         def work() -> None:
+            load_rules = include_rules
             try:
                 while True:
                     try:
@@ -448,11 +456,14 @@ class DashboardView(ft.Column):
                     except Exception:
                         logger.warning("工作台讀取快取概覽失敗", exc_info=True)
                         overview = None
-                    try:
-                        rules = self._rules_count_loader()
-                    except Exception:
-                        logger.warning("工作台讀取規則數失敗", exc_info=True)
-                        rules = None
+                    if load_rules:
+                        try:
+                            rules = self._rules_count_loader()
+                        except Exception:
+                            logger.warning("工作台讀取規則數失敗", exc_info=True)
+                            rules = None
+                    else:
+                        rules = self._rules_count
                     try:
                         moddb = self._moddb_loader()
                     except Exception as exc:
@@ -466,6 +477,8 @@ class DashboardView(ft.Column):
                     with self._reload_state_lock:
                         if self._reload_dirty:
                             self._reload_dirty = False
+                            load_rules = self._reload_rules_dirty
+                            self._reload_rules_dirty = False
                             continue
                         self._loading = False
                     self._apply_on_ui(direct=sync)
@@ -490,6 +503,7 @@ class DashboardView(ft.Column):
                 with self._reload_state_lock:
                     self._loading = False
                     self._reload_dirty = False
+                    self._reload_rules_dirty = False
 
     def _apply_on_ui(self, *, direct: bool = False) -> None:
         if direct:
@@ -513,7 +527,12 @@ class DashboardView(ft.Column):
             else set()
         )
         with self._task_state_lock:
+            completed_all = bool(self._active_task_ids) and not active_ids
             self._active_task_ids = active_ids
+        if completed_all:
+            # 任務完成才重新讀取會受翻譯／掃描影響的統計；規則數量由規則
+            # 變更事件獨立更新，避免背景任務再次觸發 replace_rules 讀檔。
+            self.reload(include_rules=False)
         self._apply_on_ui()
 
     def _safe_update(self) -> None:
