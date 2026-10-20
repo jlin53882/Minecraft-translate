@@ -1400,6 +1400,7 @@ def _make_v1_db(path):
 
 
 def test_schema_v1_migration_marks_legacy_manual_unknown_and_keeps_backup(tmp_path):
+    """驗證 v1 遷移標記舊人工狀態為未知並保留備份。"""
     from translation_tool.translation_db.schema import SCHEMA_VERSION
 
     path = tmp_path / "legacy.db"
@@ -1504,6 +1505,7 @@ def test_schema_v2_migration_keeps_first_seen_unknown_and_supports_readonly(tmp_
 
 
 def test_schema_v3_migration_backup_includes_committed_wal_snapshot(tmp_path):
+    """驗證 v3 遷移備份包含已提交的 WAL 快照。"""
     path = tmp_path / "legacy-v3-wal.db"
     db = TranslationDB(path)
     db.ingest("1.21.1", [item(key="item.wal", en="Before WAL", tw="譯文")])

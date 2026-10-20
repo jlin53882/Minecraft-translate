@@ -90,7 +90,7 @@ def build_quality_retry_batch(
     include_moddb_reviewed: bool = True,
     terminology_cache: Mapping[int, Sequence[tuple[str, str]]] | None = None,
 ) -> QualityRetryBatch:
-    """Combine same-as-source, format, and terminology failures into one retry."""
+    """處理目前函數負責的資料與流程。"""
     positions: list[int] = []
     candidate_ids: list[str] = []
     candidate_items: list[dict] = []

@@ -274,7 +274,7 @@ class TranslationDB(SmartReviewMixin, BulkReviewMixin, CleanupMixin):
         return SourceCatalog.from_registry(registry)
 
     def _priority_order(self, priority: tuple[int, ...] | None = None) -> str:
-        """Return the canonical effective-source ordering for a selected priority."""
+        """回傳指定優先序使用的標準生效來源排序。"""
         rank = self._rank if priority is None else rank_sql(tuple(priority), "t.source")
         if not self.has_review_state:
             return f"CASE WHEN t.checker <> '' THEN 0 ELSE 1 END, {rank}"
@@ -360,7 +360,7 @@ class TranslationDB(SmartReviewMixin, BulkReviewMixin, CleanupMixin):
         return gen if row is None else f"{gen}.{row[0]}"
 
     def _read_cache_identity(self) -> tuple:
-        """Include file incarnation and WAL changes, including external SQL writers."""
+        """納入檔案生命週期與 WAL 變化，包含外部 SQL 寫入。"""
         path = self.path.resolve()
         try:
             stat = path.stat()
@@ -525,7 +525,7 @@ class TranslationDB(SmartReviewMixin, BulkReviewMixin, CleanupMixin):
         *,
         priority: tuple[int, ...] | None = None,
     ) -> None:
-        """Refresh the shared projection, optionally using an explicit priority."""
+        """重新整理共用生效投影，必要時使用明確優先序。"""
         ids = list({int(i) for i in entry_ids})
         priority_order = self._priority_order(priority)
         for start in range(0, len(ids), _CHUNK):
@@ -745,7 +745,7 @@ class TranslationDB(SmartReviewMixin, BulkReviewMixin, CleanupMixin):
     def version_stats_from_effective_sources(
         self, source_stats: Sequence[EffectiveSourceStat]
     ) -> list[VersionStat]:
-        """Build version totals from an already loaded source breakdown."""
+        """從已載入的來源分解資料建立版本統計。"""
         rows = self._cached(
             "version_stats",
             lambda: self._version_stats_from_source_stats(source_stats),
@@ -776,11 +776,7 @@ class TranslationDB(SmartReviewMixin, BulkReviewMixin, CleanupMixin):
         ]
 
     def effective_source_stats_by_version(self) -> list[EffectiveSourceStat]:
-        """Count effective entries once per source and manual review state.
-
-        The query groups all versions and source codes in one pass. For an old
-        read-only database, manual rows are reported as ``legacy_unknown``.
-        """
+        """依來源與人工審核狀態各計算一次生效條目。"""
         rows = self._cached(
             "effective_source_stats_by_version",
             self._effective_source_stats_by_version_rows,
@@ -788,7 +784,7 @@ class TranslationDB(SmartReviewMixin, BulkReviewMixin, CleanupMixin):
         return [EffectiveSourceStat(*row) for row in rows]
 
     def effective_source_codes(self, version: str | None = None) -> tuple[int, ...]:
-        """Return source IDs that currently win at least one effective entry."""
+        """取得目前至少贏得一筆生效條目的來源代碼。"""
         if version is None:
             sql, params = "SELECT DISTINCT source FROM effective ORDER BY source", ()
         else:
@@ -1004,7 +1000,7 @@ class TranslationDB(SmartReviewMixin, BulkReviewMixin, CleanupMixin):
 
     @staticmethod
     def _candidate_source(expressions: str) -> str:
-        """Join only tables used by a filter or sort, before projecting a page."""
+        """只連接篩選或排序需要的資料表，再投影候選頁面。"""
         source = "FROM entry e"
         if "f." in expressions or "et." in expressions:
             source += " LEFT JOIN effective f ON f.entry_id=e.id"
@@ -1024,7 +1020,7 @@ class TranslationDB(SmartReviewMixin, BulkReviewMixin, CleanupMixin):
         offset: int,
         conn: sqlite3.Connection | None,
     ) -> list[tuple]:
-        """Apply filtering, ordering and offset to IDs before loading editor fields."""
+        """先對識別碼套用篩選、排序與位移，再載入編輯欄位。"""
         phases = self._two_phase_sort_sql(criteria.sort_by, condition)
         if phases is not None:
             return self._two_phase_page_rows(
@@ -1589,7 +1585,7 @@ class TranslationDB(SmartReviewMixin, BulkReviewMixin, CleanupMixin):
     def _quality_filtered_page(
         self, criteria: EntryFilter, *, limit: int | None, offset: int
     ) -> tuple[list[tuple], int]:
-        """Filter compact candidate rows, then fetch full data for the requested page."""
+        """篩選精簡候選資料列後，再載入要求頁面的完整資料。"""
         condition, params = self._filter_sql(criteria)
         raise_if_cancelled()
         offset = max(0, int(offset))
@@ -1811,13 +1807,7 @@ class TranslationDB(SmartReviewMixin, BulkReviewMixin, CleanupMixin):
         )
 
     def _batch_replace_select_sql(self) -> str:
-        """Select only fields used by the batch preview, keeping its row layout stable.
-
-        The normal entry projection also calculates cross-version differences and
-        the latest history timestamp for list sorting. Batch replacement does not
-        consume those values, and calculating them for every entry in an all-page
-        preview can dominate the query on a large database.
-        """
+        """只選取批次預覽需要的欄位，保持資料列配置穩定。"""
         manual_review = (
             "man.review_status"
             if self.has_review_state
@@ -2096,13 +2086,7 @@ class TranslationDB(SmartReviewMixin, BulkReviewMixin, CleanupMixin):
         ids_only: bool = False,
         progress_callback: Callable[[str, float], None] | None = None,
     ) -> list[tuple] | list[int]:
-        """Fetch only the scope IDs or actual text matches for a simple preview.
-
-        The preview dialog normally shows replacements, not every row that was
-        skipped. Avoid transferring the full effective-translation projection
-        for hundreds of thousands of non-matching rows; skip details can be
-        loaded on demand when the user opens that view.
-        """
+        """針對簡單預覽只取得範圍識別碼或實際匹配文字。"""
         cond, params = self._filter_sql(criteria)
         if ids_only:
             select = "SELECT e.id"
@@ -2379,7 +2363,7 @@ class TranslationDB(SmartReviewMixin, BulkReviewMixin, CleanupMixin):
         confirmed_quality_worsening: bool = False,
         progress_callback: Callable[[str, float], None] | None = None,
     ) -> BatchReplacePlan:
-        """Build a literal, all-page replacement plan without changing the DB."""
+        """建立不修改資料庫的完整批次取代預覽計畫。"""
         if not find_text:
             raise ValueError("尋找文字不可為空")
         with self._lock:
@@ -2400,7 +2384,7 @@ class TranslationDB(SmartReviewMixin, BulkReviewMixin, CleanupMixin):
         limit: int = 50,
         progress_callback: Callable[[str, float], None] | None = None,
     ) -> tuple[BatchReplaceSkipped, ...]:
-        """Load one page of skip reasons after the user opens that view."""
+        """在使用者開啟跳過檢視後載入一頁跳過理由。"""
         start = max(0, int(offset))
         size = max(1, int(limit))
         if plan.skipped_details_loaded:
@@ -2478,7 +2462,7 @@ class TranslationDB(SmartReviewMixin, BulkReviewMixin, CleanupMixin):
         actor: str = "",
         progress_callback: Callable[[str, float], None] | None = None,
     ) -> BatchReplaceResult:
-        """Apply exactly the previewed replacements in one compare-and-set transaction."""
+        """在一次 CAS 交易中套用預覽過的精確取代內容。"""
         if not plan.changes:
             return BatchReplaceResult(
                 "", 0, plan.skipped_count, plan.total_unique_entries
@@ -2588,7 +2572,7 @@ class TranslationDB(SmartReviewMixin, BulkReviewMixin, CleanupMixin):
         return shadowed
 
     def revert_batch_replace(self, batch_id: str) -> BatchRevertResult:
-        """CAS-revert every still-current row in a batch, leaving newer edits intact."""
+        """CAS 還原仍維持目前內容的批次資料列，保留較新的編輯。"""
         reverted: list[int] = []
         skipped = 0
         with self._tx(bump_generation_on_noop=False) as conn:
@@ -2837,12 +2821,7 @@ class TranslationDB(SmartReviewMixin, BulkReviewMixin, CleanupMixin):
         expected_checker: str | None = None,
         propagate: bool = True,
     ) -> list[ReviewPreviewItem]:
-        """Return a review scope with both effective and existing manual snapshots.
-
-        The returned immutable rows can be supplied back to ``review_manual`` so
-        every included and skipped sibling is checked again inside the write
-        transaction before any row is changed.
-        """
+        """回傳同時包含生效與既有人工快照的審核範圍。"""
         with self._lock:
             return self._review_preview_rows(
                 self._conn,
@@ -3238,13 +3217,7 @@ class TranslationDB(SmartReviewMixin, BulkReviewMixin, CleanupMixin):
         actor: str = "",
         propagate: bool = True,
     ) -> list[Impact]:
-        """Confirm the current effective text as reviewed manual translation.
-
-        ``expected_zh_tw`` is a compare-and-set guard from the editor snapshot.
-        When propagation is enabled, every same-content version (same original
-        text) is reviewed with this text, even if it currently shows a different
-        translation; the replaced text is recorded in history and can be reverted.
-        """
+        """把目前生效文字確認為已審核人工翻譯。"""
         if not expected_zh_tw.strip():
             raise ValueError("沒有可審核的譯文，請先輸入並儲存")
         batch = uuid.uuid4().hex
@@ -3278,13 +3251,7 @@ class TranslationDB(SmartReviewMixin, BulkReviewMixin, CleanupMixin):
         actor: str,
         batch: str,
     ) -> list[Impact]:
-        """Mark the included preview rows as reviewed (caller owns the transaction).
-
-        Review never changes the source: a sibling that already shows the reviewed
-        text is only marked reviewed on its own effective source; one that shows
-        a different text gets the reviewed text written to the reviewed entry's
-        source (the replaced text stays in history and can be reverted).
-        """
+        """標記預覽包含的資料列為已審核，由呼叫端負責交易。"""
         done: list[Impact] = []
         own = next((item for item in preview if item.entry_id == entry_id), None)
         own_source = (
@@ -3372,7 +3339,7 @@ class TranslationDB(SmartReviewMixin, BulkReviewMixin, CleanupMixin):
         return done
 
     def revert(self, history_id: int, *, whole_batch: bool = True) -> int:
-        """還原一次手動更新（預設連同步的其他版本一起）。回傳還原的條目數。"""
+        """處理目前函數負責的資料與流程。"""
         row = self._one("SELECT batch, action FROM history WHERE id=?", (history_id,))
         if row is None:
             return 0
@@ -3663,7 +3630,7 @@ class TranslationDB(SmartReviewMixin, BulkReviewMixin, CleanupMixin):
         return stats
 
     def _stored_priority(self, conn: sqlite3.Connection) -> tuple[int, ...]:
-        """Read the shared effective-source priority inside the active transaction."""
+        """在目前交易中讀取共用的生效來源優先序。"""
         row = conn.execute("SELECT value FROM meta WHERE key='priority'").fetchone()
         if row is None or not row[0]:
             return self.priority
@@ -3861,12 +3828,7 @@ class TranslationDB(SmartReviewMixin, BulkReviewMixin, CleanupMixin):
         strict_newline: bool = False,
         sync_other_versions: bool = False,
     ) -> AITranslationReplaceResult:
-        """Compare-and-set one mismatched source row without changing its identity.
-
-        ``strict_newline`` also requires the new text to keep the source's LF count.
-        ``sync_other_versions`` also rewrites the same source row of entries in other
-        versions that share kind/mod/key/source text and hold the identical old text.
-        """
+        """以 CAS 取代一筆不匹配來源資料，但不改變其身分。"""
         if action not in {"quality_repair", "quality_repair_review"}:
             raise ValueError("invalid quality repair history action")
         if not isinstance(new_zh_tw, str) or not new_zh_tw.strip():
@@ -4172,7 +4134,7 @@ class TranslationDB(SmartReviewMixin, BulkReviewMixin, CleanupMixin):
         *,
         check: Callable[[], None] | None = None,
     ) -> tuple[int, list[SameSourceAIEntry]]:
-        """Find special-character mismatches in every stored source translation."""
+        """找出所有儲存來源翻譯中的特殊字元不匹配。"""
         if check is not None:
             check()
         token_chars = " OR ".join(
@@ -4233,10 +4195,7 @@ class TranslationDB(SmartReviewMixin, BulkReviewMixin, CleanupMixin):
         *,
         check: Callable[[], None] | None = None,
     ):
-        """Yield eligible repair rows (only the source row currently in effect).
-
-        Rows shadowed by a higher-priority source are not what users see, so they
-        are not repaired; newline skip facts ride along with each yielded row."""
+        """逐筆產生可修復資料，只處理目前生效的來源列。"""
         # 一般條目兩邊都沒有任何格式字元（§ % $ { \ 換行）就不可能有 token，
         # 但 guide 還要保留純 Markdown 結構差異；其餘大量條目仍先在 SQL 排除。
         token_chars = " OR ".join(
@@ -4328,14 +4287,7 @@ class TranslationDB(SmartReviewMixin, BulkReviewMixin, CleanupMixin):
     def _reviewed_lang_candidate_rows(
         self, mod_id: str, mc_version: str | None
     ) -> list[list[str]]:
-        """Load one module/version candidate snapshot for repeated glossary matches.
-
-        The snapshot is stored through ``_cached`` so the SQL scan is reused by
-        later translation tasks and invalidated by ``data_gen`` or the external
-        write sequence. Source matching remains in Python to preserve Unicode
-        ``casefold()`` semantics and to keep source-specific filtering out of the
-        reusable candidate snapshot.
-        """
+        """載入一次模組與版本候選快照，供重複術語查找。"""
         clauses = [
             "e.mod_id = ?",
             "e.kind = 'lang'",
@@ -4382,13 +4334,7 @@ class TranslationDB(SmartReviewMixin, BulkReviewMixin, CleanupMixin):
         *,
         limit: int | None = 240,
     ) -> list[dict[str, str]]:
-        """Return reviewed, quality-clean lang terms for one module.
-
-        This is a prompt reference only; it never becomes a translation source or
-        changes the effective database value. Keeping it module/version scoped and
-        limiting it to the current source set prevents unrelated terminology or
-        cross-version conflicts from contaminating a batch.
-        """
+        """回傳品質乾淨且已審核的指定模組 lang 術語。"""
         normalized_sources = tuple(
             dict.fromkeys(
                 source
@@ -4442,7 +4388,7 @@ class TranslationDB(SmartReviewMixin, BulkReviewMixin, CleanupMixin):
         return self._q(self._load_mod_for_priority_sql(priority), (mod_id,))
 
     def _load_mod_for_priority_sql(self, priority: tuple[int, ...]) -> str:
-        """Build the module-scoped ranking query used by the merge resolver."""
+        """建立合併解析器使用的模組範圍排序查詢。"""
         # CROSS JOIN is intentional: SQLite must start from the selected module's
         # entries, then probe translations by entry_id. Otherwise it may rank the
         # entire translation table before applying the mod_id filter.

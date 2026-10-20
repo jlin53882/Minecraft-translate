@@ -50,6 +50,7 @@ class ChatGPTAPIError(RuntimeError):
 
 
 def _response_error(response: requests.Response) -> ChatGPTAPIError:
+    """從 OAuth Responses 錯誤回應擷取可供 UI 顯示的詳細資訊。"""
     try:
         payload = response.json()
     except ValueError:
@@ -88,7 +89,7 @@ def _response_error(response: requests.Response) -> ChatGPTAPIError:
 
 
 def _parse_retry_after(value: object) -> float | None:
-    """Parse Retry-After delta-seconds or HTTP-date into a nonnegative delay."""
+    """把 Retry-After 秒數或 HTTP 日期解析成非負延遲。"""
     if not isinstance(value, str) or not value.strip():
         return None
     try:
@@ -116,6 +117,7 @@ def _stream_request(
     conversation_history: list[dict] | None = None,
     response_schema: dict | None = None,
 ) -> requests.Response:
+    """建立並讀取 ChatGPT Responses 串流請求。"""
     response_schema = response_schema or _build_translation_response_schema(payload)
     input_history = []
     for turn in conversation_history or []:
@@ -355,7 +357,7 @@ def call_chatgpt_responses(
     conversation_history: list[dict] | None = None,
     response_schema: dict | None = None,
 ) -> str:
-    """Call Responses with the locally stored ChatGPT OAuth token and SSE stream."""
+    """使用本機 ChatGPT OAuth token 呼叫 Responses 串流。"""
     token_kwargs = {"profile_id": profile_id} if profile_id is not None else {}
     token = get_chatgpt_access_token(**token_kwargs)
     request_kwargs = {

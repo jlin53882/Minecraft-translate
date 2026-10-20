@@ -102,6 +102,7 @@ def test_normal_and_retry_payloads_share_patchouli_format_spec():
 
 
 def test_lm_quality_retry_marks_missing_reviewed_terminology():
+    """驗證品質重試會標記缺少的已審核專有名詞。"""
     item = {
         "text": "Ruby Heavy Crossbow",
         "source_text": "Ruby Heavy Crossbow",

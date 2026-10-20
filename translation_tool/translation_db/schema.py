@@ -38,7 +38,7 @@ _CACHE_TYPE_BY_KIND = {
 
 
 def cache_type_for_kind(kind: str | None) -> str:
-    """Return the shared translation cache bucket for a DB entry kind."""
+    """回傳資料庫條目種類共用的翻譯快取分桶。"""
     return _CACHE_TYPE_BY_KIND.get(str(kind or ""), KIND_PATCHOULI)
 
 
@@ -220,7 +220,7 @@ def connect(path: str | Path, *, readonly: bool = False) -> sqlite3.Connection:
 
 
 def init_schema(conn: sqlite3.Connection) -> None:
-    """建立資料表，遞增 migration 先備份並在單一交易中套用。"""
+    """處理目前函數負責的資料與流程。"""
     conn.executescript(_DDL)
     row = conn.execute("SELECT value FROM meta WHERE key='schema_version'").fetchone()
     if row is None:
@@ -314,7 +314,7 @@ def _install_derived_tables(conn: sqlite3.Connection) -> None:
 
 
 def _backup_before_review_migration(conn: sqlite3.Connection) -> Path | None:
-    """Write a consistent side-by-side SQLite backup before the v1→v2 change."""
+    """在審核狀態遷移前建立一致的 SQLite 旁側備份。"""
     main = next(
         (row[2] for row in conn.execute("PRAGMA database_list") if row[1] == "main"),
         "",
@@ -337,7 +337,7 @@ def _backup_before_review_migration(conn: sqlite3.Connection) -> Path | None:
 
 
 def _migrate_review_state_v2(conn: sqlite3.Connection) -> None:
-    """Add explicit review state while preserving all v1 manual provenance."""
+    """加入明確審核狀態並保留 v1 人工來源資訊。"""
     for table, column in (
         ("translation", "review_status"),
         ("effective", "review_status"),
@@ -366,7 +366,7 @@ def _migrate_review_state_v2(conn: sqlite3.Connection) -> None:
 
 
 def _backup_before_time_migration(conn: sqlite3.Connection) -> Path | None:
-    """Keep a consistent v2 sidecar before adding timestamps and revisions."""
+    """在加入時間戳與修訂版本前保留一致的 v2 旁側備份。"""
     main = next(
         (row[2] for row in conn.execute("PRAGMA database_list") if row[1] == "main"),
         "",
@@ -389,7 +389,7 @@ def _backup_before_time_migration(conn: sqlite3.Connection) -> Path | None:
 
 
 def _migrate_time_and_revision_v3(conn: sqlite3.Connection) -> None:
-    """Add unknown-preserving first-seen timestamps and monotonic row revisions."""
+    """加入可保留未知值的首次時間戳與遞增資料列修訂版。"""
     translation_columns = {
         row[1] for row in conn.execute("PRAGMA table_info(translation)")
     }
@@ -421,7 +421,7 @@ def _migrate_time_and_revision_v3(conn: sqlite3.Connection) -> None:
 def _backup_before_source_history_migration(
     conn: sqlite3.Connection,
 ) -> Path | None:
-    """Keep a consistent sidecar before adding source identity to history."""
+    """在歷史資料加入來源身分前建立一致的旁側備份。"""
     main = next(
         (row[2] for row in conn.execute("PRAGMA database_list") if row[1] == "main"),
         "",
@@ -444,7 +444,7 @@ def _backup_before_source_history_migration(
 
 
 def _migrate_source_history_v4(conn: sqlite3.Connection) -> None:
-    """Record which source row a repair changed so its history can be restored."""
+    """記錄修復變更的來源資料列，讓歷史可以還原。"""
     columns = {row[1] for row in conn.execute("PRAGMA table_info(history)")}
     if "source_id" not in columns:
         conn.execute("ALTER TABLE history ADD COLUMN source_id INTEGER")
@@ -453,7 +453,7 @@ def _migrate_source_history_v4(conn: sqlite3.Connection) -> None:
 def _backup_before_ai_repair_source_migration(
     conn: sqlite3.Connection,
 ) -> Path | None:
-    """Keep a sidecar backup before adding repair-source undo metadata."""
+    """在加入 AI 修復復原資訊前建立旁側備份。"""
     main = next(
         (row[2] for row in conn.execute("PRAGMA database_list") if row[1] == "main"),
         "",
@@ -476,7 +476,7 @@ def _backup_before_ai_repair_source_migration(
 
 
 def _migrate_ai_repair_source_v5(conn: sqlite3.Connection) -> None:
-    """Preserve the prior repair-source value so moving repairs can be undone."""
+    """保存先前的修復來源值，讓移動修復可以復原。"""
     columns = {row[1] for row in conn.execute("PRAGMA table_info(history)")}
     if "repair_prev_zh_tw" not in columns:
         conn.execute("ALTER TABLE history ADD COLUMN repair_prev_zh_tw TEXT")
@@ -485,7 +485,7 @@ def _migrate_ai_repair_source_v5(conn: sqlite3.Connection) -> None:
 def _backup_before_independent_review_migration(
     conn: sqlite3.Connection,
 ) -> Path | None:
-    """Keep a sidecar backup before moving reviews back to their original source."""
+    """在把審核移回原始來源前建立一致的旁側備份。"""
     main = next(
         (row[2] for row in conn.execute("PRAGMA database_list") if row[1] == "main"),
         "",
@@ -508,16 +508,7 @@ def _backup_before_independent_review_migration(
 
 
 def _migrate_independent_review_v6(conn: sqlite3.Connection) -> None:
-    """Move "manual reviewed" rows back to the source that supplied the same text.
-
-    Review used to write a reviewed source-6 row that replaced the effective
-    source. Now review is a flag on the row that wins, so a reviewed manual row
-    whose text equals another source's text is folded back: that source's row is
-    marked reviewed and the manual row is removed. Equal text alone is not proof,
-    so only rows whose entire history is a single review that wrote the row's
-    current revision are folded; hand-edited or unverifiable rows stay manual, already
-    reviewed. The target source follows the user's saved priority.
-    """
+    """把人工審核資料移回提供相同文字的來源。"""
     if "review_status" not in {
         row[1] for row in conn.execute("PRAGMA table_info(translation)")
     }:
@@ -587,7 +578,7 @@ def _migrate_independent_review_v6(conn: sqlite3.Connection) -> None:
 def _backup_before_smart_review_migration(
     conn: sqlite3.Connection,
 ) -> Path | None:
-    """Keep a consistent sidecar before adding smart-review persistence."""
+    """在智慧校對資料庫遷移前建立一致的旁側備份。"""
     main = next(
         (row[2] for row in conn.execute("PRAGMA database_list") if row[1] == "main"),
         "",
@@ -610,12 +601,12 @@ def _backup_before_smart_review_migration(
 
 
 def _migrate_smart_review_v7(conn: sqlite3.Connection) -> None:
-    """Install durable, non-destructive AI proofreading candidate storage."""
+    """安裝智慧校對持久化結構並保留既有資料。"""
     _install_smart_review_objects(conn)
 
 
 def _install_smart_review_objects(conn: sqlite3.Connection) -> None:
-    """Install the smart-review run/candidate tables for fresh and old DBs."""
+    """在新舊資料庫中安裝智慧校對執行與候選資料表。"""
     conn.executescript(
         """
         CREATE TABLE IF NOT EXISTS smart_review_run (
@@ -703,7 +694,7 @@ def _install_smart_review_objects(conn: sqlite3.Connection) -> None:
 def _backup_before_smart_review_draft_migration(
     conn: sqlite3.Connection,
 ) -> Path | None:
-    """Keep a consistent sidecar before adding editable smart-review state."""
+    """在加入智慧校對草稿欄位前建立一致的旁側備份。"""
     main = next(
         (row[2] for row in conn.execute("PRAGMA database_list") if row[1] == "main"),
         "",
@@ -726,7 +717,7 @@ def _backup_before_smart_review_draft_migration(
 
 
 def _migrate_smart_review_v8(conn: sqlite3.Connection) -> None:
-    """Add scope and human-editable draft persistence to v7 candidates."""
+    """在 v7 候選上加入範圍與可編輯草稿保存。"""
     run_columns = {
         row[1] for row in conn.execute("PRAGMA table_info(smart_review_run)")
     }
@@ -742,7 +733,7 @@ def _migrate_smart_review_v8(conn: sqlite3.Connection) -> None:
 
 
 def _install_schema_v3_objects(conn: sqlite3.Connection) -> None:
-    """Install timestamp and revision triggers for fresh and migrated databases."""
+    """為新建與遷移資料庫安裝時間戳及修訂版本觸發器。"""
     conn.execute(
         """
         CREATE TRIGGER IF NOT EXISTS translation_insert_timestamp_revision

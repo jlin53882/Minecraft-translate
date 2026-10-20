@@ -86,7 +86,7 @@ class OfficialLocaleIndex:
     name_like_terms: frozenset[str] = frozenset()
 
     def lookup_exact(self, key: object, en_us: object, zh_cn: object) -> str | None:
-        """Return official zh_tw only for an exact ``key + en + cn`` match."""
+        """只有在 key、英文與簡中完全匹配時回傳官方繁中。"""
         if not all(isinstance(value, str) for value in (key, en_us, zh_cn)):
             return None
         record = self.records_by_key.get(key)
@@ -95,7 +95,7 @@ class OfficialLocaleIndex:
         return record.zh_tw or None
 
     def lookup_unique_text(self, en_us: object, zh_cn: object) -> str | None:
-        """Return a text-only mapping only when the official pair is unambiguous."""
+        """只有官方對照無歧義時才回傳純文字映射。"""
         if not isinstance(en_us, str) or not isinstance(zh_cn, str):
             return None
         return self.unique_by_text_pair.get((en_us, zh_cn))
@@ -103,12 +103,7 @@ class OfficialLocaleIndex:
     def glossary_for_items(
         self, items: list[dict[str, Any]]
     ) -> list[tuple[str, str, str]]:
-        """Collect only official terms relevant to this batch.
-
-        Key matches win. A text-only fallback is accepted only for a unique official
-        English value, so one-to-many Chinese sources cannot silently overwrite one
-        another.
-        """
+        """收集與目前批次相關的官方術語，供提示詞使用。"""
         terms: dict[tuple[str, str], str] = {}
         for item in items:
             key = item.get("path") or item.get("key")
@@ -158,15 +153,17 @@ def _empty_index() -> OfficialLocaleIndex:
 
 
 def _strip_minecraft_format_codes(value: str) -> str:
+    """移除 Minecraft 格式碼以便比較純文字術語。"""
     return _MINECRAFT_FORMAT_CODE_RE.sub("", value)
 
 
 def normalize_terminology_text(value: str) -> str:
-    """Normalize source/term text before applying the shared terminology plan."""
+    """正規化來源與術語文字後套用共用術語規劃。"""
     return _strip_minecraft_format_codes(value)
 
 
 def _is_hyphenated_occurrence(source: str, term: str) -> bool:
+    """判斷術語是否出現在連字號詞組中。"""
     normalized_source = _strip_minecraft_format_codes(source).casefold()
     normalized_term = term.strip().casefold()
     start = 0
@@ -194,7 +191,7 @@ def _terminology_term_allowed(
     *,
     key: str | None = None,
 ) -> bool:
-    """Avoid forcing generic UI words into sentence or hyphenated contexts."""
+    """避免在句子或連字號上下文中強制套用泛用 UI 詞。"""
     normalized_source = normalize_terminology_text(source)
     normalized_term = normalize_terminology_text(term).strip()
     if term_canonical_key(normalized_source) == term_canonical_key(normalized_term):
@@ -216,7 +213,7 @@ def terminology_term_allowed(
     key: str | None = None,
     index: OfficialLocaleIndex | None = None,
 ) -> bool:
-    """Expose the production context filter to review/evidence consumers."""
+    """公開正式翻譯與評估共用的術語上下文篩選。"""
     return _terminology_term_allowed(
         source,
         term,
@@ -226,6 +223,7 @@ def terminology_term_allowed(
 
 
 def _load_index(root: Path) -> OfficialLocaleIndex:
+    """載入官方語系索引並在資源根目錄間快取結果。"""
     locale_root = root / _OFFICIAL_RELATIVE_ROOT
     try:
         manifest = json.loads(
@@ -291,12 +289,12 @@ def _load_index(root: Path) -> OfficialLocaleIndex:
 
 @lru_cache(maxsize=4)
 def load_official_locale_index(root: str | None = None) -> OfficialLocaleIndex:
-    """Load the bundled index once per resource root."""
+    """依資源根目錄載入並快取一次官方語系索引。"""
     return _load_index(Path(root) if root else get_resource_root())
 
 
 def official_translation_for_item(item: dict[str, Any]) -> str | None:
-    """Resolve an item with optional ``zh_cn`` data before an LLM request."""
+    """在 LLM 請求前解析帶有可選 zh_cn 資料的項目。"""
     zh_cn = item.get("zh_cn") or item.get("official_zh_cn")
     if zh_cn is None:
         return None
@@ -308,7 +306,7 @@ def official_translation_for_item(item: dict[str, Any]) -> str | None:
 
 
 def official_exact_translation(key: object, en_us: object, zh_cn: object) -> str | None:
-    """Shared key-aware lookup used by every merge/translation kind."""
+    """提供所有合併與翻譯種類共用的鍵值精確查找。"""
     return load_official_locale_index().lookup_exact(key, en_us, zh_cn)
 
 
@@ -320,7 +318,7 @@ def build_translation_prompt(
     include_official: bool = True,
     include_moddb_reviewed: bool = True,
 ) -> str:
-    """Append Chinese, batch-scoped glossary instructions to a base prompt."""
+    """在基礎提示詞後加入繁中與批次範圍術語指令。"""
     sections = [
         normalize_legacy_prompt(base_prompt).rstrip(),
         format_policy_for_items(items, profile=profile),
@@ -368,7 +366,7 @@ def _reviewed_glossary_for_items(
     items: list[dict[str, Any]],
     index: OfficialLocaleIndex,
 ) -> list[tuple[str, str]]:
-    """Keep only unambiguous reviewed terms that occur in the current batch."""
+    """只保留目前批次中出現且沒有歧義的已審核術語。"""
     by_source: dict[str, tuple[str, set[str]]] = {}
     for item in items:
         if not isinstance(item, dict):
@@ -406,7 +404,7 @@ def _item_terminology_terms(
     include_official: bool = True,
     include_moddb_reviewed: bool = True,
 ) -> list[tuple[str, str]]:
-    """Return unique official/reviewed mappings that occur in one source item."""
+    """找出單一來源項目中出現的官方與已審核術語對照。"""
     source_text = item.get("source_text") or item.get("text")
     if not isinstance(source_text, str) or not source_text.strip():
         return []
@@ -506,7 +504,7 @@ def _terminology_directives(
     include_official: bool = True,
     include_moddb_reviewed: bool = True,
 ) -> list[str]:
-    """Render mappings next to the payload id the model must translate."""
+    """把術語對照放在模型必須翻譯的負載識別碼旁。"""
     lines = [
         "\n【逐筆必用術語（只適用於同一 payload id）】",
         "每一行的來源詞若出現在該 id 的 value，譯文必須採用同一行的目標詞。",
@@ -535,7 +533,7 @@ def terminology_terms_for_item(
     include_moddb_reviewed: bool = True,
     index: OfficialLocaleIndex | None = None,
 ) -> list[tuple[str, str]]:
-    """Resolve the cached-input terminology plan for one translation item."""
+    """取得單一翻譯項目的快取術語規劃。"""
     return _item_terminology_terms(
         item,
         index or load_official_locale_index(),
@@ -552,7 +550,7 @@ def terminology_issues(
     include_moddb_reviewed: bool = True,
     terms: Sequence[tuple[str, str]] | None = None,
 ) -> list[str]:
-    """Report authoritative source terms missing from one model translation."""
+    """回報模型翻譯中缺少的權威來源術語。"""
     expected_terms = terms
     if expected_terms is None:
         expected_terms = terminology_terms_for_item(

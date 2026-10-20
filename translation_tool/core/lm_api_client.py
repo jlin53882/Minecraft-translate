@@ -52,7 +52,7 @@ TRANSLATION_RESPONSE_SCHEMA = {
 
 
 def _build_translation_response_schema(payload: dict) -> dict:
-    """Constrain the response IDs to the current input batch (array length is validated by the caller)."""
+    """建立限制在目前輸入批次內、供翻譯回應使用的結構。"""
     if not isinstance(payload, dict):
         raise ValueError("Gemini translation payload must be an object")  # noqa: TRY004
     if "items" not in payload:
@@ -151,7 +151,7 @@ def _resolve_max_output_tokens(explicit: int | None, lm_cfg: dict) -> int | None
 def _build_gemini_contents(
     payload: dict, conversation_history: list[dict] | None
 ) -> list[dict]:
-    """Build the current user turn, optionally continuing a client-side conversation."""
+    """建立目前使用者訊息，必要時接續用戶端對話歷史。"""
     contents: list[dict] = []
     for turn in conversation_history or []:
         if not isinstance(turn, dict):
@@ -208,14 +208,7 @@ def call_gemini_requests(
     fast: bool = False,
     response_schema: dict | None = None,
 ) -> str:
-    """以同步 requests 方式呼叫 Gemini generateContent API，並回傳純文字回應。
-
-    Args:
-        max_output_tokens: 輸出 token 上限；None 時讀設定檔
-            ``lm_translator.max_output_tokens``（預設 65536）。
-        meta_out: 若提供，會以 ``extract_response_meta`` 的結果更新這個 dict
-            （finish_reason、token 用量）。回傳值維持純文字，既有呼叫端不受影響。
-    """
+    """處理目前函數負責的資料與流程。"""
     # Batch translation passes its start-of-task snapshot so a settings change
     # cannot route an in-flight Gemini model to the ChatGPT Responses endpoint.
     lm_cfg = (

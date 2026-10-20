@@ -224,6 +224,7 @@ def test_moddb_reviewed_lang_glossary_is_injected_for_patchouli_routes() -> None
 
 
 def test_terminology_directives_bind_reviewed_terms_to_payload_ids() -> None:
+    """驗證專有名詞指令將已審核術語綁定到負載識別碼。"""
     items = [
         {
             "path": "first",
@@ -253,6 +254,7 @@ def test_terminology_directives_bind_reviewed_terms_to_payload_ids() -> None:
 def test_terminology_directives_use_official_subterms_and_prefer_longest(
     monkeypatch,
 ) -> None:
+    """驗證專有名詞指令使用官方子術語並優先最長匹配。"""
     from translation_tool.core import official_locale
 
     index = official_locale.OfficialLocaleIndex(
@@ -291,6 +293,7 @@ def test_terminology_directives_use_official_subterms_and_prefer_longest(
 
 
 def test_terminology_plan_handles_format_codes_and_contextual_short_words():
+    """驗證專有名詞規劃正確處理格式碼與上下文短詞。"""
     from translation_tool.core import official_locale
 
     index = official_locale.OfficialLocaleIndex(
@@ -324,6 +327,7 @@ def test_terminology_plan_handles_format_codes_and_contextual_short_words():
 
 
 def test_reviewed_terminology_uses_the_same_context_filter_as_official_terms():
+    """驗證已審核專有名詞使用與官方術語相同的上下文篩選。"""
     from translation_tool.core import official_locale
 
     index = official_locale.OfficialLocaleIndex(

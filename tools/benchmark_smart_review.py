@@ -1,6 +1,6 @@
-"""Run a bounded live smart-review benchmark against the configured ModDB.
+"""針對設定的 ModDB 執行有界的即時智慧校對基準測試。
 
-Examples (run from the repository root)::
+從 repository root 執行範例：
 
     uv run python -m tools.benchmark_smart_review \
         --model gemini-3.1-flash-lite --limit 1000
@@ -10,8 +10,7 @@ Examples (run from the repository root)::
         --model gemini-3.1-flash-lite --limit 1000 \
         --reference-mode same-key-reviewed
 
-The benchmark never applies candidates. It persists only the candidate run and
-writes aggregate, credential-free metrics under ``.artifacts/``.
+測試不會套用候選，只保存候選執行記錄，並在 ``.artifacts/`` 寫入不含憑證的彙總指標。
 """
 
 from __future__ import annotations
@@ -31,6 +30,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def _config_key(config: dict[str, Any]) -> str:
+    """取得目前設定使用的模型或 API 金鑰。"""
     keys = config.get("lm_translator", {}).get("keys", [])
     if not isinstance(keys, list):
         return ""
@@ -41,6 +41,7 @@ def _config_key(config: dict[str, Any]) -> str:
 
 
 def _args() -> argparse.Namespace:
+    """解析本工具的命令列參數。"""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", type=Path, default=ROOT / "config.json")
     parser.add_argument("--provider", choices=("gemini", "chatgpt"), default=None)
@@ -64,6 +65,7 @@ def _args() -> argparse.Namespace:
 
 
 def main() -> int:
+    """解析命令列參數並執行目前工具。"""
     args = _args()
     config = load_config(args.config)
     lm_config = config.get("lm_translator", {})

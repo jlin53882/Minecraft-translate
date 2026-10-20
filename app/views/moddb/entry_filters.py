@@ -28,7 +28,7 @@ def build_filter_controls(panel) -> None:
 
 
 def apply_filter_options(panel, snapshot: dict) -> None:
-    """Apply worker-loaded filter options and keep their selected values valid."""
+    """套用背景載入的篩選選項，並保持目前選取值有效。"""
     identity = snapshot.get("identity")
     panel._render_source_catalog = snapshot.get("source_catalog")
     if panel._db_identity is not None and identity != panel._db_identity:
@@ -58,6 +58,7 @@ def apply_filter_options(panel, snapshot: dict) -> None:
 
 
 def _build_controls(panel) -> None:
+    """建立目前面板的操作控制項。"""
     panel.version_dd = kit.dropdown(
         label="遊戲版本", dense=True, width=220, on_select=panel._on_version
     )
@@ -139,6 +140,7 @@ def _build_flagged_banner(panel) -> None:
 
 
 def _build_filter_card(panel) -> None:
+    """建立 ModDB 篩選條件卡片並放入相關控制項。"""
     panel.filter_card = kit.section_card(
         None,
         ft.Column(
@@ -214,7 +216,7 @@ def refresh_entry_filter(
     full_refresh: bool = False,
     background: bool = True,
 ) -> None:
-    """Refresh the requested result page, optionally delegating filter edits."""
+    """重新載入指定結果頁，必要時把篩選變更交給上層處理。"""
     panel.pager.set_state(panel.total, page)
     if panel._on_filter_changed is not None:
         panel._on_filter_changed(
@@ -270,6 +272,7 @@ def open_bulk_review(panel, _e=None) -> None:
 
 
 def open_species_scan(panel, _e=None) -> None:
+    """處理目前函數負責的資料與流程。"""
     if panel.db() is None or not panel.version:
         show_snack(panel._page, "目前沒有可用的資料庫版本。", C.GOLD)
         return
@@ -284,6 +287,7 @@ def open_species_scan(panel, _e=None) -> None:
 
 
 def open_smart_review(panel, _e=None) -> None:
+    """開啟智慧校對對話框並傳入目前資料庫與篩選範圍。"""
     if panel.drafts:
         show_snack(
             panel._page,
@@ -296,6 +300,7 @@ def open_smart_review(panel, _e=None) -> None:
         return
 
     def after_complete(_result=None) -> None:
+        """在智慧校對完成後重新整理目前頁面的資料與狀態。"""
         if panel._on_changed:
             panel._on_changed()
 

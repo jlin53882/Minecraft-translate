@@ -1,9 +1,6 @@
-"""Evaluate smart-review output for terminology evidence and semantic labels.
+"""依專有名詞證據與語意標籤評估智慧校對輸出。
 
-The unique-reviewed-reference numbers are only reference evidence: they are
-not a human-labelled semantic accuracy score.  A manual labels file can add a
-bounded terminology score with accepted translations, correction rate, false
-revision rate, and abstention coverage.
+唯一已審核參考數字只代表參考證據，不是人工標註的語意準確率；人工標籤檔可以額外提供有界的專有名詞分數、修正率、誤改率與棄答覆蓋率。
 """
 
 from __future__ import annotations
@@ -37,6 +34,7 @@ NAMED_KEY_PREFIXES = (
 
 
 def _args() -> argparse.Namespace:
+    """解析本工具的命令列參數。"""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", type=Path, default=ROOT / "config.json")
     parser.add_argument("--run-id", required=True)
@@ -54,10 +52,12 @@ def _args() -> argparse.Namespace:
 
 
 def _compact(value: str) -> str:
+    """把完整結果壓縮成適合命令列輸出的摘要。"""
     return re.sub(r"\s+", " ", value).strip()
 
 
 def _references(path: Path) -> dict[tuple[str, str, str, str], str]:
+    """載入評估使用的已審核參考資料。"""
     uri = f"file:{quote(str(path))}?mode=ro"
     connection = sqlite3.connect(uri, uri=True)
     try:
@@ -79,6 +79,7 @@ def _references(path: Path) -> dict[tuple[str, str, str, str], str]:
 
 
 def _candidate_output(candidate) -> str | None:
+    """從候選資料取出可評估的模型輸出。"""
     if candidate.status == "no_change" or candidate.decision == "no_change":
         return candidate.current_zh_tw
     if candidate.status == "ready" and candidate.suggested_zh_tw:
@@ -87,12 +88,14 @@ def _candidate_output(candidate) -> str | None:
 
 
 def _is_named_key(candidate) -> bool:
+    """判斷資料鍵是否屬於可優先評估的命名鍵。"""
     return candidate.kind == "lang" and candidate.key.startswith(NAMED_KEY_PREFIXES)
 
 
 def _summary(
     rows: list[tuple[object, str]], *, evaluation_available: bool = True
 ) -> dict[str, object]:
+    """彙總單批次模型輸出與專有名詞命中結果。"""
     total = len(rows)
     emitted = 0
     exact = 0
@@ -147,6 +150,7 @@ def _summary(
 def _glossary_summary(
     candidates: list[object], *, evaluation_available: bool = True
 ) -> dict[str, object]:
+    """整理已審核術語表的評估摘要。"""
     total = emitted = baseline_hits = baseline_emitted_hits = model_hits = 0
     corrected = false_revision = abstained = 0
     seen: set[tuple[str, str, str, str, str, str, str]] = set()
@@ -227,6 +231,7 @@ def _glossary_summary(
 
 
 def _label_key(item: dict[str, object]) -> tuple[str, str, str, str]:
+    """建立評估用的資料標籤鍵。"""
     return (
         str(item.get("kind", "")),
         str(item.get("mod_id", "")),
@@ -236,6 +241,7 @@ def _label_key(item: dict[str, object]) -> tuple[str, str, str, str]:
 
 
 def _load_labels(path: Path) -> dict[tuple[str, str, str, str], dict[str, object]]:
+    """載入資料列對應的評估標籤。"""
     value = json.loads(path.read_text(encoding="utf-8"))
     items = value.get("items", value) if isinstance(value, dict) else value
     if not isinstance(items, list):
@@ -254,6 +260,7 @@ def _load_labels(path: Path) -> dict[tuple[str, str, str, str], dict[str, object
 
 
 def _accepted_terms(label: dict[str, object]) -> list[tuple[str, tuple[str, ...]]]:
+    """取得可接受的參考術語集合。"""
     raw_terms = label.get("expected_terms", [])
     if not isinstance(raw_terms, list):
         return []
@@ -279,6 +286,7 @@ def _manual_terminology_summary(
     *,
     evaluation_available: bool = True,
 ) -> dict[str, object]:
+    """依已審核術語參考統計命中、修正、誤改與棄答。"""
     matched = scored = correct = incorrect = abstained = 0
     baseline_correct = corrected = false_revision = term_total = 0
     emitted_term_total = term_correct = 0
@@ -333,9 +341,7 @@ def _manual_terminology_summary(
             round(correct / scored, 4) if scored else None
         ),
         "model_term_accuracy_on_emitted": (
-            round(term_correct / emitted_term_total, 4)
-            if emitted_term_total
-            else None
+            round(term_correct / emitted_term_total, 4) if emitted_term_total else None
         ),
         "corrected": corrected,
         "false_revision": false_revision,
@@ -362,7 +368,7 @@ def _manual_terminology_summary(
 def _evaluation_state(
     run: dict[str, object], candidates: list[object]
 ) -> tuple[bool, str | None]:
-    """Keep provider failures out of model-accuracy denominators."""
+    """建立評估狀態並把提供者失敗排除在準確率分母之外。"""
     if not candidates:
         return True, None
     valid_count = int(run.get("valid_count") or 0)
@@ -382,6 +388,7 @@ def _evaluation_state(
 
 
 def main() -> int:
+    """解析命令列參數並執行目前工具。"""
     args = _args()
     config = load_config(args.config)
     settings = load_db_settings(config)

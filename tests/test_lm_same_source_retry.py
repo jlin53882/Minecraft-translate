@@ -834,6 +834,7 @@ def test_batch_input_fit_reserves_retry_prompt_only_when_enabled(
 def test_prepare_batch_refreshes_token_budget_after_session_history_grows(
     monkeypatch, configure_batch
 ):
+    """驗證工作階段歷史增加後會重新計算批次 Token 預算。"""
     configure_batch()
     items = [_item("First", 0), _item("Second", 1)]
     runtime = main._build_batch_runtime(items, len(items))
@@ -858,6 +859,7 @@ def test_prepare_batch_refreshes_token_budget_after_session_history_grows(
 def test_prepare_batch_keeps_payload_ids_stable_across_internal_slices(
     configure_batch,
 ):
+    """驗證批次內部分片仍維持負載識別碼穩定。"""
     configure_batch()
     items = [_item("First", 0), _item("Second", 1)]
     runtime = main._build_batch_runtime(items, len(items))
@@ -874,6 +876,7 @@ def test_prepare_batch_keeps_payload_ids_stable_across_internal_slices(
 
 
 def test_prepare_batch_keeps_repeated_item_references_distinct(configure_batch):
+    """驗證批次中重複項目參考仍保持獨立。"""
     configure_batch()
     item = _item("Repeated", 0)
     runtime = main._build_batch_runtime([item, item], 2)

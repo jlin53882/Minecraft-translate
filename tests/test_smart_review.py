@@ -24,6 +24,7 @@ from translation_tool.translation_db.smart_review import (
 
 
 def _seed(db: TranslationDB) -> None:
+    """建立智慧校對測試資料。"""
     db.write_back(
         "1.21.1",
         [
@@ -36,6 +37,7 @@ def _seed(db: TranslationDB) -> None:
 
 @pytest.fixture
 def db(tmp_path):
+    """建立測試用資料庫並在測試結束後清理。"""
     database = TranslationDB(tmp_path / "smart-review.db")
     _seed(database)
     yield database
@@ -43,6 +45,7 @@ def db(tmp_path):
 
 
 def test_snapshot_uses_implicit_unreviewed_for_non_manual_sources(db):
+    """驗證非人工來源使用隱含未審核狀態建立候選快照。"""
     snapshots = db.smart_review_candidates(version="1.21.1", limit=1000)
     assert [item.key for item in snapshots] == ["bye", "hello"]
     assert all(item.review_status == "unreviewed" for item in snapshots)
@@ -58,6 +61,7 @@ def test_snapshot_uses_implicit_unreviewed_for_non_manual_sources(db):
     ],
 )
 def test_candidate_count_uses_the_same_scope_as_rows(db, filters):
+    """驗證候選數量與資料列使用相同範圍。"""
     snapshots = db.smart_review_candidates(version="1.21.1", limit=1000, **filters)
 
     assert db.count_smart_review_candidates(version="1.21.1", **filters) == len(
@@ -66,6 +70,7 @@ def test_candidate_count_uses_the_same_scope_as_rows(db, filters):
 
 
 def test_snapshot_can_require_unique_reviewed_same_key_reference(db):
+    """驗證候選快照可以要求唯一同鍵已審核參考。"""
     db.write_back(
         "1.20.1",
         [WriteBackItem(KIND_LANG, "demo", "hello", "Hello %s", "嗨 %s")],
@@ -80,15 +85,13 @@ def test_snapshot_can_require_unique_reviewed_same_key_reference(db):
         version="1.20.1", limit=1000, require_reviewed_reference=True
     )
     assert [item.key for item in snapshots] == ["hello"]
-    assert (
-        db.count_smart_review_candidates(
-            version="1.20.1", require_reviewed_reference=True
-        )
-        == len(snapshots)
-    )
+    assert db.count_smart_review_candidates(
+        version="1.20.1", require_reviewed_reference=True
+    ) == len(snapshots)
 
 
 def test_reviewed_reference_requires_same_english_source(db):
+    """驗證已審核參考必須使用相同英文原文。"""
     db.write_back(
         "1.20.1",
         [WriteBackItem(KIND_LANG, "demo", "hello", "Hello changed", "嗨")],
@@ -106,6 +109,7 @@ def test_reviewed_reference_requires_same_english_source(db):
 
 
 def test_local_context_covers_non_lang_terms_and_preserves_traceability(db):
+    """驗證本地上下文涵蓋非 lang 專有名詞並保留可追溯性。"""
     db.write_back(
         "1.21.1",
         [
@@ -165,6 +169,7 @@ def test_local_context_covers_non_lang_terms_and_preserves_traceability(db):
 
 
 def test_local_context_uses_shared_terminology_filter(db, monkeypatch):
+    """驗證本地上下文使用共用的專有名詞篩選器。"""
     import translation_tool.translation_db.smart_review as smart_review_module
     from translation_tool.core.official_locale import OfficialLocaleIndex
 
@@ -258,6 +263,7 @@ def test_local_context_uses_shared_terminology_filter(db, monkeypatch):
 
 
 def test_response_validation_requires_exact_ids_and_format_safe_suggestion(db):
+    """驗證回應驗證要求精確識別碼與格式安全建議。"""
     snapshot = db.smart_review_candidates(version="1.21.1", limit=2)[1]
     valid = {
         "items": [
@@ -289,6 +295,7 @@ def test_response_validation_requires_exact_ids_and_format_safe_suggestion(db):
 
 
 def test_response_validation_requires_concrete_reason_and_rejects_external_urls(db):
+    """驗證回應驗證要求具體理由並拒絕外部網址。"""
     snapshot = db.smart_review_candidates(version="1.21.1", limit=2)[1]
     base = {
         "id": str(snapshot.ordinal),
@@ -319,7 +326,10 @@ def test_response_validation_requires_concrete_reason_and_rejects_external_urls(
 
 
 def test_run_persists_candidates_without_writing_translation(db, monkeypatch):
+    """驗證執行流程只保存校對候選而不寫入翻譯。"""
+
     def fake_call(**kwargs):
+        """模擬模型請求並回傳測試回應。"""
         items = kwargs["payload"]["items"]
         return json.dumps(
             {
@@ -367,7 +377,10 @@ def test_run_persists_candidates_without_writing_translation(db, monkeypatch):
 
 
 def test_request_failures_and_cancellation_are_distinct_from_invalid(db, monkeypatch):
+    """驗證請求失敗、取消與無效回應會被正確區分。"""
+
     def fail_call(**_kwargs):
+        """模擬模型請求失敗。"""
         raise RuntimeError("simulated request failure")
 
     monkeypatch.setattr(
@@ -391,6 +404,7 @@ def test_request_failures_and_cancellation_are_distinct_from_invalid(db, monkeyp
     called = False
 
     def should_not_call(**_kwargs):
+        """在不應送出模型請求時讓測試失敗。"""
         nonlocal called
         called = True
         raise AssertionError("cancelled run must not send a request")
@@ -415,17 +429,20 @@ def test_request_failures_and_cancellation_are_distinct_from_invalid(db, monkeyp
 
 
 def test_smart_review_schema_keeps_provider_unsupported_limits_local():
-    reason_schema = smart_review_response_schema(["1"])["properties"]["items"][
-        "items"
-    ]["properties"]["reason"]
+    """驗證智慧校對結構讓提供者不支援的限制留在本地驗證。"""
+    reason_schema = smart_review_response_schema(["1"])["properties"]["items"]["items"][
+        "properties"
+    ]["reason"]
 
     assert reason_schema == {"type": "string"}
 
 
 def test_smart_review_forwards_chatgpt_runtime_options(db, monkeypatch):
+    """驗證智慧校對會轉發 ChatGPT 執行選項。"""
     captured = {}
 
     def fake_call(**kwargs):
+        """模擬模型請求並回傳測試回應。"""
         captured.update(kwargs)
         item = kwargs["payload"]["items"][0]
         return json.dumps(
@@ -461,9 +478,7 @@ def test_smart_review_forwards_chatgpt_runtime_options(db, monkeypatch):
         lm_config={
             "fast": True,
             "chatgpt_model_profile_id": "profile-a",
-            "chatgpt_model_settings": {
-                "gpt-5.6-luna": {"reasoning_effort": "high"}
-            },
+            "chatgpt_model_settings": {"gpt-5.6-luna": {"reasoning_effort": "high"}},
         },
         limit=1,
     )
@@ -475,11 +490,13 @@ def test_smart_review_forwards_chatgpt_runtime_options(db, monkeypatch):
 
 
 def test_smart_review_rotates_gemini_key_for_retryable_http_error(db, monkeypatch):
+    """驗證智慧校對遇到可重試 HTTP 錯誤時會輪替 Gemini 金鑰。"""
     from translation_tool.core import lm_config_rules
 
     calls = []
 
     def fake_call(**kwargs):
+        """模擬模型請求並回傳測試回應。"""
         calls.append(kwargs["api_key"])
         if len(calls) == 1:
             response = requests.Response()
@@ -523,7 +540,10 @@ def test_smart_review_rotates_gemini_key_for_retryable_http_error(db, monkeypatc
 
 
 def test_apply_candidate_is_cas_guarded_and_writes_history(db, monkeypatch):
+    """驗證套用候選受 CAS 保護並寫入歷史。"""
+
     def fake_call(**kwargs):
+        """模擬模型請求並回傳測試回應。"""
         return json.dumps(
             {
                 "items": [
@@ -566,7 +586,10 @@ def test_apply_candidate_is_cas_guarded_and_writes_history(db, monkeypatch):
 
 
 def test_draft_is_persisted_and_apply_uses_the_human_value(db, monkeypatch):
+    """驗證草稿會保存且套用時使用人工值。"""
+
     def fake_call(**kwargs):
+        """模擬模型請求並回傳測試回應。"""
         return json.dumps(
             {
                 "items": [
@@ -596,7 +619,10 @@ def test_draft_is_persisted_and_apply_uses_the_human_value(db, monkeypatch):
 
 
 def test_reject_candidate_keeps_translation_unchanged(db, monkeypatch):
+    """驗證拒絕候選時會保留原翻譯不變。"""
+
     def fake_call(**kwargs):
+        """模擬模型請求並回傳測試回應。"""
         return json.dumps(
             {
                 "items": [
@@ -634,6 +660,7 @@ def test_reject_candidate_keeps_translation_unchanged(db, monkeypatch):
 
 
 def test_smart_review_snapshot_is_immutable_value_object():
+    """驗證智慧校對快照是不可變值物件。"""
     snapshot = SmartReviewSnapshot(
         run_id="",
         ordinal=1,
@@ -653,6 +680,7 @@ def test_smart_review_snapshot_is_immutable_value_object():
 
 
 def test_smart_review_model_options_use_configured_chatgpt_model():
+    """驗證智慧校對模型選項使用設定的 ChatGPT 模型。"""
     from app.services_impl.moddb_smart_review_service import smart_review_model_options
 
     config = {
@@ -667,6 +695,7 @@ def test_smart_review_model_options_use_configured_chatgpt_model():
 
 
 def test_smart_review_model_options_keep_gemini_preference_for_gemini():
+    """驗證 Gemini 智慧校對保留 Gemini 模型偏好。"""
     from app.services_impl.moddb_smart_review_service import smart_review_model_options
 
     config = {
@@ -687,6 +716,7 @@ def test_smart_review_model_options_keep_gemini_preference_for_gemini():
 
 
 def test_smart_review_service_passes_nested_lm_config(monkeypatch, tmp_path):
+    """驗證智慧校對服務會傳遞巢狀 LM 設定。"""
     from app.services_impl import moddb_smart_review_service as service
 
     config = {"lm_translator": {"request_interval_sec": 0}, "unrelated": True}
@@ -694,9 +724,11 @@ def test_smart_review_service_passes_nested_lm_config(monkeypatch, tmp_path):
 
     class FakeDB:
         def close(self):
+            """關閉測試用資源。"""
             captured["closed"] = True
 
     def fake_run(db, **kwargs):
+        """模擬智慧校對執行並回傳結果。"""
         captured.update(kwargs)
         assert db is fake_db
         return "result"
@@ -718,6 +750,7 @@ def test_smart_review_service_passes_nested_lm_config(monkeypatch, tmp_path):
 
 
 def test_smart_review_dialog_builds_preview_and_run_controls(db, monkeypatch):
+    """驗證智慧校對對話框建立預覽與執行控制項。"""
     monkeypatch.setattr(
         "app.services_impl.moddb_smart_review_service.load_config",
         lambda: {
@@ -738,6 +771,7 @@ def test_smart_review_dialog_builds_preview_and_run_controls(db, monkeypatch):
 
 
 def test_smart_review_apply_notifies_parent_after_reloading_candidates(monkeypatch):
+    """驗證套用智慧校對後會重新載入候選並通知上層。"""
     from app.views.moddb import smart_review_dialog as module
 
     dialog = module.SmartReviewDialog.__new__(module.SmartReviewDialog)
@@ -756,6 +790,7 @@ def test_smart_review_apply_notifies_parent_after_reloading_candidates(monkeypat
 
 
 def test_v7_smart_review_is_readable_and_migrates_to_v8(tmp_path):
+    """驗證 v7 智慧校對資料可讀且能遷移到 v8。"""
     path = tmp_path / "v7-smart-review.db"
     writable = TranslationDB(path)
     _seed(writable)

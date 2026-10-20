@@ -151,6 +151,7 @@ def render(rows: list[dict[str, str]]) -> str:
 
 
 def main() -> int:
+    """解析命令列參數並執行目前工具。"""
     rows = collect()
     # Keep generated documentation LF-normalized on Windows so git does not
     # mistake CRLF's carriage return for trailing whitespace.

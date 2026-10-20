@@ -1,4 +1,4 @@
-"""Background service adapters for local ModDB smart proofreading."""
+"""提供本地 ModDB 智慧校對的背景服務介面。"""
 
 from __future__ import annotations
 
@@ -29,17 +29,12 @@ SMART_REVIEW_DEFAULT_SOURCE = SRC_AI
 def smart_review_format_diagnostics(
     source: str, translated: str, *, kind: str = "lang"
 ) -> FormatDiagnosticsResult:
-    """Expose bounded format diagnostics to the ModDB view layer."""
+    """回傳 ModDB 智慧校對使用的有界格式診斷結果。"""
     return analyze_format_diagnostics(source, translated, kind=kind)
 
 
 def smart_review_model_options(config: dict | None = None) -> list[tuple[str, str]]:
-    """Return model choices valid for the configured smart-review provider.
-
-    Gemini models come from the enabled ``lm_translator.models`` catalog.  The
-    ChatGPT/OAuth model is stored separately in ``lm_translator.chatgpt_model``
-    and must be surfaced here instead of falling back to the Gemini catalog.
-    """
+    """依智慧校對提供者設定回傳可選模型，並保留目前設定的模型。"""
     cfg = load_config() if config is None else config
     lm_config = cfg.get("lm_translator", {})
     if not isinstance(lm_config, dict):
@@ -66,6 +61,7 @@ def smart_review_model_options(config: dict | None = None) -> list[tuple[str, st
 def _open(
     path: str | Path, priority: tuple[int, ...], *, readonly: bool
 ) -> TranslationDB:
+    """以指定模式開啟資料庫，供智慧校對服務執行操作。"""
     return TranslationDB(path, priority=priority, readonly=readonly, create=False)
 
 
@@ -81,6 +77,7 @@ def preview_moddb_smart_review_from_path(
     query: str | None = None,
     limit: int = 1000,
 ) -> list[SmartReviewSnapshot]:
+    """從指定資料庫建立智慧校對預覽，不修改翻譯資料。"""
     db = _open(path, priority, readonly=True)
     try:
         return db.smart_review_candidates(
@@ -114,6 +111,7 @@ def run_moddb_smart_review_from_path(
     query: str | None = None,
     cancel_check: Callable[[], bool] | None = None,
 ) -> SmartReviewRunResult:
+    """從指定資料庫執行智慧校對並逐步回傳執行進度。"""
     cfg = load_config()
     lm_config = cfg.get("lm_translator", {}) if isinstance(cfg, dict) else {}
     if not isinstance(lm_config, dict):
@@ -155,6 +153,7 @@ def list_moddb_smart_review_candidates_from_path(
     limit: int | None = None,
     offset: int = 0,
 ) -> list[SmartReviewCandidate]:
+    """從指定資料庫列出智慧校對候選項目。"""
     db = _open(path, priority, readonly=True)
     try:
         return db.list_smart_review_candidates(
@@ -171,6 +170,7 @@ def count_moddb_smart_review_candidates_for_run_from_path(
     *,
     status: str | None = None,
 ) -> int:
+    """計算指定智慧校對執行中的候選數量。"""
     db = _open(path, priority, readonly=True)
     try:
         return db.count_smart_review_candidates_for_run(run_id, status=status)
@@ -190,6 +190,7 @@ def count_moddb_smart_review_candidates_from_path(
     query: str | None = None,
     require_reviewed_reference: bool = False,
 ) -> int:
+    """計算指定資料庫目前範圍內的智慧校對候選數量。"""
     db = _open(path, priority, readonly=True)
     try:
         return db.count_smart_review_candidates(
@@ -208,6 +209,7 @@ def count_moddb_smart_review_candidates_from_path(
 def get_moddb_smart_review_run_from_path(
     path: str | Path, priority: tuple[int, ...], run_id: str
 ) -> dict[str, Any] | None:
+    """讀取指定資料庫中的智慧校對執行狀態。"""
     db = _open(path, priority, readonly=True)
     try:
         return db.get_smart_review_run(run_id)
@@ -222,6 +224,7 @@ def save_moddb_smart_review_draft_from_path(
     ordinal: int,
     draft_zh_tw: str,
 ) -> str:
+    """保存指定候選的人工智慧校對草稿，不直接改寫翻譯。"""
     db = _open(path, priority, readonly=False)
     try:
         return db.save_smart_review_draft(run_id, ordinal, draft_zh_tw)
@@ -237,6 +240,7 @@ def apply_moddb_smart_review_candidate_from_path(
     *,
     draft_zh_tw: str | None = None,
 ) -> str:
+    """以 CAS 條件套用指定智慧校對候選。"""
     db = _open(path, priority, readonly=False)
     try:
         return db.apply_smart_review_candidate(run_id, ordinal, draft_zh_tw=draft_zh_tw)
@@ -250,6 +254,7 @@ def reject_moddb_smart_review_candidate_from_path(
     run_id: str,
     ordinal: int,
 ) -> str:
+    """拒絕指定智慧校對候選並保留目前翻譯。"""
     db = _open(path, priority, readonly=False)
     try:
         return db.reject_smart_review_candidate(run_id, ordinal)

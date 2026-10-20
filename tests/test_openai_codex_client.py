@@ -65,6 +65,7 @@ def test_stream_request_uses_responses_structured_outputs(monkeypatch):
 
 
 def test_stream_request_accepts_a_custom_smart_review_schema(monkeypatch):
+    """驗證串流請求接受自訂智慧校對結構。"""
     captured = {}
     monkeypatch.setattr(
         client.requests,
@@ -183,6 +184,8 @@ def test_stream_request_preserves_conversation_history_for_retry(monkeypatch):
 
 
 def test_call_retries_once_after_unauthorized_and_keeps_reasoning(monkeypatch):
+    """驗證未授權後只重試一次並保留推理設定。"""
+
     class _UnauthorizedResponse:
         status_code = 401
 
@@ -236,6 +239,8 @@ def test_call_retries_once_after_unauthorized_and_keeps_reasoning(monkeypatch):
 
 
 def test_call_fast_mode_uses_codex_priority_service_tier(monkeypatch):
+    """驗證快速模式使用 Codex 優先服務層級。"""
+
     class _SuccessResponse:
         status_code = 200
         ok = True
@@ -246,6 +251,7 @@ def test_call_fast_mode_uses_codex_priority_service_tier(monkeypatch):
     )
 
     def stream_request(**kwargs):
+        """處理目前函數負責的資料與流程。"""
         requests_seen.append(kwargs)
         return _SuccessResponse()
 
@@ -868,6 +874,7 @@ def test_sse_retry_then_success_uses_same_batch_and_pinned_profile(monkeypatch):
 
 
 def test_http_error_preserves_status_type_param_and_request_id():
+    """驗證 HTTP 錯誤保留狀態碼、錯誤類型、參數與請求識別碼。"""
     response = requests.Response()
     response.status_code = 403
     response.headers["x-request-id"] = "req_example"
@@ -894,6 +901,7 @@ def test_http_error_preserves_status_type_param_and_request_id():
 
 
 def test_http_error_preserves_top_level_detail_from_direct_route():
+    """驗證 HTTP 錯誤保留直接路由回傳的頂層詳細資訊。"""
     response = requests.Response()
     response.status_code = 400
     response.headers["x-request-id"] = "req_direct_route"

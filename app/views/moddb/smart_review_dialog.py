@@ -1,4 +1,4 @@
-"""UI for previewing, running, and manually applying smart-review candidates."""
+"""提供預覽、執行與人工套用智慧校對候選的 UI。"""
 
 from __future__ import annotations
 
@@ -42,7 +42,7 @@ from app.views.moddb.formatting import format_count, shorten
 
 
 class SmartReviewDialog:
-    """A bounded local AI run whose output stays in a human-review queue."""
+    """執行有界的本地 AI 校對，輸出只進入人工審核佇列。"""
 
     def __init__(
         self,
@@ -55,6 +55,7 @@ class SmartReviewDialog:
         effective_source: int | None = SMART_REVIEW_DEFAULT_SOURCE,
         query: str = "",
     ):
+        """初始化目前物件的狀態與依賴。"""
         self.page = page
         self.get_db = get_db
         self.on_complete = on_complete
@@ -79,6 +80,7 @@ class SmartReviewDialog:
         effective_source: int | None,
         query: str,
     ) -> None:
+        """建立目前面板的操作控制項。"""
         db = self.get_db()
         versions = db.versions() if db else []
         self.version_dd = kit.dropdown(
@@ -173,6 +175,7 @@ class SmartReviewDialog:
         )
 
     def _build_dialog(self) -> None:
+        """建立智慧校對對話框的內容與版面。"""
         width, height = dialog_dimensions(self.page)
         self.dialog = ft.AlertDialog(
             modal=True,
@@ -225,23 +228,27 @@ class SmartReviewDialog:
         )
 
     def open(self) -> None:
+        """開啟智慧校對對話框並載入目前版本的預覽。"""
         try:
             present_page_dialog(self.page, self.dialog)
         except (AttributeError, RuntimeError):
             show_snack(self.page, "目前畫面無法開啟智慧校對視窗。", C.GOLD)
 
     def _close(self, _e=None) -> None:
+        """關閉智慧校對對話框並清理目前執行狀態。"""
         if self._busy:
             self._cancel()
         self._generation += 1
         close_page_dialog(self.page, self.dialog)
 
     def _on_dismiss(self, _e=None) -> None:
+        """處理智慧校對對話框被關閉的事件。"""
         if self._busy:
             self._cancel()
         self._generation += 1
 
     def _cancel(self, _e=None) -> None:
+        """取消目前智慧校對執行並更新按鈕狀態。"""
         if not self._busy:
             return
         self._cancel_event.set()
@@ -253,6 +260,7 @@ class SmartReviewDialog:
         self._safe_update()
 
     def _on_version(self, event) -> None:
+        """處理版本選擇變更並使舊預覽失效。"""
         value = event.control.value
         db = self.get_db()
         mods = db.mods(value) if db and value else []
@@ -287,6 +295,7 @@ class SmartReviewDialog:
         self._invalidate()
 
     def _invalidate(self, _e=None) -> None:
+        """清除與目前篩選條件不再相符的預覽與候選狀態。"""
         if not self._busy:
             self._run_id = None
             self._candidate_total = 0
@@ -297,6 +306,7 @@ class SmartReviewDialog:
             self._safe_update()
 
     def _parse_int(self, control, label: str, *, minimum: int = 1) -> int:
+        """將 UI 輸入安全解析為整數，無法解析時回傳預設值。"""
         try:
             value = int(str(control.value or "").strip())
         except (TypeError, ValueError) as exc:
@@ -319,6 +329,7 @@ class SmartReviewDialog:
         int,
         str,
     ]:
+        """依對話框選項建立目前智慧校對範圍。"""
         db = self.get_db()
         if db is None or not getattr(db, "path", None):
             raise ValueError("目前沒有可用的 Mod 資料庫")
@@ -345,6 +356,7 @@ class SmartReviewDialog:
         )
 
     def _preview(self, _e=None) -> None:
+        """載入智慧校對預覽並把結果更新到對話框。"""
         if self._busy:
             return
         try:
@@ -368,6 +380,7 @@ class SmartReviewDialog:
         generation = self._generation
 
         def work() -> None:
+            """在背景執行目前的智慧校對工作。"""
             try:
                 total = count_moddb_smart_review_candidates_from_path(
                     path,
@@ -400,6 +413,7 @@ class SmartReviewDialog:
     def _apply_preview(
         self, generation: int, total: int | None, rows, error: str | None
     ) -> None:
+        """把預覽結果套用到智慧校對對話框的狀態與控制項。"""
         if generation != self._generation:
             self._set_busy(False, "預覽已過期，請重新查詢。")
             return
@@ -425,6 +439,7 @@ class SmartReviewDialog:
         self._safe_update()
 
     def _load_existing_run(self, _e=None) -> None:
+        """載入既有智慧校對執行，讓使用者繼續檢視候選。"""
         if self._busy:
             return
         run_id = str(self.run_id_field.value or "").strip()
@@ -485,6 +500,7 @@ class SmartReviewDialog:
         self._safe_update()
 
     def _run(self, _e=None) -> None:
+        """啟動智慧校對執行並處理逐步進度回報。"""
         if self._busy:
             return
         try:
@@ -508,6 +524,7 @@ class SmartReviewDialog:
         generation = self._generation
 
         def progress(snapshot: dict) -> None:
+            """回報背景智慧校對的進度更新。"""
             self._post(
                 self._apply_progress,
                 generation,
@@ -517,6 +534,7 @@ class SmartReviewDialog:
             )
 
         def work() -> None:
+            """在背景執行目前的智慧校對工作。"""
             try:
                 result = run_moddb_smart_review_from_path(
                     path,
@@ -548,11 +566,13 @@ class SmartReviewDialog:
     def _apply_progress(
         self, generation: int, processed: int, selected: int, status: str
     ) -> None:
+        """把後端智慧校對進度套用到 UI。"""
         if generation == self._generation:
             self.status.value = f"AI 校對中：{processed:,} / {selected:,} 筆 · {status}"
             self._safe_update()
 
     def _apply_run(self, generation, path, priority, result, error) -> None:
+        """把智慧校對完成結果套用到對話框並重新載入候選。"""
         if generation != self._generation:
             self._set_busy(False, "執行結果已過期。")
             return
@@ -588,6 +608,7 @@ class SmartReviewDialog:
         page: int | None = None,
         total: int | None = None,
     ) -> None:
+        """載入評估所需的智慧校對候選資料。"""
         self._candidate_path = path
         self._candidate_priority = priority
         if page is not None:
@@ -617,6 +638,7 @@ class SmartReviewDialog:
             self.candidates.controls = [kit.hint_text("此 run 沒有候選結果。")]
 
     def _on_candidate_page(self, page: int) -> None:
+        """處理候選分頁切換並重新載入目前候選。"""
         if self._busy or not self._run_id or self._candidate_path is None:
             return
         self._candidate_page = max(1, int(page))
@@ -630,6 +652,7 @@ class SmartReviewDialog:
         self._safe_update()
 
     def _focus_candidate(self, ordinal: int) -> None:
+        """讓 UI 聚焦到指定智慧校對候選。"""
         if not self._run_id or self._candidate_path is None:
             return
         if ordinal < 1 or ordinal > self._candidate_total:
@@ -645,6 +668,7 @@ class SmartReviewDialog:
         self._safe_update()
 
     def _candidate_source_label(self, row: SmartReviewCandidate) -> str:
+        """建立候選來源的顯示文字。"""
         db = self.get_db()
         return (
             db.source_catalog.label(row.effective_source)
@@ -655,6 +679,7 @@ class SmartReviewDialog:
         )
 
     def _candidate_draft_controls(self, row: SmartReviewCandidate):
+        """建立候選人工草稿的輸入與操作控制項。"""
         draft_control = kit.text_field(
             "人工修正草稿",
             value=row.draft_zh_tw or row.suggested_zh_tw or "",
@@ -667,6 +692,7 @@ class SmartReviewDialog:
         format_text = ft.Text(size=12, color=C.MUTED, selectable=True)
 
         def refresh_format(_e=None) -> None:
+            """依目前草稿重新計算候選的格式診斷。"""
             value = str(draft_control.value or "").strip()
             if not value:
                 format_text.value = "格式診斷：尚無可分析草稿"
@@ -692,6 +718,7 @@ class SmartReviewDialog:
 
     @staticmethod
     def _candidate_evidence_text(row: SmartReviewCandidate) -> str:
+        """整理候選的上下文與術語證據顯示文字。"""
         evidence_by_id = {str(item.get("id")): item for item in row.context}
         evidence_ids = row.evidence_ids or tuple(evidence_by_id)[:6]
         evidence_lines = []
@@ -719,6 +746,7 @@ class SmartReviewDialog:
         row: SmartReviewCandidate,
         draft_control,
     ):
+        """建立候選的草稿、套用與拒絕操作列。"""
         apply_btn = kit.button(
             "套用這筆",
             "primary",
@@ -773,6 +801,7 @@ class SmartReviewDialog:
     def _candidate_card(
         self, path: Path, priority: tuple[int, ...], row: SmartReviewCandidate
     ):
+        """建立單一智慧校對候選卡片。"""
         source_label = self._candidate_source_label(row)
         draft_control, format_text = self._candidate_draft_controls(row)
         evidence_text = self._candidate_evidence_text(row)
@@ -837,12 +866,14 @@ class SmartReviewDialog:
         ordinal: int,
         draft_control,
     ) -> None:
+        """保存目前候選的人工編輯草稿。"""
         if self._busy:
             return
         draft = str(draft_control.value or "")
         self._set_busy(True, f"儲存候選 #{ordinal} 草稿…")
 
         def work() -> None:
+            """在背景執行目前的智慧校對工作。"""
             try:
                 status = save_moddb_smart_review_draft_from_path(
                     path, priority, run_id, ordinal, draft
@@ -862,6 +893,7 @@ class SmartReviewDialog:
         )
 
     def _apply_draft_result(self, path, priority, run_id, status, error) -> None:
+        """處理保存草稿後的回應並更新候選卡片。"""
         self._set_busy(False, "")
         if error:
             show_snack(self.page, f"草稿儲存失敗：{error}", C.RED)
@@ -881,11 +913,13 @@ class SmartReviewDialog:
         *,
         draft_zh_tw: str | None = None,
     ) -> None:
+        """送出目前候選的套用請求。"""
         if self._busy:
             return
         self._set_busy(True, f"套用候選 #{ordinal}…")
 
         def work() -> None:
+            """在背景執行目前的智慧校對工作。"""
             try:
                 status = apply_moddb_smart_review_candidate_from_path(
                     path,
@@ -911,6 +945,7 @@ class SmartReviewDialog:
         )
 
     def _apply_candidate_result(self, path, priority, run_id, status, error) -> None:
+        """處理套用候選後的回應並通知上層頁面。"""
         self._set_busy(False, "")
         if error:
             show_snack(self.page, f"套用失敗：{error}", C.RED)
@@ -931,11 +966,13 @@ class SmartReviewDialog:
     def _reject_candidate(
         self, path: Path, priority: tuple[int, ...], run_id: str, ordinal: int
     ) -> None:
+        """送出目前候選的拒絕請求。"""
         if self._busy:
             return
         self._set_busy(True, f"保留候選 #{ordinal} 的原譯文…")
 
         def work() -> None:
+            """在背景執行目前的智慧校對工作。"""
             try:
                 status = reject_moddb_smart_review_candidate_from_path(
                     path, priority, run_id, ordinal
@@ -955,6 +992,7 @@ class SmartReviewDialog:
         )
 
     def _apply_reject_result(self, path, priority, run_id, status, error) -> None:
+        """處理拒絕候選後的回應並重新整理列表。"""
         self._set_busy(False, "")
         if error:
             show_snack(self.page, f"保留失敗：{error}", C.RED)
@@ -973,6 +1011,7 @@ class SmartReviewDialog:
         *,
         durability: DurabilityPolicy = DurabilityPolicy.RECOMPUTABLE,
     ) -> None:
+        """在 UI 工作執行緒中啟動指定的智慧校對工作。"""
         self._cancel_event.clear()
         try:
             launched = launch_page_operation(
@@ -995,10 +1034,12 @@ class SmartReviewDialog:
             self._set_busy(False, "應用程式正在關閉，未啟動操作。")
 
     def _post(self, callback, *args) -> None:
+        """把背景工作結果安全送回 UI 執行緒。"""
         run_task = getattr(self.page, "run_task", None)
         if callable(run_task):
 
             async def runner() -> None:
+                """在 UI 執行緒中呼叫背景工作回呼。"""
                 callback(*args)
 
             run_task(runner)
@@ -1006,6 +1047,7 @@ class SmartReviewDialog:
             callback(*args)
 
     def _set_busy(self, busy: bool, status: str) -> None:
+        """切換智慧校對對話框的忙碌與可操作狀態。"""
         self._busy = busy
         if not busy:
             self._operation_handle = None
@@ -1029,6 +1071,7 @@ class SmartReviewDialog:
         self._safe_update()
 
     def _safe_update(self) -> None:
+        """在 UI 仍然有效時安全更新對話框控制項。"""
         try:
             self.page.update()
         except RuntimeError:

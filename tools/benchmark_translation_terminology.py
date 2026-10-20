@@ -1,17 +1,14 @@
-"""Benchmark the main translation path on a frozen 1,000-row terminology set.
+"""使用固定的一千筆專有名詞資料測試正式翻譯路徑。
 
-This benchmark deliberately sends only the English source to the translator.  The
-reviewed translation/context is used after the request as terminology reference
-data, so the model cannot pass by copying the current Chinese value.
+本測試刻意只把英文原文送給翻譯器；已審核翻譯與上下文會在請求完成後才作為專有名詞參考，避免模型直接複製目前中文值而通過測試。
 
-Examples::
+範例：
 
     uv run python -m tools.benchmark_translation_terminology \
         --run-id a8795ac9296a40dfabf7e3bdecccae58 \
         --model gemini-3.1-flash-lite --label baseline
 
-The benchmark never writes translations to the database.  It writes only a
-credential-free JSON artifact containing outputs and terminology metrics.
+測試不會把翻譯寫回資料庫，只寫入包含輸出與專有名詞指標且不含憑證的 JSON 產物。
 """
 
 from __future__ import annotations
@@ -39,6 +36,7 @@ REFERENCE_TYPES = {"reviewed_lang_glossary", "official_locale"}
 
 
 def _args() -> argparse.Namespace:
+    """解析本工具的命令列參數。"""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", type=Path, default=ROOT / "config.json")
     parser.add_argument("--run-id", default=DEFAULT_RUN_ID)
@@ -52,11 +50,12 @@ def _args() -> argparse.Namespace:
 
 
 def _compact(value: str) -> str:
+    """把完整結果壓縮成適合命令列輸出的摘要。"""
     return re.sub(r"\s+", " ", value).strip()
 
 
 def _raw_reference_terms(candidate: SmartReviewCandidate) -> list[dict[str, str]]:
-    """Return raw context references for diagnostic comparison only."""
+    """取得僅供診斷比較使用的原始上下文參考術語。"""
     result: list[dict[str, str]] = []
     seen: set[tuple[str, str, str]] = set()
     for raw in candidate.context:
@@ -82,7 +81,7 @@ def _raw_reference_terms(candidate: SmartReviewCandidate) -> list[dict[str, str]
 
 
 def _authoritative_reference_terms(item: dict[str, Any]) -> list[dict[str, str]]:
-    """Use the same ambiguity-filtered plan that production sends to the model."""
+    """使用與正式翻譯路徑相同的歧義過濾規則取得權威術語。"""
     return [
         {
             "source": source,
@@ -96,7 +95,7 @@ def _authoritative_reference_terms(item: dict[str, Any]) -> list[dict[str, str]]
 def _build_items(
     db: TranslationDB, candidates: list[SmartReviewCandidate]
 ) -> list[dict[str, Any]]:
-    """Create source-only items matching the production ModDB translation route."""
+    """建立符合 ModDB 正式翻譯路徑的純來源項目。"""
     items: list[dict[str, Any]] = []
     for candidate in candidates:
         reviewed = db.reviewed_lang_glossary(
@@ -125,6 +124,7 @@ def _build_items(
 
 
 def _output_map(results: list[dict[str, Any]] | None) -> dict[str, str | None]:
+    """整理模型輸出與來源識別碼的對照。"""
     mapped: dict[str, str | None] = {}
     for item in results or []:
         benchmark_id = item.get("_benchmark_id")
@@ -140,6 +140,7 @@ def _term_metrics(
     outputs: dict[str, str | None],
     references_by_ordinal: dict[int, list[dict[str, str]]],
 ) -> dict[str, Any]:
+    """計算單筆資料的專有名詞評估指標。"""
     total_terms = emitted_terms = term_hits = 0
     rows_with_references = 0
     for candidate in candidates:
@@ -174,6 +175,7 @@ def _metrics(
     items: list[dict[str, Any]],
     outputs: dict[str, str | None],
 ) -> dict[str, Any]:
+    """彙總整批資料的專有名詞評估指標。"""
     authoritative_by_ordinal = {
         candidate.ordinal: _authoritative_reference_terms(item)
         for candidate, item in zip(candidates, items, strict=True)
@@ -215,6 +217,7 @@ def _metrics(
 def _load_candidates(
     db: TranslationDB, run_id: str, limit: int
 ) -> list[SmartReviewCandidate]:
+    """載入評估所需的智慧校對候選資料。"""
     candidates = db.list_smart_review_candidates(run_id, limit=limit)
     if len(candidates) != limit:
         raise SystemExit(
@@ -228,6 +231,7 @@ def _load_candidates(
 
 
 def run_benchmark() -> int:
+    """執行專有名詞基準測試並輸出比較結果。"""
     args = _args()
     config = load_config(args.config)
     settings = load_db_settings(config)

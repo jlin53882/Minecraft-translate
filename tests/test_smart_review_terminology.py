@@ -15,6 +15,7 @@ def _candidate(
     output: str | None = None,
     decision: str = "suggest_revision",
 ):
+    """處理目前函數負責的資料與流程。"""
     return SimpleNamespace(
         kind="lang",
         mod_id="demo",
@@ -28,6 +29,7 @@ def _candidate(
 
 
 def test_manual_terminology_metrics_distinguish_correction_false_revision_and_abstention():
+    """驗證專有名詞指標區分修正、誤改與棄答。"""
     labels = {
         ("lang", "demo", "correct", "Phenolic Resin is useful"): {
             "expected_terms": [{"source": "Phenolic Resin", "accepted": ["酚醛樹脂"]}]
@@ -57,6 +59,7 @@ def test_manual_terminology_metrics_distinguish_correction_false_revision_and_ab
 
 
 def test_provider_failure_is_unavailable_instead_of_zero_accuracy():
+    """驗證提供者失敗標記為不可用而非零準確率。"""
     candidate = _candidate("failed", "樹脂", output=None)
     labels = {
         ("lang", "demo", "failed", "Phenolic Resin is useful"): {
@@ -80,6 +83,7 @@ def test_provider_failure_is_unavailable_instead_of_zero_accuracy():
 
 
 def test_unfinished_run_is_unavailable_instead_of_zero_accuracy():
+    """驗證未完成執行標記為不可用而非零準確率。"""
     available, reason = _evaluation_state(
         {"status": "running", "valid_count": 0}, [_candidate("running", "樹脂")]
     )

@@ -1,12 +1,12 @@
-"""Local AI smart-proofreading candidates for the Mod translation database.
+"""模組翻譯資料庫的本地 AI 智慧校對候選流程。
 
-The module deliberately separates three phases:
+本模組刻意分離三個階段：
 
-* snapshots and local context are read from SQLite;
-* a model returns strict, machine-validated review candidates;
-* a user explicitly applies a candidate through a compare-and-set transaction.
+* 從 SQLite 讀取快照與本地上下文；
+* 模型回傳經嚴格機器驗證的校對候選；
+* 使用者透過 compare-and-set 交易明確套用候選。
 
-No model response is allowed to write a translation directly.
+任何模型回應都不能直接寫入翻譯。
 """
 
 from __future__ import annotations
@@ -72,7 +72,7 @@ _URL_PATTERN = re.compile(r"(?:https?://|www\.)", re.IGNORECASE)
 
 
 def smart_review_response_schema(ids: Sequence[str]) -> dict[str, Any]:
-    """Build a provider JSON schema whose ids are limited to this request batch."""
+    """建立限制在目前批次識別碼內的 provider JSON 結構。"""
     schema = {
         "type": "object",
         "properties": {
@@ -126,7 +126,7 @@ def smart_review_response_schema(ids: Sequence[str]) -> dict[str, Any]:
 def build_smart_review_payload(
     snapshots: Sequence[SmartReviewSnapshot],
 ) -> dict[str, list[dict[str, Any]]]:
-    """Create the opaque-id payload sent to a model."""
+    """建立送給模型的不可預測識別碼智慧校對負載。"""
     return {
         "items": [
             {
@@ -144,6 +144,7 @@ def build_smart_review_payload(
 
 
 def _strict_json_object(raw: str) -> dict[str, Any]:
+    """確認模型回應是可解析的 JSON 物件。"""
     if not isinstance(raw, str) or not raw.strip():
         raise ValueError("回應不是非空 JSON 文字")
     try:
@@ -158,6 +159,7 @@ def _strict_json_object(raw: str) -> dict[str, Any]:
 
 
 def _validate_text(value: object, field: str, *, max_length: int) -> str:
+    """驗證候選文字符合智慧校對的內容限制。"""
     if not isinstance(value, str):
         raise TypeError(f"{field} 必須是字串")
     if len(value) > max_length:
@@ -172,6 +174,7 @@ def _validate_text(value: object, field: str, *, max_length: int) -> str:
 def _validate_reason(
     reason: object, snapshot: SmartReviewSnapshot, decision: str
 ) -> str:
+    """驗證候選理由是具體且可供人工檢視的文字。"""
     value = _validate_text(reason, "reason", max_length=_MAX_REASON_LENGTH).strip()
     if not value:
         raise ValueError("reason 不可為空")
@@ -205,6 +208,7 @@ def _validate_item(
     raw: Any,
     snapshot: SmartReviewSnapshot,
 ) -> dict[str, Any]:
+    """驗證單一智慧校對候選的識別碼、值與理由。"""
     if not isinstance(raw, dict):
         raise TypeError("item 必須是 object")
     required = {
@@ -273,7 +277,7 @@ def parse_smart_review_response(
     raw: str,
     snapshots: Sequence[SmartReviewSnapshot],
 ) -> list[dict[str, Any]]:
-    """Strictly validate one model response against the exact input batch."""
+    """依目前輸入批次嚴格解析並驗證模型回應。"""
     parsed = _strict_json_object(raw)
     items = parsed["items"]
     expected = {str(item.ordinal): item for item in snapshots}
@@ -298,6 +302,7 @@ def parse_smart_review_response(
 
 
 def _candidate_status(result: dict[str, Any]) -> str:
+    """從候選資料推導目前可供 UI 顯示的狀態。"""
     if result.get("validation_error"):
         return "invalid"
     return {
@@ -308,7 +313,7 @@ def _candidate_status(result: dict[str, Any]) -> str:
 
 
 def _response_reason(raw: object) -> str | None:
-    """Read a reason from current or legacy candidate JSON safely."""
+    """安全讀取目前或舊版候選格式中的理由。"""
     if not raw:
         return None
     try:
@@ -320,7 +325,7 @@ def _response_reason(raw: object) -> str | None:
 
 
 def _effective_review_sql(alias: str = "f") -> str:
-    """Return the one effective review-status rule used by smart-review SQL."""
+    """回傳智慧校對查詢共用的生效審核狀態條件。"""
     return (
         f"CASE WHEN {alias}.review_status IN ('unreviewed', 'reviewed', 'legacy_unknown') "
         f"THEN {alias}.review_status WHEN {alias}.source={SRC_MANUAL} "
@@ -329,7 +334,7 @@ def _effective_review_sql(alias: str = "f") -> str:
 
 
 def _smart_review_current_snapshot_sql() -> str:
-    """Return the CAS snapshot query shared by draft-save and apply paths."""
+    """回傳草稿保存與候選套用共用的 CAS 快照查詢。"""
     return (
         "SELECT e.kind, e.mc_version, e.mod_id, e.key, e.en_us, f.zh_tw, f.source, "
         + _effective_review_sql()
@@ -341,7 +346,7 @@ def _smart_review_current_snapshot_sql() -> str:
 
 @dataclass(frozen=True)
 class _SmartReviewSelection:
-    """Shared SQL fragments for candidate rows and their count."""
+    """保存候選資料列與數量查詢共用的 SQL 片段。"""
 
     effective_review: str
     where_sql: str
@@ -362,7 +367,7 @@ def _build_smart_review_selection(
     require_reviewed_reference: bool,
     prioritize_named_keys: bool = False,
 ) -> _SmartReviewSelection:
-    """Build one authoritative candidate scope for rows and count queries."""
+    """建立資料列與數量查詢共用的權威候選範圍。"""
     effective_review = _effective_review_sql()
     if review_status not in {"unreviewed", "reviewed", "legacy_unknown"}:
         raise ValueError("smart review 不支援的審核狀態")
@@ -433,9 +438,10 @@ def _build_smart_review_selection(
 
 
 class SmartReviewMixin:
-    """SQLite operations mixed into :class:`TranslationDB`."""
+    """提供給 TranslationDB 使用的智慧校對 SQLite 操作。"""
 
     def _smart_review_has_column(self, table: str, column: str) -> bool:
+        """確認智慧校對資料表具有指定欄位。"""
         return any(row[1] == column for row in self._q(f"PRAGMA table_info({table})"))
 
     def smart_review_candidates(
@@ -452,12 +458,7 @@ class SmartReviewMixin:
         require_reviewed_reference: bool = False,
         prioritize_named_keys: bool = False,
     ) -> list[SmartReviewSnapshot]:
-        """Select a stable, bounded set of current entries for proofreading.
-
-        ``effective_source=None`` is kept for library compatibility, while the
-        UI/service pass ``SRC_AI`` by default.  The selection always requires a
-        non-empty effective translation and the requested review state.
-        """
+        """依穩定且有界的條件選出目前智慧校對候選。"""
         bounded_limit = max(0, min(int(limit), 10_000))
         if bounded_limit == 0:
             return []
@@ -474,8 +475,7 @@ class SmartReviewMixin:
         )
         entry_source = "entry e"
         if prioritize_named_keys and self._one(
-            "SELECT 1 FROM sqlite_schema WHERE type='index' "
-            "AND name=?",
+            "SELECT 1 FROM sqlite_schema WHERE type='index' AND name=?",
             ("idx_smart_review_named_order",),
         ):
             entry_source = "entry e INDEXED BY idx_smart_review_named_order"
@@ -557,7 +557,7 @@ class SmartReviewMixin:
         query: str | None = None,
         require_reviewed_reference: bool = False,
     ) -> int:
-        """Count the same selection used by ``smart_review_candidates``."""
+        """計算與候選列表完全相同範圍的智慧校對數量。"""
         selection = _build_smart_review_selection(
             version=version,
             mod_id=mod_id,
@@ -585,13 +585,7 @@ class SmartReviewMixin:
         key: str,
         en_us: str,
     ) -> list[dict[str, Any]]:
-        """Build a bounded, replayable local evidence snapshot.
-
-        The database rows are loaded through indexed module/key/text queries and
-        cached for this selection.  Context records deliberately carry the
-        source identity and match limitations so an evidence id cannot be
-        mistaken for a generic, globally correct translation.
-        """
+        """建立可重播且有界的本地術語與翻譯證據快照。"""
         cache = getattr(self, "_smart_review_context_cache", {})
         key_rows_cache = cache.setdefault("key_rows", {})
         cache_key = (kind, mod_id, key)
@@ -641,6 +635,7 @@ class SmartReviewMixin:
         def cached_rows(
             cache_name: str, sql: str, params: tuple[Any, ...]
         ) -> list[tuple]:
+            """讀取或建立指定查詢的快取資料列。"""
             bucket = cache.setdefault(cache_name, {})
             cache_key = params
             if cache_key not in bucket:
@@ -846,6 +841,7 @@ class SmartReviewMixin:
         batch_size: int,
         scope: dict[str, Any] | None = None,
     ) -> str:
+        """建立只保存候選、不直接修改翻譯的智慧校對執行記錄。"""
         run_id = uuid.uuid4().hex
         with self._tx() as conn:
             conn.execute(
@@ -899,6 +895,7 @@ class SmartReviewMixin:
         run_id: str,
         results: Sequence[dict[str, Any]],
     ) -> None:
+        """保存一批智慧校對候選結果並維持來源快照。"""
         with self._tx() as conn:
             for result in results:
                 ordinal = int(result["id"])
@@ -940,6 +937,7 @@ class SmartReviewMixin:
         *,
         error_code: str = "request_failed",
     ) -> None:
+        """把智慧校對請求錯誤記錄到執行狀態。"""
         with self._tx() as conn:
             conn.executemany(
                 "UPDATE smart_review_candidate SET status='request_failed', validation_error=?, "
@@ -948,7 +946,7 @@ class SmartReviewMixin:
             )
 
     def mark_smart_review_pending_cancelled(self, run_id: str) -> int:
-        """Mark work that was selected but never sent after a cancellation."""
+        """標記已選取但取消前尚未送出的智慧校對項目。"""
         with self._tx() as conn:
             updated = conn.execute(
                 "UPDATE smart_review_candidate SET status='cancelled', "
@@ -969,6 +967,7 @@ class SmartReviewMixin:
         metrics: dict[str, Any] | None = None,
         status: str | None = None,
     ) -> None:
+        """完成智慧校對執行並保存最終統計。"""
         if status not in {None, "completed", "partial", "cancelled", "failed"}:
             raise ValueError("smart review 不支援的 run 狀態")
         with self._tx() as conn:
@@ -988,6 +987,7 @@ class SmartReviewMixin:
             )
 
     def get_smart_review_run(self, run_id: str) -> dict[str, Any] | None:
+        """讀取單一智慧校對執行的摘要與狀態。"""
         has_scope = self._smart_review_has_column("smart_review_run", "scope_json")
         row = self._one(
             "SELECT id, provider, model, scope_version, requested_limit, batch_size, "
@@ -1029,6 +1029,7 @@ class SmartReviewMixin:
         limit: int | None = None,
         offset: int = 0,
     ) -> list[SmartReviewCandidate]:
+        """列出指定智慧校對執行中的候選資料。"""
         has_draft = self._smart_review_has_column(
             "smart_review_candidate", "draft_zh_tw"
         )
@@ -1089,6 +1090,7 @@ class SmartReviewMixin:
     def count_smart_review_candidates_for_run(
         self, run_id: str, *, status: str | None = None
     ) -> int:
+        """計算指定智慧校對執行中的候選資料數量。"""
         clauses = ["run_id=?"]
         params: list[Any] = [run_id]
         if status:
@@ -1103,7 +1105,7 @@ class SmartReviewMixin:
     def save_smart_review_draft(
         self, run_id: str, ordinal: int, draft_zh_tw: str
     ) -> str:
-        """Persist an editable draft without touching translation/effective/history."""
+        """保存可人工編輯的智慧校對草稿，不碰生效翻譯與歷史。"""
         draft = _validate_text(
             draft_zh_tw, "draft_zh_tw", max_length=_MAX_SUGGESTION_LENGTH
         ).strip()
@@ -1171,7 +1173,7 @@ class SmartReviewMixin:
     def list_smart_review_runs(
         self, *, limit: int = 20, offset: int = 0
     ) -> list[dict[str, Any]]:
-        """Return lightweight persisted runs for reopening a review queue."""
+        """列出可重新開啟的智慧校對執行摘要。"""
         has_scope = self._smart_review_has_column("smart_review_run", "scope_json")
         scope_column = "scope_json" if has_scope else "NULL AS scope_json"
         rows = self._q(
@@ -1213,7 +1215,7 @@ class SmartReviewMixin:
         actor: str = "智慧校對",
         draft_zh_tw: str | None = None,
     ) -> str:
-        """Apply one ready candidate only if its effective snapshot is unchanged."""
+        """僅在生效快照未變更時以 CAS 套用智慧校對候選。"""
         batch = uuid.uuid4().hex
         with self._tx() as conn:
             candidate = conn.execute(
@@ -1356,7 +1358,7 @@ class SmartReviewMixin:
         return "applied"
 
     def reject_smart_review_candidate(self, run_id: str, ordinal: int) -> str:
-        """Keep the current translation and mark one ready candidate rejected."""
+        """保留目前翻譯並將智慧校對候選標記為拒絕。"""
         with self._tx(bump_generation_on_noop=False) as conn:
             updated = conn.execute(
                 "UPDATE smart_review_candidate SET status='rejected', "
@@ -1386,16 +1388,14 @@ def run_smart_review(
     query: str | None = None,
     cancel_check: Callable[[], bool] | None = None,
 ) -> SmartReviewRunResult:
-    """Run bounded AI proofreading and persist only candidates, never translations."""
+    """執行有界的 AI 智慧校對，只保存候選，不直接寫入翻譯。"""
     if not model_name.strip():
         raise ValueError("smart review 必須指定模型")
     lm_config = lm_config if isinstance(lm_config, dict) else {}
     # The service path passes no preselected key so the shared cycle can rotate
     # between configured Gemini keys. Explicit keys remain a useful injection
     # point for unit tests and callers that already own key selection.
-    key_cycle = (
-        ApiKeyCycle() if provider == "gemini" and not api_key.strip() else None
-    )
+    key_cycle = ApiKeyCycle() if provider == "gemini" and not api_key.strip() else None
     if provider == "gemini" and not api_key.strip() and not get_api_key_count():
         raise ValueError("Gemini smart review 必須指定 API key")
     chatgpt_options: dict[str, Any] = {}
@@ -1495,9 +1495,7 @@ def run_smart_review(
                     break
                 except requests.HTTPError as exc:
                     status_code = (
-                        exc.response.status_code
-                        if exc.response is not None
-                        else None
+                        exc.response.status_code if exc.response is not None else None
                     )
                     if (
                         key_cycle is not None

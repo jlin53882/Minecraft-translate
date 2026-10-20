@@ -190,6 +190,7 @@ def test_candidate_and_listing_queries_avoid_temp_sort(db):
 
 
 def test_smart_review_selection_context_and_history_avoid_temp_sort(db):
+    """驗證智慧校對選取、上下文與歷史查詢不使用暫存排序。"""
     calls = (
         lambda: db.smart_review_candidates(
             version="1.20.1", limit=5, prioritize_named_keys=True
