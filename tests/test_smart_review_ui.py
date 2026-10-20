@@ -162,6 +162,23 @@ def test_run_panel_treats_zero_limit_as_unlimited(db):
     assert "本次將處理 28 筆" in panel.estimate_text.value
 
 
+def test_run_panel_does_not_refresh_page_when_progress_and_log_unchanged(db):
+    """驗證 Smart Review 輪詢沒有可見變更時不會重送整頁 UI。"""
+    from app.views.moddb.smart_review_dialog import SmartReviewDialog
+
+    page = _sync_page()
+    dialog = SmartReviewDialog(page, lambda: db, "1.21.1", None)
+    panel = dialog.run_panel
+
+    before = page.updated
+    panel.sync()
+    first = page.updated
+    panel.sync()
+
+    assert first == before + 1
+    assert page.updated == first
+
+
 def test_dialog_open_review_switches_tab_and_loads_run(db, monkeypatch):
     """驗證從執行結果前往審查會切分頁並載入該批次。"""
     from app.views.moddb.smart_review_dialog import SmartReviewDialog
@@ -706,6 +723,24 @@ def test_reviewer_apply_notifies_parent_and_advances_queue(reviewer, monkeypatch
     assert reviewer.total == 1
     assert reviewer.counts["applied"] == 2
     assert "已套用 1 筆" in reviewer.ctx.page.snacks[-1]
+
+
+def test_reviewer_keeps_current_draft_when_auto_save_fails(reviewer, monkeypatch):
+    """驗證自動保存失敗時不會換筆而遺失目前草稿。"""
+    monkeypatch.setattr(
+        reviewer_module,
+        "save_moddb_smart_review_draft_from_path",
+        lambda *_a, **_k: "stale",
+    )
+    reviewer.load_run("run-1")
+    current_ordinal = reviewer.row.ordinal
+    reviewer.draft.value = "尚未保存的草稿"
+    reviewer._on_draft_change()
+
+    reviewer._move(1)
+
+    assert reviewer.row.ordinal == current_ordinal
+    assert reviewer.draft.value == "尚未保存的草稿"
 
 
 def test_reviewer_stale_and_reject_messages(reviewer, monkeypatch):

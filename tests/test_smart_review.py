@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import threading
 
 import pytest
 import requests
@@ -16,6 +17,7 @@ from translation_tool.translation_db import (
     TranslationDB,
     WriteBackItem,
 )
+from translation_tool.translation_db import smart_review as smart_review_module
 from translation_tool.translation_db.models import SmartReviewSnapshot
 from translation_tool.translation_db.schema import SRC_AI, SRC_JAR_TW, SRC_MANUAL
 from translation_tool.translation_db.smart_review import (
@@ -1418,6 +1420,116 @@ def test_apply_candidate_is_cas_guarded_and_writes_history(db, monkeypatch):
     )
     assert db.revert(history.id) == 1
     assert db.entry_detail(candidate.entry_id).entry.source != SRC_MANUAL
+
+
+def test_json_apply_keeps_cas_read_and_write_in_one_transaction(db, monkeypatch):
+    """驗證 JSON 候選套用不會覆蓋同時完成的外部人工修改。"""
+
+    def fake_call(**kwargs):
+        """模擬可套用的模型回應。"""
+        item = kwargs["payload"]["items"][0]
+        return json.dumps(
+            {
+                "items": [
+                    {
+                        "id": item["id"],
+                        "decision": "suggest_revision",
+                        "suggested_zh_tw": f"{item['current_translation']}（模型建議）",
+                        "issue_types": ["style"],
+                        "evidence_ids": [],
+                        "confidence": 0.95,
+                        "reason": (
+                            f"原文 {item['source_text']} 與目前譯文 "
+                            f"{item['current_translation']} 需要確認人工修改是否仍然有效。"
+                        ),
+                    }
+                ]
+            }
+        )
+
+    monkeypatch.setattr(
+        "translation_tool.translation_db.smart_review.call_gemini_requests",
+        fake_call,
+    )
+    result = run_smart_review(db, model_name="gemini-test", api_key="test-key", limit=1)
+    candidate = db.list_smart_review_candidates(result.run_id)[0]
+    external = TranslationDB(db.path)
+    writer_started = threading.Event()
+    writer_finished = threading.Event()
+
+    def write_external_manual_translation():
+        """在候選快照讀取後嘗試寫入另一個人工譯文。"""
+        writer_started.set()
+        with external._tx() as conn:
+            conn.execute(
+                "INSERT INTO translation (entry_id, source, zh_tw, checker, review_status) "
+                "VALUES (?,?,?,'','unreviewed') ON CONFLICT(entry_id, source) DO UPDATE SET "
+                "zh_tw=excluded.zh_tw, checker='', review_status='unreviewed', "
+                "updated_at=CURRENT_TIMESTAMP",
+                (candidate.entry_id, SRC_MANUAL, "外部人工修改"),
+            )
+        writer_finished.set()
+
+    writer = threading.Thread(target=write_external_manual_translation)
+    snapshot_sql = smart_review_module._smart_review_current_snapshot_sql().strip()
+    original_connection = db._conn
+
+    class CursorProxy:
+        """在 SQLite 游標取回 CAS 快照後啟動外部寫入。"""
+
+        def __init__(self, cursor):
+            """保存原始游標與一次性回呼。"""
+            self._cursor = cursor
+            self._called = False
+
+        def fetchone(self):
+            """取回快照後讓另一個連線嘗試修改資料。"""
+            row = self._cursor.fetchone()
+            if not self._called:
+                self._called = True
+                writer.start()
+                assert writer_started.wait(1)
+                # 舊流程沒有交易鎖，外部寫入會在這裡完成；修復後會等
+                # 套用交易提交，再由外部連線完成，形成可驗證的差異。
+                writer_finished.wait(1.0)
+            return row
+
+        def __getattr__(self, name):
+            """轉送未攔截的游標操作。"""
+            return getattr(self._cursor, name)
+
+    class ConnectionProxy:
+        """只攔截 CAS 快照查詢，其餘 SQLite 操作維持原行為。"""
+
+        def execute(self, sql, params=()):
+            """執行 SQL，並在指定快照游標讀取後啟動競態測試。"""
+            cursor = original_connection.execute(sql, params)
+            if str(sql).strip() == snapshot_sql:
+                return CursorProxy(cursor)
+            return cursor
+
+        def __getattr__(self, name):
+            """轉送交易管理所需的其他連線操作。"""
+            return getattr(original_connection, name)
+
+    db._conn = ConnectionProxy()
+    try:
+        assert (
+            db.apply_smart_review_candidate(result.run_id, candidate.ordinal)
+            == "applied"
+        )
+        writer.join(timeout=5)
+        assert not writer.is_alive()
+        assert writer_finished.is_set()
+        assert (
+            db._q(
+                "SELECT zh_tw FROM translation WHERE entry_id=? AND source=?",
+                (candidate.entry_id, SRC_MANUAL),
+            )[0][0]
+            == "外部人工修改"
+        )
+    finally:
+        external.close()
 
 
 def test_draft_is_persisted_and_apply_uses_the_human_value(db, monkeypatch):

@@ -1562,59 +1562,6 @@ class SmartReviewMixin:
                 if not proposed.strip():
                     return "invalid_draft"
             entry_id = int(candidate["entry_id"])
-            with self._lock:
-                current = self._conn.execute(
-                    _smart_review_current_snapshot_sql(), (entry_id,)
-                ).fetchone()
-                expected = (
-                    candidate.get("kind"),
-                    candidate.get("mc_version"),
-                    candidate.get("mod_id"),
-                    candidate.get("entry_key"),
-                    candidate.get("en_us"),
-                    candidate.get("current_zh_tw"),
-                    candidate.get("effective_source"),
-                    candidate.get("review_status"),
-                    candidate.get("effective_revision"),
-                )
-                if current is None or tuple(current) != expected:
-                    history.update_candidate(
-                        run_id,
-                        ordinal,
-                        status="stale",
-                        validation_error="snapshot_stale",
-                    )
-                    return "stale"
-                current_manual = self._conn.execute(
-                    "SELECT zh_tw, checker, review_status, revision FROM translation "
-                    "WHERE entry_id=? AND source=?",
-                    (entry_id, SRC_MANUAL),
-                ).fetchone()
-            manual_snapshot = (
-                candidate.get("manual_zh_tw"),
-                candidate.get("manual_checker"),
-                candidate.get("manual_review_status"),
-                candidate.get("manual_revision"),
-            )
-            current_manual_snapshot = (
-                tuple(current_manual) if current_manual else (None, None, None, None)
-            )
-            if current_manual_snapshot != manual_snapshot:
-                history.update_candidate(
-                    run_id,
-                    ordinal,
-                    status="stale",
-                    validation_error="manual_snapshot_stale",
-                )
-                return "stale"
-            if current_manual is not None and current_manual[2] == "reviewed":
-                history.update_candidate(
-                    run_id,
-                    ordinal,
-                    status="stale",
-                    validation_error="manual_reviewed_requires_manual_edit",
-                )
-                return "manual_reviewed"
             if translation_issues(
                 str(candidate.get("en_us") or ""),
                 str(proposed or ""),
@@ -1628,42 +1575,100 @@ class SmartReviewMixin:
                     validation_error="suggested_zh_tw_format_invalid",
                 )
                 return "invalid_format"
-            previous_manual = current_manual
-            with self._tx() as conn:
-                conn.execute(
-                    "INSERT INTO translation (entry_id, source, zh_tw, checker, review_status) "
-                    "VALUES (?,?,?,'','unreviewed') ON CONFLICT(entry_id, source) DO UPDATE SET "
-                    "zh_tw=excluded.zh_tw, checker='', review_status='unreviewed', "
-                    "updated_at=CURRENT_TIMESTAMP",
-                    (entry_id, SRC_MANUAL, proposed),
+
+            expected = (
+                candidate.get("kind"),
+                candidate.get("mc_version"),
+                candidate.get("mod_id"),
+                candidate.get("entry_key"),
+                candidate.get("en_us"),
+                candidate.get("current_zh_tw"),
+                candidate.get("effective_source"),
+                candidate.get("review_status"),
+                candidate.get("effective_revision"),
+            )
+            manual_snapshot = (
+                candidate.get("manual_zh_tw"),
+                candidate.get("manual_checker"),
+                candidate.get("manual_review_status"),
+                candidate.get("manual_revision"),
+            )
+            stale_reason: str | None = None
+            result_status = "applied"
+            previous_manual = None
+            with self._tx(bump_generation_on_noop=False) as conn:
+                # BEGIN IMMEDIATE 必須早於快照讀取，讓 CAS 檢查與正式寫入
+                # 位於同一個 SQLite 交易，避免讀取後被其他連線插入修改。
+                current = conn.execute(
+                    _smart_review_current_snapshot_sql(), (entry_id,)
+                ).fetchone()
+                if current is None or tuple(current) != expected:
+                    result_status = "stale"
+                    stale_reason = "snapshot_stale"
+                else:
+                    current_manual = conn.execute(
+                        "SELECT zh_tw, checker, review_status, revision FROM translation "
+                        "WHERE entry_id=? AND source=?",
+                        (entry_id, SRC_MANUAL),
+                    ).fetchone()
+                    current_manual_snapshot = (
+                        tuple(current_manual)
+                        if current_manual
+                        else (None, None, None, None)
+                    )
+                    if current_manual_snapshot != manual_snapshot:
+                        result_status = "stale"
+                        stale_reason = "manual_snapshot_stale"
+                    elif current_manual is not None and current_manual[2] == "reviewed":
+                        result_status = "manual_reviewed"
+                        stale_reason = "manual_reviewed_requires_manual_edit"
+                    else:
+                        previous_manual = current_manual
+                        conn.execute(
+                            "INSERT INTO translation (entry_id, source, zh_tw, checker, review_status) "
+                            "VALUES (?,?,?,'','unreviewed') ON CONFLICT(entry_id, source) DO UPDATE SET "
+                            "zh_tw=excluded.zh_tw, checker='', review_status='unreviewed', "
+                            "updated_at=CURRENT_TIMESTAMP",
+                            (entry_id, SRC_MANUAL, proposed),
+                        )
+                        new_revision = conn.execute(
+                            "SELECT revision FROM translation WHERE entry_id=? AND source=?",
+                            (entry_id, SRC_MANUAL),
+                        ).fetchone()[0]
+                        conn.execute(
+                            "INSERT INTO history (entry_id, batch, actor, action, old_zh_tw, new_zh_tw, "
+                            "prev_manual, prev_checker, prev_review_status, new_checker, new_review_status, "
+                            "prev_revision, new_revision, source_id, note) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                            (
+                                entry_id,
+                                batch,
+                                actor,
+                                "smart_review_apply",
+                                candidate.get("current_zh_tw"),
+                                proposed,
+                                previous_manual[0] if previous_manual else None,
+                                previous_manual[1] if previous_manual else None,
+                                previous_manual[2] if previous_manual else None,
+                                "",
+                                "unreviewed",
+                                previous_manual[3] if previous_manual else None,
+                                new_revision,
+                                SRC_MANUAL,
+                                f"run={run_id}; ordinal={ordinal}",
+                            ),
+                        )
+                        self._refresh(conn, [entry_id])
+
+            if result_status != "applied":
+                history.update_candidate(
+                    run_id,
+                    ordinal,
+                    status="stale",
+                    validation_error=stale_reason,
                 )
-                new_revision = conn.execute(
-                    "SELECT revision FROM translation WHERE entry_id=? AND source=?",
-                    (entry_id, SRC_MANUAL),
-                ).fetchone()[0]
-                conn.execute(
-                    "INSERT INTO history (entry_id, batch, actor, action, old_zh_tw, new_zh_tw, "
-                    "prev_manual, prev_checker, prev_review_status, new_checker, new_review_status, "
-                    "prev_revision, new_revision, source_id, note) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                    (
-                        entry_id,
-                        batch,
-                        actor,
-                        "smart_review_apply",
-                        candidate.get("current_zh_tw"),
-                        proposed,
-                        previous_manual[0] if previous_manual else None,
-                        previous_manual[1] if previous_manual else None,
-                        previous_manual[2] if previous_manual else None,
-                        "",
-                        "unreviewed",
-                        previous_manual[3] if previous_manual else None,
-                        new_revision,
-                        SRC_MANUAL,
-                        f"run={run_id}; ordinal={ordinal}",
-                    ),
+                return (
+                    "manual_reviewed" if result_status == "manual_reviewed" else "stale"
                 )
-                self._refresh(conn, [entry_id])
             history.update_candidate(
                 run_id,
                 ordinal,

@@ -717,7 +717,10 @@ class SmartReviewReviewer:
         if not self._dirty():
             then()
             return
-        self._write_draft(lambda _status: then(), quiet=True)
+        self._write_draft(
+            lambda status: then() if status == "saved" else None,
+            quiet=True,
+        )
 
     # ──────────────── 動作 ────────────────
 
@@ -742,7 +745,7 @@ class SmartReviewReviewer:
             )
 
         def done(status, error: str | None) -> None:
-            """依結果顯示提示；自動儲存失敗時不阻擋換筆。"""
+            """依結果顯示提示；自動儲存失敗時保留目前候選。"""
             self.set_busy(False)
             if error:
                 show_snack(self.ctx.page, f"草稿儲存失敗：{error}", C.RED)

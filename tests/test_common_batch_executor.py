@@ -9,6 +9,7 @@ from translation_tool.core.common_batch_executor import (
     classify_provider_error,
 )
 from translation_tool.core.lm_translator_shared_loop import (
+    _call_translate_batch,
     translate_items_with_cache_loop,
 )
 
@@ -182,3 +183,20 @@ def test_shared_loop_keeps_provider_and_network_retry_metrics_separate():
         "network_retry_wait",
         "retry_wait",
     ]
+
+
+def test_shared_loop_forwards_provider_events_through_plugin_wrapper():
+    """驗證 plugin wrapper 不會截斷共用批次的 provider telemetry。"""
+    received = []
+
+    def wrapped(batch, total, *, event_callback=None):
+        """接收 shared loop callback 的最小 plugin wrapper。"""
+        received.append((batch, total, event_callback))
+        return [{**batch[0], "text": "甲"}], "AUTO"
+
+    callback = lambda event: event
+    result = _call_translate_batch(wrapped, [{"text": "A"}], 1, callback)
+
+    assert result[1] == "AUTO"
+    assert received[0][1] == 1
+    assert received[0][2] is callback

@@ -63,6 +63,7 @@ class SmartReviewRunPanel:
         self._estimate_seq = 0
         self._poller = PollerHandle()
         self._debounce = Debouncer(lambda: ctx.page, 0.6)
+        self._last_sync_signature: tuple[object, ...] | None = None
         self._build_scope_controls(version, mod_id, kind, effective_source, query)
         self._build_run_controls()
         self.control = ft.Column(
@@ -514,6 +515,7 @@ class SmartReviewRunPanel:
             return
         self.log_view.clear()
         self.result_box.visible = False
+        self._last_sync_signature = None
         self._render_running()
         self._start_polling()
 
@@ -558,17 +560,37 @@ class SmartReviewRunPanel:
     def sync(self) -> None:
         """把目前任務狀態與 log 套用到畫面。"""
         state = self.job.state
+        new_entries = self._sync_log(update=False)
         self._render_progress(state)
-        self._sync_log(update=False)
-        self.ctx.update()
+        signature = self._progress_signature(state)
+        if new_entries or signature != self._last_sync_signature:
+            self._last_sync_signature = signature
+            self.ctx.update()
 
     def _sync_log(self, *, update: bool = True) -> None:
         """從任務的 TaskSession 同步新增的 log。"""
         session = self.job.session
         if session is None:
-            return
+            return []
         entries = session.snapshot()["logs"]
-        self.log_view.sync_entries(entries, update=update)
+        return self.log_view.sync_entries(entries, update=update)
+
+    @staticmethod
+    def _progress_signature(state: SmartReviewJobState) -> tuple[object, ...]:
+        """建立目前畫面可見值的簽章，避免沒有變更時重送整頁 UI。"""
+        return (
+            state.phase,
+            state.status,
+            state.run_id,
+            state.selected,
+            state.processed,
+            state.valid,
+            state.invalid,
+            state.request_errors,
+            state.cancel_requested,
+            format_duration(state.elapsed()),
+            format_duration(state.eta_seconds()),
+        )
 
     def _render_running(self) -> None:
         """切換到執行中的畫面：鎖定設定、顯示進度與停止按鈕。"""
@@ -582,6 +604,7 @@ class SmartReviewRunPanel:
         self.result_box.visible = False
         self.status_text.color = C.MUTED
         self._render_progress(self.job.state)
+        self._last_sync_signature = self._progress_signature(self.job.state)
         self.ctx.update()
 
     def _render_progress(self, state: SmartReviewJobState) -> None:

@@ -592,8 +592,8 @@ def translate_ftb_pending_to_zh_tw(
         res = run_translator_skeleton(
             items_to_translate,
             total_for_smart=global_total_to_translate,
-            translate_batch_smart=lambda batch, total: translate_batch_smart(
-                batch, total=total
+            translate_batch_smart=lambda batch, total, *, event_callback=None: (
+                translate_batch_smart(batch, total=total, event_callback=event_callback)
             ),
             sleep_seconds_between_batches=0.0,
             write_new_cache=bool(write_new_cache),  # ✅ 改成吃參數
