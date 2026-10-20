@@ -35,16 +35,33 @@ def smart_review_format_diagnostics(
 
 
 def smart_review_model_options(config: dict | None = None) -> list[tuple[str, str]]:
-    """Return enabled model labels without exposing credentials."""
-    cfg = config or load_config()
-    models = cfg.get("lm_translator", {}).get("models", {})
+    """Return model choices valid for the configured smart-review provider.
+
+    Gemini models come from the enabled ``lm_translator.models`` catalog.  The
+    ChatGPT/OAuth model is stored separately in ``lm_translator.chatgpt_model``
+    and must be surfaced here instead of falling back to the Gemini catalog.
+    """
+    cfg = load_config() if config is None else config
+    lm_config = cfg.get("lm_translator", {})
+    if not isinstance(lm_config, dict):
+        return []
+
+    provider = str(lm_config.get("provider") or "gemini").strip().lower()
+    if provider == "chatgpt":
+        model_name = str(lm_config.get("chatgpt_model") or "").strip()
+        return [(model_name, model_name)] if model_name else []
+
+    models = lm_config.get("models", {})
     if not isinstance(models, dict):
         return []
-    return [
+
+    options = [
         (str(name), str(name))
         for name, settings in models.items()
         if isinstance(settings, dict) and settings.get("enabled", False)
     ]
+    preferred = "gemini-3.1-flash-lite"
+    return sorted(options, key=lambda option: option[0] != preferred)
 
 
 def _open(
@@ -185,19 +202,6 @@ def count_moddb_smart_review_candidates_from_path(
         db.close()
 
 
-def list_moddb_smart_review_runs_from_path(
-    path: str | Path,
-    priority: tuple[int, ...],
-    *,
-    limit: int = 20,
-) -> list[dict[str, Any]]:
-    db = _open(path, priority, readonly=True)
-    try:
-        return db.list_smart_review_runs(limit=limit)
-    finally:
-        db.close()
-
-
 def get_moddb_smart_review_run_from_path(
     path: str | Path, priority: tuple[int, ...], run_id: str
 ) -> dict[str, Any] | None:
@@ -258,7 +262,6 @@ __all__ = [
     "count_moddb_smart_review_candidates_from_path",
     "get_moddb_smart_review_run_from_path",
     "list_moddb_smart_review_candidates_from_path",
-    "list_moddb_smart_review_runs_from_path",
     "preview_moddb_smart_review_from_path",
     "reject_moddb_smart_review_candidate_from_path",
     "run_moddb_smart_review_from_path",

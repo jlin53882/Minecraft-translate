@@ -144,11 +144,7 @@ class SmartReviewDialog:
         )
         options = smart_review_model_options()
         kit.set_dropdown_options(self.model_dd, options)
-        self.model_dd.value = (
-            "gemini-3.1-flash-lite"
-            if any(key == "gemini-3.1-flash-lite" for key, _ in options)
-            else (options[0][0] if options else None)
-        )
+        self.model_dd.value = options[0][0] if options else None
         self.limit_field = kit.text_field(
             "上限（筆）", value="1000", width=150, on_change=self._invalidate
         )

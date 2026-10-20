@@ -427,7 +427,52 @@ def test_smart_review_snapshot_is_immutable_value_object():
         snapshot.current_zh_tw = "changed"
 
 
-def test_smart_review_dialog_builds_preview_and_run_controls(db):
+def test_smart_review_model_options_use_configured_chatgpt_model():
+    from app.services_impl.moddb_smart_review_service import smart_review_model_options
+
+    config = {
+        "lm_translator": {
+            "provider": "chatgpt",
+            "chatgpt_model": "gpt-configured",
+            "models": {"gemini-3.1-flash-lite": {"enabled": True}},
+        }
+    }
+
+    assert smart_review_model_options(config) == [
+        ("gpt-configured", "gpt-configured")
+    ]
+
+
+def test_smart_review_model_options_keep_gemini_preference_for_gemini():
+    from app.services_impl.moddb_smart_review_service import smart_review_model_options
+
+    config = {
+        "lm_translator": {
+            "provider": "gemini",
+            "chatgpt_model": "gpt-ignored",
+            "models": {
+                "gemini-3.5-flash-lite": {"enabled": True},
+                "gemini-3.1-flash-lite": {"enabled": True},
+            },
+        }
+    }
+
+    assert smart_review_model_options(config) == [
+        ("gemini-3.1-flash-lite", "gemini-3.1-flash-lite"),
+        ("gemini-3.5-flash-lite", "gemini-3.5-flash-lite"),
+    ]
+
+
+def test_smart_review_dialog_builds_preview_and_run_controls(db, monkeypatch):
+    monkeypatch.setattr(
+        "app.services_impl.moddb_smart_review_service.load_config",
+        lambda: {
+            "lm_translator": {
+                "provider": "gemini",
+                "models": {"gemini-3.1-flash-lite": {"enabled": True}},
+            }
+        },
+    )
     from app.views.moddb.smart_review_dialog import SmartReviewDialog
     from tests.conftest import mock_page
 
