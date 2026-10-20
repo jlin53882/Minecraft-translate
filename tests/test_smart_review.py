@@ -83,6 +83,14 @@ def test_snapshot_uses_implicit_unreviewed_for_non_manual_sources(db):
     assert all(item.effective_source != SRC_MANUAL for item in snapshots)
 
 
+def test_smart_review_limit_zero_selects_all_candidates(db):
+    """驗證智慧校對上限 0 代表不限，而不是選取 0 筆。"""
+    snapshots = db.smart_review_candidates(version="1.21.1", limit=0)
+
+    assert len(snapshots) == db.count_smart_review_candidates(version="1.21.1")
+    assert len(snapshots) == 2
+
+
 def test_smart_review_payload_carries_target_version(db):
     """驗證模型負載包含目標 Minecraft 版本以避免跨版本誤用 context。"""
     snapshot = db.smart_review_candidates(version="1.21.1", limit=1)[0]
@@ -600,6 +608,15 @@ def test_run_persists_candidates_without_writing_translation(db, monkeypatch):
     run = db.get_smart_review_run(result.run_id)
     assert run["scope"]["effective_source"] == SRC_AI
     assert db.list_smart_review_runs(limit=1)[0]["id"] == result.run_id
+    from translation_tool.translation_db.smart_review_history import (
+        history_directory_for_db,
+    )
+
+    history_files = list(history_directory_for_db(db.path).glob("*.json"))
+    assert len(history_files) == 1
+    assert json.loads(history_files[0].read_text(encoding="utf-8"))["id"] == result.run_id
+    assert db._q("SELECT COUNT(*) FROM smart_review_run")[0][0] == 0
+    assert db._q("SELECT COUNT(*) FROM smart_review_candidate")[0][0] == 0
 
 
 def test_smart_review_reports_search_and_api_timing(db, monkeypatch):
@@ -1469,12 +1486,15 @@ def test_v7_smart_review_is_readable_and_migrates_to_v8(tmp_path):
     readonly = TranslationDB(path, readonly=True)
     old_run = readonly.get_smart_review_run(run_id)
     old_candidate = readonly.list_smart_review_candidates(run_id)[0]
-    assert old_run["scope"] == {}
+    assert old_run["scope"] == {"version": "1.21.1", "effective_source": SRC_AI}
     assert old_candidate.draft_zh_tw is None
     readonly.close()
 
     migrated = TranslationDB(path)
-    assert migrated.get_smart_review_run(run_id)["scope"] == {}
+    assert migrated.get_smart_review_run(run_id)["scope"] == {
+        "version": "1.21.1",
+        "effective_source": SRC_AI,
+    }
     assert migrated._smart_review_has_column("smart_review_run", "scope_json")
     assert migrated._smart_review_has_column("smart_review_candidate", "draft_zh_tw")
     migrated.close()

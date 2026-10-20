@@ -151,9 +151,9 @@ class SmartReviewRunPanel:
         kit.set_dropdown_options(self.model_dd, options)
         self.model_dd.value = options[0][0] if options else None
         self.limit_field = kit.text_field(
-            "本次處理上限（筆）",
+            "本次處理上限（筆，0=不限）",
             value="1000",
-            width=170,
+            width=190,
             on_change=lambda _e: self._update_estimate_text(),
         )
         self.batch_field = kit.text_field(
@@ -437,21 +437,22 @@ class SmartReviewRunPanel:
 
     def _update_estimate_text(self) -> None:
         """依目前筆數、上限與每批大小更新估算文字，不查詢資料庫。"""
-        limit = self._read_int(self.limit_field)
+        limit = self._read_int(self.limit_field, minimum=0)
         batch = self._read_int(self.batch_field)
         if limit is None or batch is None:
-            self.estimate_text.value = "上限與每批都必須是大於 0 的整數。"
+            self.estimate_text.value = "上限必須是 0 或正整數；每批必須是大於 0 的整數。"
             self.estimate_text.color = C.RED
         elif self._total is None:
             self.estimate_text.value = "正在等待候選筆數…"
             self.estimate_text.color = C.MUTED
         else:
             batch = min(batch, 100)
-            planned = min(limit, self._total)
+            planned = self._total if limit == 0 else min(limit, self._total)
             batches = math.ceil(planned / batch) if planned else 0
+            limit_label = "不限" if limit == 0 else format_count(limit)
             self.estimate_text.value = (
                 f"符合範圍的未審核 AI 譯文共 {format_count(self._total)} 筆；"
-                f"本次將處理 {format_count(planned)} 筆，約 {batches} 批"
+                f"本次將處理 {format_count(planned)} 筆（上限 {limit_label}），約 {batches} 批"
                 f"（每批最多 100 筆）。"
             )
             self.estimate_text.color = C.MUTED
@@ -470,10 +471,10 @@ class SmartReviewRunPanel:
             raise ValueError("請先選擇遊戲版本")
         if not model:
             raise ValueError("請先選擇校對模型（設定頁需啟用至少一個模型）")
-        limit = self._read_int(self.limit_field)
+        limit = self._read_int(self.limit_field, minimum=0)
         batch = self._read_int(self.batch_field)
         if limit is None:
-            raise ValueError("上限必須是大於 0 的整數")
+            raise ValueError("上限必須是 0 或正整數")
         if batch is None:
             raise ValueError("每批必須是大於 0 的整數")
         mod_id, kind, source, query = self._scope_values()

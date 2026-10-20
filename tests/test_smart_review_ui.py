@@ -144,6 +144,24 @@ def test_run_panel_shows_scope_count_when_attached(db, monkeypatch):
     assert "符合範圍的未審核 AI 譯文共 28 筆" in dialog.run_panel.estimate_text.value
 
 
+def test_run_panel_treats_zero_limit_as_unlimited(db):
+    """驗證上限 0 代表處理全部候選，但每批仍維持正整數。"""
+    from app.views.moddb.smart_review_dialog import SmartReviewDialog
+
+    dialog = SmartReviewDialog(_sync_page(), lambda: db, "1.21.1", None)
+    panel = dialog.run_panel
+    panel._total = 28
+    panel.limit_field.value = "0"
+    panel.batch_field.value = "40"
+    panel._update_estimate_text()
+
+    request = panel._request()
+    assert request.limit == 0
+    assert request.batch_size == 40
+    assert "上限 不限" in panel.estimate_text.value
+    assert "本次將處理 28 筆" in panel.estimate_text.value
+
+
 def test_dialog_open_review_switches_tab_and_loads_run(db, monkeypatch):
     """驗證從執行結果前往審查會切分頁並載入該批次。"""
     from app.views.moddb.smart_review_dialog import SmartReviewDialog
@@ -778,17 +796,17 @@ def test_run_breakdown_counts_statuses_and_top_errors(db):
         batch_size=2,
         scope={},
     )
-    with db._tx() as conn:
-        conn.execute(
-            "UPDATE smart_review_candidate SET status='invalid', "
-            "validation_error='reason 不可為空' WHERE run_id=? AND ordinal=1",
-            (run_id,),
-        )
-        conn.execute(
-            "UPDATE smart_review_candidate SET status='invalid', "
-            "validation_error='reason 不可為空' WHERE run_id=? AND ordinal=2",
-            (run_id,),
-        )
+    from translation_tool.translation_db.smart_review_history import (
+        SmartReviewHistoryStore,
+    )
+
+    history = SmartReviewHistoryStore(db.path)
+    history.update_candidate(
+        run_id, 1, status="invalid", validation_error="reason 不可為空"
+    )
+    history.update_candidate(
+        run_id, 2, status="invalid", validation_error="reason 不可為空"
+    )
     breakdown = db.smart_review_run_breakdown(run_id)
     assert breakdown["status"] == {"invalid": 2}
     assert breakdown["errors"] == [("reason 不可為空", 2)]
