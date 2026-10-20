@@ -602,6 +602,35 @@ def test_run_persists_candidates_without_writing_translation(db, monkeypatch):
     assert db.list_smart_review_runs(limit=1)[0]["id"] == result.run_id
 
 
+def test_smart_review_reports_search_and_api_timing(db, monkeypatch):
+    """驗證進度與持久化 metrics 能區分搜尋、API 與批次處理耗時。"""
+    events = []
+    monkeypatch.setattr(
+        "translation_tool.translation_db.smart_review.call_gemini_requests",
+        lambda **kwargs: _review_response(kwargs["payload"]["items"]),
+    )
+
+    result = run_smart_review(
+        db,
+        model_name="gemini-test",
+        api_key="test-key",
+        limit=2,
+        batch_size=1,
+        progress=events.append,
+    )
+
+    assert events[0]["phase"] == "selection_complete"
+    assert "selection_seconds" in events[0]["timing"]
+    batch_events = [event for event in events if event["phase"] == "batch_complete"]
+    assert len(batch_events) == 2
+    assert {"api_seconds", "parse_seconds", "result_write_seconds"} <= set(
+        batch_events[0]["timing"]
+    )
+    assert result.metrics["selection_seconds"] >= 0
+    assert result.metrics["api_seconds"] >= 0
+    assert result.metrics["batch_count"] == 2
+
+
 def test_request_failures_and_cancellation_are_distinct_from_invalid(db, monkeypatch):
     """驗證請求失敗、取消與無效回應會被正確區分。"""
 

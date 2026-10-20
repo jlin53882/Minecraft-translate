@@ -437,25 +437,22 @@ class SmartReviewRunPanel:
 
     def _update_estimate_text(self) -> None:
         """依目前筆數、上限與每批大小更新估算文字，不查詢資料庫。"""
-        if self.job.running:
-            return
         limit = self._read_int(self.limit_field)
         batch = self._read_int(self.batch_field)
         if limit is None or batch is None:
             self.estimate_text.value = "上限與每批都必須是大於 0 的整數。"
             self.estimate_text.color = C.RED
         elif self._total is None:
-            self.estimate_text.value = ""
+            self.estimate_text.value = "正在等待候選筆數…"
+            self.estimate_text.color = C.MUTED
         else:
             batch = min(batch, 100)
             planned = min(limit, self._total)
             batches = math.ceil(planned / batch) if planned else 0
             self.estimate_text.value = (
-                f"符合條件的未審核 AI 譯文共 {format_count(self._total)} 筆；"
+                f"符合範圍的未審核 AI 譯文共 {format_count(self._total)} 筆；"
                 f"本次將處理 {format_count(planned)} 筆，約 {batches} 批"
                 f"（每批最多 100 筆）。"
-                if self._total
-                else "目前條件沒有未審核且有譯文的條目。"
             )
             self.estimate_text.color = C.MUTED
         self.ctx.update()
@@ -536,6 +533,7 @@ class SmartReviewRunPanel:
         elif state.phase in {"done", "failed"}:
             self._sync_log()
             self._render_finished(state)
+            self.refresh_estimate()
         else:
             self.refresh_estimate()
 

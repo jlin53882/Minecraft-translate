@@ -300,7 +300,8 @@ def open_smart_review(panel, _e=None) -> None:
         return
 
     def after_complete(_result=None) -> None:
-        """在智慧校對完成後重新整理目前頁面的資料與狀態。"""
+        """智慧校對套用完成後重載目前條目頁，再通知頁籤外層。"""
+        refresh_entry_filter(panel, keep_selection=True)
         if panel._on_changed:
             panel._on_changed()
 

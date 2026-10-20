@@ -106,6 +106,17 @@ def format_duration(seconds: float | None) -> str:
     return f"{hours}:{minutes:02d}:{secs:02d}" if hours else f"{minutes:02d}:{secs:02d}"
 
 
+def _format_timing(seconds: float | None) -> str:
+    """把診斷用的耗時格式化成毫秒或秒，避免短階段都顯示成 00:00。"""
+    if seconds is None:
+        return "--"
+    try:
+        value = max(0.0, float(seconds))
+    except (TypeError, ValueError):
+        return "--"
+    return f"{value * 1000:.0f} ms" if value < 1 else f"{value:.2f} s"
+
+
 class SmartReviewJob:
     """頁面層級的智慧校對任務；視窗關閉不會中斷，重新開啟時可接續顯示。"""
 
@@ -261,17 +272,43 @@ class SmartReviewJob:
             state.request_errors = int(snapshot.get("request_errors", 0) or 0)
             state.status = str(snapshot.get("status", "running"))
             session.set_progress(state.fraction)
+            phase = str(snapshot.get("phase") or "")
+            timing = snapshot.get("timing")
+            if phase == "selection_complete" and isinstance(timing, dict):
+                session.add_log(
+                    f"範圍搜尋完成：選取 {state.selected:,} 筆；"
+                    f"搜尋 {_format_timing(timing.get('selection_seconds'))}、"
+                    f"建立批次 {_format_timing(timing.get('run_record_seconds'))}。",
+                    "info",
+                )
             delta = state.processed - last["processed"]
             if delta <= 0:
                 return
             new_errors = state.request_errors - last["errors"]
-            session.add_log(
-                f"已處理 {state.processed:,} / {state.selected:,} 筆（本批 +{delta}）："
-                f"有效 +{state.valid - last['valid']}、"
-                f"無效 +{state.invalid - last['invalid']}、"
-                f"請求錯誤 +{new_errors}；預估剩餘 {format_duration(state.eta_seconds())}",
-                "warning" if new_errors else "info",
-            )
+            if phase == "batch_complete" and isinstance(timing, dict):
+                session.add_log(
+                    f"已處理 {state.processed:,} / {state.selected:,} 筆；"
+                    f"第 {timing.get('batch_number', '?')} 批 "
+                    f"（{timing.get('ordinal_start', '?')}～"
+                    f"{timing.get('ordinal_end', '?')}）完成："
+                    f"準備 {_format_timing(timing.get('preparation_seconds'))}、"
+                    f"等待 {_format_timing(timing.get('rate_limit_wait_seconds'))}、"
+                    f"API {_format_timing(timing.get('api_seconds'))}、"
+                    f"解析 {_format_timing(timing.get('parse_seconds'))}、"
+                    f"寫入 {_format_timing(timing.get('result_write_seconds'))}、"
+                    f"本批 {_format_timing(timing.get('elapsed_seconds'))}；"
+                    f"請求 {timing.get('attempts', 0)} 次。",
+                    "warning" if new_errors else "info",
+                )
+            else:
+                session.add_log(
+                    f"已處理 {state.processed:,} / {state.selected:,} 筆"
+                    f"（本批 +{delta}）：有效 +{state.valid - last['valid']}、"
+                    f"無效 +{state.invalid - last['invalid']}、"
+                    f"請求錯誤 +{new_errors}；預估剩餘 "
+                    f"{format_duration(state.eta_seconds())}",
+                    "warning" if new_errors else "info",
+                )
             last.update(
                 processed=state.processed,
                 valid=state.valid,
@@ -305,6 +342,7 @@ class SmartReviewJob:
             f"耗時 {format_duration(state.elapsed())}",
             "warning" if result.status in {"failed", "partial"} else "system",
         )
+        self._log_timing_breakdown(result, session)
         session.set_progress(1.0 if result.status == "completed" else state.fraction)
         session.set_summary(
             {
@@ -318,6 +356,37 @@ class SmartReviewJob:
         if result.status == "failed":
             session.set_error()
         state.phase = "done"
+
+    def _log_timing_breakdown(self, result: Any, session: TaskSession) -> None:
+        """把搜尋、API 與資料庫階段的總耗時寫入執行紀錄。"""
+        metrics = getattr(result, "metrics", None)
+        if not isinstance(metrics, dict) or "selection_seconds" not in metrics:
+            return
+        timing_keys = (
+            "setup_seconds",
+            "selection_seconds",
+            "run_record_seconds",
+            "preparation_seconds",
+            "rate_limit_wait_seconds",
+            "api_seconds",
+            "parse_seconds",
+            "result_write_seconds",
+        )
+        accounted = sum(float(metrics.get(key) or 0) for key in timing_keys)
+        total = float(metrics.get("duration_seconds") or 0)
+        other = max(0.0, total - accounted)
+        session.add_log(
+            f"耗時拆解：搜尋 {_format_timing(metrics.get('selection_seconds'))}、"
+            f"API {_format_timing(metrics.get('api_seconds'))}、"
+            f"等待配額 {_format_timing(metrics.get('rate_limit_wait_seconds'))}、"
+            f"解析 {_format_timing(metrics.get('parse_seconds'))}、"
+            f"寫入 DB {_format_timing(metrics.get('result_write_seconds'))}、"
+            f"其他／重試 {_format_timing(other)}；"
+            f"共 {metrics.get('batch_count', 0)} 批、"
+            f"API 嘗試 {metrics.get('request_attempts', 0)} 次、"
+            f"重試 {metrics.get('retry_count', 0)} 次。",
+            "system",
+        )
 
     def _load_breakdown(
         self, request: SmartReviewRequest, run_id: str, session: TaskSession

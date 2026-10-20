@@ -1760,6 +1760,7 @@ def run_smart_review(
     """執行有界的 AI 智慧校對，只保存候選，不直接寫入翻譯。"""
     if not model_name.strip():
         raise ValueError("smart review 必須指定模型")
+    workflow_started = time.monotonic()
     lm_config = lm_config if isinstance(lm_config, dict) else {}
     # service path 不預先選 key，仍由既有 ApiKeyCycle 負責 Gemini 輪替。
     key_cycle = ApiKeyCycle() if provider == "gemini" and not api_key.strip() else None
@@ -1778,6 +1779,7 @@ def run_smart_review(
         ).strip()
         if profile_id:
             chatgpt_options["profile_id"] = profile_id
+    selection_started = time.monotonic()
     snapshots = db.smart_review_candidates(
         version=version,
         mod_id=mod_id,
@@ -1789,7 +1791,9 @@ def run_smart_review(
         require_reviewed_reference=require_reviewed_reference,
         prioritize_named_keys=prioritize_named_keys,
     )
+    selection_seconds = round(time.monotonic() - selection_started, 3)
     batch_size = max(1, min(int(batch_size), 100))
+    run_record_started = time.monotonic()
     run_id = db.create_smart_review_run(
         snapshots,
         provider=provider,
@@ -1808,11 +1812,12 @@ def run_smart_review(
             "prioritize_named_keys": prioritize_named_keys,
         },
     )
+    run_record_seconds = round(time.monotonic() - run_record_started, 3)
     processed = valid = invalid = request_errors = 0
     no_change = suggestions = needs_context = 0
     output_token_cap = _smart_review_output_token_cap(lm_config)
     input_token_budget = _smart_review_input_budget(lm_config, provider, model_name)
-    started = time.monotonic()
+    started = workflow_started
     cancelled = False
     failed = False
     token_totals: dict[str, int | None] = {
@@ -1821,6 +1826,16 @@ def run_smart_review(
     }
     metrics: dict[str, Any] = {
         "duration_seconds": 0.0,
+        "setup_seconds": round(max(0.0, selection_started - workflow_started), 3),
+        "selection_seconds": selection_seconds,
+        "run_record_seconds": run_record_seconds,
+        "preparation_seconds": 0.0,
+        "rate_limit_wait_seconds": 0.0,
+        "api_seconds": 0.0,
+        "parse_seconds": 0.0,
+        "result_write_seconds": 0.0,
+        "batch_seconds": 0.0,
+        "batch_count": 0,
         "prompt_tokens": None,
         "output_tokens": None,
         "no_change_count": 0,
@@ -1870,35 +1885,85 @@ def run_smart_review(
         classes[code] = int(classes.get(code, 0)) + 1
         return code
 
-    def report_progress() -> None:
-        """回報目前已處理數量與統計。"""
+    def report_progress(
+        *, phase: str = "batch", timing: dict[str, Any] | None = None
+    ) -> None:
+        """回報目前已處理數量、階段與可診斷的耗時。"""
         if progress is not None:
-            progress(
-                {
-                    "run_id": run_id,
-                    "processed": processed,
-                    "selected": len(snapshots),
-                    "valid": valid,
-                    "invalid": invalid,
-                    "request_errors": request_errors,
-                    "status": "running",
-                }
-            )
+            snapshot: dict[str, Any] = {
+                "run_id": run_id,
+                "processed": processed,
+                "selected": len(snapshots),
+                "valid": valid,
+                "invalid": invalid,
+                "request_errors": request_errors,
+                "status": "running",
+                "phase": phase,
+            }
+            if timing is not None:
+                snapshot["timing"] = timing
+            progress(snapshot)
+
+    def finish_batch_timing(
+        timing: dict[str, Any],
+        started_at: float,
+        attempts_before: int,
+        status: str,
+    ) -> dict[str, Any]:
+        """結算一個邏輯批次的耗時並回傳不含敏感資料的診斷摘要。"""
+        elapsed = round(time.monotonic() - started_at, 3)
+        finalized = dict(timing)
+        finalized["elapsed_seconds"] = elapsed
+        finalized["attempts"] = max(
+            0, int(metrics["request_attempts"]) - attempts_before
+        )
+        finalized["status"] = status
+        metrics["batch_count"] = int(metrics["batch_count"]) + 1
+        metrics["batch_seconds"] = round(
+            float(metrics["batch_seconds"]) + elapsed, 3
+        )
+        return finalized
+
+    report_progress(
+        phase="selection_complete",
+        timing={
+            "selection_seconds": selection_seconds,
+            "run_record_seconds": run_record_seconds,
+        },
+    )
 
     try:
         position = 0
         adaptive_batch_size = batch_size
+        batch_number = 0
         while position < len(snapshots):
             if is_cancelled() or (cancel_check is not None and cancel_check()):
                 cancelled = True
                 break
             current_size = min(adaptive_batch_size, len(snapshots) - position)
+            batch_number += 1
+            batch_started = time.monotonic()
+            attempts_before = int(metrics["request_attempts"])
+            batch_timing: dict[str, Any] = {
+                "batch_number": batch_number,
+                "ordinal_start": int(snapshots[position].ordinal),
+                "ordinal_end": int(
+                    snapshots[min(len(snapshots) - 1, position + current_size - 1)].ordinal
+                ),
+                "preparation_seconds": 0.0,
+                "rate_limit_wait_seconds": 0.0,
+                "api_seconds": 0.0,
+                "parse_seconds": 0.0,
+                "result_write_seconds": 0.0,
+            }
             abort_remaining = False
             while True:
                 if is_cancelled() or (cancel_check is not None and cancel_check()):
                     cancelled = True
                     break
                 batch = snapshots[position : position + current_size]
+                batch_timing["ordinal_end"] = int(batch[-1].ordinal)
+                preparation_started = time.monotonic()
                 payload = build_smart_review_payload(batch)
                 response_schema = smart_review_response_schema(
                     [str(item.ordinal) for item in batch]
@@ -1907,6 +1972,15 @@ def run_smart_review(
                     payload, response_schema
                 )
                 metrics["last_estimated_input_tokens"] = round(estimated_input, 2)
+                preparation_seconds = time.monotonic() - preparation_started
+                batch_timing["preparation_seconds"] = round(
+                    float(batch_timing["preparation_seconds"]) + preparation_seconds,
+                    3,
+                )
+                metrics["preparation_seconds"] = round(
+                    float(metrics["preparation_seconds"]) + preparation_seconds,
+                    3,
+                )
                 if (
                     input_token_budget is not None
                     and estimated_input > input_token_budget
@@ -1930,7 +2004,15 @@ def run_smart_review(
                     )
                     processed += len(batch)
                     position += len(batch)
-                    report_progress()
+                    report_progress(
+                        phase="batch_complete",
+                        timing=finish_batch_timing(
+                            batch_timing,
+                            batch_started,
+                            attempts_before,
+                            "input_budget_exceeded",
+                        ),
+                    )
                     break
 
                 retry_runtime = _SmartReviewRetryRuntime(
@@ -1960,25 +2042,51 @@ def run_smart_review(
 
                     attempt_meta: dict[str, Any] | None = None
                     try:
-                        _wait_for_request_slot(
-                            retry_runtime,
-                            model_name,
-                            cancel_check=cancel_check,
-                        )
+                        wait_started = time.monotonic()
+                        try:
+                            _wait_for_request_slot(
+                                retry_runtime,
+                                model_name,
+                                cancel_check=cancel_check,
+                            )
+                        finally:
+                            wait_seconds = time.monotonic() - wait_started
+                            batch_timing["rate_limit_wait_seconds"] = round(
+                                float(batch_timing["rate_limit_wait_seconds"])
+                                + wait_seconds,
+                                3,
+                            )
+                            metrics["rate_limit_wait_seconds"] = round(
+                                float(metrics["rate_limit_wait_seconds"])
+                                + wait_seconds,
+                                3,
+                            )
                         attempt_meta = {}
-                        raw = call_gemini_requests(
-                            model_name=model_name,
-                            system_prompt=SMART_REVIEW_SYSTEM_PROMPT,
-                            payload=payload,
-                            api_key=request_api_key,
-                            temperature=0.2,
-                            max_output_tokens=output_token_cap,
-                            meta_out=attempt_meta,
-                            provider=provider,
-                            lm_config=lm_config,
-                            response_schema=response_schema,
-                            **chatgpt_options,
-                        )
+                        api_started = time.monotonic()
+                        try:
+                            raw = call_gemini_requests(
+                                model_name=model_name,
+                                system_prompt=SMART_REVIEW_SYSTEM_PROMPT,
+                                payload=payload,
+                                api_key=request_api_key,
+                                temperature=0.2,
+                                max_output_tokens=output_token_cap,
+                                meta_out=attempt_meta,
+                                provider=provider,
+                                lm_config=lm_config,
+                                response_schema=response_schema,
+                                **chatgpt_options,
+                            )
+                        finally:
+                            api_seconds = time.monotonic() - api_started
+                            batch_timing["api_seconds"] = round(
+                                float(batch_timing["api_seconds"]) + api_seconds,
+                                3,
+                            )
+                            metrics["api_seconds"] = round(
+                                float(metrics["api_seconds"]) + api_seconds,
+                                3,
+                            )
                     except TaskCancelled:
                         if attempt_meta is not None:
                             _smart_review_record_usage(
@@ -2192,7 +2300,15 @@ def run_smart_review(
                         )
                         processed = len(snapshots)
                         position = len(snapshots)
-                    report_progress()
+                    report_progress(
+                        phase="batch_complete",
+                        timing=finish_batch_timing(
+                            batch_timing,
+                            batch_started,
+                            attempts_before,
+                            "request_failed",
+                        ),
+                    )
                     break
                 if shrink_requested:
                     smaller = _next_smart_review_batch_size(current_size)
@@ -2201,6 +2317,7 @@ def run_smart_review(
                         adaptive_batch_size = min(adaptive_batch_size, current_size)
                         metrics["shrink_count"] = int(metrics["shrink_count"]) + 1
                         continue
+                parse_started = time.monotonic()
                 try:
                     results = parse_smart_review_response(raw, batch)
                 except Exception as exc:  # noqa: BLE001 - response contract class
@@ -2224,7 +2341,29 @@ def run_smart_review(
                         }
                         for item in batch
                     ]
-                db.record_smart_review_results(run_id, results)
+                finally:
+                    parse_seconds = time.monotonic() - parse_started
+                    batch_timing["parse_seconds"] = round(
+                        float(batch_timing["parse_seconds"]) + parse_seconds,
+                        3,
+                    )
+                    metrics["parse_seconds"] = round(
+                        float(metrics["parse_seconds"]) + parse_seconds,
+                        3,
+                    )
+                write_started = time.monotonic()
+                try:
+                    db.record_smart_review_results(run_id, results)
+                finally:
+                    write_seconds = time.monotonic() - write_started
+                    batch_timing["result_write_seconds"] = round(
+                        float(batch_timing["result_write_seconds"]) + write_seconds,
+                        3,
+                    )
+                    metrics["result_write_seconds"] = round(
+                        float(metrics["result_write_seconds"]) + write_seconds,
+                        3,
+                    )
                 for result in results:
                     if result.get("validation_error"):
                         invalid += 1
@@ -2239,7 +2378,15 @@ def run_smart_review(
                 processed += len(batch)
                 position += len(batch)
                 adaptive_batch_size = min(adaptive_batch_size, current_size)
-                report_progress()
+                report_progress(
+                    phase="batch_complete",
+                    timing=finish_batch_timing(
+                        batch_timing,
+                        batch_started,
+                        attempts_before,
+                        "completed",
+                    ),
+                )
                 break
             if cancelled:
                 break

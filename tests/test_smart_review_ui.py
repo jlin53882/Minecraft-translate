@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import threading
+from types import SimpleNamespace
+from typing import ClassVar
 
 import pytest
 
+from app.views.moddb import entry_filters
 from app.views.moddb import smart_review_reviewer as reviewer_module
 from app.views.moddb.smart_review_context import SmartReviewContext
 from app.views.moddb.smart_review_history import SmartReviewHistory, run_status_label
@@ -110,6 +113,35 @@ def test_dialog_builds_three_panels_with_defaults(db, monkeypatch):
     assert dialog.nav.value == "run"
     visible = {name: control.visible for name, control in dialog._panels.items()}
     assert visible == {"run": True, "review": False, "history": False}
+
+
+def test_run_panel_shows_scope_count_when_attached(db, monkeypatch):
+    """驗證開啟執行分頁時會顯示目前範圍符合的條目數量。"""
+    from app.views.moddb import smart_review_run_panel as run_panel_module
+    from app.views.moddb.smart_review_dialog import SmartReviewDialog
+
+    monkeypatch.setattr(
+        "app.services_impl.moddb_smart_review_service.load_config",
+        lambda: {
+            "lm_translator": {
+                "provider": "gemini",
+                "models": {"gemini-3.1-flash-lite": {"enabled": True}},
+            }
+        },
+    )
+    calls = []
+    monkeypatch.setattr(
+        run_panel_module,
+        "count_moddb_smart_review_candidates_from_path",
+        lambda _path, _priority, **kwargs: calls.append(kwargs) or 28,
+    )
+
+    dialog = SmartReviewDialog(_sync_page(), lambda: db, "1.21.1", None)
+    dialog.run_panel.attach()
+
+    assert calls and calls[-1]["version"] == "1.21.1"
+    assert dialog.run_panel._total == 28
+    assert "符合範圍的未審核 AI 譯文共 28 筆" in dialog.run_panel.estimate_text.value
 
 
 def test_dialog_open_review_switches_tab_and_loads_run(db, monkeypatch):
@@ -248,6 +280,20 @@ class _Result:
     suggestion_count = 1
     no_change_count = 2
     needs_context_count = 0
+    metrics: ClassVar[dict[str, float | int]] = {
+        "duration_seconds": 2.5,
+        "setup_seconds": 0.01,
+        "selection_seconds": 0.4,
+        "run_record_seconds": 0.02,
+        "preparation_seconds": 0.1,
+        "rate_limit_wait_seconds": 0.2,
+        "api_seconds": 1.3,
+        "parse_seconds": 0.05,
+        "result_write_seconds": 0.04,
+        "batch_count": 2,
+        "request_attempts": 2,
+        "retry_count": 0,
+    }
 
 
 def test_job_runs_in_background_and_derives_logs(tmp_path, monkeypatch):
@@ -256,7 +302,37 @@ def test_job_runs_in_background_and_derives_logs(tmp_path, monkeypatch):
 
     def fake_run(*_args, progress=None, **_kwargs):
         """模擬兩批進度回報後完成。"""
-        progress({"run_id": "run-ok", "selected": 4, "processed": 2, "valid": 2})
+        progress(
+            {
+                "run_id": "run-ok",
+                "selected": 4,
+                "processed": 0,
+                "valid": 0,
+                "phase": "selection_complete",
+                "timing": {"selection_seconds": 0.4, "run_record_seconds": 0.02},
+            }
+        )
+        progress(
+            {
+                "run_id": "run-ok",
+                "selected": 4,
+                "processed": 2,
+                "valid": 2,
+                "phase": "batch_complete",
+                "timing": {
+                    "batch_number": 1,
+                    "ordinal_start": 1,
+                    "ordinal_end": 2,
+                    "preparation_seconds": 0.05,
+                    "rate_limit_wait_seconds": 0.1,
+                    "api_seconds": 0.6,
+                    "parse_seconds": 0.02,
+                    "result_write_seconds": 0.01,
+                    "elapsed_seconds": 0.8,
+                    "attempts": 1,
+                },
+            }
+        )
         progress(
             {
                 "run_id": "run-ok",
@@ -265,6 +341,19 @@ def test_job_runs_in_background_and_derives_logs(tmp_path, monkeypatch):
                 "valid": 3,
                 "invalid": 1,
                 "request_errors": 0,
+                "phase": "batch_complete",
+                "timing": {
+                    "batch_number": 2,
+                    "ordinal_start": 3,
+                    "ordinal_end": 4,
+                    "preparation_seconds": 0.05,
+                    "rate_limit_wait_seconds": 0.1,
+                    "api_seconds": 0.7,
+                    "parse_seconds": 0.03,
+                    "result_write_seconds": 0.03,
+                    "elapsed_seconds": 0.9,
+                    "attempts": 1,
+                },
             }
         )
         return _Result()
@@ -294,6 +383,8 @@ def test_job_runs_in_background_and_derives_logs(tmp_path, monkeypatch):
     texts = [entry.text for entry in job.session.snapshot()["logs"]]
     assert any("已處理 2 / 4 筆" in text for text in texts)
     assert any("已處理 4 / 4 筆" in text for text in texts)
+    assert any("範圍搜尋完成" in text for text in texts)
+    assert any("耗時拆解" in text and "API" in text for text in texts)
     assert any("無效原因：reason 不可為空 × 1" in text for text in texts)
     assert job.session.progress == 1.0
 
@@ -501,6 +592,44 @@ def test_reviewer_blocks_apply_when_draft_has_format_issue(reviewer, monkeypatch
     reviewer.draft.value = "你好 %s"
     reviewer._on_draft_change()
     assert reviewer.apply_btn.disabled is False
+
+
+def test_smart_review_completion_refreshes_entry_list_before_parent_changed(monkeypatch):
+    """驗證智慧校對完成後先更新條目清單，再通知外層狀態已變更。"""
+    events = []
+    panel = SimpleNamespace(
+        _page=mock_page(),
+        drafts={},
+        version="1.21.1",
+        mod_id=None,
+        kind=None,
+        source_filter=SimpleNamespace(code="all"),
+        query="",
+        db=lambda: object(),
+        _on_changed=lambda: events.append(("parent",)),
+    )
+
+    monkeypatch.setattr(
+        entry_filters,
+        "refresh_entry_filter",
+        lambda target, **kwargs: events.append(("refresh", target, kwargs)),
+    )
+
+    class FakeSmartReviewDialog:
+        """在測試中立即執行完成回呼。"""
+
+        def __init__(self, _page, _get_db, _version, on_complete, *_args):
+            self.on_complete = on_complete
+
+        def open(self):
+            self.on_complete()
+
+    monkeypatch.setattr(entry_filters, "SmartReviewDialog", FakeSmartReviewDialog)
+
+    entry_filters.open_smart_review(panel)
+
+    assert events[0] == ("refresh", panel, {"keep_selection": True})
+    assert events[1] == ("parent",)
 
 
 def test_reviewer_apply_notifies_parent_and_advances_queue(reviewer, monkeypatch):
