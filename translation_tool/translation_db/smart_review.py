@@ -1266,6 +1266,33 @@ class SmartReviewMixin:
         )
         return int(row[0]) if row else 0
 
+    def smart_review_run_breakdown(
+        self, run_id: str, *, error_limit: int = 5
+    ) -> dict[str, Any]:
+        """統計單一執行的候選狀態分佈與最常見的驗證失敗原因，供 UI 摘要使用。
+
+        兩個查詢都只掃該 run 的主鍵前綴；排序在 Python 端完成，避免臨時排序。
+        """
+        status_rows = self._q(
+            "SELECT status, COUNT(*) FROM smart_review_candidate "
+            "WHERE run_id=? GROUP BY status",
+            (run_id,),
+        )
+        error_rows = self._q(
+            "SELECT validation_error, COUNT(*) FROM smart_review_candidate "
+            "WHERE run_id=? AND validation_error IS NOT NULL AND validation_error != '' "
+            "GROUP BY validation_error",
+            (run_id,),
+        )
+        errors = sorted(
+            ((str(message), int(count)) for message, count in error_rows),
+            key=lambda item: (-item[1], item[0]),
+        )
+        return {
+            "status": {str(status): int(count) for status, count in status_rows},
+            "errors": errors[: max(0, int(error_limit))],
+        }
+
     def save_smart_review_draft(
         self, run_id: str, ordinal: int, draft_zh_tw: str
     ) -> str:

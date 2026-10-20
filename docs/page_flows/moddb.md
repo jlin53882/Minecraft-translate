@@ -95,26 +95,33 @@ flowchart TD
 
 #### AI 智慧校對（本地候選）
 
-條目校對工具列的「智慧校對」開啟 `SmartReviewDialog`。它沿用 EntriesPanel 的版本、模組、kind、目前生效來源、未審核狀態與搜尋條件，預覽和實跑共用相同 scope；預覽階段唯讀查詢，執行時以每批最多 100 筆呼叫既有 provider。模型輸出先經嚴格 JSON、具體 `reason`、證據 ID、決策值與 `translation_issues` 驗證，再寫入 `smart_review_run`／`smart_review_candidate`。候選含可追溯的 `db:<entry_id>`／`official:<key>` local context；同 key reference 另外要求英文原文相同，Patchouli／Guide／Advancement 會取得同模組 reviewed lang 術語，衝突證據會降為需人工判斷。
+條目校對工具列的「智慧校對」開啟 `SmartReviewDialog`，視窗分成「執行」「審查」「歷史批次」三個分頁，以 `Segmented` 切換。
+
+- **執行**（`SmartReviewRunPanel`）：沿用 EntriesPanel 的版本、模組、kind、目前生效來源與搜尋條件，另有校對模型、上限與每批筆數；選定範圍後在背景以唯讀查詢顯示「符合筆數、本次處理筆數與約幾批」（每批最多 100 筆）。按「開始智慧校對」後設定欄位鎖定，畫面顯示進度條、已處理筆數、預估剩餘時間、有效／無效／請求錯誤統計與逐批執行紀錄（`LogView`，可只看警告與錯誤）；結束後顯示結果摘要與最常見的無效原因，並可「前往審查候選」。
+- **背景執行**：校對由頁面層級的 `SmartReviewJob` 持有（`job_for_page`），以 `TaskSession` 登記到任務管理，所以頂列任務膠囊會顯示進度；關閉視窗只停止畫面輪詢，不會中斷校對，重新開啟時 `attach` 會接續顯示進度與 log，完成時若視窗已關閉會以提示訊息通知。同一時間只允許一個校對在執行。停止按鈕只停止後續批次，已送出的 API 回應返回後由核心寫入 `partial` 或 `cancelled`。
+- **審查**（`SmartReviewReviewer`）：每頁只顯示一筆候選，「上一筆／下一筆」就是換頁；預設只看「可套用」佇列，沒有可套用候選時改看全部，也可依狀態（已套用、已保留原譯文、需補 context、無效等）篩選，篩選器會顯示各狀態筆數。左側是英文原文、目前譯文與來源、AI 建議、理由與可展開的本地證據，右側是可編輯草稿、格式診斷與動作按鈕。不能操作的按鈕會變灰並說明原因；草稿有格式問題時不能儲存或套用，避免 service 把候選鎖成 `invalid_format`。換筆前會自動儲存格式正確且有修改的草稿，套用或保留原譯文後會更新統計並顯示佇列中的下一筆。
+- **歷史批次**（`SmartReviewHistory`）：以卡片列出最近的批次（時間、模型、範圍、處理與有效／無效／錯誤筆數），資料庫標記為執行中但實際沒有在跑的批次顯示「可能已中斷」；「開啟審查」直接載入該批次，也可展開「進階」貼上 `run_id` 開啟。批次與候選存放在翻譯資料庫本身的 `smart_review_run`／`smart_review_candidate`。
+
+模型輸出先經嚴格 JSON、具體 `reason`、證據 ID、決策值與 `translation_issues` 驗證，再寫入 `smart_review_run`／`smart_review_candidate`。候選含可追溯的 `db:<entry_id>`／`official:<key>` local context；同 key reference 另外要求英文原文相同，Patchouli／Guide／Advancement 會取得同模組 reviewed lang 術語，衝突證據會降為需人工判斷。
 
 ```mermaid
 flowchart TD
     A[條目校對按「智慧校對」] --> B[SmartReviewDialog]
-    B --> C[預覽：唯讀、限定版本與上限]
-    C --> D[背景分批呼叫本地 AI]
+    B --> C[執行分頁：唯讀估算筆數與批次]
+    C --> D[SmartReviewJob 背景分批呼叫本地 AI，進度與 log 即時顯示]
     D --> E{嚴格驗證回應}
     E -- 通過 --> F[保存 reason／evidence／no_change／needs_context／ready]
     E -- 回應格式錯誤 --> G[保存 invalid]
     E -- API 失敗 --> H[保存 request_failed]
-    F --> I{人工編修草稿}
-    I -- 跳過 --> J[rejected，不改翻譯]
+    F --> I[審查分頁：每頁一筆，人工編修草稿]
+    I -- 保留原譯文 --> J[rejected，不改翻譯]
     I -- 儲存草稿 --> K[draft_zh_tw，不改翻譯]
     I -- 套用 --> L[CAS 比對完整快照與 manual row]
     L -- 成功 --> M[SRC_MANUAL 未審核＋history]
     L -- 變動／已審核人工列 --> N[stale，拒絕覆蓋]
 ```
 
-「套用」只新增或更新來源 6 的未審核人工譯文，原 AI／其他來源列保留；不會自動標記人工已審核。套用前會再次驗證條目身份、effective 值、revision、既有 manual 快照與格式，成功後可從該筆 `smart_review_apply` history 使用既有還原流程回復。候選以每頁 50 筆顯示，run 可用 `run_id` 重新載入；停止按鈕只停止後續批次，已送出的 API 回應返回後由核心寫入 `partial` 或 `cancelled`。格式診斷只協助人工檢查，術語準確率需使用人工標註 evaluator，不能用格式通過率代替。
+「套用」只新增或更新來源 6 的未審核人工譯文，原 AI／其他來源列保留；不會自動標記人工已審核。套用前會再次驗證條目身份、effective 值、revision、既有 manual 快照與格式，成功後可從該筆 `smart_review_apply` history 使用既有還原流程回復。格式診斷只協助人工檢查，術語準確率需使用人工標註 evaluator，不能用格式通過率代替。
 
 #### 學名候選掃描
 

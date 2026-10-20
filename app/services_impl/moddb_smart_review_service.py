@@ -217,6 +217,21 @@ def get_moddb_smart_review_run_from_path(
         db.close()
 
 
+def get_moddb_smart_review_run_breakdown_from_path(
+    path: str | Path,
+    priority: tuple[int, ...],
+    run_id: str,
+    *,
+    error_limit: int = 5,
+) -> dict[str, Any]:
+    """讀取指定執行的候選狀態分佈與最常見的驗證失敗原因。"""
+    db = _open(path, priority, readonly=True)
+    try:
+        return db.smart_review_run_breakdown(run_id, error_limit=error_limit)
+    finally:
+        db.close()
+
+
 def list_moddb_smart_review_runs_from_path(
     path: str | Path,
     priority: tuple[int, ...],
@@ -283,9 +298,10 @@ __all__ = [
     "apply_moddb_smart_review_candidate_from_path",
     "count_moddb_smart_review_candidates_for_run_from_path",
     "count_moddb_smart_review_candidates_from_path",
+    "get_moddb_smart_review_run_breakdown_from_path",
     "get_moddb_smart_review_run_from_path",
-    "list_moddb_smart_review_runs_from_path",
     "list_moddb_smart_review_candidates_from_path",
+    "list_moddb_smart_review_runs_from_path",
     "preview_moddb_smart_review_from_path",
     "reject_moddb_smart_review_candidate_from_path",
     "run_moddb_smart_review_from_path",

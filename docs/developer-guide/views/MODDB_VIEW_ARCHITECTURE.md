@@ -26,7 +26,7 @@
 
 ## AI 智慧校對候選
 
-`entry_filters.py` 的 `智慧校對` 按鈕只建立 `SmartReviewDialog`，並把 EntriesPanel 的版本、模組、kind、effective source、未審核狀態與搜尋條件帶入；不把模型流程塞入 `EntriesPanel`。服務層 `moddb_smart_review_service.py` 重新以資料庫 path、priority 與 config 開啟連線；`smart_review.py` 負責 bounded candidate snapshot、typed local context、provider structured output、結果持久化與 CAS apply。預覽和實跑使用同一組 scope，預覽使用唯讀連線，執行與套用透過 `launch_page_operation` 在背景進行，UI callback 只在 generation 仍相同時更新控制項。
+`entry_filters.py` 的 `智慧校對` 按鈕只建立 `SmartReviewDialog`，並把 EntriesPanel 的版本、模組、kind、effective source、未審核狀態與搜尋條件帶入；不把模型流程塞入 `EntriesPanel`。視窗只是外殼，三個分頁各自一個模組：`SmartReviewRunPanel`（範圍設定、進度、統計與 log）、`SmartReviewReviewer`（每頁一筆的逐筆審查）、`SmartReviewHistory`（歷史批次）。`SmartReviewContext` 集中保存 UI 世代與資料庫身分，所有背景工作透過 `run_background` 啟動，結果只在世代、資料庫與呼叫端的 `still_valid` 都仍成立時才回到 UI。校對本身由 `SmartReviewJob` 執行（頁面層級單例，`job_for_page`），以 `TaskSession` 登記進度與 log，關閉視窗不會中斷。服務層 `moddb_smart_review_service.py` 重新以資料庫 path、priority 與 config 開啟連線；`smart_review.py` 負責 bounded candidate snapshot、typed local context、provider structured output、結果持久化與 CAS apply。預覽使用唯讀連線，執行與套用透過 `launch_page_operation` 在背景進行。
 
 local context 的 evidence id 必須可回到資料庫 row 或 bundled official locale；同 key reviewed reference 要比對相同 kind／mod／key／英文原文，same-module reviewed lang glossary 可供 Patchouli、Guide、Advancement 使用，衝突資料帶限制與低信心標記。`smart_review_response_schema` 要求每筆具體 `reason` 且禁止外部 URL；`smart_review_candidate` 儲存 response reason、evidence、draft 與 snapshot。
 
