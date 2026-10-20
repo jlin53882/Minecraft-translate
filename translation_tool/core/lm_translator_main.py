@@ -62,6 +62,8 @@ from translation_tool.core.lm_session import TranslationSessionState
 from translation_tool.core.official_locale import (
     build_translation_prompt,
     official_translation_for_item,
+    terminology_issues,
+    terminology_terms_for_item,
 )
 from translation_tool.utils.cancellation import (
     interruptible_sleep,
@@ -468,6 +470,9 @@ class _BatchRuntime:
     gemini_503_attempted_models: set[int] = field(default_factory=set)
     contract_errors: list[str] = field(default_factory=list)
     pending_contract_event: dict | None = None
+    terminology_cache: dict[int, tuple[tuple[str, str], ...]] = field(
+        default_factory=dict
+    )
 
 
 @dataclass(frozen=True)
@@ -800,6 +805,18 @@ def _build_batch_runtime(
         batch_interval_sec=_batch_interval_seconds(lm_cfg),
         reasoning_effort=reasoning_effort,
         chatgpt_profile_id=chatgpt_profile_id,
+        terminology_cache={
+            id(item): tuple(
+                terminology_terms_for_item(
+                    item,
+                    include_official=bool(lm_cfg.get("official_glossary", True)),
+                    include_moddb_reviewed=bool(
+                        lm_cfg.get("moddb_reviewed_glossary", True)
+                    ),
+                )
+            )
+            for item in batch_items
+        },
     )
 
 
@@ -1689,6 +1706,11 @@ def _retry_quality_translations(
         result,
         list(round_data.id_to_item),
         retry_same_as_source=runtime.retry_same_as_source,
+        include_official=bool(runtime.lm_cfg.get("official_glossary", True)),
+        include_moddb_reviewed=bool(
+            runtime.lm_cfg.get("moddb_reviewed_glossary", True)
+        ),
+        terminology_cache=runtime.terminology_cache,
     )
     if not candidates.positions:
         return result
@@ -1726,7 +1748,7 @@ def _retry_quality_translations(
     candidate_count = len(candidates.positions)
     log_info(
         f"[品質重試] 送出 {candidate_count}/{len(round_data.current_batch)} 筆需要重新確認的譯文"
-        "（與原文相同或格式不一致），"
+        "（與原文相同、格式或術語不一致），"
         f"估計輸入 {round(retry_input_tokens)} tokens"
     )
 
@@ -1852,6 +1874,17 @@ def _retry_quality_translations(
             or not isinstance(source_text, str)
             or still_suspect_same_source
             or quality_issues(round_data.current_batch[position], translated_text)
+            or terminology_issues(
+                round_data.current_batch[position],
+                translated_text,
+                include_official=bool(runtime.lm_cfg.get("official_glossary", True)),
+                include_moddb_reviewed=bool(
+                    runtime.lm_cfg.get("moddb_reviewed_glossary", True)
+                ),
+                terms=runtime.terminology_cache.get(
+                    id(round_data.current_batch[position])
+                ),
+            )
         ):
             unresolved += 1
             continue
@@ -1861,7 +1894,7 @@ def _retry_quality_translations(
     if unresolved:
         log_warning(
             f"[品質重試] 重試後仍有 {unresolved}/{candidate_count} 筆品質問題"
-            "（格式不一致或譯文為空），這些筆保留第一次譯文"
+            "（格式、術語不一致或譯文為空），這些筆保留第一次譯文"
         )
 
     merged = merge_same_source_retry_results(

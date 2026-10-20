@@ -223,6 +223,72 @@ def test_moddb_reviewed_lang_glossary_is_injected_for_patchouli_routes() -> None
         )
 
 
+def test_terminology_directives_bind_reviewed_terms_to_payload_ids() -> None:
+    items = [
+        {
+            "path": "first",
+            "source_text": "Copper Gate",
+            "text": "Copper Gate",
+            "_reviewed_glossary": [
+                {"en_us": "Copper Gate", "zh_tw": "銅製閘門"},
+            ],
+        },
+        {
+            "path": "second",
+            "source_text": "Pressure Chamber",
+            "text": "Pressure Chamber",
+            "_reviewed_glossary": [
+                {"en_us": "Pressure Chamber", "zh_tw": "壓力室"},
+            ],
+        },
+    ]
+
+    prompt = build_translation_prompt("基礎", items, profile="lang")
+
+    assert "不要因為不確定就把整個 value 原樣回傳" in prompt
+    assert 'id「0」 key「first」：Copper Gate → 銅製閘門' in prompt
+    assert 'id「1」 key「second」：Pressure Chamber → 壓力室' in prompt
+
+
+def test_terminology_directives_use_official_subterms_and_prefer_longest(
+    monkeypatch,
+) -> None:
+    from translation_tool.core import official_locale
+
+    index = official_locale.OfficialLocaleIndex(
+        records_by_key={},
+        unique_by_text_pair={},
+        unique_tw_by_en={
+            "Crossbow": "弩",
+            "Brick Slab": "紅磚半磚",
+            "Brick": "紅磚頭",
+        },
+        revision="test",
+    )
+    monkeypatch.setattr(official_locale, "load_official_locale_index", lambda: index)
+
+    prompt = build_translation_prompt(
+        "基礎",
+        [
+            {
+                "path": "item.crossbow",
+                "source_text": "Ruby Heavy Crossbow",
+                "text": "Ruby Heavy Crossbow",
+            },
+            {
+                "path": "block.slab",
+                "source_text": "Brick Slab",
+                "text": "Brick Slab",
+            },
+        ],
+        profile="lang",
+    )
+
+    assert 'id「0」 key「item.crossbow」：Crossbow → 弩' in prompt
+    assert 'id「1」 key「block.slab」：Brick Slab → 紅磚半磚' in prompt
+    assert 'id「1」 key「block.slab」：Brick → 紅磚頭' not in prompt
+
+
 def test_moddb_items_form_module_and_kind_batch_boundaries() -> None:
     items = build_items(
         [

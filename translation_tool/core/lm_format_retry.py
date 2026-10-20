@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
 from translation_tool.core.lm_format_policy import (
     build_payload_item,
     kind_for_item,
+)
+from translation_tool.core.official_locale import (
+    terminology_issues as glossary_terminology_issues,
 )
 from translation_tool.plugins.shared.rich_text_shield import (
     inspect_shielded_translation,
@@ -22,6 +26,7 @@ QUALITY_RETRY_INSTRUCTION = (
     "format_issues 是程式依原文與譯文比對產生的硬性問題，不可以忽略或重新解讀；"
     "請依目前 payload 的原文重新翻譯，不要沿用上一版錯誤格式。\n"
     "合法的同一段落軟折行不需要恢復成英文原本的行數；只有 format_issues 指出的硬結構需要修正。\n"
+    "terminology_issues 是程式依已審核或官方術語表找出的漏譯，必須在同一項目譯文中使用指定的目標詞。\n"
     "請維持原本翻譯語意，不要輸出說明文字，只回傳相同項目 ID 的結構化 JSON 翻譯結果。"
 )
 
@@ -81,8 +86,11 @@ def build_quality_retry_batch(
     item_ids: list[str],
     *,
     retry_same_as_source: bool,
+    include_official: bool = True,
+    include_moddb_reviewed: bool = True,
+    terminology_cache: Mapping[int, Sequence[tuple[str, str]]] | None = None,
 ) -> QualityRetryBatch:
-    """Combine same-as-source and format-invalid rows into one retry payload."""
+    """Combine same-as-source, format, and terminology failures into one retry."""
     positions: list[int] = []
     candidate_ids: list[str] = []
     candidate_items: list[dict] = []
@@ -107,7 +115,18 @@ def build_quality_retry_batch(
             retry_reasons.append("翻譯結果與原文相同")
 
         issues = quality_issues(source, translated_text)
-        if not retry_reasons and not issues:
+        term_issues = glossary_terminology_issues(
+            source,
+            translated_text,
+            include_official=include_official,
+            include_moddb_reviewed=include_moddb_reviewed,
+            terms=(
+                terminology_cache.get(id(source))
+                if terminology_cache is not None
+                else None
+            ),
+        )
+        if not retry_reasons and not issues and not term_issues:
             continue
 
         payload_item = build_payload_item(
@@ -115,6 +134,7 @@ def build_quality_retry_batch(
             item_id,
             retry_reasons=retry_reasons,
             format_issues=issues,
+            terminology_issues=term_issues,
         )
 
         positions.append(position)

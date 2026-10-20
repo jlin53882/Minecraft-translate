@@ -146,6 +146,7 @@ def build_payload_item(
     *,
     retry_reasons: Iterable[str] = (),
     format_issues: Iterable[str] = (),
+    terminology_issues: Iterable[str] = (),
 ) -> dict[str, object]:
     """Build the only request-item shape used by normal and retry requests."""
     payload: dict[str, object] = {
@@ -161,6 +162,9 @@ def build_payload_item(
         payload["retry_reasons"] = reasons
     if issues:
         payload["format_issues"] = issues
+    term_issues = list(terminology_issues)
+    if term_issues:
+        payload["terminology_issues"] = term_issues
     return payload
 
 

@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+from collections.abc import Sequence
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -20,7 +21,11 @@ from translation_tool.core.lm_format_policy import (
     normalize_legacy_prompt,
 )
 from translation_tool.utils.app_paths import get_resource_root
-from translation_tool.utils.text_matching import matching_terms, term_canonical_key
+from translation_tool.utils.text_matching import (
+    contains_term,
+    matching_terms,
+    term_canonical_key,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +33,15 @@ _OFFICIAL_RELATIVE_ROOT = Path("assets") / "official_locales" / "minecraft"
 _LOCALE_FILES = ("en_us.json", "zh_cn.json", "zh_tw.json")
 _MAX_PROMPT_TERMS = 240
 _MAX_PROMPT_CHARS = 24_000
+_MAX_TERMS_PER_ITEM = 6
+
+_TERMINOLOGY_INSTRUCTION = (
+    "\n【翻譯原則：術語優先、不要無故保留英文】\n"
+    "以下逐筆術語映射是已審核或官方的唯一參考；當同一 payload id 的原文包含來源詞時，"
+    "必須使用對應目標詞，不要把參考整句複製到其他項目。\n"
+    "沒有可靠術語映射時，仍要盡力翻譯人類語句；只有 placeholder、格式標記、API 識別字、"
+    "程式碼、產品名或其他明確不可翻譯內容才保留原文。不要因為不確定就把整個 value 原樣回傳。"
+)
 
 
 @dataclass(frozen=True)
@@ -198,8 +212,17 @@ def build_translation_prompt(
     sections = [
         normalize_legacy_prompt(base_prompt).rstrip(),
         format_policy_for_items(items, profile=profile),
+        _TERMINOLOGY_INSTRUCTION,
     ]
     index = load_official_locale_index()
+    directives = _terminology_directives(
+        items,
+        index,
+        include_official=include_official,
+        include_moddb_reviewed=include_moddb_reviewed,
+    )
+    if directives:
+        sections.append("\n".join(directives))
     official_terms = (
         index.glossary_for_items(items) if include_official and index.available else []
     )
@@ -275,6 +298,158 @@ def _reviewed_glossary_for_items(
     ][:_MAX_PROMPT_TERMS]
 
 
+def _item_terminology_terms(
+    item: dict[str, Any],
+    index: OfficialLocaleIndex,
+    *,
+    include_official: bool = True,
+    include_moddb_reviewed: bool = True,
+) -> list[tuple[str, str]]:
+    """Return unique official/reviewed mappings that occur in one source item."""
+    source_text = item.get("source_text") or item.get("text")
+    if not isinstance(source_text, str) or not source_text.strip():
+        return []
+
+    candidates: dict[str, tuple[str, set[str]]] = {}
+
+    if include_official and index.available:
+        key = item.get("path") or item.get("key")
+        record = index.records_by_key.get(key) if isinstance(key, str) else None
+        if record is not None and record.en_us == source_text and record.zh_tw:
+            candidates[term_canonical_key(source_text)] = (
+                source_text,
+                {record.zh_tw.strip()},
+            )
+
+        # The source item is often a compound name (for example, ``Ruby Heavy
+        # Crossbow``).  Match the unique official sub-terms as well; exact
+        # whole-value lookup alone cannot enforce Minecraft's established
+        # terminology inside a newly introduced key.
+        official_terms = matching_terms(
+            (source_text,), tuple(index.unique_tw_by_en)
+        )
+        for term in sorted(official_terms, key=lambda value: (-len(value), value)):
+            target = index.unique_tw_by_en.get(term)
+            if not isinstance(target, str) or not target.strip() or target == term:
+                continue
+            canonical = term_canonical_key(term)
+            display, targets = candidates.setdefault(canonical, (term, set()))
+            targets.add(target.strip())
+            candidates[canonical] = (display, targets)
+
+    reviewed = item.get("_reviewed_glossary")
+    if include_moddb_reviewed and isinstance(reviewed, list):
+        for entry in reviewed:
+            if not isinstance(entry, dict):
+                continue
+            term, target = entry.get("en_us"), entry.get("zh_tw")
+            if not (
+                isinstance(term, str)
+                and isinstance(target, str)
+                and term.strip()
+                and target.strip()
+                and contains_term(source_text, term)
+            ):
+                continue
+            canonical = term_canonical_key(term)
+            display, targets = candidates.setdefault(canonical, (term, set()))
+            targets.add(target.strip())
+            candidates[canonical] = (display, targets)
+
+    ordered = [
+        (display, next(iter(targets)))
+        for _canonical, (display, targets) in sorted(
+            candidates.items(), key=lambda entry: (-len(entry[1][0]), entry[0])
+        )
+        if len(targets) == 1
+    ]
+    selected: list[tuple[str, str]] = []
+    for term, target in ordered:
+        # Prefer the longest authoritative phrase.  Sending both ``Brick Slab
+        # -> 紅磚半磚`` and ``Brick -> 紅磚頭`` creates contradictory
+        # instructions for the same source span and makes the model regress.
+        if any(contains_term(selected_term, term) for selected_term, _ in selected):
+            continue
+        selected.append((term, target))
+        if len(selected) >= _MAX_TERMS_PER_ITEM:
+            break
+    return selected
+
+
+def _terminology_directives(
+    items: list[dict[str, Any]],
+    index: OfficialLocaleIndex,
+    *,
+    include_official: bool = True,
+    include_moddb_reviewed: bool = True,
+) -> list[str]:
+    """Render mappings next to the payload id the model must translate."""
+    lines = [
+        "\n【逐筆必用術語（只適用於同一 payload id）】",
+        "每一行的來源詞若出現在該 id 的 value，譯文必須採用同一行的目標詞。",
+    ]
+    count = 0
+    for item_id, item in enumerate(items):
+        terms = _item_terminology_terms(
+            item,
+            index,
+            include_official=include_official,
+            include_moddb_reviewed=include_moddb_reviewed,
+        )
+        key = item.get("path") or item.get("key") or ""
+        for source, target in terms:
+            lines.append(
+                f'- id「{item_id}」 key「{key}」：{source} → {target}'
+            )
+            count += 1
+            if count >= _MAX_PROMPT_TERMS:
+                return lines
+    return lines if count else []
+
+
+def terminology_terms_for_item(
+    item: dict[str, Any],
+    *,
+    include_official: bool = True,
+    include_moddb_reviewed: bool = True,
+) -> list[tuple[str, str]]:
+    """Resolve the cached-input terminology plan for one translation item."""
+    return _item_terminology_terms(
+        item,
+        load_official_locale_index(),
+        include_official=include_official,
+        include_moddb_reviewed=include_moddb_reviewed,
+    )
+
+
+def terminology_issues(
+    item: dict[str, Any],
+    translated_text: str,
+    *,
+    include_official: bool = True,
+    include_moddb_reviewed: bool = True,
+    terms: Sequence[tuple[str, str]] | None = None,
+) -> list[str]:
+    """Report authoritative source terms missing from one model translation."""
+    expected_terms = terms
+    if expected_terms is None:
+        expected_terms = terminology_terms_for_item(
+            item,
+            include_official=include_official,
+            include_moddb_reviewed=include_moddb_reviewed,
+        )
+    if not isinstance(translated_text, str) or not translated_text.strip():
+        return [
+            f"術語未校對：{source} → {target}"
+            for source, target in expected_terms
+        ]
+    return [
+        f"術語未命中：{source} → {target}"
+        for source, target in expected_terms
+        if target not in translated_text
+    ]
+
+
 __all__ = [
     "OfficialLocaleIndex",
     "OfficialLocaleRecord",
@@ -282,4 +457,6 @@ __all__ = [
     "load_official_locale_index",
     "official_exact_translation",
     "official_translation_for_item",
+    "terminology_issues",
+    "terminology_terms_for_item",
 ]
