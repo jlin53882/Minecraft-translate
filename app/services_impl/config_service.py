@@ -20,8 +20,10 @@ from typing import Any
 
 from translation_tool.utils.app_paths import get_data_root
 from translation_tool.utils.text_processor import (
-    load_replace_rules as load_rules_core,
+    get_replace_rules_count as get_rules_count_core,
 )
+from translation_tool.utils.text_processor import load_replace_rules as load_rules_core
+from translation_tool.utils.text_processor import replace_rules_store
 from translation_tool.utils.text_processor import (
     save_replace_rules as save_rules_core,
 )
@@ -97,13 +99,25 @@ def _save_app_config(config: dict[str, Any]):
 # --- 檔案讀寫服務 ---
 
 
-def load_replace_rules():
+def load_replace_rules(*, force_reload: bool = False, source: str = "config_service"):
     """載入替換規則。
 
     回傳：
         dict: 規則資料
     """
-    return load_rules_core(REPLACE_RULES_PATH)
+    return load_rules_core(
+        REPLACE_RULES_PATH, force_reload=force_reload, source=source
+    )
+
+
+def get_replace_rules_count(*, source: str = "config_service") -> int:
+    """取得替換規則數量，不建立可變規則複本。"""
+    return get_rules_count_core(REPLACE_RULES_PATH, source=source)
+
+
+def subscribe_replace_rules(callback):
+    """訂閱替換規則快取失效／重載事件。"""
+    return replace_rules_store.subscribe(callback)
 
 
 def save_replace_rules(rules, *, raise_on_error=False):

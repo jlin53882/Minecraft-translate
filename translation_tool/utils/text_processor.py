@@ -7,7 +7,10 @@
 import os
 import re
 import threading
-from collections.abc import Sequence
+import time
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 import orjson
@@ -16,6 +19,7 @@ from opencc import OpenCC
 from .config_manager import resolve_project_path
 from .log_unit import log_error, log_info, log_warning
 from .replace_rules import (
+    ImmutableReplaceRulesSnapshot,
     ReplaceRules,
     apply_replace_rules,
     find_replacement_conflicts,
@@ -39,28 +43,49 @@ def get_converter():
     return _thread_local.converter
 
 
-# --- 檔案讀寫與文字處理工具函式 ---
-def load_replace_rules(path: str) -> list[dict[str, str]]:
-    """
-    從指定的 JSON 檔案載入替換規則（orjson 版），並自動進行安全排序：
-    - 固定字串規則：from 長度由長到短（長詞優先）
-    - 正則規則：保持原順序
-    """
-    resolved_path = _resolve_rules_path(path)
+@dataclass(frozen=True, slots=True)
+class _RulesCacheEntry:
+    """單一 resolved path 的快取內容。"""
+
+    file_revision: tuple[int, int] | None
+    snapshot: ImmutableReplaceRulesSnapshot
+    fixed_count: int
+    regex_count: int
+
+
+def _file_revision(path: Path) -> tuple[int, int] | None:
+    """以 mtime_ns 與檔案大小辨識規則檔版本。"""
+    try:
+        stat = path.stat()
+    except OSError:
+        return None
+    return stat.st_mtime_ns, stat.st_size
+
+
+def _format_file_revision(revision: tuple[int, int] | None) -> str:
+    if revision is None:
+        return "missing"
+    return f"mtime_ns={revision[0]},size={revision[1]}"
+
+
+def _load_rules_uncached(
+    resolved_path: Path,
+) -> tuple[ReplaceRules, int, int]:
+    """讀取、驗證、排序並檢查一份規則檔；呼叫端負責快取與鎖。"""
     if not resolved_path.exists():
         log_warning("找不到替換規則檔案: %s，將略過替換處理。", resolved_path)
-        return []
+        return ReplaceRules(), 0, 0
 
     try:
         with resolved_path.open("rb") as f:
             rules = orjson.loads(f.read())
     except Exception as e:  # noqa: BLE001
         log_error("讀取替換規則檔案 %s 失敗: %s", resolved_path, e)
-        return []
+        return ReplaceRules(), 0, 0
 
     if not isinstance(rules, list):
         log_error("替換規則檔案格式錯誤（需為 list）: %s", resolved_path)
-        return []
+        return ReplaceRules(), 0, 0
 
     fixed_rules: list[dict[str, str]] = []
     regex_rules: list[dict[str, str]] = []
@@ -98,13 +123,186 @@ def load_replace_rules(path: str) -> list[dict[str, str]]:
             len(conflicts),
             examples,
         )
+    return sorted_rules, len(fixed_rules), len(regex_rules)
 
-    log_info(
-        "已載入自動替換規則：一般文字 %d 條（較長內容優先套用），正規表示式 %d 條",
-        len(fixed_rules),
-        len(regex_rules),
+
+class ReplaceRulesStore:
+    """執行緒安全的替換規則快取與異動通知中心。"""
+
+    def __init__(
+        self,
+        path_resolver: Callable[[str], Path] | None = None,
+        loader: Callable[[Path], tuple[ReplaceRules, int, int]] | None = None,
+    ) -> None:
+        # 以 lambda 動態查找 _resolve_rules_path，保留測試與執行期路徑覆寫能力。
+        self._path_resolver = path_resolver or (lambda path: _resolve_rules_path(path))
+        self._loader = loader or _load_rules_uncached
+        self._lock = threading.RLock()
+        self._cache: dict[str, _RulesCacheEntry] = {}
+        self._listeners: set[Callable[[Path | None], None]] = set()
+        self._generation = 0
+
+    def _resolved_path(self, path: str | os.PathLike[str]) -> Path:
+        return Path(self._path_resolver(os.fspath(path))).expanduser().resolve()
+
+    @staticmethod
+    def _cache_key(resolved_path: Path) -> str:
+        """在 Windows 上合併大小寫不同但指向同一檔案的路徑。"""
+        return os.path.normcase(os.fspath(resolved_path))
+
+    def _load_locked(
+        self,
+        resolved_path: Path,
+        file_revision: tuple[int, int] | None,
+        *,
+        source: str,
+        reason: str,
+    ) -> ImmutableReplaceRulesSnapshot:
+        started = time.perf_counter()
+        rules, fixed_count, regex_count = self._loader(resolved_path)
+        self._generation += 1
+        snapshot = ImmutableReplaceRulesSnapshot.from_rules(
+            rules, revision=self._generation
+        )
+        key = self._cache_key(resolved_path)
+        self._cache[key] = _RulesCacheEntry(
+            file_revision=file_revision,
+            snapshot=snapshot,
+            fixed_count=fixed_count,
+            regex_count=regex_count,
+        )
+        log_info(
+            "已載入自動替換規則：source=%s，cache_hit=false，reason=%s，"
+            "path=%s，revision=%s，一般文字 %d 條，正規表示式 %d 條，"
+            "實際讀取耗時=%.3f s",
+            source,
+            reason,
+            resolved_path,
+            _format_file_revision(file_revision),
+            fixed_count,
+            regex_count,
+            time.perf_counter() - started,
+        )
+        return snapshot
+
+    def get_snapshot(
+        self,
+        path: str | os.PathLike[str] = "replace_rules.json",
+        *,
+        source: str = "replace_rules_store",
+    ) -> ImmutableReplaceRulesSnapshot:
+        """取得同一份 path 的共享唯讀快照；檔案版本變更時才重新載入。"""
+        resolved_path = self._resolved_path(path)
+        key = self._cache_key(resolved_path)
+        with self._lock:
+            # revision 必須與 cache 檢查使用同一把鎖，避免寫檔／invalidate
+            # 與讀取交錯時，把舊 revision 寫回新內容的快取。
+            file_revision = _file_revision(resolved_path)
+            cached = self._cache.get(key)
+            if cached is not None and cached.file_revision == file_revision:
+                return cached.snapshot
+            reason = "file_revision_changed" if cached is not None else "initial_load"
+            return self._load_locked(
+                resolved_path,
+                file_revision,
+                source=source,
+                reason=reason,
+            )
+
+    def get_count(
+        self,
+        path: str | os.PathLike[str] = "replace_rules.json",
+        *,
+        source: str = "replace_rules_store",
+    ) -> int:
+        """取得規則數量，不建立可變複本，也不在快取命中時讀檔。"""
+        return len(self.get_snapshot(path, source=source))
+
+    def invalidate(
+        self,
+        path: str | os.PathLike[str] | None = None,
+        *,
+        notify: bool = True,
+    ) -> None:
+        """使指定 path（或全部 path）的快取失效，並通知訂閱者。"""
+        resolved_path = self._resolved_path(path) if path is not None else None
+        with self._lock:
+            if resolved_path is None:
+                self._cache.clear()
+            else:
+                self._cache.pop(self._cache_key(resolved_path), None)
+            listeners = list(self._listeners)
+        if notify:
+            self._notify(listeners, resolved_path)
+
+    def force_reload(
+        self,
+        path: str | os.PathLike[str] = "replace_rules.json",
+        *,
+        source: str = "replace_rules_store",
+    ) -> ImmutableReplaceRulesSnapshot:
+        """忽略既有快取，實際重新讀取一次並通知規則異動。"""
+        resolved_path = self._resolved_path(path)
+        key = str(resolved_path)
+        with self._lock:
+            file_revision = _file_revision(resolved_path)
+            self._cache.pop(key, None)
+            snapshot = self._load_locked(
+                resolved_path,
+                file_revision,
+                source=source,
+                reason="force_reload",
+            )
+            listeners = list(self._listeners)
+        self._notify(listeners, resolved_path)
+        return snapshot
+
+    def subscribe(self, callback: Callable[[Path | None], None]) -> Callable[[], None]:
+        """訂閱規則快取失效／強制重載事件，回傳取消訂閱函式。"""
+        with self._lock:
+            self._listeners.add(callback)
+
+        def unsubscribe() -> None:
+            with self._lock:
+                self._listeners.discard(callback)
+
+        return unsubscribe
+
+    @staticmethod
+    def _notify(
+        listeners: list[Callable[[Path | None], None]], path: Path | None
+    ) -> None:
+        for callback in listeners:
+            try:
+                callback(path)
+            except Exception:  # noqa: BLE001 - 訂閱者失敗不可阻斷規則寫入
+                log_warning("替換規則異動通知失敗", exc_info=True)
+
+
+replace_rules_store = ReplaceRulesStore()
+
+
+# --- 檔案讀寫與文字處理工具函式 ---
+def load_replace_rules(
+    path: str = "replace_rules.json",
+    *,
+    force_reload: bool = False,
+    source: str = "load_replace_rules",
+) -> ReplaceRules:
+    """以 Store 載入規則，並回傳不會污染共用快照的相容複本。"""
+    snapshot = (
+        replace_rules_store.force_reload(path, source=source)
+        if force_reload
+        else replace_rules_store.get_snapshot(path, source=source)
     )
-    return sorted_rules
+    return ReplaceRules(dict(rule) for rule in snapshot)
+
+
+def get_replace_rules_count(
+    path: str = "replace_rules.json", *, source: str = "get_replace_rules_count"
+) -> int:
+    """取得規則數量的共用入口。"""
+    return replace_rules_store.get_count(path, source=source)
 
 
 def save_replace_rules(
@@ -128,6 +326,8 @@ def save_replace_rules(
         log_error("儲存替換規則到 %s 失敗: %s", resolved_path, e)
         if raise_on_error:
             raise
+    else:
+        replace_rules_store.invalidate(resolved_path)
 
 
 def load_custom_translations(folder_path: str, filename="table.tsv") -> dict[str, str]:
