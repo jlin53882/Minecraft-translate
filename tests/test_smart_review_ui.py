@@ -423,7 +423,12 @@ def test_job_runs_in_background_and_derives_logs(tmp_path, monkeypatch):
     assert any("已處理 2 / 4 筆" in text for text in texts)
     assert any("已處理 4 / 4 筆" in text for text in texts)
     assert any("範圍搜尋完成" in text for text in texts)
-    assert any("第 1/3 次重試" in text and "等待 30.00 s" in text for text in texts)
+    assert any(
+        "[智慧校對][批次 1/2][第 1 次嘗試]" in text
+        and "第 1/3 次重試" in text
+        and "等待 30.00 s" in text
+        for text in texts
+    )
     assert any("耗時拆解" in text and "API" in text for text in texts)
     assert any("無效原因：reason 不可為空 × 1" in text for text in texts)
     assert job.session.progress == 1.0

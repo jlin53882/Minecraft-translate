@@ -119,7 +119,7 @@ def _format_timing(seconds: float | None) -> str:
 
 def _event_bool(value: object) -> str:
     """把結構化事件中的布林欄位格式化成穩定的 log 值。"""
-    return "true" if value is True else "false"
+    return "是" if value is True else "否"
 
 
 class SmartReviewJob:
@@ -345,7 +345,7 @@ class SmartReviewJob:
     def _event_prefix(event: dict[str, Any]) -> str:
         """建立 Smart Review 事件的穩定批次前綴。"""
         return (
-            f"[SmartReview][batch {event.get('batch_number', '?')}/"
+            f"[智慧校對][批次 {event.get('batch_number', '?')}/"
             f"{event.get('batch_total', '?')}]"
         )
 
@@ -354,10 +354,10 @@ class SmartReviewJob:
         prefix = self._event_prefix(event)
         session.add_log(
             f"{prefix} 開始：{event.get('expected_count', '?')} 筆，"
-            f"ordinal {event.get('ordinal_start', '?')}～"
+            f"序號 {event.get('ordinal_start', '?')}～"
             f"{event.get('ordinal_end', '?')}，"
-            f"provider={event.get('provider', '?')}，"
-            f"model={event.get('model', '?')}",
+            f"供應商={event.get('provider', '?')}，"
+            f"模型={event.get('model', '?')}",
             "info",
         )
 
@@ -368,10 +368,10 @@ class SmartReviewJob:
         kind = event.get("kind")
         if kind == "attempt_start":
             session.add_log(
-                f"{prefix}[attempt {attempt}] API 請求開始："
-                f"smart_review_attempt={attempt}，"
+                f"{prefix}[第 {attempt} 次嘗試] API 請求開始："
+                f"校對請求序號={attempt}，"
                 f"預期 {event.get('expected_count', '?')} 筆，"
-                f"已觀察 network_attempts={event.get('network_attempts', 0)}。",
+                f"已觀察網路請求={event.get('network_attempts', 0)}。",
                 "info",
             )
             return
@@ -379,31 +379,31 @@ class SmartReviewJob:
             prompt = event.get("prompt_tokens")
             output = event.get("output_tokens")
             token_text = (
-                f"prompt_tokens={prompt}、output_tokens={output}"
+                f"提示詞 token={prompt}、輸出 token={output}"
                 if prompt is not None or output is not None
-                else "tokens=未提供"
+                else "token=未提供"
             )
             session.add_log(
-                f"{prefix}[attempt {attempt}] API 成功："
-                f"elapsed={_format_timing(event.get('api_elapsed_seconds'))}，"
-                f"status={event.get('http_status', '?')}，"
-                f"finish_reason={event.get('finish_reason') or '-'}，"
+                f"{prefix}[第 {attempt} 次嘗試] API 成功："
+                f"耗時={_format_timing(event.get('api_elapsed_seconds'))}，"
+                f"狀態碼={event.get('http_status', '?')}，"
+                f"完成原因={event.get('finish_reason') or '-'}，"
                 f"預期/回傳={event.get('expected_count', '?')}/"
                 f"{event.get('actual_count', '?')}，{token_text}，"
-                f"network_attempts={event.get('network_attempts', 0)}。",
+                f"網路請求={event.get('network_attempts', 0)}。",
                 "info",
             )
             return
         session.add_log(
-            f"{prefix}[attempt {attempt}] API 失敗："
-            f"status={event.get('http_status', '?')}，"
-            f"kind={event.get('error_kind', 'unknown')}，"
-            f"exception={event.get('exception_type', 'Exception')}，"
-            f"overload={_event_bool(event.get('provider_overload'))}，"
-            f"quota/rate_limit={_event_bool(event.get('quota_or_rate_limit'))}，"
-            f"timeout={_event_bool(event.get('timeout'))}，"
+            f"{prefix}[第 {attempt} 次嘗試] API 失敗："
+            f"狀態碼={event.get('http_status', '?')}，"
+            f"錯誤分類={event.get('error_kind', 'unknown')}，"
+            f"例外類型={event.get('exception_type', 'Exception')}，"
+            f"服務過載={_event_bool(event.get('provider_overload'))}，"
+            f"配額／速率限制={_event_bool(event.get('quota_or_rate_limit'))}，"
+            f"逾時={_event_bool(event.get('timeout'))}，"
             f"Retry-After={_format_timing(event.get('retry_after_seconds'))}，"
-            f"key_rotation={_event_bool(event.get('key_rotated'))}。",
+            f"API 金鑰輪替={_event_bool(event.get('key_rotated'))}。",
             "warning",
         )
 
@@ -414,29 +414,29 @@ class SmartReviewJob:
         kind = event.get("kind")
         if kind == "retry_wait":
             session.add_log(
-                f"{prefix}[attempt {attempt}] 第 "
+                f"{prefix}[第 {attempt} 次嘗試] 第 "
                 f"{event.get('retry_number', '?')}/{event.get('retry_total', '?')} "
                 f"次重試，等待 {_format_timing(event.get('wait_seconds'))}；"
-                f"kind={event.get('error_kind', 'unknown')}，"
-                f"status={event.get('http_status', '?')}，"
+                f"錯誤分類={event.get('error_kind', 'unknown')}，"
+                f"狀態碼={event.get('http_status', '?')}，"
                 f"Retry-After={_format_timing(event.get('retry_after_seconds'))}。",
                 "warning",
             )
         elif kind == "retry_resume":
             session.add_log(
-                f"{prefix}[attempt {attempt}] 重試等待結束，"
+                f"{prefix}[第 {attempt} 次嘗試] 重試等待結束，"
                 "繼續下一次 API 請求。",
                 "info",
             )
         elif kind == "rate_limit_wait":
             session.add_log(
-                f"{prefix}[attempt {attempt}] 等待配額時鐘，"
+                f"{prefix}[第 {attempt} 次嘗試] 等待配額時鐘，"
                 f"預計 {_format_timing(event.get('wait_seconds'))}。",
                 "info",
             )
         else:
             session.add_log(
-                f"{prefix}[attempt {attempt}] 配額時鐘等待結束，"
+                f"{prefix}[第 {attempt} 次嘗試] 配額時鐘等待結束，"
                 "準備送出 API 請求。",
                 "info",
             )
@@ -448,42 +448,46 @@ class SmartReviewJob:
         network_attempt = event.get("network_attempt", "?")
         network_total = event.get("network_total", "?")
         scope = event.get("network_scope")
-        scope_text = f"，scope={scope}" if scope else ""
+        scope_labels = {
+            "chatgpt_provider_call": "ChatGPT 供應商請求",
+        }
+        scope_label = scope_labels.get(str(scope), scope) if scope else None
+        scope_text = f"，範圍={scope_label}" if scope_label else ""
         kind = event.get("kind")
         if kind == "network_attempt_start":
             text = (
-                f"{prefix}[attempt {attempt}] network_attempt="
+                f"{prefix}[第 {attempt} 次嘗試] 網路請求="
                 f"{network_attempt}/{network_total}{scope_text} 開始。"
             )
             level = "info"
         elif kind == "network_failure":
             text = (
-                f"{prefix}[attempt {attempt}] network 失敗："
-                f"attempt={network_attempt}/{network_total}，"
+                f"{prefix}[第 {attempt} 次嘗試] 網路請求失敗："
+                f"請求={network_attempt}/{network_total}"
                 f"{scope_text}"
-                f"kind={event.get('error_kind', 'unknown')}，"
-                f"exception={event.get('exception_type', 'Exception')}。"
+                f"，錯誤分類={event.get('error_kind', 'unknown')}，"
+                f"例外類型={event.get('exception_type', 'Exception')}。"
             )
             level = "warning"
         elif kind == "network_retry_wait":
             text = (
-                f"{prefix}[attempt {attempt}] network retry，"
+                f"{prefix}[第 {attempt} 次嘗試] 網路重試，"
                 f"等待 {_format_timing(event.get('wait_seconds'))}；"
-                f"network_attempt={network_attempt}/{network_total}。"
+                f"網路請求={network_attempt}/{network_total}。"
             )
             level = "warning"
         elif kind == "network_retry_resume":
             text = (
-                f"{prefix}[attempt {attempt}] network retry wait 結束，"
-                f"繼續 network_attempt={network_attempt} 後續嘗試/{network_total}。"
+                f"{prefix}[第 {attempt} 次嘗試] 網路重試等待結束，"
+                f"繼續後續網路請求（目前 {network_attempt}/{network_total}）。"
             )
             level = "info"
         else:
             text = (
-                f"{prefix}[attempt {attempt}] network response："
-                f"network_attempt={network_attempt}/{network_total}，"
-                f"{scope_text}"
-                f"status={event.get('http_status', '?')}。"
+                f"{prefix}[第 {attempt} 次嘗試] 網路回應："
+                f"網路請求={network_attempt}/{network_total}"
+                f"{scope_text}，"
+                f"狀態碼={event.get('http_status', '?')}。"
             )
             level = "info"
         session.add_log(text, level)
@@ -496,24 +500,24 @@ class SmartReviewJob:
             f"{message} × {count:,}" for message, count in list(errors.items())[:5]
         ) or "無"
         session.add_log(
-            f"{prefix} 完成：ordinal {event.get('ordinal_start', '?')}～"
+            f"{prefix} 完成：序號 {event.get('ordinal_start', '?')}～"
             f"{event.get('ordinal_end', '?')}，實際 {event.get('actual_count', '?')} 筆；"
-            f"Smart Review attempts {event.get('smart_review_attempts', 0)}、"
-            f"retry {event.get('retry_count', 0)}、"
+            f"校對請求 {event.get('smart_review_attempts', 0)}、"
+            f"重試 {event.get('retry_count', 0)}、"
             f"配額等待 {_format_timing(event.get('rate_limit_wait_seconds'))}、"
-            f"retry wait {_format_timing(event.get('retry_wait_seconds'))}、"
-            f"network retry wait {_format_timing(event.get('network_retry_wait_seconds'))}、"
+            f"重試等待 {_format_timing(event.get('retry_wait_seconds'))}、"
+            f"網路重試等待 {_format_timing(event.get('network_retry_wait_seconds'))}、"
             f"API {_format_timing(event.get('api_seconds'))}、"
             f"解析 {_format_timing(event.get('parse_seconds'))}、"
             f"寫入 JSON {_format_timing(event.get('result_write_seconds'))}、"
             f"本批 {_format_timing(event.get('elapsed_seconds'))}；"
-            f"valid={event.get('valid_count', 0)}、"
-            f"invalid={event.get('invalid_count', 0)}、"
-            f"needs_context={event.get('needs_context_count', 0)}、"
-            f"no_change={event.get('no_change_count', 0)}、"
-            f"suggest_revision={event.get('suggest_revision_count', event.get('suggestion_count', 0))}；"
-            f"request_errors={event.get('request_errors', 0)}；"
-            f"validation errors={error_text}。",
+            f"有效={event.get('valid_count', 0)}、"
+            f"無效={event.get('invalid_count', 0)}、"
+            f"需補充上下文={event.get('needs_context_count', 0)}、"
+            f"不變更={event.get('no_change_count', 0)}、"
+            f"建議修訂={event.get('suggest_revision_count', event.get('suggestion_count', 0))}；"
+            f"請求錯誤={event.get('request_errors', 0)}；"
+            f"驗證錯誤={error_text}。",
             "warning" if event.get("invalid_count", 0) else "info",
         )
 
@@ -536,7 +540,7 @@ class SmartReviewJob:
         session.add_log(
             f"智慧校對{label}：處理 {result.processed_count:,} 筆，有效 "
             f"{result.valid_count:,}、建議 {result.suggestion_count:,}、"
-            f"不變 {result.no_change_count:,}、需補 context "
+            f"不變 {result.no_change_count:,}、需補充上下文 "
             f"{result.needs_context_count:,}、無效 {result.invalid_count:,}；"
             f"耗時 {format_duration(state.elapsed())}",
             "warning" if result.status in {"failed", "partial"} else "system",
@@ -581,12 +585,12 @@ class SmartReviewJob:
             f"寫入 JSON {_format_timing(metrics.get('result_write_seconds'))}、"
             f"未分類 {_format_timing(unclassified)}；"
             f"共 {metrics.get('batch_count', 0)} 批、"
-            f"Smart Review attempts {metrics.get('request_attempts', 0)} 次、"
-            f"network attempts {metrics.get('network_attempts', 0)} 次、"
+            f"校對請求 {metrics.get('request_attempts', 0)} 次、"
+            f"網路請求 {metrics.get('network_attempts', 0)} 次、"
             f"重試 {metrics.get('retry_count', 0)} 次、"
-            f"network retry {metrics.get('network_retry_count', 0)} 次、"
-            f"overload {metrics.get('overload_count', 0)} 次、"
-            f"換 key {metrics.get('key_rotation_count', 0)} 次。",
+            f"網路重試 {metrics.get('network_retry_count', 0)} 次、"
+            f"服務過載 {metrics.get('overload_count', 0)} 次、"
+            f"API 金鑰輪替 {metrics.get('key_rotation_count', 0)} 次。",
             "system",
         )
 
