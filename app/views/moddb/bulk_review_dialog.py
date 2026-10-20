@@ -30,13 +30,15 @@ from translation_tool.utils.log_unit import log_exception, log_info, log_warning
 PAGE_SIZE = 50
 ACTOR = "使用者"
 ALL_MODS = "__all__"
+ALL_SOURCES = "__all__"
 
 
 class BulkReviewDialog:
     """Review entries in one version/module whose effective source matches.
 
-    The scope is recomputed and compared with the preview inside the write
-    transaction, so nothing outside the previewed list can be touched.
+    The source can also be unrestricted. The scope is recomputed and compared
+    with the preview inside the write transaction, so nothing outside the
+    previewed list can be touched.
     """
 
     def __init__(self, page: ft.Page, get_db, version: str | None, on_complete):
@@ -121,7 +123,7 @@ class BulkReviewDialog:
                 content=ft.Column(
                     [
                         ft.Text(
-                            "把「所選版本、模組、目前生效來源」的條目一次標為人工已審核（來源不變）；"
+                            "把「所選版本、模組、目前生效來源（可選全部）」的條目一次標為人工已審核（來源不變）；"
                             "預覽不會寫入，確認後才會審核，且可整批還原。",
                             size=12,
                             color=C.MUTED,
@@ -187,12 +189,17 @@ class BulkReviewDialog:
         version = self.version_dd.value
         codes = db.effective_source_codes(version) if db and version else ()
         catalog = source_catalog_for(db)
+        options = [
+            (ALL_SOURCES, "全部來源"),
+            *((str(code), source_label(code, catalog)) for code in codes),
+        ]
+        selected = self.source_dd.value
         kit.set_dropdown_options(
-            self.source_dd, [(str(code), source_label(code, catalog)) for code in codes]
+            self.source_dd, options
         )
-        keys = {str(code) for code in codes}
-        if self.source_dd.value not in keys:
-            self.source_dd.value = None
+        keys = {key for key, _label in options}
+        if selected not in keys:
+            self.source_dd.value = ALL_SOURCES
 
     def _on_version(self, _e=None) -> None:
         self._refresh_mods()
@@ -218,12 +225,14 @@ class BulkReviewDialog:
     def _preview(self, _e=None) -> None:
         db = self.get_db()
         version = self.version_dd.value
-        if db is None or not version or self.source_dd.value is None:
+        source_value = self.source_dd.value
+        if db is None or not version or source_value in (None, ""):
             show_snack(self.page, "請先選擇版本與目前生效來源。", C.GOLD)
             return
         if self._busy:
             return
-        source = int(self.source_dd.value)
+        source = None if source_value == ALL_SOURCES else int(source_value)
+        source_text = "全部來源" if source is None else str(source)
         mod_id = self.mod_dd.value if self.mod_dd.value != ALL_MODS else None
         quality = bool(self.quality_check.value)
         propagate = bool(self.sync_switch.value)
@@ -245,7 +254,7 @@ class BulkReviewDialog:
             except Exception as exc:  # noqa: BLE001 - worker boundary reports unexpected failures
                 error = exc
                 log_exception(
-                    f"Mod 資料庫批量審核預覽失敗：{version} 模組 {mod_id or '全部'} 來源 {source}"
+                    f"Mod 資料庫批量審核預覽失敗：{version} 模組 {mod_id or '全部'} 來源 {source_text}"
                 )
             self._post(self._apply_preview, generation, plan, error)
 
@@ -393,6 +402,7 @@ class BulkReviewDialog:
             return
         excluded = tuple(self.excluded)
         generation = self._generation
+        source_text = "全部來源" if plan.source is None else str(plan.source)
         self._set_busy(True, "審核中…")
 
         def work() -> None:
@@ -409,12 +419,12 @@ class BulkReviewDialog:
             except sqlite3.Error as exc:
                 error = exc
                 log_exception(
-                    f"Mod 資料庫批量審核失敗：{plan.version} 模組 {plan.mod_id or '全部'} 來源 {plan.source}"
+                    f"Mod 資料庫批量審核失敗：{plan.version} 模組 {plan.mod_id or '全部'} 來源 {source_text}"
                 )
             except Exception as exc:  # noqa: BLE001 - worker boundary reports unexpected failures
                 error = exc
                 log_exception(
-                    f"Mod 資料庫批量審核發生未預期錯誤：{plan.version} 模組 {plan.mod_id or '全部'} 來源 {plan.source}"
+                    f"Mod 資料庫批量審核發生未預期錯誤：{plan.version} 模組 {plan.mod_id or '全部'} 來源 {source_text}"
                 )
             self._post(self._apply_result, generation, plan, result, error)
 
@@ -437,6 +447,7 @@ class BulkReviewDialog:
 
     def _apply_result(self, generation: int, plan, result, error) -> None:
         self._set_busy(False)
+        source_text = "全部來源" if plan.source is None else str(plan.source)
         if error is not None:
             log_warning(f"Mod 資料庫批量審核被拒絕或失敗：{error!r}")
             self.summary.value = f"批量審核未執行：{error}"
@@ -458,7 +469,7 @@ class BulkReviewDialog:
             )
         log_info(
             f"Mod 資料庫批量審核：{plan.version} 模組 {plan.mod_id or '全部'} "
-            f"來源 {plan.source}；{message}"
+            f"來源 {source_text}；{message}"
         )
         self.summary.value = message
         self.warning.visible = False

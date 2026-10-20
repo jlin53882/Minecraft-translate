@@ -91,7 +91,7 @@ flowchart TD
 
 刪除（`apply_cleanup`）在單一交易內把整批存進 `cleanup_batch`（含譯文、生效譯文、歷史與沒有外鍵的 `src_change` 原文變更紀錄）再刪除。還原（`_revert`）呼叫 `revert_cleanup`，回傳 `RevertResult`：原編號還沒被用掉就沿用，被用掉就改用新編號並重新對應子表的 `entry_id`；譯文的 `revision` 還原成快照當時的值；生效譯文依目前優先序重算；原位置已有同一條目（重新掃描出來）的項目不覆蓋，保留為待還原並列在 `RevertResult.conflicts`，批次要全部還原才設定 `reverted_at`，進度記在 `meta` 的 `cleanup_restored:<批次>`，可以重試。`CleanupDialog._load_batch_info` 用 `cleanup_batches` 列出所有尚未完全還原的批次（新的在前），`batch_dd` 選哪一批就還原哪一批。
 
-人工審核走 `ReviewScopeController`（`review_scope_dialog.py`）：`confirm` 先呼叫 `preview_manual_review` 顯示影響範圍；確認視窗內有「同步審核其他版本」開關，預設沿用編輯面板的同步開關，切換時重算範圍；確定後 `execute` 呼叫 `review_manual`。批量審核由 `BulkReviewDialog` 負責：選一個版本、模組與一個「目前生效來源」（模組可選全部，皆單選），預設只審核格式檢查通過的條目、不同步其他版本；`_preview` 呼叫 `preview_bulk_review` 產生預覽（每頁 50 筆，可逐筆排除），`_confirm` 呼叫 `execute_bulk_review`，完成後可用 `_revert`（`revert_review_batch`）整批還原。選項改變時舊預覽立即失效；確認時資料庫會重算範圍，與預覽不同就拒絕並要求重新預覽。審核只標示審核狀態，不改變生效來源：編輯面板以 `source_chip`（來源）與 `review_chip`（人工已審核）兩個標籤並列，條目列表與來源譯文列表同樣分開顯示；「審核狀態」篩選與「目前生效來源」篩選互相獨立、可組合。
+人工審核走 `ReviewScopeController`（`review_scope_dialog.py`）：`confirm` 先呼叫 `preview_manual_review` 顯示影響範圍；確認視窗內有「同步審核其他版本」開關，預設沿用編輯面板的同步開關，切換時重算範圍；確定後 `execute` 呼叫 `review_manual`。批量審核由 `BulkReviewDialog` 負責：選一個版本、模組與一個「目前生效來源」（模組與來源都可選全部），預設只審核格式檢查通過的條目、不同步其他版本；`_preview` 呼叫 `preview_bulk_review` 產生預覽（每頁 50 筆，可逐筆排除），`_confirm` 呼叫 `execute_bulk_review`，完成後可用 `_revert`（`revert_review_batch`）整批還原。來源選「全部來源」時，後端以 `source=None` 涵蓋所選版本／模組的所有目前生效來源。選項改變時舊預覽立即失效；確認時資料庫會重算範圍，與預覽不同就拒絕並要求重新預覽。審核只標示審核狀態，不改變生效來源：編輯面板以 `source_chip`（來源）與 `review_chip`（人工已審核）兩個標籤並列，條目列表與來源譯文列表同樣分開顯示；「審核狀態」篩選與「目前生效來源」篩選互相獨立、可組合。
 
 #### AI 智慧校對（本地候選）
 

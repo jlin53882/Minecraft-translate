@@ -598,10 +598,10 @@ class BulkReviewCandidate:
 
 @dataclass(frozen=True)
 class BulkReviewPlan:
-    """「版本 + 模組 + 目前生效來源」批量審核的預覽結果。"""
+    """「版本 + 模組 + 目前生效來源」批量審核的預覽結果；來源可不限。"""
 
     version: str
-    source: int
+    source: int | None
     mod_id: str | None
     quality_pass_only: bool
     propagate: bool

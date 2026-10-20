@@ -1,11 +1,11 @@
-"""批量審核（版本 + 目前生效來源）：選取範圍、同步其他版本、CAS 與還原。"""
+"""批量審核（版本 + 模組 + 目前生效來源）：選取範圍、同步其他版本、CAS 與還原。"""
 
 from __future__ import annotations
 
 import pytest
 
 from translation_tool.translation_db import KIND_LANG, ScanItem, TranslationDB
-from translation_tool.translation_db.schema import SRC_JAR_TW, SRC_MANUAL
+from translation_tool.translation_db.schema import SRC_AI, SRC_JAR_TW, SRC_MANUAL
 
 
 @pytest.fixture
@@ -90,6 +90,31 @@ def test_candidates_and_execution_follow_module_scope(db):
     assert _entry(db, "1.21.1", "bar-key").review_status == "unreviewed"
 
 
+def test_candidates_and_execution_allow_all_effective_sources(db):
+    db.ingest(
+        "1.21.1",
+        [
+            _item("jar-key", "Jar", "甲"),
+            ScanItem(KIND_LANG, "foo", "ai-key", "AI", "乙", source=SRC_AI),
+        ],
+    )
+
+    plan = db.preview_bulk_review(
+        "1.21.1", None, mod_id="foo", quality_pass_only=False
+    )
+
+    assert plan.source is None
+    assert {candidate.key for candidate in plan.candidates} == {"jar-key", "ai-key"}
+
+    result = db.execute_bulk_review(plan, actor="使用者")
+
+    assert result.reviewed == 2
+    assert all(
+        _entry(db, "1.21.1", key).review_status == "reviewed"
+        for key in ("jar-key", "ai-key")
+    )
+
+
 def test_execute_reviews_selected_entries_and_honours_exclusions(db):
     db.ingest(
         "1.21.1",
@@ -159,7 +184,7 @@ def _drain(page):
 
 
 def test_dialog_previews_pages_excludes_and_reverts(db):
-    from app.views.moddb.bulk_review_dialog import BulkReviewDialog
+    from app.views.moddb.bulk_review_dialog import ALL_SOURCES, BulkReviewDialog
     from tests.conftest import mock_page
 
     db.ingest(
@@ -174,7 +199,8 @@ def test_dialog_previews_pages_excludes_and_reverts(db):
     # 預設：格式檢查通過 = 勾選、同步其他版本 = 關閉
     assert dialog.quality_check.value is True and dialog.sync_switch.value is False
     assert dialog.apply_btn.disabled is True
-    assert [o.key for o in dialog.source_dd.options] == [str(SRC_JAR_TW)]
+    assert [o.key for o in dialog.source_dd.options] == [ALL_SOURCES, str(SRC_JAR_TW)]
+    assert dialog.source_dd.value == ALL_SOURCES
 
     dialog.source_dd.value = str(SRC_JAR_TW)
     dialog._preview()
@@ -201,6 +227,33 @@ def test_dialog_previews_pages_excludes_and_reverts(db):
     _drain(page)
     assert _entry(db, "1.21.1", "k001").review_status == "unreviewed"
     assert dialog.revert_btn.visible is False
+
+
+def test_dialog_can_preview_all_sources(db):
+    from app.views.moddb.bulk_review_dialog import ALL_SOURCES, BulkReviewDialog
+    from tests.conftest import mock_page
+
+    db.ingest(
+        "1.21.1",
+        [
+            _item("jar-key", "Jar", "甲"),
+            ScanItem(KIND_LANG, "foo", "ai-key", "AI", "乙", source=SRC_AI),
+        ],
+    )
+    page = mock_page()
+    page.run_thread = lambda target: target()
+    dialog = BulkReviewDialog(page, lambda: db, "1.21.1", None)
+    dialog.quality_check.value = False
+    dialog.source_dd.value = ALL_SOURCES
+
+    dialog._preview()
+    _drain(page)
+
+    assert dialog.plan.source is None
+    assert {candidate.key for candidate in dialog.plan.candidates} == {
+        "jar-key",
+        "ai-key",
+    }
 
 
 def test_dialog_option_change_invalidates_preview(db):

@@ -30,17 +30,20 @@ class BulkReviewMixin:
     def _bulk_review_candidates(
         self,
         version: str,
-        source: int,
+        source: int | None,
         quality_pass_only: bool,
         *,
         mod_id: str | None = None,
         conn: sqlite3.Connection | None = None,
     ) -> tuple[BulkReviewCandidate, ...]:
-        """所選版本／模組中、來源為 ``source`` 且尚未審核的條目（有譯文者）。"""
+        """所選版本／模組中、來源為 ``source`` 且尚未審核的條目（有譯文者）。
+
+        ``source=None`` 代表不限目前生效來源。
+        """
         criteria = EntryFilter(
             version=version,
             mod_id=mod_id or None,
-            source=int(source),
+            source=int(source) if source is not None else None,
             # 審核狀態與來源各自獨立：任何來源都只列尚未審核的條目
             review_status="unreviewed",
             quality=QualityFilter(status="consistent")
@@ -140,13 +143,14 @@ class BulkReviewMixin:
     def preview_bulk_review(
         self,
         version: str,
-        source: int,
+        source: int | None,
         *,
         mod_id: str | None = None,
         quality_pass_only: bool = True,
         propagate: bool = False,
     ) -> BulkReviewPlan:
         """預覽批量審核範圍（不寫入）。"""
+        source = int(source) if source is not None else None
         mod_id = str(mod_id).strip() if mod_id is not None else None
         mod_id = mod_id or None
         candidates = self._bulk_review_candidates(
@@ -157,7 +161,7 @@ class BulkReviewMixin:
         )
         return BulkReviewPlan(
             version=version,
-            source=int(source),
+            source=source,
             mod_id=mod_id,
             quality_pass_only=quality_pass_only,
             propagate=propagate,
