@@ -419,7 +419,6 @@ def test_dashboard_mount_reload_does_not_create_a_task_lifecycle_loop():
     repeated_start = threading.Event()
     first_finish = threading.Event()
     registry_ref = []
-
     def load_cache():
         nonlocal load_count
         load_count += 1
@@ -453,7 +452,7 @@ def test_dashboard_mount_reload_does_not_create_a_task_lifecycle_loop():
         manager.detach()
 
 
-def test_dashboard_coalesces_task_changes_during_reload_and_uses_stable_owner_id():
+def test_dashboard_task_changes_do_not_reload_dashboard_data():
     import threading
 
     from app.tasks.operation_registry import OperationDescriptor
@@ -461,9 +460,7 @@ def test_dashboard_coalesces_task_changes_during_reload_and_uses_stable_owner_id
 
     first_load_started = threading.Event()
     release_first_load = threading.Event()
-    second_load_started = threading.Event()
     load_count = 0
-    registry_ref = []
 
     def load_cache():
         nonlocal load_count
@@ -471,15 +468,9 @@ def test_dashboard_coalesces_task_changes_during_reload_and_uses_stable_owner_id
         if load_count == 1:
             first_load_started.set()
             assert release_first_load.wait(timeout=2)
-        elif load_count == 2:
-            second_load_started.set()
-        else:
-            # Prevent an unbounded loop from hanging a failing implementation.
-            registry_ref[0].begin_shutdown()
         return {"total_entries": load_count, "types": {}}
 
-    _view, manager, registry = _dashboard_with_registry(load_cache)
-    registry_ref.append(registry)
+    view, manager, registry = _dashboard_with_registry(load_cache)
     session = TaskSession(name="使用者操作", view_key="test")
     handle = registry.reserve(
         OperationDescriptor(name="使用者操作", owner="test"),
@@ -487,12 +478,13 @@ def test_dashboard_coalesces_task_changes_during_reload_and_uses_stable_owner_id
     )
     assert handle is not None
 
+    view.did_mount()
+    assert first_load_started.wait(timeout=1)
     worker_finished_session = threading.Event()
     release_worker = threading.Event()
 
     def user_work():
         session.start()
-        assert first_load_started.wait(timeout=1)
         session.set_progress(0.4)
         session.set_progress(0.8)
         session.finish()
@@ -508,13 +500,11 @@ def test_dashboard_coalesces_task_changes_during_reload_and_uses_stable_owner_id
         release_worker.set()
         assert handle.done_event.wait(timeout=1)
         release_first_load.set()
-        assert second_load_started.wait(timeout=1)
         assert registry.wait_for_idle(timeout=1)
-        assert load_count == 2
+        assert load_count == 1
         assert manager.active() == []
         assert [task.name for task in manager.recent()] == ["使用者操作"]
     finally:
-        release_worker.set()
         release_first_load.set()
         registry.begin_shutdown()
         registry.wait_for_idle(timeout=2)

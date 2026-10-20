@@ -395,8 +395,10 @@ class RulesView(RulesWidgetsMixin, ft.Column):
         for func, args, kwargs in pending:
             func(*args, **kwargs)
 
-    def _load_rules_core(self):
-        """從檔案載入替換規則並回傳"""
+    def _load_rules_core(self, *, force_reload: bool = False):
+        """從共用 Store 載入替換規則；手動重新載入時強制讀取檔案。"""
+        if force_reload:
+            return load_replace_rules(force_reload=True, source="rules_manual_reload")
         return load_replace_rules()
 
     def _initial_load(self):

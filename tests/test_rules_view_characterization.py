@@ -408,6 +408,21 @@ def test_rules_view_load_rules_core(monkeypatch):
     assert callable(view._load_rules_core)
 
 
+def test_rules_view_manual_reload_forces_store_reload(monkeypatch):
+    from types import SimpleNamespace
+
+    calls = []
+    monkeypatch.setattr(
+        "app.views.rules_view.load_replace_rules",
+        lambda **kwargs: calls.append(kwargs) or [],
+    )
+
+    from app.views.rules_view import RulesView
+
+    assert RulesView._load_rules_core(SimpleNamespace(), force_reload=True) == []
+    assert calls == [{"force_reload": True, "source": "rules_manual_reload"}]
+
+
 def test_rules_view_initial_load(monkeypatch):
     monkeypatch.setattr(
         "app.views.rules_view.threading.Thread",

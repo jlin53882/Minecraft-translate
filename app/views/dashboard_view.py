@@ -12,6 +12,7 @@ import logging
 import threading
 import time
 from collections.abc import Callable
+from pathlib import Path
 
 import flet as ft
 
@@ -82,9 +83,9 @@ def _default_cache_overview() -> dict:
 
 
 def _default_rules_count() -> int:
-    from app.services_impl.config_service import load_replace_rules
+    from app.services_impl.config_service import get_replace_rules_count
 
-    return len(load_replace_rules())
+    return get_replace_rules_count(source="dashboard")
 
 
 def _default_moddb_summary() -> dict | None:
@@ -203,6 +204,7 @@ class DashboardView(ft.Column):
         self._navigate: Callable[[str], None] | None = None
         self._tasks: TaskManager | None = None
         self._unsubscribe: Callable[[], None] | None = None
+        self._unsubscribe_rules: Callable[[], None] | None = None
         self._cache_overview: dict | None = None
         self._rules_count: int | None = None
         self._loading = False
@@ -346,6 +348,7 @@ class DashboardView(ft.Column):
     def set_shell(self, shell) -> None:
         """外殼建立頁面後呼叫：提供導覽，並訂閱任務事件（任務一變就更新流程進度與活動）。"""
         self._navigate = shell.navigate
+        self._subscribe_rules()
         self.set_task_manager(shell.tasks)
 
     def set_task_manager(self, tasks: TaskManager) -> None:
@@ -364,7 +367,39 @@ class DashboardView(ft.Column):
             self._navigate(view_key)
 
     def did_mount(self) -> None:
+        self._subscribe_rules()
         self.reload()
+
+    def will_unmount(self) -> None:
+        """換頁／關閉：清理任務與規則事件訂閱。"""
+        if self._unsubscribe is not None:
+            self._unsubscribe()
+            self._unsubscribe = None
+        if self._unsubscribe_rules is not None:
+            self._unsubscribe_rules()
+            self._unsubscribe_rules = None
+
+    def _subscribe_rules(self) -> None:
+        if self._unsubscribe_rules is not None:
+            return
+        from app.services_impl.config_service import subscribe_replace_rules
+
+        self._unsubscribe_rules = subscribe_replace_rules(self._on_rules_changed)
+
+    def _on_rules_changed(self, _path=None) -> None:
+        """規則實際失效或重載後，只更新規則數卡片。"""
+        if _path is not None:
+            from app.services_impl.config_service import REPLACE_RULES_PATH
+
+            if Path(_path).resolve() != Path(REPLACE_RULES_PATH).resolve():
+                return
+        try:
+            rules = self._rules_count_loader()
+        except Exception:
+            logger.warning("工作台讀取規則數失敗", exc_info=True)
+            rules = None
+        self._rules_count = rules
+        self._apply_on_ui()
 
     # -- 資料 ----------------------------------------------------------------
 
@@ -475,12 +510,7 @@ class DashboardView(ft.Column):
             else set()
         )
         with self._task_state_lock:
-            crossed_task_boundary = active_ids != self._active_task_ids
             self._active_task_ids = active_ids
-        if crossed_task_boundary:
-            # 只在 active task membership 發生開始 / 結束邊界時重讀昂貴統計；
-            # progress 事件只更新 UI 狀態。
-            self.reload()
         self._apply_on_ui()
 
     def _safe_update(self) -> None:
