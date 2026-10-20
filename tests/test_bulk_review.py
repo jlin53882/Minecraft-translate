@@ -66,6 +66,7 @@ def test_candidates_follow_version_source_and_quality(db):
 
 
 def test_candidates_and_execution_follow_module_scope(db):
+    """驗證此測試案例的預期結果與相容性。"""
     db.ingest(
         "1.21.1",
         [
@@ -91,6 +92,7 @@ def test_candidates_and_execution_follow_module_scope(db):
 
 
 def test_candidates_and_execution_allow_all_effective_sources(db):
+    """驗證此測試案例的預期結果與相容性。"""
     db.ingest(
         "1.21.1",
         [
@@ -184,6 +186,7 @@ def _drain(page):
 
 
 def test_dialog_previews_pages_excludes_and_reverts(db):
+    """驗證此測試案例的預期結果與相容性。"""
     from app.views.moddb.bulk_review_dialog import ALL_SOURCES, BulkReviewDialog
     from tests.conftest import mock_page
 
@@ -230,6 +233,7 @@ def test_dialog_previews_pages_excludes_and_reverts(db):
 
 
 def test_dialog_can_preview_all_sources(db):
+    """驗證此測試案例的預期結果與相容性。"""
     from app.views.moddb.bulk_review_dialog import ALL_SOURCES, BulkReviewDialog
     from tests.conftest import mock_page
 
@@ -257,6 +261,7 @@ def test_dialog_can_preview_all_sources(db):
 
 
 def test_dialog_option_change_invalidates_preview(db):
+    """驗證篩選選項變更會清除舊預覽並停用確認操作。"""
     from app.views.moddb.bulk_review_dialog import BulkReviewDialog
     from tests.conftest import mock_page
 
@@ -276,6 +281,7 @@ def test_dialog_option_change_invalidates_preview(db):
 
 
 def test_dialog_filters_preview_by_module(db):
+    """驗證此測試案例的預期結果與相容性。"""
     from app.views.moddb.bulk_review_dialog import BulkReviewDialog
     from tests.conftest import mock_page
 

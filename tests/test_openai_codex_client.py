@@ -1,4 +1,4 @@
-"""Codex OAuth Responses transport and Structured Outputs tests."""
+"""OpenAI Codex client 請求參數與錯誤處理的針對性測試。"""
 
 import json
 from datetime import UTC, datetime, timedelta
@@ -193,6 +193,7 @@ def test_call_retries_once_after_unauthorized_and_keeps_reasoning(monkeypatch):
             self.closed = True
 
     class _SuccessResponse:
+        """測試用的成功 Responses API 回應物件。"""
         status_code = 200
         ok = True
 
@@ -242,6 +243,7 @@ def test_call_fast_mode_uses_codex_priority_service_tier(monkeypatch):
     """驗證快速模式使用 Codex 優先服務層級。"""
 
     class _SuccessResponse:
+        """提供測試所需的成功 HTTP response 欄位。"""
         status_code = 200
         ok = True
 
@@ -251,7 +253,7 @@ def test_call_fast_mode_uses_codex_priority_service_tier(monkeypatch):
     )
 
     def stream_request(**kwargs):
-        """處理目前函數負責的資料與流程。"""
+        """記錄測試用的 Responses 請求參數並回傳成功 response。"""
         requests_seen.append(kwargs)
         return _SuccessResponse()
 

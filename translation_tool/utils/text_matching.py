@@ -1,4 +1,4 @@
-"""Small, shared text-matching helpers used by translation references."""
+"""官方術語與 glossary 共用的文字正規化、詞界匹配與前綴索引工具。"""
 
 from __future__ import annotations
 
@@ -9,13 +9,7 @@ _TERM_WHITESPACE_RE = re.compile(r"\s+")
 
 
 def normalize_term_text(value: str, *, casefold: bool = False) -> str:
-    """Normalize separators used by Minecraft identifiers and English terms.
-
-    A hyphen and an underscore are both common ways to join the same Minecraft
-    compound name.  Treating them as a single space lets callers compare
-    ``Netherite-Diamond Block`` with ``netherite_diamond_block`` while the
-    boundary checks still prevent ``block`` from matching ``blocker``.
-    """
+    """正規化 Minecraft 識別字與英文術語常用的分隔符。"""
     if not isinstance(value, str):
         return ""
     normalized = _TERM_SEPARATOR_RE.sub(" ", value.strip())
@@ -23,12 +17,7 @@ def normalize_term_text(value: str, *, casefold: bool = False) -> str:
     return normalized.casefold() if casefold else normalized
 
 def contains_term(source: str, term: str) -> bool:
-    """Return whether ``term`` occurs in ``source`` as a case-insensitive term.
-
-    ASCII and Unicode word characters at the ends of an English term must not be
-    part of a larger word. Punctuation inside or around a term remains matchable,
-    which keeps Minecraft names such as ``<ItemLink>`` usable as references.
-    """
+    """以不分大小寫且遵守詞界的方式判斷來源是否包含術語。"""
     if not isinstance(source, str) or not isinstance(term, str):
         return False
     normalized_source = normalize_term_text(source, casefold=True)
@@ -58,16 +47,12 @@ def contains_term(source: str, term: str) -> bool:
 
 
 def term_canonical_key(term: str) -> str:
-    """Normalize a glossary source without losing the original display text."""
+    """正規化術語來源以建立穩定比對 key，同時保留顯示文字。"""
     return normalize_term_text(term, casefold=True)
 
 
 def matching_terms(sources: tuple[str, ...], terms: tuple[str, ...]) -> set[str]:
-    """Return terms that occur in at least one source using a prefix index.
-
-    The index avoids testing every term against every source.  A final
-    ``contains_term`` call keeps the word-boundary contract authoritative.
-    """
+    """使用前綴索引找出至少出現在一個來源中的術語，並以詞界檢查確認結果。"""
     normalized_terms: dict[str, list[str]] = {}
     for term in terms:
         if not isinstance(term, str):

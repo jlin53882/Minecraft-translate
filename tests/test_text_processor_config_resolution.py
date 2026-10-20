@@ -1,3 +1,5 @@
+"""文字處理器規則檔路徑解析與持久化行為的測試。"""
+
 import json
 from pathlib import Path
 
@@ -41,6 +43,7 @@ def test_save_replace_rules_can_propagate_durable_write_failure(tmp_path, monkey
 
 
 def test_save_replace_rules_invalidates_cached_snapshot(tmp_path, monkeypatch):
+    """驗證此測試案例的預期結果與相容性。"""
     rules_path = tmp_path / "replace_rules.json"
     rules_path.write_text(
         json.dumps([{"from": "hello", "to": "哈囉"}], ensure_ascii=False),

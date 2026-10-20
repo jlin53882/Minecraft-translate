@@ -1,3 +1,5 @@
+"""規則頁面的操作處理器與使用者提示組裝函式。"""
+
 from __future__ import annotations
 
 import math

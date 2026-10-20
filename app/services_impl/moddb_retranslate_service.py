@@ -1,4 +1,4 @@
-"""Preview and repair existing source translations using direct AI output."""
+"""ModDB 本地譯文修復服務：建立候選快照、呼叫 AI 修復並以 CAS 安全寫回。"""
 
 from __future__ import annotations
 
@@ -147,6 +147,7 @@ class SameSourceAIRepairPreview:
 
 @dataclass
 class SameSourceAIRepairReport:
+    """同一來源 AI 修復執行的統計報告，保存候選、成功、失敗與批次計時結果。"""
     candidates: int = 0
     translated: int = 0
     updated: int = 0
@@ -1682,6 +1683,7 @@ def _translate_snapshot(
     report: SameSourceAIRepairReport,
     cancelled,
 ) -> None:
+    """依確認過的候選快照分批執行本地譯文修復，並以 CAS 寫回通過驗證的結果。"""
     selection_started = monotonic()
     items, tracker, lm_cfg = _initialize_snapshot_run(
         db, entries, session, report, options
@@ -1749,7 +1751,7 @@ def _raise_if_repair_cancelled(items, report, cancelled):
 
 
 def _request_repair_translation(batch, total, batch_handle):
-    """Call the existing translation policy and publish common API telemetry."""
+    """呼叫既有翻譯策略並發布共用 API telemetry；每批完成後逐筆驗證並以 CAS 寫回結果。"""
     wait_before = (
         batch_handle.executor.metrics.quota_wait_ms
         + batch_handle.executor.metrics.retry_backoff_ms
@@ -1809,6 +1811,7 @@ def _prepare_repair_batch(
     report,
     executor,
 ):
+    """準備一批待修復條目，建立請求資料並記錄 prompt 與批次規劃耗時。"""
     report.batches += 1
     report.ai_submitted_items += len(batch)
     report.attempted_candidates += len(batch)
@@ -1884,6 +1887,7 @@ def _publish_repair_batch_completion(
     api_elapsed_ms,
     cache_keys_to_save,
 ):
+    """發布本批修復完成的共用事件、結果統計與畫面進度。"""
     applying_live = dict(planned_live)
     applying_live.update(
         {
@@ -1909,6 +1913,7 @@ def _publish_repair_batch_completion(
     )
 
     def check_planning_cancelled():
+        """在批次規劃的檢查點讀取取消訊號，已取消時立即停止後續規劃。"""
         if cancelled() or is_cancelled():
             raise TaskCancelled()
 
@@ -1956,7 +1961,7 @@ def _run_repair_batch(
     *,
     executor: CommonBatchExecutor | None = None,
 ):
-    """Submit one homogeneous batch, finalize each CAS, then publish its progress."""
+    """送出一批同質修復條目，逐筆完成 CAS，最後發布批次進度。"""
     (
         tail,
         batch_number,

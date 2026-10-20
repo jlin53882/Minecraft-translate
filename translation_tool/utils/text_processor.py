@@ -63,6 +63,7 @@ def _file_revision(path: Path) -> tuple[int, int] | None:
 
 
 def _format_file_revision(revision: tuple[int, int] | None) -> str:
+    """把規則檔 revision 格式化成可讀的 log 文字。"""
     if revision is None:
         return "missing"
     return f"mtime_ns={revision[0]},size={revision[1]}"
@@ -135,6 +136,7 @@ class ReplaceRulesStore:
         loader: Callable[[Path], tuple[ReplaceRules, int, int]] | None = None,
     ) -> None:
         # 以 lambda 動態查找 _resolve_rules_path，保留測試與執行期路徑覆寫能力。
+        """初始化此測試替身或服務物件所需的狀態。"""
         self._path_resolver = path_resolver or (lambda path: _resolve_rules_path(path))
         self._loader = loader or _load_rules_uncached
         self._lock = threading.RLock()
@@ -143,6 +145,7 @@ class ReplaceRulesStore:
         self._generation = 0
 
     def _resolved_path(self, path: str | os.PathLike[str]) -> Path:
+        """解析規則路徑並轉成穩定的絕對路徑。"""
         return Path(self._path_resolver(os.fspath(path))).expanduser().resolve()
 
     @staticmethod
@@ -158,6 +161,7 @@ class ReplaceRulesStore:
         source: str,
         reason: str,
     ) -> ImmutableReplaceRulesSnapshot:
+        """在 Store 鎖內實際讀取規則、建立不可變快照、更新 revision 並記錄載入 log。"""
         started = time.perf_counter()
         rules, fixed_count, regex_count = self._loader(resolved_path)
         self._generation += 1
@@ -263,6 +267,7 @@ class ReplaceRulesStore:
             self._listeners.add(callback)
 
         def unsubscribe() -> None:
+            """取消先前註冊的規則變更 callback。"""
             with self._lock:
                 self._listeners.discard(callback)
 
@@ -272,6 +277,7 @@ class ReplaceRulesStore:
     def _notify(
         listeners: list[Callable[[Path | None], None]], path: Path | None
     ) -> None:
+        """通知所有規則變更 callback；單一 callback 失敗不阻斷其他通知。"""
         for callback in listeners:
             try:
                 callback(path)

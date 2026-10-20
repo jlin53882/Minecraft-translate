@@ -298,7 +298,7 @@ def call_gemini_requests(
     response_schema: dict | None = None,
     network_event_callback: Callable[[dict[str, object]], None] | None = None,
 ) -> str:
-    """處理目前函數負責的資料與流程。"""
+    """依 provider 與固定的 lm 設定送出翻譯請求，並回傳模型文字結果。"""
     # Batch translation passes its start-of-task snapshot so a settings change
     # cannot route an in-flight Gemini model to the ChatGPT Responses endpoint.
     lm_cfg = (

@@ -453,6 +453,7 @@ def test_dashboard_mount_reload_does_not_create_a_task_lifecycle_loop():
 
 
 def test_dashboard_task_changes_do_not_reload_dashboard_data():
+    """驗證此測試案例的預期結果與相容性。"""
     import threading
 
     from app.tasks.operation_registry import OperationDescriptor

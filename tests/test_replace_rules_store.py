@@ -13,9 +13,11 @@ from translation_tool.utils.text_processor import ReplaceRulesStore
 
 
 def _store(tmp_path, load_count, *, delay=0.0):
+    """建立使用測試路徑與載入器的替換規則 Store。"""
     rules_path = tmp_path / "rules.json"
 
     def loader(path):
+        """載入測試資料並回傳規則內容，供快取與並行行為驗證。"""
         load_count.append(path)
         if delay:
             time.sleep(delay)
@@ -29,6 +31,7 @@ def _store(tmp_path, load_count, *, delay=0.0):
 
 
 def test_store_reuses_immutable_snapshot_until_file_revision_changes(tmp_path):
+    """驗證此測試案例的預期結果與相容性。"""
     loads = []
     store, rules_path = _store(tmp_path, loads)
     rules_path.write_text(
@@ -60,6 +63,7 @@ def test_store_reuses_immutable_snapshot_until_file_revision_changes(tmp_path):
 
 
 def test_store_logs_only_actual_load_with_revision_and_source(tmp_path, monkeypatch):
+    """驗證此測試案例的預期結果與相容性。"""
     loads = []
     store, rules_path = _store(tmp_path, loads)
     rules_path.write_text("[]", encoding="utf-8")
@@ -82,6 +86,7 @@ def test_store_logs_only_actual_load_with_revision_and_source(tmp_path, monkeypa
 
 
 def test_store_serializes_concurrent_first_loads(tmp_path):
+    """驗證此測試案例的預期結果與相容性。"""
     loads = []
     active = 0
     max_active = 0
@@ -93,6 +98,7 @@ def test_store_serializes_concurrent_first_loads(tmp_path):
     )
 
     def loader(path):
+        """載入測試資料並回傳規則內容，供快取與並行行為驗證。"""
         nonlocal active, max_active
         with state_lock:
             loads.append(path)
@@ -119,6 +125,7 @@ def test_store_serializes_concurrent_first_loads(tmp_path):
 
 
 def test_store_force_reload_and_invalidate_notify_and_reload(tmp_path):
+    """驗證此測試案例的預期結果與相容性。"""
     loads = []
     store, rules_path = _store(tmp_path, loads)
     rules_path.write_text("[]", encoding="utf-8")

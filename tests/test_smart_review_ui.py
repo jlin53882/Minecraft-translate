@@ -216,6 +216,7 @@ def test_context_write_callback_allows_own_generation_change(tmp_path):
         """提供可被模擬遞增的 cache generation。"""
 
         def __init__(self):
+            """初始化此測試替身或服務物件所需的狀態。"""
             self.path = path
             self.generation = "1"
 
@@ -612,6 +613,7 @@ def test_reviewer_blocks_apply_when_draft_has_format_issue(reviewer, monkeypatch
         """模擬格式診斷結果。"""
 
         def __init__(self, issues):
+            """初始化此測試替身或服務物件所需的狀態。"""
             self.summary_lines = issues
             self.has_issues = bool(issues)
 
@@ -664,9 +666,11 @@ def test_smart_review_completion_refreshes_entry_list_before_parent_changed(monk
         """在測試中立即執行完成回呼。"""
 
         def __init__(self, _page, _get_db, _version, on_complete, *_args):
+            """初始化此測試替身或服務物件所需的狀態。"""
             self.on_complete = on_complete
 
         def open(self):
+            """立即執行完成 callback，模擬對話框開啟後完成智慧校對。"""
             self.on_complete()
 
     monkeypatch.setattr(entry_filters, "SmartReviewDialog", FakeSmartReviewDialog)

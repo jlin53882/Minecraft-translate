@@ -1,4 +1,4 @@
-"""Focused contract tests for the shared translation batch executor."""
+"""共用批次執行器、事件安全性與 provider／network retry 分層的針對性測試。"""
 
 from __future__ import annotations
 
@@ -14,6 +14,7 @@ from translation_tool.core.lm_translator_shared_loop import (
 
 
 def test_common_executor_emits_safe_batch_attempt_and_retry_events():
+    """驗證此測試案例的預期結果與相容性。"""
     events: list[dict] = []
     executor = CommonBatchExecutor(
         operation="smart_review",
@@ -69,6 +70,7 @@ def test_common_executor_emits_safe_batch_attempt_and_retry_events():
 
 
 def test_common_error_classifier_distinguishes_provider_failure_kinds():
+    """驗證此測試案例的預期結果與相容性。"""
     timeout = classify_provider_error(requests.Timeout())
     assert timeout["error_class"] == "timeout"
     assert timeout["timeout"] is True
@@ -84,6 +86,7 @@ def test_common_error_classifier_distinguishes_provider_failure_kinds():
 
 
 def test_machine_translation_shared_loop_uses_common_batch_events():
+    """驗證此測試案例的預期結果與相容性。"""
     events: list[dict] = []
     item = {"path": "a", "source_text": "A", "text": "A", "cache_type": "lang"}
 
@@ -116,10 +119,12 @@ def test_machine_translation_shared_loop_uses_common_batch_events():
 
 
 def test_shared_loop_keeps_provider_and_network_retry_metrics_separate():
+    """驗證此測試案例的預期結果與相容性。"""
     events: list[dict] = []
     item = {"path": "a", "source_text": "A", "text": "A", "cache_type": "lang"}
 
     def translate(batch, _total, *, event_callback):
+        """發送測試用的 provider／network 事件並回傳最小翻譯結果。"""
         event_callback(
             {
                 "kind": "provider_attempt_start",

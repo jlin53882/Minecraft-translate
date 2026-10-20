@@ -1,4 +1,4 @@
-"""Filter controls and resolved entry query shared by list and batch actions."""
+"""ModDB 條目頁的篩選控制項與背景載入流程。"""
 
 from __future__ import annotations
 
@@ -272,7 +272,7 @@ def open_bulk_review(panel, _e=None) -> None:
 
 
 def open_species_scan(panel, _e=None) -> None:
-    """處理目前函數負責的資料與流程。"""
+    """開啟學名候選掃描對話框，並傳入目前版本、模組與條目範圍。"""
     if panel.db() is None or not panel.version:
         show_snack(panel._page, "目前沒有可用的資料庫版本。", C.GOLD)
         return

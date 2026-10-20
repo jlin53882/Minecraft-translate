@@ -251,18 +251,22 @@ class ImmutableReplaceRulesSnapshot(Sequence[Mapping[str, str]]):
     def from_rules(
         cls, rules: Sequence[Mapping[str, str]], *, revision: int = 0
     ) -> "ImmutableReplaceRulesSnapshot":
+        """把規則複製成可跨執行緒共用的不可變快照，並附上 Store revision。"""
         return cls(
             tuple(MappingProxyType(dict(rule)) for rule in rules),
             revision=revision,
         )
 
     def __getitem__(self, index):
+        """依索引回傳唯讀規則映射。"""
         return self._items[index]
 
     def __len__(self):
+        """回傳唯讀規則快照中的規則數量。"""
         return len(self._items)
 
     def __iter__(self):
+        """依規則原順序提供唯讀快照的迭代器。"""
         return iter(self._items)
 
 
@@ -305,6 +309,7 @@ class _CompiledRules:
     """
 
     def __init__(self, rules: Sequence[Mapping[str, str]]):
+        """初始化此測試替身或服務物件所需的狀態。"""
         literal_rules: list[tuple[str, str]] = []
         regex_rules: list[tuple[re.Pattern, str]] = []
         keywords: set[str] = set()

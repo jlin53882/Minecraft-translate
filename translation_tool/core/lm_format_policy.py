@@ -148,7 +148,7 @@ def build_payload_item(
     format_issues: Iterable[str] = (),
     terminology_issues: Iterable[str] = (),
 ) -> dict[str, object]:
-    """處理目前函數負責的資料與流程。"""
+    """建立單筆品質重試 payload，保留格式、重試原因與術語問題資訊。"""
     payload: dict[str, object] = {
         "id": str(item_id),
         "value": str(item.get("text") or ""),

@@ -403,7 +403,7 @@ class BatchRevertResult:
 
 @dataclass(frozen=True)
 class SmartReviewSnapshot:
-    """Immutable source/effective snapshot sent to a local proofreading model."""
+    """送給本地智慧校對模型的不可變來源與目前生效譯文快照。"""
 
     run_id: str
     ordinal: int
@@ -426,7 +426,7 @@ class SmartReviewSnapshot:
 
 @dataclass(frozen=True)
 class SmartReviewCandidate:
-    """Persisted AI result; it is a candidate until a user explicitly applies it."""
+    """已保存的 AI 智慧校對結果；使用者明確套用前都只是候選。"""
 
     run_id: str
     ordinal: int
@@ -460,7 +460,7 @@ class SmartReviewCandidate:
 
 @dataclass(frozen=True)
 class SmartReviewRunResult:
-    """Aggregate outcome of one bounded smart-review run."""
+    """單次有界智慧校對執行的彙總結果。"""
 
     run_id: str
     provider: str

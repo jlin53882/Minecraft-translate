@@ -41,7 +41,7 @@ def _call_translate_batch(
     total: int | None,
     event_callback,
 ):
-    """Call legacy test doubles while passing telemetry to the real provider."""
+    """呼叫既有翻譯測試替身或 provider 入口，並把 telemetry callback 傳給真正的請求流程。"""
     if event_callback is None:
         return translate_batch_smart(batch, total)
     try:
@@ -217,6 +217,7 @@ def translate_items_with_cache_loop(
     run_event_finished = False
 
     def make_result(status: str) -> TranslateLoopResult:
+        """把單筆翻譯結果整理成共用迴圈使用的結果字典。"""
         nonlocal run_event_finished
         if not run_event_finished:
             executor.finish(status=status)
@@ -246,6 +247,7 @@ def translate_items_with_cache_loop(
         )
 
     def emit_progress(msg: str) -> None:
+        """將目前進度、批次訊息與預估剩餘時間交給 progress callback。"""
         if on_progress is None:
             return
         try:
@@ -263,6 +265,7 @@ def translate_items_with_cache_loop(
     emit_progress("🚀 [SharedLM] 準備開始翻譯工作...")
 
     def cancelled_result() -> TranslateLoopResult:
+        """建立取消狀態的迴圈結果，並回報尚未處理的項目數。"""
         emit_progress(
             f"⏹ 已取消翻譯，剩餘 {len(remaining)} 筆未翻譯（已完成的批次已寫入快取）"
         )

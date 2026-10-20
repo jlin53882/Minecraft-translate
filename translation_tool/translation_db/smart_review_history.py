@@ -148,6 +148,7 @@ class SmartReviewHistoryStore:
     _locks: ClassVar[dict[Path, threading.RLock]] = {}
 
     def __init__(self, db_path: str | Path) -> None:
+        """初始化此測試替身或服務物件所需的狀態。"""
         self.directory = history_directory_for_db(db_path)
         with self._locks_guard:
             self._lock = self._locks.setdefault(self.directory, threading.RLock())
@@ -175,6 +176,7 @@ class SmartReviewHistoryStore:
         return self.path_for(run_id).is_file()
 
     def _read_unlocked(self, run_id: str) -> dict[str, Any]:
+        """在呼叫端持有 Store 鎖時讀取並驗證一個智慧校對批次 JSON。"""
         path = self.path_for(run_id)
         try:
             payload = json.loads(path.read_text(encoding="utf-8"))
@@ -187,6 +189,7 @@ class SmartReviewHistoryStore:
         return payload
 
     def _write_unlocked(self, run_id: str, payload: dict[str, Any]) -> None:
+        """在呼叫端持有 Store 鎖時，以暫存檔原子寫入一個智慧校對批次 JSON。"""
         path = self.path_for(run_id)
         self.directory.mkdir(parents=True, exist_ok=True)
         temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
@@ -239,6 +242,7 @@ class SmartReviewHistoryStore:
     def _candidate_unlocked(
         self, payload: dict[str, Any], ordinal: int
     ) -> dict[str, Any] | None:
+        """在已讀取的批次 payload 中依 ordinal 找到對應候選。"""
         for candidate in payload.get("candidates") or []:
             if isinstance(candidate, dict) and int(candidate.get("ordinal") or 0) == ordinal:
                 return candidate

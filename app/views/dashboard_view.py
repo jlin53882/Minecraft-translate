@@ -83,6 +83,7 @@ def _default_cache_overview() -> dict:
 
 
 def _default_rules_count() -> int:
+    """取得 Dashboard 顯示的替換規則數量；載入失敗時回傳 0。"""
     from app.services_impl.config_service import get_replace_rules_count
 
     return get_replace_rules_count(source="dashboard")
@@ -367,6 +368,7 @@ class DashboardView(ft.Column):
             self._navigate(view_key)
 
     def did_mount(self) -> None:
+        """掛載 Dashboard，初始化快取資料、規則訂閱與任務狀態更新。"""
         self._subscribe_rules()
         self.reload()
 
@@ -380,6 +382,7 @@ class DashboardView(ft.Column):
             self._unsubscribe_rules = None
 
     def _subscribe_rules(self) -> None:
+        """訂閱替換規則變更事件，讓規則數量只在規則實際變更後更新。"""
         if self._unsubscribe_rules is not None:
             return
         from app.services_impl.config_service import subscribe_replace_rules

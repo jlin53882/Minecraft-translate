@@ -220,7 +220,7 @@ def connect(path: str | Path, *, readonly: bool = False) -> sqlite3.Connection:
 
 
 def init_schema(conn: sqlite3.Connection) -> None:
-    """處理目前函數負責的資料與流程。"""
+    """建立或更新翻譯資料庫的 schema、索引與目前 schema version。"""
     conn.executescript(_DDL)
     row = conn.execute("SELECT value FROM meta WHERE key='schema_version'").fetchone()
     if row is None:

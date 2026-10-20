@@ -423,6 +423,7 @@ def _classify_batch_error(error, status: int | None = None) -> str:
 
 
 def _emit_runtime_event(callback, kind: str, **fields) -> None:
+    """將翻譯執行期間的安全事件交給 runtime callback；沒有 callback 時不做任何事。"""
     if callback is None:
         return
     try:
@@ -439,6 +440,7 @@ def _sleep_with_runtime_event(
     callback=None,
     kind: str = "retry_wait",
 ) -> None:
+    """以可取消的分段等待執行 retry 或配額等待，並回報等待進度事件。"""
     wait_seconds = max(0.0, float(wait_seconds or 0))
     if wait_seconds <= 0:
         return
@@ -539,7 +541,7 @@ def _translate_batch_smart_impl(
 
 @dataclass
 class _BatchRuntime:
-    """Mutable state shared by the small orchestration helpers."""
+    """供翻譯狀態機各協調 helper 共用的可變執行狀態。"""
 
     batch_items: list[dict]
     total: int | None
@@ -1303,6 +1305,7 @@ def _handle_service_unavailable_error(
     *,
     retry_event_callback=None,
 ) -> BatchAction:
+    """處理 provider 暫時不可用錯誤，記錄分類、等待與是否繼續重試。"""
     response = error.response if isinstance(error, requests.HTTPError) else None
     error_json = {}
     try:
@@ -2386,7 +2389,7 @@ def _perform_provider_request(
     owner,
     lease_sec: float,
 ):
-    """Execute one provider request and publish inner attempt telemetry."""
+    """執行一次 provider 請求，並發布底層 network／provider attempt telemetry。"""
     prompt = runtime.effective_prompt
     model_override = model_output_token_cap(runtime.lm_cfg, model_name)
     cap_source = "per_model" if model_override is not None else "global"

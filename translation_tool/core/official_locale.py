@@ -120,7 +120,7 @@ class OfficialTerminologyMatch:
 
 @dataclass(frozen=True)
 class OfficialLocaleIndex:
-    """Immutable in-memory view of the bundled official locale files."""
+    """bundled 官方 Minecraft locale 的不可變記憶體索引，供機翻與智慧校對共用術語匹配結果。"""
 
     records_by_key: dict[str, OfficialLocaleRecord]
     unique_by_text_pair: dict[tuple[str, str], str]
@@ -207,6 +207,7 @@ class OfficialLocaleIndex:
             match_type: str,
             term_origin: str,
         ) -> None:
+            """加入通過詞界、目標非空與來源去重檢查的官方術語候選。"""
             source = normalize_terminology_text(source).strip()
             target = str(target).strip()
             if not source or not target or term_canonical_key(source) == term_canonical_key(target):
@@ -324,6 +325,7 @@ class OfficialLocaleIndex:
         return [match for _priority, match in selected]
 
     def _unique_target_for_source(self, source: str) -> str | None:
+        """依正規化英文來源尋找唯一且不歧義的官方繁中目標。"""
         canonical = term_canonical_key(source)
         target = self.unique_tw_by_normalized_en.get(canonical)
         if target:
@@ -339,6 +341,7 @@ class OfficialLocaleIndex:
         return next(iter(matches)) if len(matches) == 1 else None
 
     def _unique_record_for_source(self, source: str) -> OfficialLocaleRecord | None:
+        """依正規化英文來源尋找唯一對應的官方 locale record。"""
         canonical = term_canonical_key(source)
         record = self.unique_record_by_normalized_en.get(canonical)
         if record is not None:
@@ -354,6 +357,7 @@ class OfficialLocaleIndex:
         return records[0] if records else None
 
     def _derived_terms(self) -> dict[str, tuple[str, str, str | None]]:
+        """取得預先計算或由官方完整翻譯拆出的複合術語表。"""
         if self.derived_terms_by_en:
             return self.derived_terms_by_en
         if not self.records_by_key:
@@ -370,6 +374,7 @@ class OfficialLocaleIndex:
     def _term_definition(
         self, term: str
     ) -> tuple[str, str, str | None, str] | None:
+        """將一個匹配到的官方術語解析成顯示來源、目標、key 與術語來源。"""
         canonical = term_canonical_key(term)
         target = self._unique_target_for_source(term)
         if target:
@@ -396,6 +401,7 @@ def _file_sha256(path: Path) -> str:
 
 
 def _empty_index() -> OfficialLocaleIndex:
+    """建立標記為 unavailable 的空官方語系索引。"""
     return OfficialLocaleIndex({}, {}, {}, "missing", available=False)
 
 

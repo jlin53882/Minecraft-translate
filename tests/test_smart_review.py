@@ -1,3 +1,5 @@
+"""智慧校對候選、解析、驗證與套用防護的測試。"""
+
 from __future__ import annotations
 
 import json
@@ -1647,6 +1649,7 @@ def test_smart_review_service_passes_nested_lm_config(monkeypatch, tmp_path):
     captured = {}
 
     class FakeDB:
+        """可記錄智慧校對呼叫參數的測試資料庫替身。"""
         def close(self):
             """關閉測試用資源。"""
             captured["closed"] = True

@@ -1,11 +1,4 @@
-"""Shared batch execution telemetry and orchestration primitives.
-
-The three translation workflows deliberately keep their own policies for
-selection, payloads, provider retry decisions, validation and persistence.
-This module owns the parts that must look the same to operators: run/batch
-identity, monotonic timings, cancellation checkpoints and safe structured
-events.
-"""
+"""機翻、本地修復與智慧校對共用的批次生命週期、計時與安全事件原語。"""
 
 from __future__ import annotations
 
@@ -63,11 +56,12 @@ _SENSITIVE_FIELD_NAMES = frozenset(
 
 
 def _new_id(prefix: str) -> str:
+    """產生帶有指定前綴的短隨機識別碼。"""
     return f"{prefix}-{uuid.uuid4().hex[:12]}"
 
 
 def _safe_fields(fields: Mapping[str, Any]) -> dict[str, Any]:
-    """Keep event payloads bounded and free of prompt/credential material."""
+    """限制事件欄位大小，並移除 prompt、response 與 credential 等敏感內容。"""
     safe: dict[str, Any] = {}
     for key, value in fields.items():
         if str(key).lower() in _SENSITIVE_FIELD_NAMES:
@@ -84,6 +78,7 @@ def _safe_fields(fields: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def _wait_ms(fields: Mapping[str, Any]) -> int:
+    """從事件欄位讀取等待時間，統一轉成非負毫秒數。"""
     value = fields.get("wait_ms", fields.get("elapsed_ms"))
     if value is None:
         try:
@@ -97,6 +92,7 @@ def _wait_ms(fields: Mapping[str, Any]) -> int:
 
 
 def _status_from_error(error: BaseException, status: int | None) -> int | None:
+    """從顯式 status 或例外的 response 物件取得 HTTP 狀態碼。"""
     if status is not None:
         return status
     response = getattr(error, "response", None)
@@ -107,7 +103,7 @@ def _status_from_error(error: BaseException, status: int | None) -> int | None:
 def classify_provider_error(
     error: BaseException, status: int | None = None
 ) -> dict[str, Any]:
-    """Classify an exception without exposing its provider error body."""
+    """在不暴露 provider 錯誤內容的前提下，分類例外、HTTP 狀態與可重試特徵。"""
     status = _status_from_error(error, status)
     name = type(error).__name__
     lowered = name.lower()
@@ -160,7 +156,7 @@ def classify_provider_error(
 
 @dataclass
 class BatchMetrics:
-    """Monotonic, additive timing and retry counters for one run."""
+    """單次執行共用的 monotonic 計時、批次數量、API attempt 與 retry 統計。"""
 
     selection_ms: int = 0
     planning_ms: int = 0
@@ -186,6 +182,7 @@ class BatchMetrics:
     error_batches: list[int] = field(default_factory=list)
 
     def add_ms(self, field_name: str, elapsed_ms: float) -> int:
+        """將單次計時以四捨五入毫秒累加到指定欄位，並回傳本次增加值。"""
         if not hasattr(self, field_name):
             raise AttributeError(field_name)
         value = max(0, round(float(elapsed_ms)))
@@ -193,6 +190,7 @@ class BatchMetrics:
         return value
 
     def as_dict(self) -> dict[str, Any]:
+        """將目前物件轉成供 UI、log 或測試使用的可序列化字典。"""
         result = {
             key: getattr(self, key)
             for key in (
@@ -225,7 +223,7 @@ class BatchMetrics:
 
 @dataclass(frozen=True)
 class BatchEvent:
-    """Safe structured event shared by app log, UI log and reports."""
+    """供 app log、UI 任務日誌與最終報告共用的安全結構化事件。"""
 
     task_id: str
     run_id: str
@@ -246,6 +244,7 @@ class BatchEvent:
     fields: Mapping[str, Any] = field(default_factory=dict)
 
     def as_dict(self) -> dict[str, Any]:
+        """將目前物件轉成供 UI、log 或測試使用的可序列化字典。"""
         event = {
             "event_version": 1,
             "task_id": self.task_id,
@@ -273,6 +272,7 @@ class BatchEvent:
 
 @dataclass
 class BatchHandle:
+    """追蹤單一批次的嘗試、重試、事件與 monotonic 耗時。"""
     executor: CommonBatchExecutor
     batch_index: int
     batch_total: int
@@ -286,9 +286,11 @@ class BatchHandle:
 
     @property
     def elapsed_ms(self) -> int:
+        """回傳此批次以 monotonic clock 計算的經過毫秒數。"""
         return max(0, round((time.monotonic_ns() - self.started_ns) / 1_000_000))
 
     def emit(self, kind: str, **fields: Any) -> dict[str, Any]:
+        """帶入目前批次上下文並發送一個結構化事件。"""
         base = {
             "batch_index": self.batch_index,
             "batch_total": self.batch_total,
@@ -303,11 +305,13 @@ class BatchHandle:
         return self.executor.emit(kind, **base)
 
     def attempt_start(self, *, max_attempts: int = 0, **fields: Any) -> dict[str, Any]:
+        """開始一次外層 API attempt，遞增請求計數並發送開始事件。"""
         self.attempt += 1
         self.executor.metrics.request_attempts += 1
         return self.emit("attempt_start", max_attempts=max_attempts, **fields)
 
     def attempt_success(self, *, elapsed_ms: float = 0, **fields: Any) -> dict[str, Any]:
+        """記錄一次成功 API attempt 的耗時，並發送成功事件。"""
         self.executor.metrics.add_ms("api_ms", elapsed_ms)
         return self.emit("attempt_success", elapsed_ms=round(float(elapsed_ms)), **fields)
 
@@ -322,6 +326,7 @@ class BatchHandle:
         key_rotated: bool = False,
         **fields: Any,
     ) -> dict[str, Any]:
+        """分類一次 API 失敗、更新錯誤批次統計，並發送安全失敗事件。"""
         classification = classify_provider_error(error, status)
         if classification["overload"]:
             self.executor.metrics.overload_count += 1
@@ -339,7 +344,7 @@ class BatchHandle:
         )
 
     def forward_provider_event(self, event: Mapping[str, Any]) -> dict[str, Any]:
-        """Forward safe provider/network telemetry under the current batch."""
+        """在目前批次上下文中轉送已清理的 provider 與 network telemetry。"""
         fields = dict(event)
         kind = str(fields.pop("kind", "provider_event") or "provider_event")
         if kind == "network_attempt_start":
@@ -380,6 +385,7 @@ class BatchHandle:
         reason: str | None = None,
         **fields: Any,
     ) -> dict[str, Any]:
+        """記錄一次可重試的 backoff 等待，更新 retry 計數與耗時。"""
         wait_ms = max(0, round(float(wait_ms)))
         self.retry_count += 1
         self.executor.metrics.retry_count += 1
@@ -396,6 +402,7 @@ class BatchHandle:
         )
 
     def add_timing(self, field_name: str, elapsed_ms: float) -> None:
+        """把批次外部量測的耗時累加到執行器統計欄位。"""
         self.executor.metrics.add_ms(field_name, elapsed_ms)
 
     def complete(
@@ -406,6 +413,7 @@ class BatchHandle:
         emit: bool = True,
         **fields: Any,
     ) -> dict[str, Any]:
+        """標記批次完成或中止，更新批次統計並可發送完成事件。"""
         if self._finished:
             return self.emit("batch_complete", status=status, **fields)
         self._finished = True
@@ -426,27 +434,43 @@ class BatchHandle:
 
 @runtime_checkable
 class BatchPolicy(Protocol):
-    """Business-specific hooks used by a common batch executor."""
+    """由各業務流程實作的批次策略介面，保留候選、payload、provider、驗證與寫入差異。"""
 
-    def candidate_selector(self, source: Any) -> Sequence[Any]: ...
+    def candidate_selector(self, source: Any) -> Sequence[Any]:
+        """依業務策略選出要處理的候選項目。"""
+        ...
 
-    def payload_builder(self, batch: Sequence[Any], context: BatchHandle) -> Any: ...
+    def payload_builder(self, batch: Sequence[Any], context: BatchHandle) -> Any:
+        """依業務策略把一批候選組成 provider payload。"""
+        ...
 
-    def provider_request(self, payload: Any, context: BatchHandle) -> Any: ...
+    def provider_request(self, payload: Any, context: BatchHandle) -> Any:
+        """執行 provider 請求並回傳原始回應。"""
+        ...
 
-    def response_parser(self, response: Any, context: BatchHandle) -> Any: ...
+    def response_parser(self, response: Any, context: BatchHandle) -> Any:
+        """把 provider 原始回應解析成策略可驗證的結果。"""
+        ...
 
-    def result_validator(self, results: Any, batch: Sequence[Any], context: BatchHandle) -> Any: ...
+    def result_validator(self, results: Any, batch: Sequence[Any], context: BatchHandle) -> Any:
+        """依業務規則驗證解析後的批次結果。"""
+        ...
 
-    def result_committer(self, results: Any, batch: Sequence[Any], context: BatchHandle) -> int: ...
+    def result_committer(self, results: Any, batch: Sequence[Any], context: BatchHandle) -> int:
+        """依業務規則提交已驗證結果，回傳提交筆數。"""
+        ...
 
-    def history_writer(self, results: Any, context: BatchHandle) -> None: ...
+    def history_writer(self, results: Any, context: BatchHandle) -> None:
+        """把批次結果寫入該策略負責的歷史保存位置。"""
+        ...
 
-    def on_batch_complete(self, event: Mapping[str, Any]) -> None: ...
+    def on_batch_complete(self, event: Mapping[str, Any]) -> None:
+        """接收共用批次完成事件，執行策略專屬的完成處理。"""
+        ...
 
 
 class CommonBatchExecutor:
-    """Shared lifecycle for legacy and policy-based batch workflows."""
+    """共用批次執行生命週期，負責識別碼、批次事件、取消檢查、計時與摘要統計。"""
 
     def __init__(
         self,
@@ -460,6 +484,7 @@ class CommonBatchExecutor:
         cancel_check: Callable[[], bool] | None = None,
         log_unhandled_events: bool = False,
     ) -> None:
+        """初始化共用批次生命週期、識別碼、事件 sink、取消檢查與計時器。"""
         self.operation = operation
         self.provider = provider
         self.model = model
@@ -472,16 +497,20 @@ class CommonBatchExecutor:
         self.started_ns = time.monotonic_ns()
 
     def is_cancelled(self) -> bool:
+        """讀取取消 callback，回傳目前是否已要求取消。"""
         return bool(self.cancel_check is not None and self.cancel_check())
 
     def check_cancelled(self) -> None:
+        """若取消 callback 已要求停止，立即拋出 TaskCancelled。"""
         if self.is_cancelled():
             raise TaskCancelled()
 
     def add_timing(self, field_name: str, elapsed_ms: float) -> None:
+        """將指定階段的耗時累加到共用 metrics。"""
         self.metrics.add_ms(field_name, elapsed_ms)
 
     def emit(self, kind: str, **fields: Any) -> dict[str, Any]:
+        """帶入目前批次上下文並發送一個結構化事件。"""
         event = BatchEvent(
             task_id=self.task_id,
             run_id=self.run_id,
@@ -520,6 +549,7 @@ class CommonBatchExecutor:
         processed_count: int,
         **fields: Any,
     ) -> BatchHandle:
+        """建立單一批次的 BatchHandle，並發送批次開始事件。"""
         handle = BatchHandle(
             executor=self,
             batch_index=batch_index,
@@ -538,13 +568,7 @@ class CommonBatchExecutor:
         *,
         batch_size: int = 1,
     ) -> list[Any]:
-        """Run a fully hook-based policy without owning its business rules.
-
-        Existing translators use the lower-level ``begin_batch`` seam because
-        they have dynamic token-budget planning and legacy cache/CAS behavior.
-        New policies can use this method directly; every business operation is
-        still delegated to the policy hooks below.
-        """
+        """依 BatchPolicy 執行完整的批次生命週期，但不介入候選、payload、驗證與寫入等業務規則。"""
         selection_started = time.monotonic_ns()
         selected = list(policy.candidate_selector(source))
         self.add_timing("selection_ms", (time.monotonic_ns() - selection_started) / 1_000_000)
@@ -624,6 +648,7 @@ class CommonBatchExecutor:
 
     @contextmanager
     def phase(self, field_name: str):
+        """以 context manager 量測一個執行階段，無論成功或例外都會累加耗時。"""
         started_ns = time.monotonic_ns()
         try:
             yield
@@ -631,6 +656,7 @@ class CommonBatchExecutor:
             self.add_timing(field_name, (time.monotonic_ns() - started_ns) / 1_000_000)
 
     def finish(self, *, status: str) -> dict[str, Any]:
+        """以 monotonic clock 結算執行總時間，並發送 run 完成事件。"""
         self.metrics.total_ms = max(
             self.metrics.total_ms,
             round((time.monotonic_ns() - self.started_ns) / 1_000_000),
@@ -638,6 +664,7 @@ class CommonBatchExecutor:
         return self.emit("run_complete", status=status, elapsed_ms=self.metrics.total_ms)
 
     def metrics_snapshot(self) -> dict[str, Any]:
+        """回傳包含識別碼、操作與所有計時／重試欄位的 metrics 快照。"""
         snapshot = self.metrics.as_dict()
         snapshot.update(
             {
@@ -652,7 +679,7 @@ class CommonBatchExecutor:
 
 
 def format_batch_event(event: Mapping[str, Any]) -> str:
-    """Chinese, bounded rendering used by non-Smart-Review TaskSession sinks."""
+    """將共用事件轉成有界且使用中文的 TaskSession 顯示文字。"""
     kind = str(event.get("kind") or "")
     prefix = (
         f"[{event.get('operation') or 'batch'}]"

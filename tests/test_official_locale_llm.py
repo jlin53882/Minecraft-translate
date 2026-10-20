@@ -101,6 +101,7 @@ def test_official_compound_terms_are_shared_by_prompt_and_match_resolver() -> No
 
 
 def test_official_compound_matching_keeps_boundaries_and_empty_fallback() -> None:
+    """驗證此測試案例的預期結果與相容性。"""
     index = load_official_locale_index()
 
     assert index.official_terminology_matches_for_item(

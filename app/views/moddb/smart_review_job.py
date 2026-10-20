@@ -568,6 +568,7 @@ class SmartReviewJob:
             return
 
         def seconds(common_key: str, legacy_key: str | None = None) -> float:
+            """把秒數格式化為可讀的計時文字；沒有數值時顯示 --:--。"""
             value = metrics.get(common_key)
             if value is not None:
                 try:

@@ -75,7 +75,6 @@ from translation_tool.translation_db.quality import (
     whitespace_note,
 )
 from translation_tool.translation_db.read_cache import READ_CACHE
-from translation_tool.translation_db.sql_helpers import like_pattern
 from translation_tool.translation_db.schema import (
     DB_EMPTY,
     DB_FOREIGN,
@@ -96,6 +95,7 @@ from translation_tool.translation_db.schema import (
 )
 from translation_tool.translation_db.smart_review import SmartReviewMixin
 from translation_tool.translation_db.source_catalog import SourceCatalog
+from translation_tool.translation_db.sql_helpers import like_pattern
 from translation_tool.utils.cancellation import (
     TaskCancelled,
     is_cancelled,
@@ -3339,7 +3339,7 @@ class TranslationDB(SmartReviewMixin, BulkReviewMixin, CleanupMixin):
         return done
 
     def revert(self, history_id: int, *, whole_batch: bool = True) -> int:
-        """處理目前函數負責的資料與流程。"""
+        """依 history 記錄還原單筆或整批變更，並回傳實際還原的條目數。"""
         row = self._one("SELECT batch, action FROM history WHERE id=?", (history_id,))
         if row is None:
             return 0

@@ -2217,7 +2217,7 @@ def run_smart_review(
     current_batch_handle = None
 
     def merge_common_metrics() -> None:
-        """Add common timing/identity fields without changing legacy counters."""
+        """補上共用執行器的計時與識別欄位，不改變既有 Smart Review 計數。"""
         common = executor.metrics_snapshot()
         for key in (
             "selection_ms",

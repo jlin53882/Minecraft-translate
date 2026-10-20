@@ -1,4 +1,4 @@
-"""Build one quality-repair retry for a translated batch."""
+"""建立翻譯批次的品質修復重試資料與流程。"""
 
 from __future__ import annotations
 
@@ -90,7 +90,7 @@ def build_quality_retry_batch(
     include_moddb_reviewed: bool = True,
     terminology_cache: Mapping[int, Sequence[tuple[str, str]]] | None = None,
 ) -> QualityRetryBatch:
-    """處理目前函數負責的資料與流程。"""
+    """選出格式或術語品質不合格的項目，並建立下一次修復請求的批次資料。"""
     positions: list[int] = []
     candidate_ids: list[str] = []
     candidate_items: list[dict] = []

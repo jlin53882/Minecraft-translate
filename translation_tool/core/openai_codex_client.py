@@ -1,4 +1,4 @@
-"""Responses API transport for Sign in with ChatGPT plan usage."""
+"""供 ChatGPT 登入方案使用的 Responses API 傳輸與錯誤轉換。"""
 
 from __future__ import annotations
 

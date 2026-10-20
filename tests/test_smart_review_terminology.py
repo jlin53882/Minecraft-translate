@@ -1,3 +1,5 @@
+"""智慧校對官方術語命中與評估摘要的測試。"""
+
 from __future__ import annotations
 
 from types import SimpleNamespace
@@ -15,7 +17,7 @@ def _candidate(
     output: str | None = None,
     decision: str = "suggest_revision",
 ):
-    """處理目前函數負責的資料與流程。"""
+    """建立包含原文、目前譯文與模型結果欄位的測試候選替身。"""
     return SimpleNamespace(
         kind="lang",
         mod_id="demo",

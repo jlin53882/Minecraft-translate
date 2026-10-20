@@ -1,4 +1,4 @@
-"""Bulk review dialog: pick a version, module and source, then preview and confirm."""
+"""ModDB 批量審核對話框與其預覽、範圍驗證及確認流程。"""
 
 from __future__ import annotations
 
@@ -34,14 +34,10 @@ ALL_SOURCES = "__all__"
 
 
 class BulkReviewDialog:
-    """Review entries in one version/module whose effective source matches.
-
-    The source can also be unrestricted. The scope is recomputed and compared
-    with the preview inside the write transaction, so nothing outside the
-    previewed list can be touched.
-    """
+    """批量審核對話框：依版本、模組與目前生效來源預覽候選，確認後才執行批次審核。"""
 
     def __init__(self, page: ft.Page, get_db, version: str | None, on_complete):
+        """初始化批量審核對話框的篩選、預覽與執行狀態。"""
         self.page = page
         self.get_db = get_db
         self.on_complete = on_complete
@@ -56,6 +52,7 @@ class BulkReviewDialog:
 
     # ------------------------------------------------------------------ 版面
     def _build_controls(self, version: str | None) -> None:
+        """建立批量審核的版本、模組、來源篩選與操作控制項。"""
         db = self.get_db()
         versions = db.versions() if db else []
         self.version_dd = kit.dropdown(
@@ -115,6 +112,7 @@ class BulkReviewDialog:
         self.close_btn = ft.TextButton("關閉", on_click=self._close)
 
     def _build_dialog(self) -> None:
+        """組合批量審核對話框的說明、篩選區、預覽區與操作按鈕。"""
         width, height = dialog_dimensions(self.page)
         self.dialog = ft.AlertDialog(
             modal=True,
@@ -175,6 +173,7 @@ class BulkReviewDialog:
 
     # ------------------------------------------------------------------ 選項
     def _refresh_mods(self) -> None:
+        """依選定版本載入可用模組，並保持目前選擇值有效。"""
         db = self.get_db()
         version = self.version_dd.value
         mods = db.mods(version) if db and version else ()
@@ -185,6 +184,7 @@ class BulkReviewDialog:
             self.mod_dd.value = ALL_MODS
 
     def _refresh_sources(self) -> None:
+        """依版本與模組載入目前生效來源選項，並提供全部來源選項。"""
         db = self.get_db()
         version = self.version_dd.value
         codes = db.effective_source_codes(version) if db and version else ()
@@ -202,6 +202,7 @@ class BulkReviewDialog:
             self.source_dd.value = ALL_SOURCES
 
     def _on_version(self, _e=None) -> None:
+        """版本選擇變更時重載模組與來源，並使舊預覽失效。"""
         self._refresh_mods()
         self._refresh_sources()
         self._invalidate()
@@ -223,6 +224,7 @@ class BulkReviewDialog:
 
     # ------------------------------------------------------------------ 預覽
     def _preview(self, _e=None) -> None:
+        """在背景執行目前範圍查詢並產生批量審核預覽。"""
         db = self.get_db()
         version = self.version_dd.value
         source_value = self.source_dd.value
@@ -240,6 +242,7 @@ class BulkReviewDialog:
         self._set_busy(True, "查詢符合條目…")
 
         def work() -> None:
+            """執行背景查詢或寫入工作，完成後把結果排回 UI 執行緒。"""
             plan = error = None
             try:
                 plan = db.preview_bulk_review(
@@ -397,6 +400,7 @@ class BulkReviewDialog:
 
     # ------------------------------------------------------------------ 寫入
     def _confirm(self, _e=None) -> None:
+        """確認目前批量審核預覽，並在背景執行套用前的範圍檢查。"""
         db, plan = self.get_db(), self.plan
         if db is None or plan is None or self._busy:
             return
@@ -406,6 +410,7 @@ class BulkReviewDialog:
         self._set_busy(True, "審核中…")
 
         def work() -> None:
+            """執行背景查詢或寫入工作，完成後把結果排回 UI 執行緒。"""
             result = error = None
             try:
                 result = db.execute_bulk_review(
@@ -438,14 +443,17 @@ class BulkReviewDialog:
         )
 
     def _on_progress(self, text: str, fraction: float) -> None:
+        """把背景批量審核的文字與比例進度排回 UI 執行緒。"""
         self._post(self._show_progress, text, fraction)
 
     def _show_progress(self, text: str, fraction: float) -> None:
+        """在 UI 執行緒顯示批量審核的狀態文字與進度比例。"""
         self.status.value = text
         self.progress.value = fraction
         self._safe_update()
 
     def _apply_result(self, generation: int, plan, result, error) -> None:
+        """把批量審核結果轉成 UI 摘要，並清除已失效的預覽狀態。"""
         self._set_busy(False)
         source_text = "全部來源" if plan.source is None else str(plan.source)
         if error is not None:

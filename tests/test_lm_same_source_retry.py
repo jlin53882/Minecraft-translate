@@ -1,4 +1,4 @@
-"""Regression tests for the optional one-pass same-as-source confirmation."""
+"""可選同來源一次確認流程的回歸測試。"""
 
 from __future__ import annotations
 

@@ -1,3 +1,5 @@
+"""規則頁面載入與互動行為的特徵測試。"""
+
 import flet as ft
 
 from app.ui.snack import show_snack
@@ -409,6 +411,7 @@ def test_rules_view_load_rules_core(monkeypatch):
 
 
 def test_rules_view_manual_reload_forces_store_reload(monkeypatch):
+    """驗證此測試案例的預期結果與相容性。"""
     from types import SimpleNamespace
 
     calls = []
