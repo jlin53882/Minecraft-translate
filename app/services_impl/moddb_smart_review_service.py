@@ -217,6 +217,21 @@ def get_moddb_smart_review_run_from_path(
         db.close()
 
 
+def list_moddb_smart_review_runs_from_path(
+    path: str | Path,
+    priority: tuple[int, ...],
+    *,
+    limit: int = 20,
+    offset: int = 0,
+) -> list[dict[str, Any]]:
+    """從指定資料庫列出可重新開啟的智慧校對批次。"""
+    db = _open(path, priority, readonly=True)
+    try:
+        return db.list_smart_review_runs(limit=limit, offset=offset)
+    finally:
+        db.close()
+
+
 def save_moddb_smart_review_draft_from_path(
     path: str | Path,
     priority: tuple[int, ...],
@@ -269,6 +284,7 @@ __all__ = [
     "count_moddb_smart_review_candidates_for_run_from_path",
     "count_moddb_smart_review_candidates_from_path",
     "get_moddb_smart_review_run_from_path",
+    "list_moddb_smart_review_runs_from_path",
     "list_moddb_smart_review_candidates_from_path",
     "preview_moddb_smart_review_from_path",
     "reject_moddb_smart_review_candidate_from_path",

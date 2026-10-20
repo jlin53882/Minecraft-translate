@@ -605,90 +605,112 @@ def _migrate_smart_review_v7(conn: sqlite3.Connection) -> None:
     _install_smart_review_objects(conn)
 
 
+_SMART_REVIEW_DDL = (
+    """
+    CREATE TABLE IF NOT EXISTS smart_review_run (
+        id TEXT PRIMARY KEY,
+        provider TEXT NOT NULL,
+        model TEXT NOT NULL,
+        scope_version TEXT,
+        requested_limit INTEGER NOT NULL,
+        batch_size INTEGER NOT NULL,
+        scope_json TEXT NOT NULL DEFAULT '{}',
+        started_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        finished_at TEXT,
+        status TEXT NOT NULL DEFAULT 'running',
+        selected_count INTEGER NOT NULL DEFAULT 0,
+        processed_count INTEGER NOT NULL DEFAULT 0,
+        valid_count INTEGER NOT NULL DEFAULT 0,
+        invalid_count INTEGER NOT NULL DEFAULT 0,
+        request_error_count INTEGER NOT NULL DEFAULT 0,
+        metrics TEXT NOT NULL DEFAULT '{}'
+    )
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_smart_review_run_status
+        ON smart_review_run (status, started_at)
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_smart_review_run_order
+        ON smart_review_run (started_at DESC, id DESC)
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS smart_review_candidate (
+        run_id TEXT NOT NULL REFERENCES smart_review_run (id) ON DELETE CASCADE,
+        ordinal INTEGER NOT NULL,
+        entry_id INTEGER NOT NULL REFERENCES entry (id) ON DELETE CASCADE,
+        kind TEXT NOT NULL,
+        mc_version TEXT NOT NULL,
+        mod_id TEXT NOT NULL,
+        entry_key TEXT NOT NULL,
+        en_us TEXT NOT NULL,
+        current_zh_tw TEXT NOT NULL,
+        effective_source INTEGER,
+        review_status TEXT,
+        effective_revision INTEGER,
+        manual_zh_tw TEXT,
+        manual_checker TEXT,
+        manual_review_status TEXT,
+        manual_revision INTEGER,
+        context_json TEXT NOT NULL DEFAULT '[]',
+        decision TEXT,
+        suggested_zh_tw TEXT,
+        issue_types_json TEXT NOT NULL DEFAULT '[]',
+        evidence_ids_json TEXT NOT NULL DEFAULT '[]',
+        confidence REAL,
+        response_json TEXT,
+        draft_zh_tw TEXT,
+        validation_error TEXT,
+        status TEXT NOT NULL DEFAULT 'pending',
+        applied_batch TEXT,
+        applied_at TEXT,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (run_id, ordinal),
+        UNIQUE (run_id, entry_id)
+    )
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_smart_review_candidate_status
+        ON smart_review_candidate (run_id, status, ordinal)
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_smart_review_candidate_entry
+        ON smart_review_candidate (entry_id, run_id)
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_smart_review_context_key
+        ON entry (kind, mod_id, key, mc_version, id)
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_smart_review_named_order
+        ON entry (
+            (CASE WHEN kind='lang' AND (
+                key LIKE 'item.%' OR key LIKE 'block.%' OR
+                key LIKE 'entity.%' OR key LIKE 'biome.%' OR
+                key LIKE 'effect.%' OR key LIKE 'fluid.%' OR
+                key LIKE 'enchantment.%' OR key LIKE 'dimension.%' OR
+                key LIKE 'painting.%' OR key LIKE 'trim_pattern.%' OR
+                key LIKE 'instrument.%' OR key LIKE 'banner.%'
+            ) THEN 0 ELSE 1 END),
+            mc_version, mod_id, kind, key, id
+        )
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_smart_review_glossary_order
+        ON entry (kind, mod_id, mc_version, id)
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_smart_review_same_text_order
+        ON entry (en_us, mod_id, kind, key, id)
+    """,
+)
+
+
 def _install_smart_review_objects(conn: sqlite3.Connection) -> None:
     """在新舊資料庫中安裝智慧校對執行與候選資料表。"""
-    conn.executescript(
-        """
-        CREATE TABLE IF NOT EXISTS smart_review_run (
-            id TEXT PRIMARY KEY,
-            provider TEXT NOT NULL,
-            model TEXT NOT NULL,
-            scope_version TEXT,
-            requested_limit INTEGER NOT NULL,
-            batch_size INTEGER NOT NULL,
-            scope_json TEXT NOT NULL DEFAULT '{}',
-            started_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            finished_at TEXT,
-            status TEXT NOT NULL DEFAULT 'running',
-            selected_count INTEGER NOT NULL DEFAULT 0,
-            processed_count INTEGER NOT NULL DEFAULT 0,
-            valid_count INTEGER NOT NULL DEFAULT 0,
-            invalid_count INTEGER NOT NULL DEFAULT 0,
-            request_error_count INTEGER NOT NULL DEFAULT 0,
-            metrics TEXT NOT NULL DEFAULT '{}'
-        );
-        CREATE INDEX IF NOT EXISTS idx_smart_review_run_status
-            ON smart_review_run (status, started_at);
-        CREATE INDEX IF NOT EXISTS idx_smart_review_run_order
-            ON smart_review_run (started_at DESC, id DESC);
-
-        CREATE TABLE IF NOT EXISTS smart_review_candidate (
-            run_id TEXT NOT NULL REFERENCES smart_review_run (id) ON DELETE CASCADE,
-            ordinal INTEGER NOT NULL,
-            entry_id INTEGER NOT NULL REFERENCES entry (id) ON DELETE CASCADE,
-            kind TEXT NOT NULL,
-            mc_version TEXT NOT NULL,
-            mod_id TEXT NOT NULL,
-            entry_key TEXT NOT NULL,
-            en_us TEXT NOT NULL,
-            current_zh_tw TEXT NOT NULL,
-            effective_source INTEGER,
-            review_status TEXT,
-            effective_revision INTEGER,
-            manual_zh_tw TEXT,
-            manual_checker TEXT,
-            manual_review_status TEXT,
-            manual_revision INTEGER,
-            context_json TEXT NOT NULL DEFAULT '[]',
-            decision TEXT,
-            suggested_zh_tw TEXT,
-            issue_types_json TEXT NOT NULL DEFAULT '[]',
-            evidence_ids_json TEXT NOT NULL DEFAULT '[]',
-            confidence REAL,
-            response_json TEXT,
-            draft_zh_tw TEXT,
-            validation_error TEXT,
-            status TEXT NOT NULL DEFAULT 'pending',
-            applied_batch TEXT,
-            applied_at TEXT,
-            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            PRIMARY KEY (run_id, ordinal),
-            UNIQUE (run_id, entry_id)
-        );
-        CREATE INDEX IF NOT EXISTS idx_smart_review_candidate_status
-            ON smart_review_candidate (run_id, status, ordinal);
-        CREATE INDEX IF NOT EXISTS idx_smart_review_candidate_entry
-            ON smart_review_candidate (entry_id, run_id);
-        CREATE INDEX IF NOT EXISTS idx_smart_review_context_key
-            ON entry (kind, mod_id, key, mc_version, id);
-        CREATE INDEX IF NOT EXISTS idx_smart_review_named_order
-            ON entry (
-                (CASE WHEN kind='lang' AND (
-                    key LIKE 'item.%' OR key LIKE 'block.%' OR
-                    key LIKE 'entity.%' OR key LIKE 'biome.%' OR
-                    key LIKE 'effect.%' OR key LIKE 'fluid.%' OR
-                    key LIKE 'enchantment.%' OR key LIKE 'dimension.%' OR
-                    key LIKE 'painting.%' OR key LIKE 'trim_pattern.%' OR
-                    key LIKE 'instrument.%' OR key LIKE 'banner.%'
-                ) THEN 0 ELSE 1 END),
-                mc_version, mod_id, kind, key, id
-            );
-        CREATE INDEX IF NOT EXISTS idx_smart_review_glossary_order
-            ON entry (kind, mod_id, mc_version, id);
-        CREATE INDEX IF NOT EXISTS idx_smart_review_same_text_order
-            ON entry (en_us, mod_id, kind, key, id);
-        """
-    )
+    # 每條 DDL 都交給目前交易執行，避免 executescript 隱式提交外層 migration。
+    for statement in _SMART_REVIEW_DDL:
+        conn.execute(statement)
 
 
 def _backup_before_smart_review_draft_migration(
@@ -781,7 +803,11 @@ def _install_schema_v3_objects(conn: sqlite3.Connection) -> None:
         "SELECT sql FROM sqlite_schema WHERE type='trigger' "
         "AND name='translation_text_change_clears_review'"
     ).fetchone()
-    normalize = lambda sql: " ".join(sql.rstrip().rstrip(";").split())
+
+    def normalize(sql: str) -> str:
+        """正規化 trigger SQL 以比較既有結構是否相同。"""
+        return " ".join(sql.rstrip().rstrip(";").split())
+
     if existing is not None and normalize(existing[0]) == normalize(review_trigger):
         return
     conn.execute("DROP TRIGGER IF EXISTS translation_text_change_clears_review")

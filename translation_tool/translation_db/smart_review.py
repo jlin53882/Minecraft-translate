@@ -36,7 +36,8 @@ from translation_tool.translation_db.models import (
     SmartReviewRunResult,
     SmartReviewSnapshot,
 )
-from translation_tool.translation_db.quality import translation_issues
+from translation_tool.translation_db.quality import quality_state, translation_issues
+from translation_tool.translation_db.sql_helpers import like_pattern
 from translation_tool.translation_db.schema import SRC_AI, SRC_MANUAL
 from translation_tool.utils.cancellation import TaskCancelled, is_cancelled
 from translation_tool.utils.text_matching import contains_term, term_canonical_key
@@ -132,6 +133,7 @@ def build_smart_review_payload(
             {
                 "id": str(item.ordinal),
                 "kind": item.kind,
+                "mc_version": item.mc_version,
                 "mod_id": item.mod_id,
                 "key": item.key,
                 "source_text": item.en_us,
@@ -391,8 +393,11 @@ def _build_smart_review_selection(
         where.append("f.source = ?")
         params.append(int(effective_source))
     if query and query.strip():
-        needle = f"%{query.strip()}%"
-        where.append("(e.key LIKE ? OR e.en_us LIKE ? OR f.zh_tw LIKE ?)")
+        needle = like_pattern(query.strip())
+        where.append(
+            "(e.key LIKE ? ESCAPE '\\' OR e.en_us LIKE ? ESCAPE '\\' "
+            "OR f.zh_tw LIKE ? ESCAPE '\\')"
+        )
         params.extend((needle, needle, needle))
 
     reference_cte = ""
@@ -588,6 +593,7 @@ class SmartReviewMixin:
         """建立可重播且有界的本地術語與翻譯證據快照。"""
         cache = getattr(self, "_smart_review_context_cache", {})
         key_rows_cache = cache.setdefault("key_rows", {})
+        quality_cache = cache.setdefault("quality", {})
         cache_key = (kind, mod_id, key)
         if cache_key not in key_rows_cache:
             key_rows_cache[cache_key] = self._q(
@@ -600,36 +606,88 @@ class SmartReviewMixin:
                 (kind, mod_id, key),
             )
         rows = [row for row in key_rows_cache[cache_key] if int(row[0]) != entry_id]
-        translations = {str(row[6]).strip() for row in rows if str(row[6]).strip()}
-        conflict = len(translations) > 1
         context: list[dict[str, Any]] = []
+
+        def quality_details(row: tuple) -> tuple[str, tuple[str, ...], str]:
+            """取得 reviewed row 的格式品質狀態與可顯示診斷。"""
+            quality_key = (int(row[0]), row[9], row[6], row[1])
+            if quality_key not in quality_cache:
+                quality_cache[quality_key] = quality_state(
+                    str(row[5]), str(row[6]), kind=str(row[1])
+                )
+            return quality_cache[quality_key]
+
+        def db_context_item(
+            row: tuple,
+            *,
+            reference_type: str,
+            match_type: str,
+            confidence: str,
+            limitations: str,
+            en_us_value: str | None = None,
+        ) -> dict[str, Any]:
+            """建立含來源、修訂版與品質限制的資料庫證據項目。"""
+            status, issues, whitespace = quality_details(row)
+            detail_parts = [limitations]
+            if status != "consistent":
+                detail_parts.append(f"reviewed quality={status}")
+                if issues:
+                    detail_parts.append("格式問題：" + "、".join(issues))
+                if whitespace:
+                    detail_parts.append(whitespace)
+            return {
+                "id": f"db:{row[0]}:source:{row[7]}:revision:{row[9]}",
+                "legacy_id": f"db:{row[0]}",
+                "entry_id": int(row[0]),
+                "reference_type": reference_type,
+                "mod_id": str(row[3]),
+                "kind": str(row[1]),
+                "key": str(row[4]),
+                "mc_version": str(row[2]),
+                "en_us": str(row[5]) if en_us_value is None else en_us_value,
+                "zh_tw": str(row[6]),
+                "review_status": str(row[8] or "reviewed"),
+                "source": row[7],
+                "source_label": self.source_catalog.label(row[7]),
+                "match_type": match_type,
+                "confidence": confidence if status == "consistent" else "low",
+                "quality_status": status,
+                "limitations": "; ".join(detail_parts),
+            }
+
+        same_version_rows = [row for row in rows if str(row[2]) == mc_version]
+        same_version_translations = {
+            str(row[6]).strip()
+            for row in same_version_rows
+            if quality_details(row)[0] == "consistent" and str(row[6]).strip()
+        }
+        version_conflict = len(same_version_translations) > 1
         for row in rows:
             same_text = str(row[5]) == en_us
+            same_version = str(row[2]) == mc_version
+            limitations = "same module/key and reviewed local source"
+            if not same_version:
+                limitations = "different Minecraft version; context only"
+            elif not same_text:
+                limitations = "same key but different English source; context only"
+            elif version_conflict:
+                limitations = (
+                    "conflicting reviewed translations; human decision required"
+                )
             context.append(
-                {
-                    "id": f"db:{row[0]}",
-                    "reference_type": "same_key_reviewed",
-                    "mod_id": str(row[3]),
-                    "kind": str(row[1]),
-                    "key": str(row[4]),
-                    "mc_version": str(row[2]),
-                    "en_us": str(row[5]),
-                    "zh_tw": str(row[6]),
-                    "review_status": str(row[8] or "reviewed"),
-                    "source": row[7],
-                    "source_label": self.source_catalog.label(row[7]),
-                    "match_type": "exact_key_same_text"
-                    if same_text
-                    else "different_source_text",
-                    "confidence": "low" if conflict or not same_text else "high",
-                    "limitations": (
-                        "conflicting reviewed translations; human decision required"
-                        if conflict
-                        else "same key but different English source; context only"
-                        if not same_text
-                        else "same module/key and reviewed local source"
+                db_context_item(
+                    row,
+                    reference_type="same_key_reviewed",
+                    match_type=(
+                        "exact_key_same_text" if same_text else "different_source_text"
                     ),
-                }
+                    confidence=(
+                        "high"
+                        if same_version and same_text and not version_conflict
+                        else "low"
+                    ),
+                    limitations=limitations,
+                )
             )
 
         def cached_rows(
@@ -669,6 +727,19 @@ class SmartReviewMixin:
         )
         glossary_rows = glossary_current_rows + glossary_other_rows
         official = load_official_locale_index()
+        official_pairs_cache = cache.setdefault("official_pairs", {})
+        official_cache_key = str(getattr(official, "revision", "default"))
+        if official_cache_key not in official_pairs_cache:
+            pairs: dict[tuple[str, str], Any] = {}
+            for record in official.records_by_key.values():
+                pair = (
+                    normalize_terminology_text(record.en_us).strip(),
+                    record.zh_tw.strip(),
+                )
+                if pair[1]:
+                    pairs.setdefault(pair, record)
+            official_pairs_cache[official_cache_key] = pairs
+        official_pairs = official_pairs_cache[official_cache_key]
         reviewed_entries = [
             {
                 "key": str(row[4]),
@@ -676,6 +747,7 @@ class SmartReviewMixin:
                 "zh_tw": str(row[6]),
             }
             for row in glossary_rows
+            if quality_details(row)[0] == "consistent"
         ]
         terminology_plan = terminology_terms_for_item(
             {
@@ -702,6 +774,8 @@ class SmartReviewMixin:
         normalized_en_us = normalize_terminology_text(en_us)
         matched_glossary = []
         for row in glossary_rows:
+            if quality_details(row)[0] != "consistent":
+                continue
             normalized_term = normalize_terminology_text(str(row[5])).strip()
             if not contains_term(normalized_en_us, normalized_term):
                 continue
@@ -719,7 +793,11 @@ class SmartReviewMixin:
             by_term.setdefault(term_canonical_key(normalized_term), []).append(row)
         for term in sorted(by_term, key=lambda value: (-len(value), value))[:12]:
             term_rows = by_term[term]
-            term_targets = {str(row[6]).strip() for row in term_rows}
+            same_version_term_rows = [
+                row for row in term_rows if str(row[2]) == mc_version
+            ]
+            conflict_rows = same_version_term_rows or term_rows
+            term_targets = {str(row[6]).strip() for row in conflict_rows}
             term_conflict = len(term_targets) != 1
             if (
                 not term_conflict
@@ -734,26 +812,24 @@ class SmartReviewMixin:
             for row in term_rows[:4]:
                 normalized_term = normalize_terminology_text(str(row[5])).strip()
                 context.append(
-                    {
-                        "id": f"db:{row[0]}",
-                        "reference_type": "reviewed_lang_glossary",
-                        "mod_id": str(row[3]),
-                        "kind": str(row[1]),
-                        "key": str(row[4]),
-                        "mc_version": str(row[2]),
-                        "en_us": normalized_term,
-                        "zh_tw": str(row[6]),
-                        "review_status": str(row[8] or "reviewed"),
-                        "source": row[7],
-                        "source_label": self.source_catalog.label(row[7]),
-                        "match_type": "whole_term_same_mod",
-                        "confidence": "low" if term_conflict else "high",
-                        "limitations": (
+                    db_context_item(
+                        row,
+                        reference_type="reviewed_lang_glossary",
+                        match_type="whole_term_same_mod",
+                        confidence=(
+                            "high"
+                            if str(row[2]) == mc_version and not term_conflict
+                            else "low"
+                        ),
+                        limitations=(
                             "conflicting reviewed glossary terms; not a unique answer"
                             if term_conflict
                             else "same-module reviewed lang term; applies to this text only"
+                            if str(row[2]) == mc_version
+                            else "different Minecraft version; context only"
                         ),
-                    }
+                        en_us_value=normalized_term,
+                    )
                 )
 
         related_rows = cached_rows(
@@ -769,39 +845,24 @@ class SmartReviewMixin:
             if str(row[1]) == kind and str(row[3]) == mod_id and str(row[4]) == key:
                 continue
             context.append(
-                {
-                    "id": f"db:{row[0]}",
-                    "reference_type": "same_text_reviewed",
-                    "mod_id": str(row[3]),
-                    "kind": str(row[1]),
-                    "key": str(row[4]),
-                    "mc_version": str(row[2]),
-                    "en_us": str(row[5]),
-                    "zh_tw": str(row[6]),
-                    "review_status": str(row[8] or "reviewed"),
-                    "source": row[7],
-                    "source_label": self.source_catalog.label(row[7]),
-                    "match_type": "same_text",
-                    "confidence": "low",
-                    "limitations": "cross-module auxiliary reference; not this module's canonical name",
-                }
+                db_context_item(
+                    row,
+                    reference_type="same_text_reviewed",
+                    match_type="same_text",
+                    confidence="low",
+                    limitations="cross-module auxiliary reference; not this module's canonical name",
+                )
             )
 
-        official_by_pair: dict[tuple[str, str], Any] = {}
-        for source, target in terminology_plan:
-            normalized_source = normalize_terminology_text(source).strip()
-            record = next(
-                (
-                    item
-                    for item in official.records_by_key.values()
-                    if normalize_terminology_text(item.en_us) == normalized_source
-                    and item.zh_tw.strip() == target.strip()
-                ),
-                None,
-            )
-            if record is None:
-                continue
-            official_by_pair.setdefault((normalized_source, target), record)
+        wanted_pairs = {
+            (normalize_terminology_text(source).strip(), target.strip())
+            for source, target in terminology_plan
+        }
+        official_by_pair = {
+            pair: official_pairs[pair]
+            for pair in wanted_pairs
+            if pair in official_pairs
+        }
         for (source, target), record in sorted(
             official_by_pair.items(), key=lambda entry: (-len(entry[0][0]), entry[0])
         )[:8]:
@@ -823,8 +884,7 @@ class SmartReviewMixin:
                 }
             )
 
-        # A repeated DB row can be reachable through same-key and glossary paths;
-        # preserve the first, most specific path so evidence ids are unambiguous.
+        # 同一資料庫列可能同時由 same-key 與 glossary 路徑取得；保留第一個較具體的路徑。
         unique: dict[str, dict[str, Any]] = {}
         for item in context:
             unique.setdefault(str(item["id"]), item)
@@ -1108,7 +1168,7 @@ class SmartReviewMixin:
         """保存可人工編輯的智慧校對草稿，不碰生效翻譯與歷史。"""
         draft = _validate_text(
             draft_zh_tw, "draft_zh_tw", max_length=_MAX_SUGGESTION_LENGTH
-        ).strip()
+        )
         with self._tx() as conn:
             row = conn.execute(
                 "SELECT entry_id, kind, mc_version, mod_id, entry_key, en_us, current_zh_tw, "
@@ -1122,7 +1182,7 @@ class SmartReviewMixin:
                 return "missing"
             if row[14] != "ready":
                 return "not_ready"
-            if not draft:
+            if not draft.strip():
                 return "invalid_draft"
             current = conn.execute(
                 _smart_review_current_snapshot_sql(),
@@ -1234,8 +1294,8 @@ class SmartReviewMixin:
             if draft_zh_tw is not None:
                 proposed = _validate_text(
                     draft_zh_tw, "draft_zh_tw", max_length=_MAX_SUGGESTION_LENGTH
-                ).strip()
-                if not proposed:
+                )
+                if not proposed.strip():
                     return "invalid_draft"
             current = conn.execute(
                 _smart_review_current_snapshot_sql(),
@@ -1368,6 +1428,33 @@ class SmartReviewMixin:
         return "rejected" if updated else "not_ready"
 
 
+def _next_smart_review_batch_size(size: int) -> int:
+    """以有界減半方式取得下一個智慧校對批次大小。"""
+    return max(1, (int(size) + 1) // 2)
+
+
+def _smart_review_response_needs_shrink(raw: str, meta: dict[str, Any]) -> bool:
+    """判斷空回應或 provider 截斷是否應該縮小下一次請求。"""
+    if not isinstance(raw, str) or not raw.strip():
+        return True
+    finish_reason = str(
+        meta.get("finish_reason") or meta.get("finishReason") or ""
+    ).lower()
+    return any(
+        marker in finish_reason
+        for marker in ("max_tokens", "length", "truncat", "incomplete")
+    )
+
+
+def _smart_review_output_token_cap(lm_config: dict[str, Any]) -> int:
+    """讀取智慧校對輸出上限並限制在 provider 可接受的整數範圍。"""
+    try:
+        configured = int(lm_config.get("smart_review_max_output_tokens", 16_384))
+    except (TypeError, ValueError):
+        configured = 16_384
+    return max(1, min(configured, 65_536))
+
+
 def run_smart_review(
     db,
     *,
@@ -1444,92 +1531,166 @@ def run_smart_review(
     processed = valid = invalid = request_errors = 0
     no_change = suggestions = needs_context = 0
     prompt_tokens = output_tokens = 0
+    output_token_cap = _smart_review_output_token_cap(lm_config)
     started = time.monotonic()
     cancelled = False
     failed = False
     try:
-        for start in range(0, len(snapshots), batch_size):
+        position = 0
+        adaptive_batch_size = batch_size
+        while position < len(snapshots):
             if is_cancelled() or (cancel_check is not None and cancel_check()):
                 cancelled = True
                 break
-            batch = snapshots[start : start + batch_size]
-            payload = build_smart_review_payload(batch)
-            meta: dict[str, Any] = {}
-            request_failed = False
+            current_size = min(adaptive_batch_size, len(snapshots) - position)
             while True:
-                request_api_key = ""
-                if key_cycle is not None:
-                    request_api_key = key_cycle.claim()
-                    if not request_api_key and not key_cycle.failed_indexes:
-                        request_api_key = api_key.strip()
-                else:
-                    request_api_key = api_key.strip()
-                if provider == "gemini" and not request_api_key:
-                    exc = RuntimeError("Gemini API key cycle exhausted")
-                    request_errors += 1
-                    db.mark_smart_review_request_error(
-                        run_id,
-                        [item.ordinal for item in batch],
-                        error_code=f"request_failed:{type(exc).__name__}",
-                    )
-                    request_failed = True
-                    break
-                try:
-                    raw = call_gemini_requests(
-                        model_name=model_name,
-                        system_prompt=SMART_REVIEW_SYSTEM_PROMPT,
-                        payload=payload,
-                        api_key=request_api_key,
-                        temperature=0.2,
-                        max_output_tokens=16_384,
-                        meta_out=meta,
-                        provider=provider,
-                        lm_config=lm_config,
-                        response_schema=smart_review_response_schema(
-                            [str(item.ordinal) for item in batch]
-                        ),
-                        **chatgpt_options,
-                    )
-                except TaskCancelled:
+                if is_cancelled() or (cancel_check is not None and cancel_check()):
                     cancelled = True
                     break
-                except requests.HTTPError as exc:
-                    status_code = (
-                        exc.response.status_code if exc.response is not None else None
-                    )
-                    if (
-                        key_cycle is not None
-                        and status_code in {403, 429}
-                        and key_cycle.mark_failed(
-                            reason="forbidden" if status_code == 403 else None
-                        )
-                    ):
-                        continue
-                    request_errors += 1
-                    db.mark_smart_review_request_error(
-                        run_id,
-                        [item.ordinal for item in batch],
-                        error_code=f"request_failed:{type(exc).__name__}",
-                    )
-                    request_failed = True
-                    break
-                except Exception as exc:  # noqa: BLE001 - persist only a credential-free class
-                    request_errors += 1
-                    db.mark_smart_review_request_error(
-                        run_id,
-                        [item.ordinal for item in batch],
-                        error_code=f"request_failed:{type(exc).__name__}",
-                    )
-                    request_failed = True
-                    break
-                else:
+                batch = snapshots[position : position + current_size]
+                payload = build_smart_review_payload(batch)
+                meta: dict[str, Any] = {}
+                request_failed = False
+                shrink_requested = False
+                raw = ""
+                while True:
+                    request_api_key = ""
                     if key_cycle is not None:
-                        key_cycle.record_success()
+                        request_api_key = key_cycle.claim()
+                        if not request_api_key and not key_cycle.failed_indexes:
+                            request_api_key = api_key.strip()
+                    else:
+                        request_api_key = api_key.strip()
+                    if provider == "gemini" and not request_api_key:
+                        exc = RuntimeError("Gemini API key cycle exhausted")
+                        request_errors += 1
+                        db.mark_smart_review_request_error(
+                            run_id,
+                            [item.ordinal for item in batch],
+                            error_code=f"request_failed:{type(exc).__name__}",
+                        )
+                        request_failed = True
+                        break
+                    try:
+                        raw = call_gemini_requests(
+                            model_name=model_name,
+                            system_prompt=SMART_REVIEW_SYSTEM_PROMPT,
+                            payload=payload,
+                            api_key=request_api_key,
+                            temperature=0.2,
+                            max_output_tokens=output_token_cap,
+                            meta_out=meta,
+                            provider=provider,
+                            lm_config=lm_config,
+                            response_schema=smart_review_response_schema(
+                                [str(item.ordinal) for item in batch]
+                            ),
+                            **chatgpt_options,
+                        )
+                    except TaskCancelled:
+                        cancelled = True
+                        break
+                    except requests.HTTPError as exc:
+                        status_code = (
+                            exc.response.status_code
+                            if exc.response is not None
+                            else None
+                        )
+                        if (
+                            key_cycle is not None
+                            and status_code in {403, 429}
+                            and key_cycle.mark_failed(
+                                reason="forbidden" if status_code == 403 else None
+                            )
+                        ):
+                            continue
+                        if status_code in {400, 413, 422} and current_size > 1:
+                            shrink_requested = True
+                            break
+                        request_errors += 1
+                        db.mark_smart_review_request_error(
+                            run_id,
+                            [item.ordinal for item in batch],
+                            error_code=f"request_failed:{type(exc).__name__}",
+                        )
+                        request_failed = True
+                        break
+                    except Exception as exc:  # noqa: BLE001 - credential-free class
+                        request_errors += 1
+                        db.mark_smart_review_request_error(
+                            run_id,
+                            [item.ordinal for item in batch],
+                            error_code=f"request_failed:{type(exc).__name__}",
+                        )
+                        request_failed = True
+                        break
+                    else:
+                        if key_cycle is not None:
+                            key_cycle.record_success()
+                        shrink_requested = (
+                            _smart_review_response_needs_shrink(raw, meta)
+                            and current_size > 1
+                        )
+                        break
+                if cancelled:
                     break
-            if cancelled:
-                break
-            if request_failed:
+                if request_failed:
+                    processed += len(batch)
+                    position += len(batch)
+                    if progress is not None:
+                        progress(
+                            {
+                                "run_id": run_id,
+                                "processed": processed,
+                                "selected": len(snapshots),
+                                "valid": valid,
+                                "invalid": invalid,
+                                "request_errors": request_errors,
+                                "status": "running",
+                            }
+                        )
+                    break
+                if shrink_requested:
+                    smaller = _next_smart_review_batch_size(current_size)
+                    if smaller < current_size:
+                        current_size = smaller
+                        adaptive_batch_size = min(adaptive_batch_size, current_size)
+                        continue
+                try:
+                    results = parse_smart_review_response(raw, batch)
+                except Exception as exc:  # noqa: BLE001 - credential-free validation class
+                    if current_size > 1:
+                        smaller = _next_smart_review_batch_size(current_size)
+                        if smaller < current_size:
+                            current_size = smaller
+                            adaptive_batch_size = min(adaptive_batch_size, current_size)
+                            continue
+                    results = [
+                        {
+                            "id": str(item.ordinal),
+                            "validation_error": f"response_invalid:{type(exc).__name__}",
+                        }
+                        for item in batch
+                    ]
+                db.record_smart_review_results(run_id, results)
+                for result in results:
+                    if result.get("validation_error"):
+                        invalid += 1
+                        continue
+                    valid += 1
+                    if result["decision"] == "no_change":
+                        no_change += 1
+                    elif result["decision"] == "suggest_revision":
+                        suggestions += 1
+                    else:
+                        needs_context += 1
+                prompt_tokens += int(meta.get("prompt_tokens") or 0)
+                output_tokens += int(
+                    meta.get("output_tokens") or meta.get("candidates_tokens") or 0
+                )
                 processed += len(batch)
+                position += len(batch)
+                adaptive_batch_size = min(adaptive_batch_size, current_size)
                 if progress is not None:
                     progress(
                         {
@@ -1542,46 +1703,9 @@ def run_smart_review(
                             "status": "running",
                         }
                     )
-                continue
-            try:
-                results = parse_smart_review_response(raw, batch)
-            except Exception as exc:  # noqa: BLE001 - credential-free validation class
-                results = [
-                    {
-                        "id": str(item.ordinal),
-                        "validation_error": f"response_invalid:{type(exc).__name__}",
-                    }
-                    for item in batch
-                ]
-            db.record_smart_review_results(run_id, results)
-            for result in results:
-                if result.get("validation_error"):
-                    invalid += 1
-                    continue
-                valid += 1
-                if result["decision"] == "no_change":
-                    no_change += 1
-                elif result["decision"] == "suggest_revision":
-                    suggestions += 1
-                else:
-                    needs_context += 1
-            prompt_tokens += int(meta.get("prompt_tokens") or 0)
-            output_tokens += int(
-                meta.get("output_tokens") or meta.get("candidates_tokens") or 0
-            )
-            processed += len(batch)
-            if progress is not None:
-                progress(
-                    {
-                        "run_id": run_id,
-                        "processed": processed,
-                        "selected": len(snapshots),
-                        "valid": valid,
-                        "invalid": invalid,
-                        "request_errors": request_errors,
-                        "status": "running",
-                    }
-                )
+                break
+            if cancelled:
+                break
     except TaskCancelled:
         cancelled = True
     except BaseException:

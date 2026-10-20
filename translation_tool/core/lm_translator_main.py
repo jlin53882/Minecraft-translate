@@ -565,8 +565,29 @@ def _estimate_retry_input_tokens(
     )
 
 
-def _refresh_runtime_prompt_budget(runtime: _BatchRuntime) -> None:
-    """在共用對話歷史增加後重新計算固定提示詞預算。"""
+def _refresh_runtime_prompt_budget(
+    runtime: _BatchRuntime,
+    *,
+    prompt_items: list[dict] | None = None,
+    prompt_ids: list[str] | None = None,
+) -> None:
+    """依目前實際負載重建提示詞並重新計算固定輸入預算。"""
+    if prompt_items is not None:
+        base_prompt = (
+            runtime.lang_prompt
+            if uses_lang_prompt(runtime.batch_profile)
+            else runtime.patchouli_prompt
+        )
+        runtime.effective_prompt = build_translation_prompt(
+            base_prompt,
+            prompt_items,
+            profile=runtime.batch_profile,
+            include_official=bool(runtime.lm_cfg.get("official_glossary", True)),
+            include_moddb_reviewed=bool(
+                runtime.lm_cfg.get("moddb_reviewed_glossary", True)
+            ),
+            item_ids=prompt_ids,
+        )
     history_input_tokens = _estimate_conversation_history_tokens(
         runtime.conversation_history
     )
@@ -622,9 +643,12 @@ def _wait_for_request_slot(runtime: _BatchRuntime, model_name: str) -> None:
 
 
 def _build_batch_prompt_context(
-    batch_items: list[dict], lm_cfg: dict
+    batch_items: list[dict],
+    lm_cfg: dict,
+    *,
+    item_ids: list[str] | None = None,
 ) -> _BatchPromptContext:
-    """建立所有批次規劃器共用的提示詞預算契約。"""
+    """建立所有批次規劃器共用的提示詞與 Token 預算契約。"""
     profile = _detect_batch_profile(batch_items)
     lang_prompt = _prompt_text(
         lm_cfg.get("lang_system_prompt"),
@@ -650,6 +674,7 @@ def _build_batch_prompt_context(
         profile=profile,
         include_official=bool(lm_cfg.get("official_glossary", True)),
         include_moddb_reviewed=bool(lm_cfg.get("moddb_reviewed_glossary", True)),
+        item_ids=item_ids,
     )
     retry_same_as_source = bool(lm_cfg.get("retry_same_as_source", True))
     history_input_tokens = _estimate_conversation_history_tokens(conversation_history)
@@ -817,17 +842,40 @@ def _build_batch_runtime(
 
 
 def _prepare_batch(runtime: _BatchRuntime) -> _BatchRound:
-    """依項目與 Token 預算選取批次前綴並建立 API 負載。"""
-    _refresh_runtime_prompt_budget(runtime)
-    fit_count = select_batch_size(
-        runtime.remaining_items,
-        runtime.batch_profile,
-        runtime.batch_size,
-        runtime.lm_cfg,
-        fixed_input_tokens=runtime.batch_fit_input_tokens,
-    )
+    """依實際批次術語提示與 Token 預算選取穩定前綴。"""
+    if not runtime.remaining_items:
+        raise ValueError("沒有可準備的翻譯項目")
+    scope_count = min(max(1, runtime.batch_size), len(runtime.remaining_items))
+    fit_count = scope_count
+    # 提示詞本身會隨批次術語數量變化；每輪都用同一批實際項目與穩定 id
+    # 重建提示詞，最多收斂數輪，避免沿用全輸入批次造成 Token 高估或錯配。
+    for _ in range(6):
+        scope_items = runtime.remaining_items[:scope_count]
+        scope_ids = runtime.remaining_item_ids[:scope_count]
+        _refresh_runtime_prompt_budget(
+            runtime, prompt_items=scope_items, prompt_ids=scope_ids
+        )
+        fit_count = max(
+            1,
+            min(
+                scope_count,
+                select_batch_size(
+                    runtime.remaining_items,
+                    runtime.batch_profile,
+                    scope_count,
+                    runtime.lm_cfg,
+                    fixed_input_tokens=runtime.batch_fit_input_tokens,
+                ),
+            ),
+        )
+        if fit_count == scope_count:
+            break
+        scope_count = fit_count
     current_batch = runtime.remaining_items[:fit_count]
     current_ids = runtime.remaining_item_ids[:fit_count]
+    _refresh_runtime_prompt_budget(
+        runtime, prompt_items=current_batch, prompt_ids=current_ids
+    )
     return _BatchRound(
         current_batch=current_batch,
         fit_count=fit_count,

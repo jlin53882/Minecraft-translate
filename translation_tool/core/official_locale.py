@@ -317,8 +317,9 @@ def build_translation_prompt(
     profile: str,
     include_official: bool = True,
     include_moddb_reviewed: bool = True,
+    item_ids: Sequence[str] | None = None,
 ) -> str:
-    """在基礎提示詞後加入繁中與批次範圍術語指令。"""
+    """在基礎提示詞後加入繁中與目前批次的穩定識別碼術語指令。"""
     sections = [
         normalize_legacy_prompt(base_prompt).rstrip(),
         format_policy_for_items(items, profile=profile),
@@ -330,6 +331,7 @@ def build_translation_prompt(
         index,
         include_official=include_official,
         include_moddb_reviewed=include_moddb_reviewed,
+        item_ids=item_ids,
     )
     if directives:
         sections.append("\n".join(directives))
@@ -503,14 +505,22 @@ def _terminology_directives(
     *,
     include_official: bool = True,
     include_moddb_reviewed: bool = True,
+    item_ids: Sequence[str] | None = None,
 ) -> list[str]:
-    """把術語對照放在模型必須翻譯的負載識別碼旁。"""
+    """把術語對照放在模型必須翻譯的實際負載識別碼旁。"""
     lines = [
         "\n【逐筆必用術語（只適用於同一 payload id）】",
         "每一行的來源詞若出現在該 id 的 value，譯文必須採用同一行的目標詞。",
     ]
     count = 0
-    for item_id, item in enumerate(items):
+    stable_ids = (
+        tuple(str(item_id) for item_id in item_ids)
+        if item_ids is not None
+        else tuple(str(index) for index in range(len(items)))
+    )
+    if len(stable_ids) != len(items):
+        raise ValueError("術語提示的 item_ids 數量必須與 items 相同")
+    for item_id, item in zip(stable_ids, items, strict=True):
         terms = _item_terminology_terms(
             item,
             index,
@@ -550,7 +560,7 @@ def terminology_issues(
     include_moddb_reviewed: bool = True,
     terms: Sequence[tuple[str, str]] | None = None,
 ) -> list[str]:
-    """回報模型翻譯中缺少的權威來源術語。"""
+    """以邊界啟發式回報缺少的權威術語，不代表完整語意準確率。"""
     expected_terms = terms
     if expected_terms is None:
         expected_terms = terminology_terms_for_item(
@@ -563,7 +573,7 @@ def terminology_issues(
     return [
         f"術語未命中：{source} → {target}"
         for source, target in expected_terms
-        if target not in translated_text
+        if not contains_term(translated_text, target)
     ]
 
 

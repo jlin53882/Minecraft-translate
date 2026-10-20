@@ -17,6 +17,7 @@ from translation_tool.translation_db import (
 from translation_tool.translation_db.models import SmartReviewSnapshot
 from translation_tool.translation_db.schema import SRC_AI, SRC_MANUAL
 from translation_tool.translation_db.smart_review import (
+    build_smart_review_payload,
     parse_smart_review_response,
     run_smart_review,
     smart_review_response_schema,
@@ -50,6 +51,12 @@ def test_snapshot_uses_implicit_unreviewed_for_non_manual_sources(db):
     assert [item.key for item in snapshots] == ["bye", "hello"]
     assert all(item.review_status == "unreviewed" for item in snapshots)
     assert all(item.effective_source != SRC_MANUAL for item in snapshots)
+
+
+def test_smart_review_payload_carries_target_version(db):
+    """驗證模型負載包含目標 Minecraft 版本以避免跨版本誤用 context。"""
+    snapshot = db.smart_review_candidates(version="1.21.1", limit=1)[0]
+    assert build_smart_review_payload([snapshot])["items"][0]["mc_version"] == "1.21.1"
 
 
 @pytest.mark.parametrize(
@@ -166,6 +173,51 @@ def test_local_context_covers_non_lang_terms_and_preserves_traceability(db):
     assert glossary[0]["zh_tw"] == "酚醛樹脂"
     assert glossary[0]["mod_id"] == "demo"
     assert glossary[0]["review_status"] == "reviewed"
+
+
+def test_local_context_quality_and_evidence_ids_keep_source_identity(db):
+    """驗證格式不合格參考不會升為高信心且不同來源 id 不碰撞。"""
+    hello = next(item for item in db.list_entries("1.21.1")[0] if item.key == "hello")
+    with db._tx() as conn:
+        conn.execute(
+            "UPDATE translation SET zh_tw=?, review_status='reviewed' "
+            "WHERE entry_id=? AND source=?",
+            ("你好", hello.id, SRC_AI),
+        )
+        conn.execute(
+            "INSERT INTO translation (entry_id, source, zh_tw, review_status) "
+            "VALUES (?,?,?,'reviewed')",
+            (hello.id, SRC_MANUAL, "您好 %s"),
+        )
+
+    context = db._smart_review_context(
+        0, KIND_LANG, "1.21.1", "demo", "hello", "Hello %s"
+    )
+    database_rows = [item for item in context if item.get("entry_id") == hello.id]
+    assert len({item["id"] for item in database_rows}) == len(database_rows)
+    assert any(
+        item["quality_status"] == "mismatch"
+        and item["confidence"] == "low"
+        and "格式問題" in item["limitations"]
+        for item in database_rows
+    )
+
+
+def test_smart_review_query_escapes_like_wildcards(db):
+    """驗證智慧校對搜尋中的百分比、底線與反斜線是字面值。"""
+    db.write_back(
+        "1.21.1",
+        [
+            WriteBackItem(KIND_LANG, "demo", "foo_bar", "Foo Bar", " foo "),
+            WriteBackItem(KIND_LANG, "demo", "foo%bar", "Foo Percent", " percent "),
+            WriteBackItem(KIND_LANG, "demo", r"foo\\bar", "Foo Slash", " slash "),
+        ],
+        fill_other_versions=False,
+    )
+    assert db.count_smart_review_candidates(version="1.21.1", query="foo_bar") == 1
+    assert db.count_smart_review_candidates(version="1.21.1", query="foo%bar") == 1
+    assert db.count_smart_review_candidates(version="1.21.1", query=r"foo\\bar") == 1
+    assert db.count_smart_review_candidates(version="1.21.1", query="foo_bar") != 3
 
 
 def test_local_context_uses_shared_terminology_filter(db, monkeypatch):
@@ -618,6 +670,108 @@ def test_draft_is_persisted_and_apply_uses_the_human_value(db, monkeypatch):
     assert db.entry_detail(stored.entry_id).entry.zh_tw == "再會！"
 
 
+def test_draft_preserves_spaces_and_newlines_until_apply(db, monkeypatch):
+    """驗證人工草稿的前後空白與實際換行不會被靜默改寫。"""
+    db.write_back(
+        "1.21.1",
+        [
+            WriteBackItem(
+                KIND_LANG,
+                "demo",
+                "multiline",
+                "Line one\nLine two",
+                "第一行\n第二行",
+            )
+        ],
+        fill_other_versions=False,
+    )
+
+    def fake_call(**kwargs):
+        """模擬可供草稿編輯的校對回應。"""
+        item = kwargs["payload"]["items"][0]
+        return json.dumps(
+            {
+                "items": [
+                    {
+                        "id": item["id"],
+                        "decision": "suggest_revision",
+                        "suggested_zh_tw": "第一列\n第二列",
+                        "issue_types": ["style"],
+                        "evidence_ids": [],
+                        "confidence": 0.9,
+                        "reason": "原文 Line one 與目前譯文 第一行需要人工確認。",
+                    }
+                ]
+            }
+        )
+
+    monkeypatch.setattr(
+        "translation_tool.translation_db.smart_review.call_gemini_requests",
+        fake_call,
+    )
+    result = run_smart_review(
+        db,
+        model_name="gemini-test",
+        api_key="test-key",
+        limit=1,
+        query="multiline",
+    )
+    draft = "  第一行\n第二行  "
+    assert db.save_smart_review_draft(result.run_id, 1, draft) == "saved"
+    assert db.list_smart_review_candidates(result.run_id)[0].draft_zh_tw == draft
+    assert db.apply_smart_review_candidate(result.run_id, 1) == "applied"
+    entry_id = db.list_smart_review_candidates(result.run_id)[0].entry_id
+    assert db.entry_detail(entry_id).entry.zh_tw == draft
+
+
+def test_smart_review_shrinks_truncated_batches_and_keeps_all_ordinals(db, monkeypatch):
+    """驗證截斷回應會有界縮批且成功子批次仍逐筆保存。"""
+    calls = []
+
+    def fake_call(**kwargs):
+        """第一次模擬輸出截斷，縮成單筆後回傳有效 JSON。"""
+        items = kwargs["payload"]["items"]
+        calls.append(len(items))
+        if len(items) > 1:
+            kwargs["meta_out"]["finish_reason"] = "MAX_TOKENS"
+            return ""
+        item = items[0]
+        return json.dumps(
+            {
+                "items": [
+                    {
+                        "id": item["id"],
+                        "decision": "no_change",
+                        "suggested_zh_tw": "",
+                        "issue_types": [],
+                        "evidence_ids": [],
+                        "confidence": 0.8,
+                        "reason": "目前譯文可保留。",
+                    }
+                ]
+            }
+        )
+
+    monkeypatch.setattr(
+        "translation_tool.translation_db.smart_review.call_gemini_requests",
+        fake_call,
+    )
+    result = run_smart_review(
+        db,
+        model_name="gemini-test",
+        api_key="test-key",
+        limit=2,
+        batch_size=2,
+    )
+
+    assert calls == [2, 1, 1]
+    assert result.processed_count == result.valid_count == 2
+    assert [item.status for item in db.list_smart_review_candidates(result.run_id)] == [
+        "no_change",
+        "no_change",
+    ]
+
+
 def test_reject_candidate_keeps_translation_unchanged(db, monkeypatch):
     """驗證拒絕候選時會保留原翻譯不變。"""
 
@@ -768,6 +922,78 @@ def test_smart_review_dialog_builds_preview_and_run_controls(db, monkeypatch):
     assert dialog.model_dd.value == "gemini-3.1-flash-lite"
     assert dialog.limit_field.value == "1000"
     assert dialog.run_btn.disabled is False
+    assert dialog.recent_run_dd is not None
+    assert dialog.refresh_runs_btn.disabled is False
+
+
+def test_smart_review_candidate_query_is_deferred_and_guarded(monkeypatch, tmp_path):
+    """驗證候選 SQLite 查詢排入背景操作且回來時檢查世代與資料庫身分。"""
+    from app.views.moddb import smart_review_dialog as module
+
+    class Pager:
+        """提供候選載入測試需要的最小分頁介面。"""
+
+        def set_state(self, total, page):
+            """保存最近一次分頁狀態。"""
+            self.state = (total, page)
+
+    class Container:
+        """提供 Flet Column 測試需要的 controls 欄位。"""
+
+        def __init__(self):
+            self.controls = []
+
+    path = tmp_path / "smart-review.db"
+    db = type("DB", (), {"path": path})()
+    dialog = module.SmartReviewDialog.__new__(module.SmartReviewDialog)
+    dialog.get_db = lambda: db
+    dialog._generation = 3
+    dialog._run_id = "run-1"
+    dialog._candidate_page = 1
+    dialog._candidate_page_size = 50
+    dialog._candidate_path = None
+    dialog._candidate_db_identity = None
+    dialog._candidate_priority = ()
+    dialog.candidates = Container()
+    dialog.candidate_pager = Pager()
+    dialog._safe_update = lambda: None
+    dialog._candidate_card = lambda _path, _priority, row: row
+    dialog._post = lambda callback, *args: callback(*args)
+    scheduled = {}
+
+    def capture_launch(work, *_args, **_kwargs):
+        """只捕捉背景工作，不在 UI 呼叫堆疊同步執行。"""
+        scheduled["work"] = work
+
+    dialog._launch = capture_launch
+    monkeypatch.setattr(
+        module,
+        "count_moddb_smart_review_candidates_for_run_from_path",
+        lambda *_args, **_kwargs: 0,
+    )
+    monkeypatch.setattr(
+        module,
+        "list_moddb_smart_review_candidates_from_path",
+        lambda *_args, **_kwargs: [],
+    )
+
+    dialog._load_candidates(path, (1,), "run-1")
+    assert "work" in scheduled
+    scheduled["work"]()
+    assert dialog.candidate_pager.state == (0, 1)
+
+    before = list(dialog.candidates.controls)
+    dialog._apply_candidates(
+        2,
+        str(path.resolve()),
+        path,
+        (1,),
+        "run-1",
+        1,
+        (1, []),
+        None,
+    )
+    assert dialog.candidates.controls == before
 
 
 def test_smart_review_apply_notifies_parent_after_reloading_candidates(monkeypatch):
@@ -826,3 +1052,29 @@ def test_v7_smart_review_is_readable_and_migrates_to_v8(tmp_path):
     assert migrated._smart_review_has_column("smart_review_candidate", "draft_zh_tw")
     migrated.close()
     assert list(tmp_path.glob("v7-smart-review.db.pre-schema-v8-*.bak"))
+
+
+def test_smart_review_ddl_failure_rolls_back_outer_transaction(monkeypatch):
+    """驗證智慧校對 DDL 中途失敗不會提交外層 migration。"""
+    from translation_tool.translation_db import schema
+
+    conn = sqlite3.connect(":memory:")
+    conn.execute("CREATE TABLE entry (id INTEGER PRIMARY KEY)")
+    conn.commit()
+    original = schema._SMART_REVIEW_DDL
+    monkeypatch.setattr(
+        schema,
+        "_SMART_REVIEW_DDL",
+        original[:1] + ("CREATE TABLE broken_smart_review (",) + original[1:],
+    )
+    conn.execute("BEGIN")
+    with pytest.raises(sqlite3.OperationalError):
+        schema._install_smart_review_objects(conn)
+    conn.rollback()
+    assert (
+        conn.execute(
+            "SELECT name FROM sqlite_master WHERE name='smart_review_run'"
+        ).fetchone()
+        is None
+    )
+    conn.close()

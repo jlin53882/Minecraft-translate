@@ -14,6 +14,7 @@ from app.services_impl.moddb_smart_review_service import (
     count_moddb_smart_review_candidates_for_run_from_path,
     count_moddb_smart_review_candidates_from_path,
     get_moddb_smart_review_run_from_path,
+    list_moddb_smart_review_runs_from_path,
     list_moddb_smart_review_candidates_from_path,
     preview_moddb_smart_review_from_path,
     reject_moddb_smart_review_candidate_from_path,
@@ -68,6 +69,7 @@ class SmartReviewDialog:
         self._candidate_page = 1
         self._candidate_page_size = 50
         self._candidate_path: Path | None = None
+        self._candidate_db_identity: str | None = None
         self._candidate_priority: tuple[int, ...] = ()
         self._build_controls(version, mod_id, kind, effective_source, query)
         self._build_dialog()
@@ -167,6 +169,16 @@ class SmartReviewDialog:
         self.load_run_btn = kit.button(
             "載入歷史批次", "secondary", on_click=self._load_existing_run
         )
+        self.recent_run_dd = kit.dropdown(
+            label="最近批次",
+            dense=True,
+            width=440,
+            on_select=self._select_recent_run,
+        )
+        kit.set_dropdown_options(self.recent_run_dd, [])
+        self.refresh_runs_btn = kit.button(
+            "重新整理批次", "secondary", on_click=self._load_recent_runs
+        )
         self.status = ft.Text("尚未預覽", size=12, color=C.MUTED, selectable=True)
         self.summary = ft.Text("尚未載入候選。", size=14, weight=ft.FontWeight.BOLD)
         self.candidates = ft.Column(spacing=8)
@@ -210,6 +222,11 @@ class SmartReviewDialog:
                         ft.Row(
                             [self.run_id_field, self.load_run_btn], spacing=8, wrap=True
                         ),
+                        ft.Row(
+                            [self.recent_run_dd, self.refresh_runs_btn],
+                            spacing=8,
+                            wrap=True,
+                        ),
                         self.status,
                         self.summary,
                         self.candidates,
@@ -231,6 +248,7 @@ class SmartReviewDialog:
         """開啟智慧校對對話框並載入目前版本的預覽。"""
         try:
             present_page_dialog(self.page, self.dialog)
+            self._load_recent_runs()
         except (AttributeError, RuntimeError):
             show_snack(self.page, "目前畫面無法開啟智慧校對視窗。", C.GOLD)
 
@@ -439,7 +457,7 @@ class SmartReviewDialog:
         self._safe_update()
 
     def _load_existing_run(self, _e=None) -> None:
-        """載入既有智慧校對執行，讓使用者繼續檢視候選。"""
+        """在背景載入既有智慧校對執行，讓使用者繼續檢視候選。"""
         if self._busy:
             return
         run_id = str(self.run_id_field.value or "").strip()
@@ -454,10 +472,62 @@ class SmartReviewDialog:
             return
         path = Path(db.path).resolve()
         priority = tuple(getattr(db, "priority", ()))
-        try:
-            run = get_moddb_smart_review_run_from_path(path, priority, run_id)
-        except Exception as exc:  # noqa: BLE001 - UI reports bounded failure
-            self.status.value = f"載入批次失敗：{exc}"
+        generation = self._generation
+        db_identity = str(path)
+        self._set_busy(True, "正在背景載入歷史批次…")
+
+        def work() -> None:
+            """在背景唯讀取得指定批次。"""
+            try:
+                run = get_moddb_smart_review_run_from_path(path, priority, run_id)
+            except Exception as exc:  # noqa: BLE001 - UI reports bounded failure
+                self._post(
+                    self._apply_loaded_run,
+                    generation,
+                    db_identity,
+                    path,
+                    priority,
+                    run_id,
+                    None,
+                    str(exc),
+                )
+                return
+            self._post(
+                self._apply_loaded_run,
+                generation,
+                db_identity,
+                path,
+                priority,
+                run_id,
+                run,
+                None,
+            )
+
+        self._launch(work, "載入智慧校對歷史批次", CommitPolicy.EPHEMERAL)
+
+    def _apply_loaded_run(
+        self,
+        generation: int,
+        db_identity: str,
+        path: Path,
+        priority: tuple[int, ...],
+        run_id: str,
+        run: dict | None,
+        error: str | None,
+    ) -> None:
+        """驗證世代與資料庫身分後把歷史批次套用到 UI。"""
+        db = self.get_db()
+        current_identity = (
+            str(Path(db.path).resolve())
+            if db is not None and getattr(db, "path", None)
+            else None
+        )
+        if generation != self._generation or current_identity != db_identity:
+            self._set_busy(False, "歷史批次結果已過期。")
+            return
+        self._set_busy(False, "")
+        if error:
+            self.status.value = f"載入批次失敗：{error}"
             self._safe_update()
             return
         if run is None:
@@ -498,6 +568,93 @@ class SmartReviewDialog:
         self.status.value = "已重新開啟既有校對批次；套用前仍會進行 CAS 檢查。"
         self._load_candidates(path, priority, run_id, page=1)
         self._safe_update()
+
+    def _load_recent_runs(self, _e=None) -> None:
+        """在背景載入最近批次清單，避免 UI 事件執行緒讀取 SQLite。"""
+        if self._busy:
+            return
+        db = self.get_db()
+        if db is None or not getattr(db, "path", None):
+            return
+        path = Path(db.path).resolve()
+        priority = tuple(getattr(db, "priority", ()))
+        generation = self._generation
+        db_identity = str(path)
+
+        def work() -> None:
+            """在背景唯讀取得最近智慧校對批次。"""
+            try:
+                runs = list_moddb_smart_review_runs_from_path(path, priority, limit=20)
+            except Exception as exc:  # noqa: BLE001 - UI reports bounded failure
+                self._post(
+                    self._apply_recent_runs,
+                    generation,
+                    db_identity,
+                    None,
+                    str(exc),
+                )
+                return
+            self._post(
+                self._apply_recent_runs,
+                generation,
+                db_identity,
+                runs,
+                None,
+            )
+
+        self._launch(work, "載入智慧校對批次清單", CommitPolicy.EPHEMERAL)
+
+    def _apply_recent_runs(
+        self,
+        generation: int,
+        db_identity: str,
+        runs: list[dict] | None,
+        error: str | None,
+    ) -> None:
+        """只在目前 UI 世代與資料庫身分相同時更新批次下拉選單。"""
+        db = self.get_db()
+        current_identity = (
+            str(Path(db.path).resolve())
+            if db is not None and getattr(db, "path", None)
+            else None
+        )
+        if generation != self._generation or current_identity != db_identity:
+            return
+        if error:
+            self.status.value = f"批次清單載入失敗：{error}"
+            self._safe_update()
+            return
+        options = []
+        for run in runs or []:
+            status = str(run.get("status") or "unknown")
+            if status == "running":
+                status = "running（可能中斷，請確認）"
+            scope = run.get("scope") or {}
+            pending = max(
+                0,
+                int(run.get("selected_count") or 0)
+                - int(run.get("processed_count") or 0),
+            )
+            label = (
+                f"{run.get('id')} · {run.get('provider')}/{run.get('model')} · "
+                f"{scope.get('version') or run.get('scope_version') or '-'} · "
+                f"{scope.get('mod_id') or '全部模組'}/{scope.get('kind') or '全部類型'} · "
+                f"{run.get('started_at') or '-'} · {status} · "
+                f"待處理 {pending:,}"
+            )
+            options.append((str(run.get("id")), label))
+        kit.set_dropdown_options(self.recent_run_dd, options)
+        if self._run_id and any(key == self._run_id for key, _label in options):
+            self.recent_run_dd.value = self._run_id
+        self._safe_update()
+
+    def _select_recent_run(self, event) -> None:
+        """將最近批次選擇填入進階 run_id 欄位並載入候選。"""
+        run_id = str(event.control.value or "").strip()
+        if not run_id:
+            return
+        self.run_id_field.value = run_id
+        self._load_existing_run()
 
     def _run(self, _e=None) -> None:
         """啟動智慧校對執行並處理逐步進度回報。"""
@@ -608,34 +765,103 @@ class SmartReviewDialog:
         page: int | None = None,
         total: int | None = None,
     ) -> None:
-        """載入評估所需的智慧校對候選資料。"""
+        """在背景載入候選，並以世代與資料庫身分丟棄過期結果。"""
         self._candidate_path = path
+        self._candidate_db_identity = str(path.resolve())
         self._candidate_priority = priority
         if page is not None:
             self._candidate_page = max(1, int(page))
-        offset = (self._candidate_page - 1) * self._candidate_page_size
-        try:
-            if total is None:
-                total = count_moddb_smart_review_candidates_for_run_from_path(
-                    path, priority, run_id
+        generation = self._generation
+        db_identity = self._candidate_db_identity
+        selected_page = self._candidate_page
+        offset = (selected_page - 1) * self._candidate_page_size
+
+        def work() -> None:
+            """在背景唯讀取得候選總數與目前頁面。"""
+            try:
+                selected_total = total
+                if selected_total is None:
+                    selected_total = (
+                        count_moddb_smart_review_candidates_for_run_from_path(
+                            path, priority, run_id
+                        )
+                    )
+                rows = list_moddb_smart_review_candidates_from_path(
+                    path,
+                    priority,
+                    run_id,
+                    limit=self._candidate_page_size,
+                    offset=offset,
                 )
-            rows = list_moddb_smart_review_candidates_from_path(
+            except Exception as exc:  # noqa: BLE001 - UI reports bounded failure
+                self._post(
+                    self._apply_candidates,
+                    generation,
+                    db_identity,
+                    path,
+                    priority,
+                    run_id,
+                    selected_page,
+                    None,
+                    str(exc),
+                )
+                return
+            self._post(
+                self._apply_candidates,
+                generation,
+                db_identity,
                 path,
                 priority,
                 run_id,
-                limit=self._candidate_page_size,
-                offset=offset,
+                selected_page,
+                (int(selected_total), rows),
+                None,
             )
-        except Exception as exc:  # noqa: BLE001 - UI reports bounded failure
-            self.candidates.controls = [ft.Text(f"候選載入失敗：{exc}", color=C.RED)]
+
+        self._launch(work, "載入智慧校對候選", CommitPolicy.EPHEMERAL)
+
+    def _apply_candidates(
+        self,
+        generation: int,
+        db_identity: str,
+        path: Path,
+        priority: tuple[int, ...],
+        run_id: str,
+        page: int,
+        result: tuple[int, list[SmartReviewCandidate]] | None,
+        error: str | None,
+    ) -> None:
+        """只在候選查詢仍屬於目前 run 時更新卡片與分頁。"""
+        if (
+            generation != self._generation
+            or self._candidate_db_identity != db_identity
+            or self._run_id != run_id
+        ):
             return
-        self._candidate_total = int(total)
+        db = self.get_db()
+        current_identity = (
+            str(Path(db.path).resolve())
+            if db is not None and getattr(db, "path", None)
+            else None
+        )
+        if current_identity != db_identity:
+            return
+        if error:
+            self.candidates.controls = [ft.Text(f"候選載入失敗：{error}", color=C.RED)]
+            self._safe_update()
+            return
+        if result is None:
+            return
+        total, rows = result
+        self._candidate_page = page
+        self._candidate_total = total
         self.candidate_pager.set_state(self._candidate_total, self._candidate_page)
         self.candidates.controls = [
             self._candidate_card(path, priority, row) for row in rows
         ]
         if not rows:
             self.candidates.controls = [kit.hint_text("此 run 沒有候選結果。")]
+        self._safe_update()
 
     def _on_candidate_page(self, page: int) -> None:
         """處理候選分頁切換並重新載入目前候選。"""
@@ -693,8 +919,8 @@ class SmartReviewDialog:
 
         def refresh_format(_e=None) -> None:
             """依目前草稿重新計算候選的格式診斷。"""
-            value = str(draft_control.value or "").strip()
-            if not value:
+            value = str(draft_control.value or "")
+            if not value.strip():
                 format_text.value = "格式診斷：尚無可分析草稿"
                 format_text.color = C.MUTED
                 return
@@ -718,26 +944,58 @@ class SmartReviewDialog:
 
     @staticmethod
     def _candidate_evidence_text(row: SmartReviewCandidate) -> str:
-        """整理候選的上下文與術語證據顯示文字。"""
-        evidence_by_id = {str(item.get("id")): item for item in row.context}
-        evidence_ids = row.evidence_ids or tuple(evidence_by_id)[:6]
-        evidence_lines = []
-        for evidence_id in evidence_ids[:8]:
-            item = evidence_by_id.get(str(evidence_id))
-            if item is None:
-                evidence_lines.append(f"{evidence_id}（找不到本地證據）")
-                continue
-            evidence_lines.append(
-                f"{evidence_id} · {item.get('reference_type', 'local')} · "
+        """只顯示 AI 實際引用的證據，並相容解析舊版 entry-only id。"""
+        context = list(row.context)
+        evidence_by_id = {str(item.get("id")): item for item in context}
+        legacy_by_id: dict[str, list[dict]] = {}
+        for item in context:
+            legacy_id = item.get("legacy_id")
+            if legacy_id:
+                legacy_by_id.setdefault(str(legacy_id), []).append(item)
+
+        def format_item(display_id: str, item: dict) -> str:
+            """格式化單筆證據及其版本、來源與品質限制。"""
+            return (
+                f"{display_id} · {item.get('reference_type', 'local')} · "
+                f"來源={item.get('source_label', item.get('source', ''))} · "
+                f"版本={item.get('mc_version', '-')} · "
+                f"信心={item.get('confidence', 'low')} · "
                 f"{item.get('en_us', '')} → {item.get('zh_tw', '')} · "
                 f"{item.get('limitations', '')}"
             )
-        evidence_text = (
-            "\n".join(evidence_lines)
-            if evidence_lines
-            else "無本地術語證據；請視為需要人工確認。"
-        )
-        return evidence_text
+
+        evidence_ids = tuple(row.evidence_ids)
+        if not evidence_ids:
+            reference_lines = ["AI 未引用任何本地證據。"]
+            if context:
+                reference_lines.append("可參考資料（非本次 AI 證據）：")
+                reference_lines.extend(
+                    format_item(str(item.get("id")), item) for item in context[:6]
+                )
+            else:
+                reference_lines.append("沒有可供參考的本地 context；請人工確認。")
+            return "\n".join(reference_lines)
+
+        evidence_lines = []
+        for evidence_id in evidence_ids[:8]:
+            requested_id = str(evidence_id)
+            item = evidence_by_id.get(requested_id)
+            if item is not None:
+                evidence_lines.append(format_item(requested_id, item))
+                continue
+            legacy_matches = legacy_by_id.get(requested_id, [])
+            if len(legacy_matches) == 1:
+                item = legacy_matches[0]
+                evidence_lines.append(
+                    format_item(f"{requested_id} → {item.get('id')}", item)
+                )
+            elif len(legacy_matches) > 1:
+                evidence_lines.append(
+                    f"{requested_id}（舊版 id 對應多個來源，無法唯一解析）"
+                )
+            else:
+                evidence_lines.append(f"{requested_id}（找不到本地證據）")
+        return "\n".join(evidence_lines)
 
     def _candidate_action_row(
         self,
@@ -1063,6 +1321,8 @@ class SmartReviewDialog:
             self.preview_btn,
             self.run_btn,
             self.load_run_btn,
+            self.recent_run_dd,
+            self.refresh_runs_btn,
         ):
             control.disabled = busy
         self.cancel_btn.visible = busy

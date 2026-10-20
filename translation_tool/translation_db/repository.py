@@ -75,6 +75,7 @@ from translation_tool.translation_db.quality import (
     whitespace_note,
 )
 from translation_tool.translation_db.read_cache import READ_CACHE
+from translation_tool.translation_db.sql_helpers import like_pattern
 from translation_tool.translation_db.schema import (
     DB_EMPTY,
     DB_FOREIGN,
@@ -184,8 +185,7 @@ class _WorstFirstQualityRow:
 
 def _like(text: str) -> str:
     """把使用者輸入轉成 LIKE 的字面比對（跳脫 % _ \\）。"""
-    esc = text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-    return f"%{esc}%"
+    return like_pattern(text)
 
 
 class TranslationDB(SmartReviewMixin, BulkReviewMixin, CleanupMixin):

@@ -24,6 +24,7 @@ from translation_tool.core.official_locale import (
     OfficialLocaleRecord,
     build_translation_prompt,
     load_official_locale_index,
+    terminology_issues,
 )
 from translation_tool.translation_db.schema import (
     KIND_ADVANCEMENT,
@@ -249,6 +250,53 @@ def test_terminology_directives_bind_reviewed_terms_to_payload_ids() -> None:
     assert "不要因為不確定就把整個 value 原樣回傳" in prompt
     assert "id「0」 key「first」：Copper Gate → 銅製閘門" in prompt
     assert "id「1」 key「second」：Pressure Chamber → 壓力室" in prompt
+
+
+def test_terminology_directives_use_current_stable_payload_ids() -> None:
+    """驗證內部縮批重建提示詞時使用實際負載的穩定 id。"""
+    items = [
+        {
+            "path": "second",
+            "source_text": "Pressure Chamber",
+            "_reviewed_glossary": [
+                {"en_us": "Pressure Chamber", "zh_tw": "壓力室"},
+            ],
+        }
+    ]
+
+    prompt = build_translation_prompt("基礎", items, profile="lang", item_ids=["17"])
+
+    assert "id「17」 key「second」：Pressure Chamber → 壓力室" in prompt
+    assert "id「0」 key「second」：Pressure Chamber → 壓力室" not in prompt
+
+
+def test_terminology_issues_are_boundary_heuristic_not_substring_matching() -> None:
+    """驗證術語命中使用邊界啟發式，且不宣稱完整語意正確。"""
+    item = {"source_text": "Brick Slab"}
+    assert (
+        terminology_issues(
+            item,
+            "紅磚半磚",
+            include_official=False,
+            terms=[("Brick Slab", "紅磚半磚")],
+        )
+        == []
+    )
+    assert terminology_issues(
+        item,
+        "紅磚頭",
+        include_official=False,
+        terms=[("Brick Slab", "紅磚半磚")],
+    )
+    assert (
+        terminology_issues(
+            {"source_text": "Brick"},
+            "紅磚",
+            include_official=False,
+            terms=[("Brick", "紅磚")],
+        )
+        == []
+    )
 
 
 def test_terminology_directives_use_official_subterms_and_prefer_longest(
