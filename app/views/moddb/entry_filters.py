@@ -304,4 +304,8 @@ def open_smart_review(panel, _e=None) -> None:
         panel.db,
         panel.version,
         after_complete,
+        panel.mod_id,
+        panel.kind,
+        panel.source_filter.code,
+        panel.query,
     ).open()

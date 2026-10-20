@@ -106,14 +106,17 @@ jar 自帶的 `zh_tw`／`zh_cn` 與「語系合併」使用同一套判斷與函
 
 ### AI 智慧校對（本地候選）
 
-條目校對工具列的「智慧校對」以目前選定版本預覽有生效譯文、但尚未審核的條目；可設定模型、筆數上限（預設 1000）與批次大小（預設 40）。預覽只讀取資料庫、不呼叫 AI；開始後由背景作業分批送出既有 provider 的 structured JSON，模型只判斷既有譯文是 `no_change`、`suggest_revision` 或 `needs_context`。
+條目校對工具列的「智慧校對」沿用目前面板的版本、模組、類型、目前生效來源與搜尋條件，預設只選未審核且有生效譯文的條目；可設定模型、筆數上限（預設 1000）與批次大小（預設 40）。預覽與實跑使用同一組 scope，預覽只讀取資料庫、不呼叫 AI；開始後由背景作業分批送出既有 provider 的 structured JSON，模型只判斷既有譯文是 `no_change`、`suggest_revision` 或 `needs_context`。
 
-- 輸入只含英文原文、目前生效譯文與有限的同鍵已審核／同模組 reviewed glossary context；這是本地證據，**未做網路查證**，AI 仍可能誤判。
-- 每筆回應都驗證同批 ID 是否完整唯一、decision／issue type／evidence ID、信心值與格式 token；格式錯誤或請求失敗只留在候選狀態，不寫入翻譯。
-- 「保留原譯文」會把可套用候選標成 `rejected`；「套用這筆」要重新比對條目、effective、revision 與既有 manual 快照，通過後才以來源 6 寫入**未審核**人工譯文，舊來源保留。
-- 套用會記 `smart_review_apply` history，可用既有條目 history 的還原操作回復；不會自動變成「人工已審核」，也不會更新共用翻譯快取。
+- local context 只來自本機資料庫與 bundled official locale。`db:<entry_id>` 可追溯到實際資料列，`official:<key>` 可追溯到內建 locale；同 key 的 reviewed reference 必須同時符合 kind、模組、key 與英文原文，跨版本英文不同只能標為 context。Patchouli、指南與 Advancement 也會收到同模組的 reviewed lang 術語；衝突證據會明確標示為低信心／需人工決定。**未做網路查證**，AI 仍可能誤判。
+- 每筆回應都必須有具體 `reason`，不得放外部 URL；另驗證同批 ID 是否完整唯一、decision／issue type／evidence ID、信心值與格式 token。格式錯誤與 API 請求失敗分別保留為 `invalid` 與 `request_failed`，不寫入翻譯。
+- 候選列顯示版本、kind、來源、審核狀態、reason、evidence 與 canonical format diagnostics；`ready` 候選可編輯並儲存 `draft_zh_tw`。套用以草稿為準，會重新比對條目、effective、revision 與既有 manual 快照；若既有人工列已審核，會阻擋並要求回到人工編輯流程。
+- 候選每頁最多 50 筆，可上一筆／下一筆／跳過；視窗可取消後續批次。run 與 candidate 狀態會持久化為 `completed`、`partial`、`cancelled`、`failed`，可輸入 `run_id` 重新載入歷史批次，晚到結果不會污染新 scope。
+- 「保留原譯文」會把可套用候選標成 `rejected`；成功套用才以來源 6 寫入**未審核**人工譯文，舊來源保留，並記 `smart_review_apply` history，可用既有條目 history 的還原操作回復；不會自動變成「人工已審核」，也不會更新共用翻譯快取。
 
-若資料庫是舊版 schema，第一次可寫開啟會在 v6→v7 migration 前建立 `*.pre-schema-v7-<時間戳>.bak`，只新增校對表與必要索引；唯讀開啟不執行升級。
+術語評估要區分三件事：格式／JSON 驗證、唯一 reviewed reference 完全一致率、以及人工標註的專有名詞語意準確率。`tools/evaluate_smart_review_terminology.py` 的 reference 數字只要求相同 kind／模組／key／英文原文，不能當成人工語意準確率；要報告 correction、false revision、abstention 與 coverage，需另外提供 `--labels` 的 `expected_terms[{source,accepted}]` 標註檔。
+
+若資料庫是 v7，第一次可寫開啟會在 v7→v8 migration 前建立 `*.pre-schema-v8-<時間戳>.bak`，新增 run scope 與可編輯草稿欄位；唯讀開啟不執行升級，但仍可讀取 v7 的舊候選。
 
 ### 學名候選掃描
 

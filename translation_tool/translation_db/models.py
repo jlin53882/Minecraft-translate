@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import dataclass, field
+from typing import Any
 
 
 @dataclass(frozen=True)
@@ -416,7 +417,7 @@ class SmartReviewSnapshot:
     effective_source: int | None
     review_status: str | None
     effective_revision: int | None
-    context: tuple[dict[str, str], ...] = ()
+    context: tuple[dict[str, Any], ...] = ()
     manual_zh_tw: str | None = None
     manual_checker: str | None = None
     manual_review_status: str | None = None
@@ -439,7 +440,7 @@ class SmartReviewCandidate:
     effective_source: int | None
     review_status: str | None
     effective_revision: int | None
-    context: tuple[dict[str, str], ...]
+    context: tuple[dict[str, Any], ...]
     manual_zh_tw: str | None = None
     manual_checker: str | None = None
     manual_review_status: str | None = None
@@ -449,6 +450,8 @@ class SmartReviewCandidate:
     issue_types: tuple[str, ...] = ()
     evidence_ids: tuple[str, ...] = ()
     confidence: float | None = None
+    reason: str | None = None
+    draft_zh_tw: str | None = None
     validation_error: str | None = None
     status: str = "pending"
     applied_batch: str | None = None
@@ -471,6 +474,7 @@ class SmartReviewRunResult:
     suggestion_count: int
     needs_context_count: int
     metrics: dict[str, object] = field(default_factory=dict)
+    status: str = "completed"
 
 
 @dataclass

@@ -95,7 +95,7 @@ flowchart TD
 
 #### AI 智慧校對（本地候選）
 
-條目校對工具列的「智慧校對」開啟 `SmartReviewDialog`。它只使用目前選定版本中有生效譯文且仍未審核的條目，預覽階段唯讀查詢；執行時以每批最多 100 筆呼叫既有 provider，模型輸出先經嚴格 JSON、證據 ID、決策值與 `translation_issues` 驗證，再寫入 `smart_review_run`／`smart_review_candidate`。候選含同鍵已審核資料與受限的 reviewed glossary context，明確標示為本地證據、未做網路查證。
+條目校對工具列的「智慧校對」開啟 `SmartReviewDialog`。它沿用 EntriesPanel 的版本、模組、kind、目前生效來源、未審核狀態與搜尋條件，預覽和實跑共用相同 scope；預覽階段唯讀查詢，執行時以每批最多 100 筆呼叫既有 provider。模型輸出先經嚴格 JSON、具體 `reason`、證據 ID、決策值與 `translation_issues` 驗證，再寫入 `smart_review_run`／`smart_review_candidate`。候選含可追溯的 `db:<entry_id>`／`official:<key>` local context；同 key reference 另外要求英文原文相同，Patchouli／Guide／Advancement 會取得同模組 reviewed lang 術語，衝突證據會降為需人工判斷。
 
 ```mermaid
 flowchart TD
@@ -103,16 +103,18 @@ flowchart TD
     B --> C[預覽：唯讀、限定版本與上限]
     C --> D[背景分批呼叫本地 AI]
     D --> E{嚴格驗證回應}
-    E -- 通過 --> F[保存 no_change／needs_context／ready 候選]
-    E -- 失敗 --> G[保存 invalid 或 request error]
-    F --> H{人工決定}
-    H -- 保留原譯文 --> I[rejected，不改翻譯]
-    H -- 套用 --> J[CAS 比對完整快照與 manual row]
-    J -- 成功 --> K[SRC_MANUAL 未審核＋history]
-    J -- 變動 --> L[stale，拒絕覆蓋]
+    E -- 通過 --> F[保存 reason／evidence／no_change／needs_context／ready]
+    E -- 回應格式錯誤 --> G[保存 invalid]
+    E -- API 失敗 --> H[保存 request_failed]
+    F --> I{人工編修草稿}
+    I -- 跳過 --> J[rejected，不改翻譯]
+    I -- 儲存草稿 --> K[draft_zh_tw，不改翻譯]
+    I -- 套用 --> L[CAS 比對完整快照與 manual row]
+    L -- 成功 --> M[SRC_MANUAL 未審核＋history]
+    L -- 變動／已審核人工列 --> N[stale，拒絕覆蓋]
 ```
 
-「套用」只新增或更新來源 6 的未審核人工譯文，原 AI／其他來源列保留；不會自動標記人工已審核。套用前會再次驗證條目身份、effective 值、revision、既有 manual 快照與格式，成功後可從該筆 `smart_review_apply` history 使用既有還原流程回復。關閉視窗不會取消已啟動的背景作業；背景結果帶 generation，過期結果不更新目前畫面。
+「套用」只新增或更新來源 6 的未審核人工譯文，原 AI／其他來源列保留；不會自動標記人工已審核。套用前會再次驗證條目身份、effective 值、revision、既有 manual 快照與格式，成功後可從該筆 `smart_review_apply` history 使用既有還原流程回復。候選以每頁 50 筆顯示，run 可用 `run_id` 重新載入；停止按鈕只停止後續批次，已送出的 API 回應返回後由核心寫入 `partial` 或 `cancelled`。格式診斷只協助人工檢查，術語準確率需使用人工標註 evaluator，不能用格式通過率代替。
 
 #### 學名候選掃描
 

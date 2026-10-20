@@ -26,9 +26,13 @@
 
 ## AI 智慧校對候選
 
-`entry_filters.py` 的 `智慧校對` 按鈕只建立 `SmartReviewDialog`，不把模型流程塞入 `EntriesPanel`。服務層 `moddb_smart_review_service.py` 重新以資料庫 path、priority 與 config 開啟連線；`smart_review.py` 負責 bounded candidate snapshot、local context、provider structured output、結果持久化與 CAS apply。預覽使用唯讀連線，執行與套用透過 `launch_page_operation` 在背景進行，UI callback 只在 generation 仍相同時更新控制項。
+`entry_filters.py` 的 `智慧校對` 按鈕只建立 `SmartReviewDialog`，並把 EntriesPanel 的版本、模組、kind、effective source、未審核狀態與搜尋條件帶入；不把模型流程塞入 `EntriesPanel`。服務層 `moddb_smart_review_service.py` 重新以資料庫 path、priority 與 config 開啟連線；`smart_review.py` 負責 bounded candidate snapshot、typed local context、provider structured output、結果持久化與 CAS apply。預覽和實跑使用同一組 scope，預覽使用唯讀連線，執行與套用透過 `launch_page_operation` 在背景進行，UI callback 只在 generation 仍相同時更新控制項。
 
-候選與原有 `translation`／`effective` 解耦，`smart_review_candidate` 保存 effective 及 manual 快照。`apply_smart_review_candidate` 在單一交易內重新比對條目身份、原文、effective source/value/review/revision、manual row 與格式；任何差異都標成 `stale` 或 `invalid_format`，不覆蓋目前資料。套用只寫 `SRC_MANUAL` 的未審核列和 `smart_review_apply` history；`revert()` 與 `entry_activity` 已納入此 action。`保留原譯文` 只把候選標成 `rejected`，不觸碰翻譯與快取。
+local context 的 evidence id 必須可回到資料庫 row 或 bundled official locale；同 key reviewed reference 要比對相同 kind／mod／key／英文原文，same-module reviewed lang glossary 可供 Patchouli、Guide、Advancement 使用，衝突資料帶限制與低信心標記。`smart_review_response_schema` 要求每筆具體 `reason` 且禁止外部 URL；`smart_review_candidate` 儲存 response reason、evidence、draft 與 snapshot。
+
+候選與原有 `translation`／`effective` 解耦，`smart_review_candidate` 保存 effective 及 manual 快照。`apply_smart_review_candidate` 與 `save_smart_review_draft` 在交易內重新比對條目身份、原文、effective source/value/review/revision、manual row 與格式；任何差異都標成 `stale` 或拒絕草稿，不覆蓋目前資料；既有已審核 manual row 不能被智慧校對重設為未審核。套用只寫 `SRC_MANUAL` 的未審核列和 `smart_review_apply` history；`revert()` 與 `entry_activity` 已納入此 action。`保留原譯文` 只把候選標成 `rejected`，不觸碰翻譯與快取。
+
+run 狀態會持久化為 `completed`、`partial`、`cancelled` 或 `failed`；請求失敗候選為 `request_failed`，尚未送出的取消候選為 `cancelled`，回應驗證失敗才是 `invalid`。UI 以 `Pager` 每頁最多 50 筆，顯示 reason／evidence／canonical format diagnostics，並允許人工編修、儲存 draft、套用、拒絕、上一筆／下一筆與輸入 run id 重新開啟。
 
 候選列的狀態文字與按鈕必須分開放：帶 `expand` 的文字放進 `wrap=True` 的 `Row` 時 Flutter 無法排版，畫面會出現灰色圖塊。
 

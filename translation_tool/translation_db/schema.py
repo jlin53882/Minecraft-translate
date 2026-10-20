@@ -20,7 +20,7 @@ import time
 from pathlib import Path
 
 KEEP_REVIEW_FLAG = "keep_review_on_text_change"  # 交易內暫時存在的 meta 旗標
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 
 KIND_LANG = "lang"
 KIND_PATCHOULI = "patchouli"
@@ -252,6 +252,8 @@ def init_schema(conn: sqlite3.Connection) -> None:
             _backup_before_independent_review_migration(conn)
         elif next_version == 7:
             _backup_before_smart_review_migration(conn)
+        elif next_version == 8:
+            _backup_before_smart_review_draft_migration(conn)
         conn.execute("BEGIN IMMEDIATE")
         try:
             if next_version == 2:
@@ -266,6 +268,8 @@ def init_schema(conn: sqlite3.Connection) -> None:
                 _migrate_independent_review_v6(conn)
             elif next_version == 7:
                 _migrate_smart_review_v7(conn)
+            elif next_version == 8:
+                _migrate_smart_review_v8(conn)
             conn.execute(
                 "UPDATE meta SET value=? WHERE key='schema_version'",
                 (str(next_version),),
@@ -621,6 +625,7 @@ def _install_smart_review_objects(conn: sqlite3.Connection) -> None:
             scope_version TEXT,
             requested_limit INTEGER NOT NULL,
             batch_size INTEGER NOT NULL,
+            scope_json TEXT NOT NULL DEFAULT '{}',
             started_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
             finished_at TEXT,
             status TEXT NOT NULL DEFAULT 'running',
@@ -658,6 +663,7 @@ def _install_smart_review_objects(conn: sqlite3.Connection) -> None:
             evidence_ids_json TEXT NOT NULL DEFAULT '[]',
             confidence REAL,
             response_json TEXT,
+            draft_zh_tw TEXT,
             validation_error TEXT,
             status TEXT NOT NULL DEFAULT 'pending',
             applied_batch TEXT,
@@ -674,6 +680,48 @@ def _install_smart_review_objects(conn: sqlite3.Connection) -> None:
             ON entry (kind, mod_id, key, mc_version, id);
         """
     )
+
+
+def _backup_before_smart_review_draft_migration(
+    conn: sqlite3.Connection,
+) -> Path | None:
+    """Keep a consistent sidecar before adding editable smart-review state."""
+    main = next(
+        (row[2] for row in conn.execute("PRAGMA database_list") if row[1] == "main"),
+        "",
+    )
+    if not main:
+        return None
+    source_path = Path(main)
+    backup_path = source_path.with_name(
+        f"{source_path.name}.pre-schema-v8-{time.time_ns()}.bak"
+    )
+    target = sqlite3.connect(backup_path)
+    try:
+        conn.backup(target)
+    except BaseException:
+        target.close()
+        backup_path.unlink(missing_ok=True)
+        raise
+    target.close()
+    return backup_path
+
+
+def _migrate_smart_review_v8(conn: sqlite3.Connection) -> None:
+    """Add scope and human-editable draft persistence to v7 candidates."""
+    run_columns = {
+        row[1] for row in conn.execute("PRAGMA table_info(smart_review_run)")
+    }
+    if "scope_json" not in run_columns:
+        conn.execute(
+            "ALTER TABLE smart_review_run ADD COLUMN scope_json TEXT NOT NULL DEFAULT '{}'"
+        )
+    candidate_columns = {
+        row[1]
+        for row in conn.execute("PRAGMA table_info(smart_review_candidate)")
+    }
+    if "draft_zh_tw" not in candidate_columns:
+        conn.execute("ALTER TABLE smart_review_candidate ADD COLUMN draft_zh_tw TEXT")
 
 
 def _install_schema_v3_objects(conn: sqlite3.Connection) -> None:
