@@ -148,6 +148,7 @@ class SameSourceAIRepairPreview:
 @dataclass
 class SameSourceAIRepairReport:
     """同一來源 AI 修復執行的統計報告，保存候選、成功、失敗與批次計時結果。"""
+
     candidates: int = 0
     translated: int = 0
     updated: int = 0
@@ -1697,7 +1698,9 @@ def _translate_snapshot(
         event_sink=lambda event: _log(
             session,
             format_batch_event(event),
-            "warning" if event.get("kind") in {"attempt_failure", "retry_wait"} else "info",
+            "warning"
+            if event.get("kind") in {"attempt_failure", "retry_wait"}
+            else "info",
         ),
         cancel_check=cancelled,
     )
@@ -1708,9 +1711,7 @@ def _translate_snapshot(
             _raise_if_repair_cancelled(items, report, cancelled)
             planning_started = monotonic()
             batch, cache_type = _same_batch_prefix(items, lm_cfg)
-            executor.add_timing(
-                "planning_ms", (monotonic() - planning_started) * 1000
-            )
+            executor.add_timing("planning_ms", (monotonic() - planning_started) * 1000)
             remainder, stop_after_batch = _run_repair_batch(
                 db,
                 options,
@@ -1917,7 +1918,9 @@ def _publish_repair_batch_completion(
         if cancelled() or is_cancelled():
             raise TaskCancelled()
 
-    live = tracker.live(processed=report.processed_candidates, check=check_planning_cancelled)
+    live = tracker.live(
+        processed=report.processed_candidates, check=check_planning_cancelled
+    )
     live.update(
         {
             "current_profile": cache_profile_label(cache_type),

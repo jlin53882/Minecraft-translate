@@ -196,9 +196,7 @@ class TestCallGeminiRequests:
         mock_config.return_value = {"lm_translator": {"rate_limit": {"timeout": 5}}}
         response = Mock(ok=True, status_code=200)
         response.json.return_value = {
-            "candidates": [
-                {"content": {"parts": [{"text": '{"items": []}'}]}}
-            ]
+            "candidates": [{"content": {"parts": [{"text": '{"items": []}'}]}}]
         }
         mock_post.side_effect = [
             requests.ConnectionError("AIza-secret prompt text"),

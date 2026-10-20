@@ -283,9 +283,7 @@ def _rules_signature(rules: Sequence[Mapping[str, str]]):
     return (
         "content",
         tuple(
-            (rule.get("from"), rule.get("to"))
-            if isinstance(rule, Mapping)
-            else None
+            (rule.get("from"), rule.get("to")) if isinstance(rule, Mapping) else None
             for rule in rules
         ),
     )

@@ -641,7 +641,9 @@ def test_reviewer_blocks_apply_when_draft_has_format_issue(reviewer, monkeypatch
     assert reviewer.apply_btn.disabled is False
 
 
-def test_smart_review_completion_refreshes_entry_list_before_parent_changed(monkeypatch):
+def test_smart_review_completion_refreshes_entry_list_before_parent_changed(
+    monkeypatch,
+):
     """驗證智慧校對完成後先更新條目清單，再通知外層狀態已變更。"""
     events = []
     panel = SimpleNamespace(

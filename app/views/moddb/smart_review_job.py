@@ -335,7 +335,12 @@ class SmartReviewJob:
             self._log_batch_start(session, event)
         elif kind in {"attempt_start", "attempt_success", "attempt_failure"}:
             self._log_attempt_event(session, event)
-        elif kind in {"retry_wait", "retry_resume", "rate_limit_wait", "rate_limit_resume"}:
+        elif kind in {
+            "retry_wait",
+            "retry_resume",
+            "rate_limit_wait",
+            "rate_limit_resume",
+        }:
             self._log_retry_event(session, event)
         elif kind.startswith("network_"):
             self._log_network_event(session, event)
@@ -425,8 +430,7 @@ class SmartReviewJob:
             )
         elif kind == "retry_resume":
             session.add_log(
-                f"{prefix}[第 {attempt} 次嘗試] 重試等待結束，"
-                "繼續下一次 API 請求。",
+                f"{prefix}[第 {attempt} 次嘗試] 重試等待結束，繼續下一次 API 請求。",
                 "info",
             )
         elif kind == "rate_limit_wait":
@@ -437,8 +441,7 @@ class SmartReviewJob:
             )
         else:
             session.add_log(
-                f"{prefix}[第 {attempt} 次嘗試] 配額時鐘等待結束，"
-                "準備送出 API 請求。",
+                f"{prefix}[第 {attempt} 次嘗試] 配額時鐘等待結束，準備送出 API 請求。",
                 "info",
             )
 
@@ -497,9 +500,12 @@ class SmartReviewJob:
         """記錄批次耗時、結果分類與 validation error 分布。"""
         prefix = self._event_prefix(event)
         errors = event.get("validation_errors") or {}
-        error_text = "、".join(
-            f"{message} × {count:,}" for message, count in list(errors.items())[:5]
-        ) or "無"
+        error_text = (
+            "、".join(
+                f"{message} × {count:,}" for message, count in list(errors.items())[:5]
+            )
+            or "無"
+        )
         session.add_log(
             f"{prefix} 完成：序號 {event.get('ordinal_start', '?')}～"
             f"{event.get('ordinal_end', '?')}，實際 {event.get('actual_count', '?')} 筆；"

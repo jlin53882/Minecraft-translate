@@ -440,7 +440,9 @@ class SmartReviewRunPanel:
         limit = self._read_int(self.limit_field, minimum=0)
         batch = self._read_int(self.batch_field)
         if limit is None or batch is None:
-            self.estimate_text.value = "上限必須是 0 或正整數；每批必須是大於 0 的整數。"
+            self.estimate_text.value = (
+                "上限必須是 0 或正整數；每批必須是大於 0 的整數。"
+            )
             self.estimate_text.color = C.RED
         elif self._total is None:
             self.estimate_text.value = "正在等待候選筆數…"

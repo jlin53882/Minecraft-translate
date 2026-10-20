@@ -770,14 +770,18 @@ def _translation_event_sink(session, event: dict[str, Any]) -> None:
     _log(session, format_batch_event(event), level)
 
 
-def _translation_event_kwargs(session, lm_cfg: dict[str, Any], batch_total: int) -> dict[str, Any]:
+def _translation_event_kwargs(
+    session, lm_cfg: dict[str, Any], batch_total: int
+) -> dict[str, Any]:
     """建立機翻共用批次事件所需的操作、模型、任務識別碼與安全事件 sink。"""
     return {
         "on_event": lambda event: _translation_event_sink(session, event),
         "task_id": str(getattr(session, "task_id", "") or ""),
         "operation": "translate",
         "provider": str(get_translation_provider() or ""),
-        "model": str(lm_cfg.get("model") or lm_cfg.get("default_model") or "model-pool"),
+        "model": str(
+            lm_cfg.get("model") or lm_cfg.get("default_model") or "model-pool"
+        ),
         "batch_total": batch_total,
     }
 

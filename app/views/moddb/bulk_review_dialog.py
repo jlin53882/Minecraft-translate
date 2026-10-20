@@ -194,9 +194,7 @@ class BulkReviewDialog:
             *((str(code), source_label(code, catalog)) for code in codes),
         ]
         selected = self.source_dd.value
-        kit.set_dropdown_options(
-            self.source_dd, options
-        )
+        kit.set_dropdown_options(self.source_dd, options)
         keys = {key for key, _label in options}
         if selected not in keys:
             self.source_dd.value = ALL_SOURCES

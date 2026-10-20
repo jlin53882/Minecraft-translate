@@ -28,6 +28,8 @@ def _http_error(status):
 @pytest.fixture
 def configure_batch(monkeypatch):
     def configure(*, retry=True):
+        # 共用模型時鐘是跨任務的；每個測試先清空，避免前一測試的等待狀態污染本測試。
+        get_model_quota_registry().clear()
         config = {
             "lm_translator": {
                 "models": {"same-source-test-model": {"enabled": True}},

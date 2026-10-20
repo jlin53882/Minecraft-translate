@@ -749,7 +749,7 @@ class SmartReviewMixin:
                     confidence=(
                         "high"
                         if same_version and same_text and not version_conflict
-                          else "medium"
+                        else "medium"
                     ),
                     limitations=limitations,
                 )
@@ -1152,7 +1152,8 @@ class SmartReviewMixin:
                 invalid_count=invalid_count,
                 request_error_count=request_error_count,
                 metrics=metrics,
-                status=status or ("completed" if not request_error_count else "partial"),
+                status=status
+                or ("completed" if not request_error_count else "partial"),
             )
             return
         with self._tx() as conn:
@@ -1402,7 +1403,8 @@ class SmartReviewMixin:
                 )
                 return "manual_reviewed"
             if translation_issues(
-                str(candidate.get("en_us") or ""), draft,
+                str(candidate.get("en_us") or ""),
+                draft,
                 kind=str(candidate.get("kind") or "lang"),
                 repair=False,
             ):
@@ -1665,7 +1667,9 @@ class SmartReviewMixin:
             history.update_candidate(
                 run_id,
                 ordinal,
-                draft_zh_tw=proposed if draft_zh_tw is not None else candidate.get("draft_zh_tw"),
+                draft_zh_tw=proposed
+                if draft_zh_tw is not None
+                else candidate.get("draft_zh_tw"),
                 status="applied",
                 applied_batch=batch,
                 applied_at=history.timestamp(),
@@ -2245,6 +2249,7 @@ def run_smart_review(
         metrics["common_provider_attempts"] = common["provider_attempts"]
         metrics["common_retry_count"] = common["retry_count"]
         metrics["common_transient_retry_count"] = common["transient_retry_count"]
+
     # 延遲取得主翻譯流程的共用 policy，避免 translation_db 初始化時形成循環 import。
     from translation_tool.core.lm_translator_main import (
         _batch_interval_seconds,
@@ -2305,7 +2310,8 @@ def run_smart_review(
         if current_batch_handle is not None:
             if kind == "attempt_start":
                 current_batch_handle.attempt = int(
-                    fields.get("smart_review_attempt") or current_batch_handle.attempt + 1
+                    fields.get("smart_review_attempt")
+                    or current_batch_handle.attempt + 1
                 )
                 executor.metrics.request_attempts += 1
             elif kind == "attempt_success":
@@ -2321,13 +2327,9 @@ def run_smart_review(
             elif kind == "network_retry_wait":
                 executor.metrics.network_retry_count += 1
                 try:
-                    wait_ms = max(
-                        0, float(fields.get("wait_seconds") or 0) * 1000
-                    )
+                    wait_ms = max(0, float(fields.get("wait_seconds") or 0) * 1000)
                     executor.metrics.add_ms("network_retry_wait_ms", wait_ms)
-                    fields.setdefault(
-                        "wait_ms", round(wait_ms)
-                    )
+                    fields.setdefault("wait_ms", round(wait_ms))
                 except (TypeError, ValueError):
                     pass
             elif kind == "retry_wait":
@@ -2401,7 +2403,8 @@ def run_smart_review(
                     0, invalid - counters_before.get("invalid", invalid)
                 ),
                 "needs_context_count": max(
-                    0, needs_context - counters_before.get("needs_context", needs_context)
+                    0,
+                    needs_context - counters_before.get("needs_context", needs_context),
                 ),
                 "no_change_count": max(
                     0, no_change - counters_before.get("no_change", no_change)
@@ -2417,9 +2420,7 @@ def run_smart_review(
         )
         finalized["status"] = status
         metrics["batch_count"] = int(metrics["batch_count"]) + 1
-        metrics["batch_seconds"] = round(
-            float(metrics["batch_seconds"]) + elapsed, 3
-        )
+        metrics["batch_seconds"] = round(float(metrics["batch_seconds"]) + elapsed, 3)
         return finalized
 
     def report_batch_complete(timing: dict[str, Any]) -> None:
@@ -2435,9 +2436,7 @@ def run_smart_review(
             "retry_count": timing.get("retry_count", 0),
             "rate_limit_wait_seconds": timing.get("rate_limit_wait_seconds", 0.0),
             "retry_wait_seconds": timing.get("retry_wait_seconds", 0.0),
-            "network_retry_wait_seconds": timing.get(
-                "network_retry_wait_seconds", 0.0
-            ),
+            "network_retry_wait_seconds": timing.get("network_retry_wait_seconds", 0.0),
             "api_seconds": timing.get("api_seconds", 0.0),
             "parse_seconds": timing.get("parse_seconds", 0.0),
             "result_write_seconds": timing.get("result_write_seconds", 0.0),
@@ -2560,7 +2559,9 @@ def run_smart_review(
                 "batch_total": max(planned_batch_count, batch_number),
                 "ordinal_start": int(snapshots[position].ordinal),
                 "ordinal_end": int(
-                    snapshots[min(len(snapshots) - 1, position + current_size - 1)].ordinal
+                    snapshots[
+                        min(len(snapshots) - 1, position + current_size - 1)
+                    ].ordinal
                 ),
                 "actual_count": current_size,
                 "preparation_seconds": 0.0,
@@ -2724,9 +2725,7 @@ def run_smart_review(
                                 3,
                             )
                         fields = {
-                            key: value
-                            for key, value in event.items()
-                            if key != "kind"
+                            key: value for key, value in event.items() if key != "kind"
                         }
                         emit_event(
                             kind,
@@ -2741,7 +2740,9 @@ def run_smart_review(
                         *,
                         _batch_number: int = batch_number,
                         _smart_review_attempt: int = smart_review_attempt,
-                        _record_retry_event: Callable[[dict[str, Any]], None] = record_retry_event,
+                        _record_retry_event: Callable[
+                            [dict[str, Any]], None
+                        ] = record_retry_event,
                     ) -> None:
                         """接收 API client 的 network attempt 診斷。"""
                         kind = str(event.get("kind") or "network_event")
@@ -2753,9 +2754,7 @@ def run_smart_review(
                             _record_retry_event(event)
                             return
                         fields = {
-                            key: value
-                            for key, value in event.items()
-                            if key != "kind"
+                            key: value for key, value in event.items() if key != "kind"
                         }
                         emit_event(
                             kind,
@@ -2774,9 +2773,7 @@ def run_smart_review(
                         """把配額時鐘等待轉成 UI 可顯示的事件。"""
                         kind = str(event.get("kind") or "rate_limit_wait")
                         fields = {
-                            key: value
-                            for key, value in event.items()
-                            if key != "kind"
+                            key: value for key, value in event.items() if key != "kind"
                         }
                         emit_event(
                             kind,
@@ -2945,9 +2942,7 @@ def run_smart_review(
                         error_json: dict[str, Any] = {}
                         try:
                             decoded = (
-                                exc.response.json()
-                                if exc.response is not None
-                                else {}
+                                exc.response.json() if exc.response is not None else {}
                             )
                             if isinstance(decoded, dict):
                                 error_json = decoded
@@ -3111,9 +3106,7 @@ def run_smart_review(
                             expected_count=len(batch),
                             actual_count=_smart_review_response_item_count(raw),
                             prompt_tokens=(attempt_meta or {}).get("prompt_tokens"),
-                            output_tokens=(attempt_meta or {}).get(
-                                "output_tokens"
-                            )
+                            output_tokens=(attempt_meta or {}).get("output_tokens")
                             or (attempt_meta or {}).get("candidates_tokens"),
                             network_attempts=int(metrics["network_attempts"]),
                             network_retry_count=int(metrics["network_retry_count"]),

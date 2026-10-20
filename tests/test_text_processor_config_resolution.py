@@ -53,13 +53,14 @@ def test_save_replace_rules_invalidates_cached_snapshot(tmp_path, monkeypatch):
     events = []
     unsubscribe = text_processor.replace_rules_store.subscribe(events.append)
     try:
-        assert text_processor.load_replace_rules("replace_rules.json")[0]["to"] == "哈囉"
+        assert (
+            text_processor.load_replace_rules("replace_rules.json")[0]["to"] == "哈囉"
+        )
         text_processor.save_replace_rules(
             "replace_rules.json", [{"from": "hello", "to": "你好"}]
         )
         assert (
-            text_processor.load_replace_rules("replace_rules.json")[0]["to"]
-            == "你好"
+            text_processor.load_replace_rules("replace_rules.json")[0]["to"] == "你好"
         )
         assert events == [rules_path.resolve()]
     finally:

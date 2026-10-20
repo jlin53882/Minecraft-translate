@@ -419,6 +419,7 @@ def test_dashboard_mount_reload_does_not_create_a_task_lifecycle_loop():
     repeated_start = threading.Event()
     first_finish = threading.Event()
     registry_ref = []
+
     def load_cache():
         nonlocal load_count
         load_count += 1

@@ -105,9 +105,7 @@ def load_replace_rules(*, force_reload: bool = False, source: str = "config_serv
     回傳：
         dict: 規則資料
     """
-    return load_rules_core(
-        REPLACE_RULES_PATH, force_reload=force_reload, source=source
-    )
+    return load_rules_core(REPLACE_RULES_PATH, force_reload=force_reload, source=source)
 
 
 def get_replace_rules_count(*, source: str = "config_service") -> int:

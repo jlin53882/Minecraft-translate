@@ -194,6 +194,7 @@ def test_call_retries_once_after_unauthorized_and_keeps_reasoning(monkeypatch):
 
     class _SuccessResponse:
         """測試用的成功 Responses API 回應物件。"""
+
         status_code = 200
         ok = True
 
@@ -244,6 +245,7 @@ def test_call_fast_mode_uses_codex_priority_service_tier(monkeypatch):
 
     class _SuccessResponse:
         """提供測試所需的成功 HTTP response 欄位。"""
+
         status_code = 200
         ok = True
 

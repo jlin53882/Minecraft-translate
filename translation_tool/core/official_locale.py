@@ -115,7 +115,9 @@ class OfficialTerminologyMatch:
                 self.target_text.strip(),
             )
         )
-        return f"official-term:{hashlib.sha256(identity.encode('utf-8')).hexdigest()[:20]}"
+        return (
+            f"official-term:{hashlib.sha256(identity.encode('utf-8')).hexdigest()[:20]}"
+        )
 
 
 @dataclass(frozen=True)
@@ -162,9 +164,7 @@ class OfficialLocaleIndex:
                 # substring/compound term is deliberately shown without a
                 # misleading full-entry key.
                 prompt_key = (
-                    match.key
-                    if match.match_type in {"exact_key", "exact_text"}
-                    else ""
+                    match.key if match.match_type in {"exact_key", "exact_text"} else ""
                 )
                 terms[
                     (
@@ -177,7 +177,10 @@ class OfficialLocaleIndex:
         ordered = sorted(
             (
                 (key, display_source, target)
-                for (key, _canonical_source, _target), (display_source, target) in terms.items()
+                for (key, _canonical_source, _target), (
+                    display_source,
+                    target,
+                ) in terms.items()
             ),
             key=lambda entry: (-len(entry[1]), entry[0], entry[1]),
         )
@@ -192,7 +195,11 @@ class OfficialLocaleIndex:
         結果只包含目前來源真正命中的少量術語，不會把整份官方語系送給模型。
         """
         source_text = item.get("source_text") or item.get("text")
-        if not isinstance(source_text, str) or not source_text.strip() or not self.available:
+        if (
+            not isinstance(source_text, str)
+            or not source_text.strip()
+            or not self.available
+        ):
             return []
 
         normalized_source = normalize_terminology_text(source_text)
@@ -210,7 +217,11 @@ class OfficialLocaleIndex:
             """加入通過詞界、目標非空與來源去重檢查的官方術語候選。"""
             source = normalize_terminology_text(source).strip()
             target = str(target).strip()
-            if not source or not target or term_canonical_key(source) == term_canonical_key(target):
+            if (
+                not source
+                or not target
+                or term_canonical_key(source) == term_canonical_key(target)
+            ):
                 return
             if not _terminology_term_allowed(source_text, source, self, key=key):
                 return
@@ -234,13 +245,12 @@ class OfficialLocaleIndex:
             )
 
         record = (
-            self.records_by_key.get(source_key)
-            if isinstance(source_key, str)
-            else None
+            self.records_by_key.get(source_key) if isinstance(source_key, str) else None
         )
         if (
             record is not None
-            and term_canonical_key(record.en_us) == term_canonical_key(normalized_source)
+            and term_canonical_key(record.en_us)
+            == term_canonical_key(normalized_source)
             and record.zh_tw.strip()
         ):
             add(
@@ -371,9 +381,7 @@ class OfficialLocaleIndex:
             },
         )
 
-    def _term_definition(
-        self, term: str
-    ) -> tuple[str, str, str | None, str] | None:
+    def _term_definition(self, term: str) -> tuple[str, str, str | None, str] | None:
         """將一個匹配到的官方術語解析成顯示來源、目標、key 與術語來源。"""
         canonical = term_canonical_key(term)
         target = self._unique_target_for_source(term)
@@ -902,9 +910,9 @@ def official_terminology_matches_for_item(
     item: dict[str, Any], *, index: OfficialLocaleIndex | None = None
 ) -> list[OfficialTerminologyMatch]:
     """取得原本機翻與 Smart Review 共用的官方命中結果。"""
-    return (index or load_official_locale_index()).official_terminology_matches_for_item(
-        item
-    )
+    return (
+        index or load_official_locale_index()
+    ).official_terminology_matches_for_item(item)
 
 
 def terminology_issues(

@@ -54,9 +54,7 @@ def _call_translate_batch(
     except (TypeError, ValueError):
         accepts_callback = False
     if accepts_callback:
-        return translate_batch_smart(
-            batch, total, event_callback=event_callback
-        )
+        return translate_batch_smart(batch, total, event_callback=event_callback)
     return translate_batch_smart(batch, total)
 
 
@@ -286,9 +284,7 @@ def translate_items_with_cache_loop(
             fixed_input_tokens_for_batch=fixed_input_tokens_for_batch,
             select_size=select_batch_size,
         )
-        executor.add_timing(
-            "planning_ms", (time.monotonic() - planning_started) * 1000
-        )
+        executor.add_timing("planning_ms", (time.monotonic() - planning_started) * 1000)
         batch_index += 1
         batch_handle = executor.begin_batch(
             batch_index=batch_index,

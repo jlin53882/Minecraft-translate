@@ -1397,7 +1397,10 @@ def _handle_service_unavailable_error(
             f"保留 batch={runtime.batch_size}"
         )
         _sleep_with_runtime_event(
-            runtime, wait_sec, reason="provider_unavailable", callback=retry_event_callback
+            runtime,
+            wait_sec,
+            reason="provider_unavailable",
+            callback=retry_event_callback,
         )
         return action
 
@@ -2480,8 +2483,10 @@ def _attempt_batch(
         cap_source = "global"
         set_active_model(model_name)  # UI 狀態列顯示實際使用中的模型
         try:
-            raw_text, api_meta, api_key, output_cap, cap_source = _perform_provider_request(
-                runtime, round_data, model_name, quota, owner, lease_sec
+            raw_text, api_meta, api_key, output_cap, cap_source = (
+                _perform_provider_request(
+                    runtime, round_data, model_name, quota, owner, lease_sec
+                )
             )
             if not raw_text:
                 _abandon_model(runtime, quota, model_index, model_indices, pinned_round)
@@ -2634,9 +2639,7 @@ def _run_batch_state_machine(
     """協調批次準備、請求、錯誤處理與前綴前進。"""
     if dry_run:
         return [], "DRY_RUN"
-    runtime = _build_batch_runtime(
-        batch_items, total, event_callback=event_callback
-    )
+    runtime = _build_batch_runtime(batch_items, total, event_callback=event_callback)
     if runtime is None:
         return [], "FAILED"
     try:

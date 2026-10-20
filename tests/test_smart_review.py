@@ -231,9 +231,7 @@ def test_local_context_includes_shared_official_compound_terms(db):
         fill_other_versions=False,
     )
     entry = next(
-        item
-        for item in db.list_entries("1.21.1")[0]
-        if item.key == "custom.obtain"
+        item for item in db.list_entries("1.21.1")[0] if item.key == "custom.obtain"
     )
 
     context = db._smart_review_context(
@@ -688,7 +686,9 @@ def test_run_persists_candidates_without_writing_translation(db, monkeypatch):
 
     history_files = list(history_directory_for_db(db.path).glob("*.json"))
     assert len(history_files) == 1
-    assert json.loads(history_files[0].read_text(encoding="utf-8"))["id"] == result.run_id
+    assert (
+        json.loads(history_files[0].read_text(encoding="utf-8"))["id"] == result.run_id
+    )
     assert db._q("SELECT COUNT(*) FROM smart_review_run")[0][0] == 0
     assert db._q("SELECT COUNT(*) FROM smart_review_candidate")[0][0] == 0
 
@@ -902,7 +902,15 @@ def test_smart_review_retry_events_classify_server_errors(db, monkeypatch, statu
     kinds = [event["kind"] for event in event_rows]
     assert result.status == "completed"
     assert calls == [1, 1]
-    assert {"batch_start", "attempt_start", "attempt_failure", "retry_wait", "retry_resume", "attempt_success", "batch_complete"} <= set(kinds)
+    assert {
+        "batch_start",
+        "attempt_start",
+        "attempt_failure",
+        "retry_wait",
+        "retry_resume",
+        "attempt_success",
+        "batch_complete",
+    } <= set(kinds)
     failure = next(event for event in event_rows if event["kind"] == "attempt_failure")
     assert failure["http_status"] == status
     assert failure["provider_overload"] is (status == 503)
@@ -911,7 +919,10 @@ def test_smart_review_retry_events_classify_server_errors(db, monkeypatch, statu
     assert result.metrics["retry_wait_seconds"] >= 45
     assert result.metrics["rate_limit_wait_seconds"] < 45
     assert result.metrics["overload_count"] == (1 if status == 503 else 0)
-    assert all(secret not in repr(event_rows) for secret in ("AIza-secret-key", "provider overload secret detail"))
+    assert all(
+        secret not in repr(event_rows)
+        for secret in ("AIza-secret-key", "provider overload secret detail")
+    )
 
 
 def test_smart_review_timeout_events_are_visible_and_safe(db, monkeypatch):
@@ -1650,6 +1661,7 @@ def test_smart_review_service_passes_nested_lm_config(monkeypatch, tmp_path):
 
     class FakeDB:
         """可記錄智慧校對呼叫參數的測試資料庫替身。"""
+
         def close(self):
             """關閉測試用資源。"""
             captured["closed"] = True

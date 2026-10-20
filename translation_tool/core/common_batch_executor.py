@@ -130,10 +130,15 @@ def classify_provider_error(
     quota_or_rate_limit = status == 429 or any(
         word in code for word in ("quota", "rate", "limit", "usage")
     )
-    overload = status == 503 or error_class in {
-        "service_unavailable",
-        "provider_overload",
-    } or any(word in code for word in ("overload", "high_demand", "too_many"))
+    overload = (
+        status == 503
+        or error_class
+        in {
+            "service_unavailable",
+            "provider_overload",
+        }
+        or any(word in code for word in ("overload", "high_demand", "too_many"))
+    )
     timeout = error_class in {"timeout", "provider_timeout", "deadline_exceeded"}
     connection = error_class == "connection_error"
     retry_after = getattr(error, "retry_after", None)
@@ -273,6 +278,7 @@ class BatchEvent:
 @dataclass
 class BatchHandle:
     """追蹤單一批次的嘗試、重試、事件與 monotonic 耗時。"""
+
     executor: CommonBatchExecutor
     batch_index: int
     batch_total: int
@@ -310,10 +316,14 @@ class BatchHandle:
         self.executor.metrics.request_attempts += 1
         return self.emit("attempt_start", max_attempts=max_attempts, **fields)
 
-    def attempt_success(self, *, elapsed_ms: float = 0, **fields: Any) -> dict[str, Any]:
+    def attempt_success(
+        self, *, elapsed_ms: float = 0, **fields: Any
+    ) -> dict[str, Any]:
         """記錄一次成功 API attempt 的耗時，並發送成功事件。"""
         self.executor.metrics.add_ms("api_ms", elapsed_ms)
-        return self.emit("attempt_success", elapsed_ms=round(float(elapsed_ms)), **fields)
+        return self.emit(
+            "attempt_success", elapsed_ms=round(float(elapsed_ms)), **fields
+        )
 
     def attempt_failure(
         self,
@@ -452,11 +462,15 @@ class BatchPolicy(Protocol):
         """把 provider 原始回應解析成策略可驗證的結果。"""
         ...
 
-    def result_validator(self, results: Any, batch: Sequence[Any], context: BatchHandle) -> Any:
+    def result_validator(
+        self, results: Any, batch: Sequence[Any], context: BatchHandle
+    ) -> Any:
         """依業務規則驗證解析後的批次結果。"""
         ...
 
-    def result_committer(self, results: Any, batch: Sequence[Any], context: BatchHandle) -> int:
+    def result_committer(
+        self, results: Any, batch: Sequence[Any], context: BatchHandle
+    ) -> int:
         """依業務規則提交已驗證結果，回傳提交筆數。"""
         ...
 
@@ -571,14 +585,23 @@ class CommonBatchExecutor:
         """依 BatchPolicy 執行完整的批次生命週期，但不介入候選、payload、驗證與寫入等業務規則。"""
         selection_started = time.monotonic_ns()
         selected = list(policy.candidate_selector(source))
-        self.add_timing("selection_ms", (time.monotonic_ns() - selection_started) / 1_000_000)
+        self.add_timing(
+            "selection_ms", (time.monotonic_ns() - selection_started) / 1_000_000
+        )
         size = max(1, int(batch_size))
         planning_started = time.monotonic_ns()
         planner = getattr(policy, "plan_batches", None)
-        planned = list(planner(selected, size)) if callable(planner) else [
-            selected[index : index + size] for index in range(0, len(selected), size)
-        ]
-        self.add_timing("planning_ms", (time.monotonic_ns() - planning_started) / 1_000_000)
+        planned = (
+            list(planner(selected, size))
+            if callable(planner)
+            else [
+                selected[index : index + size]
+                for index in range(0, len(selected), size)
+            ]
+        )
+        self.add_timing(
+            "planning_ms", (time.monotonic_ns() - planning_started) / 1_000_000
+        )
         results: list[Any] = []
         for index, batch in enumerate(planned, start=1):
             self.check_cancelled()
@@ -661,7 +684,9 @@ class CommonBatchExecutor:
             self.metrics.total_ms,
             round((time.monotonic_ns() - self.started_ns) / 1_000_000),
         )
-        return self.emit("run_complete", status=status, elapsed_ms=self.metrics.total_ms)
+        return self.emit(
+            "run_complete", status=status, elapsed_ms=self.metrics.total_ms
+        )
 
     def metrics_snapshot(self) -> dict[str, Any]:
         """回傳包含識別碼、操作與所有計時／重試欄位的 metrics 快照。"""

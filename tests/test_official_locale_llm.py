@@ -104,12 +104,18 @@ def test_official_compound_matching_keeps_boundaries_and_empty_fallback() -> Non
     """驗證此測試案例的預期結果與相容性。"""
     index = load_official_locale_index()
 
-    assert index.official_terminology_matches_for_item(
-        {"path": "custom:blocker", "source_text": "Blocker"}
-    ) == []
-    assert index.official_terminology_matches_for_item(
-        {"path": "custom:unknown", "source_text": "Zzqv Qwrtv Plmn"}
-    ) == []
+    assert (
+        index.official_terminology_matches_for_item(
+            {"path": "custom:blocker", "source_text": "Blocker"}
+        )
+        == []
+    )
+    assert (
+        index.official_terminology_matches_for_item(
+            {"path": "custom:unknown", "source_text": "Zzqv Qwrtv Plmn"}
+        )
+        == []
+    )
 
 
 def test_legacy_prompt_normalization_preserves_custom_rules() -> None:
@@ -395,15 +401,12 @@ def test_terminology_plan_handles_format_codes_and_contextual_short_words():
     assert official_locale._item_terminology_terms(
         {"source_text": "§9Fire Resistance (1:00)"}, index
     ) == [("Fire Resistance", "抗火")]
-    assert (
-        official_locale._item_terminology_terms(
-            {"source_text": "§78 Mid-Air Jumps§r"}, index
-        )
-        == [("Air", "空氣")]
-    )
     assert official_locale._item_terminology_terms(
-        {"source_text": "Blocker"}, index
-    ) == []
+        {"source_text": "§78 Mid-Air Jumps§r"}, index
+    ) == [("Air", "空氣")]
+    assert (
+        official_locale._item_terminology_terms({"source_text": "Blocker"}, index) == []
+    )
     assert (
         official_locale._item_terminology_terms(
             {"source_text": "Calms attacking Piglins when Player gets close"}, index

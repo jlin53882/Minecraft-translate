@@ -128,9 +128,7 @@ def _candidate_from_payload(
         issue_types=tuple(str(item) for item in issue_types),
         evidence_ids=tuple(str(item) for item in evidence_ids),
         confidence=(
-            None
-            if payload.get("confidence") is None
-            else float(payload["confidence"])
+            None if payload.get("confidence") is None else float(payload["confidence"])
         ),
         reason=reason,
         draft_zh_tw=payload.get("draft_zh_tw"),
@@ -244,7 +242,10 @@ class SmartReviewHistoryStore:
     ) -> dict[str, Any] | None:
         """在已讀取的批次 payload 中依 ordinal 找到對應候選。"""
         for candidate in payload.get("candidates") or []:
-            if isinstance(candidate, dict) and int(candidate.get("ordinal") or 0) == ordinal:
+            if (
+                isinstance(candidate, dict)
+                and int(candidate.get("ordinal") or 0) == ordinal
+            ):
                 return candidate
         return None
 
@@ -284,7 +285,10 @@ class SmartReviewHistoryStore:
             payload = self._read_unlocked(run_id)
             wanted = {int(ordinal) for ordinal in ordinals}
             for candidate in payload.get("candidates") or []:
-                if isinstance(candidate, dict) and int(candidate.get("ordinal") or 0) in wanted:
+                if (
+                    isinstance(candidate, dict)
+                    and int(candidate.get("ordinal") or 0) in wanted
+                ):
                     candidate["status"] = "request_failed"
                     candidate["validation_error"] = error_code
             self._write_unlocked(run_id, payload)
@@ -352,17 +356,28 @@ class SmartReviewHistoryStore:
                     continue
                 if not isinstance(payload, dict) or not payload.get("id"):
                     continue
-                runs.append({key: value for key, value in payload.items() if key != "candidates"})
+                runs.append(
+                    {
+                        key: value
+                        for key, value in payload.items()
+                        if key != "candidates"
+                    }
+                )
         return sorted(
             runs,
-            key=lambda item: (str(item.get("started_at") or ""), str(item.get("id") or "")),
+            key=lambda item: (
+                str(item.get("started_at") or ""),
+                str(item.get("id") or ""),
+            ),
             reverse=True,
         )
 
     def list_runs(self, *, limit: int = 20, offset: int = 0) -> list[dict[str, Any]]:
         """分頁讀取 JSON 批次摘要。"""
         bounded_limit = max(1, min(int(limit), 100))
-        return self.all_runs()[max(0, int(offset)) : max(0, int(offset)) + bounded_limit]
+        return self.all_runs()[
+            max(0, int(offset)) : max(0, int(offset)) + bounded_limit
+        ]
 
     def list_candidates(
         self,
@@ -381,13 +396,16 @@ class SmartReviewHistoryStore:
             candidates = [
                 item
                 for item in payload.get("candidates") or []
-                if isinstance(item, dict) and (status is None or item.get("status") == status)
+                if isinstance(item, dict)
+                and (status is None or item.get("status") == status)
             ]
         candidates.sort(key=lambda item: int(item.get("ordinal") or 0))
         start = max(0, int(offset))
-        selected = candidates[start:] if limit is None else candidates[
-            start : start + max(0, int(limit))
-        ]
+        selected = (
+            candidates[start:]
+            if limit is None
+            else candidates[start : start + max(0, int(limit))]
+        )
         return [_candidate_from_payload(run_id, item) for item in selected]
 
     def count_candidates(self, run_id: str, *, status: str | None = None) -> int:
@@ -400,7 +418,8 @@ class SmartReviewHistoryStore:
             return sum(
                 1
                 for item in payload.get("candidates") or []
-                if isinstance(item, dict) and (status is None or item.get("status") == status)
+                if isinstance(item, dict)
+                and (status is None or item.get("status") == status)
             )
 
     def breakdown(self, run_id: str, *, error_limit: int = 5) -> dict[str, Any]:
@@ -411,7 +430,9 @@ class SmartReviewHistoryStore:
             except FileNotFoundError:
                 return {"status": {}, "errors": []}
             candidates = [
-                item for item in payload.get("candidates") or [] if isinstance(item, dict)
+                item
+                for item in payload.get("candidates") or []
+                if isinstance(item, dict)
             ]
         status_counts = Counter(str(item.get("status") or "") for item in candidates)
         errors = Counter(
@@ -421,9 +442,9 @@ class SmartReviewHistoryStore:
         )
         return {
             "status": dict(status_counts),
-            "errors": sorted(
-                errors.items(), key=lambda item: (-item[1], item[0])
-            )[: max(0, int(error_limit))],
+            "errors": sorted(errors.items(), key=lambda item: (-item[1], item[0]))[
+                : max(0, int(error_limit))
+            ],
         }
 
     def get_candidate(self, run_id: str, ordinal: int) -> dict[str, Any] | None:

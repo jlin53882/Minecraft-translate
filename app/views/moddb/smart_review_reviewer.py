@@ -147,12 +147,20 @@ def candidate_evidence_text(row: SmartReviewCandidate) -> str:
                         item
                         for item in context
                         if item.get("reference_type")
-                        in {"reviewed_lang_glossary", "same_key_reviewed", "same_text_reviewed"}
+                        in {
+                            "reviewed_lang_glossary",
+                            "same_key_reviewed",
+                            "same_text_reviewed",
+                        }
                     ],
                 ),
                 (
                     "模組語系參考",
-                    [item for item in context if item.get("reference_type") == "module_locale"],
+                    [
+                        item
+                        for item in context
+                        if item.get("reference_type") == "module_locale"
+                    ],
                 ),
                 (
                     "其他本地參考",
@@ -176,7 +184,9 @@ def candidate_evidence_text(row: SmartReviewCandidate) -> str:
                     continue
                 lines.append(f"{label}：")
                 selected = grouped[:remaining]
-                lines.extend(format_item(str(item.get("id")), item) for item in selected)
+                lines.extend(
+                    format_item(str(item.get("id")), item) for item in selected
+                )
                 remaining -= len(selected)
         else:
             lines.append("完全沒有可供參考的本地 context；請人工確認。")

@@ -117,7 +117,9 @@ def test_store_serializes_concurrent_first_loads(tmp_path):
         loader=loader,
     )
     with ThreadPoolExecutor(max_workers=8) as executor:
-        snapshots = list(executor.map(lambda _index: store.get_snapshot("rules.json"), range(8)))
+        snapshots = list(
+            executor.map(lambda _index: store.get_snapshot("rules.json"), range(8))
+        )
 
     assert len(loads) == 1
     assert max_active == 1

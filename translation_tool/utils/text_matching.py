@@ -16,6 +16,7 @@ def normalize_term_text(value: str, *, casefold: bool = False) -> str:
     normalized = _TERM_WHITESPACE_RE.sub(" ", normalized)
     return normalized.casefold() if casefold else normalized
 
+
 def contains_term(source: str, term: str) -> bool:
     """以不分大小寫且遵守詞界的方式判斷來源是否包含術語。"""
     if not isinstance(source, str) or not isinstance(term, str):

@@ -101,9 +101,7 @@ def test_candidates_and_execution_allow_all_effective_sources(db):
         ],
     )
 
-    plan = db.preview_bulk_review(
-        "1.21.1", None, mod_id="foo", quality_pass_only=False
-    )
+    plan = db.preview_bulk_review("1.21.1", None, mod_id="foo", quality_pass_only=False)
 
     assert plan.source is None
     assert {candidate.key for candidate in plan.candidates} == {"jar-key", "ai-key"}
