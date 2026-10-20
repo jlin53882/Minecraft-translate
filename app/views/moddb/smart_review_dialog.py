@@ -15,8 +15,8 @@ from app.services_impl.moddb_smart_review_service import (
     count_moddb_smart_review_candidates_for_run_from_path,
     count_moddb_smart_review_candidates_from_path,
     get_moddb_smart_review_run_from_path,
-    list_moddb_smart_review_runs_from_path,
     list_moddb_smart_review_candidates_from_path,
+    list_moddb_smart_review_runs_from_path,
     preview_moddb_smart_review_from_path,
     reject_moddb_smart_review_candidate_from_path,
     run_moddb_smart_review_from_path,
@@ -267,8 +267,10 @@ class SmartReviewDialog:
             self._cancel()
         self._generation += 1
 
-    def _current_db_identity(self, path: Path | None = None) -> str | None:
-        """回傳目前資料庫路徑與 cache generation 組成的身分。"""
+    def _current_db_identity(
+        self, path: Path | None = None, *, include_generation: bool = True
+    ) -> str | None:
+        """回傳資料庫檔案身分，必要時附加可偵測內容變更的 cache generation。"""
         db = self.get_db()
         current_path = path
         if current_path is None and db is not None and getattr(db, "path", None):
@@ -276,6 +278,14 @@ class SmartReviewDialog:
         if current_path is None:
             return None
         identity = str(current_path.resolve())
+        try:
+            stat = current_path.stat()
+        except OSError:
+            stat = None
+        if stat is not None:
+            identity += f"::{stat.st_dev}:{stat.st_ino}"
+        if not include_generation:
+            return identity
         generation_getter = getattr(db, "_cache_generation", None)
         if callable(generation_getter):
             try:
@@ -296,15 +306,16 @@ class SmartReviewDialog:
         """統一驗證 UI 世代、資料庫、run、查詢序號與頁碼。"""
         if generation != self._generation:
             return False
-        if db_identity is not None and self._current_db_identity() != db_identity:
-            return False
+        if db_identity is not None:
+            current_identity = self._current_db_identity()
+            stable_identity = self._current_db_identity(include_generation=False)
+            if db_identity not in {current_identity, stable_identity}:
+                return False
         if run_id is not None and self._run_id != run_id:
             return False
         if query_id is not None and query_id != getattr(self, "_candidate_query_id", 0):
             return False
-        if page is not None and page != getattr(self, "_candidate_page", page):
-            return False
-        return True
+        return page is None or page == getattr(self, "_candidate_page", page)
 
     def _cancel(self, _e=None) -> None:
         """取消目前智慧校對執行並更新按鈕狀態。"""
@@ -719,7 +730,9 @@ class SmartReviewDialog:
             return
         self._set_busy(True, "AI 校對執行中；候選會分批保存…")
         generation = self._generation
-        db_identity = self._current_db_identity(path)
+        # 執行本身會寫入 run/candidate 並遞增 cache generation；callback
+        # 改用檔案身分，候選套用與 CAS 仍由 service 層驗證內容世代。
+        db_identity = self._current_db_identity(path, include_generation=False)
 
         def progress(snapshot: dict) -> None:
             """回報背景智慧校對的進度更新。"""
@@ -1196,7 +1209,8 @@ class SmartReviewDialog:
             return
         draft = str(draft_control.value or "")
         generation = self._generation
-        db_identity = self._current_db_identity(path)
+        # 保留原譯文也會寫入 candidate 狀態，內容衝突由 service 層 CAS 回傳 stale。
+        db_identity = self._current_db_identity(path, include_generation=False)
         self._set_busy(True, f"儲存候選 #{ordinal} 草稿…")
 
         def work() -> None:
@@ -1273,7 +1287,8 @@ class SmartReviewDialog:
         if self._busy:
             return
         generation = self._generation
-        db_identity = self._current_db_identity(path)
+        # 候選套用會改變 cache generation，內容衝突由 service 層 CAS 回傳 stale。
+        db_identity = self._current_db_identity(path, include_generation=False)
         self._set_busy(True, f"套用候選 #{ordinal}…")
 
         def work() -> None:
@@ -1355,7 +1370,8 @@ class SmartReviewDialog:
         if self._busy:
             return
         generation = self._generation
-        db_identity = self._current_db_identity(path)
+        # 保留原譯文也會寫入 candidate 狀態，內容衝突由 service 層 CAS 回傳 stale。
+        db_identity = self._current_db_identity(path, include_generation=False)
         self._set_busy(True, f"保留候選 #{ordinal} 的原譯文…")
 
         def work() -> None:

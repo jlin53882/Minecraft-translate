@@ -23,30 +23,30 @@ from typing import Any
 import requests
 
 from translation_tool.core.codex_oauth import ChatGPTOAuthError, chatgpt_account_status
+from translation_tool.core.lm_api_client import call_gemini_requests
 from translation_tool.core.lm_batch_actions import BatchAction
 from translation_tool.core.lm_batch_budget import BudgetConfig, estimate_text_tokens
-from translation_tool.core.lm_api_client import call_gemini_requests
 from translation_tool.core.lm_config_rules import ApiKeyCycle, get_api_key_count
 from translation_tool.core.lm_config_schema import (
     chatgpt_model_input_token_budget,
     chatgpt_model_reasoning_effort,
 )
 from translation_tool.core.lm_key_health import get_model_quota_registry
-from translation_tool.core.openai_codex_client import ChatGPTAPIError
 from translation_tool.core.official_locale import (
     load_official_locale_index,
     normalize_terminology_text,
     terminology_term_allowed,
     terminology_terms_for_item,
 )
+from translation_tool.core.openai_codex_client import ChatGPTAPIError
 from translation_tool.translation_db.models import (
     SmartReviewCandidate,
     SmartReviewRunResult,
     SmartReviewSnapshot,
 )
 from translation_tool.translation_db.quality import quality_state, translation_issues
-from translation_tool.translation_db.sql_helpers import like_pattern
 from translation_tool.translation_db.schema import SRC_AI, SRC_MANUAL
+from translation_tool.translation_db.sql_helpers import like_pattern
 from translation_tool.utils.cancellation import (
     TaskCancelled,
     cancel_scope,
@@ -609,7 +609,9 @@ class SmartReviewMixin:
         cache = getattr(self, "_smart_review_context_cache", {})
         key_rows_cache = cache.setdefault("key_rows", {})
         quality_cache = cache.setdefault("quality", {})
-        cache_key = (kind, mod_id, key)
+        # 同一 key 可能跨版本或原文改版；cache identity 必須涵蓋實際 context
+        # 範圍，避免把另一版本的 reviewed evidence 套到目前候選。
+        cache_key = (kind, mod_id, key, mc_version, en_us)
 
         def quality_details(row: tuple) -> tuple[str, tuple[str, ...], str]:
             """取得 reviewed row 的格式品質狀態與可顯示診斷。"""
@@ -1562,21 +1564,9 @@ class _SmartReviewRetryRuntime:
     """保存智慧校對重試所需的共用 provider 狀態。"""
 
     provider: str
-    lm_cfg: dict[str, Any]
     batch_interval_sec: float
     chatgpt_retry_count: int = 0
     gemini_transient_retry_count: int = 0
-
-
-def _smart_review_request_interval(lm_config: dict[str, Any]) -> float:
-    """讀取與翻譯主流程相同的 provider/model 請求節流設定。"""
-    rate_config = lm_config.get("rate_limit", {})
-    if not isinstance(rate_config, dict):
-        return 0.0
-    try:
-        return max(0.0, float(rate_config.get("sleep_seconds_between_batches", 0.0)))
-    except (TypeError, ValueError):
-        return 0.0
 
 
 def _smart_review_input_budget(
@@ -1825,6 +1815,7 @@ def run_smart_review(
     }
     # 延遲取得主翻譯流程的共用 policy，避免 translation_db 初始化時形成循環 import。
     from translation_tool.core.lm_translator_main import (
+        _batch_interval_seconds,
         _handle_chatgpt_api_error,
         _parse_gemini_retry_after_seconds,
         _payload_error_allows_shrink,
@@ -1917,8 +1908,7 @@ def run_smart_review(
 
                 retry_runtime = _SmartReviewRetryRuntime(
                     provider=provider,
-                    lm_cfg=lm_config,
-                    batch_interval_sec=_smart_review_request_interval(lm_config),
+                    batch_interval_sec=_batch_interval_seconds(lm_config),
                 )
                 request_failed = False
                 shrink_requested = False
@@ -1997,7 +1987,7 @@ def run_smart_review(
                         except TaskCancelled:
                             cancelled = True
                             break
-                        except Exception:
+                        except RuntimeError:
                             mark_request_failure(
                                 [item.ordinal for item in batch],
                                 exc,

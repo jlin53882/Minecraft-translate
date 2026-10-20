@@ -437,30 +437,44 @@ def _payload_error_allows_shrink(error, status: int | None = None) -> bool:
     parts = [str(error)]
     try:
         parts.append(_remote_error_detail(error, limit=500))
-    except Exception:  # noqa: BLE001 - 判斷本身不能遮蔽原始錯誤
-        pass
+    except Exception as detail_error:  # noqa: BLE001 - 判斷本身不能遮蔽原始錯誤
+        parts.append(f"detail_error:{type(detail_error).__name__}")
     code = getattr(error, "code", "")
     error_type = getattr(error, "error_type", "")
     param = getattr(error, "param", "")
     parts.extend(str(value) for value in (code, error_type, param))
     text = " ".join(parts).lower()
     size_markers = (
-        "too large",
-        "payload",
         "request too large",
+        "request body too large",
+        "request entity too large",
+        "payload too large",
+        "payload size",
+        "payload exceeds",
+        "body too large",
+        "input too large",
         "context length",
         "context window",
         "input too long",
+        "input length",
         "maximum context",
         "token limit",
+        "too many tokens",
         "content length",
         "exceeds the limit",
-        "exceed.*limit",
-        "max_tokens",
-        "maxoutputtokens",
     )
-    return any(marker in text for marker in size_markers) or (
-        "context" in text and ("too long" in text or "exceed" in text)
+    return (
+        any(marker in text for marker in size_markers)
+        or (
+            any(noun in text for noun in ("payload", "request", "input", "content"))
+            and any(
+                qualifier in text for qualifier in ("too large", "too long", "exceed")
+            )
+        )
+        or (
+            "context" in text
+            and any(qualifier in text for qualifier in ("too long", "exceed"))
+        )
     )
 
 
@@ -677,7 +691,9 @@ def _wait_for_request_slot(
 ) -> None:
     """透過共用模型時鐘節流每一次 provider 請求。"""
     quota = get_model_quota_registry()
-    provider = getattr(runtime, "provider", runtime.lm_cfg.get("provider", "gemini"))
+    provider = getattr(runtime, "provider", None)
+    if not provider:
+        provider = runtime.lm_cfg.get("provider", "gemini")
     _wait_sec, reservation = quota.reserve_request_slot_with_token(
         provider,
         model_name,

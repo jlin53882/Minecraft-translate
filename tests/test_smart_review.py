@@ -272,6 +272,51 @@ def test_smart_review_context_prioritizes_current_version_and_text_before_limit(
     assert same_key[0]["en_us"] == "Current text"
 
 
+def test_smart_review_context_cache_separates_version_and_source_text(db):
+    """驗證相同 key 的不同版本與英文原文不共用錯誤 evidence cache。"""
+    db.write_back(
+        "1.20.1",
+        [WriteBackItem(KIND_LANG, "demo", "shared", "Old text", "舊文字")],
+        fill_other_versions=False,
+    )
+    db.write_back(
+        "1.20.2",
+        [WriteBackItem(KIND_LANG, "demo", "shared", "New text", "新文字")],
+        fill_other_versions=False,
+    )
+    rows_1201, _ = db.list_entries("1.20.1")
+    rows_1202, _ = db.list_entries("1.20.2")
+    db.review_manual(
+        next(row for row in rows_1201 if row.key == "shared").id,
+        expected_zh_tw="舊文字",
+        propagate=False,
+    )
+    db.review_manual(
+        next(row for row in rows_1202 if row.key == "shared").id,
+        expected_zh_tw="新文字",
+        propagate=False,
+    )
+
+    db._smart_review_context_cache = {}
+    first = db._smart_review_context(
+        0, KIND_LANG, "1.20.1", "demo", "shared", "Old text"
+    )
+    second = db._smart_review_context(
+        0, KIND_LANG, "1.20.2", "demo", "shared", "New text"
+    )
+
+    first_same_key = [
+        item for item in first if item["reference_type"] == "same_key_reviewed"
+    ]
+    second_same_key = [
+        item for item in second if item["reference_type"] == "same_key_reviewed"
+    ]
+    assert first_same_key[0]["mc_version"] == "1.20.1"
+    assert first_same_key[0]["en_us"] == "Old text"
+    assert second_same_key[0]["mc_version"] == "1.20.2"
+    assert second_same_key[0]["en_us"] == "New text"
+
+
 def test_smart_review_glossary_target_beyond_bulk_limit_is_retrievable(db):
     """驗證 id 超過 5000 的 reviewed glossary term 仍可透過 bounded exact lookup 找到。"""
     rows = [
@@ -739,7 +784,10 @@ def test_smart_review_does_not_shrink_invalid_400_schema(db, monkeypatch):
     def fail_call(**kwargs):
         """回傳 schema 錯誤，記錄實際批次大小。"""
         calls.append(len(kwargs["payload"]["items"]))
-        raise _http_error(400, "Invalid JSON schema")
+        raise _http_error(
+            400,
+            'Invalid JSON payload received. Unknown name "responseSchema"',
+        )
 
     monkeypatch.setattr(
         "translation_tool.translation_db.smart_review.call_gemini_requests",
@@ -982,7 +1030,7 @@ def test_smart_review_chatgpt_404_uses_shared_api_error_classification(db, monke
     )
     monkeypatch.setattr(
         "translation_tool.translation_db.smart_review.chatgpt_account_status",
-        lambda: {},
+        dict,
     )
 
     result = run_smart_review(
@@ -1548,6 +1596,37 @@ def test_smart_review_action_result_rejects_old_database_context(tmp_path):
     )
 
     assert calls == []
+
+
+def test_smart_review_write_callback_allows_own_generation_change(tmp_path):
+    """驗證本身寫入造成的 generation 變更不會卡住 UI callback。"""
+    from app.views.moddb import smart_review_dialog as module
+
+    path = tmp_path / "smart-review.db"
+    path.write_text("", encoding="utf-8")
+
+    class DB:
+        """提供資料庫身分測試所需的最小介面。"""
+
+        def __init__(self):
+            self.path = path
+            self.generation = "1"
+
+        def _cache_generation(self):
+            """回傳可被模擬遞增的資料庫 cache generation。"""
+            return self.generation
+
+    db = DB()
+    dialog = module.SmartReviewDialog.__new__(module.SmartReviewDialog)
+    dialog.get_db = lambda: db
+    dialog._generation = 7
+
+    full_identity = dialog._current_db_identity(path)
+    stable_identity = dialog._current_db_identity(path, include_generation=False)
+    db.generation = "2"
+
+    assert not dialog._is_current_operation(7, full_identity)
+    assert dialog._is_current_operation(7, stable_identity)
 
 
 def test_smart_review_apply_notifies_parent_after_reloading_candidates(monkeypatch):
