@@ -205,6 +205,10 @@ def _history_summary(history: dict[str, Any]) -> dict[str, Any]:
     metrics = metrics if isinstance(metrics, dict) else {}
     selected_count = _integer(history.get("selected_count"), len(candidates))
     invalid_count = _integer(history.get("invalid_count"), statuses.get("invalid", 0))
+    valid_count = _integer(history.get("valid_count"), statuses.get("ready", 0))
+    request_failed_count = statuses.get("request_failed", 0)
+    cancelled_count = statuses.get("cancelled", 0)
+    pending_count = statuses.get("pending", 0)
     reason_empty = error_categories.get("reason 為空", 0)
     return {
         "run_id": _text(history.get("id")) or _text(history.get("run_id")),
@@ -213,10 +217,14 @@ def _history_summary(history: dict[str, Any]) -> dict[str, Any]:
         "status": _text(history.get("status")) or "unknown",
         "selected_count": selected_count,
         "processed_count": _integer(history.get("processed_count"), len(candidates)),
+        "valid_count": valid_count,
         "recorded_batch_size": _integer(history.get("batch_size")),
         "recorded_batch_count": _integer(metrics.get("batch_count")),
         "status_counts": dict(sorted(statuses.items())),
         "invalid_count": invalid_count,
+        "request_failed_count": request_failed_count,
+        "cancelled_count": cancelled_count,
+        "pending_count": pending_count,
         "invalid_rate": round(invalid_count / selected_count, 4)
         if selected_count
         else None,
@@ -274,7 +282,11 @@ def _offline_strategy_report(
 ) -> dict[str, Any]:
     """建立不需要再次呼叫模型的策略比較與安全性說明。"""
     selected_count = _integer(history_summary.get("selected_count"))
+    valid_count = _integer(history_summary.get("valid_count"))
     invalid_count = _integer(history_summary.get("invalid_count"))
+    request_failed_count = _integer(history_summary.get("request_failed_count"))
+    cancelled_count = _integer(history_summary.get("cancelled_count"))
+    pending_count = _integer(history_summary.get("pending_count"))
     reason_empty = _integer(history_summary.get("reason_empty_count"))
     metrics = history_summary.get("metrics", {})
     request_attempts = _integer(metrics.get("request_attempts"))
@@ -291,8 +303,11 @@ def _offline_strategy_report(
     ]
     return {
         "current_strict_validation": {
-            "valid_count": max(selected_count - invalid_count, 0),
+            "valid_count": valid_count,
             "invalid_count": invalid_count,
+            "request_failed_count": request_failed_count,
+            "cancelled_count": cancelled_count,
+            "pending_count": pending_count,
             "request_attempts_recorded": request_attempts,
             "meaning": "沿用目前安全驗證，不把無效輸出直接套用。",
         },

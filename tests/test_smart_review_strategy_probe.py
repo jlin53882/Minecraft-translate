@@ -76,6 +76,33 @@ def test_offline_report_does_not_treat_relaxed_validation_as_safe() -> None:
     )
 
 
+def test_offline_report_does_not_count_request_failures_as_valid() -> None:
+    """離線摘要不可把請求失敗、取消或待處理候選推算成有效。"""
+    history = {
+        "selected_count": 100,
+        "processed_count": 31,
+        "valid_count": 10,
+        "invalid_count": 20,
+        "candidates": [
+            {"status": "ready"},
+            {"status": "invalid", "validation_error": "reason 不可為空"},
+            {"status": "request_failed"},
+            {"status": "cancelled"},
+            {"status": "pending"},
+        ],
+    }
+
+    summary = _history_summary(history)
+    report = _offline_strategy_report(summary, [40])
+
+    strict = report["current_strict_validation"]
+    assert strict["valid_count"] == 10
+    assert strict["invalid_count"] == 20
+    assert strict["request_failed_count"] == 1
+    assert strict["cancelled_count"] == 1
+    assert strict["pending_count"] == 1
+
+
 def test_sample_selection_is_deterministic_and_stratified() -> None:
     """相同歷史與大小應選出可重現且包含不同狀態的樣本。"""
     history = _history()
