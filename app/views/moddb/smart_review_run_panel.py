@@ -11,6 +11,7 @@ import flet as ft
 
 from app.services_impl.moddb_smart_review_service import (
     SMART_REVIEW_DEFAULT_SOURCE,
+    SMART_REVIEW_MAX_BATCH_SIZE,
     count_moddb_smart_review_candidates_from_path,
     smart_review_model_options,
 )
@@ -28,8 +29,6 @@ from app.views.moddb.smart_review_job import (
     SmartReviewRequest,
     format_duration,
 )
-from translation_tool.translation_db.smart_review import SMART_REVIEW_MAX_BATCH_SIZE
-
 _POLL_SECONDS = 0.4
 _RESULT_LABEL = {
     "completed": ("完成", "em"),

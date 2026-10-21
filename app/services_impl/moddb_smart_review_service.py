@@ -20,7 +20,10 @@ from translation_tool.translation_db import (
     TranslationDB,
 )
 from translation_tool.translation_db.schema import SRC_AI
-from translation_tool.translation_db.smart_review import run_smart_review
+from translation_tool.translation_db.smart_review import (
+    SMART_REVIEW_MAX_BATCH_SIZE,
+    run_smart_review,
+)
 from translation_tool.utils.config_manager import load_config
 
 SMART_REVIEW_DEFAULT_SOURCE = SRC_AI
