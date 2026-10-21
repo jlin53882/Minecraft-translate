@@ -70,6 +70,24 @@ def _entry(db, mod_id: str, key: str):
     return db.entry_detail(entry_id)
 
 
+def test_count_and_page_limit_use_deduped_candidates(db):
+    """數量、limit 與 offset 都以去重後候選為準，不能被原始列截斷。"""
+    assert db.count_smart_review_candidates(version="1.20.1") == 3
+
+    first_page = db.smart_review_candidates(version="1.20.1", limit=2)
+    assert [(candidate.mod_id, candidate.key) for candidate in first_page] == [
+        ("aether", "a_rep"),
+        ("aether", "c_boots"),
+    ]
+    assert first_page[0].twin_entry_ids
+
+    second_page = db.smart_review_candidates(version="1.20.1", limit=2, offset=2)
+    assert [(candidate.mod_id, candidate.key) for candidate in second_page] == [
+        ("other", "a_rep"),
+    ]
+    assert second_page[0].ordinal == 3
+
+
 def test_selection_keeps_one_candidate_per_same_text_and_state(db, monkeypatch):
     """同模組、同英文、同目前狀態只送一筆；不同譯文或不同模組各自保留。"""
     run_id, sent = _run(db, monkeypatch)

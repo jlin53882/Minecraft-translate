@@ -461,29 +461,6 @@ def _effective_review_sql(alias: str = "f") -> str:
     )
 
 
-def _dedupe_same_text_rows(
-    rows: Sequence[tuple[Any, ...]],
-) -> list[tuple[tuple[Any, ...], tuple[int, ...]]]:
-    """同版本、模組、種類且英文與目前譯文狀態都相同的條目只保留第一筆。
-
-    回傳 ``(代表列, 被略過的同文條目 id)``。被略過的條目不送模型、不進審查清單，
-    id 會存進候選，由 ``_apply_smart_review_twins`` 在代表條目套用時一併寫入，
-    所以套用範圍永遠限於當次選取（含 query／參考條件）看過的條目。key 不納入比對；
-    目前譯文、來源或審核狀態不同的條目各自保留，避免把不同狀態的譯文覆蓋成同一份。
-    """
-    twins: dict[tuple[Any, ...], list[int]] = {}
-    kept: list[tuple[tuple[Any, ...], tuple[Any, ...]]] = []
-    for row in rows:
-        # row: id, kind, mc_version, mod_id, key, en_us, zh_tw, source, status, ...
-        group = (row[2], row[3], row[1], row[5], row[6], row[7], row[8])
-        if group in twins:
-            twins[group].append(int(row[0]))
-            continue
-        twins[group] = []
-        kept.append((row, group))
-    return [(row, tuple(twins[group])) for row, group in kept]
-
-
 def _smart_review_current_snapshot_sql() -> str:
     """回傳草稿保存與候選套用共用的 CAS 快照查詢。"""
     return (
@@ -505,6 +482,89 @@ class _SmartReviewSelection:
     reference_cte: str
     reference_join: str
     order_sql: str
+
+
+_SMART_REVIEW_DEDUPE_COLUMNS = (
+    "mc_version",
+    "mod_id",
+    "kind",
+    "en_us",
+    "current_zh_tw",
+    "effective_source",
+    "effective_review",
+)
+
+
+def _smart_review_group_sql(alias: str) -> str:
+    """回傳智慧校對同文去重所使用的欄位清單。"""
+    return ", ".join(f"{alias}.{column}" for column in _SMART_REVIEW_DEDUPE_COLUMNS)
+
+
+def _smart_review_order_for_alias(order_sql: str, alias: str) -> str:
+    """把候選排序條件中的 entry 別名改成指定的 CTE 別名。"""
+    column_aliases = {
+        "mc_version": "mc_version",
+        "mod_id": "mod_id",
+        "kind": "kind",
+        "key": "entry_key",
+        "id": "entry_id",
+    }
+    for source_column, target_column in column_aliases.items():
+        order_sql = order_sql.replace(
+            f"e.{source_column}", f"{alias}.{target_column}"
+        )
+    return order_sql
+
+
+def _smart_review_candidate_cte(
+    selection: _SmartReviewSelection,
+    entry_source: str,
+) -> str:
+    """建立未分頁的候選 CTE，讓列表與數量查詢共用同一份資料範圍。"""
+    cte_prefix = selection.reference_cte.rstrip()
+    if cte_prefix:
+        cte_prefix += ", "
+    else:
+        cte_prefix = "WITH "
+    return (
+        cte_prefix
+        + "candidate_rows AS ("
+        + "SELECT e.id AS entry_id, e.kind AS kind, e.mc_version AS mc_version, "
+        "e.mod_id AS mod_id, e.key AS entry_key, e.en_us AS en_us, "
+        "f.zh_tw AS current_zh_tw, f.source AS effective_source, "
+        f"({selection.effective_review}) AS effective_review, "
+        "t.revision AS effective_revision, tm.zh_tw AS manual_zh_tw, "
+        "tm.checker AS manual_checker, tm.review_status AS manual_review_status, "
+        "tm.revision AS manual_revision "
+        "FROM "
+        + entry_source
+        + " JOIN effective f ON f.entry_id=e.id "
+        + selection.reference_join
+        + "LEFT JOIN translation t ON t.entry_id=e.id AND t.source=f.source "
+        + f"LEFT JOIN translation tm ON tm.entry_id=e.id AND tm.source={SRC_MANUAL} "
+        + f"WHERE {selection.where_sql})"
+    )
+
+
+def _decode_smart_review_twin_ids(raw: object, entry_id: int) -> tuple[int, ...]:
+    """解析 SQL 聚合的同文條目 id，忽略損壞值與代表條目本身。"""
+    if not isinstance(raw, str):
+        return ()
+    try:
+        values = json.loads(raw)
+    except (TypeError, ValueError):
+        return ()
+    if not isinstance(values, list):
+        return ()
+    twin_ids: list[int] = []
+    for value in values:
+        try:
+            twin_id = int(value)
+        except (TypeError, ValueError):
+            continue
+        if twin_id != entry_id and twin_id not in twin_ids:
+            twin_ids.append(twin_id)
+    return tuple(twin_ids)
 
 
 def _build_smart_review_selection(
@@ -684,19 +744,33 @@ class SmartReviewMixin:
             ("idx_smart_review_named_order",),
         ):
             entry_source = "entry e INDEXED BY idx_smart_review_named_order"
+        candidate_cte = _smart_review_candidate_cte(selection, entry_source)
+        group_sql = _smart_review_group_sql("c")
+        candidate_order_sql = _smart_review_order_for_alias(selection.order_sql, "c")
+        result_order_sql = _smart_review_order_for_alias(selection.order_sql, "r")
         query_sql = (
-            selection.reference_cte
-            + "SELECT e.id, e.kind, e.mc_version, e.mod_id, e.key, e.en_us, "
-            f"f.zh_tw, f.source, ({selection.effective_review}), t.revision, "
-            "tm.zh_tw, tm.checker, tm.review_status, tm.revision "
-            "FROM "
-            + entry_source
-            + " JOIN effective f ON f.entry_id=e.id "
-            + selection.reference_join
-            + "LEFT JOIN translation t ON t.entry_id=e.id AND t.source=f.source "
-            f"LEFT JOIN translation tm ON tm.entry_id=e.id AND tm.source={SRC_MANUAL} "
-            f"WHERE {selection.where_sql} "
-            f"ORDER BY {selection.order_sql} "
+            candidate_cte
+            + ", ranked_rows AS ("
+            + "SELECT c.*, "
+            "ROW_NUMBER() OVER (PARTITION BY "
+            + group_sql
+            + " ORDER BY "
+            + candidate_order_sql
+            + ") AS duplicate_rank, "
+            "JSON_GROUP_ARRAY(c.entry_id) OVER (PARTITION BY "
+            + group_sql
+            + " ORDER BY "
+            + candidate_order_sql
+            + " ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING) "
+            "AS twin_entry_ids_json FROM candidate_rows c) "
+            "SELECT r.entry_id, r.kind, r.mc_version, r.mod_id, r.entry_key, "
+            "r.en_us, r.current_zh_tw, r.effective_source, r.effective_review, "
+            "r.effective_revision, r.manual_zh_tw, r.manual_checker, "
+            "r.manual_review_status, r.manual_revision, r.twin_entry_ids_json "
+            "FROM ranked_rows r WHERE r.duplicate_rank=1 "
+            "ORDER BY "
+            + result_order_sql
+            + " "
         )
         query_params: tuple[Any, ...]
         if bounded_limit == 0:
@@ -708,7 +782,7 @@ class SmartReviewMixin:
         rows = self._q(query_sql, query_params)
         snapshots: list[SmartReviewSnapshot] = []
         absolute_offset = max(0, int(offset))
-        for row_index, (row, twin_ids) in enumerate(_dedupe_same_text_rows(rows), 1):
+        for row_index, row in enumerate(rows, 1):
             ordinal = absolute_offset + row_index
             (
                 entry_id,
@@ -725,7 +799,9 @@ class SmartReviewMixin:
                 manual_checker,
                 manual_review_status,
                 manual_revision,
+                twin_ids_json,
             ) = row
+            twin_ids = _decode_smart_review_twin_ids(twin_ids_json, int(entry_id))
             context = self._smart_review_context(
                 entry_id,
                 kind,
@@ -781,11 +857,13 @@ class SmartReviewMixin:
             query=query,
             require_reviewed_reference=require_reviewed_reference,
         )
+        candidate_cte = _smart_review_candidate_cte(selection, "entry e")
+        group_sql = _smart_review_group_sql("c")
         row = self._one(
-            selection.reference_cte
-            + "SELECT COUNT(*) FROM entry e JOIN effective f ON f.entry_id=e.id "
-            + selection.reference_join
-            + f"WHERE {selection.where_sql}",
+            candidate_cte
+            + " SELECT COUNT(*) FROM (SELECT 1 FROM candidate_rows c GROUP BY "
+            + group_sql
+            + ")",
             selection.params,
         )
         return int(row[0]) if row else 0
