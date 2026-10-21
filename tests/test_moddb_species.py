@@ -14,6 +14,7 @@ from app.views.moddb.entries_panel import EntriesPanel
 from app.views.moddb.species_dialog import SpeciesCandidateDialog
 from tests.conftest import mock_page
 from translation_tool.translation_db import KIND_LANG, ScanItem, TranslationDB
+from translation_tool.translation_db.schema import SRC_JAR_TW
 from translation_tool.utils import species_cache
 
 
@@ -49,6 +50,51 @@ def test_scan_species_candidates_keeps_entry_scope_and_filters_values(tmp_path):
     assert all(candidate.mod_id == "plants" for candidate in result.candidates)
 
 
+def test_species_scope_options_filter_modules_and_sources(tmp_path):
+    """學名掃描的模組與來源選單只列目前範圍內的學名候選。"""
+    db = _seed(tmp_path / "mod.db")
+    try:
+        db.ingest(
+            "1.21.1",
+            [
+                ScanItem(
+                    KIND_LANG,
+                    "plants",
+                    "item.oak.latin",
+                    "Quercus robur",
+                    "櫟樹",
+                ),
+                ScanItem(
+                    KIND_LANG,
+                    "trees",
+                    "item.oak.latin",
+                    "Quercus robur",
+                ),
+            ],
+        )
+        modules, sources_by_mod = moddb_species_service.species_scope_options(
+            db, "1.21.1", kind=KIND_LANG
+        )
+
+        assert modules == ("plants", "trees")
+        assert sources_by_mod["plants"] == (SRC_JAR_TW,)
+        assert sources_by_mod["trees"] == ()
+        assert sources_by_mod[None] == (SRC_JAR_TW,)
+
+        filtered = moddb_species_service.scan_species_candidates(
+            db,
+            "1.21.1",
+            mod_id="plants",
+            kind=KIND_LANG,
+            effective_source=SRC_JAR_TW,
+        )
+        assert [candidate.value for candidate in filtered.candidates] == [
+            "Quercus robur"
+        ]
+    finally:
+        db.close()
+
+
 def test_scan_species_candidates_has_no_cap_and_does_not_write(tmp_path):
     db = TranslationDB(tmp_path / "mod.db")
     try:
@@ -75,12 +121,35 @@ def test_scan_species_candidates_has_no_cap_and_does_not_write(tmp_path):
 def test_species_dialog_exposes_scan_and_lookup_actions(tmp_path):
     db = _seed(tmp_path / "mod.db")
     try:
-        dialog = SpeciesCandidateDialog(
-            mock_page(), lambda: db, "1.21.1", "plants", KIND_LANG
+        db.ingest(
+            "1.21.1",
+            [
+                ScanItem(
+                    KIND_LANG,
+                    "plants",
+                    "item.oak.latin",
+                    "Quercus robur",
+                    "櫟樹",
+                )
+            ],
         )
+        page = mock_page()
+        page.run_thread = lambda target: target()
+        dialog = SpeciesCandidateDialog(page, lambda: db, "1.21.1", "plants", KIND_LANG)
+        page._run_all_tasks()
+        page._tasks.clear()
         assert dialog.scan_btn.content == "掃描候選"
         assert dialog.query_all_btn.content == "查詢全部候選"
         assert dialog.query_all_btn.disabled is True
+        assert dialog.mod_dd.value == "plants"
+        assert [option.key for option in dialog.source_dd.options] == [
+            "__all__",
+            str(SRC_JAR_TW),
+        ]
+        assert dialog.source_dd.value == "__all__"
+        dialog.mod_dd.value = "__all__"
+        dialog._on_mod()
+        assert dialog.source_dd.value == "__all__"
     finally:
         db.close()
 
@@ -192,7 +261,10 @@ def _run_now(_page, target, **_kwargs):
 
 
 def _new_dialog(page, db):
+    page.run_thread = lambda target: target()
     dialog = SpeciesCandidateDialog(page, lambda: db, "1.21.1", None, None)
+    page._run_all_tasks()
+    page._tasks.clear()
     dialog._post = _sync
     dialog._launch = lambda work, name: (work(), True)[1]
     dialog.job._post = _sync

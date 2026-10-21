@@ -15,6 +15,8 @@
 
 ## 學名候選流程
 
+`SpeciesCandidateDialog` 開啟時先顯示呼叫端帶入的預填值，再以維護型背景作業依學名候選品質條件建立模組清單與目前生效來源對照；模組切換只重用已載入的對照，不重新掃描資料庫。切換範圍只清除舊掃描結果，不會自動重新掃描；關閉視窗會丟棄晚到的範圍結果。
+
 條目校對的 `species_scan_btn` 依目前 `version`、`mod_id` 與 `kind` 開啟 `SpeciesCandidateDialog`。對話框分成兩個階段：
 
 1. `scan_species_candidates` 以 `QualityFilter` 的 `species_name`（預設）或 `species_format`（對話框的放寬選項）呼叫 `TranslationDB.list_entries`，由 SQL 預篩加 `is_species_candidate` 判斷取出候選，不逐筆載入整個版本；候選不設上限，對話框用 `kit.Pager` 每頁 `PAGE_SIZE` 筆顯示。`species_name` 要求值符合 `is_potential_species_name` 的格式，且 key 有 `has_species_key_hint` 的提示詞（`SPECIES_KEY_HINTS`）或值含雜交／亞種／變種記號。
@@ -26,6 +28,8 @@
 
 ## AI 智慧校對候選
 
+批量審核與 Smart Review 的範圍控制項都只顯示真正有未審核候選的模組；來源選項依選定模組重建。開啟對話框、切換版本／類型／品質條件時，模組與來源範圍查詢使用維護型背景作業；模組切換只重用已載入的來源映射，不再次查詢整個資料庫。查詢結果以序號驗證，舊結果不會覆蓋新條件；範圍變更只更新預填值、來源選單與筆數估算，不能繞過使用者明確按下預覽、掃描或開始按鈕。
+
 `entry_filters.py` 的 `批量審核` 按鈕只建立 `BulkReviewDialog`，並把 EntriesPanel 目前的版本、模組與 effective source 預填進對話框；預填不會自動產生預覽或執行，使用者仍須明確按下預覽與確認。`智慧校對` 按鈕只建立 `SmartReviewDialog`，並把 EntriesPanel 的版本、模組、kind、effective source、未審核狀態與搜尋條件帶入；不把模型流程塞入 `EntriesPanel`。視窗只是外殼，三個分頁各自一個模組：`SmartReviewRunPanel`（範圍設定、進度、統計與 log）、`SmartReviewReviewer`（每頁一筆的逐筆審查）、`SmartReviewHistory`（歷史批次）。`SmartReviewContext` 集中保存 UI 世代與資料庫身分，所有背景工作透過 `run_background` 啟動，結果只在世代、資料庫與呼叫端的 `still_valid` 都仍成立時才回到 UI。校對本身由 `SmartReviewJob` 執行（頁面層級單例，`job_for_page`），以 `TaskSession` 登記進度與 log，關閉視窗不會中斷。服務層 `moddb_smart_review_service.py` 重新以資料庫 path、priority 與 config 開啟連線；`smart_review.py` 負責候選 snapshot、typed local context、provider structured output、JSON 批次持久化與 CAS apply。預覽使用唯讀連線，執行與套用透過 `launch_page_operation` 在背景進行。
 智慧校對套用成功後，`open_smart_review` 會先以 `refresh_entry_filter(panel, keep_selection=True)` 重載目前條目頁，再通知 `ModDbView` 外層狀態變更，確保條目列表旁的來源／審核標籤與中央編輯器同步。
 `SmartReviewRunPanel` 開啟或變更範圍時，會以唯讀 count query 顯示符合範圍的未審核 AI 譯文總數、本次上限與批次數；上限輸入 `0` 代表不限，每批筆數仍必須大於 `0`。機翻、既有譯文修復與 Smart Review 都透過 `translation_tool/core/common_batch_executor.py` 的共用批次生命週期回報安全結構化事件；各自的 candidate、prompt、provider retry、validation、CAS／快取／JSON 寫入仍由專屬策略保留。Smart Review 事件分別記錄 batch start、外層 attempt、provider API、底層 network attempt、HTTP／timeout／connection 錯誤分類、Retry-After、配額等待、retry backoff、回應解析與 JSON 寫入耗時；重試等待期間仍透過 `TaskSession` 更新 UI，不把 retry backoff 混入配額等待。完成時再寫入 selection／planning／prompt／API／配額／retry／解析／驗證／寫入／total 的 monotonic timing、valid／invalid／needs_context／no_change／suggest_revision 與 validation error 分布。事件不得包含 API key、完整 prompt、完整 response 或錯誤原文。
@@ -35,7 +39,7 @@ local context 的 evidence id 必須可回到資料庫 row 或 bundled official 
 
 候選與原有 `translation`／`effective` 解耦，批次 JSON 保存 effective 及 manual 快照。`apply_smart_review_candidate` 與 `save_smart_review_draft` 仍重新比對條目身份、原文、effective source/value/review/revision、manual row 與格式；任何差異都標成 `stale` 或拒絕草稿，不覆蓋目前資料；既有已審核 manual row 不能被智慧校對重設為未審核。套用只寫 `SRC_MANUAL` 的未審核列和 `smart_review_apply` history；`revert()` 與 `entry_activity` 已納入此 action。`保留原譯文` 只把候選標成 `rejected`，不觸碰翻譯與快取。
 
-run 狀態會持久化為 `completed`、`partial`、`cancelled` 或 `failed`；請求失敗候選為 `request_failed`，尚未送出的取消候選為 `cancelled`，回應驗證失敗才是 `invalid`。UI 以 `Pager` 每頁最多 50 筆，顯示 reason／evidence／canonical format diagnostics，並允許人工編修、儲存 draft、套用、拒絕、上一筆／下一筆與輸入 run id 重新開啟。
+run 狀態會持久化為 `completed`、`partial`、`cancelled` 或 `failed`；請求失敗候選為 `request_failed`，尚未送出的取消候選為 `cancelled`，回應驗證失敗才是 `invalid`。UI 以 `Pager` 每頁最多 50 筆，顯示 reason／evidence／canonical format diagnostics，並允許人工編修、儲存 draft、套用、拒絕、上一筆／下一筆、輸入筆次跳轉與輸入 run id 重新開啟。審查導覽會沿用目前篩選的總筆數，只取得目標候選；載入期間會停用位置輸入與導覽按鈕，避免快速連點排入並行查詢。
 
 候選列的狀態文字與按鈕必須分開放：帶 `expand` 的文字放進 `wrap=True` 的 `Row` 時 Flutter 無法排版，畫面會出現灰色圖塊。
 

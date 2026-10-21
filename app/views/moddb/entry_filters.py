@@ -278,7 +278,7 @@ def open_bulk_review(panel, _e=None) -> None:
 
 
 def open_species_scan(panel, _e=None) -> None:
-    """開啟學名候選掃描對話框，並傳入目前版本、模組與條目範圍。"""
+    """開啟學名候選掃描對話框，並預填目前版本、模組與來源範圍。"""
     if panel.db() is None or not panel.version:
         show_snack(panel._page, "目前沒有可用的資料庫版本。", C.GOLD)
         return
@@ -289,6 +289,7 @@ def open_species_scan(panel, _e=None) -> None:
         panel.mod_id,
         panel.kind,
         on_open_entry=panel.open_species_entry,
+        effective_source=panel.source_filter.code,
     ).open()
 
 

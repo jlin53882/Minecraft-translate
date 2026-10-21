@@ -388,11 +388,30 @@ class SmartReviewHistoryStore:
         offset: int = 0,
     ) -> list[SmartReviewCandidate]:
         """分頁讀取 JSON 批次候選。"""
+        _total, selected = self.page_candidates(
+            run_id,
+            status=status,
+            limit=limit,
+            offset=offset,
+        )
+        return selected
+
+    def page_candidates(
+        self,
+        run_id: str,
+        *,
+        status: str | None = None,
+        limit: int | None = None,
+        offset: int = 0,
+        known_total: int | None = None,
+        clamp_offset: bool = False,
+    ) -> tuple[int, list[SmartReviewCandidate]]:
+        """在單次 JSON 讀取中取得總數與目前頁面的候選。"""
         with self._lock:
             try:
                 payload = self._read_unlocked(run_id)
             except FileNotFoundError:
-                return []
+                return 0, []
             candidates = [
                 item
                 for item in payload.get("candidates") or []
@@ -400,13 +419,16 @@ class SmartReviewHistoryStore:
                 and (status is None or item.get("status") == status)
             ]
         candidates.sort(key=lambda item: int(item.get("ordinal") or 0))
+        total = len(candidates) if known_total is None else max(0, int(known_total))
         start = max(0, int(offset))
+        if clamp_offset and total:
+            start = min(start, total - 1)
         selected = (
             candidates[start:]
             if limit is None
             else candidates[start : start + max(0, int(limit))]
         )
-        return [_candidate_from_payload(run_id, item) for item in selected]
+        return total, [_candidate_from_payload(run_id, item) for item in selected]
 
     def count_candidates(self, run_id: str, *, status: str | None = None) -> int:
         """計算 JSON 批次候選數量。"""

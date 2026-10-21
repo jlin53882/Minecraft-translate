@@ -539,6 +539,57 @@ class SmartReviewMixin:
         """確認智慧校對資料表具有指定欄位。"""
         return any(row[1] == column for row in self._q(f"PRAGMA table_info({table})"))
 
+    def smart_review_scope_options(
+        self,
+        *,
+        version: str | None = None,
+        kind: str | None = None,
+        review_status: str = "unreviewed",
+    ) -> tuple[tuple[str, ...], dict[str | None, tuple[int, ...]]]:
+        """取得有智慧校對候選的模組與來源對照。
+
+        查詢沿用智慧校對的「目前生效、原文與譯文非空、指定審核狀態」條件，
+        回傳的 ``None`` 模組鍵代表全部模組，讓 UI 不必逐一模組計數。
+        """
+        selection = _build_smart_review_selection(
+            version=version,
+            mod_id=None,
+            kind=kind,
+            effective_source=None,
+            review_status=review_status,
+            query=None,
+            require_reviewed_reference=False,
+        )
+        query = (
+            selection.reference_cte + "SELECT DISTINCT e.mod_id, f.source "
+            "FROM entry e JOIN effective f ON f.entry_id=e.id "
+            + selection.reference_join
+            + f"WHERE {selection.where_sql} ORDER BY e.mod_id, f.source"
+        )
+        rows = self._q(query, selection.params)
+        modules: list[str] = []
+        sources_by_mod: dict[str, set[int]] = {}
+        all_sources: set[int] = set()
+        for row in rows:
+            mod_id = str(row[0])
+            if mod_id not in sources_by_mod:
+                modules.append(mod_id)
+                sources_by_mod[mod_id] = set()
+            if row[1] is not None:
+                source = int(row[1])
+                sources_by_mod[mod_id].add(source)
+                all_sources.add(source)
+        return (
+            tuple(modules),
+            {
+                None: tuple(sorted(all_sources)),
+                **{
+                    mod_id: tuple(sorted(sources))
+                    for mod_id, sources in sources_by_mod.items()
+                },
+            },
+        )
+
     def smart_review_candidates(
         self,
         *,
@@ -1433,6 +1484,42 @@ class SmartReviewMixin:
                 )
             )
         return result
+
+    def load_smart_review_candidate_page(
+        self,
+        run_id: str,
+        *,
+        status: str | None = None,
+        limit: int | None = None,
+        offset: int = 0,
+        known_total: int | None = None,
+    ) -> tuple[int, list[SmartReviewCandidate]]:
+        """以同一個唯讀資料來源取得候選總數與目前頁面。"""
+        history = SmartReviewHistoryStore(self.path)
+        if history.exists(run_id):
+            self._reconcile_json_applied_candidates(history, run_id)
+            return history.page_candidates(
+                run_id,
+                status=status,
+                limit=limit,
+                offset=offset,
+                known_total=known_total,
+                clamp_offset=True,
+            )
+        total = (
+            self.count_smart_review_candidates_for_run(run_id, status=status)
+            if known_total is None
+            else max(0, int(known_total))
+        )
+        if not total:
+            return 0, []
+        rows = self.list_smart_review_candidates(
+            run_id,
+            status=status,
+            limit=limit,
+            offset=min(max(0, int(offset)), total - 1),
+        )
+        return total, rows
 
     def _reconcile_json_applied_candidates(
         self, history: SmartReviewHistoryStore, run_id: str

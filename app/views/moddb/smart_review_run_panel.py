@@ -16,6 +16,7 @@ from app.services_impl.moddb_smart_review_service import (
     count_moddb_smart_review_candidates_from_path,
     smart_review_model_options,
 )
+from app.tasks.operation_registry import OperationPresentation
 from app.ui import kit
 from app.ui.debounce import Debouncer
 from app.ui.design import C
@@ -63,9 +64,16 @@ class SmartReviewRunPanel:
         self.on_hide = on_hide
         self._total: int | None = None
         self._estimate_seq = 0
+        self._scope_seq = 0
+        self._scope_loading = False
+        self._attached = False
         self._poller = PollerHandle()
         self._debounce = Debouncer(lambda: ctx.page, 0.6)
+        self._scope_debounce = Debouncer(lambda: ctx.page, 0.15)
         self._last_sync_signature: tuple[object, ...] | None = None
+        self._scope_modules: tuple[str, ...] = ()
+        self._scope_sources_by_mod: dict[str | None, tuple[int, ...]] = {}
+        self._source_catalog = getattr(ctx.get_db(), "source_catalog", None)
         self._build_scope_controls(version, mod_id, kind, effective_source, query)
         self._build_run_controls()
         self.control = ft.Column(
@@ -79,20 +87,9 @@ class SmartReviewRunPanel:
             scroll=ft.ScrollMode.AUTO,
             expand=True,
         )
+        self._start_scope_options_load()
 
     # ──────────────── 範圍控制項 ────────────────
-
-    def _source_options(self, version: str | None) -> tuple[list[tuple[str, str]], int]:
-        """依版本建立「目前生效來源」選項與預設值。"""
-        db = self.ctx.get_db()
-        codes_found = db.effective_source_codes(version) if db and version else ()
-        codes = tuple(dict.fromkeys((SMART_REVIEW_DEFAULT_SOURCE, *codes_found)))
-        catalog = getattr(db, "source_catalog", None)
-        pairs = [("__all__", "全部來源")] + [
-            (str(code), catalog.label(code) if catalog is not None else str(code))
-            for code in codes
-        ]
-        return pairs, SMART_REVIEW_DEFAULT_SOURCE
 
     def _build_scope_controls(
         self,
@@ -103,42 +100,56 @@ class SmartReviewRunPanel:
         query: str,
     ) -> None:
         """建立版本、模組、類型、來源、搜尋、模型與批次輸入。"""
-        db = self.ctx.get_db()
-        versions = db.versions() if db else []
         self.version_dd = kit.dropdown(
             label="遊戲版本", dense=True, width=170, on_select=self._on_version
         )
-        kit.set_dropdown_options(self.version_dd, [(v, v) for v in versions])
-        self.version_dd.value = version if version in versions else None
+        # 先用呼叫端的範圍建立可互動的畫面；完整清單由背景查詢補上，
+        # 避免點擊「智慧校對」時同步讀取大型資料庫。
+        kit.set_dropdown_options(
+            self.version_dd, [(version, version)] if version else []
+        )
+        self.version_dd.value = version
         self.mod_dd = kit.dropdown(
-            label="模組", dense=True, width=210, on_select=self._scope_changed
+            label="模組", dense=True, width=210, on_select=self._on_mod
         )
         self.kind_dd = kit.dropdown(
-            label="類型", dense=True, width=150, on_select=self._scope_changed
+            label="類型", dense=True, width=150, on_select=self._on_kind
         )
         self.source_dd = kit.dropdown(
             label="目前生效來源", dense=True, width=180, on_select=self._scope_changed
         )
-        mods = db.mods(self.version_dd.value) if db and self.version_dd.value else []
-        kinds = db.kinds(self.version_dd.value) if db and self.version_dd.value else []
+        initial_kind = kind or "__all__"
         kit.set_dropdown_options(
-            self.mod_dd, [("__all__", "全部模組"), *((m, m) for m in mods)]
+            self.kind_dd,
+            [("__all__", "全部類型")]
+            + ([(initial_kind, initial_kind)] if initial_kind != "__all__" else []),
         )
+        self.kind_dd.value = initial_kind
+        initial_mod = mod_id or "__all__"
         kit.set_dropdown_options(
-            self.kind_dd, [("__all__", "全部類型"), *((k, k) for k in kinds)]
+            self.mod_dd,
+            [("__all__", "全部模組")]
+            + ([(initial_mod, initial_mod)] if initial_mod != "__all__" else []),
         )
-        source_pairs, default_source = self._source_options(self.version_dd.value)
-        kit.set_dropdown_options(self.source_dd, source_pairs)
-        known_sources = {key for key, _label in source_pairs}
-        self.mod_dd.value = mod_id if mod_id in mods else "__all__"
-        self.kind_dd.value = kind if kind in kinds else "__all__"
-        self.source_dd.value = (
-            "__all__"
-            if effective_source is None
-            else str(effective_source)
-            if str(effective_source) in known_sources
-            else str(default_source)
+        self.mod_dd.value = initial_mod
+        initial_source = (
+            "__all__" if effective_source is None else str(effective_source)
         )
+        self._scope_sources_by_mod = {
+            None: ((int(effective_source),) if effective_source is not None else ()),
+        }
+        if initial_mod != "__all__":
+            self._scope_sources_by_mod[initial_mod] = self._scope_sources_by_mod[None]
+        kit.set_dropdown_options(
+            self.source_dd,
+            [("__all__", "全部來源")]
+            + (
+                [(initial_source, initial_source)]
+                if initial_source != "__all__"
+                else []
+            ),
+        )
+        self.source_dd.value = initial_source
         self.query_field = kit.text_field(
             "條目搜尋",
             value=query,
@@ -166,6 +177,123 @@ class SmartReviewRunPanel:
             on_change=lambda _e: self._update_estimate_text(),
         )
         self.estimate_text = ft.Text("", size=13, color=C.MUTED, selectable=True)
+
+    def _scope_query(self, version: str | None, kind: str | None):
+        """在背景工作中讀取版本、類型與未審核候選的範圍對照。"""
+        db = self.ctx.get_db()
+        if db is None:
+            return [], [], (), {None: ()}
+        versions = list(db.versions())
+        kinds = list(db.kinds(version)) if version else []
+        if not version:
+            return versions, kinds, (), {None: ()}
+        modules, sources_by_mod = db.smart_review_scope_options(
+            version=str(version),
+            kind=kind,
+            review_status="unreviewed",
+        )
+        return versions, kinds, modules, sources_by_mod
+
+    def _start_scope_options_load(self) -> None:
+        """背景載入範圍選項，避免開啟或切換條件時阻塞 UI 執行緒。"""
+        self._scope_seq += 1
+        seq = self._scope_seq
+        version = self.version_dd.value
+        kind = self.kind_dd.value
+        kind_value = None if kind in (None, "", "__all__") else str(kind)
+        self._scope_loading = True
+        self._total = None
+        self._estimate_seq += 1
+        self.estimate_text.value = "正在載入可用的模組與來源…"
+        self.estimate_text.color = C.MUTED
+        if self._attached:
+            self.ctx.update()
+
+        def work():
+            """執行範圍唯讀查詢，只回傳下拉選單需要的資料。"""
+            return self._scope_query(version, kind_value)
+
+        def done(result, error: str | None) -> None:
+            """只套用仍屬於最新範圍條件的背景結果。"""
+            if seq != self._scope_seq:
+                return
+            self._scope_loading = False
+            if error:
+                self.estimate_text.value = f"無法載入範圍選項：{error}"
+                self.estimate_text.color = C.RED
+                if self._attached:
+                    self.ctx.update()
+                return
+            versions, kinds, modules, sources_by_mod = result
+            self._apply_scope_options(versions, kinds, modules, sources_by_mod)
+            if self._attached:
+                self.refresh_estimate()
+            else:
+                self._update_estimate_text(update=False)
+
+        self.ctx.run_background(
+            work,
+            done,
+            name="載入智慧校對範圍選項",
+            presentation=OperationPresentation.MAINTENANCE,
+            still_valid=lambda: seq == self._scope_seq,
+        )
+
+    def _apply_scope_options(
+        self,
+        versions,
+        kinds,
+        modules,
+        sources_by_mod,
+    ) -> None:
+        """把背景查詢的版本、類型、模組與來源對照套用到控制項。"""
+        current_version = self.version_dd.value
+        kit.set_dropdown_options(self.version_dd, [(v, v) for v in versions])
+        self.version_dd.value = current_version if current_version in versions else None
+
+        current_kind = self.kind_dd.value
+        kind_options = [("__all__", "全部類型"), *((k, k) for k in kinds)]
+        kit.set_dropdown_options(self.kind_dd, kind_options)
+        kind_keys = {key for key, _label in kind_options}
+        self.kind_dd.value = current_kind if current_kind in kind_keys else "__all__"
+
+        self._scope_modules = tuple(modules)
+        self._scope_sources_by_mod = {
+            key: tuple(values) for key, values in sources_by_mod.items()
+        }
+        current_mod = self.mod_dd.value
+        mod_options = [
+            ("__all__", "全部模組"),
+            *((mod, mod) for mod in self._scope_modules),
+        ]
+        kit.set_dropdown_options(self.mod_dd, mod_options)
+        mod_keys = {key for key, _label in mod_options}
+        self.mod_dd.value = current_mod if current_mod in mod_keys else "__all__"
+        self._refresh_sources()
+
+    def _refresh_sources(self) -> None:
+        """依目前模組從已載入的對照表重建生效來源選單。"""
+        selected_mod = self.mod_dd.value
+        mod_key = None if selected_mod in (None, "", "__all__") else str(selected_mod)
+        codes = self._scope_sources_by_mod.get(mod_key, ())
+        catalog = self._source_catalog
+        source_options = [("__all__", "全部來源")] + [
+            (
+                str(code),
+                catalog.label(code) if catalog is not None else str(code),
+            )
+            for code in codes
+        ]
+        kit.set_dropdown_options(self.source_dd, source_options)
+        known_sources = {key for key, _label in source_options}
+        selected_source = self.source_dd.value
+        if selected_source not in known_sources:
+            selected_source = (
+                str(SMART_REVIEW_DEFAULT_SOURCE)
+                if str(SMART_REVIEW_DEFAULT_SOURCE) in known_sources
+                else "__all__"
+            )
+        self.source_dd.value = selected_source
 
     def _scope_controls(self) -> list[ft.Control]:
         """回傳啟動後需要鎖定的設定控制項。"""
@@ -351,28 +479,31 @@ class SmartReviewRunPanel:
     # ──────────────── 範圍與估算 ────────────────
 
     def _on_version(self, _e=None) -> None:
-        """版本變更時重建模組、類型與來源選項並重新估算。"""
-        version = self.version_dd.value
-        db = self.ctx.get_db()
-        mods = db.mods(version) if db and version else []
-        kinds = db.kinds(version) if db and version else []
-        kit.set_dropdown_options(
-            self.mod_dd, [("__all__", "全部模組"), *((m, m) for m in mods)]
-        )
-        kit.set_dropdown_options(
-            self.kind_dd, [("__all__", "全部類型"), *((k, k) for k in kinds)]
-        )
-        pairs, default_source = self._source_options(version)
-        kit.set_dropdown_options(self.source_dd, pairs)
+        """版本變更時重建候選模組、類型與來源選項並重新估算。"""
         self.mod_dd.value = "__all__"
         self.kind_dd.value = "__all__"
-        self.source_dd.value = str(default_source)
+        self.source_dd.value = "__all__"
+        self._start_scope_options_load()
+
+    def _on_mod(self, _e=None) -> None:
+        """模組變更時直接使用已載入的來源對照，不重查整個資料庫。"""
+        self._refresh_sources()
         self._scope_changed()
 
+    def _on_kind(self, _e=None) -> None:
+        """類型變更時重新過濾有候選的模組與來源。"""
+        self.mod_dd.value = "__all__"
+        self.source_dd.value = "__all__"
+        self._start_scope_options_load()
+
     def _scope_changed(self, _e=None) -> None:
-        """任何範圍條件變更後，丟棄舊的筆數並重新查詢。"""
+        """範圍變更後立即清除舊筆數，再以短暫 debounce 背景重新估算。"""
         self._total = None
-        self.refresh_estimate()
+        self._estimate_seq += 1
+        if self._scope_loading:
+            self._update_estimate_text()
+            return
+        self._scope_debounce.call(self.refresh_estimate)
 
     def _scope_values(self) -> tuple[str | None, str | None, int | None, str]:
         """讀取模組、類型、來源與搜尋條件，並把「全部」轉成 None。"""
@@ -390,7 +521,7 @@ class SmartReviewRunPanel:
         """在背景以唯讀查詢計算符合條件的候選筆數。"""
         database = self.ctx.database()
         version = self.version_dd.value
-        if self.job.running or database is None or not version:
+        if self._scope_loading or self.job.running or database is None or not version:
             self._update_estimate_text()
             return
         path, priority = database
@@ -420,7 +551,7 @@ class SmartReviewRunPanel:
                 self.estimate_text.value = f"無法計算候選筆數：{error}"
             else:
                 self._total = int(total or 0)
-                self._update_estimate_text()
+                self._update_estimate_text(update=False)
             self.ctx.update()
 
         self.ctx.run_background(
@@ -438,11 +569,14 @@ class SmartReviewRunPanel:
             return None
         return value if value >= minimum else None
 
-    def _update_estimate_text(self) -> None:
+    def _update_estimate_text(self, *, update: bool = True) -> None:
         """依目前筆數、上限與每批大小更新估算文字，不查詢資料庫。"""
         limit = self._read_int(self.limit_field, minimum=0)
         batch = self._read_int(self.batch_field)
-        if limit is None or batch is None:
+        if self._scope_loading:
+            self.estimate_text.value = "正在載入可用的模組與來源…"
+            self.estimate_text.color = C.MUTED
+        elif limit is None or batch is None:
             self.estimate_text.value = (
                 "上限必須是 0 或正整數；每批必須是大於 0 的整數。"
             )
@@ -466,7 +600,8 @@ class SmartReviewRunPanel:
                 f"（每批最多 {SMART_REVIEW_MAX_BATCH_SIZE} 筆）。"
             )
             self.estimate_text.color = C.MUTED
-        self.ctx.update()
+        if update:
+            self.ctx.update()
 
     # ──────────────── 啟動、停止與狀態 ────────────────
 
@@ -538,6 +673,7 @@ class SmartReviewRunPanel:
 
     def attach(self) -> None:
         """視窗開啟時接續任務狀態：執行中就恢復進度，已結束就顯示結果。"""
+        self._attached = True
         self.job.add_finish_listener(self._on_finished)
         state = self.job.state
         if state.phase == "running":
@@ -547,12 +683,23 @@ class SmartReviewRunPanel:
         elif state.phase in {"done", "failed"}:
             self._sync_log()
             self._render_finished(state)
-            self.refresh_estimate()
+            if not self._scope_loading:
+                self.refresh_estimate()
+            else:
+                self._update_estimate_text()
         else:
-            self.refresh_estimate()
+            if not self._scope_loading:
+                self.refresh_estimate()
+            else:
+                self._update_estimate_text()
 
     def detach(self) -> None:
         """視窗關閉時停止輪詢並取消登記；背景任務本身不受影響。"""
+        self._attached = False
+        self._scope_debounce.cancel()
+        self._debounce.cancel()
+        self._scope_seq += 1
+        self._estimate_seq += 1
         self._poller.stop()
         self.job.remove_finish_listener(self._on_finished)
 

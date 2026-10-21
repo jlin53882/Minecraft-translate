@@ -81,6 +81,7 @@ def scan_species_candidates(
     *,
     mod_id: str | None = None,
     kind: str | None = None,
+    effective_source: int | None = None,
     require_key_hint: bool = True,
 ) -> SpeciesScanResult:
     """找出指定版本／模組／類型中所有可能是學名的條目。
@@ -94,6 +95,7 @@ def scan_species_candidates(
         version=version,
         mod_id=mod_id,
         kind=kind,
+        source=effective_source,
         quality=QualityFilter(
             status="species_name" if require_key_hint else "species_format"
         ),
@@ -103,6 +105,54 @@ def scan_species_candidates(
         _candidate_from_row(row, require_key_hint=require_key_hint) for row in rows
     )
     return SpeciesScanResult(tuple(c for c in candidates if c is not None))
+
+
+def species_scope_options(
+    db: TranslationDB | None,
+    version: str | None,
+    *,
+    kind: str | None = None,
+    require_key_hint: bool = True,
+) -> tuple[tuple[str, ...], dict[str | None, tuple[int, ...]]]:
+    """取得含學名候選的模組與目前生效來源對照。
+
+    ``None`` 模組鍵代表全部模組；模組清單沿用掃描的品質預篩，
+    來源只列出候選實際具有的目前生效來源，沒有生效譯文的候選仍保留在模組清單。
+    """
+    if db is None or not version:
+        return (), {None: ()}
+    criteria = EntryFilter(
+        version=version,
+        kind=kind,
+        quality=QualityFilter(
+            status="species_name" if require_key_hint else "species_format"
+        ),
+    )
+    rows, _total = db.list_entries(criteria=criteria, limit=None)
+    modules: list[str] = []
+    sources_by_mod: dict[str, set[int]] = {}
+    all_sources: set[int] = set()
+    for row in rows:
+        if _candidate_from_row(row, require_key_hint=require_key_hint) is None:
+            continue
+        mod_id = str(row.mod_id)
+        if mod_id not in sources_by_mod:
+            modules.append(mod_id)
+            sources_by_mod[mod_id] = set()
+        if row.source is not None:
+            source = int(row.source)
+            sources_by_mod[mod_id].add(source)
+            all_sources.add(source)
+    return (
+        tuple(modules),
+        {
+            None: tuple(sorted(all_sources)),
+            **{
+                mod_id: tuple(sorted(sources))
+                for mod_id, sources in sources_by_mod.items()
+            },
+        },
+    )
 
 
 __all__ = [
@@ -121,4 +171,5 @@ __all__ = [
     "lookup_species",
     "lookup_species_name",
     "scan_species_candidates",
+    "species_scope_options",
 ]

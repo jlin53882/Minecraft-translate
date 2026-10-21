@@ -22,6 +22,8 @@ from translation_tool.translation_db import (
 from translation_tool.translation_db.schema import SRC_AI
 from translation_tool.translation_db.smart_review import (
     SMART_REVIEW_DEFAULT_BATCH_SIZE as _SMART_REVIEW_DEFAULT_BATCH_SIZE,
+)
+from translation_tool.translation_db.smart_review import (
     SMART_REVIEW_MAX_BATCH_SIZE as _SMART_REVIEW_MAX_BATCH_SIZE,
 )
 from translation_tool.translation_db.smart_review import (
@@ -173,6 +175,30 @@ def list_moddb_smart_review_candidates_from_path(
         db.close()
 
 
+def load_moddb_smart_review_candidate_page_from_path(
+    path: str | Path,
+    priority: tuple[int, ...],
+    run_id: str,
+    *,
+    status: str | None = None,
+    limit: int | None = None,
+    offset: int = 0,
+    known_total: int | None = None,
+) -> tuple[int, list[SmartReviewCandidate]]:
+    """在單次唯讀連線中取得候選總數與目前頁面的候選。"""
+    db = _open(path, priority, readonly=True)
+    try:
+        return db.load_smart_review_candidate_page(
+            run_id,
+            status=status,
+            limit=limit,
+            offset=offset,
+            known_total=known_total,
+        )
+    finally:
+        db.close()
+
+
 def count_moddb_smart_review_candidates_for_run_from_path(
     path: str | Path,
     priority: tuple[int, ...],
@@ -313,6 +339,7 @@ __all__ = [
     "get_moddb_smart_review_run_from_path",
     "list_moddb_smart_review_candidates_from_path",
     "list_moddb_smart_review_runs_from_path",
+    "load_moddb_smart_review_candidate_page_from_path",
     "preview_moddb_smart_review_from_path",
     "reject_moddb_smart_review_candidate_from_path",
     "run_moddb_smart_review_from_path",

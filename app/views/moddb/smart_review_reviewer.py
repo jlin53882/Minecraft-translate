@@ -9,10 +9,9 @@ import flet as ft
 from app.services_impl.moddb_smart_review_service import (
     SmartReviewCandidate,
     apply_moddb_smart_review_candidate_from_path,
-    count_moddb_smart_review_candidates_for_run_from_path,
     get_moddb_smart_review_run_breakdown_from_path,
     get_moddb_smart_review_run_from_path,
-    list_moddb_smart_review_candidates_from_path,
+    load_moddb_smart_review_candidate_page_from_path,
     reject_moddb_smart_review_candidate_from_path,
     save_moddb_smart_review_draft_from_path,
     smart_review_format_diagnostics,
@@ -258,7 +257,18 @@ class SmartReviewReviewer:
         )
         kit.set_dropdown_options(self.filter_dd, list(FILTERS))
         self.filter_dd.value = DEFAULT_FILTER
-        self.position_text = ft.Text("", size=13, weight=ft.FontWeight.W_600)
+        self.position_input = kit.text_field(
+            value="",
+            width=72,
+            tooltip="輸入筆次後按 Enter 跳轉",
+            on_submit=self._on_position_submit,
+        )
+        self.position_suffix = ft.Text("", size=13, weight=ft.FontWeight.W_600)
+        self.position_control = ft.Row(
+            [ft.Text("第", size=13), self.position_input, self.position_suffix],
+            spacing=2,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+        )
         self.summary_text = ft.Text("", size=12, color=C.MUTED, selectable=True)
         self.run_text = ft.Text("", size=11.5, color=C.DIM, selectable=True)
         self.progress_bar = kit.progress_bar(0.0, "em", height=5)
@@ -296,7 +306,7 @@ class SmartReviewReviewer:
                         self.filter_dd,
                         self.prev_btn,
                         self.next_btn,
-                        self.position_text,
+                        self.position_control,
                     ],
                     spacing=10,
                     wrap=True,
@@ -377,7 +387,7 @@ class SmartReviewReviewer:
 
         self.ctx.run_background(work, done, name="更新智慧校對統計")
 
-    def load_position(self) -> None:
+    def load_position(self, *, refresh_total: bool = True) -> None:
         """依目前篩選與位置載入單筆候選（每頁一筆）。"""
         database = self.ctx.database()
         if database is None or not self.run_id:
@@ -386,27 +396,23 @@ class SmartReviewReviewer:
         run_id = self.run_id
         status = None if self.status_filter == "all" else self.status_filter
         position = max(0, self.position)
+        known_total = None if refresh_total else self.total
         self._seq += 1
         seq = self._seq
+        self.set_busy(True)
+        self.ctx.update()
 
         def work() -> tuple[int, list[SmartReviewCandidate]]:
-            """取得篩選後的總數與目前位置的那一筆。"""
-            total = count_moddb_smart_review_candidates_for_run_from_path(
-                path, priority, run_id, status=status
+            """在一次唯讀操作中取得總數與目前位置的那一筆。"""
+            return load_moddb_smart_review_candidate_page_from_path(
+                path,
+                priority,
+                run_id,
+                status=status,
+                limit=1,
+                offset=position,
+                known_total=known_total,
             )
-            rows = (
-                list_moddb_smart_review_candidates_from_path(
-                    path,
-                    priority,
-                    run_id,
-                    status=status,
-                    limit=1,
-                    offset=min(position, total - 1),
-                )
-                if total
-                else []
-            )
-            return total, rows
 
         def done(result, error: str | None) -> None:
             """顯示該筆；位置超出範圍時退回最後一筆。"""
@@ -457,7 +463,8 @@ class SmartReviewReviewer:
     def _show_empty(self, title: str, subtitle: str = "") -> None:
         """顯示空狀態，並停用所有動作。"""
         self.row = None
-        self.position_text.value = ""
+        self.position_input.value = ""
+        self.position_suffix.value = ""
         self.progress_bar.value = 0.0
         self.body.controls = [
             kit.empty_state(title, subtitle, icon=ft.Icons.RATE_REVIEW_OUTLINED)
@@ -485,8 +492,9 @@ class SmartReviewReviewer:
                 "可以切換審查篩選查看其他狀態。",
             )
             return
-        self.position_text.value = (
-            f"第 {self.position + 1:,} / {self.total:,} 筆"
+        self.position_input.value = str(self.position + 1)
+        self.position_suffix.value = (
+            f" / {self.total:,} 筆"
             f"（{STATUS_LABEL.get(self.status_filter, self.status_filter)}）"
         )
         self.progress_bar.value = (self.position + 1) / self.total if self.total else 0
@@ -666,6 +674,7 @@ class SmartReviewReviewer:
         self.next_btn.disabled = (
             not has_row or self.position >= self.total - 1 or self.busy
         )
+        self.position_input.disabled = not has_row or self.busy
         self.filter_dd.disabled = self.busy or not self.run_id
         self.hint_text.value = reason or ""
 
@@ -678,12 +687,16 @@ class SmartReviewReviewer:
 
     def _on_filter(self, event) -> None:
         """切換審查篩選並回到第一筆。"""
+        if self.busy:
+            return
         self.status_filter = str(event.control.value or "all")
         self.position = 0
         self._flush_then(self.load_position)
 
     def _move(self, delta: int) -> None:
         """移到上一筆或下一筆；到頭時說明原因。"""
+        if self.busy:
+            return
         target = self.position + delta
         if target < 0 or target >= self.total:
             show_snack(
@@ -697,9 +710,46 @@ class SmartReviewReviewer:
         def go() -> None:
             """在草稿處理完後載入目標位置。"""
             self.position = target
-            self.load_position()
+            self.load_position(refresh_total=False)
 
         self._flush_then(go)
+
+    def _on_position_submit(self, event) -> None:
+        """解析手動輸入的 1-based 筆次，完成驗證後跳到指定候選。"""
+        if self.busy:
+            return
+        raw = str(event.control.value or "").strip()
+        try:
+            target = int(raw)
+        except (TypeError, ValueError):
+            target = 0
+        if self.total <= 0 or not self.row:
+            self._restore_position_input()
+            return
+        if target < 1 or target > self.total:
+            show_snack(
+                self.ctx.page,
+                f"請輸入 1～{self.total:,} 的筆次。",
+                C.GOLD,
+                duration=2200,
+            )
+            self._restore_position_input()
+            return
+        if target - 1 == self.position:
+            self._restore_position_input()
+            return
+
+        def go() -> None:
+            """在草稿處理完後載入手動指定的位置。"""
+            self.position = target - 1
+            self.load_position(refresh_total=False)
+
+        self._flush_then(go)
+
+    def _restore_position_input(self) -> None:
+        """把筆次輸入框還原成目前實際顯示的位置。"""
+        self.position_input.value = str(self.position + 1) if self.row else ""
+        self.ctx.update()
 
     def _dirty(self) -> bool:
         """草稿是否與已儲存內容不同且可儲存。"""
@@ -846,4 +896,6 @@ class SmartReviewReviewer:
             show_snack(self.ctx.page, message, color)
         if status == "applied" and notify_parent and callable(self.on_changed):
             self.on_changed()
+        self.set_busy(True)
+        self.ctx.update()
         self.reload_counts(then=self.load_position)

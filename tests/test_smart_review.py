@@ -14,6 +14,7 @@ from translation_tool.translation_db import (
     KIND_GUIDE,
     KIND_LANG,
     KIND_PATCHOULI,
+    ScanItem,
     TranslationDB,
     WriteBackItem,
 )
@@ -86,6 +87,43 @@ def test_snapshot_uses_implicit_unreviewed_for_non_manual_sources(db):
     assert [item.key for item in snapshots] == ["bye", "hello"]
     assert all(item.review_status == "unreviewed" for item in snapshots)
     assert all(item.effective_source != SRC_MANUAL for item in snapshots)
+
+
+def test_smart_review_scope_options_only_show_unreviewed_modules_and_sources(db):
+    """智慧校對範圍選單只列未審核候選，且來源會隨模組分組。"""
+    db.write_back(
+        "1.21.1",
+        [WriteBackItem(KIND_LANG, "jar_mod", "jar", "Jar", "罐")],
+        fill_other_versions=False,
+    )
+    db.ingest(
+        "1.21.1",
+        [
+            ScanItem(
+                KIND_LANG,
+                "jar_mod",
+                "jar_source",
+                "Jar source",
+                "來源",
+                source=SRC_JAR_TW,
+            )
+        ],
+    )
+    reviewed = next(
+        row
+        for row in db.list_entries("1.21.1")[0]
+        if row.mod_id == "jar_mod" and row.key == "jar"
+    )
+    db.review_manual(reviewed.id, expected_zh_tw="罐", propagate=False)
+
+    modules, sources_by_mod = db.smart_review_scope_options(
+        version="1.21.1", kind=KIND_LANG
+    )
+
+    assert modules == ("demo", "jar_mod")
+    assert sources_by_mod["demo"] == (SRC_AI,)
+    assert sources_by_mod["jar_mod"] == (SRC_JAR_TW,)
+    assert sources_by_mod[None] == (SRC_AI, SRC_JAR_TW)
 
 
 def test_smart_review_limit_zero_selects_all_candidates(db):
@@ -749,6 +787,59 @@ def test_run_persists_candidates_without_writing_translation(db, monkeypatch):
     )
     assert db._q("SELECT COUNT(*) FROM smart_review_run")[0][0] == 0
     assert db._q("SELECT COUNT(*) FROM smart_review_candidate")[0][0] == 0
+
+
+def test_smart_review_candidate_page_reads_json_once_for_total_and_row(db, monkeypatch):
+    """驗證審查器換筆時可用一次 JSON 讀取取得總數與候選。"""
+    from translation_tool.translation_db.smart_review_history import (
+        SmartReviewHistoryStore,
+    )
+
+    snapshots = [
+        SmartReviewSnapshot(
+            run_id="",
+            ordinal=ordinal,
+            entry_id=ordinal,
+            kind=KIND_LANG,
+            mc_version="1.21.1",
+            mod_id="demo",
+            key=f"key{ordinal}",
+            en_us=f"Text {ordinal}",
+            current_zh_tw=f"文字 {ordinal}",
+            effective_source=SRC_AI,
+            review_status="unreviewed",
+            effective_revision=1,
+        )
+        for ordinal in range(1, 4)
+    ]
+    store = SmartReviewHistoryStore(db.path)
+    run_id = store.create_run(
+        snapshots,
+        provider="gemini",
+        model="test-model",
+        version="1.21.1",
+        requested_limit=3,
+        batch_size=3,
+    )
+    reads = 0
+    original_read = SmartReviewHistoryStore._read_unlocked
+
+    def counted_read(history, value):
+        """計算同一頁查詢實際讀取批次 JSON 的次數。"""
+        nonlocal reads
+        reads += 1
+        return original_read(history, value)
+
+    monkeypatch.setattr(SmartReviewHistoryStore, "_read_unlocked", counted_read)
+    total, rows = db.load_smart_review_candidate_page(
+        run_id,
+        limit=1,
+        offset=1,
+    )
+
+    assert total == 3
+    assert [row.ordinal for row in rows] == [2]
+    assert reads == 1
 
 
 def test_smart_review_run_history_merges_legacy_pages_without_double_offset(db):

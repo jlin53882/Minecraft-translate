@@ -13,6 +13,7 @@ from app.tasks.operation_registry import (
     CancellationPolicy,
     CommitPolicy,
     DurabilityPolicy,
+    OperationPresentation,
     ShutdownPolicy,
     launch_page_operation,
 )
@@ -119,6 +120,7 @@ class SmartReviewContext:
         name: str,
         commit: CommitPolicy = CommitPolicy.EPHEMERAL,
         durability: DurabilityPolicy = DurabilityPolicy.RECOMPUTABLE,
+        presentation: OperationPresentation = OperationPresentation.USER_VISIBLE,
         stable_identity: bool = False,
         still_valid: Callable[[], bool] | None = None,
     ) -> bool:
@@ -161,6 +163,7 @@ class SmartReviewContext:
                 commit=commit,
                 durability=durability,
                 shutdown=ShutdownPolicy.CANCEL_AND_DRAIN,
+                presentation=presentation,
             )
         except (AttributeError, RuntimeError) as exc:
             self.post(deliver, None, f"操作未啟動：{exc}")

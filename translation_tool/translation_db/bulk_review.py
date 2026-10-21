@@ -27,6 +27,83 @@ _ID_CHUNK = 5000
 class BulkReviewMixin:
     """``TranslationDB`` 的批量審核方法（使用其連線、交易與審核預覽）。"""
 
+    def bulk_review_scope_options(
+        self,
+        version: str,
+        *,
+        quality_pass_only: bool = True,
+    ) -> tuple[tuple[str, ...], dict[str | None, tuple[int, ...]]]:
+        """取得目前版本中真正有未審核候選的模組與來源對照。
+
+        回傳的 ``None`` 模組鍵代表全部模組；查詢沿用批量審核候選的條件，
+        因此不會把只有已審核條目的模組或沒有目前譯文的來源顯示在選單中。
+        """
+        rows = self._bulk_review_scope_rows(version, quality_pass_only)
+        modules: list[str] = []
+        sources_by_mod: dict[str, set[int]] = {}
+        all_sources: set[int] = set()
+        for mod_value, source_value in rows:
+            mod_id = str(mod_value)
+            if mod_id not in sources_by_mod:
+                modules.append(mod_id)
+                sources_by_mod[mod_id] = set()
+            if source_value is not None:
+                source = int(source_value)
+                sources_by_mod[mod_id].add(source)
+                all_sources.add(source)
+        return (
+            tuple(modules),
+            {
+                None: tuple(sorted(all_sources)),
+                **{
+                    mod_id: tuple(sorted(sources))
+                    for mod_id, sources in sources_by_mod.items()
+                },
+            },
+        )
+
+    def _bulk_review_scope_rows(
+        self,
+        version: str,
+        quality_pass_only: bool,
+    ) -> list[tuple[str, int | None]]:
+        """只查選單所需的模組／來源欄位，避免建立完整候選物件。
+
+        批量審核預覽仍需要完整 ``BulkReviewCandidate``；範圍選單只需要
+        ``mod_id`` 與生效來源。品質旗標可用時直接沿 SQL 條件篩選；舊資料庫
+        尚未完成旗標重算時，退回原本的完整候選判斷，確保結果不因最佳化而改變。
+        """
+        criteria = EntryFilter(
+            version=version,
+            review_status="unreviewed",
+            quality=QualityFilter(status="consistent")
+            if quality_pass_only
+            else QualityFilter(),
+        )
+        condition, params = self._filter_sql(criteria)
+        if quality_pass_only:
+            if not self._quality_flags_ready():
+                candidates = self._bulk_review_candidates(
+                    version,
+                    None,
+                    quality_pass_only,
+                )
+                return [
+                    (candidate.mod_id, candidate.source) for candidate in candidates
+                ]
+            condition += " AND " + self._quality_prefilter_sql(
+                criteria.quality, flags_ready=True
+            )
+        # 與 _bulk_review_candidates 相同：空白譯文不應出現在範圍選單。
+        condition += " AND f.zh_tw IS NOT NULL AND trim(f.zh_tw) <> ''"
+        rows = self._q(
+            "SELECT DISTINCT e.mod_id, f.source "
+            + self._query_source()
+            + f" WHERE {condition} ORDER BY e.mod_id, f.source",
+            params,
+        )
+        return [(str(mod_id), source) for mod_id, source in rows]
+
     def _bulk_review_candidates(
         self,
         version: str,

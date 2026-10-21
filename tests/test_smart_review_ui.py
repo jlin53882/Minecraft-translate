@@ -27,7 +27,13 @@ from app.views.moddb.smart_review_reviewer import (
 )
 from tests.conftest import mock_page
 from tests.test_smart_review import _seed
-from translation_tool.translation_db import SmartReviewCandidate, TranslationDB
+from translation_tool.translation_db import (
+    KIND_LANG,
+    ScanItem,
+    SmartReviewCandidate,
+    TranslationDB,
+)
+from translation_tool.translation_db.schema import SRC_JAR_TW
 
 
 def _sync_page():
@@ -114,6 +120,58 @@ def test_dialog_builds_three_panels_with_defaults(db, monkeypatch):
     assert dialog.nav.value == "run"
     visible = {name: control.visible for name, control in dialog._panels.items()}
     assert visible == {"run": True, "review": False, "history": False}
+
+
+def test_run_panel_filters_modules_and_updates_sources_without_starting(
+    db, monkeypatch
+):
+    """智慧校對選擇模組時更新來源，但不會自動開始任務。"""
+    db.ingest(
+        "1.21.1",
+        [
+            ScanItem(
+                KIND_LANG,
+                "jar_mod",
+                "jar",
+                "Jar",
+                "罐",
+                source=SRC_JAR_TW,
+            )
+        ],
+    )
+
+    from app.views.moddb.smart_review_dialog import SmartReviewDialog
+
+    original_scope_options = db.smart_review_scope_options
+    scope_calls = []
+
+    def scope_options(**kwargs):
+        scope_calls.append(kwargs)
+        return original_scope_options(**kwargs)
+
+    monkeypatch.setattr(db, "smart_review_scope_options", scope_options)
+    dialog = SmartReviewDialog(_sync_page(), lambda: db, "1.21.1", None)
+    panel = dialog.run_panel
+    assert len(scope_calls) == 1
+
+    assert {option.key for option in panel.mod_dd.options} == {
+        "__all__",
+        "demo",
+        "jar_mod",
+    }
+    panel.mod_dd.value = "jar_mod"
+    # 這個測試頁面用 asyncio.run 立即執行 run_task；避免 debounce callback
+    # 在 callback 內再次呼叫 run_background 時巢狀建立 event loop。
+    panel._scope_debounce.call = lambda *_args, **_kwargs: None
+    panel._on_mod()
+    assert len(scope_calls) == 1
+
+    assert [option.key for option in panel.source_dd.options] == [
+        "__all__",
+        str(SRC_JAR_TW),
+    ]
+    assert panel.job.running is False
+    assert panel.start_btn.disabled is False
 
 
 def test_run_panel_shows_scope_count_when_attached(db, monkeypatch):
@@ -590,6 +648,23 @@ class _FakeService:
         rows = self._filtered(status)
         return rows[offset : offset + limit]
 
+    def page(
+        self,
+        _path,
+        _priority,
+        _run_id,
+        *,
+        status=None,
+        limit=None,
+        offset=0,
+        known_total=None,
+    ):
+        """記錄一次總數與候選頁查詢，模擬共用唯讀連線。"""
+        rows = self._filtered(status)
+        total = len(rows) if known_total is None else known_total
+        self.calls.append(("page", status, limit, offset, known_total))
+        return total, rows[offset : offset + limit]
+
     def get_run(self, _path, _priority, run_id):
         """回傳批次資訊。"""
         return {"id": run_id, "provider": "gemini", "model": "m", "started_at": "t"}
@@ -616,11 +691,8 @@ def reviewer(ctx, monkeypatch):
     fake = _FakeService(rows)
     monkeypatch.setattr(
         reviewer_module,
-        "count_moddb_smart_review_candidates_for_run_from_path",
-        fake.count,
-    )
-    monkeypatch.setattr(
-        reviewer_module, "list_moddb_smart_review_candidates_from_path", fake.list
+        "load_moddb_smart_review_candidate_page_from_path",
+        fake.page,
     )
     monkeypatch.setattr(
         reviewer_module, "get_moddb_smart_review_run_from_path", fake.get_run
@@ -646,8 +718,9 @@ def test_reviewer_defaults_to_ready_queue_with_one_item_per_page(reviewer):
     assert reviewer.status_filter == "ready"
     assert reviewer.total == 2
     assert reviewer.row.ordinal == 2
-    assert reviewer.position_text.value == "第 1 / 2 筆（可套用）"
-    assert reviewer.fake.calls[-1] == ("list", "ready", 1, 0)
+    assert reviewer.position_input.value == "1"
+    assert reviewer.position_suffix.value == " / 2 筆（可套用）"
+    assert reviewer.fake.calls[-1] == ("page", "ready", 1, 0, None)
     labels = [option.text for option in reviewer.filter_dd.options]
     assert labels[0] == "可套用（2）"
     assert "全部（4）" in labels
@@ -658,7 +731,7 @@ def test_reviewer_next_and_previous_move_one_item_at_a_time(reviewer):
     reviewer.load_run("run-1")
     reviewer._move(1)
     assert reviewer.row.ordinal == 3
-    assert reviewer.fake.calls[-1] == ("list", "ready", 1, 1)
+    assert reviewer.fake.calls[-1] == ("page", "ready", 1, 1, 2)
     assert reviewer.next_btn.disabled is True
     reviewer._move(1)
     assert reviewer.ctx.page.snacks[-1] == "已經是最後一筆。"
@@ -666,6 +739,35 @@ def test_reviewer_next_and_previous_move_one_item_at_a_time(reviewer):
     assert reviewer.row.ordinal == 2
     reviewer._move(-1)
     assert reviewer.ctx.page.snacks[-1] == "已經是第一筆。"
+
+
+def test_reviewer_accepts_manual_position_and_reuses_known_total(reviewer):
+    """驗證可輸入筆次跳轉，且換筆時沿用已取得的篩選總數。"""
+    reviewer.load_run("run-1")
+    reviewer.status_filter = "all"
+    reviewer.position = 0
+    reviewer.load_position()
+
+    reviewer.position_input.value = "3"
+    reviewer._on_position_submit(SimpleNamespace(control=reviewer.position_input))
+
+    assert reviewer.row.ordinal == 3
+    assert reviewer.position_input.value == "3"
+    assert reviewer.position_suffix.value == " / 4 筆（全部）"
+    assert reviewer.fake.calls[-1] == ("page", None, 1, 2, 4)
+
+
+def test_reviewer_ignores_navigation_while_position_is_loading(reviewer):
+    """驗證背景載入期間連點不會再排入下一個位置查詢。"""
+    reviewer.load_run("run-1")
+    reviewer.set_busy(True)
+
+    reviewer._move(1)
+
+    assert reviewer.position == 0
+    assert reviewer.row.ordinal == 2
+    assert reviewer.next_btn.disabled is True
+    assert reviewer.position_input.disabled is True
 
 
 def test_reviewer_falls_back_to_all_when_nothing_is_ready(ctx, reviewer):
