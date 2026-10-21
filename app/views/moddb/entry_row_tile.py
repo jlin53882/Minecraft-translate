@@ -14,6 +14,7 @@ from app.ui import design, kit
 from app.ui.design import C
 from app.views.moddb.format_issue_rendering import quality_issue_summary
 from app.views.moddb.formatting import STATE_TONES, shorten
+from app.views.moddb.smart_review_marks import smart_review_mark_chip
 
 
 def build_entry_tile(panel, row, *, catalog=None) -> ft.Control:
@@ -62,6 +63,7 @@ def _tile_text(panel, row, catalog) -> ft.Control:
                         expand=True,
                     ),
                     *_source_controls(row, catalog),
+                    *_smart_review_controls(panel, row),
                     *_quality_controls(row),
                 ],
                 spacing=6,
@@ -84,6 +86,11 @@ def _source_controls(row, catalog) -> list[ft.Control]:
             kit.chip(badge, "em" if row.review_status == "reviewed" else "gold")
         )
     return chips
+
+
+def _smart_review_controls(panel, row) -> list[ft.Control]:
+    chip = smart_review_mark_chip(getattr(panel, "smart_review_marks", {}).get(row.id))
+    return [chip] if chip is not None else []
 
 
 def _quality_controls(row) -> list[ft.Control]:

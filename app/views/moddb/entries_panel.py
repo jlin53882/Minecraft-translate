@@ -23,6 +23,7 @@ from app.services_impl.moddb_service import (
     TranslationDB,
     current_settings,
 )
+from app.services_impl.moddb_smart_review_service import SmartReviewMark
 from app.services_impl.moddb_source_service import (
     REVIEW_BADGE_LABELS,
     source_catalog_for,
@@ -65,6 +66,7 @@ from app.views.moddb.formatting import (
 from app.views.moddb.history_renderer import render_history
 from app.views.moddb.mc_text_preview import MinecraftTextPreview
 from app.views.moddb.review_scope_dialog import ReviewScopeController
+from app.views.moddb.smart_review_marks import smart_review_mark_chip
 from app.views.moddb.source_filter import SourceFilter
 from app.views.moddb.species_suggestion import (
     TAB_KEY as SPECIES_TAB_KEY,
@@ -122,6 +124,8 @@ class EntriesPanel(ft.Column):
         self.query = ""
         self.query_field = "all"
         self.rows: list[EntryRow] = []
+        # 目前這一頁條目在最近一次智慧校對批次的處理狀態（entry_id -> mark）
+        self.smart_review_marks: dict[int, SmartReviewMark] = {}
         self.total = 0
         self._list_error: str | None = None
         self.selected: EntryRow | None = None
@@ -201,6 +205,7 @@ class EntriesPanel(ft.Column):
         )
         self.source_chip = ft.Container()
         self.review_chip = ft.Container()
+        self.smart_chip = ft.Container()
         self.token_hint = ft.Text("", size=12, color=C.GOLD, visible=False)
         self.mc_preview = MinecraftTextPreview()
         self.meta_col = ft.Column(spacing=4)
@@ -400,6 +405,7 @@ class EntriesPanel(ft.Column):
             apply_filter_options(self, snapshot)
 
         self.rows = snapshot.get("rows", [])
+        self.smart_review_marks = snapshot.get("smart_review_marks", {})
         self.total = snapshot.get("total", 0)
         self._list_error = snapshot.get("list_error") or snapshot.get("error")
         self.advanced_filters.error_text.value = self._list_error or ""
@@ -464,6 +470,7 @@ class EntriesPanel(ft.Column):
         )
         if db is None or not self.version:
             self.rows, self.total = [], 0
+            self.smart_review_marks = {}
             self._list_error = None
         else:
             self._list_error = None
@@ -478,6 +485,7 @@ class EntriesPanel(ft.Column):
                 self._list_error = str(exc)
                 self.advanced_filters.error_text.value = str(exc)
                 self.advanced_filters.error_text.visible = True
+            self.smart_review_marks = db.smart_review_marks([r.id for r in self.rows])
             if not self.rows and self.total and page > 1:
                 # 最後一頁的最後一筆被處理掉：退回仍有資料的最後一頁
                 return self._load_list(
@@ -619,11 +627,14 @@ class EntriesPanel(ft.Column):
             if badge
             else None
         )
+        self.smart_chip.content = smart_review_mark_chip(
+            self.smart_review_marks.get(entry.id)
+        )
         self.meta_col.controls = build_entry_metadata(detail)
         self.format_review.render(
             entry.en_us or NO_SOURCE_TEXT,
             self.tw_field.value or "",
-            metadata=[self.source_chip, self.review_chip],
+            metadata=[self.source_chip, self.review_chip, self.smart_chip],
             kind=entry.kind,
         )
         if calculate_impact:
@@ -808,7 +819,7 @@ class EntriesPanel(ft.Column):
             entry.en_us if entry else "",
             text,
             diff_result,
-            metadata=[self.source_chip, self.review_chip],
+            metadata=[self.source_chip, self.review_chip, self.smart_chip],
             kind=entry.kind if entry else "lang",
         )
 

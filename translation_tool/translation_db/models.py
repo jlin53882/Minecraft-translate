@@ -462,6 +462,15 @@ class SmartReviewCandidate:
 
 
 @dataclass(frozen=True)
+class SmartReviewMark:
+    """最近一次智慧校對批次對單一條目的處理狀態，供條目列顯示。"""
+
+    run_id: str
+    status: str
+    validation_error: str | None = None
+
+
+@dataclass(frozen=True)
 class SmartReviewRunResult:
     """單次有界智慧校對執行的彙總結果。"""
 

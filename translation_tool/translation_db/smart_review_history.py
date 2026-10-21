@@ -144,6 +144,9 @@ class SmartReviewHistoryStore:
 
     _locks_guard = threading.Lock()
     _locks: ClassVar[dict[Path, threading.RLock]] = {}
+    _marks_cache: ClassVar[
+        dict[Path, tuple[tuple[int, int], str, str, dict[int, tuple[str, str | None]]]]
+    ] = {}
 
     def __init__(self, db_path: str | Path) -> None:
         """初始化此測試替身或服務物件所需的狀態。"""
@@ -371,6 +374,70 @@ class SmartReviewHistoryStore:
             ),
             reverse=True,
         )
+
+    def latest_run_marks(self) -> tuple[str | None, dict[int, tuple[str, str | None]]]:
+        """回傳最近一次批次的 ``entry_id -> (狀態, 驗證錯誤)``，供條目列顯示狀態。
+
+        每個批次檔以 (mtime, size) 為鍵快取解析結果，所以頻繁換頁只多做檔案 stat，
+        批次被套用或改寫後才會重新解析。
+        """
+        if not self.directory.is_dir():
+            return None, {}
+        latest: (
+            tuple[tuple[str, int, str], str, dict[int, tuple[str, str | None]]] | None
+        ) = None
+        with self._lock:
+            live: set[Path] = set()
+            for path in self.directory.glob("*.json"):
+                try:
+                    stat = path.stat()
+                except OSError:
+                    continue
+                live.add(path)
+                stamp = (stat.st_mtime_ns, stat.st_size)
+                cached = self._marks_cache.get(path)
+                if cached is None or cached[0] != stamp:
+                    cached = (stamp, *self._parse_marks(path))
+                    self._marks_cache[path] = cached
+                _stamp, run_id, started_at, marks = cached
+                if not run_id:
+                    continue
+                key = (started_at, stamp[0], run_id)
+                if latest is None or key > latest[0]:
+                    latest = (key, run_id, marks)
+            for stale_path in [
+                p for p in self._marks_cache if p.parent == self.directory
+            ]:
+                if stale_path not in live:
+                    del self._marks_cache[stale_path]
+        if latest is None:
+            return None, {}
+        return latest[1], latest[2]
+
+    @staticmethod
+    def _parse_marks(
+        path: Path,
+    ) -> tuple[str, str, dict[int, tuple[str, str | None]]]:
+        """解析一個批次檔，回傳 (run_id, started_at, 條目狀態對照)；壞檔回傳空 run_id。"""
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return "", "", {}
+        if not isinstance(payload, dict) or not payload.get("id"):
+            return "", "", {}
+        marks: dict[int, tuple[str, str | None]] = {}
+        for candidate in payload.get("candidates") or []:
+            if not isinstance(candidate, dict):
+                continue
+            try:
+                entry_id = int(candidate["entry_id"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            marks[entry_id] = (
+                str(candidate.get("status") or ""),
+                candidate.get("validation_error"),
+            )
+        return str(payload["id"]), str(payload.get("started_at") or ""), marks
 
     def list_runs(self, *, limit: int = 20, offset: int = 0) -> list[dict[str, Any]]:
         """分頁讀取 JSON 批次摘要。"""

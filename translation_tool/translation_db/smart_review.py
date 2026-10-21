@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import sqlite3
 import time
 import uuid
 from collections.abc import Callable, Sequence
@@ -46,6 +47,7 @@ from translation_tool.core.official_locale import (
 from translation_tool.core.openai_codex_client import ChatGPTAPIError
 from translation_tool.translation_db.models import (
     SmartReviewCandidate,
+    SmartReviewMark,
     SmartReviewRunResult,
     SmartReviewSnapshot,
 )
@@ -108,6 +110,35 @@ SMART_REVIEW_REPAIR_SYSTEM_PROMPT = """你是 Minecraft 繁體中文翻譯的本
 
 _MAX_REASON_LENGTH = 2_000
 _MAX_SUGGESTION_LENGTH = 32_000
+# 審查者可手動編輯並覆蓋套用的候選狀態；``ready`` 走原本的 AI 建議套用流程。
+SMART_REVIEW_MANUAL_EDIT_STATUSES = frozenset(
+    {
+        "applied",
+        "rejected",
+        "needs_context",
+        "no_change",
+        "invalid",
+        "invalid_format",
+        "stale",
+    }
+)
+# 候選 JSON 內保存的 CAS 快照欄位，順序對應 ``_smart_review_current_snapshot_sql``
+# 的欄位再接 manual 列的四個欄位。
+_SNAPSHOT_FIELDS = (
+    "kind",
+    "mc_version",
+    "mod_id",
+    "entry_key",
+    "en_us",
+    "current_zh_tw",
+    "effective_source",
+    "review_status",
+    "effective_revision",
+    "manual_zh_tw",
+    "manual_checker",
+    "manual_review_status",
+    "manual_revision",
+)
 _URL_PATTERN = re.compile(r"(?:https?://|www\.)", re.IGNORECASE)
 
 
@@ -1757,6 +1788,27 @@ class SmartReviewMixin:
             ).rowcount
             return "saved" if updated == 1 else "not_ready"
 
+    def smart_review_marks(
+        self, entry_ids: Sequence[int]
+    ) -> dict[int, SmartReviewMark]:
+        """回傳指定條目在最近一次智慧校對批次的處理狀態。
+
+        只列出已有處理結果的狀態（已套用、已保留原譯文、不用改、需補 context、
+        無效、格式不符、已過期）；待審查的 ``ready`` 與未完成的候選不標記。
+        """
+        wanted = {int(entry_id) for entry_id in entry_ids}
+        if not wanted:
+            return {}
+        run_id, marks = SmartReviewHistoryStore(self.path).latest_run_marks()
+        if run_id is None:
+            return {}
+        result: dict[int, SmartReviewMark] = {}
+        for entry_id in wanted:
+            found = marks.get(entry_id)
+            if found is not None and found[0] in SMART_REVIEW_MANUAL_EDIT_STATUSES:
+                result[entry_id] = SmartReviewMark(run_id, found[0], found[1])
+        return result
+
     def list_smart_review_runs(
         self, *, limit: int = 20, offset: int = 0
     ) -> list[dict[str, Any]]:
@@ -1871,7 +1923,6 @@ class SmartReviewMixin:
             )
             stale_reason: str | None = None
             result_status = "applied"
-            previous_manual = None
             with self._tx(bump_generation_on_noop=False) as conn:
                 # BEGIN IMMEDIATE 必須早於快照讀取，讓 CAS 檢查與正式寫入
                 # 位於同一個 SQLite 交易，避免讀取後被其他連線插入修改。
@@ -1899,41 +1950,16 @@ class SmartReviewMixin:
                         result_status = "manual_reviewed"
                         stale_reason = "manual_reviewed_requires_manual_edit"
                     else:
-                        previous_manual = current_manual
-                        conn.execute(
-                            "INSERT INTO translation (entry_id, source, zh_tw, checker, review_status) "
-                            "VALUES (?,?,?,'','unreviewed') ON CONFLICT(entry_id, source) DO UPDATE SET "
-                            "zh_tw=excluded.zh_tw, checker='', review_status='unreviewed', "
-                            "updated_at=CURRENT_TIMESTAMP",
-                            (entry_id, SRC_MANUAL, proposed),
+                        self._write_smart_review_manual_row(
+                            conn,
+                            entry_id,
+                            proposed,
+                            previous_manual=current_manual,
+                            old_zh_tw=candidate.get("current_zh_tw"),
+                            batch=batch,
+                            actor=actor,
+                            note=f"run={run_id}; ordinal={ordinal}",
                         )
-                        new_revision = conn.execute(
-                            "SELECT revision FROM translation WHERE entry_id=? AND source=?",
-                            (entry_id, SRC_MANUAL),
-                        ).fetchone()[0]
-                        conn.execute(
-                            "INSERT INTO history (entry_id, batch, actor, action, old_zh_tw, new_zh_tw, "
-                            "prev_manual, prev_checker, prev_review_status, new_checker, new_review_status, "
-                            "prev_revision, new_revision, source_id, note) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                            (
-                                entry_id,
-                                batch,
-                                actor,
-                                "smart_review_apply",
-                                candidate.get("current_zh_tw"),
-                                proposed,
-                                previous_manual[0] if previous_manual else None,
-                                previous_manual[1] if previous_manual else None,
-                                previous_manual[2] if previous_manual else None,
-                                "",
-                                "unreviewed",
-                                previous_manual[3] if previous_manual else None,
-                                new_revision,
-                                SRC_MANUAL,
-                                f"run={run_id}; ordinal={ordinal}",
-                            ),
-                        )
-                        self._refresh(conn, [entry_id])
 
             if result_status != "applied":
                 history.update_candidate(
@@ -1972,6 +1998,174 @@ class SmartReviewMixin:
                     "Smart Review JSON 候選不存在，SQLite 已套用：run=%s ordinal=%s",
                     run_id,
                     ordinal,
+                )
+            return "applied"
+
+    def _write_smart_review_manual_row(
+        self,
+        conn: sqlite3.Connection,
+        entry_id: int,
+        proposed: str,
+        *,
+        previous_manual: Sequence[Any] | None,
+        old_zh_tw: str | None,
+        batch: str,
+        actor: str,
+        note: str,
+    ) -> None:
+        """在呼叫端的交易內寫入未審核人工譯文與 ``smart_review_apply`` 歷史。"""
+        conn.execute(
+            "INSERT INTO translation (entry_id, source, zh_tw, checker, review_status) "
+            "VALUES (?,?,?,'','unreviewed') ON CONFLICT(entry_id, source) DO UPDATE SET "
+            "zh_tw=excluded.zh_tw, checker='', review_status='unreviewed', "
+            "updated_at=CURRENT_TIMESTAMP",
+            (entry_id, SRC_MANUAL, proposed),
+        )
+        new_revision = conn.execute(
+            "SELECT revision FROM translation WHERE entry_id=? AND source=?",
+            (entry_id, SRC_MANUAL),
+        ).fetchone()[0]
+        conn.execute(
+            "INSERT INTO history (entry_id, batch, actor, action, old_zh_tw, new_zh_tw, "
+            "prev_manual, prev_checker, prev_review_status, new_checker, new_review_status, "
+            "prev_revision, new_revision, source_id, note) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (
+                entry_id,
+                batch,
+                actor,
+                "smart_review_apply",
+                old_zh_tw,
+                proposed,
+                previous_manual[0] if previous_manual else None,
+                previous_manual[1] if previous_manual else None,
+                previous_manual[2] if previous_manual else None,
+                "",
+                "unreviewed",
+                previous_manual[3] if previous_manual else None,
+                new_revision,
+                SRC_MANUAL,
+                note,
+            ),
+        )
+        self._refresh(conn, [entry_id])
+
+    def realign_smart_review_candidate(self, run_id: str, ordinal: int) -> str:
+        """把可人工編輯候選的快照對齊目前資料庫，讓審查者看到並編輯的是現況。
+
+        只更新快照欄位，不改狀態、草稿與正式翻譯。回傳 ``realigned``、
+        ``unchanged``、``missing``、``missing_entry``、``not_editable`` 或
+        ``unsupported``（舊版 SQLite 批次不支援）。
+        """
+        history = SmartReviewHistoryStore(self.path)
+        if not history.exists(run_id):
+            return "unsupported"
+        with history.locked():
+            candidate = history.get_candidate(run_id, ordinal)
+            if candidate is None:
+                return "missing"
+            if candidate.get("status") not in SMART_REVIEW_MANUAL_EDIT_STATUSES:
+                return "not_editable"
+            entry_id = int(candidate["entry_id"])
+            with self._lock:
+                current = self._one(_smart_review_current_snapshot_sql(), (entry_id,))
+                manual = self._one(
+                    "SELECT zh_tw, checker, review_status, revision FROM translation "
+                    "WHERE entry_id=? AND source=?",
+                    (entry_id, SRC_MANUAL),
+                )
+            if current is None:
+                return "missing_entry"
+            manual_values = tuple(manual) if manual else (None, None, None, None)
+            updates = dict(
+                zip(_SNAPSHOT_FIELDS, (*current, *manual_values), strict=True)
+            )
+            if all(candidate.get(key) == value for key, value in updates.items()):
+                return "unchanged"
+            history.update_candidate(run_id, ordinal, **updates)
+            return "realigned"
+
+    def apply_smart_review_manual_edit(
+        self,
+        run_id: str,
+        ordinal: int,
+        draft_zh_tw: str,
+        *,
+        actor: str = "智慧校對",
+    ) -> str:
+        """以人工編輯的譯文覆蓋套用候選，任何可編輯狀態（含已套用）都適用。
+
+        與 ``apply_smart_review_candidate`` 共用 CAS 與格式驗證，但不要求候選是
+        ``ready``，也不因快照變動把候選降成 ``stale``：呼叫端應先
+        ``realign_smart_review_candidate``，拒絕時只回傳狀態並保留原候選。
+        成功後候選一律標為 ``applied``。
+        """
+        history = SmartReviewHistoryStore(self.path)
+        if not history.exists(run_id):
+            return "unsupported"
+        proposed = _validate_text(
+            draft_zh_tw, "draft_zh_tw", max_length=_MAX_SUGGESTION_LENGTH
+        )
+        batch = uuid.uuid4().hex
+        with history.locked():
+            candidate = history.get_candidate(run_id, ordinal)
+            if candidate is None:
+                return "missing"
+            if candidate.get("status") not in SMART_REVIEW_MANUAL_EDIT_STATUSES:
+                return "not_editable"
+            if not proposed.strip():
+                return "invalid_draft"
+            if translation_issues(
+                str(candidate.get("en_us") or ""),
+                proposed,
+                kind=str(candidate.get("kind") or "lang"),
+                repair=False,
+            ):
+                return "invalid_format"
+            entry_id = int(candidate["entry_id"])
+            expected = tuple(candidate.get(key) for key in _SNAPSHOT_FIELDS)
+            with self._tx(bump_generation_on_noop=False) as conn:
+                current = conn.execute(
+                    _smart_review_current_snapshot_sql(), (entry_id,)
+                ).fetchone()
+                current_manual = conn.execute(
+                    "SELECT zh_tw, checker, review_status, revision FROM translation "
+                    "WHERE entry_id=? AND source=?",
+                    (entry_id, SRC_MANUAL),
+                ).fetchone()
+                snapshot = (*(current or ()), *(current_manual or (None,) * 4))
+                if current is None or snapshot != expected:
+                    return "changed"
+                if current_manual is not None and current_manual[2] == "reviewed":
+                    return "manual_reviewed"
+                if proposed == current[5]:
+                    return "unchanged"
+                self._write_smart_review_manual_row(
+                    conn,
+                    entry_id,
+                    proposed,
+                    previous_manual=current_manual,
+                    old_zh_tw=current[5],
+                    batch=batch,
+                    actor=actor,
+                    note=f"run={run_id}; ordinal={ordinal}",
+                )
+            try:
+                history.update_candidate(
+                    run_id,
+                    ordinal,
+                    status="applied",
+                    draft_zh_tw=proposed,
+                    validation_error=None,
+                    applied_batch=batch,
+                    applied_at=history.timestamp(),
+                )
+            except Exception:
+                # SQLite 已提交；JSON 狀態回寫失敗時仍回報已套用，下次對齊會讀到現況。
+                logger.warning(
+                    "Smart Review 人工編輯狀態回寫失敗：run=%s ordinal=%s",
+                    run_id,
+                    ordinal,
+                    exc_info=True,
                 )
             return "applied"
 

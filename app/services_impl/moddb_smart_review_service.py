@@ -15,6 +15,7 @@ from translation_tool.core.lm_config_rules import (
 )
 from translation_tool.translation_db import (
     SmartReviewCandidate,
+    SmartReviewMark,
     SmartReviewRunResult,
     SmartReviewSnapshot,
     TranslationDB,
@@ -24,10 +25,11 @@ from translation_tool.translation_db.smart_review import (
     SMART_REVIEW_DEFAULT_BATCH_SIZE as _SMART_REVIEW_DEFAULT_BATCH_SIZE,
 )
 from translation_tool.translation_db.smart_review import (
-    SMART_REVIEW_MAX_BATCH_SIZE as _SMART_REVIEW_MAX_BATCH_SIZE,
+    SMART_REVIEW_MANUAL_EDIT_STATUSES,
+    run_smart_review,
 )
 from translation_tool.translation_db.smart_review import (
-    run_smart_review,
+    SMART_REVIEW_MAX_BATCH_SIZE as _SMART_REVIEW_MAX_BATCH_SIZE,
 )
 from translation_tool.utils.config_manager import load_config
 
@@ -314,6 +316,35 @@ def apply_moddb_smart_review_candidate_from_path(
         db.close()
 
 
+def realign_moddb_smart_review_candidate_from_path(
+    path: str | Path,
+    priority: tuple[int, ...],
+    run_id: str,
+    ordinal: int,
+) -> str:
+    """把可人工編輯候選的快照對齊目前資料庫，不改狀態與翻譯。"""
+    db = _open(path, priority, readonly=False)
+    try:
+        return db.realign_smart_review_candidate(run_id, ordinal)
+    finally:
+        db.close()
+
+
+def apply_moddb_smart_review_manual_edit_from_path(
+    path: str | Path,
+    priority: tuple[int, ...],
+    run_id: str,
+    ordinal: int,
+    draft_zh_tw: str,
+) -> str:
+    """以人工編輯的譯文覆蓋套用候選（含已套用、無效、需補 context 等狀態）。"""
+    db = _open(path, priority, readonly=False)
+    try:
+        return db.apply_smart_review_manual_edit(run_id, ordinal, draft_zh_tw)
+    finally:
+        db.close()
+
+
 def reject_moddb_smart_review_candidate_from_path(
     path: str | Path,
     priority: tuple[int, ...],
@@ -331,8 +362,11 @@ def reject_moddb_smart_review_candidate_from_path(
 __all__ = [
     "SMART_REVIEW_DEFAULT_BATCH_SIZE",
     "SMART_REVIEW_DEFAULT_SOURCE",
+    "SMART_REVIEW_MANUAL_EDIT_STATUSES",
     "SmartReviewCandidate",
+    "SmartReviewMark",
     "apply_moddb_smart_review_candidate_from_path",
+    "apply_moddb_smart_review_manual_edit_from_path",
     "count_moddb_smart_review_candidates_for_run_from_path",
     "count_moddb_smart_review_candidates_from_path",
     "get_moddb_smart_review_run_breakdown_from_path",
@@ -341,6 +375,7 @@ __all__ = [
     "list_moddb_smart_review_runs_from_path",
     "load_moddb_smart_review_candidate_page_from_path",
     "preview_moddb_smart_review_from_path",
+    "realign_moddb_smart_review_candidate_from_path",
     "reject_moddb_smart_review_candidate_from_path",
     "run_moddb_smart_review_from_path",
     "save_moddb_smart_review_draft_from_path",
