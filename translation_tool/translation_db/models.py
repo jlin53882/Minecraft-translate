@@ -451,6 +451,8 @@ class SmartReviewSnapshot:
     manual_checker: str | None = None
     manual_review_status: str | None = None
     manual_revision: int | None = None
+    # 選取時被去重、套用時一併寫入的同文條目（見 smart_review._dedupe_same_text_rows）
+    twin_entry_ids: tuple[int, ...] = ()
 
 
 @dataclass(frozen=True)

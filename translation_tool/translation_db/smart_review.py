@@ -461,23 +461,27 @@ def _effective_review_sql(alias: str = "f") -> str:
     )
 
 
-def _dedupe_same_text_rows(rows: Sequence[tuple[Any, ...]]) -> list[tuple[Any, ...]]:
+def _dedupe_same_text_rows(
+    rows: Sequence[tuple[Any, ...]],
+) -> list[tuple[tuple[Any, ...], tuple[int, ...]]]:
     """同版本、模組、種類且英文與目前譯文狀態都相同的條目只保留第一筆。
 
-    被略過的條目在代表條目套用時由 ``_apply_smart_review_twins`` 以同樣條件一併寫入，
-    所以只需送一次模型、審查一次。key 不納入比對；目前譯文、來源或審核狀態不同的
-    條目各自保留，避免把不同狀態的譯文覆蓋成同一份。
+    回傳 ``(代表列, 被略過的同文條目 id)``。被略過的條目不送模型、不進審查清單，
+    id 會存進候選，由 ``_apply_smart_review_twins`` 在代表條目套用時一併寫入，
+    所以套用範圍永遠限於當次選取（含 query／參考條件）看過的條目。key 不納入比對；
+    目前譯文、來源或審核狀態不同的條目各自保留，避免把不同狀態的譯文覆蓋成同一份。
     """
-    seen: set[tuple[Any, ...]] = set()
-    kept: list[tuple[Any, ...]] = []
+    twins: dict[tuple[Any, ...], list[int]] = {}
+    kept: list[tuple[tuple[Any, ...], tuple[Any, ...]]] = []
     for row in rows:
         # row: id, kind, mc_version, mod_id, key, en_us, zh_tw, source, status, ...
         group = (row[2], row[3], row[1], row[5], row[6], row[7], row[8])
-        if group in seen:
+        if group in twins:
+            twins[group].append(int(row[0]))
             continue
-        seen.add(group)
-        kept.append(row)
-    return kept
+        twins[group] = []
+        kept.append((row, group))
+    return [(row, tuple(twins[group])) for row, group in kept]
 
 
 def _smart_review_current_snapshot_sql() -> str:
@@ -704,8 +708,7 @@ class SmartReviewMixin:
         rows = self._q(query_sql, query_params)
         snapshots: list[SmartReviewSnapshot] = []
         absolute_offset = max(0, int(offset))
-        rows = _dedupe_same_text_rows(rows)
-        for row_index, row in enumerate(rows, 1):
+        for row_index, (row, twin_ids) in enumerate(_dedupe_same_text_rows(rows), 1):
             ordinal = absolute_offset + row_index
             (
                 entry_id,
@@ -752,6 +755,7 @@ class SmartReviewMixin:
                     manual_revision=(
                         None if manual_revision is None else int(manual_revision)
                     ),
+                    twin_entry_ids=twin_ids,
                 )
             )
         return snapshots
@@ -1839,7 +1843,7 @@ class SmartReviewMixin:
             return run_id, marks
         try:
             self._reconcile_json_applied_candidates(history, run_id)
-        except OSError:
+        except (OSError, ValueError):
             logger.warning(
                 "Smart Review 標籤對帳失敗，下次再試：run=%s", run_id, exc_info=True
             )
@@ -2032,6 +2036,7 @@ class SmartReviewMixin:
                             entry_id,
                             current,
                             proposed,
+                            candidate.get("twin_entry_ids") or (),
                             batch=batch,
                             actor=actor,
                             run_id=run_id,
@@ -2132,6 +2137,7 @@ class SmartReviewMixin:
         entry_id: int,
         current: Sequence[Any],
         proposed: str,
+        candidate_twin_ids: Sequence[Any],
         *,
         batch: str,
         actor: str,
@@ -2140,8 +2146,9 @@ class SmartReviewMixin:
     ) -> int:
         """把代表條目的譯文一併寫給同文且目前狀態相同的條目，回傳寫入筆數。
 
-        同文＝同版本、模組、種類與英文原文；目前譯文、生效來源與審核狀態必須與
-        代表條目套用前相同（也就是選取時被去重掉的那些），已人工審核的人工列不覆蓋。
+        只處理候選記錄的 ``twin_entry_ids``（選取時被去重掉的條目），並再確認它們
+        仍與代表條目套用前同版本、模組、種類、英文、目前譯文、生效來源與審核狀態；
+        已人工審核的人工列不覆蓋。
         在呼叫端的交易內執行，每筆各自留下 ``smart_review_apply`` history。
         """
         kind, mc_version, mod_id, _key, en_us, zh_tw, source, status = current[:8]
@@ -2152,8 +2159,18 @@ class SmartReviewMixin:
                 "WHERE e.mc_version=? AND e.mod_id=? AND e.kind=? AND e.en_us=? "
                 "AND e.id!=? AND f.zh_tw=? AND f.source IS ? AND ("
                 + _effective_review_sql()
-                + ") IS ?",
-                (mc_version, mod_id, kind, en_us, entry_id, zh_tw, source, status),
+                + ") IS ? AND e.id IN (SELECT value FROM json_each(?))",
+                (
+                    mc_version,
+                    mod_id,
+                    kind,
+                    en_us,
+                    entry_id,
+                    zh_tw,
+                    source,
+                    status,
+                    json.dumps([int(value) for value in candidate_twin_ids]),
+                ),
             )
         )
         written = 0
@@ -2281,6 +2298,7 @@ class SmartReviewMixin:
                     entry_id,
                     current,
                     proposed,
+                    candidate.get("twin_entry_ids") or (),
                     batch=batch,
                     actor=actor,
                     run_id=run_id,

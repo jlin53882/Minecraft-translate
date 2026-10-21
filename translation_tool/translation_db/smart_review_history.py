@@ -70,6 +70,7 @@ def _snapshot_payload(run_id: str, item: SmartReviewSnapshot) -> dict[str, Any]:
         "manual_checker": item.manual_checker,
         "manual_review_status": item.manual_review_status,
         "manual_revision": item.manual_revision,
+        "twin_entry_ids": [int(value) for value in item.twin_entry_ids],
         "context": _copy_context(item.context),
         "decision": None,
         "suggested_zh_tw": None,

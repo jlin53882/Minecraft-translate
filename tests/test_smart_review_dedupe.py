@@ -29,7 +29,7 @@ def db(tmp_path):
     database.close()
 
 
-def _run(db, monkeypatch):
+def _run(db, monkeypatch, **scope):
     """所有項目都建議同一份新譯文，並記下實際送出的條目數。"""
     sent: list[int] = []
 
@@ -58,7 +58,7 @@ def _run(db, monkeypatch):
         "translation_tool.translation_db.smart_review.call_gemini_requests",
         fake_call,
     )
-    run = run_smart_review(db, model_name="gemini-test", api_key="k", limit=50)
+    run = run_smart_review(db, model_name="gemini-test", api_key="k", limit=50, **scope)
     return run.run_id, sent
 
 
@@ -122,3 +122,16 @@ def test_twin_with_reviewed_manual_row_is_not_overwritten(db, monkeypatch):
     )
     assert db.apply_smart_review_candidate(run_id, rep.ordinal) == "applied"
     assert _entry(db, "aether", "b_twin").entry.zh_tw == "人工確認"
+
+
+def test_scoped_run_never_writes_entries_outside_its_selection(db, monkeypatch):
+    """用 query 限縮範圍時，範圍外的同文條目不會被一併寫入。"""
+    run_id, _ = _run(db, monkeypatch, query="a_rep")
+    rep = next(
+        c
+        for c in db.list_smart_review_candidates(run_id, limit=50)
+        if (c.mod_id, c.key) == ("aether", "a_rep")
+    )
+    assert db.apply_smart_review_candidate(run_id, rep.ordinal) == "applied"
+    assert _entry(db, "aether", "a_rep").entry.zh_tw == "使用：Shift 鍵"
+    assert _entry(db, "aether", "b_twin").entry.zh_tw == "使用：Shift"
