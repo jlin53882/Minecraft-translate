@@ -399,6 +399,61 @@ def test_smart_review_context_cache_separates_version_and_source_text(db):
     assert second_same_key[0]["en_us"] == "New text"
 
 
+def test_smart_review_glossary_index_keeps_all_source_terms(db):
+    """驗證倒排索引會保留同一句中所有獨立 glossary 術語。"""
+    db.write_back(
+        "1.21.1",
+        [
+            WriteBackItem(
+                KIND_LANG,
+                "demo",
+                "solar_coil",
+                "Solar-Coil",
+                "太陽線圈",
+            ),
+            WriteBackItem(
+                KIND_LANG,
+                "demo",
+                "quantum_valve",
+                "Quantum-Valve",
+                "量子閥",
+            ),
+            WriteBackItem(
+                KIND_PATCHOULI,
+                "demo",
+                "install_components",
+                "Install Solar Coil beside Quantum Valve",
+                "在量子閥旁安裝太陽線圈",
+            ),
+        ],
+        fill_other_versions=False,
+    )
+    rows, _total = db.list_entries("1.21.1")
+    for key in ("solar_coil", "quantum_valve"):
+        row = next(item for item in rows if item.key == key)
+        db.review_manual(row.id, expected_zh_tw=row.zh_tw, propagate=False)
+
+    candidate = next(item for item in rows if item.key == "install_components")
+    context = db._smart_review_context(
+        candidate.id,
+        KIND_PATCHOULI,
+        "1.21.1",
+        "demo",
+        candidate.key,
+        candidate.en_us,
+    )
+    glossary_pairs = {
+        (item["en_us"], item["zh_tw"])
+        for item in context
+        if item["reference_type"] == "reviewed_lang_glossary"
+    }
+
+    assert {
+        ("Solar Coil", "太陽線圈"),
+        ("Quantum Valve", "量子閥"),
+    } <= glossary_pairs
+
+
 def test_smart_review_glossary_target_beyond_bulk_limit_is_retrievable(db):
     """驗證 id 超過 5000 的 reviewed glossary term 仍可透過 bounded exact lookup 找到。"""
     rows = [

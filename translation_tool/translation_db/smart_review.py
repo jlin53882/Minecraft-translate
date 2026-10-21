@@ -887,8 +887,10 @@ class SmartReviewMixin:
         ]
         relevant_glossary: dict[int, tuple] = {}
         if token_candidates:
-            for row in min(token_candidates, key=len):
-                relevant_glossary[int(row[0])] = row
+            # 取所有詞元桶的聯集；只選最小桶會漏掉同一句中的其他獨立術語。
+            for rows in token_candidates:
+                for row in rows:
+                    relevant_glossary[int(row[0])] = row
         else:
             source_prefixes = {
                 source_canonical[index : index + width]
