@@ -52,7 +52,14 @@ class GuideMark:
 
 
 def _tag_identity(tag: str, text_slot: str = "…") -> str:
-    """標籤比對用的身分：<link> 的顯示文字可翻譯，以 ``text_slot`` 取代，不納入比對。"""
+    """建立標籤的結構身分，排除已知可翻譯的顯示欄位。"""
+    if tag.startswith("<") and tag.endswith(">"):
+        fields = tag[1:-1].split(";")
+        if len(fields) >= 4 and fields[0].casefold() == "config":
+            # FTB config 標籤的前 3 欄是語法、型別與設定鍵；
+            # 後續欄位是玩家可見的說明／預設文字，允許翻譯。
+            localized_fields = [text_slot] * (len(fields) - 3)
+            return "<" + ";".join([*fields[:3], *localized_fields]) + ">"
     return _LINK_TAG.sub(lambda m: f"<link;{m[1]};{text_slot}{m[2] or ''}>", tag)
 
 

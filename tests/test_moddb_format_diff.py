@@ -54,6 +54,25 @@ def test_natural_language_changes_do_not_create_a_format_diff():
     assert result.summary_lines == ("格式檢查通過。",)
 
 
+def test_config_tag_allows_localized_text_but_keeps_structural_identity():
+    source = (
+        "<config;b;tools.chemthrower.scroll;"
+        "sneaking and using the scrollwheel, or through use of;using>"
+    )
+    translated = "<config;b;tools.chemthrower.scroll;潛行並滾動滑鼠滾輪，或使用;使用>"
+
+    for kind in (KIND_GUIDE, KIND_PATCHOULI):
+        result = compare_format_diff(source, translated, kind=kind)
+        assert result.has_issues is False
+
+    changed_key = translated.replace(
+        "tools.chemthrower.scroll", "tools.chemthrower.other"
+    )
+    result = compare_format_diff(source, changed_key, kind=KIND_GUIDE)
+    assert result.has_issues is True
+    assert any(issue.category == "guide" for issue in result.issues)
+
+
 def test_guide_soft_newline_reflow_is_informational_not_a_format_issue():
     for kind in (KIND_GUIDE, KIND_PATCHOULI):
         result = compare_format_diff("Hello\nworld", "你好世界", kind=kind)
