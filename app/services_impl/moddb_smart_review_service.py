@@ -21,12 +21,15 @@ from translation_tool.translation_db import (
 )
 from translation_tool.translation_db.schema import SRC_AI
 from translation_tool.translation_db.smart_review import (
-    SMART_REVIEW_MAX_BATCH_SIZE,
+    SMART_REVIEW_MAX_BATCH_SIZE as _SMART_REVIEW_MAX_BATCH_SIZE,
+)
+from translation_tool.translation_db.smart_review import (
     run_smart_review,
 )
 from translation_tool.utils.config_manager import load_config
 
 SMART_REVIEW_DEFAULT_SOURCE = SRC_AI
+SMART_REVIEW_MAX_BATCH_SIZE = _SMART_REVIEW_MAX_BATCH_SIZE
 
 
 def smart_review_format_diagnostics(

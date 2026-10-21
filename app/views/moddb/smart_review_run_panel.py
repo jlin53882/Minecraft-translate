@@ -29,6 +29,7 @@ from app.views.moddb.smart_review_job import (
     SmartReviewRequest,
     format_duration,
 )
+
 _POLL_SECONDS = 0.4
 _RESULT_LABEL = {
     "completed": ("完成", "em"),
