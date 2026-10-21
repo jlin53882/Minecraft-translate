@@ -473,3 +473,52 @@ def test_latest_marks_parses_only_latest_run_and_keeps_one_cache(tmp_path, monke
     assert list(SmartReviewHistoryStore._latest_marks).count(store.directory) == 1
     cached = SmartReviewHistoryStore._latest_marks[store.directory]
     assert len(cached[3]) == 1  # 只保留最近一次批次的 1 筆，而不是 200 批 × 300 筆
+
+
+def test_marks_and_filter_reconcile_unsynced_apply_without_opening_reviewer(
+    db, monkeypatch
+):
+    """JSON 回寫失敗後，只看條目列表（標籤與篩選）也能看到已套用，且換頁不重複對帳。"""
+    run_id = _run(db, monkeypatch, "no_change")
+    candidate = _candidate(db, run_id, "bye")
+    db.realign_smart_review_candidate(run_id, candidate.ordinal)
+    monkeypatch.setattr(smart_review_module.time, "sleep", lambda _s: None)
+    real = SmartReviewHistoryStore.update_candidate
+    monkeypatch.setattr(
+        SmartReviewHistoryStore,
+        "update_candidate",
+        lambda self, *a, **k: (_ for _ in ()).throw(PermissionError("locked")),
+    )
+    assert (
+        db.apply_smart_review_manual_edit(run_id, candidate.ordinal, "再會！")
+        == "state_sync_failed"
+    )
+    monkeypatch.setattr(SmartReviewHistoryStore, "update_candidate", real)
+
+    marks = db.smart_review_marks([candidate.entry_id])
+    assert marks[candidate.entry_id].status == "applied"
+    assert candidate.entry_id in db.smart_review_entry_ids("applied")
+
+    calls = []
+    original = db._reconcile_json_applied_candidates
+    monkeypatch.setattr(
+        db,
+        "_reconcile_json_applied_candidates",
+        lambda *a: calls.append(1) or original(*a),
+    )
+    db.smart_review_marks([candidate.entry_id])
+    db.smart_review_entry_ids("applied")
+    assert calls == []
+
+
+def test_reject_does_not_override_applied_candidate(db, monkeypatch):
+    """已套用的候選不能再被標成 rejected，對帳因此不會覆寫使用者的拒絕決定。"""
+    run_id = _run(db, monkeypatch, "no_change")
+    candidate = _candidate(db, run_id, "bye")
+    db.realign_smart_review_candidate(run_id, candidate.ordinal)
+    assert (
+        db.apply_smart_review_manual_edit(run_id, candidate.ordinal, "再會！")
+        == "applied"
+    )
+    assert db.reject_smart_review_candidate(run_id, candidate.ordinal) == "not_ready"
+    assert _candidate(db, run_id, "bye").status == "applied"

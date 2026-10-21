@@ -111,6 +111,8 @@ SMART_REVIEW_REPAIR_SYSTEM_PROMPT = """你是 Minecraft 繁體中文翻譯的本
 
 _MAX_REASON_LENGTH = 2_000
 _MAX_SUGGESTION_LENGTH = 32_000
+# (資料庫路徑, run_id) -> 上次對帳時 history 的最大 id
+_RECONCILED_HISTORY_HEAD: dict[tuple[str, str], int] = {}
 _STATE_SYNC_ATTEMPTS = 3
 _STATE_SYNC_RETRY_SECONDS = 0.05
 # 審查者可手動編輯並覆蓋套用的候選狀態；``ready`` 走原本的 AI 建議套用流程。
@@ -1791,6 +1793,33 @@ class SmartReviewMixin:
             ).rowcount
             return "saved" if updated == 1 else "not_ready"
 
+    def _reconciled_latest_marks(
+        self,
+    ) -> tuple[str | None, dict[int, tuple[str, str | None]]]:
+        """取得最近批次標記；SQLite 套用紀錄有新增時先對帳，換頁不重複掃描。
+
+        對帳只在 ``history`` 的最大 id 比上次對帳時大才執行（查最大 id 為常數成本），
+        對帳失敗時不記錄，下次再試。
+        """
+        history = SmartReviewHistoryStore(self.path)
+        run_id, marks = history.latest_run_marks()
+        if run_id is None:
+            return run_id, marks
+        key = (str(self.path), run_id)
+        head = self._one("SELECT MAX(id) FROM history")
+        head_id = int(head[0] or 0) if head else 0
+        if _RECONCILED_HISTORY_HEAD.get(key) == head_id:
+            return run_id, marks
+        try:
+            self._reconcile_json_applied_candidates(history, run_id)
+        except OSError:
+            logger.warning(
+                "Smart Review 標籤對帳失敗，下次再試：run=%s", run_id, exc_info=True
+            )
+            return run_id, marks
+        _RECONCILED_HISTORY_HEAD[key] = head_id
+        return history.latest_run_marks()
+
     def smart_review_marks(
         self, entry_ids: Sequence[int]
     ) -> dict[int, SmartReviewMark]:
@@ -1802,7 +1831,7 @@ class SmartReviewMixin:
         wanted = {int(entry_id) for entry_id in entry_ids}
         if not wanted:
             return {}
-        run_id, marks = SmartReviewHistoryStore(self.path).latest_run_marks()
+        run_id, marks = self._reconciled_latest_marks()
         if run_id is None:
             return {}
         result: dict[int, SmartReviewMark] = {}
@@ -1815,7 +1844,7 @@ class SmartReviewMixin:
     def smart_review_entry_ids(self, group: str) -> tuple[int, ...]:
         """回傳最近一次批次中處於指定狀態群組的條目 id（鍵見 SMART_REVIEW_FILTER_GROUPS）。"""
         statuses = set(SMART_REVIEW_FILTER_GROUPS[group])
-        _run_id, marks = SmartReviewHistoryStore(self.path).latest_run_marks()
+        _run_id, marks = self._reconciled_latest_marks()
         return tuple(
             sorted(entry_id for entry_id, mark in marks.items() if mark[0] in statuses)
         )
