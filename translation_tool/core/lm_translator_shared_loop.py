@@ -35,13 +35,13 @@ from translation_tool.utils.log_unit import log_error, log_info
 from translation_tool.utils.redaction import redact_text
 
 
-def _call_translate_batch(
+def invoke_translation_batch(
     translate_batch_smart,
     batch: list[dict[str, Any]],
     total: int | None,
-    event_callback,
+    event_callback=None,
 ):
-    """呼叫既有翻譯測試替身或 provider 入口，並把 telemetry callback 傳給真正的請求流程。"""
+    """呼叫翻譯入口，並相容不接受 telemetry callback 的舊測試替身。"""
     if event_callback is None:
         return translate_batch_smart(batch, total)
     try:
@@ -56,6 +56,21 @@ def _call_translate_batch(
     if accepts_callback:
         return translate_batch_smart(batch, total, event_callback=event_callback)
     return translate_batch_smart(batch, total)
+
+
+def _call_translate_batch(
+    translate_batch_smart,
+    batch: list[dict[str, Any]],
+    total: int | None,
+    event_callback,
+):
+    """呼叫共用翻譯入口，保留主迴圈原有的內部命名。"""
+    return invoke_translation_batch(
+        translate_batch_smart,
+        batch,
+        total,
+        event_callback,
+    )
 
 
 @dataclass

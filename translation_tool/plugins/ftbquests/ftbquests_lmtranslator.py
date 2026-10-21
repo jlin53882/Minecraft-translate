@@ -30,6 +30,7 @@ from translation_tool.core.lm_translator_shared import (
     TranslatorHooks,
     _get_default_batch_size,
     _is_valid_hit,  # ✅ 新增：cache hit 判斷
+    invoke_translation_batch,
     make_checkpoint_adapter,
     make_progress_hook,
     prepare_translator_items,
@@ -593,7 +594,9 @@ def translate_ftb_pending_to_zh_tw(
             items_to_translate,
             total_for_smart=global_total_to_translate,
             translate_batch_smart=lambda batch, total, *, event_callback=None: (
-                translate_batch_smart(batch, total=total, event_callback=event_callback)
+                invoke_translation_batch(
+                    translate_batch_smart, batch, total, event_callback
+                )
             ),
             sleep_seconds_between_batches=0.0,
             write_new_cache=bool(write_new_cache),  # ✅ 改成吃參數

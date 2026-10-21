@@ -1,5 +1,6 @@
 {
   "functions": {
+    "app/services_impl/moddb_retranslate_service.py:_publish_repair_batch_completion": 81,
     "app/services_impl/moddb_retranslate_service.py:_run_repair_batch": 118,
     "app/services_impl/moddb_service.py:run_moddb_scan_service": 84,
     "app/services_impl/moddb_translate_service.py:_translate_rows": 128,
@@ -23,7 +24,7 @@
     "app/views/moddb/scan_panel.py:ScanPanel._build_options_card": 102,
     "app/views/moddb/scan_panel.py:ScanPanel._build_run_card": 85,
     "app/views/moddb/smart_review_dialog.py:SmartReviewDialog._build_controls": 104,
-    "app/views/moddb/smart_review_reviewer.py:candidate_evidence_text": 120,
+    "app/views/moddb/smart_review_reviewer.py:candidate_evidence_text": 130,
     "app/views/moddb/translate_panel.py:TranslatePanel._apply_repair_summary": 81,
     "app/views/moddb/translate_panel.py:TranslatePanel._build_run_card": 103,
     "app/views/moddb_view.py:ModDbView.__init__": 82,
@@ -36,7 +37,7 @@
     "app/views/moddb/batch_replace_dialog.py": 1013,
     "app/views/moddb/entries_panel.py": 1104,
     "app/views/moddb/smart_review_dialog.py": 1040,
-    "app/views/moddb/smart_review_reviewer.py": 822,
+    "app/views/moddb/smart_review_reviewer.py": 849,
     "app/views/moddb/translate_panel.py": 1087
   }
 }

@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 from unittest.mock import Mock, patch
@@ -110,6 +111,9 @@ def _config(models: dict[str, bool], lang_batch: int = 300) -> dict:
             "temperature": 0.2,
             "lang_system_prompt": "test",
             "patchouli_system_prompt": "test",
+            # Key rotation tests isolate provider selection; official glossary
+            # validation is covered by the dedicated terminology tests.
+            "official_glossary": False,
         }
     }
 
@@ -146,6 +150,17 @@ class Env:
             outcome = outcome.pop(0) if len(outcome) > 1 else outcome[0]
         if isinstance(outcome, Exception):
             raise outcome
+        if outcome == _OK_JSON:
+            payload_items = kwargs.get("payload", {}).get("items", [])
+            return json.dumps(
+                {
+                    "items": [
+                        {"id": str(item["id"]), "value": "你好"}
+                        for item in payload_items
+                    ]
+                },
+                ensure_ascii=False,
+            )
         return outcome
 
     def use_models(self, *names: str) -> None:

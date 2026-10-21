@@ -27,6 +27,7 @@ from translation_tool.core.lm_translator_shared_cache import (
 from translation_tool.core.lm_translator_shared_loop import (
     TranslateLoopResult,
     _get_default_batch_size,
+    invoke_translation_batch,
     translate_items_with_cache_loop,
 )
 from translation_tool.core.lm_translator_shared_preview import (
@@ -69,6 +70,7 @@ __all__ = [
     "format_batch_event",
     "format_eta",
     "get_default_cache_rules",
+    "invoke_translation_batch",
     "make_checkpoint_adapter",
     "make_progress_hook",
     "prepare_translator_items",
