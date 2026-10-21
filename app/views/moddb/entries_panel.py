@@ -426,6 +426,9 @@ class EntriesPanel(ft.Column):
                 calculate_impact=False,
                 catalog=snapshot.get("source_catalog"),
             )
+        else:
+            # 背景篩選不重建編輯器，以免覆蓋尚未儲存的草稿；但右側狀態膠囊仍須同步。
+            self._refresh_smart_review_chip()
         self._render_list_selection(previous_selected_id)
         self.refresh_indicator.value = str(snapshot.get("error") or "")
         self.refresh_indicator.visible = bool(snapshot.get("error"))
@@ -630,9 +633,7 @@ class EntriesPanel(ft.Column):
             if badge
             else None
         )
-        self.smart_chip.content = smart_review_mark_chip(
-            self.smart_review_marks.get(entry.id)
-        )
+        self._refresh_smart_review_chip()
         self.meta_col.controls = build_entry_metadata(detail)
         self.format_review.render(
             entry.en_us or NO_SOURCE_TEXT,
@@ -646,6 +647,13 @@ class EntriesPanel(ft.Column):
             self._update_editor_actions_without_impact(entry)
         self._render_suggestions(catalog=catalog)
         self._render_history(catalog=catalog)
+
+    def _refresh_smart_review_chip(self) -> None:
+        """只更新目前選中條目的智慧校對標籤，不重建編輯器內容。"""
+        entry_id = self.selected.id if self.selected else None
+        self.smart_chip.content = smart_review_mark_chip(
+            self.smart_review_marks.get(entry_id) if entry_id is not None else None
+        )
 
     def _update_editor_actions_without_impact(self, entry: EntryRow) -> None:
         """Set initial editor state without a cross-version preview query."""
