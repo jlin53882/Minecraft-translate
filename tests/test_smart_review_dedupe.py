@@ -109,6 +109,31 @@ def test_page_completes_twins_after_raw_page_boundary(db):
     ]
 
 
+def test_unbounded_page_reuses_twins_collected_from_complete_selection(db, monkeypatch):
+    """不限筆數時已讀完完整選取範圍，不應再次執行 twin 補查。"""
+    db.write_back(
+        "1.20.1",
+        [
+            WriteBackItem(KIND_LANG, "unbounded", "a_rep", "First", "第一"),
+            WriteBackItem(KIND_LANG, "unbounded", "z_twin", "First", "第一"),
+        ],
+        fill_other_versions=False,
+    )
+
+    def fail_unexpected_supplement(*_args, **_kwargs):
+        """拒絕在完整資料已讀取後重複查詢 twin。"""
+        raise AssertionError("完整選取範圍不應再次執行 twin 補查")
+
+    monkeypatch.setattr(
+        db, "_complete_smart_review_twin_ids", fail_unexpected_supplement
+    )
+    candidates = db.smart_review_candidates(
+        version="1.20.1", mod_id="unbounded", limit=0
+    )
+    assert len(candidates) == 1
+    assert candidates[0].twin_entry_ids
+
+
 def test_selection_keeps_one_candidate_per_same_text_and_state(db, monkeypatch):
     """同模組、同英文、同目前狀態只送一筆；不同譯文或不同模組各自保留。"""
     run_id, sent = _run(db, monkeypatch)

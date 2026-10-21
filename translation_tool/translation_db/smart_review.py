@@ -687,7 +687,6 @@ class SmartReviewMixin:
     def _complete_smart_review_twin_ids(
         self,
         selection: _SmartReviewSelection,
-        entry_source: str,
         selected_rows: Sequence[tuple[tuple[Any, ...], tuple[int, ...]]],
     ) -> list[tuple[tuple[Any, ...], tuple[int, ...]]]:
         """補齊目前頁面代表候選在完整篩選範圍內的同文條目 id。
@@ -703,6 +702,12 @@ class SmartReviewMixin:
             dict.fromkeys(_smart_review_row_group(row) for row, _ in selected_rows)
         )
         group_ids: dict[tuple[Any, ...], set[int]] = {group: set() for group in groups}
+        twin_entry_source = "entry e"
+        if self._one(
+            "SELECT 1 FROM sqlite_schema WHERE type='index' AND name=?",
+            ("idx_entry_en",),
+        ):
+            twin_entry_source = "entry e INDEXED BY idx_entry_en"
         for start in range(0, len(groups), _SMART_REVIEW_TWIN_GROUP_CHUNK_SIZE):
             chunk = groups[start : start + _SMART_REVIEW_TWIN_GROUP_CHUNK_SIZE]
             cte_prefix = selection.reference_cte.rstrip()
@@ -723,14 +728,15 @@ class SmartReviewMixin:
                 "SELECT e.id, e.mc_version, e.mod_id, e.kind, e.en_us, "
                 "f.zh_tw AS f_zh_tw, f.source AS f_source, "
                 f"({selection.effective_review}) AS effective_review FROM "
-                + entry_source
-                + " JOIN effective f ON f.entry_id=e.id "
-                + selection.reference_join
-                + "JOIN selected_groups g ON e.mc_version IS g.mc_version "
-                "AND e.mod_id IS g.mod_id AND e.kind IS g.kind "
-                "AND e.en_us IS g.en_us AND f.zh_tw IS g.current_zh_tw "
+                + "selected_groups g JOIN "
+                + twin_entry_source
+                + " ON e.mc_version IS g.mc_version AND e.mod_id IS g.mod_id "
+                "AND e.kind IS g.kind AND e.en_us IS g.en_us "
+                + "JOIN effective f ON f.entry_id=e.id "
+                + "AND f.zh_tw IS g.current_zh_tw "
                 "AND f.source IS g.effective_source "
                 f"AND ({selection.effective_review}) IS g.effective_review "
+                + selection.reference_join
                 + f"WHERE {selection.where_sql}) "
                 + "SELECT id, mc_version, mod_id, kind, en_us, f_zh_tw, "
                 "f_source, effective_review FROM candidate_rows"
@@ -807,10 +813,12 @@ class SmartReviewMixin:
         )
         absolute_offset = max(0, int(offset))
         target_count = absolute_offset + bounded_limit
+        selection_exhausted = False
         if bounded_limit == 0:
             raw_rows = self._q(query_sql, selection.params)
             deduped_rows = _dedupe_same_text_rows(raw_rows)
             selected_rows = deduped_rows[absolute_offset:]
+            selection_exhausted = True
         else:
             raw_fetch_limit = max(1, target_count)
             while True:
@@ -820,15 +828,17 @@ class SmartReviewMixin:
                 )
                 deduped_rows = _dedupe_same_text_rows(raw_rows)
                 if len(deduped_rows) >= target_count or len(raw_rows) < raw_fetch_limit:
+                    selection_exhausted = len(raw_rows) < raw_fetch_limit
                     break
                 next_limit = raw_fetch_limit * 2
                 if next_limit <= raw_fetch_limit:
                     break
                 raw_fetch_limit = next_limit
             selected_rows = deduped_rows[absolute_offset:target_count]
-        selected_rows = self._complete_smart_review_twin_ids(
-            selection, entry_source, selected_rows
-        )
+        if not selection_exhausted:
+            selected_rows = self._complete_smart_review_twin_ids(
+                selection, selected_rows
+            )
         snapshots: list[SmartReviewSnapshot] = []
         for row_index, (row, twin_ids) in enumerate(selected_rows, 1):
             ordinal = absolute_offset + row_index
@@ -2008,7 +2018,9 @@ class SmartReviewMixin:
         self, *, limit: int = 20, offset: int = 0
     ) -> list[dict[str, Any]]:
         """列出 JSON 批次與舊版 SQLite 批次，依時間合併分頁。"""
-        history_runs = SmartReviewHistoryStore(self.path).all_runs()
+        history_runs = SmartReviewHistoryStore(self.path).all_runs(
+            include_sort_metadata=True
+        )
         start = max(0, int(offset))
         bounded_limit = max(1, int(limit))
         has_scope = self._smart_review_has_column("smart_review_run", "scope_json")
@@ -2051,11 +2063,15 @@ class SmartReviewMixin:
             combined.values(),
             key=lambda item: (
                 str(item.get("started_at") or ""),
+                int(item.get("_history_mtime_ns") or 0),
                 str(item.get("id") or ""),
             ),
             reverse=True,
         )
-        return ordered[start : start + bounded_limit]
+        page = ordered[start : start + bounded_limit]
+        for item in page:
+            item.pop("_history_mtime_ns", None)
+        return page
 
     def _apply_smart_review_candidate_json(
         self,

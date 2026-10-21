@@ -885,6 +885,70 @@ def test_smart_review_run_history_merges_legacy_pages_without_double_offset(db):
     assert db.list_smart_review_runs(limit=2, offset=2)[0]["id"] == "legacy-122"
 
 
+def test_smart_review_run_history_keeps_json_mtime_tie_breaker(db):
+    """同秒的 JSON 與 SQLite 批次合併時，沿用 JSON 檔案的時間排序。"""
+    from translation_tool.translation_db.smart_review_history import (
+        SmartReviewHistoryStore,
+    )
+
+    started_at = "2026-01-01 00:00:00"
+    history = SmartReviewHistoryStore(db.path)
+    history.directory.mkdir(parents=True, exist_ok=True)
+    history.path_for("aaa-json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "id": "aaa-json",
+                "provider": "gemini",
+                "model": "test-model",
+                "scope_version": 1,
+                "scope": {},
+                "started_at": started_at,
+                "finished_at": started_at,
+                "status": "completed",
+                "selected_count": 0,
+                "processed_count": 0,
+                "valid_count": 0,
+                "invalid_count": 0,
+                "request_error_count": 0,
+                "metrics": {},
+                "candidates": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    with db._tx(bump_generation_on_noop=False) as conn:
+        conn.execute(
+            "INSERT INTO smart_review_run ("
+            "id, provider, model, scope_version, requested_limit, batch_size, "
+            "scope_json, started_at, finished_at, status, selected_count, "
+            "processed_count, valid_count, invalid_count, request_error_count, metrics"
+            ") VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (
+                "zzz-legacy",
+                "gemini",
+                "test-model",
+                "1.21.1",
+                1,
+                1,
+                "{}",
+                started_at,
+                started_at,
+                "completed",
+                0,
+                0,
+                0,
+                0,
+                0,
+                "{}",
+            ),
+        )
+
+    page = db.list_smart_review_runs(limit=2)
+    assert [run["id"] for run in page] == ["aaa-json", "zzz-legacy"]
+    assert "_history_mtime_ns" not in page[0]
+
+
 def test_json_apply_reconciles_sqlite_commit_when_history_write_fails(db, monkeypatch):
     """SQLite 已提交但 JSON 回寫失敗時，下一次讀取會安全標記 applied。"""
 

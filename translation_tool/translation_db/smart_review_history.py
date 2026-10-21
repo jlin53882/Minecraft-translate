@@ -385,8 +385,12 @@ class SmartReviewHistoryStore:
                 return None
         return {key: value for key, value in payload.items() if key != "candidates"}
 
-    def all_runs(self) -> list[dict[str, Any]]:
-        """讀取所有可解析的 JSON 批次，依新到舊排序。"""
+    def all_runs(self, *, include_sort_metadata: bool = False) -> list[dict[str, Any]]:
+        """讀取所有可解析的 JSON 批次，依新到舊排序。
+
+        ``include_sort_metadata`` 僅供 SQLite 與 JSON 歷史合併排序使用；一般
+        呼叫維持原本的摘要格式，不把檔案 mtime 暴露給 UI 或其他呼叫端。
+        """
         if not self.directory.is_dir():
             return []
         runs: list[tuple[dict[str, Any], tuple[str, int, str]]] = []
@@ -402,6 +406,8 @@ class SmartReviewHistoryStore:
                 summary = {
                     key: value for key, value in payload.items() if key != "candidates"
                 }
+                if include_sort_metadata:
+                    summary["_history_mtime_ns"] = mtime_ns
                 runs.append(
                     (
                         summary,
