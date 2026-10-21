@@ -22,6 +22,7 @@ from translation_tool.translation_db.models import SmartReviewSnapshot
 from translation_tool.translation_db.schema import SRC_AI, SRC_JAR_TW, SRC_MANUAL
 from translation_tool.translation_db.smart_review import (
     build_smart_review_payload,
+    build_smart_review_validation_repair_payload,
     parse_smart_review_response,
     run_smart_review,
     smart_review_response_schema,
@@ -934,6 +935,113 @@ def test_smart_review_batch_event_reports_validation_distribution(db, monkeypatc
     assert batch_event["validation_errors"] == {"item 欄位不符合 strict schema": 2}
     assert result.metrics["validation_errors"] == batch_event["validation_errors"]
     assert result.metrics["suggest_revision_count"] == 0
+    assert result.metrics["validation_repair_attempts"] == 1
+    assert result.metrics["validation_repair_items"] == 2
+    assert result.metrics["repaired_valid_count"] == 0
+    assert result.metrics["repaired_invalid_count"] == 2
+
+
+def test_smart_review_retries_only_invalid_items_and_revalidates(db, monkeypatch):
+    """驗證 invalid 條目只修復一次，且修復後仍須通過完整 strict validation。"""
+    calls: list[dict] = []
+    events: list[dict] = []
+
+    def response(**kwargs):
+        """第一次製造缺少 reason，第二次只修復送入的 invalid 條目。"""
+        payload = kwargs["payload"]
+        calls.append(payload)
+        if "validation_errors" in payload:
+            return _review_response(payload["items"])
+        return json.dumps(
+            {
+                "items": [
+                    {
+                        "id": item["id"],
+                        "decision": "no_change",
+                        "suggested_zh_tw": "",
+                        "issue_types": [],
+                        "evidence_ids": [],
+                        "confidence": 0.8,
+                    }
+                    for item in payload["items"]
+                ]
+            }
+        )
+
+    monkeypatch.setattr(
+        "translation_tool.translation_db.smart_review.call_gemini_requests",
+        response,
+    )
+    result = run_smart_review(
+        db,
+        model_name="gemini-test",
+        api_key="test-key",
+        limit=2,
+        batch_size=2,
+        progress=events.append,
+        lm_config={"rate_limit": {"sleep_seconds_between_batches": 0}},
+    )
+
+    assert len(calls) == 2
+    assert [item["id"] for item in calls[1]["items"]] == [
+        item["id"] for item in calls[0]["items"]
+    ]
+    assert result.valid_count == 2
+    assert result.invalid_count == 0
+    assert result.metrics["validation_repair_attempts"] == 1
+    assert result.metrics["repaired_valid_count"] == 2
+    assert result.metrics["repaired_invalid_count"] == 0
+    kinds = {snapshot["event"]["kind"] for snapshot in events if snapshot.get("event")}
+    assert {
+        "validation_repair_start",
+        "validation_repair_attempt_start",
+        "validation_repair_attempt_success",
+        "validation_repair_complete",
+    } <= kinds
+    repair_events = [
+        snapshot["event"]
+        for snapshot in events
+        if snapshot.get("event", {}).get("kind", "").startswith("validation_repair")
+    ]
+    assert {event["phase"] for event in repair_events} >= {"validation", "api"}
+    assert all(
+        item.status == "no_change"
+        for item in db.list_smart_review_candidates(result.run_id)
+    )
+
+
+def test_smart_review_repair_payload_is_bounded_to_invalid_results(db):
+    """驗證修復 payload 不會重送已通過的條目或完整模型回應。"""
+    snapshots = db.smart_review_candidates(version="1.21.1", limit=2)
+    payload = build_smart_review_validation_repair_payload(
+        snapshots,
+        [
+            {"id": str(snapshots[0].ordinal), "validation_error": "reason 不可為空"},
+            {"id": str(snapshots[1].ordinal), "decision": "no_change"},
+        ],
+    )
+    assert [item["id"] for item in payload["items"]] == [str(snapshots[0].ordinal)]
+    assert payload["validation_errors"] == [
+        {"id": str(snapshots[0].ordinal), "error": "reason 不可為空"}
+    ]
+    assert "response" not in payload
+
+
+def test_smart_review_clamps_excessive_batch_size(db, monkeypatch):
+    """驗證服務層會將過大的批次限制在可觀測性測試採用的安全上限。"""
+    monkeypatch.setattr(
+        "translation_tool.translation_db.smart_review.call_gemini_requests",
+        lambda **kwargs: _review_response(kwargs["payload"]["items"]),
+    )
+    result = run_smart_review(
+        db,
+        model_name="gemini-test",
+        api_key="test-key",
+        limit=2,
+        batch_size=100,
+    )
+    assert result.metrics["batch_count"] == 1
+    assert db.get_smart_review_run(result.run_id)["batch_size"] == 50
 
 
 def test_request_failures_and_cancellation_are_distinct_from_invalid(db, monkeypatch):

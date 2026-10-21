@@ -162,6 +162,21 @@ def test_run_panel_treats_zero_limit_as_unlimited(db):
     assert "本次將處理 28 筆" in panel.estimate_text.value
 
 
+def test_run_panel_rejects_batch_size_over_safe_limit(db):
+    """驗證 UI 不會讓使用者送出超過 Smart Review 安全上限的批次。"""
+    from app.views.moddb.smart_review_dialog import SmartReviewDialog
+
+    dialog = SmartReviewDialog(_sync_page(), lambda: db, "1.21.1", None)
+    panel = dialog.run_panel
+    panel._total = 80
+    panel.batch_field.value = "51"
+    panel._update_estimate_text()
+
+    assert "不可超過 50 筆" in panel.estimate_text.value
+    with pytest.raises(ValueError, match="1 與 50"):
+        panel._request()
+
+
 def test_run_panel_does_not_refresh_page_when_progress_and_log_unchanged(db):
     """驗證 Smart Review 輪詢沒有可見變更時不會重送整頁 UI。"""
     from app.views.moddb.smart_review_dialog import SmartReviewDialog
@@ -369,6 +384,51 @@ def test_job_runs_in_background_and_derives_logs(tmp_path, monkeypatch):
                 },
             }
         )
+        for event in (
+            {
+                "kind": "validation_repair_start",
+                "batch_number": 1,
+                "batch_total": 2,
+                "smart_review_attempt": 1,
+                "expected_count": 1,
+                "validation_errors": {"1": "reason 不可為空"},
+            },
+            {
+                "kind": "validation_repair_attempt_start",
+                "batch_number": 1,
+                "batch_total": 2,
+                "smart_review_attempt": 2,
+                "expected_count": 1,
+            },
+            {
+                "kind": "validation_repair_attempt_success",
+                "batch_number": 1,
+                "batch_total": 2,
+                "smart_review_attempt": 2,
+                "api_elapsed_seconds": 0.2,
+                "http_status": 200,
+                "expected_count": 1,
+                "actual_count": 1,
+            },
+            {
+                "kind": "validation_repair_complete",
+                "batch_number": 1,
+                "batch_total": 2,
+                "smart_review_attempt": 2,
+                "repaired_valid_count": 1,
+                "repaired_invalid_count": 0,
+            },
+        ):
+            progress(
+                {
+                    "run_id": "run-ok",
+                    "selected": 4,
+                    "processed": 0,
+                    "valid": 0,
+                    "phase": "event",
+                    "event": event,
+                }
+            )
         progress(
             {
                 "run_id": "run-ok",
@@ -447,6 +507,9 @@ def test_job_runs_in_background_and_derives_logs(tmp_path, monkeypatch):
         and "等待 30.00 s" in text
         for text in texts
     )
+    assert any("驗證修復開始" in text for text in texts)
+    assert any("驗證修復 API 成功" in text for text in texts)
+    assert any("驗證修復完成：有效 +1" in text for text in texts)
     assert any("耗時拆解" in text and "API" in text for text in texts)
     assert any("無效原因：reason 不可為空 × 1" in text for text in texts)
     assert job.session.progress == 1.0

@@ -64,6 +64,8 @@ from translation_tool.utils.text_matching import contains_term, term_canonical_k
 logger = logging.getLogger(__name__)
 
 SMART_REVIEW_DECISIONS = ("no_change", "suggest_revision", "needs_context")
+SMART_REVIEW_MAX_BATCH_SIZE = 50
+SMART_REVIEW_VALIDATION_REPAIR_LIMIT = 1
 SMART_REVIEW_ISSUE_TYPES = (
     "meaning",
     "terminology",
@@ -81,11 +83,26 @@ SMART_REVIEW_SYSTEM_PROMPT = """你是 Minecraft 繁體中文翻譯的本地校�
 2. decision 只能是 no_change、suggest_revision、needs_context。
 3. 只有確定有必要修改時才使用 suggest_revision；不確定時使用 needs_context。
 4. suggest_revision 必須提供完整的繁體中文 suggested_zh_tw；其他兩種 decision 的 suggested_zh_tw 必須為空字串。
-5. 每筆都必須提供具體 reason：suggest_revision 要指出原文／目前譯文哪裡造成語意或專有名詞錯誤，以及建議如何修正；不能只寫「更自然」或「建議優化」。
-6. needs_context 要說明缺少什麼本地資料；沒有可靠佐證時不得寫成「已確認」或宣稱查過網路。
+5. 每筆都必須提供非空且具體的 reason，不可填空字串、null、「無」、「N/A」、只有標點或泛稱。suggest_revision 要指出原文／目前譯文哪裡造成語意或專有名詞錯誤，以及建議如何修正；不能只寫「翻譯錯誤」、「更自然」或「建議優化」。
+6. no_change 要說明原文與目前譯文為何可以保留，至少指出可核對的詞句或語意；suggest_revision 要在 reason 中引用可核對的原文或目前譯文片段；needs_context 要明確指出仍缺少哪一項資料。
+7. needs_context 要說明缺少什麼本地資料；沒有可靠佐證時不得寫成「已確認」或宣稱查過網路。
+8. 保留 Minecraft § 格式碼、佔位符、Patchouli／指南結構與原文語意。
+9. evidence_ids 只能引用該筆 context 中已有的 id；沒有引用時使用空陣列。衝突 evidence 不可當成唯一正解。
+10. 輸出前逐筆自我檢查：reason 非空、decision 與 suggested_zh_tw 相符、reason 能支持 decision，且 evidence_ids 都存在於該筆 context。
+"""
+SMART_REVIEW_REPAIR_SYSTEM_PROMPT = """你是 Minecraft 繁體中文翻譯的本地校對回應修復助手。
+你只能修復每筆資料標示的 validation_error，不得改變原文、目前譯文、id 或 local context 的事實。
+輸出仍是人工審查候選，不是自動翻譯，也不會直接寫入資料庫。
+
+規則：
+1. 每個 id 必須原樣保留，且每筆輸入各回傳一次。
+2. decision 只能是 no_change、suggest_revision、needs_context。
+3. 每筆 reason 必須是非空、具體、可核對的繁體中文，不能填「無」、N/A、只有標點或泛稱。
+4. no_change 的 suggested_zh_tw 必須是空字串；suggest_revision 必須提供不同且通過格式檢查的完整繁體中文；needs_context 的 suggested_zh_tw 必須是空字串。
+5. suggest_revision 的 reason 必須指出原文或目前譯文中可核對的差異；不確定時使用 needs_context，不得補造外部資料。
+6. evidence_ids 只能引用該筆 context 已有的 id，不能新增或猜測 id。
 7. 保留 Minecraft § 格式碼、佔位符、Patchouli／指南結構與原文語意。
-8. evidence_ids 只能引用該筆 context 中已有的 id；沒有引用時使用空陣列。衝突 evidence 不可當成唯一正解。
-9. 只回傳 JSON，不要 Markdown code fence 或額外說明。
+8. 輸出前逐筆檢查所有 required 欄位、reason、suggested_zh_tw 與 evidence_ids；只回傳 JSON，不要 Markdown 或額外說明。
 """
 
 _MAX_REASON_LENGTH = 2_000
@@ -164,6 +181,57 @@ def build_smart_review_payload(
             for item in snapshots
         ]
     }
+
+
+def build_smart_review_validation_repair_payload(
+    snapshots: Sequence[SmartReviewSnapshot],
+    results: Sequence[dict[str, Any]],
+) -> dict[str, Any]:
+    """只建立驗證失敗條目的受限修復負載，不重送已通過的條目。"""
+    invalid_by_id = {
+        str(result.get("id")): str(result.get("validation_error") or "")[:160]
+        for result in results
+        if result.get("validation_error")
+    }
+    invalid_snapshots = [
+        snapshot for snapshot in snapshots if str(snapshot.ordinal) in invalid_by_id
+    ]
+    payload = build_smart_review_payload(invalid_snapshots)
+    payload["validation_errors"] = [
+        {"id": str(snapshot.ordinal), "error": invalid_by_id[str(snapshot.ordinal)]}
+        for snapshot in invalid_snapshots
+    ]
+    return payload
+
+
+def merge_smart_review_validation_repairs(
+    results: Sequence[dict[str, Any]],
+    repaired_results: Sequence[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], int, int]:
+    """以再次嚴格驗證的結果取代原 invalid 候選並回傳修復統計。"""
+    repaired_by_id = {
+        str(result.get("id")): result
+        for result in repaired_results
+        if isinstance(result, dict)
+    }
+    merged: list[dict[str, Any]] = []
+    repaired_valid = 0
+    repaired_invalid = 0
+    for result in results:
+        result_id = str(result.get("id"))
+        if not result.get("validation_error"):
+            merged.append(result)
+            continue
+        repaired = repaired_by_id.get(result_id)
+        if repaired is None:
+            merged.append(result)
+        else:
+            merged.append(repaired)
+            if repaired.get("validation_error"):
+                repaired_invalid += 1
+            else:
+                repaired_valid += 1
+    return merged, repaired_valid, repaired_invalid
 
 
 def _strict_json_object(raw: str) -> dict[str, Any]:
@@ -2279,7 +2347,7 @@ def run_smart_review(
         prioritize_named_keys=prioritize_named_keys,
     )
     selection_seconds = round(time.monotonic() - selection_started, 3)
-    batch_size = max(1, min(int(batch_size), 100))
+    batch_size = max(1, min(int(batch_size), SMART_REVIEW_MAX_BATCH_SIZE))
     planning_started = time.monotonic()
     planned_batch_count = max(1, (len(snapshots) + batch_size - 1) // batch_size)
     planning_seconds = round(time.monotonic() - planning_started, 3)
@@ -2358,6 +2426,14 @@ def run_smart_review(
         "input_budget_shrink_count": 0,
         "input_budget_exceeded_count": 0,
         "response_invalid_count": 0,
+        "validation_repair_attempts": 0,
+        "validation_repair_items": 0,
+        "repaired_valid_count": 0,
+        "repaired_invalid_count": 0,
+        "validation_repair_request_errors": 0,
+        "validation_repair_response_invalid_count": 0,
+        "validation_repair_api_seconds": 0.0,
+        "validation_repair_parse_seconds": 0.0,
         "usage_missing_attempts": 0,
         "usage_missing_output_attempts": 0,
         "permanent_error_count": 0,
@@ -2587,6 +2663,16 @@ def run_smart_review(
             "api_seconds": timing.get("api_seconds", 0.0),
             "parse_seconds": timing.get("parse_seconds", 0.0),
             "result_write_seconds": timing.get("result_write_seconds", 0.0),
+            "validation_repair_attempts": timing.get("validation_repair_attempts", 0),
+            "validation_repair_items": timing.get("validation_repair_items", 0),
+            "repaired_valid_count": timing.get("repaired_valid_count", 0),
+            "repaired_invalid_count": timing.get("repaired_invalid_count", 0),
+            "validation_repair_api_seconds": timing.get(
+                "validation_repair_api_seconds", 0.0
+            ),
+            "validation_repair_parse_seconds": timing.get(
+                "validation_repair_parse_seconds", 0.0
+            ),
             "elapsed_seconds": timing.get("elapsed_seconds", 0.0),
             "valid_count": timing.get("valid_count", 0),
             "invalid_count": timing.get("invalid_count", 0),
@@ -2663,6 +2749,320 @@ def run_smart_review(
             network_retry_count=int(metrics.get("network_retry_count", 0)),
         )
 
+    def repair_invalid_results(
+        batch: Sequence[SmartReviewSnapshot],
+        results: list[dict[str, Any]],
+        batch_timing: dict[str, Any],
+        batch_number: int,
+        retry_runtime: _SmartReviewRetryRuntime,
+        outer_attempt: int,
+    ) -> list[dict[str, Any]]:
+        """只重試單批 invalid 條目一次，並在再次驗證失敗時保留 invalid。"""
+        nonlocal cancelled
+        invalid_results = [
+            result for result in results if result.get("validation_error")
+        ]
+        if not invalid_results or SMART_REVIEW_VALIDATION_REPAIR_LIMIT <= 0:
+            return results
+        invalid_ids = {str(result.get("id")) for result in invalid_results}
+        repair_batch = [item for item in batch if str(item.ordinal) in invalid_ids]
+        if not repair_batch:
+            return results
+
+        batch_timing["validation_repair_attempts"] += 1
+        batch_timing["validation_repair_items"] += len(repair_batch)
+        metrics["validation_repair_attempts"] = (
+            int(metrics["validation_repair_attempts"]) + 1
+        )
+        metrics["validation_repair_items"] = int(
+            metrics["validation_repair_items"]
+        ) + len(repair_batch)
+        emit_event(
+            "validation_repair_start",
+            batch_number=batch_number,
+            batch_total=max(planned_batch_count, batch_number),
+            smart_review_attempt=outer_attempt,
+            expected_count=len(repair_batch),
+            validation_errors={
+                str(result.get("id")): str(result.get("validation_error") or "")[:160]
+                for result in invalid_results
+            },
+        )
+
+        prepare_started = time.monotonic()
+        payload = build_smart_review_validation_repair_payload(
+            repair_batch, invalid_results
+        )
+        response_schema = smart_review_response_schema(
+            [str(item.ordinal) for item in repair_batch]
+        )
+        prepare_seconds = time.monotonic() - prepare_started
+        batch_timing["preparation_seconds"] = round(
+            float(batch_timing["preparation_seconds"]) + prepare_seconds, 3
+        )
+        metrics["preparation_seconds"] = round(
+            float(metrics["preparation_seconds"]) + prepare_seconds, 3
+        )
+        executor.add_timing("prompt_build_ms", prepare_seconds * 1000)
+
+        repair_api_key = key_cycle.claim() if key_cycle is not None else api_key.strip()
+        if (
+            not repair_api_key
+            and key_cycle is not None
+            and not key_cycle.failed_indexes
+        ):
+            repair_api_key = api_key.strip()
+        if provider == "gemini" and not repair_api_key:
+            metrics["validation_repair_request_errors"] = (
+                int(metrics["validation_repair_request_errors"]) + 1
+            )
+            emit_event(
+                "validation_repair_failure",
+                batch_number=batch_number,
+                batch_total=max(planned_batch_count, batch_number),
+                smart_review_attempt=outer_attempt,
+                error_kind="missing_api_key",
+                error_class="authentication",
+                exception_type="ApiKeyCycleExhausted",
+                will_retry=False,
+                validation_repair=True,
+            )
+            return results
+
+        repair_attempt = int(metrics["smart_review_attempts"]) + 1
+        metrics["smart_review_attempts"] = repair_attempt
+        if current_batch_handle is not None:
+            current_batch_handle.attempt = repair_attempt
+        emit_event(
+            "validation_repair_attempt_start",
+            batch_number=batch_number,
+            batch_total=max(planned_batch_count, batch_number),
+            smart_review_attempt=repair_attempt,
+            expected_count=len(repair_batch),
+            provider=provider,
+            model=model_name,
+            validation_repair=True,
+        )
+
+        def repair_rate_limit_event(event: dict[str, object]) -> None:
+            """把修復請求的配額等待標記為校對修復事件。"""
+            kind = str(event.get("kind") or "rate_limit_wait")
+            fields = {key: value for key, value in event.items() if key != "kind"}
+            emit_event(
+                kind,
+                batch_number=batch_number,
+                batch_total=max(planned_batch_count, batch_number),
+                smart_review_attempt=repair_attempt,
+                validation_repair=True,
+                **fields,
+            )
+
+        def repair_network_event(event: dict[str, object]) -> None:
+            """接收修復請求的 network telemetry 並累計等待時間。"""
+            kind = str(event.get("kind") or "network_event")
+            if kind == "network_attempt_start":
+                metrics["network_attempts"] = int(metrics["network_attempts"]) + 1
+            elif kind == "network_retry_wait":
+                try:
+                    wait_seconds = max(0.0, float(event.get("wait_seconds") or 0.0))
+                except (TypeError, ValueError):
+                    wait_seconds = 0.0
+                metrics["network_retry_count"] = int(metrics["network_retry_count"]) + 1
+                metrics["network_retry_wait_seconds"] = round(
+                    float(metrics["network_retry_wait_seconds"]) + wait_seconds, 3
+                )
+                batch_timing["network_retry_wait_seconds"] = round(
+                    float(batch_timing["network_retry_wait_seconds"]) + wait_seconds,
+                    3,
+                )
+            fields = {key: value for key, value in event.items() if key != "kind"}
+            emit_event(
+                kind,
+                batch_number=batch_number,
+                batch_total=max(planned_batch_count, batch_number),
+                smart_review_attempt=repair_attempt,
+                validation_repair=True,
+                **fields,
+            )
+
+        wait_started = time.monotonic()
+        try:
+            _wait_for_request_slot(
+                retry_runtime,
+                model_name,
+                cancel_check=cancel_check,
+                wait_event_callback=repair_rate_limit_event,
+            )
+        except TaskCancelled:
+            cancelled = True
+            return results
+        finally:
+            wait_seconds = time.monotonic() - wait_started
+            batch_timing["rate_limit_wait_seconds"] = round(
+                float(batch_timing["rate_limit_wait_seconds"]) + wait_seconds, 3
+            )
+            metrics["rate_limit_wait_seconds"] = round(
+                float(metrics["rate_limit_wait_seconds"]) + wait_seconds, 3
+            )
+
+        repair_meta: dict[str, Any] = {}
+        repair_raw = ""
+        repair_api_started = time.monotonic()
+        repair_failed = False
+        executor.metrics.request_attempts += 1
+        executor.metrics.provider_attempts += 1
+        try:
+            repair_raw = call_gemini_requests(
+                model_name=model_name,
+                system_prompt=SMART_REVIEW_REPAIR_SYSTEM_PROMPT,
+                payload=payload,
+                api_key=repair_api_key,
+                temperature=0.2,
+                max_output_tokens=output_token_cap,
+                meta_out=repair_meta,
+                provider=provider,
+                lm_config=lm_config,
+                response_schema=response_schema,
+                network_event_callback=repair_network_event,
+                **chatgpt_options,
+            )
+        except TaskCancelled:
+            _smart_review_record_usage(metrics, repair_meta, token_totals)
+            cancelled = True
+            repair_failed = True
+        except Exception as exc:  # noqa: BLE001 - safe repair event
+            _smart_review_record_usage(metrics, repair_meta, token_totals)
+            repair_failed = True
+            repair_status = getattr(exc, "status", None)
+            if isinstance(exc, requests.HTTPError):
+                repair_status = (
+                    exc.response.status_code
+                    if exc.response is not None
+                    else repair_status
+                )
+            classification = classify_provider_error(exc, repair_status)
+            metrics["validation_repair_request_errors"] = (
+                int(metrics["validation_repair_request_errors"]) + 1
+            )
+            emit_event(
+                "validation_repair_failure",
+                batch_number=batch_number,
+                batch_total=max(planned_batch_count, batch_number),
+                smart_review_attempt=repair_attempt,
+                http_status=classification["http_status"],
+                error_kind=classification["error_class"],
+                error_class=classification["error_class"],
+                provider_error_code=classification["provider_error_code"],
+                exception_type=classification["exception_type"],
+                provider_overload=classification["overload"],
+                quota_or_rate_limit=classification["rate_limit"],
+                timeout=classification["timeout"],
+                connection=classification["connection"],
+                retry_after_ms=classification["retry_after_ms"],
+                will_retry=False,
+                validation_repair=True,
+            )
+        finally:
+            repair_api_seconds = time.monotonic() - repair_api_started
+            batch_timing["api_seconds"] = round(
+                float(batch_timing["api_seconds"]) + repair_api_seconds, 3
+            )
+            batch_timing["validation_repair_api_seconds"] = round(
+                float(batch_timing["validation_repair_api_seconds"])
+                + repair_api_seconds,
+                3,
+            )
+            metrics["api_seconds"] = round(
+                float(metrics["api_seconds"]) + repair_api_seconds, 3
+            )
+            metrics["validation_repair_api_seconds"] = round(
+                float(metrics["validation_repair_api_seconds"]) + repair_api_seconds,
+                3,
+            )
+            executor.add_timing("api_ms", repair_api_seconds * 1000)
+
+        if repair_failed or cancelled:
+            return results
+
+        _smart_review_record_usage(metrics, repair_meta, token_totals)
+        emit_event(
+            "validation_repair_attempt_success",
+            batch_number=batch_number,
+            batch_total=max(planned_batch_count, batch_number),
+            smart_review_attempt=repair_attempt,
+            api_elapsed_seconds=repair_api_seconds,
+            http_status=repair_meta.get("http_status", 200),
+            finish_reason=repair_meta.get("finish_reason"),
+            expected_count=len(repair_batch),
+            actual_count=_smart_review_response_item_count(repair_raw),
+            prompt_tokens=repair_meta.get("prompt_tokens"),
+            output_tokens=repair_meta.get("output_tokens")
+            or repair_meta.get("candidates_tokens"),
+            validation_repair=True,
+        )
+        repair_parse_started = time.monotonic()
+        try:
+            repaired_results = parse_smart_review_response(repair_raw, repair_batch)
+        except Exception as exc:  # noqa: BLE001 - strict parser
+            metrics["validation_repair_response_invalid_count"] = (
+                int(metrics["validation_repair_response_invalid_count"]) + 1
+            )
+            emit_event(
+                "validation_repair_failure",
+                batch_number=batch_number,
+                batch_total=max(planned_batch_count, batch_number),
+                smart_review_attempt=repair_attempt,
+                error_kind="schema_or_parse_error",
+                error_class="schema_or_parse_error",
+                exception_type=type(exc).__name__,
+                will_retry=False,
+                validation_repair=True,
+            )
+            repaired_results = []
+        finally:
+            repair_parse_seconds = time.monotonic() - repair_parse_started
+            batch_timing["parse_seconds"] = round(
+                float(batch_timing["parse_seconds"]) + repair_parse_seconds, 3
+            )
+            batch_timing["validation_repair_parse_seconds"] = round(
+                float(batch_timing["validation_repair_parse_seconds"])
+                + repair_parse_seconds,
+                3,
+            )
+            metrics["parse_seconds"] = round(
+                float(metrics["parse_seconds"]) + repair_parse_seconds, 3
+            )
+            metrics["validation_repair_parse_seconds"] = round(
+                float(metrics["validation_repair_parse_seconds"])
+                + repair_parse_seconds,
+                3,
+            )
+            executor.add_timing("response_parse_ms", repair_parse_seconds * 1000)
+
+        if not repaired_results:
+            return results
+        merged, repaired_valid, repaired_invalid = (
+            merge_smart_review_validation_repairs(results, repaired_results)
+        )
+        batch_timing["repaired_valid_count"] += repaired_valid
+        batch_timing["repaired_invalid_count"] += repaired_invalid
+        metrics["repaired_valid_count"] = (
+            int(metrics["repaired_valid_count"]) + repaired_valid
+        )
+        metrics["repaired_invalid_count"] = (
+            int(metrics["repaired_invalid_count"]) + repaired_invalid
+        )
+        emit_event(
+            "validation_repair_complete",
+            batch_number=batch_number,
+            batch_total=max(planned_batch_count, batch_number),
+            smart_review_attempt=repair_attempt,
+            repaired_valid_count=repaired_valid,
+            repaired_invalid_count=repaired_invalid,
+            validation_repair=True,
+        )
+        return merged
+
     report_progress(
         phase="selection_complete",
         timing={
@@ -2718,6 +3118,12 @@ def run_smart_review(
                 "api_seconds": 0.0,
                 "parse_seconds": 0.0,
                 "result_write_seconds": 0.0,
+                "validation_repair_attempts": 0,
+                "validation_repair_items": 0,
+                "repaired_valid_count": 0,
+                "repaired_invalid_count": 0,
+                "validation_repair_api_seconds": 0.0,
+                "validation_repair_parse_seconds": 0.0,
             }
             current_batch_handle = executor.begin_batch(
                 batch_index=batch_number,
@@ -3338,6 +3744,14 @@ def run_smart_review(
                         3,
                     )
                     executor.add_timing("response_parse_ms", parse_seconds * 1000)
+                results = repair_invalid_results(
+                    batch,
+                    results,
+                    batch_timing,
+                    batch_number,
+                    retry_runtime,
+                    smart_review_attempt,
+                )
                 write_started = time.monotonic()
                 try:
                     db.record_smart_review_results(run_id, results)

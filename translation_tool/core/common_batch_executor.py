@@ -38,6 +38,11 @@ _PHASE_FOR_KIND = {
     "rate_limit_wait": "quota",
     "rate_limit_resume": "quota",
     "key_rotation": "retry",
+    "validation_repair_start": "validation",
+    "validation_repair_attempt_start": "api",
+    "validation_repair_attempt_success": "api",
+    "validation_repair_failure": "api",
+    "validation_repair_complete": "validation",
 }
 
 _SENSITIVE_FIELD_NAMES = frozenset(

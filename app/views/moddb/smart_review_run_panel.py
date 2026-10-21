@@ -28,6 +28,7 @@ from app.views.moddb.smart_review_job import (
     SmartReviewRequest,
     format_duration,
 )
+from translation_tool.translation_db.smart_review import SMART_REVIEW_MAX_BATCH_SIZE
 
 _POLL_SECONDS = 0.4
 _RESULT_LABEL = {
@@ -448,15 +449,20 @@ class SmartReviewRunPanel:
         elif self._total is None:
             self.estimate_text.value = "正在等待候選筆數…"
             self.estimate_text.color = C.MUTED
+        elif batch > SMART_REVIEW_MAX_BATCH_SIZE:
+            self.estimate_text.value = (
+                f"符合範圍的未審核 AI 譯文共 {format_count(self._total)} 筆；"
+                f"每批大小不可超過 {SMART_REVIEW_MAX_BATCH_SIZE} 筆。"
+            )
+            self.estimate_text.color = C.RED
         else:
-            batch = min(batch, 100)
             planned = self._total if limit == 0 else min(limit, self._total)
             batches = math.ceil(planned / batch) if planned else 0
             limit_label = "不限" if limit == 0 else format_count(limit)
             self.estimate_text.value = (
                 f"符合範圍的未審核 AI 譯文共 {format_count(self._total)} 筆；"
                 f"本次將處理 {format_count(planned)} 筆（上限 {limit_label}），約 {batches} 批"
-                f"（每批最多 100 筆）。"
+                f"（每批最多 {SMART_REVIEW_MAX_BATCH_SIZE} 筆）。"
             )
             self.estimate_text.color = C.MUTED
         self.ctx.update()
@@ -480,6 +486,8 @@ class SmartReviewRunPanel:
             raise ValueError("上限必須是 0 或正整數")
         if batch is None:
             raise ValueError("每批必須是大於 0 的整數")
+        if batch > SMART_REVIEW_MAX_BATCH_SIZE:
+            raise ValueError(f"每批必須介於 1 與 {SMART_REVIEW_MAX_BATCH_SIZE} 筆")
         mod_id, kind, source, query = self._scope_values()
         path, priority = database
         return SmartReviewRequest(

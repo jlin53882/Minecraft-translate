@@ -336,6 +336,14 @@ class SmartReviewJob:
         elif kind in {"attempt_start", "attempt_success", "attempt_failure"}:
             self._log_attempt_event(session, event)
         elif kind in {
+            "validation_repair_start",
+            "validation_repair_attempt_start",
+            "validation_repair_attempt_success",
+            "validation_repair_failure",
+            "validation_repair_complete",
+        }:
+            self._log_validation_repair_event(session, event)
+        elif kind in {
             "retry_wait",
             "retry_resume",
             "rate_limit_wait",
@@ -412,6 +420,63 @@ class SmartReviewJob:
             f"API 金鑰輪替={_event_bool(event.get('key_rotated'))}。",
             "warning",
         )
+
+    def _log_validation_repair_event(
+        self, session: TaskSession, event: dict[str, Any]
+    ) -> None:
+        """記錄只針對 validation invalid 條目的受限修復流程。"""
+        prefix = self._event_prefix(event)
+        attempt = event.get("smart_review_attempt", "?")
+        kind = event.get("kind")
+        if kind == "validation_repair_start":
+            errors = event.get("validation_errors") or {}
+            error_text = (
+                "、".join(f"{key}: {value}" for key, value in list(errors.items())[:3])
+                or "未提供"
+            )
+            session.add_log(
+                f"{prefix} 驗證修復開始：只重送 {event.get('expected_count', 0)} 筆；"
+                f"原驗證錯誤={error_text}。",
+                "warning",
+            )
+        elif kind == "validation_repair_attempt_start":
+            session.add_log(
+                f"{prefix}[第 {attempt} 次嘗試] 驗證修復 API 請求開始："
+                f"預期 {event.get('expected_count', 0)} 筆。",
+                "info",
+            )
+        elif kind == "validation_repair_attempt_success":
+            prompt = event.get("prompt_tokens")
+            output = event.get("output_tokens")
+            token_text = (
+                f"提示詞 token={prompt}、輸出 token={output}"
+                if prompt is not None or output is not None
+                else "token=未提供"
+            )
+            session.add_log(
+                f"{prefix}[第 {attempt} 次嘗試] 驗證修復 API 成功："
+                f"耗時={_format_timing(event.get('api_elapsed_seconds'))}，"
+                f"狀態碼={event.get('http_status', '?')}，"
+                f"預期/回傳={event.get('expected_count', '?')}/"
+                f"{event.get('actual_count', '?')}，{token_text}。",
+                "info",
+            )
+        elif kind == "validation_repair_complete":
+            session.add_log(
+                f"{prefix} 驗證修復完成：有效 +{event.get('repaired_valid_count', 0)}、"
+                f"仍無效 +{event.get('repaired_invalid_count', 0)}；"
+                "修復結果仍經過完整 strict schema 驗證。",
+                "warning" if event.get("repaired_invalid_count", 0) else "info",
+            )
+        else:
+            session.add_log(
+                f"{prefix}[第 {attempt} 次嘗試] 驗證修復失敗："
+                f"狀態碼={event.get('http_status', '?')}，"
+                f"錯誤分類={event.get('error_kind', 'unknown')}，"
+                f"例外類型={event.get('exception_type', 'Exception')}；"
+                "保留原 invalid 結果。",
+                "warning",
+            )
 
     def _log_retry_event(self, session: TaskSession, event: dict[str, Any]) -> None:
         """記錄 provider retry 或 quota clock 的等待與恢復。"""
@@ -517,6 +582,10 @@ class SmartReviewJob:
             f"API {_format_timing(event.get('api_seconds'))}、"
             f"解析 {_format_timing(event.get('parse_seconds'))}、"
             f"寫入 JSON {_format_timing(event.get('result_write_seconds'))}、"
+            f"驗證修復 {event.get('validation_repair_attempts', 0)} 次、"
+            f"修復有效 +{event.get('repaired_valid_count', 0)}、"
+            f"修復後仍無效 +{event.get('repaired_invalid_count', 0)}、"
+            f"修復 API {_format_timing(event.get('validation_repair_api_seconds'))}、"
             f"本批 {_format_timing(event.get('elapsed_seconds'))}；"
             f"有效={event.get('valid_count', 0)}、"
             f"無效={event.get('invalid_count', 0)}、"
@@ -595,6 +664,7 @@ class SmartReviewJob:
             f"解析 {_format_timing(seconds('response_parse_ms', 'parse_seconds'))}、"
             f"驗證 {_format_timing(seconds('validation_ms'))}、"
             f"寫入 JSON {_format_timing(seconds('history_write_ms', 'result_write_seconds'))}、"
+            f"驗證修復 API {_format_timing(metrics.get('validation_repair_api_seconds'))}、"
             f"總計 {_format_timing(total)}；"
             f"共 {metrics.get('batch_count', 0)} 批、"
             f"校對請求 {metrics.get('request_attempts', metrics.get('smart_review_attempts', 0))} 次、"
