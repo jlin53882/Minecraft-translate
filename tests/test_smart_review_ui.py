@@ -7,6 +7,7 @@ import threading
 from types import SimpleNamespace
 from typing import ClassVar
 
+import flet as ft
 import pytest
 
 from app.views.moddb import entry_filters
@@ -719,6 +720,7 @@ def test_reviewer_defaults_to_ready_queue_with_one_item_per_page(reviewer):
     assert reviewer.total == 2
     assert reviewer.row.ordinal == 2
     assert reviewer.position_input.value == "1"
+    assert reviewer.position_input.text_align == ft.TextAlign.CENTER
     assert reviewer.position_suffix.value == " / 2 筆（可套用）"
     assert reviewer.fake.calls[-1] == ("page", "ready", 1, 0, None)
     labels = [option.text for option in reviewer.filter_dd.options]

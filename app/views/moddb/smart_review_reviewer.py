@@ -263,6 +263,7 @@ class SmartReviewReviewer:
             tooltip="輸入筆次後按 Enter 跳轉",
             on_submit=self._on_position_submit,
         )
+        self.position_input.text_align = ft.TextAlign.CENTER
         self.position_suffix = ft.Text("", size=13, weight=ft.FontWeight.W_600)
         self.position_control = ft.Row(
             [
