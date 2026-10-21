@@ -2479,8 +2479,13 @@ def _attempt_batch(
             skipped_by_quota.add(model_index)
             continue
         prompt = runtime.effective_prompt
-        output_cap = None
-        cap_source = "global"
+        model_override = model_output_token_cap(runtime.lm_cfg, model_name)
+        cap_source = "per_model" if model_override is not None else "global"
+        output_cap = (
+            model_override
+            if model_override is not None
+            else runtime.budget_cfg.max_output_tokens
+        )
         set_active_model(model_name)  # UI 狀態列顯示實際使用中的模型
         try:
             raw_text, api_meta, api_key, output_cap, cap_source = (

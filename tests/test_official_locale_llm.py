@@ -8,6 +8,7 @@ from app.services_impl.moddb_translate_service import (
     _attach_translation_sessions,
     build_items,
 )
+from translation_tool.core import official_locale
 from translation_tool.core.lm_format_policy import (
     FORMAT_POLICY_PROMPT,
     LANG_SEMANTIC_FORMAT_POLICY_PROMPT,
@@ -47,6 +48,32 @@ def test_bundled_official_locale_is_valid_and_key_aware() -> None:
         index.lookup_exact("block.minecraft.cobblestone", "Cobblestone", "圆石")
         == "鵝卵石"
     )
+
+
+def test_official_terminology_matching_reuses_the_loaded_prefix_index(
+    monkeypatch,
+) -> None:
+    """官方索引命中時不得為每筆來源重新建立整份術語前綴索引。"""
+    index = load_official_locale_index()
+    assert index.terminology_terms
+    assert index.terminology_prefix_index
+
+    def fail_rebuild(_terms):
+        raise AssertionError("不應在已載入官方索引後重新建立術語前綴索引")
+
+    monkeypatch.setattr(official_locale, "build_term_prefix_index", fail_rebuild)
+    matches = index.official_terminology_matches_for_item(
+        {
+            "path": "custom:obtain_block",
+            "source_text": "Obtain a Netherite-Diamond Block",
+        }
+    )
+
+    assert {match.source_text for match in matches} >= {
+        "Netherite",
+        "Diamond",
+        "Block",
+    }
 
 
 def test_ambiguous_text_fallback_is_not_used() -> None:

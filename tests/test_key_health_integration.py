@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from unittest.mock import Mock, patch
 
@@ -123,6 +124,20 @@ class Env:
         )
         if isinstance(outcome, Exception):
             raise outcome
+        if outcome == OK_JSON:
+            # 翻譯執行器會在每個批次使用穩定的全域項目 id；測試成功回應
+            # 也要回傳目前 payload 的完整 id 集合，避免把健康狀態測試誤變成
+            # 回應契約錯誤測試。
+            payload_items = kwargs.get("payload", {}).get("items", [])
+            return json.dumps(
+                {
+                    "items": [
+                        {"id": str(item["id"]), "value": "你好"}
+                        for item in payload_items
+                    ]
+                },
+                ensure_ascii=False,
+            )
         return outcome
 
     def translate(self, n: int, lang_batch: int = 1, models: tuple = ("m1",)):
@@ -149,6 +164,9 @@ def env():
     quota = get_model_quota_registry()
     original_clocks = (registry._clock, quota._clock)
     registry._clock = quota._clock = state.clock
+    # 每個測試都從乾淨的全域健康狀態開始；否則前一個測試留下的 403
+    # 冷卻紀錄會跨 fixture 影響「停用失敗記憶」的對照測試。
+    registry.clear()
     with (
         patch.object(main, "call_gemini_requests", side_effect=state.fake_api),
         patch.object(main, "interruptible_sleep"),
@@ -157,6 +175,7 @@ def env():
         rules._key_tracker.reset()
         yield state
         rules._key_tracker.reset()
+        registry.clear()
     registry._clock, quota._clock = original_clocks
 
 

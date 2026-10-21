@@ -23,6 +23,7 @@ from translation_tool.core.lm_format_policy import (
 )
 from translation_tool.utils.app_paths import get_resource_root
 from translation_tool.utils.text_matching import (
+    build_term_prefix_index,
     contains_term,
     matching_terms,
     normalize_term_text,
@@ -135,6 +136,10 @@ class OfficialLocaleIndex:
         default_factory=dict
     )
     derived_terms_by_en: dict[str, tuple[str, str, str | None]] = field(
+        default_factory=dict
+    )
+    terminology_terms: tuple[str, ...] = ()
+    terminology_prefix_index: dict[str, tuple[tuple[str, str], ...]] = field(
         default_factory=dict
     )
 
@@ -272,7 +277,7 @@ class OfficialLocaleIndex:
                 term_origin="official_full_translation",
             )
 
-        term_values = tuple(
+        term_values = self.terminology_terms or tuple(
             dict.fromkeys(
                 (
                     *self.unique_tw_by_en.keys(),
@@ -280,7 +285,12 @@ class OfficialLocaleIndex:
                 )
             )
         )
-        for term in matching_terms((normalized_source,), term_values):
+        prefix_index = self.terminology_prefix_index or build_term_prefix_index(
+            term_values
+        )
+        for term in matching_terms(
+            (normalized_source,), term_values, prefix_index=prefix_index
+        ):
             canonical = term_canonical_key(term)
             if canonical == term_canonical_key(normalized_source):
                 continue
@@ -343,6 +353,10 @@ class OfficialLocaleIndex:
         exact = self.unique_tw_by_en.get(source)
         if exact:
             return exact
+        # 已載入索引已包含所有不歧義的正規化來源；只有手動建立的相容索引
+        # 才需要使用下方的舊式備援掃描。
+        if self.unique_tw_by_normalized_en:
+            return None
         matches = {
             value
             for raw_source, value in self.unique_tw_by_en.items()
@@ -356,6 +370,10 @@ class OfficialLocaleIndex:
         record = self.unique_record_by_normalized_en.get(canonical)
         if record is not None:
             return record
+        # 已載入索引已記錄所有不歧義的正規化來源；若找不到，掃描整份
+        # locale 不可能產生有效的唯一完整翻譯，且會造成不必要的成本。
+        if self.unique_record_by_normalized_en:
+            return None
         records = sorted(
             (
                 record
@@ -650,6 +668,14 @@ def _load_index(root: Path) -> OfficialLocaleIndex:
         if source in unique_en_normalized and values
     }
     derived_terms = _derive_component_terms(records.values(), unique_en_normalized)
+    terminology_terms = tuple(
+        dict.fromkeys(
+            (
+                *unique_en.keys(),
+                *(value[0] for value in derived_terms.values()),
+            )
+        )
+    )
     name_like_terms = {
         term_canonical_key(record.en_us)
         for record in records.values()
@@ -667,6 +693,8 @@ def _load_index(root: Path) -> OfficialLocaleIndex:
         unique_tw_by_normalized_en=unique_en_normalized,
         unique_record_by_normalized_en=unique_records_normalized,
         derived_terms_by_en=derived_terms,
+        terminology_terms=terminology_terms,
+        terminology_prefix_index=build_term_prefix_index(terminology_terms),
     )
 
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping, Sequence
 
 _TERM_SEPARATOR_RE = re.compile(r"[-_]+")
 _TERM_WHITESPACE_RE = re.compile(r"\s+")
@@ -52,8 +53,10 @@ def term_canonical_key(term: str) -> str:
     return normalize_term_text(term, casefold=True)
 
 
-def matching_terms(sources: tuple[str, ...], terms: tuple[str, ...]) -> set[str]:
-    """使用前綴索引找出至少出現在一個來源中的術語，並以詞界檢查確認結果。"""
+def build_term_prefix_index(
+    terms: Sequence[str],
+) -> dict[str, tuple[tuple[str, str], ...]]:
+    """預先建立術語前綴索引，供多筆來源重用。"""
     normalized_terms: dict[str, list[str]] = {}
     for term in terms:
         if not isinstance(term, str):
@@ -61,14 +64,25 @@ def matching_terms(sources: tuple[str, ...], terms: tuple[str, ...]) -> set[str]
         normalized = term_canonical_key(term)
         if normalized:
             normalized_terms.setdefault(normalized, []).append(term)
-    if not normalized_terms:
-        return set()
-
     prefix_index: dict[str, list[tuple[str, str]]] = {}
     for normalized, originals in normalized_terms.items():
         prefix_index.setdefault(normalized[:3], []).extend(
             (original, normalized) for original in originals
         )
+    return {prefix: tuple(entries) for prefix, entries in prefix_index.items()}
+
+
+def matching_terms(
+    sources: tuple[str, ...],
+    terms: tuple[str, ...],
+    *,
+    prefix_index: Mapping[str, Sequence[tuple[str, str]]] | None = None,
+) -> set[str]:
+    """使用前綴索引找出至少出現在一個來源中的術語，並以詞界檢查確認結果。"""
+    if prefix_index is None:
+        prefix_index = build_term_prefix_index(terms)
+    if not prefix_index:
+        return set()
 
     matched: set[str] = set()
     for source in sources:
