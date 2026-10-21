@@ -4,26 +4,39 @@ from __future__ import annotations
 
 import re
 from collections.abc import Mapping, Sequence
+from functools import lru_cache
 
 _TERM_SEPARATOR_RE = re.compile(r"[-_]+")
 _TERM_WHITESPACE_RE = re.compile(r"\s+")
+
+
+@lru_cache(maxsize=200_000)
+def _normalize_term_str(value: str, casefold: bool) -> str:
+    """快取單一字串的術語正規化結果；同一批候選會反覆比對相同術語。"""
+    normalized = _TERM_SEPARATOR_RE.sub(" ", value.strip())
+    normalized = _TERM_WHITESPACE_RE.sub(" ", normalized)
+    return normalized.casefold() if casefold else normalized
 
 
 def normalize_term_text(value: str, *, casefold: bool = False) -> str:
     """正規化 Minecraft 識別字與英文術語常用的分隔符。"""
     if not isinstance(value, str):
         return ""
-    normalized = _TERM_SEPARATOR_RE.sub(" ", value.strip())
-    normalized = _TERM_WHITESPACE_RE.sub(" ", normalized)
-    return normalized.casefold() if casefold else normalized
+    return _normalize_term_str(value, casefold)
 
 
 def contains_term(source: str, term: str) -> bool:
     """以不分大小寫且遵守詞界的方式判斷來源是否包含術語。"""
     if not isinstance(source, str) or not isinstance(term, str):
         return False
-    normalized_source = normalize_term_text(source, casefold=True)
-    normalized_term = normalize_term_text(term, casefold=True)
+    return _contains_normalized_term(
+        normalize_term_text(source, casefold=True),
+        normalize_term_text(term, casefold=True),
+    )
+
+
+def _contains_normalized_term(normalized_source: str, normalized_term: str) -> bool:
+    """比對已 casefold 正規化的來源與術語，詞界規則與 ``contains_term`` 相同。"""
     if not normalized_source or not normalized_term:
         return False
 
@@ -96,7 +109,9 @@ def matching_terms(
         }
         for prefix in prefixes:
             for original, normalized in prefix_index.get(prefix, ()):
-                if contains_term(source, original):
+                if original in matched:
+                    continue
+                if _contains_normalized_term(normalized_source, normalized):
                     matched.add(original)
     return matched
 
