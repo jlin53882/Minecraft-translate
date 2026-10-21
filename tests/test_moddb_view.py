@@ -897,6 +897,50 @@ def test_advanced_filter_refreshes_module_and_source_options(db_path):
     db.close()
 
 
+def test_advanced_filter_keeps_selected_empty_module_and_source_scope(db_path):
+    """進階條件無交集時仍保留選值，不能把查詢放寬到其他範圍。"""
+    seed(db_path)
+    db = TranslationDB(db_path)
+    db.ingest(
+        "1.21.1",
+        [
+            ScanItem(
+                KIND_LANG,
+                "baz",
+                "item.baz.a",
+                "Copper Casing",
+                "銅殼",
+                source=SRC_AI,
+            )
+        ],
+    )
+    db.close()
+
+    settings = DbSettings(path=str(db_path), version="1.21.1")
+    snapshot = moddb_view.load_panel_snapshot(
+        "entries",
+        {
+            "criteria": EntryFilter(
+                version="1.21.1",
+                mod_id="foo",
+                source=SRC_AI,
+                quality=QualityFilter(status="consistent"),
+            ),
+            "version": "1.21.1",
+            "mod_id": "foo",
+            "kind": None,
+            "page": 1,
+        },
+        settings,
+    )
+
+    assert snapshot["mod_id"] == "foo"
+    assert snapshot["source"] == SRC_AI
+    assert snapshot["total"] == 0
+    assert "foo" in snapshot["mods"]
+    assert SRC_AI in snapshot["effective_source_codes"]
+
+
 def test_entries_edit_shows_impact_and_save_propagates(entries):
     foo_a = next(r for r in entries.rows if r.key == "item.foo.a")
     entries.select(foo_a.id)

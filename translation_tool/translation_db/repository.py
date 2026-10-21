@@ -1396,8 +1396,6 @@ class TranslationDB(SmartReviewMixin, BulkReviewMixin, CleanupMixin):
         因此選項與條目清單使用完全相同的篩選語意。
         """
         option_criteria = replace(criteria, mod_id=None, source=None)
-        pairs = None
-        rows_are_full_entries = False
         if option_criteria.quality.active:
             condition, params = self._filter_sql(option_criteria)
             flags_ready = self._quality_flags_ready()
@@ -1418,50 +1416,87 @@ class TranslationDB(SmartReviewMixin, BulkReviewMixin, CleanupMixin):
                     f"SELECT DISTINCT e.mod_id, f.source {source} WHERE {condition}",
                     params,
                 )
+                pair_rows = rows
             else:
-                rows, _total = self._quality_filtered_page(
-                    option_criteria, limit=None, offset=0
-                )
-                pairs = ((row[3], row[7]) for row in rows)
-                rows_are_full_entries = True
+                pair_rows = self._quality_option_pairs(option_criteria)
         else:
             condition, params = self._filter_sql(option_criteria)
             source = self._candidate_source(f"{condition} f.source")
-            rows = self._q(
+            pair_rows = self._q(
                 f"SELECT DISTINCT e.mod_id, f.source {source} WHERE {condition}",
                 params,
             )
-
-        if pairs is None:
-            pairs = iter(rows)
 
         selected_source = criteria.source
         selected_mod = criteria.mod_id
         mods = sorted(
             {
                 str(mod_id)
-                for mod_id, source_code in pairs
+                for mod_id, source_code in pair_rows
                 if selected_source is None or source_code == selected_source
             }
         )
 
-        # rows 是可重複使用的清單，第一個 generator 只負責建立模組集合，
-        # 第二個 generator 再建立來源集合，不會再次讀取資料庫。
-        if rows_are_full_entries:
-            source_pairs = ((row[3], row[7]) for row in rows)
-        else:
-            source_pairs = iter(rows)
         sources = tuple(
             sorted(
                 {
                     int(source_code)
-                    for mod_id, source_code in source_pairs
+                    for mod_id, source_code in pair_rows
                     if source_code is not None
                     and (selected_mod is None or mod_id == selected_mod)
                 }
             )
         )
         return mods, sources
+
+    def _quality_option_pairs(
+        self, criteria: EntryFilter
+    ) -> set[tuple[str, int | None]]:
+        """以窄投影掃描非精確品質條件，只保留選項所需的唯一配對。
+
+        品質條件的方向或 token 類別不是「全部」時，不能完全交給 qflags
+        索引判斷，仍須逐列呼叫 ``matches_quality``。這裡只讀取判斷所需欄位，
+        並直接累積模組／來源配對，避免把完整條目列全部緩衝到記憶體。
+        """
+        condition, params = self._filter_sql(criteria)
+        prefilter = self._quality_prefilter_sql(
+            criteria.quality, self._quality_flags_ready()
+        )
+        pairs: set[tuple[str, int | None]] = set()
+        with self._lock:
+            owns_transaction = not self._conn.in_transaction
+            if owns_transaction:
+                self._conn.execute("BEGIN")
+            self._conn.set_progress_handler(lambda: int(is_cancelled()), 10_000)
+            cursor = None
+            try:
+                cursor = self._conn.execute(
+                    "SELECT e.kind, e.mod_id, e.key, e.en_us, f.zh_tw, f.source "
+                    f"{self._query_source()} WHERE ({condition}) AND {prefilter}",
+                    tuple(params),
+                )
+                while chunk := cursor.fetchmany(_QUALITY_FETCH_BATCH_SIZE):
+                    raise_if_cancelled()
+                    for kind, mod_id, key, en_us, zh_tw, source in chunk:
+                        if matches_quality(
+                            en_us or "",
+                            zh_tw or "",
+                            criteria.quality,
+                            key,
+                            kind=kind,
+                        ):
+                            pairs.add((str(mod_id), source))
+            except sqlite3.OperationalError:
+                if is_cancelled():
+                    raise TaskCancelled() from None
+                raise
+            finally:
+                if cursor is not None:
+                    cursor.close()
+                self._conn.set_progress_handler(None, 0)
+                if owns_transaction and self._conn.in_transaction:
+                    self._conn.rollback()
+        return pairs
 
     def _time_filter_sql(self, spec: TimeFilter) -> tuple[list[str], list]:
         where: list[str] = []

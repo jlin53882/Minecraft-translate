@@ -49,6 +49,8 @@ View 不自行判斷格式，一律透過 `app/services_impl/moddb_format_diff_s
 
 `AdvancedFilters` 的 `sort_by` 由排序下拉值與方向狀態組合：`default`／`default_desc` 與各日期排序的 `*_newest`／`*_oldest`；日期欄位由 `picked_date` 轉成本地日期，日期條件在「時間依據」為不限時間時會自動改用條目匯入時間。。清單因日期範圍而為空時，`EntriesPanel._render_list` 呼叫 `AdvancedFilters.announce_no_data`：由 `TranslationDB.time_data_range` 查出該時間依據實際最早／最晚時間，顯示在空狀態並彈出提示。
 
+進階條件同時作用於模組與目前生效來源選單。`panel_refresh._resolve_entries_scope` 會保留使用者目前選定、但在新條件下沒有交集的模組／來源，讓查詢結果正確顯示為空；不可因為選單沒有交集而清除條件並放寬到其他範圍。
+
 ## 修復結果逐筆審查
 
 `RepairReviewer`（`repair_reviewer.py`）只負責畫面與草稿：寫入、原因分類與重設基準都在 `app/services_impl/moddb_retranslate_service`。`apply_and_record_repair_review` 回傳 `applied`、`already_applied`、`stale` 或 `stale:<原因>`（原因由 `_diagnose_stale_review_item` 依資料庫現值判斷），View 依原因顯示說明；`rebase_repair_review_item` 以現值重設審查基準，供「重新讀取」使用。已套用與保留舊譯文的項目是完成狀態，草稿唯讀，不會被編輯或重新讀取降回待審查。

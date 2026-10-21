@@ -203,21 +203,12 @@ def _resolve_entries_scope(db, request: dict, settings) -> dict:
     options_are_filtered = bool(criteria.time is not None or criteria.quality.active)
     if options_are_filtered and db is not None and version:
         filtered_mods, filtered_sources = db.filter_option_values(criteria)
-        selection_changed = False
-        if mod_id is not None and mod_id not in filtered_mods:
-            mod_id = None
-            criteria = replace(criteria, mod_id=None)
-            selection_changed = True
-        if source is not None and source not in filtered_sources:
-            source = None
-            criteria = replace(criteria, source=None)
-            selection_changed = True
-        if selection_changed:
-            # 其中一個選值重設後，另一個選值可能重新變得有效；
-            # 以最終條件重新計算兩份選項清單。
-            filtered_mods, filtered_sources = db.filter_option_values(criteria)
-        mods = filtered_mods
-        source_codes = filtered_sources
+        # 選值在進階條件下沒有符合條目時，仍要保留原選值；
+        # 清空它會把條件放寬成其他模組／來源，讓使用者看到錯誤範圍的結果。
+        mods = sorted(set(filtered_mods) | ({mod_id} if mod_id is not None else set()))
+        source_codes = tuple(
+            sorted(set(filtered_sources) | ({source} if source is not None else set()))
+        )
     else:
         mods = available_mods
 
