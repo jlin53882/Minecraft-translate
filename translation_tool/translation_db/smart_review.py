@@ -1562,13 +1562,20 @@ class SmartReviewMixin:
     ) -> None:
         """以 SQLite audit marker 對帳已提交但尚未回寫 JSON 的候選。"""
         note_prefix = f"run={run_id}; ordinal="
-        rows = self._q(
-            "SELECT note, entry_id, batch, at FROM history "
-            "WHERE action='smart_review_apply' AND note LIKE ? ORDER BY id DESC",
-            (note_prefix + "%",),
+        # 以 note 範圍（不用 LIKE）走 idx_history_smart_review_apply；
+        # 最新的套用在 Python 端依 id 排序，避免臨時排序。
+        upper = note_prefix[:-1] + chr(ord(note_prefix[-1]) + 1)
+        rows = sorted(
+            self._q(
+                "SELECT id, note, entry_id, batch, at FROM history "
+                "WHERE action='smart_review_apply' AND note >= ? AND note < ?",
+                (note_prefix, upper),
+            ),
+            key=lambda row: row[0],
+            reverse=True,
         )
         records: dict[int, dict[str, Any]] = {}
-        for note, entry_id, batch, applied_at in rows:
+        for _id, note, entry_id, batch, applied_at in rows:
             value = str(note or "")
             if not value.startswith(note_prefix):
                 continue

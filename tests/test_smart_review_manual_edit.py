@@ -522,3 +522,50 @@ def test_reject_does_not_override_applied_candidate(db, monkeypatch):
     )
     assert db.reject_smart_review_candidate(run_id, candidate.ordinal) == "not_ready"
     assert _candidate(db, run_id, "bye").status == "applied"
+
+
+def test_reconcile_query_uses_partial_index_without_scan_or_temp_sort(db):
+    """對帳查詢走套用紀錄的部分索引，不掃整張 history，也不臨時排序。"""
+    prefix = "run=abc; ordinal="
+    upper = prefix[:-1] + chr(ord(prefix[-1]) + 1)
+    plan = " ".join(
+        str(row[3])
+        for row in db._q(
+            "EXPLAIN QUERY PLAN SELECT id, note, entry_id, batch, at FROM history "
+            "WHERE action='smart_review_apply' AND note >= ? AND note < ?",
+            (prefix, upper),
+        )
+    )
+    assert "idx_history_smart_review_apply" in plan
+    assert "SCAN" not in plan and "TEMP B-TREE" not in plan
+
+
+def test_reconcile_prefers_latest_apply_and_ignores_other_runs(db, monkeypatch):
+    """同一候選多次套用時取最新一次；run id 為前綴的另一批次不混入。"""
+    run_id = _run(db, monkeypatch, "no_change")
+    candidate = _candidate(db, run_id, "bye")
+    db.realign_smart_review_candidate(run_id, candidate.ordinal)
+    assert (
+        db.apply_smart_review_manual_edit(run_id, candidate.ordinal, "再會！")
+        == "applied"
+    )
+    db.realign_smart_review_candidate(run_id, candidate.ordinal)
+    assert (
+        db.apply_smart_review_manual_edit(run_id, candidate.ordinal, "再見！")
+        == "applied"
+    )
+    with db._tx() as conn:
+        conn.execute(
+            "INSERT INTO history (entry_id, action, batch, note) "
+            "VALUES (?, 'smart_review_apply', 'other', ?)",
+            (candidate.entry_id, f"run={run_id}x; ordinal={candidate.ordinal}"),
+        )
+    history = SmartReviewHistoryStore(db.path)
+    history.update_candidate(run_id, candidate.ordinal, status="no_change")
+    db._reconcile_json_applied_candidates(history, run_id)
+    latest = db._one(
+        "SELECT batch FROM history WHERE entry_id=? AND action='smart_review_apply' "
+        "AND batch!='other' ORDER BY id DESC LIMIT 1",
+        (candidate.entry_id,),
+    )[0]
+    assert history.get_candidate(run_id, candidate.ordinal)["applied_batch"] == latest
