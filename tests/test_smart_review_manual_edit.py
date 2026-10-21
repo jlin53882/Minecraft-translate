@@ -12,8 +12,10 @@ from translation_tool.translation_db import (
     TranslationDB,
     WriteBackItem,
 )
+from translation_tool.translation_db import smart_review as smart_review_module
 from translation_tool.translation_db.schema import SRC_MANUAL
 from translation_tool.translation_db.smart_review import run_smart_review
+from translation_tool.translation_db.smart_review_history import SmartReviewHistoryStore
 
 
 @pytest.fixture
@@ -306,3 +308,168 @@ def test_entry_filter_rejects_unknown_smart_review_value():
     """未知的智慧校對篩選值在建立條件時就被拒絕。"""
     with pytest.raises(ValueError, match="未知智慧校對狀態"):
         EntryFilter(version="1.21.1", smart_review="nope")
+
+
+def test_manual_edit_reports_changed_when_source_text_changes_first(db, monkeypatch):
+    """編輯期間英文原文被改動時回報 changed，而不是用舊原文判成 invalid_format。"""
+    run_id = _run(db, monkeypatch, "no_change")
+    candidate = _candidate(db, run_id, "bye")
+    db.realign_smart_review_candidate(run_id, candidate.ordinal)
+    with db._tx() as conn:
+        conn.execute(
+            "UPDATE entry SET en_us=? WHERE id=?", ("Goodbye %s", candidate.entry_id)
+        )
+
+    # 新原文要求 %s，草稿沒有；但資料已變動，應先回報 changed。
+    assert (
+        db.apply_smart_review_manual_edit(run_id, candidate.ordinal, "再會！")
+        == "changed"
+    )
+    assert _candidate(db, run_id, "bye").status == "no_change"
+
+
+def test_manual_edit_retries_transient_state_write_failure(db, monkeypatch):
+    """短暫的檔案鎖（回寫兩次失敗後成功）不影響結果，仍回報 applied。"""
+    run_id = _run(db, monkeypatch, "no_change")
+    candidate = _candidate(db, run_id, "bye")
+    db.realign_smart_review_candidate(run_id, candidate.ordinal)
+    monkeypatch.setattr(smart_review_module.time, "sleep", lambda _s: None)
+    real = SmartReviewHistoryStore.update_candidate
+    calls = []
+
+    def flaky(self, *args, **kwargs):
+        """前兩次模擬 Windows 檔案鎖。"""
+        calls.append(1)
+        if len(calls) <= 2:
+            raise PermissionError("locked")
+        return real(self, *args, **kwargs)
+
+    monkeypatch.setattr(SmartReviewHistoryStore, "update_candidate", flaky)
+    assert (
+        db.apply_smart_review_manual_edit(run_id, candidate.ordinal, "再會！")
+        == "applied"
+    )
+    assert len(calls) == 3
+    assert _candidate(db, run_id, "bye").status == "applied"
+
+
+def test_manual_edit_reports_state_sync_failure_and_reconciles(db, monkeypatch):
+    """SQLite 已提交但 JSON 一直寫不進去：明確回報，下次讀取依 history 補回，不重複套用。"""
+    run_id = _run(db, monkeypatch, "no_change")
+    candidate = _candidate(db, run_id, "bye")
+    db.realign_smart_review_candidate(run_id, candidate.ordinal)
+    monkeypatch.setattr(smart_review_module.time, "sleep", lambda _s: None)
+    real = SmartReviewHistoryStore.update_candidate
+
+    def broken(self, *args, **kwargs):
+        """模擬 JSON 狀態回寫一直失敗。"""
+        raise PermissionError("locked")
+
+    monkeypatch.setattr(SmartReviewHistoryStore, "update_candidate", broken)
+    assert (
+        db.apply_smart_review_manual_edit(run_id, candidate.ordinal, "再會！")
+        == "state_sync_failed"
+    )
+    monkeypatch.setattr(SmartReviewHistoryStore, "update_candidate", real)
+
+    # 譯文與 history 已提交，不回滾；JSON 仍是舊狀態。
+    entry = db.entry_detail(candidate.entry_id).entry
+    assert (entry.source, entry.zh_tw) == (SRC_MANUAL, "再會！")
+    assert len(_apply_history(db, candidate.entry_id)) == 1
+    assert _candidate_raw_status(db, run_id, candidate.ordinal) == "no_change"
+
+    # 下一次讀取批次時對帳補回 applied，且指向 SQLite 的套用批次。
+    assert _candidate(db, run_id, "bye").status == "applied"
+    batch = _apply_history(db, candidate.entry_id)[0].batch
+    assert _candidate(db, run_id, "bye").applied_batch == batch
+    # 載入草稿時會先對齊快照；同樣內容再套用視為沒有變更，不重複寫入。
+    db.realign_smart_review_candidate(run_id, candidate.ordinal)
+    assert (
+        db.apply_smart_review_manual_edit(run_id, candidate.ordinal, "再會！")
+        == "unchanged"
+    )
+    assert len(_apply_history(db, candidate.entry_id)) == 1
+
+
+def _candidate_raw_status(db, run_id: str, ordinal: int) -> str:
+    """直接讀批次 JSON 的候選狀態（不經過對帳）。"""
+    return SmartReviewHistoryStore(db.path).get_candidate(run_id, ordinal)["status"]
+
+
+def _write_run(store: SmartReviewHistoryStore, run_id: str, started_at: str, body):
+    """寫一份手工批次 JSON；``body`` 為 candidates 欄位內容。"""
+    store.directory.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "schema_version": 1,
+        "id": run_id,
+        "started_at": started_at,
+        "candidates": body,
+    }
+    store.path_for(run_id).write_text(json.dumps(payload), encoding="utf-8")
+
+
+@pytest.mark.parametrize("bad", [123, "abc", {"a": 1}, None, True])
+def test_latest_marks_skips_corrupt_candidates_structure(tmp_path, bad):
+    """candidates 不是 list 的批次被略過並記錄警告，改用次新的有效批次。"""
+    store = SmartReviewHistoryStore(tmp_path / "x.db")
+    _write_run(
+        store, "older", "2026-10-01 00:00:00", [{"entry_id": 7, "status": "applied"}]
+    )
+    _write_run(store, "newer", "2026-10-02 00:00:00", bad)
+    assert store.latest_run_marks() == ("older", {7: ("applied", None)})
+    # 損壞批次已記住，不會每次換頁重複解析
+    assert store.latest_run_marks() == ("older", {7: ("applied", None)})
+
+    store.path_for("older").unlink()
+    assert store.latest_run_marks() == (None, {})
+
+
+def test_latest_marks_tolerates_bad_candidate_items(tmp_path):
+    """候選項目缺欄位或型別不對時略過該筆，其餘照常。"""
+    store = SmartReviewHistoryStore(tmp_path / "x.db")
+    _write_run(
+        store,
+        "run",
+        "2026-10-02 00:00:00",
+        [
+            "oops",
+            {"status": "applied"},
+            {"entry_id": "x", "status": "applied"},
+            {"entry_id": 3, "status": "invalid", "validation_error": "e"},
+        ],
+    )
+    assert store.latest_run_marks() == ("run", {3: ("invalid", "e")})
+
+
+def test_latest_marks_parses_only_latest_run_and_keeps_one_cache(tmp_path, monkeypatch):
+    """大量歷史批次：只完整解析最近一份，快取不保留歷史批次的候選狀態。"""
+    store = SmartReviewHistoryStore(tmp_path / "x.db")
+    candidates = [{"entry_id": i, "status": "applied"} for i in range(300)]
+    for index in range(200):
+        _write_run(
+            store,
+            f"old{index:03d}",
+            f"2026-01-{index % 28 + 1:02d} 00:00:00",
+            candidates,
+        )
+    _write_run(
+        store, "latest", "2026-12-31 23:59:59", [{"entry_id": 1, "status": "stale"}]
+    )
+
+    parsed = []
+    real = SmartReviewHistoryStore._parse_marks
+
+    def counting(path):
+        """記錄被完整解析的檔案。"""
+        parsed.append(path.stem)
+        return real(path)
+
+    monkeypatch.setattr(SmartReviewHistoryStore, "_parse_marks", staticmethod(counting))
+    assert store.latest_run_marks() == ("latest", {1: ("stale", None)})
+    assert parsed == ["latest"]
+    # 再次呼叫（換頁）完全命中快取，不再解析
+    assert store.latest_run_marks() == ("latest", {1: ("stale", None)})
+    assert parsed == ["latest"]
+    assert list(SmartReviewHistoryStore._latest_marks).count(store.directory) == 1
+    cached = SmartReviewHistoryStore._latest_marks[store.directory]
+    assert len(cached[3]) == 1  # 只保留最近一次批次的 1 筆，而不是 200 批 × 300 筆

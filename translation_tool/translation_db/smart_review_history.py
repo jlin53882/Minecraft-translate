@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import threading
@@ -26,6 +27,9 @@ from translation_tool.translation_db.models import (
 )
 
 _SCHEMA_VERSION = 1
+_HEAD_BYTES = 16_384
+_STARTED_AT = re.compile(r'"started_at":\s*"([^"]*)"')
+logger = logging.getLogger(__name__)
 _RUN_ID = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
 
 
@@ -144,9 +148,17 @@ class SmartReviewHistoryStore:
 
     _locks_guard = threading.Lock()
     _locks: ClassVar[dict[Path, threading.RLock]] = {}
-    _marks_cache: ClassVar[
-        dict[Path, tuple[tuple[int, int], str, str, dict[int, tuple[str, str | None]]]]
+    # 檔案 -> ((mtime, size), started_at)：只存字串，供排序用
+    _started_cache: ClassVar[dict[Path, tuple[tuple[int, int], str]]] = {}
+    # 資料夾 -> (檔案, (mtime, size), run_id, 條目狀態對照)：每個資料夾只留最近一次批次
+    _latest_marks: ClassVar[
+        dict[
+            Path,
+            tuple[Path, tuple[int, int], str, dict[int, tuple[str, str | None]]],
+        ]
     ] = {}
+    # 已確認損壞的批次檔 -> (mtime, size)，避免每次換頁重複解析
+    _corrupt_runs: ClassVar[dict[Path, tuple[int, int]]] = {}
 
     def __init__(self, db_path: str | Path) -> None:
         """初始化此測試替身或服務物件所需的狀態。"""
@@ -378,55 +390,88 @@ class SmartReviewHistoryStore:
     def latest_run_marks(self) -> tuple[str | None, dict[int, tuple[str, str | None]]]:
         """回傳最近一次批次的 ``entry_id -> (狀態, 驗證錯誤)``，供條目列顯示狀態。
 
-        每個批次檔以 (mtime, size) 為鍵快取解析結果，所以頻繁換頁只多做檔案 stat，
-        批次被套用或改寫後才會重新解析。
+        先以檔案開頭的 ``started_at`` 排序（每個檔案只 stat 並讀檔頭，結果以
+        (mtime, size) 快取），只完整解析勝出的那一個批次；候選狀態對照每個資料夾
+        只保留這一份，歷史批次不會常駐記憶體。損壞的批次會略過並記錄警告。
         """
         if not self.directory.is_dir():
             return None, {}
-        latest: (
-            tuple[tuple[str, int, str], str, dict[int, tuple[str, str | None]]] | None
-        ) = None
         with self._lock:
-            live: set[Path] = set()
-            for path in self.directory.glob("*.json"):
-                try:
-                    stat = path.stat()
-                except OSError:
+            for _key, path, stamp in self._ranked_run_files():
+                latest = self._latest_marks.get(self.directory)
+                if latest is not None and latest[:2] == (path, stamp):
+                    return latest[2], latest[3]
+                if self._corrupt_runs.get(path) == stamp:
                     continue
-                live.add(path)
-                stamp = (stat.st_mtime_ns, stat.st_size)
-                cached = self._marks_cache.get(path)
-                if cached is None or cached[0] != stamp:
-                    cached = (stamp, *self._parse_marks(path))
-                    self._marks_cache[path] = cached
-                _stamp, run_id, started_at, marks = cached
-                if not run_id:
+                parsed = self._parse_marks(path)
+                if parsed is None:
+                    self._corrupt_runs[path] = stamp
                     continue
-                key = (started_at, stamp[0], run_id)
-                if latest is None or key > latest[0]:
-                    latest = (key, run_id, marks)
-            for stale_path in [
-                p for p in self._marks_cache if p.parent == self.directory
+                self._latest_marks[self.directory] = (path, stamp, *parsed)
+                return parsed
+        return None, {}
+
+    def _ranked_run_files(
+        self,
+    ) -> list[tuple[tuple[str, int, str], Path, tuple[int, int]]]:
+        """依 (started_at, mtime, run_id) 由新到舊列出批次檔；不解析候選內容。"""
+        ranked = []
+        live: set[Path] = set()
+        for path in self.directory.glob("*.json"):
+            try:
+                stat = path.stat()
+            except OSError:
+                continue
+            live.add(path)
+            stamp = (stat.st_mtime_ns, stat.st_size)
+            cached = self._started_cache.get(path)
+            if cached is None or cached[0] != stamp:
+                cached = (stamp, self._read_started_at(path))
+                self._started_cache[path] = cached
+            ranked.append(((cached[1], stamp[0], path.stem), path, stamp))
+        for table in (self._started_cache, self._corrupt_runs):
+            for gone in [
+                p for p in table if p.parent == self.directory and p not in live
             ]:
-                if stale_path not in live:
-                    del self._marks_cache[stale_path]
-        if latest is None:
-            return None, {}
-        return latest[1], latest[2]
+                del table[gone]
+        ranked.sort(key=lambda item: item[0], reverse=True)
+        return ranked
+
+    @staticmethod
+    def _read_started_at(path: Path) -> str:
+        """只讀檔頭取得 ``started_at``；檔頭沒有時才完整解析，失敗回傳空字串（排在最後）。"""
+        try:
+            with path.open("rb") as handle:
+                head = handle.read(_HEAD_BYTES).decode("utf-8", errors="ignore")
+        except OSError:
+            return ""
+        found = _STARTED_AT.search(head)
+        if found:
+            return found.group(1)
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return ""
+        return str(payload.get("started_at") or "") if isinstance(payload, dict) else ""
 
     @staticmethod
     def _parse_marks(
         path: Path,
-    ) -> tuple[str, str, dict[int, tuple[str, str | None]]]:
-        """解析一個批次檔，回傳 (run_id, started_at, 條目狀態對照)；壞檔回傳空 run_id。"""
+    ) -> tuple[str, dict[int, tuple[str, str | None]]] | None:
+        """完整解析一個批次檔，回傳 (run_id, 條目狀態對照)；結構不符時記錄警告並回傳 None。"""
         try:
             payload = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
-            return "", "", {}
-        if not isinstance(payload, dict) or not payload.get("id"):
-            return "", "", {}
+            logger.warning("略過無法讀取的智慧校對批次檔：%s", path)
+            return None
+        candidates = payload.get("candidates") if isinstance(payload, dict) else None
+        if not isinstance(candidates, list):
+            logger.warning(
+                "略過格式不符（candidates 不是 list）的智慧校對批次檔：%s", path
+            )
+            return None
         marks: dict[int, tuple[str, str | None]] = {}
-        for candidate in payload.get("candidates") or []:
+        for candidate in candidates:
             if not isinstance(candidate, dict):
                 continue
             try:
@@ -437,7 +482,7 @@ class SmartReviewHistoryStore:
                 str(candidate.get("status") or ""),
                 candidate.get("validation_error"),
             )
-        return str(payload["id"]), str(payload.get("started_at") or ""), marks
+        return str(payload.get("id") or path.stem), marks
 
     def list_runs(self, *, limit: int = 20, offset: int = 0) -> list[dict[str, Any]]:
         """分頁讀取 JSON 批次摘要。"""
@@ -563,7 +608,7 @@ class SmartReviewHistoryStore:
     def reconcile_applied(
         self, run_id: str, records: Mapping[int, Mapping[str, Any]]
     ) -> int:
-        """依 SQLite 套用歷史，補回尚未標記為 applied 的 JSON 候選。
+        """依 SQLite 套用歷史，補回尚未標記為 applied（或指向舊套用）的 JSON 候選。
 
         SQLite 翻譯與 JSON 歷史分屬兩個儲存邊界；若前者已提交、後者在
         原子替換時遇到 I/O 錯誤，下一次讀取可以用同一個 run／ordinal 的
@@ -576,10 +621,7 @@ class SmartReviewHistoryStore:
                 return 0
             updated = 0
             for candidate in payload.get("candidates") or []:
-                if (
-                    not isinstance(candidate, dict)
-                    or candidate.get("status") != "ready"
-                ):
+                if not isinstance(candidate, dict):
                     continue
                 ordinal = int(candidate.get("ordinal") or 0)
                 record = records.get(ordinal)
@@ -587,10 +629,17 @@ class SmartReviewHistoryStore:
                     candidate.get("entry_id") or 0
                 ):
                     continue
+                batch = str(record.get("batch") or "") or None
+                # 已標成 applied 且指向同一次套用的不用改；其餘（待審查，或人工編輯後
+                # 狀態回寫失敗的各種狀態）以 SQLite 的最新套用紀錄為準補回。
+                if candidate.get("status") == "applied" and (
+                    candidate.get("applied_batch") == batch
+                ):
+                    continue
                 candidate.update(
                     {
                         "status": "applied",
-                        "applied_batch": str(record.get("batch") or "") or None,
+                        "applied_batch": batch,
                         "applied_at": record.get("applied_at"),
                     }
                 )

@@ -86,6 +86,10 @@ _MANUAL_EDIT_MESSAGES = {
         "資料庫內容在載入後已變更，未覆蓋；已重新載入這筆，請確認目前譯文後再套用。",
         C.GOLD,
     ),
+    "state_sync_failed": (
+        "譯文已寫入（可從條目歷史還原），但批次狀態同步失敗；重新載入這個批次時會自動補回。",
+        C.GOLD,
+    ),
     "unchanged": ("草稿與目前譯文相同，沒有需要套用的變更。", C.GOLD),
     "not_editable": ("這筆目前不能人工編輯。", C.GOLD),
     "unsupported": ("舊版批次不支援人工編輯套用；請重新校對。", C.GOLD),
@@ -1083,7 +1087,12 @@ class SmartReviewReviewer:
                 status, (f"這筆目前無法處理：{status}", C.GOLD)
             )
             show_snack(self.ctx.page, message, color)
-        if status == "applied" and notify_parent and callable(self.on_changed):
+        # state_sync_failed：翻譯已提交，條目頁仍要重載
+        if (
+            status in {"applied", "state_sync_failed"}
+            and notify_parent
+            and callable(self.on_changed)
+        ):
             self.on_changed()
         self.set_busy(True)
         self.ctx.update()

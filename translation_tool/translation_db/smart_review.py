@@ -111,6 +111,8 @@ SMART_REVIEW_REPAIR_SYSTEM_PROMPT = """你是 Minecraft 繁體中文翻譯的本
 
 _MAX_REASON_LENGTH = 2_000
 _MAX_SUGGESTION_LENGTH = 32_000
+_STATE_SYNC_ATTEMPTS = 3
+_STATE_SYNC_RETRY_SECONDS = 0.05
 # 審查者可手動編輯並覆蓋套用的候選狀態；``ready`` 走原本的 AI 建議套用流程。
 SMART_REVIEW_MANUAL_EDIT_STATUSES = frozenset(
     {
@@ -2123,13 +2125,6 @@ class SmartReviewMixin:
                 return "not_editable"
             if not proposed.strip():
                 return "invalid_draft"
-            if translation_issues(
-                str(candidate.get("en_us") or ""),
-                proposed,
-                kind=str(candidate.get("kind") or "lang"),
-                repair=False,
-            ):
-                return "invalid_format"
             entry_id = int(candidate["entry_id"])
             expected = tuple(candidate.get(key) for key in _SNAPSHOT_FIELDS)
             with self._tx(bump_generation_on_noop=False) as conn:
@@ -2148,6 +2143,11 @@ class SmartReviewMixin:
                     return "manual_reviewed"
                 if proposed == current[5]:
                     return "unchanged"
+                # 格式以交易內讀到的原文檢查：資料若已變動，上面會先回報 changed。
+                if translation_issues(
+                    str(current[4] or ""), proposed, kind=str(current[0]), repair=False
+                ):
+                    return "invalid_format"
                 self._write_smart_review_manual_row(
                     conn,
                     entry_id,
@@ -2158,6 +2158,26 @@ class SmartReviewMixin:
                     actor=actor,
                     note=f"run={run_id}; ordinal={ordinal}",
                 )
+            return self._mark_candidate_applied(
+                history, run_id, ordinal, proposed=proposed, batch=batch
+            )
+
+    def _mark_candidate_applied(
+        self,
+        history: SmartReviewHistoryStore,
+        run_id: str,
+        ordinal: int,
+        *,
+        proposed: str,
+        batch: str,
+    ) -> str:
+        """把已提交到 SQLite 的人工編輯回寫成 JSON 候選的 applied 狀態。
+
+        短暫的檔案鎖（Windows 的 ``os.replace``）重試幾次即可；仍失敗時回傳
+        ``state_sync_failed``：譯文與 history 已提交（不回滾），下一次讀取批次時由
+        ``_reconcile_json_applied_candidates`` 依 ``applied_batch`` 對帳補回狀態。
+        """
+        for attempt in range(_STATE_SYNC_ATTEMPTS):
             try:
                 history.update_candidate(
                     run_id,
@@ -2168,15 +2188,17 @@ class SmartReviewMixin:
                     applied_batch=batch,
                     applied_at=history.timestamp(),
                 )
+                return "applied"
             except Exception:
-                # SQLite 已提交；JSON 狀態回寫失敗時仍回報已套用，下次對齊會讀到現況。
                 logger.warning(
-                    "Smart Review 人工編輯狀態回寫失敗：run=%s ordinal=%s",
+                    "Smart Review 人工編輯狀態回寫失敗（第 %d 次）：run=%s ordinal=%s",
+                    attempt + 1,
                     run_id,
                     ordinal,
                     exc_info=True,
                 )
-            return "applied"
+                time.sleep(_STATE_SYNC_RETRY_SECONDS)
+        return "state_sync_failed"
 
     def apply_smart_review_candidate(
         self,
