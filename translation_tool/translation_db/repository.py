@@ -1327,11 +1327,21 @@ class TranslationDB(SmartReviewMixin, BulkReviewMixin, CleanupMixin):
             params.append(criteria.kind)
         if criteria.query.strip():
             like = _like(criteria.query.strip())
-            where.append(
-                "(e.en_us LIKE ? ESCAPE '\\' OR e.key LIKE ? ESCAPE '\\' "
-                "OR f.zh_tw LIKE ? ESCAPE '\\')"
-            )
-            params += [like, like, like]
+            query_columns = {
+                "source": "e.en_us",
+                "translation": "f.zh_tw",
+                "key": "e.key",
+            }
+            column = query_columns.get(criteria.query_field)
+            if column is None:
+                where.append(
+                    "(e.en_us LIKE ? ESCAPE '\\' OR e.key LIKE ? ESCAPE '\\' "
+                    "OR f.zh_tw LIKE ? ESCAPE '\\')"
+                )
+                params += [like, like, like]
+            else:
+                where.append(f"{column} LIKE ? ESCAPE '\\'")
+                params.append(like)
 
         if criteria.state == "none":
             where.append("f.entry_id IS NULL")
@@ -2054,6 +2064,7 @@ class TranslationDB(SmartReviewMixin, BulkReviewMixin, CleanupMixin):
         kind: str | None = None,
         state: str = "all",
         query: str = "",
+        query_field: str = "all",
         source: int | None = None,
         review_status: str | None = None,
         entry_ids: Sequence[int] | None = None,
@@ -2076,6 +2087,7 @@ class TranslationDB(SmartReviewMixin, BulkReviewMixin, CleanupMixin):
                 kind=kind,
                 state=state,
                 query=query,
+                query_field=query_field,
                 source=source,
                 review_status=review_status,
                 entry_ids=None if entry_ids is None else tuple(entry_ids),

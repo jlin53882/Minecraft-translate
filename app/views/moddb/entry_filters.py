@@ -19,6 +19,12 @@ from app.views.moddb.species_dialog import SpeciesCandidateDialog
 ALL_REVIEW_STATES = "__all__"
 ALL_MODS = "全部模組"
 ALL_KINDS = "全部類型"
+SEARCH_FIELD_OPTIONS = (
+    ("all", "全部內容"),
+    ("source", "原文"),
+    ("translation", "譯文"),
+    ("key", "鍵值"),
+)
 
 
 def build_filter_controls(panel) -> None:
@@ -87,6 +93,14 @@ def _build_controls(panel) -> None:
         on_change=panel._on_search_input,
         on_submit=panel._on_search,
     )
+    panel.search_field_dd = kit.dropdown(
+        label="搜尋內容",
+        dense=True,
+        width=140,
+        on_select=panel._on_search_field,
+    )
+    kit.set_dropdown_options(panel.search_field_dd, list(SEARCH_FIELD_OPTIONS))
+    panel.search_field_dd.value = "all"
     panel.state_seg = kit.Segmented(
         [(key, label) for key, label in STATE_LABELS.items()],
         "all",
@@ -161,6 +175,7 @@ def _build_filter_card(panel) -> None:
                         panel.mod_dd,
                         panel.kind_dd,
                         panel.source_filter.dropdown,
+                        panel.search_field_dd,
                         panel.search,
                     ],
                     spacing=12,
@@ -208,6 +223,7 @@ def entry_filter(panel) -> EntryFilter:
         kind=panel.kind,
         state=panel.state,
         query=panel.query,
+        query_field=panel.query_field,
         source=panel.source_filter.code,
         review_status=(
             None if status in (None, "", ALL_REVIEW_STATES) else str(status)

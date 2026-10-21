@@ -1633,6 +1633,9 @@ def test_list_entries_filters_and_detail(db):
     assert db.list_entries("1.21.1", state="none")[1] == 1
     assert db.list_entries("1.21.1", mod_id="bar")[1] == 1
     assert db.list_entries("1.21.1", query="second")[1] == 1
+    assert db.list_entries("1.21.1", query="second", query_field="source")[1] == 1
+    assert db.list_entries("1.21.1", query="second", query_field="translation")[1] == 0
+    assert db.list_entries("1.21.1", query="k2", query_field="key")[1] == 1
     assert db.list_entries("1.21.1", query="100%")[1] == 0  # % 不是萬用字元
     first = db.list_entries("1.21.1", mod_id="foo", query="item.foo.a")[0][0]
     detail = db.entry_detail(first.id)

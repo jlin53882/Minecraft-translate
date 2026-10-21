@@ -120,6 +120,7 @@ class EntriesPanel(ft.Column):
         self._flagged_batch = 0
         self.state = "all"
         self.query = ""
+        self.query_field = "all"
         self.rows: list[EntryRow] = []
         self.total = 0
         self._list_error: str | None = None
@@ -689,6 +690,14 @@ class EntriesPanel(ft.Column):
         self.state = key
         refresh_entry_filter(self)
 
+    def _on_search_field(self, e) -> None:
+        """切換搜尋內容欄位，讓目前搜尋文字只比對指定欄位。"""
+        value = str(e.control.value or "all")
+        if value == self.query_field:
+            return
+        self.query_field = value
+        refresh_entry_filter(self)
+
     def _on_search_input(self, e) -> None:
         """輸入時即時搜尋：停止輸入一小段時間後才查詢，避免每個字都打資料庫。"""
         if (e.control.value or "").strip() == self.query:
@@ -1071,6 +1080,8 @@ class EntriesPanel(ft.Column):
         self.kind_dd.value = ALL_KINDS
         self.query = ""
         self.search.value = ""
+        self.query_field = "all"
+        self.search_field_dd.value = "all"
         self.state = "none"
         self.state_seg.select("none")
         self.source_filter.reset()

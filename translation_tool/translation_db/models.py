@@ -204,6 +204,7 @@ class EntryFilter:
     kind: str | None = None
     state: str = "all"
     query: str = ""
+    query_field: str = "all"
     source: int | None = None
     review_status: str | None = None
     entry_ids: tuple[int, ...] | None = None
@@ -216,6 +217,8 @@ class EntryFilter:
     def __post_init__(self) -> None:
         if self.state not in {"all", "none", "diff", "changed", "manual", "ok", "same"}:
             raise ValueError(f"未知條目狀態：{self.state}")
+        if self.query_field not in {"all", "source", "translation", "key"}:
+            raise ValueError(f"未知搜尋欄位：{self.query_field}")
         if self.review_status not in (None, "unreviewed", "reviewed", "legacy_unknown"):
             raise ValueError(f"未知人工審核狀態：{self.review_status}")
         if self.sort_by not in {

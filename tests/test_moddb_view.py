@@ -812,6 +812,25 @@ def test_entries_filters_by_state_mod_and_search(entries):
     assert [r.key for r in entries.rows] == ["item.foo.b"]
 
 
+def test_entries_search_can_limit_matches_to_one_content_field(entries):
+    """搜尋範圍可分別限定原文、譯文或鍵值，避免同一文字命中三種內容。"""
+    entries.search_field_dd.value = "source"
+    entries._on_search_field(type("E", (), {"control": entries.search_field_dd})())
+    entries._on_search(
+        type("E", (), {"control": type("C", (), {"value": "Steel"})()})()
+    )
+    assert {row.key for row in entries.rows} == {"item.foo.a", "item.bar.a"}
+
+    entries.search_field_dd.value = "translation"
+    entries._on_search_field(type("E", (), {"control": entries.search_field_dd})())
+    assert entries.rows == []
+
+    entries.search_field_dd.value = "key"
+    entries._on_search_field(type("E", (), {"control": entries.search_field_dd})())
+    entries._on_search(type("E", (), {"control": type("C", (), {"value": "foo"})()})())
+    assert {row.key for row in entries.rows} == {"item.foo.a", "item.foo.b"}
+
+
 def test_advanced_filter_refreshes_module_and_source_options(db_path):
     """進階品質篩選會同步縮減模組與目前生效來源下拉選項。"""
     seed(db_path)
