@@ -30,22 +30,31 @@ class SourceFilter:
         )
         self.refresh()
 
-    def refresh(self, effective_source_codes=(), *, catalog=None) -> None:
-        """Show built-ins and custom sources used by this version's effective rows."""
+    def refresh(
+        self,
+        effective_source_codes=(),
+        *,
+        catalog=None,
+        available_only: bool = False,
+    ) -> None:
+        """更新來源選項，可選擇只顯示目前篩選結果實際使用的來源。"""
         settings = current_settings()
         catalog = catalog or settings.source_catalog
+        available_codes = {int(code) for code in effective_source_codes}
         active_custom_codes = {
-            int(code)
-            for code in effective_source_codes
-            if int(code) >= CUSTOM_SOURCE_BASE
+            code for code in available_codes if code >= CUSTOM_SOURCE_BASE
         }
-        visible_codes = set(builtin_source_codes()) | active_custom_codes
+        if available_only:
+            visible_codes = available_codes
+        else:
+            visible_codes = set(builtin_source_codes()) | active_custom_codes
         order = [
             code
             for code in catalog.ordered_codes(settings.priority)
             if code in visible_codes
         ]
-        order.extend(code for code in sorted(active_custom_codes) if code not in order)
+        fallback_codes = available_codes if available_only else active_custom_codes
+        order.extend(code for code in sorted(fallback_codes) if code not in order)
         selected = self.dropdown.value
         kit.set_dropdown_options(
             self.dropdown,

@@ -1375,6 +1375,84 @@ class TranslationDB(SmartReviewMixin, BulkReviewMixin, CleanupMixin):
             params.extend(time_params)
         return " AND ".join(where), params
 
+    def filter_option_values(
+        self, criteria: EntryFilter
+    ) -> tuple[list[str], tuple[int, ...]]:
+        """取得目前條件下可用的模組與生效來源選項。
+
+        模組選項會套用目前選取的來源，來源選項會套用目前選取的模組；
+        兩者本身的條件則會暫時移除，避免下拉選單因為目前選值而把自己
+        隱藏。品質篩選沒有等價的純 SQL 結果時，沿用既有品質掃描器，
+        因此選項與條目清單使用完全相同的篩選語意。
+        """
+        option_criteria = replace(criteria, mod_id=None, source=None)
+        pairs = None
+        rows_are_full_entries = False
+        if option_criteria.quality.active:
+            condition, params = self._filter_sql(option_criteria)
+            flags_ready = self._quality_flags_ready()
+            exact = (
+                flags_ready and quality_flags.is_exact(option_criteria.quality)
+            ) or option_criteria.quality.status in {
+                "unknown_source",
+                "missing_translation",
+                "whitespace",
+            }
+            if exact:
+                prefilter = self._quality_prefilter_sql(
+                    option_criteria.quality, flags_ready
+                )
+                condition += f" AND ({prefilter})"
+                source = self._candidate_source(f"{condition} f.source")
+                rows = self._q(
+                    f"SELECT DISTINCT e.mod_id, f.source {source} WHERE {condition}",
+                    params,
+                )
+            else:
+                rows, _total = self._quality_filtered_page(
+                    option_criteria, limit=None, offset=0
+                )
+                pairs = ((row[3], row[7]) for row in rows)
+                rows_are_full_entries = True
+        else:
+            condition, params = self._filter_sql(option_criteria)
+            source = self._candidate_source(f"{condition} f.source")
+            rows = self._q(
+                f"SELECT DISTINCT e.mod_id, f.source {source} WHERE {condition}",
+                params,
+            )
+
+        if pairs is None:
+            pairs = iter(rows)
+
+        selected_source = criteria.source
+        selected_mod = criteria.mod_id
+        mods = sorted(
+            {
+                str(mod_id)
+                for mod_id, source_code in pairs
+                if selected_source is None or source_code == selected_source
+            }
+        )
+
+        # rows 是可重複使用的清單，第一個 generator 只負責建立模組集合，
+        # 第二個 generator 再建立來源集合，不會再次讀取資料庫。
+        if rows_are_full_entries:
+            source_pairs = ((row[3], row[7]) for row in rows)
+        else:
+            source_pairs = iter(rows)
+        sources = tuple(
+            sorted(
+                {
+                    int(source_code)
+                    for mod_id, source_code in source_pairs
+                    if source_code is not None
+                    and (selected_mod is None or mod_id == selected_mod)
+                }
+            )
+        )
+        return mods, sources
+
     def _time_filter_sql(self, spec: TimeFilter) -> tuple[list[str], list]:
         where: list[str] = []
         params: list = []

@@ -13,7 +13,7 @@ from app.views.moddb.batch_replace_dialog import BatchReplaceDialog
 from app.views.moddb.bulk_review_dialog import BulkReviewDialog
 from app.views.moddb.formatting import STATE_LABELS, kind_label
 from app.views.moddb.smart_review_dialog import SmartReviewDialog
-from app.views.moddb.source_filter import ReviewStatusFilter, SourceFilter
+from app.views.moddb.source_filter import ALL_SOURCES, ReviewStatusFilter, SourceFilter
 from app.views.moddb.species_dialog import SpeciesCandidateDialog
 
 ALL_REVIEW_STATES = "__all__"
@@ -37,7 +37,17 @@ def apply_filter_options(panel, snapshot: dict) -> None:
     panel.source_filter.refresh(
         snapshot.get("effective_source_codes", ()),
         catalog=snapshot.get("source_catalog"),
+        available_only=bool(snapshot.get("filter_options_are_filtered")),
     )
+    if "source" in snapshot:
+        source = snapshot.get("source")
+        source_value = ALL_SOURCES if source is None else str(source)
+        available_values = {
+            option.key for option in panel.source_filter.dropdown.options
+        }
+        panel.source_filter.dropdown.value = (
+            source_value if source_value in available_values else ALL_SOURCES
+        )
     versions = snapshot.get("versions", [])
     kit.set_dropdown_options(panel.version_dd, [(v, v) for v in versions])
     panel.version = snapshot.get("version")

@@ -43,41 +43,13 @@ def load_panel_snapshot(key: str, request: dict, settings) -> dict:
 
 
 def _load_entries_snapshot(db, request: dict, settings, snapshot: dict) -> dict:
-    versions = db.versions() if db else []
-    requested_version = request.get("version")
-    version = requested_version if requested_version in versions else None
-    if version is None and settings.version in versions:
-        version = settings.version
-    if version is None and versions:
-        version = versions[0]
-    snapshot["effective_source_codes"] = (
-        db.effective_source_codes(version) if db is not None and version else ()
-    )
-    mods = db.mods(version) if db and version else []
-    kinds = db.kinds(version) if db and version else []
-    mod_id = request.get("mod_id") if request.get("mod_id") in mods else None
-    kind = request.get("kind") if request.get("kind") in kinds else None
+    scope = _resolve_entries_scope(db, request, settings)
     rows, total, error, detail = [], 0, None, None
     page = max(1, int(request.get("page", 1)))
-    if db is not None and version:
-        requested_criteria = request["criteria"]
-        source = requested_criteria.source
-        if (
-            source is not None
-            and source >= CUSTOM_SOURCE_BASE
-            and source not in snapshot["effective_source_codes"]
-        ):
-            source = None
-        criteria = replace(
-            requested_criteria,
-            version=version,
-            mod_id=mod_id,
-            kind=kind,
-            source=source,
-        )
+    if db is not None and scope["version"]:
         try:
             rows, total = db.list_entries(
-                criteria=criteria,
+                criteria=scope["criteria"],
                 limit=PAGE_SIZE,
                 offset=(page - 1) * PAGE_SIZE,
             )
@@ -85,7 +57,7 @@ def _load_entries_snapshot(db, request: dict, settings, snapshot: dict) -> dict:
             if page > last_page:
                 page = last_page
                 rows, total = db.list_entries(
-                    criteria=criteria,
+                    criteria=scope["criteria"],
                     limit=PAGE_SIZE,
                     offset=(page - 1) * PAGE_SIZE,
                 )
@@ -98,13 +70,16 @@ def _load_entries_snapshot(db, request: dict, settings, snapshot: dict) -> dict:
         )
         detail = db.entry_detail(target_id) if target_id is not None else None
     snapshot.update(
-        versions=versions,
-        version=version,
-        mods=mods,
-        kinds=kinds,
+        versions=scope["versions"],
+        version=scope["version"],
+        mods=scope["mods"],
+        kinds=scope["kinds"],
+        effective_source_codes=scope["source_codes"],
+        source=scope["source"],
+        filter_options_are_filtered=scope["options_are_filtered"],
         page=page,
-        mod_id=mod_id,
-        kind=kind,
+        mod_id=scope["mod_id"],
+        kind=scope["kind"],
         rows=rows,
         total=total,
         list_error=error,
@@ -118,14 +93,20 @@ def load_entries_filter_snapshot(settings, request: dict) -> dict:
     db = open_database(create=False, settings=settings, readonly=True)
     page = max(1, int(request.get("page", 1)))
     rows, total, error, detail = [], 0, None, None
-    criteria = request["criteria"]
     snapshot = {
         "key": "entries",
         "identity": _database_identity(db),
         "source_catalog": source_catalog_for(db),
         "db_generation": None,
         "filter_only": True,
+        "filter_options_ready": True,
+        "versions": [],
         "version": request.get("version"),
+        "mods": [],
+        "kinds": [],
+        "effective_source_codes": (),
+        "source": None,
+        "filter_options_are_filtered": False,
         "mod_id": request.get("mod_id"),
         "kind": request.get("kind"),
         "page": page,
@@ -138,6 +119,8 @@ def load_entries_filter_snapshot(settings, request: dict) -> dict:
         if db is not None:
             db._conn.execute("BEGIN")
             snapshot["db_generation"] = db._data_gen()
+            scope = _resolve_entries_scope(db, request, settings)
+            criteria = scope["criteria"]
             try:
                 rows, total = db.list_entries(
                     criteria=criteria,
@@ -163,6 +146,15 @@ def load_entries_filter_snapshot(settings, request: dict) -> dict:
             except ValueError as exc:
                 error = str(exc)
             snapshot.update(
+                versions=scope["versions"],
+                version=scope["version"],
+                mods=scope["mods"],
+                kinds=scope["kinds"],
+                effective_source_codes=scope["source_codes"],
+                source=scope["source"],
+                filter_options_are_filtered=scope["options_are_filtered"],
+                mod_id=scope["mod_id"],
+                kind=scope["kind"],
                 page=page,
                 rows=rows,
                 total=total,
@@ -175,6 +167,72 @@ def load_entries_filter_snapshot(settings, request: dict) -> dict:
             if db._conn.in_transaction:
                 db._conn.rollback()
             db.close()
+
+
+def _resolve_entries_scope(db, request: dict, settings) -> dict:
+    """解析條目頁的版本、選值與依進階條件縮減後的下拉選項。"""
+    versions = db.versions() if db else []
+    requested_criteria = request["criteria"]
+    requested_version = request.get("version") or requested_criteria.version
+    version = requested_version if requested_version in versions else None
+    if version is None and settings.version in versions:
+        version = settings.version
+    if version is None and versions:
+        version = versions[0]
+
+    available_mods = db.mods(version) if db and version else []
+    kinds = db.kinds(version) if db and version else []
+    mod_id = request.get("mod_id") if request.get("mod_id") in available_mods else None
+    kind = request.get("kind") if request.get("kind") in kinds else None
+    source_codes = db.effective_source_codes(version) if db and version else ()
+    source = requested_criteria.source
+    if (
+        source is not None
+        and source >= CUSTOM_SOURCE_BASE
+        and source not in source_codes
+    ):
+        source = None
+
+    criteria = replace(
+        requested_criteria,
+        version=version or requested_criteria.version,
+        mod_id=mod_id,
+        kind=kind,
+        source=source,
+    )
+    options_are_filtered = bool(criteria.time is not None or criteria.quality.active)
+    if options_are_filtered and db is not None and version:
+        filtered_mods, filtered_sources = db.filter_option_values(criteria)
+        selection_changed = False
+        if mod_id is not None and mod_id not in filtered_mods:
+            mod_id = None
+            criteria = replace(criteria, mod_id=None)
+            selection_changed = True
+        if source is not None and source not in filtered_sources:
+            source = None
+            criteria = replace(criteria, source=None)
+            selection_changed = True
+        if selection_changed:
+            # 其中一個選值重設後，另一個選值可能重新變得有效；
+            # 以最終條件重新計算兩份選項清單。
+            filtered_mods, filtered_sources = db.filter_option_values(criteria)
+        mods = filtered_mods
+        source_codes = filtered_sources
+    else:
+        mods = available_mods
+
+    return {
+        "versions": versions,
+        "version": version,
+        "mods": mods,
+        "kinds": kinds,
+        "source_codes": source_codes,
+        "source": source,
+        "mod_id": mod_id,
+        "kind": kind,
+        "criteria": criteria,
+        "options_are_filtered": options_are_filtered,
+    }
 
 
 def _load_translate_snapshot(db, request: dict, snapshot: dict) -> dict:

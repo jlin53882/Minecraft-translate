@@ -395,7 +395,7 @@ class EntriesPanel(ft.Column):
         """Apply a worker-loaded tab snapshot without querying SQLite on the UI thread."""
         previous_selected_id = self.selected.id if self.selected else None
         filter_only = snapshot.get("filter_only", False)
-        if not filter_only:
+        if not filter_only or snapshot.get("filter_options_ready"):
             apply_filter_options(self, snapshot)
 
         self.rows = snapshot.get("rows", [])
