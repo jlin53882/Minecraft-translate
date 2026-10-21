@@ -88,6 +88,27 @@ def test_count_and_page_limit_use_deduped_candidates(db):
     assert second_page[0].ordinal == 3
 
 
+def test_page_completes_twins_after_raw_page_boundary(db):
+    """代表候選後方的同文條目也要被補入套用範圍。"""
+    db.write_back(
+        "1.20.1",
+        [
+            WriteBackItem(KIND_LANG, "late", "a_rep", "First", "第一"),
+            WriteBackItem(KIND_LANG, "late", "b_rep", "Second", "第二"),
+            WriteBackItem(KIND_LANG, "late", "z_twin", "First", "第一"),
+        ],
+        fill_other_versions=False,
+    )
+    candidates = db.smart_review_candidates(version="1.20.1", mod_id="late", limit=2)
+    twin_id = db._one(
+        "SELECT id FROM entry WHERE mod_id=? AND key=?", ("late", "z_twin")
+    )[0]
+    assert [(candidate.key, candidate.twin_entry_ids) for candidate in candidates] == [
+        ("a_rep", (twin_id,)),
+        ("b_rep", ()),
+    ]
+
+
 def test_selection_keeps_one_candidate_per_same_text_and_state(db, monkeypatch):
     """同模組、同英文、同目前狀態只送一筆；不同譯文或不同模組各自保留。"""
     run_id, sent = _run(db, monkeypatch)

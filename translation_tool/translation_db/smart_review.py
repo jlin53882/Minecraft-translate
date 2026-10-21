@@ -54,7 +54,10 @@ from translation_tool.translation_db.models import (
 )
 from translation_tool.translation_db.quality import quality_state, translation_issues
 from translation_tool.translation_db.schema import SRC_AI, SRC_JAR_TW, SRC_MANUAL
-from translation_tool.translation_db.smart_review_history import SmartReviewHistoryStore
+from translation_tool.translation_db.smart_review_history import (
+    SMART_REVIEW_CAS_SNAPSHOT_FIELDS,
+    SmartReviewHistoryStore,
+)
 from translation_tool.translation_db.sql_helpers import like_pattern
 from translation_tool.utils.cancellation import (
     TaskCancelled,
@@ -115,6 +118,7 @@ _MAX_SUGGESTION_LENGTH = 32_000
 _RECONCILED_HISTORY_HEAD: dict[tuple[str, str], int] = {}
 _STATE_SYNC_ATTEMPTS = 3
 _STATE_SYNC_RETRY_SECONDS = 0.05
+_SMART_REVIEW_TWIN_GROUP_CHUNK_SIZE = 128
 # 審查者可手動編輯並覆蓋套用的候選狀態；``ready`` 走原本的 AI 建議套用流程。
 SMART_REVIEW_MANUAL_EDIT_STATUSES = frozenset(
     {
@@ -129,21 +133,7 @@ SMART_REVIEW_MANUAL_EDIT_STATUSES = frozenset(
 )
 # 候選 JSON 內保存的 CAS 快照欄位，順序對應 ``_smart_review_current_snapshot_sql``
 # 的欄位再接 manual 列的四個欄位。
-_SNAPSHOT_FIELDS = (
-    "kind",
-    "mc_version",
-    "mod_id",
-    "entry_key",
-    "en_us",
-    "current_zh_tw",
-    "effective_source",
-    "review_status",
-    "effective_revision",
-    "manual_zh_tw",
-    "manual_checker",
-    "manual_review_status",
-    "manual_revision",
-)
+_SNAPSHOT_FIELDS = SMART_REVIEW_CAS_SNAPSHOT_FIELDS
 _URL_PATTERN = re.compile(r"(?:https?://|www\.)", re.IGNORECASE)
 
 
@@ -461,6 +451,11 @@ def _effective_review_sql(alias: str = "f") -> str:
     )
 
 
+def _smart_review_row_group(row: Sequence[Any]) -> tuple[Any, ...]:
+    """回傳候選列用來判斷同文的版本、內容與生效狀態。"""
+    return (row[2], row[3], row[1], row[5], row[6], row[7], row[8])
+
+
 def _dedupe_same_text_rows(
     rows: Sequence[tuple[Any, ...]],
 ) -> list[tuple[tuple[Any, ...], tuple[int, ...]]]:
@@ -469,7 +464,7 @@ def _dedupe_same_text_rows(
     kept: list[tuple[tuple[Any, ...], tuple[Any, ...]]] = []
     for row in rows:
         # row: id, kind, mc_version, mod_id, key, en_us, zh_tw, source, status, ...
-        group = (row[2], row[3], row[1], row[5], row[6], row[7], row[8])
+        group = _smart_review_row_group(row)
         if group in twins:
             twins[group].append(int(row[0]))
             continue
@@ -689,6 +684,79 @@ class SmartReviewMixin:
             },
         )
 
+    def _complete_smart_review_twin_ids(
+        self,
+        selection: _SmartReviewSelection,
+        entry_source: str,
+        selected_rows: Sequence[tuple[tuple[Any, ...], tuple[int, ...]]],
+    ) -> list[tuple[tuple[Any, ...], tuple[int, ...]]]:
+        """補齊目前頁面代表候選在完整篩選範圍內的同文條目 id。
+
+        候選列表為了保留索引排序，只會先讀取足夠的 raw page；同文條目可能排在
+        該 page 之後，因此不能只依賴 raw page 內的去重結果。補查使用相同篩選條件
+        與同一組去重欄位，但不排序、不改變代表候選的分頁結果。
+        """
+        if not selected_rows:
+            return []
+
+        groups = list(
+            dict.fromkeys(_smart_review_row_group(row) for row, _ in selected_rows)
+        )
+        group_ids: dict[tuple[Any, ...], set[int]] = {group: set() for group in groups}
+        for start in range(0, len(groups), _SMART_REVIEW_TWIN_GROUP_CHUNK_SIZE):
+            chunk = groups[start : start + _SMART_REVIEW_TWIN_GROUP_CHUNK_SIZE]
+            cte_prefix = selection.reference_cte.rstrip()
+            if cte_prefix:
+                cte_prefix += ", "
+            else:
+                cte_prefix = "WITH "
+            query = (
+                cte_prefix + "selected_groups AS (SELECT "
+                "json_extract(value, '$[0]') AS mc_version, "
+                "json_extract(value, '$[1]') AS mod_id, "
+                "json_extract(value, '$[2]') AS kind, "
+                "json_extract(value, '$[3]') AS en_us, "
+                "json_extract(value, '$[4]') AS current_zh_tw, "
+                "json_extract(value, '$[5]') AS effective_source, "
+                "json_extract(value, '$[6]') AS effective_review "
+                "FROM json_each(?)), candidate_rows AS ("
+                "SELECT e.id, e.mc_version, e.mod_id, e.kind, e.en_us, "
+                "f.zh_tw AS f_zh_tw, f.source AS f_source, "
+                f"({selection.effective_review}) AS effective_review FROM "
+                + entry_source
+                + " JOIN effective f ON f.entry_id=e.id "
+                + selection.reference_join
+                + "JOIN selected_groups g ON e.mc_version IS g.mc_version "
+                "AND e.mod_id IS g.mod_id AND e.kind IS g.kind "
+                "AND e.en_us IS g.en_us AND f.zh_tw IS g.current_zh_tw "
+                "AND f.source IS g.effective_source "
+                f"AND ({selection.effective_review}) IS g.effective_review "
+                + f"WHERE {selection.where_sql}) "
+                + "SELECT id, mc_version, mod_id, kind, en_us, f_zh_tw, "
+                "f_source, effective_review FROM candidate_rows"
+            )
+            # json_each 將有界頁面的群組值當成小型查詢輸入，避免為每個群組
+            # 展開大量 OR 條件或在補查階段重新排序整個候選集。
+            params = (json.dumps(chunk, ensure_ascii=False), *selection.params)
+            for row in self._q(query, tuple(params)):
+                group = tuple(row[1:])
+                group_ids.setdefault(group, set()).add(int(row[0]))
+
+        completed: list[tuple[tuple[Any, ...], tuple[int, ...]]] = []
+        for row, existing_twin_ids in selected_rows:
+            ids = group_ids.get(_smart_review_row_group(row), set())
+            if not ids:
+                ids = {int(row[0]), *(int(value) for value in existing_twin_ids)}
+            completed.append(
+                (
+                    row,
+                    tuple(
+                        sorted(entry_id for entry_id in ids if entry_id != int(row[0]))
+                    ),
+                )
+            )
+        return completed
+
     def smart_review_candidates(
         self,
         *,
@@ -758,6 +826,9 @@ class SmartReviewMixin:
                     break
                 raw_fetch_limit = next_limit
             selected_rows = deduped_rows[absolute_offset:target_count]
+        selected_rows = self._complete_smart_review_twin_ids(
+            selection, entry_source, selected_rows
+        )
         snapshots: list[SmartReviewSnapshot] = []
         for row_index, (row, twin_ids) in enumerate(selected_rows, 1):
             ordinal = absolute_offset + row_index
@@ -2278,6 +2349,10 @@ class SmartReviewMixin:
             updates = dict(
                 zip(_SNAPSHOT_FIELDS, (*current, *manual_values), strict=True)
             )
+            if not isinstance(candidate.get("original_snapshot"), dict):
+                updates["original_snapshot"] = {
+                    key: candidate.get(key) for key in _SNAPSHOT_FIELDS
+                }
             if all(candidate.get(key) == value for key, value in updates.items()):
                 return "unchanged"
             history.update_candidate(run_id, ordinal, **updates)

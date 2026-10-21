@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 
 import pytest
 
@@ -121,6 +122,22 @@ def test_applied_candidate_can_be_edited_and_reapplied(db, monkeypatch):
     latest = max(history, key=lambda row: row.id)
     assert db.revert(latest.id, whole_batch=False) == 1
     assert db.entry_detail(candidate.entry_id).entry.zh_tw == "再見！"
+
+
+def test_realign_preserves_original_input_snapshot(db, monkeypatch):
+    """人工重套對齊現況時，不應覆寫模型當時看到的原始快照。"""
+    run_id = _run(db, monkeypatch, "suggest_revision")
+    candidate = _candidate(db, run_id, "bye")
+    assert db.apply_smart_review_candidate(run_id, candidate.ordinal) == "applied"
+    history = SmartReviewHistoryStore(db.path)
+    original = history.get_candidate(run_id, candidate.ordinal)["original_snapshot"]
+
+    db.save_manual(candidate.entry_id, "掰掰", propagate=False)
+    assert db.realign_smart_review_candidate(run_id, candidate.ordinal) == "realigned"
+
+    updated = history.get_candidate(run_id, candidate.ordinal)
+    assert updated["current_zh_tw"] == "掰掰"
+    assert updated["original_snapshot"] == original
 
 
 def test_reapply_with_unchanged_text_writes_nothing(db, monkeypatch):
@@ -406,6 +423,23 @@ def _write_run(store: SmartReviewHistoryStore, run_id: str, started_at: str, bod
         "candidates": body,
     }
     store.path_for(run_id).write_text(json.dumps(payload), encoding="utf-8")
+
+
+def test_history_list_and_latest_marks_share_mtime_tie_breaker(tmp_path):
+    """同秒批次的歷史清單與最近標籤必須選同一個檔案。"""
+    store = SmartReviewHistoryStore(tmp_path / "history.db")
+    started_at = "2026-10-22 00:00:00"
+    _write_run(store, "run_b", started_at, [{"entry_id": 2, "status": "b"}])
+    _write_run(store, "run_a", started_at, [{"entry_id": 1, "status": "a"}])
+    base_ns = 1_700_000_000_000_000_000
+    os.utime(store.path_for("run_b"), ns=(base_ns, base_ns))
+    os.utime(
+        store.path_for("run_a"),
+        ns=(base_ns + 1_000_000, base_ns + 1_000_000),
+    )
+
+    assert [run["id"] for run in store.all_runs()] == ["run_a", "run_b"]
+    assert store.latest_run_marks() == ("run_a", {1: ("a", None)})
 
 
 @pytest.mark.parametrize("bad", [123, "abc", {"a": 1}, None, True])

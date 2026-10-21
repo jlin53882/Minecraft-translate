@@ -31,6 +31,28 @@ _HEAD_BYTES = 16_384
 _STARTED_AT = re.compile(r'"started_at":\s*"([^"]*)"')
 logger = logging.getLogger(__name__)
 _RUN_ID = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
+SMART_REVIEW_CAS_SNAPSHOT_FIELDS = (
+    "kind",
+    "mc_version",
+    "mod_id",
+    "entry_key",
+    "en_us",
+    "current_zh_tw",
+    "effective_source",
+    "review_status",
+    "effective_revision",
+    "manual_zh_tw",
+    "manual_checker",
+    "manual_review_status",
+    "manual_revision",
+)
+
+
+def _run_sort_key(
+    started_at: object, mtime_ns: int, run_id: object
+) -> tuple[str, int, str]:
+    """建立歷史清單與最近批次共用的穩定排序鍵。"""
+    return str(started_at or ""), int(mtime_ns), str(run_id or "")
 
 
 def history_directory_for_db(db_path: str | Path) -> Path:
@@ -53,7 +75,7 @@ def _copy_context(value: object) -> list[dict[str, Any]]:
 
 def _snapshot_payload(run_id: str, item: SmartReviewSnapshot) -> dict[str, Any]:
     """把候選輸入快照轉成 JSON 結構。"""
-    return {
+    candidate = {
         "run_id": run_id,
         "ordinal": int(item.ordinal),
         "entry_id": int(item.entry_id),
@@ -85,6 +107,10 @@ def _snapshot_payload(run_id: str, item: SmartReviewSnapshot) -> dict[str, Any]:
         "applied_batch": None,
         "applied_at": None,
     }
+    candidate["original_snapshot"] = {
+        key: candidate[key] for key in SMART_REVIEW_CAS_SNAPSHOT_FIELDS
+    }
+    return candidate
 
 
 def _candidate_from_payload(
@@ -363,30 +389,33 @@ class SmartReviewHistoryStore:
         """讀取所有可解析的 JSON 批次，依新到舊排序。"""
         if not self.directory.is_dir():
             return []
-        runs: list[dict[str, Any]] = []
+        runs: list[tuple[dict[str, Any], tuple[str, int, str]]] = []
         with self._lock:
             for path in self.directory.glob("*.json"):
                 try:
+                    mtime_ns = path.stat().st_mtime_ns
                     payload = json.loads(path.read_text(encoding="utf-8"))
                 except (OSError, ValueError):
                     continue
                 if not isinstance(payload, dict) or not payload.get("id"):
                     continue
+                summary = {
+                    key: value for key, value in payload.items() if key != "candidates"
+                }
                 runs.append(
-                    {
-                        key: value
-                        for key, value in payload.items()
-                        if key != "candidates"
-                    }
+                    (
+                        summary,
+                        _run_sort_key(
+                            payload.get("started_at"),
+                            mtime_ns,
+                            payload.get("id"),
+                        ),
+                    )
                 )
-        return sorted(
-            runs,
-            key=lambda item: (
-                str(item.get("started_at") or ""),
-                str(item.get("id") or ""),
-            ),
-            reverse=True,
-        )
+        return [
+            item
+            for item, _key in sorted(runs, key=lambda value: value[1], reverse=True)
+        ]
 
     def latest_run_marks(self) -> tuple[str | None, dict[int, tuple[str, str | None]]]:
         """回傳最近一次批次的 ``entry_id -> (狀態, 驗證錯誤)``，供條目列顯示狀態。
@@ -429,7 +458,7 @@ class SmartReviewHistoryStore:
             if cached is None or cached[0] != stamp:
                 cached = (stamp, self._read_started_at(path))
                 self._started_cache[path] = cached
-            ranked.append(((cached[1], stamp[0], path.stem), path, stamp))
+            ranked.append((_run_sort_key(cached[1], stamp[0], path.stem), path, stamp))
         for table in (self._started_cache, self._corrupt_runs):
             for gone in [
                 p for p in table if p.parent == self.directory and p not in live
