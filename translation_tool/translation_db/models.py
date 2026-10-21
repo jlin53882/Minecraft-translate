@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import dataclass, field
+from typing import Any
 
 
 @dataclass(frozen=True)
@@ -203,6 +204,7 @@ class EntryFilter:
     kind: str | None = None
     state: str = "all"
     query: str = ""
+    query_field: str = "all"
     source: int | None = None
     review_status: str | None = None
     entry_ids: tuple[int, ...] | None = None
@@ -215,6 +217,8 @@ class EntryFilter:
     def __post_init__(self) -> None:
         if self.state not in {"all", "none", "diff", "changed", "manual", "ok", "same"}:
             raise ValueError(f"未知條目狀態：{self.state}")
+        if self.query_field not in {"all", "source", "translation", "key"}:
+            raise ValueError(f"未知搜尋欄位：{self.query_field}")
         if self.review_status not in (None, "unreviewed", "reviewed", "legacy_unknown"):
             raise ValueError(f"未知人工審核狀態：{self.review_status}")
         if self.sort_by not in {
@@ -400,6 +404,82 @@ class BatchRevertResult:
     total: int
 
 
+@dataclass(frozen=True)
+class SmartReviewSnapshot:
+    """送給本地智慧校對模型的不可變來源與目前生效譯文快照。"""
+
+    run_id: str
+    ordinal: int
+    entry_id: int
+    kind: str
+    mc_version: str
+    mod_id: str
+    key: str
+    en_us: str
+    current_zh_tw: str
+    effective_source: int | None
+    review_status: str | None
+    effective_revision: int | None
+    context: tuple[dict[str, Any], ...] = ()
+    manual_zh_tw: str | None = None
+    manual_checker: str | None = None
+    manual_review_status: str | None = None
+    manual_revision: int | None = None
+
+
+@dataclass(frozen=True)
+class SmartReviewCandidate:
+    """已保存的 AI 智慧校對結果；使用者明確套用前都只是候選。"""
+
+    run_id: str
+    ordinal: int
+    entry_id: int
+    kind: str
+    mc_version: str
+    mod_id: str
+    key: str
+    en_us: str
+    current_zh_tw: str
+    effective_source: int | None
+    review_status: str | None
+    effective_revision: int | None
+    context: tuple[dict[str, Any], ...]
+    manual_zh_tw: str | None = None
+    manual_checker: str | None = None
+    manual_review_status: str | None = None
+    manual_revision: int | None = None
+    decision: str | None = None
+    suggested_zh_tw: str | None = None
+    issue_types: tuple[str, ...] = ()
+    evidence_ids: tuple[str, ...] = ()
+    confidence: float | None = None
+    reason: str | None = None
+    draft_zh_tw: str | None = None
+    validation_error: str | None = None
+    status: str = "pending"
+    applied_batch: str | None = None
+    applied_at: str | None = None
+
+
+@dataclass(frozen=True)
+class SmartReviewRunResult:
+    """單次有界智慧校對執行的彙總結果。"""
+
+    run_id: str
+    provider: str
+    model: str
+    selected_count: int
+    processed_count: int
+    valid_count: int
+    invalid_count: int
+    request_error_count: int
+    no_change_count: int
+    suggestion_count: int
+    needs_context_count: int
+    metrics: dict[str, object] = field(default_factory=dict)
+    status: str = "completed"
+
+
 @dataclass
 class EntryDetail:
     entry: EntryRow
@@ -521,10 +601,11 @@ class BulkReviewCandidate:
 
 @dataclass(frozen=True)
 class BulkReviewPlan:
-    """「版本 + 目前生效來源」批量審核的預覽結果。"""
+    """「版本 + 模組 + 目前生效來源」批量審核的預覽結果；來源可不限。"""
 
     version: str
-    source: int
+    source: int | None
+    mod_id: str | None
     quality_pass_only: bool
     propagate: bool
     database_identity: str

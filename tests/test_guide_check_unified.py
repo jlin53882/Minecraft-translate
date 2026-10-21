@@ -101,6 +101,30 @@ def test_normal_and_retry_payloads_share_patchouli_format_spec():
     )
 
 
+def test_lm_quality_retry_marks_missing_reviewed_terminology():
+    """驗證品質重試會標記缺少的已審核專有名詞。"""
+    item = {
+        "text": "Ruby Heavy Crossbow",
+        "source_text": "Ruby Heavy Crossbow",
+        "cache_type": KIND_LANG,
+        "_reviewed_glossary": [
+            {"en_us": "Crossbow", "zh_tw": "弩"},
+        ],
+    }
+    retry = build_quality_retry_batch(
+        [item],
+        [{**item, "text": "紅寶石重型十字弓"}],
+        ["0"],
+        retry_same_as_source=False,
+        include_official=False,
+    )
+
+    assert retry.positions == (0,)
+    assert retry.payload["items"][0]["terminology_issues"] == [
+        "術語未命中：Crossbow → 弩"
+    ]
+
+
 def test_empty_guide_translation_keeps_missing_structure_visible():
     assert guide_structure_issues(SOURCE, "", kind=KIND_GUIDE)
     assert translation_issues(SOURCE, "", kind=KIND_GUIDE)

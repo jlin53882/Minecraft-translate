@@ -19,7 +19,14 @@ import sqlite3
 
 ACTIVITY_SCHEMA_VERSION = "2"
 # 「人工活動」包含的歷史動作（排序、清單欄位與時間篩選的「全部」共用）
-ACTIVITY_ACTIONS = ("manual", "review", "batch_replace", "revert", "batch_revert")
+ACTIVITY_ACTIONS = (
+    "manual",
+    "review",
+    "smart_review_apply",
+    "batch_replace",
+    "revert",
+    "batch_revert",
+)
 ACTIONS_SQL = "(" + ",".join(f"'{action}'" for action in ACTIVITY_ACTIONS) + ")"
 
 _TABLES = """

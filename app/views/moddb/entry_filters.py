@@ -1,4 +1,4 @@
-"""Filter controls and resolved entry query shared by list and batch actions."""
+"""ModDB 條目頁的篩選控制項與背景載入流程。"""
 
 from __future__ import annotations
 
@@ -12,12 +12,19 @@ from app.views.moddb.advanced_filters import AdvancedFilters
 from app.views.moddb.batch_replace_dialog import BatchReplaceDialog
 from app.views.moddb.bulk_review_dialog import BulkReviewDialog
 from app.views.moddb.formatting import STATE_LABELS, kind_label
-from app.views.moddb.source_filter import ReviewStatusFilter, SourceFilter
+from app.views.moddb.smart_review_dialog import SmartReviewDialog
+from app.views.moddb.source_filter import ALL_SOURCES, ReviewStatusFilter, SourceFilter
 from app.views.moddb.species_dialog import SpeciesCandidateDialog
 
 ALL_REVIEW_STATES = "__all__"
 ALL_MODS = "全部模組"
 ALL_KINDS = "全部類型"
+SEARCH_FIELD_OPTIONS = (
+    ("all", "全部內容"),
+    ("source", "原文"),
+    ("translation", "譯文"),
+    ("key", "鍵值"),
+)
 
 
 def build_filter_controls(panel) -> None:
@@ -27,7 +34,7 @@ def build_filter_controls(panel) -> None:
 
 
 def apply_filter_options(panel, snapshot: dict) -> None:
-    """Apply worker-loaded filter options and keep their selected values valid."""
+    """套用背景載入的篩選選項，並保持目前選取值有效。"""
     identity = snapshot.get("identity")
     panel._render_source_catalog = snapshot.get("source_catalog")
     if panel._db_identity is not None and identity != panel._db_identity:
@@ -36,7 +43,17 @@ def apply_filter_options(panel, snapshot: dict) -> None:
     panel.source_filter.refresh(
         snapshot.get("effective_source_codes", ()),
         catalog=snapshot.get("source_catalog"),
+        available_only=bool(snapshot.get("filter_options_are_filtered")),
     )
+    if "source" in snapshot:
+        source = snapshot.get("source")
+        source_value = ALL_SOURCES if source is None else str(source)
+        available_values = {
+            option.key for option in panel.source_filter.dropdown.options
+        }
+        panel.source_filter.dropdown.value = (
+            source_value if source_value in available_values else ALL_SOURCES
+        )
     versions = snapshot.get("versions", [])
     kit.set_dropdown_options(panel.version_dd, [(v, v) for v in versions])
     panel.version = snapshot.get("version")
@@ -57,6 +74,7 @@ def apply_filter_options(panel, snapshot: dict) -> None:
 
 
 def _build_controls(panel) -> None:
+    """建立目前面板的操作控制項。"""
     panel.version_dd = kit.dropdown(
         label="遊戲版本", dense=True, width=220, on_select=panel._on_version
     )
@@ -75,6 +93,14 @@ def _build_controls(panel) -> None:
         on_change=panel._on_search_input,
         on_submit=panel._on_search,
     )
+    panel.search_field_dd = kit.dropdown(
+        label="搜尋內容",
+        dense=True,
+        width=140,
+        on_select=panel._on_search_field,
+    )
+    kit.set_dropdown_options(panel.search_field_dd, list(SEARCH_FIELD_OPTIONS))
+    panel.search_field_dd.value = "all"
     panel.state_seg = kit.Segmented(
         [(key, label) for key, label in STATE_LABELS.items()],
         "all",
@@ -94,6 +120,14 @@ def _build_controls(panel) -> None:
         icon=ft.Icons.VERIFIED_OUTLINED,
         size="sm",
         on_click=panel._open_bulk_review,
+    )
+    panel.smart_review_btn = kit.button(
+        "智慧校對",
+        "secondary",
+        icon=ft.Icons.AUTO_AWESOME,
+        size="sm",
+        on_click=lambda event: open_smart_review(panel, event),
+        tooltip="以本地 AI 產生未審核譯文的人工校對候選",
     )
     panel.species_scan_btn = kit.button(
         "掃描學名",
@@ -130,6 +164,7 @@ def _build_flagged_banner(panel) -> None:
 
 
 def _build_filter_card(panel) -> None:
+    """建立 ModDB 篩選條件卡片並放入相關控制項。"""
     panel.filter_card = kit.section_card(
         None,
         ft.Column(
@@ -140,6 +175,7 @@ def _build_filter_card(panel) -> None:
                         panel.mod_dd,
                         panel.kind_dd,
                         panel.source_filter.dropdown,
+                        panel.search_field_dd,
                         panel.search,
                     ],
                     spacing=12,
@@ -154,8 +190,10 @@ def _build_filter_card(panel) -> None:
                     [
                         panel.advanced_filters.toggle_button,
                         panel.advanced_filters.active_text,
+                        panel.advanced_filters.clear_button,
                         panel.batch_replace_btn,
                         panel.bulk_review_btn,
+                        panel.smart_review_btn,
                         panel.species_scan_btn,
                     ],
                     spacing=8,
@@ -185,6 +223,7 @@ def entry_filter(panel) -> EntryFilter:
         kind=panel.kind,
         state=panel.state,
         query=panel.query,
+        query_field=panel.query_field,
         source=panel.source_filter.code,
         review_status=(
             None if status in (None, "", ALL_REVIEW_STATES) else str(status)
@@ -204,7 +243,7 @@ def refresh_entry_filter(
     full_refresh: bool = False,
     background: bool = True,
 ) -> None:
-    """Refresh the requested result page, optionally delegating filter edits."""
+    """重新載入指定結果頁，必要時把篩選變更交給上層處理。"""
     panel.pager.set_state(panel.total, page)
     if panel._on_filter_changed is not None:
         panel._on_filter_changed(
@@ -244,6 +283,7 @@ def open_batch_replace(panel, _e=None) -> None:
 
 
 def open_bulk_review(panel, _e=None) -> None:
+    """開啟批量審核，預填目前頁面支援的範圍但不自動產生預覽。"""
     if panel.drafts:
         show_snack(
             panel._page,
@@ -255,11 +295,17 @@ def open_bulk_review(panel, _e=None) -> None:
         show_snack(panel._page, "目前沒有可用的資料庫版本。", C.GOLD)
         return
     BulkReviewDialog(
-        panel._page, panel.db, panel.version, panel._after_batch_replace
+        panel._page,
+        panel.db,
+        panel.version,
+        panel._after_batch_replace,
+        mod_id=panel.mod_id,
+        effective_source=panel.source_filter.code,
     ).open()
 
 
 def open_species_scan(panel, _e=None) -> None:
+    """開啟學名候選掃描對話框，並預填目前版本、模組與來源範圍。"""
     if panel.db() is None or not panel.version:
         show_snack(panel._page, "目前沒有可用的資料庫版本。", C.GOLD)
         return
@@ -270,4 +316,36 @@ def open_species_scan(panel, _e=None) -> None:
         panel.mod_id,
         panel.kind,
         on_open_entry=panel.open_species_entry,
+        effective_source=panel.source_filter.code,
+    ).open()
+
+
+def open_smart_review(panel, _e=None) -> None:
+    """開啟智慧校對對話框並傳入目前資料庫與篩選範圍。"""
+    if panel.drafts:
+        show_snack(
+            panel._page,
+            "目前清單含尚未寫入的機翻草稿；請先離開草稿檢視再執行智慧校對。",
+            C.GOLD,
+        )
+        return
+    if panel.db() is None or not panel.version:
+        show_snack(panel._page, "目前沒有可用的資料庫版本。", C.GOLD)
+        return
+
+    def after_complete(_result=None) -> None:
+        """智慧校對套用完成後重載目前條目頁，再通知頁籤外層。"""
+        refresh_entry_filter(panel, keep_selection=True)
+        if panel._on_changed:
+            panel._on_changed()
+
+    SmartReviewDialog(
+        panel._page,
+        panel.db,
+        panel.version,
+        after_complete,
+        panel.mod_id,
+        panel.kind,
+        panel.source_filter.code,
+        panel.query,
     ).open()

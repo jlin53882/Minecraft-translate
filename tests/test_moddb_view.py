@@ -19,11 +19,13 @@ from tests.conftest import mock_filepicker, mock_page
 from translation_tool.translation_db import (
     KIND_LANG,
     DbSettings,
+    EntryFilter,
+    QualityFilter,
     ScanItem,
     TranslationDB,
 )
 from translation_tool.translation_db.models import HistoryRow
-from translation_tool.translation_db.schema import SRC_MANUAL
+from translation_tool.translation_db.schema import SRC_AI, SRC_JAR_TW, SRC_MANUAL
 
 
 @pytest.fixture
@@ -808,6 +810,135 @@ def test_entries_filters_by_state_mod_and_search(entries):
         type("E", (), {"control": type("C", (), {"value": "alloy"})()})()
     )
     assert [r.key for r in entries.rows] == ["item.foo.b"]
+
+
+def test_entries_search_can_limit_matches_to_one_content_field(entries):
+    """搜尋範圍可分別限定原文、譯文或鍵值，避免同一文字命中三種內容。"""
+    entries.search_field_dd.value = "source"
+    entries._on_search_field(type("E", (), {"control": entries.search_field_dd})())
+    entries._on_search(
+        type("E", (), {"control": type("C", (), {"value": "Steel"})()})()
+    )
+    assert {row.key for row in entries.rows} == {"item.foo.a", "item.bar.a"}
+
+    entries.search_field_dd.value = "translation"
+    entries._on_search_field(type("E", (), {"control": entries.search_field_dd})())
+    assert entries.rows == []
+
+    entries.search_field_dd.value = "key"
+    entries._on_search_field(type("E", (), {"control": entries.search_field_dd})())
+    entries._on_search(type("E", (), {"control": type("C", (), {"value": "foo"})()})())
+    assert {row.key for row in entries.rows} == {"item.foo.a", "item.foo.b"}
+
+
+def test_advanced_filter_refreshes_module_and_source_options(db_path):
+    """進階品質篩選會同步縮減模組與目前生效來源下拉選項。"""
+    seed(db_path)
+    db = TranslationDB(db_path)
+    db.ingest(
+        "1.21.1",
+        [
+            ScanItem(
+                KIND_LANG,
+                "baz",
+                "item.baz.a",
+                "Copper Casing",
+                "銅殼",
+                source=SRC_AI,
+            )
+        ],
+    )
+    db.close()
+
+    settings = DbSettings(path=str(db_path), version="1.21.1")
+    criteria = EntryFilter(version="1.21.1", quality=QualityFilter(status="consistent"))
+    source_scoped = moddb_view.load_panel_snapshot(
+        "entries",
+        {
+            "criteria": criteria,
+            "version": "1.21.1",
+            "mod_id": None,
+            "kind": None,
+            "page": 1,
+        },
+        settings,
+    )
+    assert source_scoped["mods"] == ["bar", "baz", "foo"]
+    assert set(source_scoped["effective_source_codes"]) == {SRC_AI, SRC_JAR_TW}
+
+    module_scoped = moddb_view.load_panel_snapshot(
+        "entries",
+        {
+            "criteria": EntryFilter(
+                version="1.21.1",
+                mod_id="baz",
+                source=SRC_AI,
+                quality=QualityFilter(status="consistent"),
+            ),
+            "version": "1.21.1",
+            "mod_id": "baz",
+            "kind": None,
+            "page": 1,
+        },
+        settings,
+    )
+    assert module_scoped["mods"] == ["baz"]
+
+    db = TranslationDB(db_path)
+    panel = entries_panel.EntriesPanel(mock_page(), lambda: db)
+    panel.apply_refresh_snapshot(
+        {**module_scoped, "filter_only": True, "filter_options_ready": True}
+    )
+    assert [option.key for option in panel.mod_dd.options] == ["全部模組", "baz"]
+    assert [option.key for option in panel.source_filter.dropdown.options] == [
+        "__all__",
+        str(SRC_AI),
+    ]
+    db.close()
+
+
+def test_advanced_filter_keeps_selected_empty_module_and_source_scope(db_path):
+    """進階條件無交集時仍保留選值，不能把查詢放寬到其他範圍。"""
+    seed(db_path)
+    db = TranslationDB(db_path)
+    db.ingest(
+        "1.21.1",
+        [
+            ScanItem(
+                KIND_LANG,
+                "baz",
+                "item.baz.a",
+                "Copper Casing",
+                "銅殼",
+                source=SRC_AI,
+            )
+        ],
+    )
+    db.close()
+
+    settings = DbSettings(path=str(db_path), version="1.21.1")
+    snapshot = moddb_view.load_panel_snapshot(
+        "entries",
+        {
+            "criteria": EntryFilter(
+                version="1.21.1",
+                mod_id="foo",
+                source=SRC_AI,
+                quality=QualityFilter(status="consistent"),
+            ),
+            "version": "1.21.1",
+            "mod_id": "foo",
+            "kind": None,
+            "page": 1,
+        },
+        settings,
+    )
+
+    assert snapshot["mod_id"] == "foo"
+    assert snapshot["source"] == SRC_AI
+    assert snapshot["total"] == 0
+    assert "foo" in snapshot["mods"]
+    assert SRC_AI in snapshot["effective_source_codes"]
 
 
 def test_entries_edit_shows_impact_and_save_propagates(entries):

@@ -1,3 +1,5 @@
+"""文字處理器規則檔路徑解析與持久化行為的測試。"""
+
 import json
 from pathlib import Path
 
@@ -38,3 +40,28 @@ def test_save_replace_rules_can_propagate_durable_write_failure(tmp_path, monkey
     text_processor.save_replace_rules("replace_rules.json", [])
     with pytest.raises(PermissionError, match="read-only destination"):
         text_processor.save_replace_rules("replace_rules.json", [], raise_on_error=True)
+
+
+def test_save_replace_rules_invalidates_cached_snapshot(tmp_path, monkeypatch):
+    """驗證此測試案例的預期結果與相容性。"""
+    rules_path = tmp_path / "replace_rules.json"
+    rules_path.write_text(
+        json.dumps([{"from": "hello", "to": "哈囉"}], ensure_ascii=False),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(text_processor, "_resolve_rules_path", lambda _path: rules_path)
+    events = []
+    unsubscribe = text_processor.replace_rules_store.subscribe(events.append)
+    try:
+        assert (
+            text_processor.load_replace_rules("replace_rules.json")[0]["to"] == "哈囉"
+        )
+        text_processor.save_replace_rules(
+            "replace_rules.json", [{"from": "hello", "to": "你好"}]
+        )
+        assert (
+            text_processor.load_replace_rules("replace_rules.json")[0]["to"] == "你好"
+        )
+        assert events == [rules_path.resolve()]
+    finally:
+        unsubscribe()

@@ -189,6 +189,20 @@ def test_candidate_and_listing_queries_avoid_temp_sort(db):
         assert not offenders, offenders
 
 
+def test_smart_review_selection_context_and_history_avoid_temp_sort(db):
+    """驗證智慧校對選取、上下文與歷史查詢不使用暫存排序。"""
+    calls = (
+        lambda: db.smart_review_candidates(
+            version="1.20.1", limit=5, prioritize_named_keys=True
+        ),
+        lambda: db.smart_review_candidates(version="1.20.1", limit=5),
+        lambda: db.list_smart_review_runs(limit=5),
+    )
+    for call in calls:
+        offenders = _temp_sort_plans(db, call)
+        assert not offenders, offenders
+
+
 def _all_plans(db: TranslationDB, call) -> list[str]:
     seen: list[str] = []
     db._conn.set_trace_callback(seen.append)

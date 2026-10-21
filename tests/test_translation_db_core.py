@@ -1400,6 +1400,7 @@ def _make_v1_db(path):
 
 
 def test_schema_v1_migration_marks_legacy_manual_unknown_and_keeps_backup(tmp_path):
+    """驗證 v1 遷移標記舊人工狀態為未知並保留備份。"""
     from translation_tool.translation_db.schema import SCHEMA_VERSION
 
     path = tmp_path / "legacy.db"
@@ -1407,7 +1408,7 @@ def test_schema_v1_migration_marks_legacy_manual_unknown_and_keeps_backup(tmp_pa
     db = TranslationDB(path)
     detail = db.entry_detail(entry_id)
     manual = next(row for row in detail.translations if row.source == SRC_MANUAL)
-    assert SCHEMA_VERSION == 6
+    assert SCHEMA_VERSION == 8
     assert manual.review_status == "legacy_unknown" and manual.checker == "old-checker"
     assert detail.entry.review_status == "legacy_unknown"
     assert list(tmp_path.glob("legacy.db.pre-schema-v2-*.bak"))
@@ -1415,6 +1416,13 @@ def test_schema_v1_migration_marks_legacy_manual_unknown_and_keeps_backup(tmp_pa
     assert list(tmp_path.glob("legacy.db.pre-schema-v4-*.bak"))
     assert list(tmp_path.glob("legacy.db.pre-schema-v5-*.bak"))
     assert list(tmp_path.glob("legacy.db.pre-schema-v6-*.bak"))
+    assert list(tmp_path.glob("legacy.db.pre-schema-v7-*.bak"))
+    assert list(tmp_path.glob("legacy.db.pre-schema-v8-*.bak"))
+    assert db._q(
+        "SELECT name FROM sqlite_schema WHERE type='table' "
+        "AND name IN ('smart_review_run', 'smart_review_candidate') "
+        "ORDER BY name"
+    ) == [("smart_review_candidate",), ("smart_review_run",)]
     db.close()
 
     # 重新開啟具冪等性：不會建立第二份遷移備份。
@@ -1497,6 +1505,7 @@ def test_schema_v2_migration_keeps_first_seen_unknown_and_supports_readonly(tmp_
 
 
 def test_schema_v3_migration_backup_includes_committed_wal_snapshot(tmp_path):
+    """驗證 v3 遷移備份包含已提交的 WAL 快照。"""
     path = tmp_path / "legacy-v3-wal.db"
     db = TranslationDB(path)
     db.ingest("1.21.1", [item(key="item.wal", en="Before WAL", tw="譯文")])
@@ -1517,7 +1526,7 @@ def test_schema_v3_migration_backup_includes_committed_wal_snapshot(tmp_path):
         migrated._conn.execute(
             "SELECT value FROM meta WHERE key='schema_version'"
         ).fetchone()[0]
-        == "6"
+        == "8"
     )
     backups = list(tmp_path.glob("legacy-v3-wal.db.pre-schema-v4-*.bak"))
     assert len(backups) == 1
@@ -1624,6 +1633,9 @@ def test_list_entries_filters_and_detail(db):
     assert db.list_entries("1.21.1", state="none")[1] == 1
     assert db.list_entries("1.21.1", mod_id="bar")[1] == 1
     assert db.list_entries("1.21.1", query="second")[1] == 1
+    assert db.list_entries("1.21.1", query="second", query_field="source")[1] == 1
+    assert db.list_entries("1.21.1", query="second", query_field="translation")[1] == 0
+    assert db.list_entries("1.21.1", query="k2", query_field="key")[1] == 1
     assert db.list_entries("1.21.1", query="100%")[1] == 0  # % 不是萬用字元
     first = db.list_entries("1.21.1", mod_id="foo", query="item.foo.a")[0][0]
     detail = db.entry_detail(first.id)

@@ -434,6 +434,52 @@ def test_definition_version_change_recomputes_every_entry(tmp_path):
         reopened.close()
 
 
+def test_guide_format_rule_version_recomputes_old_config_flags(tmp_path):
+    """<config> 規則更新後，舊版格式旗標必須在開啟資料庫時重算。"""
+    path = tmp_path / "config-rule-version.db"
+    source = (
+        "<config;b;tools.chemthrower.scroll;"
+        "sneaking and using the scrollwheel, or through use of;using>"
+    )
+    translated = "<config;b;tools.chemthrower.scroll;潛行並滾動滑鼠滾輪，或使用;使用>"
+    first = TranslationDB(path)
+    first.ingest(
+        "1.21.1",
+        [
+            ScanItem(
+                KIND_GUIDE,
+                "chem",
+                "scroll",
+                source,
+                translated,
+                source=SRC_AI,
+            )
+        ],
+    )
+    row = first.list_entries("1.21.1", limit=1)[0][0]
+    assert row.quality_state == "consistent"
+    with first._tx() as conn:
+        conn.execute(
+            "UPDATE entry SET qflags=? WHERE id=?",
+            (quality_flags.BITS["mismatch"], row.id),
+        )
+        conn.execute(
+            "UPDATE meta SET value=? WHERE key='quality_schema_version'",
+            (str(int(quality_flags.SCHEMA_VERSION) - 1),),
+        )
+    first.close()
+
+    reopened = TranslationDB(path)
+    try:
+        assert quality_flags.is_installed(reopened._conn)
+        assert reopened.verify_quality_flags() == []
+        assert (
+            reopened.list_entries("1.21.1", limit=1)[0][0].quality_state == "consistent"
+        )
+    finally:
+        reopened.close()
+
+
 def test_guide_link_breakage_is_mismatch_in_flags_pages_and_rows(db):
     """指南連結目標被改壞時，條目清單的「格式不一致」要列出它，不能顯示為「一致」。"""
     _seed(db)
@@ -645,7 +691,7 @@ def test_reviewed_lang_glossary_matches_case_and_outer_space_variants(db):
 
 # 規則快照：判斷結果改變時這個測試會失敗。失敗代表已存的 entry.qflags 與新規則不一致，
 # 請遞增 quality_flags.SCHEMA_VERSION，並同步更新下面的版本與預期結果。
-_RULE_SNAPSHOT_VERSION = "6"
+_RULE_SNAPSHOT_VERSION = "7"
 _RULE_SNAPSHOT_CASES = (
     ("$(italic)HOT! DO NOT EAT$()", "$(italic)燙！請勿食用$()", "patchouli", False),
     ("A$(br2)B\n\n", "甲\n$(br2)乙", "patchouli", False),
@@ -677,6 +723,13 @@ _RULE_SNAPSHOT_CASES = (
         True,
     ),
     ("# Title\n\n- a", "# 標題\n- 甲", "guide", True),
+    ("# Title\n\n- a", "# 標題\n- 甲", "guide", True),
+    (
+        "<config;b;tools.chemthrower.scroll;sneaking and using the scrollwheel, or through use of;using>",
+        "<config;b;tools.chemthrower.scroll;潛行並滾動滑鼠滾輪，或使用;使用>",
+        "guide",
+        False,
+    ),
 )
 
 

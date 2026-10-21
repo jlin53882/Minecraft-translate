@@ -1,3 +1,5 @@
+"""規則頁面載入與互動行為的特徵測試。"""
+
 import flet as ft
 
 from app.ui.snack import show_snack
@@ -406,6 +408,22 @@ def test_rules_view_load_rules_core(monkeypatch):
     view = RulesView(mock_page())
     assert hasattr(view, "_load_rules_core")
     assert callable(view._load_rules_core)
+
+
+def test_rules_view_manual_reload_forces_store_reload(monkeypatch):
+    """驗證此測試案例的預期結果與相容性。"""
+    from types import SimpleNamespace
+
+    calls = []
+    monkeypatch.setattr(
+        "app.views.rules_view.load_replace_rules",
+        lambda **kwargs: calls.append(kwargs) or [],
+    )
+
+    from app.views.rules_view import RulesView
+
+    assert RulesView._load_rules_core(SimpleNamespace(), force_reload=True) == []
+    assert calls == [{"force_reload": True, "source": "rules_manual_reload"}]
 
 
 def test_rules_view_initial_load(monkeypatch):

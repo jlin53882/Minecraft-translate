@@ -20,7 +20,7 @@ import time
 from pathlib import Path
 
 KEEP_REVIEW_FLAG = "keep_review_on_text_change"  # 交易內暫時存在的 meta 旗標
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 8
 
 KIND_LANG = "lang"
 KIND_PATCHOULI = "patchouli"
@@ -38,7 +38,7 @@ _CACHE_TYPE_BY_KIND = {
 
 
 def cache_type_for_kind(kind: str | None) -> str:
-    """Return the shared translation cache bucket for a DB entry kind."""
+    """回傳資料庫條目種類共用的翻譯快取分桶。"""
     return _CACHE_TYPE_BY_KIND.get(str(kind or ""), KIND_PATCHOULI)
 
 
@@ -220,7 +220,7 @@ def connect(path: str | Path, *, readonly: bool = False) -> sqlite3.Connection:
 
 
 def init_schema(conn: sqlite3.Connection) -> None:
-    """建立資料表，遞增 migration 先備份並在單一交易中套用。"""
+    """建立或更新翻譯資料庫的 schema、索引與目前 schema version。"""
     conn.executescript(_DDL)
     row = conn.execute("SELECT value FROM meta WHERE key='schema_version'").fetchone()
     if row is None:
@@ -234,6 +234,7 @@ def init_schema(conn: sqlite3.Connection) -> None:
         )
         _install_schema_v3_objects(conn)
         conn.commit()
+        _install_smart_review_objects(conn)
         _install_derived_tables(conn)
         return
     version = stored_schema_version(conn)
@@ -249,6 +250,10 @@ def init_schema(conn: sqlite3.Connection) -> None:
             _backup_before_ai_repair_source_migration(conn)
         elif next_version == 6:
             _backup_before_independent_review_migration(conn)
+        elif next_version == 7:
+            _backup_before_smart_review_migration(conn)
+        elif next_version == 8:
+            _backup_before_smart_review_draft_migration(conn)
         conn.execute("BEGIN IMMEDIATE")
         try:
             if next_version == 2:
@@ -261,6 +266,10 @@ def init_schema(conn: sqlite3.Connection) -> None:
                 _migrate_ai_repair_source_v5(conn)
             elif next_version == 6:
                 _migrate_independent_review_v6(conn)
+            elif next_version == 7:
+                _migrate_smart_review_v7(conn)
+            elif next_version == 8:
+                _migrate_smart_review_v8(conn)
             conn.execute(
                 "UPDATE meta SET value=? WHERE key='schema_version'",
                 (str(next_version),),
@@ -277,6 +286,7 @@ def init_schema(conn: sqlite3.Connection) -> None:
     )
     _install_schema_v3_objects(conn)
     conn.commit()
+    _install_smart_review_objects(conn)
     _install_derived_tables(conn)
 
 
@@ -304,7 +314,7 @@ def _install_derived_tables(conn: sqlite3.Connection) -> None:
 
 
 def _backup_before_review_migration(conn: sqlite3.Connection) -> Path | None:
-    """Write a consistent side-by-side SQLite backup before the v1→v2 change."""
+    """在審核狀態遷移前建立一致的 SQLite 旁側備份。"""
     main = next(
         (row[2] for row in conn.execute("PRAGMA database_list") if row[1] == "main"),
         "",
@@ -327,7 +337,7 @@ def _backup_before_review_migration(conn: sqlite3.Connection) -> Path | None:
 
 
 def _migrate_review_state_v2(conn: sqlite3.Connection) -> None:
-    """Add explicit review state while preserving all v1 manual provenance."""
+    """加入明確審核狀態並保留 v1 人工來源資訊。"""
     for table, column in (
         ("translation", "review_status"),
         ("effective", "review_status"),
@@ -356,7 +366,7 @@ def _migrate_review_state_v2(conn: sqlite3.Connection) -> None:
 
 
 def _backup_before_time_migration(conn: sqlite3.Connection) -> Path | None:
-    """Keep a consistent v2 sidecar before adding timestamps and revisions."""
+    """在加入時間戳與修訂版本前保留一致的 v2 旁側備份。"""
     main = next(
         (row[2] for row in conn.execute("PRAGMA database_list") if row[1] == "main"),
         "",
@@ -379,7 +389,7 @@ def _backup_before_time_migration(conn: sqlite3.Connection) -> Path | None:
 
 
 def _migrate_time_and_revision_v3(conn: sqlite3.Connection) -> None:
-    """Add unknown-preserving first-seen timestamps and monotonic row revisions."""
+    """加入可保留未知值的首次時間戳與遞增資料列修訂版。"""
     translation_columns = {
         row[1] for row in conn.execute("PRAGMA table_info(translation)")
     }
@@ -411,7 +421,7 @@ def _migrate_time_and_revision_v3(conn: sqlite3.Connection) -> None:
 def _backup_before_source_history_migration(
     conn: sqlite3.Connection,
 ) -> Path | None:
-    """Keep a consistent sidecar before adding source identity to history."""
+    """在歷史資料加入來源身分前建立一致的旁側備份。"""
     main = next(
         (row[2] for row in conn.execute("PRAGMA database_list") if row[1] == "main"),
         "",
@@ -434,7 +444,7 @@ def _backup_before_source_history_migration(
 
 
 def _migrate_source_history_v4(conn: sqlite3.Connection) -> None:
-    """Record which source row a repair changed so its history can be restored."""
+    """記錄修復變更的來源資料列，讓歷史可以還原。"""
     columns = {row[1] for row in conn.execute("PRAGMA table_info(history)")}
     if "source_id" not in columns:
         conn.execute("ALTER TABLE history ADD COLUMN source_id INTEGER")
@@ -443,7 +453,7 @@ def _migrate_source_history_v4(conn: sqlite3.Connection) -> None:
 def _backup_before_ai_repair_source_migration(
     conn: sqlite3.Connection,
 ) -> Path | None:
-    """Keep a sidecar backup before adding repair-source undo metadata."""
+    """在加入 AI 修復復原資訊前建立旁側備份。"""
     main = next(
         (row[2] for row in conn.execute("PRAGMA database_list") if row[1] == "main"),
         "",
@@ -466,7 +476,7 @@ def _backup_before_ai_repair_source_migration(
 
 
 def _migrate_ai_repair_source_v5(conn: sqlite3.Connection) -> None:
-    """Preserve the prior repair-source value so moving repairs can be undone."""
+    """保存先前的修復來源值，讓移動修復可以復原。"""
     columns = {row[1] for row in conn.execute("PRAGMA table_info(history)")}
     if "repair_prev_zh_tw" not in columns:
         conn.execute("ALTER TABLE history ADD COLUMN repair_prev_zh_tw TEXT")
@@ -475,7 +485,7 @@ def _migrate_ai_repair_source_v5(conn: sqlite3.Connection) -> None:
 def _backup_before_independent_review_migration(
     conn: sqlite3.Connection,
 ) -> Path | None:
-    """Keep a sidecar backup before moving reviews back to their original source."""
+    """在把審核移回原始來源前建立一致的旁側備份。"""
     main = next(
         (row[2] for row in conn.execute("PRAGMA database_list") if row[1] == "main"),
         "",
@@ -498,16 +508,7 @@ def _backup_before_independent_review_migration(
 
 
 def _migrate_independent_review_v6(conn: sqlite3.Connection) -> None:
-    """Move "manual reviewed" rows back to the source that supplied the same text.
-
-    Review used to write a reviewed source-6 row that replaced the effective
-    source. Now review is a flag on the row that wins, so a reviewed manual row
-    whose text equals another source's text is folded back: that source's row is
-    marked reviewed and the manual row is removed. Equal text alone is not proof,
-    so only rows whose entire history is a single review that wrote the row's
-    current revision are folded; hand-edited or unverifiable rows stay manual, already
-    reviewed. The target source follows the user's saved priority.
-    """
+    """把人工審核資料移回提供相同文字的來源。"""
     if "review_status" not in {
         row[1] for row in conn.execute("PRAGMA table_info(translation)")
     }:
@@ -574,8 +575,187 @@ def _migrate_independent_review_v6(conn: sqlite3.Connection) -> None:
     )
 
 
+def _backup_before_smart_review_migration(
+    conn: sqlite3.Connection,
+) -> Path | None:
+    """在智慧校對資料庫遷移前建立一致的旁側備份。"""
+    main = next(
+        (row[2] for row in conn.execute("PRAGMA database_list") if row[1] == "main"),
+        "",
+    )
+    if not main:
+        return None
+    source_path = Path(main)
+    backup_path = source_path.with_name(
+        f"{source_path.name}.pre-schema-v7-{time.time_ns()}.bak"
+    )
+    target = sqlite3.connect(backup_path)
+    try:
+        conn.backup(target)
+    except BaseException:
+        target.close()
+        backup_path.unlink(missing_ok=True)
+        raise
+    target.close()
+    return backup_path
+
+
+def _migrate_smart_review_v7(conn: sqlite3.Connection) -> None:
+    """安裝智慧校對持久化結構並保留既有資料。"""
+    _install_smart_review_objects(conn)
+
+
+_SMART_REVIEW_DDL = (
+    """
+    CREATE TABLE IF NOT EXISTS smart_review_run (
+        id TEXT PRIMARY KEY,
+        provider TEXT NOT NULL,
+        model TEXT NOT NULL,
+        scope_version TEXT,
+        requested_limit INTEGER NOT NULL,
+        batch_size INTEGER NOT NULL,
+        scope_json TEXT NOT NULL DEFAULT '{}',
+        started_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        finished_at TEXT,
+        status TEXT NOT NULL DEFAULT 'running',
+        selected_count INTEGER NOT NULL DEFAULT 0,
+        processed_count INTEGER NOT NULL DEFAULT 0,
+        valid_count INTEGER NOT NULL DEFAULT 0,
+        invalid_count INTEGER NOT NULL DEFAULT 0,
+        request_error_count INTEGER NOT NULL DEFAULT 0,
+        metrics TEXT NOT NULL DEFAULT '{}'
+    )
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_smart_review_run_status
+        ON smart_review_run (status, started_at)
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_smart_review_run_order
+        ON smart_review_run (started_at DESC, id DESC)
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS smart_review_candidate (
+        run_id TEXT NOT NULL REFERENCES smart_review_run (id) ON DELETE CASCADE,
+        ordinal INTEGER NOT NULL,
+        entry_id INTEGER NOT NULL REFERENCES entry (id) ON DELETE CASCADE,
+        kind TEXT NOT NULL,
+        mc_version TEXT NOT NULL,
+        mod_id TEXT NOT NULL,
+        entry_key TEXT NOT NULL,
+        en_us TEXT NOT NULL,
+        current_zh_tw TEXT NOT NULL,
+        effective_source INTEGER,
+        review_status TEXT,
+        effective_revision INTEGER,
+        manual_zh_tw TEXT,
+        manual_checker TEXT,
+        manual_review_status TEXT,
+        manual_revision INTEGER,
+        context_json TEXT NOT NULL DEFAULT '[]',
+        decision TEXT,
+        suggested_zh_tw TEXT,
+        issue_types_json TEXT NOT NULL DEFAULT '[]',
+        evidence_ids_json TEXT NOT NULL DEFAULT '[]',
+        confidence REAL,
+        response_json TEXT,
+        draft_zh_tw TEXT,
+        validation_error TEXT,
+        status TEXT NOT NULL DEFAULT 'pending',
+        applied_batch TEXT,
+        applied_at TEXT,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (run_id, ordinal),
+        UNIQUE (run_id, entry_id)
+    )
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_smart_review_candidate_status
+        ON smart_review_candidate (run_id, status, ordinal)
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_smart_review_candidate_entry
+        ON smart_review_candidate (entry_id, run_id)
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_smart_review_context_key
+        ON entry (kind, mod_id, key, mc_version, id)
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_smart_review_named_order
+        ON entry (
+            (CASE WHEN kind='lang' AND (
+                key LIKE 'item.%' OR key LIKE 'block.%' OR
+                key LIKE 'entity.%' OR key LIKE 'biome.%' OR
+                key LIKE 'effect.%' OR key LIKE 'fluid.%' OR
+                key LIKE 'enchantment.%' OR key LIKE 'dimension.%' OR
+                key LIKE 'painting.%' OR key LIKE 'trim_pattern.%' OR
+                key LIKE 'instrument.%' OR key LIKE 'banner.%'
+            ) THEN 0 ELSE 1 END),
+            mc_version, mod_id, kind, key, id
+        )
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_smart_review_glossary_order
+        ON entry (kind, mod_id, mc_version, id)
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_smart_review_same_text_order
+        ON entry (en_us, mod_id, kind, key, id)
+    """,
+)
+
+
+def _install_smart_review_objects(conn: sqlite3.Connection) -> None:
+    """在新舊資料庫中安裝智慧校對執行與候選資料表。"""
+    # 每條 DDL 都交給目前交易執行，避免 executescript 隱式提交外層 migration。
+    for statement in _SMART_REVIEW_DDL:
+        conn.execute(statement)
+
+
+def _backup_before_smart_review_draft_migration(
+    conn: sqlite3.Connection,
+) -> Path | None:
+    """在加入智慧校對草稿欄位前建立一致的旁側備份。"""
+    main = next(
+        (row[2] for row in conn.execute("PRAGMA database_list") if row[1] == "main"),
+        "",
+    )
+    if not main:
+        return None
+    source_path = Path(main)
+    backup_path = source_path.with_name(
+        f"{source_path.name}.pre-schema-v8-{time.time_ns()}.bak"
+    )
+    target = sqlite3.connect(backup_path)
+    try:
+        conn.backup(target)
+    except BaseException:
+        target.close()
+        backup_path.unlink(missing_ok=True)
+        raise
+    target.close()
+    return backup_path
+
+
+def _migrate_smart_review_v8(conn: sqlite3.Connection) -> None:
+    """在 v7 候選上加入範圍與可編輯草稿保存。"""
+    run_columns = {
+        row[1] for row in conn.execute("PRAGMA table_info(smart_review_run)")
+    }
+    if "scope_json" not in run_columns:
+        conn.execute(
+            "ALTER TABLE smart_review_run ADD COLUMN scope_json TEXT NOT NULL DEFAULT '{}'"
+        )
+    candidate_columns = {
+        row[1] for row in conn.execute("PRAGMA table_info(smart_review_candidate)")
+    }
+    if "draft_zh_tw" not in candidate_columns:
+        conn.execute("ALTER TABLE smart_review_candidate ADD COLUMN draft_zh_tw TEXT")
+
+
 def _install_schema_v3_objects(conn: sqlite3.Connection) -> None:
-    """Install timestamp and revision triggers for fresh and migrated databases."""
+    """為新建與遷移資料庫安裝時間戳及修訂版本觸發器。"""
     conn.execute(
         """
         CREATE TRIGGER IF NOT EXISTS translation_insert_timestamp_revision
@@ -623,7 +803,11 @@ def _install_schema_v3_objects(conn: sqlite3.Connection) -> None:
         "SELECT sql FROM sqlite_schema WHERE type='trigger' "
         "AND name='translation_text_change_clears_review'"
     ).fetchone()
-    normalize = lambda sql: " ".join(sql.rstrip().rstrip(";").split())
+
+    def normalize(sql: str) -> str:
+        """正規化 trigger SQL 以比較既有結構是否相同。"""
+        return " ".join(sql.rstrip().rstrip(";").split())
+
     if existing is not None and normalize(existing[0]) == normalize(review_trigger):
         return
     conn.execute("DROP TRIGGER IF EXISTS translation_text_change_clears_review")

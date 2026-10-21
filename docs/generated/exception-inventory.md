@@ -4,11 +4,11 @@
 > 範圍：`app/`、`translation_tool/`、`main.py` 內所有帶 `noqa: BLE001／S110／S112` 的位置。
 > 命令列 QA 工具（`md_extract_qa.py`、`md_inject_qa.py`）的 `print` 為刻意保留，不在此表。
 
-共 **338** 項；其中 **106** 項尚未在程式碼內寫明原因（以「分類」說明處理方式）。
+共 **352** 項；其中 **106** 項尚未在程式碼內寫明原因（以「分類」說明處理方式）。
 
 | 分類 | 數量 | 意義 |
 |---|---|---|
-| 已記錄／回報 | 303 | 例外處理本身有 log、提示、回報錯誤事件或重新丟出；寬鬆捕捉是為了不中斷整批流程 |
+| 已記錄／回報 | 317 | 例外處理本身有 log、提示、回報錯誤事件或重新丟出；寬鬆捕捉是為了不中斷整批流程 |
 | UI／畫面保護 | 18 | UI 層的畫面更新、icon 快取等；失敗只影響顯示，不影響資料 |
 | 盡力而為（靜默） | 17 | 引擎層、只有 `pass`／`continue`／回傳常數；失敗不影響結果（例如進度回報、還原失敗時以原始例外為準） |
 
@@ -130,6 +130,7 @@
 | `app/views/merge_view.py:MergeView._run_merge_worker` | BLE001 | 已記錄／回報 | 背景執行緒邊界：失敗要寫進 session，否則輪詢永遠等不到結束 |
 | `app/views/merge_view.py:MergeView._sync_ui_once` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/views/merge_view.py:MergeView._close_dialog_overlay` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
+| `app/views/moddb/bulk_review_dialog.py:BulkReviewDialog._start_scope_options_load.work` | BLE001 | 已記錄／回報 | worker boundary |
 | `app/views/moddb/bulk_review_dialog.py:BulkReviewDialog._preview.work` | BLE001 | 已記錄／回報 | worker boundary reports unexpected failures |
 | `app/views/moddb/bulk_review_dialog.py:BulkReviewDialog._confirm.work` | BLE001 | 已記錄／回報 | worker boundary reports unexpected failures |
 | `app/views/moddb/bulk_review_dialog.py:BulkReviewDialog._launch` | BLE001 | 已記錄／回報 | restore the dialog if the worker cannot launch |
@@ -158,12 +159,17 @@
 | `app/views/moddb/retranslation_controller.py:apply_preview_result` | BLE001 | 已記錄／回報 | unavailable database means stale result |
 | `app/views/moddb/scan_panel.py:ScanPanel._poll` | BLE001 | 已記錄／回報 | 輪詢失敗不能讓畫面永遠卡在「執行中」 |
 | `app/views/moddb/scan_panel.py:ScanPanel._safe_update` | BLE001 | 已記錄／回報 | 頁面已卸載時不影響掃描本身 |
+| `app/views/moddb/smart_review_context.py:SmartReviewContext.run_background.target` | BLE001 | 已記錄／回報 | UI reports bounded failure |
+| `app/views/moddb/smart_review_job.py:SmartReviewJob._work` | BLE001 | 已記錄／回報 | job reports bounded failure |
+| `app/views/moddb/smart_review_job.py:SmartReviewJob._load_breakdown` | BLE001 | 已記錄／回報 | statistics are optional |
+| `app/views/moddb/smart_review_job.py:SmartReviewJob._notify_finished.deliver` | BLE001 | 已記錄／回報 | one listener must not block others |
 | `app/views/moddb/species_bulk_lookup.py:safe_lookup` | BLE001 | 已記錄／回報 | worker boundary |
 | `app/views/moddb/species_bulk_lookup.py:SpeciesBulkLookup._notify` | BLE001 | 已記錄／回報 | one closed view must not stop others |
 | `app/views/moddb/species_bulk_lookup.py:SpeciesBulkLookup.start` | BLE001 | 已記錄／回報 | restore state after launch failure |
 | `app/views/moddb/species_bulk_lookup.py:SpeciesBulkLookup._run` | BLE001 | 已記錄／回報 | admission closed while app shuts down |
 | `app/views/moddb/species_bulk_lookup.py:SpeciesBulkLookup._run` | BLE001 | 已記錄／回報 | worker boundary |
 | `app/views/moddb/species_bulk_lookup.py:SpeciesBulkLookup._post` | BLE001 | 已記錄／回報 | disposed page |
+| `app/views/moddb/species_dialog.py:SpeciesCandidateDialog._start_scope_options_load.work` | BLE001 | 已記錄／回報 | worker boundary |
 | `app/views/moddb/species_dialog.py:SpeciesCandidateDialog._scan.work` | BLE001 | 已記錄／回報 | worker boundary |
 | `app/views/moddb/species_dialog.py:SpeciesCandidateDialog._launch` | BLE001 | 已記錄／回報 | restore UI after launch failure |
 | `app/views/moddb/species_dialog.py:SpeciesCandidateDialog._post` | BLE001 | 已記錄／回報 | disposed page |
@@ -265,10 +271,13 @@
 | `translation_tool/core/lang_merger.py:_merge_zhcn_to_zhtw_from_folder` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `translation_tool/core/lang_merger.py:_merge_zhcn_to_zhtw_from_folder` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `translation_tool/core/lang_merger.py:_merge_zhcn_to_zhtw_from_folder` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
+| `translation_tool/core/lm_api_client.py:_emit_network_event` | BLE001 | 已記錄／回報 | telemetry must never break an API call |
 | `translation_tool/core/lm_api_client.py:call_gemini_requests` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `translation_tool/core/lm_resume.py:check_resume_feasibility` | BLE001 | 已記錄／回報 | 檢查失敗要回報給使用者，不能讓啟動流程中斷 |
 | `translation_tool/core/lm_translator.py:load_checkpoint` | BLE001 | 已記錄／回報 | 損毀的 checkpoint 視為沒有，但要留下紀錄 |
 | `translation_tool/core/lm_translator.py:_scan_directory_files` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
+| `translation_tool/core/lm_translator_main.py:_emit_runtime_event` | BLE001 | 已記錄／回報 | telemetry must never break translation |
+| `translation_tool/core/lm_translator_main.py:_payload_error_allows_shrink` | BLE001 | 已記錄／回報 | 判斷本身不能遮蔽原始錯誤 |
 | `translation_tool/core/lm_translator_main.py:_remote_error_detail` | BLE001 | 已記錄／回報 | 回應不是 JSON 時改用原始文字 |
 | `translation_tool/core/lm_translator_main.py:_handle_service_unavailable_error` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `translation_tool/core/lm_translator_main.py:_handle_batch_error` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
@@ -326,6 +335,10 @@
 | `translation_tool/translation_db/scanner.py:load_rules` | BLE001 | 已記錄／回報 | 規則檔問題不應讓掃描失敗，只是略過替換 |
 | `translation_tool/translation_db/settings.py:remember_db_path` | BLE001 | 已記錄／回報 | 寫設定失敗不應中斷建立資料庫 |
 | `translation_tool/translation_db/settings.py:open_db` | BLE001 | 已記錄／回報 | 資料庫問題不應中斷翻譯 |
+| `translation_tool/translation_db/smart_review.py:run_smart_review.repair_invalid_results` | BLE001 | 已記錄／回報 | safe repair event |
+| `translation_tool/translation_db/smart_review.py:run_smart_review.repair_invalid_results` | BLE001 | 已記錄／回報 | strict parser |
+| `translation_tool/translation_db/smart_review.py:run_smart_review` | BLE001 | 已記錄／回報 | credential-free class |
+| `translation_tool/translation_db/smart_review.py:run_smart_review` | BLE001 | 已記錄／回報 | response contract class |
 | `translation_tool/utils/cache_overview.py:build_cache_overview` | BLE001 | 已記錄／回報 | 讀取失敗不中斷總覽，但要留下紀錄 |
 | `translation_tool/utils/cache_overview.py:build_cache_overview` | BLE001 | 已記錄／回報 | 讀取失敗不中斷總覽，但要留下紀錄 |
 | `translation_tool/utils/cache_search.py:CacheSearchEngine.index_batch` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
@@ -346,7 +359,8 @@
 | `translation_tool/utils/safe_json_loader.py:load_json_auto_encoding` | BLE001/S112 | 盡力而為（靜默） | 逐一嘗試編碼；全部失敗才回傳 None |
 | `translation_tool/utils/species_cache.py:_convert_wikipedia_title` | BLE001 | 已記錄／回報 | 轉換失敗時仍可使用原始條目標題 |
 | `translation_tool/utils/species_cache.py:_fetch_and_cache` | BLE001 | 已記錄／回報 | 外部 API 與回應解析錯誤需分類回報 |
-| `translation_tool/utils/text_processor.py:load_replace_rules` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
+| `translation_tool/utils/text_processor.py:_load_rules_uncached` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
+| `translation_tool/utils/text_processor.py:ReplaceRulesStore._notify` | BLE001 | 已記錄／回報 | 訂閱者失敗不可阻斷規則寫入 |
 | `translation_tool/utils/text_processor.py:load_custom_translations` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `translation_tool/utils/text_processor.py:convert_snbt_file_inplace` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `translation_tool/utils/ui_logging_handler.py:UISessionLogHandler.emit` | BLE001/S110 | 盡力而為（靜默） | 在 handler 內記錄錯誤會遞迴 |

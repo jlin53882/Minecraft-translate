@@ -29,6 +29,32 @@
 
 ---
 
+## 1.1) PR 變更範圍的強制要求
+
+本專案的 PR 若新增或修改 Python 程式碼，變更範圍內的每個函式都必須有繁體中文 docstring，包含：
+
+- public、private、巢狀函式、背景 callback、generator、Protocol hook 與測試 helper
+- 新增或修改的 class、module docstring 也必須使用繁體中文
+- 內容要說明可由程式碼驗證的責任，以及重要的輸入、輸出或副作用；`API`、`JSON`、`CAS`、`TaskSession` 等技術名稱可以保留原文
+
+只補充 docstring 或文件說明時不得改變執行邏輯。遇到單行 `def ...: ...` 的 Protocol／stub，必須改成多行函式，將 docstring 放在函式本體第一行，不能把字串誤放在 class 層級。
+
+建議在提交前以 AST 檢查變更 hunk 的 docstring 覆蓋率，並將工作樹與基準版本的 AST 移除 docstring 後比較，確認這類文件補強沒有改動程式行為。
+
+---
+
+## 1.2) 共用批次執行器的文件同步
+
+涉及 `translation_tool/core/common_batch_executor.py` 的變更，相關架構文件也要維持以下邊界：
+
+- `CommonBatchExecutor` 負責 run／batch 識別碼、批次生命週期、取消檢查、monotonic 計時與安全結構化事件
+- 機翻、本地修復與 Smart Review 以策略保留各自的候選選取、prompt／payload、provider 重試條件、解析、驗證、CAS／快取／JSON 寫入與人工審核行為
+- log 與摘要必須能區分 provider attempt、network attempt、配額等待與 retry backoff；事件不得包含 API key、完整 prompt、完整 response 或錯誤原文
+
+功能流程的差異應同步記錄在 `docs/developer-guide/views/MODDB_VIEW_ARCHITECTURE.md` 或 `docs/page_flows/moddb.md`，避免只在實作 docstring 中描述重要的跨模組契約。
+
+---
+
 ## 2) UI sizing helper（你指定的模板）
 
 適用：
@@ -103,5 +129,7 @@ def load_config() -> dict:
 ## 5) PR review checklist（針對 docstring 的檢查點）
 - [ ] docstring 是否提供了「維護者需要的資訊」而非模板廢話
 - [ ] 是否避免寫錯契約（只寫 code 可驗證的事實）
+- [ ] 變更 hunk 中每個函式、巢狀 callback、Protocol hook、class 與 module 是否都有繁體中文說明
+- [ ] 若只補 docstring／文件，移除 docstring 後的 AST 是否與基準版本一致
 - [ ] UI sizing helper 是否包含：fallback / ratio / clamp
 - [ ] generator/service wrapper 是否清楚標示：yield update dict + 主要包裝哪個 core generator

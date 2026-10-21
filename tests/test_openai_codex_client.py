@@ -1,4 +1,4 @@
-"""Codex OAuth Responses transport and Structured Outputs tests."""
+"""OpenAI Codex client 請求參數與錯誤處理的針對性測試。"""
 
 import json
 from datetime import UTC, datetime, timedelta
@@ -62,6 +62,33 @@ def test_stream_request_uses_responses_structured_outputs(monkeypatch):
     assert item_schema["required"] == ["id", "value"]
     assert item_schema["additionalProperties"] is False
     assert item_schema["properties"]["id"]["enum"] == ["line-1"]
+
+
+def test_stream_request_accepts_a_custom_smart_review_schema(monkeypatch):
+    """驗證串流請求接受自訂智慧校對結構。"""
+    captured = {}
+    monkeypatch.setattr(
+        client.requests,
+        "post",
+        lambda _url, **kwargs: captured.update(kwargs) or requests.Response(),
+    )
+    custom = {
+        "type": "object",
+        "properties": {"items": {"type": "array"}},
+        "required": ["items"],
+        "additionalProperties": False,
+    }
+
+    client._stream_request(
+        token="access-token",
+        model_name="gpt-5.6-luna",
+        system_prompt="Review.",
+        payload={"items": [{"id": "1"}]},
+        timeout=30,
+        response_schema=custom,
+    )
+
+    assert captured["json"]["text"]["format"]["schema"] == custom
 
 
 def test_stream_request_sends_output_cap_and_fast_service_tier(monkeypatch):
@@ -157,6 +184,8 @@ def test_stream_request_preserves_conversation_history_for_retry(monkeypatch):
 
 
 def test_call_retries_once_after_unauthorized_and_keeps_reasoning(monkeypatch):
+    """驗證未授權後只重試一次並保留推理設定。"""
+
     class _UnauthorizedResponse:
         status_code = 401
 
@@ -164,6 +193,8 @@ def test_call_retries_once_after_unauthorized_and_keeps_reasoning(monkeypatch):
             self.closed = True
 
     class _SuccessResponse:
+        """測試用的成功 Responses API 回應物件。"""
+
         status_code = 200
         ok = True
 
@@ -202,10 +233,47 @@ def test_call_retries_once_after_unauthorized_and_keeps_reasoning(monkeypatch):
         "refreshed-token",
     ]
     assert all(request["reasoning_effort"] == "medium" for request in requests_seen)
+    assert all("service_tier" not in request for request in requests_seen)
     assert token_requests == [
         {"profile_id": "profile-a"},
         {"force_refresh": True, "profile_id": "profile-a"},
     ]
+
+
+def test_call_fast_mode_uses_codex_priority_service_tier(monkeypatch):
+    """驗證快速模式使用 Codex 優先服務層級。"""
+
+    class _SuccessResponse:
+        """提供測試所需的成功 HTTP response 欄位。"""
+
+        status_code = 200
+        ok = True
+
+    requests_seen = []
+    monkeypatch.setattr(
+        client, "get_chatgpt_access_token", lambda **_kwargs: "access-token"
+    )
+
+    def stream_request(**kwargs):
+        """記錄測試用的 Responses 請求參數並回傳成功 response。"""
+        requests_seen.append(kwargs)
+        return _SuccessResponse()
+
+    monkeypatch.setattr(client, "_stream_request", stream_request)
+    monkeypatch.setattr(client, "_consume_stream", lambda _response, _meta: "done")
+
+    assert (
+        client.call_chatgpt_responses(
+            model_name="gpt-5.6-luna",
+            system_prompt="Translate.",
+            payload={"items": []},
+            timeout=30,
+            fast=True,
+        )
+        == "done"
+    )
+    assert len(requests_seen) == 1
+    assert requests_seen[0]["service_tier"] == "priority"
 
 
 def test_consume_stream_returns_structured_output_and_usage():
@@ -810,6 +878,7 @@ def test_sse_retry_then_success_uses_same_batch_and_pinned_profile(monkeypatch):
 
 
 def test_http_error_preserves_status_type_param_and_request_id():
+    """驗證 HTTP 錯誤保留狀態碼、錯誤類型、參數與請求識別碼。"""
     response = requests.Response()
     response.status_code = 403
     response.headers["x-request-id"] = "req_example"
@@ -833,6 +902,23 @@ def test_http_error_preserves_status_type_param_and_request_id():
     assert error.request_id == "req_example"
     assert "HTTP 403" in str(error)
     assert "region_not_supported" in str(error)
+
+
+def test_http_error_preserves_top_level_detail_from_direct_route():
+    """驗證 HTTP 錯誤保留直接路由回傳的頂層詳細資訊。"""
+    response = requests.Response()
+    response.status_code = 400
+    response.headers["x-request-id"] = "req_direct_route"
+    response._content = json.dumps(
+        {"detail": "Plan usage is not authorized for this request."}
+    ).encode()
+
+    error = client._response_error(response)
+
+    assert error.status == 400
+    assert error.code == "http_400"
+    assert error.request_id == "req_direct_route"
+    assert "Plan usage is not authorized for this request." in str(error)
 
 
 def test_http_error_carries_retry_after_for_batch_backoff():

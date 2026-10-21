@@ -1,7 +1,8 @@
-"""Preview and repair existing source translations using direct AI output."""
+"""ModDB 本地譯文修復服務：建立候選快照、呼叫 AI 修復並以 CAS 安全寫回。"""
 
 from __future__ import annotations
 
+import inspect
 import logging
 import sqlite3
 import time
@@ -32,6 +33,10 @@ from app.services_impl.pipelines._pipeline_logging import (
     mirror_session_log,
 )
 from app.tasks.task_session import add_log_unmirrored
+from translation_tool.core.common_batch_executor import (
+    CommonBatchExecutor,
+    format_batch_event,
+)
 from translation_tool.core.lm_batch_budget import (
     BudgetConfig,
     get_tracker,
@@ -142,6 +147,8 @@ class SameSourceAIRepairPreview:
 
 @dataclass
 class SameSourceAIRepairReport:
+    """同一來源 AI 修復執行的統計報告，保存候選、成功、失敗與批次計時結果。"""
+
     candidates: int = 0
     translated: int = 0
     updated: int = 0
@@ -195,6 +202,7 @@ class SameSourceAIRepairReport:
     batches: int = 0
     planned_batches: int = 0
     elapsed_sec: float = 0.0
+    metrics: dict[str, Any] = field(default_factory=dict)
     status: str = "DONE"
     last_error: str | None = None
     mode: str = "same_source_ai"
@@ -1676,29 +1684,61 @@ def _translate_snapshot(
     report: SameSourceAIRepairReport,
     cancelled,
 ) -> None:
+    """依確認過的候選快照分批執行本地譯文修復，並以 CAS 寫回通過驗證的結果。"""
+    selection_started = monotonic()
     items, tracker, lm_cfg = _initialize_snapshot_run(
         db, entries, session, report, options
     )
-    cache_keys_to_save: dict[str, dict[str, int | None]] = {}
-    while items:
-        _raise_if_repair_cancelled(items, report, cancelled)
-        batch, cache_type = _same_batch_prefix(items, lm_cfg)
-        remainder, stop_after_batch = _run_repair_batch(
-            db,
-            options,
+    executor = CommonBatchExecutor(
+        operation="repair",
+        provider=str(lm_cfg.get("provider") or "gemini"),
+        model=_configured_model_label(lm_cfg),
+        task_id=str(getattr(session, "task_id", "") or ""),
+        run_id=f"repair-{uuid.uuid4().hex[:12]}",
+        event_sink=lambda event: _log(
             session,
-            batch,
-            items,
-            cache_type,
-            tracker,
-            report,
-            cancelled,
-            cache_keys_to_save,
-        )
-        if stop_after_batch:
-            break
-        items = remainder
-    _finish_snapshot(db, options, session, report, tracker)
+            format_batch_event(event),
+            "warning"
+            if event.get("kind") in {"attempt_failure", "retry_wait"}
+            else "info",
+        ),
+        cancel_check=cancelled,
+    )
+    executor.add_timing("selection_ms", (monotonic() - selection_started) * 1000)
+    cache_keys_to_save: dict[str, dict[str, int | None]] = {}
+    try:
+        while items:
+            _raise_if_repair_cancelled(items, report, cancelled)
+            planning_started = monotonic()
+            batch, cache_type = _same_batch_prefix(items, lm_cfg)
+            executor.add_timing("planning_ms", (monotonic() - planning_started) * 1000)
+            remainder, stop_after_batch = _run_repair_batch(
+                db,
+                options,
+                session,
+                batch,
+                items,
+                cache_type,
+                tracker,
+                report,
+                cancelled,
+                cache_keys_to_save,
+                executor=executor,
+            )
+            if stop_after_batch:
+                break
+            items = remainder
+        _finish_snapshot(db, options, session, report, tracker)
+        executor.finish(status="completed")
+        report.metrics = executor.metrics_snapshot()
+    except TaskCancelled:
+        executor.finish(status="cancelled")
+        report.metrics = executor.metrics_snapshot()
+        raise
+    except Exception:
+        executor.finish(status="failed")
+        report.metrics = executor.metrics_snapshot()
+        raise
 
 
 def _set_not_submitted_candidates(report, items):
@@ -1711,19 +1751,68 @@ def _raise_if_repair_cancelled(items, report, cancelled):
         raise TaskCancelled()
 
 
-def _run_repair_batch(
-    db,
-    options,
+def _request_repair_translation(batch, total, batch_handle):
+    """呼叫既有翻譯策略並發布共用 API telemetry；每批完成後逐筆驗證並以 CAS 寫回結果。"""
+    wait_before = (
+        batch_handle.executor.metrics.quota_wait_ms
+        + batch_handle.executor.metrics.retry_backoff_ms
+        + batch_handle.executor.metrics.network_retry_wait_ms
+    )
+    api_started = monotonic()
+    batch_handle.attempt_start(expected_count=len(batch), max_attempts=0)
+    try:
+        try:
+            parameters = inspect.signature(translate_batch_smart).parameters.values()
+            accepts_events = any(
+                parameter.name == "event_callback"
+                or parameter.kind is inspect.Parameter.VAR_KEYWORD
+                for parameter in parameters
+            )
+        except (TypeError, ValueError):
+            accepts_events = False
+        if accepts_events:
+            translated, status = translate_batch_smart(
+                batch, total, event_callback=batch_handle.forward_provider_event
+            )
+        else:
+            translated, status = translate_batch_smart(batch, total)
+    except TaskCancelled:
+        batch_handle.emit("cancelled", status="cancelled")
+        batch_handle.complete(status="cancelled", processed_count=0, actual_count=0)
+        raise
+    except Exception as exc:
+        batch_handle.attempt_failure(exc, will_retry=False)
+        batch_handle.complete(status="failed", processed_count=0, actual_count=0)
+        raise
+    request_elapsed_ms = (monotonic() - api_started) * 1000
+    wait_ms = (
+        batch_handle.executor.metrics.quota_wait_ms
+        + batch_handle.executor.metrics.retry_backoff_ms
+        + batch_handle.executor.metrics.network_retry_wait_ms
+        - wait_before
+    )
+    elapsed_ms = round(max(0.0, request_elapsed_ms - wait_ms))
+    batch_handle.attempt_success(
+        elapsed_ms=elapsed_ms,
+        http_status=200,
+        expected_count=len(batch),
+        actual_count=len(translated or []),
+        request_elapsed_ms=round(request_elapsed_ms),
+        retry_wait_ms=round(wait_ms),
+    )
+    return translated, status, elapsed_ms
+
+
+def _prepare_repair_batch(
     session,
     batch,
     items,
     cache_type,
     tracker,
     report,
-    cancelled,
-    cache_keys_to_save: dict[str, dict[str, int | None]],
+    executor,
 ):
-    """Submit one homogeneous batch, finalize each CAS, then publish its progress."""
+    """準備一批待修復條目，建立請求資料並記錄 prompt 與批次規劃耗時。"""
     report.batches += 1
     report.ai_submitted_items += len(batch)
     report.attempted_candidates += len(batch)
@@ -1734,6 +1823,21 @@ def _run_repair_batch(
     planned_live = tracker.live(processed=report.processed_candidates)
     planned_total = planned_live["planned_batches_total"]
     model_label = _configured_model_label(tracker.lm_cfg)
+    if executor is None:
+        executor = CommonBatchExecutor(
+            operation="repair",
+            provider=str(tracker.lm_cfg.get("provider") or "gemini"),
+            model=model_label,
+            task_id=str(getattr(session, "task_id", "") or ""),
+        )
+    batch_handle = executor.begin_batch(
+        batch_index=batch_number,
+        batch_total=planned_total,
+        batch_size=len(batch),
+        selected_count=report.candidates,
+        processed_count=report.processed_candidates,
+        cache_type=cache_type,
+    )
     in_flight_live = dict(planned_live)
     in_flight_live.update(
         {
@@ -1750,8 +1854,134 @@ def _run_repair_batch(
         f"🚀 第 {batch_number}/{planned_total} 批｜{cache_profile_label(cache_type)} "
         f"{len(batch):,} 筆已送出｜模型：{model_label}｜狀態：等待模型回應",
     )
+    return (
+        tail,
+        batch_number,
+        before_validated,
+        planned_live,
+        planned_total,
+        model_label,
+        batch_handle,
+        batch_started,
+        executor,
+    )
+
+
+def _publish_repair_batch_completion(
+    options,
+    session,
+    batch,
+    report,
+    cache_type,
+    tracker,
+    model_label,
+    batch_number,
+    planned_live,
+    before_validated,
+    batch_started,
+    cancelled,
+    result_count,
+    status,
+    finalize_stop,
+    tail,
+    batch_handle,
+    api_elapsed_ms,
+    cache_keys_to_save,
+):
+    """發布本批修復完成的共用事件、結果統計與畫面進度。"""
+    applying_live = dict(planned_live)
+    applying_live.update(
+        {
+            "current_profile": cache_profile_label(cache_type),
+            "current_batch": batch_number,
+            "current_batch_total": planned_live["planned_batches_total"],
+            "current_status": "套用翻譯結果至對應來源項目",
+            "model_label": model_label,
+        }
+    )
+    session.set_summary({**report.as_dict(), "live": applying_live})
+    _log(session, "🔄 正在套用翻譯結果至對應來源項目")
+    completion_stop = _handle_batch_completion(
+        options, session, report, batch, result_count, status, cache_keys_to_save
+    )
+    stop_after_batch = finalize_stop or completion_stop
+    if stop_after_batch:
+        _set_not_submitted_candidates(report, tail)
+    tracker.update(
+        cache_type,
+        count=len(batch),
+        elapsed=monotonic() - batch_started,
+    )
+
+    def check_planning_cancelled():
+        """在批次規劃的檢查點讀取取消訊號，已取消時立即停止後續規劃。"""
+        if cancelled() or is_cancelled():
+            raise TaskCancelled()
+
+    live = tracker.live(
+        processed=report.processed_candidates, check=check_planning_cancelled
+    )
+    live.update(
+        {
+            "current_profile": cache_profile_label(cache_type),
+            "current_batch": batch_number,
+            "current_batch_total": live["planned_batches_total"],
+            "current_status": "本批完成",
+            "model_label": model_label,
+        }
+    )
+    report.planned_batches = live["planned_batches_total"]
+    session.set_progress(report.processed_candidates / max(report.candidates, 1))
+    session.set_summary({**report.as_dict(), "live": live})
+    _log(
+        session,
+        f"✅ 第 {batch_number}/{live['planned_batches_total']} 批完成｜"
+        f"回應 {result_count:,}/{len(batch):,} 筆｜"
+        f"通過格式檢查 {report.ai_validated_items - before_validated:,} 筆",
+    )
+    _log(session, f"📈 {tracker.line(live)}")
+    batch_handle.complete(
+        status=str(status or "completed").upper(),
+        processed_count=report.processed_candidates,
+        actual_count=result_count,
+        api_ms=api_elapsed_ms,
+        result_count=result_count,
+    )
+    return stop_after_batch
+
+
+def _run_repair_batch(
+    db,
+    options,
+    session,
+    batch,
+    items,
+    cache_type,
+    tracker,
+    report,
+    cancelled,
+    cache_keys_to_save: dict[str, dict[str, int | None]],
+    *,
+    executor: CommonBatchExecutor | None = None,
+):
+    """送出一批同質修復條目，逐筆完成 CAS，最後發布批次進度。"""
+    (
+        tail,
+        batch_number,
+        before_validated,
+        planned_live,
+        planned_total,
+        model_label,
+        batch_handle,
+        batch_started,
+        executor,
+    ) = _prepare_repair_batch(
+        session, batch, items, cache_type, tracker, report, executor
+    )
     try:
-        translated, status = translate_batch_smart(batch, report.candidates)
+        translated, status, api_elapsed_ms = _request_repair_translation(
+            batch, report.candidates, batch_handle
+        )
         if cancelled() or is_cancelled():
             raise TaskCancelled()
         applying_live = dict(planned_live)
@@ -1766,6 +1996,7 @@ def _run_repair_batch(
         )
         session.set_summary({**report.as_dict(), "live": applying_live})
         _log(session, "🔄 正在套用翻譯結果至對應來源項目")
+        commit_started = monotonic()
         result_count, finalize_stop = _finalize_batch_results(
             db,
             options,
@@ -1776,45 +2007,35 @@ def _run_repair_batch(
             cache_keys_to_save,
             cancelled,
         )
-        completion_stop = _handle_batch_completion(
-            options, session, report, batch, result_count, status, cache_keys_to_save
-        )
-        stop_after_batch = finalize_stop or completion_stop
-        if stop_after_batch:
-            _set_not_submitted_candidates(report, tail)
-        tracker.update(
-            cache_type,
-            count=len(batch),
-            elapsed=monotonic() - batch_started,
-        )
-
-        def check_planning_cancelled():
-            if cancelled() or is_cancelled():
-                raise TaskCancelled()
-
-        live = tracker.live(
-            processed=report.processed_candidates, check=check_planning_cancelled
-        )
-        live.update(
-            {
-                "current_profile": cache_profile_label(cache_type),
-                "current_batch": batch_number,
-                "current_batch_total": live["planned_batches_total"],
-                "current_status": "本批完成",
-                "model_label": model_label,
-            }
-        )
-        report.planned_batches = live["planned_batches_total"]
-        session.set_progress(report.processed_candidates / max(report.candidates, 1))
-        session.set_summary({**report.as_dict(), "live": live})
-        _log(
+        batch_handle.add_timing("commit_ms", (monotonic() - commit_started) * 1000)
+        stop_after_batch = _publish_repair_batch_completion(
+            options,
             session,
-            f"✅ 第 {batch_number}/{live['planned_batches_total']} 批完成｜"
-            f"回應 {result_count:,}/{len(batch):,} 筆｜"
-            f"通過格式檢查 {report.ai_validated_items - before_validated:,} 筆",
+            batch,
+            report,
+            cache_type,
+            tracker,
+            model_label,
+            batch_number,
+            planned_live,
+            before_validated,
+            batch_started,
+            cancelled,
+            result_count,
+            status,
+            finalize_stop,
+            tail,
+            batch_handle,
+            api_elapsed_ms,
+            cache_keys_to_save,
         )
-        _log(session, f"📈 {tracker.line(live)}")
     except TaskCancelled:
+        if not batch_handle._finished:
+            batch_handle.complete(
+                status="cancelled",
+                processed_count=report.processed_candidates,
+                actual_count=0,
+            )
         _set_not_submitted_candidates(report, tail)
         report.unprocessed_candidates = max(
             0, report.candidates - report.processed_candidates
@@ -1822,6 +2043,12 @@ def _run_repair_batch(
         _flush_after_interrupted_batch(options, session, report, cache_keys_to_save)
         raise
     except Exception:
+        if not batch_handle._finished:
+            batch_handle.complete(
+                status="failed",
+                processed_count=report.processed_candidates,
+                actual_count=0,
+            )
         _set_not_submitted_candidates(report, tail)
         report.unprocessed_candidates = max(
             0, report.candidates - report.processed_candidates

@@ -8,6 +8,7 @@ from app.services_impl.moddb_translate_service import (
     _attach_translation_sessions,
     build_items,
 )
+from translation_tool.core import official_locale
 from translation_tool.core.lm_format_policy import (
     FORMAT_POLICY_PROMPT,
     LANG_SEMANTIC_FORMAT_POLICY_PROMPT,
@@ -24,6 +25,8 @@ from translation_tool.core.official_locale import (
     OfficialLocaleRecord,
     build_translation_prompt,
     load_official_locale_index,
+    terminology_issues,
+    terminology_terms_for_item,
 )
 from translation_tool.translation_db.schema import (
     KIND_ADVANCEMENT,
@@ -45,6 +48,32 @@ def test_bundled_official_locale_is_valid_and_key_aware() -> None:
         index.lookup_exact("block.minecraft.cobblestone", "Cobblestone", "圆石")
         == "鵝卵石"
     )
+
+
+def test_official_terminology_matching_reuses_the_loaded_prefix_index(
+    monkeypatch,
+) -> None:
+    """官方索引命中時不得為每筆來源重新建立整份術語前綴索引。"""
+    index = load_official_locale_index()
+    assert index.terminology_terms
+    assert index.terminology_prefix_index
+
+    def fail_rebuild(_terms):
+        raise AssertionError("不應在已載入官方索引後重新建立術語前綴索引")
+
+    monkeypatch.setattr(official_locale, "build_term_prefix_index", fail_rebuild)
+    matches = index.official_terminology_matches_for_item(
+        {
+            "path": "custom:obtain_block",
+            "source_text": "Obtain a Netherite-Diamond Block",
+        }
+    )
+
+    assert {match.source_text for match in matches} >= {
+        "Netherite",
+        "Diamond",
+        "Block",
+    }
 
 
 def test_ambiguous_text_fallback_is_not_used() -> None:
@@ -74,6 +103,46 @@ def test_official_terms_are_injected_for_every_translation_profile() -> None:
         prompt = build_translation_prompt("基礎提示詞", items, profile=profile)
         assert "官方 Minecraft 術語" in prompt
         assert "Cobblestone → 鵝卵石" in prompt
+
+
+def test_official_compound_terms_are_shared_by_prompt_and_match_resolver() -> None:
+    """完整 key 不存在時仍解析官方複合詞，且提示詞與 resolver 結果一致。"""
+    index = load_official_locale_index()
+    item = {
+        "path": "advancednetherite:custom.obtain_block",
+        "source_text": "Obtain a Netherite-Diamond Block",
+        "text": "Obtain a Netherite-Diamond Block",
+    }
+
+    matches = index.official_terminology_matches_for_item(item)
+    pairs = {(match.source_text, match.target_text) for match in matches}
+
+    assert {("Netherite", "獄髓"), ("Diamond", "鑽石"), ("Block", "方塊")} <= pairs
+    assert len({match.stable_id for match in matches}) == len(matches)
+    assert pairs == set(terminology_terms_for_item(item, index=index))
+    assert "Netherite → 獄髓" in build_translation_prompt(
+        "基礎", [item], profile="lang"
+    )
+    assert "Diamond → 鑽石" in build_translation_prompt("基礎", [item], profile="lang")
+    assert "Block → 方塊" in build_translation_prompt("基礎", [item], profile="lang")
+
+
+def test_official_compound_matching_keeps_boundaries_and_empty_fallback() -> None:
+    """驗證此測試案例的預期結果與相容性。"""
+    index = load_official_locale_index()
+
+    assert (
+        index.official_terminology_matches_for_item(
+            {"path": "custom:blocker", "source_text": "Blocker"}
+        )
+        == []
+    )
+    assert (
+        index.official_terminology_matches_for_item(
+            {"path": "custom:unknown", "source_text": "Zzqv Qwrtv Plmn"}
+        )
+        == []
+    )
 
 
 def test_legacy_prompt_normalization_preserves_custom_rules() -> None:
@@ -221,6 +290,214 @@ def test_moddb_reviewed_lang_glossary_is_injected_for_patchouli_routes() -> None
         assert "Copper Gate → 銅製閘門" in build_translation_prompt(
             "基礎", [{**item}], profile=profile
         )
+
+
+def test_terminology_directives_bind_reviewed_terms_to_payload_ids() -> None:
+    """驗證專有名詞指令將已審核術語綁定到負載識別碼。"""
+    items = [
+        {
+            "path": "first",
+            "source_text": "Copper Gate",
+            "text": "Copper Gate",
+            "_reviewed_glossary": [
+                {"en_us": "Copper Gate", "zh_tw": "銅製閘門"},
+            ],
+        },
+        {
+            "path": "second",
+            "source_text": "Pressure Chamber",
+            "text": "Pressure Chamber",
+            "_reviewed_glossary": [
+                {"en_us": "Pressure Chamber", "zh_tw": "壓力室"},
+            ],
+        },
+    ]
+
+    prompt = build_translation_prompt("基礎", items, profile="lang")
+
+    assert "不要因為不確定就把整個 value 原樣回傳" in prompt
+    assert "id「0」 key「first」：Copper Gate → 銅製閘門" in prompt
+    assert "id「1」 key「second」：Pressure Chamber → 壓力室" in prompt
+
+
+def test_terminology_directives_use_current_stable_payload_ids() -> None:
+    """驗證內部縮批重建提示詞時使用實際負載的穩定 id。"""
+    items = [
+        {
+            "path": "second",
+            "source_text": "Pressure Chamber",
+            "_reviewed_glossary": [
+                {"en_us": "Pressure Chamber", "zh_tw": "壓力室"},
+            ],
+        }
+    ]
+
+    prompt = build_translation_prompt("基礎", items, profile="lang", item_ids=["17"])
+
+    assert "id「17」 key「second」：Pressure Chamber → 壓力室" in prompt
+    assert "id「0」 key「second」：Pressure Chamber → 壓力室" not in prompt
+
+
+def test_terminology_issues_are_boundary_heuristic_not_substring_matching() -> None:
+    """驗證術語命中使用邊界啟發式，且不宣稱完整語意正確。"""
+    item = {"source_text": "Brick Slab"}
+    assert (
+        terminology_issues(
+            item,
+            "紅磚半磚",
+            include_official=False,
+            terms=[("Brick Slab", "紅磚半磚")],
+        )
+        == []
+    )
+    assert terminology_issues(
+        item,
+        "紅磚頭",
+        include_official=False,
+        terms=[("Brick Slab", "紅磚半磚")],
+    )
+    assert (
+        terminology_issues(
+            {"source_text": "Brick"},
+            "紅磚",
+            include_official=False,
+            terms=[("Brick", "紅磚")],
+        )
+        == []
+    )
+
+
+def test_terminology_directives_use_official_subterms_and_prefer_longest(
+    monkeypatch,
+) -> None:
+    """驗證專有名詞指令使用官方子術語並優先最長匹配。"""
+    from translation_tool.core import official_locale
+
+    index = official_locale.OfficialLocaleIndex(
+        records_by_key={},
+        unique_by_text_pair={},
+        unique_tw_by_en={
+            "Crossbow": "弩",
+            "Brick Slab": "紅磚半磚",
+            "Brick": "紅磚頭",
+        },
+        revision="test",
+        name_like_terms=frozenset({"crossbow", "brick"}),
+    )
+    monkeypatch.setattr(official_locale, "load_official_locale_index", lambda: index)
+
+    prompt = build_translation_prompt(
+        "基礎",
+        [
+            {
+                "path": "item.crossbow",
+                "source_text": "Ruby Heavy Crossbow",
+                "text": "Ruby Heavy Crossbow",
+            },
+            {
+                "path": "block.slab",
+                "source_text": "Brick Slab",
+                "text": "Brick Slab",
+            },
+        ],
+        profile="lang",
+    )
+
+    assert "id「0」 key「item.crossbow」：Crossbow → 弩" in prompt
+    assert "id「1」 key「block.slab」：Brick Slab → 紅磚半磚" in prompt
+    assert "id「1」 key「block.slab」：Brick → 紅磚頭" not in prompt
+
+
+def test_terminology_plan_handles_format_codes_and_contextual_short_words():
+    """驗證專有名詞規劃正確處理格式碼與上下文短詞。"""
+    from translation_tool.core import official_locale
+
+    index = official_locale.OfficialLocaleIndex(
+        records_by_key={},
+        unique_by_text_pair={},
+        unique_tw_by_en={
+            "Fire Resistance": "抗火",
+            "Resistance": "抗性",
+            "Air": "空氣",
+            "Close": "關閉",
+        },
+        revision="test",
+        name_like_terms=frozenset({"resistance", "air"}),
+    )
+
+    assert official_locale._item_terminology_terms(
+        {"source_text": "§9Fire Resistance (1:00)"}, index
+    ) == [("Fire Resistance", "抗火")]
+    assert official_locale._item_terminology_terms(
+        {"source_text": "§78 Mid-Air Jumps§r"}, index
+    ) == [("Air", "空氣")]
+    assert (
+        official_locale._item_terminology_terms({"source_text": "Blocker"}, index) == []
+    )
+    assert (
+        official_locale._item_terminology_terms(
+            {"source_text": "Calms attacking Piglins when Player gets close"}, index
+        )
+        == []
+    )
+
+
+def test_reviewed_terminology_uses_the_same_context_filter_as_official_terms():
+    """驗證已審核專有名詞使用與官方術語相同的上下文篩選。"""
+    from translation_tool.core import official_locale
+
+    index = official_locale.OfficialLocaleIndex(
+        records_by_key={},
+        unique_by_text_pair={},
+        unique_tw_by_en={},
+        revision="test",
+    )
+
+    item = {
+        "path": "tooltip.fire_resistance",
+        "source_text": "§9Fire Resistance (1:00)",
+        "_reviewed_glossary": [
+            {
+                "key": "tooltip.fire_resistance",
+                "en_us": "Fire Resistance",
+                "zh_tw": "抗火",
+            },
+            {"key": "tooltip.air", "en_us": "Air", "zh_tw": "空氣"},
+        ],
+    }
+    assert official_locale.terminology_terms_for_item(
+        item, index=index, include_official=False
+    ) == [("Fire Resistance", "抗火")]
+
+    assert (
+        official_locale.terminology_terms_for_item(
+            {
+                "path": "tooltip.close",
+                "source_text": "Calms attacking Piglins when Player gets close",
+                "_reviewed_glossary": [
+                    {"key": "tooltip.close", "en_us": "Close", "zh_tw": "關閉"}
+                ],
+            },
+            index=index,
+            include_official=False,
+        )
+        == []
+    )
+
+    assert (
+        official_locale.terminology_terms_for_item(
+            {
+                "path": "tooltip.air",
+                "source_text": "§78 Mid-Air Jumps§r",
+                "_reviewed_glossary": [
+                    {"key": "tooltip.air", "en_us": "Air", "zh_tw": "空氣"}
+                ],
+            },
+            index=index,
+            include_official=False,
+        )
+        == []
+    )
 
 
 def test_moddb_items_form_module_and_kind_batch_boundaries() -> None:

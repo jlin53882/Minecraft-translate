@@ -3,8 +3,9 @@
 import heapq
 import re
 import threading
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from types import MappingProxyType
 from typing import Any
 
 # =========================
@@ -32,7 +33,7 @@ def _build_literal_trie(rows: Sequence[tuple[str, Any]]) -> dict[Any, Any]:
 
 
 def find_replacement_conflicts(
-    rules: Sequence[dict[str, str]],
+    rules: Sequence[Mapping[str, str]],
 ) -> list[tuple[int, str, int, str]]:
     """找出輸出包含其他字面值來源詞的規則。
 
@@ -44,7 +45,7 @@ def find_replacement_conflicts(
     destinations: list[tuple[int, str]] = []
 
     for index, rule in enumerate(rules):
-        if not isinstance(rule, dict):
+        if not isinstance(rule, Mapping):
             continue
         source = rule.get("from")
         destination = rule.get("to")
@@ -234,18 +235,55 @@ class _ReplaceRulesSnapshot(Sequence[dict[str, str]]):
         return self._source.revision
 
 
-def _rules_signature(rules: Sequence[dict[str, str]]):
+@dataclass(frozen=True, slots=True)
+class ImmutableReplaceRulesSnapshot(Sequence[Mapping[str, str]]):
+    """可跨執行緒共用的唯讀規則快照。
+
+    Store 會把每一筆規則複製成 ``MappingProxyType``，避免呼叫端意外修改
+    程序內共用的快取；``revision`` 是該快照的 Store 內部版本，不依賴可變
+    的 ``ReplaceRules`` 物件。
+    """
+
+    _items: tuple[Mapping[str, str], ...]
+    revision: int = 0
+
+    @classmethod
+    def from_rules(
+        cls, rules: Sequence[Mapping[str, str]], *, revision: int = 0
+    ) -> "ImmutableReplaceRulesSnapshot":
+        """把規則複製成可跨執行緒共用的不可變快照，並附上 Store revision。"""
+        return cls(
+            tuple(MappingProxyType(dict(rule)) for rule in rules),
+            revision=revision,
+        )
+
+    def __getitem__(self, index):
+        """依索引回傳唯讀規則映射。"""
+        return self._items[index]
+
+    def __len__(self):
+        """回傳唯讀規則快照中的規則數量。"""
+        return len(self._items)
+
+    def __iter__(self):
+        """依規則原順序提供唯讀快照的迭代器。"""
+        return iter(self._items)
+
+
+def _rules_signature(rules: Sequence[Mapping[str, str]]):
     """編譯快取的內容簽章。
 
     ReplaceRules：revision（O(1)）。其他清單：逐條 (from, to)，
     正確但為 O(規則數)，大量規則請使用 load_replace_rules 回傳的清單。
     """
-    if isinstance(rules, (ReplaceRules, _ReplaceRulesSnapshot)):
+    if isinstance(
+        rules, (ReplaceRules, _ReplaceRulesSnapshot, ImmutableReplaceRulesSnapshot)
+    ):
         return ("revision", rules.revision)
     return (
         "content",
         tuple(
-            (rule.get("from"), rule.get("to")) if isinstance(rule, dict) else None
+            (rule.get("from"), rule.get("to")) if isinstance(rule, Mapping) else None
             for rule in rules
         ),
     )
@@ -268,13 +306,14 @@ class _CompiledRules:
       （索引較後）的規則加入候選，因此結果與逐條檢查完全相同。
     """
 
-    def __init__(self, rules: Sequence[dict[str, str]]):
+    def __init__(self, rules: Sequence[Mapping[str, str]]):
+        """初始化此測試替身或服務物件所需的狀態。"""
         literal_rules: list[tuple[str, str]] = []
         regex_rules: list[tuple[re.Pattern, str]] = []
         keywords: set[str] = set()
 
         for rule in rules:
-            if not isinstance(rule, dict):
+            if not isinstance(rule, Mapping):
                 continue
             if "from" not in rule or "to" not in rule:
                 continue
@@ -566,7 +605,7 @@ class _CompiledRules:
         return self._apply_literals_once(text)
 
 
-def _get_compiled_rules(rules: Sequence[dict[str, str]]) -> _CompiledRules:
+def _get_compiled_rules(rules: Sequence[Mapping[str, str]]) -> _CompiledRules:
     """依規則清單取得（或建立）編譯好的規則。
 
     以清單物件與內容簽章判斷：新清單、增刪、以及就地修改 from / to 都會重建
@@ -587,7 +626,7 @@ def _get_compiled_rules(rules: Sequence[dict[str, str]]) -> _CompiledRules:
 
 
 def apply_replace_rules(
-    text: str, rules: Sequence[dict[str, str]], *, cascade: bool = False
+    text: str, rules: Sequence[Mapping[str, str]], *, cascade: bool = False
 ) -> str:
     """應用替換規則到給定的文字。
 

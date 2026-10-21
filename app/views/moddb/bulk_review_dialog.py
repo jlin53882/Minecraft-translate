@@ -1,4 +1,4 @@
-"""Bulk review dialog: pick a version and its current effective source, preview, confirm."""
+"""ModDB 批量審核對話框與其預覽、範圍驗證及確認流程。"""
 
 from __future__ import annotations
 
@@ -12,6 +12,7 @@ from app.tasks.operation_registry import (
     CancellationPolicy,
     CommitPolicy,
     DurabilityPolicy,
+    OperationPresentation,
     ShutdownPolicy,
     launch_page_operation,
 )
@@ -29,16 +30,27 @@ from translation_tool.utils.log_unit import log_exception, log_info, log_warning
 
 PAGE_SIZE = 50
 ACTOR = "使用者"
+ALL_MODS = "__all__"
+ALL_SOURCES = "__all__"
 
 
 class BulkReviewDialog:
-    """Review every unreviewed entry of one version whose effective source matches.
+    """批量審核對話框：預填範圍後預覽候選，確認後才執行批次審核。"""
 
-    The scope is recomputed and compared with the preview inside the write
-    transaction, so nothing outside the previewed list can be touched.
-    """
+    def __init__(
+        self,
+        page: ft.Page,
+        get_db,
+        version: str | None,
+        on_complete,
+        *,
+        mod_id: str | None = None,
+        effective_source: int | None = None,
+    ):
+        """初始化對話框，必要時預填條目頁的模組與目前生效來源。
 
-    def __init__(self, page: ft.Page, get_db, version: str | None, on_complete):
+        預填只設定控制項值，不會自動產生預覽，也不會開始批量審核。
+        """
         self.page = page
         self.get_db = get_db
         self.on_complete = on_complete
@@ -48,39 +60,96 @@ class BulkReviewDialog:
         self.preview_page = 1
         self._busy = False
         self._generation = 0
-        self._build_controls(version)
+        self._scope_seq = 0
+        self._scope_loading = False
+        self._closed = False
+        self._opened = False
+        self._scope_modules: tuple[str, ...] = ()
+        self._scope_sources_by_mod: dict[str | None, tuple[int, ...]] = {}
+        self._source_catalog = source_catalog_for(self.get_db())
+        self._build_controls(
+            version,
+            initial_mod_id=mod_id,
+            initial_effective_source=effective_source,
+        )
         self._build_dialog()
+        self._start_scope_options_load()
 
     # ------------------------------------------------------------------ 版面
-    def _build_controls(self, version: str | None) -> None:
-        db = self.get_db()
-        versions = db.versions() if db else []
+    def _build_controls(
+        self,
+        version: str | None,
+        *,
+        initial_mod_id: str | None = None,
+        initial_effective_source: int | None = None,
+    ) -> None:
+        """建立篩選控制項，並套用開啟對話框時傳入的初始範圍。"""
         self.version_dd = kit.dropdown(
             label="版本", dense=True, width=180, on_select=self._on_version
         )
-        kit.set_dropdown_options(self.version_dd, [(v, v) for v in versions])
-        self.version_dd.value = version if version in versions else None
+        # 先只放入呼叫端的預填值；完整版本／模組清單由背景唯讀查詢補上，
+        # 避免開啟對話框的事件在大型資料庫上同步等待。
+        kit.set_dropdown_options(
+            self.version_dd, [(version, version)] if version else []
+        )
+        self.version_dd.value = version
+        self.mod_dd = kit.dropdown(
+            label="模組", dense=True, width=220, on_select=self._on_mod
+        )
+        initial_mod = (
+            str(initial_mod_id).strip()
+            if initial_mod_id not in (None, "")
+            else ALL_MODS
+        )
+        kit.set_dropdown_options(
+            self.mod_dd,
+            [(ALL_MODS, "全部模組")]
+            + ([(initial_mod, initial_mod)] if initial_mod != ALL_MODS else []),
+        )
+        self.mod_dd.value = initial_mod
         self.source_dd = kit.dropdown(
             label="目前生效來源", dense=True, width=260, on_select=self._invalidate
         )
-        self._refresh_sources()
+        initial_source = (
+            str(initial_effective_source)
+            if initial_effective_source is not None
+            else ALL_SOURCES
+        )
+        kit.set_dropdown_options(
+            self.source_dd,
+            [(ALL_SOURCES, "全部來源")]
+            + (
+                [(initial_source, self._source_catalog.label(int(initial_source)))]
+                if initial_source != ALL_SOURCES
+                else []
+            ),
+        )
+        self.source_dd.value = initial_source
         self.quality_check = ft.Checkbox(
             label="只審核格式檢查通過的條目",
             value=True,
-            on_change=self._invalidate,
+            on_change=self._on_quality_change,
         )
         self.sync_switch = ft.Switch(
             label="同步其他版本（原文相同的版本一併改為此譯文並標為已審核）",
             value=False,
             on_change=self._invalidate,
         )
+        self._scope_sources_by_mod = {
+            None: ((int(initial_source),) if initial_source != ALL_SOURCES else ()),
+        }
+        if initial_mod != ALL_MODS:
+            self._scope_modules = (initial_mod,)
+            self._scope_sources_by_mod[initial_mod] = self._scope_sources_by_mod[None]
+        self._refresh_mods()
+        self._refresh_sources()
         self.preview_btn = kit.button("產生預覽", "secondary", on_click=self._preview)
         self.summary = ft.Text("尚未預覽", size=14, weight=ft.FontWeight.BOLD)
         self.warning = ft.Text("", size=12, color=C.GOLD, visible=False)
         self.status = ft.Text("", size=12, color=C.MUTED, visible=False)
         self.progress = ft.ProgressBar(visible=False)
         self.rows = ft.Column(
-            [kit.hint_text("選好版本與來源後，按「產生預覽」。")],
+            [kit.hint_text("選好版本、模組與來源後，按「產生預覽」。")],
             spacing=8,
         )  # 捲動交給外層對話框，避免兩層卷軸重疊
         self.pager = kit.Pager(0, page_size=PAGE_SIZE, on_change=self._on_page)
@@ -108,6 +177,7 @@ class BulkReviewDialog:
         self.close_btn = ft.TextButton("關閉", on_click=self._close)
 
     def _build_dialog(self) -> None:
+        """組合批量審核對話框的說明、篩選區、預覽區與操作按鈕。"""
         width, height = dialog_dimensions(self.page)
         self.dialog = ft.AlertDialog(
             modal=True,
@@ -116,14 +186,14 @@ class BulkReviewDialog:
                 content=ft.Column(
                     [
                         ft.Text(
-                            "把「所選版本、目前生效來源」的條目一次標為人工已審核（來源不變）；"
+                            "把「所選版本、模組、目前生效來源（可選全部）」的條目一次標為人工已審核（來源不變）；"
                             "預覽不會寫入，確認後才會審核，且可整批還原。",
                             size=12,
                             color=C.MUTED,
                             selectable=True,
                         ),
                         ft.Row(
-                            [self.version_dd, self.source_dd],
+                            [self.version_dd, self.mod_dd, self.source_dd],
                             spacing=12,
                             wrap=True,
                         ),
@@ -151,8 +221,10 @@ class BulkReviewDialog:
         )
 
     def open(self) -> None:
+        """開啟對話框；範圍選單查詢已在背景啟動，完成後會更新選項。"""
         try:
             present_page_dialog(self.page, self.dialog)
+            self._opened = True
         except (AttributeError, RuntimeError):
             show_snack(self.page, "目前畫面無法開啟批量審核視窗。", C.GOLD)
 
@@ -160,28 +232,129 @@ class BulkReviewDialog:
         if self._busy:
             show_snack(self.page, "資料庫處理中，請稍候。", C.GOLD)
             return
+        self._closed = True
+        self._scope_seq += 1
         self._generation += 1
         close_page_dialog(self.page, self.dialog)
 
     def _on_dismiss(self, _e=None) -> None:
+        """對話框被關閉時讓尚未回來的範圍查詢結果失效。"""
+        self._closed = True
+        self._scope_seq += 1
         self._generation += 1
 
     # ------------------------------------------------------------------ 選項
-    def _refresh_sources(self) -> None:
+    def _scope_query(self, version: str | None, quality_pass_only: bool):
+        """在背景工作中讀取版本與需要審核的模組／來源對照。"""
         db = self.get_db()
-        version = self.version_dd.value
-        codes = db.effective_source_codes(version) if db and version else ()
-        catalog = source_catalog_for(db)
-        kit.set_dropdown_options(
-            self.source_dd, [(str(code), source_label(code, catalog)) for code in codes]
+        if db is None or not version:
+            return [], (), {None: ()}
+        return (
+            list(db.versions()),
+            *db.bulk_review_scope_options(
+                version,
+                quality_pass_only=quality_pass_only,
+            ),
         )
-        keys = {str(code) for code in codes}
-        if self.source_dd.value not in keys:
-            self.source_dd.value = None
+
+    def _start_scope_options_load(self) -> None:
+        """背景載入需要審核的版本、模組與來源選項，不阻塞下拉選單事件。"""
+        self._scope_seq += 1
+        seq = self._scope_seq
+        version = self.version_dd.value
+        quality_pass_only = bool(self.quality_check.value)
+        self._scope_loading = True
+        self.status.visible = True
+        self.status.value = "正在更新需要審核的模組與來源選單…"
+        if self._opened:
+            self._safe_update()
+
+        def work() -> None:
+            """執行範圍唯讀查詢，完成後只回傳精簡選單資料。"""
+            result = error = None
+            try:
+                result = self._scope_query(version, quality_pass_only)
+            except Exception as exc:  # noqa: BLE001 - worker boundary
+                error = exc
+                log_exception("Mod 資料庫批量審核範圍選單載入失敗")
+            self._post(self._apply_scope_options, seq, result, error)
+
+        self._launch(
+            work,
+            "載入批量審核範圍選單",
+            CommitPolicy.EPHEMERAL,
+            presentation=OperationPresentation.MAINTENANCE,
+        )
+
+    def _apply_scope_options(self, seq: int, result, error) -> None:
+        """把最新的背景範圍查詢結果套用到下拉選單。"""
+        if self._closed or seq != self._scope_seq:
+            return
+        self._scope_loading = False
+        if error is not None or result is None:
+            self.status.visible = True
+            self.status.value = f"範圍選單載入失敗：{error}"
+            if self._opened:
+                self._safe_update()
+            return
+        versions, modules, sources_by_mod = result
+        current_version = self.version_dd.value
+        kit.set_dropdown_options(self.version_dd, [(v, v) for v in versions])
+        self.version_dd.value = current_version if current_version in versions else None
+        self._scope_modules = tuple(modules)
+        self._scope_sources_by_mod = {
+            key: tuple(values) for key, values in sources_by_mod.items()
+        }
+        self._refresh_mods()
+        self._refresh_sources()
+        if not self._busy:
+            self.status.visible = False
+        if self._opened:
+            self._safe_update()
+
+    def _refresh_mods(self) -> None:
+        """只顯示目前有未審核候選的模組，並保持目前選擇值有效。"""
+        options = [
+            (ALL_MODS, "全部模組"),
+            *((mod, mod) for mod in self._scope_modules),
+        ]
+        kit.set_dropdown_options(self.mod_dd, options)
+        keys = {key for key, _label in options}
+        if self.mod_dd.value not in keys:
+            self.mod_dd.value = ALL_MODS
+
+    def _refresh_sources(self) -> None:
+        """依目前模組的未審核候選載入目前生效來源選項。"""
+        selected_mod = self.mod_dd.value
+        mod_key = None if selected_mod in (None, "", ALL_MODS) else str(selected_mod)
+        codes = self._scope_sources_by_mod.get(mod_key, ())
+        catalog = self._source_catalog
+        options = [
+            (ALL_SOURCES, "全部來源"),
+            *((str(code), source_label(code, catalog)) for code in codes),
+        ]
+        selected = self.source_dd.value
+        kit.set_dropdown_options(self.source_dd, options)
+        keys = {key for key, _label in options}
+        if selected not in keys:
+            self.source_dd.value = ALL_SOURCES
 
     def _on_version(self, _e=None) -> None:
+        """版本選擇變更時重載需要審核的模組與來源，並使舊預覽失效。"""
+        self.mod_dd.value = ALL_MODS
+        self.source_dd.value = ALL_SOURCES
+        self._invalidate()
+        self._start_scope_options_load()
+
+    def _on_mod(self, _e=None) -> None:
+        """模組選擇變更時只保留該模組可用來源，並使舊預覽失效。"""
         self._refresh_sources()
         self._invalidate()
+
+    def _on_quality_change(self, _e=None) -> None:
+        """品質條件變更時重新計算需要審核的模組與來源清單。"""
+        self._invalidate()
+        self._start_scope_options_load()
 
     def _invalidate(self, _e=None) -> None:
         """選項變動後舊預覽失效：清掉預覽與排除清單，要求重新預覽。"""
@@ -191,7 +364,7 @@ class BulkReviewDialog:
         self.result = None
         self.summary.value = "選項已變更，請重新產生預覽"
         self.warning.visible = False
-        self.rows.controls = [kit.hint_text("選好版本與來源後，按「產生預覽」。")]
+        self.rows.controls = [kit.hint_text("選好版本、模組與來源後，按「產生預覽」。")]
         self.pager.visible = False
         self.selection_row.visible = False
         self.apply_btn.disabled = True
@@ -200,30 +373,41 @@ class BulkReviewDialog:
 
     # ------------------------------------------------------------------ 預覽
     def _preview(self, _e=None) -> None:
+        """在背景執行目前範圍查詢並產生批量審核預覽。"""
         db = self.get_db()
         version = self.version_dd.value
-        if db is None or not version or self.source_dd.value is None:
+        source_value = self.source_dd.value
+        if db is None or not version or source_value in (None, ""):
             show_snack(self.page, "請先選擇版本與目前生效來源。", C.GOLD)
             return
         if self._busy:
             return
-        source = int(self.source_dd.value)
+        source = None if source_value == ALL_SOURCES else int(source_value)
+        source_text = "全部來源" if source is None else str(source)
+        mod_id = self.mod_dd.value if self.mod_dd.value != ALL_MODS else None
         quality = bool(self.quality_check.value)
         propagate = bool(self.sync_switch.value)
         generation = self._generation
         self._set_busy(True, "查詢符合條目…")
 
         def work() -> None:
+            """執行背景查詢或寫入工作，完成後把結果排回 UI 執行緒。"""
             plan = error = None
             try:
                 plan = db.preview_bulk_review(
-                    version, source, quality_pass_only=quality, propagate=propagate
+                    version,
+                    source,
+                    mod_id=mod_id,
+                    quality_pass_only=quality,
+                    propagate=propagate,
                 )
             except (ValueError, sqlite3.Error) as exc:
                 error = exc
             except Exception as exc:  # noqa: BLE001 - worker boundary reports unexpected failures
                 error = exc
-                log_exception(f"Mod 資料庫批量審核預覽失敗：{version} 來源 {source}")
+                log_exception(
+                    f"Mod 資料庫批量審核預覽失敗：{version} 模組 {mod_id or '全部'} 來源 {source_text}"
+                )
             self._post(self._apply_preview, generation, plan, error)
 
         self._launch(work, "Mod 資料庫批量審核預覽", CommitPolicy.PARTIAL_ALLOWED)
@@ -365,14 +549,17 @@ class BulkReviewDialog:
 
     # ------------------------------------------------------------------ 寫入
     def _confirm(self, _e=None) -> None:
+        """確認目前批量審核預覽，並在背景執行套用前的範圍檢查。"""
         db, plan = self.get_db(), self.plan
         if db is None or plan is None or self._busy:
             return
         excluded = tuple(self.excluded)
         generation = self._generation
+        source_text = "全部來源" if plan.source is None else str(plan.source)
         self._set_busy(True, "審核中…")
 
         def work() -> None:
+            """執行背景查詢或寫入工作，完成後把結果排回 UI 執行緒。"""
             result = error = None
             try:
                 result = db.execute_bulk_review(
@@ -386,12 +573,12 @@ class BulkReviewDialog:
             except sqlite3.Error as exc:
                 error = exc
                 log_exception(
-                    f"Mod 資料庫批量審核失敗：{plan.version} 來源 {plan.source}"
+                    f"Mod 資料庫批量審核失敗：{plan.version} 模組 {plan.mod_id or '全部'} 來源 {source_text}"
                 )
             except Exception as exc:  # noqa: BLE001 - worker boundary reports unexpected failures
                 error = exc
                 log_exception(
-                    f"Mod 資料庫批量審核發生未預期錯誤：{plan.version} 來源 {plan.source}"
+                    f"Mod 資料庫批量審核發生未預期錯誤：{plan.version} 模組 {plan.mod_id or '全部'} 來源 {source_text}"
                 )
             self._post(self._apply_result, generation, plan, result, error)
 
@@ -405,15 +592,19 @@ class BulkReviewDialog:
         )
 
     def _on_progress(self, text: str, fraction: float) -> None:
+        """把背景批量審核的文字與比例進度排回 UI 執行緒。"""
         self._post(self._show_progress, text, fraction)
 
     def _show_progress(self, text: str, fraction: float) -> None:
+        """在 UI 執行緒顯示批量審核的狀態文字與進度比例。"""
         self.status.value = text
         self.progress.value = fraction
         self._safe_update()
 
     def _apply_result(self, generation: int, plan, result, error) -> None:
+        """把批量審核結果轉成 UI 摘要，並清除已失效的預覽狀態。"""
         self._set_busy(False)
+        source_text = "全部來源" if plan.source is None else str(plan.source)
         if error is not None:
             log_warning(f"Mod 資料庫批量審核被拒絕或失敗：{error!r}")
             self.summary.value = f"批量審核未執行：{error}"
@@ -433,7 +624,10 @@ class BulkReviewDialog:
             message += (
                 f"（{format_count(result.stale_skipped)} 筆已被其他操作改動而略過）"
             )
-        log_info(f"Mod 資料庫批量審核：{plan.version} 來源 {plan.source}；{message}")
+        log_info(
+            f"Mod 資料庫批量審核：{plan.version} 模組 {plan.mod_id or '全部'} "
+            f"來源 {source_text}；{message}"
+        )
         self.summary.value = message
         self.warning.visible = False
         self.rows.controls = [kit.hint_text("完成。可按「還原本次批量審核」整批復原。")]
@@ -496,6 +690,7 @@ class BulkReviewDialog:
         durability: DurabilityPolicy = DurabilityPolicy.RECOMPUTABLE,
         cancellation: CancellationPolicy = CancellationPolicy.NON_CANCELLABLE,
         shutdown: ShutdownPolicy = ShutdownPolicy.ALLOW_TO_FINISH,
+        presentation: OperationPresentation = OperationPresentation.USER_VISIBLE,
     ) -> None:
         try:
             launched = launch_page_operation(
@@ -507,6 +702,7 @@ class BulkReviewDialog:
                 commit=commit,
                 durability=durability,
                 shutdown=shutdown,
+                presentation=presentation,
             )
         except Exception as exc:  # noqa: BLE001 - restore the dialog if the worker cannot launch
             self._set_busy(False)

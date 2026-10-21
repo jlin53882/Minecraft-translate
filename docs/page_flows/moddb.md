@@ -91,9 +91,43 @@ flowchart TD
 
 刪除（`apply_cleanup`）在單一交易內把整批存進 `cleanup_batch`（含譯文、生效譯文、歷史與沒有外鍵的 `src_change` 原文變更紀錄）再刪除。還原（`_revert`）呼叫 `revert_cleanup`，回傳 `RevertResult`：原編號還沒被用掉就沿用，被用掉就改用新編號並重新對應子表的 `entry_id`；譯文的 `revision` 還原成快照當時的值；生效譯文依目前優先序重算；原位置已有同一條目（重新掃描出來）的項目不覆蓋，保留為待還原並列在 `RevertResult.conflicts`，批次要全部還原才設定 `reverted_at`，進度記在 `meta` 的 `cleanup_restored:<批次>`，可以重試。`CleanupDialog._load_batch_info` 用 `cleanup_batches` 列出所有尚未完全還原的批次（新的在前），`batch_dd` 選哪一批就還原哪一批。
 
-人工審核走 `ReviewScopeController`（`review_scope_dialog.py`）：`confirm` 先呼叫 `preview_manual_review` 顯示影響範圍；確認視窗內有「同步審核其他版本」開關，預設沿用編輯面板的同步開關，切換時重算範圍；確定後 `execute` 呼叫 `review_manual`。批量審核由 `BulkReviewDialog` 負責：選一個版本與一個「目前生效來源」（皆單選），預設只審核格式檢查通過的條目、不同步其他版本；`_preview` 呼叫 `preview_bulk_review` 產生預覽（每頁 50 筆，可逐筆排除），`_confirm` 呼叫 `execute_bulk_review`，完成後可用 `_revert`（`revert_review_batch`）整批還原。選項改變時舊預覽立即失效；確認時資料庫會重算範圍，與預覽不同就拒絕並要求重新預覽。審核只標示審核狀態，不改變生效來源：編輯面板以 `source_chip`（來源）與 `review_chip`（人工已審核）兩個標籤並列，條目列表與來源譯文列表同樣分開顯示；「審核狀態」篩選與「目前生效來源」篩選互相獨立、可組合。
+人工審核走 `ReviewScopeController`（`review_scope_dialog.py`）：`confirm` 先呼叫 `preview_manual_review` 顯示影響範圍；確認視窗內有「同步審核其他版本」開關，預設沿用編輯面板的同步開關，切換時重算範圍；確定後 `execute` 呼叫 `review_manual`。批量審核由 `BulkReviewDialog` 負責：選一個版本、模組與一個「目前生效來源」（模組與來源都可選全部），預設只審核格式檢查通過的條目、不同步其他版本；從條目頁開啟時，會把目前版本、模組與目前生效來源預填到對話框，但不會自動產生預覽或執行，仍須使用者按「產生預覽」。`_preview` 呼叫 `preview_bulk_review` 產生預覽（每頁 50 筆，可逐筆排除），`_confirm` 呼叫 `execute_bulk_review`，完成後可用 `_revert`（`revert_review_batch`）整批還原。來源選「全部來源」時，後端以 `source=None` 涵蓋所選版本／模組的所有目前生效來源。選項改變時舊預覽立即失效；確認時資料庫會重算範圍，與預覽不同就拒絕並要求重新預覽。審核只標示審核狀態，不改變生效來源：編輯面板以 `source_chip`（來源）與 `review_chip`（人工已審核）兩個標籤並列，條目列表與來源譯文列表同樣分開顯示；「審核狀態」篩選與「目前生效來源」篩選互相獨立、可組合。
+
+#### AI 智慧校對（本地候選）
+
+批量審核開啟時先顯示預填範圍，再以維護型背景查詢建立有未審核候選的模組清單；目前生效來源清單會隨選定模組更新，只列該模組實際使用的來源。智慧校對執行分頁同樣在背景載入只列有未審核候選的模組與來源，模組切換只重用已載入的映射，不重新查詢整個資料庫。這些都是範圍預填與選單過濾，不會自動產生預覽、掃描或開始執行；切換條件時舊的晚到查詢結果會被丟棄。
+
+條目校對工具列的「智慧校對」開啟 `SmartReviewDialog`，視窗分成「執行」「審查」「歷史批次」三個分頁，以 `Segmented` 切換。
+
+- **執行**（`SmartReviewRunPanel`）：沿用 EntriesPanel 的版本、模組、kind、目前生效來源與搜尋條件，另有校對模型、上限與每批筆數；開啟或變更範圍後在背景以唯讀查詢顯示「符合筆數、本次處理筆數與約幾批」（每批最多 50 筆，預設每批 20 筆）。本次處理上限輸入 `0` 代表不限；每批筆數仍必須大於 `0`。按「開始智慧校對」後設定欄位鎖定，畫面顯示進度條、已處理筆數、預估剩餘時間、有效／無效／請求錯誤統計與逐批執行紀錄（`LogView`，可只看警告與錯誤）；每批紀錄會分開顯示搜尋準備、配額等待、API、解析、驗證、JSON 寫入與 retry backoff 耗時，並即時記錄 batch start、Smart Review 外層 attempt、底層 network attempt、HTTP／timeout／connection 錯誤分類、Retry-After 與恢復事件。結束後再顯示 selection、planning、prompt、API、配額等待、retry backoff、解析、驗證、寫入與 total 的 monotonic timing、結果分類與 validation error 分布，並可「前往審查候選」。
+- **背景執行**：校對由頁面層級的 `SmartReviewJob` 持有（`job_for_page`），以 `TaskSession` 登記到任務管理，所以頂列任務膠囊會顯示進度；關閉視窗只停止畫面輪詢，不會中斷校對，重新開啟時 `attach` 會接續顯示進度與 log，完成時若視窗已關閉會以提示訊息通知。同一時間只允許一個校對在執行。停止按鈕只停止後續批次，已送出的 API 回應返回後由核心寫入 `partial` 或 `cancelled`。
+- **審查**（`SmartReviewReviewer`）：每頁只顯示一筆候選，「上一筆／下一筆」就是換頁；預設只看「可套用」佇列，沒有可套用候選時改看全部，也可依狀態（已套用、已保留原譯文、需補 context、無效等）篩選，篩選器會顯示各狀態筆數。位置欄可直接輸入 1-based 筆次後按 Enter 跳轉，例如輸入 `20` 顯示第 20 / N 筆。左側是英文原文、目前譯文與來源、AI 建議、理由與可展開的本地證據，右側是可編輯草稿、格式診斷與動作按鈕。不能操作的按鈕會變灰並說明原因；草稿有格式問題時不能儲存或套用，避免 service 把候選鎖成 `invalid_format`。換筆前會自動儲存格式正確且有修改的草稿，套用或保留原譯文後會更新統計並顯示佇列中的下一筆；同一篩選範圍的換筆會重用已取得的總筆數，背景載入期間鎖定導覽以避免快速連點造成並行查詢；套用成功後會重載目前條目頁並保留選取項目，讓左側條目旁的來源／審核標籤同步更新。
+- **歷史批次**（`SmartReviewHistory`）：以卡片列出最近的批次（時間、模型、範圍、處理與有效／無效／錯誤筆數），資料庫標記為執行中但實際沒有在跑的批次顯示「可能已中斷」；「開啟審查」直接載入該批次，也可展開「進階」貼上 `run_id` 開啟。新批次與候選以一批一個 `<run_id>.json` 存放在資料庫旁的 `.smart_review` 目錄，不再增加翻譯 SQLite；套用時才把正式翻譯與 audit history 寫入 SQLite。
+
+模型輸出先經嚴格 JSON、具體 `reason`、證據 ID、決策值與 `translation_issues` 驗證，再寫入該批次 JSON。候選含可追溯的 `db:<entry_id>`／`official:<key>` local context；同 key reference 另外要求英文原文相同，Patchouli／Guide／Advancement 會取得同模組 reviewed lang 術語，衝突證據會降為需人工判斷。
+
+```mermaid
+flowchart TD
+    A[條目校對按「智慧校對」] --> B[SmartReviewDialog]
+    B --> C[執行分頁：唯讀估算筆數與批次]
+    C --> D[SmartReviewJob 背景分批呼叫本地 AI，進度與 log 即時顯示]
+    D --> E{嚴格驗證回應}
+    E -- 通過 --> F[保存 reason／evidence／no_change／needs_context／ready]
+    E -- 回應格式錯誤 --> G[保存 invalid]
+    E -- API 失敗 --> H[保存 request_failed]
+    F --> I[審查分頁：每頁一筆，人工編修草稿]
+    I -- 保留原譯文 --> J[rejected，不改翻譯]
+    I -- 儲存草稿 --> K[draft_zh_tw，不改翻譯]
+    I -- 套用 --> L[CAS 比對完整快照與 manual row]
+    L -- 成功 --> M[SRC_MANUAL 未審核＋history]
+    L -- 變動／已審核人工列 --> N[stale，拒絕覆蓋]
+```
+
+「套用」只新增或更新來源 6 的未審核人工譯文，原 AI／其他來源列保留；不會自動標記人工已審核。套用前會再次驗證條目身份、effective 值、revision、既有 manual 快照與格式，成功後可從該筆 `smart_review_apply` history 使用既有還原流程回復。格式診斷只協助人工檢查，術語準確率需使用人工標註 evaluator，不能用格式通過率代替。
 
 #### 學名候選掃描
+
+`SpeciesCandidateDialog` 開啟時先顯示預填的版本／模組／來源，再以維護型背景作業依目前版本、類型與學名候選條件建立模組清單及來源映射；模組切換只重用這份映射，不會同步掃描資料庫。切換範圍只清除舊掃描結果，使用者仍須按「掃描候選」才會執行掃描；關閉視窗後的晚到選項結果會被丟棄。
 
 ```mermaid
 flowchart TD
@@ -127,6 +161,7 @@ flowchart TD
 - Patchouli `<link;分類;顯示文字[;start]>` 標籤只比對分類與 `start`，第三欄的顯示文字可翻譯。
 - 指南的空行（只算內容之間，文字開頭與結尾的空行不計）、區塊前綴順序、硬換行與獨立成行的元件（整行只有 `<Tag/>` 或 `$(br2)` 這類不含文字的標記）沒有可計數標記，由 `FormatDiagnosticsResult.extra_guide_issues` 提供白話說明（例如元件被移動時說明是哪個元件、該放回哪裡），檢查表以「指南結構」列顯示並標明位置無法可靠判定。已有結構化診斷涵蓋的訊息不會重複出現。
 - 進階篩選的起訖日可用日曆選取（`AdvancedFilters._pick_date`，繁體中文語系）；日曆回傳的 UTC 時間以 `picked_date` 換回本地日期，起訖兩個日期都選好才立即套用（只選一個時提示還需要另一個，不顯示錯誤）。「時間依據」為不限時間時，選日期會自動改用條目匯入時間，並在提示訊息說明。日期範圍查無資料時，清單空狀態與彈出提示會說明該時間依據實際有資料的期間（`AdvancedFilters.announce_no_data`，資料來自 `TranslationDB.time_data_range`），不會自動放寬或改動使用者輸入的日期。
+- 進階篩選啟用時，模組與目前生效來源選單會依相同條件縮減；若目前選值在新條件下沒有交集，仍保留該選值並顯示空結果，不會清除選值後改查其他模組或來源。
 - 排序旁的方向按鈕對每種排序依據有效：模組／鍵值預設遞增、日期排序預設遞減，切換後立即重新載入並跳出訊息；換排序依據或重設時回到預設方向。
 
 ### 批次機翻與異常清單

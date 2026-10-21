@@ -1,11 +1,11 @@
-"""批量審核（版本 + 目前生效來源）：選取範圍、同步其他版本、CAS 與還原。"""
+"""批量審核（版本 + 模組 + 目前生效來源）：選取範圍、同步其他版本、CAS 與還原。"""
 
 from __future__ import annotations
 
 import pytest
 
 from translation_tool.translation_db import KIND_LANG, ScanItem, TranslationDB
-from translation_tool.translation_db.schema import SRC_JAR_TW, SRC_MANUAL
+from translation_tool.translation_db.schema import SRC_AI, SRC_JAR_TW, SRC_MANUAL
 
 
 @pytest.fixture
@@ -63,6 +63,104 @@ def test_candidates_follow_version_source_and_quality(db):
     db.save_manual(_entry(db, "1.21.1", "ok").id, "鋼材", propagate=False)
     manual = db.preview_bulk_review("1.21.1", SRC_MANUAL, quality_pass_only=False)
     assert {c.key for c in manual.candidates} == {"ok"}
+
+
+def test_candidates_and_execution_follow_module_scope(db):
+    """驗證此測試案例的預期結果與相容性。"""
+    db.ingest(
+        "1.21.1",
+        [
+            _item("foo-key", "Foo", "甲", mod="foo"),
+            _item("bar-key", "Bar", "乙", mod="bar"),
+        ],
+    )
+
+    plan = db.preview_bulk_review(
+        "1.21.1", SRC_JAR_TW, mod_id="foo", quality_pass_only=False
+    )
+
+    assert plan.mod_id == "foo"
+    assert [(candidate.mod_id, candidate.key) for candidate in plan.candidates] == [
+        ("foo", "foo-key")
+    ]
+
+    result = db.execute_bulk_review(plan, actor="使用者")
+
+    assert result.reviewed == 1
+    assert _entry(db, "1.21.1", "foo-key").review_status == "reviewed"
+    assert _entry(db, "1.21.1", "bar-key").review_status == "unreviewed"
+
+
+def test_bulk_review_scope_options_only_show_modules_and_sources_needing_review(db):
+    """範圍選單只列有未審核候選的模組，來源依模組分開統計。"""
+    db.ingest(
+        "1.21.1",
+        [
+            _item("foo-jar", "Foo Jar", "甲", mod="foo"),
+            ScanItem(
+                KIND_LANG,
+                "foo",
+                "foo-ai",
+                "Foo AI",
+                "乙",
+                source=SRC_AI,
+            ),
+            _item("done", "Done", "已完成", mod="done"),
+        ],
+    )
+    done = _entry(db, "1.21.1", "done")
+    db.review_manual(done.id, expected_zh_tw="已完成", propagate=False)
+
+    modules, sources_by_mod = db.bulk_review_scope_options(
+        "1.21.1", quality_pass_only=False
+    )
+
+    assert modules == ("foo",)
+    assert sources_by_mod[None] == (SRC_AI, SRC_JAR_TW)
+    assert sources_by_mod["foo"] == (SRC_AI, SRC_JAR_TW)
+    assert "done" not in sources_by_mod
+
+
+def test_bulk_review_scope_options_use_projection_without_building_candidates(
+    db, monkeypatch
+):
+    """範圍選單查詢只取模組與來源欄位，不建立完整候選物件。"""
+    db.ingest("1.21.1", [_item("k", "Steel", "鋼", mod="accessories")])
+
+    def unexpected_candidate_build(*_args, **_kwargs):
+        pytest.fail("範圍選單不應建立完整批量審核候選")
+
+    monkeypatch.setattr(db, "_bulk_review_candidates", unexpected_candidate_build)
+    modules, sources_by_mod = db.bulk_review_scope_options(
+        "1.21.1", quality_pass_only=False
+    )
+
+    assert modules == ("accessories",)
+    assert sources_by_mod["accessories"] == (SRC_JAR_TW,)
+
+
+def test_candidates_and_execution_allow_all_effective_sources(db):
+    """驗證此測試案例的預期結果與相容性。"""
+    db.ingest(
+        "1.21.1",
+        [
+            _item("jar-key", "Jar", "甲"),
+            ScanItem(KIND_LANG, "foo", "ai-key", "AI", "乙", source=SRC_AI),
+        ],
+    )
+
+    plan = db.preview_bulk_review("1.21.1", None, mod_id="foo", quality_pass_only=False)
+
+    assert plan.source is None
+    assert {candidate.key for candidate in plan.candidates} == {"jar-key", "ai-key"}
+
+    result = db.execute_bulk_review(plan, actor="使用者")
+
+    assert result.reviewed == 2
+    assert all(
+        _entry(db, "1.21.1", key).review_status == "reviewed"
+        for key in ("jar-key", "ai-key")
+    )
 
 
 def test_execute_reviews_selected_entries_and_honours_exclusions(db):
@@ -134,7 +232,8 @@ def _drain(page):
 
 
 def test_dialog_previews_pages_excludes_and_reverts(db):
-    from app.views.moddb.bulk_review_dialog import BulkReviewDialog
+    """驗證此測試案例的預期結果與相容性。"""
+    from app.views.moddb.bulk_review_dialog import ALL_SOURCES, BulkReviewDialog
     from tests.conftest import mock_page
 
     db.ingest(
@@ -145,11 +244,13 @@ def test_dialog_previews_pages_excludes_and_reverts(db):
     page.run_thread = lambda target: target()
     done: list = []
     dialog = BulkReviewDialog(page, lambda: db, "1.21.1", done.append)
+    _drain(page)
 
     # 預設：格式檢查通過 = 勾選、同步其他版本 = 關閉
     assert dialog.quality_check.value is True and dialog.sync_switch.value is False
     assert dialog.apply_btn.disabled is True
-    assert [o.key for o in dialog.source_dd.options] == [str(SRC_JAR_TW)]
+    assert [o.key for o in dialog.source_dd.options] == [ALL_SOURCES, str(SRC_JAR_TW)]
+    assert dialog.source_dd.value == ALL_SOURCES
 
     dialog.source_dd.value = str(SRC_JAR_TW)
     dialog._preview()
@@ -178,7 +279,37 @@ def test_dialog_previews_pages_excludes_and_reverts(db):
     assert dialog.revert_btn.visible is False
 
 
+def test_dialog_can_preview_all_sources(db):
+    """驗證此測試案例的預期結果與相容性。"""
+    from app.views.moddb.bulk_review_dialog import ALL_SOURCES, BulkReviewDialog
+    from tests.conftest import mock_page
+
+    db.ingest(
+        "1.21.1",
+        [
+            _item("jar-key", "Jar", "甲"),
+            ScanItem(KIND_LANG, "foo", "ai-key", "AI", "乙", source=SRC_AI),
+        ],
+    )
+    page = mock_page()
+    page.run_thread = lambda target: target()
+    dialog = BulkReviewDialog(page, lambda: db, "1.21.1", None)
+    _drain(page)
+    dialog.quality_check.value = False
+    dialog.source_dd.value = ALL_SOURCES
+
+    dialog._preview()
+    _drain(page)
+
+    assert dialog.plan.source is None
+    assert {candidate.key for candidate in dialog.plan.candidates} == {
+        "jar-key",
+        "ai-key",
+    }
+
+
 def test_dialog_option_change_invalidates_preview(db):
+    """驗證篩選選項變更會清除舊預覽並停用確認操作。"""
     from app.views.moddb.bulk_review_dialog import BulkReviewDialog
     from tests.conftest import mock_page
 
@@ -195,6 +326,74 @@ def test_dialog_option_change_invalidates_preview(db):
     dialog._invalidate()
 
     assert dialog.plan is None and dialog.apply_btn.disabled is True
+
+
+def test_dialog_filters_preview_by_module(db, monkeypatch):
+    """驗證此測試案例的預期結果與相容性。"""
+    from app.views.moddb.bulk_review_dialog import ALL_SOURCES, BulkReviewDialog
+    from tests.conftest import mock_page
+
+    db.ingest(
+        "1.21.1",
+        [
+            _item("foo-key", "Foo", "甲", mod="foo"),
+            _item("bar-key", "Bar", "乙", mod="bar"),
+        ],
+    )
+    original_scope_options = db.bulk_review_scope_options
+    scope_calls = []
+
+    def scope_options(version, **kwargs):
+        scope_calls.append((version, kwargs))
+        return original_scope_options(version, **kwargs)
+
+    monkeypatch.setattr(db, "bulk_review_scope_options", scope_options)
+    page = mock_page()
+    page.run_thread = lambda target: target()
+    dialog = BulkReviewDialog(page, lambda: db, "1.21.1", None)
+    _drain(page)
+    assert len(scope_calls) == 1
+
+    assert dialog.mod_dd.value == "__all__"
+    assert {option.key for option in dialog.mod_dd.options} == {"__all__", "foo", "bar"}
+    dialog.mod_dd.value = "foo"
+    dialog._on_mod()
+    assert len(scope_calls) == 1
+    assert [option.key for option in dialog.source_dd.options] == [
+        ALL_SOURCES,
+        str(SRC_JAR_TW),
+    ]
+    dialog.source_dd.value = str(SRC_JAR_TW)
+    dialog._preview()
+    _drain(page)
+
+    assert dialog.plan.mod_id == "foo"
+    assert {candidate.mod_id for candidate in dialog.plan.candidates} == {"foo"}
+
+
+def test_dialog_prefills_scope_without_creating_preview(db):
+    """驗證批量審核可預填模組與來源，且開啟時仍沒有預覽。"""
+    from app.views.moddb.bulk_review_dialog import ALL_SOURCES, BulkReviewDialog
+    from tests.conftest import mock_page
+
+    db.ingest("1.21.1", [_item("k", "Steel", "鋼", mod="accessories")])
+    page = mock_page()
+    page.run_thread = lambda target: target()
+    dialog = BulkReviewDialog(
+        page,
+        lambda: db,
+        "1.21.1",
+        None,
+        mod_id="accessories",
+        effective_source=SRC_JAR_TW,
+    )
+    _drain(page)
+
+    assert dialog.mod_dd.value == "accessories"
+    assert dialog.source_dd.value == str(SRC_JAR_TW)
+    assert dialog.plan is None
+    assert dialog.apply_btn.disabled is True
+    assert dialog.source_dd.value != ALL_SOURCES
 
 
 def test_sync_rejects_plan_when_another_version_changed_after_preview(db):

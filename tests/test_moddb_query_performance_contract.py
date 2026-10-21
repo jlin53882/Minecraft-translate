@@ -225,6 +225,37 @@ def test_streaming_quality_page_reused_and_invalidated(tmp_path, monkeypatch):
         db.close()
 
 
+def test_non_exact_quality_options_use_pair_projection(tmp_path, monkeypatch):
+    """非精確品質選項只投影模組／來源，不載入完整條目頁。"""
+    db = TranslationDB(tmp_path / "options.db")
+    db.ingest(
+        "1.20.1",
+        [
+            ScanItem("lang", "m1", "same", "Source", "譯文", source=1),
+            ScanItem("lang", "m2", "different", "Source %s", "譯文", source=2),
+        ],
+    )
+
+    def unexpected_full_page(*_args, **_kwargs):
+        pytest.fail("選項查詢不應載入完整品質條目頁")
+
+    monkeypatch.setattr(db, "_quality_filtered_page", unexpected_full_page)
+    try:
+        mods, sources = db.filter_option_values(
+            EntryFilter(
+                version="1.20.1",
+                quality=repository.QualityFilter(
+                    status="mismatch", direction="missing"
+                ),
+            )
+        )
+    finally:
+        db.close()
+
+    assert mods == ["m2"]
+    assert sources == (2,)
+
+
 def test_candidate_lists_stay_memory_only_and_refresh_after_write(tmp_path):
     db = TranslationDB(tmp_path / "db.sqlite")
     try:

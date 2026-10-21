@@ -4,6 +4,15 @@
 維護注意：真正實作已拆到 lm_translator_shared_* 子模組；新功能請優先落在子模組。
 """
 
+from translation_tool.core.common_batch_executor import (
+    BatchEvent,
+    BatchHandle,
+    BatchMetrics,
+    BatchPolicy,
+    CommonBatchExecutor,
+    classify_provider_error,
+    format_batch_event,
+)
 from translation_tool.core.lm_translator_shared_cache import (
     STRICT_SRC_TYPES,
     CacheRule,
@@ -18,6 +27,7 @@ from translation_tool.core.lm_translator_shared_cache import (
 from translation_tool.core.lm_translator_shared_loop import (
     TranslateLoopResult,
     _get_default_batch_size,
+    invoke_translation_batch,
     translate_items_with_cache_loop,
 )
 from translation_tool.core.lm_translator_shared_preview import (
@@ -39,7 +49,12 @@ from translation_tool.core.lm_translator_skeleton import (
 
 __all__ = [
     "STRICT_SRC_TYPES",
+    "BatchEvent",
+    "BatchHandle",
+    "BatchMetrics",
+    "BatchPolicy",
     "CacheRule",
+    "CommonBatchExecutor",
     "JsonCheckpointAdapter",
     "TouchSet",
     "TranslateLoopResult",
@@ -50,9 +65,12 @@ __all__ = [
     "_get_default_batch_size",
     "_is_valid_hit",
     "cache_storage_text",
+    "classify_provider_error",
     "fast_split_items_by_cache",
+    "format_batch_event",
     "format_eta",
     "get_default_cache_rules",
+    "invoke_translation_batch",
     "make_checkpoint_adapter",
     "make_progress_hook",
     "prepare_translator_items",

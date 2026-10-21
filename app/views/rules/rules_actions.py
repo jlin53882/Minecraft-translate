@@ -1,3 +1,5 @@
+"""規則頁面的操作處理器與使用者提示組裝函式。"""
+
 from __future__ import annotations
 
 import math
@@ -57,7 +59,7 @@ def validate_rule(view, src: str, dst: str, all_rules, current_index):
 def perform_reload(view):
     """执行规则重新加载，读取配置文件并更新界面"""
     try:
-        rules_data = view._load_rules_core()
+        rules_data = view._load_rules_core(force_reload=True)
         view._run_on_ui_thread(lambda: view._handle_reload_success(rules_data))
     except Exception as err:  # noqa: BLE001
         log_error(f"[Rules] 重新載入規則失敗：{err!r}", exc_info=True)

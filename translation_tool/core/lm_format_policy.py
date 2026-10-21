@@ -67,7 +67,7 @@ LANG_SEMANTIC_FORMAT_POLICY_PROMPT = r"""【lang 語意換行契約】
 
 
 def normalize_legacy_prompt(prompt: str) -> str:
-    """Remove only exact legacy newline-rule lines from a configured prompt."""
+    """從設定提示詞移除精確匹配的舊版換行規則。"""
     if not isinstance(prompt, str) or not prompt:
         return prompt
 
@@ -86,14 +86,14 @@ def normalize_legacy_prompt(prompt: str) -> str:
 
 
 def structured_kind(kind: object) -> bool:
-    """Return whether the kind has Markdown/Patchouli hard structure."""
+    """判斷資料種類是否具有 Markdown 或 Patchouli 的硬性結構。"""
     return str(kind or "") in STRUCTURED_KINDS
 
 
 def format_policy_for_items(
     items: Iterable[dict[str, Any]], *, profile: str | None = None
 ) -> str:
-    """Return common and kind-scoped semantic format policies."""
+    """回傳共用及依資料種類套用的語意格式規則。"""
     values = list(items)
     kinds = {kind_for_item(item) for item in values}
     normalized_profile = str(profile or "").lower()
@@ -114,7 +114,7 @@ def format_policy_for_items(
 
 
 def kind_for_item(item: dict[str, Any]) -> str | None:
-    """Resolve the DB kind carried by an item, including standalone Markdown items."""
+    """解析項目所帶的資料庫種類，包含獨立 Markdown 項目。"""
     kind = item.get("_kind")
     if not kind:
         ident = item.get("db_ident")
@@ -132,7 +132,7 @@ def kind_for_item(item: dict[str, Any]) -> str | None:
 
 
 def format_spec_for_item(item: dict[str, Any]) -> dict[str, object] | None:
-    """Return a payload format specification only for structured translation kinds."""
+    """只為結構化翻譯種類建立請求負載格式規格。"""
     kind = kind_for_item(item)
     if not structured_kind(kind):
         return None
@@ -146,8 +146,9 @@ def build_payload_item(
     *,
     retry_reasons: Iterable[str] = (),
     format_issues: Iterable[str] = (),
+    terminology_issues: Iterable[str] = (),
 ) -> dict[str, object]:
-    """Build the only request-item shape used by normal and retry requests."""
+    """建立單筆品質重試 payload，保留格式、重試原因與術語問題資訊。"""
     payload: dict[str, object] = {
         "id": str(item_id),
         "value": str(item.get("text") or ""),
@@ -161,6 +162,9 @@ def build_payload_item(
         payload["retry_reasons"] = reasons
     if issues:
         payload["format_issues"] = issues
+    term_issues = list(terminology_issues)
+    if term_issues:
+        payload["terminology_issues"] = term_issues
     return payload
 
 
@@ -169,7 +173,7 @@ def build_translation_payload(
     *,
     item_ids: Iterable[str] | None = None,
 ) -> dict[str, list[dict[str, object]]]:
-    """Build the normal request payload with the same item builder as retry."""
+    """使用與重試相同的項目建立器產生一般翻譯負載。"""
     values = list(items)
     ids = (
         list(item_ids) if item_ids is not None else [str(i) for i in range(len(values))]
@@ -185,7 +189,7 @@ def build_translation_payload(
 
 
 def estimate_format_spec_tokens(item: dict[str, Any], estimate_text_tokens) -> float:
-    """Estimate only the additional input tokens introduced by ``format_spec``."""
+    """估算格式規格額外加入的輸入 Token 數量。"""
     spec = format_spec_for_item(item)
     if spec is None:
         return 0.0

@@ -27,6 +27,7 @@ from translation_tool.core.lm_translator_shared import (
     TranslationRecorder,
     TranslatorHooks,
     _is_valid_hit,  # ✅ 新增：cache hit 判斷
+    invoke_translation_batch,
     make_checkpoint_adapter,
     make_progress_hook,
     prepare_translator_items,
@@ -379,8 +380,10 @@ def translate_md_pending(
         res = run_translator_skeleton(
             items_to_translate,
             total_for_smart=len(items_to_translate),
-            translate_batch_smart=lambda batch, total: translate_batch_smart(
-                batch, total=total
+            translate_batch_smart=lambda batch, total, *, event_callback=None: (
+                invoke_translation_batch(
+                    translate_batch_smart, batch, total, event_callback
+                )
             ),
             sleep_seconds_between_batches=0.0,
             write_new_cache=bool(

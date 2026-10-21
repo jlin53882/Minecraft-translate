@@ -184,6 +184,51 @@ class TestCallGeminiRequests:
 
         assert mock_post.call_args.kwargs["timeout"] == (5, 5)
 
+    @patch("translation_tool.core.lm_api_client.interruptible_sleep")
+    @patch("translation_tool.core.lm_api_client.requests.post")
+    @patch("translation_tool.core.lm_api_client.load_config")
+    def test_connection_retry_emits_safe_network_events(
+        self, mock_config, mock_post, mock_sleep
+    ):
+        """連線 retry 要回報 network attempt，但不能洩漏 key 或 payload。"""
+        from translation_tool.core.lm_api_client import call_gemini_requests
+
+        mock_config.return_value = {"lm_translator": {"rate_limit": {"timeout": 5}}}
+        response = Mock(ok=True, status_code=200)
+        response.json.return_value = {
+            "candidates": [{"content": {"parts": [{"text": '{"items": []}'}]}}]
+        }
+        mock_post.side_effect = [
+            requests.ConnectionError("AIza-secret prompt text"),
+            response,
+        ]
+        events = []
+
+        call_gemini_requests(
+            model_name="gemini-pro",
+            system_prompt="private prompt",
+            payload={"items": [{"id": "secret-item", "value": "private text"}]},
+            api_key="AIza-secret-key",
+            temperature=0.2,
+            network_event_callback=events.append,
+        )
+
+        assert [event["kind"] for event in events] == [
+            "network_attempt_start",
+            "network_failure",
+            "network_retry_wait",
+            "network_retry_resume",
+            "network_attempt_start",
+            "network_response",
+        ]
+        assert events[1]["error_kind"] == "connection_error"
+        assert events[3]["elapsed_seconds"] >= 0
+        assert all(
+            secret not in repr(events)
+            for secret in ("AIza-secret-key", "private prompt", "private text")
+        )
+        mock_sleep.assert_called_once()
+
     @patch("translation_tool.core.lm_api_client.requests.post")
     @patch("translation_tool.core.lm_api_client.load_config")
     def test_api_key_not_in_url(self, mock_config, mock_post):

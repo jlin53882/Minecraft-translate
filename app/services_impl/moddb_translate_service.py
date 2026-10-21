@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import inspect
 import logging
 import traceback
 from collections.abc import Callable
@@ -14,6 +15,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from functools import partial
 from pathlib import Path
+from time import monotonic
 from typing import Any
 
 from app.services_impl.logging_service import UI_LOG_HANDLER
@@ -33,10 +35,12 @@ from app.services_impl.pipelines._pipeline_logging import (
     mirror_session_log,
 )
 from app.tasks.task_session import add_log_unmirrored
+from translation_tool.core.common_batch_executor import format_batch_event
 from translation_tool.core.lm_batch_planner import (
     count_planned_batches,
     group_items_by_batch_key,
 )
+from translation_tool.core.lm_config_rules import get_translation_provider
 from translation_tool.core.lm_moddb_context import attach_moddb_context
 from translation_tool.core.lm_translator_main import (
     estimate_batch_fixed_input_tokens,
@@ -154,8 +158,10 @@ class TranslateReport:
     replace_rule_conflict_details: list[dict[str, Any]] = field(default_factory=list)
     replace_rule_scan_ok: bool = True
     contract_errors: list[str] = field(default_factory=list)
+    metrics: dict[str, Any] = field(default_factory=dict)
 
     def as_dict(self) -> dict[str, Any]:
+        """將目前物件轉成供 UI、log 或測試使用的可序列化字典。"""
         return {
             "candidates": self.candidates,
             "reused": self.reused,
@@ -169,6 +175,7 @@ class TranslateReport:
             "batches": self.batches,
             "planned_batches": self.planned_batches,
             "elapsed_sec": self.elapsed_sec,
+            "metrics": dict(self.metrics),
             "ai_response": self.ai_response,
             "quality_retry_candidates": self.quality_retry_candidates,
             "quality_retry_fixed": self.quality_retry_fixed,
@@ -688,6 +695,7 @@ def _log_final_summary(session, report: TranslateReport) -> None:
 def _settle_report(session, report, options, result, failures, buffer, tracker) -> None:
     """共享迴圈結束後，把迴圈結果、資料庫失敗與中止狀態收斂成最終報告。"""
     _sync_loop_result(report, result)
+    report.metrics = dict(getattr(result, "metrics", {}) or {})
     if not options.write_cache:
         # The shared loop still invokes a no-op callback to preserve its
         # generic contract; it must not be reported as a real cache write.
@@ -755,6 +763,64 @@ def _batch_backend_line(
     )
 
 
+def _translation_event_sink(session, event: dict[str, Any]) -> None:
+    """把一個共用批次事件轉成 TaskSession 與 app log 可讀的中文訊息。"""
+    kind = str(event.get("kind") or "")
+    level = "warning" if kind in {"attempt_failure", "retry_wait"} else "info"
+    _log(session, format_batch_event(event), level)
+
+
+def _translation_event_kwargs(
+    session, lm_cfg: dict[str, Any], batch_total: int
+) -> dict[str, Any]:
+    """建立機翻共用批次事件所需的操作、模型、任務識別碼與安全事件 sink。"""
+    return {
+        "on_event": lambda event: _translation_event_sink(session, event),
+        "task_id": str(getattr(session, "task_id", "") or ""),
+        "operation": "translate",
+        "provider": str(get_translation_provider() or ""),
+        "model": str(
+            lm_cfg.get("model") or lm_cfg.get("default_model") or "model-pool"
+        ),
+        "batch_total": batch_total,
+    }
+
+
+def _translation_fixed_input_tokens(lm_cfg: dict[str, Any]):
+    """依模型設定決定是否提供固定輸入 token 的估算器。"""
+    return (
+        estimate_batch_fixed_input_tokens
+        if lm_cfg.get("token_budget_enabled", True)
+        else None
+    )
+
+
+def _translation_lm_cfg(lm_config: Any) -> dict[str, Any]:
+    """從完整設定中取出 lm_translator 子設定；設定不是字典時回傳空字典。"""
+    value = lm_config.get("lm_translator", {}) if isinstance(lm_config, dict) else {}
+    return value if isinstance(value, dict) else {}
+
+
+def _invoke_translation_batch(batch, batch_total, event_callback):
+    """呼叫既有批次翻譯入口，僅在其函式簽名支援時傳入事件 callback。"""
+    if event_callback is None:
+        return translate_batch_smart(batch, total=batch_total)
+    try:
+        parameters = inspect.signature(translate_batch_smart).parameters.values()
+        accepts_events = any(
+            parameter.name == "event_callback"
+            or parameter.kind is inspect.Parameter.VAR_KEYWORD
+            for parameter in parameters
+        )
+    except (TypeError, ValueError):
+        accepts_events = False
+    if accepts_events:
+        return translate_batch_smart(
+            batch, total=batch_total, event_callback=event_callback
+        )
+    return translate_batch_smart(batch, total=batch_total)
+
+
 def _translate_rows(
     session, db, options: TranslateOptions, report: TranslateReport, rows, cancelled
 ) -> None:
@@ -816,6 +882,7 @@ def _translate_rows(
         _flush_buffer(session, db, options.version, buffer, report, failures)
 
     def on_progress(progress: float, message: str, _eta: float) -> None:
+        """更新機翻進度、批次摘要與即時報告，供畫面和後台共用。"""
         session.set_progress(progress)
         if message:
             if message.startswith("✅ 批次完成"):
@@ -834,12 +901,13 @@ def _translate_rows(
         _update_remaining(report)
         session.set_summary({**report.as_dict(), "live": tracker.live()})
 
-    def translate_batch(batch, batch_total):
+    def translate_batch(batch, batch_total, *, event_callback=None):
+        """每批送出前檢查資料庫失敗、取消與連續失敗中止狀態，再呼叫既有翻譯流程。"""
         if failures["db_error"]:
             failures["db_stop"] = True  # 因資料庫失敗而停止；之後補寫成功也不算整體完成
         if cancelled() or is_cancelled() or failures["aborted"] or failures["db_error"]:
             raise TaskCancelled()
-        return translate_batch_smart(batch, total=batch_total)
+        return _invoke_translation_batch(batch, batch_total, event_callback)
 
     items = group_items_by_batch_key(build_items(rows))
     operation_id = str(getattr(session, "id", "") or id(session))
@@ -851,13 +919,8 @@ def _translate_rows(
     _log(session, tracker.start_line())
     # 第一批結束前也先給畫面即時資料（已用時間從開始就會跳動）
     session.set_summary({**report.as_dict(), "live": tracker.live()})
-    lm_config = load_config()
-    lm_cfg = lm_config.get("lm_translator", {}) if isinstance(lm_config, dict) else {}
-    fixed_input_tokens_for_batch = (
-        estimate_batch_fixed_input_tokens
-        if isinstance(lm_cfg, dict) and lm_cfg.get("token_budget_enabled", True)
-        else None
-    )
+    lm_cfg = _translation_lm_cfg(load_config())
+    fixed_input_tokens_for_batch = _translation_fixed_input_tokens(lm_cfg)
     with cancel_scope(cancelled):
         result = run_translator_skeleton(
             items,
@@ -874,6 +937,8 @@ def _translate_rows(
                 on_translated_item=on_translated_item,
                 on_batch_flushed=flush,
                 on_progress=on_progress,
+                **_translation_event_kwargs(session, lm_cfg, report.planned_batches),
+                initial_timings={"selection_ms": report.metrics.get("selection_ms", 0)},
             ),
         )
     flush()
@@ -916,7 +981,9 @@ def run_moddb_translate_service(
             f"開始{'預覽' if options.dry_run else '機翻'}：版本 {options.version}，"
             f"{scope}，單次上限 {options.limit or '不限'} 筆",
         )
+        selection_started = monotonic()
         rows = _select_rows(session, db, options, report)
+        report.metrics["selection_ms"] = round((monotonic() - selection_started) * 1000)
         if rows is not None:
             _translate_rows(session, db, options, report, rows, cancelled)
     except Exception as exc:  # noqa: BLE001 - 背景任務：任何失敗都要回報到 session

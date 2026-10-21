@@ -1,4 +1,4 @@
-"""Responses API transport for Sign in with ChatGPT plan usage."""
+"""供 ChatGPT 登入方案使用的 Responses API 傳輸與錯誤轉換。"""
 
 from __future__ import annotations
 
@@ -50,6 +50,7 @@ class ChatGPTAPIError(RuntimeError):
 
 
 def _response_error(response: requests.Response) -> ChatGPTAPIError:
+    """從 OAuth Responses 錯誤回應擷取可供 UI 顯示的詳細資訊。"""
     try:
         payload = response.json()
     except ValueError:
@@ -57,20 +58,38 @@ def _response_error(response: requests.Response) -> ChatGPTAPIError:
     error = payload.get("error", {}) if isinstance(payload, dict) else {}
     if not isinstance(error, dict):
         error = {}
+    # ChatGPT's OAuth direct route may reject a request before the Responses
+    # API envelope is created.  That route returns FastAPI-style top-level
+    # fields such as {"detail": "..."}, rather than {"error": {...}}.
+    top_level = payload if isinstance(payload, dict) else {}
+    raw_message = (
+        error.get("message")
+        or top_level.get("detail")
+        or top_level.get("message")
+        or ""
+    )
+    if not isinstance(raw_message, str):
+        try:
+            raw_message = json.dumps(raw_message, ensure_ascii=False, sort_keys=True)
+        except (TypeError, ValueError):
+            raw_message = str(raw_message)
+    raw_code = error.get("code") or top_level.get("code")
+    raw_type = error.get("type") or top_level.get("type")
+    raw_param = error.get("param") or top_level.get("param")
     retry_after = _parse_retry_after(response.headers.get("Retry-After"))
     return ChatGPTAPIError(
-        str(error.get("code") or error.get("type") or f"http_{response.status_code}"),
-        str(error.get("message") or ""),
+        str(raw_code or raw_type or f"http_{response.status_code}"),
+        raw_message,
         status=response.status_code,
-        error_type=str(error.get("type") or ""),
-        param=str(error.get("param") or ""),
+        error_type=str(raw_type or ""),
+        param=str(raw_param or ""),
         request_id=response.headers.get("x-request-id", ""),
         retry_after=retry_after,
     )
 
 
 def _parse_retry_after(value: object) -> float | None:
-    """Parse Retry-After delta-seconds or HTTP-date into a nonnegative delay."""
+    """把 Retry-After 秒數或 HTTP 日期解析成非負延遲。"""
     if not isinstance(value, str) or not value.strip():
         return None
     try:
@@ -96,8 +115,10 @@ def _stream_request(
     reasoning_effort: str | None = None,
     service_tier: str | None = None,
     conversation_history: list[dict] | None = None,
+    response_schema: dict | None = None,
 ) -> requests.Response:
-    response_schema = _build_translation_response_schema(payload)
+    """建立並讀取 ChatGPT Responses 串流請求。"""
+    response_schema = response_schema or _build_translation_response_schema(payload)
     input_history = []
     for turn in conversation_history or []:
         role = turn.get("role")
@@ -334,8 +355,9 @@ def call_chatgpt_responses(
     fast: bool = False,
     profile_id: str | None = None,
     conversation_history: list[dict] | None = None,
+    response_schema: dict | None = None,
 ) -> str:
-    """Call Responses with the locally stored ChatGPT OAuth token and SSE stream."""
+    """使用本機 ChatGPT OAuth token 呼叫 Responses 串流。"""
     token_kwargs = {"profile_id": profile_id} if profile_id is not None else {}
     token = get_chatgpt_access_token(**token_kwargs)
     request_kwargs = {
@@ -350,8 +372,13 @@ def call_chatgpt_responses(
         request_kwargs["conversation_history"] = conversation_history
     if reasoning_effort is not None:
         request_kwargs["reasoning_effort"] = reasoning_effort
+    # Codex maps its provider-level fast flag to the Responses API's
+    # service_tier=priority request value. The public ChatGPT OAuth route
+    # rejects the literal service_tier=fast value, but accepts priority.
     if fast:
-        request_kwargs["service_tier"] = "fast"
+        request_kwargs["service_tier"] = "priority"
+    if response_schema is not None:
+        request_kwargs["response_schema"] = response_schema
     try:
         response = _stream_request(**request_kwargs)
     except requests.RequestException as exc:

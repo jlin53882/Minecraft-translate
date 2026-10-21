@@ -1,4 +1,4 @@
-"""批量審核：依「版本 + 目前生效來源」把一批條目標成人工已審核（生效來源不變）。
+"""批量審核：依「版本 + 模組 + 目前生效來源」把一批條目標成人工已審核（生效來源不變）。
 
 單筆審核的規則（只改審核狀態、記錄歷史、可還原、同步其他版本）完全沿用
 ``TranslationDB.review_manual``；這裡只負責選取範圍、預覽統計與逐筆套用。
@@ -27,18 +27,100 @@ _ID_CHUNK = 5000
 class BulkReviewMixin:
     """``TranslationDB`` 的批量審核方法（使用其連線、交易與審核預覽）。"""
 
+    def bulk_review_scope_options(
+        self,
+        version: str,
+        *,
+        quality_pass_only: bool = True,
+    ) -> tuple[tuple[str, ...], dict[str | None, tuple[int, ...]]]:
+        """取得目前版本中真正有未審核候選的模組與來源對照。
+
+        回傳的 ``None`` 模組鍵代表全部模組；查詢沿用批量審核候選的條件，
+        因此不會把只有已審核條目的模組或沒有目前譯文的來源顯示在選單中。
+        """
+        rows = self._bulk_review_scope_rows(version, quality_pass_only)
+        modules: list[str] = []
+        sources_by_mod: dict[str, set[int]] = {}
+        all_sources: set[int] = set()
+        for mod_value, source_value in rows:
+            mod_id = str(mod_value)
+            if mod_id not in sources_by_mod:
+                modules.append(mod_id)
+                sources_by_mod[mod_id] = set()
+            if source_value is not None:
+                source = int(source_value)
+                sources_by_mod[mod_id].add(source)
+                all_sources.add(source)
+        return (
+            tuple(modules),
+            {
+                None: tuple(sorted(all_sources)),
+                **{
+                    mod_id: tuple(sorted(sources))
+                    for mod_id, sources in sources_by_mod.items()
+                },
+            },
+        )
+
+    def _bulk_review_scope_rows(
+        self,
+        version: str,
+        quality_pass_only: bool,
+    ) -> list[tuple[str, int | None]]:
+        """只查選單所需的模組／來源欄位，避免建立完整候選物件。
+
+        批量審核預覽仍需要完整 ``BulkReviewCandidate``；範圍選單只需要
+        ``mod_id`` 與生效來源。品質旗標可用時直接沿 SQL 條件篩選；舊資料庫
+        尚未完成旗標重算時，退回原本的完整候選判斷，確保結果不因最佳化而改變。
+        """
+        criteria = EntryFilter(
+            version=version,
+            review_status="unreviewed",
+            quality=QualityFilter(status="consistent")
+            if quality_pass_only
+            else QualityFilter(),
+        )
+        condition, params = self._filter_sql(criteria)
+        if quality_pass_only:
+            if not self._quality_flags_ready():
+                candidates = self._bulk_review_candidates(
+                    version,
+                    None,
+                    quality_pass_only,
+                )
+                return [
+                    (candidate.mod_id, candidate.source) for candidate in candidates
+                ]
+            condition += " AND " + self._quality_prefilter_sql(
+                criteria.quality, flags_ready=True
+            )
+        # 與 _bulk_review_candidates 相同：空白譯文不應出現在範圍選單。
+        condition += " AND f.zh_tw IS NOT NULL AND trim(f.zh_tw) <> ''"
+        rows = self._q(
+            "SELECT DISTINCT e.mod_id, f.source "
+            + self._query_source()
+            + f" WHERE {condition} ORDER BY e.mod_id, f.source",
+            params,
+        )
+        return [(str(mod_id), source) for mod_id, source in rows]
+
     def _bulk_review_candidates(
         self,
         version: str,
-        source: int,
+        source: int | None,
         quality_pass_only: bool,
         *,
+        mod_id: str | None = None,
         conn: sqlite3.Connection | None = None,
     ) -> tuple[BulkReviewCandidate, ...]:
-        """所選版本中、目前生效來源為 ``source`` 且尚未審核的條目（有譯文者）。"""
+        """所選版本／模組中、來源為 ``source`` 且尚未審核的條目（有譯文者）。
+
+        ``source=None`` 代表不限目前生效來源。
+        """
         criteria = EntryFilter(
             version=version,
-            source=int(source),
+            mod_id=mod_id or None,
+            source=int(source) if source is not None else None,
             # 審核狀態與來源各自獨立：任何來源都只列尚未審核的條目
             review_status="unreviewed",
             quality=QualityFilter(status="consistent")
@@ -138,19 +220,26 @@ class BulkReviewMixin:
     def preview_bulk_review(
         self,
         version: str,
-        source: int,
+        source: int | None,
         *,
+        mod_id: str | None = None,
         quality_pass_only: bool = True,
         propagate: bool = False,
     ) -> BulkReviewPlan:
         """預覽批量審核範圍（不寫入）。"""
-        candidates = self._bulk_review_candidates(version, source, quality_pass_only)
+        source = int(source) if source is not None else None
+        mod_id = str(mod_id).strip() if mod_id is not None else None
+        mod_id = mod_id or None
+        candidates = self._bulk_review_candidates(
+            version, source, quality_pass_only, mod_id=mod_id
+        )
         sibling_info = (
             self._bulk_review_sibling_info(candidates, version) if propagate else ()
         )
         return BulkReviewPlan(
             version=version,
-            source=int(source),
+            source=source,
+            mod_id=mod_id,
             quality_pass_only=quality_pass_only,
             propagate=propagate,
             database_identity=self._database_identity(),
@@ -182,7 +271,11 @@ class BulkReviewMixin:
             if progress_callback is not None:
                 progress_callback("重新檢查資料庫快照", 0.02)
             current = self._bulk_review_candidates(
-                plan.version, plan.source, plan.quality_pass_only, conn=conn
+                plan.version,
+                plan.source,
+                plan.quality_pass_only,
+                mod_id=plan.mod_id,
+                conn=conn,
             )
             if current != plan.candidates:
                 raise ValueError("預覽後條目已變動，請重新產生批量審核預覽")

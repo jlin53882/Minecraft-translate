@@ -151,8 +151,12 @@ def render(rows: list[dict[str, str]]) -> str:
 
 
 def main() -> int:
+    """解析命令列參數並執行目前工具。"""
     rows = collect()
-    OUT.write_text(render(rows), encoding="utf-8")
+    # Keep generated documentation LF-normalized on Windows so git does not
+    # mistake CRLF's carriage return for trailing whitespace.
+    with OUT.open("w", encoding="utf-8", newline="\n") as stream:
+        stream.write(render(rows))
     print(f"寫入 {OUT}（{len(rows)} 項）")
     return 0
 

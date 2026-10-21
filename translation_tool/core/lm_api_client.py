@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import json
 import random
+import time
+from collections.abc import Callable
 from copy import deepcopy
 
 import requests
@@ -52,7 +54,7 @@ TRANSLATION_RESPONSE_SCHEMA = {
 
 
 def _build_translation_response_schema(payload: dict) -> dict:
-    """Constrain the response IDs to the current input batch (array length is validated by the caller)."""
+    """建立限制在目前輸入批次內、供翻譯回應使用的結構。"""
     if not isinstance(payload, dict):
         raise ValueError("Gemini translation payload must be an object")  # noqa: TRY004
     if "items" not in payload:
@@ -116,24 +118,111 @@ def worst_case_request_sec(timeout: float) -> float:
     return NETWORK_RETRY_ATTEMPTS * max(timeout, 0.0) + backoff
 
 
-def _post_with_retry(url: str, **kwargs) -> requests.Response:
+def _post_with_retry(
+    url: str,
+    *,
+    network_event_callback: Callable[[dict[str, object]], None] | None = None,
+    **kwargs,
+) -> requests.Response:
     """requests.post，遇到連線階段的暫時性錯誤時指數退避重試（含 jitter）。"""
     for attempt in range(1, NETWORK_RETRY_ATTEMPTS + 1):
+        _emit_network_event(
+            network_event_callback,
+            {
+                "kind": "network_attempt_start",
+                "network_attempt": attempt,
+                "network_total": NETWORK_RETRY_ATTEMPTS,
+            },
+        )
         try:
-            return requests.post(url, **kwargs)
+            response = requests.post(url, **kwargs)
         except requests.exceptions.SSLError:
+            _emit_network_event(
+                network_event_callback,
+                {
+                    "kind": "network_failure",
+                    "network_attempt": attempt,
+                    "network_total": NETWORK_RETRY_ATTEMPTS,
+                    "error_kind": "tls_error",
+                    "exception_type": "SSLError",
+                    "retryable": False,
+                },
+            )
             raise  # 憑證 / TLS 問題重試無意義
         except requests.exceptions.ConnectionError as e:
+            _emit_network_event(
+                network_event_callback,
+                {
+                    "kind": "network_failure",
+                    "network_attempt": attempt,
+                    "network_total": NETWORK_RETRY_ATTEMPTS,
+                    "error_kind": "connection_error",
+                    "exception_type": type(e).__name__,
+                    "retryable": attempt < NETWORK_RETRY_ATTEMPTS,
+                },
+            )
             if attempt == NETWORK_RETRY_ATTEMPTS:
                 raise
             wait = NETWORK_RETRY_BASE_SEC * (2 ** (attempt - 1))
             wait += random.uniform(0, NETWORK_RETRY_BASE_SEC)
+            _emit_network_event(
+                network_event_callback,
+                {
+                    "kind": "network_retry_wait",
+                    "network_attempt": attempt,
+                    "network_total": NETWORK_RETRY_ATTEMPTS,
+                    "wait_seconds": wait,
+                    "error_kind": "connection_error",
+                    "exception_type": type(e).__name__,
+                },
+            )
             log_warning(
                 f"[API] 連線失敗（第 {attempt}/{NETWORK_RETRY_ATTEMPTS} 次）：{redact_text(e)}；"
                 f"{wait:.1f}s 後重試"
             )
+            wait_started = time.monotonic()
             interruptible_sleep(wait)
+            _emit_network_event(
+                network_event_callback,
+                {
+                    "kind": "network_retry_resume",
+                    "network_attempt": attempt,
+                    "network_total": NETWORK_RETRY_ATTEMPTS,
+                    "wait_seconds": wait,
+                    "elapsed_seconds": time.monotonic() - wait_started,
+                },
+            )
+        else:
+            status = getattr(response, "status_code", None)
+            if not isinstance(status, int):
+                try:
+                    status = int(status)
+                except (TypeError, ValueError):
+                    status = None
+            _emit_network_event(
+                network_event_callback,
+                {
+                    "kind": "network_response",
+                    "network_attempt": attempt,
+                    "network_total": NETWORK_RETRY_ATTEMPTS,
+                    "http_status": status,
+                },
+            )
+            return response
     raise AssertionError("unreachable")  # pragma: no cover
+
+
+def _emit_network_event(
+    callback: Callable[[dict[str, object]], None] | None,
+    event: dict[str, object],
+) -> None:
+    """送出不含 payload、response body 或 credentials 的網路診斷事件。"""
+    if callback is None:
+        return
+    try:
+        callback(event)
+    except Exception:  # noqa: BLE001 - telemetry must never break an API call
+        log_warning("[API] network telemetry callback failed")
 
 
 def _resolve_max_output_tokens(explicit: int | None, lm_cfg: dict) -> int | None:
@@ -151,7 +240,7 @@ def _resolve_max_output_tokens(explicit: int | None, lm_cfg: dict) -> int | None
 def _build_gemini_contents(
     payload: dict, conversation_history: list[dict] | None
 ) -> list[dict]:
-    """Build the current user turn, optionally continuing a client-side conversation."""
+    """建立目前使用者訊息，必要時接續用戶端對話歷史。"""
     contents: list[dict] = []
     for turn in conversation_history or []:
         if not isinstance(turn, dict):
@@ -206,15 +295,10 @@ def call_gemini_requests(
     provider: str | None = None,
     lm_config: dict | None = None,
     fast: bool = False,
+    response_schema: dict | None = None,
+    network_event_callback: Callable[[dict[str, object]], None] | None = None,
 ) -> str:
-    """以同步 requests 方式呼叫 Gemini generateContent API，並回傳純文字回應。
-
-    Args:
-        max_output_tokens: 輸出 token 上限；None 時讀設定檔
-            ``lm_translator.max_output_tokens``（預設 65536）。
-        meta_out: 若提供，會以 ``extract_response_meta`` 的結果更新這個 dict
-            （finish_reason、token 用量）。回傳值維持純文字，既有呼叫端不受影響。
-    """
+    """依 provider 與固定的 lm 設定送出翻譯請求，並回傳模型文字結果。"""
     # Batch translation passes its start-of-task snapshot so a settings change
     # cannot route an in-flight Gemini model to the ChatGPT Responses endpoint.
     lm_cfg = (
@@ -242,7 +326,43 @@ def call_gemini_requests(
             chatgpt_kwargs["conversation_history"] = conversation_history
         if profile_id is not None:
             chatgpt_kwargs["profile_id"] = profile_id
-        return call_chatgpt_responses(**chatgpt_kwargs)
+        if response_schema is not None:
+            chatgpt_kwargs["response_schema"] = response_schema
+        _emit_network_event(
+            network_event_callback,
+            {
+                "kind": "network_attempt_start",
+                "network_attempt": 1,
+                "network_total": 1,
+                "network_scope": "chatgpt_provider_call",
+            },
+        )
+        try:
+            result = call_chatgpt_responses(**chatgpt_kwargs)
+        except Exception as exc:
+            _emit_network_event(
+                network_event_callback,
+                {
+                    "kind": "network_failure",
+                    "network_attempt": 1,
+                    "network_total": 1,
+                    "network_scope": "chatgpt_provider_call",
+                    "error_kind": "provider_error",
+                    "exception_type": type(exc).__name__,
+                },
+            )
+            raise
+        _emit_network_event(
+            network_event_callback,
+            {
+                "kind": "network_response",
+                "network_attempt": 1,
+                "network_total": 1,
+                "network_scope": "chatgpt_provider_call",
+                "http_status": (meta_out or {}).get("http_status", 200),
+            },
+        )
+        return result
     if provider != "gemini":
         raise RuntimeError(f"不支援的翻譯服務供應商：{provider}")
 
@@ -264,7 +384,9 @@ def call_gemini_requests(
             "responseFormat": {
                 "text": {
                     "mimeType": "APPLICATION_JSON",
-                    "schema": _build_translation_response_schema(payload),
+                    "schema": response_schema
+                    if response_schema is not None
+                    else _build_translation_response_schema(payload),
                 }
             },
         },
@@ -277,12 +399,14 @@ def call_gemini_requests(
     request_timeout = int(lm_cfg.get("rate_limit", {}).get("timeout", 600))
     connect_timeout = min(request_timeout, NETWORK_CONNECT_TIMEOUT_SEC)
 
-    response = _post_with_retry(
-        url,
-        headers=headers,
-        json=data,
-        timeout=(connect_timeout, request_timeout),
-    )
+    request_kwargs = {
+        "headers": headers,
+        "json": data,
+        "timeout": (connect_timeout, request_timeout),
+    }
+    if network_event_callback is not None:
+        request_kwargs["network_event_callback"] = network_event_callback
+    response = _post_with_retry(url, **request_kwargs)
 
     if not response.ok:
         raise requests.HTTPError(
@@ -300,6 +424,9 @@ def call_gemini_requests(
         ) from exc
 
     if meta_out is not None:
+        status = getattr(response, "status_code", None)
+        if isinstance(status, int):
+            meta_out["http_status"] = status
         try:
             meta_out.update(extract_response_meta(result))
         except Exception as exc:
