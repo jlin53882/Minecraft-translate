@@ -175,6 +175,7 @@ def _build_filter_card(panel) -> None:
                     [
                         panel.advanced_filters.toggle_button,
                         panel.advanced_filters.active_text,
+                        panel.advanced_filters.clear_button,
                         panel.batch_replace_btn,
                         panel.bulk_review_btn,
                         panel.smart_review_btn,

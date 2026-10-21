@@ -53,6 +53,21 @@ def test_changing_sort_basis_resets_to_its_natural_direction_and_reset_clears():
     assert "A→Z" in filters.sort_direction.tooltip
 
 
+def test_clear_button_resets_active_conditions_and_notifies_once():
+    filters, changes = _filters()
+    filters.quality_status.value = "mismatch"
+    filters.set_summary()
+
+    assert filters.clear_button.visible is True
+
+    filters._clear()
+
+    assert filters.quality_status.value == "all"
+    assert filters.active_text.value == ""
+    assert filters.clear_button.visible is False
+    assert changes == ["changed"]
+
+
 def test_programmatic_sort_value_uses_that_basis_natural_direction():
     filters, _ = _filters()
     filters.sort.value = "entry_newest"  # 沒有走 _selection_changed

@@ -47,6 +47,14 @@ class AdvancedFilters:
         self.toggle_button = kit.button(
             "進階篩選", "ghost", size="sm", on_click=self._toggle
         )
+        self.clear_button = kit.button(
+            "清除篩選",
+            "secondary",
+            size="sm",
+            on_click=self._clear,
+            tooltip="清除目前已套用的進階篩選條件",
+        )
+        self.clear_button.visible = False
         self.active_text = ft.Text("", size=11.5, color=C.MUTED, expand=True)
         self.error_text = ft.Text("", size=11.5, color=C.RED, visible=False)
         self.time_kind = self._dropdown(
@@ -326,6 +334,13 @@ class AdvancedFilters:
                 self.error_text.value = str(exc)
         self._on_change()
 
+    def _clear(self, _e=None) -> None:
+        """清除已套用的進階條件，並通知條目頁重新載入清單。"""
+        if self.set_summary() == 0:
+            return
+        self.reset()
+        self._on_change()
+
     def _ensure_time_kind(self) -> bool:
         """日期條件需要「時間依據」才會生效；沒選時自動用條目匯入時間。"""
         if str(self.time_kind.value or "none") != "none":
@@ -475,4 +490,5 @@ class AdvancedFilters:
             f"進階篩選（{count}）" if not self.panel.visible else "收合進階篩選"
         )
         self.active_text.value = f"已套用 {count} 項進階條件" if count else ""
+        self.clear_button.visible = bool(count)
         return count
