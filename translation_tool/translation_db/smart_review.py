@@ -461,6 +461,25 @@ def _effective_review_sql(alias: str = "f") -> str:
     )
 
 
+def _dedupe_same_text_rows(rows: Sequence[tuple[Any, ...]]) -> list[tuple[Any, ...]]:
+    """同版本、模組、種類且英文與目前譯文狀態都相同的條目只保留第一筆。
+
+    被略過的條目在代表條目套用時由 ``_apply_smart_review_twins`` 以同樣條件一併寫入，
+    所以只需送一次模型、審查一次。key 不納入比對；目前譯文、來源或審核狀態不同的
+    條目各自保留，避免把不同狀態的譯文覆蓋成同一份。
+    """
+    seen: set[tuple[Any, ...]] = set()
+    kept: list[tuple[Any, ...]] = []
+    for row in rows:
+        # row: id, kind, mc_version, mod_id, key, en_us, zh_tw, source, status, ...
+        group = (row[2], row[3], row[1], row[5], row[6], row[7], row[8])
+        if group in seen:
+            continue
+        seen.add(group)
+        kept.append(row)
+    return kept
+
+
 def _smart_review_current_snapshot_sql() -> str:
     """回傳草稿保存與候選套用共用的 CAS 快照查詢。"""
     return (
@@ -685,6 +704,7 @@ class SmartReviewMixin:
         rows = self._q(query_sql, query_params)
         snapshots: list[SmartReviewSnapshot] = []
         absolute_offset = max(0, int(offset))
+        rows = _dedupe_same_text_rows(rows)
         for row_index, row in enumerate(rows, 1):
             ordinal = absolute_offset + row_index
             (
@@ -2007,6 +2027,16 @@ class SmartReviewMixin:
                             actor=actor,
                             note=f"run={run_id}; ordinal={ordinal}",
                         )
+                        self._apply_smart_review_twins(
+                            conn,
+                            entry_id,
+                            current,
+                            proposed,
+                            batch=batch,
+                            actor=actor,
+                            run_id=run_id,
+                            ordinal=ordinal,
+                        )
 
             if result_status != "applied":
                 history.update_candidate(
@@ -2095,6 +2125,58 @@ class SmartReviewMixin:
             ),
         )
         self._refresh(conn, [entry_id])
+
+    def _apply_smart_review_twins(
+        self,
+        conn: sqlite3.Connection,
+        entry_id: int,
+        current: Sequence[Any],
+        proposed: str,
+        *,
+        batch: str,
+        actor: str,
+        run_id: str,
+        ordinal: int,
+    ) -> int:
+        """把代表條目的譯文一併寫給同文且目前狀態相同的條目，回傳寫入筆數。
+
+        同文＝同版本、模組、種類與英文原文；目前譯文、生效來源與審核狀態必須與
+        代表條目套用前相同（也就是選取時被去重掉的那些），已人工審核的人工列不覆蓋。
+        在呼叫端的交易內執行，每筆各自留下 ``smart_review_apply`` history。
+        """
+        kind, mc_version, mod_id, _key, en_us, zh_tw, source, status = current[:8]
+        twin_ids = sorted(
+            int(row[0])
+            for row in conn.execute(
+                "SELECT e.id FROM entry e JOIN effective f ON f.entry_id=e.id "
+                "WHERE e.mc_version=? AND e.mod_id=? AND e.kind=? AND e.en_us=? "
+                "AND e.id!=? AND f.zh_tw=? AND f.source IS ? AND ("
+                + _effective_review_sql()
+                + ") IS ?",
+                (mc_version, mod_id, kind, en_us, entry_id, zh_tw, source, status),
+            )
+        )
+        written = 0
+        for twin_id in twin_ids:
+            twin_manual = conn.execute(
+                "SELECT zh_tw, checker, review_status, revision FROM translation "
+                "WHERE entry_id=? AND source=?",
+                (twin_id, SRC_MANUAL),
+            ).fetchone()
+            if twin_manual is not None and twin_manual[2] == "reviewed":
+                continue
+            self._write_smart_review_manual_row(
+                conn,
+                twin_id,
+                proposed,
+                previous_manual=twin_manual,
+                old_zh_tw=zh_tw,
+                batch=batch,
+                actor=actor,
+                note=f"run={run_id}; twin_of_ordinal={ordinal}",
+            )
+            written += 1
+        return written
 
     def realign_smart_review_candidate(self, run_id: str, ordinal: int) -> str:
         """把可人工編輯候選的快照對齊目前資料庫，讓審查者看到並編輯的是現況。
@@ -2193,6 +2275,16 @@ class SmartReviewMixin:
                     batch=batch,
                     actor=actor,
                     note=f"run={run_id}; ordinal={ordinal}",
+                )
+                self._apply_smart_review_twins(
+                    conn,
+                    entry_id,
+                    current,
+                    proposed,
+                    batch=batch,
+                    actor=actor,
+                    run_id=run_id,
+                    ordinal=ordinal,
                 )
             return self._mark_candidate_applied(
                 history, run_id, ordinal, proposed=proposed, batch=batch
