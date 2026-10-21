@@ -1304,6 +1304,11 @@ class TranslationDB(SmartReviewMixin, BulkReviewMixin, CleanupMixin):
         if criteria.include_ids is not None:
             where.append("e.id IN (SELECT value FROM json_each(?))")
             params.append(json.dumps(criteria.include_ids))
+        if criteria.smart_review is not None:
+            where.append("e.id IN (SELECT value FROM json_each(?))")
+            params.append(
+                json.dumps(self.smart_review_entry_ids(criteria.smart_review))
+            )
         if criteria.exclude_ids:
             where.append("e.id NOT IN (SELECT value FROM json_each(?))")
             params.append(json.dumps(criteria.exclude_ids))

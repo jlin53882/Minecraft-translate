@@ -195,6 +195,26 @@ class TimeFilter:
             raise ValueError("時間區間無效：起始時間必須早於結束時間")
 
 
+# 條目篩選「智慧校對狀態」的選項 -> 最近一次批次中對應的候選狀態。
+SMART_REVIEW_FILTER_GROUPS: dict[str, tuple[str, ...]] = {
+    "any": (
+        "applied",
+        "rejected",
+        "needs_context",
+        "no_change",
+        "invalid",
+        "invalid_format",
+        "stale",
+    ),
+    "applied": ("applied",),
+    "invalid": ("invalid", "invalid_format"),
+    "stale": ("stale",),
+    "needs_context": ("needs_context",),
+    "no_change": ("no_change",),
+    "rejected": ("rejected",),
+}
+
+
 @dataclass(frozen=True)
 class EntryFilter:
     """Immutable resolved query shared by entries, count, paging and batch preview."""
@@ -213,8 +233,14 @@ class EntryFilter:
     sort_by: str = "default"
     include_ids: tuple[int, ...] | None = None
     exclude_ids: tuple[int, ...] = ()
+    # 只列最近一次智慧校對批次中處於該狀態群組的條目（鍵見 SMART_REVIEW_FILTER_GROUPS）
+    smart_review: str | None = None
 
     def __post_init__(self) -> None:
+        if self.smart_review is not None and (
+            self.smart_review not in SMART_REVIEW_FILTER_GROUPS
+        ):
+            raise ValueError(f"未知智慧校對狀態：{self.smart_review}")
         if self.state not in {"all", "none", "diff", "changed", "manual", "ok", "same"}:
             raise ValueError(f"未知條目狀態：{self.state}")
         if self.query_field not in {"all", "source", "translation", "key"}:

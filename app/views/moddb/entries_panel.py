@@ -66,7 +66,10 @@ from app.views.moddb.formatting import (
 from app.views.moddb.history_renderer import render_history
 from app.views.moddb.mc_text_preview import MinecraftTextPreview
 from app.views.moddb.review_scope_dialog import ReviewScopeController
-from app.views.moddb.smart_review_marks import smart_review_mark_chip
+from app.views.moddb.smart_review_marks import (
+    ALL_SMART_REVIEW,
+    smart_review_mark_chip,
+)
 from app.views.moddb.source_filter import SourceFilter
 from app.views.moddb.species_suggestion import (
     TAB_KEY as SPECIES_TAB_KEY,
@@ -694,6 +697,9 @@ class EntriesPanel(ft.Column):
     def _on_source(self) -> None:
         refresh_entry_filter(self)
 
+    def _on_smart_review_filter(self) -> None:
+        refresh_entry_filter(self)
+
     def _on_review_status(self) -> None:
         refresh_entry_filter(self)
 
@@ -1097,6 +1103,7 @@ class EntriesPanel(ft.Column):
         self.state_seg.select("none")
         self.source_filter.reset()
         self.review_filter.value = ALL_REVIEW_STATES
+        self.smart_review_filter.value = ALL_SMART_REVIEW
         self.advanced_filters.reset()
         self._set_flagged(list(entry_ids), dict(drafts))
 

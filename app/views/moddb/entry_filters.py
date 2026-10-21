@@ -13,6 +13,10 @@ from app.views.moddb.batch_replace_dialog import BatchReplaceDialog
 from app.views.moddb.bulk_review_dialog import BulkReviewDialog
 from app.views.moddb.formatting import STATE_LABELS, kind_label
 from app.views.moddb.smart_review_dialog import SmartReviewDialog
+from app.views.moddb.smart_review_marks import (
+    ALL_SMART_REVIEW,
+    SMART_REVIEW_FILTER_OPTIONS,
+)
 from app.views.moddb.source_filter import ALL_SOURCES, ReviewStatusFilter, SourceFilter
 from app.views.moddb.species_dialog import SpeciesCandidateDialog
 
@@ -86,6 +90,16 @@ def _build_controls(panel) -> None:
     )
     panel.source_filter = SourceFilter(panel._on_source)
     panel.review_filter = ReviewStatusFilter(panel._on_review_status).dropdown
+    panel.smart_review_filter = kit.dropdown(
+        label="智慧校對（最近批次）",
+        dense=True,
+        width=210,
+        value=ALL_SMART_REVIEW,
+        on_select=lambda _e: panel._on_smart_review_filter(),
+    )
+    kit.set_dropdown_options(
+        panel.smart_review_filter, list(SMART_REVIEW_FILTER_OPTIONS)
+    )
     panel.search = kit.text_field(
         "搜尋",
         hint="原文、譯文或鍵值（輸入後自動搜尋）",
@@ -182,7 +196,7 @@ def _build_filter_card(panel) -> None:
                     vertical_alignment=ft.CrossAxisAlignment.CENTER,
                 ),
                 ft.Row(
-                    [panel.state_seg, panel.review_filter],
+                    [panel.state_seg, panel.review_filter, panel.smart_review_filter],
                     spacing=10,
                     scroll=ft.ScrollMode.AUTO,
                 ),
@@ -217,6 +231,7 @@ def database_identity(db):
 
 def entry_filter(panel) -> EntryFilter:
     status = panel.review_filter.value
+    smart = panel.smart_review_filter.value
     return EntryFilter(
         version=panel.version or "",
         mod_id=panel.mod_id,
@@ -229,6 +244,7 @@ def entry_filter(panel) -> EntryFilter:
             None if status in (None, "", ALL_REVIEW_STATES) else str(status)
         ),
         entry_ids=tuple(panel.entry_ids) if panel.entry_ids is not None else None,
+        smart_review=(None if smart in (None, "", ALL_SMART_REVIEW) else str(smart)),
         time=panel.advanced_filters.time_filter(),
         quality=panel.advanced_filters.quality_filter(),
         sort_by=panel.advanced_filters.sort_by,

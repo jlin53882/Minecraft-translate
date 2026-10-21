@@ -46,6 +46,7 @@ from translation_tool.core.official_locale import (
 )
 from translation_tool.core.openai_codex_client import ChatGPTAPIError
 from translation_tool.translation_db.models import (
+    SMART_REVIEW_FILTER_GROUPS,
     SmartReviewCandidate,
     SmartReviewMark,
     SmartReviewRunResult,
@@ -1808,6 +1809,14 @@ class SmartReviewMixin:
             if found is not None and found[0] in SMART_REVIEW_MANUAL_EDIT_STATUSES:
                 result[entry_id] = SmartReviewMark(run_id, found[0], found[1])
         return result
+
+    def smart_review_entry_ids(self, group: str) -> tuple[int, ...]:
+        """回傳最近一次批次中處於指定狀態群組的條目 id（鍵見 SMART_REVIEW_FILTER_GROUPS）。"""
+        statuses = set(SMART_REVIEW_FILTER_GROUPS[group])
+        _run_id, marks = SmartReviewHistoryStore(self.path).latest_run_marks()
+        return tuple(
+            sorted(entry_id for entry_id, mark in marks.items() if mark[0] in statuses)
+        )
 
     def list_smart_review_runs(
         self, *, limit: int = 20, offset: int = 0

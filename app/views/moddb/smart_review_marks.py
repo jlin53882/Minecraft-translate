@@ -29,3 +29,17 @@ def smart_review_mark_chip(mark: SmartReviewMark | None) -> ft.Control | None:
     if mark.validation_error:
         tooltip += f"（{mark.validation_error}）"
     return kit.chip(label, tone, tooltip=tooltip)
+
+
+ALL_SMART_REVIEW = "__all__"
+# 條目篩選「智慧校對」下拉選項：(EntryFilter.smart_review 的值, 顯示名稱)；依最近一次批次判斷。
+SMART_REVIEW_FILTER_OPTIONS: tuple[tuple[str, str], ...] = (
+    (ALL_SMART_REVIEW, "全部"),
+    ("any", "有處理結果"),
+    ("applied", "已套用"),
+    ("invalid", "無效／格式不符"),
+    ("stale", "已過期"),
+    ("needs_context", "需補 context"),
+    ("no_change", "AI 認為不用改"),
+    ("rejected", "已保留原譯文"),
+)

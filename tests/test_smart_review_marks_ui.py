@@ -21,3 +21,15 @@ def test_chip_is_hidden_for_ready_and_missing_marks():
     """待審查（ready）與沒有標記時不顯示膠囊。"""
     assert smart_review_mark_chip(None) is None
     assert smart_review_mark_chip(SmartReviewMark("abcdef123456", "ready")) is None
+
+
+def test_filter_options_match_service_groups():
+    """下拉選項的值必須與服務層的狀態群組一一對應，避免選了卻被拒絕。"""
+    from app.views.moddb.smart_review_marks import (
+        ALL_SMART_REVIEW,
+        SMART_REVIEW_FILTER_OPTIONS,
+    )
+    from translation_tool.translation_db.models import SMART_REVIEW_FILTER_GROUPS
+
+    values = {value for value, _label in SMART_REVIEW_FILTER_OPTIONS}
+    assert values == {ALL_SMART_REVIEW, *SMART_REVIEW_FILTER_GROUPS}

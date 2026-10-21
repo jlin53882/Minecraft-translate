@@ -38,7 +38,7 @@
     "app/views/icon_preview/icon_cache.py": 957,
     "app/views/icon_preview_view.py": 832,
     "app/views/moddb/batch_replace_dialog.py": 1013,
-    "app/views/moddb/entries_panel.py": 1126,
+    "app/views/moddb/entries_panel.py": 1133,
     "app/views/moddb/smart_review_reviewer.py": 1090,
     "app/views/moddb/smart_review_run_panel.py": 844,
     "app/views/moddb/species_dialog.py": 841,

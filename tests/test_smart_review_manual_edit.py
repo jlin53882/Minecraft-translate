@@ -8,6 +8,7 @@ import pytest
 
 from translation_tool.translation_db import (
     KIND_LANG,
+    EntryFilter,
     TranslationDB,
     WriteBackItem,
 )
@@ -265,3 +266,43 @@ def test_marks_follow_manual_edit_status(db, monkeypatch):
     assert db.smart_review_marks([candidate.entry_id])[candidate.entry_id].status == (
         "applied"
     )
+
+
+def _listed_keys(db, group: str | None) -> set[str]:
+    """以智慧校對狀態篩選列出條目，回傳 key 集合。"""
+    rows, total = db.list_entries(
+        criteria=EntryFilter(version="1.21.1", smart_review=group), limit=50
+    )
+    assert total == len(rows)
+    return {row.key for row in rows}
+
+
+def test_entry_filter_by_smart_review_status_uses_latest_run(db, monkeypatch):
+    """條目篩選依最近一次批次的狀態群組列出條目，且與數量一致。"""
+    run_id = _run(db, monkeypatch, "no_change")
+    assert _listed_keys(db, None) == {"hello", "bye"}
+    assert _listed_keys(db, "no_change") == {"hello", "bye"}
+    assert _listed_keys(db, "any") == {"hello", "bye"}
+    assert _listed_keys(db, "applied") == set()
+    assert _listed_keys(db, "invalid") == set()
+
+    candidate = _candidate(db, run_id, "bye")
+    assert (
+        db.apply_smart_review_manual_edit(run_id, candidate.ordinal, "再會！")
+        == "applied"
+    )
+    assert _listed_keys(db, "applied") == {"bye"}
+    assert _listed_keys(db, "no_change") == {"hello"}
+
+
+def test_entry_filter_groups_invalid_with_invalid_format(db, monkeypatch):
+    """「無效／格式不符」群組同時涵蓋 invalid 與 invalid_format。"""
+    _run(db, monkeypatch, "suggest_revision")  # hello 的建議缺 %s，所以 invalid
+    assert _listed_keys(db, "invalid") == {"hello"}
+    assert _listed_keys(db, "stale") == set()
+
+
+def test_entry_filter_rejects_unknown_smart_review_value():
+    """未知的智慧校對篩選值在建立條件時就被拒絕。"""
+    with pytest.raises(ValueError, match="未知智慧校對狀態"):
+        EntryFilter(version="1.21.1", smart_review="nope")
