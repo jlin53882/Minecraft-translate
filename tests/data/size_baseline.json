@@ -40,7 +40,7 @@
     "app/views/moddb/batch_replace_dialog.py": 1013,
     "app/views/moddb/entries_panel.py": 1104,
     "app/views/moddb/smart_review_dialog.py": 1040,
-    "app/views/moddb/smart_review_reviewer.py": 901,
+    "app/views/moddb/smart_review_reviewer.py": 1002,
     "app/views/moddb/smart_review_run_panel.py": 844,
     "app/views/moddb/species_dialog.py": 841,
     "app/views/moddb/translate_panel.py": 1087

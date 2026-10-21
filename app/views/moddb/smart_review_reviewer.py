@@ -240,8 +240,8 @@ class SmartReviewReviewer:
         self._build_controls()
         self.body = ft.Column([], spacing=12, scroll=ft.ScrollMode.AUTO, expand=True)
         self.control = ft.Column(
-            [self._toolbar(), self.progress_bar, self.body],
-            spacing=10,
+            [self._toolbar(), self.body],
+            spacing=12,
             expand=True,
         )
         self._show_empty(
@@ -265,27 +265,55 @@ class SmartReviewReviewer:
         )
         self.position_suffix = ft.Text("", size=13, weight=ft.FontWeight.W_600)
         self.position_control = ft.Row(
-            [ft.Text("第", size=13), self.position_input, self.position_suffix],
-            spacing=2,
+            [
+                ft.Text("目前", size=11.5, color=C.DIM),
+                ft.Text("第", size=13, color=C.MUTED),
+                self.position_input,
+                self.position_suffix,
+            ],
+            spacing=4,
             vertical_alignment=ft.CrossAxisAlignment.CENTER,
         )
-        self.summary_text = ft.Text("", size=12, color=C.MUTED, selectable=True)
-        self.run_text = ft.Text("", size=11.5, color=C.DIM, selectable=True)
-        self.progress_bar = kit.progress_bar(0.0, "em", height=5)
-        self.prev_btn = ft.OutlinedButton(
-            "上一筆", icon=ft.Icons.ARROW_BACK, on_click=lambda _e: self._move(-1)
+        self.position_control = ft.Container(
+            content=self.position_control,
+            padding=ft.Padding.symmetric(horizontal=10, vertical=4),
+            bgcolor=C.PANEL2,
+            border=ft.Border.all(1, C.LINE2),
+            border_radius=design.RADIUS_CONTROL,
         )
-        self.next_btn = ft.OutlinedButton(
-            "下一筆", icon=ft.Icons.ARROW_FORWARD, on_click=lambda _e: self._move(1)
+        self.summary_text = ft.Text(
+            "", size=12.5, color=C.TEXT, weight=ft.FontWeight.W_600, selectable=True
         )
-        self.reject_btn = ft.OutlinedButton(
-            "保留原譯文", icon=ft.Icons.RESTORE, on_click=self._reject
+        self.run_text = ft.Text(
+            "",
+            size=11.5,
+            color=C.DIM,
+            selectable=True,
+            overflow=ft.TextOverflow.ELLIPSIS,
         )
-        self.save_btn = ft.OutlinedButton(
-            "儲存草稿", icon=ft.Icons.SAVE_OUTLINED, on_click=self._save
+        self.progress_bar = kit.progress_bar(0.0, "em", height=7)
+        self.prev_btn = kit.button(
+            "上一筆",
+            "secondary",
+            icon=ft.Icons.ARROW_BACK,
+            on_click=lambda _e: self._move(-1),
+            tooltip="載入上一筆候選",
         )
-        self.apply_btn = ft.FilledButton(
-            "套用這筆", icon=ft.Icons.CHECK, on_click=self._apply
+        self.next_btn = kit.button(
+            "下一筆",
+            "secondary",
+            icon=ft.Icons.ARROW_FORWARD,
+            on_click=lambda _e: self._move(1),
+            tooltip="載入下一筆候選",
+        )
+        self.reject_btn = kit.button(
+            "保留原譯文", "secondary", icon=ft.Icons.RESTORE, on_click=self._reject
+        )
+        self.save_btn = kit.button(
+            "儲存草稿", "secondary", icon=ft.Icons.SAVE_OUTLINED, on_click=self._save
+        )
+        self.apply_btn = kit.button(
+            "套用這筆", "primary", icon=ft.Icons.CHECK, on_click=self._apply
         )
         self.hint_text = ft.Text("", size=12, color=C.GOLD, selectable=True)
         self.format_text = ft.Text("", size=12, color=C.MUTED, selectable=True)
@@ -297,25 +325,67 @@ class SmartReviewReviewer:
             on_change=self._on_draft_change,
         )
 
+    def _status_panel(self) -> ft.Control:
+        """建立批次狀態摘要卡，集中呈現統計與批次識別資訊。"""
+        return ft.Container(
+            content=ft.Column(
+                [
+                    ft.Row(
+                        [
+                            ft.Icon(ft.Icons.INSIGHTS_OUTLINED, size=17, color=C.DIA),
+                            ft.Text(
+                                "批次狀態",
+                                size=11.5,
+                                weight=ft.FontWeight.W_700,
+                                color=C.MUTED,
+                            ),
+                        ],
+                        spacing=6,
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    ),
+                    self.summary_text,
+                    self.run_text,
+                ],
+                spacing=5,
+                tight=True,
+            ),
+            padding=ft.Padding.symmetric(horizontal=12, vertical=10),
+            bgcolor=C.PANEL2,
+            border=ft.Border.all(1, C.LINE),
+            border_radius=design.RADIUS_CONTROL,
+        )
+
     def _toolbar(self) -> ft.Control:
-        """建立篩選、位置與狀態摘要列。"""
-        return ft.Column(
+        """建立篩選、位置、狀態摘要與進度列。"""
+        navigation = ft.Row(
             [
-                ft.Row(
-                    [
-                        self.filter_dd,
-                        self.prev_btn,
-                        self.next_btn,
-                        self.position_control,
-                    ],
-                    spacing=10,
-                    wrap=True,
-                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                ),
-                self.summary_text,
-                self.run_text,
+                self.filter_dd,
+                ft.Row([self.prev_btn, self.next_btn], spacing=8, wrap=True),
+                self.position_control,
             ],
-            spacing=4,
+            spacing=10,
+            wrap=True,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+        )
+        content = ft.Column(
+            [
+                ft.Text("依狀態檢視候選，完成後再套用", size=11.5, color=C.MUTED),
+                navigation,
+                self._status_panel(),
+                ft.Container(
+                    content=self.progress_bar,
+                    padding=ft.Padding.only(left=2, right=2, top=1),
+                ),
+            ],
+            spacing=12,
+        )
+        return kit.section_card(
+            "逐筆審查",
+            content,
+            icon=ft.Icons.RATE_REVIEW_OUTLINED,
+            tone="em",
+            badge=kit.chip("人工確認", "dia"),
+            padding=ft.Padding.symmetric(horizontal=16, vertical=14),
         )
 
     # ──────────────── 載入 ────────────────
@@ -522,17 +592,48 @@ class SmartReviewReviewer:
             )
         if row.confidence is not None:
             chips.append(kit.chip(f"信心 {row.confidence:.0%}", "neutral"))
-        return ft.Column(
-            [
-                ft.Text(
-                    f"{row.mod_id}:{row.key}",
-                    size=13,
-                    selectable=True,
-                    font_family=design.FONT_MONO,
-                ),
-                ft.Row(chips, spacing=6, wrap=True),
-            ],
-            spacing=6,
+        return ft.Container(
+            content=ft.Column(
+                [
+                    ft.Row(
+                        [
+                            ft.Container(
+                                content=ft.Icon(
+                                    ft.Icons.TRANSLATE_OUTLINED,
+                                    size=18,
+                                    color=C.DIA,
+                                ),
+                                width=34,
+                                height=34,
+                                alignment=ft.Alignment.CENTER,
+                                bgcolor=C.DIA_BG,
+                                border_radius=10,
+                            ),
+                            ft.Column(
+                                [
+                                    ft.Text("目前條目", size=11, color=C.MUTED),
+                                    ft.Text(
+                                        f"{row.mod_id}:{row.key}",
+                                        size=13,
+                                        selectable=True,
+                                        font_family=design.FONT_MONO,
+                                    ),
+                                ],
+                                spacing=2,
+                                tight=True,
+                            ),
+                        ],
+                        spacing=10,
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    ),
+                    ft.Row(chips, spacing=6, wrap=True),
+                ],
+                spacing=10,
+            ),
+            padding=ft.Padding.symmetric(horizontal=14, vertical=12),
+            bgcolor=C.PANEL,
+            border=ft.Border.all(1, C.LINE),
+            border_radius=design.RADIUS_CARD,
         )
 
     @staticmethod
