@@ -8,6 +8,7 @@ import os
 import re
 import threading
 import time
+import uuid
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -222,6 +223,33 @@ class ReplaceRulesStore:
         """取得規則數量，不建立可變複本，也不在快取命中時讀檔。"""
         return len(self.get_snapshot(path, source=source))
 
+    def save(
+        self,
+        path: str | os.PathLike[str],
+        rules: list[dict[str, str]],
+    ) -> None:
+        """以原子替換儲存規則，並在同一把鎖內發布快取異動。"""
+        resolved_path = self._resolved_path(path)
+        payload = orjson.dumps(
+            rules, option=orjson.OPT_INDENT_2 | orjson.OPT_APPEND_NEWLINE
+        )
+        temporary = resolved_path.with_name(
+            f".{resolved_path.name}.{uuid.uuid4().hex}.tmp"
+        )
+        try:
+            with self._lock:
+                resolved_path.parent.mkdir(parents=True, exist_ok=True)
+                with temporary.open("wb") as file:
+                    file.write(payload)
+                    file.flush()
+                    os.fsync(file.fileno())
+                os.replace(temporary, resolved_path)
+                self._cache.pop(self._cache_key(resolved_path), None)
+                listeners = list(self._listeners)
+        finally:
+            temporary.unlink(missing_ok=True)
+        self._notify(listeners, resolved_path)
+
     def invalidate(
         self,
         path: str | os.PathLike[str] | None = None,
@@ -319,21 +347,13 @@ def save_replace_rules(
     ``raise_on_error`` keeps the historical log-and-continue behavior for
     best-effort callers while allowing durable user actions to observe failure.
     """
-    resolved_path = _resolve_rules_path(path)
     try:
-        resolved_path.parent.mkdir(parents=True, exist_ok=True)
-        with resolved_path.open("wb") as f:
-            f.write(
-                orjson.dumps(
-                    rules, option=orjson.OPT_INDENT_2 | orjson.OPT_APPEND_NEWLINE
-                )
-            )
+        replace_rules_store.save(path, rules)
     except Exception as e:
+        resolved_path = _resolve_rules_path(path)
         log_error("儲存替換規則到 %s 失敗: %s", resolved_path, e)
         if raise_on_error:
             raise
-    else:
-        replace_rules_store.invalidate(resolved_path)
 
 
 def load_custom_translations(folder_path: str, filename="table.tsv") -> dict[str, str]:
