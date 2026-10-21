@@ -10,6 +10,7 @@ from pathlib import Path
 import flet as ft
 
 from app.services_impl.moddb_smart_review_service import (
+    SMART_REVIEW_DEFAULT_BATCH_SIZE,
     SMART_REVIEW_DEFAULT_SOURCE,
     SMART_REVIEW_MAX_BATCH_SIZE,
     count_moddb_smart_review_candidates_from_path,
@@ -160,7 +161,7 @@ class SmartReviewRunPanel:
         )
         self.batch_field = kit.text_field(
             "每批（筆）",
-            value="40",
+            value=str(SMART_REVIEW_DEFAULT_BATCH_SIZE),
             width=110,
             on_change=lambda _e: self._update_estimate_text(),
         )

@@ -64,6 +64,7 @@ from translation_tool.utils.text_matching import contains_term, term_canonical_k
 logger = logging.getLogger(__name__)
 
 SMART_REVIEW_DECISIONS = ("no_change", "suggest_revision", "needs_context")
+SMART_REVIEW_DEFAULT_BATCH_SIZE = 20
 SMART_REVIEW_MAX_BATCH_SIZE = 50
 SMART_REVIEW_VALIDATION_REPAIR_LIMIT = 1
 SMART_REVIEW_ISSUE_TYPES = (
@@ -2299,7 +2300,7 @@ def run_smart_review(
     provider: str = "gemini",
     version: str | None = None,
     limit: int = 1000,
-    batch_size: int = 40,
+    batch_size: int = SMART_REVIEW_DEFAULT_BATCH_SIZE,
     progress: Callable[[dict[str, Any]], None] | None = None,
     lm_config: dict[str, Any] | None = None,
     require_reviewed_reference: bool = False,
@@ -3914,6 +3915,7 @@ def run_smart_review(
 
 __all__ = [
     "SMART_REVIEW_DECISIONS",
+    "SMART_REVIEW_DEFAULT_BATCH_SIZE",
     "SMART_REVIEW_ISSUE_TYPES",
     "SMART_REVIEW_SYSTEM_PROMPT",
     "SmartReviewMixin",

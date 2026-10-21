@@ -34,10 +34,22 @@ ALL_SOURCES = "__all__"
 
 
 class BulkReviewDialog:
-    """批量審核對話框：依版本、模組與目前生效來源預覽候選，確認後才執行批次審核。"""
+    """批量審核對話框：預填範圍後預覽候選，確認後才執行批次審核。"""
 
-    def __init__(self, page: ft.Page, get_db, version: str | None, on_complete):
-        """初始化批量審核對話框的篩選、預覽與執行狀態。"""
+    def __init__(
+        self,
+        page: ft.Page,
+        get_db,
+        version: str | None,
+        on_complete,
+        *,
+        mod_id: str | None = None,
+        effective_source: int | None = None,
+    ):
+        """初始化對話框，必要時預填條目頁的模組與目前生效來源。
+
+        預填只設定控制項值，不會自動產生預覽，也不會開始批量審核。
+        """
         self.page = page
         self.get_db = get_db
         self.on_complete = on_complete
@@ -47,12 +59,22 @@ class BulkReviewDialog:
         self.preview_page = 1
         self._busy = False
         self._generation = 0
-        self._build_controls(version)
+        self._build_controls(
+            version,
+            initial_mod_id=mod_id,
+            initial_effective_source=effective_source,
+        )
         self._build_dialog()
 
     # ------------------------------------------------------------------ 版面
-    def _build_controls(self, version: str | None) -> None:
-        """建立批量審核的版本、模組、來源篩選與操作控制項。"""
+    def _build_controls(
+        self,
+        version: str | None,
+        *,
+        initial_mod_id: str | None = None,
+        initial_effective_source: int | None = None,
+    ) -> None:
+        """建立篩選控制項，並套用開啟對話框時傳入的初始範圍。"""
         db = self.get_db()
         versions = db.versions() if db else []
         self.version_dd = kit.dropdown(
@@ -63,8 +85,18 @@ class BulkReviewDialog:
         self.mod_dd = kit.dropdown(
             label="模組", dense=True, width=220, on_select=self._invalidate
         )
+        self.mod_dd.value = (
+            str(initial_mod_id).strip()
+            if initial_mod_id not in (None, "")
+            else ALL_MODS
+        )
         self.source_dd = kit.dropdown(
             label="目前生效來源", dense=True, width=260, on_select=self._invalidate
+        )
+        self.source_dd.value = (
+            str(initial_effective_source)
+            if initial_effective_source is not None
+            else ALL_SOURCES
         )
         self._refresh_mods()
         self._refresh_sources()

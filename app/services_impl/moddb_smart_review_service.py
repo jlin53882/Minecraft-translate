@@ -21,6 +21,7 @@ from translation_tool.translation_db import (
 )
 from translation_tool.translation_db.schema import SRC_AI
 from translation_tool.translation_db.smart_review import (
+    SMART_REVIEW_DEFAULT_BATCH_SIZE as _SMART_REVIEW_DEFAULT_BATCH_SIZE,
     SMART_REVIEW_MAX_BATCH_SIZE as _SMART_REVIEW_MAX_BATCH_SIZE,
 )
 from translation_tool.translation_db.smart_review import (
@@ -29,6 +30,7 @@ from translation_tool.translation_db.smart_review import (
 from translation_tool.utils.config_manager import load_config
 
 SMART_REVIEW_DEFAULT_SOURCE = SRC_AI
+SMART_REVIEW_DEFAULT_BATCH_SIZE = _SMART_REVIEW_DEFAULT_BATCH_SIZE
 SMART_REVIEW_MAX_BATCH_SIZE = _SMART_REVIEW_MAX_BATCH_SIZE
 
 
@@ -106,7 +108,7 @@ def run_moddb_smart_review_from_path(
     model_name: str,
     version: str | None = None,
     limit: int = 1000,
-    batch_size: int = 40,
+    batch_size: int = SMART_REVIEW_DEFAULT_BATCH_SIZE,
     progress: Callable[[dict[str, Any]], None] | None = None,
     require_reviewed_reference: bool = False,
     prioritize_named_keys: bool = False,
@@ -301,6 +303,7 @@ def reject_moddb_smart_review_candidate_from_path(
 
 
 __all__ = [
+    "SMART_REVIEW_DEFAULT_BATCH_SIZE",
     "SMART_REVIEW_DEFAULT_SOURCE",
     "SmartReviewCandidate",
     "apply_moddb_smart_review_candidate_from_path",

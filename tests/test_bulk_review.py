@@ -304,6 +304,28 @@ def test_dialog_filters_preview_by_module(db):
     assert {candidate.mod_id for candidate in dialog.plan.candidates} == {"foo"}
 
 
+def test_dialog_prefills_scope_without_creating_preview(db):
+    """驗證批量審核可預填模組與來源，且開啟時仍沒有預覽。"""
+    from app.views.moddb.bulk_review_dialog import ALL_SOURCES, BulkReviewDialog
+    from tests.conftest import mock_page
+
+    db.ingest("1.21.1", [_item("k", "Steel", "鋼", mod="accessories")])
+    dialog = BulkReviewDialog(
+        mock_page(),
+        lambda: db,
+        "1.21.1",
+        None,
+        mod_id="accessories",
+        effective_source=SRC_JAR_TW,
+    )
+
+    assert dialog.mod_dd.value == "accessories"
+    assert dialog.source_dd.value == str(SRC_JAR_TW)
+    assert dialog.plan is None
+    assert dialog.apply_btn.disabled is True
+    assert dialog.source_dd.value != ALL_SOURCES
+
+
 def test_sync_rejects_plan_when_another_version_changed_after_preview(db):
     db.ingest("1.21.1", [_item("k", "Steel", "鋼")])
     db.ingest("1.20.1", [_item("k", "Steel", "鋼鐵")])

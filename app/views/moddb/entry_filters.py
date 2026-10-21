@@ -256,6 +256,7 @@ def open_batch_replace(panel, _e=None) -> None:
 
 
 def open_bulk_review(panel, _e=None) -> None:
+    """開啟批量審核，預填目前頁面支援的範圍但不自動產生預覽。"""
     if panel.drafts:
         show_snack(
             panel._page,
@@ -267,7 +268,12 @@ def open_bulk_review(panel, _e=None) -> None:
         show_snack(panel._page, "目前沒有可用的資料庫版本。", C.GOLD)
         return
     BulkReviewDialog(
-        panel._page, panel.db, panel.version, panel._after_batch_replace
+        panel._page,
+        panel.db,
+        panel.version,
+        panel._after_batch_replace,
+        mod_id=panel.mod_id,
+        effective_source=panel.source_filter.code,
     ).open()
 
 

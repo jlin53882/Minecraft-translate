@@ -109,6 +109,7 @@ def test_dialog_builds_three_panels_with_defaults(db, monkeypatch):
     dialog = SmartReviewDialog(_sync_page(), lambda: db, "1.21.1", None)
     assert dialog.run_panel.model_dd.value == "gemini-3.1-flash-lite"
     assert dialog.run_panel.limit_field.value == "1000"
+    assert dialog.run_panel.batch_field.value == "20"
     assert dialog.run_panel.start_btn.disabled is False
     assert dialog.nav.value == "run"
     visible = {name: control.visible for name, control in dialog._panels.items()}
@@ -794,6 +795,42 @@ def test_smart_review_completion_refreshes_entry_list_before_parent_changed(
 
     assert events[0] == ("refresh", panel, {"keep_selection": True})
     assert events[1] == ("parent",)
+
+
+def test_bulk_review_prefills_entry_scope_without_running_preview(monkeypatch):
+    """驗證批量審核只預填目前範圍，不會在開啟時自動預覽。"""
+    captured = {}
+    panel = SimpleNamespace(
+        _page=mock_page(),
+        drafts={},
+        version="1.21.1",
+        mod_id="accessories",
+        source_filter=SimpleNamespace(code=7),
+        db=lambda: object(),
+        _after_batch_replace=lambda: None,
+    )
+
+    class FakeBulkReviewDialog:
+        """記錄批量審核開啟時收到的預填值。"""
+
+        def __init__(self, *_args, **kwargs):
+            """保存建構參數，模擬尚未產生預覽的對話框。"""
+            captured.update(kwargs)
+            self.previewed = False
+
+        def open(self):
+            """開啟替身，不觸發預覽或執行。"""
+            captured["opened"] = True
+
+    monkeypatch.setattr(entry_filters, "BulkReviewDialog", FakeBulkReviewDialog)
+
+    entry_filters.open_bulk_review(panel)
+
+    assert captured == {
+        "mod_id": "accessories",
+        "effective_source": 7,
+        "opened": True,
+    }
 
 
 def test_reviewer_apply_notifies_parent_and_advances_queue(reviewer, monkeypatch):
