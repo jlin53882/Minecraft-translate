@@ -587,11 +587,14 @@ def test_quality_retry_request_failure_keeps_original_and_logs_exception_detail(
     assert status == "AUTO"
     assert len(calls) == 2
     assert result == [{**item, "text": "使用 next"}]
-    quality_warnings = [message for message in warnings if "[品質重試]" in message]
+    quality_warnings = [
+        message
+        for message in warnings
+        if "[品質重試]" in message and "保留第一次譯文" in message
+    ]
     assert len(quality_warnings) == 1
     assert "HTTPError" in quality_warnings[0]
     assert "429" in quality_warnings[0]
-    assert "保留第一次譯文" in quality_warnings[0]
     assert normal_error_handler_calls == []
 
 

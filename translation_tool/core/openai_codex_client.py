@@ -3,14 +3,13 @@
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
-from email.utils import parsedate_to_datetime
 from typing import Any
 
 import requests
 
 from translation_tool.core.codex_oauth import get_chatgpt_access_token
 from translation_tool.core.lm_api_client import _build_translation_response_schema
+from translation_tool.core.retry_after import parse_retry_after_header_value
 from translation_tool.utils.redaction import redact_text
 
 _RESPONSES_URL = "https://api.openai.com/v1/responses"
@@ -89,19 +88,8 @@ def _response_error(response: requests.Response) -> ChatGPTAPIError:
 
 
 def _parse_retry_after(value: object) -> float | None:
-    """把 Retry-After 秒數或 HTTP 日期解析成非負延遲。"""
-    if not isinstance(value, str) or not value.strip():
-        return None
-    try:
-        return max(0.0, float(value.strip()))
-    except ValueError:
-        try:
-            retry_at = parsedate_to_datetime(value)
-        except (TypeError, ValueError, OverflowError):
-            return None
-        if retry_at.tzinfo is None:
-            retry_at = retry_at.replace(tzinfo=UTC)
-        return max(0.0, (retry_at - datetime.now(UTC)).total_seconds())
+    """把 Retry-After 秒數或 HTTP 日期解析成有限的非負延遲；無效回傳 None。"""
+    return parse_retry_after_header_value(value)
 
 
 def _stream_request(

@@ -5,14 +5,11 @@
 """
 
 import json
-import math
 import random
 import time
 from contextlib import nullcontext
 from copy import deepcopy
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
-from email.utils import parsedate_to_datetime
 
 import requests
 
@@ -68,6 +65,7 @@ from translation_tool.core.official_locale import (
     terminology_issues,
     terminology_terms_for_item,
 )
+from translation_tool.core.retry_after import parse_response_retry_after
 from translation_tool.utils.cancellation import (
     TaskCancelled,
     cancel_scope,
@@ -93,6 +91,10 @@ GEMINI_503_MAX_RETRY_AFTER_SEC = 120
 # 次數是逐把 key 計算：不同 key 的 overload 不互相累加。
 OVERLOAD_KEY_SWITCH_THRESHOLD = 3
 CHATGPT_MAX_RETRIES = 3
+# 429 沒有任何可用的等待提示時的保守等待秒數。
+RATE_LIMIT_DEFAULT_WAIT_SEC = 10
+# 429 回應無法解析時，連續保守重試同一把 key 的次數；超過才當成該 key 受限並輪替。
+UNPARSED_RATE_LIMIT_MAX_RETRIES = 3
 CHATGPT_MAX_RETRY_AFTER_SEC = 120
 CHATGPT_TRANSIENT_USAGE_ERROR_CODES = frozenset(
     {
@@ -593,6 +595,7 @@ class _BatchRuntime:
     chatgpt_profile_id: str | None = None
     chatgpt_retry_count: int = 0
     gemini_503_retry_count: int = 0
+    unparsed_rate_limit_count: int = 0
     gemini_503_attempted_models: set[int] = field(default_factory=set)
     contract_errors: list[str] = field(default_factory=list)
     pending_contract_event: dict | None = None
@@ -1072,20 +1075,26 @@ def _prepare_batch(runtime: _BatchRuntime) -> _BatchRound:
     )
 
 
-def _parse_rate_limit_error(error: Exception) -> tuple[str, int, str]:
-    """從 429 錯誤解析配額種類、重試延遲與已遮罩訊息。"""
-    error_json = error.response.json().get("error", {})
+def _parse_rate_limit_error(error: Exception) -> tuple[str, float, str]:
+    """從 429 錯誤解析配額種類、重試延遲秒數（可含小數，無則 0）與已遮罩訊息。
+
+    配額種類為 ``rpd``／``rpm``／``quota``；回應 body 不是可解析的 Google error JSON 時
+    回傳 ``unparsed``：它仍是 HTTP 429，只能保守視為速率限制，不能當成需輪替 key 的配額耗盡。
+    延遲來自 ``Retry-After`` header 或 ``RetryInfo``（見 ``retry_after.parse_retry_after``）。
+    """
+    response = getattr(error, "response", None)
+    retry_after = parse_response_retry_after(response) or 0.0
+    try:
+        error_json = response.json().get("error", {})
+        if not isinstance(error_json, dict):
+            raise TypeError("429 error body must be an object")
+    except (AttributeError, TypeError, ValueError):
+        return "unparsed", retry_after, redact_text(error).upper()
     remote_message = redact_text(error_json.get("message", "")).upper()
     quota_id = ""
-    retry_after = 0
     for detail in error_json.get("details", []):
-        detail_type = detail.get("@type")
-        if detail_type == "type.googleapis.com/google.rpc.QuotaFailure":
+        if detail.get("@type") == "type.googleapis.com/google.rpc.QuotaFailure":
             quota_id = detail.get("violations", [{}])[0].get("quotaId", "").upper()
-        if detail_type == "type.googleapis.com/google.rpc.RetryInfo":
-            retry_after = int(
-                float(str(detail.get("retryDelay", "0s")).replace("s", ""))
-            )
     if "PERDAY" in quota_id or "DAILY" in remote_message:
         return "rpd", retry_after, remote_message
     if "PERMINUTE" in quota_id or "RPM" in remote_message:
@@ -1105,47 +1114,9 @@ def _remote_error_detail(error: Exception, limit: int = 300) -> str:
     return redact_text(text.strip())[:limit]
 
 
-def _parse_gemini_retry_after_seconds(response, error_json: dict) -> float | None:
-    """讀取 Retry-After 或 Google RetryInfo 的非負延遲秒數。"""
-    headers = getattr(response, "headers", {}) or {}
-    header_value = headers.get("Retry-After")
-    if header_value is not None:
-        try:
-            wait_sec = float(header_value)
-        except (TypeError, ValueError):
-            try:
-                retry_at = parsedate_to_datetime(str(header_value))
-                if retry_at.tzinfo is None:
-                    retry_at = retry_at.replace(tzinfo=UTC)
-                wait_sec = (retry_at - datetime.now(UTC)).total_seconds()
-            except (TypeError, ValueError, OverflowError, IndexError):
-                wait_sec = None
-        if wait_sec is not None and math.isfinite(wait_sec):
-            return max(0.0, wait_sec)
-
-    error_value = error_json.get("error", {}) if isinstance(error_json, dict) else {}
-    error = error_value if isinstance(error_value, dict) else {}
-    details = error.get("details", []) if isinstance(error, dict) else []
-    for detail in details if isinstance(details, list) else []:
-        if not isinstance(detail, dict) or not str(detail.get("@type", "")).endswith(
-            "RetryInfo"
-        ):
-            continue
-        retry_delay = detail.get("retryDelay")
-        if retry_delay is None:
-            continue
-        raw_delay = str(retry_delay).strip().removesuffix("s")
-        try:
-            wait_sec = float(raw_delay)
-        except (TypeError, ValueError, OverflowError):
-            continue
-        if math.isfinite(wait_sec):
-            return max(0.0, wait_sec)
-    return None
-
-
 def _reset_gemini_503_retry_state(runtime: _BatchRuntime) -> None:
     runtime.gemini_503_retry_count = 0
+    runtime.unparsed_rate_limit_count = 0
     runtime.gemini_503_attempted_models.clear()
 
 
@@ -1378,7 +1349,7 @@ def _handle_service_unavailable_error(
     )
     if high_demand_unavailable:
         runtime.key_cycle.clear_overload()
-        retry_after = _parse_gemini_retry_after_seconds(response, error_json)
+        retry_after = parse_response_retry_after(response)
         if retry_after is not None and retry_after > GEMINI_503_MAX_RETRY_AFTER_SEC:
             return _defer_gemini_503_remaining_items(
                 runtime,
@@ -1437,6 +1408,35 @@ def _handle_service_unavailable_error(
     return decide_batch_action(
         "service_unavailable", has_next_model=model_index + 1 < len(runtime.model_pool)
     ).action
+
+
+def _handle_unparsed_rate_limit(
+    runtime: _BatchRuntime,
+    retry_after: float,
+    remote_message: str,
+    retry_event_callback,
+) -> BatchAction:
+    """429 回應無法解析時的保守處理：先等待並重試同一把 key，連續失敗才輪替。"""
+    if runtime.unparsed_rate_limit_count >= UNPARSED_RATE_LIMIT_MAX_RETRIES:
+        runtime.unparsed_rate_limit_count = 0
+        log_warning(
+            f"[❓] 429 回應無法解析且重試 {UNPARSED_RATE_LIMIT_MAX_RETRIES} 次仍受限"
+            f" ({remote_message or 'unknown'})，嘗試切換 Key"
+        )
+        if not runtime.key_cycle.mark_failed():
+            return BatchAction.EXHAUSTED
+        return BatchAction.ROTATE_KEY
+    runtime.unparsed_rate_limit_count += 1
+    wait_time = retry_after or RATE_LIMIT_DEFAULT_WAIT_SEC
+    log_info(f"[⏳] 429 回應無法解析，視為頻率限制：等待 {wait_time:g} 秒")
+    _sleep_with_runtime_event(
+        runtime,
+        wait_time,
+        reason="rate_limit_unparsed",
+        callback=retry_event_callback,
+        kind="rate_limit_wait",
+    )
+    return BatchAction.RETRY_SAME_KEY
 
 
 def _handle_batch_error(
@@ -1523,9 +1523,13 @@ def _handle_batch_error(
             quota_kind, retry_after, remote_message = _parse_rate_limit_error(error)
         except Exception as parse_error:  # noqa: BLE001
             remote_message = redact_text(error).upper()
-            quota_kind = "quota"
-            retry_after = 0
-            log_error(f"[⚠️] 無法解析 429 JSON，使用備援：{redact_text(parse_error)}")
+            quota_kind = "unparsed"
+            retry_after = 0.0
+            log_error(f"[⚠️] 無法解析 429 回應，使用備援：{redact_text(parse_error)}")
+        if quota_kind == "unparsed":
+            return _handle_unparsed_rate_limit(
+                runtime, retry_after, remote_message, retry_event_callback
+            )
 
         if quota_kind == "rpd":
             # 同專案模式：RPD 算在「專案 × 模型」，所有 key 共用同一份額度。
@@ -1542,8 +1546,8 @@ def _handle_batch_error(
                 error_kind, quota_kind="rpd", has_next_model=bool(usable)
             ).action
         if quota_kind == "rpm":
-            wait_time = retry_after or 10
-            log_info(f"[⏳] 每分鐘頻率限制 (RPM)：等待 {wait_time} 秒")
+            wait_time = retry_after or RATE_LIMIT_DEFAULT_WAIT_SEC
+            log_info(f"[⏳] 每分鐘頻率限制 (RPM)：等待 {wait_time:g} 秒")
             _sleep_with_runtime_event(
                 runtime,
                 wait_time,
@@ -1775,20 +1779,13 @@ def _record_quality_retry_failure(
             try:
                 quota_kind, retry_after, remote_message = _parse_rate_limit_error(error)
             except (AttributeError, IndexError, KeyError, TypeError, ValueError):
-                quota_kind, remote_message = "quota", redact_text(error).upper()
+                quota_kind, retry_after = "unparsed", 0.0
+                remote_message = redact_text(error).upper()
             if quota_kind == "rpd":
                 quota.mark_exhausted(model_name)
-            elif quota_kind == "rpm":
-                response = getattr(error, "response", None)
-                error_json = {}
-                try:
-                    error_json = response.json() if response is not None else {}
-                except (AttributeError, ValueError):
-                    error_json = {}
-                retry_after_value = _parse_gemini_retry_after_seconds(
-                    response, error_json
-                )
-                if retry_after_value is None or retry_after_value <= 0:
+            elif quota_kind in {"rpm", "unparsed"}:
+                retry_after_value = retry_after
+                if retry_after_value <= 0:
                     retry_after_value = max(1.0, runtime.batch_interval_sec)
                 quota.defer_request_slot(
                     runtime.provider, model_name, retry_after_value

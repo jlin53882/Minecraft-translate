@@ -27,6 +27,7 @@ from translation_tool.core.lm_config_schema import (
 )
 from translation_tool.core.lm_key_health import get_model_quota_registry
 from translation_tool.core.openai_codex_client import ChatGPTAPIError
+from translation_tool.core.retry_after import parse_response_retry_after
 from translation_tool.translation_db.smart_review_prompt import (
     SMART_REVIEW_SYSTEM_PROMPT,
 )
@@ -192,7 +193,6 @@ def _smart_review_transient_retry(
         GEMINI_503_MAX_RETRY_AFTER_SEC,
         GEMINI_503_RETRY_DELAYS_SEC,
         _classify_batch_error,
-        _parse_gemini_retry_after_seconds,
     )
 
     error_kind = _classify_batch_error(error, status)
@@ -210,14 +210,7 @@ def _smart_review_transient_retry(
         return False
     if runtime.gemini_transient_retry_count >= len(GEMINI_503_RETRY_DELAYS_SEC):
         return False
-    response = getattr(error, "response", None)
-    error_json: dict[str, Any] = {}
-    try:
-        value = response.json() if response is not None else {}
-        error_json = value if isinstance(value, dict) else {}
-    except (AttributeError, TypeError, ValueError):
-        error_json = {}
-    retry_after = _parse_gemini_retry_after_seconds(response, error_json)
+    retry_after = parse_response_retry_after(getattr(error, "response", None))
     if retry_after is not None and retry_after > GEMINI_503_MAX_RETRY_AFTER_SEC:
         return False
     retry_index = runtime.gemini_transient_retry_count
