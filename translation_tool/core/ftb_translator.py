@@ -30,7 +30,7 @@ from translation_tool.core.ftb_translator_template import (
 )
 from translation_tool.core.lm_translator_shared import _get_default_batch_size
 from translation_tool.utils.bounded_executor import bounded_as_completed
-from translation_tool.utils.cancellation import raise_if_cancelled
+from translation_tool.utils.cancellation import is_cancelled, raise_if_cancelled
 from translation_tool.utils.log_unit import (
     get_formatted_duration,
     log_debug,
@@ -311,6 +311,7 @@ def run_ftb_pipeline(
 ) -> dict:
     """FTB Quests 全流程 Pipeline（UI / services / CLI 都可用）。"""
     result: dict = {}
+    translation_cancelled = False
 
     if step_export:
         log_info("📦 [步驟 1/4] 開始抽取 FTB Quests 原始文本...")
@@ -365,6 +366,11 @@ def run_ftb_pipeline(
             write_new_cache=write_new_cache,
         )
         result["lm_translate"] = lm_res
+        translation_cancelled = isinstance(lm_res, dict) and bool(
+            lm_res.get("cancelled")
+        )
+        if translation_cancelled:
+            result["cancelled"] = True
         try:
             cache_miss = lm_res.get("cache_miss") if isinstance(lm_res, dict) else None
             batch_size = _get_default_batch_size("ftbquests", None)
@@ -384,6 +390,13 @@ def run_ftb_pipeline(
     if dry_run:
         log_info("🧪 偵測到模擬模式 (Dry-run)：跳過步驟 4 Inject (不實際寫入檔案)。")
         result["inject"] = {"skipped": True, "reason": "dry_run"}
+        return result
+
+    if step_inject and (translation_cancelled or is_cancelled()):
+        # 取消後不注入：翻譯輸出與續跑標記保留，也不把取消當成完成
+        log_warning("⏹ [FTB] 已取消：略過步驟 4 Inject（已完成的翻譯輸出保留）。")
+        result["inject"] = {"skipped": True, "reason": "cancelled"}
+        result["cancelled"] = True
         return result
 
     if step_inject:

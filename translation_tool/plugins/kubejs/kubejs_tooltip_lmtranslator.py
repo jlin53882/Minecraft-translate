@@ -338,6 +338,7 @@ def translate_kubejs_pending_to_zh_tw(
     translated_done = 0
     avg_batch_sec = None
     total_written = 0
+    loop_status = "DONE"
 
     per_file_rows: list[dict] = []
     rec = TranslationRecorder()
@@ -603,6 +604,7 @@ def translate_kubejs_pending_to_zh_tw(
                 on_progress=on_progress,
             ),
         )
+        loop_status = res.status
         if res.status == "DONE":
             checkpoint.clear()
 
@@ -632,6 +634,8 @@ def translate_kubejs_pending_to_zh_tw(
         log_info(f"⚠️ [KubeJS-LM] export records failed: {ex}")
 
     return {
+        "status": loop_status,
+        "cancelled": loop_status == "CANCELLED",
         "written_files": total_written,
         "total_keys": global_total_keys,
         "cache_hit": global_total_hit,

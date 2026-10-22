@@ -959,6 +959,7 @@ def run_kubejs_pipeline(
 
         translated_json = sorted(paths["translated"].rglob("*.json"))
         translation_ran = False
+        translation_cancelled = False
         if pending_count == 0:
             result["step2"] = {"skipped": True, "reason": "pending keys = 0"}
             progress(session, 0.66)
@@ -987,8 +988,9 @@ def run_kubejs_pipeline(
                 if not isinstance(result["step2"], dict):
                     result["step2"] = {"result": result["step2"]}
                 translation_ran = not dry_run and not result["step2"].get("skipped")
-                if is_cancelled():
+                if is_cancelled() or result["step2"].get("cancelled"):
                     translation_ran = False
+                    translation_cancelled = True
                     result["step2"].update({"skipped": True, "reason": "cancelled"})
                 if translation_ran:
                     gaps = _translation_output_gaps(paths["pending"], translated_stage)
@@ -1038,7 +1040,11 @@ def run_kubejs_pipeline(
         elif dry_run:
             result["step3"] = {"skipped": True, "reason": "dry_run"}
         elif not translation_ran:
-            reason = "cancelled" if is_cancelled() else "no current translation output"
+            reason = (
+                "cancelled"
+                if translation_cancelled or is_cancelled()
+                else "no current translation output"
+            )
             result["step3"] = {"skipped": True, "reason": reason}
         elif not translated_json:
             result["step3"] = {"skipped": True, "reason": "translation output is empty"}
@@ -1116,7 +1122,10 @@ def run_kubejs_pipeline(
             )
 
     result["duration"] = get_formatted_duration(start_time)
-    if is_cancelled():
+    step2_summary = result.get("step2")
+    if is_cancelled() or (
+        isinstance(step2_summary, dict) and step2_summary.get("reason") == "cancelled"
+    ):
         log_warning(f"⏹ [KubeJS] 已取消（目前快照保留） {result['duration']}")
     else:
         log_info(f"🎉 [KubeJS] 任務完成！ {result['duration']}")

@@ -407,6 +407,7 @@ def translate_ftb_pending_to_zh_tw(
     translated_done = 0  # ✅ 只算 API 翻譯完成（主進度分子）
     cache_hit_done_so_far = 0  # ✅ 已寫入輸出的 cache hit（整體完成用）
     total_written = 0
+    loop_status = "DONE"  # 各檔迴圈終態：CANCELLED／ALL_KEYS_EXHAUSTED 會停止後續檔案
 
     # ---- Dry-run stats container ----
     per_file_rows: list[dict] = []
@@ -635,7 +636,12 @@ def translate_ftb_pending_to_zh_tw(
         )
 
         if res.status == "ALL_KEYS_EXHAUSTED":
+            loop_status = res.status
             log_info("⚠️ [FTB-LM] ALL_KEYS_EXHAUSTED：已輸出目前成果，停止。")
+            break
+        if res.status == "CANCELLED":
+            loop_status = res.status
+            log_info("⏹ [FTB-LM] 已取消：已輸出目前成果，不再處理後續檔案。")
             break
 
     # ---- Dry-run 結尾摘要 ----
@@ -713,6 +719,8 @@ def translate_ftb_pending_to_zh_tw(
     )
     return {
         "dry_run": False,
+        "status": loop_status,
+        "cancelled": loop_status == "CANCELLED",
         "written_files": total_written,
         "total_keys": global_total_keys,
         "cache_hit": global_total_hit,

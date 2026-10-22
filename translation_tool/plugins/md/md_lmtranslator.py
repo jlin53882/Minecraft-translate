@@ -376,6 +376,7 @@ def translate_md_pending(
     checkpoint = make_checkpoint_adapter("md", items_to_translate, target=str(out_root))
 
     avg_batch_sec = None
+    loop_status = "DONE"
     if items_to_translate:
         res = run_translator_skeleton(
             items_to_translate,
@@ -397,6 +398,7 @@ def translate_md_pending(
                 on_progress=on_progress,
             ),
         )
+        loop_status = res.status
         if res.status == "DONE":
             checkpoint.clear()
         avg_batch_sec = (
@@ -484,6 +486,8 @@ def translate_md_pending(
     )
 
     return {
+        "status": loop_status,
+        "cancelled": loop_status == "CANCELLED",
         "written_files": written_files,
         "total_blocks": total_blocks,
         "unique_blocks": unique_blocks,
