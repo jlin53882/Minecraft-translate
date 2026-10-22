@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 
 import requests
 
+from translation_tool.core.batch_timing import seconds_to_ms
 from translation_tool.core.codex_oauth import chatgpt_account_status
 from translation_tool.core.common_batch_executor import classify_provider_error
 from translation_tool.core.lm_api_client import (
@@ -466,7 +467,7 @@ def _sleep_with_runtime_event(
     _emit_runtime_event(
         callback,
         kind,
-        wait_seconds=wait_seconds,
+        wait_ms=seconds_to_ms(wait_seconds),
         retry_reason=reason,
         provider_retry=True,
     )
@@ -479,8 +480,8 @@ def _sleep_with_runtime_event(
     _emit_runtime_event(
         callback,
         resume_kind,
-        wait_seconds=wait_seconds,
-        elapsed_seconds=max(0.0, time.monotonic() - started),
+        wait_ms=seconds_to_ms(wait_seconds),
+        waited_ms=seconds_to_ms(time.monotonic() - started),
         retry_reason=reason,
     )
 
@@ -787,7 +788,7 @@ def _wait_for_request_slot(
                     wait_event_callback(
                         {
                             "kind": "rate_limit_wait",
-                            "wait_seconds": wait_sec,
+                            "wait_ms": seconds_to_ms(wait_sec),
                         }
                     )
                 wait_started = quota.now()
@@ -802,8 +803,8 @@ def _wait_for_request_slot(
                     wait_event_callback(
                         {
                             "kind": "rate_limit_resume",
-                            "wait_seconds": wait_sec,
-                            "elapsed_seconds": max(0.0, quota.now() - wait_started),
+                            "wait_ms": seconds_to_ms(wait_sec),
+                            "waited_ms": seconds_to_ms(quota.now() - wait_started),
                         }
                     )
             raise_if_cancelled()
@@ -1310,12 +1311,14 @@ def _handle_chatgpt_api_error(
                 "kind": "retry_wait",
                 "retry_number": runtime.chatgpt_retry_count,
                 "retry_total": CHATGPT_MAX_RETRIES,
-                "wait_seconds": wait_sec,
-                "retry_after_seconds": retry_after,
+                "wait_ms": seconds_to_ms(wait_sec),
+                "retry_after_ms": None
+                if retry_after is None
+                else seconds_to_ms(retry_after),
                 "error_kind": "chatgpt_transient",
                 "http_status": error.status,
-                "provider_overload": classification["overload"],
-                "quota_or_rate_limit": classification["rate_limit"],
+                "overload": classification["overload"],
+                "rate_limit": classification["rate_limit"],
                 "timeout": classification["timeout"],
             }
         )
@@ -1331,8 +1334,8 @@ def _handle_chatgpt_api_error(
                 "kind": "retry_resume",
                 "retry_number": runtime.chatgpt_retry_count,
                 "retry_total": CHATGPT_MAX_RETRIES,
-                "wait_seconds": wait_sec,
-                "elapsed_seconds": max(0.0, time.monotonic() - wait_started),
+                "wait_ms": seconds_to_ms(wait_sec),
+                "waited_ms": seconds_to_ms(time.monotonic() - wait_started),
             }
         )
     return BatchAction.RETRY_SAME_MODEL

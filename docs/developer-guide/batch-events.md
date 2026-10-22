@@ -33,3 +33,20 @@
 `invoke_translation_batch`（`translation_tool/core/lm_translator_shared_loop.py`）是所有流程呼叫 `translate_batch_smart`
 的共用入口：依簽名傳入 `total`（keyword-only 的 `total` 以關鍵字傳入，其餘位置傳入）與 `event_callback`。
 入口不接受 `event_callback` 時（舊測試替身）會退回只傳 batch／total，並記一則警告，說明這批的 provider 等待事件不會被記錄。
+
+## 事件欄位命名（canonical 與舊欄位）
+
+core 的 producer（`lm_translator_main`、`lm_api_client`、智慧校對的請求與修復）只發出 canonical 欄位：
+
+| 事件 | canonical 欄位 |
+|---|---|
+| `retry_wait`、`rate_limit_wait`、`network_retry_wait` | `wait_ms`（計畫等待）、`retry_after_ms`（供應商建議，可為 `None`） |
+| `retry_resume`、`rate_limit_resume`、`network_retry_resume` | `wait_ms` 與 `waited_ms`（**實際等待**）；`elapsed_ms` 保留給批次經過時間，兩者意義獨立 |
+| 失敗與重試診斷 | `overload`、`rate_limit`、`timeout`、`connection`（定義見 `docs/developer-guide/provider-errors.md`） |
+
+- `CommonBatchExecutor`／`BatchHandle.forward_provider_event` 直接接受 canonical 事件，不需要舊欄位。
+- 舊名稱（`wait_seconds`、`elapsed_seconds`、`retry_after_seconds`、`provider_overload`、`quota_or_rate_limit` 等）
+  只在**輸出邊界**由 `to_legacy_event` 補上，且只補缺值（不覆蓋既有欄位）；初始事件 dict 不可預放舊欄位別名。
+- 讀取舊歷史資料或舊事件時一律先經 `canonicalize_event`；智慧校對持久化的 metrics 仍帶舊的 `*_seconds`
+  欄位，供 `tools/smart_review_strategy_probe.py` 與既有歷史讀者使用。
+- 契約測試 `tests/test_batch_event_producer_contract.py` 實際執行 producer，斷言事件鍵與舊欄位集合不相交。

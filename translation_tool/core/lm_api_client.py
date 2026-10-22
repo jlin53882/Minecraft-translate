@@ -14,6 +14,7 @@ from copy import deepcopy
 
 import requests
 
+from translation_tool.core.batch_timing import seconds_to_ms
 from translation_tool.utils.cancellation import interruptible_sleep
 from translation_tool.utils.config_manager import load_config
 from translation_tool.utils.config_schema import get_schema_default
@@ -105,7 +106,9 @@ def _request_timeout(lm_cfg: dict) -> int:
     """API 請求逾時秒數：設定缺漏時用 schema 的 ``rate_limit.timeout`` 預設值。"""
     rate_limit = lm_cfg.get("rate_limit", {})
     return int(
-        rate_limit.get("timeout", get_schema_default("lm_translator.rate_limit.timeout"))
+        rate_limit.get(
+            "timeout", get_schema_default("lm_translator.rate_limit.timeout")
+        )
     )
 
 
@@ -180,7 +183,7 @@ def _post_with_retry(
                     "kind": "network_retry_wait",
                     "network_attempt": attempt,
                     "network_total": NETWORK_RETRY_ATTEMPTS,
-                    "wait_seconds": wait,
+                    "wait_ms": seconds_to_ms(wait),
                     "error_kind": "connection_error",
                     "exception_type": type(e).__name__,
                 },
@@ -197,8 +200,8 @@ def _post_with_retry(
                     "kind": "network_retry_resume",
                     "network_attempt": attempt,
                     "network_total": NETWORK_RETRY_ATTEMPTS,
-                    "wait_seconds": wait,
-                    "elapsed_seconds": time.monotonic() - wait_started,
+                    "wait_ms": seconds_to_ms(wait),
+                    "waited_ms": seconds_to_ms(time.monotonic() - wait_started),
                 },
             )
         else:
