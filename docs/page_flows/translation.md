@@ -27,7 +27,7 @@ flowchart TD
   D --> E["建立 TaskSession（_new_translation_session）"]
   E --> F{"reserve_page_operation 通過？"}
   F -- 否 --> F1["snackbar：應用程式正在關閉"]
-  F -- 是 --> G["session.start() 並寫入任務開頭日誌"]
+  F -- 是 --> G["add_start_log 登記任務開頭日誌（不呼叫 start）"]
   G --> H["operation.launch 執行 worker"]
   H --> I["_start_ui_timer 啟動輪詢（_poll_session）"]
 ```
@@ -94,7 +94,7 @@ flowchart TD
 ## 背景任務與 UI 更新
 
 - 每次執行都會建立新的 `TaskSession`（`tag_session(..., "translation", page=...)`），並以 `reserve_page_operation(owner="translation")` 登錄。預設 `CancellationPolicy.COOPERATIVE`。
-- `worker` 在背景執行緒中呼叫服務函式。服務層的 `run_callable_task` 會再次呼叫 `session.start()`，這是既有行為（`TaskSession.start()` 會重設狀態，可重入）。`finally` 內一定會呼叫 `session.finish()`。
+- `worker` 在背景執行緒中呼叫服務函式。`session.start()` 只由服務層的 `run_callable_task` 呼叫一次（單一 owner，一次執行只有一個 task ID 與一組開始／結束紀錄）；動作層用 `add_start_log` 預先登記開頭日誌，`start()` 清空日誌後會放回。`finally` 內一定會呼叫 `session.finish()`。
 - 只有在服務函式拋出未預期例外時，動作層的 `worker` 才會再補寫錯誤日誌、`set_error()` 與 `finish()`（`_report_service_failure` 會以 `session_task_scope` 把堆疊寫入後台）。
 - UI 同步由 `_poll_session`（`translation_actions.py`）負責：在 Flet event loop 上每 0.2 秒讀取 `session.snapshot()`，更新 `ProgressRing`、`LogView` 與狀態晶片。`DONE` 或 `ERROR` 時停止輪詢、停用取消按鈕。
 - 取消：`_on_cancel` 呼叫 `session.request_cancel()`，狀態改為「正在取消…」。翻譯迴圈在批次之間、等待 API 限流時檢查取消。

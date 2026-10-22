@@ -11,7 +11,13 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 
 from app.services_impl.key_health_service import KeyHealth, ModelQuotaHealth
-from app.shell.task_manager import STATUS_ERROR, TaskInfo
+from app.shell.task_manager import (
+    STATUS_ABORTED,
+    STATUS_CANCELLED,
+    STATUS_DONE,
+    STATUS_ERROR,
+    TaskInfo,
+)
 from app.shell.topbar import KeySummary, summarize_keys
 
 # 翻譯流程五步：(頁面 key, 標題, 說明)
@@ -68,7 +74,28 @@ class DashboardData:
     activity: list[TaskInfo] = field(default_factory=list)
     tasks_done: int = 0
     tasks_failed: int = 0
+    tasks_cancelled: int = 0  # 使用者取消或中止；不算完成也不算失敗
     tasks_running: int = 0
+
+    @property
+    def tasks_total(self) -> int:
+        return (
+            self.tasks_done
+            + self.tasks_failed
+            + self.tasks_cancelled
+            + self.tasks_running
+        )
+
+
+def task_status_style(task: TaskInfo) -> tuple[str, str]:
+    """已結束任務的 (狀態文字, 色調)：取消／中止不可顯示成「完成」。"""
+    if task.status == STATUS_ERROR:
+        return "失敗", "red"
+    if task.status == STATUS_CANCELLED:
+        return "已取消", "gold"
+    if task.status == STATUS_ABORTED:
+        return "已中止", "gold"
+    return "完成", "em"
 
 
 def greeting(now: dt.datetime | None = None) -> str:
@@ -155,7 +182,10 @@ def build_dashboard_data(
         model_rows=list(model_quota),
         steps=build_step_statuses(active, recent),
         activity=activity,
-        tasks_done=sum(1 for t in recent if t.status != STATUS_ERROR),
+        tasks_done=sum(1 for t in recent if t.status == STATUS_DONE),
         tasks_failed=sum(1 for t in recent if t.status == STATUS_ERROR),
+        tasks_cancelled=sum(
+            1 for t in recent if t.status in (STATUS_CANCELLED, STATUS_ABORTED)
+        ),
         tasks_running=len(active),
     )

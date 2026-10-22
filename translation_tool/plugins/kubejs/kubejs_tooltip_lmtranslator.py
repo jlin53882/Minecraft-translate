@@ -40,6 +40,7 @@ from translation_tool.core.lm_translator_shared import (
     prepare_translator_items,
     run_translator_skeleton,
     safe_output_text,
+    strip_runtime_fields,
     write_cache_hit_preview,  # ✅ 新增：cache hit preview 檔
     write_dry_run_preview,
 )
@@ -60,6 +61,7 @@ from translation_tool.utils.cancellation import raise_if_cancelled
 from translation_tool.utils.config_manager import load_config
 from translation_tool.utils.log_unit import log_info, log_warning, progress
 from translation_tool.utils.ui_mirror import ContextThreadPoolExecutor
+from translation_tool.utils.worker_count import resolve_worker_count
 
 
 # -------------------------
@@ -246,22 +248,22 @@ def translate_kubejs_pending_to_zh_tw(
     # -------------------------
     per_file_counts: List[Tuple[Path, int]] = []
     global_total_keys = 0
+    # 計數時讀到的 mapping 就是後續分析與翻譯用的快照；之後不再重讀檔案，
+    # 避免計數與重讀之間檔案被改動／移除造成 key 數不一致或崩潰。
+    src_mapping_cache: Dict[Path, Dict[str, Any]] = {}
 
-    def _count_one(src: Path) -> Tuple[Path, int]:
-        """統計單一檔案的翻譯 key 數量。"""
+    def _count_one(src: Path) -> Tuple[Path, int, Dict[str, Any]]:
+        """統計單一檔案的翻譯 key 數量，同時回傳讀到的 mapping 快照。"""
         try:
             raise_if_cancelled()
             mapping = read_json_dict(src)
             raise_if_cancelled()
-            return src, int(count_translatable_keys(mapping))
+            return src, int(count_translatable_keys(mapping)), mapping
         except Exception as e:  # noqa: BLE001 - 失敗已記錄，不中斷翻譯批次
             log_warning(f"[KubeJS-LM] 讀取 JSON 失敗 {src}: {e!r}")
-            return src, 0
+            return src, 0, {}
 
-    max_workers = int(
-        load_config().get("translator", {}).get("parallel_execution_workers", 4) or 4
-    )
-    max_workers = max(1, max_workers)
+    max_workers = resolve_worker_count("count_prescan", load_config())
 
     def submit_count(executor, src: Path):
         return executor.submit(_count_one, src)
@@ -276,9 +278,11 @@ def translate_kubejs_pending_to_zh_tw(
         ) as completed,
     ):
         for future, _src in completed:
-            src, c = future.result()
+            src, c, mapping = future.result()
             per_file_counts.append((src, c))
             global_total_keys += c
+            if c:
+                src_mapping_cache[src] = mapping
 
     per_file_counts.sort(key=lambda x: x[0].as_posix())
 
@@ -301,7 +305,7 @@ def translate_kubejs_pending_to_zh_tw(
         if key_count == 0:
             continue
         try:
-            mapping = read_json_dict(src)
+            mapping = src_mapping_cache[src]
             rel_src = src.relative_to(in_dir).as_posix()
             file_hint = f"output/kubejs/{rel_src}"  # must contain /kubejs/
             all_items = collect_items_from_mapping(mapping, file_hint=file_hint)
@@ -338,6 +342,7 @@ def translate_kubejs_pending_to_zh_tw(
     translated_done = 0
     avg_batch_sec = None
     total_written = 0
+    loop_status = "DONE"
 
     per_file_rows: list[dict] = []
     rec = TranslationRecorder()
@@ -358,7 +363,7 @@ def translate_kubejs_pending_to_zh_tw(
         if key_count == 0:
             continue
 
-        mapping = read_json_dict(src)
+        mapping = src_mapping_cache[src]
         rel_src = src.relative_to(in_dir).as_posix()
 
         file_hint = f"output/kubejs/{rel_src}"
@@ -455,20 +460,11 @@ def translate_kubejs_pending_to_zh_tw(
     # -------------------------
     if dry_run:
 
-        def _strip_runtime_fields(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-            """移除 dry-run preview 中不可 JSON 序列化的暫存欄位。"""
-            sanitized: List[Dict[str, Any]] = []
-            for it in items:
-                sanitized.append(
-                    {k: v for k, v in it.items() if k not in {"_shielded"}}
-                )
-            return sanitized
-
         dry_preview_items = (
-            _strip_runtime_fields(all_miss_items[:2000]) if all_miss_items else []
+            strip_runtime_fields(all_miss_items[:2000]) if all_miss_items else []
         )
         dry_hit_items = (
-            _strip_runtime_fields(all_hit_items[:2000]) if all_hit_items else []
+            strip_runtime_fields(all_hit_items[:2000]) if all_hit_items else []
         )
 
         preview_path = None
@@ -603,6 +599,7 @@ def translate_kubejs_pending_to_zh_tw(
                 on_progress=on_progress,
             ),
         )
+        loop_status = res.status
         if res.status == "DONE":
             checkpoint.clear()
 
@@ -632,6 +629,8 @@ def translate_kubejs_pending_to_zh_tw(
         log_info(f"⚠️ [KubeJS-LM] export records failed: {ex}")
 
     return {
+        "status": loop_status,
+        "cancelled": loop_status == "CANCELLED",
         "written_files": total_written,
         "total_keys": global_total_keys,
         "cache_hit": global_total_hit,

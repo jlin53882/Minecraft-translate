@@ -12,7 +12,12 @@ from dataclasses import dataclass
 import flet as ft
 
 from app.services_impl.key_health_service import STATUS_COOLING, KeyHealth
-from app.shell.task_manager import STATUS_ERROR, TaskInfo
+from app.shell.task_manager import (
+    STATUS_ABORTED,
+    STATUS_CANCELLED,
+    STATUS_ERROR,
+    TaskInfo,
+)
 from app.ui import design, kit
 from app.ui.design import C
 from app.ui.design import tone as get_tone
@@ -263,10 +268,15 @@ class TopBar(ft.Container):
         self.bell_dot.visible = unread
 
     def _recent_item(self, task: TaskInfo) -> ft.PopupMenuItem:
-        failed = task.status == STATUS_ERROR
-        icon = ft.Icons.ERROR_OUTLINE if failed else ft.Icons.CHECK_CIRCLE_OUTLINE
-        tone = get_tone("red" if failed else "em")
-        text = f"{task.name}　{'失敗' if failed else '完成'}"
+        if task.status == STATUS_ERROR:
+            icon, tone_name, label = ft.Icons.ERROR_OUTLINE, "red", "失敗"
+        elif task.status in (STATUS_CANCELLED, STATUS_ABORTED):
+            icon, tone_name = ft.Icons.CANCEL_OUTLINED, "gold"
+            label = "已取消" if task.status == STATUS_CANCELLED else "已中止"
+        else:
+            icon, tone_name, label = ft.Icons.CHECK_CIRCLE_OUTLINE, "em", "完成"
+        tone = get_tone(tone_name)
+        text = f"{task.name}　{label}"
         return ft.PopupMenuItem(
             content=ft.Row(
                 [ft.Icon(icon, size=16, color=tone.fg), ft.Text(text, size=13)],

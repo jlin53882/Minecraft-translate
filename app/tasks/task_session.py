@@ -109,14 +109,15 @@ class TaskSessionAdmissionError(RuntimeError):
     """Raised when shutdown has closed admission before a session can start."""
 
 
-_STATUS_LABELS = {
+# 任務終態的中文標籤；``moddb_translate_report.STATUS_LABELS`` 以此為基底（可附加原因細節）。
+STATUS_LABELS = {
     "DONE": "完成",
     "ERROR": "失敗",
     "DONE_WITH_WARNINGS": "完成但有警告",
     "CANCELLED": "已取消",
     "ABORTED": "已中止",
     "FAILED": "失敗",
-    "ALL_KEYS_EXHAUSTED": "API Key 全數耗盡",
+    "ALL_KEYS_EXHAUSTED": "所有 API Key 都已耗盡",
 }
 
 _SUMMARY_LABELS = {
@@ -149,7 +150,7 @@ _SUMMARY_LABELS = {
 
 
 def _status_label(status) -> str:
-    return f"{status}（{_STATUS_LABELS.get(str(status), str(status))}）"
+    return f"{status}（{STATUS_LABELS.get(str(status), str(status))}）"
 
 
 def _format_summary(summary) -> str:
@@ -374,10 +375,10 @@ class TaskSession:
         warned = (
             status == "DONE"
             and summary_status != "DONE"
-            and summary_status in _STATUS_LABELS
+            and summary_status in STATUS_LABELS
         )
         status_text = (
-            f"{status}（{_STATUS_LABELS.get(str(summary_status), summary_status)}）"
+            f"{status}（{STATUS_LABELS.get(str(summary_status), summary_status)}）"
             if warned
             else _status_label(status)
         )

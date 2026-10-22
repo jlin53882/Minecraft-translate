@@ -32,6 +32,7 @@ from translation_tool.core.lm_translator_shared_loop import (
 )
 from translation_tool.core.lm_translator_shared_preview import (
     TouchSet,
+    strip_runtime_fields,
     write_cache_hit_preview,
     write_dry_run_preview,
 )
@@ -77,6 +78,7 @@ __all__ = [
     "restore_cache_hit_text",
     "run_translator_skeleton",
     "safe_output_text",
+    "strip_runtime_fields",
     "translate_items_with_cache_loop",
     "write_cache_hit_preview",
     "write_dry_run_preview",

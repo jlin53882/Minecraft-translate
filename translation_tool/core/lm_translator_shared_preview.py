@@ -29,6 +29,11 @@ class TouchSet:
         self.touched.clear()
 
 
+def strip_runtime_fields(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """移除預覽 JSON 不可序列化的暫存欄位（``_shielded``）；回傳新清單，不改動原 item。"""
+    return [{k: v for k, v in item.items() if k != "_shielded"} for item in items]
+
+
 def write_dry_run_preview(
     out_dir: str | Path,
     items: list[dict[str, Any]],

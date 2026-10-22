@@ -76,7 +76,7 @@ from translation_tool.utils.config_manager import (
     get_batch_write_interval,
     load_config,
 )
-from translation_tool.utils.fs_utils import fsync_directory
+from translation_tool.utils.file_replace import atomic_write_text
 from translation_tool.utils.log_unit import log_debug, log_info, log_warning
 
 # Keep historical module attributes patchable while the shared loop owns writes.
@@ -114,22 +114,6 @@ def compute_checkpoint_fingerprint(input_dir: str, items: list) -> str:
 
 
 CHECKPOINT_VERSION = 2
-
-
-def _atomic_write_text(path: str, text: str) -> None:
-    """暫存檔 fsync → ``os.replace`` → fsync 目錄：被中斷時要嘛是舊內容、要嘛是完整新內容。
-
-    打包成 exe 後關閉視窗不保證執行任何清理，所以不能依賴關閉流程補寫（#151）。
-    """
-    directory = os.path.dirname(path)
-    os.makedirs(directory, exist_ok=True)
-    tmp_path = f"{path}.tmp"
-    with open(tmp_path, "w", encoding="utf-8") as f:
-        f.write(text)
-        f.flush()
-        os.fsync(f.fileno())
-    os.replace(tmp_path, path)
-    fsync_directory(directory)
 
 
 def save_checkpoint(
@@ -181,7 +165,9 @@ def save_checkpoint(
         "translation_db": translation_db,
         "updated_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
     }
-    _atomic_write_text(CHECKPOINT_FILE, json_std.dumps(payload, ensure_ascii=False))
+    # 暫存檔 fsync → 原子替換（鎖檔重試）→ fsync 目錄：被中斷時要嘛是舊內容、要嘛是完整新內容。
+    # 打包成 exe 後關閉視窗不保證執行任何清理，所以不能依賴關閉流程補寫（#151）。
+    atomic_write_text(CHECKPOINT_FILE, json_std.dumps(payload, ensure_ascii=False))
 
 
 def _quarantine_corrupt_checkpoint() -> str | None:

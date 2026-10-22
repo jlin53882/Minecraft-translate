@@ -39,13 +39,20 @@ def _safe_add_log(view, message: str, level: str = "info", *, mirror: bool = Tru
 
 
 def _log_task_start(view, label: str, in_dir: str, out_dir, dry_run: bool, **steps):
-    """在任務日誌開頭寫下輸入、輸出與步驟設定，排查時才知道這次是用什麼參數跑的。"""
+    """在任務日誌開頭寫下輸入、輸出與步驟設定，排查時才知道這次是用什麼參數跑的。
+
+    ``session.start()`` 只由服務層（worker 上的 ``run_callable_task``）呼叫一次；這裡用
+    ``add_start_log`` 預先登記，``start()`` 清空日誌後會放回，也會用該次執行的 task_id 鏡像。
+    """
     enabled = "、".join(name for name, on in steps.items() if on) or "（無）"
-    _safe_add_log(
-        view,
+    message = (
         f"[系統] 開始 {label}：{'模擬執行（不送出 API）' if dry_run else '正式執行'}"
-        f"｜輸入：{in_dir}｜輸出：{out_dir or '（預設位置）'}｜步驟：{enabled}",
+        f"｜輸入：{in_dir}｜輸出：{out_dir or '（預設位置）'}｜步驟：{enabled}"
     )
+    try:
+        view.session.add_start_log(message)
+    except AttributeError:
+        _safe_add_log(view, message)  # 舊版／替身 session 沒有 add_start_log
 
 
 def _report_service_failure(view, label: str, ex: Exception, in_dir: str) -> None:
@@ -113,10 +120,6 @@ def run_ftb(view, *, dry_run: bool):
         view._set_status("應用程式正在關閉", C.GOLD_BG)
         _safe_page_update(view)
         return
-    try:
-        view.session.start()
-    except Exception as e:  # noqa: BLE001
-        log_warning(f"FTB session.start() 失敗: {e!r}", exc_info=True)
     _log_task_start(
         view,
         "FTB 任務翻譯",
@@ -195,10 +198,6 @@ def run_kjs(view, *, dry_run: bool):
         view._set_status("應用程式正在關閉", C.GOLD_BG)
         _safe_page_update(view)
         return
-    try:
-        view.session.start()
-    except Exception as e:  # noqa: BLE001
-        log_warning(f"KubeJS session.start() 失敗: {e!r}", exc_info=True)
     _log_task_start(
         view,
         "KubeJS 任務翻譯",
@@ -275,10 +274,6 @@ def run_md(view, *, dry_run: bool):
         view._set_status("應用程式正在關閉", C.GOLD_BG)
         _safe_page_update(view)
         return
-    try:
-        view.session.start()
-    except Exception as e:  # noqa: BLE001
-        log_warning(f"MD session.start() 失敗: {e!r}", exc_info=True)
     _log_task_start(
         view,
         "MD 任務翻譯",

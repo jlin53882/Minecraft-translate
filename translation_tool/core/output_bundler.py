@@ -332,7 +332,7 @@ def _commit_state(output_zip_path: str, fingerprint: str) -> None:
     tmp = final + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(state, f)
-    os.replace(tmp, final)
+    replace_with_retry(tmp, final)
 
 
 class _ProgressTracker:

@@ -59,9 +59,37 @@ def _admit_session_for_registry(session, registry, detach_pending: bool):
 STATUS_RUNNING = "running"
 STATUS_DONE = "done"
 STATUS_ERROR = "error"
+STATUS_CANCELLED = "cancelled"
+STATUS_ABORTED = "aborted"
 
 DEFAULT_TASK_NAME = "背景任務"
 RECENT_LIMIT = 20
+
+
+def _session_terminal_status(session) -> str:
+    """TaskSession 結束（未失敗）時的 TaskInfo 終態。
+
+    TaskSession 本身只有 IDLE／RUNNING／DONE／ERROR；取消與中止由服務寫進摘要的 ``status``
+    或使用者的取消旗標得知。只有真正完成才是 ``done``。
+    """
+    summary = getattr(session, "summary", None)
+    summary_status = (
+        str(summary.get("status") or "").upper() if isinstance(summary, dict) else ""
+    )
+    if summary_status == "ABORTED":
+        return STATUS_ABORTED
+    if summary_status == "CANCELLED" or getattr(session, "cancel_requested", False):
+        return STATUS_CANCELLED
+    return STATUS_DONE
+
+
+def _handle_terminal_status(handle: OperationHandle) -> str:
+    """OperationRegistry 的 ``terminal_reason`` → TaskInfo 終態。"""
+    if handle.error is not None:
+        return STATUS_ERROR
+    return {"cancelled": STATUS_CANCELLED, "aborted": STATUS_ABORTED}.get(
+        handle.terminal_reason or "", STATUS_DONE
+    )
 
 
 @dataclass
@@ -214,8 +242,8 @@ class TaskManager:
                 info.status = STATUS_ERROR
             elif event == "finish":
                 if info.status != STATUS_ERROR:
-                    info.status = STATUS_DONE
-                    info.progress = 1.0
+                    info.status = _session_terminal_status(session)
+                    info.progress = 1.0 if info.status == STATUS_DONE else info.progress
                 info.finished_at = self._clock()
                 self._active.pop(sid, None)
                 self._sessions.pop(sid, None)
@@ -241,13 +269,13 @@ class TaskManager:
             self._emit()
             return
         if event == "finish" and handle._task_session_id is None:
-            failed = handle.error is not None
+            status = _handle_terminal_status(handle)
             info = TaskInfo(
                 id=int(handle.id, 16),
                 name=handle.descriptor.name or DEFAULT_TASK_NAME,
                 view_key=handle.descriptor.view_key,
-                status=STATUS_ERROR if failed else STATUS_DONE,
-                progress=0.0 if failed else 1.0,
+                status=status,
+                progress=1.0 if status == STATUS_DONE else 0.0,
                 started_at=handle.created_at,
                 finished_at=self._clock(),
                 operation_id=handle.id,
@@ -265,10 +293,14 @@ class TaskManager:
             recent = next(
                 (task for task in self._recent if task.operation_id == handle.id), None
             )
-            failed = handle.error is not None
+            status = _handle_terminal_status(handle)
             if recent is not None:
-                if failed:
+                if status == STATUS_ERROR:
                     recent.status = STATUS_ERROR
+                    recent.progress = min(recent.progress, 0.99)
+                elif status != STATUS_DONE and recent.status == STATUS_DONE:
+                    # session 先以「完成」結案；owner 的終態（取消／中止）才是權威
+                    recent.status = status
                     recent.progress = min(recent.progress, 0.99)
                 return
             self._recent.appendleft(
@@ -276,8 +308,8 @@ class TaskManager:
                     id=session_id,
                     name=handle.descriptor.name or DEFAULT_TASK_NAME,
                     view_key=handle.descriptor.view_key,
-                    status=STATUS_ERROR if failed else STATUS_DONE,
-                    progress=0.0 if failed else 1.0,
+                    status=status,
+                    progress=1.0 if status == STATUS_DONE else 0.0,
                     started_at=handle.created_at,
                     finished_at=self._clock(),
                     operation_id=handle.id,

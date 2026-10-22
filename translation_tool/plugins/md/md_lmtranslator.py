@@ -32,6 +32,7 @@ from translation_tool.core.lm_translator_shared import (
     make_progress_hook,
     prepare_translator_items,
     run_translator_skeleton,
+    strip_runtime_fields,
     write_cache_hit_preview,  # ✅ 新增：cache hit preview 檔
     write_dry_run_preview,  # ✅ NEW
 )
@@ -263,10 +264,7 @@ def translate_md_pending(
             # A) 待翻譯 preview（list）
             p1 = write_dry_run_preview(
                 out_root,
-                [
-                    {k: v for k, v in it.items() if k != "_shielded"}
-                    for it in items_to_translate
-                ],
+                strip_runtime_fields(items_to_translate),
                 meta=meta,
                 filename="_md_dry_run_preview.json",
             )
@@ -274,10 +272,7 @@ def translate_md_pending(
             # B) cache hit preview（list）
             p2 = write_cache_hit_preview(
                 out_root,
-                [
-                    {k: v for k, v in it.items() if k != "_shielded"}
-                    for it in cached_items
-                ],
+                strip_runtime_fields(cached_items),
                 meta=meta,
                 filename="_md_dry_run_cache_hit_preview.json",
             )
@@ -376,6 +371,7 @@ def translate_md_pending(
     checkpoint = make_checkpoint_adapter("md", items_to_translate, target=str(out_root))
 
     avg_batch_sec = None
+    loop_status = "DONE"
     if items_to_translate:
         res = run_translator_skeleton(
             items_to_translate,
@@ -397,6 +393,7 @@ def translate_md_pending(
                 on_progress=on_progress,
             ),
         )
+        loop_status = res.status
         if res.status == "DONE":
             checkpoint.clear()
         avg_batch_sec = (
@@ -484,6 +481,8 @@ def translate_md_pending(
     )
 
     return {
+        "status": loop_status,
+        "cancelled": loop_status == "CANCELLED",
         "written_files": written_files,
         "total_blocks": total_blocks,
         "unique_blocks": unique_blocks,

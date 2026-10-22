@@ -24,7 +24,7 @@ from pathlib import Path
 from typing import Any
 
 from translation_tool.utils.app_paths import get_data_root
-from translation_tool.utils.fs_utils import fsync_directory
+from translation_tool.utils.file_replace import atomic_write_text
 from translation_tool.utils.log_unit import log_info, log_warning
 
 PLUGIN_KINDS = ("ftbquests", "kubejs", "md")
@@ -194,16 +194,10 @@ def active_context(kind: str) -> ResumeContext | None:
 
 
 def write_marker(kind: str, payload: dict[str, Any]) -> None:
-    """原子且 durable 地寫入標記：暫存檔 fsync → replace → fsync 目錄。"""
-    path = marker_path(kind)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_suffix(".tmp")
-    with open(temporary, "w", encoding="utf-8") as f:
-        f.write(json.dumps(payload, ensure_ascii=False, sort_keys=True))
-        f.flush()
-        os.fsync(f.fileno())
-    temporary.replace(path)
-    fsync_directory(path.parent)
+    """原子且 durable 地寫入標記：暫存檔 fsync → replace（鎖檔重試）→ fsync 目錄。"""
+    atomic_write_text(
+        marker_path(kind), json.dumps(payload, ensure_ascii=False, sort_keys=True)
+    )
 
 
 def clear_marker(kind: str) -> None:

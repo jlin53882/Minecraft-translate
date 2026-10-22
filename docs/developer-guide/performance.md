@@ -151,6 +151,18 @@ Python to avoid a temporary sort. The index is created by the same writable
 change. `tests/test_smart_review_manual_edit.py` asserts the plan has no `SCAN`
 or `TEMP B-TREE`.
 
+## Worker 數量
+
+`translator.parallel_execution_workers` 是使用者設定的上限；不同工作的負載不同，所以各用途保有自己的預設值與上限，
+共通的只有 `translation_tool/utils/worker_count.py` 的 `resolve_worker_count(purpose, config, cpu)` 解析規則：
+
+- 設定值必須是正整數；`bool`、字串、浮點數、0、負數視為無效，退回該用途的預設值。
+- 有效時取設定值，再套該用途的上限（若有）；結果至少 1。
+- 用途表 `WORKER_POLICIES`：`count_prescan`（FTB／KubeJS 預掃描，預設 4）、`file_pipeline`（逐檔處理，CPU 一半，上限也是 CPU 一半）、
+  `moddb_scan`（上限 CPU 核心數）、`jar_extract`（預設 CPU 一半，上限 32）、`jar_preview`、`jar_browser`、`icon_index`、`icon_cache`、`cache_load`、`lm_extract`。
+- 呼叫端：FTB／KubeJS 預掃描（`count_prescan`）與 FTB 逐檔翻譯（`file_pipeline`）使用本函式；其餘用途的預設與上限已定義在表中，對應的呼叫點仍各自讀設定。
+- 未知用途會丟 `KeyError`，避免默默用錯上限。測試：`tests/test_worker_count.py`。
+
 ## Commands
 
 Generate the real-Flet timing source:
