@@ -325,24 +325,34 @@ def test_429_unknown_quota_second_key_succeeds(env):
     assert _texts(result) == ["你好"]
 
 
-def test_429_unparseable_body_fallback_tries_every_key(env):
-    env.outcomes = {"key0": _unparseable_429(), "key1": _unparseable_429()}
-
-    result, status = main.translate_batch_smart(_items(), 1)
-
-    assert env.calls == ["key0", "key1"]
-    assert result == []
-    assert status == "ALL_KEYS_EXHAUSTED"
-
-
-def test_429_unparseable_body_fallback_second_key_succeeds(env):
+def test_429_unparseable_body_is_a_rate_limit_not_a_failed_key(env):
+    """body 不是 JSON 的 429 只能保守當成速率限制：先等待再重試，不把 key 標成失效。"""
     env.outcomes = {"key0": _unparseable_429(), "key1": _OK_JSON}
+    spy, marked = _spy_mark_failed()
 
-    result, status = main.translate_batch_smart(_items(), 1)
+    with spy, patch.object(main, "interruptible_sleep") as sleep:
+        result, status = main.translate_batch_smart(_items(), 1)
 
     assert env.calls == ["key0", "key1"]
+    assert marked == []
+    sleep.assert_any_call(main.RATE_LIMIT_DEFAULT_WAIT_SEC)
     assert status == "AUTO"
     assert _texts(result) == ["你好"]
+
+
+def test_429_unparseable_body_waits_before_each_retry_then_rotates(env):
+    """連續無法解析的 429 先做有限次等待重試；仍受限才輪替 key，最後以 EXHAUSTED 結束。"""
+    env.outcomes = {"key0": _unparseable_429(), "key1": _unparseable_429()}
+    spy, marked = _spy_mark_failed()
+
+    with spy, patch.object(main, "interruptible_sleep") as sleep:
+        result, status = main.translate_batch_smart(_items(), 1)
+
+    assert result == []
+    assert status == "ALL_KEYS_EXHAUSTED"
+    assert sleep.call_count >= main.UNPARSED_RATE_LIMIT_MAX_RETRIES
+    assert len(env.calls) > 2
+    assert marked  # 只有在重試耗盡後才標記 key 失效
 
 
 def test_429_three_keys_rpd_still_requests_only_once(env):

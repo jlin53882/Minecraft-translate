@@ -18,6 +18,7 @@ from typing import Any
 import requests
 
 from translation_tool.core.codex_oauth import chatgpt_account_status
+from translation_tool.core.common_batch_executor import classify_provider_error
 from translation_tool.core.lm_api_client import call_gemini_requests
 from translation_tool.core.lm_batch_budget import BudgetConfig, estimate_text_tokens
 from translation_tool.core.lm_config_rules import ApiKeyCycle, get_api_key_count
@@ -27,6 +28,7 @@ from translation_tool.core.lm_config_schema import (
 )
 from translation_tool.core.lm_key_health import get_model_quota_registry
 from translation_tool.core.openai_codex_client import ChatGPTAPIError
+from translation_tool.core.retry_after import parse_response_retry_after
 from translation_tool.translation_db.smart_review_prompt import (
     SMART_REVIEW_SYSTEM_PROMPT,
 )
@@ -192,10 +194,11 @@ def _smart_review_transient_retry(
         GEMINI_503_MAX_RETRY_AFTER_SEC,
         GEMINI_503_RETRY_DELAYS_SEC,
         _classify_batch_error,
-        _parse_gemini_retry_after_seconds,
+        gemini_503_wait_sec,
     )
 
     error_kind = _classify_batch_error(error, status)
+    classification = classify_provider_error(error, status)
     if isinstance(error, requests.Timeout):
         error_kind = "timeout"
     elif isinstance(error, requests.ConnectionError):
@@ -210,21 +213,12 @@ def _smart_review_transient_retry(
         return False
     if runtime.gemini_transient_retry_count >= len(GEMINI_503_RETRY_DELAYS_SEC):
         return False
-    response = getattr(error, "response", None)
-    error_json: dict[str, Any] = {}
-    try:
-        value = response.json() if response is not None else {}
-        error_json = value if isinstance(value, dict) else {}
-    except (AttributeError, TypeError, ValueError):
-        error_json = {}
-    retry_after = _parse_gemini_retry_after_seconds(response, error_json)
+    retry_after = parse_response_retry_after(getattr(error, "response", None))
     if retry_after is not None and retry_after > GEMINI_503_MAX_RETRY_AFTER_SEC:
         return False
     retry_index = runtime.gemini_transient_retry_count
     runtime.gemini_transient_retry_count += 1
-    wait_sec = GEMINI_503_RETRY_DELAYS_SEC[retry_index]
-    if retry_after is not None:
-        wait_sec = max(wait_sec, retry_after)
+    wait_sec = gemini_503_wait_sec(retry_index, retry_after)
     if event_callback is not None:
         event_callback(
             {
@@ -238,9 +232,9 @@ def _smart_review_transient_retry(
                 "error_kind": error_kind,
                 "http_status": status,
                 "exception_type": type(error).__name__,
-                "overload": bool(status == 503 or error_kind == "service_unavailable"),
-                "rate_limit": bool(status == 429),
-                "timeout": bool(error_kind == "timeout"),
+                "overload": classification["overload"],
+                "rate_limit": classification["rate_limit"],
+                "timeout": classification["timeout"],
             }
         )
     wait_started = time.monotonic()

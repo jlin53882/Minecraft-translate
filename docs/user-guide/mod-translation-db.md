@@ -106,7 +106,7 @@ jar 自帶的 `zh_tw`／`zh_cn` 與「語系合併」使用同一套判斷與函
 
 ### AI 智慧校對（本地候選）
 
-條目校對工具列的「智慧校對」沿用目前面板的版本、模組、類型、目前生效來源與搜尋條件，預設只選未審核且有生效譯文的條目；可設定模型、筆數上限（預設 1000）與批次大小（預設 40）。預覽與實跑使用同一組 scope，預覽只讀取資料庫、不呼叫 AI；開始後由背景作業分批送出既有 provider 的 structured JSON，模型只判斷既有譯文是 `no_change`、`suggest_revision` 或 `needs_context`。
+條目校對工具列的「智慧校對」沿用目前面板的版本、模組、類型、目前生效來源與搜尋條件，預設只選未審核且有生效譯文的條目；可設定模型、筆數上限（預設 1000）與批次大小（預設 20，上限 50）。預覽與實跑使用同一組 scope，預覽只讀取資料庫、不呼叫 AI；開始後由背景作業分批送出既有 provider 的 structured JSON，模型只判斷既有譯文是 `no_change`、`suggest_revision` 或 `needs_context`。
 
 - local context 只來自本機資料庫與 bundled official locale。`db:<entry_id>` 可追溯到實際資料列，`official:<key>` 可追溯到內建 locale；同 key 的 reviewed reference 必須同時符合 kind、模組、key 與英文原文，跨版本英文不同只能標為 context。Patchouli、指南與 Advancement 也會收到同模組的 reviewed lang 術語；衝突證據會明確標示為低信心／需人工決定。**未做網路查證**，AI 仍可能誤判。
 - 每筆回應都必須有具體 `reason`，不得放外部 URL；另驗證同批 ID 是否完整唯一、decision／issue type／evidence ID、信心值與格式 token。格式錯誤與 API 請求失敗分別保留為 `invalid` 與 `request_failed`，不寫入翻譯。

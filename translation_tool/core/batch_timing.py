@@ -44,6 +44,12 @@ def _number(value: Any) -> float | None:
         return None
 
 
+def seconds_to_ms(seconds: Any) -> int:
+    """producer 用：把秒數轉成非負整數毫秒（無效值視為 0）。"""
+    value = _number(seconds)
+    return 0 if value is None else round(value * 1000)
+
+
 def timing_seconds(source: Mapping[str, Any], canonical_ms: str) -> float | None:
     """從 ``source`` 取得某個計時欄位的秒數：先讀 canonical ``*_ms``，再讀舊版秒數別名。"""
     ms = _number(source.get(canonical_ms))
