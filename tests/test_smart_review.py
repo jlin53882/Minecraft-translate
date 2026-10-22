@@ -1514,6 +1514,9 @@ def test_smart_review_reports_search_and_api_timing(db, monkeypatch):
     assert result.metrics["selection_seconds"] >= 0
     assert result.metrics["api_seconds"] >= 0
     assert result.metrics["batch_count"] == 2
+    assert (
+        result.metrics["suggest_revision_count"] == result.metrics["suggestion_count"]
+    )
 
 
 def test_smart_review_batch_event_reports_validation_distribution(db, monkeypatch):

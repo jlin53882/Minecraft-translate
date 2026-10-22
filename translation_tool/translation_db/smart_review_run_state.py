@@ -45,13 +45,16 @@ _COMMON_METRIC_KEYS = (
 
 
 def new_smart_review_metrics(*, input_token_budget: int | None) -> dict[str, Any]:
-    """建立一次執行的計數型 metrics 初始值；耗時由 ``BatchTiming`` 累計，結算時才併入。"""
+    """建立一次執行的計數型 metrics 初始值；耗時由 ``BatchTiming`` 累計，結算時才併入。
+
+    只放 canonical 欄位：舊欄位別名（例如 ``suggest_revision_count``）只在輸出邊界由
+    ``to_legacy_event`` 補上；若在這裡預先放舊欄位，別名只補缺值的規則會讓它永遠不更新。
+    """
     return {
         "prompt_tokens": None,
         "output_tokens": None,
         "no_change_count": 0,
         "suggestion_count": 0,
-        "suggest_revision_count": 0,
         "needs_context_count": 0,
         "request_attempts": 0,
         "attempts": 0,

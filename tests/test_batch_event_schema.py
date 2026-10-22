@@ -338,3 +338,32 @@ def test_unknown_kinds_fall_back_and_levels_follow_severity():
         )
         == "warning"
     )
+
+
+def test_initial_metrics_contain_only_canonical_fields():
+    """初始 metrics 不得預放舊欄位別名，否則輸出邊界的別名（只補缺值）永遠不會更新。"""
+    from translation_tool.core.batch_events import LEGACY_FIELD_ALIASES
+    from translation_tool.translation_db.smart_review_run_state import (
+        new_smart_review_metrics,
+    )
+
+    legacy_names = {
+        name for names in LEGACY_FIELD_ALIASES.values() for name in names
+    } | {name for names in LEGACY_SECONDS_ALIASES.values() for name in names}
+    assert (
+        set(new_smart_review_metrics(input_token_budget=None)) & legacy_names == set()
+    )
+
+
+def test_persisted_metrics_legacy_aliases_follow_canonical_values():
+    """持久化 metrics 的舊別名必須等於 canonical 值（含建議筆數大於 0 的情況）。"""
+    from translation_tool.core.batch_events import to_legacy_event
+    from translation_tool.translation_db.smart_review_run_state import (
+        new_smart_review_metrics,
+    )
+
+    metrics = new_smart_review_metrics(input_token_budget=None)
+    metrics.update(suggestion_count=7, attempts=4)
+    metrics.update(to_legacy_event(metrics))
+    assert metrics["suggest_revision_count"] == 7
+    assert metrics["smart_review_attempts"] == 4
