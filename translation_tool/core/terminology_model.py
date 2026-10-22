@@ -14,7 +14,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
+from types import MappingProxyType
 from typing import Any
 
 AUTHORITY_OFFICIAL_MINECRAFT = "official_minecraft"
@@ -24,6 +26,27 @@ USAGE_FULL_TRANSLATION = "official_full_translation"
 USAGE_PHRASE = "official_phrase"
 USAGE_TERM = "official_term"
 USAGE_COMPONENT = "compound_component"
+USAGE_STANDALONE = "standalone_allowlist"
+MATCH_STANDALONE = "standalone_allowlist"
+
+# 來源整句恰為單一詞時的人工審核 allowlist：{正規化英文: 繁中目標}。
+#
+# 官方複合詞可推導出的單詞很多，但單獨成句時多半是 UI 動詞、屬性前綴或
+# 材質後綴（``Max``→最大傷害值、``Wood``→塊、``Planks``→材），直接送模型會
+# 誤導。因此單獨成句預設不命中，只有列在這裡、且目標與目前官方語系推導結果
+# 一致、官方語系沒有同名完整條目的名詞才放行。新增項目的審核方式見
+# ``docs/developer-guide/official-terminology.md``。
+STANDALONE_ALLOWLIST: Mapping[str, str] = MappingProxyType(
+    {
+        "amethyst": "紫水晶",
+        "copper": "銅",
+        "gold": "金",
+        "iron": "鐵",
+        "netherite": "獄髓",
+        "quartz": "石英",
+        "redstone": "紅石",
+    }
+)
 
 _FULL_MATCH_TYPES = frozenset({"exact_key", "exact_text"})
 
@@ -79,6 +102,8 @@ def evidence_limitations(match: TerminologyMatch) -> str:
         return "官方 Minecraft 完整翻譯；高信心"
     if match.match_type == "official_phrase":
         return "官方 Minecraft 完整片語；高信心"
+    if match.match_type == MATCH_STANDALONE:
+        return "官方 Minecraft 術語；單獨成句，經人工審核 allowlist 放行；高信心"
     if match.usage == USAGE_COMPONENT:
         return "官方 Minecraft 術語；由官方複合詞拆解；高信心"
     return "官方 Minecraft 術語；高信心"
@@ -110,6 +135,9 @@ def evidence_context_entry(match: TerminologyMatch) -> dict[str, Any]:
 __all__ = [
     "AUTHORITY_OFFICIAL_MINECRAFT",
     "CONFIDENCE_HIGH",
+    "MATCH_STANDALONE",
+    "STANDALONE_ALLOWLIST",
+    "USAGE_STANDALONE",
     "TerminologyMatch",
     "evidence_context_entry",
     "evidence_limitations",

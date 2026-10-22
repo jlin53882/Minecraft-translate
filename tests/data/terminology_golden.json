@@ -504,8 +504,8 @@
           "source_text": "Netherite",
           "target_text": "獄髓",
           "authority": "official_minecraft",
-          "usage": "compound_component",
-          "match_type": "source_substring",
+          "usage": "standalone_allowlist",
+          "match_type": "standalone_allowlist",
           "confidence": "high",
           "source_key": "block.minecraft.netherite_block"
         }
@@ -515,8 +515,7 @@
           "Netherite",
           "獄髓"
         ]
-      ],
-      "xfail": "官方複合詞可拆出 Netherite→獄髓，但來源整句恰為該詞時被 canonical==source 規則略過，單獨出現反而沒有命中（目前行為為空）"
+      ]
     },
     {
       "id": "netherite_with_format_code",
@@ -529,8 +528,8 @@
           "source_text": "Netherite",
           "target_text": "獄髓",
           "authority": "official_minecraft",
-          "usage": "compound_component",
-          "match_type": "source_substring",
+          "usage": "standalone_allowlist",
+          "match_type": "standalone_allowlist",
           "confidence": "high",
           "source_key": "block.minecraft.netherite_block"
         }
@@ -540,8 +539,43 @@
           "Netherite",
           "獄髓"
         ]
-      ],
-      "xfail": "官方複合詞可拆出 Netherite→獄髓，但來源整句恰為該詞時被 canonical==source 規則略過，單獨出現反而沒有命中（目前行為為空）"
+      ]
+    },
+    {
+      "id": "standalone_max_not_matched",
+      "item": {
+        "path": "custom:a",
+        "source_text": "Max"
+      },
+      "expected": [],
+      "prompt_terms": []
+    },
+    {
+      "id": "standalone_wood_not_matched",
+      "item": {
+        "path": "custom:a",
+        "source_text": "Wood"
+      },
+      "expected": [],
+      "prompt_terms": []
+    },
+    {
+      "id": "standalone_planks_not_matched",
+      "item": {
+        "path": "custom:a",
+        "source_text": "Planks"
+      },
+      "expected": [],
+      "prompt_terms": []
+    },
+    {
+      "id": "standalone_blocker_not_matched",
+      "item": {
+        "path": "custom:a",
+        "source_text": "Blocker"
+      },
+      "expected": [],
+      "prompt_terms": []
     }
   ]
 }
