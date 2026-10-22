@@ -40,6 +40,7 @@ from translation_tool.translation_db.smart_review_history_codec import (
     candidate_metadata_delta,
     find_candidate,
     is_chunked,
+    mark_projection,
     refresh_status_counts,
     snapshot_payload,
     timestamp,
@@ -52,7 +53,10 @@ from translation_tool.translation_db.smart_review_history_query import HistoryQu
 from translation_tool.translation_db.smart_review_history_recovery import (
     HistoryRecovery,
 )
-from translation_tool.translation_db.smart_review_status import SmartReviewStatus
+from translation_tool.translation_db.smart_review_status import (
+    ProjectionState,
+    SmartReviewStatus,
+)
 from translation_tool.utils.config_manager import get_smart_review_settings
 
 
@@ -449,8 +453,8 @@ class SmartReviewHistoryStore:
                         candidate["validation_error"] = "cancelled_before_request"
                         candidate_metadata_delta(
                             payload,
-                            "pending",
-                            "cancelled",
+                            SmartReviewStatus.PENDING,
+                            SmartReviewStatus.CANCELLED,
                             old_error,
                             "cancelled_before_request",
                         )
@@ -462,6 +466,7 @@ class SmartReviewHistoryStore:
                             run_id, payload, chunk_index, chunk
                         )
                 if updated:
+                    mark_projection(payload)
                     self.repository.write_unlocked(run_id, payload)
                 return updated
             updated = 0
@@ -545,6 +550,7 @@ class SmartReviewHistoryStore:
                 self.repository.update_chunk_checkpoint_unlocked(
                     run_id, payload, chunk_index, chunk
                 )
+                mark_projection(payload)
                 self.repository.write_unlocked(run_id, payload)
                 return True
             candidate = find_candidate(payload, int(ordinal))
@@ -552,6 +558,7 @@ class SmartReviewHistoryStore:
                 return False
             candidate.update(updates)
             refresh_status_counts(payload)
+            mark_projection(payload)
             self.repository.write_unlocked(run_id, payload)
             return True
 
@@ -610,7 +617,7 @@ class SmartReviewHistoryStore:
                         candidate_metadata_delta(
                             payload,
                             old_status,
-                            "applied",
+                            SmartReviewStatus.APPLIED,
                             old_error,
                             candidate.get("validation_error"),
                         )
@@ -622,6 +629,7 @@ class SmartReviewHistoryStore:
                             run_id, payload, chunk_index, chunk
                         )
                 if updated:
+                    mark_projection(payload, ProjectionState.RECONCILED)
                     self.repository.write_unlocked(run_id, payload)
                 return updated
             updated = 0
@@ -651,6 +659,7 @@ class SmartReviewHistoryStore:
                 updated += 1
             if updated:
                 refresh_status_counts(payload)
+                mark_projection(payload, ProjectionState.RECONCILED)
                 self.repository.write_unlocked(run_id, payload)
             return updated
 

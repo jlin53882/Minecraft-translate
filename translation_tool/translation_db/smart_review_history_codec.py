@@ -20,6 +20,7 @@ from translation_tool.translation_db.smart_review_status import (
     DECISION_STATUS,
     PROCESSED_STATUSES,
     VALID_STATUSES,
+    ProjectionState,
     SmartReviewStatus,
     coerce_status,
 )
@@ -288,6 +289,18 @@ def candidate_metadata_delta(
     for key in list(errors):
         if int(errors[key]) <= 0:
             del errors[key]
+
+
+def mark_projection(
+    payload: dict[str, Any], state: ProjectionState = ProjectionState.PROJECTED
+) -> None:
+    """每次候選投影變更都遞增 ``projection.revision`` 並記錄同步狀態。
+
+    revision 單調遞增，讓對帳與診斷能判斷 JSON 是否比某次 audit 更新；舊批次沒有此欄位時從 0 起算。
+    """
+    info = payload.get("projection")
+    revision = int(info.get("revision") or 0) if isinstance(info, dict) else 0
+    payload["projection"] = {"revision": revision + 1, "state": str(state)}
 
 
 def refresh_status_counts(payload: dict[str, Any]) -> None:

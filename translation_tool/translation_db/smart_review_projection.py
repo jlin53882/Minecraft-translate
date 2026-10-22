@@ -17,6 +17,10 @@ from translation_tool.translation_db.models import (
 from translation_tool.translation_db.smart_review_history import (
     SmartReviewHistoryStore,
 )
+from translation_tool.translation_db.smart_review_status import (
+    ProjectionState,
+    SmartReviewStatus,
+)
 from translation_tool.translation_db.smart_review_validation import (
     SMART_REVIEW_MANUAL_EDIT_STATUSES,
 )
@@ -40,6 +44,12 @@ class SmartReviewProjectionMixin:
         self, history: SmartReviewHistoryStore, run_id: str
     ) -> None:
         """以 SQLite audit marker 對帳已提交但尚未回寫 JSON 的候選。"""
+        records = self._smart_review_apply_records(run_id)
+        if records:
+            history.reconcile_applied(run_id, records)
+
+    def _smart_review_apply_records(self, run_id: str) -> dict[int, dict[str, Any]]:
+        """讀取某批次每個序號最新的套用 audit（``ordinal -> entry_id／batch／applied_at``）。"""
         note_prefix = f"run={run_id}; ordinal="
         # 以 note 範圍（不用 LIKE）走 idx_history_smart_review_apply；
         # 最新的套用在 Python 端依 id 排序，避免臨時排序。
@@ -70,8 +80,42 @@ class SmartReviewProjectionMixin:
                     "applied_at": applied_at,
                 },
             )
-        if records:
-            history.reconcile_applied(run_id, records)
+        return records
+
+    def smart_review_projection_report(self, run_id: str) -> dict[str, Any]:
+        """比對 SQLite 套用 audit 與 JSON 候選，回報投影同步狀態（唯讀，不修改任何資料）。
+
+        ``pending_ordinals`` 是 audit 已提交、但 JSON 尚未標成同一次套用的候選序號；
+        有任何一筆就是 ``pending_projection``，下一次讀取標籤時會由對帳補回。
+        沒有待補時回傳 JSON 內記錄的狀態（沒有紀錄的舊批次視為 ``projected``）。
+        """
+        history = SmartReviewHistoryStore(self.path)
+        run = history.get_run(run_id)
+        info = (run or {}).get("projection")
+        info = info if isinstance(info, dict) else {}
+        records = self._smart_review_apply_records(run_id)
+        applied = {
+            candidate.ordinal: candidate
+            for candidate in history.list_candidates(run_id)
+            if candidate.status == SmartReviewStatus.APPLIED
+        }
+        pending = sorted(
+            ordinal
+            for ordinal, record in records.items()
+            if ordinal not in applied
+            or applied[ordinal].applied_batch != (record["batch"] or None)
+        )
+        state = (
+            ProjectionState.PENDING_PROJECTION
+            if pending
+            else info.get("state") or ProjectionState.PROJECTED
+        )
+        return {
+            "run_id": run_id,
+            "state": str(state),
+            "revision": int(info.get("revision") or 0),
+            "pending_ordinals": pending,
+        }
 
     def _reconciled_latest_marks(
         self,

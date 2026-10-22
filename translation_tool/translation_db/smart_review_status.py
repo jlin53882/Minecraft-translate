@@ -27,6 +27,23 @@ class SmartReviewStatus(StrEnum):
     INVALID_FORMAT = "invalid_format"
 
 
+class ProjectionState(StrEnum):
+    """JSON 候選投影相對於 SQLite 套用紀錄（audit）的同步狀態。
+
+    SQLite audit 是「寫入事實」，JSON 是「候選狀態投影」：
+
+    * ``PROJECTED``：JSON 已依最近一次寫入更新；
+    * ``PENDING_PROJECTION``：audit 已提交，JSON 尚未反映（寫入失敗或尚在回寫）；
+    * ``PROJECTION_FAILED``：回寫 JSON 失敗且已放棄本次重試，等待下一次對帳；
+    * ``RECONCILED``：最近一次 JSON 變更由對帳依 audit 補回。
+    """
+
+    PROJECTED = "projected"
+    PENDING_PROJECTION = "pending_projection"
+    PROJECTION_FAILED = "projection_failed"
+    RECONCILED = "reconciled"
+
+
 S = SmartReviewStatus
 
 # AI 已處理完（不論結果好壞）的狀態；不含尚待處理的 pending 與被取消的 cancelled。

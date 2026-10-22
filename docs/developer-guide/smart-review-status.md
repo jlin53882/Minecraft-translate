@@ -30,6 +30,21 @@
 `can_transition()` 回傳是否允許，`validate_transition()` 對非法轉移丟出 `InvalidStatusTransition`
 （`reason` 可寫入 audit）。套用與保留原譯文仍由 CAS／revision 檢查把關，狀態機不取代這些防護。
 
+## JSON 與 SQLite 的一致性協議
+
+兩個儲存之間沒有共同交易，邊界如下：
+
+- **SQLite `history` 的 `smart_review_apply` audit 是「寫入事實」**：套用先提交 SQLite（含 CAS 檢查），再回寫 JSON。
+- **JSON 是「候選狀態投影」**：保存候選、狀態與驗證結果；完整候選不放進 SQLite，避免資料庫檔案膨脹。
+- 每次 JSON 候選變更都會遞增批次內的 `projection.revision`，並記錄 `projection.state`（`ProjectionState`）：
+  `projected`（依最近一次寫入更新）、`reconciled`（由對帳依 audit 補回）；
+  `pending_projection`（audit 已提交、JSON 尚未反映）與 `projection_failed`（回寫失敗並放棄本次重試）
+  只會出現在診斷回報，因為這時 JSON 本來就寫不進去。
+- 對帳 `reconcile_applied` 具冪等性：已標成同一次套用的候選不再改寫，重複呼叫不改任何檔案。
+  讀取標籤與候選列表時，若 `history` 的最大 id 比上次對帳新，會先對帳。
+- `TranslationDB.smart_review_projection_report(run_id)` 唯讀比對 audit 與 JSON，回傳
+  `state`、`revision` 與 `pending_ordinals`。
+
 ## 行程內快取
 
 - `SmartReviewHistoryStore.clear_caches(directory=None)`：清除起始時間、最新標記、損壞批次與復原掃描快取。
