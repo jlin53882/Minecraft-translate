@@ -84,15 +84,10 @@
   "translation_tool/translation_db/scanner.py:_guide_items": 24,
   "translation_tool/translation_db/scanner.py:_items_for_group": 34,
   "translation_tool/translation_db/scanner.py:scan_folder_generator": 30,
-  "translation_tool/translation_db/smart_review.py:SmartReviewMixin._apply_smart_review_candidate_json": 23,
-  "translation_tool/translation_db/smart_review.py:SmartReviewMixin._smart_review_context": 98,
-  "translation_tool/translation_db/smart_review.py:_validate_item": 22,
-  "translation_tool/translation_db/smart_review.py:run_smart_review": 208,
-  "translation_tool/translation_db/smart_review.py:run_smart_review.emit_event": 21,
-  "translation_tool/translation_db/smart_review.py:run_smart_review.repair_invalid_results": 35,
-  "translation_tool/translation_db/smart_review_history.py:SmartReviewHistoryStore.page_candidates": 43,
+  "translation_tool/translation_db/smart_review_context.py:_LocalContextBuilder._glossary_context": 24,
   "translation_tool/translation_db/smart_review_history.py:SmartReviewHistoryStore.reconcile_applied": 33,
-  "translation_tool/translation_db/smart_review_history.py:_candidate_from_payload": 21,
+  "translation_tool/translation_db/smart_review_history_query.py:HistoryQuery.page_candidates": 43,
+  "translation_tool/translation_db/smart_review_validation.py:_validate_item": 22,
   "translation_tool/utils/config_manager.py:_validate_lm_translator_config": 35,
   "translation_tool/utils/config_manager.py:_validate_token_budget_config": 23,
   "translation_tool/utils/exceptions.py:handle_translation_errors": 24,
@@ -113,7 +108,7 @@
    "max_complexity": 8,
    "public_api": 6,
    "class_methods": 0,
-   "import_depth": 1,
+   "import_depth": 2,
    "top_level_defs": 6,
    "annotation_coverage": 0.917
   },
@@ -233,7 +228,7 @@
    "max_complexity": 6,
    "public_api": 16,
    "class_methods": 0,
-   "import_depth": 7,
+   "import_depth": 12,
    "top_level_defs": 11,
    "annotation_coverage": 1.0
   },
@@ -257,7 +252,7 @@
    "max_complexity": 6,
    "public_api": 13,
    "class_methods": 0,
-   "import_depth": 0,
+   "import_depth": 1,
    "top_level_defs": 14,
    "annotation_coverage": 1.0
   },
@@ -265,7 +260,7 @@
    "max_complexity": 14,
    "public_api": 5,
    "class_methods": 20,
-   "import_depth": 10,
+   "import_depth": 15,
    "top_level_defs": 68,
    "annotation_coverage": 0.423
   },
@@ -273,15 +268,15 @@
    "max_complexity": 19,
    "public_api": 63,
    "class_methods": 0,
-   "import_depth": 8,
+   "import_depth": 13,
    "top_level_defs": 12,
    "annotation_coverage": 0.903
   },
   "app.services_impl.moddb_smart_review_service": {
    "max_complexity": 10,
-   "public_api": 21,
+   "public_api": 24,
    "class_methods": 0,
-   "import_depth": 7,
+   "import_depth": 12,
    "top_level_defs": 17,
    "annotation_coverage": 1.0
   },
@@ -289,7 +284,7 @@
    "max_complexity": 7,
    "public_api": 10,
    "class_methods": 0,
-   "import_depth": 9,
+   "import_depth": 14,
    "top_level_defs": 10,
    "annotation_coverage": 0.833
   },
@@ -297,7 +292,7 @@
    "max_complexity": 9,
    "public_api": 16,
    "class_methods": 1,
-   "import_depth": 7,
+   "import_depth": 12,
    "top_level_defs": 5,
    "annotation_coverage": 1.0
   },
@@ -313,7 +308,7 @@
    "max_complexity": 25,
    "public_api": 12,
    "class_methods": 1,
-   "import_depth": 9,
+   "import_depth": 14,
    "top_level_defs": 35,
    "annotation_coverage": 0.667
   },
@@ -385,7 +380,7 @@
    "max_complexity": 14,
    "public_api": 1,
    "class_methods": 0,
-   "import_depth": 9,
+   "import_depth": 14,
    "top_level_defs": 2,
    "annotation_coverage": 0.769
   },
@@ -409,7 +404,7 @@
    "max_complexity": 11,
    "public_api": 2,
    "class_methods": 0,
-   "import_depth": 9,
+   "import_depth": 14,
    "top_level_defs": 21,
    "annotation_coverage": 0.742
   },
@@ -425,7 +420,7 @@
    "max_complexity": 1,
    "public_api": 5,
    "class_methods": 0,
-   "import_depth": 10,
+   "import_depth": 15,
    "top_level_defs": 3,
    "annotation_coverage": 1.0
   },
@@ -929,7 +924,7 @@
    "max_complexity": 24,
    "public_api": 12,
    "class_methods": 0,
-   "import_depth": 10,
+   "import_depth": 15,
    "top_level_defs": 26,
    "annotation_coverage": 0.259
   },
@@ -945,7 +940,7 @@
    "max_complexity": 9,
    "public_api": 4,
    "class_methods": 4,
-   "import_depth": 10,
+   "import_depth": 15,
    "top_level_defs": 5,
    "annotation_coverage": 0.733
   },
@@ -961,7 +956,7 @@
    "max_complexity": 13,
    "public_api": 13,
    "class_methods": 3,
-   "import_depth": 1,
+   "import_depth": 2,
    "top_level_defs": 15,
    "annotation_coverage": 0.812
   },
@@ -969,7 +964,7 @@
    "max_complexity": 10,
    "public_api": 1,
    "class_methods": 63,
-   "import_depth": 11,
+   "import_depth": 16,
    "top_level_defs": 3,
    "annotation_coverage": 0.487
   },
@@ -1073,17 +1068,17 @@
    "max_complexity": 9,
    "public_api": 0,
    "class_methods": 0,
-   "import_depth": 1,
+   "import_depth": 2,
    "top_level_defs": 7,
    "annotation_coverage": 0.867
   },
   "app.views.icon_preview.icon_cache": {
    "max_complexity": 21,
-   "public_api": 2,
+   "public_api": 3,
    "class_methods": 8,
    "import_depth": 3,
-   "top_level_defs": 26,
-   "annotation_coverage": 0.89
+   "top_level_defs": 27,
+   "annotation_coverage": 0.891
   },
   "app.views.icon_preview.list_mixin": {
    "max_complexity": 11,
@@ -1137,7 +1132,7 @@
    "max_complexity": 9,
    "public_api": 2,
    "class_methods": 28,
-   "import_depth": 11,
+   "import_depth": 16,
    "top_level_defs": 2,
    "annotation_coverage": 0.296
   },
@@ -1161,7 +1156,7 @@
    "max_complexity": 11,
    "public_api": 2,
    "class_methods": 13,
-   "import_depth": 10,
+   "import_depth": 15,
    "top_level_defs": 2,
    "annotation_coverage": 0.636
   },
@@ -1169,7 +1164,7 @@
    "max_complexity": 8,
    "public_api": 1,
    "class_methods": 11,
-   "import_depth": 11,
+   "import_depth": 16,
    "top_level_defs": 1,
    "annotation_coverage": 0.121
   },
@@ -1177,7 +1172,7 @@
    "max_complexity": 18,
    "public_api": 1,
    "class_methods": 31,
-   "import_depth": 12,
+   "import_depth": 17,
    "top_level_defs": 1,
    "annotation_coverage": 0.857
   },
@@ -1193,7 +1188,7 @@
    "max_complexity": 19,
    "public_api": 2,
    "class_methods": 23,
-   "import_depth": 9,
+   "import_depth": 14,
    "top_level_defs": 2,
    "annotation_coverage": 0.773
   },
@@ -1201,7 +1196,7 @@
    "max_complexity": 22,
    "public_api": 1,
    "class_methods": 48,
-   "import_depth": 11,
+   "import_depth": 16,
    "top_level_defs": 1,
    "annotation_coverage": 0.724
   },
@@ -1209,7 +1204,7 @@
    "max_complexity": 9,
    "public_api": 2,
    "class_methods": 2,
-   "import_depth": 10,
+   "import_depth": 15,
    "top_level_defs": 9,
    "annotation_coverage": 0.976
   },
@@ -1217,7 +1212,7 @@
    "max_complexity": 11,
    "public_api": 1,
    "class_methods": 33,
-   "import_depth": 10,
+   "import_depth": 15,
    "top_level_defs": 1,
    "annotation_coverage": 0.684
   },
@@ -1233,7 +1228,7 @@
    "max_complexity": 9,
    "public_api": 1,
    "class_methods": 29,
-   "import_depth": 10,
+   "import_depth": 15,
    "top_level_defs": 3,
    "annotation_coverage": 0.635
   },
@@ -1241,7 +1236,7 @@
    "max_complexity": 24,
    "public_api": 2,
    "class_methods": 70,
-   "import_depth": 13,
+   "import_depth": 18,
    "top_level_defs": 1,
    "annotation_coverage": 0.748
   },
@@ -1249,7 +1244,7 @@
    "max_complexity": 12,
    "public_api": 10,
    "class_methods": 0,
-   "import_depth": 12,
+   "import_depth": 17,
    "top_level_defs": 13,
    "annotation_coverage": 0.486
   },
@@ -1257,7 +1252,7 @@
    "max_complexity": 3,
    "public_api": 1,
    "class_methods": 0,
-   "import_depth": 10,
+   "import_depth": 15,
    "top_level_defs": 6,
    "annotation_coverage": 0.929
   },
@@ -1265,7 +1260,7 @@
    "max_complexity": 5,
    "public_api": 1,
    "class_methods": 0,
-   "import_depth": 10,
+   "import_depth": 15,
    "top_level_defs": 5,
    "annotation_coverage": 0.312
   },
@@ -1297,7 +1292,7 @@
    "max_complexity": 8,
    "public_api": 3,
    "class_methods": 0,
-   "import_depth": 9,
+   "import_depth": 14,
    "top_level_defs": 6,
    "annotation_coverage": 0.938
   },
@@ -1305,7 +1300,7 @@
    "max_complexity": 12,
    "public_api": 1,
    "class_methods": 0,
-   "import_depth": 10,
+   "import_depth": 15,
    "top_level_defs": 4,
    "annotation_coverage": 0.267
   },
@@ -1313,7 +1308,7 @@
    "max_complexity": 19,
    "public_api": 2,
    "class_methods": 14,
-   "import_depth": 10,
+   "import_depth": 15,
    "top_level_defs": 2,
    "annotation_coverage": 0.759
   },
@@ -1329,7 +1324,7 @@
    "max_complexity": 13,
    "public_api": 1,
    "class_methods": 15,
-   "import_depth": 11,
+   "import_depth": 16,
    "top_level_defs": 2,
    "annotation_coverage": 0.822
   },
@@ -1337,7 +1332,7 @@
    "max_complexity": 26,
    "public_api": 2,
    "class_methods": 0,
-   "import_depth": 14,
+   "import_depth": 19,
    "top_level_defs": 6,
    "annotation_coverage": 0.591
   },
@@ -1350,12 +1345,12 @@
    "annotation_coverage": 1.0
   },
   "app.views.moddb.repair_reviewer": {
-   "max_complexity": 13,
+   "max_complexity": 12,
    "public_api": 2,
-   "class_methods": 30,
-   "import_depth": 11,
+   "class_methods": 31,
+   "import_depth": 16,
    "top_level_defs": 2,
-   "annotation_coverage": 0.812
+   "annotation_coverage": 0.817
   },
   "app.views.moddb.repair_summary": {
    "max_complexity": 10,
@@ -1369,7 +1364,7 @@
    "max_complexity": 9,
    "public_api": 1,
    "class_methods": 10,
-   "import_depth": 12,
+   "import_depth": 17,
    "top_level_defs": 2,
    "annotation_coverage": 0.875
   },
@@ -1377,7 +1372,7 @@
    "max_complexity": 14,
    "public_api": 8,
    "class_methods": 0,
-   "import_depth": 11,
+   "import_depth": 16,
    "top_level_defs": 19,
    "annotation_coverage": 0.494
   },
@@ -1385,7 +1380,7 @@
    "max_complexity": 12,
    "public_api": 1,
    "class_methods": 14,
-   "import_depth": 10,
+   "import_depth": 15,
    "top_level_defs": 1,
    "annotation_coverage": 0.932
   },
@@ -1393,7 +1388,7 @@
    "max_complexity": 13,
    "public_api": 1,
    "class_methods": 31,
-   "import_depth": 10,
+   "import_depth": 15,
    "top_level_defs": 1,
    "annotation_coverage": 0.808
   },
@@ -1409,7 +1404,7 @@
    "max_complexity": 3,
    "public_api": 1,
    "class_methods": 10,
-   "import_depth": 11,
+   "import_depth": 16,
    "top_level_defs": 1,
    "annotation_coverage": 0.783
   },
@@ -1417,7 +1412,7 @@
    "max_complexity": 15,
    "public_api": 2,
    "class_methods": 6,
-   "import_depth": 8,
+   "import_depth": 13,
    "top_level_defs": 2,
    "annotation_coverage": 0.818
   },
@@ -1425,7 +1420,7 @@
    "max_complexity": 18,
    "public_api": 5,
    "class_methods": 27,
-   "import_depth": 8,
+   "import_depth": 13,
    "top_level_defs": 7,
    "annotation_coverage": 1.0
   },
@@ -1433,7 +1428,7 @@
    "max_complexity": 5,
    "public_api": 1,
    "class_methods": 0,
-   "import_depth": 8,
+   "import_depth": 13,
    "top_level_defs": 1,
    "annotation_coverage": 1.0
   },
@@ -1441,7 +1436,7 @@
    "max_complexity": 26,
    "public_api": 6,
    "class_methods": 32,
-   "import_depth": 10,
+   "import_depth": 15,
    "top_level_defs": 6,
    "annotation_coverage": 0.843
   },
@@ -1449,7 +1444,7 @@
    "max_complexity": 11,
    "public_api": 1,
    "class_methods": 37,
-   "import_depth": 10,
+   "import_depth": 15,
    "top_level_defs": 1,
    "annotation_coverage": 0.805
   },
@@ -1457,7 +1452,7 @@
    "max_complexity": 11,
    "public_api": 2,
    "class_methods": 5,
-   "import_depth": 10,
+   "import_depth": 15,
    "top_level_defs": 2,
    "annotation_coverage": 0.6
   },
@@ -1465,7 +1460,7 @@
    "max_complexity": 9,
    "public_api": 9,
    "class_methods": 12,
-   "import_depth": 9,
+   "import_depth": 14,
    "top_level_defs": 7,
    "annotation_coverage": 0.922
   },
@@ -1473,7 +1468,7 @@
    "max_complexity": 12,
    "public_api": 1,
    "class_methods": 43,
-   "import_depth": 10,
+   "import_depth": 15,
    "top_level_defs": 3,
    "annotation_coverage": 0.802
   },
@@ -1481,7 +1476,7 @@
    "max_complexity": 15,
    "public_api": 3,
    "class_methods": 11,
-   "import_depth": 10,
+   "import_depth": 15,
    "top_level_defs": 1,
    "annotation_coverage": 0.794
   },
@@ -1489,7 +1484,7 @@
    "max_complexity": 13,
    "public_api": 1,
    "class_methods": 0,
-   "import_depth": 10,
+   "import_depth": 15,
    "top_level_defs": 4,
    "annotation_coverage": 0.647
   },
@@ -1497,7 +1492,7 @@
    "max_complexity": 24,
    "public_api": 1,
    "class_methods": 46,
-   "import_depth": 13,
+   "import_depth": 18,
    "top_level_defs": 1,
    "annotation_coverage": 0.793
   },
@@ -1505,7 +1500,7 @@
    "max_complexity": 9,
    "public_api": 8,
    "class_methods": 0,
-   "import_depth": 9,
+   "import_depth": 14,
    "top_level_defs": 8,
    "annotation_coverage": 0.821
   },
@@ -1513,7 +1508,7 @@
    "max_complexity": 17,
    "public_api": 1,
    "class_methods": 28,
-   "import_depth": 15,
+   "import_depth": 20,
    "top_level_defs": 2,
    "annotation_coverage": 0.84
   },
@@ -1521,7 +1516,7 @@
    "max_complexity": 0,
    "public_api": 1,
    "class_methods": 0,
-   "import_depth": 13,
+   "import_depth": 18,
    "top_level_defs": 0,
    "annotation_coverage": null
   },
@@ -1529,7 +1524,7 @@
    "max_complexity": 12,
    "public_api": 3,
    "class_methods": 10,
-   "import_depth": 10,
+   "import_depth": 15,
    "top_level_defs": 4,
    "annotation_coverage": 0.629
   },
@@ -1569,7 +1564,7 @@
    "max_complexity": 18,
    "public_api": 1,
    "class_methods": 0,
-   "import_depth": 11,
+   "import_depth": 16,
    "top_level_defs": 19,
    "annotation_coverage": 0.148
   },
@@ -1585,7 +1580,7 @@
    "max_complexity": 16,
    "public_api": 1,
    "class_methods": 0,
-   "import_depth": 11,
+   "import_depth": 16,
    "top_level_defs": 21,
    "annotation_coverage": 0.209
   },
@@ -1609,7 +1604,7 @@
    "max_complexity": 11,
    "public_api": 1,
    "class_methods": 0,
-   "import_depth": 11,
+   "import_depth": 16,
    "top_level_defs": 11,
    "annotation_coverage": 0.132
   },
@@ -1617,7 +1612,7 @@
    "max_complexity": 10,
    "public_api": 1,
    "class_methods": 27,
-   "import_depth": 12,
+   "import_depth": 17,
    "top_level_defs": 1,
    "annotation_coverage": 0.429
   },
@@ -1788,6 +1783,14 @@
    "import_depth": 0,
    "top_level_defs": 0,
    "annotation_coverage": null
+  },
+  "translation_tool.core.batch_timing": {
+   "max_complexity": 5,
+   "public_api": 5,
+   "class_methods": 0,
+   "import_depth": 0,
+   "top_level_defs": 6,
+   "annotation_coverage": 1.0
   },
   "translation_tool.core.book_dirs": {
    "max_complexity": 4,
@@ -2015,11 +2018,11 @@
   },
   "translation_tool.core.lang_merge_content_copy": {
    "max_complexity": 114,
-   "public_api": 2,
+   "public_api": 3,
    "class_methods": 1,
    "import_depth": 2,
-   "top_level_defs": 9,
-   "annotation_coverage": 0.754
+   "top_level_defs": 10,
+   "annotation_coverage": 0.758
   },
   "translation_tool.core.lang_merge_content_patchers": {
    "max_complexity": 9,
@@ -2033,7 +2036,7 @@
    "max_complexity": 10,
    "public_api": 3,
    "class_methods": 4,
-   "import_depth": 7,
+   "import_depth": 12,
    "top_level_defs": 3,
    "annotation_coverage": 1.0
   },
@@ -2049,7 +2052,7 @@
    "max_complexity": 40,
    "public_api": 2,
    "class_methods": 4,
-   "import_depth": 8,
+   "import_depth": 13,
    "top_level_defs": 11,
    "annotation_coverage": 0.857
   },
@@ -2097,7 +2100,7 @@
    "max_complexity": 36,
    "public_api": 2,
    "class_methods": 0,
-   "import_depth": 8,
+   "import_depth": 13,
    "top_level_defs": 6,
    "annotation_coverage": 0.818
   },
@@ -2201,7 +2204,7 @@
    "max_complexity": 12,
    "public_api": 6,
    "class_methods": 2,
-   "import_depth": 9,
+   "import_depth": 14,
    "top_level_defs": 9,
    "annotation_coverage": 1.0
   },
@@ -2225,7 +2228,7 @@
    "max_complexity": 26,
    "public_api": 7,
    "class_methods": 0,
-   "import_depth": 8,
+   "import_depth": 13,
    "top_level_defs": 26,
    "annotation_coverage": 0.866
   },
@@ -2233,7 +2236,7 @@
    "max_complexity": 9,
    "public_api": 7,
    "class_methods": 1,
-   "import_depth": 7,
+   "import_depth": 12,
    "top_level_defs": 7,
    "annotation_coverage": 0.87
   },
@@ -2338,7 +2341,7 @@
    "public_api": 13,
    "class_methods": 9,
    "import_depth": 3,
-   "top_level_defs": 25,
+   "top_level_defs": 26,
    "annotation_coverage": 1.0
   },
   "translation_tool.core.openai_codex_client": {
@@ -2385,7 +2388,7 @@
    "max_complexity": 11,
    "public_api": 9,
    "class_methods": 4,
-   "import_depth": 1,
+   "import_depth": 2,
    "top_level_defs": 11,
    "annotation_coverage": 1.0
   },
@@ -2569,7 +2572,7 @@
    "max_complexity": 0,
    "public_api": 48,
    "class_methods": 0,
-   "import_depth": 6,
+   "import_depth": 11,
    "top_level_defs": 0,
    "annotation_coverage": null
   },
@@ -2577,7 +2580,7 @@
    "max_complexity": 26,
    "public_api": 1,
    "class_methods": 8,
-   "import_depth": 1,
+   "import_depth": 2,
    "top_level_defs": 1,
    "annotation_coverage": 1.0
   },
@@ -2625,7 +2628,7 @@
    "max_complexity": 10,
    "public_api": 33,
    "class_methods": 16,
-   "import_depth": 0,
+   "import_depth": 1,
    "top_level_defs": 33,
    "annotation_coverage": 1.0
   },
@@ -2653,19 +2656,27 @@
    "top_level_defs": 1,
    "annotation_coverage": 0.9
   },
+  "translation_tool.translation_db.repair_status": {
+   "max_complexity": 2,
+   "public_api": 6,
+   "class_methods": 0,
+   "import_depth": 0,
+   "top_level_defs": 6,
+   "annotation_coverage": 1.0
+  },
   "translation_tool.translation_db.repository": {
    "max_complexity": 51,
-   "public_api": 1,
+   "public_api": 2,
    "class_methods": 126,
-   "import_depth": 6,
-   "top_level_defs": 3,
+   "import_depth": 11,
+   "top_level_defs": 5,
    "annotation_coverage": 0.983
   },
   "translation_tool.translation_db.resolver": {
    "max_complexity": 12,
    "public_api": 7,
    "class_methods": 7,
-   "import_depth": 6,
+   "import_depth": 11,
    "top_level_defs": 7,
    "annotation_coverage": 0.871
   },
@@ -2681,7 +2692,7 @@
    "max_complexity": 34,
    "public_api": 10,
    "class_methods": 6,
-   "import_depth": 7,
+   "import_depth": 12,
    "top_level_defs": 26,
    "annotation_coverage": 0.97
   },
@@ -2695,26 +2706,170 @@
   },
   "translation_tool.translation_db.settings": {
    "max_complexity": 16,
-   "public_api": 16,
+   "public_api": 17,
    "class_methods": 2,
-   "import_depth": 6,
-   "top_level_defs": 19,
+   "import_depth": 11,
+   "top_level_defs": 20,
    "annotation_coverage": 1.0
   },
   "translation_tool.translation_db.smart_review": {
-   "max_complexity": 208,
-   "public_api": 9,
-   "class_methods": 31,
-   "import_depth": 5,
-   "top_level_defs": 33,
-   "annotation_coverage": 0.997
+   "max_complexity": 0,
+   "public_api": 16,
+   "class_methods": 0,
+   "import_depth": 10,
+   "top_level_defs": 1,
+   "annotation_coverage": null
+  },
+  "translation_tool.translation_db.smart_review_apply": {
+   "max_complexity": 16,
+   "public_api": 1,
+   "class_methods": 13,
+   "import_depth": 7,
+   "top_level_defs": 1,
+   "annotation_coverage": 1.0
+  },
+  "translation_tool.translation_db.smart_review_context": {
+   "max_complexity": 24,
+   "public_api": 1,
+   "class_methods": 18,
+   "import_depth": 4,
+   "top_level_defs": 2,
+   "annotation_coverage": 1.0
+  },
+  "translation_tool.translation_db.smart_review_filters": {
+   "max_complexity": 12,
+   "public_api": 1,
+   "class_methods": 6,
+   "import_depth": 2,
+   "top_level_defs": 9,
+   "annotation_coverage": 1.0
   },
   "translation_tool.translation_db.smart_review_history": {
-   "max_complexity": 43,
-   "public_api": 2,
-   "class_methods": 60,
+   "max_complexity": 33,
+   "public_api": 3,
+   "class_methods": 25,
+   "import_depth": 6,
+   "top_level_defs": 2,
+   "annotation_coverage": 1.0
+  },
+  "translation_tool.translation_db.smart_review_history_codec": {
+   "max_complexity": 20,
+   "public_api": 15,
+   "class_methods": 0,
+   "import_depth": 2,
+   "top_level_defs": 16,
+   "annotation_coverage": 1.0
+  },
+  "translation_tool.translation_db.smart_review_history_lock": {
+   "max_complexity": 12,
+   "public_api": 1,
+   "class_methods": 5,
+   "import_depth": 0,
+   "top_level_defs": 3,
+   "annotation_coverage": 1.0
+  },
+  "translation_tool.translation_db.smart_review_history_manifest": {
+   "max_complexity": 18,
+   "public_api": 1,
+   "class_methods": 25,
    "import_depth": 3,
+   "top_level_defs": 1,
+   "annotation_coverage": 1.0
+  },
+  "translation_tool.translation_db.smart_review_history_query": {
+   "max_complexity": 43,
+   "public_api": 1,
+   "class_methods": 14,
+   "import_depth": 5,
+   "top_level_defs": 2,
+   "annotation_coverage": 1.0
+  },
+  "translation_tool.translation_db.smart_review_history_recovery": {
+   "max_complexity": 17,
+   "public_api": 1,
+   "class_methods": 2,
+   "import_depth": 4,
+   "top_level_defs": 2,
+   "annotation_coverage": 1.0
+  },
+  "translation_tool.translation_db.smart_review_projection": {
+   "max_complexity": 10,
+   "public_api": 2,
+   "class_methods": 6,
+   "import_depth": 7,
+   "top_level_defs": 2,
+   "annotation_coverage": 1.0
+  },
+  "translation_tool.translation_db.smart_review_prompt": {
+   "max_complexity": 5,
+   "public_api": 3,
+   "class_methods": 0,
+   "import_depth": 3,
+   "top_level_defs": 3,
+   "annotation_coverage": 1.0
+  },
+  "translation_tool.translation_db.smart_review_provider": {
+   "max_complexity": 14,
+   "public_api": 1,
+   "class_methods": 4,
+   "import_depth": 5,
    "top_level_defs": 13,
+   "annotation_coverage": 1.0
+  },
+  "translation_tool.translation_db.smart_review_repair": {
+   "max_complexity": 12,
+   "public_api": 1,
+   "class_methods": 12,
+   "import_depth": 8,
+   "top_level_defs": 2,
+   "annotation_coverage": 1.0
+  },
+  "translation_tool.translation_db.smart_review_request": {
+   "max_complexity": 12,
+   "public_api": 3,
+   "class_methods": 21,
+   "import_depth": 7,
+   "top_level_defs": 5,
+   "annotation_coverage": 1.0
+  },
+  "translation_tool.translation_db.smart_review_run": {
+   "max_complexity": 9,
+   "public_api": 1,
+   "class_methods": 12,
+   "import_depth": 9,
+   "top_level_defs": 5,
+   "annotation_coverage": 0.987
+  },
+  "translation_tool.translation_db.smart_review_run_state": {
+   "max_complexity": 18,
+   "public_api": 4,
+   "class_methods": 16,
+   "import_depth": 6,
+   "top_level_defs": 4,
+   "annotation_coverage": 1.0
+  },
+  "translation_tool.translation_db.smart_review_runs": {
+   "max_complexity": 14,
+   "public_api": 1,
+   "class_methods": 12,
+   "import_depth": 7,
+   "top_level_defs": 2,
+   "annotation_coverage": 1.0
+  },
+  "translation_tool.translation_db.smart_review_status": {
+   "max_complexity": 4,
+   "public_api": 7,
+   "class_methods": 1,
+   "import_depth": 0,
+   "top_level_defs": 7,
+   "annotation_coverage": 1.0
+  },
+  "translation_tool.translation_db.smart_review_validation": {
+   "max_complexity": 22,
+   "public_api": 2,
+   "class_methods": 0,
+   "import_depth": 4,
+   "top_level_defs": 7,
    "annotation_coverage": 1.0
   },
   "translation_tool.translation_db.sniff_groups": {
@@ -2767,10 +2922,10 @@
   },
   "translation_tool.utils.app_paths": {
    "max_complexity": 7,
-   "public_api": 6,
+   "public_api": 7,
    "class_methods": 0,
-   "import_depth": 0,
-   "top_level_defs": 10,
+   "import_depth": 1,
+   "top_level_defs": 11,
    "annotation_coverage": 1.0
   },
   "translation_tool.utils.bounded_executor": {
@@ -2803,6 +2958,14 @@
    "class_methods": 0,
    "import_depth": 1,
    "top_level_defs": 3,
+   "annotation_coverage": 1.0
+  },
+  "translation_tool.utils.cache_registry": {
+   "max_complexity": 5,
+   "public_api": 4,
+   "class_methods": 0,
+   "import_depth": 0,
+   "top_level_defs": 4,
    "annotation_coverage": 1.0
   },
   "translation_tool.utils.cache_search": {
@@ -2850,14 +3013,14 @@
    "public_api": 23,
    "class_methods": 11,
    "import_depth": 2,
-   "top_level_defs": 32,
-   "annotation_coverage": 0.723
+   "top_level_defs": 31,
+   "annotation_coverage": 0.713
   },
   "translation_tool.utils.config_schema": {
    "max_complexity": 4,
    "public_api": 7,
    "class_methods": 0,
-   "import_depth": 0,
+   "import_depth": 1,
    "top_level_defs": 7,
    "annotation_coverage": 1.0
   },
@@ -2865,7 +3028,7 @@
    "max_complexity": 24,
    "public_api": 8,
    "class_methods": 4,
-   "import_depth": 1,
+   "import_depth": 2,
    "top_level_defs": 10,
    "annotation_coverage": 0.227
   },
@@ -2933,6 +3096,14 @@
    "top_level_defs": 1,
    "annotation_coverage": 1.0
   },
+  "translation_tool.utils.smart_review_settings": {
+   "max_complexity": 3,
+   "public_api": 2,
+   "class_methods": 7,
+   "import_depth": 0,
+   "top_level_defs": 2,
+   "annotation_coverage": 1.0
+  },
   "translation_tool.utils.species_cache": {
    "max_complexity": 18,
    "public_api": 6,
@@ -2953,17 +3124,17 @@
    "max_complexity": 11,
    "public_api": 4,
    "class_methods": 0,
-   "import_depth": 0,
-   "top_level_defs": 8,
-   "annotation_coverage": 1.0
+   "import_depth": 1,
+   "top_level_defs": 10,
+   "annotation_coverage": 0.958
   },
   "translation_tool.utils.text_processor": {
    "max_complexity": 15,
-   "public_api": 14,
+   "public_api": 16,
    "class_methods": 11,
    "import_depth": 3,
-   "top_level_defs": 19,
-   "annotation_coverage": 0.901
+   "top_level_defs": 21,
+   "annotation_coverage": 0.904
   },
   "translation_tool.utils.ui_logging_handler": {
    "max_complexity": 11,
