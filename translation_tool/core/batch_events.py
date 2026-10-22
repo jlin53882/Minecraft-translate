@@ -378,8 +378,8 @@ def _provider_attempt(event: Mapping[str, Any], prefix: str, operation: str) -> 
     return (
         f"{tag} API 失敗：狀態碼={event.get('http_status', '?')}，"
         f"錯誤分類={event.get('error_class', 'unknown')}，"
-        f"逾時={event.get('timeout', False)}，過載={event.get('overload', False)}，"
-        f"速率限制={event.get('rate_limit', False)}。"
+        f"逾時={_yes_no(event.get('timeout'))}，過載={_yes_no(event.get('overload'))}，"
+        f"速率限制={_yes_no(event.get('rate_limit'))}。"
     )
 
 

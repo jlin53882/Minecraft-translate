@@ -189,7 +189,7 @@ class _SmartReviewBatchRunner:
         estimated_input = _smart_review_estimated_input_tokens(payload, response_schema)
         state.metrics["last_estimated_input_tokens"] = round(estimated_input, 2)
         preparation_seconds = time.monotonic() - preparation_started
-        state.add_timing(batch_ctx, "prompt_build_ms", preparation_seconds)
+        state.add_timing_seconds(batch_ctx, "prompt_build_ms", preparation_seconds)
         return payload, response_schema, estimated_input
 
     def _reject_over_budget_batch(
@@ -265,7 +265,7 @@ class _SmartReviewBatchRunner:
             ]
         finally:
             parse_seconds = time.monotonic() - parse_started
-            state.add_timing(batch_ctx, "response_parse_ms", parse_seconds)
+            state.add_timing_seconds(batch_ctx, "response_parse_ms", parse_seconds)
 
     def _persist_results(
         self, results: list[dict[str, Any]], batch_ctx: SmartReviewBatch
@@ -277,8 +277,8 @@ class _SmartReviewBatchRunner:
             self.db.record_smart_review_results(state.run_id, results)
         finally:
             write_seconds = time.monotonic() - write_started
-            state.add_timing(batch_ctx, "history_write_ms", write_seconds)
-            state.add_timing(batch_ctx, "commit_ms", write_seconds)
+            state.add_timing_seconds(batch_ctx, "history_write_ms", write_seconds)
+            state.add_timing_seconds(batch_ctx, "commit_ms", write_seconds)
 
     def _count_results(
         self, results: list[dict[str, Any]], batch_ctx: SmartReviewBatch
@@ -303,7 +303,7 @@ class _SmartReviewBatchRunner:
                 counts.suggestions += 1
             else:
                 counts.needs_context += 1
-        state.add_timing(
+        state.add_timing_seconds(
             batch_ctx, "validation_ms", time.monotonic() - validation_started
         )
 

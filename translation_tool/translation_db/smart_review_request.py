@@ -74,10 +74,10 @@ class SmartReviewAttemptEvents:
         kind = str(event.get("kind") or "retry")
         wait_seconds = (timing_ms(event, "wait_ms") or 0) / 1000
         if kind == "retry_wait":
-            state.add_timing(batch, "retry_backoff_ms", wait_seconds)
+            state.add_timing_seconds(batch, "retry_backoff_ms", wait_seconds)
         elif kind == "network_retry_wait":
             state.bump("network_retry_count")
-            state.add_timing(batch, "network_retry_wait_ms", wait_seconds)
+            state.add_timing_seconds(batch, "network_retry_wait_ms", wait_seconds)
         self._emit(kind, event)
 
     def on_network_event(self, event: dict[str, object]) -> None:
@@ -206,7 +206,7 @@ class _BatchRequester:
                 wait_event_callback=events.on_rate_limit_event,
             )
         finally:
-            state.add_timing(
+            state.add_timing_seconds(
                 batch_ctx, "quota_wait_ms", time.monotonic() - wait_started
             )
         self.attempt_meta = {}
@@ -231,7 +231,7 @@ class _BatchRequester:
             )
         finally:
             self.api_seconds = time.monotonic() - api_started
-            state.add_timing(batch_ctx, "api_ms", self.api_seconds)
+            state.add_timing_seconds(batch_ctx, "api_ms", self.api_seconds)
 
     # -- 結果處置：回傳 True 代表重試，False 代表停止本批次請求 ------------------
 

@@ -205,7 +205,7 @@ def test_run_state_emits_canonical_events_and_adapts_only_at_progress_boundary()
     )
     state.bump("attempts")
     state.emit_batch_event(batch, "attempt_start", 1, expected_count=2)
-    state.add_timing(batch, "api_ms", 1.5)
+    state.add_timing_seconds(batch, "api_ms", 1.5)
     state.emit_batch_event(batch, "attempt_success", 1, api_ms=1500, http_status=200)
     state.complete_batch(batch, "completed")
 
@@ -367,3 +367,28 @@ def test_persisted_metrics_legacy_aliases_follow_canonical_values():
     metrics.update(to_legacy_event(metrics))
     assert metrics["suggest_revision_count"] == 7
     assert metrics["smart_review_attempts"] == 4
+
+
+def test_provider_attempt_failure_uses_yes_no_flags():
+    """provider 失敗訊息的旗標與其他 formatter 一致，用「是／否」而不是 Python 的 True／False。"""
+    text = format_batch_event(
+        {
+            "kind": "provider_attempt_failure",
+            "operation": "translate",
+            "timeout": False,
+            "overload": True,
+            "rate_limit": False,
+        }
+    )
+    assert "逾時=否" in text and "過載=是" in text and "速率限制=否" in text
+    assert "True" not in text and "False" not in text
+
+
+def test_smart_review_run_state_timing_method_name_states_the_unit():
+    """SmartReviewRunState 以秒計；方法名必須帶單位，避免與毫秒的 add_timing 混用。"""
+    from translation_tool.translation_db.smart_review_run_state import (
+        SmartReviewRunState,
+    )
+
+    assert hasattr(SmartReviewRunState, "add_timing_seconds")
+    assert not hasattr(SmartReviewRunState, "add_timing")

@@ -292,7 +292,7 @@ class SmartReviewJob:
             if phase == "batch_complete" and isinstance(timing, dict) and not event:
                 session.add_log(
                     f"已處理 {state.processed:,} / {state.selected:,} 筆；"
-                    f"第 {timing.get('batch_number', '?')} 批 "
+                    f"第 {timing.get('batch_index', timing.get('batch_number', '?'))} 批 "
                     f"（{timing.get('ordinal_start', '?')}～"
                     f"{timing.get('ordinal_end', '?')}）完成："
                     f"準備 {_format_timing(timing_seconds(timing, 'prompt_build_ms'))}、"

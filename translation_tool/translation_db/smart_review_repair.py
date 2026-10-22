@@ -96,7 +96,9 @@ class _ValidationRepair:
             [str(item.ordinal) for item in self.repair_batch]
         )
         prepare_seconds = time.monotonic() - prepare_started
-        self.state.add_timing(self.batch_ctx, "prompt_build_ms", prepare_seconds)
+        self.state.add_timing_seconds(
+            self.batch_ctx, "prompt_build_ms", prepare_seconds
+        )
         return payload, response_schema
 
     def begin_attempt(self) -> None:
@@ -134,7 +136,7 @@ class _ValidationRepair:
             self.state.cancelled = True
             return False
         finally:
-            self.state.add_timing(
+            self.state.add_timing_seconds(
                 self.batch_ctx, "quota_wait_ms", time.monotonic() - wait_started
             )
         return True
@@ -169,8 +171,8 @@ class _ValidationRepair:
             self._record_request_error(exc)
         finally:
             api_seconds = time.monotonic() - api_started
-            state.add_timing(batch_ctx, "api_ms", api_seconds)
-            state.add_timing(batch_ctx, "validation_repair_api_ms", api_seconds)
+            state.add_timing_seconds(batch_ctx, "api_ms", api_seconds)
+            state.add_timing_seconds(batch_ctx, "validation_repair_api_ms", api_seconds)
         if failed or state.cancelled:
             return None
         return raw, meta, api_seconds
@@ -227,8 +229,10 @@ class _ValidationRepair:
             return []
         finally:
             parse_seconds = time.monotonic() - parse_started
-            state.add_timing(batch_ctx, "response_parse_ms", parse_seconds)
-            state.add_timing(batch_ctx, "validation_repair_parse_ms", parse_seconds)
+            state.add_timing_seconds(batch_ctx, "response_parse_ms", parse_seconds)
+            state.add_timing_seconds(
+                batch_ctx, "validation_repair_parse_ms", parse_seconds
+            )
 
     def merge(
         self,

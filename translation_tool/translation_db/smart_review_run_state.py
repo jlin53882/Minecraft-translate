@@ -153,7 +153,7 @@ class SmartReviewRunState:
         """把整數 metrics 欄位加上指定數量。"""
         self.metrics[key] = int(self.metrics[key]) + amount
 
-    def add_timing(
+    def add_timing_seconds(
         self, batch: SmartReviewBatch, field_name: str, seconds: float
     ) -> None:
         """把量測到的耗時（秒）累計到該批次與整體執行的同名 canonical ``*_ms`` 欄位。"""
@@ -215,7 +215,7 @@ class SmartReviewRunState:
         self.progress(snapshot)
 
     def _count_event_metrics(self, kind: str, fields: dict[str, Any]) -> None:
-        """把事件對應的重試與嘗試計數累計到共用批次執行器（耗時由 ``add_timing`` 累計）。"""
+        """把事件對應的重試與嘗試計數累計到共用批次執行器（耗時由 ``add_timing_seconds`` 累計）。"""
         handle = self.current_batch_handle
         metrics = self.executor.metrics
         if kind == "attempt_start":
