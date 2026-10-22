@@ -29,16 +29,13 @@ from app.views.moddb.smart_review_job import (
     SmartReviewRequest,
     format_duration,
 )
+from app.views.moddb.smart_review_run_status import (
+    run_status_color,
+    run_status_label,
+)
 from translation_tool.utils.config_manager import get_smart_review_settings
 
 _POLL_SECONDS = 0.4
-_RESULT_LABEL = {
-    "completed": ("完成", "em"),
-    "partial": ("部分完成", "gold"),
-    "cancelled": ("已取消", "gold"),
-    "interrupted": ("意外中斷", "red"),
-    "failed": ("失敗", "red"),
-}
 
 
 class SmartReviewRunPanel:
@@ -811,10 +808,10 @@ class SmartReviewRunPanel:
             self.result_box.visible = False
             self.ctx.update()
             return
-        label, _tone = _RESULT_LABEL.get(state.status, (state.status, "neutral"))
+        label, _tone = run_status_label(state.status)
         result = state.result
         self.status_text.value = f"智慧校對{label}。"
-        self.status_text.color = C.EM if state.status == "completed" else C.GOLD
+        self.status_text.color = run_status_color(state.status)
         self.result_title.value = f"{label}：已處理 {state.processed:,} 筆"
         if result is not None:
             self.result_detail.value = (
