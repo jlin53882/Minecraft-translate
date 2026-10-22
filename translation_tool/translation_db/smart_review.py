@@ -65,13 +65,18 @@ from translation_tool.utils.cancellation import (
     interruptible_sleep,
     is_cancelled,
 )
+from translation_tool.utils.config_manager import (
+    DEFAULT_SMART_REVIEW_BATCH_SIZE,
+    DEFAULT_SMART_REVIEW_MAX_BATCH_SIZE,
+    get_smart_review_settings,
+)
 from translation_tool.utils.text_matching import contains_term, term_canonical_key
 
 logger = logging.getLogger(__name__)
 
 SMART_REVIEW_DECISIONS = ("no_change", "suggest_revision", "needs_context")
-SMART_REVIEW_DEFAULT_BATCH_SIZE = 20
-SMART_REVIEW_MAX_BATCH_SIZE = 50
+SMART_REVIEW_DEFAULT_BATCH_SIZE = DEFAULT_SMART_REVIEW_BATCH_SIZE
+SMART_REVIEW_MAX_BATCH_SIZE = DEFAULT_SMART_REVIEW_MAX_BATCH_SIZE
 SMART_REVIEW_VALIDATION_REPAIR_LIMIT = 1
 SMART_REVIEW_ISSUE_TYPES = (
     "meaning",
@@ -1538,7 +1543,14 @@ class SmartReviewMixin:
         status: str | None = None,
     ) -> None:
         """完成智慧校對執行並保存最終統計。"""
-        if status not in {None, "completed", "partial", "cancelled", "failed"}:
+        if status not in {
+            None,
+            "completed",
+            "partial",
+            "cancelled",
+            "failed",
+            "interrupted",
+        }:
             raise ValueError("smart review 不支援的 run 狀態")
         history = SmartReviewHistoryStore(self.path)
         if history.exists(run_id):
@@ -2902,7 +2914,7 @@ def run_smart_review(
     provider: str = "gemini",
     version: str | None = None,
     limit: int = 1000,
-    batch_size: int = SMART_REVIEW_DEFAULT_BATCH_SIZE,
+    batch_size: int | None = None,
     progress: Callable[[dict[str, Any]], None] | None = None,
     lm_config: dict[str, Any] | None = None,
     require_reviewed_reference: bool = False,
@@ -2920,6 +2932,9 @@ def run_smart_review(
         raise ValueError("smart review 必須指定模型")
     workflow_started = time.monotonic()
     lm_config = lm_config if isinstance(lm_config, dict) else {}
+    smart_review_settings = get_smart_review_settings()
+    if batch_size is None:
+        batch_size = smart_review_settings["default_batch_size"]
     # service path 不預先選 key，仍由既有 ApiKeyCycle 負責 Gemini 輪替。
     key_cycle = ApiKeyCycle() if provider == "gemini" and not api_key.strip() else None
     if provider == "gemini" and not api_key.strip() and not get_api_key_count():
@@ -2950,7 +2965,10 @@ def run_smart_review(
         prioritize_named_keys=prioritize_named_keys,
     )
     selection_seconds = round(time.monotonic() - selection_started, 3)
-    batch_size = max(1, min(int(batch_size), SMART_REVIEW_MAX_BATCH_SIZE))
+    batch_size = max(
+        1,
+        min(int(batch_size), smart_review_settings["max_batch_size"]),
+    )
     planning_started = time.monotonic()
     planned_batch_count = max(1, (len(snapshots) + batch_size - 1) // batch_size)
     planning_seconds = round(time.monotonic() - planning_started, 3)

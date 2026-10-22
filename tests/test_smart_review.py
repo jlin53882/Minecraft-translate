@@ -842,6 +842,82 @@ def test_smart_review_candidate_page_reads_json_once_for_total_and_row(db, monke
     assert reads == 1
 
 
+def test_smart_review_large_history_uses_manifest_and_partial_chunk_updates(
+    db, monkeypatch
+):
+    """大型批次只更新受影響分片，讀取單筆時不解析整個候選 JSON。"""
+    from translation_tool.translation_db.smart_review_history import (
+        SmartReviewHistoryStore,
+        history_directory_for_db,
+    )
+
+    snapshots = db.smart_review_candidates(version="1.21.1", limit=2)
+    store = SmartReviewHistoryStore(db.path, storage_chunk_size=1)
+    run_id = store.create_run(
+        snapshots,
+        provider="gemini",
+        model="test-model",
+        version="1.21.1",
+        requested_limit=2,
+        batch_size=1,
+    )
+    history_dir = history_directory_for_db(db.path)
+    manifest_path = history_dir / f"{run_id}.json"
+    chunk_dir = history_dir / f"{run_id}.chunks"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert manifest["storage_format"] == "chunked_json_v1"
+    assert manifest["chunk_count"] == 2
+    assert sorted(path.name for path in chunk_dir.glob("*.json")) == [
+        "000000.json",
+        "000001.json",
+    ]
+
+    read_paths = []
+    original_read = SmartReviewHistoryStore._read_json_path
+
+    def counted_read(path):
+        """記錄單筆讀取實際碰到的 manifest 與分片。"""
+        read_paths.append(path.name)
+        return original_read(path)
+
+    monkeypatch.setattr(
+        SmartReviewHistoryStore, "_read_json_path", staticmethod(counted_read)
+    )
+    candidate = store.get_candidate(run_id, snapshots[1].ordinal)
+    assert candidate is not None
+    assert read_paths == [f"{run_id}.json", "000001.json"]
+
+    write_paths = []
+    original_write = SmartReviewHistoryStore._write_json_path_unlocked
+
+    def counted_write(history, path, payload):
+        """記錄一次結果 checkpoint 寫入哪些 JSON 檔。"""
+        write_paths.append(path.name)
+        return original_write(history, path, payload)
+
+    monkeypatch.setattr(
+        SmartReviewHistoryStore, "_write_json_path_unlocked", counted_write
+    )
+    store.record_results(
+        run_id,
+        [
+            {
+                "id": str(snapshots[0].ordinal),
+                "decision": "no_change",
+                "suggested_zh_tw": "",
+                "issue_types": [],
+                "evidence_ids": [],
+                "confidence": 0.8,
+                "reason": "原文與目前譯文可核對一致。",
+            }
+        ],
+    )
+    assert "000000.json" in write_paths
+    assert "000001.json" not in write_paths
+    assert store.count_candidates(run_id, status="no_change") == 1
+    assert store.count_candidates(run_id, status="pending") == 1
+
+
 def test_smart_review_run_history_merges_legacy_pages_without_double_offset(db):
     """驗證合併 JSON／SQLite 歷史後只套用一次 offset，且可超過 100 筆。"""
     rows = []
@@ -1251,6 +1327,128 @@ def test_request_failures_and_cancellation_are_distinct_from_invalid(db, monkeyp
     ] == ["cancelled", "cancelled"]
 
 
+def test_smart_review_cancel_after_batch_keeps_completed_json_checkpoint(
+    db, monkeypatch
+):
+    """驗證批次中途取消會保留已完成結果，並把剩餘候選標記為取消。"""
+    cancel_requested = False
+
+    def fake_call(**kwargs):
+        """第一批回應完成後模擬使用者按下停止。"""
+        nonlocal cancel_requested
+        cancel_requested = True
+        return _review_response(kwargs["payload"]["items"])
+
+    monkeypatch.setattr(
+        "translation_tool.translation_db.smart_review.call_gemini_requests",
+        fake_call,
+    )
+    result = run_smart_review(
+        db,
+        model_name="gemini-test",
+        api_key="test-key",
+        limit=2,
+        batch_size=1,
+        cancel_check=lambda: cancel_requested,
+    )
+
+    assert result.status == "cancelled"
+    assert result.processed_count == 1
+    assert [item.status for item in db.list_smart_review_candidates(result.run_id)] == [
+        "no_change",
+        "cancelled",
+    ]
+    from translation_tool.translation_db.smart_review_history import (
+        history_directory_for_db,
+    )
+
+    history_path = history_directory_for_db(db.path) / f"{result.run_id}.json"
+    payload = json.loads(history_path.read_text(encoding="utf-8"))
+    assert payload["status"] == "cancelled"
+    assert payload["processed_count"] == 1
+    assert [candidate["status"] for candidate in payload["candidates"]] == [
+        "no_change",
+        "cancelled",
+    ]
+
+
+def test_smart_review_recovers_dead_owner_without_losing_completed_candidates(
+    db, monkeypatch
+):
+    """驗證意外退出後下一次讀取會收斂 running JSON，保留已完成候選。"""
+    from translation_tool.translation_db import smart_review_history
+    from translation_tool.translation_db.smart_review_history import (
+        SmartReviewHistoryStore,
+    )
+
+    snapshots = db.smart_review_candidates(version="1.21.1", limit=2)
+    store = SmartReviewHistoryStore(db.path)
+    run_id = store.create_run(
+        snapshots,
+        provider="gemini",
+        model="test-model",
+        version="1.21.1",
+        requested_limit=2,
+        batch_size=1,
+    )
+    store.record_results(
+        run_id,
+        [
+            {
+                "id": str(snapshots[0].ordinal),
+                "decision": "no_change",
+                "suggested_zh_tw": "",
+                "issue_types": [],
+                "evidence_ids": [],
+                "confidence": 0.8,
+                "reason": "原文與目前譯文可核對一致。",
+            }
+        ],
+    )
+    path = store.path_for(run_id)
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload["owner_pid"] = 999999
+    path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    monkeypatch.setattr(smart_review_history, "_process_is_alive", lambda _pid: False)
+    SmartReviewHistoryStore._recovery_checked.discard(store.directory)
+
+    run = db.get_smart_review_run(run_id)
+    assert run is not None
+    assert run["status"] == "interrupted"
+    assert run["processed_count"] == 1
+    assert run["metrics"]["recovered_after_unexpected_exit"] is True
+    assert run["metrics"]["interrupted_pending_count"] == 1
+    assert [item.status for item in db.list_smart_review_candidates(run_id)] == [
+        "no_change",
+        "pending",
+    ]
+
+
+def test_smart_review_does_not_recover_live_owner(db, monkeypatch):
+    """驗證仍由目前程序執行的 running 批次不會被誤標為中斷。"""
+    from translation_tool.translation_db.smart_review_history import (
+        SmartReviewHistoryStore,
+    )
+
+    snapshots = db.smart_review_candidates(version="1.21.1", limit=1)
+    store = SmartReviewHistoryStore(db.path)
+    run_id = store.create_run(
+        snapshots,
+        provider="gemini",
+        model="test-model",
+        version="1.21.1",
+        requested_limit=1,
+        batch_size=1,
+    )
+    monkeypatch.setattr(
+        "translation_tool.translation_db.smart_review_history._process_is_alive",
+        lambda _pid: True,
+    )
+
+    assert SmartReviewHistoryStore(db.path).recover_abandoned_runs(force=True) == []
+    assert db.get_smart_review_run(run_id)["status"] == "running"
+
+
 def test_smart_review_retries_gemini_503_with_bounded_shared_backoff(db, monkeypatch):
     """驗證 Gemini 503 使用共用 policy 重試，成功後只保存一次結果。"""
     calls = []
@@ -1372,6 +1570,10 @@ def test_smart_review_timeout_events_are_visible_and_safe(db, monkeypatch):
     )
     monkeypatch.setattr(
         "translation_tool.translation_db.smart_review.interruptible_sleep",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        "translation_tool.core.lm_translator_main.interruptible_sleep",
         lambda *_args, **_kwargs: None,
     )
 
@@ -2195,7 +2397,15 @@ def test_smart_review_service_passes_nested_lm_config(monkeypatch, tmp_path):
     """驗證智慧校對服務會傳遞巢狀 LM 設定。"""
     from app.services_impl import moddb_smart_review_service as service
 
-    config = {"lm_translator": {"request_interval_sec": 0}, "unrelated": True}
+    config = {
+        "lm_translator": {"request_interval_sec": 0},
+        "smart_review": {
+            "default_batch_size": 12,
+            "max_batch_size": 24,
+            "storage_chunk_size": 300,
+        },
+        "unrelated": True,
+    }
     captured = {}
 
     class FakeDB:
@@ -2223,6 +2433,7 @@ def test_smart_review_service_passes_nested_lm_config(monkeypatch, tmp_path):
 
     assert result == "result"
     assert captured["lm_config"] == config["lm_translator"]
+    assert captured["batch_size"] == 12
     assert captured["api_key"] == ""
     assert captured["closed"] is True
 

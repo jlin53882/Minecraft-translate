@@ -30,6 +30,7 @@ _STATUS_LABEL = {
     "completed": "完成",
     "partial": "部分完成",
     "cancelled": "已取消",
+    "interrupted": "意外中斷",
     "failed": "失敗",
 }
 

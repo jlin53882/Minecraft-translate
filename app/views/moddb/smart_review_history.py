@@ -19,6 +19,7 @@ _STATUS = {
     "completed": ("完成", "em"),
     "partial": ("部分完成", "gold"),
     "cancelled": ("已取消", "neutral"),
+    "interrupted": ("意外中斷", "red"),
     "failed": ("失敗", "red"),
     "running": ("執行中", "gold"),
 }

@@ -31,7 +31,7 @@ from translation_tool.translation_db.smart_review import (
 from translation_tool.translation_db.smart_review import (
     SMART_REVIEW_MAX_BATCH_SIZE as _SMART_REVIEW_MAX_BATCH_SIZE,
 )
-from translation_tool.utils.config_manager import load_config
+from translation_tool.utils.config_manager import get_smart_review_settings, load_config
 
 SMART_REVIEW_DEFAULT_SOURCE = SRC_AI
 SMART_REVIEW_DEFAULT_BATCH_SIZE = _SMART_REVIEW_DEFAULT_BATCH_SIZE
@@ -112,7 +112,7 @@ def run_moddb_smart_review_from_path(
     model_name: str,
     version: str | None = None,
     limit: int = 1000,
-    batch_size: int = SMART_REVIEW_DEFAULT_BATCH_SIZE,
+    batch_size: int | None = None,
     progress: Callable[[dict[str, Any]], None] | None = None,
     require_reviewed_reference: bool = False,
     prioritize_named_keys: bool = False,
@@ -129,6 +129,8 @@ def run_moddb_smart_review_from_path(
     lm_config = cfg.get("lm_translator", {}) if isinstance(cfg, dict) else {}
     if not isinstance(lm_config, dict):
         lm_config = {}
+    if batch_size is None:
+        batch_size = get_smart_review_settings(cfg)["default_batch_size"]
     provider = get_translation_provider()
     db = _open(path, priority, readonly=False)
     try:

@@ -126,6 +126,35 @@ def test_dialog_builds_three_panels_with_defaults(db, monkeypatch):
     assert visible == {"run": True, "review": False, "history": False}
 
 
+def test_run_panel_reads_configured_smart_review_batch_size(db, monkeypatch):
+    """驗證執行頁的批次預填值來自智慧校對設定，而不是硬編碼。"""
+    from app.views.moddb import smart_review_run_panel as run_panel_module
+    from app.views.moddb.smart_review_dialog import SmartReviewDialog
+
+    monkeypatch.setattr(
+        "app.services_impl.moddb_smart_review_service.load_config",
+        lambda: {
+            "lm_translator": {
+                "provider": "gemini",
+                "models": {"gemini-3.1-flash-lite": {"enabled": True}},
+            }
+        },
+    )
+    monkeypatch.setattr(
+        run_panel_module,
+        "get_smart_review_settings",
+        lambda: {
+            "default_batch_size": 12,
+            "max_batch_size": 24,
+            "storage_chunk_size": 300,
+        },
+    )
+
+    dialog = SmartReviewDialog(_sync_page(), lambda: db, "1.21.1", None)
+
+    assert dialog.run_panel.batch_field.value == "12"
+
+
 def test_run_panel_filters_modules_and_updates_sources_without_starting(
     db, monkeypatch
 ):
@@ -1197,6 +1226,7 @@ def test_history_shows_interrupted_status_and_opens_run(ctx, monkeypatch):
     """驗證歷史清單把沒在跑的 running 標為可能中斷，並能開啟批次。"""
     assert run_status_label("running", active=False) == ("可能已中斷", "red")
     assert run_status_label("running", active=True) == ("執行中", "gold")
+    assert run_status_label("interrupted", active=False) == ("意外中斷", "red")
     assert run_status_label("completed", active=False)[0] == "完成"
     import app.views.moddb.smart_review_history as history_module
 

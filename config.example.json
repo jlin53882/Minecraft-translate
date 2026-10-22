@@ -35,6 +35,11 @@
             "AI 機翻"
         ]
     },
+    "smart_review": {
+        "default_batch_size": 20,
+        "max_batch_size": 50,
+        "storage_chunk_size": 200
+    },
     "output_bundler": {
         "output_zip_name": "可使用翻譯.zip"
     },
