@@ -22,6 +22,12 @@ import copy
 from dataclasses import dataclass
 from typing import Any
 
+from translation_tool.utils.smart_review_settings import (
+    DEFAULT_SMART_REVIEW_BATCH_SIZE,
+    DEFAULT_SMART_REVIEW_MAX_BATCH_SIZE,
+    DEFAULT_SMART_REVIEW_STORAGE_CHUNK_SIZE,
+)
+
 # kind:
 #   str      單行文字（直接存字串）
 #   int      整數（空白依 ``blank`` 處理）
@@ -268,7 +274,7 @@ SETTINGS: tuple[Setting, ...] = (
         "mod_db",
         C_TDB,
         "開啟智慧校對時預填的每批筆數；實際送出前仍可在智慧校對視窗調整。",
-        default=20,
+        default=DEFAULT_SMART_REVIEW_BATCH_SIZE,
         minimum=1,
         blank="error",
         timing="next_task",
@@ -281,7 +287,7 @@ SETTINGS: tuple[Setting, ...] = (
         "mod_db",
         C_TDB,
         "限制單次智慧校對請求的最大筆數，避免提示詞過大而降低回應品質。",
-        default=50,
+        default=DEFAULT_SMART_REVIEW_MAX_BATCH_SIZE,
         minimum=1,
         blank="error",
         timing="next_task",
@@ -294,7 +300,7 @@ SETTINGS: tuple[Setting, ...] = (
         "mod_db",
         C_TDB,
         "大型歷史批次會分成多個 JSON 分片；每次 checkpoint 只重寫受影響的分片。API 每批筆數仍由上方設定獨立控制。",
-        default=200,
+        default=DEFAULT_SMART_REVIEW_STORAGE_CHUNK_SIZE,
         minimum=1,
         blank="error",
         timing="next_task",
