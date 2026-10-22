@@ -5,9 +5,7 @@ from pathlib import Path
 from translation_tool.core import ftb_translator
 
 
-def test_run_ftb_pipeline_smoke_export_and_clean_only(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_run_ftb_pipeline_smoke_export_and_clean_only(tmp_path: Path, monkeypatch) -> None:
     calls: list[tuple[str, str | None]] = []
 
     def fake_export(directory_path: str, *, output_dir: str | None = None):
@@ -16,17 +14,7 @@ def test_run_ftb_pipeline_smoke_export_and_clean_only(
 
     def fake_clean(directory_path: str, *, output_dir: str | None = None):
         calls.append(("clean", output_dir))
-        pending_dir = (
-            tmp_path
-            / "Output"
-            / "ftbquests"
-            / "待翻譯"
-            / "config"
-            / "ftbquests"
-            / "quests"
-            / "lang"
-            / "en_us"
-        )
+        pending_dir = tmp_path / "Output" / "ftbquests" / "待翻譯" / "config" / "ftbquests" / "quests" / "lang" / "en_us"
         pending_dir.mkdir(parents=True, exist_ok=True)
         return {
             "en_pending_dir": str(pending_dir),

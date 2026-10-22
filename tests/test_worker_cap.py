@@ -21,25 +21,25 @@ class TestWorkerCap:
     """Worker cap boundary tests (cpu=8 → cap=4, cpu=4 → cap=2)."""
 
     def test_no_config_uses_cpu_half(self):
-        assert _compute_workers(8, None) == 4  # cpu=8, cap=4
-        assert _compute_workers(4, None) == 2  # cpu=4, cap=2
+        assert _compute_workers(8, None) == 4   # cpu=8, cap=4
+        assert _compute_workers(4, None) == 2   # cpu=4, cap=2
 
     def test_config_above_cap_is_capped(self):
-        assert _compute_workers(8, 32) == 4  # cpu=8, cap=4, config=32 → 4
-        assert _compute_workers(8, 100) == 4  # cpu=8, cap=4, config=100 → 4
+        assert _compute_workers(8, 32) == 4    # cpu=8, cap=4, config=32 → 4
+        assert _compute_workers(8, 100) == 4   # cpu=8, cap=4, config=100 → 4
 
     def test_config_below_cap_is_used(self):
-        assert _compute_workers(8, 2) == 2  # cpu=8, cap=4, config=2 → 2
-        assert _compute_workers(8, 3) == 3  # cpu=8, cap=4, config=3 → 3
+        assert _compute_workers(8, 2) == 2     # cpu=8, cap=4, config=2 → 2
+        assert _compute_workers(8, 3) == 3     # cpu=8, cap=4, config=3 → 3
 
     def test_config_exactly_cap(self):
-        assert _compute_workers(8, 4) == 4  # cpu=8, cap=4, config=4 → 4
+        assert _compute_workers(8, 4) == 4     # cpu=8, cap=4, config=4 → 4
 
     def test_zero_config_falls_back_to_cap(self):
-        assert _compute_workers(8, 0) == 4  # cpu=8, cap=4, config=0 → 4
+        assert _compute_workers(8, 0) == 4     # cpu=8, cap=4, config=0 → 4
 
     def test_negative_config_falls_back_to_cap(self):
-        assert _compute_workers(8, -1) == 4  # cpu=8, cap=4, config=-1 → 4
+        assert _compute_workers(8, -1) == 4    # cpu=8, cap=4, config=-1 → 4
 
     def test_single_core_min_one(self):
         assert _compute_workers(1, None) == 1  # cpu=1, cap=1
@@ -49,4 +49,4 @@ class TestWorkerCap:
         assert _compute_workers(None, None) == 1  # None → 2, cap=1
 
     def test_single_core_with_config_above_cap(self):
-        assert _compute_workers(1, 8) == 1  # cpu=1, cap=1, config=8 → 1
+        assert _compute_workers(1, 8) == 1    # cpu=1, cap=1, config=8 → 1

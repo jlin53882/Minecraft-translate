@@ -299,6 +299,9 @@ def finish(
     proc: subprocess.Popen[str], timeout: float = WORKER_TIMEOUT_SECONDS
 ) -> tuple[int, str, str]:
     """等待子程序結束，回傳 (returncode, stdout, stderr)；逾時就砍掉並失敗。"""
+    if proc.stdin is not None and proc.stdin.closed:
+        # 呼叫端已自行關閉 stdin；communicate() 在 Python 3.12 會對已關閉的串流 flush 而失敗。
+        proc.stdin = None
     try:
         out, err = proc.communicate(timeout=timeout)
     except subprocess.TimeoutExpired:

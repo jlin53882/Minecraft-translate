@@ -2,7 +2,6 @@
 
 用途：測試 lang_text_rules 模組的功能。
 """
-
 from __future__ import annotations
 
 import sys
@@ -21,7 +20,7 @@ def test_strip_fmt_basic(tmp_path: Path) -> None:
     # § 格式碼
     assert lang_text_rules._strip_fmt("§aHello") == "Hello"
     assert lang_text_rules._strip_fmt("§lBold§r") == "Bold"
-
+    
     # & 格式碼
     assert lang_text_rules._strip_fmt("&cRed") == "Red"
     assert lang_text_rules._strip_fmt("&kMagic&r") == "Magic"
@@ -100,32 +99,20 @@ def test_is_already_zh_custom_letter_threshold(tmp_path: Path) -> None:
     """測試 is_already_zh 使用自訂 letter_threshold 參數。"""
     # threshold=3: 3 個以內英文字母視為已翻譯
     assert lang_text_rules.is_already_zh("OK 你好", letter_threshold=3) is True
-    assert (
-        lang_text_rules.is_already_zh("YES 你好", letter_threshold=3) is True
-    )  # 3 個字母
-    assert (
-        lang_text_rules.is_already_zh("Hello 你好", letter_threshold=3) is False
-    )  # 5 個字母
+    assert lang_text_rules.is_already_zh("YES 你好", letter_threshold=3) is True  # 3 個字母
+    assert lang_text_rules.is_already_zh("Hello 你好", letter_threshold=3) is False  # 5 個字母
 
     # threshold=0: 任何英文字母都視為未翻譯
-    assert (
-        lang_text_rules.is_already_zh("你好", letter_threshold=0) is True
-    )  # 無英文字母
-    assert (
-        lang_text_rules.is_already_zh("A 你好", letter_threshold=0) is False
-    )  # 1 個字母
+    assert lang_text_rules.is_already_zh("你好", letter_threshold=0) is True  # 無英文字母
+    assert lang_text_rules.is_already_zh("A 你好", letter_threshold=0) is False  # 1 個字母
 
     # threshold=1: 1 個以內字母視為已翻譯
     assert lang_text_rules.is_already_zh("A 你好", letter_threshold=1) is True
     assert lang_text_rules.is_already_zh("AB 你好", letter_threshold=1) is False
 
     # threshold=5: 5 個以內字母視為已翻譯
-    assert (
-        lang_text_rules.is_already_zh("Hello 你好", letter_threshold=5) is True
-    )  # 5 個字母
-    assert (
-        lang_text_rules.is_already_zh("HelloWorld 你好", letter_threshold=5) is False
-    )  # 10 個字母
+    assert lang_text_rules.is_already_zh("Hello 你好", letter_threshold=5) is True  # 5 個字母
+    assert lang_text_rules.is_already_zh("HelloWorld 你好", letter_threshold=5) is False  # 10 個字母
 
     # 無中文時無論 threshold 多少都回傳 False
     assert lang_text_rules.is_already_zh("Hello", letter_threshold=10) is False
