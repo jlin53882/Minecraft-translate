@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -208,6 +209,52 @@ def load_moddb_smart_review_candidate_page_from_path(
         db.close()
 
 
+class SmartReviewReadSession:
+    """同一個唯讀連線上的批次查詢；讓一次導覽操作只開一次資料庫。"""
+
+    def __init__(self, db: TranslationDB) -> None:
+        """包裝已開啟的唯讀資料庫。"""
+        self._db = db
+
+    def get_run(self, run_id: str) -> dict[str, Any] | None:
+        """讀取批次資訊。"""
+        return self._db.get_smart_review_run(run_id)
+
+    def run_breakdown(self, run_id: str, *, error_limit: int = 5) -> dict[str, Any]:
+        """讀取候選狀態分佈與最常見的驗證失敗原因。"""
+        return self._db.smart_review_run_breakdown(run_id, error_limit=error_limit)
+
+    def candidate_page(
+        self,
+        run_id: str,
+        *,
+        status: str | None = None,
+        limit: int | None = None,
+        offset: int = 0,
+        known_total: int | None = None,
+    ) -> tuple[int, list[SmartReviewCandidate]]:
+        """取得候選總數與指定範圍的候選。"""
+        return self._db.load_smart_review_candidate_page(
+            run_id,
+            status=status,
+            limit=limit,
+            offset=offset,
+            known_total=known_total,
+        )
+
+
+@contextmanager
+def moddb_smart_review_read_session(
+    path: str | Path, priority: tuple[int, ...]
+) -> Iterator[SmartReviewReadSession]:
+    """開啟一個唯讀連線供多次查詢共用，離開時關閉。"""
+    db = _open(path, priority, readonly=True)
+    try:
+        yield SmartReviewReadSession(db)
+    finally:
+        db.close()
+
+
 def count_moddb_smart_review_candidates_for_run_from_path(
     path: str | Path,
     priority: tuple[int, ...],
@@ -372,6 +419,7 @@ __all__ = [
     "SMART_REVIEW_MANUAL_EDIT_STATUSES",
     "SmartReviewCandidate",
     "SmartReviewMark",
+    "SmartReviewReadSession",
     "SmartReviewStatus",
     "apply_moddb_smart_review_candidate_from_path",
     "apply_moddb_smart_review_manual_edit_from_path",
@@ -383,6 +431,7 @@ __all__ = [
     "list_moddb_smart_review_candidates_from_path",
     "list_moddb_smart_review_runs_from_path",
     "load_moddb_smart_review_candidate_page_from_path",
+    "moddb_smart_review_read_session",
     "preview_moddb_smart_review_from_path",
     "realign_moddb_smart_review_candidate_from_path",
     "reject_moddb_smart_review_candidate_from_path",

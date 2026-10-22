@@ -122,6 +122,10 @@ def test_sql_status_literals_are_known_statuses():
         "translation_tool/translation_db/smart_review_history_codec.py",
         "translation_tool/translation_db/smart_review_history_manifest.py",
         "app/views/moddb/smart_review_reviewer.py",
+        "app/views/moddb/smart_review_reviewer_state.py",
+        "app/views/moddb/smart_review_candidate_loader.py",
+        "app/views/moddb/smart_review_evidence.py",
+        "app/views/moddb/smart_review_actions.py",
     ],
 )
 def test_no_bare_status_comparisons(path):
