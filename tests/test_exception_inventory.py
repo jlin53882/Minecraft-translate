@@ -186,3 +186,18 @@ def test_inventory_document_matches_the_code():
     assert actual == expected, (
         "docs/generated/exception-inventory.md 已過期，請執行 `uv run python tools/gen_exception_inventory.py` 重新產生"
     )
+
+
+def test_check_mode_passes_when_current_and_fails_on_drift(tmp_path, monkeypatch):
+    """``--check`` 與文件一致時回傳 0；文件過期（或不存在）時回傳 1 且不寫檔。"""
+    gen = _load_generator()
+    assert gen.main(["--check"]) == 0
+
+    stale = tmp_path / "exception-inventory.md"
+    stale.write_text("過期內容\n", encoding="utf-8")
+    monkeypatch.setattr(gen, "OUT", stale)
+    assert gen.main(["--check"]) == 1
+    assert stale.read_text(encoding="utf-8") == "過期內容\n"
+
+    monkeypatch.setattr(gen, "OUT", tmp_path / "missing.md")
+    assert gen.main(["--check"]) == 1
