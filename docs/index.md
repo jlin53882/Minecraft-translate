@@ -29,6 +29,7 @@
 - [`developer-guide/codebase-ownership.md`](developer-guide/codebase-ownership.md)：子系統 → 原始碼 → 權威文件 → 測試的對照。
 - [`developer-guide/views/`](developer-guide/views/)：各 View 的元件、呼叫鏈與 service 邊界；每份文件的識別字範圍由 `tests/test_view_docs_identifiers.py` 宣告。
 - [`page_flows/README.md`](page_flows/README.md)：頁面操作到背景工作與結果回到 UI 的流程圖。
+- [`developer-guide/smart-review-status.md`](developer-guide/smart-review-status.md)：智慧校對候選狀態機、允許的轉移與行程內快取清除入口。
 - [`developer-guide/operation-lifecycle.md`](developer-guide/operation-lifecycle.md)、[`developer-guide/worker-thread-audit.md`](developer-guide/worker-thread-audit.md)：長任務、取消、關閉與 worker/UI 邊界。
 - [`developer-guide/jar-pipeline.md`](developer-guide/jar-pipeline.md)、[`developer-guide/translation-engine-skeleton.md`](developer-guide/translation-engine-skeleton.md)：引擎資料流與共用翻譯骨架。
 

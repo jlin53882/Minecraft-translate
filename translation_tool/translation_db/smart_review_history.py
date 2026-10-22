@@ -28,6 +28,13 @@ from translation_tool.translation_db.models import (
     SmartReviewCandidate,
     SmartReviewSnapshot,
 )
+from translation_tool.translation_db.smart_review_status import (
+    DECISION_STATUS,
+    PROCESSED_STATUSES,
+    VALID_STATUSES,
+    SmartReviewStatus,
+    coerce_status,
+)
 from translation_tool.utils.config_manager import get_smart_review_settings
 
 _SCHEMA_VERSION = 1
@@ -43,10 +50,8 @@ _MarksStamp = tuple[
     _FileStamp,
     tuple[tuple[int, _FileStamp | None], ...],
 ]
-_PROCESSED_CANDIDATE_STATUSES = frozenset(
-    {"ready", "no_change", "needs_context", "invalid", "request_failed"}
-)
-_VALID_CANDIDATE_STATUSES = frozenset({"ready", "no_change", "needs_context"})
+_PROCESSED_CANDIDATE_STATUSES = PROCESSED_STATUSES
+_VALID_CANDIDATE_STATUSES = VALID_STATUSES
 SMART_REVIEW_CAS_SNAPSHOT_FIELDS = (
     "kind",
     "mc_version",
@@ -189,7 +194,7 @@ def _candidate_counts_from_items(
     candidates: Sequence[Mapping[str, Any]],
 ) -> dict[str, Any]:
     """從候選字典清單建立狀態、錯誤與摘要計數。"""
-    statuses = [str(item.get("status") or "pending") for item in candidates]
+    statuses = [coerce_status(item.get("status")) for item in candidates]
     ai_statuses: list[str | None] = []
     for item, status in zip(candidates, statuses, strict=True):
         candidate_ai_status = item.get("ai_status")
@@ -215,9 +220,9 @@ def _candidate_counts_from_items(
         "valid_count": sum(
             status in _VALID_CANDIDATE_STATUSES for status in ai_statuses
         ),
-        "invalid_count": ai_statuses.count("invalid"),
-        "request_error_count": ai_statuses.count("request_failed"),
-        "pending_count": statuses.count("pending"),
+        "invalid_count": ai_statuses.count(SmartReviewStatus.INVALID),
+        "request_error_count": ai_statuses.count(SmartReviewStatus.REQUEST_FAILED),
+        "pending_count": statuses.count(SmartReviewStatus.PENDING),
         "status_counts": dict(status_counts),
         "error_counts": dict(error_counts),
     }
@@ -253,7 +258,7 @@ def _snapshot_payload(run_id: str, item: SmartReviewSnapshot) -> dict[str, Any]:
         "response": None,
         "draft_zh_tw": None,
         "validation_error": None,
-        "status": "pending",
+        "status": SmartReviewStatus.PENDING,
         "ai_status": None,
         "applied_batch": None,
         "applied_at": None,
@@ -315,7 +320,7 @@ def _candidate_from_payload(
         reason=reason,
         draft_zh_tw=payload.get("draft_zh_tw"),
         validation_error=payload.get("validation_error"),
-        status=str(payload.get("status") or "pending"),
+        status=coerce_status(payload.get("status")),
         applied_batch=payload.get("applied_batch"),
         applied_at=payload.get("applied_at"),
     )
@@ -342,6 +347,25 @@ class SmartReviewHistoryStore:
     _recovery_checked: ClassVar[set[Path]] = set()
     # 同一執行緒內巢狀呼叫寫入方法時，共用已取得的跨程序鎖。
     _interprocess_state: ClassVar[threading.local] = threading.local()
+
+    @classmethod
+    def clear_caches(cls, directory: str | Path | None = None) -> None:
+        """清除行程內快取；指定 ``directory`` 時只清該歷史目錄，不影響磁碟資料。
+
+        切換大量資料庫、測試隔離或外部程序改寫歷史檔後呼叫，避免舊 stamp 殘留。
+        """
+        target = Path(directory) if directory is not None else None
+
+        def _under(path: Path) -> bool:
+            return target is None or path == target or target in path.parents
+
+        with cls._locks_guard:
+            for cache in (cls._started_cache, cls._latest_marks, cls._corrupt_runs):
+                for key in [key for key in cache if _under(key)]:
+                    del cache[key]
+            cls._recovery_checked.difference_update(
+                [path for path in cls._recovery_checked if _under(path)]
+            )
 
     def __init__(
         self, db_path: str | Path, *, storage_chunk_size: int | None = None
@@ -723,8 +747,8 @@ class SmartReviewHistoryStore:
         new_error: object,
     ) -> None:
         """更新分片 checkpoint 後 manifest 的狀態與錯誤摘要。"""
-        old = str(old_status or "pending")
-        new = str(new_status or "pending")
+        old = coerce_status(old_status)
+        new = coerce_status(new_status)
         statuses = manifest.setdefault("status_counts", {})
         if not isinstance(statuses, dict):
             statuses = {}
@@ -781,10 +805,13 @@ class SmartReviewHistoryStore:
                 old in _VALID_CANDIDATE_STATUSES,
                 new in _VALID_CANDIDATE_STATUSES,
             ),
-            "invalid_count": (old == "invalid", new == "invalid"),
+            "invalid_count": (
+                old == SmartReviewStatus.INVALID,
+                new == SmartReviewStatus.INVALID,
+            ),
             "request_error_count": (
-                old == "request_failed",
-                new == "request_failed",
+                old == SmartReviewStatus.REQUEST_FAILED,
+                new == SmartReviewStatus.REQUEST_FAILED,
             ),
         }
         for field, (had_old, has_new) in counters.items():
@@ -1175,11 +1202,11 @@ class SmartReviewHistoryStore:
         candidate: dict[str, Any], result: Mapping[str, Any]
     ) -> tuple[str, str, object, object, str | None, str]:
         """套用一筆已解析結果並回傳狀態、錯誤與 AI 狀態的前後值。"""
-        old_status = str(candidate.get("status") or "pending")
+        old_status = coerce_status(candidate.get("status"))
         old_error = candidate.get("validation_error")
         old_ai_status = SmartReviewHistoryStore._candidate_ai_status(candidate)
         if result.get("validation_error"):
-            candidate["status"] = "invalid"
+            candidate["status"] = SmartReviewStatus.INVALID
             candidate["validation_error"] = str(result["validation_error"])
             new_ai_status = "invalid"
         else:
@@ -1202,7 +1229,7 @@ class SmartReviewHistoryStore:
             candidate["ai_status"] = new_ai_status
         return (
             old_status,
-            str(candidate.get("status") or "pending"),
+            coerce_status(candidate.get("status")),
             old_error,
             candidate.get("validation_error"),
             old_ai_status,
@@ -1332,9 +1359,9 @@ class SmartReviewHistoryStore:
                         old_status = candidate.get("status")
                         old_error = candidate.get("validation_error")
                         old_ai_status = self._candidate_ai_status(candidate)
-                        candidate["status"] = "request_failed"
+                        candidate["status"] = SmartReviewStatus.REQUEST_FAILED
                         candidate["validation_error"] = error_code
-                        candidate["ai_status"] = "request_failed"
+                        candidate["ai_status"] = SmartReviewStatus.REQUEST_FAILED
                         self._apply_result_delta(
                             payload,
                             old_status,
@@ -1355,9 +1382,9 @@ class SmartReviewHistoryStore:
                     isinstance(candidate, dict)
                     and int(candidate.get("ordinal") or 0) in wanted
                 ):
-                    candidate["status"] = "request_failed"
+                    candidate["status"] = SmartReviewStatus.REQUEST_FAILED
                     candidate["validation_error"] = error_code
-                    candidate["ai_status"] = "request_failed"
+                    candidate["ai_status"] = SmartReviewStatus.REQUEST_FAILED
             payload.update(_candidate_counts(payload))
             self._write_unlocked(run_id, payload)
 
@@ -1375,10 +1402,10 @@ class SmartReviewHistoryStore:
                     for candidate in chunk.get("candidates") or []:
                         if not isinstance(candidate, dict):
                             continue
-                        if candidate.get("status") != "pending":
+                        if candidate.get("status") != SmartReviewStatus.PENDING:
                             continue
                         old_error = candidate.get("validation_error")
-                        candidate["status"] = "cancelled"
+                        candidate["status"] = SmartReviewStatus.CANCELLED
                         candidate["validation_error"] = "cancelled_before_request"
                         self._apply_status_delta(
                             payload,
@@ -1399,8 +1426,11 @@ class SmartReviewHistoryStore:
                 return updated
             updated = 0
             for candidate in payload.get("candidates") or []:
-                if isinstance(candidate, dict) and candidate.get("status") == "pending":
-                    candidate["status"] = "cancelled"
+                if (
+                    isinstance(candidate, dict)
+                    and candidate.get("status") == SmartReviewStatus.PENDING
+                ):
+                    candidate["status"] = SmartReviewStatus.CANCELLED
                     candidate["validation_error"] = "cancelled_before_request"
                     updated += 1
             if updated:
@@ -1930,7 +1960,7 @@ class SmartReviewHistoryStore:
                         ):
                             continue
                         batch = str(record.get("batch") or "") or None
-                        if candidate.get("status") == "applied" and (
+                        if candidate.get("status") == SmartReviewStatus.APPLIED and (
                             candidate.get("applied_batch") == batch
                         ):
                             continue
@@ -1938,7 +1968,7 @@ class SmartReviewHistoryStore:
                         old_error = candidate.get("validation_error")
                         candidate.update(
                             {
-                                "status": "applied",
+                                "status": SmartReviewStatus.APPLIED,
                                 "applied_batch": batch,
                                 "applied_at": record.get("applied_at"),
                             }
@@ -1973,13 +2003,13 @@ class SmartReviewHistoryStore:
                 batch = str(record.get("batch") or "") or None
                 # 已標成 applied 且指向同一次套用的不用改；其餘（待審查，或人工編輯後
                 # 狀態回寫失敗的各種狀態）以 SQLite 的最新套用紀錄為準補回。
-                if candidate.get("status") == "applied" and (
+                if candidate.get("status") == SmartReviewStatus.APPLIED and (
                     candidate.get("applied_batch") == batch
                 ):
                     continue
                 candidate.update(
                     {
-                        "status": "applied",
+                        "status": SmartReviewStatus.APPLIED,
                         "applied_batch": batch,
                         "applied_at": record.get("applied_at"),
                     }
@@ -1993,12 +2023,8 @@ class SmartReviewHistoryStore:
 def _candidate_status(result: dict[str, Any]) -> str:
     """從已驗證模型結果推導候選狀態。"""
     if result.get("validation_error"):
-        return "invalid"
-    return {
-        "no_change": "no_change",
-        "suggest_revision": "ready",
-        "needs_context": "needs_context",
-    }[result["decision"]]
+        return SmartReviewStatus.INVALID
+    return DECISION_STATUS[result["decision"]]
 
 
 __all__ = ["SmartReviewHistoryStore", "history_directory_for_db"]

@@ -489,7 +489,12 @@ class BatchPolicy(Protocol):
 
 
 class CommonBatchExecutor:
-    """共用批次執行生命週期，負責識別碼、批次事件、取消檢查、計時與摘要統計。"""
+    """共用批次執行生命週期，負責識別碼、批次事件、取消檢查、計時與摘要統計。
+
+    責任邊界：這裡只管「批次的生命週期」，不統一 retry。重試條件、配額等待、
+    context 過大縮批與 validation repair 由各業務（機翻、本地修復、智慧校對）自己決定，
+    執行器只記錄它們回報的 attempt／retry 事件。
+    """
 
     def __init__(
         self,

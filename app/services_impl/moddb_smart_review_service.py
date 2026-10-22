@@ -31,6 +31,7 @@ from translation_tool.translation_db.smart_review import (
 from translation_tool.translation_db.smart_review import (
     SMART_REVIEW_MAX_BATCH_SIZE as _SMART_REVIEW_MAX_BATCH_SIZE,
 )
+from translation_tool.translation_db.smart_review_status import SmartReviewStatus
 from translation_tool.utils.config_manager import get_smart_review_settings, load_config
 
 SMART_REVIEW_DEFAULT_SOURCE = SRC_AI
@@ -367,6 +368,7 @@ __all__ = [
     "SMART_REVIEW_MANUAL_EDIT_STATUSES",
     "SmartReviewCandidate",
     "SmartReviewMark",
+    "SmartReviewStatus",
     "apply_moddb_smart_review_candidate_from_path",
     "apply_moddb_smart_review_manual_edit_from_path",
     "count_moddb_smart_review_candidates_for_run_from_path",

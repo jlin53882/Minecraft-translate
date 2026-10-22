@@ -58,6 +58,11 @@ from translation_tool.translation_db.smart_review_history import (
     SMART_REVIEW_CAS_SNAPSHOT_FIELDS,
     SmartReviewHistoryStore,
 )
+from translation_tool.translation_db.smart_review_status import (
+    DECISION_STATUS,
+    MANUAL_EDIT_STATUSES,
+    SmartReviewStatus,
+)
 from translation_tool.translation_db.sql_helpers import like_pattern
 from translation_tool.utils.cancellation import (
     TaskCancelled,
@@ -121,21 +126,19 @@ _MAX_REASON_LENGTH = 2_000
 _MAX_SUGGESTION_LENGTH = 32_000
 # (資料庫路徑, run_id) -> 上次對帳時 history 的最大 id
 _RECONCILED_HISTORY_HEAD: dict[tuple[str, str], int] = {}
+
+
+def clear_smart_review_caches(db_path: str | None = None) -> None:
+    """清除對帳進度快取（只影響效能，下一次會重新對帳）；指定 ``db_path`` 時只清該資料庫。"""
+    for key in [key for key in _RECONCILED_HISTORY_HEAD if db_path in (None, key[0])]:
+        del _RECONCILED_HISTORY_HEAD[key]
+
+
 _STATE_SYNC_ATTEMPTS = 3
 _STATE_SYNC_RETRY_SECONDS = 0.05
 _SMART_REVIEW_TWIN_GROUP_CHUNK_SIZE = 128
 # 審查者可手動編輯並覆蓋套用的候選狀態；``ready`` 走原本的 AI 建議套用流程。
-SMART_REVIEW_MANUAL_EDIT_STATUSES = frozenset(
-    {
-        "applied",
-        "rejected",
-        "needs_context",
-        "no_change",
-        "invalid",
-        "invalid_format",
-        "stale",
-    }
-)
+SMART_REVIEW_MANUAL_EDIT_STATUSES = MANUAL_EDIT_STATUSES
 # 候選 JSON 內保存的 CAS 快照欄位，順序對應 ``_smart_review_current_snapshot_sql``
 # 的欄位再接 manual 列的四個欄位。
 _SNAPSHOT_FIELDS = SMART_REVIEW_CAS_SNAPSHOT_FIELDS
@@ -427,12 +430,8 @@ def parse_smart_review_response(
 def _candidate_status(result: dict[str, Any]) -> str:
     """從候選資料推導目前可供 UI 顯示的狀態。"""
     if result.get("validation_error"):
-        return "invalid"
-    return {
-        "no_change": "no_change",
-        "suggest_revision": "ready",
-        "needs_context": "needs_context",
-    }[result["decision"]]
+        return SmartReviewStatus.INVALID
+    return DECISION_STATUS[result["decision"]]
 
 
 def _response_reason(raw: object) -> str | None:
@@ -1503,7 +1502,7 @@ class SmartReviewMixin:
         run_id: str,
         ordinals: Sequence[int],
         *,
-        error_code: str = "request_failed",
+        error_code: str = SmartReviewStatus.REQUEST_FAILED,
     ) -> None:
         """把智慧校對請求錯誤記錄到 JSON 或舊版 SQLite 批次。"""
         history = SmartReviewHistoryStore(self.path)
@@ -1829,7 +1828,7 @@ class SmartReviewMixin:
             candidate = history.get_candidate(run_id, ordinal)
             if candidate is None:
                 return "missing"
-            if candidate.get("status") != "ready":
+            if candidate.get("status") != SmartReviewStatus.READY:
                 return "not_ready"
             if not draft.strip():
                 return "invalid_draft"
@@ -1853,10 +1852,10 @@ class SmartReviewMixin:
                     history.update_candidate(
                         run_id,
                         ordinal,
-                        status="stale",
+                        status=SmartReviewStatus.STALE,
                         validation_error="snapshot_stale",
                     )
-                    return "stale"
+                    return SmartReviewStatus.STALE
                 current_manual = self._one(
                     "SELECT zh_tw, checker, review_status, revision FROM translation "
                     "WHERE entry_id=? AND source=?",
@@ -1875,15 +1874,15 @@ class SmartReviewMixin:
                 history.update_candidate(
                     run_id,
                     ordinal,
-                    status="stale",
+                    status=SmartReviewStatus.STALE,
                     validation_error="manual_snapshot_stale",
                 )
-                return "stale"
+                return SmartReviewStatus.STALE
             if current_manual is not None and current_manual[2] == "reviewed":
                 history.update_candidate(
                     run_id,
                     ordinal,
-                    status="stale",
+                    status=SmartReviewStatus.STALE,
                     validation_error="manual_reviewed_requires_manual_edit",
                 )
                 return "manual_reviewed"
@@ -1893,7 +1892,7 @@ class SmartReviewMixin:
                 kind=str(candidate.get("kind") or "lang"),
                 repair=False,
             ):
-                return "invalid_format"
+                return SmartReviewStatus.INVALID_FORMAT
             history.update_candidate(run_id, ordinal, draft_zh_tw=draft)
             return "saved"
 
@@ -1920,7 +1919,7 @@ class SmartReviewMixin:
             ).fetchone()
             if row is None:
                 return "missing"
-            if row[14] != "ready":
+            if row[14] != SmartReviewStatus.READY:
                 return "not_ready"
             if not draft.strip():
                 return "invalid_draft"
@@ -1935,7 +1934,7 @@ class SmartReviewMixin:
                     "WHERE run_id=? AND ordinal=?",
                     (run_id, int(ordinal)),
                 )
-                return "stale"
+                return SmartReviewStatus.STALE
             current_manual = conn.execute(
                 "SELECT zh_tw, checker, review_status, revision FROM translation "
                 "WHERE entry_id=? AND source=?",
@@ -1952,7 +1951,7 @@ class SmartReviewMixin:
                     "WHERE run_id=? AND ordinal=?",
                     (run_id, int(ordinal)),
                 )
-                return "stale"
+                return SmartReviewStatus.STALE
             if current_manual is not None and current_manual[2] == "reviewed":
                 conn.execute(
                     "UPDATE smart_review_candidate SET status='stale', "
@@ -1962,7 +1961,7 @@ class SmartReviewMixin:
                 )
                 return "manual_reviewed"
             if translation_issues(row[5], draft, kind=row[1], repair=False):
-                return "invalid_format"
+                return SmartReviewStatus.INVALID_FORMAT
             updated = conn.execute(
                 "UPDATE smart_review_candidate SET draft_zh_tw=?, "
                 "updated_at=CURRENT_TIMESTAMP WHERE run_id=? AND ordinal=? AND status='ready'",
@@ -2101,7 +2100,7 @@ class SmartReviewMixin:
             candidate = history.get_candidate(run_id, ordinal)
             if candidate is None:
                 return "missing"
-            if candidate.get("status") != "ready" or not candidate.get(
+            if candidate.get("status") != SmartReviewStatus.READY or not candidate.get(
                 "suggested_zh_tw"
             ):
                 return "not_ready"
@@ -2122,10 +2121,10 @@ class SmartReviewMixin:
                 history.update_candidate(
                     run_id,
                     ordinal,
-                    status="invalid_format",
+                    status=SmartReviewStatus.INVALID_FORMAT,
                     validation_error="suggested_zh_tw_format_invalid",
                 )
-                return "invalid_format"
+                return SmartReviewStatus.INVALID_FORMAT
 
             expected = (
                 candidate.get("kind"),
@@ -2145,7 +2144,7 @@ class SmartReviewMixin:
                 candidate.get("manual_revision"),
             )
             stale_reason: str | None = None
-            result_status = "applied"
+            result_status = SmartReviewStatus.APPLIED
             with self._tx(bump_generation_on_noop=False) as conn:
                 # BEGIN IMMEDIATE 必須早於快照讀取，讓 CAS 檢查與正式寫入
                 # 位於同一個 SQLite 交易，避免讀取後被其他連線插入修改。
@@ -2153,7 +2152,7 @@ class SmartReviewMixin:
                     _smart_review_current_snapshot_sql(), (entry_id,)
                 ).fetchone()
                 if current is None or tuple(current) != expected:
-                    result_status = "stale"
+                    result_status = SmartReviewStatus.STALE
                     stale_reason = "snapshot_stale"
                 else:
                     current_manual = conn.execute(
@@ -2167,7 +2166,7 @@ class SmartReviewMixin:
                         else (None, None, None, None)
                     )
                     if current_manual_snapshot != manual_snapshot:
-                        result_status = "stale"
+                        result_status = SmartReviewStatus.STALE
                         stale_reason = "manual_snapshot_stale"
                     elif current_manual is not None and current_manual[2] == "reviewed":
                         result_status = "manual_reviewed"
@@ -2195,11 +2194,11 @@ class SmartReviewMixin:
                             ordinal=ordinal,
                         )
 
-            if result_status != "applied":
+            if result_status != SmartReviewStatus.APPLIED:
                 history.update_candidate(
                     run_id,
                     ordinal,
-                    status="stale",
+                    status=SmartReviewStatus.STALE,
                     validation_error=stale_reason,
                 )
                 return (
@@ -2212,7 +2211,7 @@ class SmartReviewMixin:
                     draft_zh_tw=proposed
                     if draft_zh_tw is not None
                     else candidate.get("draft_zh_tw"),
-                    status="applied",
+                    status=SmartReviewStatus.APPLIED,
                     applied_batch=batch,
                     applied_at=history.timestamp(),
                 )
@@ -2226,14 +2225,14 @@ class SmartReviewMixin:
                     ordinal,
                     exc_info=True,
                 )
-                return "applied"
+                return SmartReviewStatus.APPLIED
             if not updated:
                 logger.warning(
                     "Smart Review JSON 候選不存在，SQLite 已套用：run=%s ordinal=%s",
                     run_id,
                     ordinal,
                 )
-            return "applied"
+            return SmartReviewStatus.APPLIED
 
     def _write_smart_review_manual_row(
         self,
@@ -2438,7 +2437,7 @@ class SmartReviewMixin:
                 if translation_issues(
                     str(current[4] or ""), proposed, kind=str(current[0]), repair=False
                 ):
-                    return "invalid_format"
+                    return SmartReviewStatus.INVALID_FORMAT
                 self._write_smart_review_manual_row(
                     conn,
                     entry_id,
@@ -2484,13 +2483,13 @@ class SmartReviewMixin:
                 history.update_candidate(
                     run_id,
                     ordinal,
-                    status="applied",
+                    status=SmartReviewStatus.APPLIED,
                     draft_zh_tw=proposed,
                     validation_error=None,
                     applied_batch=batch,
                     applied_at=history.timestamp(),
                 )
-                return "applied"
+                return SmartReviewStatus.APPLIED
             except Exception:
                 logger.warning(
                     "Smart Review 人工編輯狀態回寫失敗（第 %d 次）：run=%s ordinal=%s",
@@ -2532,7 +2531,7 @@ class SmartReviewMixin:
             ).fetchone()
             if candidate is None:
                 return "missing"
-            if candidate[15] != "ready" or not candidate[14]:
+            if candidate[15] != SmartReviewStatus.READY or not candidate[14]:
                 return "not_ready"
             proposed = candidate[16] or candidate[14]
             if draft_zh_tw is not None:
@@ -2572,7 +2571,7 @@ class SmartReviewMixin:
                     "WHERE run_id=? AND ordinal=?",
                     (run_id, int(ordinal)),
                 )
-                return "stale"
+                return SmartReviewStatus.STALE
             current_manual = conn.execute(
                 "SELECT zh_tw, checker, review_status, revision FROM translation "
                 "WHERE entry_id=? AND source=?",
@@ -2594,7 +2593,7 @@ class SmartReviewMixin:
                     "WHERE run_id=? AND ordinal=?",
                     (run_id, int(ordinal)),
                 )
-                return "stale"
+                return SmartReviewStatus.STALE
             if current_manual is not None and current_manual[2] == "reviewed":
                 conn.execute(
                     "UPDATE smart_review_candidate SET status='stale', "
@@ -2612,7 +2611,7 @@ class SmartReviewMixin:
                     "WHERE run_id=? AND ordinal=?",
                     (run_id, int(ordinal)),
                 )
-                return "invalid_format"
+                return SmartReviewStatus.INVALID_FORMAT
             previous_manual = current_manual
             conn.execute(
                 "INSERT INTO translation (entry_id, source, zh_tw, checker, review_status) "
@@ -2659,7 +2658,7 @@ class SmartReviewMixin:
                 (batch, run_id, int(ordinal)),
             )
             self._refresh(conn, [candidate[0]])
-        return "applied"
+        return SmartReviewStatus.APPLIED
 
     def reject_smart_review_candidate(self, run_id: str, ordinal: int) -> str:
         """保留目前翻譯並將智慧校對候選標記為拒絕。"""
@@ -2670,17 +2669,22 @@ class SmartReviewMixin:
             # 後，apply 先完成並把同一候選改成 applied，最後又被覆寫成 rejected。
             with history.locked():
                 candidate = history.get_candidate(run_id, ordinal)
-                if candidate is None or candidate.get("status") != "ready":
+                if (
+                    candidate is None
+                    or candidate.get("status") != SmartReviewStatus.READY
+                ):
                     return "not_ready"
-                updated = history.update_candidate(run_id, ordinal, status="rejected")
-                return "rejected" if updated else "not_ready"
+                updated = history.update_candidate(
+                    run_id, ordinal, status=SmartReviewStatus.REJECTED
+                )
+                return SmartReviewStatus.REJECTED if updated else "not_ready"
         with self._tx(bump_generation_on_noop=False) as conn:
             updated = conn.execute(
                 "UPDATE smart_review_candidate SET status='rejected', "
                 "updated_at=CURRENT_TIMESTAMP WHERE run_id=? AND ordinal=? AND status='ready'",
                 (run_id, int(ordinal)),
             ).rowcount
-        return "rejected" if updated else "not_ready"
+        return SmartReviewStatus.REJECTED if updated else "not_ready"
 
 
 def _next_smart_review_batch_size(size: int) -> int:
@@ -4316,7 +4320,7 @@ def run_smart_review(
                             batch_timing,
                             batch_started,
                             attempts_before,
-                            "request_failed",
+                            SmartReviewStatus.REQUEST_FAILED,
                             counters_before=counters_before,
                             retry_before=retry_before,
                             validation_errors=batch_validation_errors,
@@ -4472,7 +4476,7 @@ def run_smart_review(
         db.mark_smart_review_pending_cancelled(run_id)
 
     status = (
-        "cancelled"
+        SmartReviewStatus.CANCELLED
         if cancelled
         else "failed"
         if failed

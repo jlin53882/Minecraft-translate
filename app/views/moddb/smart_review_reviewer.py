@@ -9,6 +9,7 @@ import flet as ft
 from app.services_impl.moddb_smart_review_service import (
     SMART_REVIEW_MANUAL_EDIT_STATUSES,
     SmartReviewCandidate,
+    SmartReviewStatus,
     apply_moddb_smart_review_candidate_from_path,
     apply_moddb_smart_review_manual_edit_from_path,
     get_moddb_smart_review_run_breakdown_from_path,
@@ -26,29 +27,29 @@ from app.ui.snack import show_snack
 from app.views.moddb.formatting import format_count
 from app.views.moddb.smart_review_context import SmartReviewContext
 
-DEFAULT_FILTER = "ready"
+DEFAULT_FILTER = SmartReviewStatus.READY
 # 篩選器：(狀態值, 顯示名稱)；``all`` 表示不篩選。
 FILTERS: tuple[tuple[str, str], ...] = (
-    ("ready", "可套用"),
-    ("applied", "已套用"),
-    ("rejected", "已保留原譯文"),
-    ("needs_context", "需補 context"),
-    ("no_change", "AI 認為不用改"),
-    ("invalid", "無效（AI 回應不合格）"),
-    ("invalid_format", "格式不符"),
-    ("stale", "已過期"),
+    (SmartReviewStatus.READY, "可套用"),
+    (SmartReviewStatus.APPLIED, "已套用"),
+    (SmartReviewStatus.REJECTED, "已保留原譯文"),
+    (SmartReviewStatus.NEEDS_CONTEXT, "需補 context"),
+    (SmartReviewStatus.NO_CHANGE, "AI 認為不用改"),
+    (SmartReviewStatus.INVALID, "無效（AI 回應不合格）"),
+    (SmartReviewStatus.INVALID_FORMAT, "格式不符"),
+    (SmartReviewStatus.STALE, "已過期"),
     ("all", "全部"),
 )
 STATUS_LABEL = dict(FILTERS)
 _STATUS_TONE = {
-    "ready": "em",
-    "applied": "dia",
-    "rejected": "neutral",
-    "needs_context": "gold",
-    "no_change": "neutral",
-    "invalid": "red",
-    "invalid_format": "red",
-    "stale": "gold",
+    SmartReviewStatus.READY: "em",
+    SmartReviewStatus.APPLIED: "dia",
+    SmartReviewStatus.REJECTED: "neutral",
+    SmartReviewStatus.NEEDS_CONTEXT: "gold",
+    SmartReviewStatus.NO_CHANGE: "neutral",
+    SmartReviewStatus.INVALID: "red",
+    SmartReviewStatus.INVALID_FORMAT: "red",
+    SmartReviewStatus.STALE: "gold",
 }
 _DECISION_LABEL = {
     "no_change": "維持不變",
@@ -58,22 +59,28 @@ _DECISION_LABEL = {
 _CONFIDENCE_LABEL = {"high": "高", "medium": "中", "low": "低"}
 # 為什麼某筆不能套用：讓灰掉的按鈕有明確的說明。
 _NOT_APPLICABLE = {
-    "applied": "這筆已經套用；要再修改請編輯草稿後重新套用。",
-    "rejected": "這筆已選擇保留原譯文。",
-    "needs_context": "AI 表示需要更多上下文才能判斷，沒有提供建議譯文。",
-    "no_change": "AI 認為目前譯文不用修改，沒有建議譯文。",
-    "invalid": "AI 的回應沒有通過驗證，不能套用。",
-    "invalid_format": "草稿的格式未通過檢查，這筆已鎖定；請重新校對。",
-    "stale": "資料庫內容在校對後已變更，這筆已過期；請重新校對。",
+    SmartReviewStatus.APPLIED: "這筆已經套用；要再修改請編輯草稿後重新套用。",
+    SmartReviewStatus.REJECTED: "這筆已選擇保留原譯文。",
+    SmartReviewStatus.NEEDS_CONTEXT: "AI 表示需要更多上下文才能判斷，沒有提供建議譯文。",
+    SmartReviewStatus.NO_CHANGE: "AI 認為目前譯文不用修改，沒有建議譯文。",
+    SmartReviewStatus.INVALID: "AI 的回應沒有通過驗證，不能套用。",
+    SmartReviewStatus.INVALID_FORMAT: "草稿的格式未通過檢查，這筆已鎖定；請重新校對。",
+    SmartReviewStatus.STALE: "資料庫內容在校對後已變更，這筆已過期；請重新校對。",
 }
 _APPLY_MESSAGES = {
-    "applied": ("已套用 1 筆人工（未審核）譯文；原 AI 譯文保留。", C.EM),
-    "stale": ("資料庫內容已變更，這筆候選已過期；未覆蓋目前譯文。", C.GOLD),
+    SmartReviewStatus.APPLIED: (
+        "已套用 1 筆人工（未審核）譯文；原 AI 譯文保留。",
+        C.EM,
+    ),
+    SmartReviewStatus.STALE: (
+        "資料庫內容已變更，這筆候選已過期；未覆蓋目前譯文。",
+        C.GOLD,
+    ),
     "manual_reviewed": (
         "目前已有人工審核過的譯文，不會被覆蓋；請到條目校對編輯。",
         C.GOLD,
     ),
-    "invalid_format": ("草稿格式未通過檢查，未套用。", C.GOLD),
+    SmartReviewStatus.INVALID_FORMAT: ("草稿格式未通過檢查，未套用。", C.GOLD),
     "invalid_draft": ("草稿不可為空白。", C.GOLD),
     "not_ready": ("這筆目前不是可套用的狀態。", C.GOLD),
     "missing": ("找不到這筆候選。", C.GOLD),
@@ -81,7 +88,7 @@ _APPLY_MESSAGES = {
 # 人工編輯套用（任何非 ready 的可編輯狀態）可能回傳的結果。
 _MANUAL_EDIT_MESSAGES = {
     **_APPLY_MESSAGES,
-    "applied": ("已套用人工修改（未審核）；可從條目歷史還原。", C.EM),
+    SmartReviewStatus.APPLIED: ("已套用人工修改（未審核）；可從條目歷史還原。", C.EM),
     "changed": (
         "資料庫內容在載入後已變更，未覆蓋；已重新載入這筆，請確認目前譯文後再套用。",
         C.GOLD,
@@ -95,13 +102,13 @@ _MANUAL_EDIT_MESSAGES = {
     "unsupported": ("舊版批次不支援人工編輯套用；請重新校對。", C.GOLD),
 }
 _MANUAL_EDIT_HINTS = {
-    "applied": "這筆已套用。修改草稿後按「重新套用」會覆蓋目前人工譯文（可從條目歷史還原）。",
-    "rejected": "這筆先前選擇保留原譯文；仍可編輯草稿後套用。",
-    "needs_context": "AI 沒有提供建議譯文；草稿預設為目前譯文，可直接修改後套用。",
-    "no_change": "AI 認為不用修改；草稿預設為目前譯文，仍可修改後套用。",
-    "invalid": "AI 的回應沒有通過驗證；草稿預設為目前譯文，可直接修改後套用。",
-    "invalid_format": "先前的草稿格式未通過檢查；請修正草稿後套用。",
-    "stale": "資料庫內容在校對後已變更；已對齊目前譯文，可直接修改後套用。",
+    SmartReviewStatus.APPLIED: "這筆已套用。修改草稿後按「重新套用」會覆蓋目前人工譯文（可從條目歷史還原）。",
+    SmartReviewStatus.REJECTED: "這筆先前選擇保留原譯文；仍可編輯草稿後套用。",
+    SmartReviewStatus.NEEDS_CONTEXT: "AI 沒有提供建議譯文；草稿預設為目前譯文，可直接修改後套用。",
+    SmartReviewStatus.NO_CHANGE: "AI 認為不用修改；草稿預設為目前譯文，仍可修改後套用。",
+    SmartReviewStatus.INVALID: "AI 的回應沒有通過驗證；草稿預設為目前譯文，可直接修改後套用。",
+    SmartReviewStatus.INVALID_FORMAT: "先前的草稿格式未通過檢查；請修正草稿後套用。",
+    SmartReviewStatus.STALE: "資料庫內容在校對後已變更；已對齊目前譯文，可直接修改後套用。",
 }
 
 
@@ -113,14 +120,17 @@ def is_manual_edit_row(row: SmartReviewCandidate | None) -> bool:
 def manual_edit_hint(row: SmartReviewCandidate) -> str:
     """說明人工編輯這筆候選的方式；未儲存的修改換筆後不會保留。"""
     hint = _MANUAL_EDIT_HINTS.get(row.status, "")
-    if row.status in {"invalid", "invalid_format"} and row.validation_error:
+    if (
+        row.status in {SmartReviewStatus.INVALID, SmartReviewStatus.INVALID_FORMAT}
+        and row.validation_error
+    ):
         hint += f"原因：{row.validation_error}。"
     return f"{hint}未套用的修改換筆後不會保留。" if hint else ""
 
 
 def initial_draft_text(row: SmartReviewCandidate) -> str:
     """決定草稿框的起始內容：已套用以目前資料庫值為準，其他依序取草稿、建議、現況。"""
-    if row.status == "applied":
+    if row.status == SmartReviewStatus.APPLIED:
         return row.current_zh_tw or ""
     if row.status in SMART_REVIEW_MANUAL_EDIT_STATUSES:
         return row.draft_zh_tw or row.suggested_zh_tw or row.current_zh_tw or ""
@@ -261,10 +271,13 @@ def candidate_evidence_text(row: SmartReviewCandidate) -> str:
 
 def not_applicable_reason(row: SmartReviewCandidate) -> str | None:
     """回傳這筆候選不能套用的原因；可套用時回傳 None。"""
-    if row.status == "ready":
+    if row.status == SmartReviewStatus.READY:
         return None
     reason = _NOT_APPLICABLE.get(row.status, f"目前狀態「{row.status}」不能套用。")
-    if row.status in {"invalid", "invalid_format"} and row.validation_error:
+    if (
+        row.status in {SmartReviewStatus.INVALID, SmartReviewStatus.INVALID_FORMAT}
+        and row.validation_error
+    ):
         reason += f"原因：{row.validation_error}"
     return reason
 
@@ -473,8 +486,8 @@ class SmartReviewReviewer:
                 return
             self.run_info = info
             self.counts = dict(breakdown.get("status", {}))
-            ready = self.counts.get("ready", 0)
-            self.status_filter = "ready" if ready else "all"
+            ready = self.counts.get(SmartReviewStatus.READY, 0)
+            self.status_filter = SmartReviewStatus.READY if ready else "all"
             self.filter_dd.value = self.status_filter
             self._refresh_filter_labels()
             self.position = 0
@@ -617,8 +630,10 @@ class SmartReviewReviewer:
         if row is None:
             label = STATUS_LABEL.get(self.status_filter, self.status_filter)
             done_all = (
-                self.status_filter == "ready"
-                and self.counts.get("applied", 0) + self.counts.get("rejected", 0) > 0
+                self.status_filter == SmartReviewStatus.READY
+                and self.counts.get(SmartReviewStatus.APPLIED, 0)
+                + self.counts.get(SmartReviewStatus.REJECTED, 0)
+                > 0
             )
             self._show_empty(
                 "可套用的候選都處理完了" if done_all else f"「{label}」沒有候選",
@@ -633,7 +648,9 @@ class SmartReviewReviewer:
         self.progress_bar.value = (self.position + 1) / self.total if self.total else 0
         self._stored_draft = initial_draft_text(row)
         self.draft.value = self._stored_draft
-        self.draft.read_only = not (row.status == "ready" or is_manual_edit_row(row))
+        self.draft.read_only = not (
+            row.status == SmartReviewStatus.READY or is_manual_edit_row(row)
+        )
         self.body.controls = [self._header(row), self._columns(row)]
         self._refresh_format()
         self.ctx.update()
@@ -801,7 +818,7 @@ class SmartReviewReviewer:
         if not value.strip():
             self.format_text.value = "格式診斷：尚無可分析草稿"
             self.format_text.color = C.MUTED
-            has_issue = row.status == "ready" or is_manual_edit_row(row)
+            has_issue = row.status == SmartReviewStatus.READY or is_manual_edit_row(row)
         else:
             try:
                 diagnostics = smart_review_format_diagnostics(
@@ -852,7 +869,9 @@ class SmartReviewReviewer:
 
     def _set_manual_edit_actions(self, row: SmartReviewCandidate) -> None:
         """人工編輯模式只開放套用；草稿有內容且格式正確才能按，存草稿與保留原譯文不適用。"""
-        self.apply_btn.content = "重新套用" if row.status == "applied" else "套用修改"
+        self.apply_btn.content = (
+            "重新套用" if row.status == SmartReviewStatus.APPLIED else "套用修改"
+        )
         self.apply_btn.disabled = self.busy or self._has_format_issue
         self.save_btn.disabled = True
         self.reject_btn.disabled = True
@@ -943,7 +962,7 @@ class SmartReviewReviewer:
         row = self.row
         return (
             row is not None
-            and row.status == "ready"
+            and row.status == SmartReviewStatus.READY
             and str(self.draft.value or "") != self._stored_draft
         )
 
@@ -1080,7 +1099,7 @@ class SmartReviewReviewer:
             show_snack(self.ctx.page, f"{failure}：{error}", C.RED)
             self.ctx.update()
             return
-        if status == "rejected":
+        if status == SmartReviewStatus.REJECTED:
             show_snack(self.ctx.page, "已保留原譯文，這筆不會套用。", C.EM)
         else:
             message, color = messages.get(
@@ -1089,7 +1108,7 @@ class SmartReviewReviewer:
             show_snack(self.ctx.page, message, color)
         # state_sync_failed：翻譯已提交，條目頁仍要重載
         if (
-            status in {"applied", "state_sync_failed"}
+            status in {SmartReviewStatus.APPLIED, "state_sync_failed"}
             and notify_parent
             and callable(self.on_changed)
         ):
