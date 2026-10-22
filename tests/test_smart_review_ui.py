@@ -775,6 +775,22 @@ def test_reviewer_next_and_previous_move_one_item_at_a_time(reviewer):
     assert reviewer.ctx.page.snacks[-1] == "已經是第一筆。"
 
 
+def test_reviewer_clamps_to_remaining_candidate_after_queue_shrinks(reviewer):
+    """目前候選被處理後，原位置縮到最後一筆仍應顯示剩餘候選。"""
+    reviewer.load_run("run-1")
+    reviewer._go_to(1)
+    assert reviewer.state.row.ordinal == 3
+
+    reviewer.fake.rows = [row for row in reviewer.fake.rows if row.ordinal != 3]
+    reviewer.loader.invalidate()
+    reviewer.load_position(refresh_counts=True)
+
+    assert reviewer.state.position == 0
+    assert reviewer.state.total == 1
+    assert reviewer.state.row is not None
+    assert reviewer.state.row.ordinal == 2
+
+
 def test_reviewer_accepts_manual_position_and_reuses_known_total(reviewer):
     """驗證可輸入筆次跳轉，且換筆時沿用已取得的篩選總數。"""
     reviewer.load_run("run-1")

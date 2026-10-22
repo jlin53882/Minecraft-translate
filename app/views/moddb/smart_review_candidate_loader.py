@@ -104,8 +104,25 @@ class SmartReviewCandidateLoader:
         ``with_counts`` 為真時在同一個連線內一併取得狀態統計（套用或保留之後的刷新）。
         """
         with moddb_smart_review_read_session(path, priority) as session:
-            total, window = _read_window(session, run_id, status, position, known_total)
+            requested_position = max(0, int(position))
+            total, window = _read_window(
+                session, run_id, status, requested_position, known_total
+            )
+            position = min(requested_position, total - 1) if total else 0
             row = window.get(position)
+            if row is None and total:
+                # The queue may have shrunk since the UI last counted it.  A clamped
+                # page can be keyed by the old offset, so re-read around the actual
+                # last position before declaring the candidate missing.
+                total, window = _read_window(
+                    session,
+                    run_id,
+                    status,
+                    position,
+                    None if known_total is not None else total,
+                )
+                position = min(position, total - 1) if total else 0
+                row = window.get(position)
             if is_manual_edit_row(row) and (
                 realign_moddb_smart_review_candidate_from_path(
                     path, priority, run_id, row.ordinal

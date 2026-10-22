@@ -2,7 +2,7 @@
 
 import pytest
 
-from tests.smart_review_history_support import seed_ready_run
+from tests.smart_review_history_support import create_store_run, seed_ready_run
 from translation_tool.translation_db import TranslationDB
 from translation_tool.translation_db.smart_review_history import (
     SmartReviewHistoryStore,
@@ -39,6 +39,17 @@ def test_revision_increases_on_each_candidate_change(tmp_path, layout):
     assert first["state"] == "projected" and first["revision"] >= 1
     assert store.update_candidate(run_id, 2, status="rejected")
     assert _projection(store, run_id)["revision"] == first["revision"] + 1
+
+
+def test_cancelling_pending_candidates_marks_projection(tmp_path, layout):
+    store, run_id = create_store_run(
+        tmp_path / "cancel.db", 6, chunk_size=CHUNK_SIZE[layout]
+    )
+
+    assert store.mark_pending_cancelled(run_id) == 6
+    projection = _projection(store, run_id)
+    assert projection["state"] == "projected"
+    assert projection["revision"] == 1
 
 
 def test_reconcile_marks_reconciled_and_repeat_is_noop(tmp_path, layout):

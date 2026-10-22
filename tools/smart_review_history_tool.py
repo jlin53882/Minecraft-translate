@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import shutil
 import sys
 import zipfile
@@ -47,6 +48,10 @@ DEFAULT_RETENTION_DAYS = 90
 DEFAULT_KEEP_LATEST = 10
 _TIME_FORMAT = "%Y-%m-%d %H:%M:%S"
 _LOCK_FILE_NAME = ".smart_review.lock"
+_RUN_ID = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
+_FINISHED_RUN_STATUSES = frozenset(
+    {"completed", "partial", "cancelled", "failed", "interrupted"}
+)
 
 
 class ToolError(Exception):
@@ -178,6 +183,29 @@ def _run_files(directory: Path, run_id: str) -> list[Path]:
     return files
 
 
+def _manifest_issue_run_ids(directory: Path) -> set[str]:
+    """回傳檢查器判定有問題的批次；有任何問題就不進行破壞性清理。"""
+    return {
+        str(issue.run_id)
+        for issue in check_history_directory(directory)
+        if issue.run_id
+    }
+
+
+def _is_prunable_manifest(
+    payload: object, *, run_id: str, started_at: str, status: str
+) -> bool:
+    """確認 manifest 仍是規劃時看到的完整、已結束批次。"""
+    if not isinstance(payload, dict):
+        return False
+    return (
+        payload.get("id") == run_id
+        and payload.get("started_at") == started_at
+        and payload.get("status") == status
+        and status in _FINISHED_RUN_STATUSES
+    )
+
+
 def plan_prune(
     directory: Path,
     *,
@@ -195,14 +223,19 @@ def plan_prune(
     if not directory.is_dir():
         return []
     cutoff = (now or datetime.now(UTC)) - timedelta(days=retention_days)
+    invalid_run_ids = _manifest_issue_run_ids(directory)
     runs: list[tuple[str, str, dict[str, Any]]] = []
     for path in directory.glob("*.json"):
+        if not _RUN_ID.fullmatch(path.stem) or path.stem in invalid_run_ids:
+            continue
         try:
             payload = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             continue
-        if isinstance(payload, dict):
-            runs.append((str(payload.get("started_at") or ""), path.stem, payload))
+        if isinstance(payload, dict) and payload.get("id") == path.stem:
+            status = str(payload.get("status") or "")
+            if status in _FINISHED_RUN_STATUSES:
+                runs.append((str(payload.get("started_at") or ""), path.stem, payload))
     runs.sort(reverse=True)
     candidates = []
     for started_at, run_id, payload in runs[keep_latest:]:
@@ -224,9 +257,24 @@ def apply_prune(directory: Path, candidates: list[PruneCandidate]) -> int:
     """刪除清單中的批次（manifest 最後刪除前先移除分片，避免留下孤立的分片目錄）。"""
     removed = 0
     with HistoryLock(directory).write():
+        invalid_run_ids = _manifest_issue_run_ids(directory)
         for candidate in candidates:
+            if candidate.run_id in invalid_run_ids:
+                continue
+            manifest = directory / f"{candidate.run_id}.json"
+            try:
+                payload = json.loads(manifest.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            if not _is_prunable_manifest(
+                payload,
+                run_id=candidate.run_id,
+                started_at=candidate.started_at,
+                status=candidate.status,
+            ):
+                continue
             shutil.rmtree(directory / f"{candidate.run_id}.chunks", ignore_errors=True)
-            (directory / f"{candidate.run_id}.json").unlink(missing_ok=True)
+            manifest.unlink(missing_ok=True)
             removed += 1
     return removed
 

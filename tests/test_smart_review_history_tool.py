@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 
 from tests.smart_review_history_support import create_store_run, make_result
-from tools.smart_review_history_tool import main, plan_prune
+from tools.smart_review_history_tool import apply_prune, main, plan_prune
 from translation_tool.translation_db.smart_review_history import (
     SmartReviewHistoryStore,
 )
@@ -246,6 +246,51 @@ def test_prune_keeps_latest_n_and_running_and_unparseable_runs(history):
         c.run_id
         for c in plan_prune(store.directory, retention_days=30, keep_latest=0, now=now)
     }
+
+
+def test_prune_keeps_invalid_manifest(history):
+    store, _chunked_id, _single_id = history
+    now = datetime.now(UTC)
+    path = store.directory / "broken.json"
+    path.write_text(
+        json.dumps(
+            {
+                "id": "broken",
+                "started_at": (now - timedelta(days=400)).strftime("%Y-%m-%d %H:%M:%S"),
+                "status": "completed",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert not any(
+        candidate.run_id == "broken"
+        for candidate in plan_prune(
+            store.directory, retention_days=30, keep_latest=0, now=now
+        )
+    )
+    assert path.is_file()
+
+
+def test_apply_prune_rechecks_manifest_before_removing(history):
+    store, chunked_id, _single_id = history
+    now = datetime.now(UTC)
+    _set_started_at(store, chunked_id, now - timedelta(days=400))
+    candidates = plan_prune(store.directory, retention_days=30, keep_latest=0, now=now)
+    candidate = next(item for item in candidates if item.run_id == chunked_id)
+    store.path_for(chunked_id).write_text(
+        json.dumps(
+            {
+                "id": chunked_id,
+                "started_at": candidate.started_at,
+                "status": candidate.status,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert apply_prune(store.directory, [candidate]) == 0
+    assert store.path_for(chunked_id).is_file()
 
 
 def test_prune_rejects_negative_arguments(history, capsys):

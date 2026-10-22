@@ -65,6 +65,12 @@ def timing_ms(source: Mapping[str, Any], canonical_ms: str) -> int | None:
 def with_legacy_seconds(event: Mapping[str, Any]) -> dict[str, Any]:
     """回傳補上舊版 ``*_seconds`` 別名的事件複本（只補缺的欄位，不覆蓋既有值）。"""
     result = dict(event)
+    # 舊版 resume 事件把實際等待時間放在 elapsed_seconds；canonical 事件將它
+    # 與批次經過時間區分為 waited_ms，因此這個別名必須優先於 elapsed_ms。
+    if str(result.get("kind") or "").endswith("_resume"):
+        waited_ms = _number(result.get("waited_ms"))
+        if waited_ms is not None:
+            result.setdefault("elapsed_seconds", round(waited_ms / 1000, 3))
     for canonical, legacy_names in LEGACY_SECONDS_ALIASES.items():
         ms = _number(result.get(canonical))
         if ms is None:

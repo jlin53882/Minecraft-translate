@@ -482,6 +482,7 @@ class SmartReviewHistoryStore:
                     updated += 1
             if updated:
                 payload.update(candidate_counts(payload))
+                mark_projection(payload)
                 self.repository.write_unlocked(run_id, payload)
             return updated
 

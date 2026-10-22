@@ -143,6 +143,16 @@ def test_to_legacy_event_adds_old_names_without_overwriting():
     assert event["wait_ms"] == 30000  # canonical 欄位保留
 
 
+def test_to_legacy_event_restores_resume_elapsed_seconds():
+    event = to_legacy_event(
+        {"kind": "retry_resume", "waited_ms": 30000, "elapsed_ms": 31000}
+    )
+
+    assert event["elapsed_seconds"] == 30.0
+    assert event["waited_ms"] == 30000
+    assert event["elapsed_ms"] == 31000
+
+
 def test_with_legacy_fields_skips_missing_values():
     assert with_legacy_fields({"attempt": None}) == {"attempt": None}
 
