@@ -554,6 +554,29 @@ def test_smart_review_candidate_offset_keeps_absolute_ordinals(db):
     assert [item.ordinal for item in page] == [2]
 
 
+def test_smart_review_latest_marks_accepts_nonzero_ordinal_chunks(db):
+    """驗證 offset 產生的非 1 起始分片仍可通過嚴格完整性檢查。"""
+    from translation_tool.translation_db.smart_review_history import (
+        SmartReviewHistoryStore,
+    )
+
+    snapshots = db.smart_review_candidates(version="1.21.1", limit=1, offset=1)
+    store = SmartReviewHistoryStore(db.path, storage_chunk_size=1)
+    run_id = store.create_run(
+        snapshots,
+        provider="gemini",
+        model="test-model",
+        version="1.21.1",
+        requested_limit=1,
+        batch_size=1,
+    )
+
+    selected_run, marks = store.latest_run_marks()
+
+    assert selected_run == run_id
+    assert set(marks) == {snapshots[0].entry_id}
+
+
 def test_smart_review_query_escapes_like_wildcards(db):
     """驗證智慧校對搜尋中的百分比、底線與反斜線是字面值。"""
     db.write_back(

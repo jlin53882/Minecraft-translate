@@ -17,7 +17,7 @@ import threading
 import uuid
 from collections import Counter, defaultdict
 from collections.abc import Iterator, Mapping, Sequence
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, ClassVar
@@ -106,7 +106,7 @@ def _process_is_alive(pid: object) -> bool:
 
 
 @contextmanager
-def _exclusive_file_lock(path: Path) -> Iterator[None]:
+def _exclusive_file_lock(path: Path, *, blocking: bool = True) -> Iterator[None]:
     """以跨程序檔案鎖保護歷史目錄的發布與復原交錯。"""
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a+b") as handle:
@@ -120,11 +120,13 @@ def _exclusive_file_lock(path: Path) -> Iterator[None]:
             if os.name == "nt":
                 import msvcrt
 
-                msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
+                mode = msvcrt.LK_LOCK if blocking else msvcrt.LK_NBLCK
+                msvcrt.locking(handle.fileno(), mode, 1)
             else:
                 import fcntl
 
-                fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+                flags = fcntl.LOCK_EX if blocking else fcntl.LOCK_EX | fcntl.LOCK_NB
+                fcntl.flock(handle.fileno(), flags)
             locked = True
             yield
         finally:
@@ -333,6 +335,34 @@ class SmartReviewHistoryStore:
         with _exclusive_file_lock(self.directory / ".smart_review.lock"):
             yield
 
+    @contextmanager
+    def _try_interprocess_lock(self) -> Iterator[bool]:
+        """嘗試取得非阻塞歷史目錄鎖，供一般讀取路徑略過復原工作。"""
+        stack = ExitStack()
+        try:
+            try:
+                stack.enter_context(
+                    _exclusive_file_lock(
+                        self.directory / ".smart_review.lock", blocking=False
+                    )
+                )
+            except OSError:
+                yield False
+                return
+            yield True
+        finally:
+            stack.close()
+
+    @contextmanager
+    def _recovery_interprocess_lock(self, *, force: bool) -> Iterator[bool]:
+        """依復原模式取得必要或非阻塞的跨程序鎖。"""
+        if force:
+            with self._interprocess_lock():
+                yield True
+            return
+        with self._try_interprocess_lock() as acquired:
+            yield acquired
+
     def path_for(self, run_id: str) -> Path:
         """取得批次 JSON 路徑並拒絕路徑穿越。"""
         value = str(run_id or "")
@@ -518,14 +548,18 @@ class SmartReviewHistoryStore:
                 raise ValueError("智慧校對 manifest 的 selected_count 無效") from exc
             if sum(int(entry["count"]) for entry in entries) != expected_selected_count:
                 raise ValueError("智慧校對 manifest 的候選數量不完整")
-        previous_end = 0
+        previous_end: int | None = None
         for position, entry in enumerate(entries):
             start = int(entry["ordinal_start"])
             end = int(entry["ordinal_end"])
             count = int(entry["count"])
             if int(entry["index"]) != position:
                 raise ValueError("智慧校對 manifest 的分片索引不連續")
-            if start != previous_end + 1 or end < start or count != end - start + 1:
+            if (
+                (previous_end is not None and start != previous_end + 1)
+                or end < start
+                or count != end - start + 1
+            ):
                 raise ValueError("智慧校對 manifest 的 ordinal 範圍不完整")
             previous_end = end
 
@@ -979,7 +1013,15 @@ class SmartReviewHistoryStore:
         """
         if not self.directory.is_dir():
             return []
-        with self._lock, self._interprocess_lock():
+        if not force and self.directory in self._recovery_checked:
+            return []
+        with self._lock, self._recovery_interprocess_lock(force=force) as acquired:
+            if not acquired:
+                logger.debug(
+                    "略過目前無法取得的智慧校對 recovery 鎖：directory=%s",
+                    self.directory,
+                )
+                return []
             if not force and self.directory in self._recovery_checked:
                 return []
             self._recovery_checked.add(self.directory)
