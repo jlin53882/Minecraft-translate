@@ -22,7 +22,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 import opencc
 
@@ -66,10 +66,10 @@ from translation_tool.utils.ui_mirror import ContextThreadPoolExecutor
 # Smart item mapping
 # -------------------------
 def collect_items_from_mapping(
-    mapping: Dict[str, Any],
+    mapping: dict[str, Any],
     *,
     file_hint: str,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """
     將 {路徑鍵: 原文} 的映射轉換為翻譯批次項目。
     需確保智慧偵測能識別 KubeJS 配置（item["file"] 包含 "/kubejs/"）。
@@ -79,7 +79,7 @@ def collect_items_from_mapping(
     - 若需要翻譯，用 shield 過的乾淨文字（clean）取代原文字。
     - 同時在 item 字典中附加 _shielded，供 on_translated_item() 做 unshield 回填。
     """
-    items: List[Dict[str, Any]] = []
+    items: list[dict[str, Any]] = []
     for k, v in mapping.items():
         if not isinstance(k, str):
             continue
@@ -118,7 +118,7 @@ def collect_items_from_mapping(
     return items
 
 
-def count_translatable_keys(mapping: Dict[str, Any]) -> int:
+def count_translatable_keys(mapping: dict[str, Any]) -> int:
     """計算 mapping 中『可翻譯字串』的數量。
 
     判斷條件：
@@ -148,12 +148,12 @@ def _is_tw_text(text: str) -> bool:
 
 
 def _split_off_tw_items(
-    cached_items: List[Dict[str, Any]],
-    items_to_translate: List[Dict[str, Any]],
-) -> List[Dict[str, Any]]:
+    cached_items: list[dict[str, Any]],
+    items_to_translate: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
     """從 items_to_translate 移出已翻譯（繁體）的項目到 cached_items，回傳被移動的 items。"""
-    tw_items: List[Dict[str, Any]] = []
-    remaining: List[Dict[str, Any]] = []
+    tw_items: list[dict[str, Any]] = []
+    remaining: list[dict[str, Any]] = []
     for it in items_to_translate:
         src_text = it.get("source_text", "") or ""
         if _is_tw_text(src_text):
@@ -182,7 +182,7 @@ class DryRunStats:
     total_keys: int = 0
     cache_hit: int = 0
     cache_miss: int = 0
-    per_file: Optional[list[dict]] = None
+    per_file: list[dict] | None = None
 
 
 # -------------------------
@@ -193,7 +193,7 @@ def translate_kubejs_pending_to_zh_tw(
     pending_dir: str | Path,
     output_dir: str | Path,
     session=None,
-    rename_langs: Optional[set[str]] = None,
+    rename_langs: set[str] | None = None,
     dry_run: bool = False,
     write_new_cache: bool = False,
 ) -> dict:
@@ -244,10 +244,10 @@ def translate_kubejs_pending_to_zh_tw(
     # -------------------------
     # Pre-scan global total (multithread, like FTB)
     # -------------------------
-    per_file_counts: List[Tuple[Path, int]] = []
+    per_file_counts: list[tuple[Path, int]] = []
     global_total_keys = 0
 
-    def _count_one(src: Path) -> Tuple[Path, int]:
+    def _count_one(src: Path) -> tuple[Path, int]:
         """統計單一檔案的翻譯 key 數量。"""
         try:
             raise_if_cancelled()
@@ -342,7 +342,7 @@ def translate_kubejs_pending_to_zh_tw(
     per_file_rows: list[dict] = []
     rec = TranslationRecorder()
     touch = TouchSet()
-    _file_write_table: dict[str, tuple[Path, Dict[str, str]]] = {}
+    _file_write_table: dict[str, tuple[Path, dict[str, str]]] = {}
 
     def _writer(file_id: str) -> None:
         """寫入翻譯結果到檔案。"""
@@ -351,8 +351,8 @@ def translate_kubejs_pending_to_zh_tw(
 
     # Build phase: per-file state + global miss list
     file_states: dict[str, dict] = {}
-    all_miss_items: List[Dict[str, Any]] = []
-    all_hit_items: List[Dict[str, Any]] = []
+    all_miss_items: list[dict[str, Any]] = []
+    all_hit_items: list[dict[str, Any]] = []
 
     for idx, (src, key_count) in enumerate(per_file_counts, start=1):
         if key_count == 0:
@@ -404,7 +404,7 @@ def translate_kubejs_pending_to_zh_tw(
         )
 
         # out_map base
-        out_map: Dict[str, str] = {
+        out_map: dict[str, str] = {
             k: v
             for k, v in mapping.items()
             if isinstance(k, str) and isinstance(v, str)
@@ -455,9 +455,9 @@ def translate_kubejs_pending_to_zh_tw(
     # -------------------------
     if dry_run:
 
-        def _strip_runtime_fields(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        def _strip_runtime_fields(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
             """移除 dry-run preview 中不可 JSON 序列化的暫存欄位。"""
-            sanitized: List[Dict[str, Any]] = []
+            sanitized: list[dict[str, Any]] = []
             for it in items:
                 sanitized.append(
                     {k: v for k, v in it.items() if k not in {"_shielded"}}
@@ -527,7 +527,7 @@ def translate_kubejs_pending_to_zh_tw(
         progress(1.0)
     else:
 
-        def on_translated_item(it: Dict[str, Any]) -> None:
+        def on_translated_item(it: dict[str, Any]) -> None:
             """處理翻譯結果。"""
             rel_src = it.get("file_rel")
             p = it.get("path")
@@ -576,7 +576,7 @@ def translate_kubejs_pending_to_zh_tw(
                 touch.flush(_writer)
             except Exception as e:  # noqa: BLE001 - 失敗已記錄，不中斷翻譯批次
                 log_warning(f"[KubeJS-LM] 批次刷新失敗，使用 fallback 寫入: {e!r}")
-                for fid, (dstp, data) in _file_write_table.items():
+                for dstp, data in _file_write_table.values():
                     write_json_dict(dstp, data)
 
         on_progress = make_progress_hook(progress, log_info)

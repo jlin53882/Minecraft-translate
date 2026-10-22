@@ -96,23 +96,9 @@ jobs:
           echo "Changed Python files:"
           echo "$FILES"
 
-          # Keep the complete changed-files Ruff gate. The FTB translator has
-          # explicit, temporary #128 baselines for legacy diagnostics only;
-          # remove these scoped baselines when #128 cleans these legacy diagnostics.
-          # E402 is configured in pyproject.toml so local and CI checks agree.
-          echo "$FILES" | xargs uv run ruff check \
-            --extend-per-file-ignores 'translation_tool/plugins/ftbquests/ftbquests_lmtranslator.py:I001' \
-            --extend-per-file-ignores 'translation_tool/plugins/ftbquests/ftbquests_lmtranslator.py:PIE790' \
-            --extend-per-file-ignores 'translation_tool/plugins/ftbquests/ftbquests_lmtranslator.py:UP006' \
-            --extend-per-file-ignores 'translation_tool/plugins/ftbquests/ftbquests_lmtranslator.py:UP035' \
-            --extend-per-file-ignores 'translation_tool/plugins/ftbquests/ftbquests_lmtranslator.py:UP045' \
-            --extend-per-file-ignores 'translation_tool/plugins/kubejs/kubejs_tooltip_lmtranslator.py:PERF102' \
-            --extend-per-file-ignores 'translation_tool/plugins/kubejs/kubejs_tooltip_lmtranslator.py:UP006' \
-            --extend-per-file-ignores 'translation_tool/plugins/kubejs/kubejs_tooltip_lmtranslator.py:UP035' \
-            --extend-per-file-ignores 'translation_tool/plugins/kubejs/kubejs_tooltip_lmtranslator.py:UP045' \
-            --extend-per-file-ignores 'translation_tool/plugins/md/md_lmtranslator.py:D419' \
-            --extend-per-file-ignores 'translation_tool/plugins/md/md_lmtranslator.py:UP006' \
-            --extend-per-file-ignores 'translation_tool/plugins/md/md_lmtranslator.py:UP035'
+          # 完整的 changed-files Ruff gate，不再有逐檔豁免。
+          # E402 設在 pyproject.toml，讓本機與 CI 檢查一致。
+          echo "$FILES" | xargs uv run ruff check
           echo "$FILES" | xargs uv run ruff format --check
 
   audit:
