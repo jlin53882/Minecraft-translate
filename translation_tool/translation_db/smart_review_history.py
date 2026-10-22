@@ -10,9 +10,11 @@ manifest 加多個 JSON 分片，更新時只原子替換受影響的分片。Tr
 
 - ``smart_review_history_lock``：程序內鎖與跨程序檔案鎖（``HistoryLock``）。
 - ``smart_review_history_codec``：候選／批次 JSON 結構、摘要計算（純函式）。
-- ``smart_review_history_manifest``：manifest 與分片檔案存取（``ChunkManifestRepository``）。
+- ``smart_review_history_manifest``：manifest、分片與 status sidecar 檔案存取（``ChunkManifestRepository``）。
+- ``smart_review_history_sidecar``：status sidecar 格式（純函式）。
 - ``smart_review_history_recovery``：失聯批次復原（``HistoryRecovery``）。
 - ``smart_review_history_query``：分頁、計數與最近標籤快取（``HistoryQuery``）。
+- ``smart_review_history_migrations``：schema migration registry、一致性檢查與修復。
 """
 
 from __future__ import annotations
