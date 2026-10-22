@@ -42,7 +42,9 @@ IDs first, then read the wide columns), or from a trigger-maintained derived
 column or table.
 
 `tests/test_moddb_no_temp_sort.py` runs the public read APIs over every state,
-sort, quality status and common filter, captures each SELECT through
+sort, quality status and common filter, plus the module/source scope options
+(`bulk_review_scope_options`, `smart_review_scope_options`), `cleanup_candidates` and
+`cleanup_batches`, captures each SELECT through
 `sqlite3.Connection.set_trace_callback`, and fails when a plan contains the temporary
 sort. An exception is acceptable only when the sorted set has a hard bound that
 does not depend on the table size; record the bound in `ALLOWED_PLAN_MARKERS` or
@@ -55,6 +57,8 @@ does not depend on the table size; record the bound in `ALLOWED_PLAN_MARKERS` or
   set is the number of missing or matching rows in one version.
 - `kinds()`: sorts the distinct entry kinds only.
 - The mismatch list: sorts only rows that pass the special-character prefilter.
+- `cleanup_batches()`: sorts the cleanup batches created by manual cleanup operations only.
+- Not measured: a 700k-row database. The plan checks run on a small fixture; no large database was available to compare timings.
 
 ### Mod DB 已審核 lang 術語候選
 
