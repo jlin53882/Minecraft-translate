@@ -732,6 +732,8 @@ def test_format_repair_runs_before_the_next_batch_is_requested(
     config = configure_batch(retry=False)
     waits = []
     monkeypatch.setattr(main, "interruptible_sleep", waits.append)
+    # 此測試驗證批次間節流等待，明確還原預設間隔（conftest 預設為 0）。
+    monkeypatch.setattr(main, "_DEFAULT_BATCH_SLEEP", 4.0)
     config["lm_translator"]["initial_batch_size_lang"] = 1
     items = [_item("§aUse %s\nnext", 0), _item("Second", 1)]
 

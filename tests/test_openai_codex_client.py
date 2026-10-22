@@ -767,6 +767,9 @@ def test_sse_retry_wait_cancellation_stops_the_batch_before_another_request(
 def test_sse_retry_then_success_uses_same_batch_and_pinned_profile(monkeypatch):
     from translation_tool.core import lm_translator_main as main
 
+    # 此測試驗證批次間節流等待，明確還原預設間隔（conftest 預設為 0）。
+    monkeypatch.setattr(main, "_DEFAULT_BATCH_SLEEP", 4.0)
+
     active_profile = {"id": "profile-a"}
     token_requests = []
     posts = []
