@@ -13,16 +13,24 @@ TIMING_SCHEMA_VERSION: Final = 1
 
 # canonical 毫秒欄位 -> 依優先順序嘗試的舊版秒數欄位。
 LEGACY_SECONDS_ALIASES: Final[dict[str, tuple[str, ...]]] = {
-    "api_ms": ("api_seconds", "api_elapsed_seconds"),
-    "response_parse_ms": ("parse_seconds",),
+    "setup_ms": ("setup_seconds",),
+    "selection_ms": ("selection_seconds",),
+    "planning_ms": ("planning_seconds",),
+    "prompt_build_ms": ("preparation_seconds",),
     "quota_wait_ms": ("rate_limit_wait_seconds",),
     "retry_backoff_ms": ("retry_wait_seconds",),
     "network_retry_wait_ms": ("network_retry_wait_seconds",),
-    "prompt_build_ms": ("preparation_seconds",),
+    "api_ms": ("api_seconds", "api_elapsed_seconds"),
+    "response_parse_ms": ("parse_seconds",),
     "history_write_ms": ("result_write_seconds",),
+    "run_record_ms": ("run_record_seconds",),
     "validation_repair_api_ms": ("validation_repair_api_seconds",),
-    "planning_ms": ("planning_seconds",),
-    "total_ms": ("duration_seconds", "elapsed_seconds"),
+    "validation_repair_parse_ms": ("validation_repair_parse_seconds",),
+    "batch_ms": ("batch_seconds",),
+    "total_ms": ("duration_seconds", "total_duration_seconds"),
+    "elapsed_ms": ("elapsed_seconds",),
+    "wait_ms": ("wait_seconds",),
+    "retry_after_ms": ("retry_after_seconds",),
 }
 
 

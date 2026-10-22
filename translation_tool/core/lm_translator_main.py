@@ -75,6 +75,7 @@ from translation_tool.utils.cancellation import (
     raise_if_cancelled,
 )
 from translation_tool.utils.config_manager import get_models_config, load_config
+from translation_tool.utils.config_schema import get_default
 from translation_tool.utils.log_unit import log_error, log_info, log_warning
 from translation_tool.utils.redaction import redact_text
 
@@ -114,7 +115,17 @@ CHATGPT_PERMANENT_QUOTA_ERROR_CODES = frozenset(
 # Size Constants - 大小相關常數
 # =========================================================
 MIN_LANG_BATCH_SIZE = 20  # Lang 類型最小批次大小
-DEFAULT_BATCH_SIZE = 50  # 預設批次大小
+# 批次 profile -> ``lm_translator.initial_batch_size_*`` 的設定後綴；預設值一律取自 schema。
+_BATCH_PROFILE_SIZE_KEYS = {
+    "lang": "lang",
+    "ftb": "ftb",
+    "kubejs": "kubejs",
+    "md": "md",
+    "patch": "patchouli",
+}
+_DEFAULT_BATCH_SLEEP = float(
+    get_default("lm_translator.rate_limit.sleep_seconds_between_batches")
+)
 
 
 # =========================================================
@@ -731,9 +742,12 @@ def _batch_interval_seconds(lm_cfg: dict) -> float:
     if not isinstance(rate_cfg, dict):
         rate_cfg = {}
     try:
-        return max(0.0, float(rate_cfg.get("sleep_seconds_between_batches", 4.0)))
+        return max(
+            0.0,
+            float(rate_cfg.get("sleep_seconds_between_batches", _DEFAULT_BATCH_SLEEP)),
+        )
     except (TypeError, ValueError):
-        return 4.0
+        return _DEFAULT_BATCH_SLEEP
 
 
 def _wait_for_request_slot(
@@ -883,11 +897,11 @@ def _build_batch_runtime(
     provider = lm_cfg.get("provider", "gemini")
     profile = _detect_batch_profile(batch_items)
     max_sizes = {
-        "lang": lm_cfg.get("initial_batch_size_lang", 200),
-        "ftb": lm_cfg.get("initial_batch_size_ftb", 100),
-        "kubejs": lm_cfg.get("initial_batch_size_kubejs", 200),
-        "md": lm_cfg.get("initial_batch_size_md", 100),
-        "patch": lm_cfg.get("initial_batch_size_patchouli", 100),
+        profile_name: lm_cfg.get(
+            f"initial_batch_size_{key}",
+            get_default(f"lm_translator.initial_batch_size_{key}"),
+        )
+        for profile_name, key in _BATCH_PROFILE_SIZE_KEYS.items()
     }
     max_size = int(max_sizes.get(profile, max_sizes["patch"]) or 1)
     try:
@@ -957,7 +971,9 @@ def _build_batch_runtime(
         budget_tracker=get_tracker(profile),
         key_cycle=ApiKeyCycle(),
         model_pool=model_pool,
-        model_temperature=lm_cfg.get("temperature", 0.2),
+        model_temperature=lm_cfg.get(
+            "temperature", get_default("lm_translator.temperature")
+        ),
         lang_prompt=prompt_context.lang_prompt,
         patchouli_prompt=prompt_context.patchouli_prompt,
         effective_prompt=prompt_context.effective_prompt,
@@ -2222,10 +2238,13 @@ def _abandon_model(
 
 def _probe_lease_sec(runtime: _BatchRuntime) -> float:
     """探測租約長度：涵蓋用戶端整段最壞耗時（連線重試 × 逾時 + 退避）+ 餘裕。"""
+    default_timeout = float(get_default("lm_translator.rate_limit.timeout"))
     try:
-        timeout = float((runtime.lm_cfg.get("rate_limit") or {}).get("timeout", 600))
+        timeout = float(
+            (runtime.lm_cfg.get("rate_limit") or {}).get("timeout", default_timeout)
+        )
     except (TypeError, ValueError):
-        timeout = 600.0
+        timeout = default_timeout
     return worst_case_request_sec(timeout) + PROBE_LEASE_MARGIN_SEC
 
 

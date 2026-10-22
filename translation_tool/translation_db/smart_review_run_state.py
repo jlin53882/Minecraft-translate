@@ -16,6 +16,7 @@ from typing import Any
 
 import requests
 
+from translation_tool.core.batch_events import BatchTiming, to_legacy_event
 from translation_tool.core.common_batch_executor import (
     CommonBatchExecutor,
     classify_provider_error,
@@ -26,25 +27,13 @@ from translation_tool.translation_db.smart_review_provider import (
 )
 
 _RETRY_BASELINE_KEYS = (
-    "smart_review_attempts",
+    "attempts",
     "retry_count",
     "transient_retry_count",
     "overload_count",
     "key_rotation_count",
 )
 _COMMON_METRIC_KEYS = (
-    "selection_ms",
-    "planning_ms",
-    "prompt_build_ms",
-    "quota_wait_ms",
-    "retry_backoff_ms",
-    "api_ms",
-    "response_parse_ms",
-    "validation_ms",
-    "commit_ms",
-    "history_write_ms",
-    "network_retry_wait_ms",
-    "total_ms",
     "batch_count",
     "error_batches",
     "task_id",
@@ -55,29 +44,9 @@ _COMMON_METRIC_KEYS = (
 )
 
 
-def new_smart_review_metrics(
-    *,
-    setup_seconds: float,
-    selection_seconds: float,
-    run_record_seconds: float,
-    input_token_budget: int | None,
-) -> dict[str, Any]:
-    """建立一次執行的 metrics 初始值。"""
+def new_smart_review_metrics(*, input_token_budget: int | None) -> dict[str, Any]:
+    """建立一次執行的計數型 metrics 初始值；耗時由 ``BatchTiming`` 累計，結算時才併入。"""
     return {
-        "duration_seconds": 0.0,
-        "total_duration_seconds": 0.0,
-        "setup_seconds": setup_seconds,
-        "selection_seconds": selection_seconds,
-        "run_record_seconds": run_record_seconds,
-        "preparation_seconds": 0.0,
-        "rate_limit_wait_seconds": 0.0,
-        "retry_wait_seconds": 0.0,
-        "network_retry_wait_seconds": 0.0,
-        "api_seconds": 0.0,
-        "parse_seconds": 0.0,
-        "result_write_seconds": 0.0,
-        "batch_seconds": 0.0,
-        "batch_count": 0,
         "prompt_tokens": None,
         "output_tokens": None,
         "no_change_count": 0,
@@ -85,7 +54,7 @@ def new_smart_review_metrics(
         "suggest_revision_count": 0,
         "needs_context_count": 0,
         "request_attempts": 0,
-        "smart_review_attempts": 0,
+        "attempts": 0,
         "network_attempts": 0,
         "network_retry_count": 0,
         "retry_count": 0,
@@ -102,8 +71,6 @@ def new_smart_review_metrics(
         "repaired_invalid_count": 0,
         "validation_repair_request_errors": 0,
         "validation_repair_response_invalid_count": 0,
-        "validation_repair_api_seconds": 0.0,
-        "validation_repair_parse_seconds": 0.0,
         "usage_missing_attempts": 0,
         "usage_missing_output_attempts": 0,
         "permanent_error_count": 0,
@@ -128,15 +95,21 @@ class SmartReviewCounts:
 
 @dataclass
 class SmartReviewBatch:
-    """一個邏輯批次的編號、起點基準與耗時診斷。"""
+    """一個邏輯批次的編號、起點基準與耗時診斷（耗時為 canonical 毫秒）。"""
 
     number: int
     total: int
     started: float
-    attempts_before: int
     counters_before: dict[str, int]
     retry_before: dict[str, int]
-    timing: dict[str, Any]
+    ordinal_start: int
+    ordinal_end: int
+    actual_count: int
+    timing: BatchTiming = field(default_factory=BatchTiming)
+    validation_repair_attempts: int = 0
+    validation_repair_items: int = 0
+    repaired_valid_count: int = 0
+    repaired_invalid_count: int = 0
     validation_errors: dict[str, int] = field(default_factory=dict)
 
 
@@ -177,10 +150,12 @@ class SmartReviewRunState:
         """把整數 metrics 欄位加上指定數量。"""
         self.metrics[key] = int(self.metrics[key]) + amount
 
-    def add_elapsed(self, batch: SmartReviewBatch, key: str, seconds: float) -> None:
-        """把耗時同時累計到批次診斷與整體 metrics 的同名欄位。"""
-        batch.timing[key] = round(float(batch.timing[key]) + seconds, 3)
-        self.metrics[key] = round(float(self.metrics[key]) + seconds, 3)
+    def add_timing(
+        self, batch: SmartReviewBatch, field_name: str, seconds: float
+    ) -> None:
+        """把量測到的耗時（秒）累計到該批次與整體執行的同名 canonical ``*_ms`` 欄位。"""
+        elapsed_ms = batch.timing.add_seconds(field_name, seconds)
+        self.executor.metrics.add(field_name, elapsed_ms)
 
     def record_usage(self, meta: dict[str, Any]) -> None:
         """記錄一次 API 嘗試的 provider usage，包含失敗或截斷回應。"""
@@ -202,9 +177,7 @@ class SmartReviewRunState:
         self.db.mark_smart_review_request_error(self.run_id, ordinals, error_code=code)
         self.counts.request_errors += 1
         if permanent:
-            self.metrics["permanent_error_count"] = (
-                int(self.metrics["permanent_error_count"]) + 1
-            )
+            self.bump("permanent_error_count")
         classes = self.metrics["failure_classes"]
         classes[code] = int(classes.get(code, 0)) + 1
         return code
@@ -231,57 +204,31 @@ class SmartReviewRunState:
             "status": "running",
             "phase": phase,
         }
+        # 輸出邊界：core 內部只有 canonical 欄位，回呼端才補舊版欄位。
         if timing is not None:
-            snapshot["timing"] = timing
+            snapshot["timing"] = to_legacy_event(timing)
         if event is not None:
-            snapshot["event"] = event
+            snapshot["event"] = to_legacy_event(event)
         self.progress(snapshot)
 
     def _count_event_metrics(self, kind: str, fields: dict[str, Any]) -> None:
-        """把事件對應的耗時與重試次數累計到共用批次執行器。"""
+        """把事件對應的重試與嘗試計數累計到共用批次執行器（耗時由 ``add_timing`` 累計）。"""
         handle = self.current_batch_handle
         metrics = self.executor.metrics
         if kind == "attempt_start":
-            handle.attempt = int(
-                fields.get("smart_review_attempt") or handle.attempt + 1
-            )
+            handle.attempt = int(fields.get("attempt") or handle.attempt + 1)
             metrics.request_attempts += 1
         elif kind == "attempt_success":
-            elapsed_value = fields.get("api_elapsed_seconds")
-            try:
-                elapsed_ms = float(elapsed_value or 0) * 1000
-                metrics.add_ms("api_ms", elapsed_ms)
-                fields.setdefault("elapsed_ms", round(elapsed_ms))
-            except (TypeError, ValueError):
-                pass
+            fields.setdefault("elapsed_ms", int(fields.get("api_ms") or 0))
         elif kind == "network_attempt_start":
             metrics.network_attempts += 1
         elif kind == "network_retry_wait":
             metrics.network_retry_count += 1
-            try:
-                wait_ms = max(0, float(fields.get("wait_seconds") or 0) * 1000)
-                metrics.add_ms("network_retry_wait_ms", wait_ms)
-                fields.setdefault("wait_ms", round(wait_ms))
-            except (TypeError, ValueError):
-                pass
         elif kind == "retry_wait":
-            wait_value = fields.get("wait_seconds")
-            try:
-                wait_ms = max(0, float(wait_value or 0) * 1000)
-            except (TypeError, ValueError):
-                wait_ms = 0
             handle.retry_count += 1
             metrics.retry_count += 1
             metrics.transient_retry_count += 1
-            metrics.add_ms("retry_backoff_ms", wait_ms)
-            fields.setdefault("wait_ms", round(wait_ms))
-            fields.setdefault("backoff_ms", round(wait_ms))
-        elif kind == "rate_limit_wait":
-            wait_value = fields.get("wait_seconds")
-            try:
-                metrics.add_ms("quota_wait_ms", max(0, float(wait_value or 0) * 1000))
-            except (TypeError, ValueError):
-                pass
+            fields.setdefault("backoff_ms", fields.get("wait_ms", 0))
         elif kind == "attempt_failure" and fields.get("key_rotated"):
             metrics.key_rotation_count += 1
 
@@ -307,9 +254,9 @@ class SmartReviewRunState:
         """送出帶有批次編號與嘗試序號的事件。"""
         self.emit_event(
             kind,
-            batch_number=batch.number,
+            batch_index=batch.number,
             batch_total=batch.total,
-            smart_review_attempt=attempt,
+            attempt=attempt,
             **fields,
         )
 
@@ -318,7 +265,7 @@ class SmartReviewRunState:
         error: Exception,
         *,
         batch_number: int,
-        smart_review_attempt: int,
+        attempt: int,
         status: int | None = None,
         retry_after_seconds: float | None = None,
         key_rotated: bool = False,
@@ -333,26 +280,26 @@ class SmartReviewRunState:
         elif isinstance(error, requests.ConnectionError):
             kind = "connection_error"
         classification = classify_provider_error(error, status)
-        if status == 503 or kind == "service_unavailable":
-            self.metrics["overload_count"] = int(self.metrics["overload_count"]) + 1
+        overload = bool(status == 503 or kind == "service_unavailable")
+        if overload:
+            self.bump("overload_count")
             self.executor.metrics.overload_count += 1
         self.executor.metrics.error_batches.append(batch_number)
         code = str(getattr(error, "code", "") or "").lower()
         self.emit_event(
             "attempt_failure",
-            batch_number=batch_number,
+            batch_index=batch_number,
             batch_total=self.planned_batch_count,
-            smart_review_attempt=smart_review_attempt,
+            attempt=attempt,
             http_status=status,
             error_kind=kind,
             error_class=classification["error_class"],
             provider_error_code=classification["provider_error_code"],
             exception_type=type(error).__name__,
-            provider_overload=bool(status == 503 or kind == "service_unavailable"),
-            quota_or_rate_limit=bool(status == 429 or "quota" in code),
+            overload=overload,
+            rate_limit=bool(status == 429 or "quota" in code),
             timeout=bool(isinstance(error, requests.Timeout) or kind == "timeout"),
             connection=classification["connection"],
-            retry_after_seconds=retry_after_seconds,
             retry_after_ms=(
                 round(float(retry_after_seconds) * 1000)
                 if retry_after_seconds is not None
@@ -387,7 +334,6 @@ class SmartReviewRunState:
             number=number,
             total=total,
             started=time.monotonic(),
-            attempts_before=int(self.metrics["request_attempts"]),
             counters_before={
                 "valid": counts.valid,
                 "invalid": counts.invalid,
@@ -396,26 +342,9 @@ class SmartReviewRunState:
                 "suggestions": counts.suggestions,
             },
             retry_before={key: int(self.metrics[key]) for key in _RETRY_BASELINE_KEYS},
-            timing={
-                "batch_number": number,
-                "batch_total": total,
-                "ordinal_start": ordinal_start,
-                "ordinal_end": ordinal_end,
-                "actual_count": size,
-                "preparation_seconds": 0.0,
-                "rate_limit_wait_seconds": 0.0,
-                "retry_wait_seconds": 0.0,
-                "network_retry_wait_seconds": 0.0,
-                "api_seconds": 0.0,
-                "parse_seconds": 0.0,
-                "result_write_seconds": 0.0,
-                "validation_repair_attempts": 0,
-                "validation_repair_items": 0,
-                "repaired_valid_count": 0,
-                "repaired_invalid_count": 0,
-                "validation_repair_api_seconds": 0.0,
-                "validation_repair_parse_seconds": 0.0,
-            },
+            ordinal_start=ordinal_start,
+            ordinal_end=ordinal_end,
+            actual_count=size,
         )
         self.current_batch_handle = self.executor.begin_batch(
             batch_index=number,
@@ -428,7 +357,7 @@ class SmartReviewRunState:
         )
         self.emit_event(
             "batch_start",
-            batch_number=number,
+            batch_index=number,
             batch_total=total,
             ordinal_start=ordinal_start,
             ordinal_end=ordinal_end,
@@ -439,106 +368,53 @@ class SmartReviewRunState:
         return batch
 
     def _finish_batch_timing(self, batch: SmartReviewBatch, status: str) -> dict:
-        """結算一個邏輯批次的耗時並回傳不含敏感資料的診斷摘要。"""
+        """結算一個邏輯批次的耗時並回傳不含敏感資料的 canonical 診斷摘要。"""
         metrics, counts = self.metrics, self.counts
         before, retry_before = batch.counters_before, batch.retry_before
-        elapsed = round(time.monotonic() - batch.started, 3)
-        finalized = dict(batch.timing)
-        finalized["elapsed_seconds"] = elapsed
-        finalized["attempts"] = max(
-            0, int(metrics["request_attempts"]) - batch.attempts_before
+        elapsed_ms = batch.timing.add_seconds(
+            "total_ms", time.monotonic() - batch.started
         )
-        finalized["smart_review_attempts"] = max(
-            0,
-            int(metrics["smart_review_attempts"])
-            - retry_before.get("smart_review_attempts", 0),
-        )
-        for key in (
-            "retry_count",
-            "transient_retry_count",
-            "overload_count",
-            "key_rotation_count",
-        ):
-            finalized[key] = max(
-                0, int(metrics[key]) - retry_before.get(key, int(metrics[key]))
-            )
-        finalized.update(
-            {
-                "valid_count": max(0, counts.valid - before.get("valid", counts.valid)),
-                "invalid_count": max(
-                    0, counts.invalid - before.get("invalid", counts.invalid)
-                ),
-                "needs_context_count": max(
-                    0,
-                    counts.needs_context
-                    - before.get("needs_context", counts.needs_context),
-                ),
-                "no_change_count": max(
-                    0, counts.no_change - before.get("no_change", counts.no_change)
-                ),
-                "suggestion_count": max(
-                    0,
-                    counts.suggestions - before.get("suggestions", counts.suggestions),
-                ),
-                "suggest_revision_count": max(
-                    0,
-                    counts.suggestions - before.get("suggestions", counts.suggestions),
-                ),
-                "validation_errors": dict(batch.validation_errors),
-            }
-        )
-        finalized["status"] = status
-        metrics["batch_count"] = int(metrics["batch_count"]) + 1
-        metrics["batch_seconds"] = round(float(metrics["batch_seconds"]) + elapsed, 3)
-        return finalized
+        self.executor.metrics.add("batch_ms", elapsed_ms)
+
+        def delta(current: int, key: str) -> int:
+            return max(0, current - before.get(key, current))
+
+        suggestions = delta(counts.suggestions, "suggestions")
+        summary: dict[str, Any] = {
+            "batch_index": batch.number,
+            "batch_total": batch.total,
+            "ordinal_start": batch.ordinal_start,
+            "ordinal_end": batch.ordinal_end,
+            "actual_count": batch.actual_count,
+            **batch.timing.to_event(),
+            "elapsed_ms": elapsed_ms,
+            "validation_repair_attempts": batch.validation_repair_attempts,
+            "validation_repair_items": batch.validation_repair_items,
+            "repaired_valid_count": batch.repaired_valid_count,
+            "repaired_invalid_count": batch.repaired_invalid_count,
+            "valid_count": delta(counts.valid, "valid"),
+            "invalid_count": delta(counts.invalid, "invalid"),
+            "needs_context_count": delta(counts.needs_context, "needs_context"),
+            "no_change_count": delta(counts.no_change, "no_change"),
+            "suggestion_count": suggestions,
+            "validation_errors": dict(batch.validation_errors),
+            "status": status,
+        }
+        for key in _RETRY_BASELINE_KEYS:
+            summary[key] = max(0, int(metrics[key]) - retry_before.get(key, 0))
+        return summary
 
     def complete_batch(self, batch: SmartReviewBatch, status: str) -> None:
-        """結算批次耗時，並同時送出舊版批次進度與可供 UI 即時顯示的完整事件。"""
+        """結算批次耗時，並送出批次完成事件與 UI 即時顯示用的進度快照。"""
         timing = self._finish_batch_timing(batch, status)
         event_fields = {
-            "batch_number": timing.get("batch_number"),
-            "batch_total": timing.get("batch_total"),
-            "ordinal_start": timing.get("ordinal_start"),
-            "ordinal_end": timing.get("ordinal_end"),
-            "actual_count": timing.get("actual_count"),
-            "attempts": timing.get("attempts", 0),
-            "smart_review_attempts": timing.get("smart_review_attempts", 0),
-            "retry_count": timing.get("retry_count", 0),
-            "rate_limit_wait_seconds": timing.get("rate_limit_wait_seconds", 0.0),
-            "retry_wait_seconds": timing.get("retry_wait_seconds", 0.0),
-            "network_retry_wait_seconds": timing.get("network_retry_wait_seconds", 0.0),
-            "api_seconds": timing.get("api_seconds", 0.0),
-            "parse_seconds": timing.get("parse_seconds", 0.0),
-            "result_write_seconds": timing.get("result_write_seconds", 0.0),
-            "validation_repair_attempts": timing.get("validation_repair_attempts", 0),
-            "validation_repair_items": timing.get("validation_repair_items", 0),
-            "repaired_valid_count": timing.get("repaired_valid_count", 0),
-            "repaired_invalid_count": timing.get("repaired_invalid_count", 0),
-            "validation_repair_api_seconds": timing.get(
-                "validation_repair_api_seconds", 0.0
-            ),
-            "validation_repair_parse_seconds": timing.get(
-                "validation_repair_parse_seconds", 0.0
-            ),
-            "elapsed_seconds": timing.get("elapsed_seconds", 0.0),
-            "valid_count": timing.get("valid_count", 0),
-            "invalid_count": timing.get("invalid_count", 0),
-            "needs_context_count": timing.get("needs_context_count", 0),
-            "no_change_count": timing.get("no_change_count", 0),
-            "suggestion_count": timing.get("suggestion_count", 0),
-            "suggest_revision_count": timing.get("suggest_revision_count", 0),
-            "validation_errors": timing.get("validation_errors", {}),
+            **timing,
             "request_errors": self.counts.request_errors,
         }
         processed = self.counts.processed
         handle = self.current_batch_handle
         if handle is not None:
-            handle.complete(
-                status=str(timing.get("status") or "completed"),
-                processed_count=processed,
-                emit=False,
-                **event_fields,
-            )
+            handle.complete(processed_count=processed, emit=False, **event_fields)
             event = handle.emit(
                 "batch_complete", processed_count=processed, **event_fields
             )
@@ -551,6 +427,7 @@ class SmartReviewRunState:
     def _merge_common_metrics(self) -> None:
         """補上共用執行器的計時與識別欄位，不改變既有 Smart Review 計數。"""
         common = self.executor.metrics_snapshot()
+        self.metrics.update(self.executor.metrics.to_event())
         for key in _COMMON_METRIC_KEYS:
             self.metrics[key] = common[key]
         self.metrics["common_request_attempts"] = common["request_attempts"]
@@ -572,32 +449,26 @@ class SmartReviewRunState:
 
     def close_run(self, status: str, *, include_outcome_counts: bool) -> None:
         """結束共用執行器、合併 metrics 並保存這次執行的最終統計。"""
-        total_seconds = round(time.monotonic() - self.started, 3)
+        total_ms = round((time.monotonic() - self.started) * 1000)
         executor = self.executor
-        executor.metrics.total_ms = max(
-            executor.metrics.total_ms, round(total_seconds * 1000)
-        )
+        executor.metrics.total_ms = max(executor.metrics.total_ms, total_ms)
         executor.finish(status=status)
         self._merge_common_metrics()
         counts = self.counts
-        final_metrics: dict[str, Any] = {
-            "duration_seconds": total_seconds,
-            "total_duration_seconds": total_seconds,
-            "prompt_tokens": self.token_totals["prompt_tokens"],
-            "output_tokens": self.token_totals["output_tokens"],
-        }
+        self.metrics.update(
+            prompt_tokens=self.token_totals["prompt_tokens"],
+            output_tokens=self.token_totals["output_tokens"],
+            status=status,
+            token_counts=self._token_count_label(),
+        )
         if include_outcome_counts:
-            final_metrics.update(
-                {
-                    "no_change_count": counts.no_change,
-                    "suggestion_count": counts.suggestions,
-                    "suggest_revision_count": counts.suggestions,
-                    "needs_context_count": counts.needs_context,
-                }
+            self.metrics.update(
+                no_change_count=counts.no_change,
+                suggestion_count=counts.suggestions,
+                needs_context_count=counts.needs_context,
             )
-        final_metrics["status"] = status
-        final_metrics["token_counts"] = self._token_count_label()
-        self.metrics.update(final_metrics)
+        # 輸出邊界：持久化的 metrics 同時保留舊版 ``*_seconds`` 欄位供既有讀者使用。
+        self.metrics.update(to_legacy_event(self.metrics))
         self.db.finish_smart_review_run(
             self.run_id,
             processed_count=counts.processed,

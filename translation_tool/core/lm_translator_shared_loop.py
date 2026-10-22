@@ -31,6 +31,7 @@ from translation_tool.utils.cache_manager import (
 )
 from translation_tool.utils.cancellation import TaskCancelled, is_cancelled
 from translation_tool.utils.config_manager import load_config
+from translation_tool.utils.config_schema import get_default
 from translation_tool.utils.log_unit import log_error, log_info
 from translation_tool.utils.redaction import redact_text
 
@@ -122,6 +123,14 @@ def _lm_config() -> dict[str, Any]:
     return lm_cfg if isinstance(lm_cfg, dict) else {}
 
 
+_CACHE_TYPE_SIZE_KEYS = {
+    "ftbquests": "ftb",
+    "kubejs": "kubejs",
+    "patchouli": "patchouli",
+    "md": "md",
+}
+
+
 def _get_default_batch_size(
     cache_type: str, batch_size_by_type: dict[str, int] | None
 ) -> int:
@@ -132,15 +141,9 @@ def _get_default_batch_size(
     cfg = load_config()
     lm_cfg = (cfg or {}).get("lm_translator", {}) if isinstance(cfg, dict) else {}
 
-    if cache_type == "ftbquests":
-        return int(lm_cfg.get("initial_batch_size_ftb", 100) or 100)
-    if cache_type == "kubejs":
-        return int(lm_cfg.get("initial_batch_size_kubejs", 200) or 200)
-    if cache_type == "patchouli":
-        return int(lm_cfg.get("initial_batch_size_patchouli", 100) or 100)
-    if cache_type == "md":
-        return int(lm_cfg.get("initial_batch_size_md", 100) or 100)
-    return int(lm_cfg.get("initial_batch_size_lang", 300) or 300)
+    suffix = _CACHE_TYPE_SIZE_KEYS.get(cache_type, "lang")
+    default = get_default(f"lm_translator.initial_batch_size_{suffix}")
+    return int(lm_cfg.get(f"initial_batch_size_{suffix}", default) or default)
 
 
 def translate_items_with_cache_loop(
@@ -184,7 +187,10 @@ def translate_items_with_cache_loop(
             load_config()
             .get("lm_translator", {})
             .get("rate_limit", {})
-            .get("sleep_seconds_between_batches", 4.0)
+            .get(
+                "sleep_seconds_between_batches",
+                get_default("lm_translator.rate_limit.sleep_seconds_between_batches"),
+            )
         )
 
     if reload_cache:

@@ -6,6 +6,11 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from translation_tool.core.batch_events import (
+    FORMATTED_BATCH_EVENT_KINDS,
+    batch_event_level,
+    format_batch_event,
+)
 from translation_tool.core.batch_timing import (
     format_duration as format_timing_duration,
 )
@@ -367,6 +372,7 @@ def reject_moddb_smart_review_candidate_from_path(
 
 
 __all__ = [
+    "FORMATTED_BATCH_EVENT_KINDS",
     "SMART_REVIEW_DEFAULT_BATCH_SIZE",
     "SMART_REVIEW_DEFAULT_SOURCE",
     "SMART_REVIEW_MANUAL_EDIT_STATUSES",
@@ -375,8 +381,10 @@ __all__ = [
     "SmartReviewStatus",
     "apply_moddb_smart_review_candidate_from_path",
     "apply_moddb_smart_review_manual_edit_from_path",
+    "batch_event_level",
     "count_moddb_smart_review_candidates_for_run_from_path",
     "count_moddb_smart_review_candidates_from_path",
+    "format_batch_event",
     "format_timing_duration",
     "get_moddb_smart_review_run_breakdown_from_path",
     "get_moddb_smart_review_run_from_path",

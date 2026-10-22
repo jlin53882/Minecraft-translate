@@ -1071,6 +1071,15 @@ SETTINGS: tuple[Setting, ...] = (
 SETTINGS_BY_PATH: dict[str, Setting] = {s.path: s for s in SETTINGS}
 
 
+def get_default(path: str) -> Any:
+    """回傳某個設定在 schema 的預設值（深拷貝）；路徑不在 schema 時丟 ``KeyError``。
+
+    程式裡「設定缺漏時的後備值」一律用它取得，不要在呼叫端另寫字面值，
+    否則預設值會在 schema、執行端與 UI 之間各自漂移。
+    """
+    return copy.deepcopy(SETTINGS_BY_PATH[path].default)
+
+
 def build_default_config() -> dict[str, Any]:
     """由 schema 建出完整的預設設定（深拷貝，呼叫端可自由修改）。"""
     config: dict[str, Any] = {}
