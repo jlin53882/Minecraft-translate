@@ -8,12 +8,14 @@ manifest 加多個 JSON 分片，更新時只原子替換受影響的分片。Tr
 
 from __future__ import annotations
 
+import errno
 import json
 import logging
 import os
 import re
 import shutil
 import threading
+import time
 import uuid
 from collections import Counter, defaultdict
 from collections.abc import Iterator, Mapping, Sequence
@@ -32,6 +34,8 @@ _SCHEMA_VERSION = 1
 _CHUNKED_STORAGE_FORMAT = "chunked_json_v1"
 _HEAD_BYTES = 16_384
 _STARTED_AT = re.compile(r'"started_at":\s*"([^"]*)"')
+_FILE_LOCK_TIMEOUT_SECONDS = 120.0
+_FILE_LOCK_POLL_SECONDS = 0.1
 logger = logging.getLogger(__name__)
 _RUN_ID = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
 _FileStamp = tuple[int, int]
@@ -106,8 +110,13 @@ def _process_is_alive(pid: object) -> bool:
 
 
 @contextmanager
-def _exclusive_file_lock(path: Path, *, blocking: bool = True) -> Iterator[None]:
-    """以跨程序檔案鎖保護歷史目錄的發布與復原交錯。"""
+def _exclusive_file_lock(
+    path: Path,
+    *,
+    blocking: bool = True,
+    timeout_seconds: float = _FILE_LOCK_TIMEOUT_SECONDS,
+) -> Iterator[None]:
+    """以具明確等待上限的跨程序檔案鎖保護歷史檔案更新。"""
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a+b") as handle:
         handle.seek(0, os.SEEK_END)
@@ -117,16 +126,33 @@ def _exclusive_file_lock(path: Path, *, blocking: bool = True) -> Iterator[None]
         handle.seek(0)
         locked = False
         try:
-            if os.name == "nt":
-                import msvcrt
+            deadline = (
+                time.monotonic() + max(0.0, float(timeout_seconds))
+                if blocking
+                else None
+            )
+            while True:
+                try:
+                    if os.name == "nt":
+                        import msvcrt
 
-                mode = msvcrt.LK_LOCK if blocking else msvcrt.LK_NBLCK
-                msvcrt.locking(handle.fileno(), mode, 1)
-            else:
-                import fcntl
+                        handle.seek(0)
+                        msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+                    else:
+                        import fcntl
 
-                flags = fcntl.LOCK_EX if blocking else fcntl.LOCK_EX | fcntl.LOCK_NB
-                fcntl.flock(handle.fileno(), flags)
+                        flags = fcntl.LOCK_EX | fcntl.LOCK_NB
+                        fcntl.flock(handle.fileno(), flags)
+                except OSError as exc:
+                    if not blocking or not _is_lock_contention_error(exc):
+                        raise
+                    if deadline is not None and time.monotonic() >= deadline:
+                        raise TimeoutError(
+                            f"取得智慧校對歷史檔案鎖逾時：{path}"
+                        ) from exc
+                    time.sleep(_FILE_LOCK_POLL_SECONDS)
+                    continue
+                break
             locked = True
             yield
         finally:
@@ -140,6 +166,15 @@ def _exclusive_file_lock(path: Path, *, blocking: bool = True) -> Iterator[None]
                     import fcntl
 
                     fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+
+def _is_lock_contention_error(exc: OSError) -> bool:
+    """判斷例外是否代表鎖被其他程序占用，而非真正的 I/O 錯誤。"""
+    return getattr(exc, "errno", None) in {
+        errno.EACCES,
+        errno.EAGAIN,
+        errno.EDEADLK,
+    } or getattr(exc, "winerror", None) in {32, 33, 1224}
 
 
 def _candidate_counts(payload: Mapping[str, Any]) -> dict[str, Any]:
@@ -333,6 +368,12 @@ class SmartReviewHistoryStore:
     def _interprocess_lock(self) -> Iterator[None]:
         """鎖定同一歷史目錄，避免不同程序交錯發布與清理分片。"""
         with _exclusive_file_lock(self.directory / ".smart_review.lock"):
+            yield
+
+    @contextmanager
+    def _write_lock(self) -> Iterator[None]:
+        """同時鎖定程序內與跨程序寫入，保護完整 read-modify-write 交易。"""
+        with self._lock, self._interprocess_lock():
             yield
 
     @contextmanager
@@ -827,9 +868,13 @@ class SmartReviewHistoryStore:
         return summary
 
     def _ensure_chunked_summary_unlocked(
-        self, run_id: str, manifest: dict[str, Any]
+        self, run_id: str, manifest: dict[str, Any], *, persist: bool = True
     ) -> None:
-        """在摘要過期或 checkpoint 不一致時重建 manifest 計數。"""
+        """在摘要過期或 checkpoint 不一致時重建 manifest 計數。
+
+        ``persist=False`` 只更新目前記憶體中的摘要，供唯讀查詢避免在未取得
+        寫入鎖時改寫 manifest；真正的候選變更仍使用預設值保存 checkpoint。
+        """
         if (
             isinstance(manifest.get("status_counts"), dict)
             and isinstance(manifest.get("error_counts"), dict)
@@ -855,6 +900,8 @@ class SmartReviewHistoryStore:
                 "error_counts": summary["error_counts"],
             }
         )
+        if not persist:
+            return
         try:
             self._write_unlocked(run_id, manifest)
         except OSError:
@@ -922,7 +969,7 @@ class SmartReviewHistoryStore:
                 "error_counts": {},
                 "candidates": candidates,
             }
-            with self._lock:
+            with self._write_lock():
                 self._write_unlocked(run_id, payload)
             return run_id
 
@@ -951,57 +998,56 @@ class SmartReviewHistoryStore:
             "chunk_revisions": {},
             "chunk_signatures": {},
         }
-        with self._lock:
+        with self._write_lock():
             # 先完整寫入暫存分片目錄，再以最後一次 manifest replace 發布批次。
             # 跨程序鎖同時涵蓋目錄改名與 manifest 發布，避免 recovery 把合法的
             # 發布中分片誤判為孤立資料而刪除。
             self.directory.mkdir(parents=True, exist_ok=True)
-            with self._interprocess_lock():
-                staging_directory = self.directory / (
-                    f".{run_id}.chunks.{uuid.uuid4().hex}.tmp"
-                )
-                final_directory = self._chunk_directory_for(run_id)
-                published = False
-                try:
-                    staging_directory.mkdir(parents=True, exist_ok=False)
-                    for chunk in chunks:
-                        chunk_index = int(chunk["index"])
-                        start = chunk_index * self.storage_chunk_size
-                        chunk_payload = {
-                            "schema_version": _SCHEMA_VERSION,
-                            "storage_format": _CHUNKED_STORAGE_FORMAT,
-                            "run_id": run_id,
-                            "chunk_index": chunk_index,
-                            "ordinal_start": chunk["ordinal_start"],
-                            "ordinal_end": chunk["ordinal_end"],
-                            "candidates": candidates[
-                                start : start + self.storage_chunk_size
-                            ],
-                        }
-                        self._write_chunk_path_unlocked(
-                            staging_directory / f"{chunk_index:06d}.json",
-                            chunk_payload,
-                        )
-                        chunk["chunk_revision"] = chunk_payload["chunk_revision"]
-                    staging_directory.replace(final_directory)
-                    for chunk in chunks:
-                        chunk_index = int(chunk["index"])
-                        signature = self._chunk_signature(
-                            self._chunk_path_for(run_id, chunk_index)
-                        )
-                        manifest["chunk_revisions"][str(chunk_index)] = str(
-                            chunk["chunk_revision"]
-                        )
-                        if signature is not None:
-                            manifest["chunk_signatures"][str(chunk_index)] = signature
-                    # manifest 必須最後發布；失敗時不留下可被讀取的批次索引。
-                    self._write_unlocked(run_id, manifest)
-                    published = True
-                finally:
-                    if not published:
-                        shutil.rmtree(staging_directory, ignore_errors=True)
-                        if not self.path_for(run_id).exists():
-                            shutil.rmtree(final_directory, ignore_errors=True)
+            staging_directory = self.directory / (
+                f".{run_id}.chunks.{uuid.uuid4().hex}.tmp"
+            )
+            final_directory = self._chunk_directory_for(run_id)
+            published = False
+            try:
+                staging_directory.mkdir(parents=True, exist_ok=False)
+                for chunk in chunks:
+                    chunk_index = int(chunk["index"])
+                    start = chunk_index * self.storage_chunk_size
+                    chunk_payload = {
+                        "schema_version": _SCHEMA_VERSION,
+                        "storage_format": _CHUNKED_STORAGE_FORMAT,
+                        "run_id": run_id,
+                        "chunk_index": chunk_index,
+                        "ordinal_start": chunk["ordinal_start"],
+                        "ordinal_end": chunk["ordinal_end"],
+                        "candidates": candidates[
+                            start : start + self.storage_chunk_size
+                        ],
+                    }
+                    self._write_chunk_path_unlocked(
+                        staging_directory / f"{chunk_index:06d}.json",
+                        chunk_payload,
+                    )
+                    chunk["chunk_revision"] = chunk_payload["chunk_revision"]
+                staging_directory.replace(final_directory)
+                for chunk in chunks:
+                    chunk_index = int(chunk["index"])
+                    signature = self._chunk_signature(
+                        self._chunk_path_for(run_id, chunk_index)
+                    )
+                    manifest["chunk_revisions"][str(chunk_index)] = str(
+                        chunk["chunk_revision"]
+                    )
+                    if signature is not None:
+                        manifest["chunk_signatures"][str(chunk_index)] = signature
+                # manifest 必須最後發布；失敗時不留下可被讀取的批次索引。
+                self._write_unlocked(run_id, manifest)
+                published = True
+            finally:
+                if not published:
+                    shutil.rmtree(staging_directory, ignore_errors=True)
+                    if not self.path_for(run_id).exists():
+                        shutil.rmtree(final_directory, ignore_errors=True)
         return run_id
 
     def recover_abandoned_runs(self, *, force: bool = False) -> list[str]:
@@ -1185,7 +1231,7 @@ class SmartReviewHistoryStore:
 
     def record_results(self, run_id: str, results: Sequence[dict[str, Any]]) -> None:
         """把一批模型結果寫回 JSON 候選。"""
-        with self._lock:
+        with self._write_lock():
             payload = self._read_unlocked(run_id)
             if self._is_chunked(payload):
                 self._ensure_chunked_summary_unlocked(run_id, payload)
@@ -1243,7 +1289,7 @@ class SmartReviewHistoryStore:
         self, run_id: str, ordinals: Sequence[int], *, error_code: str
     ) -> None:
         """把請求失敗寫入 JSON 候選。"""
-        with self._lock:
+        with self._write_lock():
             payload = self._read_unlocked(run_id)
             wanted = {int(ordinal) for ordinal in ordinals}
             if self._is_chunked(payload):
@@ -1294,7 +1340,7 @@ class SmartReviewHistoryStore:
 
     def mark_pending_cancelled(self, run_id: str) -> int:
         """標記尚未送出的候選為取消。"""
-        with self._lock:
+        with self._write_lock():
             payload = self._read_unlocked(run_id)
             if self._is_chunked(payload):
                 self._ensure_chunked_summary_unlocked(run_id, payload)
@@ -1351,7 +1397,7 @@ class SmartReviewHistoryStore:
         status: str,
     ) -> None:
         """寫入批次結束狀態與統計。"""
-        with self._lock:
+        with self._write_lock():
             payload = self._read_unlocked(run_id)
             payload.update(
                 {
@@ -1375,7 +1421,7 @@ class SmartReviewHistoryStore:
             except FileNotFoundError:
                 return None
             if self._is_chunked(payload):
-                self._ensure_chunked_summary_unlocked(run_id, payload)
+                self._ensure_chunked_summary_unlocked(run_id, payload, persist=False)
         return {key: value for key, value in payload.items() if key != "candidates"}
 
     def all_runs(self, *, include_sort_metadata: bool = False) -> list[dict[str, Any]]:
@@ -1398,7 +1444,9 @@ class SmartReviewHistoryStore:
                 if not isinstance(payload, dict) or not payload.get("id"):
                     continue
                 if self._is_chunked(payload):
-                    self._ensure_chunked_summary_unlocked(path.stem, payload)
+                    self._ensure_chunked_summary_unlocked(
+                        path.stem, payload, persist=False
+                    )
                 summary = {
                     key: value for key, value in payload.items() if key != "candidates"
                 }
@@ -1596,7 +1644,7 @@ class SmartReviewHistoryStore:
             except FileNotFoundError:
                 return 0, []
             if self._is_chunked(payload):
-                self._ensure_chunked_summary_unlocked(run_id, payload)
+                self._ensure_chunked_summary_unlocked(run_id, payload, persist=False)
                 status_counts = payload.get("status_counts")
                 if status is None:
                     total = (
@@ -1686,7 +1734,7 @@ class SmartReviewHistoryStore:
             except FileNotFoundError:
                 return 0
             if self._is_chunked(payload):
-                self._ensure_chunked_summary_unlocked(run_id, payload)
+                self._ensure_chunked_summary_unlocked(run_id, payload, persist=False)
                 status_counts = payload.get("status_counts")
                 if isinstance(status_counts, dict):
                     if status is None:
@@ -1713,7 +1761,7 @@ class SmartReviewHistoryStore:
             except FileNotFoundError:
                 return {"status": {}, "errors": []}
             if self._is_chunked(payload):
-                self._ensure_chunked_summary_unlocked(run_id, payload)
+                self._ensure_chunked_summary_unlocked(run_id, payload, persist=False)
                 status_counts = payload.get("status_counts")
                 error_counts = payload.get("error_counts")
                 if isinstance(status_counts, dict) and isinstance(error_counts, dict):
@@ -1775,7 +1823,7 @@ class SmartReviewHistoryStore:
 
     def update_candidate(self, run_id: str, ordinal: int, **updates: Any) -> bool:
         """原子更新 JSON 候選欄位。"""
-        with self._lock:
+        with self._write_lock():
             try:
                 payload = self._read_unlocked(run_id)
             except FileNotFoundError:
@@ -1831,7 +1879,7 @@ class SmartReviewHistoryStore:
         原子替換時遇到 I/O 錯誤，下一次讀取可以用同一個 run／ordinal 的
         SQLite audit marker 對帳，而不會再次把候選當成 ready 套用。
         """
-        with self._lock:
+        with self._write_lock():
             try:
                 payload = self._read_unlocked(run_id)
             except FileNotFoundError:

@@ -560,21 +560,28 @@ def test_smart_review_latest_marks_accepts_nonzero_ordinal_chunks(db):
         SmartReviewHistoryStore,
     )
 
-    snapshots = db.smart_review_candidates(version="1.21.1", limit=1, offset=1)
+    db.write_back(
+        "1.21.1",
+        [WriteBackItem(KIND_LANG, "demo", "later", "Later", "稍後")],
+        fill_other_versions=False,
+    )
+    snapshots = db.smart_review_candidates(version="1.21.1", limit=2, offset=1)
+    assert [item.ordinal for item in snapshots] == [2, 3]
     store = SmartReviewHistoryStore(db.path, storage_chunk_size=1)
     run_id = store.create_run(
         snapshots,
         provider="gemini",
         model="test-model",
         version="1.21.1",
-        requested_limit=1,
+        requested_limit=2,
         batch_size=1,
     )
 
+    assert store.get_run(run_id)["storage_format"] == "chunked_json_v1"
     selected_run, marks = store.latest_run_marks()
 
     assert selected_run == run_id
-    assert set(marks) == {snapshots[0].entry_id}
+    assert set(marks) == {item.entry_id for item in snapshots}
 
 
 def test_smart_review_query_escapes_like_wildcards(db):
