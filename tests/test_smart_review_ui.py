@@ -1479,5 +1479,7 @@ def test_batch_result_summary_total_equals_processed(ctx):
     assert "完成 9 / 9 筆" in text
     assert "已套用 1" in text
     assert "已保留原譯文 1" in text
-    assert "略過 6" in text  # not_ready/missing/manual_reviewed/missing_entry/stale/未知
+    assert (
+        "略過 6" in text
+    )  # not_ready/missing/manual_reviewed/missing_entry/stale/未知
     assert "失敗 1" in text
