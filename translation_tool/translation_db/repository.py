@@ -438,20 +438,34 @@ class TranslationDB(SmartReviewMixin, BulkReviewMixin, CleanupMixin):
         if self._cache_generation() == gen:
             READ_CACHE.put(cache_key, encoded)
         if persist and not self.readonly:
-            try:
-                with self._lock:
-                    if self._cache_generation() != gen:
-                        return value  # 計算期間資料又變了：不寫舊世代，也不清掉新世代的快取
-                    self._conn.execute("DELETE FROM stat_cache WHERE gen <> ?", (gen,))
-                    self._conn.execute(
-                        "INSERT OR REPLACE INTO stat_cache (key, gen, value) "
-                        "VALUES (?,?,?)",
-                        (key, gen, encoded),
-                    )
-                    self._conn.commit()
-            except sqlite3.Error:
-                pass  # 快取寫不進去（被其他連線鎖住等）不影響結果
+            self._persist_stat_cache(key, gen, encoded)
         return value
+
+    def _persist_stat_cache(self, key: str, gen: str, encoded: str) -> None:
+        """把統計結果寫進 ``stat_cache``；失敗時回復本次寫入，不影響呼叫端取得的結果。
+
+        所有權：這裡只提交／回復「自己開的」交易。連線上已有別人未提交的交易
+        （``in_transaction``）時不替它 commit 或 rollback，直接放棄這次持久化，
+        資料世代照常由程序內快取負責。
+        """
+        with self._lock:
+            if self._conn.in_transaction:
+                return
+            try:
+                if self._cache_generation() != gen:
+                    return  # 計算期間資料又變了：不寫舊世代，也不清掉新世代的快取
+                self._conn.execute("DELETE FROM stat_cache WHERE gen <> ?", (gen,))
+                self._conn.execute(
+                    "INSERT OR REPLACE INTO stat_cache (key, gen, value) "
+                    "VALUES (?,?,?)",
+                    (key, gen, encoded),
+                )
+                self._conn.commit()
+            except sqlite3.Error:
+                # 快取寫不進去（被其他連線鎖住等）不影響結果；但 DELETE 可能已開了寫入交易，
+                # 不回復會一直持有寫鎖，擋住之後所有寫入。
+                if self._conn.in_transaction:
+                    self._conn.rollback()
 
     def warm_stats(self) -> None:
         """預先算好總覽統計並存入快取（大量寫入後在背景呼叫，之後切到總覽頁就是即時的）。"""
