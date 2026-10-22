@@ -737,6 +737,7 @@ SETTINGS: tuple[Setting, ...] = (
         C_BATCH,
         "用於：批次失敗時縮小率",
         default=0.5,
+        validator="batch_shrink_factor",
     ),
     Setting(
         "lm_translator.rpm_cooldown_sec",

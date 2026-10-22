@@ -27,7 +27,10 @@ from translation_tool.utils.config_manager import (
     validate_lm_translate_folder_name,
     validate_output_folder_names,
 )
-from translation_tool.utils.config_schema import LEGACY_API_KEY_PLACEHOLDERS
+from translation_tool.utils.config_schema import (
+    LEGACY_API_KEY_PLACEHOLDERS,
+    validate_batch_shrink_factor,
+)
 from translation_tool.utils.redaction import redact_text
 
 logger = logging.getLogger(__name__)
@@ -78,6 +81,8 @@ def _from_control_value(setting: Setting, raw):
                 raise ValueError(f"「{setting.label}」不可空白")
         else:
             value = convert(text)  # 字串或已是數字的值
+        if setting.validator == "batch_shrink_factor":
+            value = validate_batch_shrink_factor(value)
         if setting.minimum is not None:
             value = max(convert(setting.minimum), value)
         return value
