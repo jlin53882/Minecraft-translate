@@ -73,6 +73,7 @@ def make_full_view():
         view.controls_map[k] = MagicMock()
     view.controls_map["logging.log_format"].value = "%(message)s"
     view.controls_map["lm_translator.lm_translate_folder_name"].value = "LM翻譯後"
+    view.controls_map["lm_translator.batch_shrink_factor"].value = "0.5"
     # Saving tests that do not call load_config_into_view still model a real
     # settings form, whose six extractor suffix controls start at schema defaults.
     for key, value in {
