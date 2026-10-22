@@ -13,6 +13,7 @@ from typing import Any, Protocol, runtime_checkable
 import requests
 
 from translation_tool.core.batch_events import (
+    TIMING_FIELDS,
     BatchEvent,
     BatchTiming,
     format_batch_event,
@@ -59,12 +60,16 @@ def _new_id(prefix: str) -> str:
 
 
 def _wait_ms(fields: Mapping[str, Any]) -> int:
-    """從事件欄位讀取等待時間（先 ``wait_ms``，再 ``elapsed_ms``），統一轉成非負毫秒數。"""
-    for key in ("wait_ms", "elapsed_ms"):
-        value = timing_ms(fields, key)
-        if value is not None:
-            return value
-    return 0
+    """從 provider 等待事件讀取等待毫秒數（``wait_ms``，或舊欄位 ``wait_seconds``），沒有就是 0。
+
+    不會退而使用 ``elapsed_ms``：事件裡的 ``elapsed_ms`` 是批次已經過的時間，不是等待量。
+    """
+    return timing_ms(fields, "wait_ms") or 0
+
+
+def _timing_event_ms(fields: Mapping[str, Any]) -> int:
+    """``timing`` 事件自己的耗時（``elapsed_ms``，或舊欄位 ``elapsed_seconds``）。"""
+    return timing_ms(fields, "elapsed_ms") or 0
 
 
 def _status_from_error(error: BaseException, status: int | None) -> int | None:
@@ -147,9 +152,7 @@ def classify_provider_error(
         "connection": connection,
         "overload": overload,
         "rate_limit": rate_limit,
-        "retryable": bool(
-            status in _TRANSIENT_STATUSES or timeout or connection
-        ),
+        "retryable": bool(status in _TRANSIENT_STATUSES or timeout or connection),
         "retry_after_ms": _error_retry_after_ms(error),
     }
 
@@ -169,6 +172,11 @@ class BatchMetrics(BatchTiming):
     network_retry_count: int = 0
     error_batches: list[int] = field(default_factory=list)
 
+    @property
+    def total_wait_ms(self) -> int:
+        """等待總額（配額等待＋重試退避＋網路重試等待）：所有「等待 vs. 實際 API 時間」換算的唯一入口。"""
+        return self.quota_wait_ms + self.retry_backoff_ms + self.network_retry_wait_ms
+
     def as_dict(self) -> dict[str, Any]:
         """將目前物件轉成供 UI、log 或測試使用的可序列化字典。"""
         result: dict[str, Any] = self.to_event()
@@ -186,6 +194,15 @@ class BatchMetrics(BatchTiming):
             result[key] = getattr(self, key)
         result["error_batches"] = list(self.error_batches)
         return result
+
+
+@dataclass
+class RequestTiming:
+    """``BatchHandle.timed_request`` 的結果：請求總毫秒、期間等待毫秒與實際 API 毫秒。"""
+
+    request_ms: int = 0
+    wait_ms: int = 0
+    api_ms: int = 0
 
 
 @dataclass
@@ -294,11 +311,41 @@ class BatchHandle:
             fields.setdefault("wait_ms", wait_ms)
         elif kind == "timing":
             field_name = str(fields.get("field_name") or "")
-            if field_name:
-                self.executor.metrics.add_ms(field_name, _wait_ms(fields))
+            if field_name in TIMING_FIELDS:
+                self.executor.metrics.add_ms(field_name, _timing_event_ms(fields))
+            elif field_name:
+                logger.warning(
+                    "忽略未知的計時欄位 %r（不在 TIMING_FIELDS，耗時未計入統計）",
+                    field_name,
+                )
         elif kind == "key_rotation":
             self.executor.metrics.key_rotation_count += 1
         return self.emit(kind, **fields)
+
+    @contextmanager
+    def timed_request(self):
+        """量測一次 provider 請求：總時間、期間發生的等待，以及扣掉等待後的實際 API 時間。
+
+        等待事件（配額、重試退避、網路重試）由 ``forward_provider_event`` 累加到各自欄位，
+        所以 ``api_ms`` 只能是「請求總時間 - 期間的等待」，不得再把等待算進去。
+        請求失敗或被取消時，已花掉的 API 時間仍累加到 ``api_ms``；成功時由呼叫端
+        ``attempt_success(elapsed_ms=request.api_ms)`` 累加。
+        """
+        request = RequestTiming()
+        wait_before = self.executor.metrics.total_wait_ms
+        started = time.monotonic()
+        failed = False
+        try:
+            yield request
+        except BaseException:
+            failed = True
+            raise
+        finally:
+            request.request_ms = max(0, round((time.monotonic() - started) * 1000))
+            request.wait_ms = max(0, self.executor.metrics.total_wait_ms - wait_before)
+            request.api_ms = max(0, request.request_ms - request.wait_ms)
+            if failed:
+                self.add_timing("api_ms", request.api_ms)
 
     def retry_wait(
         self,
@@ -626,6 +673,7 @@ __all__ = [
     "BatchMetrics",
     "BatchPolicy",
     "CommonBatchExecutor",
+    "RequestTiming",
     "classify_provider_error",
     "format_batch_event",
 ]

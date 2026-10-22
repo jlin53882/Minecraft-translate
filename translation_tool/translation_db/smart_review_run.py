@@ -364,8 +364,8 @@ def _open_run_state(
     )
     executor.add_timing("selection_ms", selection_seconds * 1000)
     executor.add_timing("planning_ms", planning_seconds * 1000)
+    # 建立 run record 的耗時只記在 run_record_ms；history_write_ms 專指批次結果寫入歷史。
     executor.add_timing("run_record_ms", run_record_seconds * 1000)
-    executor.add_timing("history_write_ms", run_record_seconds * 1000)
     session.configure_limits()
     state = SmartReviewRunState(
         db=db,

@@ -7,7 +7,6 @@
 
 from __future__ import annotations
 
-import inspect
 import logging
 import traceback
 from collections.abc import Callable
@@ -35,7 +34,7 @@ from app.services_impl.pipelines._pipeline_logging import (
     mirror_session_log,
 )
 from app.tasks.task_session import add_log_unmirrored
-from translation_tool.core.common_batch_executor import format_batch_event
+from translation_tool.core.batch_events import format_batch_event_for_log
 from translation_tool.core.lm_batch_planner import (
     count_planned_batches,
     group_items_by_batch_key,
@@ -46,6 +45,7 @@ from translation_tool.core.lm_translator_main import (
     estimate_batch_fixed_input_tokens,
     translate_batch_smart,
 )
+from translation_tool.core.lm_translator_shared import invoke_translation_batch
 from translation_tool.core.lm_translator_shared_loop import _get_default_batch_size
 from translation_tool.core.lm_translator_skeleton import (
     TranslatorHooks,
@@ -765,9 +765,9 @@ def _batch_backend_line(
 
 def _translation_event_sink(session, event: dict[str, Any]) -> None:
     """把一個共用批次事件轉成 TaskSession 與 app log 可讀的中文訊息。"""
-    kind = str(event.get("kind") or "")
-    level = "warning" if kind in {"attempt_failure", "retry_wait"} else "info"
-    _log(session, format_batch_event(event), level)
+    entry = format_batch_event_for_log(event)
+    if entry is not None:
+        _log(session, entry[1], entry[0])
 
 
 def _translation_event_kwargs(
@@ -799,26 +799,6 @@ def _translation_lm_cfg(lm_config: Any) -> dict[str, Any]:
     """從完整設定中取出 lm_translator 子設定；設定不是字典時回傳空字典。"""
     value = lm_config.get("lm_translator", {}) if isinstance(lm_config, dict) else {}
     return value if isinstance(value, dict) else {}
-
-
-def _invoke_translation_batch(batch, batch_total, event_callback):
-    """呼叫既有批次翻譯入口，僅在其函式簽名支援時傳入事件 callback。"""
-    if event_callback is None:
-        return translate_batch_smart(batch, total=batch_total)
-    try:
-        parameters = inspect.signature(translate_batch_smart).parameters.values()
-        accepts_events = any(
-            parameter.name == "event_callback"
-            or parameter.kind is inspect.Parameter.VAR_KEYWORD
-            for parameter in parameters
-        )
-    except (TypeError, ValueError):
-        accepts_events = False
-    if accepts_events:
-        return translate_batch_smart(
-            batch, total=batch_total, event_callback=event_callback
-        )
-    return translate_batch_smart(batch, total=batch_total)
 
 
 def _translate_rows(
@@ -907,7 +887,9 @@ def _translate_rows(
             failures["db_stop"] = True  # 因資料庫失敗而停止；之後補寫成功也不算整體完成
         if cancelled() or is_cancelled() or failures["aborted"] or failures["db_error"]:
             raise TaskCancelled()
-        return _invoke_translation_batch(batch, batch_total, event_callback)
+        return invoke_translation_batch(
+            translate_batch_smart, batch, batch_total, event_callback
+        )
 
     items = group_items_by_batch_key(build_items(rows))
     operation_id = str(getattr(session, "id", "") or id(session))
