@@ -13,9 +13,11 @@ import pytest
 
 from app.views.moddb import entry_filters
 from app.views.moddb import smart_review_actions as actions_module
+from app.views.moddb import smart_review_batch_reviewer as batch_reviewer_module
 from app.views.moddb import smart_review_candidate_loader as loader_module
 from app.views.moddb import smart_review_evidence as evidence_module
 from app.views.moddb import smart_review_reviewer as reviewer_module
+from app.views.moddb.smart_review_batch_reviewer import SmartReviewBatchReviewer
 from app.views.moddb.smart_review_context import SmartReviewContext
 from app.views.moddb.smart_review_evidence import (
     SmartReviewEvidencePresenter,
@@ -76,6 +78,79 @@ def _candidate(ordinal: int = 1, status: str = "ready", **overrides):
     }
     values.update(overrides)
     return SmartReviewCandidate(**values)
+
+
+def test_batch_reviewer_paginates_and_preserves_selection_across_pages(
+    db, ctx, monkeypatch
+):
+    """批量審查跨頁勾選時保留前一頁的選取。"""
+    rows = [_candidate(index) for index in range(1, 31)]
+
+    class Session:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def get_run(self, _run_id):
+            return {
+                "id": "run-1",
+                "provider": "gemini",
+                "model": "test",
+                "scope_version": "1.21.1",
+                "started_at": "now",
+            }
+
+        def run_breakdown(self, _run_id):
+            return {"status": {"ready": len(rows)}}
+
+        def candidate_page(self, _run_id, *, status, limit, offset, **_kwargs):
+            selected = [row for row in rows if status is None or row.status == status]
+            return len(selected), selected[offset : offset + limit]
+
+    monkeypatch.setattr(
+        batch_reviewer_module,
+        "moddb_smart_review_read_session",
+        lambda *_args, **_kwargs: Session(),
+    )
+    reviewer = SmartReviewBatchReviewer(ctx, on_changed=lambda: None)
+
+    reviewer.load_run("run-1")
+    assert reviewer.pager.total_items == 30
+    assert reviewer.pager.total_pages == 2
+    reviewer._select_page()
+    assert len(reviewer._selected) == 25
+
+    reviewer._on_page(2)
+    reviewer._select_page()
+
+    assert reviewer.page == 2
+    assert len(reviewer.rows) == 5
+    assert len(reviewer._selected) == 30
+    assert reviewer.apply_btn.disabled is False
+
+
+def test_dialog_switches_between_single_and_batch_review_modes(db, monkeypatch):
+    """智慧校對審查分頁提供逐筆／批量模式切換而不重建外層分頁。"""
+    from app.views.moddb.smart_review_dialog import SmartReviewDialog
+
+    monkeypatch.setattr(
+        "app.services_impl.moddb_smart_review_service.load_config",
+        lambda: {
+            "lm_translator": {
+                "provider": "gemini",
+                "models": {"test": {"enabled": True}},
+            }
+        },
+    )
+    dialog = SmartReviewDialog(_sync_page(), lambda: db, "1.21.1", None)
+
+    assert dialog.reviewer.control.visible is True
+    assert dialog.batch_reviewer.control.visible is False
+    dialog._on_review_mode("batch")
+    assert dialog.reviewer.control.visible is False
+    assert dialog.batch_reviewer.control.visible is True
 
 
 @pytest.fixture

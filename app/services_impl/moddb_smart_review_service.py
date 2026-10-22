@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Sequence
 from contextlib import contextmanager
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -47,6 +48,33 @@ from translation_tool.utils.config_manager import get_smart_review_settings, loa
 SMART_REVIEW_DEFAULT_SOURCE = SRC_AI
 SMART_REVIEW_DEFAULT_BATCH_SIZE = _SMART_REVIEW_DEFAULT_BATCH_SIZE
 SMART_REVIEW_MAX_BATCH_SIZE = _SMART_REVIEW_MAX_BATCH_SIZE
+
+
+@dataclass(frozen=True)
+class SmartReviewBatchItemResult:
+    """單筆批量審查的結果；保留 ordinal 供 UI 對應原候選。"""
+
+    run_id: str
+    ordinal: int
+    key: str
+    status: str
+    error: str | None = None
+
+
+@dataclass(frozen=True)
+class SmartReviewBatchResult:
+    """批量審查的部分成功結果與取消狀態。"""
+
+    action: str
+    requested: int
+    processed: int
+    cancelled: bool
+    items: tuple[SmartReviewBatchItemResult, ...]
+
+    def count(self, *statuses: str) -> int:
+        """計算指定 service status 的筆數，讓 UI 不需理解資料庫細節。"""
+        wanted = set(statuses)
+        return sum(item.status in wanted for item in self.items)
 
 
 def smart_review_format_diagnostics(
@@ -418,15 +446,91 @@ def reject_moddb_smart_review_candidate_from_path(
         db.close()
 
 
+def apply_moddb_smart_review_batch_from_path(
+    path: str | Path,
+    priority: tuple[int, ...],
+    candidates: Sequence[SmartReviewCandidate],
+    *,
+    action: str = "apply",
+    progress: Callable[[dict[str, Any]], None] | None = None,
+    cancel_check: Callable[[], bool] | None = None,
+) -> SmartReviewBatchResult:
+    """在背景工作中逐筆套用或保留一組候選，沿用單筆 CAS 與歷史規則。
+
+    每筆操作仍由 ``TranslationDB`` 的既有交易完成，因此資料在預覽後被修改時只會
+    略過該筆，不會因批量操作而覆蓋較新的譯文。批次允許部分成功，方便大型批次在
+    遇到單筆 stale 或格式問題時繼續處理其他候選。
+    """
+    if action not in {"apply", "reject"}:
+        raise ValueError(f"未知的智慧校對批量動作：{action}")
+    selected = tuple(candidates)
+    results: list[SmartReviewBatchItemResult] = []
+    cancelled = False
+    db = _open(path, priority, readonly=False)
+    try:
+        for index, candidate in enumerate(selected, start=1):
+            if cancel_check is not None and cancel_check():
+                cancelled = True
+                break
+            try:
+                if action == "apply":
+                    status = db.apply_smart_review_candidate(
+                        candidate.run_id,
+                        candidate.ordinal,
+                        draft_zh_tw=candidate.draft_zh_tw,
+                    )
+                else:
+                    status = db.reject_smart_review_candidate(
+                        candidate.run_id, candidate.ordinal
+                    )
+                item = SmartReviewBatchItemResult(
+                    candidate.run_id,
+                    candidate.ordinal,
+                    candidate.key,
+                    str(status),
+                )
+            except Exception as exc:  # noqa: BLE001 - one bad candidate must not stop the batch
+                item = SmartReviewBatchItemResult(
+                    candidate.run_id,
+                    candidate.ordinal,
+                    candidate.key,
+                    "error",
+                    str(exc) or type(exc).__name__,
+                )
+            results.append(item)
+            if progress is not None:
+                progress(
+                    {
+                        "processed": index,
+                        "total": len(selected),
+                        "item": item,
+                    }
+                )
+    finally:
+        db.close()
+    if not cancelled and cancel_check is not None:
+        cancelled = bool(cancel_check())
+    return SmartReviewBatchResult(
+        action=action,
+        requested=len(selected),
+        processed=len(results),
+        cancelled=cancelled,
+        items=tuple(results),
+    )
+
+
 __all__ = [
     "FORMATTED_BATCH_EVENT_KINDS",
     "SMART_REVIEW_DEFAULT_BATCH_SIZE",
     "SMART_REVIEW_DEFAULT_SOURCE",
     "SMART_REVIEW_MANUAL_EDIT_STATUSES",
+    "SmartReviewBatchItemResult",
+    "SmartReviewBatchResult",
     "SmartReviewCandidate",
     "SmartReviewMark",
     "SmartReviewReadSession",
     "SmartReviewStatus",
+    "apply_moddb_smart_review_batch_from_path",
     "apply_moddb_smart_review_candidate_from_path",
     "apply_moddb_smart_review_manual_edit_from_path",
     "batch_event_level",

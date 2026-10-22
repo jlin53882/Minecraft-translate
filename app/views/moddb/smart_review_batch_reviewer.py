@@ -1,0 +1,831 @@
+"""智慧校對審查的批量模式：分頁勾選候選，預覽後背景套用或保留原譯文。"""
+
+from __future__ import annotations
+
+import threading
+
+import flet as ft
+
+from app.services_impl.moddb_smart_review_service import (
+    SmartReviewBatchResult,
+    SmartReviewCandidate,
+    SmartReviewStatus,
+    apply_moddb_smart_review_batch_from_path,
+    moddb_smart_review_read_session,
+)
+from app.tasks.operation_registry import CommitPolicy, DurabilityPolicy
+from app.ui import design, kit
+from app.ui.design import C
+from app.ui.snack import show_snack
+from app.views.moddb.formatting import format_count, shorten
+from app.views.moddb.smart_review_context import SmartReviewContext
+from app.views.moddb.smart_review_evidence import (
+    SmartReviewEvidencePresenter,
+    initial_draft_text,
+)
+from app.views.moddb.smart_review_reviewer_state import (
+    ALL_FILTER,
+    FILTERS,
+    STATUS_LABEL,
+)
+
+PAGE_SIZE = 25
+_BATCHABLE_STATUS = SmartReviewStatus.READY
+_SUCCESS_STATUSES = frozenset({"applied", "rejected"})
+_SKIPPED_STATUSES = frozenset(
+    {
+        "not_ready",
+        "missing",
+        "manual_reviewed",
+        SmartReviewStatus.STALE,
+        SmartReviewStatus.INVALID_FORMAT,
+    }
+)
+
+
+class SmartReviewBatchReviewer:
+    """提供有界分頁、跨頁選取與部分成功結果摘要的批量審查面板。"""
+
+    def __init__(self, ctx: SmartReviewContext, *, on_changed) -> None:
+        """建立批量審查控制項；批次由 ``load_run`` 指定，不在初始化時讀資料庫。"""
+        self.ctx = ctx
+        self.on_changed = on_changed
+        self.run_id: str | None = None
+        self.run_info: dict = {}
+        self.counts: dict[str, int] = {}
+        self.status_filter = str(_BATCHABLE_STATUS)
+        self.page = 1
+        self.total = 0
+        self.rows: list[SmartReviewCandidate] = []
+        self._row_cache: dict[int, SmartReviewCandidate] = {}
+        self._selected: set[int] = set()
+        self._request_seq = 0
+        self._operation_seq = 0
+        self._loading = False
+        self._busy = False
+        self._cancel_event = threading.Event()
+        self._last_result: SmartReviewBatchResult | None = None
+        self._build_controls()
+        self.body = ft.Column([], spacing=8, scroll=ft.ScrollMode.AUTO, expand=True)
+        self.control = ft.Column(
+            [self._toolbar(), self.body, self.pager],
+            spacing=10,
+            expand=True,
+        )
+        self._show_empty("尚未載入批次", "請從歷史批次或執行結果開啟智慧校對批次。")
+
+    # ──────────────── 控制項 ────────────────
+
+    def _build_controls(self) -> None:
+        """建立篩選、選取、批量動作、進度與結果控制項。"""
+        self.filter_dd = kit.dropdown(
+            label="候選篩選", dense=True, width=230, on_select=self._on_filter
+        )
+        kit.set_dropdown_options(self.filter_dd, list(FILTERS))
+        self.filter_dd.value = self.status_filter
+        self.refresh_btn = kit.button(
+            "重新整理",
+            "secondary",
+            icon=ft.Icons.REFRESH,
+            on_click=lambda _e: self.refresh(),
+            tooltip="重新讀取目前批次與狀態",
+        )
+        self.select_page_btn = kit.button(
+            "全選本頁",
+            "ghost",
+            size="sm",
+            icon=ft.Icons.CHECK_BOX_OUTLINED,
+            on_click=lambda _e: self._select_page(),
+        )
+        self.select_all_btn = kit.button(
+            "全選全部可套用",
+            "ghost",
+            size="sm",
+            icon=ft.Icons.SELECT_ALL,
+            on_click=lambda _e: self._select_all_safe(),
+        )
+        self.clear_btn = kit.button(
+            "清除選取",
+            "ghost",
+            size="sm",
+            icon=ft.Icons.CHECK_BOX_OUTLINE_BLANK,
+            on_click=lambda _e: self._clear_selection(),
+        )
+        self.selection_text = ft.Text("尚未選取候選", size=12, color=C.MUTED)
+        self.summary_text = ft.Text(
+            "", size=12.5, color=C.TEXT, weight=ft.FontWeight.W_600, selectable=True
+        )
+        self.run_text = ft.Text(
+            "",
+            size=11.5,
+            color=C.DIM,
+            selectable=True,
+            overflow=ft.TextOverflow.ELLIPSIS,
+        )
+        self.status_text = ft.Text("", size=12, color=C.MUTED, selectable=True)
+        self.progress_bar = kit.progress_bar(0.0, "em", height=7)
+        self.progress_bar.visible = False
+        self.apply_btn = kit.button(
+            "批量套用",
+            "primary",
+            icon=ft.Icons.CHECK,
+            on_click=lambda _e: self._confirm_action("apply"),
+        )
+        self.reject_btn = kit.button(
+            "批量保留原譯文",
+            "secondary",
+            icon=ft.Icons.RESTORE,
+            on_click=lambda _e: self._confirm_action("reject"),
+        )
+        self.cancel_btn = kit.button(
+            "停止後續項目",
+            "danger",
+            icon=ft.Icons.STOP_CIRCLE_OUTLINED,
+            on_click=lambda _e: self._cancel(),
+        )
+        self.cancel_btn.visible = False
+        self.result_text = ft.Text("", size=12.5, color=C.MUTED, selectable=True)
+        self.result_box = ft.Container(
+            content=self.result_text,
+            padding=ft.Padding.symmetric(horizontal=12, vertical=10),
+            bgcolor=C.PANEL2,
+            border=ft.Border.all(1, C.LINE),
+            border_radius=design.RADIUS_CONTROL,
+            visible=False,
+        )
+        self.pager = kit.Pager(0, page_size=PAGE_SIZE, on_change=self._on_page)
+        self.pager.visible = False
+
+    def _toolbar(self) -> ft.Control:
+        """建立批量模式的篩選、跨頁選取與動作工具列。"""
+        return kit.section_card(
+            "批量審查",
+            ft.Column(
+                [
+                    kit.hint_text(
+                        "先勾選候選再確認批量動作；只有可套用候選會寫入，資料在預覽後變更的項目會安全略過。"
+                    ),
+                    ft.Row(
+                        [self.filter_dd, self.refresh_btn],
+                        spacing=8,
+                        wrap=True,
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    ),
+                    ft.Row(
+                        [
+                            self.select_page_btn,
+                            self.select_all_btn,
+                            self.clear_btn,
+                            self.selection_text,
+                        ],
+                        spacing=6,
+                        wrap=True,
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    ),
+                    ft.Container(
+                        content=ft.Column(
+                            [self.summary_text, self.run_text], spacing=4, tight=True
+                        ),
+                        padding=ft.Padding.symmetric(horizontal=12, vertical=9),
+                        bgcolor=C.PANEL2,
+                        border=ft.Border.all(1, C.LINE),
+                        border_radius=design.RADIUS_CONTROL,
+                    ),
+                    ft.Row(
+                        [self.apply_btn, self.reject_btn, self.cancel_btn],
+                        spacing=8,
+                        wrap=True,
+                    ),
+                    self.status_text,
+                    self.progress_bar,
+                    self.result_box,
+                ],
+                spacing=9,
+            ),
+            icon=ft.Icons.LAYERS_OUTLINED,
+            tone="em",
+            badge=kit.chip("分頁選取", "dia"),
+            padding=ft.Padding.symmetric(horizontal=16, vertical=14),
+        )
+
+    # ──────────────── 載入與分頁 ────────────────
+
+    def load_run(self, run_id: str) -> None:
+        """切換批次、重設選取並從第一頁載入候選。"""
+        self.run_id = run_id
+        self.run_info = {}
+        self.counts = {}
+        self.status_filter = str(_BATCHABLE_STATUS)
+        self.filter_dd.value = self.status_filter
+        self.page = 1
+        self.total = 0
+        self.rows = []
+        self._row_cache.clear()
+        self._selected.clear()
+        self._last_result = None
+        self.result_box.visible = False
+        self._request_seq += 1
+        self._show_loading("正在載入批量候選…")
+        self._load_page(include_run=True)
+
+    def refresh(self) -> None:
+        """重新讀取目前頁；刷新會清除選取，避免使用舊快照批量寫入。"""
+        if self._busy or not self.run_id:
+            return
+        self._selected.clear()
+        self._row_cache.clear()
+        self._load_page(include_run=True)
+
+    def _load_page(self, *, include_run: bool = False) -> None:
+        """在單一唯讀連線中取得統計、總數與目前頁候選。"""
+        database = self.ctx.database()
+        if database is None or not self.run_id:
+            self._show_empty("沒有可用的資料庫", "請先在條目校對選擇資料庫。")
+            return
+        path, priority = database
+        run_id = self.run_id
+        status = self._status_query()
+        page = max(1, self.page)
+        token = self._request_seq = self._request_seq + 1
+        self._loading = True
+        self._set_controls_enabled(False)
+        self.status_text.value = "正在讀取候選分頁…"
+        self.ctx.update()
+
+        def work():
+            with moddb_smart_review_read_session(path, priority) as session:
+                info = session.get_run(run_id) if include_run else None
+                breakdown = session.run_breakdown(run_id)
+                total, rows = session.candidate_page(
+                    run_id,
+                    status=status,
+                    limit=PAGE_SIZE,
+                    offset=(page - 1) * PAGE_SIZE,
+                )
+            return info, breakdown, total, rows
+
+        def done(result, error: str | None) -> None:
+            if token != self._request_seq:
+                return
+            self._loading = False
+            if error:
+                self._set_controls_enabled(True)
+                self._show_empty("候選載入失敗", error, keep_toolbar=True)
+                return
+            info, breakdown, total, rows = result
+            if include_run and info is None:
+                self._set_controls_enabled(True)
+                self._show_empty("找不到批次", f"run_id：{run_id}", keep_toolbar=True)
+                return
+            if info is not None:
+                self.run_info = info or {}
+                self._choose_initial_filter(breakdown.get("status", {}))
+                if self._status_query() != status:
+                    self.page = 1
+                    self._load_page()
+                    return
+            self.counts = {
+                str(key): int(value or 0)
+                for key, value in (breakdown.get("status", {}) or {}).items()
+            }
+            total_pages = max(1, (total + PAGE_SIZE - 1) // PAGE_SIZE)
+            if total and page > total_pages:
+                self.page = total_pages
+                self._load_page()
+                return
+            self.total = int(total or 0)
+            self.rows = list(rows or [])
+            self._row_cache.update({row.ordinal: row for row in self.rows})
+            self.page = min(page, total_pages)
+            self._refresh_filter_labels()
+            self._set_controls_enabled(True)
+            self._render_page()
+
+        self.ctx.run_background(
+            work,
+            done,
+            name="載入智慧校對批量候選",
+            still_valid=lambda: token == self._request_seq,
+        )
+
+    def _choose_initial_filter(self, counts: dict) -> None:
+        """有可套用候選時預設看 ready，否則顯示全部狀態以解釋空批次。"""
+        if self.status_filter != str(_BATCHABLE_STATUS):
+            return
+        if int(counts.get(str(_BATCHABLE_STATUS), 0) or 0) == 0:
+            self.status_filter = ALL_FILTER
+            self.filter_dd.value = ALL_FILTER
+
+    def _status_query(self) -> str | None:
+        return None if self.status_filter == ALL_FILTER else self.status_filter
+
+    def _on_filter(self, event) -> None:
+        """切換狀態篩選並清除跨篩選選取。"""
+        if self._busy:
+            return
+        self.status_filter = str(event.control.value or ALL_FILTER)
+        self.page = 1
+        self._selected.clear()
+        self._row_cache.clear()
+        self._load_page()
+
+    def _on_page(self, page: int) -> None:
+        """換頁；選取保留在記憶體中，讓使用者可以跨頁勾選。"""
+        if self._busy or self._loading or not self.run_id:
+            return
+        self.page = max(1, int(page))
+        self._load_page()
+
+    # ──────────────── 顯示 ────────────────
+
+    def _refresh_filter_labels(self) -> None:
+        """在候選篩選器上顯示各狀態的筆數。"""
+        pairs = [
+            (
+                key,
+                f"{label}（{format_count(self.total if key == ALL_FILTER else self.counts.get(str(key), 0))}）",
+            )
+            for key, label in FILTERS
+        ]
+        kit.set_dropdown_options(self.filter_dd, pairs)
+        self.filter_dd.value = self.status_filter
+
+    def _render_page(self) -> None:
+        """重畫目前頁、分頁器、選取摘要與批量按鈕。"""
+        self._refresh_summary()
+        self.pager.set_state(self.total, self.page)
+        self.pager.visible = self.total > PAGE_SIZE
+        if not self.rows:
+            label = STATUS_LABEL.get(self.status_filter, self.status_filter)
+            title = (
+                "沒有可批量處理的候選" if self.total == 0 else f"「{label}」沒有候選"
+            )
+            self._show_empty(
+                title, "可切換候選篩選，或重新整理批次狀態。", keep_toolbar=True
+            )
+            return
+        controls = [self._candidate_card(row) for row in self.rows]
+        self.body.controls = kit.rekey(controls, "smart-review-batch-row")
+        self._update_action_buttons()
+        self.ctx.update()
+
+    def _refresh_summary(self) -> None:
+        """更新批次識別、狀態統計與目前選取摘要。"""
+        info = self.run_info
+        if info:
+            self.run_text.value = (
+                f"批次 {str(info.get('id', ''))[:8]} · "
+                f"{info.get('provider')}/{info.get('model')} · "
+                f"{info.get('scope_version') or '-'} · {info.get('started_at') or '-'}"
+            )
+        parts = [
+            f"{STATUS_LABEL.get(str(status), str(status))} {format_count(count)}"
+            for status, count in self.counts.items()
+            if count and str(status) in STATUS_LABEL
+        ]
+        self.summary_text.value = f"目前篩選共 {format_count(self.total)} 筆" + (
+            "；" + " · ".join(parts) if parts else ""
+        )
+        selected = self._selected_rows()
+        safe = [row for row in selected if self._can_apply(row)]
+        format_issues = len(
+            [
+                row
+                for row in selected
+                if self._can_select(row) and not self._can_apply(row)
+            ]
+        )
+        text = f"已選 {format_count(len(selected))} 筆"
+        if selected:
+            text += f"；可套用 {format_count(len(safe))} 筆"
+        if format_issues:
+            text += f"；格式問題 {format_count(format_issues)} 筆會略過套用"
+        self.selection_text.value = text
+
+    def _candidate_card(self, row: SmartReviewCandidate) -> ft.Control:
+        """建立一筆候選卡片；長文以三行摘要呈現，避免表格在小視窗爆版。"""
+        can_select = self._can_select(row)
+        can_apply = self._can_apply(row)
+        selected = row.ordinal in self._selected
+        status = STATUS_LABEL.get(str(row.status), str(row.status))
+        tone = "em" if can_apply else "gold" if can_select else "neutral"
+        chips: list[ft.Control] = [kit.chip(status, tone, dot=True)]
+        if row.confidence is not None:
+            chips.append(kit.chip(f"信心 {row.confidence:.0%}", "neutral"))
+        if can_select and not can_apply:
+            chips.append(kit.chip("格式問題・套用會略過", "gold"))
+        if not can_select:
+            chips.append(kit.chip(self._selection_reason(row), "neutral"))
+
+        def toggle(event, ordinal=row.ordinal) -> None:
+            if event.control.value:
+                self._selected.add(ordinal)
+            else:
+                self._selected.discard(ordinal)
+            self._refresh_summary()
+            self._update_action_buttons()
+            self.ctx.update()
+
+        checkbox = ft.Checkbox(
+            value=selected,
+            on_change=toggle,
+            disabled=self._busy or not can_select,
+        )
+        details = ft.Column(
+            [
+                ft.Row(
+                    [
+                        ft.Text(
+                            f"{row.mod_id}:{shorten(row.key, 76)}",
+                            size=12.5,
+                            weight=ft.FontWeight.BOLD,
+                            selectable=True,
+                            font_family=design.FONT_MONO,
+                            expand=True,
+                        ),
+                        ft.Row(chips, spacing=5, wrap=True),
+                    ],
+                    spacing=8,
+                    wrap=True,
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                ),
+                self._text_line("原文", row.en_us),
+                self._text_line("目前", row.current_zh_tw),
+                self._text_line("建議", initial_draft_text(row), main=True),
+            ],
+            spacing=5,
+            tight=True,
+            expand=True,
+        )
+        return ft.Container(
+            content=ft.Row(
+                [checkbox, details],
+                spacing=7,
+                vertical_alignment=ft.CrossAxisAlignment.START,
+            ),
+            padding=ft.Padding.symmetric(horizontal=9, vertical=8),
+            bgcolor=C.PANEL2 if not selected else C.PANEL,
+            border=ft.Border.all(1, C.EM if selected else C.LINE),
+            border_radius=design.RADIUS_CONTROL,
+        )
+
+    @staticmethod
+    def _text_line(label: str, value: str, *, main: bool = False) -> ft.Control:
+        """建立單筆候選卡片的原文／現況／建議摘要。"""
+        return ft.Row(
+            [
+                ft.Container(ft.Text(label, size=10.5, color=C.DIM), width=30),
+                ft.Text(
+                    value or "（無內容）",
+                    size=13 if main else 12,
+                    color=C.TEXT if main else C.MUTED,
+                    selectable=True,
+                    expand=True,
+                    max_lines=3,
+                    overflow=ft.TextOverflow.ELLIPSIS,
+                ),
+            ],
+            spacing=6,
+            vertical_alignment=ft.CrossAxisAlignment.START,
+        )
+
+    def _show_loading(self, text: str) -> None:
+        """顯示讀取中狀態並暫停批量動作。"""
+        self.body.controls = [kit.loading_state(text)]
+        self._set_controls_enabled(False)
+        self.ctx.update()
+
+    def _show_empty(
+        self, title: str, subtitle: str, *, keep_toolbar: bool = False
+    ) -> None:
+        """顯示空狀態；保留工具列讓使用者仍可切換篩選或重新整理。"""
+        self.body.controls = [
+            kit.empty_state(title, subtitle, icon=ft.Icons.LAYERS_OUTLINED)
+        ]
+        if not keep_toolbar:
+            self._set_controls_enabled(False)
+        self._update_action_buttons()
+        self.ctx.update()
+
+    # ──────────────── 選取 ────────────────
+
+    def _selected_rows(self) -> list[SmartReviewCandidate]:
+        """依穩定 ordinal 取回跨頁選取的候選。"""
+        return [
+            self._row_cache[ordinal]
+            for ordinal in sorted(self._selected)
+            if ordinal in self._row_cache
+        ]
+
+    def _select_page(self) -> None:
+        """選取目前頁所有 ready 候選，格式問題仍保留給 reject 使用。"""
+        if self._busy:
+            return
+        self._selected.update(row.ordinal for row in self.rows if self._can_select(row))
+        self._refresh_summary()
+        self._update_action_buttons()
+        self._render_page()
+
+    def _select_all_safe(self) -> None:
+        """背景載入目前篩選的完整候選，只選取格式檢查通過的 ready 項目。"""
+        if self._busy or self._loading or not self.run_id:
+            return
+        database = self.ctx.database()
+        if database is None:
+            return
+        path, priority = database
+        run_id = self.run_id
+        status = self._status_query()
+        token = self._request_seq = self._request_seq + 1
+        self._loading = True
+        self._set_controls_enabled(False)
+        self.status_text.value = "正在載入全部候選並篩選可套用項目…"
+        self.ctx.update()
+
+        def work():
+            with moddb_smart_review_read_session(path, priority) as session:
+                _total, rows = session.candidate_page(
+                    run_id, status=status, limit=None, offset=0
+                )
+            return list(rows or [])
+
+        def done(rows, error: str | None) -> None:
+            if token != self._request_seq:
+                return
+            self._loading = False
+            self._set_controls_enabled(True)
+            if error:
+                show_snack(self.ctx.page, f"全批次載入失敗：{error}", C.RED)
+                self._render_page()
+                return
+            self._row_cache.update({row.ordinal: row for row in rows})
+            self._selected.update(row.ordinal for row in rows if self._can_apply(row))
+            self._refresh_summary()
+            self._update_action_buttons()
+            self._render_page()
+            show_snack(
+                self.ctx.page,
+                f"已選取全部可套用候選，共 {format_count(len(self._selected))} 筆。",
+                C.EM,
+            )
+
+        self.ctx.run_background(
+            work,
+            done,
+            name="選取全部智慧校對候選",
+            still_valid=lambda: token == self._request_seq,
+        )
+
+    def _clear_selection(self) -> None:
+        """清除所有頁面的選取。"""
+        if self._busy:
+            return
+        self._selected.clear()
+        self._refresh_summary()
+        self._update_action_buttons()
+        self._render_page()
+
+    def _can_select(self, row: SmartReviewCandidate) -> bool:
+        """只有 ready 且有 AI 建議的候選可進入批量選取。"""
+        return row.status == _BATCHABLE_STATUS and bool(initial_draft_text(row).strip())
+
+    def _can_apply(self, row: SmartReviewCandidate) -> bool:
+        """批量套用再加一道純本地格式診斷，避免把已知問題送進寫入流程。"""
+        if not self._can_select(row):
+            return False
+        try:
+            return not SmartReviewEvidencePresenter.diagnose_draft(
+                row, initial_draft_text(row)
+            ).has_issue
+        except (TypeError, ValueError):
+            return False
+
+    @staticmethod
+    def _selection_reason(row: SmartReviewCandidate) -> str:
+        """回傳停用勾選框的簡短原因。"""
+        if row.status != _BATCHABLE_STATUS:
+            return STATUS_LABEL.get(str(row.status), "非可套用狀態")
+        return "沒有建議譯文"
+
+    # ──────────────── 批量動作 ────────────────
+
+    def _update_action_buttons(self) -> None:
+        """依選取與格式檢查結果更新批量按鈕文字和可用狀態。"""
+        selected = self._selected_rows()
+        apply_rows = [row for row in selected if self._can_apply(row)]
+        reject_rows = [row for row in selected if self._can_select(row)]
+        self.apply_btn.content = f"批量套用（{len(apply_rows):,}）"
+        self.reject_btn.content = f"批量保留原譯文（{len(reject_rows):,}）"
+        enabled = not self._busy and not self._loading
+        self.apply_btn.disabled = not enabled or not apply_rows
+        self.reject_btn.disabled = not enabled or not reject_rows
+        self.select_page_btn.disabled = not enabled or not any(
+            self._can_select(row) for row in self.rows
+        )
+        self.select_all_btn.disabled = not enabled or not self.total
+        self.clear_btn.disabled = not enabled or not self._selected
+        self.refresh_btn.disabled = self._busy or self._loading or not self.run_id
+        self.filter_dd.disabled = self._busy or self._loading or not self.run_id
+
+    def _confirm_action(self, action: str) -> None:
+        """顯示批量寫入前的明確確認，避免誤按一次就處理整批。"""
+        selected = self._selected_rows()
+        candidates = (
+            [row for row in selected if self._can_apply(row)]
+            if action == "apply"
+            else [row for row in selected if self._can_select(row)]
+        )
+        if not candidates:
+            show_snack(self.ctx.page, "目前沒有可執行的選取項目。", C.GOLD)
+            return
+        if not callable(getattr(self.ctx.page, "show_dialog", None)):
+            self._start_batch(action, candidates)
+            return
+        label = "套用 AI 建議" if action == "apply" else "保留原譯文"
+        skipped = len(selected) - len(candidates)
+        detail = f"即將{label} {len(candidates):,} 筆候選。"
+        if skipped:
+            detail += f"另有 {skipped:,} 筆不符合此動作，會略過。"
+        dialog = ft.AlertDialog(
+            modal=True,
+            title=ft.Row(
+                [
+                    ft.Icon(ft.Icons.WARNING_AMBER, color=C.GOLD),
+                    ft.Text(f"確認批量{label}"),
+                ],
+                spacing=8,
+            ),
+            content=ft.Column(
+                [
+                    ft.Text(detail, selectable=True),
+                    ft.Text(
+                        "執行前仍會重新檢查資料庫快照；已被其他操作修改的候選不會被覆蓋。",
+                        size=12,
+                        color=C.MUTED,
+                        selectable=True,
+                    ),
+                ],
+                tight=True,
+                spacing=10,
+            ),
+            actions=[
+                ft.TextButton(
+                    "返回檢查",
+                    on_click=lambda _e: self._dismiss_confirmation(),
+                ),
+                kit.button(
+                    f"確認{label}",
+                    "primary",
+                    icon=ft.Icons.CHECK,
+                    on_click=lambda _e: self._confirm_and_start(action, candidates),
+                ),
+            ],
+        )
+        self._confirmation = dialog
+        self.ctx.page.show_dialog(dialog)
+
+    def _confirm_and_start(
+        self, action: str, candidates: list[SmartReviewCandidate]
+    ) -> None:
+        """關閉確認視窗並啟動背景批量操作。"""
+        self._dismiss_confirmation()
+        self._start_batch(action, candidates)
+
+    def _dismiss_confirmation(self) -> None:
+        """關閉批量確認視窗。"""
+        self._confirmation = None
+        pop_dialog = getattr(self.ctx.page, "pop_dialog", None)
+        if callable(pop_dialog):
+            pop_dialog()
+
+    def _start_batch(self, action: str, candidates: list[SmartReviewCandidate]) -> None:
+        """以部分成功策略執行批量候選，並在 UI 執行緒更新進度。"""
+        database = self.ctx.database()
+        if database is None or self._busy:
+            return
+        path, priority = database
+        self._busy = True
+        self._cancel_event.clear()
+        self._operation_seq += 1
+        operation = self._operation_seq
+        self.progress_bar.visible = True
+        self.progress_bar.value = 0.0
+        self.body.disabled = True
+        self.cancel_btn.visible = True
+        self.cancel_btn.disabled = False
+        self.status_text.value = (
+            f"準備{('套用' if action == 'apply' else '保留')} {len(candidates):,} 筆…"
+        )
+        self._update_action_buttons()
+        self.ctx.update()
+
+        def progress(snapshot: dict) -> None:
+            if self.ctx.closed or operation != self._operation_seq:
+                return
+            self.ctx.post(self._apply_progress, operation, snapshot)
+
+        def work() -> SmartReviewBatchResult:
+            return apply_moddb_smart_review_batch_from_path(
+                path,
+                priority,
+                candidates,
+                action=action,
+                progress=progress,
+                cancel_check=self._cancel_event.is_set,
+            )
+
+        def done(result: SmartReviewBatchResult | None, error: str | None) -> None:
+            if operation != self._operation_seq:
+                return
+            self._busy = False
+            self.progress_bar.visible = False
+            self.body.disabled = False
+            self.cancel_btn.visible = False
+            if error:
+                self.status_text.value = f"批量操作失敗：{error}"
+                self.status_text.color = C.RED
+                self._update_action_buttons()
+                self.ctx.update()
+                return
+            self._last_result = result
+            self._selected.clear()
+            self._row_cache.clear()
+            self._render_result(result)
+            if result.count(*_SUCCESS_STATUSES) and callable(self.on_changed):
+                self.on_changed()
+            self._load_page(include_run=True)
+
+        self.ctx.run_background(
+            work,
+            done,
+            name="執行智慧校對批量審查",
+            commit=CommitPolicy.PARTIAL_ALLOWED,
+            durability=DurabilityPolicy.USER_ACTION,
+            stable_identity=True,
+            still_valid=lambda: operation == self._operation_seq,
+        )
+
+    def _apply_progress(self, operation: int, snapshot: dict) -> None:
+        """把 worker 的單筆進度安全套用到畫面。"""
+        if operation != self._operation_seq or not self._busy:
+            return
+        processed = int(snapshot.get("processed", 0) or 0)
+        total = max(1, int(snapshot.get("total", 0) or 0))
+        item = snapshot.get("item")
+        status = getattr(item, "status", "")
+        self.progress_bar.value = min(1.0, processed / total)
+        self.status_text.value = f"已處理 {processed:,} / {total:,} 筆"
+        if status not in _SUCCESS_STATUSES:
+            self.status_text.value += (
+                f"；本筆結果：{STATUS_LABEL.get(str(status), str(status))}"
+            )
+        self.ctx.update()
+
+    def _cancel(self) -> None:
+        """要求在目前項目完成後停止後續候選。"""
+        if not self._busy:
+            return
+        self._cancel_event.set()
+        self.cancel_btn.disabled = True
+        self.status_text.value = "已要求停止；目前項目完成後不再處理下一筆。"
+        self.status_text.color = C.GOLD
+        self.ctx.update()
+
+    def _render_result(self, result: SmartReviewBatchResult) -> None:
+        """顯示成功、略過、格式問題、錯誤與取消的批量結果。"""
+        applied = result.count("applied")
+        rejected = result.count("rejected")
+        stale = result.count(*_SKIPPED_STATUSES)
+        errors = result.count("error")
+        parts = [f"完成 {result.processed:,} / {result.requested:,} 筆"]
+        if applied:
+            parts.append(f"已套用 {applied:,}")
+        if rejected:
+            parts.append(f"已保留原譯文 {rejected:,}")
+        if stale:
+            parts.append(f"略過 {stale:,}")
+        if errors:
+            parts.append(f"失敗 {errors:,}")
+        if result.cancelled:
+            parts.append("已停止後續項目")
+        self.result_text.value = "批量結果：" + "；".join(parts) + "。"
+        self.result_text.color = C.GOLD if result.cancelled or stale or errors else C.EM
+        self.result_box.visible = True
+        self.status_text.value = "批量操作完成。"
+        self.status_text.color = C.MUTED
+
+    # ──────────────── 狀態 ────────────────
+
+    def _set_controls_enabled(self, enabled: bool) -> None:
+        """在唯讀載入期間鎖定篩選與批量控制，但保留結果畫面。"""
+        self.body.disabled = not enabled
+        if not enabled:
+            self.filter_dd.disabled = True
+            self.refresh_btn.disabled = True
+            self.select_page_btn.disabled = True
+            self.select_all_btn.disabled = True
+            self.clear_btn.disabled = True
+            self.apply_btn.disabled = True
+            self.reject_btn.disabled = True
+            return
+        self._update_action_buttons()
