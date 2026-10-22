@@ -335,10 +335,10 @@
 | `translation_tool/translation_db/scanner.py:load_rules` | BLE001 | 已記錄／回報 | 規則檔問題不應讓掃描失敗，只是略過替換 |
 | `translation_tool/translation_db/settings.py:remember_db_path` | BLE001 | 已記錄／回報 | 寫設定失敗不應中斷建立資料庫 |
 | `translation_tool/translation_db/settings.py:open_db` | BLE001 | 已記錄／回報 | 資料庫問題不應中斷翻譯 |
-| `translation_tool/translation_db/smart_review.py:run_smart_review.repair_invalid_results` | BLE001 | 已記錄／回報 | safe repair event |
-| `translation_tool/translation_db/smart_review.py:run_smart_review.repair_invalid_results` | BLE001 | 已記錄／回報 | strict parser |
-| `translation_tool/translation_db/smart_review.py:run_smart_review` | BLE001 | 已記錄／回報 | credential-free class |
-| `translation_tool/translation_db/smart_review.py:run_smart_review` | BLE001 | 已記錄／回報 | response contract class |
+| `translation_tool/translation_db/smart_review_repair.py:_ValidationRepair.call_provider` | BLE001 | 已記錄／回報 | safe repair event |
+| `translation_tool/translation_db/smart_review_repair.py:_ValidationRepair.parse` | BLE001 | 已記錄／回報 | strict parser |
+| `translation_tool/translation_db/smart_review_request.py:_BatchRequester._attempt` | BLE001 | 已記錄／回報 | credential-free class |
+| `translation_tool/translation_db/smart_review_run.py:_SmartReviewBatchRunner._parse_response` | BLE001 | 已記錄／回報 | response contract class |
 | `translation_tool/utils/cache_overview.py:build_cache_overview` | BLE001 | 已記錄／回報 | 讀取失敗不中斷總覽，但要留下紀錄 |
 | `translation_tool/utils/cache_overview.py:build_cache_overview` | BLE001 | 已記錄／回報 | 讀取失敗不中斷總覽，但要留下紀錄 |
 | `translation_tool/utils/cache_search.py:CacheSearchEngine.index_batch` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |

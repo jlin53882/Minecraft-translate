@@ -6,7 +6,11 @@ from pathlib import Path
 
 import pytest
 
-from translation_tool.translation_db import smart_review, smart_review_history_codec
+from translation_tool.translation_db import (
+    smart_review,
+    smart_review_history_codec,
+    smart_review_projection,
+)
 from translation_tool.translation_db.models import SMART_REVIEW_FILTER_GROUPS
 from translation_tool.translation_db.smart_review_history import (
     SmartReviewHistoryStore,
@@ -99,8 +103,9 @@ def test_manual_edit_and_filter_groups_derive_from_state_machine():
 
 def test_sql_status_literals_are_known_statuses():
     known = {s.value for s in S}
-    text = (ROOT / "translation_tool/translation_db/smart_review.py").read_text(
-        encoding="utf-8"
+    text = "".join(
+        path.read_text(encoding="utf-8")
+        for path in (ROOT / "translation_tool/translation_db").glob("smart_review*.py")
     )
     used = set(re.findall(r"smart_review_candidate SET status\s*=\s*'([a-z_]+)'", text))
     assert used and used <= known
@@ -109,7 +114,10 @@ def test_sql_status_literals_are_known_statuses():
 @pytest.mark.parametrize(
     "path",
     [
-        "translation_tool/translation_db/smart_review.py",
+        "translation_tool/translation_db/smart_review_apply.py",
+        "translation_tool/translation_db/smart_review_runs.py",
+        "translation_tool/translation_db/smart_review_run.py",
+        "translation_tool/translation_db/smart_review_validation.py",
         "translation_tool/translation_db/smart_review_history.py",
         "translation_tool/translation_db/smart_review_history_codec.py",
         "translation_tool/translation_db/smart_review_history_manifest.py",
@@ -142,12 +150,12 @@ def test_clear_caches(tmp_path):
 
 def test_clear_smart_review_caches():
     smart_review.clear_smart_review_caches()
-    smart_review._RECONCILED_HISTORY_HEAD[("a.db", "r1")] = 3
-    smart_review._RECONCILED_HISTORY_HEAD[("b.db", "r1")] = 4
+    smart_review_projection._RECONCILED_HISTORY_HEAD[("a.db", "r1")] = 3
+    smart_review_projection._RECONCILED_HISTORY_HEAD[("b.db", "r1")] = 4
     smart_review.clear_smart_review_caches("a.db")
-    assert list(smart_review._RECONCILED_HISTORY_HEAD) == [("b.db", "r1")]
+    assert list(smart_review_projection._RECONCILED_HISTORY_HEAD) == [("b.db", "r1")]
     smart_review.clear_smart_review_caches()
-    assert not smart_review._RECONCILED_HISTORY_HEAD
+    assert not smart_review_projection._RECONCILED_HISTORY_HEAD
 
 
 def test_history_module_uses_shared_groups():

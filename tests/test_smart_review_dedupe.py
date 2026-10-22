@@ -55,7 +55,7 @@ def _run(db, monkeypatch, **scope):
         )
 
     monkeypatch.setattr(
-        "translation_tool.translation_db.smart_review.call_gemini_requests",
+        "translation_tool.translation_db.smart_review_provider.call_gemini_requests",
         fake_call,
     )
     run = run_smart_review(db, model_name="gemini-test", api_key="k", limit=50, **scope)

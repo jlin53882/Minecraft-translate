@@ -13,7 +13,9 @@ from translation_tool.translation_db import (
     TranslationDB,
     WriteBackItem,
 )
-from translation_tool.translation_db import smart_review as smart_review_module
+from translation_tool.translation_db import (
+    smart_review_apply as smart_review_apply_module,
+)
 from translation_tool.translation_db.schema import SRC_MANUAL
 from translation_tool.translation_db.smart_review import run_smart_review
 from translation_tool.translation_db.smart_review_history import SmartReviewHistoryStore
@@ -56,7 +58,7 @@ def _run(db, monkeypatch, decision: str):
         return json.dumps({"items": items})
 
     monkeypatch.setattr(
-        "translation_tool.translation_db.smart_review.call_gemini_requests",
+        "translation_tool.translation_db.smart_review_provider.call_gemini_requests",
         fake_call,
     )
     return run_smart_review(
@@ -351,7 +353,7 @@ def test_manual_edit_retries_transient_state_write_failure(db, monkeypatch):
     run_id = _run(db, monkeypatch, "no_change")
     candidate = _candidate(db, run_id, "bye")
     db.realign_smart_review_candidate(run_id, candidate.ordinal)
-    monkeypatch.setattr(smart_review_module.time, "sleep", lambda _s: None)
+    monkeypatch.setattr(smart_review_apply_module.time, "sleep", lambda _s: None)
     real = SmartReviewHistoryStore.update_candidate
     calls = []
 
@@ -376,7 +378,7 @@ def test_manual_edit_reports_state_sync_failure_and_reconciles(db, monkeypatch):
     run_id = _run(db, monkeypatch, "no_change")
     candidate = _candidate(db, run_id, "bye")
     db.realign_smart_review_candidate(run_id, candidate.ordinal)
-    monkeypatch.setattr(smart_review_module.time, "sleep", lambda _s: None)
+    monkeypatch.setattr(smart_review_apply_module.time, "sleep", lambda _s: None)
     real = SmartReviewHistoryStore.update_candidate
 
     def broken(self, *args, **kwargs):
@@ -517,7 +519,7 @@ def test_marks_and_filter_reconcile_unsynced_apply_without_opening_reviewer(
     run_id = _run(db, monkeypatch, "no_change")
     candidate = _candidate(db, run_id, "bye")
     db.realign_smart_review_candidate(run_id, candidate.ordinal)
-    monkeypatch.setattr(smart_review_module.time, "sleep", lambda _s: None)
+    monkeypatch.setattr(smart_review_apply_module.time, "sleep", lambda _s: None)
     real = SmartReviewHistoryStore.update_candidate
     monkeypatch.setattr(
         SmartReviewHistoryStore,
