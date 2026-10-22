@@ -566,7 +566,7 @@ class SmartReviewHistoryStore:
                 seen_ordinals: set[int] = set()
                 for candidate in candidates:
                     if not isinstance(candidate, dict):
-                        raise ValueError("智慧校對候選分片含有無效候選")
+                        raise ValueError("智慧校對候選分片含有無效候選")  # noqa: TRY004 - 檔案內容不合法一律以 ValueError 回報，呼叫端依此隔離損壞分片
                     try:
                         ordinal = int(candidate["ordinal"])
                     except (KeyError, TypeError, ValueError) as exc:
@@ -979,79 +979,73 @@ class SmartReviewHistoryStore:
         """
         if not self.directory.is_dir():
             return []
-        with self._lock:
-            with self._interprocess_lock():
-                if not force and self.directory in self._recovery_checked:
-                    return []
-                self._recovery_checked.add(self.directory)
-                self._cleanup_unpublished_chunks_unlocked()
-                recovered: list[str] = []
-                for path in self.directory.glob("*.json"):
-                    try:
-                        payload = json.loads(path.read_text(encoding="utf-8"))
-                    except (OSError, ValueError):
-                        continue
-                    if (
-                        not isinstance(payload, dict)
-                        or payload.get("status") != "running"
-                    ):
-                        continue
-                    owner_pid = payload.get("owner_pid")
-                    if owner_pid is None or _process_is_alive(owner_pid):
-                        continue
-                    run_id = path.stem
-                    try:
-                        self.path_for(run_id)
-                    except ValueError:
-                        logger.warning("略過無效檔名的智慧校對批次檔：%s", path)
-                        continue
-                    payload_run_id = payload.get("id")
-                    if payload_run_id not in (None, run_id):
-                        logger.warning(
-                            "略過檔名與內容 id 不一致的智慧校對批次檔：%s", path
-                        )
-                        continue
-                    counts = (
-                        self._chunk_summary_unlocked(run_id, payload)
-                        if self._is_chunked(payload)
-                        else _candidate_counts(payload)
-                    )
-                    recovered_at = _timestamp()
-                    raw_metrics = payload.get("metrics")
-                    metrics = dict(raw_metrics) if isinstance(raw_metrics, dict) else {}
-                    metrics.update(
-                        {
-                            "recovered_after_unexpected_exit": True,
-                            "recovery_reason": "owner_process_not_alive",
-                            "recovered_at": recovered_at,
-                            "interrupted_pending_count": counts["pending_count"],
-                        }
-                    )
-                    payload.update(
-                        {
-                            "finished_at": recovered_at,
-                            "status": "interrupted",
-                            "processed_count": counts["processed_count"],
-                            "valid_count": counts["valid_count"],
-                            "invalid_count": counts["invalid_count"],
-                            "request_error_count": counts["request_error_count"],
-                            "status_counts": counts["status_counts"],
-                            "error_counts": counts["error_counts"],
-                            "metrics": metrics,
-                            "recovery_reason": "owner_process_not_alive",
-                            "recovered_at": recovered_at,
-                        }
-                    )
-                    self._write_unlocked(run_id, payload)
-                    recovered.append(run_id)
-                    logger.warning(
-                        "已將非預期退出的智慧校對批次標記為 interrupted：run_id=%s，"
-                        "已處理 %s 筆，未處理 %s 筆",
-                        run_id,
-                        counts["processed_count"],
-                        counts["pending_count"],
-                    )
-                return recovered
+        with self._lock, self._interprocess_lock():
+            if not force and self.directory in self._recovery_checked:
+                return []
+            self._recovery_checked.add(self.directory)
+            self._cleanup_unpublished_chunks_unlocked()
+            recovered: list[str] = []
+            for path in self.directory.glob("*.json"):
+                try:
+                    payload = json.loads(path.read_text(encoding="utf-8"))
+                except (OSError, ValueError):
+                    continue
+                if not isinstance(payload, dict) or payload.get("status") != "running":
+                    continue
+                owner_pid = payload.get("owner_pid")
+                if owner_pid is None or _process_is_alive(owner_pid):
+                    continue
+                run_id = path.stem
+                try:
+                    self.path_for(run_id)
+                except ValueError:
+                    logger.warning("略過無效檔名的智慧校對批次檔：%s", path)
+                    continue
+                payload_run_id = payload.get("id")
+                if payload_run_id not in (None, run_id):
+                    logger.warning("略過檔名與內容 id 不一致的智慧校對批次檔：%s", path)
+                    continue
+                counts = (
+                    self._chunk_summary_unlocked(run_id, payload)
+                    if self._is_chunked(payload)
+                    else _candidate_counts(payload)
+                )
+                recovered_at = _timestamp()
+                raw_metrics = payload.get("metrics")
+                metrics = dict(raw_metrics) if isinstance(raw_metrics, dict) else {}
+                metrics.update(
+                    {
+                        "recovered_after_unexpected_exit": True,
+                        "recovery_reason": "owner_process_not_alive",
+                        "recovered_at": recovered_at,
+                        "interrupted_pending_count": counts["pending_count"],
+                    }
+                )
+                payload.update(
+                    {
+                        "finished_at": recovered_at,
+                        "status": "interrupted",
+                        "processed_count": counts["processed_count"],
+                        "valid_count": counts["valid_count"],
+                        "invalid_count": counts["invalid_count"],
+                        "request_error_count": counts["request_error_count"],
+                        "status_counts": counts["status_counts"],
+                        "error_counts": counts["error_counts"],
+                        "metrics": metrics,
+                        "recovery_reason": "owner_process_not_alive",
+                        "recovered_at": recovered_at,
+                    }
+                )
+                self._write_unlocked(run_id, payload)
+                recovered.append(run_id)
+                logger.warning(
+                    "已將非預期退出的智慧校對批次標記為 interrupted：run_id=%s，"
+                    "已處理 %s 筆，未處理 %s 筆",
+                    run_id,
+                    counts["processed_count"],
+                    counts["pending_count"],
+                )
+            return recovered
 
     def _candidate_unlocked(
         self, payload: dict[str, Any], ordinal: int

@@ -1179,7 +1179,7 @@ def test_smart_review_latest_marks_falls_back_from_corrupt_chunk(db, corruption)
     elif corruption == "wrong_candidates_type":
         chunk_path.write_text(json.dumps({"candidates": {}}), encoding="utf-8")
     else:
-        chunk_payload = json.loads((chunk_path.read_text(encoding="utf-8")))
+        chunk_payload = json.loads(chunk_path.read_text(encoding="utf-8"))
         chunk_payload["candidates"] = []
         chunk_path.write_text(json.dumps(chunk_payload), encoding="utf-8")
 
