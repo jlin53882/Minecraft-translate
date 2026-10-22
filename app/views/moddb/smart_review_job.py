@@ -28,16 +28,13 @@ from app.tasks.operation_registry import (
 from app.tasks.task_session import TaskSession, tag_session
 from app.ui.design import C
 from app.ui.snack import show_snack
+from app.views.moddb.smart_review_run_status import (
+    run_status_color,
+    run_status_label,
+)
 from translation_tool.utils.log_unit import log_warning
 
 _JOB_ATTR = "_smart_review_job"
-_STATUS_LABEL = {
-    "completed": "完成",
-    "partial": "部分完成",
-    "cancelled": "已取消",
-    "interrupted": "意外中斷",
-    "failed": "失敗",
-}
 
 
 @dataclass
@@ -347,7 +344,7 @@ class SmartReviewJob:
         state.status = result.status
         state.finished_at = time.monotonic()
         self._load_breakdown(request, result.run_id, session)
-        label = _STATUS_LABEL.get(result.status, result.status)
+        label = run_status_label(result.status)[0]
         session.add_log(
             f"智慧校對{label}：處理 {result.processed_count:,} 筆，有效 "
             f"{result.valid_count:,}、建議 {result.suggestion_count:,}、"
@@ -461,12 +458,12 @@ class SmartReviewJob:
         if state.phase == "failed":
             show_snack(self.page, f"智慧校對失敗：{state.error}", C.RED)
             return
-        label = _STATUS_LABEL.get(state.status, state.status)
+        label = run_status_label(state.status)[0]
         show_snack(
             self.page,
             f"智慧校對{label}：處理 {state.processed:,} 筆，有效 {state.valid:,}、"
             f"無效 {state.invalid:,}。到條目校對按「智慧校對」即可審查。",
-            C.GOLD if state.status in {"partial", "cancelled"} else C.EM,
+            run_status_color(state.status),
         )
 
 

@@ -139,12 +139,12 @@ flowchart TD
 - **同步在 UI 執行緒的操作**：套用 DST、套用歷史、還原、刷新統計、分頁切換、分片詳情的選取。這些操作會呼叫磁碟寫入，因此操作期間頁面會阻塞。
 - **忙碌狀態**：`_set_state(busy, reason, trace)` 更新 `ui_busy`、`busy_reason` 與狀態列文字，並呼叫 `_refresh_disabled_state` 依忙碌狀態切換所有按鈕與分頁控制項。
 - **日誌與提示**：`_append_log` 依前綴 `[ERROR`、`[WARN` 分別寫入 `log_error`、`log_warning`，其餘寫入 `log_info`，並同步加入記憶體日誌（上限 1500 筆）。`_notify` 同時寫日誌並顯示 `show_snack`。日誌面板可切換「只看警告以上」。
-- **換頁與視窗大小**：本頁沒有換頁清理（不覆寫 Flet 的 unmount 回呼）。`did_mount` 把 `page.on_resized` 設為 `_on_page_resized`（重算分片鍵清單寬度並重新渲染分片區），離開本頁後不會解除，此時重新渲染失敗會被忽略。總覽讀取的 operation 為 `NON_CANCELLABLE`／`DRAIN_ONLY`，由 `OperationRegistry` 管理，不需要頁面自行取消。
+- **換頁與視窗大小**：Flet 1.0 的 `Page` 只有 `on_resize`（沒有 on_resized 這個屬性），且由 AppShell 持有。`did_mount` 以 `subscribe_page_resize`（`app/ui/page_resize.py`）向 AppShell 的 resize 派送登記 `_on_page_resized`（重算分片鍵清單寬度並重新渲染分片區），`will_unmount` 取消訂閱，離開本頁後不留下回呼；單一訂閱者失敗只記錄，不影響其他頁面。總覽讀取的 operation 為 `NON_CANCELLABLE`／`DRAIN_ONLY`，由 `OperationRegistry` 管理，不需要頁面自行取消。
 
 ## 狀態與資料
 
 - **Flet 控制項狀態**：`ui_busy`、`busy_reason`、`_all_logs`、`_only_error`、`_last_overview_data`（最近一次總覽資料，多數歷史與分析功能依賴其中的 `cache_root`）。
-- **查詢狀態**：`CacheQueryState`（`app/views/cache_manager/cache_state.py`）提供初始值，實際使用的是 `query_results`、`query_selected_result`、`query_original_dst`、`query_page`、`query_page_size`、`query_total_pages` 等 view 屬性。`_query_seq` 用於丟棄過期的搜尋結果。
+- **查詢狀態**：`CacheQueryState`（`app/views/cache_manager/cache_state.py`）提供初始值，實際使用的是 `query_results`、`query_selected_result`、`query_original_dst`、`query_page`、`query_page_size`、`query_total_pages` 等 view 屬性。`_query_seq` 由 `CacheQueryMixin` 以類別預設值 0 初始化、每次搜尋遞增，用於丟棄過期的搜尋結果；舊請求的失敗也依序號丟棄（不通知、不改狀態），只有最新請求的失敗會通知並把「搜尋中」提示改為「搜尋未完成，請重新搜尋」。
 - **分片狀態**：`CacheShardState` 提供初始值，實際使用 `shard_detail_selected_type`、`shard_detail_selected_file`、`shard_detail_selected_key`、`shard_detail_keys`、`shard_detail_page`、`shard_detail_src_mode`，以及 `shard_dst_original`、`shard_dst_loaded_sig`。
 - **歷史狀態**：`CacheHistoryState` 提供初始值，`history_window_source` 記錄目前開啟的來源。
 - **分片讀取**：`app/views/cache_manager/shard_reader.py` 以檔案簽章為 key 快取分片摘要與 raw 內容；`warm_shard_summaries` 在背景預熱，渲染時不必再解析 JSON。

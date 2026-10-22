@@ -68,7 +68,7 @@ CacheView（主入口）
 - **分片讀取的執行緒契約**：`_load_shard_rows` / `_load_shard_keys` 只查 `shard_reader` 的記憶（檔案簽名未變就不再解析 JSON）；`_fetch_overview`（載入總覽的背景執行緒）與 `run_cache_action` 的背景工作結束前呼叫 `_warm_shard_cache` 預熱（含歷史索引 `warm_history_index`）。單筆 SRC 先以 `cache_get_entry_service` 取得，找不到才 fallback 到 `_load_shard_entry`（經 `shard_reader.shard_raw` 讀取整個分片，LRU 只保留最近 2 個分片）。歷史紀錄 `cache_history_store`：讀取以 `{key: events}` 索引記憶，append 就地更新；整份 json 鏡像由單一背景執行緒寫入（`history_flush` 可等待）。
 - `_load_shard_rows` → `_load_shard_keys(cache_type, filename)` → `_on_select_shard_key` → `_load_shard_entry` → `_render_shard_src_panel` / `_render_shard_dst_panel`
 - dst 編輯：`_on_shard_dst_apply` / `_on_shard_dst_revert` / `_on_shard_dst_copy` / `_on_shard_dst_restore_latest`
-- 動態高度計算：`_dynamic_*_height/width` 系列（`_on_page_resized` 觸發）
+- 動態高度計算：`_dynamic_*_height/width` 系列（`_on_page_resized` 觸發；經 `app/ui/page_resize.py` 向 AppShell 的 resize 派送訂閱，`will_unmount` 取消）
 - 分片工作區：`_open_shard_workspace_tab` / `_on_back_to_shard_list` / `_on_select_shard_row`
 
 ### 歷史（共用）
@@ -113,6 +113,7 @@ CacheView（主入口）
 
 ## 維護注意
 
+0. 快取與圖示預覽的 reserve → launch → 輪詢 `done_event` 流程，在未准入（正在關閉）與 launch 失敗時都會結束 operation 並以通知／狀態還原回報；各處的結果型別與 UI 回應不同，不抽成通用框架。
 1. 大量事件回呼觸發背景操作；避免舊任務覆蓋新狀態：總覽動作靠 `run_cache_action` 的 busy 鎖，查詢靠 `_query_seq`。
 2. 新增總覽動作：加 service → 加 `_on_*` handler → `_run_action` 包裝 → `_refresh_disabled_state`。
 3. 歷史事件 append 後要 `_render_shard_history` / `_render_query_history` 重繪。

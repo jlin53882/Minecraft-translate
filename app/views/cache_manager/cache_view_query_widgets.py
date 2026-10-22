@@ -41,6 +41,7 @@ class CacheQueryWidgetsMixin:
         """查詢狀態與分頁初始值。"""
         # -------------------- Query: Search / Explorer --------------------
         self._query_state = CacheQueryState()
+        self._query_seq = 0  # 每次搜尋遞增，晚到的舊結果／失敗以此丟棄
         self.query_results = self._query_state.query_results
         self.query_selected_result = self._query_state.query_selected_result
         self.query_original_dst = self._query_state.query_original_dst

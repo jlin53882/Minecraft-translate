@@ -31,6 +31,7 @@ from app.ui import kit
 
 # UI 共用元件：總覽區使用新 UI kit。
 from app.ui.design import C
+from app.ui.page_resize import subscribe_page_resize
 from app.ui.snack import show_snack
 from app.views.cache_manager.cache_view_history import CacheHistoryMixin
 from app.views.cache_manager.cache_view_overview import CacheOverviewMixin
@@ -163,8 +164,7 @@ class CacheView(
         總覽需要載入整個快取（大量資料時數秒），有 event loop 時改在執行緒讀取，
         頁面先顯示「載入中」，不再阻塞切換頁面。
         """
-        if self.page is not None:
-            self.page.on_resized = self._on_page_resized
+        self._bind_page_resize(self.page)
         run_task = getattr(self.page, "run_task", None)
         if run_task is None:
             self._finish_mount(self._fetch_overview())
@@ -246,6 +246,25 @@ class CacheView(
                 self.update()
             except Exception:  # noqa: BLE001, S110
                 pass
+
+    def _bind_page_resize(self, page) -> None:
+        """向 AppShell 的 resize 派送訂閱；重複掛載時先取消舊訂閱，卸載時由 will_unmount 取消。"""
+        self._unbind_page_resize()
+        if page is not None:
+            self._unsubscribe_resize = subscribe_page_resize(
+                page, self._on_page_resized
+            )
+
+    def _unbind_page_resize(self) -> None:
+        """取消 resize 訂閱（可重複呼叫）。"""
+        unsubscribe = getattr(self, "_unsubscribe_resize", None)
+        self._unsubscribe_resize = None
+        if unsubscribe is not None:
+            unsubscribe()
+
+    def will_unmount(self):
+        """換頁或關閉時移除 resize 訂閱，不留下指向已卸載控制項的回呼。"""
+        self._unbind_page_resize()
 
     def _on_page_resized(self, e):
         # 重繪分類/分片與 C1 KeyListCard，讓大小可跟視窗動態變更

@@ -24,6 +24,7 @@ from app.ui.dialogs import (
     dialog_dimensions,
     present_page_dialog,
 )
+from app.ui.page_post import post_to_ui
 from app.ui.snack import show_snack
 from app.views.moddb.formatting import format_count, shorten
 from translation_tool.utils.log_unit import log_exception, log_info, log_warning
@@ -593,7 +594,7 @@ class BulkReviewDialog:
 
     def _on_progress(self, text: str, fraction: float) -> None:
         """把背景批量審核的文字與比例進度排回 UI 執行緒。"""
-        self._post(self._show_progress, text, fraction)
+        self._post(self._show_progress, text, fraction, final=False)
 
     def _show_progress(self, text: str, fraction: float) -> None:
         """在 UI 執行緒顯示批量審核的狀態文字與進度比例。"""
@@ -713,20 +714,18 @@ class BulkReviewDialog:
             self._set_busy(False)
             show_snack(self.page, "應用程式正在關閉，未啟動操作。", C.GOLD)
 
-    def _post(self, callback, *args) -> None:
-        """把背景結果排回畫面執行緒（沒有 ``run_task`` 的測試頁面直接呼叫）。"""
-        run_task = getattr(self.page, "run_task", None)
-        try:
-            if callable(run_task):
+    def _post(self, callback, *args, final: bool = True) -> None:
+        """把背景結果排回畫面執行緒；排程失敗時（頁面已卸載）收回忙碌狀態。
 
-                async def runner() -> None:
-                    callback(*args)
-
-                run_task(runner)
-            else:
-                callback(*args)
-        except Exception as exc:  # noqa: BLE001 - a disposed page may reject the callback
-            log_warning(f"Mod 資料庫批量審核結果無法排回畫面：{exc!r}")
+        ``final`` 為 False 的進度通知失敗不影響操作本身，不需回收。
+        """
+        post_to_ui(
+            self.page,
+            callback,
+            *args,
+            label="Mod 資料庫批量審核結果",
+            on_failure=(lambda: self._set_busy(False)) if final else None,
+        )
 
     def _set_busy(self, busy: bool, text: str = "") -> None:
         self._busy = busy

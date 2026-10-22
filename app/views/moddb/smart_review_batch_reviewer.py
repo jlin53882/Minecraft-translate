@@ -22,6 +22,10 @@ from app.views.moddb.smart_review_batch_loader import (
     load_batch_page,
     should_load_summary,
 )
+from app.views.moddb.smart_review_batch_outcome import (
+    SUCCESS_OUTCOMES,
+    summarize_outcomes,
+)
 from app.views.moddb.smart_review_batch_progress import SmartReviewBatchProgress
 from app.views.moddb.smart_review_context import SmartReviewContext
 from app.views.moddb.smart_review_evidence import (
@@ -41,22 +45,6 @@ from app.views.moddb.smart_review_reviewer_state import (
 
 PAGE_SIZE = 25
 _BATCHABLE_STATUS = SmartReviewStatus.READY
-_SUCCESS_STATUSES = frozenset({"applied", "rejected"})
-_SKIPPED_STATUSES = frozenset(
-    {
-        "not_ready",
-        "missing",
-        "not_stale",
-        "not_editable",
-        "unsupported",
-        "invalid_draft",
-        "changed",
-        "unchanged",
-        "manual_reviewed",
-        SmartReviewStatus.STALE,
-        SmartReviewStatus.INVALID_FORMAT,
-    }
-)
 
 
 class SmartReviewBatchReviewer:
@@ -905,7 +893,7 @@ class SmartReviewBatchReviewer:
             self._selected.clear()
             self._row_cache.clear()
             self._render_result(result)
-            if result.count(*_SUCCESS_STATUSES) and callable(self.on_changed):
+            if summarize_outcomes(result).succeeded and callable(self.on_changed):
                 self.on_changed()
             self._load_page(include_run=True)
 
@@ -929,7 +917,7 @@ class SmartReviewBatchReviewer:
         status = getattr(item, "status", "")
         self.progress_bar.value = min(1.0, processed / total)
         self.status_text.value = f"已處理 {processed:,} / {total:,} 筆"
-        if status not in _SUCCESS_STATUSES:
+        if status not in SUCCESS_OUTCOMES:
             self.status_text.value += (
                 f"；本筆結果：{STATUS_LABEL.get(str(status), str(status))}"
             )
@@ -947,11 +935,10 @@ class SmartReviewBatchReviewer:
 
     def _render_result(self, result: SmartReviewBatchResult) -> None:
         """顯示成功、略過、格式問題、錯誤與取消的批量結果。"""
-        applied = result.count("applied")
-        rejected = result.count("rejected")
-        stale = result.count(*_SKIPPED_STATUSES)
-        errors = result.count("error")
-        parts = [f"完成 {result.processed:,} / {result.requested:,} 筆"]
+        summary = summarize_outcomes(result)
+        applied, rejected = summary.applied, summary.rejected
+        stale, errors = summary.skipped, summary.error
+        parts = [f"完成 {summary.total:,} / {result.requested:,} 筆"]
         if applied:
             parts.append(f"已套用 {applied:,}")
         if rejected:

@@ -4,7 +4,11 @@ from __future__ import annotations
 
 from dataclasses import replace
 
-from app.services_impl.moddb_service import open_database, version_choices
+from app.services_impl.moddb_service import (
+    database_data_generation,
+    moddb_read_snapshot,
+    version_choices,
+)
 from app.services_impl.moddb_source_service import (
     CUSTOM_SOURCE_BASE,
     source_catalog_for,
@@ -17,15 +21,12 @@ ALL_MODS = "__all__"
 
 def load_panel_snapshot(key: str, request: dict, settings) -> dict:
     """Read tab data from a worker-owned, read-only connection."""
-    db = open_database(create=False, settings=settings, readonly=True)
     snapshot = {"key": key, "identity": None, "error": None}
     snapshot["effective_source_codes"] = ()
-    try:
-        if db is not None:
-            db._conn.execute("BEGIN")
+    with moddb_read_snapshot(settings) as db:
         snapshot["identity"] = _database_identity(db)
         snapshot["source_catalog"] = source_catalog_for(db)
-        snapshot["db_generation"] = db._data_gen() if db is not None else None
+        snapshot["db_generation"] = database_data_generation(db)
         if key == "entries":
             return _load_entries_snapshot(db, request, settings, snapshot)
         if key == "scan":
@@ -35,11 +36,6 @@ def load_panel_snapshot(key: str, request: dict, settings) -> dict:
         if key == "translate":
             return _load_translate_snapshot(db, request, snapshot)
         raise ValueError(f"未知 Mod DB 頁籤：{key}")
-    finally:
-        if db is not None:
-            if db._conn.in_transaction:
-                db._conn.rollback()
-            db.close()
 
 
 def _load_entries_snapshot(db, request: dict, settings, snapshot: dict) -> dict:
@@ -93,7 +89,11 @@ def _load_entries_snapshot(db, request: dict, settings, snapshot: dict) -> dict:
 
 def load_entries_filter_snapshot(settings, request: dict) -> dict:
     """Query a filtered page on a worker-owned read-only SQLite snapshot."""
-    db = open_database(create=False, settings=settings, readonly=True)
+    with moddb_read_snapshot(settings) as db:
+        return _entries_filter_snapshot(db, settings, request)
+
+
+def _entries_filter_snapshot(db, settings, request: dict) -> dict:
     page = max(1, int(request.get("page", 1)))
     rows, total, error, detail = [], 0, None, None
     snapshot = {
@@ -119,59 +119,52 @@ def load_entries_filter_snapshot(settings, request: dict) -> dict:
         "list_error": error,
         "detail": detail,
     }
-    try:
-        if db is not None:
-            db._conn.execute("BEGIN")
-            snapshot["db_generation"] = db._data_gen()
-            scope = _resolve_entries_scope(db, request, settings)
-            criteria = scope["criteria"]
-            try:
+    if db is not None:
+        snapshot["db_generation"] = database_data_generation(db)
+        scope = _resolve_entries_scope(db, request, settings)
+        criteria = scope["criteria"]
+        try:
+            rows, total = db.list_entries(
+                criteria=criteria,
+                limit=PAGE_SIZE,
+                offset=(page - 1) * PAGE_SIZE,
+            )
+            last_page = max(1, (total + PAGE_SIZE - 1) // PAGE_SIZE)
+            if page > last_page:
+                page = last_page
                 rows, total = db.list_entries(
                     criteria=criteria,
                     limit=PAGE_SIZE,
                     offset=(page - 1) * PAGE_SIZE,
                 )
-                last_page = max(1, (total + PAGE_SIZE - 1) // PAGE_SIZE)
-                if page > last_page:
-                    page = last_page
-                    rows, total = db.list_entries(
-                        criteria=criteria,
-                        limit=PAGE_SIZE,
-                        offset=(page - 1) * PAGE_SIZE,
-                    )
-                selected_id = request.get("selected_id")
-                row_ids = {row.id for row in rows}
-                target_id = (
-                    selected_id
-                    if selected_id in row_ids
-                    else (rows[0].id if rows else None)
-                )
-                detail = db.entry_detail(target_id) if target_id is not None else None
-                snapshot["smart_review_marks"] = db.smart_review_marks(sorted(row_ids))
-            except ValueError as exc:
-                error = str(exc)
-            snapshot.update(
-                versions=scope["versions"],
-                version=scope["version"],
-                mods=scope["mods"],
-                kinds=scope["kinds"],
-                effective_source_codes=scope["source_codes"],
-                source=scope["source"],
-                filter_options_are_filtered=scope["options_are_filtered"],
-                mod_id=scope["mod_id"],
-                kind=scope["kind"],
-                page=page,
-                rows=rows,
-                total=total,
-                list_error=error,
-                detail=detail,
+            selected_id = request.get("selected_id")
+            row_ids = {row.id for row in rows}
+            target_id = (
+                selected_id
+                if selected_id in row_ids
+                else (rows[0].id if rows else None)
             )
-        return snapshot
-    finally:
-        if db is not None:
-            if db._conn.in_transaction:
-                db._conn.rollback()
-            db.close()
+            detail = db.entry_detail(target_id) if target_id is not None else None
+            snapshot["smart_review_marks"] = db.smart_review_marks(sorted(row_ids))
+        except ValueError as exc:
+            error = str(exc)
+        snapshot.update(
+            versions=scope["versions"],
+            version=scope["version"],
+            mods=scope["mods"],
+            kinds=scope["kinds"],
+            effective_source_codes=scope["source_codes"],
+            source=scope["source"],
+            filter_options_are_filtered=scope["options_are_filtered"],
+            mod_id=scope["mod_id"],
+            kind=scope["kind"],
+            page=page,
+            rows=rows,
+            total=total,
+            list_error=error,
+            detail=detail,
+        )
+    return snapshot
 
 
 def _resolve_entries_scope(db, request: dict, settings) -> dict:

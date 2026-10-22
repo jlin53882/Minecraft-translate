@@ -351,8 +351,8 @@ def test_quality_filter_worker_owns_readonly_connection_and_does_not_block_selec
 ):
     from dataclasses import replace
 
+    from app.services_impl import moddb_service as panel_refresh
     from app.tasks.operation_registry import OperationRegistry
-    from app.views.moddb import panel_refresh
     from translation_tool.translation_db import QualityFilter
 
     seed(db_path)
@@ -659,8 +659,8 @@ def test_overview_worker_closes_connection_when_ui_dispatch_raises(
 def test_panel_worker_dispatch_failure_releases_loading_and_database(
     db_path, monkeypatch
 ):
+    from app.services_impl import moddb_service as panel_refresh
     from app.tasks.operation_registry import OperationRegistry
-    from app.views.moddb import panel_refresh
 
     seed(db_path)
     page = mock_page()
