@@ -48,6 +48,11 @@ GUARDED_KEYS: dict[str, tuple[str, str | None]] = {
         "lm_translator.initial_batch_size_patchouli",
         None,
     ),
+    "batch_shrink_factor": ("lm_translator.batch_shrink_factor", None),
+    "min_batch_size": ("lm_translator.min_batch_size", None),
+    "rpm_cooldown_sec": ("lm_translator.rpm_cooldown_sec", None),
+    "max_input_token_budget": ("lm_translator.max_input_token_budget", None),
+    "max_output_tokens": ("lm_translator.max_output_tokens", None),
 }
 
 #: 不得以數字字面值指定的預設常數名稱（值應該呼叫 ``get_default``）。
@@ -57,6 +62,8 @@ GUARDED_CONSTANT_NAMES = frozenset(
         "DEFAULT_REQUEST_TIMEOUT",
         "DEFAULT_TIMEOUT_SEC",
         "DEFAULT_TEMPERATURE",
+        "RPM_COOLDOWN_SEC",
+        "DEFAULT_MAX_OUTPUT_TOKENS",
     }
 )
 
@@ -213,3 +220,111 @@ def test_runtime_fallbacks_resolve_to_the_schema_defaults():
     ):
         assert _get_default_batch_size(cache_type, {cache_type: 7}) == 7
         assert get_default(f"lm_translator.initial_batch_size_{suffix}") > 0
+
+
+# ---------------------------------------------------------------------------
+# 無法（或不該）改成 schema lookup 的硬編碼後備值：用相等性契約釘住
+# ---------------------------------------------------------------------------
+
+
+def test_budget_config_defaults_equal_schema_defaults():
+    """``BudgetConfig`` 的 dataclass 預設是缺設定時的實際後備值，必須等於 schema。"""
+    from translation_tool.core.lm_batch_budget import BudgetConfig
+
+    default = BudgetConfig()
+    from_empty = BudgetConfig.from_config({})
+    for cfg in (default, from_empty):
+        assert cfg.max_output_token_budget == get_default(
+            "lm_translator.max_output_token_budget"
+        )
+        assert cfg.max_input_token_budget == get_default(
+            "lm_translator.max_input_token_budget"
+        )
+        assert cfg.max_output_tokens == get_default("lm_translator.max_output_tokens")
+        assert cfg.enabled == get_default("lm_translator.token_budget_enabled")
+
+
+def test_runtime_constants_equal_schema_defaults():
+    from translation_tool.core import lm_api_client, lm_key_health
+    from translation_tool.core import lm_translator_main as main
+
+    assert main.RPM_COOLDOWN_SEC == get_default("lm_translator.rpm_cooldown_sec")
+    assert lm_api_client.DEFAULT_MAX_OUTPUT_TOKENS == get_default(
+        "lm_translator.max_output_tokens"
+    )
+    # 403 key 冷卻的後備值與 schema 相同（常數是 float、schema 是 int）。
+    assert lm_key_health.DEFAULT_COOLDOWN_SEC == float(
+        get_default("lm_translator.key_failure_cooldown_sec")
+    )
+
+
+#: 以字面值當後備、且與 schema 預設值不同的位置，以及為什麼可以不同。
+LITERAL_FALLBACK_EXCEPTIONS: dict[tuple[str, str], str] = {
+    ("app/icon_index.py", "parallel_execution_workers"): (
+        "圖示索引是 I/O 為主的背景掃描，刻意用比一般檔案處理（4）更多的執行緒"
+    ),
+}
+EQUALITY_KEYS = {
+    "parallel_execution_workers": "translator.parallel_execution_workers",
+    "enable_cache_saving": "translator.enable_cache_saving",
+}
+
+
+def _literal_fallbacks() -> list[tuple[str, int, str, object]]:
+    found = []
+    for directory in SCAN_DIRS:
+        for path in sorted((ROOT / directory).rglob("*.py")):
+            relative = path.relative_to(ROOT).as_posix()
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+            for node in ast.walk(tree):
+                if not (
+                    isinstance(node, ast.Call)
+                    and isinstance(node.func, ast.Attribute)
+                    and node.func.attr == "get"
+                    and len(node.args) >= 2
+                    and isinstance(node.args[0], ast.Constant)
+                    and node.args[0].value in EQUALITY_KEYS
+                    and isinstance(node.args[1], ast.Constant)
+                ):
+                    continue
+                found.append(
+                    (relative, node.lineno, node.args[0].value, node.args[1].value)
+                )
+    return found
+
+
+def test_literal_fallbacks_for_hidden_defaults_equal_the_schema():
+    """``parallel_execution_workers``／``enable_cache_saving`` 的字面值後備必須等於 schema 預設值。"""
+    mismatches = [
+        f"{relative}:{lineno} {key} 後備 {value!r} != schema "
+        f"{get_default(EQUALITY_KEYS[key])!r}"
+        for relative, lineno, key, value in _literal_fallbacks()
+        if (relative, key) not in LITERAL_FALLBACK_EXCEPTIONS
+        and value != get_default(EQUALITY_KEYS[key])
+    ]
+    assert not mismatches, "\n".join(mismatches)
+
+
+def test_literal_fallback_exceptions_state_a_reason_and_still_differ():
+    present = {
+        (relative, key): value for relative, _l, key, value in _literal_fallbacks()
+    }
+    for (relative, key), reason in LITERAL_FALLBACK_EXCEPTIONS.items():
+        assert reason.strip()
+        assert (relative, key) in present, f"{relative} 已沒有 {key} 的字面值後備"
+        assert present[(relative, key)] != get_default(EQUALITY_KEYS[key]), (
+            f"{relative} 的 {key} 已與 schema 相同，請從例外移除"
+        )
+
+
+def test_get_schema_default_is_the_canonical_name_and_get_default_stays_compatible():
+    from translation_tool.utils import config_schema, config_manager
+
+    assert config_schema.get_default is config_schema.get_schema_default
+    assert config_schema.get_schema_default("lm_translator.batch_shrink_factor") == 0.5
+    # config_manager.get_default 是另一個函式：讀 DEFAULT_CONFIG 區塊並接受自訂 default。
+    assert config_manager.get_default is not config_schema.get_schema_default
+    assert config_manager.get_default("no.such.path", "fallback") == "fallback"
+    assert config_manager.get_default(
+        "lm_translator.batch_shrink_factor"
+    ) == config_schema.get_schema_default("lm_translator.batch_shrink_factor")

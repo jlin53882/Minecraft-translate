@@ -5,6 +5,7 @@
 """
 
 import json
+import math
 import random
 import time
 from contextlib import nullcontext
@@ -73,7 +74,10 @@ from translation_tool.utils.cancellation import (
     raise_if_cancelled,
 )
 from translation_tool.utils.config_manager import get_models_config, load_config
-from translation_tool.utils.config_schema import get_default
+from translation_tool.utils.config_schema import (
+    get_schema_default,
+    validate_batch_shrink_factor,
+)
 from translation_tool.utils.log_unit import log_error, log_info, log_warning
 from translation_tool.utils.redaction import redact_text
 
@@ -82,8 +86,10 @@ from translation_tool.utils.redaction import redact_text
 # =========================================================
 # 每批完成後的固定等待秒數（預設不等待；遇到 429 會依 API 建議秒數重試）。
 # 免費層若常遇到 429，可在設定頁把「每批翻譯後等待秒數」調高。
-RPM_COOLDOWN_SEC = 0
+RPM_COOLDOWN_SEC = get_schema_default("lm_translator.rpm_cooldown_sec")
 OVERLOAD_RETRY_WAIT_SEC = 12  # Overload 重試等待秒數
+KEY_ROTATION_BUFFER_SEC = 5  # 換 Key 前的緩衝秒數
+REQUEST_INTERVAL_SEC = 4  # 非 overload 的 503 後的等待秒數
 # Gemini 503 UNAVAILABLE/high-demand：最多重試三次，重試等待逐步增加。
 GEMINI_503_RETRY_DELAYS_SEC = (30, 60, 120)
 GEMINI_503_MAX_RETRY_AFTER_SEC = 120
@@ -126,7 +132,7 @@ _BATCH_PROFILE_SIZE_KEYS = {
     "patch": "patchouli",
 }
 _DEFAULT_BATCH_SLEEP = float(
-    get_default("lm_translator.rate_limit.sleep_seconds_between_batches")
+    get_schema_default("lm_translator.rate_limit.sleep_seconds_between_batches")
 )
 
 
@@ -587,9 +593,9 @@ class _BatchRuntime:
     quota_owner: object = field(default_factory=object)
     missing_models: set[int] = field(default_factory=set)
     rpm_cooldown_sec: float = RPM_COOLDOWN_SEC
-    key_rotation_buffer_sec: float = 5
+    key_rotation_buffer_sec: float = KEY_ROTATION_BUFFER_SEC
     overload_retry_sec: float = OVERLOAD_RETRY_WAIT_SEC
-    request_interval_sec: float = 4
+    request_interval_sec: float = REQUEST_INTERVAL_SEC
     batch_interval_sec: float = 4
     reasoning_effort: str | None = None
     chatgpt_profile_id: str | None = None
@@ -893,10 +899,32 @@ def _profile_max_batch_sizes(lm_cfg: dict) -> dict[str, int | str | None]:
     return {
         profile_name: lm_cfg.get(
             f"initial_batch_size_{key}",
-            get_default(f"lm_translator.initial_batch_size_{key}"),
+            get_schema_default(f"lm_translator.initial_batch_size_{key}"),
         )
         for profile_name, key in _BATCH_PROFILE_SIZE_KEYS.items()
     }
+
+
+# 內部隱藏設定（不在設定頁，需手動編輯 config.json）的等待秒數上限；超出或非有限值時退回預設。
+HIDDEN_WAIT_SEC_MAX = 3600.0
+
+
+def _hidden_wait_sec(lm_cfg: dict, key: str, default: float) -> float:
+    """讀取隱藏的等待秒數設定：必須是 ``0 <= 有限數值 <= HIDDEN_WAIT_SEC_MAX``，否則用預設並記警告。"""
+    raw = lm_cfg.get(key)
+    if raw is None:
+        return default
+    try:
+        value = float(raw) if not isinstance(raw, bool) else math.nan
+    except (TypeError, ValueError):
+        value = math.nan
+    if math.isfinite(value) and 0 <= value <= HIDDEN_WAIT_SEC_MAX:
+        return value
+    log_warning(
+        f"[⚠️] lm_translator.{key} 必須介於 0 到 {HIDDEN_WAIT_SEC_MAX:g} 秒，"
+        f"收到 {raw!r}，改用預設 {default:g} 秒"
+    )
+    return default
 
 
 def _build_batch_runtime(
@@ -908,6 +936,7 @@ def _build_batch_runtime(
     """建立單次批次翻譯共用的設定與可變執行狀態。"""
     config_snapshot = deepcopy(load_config())
     lm_cfg = config_snapshot.get("lm_translator", {})
+    _batch_shrink_factor(lm_cfg)  # 設定非法時在送出任何請求前就報錯
     provider = lm_cfg.get("provider", "gemini")
     profile = _detect_batch_profile(batch_items)
     max_sizes = _profile_max_batch_sizes(lm_cfg)
@@ -927,10 +956,13 @@ def _build_batch_runtime(
             if context_budget is not None:
                 try:
                     configured_budget = int(
-                        lm_cfg.get("max_input_token_budget", 256_000) or 256_000
+                        lm_cfg.get("max_input_token_budget")
+                        or get_schema_default("lm_translator.max_input_token_budget")
                     )
                 except (TypeError, ValueError):
-                    configured_budget = 256_000
+                    configured_budget = int(
+                        get_schema_default("lm_translator.max_input_token_budget")
+                    )
                 lm_cfg = {
                     **lm_cfg,
                     "max_input_token_budget": min(configured_budget, context_budget),
@@ -980,7 +1012,7 @@ def _build_batch_runtime(
         key_cycle=ApiKeyCycle(),
         model_pool=model_pool,
         model_temperature=lm_cfg.get(
-            "temperature", get_default("lm_translator.temperature")
+            "temperature", get_schema_default("lm_translator.temperature")
         ),
         lang_prompt=prompt_context.lang_prompt,
         patchouli_prompt=prompt_context.patchouli_prompt,
@@ -1004,9 +1036,15 @@ def _build_batch_runtime(
             None,
         ),
         rpm_cooldown_sec=rpm_cooldown,
-        key_rotation_buffer_sec=lm_cfg.get("key_rotation_buffer_sec", 5),
-        overload_retry_sec=lm_cfg.get("overload_retry_sec", OVERLOAD_RETRY_WAIT_SEC),
-        request_interval_sec=lm_cfg.get("request_interval_sec", 4),
+        key_rotation_buffer_sec=_hidden_wait_sec(
+            lm_cfg, "key_rotation_buffer_sec", KEY_ROTATION_BUFFER_SEC
+        ),
+        overload_retry_sec=_hidden_wait_sec(
+            lm_cfg, "overload_retry_sec", OVERLOAD_RETRY_WAIT_SEC
+        ),
+        request_interval_sec=_hidden_wait_sec(
+            lm_cfg, "request_interval_sec", REQUEST_INTERVAL_SEC
+        ),
         batch_interval_sec=_batch_interval_seconds(lm_cfg),
         reasoning_effort=reasoning_effort,
         chatgpt_profile_id=chatgpt_profile_id,
@@ -2249,7 +2287,7 @@ def _abandon_model(
 
 def _probe_lease_sec(runtime: _BatchRuntime) -> float:
     """探測租約長度：涵蓋用戶端整段最壞耗時（連線重試 × 逾時 + 退避）+ 餘裕。"""
-    default_timeout = float(get_default("lm_translator.rate_limit.timeout"))
+    default_timeout = float(get_schema_default("lm_translator.rate_limit.timeout"))
     try:
         timeout = float(
             (runtime.lm_cfg.get("rate_limit") or {}).get("timeout", default_timeout)
@@ -2609,6 +2647,21 @@ def _attempt_batch(
     return _BatchRoundOutcome(BatchAction.SHRINK_BATCH)
 
 
+def _batch_shrink_factor(lm_cfg: dict) -> float:
+    """讀取縮批比例：缺漏用 schema 預設；明確設定但不在 ``0 < factor < 1`` 時丟 RuntimeError。
+
+    不使用 ``get(key, default) or default`` 這類會把顯式 0 吞成預設值的寫法，
+    也不讓非法值默默擴大批次或把整批回填原文。
+    """
+    raw = lm_cfg.get("batch_shrink_factor")
+    if raw is None:
+        return float(get_schema_default("lm_translator.batch_shrink_factor"))
+    try:
+        return validate_batch_shrink_factor(raw)
+    except ValueError as error:
+        raise RuntimeError(f"❌ {error}") from error
+
+
 def _apply_batch_shrink(
     runtime: _BatchRuntime, round_data: _BatchRound, outcome: _BatchRoundOutcome
 ) -> None:
@@ -2625,10 +2678,13 @@ def _apply_batch_shrink(
             _note_contract_progress(runtime, len(round_data.current_batch), next_fit)
             return
 
-    shrink_factor = float(runtime.lm_cfg.get("batch_shrink_factor", 0.75) or 0.75)
+    shrink_factor = _batch_shrink_factor(runtime.lm_cfg)
     basis = min(runtime.batch_size, len(round_data.current_batch))
     new_size = int(basis * shrink_factor)
-    min_size = int(runtime.lm_cfg.get("min_batch_size", 50) or 50)
+    min_size = int(
+        runtime.lm_cfg.get("min_batch_size")
+        or get_schema_default("lm_translator.min_batch_size")
+    )
     if runtime.batch_profile == "lang" and new_size < MIN_LANG_BATCH_SIZE:
         new_size = MIN_LANG_BATCH_SIZE if basis > MIN_LANG_BATCH_SIZE else 0
     elif new_size < min_size:
