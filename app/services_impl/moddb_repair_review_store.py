@@ -8,6 +8,14 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
+from translation_tool.translation_db.repair_status import (  # noqa: F401 - view 經此取用
+    REPAIR_FINISHED_STATUSES,
+    REPAIR_REVIEW_STATUS_LABELS,
+    REPAIR_UNRESOLVED_STATUSES,
+    RepairReviewStatus,
+    RepairStaleReason,
+)
+
 
 def store_path(database_path: str | Path) -> Path:
     return Path(f"{Path(database_path)}.repair-review.sqlite3")
@@ -112,7 +120,7 @@ def matching_items(
     run_id: str,
     item: dict[str, Any],
     *,
-    statuses: tuple[str, ...] = ("pending", "invalid"),
+    statuses: tuple[str, ...] = REPAIR_UNRESOLVED_STATUSES,
 ) -> list[dict[str, Any]]:
     """Return unresolved review items in the same persisted review group as ``item``.
 
@@ -240,10 +248,11 @@ def rebase_item(
         payload["old_translation"] = old_translation
         payload["expected_revision"] = expected_revision
         conn.execute(
-            "UPDATE repair_review SET payload=?, status='pending', "
+            "UPDATE repair_review SET payload=?, status=?, "
             "updated_at=CURRENT_TIMESTAMP WHERE run_id=? AND item_index=?",
             (
                 json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
+                RepairReviewStatus.PENDING.value,
                 run_id,
                 index,
             ),
@@ -254,8 +263,10 @@ def rebase_item(
 def save_review_state(
     path: str | Path, run_id: str, index: int, status: str, draft: str
 ) -> bool:
-    if status not in {"pending", "kept_old", "applied", "stale", "invalid"}:
-        raise ValueError("unknown repair review status")
+    try:
+        status = RepairReviewStatus(status).value
+    except ValueError:
+        raise ValueError("unknown repair review status") from None
     with sqlite3.connect(path, timeout=10) as conn:
         result = conn.execute(
             "UPDATE repair_review SET status=?,draft=?,updated_at=CURRENT_TIMESTAMP "

@@ -27,6 +27,7 @@ from translation_tool.translation_db.source_catalog import (
     DEFAULT_SOURCE_CATALOG,
     SourceCatalog,
 )
+from translation_tool.utils.cache_registry import register_cache
 from translation_tool.utils.log_unit import log_info, log_warning
 from translation_tool.utils.path_text import normalize_path_text, strip_path_quotes
 
@@ -114,6 +115,14 @@ def clean_source_names(names: Any) -> list[str]:
 
 
 _registry_cache: dict[Path, tuple[tuple, dict[str, int]]] = {}
+
+
+def clear_registry_cache() -> None:
+    """清除自訂來源登錄表的檔案簽章快取。"""
+    _registry_cache.clear()
+
+
+register_cache("translation_db.settings.registry", clear_registry_cache)
 
 
 def _file_signature(path: Path) -> tuple:

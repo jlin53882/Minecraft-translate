@@ -29,6 +29,9 @@ from translation_tool.translation_db.smart_review import (
     run_smart_review,
     smart_review_response_schema,
 )
+from translation_tool.translation_db.smart_review_history_manifest import (
+    ChunkManifestRepository,
+)
 
 
 def _seed(db: TranslationDB) -> None:
@@ -603,11 +606,11 @@ def test_smart_review_query_escapes_like_wildcards(db):
 
 def test_local_context_uses_shared_terminology_filter(db, monkeypatch):
     """驗證本地上下文使用共用的專有名詞篩選器。"""
-    import translation_tool.translation_db.smart_review as smart_review_module
+    import translation_tool.translation_db.smart_review_context as smart_review_context_module
     from translation_tool.core.official_locale import OfficialLocaleIndex
 
     monkeypatch.setattr(
-        smart_review_module,
+        smart_review_context_module,
         "load_official_locale_index",
         lambda: OfficialLocaleIndex({}, {}, {}, "test"),
     )
@@ -782,7 +785,7 @@ def test_run_persists_candidates_without_writing_translation(db, monkeypatch):
         )
 
     monkeypatch.setattr(
-        "translation_tool.translation_db.smart_review.call_gemini_requests",
+        "translation_tool.translation_db.smart_review_provider.call_gemini_requests",
         fake_call,
     )
     before = db._q("SELECT COUNT(*) FROM translation WHERE source=?", (SRC_MANUAL,))[0][
@@ -853,7 +856,7 @@ def test_smart_review_candidate_page_reads_json_once_for_total_and_row(db, monke
         batch_size=3,
     )
     reads = 0
-    original_read = SmartReviewHistoryStore._read_unlocked
+    original_read = ChunkManifestRepository.read_unlocked
 
     def counted_read(history, value):
         """計算同一頁查詢實際讀取批次 JSON 的次數。"""
@@ -861,7 +864,7 @@ def test_smart_review_candidate_page_reads_json_once_for_total_and_row(db, monke
         reads += 1
         return original_read(history, value)
 
-    monkeypatch.setattr(SmartReviewHistoryStore, "_read_unlocked", counted_read)
+    monkeypatch.setattr(ChunkManifestRepository, "read_unlocked", counted_read)
     total, rows = db.load_smart_review_candidate_page(
         run_id,
         limit=1,
@@ -904,7 +907,7 @@ def test_smart_review_large_history_uses_manifest_and_partial_chunk_updates(
     ]
 
     read_paths = []
-    original_read = SmartReviewHistoryStore._read_json_path
+    original_read = ChunkManifestRepository.read_json_path
 
     def counted_read(path):
         """記錄單筆讀取實際碰到的 manifest 與分片。"""
@@ -912,14 +915,14 @@ def test_smart_review_large_history_uses_manifest_and_partial_chunk_updates(
         return original_read(path)
 
     monkeypatch.setattr(
-        SmartReviewHistoryStore, "_read_json_path", staticmethod(counted_read)
+        ChunkManifestRepository, "read_json_path", staticmethod(counted_read)
     )
     candidate = store.get_candidate(run_id, snapshots[1].ordinal)
     assert candidate is not None
     assert read_paths == [f"{run_id}.json", "000001.json"]
 
     write_paths = []
-    original_write = SmartReviewHistoryStore._write_json_path_unlocked
+    original_write = ChunkManifestRepository._write_json_path_unlocked
 
     def counted_write(history, path, payload):
         """記錄一次結果 checkpoint 寫入哪些 JSON 檔。"""
@@ -927,7 +930,7 @@ def test_smart_review_large_history_uses_manifest_and_partial_chunk_updates(
         return original_write(history, path, payload)
 
     monkeypatch.setattr(
-        SmartReviewHistoryStore, "_write_json_path_unlocked", counted_write
+        ChunkManifestRepository, "_write_json_path_unlocked", counted_write
     )
     store.record_results(
         run_id,
@@ -958,7 +961,7 @@ def test_smart_review_chunked_create_publishes_manifest_last(db, monkeypatch):
 
     snapshots = db.smart_review_candidates(version="1.21.1", limit=2)
     store = SmartReviewHistoryStore(db.path, storage_chunk_size=1)
-    original_write = SmartReviewHistoryStore._write_chunk_path_unlocked
+    original_write = ChunkManifestRepository._write_chunk_path_unlocked
 
     def fail_second_chunk(history, path, payload):
         """模擬第二個暫存分片寫入失敗。"""
@@ -967,7 +970,7 @@ def test_smart_review_chunked_create_publishes_manifest_last(db, monkeypatch):
         return original_write(history, path, payload)
 
     monkeypatch.setattr(
-        SmartReviewHistoryStore, "_write_chunk_path_unlocked", fail_second_chunk
+        ChunkManifestRepository, "_write_chunk_path_unlocked", fail_second_chunk
     )
     with pytest.raises(OSError, match="simulated chunk write failure"):
         store.create_run(
@@ -988,7 +991,9 @@ def test_smart_review_outer_history_lock_covers_nested_candidate_write(db, monke
     """外層候選狀態交易應持有跨程序鎖，且巢狀寫入只能重用該鎖。"""
     from contextlib import contextmanager
 
-    from translation_tool.translation_db import smart_review_history as history_module
+    from translation_tool.translation_db import (
+        smart_review_history_lock as history_module,
+    )
     from translation_tool.translation_db.smart_review_history import (
         SmartReviewHistoryStore,
     )
@@ -1045,7 +1050,7 @@ def test_smart_review_chunk_manifest_recovers_after_manifest_write_failure(
         requested_limit=2,
         batch_size=1,
     )
-    original_write = SmartReviewHistoryStore._write_unlocked
+    original_write = ChunkManifestRepository.write_unlocked
     fail_once = True
 
     def fail_manifest_once(history, value, payload):
@@ -1056,7 +1061,7 @@ def test_smart_review_chunk_manifest_recovers_after_manifest_write_failure(
             raise OSError("simulated manifest write failure")
         return original_write(history, value, payload)
 
-    monkeypatch.setattr(SmartReviewHistoryStore, "_write_unlocked", fail_manifest_once)
+    monkeypatch.setattr(ChunkManifestRepository, "write_unlocked", fail_manifest_once)
     with pytest.raises(OSError, match="simulated manifest write failure"):
         store.record_results(
             run_id,
@@ -1138,7 +1143,7 @@ def test_smart_review_page_skips_unneeded_chunks_for_absolute_offset(db, monkeyp
         requested_limit=3,
         batch_size=1,
     )
-    original_read = SmartReviewHistoryStore._read_chunk_unlocked
+    original_read = ChunkManifestRepository.read_chunk_unlocked
     read_indexes = []
 
     def counted_chunk_read(history, value, index):
@@ -1147,7 +1152,7 @@ def test_smart_review_page_skips_unneeded_chunks_for_absolute_offset(db, monkeyp
         return original_read(history, value, index)
 
     monkeypatch.setattr(
-        SmartReviewHistoryStore, "_read_chunk_unlocked", counted_chunk_read
+        ChunkManifestRepository, "read_chunk_unlocked", counted_chunk_read
     )
     total, rows = store.page_candidates(run_id, offset=2, limit=1)
     assert total == 3
@@ -1176,7 +1181,7 @@ def test_smart_review_reconcile_reads_only_target_chunks(db, monkeypatch):
         requested_limit=3,
         batch_size=1,
     )
-    original_read = SmartReviewHistoryStore._read_chunk_unlocked
+    original_read = ChunkManifestRepository.read_chunk_unlocked
     read_indexes = []
 
     def counted_chunk_read(history, value, index):
@@ -1185,7 +1190,7 @@ def test_smart_review_reconcile_reads_only_target_chunks(db, monkeypatch):
         return original_read(history, value, index)
 
     monkeypatch.setattr(
-        SmartReviewHistoryStore, "_read_chunk_unlocked", counted_chunk_read
+        ChunkManifestRepository, "read_chunk_unlocked", counted_chunk_read
     )
     assert (
         store.reconcile_applied(
@@ -1442,7 +1447,7 @@ def test_json_apply_reconciles_sqlite_commit_when_history_write_fails(db, monkey
         )
 
     monkeypatch.setattr(
-        "translation_tool.translation_db.smart_review.call_gemini_requests",
+        "translation_tool.translation_db.smart_review_provider.call_gemini_requests",
         fake_call,
     )
     result = run_smart_review(db, model_name="gemini-test", api_key="test-key", limit=1)
@@ -1486,7 +1491,7 @@ def test_smart_review_reports_search_and_api_timing(db, monkeypatch):
     """驗證進度與持久化 metrics 能區分搜尋、API 與批次處理耗時。"""
     events = []
     monkeypatch.setattr(
-        "translation_tool.translation_db.smart_review.call_gemini_requests",
+        "translation_tool.translation_db.smart_review_provider.call_gemini_requests",
         lambda **kwargs: _review_response(kwargs["payload"]["items"]),
     )
 
@@ -1509,6 +1514,9 @@ def test_smart_review_reports_search_and_api_timing(db, monkeypatch):
     assert result.metrics["selection_seconds"] >= 0
     assert result.metrics["api_seconds"] >= 0
     assert result.metrics["batch_count"] == 2
+    assert (
+        result.metrics["suggest_revision_count"] == result.metrics["suggestion_count"]
+    )
 
 
 def test_smart_review_batch_event_reports_validation_distribution(db, monkeypatch):
@@ -1534,7 +1542,7 @@ def test_smart_review_batch_event_reports_validation_distribution(db, monkeypatc
         )
 
     monkeypatch.setattr(
-        "translation_tool.translation_db.smart_review.call_gemini_requests",
+        "translation_tool.translation_db.smart_review_provider.call_gemini_requests",
         invalid_response,
     )
     result = run_smart_review(
@@ -1591,7 +1599,7 @@ def test_smart_review_retries_only_invalid_items_and_revalidates(db, monkeypatch
         )
 
     monkeypatch.setattr(
-        "translation_tool.translation_db.smart_review.call_gemini_requests",
+        "translation_tool.translation_db.smart_review_provider.call_gemini_requests",
         response,
     )
     result = run_smart_review(
@@ -1652,7 +1660,7 @@ def test_smart_review_repair_payload_is_bounded_to_invalid_results(db):
 def test_smart_review_clamps_excessive_batch_size(db, monkeypatch):
     """驗證服務層會將過大的批次限制在可觀測性測試採用的安全上限。"""
     monkeypatch.setattr(
-        "translation_tool.translation_db.smart_review.call_gemini_requests",
+        "translation_tool.translation_db.smart_review_provider.call_gemini_requests",
         lambda **kwargs: _review_response(kwargs["payload"]["items"]),
     )
     result = run_smart_review(
@@ -1674,7 +1682,7 @@ def test_request_failures_and_cancellation_are_distinct_from_invalid(db, monkeyp
         raise RuntimeError("simulated request failure")
 
     monkeypatch.setattr(
-        "translation_tool.translation_db.smart_review.call_gemini_requests",
+        "translation_tool.translation_db.smart_review_provider.call_gemini_requests",
         fail_call,
     )
     failed = run_smart_review(
@@ -1700,7 +1708,7 @@ def test_request_failures_and_cancellation_are_distinct_from_invalid(db, monkeyp
         raise AssertionError("cancelled run must not send a request")
 
     monkeypatch.setattr(
-        "translation_tool.translation_db.smart_review.call_gemini_requests",
+        "translation_tool.translation_db.smart_review_provider.call_gemini_requests",
         should_not_call,
     )
     cancelled = run_smart_review(
@@ -1731,7 +1739,7 @@ def test_smart_review_cancel_after_batch_keeps_completed_json_checkpoint(
         return _review_response(kwargs["payload"]["items"])
 
     monkeypatch.setattr(
-        "translation_tool.translation_db.smart_review.call_gemini_requests",
+        "translation_tool.translation_db.smart_review_provider.call_gemini_requests",
         fake_call,
     )
     result = run_smart_review(
@@ -1767,7 +1775,7 @@ def test_smart_review_recovers_dead_owner_without_losing_completed_candidates(
     db, monkeypatch
 ):
     """驗證意外退出後下一次讀取會收斂 running JSON，保留已完成候選。"""
-    from translation_tool.translation_db import smart_review_history
+    from translation_tool.translation_db import smart_review_history_recovery
     from translation_tool.translation_db.smart_review_history import (
         SmartReviewHistoryStore,
     )
@@ -1800,7 +1808,9 @@ def test_smart_review_recovers_dead_owner_without_losing_completed_candidates(
     payload = json.loads(path.read_text(encoding="utf-8"))
     payload["owner_pid"] = 999999
     path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
-    monkeypatch.setattr(smart_review_history, "_process_is_alive", lambda _pid: False)
+    monkeypatch.setattr(
+        smart_review_history_recovery, "_process_is_alive", lambda _pid: False
+    )
     SmartReviewHistoryStore._recovery_checked.discard(store.directory)
 
     run = db.get_smart_review_run(run_id)
@@ -1832,7 +1842,7 @@ def test_smart_review_does_not_recover_live_owner(db, monkeypatch):
         batch_size=1,
     )
     monkeypatch.setattr(
-        "translation_tool.translation_db.smart_review_history._process_is_alive",
+        "translation_tool.translation_db.smart_review_history_recovery._process_is_alive",
         lambda _pid: True,
     )
 
@@ -1852,11 +1862,11 @@ def test_smart_review_retries_gemini_503_with_bounded_shared_backoff(db, monkeyp
         return _review_response(kwargs["payload"]["items"])
 
     monkeypatch.setattr(
-        "translation_tool.translation_db.smart_review.call_gemini_requests",
+        "translation_tool.translation_db.smart_review_provider.call_gemini_requests",
         fake_call,
     )
     monkeypatch.setattr(
-        "translation_tool.translation_db.smart_review.interruptible_sleep",
+        "translation_tool.translation_db.smart_review_provider.interruptible_sleep",
         lambda *_args, **_kwargs: None,
     )
     monkeypatch.setattr(
@@ -1894,11 +1904,11 @@ def test_smart_review_retry_events_classify_server_errors(db, monkeypatch, statu
         return _review_response(kwargs["payload"]["items"])
 
     monkeypatch.setattr(
-        "translation_tool.translation_db.smart_review.call_gemini_requests",
+        "translation_tool.translation_db.smart_review_provider.call_gemini_requests",
         fake_call,
     )
     monkeypatch.setattr(
-        "translation_tool.translation_db.smart_review.interruptible_sleep",
+        "translation_tool.translation_db.smart_review_provider.interruptible_sleep",
         lambda *_args, **_kwargs: None,
     )
     monkeypatch.setattr(
@@ -1956,11 +1966,11 @@ def test_smart_review_timeout_events_are_visible_and_safe(db, monkeypatch):
         return _review_response(kwargs["payload"]["items"])
 
     monkeypatch.setattr(
-        "translation_tool.translation_db.smart_review.call_gemini_requests",
+        "translation_tool.translation_db.smart_review_provider.call_gemini_requests",
         fake_call,
     )
     monkeypatch.setattr(
-        "translation_tool.translation_db.smart_review.interruptible_sleep",
+        "translation_tool.translation_db.smart_review_provider.interruptible_sleep",
         lambda *_args, **_kwargs: None,
     )
     monkeypatch.setattr(
@@ -1999,11 +2009,11 @@ def test_smart_review_bounds_continuous_gemini_503_and_stops_pending_batches(
         raise _http_error(503, "UNAVAILABLE")
 
     monkeypatch.setattr(
-        "translation_tool.translation_db.smart_review.call_gemini_requests",
+        "translation_tool.translation_db.smart_review_provider.call_gemini_requests",
         fail_call,
     )
     monkeypatch.setattr(
-        "translation_tool.translation_db.smart_review.interruptible_sleep",
+        "translation_tool.translation_db.smart_review_provider.interruptible_sleep",
         lambda *_args, **_kwargs: None,
     )
     monkeypatch.setattr(
@@ -2046,11 +2056,11 @@ def test_smart_review_cancel_during_provider_backoff_is_cooperative(db, monkeypa
         cancelled.set()
 
     monkeypatch.setattr(
-        "translation_tool.translation_db.smart_review.call_gemini_requests",
+        "translation_tool.translation_db.smart_review_provider.call_gemini_requests",
         fail_call,
     )
     monkeypatch.setattr(
-        "translation_tool.translation_db.smart_review.interruptible_sleep",
+        "translation_tool.translation_db.smart_review_provider.interruptible_sleep",
         cancel_during_sleep,
     )
     monkeypatch.setattr(
@@ -2085,7 +2095,7 @@ def test_smart_review_does_not_shrink_invalid_400_schema(db, monkeypatch):
         )
 
     monkeypatch.setattr(
-        "translation_tool.translation_db.smart_review.call_gemini_requests",
+        "translation_tool.translation_db.smart_review_provider.call_gemini_requests",
         fail_call,
     )
 
@@ -2119,7 +2129,7 @@ def test_smart_review_shrinks_explicit_payload_too_large_413(db, monkeypatch):
         return _review_response(items)
 
     monkeypatch.setattr(
-        "translation_tool.translation_db.smart_review.call_gemini_requests",
+        "translation_tool.translation_db.smart_review_provider.call_gemini_requests",
         fake_call,
     )
 
@@ -2149,7 +2159,7 @@ def test_smart_review_shrinks_400_only_when_context_size_is_explicit(db, monkeyp
         return _review_response(items)
 
     monkeypatch.setattr(
-        "translation_tool.translation_db.smart_review.call_gemini_requests",
+        "translation_tool.translation_db.smart_review_provider.call_gemini_requests",
         fake_call,
     )
 
@@ -2188,7 +2198,7 @@ def test_smart_review_metrics_count_usage_for_truncated_retry(db, monkeypatch):
         return _review_response(items)
 
     monkeypatch.setattr(
-        "translation_tool.translation_db.smart_review.call_gemini_requests",
+        "translation_tool.translation_db.smart_review_provider.call_gemini_requests",
         fake_call,
     )
 
@@ -2218,7 +2228,7 @@ def test_smart_review_enforces_shared_input_token_budget_before_send(db, monkeyp
         called = True
 
     monkeypatch.setattr(
-        "translation_tool.translation_db.smart_review.call_gemini_requests",
+        "translation_tool.translation_db.smart_review_provider.call_gemini_requests",
         should_not_call,
     )
 
@@ -2276,11 +2286,11 @@ def test_smart_review_forwards_chatgpt_runtime_options(db, monkeypatch):
         )
 
     monkeypatch.setattr(
-        "translation_tool.translation_db.smart_review.call_gemini_requests",
+        "translation_tool.translation_db.smart_review_provider.call_gemini_requests",
         fake_call,
     )
     monkeypatch.setattr(
-        "translation_tool.translation_db.smart_review.chatgpt_account_status",
+        "translation_tool.translation_db.smart_review_provider.chatgpt_account_status",
         lambda: {"active_profile_id": "profile-a"},
     )
 
@@ -2320,11 +2330,11 @@ def test_smart_review_chatgpt_404_uses_shared_api_error_classification(db, monke
         )
 
     monkeypatch.setattr(
-        "translation_tool.translation_db.smart_review.call_gemini_requests",
+        "translation_tool.translation_db.smart_review_provider.call_gemini_requests",
         fail_call,
     )
     monkeypatch.setattr(
-        "translation_tool.translation_db.smart_review.chatgpt_account_status",
+        "translation_tool.translation_db.smart_review_provider.chatgpt_account_status",
         dict,
     )
 
@@ -2377,7 +2387,7 @@ def test_smart_review_rotates_gemini_key_for_retryable_http_error(db, monkeypatc
         )
 
     monkeypatch.setattr(
-        "translation_tool.translation_db.smart_review.call_gemini_requests",
+        "translation_tool.translation_db.smart_review_provider.call_gemini_requests",
         fake_call,
     )
     monkeypatch.setattr(lm_config_rules, "_get_all_keys", lambda: ["key0", "key1"])
@@ -2418,7 +2428,7 @@ def test_apply_candidate_is_cas_guarded_and_writes_history(db, monkeypatch):
         )
 
     monkeypatch.setattr(
-        "translation_tool.translation_db.smart_review.call_gemini_requests",
+        "translation_tool.translation_db.smart_review_provider.call_gemini_requests",
         fake_call,
     )
     result = run_smart_review(db, model_name="gemini-test", api_key="test-key", limit=1)
@@ -2468,7 +2478,7 @@ def test_json_apply_keeps_cas_read_and_write_in_one_transaction(db, monkeypatch)
         )
 
     monkeypatch.setattr(
-        "translation_tool.translation_db.smart_review.call_gemini_requests",
+        "translation_tool.translation_db.smart_review_provider.call_gemini_requests",
         fake_call,
     )
     result = run_smart_review(db, model_name="gemini-test", api_key="test-key", limit=1)
@@ -2574,7 +2584,7 @@ def test_draft_is_persisted_and_apply_uses_the_human_value(db, monkeypatch):
         )
 
     monkeypatch.setattr(
-        "translation_tool.translation_db.smart_review.call_gemini_requests",
+        "translation_tool.translation_db.smart_review_provider.call_gemini_requests",
         fake_call,
     )
     result = run_smart_review(db, model_name="gemini-test", api_key="test-key", limit=1)
@@ -2621,7 +2631,7 @@ def test_draft_preserves_spaces_and_newlines_until_apply(db, monkeypatch):
         )
 
     monkeypatch.setattr(
-        "translation_tool.translation_db.smart_review.call_gemini_requests",
+        "translation_tool.translation_db.smart_review_provider.call_gemini_requests",
         fake_call,
     )
     result = run_smart_review(
@@ -2668,7 +2678,7 @@ def test_smart_review_shrinks_truncated_batches_and_keeps_all_ordinals(db, monke
         )
 
     monkeypatch.setattr(
-        "translation_tool.translation_db.smart_review.call_gemini_requests",
+        "translation_tool.translation_db.smart_review_provider.call_gemini_requests",
         fake_call,
     )
     result = run_smart_review(
@@ -2709,7 +2719,7 @@ def test_reject_candidate_keeps_translation_unchanged(db, monkeypatch):
         )
 
     monkeypatch.setattr(
-        "translation_tool.translation_db.smart_review.call_gemini_requests",
+        "translation_tool.translation_db.smart_review_provider.call_gemini_requests",
         fake_call,
     )
     before = db._q(

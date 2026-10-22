@@ -7,16 +7,22 @@ import os
 
 import pytest
 
+from app.services_impl.moddb_smart_review_service import (
+    apply_moddb_smart_review_batch_from_path,
+)
 from translation_tool.translation_db import (
     KIND_LANG,
     EntryFilter,
     TranslationDB,
     WriteBackItem,
 )
-from translation_tool.translation_db import smart_review as smart_review_module
+from translation_tool.translation_db import (
+    smart_review_apply as smart_review_apply_module,
+)
 from translation_tool.translation_db.schema import SRC_MANUAL
 from translation_tool.translation_db.smart_review import run_smart_review
 from translation_tool.translation_db.smart_review_history import SmartReviewHistoryStore
+from translation_tool.translation_db.smart_review_history_query import HistoryQuery
 
 
 @pytest.fixture
@@ -55,7 +61,7 @@ def _run(db, monkeypatch, decision: str):
         return json.dumps({"items": items})
 
     monkeypatch.setattr(
-        "translation_tool.translation_db.smart_review.call_gemini_requests",
+        "translation_tool.translation_db.smart_review_provider.call_gemini_requests",
         fake_call,
     )
     return run_smart_review(
@@ -192,6 +198,28 @@ def test_stale_candidate_is_editable_after_realign(db, monkeypatch):
         == "applied"
     )
     assert _candidate(db, run_id, "bye").status == "applied"
+
+
+def test_batch_override_realigns_json_current_translation_before_apply(db, monkeypatch):
+    """批量覆蓋會先把 JSON current_zh_tw 對齊資料庫現況，再套用建議。"""
+    run_id = _run(db, monkeypatch, "suggest_revision")
+    candidate = _candidate(db, run_id, "bye")
+    db.save_manual(candidate.entry_id, "掰掰", propagate=False)
+    assert db.apply_smart_review_candidate(run_id, candidate.ordinal) == "stale"
+
+    stale = _candidate(db, run_id, "bye")
+    result = apply_moddb_smart_review_batch_from_path(
+        db.path,
+        db.priority,
+        [stale],
+        action="override",
+    )
+
+    assert result.count("applied") == 1
+    updated = _candidate(db, run_id, "bye")
+    assert updated.status == "applied"
+    assert updated.current_zh_tw == "掰掰"
+    assert db.entry_detail(candidate.entry_id).entry.zh_tw == "再見！"
 
 
 def test_manual_edit_rejects_bad_format_without_changing_status(db, monkeypatch):
@@ -350,7 +378,7 @@ def test_manual_edit_retries_transient_state_write_failure(db, monkeypatch):
     run_id = _run(db, monkeypatch, "no_change")
     candidate = _candidate(db, run_id, "bye")
     db.realign_smart_review_candidate(run_id, candidate.ordinal)
-    monkeypatch.setattr(smart_review_module.time, "sleep", lambda _s: None)
+    monkeypatch.setattr(smart_review_apply_module.time, "sleep", lambda _s: None)
     real = SmartReviewHistoryStore.update_candidate
     calls = []
 
@@ -375,7 +403,7 @@ def test_manual_edit_reports_state_sync_failure_and_reconciles(db, monkeypatch):
     run_id = _run(db, monkeypatch, "no_change")
     candidate = _candidate(db, run_id, "bye")
     db.realign_smart_review_candidate(run_id, candidate.ordinal)
-    monkeypatch.setattr(smart_review_module.time, "sleep", lambda _s: None)
+    monkeypatch.setattr(smart_review_apply_module.time, "sleep", lambda _s: None)
     real = SmartReviewHistoryStore.update_candidate
 
     def broken(self, *args, **kwargs):
@@ -491,14 +519,14 @@ def test_latest_marks_parses_only_latest_run_and_keeps_one_cache(tmp_path, monke
     )
 
     parsed = []
-    real = SmartReviewHistoryStore._parse_marks
+    real = HistoryQuery.parse_marks
 
     def counting(self, path):
         """記錄被完整解析的檔案。"""
         parsed.append(path.stem)
         return real(self, path)
 
-    monkeypatch.setattr(SmartReviewHistoryStore, "_parse_marks", counting)
+    monkeypatch.setattr(HistoryQuery, "parse_marks", counting)
     assert store.latest_run_marks() == ("latest", {1: ("stale", None)})
     assert parsed == ["latest"]
     # 再次呼叫（換頁）完全命中快取，不再解析
@@ -516,7 +544,7 @@ def test_marks_and_filter_reconcile_unsynced_apply_without_opening_reviewer(
     run_id = _run(db, monkeypatch, "no_change")
     candidate = _candidate(db, run_id, "bye")
     db.realign_smart_review_candidate(run_id, candidate.ordinal)
-    monkeypatch.setattr(smart_review_module.time, "sleep", lambda _s: None)
+    monkeypatch.setattr(smart_review_apply_module.time, "sleep", lambda _s: None)
     real = SmartReviewHistoryStore.update_candidate
     monkeypatch.setattr(
         SmartReviewHistoryStore,

@@ -12,8 +12,13 @@ from typing import Any
 import flet as ft
 
 from app.services_impl.moddb_smart_review_service import (
+    FORMATTED_BATCH_EVENT_KINDS,
+    batch_event_level,
+    format_batch_event,
+    format_timing_duration,
     get_moddb_smart_review_run_breakdown_from_path,
     run_moddb_smart_review_from_path,
+    timing_seconds,
 )
 from app.tasks.operation_registry import (
     CommitPolicy,
@@ -108,19 +113,8 @@ def format_duration(seconds: float | None) -> str:
 
 
 def _format_timing(seconds: float | None) -> str:
-    """把診斷用的耗時格式化成毫秒或秒，避免短階段都顯示成 00:00。"""
-    if seconds is None:
-        return "--"
-    try:
-        value = max(0.0, float(seconds))
-    except (TypeError, ValueError):
-        return "--"
-    return f"{value * 1000:.0f} ms" if value < 1 else f"{value:.2f} s"
-
-
-def _event_bool(value: object) -> str:
-    """把結構化事件中的布林欄位格式化成穩定的 log 值。"""
-    return "是" if value is True else "否"
+    """把診斷用的耗時格式化成毫秒、秒或分秒，避免短階段都顯示成 00:00。"""
+    return format_timing_duration(seconds)
 
 
 class SmartReviewJob:
@@ -287,8 +281,8 @@ class SmartReviewJob:
             if phase == "selection_complete" and isinstance(timing, dict):
                 session.add_log(
                     f"範圍搜尋完成：選取 {state.selected:,} 筆；"
-                    f"搜尋 {_format_timing(timing.get('selection_seconds'))}、"
-                    f"建立批次 {_format_timing(timing.get('run_record_seconds'))}。",
+                    f"搜尋 {_format_timing(timing_seconds(timing, 'selection_ms'))}、"
+                    f"建立批次 {_format_timing(timing_seconds(timing, 'run_record_ms'))}。",
                     "info",
                 )
             delta = state.processed - last["processed"]
@@ -298,16 +292,16 @@ class SmartReviewJob:
             if phase == "batch_complete" and isinstance(timing, dict) and not event:
                 session.add_log(
                     f"已處理 {state.processed:,} / {state.selected:,} 筆；"
-                    f"第 {timing.get('batch_number', '?')} 批 "
+                    f"第 {timing.get('batch_index', timing.get('batch_number', '?'))} 批 "
                     f"（{timing.get('ordinal_start', '?')}～"
                     f"{timing.get('ordinal_end', '?')}）完成："
-                    f"準備 {_format_timing(timing.get('preparation_seconds'))}、"
-                    f"等待配額 {_format_timing(timing.get('rate_limit_wait_seconds'))}、"
-                    f"重試等待 {_format_timing(timing.get('retry_wait_seconds'))}、"
-                    f"API {_format_timing(timing.get('api_seconds'))}、"
-                    f"解析 {_format_timing(timing.get('parse_seconds'))}、"
-                    f"寫入 JSON {_format_timing(timing.get('result_write_seconds'))}、"
-                    f"本批 {_format_timing(timing.get('elapsed_seconds'))}；"
+                    f"準備 {_format_timing(timing_seconds(timing, 'prompt_build_ms'))}、"
+                    f"等待配額 {_format_timing(timing_seconds(timing, 'quota_wait_ms'))}、"
+                    f"重試等待 {_format_timing(timing_seconds(timing, 'retry_backoff_ms'))}、"
+                    f"API {_format_timing(timing_seconds(timing, 'api_ms'))}、"
+                    f"解析 {_format_timing(timing_seconds(timing, 'response_parse_ms'))}、"
+                    f"寫入 JSON {_format_timing(timing_seconds(timing, 'history_write_ms'))}、"
+                    f"本批 {_format_timing(timing_seconds(timing, 'elapsed_ms'))}；"
                     f"請求 {timing.get('attempts', 0)} 次。",
                     "warning" if new_errors else "info",
                 )
@@ -330,272 +324,12 @@ class SmartReviewJob:
         return progress
 
     def _log_event(self, session: TaskSession, event: dict[str, Any]) -> None:
-        """把核心的安全事件轉成可讀的 TaskSession 日誌。"""
-        kind = str(event.get("kind") or "")
-        if kind == "batch_start":
-            self._log_batch_start(session, event)
-        elif kind in {"attempt_start", "attempt_success", "attempt_failure"}:
-            self._log_attempt_event(session, event)
-        elif kind in {
-            "validation_repair_start",
-            "validation_repair_attempt_start",
-            "validation_repair_attempt_success",
-            "validation_repair_failure",
-            "validation_repair_complete",
-        }:
-            self._log_validation_repair_event(session, event)
-        elif kind in {
-            "retry_wait",
-            "retry_resume",
-            "rate_limit_wait",
-            "rate_limit_resume",
-        }:
-            self._log_retry_event(session, event)
-        elif kind.startswith("network_"):
-            self._log_network_event(session, event)
-        elif kind == "batch_complete":
-            self._log_batch_complete(session, event)
-
-    @staticmethod
-    def _event_prefix(event: dict[str, Any]) -> str:
-        """建立 Smart Review 事件的穩定批次前綴。"""
-        return (
-            f"[智慧校對][批次 {event.get('batch_number', '?')}/"
-            f"{event.get('batch_total', '?')}]"
-        )
-
-    def _log_batch_start(self, session: TaskSession, event: dict[str, Any]) -> None:
-        """記錄批次開始事件。"""
-        prefix = self._event_prefix(event)
-        session.add_log(
-            f"{prefix} 開始：{event.get('expected_count', '?')} 筆，"
-            f"序號 {event.get('ordinal_start', '?')}～"
-            f"{event.get('ordinal_end', '?')}，"
-            f"供應商={event.get('provider', '?')}，"
-            f"模型={event.get('model', '?')}",
-            "info",
-        )
-
-    def _log_attempt_event(self, session: TaskSession, event: dict[str, Any]) -> None:
-        """記錄外層 Smart Review attempt 的開始、成功或失敗。"""
-        prefix = self._event_prefix(event)
-        attempt = event.get("smart_review_attempt", "?")
-        kind = event.get("kind")
-        if kind == "attempt_start":
-            session.add_log(
-                f"{prefix}[第 {attempt} 次嘗試] API 請求開始："
-                f"校對請求序號={attempt}，"
-                f"預期 {event.get('expected_count', '?')} 筆，"
-                f"已觀察網路請求={event.get('network_attempts', 0)}。",
-                "info",
-            )
-            return
-        if kind == "attempt_success":
-            prompt = event.get("prompt_tokens")
-            output = event.get("output_tokens")
-            token_text = (
-                f"提示詞 token={prompt}、輸出 token={output}"
-                if prompt is not None or output is not None
-                else "token=未提供"
-            )
-            session.add_log(
-                f"{prefix}[第 {attempt} 次嘗試] API 成功："
-                f"耗時={_format_timing(event.get('api_elapsed_seconds'))}，"
-                f"狀態碼={event.get('http_status', '?')}，"
-                f"完成原因={event.get('finish_reason') or '-'}，"
-                f"預期/回傳={event.get('expected_count', '?')}/"
-                f"{event.get('actual_count', '?')}，{token_text}，"
-                f"網路請求={event.get('network_attempts', 0)}。",
-                "info",
-            )
+        """把核心的安全事件交給共用 formatter 轉成 TaskSession 日誌。"""
+        if str(event.get("kind") or "") not in FORMATTED_BATCH_EVENT_KINDS:
             return
         session.add_log(
-            f"{prefix}[第 {attempt} 次嘗試] API 失敗："
-            f"狀態碼={event.get('http_status', '?')}，"
-            f"錯誤分類={event.get('error_kind', 'unknown')}，"
-            f"例外類型={event.get('exception_type', 'Exception')}，"
-            f"服務過載={_event_bool(event.get('provider_overload'))}，"
-            f"配額／速率限制={_event_bool(event.get('quota_or_rate_limit'))}，"
-            f"逾時={_event_bool(event.get('timeout'))}，"
-            f"Retry-After={_format_timing(event.get('retry_after_seconds'))}，"
-            f"API 金鑰輪替={_event_bool(event.get('key_rotated'))}。",
-            "warning",
-        )
-
-    def _log_validation_repair_event(
-        self, session: TaskSession, event: dict[str, Any]
-    ) -> None:
-        """記錄只針對 validation invalid 條目的受限修復流程。"""
-        prefix = self._event_prefix(event)
-        attempt = event.get("smart_review_attempt", "?")
-        kind = event.get("kind")
-        if kind == "validation_repair_start":
-            errors = event.get("validation_errors") or {}
-            error_text = (
-                "、".join(f"{key}: {value}" for key, value in list(errors.items())[:3])
-                or "未提供"
-            )
-            session.add_log(
-                f"{prefix} 驗證修復開始：只重送 {event.get('expected_count', 0)} 筆；"
-                f"原驗證錯誤={error_text}。",
-                "warning",
-            )
-        elif kind == "validation_repair_attempt_start":
-            session.add_log(
-                f"{prefix}[第 {attempt} 次嘗試] 驗證修復 API 請求開始："
-                f"預期 {event.get('expected_count', 0)} 筆。",
-                "info",
-            )
-        elif kind == "validation_repair_attempt_success":
-            prompt = event.get("prompt_tokens")
-            output = event.get("output_tokens")
-            token_text = (
-                f"提示詞 token={prompt}、輸出 token={output}"
-                if prompt is not None or output is not None
-                else "token=未提供"
-            )
-            session.add_log(
-                f"{prefix}[第 {attempt} 次嘗試] 驗證修復 API 成功："
-                f"耗時={_format_timing(event.get('api_elapsed_seconds'))}，"
-                f"狀態碼={event.get('http_status', '?')}，"
-                f"預期/回傳={event.get('expected_count', '?')}/"
-                f"{event.get('actual_count', '?')}，{token_text}。",
-                "info",
-            )
-        elif kind == "validation_repair_complete":
-            session.add_log(
-                f"{prefix} 驗證修復完成：有效 +{event.get('repaired_valid_count', 0)}、"
-                f"仍無效 +{event.get('repaired_invalid_count', 0)}；"
-                "修復結果仍經過完整 strict schema 驗證。",
-                "warning" if event.get("repaired_invalid_count", 0) else "info",
-            )
-        else:
-            session.add_log(
-                f"{prefix}[第 {attempt} 次嘗試] 驗證修復失敗："
-                f"狀態碼={event.get('http_status', '?')}，"
-                f"錯誤分類={event.get('error_kind', 'unknown')}，"
-                f"例外類型={event.get('exception_type', 'Exception')}；"
-                "保留原 invalid 結果。",
-                "warning",
-            )
-
-    def _log_retry_event(self, session: TaskSession, event: dict[str, Any]) -> None:
-        """記錄 provider retry 或 quota clock 的等待與恢復。"""
-        prefix = self._event_prefix(event)
-        attempt = event.get("smart_review_attempt", "?")
-        kind = event.get("kind")
-        if kind == "retry_wait":
-            session.add_log(
-                f"{prefix}[第 {attempt} 次嘗試] 第 "
-                f"{event.get('retry_number', '?')}/{event.get('retry_total', '?')} "
-                f"次重試，等待 {_format_timing(event.get('wait_seconds'))}；"
-                f"錯誤分類={event.get('error_kind', 'unknown')}，"
-                f"狀態碼={event.get('http_status', '?')}，"
-                f"Retry-After={_format_timing(event.get('retry_after_seconds'))}。",
-                "warning",
-            )
-        elif kind == "retry_resume":
-            session.add_log(
-                f"{prefix}[第 {attempt} 次嘗試] 重試等待結束，繼續下一次 API 請求。",
-                "info",
-            )
-        elif kind == "rate_limit_wait":
-            session.add_log(
-                f"{prefix}[第 {attempt} 次嘗試] 等待配額時鐘，"
-                f"預計 {_format_timing(event.get('wait_seconds'))}。",
-                "info",
-            )
-        else:
-            session.add_log(
-                f"{prefix}[第 {attempt} 次嘗試] 配額時鐘等待結束，準備送出 API 請求。",
-                "info",
-            )
-
-    def _log_network_event(self, session: TaskSession, event: dict[str, Any]) -> None:
-        """記錄底層 network attempt 與 connection retry。"""
-        prefix = self._event_prefix(event)
-        attempt = event.get("smart_review_attempt", "?")
-        network_attempt = event.get("network_attempt", "?")
-        network_total = event.get("network_total", "?")
-        scope = event.get("network_scope")
-        scope_labels = {
-            "chatgpt_provider_call": "ChatGPT 供應商請求",
-        }
-        scope_label = scope_labels.get(str(scope), scope) if scope else None
-        scope_text = f"，範圍={scope_label}" if scope_label else ""
-        kind = event.get("kind")
-        if kind == "network_attempt_start":
-            text = (
-                f"{prefix}[第 {attempt} 次嘗試] 網路請求="
-                f"{network_attempt}/{network_total}{scope_text} 開始。"
-            )
-            level = "info"
-        elif kind == "network_failure":
-            text = (
-                f"{prefix}[第 {attempt} 次嘗試] 網路請求失敗："
-                f"請求={network_attempt}/{network_total}"
-                f"{scope_text}"
-                f"，錯誤分類={event.get('error_kind', 'unknown')}，"
-                f"例外類型={event.get('exception_type', 'Exception')}。"
-            )
-            level = "warning"
-        elif kind == "network_retry_wait":
-            text = (
-                f"{prefix}[第 {attempt} 次嘗試] 網路重試，"
-                f"等待 {_format_timing(event.get('wait_seconds'))}；"
-                f"網路請求={network_attempt}/{network_total}。"
-            )
-            level = "warning"
-        elif kind == "network_retry_resume":
-            text = (
-                f"{prefix}[第 {attempt} 次嘗試] 網路重試等待結束，"
-                f"繼續後續網路請求（目前 {network_attempt}/{network_total}）。"
-            )
-            level = "info"
-        else:
-            text = (
-                f"{prefix}[第 {attempt} 次嘗試] 網路回應："
-                f"網路請求={network_attempt}/{network_total}"
-                f"{scope_text}，"
-                f"狀態碼={event.get('http_status', '?')}。"
-            )
-            level = "info"
-        session.add_log(text, level)
-
-    def _log_batch_complete(self, session: TaskSession, event: dict[str, Any]) -> None:
-        """記錄批次耗時、結果分類與 validation error 分布。"""
-        prefix = self._event_prefix(event)
-        errors = event.get("validation_errors") or {}
-        error_text = (
-            "、".join(
-                f"{message} × {count:,}" for message, count in list(errors.items())[:5]
-            )
-            or "無"
-        )
-        session.add_log(
-            f"{prefix} 完成：序號 {event.get('ordinal_start', '?')}～"
-            f"{event.get('ordinal_end', '?')}，實際 {event.get('actual_count', '?')} 筆；"
-            f"校對請求 {event.get('smart_review_attempts', 0)}、"
-            f"重試 {event.get('retry_count', 0)}、"
-            f"配額等待 {_format_timing(event.get('rate_limit_wait_seconds'))}、"
-            f"重試等待 {_format_timing(event.get('retry_wait_seconds'))}、"
-            f"網路重試等待 {_format_timing(event.get('network_retry_wait_seconds'))}、"
-            f"API {_format_timing(event.get('api_seconds'))}、"
-            f"解析 {_format_timing(event.get('parse_seconds'))}、"
-            f"寫入 JSON {_format_timing(event.get('result_write_seconds'))}、"
-            f"驗證修復 {event.get('validation_repair_attempts', 0)} 次、"
-            f"修復有效 +{event.get('repaired_valid_count', 0)}、"
-            f"修復後仍無效 +{event.get('repaired_invalid_count', 0)}、"
-            f"修復 API {_format_timing(event.get('validation_repair_api_seconds'))}、"
-            f"本批 {_format_timing(event.get('elapsed_seconds'))}；"
-            f"有效={event.get('valid_count', 0)}、"
-            f"無效={event.get('invalid_count', 0)}、"
-            f"需補充上下文={event.get('needs_context_count', 0)}、"
-            f"不變更={event.get('no_change_count', 0)}、"
-            f"建議修訂={event.get('suggest_revision_count', event.get('suggestion_count', 0))}；"
-            f"請求錯誤={event.get('request_errors', 0)}；"
-            f"驗證錯誤={error_text}。",
-            "warning" if event.get("invalid_count", 0) else "info",
+            format_batch_event(event, default_operation="smart_review"),
+            batch_event_level(event),
         )
 
     def _record_result(
@@ -640,35 +374,32 @@ class SmartReviewJob:
     def _log_timing_breakdown(self, result: Any, session: TaskSession) -> None:
         """把搜尋、API、retry 與 JSON 寫入的總耗時寫入執行紀錄。"""
         metrics = getattr(result, "metrics", None)
-        if not isinstance(metrics, dict) or "selection_seconds" not in metrics:
+        if (
+            not isinstance(metrics, dict)
+            or timing_seconds(metrics, "selection_ms") is None
+        ):
             return
 
-        def seconds(common_key: str, legacy_key: str | None = None) -> float:
-            """把秒數格式化為可讀的計時文字；沒有數值時顯示 --:--。"""
-            value = metrics.get(common_key)
-            if value is not None:
-                try:
-                    return max(0.0, float(value) / 1000)
-                except (TypeError, ValueError):
-                    pass
-            return max(0.0, float(metrics.get(legacy_key or common_key) or 0))
+        def seconds(canonical_ms: str) -> float:
+            """取得計時欄位的秒數（先讀 ``*_ms``，再讀舊版秒數欄位）；沒有數值時為 0。"""
+            return timing_seconds(metrics, canonical_ms) or 0.0
 
-        total = seconds("total_ms", "duration_seconds")
+        total = seconds("total_ms")
         session.add_log(
-            f"耗時拆解：搜尋 {_format_timing(metrics.get('selection_seconds'))}、"
-            f"規劃 {_format_timing(seconds('planning_ms', 'planning_seconds'))}、"
-            f"提示詞 {_format_timing(seconds('prompt_build_ms', 'preparation_seconds'))}、"
-            f"API {_format_timing(seconds('api_ms', 'api_seconds'))}、"
-            f"等待配額 {_format_timing(seconds('quota_wait_ms', 'rate_limit_wait_seconds'))}、"
-            f"重試等待 {_format_timing(seconds('retry_backoff_ms', 'retry_wait_seconds'))}、"
+            f"耗時拆解：搜尋 {_format_timing(seconds('selection_ms'))}、"
+            f"規劃 {_format_timing(seconds('planning_ms'))}、"
+            f"提示詞 {_format_timing(seconds('prompt_build_ms'))}、"
+            f"API {_format_timing(seconds('api_ms'))}、"
+            f"等待配額 {_format_timing(seconds('quota_wait_ms'))}、"
+            f"重試等待 {_format_timing(seconds('retry_backoff_ms'))}、"
             f"網路重試等待 {_format_timing(seconds('network_retry_wait_ms'))}、"
-            f"解析 {_format_timing(seconds('response_parse_ms', 'parse_seconds'))}、"
+            f"解析 {_format_timing(seconds('response_parse_ms'))}、"
             f"驗證 {_format_timing(seconds('validation_ms'))}、"
-            f"寫入 JSON {_format_timing(seconds('history_write_ms', 'result_write_seconds'))}、"
-            f"驗證修復 API {_format_timing(metrics.get('validation_repair_api_seconds'))}、"
+            f"寫入 JSON {_format_timing(seconds('history_write_ms'))}、"
+            f"驗證修復 API {_format_timing(timing_seconds(metrics, 'validation_repair_api_ms'))}、"
             f"總計 {_format_timing(total)}；"
             f"共 {metrics.get('batch_count', 0)} 批、"
-            f"校對請求 {metrics.get('request_attempts', metrics.get('smart_review_attempts', 0))} 次、"
+            f"校對請求 {metrics.get('request_attempts', metrics.get('attempts', 0))} 次、"
             f"網路請求 {metrics.get('network_attempts', 0)} 次、"
             f"重試 {metrics.get('retry_count', 0)} 次、"
             f"網路重試 {metrics.get('network_retry_count', 0)} 次、"

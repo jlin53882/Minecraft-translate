@@ -1,0 +1,174 @@
+"""智慧校對 JSON 候選與 SQLite 套用紀錄的對帳（reconcile）。
+
+套用候選時 SQLite 先提交、JSON 後回寫；兩個儲存之間的失敗以 ``history`` 表
+的 ``smart_review_apply`` audit marker 為準，於下一次讀取時補回 JSON 狀態。
+"""
+
+from __future__ import annotations
+
+import logging
+from collections.abc import Sequence
+from typing import Any
+
+from translation_tool.translation_db.models import (
+    SMART_REVIEW_FILTER_GROUPS,
+    SmartReviewMark,
+)
+from translation_tool.translation_db.smart_review_history import (
+    SmartReviewHistoryStore,
+)
+from translation_tool.translation_db.smart_review_status import (
+    ProjectionState,
+    SmartReviewStatus,
+)
+from translation_tool.translation_db.smart_review_validation import (
+    SMART_REVIEW_MANUAL_EDIT_STATUSES,
+)
+
+logger = logging.getLogger(__name__)
+
+# (資料庫路徑, run_id) -> 上次對帳時 history 的最大 id
+_RECONCILED_HISTORY_HEAD: dict[tuple[str, str], int] = {}
+
+
+def clear_smart_review_caches(db_path: str | None = None) -> None:
+    """清除對帳進度快取（只影響效能，下一次會重新對帳）；指定 ``db_path`` 時只清該資料庫。"""
+    for key in [key for key in _RECONCILED_HISTORY_HEAD if db_path in (None, key[0])]:
+        del _RECONCILED_HISTORY_HEAD[key]
+
+
+class SmartReviewProjectionMixin:
+    """提供給 TranslationDB 使用的智慧校對 JSON／SQLite 對帳與標籤投影。"""
+
+    def _reconcile_json_applied_candidates(
+        self, history: SmartReviewHistoryStore, run_id: str
+    ) -> None:
+        """以 SQLite audit marker 對帳已提交但尚未回寫 JSON 的候選。"""
+        records = self._smart_review_apply_records(run_id)
+        if records:
+            history.reconcile_applied(run_id, records)
+
+    def _smart_review_apply_records(self, run_id: str) -> dict[int, dict[str, Any]]:
+        """讀取某批次每個序號最新的套用 audit（``ordinal -> entry_id／batch／applied_at``）。"""
+        note_prefix = f"run={run_id}; ordinal="
+        # 以 note 範圍（不用 LIKE）走 idx_history_smart_review_apply；
+        # 最新的套用在 Python 端依 id 排序，避免臨時排序。
+        upper = note_prefix[:-1] + chr(ord(note_prefix[-1]) + 1)
+        rows = sorted(
+            self._q(
+                "SELECT id, note, entry_id, batch, at FROM history "
+                "WHERE action='smart_review_apply' AND note >= ? AND note < ?",
+                (note_prefix, upper),
+            ),
+            key=lambda row: row[0],
+            reverse=True,
+        )
+        records: dict[int, dict[str, Any]] = {}
+        for _id, note, entry_id, batch, applied_at in rows:
+            value = str(note or "")
+            if not value.startswith(note_prefix):
+                continue
+            try:
+                ordinal = int(value[len(note_prefix) :])
+            except ValueError:
+                continue
+            records.setdefault(
+                ordinal,
+                {
+                    "entry_id": int(entry_id),
+                    "batch": batch,
+                    "applied_at": applied_at,
+                },
+            )
+        return records
+
+    def smart_review_projection_report(self, run_id: str) -> dict[str, Any]:
+        """比對 SQLite 套用 audit 與 JSON 候選，回報投影同步狀態（唯讀，不修改任何資料）。
+
+        ``pending_ordinals`` 是 audit 已提交、但 JSON 尚未標成同一次套用的候選序號；
+        有任何一筆就是 ``pending_projection``，下一次讀取標籤時會由對帳補回。
+        沒有待補時回傳 JSON 內記錄的狀態（沒有紀錄的舊批次視為 ``projected``）。
+        """
+        history = SmartReviewHistoryStore(self.path)
+        run = history.get_run(run_id)
+        info = (run or {}).get("projection")
+        info = info if isinstance(info, dict) else {}
+        records = self._smart_review_apply_records(run_id)
+        applied = {
+            candidate.ordinal: candidate
+            for candidate in history.list_candidates(run_id)
+            if candidate.status == SmartReviewStatus.APPLIED
+        }
+        pending = sorted(
+            ordinal
+            for ordinal, record in records.items()
+            if ordinal not in applied
+            or applied[ordinal].applied_batch != (record["batch"] or None)
+        )
+        state = (
+            ProjectionState.PENDING_PROJECTION
+            if pending
+            else info.get("state") or ProjectionState.PROJECTED
+        )
+        return {
+            "run_id": run_id,
+            "state": str(state),
+            "revision": int(info.get("revision") or 0),
+            "pending_ordinals": pending,
+        }
+
+    def _reconciled_latest_marks(
+        self,
+    ) -> tuple[str | None, dict[int, tuple[str, str | None]]]:
+        """取得最近批次標記；SQLite 套用紀錄有新增時先對帳，換頁不重複掃描。
+
+        對帳只在 ``history`` 的最大 id 比上次對帳時大才執行（查最大 id 為常數成本），
+        對帳失敗時不記錄，下次再試。
+        """
+        history = SmartReviewHistoryStore(self.path)
+        run_id, marks = history.latest_run_marks()
+        if run_id is None:
+            return run_id, marks
+        key = (str(self.path), run_id)
+        head = self._one("SELECT MAX(id) FROM history")
+        head_id = int(head[0] or 0) if head else 0
+        if _RECONCILED_HISTORY_HEAD.get(key) == head_id:
+            return run_id, marks
+        try:
+            self._reconcile_json_applied_candidates(history, run_id)
+        except (OSError, ValueError):
+            logger.warning(
+                "Smart Review 標籤對帳失敗，下次再試：run=%s", run_id, exc_info=True
+            )
+            return run_id, marks
+        _RECONCILED_HISTORY_HEAD[key] = head_id
+        return history.latest_run_marks()
+
+    def smart_review_marks(
+        self, entry_ids: Sequence[int]
+    ) -> dict[int, SmartReviewMark]:
+        """回傳指定條目在最近一次智慧校對批次的處理狀態。
+
+        只列出已有處理結果的狀態（已套用、已保留原譯文、不用改、需補 context、
+        無效、格式不符、已過期）；待審查的 ``ready`` 與未完成的候選不標記。
+        """
+        wanted = {int(entry_id) for entry_id in entry_ids}
+        if not wanted:
+            return {}
+        run_id, marks = self._reconciled_latest_marks()
+        if run_id is None:
+            return {}
+        result: dict[int, SmartReviewMark] = {}
+        for entry_id in wanted:
+            found = marks.get(entry_id)
+            if found is not None and found[0] in SMART_REVIEW_MANUAL_EDIT_STATUSES:
+                result[entry_id] = SmartReviewMark(run_id, found[0], found[1])
+        return result
+
+    def smart_review_entry_ids(self, group: str) -> tuple[int, ...]:
+        """回傳最近一次批次中處於指定狀態群組的條目 id（鍵見 SMART_REVIEW_FILTER_GROUPS）。"""
+        statuses = set(SMART_REVIEW_FILTER_GROUPS[group])
+        _run_id, marks = self._reconciled_latest_marks()
+        return tuple(
+            sorted(entry_id for entry_id, mark in marks.items() if mark[0] in statuses)
+        )

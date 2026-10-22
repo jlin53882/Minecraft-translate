@@ -8,6 +8,7 @@
 - 原因：行內 noqa 的說明文字（若有）
 
 用法：``python tools/gen_exception_inventory.py``（覆寫文件）；
+``python tools/gen_exception_inventory.py --check`` 只檢查文件是否一致（不一致回傳 1）；
 ``tests/test_exception_inventory.py`` 檢查整份文件與 ``render(collect())`` 逐字一致。
 """
 
@@ -150,13 +151,24 @@ def render(rows: list[dict[str, str]]) -> str:
     return "\n".join(out)
 
 
-def main() -> int:
-    """解析命令列參數並執行目前工具。"""
+def main(argv: list[str] | None = None) -> int:
+    """解析命令列參數並執行目前工具；``--check`` 只比對不寫檔。"""
+    args = sys.argv[1:] if argv is None else argv
     rows = collect()
+    text = render(rows)
+    if "--check" in args:
+        current = OUT.read_text(encoding="utf-8") if OUT.exists() else ""
+        if current != text:
+            sys.stderr.write(
+                "docs/generated/exception-inventory.md 已過期；"
+                "請執行 python tools/gen_exception_inventory.py\n"
+            )
+            return 1
+        return 0
     # Keep generated documentation LF-normalized on Windows so git does not
     # mistake CRLF's carriage return for trailing whitespace.
     with OUT.open("w", encoding="utf-8", newline="\n") as stream:
-        stream.write(render(rows))
+        stream.write(text)
     print(f"寫入 {OUT}（{len(rows)} 項）")
     return 0
 

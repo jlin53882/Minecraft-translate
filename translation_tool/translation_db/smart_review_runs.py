@@ -1,0 +1,446 @@
+"""智慧校對批次（run）的生命週期、候選列表與統計。
+
+新批次保存在 JSON（``SmartReviewHistoryStore``），舊版批次仍讀寫 SQLite；
+每個方法先判斷批次所在的儲存，再走對應路徑。JSON 與 SQLite 套用紀錄的對帳
+見 ``smart_review_projection``。
+"""
+
+from __future__ import annotations
+
+import json
+from collections.abc import Sequence
+from typing import Any
+
+from translation_tool.translation_db.models import (
+    SmartReviewCandidate,
+    SmartReviewSnapshot,
+)
+from translation_tool.translation_db.smart_review_history import (
+    SmartReviewHistoryStore,
+)
+from translation_tool.translation_db.smart_review_status import SmartReviewStatus
+from translation_tool.translation_db.smart_review_validation import _candidate_status
+
+
+def _response_reason(raw: object) -> str | None:
+    """安全讀取目前或舊版候選格式中的理由。"""
+    if not raw:
+        return None
+    try:
+        value = json.loads(raw) if isinstance(raw, str) else raw
+    except (TypeError, ValueError):
+        return None
+    reason = value.get("reason") if isinstance(value, dict) else None
+    return reason if isinstance(reason, str) else None
+
+
+class SmartReviewRunStoreMixin:
+    """提供給 TranslationDB 使用的智慧校對批次與候選存取。"""
+
+    def _smart_review_has_column(self, table: str, column: str) -> bool:
+        """確認智慧校對資料表具有指定欄位。"""
+        return any(row[1] == column for row in self._q(f"PRAGMA table_info({table})"))
+
+    def create_smart_review_run(
+        self,
+        snapshots: Sequence[SmartReviewSnapshot],
+        *,
+        provider: str,
+        model: str,
+        version: str | None,
+        requested_limit: int,
+        batch_size: int,
+        scope: dict[str, Any] | None = None,
+    ) -> str:
+        """建立只保存候選、不直接修改翻譯的 JSON 智慧校對批次。"""
+        return SmartReviewHistoryStore(self.path).create_run(
+            snapshots,
+            provider=provider,
+            model=model,
+            version=version,
+            requested_limit=requested_limit,
+            batch_size=batch_size,
+            scope=scope,
+        )
+
+    def record_smart_review_results(
+        self,
+        run_id: str,
+        results: Sequence[dict[str, Any]],
+    ) -> None:
+        """保存一批智慧校對候選結果；新批次寫入 JSON，舊批次保留 SQLite 讀寫。"""
+        history = SmartReviewHistoryStore(self.path)
+        if history.exists(run_id):
+            history.record_results(run_id, results)
+            return
+        with self._tx() as conn:
+            for result in results:
+                ordinal = int(result["id"])
+                row = conn.execute(
+                    "SELECT 1 FROM smart_review_candidate WHERE run_id=? AND ordinal=?",
+                    (run_id, ordinal),
+                ).fetchone()
+                if row is None:
+                    raise ValueError("smart review response id 不在候選快照")
+                if result.get("validation_error"):
+                    conn.execute(
+                        "UPDATE smart_review_candidate SET status='invalid', "
+                        "validation_error=?, updated_at=CURRENT_TIMESTAMP WHERE run_id=? AND ordinal=?",
+                        (str(result["validation_error"]), run_id, ordinal),
+                    )
+                    continue
+                conn.execute(
+                    "UPDATE smart_review_candidate SET decision=?, suggested_zh_tw=?, "
+                    "issue_types_json=?, evidence_ids_json=?, confidence=?, response_json=?, "
+                    "status=?, validation_error=NULL, updated_at=CURRENT_TIMESTAMP "
+                    "WHERE run_id=? AND ordinal=?",
+                    (
+                        result["decision"],
+                        result["suggested_zh_tw"],
+                        json.dumps(result["issue_types"], ensure_ascii=False),
+                        json.dumps(result["evidence_ids"], ensure_ascii=False),
+                        float(result["confidence"]),
+                        json.dumps(result, ensure_ascii=False),
+                        _candidate_status(result),
+                        run_id,
+                        ordinal,
+                    ),
+                )
+
+    def mark_smart_review_request_error(
+        self,
+        run_id: str,
+        ordinals: Sequence[int],
+        *,
+        error_code: str = SmartReviewStatus.REQUEST_FAILED,
+    ) -> None:
+        """把智慧校對請求錯誤記錄到 JSON 或舊版 SQLite 批次。"""
+        history = SmartReviewHistoryStore(self.path)
+        if history.exists(run_id):
+            history.mark_request_error(run_id, ordinals, error_code=error_code)
+            return
+        with self._tx() as conn:
+            conn.executemany(
+                "UPDATE smart_review_candidate SET status='request_failed', validation_error=?, "
+                "updated_at=CURRENT_TIMESTAMP WHERE run_id=? AND ordinal=?",
+                ((error_code, run_id, int(ordinal)) for ordinal in ordinals),
+            )
+
+    def mark_smart_review_pending_cancelled(self, run_id: str) -> int:
+        """標記已選取但取消前尚未送出的智慧校對項目。"""
+        history = SmartReviewHistoryStore(self.path)
+        if history.exists(run_id):
+            return history.mark_pending_cancelled(run_id)
+        with self._tx() as conn:
+            updated = conn.execute(
+                "UPDATE smart_review_candidate SET status='cancelled', "
+                "validation_error='cancelled_before_request', updated_at=CURRENT_TIMESTAMP "
+                "WHERE run_id=? AND status='pending'",
+                (run_id,),
+            ).rowcount
+        return int(updated)
+
+    def finish_smart_review_run(
+        self,
+        run_id: str,
+        *,
+        processed_count: int,
+        valid_count: int,
+        invalid_count: int,
+        request_error_count: int,
+        metrics: dict[str, Any] | None = None,
+        status: str | None = None,
+    ) -> None:
+        """完成智慧校對執行並保存最終統計。"""
+        if status not in {
+            None,
+            "completed",
+            "partial",
+            SmartReviewStatus.CANCELLED,
+            "failed",
+            "interrupted",
+        }:
+            raise ValueError("smart review 不支援的 run 狀態")
+        history = SmartReviewHistoryStore(self.path)
+        if history.exists(run_id):
+            history.finish_run(
+                run_id,
+                processed_count=processed_count,
+                valid_count=valid_count,
+                invalid_count=invalid_count,
+                request_error_count=request_error_count,
+                metrics=metrics,
+                status=status
+                or ("completed" if not request_error_count else "partial"),
+            )
+            return
+        with self._tx() as conn:
+            conn.execute(
+                "UPDATE smart_review_run SET finished_at=CURRENT_TIMESTAMP, status=?, "
+                "processed_count=?, valid_count=?, invalid_count=?, request_error_count=?, metrics=? "
+                "WHERE id=?",
+                (
+                    status or ("completed" if not request_error_count else "partial"),
+                    int(processed_count),
+                    int(valid_count),
+                    int(invalid_count),
+                    int(request_error_count),
+                    json.dumps(metrics or {}, ensure_ascii=False),
+                    run_id,
+                ),
+            )
+
+    def get_smart_review_run(self, run_id: str) -> dict[str, Any] | None:
+        """讀取單一智慧校對執行的摘要與狀態。"""
+        history = SmartReviewHistoryStore(self.path)
+        if history.exists(run_id):
+            return history.get_run(run_id)
+        has_scope = self._smart_review_has_column("smart_review_run", "scope_json")
+        row = self._one(
+            "SELECT id, provider, model, scope_version, requested_limit, batch_size, "
+            + ("scope_json, " if has_scope else "")
+            + "started_at, finished_at, status, selected_count, processed_count, valid_count, "
+            "invalid_count, request_error_count, metrics FROM smart_review_run WHERE id=?",
+            (run_id,),
+        )
+        if row is None:
+            return None
+        scope_index = 6 if has_scope else None
+        started_index = 7 if has_scope else 6
+        scope = json.loads(row[scope_index] or "{}") if scope_index is not None else {}
+        metrics = json.loads(row[started_index + 8] or "{}")
+        return {
+            "id": row[0],
+            "provider": row[1],
+            "model": row[2],
+            "scope_version": row[3],
+            "requested_limit": row[4],
+            "batch_size": row[5],
+            "scope": scope,
+            "started_at": row[started_index],
+            "finished_at": row[started_index + 1],
+            "status": row[started_index + 2],
+            "selected_count": row[started_index + 3],
+            "processed_count": row[started_index + 4],
+            "valid_count": row[started_index + 5],
+            "invalid_count": row[started_index + 6],
+            "request_error_count": row[started_index + 7],
+            "metrics": metrics,
+        }
+
+    def list_smart_review_candidates(
+        self,
+        run_id: str,
+        *,
+        status: str | None = None,
+        limit: int | None = None,
+        offset: int = 0,
+    ) -> list[SmartReviewCandidate]:
+        """列出指定智慧校對執行中的候選資料。"""
+        history = SmartReviewHistoryStore(self.path)
+        if history.exists(run_id):
+            self._reconcile_json_applied_candidates(history, run_id)
+            return history.list_candidates(
+                run_id, status=status, limit=limit, offset=offset
+            )
+        has_draft = self._smart_review_has_column(
+            "smart_review_candidate", "draft_zh_tw"
+        )
+        draft_column = "draft_zh_tw" if has_draft else "NULL AS draft_zh_tw"
+        clauses = ["run_id=?"]
+        params: list[Any] = [run_id]
+        if status:
+            clauses.append("status=?")
+            params.append(status)
+        rows = self._q(
+            "SELECT run_id, ordinal, entry_id, kind, mc_version, mod_id, entry_key, en_us, "
+            "current_zh_tw, effective_source, review_status, effective_revision, "
+            "manual_zh_tw, manual_checker, manual_review_status, manual_revision, context_json, "
+            "decision, suggested_zh_tw, issue_types_json, evidence_ids_json, confidence, "
+            f"response_json, {draft_column}, validation_error, status, applied_batch, applied_at "
+            f"FROM smart_review_candidate WHERE {' AND '.join(clauses)} ORDER BY ordinal"
+            + (" LIMIT ? OFFSET ?" if limit is not None else ""),
+            (*params, max(0, int(limit)), max(0, int(offset)))
+            if limit is not None
+            else params,
+        )
+        result: list[SmartReviewCandidate] = []
+        for row in rows:
+            result.append(
+                SmartReviewCandidate(
+                    run_id=row[0],
+                    ordinal=int(row[1]),
+                    entry_id=int(row[2]),
+                    kind=row[3],
+                    mc_version=row[4],
+                    mod_id=row[5],
+                    key=row[6],
+                    en_us=row[7],
+                    current_zh_tw=row[8],
+                    effective_source=None if row[9] is None else int(row[9]),
+                    review_status=row[10],
+                    effective_revision=None if row[11] is None else int(row[11]),
+                    manual_zh_tw=row[12],
+                    manual_checker=row[13],
+                    manual_review_status=row[14],
+                    manual_revision=(None if row[15] is None else int(row[15])),
+                    context=tuple(json.loads(row[16] or "[]")),
+                    decision=row[17],
+                    suggested_zh_tw=row[18],
+                    issue_types=tuple(json.loads(row[19] or "[]")),
+                    evidence_ids=tuple(json.loads(row[20] or "[]")),
+                    confidence=None if row[21] is None else float(row[21]),
+                    reason=_response_reason(row[22]),
+                    draft_zh_tw=row[23],
+                    validation_error=row[24],
+                    status=row[25],
+                    applied_batch=row[26],
+                    applied_at=row[27],
+                )
+            )
+        return result
+
+    def load_smart_review_candidate_page(
+        self,
+        run_id: str,
+        *,
+        status: str | None = None,
+        limit: int | None = None,
+        offset: int = 0,
+        known_total: int | None = None,
+    ) -> tuple[int, list[SmartReviewCandidate]]:
+        """以同一個唯讀資料來源取得候選總數與目前頁面。"""
+        history = SmartReviewHistoryStore(self.path)
+        if history.exists(run_id):
+            self._reconcile_json_applied_candidates(history, run_id)
+            return history.page_candidates(
+                run_id,
+                status=status,
+                limit=limit,
+                offset=offset,
+                known_total=known_total,
+                clamp_offset=True,
+            )
+        total = (
+            self.count_smart_review_candidates_for_run(run_id, status=status)
+            if known_total is None
+            else max(0, int(known_total))
+        )
+        if not total:
+            return 0, []
+        rows = self.list_smart_review_candidates(
+            run_id,
+            status=status,
+            limit=limit,
+            offset=min(max(0, int(offset)), total - 1),
+        )
+        return total, rows
+
+    def count_smart_review_candidates_for_run(
+        self, run_id: str, *, status: str | None = None
+    ) -> int:
+        """計算指定智慧校對執行中的候選資料數量。"""
+        history = SmartReviewHistoryStore(self.path)
+        if history.exists(run_id):
+            self._reconcile_json_applied_candidates(history, run_id)
+            return history.count_candidates(run_id, status=status)
+        clauses = ["run_id=?"]
+        params: list[Any] = [run_id]
+        if status:
+            clauses.append("status=?")
+            params.append(status)
+        row = self._one(
+            f"SELECT COUNT(*) FROM smart_review_candidate WHERE {' AND '.join(clauses)}",
+            params,
+        )
+        return int(row[0]) if row else 0
+
+    def smart_review_run_breakdown(
+        self, run_id: str, *, error_limit: int = 5
+    ) -> dict[str, Any]:
+        """統計單一執行的候選狀態分佈與最常見的驗證失敗原因，供 UI 摘要使用。
+
+        兩個查詢都只掃該 run 的主鍵前綴；排序在 Python 端完成，避免臨時排序。
+        """
+        history = SmartReviewHistoryStore(self.path)
+        if history.exists(run_id):
+            self._reconcile_json_applied_candidates(history, run_id)
+            return history.breakdown(run_id, error_limit=error_limit)
+        status_rows = self._q(
+            "SELECT status, COUNT(*) FROM smart_review_candidate "
+            "WHERE run_id=? GROUP BY status",
+            (run_id,),
+        )
+        error_rows = self._q(
+            "SELECT validation_error, COUNT(*) FROM smart_review_candidate "
+            "WHERE run_id=? AND validation_error IS NOT NULL AND validation_error != '' "
+            "GROUP BY validation_error",
+            (run_id,),
+        )
+        errors = sorted(
+            ((str(message), int(count)) for message, count in error_rows),
+            key=lambda item: (-item[1], item[0]),
+        )
+        return {
+            "status": {str(status): int(count) for status, count in status_rows},
+            "errors": errors[: max(0, int(error_limit))],
+        }
+
+    def list_smart_review_runs(
+        self, *, limit: int = 20, offset: int = 0
+    ) -> list[dict[str, Any]]:
+        """列出 JSON 批次與舊版 SQLite 批次，依時間合併分頁。"""
+        history_runs = SmartReviewHistoryStore(self.path).all_runs(
+            include_sort_metadata=True
+        )
+        start = max(0, int(offset))
+        bounded_limit = max(1, int(limit))
+        has_scope = self._smart_review_has_column("smart_review_run", "scope_json")
+        scope_column = "scope_json" if has_scope else "NULL AS scope_json"
+        # SQLite 舊批次必須先抓取足以填滿合併後頁面的前置資料；不能先套用
+        # OFFSET，否則與 JSON 批次合併排序後會被再次偏移而漏資料。
+        legacy_limit = max(1, start + bounded_limit + 1)
+        rows = self._q(
+            "SELECT id, provider, model, scope_version, "
+            + scope_column
+            + ", started_at, "
+            "finished_at, status, selected_count, processed_count, valid_count, "
+            "invalid_count, request_error_count, metrics "
+            "FROM smart_review_run ORDER BY started_at DESC, id DESC LIMIT ?",
+            (legacy_limit,),
+        )
+        result = []
+        for row in rows:
+            result.append(
+                {
+                    "id": row[0],
+                    "provider": row[1],
+                    "model": row[2],
+                    "scope_version": row[3],
+                    "scope": json.loads(row[4] or "{}"),
+                    "started_at": row[5],
+                    "finished_at": row[6],
+                    "status": row[7],
+                    "selected_count": row[8],
+                    "processed_count": row[9],
+                    "valid_count": row[10],
+                    "invalid_count": row[11],
+                    "request_error_count": row[12],
+                    "metrics": json.loads(row[13] or "{}"),
+                }
+            )
+        combined = {str(run.get("id")): run for run in result}
+        combined.update({str(run.get("id")): run for run in history_runs})
+        ordered = sorted(
+            combined.values(),
+            key=lambda item: (
+                str(item.get("started_at") or ""),
+                int(item.get("_history_mtime_ns") or 0),
+                str(item.get("id") or ""),
+            ),
+            reverse=True,
+        )
+        page = ordered[start : start + bounded_limit]
+        for item in page:
+            item.pop("_history_mtime_ns", None)
+        return page

@@ -17,6 +17,7 @@ from typing import Any
 import orjson
 from opencc import OpenCC
 
+from .cache_registry import register_cache
 from .config_manager import resolve_project_path
 from .log_unit import log_error, log_info, log_warning
 from .replace_rules import (
@@ -314,6 +315,20 @@ class ReplaceRulesStore:
 
 
 replace_rules_store = ReplaceRulesStore()
+
+
+def clear_conflict_warning_cache() -> None:
+    """清除「已警告過的替換規則衝突」記錄，讓同一組衝突能再警告一次。"""
+    _WARNED_CONFLICT_SIGNATURES.clear()
+
+
+def clear_replace_rules_cache() -> None:
+    """使全域替換規則 Store 的快取失效（不通知訂閱者，下次讀取時重新載入）。"""
+    replace_rules_store.invalidate(notify=False)
+
+
+register_cache("utils.text_processor.conflict_warnings", clear_conflict_warning_cache)
+register_cache("utils.text_processor.replace_rules", clear_replace_rules_cache)
 
 
 # --- 檔案讀寫與文字處理工具函式 ---

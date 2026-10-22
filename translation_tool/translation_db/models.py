@@ -9,6 +9,11 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import Any
 
+from translation_tool.translation_db.smart_review_status import (
+    MANUAL_EDIT_STATUSES,
+    SmartReviewStatus,
+)
+
 
 @dataclass(frozen=True)
 class EntryRow:
@@ -197,21 +202,13 @@ class TimeFilter:
 
 # 條目篩選「智慧校對狀態」的選項 -> 最近一次批次中對應的候選狀態。
 SMART_REVIEW_FILTER_GROUPS: dict[str, tuple[str, ...]] = {
-    "any": (
-        "applied",
-        "rejected",
-        "needs_context",
-        "no_change",
-        "invalid",
-        "invalid_format",
-        "stale",
-    ),
-    "applied": ("applied",),
-    "invalid": ("invalid", "invalid_format"),
-    "stale": ("stale",),
-    "needs_context": ("needs_context",),
-    "no_change": ("no_change",),
-    "rejected": ("rejected",),
+    "any": tuple(sorted(MANUAL_EDIT_STATUSES)),
+    "applied": (SmartReviewStatus.APPLIED,),
+    "invalid": (SmartReviewStatus.INVALID, SmartReviewStatus.INVALID_FORMAT),
+    "stale": (SmartReviewStatus.STALE,),
+    "needs_context": (SmartReviewStatus.NEEDS_CONTEXT,),
+    "no_change": (SmartReviewStatus.NO_CHANGE,),
+    "rejected": (SmartReviewStatus.REJECTED,),
 }
 
 
@@ -484,7 +481,7 @@ class SmartReviewCandidate:
     reason: str | None = None
     draft_zh_tw: str | None = None
     validation_error: str | None = None
-    status: str = "pending"
+    status: str = SmartReviewStatus.PENDING
     applied_batch: str | None = None
     applied_at: str | None = None
 

@@ -11,8 +11,9 @@
 | 使用 Mod 翻譯資料庫 | [`user-guide/mod-translation-db.md`](user-guide/mod-translation-db.md) |
 | 了解系統邊界與資料流 | [`developer-guide/architecture.md`](developer-guide/architecture.md) |
 | 修改某個子系統前找程式碼與測試 | [`developer-guide/codebase-ownership.md`](developer-guide/codebase-ownership.md) |
-| 追查某個 View、長任務或快取契約 | [`developer-guide/views/`](developer-guide/views/)、[`developer-guide/operation-lifecycle.md`](developer-guide/operation-lifecycle.md)、[`developer-guide/cache.md`](developer-guide/cache.md) |
+| 追查某個 View、長任務或快取契約 | [`developer-guide/views/`](developer-guide/views/)、[`developer-guide/operation-lifecycle.md`](developer-guide/operation-lifecycle.md)、[`developer-guide/cache.md`](developer-guide/cache.md)、[`developer-guide/cache-lifecycle.md`](developer-guide/cache-lifecycle.md) |
 | 修改設定、格式或產生文件 | [`reference/configuration.md`](reference/configuration.md)、[`reference/formats.md`](reference/formats.md)、[`generated/exception-inventory.md`](generated/exception-inventory.md) |
+| 重新產生或檢查生成文件 | [`contributing/generated-docs.md`](contributing/generated-docs.md) |
 | 執行測試、開 PR 或發版 | [`contributing/testing.md`](contributing/testing.md)、[`contributing/pr-workflow.md`](contributing/pr-workflow.md)、[`contributing/release.md`](contributing/release.md) |
 
 ## 文件分類
@@ -29,6 +30,8 @@
 - [`developer-guide/codebase-ownership.md`](developer-guide/codebase-ownership.md)：子系統 → 原始碼 → 權威文件 → 測試的對照。
 - [`developer-guide/views/`](developer-guide/views/)：各 View 的元件、呼叫鏈與 service 邊界；每份文件的識別字範圍由 `tests/test_view_docs_identifiers.py` 宣告。
 - [`page_flows/README.md`](page_flows/README.md)：頁面操作到背景工作與結果回到 UI 的流程圖。
+- [`developer-guide/smart-review-status.md`](developer-guide/smart-review-status.md)：智慧校對候選狀態機、允許的轉移與行程內快取清除入口。
+- [`developer-guide/smart-review-history-storage.md`](developer-guide/smart-review-history-storage.md)：智慧校對歷史 JSON 的檔案格式、sidecar、schema 版本與 migration、檢查／修復／備份／清理工具與保留策略。
 - [`developer-guide/operation-lifecycle.md`](developer-guide/operation-lifecycle.md)、[`developer-guide/worker-thread-audit.md`](developer-guide/worker-thread-audit.md)：長任務、取消、關閉與 worker/UI 邊界。
 - [`developer-guide/jar-pipeline.md`](developer-guide/jar-pipeline.md)、[`developer-guide/translation-engine-skeleton.md`](developer-guide/translation-engine-skeleton.md)：引擎資料流與共用翻譯骨架。
 

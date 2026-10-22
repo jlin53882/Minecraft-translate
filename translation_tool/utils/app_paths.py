@@ -38,6 +38,8 @@ import sys
 import threading
 from pathlib import Path
 
+from translation_tool.utils.cache_registry import register_cache
+
 log = logging.getLogger(__name__)
 
 DATA_DIR_ENV = "MCT_DATA_DIR"
@@ -149,6 +151,15 @@ def migrate_legacy_data(legacy_root: Path, data_root: Path) -> list[str]:
     if moved:
         log.info("已把舊版資料搬進 %s：%s", data_root, ", ".join(moved))
     return moved
+
+
+def clear_migrated_roots() -> None:
+    """清除「已做過舊版資料遷移」的記錄，下次解析資料根目錄時會再檢查一次。"""
+    with _migration_lock:
+        _migrated_roots.clear()
+
+
+register_cache("utils.app_paths.migrated_roots", clear_migrated_roots)
 
 
 def _migrate_once(root: Path, data_root: Path) -> None:

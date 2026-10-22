@@ -1,272 +1,62 @@
-"""智慧校對視窗的「審查」分頁：每頁一筆的逐筆審查（套用／保留原譯文／存草稿）。"""
+"""智慧校對視窗的「審查」分頁：每頁一筆的逐筆審查（套用／保留原譯文／存草稿）。
+
+本模組是 Flet 控制項與事件的串接層（controller + view）：畫面狀態在
+``SmartReviewReviewerState``，候選讀取與預載在 ``SmartReviewCandidateLoader``，證據與格式診斷的
+文字在 ``SmartReviewEvidencePresenter``，寫入動作在 ``SmartReviewActionService``。
+"""
 
 from __future__ import annotations
-
-from typing import Any
 
 import flet as ft
 
 from app.services_impl.moddb_smart_review_service import (
-    SMART_REVIEW_MANUAL_EDIT_STATUSES,
     SmartReviewCandidate,
-    apply_moddb_smart_review_candidate_from_path,
-    apply_moddb_smart_review_manual_edit_from_path,
-    get_moddb_smart_review_run_breakdown_from_path,
-    get_moddb_smart_review_run_from_path,
-    load_moddb_smart_review_candidate_page_from_path,
-    realign_moddb_smart_review_candidate_from_path,
-    reject_moddb_smart_review_candidate_from_path,
-    save_moddb_smart_review_draft_from_path,
-    smart_review_format_diagnostics,
+    SmartReviewStatus,
 )
-from app.tasks.operation_registry import CommitPolicy, DurabilityPolicy
+from app.tasks.operation_registry import OperationPresentation
 from app.ui import design, kit
 from app.ui.design import C
 from app.ui.snack import show_snack
 from app.views.moddb.formatting import format_count
-from app.views.moddb.smart_review_context import SmartReviewContext
-
-DEFAULT_FILTER = "ready"
-# 篩選器：(狀態值, 顯示名稱)；``all`` 表示不篩選。
-FILTERS: tuple[tuple[str, str], ...] = (
-    ("ready", "可套用"),
-    ("applied", "已套用"),
-    ("rejected", "已保留原譯文"),
-    ("needs_context", "需補 context"),
-    ("no_change", "AI 認為不用改"),
-    ("invalid", "無效（AI 回應不合格）"),
-    ("invalid_format", "格式不符"),
-    ("stale", "已過期"),
-    ("all", "全部"),
+from app.views.moddb.smart_review_actions import (
+    DRAFT_SAVED,
+    ActionOutcome,
+    SmartReviewActionService,
 )
-STATUS_LABEL = dict(FILTERS)
+from app.views.moddb.smart_review_candidate_loader import SmartReviewCandidateLoader
+from app.views.moddb.smart_review_context import SmartReviewContext
+from app.views.moddb.smart_review_evidence import (
+    SmartReviewEvidencePresenter,
+    initial_draft_text,
+    is_editable_row,
+    is_manual_edit_row,
+    manual_edit_hint,
+    not_applicable_reason,
+)
+from app.views.moddb.smart_review_reason import build_ai_reason_panel
+from app.views.moddb.smart_review_reviewer_state import (
+    DEFAULT_FILTER,
+    FILTERS,
+    STATUS_LABEL,
+    SmartReviewReviewerState,
+)
+
 _STATUS_TONE = {
-    "ready": "em",
-    "applied": "dia",
-    "rejected": "neutral",
-    "needs_context": "gold",
-    "no_change": "neutral",
-    "invalid": "red",
-    "invalid_format": "red",
-    "stale": "gold",
+    SmartReviewStatus.READY: "em",
+    SmartReviewStatus.APPLIED: "dia",
+    SmartReviewStatus.REJECTED: "neutral",
+    SmartReviewStatus.NEEDS_CONTEXT: "gold",
+    SmartReviewStatus.NO_CHANGE: "neutral",
+    SmartReviewStatus.INVALID: "red",
+    SmartReviewStatus.INVALID_FORMAT: "red",
+    SmartReviewStatus.STALE: "gold",
 }
 _DECISION_LABEL = {
     "no_change": "維持不變",
     "suggest_revision": "建議修改",
     "needs_context": "需補 context",
 }
-_CONFIDENCE_LABEL = {"high": "高", "medium": "中", "low": "低"}
-# 為什麼某筆不能套用：讓灰掉的按鈕有明確的說明。
-_NOT_APPLICABLE = {
-    "applied": "這筆已經套用；要再修改請編輯草稿後重新套用。",
-    "rejected": "這筆已選擇保留原譯文。",
-    "needs_context": "AI 表示需要更多上下文才能判斷，沒有提供建議譯文。",
-    "no_change": "AI 認為目前譯文不用修改，沒有建議譯文。",
-    "invalid": "AI 的回應沒有通過驗證，不能套用。",
-    "invalid_format": "草稿的格式未通過檢查，這筆已鎖定；請重新校對。",
-    "stale": "資料庫內容在校對後已變更，這筆已過期；請重新校對。",
-}
-_APPLY_MESSAGES = {
-    "applied": ("已套用 1 筆人工（未審核）譯文；原 AI 譯文保留。", C.EM),
-    "stale": ("資料庫內容已變更，這筆候選已過期；未覆蓋目前譯文。", C.GOLD),
-    "manual_reviewed": (
-        "目前已有人工審核過的譯文，不會被覆蓋；請到條目校對編輯。",
-        C.GOLD,
-    ),
-    "invalid_format": ("草稿格式未通過檢查，未套用。", C.GOLD),
-    "invalid_draft": ("草稿不可為空白。", C.GOLD),
-    "not_ready": ("這筆目前不是可套用的狀態。", C.GOLD),
-    "missing": ("找不到這筆候選。", C.GOLD),
-}
-# 人工編輯套用（任何非 ready 的可編輯狀態）可能回傳的結果。
-_MANUAL_EDIT_MESSAGES = {
-    **_APPLY_MESSAGES,
-    "applied": ("已套用人工修改（未審核）；可從條目歷史還原。", C.EM),
-    "changed": (
-        "資料庫內容在載入後已變更，未覆蓋；已重新載入這筆，請確認目前譯文後再套用。",
-        C.GOLD,
-    ),
-    "state_sync_failed": (
-        "譯文已寫入（可從條目歷史還原），但批次狀態同步失敗；重新載入這個批次時會自動補回。",
-        C.GOLD,
-    ),
-    "unchanged": ("草稿與目前譯文相同，沒有需要套用的變更。", C.GOLD),
-    "not_editable": ("這筆目前不能人工編輯。", C.GOLD),
-    "unsupported": ("舊版批次不支援人工編輯套用；請重新校對。", C.GOLD),
-}
-_MANUAL_EDIT_HINTS = {
-    "applied": "這筆已套用。修改草稿後按「重新套用」會覆蓋目前人工譯文（可從條目歷史還原）。",
-    "rejected": "這筆先前選擇保留原譯文；仍可編輯草稿後套用。",
-    "needs_context": "AI 沒有提供建議譯文；草稿預設為目前譯文，可直接修改後套用。",
-    "no_change": "AI 認為不用修改；草稿預設為目前譯文，仍可修改後套用。",
-    "invalid": "AI 的回應沒有通過驗證；草稿預設為目前譯文，可直接修改後套用。",
-    "invalid_format": "先前的草稿格式未通過檢查；請修正草稿後套用。",
-    "stale": "資料庫內容在校對後已變更；已對齊目前譯文，可直接修改後套用。",
-}
-
-
-def is_manual_edit_row(row: SmartReviewCandidate | None) -> bool:
-    """這筆候選是否走人工編輯套用（非 ready 但可編輯的狀態）。"""
-    return row is not None and row.status in SMART_REVIEW_MANUAL_EDIT_STATUSES
-
-
-def manual_edit_hint(row: SmartReviewCandidate) -> str:
-    """說明人工編輯這筆候選的方式；未儲存的修改換筆後不會保留。"""
-    hint = _MANUAL_EDIT_HINTS.get(row.status, "")
-    if row.status in {"invalid", "invalid_format"} and row.validation_error:
-        hint += f"原因：{row.validation_error}。"
-    return f"{hint}未套用的修改換筆後不會保留。" if hint else ""
-
-
-def initial_draft_text(row: SmartReviewCandidate) -> str:
-    """決定草稿框的起始內容：已套用以目前資料庫值為準，其他依序取草稿、建議、現況。"""
-    if row.status == "applied":
-        return row.current_zh_tw or ""
-    if row.status in SMART_REVIEW_MANUAL_EDIT_STATUSES:
-        return row.draft_zh_tw or row.suggested_zh_tw or row.current_zh_tw or ""
-    return row.draft_zh_tw or row.suggested_zh_tw or ""
-
-
-def candidate_evidence_text(row: SmartReviewCandidate) -> str:
-    """只顯示 AI 實際引用的證據，並相容解析舊版 entry-only id。"""
-    context = list(row.context)
-    evidence_by_id = {str(item.get("id")): item for item in context}
-    legacy_by_id: dict[str, list[dict]] = {}
-    for item in context:
-        legacy_id = item.get("legacy_id")
-        if legacy_id:
-            legacy_by_id.setdefault(str(legacy_id), []).append(item)
-
-    def reference_label(item: dict) -> str:
-        """將 context 來源轉成審查者看得懂的可信度分層。"""
-        reference_type = str(item.get("reference_type", "local"))
-        match_type = str(item.get("match_type", ""))
-        if reference_type == "official_locale":
-            if match_type in {"exact_key", "exact_text", "official_phrase"}:
-                return "官方完整翻譯"
-            return "官方術語"
-        if reference_type == "reviewed_lang_glossary":
-            return "已審核 lang 參考"
-        if reference_type in {"same_key_reviewed", "same_text_reviewed"}:
-            return "已審核資料庫參考"
-        if reference_type == "module_locale":
-            return "未審核模組翻譯（低信心，非官方標準）"
-        return "本地參考"
-
-    def format_item(display_id: str, item: dict) -> str:
-        """格式化單筆證據及其版本、來源與品質限制。"""
-        return (
-            f"{display_id} · {reference_label(item)} · "
-            f"來源={item.get('source_label', item.get('source', ''))} · "
-            f"版本={item.get('mc_version', '-')} · "
-            f"信心={_CONFIDENCE_LABEL.get(str(item.get('confidence', 'low')), '未知')} · "
-            f"{item.get('en_us', '')} → {item.get('zh_tw', '')} · "
-            f"{item.get('limitations', '')}"
-        )
-
-    evidence_ids = tuple(row.evidence_ids)
-    if not evidence_ids:
-        lines = ["AI 未引用任何本地證據。"]
-        if context:
-            lines.append("可參考資料（非本次 AI 證據）：")
-            groups = (
-                (
-                    "官方完整翻譯參考",
-                    [
-                        item
-                        for item in context
-                        if item.get("reference_type") == "official_locale"
-                        and item.get("match_type")
-                        in {"exact_key", "exact_text", "official_phrase"}
-                    ],
-                ),
-                (
-                    "官方術語參考",
-                    [
-                        item
-                        for item in context
-                        if item.get("reference_type") == "official_locale"
-                        and item.get("match_type")
-                        not in {"exact_key", "exact_text", "official_phrase"}
-                    ],
-                ),
-                (
-                    "已審核參考",
-                    [
-                        item
-                        for item in context
-                        if item.get("reference_type")
-                        in {
-                            "reviewed_lang_glossary",
-                            "same_key_reviewed",
-                            "same_text_reviewed",
-                        }
-                    ],
-                ),
-                (
-                    "模組語系參考",
-                    [
-                        item
-                        for item in context
-                        if item.get("reference_type") == "module_locale"
-                    ],
-                ),
-                (
-                    "其他本地參考",
-                    [
-                        item
-                        for item in context
-                        if item.get("reference_type")
-                        not in {
-                            "official_locale",
-                            "reviewed_lang_glossary",
-                            "same_key_reviewed",
-                            "same_text_reviewed",
-                            "module_locale",
-                        }
-                    ],
-                ),
-            )
-            remaining = 6
-            for label, grouped in groups:
-                if not grouped or remaining <= 0:
-                    continue
-                lines.append(f"{label}：")
-                selected = grouped[:remaining]
-                lines.extend(
-                    format_item(str(item.get("id")), item) for item in selected
-                )
-                remaining -= len(selected)
-        else:
-            lines.append("完全沒有可供參考的本地 context；請人工確認。")
-        return "\n".join(lines)
-    lines = []
-    for evidence_id in evidence_ids[:8]:
-        requested_id = str(evidence_id)
-        item = evidence_by_id.get(requested_id)
-        if item is not None:
-            lines.append(format_item(requested_id, item))
-            continue
-        matches = legacy_by_id.get(requested_id, [])
-        if len(matches) == 1:
-            lines.append(
-                format_item(f"{requested_id} → {matches[0].get('id')}", matches[0])
-            )
-        elif matches:
-            lines.append(f"{requested_id}（舊版 id 對應多個來源，無法唯一解析）")
-        else:
-            lines.append(f"{requested_id}（找不到本地證據）")
-    return "\n".join(lines)
-
-
-def not_applicable_reason(row: SmartReviewCandidate) -> str | None:
-    """回傳這筆候選不能套用的原因；可套用時回傳 None。"""
-    if row.status == "ready":
-        return None
-    reason = _NOT_APPLICABLE.get(row.status, f"目前狀態「{row.status}」不能套用。")
-    if row.status in {"invalid", "invalid_format"} and row.validation_error:
-        reason += f"原因：{row.validation_error}"
-    return reason
+_FORMAT_TONE_COLOR = {"muted": C.MUTED, "gold": C.GOLD, "red": C.RED, "em": C.EM}
 
 
 class SmartReviewReviewer:
@@ -276,17 +66,9 @@ class SmartReviewReviewer:
         """建立審查面板；``on_changed`` 在候選被套用後通知外層重新整理。"""
         self.ctx = ctx
         self.on_changed = on_changed
-        self.run_id: str | None = None
-        self.run_info: dict[str, Any] = {}
-        self.counts: dict[str, int] = {}
-        self.status_filter = DEFAULT_FILTER
-        self.position = 0
-        self.total = 0
-        self.row: SmartReviewCandidate | None = None
-        self.busy = False
-        self._seq = 0
-        self._stored_draft = ""
-        self._has_format_issue = False
+        self.state = SmartReviewReviewerState()
+        self.loader = SmartReviewCandidateLoader()
+        self.actions = SmartReviewActionService(ctx)
         self._build_controls()
         self.body = ft.Column([], spacing=12, scroll=ft.ScrollMode.AUTO, expand=True)
         self.control = ft.Column(
@@ -436,6 +218,7 @@ class SmartReviewReviewer:
             icon=ft.Icons.RATE_REVIEW_OUTLINED,
             tone="em",
             badge=kit.chip("人工確認", "dia"),
+            collapsible=True,
             padding=ft.Padding.symmetric(horizontal=16, vertical=14),
         )
 
@@ -448,104 +231,56 @@ class SmartReviewReviewer:
             self._show_empty("沒有可用的資料庫", "請先在條目校對選擇資料庫。")
             return
         path, priority = database
-        self.run_id = run_id
-        self._seq += 1
-        seq = self._seq
+        state = self.state
+        state.run_id = run_id
+        self.loader.invalidate()
+        token = state.begin_request()
         self._show_loading("正在載入批次…")
-
-        def work() -> tuple[dict | None, dict]:
-            """唯讀取得批次資訊與狀態統計。"""
-            info = get_moddb_smart_review_run_from_path(path, priority, run_id)
-            breakdown = get_moddb_smart_review_run_breakdown_from_path(
-                path, priority, run_id
-            )
-            return info, breakdown
 
         def done(result, error: str | None) -> None:
             """決定初始篩選並顯示第一筆。"""
             if error:
                 self._show_empty("批次載入失敗", error)
                 return
-            info, breakdown = result
-            if info is None:
-                self.run_id = None
+            if result.info is None:
+                state.run_id = None
                 self._show_empty("找不到批次", f"run_id：{run_id}")
                 return
-            self.run_info = info
-            self.counts = dict(breakdown.get("status", {}))
-            ready = self.counts.get("ready", 0)
-            self.status_filter = "ready" if ready else "all"
-            self.filter_dd.value = self.status_filter
+            state.run_info = result.info
+            state.counts = result.counts
+            state.status_filter = state.prefer_ready_filter()
+            self.filter_dd.value = state.status_filter
             self._refresh_filter_labels()
-            self.position = 0
+            state.position = 0
             self.load_position()
 
         self.ctx.run_background(
-            work, done, name="載入智慧校對批次", still_valid=lambda: seq == self._seq
+            lambda: self.loader.load_run(path, priority, run_id),
+            done,
+            name="載入智慧校對批次",
+            still_valid=lambda: state.is_current(token),
         )
 
-    def reload_counts(self, then=None) -> None:
-        """重新讀取目前批次的狀態統計（套用或保留之後使用）。"""
+    def load_position(
+        self, *, refresh_total: bool = True, refresh_counts: bool = False
+    ) -> None:
+        """依目前篩選與位置載入單筆候選（每頁一筆）。
+
+        ``refresh_counts`` 在套用或保留之後使用：狀態統計與候選在同一個唯讀連線讀取。
+        """
         database = self.ctx.database()
-        if database is None or not self.run_id:
+        state = self.state
+        if database is None or not state.run_id:
             return
         path, priority = database
-        run_id = self.run_id
-
-        def work() -> dict:
-            """唯讀取得狀態統計。"""
-            return get_moddb_smart_review_run_breakdown_from_path(
-                path, priority, run_id
-            )
-
-        def done(result, error: str | None) -> None:
-            """更新篩選器上的筆數並繼續。"""
-            if not error:
-                self.counts = dict(result.get("status", {}))
-                self._refresh_filter_labels()
-            if then is not None:
-                then()
-
-        self.ctx.run_background(work, done, name="更新智慧校對統計")
-
-    def load_position(self, *, refresh_total: bool = True) -> None:
-        """依目前篩選與位置載入單筆候選（每頁一筆）。"""
-        database = self.ctx.database()
-        if database is None or not self.run_id:
-            return
-        path, priority = database
-        run_id = self.run_id
-        status = None if self.status_filter == "all" else self.status_filter
-        position = max(0, self.position)
-        known_total = None if refresh_total else self.total
-        self._seq += 1
-        seq = self._seq
+        run_id = state.run_id
+        status = state.status_query
+        position = max(0, state.position)
+        known_total = None if refresh_total else state.total
+        identity = self.ctx.db_identity()
+        token = state.begin_request()
         self.set_busy(True)
         self.ctx.update()
-
-        def read_page(total_hint: int | None):
-            """在一次唯讀操作中取得總數與目前位置的那一筆。"""
-            return load_moddb_smart_review_candidate_page_from_path(
-                path,
-                priority,
-                run_id,
-                status=status,
-                limit=1,
-                offset=position,
-                known_total=total_hint,
-            )
-
-        def work() -> tuple[int, list[SmartReviewCandidate]]:
-            """載入該筆；可人工編輯的候選先對齊目前資料庫，讓畫面顯示現況。"""
-            total, rows = read_page(known_total)
-            if is_manual_edit_row(rows[0] if rows else None) and (
-                realign_moddb_smart_review_candidate_from_path(
-                    path, priority, run_id, rows[0].ordinal
-                )
-                == "realigned"
-            ):
-                total, rows = read_page(total)
-            return total, rows
 
         def done(result, error: str | None) -> None:
             """顯示該筆；位置超出範圍時退回最後一筆。"""
@@ -553,39 +288,88 @@ class SmartReviewReviewer:
             if error:
                 self._show_empty("候選載入失敗", error)
                 return
-            total, rows = result
-            self.total = total
-            self.position = min(position, total - 1) if total else 0
-            self.row = rows[0] if rows else None
+            state.total = result.total
+            state.position = state.clamp_position(position, result.total)
+            state.row = result.row
+            if result.counts is not None:
+                state.counts = result.counts
+                self._refresh_filter_labels()
+            self.loader.remember(run_id, status, identity, position, result.window)
             self._render()
+            self._preload()
 
         self.ctx.run_background(
-            work,
+            lambda: self.loader.read_position(
+                path,
+                priority,
+                run_id,
+                status=status,
+                position=position,
+                known_total=known_total,
+                with_counts=refresh_counts,
+            ),
             done,
             name="載入智慧校對候選",
-            still_valid=lambda: seq == self._seq,
+            still_valid=lambda: state.is_current(token),
+        )
+
+    def _preload(self) -> None:
+        """在背景預載目前位置前後各一筆，讓下一次換筆不必再讀資料庫。"""
+        database, state = self.ctx.database(), self.state
+        if database is None or state.row is None or not state.run_id:
+            return
+        run_id, status, position = state.run_id, state.status_query, state.position
+        identity = self.ctx.db_identity()
+        if not self.loader.missing_neighbors(
+            run_id, status, identity, position, state.total
+        ):
+            return
+        path, priority = database
+        total = state.total
+        token = state.begin_request()
+
+        def done(window, error: str | None) -> None:
+            """預載失敗時不提示：換筆時會改走一般載入。"""
+            if not error:
+                self.loader.remember(run_id, status, identity, position, window)
+
+        self.ctx.run_background(
+            lambda: self.loader.read_window(
+                path,
+                priority,
+                run_id,
+                status=status,
+                position=position,
+                known_total=total,
+            ),
+            done,
+            name="預載智慧校對候選",
+            presentation=OperationPresentation.MAINTENANCE,
+            still_valid=lambda: state.is_current(token),
         )
 
     # ──────────────── 顯示 ────────────────
 
     def _refresh_filter_labels(self) -> None:
         """在篩選器選項上顯示各狀態的筆數。"""
-        total = sum(self.counts.values())
+        state = self.state
+        counts = state.counts
+        total = state.total_count
         pairs = [
             (
                 key,
-                f"{label}（{format_count(total if key == 'all' else self.counts.get(key, 0))}）",
+                f"{label}（{format_count(total if key == 'all' else counts.get(key, 0))}）",
             )
             for key, label in FILTERS
         ]
         kit.set_dropdown_options(self.filter_dd, pairs)
         parts = [
-            f"{label} {format_count(self.counts[key])}"
+            f"{label} {format_count(counts[key])}"
             for key, label in FILTERS[:-1]
-            if self.counts.get(key)
+            if counts.get(key)
         ]
         self.summary_text.value = "批次狀態：" + (" · ".join(parts) or "沒有候選")
-        info = self.run_info
+        info = state.run_info
         if info:
             self.run_text.value = (
                 f"批次 {str(info.get('id', ''))[:8]} · "
@@ -595,7 +379,7 @@ class SmartReviewReviewer:
 
     def _show_empty(self, title: str, subtitle: str = "") -> None:
         """顯示空狀態，並停用所有動作。"""
-        self.row = None
+        self.state.row = None
         self.position_input.value = ""
         self.position_suffix.value = ""
         self.progress_bar.value = 0.0
@@ -613,27 +397,28 @@ class SmartReviewReviewer:
 
     def _render(self) -> None:
         """顯示目前候選，或在篩選結果為空時說明下一步。"""
-        row = self.row
+        state = self.state
+        row = state.row
         if row is None:
-            label = STATUS_LABEL.get(self.status_filter, self.status_filter)
-            done_all = (
-                self.status_filter == "ready"
-                and self.counts.get("applied", 0) + self.counts.get("rejected", 0) > 0
-            )
+            label = STATUS_LABEL.get(state.status_filter, state.status_filter)
             self._show_empty(
-                "可套用的候選都處理完了" if done_all else f"「{label}」沒有候選",
+                "可套用的候選都處理完了"
+                if state.ready_queue_finished()
+                else f"「{label}」沒有候選",
                 "可以切換審查篩選查看其他狀態。",
             )
             return
-        self.position_input.value = str(self.position + 1)
+        self.position_input.value = str(state.position + 1)
         self.position_suffix.value = (
-            f" / {self.total:,} 筆"
-            f"（{STATUS_LABEL.get(self.status_filter, self.status_filter)}）"
+            f" / {state.total:,} 筆"
+            f"（{STATUS_LABEL.get(state.status_filter, state.status_filter)}）"
         )
-        self.progress_bar.value = (self.position + 1) / self.total if self.total else 0
-        self._stored_draft = initial_draft_text(row)
-        self.draft.value = self._stored_draft
-        self.draft.read_only = not (row.status == "ready" or is_manual_edit_row(row))
+        self.progress_bar.value = (
+            (state.position + 1) / state.total if state.total else 0
+        )
+        state.stored_draft = initial_draft_text(row)
+        self.draft.value = state.stored_draft
+        self.draft.read_only = not is_editable_row(row)
         self.body.controls = [self._header(row), self._columns(row)]
         self._refresh_format()
         self.ctx.update()
@@ -731,20 +516,7 @@ class SmartReviewReviewer:
         )
 
     def _columns(self, row: SmartReviewCandidate) -> ft.Control:
-        """建立左右兩欄：左邊是原文與 AI 判斷，右邊是可編輯草稿與動作。"""
-        reason = row.reason or "（這批資料沒有儲存 reason）"
-        issues = "、".join(row.issue_types) or "未標記"
-        evidence = ft.ExpansionTile(
-            title=ft.Text("本地證據", size=12, color=C.MUTED),
-            controls=[
-                ft.Container(
-                    ft.Text(candidate_evidence_text(row), size=12, selectable=True),
-                    padding=ft.Padding.only(left=14, right=14, bottom=10),
-                )
-            ],
-            expanded=False,
-            tile_padding=ft.Padding.symmetric(horizontal=10),
-        )
+        """建立 AI 說明與左右檢視欄，讓理由不必捲到頁面下方才看得到。"""
         left = ft.Column(
             [
                 self._text_card("英文原文", row.en_us, "dia"),
@@ -754,8 +526,6 @@ class SmartReviewReviewer:
                     "gold",
                 ),
                 self._text_card("AI 建議譯文", row.suggested_zh_tw or "", "em"),
-                self._text_card("AI 理由", f"{reason}\n問題類型：{issues}"),
-                evidence,
             ],
             spacing=10,
             horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
@@ -774,13 +544,19 @@ class SmartReviewReviewer:
             spacing=10,
             horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
         )
-        return ft.ResponsiveRow(
+        return ft.Column(
             [
-                ft.Container(left, col={"xs": 12, "md": 6}),
-                ft.Container(right, col={"xs": 12, "md": 6}),
+                build_ai_reason_panel(row),
+                ft.ResponsiveRow(
+                    [
+                        ft.Container(left, col={"xs": 12, "md": 6}),
+                        ft.Container(right, col={"xs": 12, "md": 6}),
+                    ],
+                    spacing=14,
+                    run_spacing=14,
+                ),
             ],
             spacing=14,
-            run_spacing=14,
         )
 
     # ──────────────── 草稿與格式診斷 ────────────────
@@ -792,92 +568,82 @@ class SmartReviewReviewer:
 
     def _refresh_format(self) -> None:
         """依目前草稿計算格式診斷，並決定能否儲存與套用。"""
-        row = self.row
-        value = str(self.draft.value or "")
-        has_issue = False
+        state = self.state
+        row = state.row
         if row is None:
             self._set_actions_enabled(False, None)
             return
-        if not value.strip():
-            self.format_text.value = "格式診斷：尚無可分析草稿"
-            self.format_text.color = C.MUTED
-            has_issue = row.status == "ready" or is_manual_edit_row(row)
-        else:
-            try:
-                diagnostics = smart_review_format_diagnostics(
-                    row.en_us, value, kind=row.kind
-                )
-            except (TypeError, ValueError) as exc:
-                self.format_text.value = f"格式診斷無法執行：{exc}"
-                self.format_text.color = C.GOLD
-            else:
-                lines = diagnostics.summary_lines
-                self.format_text.value = (
-                    "格式診斷：" + "；".join(lines)
-                    if lines
-                    else "格式診斷：未發現格式問題"
-                )
-                self.format_text.color = C.RED if diagnostics.has_issues else C.EM
-                has_issue = diagnostics.has_issues
-        self._has_format_issue = has_issue
+        diagnosis = SmartReviewEvidencePresenter.diagnose_draft(
+            row, str(self.draft.value or "")
+        )
+        self.format_text.value = diagnosis.text
+        self.format_text.color = _FORMAT_TONE_COLOR[diagnosis.tone]
+        state.has_format_issue = diagnosis.has_issue
         self._set_actions_enabled(True, row)
 
     def _set_actions_enabled(
         self, has_row: bool, row: SmartReviewCandidate | None
     ) -> None:
         """依候選狀態與格式診斷設定按鈕，並說明不能操作的原因。"""
+        state = self.state
         manual = has_row and is_manual_edit_row(row)
         reason = not_applicable_reason(row) if row is not None else None
         ready = has_row and row is not None and reason is None
         if manual:
             self._set_manual_edit_actions(row)
             reason = manual_edit_hint(row)
-            if self._has_format_issue:
+            if state.has_format_issue:
                 reason = "草稿有格式問題或是空白：請先修正才能套用。"
         else:
             self.apply_btn.content = "套用這筆"
-            if ready and self._has_format_issue:
+            if ready and state.has_format_issue:
                 reason = "草稿有格式問題：請先修正，否則套用會被拒絕並鎖定這筆。"
-            usable = ready and not self._has_format_issue and not self.busy
+            usable = ready and not state.has_format_issue and not state.busy
             self.apply_btn.disabled = not usable
             self.save_btn.disabled = not usable
-            self.reject_btn.disabled = not (ready and not self.busy)
-        self.prev_btn.disabled = not has_row or self.position <= 0 or self.busy
+            self.reject_btn.disabled = not (ready and not state.busy)
+        self.prev_btn.disabled = not has_row or state.position <= 0 or state.busy
         self.next_btn.disabled = (
-            not has_row or self.position >= self.total - 1 or self.busy
+            not has_row or state.position >= state.total - 1 or state.busy
         )
-        self.position_input.disabled = not has_row or self.busy
-        self.filter_dd.disabled = self.busy or not self.run_id
+        self.position_input.disabled = not has_row or state.busy
+        self.filter_dd.disabled = state.busy or not state.run_id
         self.hint_text.value = reason or ""
 
     def _set_manual_edit_actions(self, row: SmartReviewCandidate) -> None:
         """人工編輯模式只開放套用；草稿有內容且格式正確才能按，存草稿與保留原譯文不適用。"""
-        self.apply_btn.content = "重新套用" if row.status == "applied" else "套用修改"
-        self.apply_btn.disabled = self.busy or self._has_format_issue
+        state = self.state
+        self.apply_btn.content = (
+            "重新套用" if row.status == SmartReviewStatus.APPLIED else "套用修改"
+        )
+        self.apply_btn.disabled = state.busy or state.has_format_issue
         self.save_btn.disabled = True
         self.reject_btn.disabled = True
 
     def set_busy(self, busy: bool) -> None:
         """切換忙碌狀態並同步按鈕可用性。"""
-        self.busy = busy
-        self._set_actions_enabled(self.row is not None, self.row)
+        self.state.busy = busy
+        self._set_actions_enabled(self.state.row is not None, self.state.row)
 
     # ──────────────── 導覽 ────────────────
 
     def _on_filter(self, event) -> None:
         """切換審查篩選並回到第一筆。"""
-        if self.busy:
+        state = self.state
+        if state.busy:
             return
-        self.status_filter = str(event.control.value or "all")
-        self.position = 0
+        state.status_filter = str(event.control.value or "all")
+        state.position = 0
+        self.loader.invalidate()
         self._flush_then(self.load_position)
 
     def _move(self, delta: int) -> None:
         """移到上一筆或下一筆；到頭時說明原因。"""
-        if self.busy:
+        state = self.state
+        if state.busy:
             return
-        target = self.position + delta
-        if target < 0 or target >= self.total:
+        target = state.position + delta
+        if target < 0 or target >= state.total:
             show_snack(
                 self.ctx.page,
                 "已經是最後一筆。" if delta > 0 else "已經是第一筆。",
@@ -885,74 +651,65 @@ class SmartReviewReviewer:
                 duration=2200,
             )
             return
-
-        def go() -> None:
-            """在草稿處理完後載入目標位置。"""
-            self.position = target
-            self.load_position(refresh_total=False)
-
-        self._flush_then(go)
+        self._flush_then(lambda: self._go_to(target))
 
     def _on_position_submit(self, event) -> None:
         """解析手動輸入的 1-based 筆次，完成驗證後跳到指定候選。"""
-        if self.busy:
+        state = self.state
+        if state.busy:
             return
         raw = str(event.control.value or "").strip()
         try:
             target = int(raw)
         except (TypeError, ValueError):
             target = 0
-        if self.total <= 0 or not self.row:
+        if state.total <= 0 or not state.row:
             self._restore_position_input()
             return
-        if target < 1 or target > self.total:
+        if target < 1 or target > state.total:
             show_snack(
                 self.ctx.page,
-                f"請輸入 1～{self.total:,} 的筆次。",
+                f"請輸入 1～{state.total:,} 的筆次。",
                 C.GOLD,
                 duration=2200,
             )
             self._restore_position_input()
             return
-        if target - 1 == self.position:
+        if target - 1 == state.position:
             self._restore_position_input()
             return
+        self._flush_then(lambda: self._go_to(target - 1))
 
-        def go() -> None:
-            """在草稿處理完後載入手動指定的位置。"""
-            self.position = target - 1
+    def _go_to(self, position: int) -> None:
+        """換到指定位置：已預載就直接顯示，否則在背景載入。"""
+        state = self.state
+        cached = self.loader.take(
+            state.run_id, state.status_query, self.ctx.db_identity(), position
+        )
+        state.position = position
+        if cached is None:
             self.load_position(refresh_total=False)
-
-        self._flush_then(go)
+            return
+        state.begin_request()
+        state.row = cached
+        self._render()
+        self._preload()
 
     def _restore_position_input(self) -> None:
         """把筆次輸入框還原成目前實際顯示的位置。"""
-        self.position_input.value = str(self.position + 1) if self.row else ""
+        self.position_input.value = (
+            str(self.state.position + 1) if self.state.row else ""
+        )
         self.ctx.update()
-
-    def _dirty(self) -> bool:
-        """草稿是否與已儲存內容不同且可儲存。"""
-        return (
-            self._draft_changed()
-            and bool(str(self.draft.value or "").strip())
-            and not self._has_format_issue
-        )
-
-    def _draft_changed(self) -> bool:
-        """判斷目前可編輯候選是否有尚未保存的文字變更。"""
-        row = self.row
-        return (
-            row is not None
-            and row.status == "ready"
-            and str(self.draft.value or "") != self._stored_draft
-        )
 
     def _flush_then(self, then) -> None:
         """換筆前保存草稿；格式錯誤或空白草稿會停留在目前候選。"""
-        if not self._draft_changed():
+        state = self.state
+        draft = str(self.draft.value or "")
+        if not state.draft_changed(draft):
             then()
             return
-        if not str(self.draft.value or "").strip() or self._has_format_issue:
+        if not draft.strip() or state.has_format_issue:
             show_snack(
                 self.ctx.page,
                 "草稿尚未保存：請先修正格式問題或填入內容。",
@@ -961,7 +718,7 @@ class SmartReviewReviewer:
             )
             return
         self._write_draft(
-            lambda status: then() if status == "saved" else None,
+            lambda status: then() if status == DRAFT_SAVED else None,
             quiet=True,
         )
 
@@ -973,127 +730,55 @@ class SmartReviewReviewer:
 
     def _write_draft(self, then, *, quiet: bool = False) -> None:
         """在背景儲存目前草稿，完成後呼叫 ``then(status)``。"""
-        row, database = self.row, self.ctx.database()
-        if row is None or database is None or self.busy:
+        state = self.state
+        row, database = state.row, self.ctx.database()
+        if row is None or database is None or state.busy:
             then(None)
             return
-        path, priority = database
         draft = str(self.draft.value or "")
         self.set_busy(True)
 
-        def work() -> str:
-            """儲存草稿並回傳 service 狀態。"""
-            return save_moddb_smart_review_draft_from_path(
-                path, priority, row.run_id, row.ordinal, draft
-            )
-
-        def done(status, error: str | None) -> None:
+        def done(outcome: ActionOutcome) -> None:
             """依結果顯示提示；自動儲存失敗時保留目前候選。"""
             self.set_busy(False)
-            if error:
-                show_snack(self.ctx.page, f"草稿儲存失敗：{error}", C.RED)
-            elif status == "saved":
-                self._stored_draft = draft
-                if not quiet:
-                    show_snack(self.ctx.page, "草稿已儲存，尚未改寫正式譯文。", C.EM)
-            else:
-                show_snack(self.ctx.page, f"草稿目前無法儲存：{status}", C.GOLD)
+            if outcome.status == DRAFT_SAVED:
+                state.stored_draft = draft
+                self.loader.invalidate()
+            if outcome.message:
+                show_snack(self.ctx.page, outcome.message, outcome.color)
             self.ctx.update()
-            then(status)
+            then(outcome.status)
 
-        self.ctx.run_background(
-            work,
-            done,
-            name="儲存智慧校對草稿",
-            commit=CommitPolicy.ATOMIC,
-            durability=DurabilityPolicy.USER_ACTION,
-            stable_identity=True,
-        )
+        self.actions.save_draft(database, row, draft, done, quiet=quiet)
 
     def _apply(self, _e=None) -> None:
         """套用目前草稿；格式有問題時不會送出，避免鎖死這筆候選。"""
-        row, database = self.row, self.ctx.database()
-        if row is None or database is None or self.busy or self._has_format_issue:
+        state = self.state
+        row, database = state.row, self.ctx.database()
+        if row is None or database is None or state.busy or state.has_format_issue:
             return
-        path, priority = database
-        draft = str(self.draft.value or "")
-        manual = is_manual_edit_row(row)
-        messages = _MANUAL_EDIT_MESSAGES if manual else _APPLY_MESSAGES
         self.set_busy(True)
-
-        def work() -> str:
-            """以 CAS 條件套用候選（ready 走 AI 建議流程，其餘走人工編輯）。"""
-            if manual:
-                return apply_moddb_smart_review_manual_edit_from_path(
-                    path, priority, row.run_id, row.ordinal, draft
-                )
-            return apply_moddb_smart_review_candidate_from_path(
-                path, priority, row.run_id, row.ordinal, draft_zh_tw=draft
-            )
-
-        self.ctx.run_background(
-            work,
-            lambda status, error: self._after_action(
-                status, error, "套用失敗", True, messages=messages
-            ),
-            name="套用智慧校對候選",
-            commit=CommitPolicy.ATOMIC,
-            durability=DurabilityPolicy.USER_ACTION,
-            stable_identity=True,
+        self.actions.apply(
+            database, row, str(self.draft.value or ""), self._after_action
         )
 
     def _reject(self, _e=None) -> None:
         """保留原譯文並把這筆候選標為已處理。"""
-        row, database = self.row, self.ctx.database()
-        if row is None or database is None or self.busy:
+        state = self.state
+        row, database = state.row, self.ctx.database()
+        if row is None or database is None or state.busy:
             return
-        path, priority = database
         self.set_busy(True)
+        self.actions.reject(database, row, self._after_action)
 
-        def work() -> str:
-            """標記候選為保留原譯文並回傳 service 狀態。"""
-            return reject_moddb_smart_review_candidate_from_path(
-                path, priority, row.run_id, row.ordinal
-            )
-
-        self.ctx.run_background(
-            work,
-            lambda status, error: self._after_action(status, error, "保留失敗", False),
-            name="保留智慧校對原譯文",
-            commit=CommitPolicy.ATOMIC,
-            durability=DurabilityPolicy.USER_ACTION,
-            stable_identity=True,
-        )
-
-    def _after_action(
-        self,
-        status,
-        error: str | None,
-        failure: str,
-        notify_parent: bool,
-        *,
-        messages: dict = _APPLY_MESSAGES,
-    ) -> None:
-        """動作完成後提示結果，更新統計並顯示佇列中的下一筆。"""
+    def _after_action(self, outcome: ActionOutcome) -> None:
+        """動作完成後提示結果，並在同一次讀取中更新統計、顯示佇列中的下一筆。"""
         self.set_busy(False)
-        if error:
-            show_snack(self.ctx.page, f"{failure}：{error}", C.RED)
+        show_snack(self.ctx.page, outcome.message or "", outcome.color)
+        if outcome.failed:
             self.ctx.update()
             return
-        if status == "rejected":
-            show_snack(self.ctx.page, "已保留原譯文，這筆不會套用。", C.EM)
-        else:
-            message, color = messages.get(
-                status, (f"這筆目前無法處理：{status}", C.GOLD)
-            )
-            show_snack(self.ctx.page, message, color)
-        # state_sync_failed：翻譯已提交，條目頁仍要重載
-        if (
-            status in {"applied", "state_sync_failed"}
-            and notify_parent
-            and callable(self.on_changed)
-        ):
+        if outcome.reload_parent and callable(self.on_changed):
             self.on_changed()
-        self.set_busy(True)
-        self.ctx.update()
-        self.reload_counts(then=self.load_position)
+        self.loader.invalidate()
+        self.load_position(refresh_counts=True)

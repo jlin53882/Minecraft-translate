@@ -44,3 +44,18 @@ def test_first_run_config_from_example_is_complete(tmp_path):
     before = cfg.read_text(encoding="utf-8")
     sync_missing_config_keys(cfg)
     assert cfg.read_text(encoding="utf-8") == before
+
+
+def test_check_mode_passes_when_current_and_fails_on_drift(tmp_path, monkeypatch):
+    """``--check`` 與 schema 一致時回傳 0；範本過期（或不存在）時回傳 1 且不寫檔。"""
+    gen = _generator()
+    assert gen.main(["--check"]) == 0
+
+    stale = tmp_path / "config.example.json"
+    stale.write_text("{}\n", encoding="utf-8")
+    monkeypatch.setattr(gen, "OUT", stale)
+    assert gen.main(["--check"]) == 1
+    assert stale.read_text(encoding="utf-8") == "{}\n"
+
+    monkeypatch.setattr(gen, "OUT", tmp_path / "missing.json")
+    assert gen.main(["--check"]) == 1

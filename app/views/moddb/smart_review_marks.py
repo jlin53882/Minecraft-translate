@@ -4,18 +4,21 @@ from __future__ import annotations
 
 import flet as ft
 
-from app.services_impl.moddb_smart_review_service import SmartReviewMark
+from app.services_impl.moddb_smart_review_service import (
+    SmartReviewMark,
+    SmartReviewStatus,
+)
 from app.ui import kit
 
 # 狀態 -> (標籤文字, 色調)。待審查的 ready 不標記：使用者本來就會到審查分頁處理。
 MARK_STYLES: dict[str, tuple[str, str]] = {
-    "applied": ("校對：已套用", "dia"),
-    "rejected": ("校對：保留原譯文", "neutral"),
-    "no_change": ("AI：不用改", "neutral"),
-    "needs_context": ("AI：需補 context", "gold"),
-    "invalid": ("校對：無效", "red"),
-    "invalid_format": ("校對：格式不符", "red"),
-    "stale": ("校對：已過期", "gold"),
+    SmartReviewStatus.APPLIED: ("校對：已套用", "dia"),
+    SmartReviewStatus.REJECTED: ("校對：保留原譯文", "neutral"),
+    SmartReviewStatus.NO_CHANGE: ("AI：不用改", "neutral"),
+    SmartReviewStatus.NEEDS_CONTEXT: ("AI：需補 context", "gold"),
+    SmartReviewStatus.INVALID: ("校對：無效", "red"),
+    SmartReviewStatus.INVALID_FORMAT: ("校對：格式不符", "red"),
+    SmartReviewStatus.STALE: ("校對：已過期", "gold"),
 }
 
 

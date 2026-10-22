@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import threading
+from contextlib import contextmanager
 from types import SimpleNamespace
 from typing import ClassVar
 
@@ -11,8 +12,20 @@ import flet as ft
 import pytest
 
 from app.views.moddb import entry_filters
+from app.views.moddb import smart_review_actions as actions_module
+from app.views.moddb import smart_review_batch_reviewer as batch_reviewer_module
+from app.views.moddb import smart_review_candidate_loader as loader_module
+from app.views.moddb import smart_review_evidence as evidence_module
 from app.views.moddb import smart_review_reviewer as reviewer_module
+from app.views.moddb.smart_review_batch_reviewer import SmartReviewBatchReviewer
 from app.views.moddb.smart_review_context import SmartReviewContext
+from app.views.moddb.smart_review_evidence import (
+    SmartReviewEvidencePresenter,
+    initial_draft_text,
+    is_manual_edit_row,
+    manual_edit_hint,
+    not_applicable_reason,
+)
 from app.views.moddb.smart_review_history import SmartReviewHistory, run_status_label
 from app.views.moddb.smart_review_job import (
     SmartReviewJob,
@@ -21,14 +34,7 @@ from app.views.moddb.smart_review_job import (
     format_duration,
     job_for_page,
 )
-from app.views.moddb.smart_review_reviewer import (
-    SmartReviewReviewer,
-    candidate_evidence_text,
-    initial_draft_text,
-    is_manual_edit_row,
-    manual_edit_hint,
-    not_applicable_reason,
-)
+from app.views.moddb.smart_review_reviewer import SmartReviewReviewer
 from tests.conftest import mock_page
 from tests.test_smart_review import _seed
 from translation_tool.translation_db import (
@@ -72,6 +78,129 @@ def _candidate(ordinal: int = 1, status: str = "ready", **overrides):
     }
     values.update(overrides)
     return SmartReviewCandidate(**values)
+
+
+def test_batch_reviewer_paginates_and_preserves_selection_across_pages(
+    db, ctx, monkeypatch
+):
+    """批量審查跨頁勾選時保留前一頁的選取。"""
+    rows = [_candidate(index) for index in range(1, 31)]
+
+    breakdown_calls = []
+
+    class Session:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def get_run(self, _run_id):
+            return {
+                "id": "run-1",
+                "provider": "gemini",
+                "model": "test",
+                "scope_version": "1.21.1",
+                "started_at": "now",
+            }
+
+        def run_breakdown(self, _run_id):
+            breakdown_calls.append(True)
+            return {"status": {"ready": len(rows)}}
+
+        def candidate_page(self, _run_id, *, status, limit, offset, **_kwargs):
+            selected = [row for row in rows if status is None or row.status == status]
+            return len(selected), selected[offset : offset + limit]
+
+    monkeypatch.setattr(
+        batch_reviewer_module,
+        "moddb_smart_review_read_session",
+        lambda *_args, **_kwargs: Session(),
+    )
+    reviewer = SmartReviewBatchReviewer(ctx, on_changed=lambda: None)
+
+    reviewer.load_run("run-1")
+    assert reviewer.pager.total_items == 30
+    assert reviewer.pager.total_pages == 2
+    reviewer._select_page()
+    assert len(reviewer._selected) == 25
+
+    reviewer._on_page(2)
+    reviewer._select_page()
+
+    assert reviewer.page == 2
+    assert len(reviewer.rows) == 5
+    assert len(reviewer._selected) == 30
+    assert reviewer.apply_btn.disabled is False
+    assert len(breakdown_calls) == 1
+
+
+def test_batch_candidate_header_separates_wrapped_chips_from_text(ctx):
+    """批量候選標題不可把 expand 文字放進可換行 Row。"""
+    reviewer = SmartReviewBatchReviewer(ctx, on_changed=lambda: None)
+
+    card = reviewer._candidate_card(_candidate())
+    details = card.content.controls[1]
+    header = details.controls[0]
+
+    assert isinstance(header, ft.Column)
+    assert isinstance(header.controls[1], ft.Row)
+    assert header.controls[1].wrap is True
+    assert details.controls[4].controls[1].value == "原文是問候語"
+    assert details.controls[5].controls[1].value == "未標記"
+
+
+def test_single_reviewer_places_ai_reason_before_editing_columns(ctx):
+    """逐筆檢視先顯示 AI 理由，再顯示原文與人工編輯區。"""
+    reviewer = SmartReviewReviewer(ctx, on_changed=lambda: None)
+
+    columns = reviewer._columns(_candidate())
+    explanation = columns.controls[0]
+    explanation_texts = explanation.content.controls
+
+    assert explanation_texts[1].value == "原文是問候語"
+    assert "問題類型：未標記" == explanation_texts[2].value
+
+
+def test_batch_reviewer_exposes_expired_override_action(ctx):
+    """已過期候選可選取並顯示獨立覆蓋動作，不會混入一般套用或保留。"""
+    reviewer = SmartReviewBatchReviewer(ctx, on_changed=lambda: None)
+    stale = _candidate(status="stale")
+    reviewer._row_cache[stale.ordinal] = stale
+    reviewer._selected.add(stale.ordinal)
+    reviewer._update_action_buttons()
+
+    assert reviewer._can_select(stale) is True
+    assert reviewer._can_override(stale) is True
+    assert reviewer.apply_btn.disabled is True
+    assert reviewer.reject_btn.disabled is True
+    assert reviewer.override_btn.disabled is False
+    assert reviewer.override_btn.content == "批量覆蓋已過期（1）"
+
+    checkbox = reviewer._candidate_card(stale).content.controls[0]
+    assert checkbox.disabled is False
+
+
+def test_dialog_switches_between_single_and_batch_review_modes(db, monkeypatch):
+    """智慧校對審查分頁提供逐筆／批量模式切換而不重建外層分頁。"""
+    from app.views.moddb.smart_review_dialog import SmartReviewDialog
+
+    monkeypatch.setattr(
+        "app.services_impl.moddb_smart_review_service.load_config",
+        lambda: {
+            "lm_translator": {
+                "provider": "gemini",
+                "models": {"test": {"enabled": True}},
+            }
+        },
+    )
+    dialog = SmartReviewDialog(_sync_page(), lambda: db, "1.21.1", None)
+
+    assert dialog.reviewer.control.visible is True
+    assert dialog.batch_reviewer.control.visible is False
+    dialog._on_review_mode("batch")
+    assert dialog.reviewer.control.visible is False
+    assert dialog.batch_reviewer.control.visible is True
 
 
 @pytest.fixture
@@ -292,12 +421,18 @@ def test_dialog_open_review_switches_tab_and_loads_run(db, monkeypatch):
 
     dialog = SmartReviewDialog(_sync_page(), lambda: db, "1.21.1", None)
     loaded = []
+    batch_loaded = []
     dialog.reviewer.load_run = loaded.append
+    dialog.batch_reviewer.load_run = batch_loaded.append
     dialog.open_review("run-9")
     assert loaded == ["run-9"]
+    assert batch_loaded == []
     assert dialog.nav.value == "review"
     assert dialog._panels["review"].visible is True
     assert dialog._panels["run"].visible is False
+
+    dialog._on_review_mode("batch")
+    assert batch_loaded == ["run-9"]
 
 
 def test_dialog_close_keeps_background_job_running(db):
@@ -596,7 +731,7 @@ def test_job_runs_in_background_and_derives_logs(tmp_path, monkeypatch):
     assert any(
         "[智慧校對][批次 1/2][第 1 次嘗試]" in text
         and "第 1/3 次重試" in text
-        and "等待 30.00 s" in text
+        and "等待 30s" in text
         for text in texts
     )
     assert any("驗證修復開始" in text for text in texts)
@@ -666,25 +801,14 @@ class _FakeService:
         """保存候選並初始化呼叫紀錄。"""
         self.rows = rows
         self.calls = []
-
-    def count(self, _path, _priority, _run_id, *, status=None):
-        """回傳篩選後的候選數。"""
-        return len(self._filtered(status))
+        self.sessions = 0
 
     def _filtered(self, status):
         """依狀態篩選候選。"""
         return [r for r in self.rows if status is None or r.status == status]
 
-    def list(self, _path, _priority, _run_id, *, status=None, limit=None, offset=0):
-        """記錄分頁參數並回傳該頁候選。"""
-        self.calls.append(("list", status, limit, offset))
-        rows = self._filtered(status)
-        return rows[offset : offset + limit]
-
     def page(
         self,
-        _path,
-        _priority,
         _run_id,
         *,
         status=None,
@@ -698,7 +822,7 @@ class _FakeService:
         self.calls.append(("page", status, limit, offset, known_total))
         return total, rows[offset : offset + limit]
 
-    def get_run(self, _path, _priority, run_id):
+    def get_run(self, run_id):
         """回傳批次資訊。"""
         return {"id": run_id, "provider": "gemini", "model": "m", "started_at": "t"}
 
@@ -708,6 +832,20 @@ class _FakeService:
         for row in self.rows:
             counts[row.status] = counts.get(row.status, 0) + 1
         return {"status": counts, "errors": []}
+
+    @contextmanager
+    def read_session(self, _path, _priority):
+        """模擬同一個唯讀連線：一次 session 內的所有查詢共用。"""
+        self.sessions += 1
+        yield SimpleNamespace(
+            get_run=self.get_run,
+            run_breakdown=self.breakdown,
+            candidate_page=self.page,
+        )
+
+    def page_calls(self):
+        """只取出候選頁查詢的紀錄。"""
+        return [call for call in self.calls if call[0] == "page"]
 
 
 @pytest.fixture
@@ -723,17 +861,7 @@ def reviewer(ctx, monkeypatch):
     ]
     fake = _FakeService(rows)
     monkeypatch.setattr(
-        reviewer_module,
-        "load_moddb_smart_review_candidate_page_from_path",
-        fake.page,
-    )
-    monkeypatch.setattr(
-        reviewer_module, "get_moddb_smart_review_run_from_path", fake.get_run
-    )
-    monkeypatch.setattr(
-        reviewer_module,
-        "get_moddb_smart_review_run_breakdown_from_path",
-        fake.breakdown,
+        loader_module, "moddb_smart_review_read_session", fake.read_session
     )
     monkeypatch.setattr(
         reviewer_module,
@@ -746,15 +874,16 @@ def reviewer(ctx, monkeypatch):
 
 
 def test_reviewer_defaults_to_ready_queue_with_one_item_per_page(reviewer):
-    """驗證預設只看可套用，且每頁只載入一筆（limit=1）。"""
+    """驗證預設只看可套用，每頁只顯示一筆；同一次查詢順便帶回下一筆供預載。"""
     reviewer.load_run("run-1")
-    assert reviewer.status_filter == "ready"
-    assert reviewer.total == 2
-    assert reviewer.row.ordinal == 2
+    assert reviewer.state.status_filter == "ready"
+    assert reviewer.state.total == 2
+    assert reviewer.state.row.ordinal == 2
     assert reviewer.position_input.value == "1"
     assert reviewer.position_input.text_align == ft.TextAlign.CENTER
     assert reviewer.position_suffix.value == " / 2 筆（可套用）"
-    assert reviewer.fake.calls[-1] == ("page", "ready", 1, 0, None)
+    assert reviewer.fake.page_calls() == [("page", "ready", 2, 0, None)]
+    assert reviewer.fake.sessions == 2  # 批次資訊與統計共用一個連線；候選頁一個連線
     labels = [option.text for option in reviewer.filter_dd.options]
     assert labels[0] == "可套用（2）"
     assert "全部（4）" in labels
@@ -763,32 +892,51 @@ def test_reviewer_defaults_to_ready_queue_with_one_item_per_page(reviewer):
 def test_reviewer_next_and_previous_move_one_item_at_a_time(reviewer):
     """驗證「下一筆」就是換到下一頁，到頭時提示而不是沒反應。"""
     reviewer.load_run("run-1")
+    sessions = reviewer.fake.sessions
     reviewer._move(1)
-    assert reviewer.row.ordinal == 3
-    assert reviewer.fake.calls[-1] == ("page", "ready", 1, 1, 2)
+    assert reviewer.state.row.ordinal == 3
+    # 下一筆已在載入第一筆時預載，換筆不再開資料庫
+    assert reviewer.fake.sessions == sessions
     assert reviewer.next_btn.disabled is True
     reviewer._move(1)
     assert reviewer.ctx.page.snacks[-1] == "已經是最後一筆。"
     reviewer._move(-1)
-    assert reviewer.row.ordinal == 2
+    assert reviewer.state.row.ordinal == 2
     reviewer._move(-1)
     assert reviewer.ctx.page.snacks[-1] == "已經是第一筆。"
+
+
+def test_reviewer_clamps_to_remaining_candidate_after_queue_shrinks(reviewer):
+    """目前候選被處理後，原位置縮到最後一筆仍應顯示剩餘候選。"""
+    reviewer.load_run("run-1")
+    reviewer._go_to(1)
+    assert reviewer.state.row.ordinal == 3
+
+    reviewer.fake.rows = [row for row in reviewer.fake.rows if row.ordinal != 3]
+    reviewer.loader.invalidate()
+    reviewer.load_position(refresh_counts=True)
+
+    assert reviewer.state.position == 0
+    assert reviewer.state.total == 1
+    assert reviewer.state.row is not None
+    assert reviewer.state.row.ordinal == 2
 
 
 def test_reviewer_accepts_manual_position_and_reuses_known_total(reviewer):
     """驗證可輸入筆次跳轉，且換筆時沿用已取得的篩選總數。"""
     reviewer.load_run("run-1")
-    reviewer.status_filter = "all"
-    reviewer.position = 0
+    reviewer.state.status_filter = "all"
+    reviewer.state.position = 0
     reviewer.load_position()
 
     reviewer.position_input.value = "3"
     reviewer._on_position_submit(SimpleNamespace(control=reviewer.position_input))
 
-    assert reviewer.row.ordinal == 3
+    assert reviewer.state.row.ordinal == 3
     assert reviewer.position_input.value == "3"
     assert reviewer.position_suffix.value == " / 4 筆（全部）"
-    assert reviewer.fake.calls[-1] == ("page", None, 1, 2, 4)
+    # 預載沒有涵蓋的位置才查詢，並沿用已知總數（known_total=4）
+    assert ("page", None, 3, 1, 4) in reviewer.fake.page_calls()
 
 
 def test_reviewer_ignores_navigation_while_position_is_loading(reviewer):
@@ -798,8 +946,8 @@ def test_reviewer_ignores_navigation_while_position_is_loading(reviewer):
 
     reviewer._move(1)
 
-    assert reviewer.position == 0
-    assert reviewer.row.ordinal == 2
+    assert reviewer.state.position == 0
+    assert reviewer.state.row.ordinal == 2
     assert reviewer.next_btn.disabled is True
     assert reviewer.position_input.disabled is True
 
@@ -815,8 +963,8 @@ def test_reviewer_falls_back_to_all_when_nothing_is_ready(ctx, reviewer):
         )
     ]
     reviewer.load_run("run-1")
-    assert reviewer.status_filter == "all"
-    assert reviewer.row.status == "invalid"
+    assert reviewer.state.status_filter == "all"
+    assert reviewer.state.row.status == "invalid"
     assert reviewer.draft.read_only is False
     assert reviewer.draft.value == "哈囉"
     assert reviewer.apply_btn.disabled is False
@@ -846,27 +994,27 @@ def test_reviewer_reapplies_applied_candidate_with_manual_edit(reviewer, monkeyp
     changed = []
     reviewer.on_changed = lambda: changed.append(True)
     monkeypatch.setattr(
-        reviewer_module,
+        loader_module,
         "realign_moddb_smart_review_candidate_from_path",
         lambda *_a, **_k: "unchanged",
     )
     monkeypatch.setattr(
-        reviewer_module,
+        actions_module,
         "apply_moddb_smart_review_manual_edit_from_path",
         lambda _p, _pr, run_id, ordinal, draft: (
             calls.append((run_id, ordinal, draft)) or "applied"
         ),
     )
     monkeypatch.setattr(
-        reviewer_module,
+        actions_module,
         "apply_moddb_smart_review_candidate_from_path",
         lambda *_a, **_k: pytest.fail("已套用的筆不應走 AI 建議套用路徑"),
     )
     reviewer.load_run("run-1")
-    reviewer.status_filter = "applied"
-    reviewer.position = 0
+    reviewer.state.status_filter = "applied"
+    reviewer.state.position = 0
     reviewer.load_position()
-    assert reviewer.row.status == "applied"
+    assert reviewer.state.row.status == "applied"
     assert reviewer.draft.read_only is False
     assert reviewer.apply_btn.content == "重新套用"
     assert reviewer.apply_btn.disabled is False
@@ -887,17 +1035,17 @@ def test_reviewer_manual_edit_reports_changed_snapshot_without_notifying(
     changed = []
     reviewer.on_changed = lambda: changed.append(True)
     monkeypatch.setattr(
-        reviewer_module,
+        loader_module,
         "realign_moddb_smart_review_candidate_from_path",
         lambda *_a, **_k: "unchanged",
     )
     monkeypatch.setattr(
-        reviewer_module,
+        actions_module,
         "apply_moddb_smart_review_manual_edit_from_path",
         lambda *_a, **_k: "changed",
     )
     reviewer.load_run("run-1")
-    reviewer.status_filter = "applied"
+    reviewer.state.status_filter = "applied"
     reviewer.load_position()
     reviewer._apply()
     assert "已變更" in reviewer.ctx.page.snacks[-1]
@@ -907,12 +1055,12 @@ def test_reviewer_manual_edit_reports_changed_snapshot_without_notifying(
 def test_reviewer_blocks_manual_apply_when_draft_is_blank(reviewer, monkeypatch):
     """人工編輯模式下空白草稿不能套用。"""
     monkeypatch.setattr(
-        reviewer_module,
+        loader_module,
         "realign_moddb_smart_review_candidate_from_path",
         lambda *_a, **_k: "unchanged",
     )
     reviewer.load_run("run-1")
-    reviewer.status_filter = "applied"
+    reviewer.state.status_filter = "applied"
     reviewer.load_position()
     reviewer.draft.value = "  "
     reviewer._on_draft_change()
@@ -923,7 +1071,7 @@ def test_reviewer_blocks_apply_when_draft_has_format_issue(reviewer, monkeypatch
     """驗證草稿有格式問題時不能套用，避免 service 把候選永久鎖成 invalid_format。"""
     applied = []
     monkeypatch.setattr(
-        reviewer_module,
+        actions_module,
         "apply_moddb_smart_review_candidate_from_path",
         lambda *a, **k: applied.append(a) or "applied",
     )
@@ -937,7 +1085,7 @@ def test_reviewer_blocks_apply_when_draft_has_format_issue(reviewer, monkeypatch
             self.has_issues = bool(issues)
 
     monkeypatch.setattr(
-        reviewer_module,
+        evidence_module,
         "smart_review_format_diagnostics",
         lambda _en, value, kind="lang": Diagnostics(
             ["缺少佔位符 %s"] if "%s" not in value else []
@@ -972,7 +1120,7 @@ def test_reviewer_keeps_invalid_unsaved_draft_when_navigating(reviewer, monkeypa
             self.has_issues = bool(issues)
 
     monkeypatch.setattr(
-        reviewer_module,
+        evidence_module,
         "smart_review_format_diagnostics",
         lambda _en, value, kind="lang": Diagnostics(
             ["缺少佔位符 %s"] if "%s" not in value else []
@@ -988,7 +1136,7 @@ def test_reviewer_keeps_invalid_unsaved_draft_when_navigating(reviewer, monkeypa
 
     reviewer._move(1)
 
-    assert reviewer.row.ordinal == 1
+    assert reviewer.state.row.ordinal == 1
     assert reviewer.draft.value == "尚未補回之前的草稿"
     assert "尚未保存" in reviewer.ctx.page.snacks[-1]
 
@@ -1084,33 +1232,33 @@ def test_reviewer_apply_notifies_parent_and_advances_queue(reviewer, monkeypatch
         return "applied"
 
     monkeypatch.setattr(
-        reviewer_module, "apply_moddb_smart_review_candidate_from_path", fake_apply
+        actions_module, "apply_moddb_smart_review_candidate_from_path", fake_apply
     )
     reviewer.load_run("run-1")
-    assert reviewer.row.ordinal == 2
+    assert reviewer.state.row.ordinal == 2
     reviewer._apply()
     assert changed == [True]
-    assert reviewer.row.ordinal == 3
-    assert reviewer.total == 1
-    assert reviewer.counts["applied"] == 2
+    assert reviewer.state.row.ordinal == 3
+    assert reviewer.state.total == 1
+    assert reviewer.state.counts["applied"] == 2
     assert "已套用 1 筆" in reviewer.ctx.page.snacks[-1]
 
 
 def test_reviewer_keeps_current_draft_when_auto_save_fails(reviewer, monkeypatch):
     """驗證自動保存失敗時不會換筆而遺失目前草稿。"""
     monkeypatch.setattr(
-        reviewer_module,
+        actions_module,
         "save_moddb_smart_review_draft_from_path",
         lambda *_a, **_k: "stale",
     )
     reviewer.load_run("run-1")
-    current_ordinal = reviewer.row.ordinal
+    current_ordinal = reviewer.state.row.ordinal
     reviewer.draft.value = "尚未保存的草稿"
     reviewer._on_draft_change()
 
     reviewer._move(1)
 
-    assert reviewer.row.ordinal == current_ordinal
+    assert reviewer.state.row.ordinal == current_ordinal
     assert reviewer.draft.value == "尚未保存的草稿"
 
 
@@ -1119,12 +1267,12 @@ def test_reviewer_stale_and_reject_messages(reviewer, monkeypatch):
     changed = []
     reviewer.on_changed = lambda: changed.append(True)
     monkeypatch.setattr(
-        reviewer_module,
+        actions_module,
         "apply_moddb_smart_review_candidate_from_path",
         lambda *_a, **_k: "stale",
     )
     monkeypatch.setattr(
-        reviewer_module,
+        actions_module,
         "reject_moddb_smart_review_candidate_from_path",
         lambda *_a, **_k: "rejected",
     )
@@ -1142,17 +1290,17 @@ def test_reviewer_discards_stale_position_results(ctx, reviewer):
     ctx.run_background = lambda work, done, *, still_valid=None, **_k: pending.append(
         (work, done, still_valid)
     )
-    reviewer.run_id = "run-1"
-    reviewer.status_filter = "ready"
-    reviewer.position = 0
+    reviewer.state.run_id = "run-1"
+    reviewer.state.status_filter = "ready"
+    reviewer.state.position = 0
     reviewer.load_position()
-    reviewer.position = 1
+    reviewer.state.position = 1
     reviewer.load_position()
     (_work0, _done0, valid0), (work1, done1, valid1) = pending
     assert valid0() is False
     assert valid1() is True
     done1(work1(), None)
-    assert reviewer.row.ordinal == 3
+    assert reviewer.state.row.ordinal == 3
 
 
 def test_not_applicable_reason_explains_each_blocked_status():
@@ -1167,19 +1315,21 @@ def test_not_applicable_reason_explains_each_blocked_status():
 def test_candidate_evidence_text_separates_cited_from_reference():
     """驗證沒有引用證據時明說，並把參考資料另外列出而不當成 AI 證據。"""
     context = ({"id": "db:1:source:1:revision:2", "en_us": "A", "zh_tw": "甲"},)
-    text = candidate_evidence_text(_candidate(1, context=context, evidence_ids=()))
+    text = SmartReviewEvidencePresenter.evidence_text(
+        _candidate(1, context=context, evidence_ids=())
+    )
     assert text.startswith("AI 未引用任何本地證據。")
     assert "非本次 AI 證據" in text
-    cited = candidate_evidence_text(
+    cited = SmartReviewEvidencePresenter.evidence_text(
         _candidate(1, context=context, evidence_ids=("db:1:source:1:revision:2",))
     )
     assert "非本次 AI 證據" not in cited
     legacy = ({"id": "db:1:source:1:revision:2", "legacy_id": "db:1"},)
-    resolved = candidate_evidence_text(
+    resolved = SmartReviewEvidencePresenter.evidence_text(
         _candidate(1, context=legacy, evidence_ids=("db:1",))
     )
     assert "db:1 → db:1:source:1:revision:2" in resolved
-    missing = candidate_evidence_text(
+    missing = SmartReviewEvidencePresenter.evidence_text(
         _candidate(1, context=legacy, evidence_ids=("db:9",))
     )
     assert "找不到本地證據" in missing
@@ -1214,7 +1364,9 @@ def test_candidate_evidence_text_distinguishes_official_and_module_references():
         },
     )
 
-    text = candidate_evidence_text(_candidate(1, context=context, evidence_ids=()))
+    text = SmartReviewEvidencePresenter.evidence_text(
+        _candidate(1, context=context, evidence_ids=())
+    )
 
     assert "AI 未引用任何本地證據。" in text
     assert "官方完整翻譯參考：" in text
