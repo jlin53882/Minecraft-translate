@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import copy
+import math
 from dataclasses import dataclass
 from typing import Any
 
@@ -1079,6 +1080,25 @@ def get_default(path: str) -> Any:
     否則預設值會在 schema、執行端與 UI 之間各自漂移。
     """
     return copy.deepcopy(SETTINGS_BY_PATH[path].default)
+
+
+def validate_batch_shrink_factor(value: object) -> float:
+    """驗證 ``lm_translator.batch_shrink_factor``：必須是有限數值且 ``0 < value < 1``。
+
+    小於等於 0 會把批次縮到 0 而回填原文，大於等於 1 則不會縮小甚至擴大批次，兩者都不是縮批。
+    不合法時丟 ``ValueError``（訊息可直接顯示給使用者）。
+    """
+    factor = math.nan
+    if not isinstance(value, bool) and isinstance(value, int | float | str):
+        try:
+            factor = float(value)
+        except ValueError:
+            factor = math.nan
+    if not (math.isfinite(factor) and 0 < factor < 1):
+        raise ValueError(
+            f"lm_translator.batch_shrink_factor 必須是介於 0 與 1 之間（不含）的數字，收到：{value!r}"
+        )
+    return factor
 
 
 def build_default_config() -> dict[str, Any]:
