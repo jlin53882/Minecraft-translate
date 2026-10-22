@@ -12,6 +12,7 @@ import json
 import logging
 import os
 import re
+import shutil
 import threading
 import uuid
 from collections import Counter, defaultdict
@@ -36,6 +37,7 @@ _RUN_ID = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
 _PROCESSED_CANDIDATE_STATUSES = frozenset(
     {"ready", "no_change", "needs_context", "invalid", "request_failed"}
 )
+_VALID_CANDIDATE_STATUSES = frozenset({"ready", "no_change", "needs_context"})
 SMART_REVIEW_CAS_SNAPSHOT_FIELDS = (
     "kind",
     "mc_version",
@@ -111,6 +113,18 @@ def _candidate_counts_from_items(
 ) -> dict[str, Any]:
     """從候選字典清單建立狀態、錯誤與摘要計數。"""
     statuses = [str(item.get("status") or "pending") for item in candidates]
+    ai_statuses: list[str | None] = []
+    for item, status in zip(candidates, statuses, strict=True):
+        candidate_ai_status = item.get("ai_status")
+        if (
+            isinstance(candidate_ai_status, str)
+            and candidate_ai_status in _PROCESSED_CANDIDATE_STATUSES
+        ):
+            ai_statuses.append(candidate_ai_status)
+        elif status in _PROCESSED_CANDIDATE_STATUSES:
+            ai_statuses.append(status)
+        else:
+            ai_statuses.append(None)
     status_counts = Counter(statuses)
     error_counts = Counter(
         str(item.get("validation_error"))
@@ -119,13 +133,13 @@ def _candidate_counts_from_items(
     )
     return {
         "processed_count": sum(
-            status in _PROCESSED_CANDIDATE_STATUSES for status in statuses
+            status in _PROCESSED_CANDIDATE_STATUSES for status in ai_statuses
         ),
         "valid_count": sum(
-            status in {"ready", "no_change", "needs_context"} for status in statuses
+            status in _VALID_CANDIDATE_STATUSES for status in ai_statuses
         ),
-        "invalid_count": statuses.count("invalid"),
-        "request_error_count": statuses.count("request_failed"),
+        "invalid_count": ai_statuses.count("invalid"),
+        "request_error_count": ai_statuses.count("request_failed"),
         "pending_count": statuses.count("pending"),
         "status_counts": dict(status_counts),
         "error_counts": dict(error_counts),
@@ -163,6 +177,7 @@ def _snapshot_payload(run_id: str, item: SmartReviewSnapshot) -> dict[str, Any]:
         "draft_zh_tw": None,
         "validation_error": None,
         "status": "pending",
+        "ai_status": None,
         "applied_batch": None,
         "applied_at": None,
     }
@@ -359,12 +374,17 @@ class SmartReviewHistoryStore:
         self, run_id: str, chunk_index: int, payload: dict[str, Any]
     ) -> None:
         """以原子方式寫入單一候選分片。"""
-        payload["checkpoint_at"] = _timestamp()
-        self._write_json_path_unlocked(
+        self._write_chunk_path_unlocked(
             self._chunk_path_for(run_id, chunk_index), payload
         )
 
-    def _chunk_entries(self, manifest: Mapping[str, Any]) -> list[dict[str, int]]:
+    def _write_chunk_path_unlocked(self, path: Path, payload: dict[str, Any]) -> None:
+        """以原子方式寫入指定路徑的候選分片並更新其 revision。"""
+        payload["checkpoint_at"] = _timestamp()
+        payload["chunk_revision"] = uuid.uuid4().hex
+        self._write_json_path_unlocked(path, payload)
+
+    def _chunk_entries(self, manifest: Mapping[str, Any]) -> list[dict[str, Any]]:
         """回傳 manifest 中可定位候選 ordinal 的分片描述。"""
         raw_chunks = manifest.get("chunks")
         if isinstance(raw_chunks, list):
@@ -380,14 +400,21 @@ class SmartReviewHistoryStore:
                 except (KeyError, TypeError, ValueError):
                     continue
                 if index >= 0 and start > 0 and end >= start:
-                    entries.append(
-                        {
-                            "index": index,
-                            "ordinal_start": start,
-                            "ordinal_end": end,
-                            "count": count,
-                        }
-                    )
+                    entry = {
+                        "index": index,
+                        "ordinal_start": start,
+                        "ordinal_end": end,
+                        "count": count,
+                    }
+                    for key in (
+                        "status_counts",
+                        "error_counts",
+                        "chunk_revision",
+                        "signature",
+                    ):
+                        if key in raw:
+                            entry[key] = raw[key]
+                    entries.append(entry)
             if entries:
                 return sorted(entries, key=lambda item: item["index"])
         chunk_size = max(
@@ -428,18 +455,27 @@ class SmartReviewHistoryStore:
         return payload
 
     def _iter_chunk_candidates_unlocked(
-        self, run_id: str, manifest: Mapping[str, Any]
+        self,
+        run_id: str,
+        manifest: Mapping[str, Any],
+        *,
+        strict: bool = False,
     ) -> Iterator[dict[str, Any]]:
         """依 ordinal 順序串流遍歷分片中的候選。"""
         for entry in self._chunk_entries(manifest):
             try:
                 chunk = self._read_chunk_unlocked(run_id, entry["index"])
-            except FileNotFoundError:
+            except (FileNotFoundError, OSError, ValueError, TypeError) as exc:
                 logger.warning(
-                    "略過缺少的智慧校對候選分片：run_id=%s，chunk=%s",
+                    "智慧校對候選分片無法讀取：run_id=%s，chunk=%s，error=%s",
                     run_id,
                     entry["index"],
+                    type(exc).__name__,
                 )
+                if strict:
+                    raise ValueError(
+                        f"智慧校對候選分片無法讀取：run_id={run_id}，chunk={entry['index']}"
+                    ) from exc
                 continue
             for candidate in chunk.get("candidates") or []:
                 if isinstance(candidate, dict):
@@ -465,7 +501,13 @@ class SmartReviewHistoryStore:
             return None
         try:
             return chunk_index, self._read_chunk_unlocked(run_id, chunk_index)
-        except FileNotFoundError:
+        except (FileNotFoundError, OSError, ValueError, TypeError) as exc:
+            logger.warning(
+                "智慧校對指定候選分片無法讀取：run_id=%s，chunk=%s，error=%s",
+                run_id,
+                chunk_index,
+                type(exc).__name__,
+            )
             return None
 
     @staticmethod
@@ -503,22 +545,121 @@ class SmartReviewHistoryStore:
         for key in list(errors):
             if int(errors[key]) <= 0:
                 del errors[key]
-        manifest.update(
-            {
-                "processed_count": sum(
-                    int(count)
-                    for status, count in statuses.items()
-                    if status in _PROCESSED_CANDIDATE_STATUSES
-                ),
-                "valid_count": sum(
-                    int(count)
-                    for status, count in statuses.items()
-                    if status in {"ready", "no_change", "needs_context"}
-                ),
-                "invalid_count": int(statuses.get("invalid", 0)),
-                "request_error_count": int(statuses.get("request_failed", 0)),
-            }
+
+    @staticmethod
+    def _candidate_ai_status(candidate: Mapping[str, Any]) -> str | None:
+        """取得候選的 AI 執行結果狀態，不受人工套用狀態影響。"""
+        ai_status = candidate.get("ai_status")
+        if isinstance(ai_status, str) and ai_status in _PROCESSED_CANDIDATE_STATUSES:
+            return ai_status
+        status = candidate.get("status")
+        if isinstance(status, str) and status in _PROCESSED_CANDIDATE_STATUSES:
+            return status
+        return None
+
+    @staticmethod
+    def _apply_ai_status_delta(
+        manifest: dict[str, Any],
+        old_ai_status: object,
+        new_ai_status: object,
+    ) -> None:
+        """更新只代表 AI 執行結果的累計統計，不追蹤人工狀態轉換。"""
+        old = old_ai_status if isinstance(old_ai_status, str) else None
+        new = new_ai_status if isinstance(new_ai_status, str) else None
+        if old == new:
+            return
+        counters = {
+            "processed_count": (
+                old in _PROCESSED_CANDIDATE_STATUSES,
+                new in _PROCESSED_CANDIDATE_STATUSES,
+            ),
+            "valid_count": (
+                old in _VALID_CANDIDATE_STATUSES,
+                new in _VALID_CANDIDATE_STATUSES,
+            ),
+            "invalid_count": (old == "invalid", new == "invalid"),
+            "request_error_count": (
+                old == "request_failed",
+                new == "request_failed",
+            ),
+        }
+        for field, (had_old, has_new) in counters.items():
+            value = int(manifest.get(field) or 0)
+            if had_old:
+                value = max(0, value - 1)
+            if has_new:
+                value += 1
+            manifest[field] = value
+
+    @staticmethod
+    def _chunk_signature(path: Path) -> list[int] | None:
+        """回傳分片檔案的 mtime 與大小，供 manifest checkpoint 對帳。"""
+        try:
+            stat = path.stat()
+        except OSError:
+            return None
+        return [int(stat.st_mtime_ns), int(stat.st_size)]
+
+    def _update_chunk_checkpoint_unlocked(
+        self,
+        run_id: str,
+        manifest: dict[str, Any],
+        chunk_index: int,
+        chunk: Mapping[str, Any],
+    ) -> None:
+        """把已寫入分片的 revision、摘要與檔案版本同步到 manifest。"""
+        summary = _candidate_counts_from_items(
+            [item for item in chunk.get("candidates") or [] if isinstance(item, dict)]
         )
+        signature = self._chunk_signature(self._chunk_path_for(run_id, chunk_index))
+        revision = chunk.get("chunk_revision")
+        if revision is None and signature is not None:
+            # 舊版分片沒有 revision；以檔案版本建立相容 checkpoint，避免每次
+            # 只讀摘要都重新掃描同一批舊候選。
+            revision = f"legacy:{signature[0]}:{signature[1]}"
+        entries = self._chunk_entries(manifest)
+        entry = next((item for item in entries if item["index"] == chunk_index), None)
+        if entry is not None:
+            entry["count"] = len(
+                [
+                    item
+                    for item in chunk.get("candidates") or []
+                    if isinstance(item, dict)
+                ]
+            )
+            entry["status_counts"] = dict(summary["status_counts"])
+            entry["error_counts"] = dict(summary["error_counts"])
+            if revision:
+                entry["chunk_revision"] = str(revision)
+            for raw in manifest.get("chunks") or []:
+                if isinstance(raw, dict) and int(raw.get("index", -1)) == chunk_index:
+                    raw.update(entry)
+                    break
+        revisions = manifest.setdefault("chunk_revisions", {})
+        if isinstance(revisions, dict) and revision:
+            revisions[str(chunk_index)] = str(revision)
+        signatures = manifest.setdefault("chunk_signatures", {})
+        if isinstance(signatures, dict) and signature is not None:
+            signatures[str(chunk_index)] = signature
+
+    def _chunk_checkpoints_current_unlocked(
+        self, run_id: str, manifest: Mapping[str, Any]
+    ) -> bool:
+        """確認 manifest 的分片檔案版本仍與最後一次 checkpoint 相符。"""
+        revisions = manifest.get("chunk_revisions")
+        signatures = manifest.get("chunk_signatures")
+        if not isinstance(revisions, dict) or not isinstance(signatures, dict):
+            return False
+        for entry in self._chunk_entries(manifest):
+            index = str(entry["index"])
+            signature = self._chunk_signature(
+                self._chunk_path_for(run_id, entry["index"])
+            )
+            if signature is None or signatures.get(index) != signature:
+                return False
+            if not revisions.get(index):
+                return False
+        return True
 
     def _chunk_summary_unlocked(
         self, run_id: str, manifest: Mapping[str, Any]
@@ -533,17 +674,37 @@ class SmartReviewHistoryStore:
             status_counts["pending"] = int(status_counts.get("pending", 0)) + missing
             summary["status_counts"] = status_counts
             summary["pending_count"] = int(summary["pending_count"]) + missing
+        if not any("ai_status" in item for item in candidates):
+            # 舊版候選沒有 ai_status；人工套用後無法從目前 status 還原 AI
+            # 結果，因此保留 manifest 已記錄的累計值，避免歷史統計倒退。
+            for field in (
+                "processed_count",
+                "valid_count",
+                "invalid_count",
+                "request_error_count",
+            ):
+                summary[field] = max(int(summary[field]), int(manifest.get(field) or 0))
         return summary
 
     def _ensure_chunked_summary_unlocked(
         self, run_id: str, manifest: dict[str, Any]
     ) -> None:
-        """在舊的分片 manifest 缺少摘要時，先掃描一次分片補齊計數。"""
-        if isinstance(manifest.get("status_counts"), dict) and isinstance(
-            manifest.get("error_counts"), dict
+        """在摘要過期或 checkpoint 不一致時重建 manifest 計數。"""
+        if (
+            isinstance(manifest.get("status_counts"), dict)
+            and isinstance(manifest.get("error_counts"), dict)
+            and self._chunk_checkpoints_current_unlocked(run_id, manifest)
         ):
             return
         summary = self._chunk_summary_unlocked(run_id, manifest)
+        for entry in self._chunk_entries(manifest):
+            try:
+                chunk = self._read_chunk_unlocked(run_id, entry["index"])
+            except (FileNotFoundError, OSError, ValueError, TypeError):
+                continue
+            self._update_chunk_checkpoint_unlocked(
+                run_id, manifest, entry["index"], chunk
+            )
         manifest.update(
             {
                 "processed_count": summary["processed_count"],
@@ -554,6 +715,28 @@ class SmartReviewHistoryStore:
                 "error_counts": summary["error_counts"],
             }
         )
+        try:
+            self._write_unlocked(run_id, manifest)
+        except OSError:
+            logger.warning(
+                "無法寫回智慧校對 manifest checkpoint：run_id=%s",
+                run_id,
+                exc_info=True,
+            )
+
+    def _cleanup_unpublished_chunks_unlocked(self) -> None:
+        """清理沒有 manifest 索引的建立中或孤立分片目錄。"""
+        for staging in self.directory.glob(".*.chunks.*.tmp"):
+            if staging.is_dir():
+                shutil.rmtree(staging, ignore_errors=True)
+        for chunk_directory in self.directory.glob("*.chunks"):
+            run_id = chunk_directory.name[: -len(".chunks")]
+            try:
+                manifest_path = self.path_for(run_id)
+            except ValueError:
+                continue
+            if not manifest_path.is_file():
+                shutil.rmtree(chunk_directory, ignore_errors=True)
 
     def create_run(
         self,
@@ -589,6 +772,7 @@ class SmartReviewHistoryStore:
             "valid_count": 0,
             "invalid_count": 0,
             "request_error_count": 0,
+            "ai_metrics_version": 1,
             "metrics": {},
         }
         if len(candidates) <= self.storage_chunk_size:
@@ -602,7 +786,7 @@ class SmartReviewHistoryStore:
                 self._write_unlocked(run_id, payload)
             return run_id
 
-        chunks: list[dict[str, int]] = []
+        chunks: list[dict[str, Any]] = []
         for index in range(0, len(candidates), self.storage_chunk_size):
             chunk_index = index // self.storage_chunk_size
             chunk_candidates = candidates[index : index + self.storage_chunk_size]
@@ -612,6 +796,8 @@ class SmartReviewHistoryStore:
                     "ordinal_start": int(chunk_candidates[0]["ordinal"]),
                     "ordinal_end": int(chunk_candidates[-1]["ordinal"]),
                     "count": len(chunk_candidates),
+                    "status_counts": {"pending": len(chunk_candidates)},
+                    "error_counts": {},
                 }
             )
         manifest = {
@@ -622,24 +808,58 @@ class SmartReviewHistoryStore:
             "chunks": chunks,
             "status_counts": {"pending": len(candidates)} if candidates else {},
             "error_counts": {},
+            "chunk_revisions": {},
+            "chunk_signatures": {},
         }
         with self._lock:
-            # 先建立 manifest，再逐個原子建立分片；意外退出時 recovery
-            # 可以辨識已建立的批次，尚未建立的候選仍會保留為 pending。
-            self._write_unlocked(run_id, manifest)
-            for chunk in chunks:
-                chunk_index = chunk["index"]
-                start = chunk_index * self.storage_chunk_size
-                chunk_payload = {
-                    "schema_version": _SCHEMA_VERSION,
-                    "storage_format": _CHUNKED_STORAGE_FORMAT,
-                    "run_id": run_id,
-                    "chunk_index": chunk_index,
-                    "ordinal_start": chunk["ordinal_start"],
-                    "ordinal_end": chunk["ordinal_end"],
-                    "candidates": candidates[start : start + self.storage_chunk_size],
-                }
-                self._write_chunk_unlocked(run_id, chunk_index, chunk_payload)
+            # 先完整寫入暫存分片目錄，再以最後一次 manifest replace 發布批次。
+            # 因此讀者不會看到宣稱已存在、但實際缺少候選的半成品批次。
+            self.directory.mkdir(parents=True, exist_ok=True)
+            staging_directory = self.directory / (
+                f".{run_id}.chunks.{uuid.uuid4().hex}.tmp"
+            )
+            final_directory = self._chunk_directory_for(run_id)
+            published = False
+            try:
+                staging_directory.mkdir(parents=True, exist_ok=False)
+                for chunk in chunks:
+                    chunk_index = int(chunk["index"])
+                    start = chunk_index * self.storage_chunk_size
+                    chunk_payload = {
+                        "schema_version": _SCHEMA_VERSION,
+                        "storage_format": _CHUNKED_STORAGE_FORMAT,
+                        "run_id": run_id,
+                        "chunk_index": chunk_index,
+                        "ordinal_start": chunk["ordinal_start"],
+                        "ordinal_end": chunk["ordinal_end"],
+                        "candidates": candidates[
+                            start : start + self.storage_chunk_size
+                        ],
+                    }
+                    self._write_chunk_path_unlocked(
+                        staging_directory / f"{chunk_index:06d}.json",
+                        chunk_payload,
+                    )
+                    chunk["chunk_revision"] = chunk_payload["chunk_revision"]
+                staging_directory.replace(final_directory)
+                for chunk in chunks:
+                    chunk_index = int(chunk["index"])
+                    signature = self._chunk_signature(
+                        self._chunk_path_for(run_id, chunk_index)
+                    )
+                    manifest["chunk_revisions"][str(chunk_index)] = str(
+                        chunk["chunk_revision"]
+                    )
+                    if signature is not None:
+                        manifest["chunk_signatures"][str(chunk_index)] = signature
+                # manifest 必須最後發布；失敗時不留下可被讀取的批次索引。
+                self._write_unlocked(run_id, manifest)
+                published = True
+            finally:
+                if not published:
+                    shutil.rmtree(staging_directory, ignore_errors=True)
+                    if not self.path_for(run_id).exists():
+                        shutil.rmtree(final_directory, ignore_errors=True)
         return run_id
 
     def recover_abandoned_runs(self, *, force: bool = False) -> list[str]:
@@ -655,6 +875,7 @@ class SmartReviewHistoryStore:
             if not force and self.directory in self._recovery_checked:
                 return []
             self._recovery_checked.add(self.directory)
+            self._cleanup_unpublished_chunks_unlocked()
             recovered: list[str] = []
             for path in self.directory.glob("*.json"):
                 try:
@@ -733,14 +954,17 @@ class SmartReviewHistoryStore:
     @staticmethod
     def _apply_result_to_candidate(
         candidate: dict[str, Any], result: Mapping[str, Any]
-    ) -> tuple[str, str, object, object]:
-        """把一筆已解析結果套用到候選，回傳狀態與錯誤的前後值。"""
+    ) -> tuple[str, str, object, object, str | None, str]:
+        """套用一筆已解析結果並回傳狀態、錯誤與 AI 狀態的前後值。"""
         old_status = str(candidate.get("status") or "pending")
         old_error = candidate.get("validation_error")
+        old_ai_status = SmartReviewHistoryStore._candidate_ai_status(candidate)
         if result.get("validation_error"):
             candidate["status"] = "invalid"
             candidate["validation_error"] = str(result["validation_error"])
+            new_ai_status = "invalid"
         else:
+            new_ai_status = _candidate_status(dict(result))
             candidate.update(
                 {
                     "decision": result["decision"],
@@ -751,14 +975,19 @@ class SmartReviewHistoryStore:
                     "reason": result.get("reason"),
                     "response": dict(result),
                     "validation_error": None,
-                    "status": _candidate_status(dict(result)),
+                    "status": new_ai_status,
+                    "ai_status": new_ai_status,
                 }
             )
+        if result.get("validation_error"):
+            candidate["ai_status"] = new_ai_status
         return (
             old_status,
             str(candidate.get("status") or "pending"),
             old_error,
             candidate.get("validation_error"),
+            old_ai_status,
+            new_ai_status,
         )
 
     def _group_results_by_chunk(
@@ -790,6 +1019,20 @@ class SmartReviewHistoryStore:
             manifest, old_status, new_status, old_error, new_error
         )
 
+    def _apply_result_delta(
+        self,
+        manifest: dict[str, Any],
+        old_status: object,
+        new_status: object,
+        old_error: object,
+        new_error: object,
+        old_ai_status: object,
+        new_ai_status: object,
+    ) -> None:
+        """同時更新目前候選狀態與不可被人工狀態覆蓋的 AI 統計。"""
+        self._apply_status_delta(manifest, old_status, new_status, old_error, new_error)
+        self._apply_ai_status_delta(manifest, old_ai_status, new_ai_status)
+
     def record_results(self, run_id: str, results: Sequence[dict[str, Any]]) -> None:
         """把一批模型結果寫回 JSON 候選。"""
         with self._lock:
@@ -814,17 +1057,27 @@ class SmartReviewHistoryStore:
                         candidate = candidates.get(ordinal)
                         if candidate is None:
                             raise ValueError("smart review response id 不在候選快照")
-                        old_status, new_status, old_error, new_error = (
-                            self._apply_result_to_candidate(candidate, result)
-                        )
-                        self._apply_status_delta(
+                        (
+                            old_status,
+                            new_status,
+                            old_error,
+                            new_error,
+                            old_ai_status,
+                            new_ai_status,
+                        ) = self._apply_result_to_candidate(candidate, result)
+                        self._apply_result_delta(
                             payload,
                             old_status,
                             new_status,
                             old_error,
                             new_error,
+                            old_ai_status,
+                            new_ai_status,
                         )
                     self._write_chunk_unlocked(run_id, chunk_index, loaded[chunk_index])
+                    self._update_chunk_checkpoint_unlocked(
+                        run_id, payload, chunk_index, loaded[chunk_index]
+                    )
                 self._write_unlocked(run_id, payload)
                 return
             for result in results:
@@ -859,16 +1112,23 @@ class SmartReviewHistoryStore:
                             continue
                         old_status = candidate.get("status")
                         old_error = candidate.get("validation_error")
+                        old_ai_status = self._candidate_ai_status(candidate)
                         candidate["status"] = "request_failed"
                         candidate["validation_error"] = error_code
-                        self._apply_status_delta(
+                        candidate["ai_status"] = "request_failed"
+                        self._apply_result_delta(
                             payload,
                             old_status,
                             "request_failed",
                             old_error,
                             error_code,
+                            old_ai_status,
+                            "request_failed",
                         )
                     self._write_chunk_unlocked(run_id, chunk_index, chunk)
+                    self._update_chunk_checkpoint_unlocked(
+                        run_id, payload, chunk_index, chunk
+                    )
                 self._write_unlocked(run_id, payload)
                 return
             for candidate in payload.get("candidates") or []:
@@ -878,6 +1138,7 @@ class SmartReviewHistoryStore:
                 ):
                     candidate["status"] = "request_failed"
                     candidate["validation_error"] = error_code
+                    candidate["ai_status"] = "request_failed"
             payload.update(_candidate_counts(payload))
             self._write_unlocked(run_id, payload)
 
@@ -889,7 +1150,8 @@ class SmartReviewHistoryStore:
                 self._ensure_chunked_summary_unlocked(run_id, payload)
                 updated = 0
                 for entry in self._chunk_entries(payload):
-                    chunk = self._read_chunk_unlocked(run_id, entry["index"])
+                    chunk_index = entry["index"]
+                    chunk = self._read_chunk_unlocked(run_id, chunk_index)
                     chunk_updated = False
                     for candidate in chunk.get("candidates") or []:
                         if not isinstance(candidate, dict):
@@ -909,7 +1171,10 @@ class SmartReviewHistoryStore:
                         updated += 1
                         chunk_updated = True
                     if chunk_updated:
-                        self._write_chunk_unlocked(run_id, entry["index"], chunk)
+                        self._write_chunk_unlocked(run_id, chunk_index, chunk)
+                        self._update_chunk_checkpoint_unlocked(
+                            run_id, payload, chunk_index, chunk
+                        )
                 if updated:
                     self._write_unlocked(run_id, payload)
                 return updated
@@ -959,6 +1224,8 @@ class SmartReviewHistoryStore:
                 payload = self._read_unlocked(run_id)
             except FileNotFoundError:
                 return None
+            if self._is_chunked(payload):
+                self._ensure_chunked_summary_unlocked(run_id, payload)
         return {key: value for key, value in payload.items() if key != "candidates"}
 
     def all_runs(self, *, include_sort_metadata: bool = False) -> list[dict[str, Any]]:
@@ -980,6 +1247,8 @@ class SmartReviewHistoryStore:
                     continue
                 if not isinstance(payload, dict) or not payload.get("id"):
                     continue
+                if self._is_chunked(payload):
+                    self._ensure_chunked_summary_unlocked(path.stem, payload)
                 summary = {
                     key: value for key, value in payload.items() if key != "candidates"
                 }
@@ -1075,31 +1344,37 @@ class SmartReviewHistoryStore:
         """完整解析一個批次檔，回傳 (run_id, 條目狀態對照)；結構不符時記錄警告並回傳 None。"""
         try:
             payload = self._read_json_path(path)
-        except (OSError, ValueError):
+        except (OSError, ValueError, TypeError):
             logger.warning("略過無法讀取的智慧校對批次檔：%s", path)
             return None
         marks: dict[int, tuple[str, str | None]] = {}
-        if self._is_chunked(payload):
-            candidates = self._candidate_items_unlocked(path.stem, payload)
-        else:
-            candidates = payload.get("candidates")
-            if not isinstance(candidates, list):
-                logger.warning(
-                    "略過格式不符（candidates 不是 list）的智慧校對批次檔：%s",
-                    path,
+        try:
+            if self._is_chunked(payload):
+                candidates = self._iter_chunk_candidates_unlocked(
+                    path.stem, payload, strict=True
                 )
-                return None
-        for candidate in candidates:
-            if not isinstance(candidate, dict):
-                continue
-            try:
-                entry_id = int(candidate["entry_id"])
-            except (KeyError, TypeError, ValueError):
-                continue
-            marks[entry_id] = (
-                str(candidate.get("status") or ""),
-                candidate.get("validation_error"),
-            )
+            else:
+                candidates = payload.get("candidates")
+                if not isinstance(candidates, list):
+                    logger.warning(
+                        "略過格式不符（candidates 不是 list）的智慧校對批次檔：%s",
+                        path,
+                    )
+                    return None
+            for candidate in candidates:
+                if not isinstance(candidate, dict):
+                    continue
+                try:
+                    entry_id = int(candidate["entry_id"])
+                except (KeyError, TypeError, ValueError):
+                    continue
+                marks[entry_id] = (
+                    str(candidate.get("status") or ""),
+                    candidate.get("validation_error"),
+                )
+        except (OSError, ValueError, TypeError, KeyError):
+            logger.warning("略過含有損壞候選分片的智慧校對批次檔：%s", path)
+            return None
         return str(payload.get("id") or path.stem), marks
 
     def list_runs(self, *, limit: int = 20, offset: int = 0) -> list[dict[str, Any]]:
@@ -1144,6 +1419,7 @@ class SmartReviewHistoryStore:
             except FileNotFoundError:
                 return 0, []
             if self._is_chunked(payload):
+                self._ensure_chunked_summary_unlocked(run_id, payload)
                 status_counts = payload.get("status_counts")
                 if status is None:
                     total = (
@@ -1166,13 +1442,35 @@ class SmartReviewHistoryStore:
                 for entry in self._chunk_entries(payload):
                     if wanted is not None and len(selected) >= wanted:
                         break
-                    chunk = self._read_chunk_unlocked(run_id, entry["index"])
+                    entry_status_counts = entry.get("status_counts")
+                    if status is not None and isinstance(entry_status_counts, dict):
+                        entry_total = int(entry_status_counts.get(status, 0) or 0)
+                        if start >= entry_total:
+                            start -= entry_total
+                            continue
+                    elif status is None:
+                        entry_total = int(entry.get("count") or 0)
+                        if start >= entry_total:
+                            start -= entry_total
+                            continue
+                    try:
+                        chunk = self._read_chunk_unlocked(run_id, entry["index"])
+                    except (FileNotFoundError, OSError, ValueError, TypeError):
+                        logger.warning(
+                            "智慧校對分頁遇到無法讀取的候選分片：run_id=%s，chunk=%s",
+                            run_id,
+                            entry["index"],
+                        )
+                        return 0, []
+                    local_skip = start
+                    start = 0
                     for item in chunk.get("candidates") or []:
                         if not isinstance(item, dict):
                             continue
                         if status is not None and item.get("status") != status:
                             continue
-                        if matched < start:
+                        if local_skip > 0:
+                            local_skip -= 1
                             matched += 1
                             continue
                         selected.append(item)
@@ -1211,6 +1509,7 @@ class SmartReviewHistoryStore:
             except FileNotFoundError:
                 return 0
             if self._is_chunked(payload):
+                self._ensure_chunked_summary_unlocked(run_id, payload)
                 status_counts = payload.get("status_counts")
                 if isinstance(status_counts, dict):
                     if status is None:
@@ -1237,6 +1536,7 @@ class SmartReviewHistoryStore:
             except FileNotFoundError:
                 return {"status": {}, "errors": []}
             if self._is_chunked(payload):
+                self._ensure_chunked_summary_unlocked(run_id, payload)
                 status_counts = payload.get("status_counts")
                 error_counts = payload.get("error_counts")
                 if isinstance(status_counts, dict) and isinstance(error_counts, dict):
@@ -1333,6 +1633,9 @@ class SmartReviewHistoryStore:
                     candidate.get("validation_error"),
                 )
                 self._write_chunk_unlocked(run_id, chunk_index, chunk)
+                self._update_chunk_checkpoint_unlocked(
+                    run_id, payload, chunk_index, chunk
+                )
                 self._write_unlocked(run_id, payload)
                 return True
             candidate = self._candidate_unlocked(payload, int(ordinal))
@@ -1359,14 +1662,21 @@ class SmartReviewHistoryStore:
             if self._is_chunked(payload):
                 self._ensure_chunked_summary_unlocked(run_id, payload)
                 updated = 0
-                for entry in self._chunk_entries(payload):
-                    chunk = self._read_chunk_unlocked(run_id, entry["index"])
+                records_by_chunk: dict[int, dict[int, Mapping[str, Any]]] = defaultdict(
+                    dict
+                )
+                for ordinal, record in records.items():
+                    chunk_index = self._chunk_index_for_ordinal(payload, int(ordinal))
+                    if chunk_index is not None:
+                        records_by_chunk[chunk_index][int(ordinal)] = record
+                for chunk_index, chunk_records in records_by_chunk.items():
+                    chunk = self._read_chunk_unlocked(run_id, chunk_index)
                     chunk_updated = False
                     for candidate in chunk.get("candidates") or []:
                         if not isinstance(candidate, dict):
                             continue
                         ordinal = int(candidate.get("ordinal") or 0)
-                        record = records.get(ordinal)
+                        record = chunk_records.get(ordinal)
                         if record is None or int(record.get("entry_id") or 0) != int(
                             candidate.get("entry_id") or 0
                         ):
@@ -1395,7 +1705,10 @@ class SmartReviewHistoryStore:
                         updated += 1
                         chunk_updated = True
                     if chunk_updated:
-                        self._write_chunk_unlocked(run_id, entry["index"], chunk)
+                        self._write_chunk_unlocked(run_id, chunk_index, chunk)
+                        self._update_chunk_checkpoint_unlocked(
+                            run_id, payload, chunk_index, chunk
+                        )
                 if updated:
                     self._write_unlocked(run_id, payload)
                 return updated

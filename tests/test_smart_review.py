@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import threading
+from dataclasses import replace
 
 import pytest
 import requests
@@ -916,6 +917,270 @@ def test_smart_review_large_history_uses_manifest_and_partial_chunk_updates(
     assert "000001.json" not in write_paths
     assert store.count_candidates(run_id, status="no_change") == 1
     assert store.count_candidates(run_id, status="pending") == 1
+
+
+def test_smart_review_chunked_create_publishes_manifest_last(db, monkeypatch):
+    """建立大型批次失敗時，不應發布缺少分片的 manifest。"""
+    from translation_tool.translation_db.smart_review_history import (
+        SmartReviewHistoryStore,
+        history_directory_for_db,
+    )
+
+    snapshots = db.smart_review_candidates(version="1.21.1", limit=2)
+    store = SmartReviewHistoryStore(db.path, storage_chunk_size=1)
+    original_write = SmartReviewHistoryStore._write_chunk_path_unlocked
+
+    def fail_second_chunk(history, path, payload):
+        """模擬第二個暫存分片寫入失敗。"""
+        if path.name == "000001.json":
+            raise OSError("simulated chunk write failure")
+        return original_write(history, path, payload)
+
+    monkeypatch.setattr(
+        SmartReviewHistoryStore, "_write_chunk_path_unlocked", fail_second_chunk
+    )
+    with pytest.raises(OSError, match="simulated chunk write failure"):
+        store.create_run(
+            snapshots,
+            provider="gemini",
+            model="test-model",
+            version="1.21.1",
+            requested_limit=2,
+            batch_size=1,
+        )
+
+    history_dir = history_directory_for_db(db.path)
+    assert list(history_dir.glob("*.json")) == []
+    assert list(history_dir.glob("*.chunks")) == []
+
+
+def test_smart_review_chunk_manifest_recovers_after_manifest_write_failure(
+    db, monkeypatch
+):
+    """分片已寫入但 manifest checkpoint 失敗時，下一次讀取應重建摘要。"""
+    from translation_tool.translation_db.smart_review_history import (
+        SmartReviewHistoryStore,
+    )
+
+    snapshots = db.smart_review_candidates(version="1.21.1", limit=2)
+    store = SmartReviewHistoryStore(db.path, storage_chunk_size=1)
+    run_id = store.create_run(
+        snapshots,
+        provider="gemini",
+        model="test-model",
+        version="1.21.1",
+        requested_limit=2,
+        batch_size=1,
+    )
+    original_write = SmartReviewHistoryStore._write_unlocked
+    fail_once = True
+
+    def fail_manifest_once(history, value, payload):
+        """只讓第一次結果 manifest 寫入失敗。"""
+        nonlocal fail_once
+        if fail_once:
+            fail_once = False
+            raise OSError("simulated manifest write failure")
+        return original_write(history, value, payload)
+
+    monkeypatch.setattr(SmartReviewHistoryStore, "_write_unlocked", fail_manifest_once)
+    with pytest.raises(OSError, match="simulated manifest write failure"):
+        store.record_results(
+            run_id,
+            [
+                {
+                    "id": str(snapshots[0].ordinal),
+                    "decision": "no_change",
+                    "suggested_zh_tw": "",
+                    "issue_types": [],
+                    "evidence_ids": [],
+                    "confidence": 0.8,
+                    "reason": "原文與目前譯文可核對一致。",
+                }
+            ],
+        )
+
+    assert store.count_candidates(run_id, status="no_change") == 1
+    assert store.count_candidates(run_id, status="pending") == 1
+
+
+def test_smart_review_ai_metrics_survive_manual_status_changes(db):
+    """人工套用或拒絕候選時，AI 執行統計不可被目前狀態倒扣。"""
+    from translation_tool.translation_db.smart_review_history import (
+        SmartReviewHistoryStore,
+    )
+
+    snapshots = db.smart_review_candidates(version="1.21.1", limit=2)
+    store = SmartReviewHistoryStore(db.path, storage_chunk_size=1)
+    run_id = store.create_run(
+        snapshots,
+        provider="gemini",
+        model="test-model",
+        version="1.21.1",
+        requested_limit=2,
+        batch_size=1,
+    )
+    store.record_results(
+        run_id,
+        [
+            {
+                "id": str(snapshots[0].ordinal),
+                "decision": "no_change",
+                "suggested_zh_tw": "",
+                "issue_types": [],
+                "evidence_ids": [],
+                "confidence": 0.8,
+                "reason": "原文與目前譯文可核對一致。",
+            }
+        ],
+    )
+    assert store.get_run(run_id)["processed_count"] == 1
+    assert store.get_run(run_id)["valid_count"] == 1
+
+    assert store.update_candidate(run_id, snapshots[0].ordinal, status="applied")
+    assert store.update_candidate(run_id, snapshots[0].ordinal, status="rejected")
+    summary = store.get_run(run_id)
+    assert summary["processed_count"] == 1
+    assert summary["valid_count"] == 1
+
+
+def test_smart_review_page_skips_unneeded_chunks_for_absolute_offset(db, monkeypatch):
+    """未指定狀態時，分頁 offset 應直接定位分片而非從第一片掃描。"""
+    from translation_tool.translation_db.smart_review_history import (
+        SmartReviewHistoryStore,
+    )
+
+    first = db.smart_review_candidates(version="1.21.1", limit=1)[0]
+    snapshots = [
+        first,
+        replace(first, ordinal=2, entry_id=2, key="second"),
+        replace(first, ordinal=3, entry_id=3, key="third"),
+    ]
+    store = SmartReviewHistoryStore(db.path, storage_chunk_size=1)
+    run_id = store.create_run(
+        snapshots,
+        provider="gemini",
+        model="test-model",
+        version="1.21.1",
+        requested_limit=3,
+        batch_size=1,
+    )
+    original_read = SmartReviewHistoryStore._read_chunk_unlocked
+    read_indexes = []
+
+    def counted_chunk_read(history, value, index):
+        """記錄分頁實際開啟的候選分片。"""
+        read_indexes.append(index)
+        return original_read(history, value, index)
+
+    monkeypatch.setattr(
+        SmartReviewHistoryStore, "_read_chunk_unlocked", counted_chunk_read
+    )
+    total, rows = store.page_candidates(run_id, offset=2, limit=1)
+    assert total == 3
+    assert [row.ordinal for row in rows] == [3]
+    assert read_indexes == [2]
+
+
+def test_smart_review_reconcile_reads_only_target_chunks(db, monkeypatch):
+    """對帳只應讀取 audit marker 指向的分片。"""
+    from translation_tool.translation_db.smart_review_history import (
+        SmartReviewHistoryStore,
+    )
+
+    first = db.smart_review_candidates(version="1.21.1", limit=1)[0]
+    snapshots = [
+        first,
+        replace(first, ordinal=2, entry_id=2, key="second"),
+        replace(first, ordinal=3, entry_id=3, key="third"),
+    ]
+    store = SmartReviewHistoryStore(db.path, storage_chunk_size=1)
+    run_id = store.create_run(
+        snapshots,
+        provider="gemini",
+        model="test-model",
+        version="1.21.1",
+        requested_limit=3,
+        batch_size=1,
+    )
+    original_read = SmartReviewHistoryStore._read_chunk_unlocked
+    read_indexes = []
+
+    def counted_chunk_read(history, value, index):
+        """記錄對帳實際開啟的候選分片。"""
+        read_indexes.append(index)
+        return original_read(history, value, index)
+
+    monkeypatch.setattr(
+        SmartReviewHistoryStore, "_read_chunk_unlocked", counted_chunk_read
+    )
+    assert (
+        store.reconcile_applied(
+            run_id,
+            {3: {"entry_id": 3, "batch": "batch-3", "applied_at": "now"}},
+        )
+        == 1
+    )
+    assert read_indexes == [2]
+
+
+@pytest.mark.parametrize(
+    "corruption", ["missing", "invalid_json", "wrong_candidates_type"]
+)
+def test_smart_review_latest_marks_falls_back_from_corrupt_chunk(db, corruption):
+    """最近批次的分片損壞時，條目狀態應回退到較早的完整批次。"""
+    from translation_tool.translation_db.smart_review_history import (
+        SmartReviewHistoryStore,
+        history_directory_for_db,
+    )
+
+    snapshots = db.smart_review_candidates(version="1.21.1", limit=2)
+    store = SmartReviewHistoryStore(db.path, storage_chunk_size=1)
+
+    older_run = store.create_run(
+        snapshots,
+        provider="gemini",
+        model="test-model",
+        version="1.21.1",
+        requested_limit=2,
+        batch_size=1,
+    )
+    store.record_results(
+        older_run,
+        [
+            {
+                "id": str(item.ordinal),
+                "decision": "no_change",
+                "suggested_zh_tw": "",
+                "issue_types": [],
+                "evidence_ids": [],
+                "confidence": 0.8,
+                "reason": "原文與目前譯文可核對一致。",
+            }
+            for item in snapshots
+        ],
+    )
+    latest_run = store.create_run(
+        snapshots,
+        provider="gemini",
+        model="test-model",
+        version="1.21.1",
+        requested_limit=2,
+        batch_size=1,
+    )
+    chunk_path = (
+        history_directory_for_db(db.path) / f"{latest_run}.chunks" / "000000.json"
+    )
+    if corruption == "missing":
+        chunk_path.unlink()
+    elif corruption == "invalid_json":
+        chunk_path.write_text("{", encoding="utf-8")
+    else:
+        chunk_path.write_text(json.dumps({"candidates": {}}), encoding="utf-8")
+
+    selected_run, marks = store.latest_run_marks()
+    assert selected_run == older_run
+    assert len(marks) == len(snapshots)
 
 
 def test_smart_review_run_history_merges_legacy_pages_without_double_offset(db):
