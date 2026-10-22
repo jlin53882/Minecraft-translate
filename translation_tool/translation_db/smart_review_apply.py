@@ -12,7 +12,7 @@ import logging
 import sqlite3
 import time
 import uuid
-from collections.abc import Sequence
+from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
 from translation_tool.translation_db.quality import translation_issues
@@ -23,6 +23,7 @@ from translation_tool.translation_db.smart_review_filters import (
 )
 from translation_tool.translation_db.smart_review_history import (
     SMART_REVIEW_CAS_SNAPSHOT_FIELDS,
+    SmartReviewHistoryBatch,
     SmartReviewHistoryStore,
 )
 from translation_tool.translation_db.smart_review_status import SmartReviewStatus
@@ -375,6 +376,289 @@ class SmartReviewApplyMixin:
                         ordinal=ordinal,
                     )
         return result_status, stale_reason
+
+    def _apply_smart_review_candidate_history_batch(
+        self,
+        history: SmartReviewHistoryBatch,
+        run_id: str,
+        ordinal: int,
+        *,
+        draft_zh_tw: str | None,
+        actor: str,
+    ) -> str:
+        """在共用歷史批次中套用一筆 JSON 候選。"""
+        batch = uuid.uuid4().hex
+        candidate = history.get_candidate(ordinal)
+        if candidate is None:
+            return "missing"
+        if candidate.get("status") != SmartReviewStatus.READY or not candidate.get(
+            "suggested_zh_tw"
+        ):
+            return "not_ready"
+        proposed = candidate.get("draft_zh_tw") or candidate.get("suggested_zh_tw")
+        if draft_zh_tw is not None:
+            proposed = _validate_text(
+                draft_zh_tw, "draft_zh_tw", max_length=_MAX_SUGGESTION_LENGTH
+            )
+            if not proposed.strip():
+                return "invalid_draft"
+        entry_id = int(candidate["entry_id"])
+        if translation_issues(
+            str(candidate.get("en_us") or ""),
+            str(proposed or ""),
+            kind=str(candidate.get("kind") or "lang"),
+            repair=False,
+        ):
+            history.update_candidate(
+                ordinal,
+                status=SmartReviewStatus.INVALID_FORMAT,
+                validation_error="suggested_zh_tw_format_invalid",
+            )
+            return SmartReviewStatus.INVALID_FORMAT
+
+        result_status, stale_reason = self._cas_write_json_candidate(
+            candidate,
+            entry_id,
+            proposed,
+            batch=batch,
+            actor=actor,
+            run_id=run_id,
+            ordinal=ordinal,
+        )
+        if result_status != SmartReviewStatus.APPLIED:
+            history.update_candidate(
+                ordinal,
+                status=SmartReviewStatus.STALE,
+                validation_error=stale_reason,
+            )
+            return (
+                "manual_reviewed"
+                if result_status == "manual_reviewed"
+                else "stale"
+            )
+        history.update_candidate(
+            ordinal,
+            draft_zh_tw=proposed
+            if draft_zh_tw is not None
+            else candidate.get("draft_zh_tw"),
+            status=SmartReviewStatus.APPLIED,
+            applied_batch=batch,
+            applied_at=history.store.timestamp(),
+        )
+        return SmartReviewStatus.APPLIED
+
+    @staticmethod
+    def _reject_smart_review_candidate_history_batch(
+        history: SmartReviewHistoryBatch, ordinal: int
+    ) -> str:
+        """在共用歷史批次中拒絕一筆候選。"""
+        candidate = history.get_candidate(ordinal)
+        if candidate is None or candidate.get("status") != SmartReviewStatus.READY:
+            return "not_ready"
+        updated = history.update_candidate(
+            ordinal, status=SmartReviewStatus.REJECTED
+        )
+        return SmartReviewStatus.REJECTED if updated else "not_ready"
+
+    def _realign_smart_review_candidate_history_batch(
+        self, history: SmartReviewHistoryBatch, run_id: str, ordinal: int
+    ) -> str:
+        """在共用歷史批次中把候選快照對齊目前資料庫。"""
+        candidate = history.get_candidate(ordinal)
+        if candidate is None:
+            return "missing"
+        if candidate.get("status") not in SMART_REVIEW_MANUAL_EDIT_STATUSES:
+            return "not_editable"
+        entry_id = int(candidate["entry_id"])
+        with self._lock:
+            current = self._one(_smart_review_current_snapshot_sql(), (entry_id,))
+            manual = self._one(
+                "SELECT zh_tw, checker, review_status, revision FROM translation "
+                "WHERE entry_id=? AND source=?",
+                (entry_id, SRC_MANUAL),
+            )
+        if current is None:
+            return "missing_entry"
+        manual_values = tuple(manual) if manual else (None, None, None, None)
+        updates = dict(zip(_SNAPSHOT_FIELDS, (*current, *manual_values), strict=True))
+        if not isinstance(candidate.get("original_snapshot"), dict):
+            updates["original_snapshot"] = {
+                key: candidate.get(key) for key in _SNAPSHOT_FIELDS
+            }
+        if all(candidate.get(key) == value for key, value in updates.items()):
+            return "unchanged"
+        history.update_candidate(ordinal, **updates)
+        return "realigned"
+
+    def _apply_smart_review_manual_edit_history_batch(
+        self,
+        history: SmartReviewHistoryBatch,
+        run_id: str,
+        ordinal: int,
+        proposed: str,
+        *,
+        actor: str,
+    ) -> str:
+        """在共用歷史批次中以人工文字覆蓋一筆候選。"""
+        proposed = _validate_text(
+            proposed, "draft_zh_tw", max_length=_MAX_SUGGESTION_LENGTH
+        )
+        batch = uuid.uuid4().hex
+        candidate = history.get_candidate(ordinal)
+        if candidate is None:
+            return "missing"
+        if candidate.get("status") not in SMART_REVIEW_MANUAL_EDIT_STATUSES:
+            return "not_editable"
+        if not proposed.strip():
+            return "invalid_draft"
+        entry_id = int(candidate["entry_id"])
+        expected = tuple(candidate.get(key) for key in _SNAPSHOT_FIELDS)
+        with self._tx(bump_generation_on_noop=False) as conn:
+            current = conn.execute(
+                _smart_review_current_snapshot_sql(), (entry_id,)
+            ).fetchone()
+            current_manual = conn.execute(
+                "SELECT zh_tw, checker, review_status, revision FROM translation "
+                "WHERE entry_id=? AND source=?",
+                (entry_id, SRC_MANUAL),
+            ).fetchone()
+            snapshot = (*(current or ()), *(current_manual or (None,) * 4))
+            if current is None or snapshot != expected:
+                return "changed"
+            if current_manual is not None and current_manual[2] == "reviewed":
+                return "manual_reviewed"
+            if proposed == current[5]:
+                return "unchanged"
+            if translation_issues(
+                str(current[4] or ""), proposed, kind=str(current[0]), repair=False
+            ):
+                return SmartReviewStatus.INVALID_FORMAT
+            self._write_smart_review_manual_row(
+                conn,
+                entry_id,
+                proposed,
+                previous_manual=current_manual,
+                old_zh_tw=current[5],
+                batch=batch,
+                actor=actor,
+                note=f"run={run_id}; ordinal={ordinal}",
+            )
+            self._apply_smart_review_twins(
+                conn,
+                entry_id,
+                current,
+                proposed,
+                candidate.get("twin_entry_ids") or (),
+                batch=batch,
+                actor=actor,
+                run_id=run_id,
+                ordinal=ordinal,
+            )
+        history.update_candidate(
+            ordinal,
+            status=SmartReviewStatus.APPLIED,
+            draft_zh_tw=proposed,
+            validation_error=None,
+            applied_batch=batch,
+            applied_at=history.store.timestamp(),
+        )
+        return SmartReviewStatus.APPLIED
+
+    def _override_stale_smart_review_candidate_history_batch(
+        self,
+        history: SmartReviewHistoryBatch,
+        candidate: Mapping[str, Any],
+    ) -> tuple[str, str | None]:
+        """在共用歷史批次中對齊並覆蓋一筆 stale 候選。"""
+        if candidate.get("status") != SmartReviewStatus.STALE:
+            return "not_stale", "候選狀態不是已過期"
+        proposed = candidate.get("draft_zh_tw") or candidate.get("suggested_zh_tw")
+        if not proposed or not str(proposed).strip():
+            return "not_ready", "沒有可覆蓋的草稿或 AI 建議"
+        run_id = str(candidate.get("run_id") or history.run_id)
+        ordinal = int(candidate["ordinal"])
+        aligned = self._realign_smart_review_candidate_history_batch(
+            history, run_id, ordinal
+        )
+        if aligned not in {"realigned", "unchanged"}:
+            return aligned, "無法更新 JSON 目前譯文快照"
+        status = self._apply_smart_review_manual_edit_history_batch(
+            history,
+            run_id,
+            ordinal,
+            str(proposed),
+            actor="智慧校對",
+        )
+        if status == "changed":
+            return SmartReviewStatus.STALE, "對齊後資料庫再次變更"
+        if status == "manual_reviewed":
+            return "manual_reviewed", "目前譯文已人工審核，不進行批量覆蓋"
+        return str(status), None
+
+    def apply_smart_review_candidate_batch(
+        self,
+        run_id: str,
+        candidates: Sequence[Mapping[str, Any]],
+        *,
+        action: str = "apply",
+        progress_cancel: Callable[[], bool] | None = None,
+        progress: Callable[[int, int, tuple[int, str, str | None]], None]
+        | None = None,
+        actor: str = "智慧校對",
+    ) -> tuple[tuple[tuple[int, str, str | None], ...], bool] | None:
+        """在同一 JSON 歷史鎖內處理一個 run 的多筆候選。
+
+        回傳 ``None`` 代表該 run 是舊版 SQLite-only 批次，呼叫端應回退到
+        原本的逐筆流程；其餘回傳（ordinal、狀態、錯誤）與是否取消。每筆
+        SQLite 寫入仍維持獨立 CAS 交易，但 JSON 分片只在最後各寫一次。
+        """
+        if action not in {"apply", "reject", "override"}:
+            raise ValueError(f"未知的智慧校對批量動作：{action}")
+        history = SmartReviewHistoryStore(self.path)
+        if not history.exists(run_id):
+            return None
+        results: list[tuple[int, str, str | None]] = []
+        cancelled = False
+        with history.batch(run_id) as history_batch:
+            records = self._smart_review_apply_records(run_id)
+            if records:
+                history_batch.reconcile_applied(records)
+            for item in candidates:
+                if progress_cancel is not None and progress_cancel():
+                    cancelled = True
+                    break
+                ordinal = int(item["ordinal"])
+                try:
+                    if action == "apply":
+                        status = self._apply_smart_review_candidate_history_batch(
+                            history_batch,
+                            run_id,
+                            ordinal,
+                            draft_zh_tw=item.get("draft_zh_tw"),
+                            actor=actor,
+                        )
+                        error = None
+                    elif action == "reject":
+                        status = self._reject_smart_review_candidate_history_batch(
+                            history_batch, ordinal
+                        )
+                        error = None
+                    else:
+                        status, error = (
+                            self._override_stale_smart_review_candidate_history_batch(
+                                history_batch, item
+                            )
+                        )
+                except Exception as exc:  # noqa: BLE001 - preserve partial batch success
+                    status = "error"
+                    error = str(exc) or type(exc).__name__
+                result = (ordinal, str(status), error)
+                results.append(result)
+                if progress is not None:
+                    progress(len(results), len(candidates), result)
+        if not cancelled and progress_cancel is not None:
+            cancelled = bool(progress_cancel())
+        return tuple(results), cancelled
 
     def _write_smart_review_manual_row(
         self,

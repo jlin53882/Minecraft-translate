@@ -25,7 +25,8 @@ from collections import defaultdict
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import AbstractContextManager, contextmanager
 from pathlib import Path
-from typing import Any, ClassVar
+from types import TracebackType
+from typing import Any, ClassVar, Self
 
 from translation_tool.translation_db.models import (
     SmartReviewCandidate,
@@ -66,6 +67,260 @@ def history_directory_for_db(db_path: str | Path) -> Path:
     """回傳指定翻譯資料庫專用的智慧校對 JSON 目錄。"""
     path = Path(db_path).expanduser().resolve()
     return path.parent / f"{path.stem}.smart_review"
+
+
+class SmartReviewHistoryBatch:
+    """在同一個歷史鎖內批次更新一個 run 的候選。
+
+    單筆 ``update_candidate`` 為了保證程序崩潰時的可恢復性，每次都會讀取
+    manifest、替換分片、寫 status sidecar，再替換 manifest。審查批量操作若
+    每筆都走這條路徑，實際上會反覆處理同一個分片。本類別把候選變更先留在
+    記憶體，離開 context 時每個受影響分片只發布一次；SQLite 的 CAS 仍可在
+    context 內逐筆執行，兩個儲存邊界的安全語意不變。
+    """
+
+    def __init__(self, store: SmartReviewHistoryStore, run_id: str) -> None:
+        self.store = store
+        self.run_id = str(run_id)
+        self.payload: dict[str, Any] | None = None
+        self._lock_context: AbstractContextManager[None] | None = None
+        self._chunks: dict[int, dict[str, Any]] = {}
+        self._dirty_chunks: set[int] = set()
+        self._dirty = False
+        self._committed = False
+
+    def __enter__(self) -> Self:
+        self._lock_context = self.store._write_lock()
+        try:
+            self._lock_context.__enter__()
+            self.payload = self.store.repository.read_unlocked(self.run_id)
+            if is_chunked(self.payload):
+                self.store.repository.ensure_chunked_summary_unlocked(
+                    self.run_id, self.payload
+                )
+            return self
+        except BaseException:
+            self._release_lock(None, None, None)
+            raise
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
+        try:
+            if exc_type is None and not self._committed:
+                self.commit()
+        finally:
+            self._release_lock(exc_type, exc, traceback)
+
+    def _release_lock(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
+        lock_context = self._lock_context
+        self._lock_context = None
+        if lock_context is not None:
+            lock_context.__exit__(exc_type, exc, traceback)
+
+    def _require_payload(self) -> dict[str, Any]:
+        if self.payload is None:
+            raise RuntimeError("智慧校對歷史批次尚未進入 context")
+        return self.payload
+
+    def _load_chunk(self, chunk_index: int) -> dict[str, Any]:
+        chunk = self._chunks.get(int(chunk_index))
+        if chunk is None:
+            chunk = self.store.repository.read_chunk_unlocked(
+                self.run_id, int(chunk_index)
+            )
+            self._chunks[int(chunk_index)] = chunk
+        return chunk
+
+    def _locate_candidate(
+        self, ordinal: int
+    ) -> tuple[dict[str, Any] | None, int | None]:
+        payload = self._require_payload()
+        value = int(ordinal)
+        if is_chunked(payload):
+            chunk_index = self.store.repository.chunk_index_for_ordinal(payload, value)
+            if chunk_index is None:
+                return None, None
+            chunk = self._load_chunk(chunk_index)
+            candidate = next(
+                (
+                    item
+                    for item in chunk.get("candidates") or []
+                    if isinstance(item, dict)
+                    and int(item.get("ordinal") or 0) == value
+                ),
+                None,
+            )
+            return candidate, int(chunk_index)
+        return find_candidate(payload, value), None
+
+    def get_candidate(self, ordinal: int) -> dict[str, Any] | None:
+        """回傳批次內可變的候選字典，不再重新讀取 JSON。"""
+        candidate, _chunk_index = self._locate_candidate(ordinal)
+        return candidate
+
+    def _mark_candidate_dirty(
+        self,
+        candidate: dict[str, Any],
+        *,
+        chunk_index: int | None,
+        old_status: object,
+        old_error: object,
+    ) -> None:
+        payload = self._require_payload()
+        candidate_metadata_delta(
+            payload,
+            old_status,
+            candidate.get("status"),
+            old_error,
+            candidate.get("validation_error"),
+        )
+        self._dirty = True
+        if chunk_index is not None:
+            self._dirty_chunks.add(int(chunk_index))
+
+    def update_candidate(self, ordinal: int, **updates: Any) -> bool:
+        """在記憶體中更新一筆候選，稍後由 ``commit`` 按分片發布。"""
+        candidate, chunk_index = self._locate_candidate(ordinal)
+        if candidate is None:
+            return False
+        old_status = candidate.get("status")
+        old_error = candidate.get("validation_error")
+        candidate.update(updates)
+        self._mark_candidate_dirty(
+            candidate,
+            chunk_index=chunk_index,
+            old_status=old_status,
+            old_error=old_error,
+        )
+        return True
+
+    def _reconcile_chunked_applied(
+        self, records: Mapping[int, Mapping[str, Any]]
+    ) -> int:
+        """在分片候選內補回 SQLite 套用紀錄。"""
+        payload = self._require_payload()
+        grouped: dict[int, dict[int, Mapping[str, Any]]] = defaultdict(dict)
+        for ordinal, record in records.items():
+            chunk_index = self.store.repository.chunk_index_for_ordinal(
+                payload, int(ordinal)
+            )
+            if chunk_index is not None:
+                grouped[int(chunk_index)][int(ordinal)] = record
+        updated = 0
+        for chunk_index, chunk_records in grouped.items():
+            chunk = self._load_chunk(chunk_index)
+            for candidate in chunk.get("candidates") or []:
+                if not isinstance(candidate, dict):
+                    continue
+                ordinal = int(candidate.get("ordinal") or 0)
+                record = chunk_records.get(ordinal)
+                if record is None or int(record.get("entry_id") or 0) != int(
+                    candidate.get("entry_id") or 0
+                ):
+                    continue
+                batch = str(record.get("batch") or "") or None
+                if candidate.get("status") == SmartReviewStatus.APPLIED and (
+                    candidate.get("applied_batch") == batch
+                ):
+                    continue
+                old_status = candidate.get("status")
+                old_error = candidate.get("validation_error")
+                candidate.update(
+                    {
+                        "status": SmartReviewStatus.APPLIED,
+                        "applied_batch": batch,
+                        "applied_at": record.get("applied_at"),
+                    }
+                )
+                self._mark_candidate_dirty(
+                    candidate,
+                    chunk_index=chunk_index,
+                    old_status=old_status,
+                    old_error=old_error,
+                )
+                updated += 1
+        return updated
+
+    def _reconcile_legacy_applied(
+        self, records: Mapping[int, Mapping[str, Any]]
+    ) -> int:
+        """在單檔候選內補回 SQLite 套用紀錄。"""
+        payload = self._require_payload()
+        updated = 0
+        for candidate in payload.get("candidates") or []:
+            if not isinstance(candidate, dict):
+                continue
+            ordinal = int(candidate.get("ordinal") or 0)
+            record = records.get(ordinal)
+            if record is None or int(record.get("entry_id") or 0) != int(
+                candidate.get("entry_id") or 0
+            ):
+                continue
+            batch = str(record.get("batch") or "") or None
+            if candidate.get("status") == SmartReviewStatus.APPLIED and (
+                candidate.get("applied_batch") == batch
+            ):
+                continue
+            old_status = candidate.get("status")
+            old_error = candidate.get("validation_error")
+            candidate.update(
+                {
+                    "status": SmartReviewStatus.APPLIED,
+                    "applied_batch": batch,
+                    "applied_at": record.get("applied_at"),
+                }
+            )
+            self._mark_candidate_dirty(
+                candidate,
+                chunk_index=None,
+                old_status=old_status,
+                old_error=old_error,
+            )
+            updated += 1
+        return updated
+
+    def reconcile_applied(self, records: Mapping[int, Mapping[str, Any]]) -> int:
+        """在目前批次快照內一次補回 SQLite 已提交的套用紀錄。"""
+        if not records:
+            return 0
+        return (
+            self._reconcile_chunked_applied(records)
+            if is_chunked(self._require_payload())
+            else self._reconcile_legacy_applied(records)
+        )
+
+    def commit(self) -> None:
+        """把目前記憶體中的候選變更以最少檔案替換發布。"""
+        if self._committed:
+            return
+        payload = self._require_payload()
+        if not self._dirty:
+            self._committed = True
+            return
+        if is_chunked(payload):
+            for chunk_index in sorted(self._dirty_chunks):
+                chunk = self._chunks[chunk_index]
+                self.store.repository.write_chunk_unlocked(
+                    self.run_id, chunk_index, chunk
+                )
+                self.store.repository.update_chunk_checkpoint_unlocked(
+                    self.run_id, payload, chunk_index, chunk
+                )
+            mark_projection(payload)
+        else:
+            refresh_status_counts(payload)
+            mark_projection(payload)
+        self.store.repository.write_unlocked(self.run_id, payload)
+        self._committed = True
 
 
 class SmartReviewHistoryStore:
@@ -135,6 +390,10 @@ class SmartReviewHistoryStore:
         """在跨程序保護下執行候選狀態檢查、CAS 與 JSON 更新。"""
         with self._write_lock():
             yield
+
+    def batch(self, run_id: str) -> SmartReviewHistoryBatch:
+        """建立一個可在同一歷史鎖內合併寫入的候選批次。"""
+        return SmartReviewHistoryBatch(self, run_id)
 
     def _write_lock(self) -> AbstractContextManager[None]:
         """同時鎖定程序內與跨程序寫入，保護完整 read-modify-write 交易。"""
@@ -669,6 +928,7 @@ class SmartReviewHistoryStore:
 
 __all__ = [
     "SMART_REVIEW_CAS_SNAPSHOT_FIELDS",
+    "SmartReviewHistoryBatch",
     "SmartReviewHistoryStore",
     "history_directory_for_db",
 ]

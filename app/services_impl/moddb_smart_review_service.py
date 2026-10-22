@@ -446,6 +446,141 @@ def reject_moddb_smart_review_candidate_from_path(
         db.close()
 
 
+def _apply_moddb_smart_review_fast_batch(
+    db: TranslationDB,
+    selected: tuple[SmartReviewCandidate, ...],
+    *,
+    action: str,
+    progress: Callable[[dict[str, Any]], None] | None,
+    cancel_check: Callable[[], bool] | None,
+) -> SmartReviewBatchResult | None:
+    """使用資料層合併 JSON 寫入；舊版 SQLite-only 批次回傳 ``None``。"""
+    if not selected or len({candidate.run_id for candidate in selected}) != 1:
+        return None
+    batch_apply = getattr(db, "apply_smart_review_candidate_batch", None)
+    if not callable(batch_apply):
+        return None
+    results: list[SmartReviewBatchItemResult] = []
+    run_id = selected[0].run_id
+
+    def fast_progress(
+        _processed: int,
+        _total: int,
+        batch_item: tuple[int, str, str | None],
+    ) -> None:
+        ordinal, status, error = batch_item
+        candidate = selected[len(results)]
+        item = SmartReviewBatchItemResult(
+            candidate.run_id,
+            ordinal,
+            candidate.key,
+            status,
+            error,
+        )
+        results.append(item)
+        if progress is not None:
+            progress(
+                {
+                    "processed": len(results),
+                    "total": len(selected),
+                    "item": item,
+                }
+            )
+
+    fast_result = batch_apply(
+        run_id,
+        tuple(
+            {
+                "run_id": candidate.run_id,
+                "ordinal": candidate.ordinal,
+                "status": candidate.status,
+                "draft_zh_tw": candidate.draft_zh_tw,
+                "suggested_zh_tw": candidate.suggested_zh_tw,
+            }
+            for candidate in selected
+        ),
+        action=action,
+        progress_cancel=cancel_check,
+        progress=fast_progress,
+    )
+    if fast_result is None:
+        return None
+    fast_items, cancelled = fast_result
+    # Reconstruct only for adapters that omit the progress callback.
+    if len(results) != len(fast_items):
+        results = [
+            SmartReviewBatchItemResult(
+                selected[index].run_id,
+                ordinal,
+                selected[index].key,
+                status,
+                error,
+            )
+            for index, (ordinal, status, error) in enumerate(fast_items)
+        ]
+    return SmartReviewBatchResult(
+        action=action,
+        requested=len(selected),
+        processed=len(results),
+        cancelled=cancelled,
+        items=tuple(results),
+    )
+
+
+def _apply_moddb_smart_review_legacy_batch(
+    db: TranslationDB,
+    selected: tuple[SmartReviewCandidate, ...],
+    *,
+    action: str,
+    progress: Callable[[dict[str, Any]], None] | None,
+    cancel_check: Callable[[], bool] | None,
+) -> tuple[list[SmartReviewBatchItemResult], bool]:
+    """保留舊版 SQLite-only 批次的逐筆處理與部分成功語意。"""
+    results: list[SmartReviewBatchItemResult] = []
+    cancelled = False
+    for index, candidate in enumerate(selected, start=1):
+        if cancel_check is not None and cancel_check():
+            cancelled = True
+            break
+        try:
+            error = None
+            if action == "apply":
+                status = db.apply_smart_review_candidate(
+                    candidate.run_id,
+                    candidate.ordinal,
+                    draft_zh_tw=candidate.draft_zh_tw,
+                )
+            elif action == "reject":
+                status = db.reject_smart_review_candidate(
+                    candidate.run_id, candidate.ordinal
+                )
+            else:
+                status, error = _override_stale_smart_review_candidate(
+                    db, candidate
+                )
+            item = SmartReviewBatchItemResult(
+                candidate.run_id,
+                candidate.ordinal,
+                candidate.key,
+                str(status),
+                error,
+            )
+        except Exception as exc:  # noqa: BLE001 - one bad candidate must not stop the batch
+            item = SmartReviewBatchItemResult(
+                candidate.run_id,
+                candidate.ordinal,
+                candidate.key,
+                "error",
+                str(exc) or type(exc).__name__,
+            )
+        results.append(item)
+        if progress is not None:
+            progress(
+                {"processed": index, "total": len(selected), "item": item}
+            )
+    return results, cancelled
+
+
 def apply_moddb_smart_review_batch_from_path(
     path: str | Path,
     priority: tuple[int, ...],
@@ -455,64 +590,35 @@ def apply_moddb_smart_review_batch_from_path(
     progress: Callable[[dict[str, Any]], None] | None = None,
     cancel_check: Callable[[], bool] | None = None,
 ) -> SmartReviewBatchResult:
-    """在背景工作中逐筆處理一組候選，沿用單筆 CAS 與歷史規則。
+    """在背景工作中處理一組候選，沿用單筆 CAS 與歷史規則。
 
     ``apply`` 與 ``reject`` 維持一般批量的安全語意；``override`` 是明確的過期覆蓋
     動作，只接受 stale 候選，先把 JSON 的目前譯文快照對齊資料庫現況，再沿用人工
-    編輯的 CAS 路徑套用草稿／建議。每筆操作仍可獨立成功或略過，方便大型批次在
-    遇到單筆 stale、格式問題或已人工審核資料時繼續處理其他候選。
+    編輯的 CAS 路徑套用草稿／建議。JSON run 會在資料層共用一次歷史鎖並合併
+    分片寫入；每筆 SQLite CAS 仍可獨立成功或略過，方便大型批次在遇到單筆 stale、
+    格式問題或已人工審核資料時繼續處理其他候選。
     """
     if action not in {"apply", "reject", "override"}:
         raise ValueError(f"未知的智慧校對批量動作：{action}")
     selected = tuple(candidates)
-    results: list[SmartReviewBatchItemResult] = []
-    cancelled = False
     db = _open(path, priority, readonly=False)
     try:
-        for index, candidate in enumerate(selected, start=1):
-            if cancel_check is not None and cancel_check():
-                cancelled = True
-                break
-            try:
-                error = None
-                if action == "apply":
-                    status = db.apply_smart_review_candidate(
-                        candidate.run_id,
-                        candidate.ordinal,
-                        draft_zh_tw=candidate.draft_zh_tw,
-                    )
-                elif action == "reject":
-                    status = db.reject_smart_review_candidate(
-                        candidate.run_id, candidate.ordinal
-                    )
-                else:
-                    status, error = _override_stale_smart_review_candidate(
-                        db, candidate
-                    )
-                item = SmartReviewBatchItemResult(
-                    candidate.run_id,
-                    candidate.ordinal,
-                    candidate.key,
-                    str(status),
-                    error,
-                )
-            except Exception as exc:  # noqa: BLE001 - one bad candidate must not stop the batch
-                item = SmartReviewBatchItemResult(
-                    candidate.run_id,
-                    candidate.ordinal,
-                    candidate.key,
-                    "error",
-                    str(exc) or type(exc).__name__,
-                )
-            results.append(item)
-            if progress is not None:
-                progress(
-                    {
-                        "processed": index,
-                        "total": len(selected),
-                        "item": item,
-                    }
-                )
+        fast_result = _apply_moddb_smart_review_fast_batch(
+            db,
+            selected,
+            action=action,
+            progress=progress,
+            cancel_check=cancel_check,
+        )
+        if fast_result is not None:
+            return fast_result
+        results, cancelled = _apply_moddb_smart_review_legacy_batch(
+            db,
+            selected,
+            action=action,
+            progress=progress,
+            cancel_check=cancel_check,
+        )
     finally:
         db.close()
     if not cancelled and cancel_check is not None:

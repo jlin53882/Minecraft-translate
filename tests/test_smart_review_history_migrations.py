@@ -163,6 +163,37 @@ def test_update_candidate_rewrites_only_that_chunks_sidecar(chunked):
     assert check_history_directory(store.directory) == []
 
 
+def test_history_batch_publishes_each_affected_chunk_once(chunked, monkeypatch):
+    """批量狀態更新只替換受影響分片，manifest 也只發布一次。"""
+    store, run_id = chunked
+    writes: list[str] = []
+    original_write = ChunkManifestRepository._write_json_path_unlocked
+
+    def counted_write(repository, path, payload):
+        writes.append(path.name)
+        return original_write(repository, path, payload)
+
+    monkeypatch.setattr(
+        ChunkManifestRepository, "_write_json_path_unlocked", counted_write
+    )
+    with store.batch(run_id) as batch:
+        assert batch.update_candidate(1, status="rejected")
+        assert batch.update_candidate(2, status="rejected")
+        assert batch.update_candidate(6, status="rejected")
+
+    assert writes.count(f"{run_id}.json") == 1
+    assert writes.count("000000.json") == 1
+    assert writes.count("000001.json") == 1
+    assert writes.count("000000.status") == 1
+    assert writes.count("000001.status") == 1
+    assert store.breakdown(run_id)["status"] == {
+        "rejected": 3,
+        "pending": 5,
+        "no_change": 1,
+        "invalid": 1,
+    }
+
+
 def test_missing_stale_or_corrupt_sidecar_falls_back_to_chunks_without_writing(
     chunked,
 ):

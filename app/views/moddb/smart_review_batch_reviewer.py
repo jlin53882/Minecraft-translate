@@ -22,6 +22,7 @@ from app.views.moddb.smart_review_batch_loader import (
     load_batch_page,
     should_load_summary,
 )
+from app.views.moddb.smart_review_batch_progress import SmartReviewBatchProgress
 from app.views.moddb.smart_review_context import SmartReviewContext
 from app.views.moddb.smart_review_evidence import (
     SmartReviewEvidencePresenter,
@@ -875,10 +876,7 @@ class SmartReviewBatchReviewer:
         self._update_action_buttons()
         self.ctx.update()
 
-        def progress(snapshot: dict) -> None:
-            if self.ctx.closed or operation != self._operation_seq:
-                return
-            self.ctx.post(self._apply_progress, operation, snapshot)
+        progress = SmartReviewBatchProgress(self.ctx, operation, self._apply_progress)
 
         def work() -> SmartReviewBatchResult:
             return apply_moddb_smart_review_batch_from_path(
