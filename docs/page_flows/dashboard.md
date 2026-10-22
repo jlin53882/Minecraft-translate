@@ -75,7 +75,7 @@ flowchart TD
 - 本頁只讀取，不寫入任何設定或檔案。規則數的卡片標示來源為 `replace_rules.json`，實際數字由共用 Store 的 `get_replace_rules_count()` 取得；初始化或手動工作台重新整理會使用既有快取，規則檔版本變更時才重新讀取。
 - 翻譯流程步驟（`PIPELINE_STEPS`）：提取（extractor）、語系合併（merge）、機器翻譯（lm）、QC 檢驗（qc）、打包輸出（bundler）。`build_step_statuses` 只依 active 任務的 `view_key` 把步驟設為「進行中」（附進度百分比），其餘為「待執行」。
 - 注意：`build_step_statuses` 目前不會產生 `STEP_DONE` 或 `STEP_FAILED`，因此步驟卡的「完成」樣式與「本次完成 N / 5」徽章在現行程式碼中不會出現非零值，完成與失敗只在「最近活動」區呈現。
-- 任務計數：`tasks_running` 為 active 任務數；`tasks_done`、`tasks_failed` 由 `recent(20)` 依 `STATUS_ERROR` 分類。
+- 任務計數：`tasks_running` 為 active 任務數；`tasks_done`（只算 `STATUS_DONE`）、`tasks_failed`（`STATUS_ERROR`）、`tasks_cancelled`（`STATUS_CANCELLED` 與 `STATUS_ABORTED`）由 `recent(20)` 分類，三者互斥，取消或中止的任務不會被算成完成。`TaskManager` 以 `OperationRegistry` 的 `terminal_reason`（無 owner 的舊 session 則用 summary 的 `CANCELLED`／`ABORTED` 與取消旗標）決定終態；最近活動以 `task_status_style` 顯示「完成／失敗／已取消／已中止」。
 - 活動區最多 6 筆（`activity_limit=6`），由 active 與 recent 合併後依 `started_at` 由新到舊排序。
 - Key 狀態以 `summarize_keys`（`app/shell/topbar.py`）整理成「可用／總數」與冷卻數；模型配額列出今日額度用盡的模型，重置時間由 `format_quota_reset` 顯示。
 

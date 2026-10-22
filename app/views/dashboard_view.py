@@ -22,7 +22,7 @@ from app.services_impl.key_health_service import (
     KeyHealth,
     ModelQuotaHealth,
 )
-from app.shell.task_manager import STATUS_ERROR, TaskManager
+from app.shell.task_manager import TaskManager
 from app.tasks.operation_registry import (
     CancellationPolicy,
     OperationPresentation,
@@ -44,6 +44,7 @@ from app.views.dashboard.dashboard_data import (
     format_ago,
     format_count,
     greeting,
+    task_status_style,
 )
 
 logger = logging.getLogger(__name__)
@@ -568,8 +569,8 @@ class DashboardView(ft.Column):
                 delta_tone="neutral" if not keys.cooling else "gold",
             )
         self.stat_tasks.set_value(
-            str(data.tasks_done + data.tasks_failed + data.tasks_running),
-            delta=f"完成 {data.tasks_done}・進行中 {data.tasks_running}・失敗 {data.tasks_failed}",
+            str(data.tasks_total),
+            delta=f"完成 {data.tasks_done}・進行中 {data.tasks_running}・失敗 {data.tasks_failed}・已取消 {data.tasks_cancelled}",
             delta_tone="red" if data.tasks_failed else "neutral",
         )
         self.steps_row.controls = [
@@ -683,10 +684,8 @@ class DashboardView(ft.Column):
         for task in data.activity:
             if task.running:
                 tone_name, status = "gold", f"進行中 {task.percent}%"
-            elif task.status == STATUS_ERROR:
-                tone_name, status = "red", "失敗"
             else:
-                tone_name, status = "em", "完成"
+                status, tone_name = task_status_style(task)
             ago = format_ago(now - (task.finished_at or task.started_at))
             rows.append(
                 ft.Container(

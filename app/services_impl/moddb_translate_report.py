@@ -19,6 +19,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from app.tasks.task_session import STATUS_LABELS as TASK_STATUS_LABELS
 from translation_tool.utils.file_replace import replace_with_retry
 
 QUALITY_STATUS = "QUALITY_REJECTED"
@@ -35,13 +36,10 @@ FIELD_NOTES = {
     "batches": "出現在第幾批（從 1 開始）",
 }
 
+# 與 TaskSession 共用同義標籤；報告只補充「原因細節」與報告專用的 DRY_RUN。
 STATUS_LABELS = {
-    "DONE": "完成",
-    "DONE_WITH_WARNINGS": "完成但有警告",
-    "CANCELLED": "已取消",
-    "ABORTED": "已中止（連續失敗）",
-    "FAILED": "失敗",
-    "ALL_KEYS_EXHAUSTED": "所有 API Key 都已耗盡",
+    **TASK_STATUS_LABELS,
+    "ABORTED": f"{TASK_STATUS_LABELS['ABORTED']}（連續失敗）",
     "DRY_RUN": "預覽（未呼叫 AI）",
 }
 

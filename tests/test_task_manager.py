@@ -10,6 +10,7 @@ import pytest
 
 from app.shell.task_manager import (
     DEFAULT_TASK_NAME,
+    STATUS_CANCELLED,
     STATUS_DONE,
     STATUS_ERROR,
     TaskManager,
@@ -180,7 +181,7 @@ def test_session_registry_terminal_notifies_subscribers_of_idle(manager):
     [
         ("success", "session_finished", STATUS_DONE),
         ("error", "failed", STATUS_ERROR),
-        ("cancel", "cancelled", STATUS_DONE),
+        ("cancel", "cancelled", STATUS_CANCELLED),
     ],
 )
 def test_legacy_session_terminal_result_matches_registry(
@@ -279,7 +280,7 @@ def test_cancel_before_task_session_start_still_records_recent_terminal(manager)
     assert handle.terminal_reason == "cancelled"
     assert manager.operation_registry.active_count() == 0
     assert len(manager.recent()) == 1
-    assert manager.recent()[0].status == STATUS_DONE
+    assert manager.recent()[0].status == STATUS_CANCELLED
 
 
 def test_detach_keeps_admission_gate_until_last_operation_finishes(manager):
