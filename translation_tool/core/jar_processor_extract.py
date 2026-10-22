@@ -42,6 +42,9 @@ from ..utils.zip_safety import (
 
 log = logging.getLogger(__name__)
 
+# 背景預掃描的進度 yield 節流（秒）：避免 100+ JAR 的慢速掃描洗版日誌；測試可縮短。
+YIELD_INTERVAL = 5.0
+
 VERSION_REGEX = re.compile(
     r"[-_](?:[a-zA-Z]+-)?\d+(?:\.\d+)+(?:[-_.][a-zA-Z0-9]+)*$",
     re.IGNORECASE,
@@ -314,7 +317,6 @@ def run_extraction_process_impl(
 
         scan_start = time.time()
         last_yielded_at = 0.0
-        YIELD_INTERVAL = 5.0  # 節流：每 5 秒才 yield 一次，避免日誌洗版
         while not scan_done.is_set():
             if is_cancelled():
                 # 子執行緒有 bounded checkpoints；等它實際收斂後再讓 operation terminal。

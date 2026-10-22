@@ -84,6 +84,19 @@ def _isolate_test_runtime_writes(tmp_path, monkeypatch, request):
 
 
 @pytest.fixture(autouse=True)
+def _no_default_batch_interval(monkeypatch):
+    """預設的批次間隔（schema 預設 4 秒）不該讓測試真的睡覺。
+
+    共用的模型配額時鐘會依 ``sleep_seconds_between_batches`` 節流每一次 provider 請求；
+    沒明確設定間隔的測試會因此每個請求固定多等 4 秒。要驗證節流行為的測試
+    一律明確傳入間隔，不依賴這個預設值。
+    """
+    from translation_tool.core import lm_translator_main
+
+    monkeypatch.setattr(lm_translator_main, "_DEFAULT_BATCH_SLEEP", 0.0)
+
+
+@pytest.fixture(autouse=True)
 def _patch_flet_page_property():
     """自動 patch Flet 的 BaseControl.page 屬性。
 

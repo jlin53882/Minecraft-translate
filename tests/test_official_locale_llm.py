@@ -519,6 +519,7 @@ def test_moddb_items_form_module_and_kind_batch_boundaries() -> None:
     result = translate_items_with_cache_loop(
         items,
         total_for_smart=len(items),
+        sleep_seconds_between_batches=0,
         translate_batch_smart=fake_translate,
         write_new_cache=False,
         reload_cache=False,
