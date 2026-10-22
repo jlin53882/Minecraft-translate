@@ -72,9 +72,9 @@ class _ValidationRepair:
 
     def announce_start(self) -> None:
         """記錄修復筆數並送出 ``validation_repair_start``。"""
-        state, timing = self.state, self.batch_ctx.timing
-        timing["validation_repair_attempts"] += 1
-        timing["validation_repair_items"] += len(self.repair_batch)
+        state, batch = self.state, self.batch_ctx
+        batch.validation_repair_attempts += 1
+        batch.validation_repair_items += len(self.repair_batch)
         state.bump("validation_repair_attempts")
         state.bump("validation_repair_items", len(self.repair_batch))
         self._emit(
@@ -96,15 +96,14 @@ class _ValidationRepair:
             [str(item.ordinal) for item in self.repair_batch]
         )
         prepare_seconds = time.monotonic() - prepare_started
-        self.state.add_elapsed(self.batch_ctx, "preparation_seconds", prepare_seconds)
-        self.state.executor.add_timing("prompt_build_ms", prepare_seconds * 1000)
+        self.state.add_timing(self.batch_ctx, "prompt_build_ms", prepare_seconds)
         return payload, response_schema
 
     def begin_attempt(self) -> None:
         """登記修復請求的嘗試序號並送出 ``validation_repair_attempt_start``。"""
         state = self.state
-        repair_attempt = int(state.metrics["smart_review_attempts"]) + 1
-        state.metrics["smart_review_attempts"] = repair_attempt
+        state.bump("attempts")
+        repair_attempt = int(state.metrics["attempts"])
         if state.current_batch_handle is not None:
             state.current_batch_handle.attempt = repair_attempt
         self.attempt = repair_attempt
@@ -135,10 +134,8 @@ class _ValidationRepair:
             self.state.cancelled = True
             return False
         finally:
-            self.state.add_elapsed(
-                self.batch_ctx,
-                "rate_limit_wait_seconds",
-                time.monotonic() - wait_started,
+            self.state.add_timing(
+                self.batch_ctx, "quota_wait_ms", time.monotonic() - wait_started
             )
         return True
 
@@ -172,9 +169,8 @@ class _ValidationRepair:
             self._record_request_error(exc)
         finally:
             api_seconds = time.monotonic() - api_started
-            state.add_elapsed(batch_ctx, "api_seconds", api_seconds)
-            state.add_elapsed(batch_ctx, "validation_repair_api_seconds", api_seconds)
-            state.executor.add_timing("api_ms", api_seconds * 1000)
+            state.add_timing(batch_ctx, "api_ms", api_seconds)
+            state.add_timing(batch_ctx, "validation_repair_api_ms", api_seconds)
         if failed or state.cancelled:
             return None
         return raw, meta, api_seconds
@@ -206,7 +202,7 @@ class _ValidationRepair:
         self.state.record_usage(meta)
         self._emit(
             "validation_repair_attempt_success",
-            api_elapsed_seconds=api_seconds,
+            api_ms=round(api_seconds * 1000),
             http_status=meta.get("http_status", 200),
             finish_reason=meta.get("finish_reason"),
             expected_count=len(self.repair_batch),
@@ -231,11 +227,8 @@ class _ValidationRepair:
             return []
         finally:
             parse_seconds = time.monotonic() - parse_started
-            state.add_elapsed(batch_ctx, "parse_seconds", parse_seconds)
-            state.add_elapsed(
-                batch_ctx, "validation_repair_parse_seconds", parse_seconds
-            )
-            state.executor.add_timing("response_parse_ms", parse_seconds * 1000)
+            state.add_timing(batch_ctx, "response_parse_ms", parse_seconds)
+            state.add_timing(batch_ctx, "validation_repair_parse_ms", parse_seconds)
 
     def merge(
         self,
@@ -243,12 +236,12 @@ class _ValidationRepair:
         repaired_results: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
         """用再次驗證的修復結果取代原 invalid 候選並記錄統計。"""
-        state, timing = self.state, self.batch_ctx.timing
+        state, batch = self.state, self.batch_ctx
         merged, repaired_valid, repaired_invalid = (
             merge_smart_review_validation_repairs(results, repaired_results)
         )
-        timing["repaired_valid_count"] += repaired_valid
-        timing["repaired_invalid_count"] += repaired_invalid
+        batch.repaired_valid_count += repaired_valid
+        batch.repaired_invalid_count += repaired_invalid
         state.bump("repaired_valid_count", repaired_valid)
         state.bump("repaired_invalid_count", repaired_invalid)
         self._emit(

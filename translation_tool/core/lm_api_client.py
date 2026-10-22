@@ -16,6 +16,7 @@ import requests
 
 from translation_tool.utils.cancellation import interruptible_sleep
 from translation_tool.utils.config_manager import load_config
+from translation_tool.utils.config_schema import get_default
 from translation_tool.utils.log_unit import log_warning
 from translation_tool.utils.redaction import redact_text
 
@@ -98,6 +99,14 @@ class GeminiResponseFormatError(RuntimeError):
 
     仍是 ``RuntimeError`` 的子類（既有行為不變）；呼叫端可據此知道「這次沒有被配額拒絕」。
     """
+
+
+def _request_timeout(lm_cfg: dict) -> int:
+    """API 請求逾時秒數：設定缺漏時用 schema 的 ``rate_limit.timeout`` 預設值。"""
+    rate_limit = lm_cfg.get("rate_limit", {})
+    return int(
+        rate_limit.get("timeout", get_default("lm_translator.rate_limit.timeout"))
+    )
 
 
 def worst_case_request_sec(timeout: float) -> float:
@@ -314,7 +323,7 @@ def call_gemini_requests(
             "model_name": model_name,
             "system_prompt": system_prompt,
             "payload": payload,
-            "timeout": int(lm_cfg.get("rate_limit", {}).get("timeout", 600)),
+            "timeout": _request_timeout(lm_cfg),
             "meta_out": meta_out,
             "reasoning_effort": reasoning_effort,
         }
@@ -396,7 +405,7 @@ def call_gemini_requests(
     if output_cap is not None:
         data["generationConfig"]["maxOutputTokens"] = output_cap
 
-    request_timeout = int(lm_cfg.get("rate_limit", {}).get("timeout", 600))
+    request_timeout = _request_timeout(lm_cfg)
     connect_timeout = min(request_timeout, NETWORK_CONNECT_TIMEOUT_SEC)
 
     request_kwargs = {

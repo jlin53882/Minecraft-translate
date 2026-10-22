@@ -231,15 +231,15 @@ def _smart_review_transient_retry(
                 "kind": "retry_wait",
                 "retry_number": retry_index + 1,
                 "retry_total": len(GEMINI_503_RETRY_DELAYS_SEC),
-                "wait_seconds": wait_sec,
-                "retry_after_seconds": retry_after,
+                "wait_ms": round(wait_sec * 1000),
+                "retry_after_ms": (
+                    None if retry_after is None else round(retry_after * 1000)
+                ),
                 "error_kind": error_kind,
                 "http_status": status,
                 "exception_type": type(error).__name__,
-                "provider_overload": bool(
-                    status == 503 or error_kind == "service_unavailable"
-                ),
-                "quota_or_rate_limit": bool(status == 429),
+                "overload": bool(status == 503 or error_kind == "service_unavailable"),
+                "rate_limit": bool(status == 429),
                 "timeout": bool(error_kind == "timeout"),
             }
         )
@@ -253,8 +253,8 @@ def _smart_review_transient_retry(
                 "kind": "retry_resume",
                 "retry_number": retry_index + 1,
                 "retry_total": len(GEMINI_503_RETRY_DELAYS_SEC),
-                "wait_seconds": wait_sec,
-                "elapsed_seconds": time.monotonic() - wait_started,
+                "wait_ms": round(wait_sec * 1000),
+                "waited_ms": round((time.monotonic() - wait_started) * 1000),
             }
         )
     return True

@@ -127,7 +127,7 @@ class _SmartReviewBatchRunner:
             state.cancelled = True
             return False
         batch = self.snapshots[cursor.position : cursor.position + cursor.current_size]
-        batch_ctx.timing["ordinal_end"] = int(batch[-1].ordinal)
+        batch_ctx.ordinal_end = int(batch[-1].ordinal)
         payload, response_schema, estimated_input = self._prepare_request(
             batch, batch_ctx
         )
@@ -189,8 +189,7 @@ class _SmartReviewBatchRunner:
         estimated_input = _smart_review_estimated_input_tokens(payload, response_schema)
         state.metrics["last_estimated_input_tokens"] = round(estimated_input, 2)
         preparation_seconds = time.monotonic() - preparation_started
-        state.add_elapsed(batch_ctx, "preparation_seconds", preparation_seconds)
-        state.executor.add_timing("prompt_build_ms", preparation_seconds * 1000)
+        state.add_timing(batch_ctx, "prompt_build_ms", preparation_seconds)
         return payload, response_schema, estimated_input
 
     def _reject_over_budget_batch(
@@ -206,7 +205,7 @@ class _SmartReviewBatchRunner:
             state.bump("shrink_count")
             return True
         state.bump("input_budget_exceeded_count", len(batch))
-        batch_ctx.timing["actual_count"] = len(batch)
+        batch_ctx.actual_count = len(batch)
         state.mark_request_failure(
             [item.ordinal for item in batch],
             error_code="request_failed:input_budget_exceeded",
@@ -236,7 +235,7 @@ class _SmartReviewBatchRunner:
             )
             state.counts.processed = len(snapshots)
             cursor.position = len(snapshots)
-        batch_ctx.timing["actual_count"] = len(batch)
+        batch_ctx.actual_count = len(batch)
         state.complete_batch(batch_ctx, SmartReviewStatus.REQUEST_FAILED)
 
     def _parse_response(
@@ -266,8 +265,7 @@ class _SmartReviewBatchRunner:
             ]
         finally:
             parse_seconds = time.monotonic() - parse_started
-            state.add_elapsed(batch_ctx, "parse_seconds", parse_seconds)
-            state.executor.add_timing("response_parse_ms", parse_seconds * 1000)
+            state.add_timing(batch_ctx, "response_parse_ms", parse_seconds)
 
     def _persist_results(
         self, results: list[dict[str, Any]], batch_ctx: SmartReviewBatch
@@ -279,9 +277,8 @@ class _SmartReviewBatchRunner:
             self.db.record_smart_review_results(state.run_id, results)
         finally:
             write_seconds = time.monotonic() - write_started
-            state.add_elapsed(batch_ctx, "result_write_seconds", write_seconds)
-            state.executor.add_timing("history_write_ms", write_seconds * 1000)
-            state.executor.add_timing("commit_ms", write_seconds * 1000)
+            state.add_timing(batch_ctx, "history_write_ms", write_seconds)
+            state.add_timing(batch_ctx, "commit_ms", write_seconds)
 
     def _count_results(
         self, results: list[dict[str, Any]], batch_ctx: SmartReviewBatch
@@ -306,8 +303,8 @@ class _SmartReviewBatchRunner:
                 counts.suggestions += 1
             else:
                 counts.needs_context += 1
-        state.executor.add_timing(
-            "validation_ms", (time.monotonic() - validation_started) * 1000
+        state.add_timing(
+            batch_ctx, "validation_ms", time.monotonic() - validation_started
         )
 
     def _finish_batch(
@@ -320,7 +317,7 @@ class _SmartReviewBatchRunner:
         self.state.counts.processed += len(batch)
         cursor.position += len(batch)
         cursor.adaptive_size = min(cursor.adaptive_size, cursor.current_size)
-        batch_ctx.timing["actual_count"] = len(batch)
+        batch_ctx.actual_count = len(batch)
         self.state.complete_batch(batch_ctx, "completed")
 
 
@@ -362,8 +359,12 @@ def _open_run_state(
         run_id=run_id,
         cancel_check=session.cancel_check,
     )
+    executor.add_timing(
+        "setup_ms", max(0.0, selection_started - workflow_started) * 1000
+    )
     executor.add_timing("selection_ms", selection_seconds * 1000)
     executor.add_timing("planning_ms", planning_seconds * 1000)
+    executor.add_timing("run_record_ms", run_record_seconds * 1000)
     executor.add_timing("history_write_ms", run_record_seconds * 1000)
     session.configure_limits()
     state = SmartReviewRunState(
@@ -373,20 +374,15 @@ def _open_run_state(
         selected_count=len(snapshots),
         planned_batch_count=planned_batch_count,
         progress=progress,
-        metrics=new_smart_review_metrics(
-            setup_seconds=round(max(0.0, selection_started - workflow_started), 3),
-            selection_seconds=selection_seconds,
-            run_record_seconds=run_record_seconds,
-            input_token_budget=session.input_token_budget,
-        ),
+        metrics=new_smart_review_metrics(input_token_budget=session.input_token_budget),
         started=workflow_started,
     )
     state.report_progress(
         phase="selection_complete",
         timing={
-            "selection_seconds": selection_seconds,
-            "planning_seconds": planning_seconds,
-            "run_record_seconds": run_record_seconds,
+            "selection_ms": round(selection_seconds * 1000),
+            "planning_ms": round(planning_seconds * 1000),
+            "run_record_ms": round(run_record_seconds * 1000),
         },
     )
     return state

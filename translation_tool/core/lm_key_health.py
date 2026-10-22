@@ -33,6 +33,7 @@ from datetime import datetime, timedelta, timezone, tzinfo
 from datetime import time as dt_time
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from translation_tool.utils.config_schema import get_default
 from translation_tool.utils.ui_mirror import run_in_context
 
 # 失敗原因
@@ -262,8 +263,10 @@ DEFAULT_PROBE_INTERVAL_SEC = 600.0
 # 探測租約的保底逾時：必須比探測請求可能飛行的時間（請求逾時）長，否則慢速探測期間
 # 其他 worker 會搶到第二個探測；持有者異常結束又沒釋放時，也不會永遠卡住其他 worker。
 PROBE_LEASE_MARGIN_SEC = 60.0
-# 預設租約長度：預設請求逾時（rate_limit.timeout = 600 秒）+ 餘裕；實際使用時由呼叫端依設定傳入。
-DEFAULT_PROBE_LEASE_SEC = 660.0
+# 預設租約長度：schema 預設請求逾時（rate_limit.timeout）+ 餘裕；實際使用時由呼叫端依設定傳入。
+DEFAULT_PROBE_LEASE_SEC = (
+    float(get_default("lm_translator.rate_limit.timeout")) + PROBE_LEASE_MARGIN_SEC
+)
 
 
 @dataclass

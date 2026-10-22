@@ -215,23 +215,19 @@ def load_config(config_path: str | os.PathLike | None = None) -> dict:
     return copy.deepcopy(load_config_shared(config_path))
 
 
-DEFAULT_BATCH_WRITE_INTERVAL = 2
-
-
 def get_batch_write_interval(config: dict | None = None) -> int:
     """回傳 lm_translator.batch_write_interval 的實際生效值（至少為 1）。
 
     執行時寫入頻率與 UI 顯示共用這個函式，確保兩者一致：
-    缺漏 / 無法轉成整數 → 預設 2；小於 1 → 1。
+    缺漏 / 無法轉成整數 → schema 預設值；小於 1 → 1。
     """
+    default = int(get_default("lm_translator.batch_write_interval"))
     cfg = load_config() if config is None else config
-    raw = (cfg.get("lm_translator") or {}).get(
-        "batch_write_interval", DEFAULT_BATCH_WRITE_INTERVAL
-    )
+    raw = (cfg.get("lm_translator") or {}).get("batch_write_interval", default)
     try:
         return max(1, int(raw))
     except (TypeError, ValueError):
-        return DEFAULT_BATCH_WRITE_INTERVAL
+        return default
 
 
 def get_smart_review_settings(config: dict | None = None) -> SmartReviewSettings:

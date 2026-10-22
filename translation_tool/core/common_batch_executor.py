@@ -12,7 +12,12 @@ from typing import Any, Protocol, runtime_checkable
 
 import requests
 
-from translation_tool.core.batch_timing import format_duration_ms
+from translation_tool.core.batch_events import (
+    BatchEvent,
+    BatchTiming,
+    format_batch_event,
+)
+from translation_tool.core.batch_timing import timing_ms
 from translation_tool.utils.cancellation import TaskCancelled
 
 logger = logging.getLogger(__name__)
@@ -46,55 +51,19 @@ _PHASE_FOR_KIND = {
     "validation_repair_complete": "validation",
 }
 
-_SENSITIVE_FIELD_NAMES = frozenset(
-    {
-        "api_key",
-        "payload",
-        "prompt",
-        "system_prompt",
-        "raw",
-        "raw_response",
-        "response_text",
-        "error_message",
-        "exception_message",
-    }
-)
-
 
 def _new_id(prefix: str) -> str:
     """產生帶有指定前綴的短隨機識別碼。"""
     return f"{prefix}-{uuid.uuid4().hex[:12]}"
 
 
-def _safe_fields(fields: Mapping[str, Any]) -> dict[str, Any]:
-    """限制事件欄位大小，並移除 prompt、response 與 credential 等敏感內容。"""
-    safe: dict[str, Any] = {}
-    for key, value in fields.items():
-        if str(key).lower() in _SENSITIVE_FIELD_NAMES:
-            continue
-        if isinstance(value, (str, int, float, bool)) or value is None:
-            safe[str(key)] = value
-        elif isinstance(value, Mapping):
-            safe[str(key)] = _safe_fields(value)
-        elif isinstance(value, Sequence) and not isinstance(value, (bytes, bytearray)):
-            safe[str(key)] = [str(item) for item in value[:20]]
-        else:
-            safe[str(key)] = str(value)[:160]
-    return safe
-
-
 def _wait_ms(fields: Mapping[str, Any]) -> int:
-    """從事件欄位讀取等待時間，統一轉成非負毫秒數。"""
-    value = fields.get("wait_ms", fields.get("elapsed_ms"))
-    if value is None:
-        try:
-            value = float(fields.get("wait_seconds") or 0) * 1000
-        except (TypeError, ValueError):
-            value = 0
-    try:
-        return max(0, round(float(value)))
-    except (TypeError, ValueError):
-        return 0
+    """從事件欄位讀取等待時間（先 ``wait_ms``，再 ``elapsed_ms``），統一轉成非負毫秒數。"""
+    for key in ("wait_ms", "elapsed_ms"):
+        value = timing_ms(fields, key)
+        if value is not None:
+            return value
+    return 0
 
 
 def _status_from_error(error: BaseException, status: int | None) -> int | None:
@@ -166,21 +135,9 @@ def classify_provider_error(
 
 
 @dataclass
-class BatchMetrics:
-    """單次執行共用的 monotonic 計時、批次數量、API attempt 與 retry 統計。"""
+class BatchMetrics(BatchTiming):
+    """單次執行共用的 monotonic 計時（繼承 ``BatchTiming``）、批次數量、API attempt 與 retry 統計。"""
 
-    selection_ms: int = 0
-    planning_ms: int = 0
-    prompt_build_ms: int = 0
-    quota_wait_ms: int = 0
-    retry_backoff_ms: int = 0
-    api_ms: int = 0
-    response_parse_ms: int = 0
-    validation_ms: int = 0
-    commit_ms: int = 0
-    history_write_ms: int = 0
-    network_retry_wait_ms: int = 0
-    total_ms: int = 0
     batch_count: int = 0
     request_attempts: int = 0
     provider_attempts: int = 0
@@ -192,93 +149,23 @@ class BatchMetrics:
     network_retry_count: int = 0
     error_batches: list[int] = field(default_factory=list)
 
-    def add_ms(self, field_name: str, elapsed_ms: float) -> int:
-        """將單次計時以四捨五入毫秒累加到指定欄位，並回傳本次增加值。"""
-        if not hasattr(self, field_name):
-            raise AttributeError(field_name)
-        value = max(0, round(float(elapsed_ms)))
-        setattr(self, field_name, int(getattr(self, field_name)) + value)
-        return value
-
     def as_dict(self) -> dict[str, Any]:
         """將目前物件轉成供 UI、log 或測試使用的可序列化字典。"""
-        result = {
-            key: getattr(self, key)
-            for key in (
-                "selection_ms",
-                "planning_ms",
-                "prompt_build_ms",
-                "quota_wait_ms",
-                "retry_backoff_ms",
-                "api_ms",
-                "response_parse_ms",
-                "validation_ms",
-                "commit_ms",
-                "history_write_ms",
-                "network_retry_wait_ms",
-                "total_ms",
-                "batch_count",
-                "request_attempts",
-                "provider_attempts",
-                "retry_count",
-                "transient_retry_count",
-                "overload_count",
-                "key_rotation_count",
-                "network_attempts",
-                "network_retry_count",
-            )
-        }
+        result: dict[str, Any] = self.to_event()
+        for key in (
+            "batch_count",
+            "request_attempts",
+            "provider_attempts",
+            "retry_count",
+            "transient_retry_count",
+            "overload_count",
+            "key_rotation_count",
+            "network_attempts",
+            "network_retry_count",
+        ):
+            result[key] = getattr(self, key)
         result["error_batches"] = list(self.error_batches)
         return result
-
-
-@dataclass(frozen=True)
-class BatchEvent:
-    """供 app log、UI 任務日誌與最終報告共用的安全結構化事件。"""
-
-    task_id: str
-    run_id: str
-    operation: str
-    provider: str
-    model: str
-    phase: str
-    batch_index: int = 0
-    batch_total: int = 0
-    batch_size: int = 0
-    selected_count: int = 0
-    processed_count: int = 0
-    attempt: int = 0
-    max_attempts: int = 0
-    retry_count: int = 0
-    status: str = ""
-    elapsed_ms: int = 0
-    fields: Mapping[str, Any] = field(default_factory=dict)
-
-    def as_dict(self) -> dict[str, Any]:
-        """將目前物件轉成供 UI、log 或測試使用的可序列化字典。"""
-        event = {
-            "event_version": 1,
-            "task_id": self.task_id,
-            "run_id": self.run_id,
-            "operation": self.operation,
-            "provider": self.provider,
-            "model": self.model,
-            "phase": self.phase,
-            "batch_index": self.batch_index,
-            "batch_number": self.batch_index,
-            "batch_total": self.batch_total,
-            "batch_size": self.batch_size,
-            "selected_count": self.selected_count,
-            "processed_count": self.processed_count,
-            "attempt": self.attempt,
-            "smart_review_attempt": self.attempt,
-            "max_attempts": self.max_attempts,
-            "retry_count": self.retry_count,
-            "status": self.status,
-            "elapsed_ms": self.elapsed_ms,
-        }
-        event.update(_safe_fields(self.fields))
-        return event
 
 
 @dataclass
@@ -411,7 +298,6 @@ class BatchHandle:
         return self.emit(
             "retry_wait",
             wait_ms=wait_ms,
-            wait_seconds=wait_ms / 1000,
             retry_number=self.retry_count,
             retry_reason=reason,
             **fields,
@@ -712,120 +598,6 @@ class CommonBatchExecutor:
             }
         )
         return snapshot
-
-
-def format_batch_event(event: Mapping[str, Any]) -> str:
-    """將共用事件轉成有界且使用中文的 TaskSession 顯示文字。"""
-    kind = str(event.get("kind") or "")
-    prefix = (
-        f"[{event.get('operation') or 'batch'}]"
-        f"[批次 {event.get('batch_index', '?')}/{event.get('batch_total', '?')}]"
-    )
-    if kind == "batch_start":
-        return (
-            f"{prefix} 開始：{event.get('batch_size', 0)} 筆；"
-            f"provider={event.get('provider') or '-'}，model={event.get('model') or '-'}。"
-        )
-    if kind == "attempt_start":
-        return (
-            f"{prefix}[第 {event.get('attempt', '?')} 次嘗試] API 請求開始；"
-            f"預期 {event.get('batch_size', 0)} 筆。"
-        )
-    if kind == "provider_attempt_start":
-        return (
-            f"{prefix}[Provider 第 {event.get('provider_attempt', '?')} 次嘗試] "
-            f"請求開始；模型={event.get('provider_model') or event.get('model') or '-'}，"
-            f"預期 {event.get('expected_count', event.get('batch_size', 0))} 筆。"
-        )
-    if kind == "provider_attempt_success":
-        return (
-            f"{prefix}[Provider 第 {event.get('provider_attempt', '?')} 次嘗試] "
-            f"API 成功：狀態碼={event.get('http_status', '?')}，"
-            f"finish_reason={event.get('finish_reason') or '-'}，"
-            f"預期/回傳={event.get('expected_count', '?')}/{event.get('actual_count', '?')}，"
-            f"prompt/output tokens={event.get('prompt_tokens', '-')}/"
-            f"{event.get('output_tokens', '-')}。"
-        )
-    if kind == "provider_attempt_failure":
-        return (
-            f"{prefix}[Provider 第 {event.get('provider_attempt', '?')} 次嘗試] "
-            f"API 失敗：狀態碼={event.get('http_status', '?')}，"
-            f"錯誤分類={event.get('error_class', 'unknown')}，"
-            f"逾時={event.get('timeout', False)}，過載={event.get('overload', False)}，"
-            f"速率限制={event.get('rate_limit', False)}。"
-        )
-    if kind == "network_attempt_start":
-        return (
-            f"{prefix}[網路第 {event.get('network_attempt', '?')}/"
-            f"{event.get('network_total', '?')} 次] 請求開始。"
-        )
-    if kind == "network_response":
-        return (
-            f"{prefix}[網路第 {event.get('network_attempt', '?')}/"
-            f"{event.get('network_total', '?')} 次] 回應："
-            f"狀態碼={event.get('http_status', '?')}。"
-        )
-    if kind == "network_failure":
-        return (
-            f"{prefix}[網路第 {event.get('network_attempt', '?')}/"
-            f"{event.get('network_total', '?')} 次] 失敗："
-            f"錯誤分類={event.get('error_kind', event.get('error_class', 'unknown'))}，"
-            f"是否重試={event.get('retryable', False)}。"
-        )
-    if kind == "attempt_success":
-        return (
-            f"{prefix}[第 {event.get('attempt', '?')} 次嘗試] API 成功："
-            f"耗時 {format_duration_ms(event.get('elapsed_ms', 0))}，"
-            f"狀態碼={event.get('http_status', '?')}，"
-            f"預期/回傳={event.get('expected_count', '?')}/{event.get('actual_count', '?')}。"
-        )
-    if kind == "attempt_failure":
-        return (
-            f"{prefix}[第 {event.get('attempt', '?')} 次嘗試] API 失敗："
-            f"狀態碼={event.get('http_status', '?')}，"
-            f"錯誤分類={event.get('error_class', event.get('error_kind', 'unknown'))}，"
-            f"逾時={event.get('timeout', False)}，過載={event.get('overload', False)}，"
-            f"速率限制={event.get('rate_limit', False)}，"
-            f"Retry-After={format_duration_ms(event.get('retry_after_ms', '?'))}，"
-            f"是否重試={event.get('will_retry', False)}。"
-        )
-    if kind == "retry_wait":
-        return (
-            f"{prefix}[第 {event.get('attempt', '?')} 次嘗試] 重試等待："
-            f"第 {event.get('retry_number', '?')} 次，"
-            f"等待 {format_duration_ms(event.get('wait_ms', 0))}；"
-            f"原因={event.get('retry_reason') or 'transient'}。"
-        )
-    if kind == "network_retry_wait":
-        return (
-            f"{prefix}[網路第 {event.get('network_attempt', '?')} 次] "
-            f"網路重試等待 {format_duration_ms(event.get('wait_ms', '?'))}。"
-        )
-    if kind == "rate_limit_wait":
-        return f"{prefix} 配額等待：{format_duration_ms(event.get('wait_ms', '?'))}。"
-    if kind == "rate_limit_resume":
-        return f"{prefix} 配額等待結束，繼續請求。"
-    if kind in {"retry_resume", "network_retry_resume"}:
-        return f"{prefix} 重試等待結束，繼續請求。"
-    if kind == "timing":
-        return (
-            f"{prefix} 計時：{event.get('field_name') or '-'} "
-            f"{format_duration_ms(event.get('elapsed_ms', 0))}。"
-        )
-    if kind == "key_rotation":
-        return f"{prefix} 重試策略切換 API Key：原因={event.get('reason') or '-'}。"
-    if kind == "batch_complete":
-        return (
-            f"{prefix} 完成：已處理 {event.get('processed_count', 0)} 筆，"
-            f"API {format_duration_ms(event.get('api_ms', event.get('elapsed_ms', 0)))}，"
-            f"解析 {format_duration_ms(event.get('response_parse_ms', 0))}，"
-            f"驗證 {format_duration_ms(event.get('validation_ms', 0))}，"
-            f"寫入 {format_duration_ms(event.get('commit_ms', 0))}，"
-            f"重試 {event.get('retry_count', 0)} 次，狀態={event.get('status') or '-'}。"
-        )
-    if kind == "run_complete":
-        return f"[{event.get('operation') or 'batch'}] 任務完成：狀態={event.get('status') or '-'}。"
-    return f"{prefix} {kind}。"
 
 
 __all__ = [

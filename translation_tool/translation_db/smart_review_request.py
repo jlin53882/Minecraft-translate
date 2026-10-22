@@ -15,6 +15,8 @@ from typing import Any
 
 import requests
 
+from translation_tool.core.batch_events import canonicalize_event
+from translation_tool.core.batch_timing import timing_ms
 from translation_tool.core.codex_oauth import ChatGPTOAuthError
 from translation_tool.core.lm_batch_actions import BatchAction
 from translation_tool.core.lm_key_health import get_model_quota_registry
@@ -56,7 +58,11 @@ class SmartReviewAttemptEvents:
         )
 
     def _emit(self, kind: str, event: dict[str, object]) -> None:
-        fields = {key: value for key, value in event.items() if key != "kind"}
+        fields = {
+            key: value
+            for key, value in canonicalize_event(event).items()
+            if key != "kind"
+        }
         self.state.emit_batch_event(
             self.batch, kind, self.attempt, **self.extra, **fields
         )
@@ -64,17 +70,14 @@ class SmartReviewAttemptEvents:
     def record_retry_event(self, event: dict[str, Any]) -> None:
         """累計 retry wait 並把安全事件轉回 Smart Review。"""
         state, batch = self.state, self.batch
+        event = canonicalize_event(event)
         kind = str(event.get("kind") or "retry")
-        wait_value = event.get("wait_seconds")
-        try:
-            wait_seconds = max(0.0, float(wait_value or 0.0))
-        except (TypeError, ValueError):
-            wait_seconds = 0.0
+        wait_seconds = (timing_ms(event, "wait_ms") or 0) / 1000
         if kind == "retry_wait":
-            state.add_elapsed(batch, "retry_wait_seconds", wait_seconds)
+            state.add_timing(batch, "retry_backoff_ms", wait_seconds)
         elif kind == "network_retry_wait":
             state.bump("network_retry_count")
-            state.add_elapsed(batch, "network_retry_wait_seconds", wait_seconds)
+            state.add_timing(batch, "network_retry_wait_ms", wait_seconds)
         self._emit(kind, event)
 
     def on_network_event(self, event: dict[str, object]) -> None:
@@ -162,7 +165,7 @@ class _BatchRequester:
                 outcome.abort_remaining = True
                 return outcome
             outcome.attempt += 1
-            self.state.bump("smart_review_attempts")
+            self.state.bump("attempts")
             if not self._attempt(request_api_key):
                 return outcome
 
@@ -203,8 +206,8 @@ class _BatchRequester:
                 wait_event_callback=events.on_rate_limit_event,
             )
         finally:
-            state.add_elapsed(
-                batch_ctx, "rate_limit_wait_seconds", time.monotonic() - wait_started
+            state.add_timing(
+                batch_ctx, "quota_wait_ms", time.monotonic() - wait_started
             )
         self.attempt_meta = {}
         state.emit_batch_event(
@@ -228,7 +231,7 @@ class _BatchRequester:
             )
         finally:
             self.api_seconds = time.monotonic() - api_started
-            state.add_elapsed(batch_ctx, "api_seconds", self.api_seconds)
+            state.add_timing(batch_ctx, "api_ms", self.api_seconds)
 
     # -- 結果處置：回傳 True 代表重試，False 代表停止本批次請求 ------------------
 
@@ -260,7 +263,7 @@ class _BatchRequester:
         self.state.emit_attempt_failure(
             error,
             batch_number=self.batch_ctx.number,
-            smart_review_attempt=self.outcome.attempt,
+            attempt=self.outcome.attempt,
             status=status,
             retry_after_seconds=retry_after_seconds,
             key_rotated=key_rotated,
@@ -435,7 +438,7 @@ class _BatchRequester:
             self.batch_ctx,
             "attempt_success",
             outcome.attempt,
-            api_elapsed_seconds=self.api_seconds,
+            api_ms=round(self.api_seconds * 1000),
             http_status=meta.get("http_status", 200),
             finish_reason=meta.get("finish_reason"),
             expected_count=len(self.batch),
