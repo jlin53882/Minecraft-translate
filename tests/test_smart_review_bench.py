@@ -23,6 +23,9 @@ from tests.smart_review_history_support import (
     snapshot_bytes,
 )
 from translation_tool.translation_db import TranslationDB
+from translation_tool.translation_db.smart_review_history import (
+    SmartReviewHistoryStore,
+)
 
 TOTAL = 10_000
 CHUNK = 200
@@ -226,6 +229,20 @@ def test_ten_thousand_candidates_page_filter_apply_reconcile(bench_run):
             "invalid": 100,
         }
         assert_summary_consistent(store, run_id, TOTAL)
+
+        # 最近批次標籤：冷快取（只剩磁碟）與單筆更新後（只有一個分片變動）。
+        SmartReviewHistoryStore.clear_caches()
+        _run, cold_marks = timer.measure(
+            "latest_run_marks (cold)", store.latest_run_marks
+        )
+        assert len(cold_marks) == TOTAL
+        timer.measure("latest_run_marks (warm)", store.latest_run_marks)
+        ordinal = next(item.ordinal for item in snapshots if item.ordinal % 100 == 0)
+        store.update_candidate(run_id, ordinal, status="rejected")
+        _run, changed_marks = timer.measure(
+            "latest_run_marks (1 chunk changed)", store.latest_run_marks
+        )
+        assert len(changed_marks) == TOTAL
     finally:
         db.close()
 

@@ -236,9 +236,14 @@ class HistoryQuery:
         marks: dict[int, tuple[str, str | None]] = {}
         try:
             if is_chunked(payload):
-                candidates = self.repository.iter_chunk_candidates_unlocked(
-                    path.stem, payload, strict=True
-                )
+                # 分片批次讀各分片旁的 status sidecar；過期或遺失時才從分片重建。
+                for (
+                    _ordinal,
+                    entry_id,
+                    status,
+                    error,
+                ) in self.repository.iter_status_rows_unlocked(path.stem, payload):
+                    marks[entry_id] = (status, error)
             else:
                 candidates = payload.get("candidates")
                 if not isinstance(candidates, list):
@@ -247,17 +252,17 @@ class HistoryQuery:
                         path,
                     )
                     return None
-            for candidate in candidates:
-                if not isinstance(candidate, dict):
-                    continue
-                try:
-                    entry_id = int(candidate["entry_id"])
-                except (KeyError, TypeError, ValueError):
-                    continue
-                marks[entry_id] = (
-                    str(candidate.get("status") or ""),
-                    candidate.get("validation_error"),
-                )
+                for candidate in candidates:
+                    if not isinstance(candidate, dict):
+                        continue
+                    try:
+                        entry_id = int(candidate["entry_id"])
+                    except (KeyError, TypeError, ValueError):
+                        continue
+                    marks[entry_id] = (
+                        str(candidate.get("status") or ""),
+                        candidate.get("validation_error"),
+                    )
         except (OSError, ValueError, TypeError, KeyError):
             logger.warning("略過含有損壞候選分片的智慧校對批次檔：%s", path)
             return None

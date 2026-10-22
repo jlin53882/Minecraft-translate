@@ -2,7 +2,7 @@
 
 ``ChunkManifestRepository`` 擁有歷史目錄內的檔案配置：批次 manifest（或舊版單檔
 JSON）、``<run_id>.chunks`` 候選分片目錄、原子替換寫入、分片 checkpoint 與 manifest
-摘要重建，以及「分片先寫完、manifest 最後發布」的建立流程。方法名稱帶
+摘要重建、分片旁的 status sidecar，以及「分片先寫完、manifest 最後發布」的建立流程。方法名稱帶
 ``_unlocked`` 者要求呼叫端已持有 ``HistoryLock``；這個類別本身不取鎖。
 """
 
@@ -24,6 +24,14 @@ from translation_tool.translation_db.smart_review_history_codec import (
     candidate_counts_from_items,
     is_chunked,
     timestamp,
+)
+from translation_tool.translation_db.smart_review_history_sidecar import (
+    StatusRow,
+    build_sidecar,
+    projection_revision_of,
+    rows_if_current,
+    sidecar_file_name,
+    status_rows_from_candidates,
 )
 from translation_tool.translation_db.smart_review_status import SmartReviewStatus
 
@@ -229,6 +237,36 @@ class ChunkManifestRepository:
                 raise ValueError("智慧校對 manifest 的 ordinal 範圍不完整")
             previous_end = end
 
+    @staticmethod
+    def validated_chunk_candidates(
+        run_id: str, entry: Mapping[str, Any], chunk: Mapping[str, Any]
+    ) -> list[dict[str, Any]]:
+        """依 manifest 分片描述嚴格驗證一個分片，回傳其候選；不符時丟出 ValueError。"""
+        candidates = chunk.get("candidates") or []
+        if chunk.get("run_id") not in (None, run_id):
+            raise ValueError("智慧校對候選分片的 run_id 不一致")
+        if chunk.get("chunk_index") not in (None, entry["index"]):
+            raise ValueError("智慧校對候選分片的索引不一致")
+        if len(candidates) != int(entry["count"]):
+            raise ValueError("智慧校對候選分片的候選數量不完整")
+        seen_ordinals: set[int] = set()
+        for candidate in candidates:
+            if not isinstance(candidate, dict):
+                raise ValueError("智慧校對候選分片含有無效候選")  # noqa: TRY004 - 檔案內容不合法一律以 ValueError 回報，呼叫端依此隔離損壞分片
+            try:
+                ordinal = int(candidate["ordinal"])
+            except (KeyError, TypeError, ValueError) as exc:
+                raise ValueError("智慧校對候選分片缺少有效 ordinal") from exc
+            if (
+                not (
+                    int(entry["ordinal_start"]) <= ordinal <= int(entry["ordinal_end"])
+                )
+                or ordinal in seen_ordinals
+            ):
+                raise ValueError("智慧校對候選分片的 ordinal 不完整")
+            seen_ordinals.add(ordinal)
+        return candidates
+
     def iter_chunk_candidates_unlocked(
         self,
         run_id: str,
@@ -255,34 +293,10 @@ class ChunkManifestRepository:
                         f"智慧校對候選分片無法讀取：run_id={run_id}，chunk={entry['index']}"
                     ) from exc
                 continue
-            candidates = chunk.get("candidates") or []
             if strict:
-                if chunk.get("run_id") not in (None, run_id):
-                    raise ValueError("智慧校對候選分片的 run_id 不一致")
-                if chunk.get("chunk_index") not in (None, entry["index"]):
-                    raise ValueError("智慧校對候選分片的索引不一致")
-                if len(candidates) != int(entry["count"]):
-                    raise ValueError("智慧校對候選分片的候選數量不完整")
-                seen_ordinals: set[int] = set()
-                for candidate in candidates:
-                    if not isinstance(candidate, dict):
-                        raise ValueError("智慧校對候選分片含有無效候選")  # noqa: TRY004 - 檔案內容不合法一律以 ValueError 回報，呼叫端依此隔離損壞分片
-                    try:
-                        ordinal = int(candidate["ordinal"])
-                    except (KeyError, TypeError, ValueError) as exc:
-                        raise ValueError("智慧校對候選分片缺少有效 ordinal") from exc
-                    if (
-                        not (
-                            int(entry["ordinal_start"])
-                            <= ordinal
-                            <= int(entry["ordinal_end"])
-                        )
-                        or ordinal in seen_ordinals
-                    ):
-                        raise ValueError("智慧校對候選分片的 ordinal 不完整")
-                    seen_ordinals.add(ordinal)
-                    yield candidate
+                yield from self.validated_chunk_candidates(run_id, entry, chunk)
                 continue
+            candidates = chunk.get("candidates") or []
             for candidate in candidates:
                 if isinstance(candidate, dict):
                     yield candidate
@@ -316,6 +330,105 @@ class ChunkManifestRepository:
             )
             return None
 
+    def status_sidecar_path_for(self, run_id: str, chunk_index: int) -> Path:
+        """取得指定分片的 status sidecar 路徑。"""
+        return self._chunk_directory_for(run_id) / sidecar_file_name(chunk_index)
+
+    @staticmethod
+    def expected_chunk_revision(
+        manifest: Mapping[str, Any], entry: Mapping[str, Any]
+    ) -> str | None:
+        """取得 manifest 登記的分片 revision（sidecar 是否最新的唯一依據）。"""
+        revisions = manifest.get("chunk_revisions")
+        if isinstance(revisions, dict) and revisions.get(str(entry["index"])):
+            return str(revisions[str(entry["index"])])
+        revision = entry.get("chunk_revision")
+        return str(revision) if revision else None
+
+    def write_status_sidecar_unlocked(
+        self,
+        run_id: str,
+        manifest: Mapping[str, Any],
+        chunk_index: int,
+        chunk: Mapping[str, Any],
+        chunk_revision: str,
+    ) -> bool:
+        """寫入分片的 status sidecar；它是衍生資料，寫入失敗只記錄警告並回傳 False。"""
+        payload = build_sidecar(
+            run_id,
+            chunk_index,
+            chunk_revision,
+            [item for item in chunk.get("candidates") or [] if isinstance(item, dict)],
+            projection_revision=projection_revision_of(manifest),
+        )
+        try:
+            self._write_json_path_unlocked(
+                self.status_sidecar_path_for(run_id, chunk_index), payload
+            )
+        except OSError:
+            logger.warning(
+                "無法寫入智慧校對 status sidecar：run_id=%s，chunk=%s",
+                run_id,
+                chunk_index,
+                exc_info=True,
+            )
+            return False
+        return True
+
+    def _chunk_file_matches_checkpoint(
+        self, run_id: str, manifest: Mapping[str, Any], chunk_index: int
+    ) -> bool:
+        """分片檔案的 mtime／大小仍等於 manifest checkpoint；不符代表分片被外部改過或損壞。"""
+        signatures = manifest.get("chunk_signatures")
+        if not isinstance(signatures, dict):
+            return False
+        recorded = signatures.get(str(chunk_index))
+        actual = self.chunk_signature(self.chunk_path_for(run_id, chunk_index))
+        return actual is not None and recorded == actual
+
+    def status_rows_for_chunk_unlocked(
+        self, run_id: str, manifest: Mapping[str, Any], entry: Mapping[str, Any]
+    ) -> list[StatusRow]:
+        """讀取分片的狀態資料列：sidecar 最新就直接用，遺失或過期時從分片重建（不寫檔）。
+
+        重建時以嚴格模式驗證分片，損壞會丟出 ``ValueError``，語意與完整解析相同。
+        """
+        index = int(entry["index"])
+        try:
+            sidecar = self.read_json_path(self.status_sidecar_path_for(run_id, index))
+        except (OSError, ValueError, TypeError):
+            sidecar = None
+        if sidecar is not None and self._chunk_file_matches_checkpoint(
+            run_id, manifest, index
+        ):
+            rows = rows_if_current(
+                sidecar,
+                run_id=run_id,
+                chunk_index=index,
+                expected_revision=self.expected_chunk_revision(manifest, entry),
+                expected_count=int(entry["count"]),
+            )
+            if rows is not None:
+                return rows
+        try:
+            chunk = self.read_chunk_unlocked(run_id, index)
+        except (OSError, ValueError, TypeError) as exc:
+            raise ValueError(
+                f"智慧校對候選分片無法讀取：run_id={run_id}，chunk={index}"
+            ) from exc
+        return status_rows_from_candidates(
+            self.validated_chunk_candidates(run_id, entry, chunk)
+        )
+
+    def iter_status_rows_unlocked(
+        self, run_id: str, manifest: Mapping[str, Any]
+    ) -> Iterator[StatusRow]:
+        """依 ordinal 順序串流遍歷各分片的狀態資料列；manifest 或分片不完整時丟出 ValueError。"""
+        entries = self.chunk_entries(manifest)
+        self._validate_strict_chunk_entries(manifest, entries)
+        for entry in entries:
+            yield from self.status_rows_for_chunk_unlocked(run_id, manifest, entry)
+
     @staticmethod
     def chunk_signature(path: Path) -> list[int] | None:
         """回傳分片檔案的 mtime 與大小，供 manifest checkpoint 對帳。"""
@@ -331,8 +444,14 @@ class ChunkManifestRepository:
         manifest: dict[str, Any],
         chunk_index: int,
         chunk: Mapping[str, Any],
+        *,
+        write_sidecar: bool = True,
     ) -> None:
-        """把已寫入分片的 revision、摘要與檔案版本同步到 manifest。"""
+        """把已寫入分片的 revision、摘要與檔案版本同步到 manifest，並更新該分片的 sidecar。
+
+        sidecar 在 manifest 發布前寫入；若程序在兩者之間中止，manifest 仍指向舊 revision，
+        下次讀取會判定 sidecar 過期並從分片重建。
+        """
         summary = candidate_counts_from_items(
             [item for item in chunk.get("candidates") or [] if isinstance(item, dict)]
         )
@@ -366,6 +485,10 @@ class ChunkManifestRepository:
         signatures = manifest.setdefault("chunk_signatures", {})
         if isinstance(signatures, dict) and signature is not None:
             signatures[str(chunk_index)] = signature
+        if write_sidecar and revision:
+            self.write_status_sidecar_unlocked(
+                run_id, manifest, chunk_index, chunk, str(revision)
+            )
 
     def _chunk_checkpoints_current_unlocked(
         self, run_id: str, manifest: Mapping[str, Any]
@@ -414,15 +537,22 @@ class ChunkManifestRepository:
         return summary
 
     def ensure_chunked_summary_unlocked(
-        self, run_id: str, manifest: dict[str, Any], *, persist: bool = True
+        self,
+        run_id: str,
+        manifest: dict[str, Any],
+        *,
+        persist: bool = True,
+        force: bool = False,
     ) -> None:
         """在摘要過期或 checkpoint 不一致時重建 manifest 計數。
 
         ``persist=False`` 只更新目前記憶體中的摘要，供唯讀查詢避免在未取得
         寫入鎖時改寫 manifest；真正的候選變更仍使用預設值保存 checkpoint。
+        ``force=True`` 略過「摘要仍是最新」的判斷，一律從分片重建（修復工具使用）。
         """
         if (
-            isinstance(manifest.get("status_counts"), dict)
+            not force
+            and isinstance(manifest.get("status_counts"), dict)
             and isinstance(manifest.get("error_counts"), dict)
             and self._chunk_checkpoints_current_unlocked(run_id, manifest)
         ):
@@ -434,7 +564,7 @@ class ChunkManifestRepository:
             except (FileNotFoundError, OSError, ValueError, TypeError):
                 continue
             self.update_chunk_checkpoint_unlocked(
-                run_id, manifest, entry["index"], chunk
+                run_id, manifest, entry["index"], chunk, write_sidecar=persist
             )
         manifest.update(
             {
@@ -508,6 +638,16 @@ class ChunkManifestRepository:
                     chunk_payload,
                 )
                 chunk["chunk_revision"] = chunk_payload["chunk_revision"]
+                self._write_json_path_unlocked(
+                    staging_directory / sidecar_file_name(chunk_index),
+                    build_sidecar(
+                        run_id,
+                        chunk_index,
+                        chunk_payload["chunk_revision"],
+                        chunk_payload["candidates"],
+                        projection_revision=projection_revision_of(manifest),
+                    ),
+                )
             staging_directory.replace(final_directory)
             for chunk in chunks:
                 chunk_index = int(chunk["index"])
