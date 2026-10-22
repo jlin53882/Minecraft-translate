@@ -96,3 +96,35 @@ def test_external_dialog_dismiss_releases_responsive_resize_binding():
 
     assert dismiss_events == ["dismissed"]
     assert page.on_resize is original_resize
+
+
+def test_responsive_dialog_supports_content_specific_dimensions():
+    page = _ResizablePage()
+    dialog = ft.AlertDialog(
+        content=ft.Container(
+            content=ft.Text("large"),
+            data={
+                "marker": "pipeline-responsive-dialog",
+                "width_ratio": 0.88,
+                "max_width": 1280,
+                "vertical_margin": 150,
+                "max_height": 900,
+            },
+        )
+    )
+    present_page_dialog(page, dialog)
+
+    page.width = 1280
+    page.height = 900
+    page.on_resize(SimpleNamespace(width=1280, height=900))
+
+    assert (dialog.content.width, dialog.content.height) == dialog_dimensions(
+        page,
+        width_ratio=0.88,
+        max_width=1280,
+        vertical_margin=150,
+        max_height=900,
+    )
+    assert dialog.content.width > dialog_dimensions(page)[0]
+
+    close_page_dialog(page, dialog)

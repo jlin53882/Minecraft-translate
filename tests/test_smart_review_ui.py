@@ -86,6 +86,8 @@ def test_batch_reviewer_paginates_and_preserves_selection_across_pages(
     """批量審查跨頁勾選時保留前一頁的選取。"""
     rows = [_candidate(index) for index in range(1, 31)]
 
+    breakdown_calls = []
+
     class Session:
         def __enter__(self):
             return self
@@ -103,6 +105,7 @@ def test_batch_reviewer_paginates_and_preserves_selection_across_pages(
             }
 
         def run_breakdown(self, _run_id):
+            breakdown_calls.append(True)
             return {"status": {"ready": len(rows)}}
 
         def candidate_page(self, _run_id, *, status, limit, offset, **_kwargs):
@@ -129,6 +132,7 @@ def test_batch_reviewer_paginates_and_preserves_selection_across_pages(
     assert len(reviewer.rows) == 5
     assert len(reviewer._selected) == 30
     assert reviewer.apply_btn.disabled is False
+    assert len(breakdown_calls) == 1
 
 
 def test_batch_candidate_header_separates_wrapped_chips_from_text(ctx):
@@ -142,6 +146,20 @@ def test_batch_candidate_header_separates_wrapped_chips_from_text(ctx):
     assert isinstance(header, ft.Column)
     assert isinstance(header.controls[1], ft.Row)
     assert header.controls[1].wrap is True
+    assert details.controls[4].controls[1].value == "原文是問候語"
+    assert details.controls[5].controls[1].value == "未標記"
+
+
+def test_single_reviewer_places_ai_reason_before_editing_columns(ctx):
+    """逐筆檢視先顯示 AI 理由，再顯示原文與人工編輯區。"""
+    reviewer = SmartReviewReviewer(ctx, on_changed=lambda: None)
+
+    columns = reviewer._columns(_candidate())
+    explanation = columns.controls[0]
+    explanation_texts = explanation.content.controls
+
+    assert explanation_texts[1].value == "原文是問候語"
+    assert "問題類型：未標記" == explanation_texts[2].value
 
 
 def test_batch_reviewer_exposes_expired_override_action(ctx):
@@ -403,12 +421,18 @@ def test_dialog_open_review_switches_tab_and_loads_run(db, monkeypatch):
 
     dialog = SmartReviewDialog(_sync_page(), lambda: db, "1.21.1", None)
     loaded = []
+    batch_loaded = []
     dialog.reviewer.load_run = loaded.append
+    dialog.batch_reviewer.load_run = batch_loaded.append
     dialog.open_review("run-9")
     assert loaded == ["run-9"]
+    assert batch_loaded == []
     assert dialog.nav.value == "review"
     assert dialog._panels["review"].visible is True
     assert dialog._panels["run"].visible is False
+
+    dialog._on_review_mode("batch")
+    assert batch_loaded == ["run-9"]
 
 
 def test_dialog_close_keeps_background_job_running(db):

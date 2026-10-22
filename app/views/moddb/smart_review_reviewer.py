@@ -33,6 +33,7 @@ from app.views.moddb.smart_review_evidence import (
     manual_edit_hint,
     not_applicable_reason,
 )
+from app.views.moddb.smart_review_reason import build_ai_reason_panel
 from app.views.moddb.smart_review_reviewer_state import (
     DEFAULT_FILTER,
     FILTERS,
@@ -217,6 +218,7 @@ class SmartReviewReviewer:
             icon=ft.Icons.RATE_REVIEW_OUTLINED,
             tone="em",
             badge=kit.chip("人工確認", "dia"),
+            collapsible=True,
             padding=ft.Padding.symmetric(horizontal=16, vertical=14),
         )
 
@@ -514,24 +516,7 @@ class SmartReviewReviewer:
         )
 
     def _columns(self, row: SmartReviewCandidate) -> ft.Control:
-        """建立左右兩欄：左邊是原文與 AI 判斷，右邊是可編輯草稿與動作。"""
-        reason = row.reason or "（這批資料沒有儲存 reason）"
-        issues = "、".join(row.issue_types) or "未標記"
-        evidence = ft.ExpansionTile(
-            title=ft.Text("本地證據", size=12, color=C.MUTED),
-            controls=[
-                ft.Container(
-                    ft.Text(
-                        SmartReviewEvidencePresenter.evidence_text(row),
-                        size=12,
-                        selectable=True,
-                    ),
-                    padding=ft.Padding.only(left=14, right=14, bottom=10),
-                )
-            ],
-            expanded=False,
-            tile_padding=ft.Padding.symmetric(horizontal=10),
-        )
+        """建立 AI 說明與左右檢視欄，讓理由不必捲到頁面下方才看得到。"""
         left = ft.Column(
             [
                 self._text_card("英文原文", row.en_us, "dia"),
@@ -541,8 +526,6 @@ class SmartReviewReviewer:
                     "gold",
                 ),
                 self._text_card("AI 建議譯文", row.suggested_zh_tw or "", "em"),
-                self._text_card("AI 理由", f"{reason}\n問題類型：{issues}"),
-                evidence,
             ],
             spacing=10,
             horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
@@ -561,13 +544,19 @@ class SmartReviewReviewer:
             spacing=10,
             horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
         )
-        return ft.ResponsiveRow(
+        return ft.Column(
             [
-                ft.Container(left, col={"xs": 12, "md": 6}),
-                ft.Container(right, col={"xs": 12, "md": 6}),
+                build_ai_reason_panel(row),
+                ft.ResponsiveRow(
+                    [
+                        ft.Container(left, col={"xs": 12, "md": 6}),
+                        ft.Container(right, col={"xs": 12, "md": 6}),
+                    ],
+                    spacing=14,
+                    run_spacing=14,
+                ),
             ],
             spacing=14,
-            run_spacing=14,
         )
 
     # ──────────────── 草稿與格式診斷 ────────────────

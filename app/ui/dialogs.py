@@ -10,15 +10,45 @@ import flet as ft
 
 RESPONSIVE_DIALOG_MARKER = "pipeline-responsive-dialog"
 RESPONSIVE_FIELD_DATA_KEY = "pipeline-dialog-reserved-width"
+_DIALOG_DIMENSION_KEYS = (
+    "width_ratio",
+    "max_width",
+    "vertical_margin",
+    "max_height",
+)
 
 
-def dialog_dimensions(page: ft.Page) -> tuple[int, int]:
-    """Return a viewport-safe dialog body size with room for title and actions."""
+def dialog_dimensions(
+    page: ft.Page,
+    *,
+    width_ratio: float = 0.6,
+    max_width: int = 960,
+    vertical_margin: int = 220,
+    max_height: int = 680,
+) -> tuple[int, int]:
+    """Return a viewport-safe dialog body size with room for title and actions.
+
+    The defaults preserve the compact size used by existing dialogs. Larger,
+    content-heavy dialogs can opt in to a wider/taller layout without changing
+    the dimensions of unrelated dialogs.
+    """
     viewport_width = max(320, int(getattr(page, "width", 1280) or 1280))
     viewport_height = max(420, int(getattr(page, "height", 900) or 900))
-    width = min(960, max(320, int(viewport_width * 0.6)), viewport_width - 32)
-    height = min(680, max(200, viewport_height - 220))
+    width = min(
+        max_width, max(320, int(viewport_width * width_ratio)), viewport_width - 32
+    )
+    height = min(max_height, max(200, viewport_height - vertical_margin))
     return width, height
+
+
+def _responsive_dialog_options(content: ft.Container) -> dict | None:
+    """Return optional sizing overrides for a responsive dialog container."""
+    data = getattr(content, "data", None)
+    if data == RESPONSIVE_DIALOG_MARKER:
+        return {}
+    if not isinstance(data, dict) or data.get("marker") != RESPONSIVE_DIALOG_MARKER:
+        return None
+    return {key: data[key] for key in _DIALOG_DIMENSION_KEYS if key in data}
 
 
 @dataclass
@@ -62,7 +92,10 @@ def _resize_dialog_controls(page: ft.Page, dialog: ft.DialogControl) -> bool:
     content = getattr(dialog, "content", None)
     if not isinstance(content, ft.Container):
         return False
-    width, height = dialog_dimensions(page)
+    options = _responsive_dialog_options(content)
+    if options is None:
+        return False
+    width, height = dialog_dimensions(page, **options)
     changed = content.width != width or content.height != height
     content.width = width
     content.height = height
@@ -85,7 +118,7 @@ def _register_responsive_dialog(page: ft.Page, dialog: ft.DialogControl) -> None
     content = getattr(dialog, "content", None)
     if (
         not isinstance(content, ft.Container)
-        or getattr(content, "data", None) != RESPONSIVE_DIALOG_MARKER
+        or _responsive_dialog_options(content) is None
     ):
         return
 

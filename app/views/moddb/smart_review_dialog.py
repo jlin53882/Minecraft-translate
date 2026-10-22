@@ -66,6 +66,7 @@ class SmartReviewDialog:
         self.batch_reviewer = SmartReviewBatchReviewer(
             self.ctx, on_changed=self.ctx.notify_parent
         )
+        self._review_run_id: str | None = None
         self.review_mode = kit.Segmented(
             [
                 ("single", "逐筆審查", ft.Icons.RATE_REVIEW_OUTLINED),
@@ -104,7 +105,13 @@ class SmartReviewDialog:
 
     def _build_dialog(self) -> None:
         """建立對話框外殼：分頁切換列與三個分頁內容。"""
-        width, height = dialog_dimensions(self.page)
+        width, height = dialog_dimensions(
+            self.page,
+            width_ratio=0.88,
+            max_width=1280,
+            vertical_margin=150,
+            max_height=900,
+        )
         self.close_btn = ft.TextButton("關閉", on_click=self._close)
         self.dialog = ft.AlertDialog(
             modal=True,
@@ -124,7 +131,13 @@ class SmartReviewDialog:
                 ),
                 width=width,
                 height=height,
-                data=RESPONSIVE_DIALOG_MARKER,
+                data={
+                    "marker": RESPONSIVE_DIALOG_MARKER,
+                    "width_ratio": 0.88,
+                    "max_width": 1280,
+                    "vertical_margin": 150,
+                    "max_height": 900,
+                },
             ),
             actions=[self.close_btn],
             on_dismiss=self._on_dismiss,
@@ -141,6 +154,12 @@ class SmartReviewDialog:
         """在逐筆與批量審查間切換，保留兩邊的篩選與頁面狀態。"""
         self.reviewer.control.visible = key == "single"
         self.batch_reviewer.control.visible = key == "batch"
+        if (
+            key == "batch"
+            and self._review_run_id
+            and self.batch_reviewer.run_id != self._review_run_id
+        ):
+            self.batch_reviewer.load_run(self._review_run_id)
         self.ctx.update()
 
     def _show_tab(self, key: str) -> None:
@@ -152,9 +171,13 @@ class SmartReviewDialog:
 
     def open_review(self, run_id: str) -> None:
         """切到審查分頁並載入指定批次。"""
+        self._review_run_id = run_id
         self._show_tab("review")
         self.reviewer.load_run(run_id)
-        self.batch_reviewer.load_run(run_id)
+        # 批量候選是另一個分頁，等使用者真的切換過去才讀取，避免隱藏
+        # 面板在逐筆審查時也啟動候選分頁查詢。
+        if self.review_mode.value == "batch":
+            self.batch_reviewer.load_run(run_id)
         self.ctx.update()
 
     def open(self) -> None:

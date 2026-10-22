@@ -18,10 +18,19 @@ from app.ui import design, kit
 from app.ui.design import C
 from app.ui.snack import show_snack
 from app.views.moddb.formatting import format_count, shorten
+from app.views.moddb.smart_review_batch_loader import (
+    load_batch_page,
+    should_load_summary,
+)
 from app.views.moddb.smart_review_context import SmartReviewContext
 from app.views.moddb.smart_review_evidence import (
     SmartReviewEvidencePresenter,
     initial_draft_text,
+)
+from app.views.moddb.smart_review_reason import (
+    build_batch_text_line,
+    issue_text,
+    reason_text,
 )
 from app.views.moddb.smart_review_reviewer_state import (
     ALL_FILTER,
@@ -59,6 +68,7 @@ class SmartReviewBatchReviewer:
         self.run_id: str | None = None
         self.run_info: dict = {}
         self.counts: dict[str, int] = {}
+        self._summary_loaded = False
         self.status_filter = str(_BATCHABLE_STATUS)
         self.page = 1
         self.total = 0
@@ -232,6 +242,7 @@ class SmartReviewBatchReviewer:
             icon=ft.Icons.LAYERS_OUTLINED,
             tone="em",
             badge=kit.chip("分頁選取", "dia"),
+            collapsible=True,
             padding=ft.Padding.symmetric(horizontal=16, vertical=14),
         )
 
@@ -273,23 +284,27 @@ class SmartReviewBatchReviewer:
         run_id = self.run_id
         status = self._status_query()
         page = max(1, self.page)
+        include_summary = should_load_summary(include_run, self._summary_loaded)
         token = self._request_seq = self._request_seq + 1
         self._loading = True
         self._set_controls_enabled(False)
-        self.status_text.value = "正在讀取候選分頁…"
+        self.status_text.value = (
+            f"正在切換第 {page} 頁…" if self.rows else "正在讀取候選分頁…"
+        )
         self.ctx.update()
 
         def work():
-            with moddb_smart_review_read_session(path, priority) as session:
-                info = session.get_run(run_id) if include_run else None
-                breakdown = session.run_breakdown(run_id)
-                total, rows = session.candidate_page(
-                    run_id,
-                    status=status,
-                    limit=PAGE_SIZE,
-                    offset=(page - 1) * PAGE_SIZE,
-                )
-            return info, breakdown, total, rows
+            return load_batch_page(
+                path,
+                priority,
+                run_id,
+                status,
+                page,
+                PAGE_SIZE,
+                moddb_smart_review_read_session,
+                include_run=include_run,
+                include_summary=include_summary,
+            )
 
         def done(result, error: str | None) -> None:
             if token != self._request_seq:
@@ -304,17 +319,19 @@ class SmartReviewBatchReviewer:
                 self._set_controls_enabled(True)
                 self._show_empty("找不到批次", f"run_id：{run_id}", keep_toolbar=True)
                 return
+            if breakdown is not None:
+                status_counts = breakdown.get("status", {}) or {}
+                self.counts = {
+                    str(key): int(value or 0) for key, value in status_counts.items()
+                }
+                self._summary_loaded = True
             if info is not None:
                 self.run_info = info or {}
-                self._choose_initial_filter(breakdown.get("status", {}))
+                self._choose_initial_filter(self.counts)
                 if self._status_query() != status:
                     self.page = 1
                     self._load_page()
                     return
-            self.counts = {
-                str(key): int(value or 0)
-                for key, value in (breakdown.get("status", {}) or {}).items()
-            }
             total_pages = max(1, (total + PAGE_SIZE - 1) // PAGE_SIZE)
             if total and page > total_pages:
                 self.page = total_pages
@@ -379,6 +396,7 @@ class SmartReviewBatchReviewer:
 
     def _render_page(self) -> None:
         """重畫目前頁、分頁器、選取摘要與批量按鈕。"""
+        self.status_text.value = ""
         self._refresh_summary()
         self.pager.set_state(self.total, self.page)
         self.pager.visible = self.total > PAGE_SIZE
@@ -490,9 +508,11 @@ class SmartReviewBatchReviewer:
         details = ft.Column(
             [
                 header,
-                self._text_line("原文", row.en_us),
-                self._text_line("目前", row.current_zh_tw),
-                self._text_line("建議", initial_draft_text(row), main=True),
+                build_batch_text_line("原文", row.en_us),
+                build_batch_text_line("目前", row.current_zh_tw),
+                build_batch_text_line("建議", initial_draft_text(row), main=True),
+                build_batch_text_line("AI 理由", reason_text(row)),
+                build_batch_text_line("問題", issue_text(row)),
             ],
             spacing=5,
             tight=True,
@@ -508,26 +528,6 @@ class SmartReviewBatchReviewer:
             bgcolor=C.PANEL2 if not selected else C.PANEL,
             border=ft.Border.all(1, C.EM if selected else C.LINE),
             border_radius=design.RADIUS_CONTROL,
-        )
-
-    @staticmethod
-    def _text_line(label: str, value: str, *, main: bool = False) -> ft.Control:
-        """建立單筆候選卡片的原文／現況／建議摘要。"""
-        return ft.Row(
-            [
-                ft.Container(ft.Text(label, size=10.5, color=C.DIM), width=30),
-                ft.Text(
-                    value or "（無內容）",
-                    size=13 if main else 12,
-                    color=C.TEXT if main else C.MUTED,
-                    selectable=True,
-                    expand=True,
-                    max_lines=3,
-                    overflow=ft.TextOverflow.ELLIPSIS,
-                ),
-            ],
-            spacing=6,
-            vertical_alignment=ft.CrossAxisAlignment.START,
         )
 
     def _show_loading(self, text: str) -> None:
