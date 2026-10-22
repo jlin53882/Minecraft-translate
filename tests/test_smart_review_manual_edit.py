@@ -493,12 +493,12 @@ def test_latest_marks_parses_only_latest_run_and_keeps_one_cache(tmp_path, monke
     parsed = []
     real = SmartReviewHistoryStore._parse_marks
 
-    def counting(path):
+    def counting(self, path):
         """記錄被完整解析的檔案。"""
         parsed.append(path.stem)
-        return real(path)
+        return real(self, path)
 
-    monkeypatch.setattr(SmartReviewHistoryStore, "_parse_marks", staticmethod(counting))
+    monkeypatch.setattr(SmartReviewHistoryStore, "_parse_marks", counting)
     assert store.latest_run_marks() == ("latest", {1: ("stale", None)})
     assert parsed == ["latest"]
     # 再次呼叫（換頁）完全命中快取，不再解析
