@@ -37,6 +37,7 @@ from translation_tool.core.lm_translator_shared import (
     restore_cache_hit_text,
     run_translator_skeleton,
     safe_output_text,
+    strip_runtime_fields,
     write_cache_hit_preview,  # ✅ 新增：cache hit preview 檔
     write_dry_run_preview,  # ✅ 新增：dry-run preview 檔
 )
@@ -59,6 +60,7 @@ from translation_tool.utils.log_unit import (
     log_warning,
 )
 from translation_tool.utils.ui_mirror import ContextThreadPoolExecutor
+from translation_tool.utils.worker_count import resolve_worker_count
 
 # -------------------------
 # Smart 翻譯轉接器（資料格式轉換）
@@ -308,11 +310,7 @@ def translate_ftb_pending_to_zh_tw(
             log_warning(f"[FTB-LM] 讀取 JSON 失敗，視為 0 條目 src={src}: {exc!r}")
             return src, 0, {}
 
-    # max_workers 你可以改成 config 的 parallel_execution_workers
-
-    max_workers = (
-        load_config().get("translator", {}).get("parallel_execution_workers", 4)
-    )
+    max_workers = resolve_worker_count("count_prescan", load_config())
 
     def submit_count(executor, src: Path):
         return executor.submit(_count_one, src)
@@ -647,15 +645,6 @@ def translate_ftb_pending_to_zh_tw(
     # ---- Dry-run 結尾摘要 ----
     if dry_run:
 
-        def _strip_runtime_fields(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-            """移除 dry-run preview 中不可 JSON 序列化的暫存欄位。"""
-            sanitized: List[Dict[str, Any]] = []
-            for it in items:
-                sanitized.append(
-                    {k: v for k, v in it.items() if k not in {"_shielded"}}
-                )
-            return sanitized
-
         batch_size = _get_default_batch_size("ftbquests", None)
         est_batches = (
             math.ceil(global_total_to_translate / batch_size)
@@ -674,7 +663,7 @@ def translate_ftb_pending_to_zh_tw(
             # 原本：待翻譯 preview
             write_dry_run_preview(
                 out_dir,
-                _strip_runtime_fields(dry_preview_items),
+                strip_runtime_fields(dry_preview_items),
                 meta=meta,
                 filename="_ftbquests_dry_run_preview.json",  # 可選：明確檔名
             )
@@ -682,7 +671,7 @@ def translate_ftb_pending_to_zh_tw(
             # ✅ NEW：cache hit preview
             write_cache_hit_preview(
                 out_dir,
-                _strip_runtime_fields(all_cached_items),
+                strip_runtime_fields(all_cached_items),
                 filename="_ftbquests_dry_run_cache_hit_preview.json",
                 meta=meta,
             )

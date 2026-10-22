@@ -39,6 +39,7 @@ from translation_tool.utils.log_unit import (
     log_warning,
 )
 from translation_tool.utils.ui_mirror import ContextThreadPoolExecutor
+from translation_tool.utils.worker_count import resolve_worker_count
 
 from ..plugins.ftbquests.ftbquests_snbt_extractor import process_quest_folder
 from ..utils.config_manager import load_config
@@ -150,15 +151,7 @@ def translate_directory_generator(
         yield {"progress": 0.0}
 
         processed_count = 0
-        cpu_count = os.cpu_count() or 2
-        max_allowed_workers = max(1, cpu_count // 2)
-        config_workers = (
-            load_config().get("translator", {}).get("parallel_execution_workers")
-        )
-        if isinstance(config_workers, int) and config_workers > 0:
-            max_workers = min(config_workers, max_allowed_workers)
-        else:
-            max_workers = max_allowed_workers
+        max_workers = resolve_worker_count("file_pipeline", load_config())
 
         def submit_file(executor, file_path):
             return executor.submit(

@@ -32,6 +32,7 @@ from translation_tool.core.lm_translator_shared import (
     make_progress_hook,
     prepare_translator_items,
     run_translator_skeleton,
+    strip_runtime_fields,
     write_cache_hit_preview,  # ✅ 新增：cache hit preview 檔
     write_dry_run_preview,  # ✅ NEW
 )
@@ -263,10 +264,7 @@ def translate_md_pending(
             # A) 待翻譯 preview（list）
             p1 = write_dry_run_preview(
                 out_root,
-                [
-                    {k: v for k, v in it.items() if k != "_shielded"}
-                    for it in items_to_translate
-                ],
+                strip_runtime_fields(items_to_translate),
                 meta=meta,
                 filename="_md_dry_run_preview.json",
             )
@@ -274,10 +272,7 @@ def translate_md_pending(
             # B) cache hit preview（list）
             p2 = write_cache_hit_preview(
                 out_root,
-                [
-                    {k: v for k, v in it.items() if k != "_shielded"}
-                    for it in cached_items
-                ],
+                strip_runtime_fields(cached_items),
                 meta=meta,
                 filename="_md_dry_run_cache_hit_preview.json",
             )
