@@ -17,6 +17,7 @@ from translation_tool.translation_db import smart_review as smart_review_module
 from translation_tool.translation_db.schema import SRC_MANUAL
 from translation_tool.translation_db.smart_review import run_smart_review
 from translation_tool.translation_db.smart_review_history import SmartReviewHistoryStore
+from translation_tool.translation_db.smart_review_history_query import HistoryQuery
 
 
 @pytest.fixture
@@ -491,14 +492,14 @@ def test_latest_marks_parses_only_latest_run_and_keeps_one_cache(tmp_path, monke
     )
 
     parsed = []
-    real = SmartReviewHistoryStore._parse_marks
+    real = HistoryQuery.parse_marks
 
     def counting(self, path):
         """記錄被完整解析的檔案。"""
         parsed.append(path.stem)
         return real(self, path)
 
-    monkeypatch.setattr(SmartReviewHistoryStore, "_parse_marks", counting)
+    monkeypatch.setattr(HistoryQuery, "parse_marks", counting)
     assert store.latest_run_marks() == ("latest", {1: ("stale", None)})
     assert parsed == ["latest"]
     # 再次呼叫（換頁）完全命中快取，不再解析
