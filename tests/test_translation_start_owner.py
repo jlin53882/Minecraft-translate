@@ -29,7 +29,7 @@ def start_events():
 def _fake_service(*args, **kwargs):
     """與真實服務相同：交給 run_callable_task（它是 start 的 owner）。"""
     session = kwargs["session"] if "session" in kwargs else args[1]
-    return run_callable_task(session=session, task_name="t", func=lambda: {}, kwargs={})
+    return run_callable_task(session=session, task_name="t", func=dict, kwargs={})
 
 
 @pytest.mark.parametrize(

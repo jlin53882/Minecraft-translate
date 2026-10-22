@@ -318,7 +318,7 @@ def test_literal_fallback_exceptions_state_a_reason_and_still_differ():
 
 
 def test_get_schema_default_is_the_canonical_name_and_get_default_stays_compatible():
-    from translation_tool.utils import config_schema, config_manager
+    from translation_tool.utils import config_manager, config_schema
 
     assert config_schema.get_default is config_schema.get_schema_default
     assert config_schema.get_schema_default("lm_translator.batch_shrink_factor") == 0.5

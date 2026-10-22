@@ -19,7 +19,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 from translation_tool.core.lm_config_rules import validate_api_keys
 from translation_tool.core.lm_translator_main import translate_batch_smart
@@ -68,10 +68,10 @@ from translation_tool.utils.worker_count import resolve_worker_count
 
 
 def map_to_items(
-    mapping: Dict[str, Any],
+    mapping: dict[str, Any],
     cache_type: str,
     file_hint: str,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """
     將 {key: text} 的原始資料，轉換成 translate_batch_smart 可處理的 item 格式。
 
@@ -88,7 +88,7 @@ def map_to_items(
 
     這也是為什麼 file_hint 不是實際檔案路徑，而是「刻意構造的提示路徑」。
     """
-    items: List[Dict[str, Any]] = []
+    items: list[dict[str, Any]] = []
 
     for k, v in mapping.items():
         # key 必須是字串（語言 key）
@@ -123,7 +123,7 @@ def map_to_items(
     return items
 
 
-def count_translatable_keys(mapping: Dict[str, Any]) -> int:
+def count_translatable_keys(mapping: dict[str, Any]) -> int:
     """
     計算 mapping 中「實際可翻譯的字串數量」。
 
@@ -160,7 +160,7 @@ class DryRunStats:
 def _make_on_translated_item(rel_src, dst, out_map, rec, out_dir):
     """建立固定綁定檔案上下文的翻譯結果 callback。"""
 
-    def on_translated_item(it: Dict[str, Any]) -> None:
+    def on_translated_item(it: dict[str, Any]) -> None:
         """處理翻譯結果並寫入映射。"""
         p = it.get("path")
         rejected = bool(it.get("_cache_rejected"))
@@ -232,7 +232,7 @@ def translate_ftb_pending_to_zh_tw(
     input_lang_dir: str | Path,
     output_lang_dir: str | Path,
     session=None,
-    rename_langs: Optional[set[str]] = None,
+    rename_langs: set[str] | None = None,
     dry_run: bool = False,  # ✅ 新增
     write_new_cache: bool = True,  # ✅ 新增
 ) -> dict:
@@ -293,12 +293,12 @@ def translate_ftb_pending_to_zh_tw(
         raise FileNotFoundError(f"找不到任何 .json：{in_dir}")
 
     # ---- Global total keys (raw) + cache mappings ----
-    per_file_counts: List[Tuple[Path, int]] = []
+    per_file_counts: list[tuple[Path, int]] = []
     global_total_keys = 0
     # ✅ Issue #7 修復：緩存 JSON mapping 避免重複讀取
-    src_mapping_cache: Dict[Path, Dict[str, Any]] = {}
+    src_mapping_cache: dict[Path, dict[str, Any]] = {}
 
-    def _count_one(src: Path) -> Tuple[Path, int, Dict[str, Any]]:
+    def _count_one(src: Path) -> tuple[Path, int, dict[str, Any]]:
         """讀取 JSON 並統計可翻譯鍵值數量，同時快取 mapping。"""
         try:
             raise_if_cancelled()
@@ -410,7 +410,7 @@ def translate_ftb_pending_to_zh_tw(
     # ---- Dry-run stats container ----
     per_file_rows: list[dict] = []
     # ---- Dry-run: 不翻譯、不輸出 ----
-    dry_preview_items: List[Dict[str, Any]] = []
+    dry_preview_items: list[dict[str, Any]] = []
 
     all_cached_items: list[dict] = []
 
@@ -418,7 +418,7 @@ def translate_ftb_pending_to_zh_tw(
     touch = TouchSet()
 
     # touched_files 對應的 writer：最小改動版（每檔只會有一個 dst/out_map）
-    _file_write_table: dict[str, tuple[Path, Dict[str, str]]] = {}
+    _file_write_table: dict[str, tuple[Path, dict[str, str]]] = {}
 
     def _writer(file_id: str) -> None:
         """寫入翻譯結果到檔案。"""
@@ -521,7 +521,7 @@ def translate_ftb_pending_to_zh_tw(
         # ============================
 
         # out_map：先用原文當底（避免中斷時輸出缺 key）
-        out_map: Dict[str, str] = {
+        out_map: dict[str, str] = {
             k: v
             for k, v in mapping.items()
             if isinstance(k, str) and isinstance(v, str)
@@ -644,7 +644,6 @@ def translate_ftb_pending_to_zh_tw(
 
     # ---- Dry-run 結尾摘要 ----
     if dry_run:
-
         batch_size = _get_default_batch_size("ftbquests", None)
         est_batches = (
             math.ceil(global_total_to_translate / batch_size)
