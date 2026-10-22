@@ -747,21 +747,12 @@ class AppShell:
         async def on_close(event=None) -> None:
             try:
                 self.operations.begin_shutdown()
-                deadline = _monotonic() + CLOSE_WAIT_TIMEOUT_SEC
-                while self.operations.active_count() and _monotonic() < deadline:
-                    await _async_sleep(CLOSE_WAIT_POLL_SEC)
-                if self.operations.active_count():
-                    self.operations.mark_drain_timeout()
+                if await self._drain_and_flush():
+                    self.operations.mark_closed()
+                else:
                     logger.warning(
                         "Web session 過期時仍有背景操作；取消要求已送出，操作仍由 registry 追蹤"
                     )
-                else:
-                    result = self._flush_before_close()
-                    if inspect.isawaitable(result):
-                        result = await result
-                    if result is False:
-                        raise RuntimeError("Web close flush returned false")
-                    self.operations.mark_closed()
             except Exception:
                 logger.warning(
                     "Web session 結束時 drain/flush 未完整成功；admission 維持關閉",
@@ -935,24 +926,34 @@ class AppShell:
             raise
         return True
 
+    async def _drain_and_flush(self) -> bool:
+        """等背景操作結束後落盤；web 與 desktop 關閉流程共用，各自決定 UI 回應。
+
+        回傳 True 表示已完整 drain 並 flush（呼叫端再 ``mark_closed``）；回傳 False 表示
+        逾時仍有操作（已標記 drain timeout）。flush 回傳 False 或拋錯時例外往外傳。
+        """
+        deadline = _monotonic() + CLOSE_WAIT_TIMEOUT_SEC
+        while self.operations.active_count() and _monotonic() < deadline:
+            await _async_sleep(CLOSE_WAIT_POLL_SEC)
+        if self.operations.active_count():
+            self.operations.mark_drain_timeout()
+            return False
+        result = self._flush_before_close()
+        if inspect.isawaitable(result):
+            result = await result
+        if result is False:
+            raise RuntimeError("close flush returned false")
+        return True
+
     async def _complete_window_close(self) -> None:
         """完成 desktop close：先 teardown，再讓 native window 結束。"""
         if self._disposed:
             return
         self.operations.begin_shutdown()
         try:
-            deadline = _monotonic() + CLOSE_WAIT_TIMEOUT_SEC
-            while self.operations.active_count() and _monotonic() < deadline:
-                await _async_sleep(CLOSE_WAIT_POLL_SEC)
-            if self.operations.active_count():
-                self.operations.mark_drain_timeout()
+            if not await self._drain_and_flush():
                 self._show_close_failure()
                 return
-            result = self._flush_before_close()
-            if inspect.isawaitable(result):
-                result = await result
-            if result is False:
-                raise RuntimeError("close flush returned false")
         except Exception:
             logger.warning(
                 "關閉前 drain/flush/checkpoint 失敗，保留視窗供重試", exc_info=True
