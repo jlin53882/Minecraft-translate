@@ -16,6 +16,10 @@ from translation_tool.core.official_locale import (
     terminology_term_allowed,
     terminology_terms_for_item,
 )
+from translation_tool.core.terminology_model import (
+    evidence_context_entry,
+    from_official_match,
+)
 from translation_tool.translation_db.quality import quality_state
 from translation_tool.translation_db.schema import SRC_JAR_TW
 from translation_tool.utils.text_matching import contains_term, term_canonical_key
@@ -399,40 +403,12 @@ class _LocalContextBuilder:
 
     def _official_context(self, official: Any) -> list[dict[str, Any]]:
         """建立內建官方 Minecraft 在地化的術語與完整翻譯 evidence。"""
-        official_context: list[dict[str, Any]] = []
-        for match in official.official_terminology_matches_for_item(
-            {"path": self.key, "source_text": self.en_us, "text": self.en_us}
-        ):
-            if match.match_type in {"exact_key", "exact_text"}:
-                limitations = "官方 Minecraft 完整翻譯；高信心"
-            elif match.match_type == "official_phrase":
-                limitations = "官方 Minecraft 完整片語；高信心"
-            elif match.term_origin == "compound_component":
-                limitations = "官方 Minecraft 術語；由官方複合詞拆解；高信心"
-            else:
-                limitations = "官方 Minecraft 術語；高信心"
-            official_context.append(
-                {
-                    "id": match.stable_id,
-                    "reference_type": "official_locale",
-                    "mod_id": "minecraft",
-                    "kind": "lang",
-                    "key": match.key or "",
-                    "mc_version": "bundled",
-                    "en_us": match.source_text,
-                    "zh_tw": match.target_text,
-                    "source_text": match.source_text,
-                    "target_text": match.target_text,
-                    "review_status": "reviewed",
-                    "source": "bundled_official_locale",
-                    "source_label": "官方 Minecraft",
-                    "match_type": match.match_type,
-                    "term_origin": match.term_origin,
-                    "confidence": "high",
-                    "limitations": limitations,
-                }
+        return [
+            evidence_context_entry(from_official_match(match))
+            for match in official.official_terminology_matches_for_item(
+                {"path": self.key, "source_text": self.en_us, "text": self.en_us}
             )
-        return official_context
+        ]
 
     def _glossary_context(
         self, glossary_rows_for_item: list[tuple], official: Any

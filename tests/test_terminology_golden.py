@@ -161,3 +161,16 @@ def test_translation_prompt_text_is_unchanged() -> None:
     assert "- id「1」 key「custom:a」：Chest → 儲物箱" in prompt
     assert "- key「block.minecraft.cobblestone」：Cobblestone → 鵝卵石" in prompt
     assert "- Chest → 儲物箱" in prompt
+
+
+def test_smart_review_context_uses_the_evidence_adapter():
+    """智慧校對的官方 evidence 只能由 adapter 產生，不得在 context 模組重複組欄位。"""
+    from pathlib import Path
+
+    source = (
+        Path(__file__).resolve().parents[1]
+        / "translation_tool/translation_db/smart_review_context.py"
+    ).read_text(encoding="utf-8")
+    assert "evidence_context_entry(" in source
+    assert "bundled_official_locale" not in source
+    assert "官方 Minecraft 完整翻譯" not in source
