@@ -455,13 +455,14 @@ def apply_moddb_smart_review_batch_from_path(
     progress: Callable[[dict[str, Any]], None] | None = None,
     cancel_check: Callable[[], bool] | None = None,
 ) -> SmartReviewBatchResult:
-    """在背景工作中逐筆套用或保留一組候選，沿用單筆 CAS 與歷史規則。
+    """在背景工作中逐筆處理一組候選，沿用單筆 CAS 與歷史規則。
 
-    每筆操作仍由 ``TranslationDB`` 的既有交易完成，因此資料在預覽後被修改時只會
-    略過該筆，不會因批量操作而覆蓋較新的譯文。批次允許部分成功，方便大型批次在
-    遇到單筆 stale 或格式問題時繼續處理其他候選。
+    ``apply`` 與 ``reject`` 維持一般批量的安全語意；``override`` 是明確的過期覆蓋
+    動作，只接受 stale 候選，先把 JSON 的目前譯文快照對齊資料庫現況，再沿用人工
+    編輯的 CAS 路徑套用草稿／建議。每筆操作仍可獨立成功或略過，方便大型批次在
+    遇到單筆 stale、格式問題或已人工審核資料時繼續處理其他候選。
     """
-    if action not in {"apply", "reject"}:
+    if action not in {"apply", "reject", "override"}:
         raise ValueError(f"未知的智慧校對批量動作：{action}")
     selected = tuple(candidates)
     results: list[SmartReviewBatchItemResult] = []
@@ -473,21 +474,27 @@ def apply_moddb_smart_review_batch_from_path(
                 cancelled = True
                 break
             try:
+                error = None
                 if action == "apply":
                     status = db.apply_smart_review_candidate(
                         candidate.run_id,
                         candidate.ordinal,
                         draft_zh_tw=candidate.draft_zh_tw,
                     )
-                else:
+                elif action == "reject":
                     status = db.reject_smart_review_candidate(
                         candidate.run_id, candidate.ordinal
+                    )
+                else:
+                    status, error = _override_stale_smart_review_candidate(
+                        db, candidate
                     )
                 item = SmartReviewBatchItemResult(
                     candidate.run_id,
                     candidate.ordinal,
                     candidate.key,
                     str(status),
+                    error,
                 )
             except Exception as exc:  # noqa: BLE001 - one bad candidate must not stop the batch
                 item = SmartReviewBatchItemResult(
@@ -517,6 +524,36 @@ def apply_moddb_smart_review_batch_from_path(
         cancelled=cancelled,
         items=tuple(results),
     )
+
+
+def _override_stale_smart_review_candidate(
+    db: TranslationDB, candidate: SmartReviewCandidate
+) -> tuple[str, str | None]:
+    """以明確覆蓋語意處理一筆 stale JSON 候選。
+
+    ``realign_smart_review_candidate`` 會在 JSON history lock 下把
+    ``current_zh_tw`` 與其他 CAS snapshot 欄位更新成資料庫現況；接著人工編輯套用
+    再以這份新快照做 CAS。兩個步驟不是跨 SQLite／JSON 的單一交易，但第二步仍會
+    阻止對齊後再次變更的資料被覆蓋，且 SQLite audit 可供 JSON projection 對帳。
+    """
+    if candidate.status != SmartReviewStatus.STALE:
+        return "not_stale", "候選狀態不是已過期"
+    proposed = candidate.draft_zh_tw or candidate.suggested_zh_tw
+    if not proposed or not proposed.strip():
+        return "not_ready", "沒有可覆蓋的草稿或 AI 建議"
+
+    aligned = db.realign_smart_review_candidate(candidate.run_id, candidate.ordinal)
+    if aligned not in {"realigned", "unchanged"}:
+        return str(aligned), "無法更新 JSON 目前譯文快照"
+
+    status = db.apply_smart_review_manual_edit(
+        candidate.run_id, candidate.ordinal, proposed
+    )
+    if status == "changed":
+        return SmartReviewStatus.STALE, "對齊後資料庫再次變更"
+    if status == "manual_reviewed":
+        return "manual_reviewed", "目前譯文已人工審核，不進行批量覆蓋"
+    return str(status), None
 
 
 __all__ = [

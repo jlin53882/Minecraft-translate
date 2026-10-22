@@ -1,4 +1,4 @@
-"""智慧校對審查的批量模式：分頁勾選候選，預覽後背景套用或保留原譯文。"""
+"""智慧校對審查的批量模式：分頁勾選候選，預覽後背景套用、保留或覆蓋。"""
 
 from __future__ import annotations
 
@@ -36,6 +36,12 @@ _SKIPPED_STATUSES = frozenset(
     {
         "not_ready",
         "missing",
+        "not_stale",
+        "not_editable",
+        "unsupported",
+        "invalid_draft",
+        "changed",
+        "unchanged",
         "manual_reviewed",
         SmartReviewStatus.STALE,
         SmartReviewStatus.INVALID_FORMAT,
@@ -104,6 +110,14 @@ class SmartReviewBatchReviewer:
             icon=ft.Icons.SELECT_ALL,
             on_click=lambda _e: self._select_all_safe(),
         )
+        self.select_override_all_btn = kit.button(
+            "全選全部可覆蓋",
+            "ghost",
+            size="sm",
+            icon=ft.Icons.WARNING_AMBER,
+            on_click=lambda _e: self._select_all_override(),
+            tooltip="載入所有已過期且格式可用的候選，準備明確覆蓋",
+        )
         self.clear_btn = kit.button(
             "清除選取",
             "ghost",
@@ -137,6 +151,13 @@ class SmartReviewBatchReviewer:
             icon=ft.Icons.RESTORE,
             on_click=lambda _e: self._confirm_action("reject"),
         )
+        self.override_btn = kit.button(
+            "批量覆蓋已過期",
+            "danger",
+            icon=ft.Icons.WARNING_AMBER,
+            on_click=lambda _e: self._confirm_action("override"),
+            tooltip="先更新 JSON 目前譯文快照，再覆蓋資料庫目前譯文",
+        )
         self.cancel_btn = kit.button(
             "停止後續項目",
             "danger",
@@ -163,7 +184,7 @@ class SmartReviewBatchReviewer:
             ft.Column(
                 [
                     kit.hint_text(
-                        "先勾選候選再確認批量動作；只有可套用候選會寫入，資料在預覽後變更的項目會安全略過。"
+                        "先勾選候選再確認批量動作；一般套用不會覆蓋過期資料，需明確使用「批量覆蓋已過期」。"
                     ),
                     ft.Row(
                         [self.filter_dd, self.refresh_btn],
@@ -175,6 +196,7 @@ class SmartReviewBatchReviewer:
                         [
                             self.select_page_btn,
                             self.select_all_btn,
+                            self.select_override_all_btn,
                             self.clear_btn,
                             self.selection_text,
                         ],
@@ -192,7 +214,12 @@ class SmartReviewBatchReviewer:
                         border_radius=design.RADIUS_CONTROL,
                     ),
                     ft.Row(
-                        [self.apply_btn, self.reject_btn, self.cancel_btn],
+                        [
+                            self.apply_btn,
+                            self.reject_btn,
+                            self.override_btn,
+                            self.cancel_btn,
+                        ],
                         spacing=8,
                         wrap=True,
                     ),
@@ -388,32 +415,47 @@ class SmartReviewBatchReviewer:
         )
         selected = self._selected_rows()
         safe = [row for row in selected if self._can_apply(row)]
+        override = [row for row in selected if self._can_override(row)]
         format_issues = len(
             [
                 row
                 for row in selected
-                if self._can_select(row) and not self._can_apply(row)
+                if self._can_select(row)
+                and not self._can_apply(row)
+                and not self._can_override(row)
             ]
         )
         text = f"已選 {format_count(len(selected))} 筆"
         if selected:
             text += f"；可套用 {format_count(len(safe))} 筆"
+            if override:
+                text += f"；可覆蓋已過期 {format_count(len(override))} 筆"
         if format_issues:
-            text += f"；格式問題 {format_count(format_issues)} 筆會略過套用"
+            text += f"；格式問題 {format_count(format_issues)} 筆會略過"
         self.selection_text.value = text
 
     def _candidate_card(self, row: SmartReviewCandidate) -> ft.Control:
         """建立一筆候選卡片；長文以三行摘要呈現，避免表格在小視窗爆版。"""
         can_select = self._can_select(row)
         can_apply = self._can_apply(row)
+        can_override = self._can_override(row)
         selected = row.ordinal in self._selected
         status = STATUS_LABEL.get(str(row.status), str(row.status))
         tone = "em" if can_apply else "gold" if can_select else "neutral"
         chips: list[ft.Control] = [kit.chip(status, tone, dot=True)]
         if row.confidence is not None:
             chips.append(kit.chip(f"信心 {row.confidence:.0%}", "neutral"))
-        if can_select and not can_apply:
-            chips.append(kit.chip("格式問題・套用會略過", "gold"))
+        if row.status == SmartReviewStatus.STALE and can_override:
+            chips.append(kit.chip("可覆蓋・會更新 JSON 快照", "gold"))
+        elif can_select and not can_apply:
+            chips.append(
+                kit.chip(
+                    "格式問題・覆蓋會略過"
+                    if row.status == SmartReviewStatus.STALE
+                    else "格式問題・套用會略過",
+                    "gold",
+                )
+            )
         if not can_select:
             chips.append(kit.chip(self._selection_reason(row), "neutral"))
 
@@ -517,7 +559,7 @@ class SmartReviewBatchReviewer:
         ]
 
     def _select_page(self) -> None:
-        """選取目前頁所有 ready 候選，格式問題仍保留給 reject 使用。"""
+        """選取目前頁所有可進入批量流程的 ready／stale 候選。"""
         if self._busy:
             return
         self._selected.update(row.ordinal for row in self.rows if self._can_select(row))
@@ -575,6 +617,67 @@ class SmartReviewBatchReviewer:
             still_valid=lambda: token == self._request_seq,
         )
 
+    def _select_all_override(self) -> None:
+        """背景載入所有 stale 候選，只選取可安全覆蓋的項目。"""
+        if self._busy or self._loading or not self.run_id:
+            return
+        database = self.ctx.database()
+        if database is None:
+            return
+        path, priority = database
+        run_id = self.run_id
+        # 把畫面切到 stale 篩選並清掉其他篩選下的選取，避免使用者看不到
+        # 即將覆蓋的候選，或誤把 ready 候選一起帶入危險動作。
+        self.status_filter = str(SmartReviewStatus.STALE)
+        self.filter_dd.value = self.status_filter
+        self.page = 1
+        self._selected.clear()
+        self._row_cache.clear()
+        token = self._request_seq = self._request_seq + 1
+        self._loading = True
+        self._set_controls_enabled(False)
+        self.status_text.value = "正在載入全部已過期候選並篩選可覆蓋項目…"
+        self.ctx.update()
+
+        def work():
+            with moddb_smart_review_read_session(path, priority) as session:
+                _total, rows = session.candidate_page(
+                    run_id,
+                    status=SmartReviewStatus.STALE,
+                    limit=None,
+                    offset=0,
+                )
+            return list(rows or [])
+
+        def done(rows, error: str | None) -> None:
+            if token != self._request_seq:
+                return
+            self._loading = False
+            self._set_controls_enabled(True)
+            if error:
+                show_snack(self.ctx.page, f"過期候選載入失敗：{error}", C.RED)
+                self._render_page()
+                return
+            self._row_cache.update({row.ordinal: row for row in rows})
+            self._selected.update(
+                row.ordinal for row in rows if self._can_override(row)
+            )
+            self._refresh_summary()
+            self._update_action_buttons()
+            self._render_page()
+            show_snack(
+                self.ctx.page,
+                f"已選取全部可覆蓋候選，共 {format_count(sum(self._can_override(row) for row in rows))} 筆。",
+                C.GOLD,
+            )
+
+        self.ctx.run_background(
+            work,
+            done,
+            name="選取全部已過期智慧校對候選",
+            still_valid=lambda: token == self._request_seq,
+        )
+
     def _clear_selection(self) -> None:
         """清除所有頁面的選取。"""
         if self._busy:
@@ -585,12 +688,37 @@ class SmartReviewBatchReviewer:
         self._render_page()
 
     def _can_select(self, row: SmartReviewCandidate) -> bool:
-        """只有 ready 且有 AI 建議的候選可進入批量選取。"""
+        """可進入批量選取的 ready 或 stale 候選。"""
+        return self._can_ready_select(row) or self._can_stale_select(row)
+
+    @staticmethod
+    def _can_ready_select(row: SmartReviewCandidate) -> bool:
+        """ready 候選只要有 AI 建議即可選取，格式問題交給動作按鈕略過。"""
         return row.status == _BATCHABLE_STATUS and bool(initial_draft_text(row).strip())
+
+    @staticmethod
+    def _can_stale_select(row: SmartReviewCandidate) -> bool:
+        """stale 候選只允許有草稿且未標記人工審核保護的項目。"""
+        return (
+            row.status == SmartReviewStatus.STALE
+            and row.validation_error != "manual_reviewed_requires_manual_edit"
+            and bool(initial_draft_text(row).strip())
+        )
 
     def _can_apply(self, row: SmartReviewCandidate) -> bool:
         """批量套用再加一道純本地格式診斷，避免把已知問題送進寫入流程。"""
-        if not self._can_select(row):
+        if not self._can_ready_select(row):
+            return False
+        try:
+            return not SmartReviewEvidencePresenter.diagnose_draft(
+                row, initial_draft_text(row)
+            ).has_issue
+        except (TypeError, ValueError):
+            return False
+
+    def _can_override(self, row: SmartReviewCandidate) -> bool:
+        """stale 候選需通過本地格式診斷，才可進入明確覆蓋動作。"""
+        if not self._can_stale_select(row):
             return False
         try:
             return not SmartReviewEvidencePresenter.diagnose_draft(
@@ -602,6 +730,11 @@ class SmartReviewBatchReviewer:
     @staticmethod
     def _selection_reason(row: SmartReviewCandidate) -> str:
         """回傳停用勾選框的簡短原因。"""
+        if row.status == SmartReviewStatus.STALE:
+            if row.validation_error == "manual_reviewed_requires_manual_edit":
+                return "已有人工審核，不批量覆蓋"
+            if not initial_draft_text(row).strip():
+                return "沒有可覆蓋草稿"
         if row.status != _BATCHABLE_STATUS:
             return STATUS_LABEL.get(str(row.status), "非可套用狀態")
         return "沒有建議譯文"
@@ -612,16 +745,22 @@ class SmartReviewBatchReviewer:
         """依選取與格式檢查結果更新批量按鈕文字和可用狀態。"""
         selected = self._selected_rows()
         apply_rows = [row for row in selected if self._can_apply(row)]
-        reject_rows = [row for row in selected if self._can_select(row)]
+        reject_rows = [row for row in selected if self._can_ready_select(row)]
+        override_rows = [row for row in selected if self._can_override(row)]
         self.apply_btn.content = f"批量套用（{len(apply_rows):,}）"
         self.reject_btn.content = f"批量保留原譯文（{len(reject_rows):,}）"
+        self.override_btn.content = f"批量覆蓋已過期（{len(override_rows):,}）"
         enabled = not self._busy and not self._loading
         self.apply_btn.disabled = not enabled or not apply_rows
         self.reject_btn.disabled = not enabled or not reject_rows
+        self.override_btn.disabled = not enabled or not override_rows
         self.select_page_btn.disabled = not enabled or not any(
             self._can_select(row) for row in self.rows
         )
         self.select_all_btn.disabled = not enabled or not self.total
+        self.select_override_all_btn.disabled = not enabled or not self.counts.get(
+            str(SmartReviewStatus.STALE), 0
+        )
         self.clear_btn.disabled = not enabled or not self._selected
         self.refresh_btn.disabled = self._busy or self._loading or not self.run_id
         self.filter_dd.disabled = self._busy or self._loading or not self.run_id
@@ -629,22 +768,35 @@ class SmartReviewBatchReviewer:
     def _confirm_action(self, action: str) -> None:
         """顯示批量寫入前的明確確認，避免誤按一次就處理整批。"""
         selected = self._selected_rows()
-        candidates = (
-            [row for row in selected if self._can_apply(row)]
-            if action == "apply"
-            else [row for row in selected if self._can_select(row)]
-        )
+        if action == "apply":
+            candidates = [row for row in selected if self._can_apply(row)]
+        elif action == "reject":
+            candidates = [row for row in selected if self._can_ready_select(row)]
+        elif action == "override":
+            candidates = [row for row in selected if self._can_override(row)]
+        else:
+            raise ValueError(f"未知的智慧校對批量動作：{action}")
         if not candidates:
             show_snack(self.ctx.page, "目前沒有可執行的選取項目。", C.GOLD)
             return
         if not callable(getattr(self.ctx.page, "show_dialog", None)):
             self._start_batch(action, candidates)
             return
-        label = "套用 AI 建議" if action == "apply" else "保留原譯文"
+        label = {
+            "apply": "套用 AI 建議",
+            "reject": "保留原譯文",
+            "override": "覆蓋已過期候選",
+        }[action]
         skipped = len(selected) - len(candidates)
         detail = f"即將{label} {len(candidates):,} 筆候選。"
         if skipped:
             detail += f"另有 {skipped:,} 筆不符合此動作，會略過。"
+        warning = (
+            "會先把 JSON 的 current_zh_tw 快照更新為資料庫目前譯文，再以候選草稿／AI 建議覆蓋；"
+            "資料庫在對齊後再次變更，或目前譯文已人工審核的項目，會安全略過。"
+            if action == "override"
+            else "執行前仍會重新檢查資料庫快照；已被其他操作修改的候選不會被覆蓋。"
+        )
         dialog = ft.AlertDialog(
             modal=True,
             title=ft.Row(
@@ -658,7 +810,7 @@ class SmartReviewBatchReviewer:
                 [
                     ft.Text(detail, selectable=True),
                     ft.Text(
-                        "執行前仍會重新檢查資料庫快照；已被其他操作修改的候選不會被覆蓋。",
+                        warning,
                         size=12,
                         color=C.MUTED,
                         selectable=True,
@@ -674,8 +826,10 @@ class SmartReviewBatchReviewer:
                 ),
                 kit.button(
                     f"確認{label}",
-                    "primary",
-                    icon=ft.Icons.CHECK,
+                    "danger" if action == "override" else "primary",
+                    icon=ft.Icons.WARNING_AMBER
+                    if action == "override"
+                    else ft.Icons.CHECK,
                     on_click=lambda _e: self._confirm_and_start(action, candidates),
                 ),
             ],
@@ -712,9 +866,12 @@ class SmartReviewBatchReviewer:
         self.body.disabled = True
         self.cancel_btn.visible = True
         self.cancel_btn.disabled = False
-        self.status_text.value = (
-            f"準備{('套用' if action == 'apply' else '保留')} {len(candidates):,} 筆…"
-        )
+        action_label = {
+            "apply": "套用",
+            "reject": "保留",
+            "override": "覆蓋已過期",
+        }.get(action, action)
+        self.status_text.value = f"準備{action_label} {len(candidates):,} 筆…"
         self._update_action_buttons()
         self.ctx.update()
 
@@ -823,8 +980,10 @@ class SmartReviewBatchReviewer:
             self.refresh_btn.disabled = True
             self.select_page_btn.disabled = True
             self.select_all_btn.disabled = True
+            self.select_override_all_btn.disabled = True
             self.clear_btn.disabled = True
             self.apply_btn.disabled = True
             self.reject_btn.disabled = True
+            self.override_btn.disabled = True
             return
         self._update_action_buttons()

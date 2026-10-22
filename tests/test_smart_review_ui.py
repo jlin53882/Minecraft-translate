@@ -144,6 +144,25 @@ def test_batch_candidate_header_separates_wrapped_chips_from_text(ctx):
     assert header.controls[1].wrap is True
 
 
+def test_batch_reviewer_exposes_expired_override_action(ctx):
+    """已過期候選可選取並顯示獨立覆蓋動作，不會混入一般套用或保留。"""
+    reviewer = SmartReviewBatchReviewer(ctx, on_changed=lambda: None)
+    stale = _candidate(status="stale")
+    reviewer._row_cache[stale.ordinal] = stale
+    reviewer._selected.add(stale.ordinal)
+    reviewer._update_action_buttons()
+
+    assert reviewer._can_select(stale) is True
+    assert reviewer._can_override(stale) is True
+    assert reviewer.apply_btn.disabled is True
+    assert reviewer.reject_btn.disabled is True
+    assert reviewer.override_btn.disabled is False
+    assert reviewer.override_btn.content == "批量覆蓋已過期（1）"
+
+    checkbox = reviewer._candidate_card(stale).content.controls[0]
+    assert checkbox.disabled is False
+
+
 def test_dialog_switches_between_single_and_batch_review_modes(db, monkeypatch):
     """智慧校對審查分頁提供逐筆／批量模式切換而不重建外層分頁。"""
     from app.views.moddb.smart_review_dialog import SmartReviewDialog

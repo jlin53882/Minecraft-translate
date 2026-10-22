@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 from app.services_impl import moddb_smart_review_service as service
 from translation_tool.translation_db import SmartReviewCandidate
 
@@ -28,11 +30,23 @@ def _candidate(ordinal: int) -> SmartReviewCandidate:
     )
 
 
+def _stale_candidate(ordinal: int = 1) -> SmartReviewCandidate:
+    """建立可供批量覆蓋測試使用的 stale 候選。"""
+    candidate = _candidate(ordinal)
+    return replace(
+        candidate,
+        status="stale",
+        draft_zh_tw="人工確認譯文",
+    )
+
+
 class _FakeDB:
-    """只模擬 TranslationDB 的兩個批量動作。"""
+    """只模擬 TranslationDB 的批量動作與 stale 對齊流程。"""
 
     def __init__(self):
         self.closed = False
+        self.realign_calls = []
+        self.manual_edit_calls = []
 
     def apply_smart_review_candidate(self, _run_id, ordinal, *, draft_zh_tw=None):
         assert draft_zh_tw is None
@@ -40,6 +54,14 @@ class _FakeDB:
 
     def reject_smart_review_candidate(self, _run_id, ordinal):
         return "rejected" if ordinal == 1 else "not_ready"
+
+    def realign_smart_review_candidate(self, run_id, ordinal):
+        self.realign_calls.append((run_id, ordinal))
+        return "realigned"
+
+    def apply_smart_review_manual_edit(self, run_id, ordinal, draft_zh_tw):
+        self.manual_edit_calls.append((run_id, ordinal, draft_zh_tw))
+        return "applied"
 
     def close(self):
         self.closed = True
@@ -85,4 +107,23 @@ def test_batch_service_stops_before_next_candidate_when_cancelled(monkeypatch):
     assert result.processed == 1
     assert result.cancelled is True
     assert result.items[0].status == "applied"
+    assert database.closed is True
+
+
+def test_batch_service_override_realigns_json_snapshot_before_apply(monkeypatch):
+    """批量覆蓋先對齊 JSON 來源譯文，再沿用人工 CAS 套用候選草稿。"""
+    database = _FakeDB()
+    monkeypatch.setattr(service, "_open", lambda *_args, **_kwargs: database)
+
+    result = service.apply_moddb_smart_review_batch_from_path(
+        "db.sqlite",
+        (),
+        [_stale_candidate()],
+        action="override",
+    )
+
+    assert result.action == "override"
+    assert result.count("applied") == 1
+    assert database.realign_calls == [("run-1", 1)]
+    assert database.manual_edit_calls == [("run-1", 1, "人工確認譯文")]
     assert database.closed is True
