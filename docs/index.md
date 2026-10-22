@@ -11,7 +11,7 @@
 | 使用 Mod 翻譯資料庫 | [`user-guide/mod-translation-db.md`](user-guide/mod-translation-db.md) |
 | 了解系統邊界與資料流 | [`developer-guide/architecture.md`](developer-guide/architecture.md) |
 | 修改某個子系統前找程式碼與測試 | [`developer-guide/codebase-ownership.md`](developer-guide/codebase-ownership.md) |
-| 追查某個 View、長任務或快取契約 | [`developer-guide/views/`](developer-guide/views/)、[`developer-guide/operation-lifecycle.md`](developer-guide/operation-lifecycle.md)、[`developer-guide/cache.md`](developer-guide/cache.md) |
+| 追查某個 View、長任務或快取契約 | [`developer-guide/views/`](developer-guide/views/)、[`developer-guide/operation-lifecycle.md`](developer-guide/operation-lifecycle.md)、[`developer-guide/cache.md`](developer-guide/cache.md)、[`developer-guide/cache-lifecycle.md`](developer-guide/cache-lifecycle.md) |
 | 修改設定、格式或產生文件 | [`reference/configuration.md`](reference/configuration.md)、[`reference/formats.md`](reference/formats.md)、[`generated/exception-inventory.md`](generated/exception-inventory.md) |
 | 執行測試、開 PR 或發版 | [`contributing/testing.md`](contributing/testing.md)、[`contributing/pr-workflow.md`](contributing/pr-workflow.md)、[`contributing/release.md`](contributing/release.md) |
 

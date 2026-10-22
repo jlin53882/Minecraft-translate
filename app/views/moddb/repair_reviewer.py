@@ -8,10 +8,20 @@ import flet as ft
 
 from app.services_impl import moddb_repair_review_store
 from app.services_impl.moddb_format_diff_service import analyze_format_diagnostics
+from app.services_impl.moddb_repair_review_store import (
+    REPAIR_FINISHED_STATUSES,
+    REPAIR_REVIEW_STATUS_LABELS,
+    REPAIR_UNRESOLVED_STATUSES,
+    RepairReviewStatus,
+    RepairStaleReason,
+)
 from app.services_impl.moddb_retranslate_service import (
+    RepairApplyOutcome,
     apply_and_record_repair_review,
     rebase_repair_review_item,
     repair_output_issues_for_kind,
+    split_stale_reason,
+    status_after_apply,
 )
 from app.ui import design
 from app.ui.design import C
@@ -23,10 +33,10 @@ from app.views.moddb.formatting import format_count
 
 # 套用被拒絕時的原因說明（``stale:<原因>`` 的原因部分）；空字串是沒有可歸類的原因。
 _STALE_MESSAGES = {
-    "changed": "目前譯文已和審查時不同（可能已被其他操作改過）；草稿保留，請按「重新讀取」以目前譯文為基準。",
-    "not_needed": "目前譯文已經沒有格式問題，不需要修復；草稿保留。",
-    "missing": "找不到這筆譯文，或資料庫已不是建立這次審查的那一個；草稿保留。",
-    "": "沒有寫入：草稿與目前譯文相同，或資料已變動；草稿保留，可按「重新讀取」以目前譯文為基準。",
+    RepairStaleReason.CHANGED: "目前譯文已和審查時不同（可能已被其他操作改過）；草稿保留，請按「重新讀取」以目前譯文為基準。",
+    RepairStaleReason.NOT_NEEDED: "目前譯文已經沒有格式問題，不需要修復；草稿保留。",
+    RepairStaleReason.MISSING: "找不到這筆譯文，或資料庫已不是建立這次審查的那一個；草稿保留。",
+    RepairStaleReason.UNCLASSIFIED: "沒有寫入：草稿與目前譯文相同，或資料已變動；草稿保留，可按「重新讀取」以目前譯文為基準。",
 }
 _FINISHED_MESSAGE = "這筆已完成審查，不能再從這裡修改；要再修改譯文，請到條目校對編輯。"
 _REBASE_MESSAGES = {
@@ -42,7 +52,7 @@ class RepairReviewer:
         self.store_path = store_path
         self.run_id = run_id
         self.on_close = on_close
-        self.status_filter = "pending"
+        self.status_filter = RepairReviewStatus.PENDING.value
         self.page_size = 100
         self.page_offset = 0
         self.filtered_count = 0
@@ -163,13 +173,17 @@ class RepairReviewer:
             )
         ]
 
+    @staticmethod
+    def _pending_count(counts: dict[str, int]) -> int:
+        return sum(counts.get(status, 0) for status in REPAIR_UNRESOLVED_STATUSES)
+
     def _status_summary(self, counts: dict[str, int], total: int) -> str:
-        pending = counts.get("pending", 0) + counts.get("invalid", 0)
+        pending = self._pending_count(counts)
         return (
             f"待確認 {format_count(pending)} · "
-            f"已套用 {format_count(counts.get('applied', 0))} · "
-            f"保留舊譯文 {format_count(counts.get('kept_old', 0))} · "
-            f"未寫入 {format_count(counts.get('stale', 0))} / {total}"
+            f"已套用 {format_count(counts.get(RepairReviewStatus.APPLIED, 0))} · "
+            f"保留舊譯文 {format_count(counts.get(RepairReviewStatus.KEPT_OLD, 0))} · "
+            f"未寫入 {format_count(counts.get(RepairReviewStatus.STALE, 0))} / {total}"
         )
 
     def _update_progress(self, counts: dict[str, int], total: int) -> None:
@@ -344,7 +358,9 @@ class RepairReviewer:
             )
         ]
         self.group_members = [m for m in self.group_members if m is not None]
-        self._show_review_status(self.item.get("review_status", "pending"))
+        self._show_review_status(
+            self.item.get("review_status", RepairReviewStatus.PENDING)
+        )
         counts = moddb_repair_review_store.status_counts(
             self.store_path, self.run_id, grouped=True
         )
@@ -392,13 +408,9 @@ class RepairReviewer:
             value=self.status_filter,
             width=190,
             options=[
-                ft.dropdown.Option(key, label)
+                ft.dropdown.Option(str(key), label)
                 for key, label in (
-                    ("pending", "待審查"),
-                    ("applied", "已套用"),
-                    ("kept_old", "保留舊譯文"),
-                    ("stale", "未寫入（見原因）"),
-                    ("invalid", "待確認草稿"),
+                    *REPAIR_REVIEW_STATUS_LABELS.items(),
                     ("all", "全部狀態"),
                 )
             ],
@@ -423,15 +435,15 @@ class RepairReviewer:
         self.format_review.render(source, draft, diff_result, kind=kind)
 
     def _is_finished(self) -> bool:
-        return bool(self.item) and self.item.get("review_status") in {
-            "applied",
-            "kept_old",
-        }
+        return (
+            bool(self.item)
+            and self.item.get("review_status") in REPAIR_FINISHED_STATUSES
+        )
 
     def _draft_changed(self, _event=None) -> None:
         if self.applying or self.item is None or self.draft is None:
             return
-        self._save_draft(status="pending")
+        self._save_draft(status=RepairReviewStatus.PENDING)
         self._update_format_status(
             str(self.item.get("en_us") or ""),
             self.draft.value or "",
@@ -442,17 +454,23 @@ class RepairReviewer:
     def _show_review_status(self, status: str) -> None:
         source_id = self.item.get("source_id", "?") if self.item else "?"
         messages = {
-            "applied": (
+            RepairReviewStatus.APPLIED: (
                 f"✓ 已套用至原來源 #{source_id}；修復內容與歷史紀錄已保存。",
                 C.EM,
             ),
-            "kept_old": ("已保留舊譯文；沒有寫入翻譯資料，也沒有新增歷史。", C.EM),
-            "stale": (
-                _STALE_MESSAGES[""],
+            RepairReviewStatus.KEPT_OLD: (
+                "已保留舊譯文；沒有寫入翻譯資料，也沒有新增歷史。",
+                C.EM,
+            ),
+            RepairReviewStatus.STALE: (
+                _STALE_MESSAGES[RepairStaleReason.UNCLASSIFIED],
                 C.GOLD,
             ),
-            "invalid": ("此筆草稿待確認，可由你決定是否套用。", C.GOLD),
-            "pending": ("待審查：尚未套用。", C.MUTED),
+            RepairReviewStatus.INVALID: (
+                "此筆草稿待確認，可由你決定是否套用。",
+                C.GOLD,
+            ),
+            RepairReviewStatus.PENDING: ("待審查：尚未套用。", C.MUTED),
         }
         message, color = messages.get(status, ("", C.MUTED))
         self.status.value = message
@@ -467,14 +485,16 @@ class RepairReviewer:
         if status is None:
             unchanged = value == str(self.item.get("draft") or "")
             status = (
-                self.item.get("review_status", "pending") if unchanged else "pending"
+                self.item.get("review_status", RepairReviewStatus.PENDING)
+                if unchanged
+                else RepairReviewStatus.PENDING
             )
         self.item["draft"] = value
         self.item["review_status"] = status
         indices = {int(self.item["item_index"])} | {
             int(m["item_index"])
             for m in self.group_members
-            if m.get("review_status") not in {"applied", "kept_old"}
+            if m.get("review_status") not in REPAIR_FINISHED_STATUSES
         }
         for index in sorted(indices):
             moddb_repair_review_store.save_review_state(
@@ -528,10 +548,10 @@ class RepairReviewer:
     def _keep_old(self, _event=None) -> None:
         if self.applying or self.item is None:
             return
-        if self.item.get("review_status") in {"applied", "kept_old"}:
+        if self.item.get("review_status") in REPAIR_FINISHED_STATUSES:
             show_snack(self.page, "這筆項目已經完成審查，無需再次處理。", C.DIA)
             return
-        self._save_draft(status="kept_old")
+        self._save_draft(status=RepairReviewStatus.KEPT_OLD)
         self.status.value = "已保留舊譯文；沒有寫入翻譯資料，也沒有新增歷史。"
         self.status.color = C.EM
         self._render()
@@ -543,7 +563,7 @@ class RepairReviewer:
         if self.item is None or self.draft is None:
             show_snack(self.page, "目前沒有可套用的審查項目。", C.DIA)
             return
-        if self.item.get("review_status") in {"applied", "kept_old"}:
+        if self.item.get("review_status") in REPAIR_FINISHED_STATUSES:
             show_snack(self.page, "這筆項目已經完成審查，無需再次套用。", C.DIA)
             return
         value = self.draft.value or ""
@@ -660,16 +680,18 @@ class RepairReviewer:
             return
         self.applying = False
         self._set_controls_disabled(False)
-        status = "applied" if result in ("applied", "already_applied") else "stale"
-        reason = result.partition(":")[2]
-        if result == "already_applied":
+        status = status_after_apply(result)
+        reason = split_stale_reason(result)
+        if result == RepairApplyOutcome.ALREADY_APPLIED:
             applied_text = "目前譯文已經等於這份草稿（先前已套用過），不需要再寫入。"
         else:
             applied_text = "已套用，原來源與歷史均已保留。"
         outcome_text = (
             applied_text
-            if status == "applied"
-            else _STALE_MESSAGES.get(reason, _STALE_MESSAGES[""])
+            if status == RepairReviewStatus.APPLIED
+            else _STALE_MESSAGES.get(
+                reason, _STALE_MESSAGES[RepairStaleReason.UNCLASSIFIED]
+            )
         )
         self.filtered_count = moddb_repair_review_store.index_count(
             self.store_path, self.run_id, self.status_filter, grouped=True
@@ -684,13 +706,13 @@ class RepairReviewer:
         self._render()
         if self.item and self.item.get("item_index") == item.get("item_index"):
             self.status.value = outcome_text
-            self.status.color = C.EM if status == "applied" else C.GOLD
+            self.status.color = C.EM if status == RepairReviewStatus.APPLIED else C.GOLD
             self.page.update()
         counts = moddb_repair_review_store.status_counts(
             self.store_path, self.run_id, grouped=True
         )
-        pending = counts.get("pending", 0) + counts.get("invalid", 0)
-        if status == "applied":
+        pending = self._pending_count(counts)
+        if status == RepairReviewStatus.APPLIED:
             message = (
                 f"✅ 已套用，原來源與歷史均已保留。剩餘待確認 {pending} 筆。"
                 if pending

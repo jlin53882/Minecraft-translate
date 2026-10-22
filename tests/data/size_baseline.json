@@ -35,10 +35,11 @@
   },
   "view_files": {
     "app/views/config_view.py": 1016,
-    "app/views/icon_preview/icon_cache.py": 957,
+    "app/views/icon_preview/icon_cache.py": 967,
     "app/views/icon_preview_view.py": 832,
     "app/views/moddb/batch_replace_dialog.py": 1013,
     "app/views/moddb/entries_panel.py": 1141,
+    "app/views/moddb/repair_reviewer.py": 802,
     "app/views/moddb/smart_review_reviewer.py": 1118,
     "app/views/moddb/smart_review_run_panel.py": 848,
     "app/views/moddb/species_dialog.py": 841,

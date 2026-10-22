@@ -16,6 +16,7 @@ from app.icon_reader import IconRef
 from app.icon_runtime import get_runtime_asset_paths
 from translation_tool.utils.app_paths import get_data_root
 from translation_tool.utils.bounded_executor import bounded_as_completed
+from translation_tool.utils.cache_registry import register_cache
 from translation_tool.utils.cancellation import raise_if_cancelled
 from translation_tool.utils.config_manager import load_config
 from translation_tool.utils.log_unit import log_info, log_warning
@@ -125,6 +126,15 @@ def _migrate_old_icon_cache(source_root: Path) -> bool:
 # （40 個 JAR 就讀了 9,179 次），改為每個 JAR 只讀一次。
 _MODEL_INDEX_MEMO: dict[tuple[str, str], tuple[str, dict]] = {}
 _MODEL_INDEX_MEMO_LOCK = threading.Lock()
+
+
+def clear_model_index_memo() -> None:
+    """清除程序內 model index 快取。"""
+    with _MODEL_INDEX_MEMO_LOCK:
+        _MODEL_INDEX_MEMO.clear()
+
+
+register_cache("icon_preview.model_index_memo", clear_model_index_memo)
 
 
 class ModpackAssetCatalog:

@@ -6,6 +6,8 @@ import re
 from collections.abc import Mapping, Sequence
 from functools import lru_cache
 
+from translation_tool.utils.cache_registry import register_cache
+
 _TERM_SEPARATOR_RE = re.compile(r"[-_]+")
 _TERM_WHITESPACE_RE = re.compile(r"\s+")
 
@@ -16,6 +18,19 @@ def _normalize_term_str(value: str, casefold: bool) -> str:
     normalized = _TERM_SEPARATOR_RE.sub(" ", value.strip())
     normalized = _TERM_WHITESPACE_RE.sub(" ", normalized)
     return normalized.casefold() if casefold else normalized
+
+
+def clear_term_normalize_cache() -> None:
+    """清除術語正規化的 lru_cache。"""
+    _normalize_term_str.cache_clear()
+
+
+def term_normalize_cache_info():
+    """回傳術語正規化 lru_cache 的統計（hits／misses／maxsize／currsize），供觀測用。"""
+    return _normalize_term_str.cache_info()
+
+
+register_cache("utils.text_matching.normalize_term", clear_term_normalize_cache)
 
 
 def normalize_term_text(value: str, *, casefold: bool = False) -> str:

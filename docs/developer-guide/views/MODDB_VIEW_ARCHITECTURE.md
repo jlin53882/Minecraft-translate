@@ -56,7 +56,7 @@ View 不自行判斷格式，一律透過 `app/services_impl/moddb_format_diff_s
 
 ## 修復結果逐筆審查
 
-`RepairReviewer`（`repair_reviewer.py`）只負責畫面與草稿：寫入、原因分類與重設基準都在 `app/services_impl/moddb_retranslate_service`。`apply_and_record_repair_review` 回傳 `applied`、`already_applied`、`stale` 或 `stale:<原因>`（原因由 `_diagnose_stale_review_item` 依資料庫現值判斷），View 依原因顯示說明；`rebase_repair_review_item` 以現值重設審查基準，供「重新讀取」使用。已套用與保留舊譯文的項目是完成狀態，草稿唯讀，不會被編輯或重新讀取降回待審查。
+`RepairReviewer`（`repair_reviewer.py`）只負責畫面與草稿：寫入、原因分類與重設基準都在 `app/services_impl/moddb_retranslate_service`。`apply_and_record_repair_review` 回傳 `applied`、`already_applied`、`stale` 或 `stale:<原因>`（原因由 `_diagnose_stale_review_item` 依資料庫現值判斷），View 依原因顯示說明；`rebase_repair_review_item` 以現值重設審查基準，供「重新讀取」使用。已套用與保留舊譯文的項目是完成狀態，草稿唯讀，不會被編輯或重新讀取降回待審查。審查項目狀態（`pending`／`kept_old`／`applied`／`stale`／`invalid`）、套用結果與未寫入原因集中定義在 `translation_tool/translation_db/repair_status.py`（`RepairReviewStatus`、`RepairApplyOutcome`、`RepairStaleReason`），值即 sidecar 檔存的字串；它與智慧校對候選的狀態是兩套詞彙，不可混用，View 與 service 不寫裸字面值（`tests/test_repair_status_contract.py`），View 經 `moddb_repair_review_store`、`moddb_retranslate_service` 取用。
 
 ## 維護邊界
 
