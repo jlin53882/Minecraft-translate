@@ -214,6 +214,8 @@ Patchouli 與 lang 走同一個流程，只是身分不同。FTB Quests / KubeJS
 
 Schema v3 增加每個來源譯文的首次匯入時間與單調修訂序號，以及 history 的前後修訂快照。升級 v1 會先依序建立 v2 與 v3 備份；升級 v2 會先建立 `*.pre-schema-v3-<時間戳>.bak`。舊資料的 `translation.created_at` 保留為 `NULL`，不推測匯入時間。migration 在單一交易中完成；唯讀開啟舊資料庫不執行 migration，時間欄位會顯示未知。備份檔應和資料庫一樣納入使用者自己的備份政策。
 
+兩個程序同時開啟舊版資料庫時，版本以取得寫鎖後重新讀到的為準：後到的程序若看到別人已完成該版 migration，就放棄本次升級並刪除自己剛建立的備份，不會重跑回填（例如把人工審核蓋回 `legacy_unknown`），也不會留下重複備份。
+
 統計摘要（`meta.stats_schema_version`）不屬於 `schema_version`：可寫開啟時若摘要表缺少或無效，就在單一交易中建立摘要表與觸發器並以全庫重算填入；它只是可隨時重算的衍生資料，不建立備份檔。重建所有生效譯文這類整批改寫會在同一交易內暫停觸發器（`meta.stats_frozen`），完成後一次重算摘要。
 
 `entry_activity`（`meta.activity_schema_version`、`activity_valid`）與 `effective` 的衍生欄位（`meta.effective_columns_schema_version`、`effective_columns_valid`）同樣不屬於 `schema_version`，可寫開啟時缺少、無效或觸發器定義不同就在單一交易中安裝並重算，不建立備份檔。整批重建生效譯文時以 `meta.effective_columns_frozen` 暫停衍生欄位的觸發器，完成後一次重算。唯讀開啟沒有這些資料的舊資料庫、或標記無效時，清單改用原本的關聯子查詢與排序，結果相同。
