@@ -19,6 +19,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from translation_tool.utils.file_replace import replace_with_retry
+
 QUALITY_STATUS = "QUALITY_REJECTED"
 
 FIELD_NOTES = {
@@ -184,8 +186,8 @@ def write_quality_report(
         _write_csv(csv_tmp, flat)
         # 兩個暫存檔都寫成功才換上正式檔。JSON 是主要報告，先換；CSV 是由同一份
         # 資料產生的表格版，若第二次替換失敗只會是舊版（下次任務會重新產生）。
-        os.replace(json_tmp, json_path)
-        os.replace(csv_tmp, csv_path)
+        replace_with_retry(json_tmp, json_path)
+        replace_with_retry(csv_tmp, csv_path)
     finally:
         json_tmp.unlink(missing_ok=True)
         csv_tmp.unlink(missing_ok=True)
@@ -220,7 +222,7 @@ def write_replace_rule_conflicts(
     tmp = _tmp_path(path)
     try:
         tmp.write_text(text, encoding="utf-8")
-        os.replace(tmp, path)
+        replace_with_retry(tmp, path)
     finally:
         tmp.unlink(missing_ok=True)
     return path

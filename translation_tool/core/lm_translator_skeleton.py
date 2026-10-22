@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -28,7 +27,7 @@ from translation_tool.utils.cache_manager import (
 from translation_tool.utils.cache_manager import (
     save_translation_cache as _default_cache_save,
 )
-from translation_tool.utils.fs_utils import fsync_directory
+from translation_tool.utils.file_replace import atomic_write_text
 
 
 @dataclass(frozen=True)
@@ -139,16 +138,11 @@ class JsonCheckpointAdapter:
         打包 exe 關閉視窗不保證執行清理，不能依賴關閉流程補寫。
         """
         assert self.path is not None
-        self.path.parent.mkdir(parents=True, exist_ok=True)
         payload = self._payload(state)
         self._last_processed = int(state.get("processed") or 0)
-        temporary = self.path.with_suffix(".tmp")
-        with open(temporary, "w", encoding="utf-8") as f:
-            f.write(json.dumps(payload, ensure_ascii=False, sort_keys=True))
-            f.flush()
-            os.fsync(f.fileno())
-        temporary.replace(self.path)
-        fsync_directory(self.path.parent)
+        atomic_write_text(
+            self.path, json.dumps(payload, ensure_ascii=False, sort_keys=True)
+        )
 
     def clear(self) -> None:
         """迴圈完成（DONE）。
