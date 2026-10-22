@@ -1125,7 +1125,8 @@ def test_smart_review_reconcile_reads_only_target_chunks(db, monkeypatch):
 
 
 @pytest.mark.parametrize(
-    "corruption", ["missing", "invalid_json", "wrong_candidates_type"]
+    "corruption",
+    ["missing", "invalid_json", "wrong_candidates_type", "incomplete_candidates"],
 )
 def test_smart_review_latest_marks_falls_back_from_corrupt_chunk(db, corruption):
     """最近批次的分片損壞時，條目狀態應回退到較早的完整批次。"""
@@ -1175,12 +1176,64 @@ def test_smart_review_latest_marks_falls_back_from_corrupt_chunk(db, corruption)
         chunk_path.unlink()
     elif corruption == "invalid_json":
         chunk_path.write_text("{", encoding="utf-8")
-    else:
+    elif corruption == "wrong_candidates_type":
         chunk_path.write_text(json.dumps({"candidates": {}}), encoding="utf-8")
+    else:
+        chunk_payload = json.loads((chunk_path.read_text(encoding="utf-8")))
+        chunk_payload["candidates"] = []
+        chunk_path.write_text(json.dumps(chunk_payload), encoding="utf-8")
 
     selected_run, marks = store.latest_run_marks()
     assert selected_run == older_run
     assert len(marks) == len(snapshots)
+
+
+def test_smart_review_latest_marks_invalidates_chunk_cache_after_corruption(db):
+    """最近標籤快取命中後，分片損壞或修復仍應重新判斷批次。"""
+    from translation_tool.translation_db.smart_review_history import (
+        SmartReviewHistoryStore,
+        history_directory_for_db,
+    )
+
+    snapshots = db.smart_review_candidates(version="1.21.1", limit=2)
+    store = SmartReviewHistoryStore(db.path, storage_chunk_size=1)
+    run_id = store.create_run(
+        snapshots,
+        provider="gemini",
+        model="test-model",
+        version="1.21.1",
+        requested_limit=2,
+        batch_size=1,
+    )
+    store.record_results(
+        run_id,
+        [
+            {
+                "id": str(snapshots[0].ordinal),
+                "decision": "no_change",
+                "suggested_zh_tw": "",
+                "issue_types": [],
+                "evidence_ids": [],
+                "confidence": 0.8,
+                "reason": "原文與目前譯文可核對一致。",
+            }
+        ],
+    )
+    selected_run, marks = store.latest_run_marks()
+    assert selected_run == run_id
+    assert marks[snapshots[0].entry_id][0] == "no_change"
+
+    chunk_path = history_directory_for_db(db.path) / f"{run_id}.chunks" / "000000.json"
+    original_payload = json.loads(chunk_path.read_text(encoding="utf-8"))
+    broken_payload = dict(original_payload)
+    broken_payload["candidates"] = []
+    chunk_path.write_text(json.dumps(broken_payload), encoding="utf-8")
+    assert store.latest_run_marks() == (None, {})
+
+    chunk_path.write_text(json.dumps(original_payload), encoding="utf-8")
+    selected_run, marks = store.latest_run_marks()
+    assert selected_run == run_id
+    assert marks[snapshots[0].entry_id][0] == "no_change"
 
 
 def test_smart_review_run_history_merges_legacy_pages_without_double_offset(db):

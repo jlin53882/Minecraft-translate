@@ -34,6 +34,11 @@ _HEAD_BYTES = 16_384
 _STARTED_AT = re.compile(r'"started_at":\s*"([^"]*)"')
 logger = logging.getLogger(__name__)
 _RUN_ID = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
+_FileStamp = tuple[int, int]
+_MarksStamp = tuple[
+    _FileStamp,
+    tuple[tuple[int, _FileStamp | None], ...],
+]
 _PROCESSED_CANDIDATE_STATUSES = frozenset(
     {"ready", "no_change", "needs_context", "invalid", "request_failed"}
 )
@@ -98,6 +103,41 @@ def _process_is_alive(pid: object) -> bool:
         # Windows 對仍存在但無權限查詢的程序可能回報 ERROR_ACCESS_DENIED。
         return getattr(exc, "winerror", None) == 5 or getattr(exc, "errno", None) == 1
     return True
+
+
+@contextmanager
+def _exclusive_file_lock(path: Path) -> Iterator[None]:
+    """以跨程序檔案鎖保護歷史目錄的發布與復原交錯。"""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a+b") as handle:
+        handle.seek(0, os.SEEK_END)
+        if handle.tell() == 0:
+            handle.write(b"\0")
+            handle.flush()
+        handle.seek(0)
+        locked = False
+        try:
+            if os.name == "nt":
+                import msvcrt
+
+                msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
+            else:
+                import fcntl
+
+                fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+            locked = True
+            yield
+        finally:
+            if locked:
+                if os.name == "nt":
+                    import msvcrt
+
+                    handle.seek(0)
+                    msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+                else:
+                    import fcntl
+
+                    fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 
 def _candidate_counts(payload: Mapping[str, Any]) -> dict[str, Any]:
@@ -255,15 +295,12 @@ class SmartReviewHistoryStore:
     _locks: ClassVar[dict[Path, threading.RLock]] = {}
     # 檔案 -> ((mtime, size), started_at)：只存字串，供排序用
     _started_cache: ClassVar[dict[Path, tuple[tuple[int, int], str]]] = {}
-    # 資料夾 -> (檔案, (mtime, size), run_id, 條目狀態對照)：每個資料夾只留最近一次批次
+    # 資料夾 -> (檔案, manifest 與分片版本, run_id, 條目狀態對照)
     _latest_marks: ClassVar[
-        dict[
-            Path,
-            tuple[Path, tuple[int, int], str, dict[int, tuple[str, str | None]]],
-        ]
+        dict[Path, tuple[Path, _MarksStamp, str, dict[int, tuple[str, str | None]]]]
     ] = {}
-    # 已確認損壞的批次檔 -> (mtime, size)，避免每次換頁重複解析
-    _corrupt_runs: ClassVar[dict[Path, tuple[int, int]]] = {}
+    # 已確認損壞的批次檔 -> manifest 與分片版本，避免每次換頁重複解析
+    _corrupt_runs: ClassVar[dict[Path, _MarksStamp]] = {}
     # 本程序每個歷史目錄只需掃描一次失聯批次；避免每批 JSON 讀寫都重掃整個目錄。
     _recovery_checked: ClassVar[set[Path]] = set()
 
@@ -288,6 +325,12 @@ class SmartReviewHistoryStore:
     def locked(self) -> Iterator[None]:
         """在跨越資料庫 CAS 與 JSON 更新時保護同一批次檔案。"""
         with self._lock:
+            yield
+
+    @contextmanager
+    def _interprocess_lock(self) -> Iterator[None]:
+        """鎖定同一歷史目錄，避免不同程序交錯發布與清理分片。"""
+        with _exclusive_file_lock(self.directory / ".smart_review.lock"):
             yield
 
     def path_for(self, run_id: str) -> Path:
@@ -454,6 +497,38 @@ class SmartReviewHistoryStore:
             raise TypeError(f"智慧校對候選分片格式無效：{path}")
         return payload
 
+    @staticmethod
+    def _validate_strict_chunk_entries(
+        manifest: Mapping[str, Any], entries: Sequence[Mapping[str, Any]]
+    ) -> None:
+        """嚴格驗證 manifest 的分片數量與 ordinal 範圍是否完整。"""
+        raw_chunk_count = manifest.get("chunk_count")
+        if raw_chunk_count is not None:
+            try:
+                expected_chunk_count = max(0, int(raw_chunk_count))
+            except (TypeError, ValueError) as exc:
+                raise ValueError("智慧校對 manifest 的 chunk_count 無效") from exc
+            if len(entries) != expected_chunk_count:
+                raise ValueError("智慧校對 manifest 的分片數量不完整")
+        raw_selected_count = manifest.get("selected_count")
+        if raw_selected_count is not None:
+            try:
+                expected_selected_count = max(0, int(raw_selected_count))
+            except (TypeError, ValueError) as exc:
+                raise ValueError("智慧校對 manifest 的 selected_count 無效") from exc
+            if sum(int(entry["count"]) for entry in entries) != expected_selected_count:
+                raise ValueError("智慧校對 manifest 的候選數量不完整")
+        previous_end = 0
+        for position, entry in enumerate(entries):
+            start = int(entry["ordinal_start"])
+            end = int(entry["ordinal_end"])
+            count = int(entry["count"])
+            if int(entry["index"]) != position:
+                raise ValueError("智慧校對 manifest 的分片索引不連續")
+            if start != previous_end + 1 or end < start or count != end - start + 1:
+                raise ValueError("智慧校對 manifest 的 ordinal 範圍不完整")
+            previous_end = end
+
     def _iter_chunk_candidates_unlocked(
         self,
         run_id: str,
@@ -462,7 +537,10 @@ class SmartReviewHistoryStore:
         strict: bool = False,
     ) -> Iterator[dict[str, Any]]:
         """依 ordinal 順序串流遍歷分片中的候選。"""
-        for entry in self._chunk_entries(manifest):
+        entries = self._chunk_entries(manifest)
+        if strict:
+            self._validate_strict_chunk_entries(manifest, entries)
+        for entry in entries:
             try:
                 chunk = self._read_chunk_unlocked(run_id, entry["index"])
             except (FileNotFoundError, OSError, ValueError, TypeError) as exc:
@@ -477,7 +555,35 @@ class SmartReviewHistoryStore:
                         f"智慧校對候選分片無法讀取：run_id={run_id}，chunk={entry['index']}"
                     ) from exc
                 continue
-            for candidate in chunk.get("candidates") or []:
+            candidates = chunk.get("candidates") or []
+            if strict:
+                if chunk.get("run_id") not in (None, run_id):
+                    raise ValueError("智慧校對候選分片的 run_id 不一致")
+                if chunk.get("chunk_index") not in (None, entry["index"]):
+                    raise ValueError("智慧校對候選分片的索引不一致")
+                if len(candidates) != int(entry["count"]):
+                    raise ValueError("智慧校對候選分片的候選數量不完整")
+                seen_ordinals: set[int] = set()
+                for candidate in candidates:
+                    if not isinstance(candidate, dict):
+                        raise ValueError("智慧校對候選分片含有無效候選")
+                    try:
+                        ordinal = int(candidate["ordinal"])
+                    except (KeyError, TypeError, ValueError) as exc:
+                        raise ValueError("智慧校對候選分片缺少有效 ordinal") from exc
+                    if (
+                        not (
+                            int(entry["ordinal_start"])
+                            <= ordinal
+                            <= int(entry["ordinal_end"])
+                        )
+                        or ordinal in seen_ordinals
+                    ):
+                        raise ValueError("智慧校對候選分片的 ordinal 不完整")
+                    seen_ordinals.add(ordinal)
+                    yield candidate
+                continue
+            for candidate in candidates:
                 if isinstance(candidate, dict):
                     yield candidate
 
@@ -813,53 +919,55 @@ class SmartReviewHistoryStore:
         }
         with self._lock:
             # 先完整寫入暫存分片目錄，再以最後一次 manifest replace 發布批次。
-            # 因此讀者不會看到宣稱已存在、但實際缺少候選的半成品批次。
+            # 跨程序鎖同時涵蓋目錄改名與 manifest 發布，避免 recovery 把合法的
+            # 發布中分片誤判為孤立資料而刪除。
             self.directory.mkdir(parents=True, exist_ok=True)
-            staging_directory = self.directory / (
-                f".{run_id}.chunks.{uuid.uuid4().hex}.tmp"
-            )
-            final_directory = self._chunk_directory_for(run_id)
-            published = False
-            try:
-                staging_directory.mkdir(parents=True, exist_ok=False)
-                for chunk in chunks:
-                    chunk_index = int(chunk["index"])
-                    start = chunk_index * self.storage_chunk_size
-                    chunk_payload = {
-                        "schema_version": _SCHEMA_VERSION,
-                        "storage_format": _CHUNKED_STORAGE_FORMAT,
-                        "run_id": run_id,
-                        "chunk_index": chunk_index,
-                        "ordinal_start": chunk["ordinal_start"],
-                        "ordinal_end": chunk["ordinal_end"],
-                        "candidates": candidates[
-                            start : start + self.storage_chunk_size
-                        ],
-                    }
-                    self._write_chunk_path_unlocked(
-                        staging_directory / f"{chunk_index:06d}.json",
-                        chunk_payload,
-                    )
-                    chunk["chunk_revision"] = chunk_payload["chunk_revision"]
-                staging_directory.replace(final_directory)
-                for chunk in chunks:
-                    chunk_index = int(chunk["index"])
-                    signature = self._chunk_signature(
-                        self._chunk_path_for(run_id, chunk_index)
-                    )
-                    manifest["chunk_revisions"][str(chunk_index)] = str(
-                        chunk["chunk_revision"]
-                    )
-                    if signature is not None:
-                        manifest["chunk_signatures"][str(chunk_index)] = signature
-                # manifest 必須最後發布；失敗時不留下可被讀取的批次索引。
-                self._write_unlocked(run_id, manifest)
-                published = True
-            finally:
-                if not published:
-                    shutil.rmtree(staging_directory, ignore_errors=True)
-                    if not self.path_for(run_id).exists():
-                        shutil.rmtree(final_directory, ignore_errors=True)
+            with self._interprocess_lock():
+                staging_directory = self.directory / (
+                    f".{run_id}.chunks.{uuid.uuid4().hex}.tmp"
+                )
+                final_directory = self._chunk_directory_for(run_id)
+                published = False
+                try:
+                    staging_directory.mkdir(parents=True, exist_ok=False)
+                    for chunk in chunks:
+                        chunk_index = int(chunk["index"])
+                        start = chunk_index * self.storage_chunk_size
+                        chunk_payload = {
+                            "schema_version": _SCHEMA_VERSION,
+                            "storage_format": _CHUNKED_STORAGE_FORMAT,
+                            "run_id": run_id,
+                            "chunk_index": chunk_index,
+                            "ordinal_start": chunk["ordinal_start"],
+                            "ordinal_end": chunk["ordinal_end"],
+                            "candidates": candidates[
+                                start : start + self.storage_chunk_size
+                            ],
+                        }
+                        self._write_chunk_path_unlocked(
+                            staging_directory / f"{chunk_index:06d}.json",
+                            chunk_payload,
+                        )
+                        chunk["chunk_revision"] = chunk_payload["chunk_revision"]
+                    staging_directory.replace(final_directory)
+                    for chunk in chunks:
+                        chunk_index = int(chunk["index"])
+                        signature = self._chunk_signature(
+                            self._chunk_path_for(run_id, chunk_index)
+                        )
+                        manifest["chunk_revisions"][str(chunk_index)] = str(
+                            chunk["chunk_revision"]
+                        )
+                        if signature is not None:
+                            manifest["chunk_signatures"][str(chunk_index)] = signature
+                    # manifest 必須最後發布；失敗時不留下可被讀取的批次索引。
+                    self._write_unlocked(run_id, manifest)
+                    published = True
+                finally:
+                    if not published:
+                        shutil.rmtree(staging_directory, ignore_errors=True)
+                        if not self.path_for(run_id).exists():
+                            shutil.rmtree(final_directory, ignore_errors=True)
         return run_id
 
     def recover_abandoned_runs(self, *, force: bool = False) -> list[str]:
@@ -872,72 +980,78 @@ class SmartReviewHistoryStore:
         if not self.directory.is_dir():
             return []
         with self._lock:
-            if not force and self.directory in self._recovery_checked:
-                return []
-            self._recovery_checked.add(self.directory)
-            self._cleanup_unpublished_chunks_unlocked()
-            recovered: list[str] = []
-            for path in self.directory.glob("*.json"):
-                try:
-                    payload = json.loads(path.read_text(encoding="utf-8"))
-                except (OSError, ValueError):
-                    continue
-                if not isinstance(payload, dict) or payload.get("status") != "running":
-                    continue
-                owner_pid = payload.get("owner_pid")
-                if owner_pid is None or _process_is_alive(owner_pid):
-                    continue
-                run_id = path.stem
-                try:
-                    self.path_for(run_id)
-                except ValueError:
-                    logger.warning("略過無效檔名的智慧校對批次檔：%s", path)
-                    continue
-                payload_run_id = payload.get("id")
-                if payload_run_id not in (None, run_id):
-                    logger.warning("略過檔名與內容 id 不一致的智慧校對批次檔：%s", path)
-                    continue
-                counts = (
-                    self._chunk_summary_unlocked(run_id, payload)
-                    if self._is_chunked(payload)
-                    else _candidate_counts(payload)
-                )
-                recovered_at = _timestamp()
-                raw_metrics = payload.get("metrics")
-                metrics = dict(raw_metrics) if isinstance(raw_metrics, dict) else {}
-                metrics.update(
-                    {
-                        "recovered_after_unexpected_exit": True,
-                        "recovery_reason": "owner_process_not_alive",
-                        "recovered_at": recovered_at,
-                        "interrupted_pending_count": counts["pending_count"],
-                    }
-                )
-                payload.update(
-                    {
-                        "finished_at": recovered_at,
-                        "status": "interrupted",
-                        "processed_count": counts["processed_count"],
-                        "valid_count": counts["valid_count"],
-                        "invalid_count": counts["invalid_count"],
-                        "request_error_count": counts["request_error_count"],
-                        "status_counts": counts["status_counts"],
-                        "error_counts": counts["error_counts"],
-                        "metrics": metrics,
-                        "recovery_reason": "owner_process_not_alive",
-                        "recovered_at": recovered_at,
-                    }
-                )
-                self._write_unlocked(run_id, payload)
-                recovered.append(run_id)
-                logger.warning(
-                    "已將非預期退出的智慧校對批次標記為 interrupted：run_id=%s，"
-                    "已處理 %s 筆，未處理 %s 筆",
-                    run_id,
-                    counts["processed_count"],
-                    counts["pending_count"],
-                )
-            return recovered
+            with self._interprocess_lock():
+                if not force and self.directory in self._recovery_checked:
+                    return []
+                self._recovery_checked.add(self.directory)
+                self._cleanup_unpublished_chunks_unlocked()
+                recovered: list[str] = []
+                for path in self.directory.glob("*.json"):
+                    try:
+                        payload = json.loads(path.read_text(encoding="utf-8"))
+                    except (OSError, ValueError):
+                        continue
+                    if (
+                        not isinstance(payload, dict)
+                        or payload.get("status") != "running"
+                    ):
+                        continue
+                    owner_pid = payload.get("owner_pid")
+                    if owner_pid is None or _process_is_alive(owner_pid):
+                        continue
+                    run_id = path.stem
+                    try:
+                        self.path_for(run_id)
+                    except ValueError:
+                        logger.warning("略過無效檔名的智慧校對批次檔：%s", path)
+                        continue
+                    payload_run_id = payload.get("id")
+                    if payload_run_id not in (None, run_id):
+                        logger.warning(
+                            "略過檔名與內容 id 不一致的智慧校對批次檔：%s", path
+                        )
+                        continue
+                    counts = (
+                        self._chunk_summary_unlocked(run_id, payload)
+                        if self._is_chunked(payload)
+                        else _candidate_counts(payload)
+                    )
+                    recovered_at = _timestamp()
+                    raw_metrics = payload.get("metrics")
+                    metrics = dict(raw_metrics) if isinstance(raw_metrics, dict) else {}
+                    metrics.update(
+                        {
+                            "recovered_after_unexpected_exit": True,
+                            "recovery_reason": "owner_process_not_alive",
+                            "recovered_at": recovered_at,
+                            "interrupted_pending_count": counts["pending_count"],
+                        }
+                    )
+                    payload.update(
+                        {
+                            "finished_at": recovered_at,
+                            "status": "interrupted",
+                            "processed_count": counts["processed_count"],
+                            "valid_count": counts["valid_count"],
+                            "invalid_count": counts["invalid_count"],
+                            "request_error_count": counts["request_error_count"],
+                            "status_counts": counts["status_counts"],
+                            "error_counts": counts["error_counts"],
+                            "metrics": metrics,
+                            "recovery_reason": "owner_process_not_alive",
+                            "recovered_at": recovered_at,
+                        }
+                    )
+                    self._write_unlocked(run_id, payload)
+                    recovered.append(run_id)
+                    logger.warning(
+                        "已將非預期退出的智慧校對批次標記為 interrupted：run_id=%s，"
+                        "已處理 %s 筆，未處理 %s 筆",
+                        run_id,
+                        counts["processed_count"],
+                        counts["pending_count"],
+                    )
+                return recovered
 
     def _candidate_unlocked(
         self, payload: dict[str, Any], ordinal: int
@@ -1269,28 +1383,55 @@ class SmartReviewHistoryStore:
             for item, _key in sorted(runs, key=lambda value: value[1], reverse=True)
         ]
 
+    def _marks_cache_stamp(self, path: Path, manifest_stamp: _FileStamp) -> _MarksStamp:
+        """建立最近標籤快取版本，包含分片檔案的存在與 stat 版本。"""
+        try:
+            manifest = self._read_json_path(path)
+        except (OSError, ValueError, TypeError):
+            return (manifest_stamp, ())
+        if not self._is_chunked(manifest):
+            return (manifest_stamp, ())
+        chunk_stamps: list[tuple[int, _FileStamp | None]] = []
+        for entry in self._chunk_entries(manifest):
+            try:
+                chunk_path = self._chunk_path_for(path.stem, entry["index"])
+            except ValueError:
+                return (manifest_stamp, ())
+            signature = self._chunk_signature(chunk_path)
+            chunk_stamps.append(
+                (
+                    int(entry["index"]),
+                    None
+                    if signature is None
+                    else (int(signature[0]), int(signature[1])),
+                )
+            )
+        return (manifest_stamp, tuple(chunk_stamps))
+
     def latest_run_marks(self) -> tuple[str | None, dict[int, tuple[str, str | None]]]:
         """回傳最近一次批次的 ``entry_id -> (狀態, 驗證錯誤)``，供條目列顯示狀態。
 
-        先以檔案開頭的 ``started_at`` 排序（每個檔案只 stat 並讀檔頭，結果以
-        (mtime, size) 快取），只完整解析勝出的那一個批次；候選狀態對照每個資料夾
-        只保留這一份，歷史批次不會常駐記憶體。損壞的批次會略過並記錄警告。
+        先以檔案開頭的 ``started_at`` 排序（每個檔案只 stat 並讀檔頭），只完整
+        解析勝出的那一個批次；分片批次的快取版本也包含各分片的 stat，避免分片
+        損壞或修復後沿用舊標籤。候選狀態對照每個資料夾只保留這一份，歷史批次
+        不會常駐記憶體。損壞的批次會略過並記錄警告。
         """
         self.recover_abandoned_runs()
         if not self.directory.is_dir():
             return None, {}
         with self._lock:
             for _key, path, stamp in self._ranked_run_files():
+                marks_stamp = self._marks_cache_stamp(path, stamp)
                 latest = self._latest_marks.get(self.directory)
-                if latest is not None and latest[:2] == (path, stamp):
+                if latest is not None and latest[:2] == (path, marks_stamp):
                     return latest[2], latest[3]
-                if self._corrupt_runs.get(path) == stamp:
+                if self._corrupt_runs.get(path) == marks_stamp:
                     continue
                 parsed = self._parse_marks(path)
                 if parsed is None:
-                    self._corrupt_runs[path] = stamp
+                    self._corrupt_runs[path] = marks_stamp
                     continue
-                self._latest_marks[self.directory] = (path, stamp, *parsed)
+                self._latest_marks[self.directory] = (path, marks_stamp, *parsed)
                 return parsed
         return None, {}
 
