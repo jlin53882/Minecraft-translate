@@ -1,0 +1,547 @@
+{
+  "_comment": "以目前行為為基準的術語匹配 golden。含 xfail 欄位的案例記錄期望但目前未達成的行為，測試以 xfail(strict=True) 標示。",
+  "cases": [
+    {
+      "id": "netherite_in_phrase",
+      "item": {
+        "path": "custom:a",
+        "source_text": "Obtain a Netherite Ingot"
+      },
+      "expected": [
+        {
+          "source_text": "Netherite Ingot",
+          "target_text": "獄髓錠",
+          "authority": "official_minecraft",
+          "usage": "official_phrase",
+          "match_type": "official_phrase",
+          "confidence": "high",
+          "source_key": "item.minecraft.netherite_ingot"
+        }
+      ],
+      "prompt_terms": [
+        [
+          "Netherite Ingot",
+          "獄髓錠"
+        ]
+      ]
+    },
+    {
+      "id": "hyphen_exact_text",
+      "item": {
+        "path": "custom:a",
+        "source_text": "netherite-ingot"
+      },
+      "expected": [
+        {
+          "source_text": "Netherite Ingot",
+          "target_text": "獄髓錠",
+          "authority": "official_minecraft",
+          "usage": "official_full_translation",
+          "match_type": "exact_text",
+          "confidence": "high",
+          "source_key": "item.minecraft.netherite_ingot"
+        }
+      ],
+      "prompt_terms": [
+        [
+          "Netherite Ingot",
+          "獄髓錠"
+        ]
+      ]
+    },
+    {
+      "id": "underscore_exact_text",
+      "item": {
+        "path": "custom:a",
+        "source_text": "NETHERITE_INGOT"
+      },
+      "expected": [
+        {
+          "source_text": "Netherite Ingot",
+          "target_text": "獄髓錠",
+          "authority": "official_minecraft",
+          "usage": "official_full_translation",
+          "match_type": "exact_text",
+          "confidence": "high",
+          "source_key": "item.minecraft.netherite_ingot"
+        }
+      ],
+      "prompt_terms": [
+        [
+          "Netherite Ingot",
+          "獄髓錠"
+        ]
+      ]
+    },
+    {
+      "id": "upper_case_exact_text",
+      "item": {
+        "path": "custom:a",
+        "source_text": "DIAMOND"
+      },
+      "expected": [
+        {
+          "source_text": "Diamond",
+          "target_text": "鑽石",
+          "authority": "official_minecraft",
+          "usage": "official_full_translation",
+          "match_type": "exact_text",
+          "confidence": "high",
+          "source_key": "item.minecraft.diamond"
+        }
+      ],
+      "prompt_terms": [
+        [
+          "Diamond",
+          "鑽石"
+        ]
+      ]
+    },
+    {
+      "id": "lower_case_exact_text",
+      "item": {
+        "path": "custom:a",
+        "source_text": "diamond"
+      },
+      "expected": [
+        {
+          "source_text": "Diamond",
+          "target_text": "鑽石",
+          "authority": "official_minecraft",
+          "usage": "official_full_translation",
+          "match_type": "exact_text",
+          "confidence": "high",
+          "source_key": "item.minecraft.diamond"
+        }
+      ],
+      "prompt_terms": [
+        [
+          "Diamond",
+          "鑽石"
+        ]
+      ]
+    },
+    {
+      "id": "hyphen_compound",
+      "item": {
+        "path": "custom:a",
+        "source_text": "Obtain a Netherite-Diamond Block"
+      },
+      "expected": [
+        {
+          "source_text": "Netherite",
+          "target_text": "獄髓",
+          "authority": "official_minecraft",
+          "usage": "compound_component",
+          "match_type": "source_substring",
+          "confidence": "high",
+          "source_key": "block.minecraft.netherite_block"
+        },
+        {
+          "source_text": "Diamond",
+          "target_text": "鑽石",
+          "authority": "official_minecraft",
+          "usage": "official_term",
+          "match_type": "source_substring",
+          "confidence": "high",
+          "source_key": "item.minecraft.diamond"
+        },
+        {
+          "source_text": "Block",
+          "target_text": "方塊",
+          "authority": "official_minecraft",
+          "usage": "compound_component",
+          "match_type": "source_substring",
+          "confidence": "high",
+          "source_key": "block.minecraft.coal_block"
+        }
+      ],
+      "prompt_terms": [
+        [
+          "Netherite",
+          "獄髓"
+        ],
+        [
+          "Diamond",
+          "鑽石"
+        ],
+        [
+          "Block",
+          "方塊"
+        ]
+      ]
+    },
+    {
+      "id": "underscore_compound",
+      "item": {
+        "path": "custom:a",
+        "source_text": "Netherite_Diamond_Block"
+      },
+      "expected": [
+        {
+          "source_text": "Netherite",
+          "target_text": "獄髓",
+          "authority": "official_minecraft",
+          "usage": "compound_component",
+          "match_type": "source_substring",
+          "confidence": "high",
+          "source_key": "block.minecraft.netherite_block"
+        },
+        {
+          "source_text": "Diamond",
+          "target_text": "鑽石",
+          "authority": "official_minecraft",
+          "usage": "official_term",
+          "match_type": "source_substring",
+          "confidence": "high",
+          "source_key": "item.minecraft.diamond"
+        },
+        {
+          "source_text": "Block",
+          "target_text": "方塊",
+          "authority": "official_minecraft",
+          "usage": "compound_component",
+          "match_type": "source_substring",
+          "confidence": "high",
+          "source_key": "block.minecraft.coal_block"
+        }
+      ],
+      "prompt_terms": [
+        [
+          "Netherite",
+          "獄髓"
+        ],
+        [
+          "Diamond",
+          "鑽石"
+        ],
+        [
+          "Block",
+          "方塊"
+        ]
+      ]
+    },
+    {
+      "id": "compound_phrase_wins",
+      "item": {
+        "path": "custom:a",
+        "source_text": "Netherite Block of Diamond"
+      },
+      "expected": [
+        {
+          "source_text": "Block of Diamond",
+          "target_text": "鑽石方塊",
+          "authority": "official_minecraft",
+          "usage": "official_phrase",
+          "match_type": "official_phrase",
+          "confidence": "high",
+          "source_key": "block.minecraft.diamond_block"
+        },
+        {
+          "source_text": "Netherite",
+          "target_text": "獄髓",
+          "authority": "official_minecraft",
+          "usage": "compound_component",
+          "match_type": "source_substring",
+          "confidence": "high",
+          "source_key": "block.minecraft.netherite_block"
+        }
+      ],
+      "prompt_terms": [
+        [
+          "Block of Diamond",
+          "鑽石方塊"
+        ],
+        [
+          "Netherite",
+          "獄髓"
+        ]
+      ]
+    },
+    {
+      "id": "two_phrases",
+      "item": {
+        "path": "custom:a",
+        "source_text": "Iron Ingot and Gold Ingot"
+      },
+      "expected": [
+        {
+          "source_text": "Gold Ingot",
+          "target_text": "金錠",
+          "authority": "official_minecraft",
+          "usage": "official_phrase",
+          "match_type": "official_phrase",
+          "confidence": "high",
+          "source_key": "item.minecraft.gold_ingot"
+        },
+        {
+          "source_text": "Iron Ingot",
+          "target_text": "鐵錠",
+          "authority": "official_minecraft",
+          "usage": "official_phrase",
+          "match_type": "official_phrase",
+          "confidence": "high",
+          "source_key": "item.minecraft.iron_ingot"
+        }
+      ],
+      "prompt_terms": [
+        [
+          "Gold Ingot",
+          "金錠"
+        ],
+        [
+          "Iron Ingot",
+          "鐵錠"
+        ]
+      ]
+    },
+    {
+      "id": "block_lower",
+      "item": {
+        "path": "custom:a",
+        "source_text": "Place a block"
+      },
+      "expected": [
+        {
+          "source_text": "Block",
+          "target_text": "方塊",
+          "authority": "official_minecraft",
+          "usage": "compound_component",
+          "match_type": "source_substring",
+          "confidence": "high",
+          "source_key": "block.minecraft.coal_block"
+        }
+      ],
+      "prompt_terms": [
+        [
+          "Block",
+          "方塊"
+        ]
+      ]
+    },
+    {
+      "id": "block_title",
+      "item": {
+        "path": "custom:a",
+        "source_text": "Place a Block"
+      },
+      "expected": [
+        {
+          "source_text": "Block",
+          "target_text": "方塊",
+          "authority": "official_minecraft",
+          "usage": "compound_component",
+          "match_type": "source_substring",
+          "confidence": "high",
+          "source_key": "block.minecraft.coal_block"
+        }
+      ],
+      "prompt_terms": [
+        [
+          "Block",
+          "方塊"
+        ]
+      ]
+    },
+    {
+      "id": "blocker_no_match",
+      "item": {
+        "path": "custom:a",
+        "source_text": "Blocker"
+      },
+      "expected": [],
+      "prompt_terms": []
+    },
+    {
+      "id": "blockers_sentence_no_match",
+      "item": {
+        "path": "custom:a",
+        "source_text": "Blocks and blockers"
+      },
+      "expected": [],
+      "prompt_terms": []
+    },
+    {
+      "id": "unblock_no_block_match",
+      "item": {
+        "path": "custom:a",
+        "source_text": "Unblock the gate"
+      },
+      "expected": [
+        {
+          "source_text": "Gate",
+          "target_text": "門",
+          "authority": "official_minecraft",
+          "usage": "compound_component",
+          "match_type": "source_substring",
+          "confidence": "high",
+          "source_key": "block.minecraft.acacia_fence_gate"
+        }
+      ],
+      "prompt_terms": [
+        [
+          "Gate",
+          "門"
+        ]
+      ]
+    },
+    {
+      "id": "plural_not_matched",
+      "item": {
+        "path": "custom:a",
+        "source_text": "Diamonds"
+      },
+      "expected": [],
+      "prompt_terms": []
+    },
+    {
+      "id": "suffix_word_not_matched",
+      "item": {
+        "path": "custom:a",
+        "source_text": "Endermanlike"
+      },
+      "expected": [],
+      "prompt_terms": []
+    },
+    {
+      "id": "prefix_word_not_matched",
+      "item": {
+        "path": "custom:a",
+        "source_text": "Swordsman"
+      },
+      "expected": [],
+      "prompt_terms": []
+    },
+    {
+      "id": "exact_key",
+      "item": {
+        "path": "block.minecraft.cobblestone",
+        "source_text": "Cobblestone"
+      },
+      "expected": [
+        {
+          "source_text": "Cobblestone",
+          "target_text": "鵝卵石",
+          "authority": "official_minecraft",
+          "usage": "official_full_translation",
+          "match_type": "exact_key",
+          "confidence": "high",
+          "source_key": "block.minecraft.cobblestone"
+        }
+      ],
+      "prompt_terms": [
+        [
+          "Cobblestone",
+          "鵝卵石"
+        ]
+      ]
+    },
+    {
+      "id": "exact_text_without_key",
+      "item": {
+        "path": "custom:a",
+        "source_text": "Cobblestone"
+      },
+      "expected": [
+        {
+          "source_text": "Cobblestone",
+          "target_text": "鵝卵石",
+          "authority": "official_minecraft",
+          "usage": "official_full_translation",
+          "match_type": "exact_text",
+          "confidence": "high",
+          "source_key": "block.minecraft.cobblestone"
+        }
+      ],
+      "prompt_terms": [
+        [
+          "Cobblestone",
+          "鵝卵石"
+        ]
+      ]
+    },
+    {
+      "id": "single_term_in_sentence",
+      "item": {
+        "path": "custom:a",
+        "source_text": "Click to open the Chest"
+      },
+      "expected": [
+        {
+          "source_text": "Chest",
+          "target_text": "儲物箱",
+          "authority": "official_minecraft",
+          "usage": "official_term",
+          "match_type": "source_substring",
+          "confidence": "high",
+          "source_key": "block.minecraft.chest"
+        }
+      ],
+      "prompt_terms": [
+        [
+          "Chest",
+          "儲物箱"
+        ]
+      ]
+    },
+    {
+      "id": "unknown_text",
+      "item": {
+        "path": "custom:a",
+        "source_text": "Zzqv Qwrtv Plmn"
+      },
+      "expected": [],
+      "prompt_terms": []
+    },
+    {
+      "id": "netherite_alone",
+      "item": {
+        "path": "custom:a",
+        "source_text": "Netherite"
+      },
+      "expected": [
+        {
+          "source_text": "Netherite",
+          "target_text": "獄髓",
+          "authority": "official_minecraft",
+          "usage": "compound_component",
+          "match_type": "source_substring",
+          "confidence": "high",
+          "source_key": "block.minecraft.netherite_block"
+        }
+      ],
+      "prompt_terms": [
+        [
+          "Netherite",
+          "獄髓"
+        ]
+      ],
+      "xfail": "官方複合詞可拆出 Netherite→獄髓，但來源整句恰為該詞時被 canonical==source 規則略過，單獨出現反而沒有命中（目前行為為空）"
+    },
+    {
+      "id": "netherite_with_format_code",
+      "item": {
+        "path": "custom:a",
+        "source_text": "§aNetherite§r"
+      },
+      "expected": [
+        {
+          "source_text": "Netherite",
+          "target_text": "獄髓",
+          "authority": "official_minecraft",
+          "usage": "compound_component",
+          "match_type": "source_substring",
+          "confidence": "high",
+          "source_key": "block.minecraft.netherite_block"
+        }
+      ],
+      "prompt_terms": [
+        [
+          "Netherite",
+          "獄髓"
+        ]
+      ],
+      "xfail": "官方複合詞可拆出 Netherite→獄髓，但來源整句恰為該詞時被 canonical==source 規則略過，單獨出現反而沒有命中（目前行為為空）"
+    }
+  ]
+}

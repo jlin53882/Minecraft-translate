@@ -21,6 +21,12 @@ from translation_tool.core.lm_format_policy import (
     format_policy_for_items,
     normalize_legacy_prompt,
 )
+from translation_tool.core.terminology_model import (
+    TerminologyMatch,
+    from_official_match,
+    prompt_glossary_key,
+    prompt_term_pair,
+)
 from translation_tool.utils.app_paths import get_resource_root
 from translation_tool.utils.text_matching import (
     build_term_prefix_index,
@@ -164,20 +170,19 @@ class OfficialLocaleIndex:
         """收集與目前批次相關的官方術語，供提示詞使用。"""
         terms: dict[tuple[str, str, str], tuple[str, str]] = {}
         for item in items:
-            for match in self.official_terminology_matches_for_item(item):
+            for official_match in self.official_terminology_matches_for_item(item):
                 # Keep key-specific full translations distinguishable.  A
                 # substring/compound term is deliberately shown without a
-                # misleading full-entry key.
-                prompt_key = (
-                    match.key if match.match_type in {"exact_key", "exact_text"} else ""
-                )
+                # misleading full-entry key (see ``prompt_glossary_key``).
+                match = from_official_match(official_match)
+                source, target = prompt_term_pair(match)
                 terms[
                     (
-                        str(prompt_key or ""),
-                        term_canonical_key(match.source_text),
-                        match.target_text.strip(),
+                        prompt_glossary_key(match),
+                        term_canonical_key(source),
+                        target,
                     )
-                ] = (match.source_text, match.target_text.strip())
+                ] = (source, target)
 
         ordered = sorted(
             (
@@ -943,6 +948,16 @@ def official_terminology_matches_for_item(
     ).official_terminology_matches_for_item(item)
 
 
+def terminology_matches_for_item(
+    item: dict[str, Any], *, index: OfficialLocaleIndex | None = None
+) -> list[TerminologyMatch]:
+    """取得固定欄位的術語命中（``TerminologyMatch``），供 prompt 與 evidence adapter 使用。"""
+    return [
+        from_official_match(match)
+        for match in official_terminology_matches_for_item(item, index=index)
+    ]
+
+
 def terminology_issues(
     item: dict[str, Any],
     translated_text: str,
@@ -979,6 +994,7 @@ __all__ = [
     "official_terminology_matches_for_item",
     "official_translation_for_item",
     "terminology_issues",
+    "terminology_matches_for_item",
     "terminology_term_allowed",
     "terminology_terms_for_item",
 ]

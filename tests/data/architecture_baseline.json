@@ -1,0 +1,2993 @@
+{
+ "import_cycles": [
+  [
+   "translation_tool.translation_db",
+   "translation_tool.translation_db.repository",
+   "translation_tool.translation_db.resolver",
+   "translation_tool.translation_db.settings"
+  ]
+ ],
+ "high_complexity": {
+  "app/icon_index.py:_iter_entries_from_lang_files": 22,
+  "app/services_impl/moddb_translate_service.py:_translate_rows": 25,
+  "app/shell/task_manager.py:TaskManager._on_session_event": 23,
+  "app/tasks/operation_registry.py:OperationHandle.run": 21,
+  "app/views/cache_view.py:CacheView._refresh_query_disabled_state": 21,
+  "app/views/cache_view.py:CacheView._refresh_shard_disabled_state": 31,
+  "app/views/config/chatgpt_oauth_panel.py:ChatGPTOAuthPanel.refresh_controls": 29,
+  "app/views/config/config_actions.py:_collect_validated_config": 24,
+  "app/views/icon_preview/icon_cache.py:_resolve_icon_from_catalog": 21,
+  "app/views/moddb/batch_replace_dialog.py:BatchReplaceDialog._render": 22,
+  "app/views/moddb/entries_panel.py:EntriesPanel._apply_save_result": 24,
+  "app/views/moddb/panel_refresh.py:_resolve_entries_scope": 26,
+  "app/views/moddb/smart_review_reviewer.py:candidate_evidence_text": 26,
+  "app/views/moddb/translate_panel.py:TranslatePanel.sync_from_session": 24,
+  "translation_tool/core/codex_oauth.py:PendingChatGPTLogin.complete": 33,
+  "translation_tool/core/codex_oauth.py:_validate_id_token": 21,
+  "translation_tool/core/codex_oauth.py:get_chatgpt_access_token": 32,
+  "translation_tool/core/common_batch_executor.py:format_batch_event": 33,
+  "translation_tool/core/ftb_translator.py:run_ftb_pipeline": 35,
+  "translation_tool/core/jar_processor_extract.py:extract_from_jar_impl": 24,
+  "translation_tool/core/jar_processor_extract.py:run_extraction_process_impl": 31,
+  "translation_tool/core/kubejs_translator.py:run_kubejs_pipeline": 69,
+  "translation_tool/core/kubejs_translator_clean.py:clean_kubejs_from_raw_impl": 56,
+  "translation_tool/core/kubejs_translator_state.py:load_current_manifest": 22,
+  "translation_tool/core/kubejs_translator_state.py:sync_managed_tree": 36,
+  "translation_tool/core/lang_merge_content_copy.py:_compute_patchouli_lang_effectiveness": 25,
+  "translation_tool/core/lang_merge_content_copy.py:process_content_or_copy_file_impl": 114,
+  "translation_tool/core/lang_merge_extracted_assets.py:_merge_extracted_to_assets": 40,
+  "translation_tool/core/lang_merge_extracted_assets.py:normalize_pending_extracted_wrappers": 23,
+  "translation_tool/core/lang_merge_pending.py:export_filtered_pending_impl": 22,
+  "translation_tool/core/lang_merge_pipeline.py:_process_single_mod": 28,
+  "translation_tool/core/lang_merger.py:_merge_zhcn_to_zhtw_from_folder": 33,
+  "translation_tool/core/lang_merger.py:_merge_zhcn_to_zhtw_from_zip": 36,
+  "translation_tool/core/lm_api_client.py:call_gemini_requests": 21,
+  "translation_tool/core/lm_moddb_context.py:attach_moddb_context": 23,
+  "translation_tool/core/lm_translator.py:_run_directory_translation": 26,
+  "translation_tool/core/lm_translator_main.py:_handle_batch_error": 28,
+  "translation_tool/core/lm_translator_main.py:_handle_service_unavailable_error": 22,
+  "translation_tool/core/lm_translator_main.py:_record_quality_retry_failure": 26,
+  "translation_tool/core/lm_translator_main.py:_retry_quality_translations": 29,
+  "translation_tool/core/lm_translator_shared_loop.py:translate_items_with_cache_loop": 74,
+  "translation_tool/core/official_locale.py:OfficialLocaleIndex.official_terminology_matches_for_item": 36,
+  "translation_tool/core/official_locale.py:_derive_component_terms": 30,
+  "translation_tool/core/official_locale.py:_item_terminology_terms": 23,
+  "translation_tool/core/openai_codex_client.py:_consume_stream": 60,
+  "translation_tool/core/openai_codex_client.py:_consume_stream.consume_event": 43,
+  "translation_tool/core/output_bundler.py:bundle_outputs_generator": 54,
+  "translation_tool/core/text_sniffer.py:classify_book_string": 36,
+  "translation_tool/core/translatable_extractor.py:extract_translatables": 22,
+  "translation_tool/core/translatable_extractor.py:extract_translatables.walk": 22,
+  "translation_tool/core/translation_path_writer.py:set_by_path": 28,
+  "translation_tool/plugins/ftbquests/ftbquests_lmtranslator.py:translate_ftb_pending_to_zh_tw": 64,
+  "translation_tool/plugins/ftbquests/ftbquests_snbt_extractor.py:extract_quest_file": 22,
+  "translation_tool/plugins/ftbquests/ftbquests_snbt_extractor.py:process_quest_folder": 25,
+  "translation_tool/plugins/ftbquests/ftbquests_snbt_inject.py:inject_ftbquests_zh_tw_from_jsons": 52,
+  "translation_tool/plugins/ftbquests/ftbquests_snbt_inject.py:patch_quest_snbt_file": 34,
+  "translation_tool/plugins/kubejs/kubejs_tooltip_extract.py:extract": 56,
+  "translation_tool/plugins/kubejs/kubejs_tooltip_inject.py:inject": 80,
+  "translation_tool/plugins/kubejs/kubejs_tooltip_lmtranslator.py:translate_kubejs_pending_to_zh_tw": 60,
+  "translation_tool/plugins/md/md_extract_qa.py:extract_blocks": 24,
+  "translation_tool/plugins/md/md_lmtranslator.py:translate_md_pending": 55,
+  "translation_tool/translation_db/bulk_review.py:BulkReviewMixin._bulk_review_sibling_info": 26,
+  "translation_tool/translation_db/quality.py:matches_quality": 31,
+  "translation_tool/translation_db/repository.py:TranslationDB._apply_review_preview": 26,
+  "translation_tool/translation_db/repository.py:TranslationDB._build_batch_replace_plan": 51,
+  "translation_tool/translation_db/repository.py:TranslationDB._filter_sql": 21,
+  "translation_tool/translation_db/repository.py:TranslationDB._quality_filtered_page": 32,
+  "translation_tool/translation_db/repository.py:TranslationDB._query_entry_rows": 24,
+  "translation_tool/translation_db/repository.py:TranslationDB._review_preview_rows": 32,
+  "translation_tool/translation_db/repository.py:TranslationDB.ingest": 23,
+  "translation_tool/translation_db/repository.py:TranslationDB.replace_translation_quality_mismatch": 29,
+  "translation_tool/translation_db/repository.py:TranslationDB.revert": 43,
+  "translation_tool/translation_db/repository.py:TranslationDB.save_manual": 40,
+  "translation_tool/translation_db/scanner.py:_guide_items": 24,
+  "translation_tool/translation_db/scanner.py:_items_for_group": 34,
+  "translation_tool/translation_db/scanner.py:scan_folder_generator": 30,
+  "translation_tool/translation_db/smart_review.py:SmartReviewMixin._apply_smart_review_candidate_json": 23,
+  "translation_tool/translation_db/smart_review.py:SmartReviewMixin._smart_review_context": 98,
+  "translation_tool/translation_db/smart_review.py:_validate_item": 22,
+  "translation_tool/translation_db/smart_review.py:run_smart_review": 208,
+  "translation_tool/translation_db/smart_review.py:run_smart_review.emit_event": 21,
+  "translation_tool/translation_db/smart_review.py:run_smart_review.repair_invalid_results": 35,
+  "translation_tool/translation_db/smart_review_history.py:SmartReviewHistoryStore.page_candidates": 43,
+  "translation_tool/translation_db/smart_review_history.py:SmartReviewHistoryStore.reconcile_applied": 33,
+  "translation_tool/translation_db/smart_review_history.py:_candidate_from_payload": 21,
+  "translation_tool/utils/config_manager.py:_validate_lm_translator_config": 35,
+  "translation_tool/utils/config_manager.py:_validate_token_budget_config": 23,
+  "translation_tool/utils/exceptions.py:handle_translation_errors": 24,
+  "translation_tool/utils/exceptions.py:handle_translation_errors.decorator": 24,
+  "translation_tool/utils/exceptions.py:handle_translation_errors.decorator.wrapper": 24,
+  "translation_tool/utils/replace_rules.py:_CompiledRules._apply_literals_once": 24
+ },
+ "modules": {
+  "app": {
+   "max_complexity": 0,
+   "public_api": 0,
+   "class_methods": 0,
+   "import_depth": 0,
+   "top_level_defs": 0,
+   "annotation_coverage": null
+  },
+  "app.config_apply": {
+   "max_complexity": 8,
+   "public_api": 6,
+   "class_methods": 0,
+   "import_depth": 1,
+   "top_level_defs": 6,
+   "annotation_coverage": 0.917
+  },
+  "app.config_store": {
+   "max_complexity": 7,
+   "public_api": 11,
+   "class_methods": 0,
+   "import_depth": 0,
+   "top_level_defs": 13,
+   "annotation_coverage": 1.0
+  },
+  "app.icon_index": {
+   "max_complexity": 22,
+   "public_api": 5,
+   "class_methods": 0,
+   "import_depth": 3,
+   "top_level_defs": 11,
+   "annotation_coverage": 0.853
+  },
+  "app.icon_reader": {
+   "max_complexity": 4,
+   "public_api": 2,
+   "class_methods": 5,
+   "import_depth": 2,
+   "top_level_defs": 3,
+   "annotation_coverage": 1.0
+  },
+  "app.icon_runtime": {
+   "max_complexity": 10,
+   "public_api": 1,
+   "class_methods": 0,
+   "import_depth": 0,
+   "top_level_defs": 1,
+   "annotation_coverage": 1.0
+  },
+  "app.services": {
+   "max_complexity": 4,
+   "public_api": 4,
+   "class_methods": 0,
+   "import_depth": 5,
+   "top_level_defs": 4,
+   "annotation_coverage": 0.714
+  },
+  "app.services_impl": {
+   "max_complexity": 0,
+   "public_api": 0,
+   "class_methods": 0,
+   "import_depth": 0,
+   "top_level_defs": 0,
+   "annotation_coverage": null
+  },
+  "app.services_impl.cache": {
+   "max_complexity": 0,
+   "public_api": 0,
+   "class_methods": 0,
+   "import_depth": 0,
+   "top_level_defs": 0,
+   "annotation_coverage": null
+  },
+  "app.services_impl.cache.cache_services": {
+   "max_complexity": 10,
+   "public_api": 9,
+   "class_methods": 0,
+   "import_depth": 4,
+   "top_level_defs": 12,
+   "annotation_coverage": 1.0
+  },
+  "app.services_impl.chatgpt_oauth_service": {
+   "max_complexity": 0,
+   "public_api": 6,
+   "class_methods": 0,
+   "import_depth": 3,
+   "top_level_defs": 0,
+   "annotation_coverage": null
+  },
+  "app.services_impl.config_service": {
+   "max_complexity": 3,
+   "public_api": 6,
+   "class_methods": 0,
+   "import_depth": 4,
+   "top_level_defs": 8,
+   "annotation_coverage": 0.438
+  },
+  "app.services_impl.icon_service": {
+   "max_complexity": 0,
+   "public_api": 4,
+   "class_methods": 0,
+   "import_depth": 3,
+   "top_level_defs": 0,
+   "annotation_coverage": null
+  },
+  "app.services_impl.key_health_service": {
+   "max_complexity": 1,
+   "public_api": 9,
+   "class_methods": 0,
+   "import_depth": 4,
+   "top_level_defs": 1,
+   "annotation_coverage": 1.0
+  },
+  "app.services_impl.logging_service": {
+   "max_complexity": 7,
+   "public_api": 5,
+   "class_methods": 3,
+   "import_depth": 3,
+   "top_level_defs": 6,
+   "annotation_coverage": 0.474
+  },
+  "app.services_impl.moddb_batch_operation": {
+   "max_complexity": 10,
+   "public_api": 3,
+   "class_methods": 5,
+   "import_depth": 3,
+   "top_level_defs": 5,
+   "annotation_coverage": 0.967
+  },
+  "app.services_impl.moddb_cleanup_service": {
+   "max_complexity": 6,
+   "public_api": 16,
+   "class_methods": 0,
+   "import_depth": 7,
+   "top_level_defs": 11,
+   "annotation_coverage": 1.0
+  },
+  "app.services_impl.moddb_format_diff_service": {
+   "max_complexity": 2,
+   "public_api": 9,
+   "class_methods": 0,
+   "import_depth": 2,
+   "top_level_defs": 1,
+   "annotation_coverage": 1.0
+  },
+  "app.services_impl.moddb_guide_service": {
+   "max_complexity": 1,
+   "public_api": 2,
+   "class_methods": 0,
+   "import_depth": 3,
+   "top_level_defs": 2,
+   "annotation_coverage": 1.0
+  },
+  "app.services_impl.moddb_repair_review_store": {
+   "max_complexity": 6,
+   "public_api": 13,
+   "class_methods": 0,
+   "import_depth": 0,
+   "top_level_defs": 14,
+   "annotation_coverage": 1.0
+  },
+  "app.services_impl.moddb_retranslate_service": {
+   "max_complexity": 14,
+   "public_api": 5,
+   "class_methods": 20,
+   "import_depth": 10,
+   "top_level_defs": 68,
+   "annotation_coverage": 0.423
+  },
+  "app.services_impl.moddb_service": {
+   "max_complexity": 19,
+   "public_api": 63,
+   "class_methods": 0,
+   "import_depth": 8,
+   "top_level_defs": 12,
+   "annotation_coverage": 0.903
+  },
+  "app.services_impl.moddb_smart_review_service": {
+   "max_complexity": 10,
+   "public_api": 21,
+   "class_methods": 0,
+   "import_depth": 7,
+   "top_level_defs": 17,
+   "annotation_coverage": 1.0
+  },
+  "app.services_impl.moddb_source_service": {
+   "max_complexity": 7,
+   "public_api": 10,
+   "class_methods": 0,
+   "import_depth": 9,
+   "top_level_defs": 10,
+   "annotation_coverage": 0.833
+  },
+  "app.services_impl.moddb_species_service": {
+   "max_complexity": 9,
+   "public_api": 16,
+   "class_methods": 1,
+   "import_depth": 7,
+   "top_level_defs": 5,
+   "annotation_coverage": 1.0
+  },
+  "app.services_impl.moddb_translate_report": {
+   "max_complexity": 7,
+   "public_api": 5,
+   "class_methods": 0,
+   "import_depth": 0,
+   "top_level_defs": 9,
+   "annotation_coverage": 1.0
+  },
+  "app.services_impl.moddb_translate_service": {
+   "max_complexity": 25,
+   "public_api": 12,
+   "class_methods": 1,
+   "import_depth": 9,
+   "top_level_defs": 35,
+   "annotation_coverage": 0.667
+  },
+  "app.services_impl.pack_format_service": {
+   "max_complexity": 0,
+   "public_api": 6,
+   "class_methods": 0,
+   "import_depth": 2,
+   "top_level_defs": 0,
+   "annotation_coverage": null
+  },
+  "app.services_impl.pipelines": {
+   "max_complexity": 0,
+   "public_api": 0,
+   "class_methods": 0,
+   "import_depth": 0,
+   "top_level_defs": 0,
+   "annotation_coverage": null
+  },
+  "app.services_impl.pipelines._pipeline_logging": {
+   "max_complexity": 1,
+   "public_api": 2,
+   "class_methods": 0,
+   "import_depth": 5,
+   "top_level_defs": 2,
+   "annotation_coverage": 0.571
+  },
+  "app.services_impl.pipelines._task_runner": {
+   "max_complexity": 4,
+   "public_api": 1,
+   "class_methods": 0,
+   "import_depth": 6,
+   "top_level_defs": 1,
+   "annotation_coverage": 0.571
+  },
+  "app.services_impl.pipelines.bundle_service": {
+   "max_complexity": 13,
+   "public_api": 3,
+   "class_methods": 0,
+   "import_depth": 4,
+   "top_level_defs": 12,
+   "annotation_coverage": 0.974
+  },
+  "app.services_impl.pipelines.extract_service": {
+   "max_complexity": 14,
+   "public_api": 11,
+   "class_methods": 3,
+   "import_depth": 6,
+   "top_level_defs": 18,
+   "annotation_coverage": 0.851
+  },
+  "app.services_impl.pipelines.ftb_service": {
+   "max_complexity": 1,
+   "public_api": 1,
+   "class_methods": 0,
+   "import_depth": 4,
+   "top_level_defs": 1,
+   "annotation_coverage": 1.0
+  },
+  "app.services_impl.pipelines.kubejs_service": {
+   "max_complexity": 1,
+   "public_api": 1,
+   "class_methods": 0,
+   "import_depth": 4,
+   "top_level_defs": 1,
+   "annotation_coverage": 1.0
+  },
+  "app.services_impl.pipelines.lm_service": {
+   "max_complexity": 14,
+   "public_api": 1,
+   "class_methods": 0,
+   "import_depth": 9,
+   "top_level_defs": 2,
+   "annotation_coverage": 0.769
+  },
+  "app.services_impl.pipelines.lookup_service": {
+   "max_complexity": 12,
+   "public_api": 3,
+   "class_methods": 0,
+   "import_depth": 4,
+   "top_level_defs": 5,
+   "annotation_coverage": 0.9
+  },
+  "app.services_impl.pipelines.md_service": {
+   "max_complexity": 1,
+   "public_api": 1,
+   "class_methods": 0,
+   "import_depth": 4,
+   "top_level_defs": 1,
+   "annotation_coverage": 0.8
+  },
+  "app.services_impl.pipelines.merge_service": {
+   "max_complexity": 11,
+   "public_api": 2,
+   "class_methods": 0,
+   "import_depth": 9,
+   "top_level_defs": 21,
+   "annotation_coverage": 0.742
+  },
+  "app.services_impl.pipelines.output_lease": {
+   "max_complexity": 3,
+   "public_api": 3,
+   "class_methods": 2,
+   "import_depth": 0,
+   "top_level_defs": 5,
+   "annotation_coverage": 1.0
+  },
+  "app.services_impl.resume_service": {
+   "max_complexity": 1,
+   "public_api": 5,
+   "class_methods": 0,
+   "import_depth": 10,
+   "top_level_defs": 3,
+   "annotation_coverage": 1.0
+  },
+  "app.shell": {
+   "max_complexity": 0,
+   "public_api": 2,
+   "class_methods": 0,
+   "import_depth": 7,
+   "top_level_defs": 0,
+   "annotation_coverage": null
+  },
+  "app.shell.app_shell": {
+   "max_complexity": 14,
+   "public_api": 4,
+   "class_methods": 47,
+   "import_depth": 6,
+   "top_level_defs": 11,
+   "annotation_coverage": 0.788
+  },
+  "app.shell.config_effects": {
+   "max_complexity": 8,
+   "public_api": 1,
+   "class_methods": 5,
+   "import_depth": 0,
+   "top_level_defs": 2,
+   "annotation_coverage": 1.0
+  },
+  "app.shell.palette": {
+   "max_complexity": 13,
+   "public_api": 8,
+   "class_methods": 11,
+   "import_depth": 5,
+   "top_level_defs": 8,
+   "annotation_coverage": 0.974
+  },
+  "app.shell.resume_prompt": {
+   "max_complexity": 10,
+   "public_api": 2,
+   "class_methods": 9,
+   "import_depth": 2,
+   "top_level_defs": 3,
+   "annotation_coverage": 1.0
+  },
+  "app.shell.sidebar": {
+   "max_complexity": 12,
+   "public_api": 2,
+   "class_methods": 14,
+   "import_depth": 5,
+   "top_level_defs": 2,
+   "annotation_coverage": 1.0
+  },
+  "app.shell.statusbar": {
+   "max_complexity": 3,
+   "public_api": 1,
+   "class_methods": 4,
+   "import_depth": 5,
+   "top_level_defs": 3,
+   "annotation_coverage": 1.0
+  },
+  "app.shell.task_manager": {
+   "max_complexity": 23,
+   "public_api": 2,
+   "class_methods": 16,
+   "import_depth": 4,
+   "top_level_defs": 3,
+   "annotation_coverage": 0.875
+  },
+  "app.shell.topbar": {
+   "max_complexity": 7,
+   "public_api": 5,
+   "class_methods": 13,
+   "import_depth": 5,
+   "top_level_defs": 5,
+   "annotation_coverage": 0.973
+  },
+  "app.startup_tasks": {
+   "max_complexity": 4,
+   "public_api": 2,
+   "class_methods": 0,
+   "import_depth": 5,
+   "top_level_defs": 2,
+   "annotation_coverage": 0.8
+  },
+  "app.tasks": {
+   "max_complexity": 0,
+   "public_api": 4,
+   "class_methods": 0,
+   "import_depth": 3,
+   "top_level_defs": 0,
+   "annotation_coverage": null
+  },
+  "app.tasks.log_entry": {
+   "max_complexity": 1,
+   "public_api": 2,
+   "class_methods": 2,
+   "import_depth": 0,
+   "top_level_defs": 2,
+   "annotation_coverage": 0.833
+  },
+  "app.tasks.operation_registry": {
+   "max_complexity": 21,
+   "public_api": 14,
+   "class_methods": 39,
+   "import_depth": 0,
+   "top_level_defs": 15,
+   "annotation_coverage": 0.872
+  },
+  "app.tasks.task_session": {
+   "max_complexity": 13,
+   "public_api": 6,
+   "class_methods": 14,
+   "import_depth": 2,
+   "top_level_defs": 9,
+   "annotation_coverage": 0.854
+  },
+  "app.ui": {
+   "max_complexity": 0,
+   "public_api": 0,
+   "class_methods": 0,
+   "import_depth": 0,
+   "top_level_defs": 0,
+   "annotation_coverage": null
+  },
+  "app.ui.debounce": {
+   "max_complexity": 4,
+   "public_api": 1,
+   "class_methods": 3,
+   "import_depth": 0,
+   "top_level_defs": 1,
+   "annotation_coverage": 0.75
+  },
+  "app.ui.design": {
+   "max_complexity": 3,
+   "public_api": 11,
+   "class_methods": 5,
+   "import_depth": 0,
+   "top_level_defs": 14,
+   "annotation_coverage": 1.0
+  },
+  "app.ui.dialogs": {
+   "max_complexity": 13,
+   "public_api": 7,
+   "class_methods": 0,
+   "import_depth": 0,
+   "top_level_defs": 13,
+   "annotation_coverage": 0.75
+  },
+  "app.ui.keyboard_shortcuts": {
+   "max_complexity": 17,
+   "public_api": 3,
+   "class_methods": 8,
+   "import_depth": 0,
+   "top_level_defs": 3,
+   "annotation_coverage": 0.333
+  },
+  "app.ui.kit": {
+   "max_complexity": 0,
+   "public_api": 32,
+   "class_methods": 0,
+   "import_depth": 4,
+   "top_level_defs": 0,
+   "annotation_coverage": null
+  },
+  "app.ui.kit.basics": {
+   "max_complexity": 3,
+   "public_api": 10,
+   "class_methods": 0,
+   "import_depth": 1,
+   "top_level_defs": 10,
+   "annotation_coverage": 0.971
+  },
+  "app.ui.kit.cards": {
+   "max_complexity": 7,
+   "public_api": 7,
+   "class_methods": 15,
+   "import_depth": 2,
+   "top_level_defs": 7,
+   "annotation_coverage": 0.923
+  },
+  "app.ui.kit.gallery": {
+   "max_complexity": 1,
+   "public_api": 2,
+   "class_methods": 0,
+   "import_depth": 5,
+   "top_level_defs": 7,
+   "annotation_coverage": 0.583
+  },
+  "app.ui.kit.inputs": {
+   "max_complexity": 14,
+   "public_api": 10,
+   "class_methods": 18,
+   "import_depth": 2,
+   "top_level_defs": 12,
+   "annotation_coverage": 0.978
+  },
+  "app.ui.kit.progress": {
+   "max_complexity": 3,
+   "public_api": 3,
+   "class_methods": 5,
+   "import_depth": 1,
+   "top_level_defs": 3,
+   "annotation_coverage": 1.0
+  },
+  "app.ui.kit.states": {
+   "max_complexity": 3,
+   "public_api": 3,
+   "class_methods": 0,
+   "import_depth": 3,
+   "top_level_defs": 4,
+   "annotation_coverage": 1.0
+  },
+  "app.ui.mc_text": {
+   "max_complexity": 12,
+   "public_api": 2,
+   "class_methods": 0,
+   "import_depth": 0,
+   "top_level_defs": 2,
+   "annotation_coverage": 1.0
+  },
+  "app.ui.md_text": {
+   "max_complexity": 10,
+   "public_api": 1,
+   "class_methods": 0,
+   "import_depth": 0,
+   "top_level_defs": 4,
+   "annotation_coverage": 0.944
+  },
+  "app.ui.poller": {
+   "max_complexity": 3,
+   "public_api": 1,
+   "class_methods": 7,
+   "import_depth": 0,
+   "top_level_defs": 1,
+   "annotation_coverage": 1.0
+  },
+  "app.ui.safe_file_picker": {
+   "max_complexity": 10,
+   "public_api": 3,
+   "class_methods": 5,
+   "import_depth": 2,
+   "top_level_defs": 3,
+   "annotation_coverage": 0.471
+  },
+  "app.ui.snack": {
+   "max_complexity": 8,
+   "public_api": 2,
+   "class_methods": 0,
+   "import_depth": 1,
+   "top_level_defs": 5,
+   "annotation_coverage": 0.87
+  },
+  "app.ui.status_chip": {
+   "max_complexity": 3,
+   "public_api": 4,
+   "class_methods": 0,
+   "import_depth": 2,
+   "top_level_defs": 4,
+   "annotation_coverage": 0.667
+  },
+  "app.ui.sync_text_field": {
+   "max_complexity": 7,
+   "public_api": 1,
+   "class_methods": 3,
+   "import_depth": 1,
+   "top_level_defs": 7,
+   "annotation_coverage": 0.304
+  },
+  "app.ui.ui_batcher": {
+   "max_complexity": 8,
+   "public_api": 1,
+   "class_methods": 7,
+   "import_depth": 0,
+   "top_level_defs": 1,
+   "annotation_coverage": 0.667
+  },
+  "app.ui.view_wrapper": {
+   "max_complexity": 1,
+   "public_api": 1,
+   "class_methods": 0,
+   "import_depth": 0,
+   "top_level_defs": 1,
+   "annotation_coverage": 1.0
+  },
+  "app.view_registry": {
+   "max_complexity": 3,
+   "public_api": 10,
+   "class_methods": 7,
+   "import_depth": 1,
+   "top_level_defs": 11,
+   "annotation_coverage": 0.486
+  },
+  "app.views": {
+   "max_complexity": 0,
+   "public_api": 0,
+   "class_methods": 0,
+   "import_depth": 0,
+   "top_level_defs": 0,
+   "annotation_coverage": null
+  },
+  "app.views._log": {
+   "max_complexity": 0,
+   "public_api": 11,
+   "class_methods": 0,
+   "import_depth": 4,
+   "top_level_defs": 0,
+   "annotation_coverage": null
+  },
+  "app.views._log.log_colors": {
+   "max_complexity": 1,
+   "public_api": 2,
+   "class_methods": 0,
+   "import_depth": 0,
+   "top_level_defs": 2,
+   "annotation_coverage": 1.0
+  },
+  "app.views._log.log_config": {
+   "max_complexity": 10,
+   "public_api": 1,
+   "class_methods": 0,
+   "import_depth": 0,
+   "top_level_defs": 1,
+   "annotation_coverage": 1.0
+  },
+  "app.views._log.log_presenter": {
+   "max_complexity": 5,
+   "public_api": 1,
+   "class_methods": 7,
+   "import_depth": 1,
+   "top_level_defs": 1,
+   "annotation_coverage": 0.955
+  },
+  "app.views._log.log_view": {
+   "max_complexity": 7,
+   "public_api": 1,
+   "class_methods": 15,
+   "import_depth": 3,
+   "top_level_defs": 1,
+   "annotation_coverage": 0.976
+  },
+  "app.views.bundler": {
+   "max_complexity": 0,
+   "public_api": 0,
+   "class_methods": 0,
+   "import_depth": 0,
+   "top_level_defs": 0,
+   "annotation_coverage": null
+  },
+  "app.views.bundler.bundler_widgets": {
+   "max_complexity": 2,
+   "public_api": 1,
+   "class_methods": 5,
+   "import_depth": 5,
+   "top_level_defs": 1,
+   "annotation_coverage": 0.0
+  },
+  "app.views.bundler_view": {
+   "max_complexity": 14,
+   "public_api": 1,
+   "class_methods": 31,
+   "import_depth": 6,
+   "top_level_defs": 2,
+   "annotation_coverage": 0.483
+  },
+  "app.views.cache_manager": {
+   "max_complexity": 0,
+   "public_api": 0,
+   "class_methods": 0,
+   "import_depth": 0,
+   "top_level_defs": 0,
+   "annotation_coverage": null
+  },
+  "app.views.cache_manager.cache_actions": {
+   "max_complexity": 7,
+   "public_api": 1,
+   "class_methods": 0,
+   "import_depth": 1,
+   "top_level_defs": 7,
+   "annotation_coverage": 0.262
+  },
+  "app.views.cache_manager.cache_history_store": {
+   "max_complexity": 10,
+   "public_api": 10,
+   "class_methods": 0,
+   "import_depth": 1,
+   "top_level_defs": 14,
+   "annotation_coverage": 0.865
+  },
+  "app.views.cache_manager.cache_log_panel": {
+   "max_complexity": 1,
+   "public_api": 1,
+   "class_methods": 0,
+   "import_depth": 5,
+   "top_level_defs": 1,
+   "annotation_coverage": 1.0
+  },
+  "app.views.cache_manager.cache_overview_panel": {
+   "max_complexity": 2,
+   "public_api": 1,
+   "class_methods": 0,
+   "import_depth": 6,
+   "top_level_defs": 3,
+   "annotation_coverage": 1.0
+  },
+  "app.views.cache_manager.cache_state": {
+   "max_complexity": 0,
+   "public_api": 3,
+   "class_methods": 0,
+   "import_depth": 0,
+   "top_level_defs": 3,
+   "annotation_coverage": null
+  },
+  "app.views.cache_manager.cache_status_text": {
+   "max_complexity": 4,
+   "public_api": 5,
+   "class_methods": 0,
+   "import_depth": 0,
+   "top_level_defs": 5,
+   "annotation_coverage": 1.0
+  },
+  "app.views.cache_manager.cache_view_history": {
+   "max_complexity": 16,
+   "public_api": 1,
+   "class_methods": 18,
+   "import_depth": 5,
+   "top_level_defs": 1,
+   "annotation_coverage": 0.385
+  },
+  "app.views.cache_manager.cache_view_overview": {
+   "max_complexity": 10,
+   "public_api": 1,
+   "class_methods": 22,
+   "import_depth": 7,
+   "top_level_defs": 1,
+   "annotation_coverage": 0.373
+  },
+  "app.views.cache_manager.cache_view_query": {
+   "max_complexity": 18,
+   "public_api": 1,
+   "class_methods": 22,
+   "import_depth": 5,
+   "top_level_defs": 1,
+   "annotation_coverage": 0.174
+  },
+  "app.views.cache_manager.cache_view_query_widgets": {
+   "max_complexity": 1,
+   "public_api": 1,
+   "class_methods": 16,
+   "import_depth": 2,
+   "top_level_defs": 1,
+   "annotation_coverage": 0.875
+  },
+  "app.views.cache_manager.cache_view_shard": {
+   "max_complexity": 18,
+   "public_api": 1,
+   "class_methods": 25,
+   "import_depth": 2,
+   "top_level_defs": 1,
+   "annotation_coverage": 0.63
+  },
+  "app.views.cache_manager.cache_view_shard_detail": {
+   "max_complexity": 17,
+   "public_api": 1,
+   "class_methods": 8,
+   "import_depth": 5,
+   "top_level_defs": 1,
+   "annotation_coverage": 0.2
+  },
+  "app.views.cache_manager.cache_view_shard_widgets": {
+   "max_complexity": 1,
+   "public_api": 1,
+   "class_methods": 11,
+   "import_depth": 5,
+   "top_level_defs": 1,
+   "annotation_coverage": 0.909
+  },
+  "app.views.cache_manager.shard_reader": {
+   "max_complexity": 7,
+   "public_api": 6,
+   "class_methods": 0,
+   "import_depth": 0,
+   "top_level_defs": 9,
+   "annotation_coverage": 0.952
+  },
+  "app.views.cache_view": {
+   "max_complexity": 31,
+   "public_api": 1,
+   "class_methods": 17,
+   "import_depth": 8,
+   "top_level_defs": 1,
+   "annotation_coverage": 0.452
+  },
+  "app.views.config.chatgpt_oauth_panel": {
+   "max_complexity": 29,
+   "public_api": 1,
+   "class_methods": 15,
+   "import_depth": 4,
+   "top_level_defs": 1,
+   "annotation_coverage": 0.771
+  },
+  "app.views.config.config_actions": {
+   "max_complexity": 24,
+   "public_api": 12,
+   "class_methods": 0,
+   "import_depth": 10,
+   "top_level_defs": 26,
+   "annotation_coverage": 0.259
+  },
+  "app.views.config.config_form": {
+   "max_complexity": 1,
+   "public_api": 5,
+   "class_methods": 0,
+   "import_depth": 5,
+   "top_level_defs": 5,
+   "annotation_coverage": 0.154
+  },
+  "app.views.config.db_location": {
+   "max_complexity": 9,
+   "public_api": 4,
+   "class_methods": 4,
+   "import_depth": 10,
+   "top_level_defs": 5,
+   "annotation_coverage": 0.733
+  },
+  "app.views.config.settings_form": {
+   "max_complexity": 15,
+   "public_api": 4,
+   "class_methods": 0,
+   "import_depth": 5,
+   "top_level_defs": 8,
+   "annotation_coverage": 1.0
+  },
+  "app.views.config.settings_schema": {
+   "max_complexity": 13,
+   "public_api": 13,
+   "class_methods": 3,
+   "import_depth": 1,
+   "top_level_defs": 15,
+   "annotation_coverage": 0.812
+  },
+  "app.views.config_view": {
+   "max_complexity": 10,
+   "public_api": 1,
+   "class_methods": 63,
+   "import_depth": 11,
+   "top_level_defs": 3,
+   "annotation_coverage": 0.487
+  },
+  "app.views.dashboard": {
+   "max_complexity": 0,
+   "public_api": 0,
+   "class_methods": 0,
+   "import_depth": 0,
+   "top_level_defs": 0,
+   "annotation_coverage": null
+  },
+  "app.views.dashboard.dashboard_data": {
+   "max_complexity": 8,
+   "public_api": 9,
+   "class_methods": 0,
+   "import_depth": 6,
+   "top_level_defs": 9,
+   "annotation_coverage": 1.0
+  },
+  "app.views.dashboard_view": {
+   "max_complexity": 19,
+   "public_api": 2,
+   "class_methods": 24,
+   "import_depth": 7,
+   "top_level_defs": 7,
+   "annotation_coverage": 0.828
+  },
+  "app.views.extractor.extractor_dialog": {
+   "max_complexity": 4,
+   "public_api": 1,
+   "class_methods": 0,
+   "import_depth": 7,
+   "top_level_defs": 16,
+   "annotation_coverage": 0.315
+  },
+  "app.views.extractor.extractor_dialog_helpers": {
+   "max_complexity": 3,
+   "public_api": 1,
+   "class_methods": 0,
+   "import_depth": 0,
+   "top_level_defs": 1,
+   "annotation_coverage": 1.0
+  },
+  "app.views.extractor.extractor_dialog_ui": {
+   "max_complexity": 13,
+   "public_api": 0,
+   "class_methods": 0,
+   "import_depth": 5,
+   "top_level_defs": 13,
+   "annotation_coverage": 0.217
+  },
+  "app.views.extractor.extractor_panels": {
+   "max_complexity": 2,
+   "public_api": 1,
+   "class_methods": 0,
+   "import_depth": 5,
+   "top_level_defs": 5,
+   "annotation_coverage": 0.455
+  },
+  "app.views.extractor.extractor_preview_dialog": {
+   "max_complexity": 13,
+   "public_api": 1,
+   "class_methods": 0,
+   "import_depth": 8,
+   "top_level_defs": 15,
+   "annotation_coverage": 0.377
+  },
+  "app.views.extractor.extractor_state": {
+   "max_complexity": 1,
+   "public_api": 2,
+   "class_methods": 2,
+   "import_depth": 0,
+   "top_level_defs": 2,
+   "annotation_coverage": 1.0
+  },
+  "app.views.extractor_view": {
+   "max_complexity": 6,
+   "public_api": 1,
+   "class_methods": 19,
+   "import_depth": 8,
+   "top_level_defs": 1,
+   "annotation_coverage": 0.381
+  },
+  "app.views.icon_preview": {
+   "max_complexity": 0,
+   "public_api": 0,
+   "class_methods": 0,
+   "import_depth": 0,
+   "top_level_defs": 0,
+   "annotation_coverage": null
+  },
+  "app.views.icon_preview.detail_mixin": {
+   "max_complexity": 14,
+   "public_api": 1,
+   "class_methods": 17,
+   "import_depth": 6,
+   "top_level_defs": 1,
+   "annotation_coverage": 0.333
+  },
+  "app.views.icon_preview.entries_cache": {
+   "max_complexity": 9,
+   "public_api": 0,
+   "class_methods": 0,
+   "import_depth": 1,
+   "top_level_defs": 7,
+   "annotation_coverage": 0.867
+  },
+  "app.views.icon_preview.icon_cache": {
+   "max_complexity": 21,
+   "public_api": 2,
+   "class_methods": 8,
+   "import_depth": 3,
+   "top_level_defs": 26,
+   "annotation_coverage": 0.89
+  },
+  "app.views.icon_preview.list_mixin": {
+   "max_complexity": 11,
+   "public_api": 1,
+   "class_methods": 15,
+   "import_depth": 5,
+   "top_level_defs": 1,
+   "annotation_coverage": 0.333
+  },
+  "app.views.icon_preview.load_operation": {
+   "max_complexity": 17,
+   "public_api": 2,
+   "class_methods": 0,
+   "import_depth": 2,
+   "top_level_defs": 3,
+   "annotation_coverage": 0.308
+  },
+  "app.views.icon_preview.progress": {
+   "max_complexity": 4,
+   "public_api": 0,
+   "class_methods": 0,
+   "import_depth": 0,
+   "top_level_defs": 4,
+   "annotation_coverage": 0.632
+  },
+  "app.views.icon_preview.render_operation": {
+   "max_complexity": 12,
+   "public_api": 1,
+   "class_methods": 0,
+   "import_depth": 4,
+   "top_level_defs": 1,
+   "annotation_coverage": 0.25
+  },
+  "app.views.icon_preview_row": {
+   "max_complexity": 7,
+   "public_api": 3,
+   "class_methods": 2,
+   "import_depth": 5,
+   "top_level_defs": 6,
+   "annotation_coverage": 0.621
+  },
+  "app.views.icon_preview_view": {
+   "max_complexity": 9,
+   "public_api": 1,
+   "class_methods": 35,
+   "import_depth": 7,
+   "top_level_defs": 1,
+   "annotation_coverage": 0.556
+  },
+  "app.views.lm_view": {
+   "max_complexity": 9,
+   "public_api": 2,
+   "class_methods": 28,
+   "import_depth": 11,
+   "top_level_defs": 2,
+   "annotation_coverage": 0.296
+  },
+  "app.views.lookup_view": {
+   "max_complexity": 8,
+   "public_api": 1,
+   "class_methods": 12,
+   "import_depth": 5,
+   "top_level_defs": 1,
+   "annotation_coverage": 0.333
+  },
+  "app.views.merge": {
+   "max_complexity": 0,
+   "public_api": 0,
+   "class_methods": 0,
+   "import_depth": 0,
+   "top_level_defs": 0,
+   "annotation_coverage": null
+  },
+  "app.views.merge.merge_db_options": {
+   "max_complexity": 11,
+   "public_api": 2,
+   "class_methods": 13,
+   "import_depth": 10,
+   "top_level_defs": 2,
+   "annotation_coverage": 0.636
+  },
+  "app.views.merge.merge_widgets": {
+   "max_complexity": 8,
+   "public_api": 1,
+   "class_methods": 11,
+   "import_depth": 11,
+   "top_level_defs": 1,
+   "annotation_coverage": 0.121
+  },
+  "app.views.merge_view": {
+   "max_complexity": 18,
+   "public_api": 1,
+   "class_methods": 31,
+   "import_depth": 12,
+   "top_level_defs": 1,
+   "annotation_coverage": 0.857
+  },
+  "app.views.moddb": {
+   "max_complexity": 0,
+   "public_api": 0,
+   "class_methods": 0,
+   "import_depth": 0,
+   "top_level_defs": 0,
+   "annotation_coverage": null
+  },
+  "app.views.moddb.advanced_filters": {
+   "max_complexity": 19,
+   "public_api": 2,
+   "class_methods": 23,
+   "import_depth": 9,
+   "top_level_defs": 2,
+   "annotation_coverage": 0.773
+  },
+  "app.views.moddb.batch_replace_dialog": {
+   "max_complexity": 22,
+   "public_api": 1,
+   "class_methods": 48,
+   "import_depth": 11,
+   "top_level_defs": 1,
+   "annotation_coverage": 0.724
+  },
+  "app.views.moddb.batch_replace_preview": {
+   "max_complexity": 9,
+   "public_api": 2,
+   "class_methods": 2,
+   "import_depth": 10,
+   "top_level_defs": 9,
+   "annotation_coverage": 0.976
+  },
+  "app.views.moddb.bulk_review_dialog": {
+   "max_complexity": 11,
+   "public_api": 1,
+   "class_methods": 33,
+   "import_depth": 10,
+   "top_level_defs": 1,
+   "annotation_coverage": 0.684
+  },
+  "app.views.moddb.char_inspector": {
+   "max_complexity": 1,
+   "public_api": 1,
+   "class_methods": 0,
+   "import_depth": 1,
+   "top_level_defs": 1,
+   "annotation_coverage": 1.0
+  },
+  "app.views.moddb.cleanup_dialog": {
+   "max_complexity": 9,
+   "public_api": 1,
+   "class_methods": 29,
+   "import_depth": 10,
+   "top_level_defs": 3,
+   "annotation_coverage": 0.635
+  },
+  "app.views.moddb.entries_panel": {
+   "max_complexity": 24,
+   "public_api": 2,
+   "class_methods": 70,
+   "import_depth": 13,
+   "top_level_defs": 1,
+   "annotation_coverage": 0.748
+  },
+  "app.views.moddb.entry_filters": {
+   "max_complexity": 12,
+   "public_api": 10,
+   "class_methods": 0,
+   "import_depth": 12,
+   "top_level_defs": 13,
+   "annotation_coverage": 0.486
+  },
+  "app.views.moddb.entry_metadata": {
+   "max_complexity": 3,
+   "public_api": 1,
+   "class_methods": 0,
+   "import_depth": 10,
+   "top_level_defs": 6,
+   "annotation_coverage": 0.929
+  },
+  "app.views.moddb.entry_row_tile": {
+   "max_complexity": 5,
+   "public_api": 1,
+   "class_methods": 0,
+   "import_depth": 10,
+   "top_level_defs": 5,
+   "annotation_coverage": 0.312
+  },
+  "app.views.moddb.format_diff_review": {
+   "max_complexity": 11,
+   "public_api": 1,
+   "class_methods": 11,
+   "import_depth": 5,
+   "top_level_defs": 5,
+   "annotation_coverage": 0.894
+  },
+  "app.views.moddb.format_diff_viewer": {
+   "max_complexity": 9,
+   "public_api": 1,
+   "class_methods": 4,
+   "import_depth": 5,
+   "top_level_defs": 1,
+   "annotation_coverage": 1.0
+  },
+  "app.views.moddb.format_issue_rendering": {
+   "max_complexity": 14,
+   "public_api": 4,
+   "class_methods": 0,
+   "import_depth": 3,
+   "top_level_defs": 4,
+   "annotation_coverage": 1.0
+  },
+  "app.views.moddb.formatting": {
+   "max_complexity": 8,
+   "public_api": 3,
+   "class_methods": 0,
+   "import_depth": 9,
+   "top_level_defs": 6,
+   "annotation_coverage": 0.938
+  },
+  "app.views.moddb.history_renderer": {
+   "max_complexity": 12,
+   "public_api": 1,
+   "class_methods": 0,
+   "import_depth": 10,
+   "top_level_defs": 4,
+   "annotation_coverage": 0.267
+  },
+  "app.views.moddb.lm_db_options": {
+   "max_complexity": 19,
+   "public_api": 2,
+   "class_methods": 14,
+   "import_depth": 10,
+   "top_level_defs": 2,
+   "annotation_coverage": 0.759
+  },
+  "app.views.moddb.mc_text_preview": {
+   "max_complexity": 7,
+   "public_api": 1,
+   "class_methods": 2,
+   "import_depth": 1,
+   "top_level_defs": 1,
+   "annotation_coverage": 1.0
+  },
+  "app.views.moddb.overview_panel": {
+   "max_complexity": 13,
+   "public_api": 1,
+   "class_methods": 15,
+   "import_depth": 11,
+   "top_level_defs": 2,
+   "annotation_coverage": 0.822
+  },
+  "app.views.moddb.panel_refresh": {
+   "max_complexity": 26,
+   "public_api": 2,
+   "class_methods": 0,
+   "import_depth": 14,
+   "top_level_defs": 6,
+   "annotation_coverage": 0.591
+  },
+  "app.views.moddb.repair_card": {
+   "max_complexity": 2,
+   "public_api": 3,
+   "class_methods": 0,
+   "import_depth": 5,
+   "top_level_defs": 3,
+   "annotation_coverage": 1.0
+  },
+  "app.views.moddb.repair_reviewer": {
+   "max_complexity": 13,
+   "public_api": 2,
+   "class_methods": 30,
+   "import_depth": 11,
+   "top_level_defs": 2,
+   "annotation_coverage": 0.812
+  },
+  "app.views.moddb.repair_summary": {
+   "max_complexity": 10,
+   "public_api": 1,
+   "class_methods": 0,
+   "import_depth": 0,
+   "top_level_defs": 1,
+   "annotation_coverage": 1.0
+  },
+  "app.views.moddb.result_inspector": {
+   "max_complexity": 9,
+   "public_api": 1,
+   "class_methods": 10,
+   "import_depth": 12,
+   "top_level_defs": 2,
+   "annotation_coverage": 0.875
+  },
+  "app.views.moddb.retranslation_controller": {
+   "max_complexity": 14,
+   "public_api": 8,
+   "class_methods": 0,
+   "import_depth": 11,
+   "top_level_defs": 19,
+   "annotation_coverage": 0.494
+  },
+  "app.views.moddb.review_scope_dialog": {
+   "max_complexity": 12,
+   "public_api": 1,
+   "class_methods": 14,
+   "import_depth": 10,
+   "top_level_defs": 1,
+   "annotation_coverage": 0.932
+  },
+  "app.views.moddb.scan_panel": {
+   "max_complexity": 13,
+   "public_api": 1,
+   "class_methods": 31,
+   "import_depth": 10,
+   "top_level_defs": 1,
+   "annotation_coverage": 0.808
+  },
+  "app.views.moddb.smart_review_context": {
+   "max_complexity": 10,
+   "public_api": 1,
+   "class_methods": 9,
+   "import_depth": 1,
+   "top_level_defs": 1,
+   "annotation_coverage": 0.969
+  },
+  "app.views.moddb.smart_review_dialog": {
+   "max_complexity": 3,
+   "public_api": 1,
+   "class_methods": 10,
+   "import_depth": 11,
+   "top_level_defs": 1,
+   "annotation_coverage": 0.783
+  },
+  "app.views.moddb.smart_review_history": {
+   "max_complexity": 15,
+   "public_api": 2,
+   "class_methods": 6,
+   "import_depth": 8,
+   "top_level_defs": 2,
+   "annotation_coverage": 0.818
+  },
+  "app.views.moddb.smart_review_job": {
+   "max_complexity": 18,
+   "public_api": 5,
+   "class_methods": 27,
+   "import_depth": 8,
+   "top_level_defs": 7,
+   "annotation_coverage": 1.0
+  },
+  "app.views.moddb.smart_review_marks": {
+   "max_complexity": 5,
+   "public_api": 1,
+   "class_methods": 0,
+   "import_depth": 8,
+   "top_level_defs": 1,
+   "annotation_coverage": 1.0
+  },
+  "app.views.moddb.smart_review_reviewer": {
+   "max_complexity": 26,
+   "public_api": 6,
+   "class_methods": 32,
+   "import_depth": 10,
+   "top_level_defs": 6,
+   "annotation_coverage": 0.843
+  },
+  "app.views.moddb.smart_review_run_panel": {
+   "max_complexity": 11,
+   "public_api": 1,
+   "class_methods": 37,
+   "import_depth": 10,
+   "top_level_defs": 1,
+   "annotation_coverage": 0.805
+  },
+  "app.views.moddb.source_filter": {
+   "max_complexity": 11,
+   "public_api": 2,
+   "class_methods": 5,
+   "import_depth": 10,
+   "top_level_defs": 2,
+   "annotation_coverage": 0.6
+  },
+  "app.views.moddb.species_bulk_lookup": {
+   "max_complexity": 9,
+   "public_api": 9,
+   "class_methods": 12,
+   "import_depth": 9,
+   "top_level_defs": 7,
+   "annotation_coverage": 0.922
+  },
+  "app.views.moddb.species_dialog": {
+   "max_complexity": 12,
+   "public_api": 1,
+   "class_methods": 43,
+   "import_depth": 10,
+   "top_level_defs": 3,
+   "annotation_coverage": 0.802
+  },
+  "app.views.moddb.species_suggestion": {
+   "max_complexity": 15,
+   "public_api": 3,
+   "class_methods": 11,
+   "import_depth": 10,
+   "top_level_defs": 1,
+   "annotation_coverage": 0.794
+  },
+  "app.views.moddb.suggestions": {
+   "max_complexity": 13,
+   "public_api": 1,
+   "class_methods": 0,
+   "import_depth": 10,
+   "top_level_defs": 4,
+   "annotation_coverage": 0.647
+  },
+  "app.views.moddb.translate_panel": {
+   "max_complexity": 24,
+   "public_api": 1,
+   "class_methods": 46,
+   "import_depth": 13,
+   "top_level_defs": 1,
+   "annotation_coverage": 0.793
+  },
+  "app.views.moddb.version_picker": {
+   "max_complexity": 9,
+   "public_api": 8,
+   "class_methods": 0,
+   "import_depth": 9,
+   "top_level_defs": 8,
+   "annotation_coverage": 0.821
+  },
+  "app.views.moddb_view": {
+   "max_complexity": 17,
+   "public_api": 1,
+   "class_methods": 28,
+   "import_depth": 15,
+   "top_level_defs": 2,
+   "annotation_coverage": 0.84
+  },
+  "app.views.pipeline": {
+   "max_complexity": 0,
+   "public_api": 1,
+   "class_methods": 0,
+   "import_depth": 13,
+   "top_level_defs": 0,
+   "annotation_coverage": null
+  },
+  "app.views.pipeline.pipeline_actions": {
+   "max_complexity": 12,
+   "public_api": 3,
+   "class_methods": 10,
+   "import_depth": 10,
+   "top_level_defs": 4,
+   "annotation_coverage": 0.629
+  },
+  "app.views.pipeline.pipeline_bundle_dialog": {
+   "max_complexity": 20,
+   "public_api": 1,
+   "class_methods": 0,
+   "import_depth": 7,
+   "top_level_defs": 16,
+   "annotation_coverage": 0.113
+  },
+  "app.views.pipeline.pipeline_config": {
+   "max_complexity": 3,
+   "public_api": 2,
+   "class_methods": 13,
+   "import_depth": 5,
+   "top_level_defs": 3,
+   "annotation_coverage": 0.3
+  },
+  "app.views.pipeline.pipeline_extract_dialog": {
+   "max_complexity": 15,
+   "public_api": 1,
+   "class_methods": 0,
+   "import_depth": 7,
+   "top_level_defs": 16,
+   "annotation_coverage": 0.197
+  },
+  "app.views.pipeline.pipeline_forms": {
+   "max_complexity": 10,
+   "public_api": 18,
+   "class_methods": 0,
+   "import_depth": 3,
+   "top_level_defs": 23,
+   "annotation_coverage": 0.771
+  },
+  "app.views.pipeline.pipeline_merge_dialog": {
+   "max_complexity": 18,
+   "public_api": 1,
+   "class_methods": 0,
+   "import_depth": 11,
+   "top_level_defs": 19,
+   "annotation_coverage": 0.148
+  },
+  "app.views.pipeline.pipeline_one_click_bundle_widgets": {
+   "max_complexity": 2,
+   "public_api": 2,
+   "class_methods": 0,
+   "import_depth": 4,
+   "top_level_defs": 2,
+   "annotation_coverage": 0.0
+  },
+  "app.views.pipeline.pipeline_one_click_dialog": {
+   "max_complexity": 16,
+   "public_api": 1,
+   "class_methods": 0,
+   "import_depth": 11,
+   "top_level_defs": 21,
+   "annotation_coverage": 0.209
+  },
+  "app.views.pipeline.pipeline_progress": {
+   "max_complexity": 7,
+   "public_api": 2,
+   "class_methods": 12,
+   "import_depth": 5,
+   "top_level_defs": 2,
+   "annotation_coverage": 0.536
+  },
+  "app.views.pipeline.pipeline_session": {
+   "max_complexity": 16,
+   "public_api": 3,
+   "class_methods": 19,
+   "import_depth": 3,
+   "top_level_defs": 4,
+   "annotation_coverage": 0.632
+  },
+  "app.views.pipeline.pipeline_translate_dialog": {
+   "max_complexity": 11,
+   "public_api": 1,
+   "class_methods": 0,
+   "import_depth": 11,
+   "top_level_defs": 11,
+   "annotation_coverage": 0.132
+  },
+  "app.views.pipeline.pipeline_view": {
+   "max_complexity": 10,
+   "public_api": 1,
+   "class_methods": 27,
+   "import_depth": 12,
+   "top_level_defs": 1,
+   "annotation_coverage": 0.429
+  },
+  "app.views.pipeline.pipeline_widgets": {
+   "max_complexity": 1,
+   "public_api": 1,
+   "class_methods": 5,
+   "import_depth": 5,
+   "top_level_defs": 1,
+   "annotation_coverage": 0.545
+  },
+  "app.views.qc_base": {
+   "max_complexity": 19,
+   "public_api": 1,
+   "class_methods": 3,
+   "import_depth": 5,
+   "top_level_defs": 2,
+   "annotation_coverage": 0.562
+  },
+  "app.views.qc_view": {
+   "max_complexity": 13,
+   "public_api": 1,
+   "class_methods": 14,
+   "import_depth": 7,
+   "top_level_defs": 1,
+   "annotation_coverage": 0.613
+  },
+  "app.views.rules": {
+   "max_complexity": 0,
+   "public_api": 0,
+   "class_methods": 0,
+   "import_depth": 0,
+   "top_level_defs": 0,
+   "annotation_coverage": null
+  },
+  "app.views.rules.rules_actions": {
+   "max_complexity": 12,
+   "public_api": 5,
+   "class_methods": 0,
+   "import_depth": 2,
+   "top_level_defs": 5,
+   "annotation_coverage": 0.467
+  },
+  "app.views.rules.rules_state": {
+   "max_complexity": 0,
+   "public_api": 1,
+   "class_methods": 0,
+   "import_depth": 0,
+   "top_level_defs": 1,
+   "annotation_coverage": null
+  },
+  "app.views.rules.rules_table": {
+   "max_complexity": 1,
+   "public_api": 1,
+   "class_methods": 0,
+   "import_depth": 5,
+   "top_level_defs": 1,
+   "annotation_coverage": 0.333
+  },
+  "app.views.rules.rules_widgets": {
+   "max_complexity": 1,
+   "public_api": 1,
+   "class_methods": 8,
+   "import_depth": 5,
+   "top_level_defs": 1,
+   "annotation_coverage": 0.273
+  },
+  "app.views.rules_view": {
+   "max_complexity": 13,
+   "public_api": 1,
+   "class_methods": 35,
+   "import_depth": 6,
+   "top_level_defs": 1,
+   "annotation_coverage": 0.259
+  },
+  "app.views.translation.translation_actions": {
+   "max_complexity": 18,
+   "public_api": 6,
+   "class_methods": 0,
+   "import_depth": 3,
+   "top_level_defs": 14,
+   "annotation_coverage": 0.298
+  },
+  "app.views.translation.translation_panels": {
+   "max_complexity": 2,
+   "public_api": 5,
+   "class_methods": 0,
+   "import_depth": 5,
+   "top_level_defs": 8,
+   "annotation_coverage": 0.519
+  },
+  "app.views.translation_view": {
+   "max_complexity": 11,
+   "public_api": 1,
+   "class_methods": 27,
+   "import_depth": 6,
+   "top_level_defs": 1,
+   "annotation_coverage": 0.429
+  },
+  "app.views.untranslated_checker": {
+   "max_complexity": 4,
+   "public_api": 1,
+   "class_methods": 7,
+   "import_depth": 6,
+   "top_level_defs": 1,
+   "annotation_coverage": 0.667
+  },
+  "translation_tool": {
+   "max_complexity": 0,
+   "public_api": 0,
+   "class_methods": 0,
+   "import_depth": 0,
+   "top_level_defs": 0,
+   "annotation_coverage": null
+  },
+  "translation_tool.checkers": {
+   "max_complexity": 0,
+   "public_api": 0,
+   "class_methods": 0,
+   "import_depth": 0,
+   "top_level_defs": 0,
+   "annotation_coverage": null
+  },
+  "translation_tool.checkers.color_char_checker": {
+   "max_complexity": 12,
+   "public_api": 4,
+   "class_methods": 0,
+   "import_depth": 0,
+   "top_level_defs": 5,
+   "annotation_coverage": 1.0
+  },
+  "translation_tool.checkers.english_residue_checker": {
+   "max_complexity": 9,
+   "public_api": 2,
+   "class_methods": 0,
+   "import_depth": 0,
+   "top_level_defs": 2,
+   "annotation_coverage": 0.8
+  },
+  "translation_tool.checkers.untranslated_checker": {
+   "max_complexity": 10,
+   "public_api": 1,
+   "class_methods": 0,
+   "import_depth": 0,
+   "top_level_defs": 1,
+   "annotation_coverage": 1.0
+  },
+  "translation_tool.checkers.variant_comparator": {
+   "max_complexity": 14,
+   "public_api": 1,
+   "class_methods": 0,
+   "import_depth": 4,
+   "top_level_defs": 1,
+   "annotation_coverage": 1.0
+  },
+  "translation_tool.checkers.variant_comparator_tsv": {
+   "max_complexity": 16,
+   "public_api": 1,
+   "class_methods": 0,
+   "import_depth": 0,
+   "top_level_defs": 1,
+   "annotation_coverage": 1.0
+  },
+  "translation_tool.core": {
+   "max_complexity": 0,
+   "public_api": 0,
+   "class_methods": 0,
+   "import_depth": 0,
+   "top_level_defs": 0,
+   "annotation_coverage": null
+  },
+  "translation_tool.core.book_dirs": {
+   "max_complexity": 4,
+   "public_api": 1,
+   "class_methods": 0,
+   "import_depth": 0,
+   "top_level_defs": 1,
+   "annotation_coverage": 1.0
+  },
+  "translation_tool.core.codex_oauth": {
+   "max_complexity": 33,
+   "public_api": 9,
+   "class_methods": 8,
+   "import_depth": 2,
+   "top_level_defs": 30,
+   "annotation_coverage": 0.988
+  },
+  "translation_tool.core.common_batch_executor": {
+   "max_complexity": 33,
+   "public_api": 7,
+   "class_methods": 30,
+   "import_depth": 1,
+   "top_level_defs": 11,
+   "annotation_coverage": 0.991
+  },
+  "translation_tool.core.format_diagnostics": {
+   "max_complexity": 9,
+   "public_api": 12,
+   "class_methods": 9,
+   "import_depth": 1,
+   "top_level_defs": 17,
+   "annotation_coverage": 1.0
+  },
+  "translation_tool.core.format_tokens": {
+   "max_complexity": 7,
+   "public_api": 4,
+   "class_methods": 0,
+   "import_depth": 0,
+   "top_level_defs": 6,
+   "annotation_coverage": 0.923
+  },
+  "translation_tool.core.ftb_translator": {
+   "max_complexity": 35,
+   "public_api": 9,
+   "class_methods": 0,
+   "import_depth": 8,
+   "top_level_defs": 8,
+   "annotation_coverage": 0.892
+  },
+  "translation_tool.core.ftb_translator_clean": {
+   "max_complexity": 14,
+   "public_api": 4,
+   "class_methods": 0,
+   "import_depth": 0,
+   "top_level_defs": 5,
+   "annotation_coverage": 0.69
+  },
+  "translation_tool.core.ftb_translator_export": {
+   "max_complexity": 10,
+   "public_api": 2,
+   "class_methods": 0,
+   "import_depth": 0,
+   "top_level_defs": 2,
+   "annotation_coverage": 1.0
+  },
+  "translation_tool.core.ftb_translator_template": {
+   "max_complexity": 8,
+   "public_api": 1,
+   "class_methods": 0,
+   "import_depth": 0,
+   "top_level_defs": 1,
+   "annotation_coverage": 1.0
+  },
+  "translation_tool.core.guide_blocks": {
+   "max_complexity": 16,
+   "public_api": 5,
+   "class_methods": 0,
+   "import_depth": 2,
+   "top_level_defs": 14,
+   "annotation_coverage": 1.0
+  },
+  "translation_tool.core.guide_format": {
+   "max_complexity": 14,
+   "public_api": 6,
+   "class_methods": 1,
+   "import_depth": 1,
+   "top_level_defs": 17,
+   "annotation_coverage": 0.977
+  },
+  "translation_tool.core.guide_translation": {
+   "max_complexity": 12,
+   "public_api": 8,
+   "class_methods": 0,
+   "import_depth": 3,
+   "top_level_defs": 10,
+   "annotation_coverage": 1.0
+  },
+  "translation_tool.core.icon_classifier": {
+   "max_complexity": 7,
+   "public_api": 1,
+   "class_methods": 0,
+   "import_depth": 1,
+   "top_level_defs": 1,
+   "annotation_coverage": 1.0
+  },
+  "translation_tool.core.icon_preview_cache": {
+   "max_complexity": 4,
+   "public_api": 1,
+   "class_methods": 0,
+   "import_depth": 0,
+   "top_level_defs": 1,
+   "annotation_coverage": 1.0
+  },
+  "translation_tool.core.icon_reason": {
+   "max_complexity": 0,
+   "public_api": 2,
+   "class_methods": 0,
+   "import_depth": 0,
+   "top_level_defs": 2,
+   "annotation_coverage": null
+  },
+  "translation_tool.core.icon_resolver": {
+   "max_complexity": 3,
+   "public_api": 2,
+   "class_methods": 0,
+   "import_depth": 2,
+   "top_level_defs": 3,
+   "annotation_coverage": 0.75
+  },
+  "translation_tool.core.jar_processor": {
+   "max_complexity": 14,
+   "public_api": 11,
+   "class_methods": 0,
+   "import_depth": 5,
+   "top_level_defs": 12,
+   "annotation_coverage": 1.0
+  },
+  "translation_tool.core.jar_processor_discovery": {
+   "max_complexity": 4,
+   "public_api": 1,
+   "class_methods": 0,
+   "import_depth": 0,
+   "top_level_defs": 1,
+   "annotation_coverage": 1.0
+  },
+  "translation_tool.core.jar_processor_extract": {
+   "max_complexity": 31,
+   "public_api": 3,
+   "class_methods": 0,
+   "import_depth": 3,
+   "top_level_defs": 4,
+   "annotation_coverage": 0.826
+  },
+  "translation_tool.core.jar_processor_preview": {
+   "max_complexity": 11,
+   "public_api": 3,
+   "class_methods": 5,
+   "import_depth": 3,
+   "top_level_defs": 5,
+   "annotation_coverage": 0.781
+  },
+  "translation_tool.core.jar_sniff_extract": {
+   "max_complexity": 10,
+   "public_api": 2,
+   "class_methods": 0,
+   "import_depth": 4,
+   "top_level_defs": 4,
+   "annotation_coverage": 1.0
+  },
+  "translation_tool.core.kubejs_translator": {
+   "max_complexity": 69,
+   "public_api": 11,
+   "class_methods": 3,
+   "import_depth": 4,
+   "top_level_defs": 19,
+   "annotation_coverage": 0.925
+  },
+  "translation_tool.core.kubejs_translator_clean": {
+   "max_complexity": 56,
+   "public_api": 4,
+   "class_methods": 0,
+   "import_depth": 1,
+   "top_level_defs": 5,
+   "annotation_coverage": 1.0
+  },
+  "translation_tool.core.kubejs_translator_io": {
+   "max_complexity": 5,
+   "public_api": 2,
+   "class_methods": 0,
+   "import_depth": 1,
+   "top_level_defs": 2,
+   "annotation_coverage": 1.0
+  },
+  "translation_tool.core.kubejs_translator_paths": {
+   "max_complexity": 10,
+   "public_api": 1,
+   "class_methods": 0,
+   "import_depth": 0,
+   "top_level_defs": 1,
+   "annotation_coverage": 1.0
+  },
+  "translation_tool.core.kubejs_translator_state": {
+   "max_complexity": 36,
+   "public_api": 18,
+   "class_methods": 0,
+   "import_depth": 0,
+   "top_level_defs": 20,
+   "annotation_coverage": 1.0
+  },
+  "translation_tool.core.lang_codec": {
+   "max_complexity": 9,
+   "public_api": 7,
+   "class_methods": 0,
+   "import_depth": 1,
+   "top_level_defs": 7,
+   "annotation_coverage": 0.667
+  },
+  "translation_tool.core.lang_merge_content": {
+   "max_complexity": 1,
+   "public_api": 7,
+   "class_methods": 0,
+   "import_depth": 5,
+   "top_level_defs": 4,
+   "annotation_coverage": 0.724
+  },
+  "translation_tool.core.lang_merge_content_copy": {
+   "max_complexity": 114,
+   "public_api": 2,
+   "class_methods": 1,
+   "import_depth": 2,
+   "top_level_defs": 9,
+   "annotation_coverage": 0.754
+  },
+  "translation_tool.core.lang_merge_content_patchers": {
+   "max_complexity": 9,
+   "public_api": 1,
+   "class_methods": 0,
+   "import_depth": 1,
+   "top_level_defs": 1,
+   "annotation_coverage": 0.727
+  },
+  "translation_tool.core.lang_merge_db": {
+   "max_complexity": 10,
+   "public_api": 3,
+   "class_methods": 4,
+   "import_depth": 7,
+   "top_level_defs": 3,
+   "annotation_coverage": 1.0
+  },
+  "translation_tool.core.lang_merge_dict": {
+   "max_complexity": 20,
+   "public_api": 4,
+   "class_methods": 0,
+   "import_depth": 0,
+   "top_level_defs": 5,
+   "annotation_coverage": 1.0
+  },
+  "translation_tool.core.lang_merge_extracted_assets": {
+   "max_complexity": 40,
+   "public_api": 2,
+   "class_methods": 4,
+   "import_depth": 8,
+   "top_level_defs": 11,
+   "annotation_coverage": 0.857
+  },
+  "translation_tool.core.lang_merge_io": {
+   "max_complexity": 7,
+   "public_api": 5,
+   "class_methods": 16,
+   "import_depth": 2,
+   "top_level_defs": 5,
+   "annotation_coverage": 0.9
+  },
+  "translation_tool.core.lang_merge_pending": {
+   "max_complexity": 22,
+   "public_api": 2,
+   "class_methods": 0,
+   "import_depth": 1,
+   "top_level_defs": 2,
+   "annotation_coverage": 0.75
+  },
+  "translation_tool.core.lang_merge_pipeline": {
+   "max_complexity": 28,
+   "public_api": 1,
+   "class_methods": 0,
+   "import_depth": 5,
+   "top_level_defs": 3,
+   "annotation_coverage": 0.682
+  },
+  "translation_tool.core.lang_merge_provenance": {
+   "max_complexity": 10,
+   "public_api": 2,
+   "class_methods": 0,
+   "import_depth": 1,
+   "top_level_defs": 3,
+   "annotation_coverage": 0.8
+  },
+  "translation_tool.core.lang_merge_zip_io": {
+   "max_complexity": 7,
+   "public_api": 1,
+   "class_methods": 0,
+   "import_depth": 3,
+   "top_level_defs": 5,
+   "annotation_coverage": 0.895
+  },
+  "translation_tool.core.lang_merger": {
+   "max_complexity": 36,
+   "public_api": 2,
+   "class_methods": 0,
+   "import_depth": 8,
+   "top_level_defs": 6,
+   "annotation_coverage": 0.818
+  },
+  "translation_tool.core.lang_processing_format": {
+   "max_complexity": 10,
+   "public_api": 9,
+   "class_methods": 0,
+   "import_depth": 4,
+   "top_level_defs": 9,
+   "annotation_coverage": 0.828
+  },
+  "translation_tool.core.lm_api_client": {
+   "max_complexity": 21,
+   "public_api": 4,
+   "class_methods": 0,
+   "import_depth": 3,
+   "top_level_defs": 9,
+   "annotation_coverage": 0.971
+  },
+  "translation_tool.core.lm_batch_actions": {
+   "max_complexity": 20,
+   "public_api": 3,
+   "class_methods": 0,
+   "import_depth": 0,
+   "top_level_defs": 3,
+   "annotation_coverage": 1.0
+  },
+  "translation_tool.core.lm_batch_budget": {
+   "max_complexity": 9,
+   "public_api": 12,
+   "class_methods": 11,
+   "import_depth": 3,
+   "top_level_defs": 13,
+   "annotation_coverage": 0.915
+  },
+  "translation_tool.core.lm_batch_planner": {
+   "max_complexity": 17,
+   "public_api": 4,
+   "class_methods": 0,
+   "import_depth": 4,
+   "top_level_defs": 5,
+   "annotation_coverage": 1.0
+  },
+  "translation_tool.core.lm_config_rules": {
+   "max_complexity": 18,
+   "public_api": 21,
+   "class_methods": 17,
+   "import_depth": 3,
+   "top_level_defs": 24,
+   "annotation_coverage": 0.891
+  },
+  "translation_tool.core.lm_config_schema": {
+   "max_complexity": 6,
+   "public_api": 3,
+   "class_methods": 0,
+   "import_depth": 0,
+   "top_level_defs": 4,
+   "annotation_coverage": 1.0
+  },
+  "translation_tool.core.lm_format_policy": {
+   "max_complexity": 10,
+   "public_api": 14,
+   "class_methods": 0,
+   "import_depth": 2,
+   "top_level_defs": 8,
+   "annotation_coverage": 0.957
+  },
+  "translation_tool.core.lm_format_retry": {
+   "max_complexity": 13,
+   "public_api": 3,
+   "class_methods": 0,
+   "import_depth": 4,
+   "top_level_defs": 4,
+   "annotation_coverage": 1.0
+  },
+  "translation_tool.core.lm_key_health": {
+   "max_complexity": 7,
+   "public_api": 14,
+   "class_methods": 35,
+   "import_depth": 2,
+   "top_level_defs": 17,
+   "annotation_coverage": 1.0
+  },
+  "translation_tool.core.lm_moddb_context": {
+   "max_complexity": 23,
+   "public_api": 2,
+   "class_methods": 0,
+   "import_depth": 5,
+   "top_level_defs": 4,
+   "annotation_coverage": 1.0
+  },
+  "translation_tool.core.lm_response_parser": {
+   "max_complexity": 9,
+   "public_api": 2,
+   "class_methods": 0,
+   "import_depth": 0,
+   "top_level_defs": 3,
+   "annotation_coverage": 0.286
+  },
+  "translation_tool.core.lm_resume": {
+   "max_complexity": 12,
+   "public_api": 6,
+   "class_methods": 2,
+   "import_depth": 9,
+   "top_level_defs": 9,
+   "annotation_coverage": 1.0
+  },
+  "translation_tool.core.lm_same_source_retry": {
+   "max_complexity": 7,
+   "public_api": 3,
+   "class_methods": 0,
+   "import_depth": 0,
+   "top_level_defs": 3,
+   "annotation_coverage": 1.0
+  },
+  "translation_tool.core.lm_session": {
+   "max_complexity": 4,
+   "public_api": 1,
+   "class_methods": 4,
+   "import_depth": 4,
+   "top_level_defs": 1,
+   "annotation_coverage": 1.0
+  },
+  "translation_tool.core.lm_translator": {
+   "max_complexity": 26,
+   "public_api": 7,
+   "class_methods": 0,
+   "import_depth": 8,
+   "top_level_defs": 26,
+   "annotation_coverage": 0.866
+  },
+  "translation_tool.core.lm_translator_db": {
+   "max_complexity": 9,
+   "public_api": 7,
+   "class_methods": 1,
+   "import_depth": 7,
+   "top_level_defs": 7,
+   "annotation_coverage": 0.87
+  },
+  "translation_tool.core.lm_translator_main": {
+   "max_complexity": 29,
+   "public_api": 2,
+   "class_methods": 0,
+   "import_depth": 5,
+   "top_level_defs": 67,
+   "annotation_coverage": 0.738
+  },
+  "translation_tool.core.lm_translator_scan": {
+   "max_complexity": 12,
+   "public_api": 3,
+   "class_methods": 0,
+   "import_depth": 5,
+   "top_level_defs": 3,
+   "annotation_coverage": 0.714
+  },
+  "translation_tool.core.lm_translator_shared": {
+   "max_complexity": 0,
+   "public_api": 32,
+   "class_methods": 0,
+   "import_depth": 7,
+   "top_level_defs": 0,
+   "annotation_coverage": null
+  },
+  "translation_tool.core.lm_translator_shared_cache": {
+   "max_complexity": 14,
+   "public_api": 7,
+   "class_methods": 1,
+   "import_depth": 4,
+   "top_level_defs": 8,
+   "annotation_coverage": 1.0
+  },
+  "translation_tool.core.lm_translator_shared_loop": {
+   "max_complexity": 74,
+   "public_api": 3,
+   "class_methods": 0,
+   "import_depth": 5,
+   "top_level_defs": 8,
+   "annotation_coverage": 0.872
+  },
+  "translation_tool.core.lm_translator_shared_preview": {
+   "max_complexity": 3,
+   "public_api": 3,
+   "class_methods": 2,
+   "import_depth": 0,
+   "top_level_defs": 3,
+   "annotation_coverage": 1.0
+  },
+  "translation_tool.core.lm_translator_shared_recording": {
+   "max_complexity": 5,
+   "public_api": 1,
+   "class_methods": 3,
+   "import_depth": 0,
+   "top_level_defs": 1,
+   "annotation_coverage": 1.0
+  },
+  "translation_tool.core.lm_translator_skeleton": {
+   "max_complexity": 6,
+   "public_api": 8,
+   "class_methods": 5,
+   "import_depth": 6,
+   "top_level_defs": 8,
+   "annotation_coverage": 1.0
+  },
+  "translation_tool.core.md_translation_assembly": {
+   "max_complexity": 16,
+   "public_api": 5,
+   "class_methods": 0,
+   "import_depth": 9,
+   "top_level_defs": 5,
+   "annotation_coverage": 0.882
+  },
+  "translation_tool.core.md_translation_progress": {
+   "max_complexity": 5,
+   "public_api": 0,
+   "class_methods": 2,
+   "import_depth": 0,
+   "top_level_defs": 1,
+   "annotation_coverage": 0.667
+  },
+  "translation_tool.core.md_translation_stats": {
+   "max_complexity": 13,
+   "public_api": 4,
+   "class_methods": 0,
+   "import_depth": 8,
+   "top_level_defs": 4,
+   "annotation_coverage": 1.0
+  },
+  "translation_tool.core.md_translation_steps": {
+   "max_complexity": 17,
+   "public_api": 3,
+   "class_methods": 0,
+   "import_depth": 1,
+   "top_level_defs": 3,
+   "annotation_coverage": 0.538
+  },
+  "translation_tool.core.official_locale": {
+   "max_complexity": 36,
+   "public_api": 13,
+   "class_methods": 9,
+   "import_depth": 3,
+   "top_level_defs": 25,
+   "annotation_coverage": 1.0
+  },
+  "translation_tool.core.openai_codex_client": {
+   "max_complexity": 60,
+   "public_api": 2,
+   "class_methods": 1,
+   "import_depth": 4,
+   "top_level_defs": 8,
+   "annotation_coverage": 0.977
+  },
+  "translation_tool.core.output_bundler": {
+   "max_complexity": 54,
+   "public_api": 4,
+   "class_methods": 5,
+   "import_depth": 3,
+   "top_level_defs": 23,
+   "annotation_coverage": 1.0
+  },
+  "translation_tool.core.pack_format_lookup": {
+   "max_complexity": 5,
+   "public_api": 8,
+   "class_methods": 0,
+   "import_depth": 1,
+   "top_level_defs": 9,
+   "annotation_coverage": 1.0
+  },
+  "translation_tool.core.pack_mcmeta": {
+   "max_complexity": 18,
+   "public_api": 7,
+   "class_methods": 0,
+   "import_depth": 0,
+   "top_level_defs": 19,
+   "annotation_coverage": 1.0
+  },
+  "translation_tool.core.patchouli_compat": {
+   "max_complexity": 15,
+   "public_api": 4,
+   "class_methods": 0,
+   "import_depth": 0,
+   "top_level_defs": 9,
+   "annotation_coverage": 1.0
+  },
+  "translation_tool.core.plugin_resume": {
+   "max_complexity": 11,
+   "public_api": 9,
+   "class_methods": 4,
+   "import_depth": 1,
+   "top_level_defs": 11,
+   "annotation_coverage": 1.0
+  },
+  "translation_tool.core.terminology_model": {
+   "max_complexity": 4,
+   "public_api": 8,
+   "class_methods": 0,
+   "import_depth": 0,
+   "top_level_defs": 6,
+   "annotation_coverage": 1.0
+  },
+  "translation_tool.core.text_sniffer": {
+   "max_complexity": 36,
+   "public_api": 17,
+   "class_methods": 0,
+   "import_depth": 0,
+   "top_level_defs": 19,
+   "annotation_coverage": 1.0
+  },
+  "translation_tool.core.translatable_extractor": {
+   "max_complexity": 22,
+   "public_api": 4,
+   "class_methods": 0,
+   "import_depth": 4,
+   "top_level_defs": 7,
+   "annotation_coverage": 0.591
+  },
+  "translation_tool.core.translation_path_writer": {
+   "max_complexity": 28,
+   "public_api": 2,
+   "class_methods": 0,
+   "import_depth": 0,
+   "top_level_defs": 2,
+   "annotation_coverage": 0.667
+  },
+  "translation_tool.plugins": {
+   "max_complexity": 0,
+   "public_api": 0,
+   "class_methods": 0,
+   "import_depth": 0,
+   "top_level_defs": 0,
+   "annotation_coverage": null
+  },
+  "translation_tool.plugins.ftbquests": {
+   "max_complexity": 0,
+   "public_api": 0,
+   "class_methods": 0,
+   "import_depth": 0,
+   "top_level_defs": 0,
+   "annotation_coverage": null
+  },
+  "translation_tool.plugins.ftbquests.ftbquests_lmtranslator": {
+   "max_complexity": 64,
+   "public_api": 4,
+   "class_methods": 0,
+   "import_depth": 8,
+   "top_level_defs": 7,
+   "annotation_coverage": 0.548
+  },
+  "translation_tool.plugins.ftbquests.ftbquests_snbt_extractor": {
+   "max_complexity": 25,
+   "public_api": 8,
+   "class_methods": 0,
+   "import_depth": 1,
+   "top_level_defs": 8,
+   "annotation_coverage": 0.769
+  },
+  "translation_tool.plugins.ftbquests.ftbquests_snbt_inject": {
+   "max_complexity": 52,
+   "public_api": 6,
+   "class_methods": 0,
+   "import_depth": 4,
+   "top_level_defs": 11,
+   "annotation_coverage": 0.9
+  },
+  "translation_tool.plugins.kubejs": {
+   "max_complexity": 0,
+   "public_api": 0,
+   "class_methods": 0,
+   "import_depth": 0,
+   "top_level_defs": 0,
+   "annotation_coverage": null
+  },
+  "translation_tool.plugins.kubejs.kubejs_tooltip_extract": {
+   "max_complexity": 56,
+   "public_api": 15,
+   "class_methods": 0,
+   "import_depth": 1,
+   "top_level_defs": 15,
+   "annotation_coverage": 0.976
+  },
+  "translation_tool.plugins.kubejs.kubejs_tooltip_inject": {
+   "max_complexity": 80,
+   "public_api": 9,
+   "class_methods": 0,
+   "import_depth": 1,
+   "top_level_defs": 12,
+   "annotation_coverage": 0.883
+  },
+  "translation_tool.plugins.kubejs.kubejs_tooltip_lmtranslator": {
+   "max_complexity": 60,
+   "public_api": 4,
+   "class_methods": 0,
+   "import_depth": 8,
+   "top_level_defs": 6,
+   "annotation_coverage": 0.897
+  },
+  "translation_tool.plugins.md": {
+   "max_complexity": 0,
+   "public_api": 0,
+   "class_methods": 0,
+   "import_depth": 0,
+   "top_level_defs": 0,
+   "annotation_coverage": null
+  },
+  "translation_tool.plugins.md.md_extract_qa": {
+   "max_complexity": 24,
+   "public_api": 16,
+   "class_methods": 0,
+   "import_depth": 1,
+   "top_level_defs": 17,
+   "annotation_coverage": 0.929
+  },
+  "translation_tool.plugins.md.md_inject_qa": {
+   "max_complexity": 13,
+   "public_api": 10,
+   "class_methods": 1,
+   "import_depth": 1,
+   "top_level_defs": 10,
+   "annotation_coverage": 0.833
+  },
+  "translation_tool.plugins.md.md_lmtranslator": {
+   "max_complexity": 55,
+   "public_api": 8,
+   "class_methods": 0,
+   "import_depth": 8,
+   "top_level_defs": 8,
+   "annotation_coverage": 0.92
+  },
+  "translation_tool.plugins.shared": {
+   "max_complexity": 0,
+   "public_api": 13,
+   "class_methods": 0,
+   "import_depth": 1,
+   "top_level_defs": 0,
+   "annotation_coverage": null
+  },
+  "translation_tool.plugins.shared.json_io": {
+   "max_complexity": 2,
+   "public_api": 3,
+   "class_methods": 0,
+   "import_depth": 0,
+   "top_level_defs": 3,
+   "annotation_coverage": 1.0
+  },
+  "translation_tool.plugins.shared.lang_path_rules": {
+   "max_complexity": 4,
+   "public_api": 4,
+   "class_methods": 0,
+   "import_depth": 0,
+   "top_level_defs": 4,
+   "annotation_coverage": 1.0
+  },
+  "translation_tool.plugins.shared.lang_text_rules": {
+   "max_complexity": 3,
+   "public_api": 1,
+   "class_methods": 0,
+   "import_depth": 0,
+   "top_level_defs": 2,
+   "annotation_coverage": 1.0
+  },
+  "translation_tool.plugins.shared.rich_text_shield": {
+   "max_complexity": 18,
+   "public_api": 10,
+   "class_methods": 0,
+   "import_depth": 0,
+   "top_level_defs": 15,
+   "annotation_coverage": 1.0
+  },
+  "translation_tool.translation_db": {
+   "max_complexity": 0,
+   "public_api": 48,
+   "class_methods": 0,
+   "import_depth": 6,
+   "top_level_defs": 0,
+   "annotation_coverage": null
+  },
+  "translation_tool.translation_db.bulk_review": {
+   "max_complexity": 26,
+   "public_api": 1,
+   "class_methods": 8,
+   "import_depth": 1,
+   "top_level_defs": 1,
+   "annotation_coverage": 1.0
+  },
+  "translation_tool.translation_db.change_tracker": {
+   "max_complexity": 7,
+   "public_api": 2,
+   "class_methods": 0,
+   "import_depth": 0,
+   "top_level_defs": 4,
+   "annotation_coverage": 1.0
+  },
+  "translation_tool.translation_db.cleanup": {
+   "max_complexity": 17,
+   "public_api": 8,
+   "class_methods": 33,
+   "import_depth": 3,
+   "top_level_defs": 22,
+   "annotation_coverage": 1.0
+  },
+  "translation_tool.translation_db.effective_columns": {
+   "max_complexity": 7,
+   "public_api": 8,
+   "class_methods": 0,
+   "import_depth": 0,
+   "top_level_defs": 14,
+   "annotation_coverage": 1.0
+  },
+  "translation_tool.translation_db.entry_activity": {
+   "max_complexity": 9,
+   "public_api": 5,
+   "class_methods": 0,
+   "import_depth": 0,
+   "top_level_defs": 7,
+   "annotation_coverage": 1.0
+  },
+  "translation_tool.translation_db.identity": {
+   "max_complexity": 13,
+   "public_api": 7,
+   "class_methods": 1,
+   "import_depth": 1,
+   "top_level_defs": 8,
+   "annotation_coverage": 1.0
+  },
+  "translation_tool.translation_db.models": {
+   "max_complexity": 10,
+   "public_api": 33,
+   "class_methods": 16,
+   "import_depth": 0,
+   "top_level_defs": 33,
+   "annotation_coverage": 1.0
+  },
+  "translation_tool.translation_db.quality": {
+   "max_complexity": 31,
+   "public_api": 17,
+   "class_methods": 0,
+   "import_depth": 2,
+   "top_level_defs": 20,
+   "annotation_coverage": 0.92
+  },
+  "translation_tool.translation_db.quality_flags": {
+   "max_complexity": 10,
+   "public_api": 10,
+   "class_methods": 0,
+   "import_depth": 3,
+   "top_level_defs": 14,
+   "annotation_coverage": 1.0
+  },
+  "translation_tool.translation_db.read_cache": {
+   "max_complexity": 10,
+   "public_api": 1,
+   "class_methods": 4,
+   "import_depth": 0,
+   "top_level_defs": 1,
+   "annotation_coverage": 0.9
+  },
+  "translation_tool.translation_db.repository": {
+   "max_complexity": 51,
+   "public_api": 1,
+   "class_methods": 126,
+   "import_depth": 6,
+   "top_level_defs": 3,
+   "annotation_coverage": 0.983
+  },
+  "translation_tool.translation_db.resolver": {
+   "max_complexity": 12,
+   "public_api": 7,
+   "class_methods": 7,
+   "import_depth": 6,
+   "top_level_defs": 7,
+   "annotation_coverage": 0.871
+  },
+  "translation_tool.translation_db.run_progress": {
+   "max_complexity": 9,
+   "public_api": 6,
+   "class_methods": 7,
+   "import_depth": 0,
+   "top_level_defs": 7,
+   "annotation_coverage": 0.963
+  },
+  "translation_tool.translation_db.scanner": {
+   "max_complexity": 34,
+   "public_api": 10,
+   "class_methods": 6,
+   "import_depth": 7,
+   "top_level_defs": 26,
+   "annotation_coverage": 0.97
+  },
+  "translation_tool.translation_db.schema": {
+   "max_complexity": 18,
+   "public_api": 6,
+   "class_methods": 0,
+   "import_depth": 0,
+   "top_level_defs": 23,
+   "annotation_coverage": 1.0
+  },
+  "translation_tool.translation_db.settings": {
+   "max_complexity": 16,
+   "public_api": 16,
+   "class_methods": 2,
+   "import_depth": 6,
+   "top_level_defs": 19,
+   "annotation_coverage": 1.0
+  },
+  "translation_tool.translation_db.smart_review": {
+   "max_complexity": 208,
+   "public_api": 9,
+   "class_methods": 31,
+   "import_depth": 5,
+   "top_level_defs": 33,
+   "annotation_coverage": 0.997
+  },
+  "translation_tool.translation_db.smart_review_history": {
+   "max_complexity": 43,
+   "public_api": 2,
+   "class_methods": 60,
+   "import_depth": 3,
+   "top_level_defs": 13,
+   "annotation_coverage": 1.0
+  },
+  "translation_tool.translation_db.sniff_groups": {
+   "max_complexity": 13,
+   "public_api": 1,
+   "class_methods": 0,
+   "import_depth": 2,
+   "top_level_defs": 5,
+   "annotation_coverage": 1.0
+  },
+  "translation_tool.translation_db.source_catalog": {
+   "max_complexity": 14,
+   "public_api": 2,
+   "class_methods": 9,
+   "import_depth": 1,
+   "top_level_defs": 2,
+   "annotation_coverage": 1.0
+  },
+  "translation_tool.translation_db.sql_helpers": {
+   "max_complexity": 1,
+   "public_api": 1,
+   "class_methods": 0,
+   "import_depth": 0,
+   "top_level_defs": 1,
+   "annotation_coverage": 1.0
+  },
+  "translation_tool.translation_db.stat_summary": {
+   "max_complexity": 7,
+   "public_api": 9,
+   "class_methods": 0,
+   "import_depth": 1,
+   "top_level_defs": 20,
+   "annotation_coverage": 1.0
+  },
+  "translation_tool.translation_db.time_filters": {
+   "max_complexity": 8,
+   "public_api": 4,
+   "class_methods": 0,
+   "import_depth": 0,
+   "top_level_defs": 5,
+   "annotation_coverage": 1.0
+  },
+  "translation_tool.utils": {
+   "max_complexity": 0,
+   "public_api": 0,
+   "class_methods": 0,
+   "import_depth": 0,
+   "top_level_defs": 0,
+   "annotation_coverage": null
+  },
+  "translation_tool.utils.app_paths": {
+   "max_complexity": 7,
+   "public_api": 6,
+   "class_methods": 0,
+   "import_depth": 0,
+   "top_level_defs": 10,
+   "annotation_coverage": 1.0
+  },
+  "translation_tool.utils.bounded_executor": {
+   "max_complexity": 11,
+   "public_api": 1,
+   "class_methods": 0,
+   "import_depth": 1,
+   "top_level_defs": 1,
+   "annotation_coverage": 1.0
+  },
+  "translation_tool.utils.cache_loader": {
+   "max_complexity": 6,
+   "public_api": 2,
+   "class_methods": 0,
+   "import_depth": 2,
+   "top_level_defs": 2,
+   "annotation_coverage": 0.833
+  },
+  "translation_tool.utils.cache_manager": {
+   "max_complexity": 17,
+   "public_api": 26,
+   "class_methods": 0,
+   "import_depth": 3,
+   "top_level_defs": 35,
+   "annotation_coverage": 0.857
+  },
+  "translation_tool.utils.cache_overview": {
+   "max_complexity": 7,
+   "public_api": 3,
+   "class_methods": 0,
+   "import_depth": 1,
+   "top_level_defs": 3,
+   "annotation_coverage": 1.0
+  },
+  "translation_tool.utils.cache_search": {
+   "max_complexity": 13,
+   "public_api": 6,
+   "class_methods": 28,
+   "import_depth": 1,
+   "top_level_defs": 12,
+   "annotation_coverage": 0.86
+  },
+  "translation_tool.utils.cache_search_facade": {
+   "max_complexity": 3,
+   "public_api": 1,
+   "class_methods": 8,
+   "import_depth": 2,
+   "top_level_defs": 1,
+   "annotation_coverage": 0.917
+  },
+  "translation_tool.utils.cache_shards": {
+   "max_complexity": 15,
+   "public_api": 2,
+   "class_methods": 0,
+   "import_depth": 0,
+   "top_level_defs": 15,
+   "annotation_coverage": 0.968
+  },
+  "translation_tool.utils.cache_store": {
+   "max_complexity": 10,
+   "public_api": 13,
+   "class_methods": 0,
+   "import_depth": 0,
+   "top_level_defs": 13,
+   "annotation_coverage": 1.0
+  },
+  "translation_tool.utils.cancellation": {
+   "max_complexity": 4,
+   "public_api": 5,
+   "class_methods": 0,
+   "import_depth": 0,
+   "top_level_defs": 5,
+   "annotation_coverage": 1.0
+  },
+  "translation_tool.utils.config_manager": {
+   "max_complexity": 35,
+   "public_api": 23,
+   "class_methods": 11,
+   "import_depth": 2,
+   "top_level_defs": 32,
+   "annotation_coverage": 0.723
+  },
+  "translation_tool.utils.config_schema": {
+   "max_complexity": 4,
+   "public_api": 7,
+   "class_methods": 0,
+   "import_depth": 0,
+   "top_level_defs": 7,
+   "annotation_coverage": 1.0
+  },
+  "translation_tool.utils.exceptions": {
+   "max_complexity": 24,
+   "public_api": 8,
+   "class_methods": 4,
+   "import_depth": 1,
+   "top_level_defs": 10,
+   "annotation_coverage": 0.227
+  },
+  "translation_tool.utils.file_replace": {
+   "max_complexity": 3,
+   "public_api": 1,
+   "class_methods": 0,
+   "import_depth": 0,
+   "top_level_defs": 1,
+   "annotation_coverage": 1.0
+  },
+  "translation_tool.utils.fs_utils": {
+   "max_complexity": 3,
+   "public_api": 1,
+   "class_methods": 0,
+   "import_depth": 0,
+   "top_level_defs": 1,
+   "annotation_coverage": 1.0
+  },
+  "translation_tool.utils.jar_browser": {
+   "max_complexity": 14,
+   "public_api": 2,
+   "class_methods": 1,
+   "import_depth": 3,
+   "top_level_defs": 4,
+   "annotation_coverage": 0.882
+  },
+  "translation_tool.utils.log_unit": {
+   "max_complexity": 9,
+   "public_api": 7,
+   "class_methods": 0,
+   "import_depth": 0,
+   "top_level_defs": 10,
+   "annotation_coverage": 0.943
+  },
+  "translation_tool.utils.path_text": {
+   "max_complexity": 6,
+   "public_api": 2,
+   "class_methods": 0,
+   "import_depth": 0,
+   "top_level_defs": 2,
+   "annotation_coverage": 1.0
+  },
+  "translation_tool.utils.redaction": {
+   "max_complexity": 9,
+   "public_api": 8,
+   "class_methods": 2,
+   "import_depth": 0,
+   "top_level_defs": 9,
+   "annotation_coverage": 1.0
+  },
+  "translation_tool.utils.replace_rules": {
+   "max_complexity": 24,
+   "public_api": 4,
+   "class_methods": 45,
+   "import_depth": 0,
+   "top_level_defs": 10,
+   "annotation_coverage": 0.406
+  },
+  "translation_tool.utils.safe_json_loader": {
+   "max_complexity": 5,
+   "public_api": 1,
+   "class_methods": 0,
+   "import_depth": 0,
+   "top_level_defs": 1,
+   "annotation_coverage": 1.0
+  },
+  "translation_tool.utils.species_cache": {
+   "max_complexity": 18,
+   "public_api": 6,
+   "class_methods": 6,
+   "import_depth": 3,
+   "top_level_defs": 18,
+   "annotation_coverage": 0.925
+  },
+  "translation_tool.utils.species_names": {
+   "max_complexity": 4,
+   "public_api": 5,
+   "class_methods": 0,
+   "import_depth": 0,
+   "top_level_defs": 5,
+   "annotation_coverage": 1.0
+  },
+  "translation_tool.utils.text_matching": {
+   "max_complexity": 11,
+   "public_api": 4,
+   "class_methods": 0,
+   "import_depth": 0,
+   "top_level_defs": 8,
+   "annotation_coverage": 1.0
+  },
+  "translation_tool.utils.text_processor": {
+   "max_complexity": 15,
+   "public_api": 14,
+   "class_methods": 11,
+   "import_depth": 3,
+   "top_level_defs": 19,
+   "annotation_coverage": 0.901
+  },
+  "translation_tool.utils.ui_logging_handler": {
+   "max_complexity": 11,
+   "public_api": 1,
+   "class_methods": 5,
+   "import_depth": 2,
+   "top_level_defs": 1,
+   "annotation_coverage": 1.0
+  },
+  "translation_tool.utils.ui_mirror": {
+   "max_complexity": 10,
+   "public_api": 17,
+   "class_methods": 8,
+   "import_depth": 1,
+   "top_level_defs": 21,
+   "annotation_coverage": 0.769
+  },
+  "translation_tool.utils.zip_safety": {
+   "max_complexity": 8,
+   "public_api": 6,
+   "class_methods": 7,
+   "import_depth": 1,
+   "top_level_defs": 8,
+   "annotation_coverage": 1.0
+  }
+ }
+}

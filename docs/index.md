@@ -13,6 +13,7 @@
 | 修改某個子系統前找程式碼與測試 | [`developer-guide/codebase-ownership.md`](developer-guide/codebase-ownership.md) |
 | 追查某個 View、長任務或快取契約 | [`developer-guide/views/`](developer-guide/views/)、[`developer-guide/operation-lifecycle.md`](developer-guide/operation-lifecycle.md)、[`developer-guide/cache.md`](developer-guide/cache.md) |
 | 修改設定、格式或產生文件 | [`reference/configuration.md`](reference/configuration.md)、[`reference/formats.md`](reference/formats.md)、[`generated/exception-inventory.md`](generated/exception-inventory.md) |
+| 重新產生或檢查生成文件 | [`contributing/generated-docs.md`](contributing/generated-docs.md) |
 | 執行測試、開 PR 或發版 | [`contributing/testing.md`](contributing/testing.md)、[`contributing/pr-workflow.md`](contributing/pr-workflow.md)、[`contributing/release.md`](contributing/release.md) |
 
 ## 文件分類

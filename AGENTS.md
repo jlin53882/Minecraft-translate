@@ -29,6 +29,16 @@
   只被單一函式機械呼叫的 helper（例如 `_continue_step()`、`_run_part2()`、`_process_more()`）。
   拆出來的函式要能回答「它負責什麼」（例如 `_validate_merge_inputs()`、`_collect_merge_summary()`）。
 
+### 架構指標（不依賴行數）
+
+`tests/test_architecture_metrics.py`（工具：`tools/architecture_metrics.py`，掃 `app/` 與 `translation_tool/`）
+統計每個模組的複雜度、公開 API 數、class method 數、模組層級 import 深度、頂層 class／函式數與型別註解覆蓋率。
+
+- 只有兩項會失敗：**新的循環 import**，以及**新增且不在基線的函式複雜度 > 20**。其餘指標變差只輸出警告。
+- 基線在 `tests/data/architecture_baseline.json`，規則同 size baseline（只有變差才失敗，改善不失敗）；
+  合理時用 `UPDATE_ARCH_BASELINE=1 pytest tests/test_architecture_metrics.py` 更新並在 PR 說明。
+- `python tools/architecture_metrics.py` 印出摘要。行數防護欄保留，兩者並行。
+
 ## 常用檢查
 
 - 測試：`python -m pytest tests -q`（UI smoke 相關測試需要 playwright，沒安裝時略過）
