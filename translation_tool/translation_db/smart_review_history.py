@@ -340,6 +340,8 @@ class SmartReviewHistoryStore:
     _corrupt_runs: ClassVar[dict[Path, _MarksStamp]] = {}
     # 本程序每個歷史目錄只需掃描一次失聯批次；避免每批 JSON 讀寫都重掃整個目錄。
     _recovery_checked: ClassVar[set[Path]] = set()
+    # 同一執行緒內巢狀呼叫寫入方法時，共用已取得的跨程序鎖。
+    _interprocess_state: ClassVar[threading.local] = threading.local()
 
     def __init__(
         self, db_path: str | Path, *, storage_chunk_size: int | None = None
@@ -360,15 +362,36 @@ class SmartReviewHistoryStore:
 
     @contextmanager
     def locked(self) -> Iterator[None]:
-        """在跨越資料庫 CAS 與 JSON 更新時保護同一批次檔案。"""
-        with self._lock:
+        """在跨程序保護下執行候選狀態檢查、CAS 與 JSON 更新。"""
+        with self._write_lock():
             yield
 
     @contextmanager
     def _interprocess_lock(self) -> Iterator[None]:
-        """鎖定同一歷史目錄，避免不同程序交錯發布與清理分片。"""
-        with _exclusive_file_lock(self.directory / ".smart_review.lock"):
-            yield
+        """鎖定歷史目錄，並允許同一執行緒內的巢狀寫入重用鎖。"""
+        lock_path = self.directory / ".smart_review.lock"
+        active_locks = getattr(self._interprocess_state, "locks", None)
+        if active_locks is None:
+            active_locks = {}
+            self._interprocess_state.locks = active_locks
+        if lock_path in active_locks:
+            active_locks[lock_path] += 1
+            try:
+                yield
+            finally:
+                depth = active_locks[lock_path] - 1
+                if depth:
+                    active_locks[lock_path] = depth
+                else:
+                    del active_locks[lock_path]
+            return
+
+        with _exclusive_file_lock(lock_path):
+            active_locks[lock_path] = 1
+            try:
+                yield
+            finally:
+                active_locks.pop(lock_path, None)
 
     @contextmanager
     def _write_lock(self) -> Iterator[None]:

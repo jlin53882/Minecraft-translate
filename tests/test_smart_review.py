@@ -984,6 +984,49 @@ def test_smart_review_chunked_create_publishes_manifest_last(db, monkeypatch):
     assert list(history_dir.glob("*.chunks")) == []
 
 
+def test_smart_review_outer_history_lock_covers_nested_candidate_write(db, monkeypatch):
+    """外層候選狀態交易應持有跨程序鎖，且巢狀寫入只能重用該鎖。"""
+    from contextlib import contextmanager
+
+    from translation_tool.translation_db import smart_review_history as history_module
+    from translation_tool.translation_db.smart_review_history import (
+        SmartReviewHistoryStore,
+    )
+
+    snapshots = db.smart_review_candidates(version="1.21.1", limit=1)
+    store = SmartReviewHistoryStore(db.path)
+    run_id = store.create_run(
+        snapshots,
+        provider="gemini",
+        model="test-model",
+        version="1.21.1",
+        requested_limit=1,
+        batch_size=1,
+    )
+    real_lock = history_module._exclusive_file_lock
+    lock_entries = []
+
+    @contextmanager
+    def counted_lock(path, **kwargs):
+        """記錄跨程序鎖取得次數，確認巢狀寫入沒有重新開鎖。"""
+        lock_entries.append(path)
+        with real_lock(path, **kwargs):
+            yield
+
+    monkeypatch.setattr(history_module, "_exclusive_file_lock", counted_lock)
+
+    with store.locked():
+        assert len(lock_entries) == 1
+        assert store.update_candidate(
+            run_id, snapshots[0].ordinal, draft_zh_tw="人工草稿"
+        )
+
+    assert len(lock_entries) == 1
+    assert (
+        store.get_candidate(run_id, snapshots[0].ordinal)["draft_zh_tw"] == "人工草稿"
+    )
+
+
 def test_smart_review_chunk_manifest_recovers_after_manifest_write_failure(
     db, monkeypatch
 ):
