@@ -153,6 +153,9 @@ CREATE TABLE IF NOT EXISTS history (
 CREATE INDEX IF NOT EXISTS idx_history_entry ON history (entry_id);
 CREATE INDEX IF NOT EXISTS idx_history_batch ON history (batch);
 CREATE INDEX IF NOT EXISTS idx_history_entry_action_at ON history (entry_id, action, at);
+-- 智慧校對套用紀錄對帳：依 note 前綴（run=<id>; ordinal=）取範圍，只索引套用紀錄
+CREATE INDEX IF NOT EXISTS idx_history_smart_review_apply
+    ON history (note) WHERE action='smart_review_apply';
 
 CREATE TABLE IF NOT EXISTS src_change (
     id          INTEGER PRIMARY KEY,

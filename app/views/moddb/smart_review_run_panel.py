@@ -10,9 +10,7 @@ from pathlib import Path
 import flet as ft
 
 from app.services_impl.moddb_smart_review_service import (
-    SMART_REVIEW_DEFAULT_BATCH_SIZE,
     SMART_REVIEW_DEFAULT_SOURCE,
-    SMART_REVIEW_MAX_BATCH_SIZE,
     count_moddb_smart_review_candidates_from_path,
     smart_review_model_options,
 )
@@ -31,12 +29,14 @@ from app.views.moddb.smart_review_job import (
     SmartReviewRequest,
     format_duration,
 )
+from translation_tool.utils.config_manager import get_smart_review_settings
 
 _POLL_SECONDS = 0.4
 _RESULT_LABEL = {
     "completed": ("完成", "em"),
     "partial": ("部分完成", "gold"),
     "cancelled": ("已取消", "gold"),
+    "interrupted": ("意外中斷", "red"),
     "failed": ("失敗", "red"),
 }
 
@@ -100,6 +100,7 @@ class SmartReviewRunPanel:
         query: str,
     ) -> None:
         """建立版本、模組、類型、來源、搜尋、模型與批次輸入。"""
+        smart_review_settings = get_smart_review_settings()
         self.version_dd = kit.dropdown(
             label="遊戲版本", dense=True, width=170, on_select=self._on_version
         )
@@ -172,7 +173,7 @@ class SmartReviewRunPanel:
         )
         self.batch_field = kit.text_field(
             "每批（筆）",
-            value=str(SMART_REVIEW_DEFAULT_BATCH_SIZE),
+            value=str(smart_review_settings["default_batch_size"]),
             width=110,
             on_change=lambda _e: self._update_estimate_text(),
         )
@@ -571,6 +572,8 @@ class SmartReviewRunPanel:
 
     def _update_estimate_text(self, *, update: bool = True) -> None:
         """依目前筆數、上限與每批大小更新估算文字，不查詢資料庫。"""
+        smart_review_settings = get_smart_review_settings()
+        max_batch_size = smart_review_settings["max_batch_size"]
         limit = self._read_int(self.limit_field, minimum=0)
         batch = self._read_int(self.batch_field)
         if self._scope_loading:
@@ -584,10 +587,10 @@ class SmartReviewRunPanel:
         elif self._total is None:
             self.estimate_text.value = "正在等待候選筆數…"
             self.estimate_text.color = C.MUTED
-        elif batch > SMART_REVIEW_MAX_BATCH_SIZE:
+        elif batch > max_batch_size:
             self.estimate_text.value = (
                 f"符合範圍的未審核 AI 譯文共 {format_count(self._total)} 筆；"
-                f"每批大小不可超過 {SMART_REVIEW_MAX_BATCH_SIZE} 筆。"
+                f"每批大小不可超過 {max_batch_size} 筆。"
             )
             self.estimate_text.color = C.RED
         else:
@@ -597,7 +600,7 @@ class SmartReviewRunPanel:
             self.estimate_text.value = (
                 f"符合範圍的未審核 AI 譯文共 {format_count(self._total)} 筆；"
                 f"本次將處理 {format_count(planned)} 筆（上限 {limit_label}），約 {batches} 批"
-                f"（每批最多 {SMART_REVIEW_MAX_BATCH_SIZE} 筆）。"
+                f"（每批最多 {max_batch_size} 筆）。"
             )
             self.estimate_text.color = C.MUTED
         if update:
@@ -622,8 +625,9 @@ class SmartReviewRunPanel:
             raise ValueError("上限必須是 0 或正整數")
         if batch is None:
             raise ValueError("每批必須是大於 0 的整數")
-        if batch > SMART_REVIEW_MAX_BATCH_SIZE:
-            raise ValueError(f"每批必須介於 1 與 {SMART_REVIEW_MAX_BATCH_SIZE} 筆")
+        max_batch_size = get_smart_review_settings()["max_batch_size"]
+        if batch > max_batch_size:
+            raise ValueError(f"每批必須介於 1 與 {max_batch_size} 筆")
         mod_id, kind, source, query = self._scope_values()
         path, priority = database
         return SmartReviewRequest(

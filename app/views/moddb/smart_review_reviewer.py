@@ -7,11 +7,14 @@ from typing import Any
 import flet as ft
 
 from app.services_impl.moddb_smart_review_service import (
+    SMART_REVIEW_MANUAL_EDIT_STATUSES,
     SmartReviewCandidate,
     apply_moddb_smart_review_candidate_from_path,
+    apply_moddb_smart_review_manual_edit_from_path,
     get_moddb_smart_review_run_breakdown_from_path,
     get_moddb_smart_review_run_from_path,
     load_moddb_smart_review_candidate_page_from_path,
+    realign_moddb_smart_review_candidate_from_path,
     reject_moddb_smart_review_candidate_from_path,
     save_moddb_smart_review_draft_from_path,
     smart_review_format_diagnostics,
@@ -55,7 +58,7 @@ _DECISION_LABEL = {
 _CONFIDENCE_LABEL = {"high": "高", "medium": "中", "low": "低"}
 # 為什麼某筆不能套用：讓灰掉的按鈕有明確的說明。
 _NOT_APPLICABLE = {
-    "applied": "這筆已經套用，不能重複套用；要再修改請到條目校對編輯。",
+    "applied": "這筆已經套用；要再修改請編輯草稿後重新套用。",
     "rejected": "這筆已選擇保留原譯文。",
     "needs_context": "AI 表示需要更多上下文才能判斷，沒有提供建議譯文。",
     "no_change": "AI 認為目前譯文不用修改，沒有建議譯文。",
@@ -75,6 +78,53 @@ _APPLY_MESSAGES = {
     "not_ready": ("這筆目前不是可套用的狀態。", C.GOLD),
     "missing": ("找不到這筆候選。", C.GOLD),
 }
+# 人工編輯套用（任何非 ready 的可編輯狀態）可能回傳的結果。
+_MANUAL_EDIT_MESSAGES = {
+    **_APPLY_MESSAGES,
+    "applied": ("已套用人工修改（未審核）；可從條目歷史還原。", C.EM),
+    "changed": (
+        "資料庫內容在載入後已變更，未覆蓋；已重新載入這筆，請確認目前譯文後再套用。",
+        C.GOLD,
+    ),
+    "state_sync_failed": (
+        "譯文已寫入（可從條目歷史還原），但批次狀態同步失敗；重新載入這個批次時會自動補回。",
+        C.GOLD,
+    ),
+    "unchanged": ("草稿與目前譯文相同，沒有需要套用的變更。", C.GOLD),
+    "not_editable": ("這筆目前不能人工編輯。", C.GOLD),
+    "unsupported": ("舊版批次不支援人工編輯套用；請重新校對。", C.GOLD),
+}
+_MANUAL_EDIT_HINTS = {
+    "applied": "這筆已套用。修改草稿後按「重新套用」會覆蓋目前人工譯文（可從條目歷史還原）。",
+    "rejected": "這筆先前選擇保留原譯文；仍可編輯草稿後套用。",
+    "needs_context": "AI 沒有提供建議譯文；草稿預設為目前譯文，可直接修改後套用。",
+    "no_change": "AI 認為不用修改；草稿預設為目前譯文，仍可修改後套用。",
+    "invalid": "AI 的回應沒有通過驗證；草稿預設為目前譯文，可直接修改後套用。",
+    "invalid_format": "先前的草稿格式未通過檢查；請修正草稿後套用。",
+    "stale": "資料庫內容在校對後已變更；已對齊目前譯文，可直接修改後套用。",
+}
+
+
+def is_manual_edit_row(row: SmartReviewCandidate | None) -> bool:
+    """這筆候選是否走人工編輯套用（非 ready 但可編輯的狀態）。"""
+    return row is not None and row.status in SMART_REVIEW_MANUAL_EDIT_STATUSES
+
+
+def manual_edit_hint(row: SmartReviewCandidate) -> str:
+    """說明人工編輯這筆候選的方式；未儲存的修改換筆後不會保留。"""
+    hint = _MANUAL_EDIT_HINTS.get(row.status, "")
+    if row.status in {"invalid", "invalid_format"} and row.validation_error:
+        hint += f"原因：{row.validation_error}。"
+    return f"{hint}未套用的修改換筆後不會保留。" if hint else ""
+
+
+def initial_draft_text(row: SmartReviewCandidate) -> str:
+    """決定草稿框的起始內容：已套用以目前資料庫值為準，其他依序取草稿、建議、現況。"""
+    if row.status == "applied":
+        return row.current_zh_tw or ""
+    if row.status in SMART_REVIEW_MANUAL_EDIT_STATUSES:
+        return row.draft_zh_tw or row.suggested_zh_tw or row.current_zh_tw or ""
+    return row.draft_zh_tw or row.suggested_zh_tw or ""
 
 
 def candidate_evidence_text(row: SmartReviewCandidate) -> str:
@@ -473,7 +523,7 @@ class SmartReviewReviewer:
         self.set_busy(True)
         self.ctx.update()
 
-        def work() -> tuple[int, list[SmartReviewCandidate]]:
+        def read_page(total_hint: int | None):
             """在一次唯讀操作中取得總數與目前位置的那一筆。"""
             return load_moddb_smart_review_candidate_page_from_path(
                 path,
@@ -482,8 +532,20 @@ class SmartReviewReviewer:
                 status=status,
                 limit=1,
                 offset=position,
-                known_total=known_total,
+                known_total=total_hint,
             )
+
+        def work() -> tuple[int, list[SmartReviewCandidate]]:
+            """載入該筆；可人工編輯的候選先對齊目前資料庫，讓畫面顯示現況。"""
+            total, rows = read_page(known_total)
+            if is_manual_edit_row(rows[0] if rows else None) and (
+                realign_moddb_smart_review_candidate_from_path(
+                    path, priority, run_id, rows[0].ordinal
+                )
+                == "realigned"
+            ):
+                total, rows = read_page(total)
+            return total, rows
 
         def done(result, error: str | None) -> None:
             """顯示該筆；位置超出範圍時退回最後一筆。"""
@@ -569,9 +631,9 @@ class SmartReviewReviewer:
             f"（{STATUS_LABEL.get(self.status_filter, self.status_filter)}）"
         )
         self.progress_bar.value = (self.position + 1) / self.total if self.total else 0
-        self._stored_draft = row.draft_zh_tw or row.suggested_zh_tw or ""
+        self._stored_draft = initial_draft_text(row)
         self.draft.value = self._stored_draft
-        self.draft.read_only = row.status != "ready"
+        self.draft.read_only = not (row.status == "ready" or is_manual_edit_row(row))
         self.body.controls = [self._header(row), self._columns(row)]
         self._refresh_format()
         self.ctx.update()
@@ -739,7 +801,7 @@ class SmartReviewReviewer:
         if not value.strip():
             self.format_text.value = "格式診斷：尚無可分析草稿"
             self.format_text.color = C.MUTED
-            has_issue = row.status == "ready"
+            has_issue = row.status == "ready" or is_manual_edit_row(row)
         else:
             try:
                 diagnostics = smart_review_format_diagnostics(
@@ -764,14 +826,22 @@ class SmartReviewReviewer:
         self, has_row: bool, row: SmartReviewCandidate | None
     ) -> None:
         """依候選狀態與格式診斷設定按鈕，並說明不能操作的原因。"""
+        manual = has_row and is_manual_edit_row(row)
         reason = not_applicable_reason(row) if row is not None else None
         ready = has_row and row is not None and reason is None
-        if ready and self._has_format_issue:
-            reason = "草稿有格式問題：請先修正，否則套用會被拒絕並鎖定這筆。"
-        usable = ready and not self._has_format_issue and not self.busy
-        self.apply_btn.disabled = not usable
-        self.save_btn.disabled = not usable
-        self.reject_btn.disabled = not (ready and not self.busy)
+        if manual:
+            self._set_manual_edit_actions(row)
+            reason = manual_edit_hint(row)
+            if self._has_format_issue:
+                reason = "草稿有格式問題或是空白：請先修正才能套用。"
+        else:
+            self.apply_btn.content = "套用這筆"
+            if ready and self._has_format_issue:
+                reason = "草稿有格式問題：請先修正，否則套用會被拒絕並鎖定這筆。"
+            usable = ready and not self._has_format_issue and not self.busy
+            self.apply_btn.disabled = not usable
+            self.save_btn.disabled = not usable
+            self.reject_btn.disabled = not (ready and not self.busy)
         self.prev_btn.disabled = not has_row or self.position <= 0 or self.busy
         self.next_btn.disabled = (
             not has_row or self.position >= self.total - 1 or self.busy
@@ -779,6 +849,13 @@ class SmartReviewReviewer:
         self.position_input.disabled = not has_row or self.busy
         self.filter_dd.disabled = self.busy or not self.run_id
         self.hint_text.value = reason or ""
+
+    def _set_manual_edit_actions(self, row: SmartReviewCandidate) -> None:
+        """人工編輯模式只開放套用；草稿有內容且格式正確才能按，存草稿與保留原譯文不適用。"""
+        self.apply_btn.content = "重新套用" if row.status == "applied" else "套用修改"
+        self.apply_btn.disabled = self.busy or self._has_format_issue
+        self.save_btn.disabled = True
+        self.reject_btn.disabled = True
 
     def set_busy(self, busy: bool) -> None:
         """切換忙碌狀態並同步按鈕可用性。"""
@@ -940,17 +1017,25 @@ class SmartReviewReviewer:
             return
         path, priority = database
         draft = str(self.draft.value or "")
+        manual = is_manual_edit_row(row)
+        messages = _MANUAL_EDIT_MESSAGES if manual else _APPLY_MESSAGES
         self.set_busy(True)
 
         def work() -> str:
-            """以 CAS 條件套用候選並回傳 service 狀態。"""
+            """以 CAS 條件套用候選（ready 走 AI 建議流程，其餘走人工編輯）。"""
+            if manual:
+                return apply_moddb_smart_review_manual_edit_from_path(
+                    path, priority, row.run_id, row.ordinal, draft
+                )
             return apply_moddb_smart_review_candidate_from_path(
                 path, priority, row.run_id, row.ordinal, draft_zh_tw=draft
             )
 
         self.ctx.run_background(
             work,
-            lambda status, error: self._after_action(status, error, "套用失敗", True),
+            lambda status, error: self._after_action(
+                status, error, "套用失敗", True, messages=messages
+            ),
             name="套用智慧校對候選",
             commit=CommitPolicy.ATOMIC,
             durability=DurabilityPolicy.USER_ACTION,
@@ -981,7 +1066,13 @@ class SmartReviewReviewer:
         )
 
     def _after_action(
-        self, status, error: str | None, failure: str, notify_parent: bool
+        self,
+        status,
+        error: str | None,
+        failure: str,
+        notify_parent: bool,
+        *,
+        messages: dict = _APPLY_MESSAGES,
     ) -> None:
         """動作完成後提示結果，更新統計並顯示佇列中的下一筆。"""
         self.set_busy(False)
@@ -992,11 +1083,16 @@ class SmartReviewReviewer:
         if status == "rejected":
             show_snack(self.ctx.page, "已保留原譯文，這筆不會套用。", C.EM)
         else:
-            message, color = _APPLY_MESSAGES.get(
+            message, color = messages.get(
                 status, (f"這筆目前無法處理：{status}", C.GOLD)
             )
             show_snack(self.ctx.page, message, color)
-        if status == "applied" and notify_parent and callable(self.on_changed):
+        # state_sync_failed：翻譯已提交，條目頁仍要重載
+        if (
+            status in {"applied", "state_sync_failed"}
+            and notify_parent
+            and callable(self.on_changed)
+        ):
             self.on_changed()
         self.set_busy(True)
         self.ctx.update()

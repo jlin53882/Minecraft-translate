@@ -24,6 +24,9 @@ from app.views.moddb.smart_review_job import (
 from app.views.moddb.smart_review_reviewer import (
     SmartReviewReviewer,
     candidate_evidence_text,
+    initial_draft_text,
+    is_manual_edit_row,
+    manual_edit_hint,
     not_applicable_reason,
 )
 from tests.conftest import mock_page
@@ -121,6 +124,35 @@ def test_dialog_builds_three_panels_with_defaults(db, monkeypatch):
     assert dialog.nav.value == "run"
     visible = {name: control.visible for name, control in dialog._panels.items()}
     assert visible == {"run": True, "review": False, "history": False}
+
+
+def test_run_panel_reads_configured_smart_review_batch_size(db, monkeypatch):
+    """驗證執行頁的批次預填值來自智慧校對設定，而不是硬編碼。"""
+    from app.views.moddb import smart_review_run_panel as run_panel_module
+    from app.views.moddb.smart_review_dialog import SmartReviewDialog
+
+    monkeypatch.setattr(
+        "app.services_impl.moddb_smart_review_service.load_config",
+        lambda: {
+            "lm_translator": {
+                "provider": "gemini",
+                "models": {"gemini-3.1-flash-lite": {"enabled": True}},
+            }
+        },
+    )
+    monkeypatch.setattr(
+        run_panel_module,
+        "get_smart_review_settings",
+        lambda: {
+            "default_batch_size": 12,
+            "max_batch_size": 24,
+            "storage_chunk_size": 300,
+        },
+    )
+
+    dialog = SmartReviewDialog(_sync_page(), lambda: db, "1.21.1", None)
+
+    assert dialog.run_panel.batch_field.value == "12"
 
 
 def test_run_panel_filters_modules_and_updates_sources_without_starting(
@@ -773,16 +805,118 @@ def test_reviewer_ignores_navigation_while_position_is_loading(reviewer):
 
 
 def test_reviewer_falls_back_to_all_when_nothing_is_ready(ctx, reviewer):
-    """驗證沒有可套用候選時改顯示全部，並說明不能操作的原因。"""
-    reviewer.fake.rows = [_candidate(1, "invalid", validation_error="reason 不可為空")]
+    """驗證沒有可套用候選時改顯示全部，無效的筆改為人工編輯並說明做法。"""
+    reviewer.fake.rows = [
+        _candidate(
+            1,
+            "invalid",
+            suggested_zh_tw=None,
+            validation_error="reason 不可為空",
+        )
+    ]
     reviewer.load_run("run-1")
     assert reviewer.status_filter == "all"
     assert reviewer.row.status == "invalid"
-    assert reviewer.apply_btn.disabled is True
+    assert reviewer.draft.read_only is False
+    assert reviewer.draft.value == "哈囉"
+    assert reviewer.apply_btn.disabled is False
+    assert reviewer.apply_btn.content == "套用修改"
     assert reviewer.save_btn.disabled is True
     assert reviewer.reject_btn.disabled is True
     assert "AI 的回應沒有通過驗證" in reviewer.hint_text.value
     assert "reason 不可為空" in reviewer.hint_text.value
+
+
+def test_manual_edit_helpers_choose_draft_and_hint_per_status():
+    """已套用以目前資料庫值為草稿起點；其他可編輯狀態依序取草稿、建議、現況。"""
+    applied = _candidate(1, "applied", draft_zh_tw="舊草稿", current_zh_tw="已寫入")
+    assert initial_draft_text(applied) == "已寫入"
+    no_change = _candidate(1, "no_change", suggested_zh_tw=None)
+    assert initial_draft_text(no_change) == "哈囉"
+    assert initial_draft_text(_candidate(1, "no_change", draft_zh_tw="草稿")) == "草稿"
+    assert initial_draft_text(_candidate(1, "ready")) == "你好"
+    assert is_manual_edit_row(applied) and not is_manual_edit_row(_candidate(1))
+    assert "重新套用" in manual_edit_hint(applied)
+    assert "換筆後不會保留" in manual_edit_hint(no_change)
+
+
+def test_reviewer_reapplies_applied_candidate_with_manual_edit(reviewer, monkeypatch):
+    """已套用的筆可編輯後「重新套用」，走人工編輯路徑並通知上層重載條目。"""
+    calls = []
+    changed = []
+    reviewer.on_changed = lambda: changed.append(True)
+    monkeypatch.setattr(
+        reviewer_module,
+        "realign_moddb_smart_review_candidate_from_path",
+        lambda *_a, **_k: "unchanged",
+    )
+    monkeypatch.setattr(
+        reviewer_module,
+        "apply_moddb_smart_review_manual_edit_from_path",
+        lambda _p, _pr, run_id, ordinal, draft: (
+            calls.append((run_id, ordinal, draft)) or "applied"
+        ),
+    )
+    monkeypatch.setattr(
+        reviewer_module,
+        "apply_moddb_smart_review_candidate_from_path",
+        lambda *_a, **_k: pytest.fail("已套用的筆不應走 AI 建議套用路徑"),
+    )
+    reviewer.load_run("run-1")
+    reviewer.status_filter = "applied"
+    reviewer.position = 0
+    reviewer.load_position()
+    assert reviewer.row.status == "applied"
+    assert reviewer.draft.read_only is False
+    assert reviewer.apply_btn.content == "重新套用"
+    assert reviewer.apply_btn.disabled is False
+
+    reviewer.draft.value = "修正後的譯文"
+    reviewer._on_draft_change()
+    reviewer._apply()
+
+    assert calls == [("run-1", 4, "修正後的譯文")]
+    assert changed == [True]
+    assert "已套用人工修改" in reviewer.ctx.page.snacks[-1]
+
+
+def test_reviewer_manual_edit_reports_changed_snapshot_without_notifying(
+    reviewer, monkeypatch
+):
+    """資料庫已被他處修改時只提示並重載，不通知上層也不覆蓋。"""
+    changed = []
+    reviewer.on_changed = lambda: changed.append(True)
+    monkeypatch.setattr(
+        reviewer_module,
+        "realign_moddb_smart_review_candidate_from_path",
+        lambda *_a, **_k: "unchanged",
+    )
+    monkeypatch.setattr(
+        reviewer_module,
+        "apply_moddb_smart_review_manual_edit_from_path",
+        lambda *_a, **_k: "changed",
+    )
+    reviewer.load_run("run-1")
+    reviewer.status_filter = "applied"
+    reviewer.load_position()
+    reviewer._apply()
+    assert "已變更" in reviewer.ctx.page.snacks[-1]
+    assert changed == []
+
+
+def test_reviewer_blocks_manual_apply_when_draft_is_blank(reviewer, monkeypatch):
+    """人工編輯模式下空白草稿不能套用。"""
+    monkeypatch.setattr(
+        reviewer_module,
+        "realign_moddb_smart_review_candidate_from_path",
+        lambda *_a, **_k: "unchanged",
+    )
+    reviewer.load_run("run-1")
+    reviewer.status_filter = "applied"
+    reviewer.load_position()
+    reviewer.draft.value = "  "
+    reviewer._on_draft_change()
+    assert reviewer.apply_btn.disabled is True
 
 
 def test_reviewer_blocks_apply_when_draft_has_format_issue(reviewer, monkeypatch):
@@ -1092,6 +1226,7 @@ def test_history_shows_interrupted_status_and_opens_run(ctx, monkeypatch):
     """驗證歷史清單把沒在跑的 running 標為可能中斷，並能開啟批次。"""
     assert run_status_label("running", active=False) == ("可能已中斷", "red")
     assert run_status_label("running", active=True) == ("執行中", "gold")
+    assert run_status_label("interrupted", active=False) == ("意外中斷", "red")
     assert run_status_label("completed", active=False)[0] == "完成"
     import app.views.moddb.smart_review_history as history_module
 

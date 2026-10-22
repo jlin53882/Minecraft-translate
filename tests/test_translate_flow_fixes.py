@@ -527,6 +527,46 @@ def test_lm_view_uses_shared_batch_write_interval_helper():
     assert '.get("batch_write_interval"' not in src
 
 
+@pytest.mark.parametrize(
+    ("smart_review", "expected"),
+    [
+        (
+            {
+                "default_batch_size": 12,
+                "max_batch_size": 24,
+                "storage_chunk_size": 300,
+            },
+            {
+                "default_batch_size": 12,
+                "max_batch_size": 24,
+                "storage_chunk_size": 300,
+            },
+        ),
+        (
+            {"default_batch_size": 90, "max_batch_size": 40},
+            {
+                "default_batch_size": 40,
+                "max_batch_size": 40,
+                "storage_chunk_size": 200,
+            },
+        ),
+        (
+            {"default_batch_size": "bad", "storage_chunk_size": 0},
+            {
+                "default_batch_size": 20,
+                "max_batch_size": 50,
+                "storage_chunk_size": 1,
+            },
+        ),
+    ],
+)
+def test_smart_review_settings_normalization(smart_review, expected):
+    """執行層與 UI 共用同一套批次／分片設定正規化。"""
+    from translation_tool.utils.config_manager import get_smart_review_settings
+
+    assert get_smart_review_settings({"smart_review": smart_review}) == expected
+
+
 # ---------------------------------------------------------------------------
 # 快取分片 freshness contract：載入順序 = 寫入先後，與檔名無關
 # ---------------------------------------------------------------------------

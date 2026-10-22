@@ -12,6 +12,7 @@ from types import SimpleNamespace
 import pytest
 
 from app.services_impl import moddb_service
+from app.services_impl.moddb_smart_review_service import SmartReviewMark
 from app.tasks.task_session import TaskSession
 from app.views import moddb_view
 from app.views.moddb import entries_panel, scan_panel
@@ -792,6 +793,30 @@ def test_entries_lists_selected_version_and_selects_first(entries):
     assert entries.selected is not None and entries.editor_body.visible is True
     assert entries.src_text.value == entries.selected.en_us
     assert entries.save_btn.disabled is True  # 沒改動不能儲存
+
+
+def test_entries_filter_refresh_updates_selected_smart_review_chip_without_resetting_draft(
+    entries,
+):
+    """背景篩選更新同一選取條目時，標籤同步但不覆蓋未儲存草稿。"""
+    selected_id = entries.selected.id
+    entries.tw_field.value = "尚未儲存的草稿"
+
+    entries.apply_refresh_snapshot(
+        {
+            "filter_only": True,
+            "rows": entries.rows,
+            "total": entries.total,
+            "page": 1,
+            "detail": entries.detail,
+            "smart_review_marks": {
+                selected_id: SmartReviewMark("run-123456", "applied")
+            },
+        }
+    )
+
+    assert entries.tw_field.value == "尚未儲存的草稿"
+    assert "校對：已套用" in texts_of(entries.smart_chip)
 
 
 def test_entries_filters_by_state_mod_and_search(entries):

@@ -112,6 +112,9 @@ jar 自帶的 `zh_tw`／`zh_cn` 與「語系合併」使用同一套判斷與函
 - 每筆回應都必須有具體 `reason`，不得放外部 URL；另驗證同批 ID 是否完整唯一、decision／issue type／evidence ID、信心值與格式 token。格式錯誤與 API 請求失敗分別保留為 `invalid` 與 `request_failed`，不寫入翻譯。
 - 候選列顯示版本、kind、來源、審核狀態、reason、evidence 與 canonical format diagnostics；`ready` 候選可編輯並儲存 `draft_zh_tw`。套用以草稿為準，會重新比對條目、effective、revision 與既有 manual 快照；若既有人工列已審核，會阻擋並要求回到人工編輯流程。
 - 候選每頁最多 50 筆，可上一筆／下一筆／跳過；視窗可取消後續批次。run 與 candidate 狀態會持久化為 `completed`、`partial`、`cancelled`、`failed`，可輸入 `run_id` 重新載入歷史批次，晚到結果不會污染新 scope。
+- 同一個模組、同一個版本、種類與英文原文都相同，而且目前譯文與審核狀態也相同的條目（例如多件裝備共用同一句技能提示）只會送出並審查一次；套用那一筆時，其餘相同的條目會一併寫入同一份譯文，各自留下可還原的 history。目前譯文不同，或已有人工審核過譯文的條目不會被一併覆蓋。
+- 已套用、已保留原譯文、需補 context、AI 認為不用改、無效、格式不符與已過期的候選，都能在審查分頁直接編輯草稿並按「重新套用」／「套用修改」；已套用的候選可再次修正，覆蓋同一筆人工譯文並新增一筆 history（可還原）。資料庫在你開啟後被他處修改時會提示並重新載入，不會覆蓋；人工已審核過的譯文不會被覆蓋。若譯文已寫入但批次狀態一時無法更新，畫面會提示；譯文不會遺失，重新載入該批次時會自動補回「已套用」。
+- 條目校對每一列與詳情會顯示該條目在最近一次智慧校對批次的處理結果（已套用、保留原譯文、AI 不用改、需補 context、無效、格式不符、已過期），不必再開智慧校對確認；篩選列的「智慧校對（最近批次）」可只列已套用、無效／格式不符、已過期、需補 context、AI 認為不用改或已保留原譯文的條目，也可選「有處理結果」，並與其他篩選條件疊加。標籤與篩選只依資料庫旁 `.smart_review` 目錄內的批次檔判斷：刪除最近一次批次檔後改以次新的批次為準，全部刪除則不再有標籤；已套用的人工譯文與 history 在 SQLite，不受影響，仍可用條目 history 還原。
 - 「保留原譯文」會把可套用候選標成 `rejected`；成功套用才以來源 6 寫入**未審核**人工譯文，舊來源保留，並記 `smart_review_apply` history，可用既有條目 history 的還原操作回復；不會自動變成「人工已審核」，也不會更新共用翻譯快取。
 
 術語評估要區分三件事：格式／JSON 驗證、唯一 reviewed reference 完全一致率、以及人工標註的專有名詞語意準確率。`tools/evaluate_smart_review_terminology.py` 的 reference 數字只要求相同 kind／模組／key／英文原文，不能當成人工語意準確率；要報告 correction、false revision、abstention 與 coverage，需另外提供 `--labels` 的 `expected_terms[{source,accepted}]` 標註檔。

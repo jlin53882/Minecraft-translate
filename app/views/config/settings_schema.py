@@ -317,6 +317,13 @@ LAYOUT: dict[str, tuple[Card, ...]] = {
                 Head("來源"),
                 F("translation_db.zip_source"),
                 F("translation_db.priority"),
+                Gap(),
+                Head("智慧校對"),
+                R(
+                    "smart_review.default_batch_size",
+                    "smart_review.max_batch_size",
+                    "smart_review.storage_chunk_size",
+                ),
             ),
         ),
     ),

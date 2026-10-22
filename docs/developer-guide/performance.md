@@ -136,6 +136,17 @@ Synthetic JARs, translation items, Dashboard cache shards and replace rules are
 generated in temporary directories. Dashboard task rendering is measured as
 Python-side control refresh; it is not browser frame or scroll performance.
 
+### Smart Review apply-record reconciliation
+
+`schema.py` installs `idx_history_smart_review_apply` on `history (note)` with
+`WHERE action='smart_review_apply'`. `_reconcile_json_applied_candidates` reads a
+run's apply records with a `note >= prefix AND note < upper` range (not `LIKE`)
+so the plan is a `SEARCH` on that partial index, and orders the rows by `id` in
+Python to avoid a temporary sort. The index is created by the same writable
+`CREATE INDEX IF NOT EXISTS` initialization as above and needs no schema-version
+change. `tests/test_smart_review_manual_edit.py` asserts the plan has no `SCAN`
+or `TEMP B-TREE`.
+
 ## Commands
 
 Generate the real-Flet timing source:

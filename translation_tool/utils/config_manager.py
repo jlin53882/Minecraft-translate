@@ -205,6 +205,9 @@ def load_config(config_path: str | os.PathLike | None = None) -> dict:
 
 
 DEFAULT_BATCH_WRITE_INTERVAL = 2
+DEFAULT_SMART_REVIEW_BATCH_SIZE = 20
+DEFAULT_SMART_REVIEW_MAX_BATCH_SIZE = 50
+DEFAULT_SMART_REVIEW_STORAGE_CHUNK_SIZE = 200
 
 
 def get_batch_write_interval(config: dict | None = None) -> int:
@@ -221,6 +224,47 @@ def get_batch_write_interval(config: dict | None = None) -> int:
         return max(1, int(raw))
     except (TypeError, ValueError):
         return DEFAULT_BATCH_WRITE_INTERVAL
+
+
+def _positive_int_setting(value: object, fallback: int) -> int:
+    """把設定值正規化為正整數；設定頁以外的呼叫也要有安全保底。"""
+    if isinstance(value, bool):
+        return fallback
+    try:
+        return max(1, int(value))
+    except (TypeError, ValueError):
+        return fallback
+
+
+def get_smart_review_settings(config: dict | None = None) -> dict[str, int]:
+    """回傳智慧校對執行與 JSON 儲存共用的有效設定。
+
+    ``default_batch_size`` 只決定 UI 預填與未明確指定批次時的預設值；
+    ``max_batch_size`` 是執行層安全上限；``storage_chunk_size`` 則只控制
+    歷史 JSON 分片大小，與送給模型的 API 批次大小分離。
+    """
+    # 歷史 JSON 的每次查詢都會建立 Store；使用唯讀共享快取避免每次
+    # deepcopy 整份包含 prompt 的設定，但保留明確傳入 config 的測試與服務入口。
+    cfg = load_config_shared() if config is None else config
+    block = cfg.get("smart_review") if isinstance(cfg, dict) else None
+    block = block if isinstance(block, dict) else {}
+    max_batch_size = _positive_int_setting(
+        block.get("max_batch_size"), DEFAULT_SMART_REVIEW_MAX_BATCH_SIZE
+    )
+    default_batch_size = min(
+        _positive_int_setting(
+            block.get("default_batch_size"), DEFAULT_SMART_REVIEW_BATCH_SIZE
+        ),
+        max_batch_size,
+    )
+    storage_chunk_size = _positive_int_setting(
+        block.get("storage_chunk_size"), DEFAULT_SMART_REVIEW_STORAGE_CHUNK_SIZE
+    )
+    return {
+        "default_batch_size": default_batch_size,
+        "max_batch_size": max_batch_size,
+        "storage_chunk_size": storage_chunk_size,
+    }
 
 
 def _load_config_uncached(resolved_config_path: Path) -> tuple[dict, bool]:
@@ -543,6 +587,12 @@ def validate_config_values(config: dict) -> None:
         raise ConfigValidationError("lm_translator 必須是 object")
     _validate_lm_translator_config(lm_config)
 
+    smart_review_config = config.get("smart_review")
+    if smart_review_config is not None:
+        if not isinstance(smart_review_config, dict):
+            raise ConfigValidationError("smart_review 必須是 object")
+        _validate_smart_review_config(smart_review_config)
+
     translator_config = config.get("translator")
     if translator_config is not None:
         if not isinstance(translator_config, dict):
@@ -668,6 +718,28 @@ def _validate_lm_translator_config(lm: dict) -> None:
         raise ConfigValidationError(
             f"lm_translator.key_failure_cooldown_sec 必須為 >= 0 的數字（0 = 不記憶），"
             f"目前為 {type(cooldown).__name__}：'{cooldown}'"
+        )
+
+
+def _validate_smart_review_config(settings: dict) -> None:
+    """驗證智慧校對批次與 JSON 分片設定。"""
+    labels = {
+        "default_batch_size": "智慧校對預設每批筆數",
+        "max_batch_size": "智慧校對每批安全上限",
+        "storage_chunk_size": "智慧校對歷史 JSON 分片筆數",
+    }
+    values: dict[str, int] = {}
+    for key, label in labels.items():
+        value = settings.get(key)
+        if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+            raise ConfigValidationError(
+                f"smart_review.{key}（{label}）必須為正整數，"
+                f"目前為 {type(value).__name__}：{value!r}"
+            )
+        values[key] = value
+    if values["default_batch_size"] > values["max_batch_size"]:
+        raise ConfigValidationError(
+            "smart_review.default_batch_size 不可大於 smart_review.max_batch_size"
         )
 
 

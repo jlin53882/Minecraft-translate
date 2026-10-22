@@ -45,6 +45,7 @@ def load_panel_snapshot(key: str, request: dict, settings) -> dict:
 def _load_entries_snapshot(db, request: dict, settings, snapshot: dict) -> dict:
     scope = _resolve_entries_scope(db, request, settings)
     rows, total, error, detail = [], 0, None, None
+    smart_review_marks: dict = {}
     page = max(1, int(request.get("page", 1)))
     if db is not None and scope["version"]:
         try:
@@ -69,7 +70,9 @@ def _load_entries_snapshot(db, request: dict, settings, snapshot: dict) -> dict:
             selected_id if selected_id in row_ids else (rows[0].id if rows else None)
         )
         detail = db.entry_detail(target_id) if target_id is not None else None
+        smart_review_marks = db.smart_review_marks(sorted(row_ids))
     snapshot.update(
+        smart_review_marks=smart_review_marks,
         versions=scope["versions"],
         version=scope["version"],
         mods=scope["mods"],
@@ -111,6 +114,7 @@ def load_entries_filter_snapshot(settings, request: dict) -> dict:
         "kind": request.get("kind"),
         "page": page,
         "rows": rows,
+        "smart_review_marks": {},
         "total": total,
         "list_error": error,
         "detail": detail,
@@ -143,6 +147,7 @@ def load_entries_filter_snapshot(settings, request: dict) -> dict:
                     else (rows[0].id if rows else None)
                 )
                 detail = db.entry_detail(target_id) if target_id is not None else None
+                snapshot["smart_review_marks"] = db.smart_review_marks(sorted(row_ids))
             except ValueError as exc:
                 error = str(exc)
             snapshot.update(

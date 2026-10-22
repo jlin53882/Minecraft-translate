@@ -32,6 +32,7 @@ class TestSchemaKeys完整性:
             "translator",
             "ftb_translator",
             "translation_db",
+            "smart_review",
             "species_cache",
             "lm_translator",
             "output_bundler",
@@ -127,6 +128,21 @@ class TestSchema型別合約:
         lm = DEFAULT_CONFIG["lm_translator"]
         assert isinstance(lm["models"], dict), (
             "lm_translator.models 應為 dict，不應變成 list"
+        )
+
+    def test_smart_review_fields_types(self):
+        """智慧校對批次與歷史分片設定必須是正整數。"""
+        settings = DEFAULT_CONFIG["smart_review"]
+        assert settings["default_batch_size"] == 20
+        assert settings["max_batch_size"] == 50
+        assert settings["storage_chunk_size"] == 200
+        assert all(
+            isinstance(settings[key], int) and not isinstance(settings[key], bool)
+            for key in (
+                "default_batch_size",
+                "max_batch_size",
+                "storage_chunk_size",
+            )
         )
 
     def test_lm_translator_patchouli_system_prompt_is_string(self):
