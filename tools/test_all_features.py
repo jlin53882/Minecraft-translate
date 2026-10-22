@@ -5,14 +5,15 @@
       不開 UI，純終端驗證每個功能的輸出是否正確。
 
 使用方式（在專案根目錄執行）：
-    cd C:\\Users\\admin\\Desktop\\minecraft_translator_flet
-    .\\.venv\\Scripts\\python.exe tools\\test_all_features.py
+    cd <專案根目錄>
+    python tools/test_all_features.py --modpack-root <模組包根目錄>
 
 輸出：終端彩色報告，每個功能 PASS / FAIL / WARN。
 """
 
 from __future__ import annotations
 
+import argparse
 import sys
 import tempfile
 import traceback
@@ -24,10 +25,10 @@ SRC_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(SRC_ROOT))
 
 # ── 測試資料路徑（All the Mods 10 4.3） ──────────────────────────────────
-ATM10_ROOT = Path(r"C:\Users\admin\Desktop\.minecraft\versions\All the Mods 10 4.3")
-MODS_DIR = ATM10_ROOT / "mods"
-KUBEJS_DIR = ATM10_ROOT / "kubejs"
-FTBQUESTS_DIR = ATM10_ROOT / "config" / "ftbquests"
+ATM10_ROOT = Path()  # 由 main() 依 --modpack-root 設定
+MODS_DIR = Path()
+KUBEJS_DIR = Path()
+FTBQUESTS_DIR = Path()
 
 # ── ANSI 顏色 ────────────────────────────────────────────────────────────
 C_GREEN = "\033[92m"
@@ -648,7 +649,29 @@ def test_ftb() -> bool:
 # ════════════════════════════════════════════════════════════════════════
 # 主程式
 # ════════════════════════════════════════════════════════════════════════
-def main() -> None:
+def _parse_args(argv: list[str] | None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description=(
+            "對真實模組包目錄（含 mods/、kubejs/、config/ftbquests/）執行全功能煙霧測試；"
+            "需要外部資料（真實模組包）。"
+        )
+    )
+    parser.add_argument(
+        "--modpack-root",
+        required=True,
+        type=Path,
+        help="模組包根目錄（其下有 mods/、kubejs/、config/ftbquests/）",
+    )
+    return parser.parse_args(argv)
+
+
+def main(argv: list[str] | None = None) -> None:
+    global ATM10_ROOT, MODS_DIR, KUBEJS_DIR, FTBQUESTS_DIR
+    args = _parse_args(argv)
+    ATM10_ROOT = args.modpack_root
+    MODS_DIR = ATM10_ROOT / "mods"
+    KUBEJS_DIR = ATM10_ROOT / "kubejs"
+    FTBQUESTS_DIR = ATM10_ROOT / "config" / "ftbquests"
     print(f"\n{C_BOLD}{'─' * 60}")
     print("  minecraft_translator_flet 全功能測試")
     print(f"  資料來源：{ATM10_ROOT}")

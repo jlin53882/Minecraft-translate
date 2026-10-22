@@ -371,7 +371,7 @@ LAYOUT: dict[str, tuple[Card, ...]] = {
 }
 
 # 儲存前驗證／正規化（名稱對應 Setting.validator）。實作在 config_actions，避免這裡依賴服務層。
-VALIDATOR_NAMES = frozenset({"log_format"})
+VALIDATOR_NAMES = frozenset({"log_format", "batch_shrink_factor"})
 
 
 # ---------------------------------------------------------------------------

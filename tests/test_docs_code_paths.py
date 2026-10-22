@@ -297,3 +297,40 @@ def test_maintenance_docs_have_no_pr_or_issue_numbers():
     assert found == [], "維護文件只描述現況，請移除 PR／issue 編號：\n" + "\n".join(
         found
     )
+
+
+# ---------------------------------------------------------------- 文件引用的測試名稱
+
+TEST_NAME = re.compile(r"test_[a-z0-9_]*[a-z0-9]")
+
+
+@cache
+def _test_names() -> frozenset[str]:
+    """tests/ 內所有測試函式、測試類別與測試檔案（不含副檔名）的名稱。"""
+    names: set[str] = set()
+    for path in sorted((ROOT / "tests").rglob("*.py")):
+        names.add(path.stem)
+        for node in ast.walk(_tree(path)):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                names.add(node.name)
+    return frozenset(names)
+
+
+def test_developer_guide_test_names_exist():
+    """`docs/developer-guide/*.md` 的反引號若是完整的測試識別字（`test_xxx`），必須真的存在。
+
+    只檢查整段反引號就是一個 ``test_`` 識別字（或 ``test_x.py::test_y``）的寫法，
+    字首片段（``test_lm_``）與一般敘述文字不算。``views/`` 底下的 View 架構文件不檢查：
+    它們由 ``test_view_docs_identifiers`` 對照程式識別字，且 ``test_input`` 之類是控制項名稱。
+    """
+    missing: list[str] = []
+    for doc in sorted((ROOT / "docs" / "developer-guide").glob("*.md")):
+        rel = doc.relative_to(ROOT).as_posix()
+        for token in BACKTICK.findall(doc.read_text(encoding="utf-8")):
+            token = token.strip()
+            parts = token.split("::") if "::" in token else [token]
+            for part in parts:
+                part = part.removesuffix(".py").rsplit("/", 1)[-1]
+                if TEST_NAME.fullmatch(part) and part not in _test_names():
+                    missing.append(f"{rel}: `{token}`")
+    assert missing == [], "開發文件引用了不存在的測試：\n" + "\n".join(missing)

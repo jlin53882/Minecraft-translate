@@ -1,6 +1,19 @@
-"""全面分析單元測試覆蓋"""
+"""全面分析單元測試覆蓋（唯讀，只輸出到終端機）。
 
+用法：
+    python tools/analyze_all.py [--tests-dir tests]
+"""
+
+import argparse
 import os
+
+_parser = argparse.ArgumentParser(
+    description="比對 core/utils/plugins 模組清單與測試檔名，列出疑似缺少測試的模組（唯讀）。"
+)
+_parser.add_argument(
+    "--tests-dir", default="tests", help="測試資料夾（預設為目前目錄下的 tests）"
+)
+_ARGS = _parser.parse_args()
 
 # translation_tool/core 所有模組
 core_modules = [
@@ -94,7 +107,7 @@ app_modules = [
 ]
 
 # 讀取測試檔案名稱
-test_dir = "tests"
+test_dir = _ARGS.tests_dir
 test_files = []
 if os.path.exists(test_dir):
     test_files = [

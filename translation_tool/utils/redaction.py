@@ -10,6 +10,31 @@ from typing import Any
 
 _GOOGLE_KEY_RE = re.compile(r"\b(?:AIza[0-9A-Za-z_-]{20,}|AQ\.[0-9A-Za-z_-]+)\b")
 _BEARER_RE = re.compile(r"(?i)\bBearer\s+[^\s,;]+")
+# 第三方金鑰／token 的固定格式。長度與前綴都要求夠嚴格，避免把 ``sk-learn``、
+# ``risk-assessment``、「Basic configuration」這類一般文字遮蔽掉。
+_PROVIDER_KEY_RE = re.compile(r"(?<![A-Za-z0-9_-])sk-[A-Za-z0-9_-]{20,}")
+_JWT_RE = re.compile(
+    r"(?<![A-Za-z0-9_-])eyJ[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]*"
+)
+_BASIC_AUTH_RE = re.compile(
+    r"(?i)(\bauthorization\s*[:=]\s*[\"']?)basic\s+[A-Za-z0-9+/_-]{8,}={0,2}"
+)
+# OAuth 參數／JSON 欄位：只認明確的 token 欄位名且值夠長（>=16 個 token 字元）
+_OAUTH_FIELD_RE = re.compile(
+    r"(?i)([\"']?\b(?:refresh_token|access_token|id_token|client_secret|code_verifier)"
+    r"[\"']?\s*[:=]\s*[\"']?)[A-Za-z0-9._~+/-]{16,}"
+)
+
+
+def _mask_formats(text: str) -> str:
+    text = _GOOGLE_KEY_RE.sub("[REDACTED]", text)
+    text = _PROVIDER_KEY_RE.sub("[REDACTED]", text)
+    text = _JWT_RE.sub("[REDACTED]", text)
+    text = _BASIC_AUTH_RE.sub(r"\1Basic [REDACTED]", text)
+    text = _OAUTH_FIELD_RE.sub(r"\1[REDACTED]", text)
+    return _BEARER_RE.sub("Bearer [REDACTED]", text)
+
+
 _SECRET_FIELD_RE = re.compile(
     r'(?i)(["\']?(?:api[_-]?key|authorization|bearer|credential|password|secret|token)'
     r'["\']?\s*[:=]\s*)(?:"[^"]*"|\'[^\']*\'|[^\s,;"\'}]+)'
@@ -55,9 +80,7 @@ def redact_secrets(value: Any) -> str:
     給「所有輸出都會經過」的全域出口（日誌檔、UI 日誌、提示訊息）使用；不套用欄位名稱規則，
     以免把一般訊息裡的 ``token: 123`` 之類文字誤遮蔽。
     """
-    text = _mask_known(str(value))
-    text = _GOOGLE_KEY_RE.sub("[REDACTED]", text)
-    return _BEARER_RE.sub("Bearer [REDACTED]", text)
+    return _mask_formats(_mask_known(str(value)))
 
 
 # ``%(message)s`` 的 percent-style 規格：可帶旗標、寬度、精度與型別（``%(message)-80s``、``%(message).200s``…）
@@ -128,9 +151,7 @@ class RedactingFormatter(logging.Formatter):
 
 def redact_text(value: Any, secrets: Iterable[str] = ()) -> str:
     """Return text safe for diagnostics, replacing keys and secret fields."""
-    text = _mask_known(str(value), secrets)
-    text = _GOOGLE_KEY_RE.sub("[REDACTED]", text)
-    text = _BEARER_RE.sub("Bearer [REDACTED]", text)
+    text = _mask_formats(_mask_known(str(value), secrets))
     return _SECRET_FIELD_RE.sub(r"\1[REDACTED]", text)
 
 

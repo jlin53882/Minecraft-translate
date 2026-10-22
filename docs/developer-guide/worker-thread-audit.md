@@ -57,7 +57,7 @@ user-triggered extraction, translation, save, and cache actions remain visible.
 | Cache-root reload | `cache-root-reload`, maintenance presentation | Cache busy/pending decisions continue to use `OperationRegistry.active()`, never the filtered task projection. |
 | Resume prompt input check | `resume-prompt`, maintenance presentation | Registry owns the check; page lifecycle discards stale UI results. |
 
-Behavioral coverage: `test_dashboard_mount_reload_does_not_create_a_task_lifecycle_loop`, `test_dashboard_coalesces_task_changes_during_reload_and_uses_stable_owner_id`, and `test_maintenance_operations_remain_owned_without_polluting_task_history`. This does not establish a hard maximum duration for Dashboard loaders or one SQLite call.
+Behavioral coverage: `test_dashboard_mount_reload_does_not_create_a_task_lifecycle_loop`, `test_dashboard_reload_is_not_reentrant`, and `test_maintenance_operations_remain_owned_without_polluting_task_history`. This does not establish a hard maximum duration for Dashboard loaders or one SQLite call.
 
 ## B. 長生命週期輪詢／task 的 owner 與 teardown
 

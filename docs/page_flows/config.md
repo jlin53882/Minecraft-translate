@@ -112,6 +112,7 @@ flowchart TD
 ## 錯誤處理
 
 - 輸出資料夾名稱無效（提取輸出後綴，或「LM 翻譯輸出資料夾」不是單一資料夾名稱，例如路徑、`..`、Windows 保留名稱）：`validate_output_folder_names`／`validate_lm_translate_folder_name` 拋出 `ConfigValidationError`，記錄警告並以錯誤原因提示，不寫入。「LM 翻譯輸出資料夾」留空表示使用預設值 `LM翻譯後`。
+- 「錯誤縮小比例」（`lm_translator.batch_shrink_factor`）必須是有限數值且 `0 < 值 < 1`：`_from_control_value` 以 `validate_batch_shrink_factor` 檢查，不合法（0、1 以上、負數、`nan`、`inf`、非數字）時走下方「收集或驗證失敗」流程，不寫入，不會默默擴大批次或縮到 0。
 - 其他收集或驗證失敗（例如 `validate_config_values` 拋出錯誤）：`_collect_validated_config` 記錄含堆疊的 log（經 `redact_text` 遮蔽），顯示「設定驗證失敗」提示，不寫入。
 - 寫入回傳值不是 `True`，或例外發生：視為無法確認寫入，變更保留在頁面上，提示使用者檢查 `config.json`。
 - 寫入成功但重載失敗：結果為 `SAVED_RELOAD_FAILED`，頁面進入復原模式，儲存按鈕改為「重新載入設定」，離開前會再次確認。

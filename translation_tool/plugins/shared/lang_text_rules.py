@@ -11,9 +11,11 @@ import re
 # Match minecraft-like color/format tokens, e.g. &a §l
 _FMT_RE = re.compile(r"(?:&|§)[0-9a-fk-or]", re.IGNORECASE)
 
+
 def _strip_fmt(s: str) -> str:
     """移除行內格式標記（如 &a / §l）。"""
     return _FMT_RE.sub("", s)
+
 
 def is_already_zh(s: str, letter_threshold: int = 2) -> bool:
     """啟發式判斷：去除格式標記後，若有中日韓文字且几乎無英文，則視為已翻譯。

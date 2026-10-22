@@ -1780,6 +1780,7 @@ def test_loop_batches_are_homogeneous_cache_type(monkeypatch):
     loop.translate_items_with_cache_loop(
         items,
         total_for_smart=6,
+        sleep_seconds_between_batches=0,
         translate_batch_smart=tb,
         write_new_cache=True,
         reload_cache=False,
