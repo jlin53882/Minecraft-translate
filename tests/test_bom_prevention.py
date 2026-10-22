@@ -1,6 +1,7 @@
 """tests/test_bom_prevention.py
 用途：防止 UI 模組檔案帶有 UTF-8 BOM，確保 BOM 被徹底移除且未來不會復發。
 """
+
 from pathlib import Path
 
 
@@ -19,7 +20,6 @@ def test_ui_python_files_have_no_bom():
         if first3 == b"\xef\xbb\xbf":
             bom_files.append(str(f))
 
-    assert len(bom_files) == 0, (
-        f"發現 {len(bom_files)} 個檔案含 BOM：\n" +
-        "\n".join(f"  - {f}" for f in bom_files)
+    assert len(bom_files) == 0, f"發現 {len(bom_files)} 個檔案含 BOM：\n" + "\n".join(
+        f"  - {f}" for f in bom_files
     )

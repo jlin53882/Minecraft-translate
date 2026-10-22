@@ -290,6 +290,17 @@ def candidate_metadata_delta(
             del errors[key]
 
 
+def refresh_status_counts(payload: dict[str, Any]) -> None:
+    """單檔批次：候選狀態改變後，以目前候選重算 ``status_counts``。"""
+    payload["status_counts"] = dict(
+        Counter(
+            coerce_status(item.get("status"))
+            for item in payload.get("candidates") or []
+            if isinstance(item, dict)
+        )
+    )
+
+
 def apply_result_delta(
     manifest: dict[str, Any],
     old_status: object,

@@ -40,6 +40,7 @@ from translation_tool.translation_db.smart_review_history_codec import (
     candidate_metadata_delta,
     find_candidate,
     is_chunked,
+    refresh_status_counts,
     snapshot_payload,
     timestamp,
 )
@@ -550,6 +551,7 @@ class SmartReviewHistoryStore:
             if candidate is None:
                 return False
             candidate.update(updates)
+            refresh_status_counts(payload)
             self.repository.write_unlocked(run_id, payload)
             return True
 
@@ -648,6 +650,7 @@ class SmartReviewHistoryStore:
                 )
                 updated += 1
             if updated:
+                refresh_status_counts(payload)
                 self.repository.write_unlocked(run_id, payload)
             return updated
 

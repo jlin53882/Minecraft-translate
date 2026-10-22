@@ -316,14 +316,6 @@ def test_reconcile_applied_semantics_and_idempotence(tmp_path, layout):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "單檔批次的 update_candidate／reconcile_applied 只改候選與寫檔，"
-        "不更新 payload['status_counts']，get_run() 的 status_counts 會過期"
-        "（分片批次則會同步）；目前沒有程式讀取此欄位，屬低嚴重度的格式不一致。"
-    ),
-)
 def test_single_file_run_summary_status_counts_follow_candidate_updates(tmp_path):
     """單檔批次 get_run() 的 status_counts 應與分片批次一樣隨候選狀態更新。"""
     total = 4

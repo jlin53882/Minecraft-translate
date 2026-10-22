@@ -162,7 +162,9 @@ class TestCleanKubejsFromRaw:
         lang_root = raw_root / "assets" / "test" / "lang"
         lang_root.mkdir(parents=True)
 
-        (lang_root / "en_us.json").write_bytes(orjson.dumps({"key1": "EN1", "key2": "EN2"}))
+        (lang_root / "en_us.json").write_bytes(
+            orjson.dumps({"key1": "EN1", "key2": "EN2"})
+        )
         (lang_root / "zh_cn.json").write_bytes(orjson.dumps({"key1": "CN1"}))
 
         result = kubejs_translator.clean_kubejs_from_raw(

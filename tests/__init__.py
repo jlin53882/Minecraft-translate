@@ -13,7 +13,9 @@
 import sys
 from pathlib import Path as _Path
 
-_hermes_agent_tests = _Path.home() / "AppData" / "Local" / "hermes" / "hermes-agent" / "tests"
+_hermes_agent_tests = (
+    _Path.home() / "AppData" / "Local" / "hermes" / "hermes-agent" / "tests"
+)
 if _hermes_agent_tests.exists():
     _resolved = _hermes_agent_tests.resolve()
     sys.path = [p for p in sys.path if _Path(p).resolve() != _resolved]

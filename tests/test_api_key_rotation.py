@@ -42,9 +42,7 @@ class TestAtk009ApiKeyRotationThreadSafety:
             }
         }
 
-    def test_concurrent_get_current_api_key_all_valid(
-        self, mock_config_with_keys
-    ):
+    def test_concurrent_get_current_api_key_all_valid(self, mock_config_with_keys):
         """
         Arrange：模擬 3 個 API Key，多執行緒同時呼叫 get_current_api_key()
         Act：20 個執行緒同時競爭呼叫 get_current_api_key()
@@ -151,9 +149,7 @@ class TestAtk009ApiKeyRotationThreadSafety:
 
         # Assert：new_idx 必須在有效範圍內
         for idx1, new_idx, idx2 in next_returns:
-            assert 0 <= new_idx < 3, (
-                f"next() 回傳了無效索引：{new_idx}（應在 [0, 3)）"
-            )
+            assert 0 <= new_idx < 3, f"next() 回傳了無效索引：{new_idx}（應在 [0, 3)）"
 
         # Assert：new_idx > idx1（除了到達邊界後环绕的情況）
         wrap_around_count = 0
@@ -169,9 +165,7 @@ class TestAtk009ApiKeyRotationThreadSafety:
         # 如果有環繞，至少要發生一次
         assert wrap_around_count >= 0  # 放寬：允許各種結果
 
-    def test_set_key_count_during_get_current_no_crash(
-        self, mock_config_with_keys
-    ):
+    def test_set_key_count_during_get_current_no_crash(self, mock_config_with_keys):
         """
         Arrange：_key_tracker 初始有 5 個 key
         Act：一執行緒呼叫 get_current()，另一執行緒同時呼叫 set_key_count(3)
