@@ -102,6 +102,7 @@ flowchart TD
 ## 狀態與資料
 
 - 持久化資料：`config.json`，由 `save_config_json` 寫入；寫入後以 `load_config_json` 重新讀取作為畫面來源。
+- 既存 `config.json` 無法解析時，儲存會被拒絕並提示原因（原檔位元組不變、表單內容保留）；檔案不存在的首次儲存仍會建立檔案。
 - 基準狀態：`_saved_form_state`（最近一次成功載入或儲存的表單快照）。
 - 復原旗標：`_reload_recovery_required`（寫入成功但畫面重載失敗）、`_reload_before_next_entry`（先前確認過的過期畫面需在進入前重載）、`_reload_exit_acknowledged`（單次允許離開）。
 - 對話框狀態：`_unsaved_dialog_open`、`_unsaved_dialog_resolved`、`_unsaved_dialog_continue`。

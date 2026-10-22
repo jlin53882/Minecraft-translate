@@ -141,6 +141,53 @@ DEFAULT_CONFIG = build_default_config()
 _CONFIG_CACHE: dict = {"key": None, "config": None}
 _CONFIG_CACHE_LOCK = threading.Lock()
 
+# 使用者設定檔（Layer 1）的來源狀態。讀取仍會 fallback 到預設值，
+# 但「回傳預設值」不代表檔案正常：寫入端必須用這個狀態決定能不能覆蓋。
+CONFIG_OK = "ok"
+CONFIG_MISSING = "missing"
+CONFIG_CORRUPT = "corrupt"  # 不是合法 JSON，或最上層不是 JSON object
+CONFIG_UNREADABLE = "unreadable"  # I/O 失敗（權限、共用鎖等）
+_UNSAFE_TO_OVERWRITE = frozenset({CONFIG_CORRUPT, CONFIG_UNREADABLE})
+
+# 序列化 save_config 的「檢查現檔 → 替換」，同程序內的寫入者不會交錯。
+_SAVE_LOCK = threading.Lock()
+
+
+def read_config_file(path: Path) -> tuple[str, dict | None]:
+    """讀取單一設定檔並回報來源狀態：``(狀態, 內容或 None)``。
+
+    不存在 → ``CONFIG_MISSING``；解析成 JSON object → ``CONFIG_OK``；
+    JSON 壞掉或不是 object → ``CONFIG_CORRUPT``；I/O 失敗 → ``CONFIG_UNREADABLE``。
+    """
+    try:
+        text = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return CONFIG_MISSING, None
+    except UnicodeDecodeError:
+        return CONFIG_CORRUPT, None
+    except OSError:
+        return CONFIG_UNREADABLE, None
+    try:
+        data = json.loads(text)
+    except ValueError:
+        return CONFIG_CORRUPT, None
+    if not isinstance(data, dict):
+        return CONFIG_CORRUPT, None
+    return CONFIG_OK, data
+
+
+def config_file_status(config_path: str | os.PathLike | None = None) -> str:
+    """使用者設定檔目前的狀態（見 ``CONFIG_*``）；供 UI 與寫入端判斷能否覆寫。"""
+    resolved = resolve_project_path(config_path or CONFIG_PATH)
+    return read_config_file(resolved)[0]
+
+
+def config_file_unsafe_to_overwrite(
+    config_path: str | os.PathLike | None = None,
+) -> bool:
+    """既存設定檔無法解析（或讀不到）：整份寫入會毀掉可復原的內容。"""
+    return config_file_status(config_path) in _UNSAFE_TO_OVERWRITE
+
 
 def _sensitive_values(config: dict):
     """schema 標示為 sensitive 的設定值（字串，或字串清單裡的每一項）。"""
@@ -252,16 +299,18 @@ def _load_config_uncached(resolved_config_path: Path) -> tuple[dict, bool]:
         base = deep_merge(base, example)
 
     # Layer 1: config.json (user values) — only if file exists
-    user_config = {}
-    if resolved_config_path.exists():
-        try:
-            with resolved_config_path.open("r", encoding="utf-8") as f:
-                user_config = json.load(f)
-        except (OSError, json.JSONDecodeError) as e:
-            log.error(
-                "讀取設定檔 %s 失敗: %s，將使用預設設定。", resolved_config_path, e
-            )
-            return base, False
+    status, user_config = read_config_file(resolved_config_path)
+    if status in (CONFIG_CORRUPT, CONFIG_UNREADABLE):
+        log.error(
+            "設定檔 %s 無法讀取（%s），暫以預設設定運作；為避免遺失內容，"
+            "在修復前不會覆寫該檔。",
+            resolved_config_path,
+            status,
+        )
+        # JSON 損毀以 (mtime_ns, size) 快取，避免每次讀設定都重複解析與記錄；
+        # I/O 失敗可能是暫時的，不快取。
+        return base, status == CONFIG_CORRUPT
+    user_config = user_config or {}
 
     # Merge: user (Layer 1) > example (Layer 2) > default (Layer 3)
     # 全部用 deep_merge 一次搞定，確保 config.example.json 新增的 top-level key
@@ -392,7 +441,16 @@ def save_config(config, config_path: str | os.PathLike | None = None) -> bool:
             staged_data = json.load(f)
         json.dumps(staged_data, sort_keys=True)
 
-        os.replace(temp_path, resolved_config_path)
+        # 替換前的最後一道防線：既存檔無法解析時不覆蓋（可能含可救回的金鑰與自訂來源）。
+        # 在鎖內檢查並替換，同程序的寫入者不會在檢查與替換之間交錯。
+        with _SAVE_LOCK:
+            if config_file_unsafe_to_overwrite(resolved_config_path):
+                logging.error(  # noqa: LOG015
+                    "拒絕覆寫無法解析的設定檔 %s；請先修復或手動備份後再儲存。",
+                    resolved_config_path,
+                )
+                return False
+            os.replace(temp_path, resolved_config_path)
         temp_path = None
         fsync_directory(resolved_config_path.parent)
 
