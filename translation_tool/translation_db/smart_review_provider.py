@@ -18,6 +18,7 @@ from typing import Any
 import requests
 
 from translation_tool.core.codex_oauth import chatgpt_account_status
+from translation_tool.core.common_batch_executor import classify_provider_error
 from translation_tool.core.lm_api_client import call_gemini_requests
 from translation_tool.core.lm_batch_budget import BudgetConfig, estimate_text_tokens
 from translation_tool.core.lm_config_rules import ApiKeyCycle, get_api_key_count
@@ -193,9 +194,11 @@ def _smart_review_transient_retry(
         GEMINI_503_MAX_RETRY_AFTER_SEC,
         GEMINI_503_RETRY_DELAYS_SEC,
         _classify_batch_error,
+        gemini_503_wait_sec,
     )
 
     error_kind = _classify_batch_error(error, status)
+    classification = classify_provider_error(error, status)
     if isinstance(error, requests.Timeout):
         error_kind = "timeout"
     elif isinstance(error, requests.ConnectionError):
@@ -215,9 +218,7 @@ def _smart_review_transient_retry(
         return False
     retry_index = runtime.gemini_transient_retry_count
     runtime.gemini_transient_retry_count += 1
-    wait_sec = GEMINI_503_RETRY_DELAYS_SEC[retry_index]
-    if retry_after is not None:
-        wait_sec = max(wait_sec, retry_after)
+    wait_sec = gemini_503_wait_sec(retry_index, retry_after)
     if event_callback is not None:
         event_callback(
             {
@@ -231,9 +232,9 @@ def _smart_review_transient_retry(
                 "error_kind": error_kind,
                 "http_status": status,
                 "exception_type": type(error).__name__,
-                "overload": bool(status == 503 or error_kind == "service_unavailable"),
-                "rate_limit": bool(status == 429),
-                "timeout": bool(error_kind == "timeout"),
+                "overload": classification["overload"],
+                "rate_limit": classification["rate_limit"],
+                "timeout": classification["timeout"],
             }
         )
     wait_started = time.monotonic()

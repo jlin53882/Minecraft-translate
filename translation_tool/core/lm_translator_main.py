@@ -1114,6 +1114,16 @@ def _remote_error_detail(error: Exception, limit: int = 300) -> str:
     return redact_text(text.strip())[:limit]
 
 
+def gemini_503_wait_sec(retry_index: int, retry_after: float | None) -> float:
+    """Gemini 503 暫時不可用的等待秒數：固定退避表與供應商 Retry-After 取較大者。
+
+    LM 主流程與智慧校對共用；是否超過 ``GEMINI_503_MAX_RETRY_AFTER_SEC``、
+    是否換模型或改回報 PARTIAL，仍由各流程自己決定。
+    """
+    base_delay = GEMINI_503_RETRY_DELAYS_SEC[retry_index]
+    return base_delay if retry_after is None else max(base_delay, retry_after)
+
+
 def _reset_gemini_503_retry_state(runtime: _BatchRuntime) -> None:
     runtime.gemini_503_retry_count = 0
     runtime.unparsed_rate_limit_count = 0
@@ -1256,6 +1266,7 @@ def _handle_chatgpt_api_error(
 
     runtime.chatgpt_retry_count += 1
     if retry_event_callback is not None:
+        classification = classify_provider_error(error, error.status)
         retry_event_callback(
             {
                 "kind": "retry_wait",
@@ -1265,9 +1276,9 @@ def _handle_chatgpt_api_error(
                 "retry_after_seconds": retry_after,
                 "error_kind": "chatgpt_transient",
                 "http_status": error.status,
-                "provider_overload": bool(error.status in {500, 502, 503, 504}),
-                "quota_or_rate_limit": bool(error.status == 429),
-                "timeout": bool(error.status == 408),
+                "provider_overload": classification["overload"],
+                "quota_or_rate_limit": classification["rate_limit"],
+                "timeout": classification["timeout"],
             }
         )
     wait_started = time.monotonic()
@@ -1363,9 +1374,7 @@ def _handle_service_unavailable_error(
 
         retry_index = runtime.gemini_503_retry_count
         runtime.gemini_503_retry_count += 1
-        wait_sec = GEMINI_503_RETRY_DELAYS_SEC[retry_index]
-        if retry_after is not None:
-            wait_sec = max(wait_sec, retry_after)
+        wait_sec = gemini_503_wait_sec(retry_index, retry_after)
         runtime.gemini_503_attempted_models.add(model_index)
 
         alternate_models = []

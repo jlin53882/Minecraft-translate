@@ -18,6 +18,7 @@ from translation_tool.core.batch_events import (
     format_batch_event,
 )
 from translation_tool.core.batch_timing import timing_ms
+from translation_tool.core.retry_after import parse_response_retry_after
 from translation_tool.utils.cancellation import TaskCancelled
 
 logger = logging.getLogger(__name__)
@@ -75,10 +76,50 @@ def _status_from_error(error: BaseException, status: int | None) -> int | None:
     return int(value) if isinstance(value, int) else None
 
 
+_STATUS_ERROR_CLASS = {
+    400: "invalid_request",
+    401: "authentication",
+    403: "key_forbidden",
+    404: "model_missing",
+    408: "deadline_exceeded",
+    413: "context_too_large",
+    422: "invalid_request",
+    429: "rate_limit",
+    500: "provider_transient",
+    502: "provider_transient",
+    503: "service_unavailable",
+    504: "provider_timeout",
+}
+_RATE_LIMIT_CODE_WORDS = ("quota", "rate", "limit", "usage")
+_OVERLOAD_CODE_WORDS = ("overload", "high_demand", "too_many")
+_TRANSIENT_STATUSES = frozenset({408, 429, 500, 502, 503, 504})
+
+
+def _error_retry_after_ms(error: BaseException) -> int | None:
+    """例外的 ``retry_after`` 屬性優先，其次讀 ``requests.HTTPError`` 回應的 Retry-After。"""
+    retry_after = getattr(error, "retry_after", None)
+    if retry_after is None:
+        retry_after = parse_response_retry_after(getattr(error, "response", None))
+    try:
+        return max(0, round(float(retry_after) * 1000))
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+
 def classify_provider_error(
     error: BaseException, status: int | None = None
 ) -> dict[str, Any]:
-    """在不暴露 provider 錯誤內容的前提下，分類例外、HTTP 狀態與可重試特徵。"""
+    """在不暴露 provider 錯誤內容的前提下，分類例外、HTTP 狀態與可重試特徵。
+
+    診斷旗標的權威定義（LM、智慧校對與其修復請求都使用這份結果）：
+
+    - ``overload``：供應商服務過載，只含 503／``service_unavailable``，或錯誤碼含
+      ``overload``／``high_demand``／``too_many``。500／502／504 是 provider 暫時失敗，**不算** overload。
+    - ``rate_limit``：速率或配額受限，HTTP 429，或錯誤碼含 ``quota``／``rate``／``limit``／``usage``。
+    - ``timeout``：``requests.Timeout``、408、504。``connection``：連線層錯誤。
+    - ``retryable``：此類錯誤「一般而言」值得重試（408／429／5xx、timeout、連線錯誤）。
+      這只是診斷資訊；實際是否重試、換 key 或換模型由各流程自己的 retry 政策決定。
+    """
     status = _status_from_error(error, status)
     name = type(error).__name__
     lowered = name.lower()
@@ -88,39 +129,15 @@ def classify_provider_error(
     elif isinstance(error, requests.ConnectionError) or "connection" in lowered:
         error_class = "connection_error"
     else:
-        error_class = {
-            400: "invalid_request",
-            401: "authentication",
-            403: "key_forbidden",
-            404: "model_missing",
-            408: "deadline_exceeded",
-            413: "context_too_large",
-            422: "invalid_request",
-            429: "rate_limit",
-            500: "provider_transient",
-            502: "provider_transient",
-            503: "service_unavailable",
-            504: "provider_timeout",
-        }.get(status, "unknown")
-    quota_or_rate_limit = status == 429 or any(
-        word in code for word in ("quota", "rate", "limit", "usage")
-    )
+        error_class = _STATUS_ERROR_CLASS.get(status, "unknown")
+    rate_limit = status == 429 or any(word in code for word in _RATE_LIMIT_CODE_WORDS)
     overload = (
         status == 503
-        or error_class
-        in {
-            "service_unavailable",
-            "provider_overload",
-        }
-        or any(word in code for word in ("overload", "high_demand", "too_many"))
+        or error_class in {"service_unavailable", "provider_overload"}
+        or any(word in code for word in _OVERLOAD_CODE_WORDS)
     )
     timeout = error_class in {"timeout", "provider_timeout", "deadline_exceeded"}
     connection = error_class == "connection_error"
-    retry_after = getattr(error, "retry_after", None)
-    try:
-        retry_after_ms = max(0, round(float(retry_after) * 1000))
-    except (TypeError, ValueError):
-        retry_after_ms = None
     return {
         "error_class": error_class,
         "http_status": status,
@@ -129,8 +146,11 @@ def classify_provider_error(
         "timeout": timeout,
         "connection": connection,
         "overload": overload,
-        "rate_limit": quota_or_rate_limit,
-        "retry_after_ms": retry_after_ms,
+        "rate_limit": rate_limit,
+        "retryable": bool(
+            status in _TRANSIENT_STATUSES or timeout or connection
+        ),
+        "retry_after_ms": _error_retry_after_ms(error),
     }
 
 

@@ -122,6 +122,7 @@ LMView 本身不直接操作 cache_manager，只透過 `write_new_cache_switch` 
 
 - **503 overload**（訊息含 overloaded / too many requests）：**逐把 key** 計數（`ApiKeyCycle` 的 `record_overload()` / `clear_overload()`，`lm_config_rules.py`）。未達 `OVERLOAD_KEY_SWITCH_THRESHOLD`（3）時同一模型等待 `overload_retry_sec` 後重試；達到門檻才對這把 key `mark_failed()` 並換 key（`BatchAction.ROTATE_KEY`，先等待 `key_rotation_buffer_sec`）。成功後 `record_success()` 會 `reset()` 開始新的 cycle
 - **Gemini 503 UNAVAILABLE / high demand**（非 overload）：依 `GEMINI_503_RETRY_DELAYS_SEC`（30、60、120 秒）重試，第二次起可改試其他可用模型；重試用盡，或 Retry-After 超過 `GEMINI_503_MAX_RETRY_AFTER_SEC`（120 秒）時，保留未翻譯項目（標記 `_untranslated`）並以 PARTIAL 結束
+- **429 回應無法解析**（body 不是 Google error JSON）：視為速率限制，先等待 `Retry-After`（沒有則 10 秒）並重試，連續 3 次仍受限才輪替 key；Retry-After 的解析規則與錯誤分類旗標見 `docs/developer-guide/provider-errors.md`
 - **其他 503**：等待 `request_interval_sec` 後，依是否還有下一個模型決定換模型（`NEXT_MODEL`）或縮小 batch
 - **404** → 模型不存在，記入 `missing_models`，之後不再呼叫該模型，換下一個模型
 - **403** → Key 無權限，`mark_failed(reason="forbidden")` 換 Key；無 Key 可換 → RuntimeError「所有 API Key 均無權限」
