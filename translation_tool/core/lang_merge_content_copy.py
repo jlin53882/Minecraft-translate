@@ -12,6 +12,7 @@ import threading
 from collections.abc import Callable
 from typing import Any
 
+from ..utils.cache_registry import register_cache
 from ..utils.log_unit import log_debug, log_error, log_info, log_warning
 from ..utils.zip_safety import UnsafePathError, safe_join
 from .patchouli_compat import find_patchouli_marker_issue, find_patchouli_mismatch
@@ -24,11 +25,25 @@ _patchouli_eff_cache: dict = {}
 _patchouli_eff_cache_lock = threading.RLock()
 
 
+def clear_patchouli_eff_cache() -> None:
+    """清除 fallback 快取中已完成的結果；進行中的計算（single-flight）保留。"""
+    with _patchouli_eff_cache_lock:
+        for key in [
+            k
+            for k, v in _patchouli_eff_cache.items()
+            if not isinstance(v, _PatchouliSingleFlight)
+        ]:
+            del _patchouli_eff_cache[key]
+
+
 class _PatchouliSingleFlight:
     """表示同一 cache key 正在計算，讓其他 worker 等待而不重複計算。"""
 
     def __init__(self) -> None:
         self.done = threading.Event()
+
+
+register_cache("core.lang_merge_content_copy.patchouli_eff", clear_patchouli_eff_cache)
 
 
 # ----------------------------------------------------------------------

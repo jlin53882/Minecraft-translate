@@ -24,6 +24,7 @@ from datetime import datetime
 from pathlib import Path
 
 from translation_tool.utils.app_paths import get_data_root, get_resource_root
+from translation_tool.utils.cache_registry import register_cache
 from translation_tool.utils.config_schema import (
     build_default_config,
     get_path,
@@ -157,6 +158,9 @@ def clear_config_cache() -> None:
     with _CONFIG_CACHE_LOCK:
         _CONFIG_CACHE["key"] = None
         _CONFIG_CACHE["config"] = None
+
+
+register_cache("utils.config_manager.config", clear_config_cache)
 
 
 def load_config_shared(config_path: str | os.PathLike | None = None) -> dict:

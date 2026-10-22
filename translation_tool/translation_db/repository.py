@@ -96,6 +96,7 @@ from translation_tool.translation_db.schema import (
 from translation_tool.translation_db.smart_review import SmartReviewMixin
 from translation_tool.translation_db.source_catalog import SourceCatalog
 from translation_tool.translation_db.sql_helpers import like_pattern
+from translation_tool.utils.cache_registry import register_cache
 from translation_tool.utils.cancellation import (
     TaskCancelled,
     is_cancelled,
@@ -181,6 +182,25 @@ class _WorstFirstQualityRow:
         if ascending and self.sort_by != "entry_oldest":
             return self.entry_id < other.entry_id
         return self.entry_id > other.entry_id
+
+
+@lru_cache(maxsize=4096)
+def _cached_quality_comparison(
+    source: str, before: str, after: str, kind: str | None
+) -> tuple[tuple[str, ...], tuple[str, ...], tuple[QualityIssueDelta, ...]]:
+    """批次取代預覽用的格式品質比對（純函式，依輸入文字快取）。"""
+    old, new, deltas = format_quality_comparison(source, before, after, kind=kind)
+    return tuple(old), tuple(new), deltas
+
+
+def clear_quality_comparison_cache() -> None:
+    """清除批次取代預覽的品質比對 lru_cache。"""
+    _cached_quality_comparison.cache_clear()
+
+
+register_cache(
+    "translation_db.repository.quality_comparison", clear_quality_comparison_cache
+)
 
 
 def _like(text: str) -> str:
@@ -2315,15 +2335,6 @@ class TranslationDB(SmartReviewMixin, BulkReviewMixin, CleanupMixin):
         changes: dict[int, BatchReplaceChange] = {}
         skipped: dict[int, BatchReplaceSkipped] = {}
 
-        @lru_cache(maxsize=4096)
-        def quality_comparison(
-            source: str, before: str, after: str, kind: str | None
-        ) -> tuple[tuple[str, ...], tuple[str, ...], tuple[QualityIssueDelta, ...]]:
-            old, new, deltas = format_quality_comparison(
-                source, before, after, kind=kind
-            )
-            return tuple(old), tuple(new), deltas
-
         def add_candidate(
             row: tuple, *, extra: bool, root_entry_id: int | None
         ) -> None:
@@ -2359,7 +2370,7 @@ class TranslationDB(SmartReviewMixin, BulkReviewMixin, CleanupMixin):
                     )
                 return
             source_text = row[5] or ""
-            old_issues, new_issues, quality_deltas = quality_comparison(
+            old_issues, new_issues, quality_deltas = _cached_quality_comparison(
                 source_text, old_text, new_text, row[1]
             )
             old_space = whitespace_note(old_text)

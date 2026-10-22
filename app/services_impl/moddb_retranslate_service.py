@@ -63,6 +63,15 @@ from translation_tool.translation_db.quality import (
     repair_output_issues_for_kind,
     translation_issues,
 )
+from translation_tool.translation_db.repair_status import (
+    REPAIR_APPLY_DONE_OUTCOMES,
+    REPAIR_REBASE_STATUSES,
+    RepairApplyOutcome,
+    RepairStaleReason,
+    split_stale_reason,  # noqa: F401 - view 經此取用
+    stale_outcome,
+    status_after_apply,
+)
 from translation_tool.translation_db.run_progress import format_repair_live
 from translation_tool.translation_db.schema import SRC_AI
 from translation_tool.utils.cache_manager import (
@@ -1358,7 +1367,11 @@ def _apply_review_item_on(db, item: dict[str, Any], draft: str) -> str:
         action="quality_repair_review",
         sync_other_versions=bool(item.get("sync_other_versions")),
     )
-    return "applied" if result.status == "updated" else "stale"
+    return (
+        RepairApplyOutcome.APPLIED
+        if result.status == "updated"
+        else RepairApplyOutcome.STALE
+    )
 
 
 def _review_item_identity(item: dict[str, Any]) -> dict[str, Any]:
@@ -1387,35 +1400,37 @@ def _diagnose_stale_review_item(db, item: dict[str, Any], draft: str) -> str:
     空字串代表沒有可歸類的原因（例如草稿與現值相同）。
     """
     if db is None:
-        return "missing"
+        return RepairStaleReason.MISSING
     row = db.current_translation_row(
         int(item["entry_id"]), int(item["source_id"]), **_review_item_identity(item)
     )
     if row is None:
-        return "missing"
+        return RepairStaleReason.MISSING
     current, revision = row
     old = str(item["old_translation"])
     if current == draft:
-        return "already_applied" if current != old else ""
+        if current != old:
+            return RepairStaleReason.ALREADY_APPLIED
+        return RepairStaleReason.UNCLASSIFIED
     if not _review_needs_repair(item, current):
-        return "not_needed"
+        return RepairStaleReason.NOT_NEEDED
     expected = item.get("expected_revision")
     if current != old or (expected is not None and revision != expected):
-        return "changed"
-    return ""
-
-
-_REVIEW_DONE = ("applied", "already_applied")
+        return RepairStaleReason.CHANGED
+    return RepairStaleReason.UNCLASSIFIED
 
 
 def _apply_review_outcome(db, item: dict[str, Any], draft: str) -> str:
     """``applied`` / ``already_applied`` / ``stale`` / ``stale:<原因>``（見 ``_diagnose_stale_review_item``）。"""
-    if db is not None and _apply_review_item_on(db, item, draft) == "applied":
-        return "applied"
+    if (
+        db is not None
+        and _apply_review_item_on(db, item, draft) == RepairApplyOutcome.APPLIED
+    ):
+        return RepairApplyOutcome.APPLIED
     reason = _diagnose_stale_review_item(db, item, draft)
-    if reason == "already_applied":
-        return reason
-    return f"stale:{reason}" if reason else "stale"
+    if reason == RepairStaleReason.ALREADY_APPLIED:
+        return RepairApplyOutcome.ALREADY_APPLIED
+    return stale_outcome(reason)
 
 
 def _save_review_outcome(
@@ -1425,7 +1440,7 @@ def _save_review_outcome(
         store_path,
         run_id,
         int(item["item_index"]),
-        "applied" if outcome in _REVIEW_DONE else "stale",
+        status_after_apply(outcome),
         draft,
     )
 
@@ -1446,7 +1461,7 @@ def apply_and_record_repair_review(
     try:
         result = _apply_review_outcome(db, item, draft)
         _save_review_outcome(store_path, run_id, item, result, draft)
-        if result not in _REVIEW_DONE:
+        if result not in REPAIR_APPLY_DONE_OUTCOMES:
             return result
 
         for sibling in moddb_repair_review_store.matching_items(
@@ -1481,7 +1496,7 @@ def rebase_repair_review_item(
     try:
         result = _rebase_one_review_item(db, store_path, run_id, item)
         for member in moddb_repair_review_store.matching_items(
-            store_path, run_id, item, statuses=("pending", "invalid", "stale")
+            store_path, run_id, item, statuses=REPAIR_REBASE_STATUSES
         ):
             if int(member["item_index"]) != int(item["item_index"]):
                 _rebase_one_review_item(db, store_path, run_id, member)

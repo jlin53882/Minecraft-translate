@@ -22,6 +22,7 @@ from translation_tool.core.lm_format_policy import (
     normalize_legacy_prompt,
 )
 from translation_tool.utils.app_paths import get_resource_root
+from translation_tool.utils.cache_registry import register_cache
 from translation_tool.utils.text_matching import (
     build_term_prefix_index,
     contains_term,
@@ -702,6 +703,14 @@ def _load_index(root: Path) -> OfficialLocaleIndex:
 def load_official_locale_index(root: str | None = None) -> OfficialLocaleIndex:
     """依資源根目錄載入並快取一次官方語系索引。"""
     return _load_index(Path(root) if root else get_resource_root())
+
+
+def clear_official_locale_cache() -> None:
+    """清除官方語系索引的 lru_cache。"""
+    load_official_locale_index.cache_clear()
+
+
+register_cache("core.official_locale.index", clear_official_locale_cache)
 
 
 def official_translation_for_item(item: dict[str, Any]) -> str | None:
