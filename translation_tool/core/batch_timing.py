@@ -1,0 +1,66 @@
+"""批次計時欄位的 canonical 名稱與舊欄位別名。
+
+事件與 metrics 一律以毫秒的 ``*_ms`` 為 canonical；舊版（智慧校對）輸出的 ``*_seconds`` 欄位
+仍存在於既有歷史資料與事件，讀取端透過 ``timing_seconds`` 取值，不再各自維護名稱對照。
+"""
+
+from __future__ import annotations
+
+from collections.abc import Mapping
+from typing import Any, Final
+
+TIMING_SCHEMA_VERSION: Final = 1
+
+# canonical 毫秒欄位 -> 依優先順序嘗試的舊版秒數欄位。
+LEGACY_SECONDS_ALIASES: Final[dict[str, tuple[str, ...]]] = {
+    "api_ms": ("api_seconds", "api_elapsed_seconds"),
+    "response_parse_ms": ("parse_seconds",),
+    "quota_wait_ms": ("rate_limit_wait_seconds",),
+    "retry_backoff_ms": ("retry_wait_seconds",),
+    "network_retry_wait_ms": ("network_retry_wait_seconds",),
+    "prompt_build_ms": ("preparation_seconds",),
+    "history_write_ms": ("result_write_seconds",),
+    "validation_repair_api_ms": ("validation_repair_api_seconds",),
+    "planning_ms": ("planning_seconds",),
+    "total_ms": ("duration_seconds", "elapsed_seconds"),
+}
+
+
+def _number(value: Any) -> float | None:
+    """可轉成非負數的值回傳 float，其餘回傳 None。"""
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        return max(0.0, float(value))
+    except (TypeError, ValueError):
+        return None
+
+
+def timing_seconds(source: Mapping[str, Any], canonical_ms: str) -> float | None:
+    """從 ``source`` 取得某個計時欄位的秒數：先讀 canonical ``*_ms``，再讀舊版秒數別名。"""
+    ms = _number(source.get(canonical_ms))
+    if ms is not None:
+        return ms / 1000
+    for legacy in LEGACY_SECONDS_ALIASES.get(canonical_ms, ()):
+        seconds = _number(source.get(legacy))
+        if seconds is not None:
+            return seconds
+    return None
+
+
+def timing_ms(source: Mapping[str, Any], canonical_ms: str) -> int | None:
+    """同 ``timing_seconds``，但以整數毫秒回傳。"""
+    seconds = timing_seconds(source, canonical_ms)
+    return None if seconds is None else round(seconds * 1000)
+
+
+def with_legacy_seconds(event: Mapping[str, Any]) -> dict[str, Any]:
+    """回傳補上舊版 ``*_seconds`` 別名的事件複本（只補缺的欄位，不覆蓋既有值）。"""
+    result = dict(event)
+    for canonical, legacy_names in LEGACY_SECONDS_ALIASES.items():
+        ms = _number(result.get(canonical))
+        if ms is None:
+            continue
+        for legacy in legacy_names:
+            result.setdefault(legacy, round(ms / 1000, 3))
+    return result

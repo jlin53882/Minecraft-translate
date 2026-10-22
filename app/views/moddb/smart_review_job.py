@@ -14,6 +14,7 @@ import flet as ft
 from app.services_impl.moddb_smart_review_service import (
     get_moddb_smart_review_run_breakdown_from_path,
     run_moddb_smart_review_from_path,
+    timing_seconds,
 )
 from app.tasks.operation_registry import (
     CommitPolicy,
@@ -301,12 +302,12 @@ class SmartReviewJob:
                     f"第 {timing.get('batch_number', '?')} 批 "
                     f"（{timing.get('ordinal_start', '?')}～"
                     f"{timing.get('ordinal_end', '?')}）完成："
-                    f"準備 {_format_timing(timing.get('preparation_seconds'))}、"
-                    f"等待配額 {_format_timing(timing.get('rate_limit_wait_seconds'))}、"
-                    f"重試等待 {_format_timing(timing.get('retry_wait_seconds'))}、"
-                    f"API {_format_timing(timing.get('api_seconds'))}、"
-                    f"解析 {_format_timing(timing.get('parse_seconds'))}、"
-                    f"寫入 JSON {_format_timing(timing.get('result_write_seconds'))}、"
+                    f"準備 {_format_timing(timing_seconds(timing, 'prompt_build_ms'))}、"
+                    f"等待配額 {_format_timing(timing_seconds(timing, 'quota_wait_ms'))}、"
+                    f"重試等待 {_format_timing(timing_seconds(timing, 'retry_backoff_ms'))}、"
+                    f"API {_format_timing(timing_seconds(timing, 'api_ms'))}、"
+                    f"解析 {_format_timing(timing_seconds(timing, 'response_parse_ms'))}、"
+                    f"寫入 JSON {_format_timing(timing_seconds(timing, 'history_write_ms'))}、"
                     f"本批 {_format_timing(timing.get('elapsed_seconds'))}；"
                     f"請求 {timing.get('attempts', 0)} 次。",
                     "warning" if new_errors else "info",
@@ -400,7 +401,7 @@ class SmartReviewJob:
             )
             session.add_log(
                 f"{prefix}[第 {attempt} 次嘗試] API 成功："
-                f"耗時={_format_timing(event.get('api_elapsed_seconds'))}，"
+                f"耗時={_format_timing(timing_seconds(event, 'api_ms'))}，"
                 f"狀態碼={event.get('http_status', '?')}，"
                 f"完成原因={event.get('finish_reason') or '-'}，"
                 f"預期/回傳={event.get('expected_count', '?')}/"
@@ -456,7 +457,7 @@ class SmartReviewJob:
             )
             session.add_log(
                 f"{prefix}[第 {attempt} 次嘗試] 驗證修復 API 成功："
-                f"耗時={_format_timing(event.get('api_elapsed_seconds'))}，"
+                f"耗時={_format_timing(timing_seconds(event, 'api_ms'))}，"
                 f"狀態碼={event.get('http_status', '?')}，"
                 f"預期/回傳={event.get('expected_count', '?')}/"
                 f"{event.get('actual_count', '?')}，{token_text}。",
@@ -577,16 +578,16 @@ class SmartReviewJob:
             f"{event.get('ordinal_end', '?')}，實際 {event.get('actual_count', '?')} 筆；"
             f"校對請求 {event.get('smart_review_attempts', 0)}、"
             f"重試 {event.get('retry_count', 0)}、"
-            f"配額等待 {_format_timing(event.get('rate_limit_wait_seconds'))}、"
-            f"重試等待 {_format_timing(event.get('retry_wait_seconds'))}、"
-            f"網路重試等待 {_format_timing(event.get('network_retry_wait_seconds'))}、"
-            f"API {_format_timing(event.get('api_seconds'))}、"
-            f"解析 {_format_timing(event.get('parse_seconds'))}、"
-            f"寫入 JSON {_format_timing(event.get('result_write_seconds'))}、"
+            f"配額等待 {_format_timing(timing_seconds(event, 'quota_wait_ms'))}、"
+            f"重試等待 {_format_timing(timing_seconds(event, 'retry_backoff_ms'))}、"
+            f"網路重試等待 {_format_timing(timing_seconds(event, 'network_retry_wait_ms'))}、"
+            f"API {_format_timing(timing_seconds(event, 'api_ms'))}、"
+            f"解析 {_format_timing(timing_seconds(event, 'response_parse_ms'))}、"
+            f"寫入 JSON {_format_timing(timing_seconds(event, 'history_write_ms'))}、"
             f"驗證修復 {event.get('validation_repair_attempts', 0)} 次、"
             f"修復有效 +{event.get('repaired_valid_count', 0)}、"
             f"修復後仍無效 +{event.get('repaired_invalid_count', 0)}、"
-            f"修復 API {_format_timing(event.get('validation_repair_api_seconds'))}、"
+            f"修復 API {_format_timing(timing_seconds(event, 'validation_repair_api_ms'))}、"
             f"本批 {_format_timing(event.get('elapsed_seconds'))}；"
             f"有效={event.get('valid_count', 0)}、"
             f"無效={event.get('invalid_count', 0)}、"
@@ -643,29 +644,23 @@ class SmartReviewJob:
         if not isinstance(metrics, dict) or "selection_seconds" not in metrics:
             return
 
-        def seconds(common_key: str, legacy_key: str | None = None) -> float:
-            """把秒數格式化為可讀的計時文字；沒有數值時顯示 --:--。"""
-            value = metrics.get(common_key)
-            if value is not None:
-                try:
-                    return max(0.0, float(value) / 1000)
-                except (TypeError, ValueError):
-                    pass
-            return max(0.0, float(metrics.get(legacy_key or common_key) or 0))
+        def seconds(canonical_ms: str) -> float:
+            """取得計時欄位的秒數（先讀 ``*_ms``，再讀舊版秒數欄位）；沒有數值時為 0。"""
+            return timing_seconds(metrics, canonical_ms) or 0.0
 
-        total = seconds("total_ms", "duration_seconds")
+        total = seconds("total_ms")
         session.add_log(
             f"耗時拆解：搜尋 {_format_timing(metrics.get('selection_seconds'))}、"
-            f"規劃 {_format_timing(seconds('planning_ms', 'planning_seconds'))}、"
-            f"提示詞 {_format_timing(seconds('prompt_build_ms', 'preparation_seconds'))}、"
-            f"API {_format_timing(seconds('api_ms', 'api_seconds'))}、"
-            f"等待配額 {_format_timing(seconds('quota_wait_ms', 'rate_limit_wait_seconds'))}、"
-            f"重試等待 {_format_timing(seconds('retry_backoff_ms', 'retry_wait_seconds'))}、"
+            f"規劃 {_format_timing(seconds('planning_ms'))}、"
+            f"提示詞 {_format_timing(seconds('prompt_build_ms'))}、"
+            f"API {_format_timing(seconds('api_ms'))}、"
+            f"等待配額 {_format_timing(seconds('quota_wait_ms'))}、"
+            f"重試等待 {_format_timing(seconds('retry_backoff_ms'))}、"
             f"網路重試等待 {_format_timing(seconds('network_retry_wait_ms'))}、"
-            f"解析 {_format_timing(seconds('response_parse_ms', 'parse_seconds'))}、"
+            f"解析 {_format_timing(seconds('response_parse_ms'))}、"
             f"驗證 {_format_timing(seconds('validation_ms'))}、"
-            f"寫入 JSON {_format_timing(seconds('history_write_ms', 'result_write_seconds'))}、"
-            f"驗證修復 API {_format_timing(metrics.get('validation_repair_api_seconds'))}、"
+            f"寫入 JSON {_format_timing(seconds('history_write_ms'))}、"
+            f"驗證修復 API {_format_timing(timing_seconds(metrics, 'validation_repair_api_ms'))}、"
             f"總計 {_format_timing(total)}；"
             f"共 {metrics.get('batch_count', 0)} 批、"
             f"校對請求 {metrics.get('request_attempts', metrics.get('smart_review_attempts', 0))} 次、"

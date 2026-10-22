@@ -6,6 +6,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from translation_tool.core.batch_timing import timing_seconds
 from translation_tool.core.format_diagnostics import (
     FormatDiagnosticsResult,
     analyze_format_diagnostics,
@@ -385,4 +386,5 @@ __all__ = [
     "save_moddb_smart_review_draft_from_path",
     "smart_review_format_diagnostics",
     "smart_review_model_options",
+    "timing_seconds",
 ]
