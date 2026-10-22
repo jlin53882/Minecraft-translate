@@ -131,6 +131,19 @@ def test_batch_reviewer_paginates_and_preserves_selection_across_pages(
     assert reviewer.apply_btn.disabled is False
 
 
+def test_batch_candidate_header_separates_wrapped_chips_from_text(ctx):
+    """批量候選標題不可把 expand 文字放進可換行 Row。"""
+    reviewer = SmartReviewBatchReviewer(ctx, on_changed=lambda: None)
+
+    card = reviewer._candidate_card(_candidate())
+    details = card.content.controls[1]
+    header = details.controls[0]
+
+    assert isinstance(header, ft.Column)
+    assert isinstance(header.controls[1], ft.Row)
+    assert header.controls[1].wrap is True
+
+
 def test_dialog_switches_between_single_and_batch_review_modes(db, monkeypatch):
     """智慧校對審查分頁提供逐筆／批量模式切換而不重建外層分頁。"""
     from app.views.moddb.smart_review_dialog import SmartReviewDialog

@@ -431,24 +431,23 @@ class SmartReviewBatchReviewer:
             on_change=toggle,
             disabled=self._busy or not can_select,
         )
+        header = ft.Column(
+            [
+                ft.Text(
+                    f"{row.mod_id}:{shorten(row.key, 76)}",
+                    size=12.5,
+                    weight=ft.FontWeight.BOLD,
+                    selectable=True,
+                    font_family=design.FONT_MONO,
+                ),
+                ft.Row(chips, spacing=5, wrap=True),
+            ],
+            spacing=5,
+            tight=True,
+        )
         details = ft.Column(
             [
-                ft.Row(
-                    [
-                        ft.Text(
-                            f"{row.mod_id}:{shorten(row.key, 76)}",
-                            size=12.5,
-                            weight=ft.FontWeight.BOLD,
-                            selectable=True,
-                            font_family=design.FONT_MONO,
-                            expand=True,
-                        ),
-                        ft.Row(chips, spacing=5, wrap=True),
-                    ],
-                    spacing=8,
-                    wrap=True,
-                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                ),
+                header,
                 self._text_line("原文", row.en_us),
                 self._text_line("目前", row.current_zh_tw),
                 self._text_line("建議", initial_draft_text(row), main=True),
