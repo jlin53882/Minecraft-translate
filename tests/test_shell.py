@@ -1027,3 +1027,15 @@ def test_statusbar_does_not_carry_a_finished_translations_model_into_the_next_ta
         lm_key_health.set_active_model_owner_resolver(lambda: None)
         lm_key_health.set_active_model(None)
         s.dispose()
+
+
+def test_resize_is_forwarded_to_subscribed_pages(shell):
+    from app.ui.page_resize import subscribe_page_resize
+
+    seen = []
+    unsubscribe = subscribe_page_resize(shell.page, seen.append)
+    shell.page.width = 1000
+    shell._on_resize("evt")
+    unsubscribe()
+    shell._on_resize("evt2")
+    assert seen == ["evt"]

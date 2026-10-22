@@ -251,7 +251,7 @@ def test_lookup_species_merges_concurrent_requests_for_same_name(
 
 
 # ---------------------------------------------------------------- 對話框生命週期
-def _sync(callback, *args):
+def _sync(callback, *args, **_kwargs):
     callback(*args)
 
 
@@ -517,7 +517,7 @@ def test_dialog_pages_candidates_without_a_cap(tmp_path, monkeypatch):
             ],
         )
         dialog = SpeciesCandidateDialog(mock_page(), lambda: db, "1.21.1", None, None)
-        dialog._post = lambda callback, *args: callback(*args)
+        dialog._post = lambda callback, *args, **_kwargs: callback(*args)
         dialog._launch = lambda work, name, *, cancellable=False: (work(), True)[1]
         dialog._scan()
         assert dialog.result.total_candidates == PAGE_SIZE * 2 + 5
@@ -618,7 +618,7 @@ def test_species_suggestion_query_updates_and_allows_retry(
     suggestion = module.SpeciesSuggestion(
         mock_page(), lambda _t: None, lambda: changes.append(1)
     )
-    suggestion._post = lambda callback, *args: callback(*args)
+    suggestion._post = lambda callback, *args, **_kwargs: callback(*args)
     suggestion._launch = lambda work: (work(), True)[1]
     monkeypatch.setattr(module, "_safe_lookup", lambda _name, **_kw: FAILED)
     suggestion.query("Ginkgo biloba")
@@ -1479,7 +1479,7 @@ def test_species_suggestion_keeps_failed_refresh_over_cached_not_found(
 
     page = mock_page()
     suggestion = module.SpeciesSuggestion(page, lambda _t: None, lambda: None)
-    suggestion._post = lambda callback, *args: callback(*args)
+    suggestion._post = lambda callback, *args, **_kwargs: callback(*args)
     suggestion._launch = lambda work: (work(), True)[1]
     species_cache._species_cache_data["Olea europaea"] = ""
 
@@ -1529,7 +1529,7 @@ def test_species_suggestion_retry_after_failed_refresh_reconnects(
     from app.views.moddb import species_suggestion as module
 
     suggestion = module.SpeciesSuggestion(mock_page(), lambda _t: None, lambda: None)
-    suggestion._post = lambda callback, *args: callback(*args)
+    suggestion._post = lambda callback, *args, **_kwargs: callback(*args)
     suggestion._launch = lambda work: (work(), True)[1]
     species_cache._species_cache_data["Olea europaea"] = ""
     network = _FlakyOlive()

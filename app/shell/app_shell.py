@@ -41,6 +41,7 @@ from app.tasks.operation_registry import (
 from app.ui import design
 from app.ui.design import C
 from app.ui.keyboard_shortcuts import create_keyboard_handler
+from app.ui.page_resize import notify_page_resize
 from app.ui.safe_file_picker import SafeFilePicker
 from app.ui.snack import show_snack
 from app.view_registry import (
@@ -1083,6 +1084,7 @@ class AppShell:
     # -- 視窗 ----------------------------------------------------------------
 
     def _on_resize(self, _e=None) -> None:
+        """依視窗寬度切換側欄精簡模式，並轉發給訂閱 resize 的頁面。"""
         try:
             width = self.page.width or self.page.window.width or 0
         except Exception:  # noqa: BLE001
@@ -1091,6 +1093,7 @@ class AppShell:
         if compact != self.sidebar.compact:
             self.sidebar.set_compact(compact)
             self._safe_update()
+        notify_page_resize(self.page, _e)
 
     def _safe_update(self) -> None:
         try:

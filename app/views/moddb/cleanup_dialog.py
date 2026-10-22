@@ -28,6 +28,7 @@ from app.ui.dialogs import (
     dialog_dimensions,
     present_page_dialog,
 )
+from app.ui.page_post import post_to_ui
 from app.ui.snack import show_snack
 from app.views.moddb.formatting import format_count, kind_label
 from translation_tool.utils.log_unit import log_exception, log_info, log_warning
@@ -614,19 +615,14 @@ class CleanupDialog:
             show_snack(self.page, "應用程式正在關閉，未啟動操作。", C.GOLD)
 
     def _post(self, callback, *args) -> None:
-        """把背景結果排回畫面執行緒（沒有 ``run_task`` 的測試頁面直接呼叫）。"""
-        run_task = getattr(self.page, "run_task", None)
-        try:
-            if callable(run_task):
-
-                async def runner() -> None:
-                    callback(*args)
-
-                run_task(runner)
-            else:
-                callback(*args)
-        except Exception as exc:  # noqa: BLE001 - a disposed page may reject the callback
-            log_warning(f"Mod 資料庫清理結果無法排回畫面：{exc!r}")
+        """把背景結果排回畫面執行緒；排程失敗時（頁面已卸載）收回忙碌狀態。"""
+        post_to_ui(
+            self.page,
+            callback,
+            *args,
+            label="Mod 資料庫清理結果",
+            on_failure=lambda: self._set_busy(False),
+        )
 
     def _set_busy(self, busy: bool, text: str = "") -> None:
         self._busy = busy

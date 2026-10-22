@@ -30,6 +30,7 @@ from app.tasks.operation_registry import (
 )
 from app.tasks.task_session import TaskSession, tag_session
 from app.ui.design import C
+from app.ui.page_post import post_to_ui
 from app.ui.snack import show_snack
 from translation_tool.utils.log_unit import log_exception, log_warning
 from translation_tool.utils.ui_mirror import session_task_scope
@@ -229,7 +230,13 @@ class SpeciesBulkLookup:
             session.start()
         except Exception:  # noqa: BLE001 - admission closed while app shuts down
             log_exception(f"{TASK_NAME}無法開始")
-            self._post(self._finish, generation, "error", [])
+            self._post(
+                self._finish,
+                generation,
+                "error",
+                [],
+                on_failure=lambda: self._abandon(generation),
+            )
             return
         total = len(pending)
         session.add_log(f"開始查詢 {total} 個學名候選")
@@ -265,7 +272,13 @@ class SpeciesBulkLookup:
         session.add_log(message, "info" if stop_reason == "completed" else "warning")
         session.set_summary({"stop_reason": stop_reason, "queried": len(lookups)})
         session.finish()
-        self._post(self._finish, generation, stop_reason, lookups)
+        self._post(
+            self._finish,
+            generation,
+            stop_reason,
+            lookups,
+            on_failure=lambda: self._abandon(generation),
+        )
 
     # ------------------------------------------------------------------ UI 執行緒
     def _record(
@@ -288,19 +301,17 @@ class SpeciesBulkLookup:
         color = C.EM if stop_reason == "completed" else C.GOLD
         show_snack(self.page, summary_text(STOP_MESSAGES[stop_reason], lookups), color)
 
-    def _post(self, callback, *args) -> None:
-        run_task = getattr(self.page, "run_task", None)
-        try:
-            if callable(run_task):
+    def _post(self, callback, *args, on_failure=None) -> None:
+        """把背景結果排回畫面執行緒；排程失敗時由呼叫端提供的 ``on_failure`` 回收狀態。"""
+        post_to_ui(
+            self.page, callback, *args, label="學名批次查詢結果", on_failure=on_failure
+        )
 
-                async def runner() -> None:
-                    callback(*args)
-
-                run_task(runner)
-            else:
-                callback(*args)
-        except Exception as exc:  # noqa: BLE001 - disposed page
-            log_warning("學名批次查詢結果無法排回畫面：%r", exc)
+    def _abandon(self, generation: int) -> None:
+        """結束通知無法排回畫面時，收回執行中狀態，讓下一次查詢可以啟動。"""
+        if generation == self._generation:
+            self.running = False
+            self.session = None
 
 
 def bulk_lookup_for(page: ft.Page) -> SpeciesBulkLookup:

@@ -250,9 +250,9 @@ def test_page_flow_names_exist_in_their_page_scope():
 def test_page_flow_scope_ignores_comments_docstrings_and_other_pages():
     """防止退化：別頁的方法、或只出現在 docstring 的字，不能讓流程文件通過。"""
     cache_scope = _scope_names(PAGE_SCOPES["cache"]) | _scope_names(PAGE_SHARED)
-    assert "will_unmount" in _code_names(ROOT / "app" / "views" / "lm_view.py")
+    assert "LmDbOptions" in _code_names(ROOT / "app" / "views" / "lm_view.py")
     assert "will_unmount" in (ROOT / "app" / "ui" / "poller.py").read_text("utf-8")
-    assert "will_unmount" not in cache_scope
+    assert "LmDbOptions" not in cache_scope
 
 
 def test_documented_class_members_exist():
