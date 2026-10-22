@@ -64,3 +64,30 @@ def with_legacy_seconds(event: Mapping[str, Any]) -> dict[str, Any]:
         for legacy in legacy_names:
             result.setdefault(legacy, round(ms / 1000, 3))
     return result
+
+
+def format_duration(seconds: float | None) -> str:
+    """把耗時格式化成給人看的文字：不足 1 秒用毫秒，其餘用秒（30s、1.5s），超過 1 分鐘用分秒。
+
+    沒有數值時回傳 ``--``。例如 30000 ms 顯示為 ``30s``，850 ms 顯示為 ``850ms``。
+    """
+    value = _number(seconds)
+    if value is None:
+        return "--"
+    if value < 1:
+        return f"{round(value * 1000)}ms"
+    if value < 60:
+        text = f"{value:.2f}".rstrip("0").rstrip(".")
+        return f"{text}s"
+    total = round(value)
+    hours, rest = divmod(total, 3600)
+    minutes, secs = divmod(rest, 60)
+    if hours:
+        return f"{hours}h{minutes:02d}m{secs:02d}s"
+    return f"{minutes}m{secs:02d}s"
+
+
+def format_duration_ms(milliseconds: Any) -> str:
+    """``format_duration`` 的毫秒版本；``None``／非數值回傳 ``--``。"""
+    value = _number(milliseconds)
+    return format_duration(None if value is None else value / 1000)

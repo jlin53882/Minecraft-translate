@@ -37,3 +37,25 @@ def test_alias_table_is_well_formed():
     assert len(legacy) == len(set(legacy))
     assert all(key.endswith("_ms") for key in LEGACY_SECONDS_ALIASES)
     assert all(name.endswith("_seconds") for name in legacy)
+
+
+def test_format_duration_reads_naturally():
+    from translation_tool.core.batch_timing import format_duration, format_duration_ms
+
+    assert format_duration_ms(30000) == "30s"
+    assert format_duration_ms(1500) == "1.5s"
+    assert format_duration_ms(850) == "850ms"
+    assert format_duration_ms(0) == "0ms"
+    assert format_duration(95) == "1m35s"
+    assert format_duration(3725) == "1h02m05s"
+    assert format_duration(None) == "--"
+    assert format_duration_ms("?") == "--"
+
+
+def test_batch_event_text_shows_seconds_not_raw_ms():
+    from translation_tool.core.common_batch_executor import format_batch_event
+
+    text = format_batch_event(
+        {"kind": "retry_wait", "attempt": 1, "retry_number": 1, "wait_ms": 30000}
+    )
+    assert "30s" in text and "30000" not in text

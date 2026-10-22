@@ -12,6 +12,7 @@ from typing import Any
 import flet as ft
 
 from app.services_impl.moddb_smart_review_service import (
+    format_timing_duration,
     get_moddb_smart_review_run_breakdown_from_path,
     run_moddb_smart_review_from_path,
     timing_seconds,
@@ -109,14 +110,8 @@ def format_duration(seconds: float | None) -> str:
 
 
 def _format_timing(seconds: float | None) -> str:
-    """把診斷用的耗時格式化成毫秒或秒，避免短階段都顯示成 00:00。"""
-    if seconds is None:
-        return "--"
-    try:
-        value = max(0.0, float(seconds))
-    except (TypeError, ValueError):
-        return "--"
-    return f"{value * 1000:.0f} ms" if value < 1 else f"{value:.2f} s"
+    """把診斷用的耗時格式化成毫秒、秒或分秒，避免短階段都顯示成 00:00。"""
+    return format_timing_duration(seconds)
 
 
 def _event_bool(value: object) -> str:

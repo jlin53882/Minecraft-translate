@@ -12,6 +12,7 @@ from typing import Any, Protocol, runtime_checkable
 
 import requests
 
+from translation_tool.core.batch_timing import format_duration_ms
 from translation_tool.utils.cancellation import TaskCancelled
 
 logger = logging.getLogger(__name__)
@@ -774,7 +775,7 @@ def format_batch_event(event: Mapping[str, Any]) -> str:
     if kind == "attempt_success":
         return (
             f"{prefix}[第 {event.get('attempt', '?')} 次嘗試] API 成功："
-            f"耗時 {event.get('elapsed_ms', 0)} ms，"
+            f"耗時 {format_duration_ms(event.get('elapsed_ms', 0))}，"
             f"狀態碼={event.get('http_status', '?')}，"
             f"預期/回傳={event.get('expected_count', '?')}/{event.get('actual_count', '?')}。"
         )
@@ -785,23 +786,23 @@ def format_batch_event(event: Mapping[str, Any]) -> str:
             f"錯誤分類={event.get('error_class', event.get('error_kind', 'unknown'))}，"
             f"逾時={event.get('timeout', False)}，過載={event.get('overload', False)}，"
             f"速率限制={event.get('rate_limit', False)}，"
-            f"Retry-After={event.get('retry_after_ms', '?')} ms，"
+            f"Retry-After={format_duration_ms(event.get('retry_after_ms', '?'))}，"
             f"是否重試={event.get('will_retry', False)}。"
         )
     if kind == "retry_wait":
         return (
             f"{prefix}[第 {event.get('attempt', '?')} 次嘗試] 重試等待："
             f"第 {event.get('retry_number', '?')} 次，"
-            f"等待 {event.get('wait_ms', 0)} ms；"
+            f"等待 {format_duration_ms(event.get('wait_ms', 0))}；"
             f"原因={event.get('retry_reason') or 'transient'}。"
         )
     if kind == "network_retry_wait":
         return (
             f"{prefix}[網路第 {event.get('network_attempt', '?')} 次] "
-            f"網路重試等待 {event.get('wait_ms', '?')} ms。"
+            f"網路重試等待 {format_duration_ms(event.get('wait_ms', '?'))}。"
         )
     if kind == "rate_limit_wait":
-        return f"{prefix} 配額等待：{event.get('wait_ms', '?')} ms。"
+        return f"{prefix} 配額等待：{format_duration_ms(event.get('wait_ms', '?'))}。"
     if kind == "rate_limit_resume":
         return f"{prefix} 配額等待結束，繼續請求。"
     if kind in {"retry_resume", "network_retry_resume"}:
@@ -809,17 +810,17 @@ def format_batch_event(event: Mapping[str, Any]) -> str:
     if kind == "timing":
         return (
             f"{prefix} 計時：{event.get('field_name') or '-'} "
-            f"{event.get('elapsed_ms', 0)} ms。"
+            f"{format_duration_ms(event.get('elapsed_ms', 0))}。"
         )
     if kind == "key_rotation":
         return f"{prefix} 重試策略切換 API Key：原因={event.get('reason') or '-'}。"
     if kind == "batch_complete":
         return (
             f"{prefix} 完成：已處理 {event.get('processed_count', 0)} 筆，"
-            f"API {event.get('api_ms', event.get('elapsed_ms', 0))} ms，"
-            f"解析 {event.get('response_parse_ms', 0)} ms，"
-            f"驗證 {event.get('validation_ms', 0)} ms，"
-            f"寫入 {event.get('commit_ms', 0)} ms，"
+            f"API {format_duration_ms(event.get('api_ms', event.get('elapsed_ms', 0)))}，"
+            f"解析 {format_duration_ms(event.get('response_parse_ms', 0))}，"
+            f"驗證 {format_duration_ms(event.get('validation_ms', 0))}，"
+            f"寫入 {format_duration_ms(event.get('commit_ms', 0))}，"
             f"重試 {event.get('retry_count', 0)} 次，狀態={event.get('status') or '-'}。"
         )
     if kind == "run_complete":

@@ -596,7 +596,7 @@ def test_job_runs_in_background_and_derives_logs(tmp_path, monkeypatch):
     assert any(
         "[智慧校對][批次 1/2][第 1 次嘗試]" in text
         and "第 1/3 次重試" in text
-        and "等待 30.00 s" in text
+        and "等待 30s" in text
         for text in texts
     )
     assert any("驗證修復開始" in text for text in texts)

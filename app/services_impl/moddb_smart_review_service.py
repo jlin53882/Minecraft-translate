@@ -6,6 +6,9 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from translation_tool.core.batch_timing import (
+    format_duration as format_timing_duration,
+)
 from translation_tool.core.batch_timing import timing_seconds
 from translation_tool.core.format_diagnostics import (
     FormatDiagnosticsResult,
@@ -374,6 +377,7 @@ __all__ = [
     "apply_moddb_smart_review_manual_edit_from_path",
     "count_moddb_smart_review_candidates_for_run_from_path",
     "count_moddb_smart_review_candidates_from_path",
+    "format_timing_duration",
     "get_moddb_smart_review_run_breakdown_from_path",
     "get_moddb_smart_review_run_from_path",
     "list_moddb_smart_review_candidates_from_path",
