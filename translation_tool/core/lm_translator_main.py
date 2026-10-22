@@ -885,6 +885,17 @@ def estimate_batch_fixed_input_tokens(
     return _build_batch_prompt_context(batch_items, lm_cfg).batch_fit_input_tokens
 
 
+def _profile_max_batch_sizes(lm_cfg: dict) -> dict[str, int | str | None]:
+    """各批次 profile 的初始批次上限；設定缺漏時使用 schema 預設值。"""
+    return {
+        profile_name: lm_cfg.get(
+            f"initial_batch_size_{key}",
+            get_default(f"lm_translator.initial_batch_size_{key}"),
+        )
+        for profile_name, key in _BATCH_PROFILE_SIZE_KEYS.items()
+    }
+
+
 def _build_batch_runtime(
     batch_items: list[dict],
     total: int | None,
@@ -896,13 +907,7 @@ def _build_batch_runtime(
     lm_cfg = config_snapshot.get("lm_translator", {})
     provider = lm_cfg.get("provider", "gemini")
     profile = _detect_batch_profile(batch_items)
-    max_sizes = {
-        profile_name: lm_cfg.get(
-            f"initial_batch_size_{key}",
-            get_default(f"lm_translator.initial_batch_size_{key}"),
-        )
-        for profile_name, key in _BATCH_PROFILE_SIZE_KEYS.items()
-    }
+    max_sizes = _profile_max_batch_sizes(lm_cfg)
     max_size = int(max_sizes.get(profile, max_sizes["patch"]) or 1)
     try:
         rpm_cooldown = max(0.0, float(lm_cfg.get("rpm_cooldown_sec", RPM_COOLDOWN_SEC)))
