@@ -211,7 +211,7 @@ class TestConfigExampleJsonSchema完整性:
         # 用真實的 EXAMPLE_PATH
         example_path = cm.EXAMPLE_PATH
         if not example_path.exists():
-            pytest.skip("config.example.json 不存在於 repo（正常行為）")
+            pytest.fail(f"config.example.json 必須存在於 repo：{example_path}")
 
         with example_path.open(encoding="utf-8") as f:
             example = json.load(f)
@@ -236,7 +236,7 @@ class TestConfigExampleJsonSchema完整性:
 
         example_path = cm.EXAMPLE_PATH
         if not example_path.exists():
-            pytest.skip("config.example.json 不存在")
+            pytest.fail(f"config.example.json 必須存在於 repo：{example_path}")
 
         with example_path.open(encoding="utf-8") as f:
             example = json.load(f)
