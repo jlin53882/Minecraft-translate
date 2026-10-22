@@ -19,7 +19,7 @@ from translation_tool.translation_db.models import (
     EntryFilter,
     QualityFilter,
 )
-from translation_tool.translation_db.schema import SRC_MANUAL
+from translation_tool.translation_db.sql_helpers import translation_review_sql
 
 _ID_CHUNK = 5000
 
@@ -162,17 +162,9 @@ class BulkReviewMixin:
         回傳 ``(候選 id, 會被寫入筆數, 其中譯文不同筆數, 狀態摘要)``；摘要涵蓋所有原文相同的
         其他版本的生效譯文、來源與人工審核狀態，確認時重算並逐筆比對。
         """
-        manual_review = (
-            "m.review_status"
-            if self.has_review_state
-            else f"CASE WHEN m.source={SRC_MANUAL} THEN 'legacy_unknown' END"
-        )
+        manual_review = translation_review_sql("m", self.has_review_state)
         revision = "m.revision" if self.has_translation_revision else "NULL"
-        effective_review = (
-            "f2.review_status"
-            if self.has_review_state
-            else f"CASE WHEN f2.source={SRC_MANUAL} THEN 'legacy_unknown' END"
-        )
+        effective_review = translation_review_sql("f2", self.has_review_state)
         effective_revision = "et2.revision" if self.has_translation_revision else "NULL"
         sql = (
             "SELECT e.id, e2.id, f.zh_tw, f2.zh_tw, f2.source, m.zh_tw, "

@@ -14,18 +14,17 @@ from typing import Any
 
 from translation_tool.translation_db.models import SmartReviewSnapshot
 from translation_tool.translation_db.schema import SRC_MANUAL
-from translation_tool.translation_db.sql_helpers import like_pattern
+from translation_tool.translation_db.sql_helpers import (
+    effective_review_sql,
+    like_pattern,
+)
 
 _SMART_REVIEW_TWIN_GROUP_CHUNK_SIZE = 128
 
 
 def _effective_review_sql(alias: str = "f") -> str:
     """回傳智慧校對查詢共用的生效審核狀態條件。"""
-    return (
-        f"CASE WHEN {alias}.review_status IN ('unreviewed', 'reviewed', 'legacy_unknown') "
-        f"THEN {alias}.review_status WHEN {alias}.source={SRC_MANUAL} "
-        f"THEN 'legacy_unknown' WHEN {alias}.source IS NOT NULL THEN 'unreviewed' END"
-    )
+    return effective_review_sql(alias, True)
 
 
 def _smart_review_row_group(row: Sequence[Any]) -> tuple[Any, ...]:
