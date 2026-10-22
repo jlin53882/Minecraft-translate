@@ -113,6 +113,7 @@ CacheView（主入口）
 
 ## 維護注意
 
+0. 快取與圖示預覽的 reserve → launch → 輪詢 `done_event` 流程，在未准入（正在關閉）與 launch 失敗時都會結束 operation 並以通知／狀態還原回報；各處的結果型別與 UI 回應不同，不抽成通用框架。
 1. 大量事件回呼觸發背景操作；避免舊任務覆蓋新狀態：總覽動作靠 `run_cache_action` 的 busy 鎖，查詢靠 `_query_seq`。
 2. 新增總覽動作：加 service → 加 `_on_*` handler → `_run_action` 包裝 → `_refresh_disabled_state`。
 3. 歷史事件 append 後要 `_render_shard_history` / `_render_query_history` 重繪。

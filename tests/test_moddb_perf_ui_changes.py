@@ -597,3 +597,44 @@ def test_result_table_has_row_for_guide_only_structure_issue():
     assert "指南結構" in table_text
     assert "位置無法可靠判定" in table_text
     assert "段落分隔空行" in table_text
+
+
+def test_batch_replace_dialog_manual_paging_clamps_and_toggles_buttons(db):
+    """手刻分頁的固定行為：換頁夾在首末頁之間，頁碼文字與前後頁按鈕狀態一致。"""
+    from app.views.moddb.batch_replace_dialog import (
+        PREVIEW_PAGE_SIZE,
+        BatchReplaceDialog,
+    )
+    from tests.conftest import mock_page
+
+    count = PREVIEW_PAGE_SIZE * 2 + 20
+    db.ingest(
+        "1.21.1",
+        [
+            ScanItem(KIND_LANG, "foo", f"k.{i:03d}", f"A{i}", f"地獄{i}")
+            for i in range(count)
+        ],
+    )
+    plan = db.preview_batch_replace(EntryFilter(version="1.21.1"), "地獄", "下界")
+    dialog = BatchReplaceDialog(
+        mock_page(),
+        lambda: db,
+        EntryFilter(version="1.21.1"),
+        lambda _r: None,
+        operation_launcher=lambda target, **_kwargs: (target(), True)[1],
+    )
+    dialog.plan = dialog.selection_plan = plan
+    dialog._plan_catalog = db.source_catalog
+    dialog._render()
+    assert "第 1/3 頁" in dialog.page_text.value
+    assert dialog.previous_btn.disabled is True
+    assert dialog.next_btn.disabled is False
+
+    dialog._turn(-1)  # 已在第一頁：不會變成負數
+    assert dialog.preview_page == 0
+    for _ in range(5):
+        dialog._turn(1)
+    assert dialog.preview_page == 2  # 夾在最後一頁
+    assert "第 3/3 頁" in dialog.page_text.value
+    assert dialog.next_btn.disabled is True
+    assert dialog.previous_btn.disabled is False

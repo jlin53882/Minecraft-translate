@@ -197,3 +197,7 @@ ExtractorView._handle_preview_*_click()    ← 驗證 mods_dir 後解析輸出�
 - `app/views/extractor/extractor_dialog_ui.py`：提取對話框的控制項建構與 UI 更新輔助（log／進度／統計，皆只依賴 `ctx`）。
 - `app/views/extractor/extractor_preview_dialog.py`：`open_preview_dialog`（預覽對話框，確認後呼叫 `extractor_dialog.open_extractor_dialog`）。
 - 行為由 `tests/test_extractor_dialog_behavior.py`、`tests/test_extractor_preview_dialog_behavior.py` 以公開入口驅動驗證。
+
+## `cancelled` 的語意
+
+提取與預覽對話框裡的 `state["cancelled"]`、`cancelled_flag` 是對話框內部的布林取消旗標（使用者按取消、執行迴圈輪詢），不是任務狀態字串；它與 TaskSession 的取消狀態、KubeJS 翻譯流程的任務狀態屬於不同 domain，不共用列舉。
