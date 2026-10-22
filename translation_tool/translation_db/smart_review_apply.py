@@ -431,11 +431,7 @@ class SmartReviewApplyMixin:
                 status=SmartReviewStatus.STALE,
                 validation_error=stale_reason,
             )
-            return (
-                "manual_reviewed"
-                if result_status == "manual_reviewed"
-                else "stale"
-            )
+            return "manual_reviewed" if result_status == "manual_reviewed" else "stale"
         history.update_candidate(
             ordinal,
             draft_zh_tw=proposed
@@ -455,9 +451,7 @@ class SmartReviewApplyMixin:
         candidate = history.get_candidate(ordinal)
         if candidate is None or candidate.get("status") != SmartReviewStatus.READY:
             return "not_ready"
-        updated = history.update_candidate(
-            ordinal, status=SmartReviewStatus.REJECTED
-        )
+        updated = history.update_candidate(ordinal, status=SmartReviewStatus.REJECTED)
         return SmartReviewStatus.REJECTED if updated else "not_ready"
 
     def _realign_smart_review_candidate_history_batch(
@@ -602,8 +596,7 @@ class SmartReviewApplyMixin:
         *,
         action: str = "apply",
         progress_cancel: Callable[[], bool] | None = None,
-        progress: Callable[[int, int, tuple[int, str, str | None]], None]
-        | None = None,
+        progress: Callable[[int, int, tuple[int, str, str | None]], None] | None = None,
         actor: str = "智慧校對",
     ) -> tuple[tuple[tuple[int, str, str | None], ...], bool] | None:
         """在同一 JSON 歷史鎖內處理一個 run 的多筆候選。

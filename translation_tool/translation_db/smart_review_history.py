@@ -154,8 +154,7 @@ class SmartReviewHistoryBatch:
                 (
                     item
                     for item in chunk.get("candidates") or []
-                    if isinstance(item, dict)
-                    and int(item.get("ordinal") or 0) == value
+                    if isinstance(item, dict) and int(item.get("ordinal") or 0) == value
                 ),
                 None,
             )

@@ -555,9 +555,7 @@ def _apply_moddb_smart_review_legacy_batch(
                     candidate.run_id, candidate.ordinal
                 )
             else:
-                status, error = _override_stale_smart_review_candidate(
-                    db, candidate
-                )
+                status, error = _override_stale_smart_review_candidate(db, candidate)
             item = SmartReviewBatchItemResult(
                 candidate.run_id,
                 candidate.ordinal,
@@ -575,9 +573,7 @@ def _apply_moddb_smart_review_legacy_batch(
             )
         results.append(item)
         if progress is not None:
-            progress(
-                {"processed": index, "total": len(selected), "item": item}
-            )
+            progress({"processed": index, "total": len(selected), "item": item})
     return results, cancelled
 
 
