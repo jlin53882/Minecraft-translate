@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from translation_tool.translation_db import smart_review, smart_review_history
+from translation_tool.translation_db import smart_review, smart_review_history_codec
 from translation_tool.translation_db.models import SMART_REVIEW_FILTER_GROUPS
 from translation_tool.translation_db.smart_review_history import (
     SmartReviewHistoryStore,
@@ -111,6 +111,8 @@ def test_sql_status_literals_are_known_statuses():
     [
         "translation_tool/translation_db/smart_review.py",
         "translation_tool/translation_db/smart_review_history.py",
+        "translation_tool/translation_db/smart_review_history_codec.py",
+        "translation_tool/translation_db/smart_review_history_manifest.py",
         "app/views/moddb/smart_review_reviewer.py",
     ],
 )
@@ -149,4 +151,4 @@ def test_clear_smart_review_caches():
 
 
 def test_history_module_uses_shared_groups():
-    assert smart_review_history._PROCESSED_CANDIDATE_STATUSES is PROCESSED_STATUSES
+    assert smart_review_history_codec.PROCESSED_CANDIDATE_STATUSES is PROCESSED_STATUSES

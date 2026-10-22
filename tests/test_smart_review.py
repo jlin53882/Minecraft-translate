@@ -29,6 +29,9 @@ from translation_tool.translation_db.smart_review import (
     run_smart_review,
     smart_review_response_schema,
 )
+from translation_tool.translation_db.smart_review_history_manifest import (
+    ChunkManifestRepository,
+)
 
 
 def _seed(db: TranslationDB) -> None:
@@ -853,7 +856,7 @@ def test_smart_review_candidate_page_reads_json_once_for_total_and_row(db, monke
         batch_size=3,
     )
     reads = 0
-    original_read = SmartReviewHistoryStore._read_unlocked
+    original_read = ChunkManifestRepository.read_unlocked
 
     def counted_read(history, value):
         """計算同一頁查詢實際讀取批次 JSON 的次數。"""
@@ -861,7 +864,7 @@ def test_smart_review_candidate_page_reads_json_once_for_total_and_row(db, monke
         reads += 1
         return original_read(history, value)
 
-    monkeypatch.setattr(SmartReviewHistoryStore, "_read_unlocked", counted_read)
+    monkeypatch.setattr(ChunkManifestRepository, "read_unlocked", counted_read)
     total, rows = db.load_smart_review_candidate_page(
         run_id,
         limit=1,
@@ -904,7 +907,7 @@ def test_smart_review_large_history_uses_manifest_and_partial_chunk_updates(
     ]
 
     read_paths = []
-    original_read = SmartReviewHistoryStore._read_json_path
+    original_read = ChunkManifestRepository.read_json_path
 
     def counted_read(path):
         """記錄單筆讀取實際碰到的 manifest 與分片。"""
@@ -912,14 +915,14 @@ def test_smart_review_large_history_uses_manifest_and_partial_chunk_updates(
         return original_read(path)
 
     monkeypatch.setattr(
-        SmartReviewHistoryStore, "_read_json_path", staticmethod(counted_read)
+        ChunkManifestRepository, "read_json_path", staticmethod(counted_read)
     )
     candidate = store.get_candidate(run_id, snapshots[1].ordinal)
     assert candidate is not None
     assert read_paths == [f"{run_id}.json", "000001.json"]
 
     write_paths = []
-    original_write = SmartReviewHistoryStore._write_json_path_unlocked
+    original_write = ChunkManifestRepository._write_json_path_unlocked
 
     def counted_write(history, path, payload):
         """記錄一次結果 checkpoint 寫入哪些 JSON 檔。"""
@@ -927,7 +930,7 @@ def test_smart_review_large_history_uses_manifest_and_partial_chunk_updates(
         return original_write(history, path, payload)
 
     monkeypatch.setattr(
-        SmartReviewHistoryStore, "_write_json_path_unlocked", counted_write
+        ChunkManifestRepository, "_write_json_path_unlocked", counted_write
     )
     store.record_results(
         run_id,
@@ -958,7 +961,7 @@ def test_smart_review_chunked_create_publishes_manifest_last(db, monkeypatch):
 
     snapshots = db.smart_review_candidates(version="1.21.1", limit=2)
     store = SmartReviewHistoryStore(db.path, storage_chunk_size=1)
-    original_write = SmartReviewHistoryStore._write_chunk_path_unlocked
+    original_write = ChunkManifestRepository._write_chunk_path_unlocked
 
     def fail_second_chunk(history, path, payload):
         """模擬第二個暫存分片寫入失敗。"""
@@ -967,7 +970,7 @@ def test_smart_review_chunked_create_publishes_manifest_last(db, monkeypatch):
         return original_write(history, path, payload)
 
     monkeypatch.setattr(
-        SmartReviewHistoryStore, "_write_chunk_path_unlocked", fail_second_chunk
+        ChunkManifestRepository, "_write_chunk_path_unlocked", fail_second_chunk
     )
     with pytest.raises(OSError, match="simulated chunk write failure"):
         store.create_run(
@@ -988,7 +991,9 @@ def test_smart_review_outer_history_lock_covers_nested_candidate_write(db, monke
     """外層候選狀態交易應持有跨程序鎖，且巢狀寫入只能重用該鎖。"""
     from contextlib import contextmanager
 
-    from translation_tool.translation_db import smart_review_history as history_module
+    from translation_tool.translation_db import (
+        smart_review_history_lock as history_module,
+    )
     from translation_tool.translation_db.smart_review_history import (
         SmartReviewHistoryStore,
     )
@@ -1045,7 +1050,7 @@ def test_smart_review_chunk_manifest_recovers_after_manifest_write_failure(
         requested_limit=2,
         batch_size=1,
     )
-    original_write = SmartReviewHistoryStore._write_unlocked
+    original_write = ChunkManifestRepository.write_unlocked
     fail_once = True
 
     def fail_manifest_once(history, value, payload):
@@ -1056,7 +1061,7 @@ def test_smart_review_chunk_manifest_recovers_after_manifest_write_failure(
             raise OSError("simulated manifest write failure")
         return original_write(history, value, payload)
 
-    monkeypatch.setattr(SmartReviewHistoryStore, "_write_unlocked", fail_manifest_once)
+    monkeypatch.setattr(ChunkManifestRepository, "write_unlocked", fail_manifest_once)
     with pytest.raises(OSError, match="simulated manifest write failure"):
         store.record_results(
             run_id,
@@ -1138,7 +1143,7 @@ def test_smart_review_page_skips_unneeded_chunks_for_absolute_offset(db, monkeyp
         requested_limit=3,
         batch_size=1,
     )
-    original_read = SmartReviewHistoryStore._read_chunk_unlocked
+    original_read = ChunkManifestRepository.read_chunk_unlocked
     read_indexes = []
 
     def counted_chunk_read(history, value, index):
@@ -1147,7 +1152,7 @@ def test_smart_review_page_skips_unneeded_chunks_for_absolute_offset(db, monkeyp
         return original_read(history, value, index)
 
     monkeypatch.setattr(
-        SmartReviewHistoryStore, "_read_chunk_unlocked", counted_chunk_read
+        ChunkManifestRepository, "read_chunk_unlocked", counted_chunk_read
     )
     total, rows = store.page_candidates(run_id, offset=2, limit=1)
     assert total == 3
@@ -1176,7 +1181,7 @@ def test_smart_review_reconcile_reads_only_target_chunks(db, monkeypatch):
         requested_limit=3,
         batch_size=1,
     )
-    original_read = SmartReviewHistoryStore._read_chunk_unlocked
+    original_read = ChunkManifestRepository.read_chunk_unlocked
     read_indexes = []
 
     def counted_chunk_read(history, value, index):
@@ -1185,7 +1190,7 @@ def test_smart_review_reconcile_reads_only_target_chunks(db, monkeypatch):
         return original_read(history, value, index)
 
     monkeypatch.setattr(
-        SmartReviewHistoryStore, "_read_chunk_unlocked", counted_chunk_read
+        ChunkManifestRepository, "read_chunk_unlocked", counted_chunk_read
     )
     assert (
         store.reconcile_applied(
@@ -1767,7 +1772,7 @@ def test_smart_review_recovers_dead_owner_without_losing_completed_candidates(
     db, monkeypatch
 ):
     """驗證意外退出後下一次讀取會收斂 running JSON，保留已完成候選。"""
-    from translation_tool.translation_db import smart_review_history
+    from translation_tool.translation_db import smart_review_history_recovery
     from translation_tool.translation_db.smart_review_history import (
         SmartReviewHistoryStore,
     )
@@ -1800,7 +1805,9 @@ def test_smart_review_recovers_dead_owner_without_losing_completed_candidates(
     payload = json.loads(path.read_text(encoding="utf-8"))
     payload["owner_pid"] = 999999
     path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
-    monkeypatch.setattr(smart_review_history, "_process_is_alive", lambda _pid: False)
+    monkeypatch.setattr(
+        smart_review_history_recovery, "_process_is_alive", lambda _pid: False
+    )
     SmartReviewHistoryStore._recovery_checked.discard(store.directory)
 
     run = db.get_smart_review_run(run_id)
@@ -1832,7 +1839,7 @@ def test_smart_review_does_not_recover_live_owner(db, monkeypatch):
         batch_size=1,
     )
     monkeypatch.setattr(
-        "translation_tool.translation_db.smart_review_history._process_is_alive",
+        "translation_tool.translation_db.smart_review_history_recovery._process_is_alive",
         lambda _pid: True,
     )
 
