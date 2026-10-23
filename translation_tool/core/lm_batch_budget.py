@@ -528,6 +528,122 @@ class BatchBudgetTracker:
             output_tokens=value * factor + n * estimator.output_item_overhead_tokens,
         )
 
+    def _fit_character_prefix(
+        self,
+        items: Sequence[dict[str, Any]],
+        cfg: BudgetConfig,
+        fixed_input_tokens: float,
+        out_budget: float,
+        in_budget: float,
+    ) -> int:
+        """Fit an additive character estimate in one forward pass."""
+        estimator = cfg.token_estimator
+        factor = self.output_factor(cfg)
+        value_tokens = 0.0
+        input_tokens = float(fixed_input_tokens)
+        taken = 0
+        for candidate_count, item in enumerate(items, start=1):
+            value_tokens += estimate_value_tokens(item, estimator=estimator)
+            input_tokens += (
+                estimate_input_item_tokens(item, estimator=estimator)
+                + estimator.input_item_overhead_tokens
+            )
+            output_tokens = (
+                value_tokens * factor
+                + candidate_count * estimator.output_item_overhead_tokens
+            )
+            if candidate_count > 1 and (
+                input_tokens > in_budget or output_tokens > out_budget
+            ):
+                break
+            taken = candidate_count
+        return max(taken, 1)
+
+    def _estimate_prefix(
+        self,
+        items: Sequence[dict[str, Any]],
+        candidate_count: int,
+        cfg: BudgetConfig,
+        fixed_input_tokens: float,
+        item_ids: Sequence[str],
+        estimates: dict[int, BatchEstimate],
+    ) -> BatchEstimate:
+        """Estimate and cache one exact tiktoken payload prefix."""
+        cached = estimates.get(candidate_count)
+        if cached is None:
+            cached = self.estimate(
+                items[:candidate_count],
+                cfg,
+                fixed_input_tokens,
+                item_ids=item_ids[:candidate_count],
+            )
+            estimates[candidate_count] = cached
+        return cached
+
+    def _fit_tiktoken_prefix(
+        self,
+        items: Sequence[dict[str, Any]],
+        cap: int,
+        cfg: BudgetConfig,
+        fixed_input_tokens: float,
+        out_budget: float,
+        in_budget: float,
+        item_ids: Sequence[str],
+    ) -> int:
+        """Fit exact payload estimates with logarithmic prefix probing."""
+        estimates: dict[int, BatchEstimate] = {}
+        lower = 0
+        probe = 1
+        while True:
+            candidate_estimate = self._estimate_prefix(
+                items,
+                probe,
+                cfg,
+                fixed_input_tokens,
+                item_ids,
+                estimates,
+            )
+            if (
+                candidate_estimate.input_tokens > in_budget
+                or candidate_estimate.output_tokens > out_budget
+            ):
+                upper = probe
+                break
+            lower = probe
+            if probe == cap:
+                return cap
+            probe = min(probe * 2, cap)
+
+        while lower + 1 < upper:
+            middle = (lower + upper) // 2
+            candidate_estimate = self._estimate_prefix(
+                items,
+                middle,
+                cfg,
+                fixed_input_tokens,
+                item_ids,
+                estimates,
+            )
+            if (
+                candidate_estimate.input_tokens <= in_budget
+                and candidate_estimate.output_tokens <= out_budget
+            ):
+                lower = middle
+            else:
+                upper = middle
+
+        # Keep the final decision tied to the exact selected payload and IDs.
+        if lower > 0:
+            self._estimate_prefix(
+                items,
+                lower,
+                cfg,
+                fixed_input_tokens,
+                item_ids,
+                estimates,
+            )
+        return max(lower, 1)
+
     def fit(
         self,
         items: Sequence[dict[str, Any]],
@@ -554,93 +670,23 @@ class BatchBudgetTracker:
         resolved_item_ids = _resolve_item_ids(cap, limited_item_ids)
 
         estimator = cfg.token_estimator
-        factor = self.output_factor(cfg)
-        if not _uses_tiktoken(estimator):
-            # Character estimates are additive.  Keep this path linear instead
-            # of rebuilding every prefix, while preserving the same formula as
-            # ``estimate()`` (including the fallback request overhead).
-            value_tokens = 0.0
-            input_tokens = float(fixed_input_tokens)
-            taken = 0
-            for candidate_count, item in enumerate(limited_items, start=1):
-                value_tokens += estimate_value_tokens(item, estimator=estimator)
-                input_tokens += (
-                    estimate_input_item_tokens(item, estimator=estimator)
-                    + estimator.input_item_overhead_tokens
-                )
-                output_tokens = (
-                    value_tokens * factor
-                    + candidate_count * estimator.output_item_overhead_tokens
-                )
-                if candidate_count > 1 and (
-                    input_tokens > in_budget or output_tokens > out_budget
-                ):
-                    break
-                taken = candidate_count
-            return max(taken, 1)
-
-        # A tiktoken payload is not additive because JSON separators and BPE
-        # boundaries depend on the whole prefix.  Use exponential probing plus
-        # binary search, but keep every probe as an exact provider payload so
-        # the selected prefix still has the same IDs and wire shape as the
-        # request that will be sent.
-        estimates: dict[int, BatchEstimate] = {}
-
-        def _estimate_prefix(candidate_count: int) -> BatchEstimate:
-            cached = estimates.get(candidate_count)
-            if cached is None:
-                cached = self.estimate(
-                    limited_items[:candidate_count],
-                    cfg,
-                    fixed_input_tokens,
-                    item_ids=resolved_item_ids[:candidate_count],
-                )
-                estimates[candidate_count] = cached
-            return cached
-
-        def _fits(candidate_count: int) -> bool:
-            candidate_estimate = _estimate_prefix(candidate_count)
-            return (
-                candidate_estimate.input_tokens <= in_budget
-                and candidate_estimate.output_tokens <= out_budget
+        if _uses_tiktoken(estimator):
+            return self._fit_tiktoken_prefix(
+                limited_items,
+                cap,
+                cfg,
+                fixed_input_tokens,
+                out_budget,
+                in_budget,
+                resolved_item_ids,
             )
-
-        lower = 0
-        upper: int | None = None
-        probe = 1
-        while True:
-            if _fits(probe):
-                lower = probe
-                if probe == cap:
-                    break
-                next_probe = min(probe * 2, cap)
-                if next_probe == probe:
-                    break
-                probe = next_probe
-                continue
-            upper = probe
-            break
-
-        if lower == cap:
-            return cap
-        if upper is None:
-            # The exponential probes may stop below a non-power-of-two cap.
-            upper = cap
-            if _fits(upper):
-                return upper
-
-        while lower + 1 < upper:
-            middle = (lower + upper) // 2
-            if _fits(middle):
-                lower = middle
-            else:
-                upper = middle
-
-        # Re-read the exact selected payload from the cache before returning.
-        # This keeps the final decision tied to the same IDs and serialization
-        # that were used for the budget checks above.
-        _estimate_prefix(lower)
-        return max(lower, 1)
+        return self._fit_character_prefix(
+            limited_items,
+            cfg,
+            fixed_input_tokens,
+            out_budget,
+            in_budget,
+        )
 
     # -- 回饋 --------------------------------------------------------------
 
