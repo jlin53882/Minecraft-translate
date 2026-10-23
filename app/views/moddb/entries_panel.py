@@ -618,7 +618,6 @@ class EntriesPanel(ft.Column):
     def _row_tile(self, row: EntryRow) -> ft.Control:
         return build_entry_tile(self, row, catalog=self._render_source_catalog)
 
-    # ------------------------------------------------------------------ 選取
     def select(self, entry_id: int | None) -> None:
         db = self.db()
         self._sync_database_identity(
@@ -1139,6 +1138,7 @@ class EntriesPanel(ft.Column):
         self, entry_ids: list[int], drafts: dict[int, str], version: str
     ) -> None:
         """從批次機翻跳進來：只列「特殊字元不一致、沒寫入」的條目，並預填 AI 譯文供修正。"""
+        self._sync_database_identity(self._database_identity(self.db()))
         self.version = version
         self.mod_id = None
         self.kind = None

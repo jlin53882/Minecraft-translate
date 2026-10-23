@@ -266,6 +266,8 @@ def _build_filter_card(panel) -> None:
 
 
 def database_identity(db):
+    if db is None:
+        return None
     path = getattr(db, "path", None)
     try:
         stat = path.stat()
