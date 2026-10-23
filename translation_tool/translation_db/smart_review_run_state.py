@@ -283,12 +283,14 @@ class SmartReviewRunState:
         elif isinstance(error, requests.ConnectionError):
             kind = "connection_error"
         classification = classify_provider_error(error, status)
-        overload = bool(status == 503 or kind == "service_unavailable")
+        overload = classification["overload"]
         if overload:
             self.bump("overload_count")
             self.executor.metrics.overload_count += 1
         self.executor.metrics.error_batches.append(batch_number)
-        code = str(getattr(error, "code", "") or "").lower()
+        retry_after_ms = classification["retry_after_ms"]
+        if retry_after_seconds is not None:
+            retry_after_ms = round(float(retry_after_seconds) * 1000)
         self.emit_event(
             "attempt_failure",
             batch_index=batch_number,
@@ -300,19 +302,12 @@ class SmartReviewRunState:
             provider_error_code=classification["provider_error_code"],
             exception_type=type(error).__name__,
             overload=overload,
-            rate_limit=bool(status == 429 or "quota" in code),
-            timeout=bool(isinstance(error, requests.Timeout) or kind == "timeout"),
+            rate_limit=classification["rate_limit"],
+            timeout=classification["timeout"],
             connection=classification["connection"],
-            retry_after_ms=(
-                round(float(retry_after_seconds) * 1000)
-                if retry_after_seconds is not None
-                else None
-            ),
-            will_retry=bool(
-                key_rotated
-                or status in {408, 429, 500, 502, 503, 504}
-                or isinstance(error, (requests.Timeout, requests.ConnectionError))
-            ),
+            retry_after_ms=retry_after_ms,
+            retryable=classification["retryable"],
+            will_retry=bool(key_rotated or classification["retryable"]),
             key_rotated=key_rotated,
             network_attempts=int(self.metrics.get("network_attempts", 0)),
             network_retry_count=int(self.metrics.get("network_retry_count", 0)),

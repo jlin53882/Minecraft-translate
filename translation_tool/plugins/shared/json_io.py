@@ -8,22 +8,26 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any
 
-def read_json_dict(path: Path) -> Dict[str, Any]:
+
+def read_json_dict(path: Path) -> dict[str, Any]:
     """讀取 JSON 檔案並回傳頂層物件（字典）。"""
     with path.open("r", encoding="utf-8") as f:
         data = json.load(f)
     if not isinstance(data, dict):
-        raise ValueError(f"JSON must be an object/dict: {path}")
+        # 呼叫端與測試以 ValueError 處理格式錯誤，維持例外型別
+        raise ValueError(f"JSON must be an object/dict: {path}")  # noqa: TRY004
     return data
 
-def write_json_dict(path: Path, data: Dict[str, str]) -> None:
+
+def write_json_dict(path: Path, data: dict[str, str]) -> None:
     """將字典寫入 JSON 檔案（UTF-8 編碼）。"""
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8") as wf:
         json.dump(data, wf, ensure_ascii=False, indent=2)
 
-def collect_json_files(input_dir: Path) -> List[Path]:
+
+def collect_json_files(input_dir: Path) -> list[Path]:
     """收集輸入目錄下所有 JSON 檔案（遞迴）。"""
     return sorted(input_dir.rglob("*.json"))

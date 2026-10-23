@@ -4,11 +4,11 @@
 > 範圍：`app/`、`translation_tool/`、`main.py` 內所有帶 `noqa: BLE001／S110／S112` 的位置。
 > 命令列 QA 工具（`md_extract_qa.py`、`md_inject_qa.py`）的 `print` 為刻意保留，不在此表。
 
-共 **354** 項；其中 **106** 項尚未在程式碼內寫明原因（以「分類」說明處理方式）。
+共 **349** 項；其中 **103** 項尚未在程式碼內寫明原因（以「分類」說明處理方式）。
 
 | 分類 | 數量 | 意義 |
 |---|---|---|
-| 已記錄／回報 | 319 | 例外處理本身有 log、提示、回報錯誤事件或重新丟出；寬鬆捕捉是為了不中斷整批流程 |
+| 已記錄／回報 | 314 | 例外處理本身有 log、提示、回報錯誤事件或重新丟出；寬鬆捕捉是為了不中斷整批流程 |
 | UI／畫面保護 | 18 | UI 層的畫面更新、icon 快取等；失敗只影響顯示，不影響資料 |
 | 盡力而為（靜默） | 17 | 引擎層、只有 `pass`／`continue`／回傳常數；失敗不影響結果（例如進度回報、還原失敗時以原始例外為準） |
 
@@ -51,6 +51,10 @@
 | `app/shell/app_shell.py:read_app_version` | BLE001 | UI／畫面保護 | 版本只是裝飾，讀不到不影響啟動 |
 | `app/shell/app_shell.py:AppShell._on_resize` | BLE001 | UI／畫面保護 | （未寫原因；見分類） |
 | `app/shell/app_shell.py:_default_mode` | BLE001 | 已記錄／回報 | 設定壞掉時用預設深色 |
+| `app/ui/page_post.py:post_to_ui` | BLE001 | 已記錄／回報 | a disposed page may reject the callback |
+| `app/ui/page_post.py:post_to_ui` | BLE001 | 已記錄／回報 | recovery must not raise into the worker |
+| `app/ui/page_resize.py:subscribe_page_resize` | BLE001 | 已記錄／回報 | 無法掛在頁面上時退化成空操作訂閱 |
+| `app/ui/page_resize.py:notify_page_resize` | BLE001 | 已記錄／回報 | 一個 view 的 resize 失敗不可拖垮其他 view |
 | `app/ui/safe_file_picker.py:SafeFilePicker._notify_unsupported` | BLE001 | 已記錄／回報 | 控制項未掛載時只能記錄 |
 | `app/ui/safe_file_picker.py:SafeFilePicker._is_web` | BLE001 | UI／畫面保護 | 控制項尚未掛載：視為非 Web，交給原本的行為 |
 | `app/ui/snack.py:_clear_existing_snacks` | BLE001/S110 | UI／畫面保護 | （未寫原因；見分類） |
@@ -135,18 +139,15 @@
 | `app/views/moddb/bulk_review_dialog.py:BulkReviewDialog._preview.work` | BLE001 | 已記錄／回報 | worker boundary reports unexpected failures |
 | `app/views/moddb/bulk_review_dialog.py:BulkReviewDialog._confirm.work` | BLE001 | 已記錄／回報 | worker boundary reports unexpected failures |
 | `app/views/moddb/bulk_review_dialog.py:BulkReviewDialog._launch` | BLE001 | 已記錄／回報 | restore the dialog if the worker cannot launch |
-| `app/views/moddb/bulk_review_dialog.py:BulkReviewDialog._post` | BLE001 | 已記錄／回報 | a disposed page may reject the callback |
 | `app/views/moddb/cleanup_dialog.py:CleanupDialog._refresh_overview.work` | BLE001 | 已記錄／回報 | worker boundary reports unexpected failures |
 | `app/views/moddb/cleanup_dialog.py:CleanupDialog._export.work` | BLE001 | 已記錄／回報 | worker boundary reports unexpected failures |
 | `app/views/moddb/cleanup_dialog.py:CleanupDialog._preview.work` | BLE001 | 已記錄／回報 | worker boundary reports unexpected failures |
 | `app/views/moddb/cleanup_dialog.py:CleanupDialog._apply.work` | BLE001 | 已記錄／回報 | worker boundary reports unexpected failures |
 | `app/views/moddb/cleanup_dialog.py:CleanupDialog._revert.work` | BLE001 | 已記錄／回報 | worker boundary reports unexpected failures |
 | `app/views/moddb/cleanup_dialog.py:CleanupDialog._launch` | BLE001 | 已記錄／回報 | restore the dialog if the worker cannot launch |
-| `app/views/moddb/cleanup_dialog.py:CleanupDialog._post` | BLE001 | 已記錄／回報 | a disposed page may reject the callback |
 | `app/views/moddb/entries_panel.py:EntriesPanel._scroll_list_to.scroll` | BLE001 | 已記錄／回報 | 尚未掛上頁面時不影響清單 |
 | `app/views/moddb/entries_panel.py:EntriesPanel._scroll_list_to` | BLE001 | 已記錄／回報 | 排程失敗不影響清單 |
 | `app/views/moddb/entries_panel.py:EntriesPanel._save.save_in_background` | BLE001 | 已記錄／回報 | worker boundary reports unexpected failures |
-| `app/views/moddb/entries_panel.py:EntriesPanel._save.save_in_background` | BLE001 | 已記錄／回報 | a disposed page may reject the result callback |
 | `app/views/moddb/entries_panel.py:EntriesPanel._save` | BLE001 | 已記錄／回報 | restore the editor if the worker cannot launch |
 | `app/views/moddb/entries_panel.py:EntriesPanel._safe_update` | BLE001 | 已記錄／回報 | 頁面已卸載時不影響資料操作 |
 | `app/views/moddb/lm_db_options.py:LmDbOptions._update` | BLE001 | 已記錄／回報 | control may be temporarily detached |
@@ -169,13 +170,10 @@
 | `app/views/moddb/species_bulk_lookup.py:SpeciesBulkLookup.start` | BLE001 | 已記錄／回報 | restore state after launch failure |
 | `app/views/moddb/species_bulk_lookup.py:SpeciesBulkLookup._run` | BLE001 | 已記錄／回報 | admission closed while app shuts down |
 | `app/views/moddb/species_bulk_lookup.py:SpeciesBulkLookup._run` | BLE001 | 已記錄／回報 | worker boundary |
-| `app/views/moddb/species_bulk_lookup.py:SpeciesBulkLookup._post` | BLE001 | 已記錄／回報 | disposed page |
 | `app/views/moddb/species_dialog.py:SpeciesCandidateDialog._start_scope_options_load.work` | BLE001 | 已記錄／回報 | worker boundary |
 | `app/views/moddb/species_dialog.py:SpeciesCandidateDialog._scan.work` | BLE001 | 已記錄／回報 | worker boundary |
 | `app/views/moddb/species_dialog.py:SpeciesCandidateDialog._launch` | BLE001 | 已記錄／回報 | restore UI after launch failure |
-| `app/views/moddb/species_dialog.py:SpeciesCandidateDialog._post` | BLE001 | 已記錄／回報 | disposed page |
 | `app/views/moddb/species_suggestion.py:SpeciesSuggestion._launch` | BLE001 | 已記錄／回報 | restore UI after launch failure |
-| `app/views/moddb/species_suggestion.py:SpeciesSuggestion._post` | BLE001 | 已記錄／回報 | disposed page |
 | `app/views/moddb/translate_panel.py:TranslatePanel._launch_retranslation_worker` | BLE001 | 已記錄／回報 | caller restores the UI state |
 | `app/views/moddb/translate_panel.py:TranslatePanel._poll` | BLE001 | 已記錄／回報 | 輪詢失敗不能讓畫面永遠卡在「執行中」 |
 | `app/views/moddb/translate_panel.py:TranslatePanel._safe_update` | BLE001 | 已記錄／回報 | 頁面已卸載時不影響機翻本身 |
@@ -198,13 +196,10 @@
 | `app/views/rules_view.py:RulesView._initial_load.run` | BLE001 | 已記錄／回報 | 失敗要顯示在 UI |
 | `app/views/translation/translation_actions.py:_safe_add_log` | BLE001/S110 | UI／畫面保護 | （未寫原因；見分類） |
 | `app/views/translation/translation_actions.py:_safe_page_update` | BLE001/S110 | UI／畫面保護 | （未寫原因；見分類） |
-| `app/views/translation/translation_actions.py:run_ftb` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/views/translation/translation_actions.py:run_ftb.worker` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/views/translation/translation_actions.py:run_ftb.worker` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
-| `app/views/translation/translation_actions.py:run_kjs` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/views/translation/translation_actions.py:run_kjs.worker` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/views/translation/translation_actions.py:run_kjs.worker` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
-| `app/views/translation/translation_actions.py:run_md` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/views/translation/translation_actions.py:run_md.worker` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/views/translation/translation_actions.py:run_md.worker` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/views/translation_view.py:<module>` | BLE001 | 已記錄／回報 | 服務載入失敗時整頁仍可開啟，但原因必須留在 log |

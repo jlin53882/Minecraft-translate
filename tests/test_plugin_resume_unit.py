@@ -14,6 +14,7 @@ from translation_tool.core.lm_translator_skeleton import (
     JsonCheckpointAdapter,
     make_checkpoint_adapter,
 )
+from translation_tool.utils import file_replace
 
 
 @pytest.fixture(autouse=True)
@@ -333,7 +334,7 @@ class TestResumeTask:
             os, "fsync", lambda fd: (synced.append("file"), real_fsync(fd))
         )
         monkeypatch.setattr(
-            plugin_resume, "fsync_directory", lambda path: synced.append("dir")
+            file_replace, "fsync_directory", lambda path: synced.append("dir")
         )
 
         with _task():

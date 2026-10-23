@@ -32,7 +32,7 @@ from translation_tool.utils.cache_manager import (
 from translation_tool.utils.cancellation import TaskCancelled, is_cancelled
 from translation_tool.utils.config_manager import load_config
 from translation_tool.utils.config_schema import get_default
-from translation_tool.utils.log_unit import log_error, log_info
+from translation_tool.utils.log_unit import log_error, log_info, log_warning
 from translation_tool.utils.redaction import redact_text
 
 
@@ -42,21 +42,36 @@ def invoke_translation_batch(
     total: int | None,
     event_callback=None,
 ):
-    """呼叫翻譯入口，並相容不接受 telemetry callback 的舊測試替身。"""
-    if event_callback is None:
-        return translate_batch_smart(batch, total)
+    """呼叫翻譯入口，依其簽名傳入 ``total`` 與 telemetry callback。
+
+    - ``total`` 預設以位置參數傳入；只有宣告為 keyword-only 的 ``total`` 才用關鍵字傳入。
+    - 有 callback 但入口不接受 ``event_callback`` 時（舊測試替身），退回只傳 batch／total，
+      並記一則警告：這批的等待與重試統計不會有 provider 事件。
+    """
+    kwargs: dict[str, Any] = {}
+    args: tuple[Any, ...] = (batch, total)
     try:
-        parameters = inspect.signature(translate_batch_smart).parameters.values()
-        accepts_callback = any(
-            parameter.name == "event_callback"
-            or parameter.kind is inspect.Parameter.VAR_KEYWORD
-            for parameter in parameters
-        )
+        parameters = inspect.signature(translate_batch_smart).parameters
     except (TypeError, ValueError):
-        accepts_callback = False
-    if accepts_callback:
-        return translate_batch_smart(batch, total, event_callback=event_callback)
-    return translate_batch_smart(batch, total)
+        parameters = {}
+    total_parameter = parameters.get("total")
+    if (
+        total_parameter is not None
+        and total_parameter.kind is inspect.Parameter.KEYWORD_ONLY
+    ):
+        args, kwargs = (batch,), {"total": total}
+    if event_callback is not None:
+        accepts_callback = "event_callback" in parameters or any(
+            parameter.kind is inspect.Parameter.VAR_KEYWORD
+            for parameter in parameters.values()
+        )
+        if accepts_callback:
+            kwargs["event_callback"] = event_callback
+        else:
+            log_warning(
+                "[SharedLM] 翻譯入口不接受 event_callback，這批的 provider 等待事件不會被記錄"
+            )
+    return translate_batch_smart(*args, **kwargs)
 
 
 def _call_translate_batch(
@@ -340,20 +355,15 @@ def translate_items_with_cache_loop(
             ]
             status = "OVERSIZED_ITEM"
         else:
-            request_wait_before = (
-                executor.metrics.quota_wait_ms
-                + executor.metrics.retry_backoff_ms
-                + executor.metrics.network_retry_wait_ms
-            )
-            api_started = time.monotonic()
             batch_handle.attempt_start(expected_count=len(batch), max_attempts=0)
             try:
-                translated, status = _call_translate_batch(
-                    translate_batch_smart,
-                    batch,
-                    total_for_smart,
-                    batch_handle.forward_provider_event,
-                )
+                with batch_handle.timed_request() as request:
+                    translated, status = _call_translate_batch(
+                        translate_batch_smart,
+                        batch,
+                        total_for_smart,
+                        batch_handle.forward_provider_event,
+                    )
             except TaskCancelled:
                 # 等待 API 限流時被取消
                 batch_handle.emit("cancelled", status="cancelled")
@@ -372,20 +382,13 @@ def translate_items_with_cache_loop(
                 emit_progress(f"❌ [SharedLM] 翻譯發生異常: {last_error}")
                 return make_result("FAILED")
             else:
-                request_elapsed_ms = (time.monotonic() - api_started) * 1000
-                request_wait_ms = (
-                    executor.metrics.quota_wait_ms
-                    + executor.metrics.retry_backoff_ms
-                    + executor.metrics.network_retry_wait_ms
-                    - request_wait_before
-                )
                 batch_handle.attempt_success(
-                    elapsed_ms=max(0.0, request_elapsed_ms - request_wait_ms),
+                    elapsed_ms=request.api_ms,
                     http_status=200,
                     expected_count=len(batch),
                     actual_count=len(translated or []),
-                    request_elapsed_ms=round(request_elapsed_ms),
-                    retry_wait_ms=round(request_wait_ms),
+                    request_elapsed_ms=request.request_ms,
+                    retry_wait_ms=request.wait_ms,
                 )
             completed_calls += 1
         parse_started = time.monotonic()

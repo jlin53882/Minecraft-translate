@@ -30,6 +30,9 @@ from app.ui.snack import show_snack
 class CacheQueryMixin:
     """查詢頁：查詢 widgets、搜尋、結果顯示／分頁與單筆編輯。"""
 
+    # 搜尋請求序號；每次搜尋遞增，晚到的舊結果或舊失敗以此丟棄（建構時也會重設為 0）。
+    _query_seq: int = 0
+
     # =========================================================
     # Query phase-2: search block
     # =========================================================
@@ -384,7 +387,7 @@ class CacheQueryMixin:
             self._apply_query_results(self._compute_query_results(query, mode, targets))
             return
 
-        seq = self._query_seq = getattr(self, "_query_seq", 0) + 1
+        seq = self._query_seq = self._query_seq + 1
         self.query_search_hint.update()
         if get_page_operation_registry(self.page) is None:
 
@@ -394,7 +397,7 @@ class CacheQueryMixin:
                         self._compute_query_results, query, mode, targets
                     )
                 except Exception as ex:  # noqa: BLE001 - event loop displays the error
-                    self._notify(f"搜尋失敗：{ex}", "error")
+                    self._report_search_failure(seq, f"搜尋失敗：{ex}")
                     return
                 if seq == self._query_seq:
                     self._apply_query_results(results)
@@ -409,7 +412,7 @@ class CacheQueryMixin:
             shutdown=ShutdownPolicy.DRAIN_ONLY,
         )
         if not operation.admitted:
-            self._notify("應用程式正在關閉，未啟動查詢", "warn")
+            self._report_search_failure(seq, "應用程式正在關閉，未啟動查詢", "warn")
             return
         result = {}
 
@@ -422,19 +425,29 @@ class CacheQueryMixin:
 
         if not operation.launch(search):
             operation.finish(error=RuntimeError("cache query worker was not launched"))
-            self._notify("無法啟動快取查詢", "error")
+            self._report_search_failure(seq, "無法啟動快取查詢")
             return
 
         async def _search():
             while not operation.done_event.is_set():
                 await asyncio.sleep(0.02)
             if "error" in result:
-                self._notify(f"搜尋失敗：{result['error']}", "error")
+                self._report_search_failure(seq, f"搜尋失敗：{result['error']}")
                 return
             if seq == self._query_seq:  # 只套用最後一次搜尋
                 self._apply_query_results(result.get("dedup", []))
 
         run_task(_search)
+
+    def _report_search_failure(
+        self, seq: int, message: str, kind: str = "error"
+    ) -> None:
+        """回報搜尋失敗並收掉「搜尋中」提示；已被較新搜尋取代的請求不得覆蓋新狀態。"""
+        if seq != self._query_seq:
+            return
+        self.query_search_hint.value = "搜尋未完成，請重新搜尋"
+        self.query_search_hint.color = C.RED if kind == "error" else C.GOLD
+        self._notify(message, kind)
 
     def _compute_query_results(self, query: str, mode: str, targets: list) -> list:
         """查詢快取（可在背景執行緒執行；不修改任何控制項）。"""
@@ -502,6 +515,8 @@ class CacheQueryMixin:
 
     def _on_query_clear(self, e):
         """清除搜尋條件與結果"""
+        # 讓尚未完成的背景搜尋失效，避免清除後舊結果晚到又回寫畫面。
+        self._query_seq += 1
         self.tf_query_input.value = ""
         self.query_results = []
         self.query_selected_result = None

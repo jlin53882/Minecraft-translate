@@ -13,23 +13,9 @@ from app.services_impl.moddb_smart_review_service import (
 from app.ui import kit
 from app.ui.design import C
 from app.views.moddb.smart_review_context import SmartReviewContext
+from app.views.moddb.smart_review_run_status import run_status_label
 
 _PAGE_SIZE = 20
-_STATUS = {
-    "completed": ("完成", "em"),
-    "partial": ("部分完成", "gold"),
-    "cancelled": ("已取消", "neutral"),
-    "interrupted": ("意外中斷", "red"),
-    "failed": ("失敗", "red"),
-    "running": ("執行中", "gold"),
-}
-
-
-def run_status_label(status: str, *, active: bool) -> tuple[str, str]:
-    """回傳批次狀態的顯示文字與色調；資料庫標記執行中但實際沒在跑代表已中斷。"""
-    if status == "running" and not active:
-        return "可能已中斷", "red"
-    return _STATUS.get(status, (status or "未知", "neutral"))
 
 
 class SmartReviewHistory:

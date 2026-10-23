@@ -27,7 +27,10 @@ from translation_tool.utils.config_manager import (
     validate_lm_translate_folder_name,
     validate_output_folder_names,
 )
-from translation_tool.utils.config_schema import LEGACY_API_KEY_PLACEHOLDERS
+from translation_tool.utils.config_schema import (
+    LEGACY_API_KEY_PLACEHOLDERS,
+    validate_batch_shrink_factor,
+)
 from translation_tool.utils.redaction import redact_text
 
 logger = logging.getLogger(__name__)
@@ -78,6 +81,8 @@ def _from_control_value(setting: Setting, raw):
                 raise ValueError(f"「{setting.label}」不可空白")
         else:
             value = convert(text)  # 字串或已是數字的值
+        if setting.validator == "batch_shrink_factor":
+            value = validate_batch_shrink_factor(value)
         if setting.minimum is not None:
             value = max(convert(setting.minimum), value)
         return value
@@ -328,6 +333,19 @@ def _priority_source_path_change_needs_review(view, config: dict) -> bool:
     )
 
 
+def _write_failure_message() -> str:
+    """寫入失敗時的提示；既存 config.json 損毀要明說，才不會被當成一般寫入錯誤。"""
+    from app.services_impl.config_service import CONFIG_PATH
+    from translation_tool.utils.config_manager import config_file_unsafe_to_overwrite
+
+    if config_file_unsafe_to_overwrite(CONFIG_PATH):
+        return (
+            "❌ config.json 格式損毀或無法讀取，為避免遺失內容不會覆寫；"
+            "變更仍保留在此頁，請先修復或備份該檔後再儲存。"
+        )
+    return "❌ 無法確認設定檔是否已更新；變更仍保留在此頁，請先檢查 config.json。"
+
+
 def _write_config_with_feedback(
     view, config, save_config_json_fn, *, show_feedback=True
 ) -> bool:
@@ -339,10 +357,7 @@ def _write_config_with_feedback(
     if write_result is not True:
         logger.error("儲存設定未確認成功：writer 未回報 True")
         if show_feedback:
-            show_snack(
-                view.page,
-                "❌ 無法確認設定檔是否已更新；變更仍保留在此頁，請先檢查 config.json。",
-            )
+            show_snack(view.page, _write_failure_message())
         return False
     return True
 

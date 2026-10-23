@@ -370,6 +370,8 @@ def test_closing_pre_scan_generator_joins_background_worker(
             return super().join(timeout)
 
     monkeypatch.setattr(threading, "Thread", ReleaseScannerOnJoinThread)
+    # 進度 yield 預設每 5 秒一次；縮短成 0 讓第一次輪詢就 yield，不必真的等 5 秒。
+    monkeypatch.setattr(extract_module, "YIELD_INTERVAL", 0.0)
 
     def blocking_scan(**_kwargs):
         scan_threads.append(threading.current_thread())

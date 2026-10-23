@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import copy
+import math
 from dataclasses import dataclass
 from typing import Any
 
@@ -735,8 +736,9 @@ SETTINGS: tuple[Setting, ...] = (
         "錯誤縮小比例",
         "batch_limits",
         C_BATCH,
-        "用於：批次失敗時縮小率",
+        "用於：批次失敗時縮小率；需介於 0 與 1 之間（不含）",
         default=0.5,
+        validator="batch_shrink_factor",
     ),
     Setting(
         "lm_translator.rpm_cooldown_sec",
@@ -1071,13 +1073,39 @@ SETTINGS: tuple[Setting, ...] = (
 SETTINGS_BY_PATH: dict[str, Setting] = {s.path: s for s in SETTINGS}
 
 
-def get_default(path: str) -> Any:
+def get_schema_default(path: str) -> Any:
     """回傳某個設定在 schema 的預設值（深拷貝）；路徑不在 schema 時丟 ``KeyError``。
 
     程式裡「設定缺漏時的後備值」一律用它取得，不要在呼叫端另寫字面值，
     否則預設值會在 schema、執行端與 UI 之間各自漂移。
+
+    ``config_manager.get_default`` 是另一個函式：它依路徑讀 ``DEFAULT_CONFIG`` 區塊，
+    找不到時回傳呼叫端給的 ``default``，不保證路徑存在於 schema。本函式只讀 schema 欄位。
     """
     return copy.deepcopy(SETTINGS_BY_PATH[path].default)
+
+
+#: ``get_schema_default`` 的相容名稱（既有呼叫端與測試使用）。
+get_default = get_schema_default
+
+
+def validate_batch_shrink_factor(value: object) -> float:
+    """驗證 ``lm_translator.batch_shrink_factor``：必須是有限數值且 ``0 < value < 1``。
+
+    小於等於 0 會把批次縮到 0 而回填原文，大於等於 1 則不會縮小甚至擴大批次，兩者都不是縮批。
+    不合法時丟 ``ValueError``（訊息可直接顯示給使用者）。
+    """
+    factor = math.nan
+    if not isinstance(value, bool) and isinstance(value, int | float | str):
+        try:
+            factor = float(value)
+        except ValueError:
+            factor = math.nan
+    if not (math.isfinite(factor) and 0 < factor < 1):
+        raise ValueError(
+            f"lm_translator.batch_shrink_factor 必須是介於 0 與 1 之間（不含）的數字，收到：{value!r}"
+        )
+    return factor
 
 
 def build_default_config() -> dict[str, Any]:

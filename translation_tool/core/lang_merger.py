@@ -14,6 +14,7 @@ from typing import Any
 
 from translation_tool.utils.bounded_executor import bounded_as_completed
 from translation_tool.utils.ui_mirror import ContextThreadPoolExecutor
+from translation_tool.utils.worker_count import resolve_worker_count
 
 from ..translation_db import DbSettings
 from ..utils.cancellation import raise_if_cancelled
@@ -278,15 +279,7 @@ def _merge_zhcn_to_zhtw_from_zip(
 
             # 使用 ThreadPoolExecutor 處理（你可以依需求調整 max_workers）
             # 讀取config 設定資料
-            cpu_count = os.cpu_count() or 2
-            max_allowed_workers = max(1, cpu_count // 2)
-            config_workers = (
-                load_config().get("translator", {}).get("parallel_execution_workers")
-            )
-            if isinstance(config_workers, int) and config_workers > 0:
-                max_workers = min(config_workers, max_allowed_workers)
-            else:
-                max_workers = max_allowed_workers
+            max_workers = resolve_worker_count("file_pipeline", load_config())
 
             # 所有任務共用同一個累計讀取預算（防止大量合法大小成員的 ZIP bomb）
             zip_budget = ZipReadBudget.for_pack(label=str(zip_file))
@@ -632,15 +625,7 @@ def _merge_zhcn_to_zhtw_from_folder(
         )
         yield {"progress": _scale_progress(0.0, progress_start, progress_end)}
 
-        cpu_count = os.cpu_count() or 2
-        max_allowed_workers = max(1, cpu_count // 2)
-        config_workers = (
-            load_config().get("translator", {}).get("parallel_execution_workers")
-        )
-        if isinstance(config_workers, int) and config_workers > 0:
-            max_workers = min(config_workers, max_allowed_workers)
-        else:
-            max_workers = max_allowed_workers
+        max_workers = resolve_worker_count("file_pipeline", load_config())
 
         all_files_cache = [n.lower().replace("\\", "/") for n in all_names]
         # 包裝前綴只算一次,避免每個 mod / 內容檔各掃一次全部檔名

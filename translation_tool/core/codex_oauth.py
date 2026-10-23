@@ -30,6 +30,7 @@ from urllib.parse import parse_qs, urlencode, urlsplit
 import jwt
 import requests
 
+from translation_tool.utils.redaction import redact_text, register_secrets
 from translation_tool.utils.ui_mirror import run_in_context
 
 _ISSUER = "https://auth.openai.com"
@@ -52,6 +53,15 @@ _credential_mutex = threading.RLock()
 
 class ChatGPTOAuthError(RuntimeError):
     """A safe, user-facing OAuth or credential-store failure."""
+
+
+def _register_token_secrets(*tokens: Any) -> None:
+    """Register OAuth tokens with the global log/UI redaction sinks.
+
+    Tokens are dynamic (issued and rotated at runtime), so they never pass
+    through ``load_config``'s static key registration.
+    """
+    register_secrets(t for t in tokens if isinstance(t, str))
 
 
 @dataclass(frozen=True)
@@ -484,7 +494,12 @@ def _auth_endpoint(metadata: dict[str, Any], name: str) -> str:
     return value
 
 
-def _safe_oauth_error(response: requests.Response, action: str) -> ChatGPTOAuthError:
+def _safe_oauth_error(
+    response: requests.Response,
+    action: str,
+    *,
+    extra_secrets: tuple[str, ...] = (),
+) -> ChatGPTOAuthError:
     code = ""
     description = ""
     try:
@@ -500,7 +515,7 @@ def _safe_oauth_error(response: requests.Response, action: str) -> ChatGPTOAuthE
     elif code in {"invalid_client", "unauthorized_client"}:
         message = "OpenAI 未接受此登入用戶端，請稍後再試或更新應用程式。"
     elif description:
-        message = f"{action}失敗：{description[:240]}"
+        message = f"{action}失敗：{redact_text(description[:240], extra_secrets)}"
     else:
         message = f"{action}失敗（HTTP {response.status_code}）。"
     return ChatGPTOAuthError(message)
@@ -674,7 +689,11 @@ class PendingChatGPTLogin:
                     "無法交換 ChatGPT 登入授權，請重新登入。"
                 ) from exc
             if not response.ok:
-                raise _safe_oauth_error(response, "ChatGPT 登入授權交換")
+                raise _safe_oauth_error(
+                    response,
+                    "ChatGPT 登入授權交換",
+                    extra_secrets=(code, self.verifier, self.state, self.nonce),
+                )
             try:
                 tokens = response.json()
             except ValueError as exc:
@@ -684,6 +703,7 @@ class PendingChatGPTLogin:
             access_token = tokens.get("access_token")
             refresh_token = tokens.get("refresh_token")
             id_token = tokens.get("id_token")
+            _register_token_secrets(access_token, refresh_token, id_token)
             # Only the validated token response proves which permissions OpenAI
             # granted. The authorization callback may echo requested scopes.
             granted_scopes = str(tokens.get("scope") or "")
@@ -888,6 +908,7 @@ def get_chatgpt_access_token(
             record = _profile_record(store, profile_id)
         access_token = str(record.get("access_token") or "")
         refresh_token = str(record.get("refresh_token") or "")
+        _register_token_secrets(access_token, refresh_token)
         client_id = str(record.get("client_id") or "")
         if not client_id:
             raise ChatGPTOAuthError("尚未連結 ChatGPT 帳號；請先在設定頁登入。")
@@ -931,7 +952,11 @@ def get_chatgpt_access_token(
         if not response.ok:
             if response.status_code in {400, 401, 403}:
                 raise ChatGPTOAuthError("ChatGPT 登入已失效，請重新登入。")
-            raise _safe_oauth_error(response, "ChatGPT token 更新")
+            raise _safe_oauth_error(
+                response,
+                "ChatGPT token 更新",
+                extra_secrets=(refresh_token, client_id),
+            )
         try:
             tokens = response.json()
         except ValueError as exc:
@@ -940,6 +965,7 @@ def get_chatgpt_access_token(
             raise ChatGPTOAuthError("OpenAI token endpoint 回傳無效資料。")
         new_access = tokens.get("access_token")
         new_refresh = tokens.get("refresh_token")
+        _register_token_secrets(new_access, new_refresh)
         if not isinstance(new_access, str) or not new_access:
             raise ChatGPTOAuthError("OpenAI token 更新缺少 access token，請重新登入。")
         if not isinstance(new_refresh, str) or not new_refresh:

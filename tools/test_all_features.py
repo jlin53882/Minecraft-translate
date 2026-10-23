@@ -5,18 +5,20 @@
       不開 UI，純終端驗證每個功能的輸出是否正確。
 
 使用方式（在專案根目錄執行）：
-    cd C:\\Users\\admin\\Desktop\\minecraft_translator_flet
-    .\\.venv\\Scripts\\python.exe tools\\test_all_features.py
+    cd <專案根目錄>
+    python tools/test_all_features.py --modpack-root <模組包根目錄>
 
 輸出：終端彩色報告，每個功能 PASS / FAIL / WARN。
 """
 
 from __future__ import annotations
 
+import argparse
 import sys
 import tempfile
 import traceback
 import zipfile
+from contextlib import contextmanager
 from pathlib import Path
 
 # ── 路徑設定 ──────────────────────────────────────────────────────────
@@ -24,10 +26,10 @@ SRC_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(SRC_ROOT))
 
 # ── 測試資料路徑（All the Mods 10 4.3） ──────────────────────────────────
-ATM10_ROOT = Path(r"C:\Users\admin\Desktop\.minecraft\versions\All the Mods 10 4.3")
-MODS_DIR = ATM10_ROOT / "mods"
-KUBEJS_DIR = ATM10_ROOT / "kubejs"
-FTBQUESTS_DIR = ATM10_ROOT / "config" / "ftbquests"
+ATM10_ROOT = Path()  # 由 main() 依 --modpack-root 設定
+MODS_DIR = Path()
+KUBEJS_DIR = Path()
+FTBQUESTS_DIR = Path()
 
 # ── ANSI 顏色 ────────────────────────────────────────────────────────────
 C_GREEN = "\033[92m"
@@ -64,6 +66,19 @@ def fail(name: str, exc: Exception) -> bool:
     return False
 
 
+@contextmanager
+def _isolated_cache_root(cache_manager, root: Path):
+    """讓手動 smoke test 只寫入暫存快取，不污染使用者專案。"""
+    original_resolve = cache_manager.resolve_project_path
+    cache_manager.cache_store.reset_runtime_state(cache_manager.CACHE_TYPES)
+    cache_manager.resolve_project_path = lambda _path: root
+    try:
+        yield
+    finally:
+        cache_manager.cache_store.reset_runtime_state(cache_manager.CACHE_TYPES)
+        cache_manager.resolve_project_path = original_resolve
+
+
 # ════════════════════════════════════════════════════════════════════════
 # 功能 1：設定（ConfigService）
 # ════════════════════════════════════════════════════════════════════════
@@ -76,7 +91,9 @@ def test_config() -> bool:
 
         cfg = load_config()
         ok_all &= result(
-            "load_config() 可正常讀取", True, f"config.json 讀取結果：{cfg is not None}"
+            "load_config() 可正常讀取",
+            isinstance(cfg, dict),
+            f"config.json 讀取結果：{type(cfg).__name__}",
         )
     except Exception as e:  # noqa: BLE001
         ok_all &= fail("load_config()", e)
@@ -109,7 +126,9 @@ def test_rules() -> bool:
             with open(rules_path, "r", encoding="utf-8") as f:
                 rules = json.load(f)
             ok_all &= result(
-                "replace_rules.json 可讀取", True, f"共 {len(rules)} 條規則"
+                "replace_rules.json 可讀取",
+                isinstance(rules, (dict, list)),
+                f"共 {len(rules)} 條規則",
             )
         except Exception as e:  # noqa: BLE001
             ok_all &= fail("replace_rules.json 讀取", e)
@@ -129,7 +148,11 @@ def test_rules() -> bool:
             preview_root=Path(tempfile.gettempdir()),
             on_value_changed=dummy_cb,
         )
-        ok_all &= result("LangItemRow 可建立", True, f"lang_key={row.lang_key}")
+        ok_all &= result(
+            "LangItemRow 可建立",
+            row.lang_key == "item.test" and row.en_text == "Test Item",
+            f"lang_key={row.lang_key}",
+        )
     except Exception as e:  # noqa: BLE001
         ok_all &= fail("LangItemRow 建立", e)
 
@@ -145,26 +168,28 @@ def test_cache() -> bool:
 
     with tempfile.TemporaryDirectory() as tmp:
         tmp_path = Path(tmp)
-        db_path = tmp_path / "cache.db"  # noqa: F841
 
         try:
             from translation_tool.utils import cache_manager
 
-            cache_manager.initialize_translation_cache()
-            cache_manager.add_to_cache("lang", "hello", "Hello", "你好", mod="test_mod")
-            hit = cache_manager.get_from_cache("lang", "hello")
-            ok_all &= result(
-                "cache_manager add/get",
-                hit == "你好",
-                f"get_from_cache('hello') = {hit!r}",
-            )
+            with _isolated_cache_root(cache_manager, tmp_path / "cache"):
+                cache_manager.initialize_translation_cache()
+                cache_manager.add_to_cache(
+                    "lang", "hello", "Hello", "你好", mod="test_mod"
+                )
+                hit = cache_manager.get_from_cache("lang", "hello")
+                ok_all &= result(
+                    "cache_manager add/get",
+                    hit == "你好",
+                    f"get_from_cache('hello') = {hit!r}",
+                )
 
-            overview = cache_manager.get_cache_overview()
-            ok_all &= result(
-                "get_cache_overview()",
-                overview is not None,
-                f"types: {list(overview.keys())}",
-            )
+                overview = cache_manager.get_cache_overview()
+                ok_all &= result(
+                    "get_cache_overview()",
+                    isinstance(overview, dict) and "lang" in overview,
+                    f"types: {list(overview.keys())}",
+                )
         except Exception as e:  # noqa: BLE001
             ok_all &= fail("cache_manager 操作", e)
 
@@ -209,13 +234,15 @@ def test_qc() -> bool:
             compare_variants_tsv_generator,
         )
 
+        qc_out = tmp_path / "qc_out"
         results_ut = list(
-            check_untranslated_generator(
-                str(en_dir), str(tw_dir), str(tmp_path / "qc_out")
-            )
+            check_untranslated_generator(str(en_dir), str(tw_dir), str(qc_out))
         )
         ok_all &= result(
-            "check_untranslated_generator", True, f"產出 {len(results_ut)} 個 update"
+            "check_untranslated_generator",
+            not any(item.get("error") for item in results_ut)
+            and (qc_out / "test_mod" / "lang" / "en_us.json").is_file(),
+            f"產出 {len(results_ut)} 個 update",
         )
 
         results_var = list(
@@ -224,7 +251,9 @@ def test_qc() -> bool:
             )
         )
         ok_all &= result(
-            "compare_variants_generator", True, f"產出 {len(results_var)} 個 update"
+            "compare_variants_generator",
+            not any(item.get("error") for item in results_var),
+            f"產出 {len(results_var)} 個 update",
         )
 
         results_res = list(
@@ -232,18 +261,18 @@ def test_qc() -> bool:
         )
         ok_all &= result(
             "check_english_residue_generator",
-            True,
+            not any(item.get("error") for item in results_res),
             f"產出 {len(results_res)} 個 update",
         )
 
         # TSV generator 只需要 (file_path, output_file)
         tsv_in = tmp_path / "input.tsv"
         tsv_out = tmp_path / "output.tsv"
-        tsv_in.write_text("en\tzh_tw\nhello\t你好\n", encoding="utf-8")
+        tsv_in.write_text("key\tzh_cn\tzh_tw\nhello\t你好\t你好\n", encoding="utf-8")
         results_tsv = list(compare_variants_tsv_generator(str(tsv_in), str(tsv_out)))
         ok_all &= result(
             "compare_variants_tsv_generator(file, out)",
-            True,
+            not any(item.get("error") for item in results_tsv),
             f"產出 {len(results_tsv)} 個 update",
         )
 
@@ -258,31 +287,35 @@ def test_lookup() -> bool:
     ok_all = True
 
     with tempfile.TemporaryDirectory() as tmp:
-        tmp_path = Path(tmp)  # noqa: F841
+        tmp_path = Path(tmp)
 
         from translation_tool.utils import cache_manager
         from translation_tool.utils.cache_search_facade import CacheSearchFacade
 
-        cache_manager.initialize_translation_cache()
-        cache_manager.add_to_cache(
-            "lang", "diamond_sword", "Diamond Sword", "鑽石劍", mod="test"
-        )
-        cache_manager.add_to_cache(
-            "lang", "iron_pickaxe", "Iron Pickaxe", "鐵鎬", mod="test"
-        )
-
         try:
             import logging
 
-            facade = CacheSearchFacade(
-                cache_root_getter=lambda: Path(tempfile.gettempdir()),
-                logger=logging.getLogger("test"),
-            )
-            ok_all &= result("CacheSearchFacade 初始化", True)
-            results = facade.search_cache("diamond")
-            ok_all &= result(
-                "CacheSearchFacade.search_cache()", True, f"找到 {len(results)} 筆"
-            )
+            with _isolated_cache_root(cache_manager, tmp_path / "cache"):
+                cache_manager.initialize_translation_cache()
+                cache_manager.add_to_cache(
+                    "lang", "diamond_sword", "Diamond Sword", "鑽石劍", mod="test"
+                )
+                cache_manager.add_to_cache(
+                    "lang", "iron_pickaxe", "Iron Pickaxe", "鐵鎬", mod="test"
+                )
+                facade = CacheSearchFacade(
+                    cache_root_getter=lambda: tmp_path / "cache",
+                    logger=logging.getLogger("test"),
+                )
+                ok_all &= result(
+                    "CacheSearchFacade 初始化", callable(facade.search_cache)
+                )
+                results = facade.search_cache("diamond")
+                ok_all &= result(
+                    "CacheSearchFacade.search_cache()",
+                    bool(results) and "diamond" in str(results).lower(),
+                    f"找到 {len(results)} 筆",
+                )
         except Exception as e:  # noqa: BLE001
             ok_all &= warn("CacheSearchFacade 搜尋", f"UI 模式限制：{e}")
 
@@ -301,7 +334,9 @@ def test_icon_preview() -> bool:
 
         reason, risk = classify_no_icon_reason("item.diamond_sword")
         ok_all &= result(
-            "classify_no_icon_reason()", True, f"reason={reason!r}, risk={risk}"
+            "classify_no_icon_reason()",
+            isinstance(reason, str) and bool(reason) and isinstance(risk, str),
+            f"reason={reason!r}, risk={risk}",
         )
     except Exception as e:  # noqa: BLE001
         ok_all &= fail("classify_no_icon_reason", e)
@@ -313,7 +348,7 @@ def test_icon_preview() -> bool:
         r2 = resolve_icon_with_reason("item.diamond_sword", temp_path)
         ok_all &= result(
             "resolve_icon_with_reason()",
-            True,
+            r2.icon_path is None or isinstance(r2.icon_path, Path),
             f"icon_path={r2.icon_path!r}, risk={r2.risk}",
         )
     except Exception as e:  # noqa: BLE001
@@ -343,9 +378,12 @@ def test_bundler() -> bool:
 
         results = list(bundle_outputs_generator(str(input_root), str(output_zip)))
         ok_all &= result(
-            "bundle_outputs_generator", True, f"產出 {len(results)} 個 update"
+            "bundle_outputs_generator",
+            not any(item.get("error") for item in results)
+            and zipfile.is_zipfile(output_zip),
+            f"產出 {len(results)} 個 update",
         )
-        ok_all &= result("output.zip 產生", output_zip.exists(), f"{output_zip}")
+        ok_all &= result("output.zip 產生", output_zip.is_file(), f"{output_zip}")
 
     return ok_all
 
@@ -358,7 +396,16 @@ def test_translation_view() -> bool:
     ok_all = True
 
     try:
-        ok_all &= result("build_ftb_tab / build_kjs_tab / build_md_tab 存在", True)
+        from app.views.translation.translation_panels import (
+            build_ftb_tab,
+            build_kjs_tab,
+            build_md_tab,
+        )
+
+        ok_all &= result(
+            "build_ftb_tab / build_kjs_tab / build_md_tab 存在",
+            all(callable(fn) for fn in (build_ftb_tab, build_kjs_tab, build_md_tab)),
+        )
     except Exception as e:  # noqa: BLE001
         ok_all &= fail("translation_panels 函式", e)
 
@@ -390,16 +437,30 @@ def test_extractor() -> bool:
 
         total_extracted = 0
         jar_with_lang = 0
+        extraction_errors = []
+        invalid_results = []
         for jar in jar_list:
             r = extract_from_jar_impl(str(jar), str(output_dir), lang_regex)
+            if not isinstance(r, dict):
+                invalid_results.append(f"{jar.name}: result is not a dict")
+                continue
+            if r.get("error"):
+                extraction_errors.append(f"{jar.name}: {r['error']}")
+            if not isinstance(r.get("extracted", 0), int) or r.get("extracted", 0) < 0:
+                invalid_results.append(f"{jar.name}: invalid extracted count")
             if r.get("extracted", 0) > 0:
                 total_extracted += r["extracted"]
                 jar_with_lang += 1
 
         ok_all &= result(
             "extract_from_jar_impl（lang）前 10 個 jar",
-            True,
-            f"有 lang 的 jar：{jar_with_lang}/10，共 {total_extracted} 個 lang 檔",
+            not extraction_errors and not invalid_results,
+            f"有 lang 的 jar：{jar_with_lang}/{len(jar_list)}，共 {total_extracted} 個 lang 檔"
+            + (
+                f"；錯誤：{extraction_errors + invalid_results}"
+                if extraction_errors or invalid_results
+                else ""
+            ),
         )
 
     # ── 9b：Book（前 10 個 jar） ──────────────────────────────────────
@@ -410,18 +471,32 @@ def test_extractor() -> bool:
 
         total_extracted = 0
         jar_with_book = 0
+        extraction_errors = []
+        invalid_results = []
         for jar in jar_list:
             r = extract_from_jar_impl(
                 str(jar), str(output_dir), BOOK_PATH_REGEX_DUAL_STRUCTURE
             )
+            if not isinstance(r, dict):
+                invalid_results.append(f"{jar.name}: result is not a dict")
+                continue
+            if r.get("error"):
+                extraction_errors.append(f"{jar.name}: {r['error']}")
+            if not isinstance(r.get("extracted", 0), int) or r.get("extracted", 0) < 0:
+                invalid_results.append(f"{jar.name}: invalid extracted count")
             if r.get("extracted", 0) > 0:
                 total_extracted += r["extracted"]
                 jar_with_book += 1
 
         ok_all &= result(
             "extract_from_jar_impl（book）前 10 個 jar",
-            True,
-            f"有 book 的 jar：{jar_with_book}/10，共 {total_extracted} 個 book 檔",
+            not extraction_errors and not invalid_results,
+            f"有 book 的 jar：{jar_with_book}/{len(jar_list)}，共 {total_extracted} 個 book 檔"
+            + (
+                f"；錯誤：{extraction_errors + invalid_results}"
+                if extraction_errors or invalid_results
+                else ""
+            ),
         )
 
     # ── 9c：Preview Generator ────────────────────────────────────────
@@ -442,7 +517,7 @@ def test_extractor() -> bool:
             )
             ok_all &= result(
                 "preview_extraction_generator_impl",
-                True,
+                not any(item.get("error") for item in results),
                 f"產出 {len(results)} 個 update",
             )
         except Exception as e:  # noqa: BLE001
@@ -485,7 +560,9 @@ def test_lm() -> bool:
                 )
             )
             ok_all &= result(
-                "lm_translator dry-run", True, f"產出 {len(results)} 個 update"
+                "lm_translator dry-run",
+                not any(item.get("error") for item in results),
+                f"產出 {len(results)} 個 update",
             )
         except Exception as e:  # noqa: BLE001
             ok_all &= fail("lm_translator dry-run", e)
@@ -528,7 +605,9 @@ def test_merge() -> bool:
                 )
             )
             ok_all &= result(
-                "merge_zhcn_to_zhtw_from_zip", True, f"產出 {len(results)} 個 update"
+                "merge_zhcn_to_zhtw_from_zip",
+                not any(item.get("error") for item in results),
+                f"產出 {len(results)} 個 update",
             )
         except Exception as e:  # noqa: BLE001
             ok_all &= fail("merge_zhcn_to_zhtw_from_zip", e)
@@ -548,7 +627,7 @@ def test_merge() -> bool:
             results2 = list(gen) if gen is not None else []
             ok_all &= result(
                 "export_filtered_pending (pending export)",
-                True,
+                not any(item.get("error") for item in results2),
                 f"產出 {len(results2)} 個 update",
             )
         except Exception as e:  # noqa: BLE001
@@ -578,7 +657,11 @@ def test_kubejs() -> bool:
 
             session = TaskSession(max_logs=300)
             session.add_log("Test log entry")
-            ok_all &= result("TaskSession 初始化 + add_log", True, "log added")
+            ok_all &= result(
+                "TaskSession 初始化 + add_log",
+                bool(getattr(session, "logs", getattr(session, "_logs", []))),
+                "log added",
+            )
 
             results = list(
                 run_kubejs_pipeline(
@@ -593,7 +676,9 @@ def test_kubejs() -> bool:
                 )
             )
             ok_all &= result(
-                "run_kubejs_pipeline extract", True, f"產出 {len(results)} 個 update"
+                "run_kubejs_pipeline extract",
+                not any(item.get("error") for item in results),
+                f"產出 {len(results)} 個 update",
             )
         except Exception as e:  # noqa: BLE001
             ok_all &= fail("run_kubejs_pipeline", e)
@@ -637,7 +722,9 @@ def test_ftb() -> bool:
                 )
             )
             ok_all &= result(
-                "run_ftb_pipeline export+clean", True, f"產出 {len(results)} 個 update"
+                "run_ftb_pipeline export+clean",
+                not any(item.get("error") for item in results),
+                f"產出 {len(results)} 個 update",
             )
         except Exception as e:  # noqa: BLE001
             ok_all &= fail("run_ftb_pipeline", e)
@@ -648,7 +735,29 @@ def test_ftb() -> bool:
 # ════════════════════════════════════════════════════════════════════════
 # 主程式
 # ════════════════════════════════════════════════════════════════════════
-def main() -> None:
+def _parse_args(argv: list[str] | None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description=(
+            "對真實模組包目錄（含 mods/、kubejs/、config/ftbquests/）執行全功能煙霧測試；"
+            "需要外部資料（真實模組包）。"
+        )
+    )
+    parser.add_argument(
+        "--modpack-root",
+        required=True,
+        type=Path,
+        help="模組包根目錄（其下有 mods/、kubejs/、config/ftbquests/）",
+    )
+    return parser.parse_args(argv)
+
+
+def main(argv: list[str] | None = None) -> None:
+    global ATM10_ROOT, MODS_DIR, KUBEJS_DIR, FTBQUESTS_DIR
+    args = _parse_args(argv)
+    ATM10_ROOT = args.modpack_root
+    MODS_DIR = ATM10_ROOT / "mods"
+    KUBEJS_DIR = ATM10_ROOT / "kubejs"
+    FTBQUESTS_DIR = ATM10_ROOT / "config" / "ftbquests"
     print(f"\n{C_BOLD}{'─' * 60}")
     print("  minecraft_translator_flet 全功能測試")
     print(f"  資料來源：{ATM10_ROOT}")

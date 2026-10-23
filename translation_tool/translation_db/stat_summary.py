@@ -21,7 +21,7 @@ import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
 
-from translation_tool.translation_db.schema import SRC_MANUAL
+from translation_tool.translation_db.sql_helpers import effective_review_sql
 
 STAT_SCHEMA_VERSION = "2"
 NO_SOURCE = -1  # 沒有生效譯文的條目在 stat_src 的來源值
@@ -49,11 +49,7 @@ CREATE TABLE IF NOT EXISTS stat_counter (
 
 def _review(alias: str) -> str:
     """生效列的審核狀態（與全庫重算的 CASE 相同）。"""
-    return (
-        f"CASE WHEN {alias}.review_status IN ('unreviewed','reviewed','legacy_unknown') "
-        f"THEN {alias}.review_status WHEN {alias}.source={SRC_MANUAL} "
-        "THEN 'legacy_unknown' ELSE 'unreviewed' END"
-    )
+    return effective_review_sql(alias, True, else_unreviewed=True)
 
 
 def _bump(version: str, source: str, review: str, guard: str = "1") -> str:

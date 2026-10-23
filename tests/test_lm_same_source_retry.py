@@ -587,11 +587,14 @@ def test_quality_retry_request_failure_keeps_original_and_logs_exception_detail(
     assert status == "AUTO"
     assert len(calls) == 2
     assert result == [{**item, "text": "使用 next"}]
-    quality_warnings = [message for message in warnings if "[品質重試]" in message]
+    quality_warnings = [
+        message
+        for message in warnings
+        if "[品質重試]" in message and "保留第一次譯文" in message
+    ]
     assert len(quality_warnings) == 1
     assert "HTTPError" in quality_warnings[0]
     assert "429" in quality_warnings[0]
-    assert "保留第一次譯文" in quality_warnings[0]
     assert normal_error_handler_calls == []
 
 
@@ -729,6 +732,8 @@ def test_format_repair_runs_before_the_next_batch_is_requested(
     config = configure_batch(retry=False)
     waits = []
     monkeypatch.setattr(main, "interruptible_sleep", waits.append)
+    # 此測試驗證批次間節流等待，明確還原預設間隔（conftest 預設為 0）。
+    monkeypatch.setattr(main, "_DEFAULT_BATCH_SLEEP", 4.0)
     config["lm_translator"]["initial_batch_size_lang"] = 1
     items = [_item("§aUse %s\nnext", 0), _item("Second", 1)]
 

@@ -21,6 +21,7 @@ from translation_tool.utils.cancellation import raise_if_cancelled
 from translation_tool.utils.config_manager import load_config
 from translation_tool.utils.log_unit import log_info, log_warning
 from translation_tool.utils.ui_mirror import ContextThreadPoolExecutor
+from translation_tool.utils.worker_count import resolve_worker_count
 from translation_tool.utils.zip_safety import (
     ArchiveBudgetError,
     ZipReadBudget,
@@ -255,10 +256,7 @@ def build_icon_index(mods_dir: Path, progress_cb=None) -> dict[str, str]:
 
     asset_catalog = ModpackAssetCatalog.from_mods_directory(mods_dir)
 
-    config_workers = (
-        load_config().get("translator", {}).get("parallel_execution_workers", 8)
-    )
-    max_workers = max(1, config_workers) if isinstance(config_workers, int) else 8
+    max_workers = resolve_worker_count("icon_index", load_config())
 
     def submit_jar(executor, jar_path: Path):
         return executor.submit(_process_single_jar, jar_path, asset_catalog)

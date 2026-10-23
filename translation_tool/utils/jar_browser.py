@@ -15,7 +15,6 @@
 
 from __future__ import annotations
 
-import os
 import re
 import zipfile
 from collections.abc import Callable, Iterable
@@ -26,6 +25,7 @@ from translation_tool.utils.cancellation import raise_if_cancelled
 from translation_tool.utils.config_manager import load_config
 from translation_tool.utils.log_unit import log_error, log_warning
 from translation_tool.utils.ui_mirror import ContextThreadPoolExecutor
+from translation_tool.utils.worker_count import resolve_worker_count
 from translation_tool.utils.zip_safety import (
     ArchiveBudgetError,
     ZipReadBudget,
@@ -41,13 +41,10 @@ def _get_default_workers() -> int:
         int: 最大執行緒數（至少 1）
     """
     try:
-        config = load_config()
-        config_workers = config.get("translator", {}).get("parallel_execution_workers")
-        if isinstance(config_workers, int) and config_workers > 0:
-            return config_workers
+        return resolve_worker_count("jar_browser", load_config())
     except Exception:  # noqa: BLE001, S110 - config 讀取失敗時不 blocking，直接用 fallback
         pass
-    return max(1, os.cpu_count() // 2)
+    return resolve_worker_count("jar_browser", None)
 
 
 class ScanResults(dict):

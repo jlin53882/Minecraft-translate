@@ -51,7 +51,7 @@ TranslationView（ft.Column）
        ├─ _set_status(「模擬執行」/「執行中」)、progress=0、log_view.clear()
        ├─ view.session = _new_translation_session(view, ...)（tag_session(view.TaskSession(), ...)）
        ├─ reserve_page_operation(...)：應用程式關閉中則 snack 並返回
-       ├─ view.session.start()；_log_task_start() 寫入輸入、輸出與步驟設定
+       ├─ _log_task_start()：add_start_log 登記輸入、輸出與步驟設定（start() 由服務層 run_callable_task 呼叫）
        ├─ operation.launch(worker)
        │    └→ view.run_ftb_translation_service(in_dir, session, output_dir=...,
        │         dry_run, step_export/clean/translate/inject, write_new_cache)

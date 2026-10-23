@@ -222,7 +222,7 @@ class TestCallGeminiRequests:
             "network_response",
         ]
         assert events[1]["error_kind"] == "connection_error"
-        assert events[3]["elapsed_seconds"] >= 0
+        assert events[3]["waited_ms"] >= 0 and events[2]["wait_ms"] > 0
         assert all(
             secret not in repr(events)
             for secret in ("AIza-secret-key", "private prompt", "private text")

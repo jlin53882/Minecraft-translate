@@ -42,7 +42,9 @@ IDs first, then read the wide columns), or from a trigger-maintained derived
 column or table.
 
 `tests/test_moddb_no_temp_sort.py` runs the public read APIs over every state,
-sort, quality status and common filter, captures each SELECT through
+sort, quality status and common filter, plus the module/source scope options
+(`bulk_review_scope_options`, `smart_review_scope_options`), `cleanup_candidates` and
+`cleanup_batches`, captures each SELECT through
 `sqlite3.Connection.set_trace_callback`, and fails when a plan contains the temporary
 sort. An exception is acceptable only when the sorted set has a hard bound that
 does not depend on the table size; record the bound in `ALLOWED_PLAN_MARKERS` or
@@ -55,6 +57,8 @@ does not depend on the table size; record the bound in `ALLOWED_PLAN_MARKERS` or
   set is the number of missing or matching rows in one version.
 - `kinds()`: sorts the distinct entry kinds only.
 - The mismatch list: sorts only rows that pass the special-character prefilter.
+- `cleanup_batches()`: sorts the cleanup batches created by manual cleanup operations only.
+- Not measured: a 700k-row database. The plan checks run on a small fixture; no large database was available to compare timings.
 
 ### Mod DB 已審核 lang 術語候選
 
@@ -146,6 +150,18 @@ Python to avoid a temporary sort. The index is created by the same writable
 `CREATE INDEX IF NOT EXISTS` initialization as above and needs no schema-version
 change. `tests/test_smart_review_manual_edit.py` asserts the plan has no `SCAN`
 or `TEMP B-TREE`.
+
+## Worker 數量
+
+`translator.parallel_execution_workers` 是使用者設定的上限；不同工作的負載不同，所以各用途保有自己的預設值與上限，
+共通的只有 `translation_tool/utils/worker_count.py` 的 `resolve_worker_count(purpose, config, cpu)` 解析規則：
+
+- 設定值必須是正整數；`bool`、字串、浮點數、0、負數視為無效，退回該用途的預設值。
+- 有效時取設定值，再套該用途的上限（若有）；結果至少 1。
+- 用途表 `WORKER_POLICIES`：`count_prescan`（FTB／KubeJS 預掃描，預設 4）、`file_pipeline`（逐檔處理，CPU 一半，上限也是 CPU 一半）、
+  `moddb_scan`（上限 CPU 核心數）、`jar_extract`（預設 CPU 一半，上限 32）、`jar_preview`、`jar_browser`、`icon_index`、`icon_cache`、`cache_load`、`lm_extract`。
+- 呼叫端：所有讀取 `translator.parallel_execution_workers` 的程式都經過本函式並指定用途（`WORKER_POLICIES` 的鍵）；`tests/test_worker_count.py` 以掃描原始碼確保不會再出現各自讀設定的呼叫點。
+- 未知用途會丟 `KeyError`，避免默默用錯上限。測試：`tests/test_worker_count.py`。
 
 ## Commands
 

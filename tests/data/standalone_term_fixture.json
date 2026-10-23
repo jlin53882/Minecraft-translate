@@ -1,0 +1,24 @@
+{
+  "_comment": "單獨成句術語效果 fixture：expected 為允許新增的目標；null 表示不得新增任何命中。",
+  "cases": [
+    {"source": "Netherite", "expected": "獄髓"},
+    {"source": "Iron", "expected": "鐵"},
+    {"source": "Gold", "expected": "金"},
+    {"source": "Copper", "expected": "銅"},
+    {"source": "Amethyst", "expected": "紫水晶"},
+    {"source": "Quartz", "expected": "石英"},
+    {"source": "Redstone", "expected": "紅石"},
+    {"source": "§6Gold§r", "expected": "金"},
+    {"source": "Max", "expected": null},
+    {"source": "Wood", "expected": null},
+    {"source": "Planks", "expected": null},
+    {"source": "Wooden", "expected": null},
+    {"source": "Block", "expected": null},
+    {"source": "Blocker", "expected": null},
+    {"source": "Step", "expected": null},
+    {"source": "Netherite Sword", "expected": null},
+    {"source": "Obtain a Netherite Ingot", "expected": null},
+    {"source": "Mine Iron ore with a pickaxe", "expected": null},
+    {"source": "Max Health", "expected": null}
+  ]
+}

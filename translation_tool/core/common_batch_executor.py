@@ -13,11 +13,13 @@ from typing import Any, Protocol, runtime_checkable
 import requests
 
 from translation_tool.core.batch_events import (
+    TIMING_FIELDS,
     BatchEvent,
     BatchTiming,
     format_batch_event,
 )
 from translation_tool.core.batch_timing import timing_ms
+from translation_tool.core.retry_after import parse_response_retry_after
 from translation_tool.utils.cancellation import TaskCancelled
 
 logger = logging.getLogger(__name__)
@@ -58,12 +60,16 @@ def _new_id(prefix: str) -> str:
 
 
 def _wait_ms(fields: Mapping[str, Any]) -> int:
-    """從事件欄位讀取等待時間（先 ``wait_ms``，再 ``elapsed_ms``），統一轉成非負毫秒數。"""
-    for key in ("wait_ms", "elapsed_ms"):
-        value = timing_ms(fields, key)
-        if value is not None:
-            return value
-    return 0
+    """從 provider 等待事件讀取等待毫秒數（``wait_ms``，或舊欄位 ``wait_seconds``），沒有就是 0。
+
+    不會退而使用 ``elapsed_ms``：事件裡的 ``elapsed_ms`` 是批次已經過的時間，不是等待量。
+    """
+    return timing_ms(fields, "wait_ms") or 0
+
+
+def _timing_event_ms(fields: Mapping[str, Any]) -> int:
+    """``timing`` 事件自己的耗時（``elapsed_ms``，或舊欄位 ``elapsed_seconds``）。"""
+    return timing_ms(fields, "elapsed_ms") or 0
 
 
 def _status_from_error(error: BaseException, status: int | None) -> int | None:
@@ -75,10 +81,50 @@ def _status_from_error(error: BaseException, status: int | None) -> int | None:
     return int(value) if isinstance(value, int) else None
 
 
+_STATUS_ERROR_CLASS = {
+    400: "invalid_request",
+    401: "authentication",
+    403: "key_forbidden",
+    404: "model_missing",
+    408: "deadline_exceeded",
+    413: "context_too_large",
+    422: "invalid_request",
+    429: "rate_limit",
+    500: "provider_transient",
+    502: "provider_transient",
+    503: "service_unavailable",
+    504: "provider_timeout",
+}
+_RATE_LIMIT_CODE_WORDS = ("quota", "rate", "limit", "usage")
+_OVERLOAD_CODE_WORDS = ("overload", "high_demand", "too_many")
+_TRANSIENT_STATUSES = frozenset({408, 429, 500, 502, 503, 504})
+
+
+def _error_retry_after_ms(error: BaseException) -> int | None:
+    """例外的 ``retry_after`` 屬性優先，其次讀 ``requests.HTTPError`` 回應的 Retry-After。"""
+    retry_after = getattr(error, "retry_after", None)
+    if retry_after is None:
+        retry_after = parse_response_retry_after(getattr(error, "response", None))
+    try:
+        return max(0, round(float(retry_after) * 1000))
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+
 def classify_provider_error(
     error: BaseException, status: int | None = None
 ) -> dict[str, Any]:
-    """在不暴露 provider 錯誤內容的前提下，分類例外、HTTP 狀態與可重試特徵。"""
+    """在不暴露 provider 錯誤內容的前提下，分類例外、HTTP 狀態與可重試特徵。
+
+    診斷旗標的權威定義（LM、智慧校對與其修復請求都使用這份結果）：
+
+    - ``overload``：供應商服務過載，只含 503／``service_unavailable``，或錯誤碼含
+      ``overload``／``high_demand``／``too_many``。500／502／504 是 provider 暫時失敗，**不算** overload。
+    - ``rate_limit``：速率或配額受限，HTTP 429，或錯誤碼含 ``quota``／``rate``／``limit``／``usage``。
+    - ``timeout``：``requests.Timeout``、408、504。``connection``：連線層錯誤。
+    - ``retryable``：此類錯誤「一般而言」值得重試（408／429／5xx、timeout、連線錯誤）。
+      這只是診斷資訊；實際是否重試、換 key 或換模型由各流程自己的 retry 政策決定。
+    """
     status = _status_from_error(error, status)
     name = type(error).__name__
     lowered = name.lower()
@@ -88,39 +134,15 @@ def classify_provider_error(
     elif isinstance(error, requests.ConnectionError) or "connection" in lowered:
         error_class = "connection_error"
     else:
-        error_class = {
-            400: "invalid_request",
-            401: "authentication",
-            403: "key_forbidden",
-            404: "model_missing",
-            408: "deadline_exceeded",
-            413: "context_too_large",
-            422: "invalid_request",
-            429: "rate_limit",
-            500: "provider_transient",
-            502: "provider_transient",
-            503: "service_unavailable",
-            504: "provider_timeout",
-        }.get(status, "unknown")
-    quota_or_rate_limit = status == 429 or any(
-        word in code for word in ("quota", "rate", "limit", "usage")
-    )
+        error_class = _STATUS_ERROR_CLASS.get(status, "unknown")
+    rate_limit = status == 429 or any(word in code for word in _RATE_LIMIT_CODE_WORDS)
     overload = (
         status == 503
-        or error_class
-        in {
-            "service_unavailable",
-            "provider_overload",
-        }
-        or any(word in code for word in ("overload", "high_demand", "too_many"))
+        or error_class in {"service_unavailable", "provider_overload"}
+        or any(word in code for word in _OVERLOAD_CODE_WORDS)
     )
     timeout = error_class in {"timeout", "provider_timeout", "deadline_exceeded"}
     connection = error_class == "connection_error"
-    retry_after = getattr(error, "retry_after", None)
-    try:
-        retry_after_ms = max(0, round(float(retry_after) * 1000))
-    except (TypeError, ValueError):
-        retry_after_ms = None
     return {
         "error_class": error_class,
         "http_status": status,
@@ -129,8 +151,9 @@ def classify_provider_error(
         "timeout": timeout,
         "connection": connection,
         "overload": overload,
-        "rate_limit": quota_or_rate_limit,
-        "retry_after_ms": retry_after_ms,
+        "rate_limit": rate_limit,
+        "retryable": bool(status in _TRANSIENT_STATUSES or timeout or connection),
+        "retry_after_ms": _error_retry_after_ms(error),
     }
 
 
@@ -149,6 +172,11 @@ class BatchMetrics(BatchTiming):
     network_retry_count: int = 0
     error_batches: list[int] = field(default_factory=list)
 
+    @property
+    def total_wait_ms(self) -> int:
+        """等待總額（配額等待＋重試退避＋網路重試等待）：所有「等待 vs. 實際 API 時間」換算的唯一入口。"""
+        return self.quota_wait_ms + self.retry_backoff_ms + self.network_retry_wait_ms
+
     def as_dict(self) -> dict[str, Any]:
         """將目前物件轉成供 UI、log 或測試使用的可序列化字典。"""
         result: dict[str, Any] = self.to_event()
@@ -166,6 +194,15 @@ class BatchMetrics(BatchTiming):
             result[key] = getattr(self, key)
         result["error_batches"] = list(self.error_batches)
         return result
+
+
+@dataclass
+class RequestTiming:
+    """``BatchHandle.timed_request`` 的結果：請求總毫秒、期間等待毫秒與實際 API 毫秒。"""
+
+    request_ms: int = 0
+    wait_ms: int = 0
+    api_ms: int = 0
 
 
 @dataclass
@@ -274,11 +311,41 @@ class BatchHandle:
             fields.setdefault("wait_ms", wait_ms)
         elif kind == "timing":
             field_name = str(fields.get("field_name") or "")
-            if field_name:
-                self.executor.metrics.add_ms(field_name, _wait_ms(fields))
+            if field_name in TIMING_FIELDS:
+                self.executor.metrics.add_ms(field_name, _timing_event_ms(fields))
+            elif field_name:
+                logger.warning(
+                    "忽略未知的計時欄位 %r（不在 TIMING_FIELDS，耗時未計入統計）",
+                    field_name,
+                )
         elif kind == "key_rotation":
             self.executor.metrics.key_rotation_count += 1
         return self.emit(kind, **fields)
+
+    @contextmanager
+    def timed_request(self):
+        """量測一次 provider 請求：總時間、期間發生的等待，以及扣掉等待後的實際 API 時間。
+
+        等待事件（配額、重試退避、網路重試）由 ``forward_provider_event`` 累加到各自欄位，
+        所以 ``api_ms`` 只能是「請求總時間 - 期間的等待」，不得再把等待算進去。
+        請求失敗或被取消時，已花掉的 API 時間仍累加到 ``api_ms``；成功時由呼叫端
+        ``attempt_success(elapsed_ms=request.api_ms)`` 累加。
+        """
+        request = RequestTiming()
+        wait_before = self.executor.metrics.total_wait_ms
+        started = time.monotonic()
+        failed = False
+        try:
+            yield request
+        except BaseException:
+            failed = True
+            raise
+        finally:
+            request.request_ms = max(0, round((time.monotonic() - started) * 1000))
+            request.wait_ms = max(0, self.executor.metrics.total_wait_ms - wait_before)
+            request.api_ms = max(0, request.request_ms - request.wait_ms)
+            if failed:
+                self.add_timing("api_ms", request.api_ms)
 
     def retry_wait(
         self,
@@ -606,6 +673,7 @@ __all__ = [
     "BatchMetrics",
     "BatchPolicy",
     "CommonBatchExecutor",
+    "RequestTiming",
     "classify_provider_error",
     "format_batch_event",
 ]

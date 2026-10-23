@@ -40,6 +40,7 @@ from app.tasks.operation_registry import (
 from app.ui import design, kit
 from app.ui.debounce import Debouncer
 from app.ui.design import C
+from app.ui.page_post import post_to_ui
 from app.ui.snack import show_snack
 from app.views.moddb.char_inspector import scrolling_list
 from app.views.moddb.entry_filters import (
@@ -880,14 +881,13 @@ class EntriesPanel(ft.Column):
                 )
 
             result = (db, entry, text, done, error, flagged_batch)
-            run_task = getattr(self._page, "run_task", None)
-            try:
-                if callable(run_task):
-                    run_task(self._apply_save_result_async, *result)
-                else:
-                    self._apply_save_result(*result)
-            except Exception as exc:  # noqa: BLE001 - a disposed page may reject the result callback
-                log_warning(f"Mod 資料庫儲存結果無法排回畫面：{exc!r}")
+            post_to_ui(
+                self._page,
+                self._apply_save_result,
+                *result,
+                label="Mod 資料庫儲存結果",
+                on_failure=lambda: setattr(self, "_save_running", False),
+            )
 
         try:
             launched = launch_page_operation(
@@ -918,8 +918,11 @@ class EntriesPanel(ft.Column):
             self._update_impact()
             self._safe_update()
 
-    async def _apply_save_result_async(self, *result) -> None:
-        self._apply_save_result(*result)
+    def _abandon_save(self) -> None:
+        """儲存結果無法排回畫面時，解除儲存中狀態讓編輯區可再操作。"""
+        self._save_running = False
+        self.saved_text.value = ""
+        self._update_impact()
 
     def _apply_save_result(self, db, entry, text, done, error, flagged_batch) -> None:
         self._save_running = False

@@ -11,11 +11,10 @@ import time
 from contextlib import nullcontext
 from copy import deepcopy
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
-from email.utils import parsedate_to_datetime
 
 import requests
 
+from translation_tool.core.batch_timing import seconds_to_ms
 from translation_tool.core.codex_oauth import chatgpt_account_status
 from translation_tool.core.common_batch_executor import classify_provider_error
 from translation_tool.core.lm_api_client import (
@@ -68,6 +67,7 @@ from translation_tool.core.official_locale import (
     terminology_issues,
     terminology_terms_for_item,
 )
+from translation_tool.core.retry_after import parse_response_retry_after
 from translation_tool.utils.cancellation import (
     TaskCancelled,
     cancel_scope,
@@ -75,7 +75,10 @@ from translation_tool.utils.cancellation import (
     raise_if_cancelled,
 )
 from translation_tool.utils.config_manager import get_models_config, load_config
-from translation_tool.utils.config_schema import get_default
+from translation_tool.utils.config_schema import (
+    get_schema_default,
+    validate_batch_shrink_factor,
+)
 from translation_tool.utils.log_unit import log_error, log_info, log_warning
 from translation_tool.utils.redaction import redact_text
 
@@ -84,8 +87,10 @@ from translation_tool.utils.redaction import redact_text
 # =========================================================
 # 每批完成後的固定等待秒數（預設不等待；遇到 429 會依 API 建議秒數重試）。
 # 免費層若常遇到 429，可在設定頁把「每批翻譯後等待秒數」調高。
-RPM_COOLDOWN_SEC = 0
+RPM_COOLDOWN_SEC = get_schema_default("lm_translator.rpm_cooldown_sec")
 OVERLOAD_RETRY_WAIT_SEC = 12  # Overload 重試等待秒數
+KEY_ROTATION_BUFFER_SEC = 5  # 換 Key 前的緩衝秒數
+REQUEST_INTERVAL_SEC = 4  # 非 overload 的 503 後的等待秒數
 # Gemini 503 UNAVAILABLE/high-demand：最多重試三次，重試等待逐步增加。
 GEMINI_503_RETRY_DELAYS_SEC = (30, 60, 120)
 GEMINI_503_MAX_RETRY_AFTER_SEC = 120
@@ -93,6 +98,17 @@ GEMINI_503_MAX_RETRY_AFTER_SEC = 120
 # 次數是逐把 key 計算：不同 key 的 overload 不互相累加。
 OVERLOAD_KEY_SWITCH_THRESHOLD = 3
 CHATGPT_MAX_RETRIES = 3
+# 429 沒有任何可用的等待提示時的保守等待秒數。
+RATE_LIMIT_DEFAULT_WAIT_SEC = 10
+# 429 回應無法解析時，連續保守重試同一把 key 的次數；超過才當成該 key 受限並輪替。
+UNPARSED_RATE_LIMIT_MAX_RETRIES = 3
+_EXPLICIT_QUOTA_MESSAGE_MARKERS = (
+    "QUOTA EXCEEDED",
+    "QUOTA EXHAUSTED",
+    "INSUFFICIENT QUOTA",
+    "USAGE LIMIT EXCEEDED",
+    "CREDIT BALANCE EXHAUSTED",
+)
 CHATGPT_MAX_RETRY_AFTER_SEC = 120
 CHATGPT_TRANSIENT_USAGE_ERROR_CODES = frozenset(
     {
@@ -124,7 +140,7 @@ _BATCH_PROFILE_SIZE_KEYS = {
     "patch": "patchouli",
 }
 _DEFAULT_BATCH_SLEEP = float(
-    get_default("lm_translator.rate_limit.sleep_seconds_between_batches")
+    get_schema_default("lm_translator.rate_limit.sleep_seconds_between_batches")
 )
 
 
@@ -458,7 +474,7 @@ def _sleep_with_runtime_event(
     _emit_runtime_event(
         callback,
         kind,
-        wait_seconds=wait_seconds,
+        wait_ms=seconds_to_ms(wait_seconds),
         retry_reason=reason,
         provider_retry=True,
     )
@@ -471,8 +487,8 @@ def _sleep_with_runtime_event(
     _emit_runtime_event(
         callback,
         resume_kind,
-        wait_seconds=wait_seconds,
-        elapsed_seconds=max(0.0, time.monotonic() - started),
+        wait_ms=seconds_to_ms(wait_seconds),
+        waited_ms=seconds_to_ms(time.monotonic() - started),
         retry_reason=reason,
     )
 
@@ -585,14 +601,16 @@ class _BatchRuntime:
     quota_owner: object = field(default_factory=object)
     missing_models: set[int] = field(default_factory=set)
     rpm_cooldown_sec: float = RPM_COOLDOWN_SEC
-    key_rotation_buffer_sec: float = 5
+    key_rotation_buffer_sec: float = KEY_ROTATION_BUFFER_SEC
     overload_retry_sec: float = OVERLOAD_RETRY_WAIT_SEC
-    request_interval_sec: float = 4
+    request_interval_sec: float = REQUEST_INTERVAL_SEC
     batch_interval_sec: float = 4
     reasoning_effort: str | None = None
     chatgpt_profile_id: str | None = None
     chatgpt_retry_count: int = 0
     gemini_503_retry_count: int = 0
+    unparsed_rate_limit_count: int = 0
+    retry_same_key: bool = False
     gemini_503_attempted_models: set[int] = field(default_factory=set)
     contract_errors: list[str] = field(default_factory=list)
     pending_contract_event: dict | None = None
@@ -778,7 +796,7 @@ def _wait_for_request_slot(
                     wait_event_callback(
                         {
                             "kind": "rate_limit_wait",
-                            "wait_seconds": wait_sec,
+                            "wait_ms": seconds_to_ms(wait_sec),
                         }
                     )
                 wait_started = quota.now()
@@ -793,8 +811,8 @@ def _wait_for_request_slot(
                     wait_event_callback(
                         {
                             "kind": "rate_limit_resume",
-                            "wait_seconds": wait_sec,
-                            "elapsed_seconds": max(0.0, quota.now() - wait_started),
+                            "wait_ms": seconds_to_ms(wait_sec),
+                            "waited_ms": seconds_to_ms(quota.now() - wait_started),
                         }
                     )
             raise_if_cancelled()
@@ -890,10 +908,32 @@ def _profile_max_batch_sizes(lm_cfg: dict) -> dict[str, int | str | None]:
     return {
         profile_name: lm_cfg.get(
             f"initial_batch_size_{key}",
-            get_default(f"lm_translator.initial_batch_size_{key}"),
+            get_schema_default(f"lm_translator.initial_batch_size_{key}"),
         )
         for profile_name, key in _BATCH_PROFILE_SIZE_KEYS.items()
     }
+
+
+# 內部隱藏設定（不在設定頁，需手動編輯 config.json）的等待秒數上限；超出或非有限值時退回預設。
+HIDDEN_WAIT_SEC_MAX = 3600.0
+
+
+def _hidden_wait_sec(lm_cfg: dict, key: str, default: float) -> float:
+    """讀取隱藏的等待秒數設定：必須是 ``0 <= 有限數值 <= HIDDEN_WAIT_SEC_MAX``，否則用預設並記警告。"""
+    raw = lm_cfg.get(key)
+    if raw is None:
+        return default
+    try:
+        value = float(raw) if not isinstance(raw, bool) else math.nan
+    except (TypeError, ValueError):
+        value = math.nan
+    if math.isfinite(value) and 0 <= value <= HIDDEN_WAIT_SEC_MAX:
+        return value
+    log_warning(
+        f"[⚠️] lm_translator.{key} 必須介於 0 到 {HIDDEN_WAIT_SEC_MAX:g} 秒，"
+        f"收到 {raw!r}，改用預設 {default:g} 秒"
+    )
+    return default
 
 
 def _build_batch_runtime(
@@ -905,6 +945,7 @@ def _build_batch_runtime(
     """建立單次批次翻譯共用的設定與可變執行狀態。"""
     config_snapshot = deepcopy(load_config())
     lm_cfg = config_snapshot.get("lm_translator", {})
+    _batch_shrink_factor(lm_cfg)  # 設定非法時在送出任何請求前就報錯
     provider = lm_cfg.get("provider", "gemini")
     profile = _detect_batch_profile(batch_items)
     max_sizes = _profile_max_batch_sizes(lm_cfg)
@@ -924,10 +965,13 @@ def _build_batch_runtime(
             if context_budget is not None:
                 try:
                     configured_budget = int(
-                        lm_cfg.get("max_input_token_budget", 256_000) or 256_000
+                        lm_cfg.get("max_input_token_budget")
+                        or get_schema_default("lm_translator.max_input_token_budget")
                     )
                 except (TypeError, ValueError):
-                    configured_budget = 256_000
+                    configured_budget = int(
+                        get_schema_default("lm_translator.max_input_token_budget")
+                    )
                 lm_cfg = {
                     **lm_cfg,
                     "max_input_token_budget": min(configured_budget, context_budget),
@@ -977,7 +1021,7 @@ def _build_batch_runtime(
         key_cycle=ApiKeyCycle(),
         model_pool=model_pool,
         model_temperature=lm_cfg.get(
-            "temperature", get_default("lm_translator.temperature")
+            "temperature", get_schema_default("lm_translator.temperature")
         ),
         lang_prompt=prompt_context.lang_prompt,
         patchouli_prompt=prompt_context.patchouli_prompt,
@@ -1001,9 +1045,15 @@ def _build_batch_runtime(
             None,
         ),
         rpm_cooldown_sec=rpm_cooldown,
-        key_rotation_buffer_sec=lm_cfg.get("key_rotation_buffer_sec", 5),
-        overload_retry_sec=lm_cfg.get("overload_retry_sec", OVERLOAD_RETRY_WAIT_SEC),
-        request_interval_sec=lm_cfg.get("request_interval_sec", 4),
+        key_rotation_buffer_sec=_hidden_wait_sec(
+            lm_cfg, "key_rotation_buffer_sec", KEY_ROTATION_BUFFER_SEC
+        ),
+        overload_retry_sec=_hidden_wait_sec(
+            lm_cfg, "overload_retry_sec", OVERLOAD_RETRY_WAIT_SEC
+        ),
+        request_interval_sec=_hidden_wait_sec(
+            lm_cfg, "request_interval_sec", REQUEST_INTERVAL_SEC
+        ),
         batch_interval_sec=_batch_interval_seconds(lm_cfg),
         reasoning_effort=reasoning_effort,
         chatgpt_profile_id=chatgpt_profile_id,
@@ -1072,25 +1122,64 @@ def _prepare_batch(runtime: _BatchRuntime) -> _BatchRound:
     )
 
 
-def _parse_rate_limit_error(error: Exception) -> tuple[str, int, str]:
-    """從 429 錯誤解析配額種類、重試延遲與已遮罩訊息。"""
-    error_json = error.response.json().get("error", {})
+def _is_explicit_quota_exhaustion(quota_id: str, remote_message: str) -> bool:
+    return bool(quota_id) or any(
+        marker in remote_message for marker in _EXPLICIT_QUOTA_MESSAGE_MARKERS
+    )
+
+
+def _parse_rate_limit_error(error: Exception) -> tuple[str, float, str]:
+    """從 429 錯誤解析配額種類、重試延遲秒數（可含小數，無則 0）與已遮罩訊息。
+
+    配額種類為 ``rpd``／``rpm``／``quota``；只有明確辨識為配額耗盡時才回傳 ``quota``。
+    合法 JSON 但沒有 RPD／RPM／明確配額耗盡訊號，或回應 body 不是可解析的 Google error JSON
+    時回傳 ``unparsed``：它仍是 HTTP 429，只能保守視為速率限制，不能當成需輪替 key 的配額耗盡。
+    延遲來自 ``Retry-After`` header 或 ``RetryInfo``（見 ``retry_after.parse_retry_after``）。
+    """
+    response = getattr(error, "response", None)
+    parsed_retry_after = parse_response_retry_after(response)
+    # A provider-controlled delay must not be allowed to suspend the app for
+    # days.  503 has a separate policy below; this bound is for 429 waits.
+    retry_after = (
+        parsed_retry_after
+        if parsed_retry_after is not None
+        and math.isfinite(parsed_retry_after)
+        and 0 <= parsed_retry_after <= GEMINI_503_MAX_RETRY_AFTER_SEC
+        else 0.0
+    )
+    try:
+        error_json = response.json().get("error", {})
+        if not isinstance(error_json, dict):
+            raise TypeError("429 error body must be an object")
+    except (AttributeError, TypeError, ValueError):
+        return "unparsed", retry_after, redact_text(error).upper()
     remote_message = redact_text(error_json.get("message", "")).upper()
     quota_id = ""
-    retry_after = 0
-    for detail in error_json.get("details", []):
-        detail_type = detail.get("@type")
-        if detail_type == "type.googleapis.com/google.rpc.QuotaFailure":
-            quota_id = detail.get("violations", [{}])[0].get("quotaId", "").upper()
-        if detail_type == "type.googleapis.com/google.rpc.RetryInfo":
-            retry_after = int(
-                float(str(detail.get("retryDelay", "0s")).replace("s", ""))
-            )
+    details = error_json.get("details", [])
+    if not isinstance(details, list):
+        details = []
+    for detail in details:
+        if not isinstance(detail, dict):
+            continue
+        if detail.get("@type") != "type.googleapis.com/google.rpc.QuotaFailure":
+            continue
+        violations = detail.get("violations", [])
+        if not isinstance(violations, list):
+            continue
+        for violation in violations:
+            if isinstance(violation, dict):
+                quota_id = str(violation.get("quotaId", "")).upper()
+                if quota_id:
+                    break
+        if quota_id:
+            break
     if "PERDAY" in quota_id or "DAILY" in remote_message:
         return "rpd", retry_after, remote_message
     if "PERMINUTE" in quota_id or "RPM" in remote_message:
         return "rpm", retry_after, remote_message
-    return "quota", retry_after, remote_message
+    if _is_explicit_quota_exhaustion(quota_id, remote_message):
+        return "quota", retry_after, remote_message
+    return "unparsed", retry_after, remote_message
 
 
 def _remote_error_detail(error: Exception, limit: int = 300) -> str:
@@ -1105,47 +1194,19 @@ def _remote_error_detail(error: Exception, limit: int = 300) -> str:
     return redact_text(text.strip())[:limit]
 
 
-def _parse_gemini_retry_after_seconds(response, error_json: dict) -> float | None:
-    """讀取 Retry-After 或 Google RetryInfo 的非負延遲秒數。"""
-    headers = getattr(response, "headers", {}) or {}
-    header_value = headers.get("Retry-After")
-    if header_value is not None:
-        try:
-            wait_sec = float(header_value)
-        except (TypeError, ValueError):
-            try:
-                retry_at = parsedate_to_datetime(str(header_value))
-                if retry_at.tzinfo is None:
-                    retry_at = retry_at.replace(tzinfo=UTC)
-                wait_sec = (retry_at - datetime.now(UTC)).total_seconds()
-            except (TypeError, ValueError, OverflowError, IndexError):
-                wait_sec = None
-        if wait_sec is not None and math.isfinite(wait_sec):
-            return max(0.0, wait_sec)
+def gemini_503_wait_sec(retry_index: int, retry_after: float | None) -> float:
+    """Gemini 503 暫時不可用的等待秒數：固定退避表與供應商 Retry-After 取較大者。
 
-    error_value = error_json.get("error", {}) if isinstance(error_json, dict) else {}
-    error = error_value if isinstance(error_value, dict) else {}
-    details = error.get("details", []) if isinstance(error, dict) else []
-    for detail in details if isinstance(details, list) else []:
-        if not isinstance(detail, dict) or not str(detail.get("@type", "")).endswith(
-            "RetryInfo"
-        ):
-            continue
-        retry_delay = detail.get("retryDelay")
-        if retry_delay is None:
-            continue
-        raw_delay = str(retry_delay).strip().removesuffix("s")
-        try:
-            wait_sec = float(raw_delay)
-        except (TypeError, ValueError, OverflowError):
-            continue
-        if math.isfinite(wait_sec):
-            return max(0.0, wait_sec)
-    return None
+    LM 主流程與智慧校對共用；是否超過 ``GEMINI_503_MAX_RETRY_AFTER_SEC``、
+    是否換模型或改回報 PARTIAL，仍由各流程自己決定。
+    """
+    base_delay = GEMINI_503_RETRY_DELAYS_SEC[retry_index]
+    return base_delay if retry_after is None else max(base_delay, retry_after)
 
 
 def _reset_gemini_503_retry_state(runtime: _BatchRuntime) -> None:
     runtime.gemini_503_retry_count = 0
+    runtime.unparsed_rate_limit_count = 0
     runtime.gemini_503_attempted_models.clear()
 
 
@@ -1271,8 +1332,11 @@ def _handle_chatgpt_api_error(
     retry_after = getattr(error, "retry_after", None)
     if retry_after is not None:
         try:
-            wait_sec = max(0.0, float(retry_after))
-        except (TypeError, ValueError):
+            parsed_retry_after = float(retry_after)
+            if not math.isfinite(parsed_retry_after) or parsed_retry_after < 0:
+                raise ValueError("retry_after must be finite and non-negative")
+            wait_sec = parsed_retry_after
+        except (TypeError, ValueError, OverflowError):
             retry_after = None
     if retry_after is None:
         base_delay = min(2**runtime.chatgpt_retry_count, 30)
@@ -1285,18 +1349,21 @@ def _handle_chatgpt_api_error(
 
     runtime.chatgpt_retry_count += 1
     if retry_event_callback is not None:
+        classification = classify_provider_error(error, error.status)
         retry_event_callback(
             {
                 "kind": "retry_wait",
                 "retry_number": runtime.chatgpt_retry_count,
                 "retry_total": CHATGPT_MAX_RETRIES,
-                "wait_seconds": wait_sec,
-                "retry_after_seconds": retry_after,
+                "wait_ms": seconds_to_ms(wait_sec),
+                "retry_after_ms": None
+                if retry_after is None
+                else seconds_to_ms(retry_after),
                 "error_kind": "chatgpt_transient",
                 "http_status": error.status,
-                "provider_overload": bool(error.status in {500, 502, 503, 504}),
-                "quota_or_rate_limit": bool(error.status == 429),
-                "timeout": bool(error.status == 408),
+                "overload": classification["overload"],
+                "rate_limit": classification["rate_limit"],
+                "timeout": classification["timeout"],
             }
         )
     wait_started = time.monotonic()
@@ -1311,8 +1378,8 @@ def _handle_chatgpt_api_error(
                 "kind": "retry_resume",
                 "retry_number": runtime.chatgpt_retry_count,
                 "retry_total": CHATGPT_MAX_RETRIES,
-                "wait_seconds": wait_sec,
-                "elapsed_seconds": max(0.0, time.monotonic() - wait_started),
+                "wait_ms": seconds_to_ms(wait_sec),
+                "waited_ms": seconds_to_ms(time.monotonic() - wait_started),
             }
         )
     return BatchAction.RETRY_SAME_MODEL
@@ -1378,7 +1445,7 @@ def _handle_service_unavailable_error(
     )
     if high_demand_unavailable:
         runtime.key_cycle.clear_overload()
-        retry_after = _parse_gemini_retry_after_seconds(response, error_json)
+        retry_after = parse_response_retry_after(response)
         if retry_after is not None and retry_after > GEMINI_503_MAX_RETRY_AFTER_SEC:
             return _defer_gemini_503_remaining_items(
                 runtime,
@@ -1392,9 +1459,7 @@ def _handle_service_unavailable_error(
 
         retry_index = runtime.gemini_503_retry_count
         runtime.gemini_503_retry_count += 1
-        wait_sec = GEMINI_503_RETRY_DELAYS_SEC[retry_index]
-        if retry_after is not None:
-            wait_sec = max(wait_sec, retry_after)
+        wait_sec = gemini_503_wait_sec(retry_index, retry_after)
         runtime.gemini_503_attempted_models.add(model_index)
 
         alternate_models = []
@@ -1437,6 +1502,37 @@ def _handle_service_unavailable_error(
     return decide_batch_action(
         "service_unavailable", has_next_model=model_index + 1 < len(runtime.model_pool)
     ).action
+
+
+def _handle_unparsed_rate_limit(
+    runtime: _BatchRuntime,
+    retry_after: float,
+    remote_message: str,
+    retry_event_callback,
+) -> BatchAction:
+    """429 回應無法解析時的保守處理：先等待並重試同一把 key，連續失敗才輪替。"""
+    if runtime.unparsed_rate_limit_count >= UNPARSED_RATE_LIMIT_MAX_RETRIES:
+        runtime.unparsed_rate_limit_count = 0
+        runtime.retry_same_key = False
+        log_warning(
+            f"[❓] 429 回應無法解析且重試 {UNPARSED_RATE_LIMIT_MAX_RETRIES} 次仍受限"
+            f" ({remote_message or 'unknown'})，嘗試切換 Key"
+        )
+        if not runtime.key_cycle.mark_failed():
+            return BatchAction.EXHAUSTED
+        return BatchAction.ROTATE_KEY
+    runtime.unparsed_rate_limit_count += 1
+    runtime.retry_same_key = True
+    wait_time = retry_after or RATE_LIMIT_DEFAULT_WAIT_SEC
+    log_info(f"[⏳] 429 回應無法解析，視為頻率限制：等待 {wait_time:g} 秒")
+    _sleep_with_runtime_event(
+        runtime,
+        wait_time,
+        reason="rate_limit_unparsed",
+        callback=retry_event_callback,
+        kind="rate_limit_wait",
+    )
+    return BatchAction.RETRY_SAME_KEY
 
 
 def _handle_batch_error(
@@ -1509,7 +1605,15 @@ def _handle_batch_error(
             raise RuntimeError(
                 f"❌ maxOutputTokens（{model_output_cap}）超過模型上限；請調低 {setting}"
             )
-        log_info("[⚠️] 400 INVALID_ARGUMENT：payload 格式錯誤或過大，縮小 batch")
+        if not _payload_error_allows_shrink(error, status):
+            detail = _remote_error_detail(error)
+            if detail:
+                log_info(f"[⚠️] 伺服器回應：{detail}")
+            raise RuntimeError(
+                "❌ provider 拒絕翻譯請求；回應沒有指出 payload/context 過大，"
+                "不會盲目縮小批次。請檢查模型、schema 與請求設定。"
+            ) from error
+        log_info("[⚠️] 400 INVALID_ARGUMENT：payload 過大，縮小 batch")
         detail = _remote_error_detail(error)
         if detail:
             log_info(f"[⚠️] 伺服器回應：{detail}")
@@ -1523,9 +1627,13 @@ def _handle_batch_error(
             quota_kind, retry_after, remote_message = _parse_rate_limit_error(error)
         except Exception as parse_error:  # noqa: BLE001
             remote_message = redact_text(error).upper()
-            quota_kind = "quota"
-            retry_after = 0
-            log_error(f"[⚠️] 無法解析 429 JSON，使用備援：{redact_text(parse_error)}")
+            quota_kind = "unparsed"
+            retry_after = 0.0
+            log_error(f"[⚠️] 無法解析 429 回應，使用備援：{redact_text(parse_error)}")
+        if quota_kind == "unparsed":
+            return _handle_unparsed_rate_limit(
+                runtime, retry_after, remote_message, retry_event_callback
+            )
 
         if quota_kind == "rpd":
             # 同專案模式：RPD 算在「專案 × 模型」，所有 key 共用同一份額度。
@@ -1542,8 +1650,8 @@ def _handle_batch_error(
                 error_kind, quota_kind="rpd", has_next_model=bool(usable)
             ).action
         if quota_kind == "rpm":
-            wait_time = retry_after or 10
-            log_info(f"[⏳] 每分鐘頻率限制 (RPM)：等待 {wait_time} 秒")
+            wait_time = retry_after or RATE_LIMIT_DEFAULT_WAIT_SEC
+            log_info(f"[⏳] 每分鐘頻率限制 (RPM)：等待 {wait_time:g} 秒")
             _sleep_with_runtime_event(
                 runtime,
                 wait_time,
@@ -1749,9 +1857,12 @@ def _record_quality_retry_failure(
             )
             if is_rate_limited and not _is_chatgpt_quota_exhaustion(error):
                 try:
-                    retry_after = max(0.0, float(error.retry_after or 0.0))
-                except (TypeError, ValueError):
+                    retry_after = float(error.retry_after or 0.0)
+                    if not math.isfinite(retry_after) or retry_after < 0:
+                        raise ValueError("retry_after must be finite and non-negative")
+                except (TypeError, ValueError, OverflowError):
                     retry_after = 0.0
+                retry_after = min(retry_after, CHATGPT_MAX_RETRY_AFTER_SEC)
                 if retry_after <= 0:
                     retry_after = max(1.0, runtime.batch_interval_sec)
                 quota.defer_request_slot(runtime.provider, model_name, retry_after)
@@ -1775,20 +1886,13 @@ def _record_quality_retry_failure(
             try:
                 quota_kind, retry_after, remote_message = _parse_rate_limit_error(error)
             except (AttributeError, IndexError, KeyError, TypeError, ValueError):
-                quota_kind, remote_message = "quota", redact_text(error).upper()
+                quota_kind, retry_after = "unparsed", 0.0
+                remote_message = redact_text(error).upper()
             if quota_kind == "rpd":
                 quota.mark_exhausted(model_name)
-            elif quota_kind == "rpm":
-                response = getattr(error, "response", None)
-                error_json = {}
-                try:
-                    error_json = response.json() if response is not None else {}
-                except (AttributeError, ValueError):
-                    error_json = {}
-                retry_after_value = _parse_gemini_retry_after_seconds(
-                    response, error_json
-                )
-                if retry_after_value is None or retry_after_value <= 0:
+            elif quota_kind in {"rpm", "unparsed"}:
+                retry_after_value = retry_after
+                if retry_after_value <= 0:
                     retry_after_value = max(1.0, runtime.batch_interval_sec)
                 quota.defer_request_slot(
                     runtime.provider, model_name, retry_after_value
@@ -2243,7 +2347,7 @@ def _abandon_model(
 
 def _probe_lease_sec(runtime: _BatchRuntime) -> float:
     """探測租約長度：涵蓋用戶端整段最壞耗時（連線重試 × 逾時 + 退避）+ 餘裕。"""
-    default_timeout = float(get_default("lm_translator.rate_limit.timeout"))
+    default_timeout = float(get_schema_default("lm_translator.rate_limit.timeout"))
     try:
         timeout = float(
             (runtime.lm_cfg.get("rate_limit") or {}).get("timeout", default_timeout)
@@ -2442,7 +2546,16 @@ def _perform_provider_request(
                 provider_model=model_name,
                 expected_count=len(round_data.current_batch),
             )
-            api_key = runtime.key_cycle.claim() if runtime.provider == "gemini" else ""
+            if runtime.provider == "gemini":
+                reuse_current_key = runtime.retry_same_key
+                runtime.retry_same_key = False
+                api_key = (
+                    runtime.key_cycle.reuse_current()
+                    if reuse_current_key
+                    else runtime.key_cycle.claim()
+                )
+            else:
+                api_key = ""
             request_kwargs = _provider_request_kwargs(
                 runtime,
                 model_name,
@@ -2603,6 +2716,21 @@ def _attempt_batch(
     return _BatchRoundOutcome(BatchAction.SHRINK_BATCH)
 
 
+def _batch_shrink_factor(lm_cfg: dict) -> float:
+    """讀取縮批比例：缺漏用 schema 預設；明確設定但不在 ``0 < factor < 1`` 時丟 RuntimeError。
+
+    不使用 ``get(key, default) or default`` 這類會把顯式 0 吞成預設值的寫法，
+    也不讓非法值默默擴大批次或把整批回填原文。
+    """
+    raw = lm_cfg.get("batch_shrink_factor")
+    if raw is None:
+        return float(get_schema_default("lm_translator.batch_shrink_factor"))
+    try:
+        return validate_batch_shrink_factor(raw)
+    except ValueError as error:
+        raise RuntimeError(f"❌ {error}") from error
+
+
 def _apply_batch_shrink(
     runtime: _BatchRuntime, round_data: _BatchRound, outcome: _BatchRoundOutcome
 ) -> None:
@@ -2619,10 +2747,13 @@ def _apply_batch_shrink(
             _note_contract_progress(runtime, len(round_data.current_batch), next_fit)
             return
 
-    shrink_factor = float(runtime.lm_cfg.get("batch_shrink_factor", 0.75) or 0.75)
+    shrink_factor = _batch_shrink_factor(runtime.lm_cfg)
     basis = min(runtime.batch_size, len(round_data.current_batch))
     new_size = int(basis * shrink_factor)
-    min_size = int(runtime.lm_cfg.get("min_batch_size", 50) or 50)
+    min_size = int(
+        runtime.lm_cfg.get("min_batch_size")
+        or get_schema_default("lm_translator.min_batch_size")
+    )
     if runtime.batch_profile == "lang" and new_size < MIN_LANG_BATCH_SIZE:
         new_size = MIN_LANG_BATCH_SIZE if basis > MIN_LANG_BATCH_SIZE else 0
     elif new_size < min_size:

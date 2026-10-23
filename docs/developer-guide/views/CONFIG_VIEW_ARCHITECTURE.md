@@ -138,6 +138,18 @@ app/views/config/
 原子 replace 與明確失敗回報為契約。替換後的讀回驗證若失敗會回傳 `False`，
 但不盲目回滾，避免覆蓋提交點後另一個合法 writer 的更新。
 
+### 既存設定檔損毀時不覆寫
+
+讀取端仍以三層 fallback 回傳預設值，但「回傳預設值」不代表檔案正常。
+`config_manager.read_config_file` / `config_file_status` 明確回報來源狀態
+（`CONFIG_MISSING`／`CONFIG_OK`／`CONFIG_CORRUPT`／`CONFIG_UNREADABLE`）；
+JSON 損毀的結果以 `(mtime_ns, size)` 快取，同一個壞檔只解析、記錄一次，修復後自動重新載入。
+`save_config` 在 `_SAVE_LOCK` 內於 `os.replace` 前重新檢查現檔，
+壞檔（或最上層不是 object、讀不到）一律回傳 `False` 且位元組不變；檔案不存在（首次建立）仍可寫入。
+所有整份寫入（`save_config_json`、`config_store.save`、資料庫設定的背景寫入、`sync_missing_config_keys`）
+都經過這道檢查。設定頁在寫入失敗時用 `config_file_unsafe_to_overwrite` 區分並提示「格式損毀、不會覆寫」，
+表單內容保留在頁面上。
+
 `get_models_config` 只回傳 `{model: {"enabled": bool}}`，外部亂寫 list/str 被忽略。
 
 ## 維護注意

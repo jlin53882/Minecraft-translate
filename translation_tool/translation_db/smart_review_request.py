@@ -21,6 +21,7 @@ from translation_tool.core.codex_oauth import ChatGPTOAuthError
 from translation_tool.core.lm_batch_actions import BatchAction
 from translation_tool.core.lm_key_health import get_model_quota_registry
 from translation_tool.core.openai_codex_client import ChatGPTAPIError
+from translation_tool.core.retry_after import parse_response_retry_after
 from translation_tool.translation_db.models import SmartReviewSnapshot
 from translation_tool.translation_db.smart_review_prompt import (
     SMART_REVIEW_SYSTEM_PROMPT,
@@ -107,19 +108,16 @@ class BatchRequestOutcome:
 
 
 def _http_retry_after(exc: requests.HTTPError) -> float | None:
-    """從 Gemini HTTP 錯誤回應讀取 Retry-After 秒數。"""
-    from translation_tool.core.lm_translator_main import (
-        _parse_gemini_retry_after_seconds,
-    )
-
-    error_json: dict[str, Any] = {}
-    try:
-        decoded = exc.response.json() if exc.response is not None else {}
-        if isinstance(decoded, dict):
-            error_json = decoded
-    except (AttributeError, TypeError, ValueError):
-        error_json = {}
-    return _parse_gemini_retry_after_seconds(exc.response, error_json)
+    """從 Gemini HTTP 錯誤回應（header 或 RetryInfo）讀取 Retry-After 秒數。"""
+    retry_after = parse_response_retry_after(exc.response)
+    response = exc.response
+    status = getattr(response, "status_code", None)
+    # 429 is a rate-limit wait, not a promise that the application should
+    # sleep indefinitely.  Keep the raw value for 503 because the dedicated
+    # transient-retry policy uses it to reject waits over its own limit.
+    if status == 429 and (retry_after is None or retry_after < 0 or retry_after > 120):
+        return None
+    return retry_after
 
 
 class _BatchRequester:

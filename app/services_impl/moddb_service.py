@@ -7,8 +7,9 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import traceback
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -83,6 +84,7 @@ from translation_tool.translation_db.time_filters import (
 )
 from translation_tool.utils.cancellation import cancel_scope
 from translation_tool.utils.config_manager import load_config
+from translation_tool.utils.worker_count import resolve_worker_count
 
 # View 經由本模組取用資料庫型別與常數（View 不直接 import translation_tool 引擎）
 __all__ = [
@@ -184,6 +186,34 @@ def open_database(
 ) -> TranslationDB | None:
     """依指定或目前設定開啟資料庫；唯讀查詢不建立、遷移或同步來源優先序。"""
     return open_db(settings or current_settings(), create=create, readonly=readonly)
+
+
+@contextmanager
+def moddb_read_snapshot(
+    settings: DbSettings | None = None,
+) -> Iterator[TranslationDB | None]:
+    """開啟 worker 專用的唯讀連線，並在一個讀取交易內提供一致的快照。
+
+    資料庫不存在時 yield ``None``。離開時一律 rollback 並關閉連線；交易歸這個
+    context manager 所有，呼叫端不碰 ``_conn``。
+    """
+    db = open_database(create=False, settings=settings, readonly=True)
+    try:
+        if db is not None:
+            db._conn.execute("BEGIN")
+        yield db
+    finally:
+        if db is not None:
+            try:
+                if db._conn.in_transaction:
+                    db._conn.rollback()
+            finally:
+                db.close()
+
+
+def database_data_generation(db: TranslationDB | None) -> str | None:
+    """回傳資料庫目前的資料世代（無資料庫時為 ``None``），供 UI 判斷快取是否過期。"""
+    return db._data_gen() if db is not None else None
 
 
 def database_version_choices(settings: DbSettings | None = None) -> list[str]:
@@ -319,11 +349,7 @@ def run_moddb_scan_service(
             f"開始{'預覽' if options.dry_run else '掃描'}：版本 {options.version}，來源 {folder}"
             + (f"，資料庫 {db.path}" if db is not None else "（預覽模式，不寫入）"),
         )
-        workers = int(
-            load_config().get("translator", {}).get("parallel_execution_workers", 4)
-            or 4
-        )
-        workers = max(1, min(workers, os.cpu_count() or 4))
+        workers = resolve_worker_count("moddb_scan", load_config())
         with cancel_scope(cancelled):
             for update in scan_folder_generator(
                 db, folder, options, should_cancel=cancelled, workers=workers

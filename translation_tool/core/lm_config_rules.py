@@ -24,6 +24,12 @@ from .lm_key_health import (
 
 _API_KEY_PATTERN = re.compile(r"(?:AIza|AQ\.)[a-zA-Z0-9_-]+")
 _API_KEY_PREFIXES = ("AIza", "AQ.")
+_API_KEY_MIN_LENGTH = 35
+_API_KEY_PROBLEM_LABELS = {
+    "prefix": "偵測到無效格式金鑰",
+    "length": "偵測到過短的金鑰",
+    "charset": "偵測到包含無效字元的金鑰",
+}
 
 # =========================
 # 1. 執行緒安全的 API Key 索引追蹤器
@@ -304,6 +310,19 @@ class ApiKeyCycle:
         self._current_key = key
         return key
 
+    def reuse_current(self) -> str:
+        """重用目前仍有效的 key，供暫時性錯誤的 bounded retry 使用。"""
+        keys = _get_all_keys()
+        current_index = self.current_index
+        if (
+            current_index is not None
+            and 0 <= current_index < len(keys)
+            and current_index not in self._failed
+            and keys[current_index] == self._current_key
+        ):
+            return self._current_key
+        return self.claim()
+
     def _claim_probe(
         self, keys: list[str], cooling: set[int]
     ) -> tuple[int, str] | None:
@@ -446,6 +465,33 @@ def rotate_api_key():
     return True
 
 
+def _gemini_key_format_error(key: str) -> tuple[str, str] | None:
+    """Gemini API Key 的格式規則（validate_api_keys 與 UI 驗證共用）。
+
+    回傳 ``(違規種類, 使用者訊息)``；格式正確回傳 ``None``。
+    這是憑證格式驗證，與 ``redaction`` 的秘密遮蔽規則是兩件事：遮蔽規則要盡量寬以免漏遮，
+    不能拿來判斷金鑰是否合法。
+    """
+    if not key.startswith(_API_KEY_PREFIXES):
+        return "prefix", (
+            f"❌ 無效的 API Key 格式：{mask_key(key)}\n"
+            "請使用 Google AI Studio 產生的 Gemini API Key，"
+            "應以 'AIza' 或 'AQ.' 字樣開頭。"
+        )
+    if len(key) < _API_KEY_MIN_LENGTH:
+        return "length", (
+            f"❌ API Key 長度異常：{mask_key(key)}\n"
+            f"長度為 {len(key)}，API Key 應至少包含 {_API_KEY_MIN_LENGTH} 個字元，"
+            "請檢查是否輸入正確。"
+        )
+    if not _API_KEY_PATTERN.fullmatch(key):
+        return "charset", (
+            f"❌ API Key 包含無效字元：{mask_key(key)}\n"
+            "僅允許 'AIza' 或 'AQ.' 開頭後接英文字母、數字、 dash(-) 或 underscore(_)。"
+        )
+    return None
+
+
 def validate_api_keys():
     """
     驗證 API 金鑰格式。
@@ -463,27 +509,11 @@ def validate_api_keys():
         raise RuntimeError("❌ 設定檔中沒有找到任何 API Key，請先設定金鑰。")
 
     for k in keys:
-        # 1. 接受標準 API keys (AIza) 與新的 Gemini authorization keys (AQ.)
-        if not k.startswith(_API_KEY_PREFIXES):
-            log_error(f"❌ 偵測到無效格式金鑰: {mask_key(k)}")
-            raise RuntimeError(
-                f"❌ 無效的 API Key 格式：{mask_key(k)}\n"
-                "Gemini API Key 應以 'AIza' 或 'AQ.' 開頭，請檢查您的設定檔。"
-            )
-        # 2. 檢查金鑰長度（保留既有最低長度檢查）
-        if len(k) < 35:
-            log_error(f"❌ 偵測到過短的 API 金鑰: {mask_key(k)} (長度={len(k)})")
-            raise RuntimeError(
-                f"❌ API Key 長度異常：{mask_key(k)}\n"
-                f"長度為 {len(k)}，API Key 應至少包含 35 個字元，請檢查是否輸入正確。"
-            )
-        # 3. 除支援前綴外，key body 僅允許英數字、dash 與 underscore。
-        if not _API_KEY_PATTERN.fullmatch(k):
-            log_error(f"❌ 偵測到包含無效字元的 API 金鑰: {mask_key(k)}")
-            raise RuntimeError(
-                f"❌ API Key 包含無效字元：{mask_key(k)}\n"
-                "僅允許 'AIza' 或 'AQ.' 開頭後接英文字母、數字、 dash(-) 或 underscore(_)。"
-            )
+        problem = _gemini_key_format_error(k)
+        if problem is not None:
+            kind, message = problem
+            log_error(f"❌ API Key {_API_KEY_PROBLEM_LABELS[kind]}: {mask_key(k)}")
+            raise RuntimeError(message)
 
     log_info(f"✅ 金鑰格式驗證通過，共載入 {len(keys)} 組金鑰。")
 
@@ -497,22 +527,9 @@ def validate_api_keys_from_ui(keys: list[str]):  # ui 專用
     for k in keys:
         if not k:
             raise RuntimeError("❌ API Key 不得為空，請輸入有效的 Gemini API Key。")
-        if not k.startswith(_API_KEY_PREFIXES):
-            raise RuntimeError(
-                f"❌ 無效的 API Key 格式：{mask_key(k)}\n"
-                "請使用 Google AI Studio 產生的 Gemini API Key，"
-                "應以 'AIza' 或 'AQ.' 字樣開頭。"
-            )
-        if len(k) < 35:
-            raise RuntimeError(
-                f"❌ API Key 長度異常：{mask_key(k)}\n"
-                f"長度為 {len(k)}，API Key 應至少包含 35 個字元，請檢查是否輸入正確。"
-            )
-        if not _API_KEY_PATTERN.fullmatch(k):
-            raise RuntimeError(
-                f"❌ API Key 包含無效字元：{mask_key(k)}\n"
-                "僅允許 'AIza' 或 'AQ.' 開頭後接英文字母、數字、 dash(-) 或 underscore(_)。"
-            )
+        problem = _gemini_key_format_error(k)
+        if problem is not None:
+            raise RuntimeError(problem[1])
 
 
 # =========================

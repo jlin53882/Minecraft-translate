@@ -23,6 +23,7 @@ from app.tasks.operation_registry import (
 )
 from app.ui import kit
 from app.ui.design import C
+from app.ui.page_post import post_to_ui
 from app.ui.snack import show_snack
 from app.views.moddb.species_bulk_lookup import (
     bulk_lookup_for,
@@ -31,7 +32,6 @@ from app.views.moddb.species_bulk_lookup import (
     retry_needs_refresh,
 )
 from app.views.moddb.species_bulk_lookup import safe_lookup as _safe_lookup
-from translation_tool.utils.log_unit import log_warning
 from translation_tool.utils.species_names import (
     has_species_key_hint,
     normalize_species_name,
@@ -250,7 +250,12 @@ class SpeciesSuggestion:
 
         def work() -> None:
             lookup = _safe_lookup(name, refresh=refresh)
-            self._post(self._finish, name, lookup)
+            self._post(
+                self._finish,
+                name,
+                lookup,
+                on_failure=lambda: self._running.discard(name),
+            )
 
         if not self._launch(work):
             self._running.discard(name)
@@ -284,19 +289,11 @@ class SpeciesSuggestion:
             return False
         return True
 
-    def _post(self, callback, *args) -> None:
-        run_task = getattr(self.page, "run_task", None)
-        try:
-            if callable(run_task):
-
-                async def runner() -> None:
-                    callback(*args)
-
-                run_task(runner)
-            else:
-                callback(*args)
-        except Exception as exc:  # noqa: BLE001 - disposed page
-            log_warning("學名查詢結果無法排回畫面：%r", exc)
+    def _post(self, callback, *args, on_failure=None) -> None:
+        """把背景結果排回畫面執行緒；排程失敗時由呼叫端提供的 ``on_failure`` 回收狀態。"""
+        post_to_ui(
+            self.page, callback, *args, label="學名查詢結果", on_failure=on_failure
+        )
 
 
 __all__ = ["TAB_KEY", "TAB_LABEL", "SpeciesSuggestion"]

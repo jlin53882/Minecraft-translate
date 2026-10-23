@@ -575,6 +575,24 @@ def batch_event_level(event: Mapping[str, Any]) -> str:
     return "info"
 
 
+def format_batch_event_for_log(
+    event: Mapping[str, Any], *, default_operation: str = ""
+) -> tuple[str, str] | None:
+    """任務日誌要顯示的 ``(等級, 文字)``；formatter 不認得的事件種類回傳 ``None``（不顯示）。
+
+    機翻與譯文修復的畫面 log 共用這個規則：只顯示有專屬文字的事件，
+    未知種類（例如 ``cancelled``、新增但尚未寫 formatter 的 kind）不產生通用的垃圾行，
+    取消等結果由各流程自己的狀態訊息呈現。
+    """
+    canonical = canonicalize_event(event)
+    if str(canonical.get("kind") or "") not in FORMATTED_BATCH_EVENT_KINDS:
+        return None
+    return (
+        batch_event_level(canonical),
+        format_batch_event(canonical, default_operation=default_operation),
+    )
+
+
 def format_batch_event(event: Mapping[str, Any], *, default_operation: str = "") -> str:
     """把批次事件轉成有界的中文任務日誌文字。
 
@@ -603,6 +621,7 @@ __all__ = [
     "batch_event_level",
     "canonicalize_event",
     "format_batch_event",
+    "format_batch_event_for_log",
     "safe_fields",
     "to_legacy_event",
     "with_legacy_fields",

@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from translation_tool.core import lm_resume, lm_translator
+from translation_tool.utils import file_replace
 
 
 @pytest.fixture
@@ -94,7 +95,7 @@ class TestSaveCheckpoint:
             lambda a, b: (events.append("replace"), real_replace(a, b))[1],
         )
         monkeypatch.setattr(
-            lm_translator,
+            file_replace,
             "fsync_directory",
             lambda path: events.append(f"fsync_dir:{Path(path).name}"),
         )

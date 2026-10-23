@@ -95,7 +95,11 @@ from translation_tool.translation_db.schema import (
 )
 from translation_tool.translation_db.smart_review import SmartReviewMixin
 from translation_tool.translation_db.source_catalog import SourceCatalog
-from translation_tool.translation_db.sql_helpers import like_pattern
+from translation_tool.translation_db.sql_helpers import (
+    effective_review_sql,
+    like_pattern,
+    translation_review_sql,
+)
 from translation_tool.utils.cache_registry import register_cache
 from translation_tool.utils.cancellation import (
     TaskCancelled,
@@ -438,20 +442,34 @@ class TranslationDB(SmartReviewMixin, BulkReviewMixin, CleanupMixin):
         if self._cache_generation() == gen:
             READ_CACHE.put(cache_key, encoded)
         if persist and not self.readonly:
-            try:
-                with self._lock:
-                    if self._cache_generation() != gen:
-                        return value  # 計算期間資料又變了：不寫舊世代，也不清掉新世代的快取
-                    self._conn.execute("DELETE FROM stat_cache WHERE gen <> ?", (gen,))
-                    self._conn.execute(
-                        "INSERT OR REPLACE INTO stat_cache (key, gen, value) "
-                        "VALUES (?,?,?)",
-                        (key, gen, encoded),
-                    )
-                    self._conn.commit()
-            except sqlite3.Error:
-                pass  # 快取寫不進去（被其他連線鎖住等）不影響結果
+            self._persist_stat_cache(key, gen, encoded)
         return value
+
+    def _persist_stat_cache(self, key: str, gen: str, encoded: str) -> None:
+        """把統計結果寫進 ``stat_cache``；失敗時回復本次寫入，不影響呼叫端取得的結果。
+
+        所有權：這裡只提交／回復「自己開的」交易。連線上已有別人未提交的交易
+        （``in_transaction``）時不替它 commit 或 rollback，直接放棄這次持久化，
+        資料世代照常由程序內快取負責。
+        """
+        with self._lock:
+            if self._conn.in_transaction:
+                return
+            try:
+                if self._cache_generation() != gen:
+                    return  # 計算期間資料又變了：不寫舊世代，也不清掉新世代的快取
+                self._conn.execute("DELETE FROM stat_cache WHERE gen <> ?", (gen,))
+                self._conn.execute(
+                    "INSERT OR REPLACE INTO stat_cache (key, gen, value) "
+                    "VALUES (?,?,?)",
+                    (key, gen, encoded),
+                )
+                self._conn.commit()
+            except sqlite3.Error:
+                # 快取寫不進去（被其他連線鎖住等）不影響結果；但 DELETE 可能已開了寫入交易，
+                # 不回復會一直持有寫鎖，擋住之後所有寫入。
+                if self._conn.in_transaction:
+                    self._conn.rollback()
 
     def warm_stats(self) -> None:
         """預先算好總覽統計並存入快取（大量寫入後在背景呼叫，之後切到總覽頁就是即時的）。"""
@@ -826,17 +844,8 @@ class TranslationDB(SmartReviewMixin, BulkReviewMixin, CleanupMixin):
         return self._effective_source_stats_by_version_full()
 
     def _effective_source_stats_by_version_full(self) -> list[list]:
-        if self.has_review_state:
-            # 審核狀態與生效來源各自獨立；非人工來源沒有狀態就是「未審核」
-            review = (
-                f"CASE WHEN f.review_status IN "
-                "('unreviewed', 'reviewed', 'legacy_unknown') "
-                "THEN f.review_status "
-                f"WHEN f.source = {SRC_MANUAL} THEN 'legacy_unknown' "
-                "WHEN f.source IS NOT NULL THEN 'unreviewed' END"
-            )
-        else:
-            review = f"CASE WHEN f.source = {SRC_MANUAL} THEN 'legacy_unknown' END"
+        # 審核狀態與生效來源各自獨立；非人工來源沒有狀態就是「未審核」
+        review = effective_review_sql("f", self.has_review_state)
         return [
             list(row)
             for row in self._q(
@@ -992,13 +1001,7 @@ class TranslationDB(SmartReviewMixin, BulkReviewMixin, CleanupMixin):
     @property
     def _effective_review_sql(self) -> str:
         """生效譯文的審核狀態：與來源各自獨立，非人工來源沒有狀態就是未審核。"""
-        if not self.has_review_state:
-            return f"CASE WHEN f.source={SRC_MANUAL} THEN 'legacy_unknown' END"
-        return (
-            "COALESCE(f.review_status, CASE "
-            f"WHEN f.source={SRC_MANUAL} THEN 'legacy_unknown' "
-            "WHEN f.source IS NOT NULL THEN 'unreviewed' END)"
-        )
+        return effective_review_sql("f", self.has_review_state)
 
     # 有效譯文（``effective`` 視圖／表，已套用來源優先序）與 en_us 嚴格相等，且兩者都非空
     _SAME_AS_SOURCE_SQL = (
@@ -1938,11 +1941,7 @@ class TranslationDB(SmartReviewMixin, BulkReviewMixin, CleanupMixin):
         translation_created = (
             "et.created_at" if self.has_translation_created_at else "NULL"
         )
-        manual_review = (
-            "man.review_status"
-            if self.has_review_state
-            else f"CASE WHEN man.source={SRC_MANUAL} THEN 'legacy_unknown' END"
-        )
+        manual_review = translation_review_sql("man", self.has_review_state)
         manual_revision = "man.revision" if self.has_translation_revision else "NULL"
         return (
             f"SELECT {_ENTRY_COLS}, f.zh_tw, f.source, f.checker, "
@@ -1956,11 +1955,7 @@ class TranslationDB(SmartReviewMixin, BulkReviewMixin, CleanupMixin):
 
     def _batch_replace_select_sql(self) -> str:
         """只選取批次預覽需要的欄位，保持資料列配置穩定。"""
-        manual_review = (
-            "man.review_status"
-            if self.has_review_state
-            else f"CASE WHEN man.source={SRC_MANUAL} THEN 'legacy_unknown' END"
-        )
+        manual_review = translation_review_sql("man", self.has_review_state)
         manual_revision = "man.revision" if self.has_translation_revision else "NULL"
         effective_revision = "et.revision" if self.has_translation_revision else "NULL"
         return (
@@ -2821,10 +2816,8 @@ class TranslationDB(SmartReviewMixin, BulkReviewMixin, CleanupMixin):
         if entry is None:
             return None
         detail = EntryDetail(entry=entry)
-        translation_review_sql = (
-            "review_status"
-            if self.has_review_state
-            else f"CASE WHEN source={SRC_MANUAL} THEN 'legacy_unknown' END"
+        translation_review = translation_review_sql(
+            "translation", self.has_review_state
         )
         translation_created_sql = (
             "created_at" if self.has_translation_created_at else "NULL"
@@ -2836,7 +2829,7 @@ class TranslationDB(SmartReviewMixin, BulkReviewMixin, CleanupMixin):
             TranslationRow(*r)
             for r in self._q(
                 "SELECT source, zh_tw, zh_cn, checker, updated_at, "
-                f"{translation_review_sql}, {translation_created_sql}, "
+                f"{translation_review}, {translation_created_sql}, "
                 f"{translation_revision_sql} FROM translation "
                 "WHERE entry_id=? ORDER BY source",
                 (entry_id,),

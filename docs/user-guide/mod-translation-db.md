@@ -106,7 +106,7 @@ jar 自帶的 `zh_tw`／`zh_cn` 與「語系合併」使用同一套判斷與函
 
 ### AI 智慧校對（本地候選）
 
-條目校對工具列的「智慧校對」沿用目前面板的版本、模組、類型、目前生效來源與搜尋條件，預設只選未審核且有生效譯文的條目；可設定模型、筆數上限（預設 1000）與批次大小（預設 40）。預覽與實跑使用同一組 scope，預覽只讀取資料庫、不呼叫 AI；開始後由背景作業分批送出既有 provider 的 structured JSON，模型只判斷既有譯文是 `no_change`、`suggest_revision` 或 `needs_context`。
+條目校對工具列的「智慧校對」沿用目前面板的版本、模組、類型、目前生效來源與搜尋條件，預設只選未審核且有生效譯文的條目；可設定模型、筆數上限（預設 1000）與批次大小（預設 20，上限 50）。預覽與實跑使用同一組 scope，預覽只讀取資料庫、不呼叫 AI；開始後由背景作業分批送出既有 provider 的 structured JSON，模型只判斷既有譯文是 `no_change`、`suggest_revision` 或 `needs_context`。
 
 - local context 只來自本機資料庫與 bundled official locale。`db:<entry_id>` 可追溯到實際資料列，`official:<key>` 可追溯到內建 locale；同 key 的 reviewed reference 必須同時符合 kind、模組、key 與英文原文，跨版本英文不同只能標為 context。Patchouli、指南與 Advancement 也會收到同模組的 reviewed lang 術語；衝突證據會明確標示為低信心／需人工決定。**未做網路查證**，AI 仍可能誤判。
 - 每筆回應都必須有具體 `reason`，不得放外部 URL；另驗證同批 ID 是否完整唯一、decision／issue type／evidence ID、信心值與格式 token。格式錯誤與 API 請求失敗分別保留為 `invalid` 與 `request_failed`，不寫入翻譯。
@@ -213,6 +213,8 @@ Patchouli 與 lang 走同一個流程，只是身分不同。FTB Quests / KubeJS
 ### Schema 升級
 
 Schema v3 增加每個來源譯文的首次匯入時間與單調修訂序號，以及 history 的前後修訂快照。升級 v1 會先依序建立 v2 與 v3 備份；升級 v2 會先建立 `*.pre-schema-v3-<時間戳>.bak`。舊資料的 `translation.created_at` 保留為 `NULL`，不推測匯入時間。migration 在單一交易中完成；唯讀開啟舊資料庫不執行 migration，時間欄位會顯示未知。備份檔應和資料庫一樣納入使用者自己的備份政策。
+
+兩個程序同時開啟舊版資料庫時，版本以取得寫鎖後重新讀到的為準：後到的程序若看到別人已完成該版 migration，就放棄本次升級並刪除自己剛建立的備份，不會重跑回填（例如把人工審核蓋回 `legacy_unknown`），也不會留下重複備份。
 
 統計摘要（`meta.stats_schema_version`）不屬於 `schema_version`：可寫開啟時若摘要表缺少或無效，就在單一交易中建立摘要表與觸發器並以全庫重算填入；它只是可隨時重算的衍生資料，不建立備份檔。重建所有生效譯文這類整批改寫會在同一交易內暫停觸發器（`meta.stats_frozen`），完成後一次重算摘要。
 

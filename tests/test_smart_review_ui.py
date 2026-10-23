@@ -26,7 +26,7 @@ from app.views.moddb.smart_review_evidence import (
     manual_edit_hint,
     not_applicable_reason,
 )
-from app.views.moddb.smart_review_history import SmartReviewHistory, run_status_label
+from app.views.moddb.smart_review_history import SmartReviewHistory
 from app.views.moddb.smart_review_job import (
     SmartReviewJob,
     SmartReviewJobState,
@@ -35,6 +35,7 @@ from app.views.moddb.smart_review_job import (
     job_for_page,
 )
 from app.views.moddb.smart_review_reviewer import SmartReviewReviewer
+from app.views.moddb.smart_review_run_status import run_status_label
 from tests.conftest import mock_page
 from tests.test_smart_review import _seed
 from translation_tool.translation_db import (
@@ -1440,3 +1441,45 @@ def test_run_breakdown_counts_statuses_and_top_errors(db):
     assert breakdown["status"] == {"invalid": 2}
     assert breakdown["errors"] == [("reason 不可為空", 2)]
     assert db.smart_review_run_breakdown("missing") == {"status": {}, "errors": []}
+
+
+def test_batch_result_summary_total_equals_processed(ctx):
+    """「完成 N / M」必須等於各分類加總：未知或少見的 outcome 也要計入略過。"""
+    from app.services_impl.moddb_smart_review_service import (
+        SmartReviewBatchItemResult,
+        SmartReviewBatchResult,
+    )
+
+    statuses = [
+        "applied",
+        "rejected",
+        "error",
+        "not_ready",
+        "missing",
+        "manual_reviewed",
+        "missing_entry",
+        "stale",
+        "brand_new_status",
+    ]
+    result = SmartReviewBatchResult(
+        action="override",
+        requested=len(statuses),
+        processed=len(statuses),
+        cancelled=False,
+        items=tuple(
+            SmartReviewBatchItemResult("run-1", index, f"k{index}", status)
+            for index, status in enumerate(statuses, start=1)
+        ),
+    )
+    reviewer = SmartReviewBatchReviewer(ctx, on_changed=lambda: None)
+
+    reviewer._render_result(result)
+
+    text = reviewer.result_text.value
+    assert "完成 9 / 9 筆" in text
+    assert "已套用 1" in text
+    assert "已保留原譯文 1" in text
+    assert (
+        "略過 6" in text
+    )  # not_ready/missing/manual_reviewed/missing_entry/stale/未知
+    assert "失敗 1" in text

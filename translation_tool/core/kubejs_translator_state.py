@@ -9,10 +9,11 @@ import re
 import shutil
 import tempfile
 import threading
-import time
 import uuid
 from pathlib import Path
 from typing import Any
+
+from translation_tool.utils.file_replace import replace_with_retry
 
 STATE_VERSION = 1
 _RUN_ID_RE = re.compile(r"^[0-9a-f]{32}$")
@@ -144,16 +145,9 @@ def atomic_write_bytes(path: Path, data: bytes) -> None:
             handle.write(data)
             handle.flush()
             os.fsync(handle.fileno())
-        for attempt in range(4):
-            try:
-                os.replace(temporary, path)
-                break
-            except PermissionError:
-                if attempt == 3:
-                    raise
-                # Windows scanners/editors can hold a just-written manifest for
-                # a short interval. Retry briefly; never remove the old target.
-                time.sleep(0.025 * (attempt + 1))
+        # Windows scanners/editors can hold a just-written manifest for a short
+        # interval; replace_with_retry backs off and never removes the old target.
+        replace_with_retry(temporary, path)
     except BaseException:
         temporary.unlink(missing_ok=True)
         raise

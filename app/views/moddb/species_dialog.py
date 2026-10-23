@@ -34,10 +34,11 @@ from app.ui.dialogs import (
     dialog_dimensions,
     present_page_dialog,
 )
+from app.ui.page_post import post_to_ui
 from app.ui.snack import show_snack
 from app.views.moddb import species_bulk_lookup as bulk
 from app.views.moddb.formatting import kind_label
-from translation_tool.utils.log_unit import log_exception, log_warning
+from translation_tool.utils.log_unit import log_exception
 
 # 候選列表每頁顯示幾筆（候選數量不設上限，用頁碼切換）。
 PAGE_SIZE = 50
@@ -261,7 +262,7 @@ class SpeciesCandidateDialog:
             except Exception as exc:  # noqa: BLE001 - worker boundary
                 error = exc
                 log_exception("Mod 資料庫學名掃描範圍選單載入失敗")
-            self._post(done, result, error)
+            self._post(done, result, error, on_failure=self._abandon_scope_load)
 
         def done(result, error: str | None) -> None:
             """只套用仍屬於最新條件的背景查詢結果。"""
@@ -452,7 +453,13 @@ class SpeciesCandidateDialog:
             except Exception as exc:  # noqa: BLE001 - worker boundary
                 error = exc
                 log_exception("Mod 資料庫學名候選掃描失敗")
-            self._post(self._apply_scan, generation, result, error)
+            self._post(
+                self._apply_scan,
+                generation,
+                result,
+                error,
+                on_failure=lambda: setattr(self, "_busy", False),
+            )
 
         if not self._launch(work, "Mod 資料庫學名候選掃描"):
             self._set_busy(False, "掃描無法啟動")
@@ -516,6 +523,16 @@ class SpeciesCandidateDialog:
         self._flush(force=True)
 
     # ------------------------------------------------------------------ 單筆查詢
+    def _abandon_scope_load(self) -> None:
+        """範圍選單結果無法排回畫面時，結束載入中狀態。"""
+        self._scope_loading = False
+
+    def _abandon_lookup(self, candidate: SpeciesCandidate) -> None:
+        """單筆查詢結果無法排回畫面時，結束這一筆的執行中狀態。"""
+        state = self._states.get(candidate.entry_id)
+        if state is not None:
+            state.running = False
+
     def _any_running(self) -> bool:
         return any(state.running for state in self._states.values())
 
@@ -536,7 +553,13 @@ class SpeciesCandidateDialog:
 
         def work() -> None:
             lookup = bulk.safe_lookup(candidate.value, refresh=refresh)
-            self._post(self._apply_lookup, generation, candidate.entry_id, lookup)
+            self._post(
+                self._apply_lookup,
+                generation,
+                candidate.entry_id,
+                lookup,
+                on_failure=lambda: self._abandon_lookup(candidate),
+            )
 
         if not self._launch(work, "Mod 資料庫學名查詢"):
             state.running = False
@@ -799,19 +822,11 @@ class SpeciesCandidateDialog:
             return False
         return True
 
-    def _post(self, callback, *args) -> None:
-        run_task = getattr(self.page, "run_task", None)
-        try:
-            if callable(run_task):
-
-                async def runner() -> None:
-                    callback(*args)
-
-                run_task(runner)
-            else:
-                callback(*args)
-        except Exception as exc:  # noqa: BLE001 - disposed page
-            log_warning("學名掃描結果無法排回畫面：%r", exc)
+    def _post(self, callback, *args, on_failure=None) -> None:
+        """把背景結果排回畫面執行緒；排程失敗時由呼叫端提供的 ``on_failure`` 回收狀態。"""
+        post_to_ui(
+            self.page, callback, *args, label="學名掃描結果", on_failure=on_failure
+        )
 
     def _set_busy(self, busy: bool, text: str = "") -> None:
         self._busy = busy

@@ -386,6 +386,54 @@ def test_response_incomplete_keeps_shrink_batch_action(monkeypatch):
 
 
 @pytest.mark.parametrize(
+    "event_payload",
+    [
+        {
+            "type": "error",
+            "error": {
+                "code": "stream_backend_error",
+                "status": "not-a-status",
+            },
+        },
+        {
+            "type": "response.failed",
+            "response": {
+                "error": {
+                    "code": "stream_backend_error",
+                    "status": "999999999999999999999999",
+                }
+            },
+        },
+    ],
+)
+def test_malformed_sse_status_is_treated_as_unknown(event_payload):
+    response = _FakeStreamResponse([event_payload])
+
+    with pytest.raises(client.ChatGPTAPIError) as exc_info:
+        client._consume_stream(response, None)
+
+    assert exc_info.value.status is None
+    assert response.closed is True
+
+
+def test_malformed_incomplete_details_do_not_crash_stream_parser():
+    response = _FakeStreamResponse(
+        [
+            {
+                "type": "response.incomplete",
+                "response": {"incomplete_details": ["unexpected"]},
+            }
+        ]
+    )
+
+    with pytest.raises(client.ChatGPTAPIError) as exc_info:
+        client._consume_stream(response, None)
+
+    assert exc_info.value.code == "incomplete"
+    assert response.closed is True
+
+
+@pytest.mark.parametrize(
     ("event", "code"),
     [
         ("response.failed", "subscription_sharing_usage_unavailable"),
@@ -766,6 +814,9 @@ def test_sse_retry_wait_cancellation_stops_the_batch_before_another_request(
 
 def test_sse_retry_then_success_uses_same_batch_and_pinned_profile(monkeypatch):
     from translation_tool.core import lm_translator_main as main
+
+    # 此測試驗證批次間節流等待，明確還原預設間隔（conftest 預設為 0）。
+    monkeypatch.setattr(main, "_DEFAULT_BATCH_SLEEP", 4.0)
 
     active_profile = {"id": "profile-a"}
     token_requests = []

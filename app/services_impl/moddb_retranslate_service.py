@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import inspect
 import logging
 import sqlite3
 import time
@@ -33,10 +32,8 @@ from app.services_impl.pipelines._pipeline_logging import (
     mirror_session_log,
 )
 from app.tasks.task_session import add_log_unmirrored
-from translation_tool.core.common_batch_executor import (
-    CommonBatchExecutor,
-    format_batch_event,
-)
+from translation_tool.core.batch_events import format_batch_event_for_log
+from translation_tool.core.common_batch_executor import CommonBatchExecutor
 from translation_tool.core.lm_batch_budget import (
     BudgetConfig,
     get_tracker,
@@ -54,6 +51,7 @@ from translation_tool.core.lm_translator_main import (
     estimate_batch_fixed_input_tokens,
     translate_batch_smart,
 )
+from translation_tool.core.lm_translator_shared import invoke_translation_batch
 from translation_tool.core.lm_translator_shared_cache import get_default_cache_rules
 from translation_tool.core.lm_translator_shared_loop import _get_default_batch_size
 from translation_tool.translation_db import TranslationDB
@@ -1691,6 +1689,13 @@ def _flush_repair_cache(options, session, report, cache_keys_to_save) -> None:
         cache_keys_to_save.pop(cache_type, None)
 
 
+def _repair_event_sink(session, event: dict[str, Any]) -> None:
+    """把共用批次事件轉成譯文修復的任務日誌；顯示規則與等級見 ``format_batch_event_for_log``。"""
+    entry = format_batch_event_for_log(event)
+    if entry is not None:
+        _log(session, entry[1], entry[0])
+
+
 def _translate_snapshot(
     db,
     options: TranslateOptions,
@@ -1710,13 +1715,7 @@ def _translate_snapshot(
         model=_configured_model_label(lm_cfg),
         task_id=str(getattr(session, "task_id", "") or ""),
         run_id=f"repair-{uuid.uuid4().hex[:12]}",
-        event_sink=lambda event: _log(
-            session,
-            format_batch_event(event),
-            "warning"
-            if event.get("kind") in {"attempt_failure", "retry_wait"}
-            else "info",
-        ),
+        event_sink=lambda event: _repair_event_sink(session, event),
         cancel_check=cancelled,
     )
     executor.add_timing("selection_ms", (monotonic() - selection_started) * 1000)
@@ -1768,29 +1767,15 @@ def _raise_if_repair_cancelled(items, report, cancelled):
 
 def _request_repair_translation(batch, total, batch_handle):
     """呼叫既有翻譯策略並發布共用 API telemetry；每批完成後逐筆驗證並以 CAS 寫回結果。"""
-    wait_before = (
-        batch_handle.executor.metrics.quota_wait_ms
-        + batch_handle.executor.metrics.retry_backoff_ms
-        + batch_handle.executor.metrics.network_retry_wait_ms
-    )
-    api_started = monotonic()
     batch_handle.attempt_start(expected_count=len(batch), max_attempts=0)
     try:
-        try:
-            parameters = inspect.signature(translate_batch_smart).parameters.values()
-            accepts_events = any(
-                parameter.name == "event_callback"
-                or parameter.kind is inspect.Parameter.VAR_KEYWORD
-                for parameter in parameters
+        with batch_handle.timed_request() as request:
+            translated, status = invoke_translation_batch(
+                translate_batch_smart,
+                batch,
+                total,
+                batch_handle.forward_provider_event,
             )
-        except (TypeError, ValueError):
-            accepts_events = False
-        if accepts_events:
-            translated, status = translate_batch_smart(
-                batch, total, event_callback=batch_handle.forward_provider_event
-            )
-        else:
-            translated, status = translate_batch_smart(batch, total)
     except TaskCancelled:
         batch_handle.emit("cancelled", status="cancelled")
         batch_handle.complete(status="cancelled", processed_count=0, actual_count=0)
@@ -1799,21 +1784,14 @@ def _request_repair_translation(batch, total, batch_handle):
         batch_handle.attempt_failure(exc, will_retry=False)
         batch_handle.complete(status="failed", processed_count=0, actual_count=0)
         raise
-    request_elapsed_ms = (monotonic() - api_started) * 1000
-    wait_ms = (
-        batch_handle.executor.metrics.quota_wait_ms
-        + batch_handle.executor.metrics.retry_backoff_ms
-        + batch_handle.executor.metrics.network_retry_wait_ms
-        - wait_before
-    )
-    elapsed_ms = round(max(0.0, request_elapsed_ms - wait_ms))
+    elapsed_ms = request.api_ms
     batch_handle.attempt_success(
         elapsed_ms=elapsed_ms,
         http_status=200,
         expected_count=len(batch),
         actual_count=len(translated or []),
-        request_elapsed_ms=round(request_elapsed_ms),
-        retry_wait_ms=round(wait_ms),
+        request_elapsed_ms=request.request_ms,
+        retry_wait_ms=request.wait_ms,
     )
     return translated, status, elapsed_ms
 

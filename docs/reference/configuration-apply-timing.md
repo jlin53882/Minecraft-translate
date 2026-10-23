@@ -38,7 +38,7 @@
 | `token_budget_*`、`max_output_tokens`、`output_token_factor`、`budget_*` | 每批重讀；學到的預算是行程內狀態 |
 | `key_failure_cooldown_sec` | 每次判斷冷卻時讀 |
 | `rate_limit.*`、`rpm_cooldown_sec` | 每次請求前讀 |
-| `translator.parallel_execution_workers` | 每次建立執行緒池時讀 |
+| `translator.parallel_execution_workers` | 每次建立執行緒池時讀；解析規則與各用途的預設／上限見 `translation_tool/utils/worker_count.py`（正整數才有效，無效值退回該用途預設） |
 | `translator.output_dir_name`、`ftb_translator.output_dir_name` | 每次任務讀 |
 | `lang_merger.*` | 每次合併讀 |
 | `extractor.output_folder_names.*`、`jar_extractor.lang_codes` | 提取頁在按下動作時才讀 |

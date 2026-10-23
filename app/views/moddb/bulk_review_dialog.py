@@ -24,6 +24,7 @@ from app.ui.dialogs import (
     dialog_dimensions,
     present_page_dialog,
 )
+from app.ui.page_post import post_to_ui
 from app.ui.snack import show_snack
 from app.views.moddb.formatting import format_count, shorten
 from translation_tool.utils.log_unit import log_exception, log_info, log_warning
@@ -413,9 +414,12 @@ class BulkReviewDialog:
         self._launch(work, "Mod 資料庫批量審核預覽", CommitPolicy.PARTIAL_ALLOWED)
 
     def _apply_preview(self, generation: int, plan, error) -> None:
-        self._set_busy(False)
+        if self._closed:
+            return
         if generation != self._generation:
+            self._set_busy(False)
             return  # 預覽期間選項又改了
+        self._set_busy(False)
         if error is not None:
             self.summary.value = f"預覽失敗：{error}"
             show_snack(self.page, f"批量審核預覽失敗：{error}", C.RED)
@@ -593,7 +597,7 @@ class BulkReviewDialog:
 
     def _on_progress(self, text: str, fraction: float) -> None:
         """把背景批量審核的文字與比例進度排回 UI 執行緒。"""
-        self._post(self._show_progress, text, fraction)
+        self._post(self._show_progress, text, fraction, final=False)
 
     def _show_progress(self, text: str, fraction: float) -> None:
         """在 UI 執行緒顯示批量審核的狀態文字與進度比例。"""
@@ -603,6 +607,11 @@ class BulkReviewDialog:
 
     def _apply_result(self, generation: int, plan, result, error) -> None:
         """把批量審核結果轉成 UI 摘要，並清除已失效的預覽狀態。"""
+        if self._closed:
+            return
+        if generation != self._generation:
+            self._set_busy(False)
+            return  # 這份結果已被新的操作取代
         self._set_busy(False)
         source_text = "全部來源" if plan.source is None else str(plan.source)
         if error is not None:
@@ -644,6 +653,7 @@ class BulkReviewDialog:
         db, result = self.get_db(), self.result
         if db is None or result is None or self._busy:
             return
+        generation = self._generation
         self._set_busy(True, "還原中…")
 
         def work() -> None:
@@ -653,7 +663,7 @@ class BulkReviewDialog:
             except sqlite3.Error as exc:
                 error = exc
                 log_exception(f"Mod 資料庫批量審核還原失敗：batch={result.batch}")
-            self._post(self._apply_revert, count, error)
+            self._post(self._apply_revert, generation, count, error)
 
         self._launch(
             work,
@@ -664,7 +674,12 @@ class BulkReviewDialog:
             shutdown=ShutdownPolicy.ALLOW_TO_FINISH,
         )
 
-    def _apply_revert(self, count, error) -> None:
+    def _apply_revert(self, generation: int, count, error) -> None:
+        if self._closed:
+            return
+        if generation != self._generation:
+            self._set_busy(False)
+            return
         self._set_busy(False)
         if error is not None:
             show_snack(
@@ -713,20 +728,22 @@ class BulkReviewDialog:
             self._set_busy(False)
             show_snack(self.page, "應用程式正在關閉，未啟動操作。", C.GOLD)
 
-    def _post(self, callback, *args) -> None:
-        """把背景結果排回畫面執行緒（沒有 ``run_task`` 的測試頁面直接呼叫）。"""
-        run_task = getattr(self.page, "run_task", None)
-        try:
-            if callable(run_task):
+    def _post(self, callback, *args, final: bool = True) -> None:
+        """把背景結果排回畫面執行緒；排程失敗時（頁面已卸載）收回忙碌狀態。
 
-                async def runner() -> None:
-                    callback(*args)
+        ``final`` 為 False 的進度通知失敗不影響操作本身，不需回收。
+        """
+        post_to_ui(
+            self.page,
+            callback,
+            *args,
+            label="Mod 資料庫批量審核結果",
+            on_failure=(self._mark_post_failure if final else None),
+        )
 
-                run_task(runner)
-            else:
-                callback(*args)
-        except Exception as exc:  # noqa: BLE001 - a disposed page may reject the callback
-            log_warning(f"Mod 資料庫批量審核結果無法排回畫面：{exc!r}")
+    def _mark_post_failure(self) -> None:
+        """排程失敗時只回收背景狀態；此 callback 可能在 worker thread 執行。"""
+        self._busy = False
 
     def _set_busy(self, busy: bool, text: str = "") -> None:
         self._busy = busy

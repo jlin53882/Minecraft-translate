@@ -22,6 +22,9 @@ from translation_tool.core.lm_format_policy import (
     normalize_legacy_prompt,
 )
 from translation_tool.core.terminology_model import (
+    MATCH_STANDALONE,
+    STANDALONE_ALLOWLIST,
+    USAGE_STANDALONE,
     TerminologyMatch,
     from_official_match,
     prompt_glossary_key,
@@ -240,6 +243,7 @@ class OfficialLocaleIndex:
                 "exact_key": 0,
                 "exact_text": 1,
                 "official_phrase": 2,
+                MATCH_STANDALONE: 2,
                 "source_substring": 3,
             }.get(match_type, 4)
             candidates.append(
@@ -299,6 +303,18 @@ class OfficialLocaleIndex:
         ):
             canonical = term_canonical_key(term)
             if canonical == term_canonical_key(normalized_source):
+                # 單獨成句預設不套用子字串／複合詞術語（``Max``、``Wood`` 等會誤導）；
+                # 只有人工審核 allowlist 且仍與官方語系一致者放行。
+                allowed = self._standalone_allowlist_definition(canonical)
+                if allowed is not None:
+                    display, target, term_key = allowed
+                    add(
+                        display,
+                        target,
+                        key=term_key,
+                        match_type=MATCH_STANDALONE,
+                        term_origin=USAGE_STANDALONE,
+                    )
                 continue
             definition = self._term_definition(term)
             if definition is None:
@@ -389,6 +405,22 @@ class OfficialLocaleIndex:
             key=lambda value: value.key,
         )
         return records[0] if records else None
+
+    def _standalone_allowlist_definition(
+        self, canonical: str
+    ) -> tuple[str, str, str | None] | None:
+        """單獨成句時，回傳 allowlist 內且與官方推導一致的（來源, 目標, key）。
+
+        官方語系若已有同名完整翻譯，會由 exact_text 處理，這裡不重複放行；
+        推導目標與審核值不同（語系更新或歧義）時不放行。
+        """
+        expected = STANDALONE_ALLOWLIST.get(canonical)
+        if expected is None or self._unique_target_for_source(canonical):
+            return None
+        derived = self._derived_terms().get(canonical)
+        if derived is None or derived[1] != expected:
+            return None
+        return derived
 
     def _derived_terms(self) -> dict[str, tuple[str, str, str | None]]:
         """取得預先計算或由官方完整翻譯拆出的複合術語表。"""

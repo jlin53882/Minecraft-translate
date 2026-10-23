@@ -111,17 +111,18 @@ LMView 本身不直接操作 cache_manager，只透過 `write_new_cache_switch` 
 
 - `lm_translator_main.py` 常數：`RPM_COOLDOWN_SEC=0`、`OVERLOAD_RETRY_WAIT_SEC=12`、`OVERLOAD_KEY_SWITCH_THRESHOLD=3`、`MIN_LANG_BATCH_SIZE=20`、`DEFAULT_DRY_RUN=False`
 - `lm_translator.rate_limit.sleep_seconds_between_batches` 是 provider／model 共用 request slot 的最小間隔，預設為 `4` 秒，讓 RPM 15 的模型約每分鐘送出 15 次；正常批次、內部縮批與品質 retry 共用同一個可取消 scheduler。正式 provider 路線不再額外執行 shared-loop sleep，避免雙重等待；明確設為 `0` 才停用本地間隔。這個設定不會取代 API 回傳的 `Retry-After`、429、503 或換 Key 緩衝等待。
-- 其他等待秒數可由 `config.json` 的 `lm_translator` 覆寫：`rpm_cooldown_sec`（無效值退回預設）、`overload_retry_sec`、`key_rotation_buffer_sec`（預設 5）、`request_interval_sec`（預設 4）。其中只有 `rpm_cooldown_sec` 在設定頁有欄位，其餘需手動編輯 `config.json`
+- 其他等待秒數可由 `config.json` 的 `lm_translator` 覆寫：`rpm_cooldown_sec`（無效值退回預設）、`overload_retry_sec`、`key_rotation_buffer_sec`（預設 5）、`request_interval_sec`（預設 4）。其中只有 `rpm_cooldown_sec` 在設定頁有欄位，其餘需手動編輯 `config.json`；這三個隱藏設定必須是 0 到 3600 秒之間的有限數值，超出範圍或型別錯誤時記警告並改用預設
 - **每批項目數上限**：共用迴圈以 `_get_default_batch_size`（`lm_translator_shared_loop.py`）依 cache_type 讀 `initial_batch_size_*`（ftbquests / kubejs / patchouli / md / lang），再由 `select_batch_size` 依 token 預算取前綴；同一批只取開頭連續、同一 cache_type 的項目。`translate_batch_smart` 內另以 `_build_batch_runtime` 讀同一組設定。預設值以設定頁（`config_schema.py`）為準
 - 每批成功後 `batch_size = min(batch_size, remaining_count)` 動態縮小；正式 provider 的批次間隔由共用 request slot 控制。全部項目完成且 `rpm_cooldown_sec > 0` 時另外執行 `interruptible_sleep(rpm_cooldown_sec)`（免費層 RPM 保護）。
 - API 限流冷卻、429 `retry_after`、overload 重試、品質 retry 間隔與換 Key 緩衝使用 `interruptible_sleep()`，可被取消打斷；provider／model 的正常批次間隔由共用 request slot 管理，等待中的取消會釋放尚未送出的預約，API `Retry-After` 會推遲同一共用時鐘。每次準備下一個內部批次前，會依最新的 session history 重新計算固定 prompt token 預算，取消會在下一個批次邊界檢查。
-- 縮小 batch（`BatchAction.SHRINK_BATCH`）的情況：400 INVALID_ARGUMENT（payload 過大 / 格式錯誤）、回應被截斷或漏翻、逾時 / 5xx 類錯誤；縮小係數 `batch_shrink_factor`（預設 0.75）、下限 `min_batch_size`（預設 50；lang 類型下限為 `MIN_LANG_BATCH_SIZE`）。縮到極限時以原文回填（標記 `_untranslated`，不寫入快取）並繼續後續項目
+- 縮小 batch（`BatchAction.SHRINK_BATCH`）的情況：400 INVALID_ARGUMENT（payload 過大 / 格式錯誤）、回應被截斷或漏翻、逾時 / 5xx 類錯誤；縮小係數 `batch_shrink_factor`（預設 0.5，取自 `config_schema` 的單一來源；必須是有限數值且 `0 < factor < 1`，缺漏用預設，明確設定成 0、1 以上或非數字會在送出請求前以錯誤中止，不會默默擴大批次或回填原文）、下限 `min_batch_size`（預設 50；lang 類型下限為 `MIN_LANG_BATCH_SIZE`）。縮到極限時以原文回填（標記 `_untranslated`，不寫入快取）並繼續後續項目
 - `provider` 為 `chatgpt` 時，ChatGPT API 錯誤交由 `_handle_chatgpt_api_error` 處理：暫時性錯誤最多重試 `CHATGPT_MAX_RETRIES`（3）次，等待時間上限為 `CHATGPT_MAX_RETRY_AFTER_SEC`（120 秒），超過即回報錯誤
 
 ### 錯誤處理與 Key 輪替（`_handle_batch_error`）
 
 - **503 overload**（訊息含 overloaded / too many requests）：**逐把 key** 計數（`ApiKeyCycle` 的 `record_overload()` / `clear_overload()`，`lm_config_rules.py`）。未達 `OVERLOAD_KEY_SWITCH_THRESHOLD`（3）時同一模型等待 `overload_retry_sec` 後重試；達到門檻才對這把 key `mark_failed()` 並換 key（`BatchAction.ROTATE_KEY`，先等待 `key_rotation_buffer_sec`）。成功後 `record_success()` 會 `reset()` 開始新的 cycle
 - **Gemini 503 UNAVAILABLE / high demand**（非 overload）：依 `GEMINI_503_RETRY_DELAYS_SEC`（30、60、120 秒）重試，第二次起可改試其他可用模型；重試用盡，或 Retry-After 超過 `GEMINI_503_MAX_RETRY_AFTER_SEC`（120 秒）時，保留未翻譯項目（標記 `_untranslated`）並以 PARTIAL 結束
+- **429 回應無法解析**（body 不是 Google error JSON）：視為速率限制，先等待 `Retry-After`（沒有則 10 秒）並重試，連續 3 次仍受限才輪替 key；Retry-After 的解析規則與錯誤分類旗標見 `docs/developer-guide/provider-errors.md`
 - **其他 503**：等待 `request_interval_sec` 後，依是否還有下一個模型決定換模型（`NEXT_MODEL`）或縮小 batch
 - **404** → 模型不存在，記入 `missing_models`，之後不再呼叫該模型，換下一個模型
 - **403** → Key 無權限，`mark_failed(reason="forbidden")` 換 Key；無 Key 可換 → RuntimeError「所有 API Key 均無權限」

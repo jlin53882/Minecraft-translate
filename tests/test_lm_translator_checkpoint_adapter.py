@@ -1,4 +1,5 @@
 import json
+import os
 
 import pytest
 
@@ -98,20 +99,20 @@ def test_write_is_fsynced_and_leaves_no_tmp_file(tmp_path, monkeypatch):
 
 def test_directory_is_fsynced_after_the_replace(tmp_path, monkeypatch):
     """只 fsync 暫存檔不夠：rename 造成的目錄項目更新也要同步（replace 之後）。"""
-    from translation_tool.core import lm_translator_skeleton as skeleton
+    from translation_tool.utils import file_replace
 
     monkeypatch.setenv("MCT_DATA_DIR", str(tmp_path))
     events: list[tuple[str, object]] = []
     adapter = _adapter()
-    real_replace = type(adapter.path).replace
+    real_replace = os.replace
 
-    def tracking_replace(self, target):
+    def tracking_replace(source, target):
         events.append(("replace", str(target)))
-        return real_replace(self, target)
+        return real_replace(source, target)
 
-    monkeypatch.setattr(type(adapter.path), "replace", tracking_replace)
+    monkeypatch.setattr(os, "replace", tracking_replace)
     monkeypatch.setattr(
-        skeleton, "fsync_directory", lambda path: events.append(("fsync_dir", path))
+        file_replace, "fsync_directory", lambda path: events.append(("fsync_dir", path))
     )
 
     adapter(_state())
@@ -128,10 +129,10 @@ def test_crash_before_replace_keeps_the_previous_checkpoint(tmp_path, monkeypatc
     adapter(_state())
     before = adapter.path.read_text(encoding="utf-8")
 
-    def crash(self, *_a, **_k):
+    def crash(*_a, **_k):
         raise OSError("simulated power loss before replace")
 
-    monkeypatch.setattr(type(adapter.path), "replace", crash)
+    monkeypatch.setattr(os, "replace", crash)
     newer = {**_state(), "processed": 6}
     with pytest.raises(OSError):
         adapter(newer)

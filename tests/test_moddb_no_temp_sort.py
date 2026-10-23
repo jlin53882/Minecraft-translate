@@ -51,6 +51,8 @@ ALLOWED_PLAN_MARKERS = {
     "t.zh_tw": "不一致清單先經特殊字元前置篩選，只排序疑似不一致的列；"
     "首次計算受 Python 逐列檢查限制，結果有快取（見 performance.md）",
     "WITH RECURSIVE": "kinds() 只排序不同的條目類型（個位數），與資料量無關",
+    "FROM cleanup_batch ORDER BY": "清理批次清單只排序人工清理操作產生的批次（個位數到數十），"
+    "與條目數無關；不為它加索引",
     "MATERIALIZED": "未翻譯候選集只含單一版本沒有譯文的條目（實測數千筆、約 35ms），"
     "要依 (類型, 模組, 鍵值) 排序後才能逐筆比對重用；不是整庫排序",
 }
@@ -236,3 +238,28 @@ def test_manual_activity_sort_fails_ready_check_without_its_index(db):
     entry_activity.install(db._conn)  # 重新安裝會補回索引
     assert entry_activity.is_installed(db._conn)
     assert entry_activity.verify(db._conn) == []
+
+
+def test_scope_option_and_cleanup_queries_avoid_temp_sort(db):
+    """模組／來源選單、清理候選與清理批次清單：計畫不可回退成整庫臨時排序。
+
+    ``cleanup_batches`` 的臨時排序以 ``ALLOWED_PLAN_MARKERS`` 登錄（只排序清理批次）。
+    """
+    db.ingest(
+        "1.20.1",
+        [ScanItem("lang", "alpha", "key.flagged", "TODO", "")],  # 會被判為可清理
+    )
+    assert db.cleanup_candidates("1.20.1")[0], "夾具必須讓 _protected_ids 也被執行"
+    calls = (
+        lambda: db.bulk_review_scope_options("1.20.1"),
+        lambda: db.bulk_review_scope_options("1.20.1", quality_pass_only=False),
+        lambda: db.smart_review_scope_options(version="1.20.1"),
+        lambda: db.smart_review_scope_options(
+            version="1.20.1", kind="lang", review_status="reviewed"
+        ),
+        lambda: db.cleanup_candidates("1.20.1"),
+        lambda: db.cleanup_batches(),
+    )
+    for call in calls:
+        offenders = _temp_sort_plans(db, call)
+        assert not offenders, offenders

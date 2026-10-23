@@ -46,7 +46,7 @@ from translation_tool.plugins.md.md_inject_qa import (
     map_lang_in_rel_path_allow_zh,
 )
 from translation_tool.plugins.md.md_lmtranslator import translate_md_pending
-from translation_tool.utils.cancellation import raise_if_cancelled
+from translation_tool.utils.cancellation import is_cancelled, raise_if_cancelled
 from translation_tool.utils.log_unit import (
     get_formatted_duration,
     log_info,
@@ -195,6 +195,7 @@ def run_md_pipeline(
         result["step1"] = {"skipped": True, "reason": "step_extract_disabled"}
         progress(session, 0.33)
 
+    translation_cancelled = False
     pending_json_count = _count_md_pending_docs(pending_dir)
     if step_translate:
         raise_if_cancelled()  # 前面步驟期間已要求取消時，不開始送 API
@@ -213,13 +214,19 @@ def run_md_pipeline(
                 dry_run=dry_run,
                 write_new_cache=write_new_cache,
             )
+            translation_cancelled = bool(result["step2"].get("cancelled"))
             _log_md_step2_stats(result["step2"])
     else:
         log_info("[MD] [2/3] 已略過翻譯")
         result["step2"] = {"skipped": True, "reason": "step_translate_disabled"}
         progress(session, 0.66)
 
-    if dry_run:
+    if translation_cancelled or is_cancelled():
+        # 取消後不回寫：翻譯輸出與續跑標記保留，也不用舊 pending JSON 補完
+        log_warning("[MD] ⏹ 已取消：略過回寫（已完成的翻譯輸出保留）")
+        result["step3"] = {"skipped": True, "reason": "cancelled"}
+        result["cancelled"] = True
+    elif dry_run:
         log_info("[MD] [3/3] 已略過回寫：dry-run 模式")
         result["step3"] = {"skipped": True, "reason": "dry_run"}
     elif not step_inject:
@@ -266,7 +273,10 @@ def run_md_pipeline(
         )
 
     progress(session, 0.999)
-    log_info("[MD] 流程完成，耗時：%s", get_formatted_duration(start_tick))
+    if result.get("cancelled"):
+        log_warning("[MD] ⏹ 流程已取消，耗時：%s", get_formatted_duration(start_tick))
+    else:
+        log_info("[MD] 流程完成，耗時：%s", get_formatted_duration(start_tick))
     return result
 
 

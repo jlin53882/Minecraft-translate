@@ -39,7 +39,7 @@ app/views/cache_manager/
 ## 呼叫鏈（實際）
 
 ```
-CacheView（主入口）
+CacheView（主入口；did_mount／will_unmount 以 mount generation 丟棄已卸載或舊掛載的總覽結果）
   ├─ 總覽：_load_overview() → cache_get_overview_service() → _render_type_list()
   │        動作：_run_action() → run_cache_action(view, reason, work_fn, ...)
   │              ├─ mounted App 先向 OperationRegistry admission，再由 owner worker 執行 work_fn（`show_progress` 時顯示 SnackBar 進度）
@@ -60,7 +60,8 @@ CacheView（主入口）
 - 「補滿舊檔」為高風險動作：總覽頁「操作」卡片內有確認勾選 `chk_danger_confirm`（「我了解「補滿舊檔」會覆寫既有分片（高風險）」，預設未勾選）；`_on_save_one_fill` 在未勾選時只提示「尚未勾選高風險確認」而不執行
 
 ### 查詢區
-- `_on_query_search()`：模式 `KEY` / `DST` / `ALL`（預設 ALL）、分類預設全部；mounted App 由 Registry 持有搜尋 worker，以 query sequence 只套用最後一次結果 → `_render_query_results()`
+- `_on_query_search()`：模式 `KEY` / `DST` / `ALL`（預設 ALL）、分類預設全部；mounted App 由 Registry 持有搜尋 worker，以 query sequence 只套用最後一次結果 → `_render_query_results()`。`_on_query_clear()` 也會遞增同一個序號，讓清空後才完成的舊 worker 結果失效。
+- `did_mount()`／`will_unmount()`：總覽載入以 mount generation 綁定掛載週期，舊 worker 完成後不會更新已卸載或重新掛載後的控制項。
 - `_render_query_detail()` / `_on_apply_dst()` / `_on_revert_dst()` / `_on_restore_latest_query()`
 - 分頁：`_set_query_page` + `_on_page_first/prev/next/last/jump` + `_on_page_size_change`
 
@@ -68,7 +69,7 @@ CacheView（主入口）
 - **分片讀取的執行緒契約**：`_load_shard_rows` / `_load_shard_keys` 只查 `shard_reader` 的記憶（檔案簽名未變就不再解析 JSON）；`_fetch_overview`（載入總覽的背景執行緒）與 `run_cache_action` 的背景工作結束前呼叫 `_warm_shard_cache` 預熱（含歷史索引 `warm_history_index`）。單筆 SRC 先以 `cache_get_entry_service` 取得，找不到才 fallback 到 `_load_shard_entry`（經 `shard_reader.shard_raw` 讀取整個分片，LRU 只保留最近 2 個分片）。歷史紀錄 `cache_history_store`：讀取以 `{key: events}` 索引記憶，append 就地更新；整份 json 鏡像由單一背景執行緒寫入（`history_flush` 可等待）。
 - `_load_shard_rows` → `_load_shard_keys(cache_type, filename)` → `_on_select_shard_key` → `_load_shard_entry` → `_render_shard_src_panel` / `_render_shard_dst_panel`
 - dst 編輯：`_on_shard_dst_apply` / `_on_shard_dst_revert` / `_on_shard_dst_copy` / `_on_shard_dst_restore_latest`
-- 動態高度計算：`_dynamic_*_height/width` 系列（`_on_page_resized` 觸發）
+- 動態高度計算：`_dynamic_*_height/width` 系列（`_on_page_resized` 觸發；經 `app/ui/page_resize.py` 向 AppShell 的 resize 派送訂閱，`will_unmount` 取消）
 - 分片工作區：`_open_shard_workspace_tab` / `_on_back_to_shard_list` / `_on_select_shard_row`
 
 ### 歷史（共用）
@@ -113,6 +114,7 @@ CacheView（主入口）
 
 ## 維護注意
 
+0. 快取與圖示預覽的 reserve → launch → 輪詢 `done_event` 流程，在未准入（正在關閉）與 launch 失敗時都會結束 operation 並以通知／狀態還原回報；各處的結果型別與 UI 回應不同，不抽成通用框架。
 1. 大量事件回呼觸發背景操作；避免舊任務覆蓋新狀態：總覽動作靠 `run_cache_action` 的 busy 鎖，查詢靠 `_query_seq`。
 2. 新增總覽動作：加 service → 加 `_on_*` handler → `_run_action` 包裝 → `_refresh_disabled_state`。
 3. 歷史事件 append 後要 `_render_shard_history` / `_render_query_history` 重繪。

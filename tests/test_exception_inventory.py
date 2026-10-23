@@ -105,7 +105,7 @@ UNEXPLAINED_NOQA_BASELINE = {
     "app/views/merge_view.py": 2,
     "app/views/qc_view.py": 1,
     "app/views/rules/rules_actions.py": 1,
-    "app/views/translation/translation_actions.py": 11,
+    "app/views/translation/translation_actions.py": 8,
     "translation_tool/core/ftb_translator.py": 3,
     "translation_tool/core/jar_processor_extract.py": 3,
     "translation_tool/core/lang_merge_content_copy.py": 8,

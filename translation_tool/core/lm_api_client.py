@@ -14,9 +14,10 @@ from copy import deepcopy
 
 import requests
 
+from translation_tool.core.batch_timing import seconds_to_ms
 from translation_tool.utils.cancellation import interruptible_sleep
 from translation_tool.utils.config_manager import load_config
-from translation_tool.utils.config_schema import get_default
+from translation_tool.utils.config_schema import get_schema_default
 from translation_tool.utils.log_unit import log_warning
 from translation_tool.utils.redaction import redact_text
 
@@ -30,7 +31,7 @@ NETWORK_CONNECT_TIMEOUT_SEC = 30
 # 單次回應的輸出 token 上限（generationConfig.maxOutputTokens）。
 # 不設的話，模型重複輸出時會燒光整個輸出額度（issue #108）。
 # 設定檔 lm_translator.max_output_tokens 可覆寫；設為 0 代表不送這個欄位。
-DEFAULT_MAX_OUTPUT_TOKENS = 65536
+DEFAULT_MAX_OUTPUT_TOKENS = get_schema_default("lm_translator.max_output_tokens")
 
 # Gemini responseFormat.text.schema uses a JSON Schema subset.
 TRANSLATION_RESPONSE_SCHEMA = {
@@ -105,7 +106,9 @@ def _request_timeout(lm_cfg: dict) -> int:
     """API 請求逾時秒數：設定缺漏時用 schema 的 ``rate_limit.timeout`` 預設值。"""
     rate_limit = lm_cfg.get("rate_limit", {})
     return int(
-        rate_limit.get("timeout", get_default("lm_translator.rate_limit.timeout"))
+        rate_limit.get(
+            "timeout", get_schema_default("lm_translator.rate_limit.timeout")
+        )
     )
 
 
@@ -180,7 +183,7 @@ def _post_with_retry(
                     "kind": "network_retry_wait",
                     "network_attempt": attempt,
                     "network_total": NETWORK_RETRY_ATTEMPTS,
-                    "wait_seconds": wait,
+                    "wait_ms": seconds_to_ms(wait),
                     "error_kind": "connection_error",
                     "exception_type": type(e).__name__,
                 },
@@ -197,8 +200,8 @@ def _post_with_retry(
                     "kind": "network_retry_resume",
                     "network_attempt": attempt,
                     "network_total": NETWORK_RETRY_ATTEMPTS,
-                    "wait_seconds": wait,
-                    "elapsed_seconds": time.monotonic() - wait_started,
+                    "wait_ms": seconds_to_ms(wait),
+                    "waited_ms": seconds_to_ms(time.monotonic() - wait_started),
                 },
             )
         else:
