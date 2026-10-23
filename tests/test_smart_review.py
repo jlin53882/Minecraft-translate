@@ -2033,10 +2033,11 @@ def test_smart_review_bounds_continuous_gemini_503_and_stops_pending_batches(
     assert result.status == "partial"
     assert result.request_error_count == 1
     assert result.metrics["transient_retry_count"] == 3
-    assert all(
-        item.status == "request_failed"
-        for item in db.list_smart_review_candidates(result.run_id)
-    )
+    assert [item.status for item in db.list_smart_review_candidates(result.run_id)] == [
+        "request_failed",
+        "pending",
+    ]
+    assert result.processed_count == 1
 
 
 def test_smart_review_cancel_during_provider_backoff_is_cooperative(db, monkeypatch):

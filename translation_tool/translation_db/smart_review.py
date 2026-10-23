@@ -52,7 +52,10 @@ from translation_tool.translation_db.smart_review_prompt import (
     build_smart_review_validation_repair_payload,
     smart_review_response_schema,
 )
-from translation_tool.translation_db.smart_review_run import run_smart_review
+from translation_tool.translation_db.smart_review_run import (
+    resume_smart_review,
+    run_smart_review,
+)
 from translation_tool.translation_db.smart_review_runs import SmartReviewRunStoreMixin
 from translation_tool.translation_db.smart_review_validation import (
     SMART_REVIEW_MANUAL_EDIT_STATUSES,
@@ -86,6 +89,7 @@ __all__ = [
     "clear_smart_review_caches",
     "merge_smart_review_validation_repairs",
     "parse_smart_review_response",
+    "resume_smart_review",
     "run_smart_review",
     "smart_review_response_schema",
 ]

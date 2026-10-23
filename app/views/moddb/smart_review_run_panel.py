@@ -29,6 +29,7 @@ from app.views.moddb.smart_review_job import (
     SmartReviewRequest,
     format_duration,
 )
+from app.views.moddb.smart_review_run_planning import SmartReviewRunPlanningMixin
 from app.views.moddb.smart_review_run_status import (
     run_status_color,
     run_status_label,
@@ -38,7 +39,7 @@ from translation_tool.utils.config_manager import get_smart_review_settings
 _POLL_SECONDS = 0.4
 
 
-class SmartReviewRunPanel:
+class SmartReviewRunPanel(SmartReviewRunPlanningMixin):
     """設定範圍、啟動背景校對，並顯示進度、統計與逐批 log。"""
 
     def __init__(
@@ -72,6 +73,7 @@ class SmartReviewRunPanel:
         self._scope_sources_by_mod: dict[str | None, tuple[int, ...]] = {}
         self._source_catalog = getattr(ctx.get_db(), "source_catalog", None)
         self._build_scope_controls(version, mod_id, kind, effective_source, query)
+        self._build_history_controls()
         self._build_run_controls()
         self.control = ft.Column(
             [
@@ -306,40 +308,6 @@ class SmartReviewRunPanel:
             self.batch_field,
         ]
 
-    def _scope_card(self) -> ft.Control:
-        """建立「校對範圍與模型」卡片。"""
-        return kit.section_card(
-            "校對範圍與模型",
-            ft.Column(
-                [
-                    kit.hint_text(
-                        "只讀取「目前生效且未審核」的 AI 譯文與本地已審核 context；"
-                        "AI 結果先存成候選，不會自動覆蓋譯文。"
-                    ),
-                    ft.Row(
-                        [
-                            self.version_dd,
-                            self.mod_dd,
-                            self.kind_dd,
-                            self.source_dd,
-                            self.query_field,
-                        ],
-                        spacing=10,
-                        wrap=True,
-                    ),
-                    ft.Row(
-                        [self.model_dd, self.limit_field, self.batch_field],
-                        spacing=10,
-                        wrap=True,
-                    ),
-                    self.estimate_text,
-                ],
-                spacing=10,
-            ),
-            icon=ft.Icons.TUNE,
-            tone="em",
-        )
-
     # ──────────────── 執行與進度控制項 ────────────────
 
     def _build_run_controls(self) -> None:
@@ -558,6 +526,7 @@ class SmartReviewRunPanel:
             name="計算智慧校對候選筆數",
             still_valid=lambda: seq == self._estimate_seq,
         )
+        self._refresh_plan_preview()
 
     def _read_int(self, control: ft.TextField, minimum: int = 1) -> int | None:
         """讀取整數輸入；格式錯誤或小於下限時回傳 None。"""
@@ -638,6 +607,8 @@ class SmartReviewRunPanel:
             query=query,
             limit=limit,
             batch_size=batch,
+            use_recent_history=bool(self.use_recent_history.value),
+            skip_valid_history=bool(self.skip_valid_history.value),
         )
 
     def _start(self, _e=None) -> None:
@@ -821,6 +792,10 @@ class SmartReviewRunPanel:
                 f"需補 context {result.needs_context_count:,}）；"
                 f"無效 {result.invalid_count:,}、請求錯誤 {result.request_error_count:,}。"
             )
+            if getattr(result, "stop_reason", None):
+                self.result_detail.value += (
+                    f" 執行停止原因：{result.stop_reason}（未送出的候選保留待恢復）。"
+                )
         errors = state.breakdown.get("errors") if state.breakdown else None
         self.result_errors.value = (
             "無效原因（前幾名）：\n"

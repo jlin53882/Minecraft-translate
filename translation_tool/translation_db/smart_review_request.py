@@ -105,6 +105,7 @@ class BatchRequestOutcome:
     request_failed: bool = False
     abort_remaining: bool = False
     shrink_requested: bool = False
+    stop_reason: str | None = None
 
 
 def _http_retry_after(exc: requests.HTTPError) -> float | None:
@@ -158,9 +159,11 @@ class _BatchRequester:
                     self.ordinals,
                     error_code="request_failed:ApiKeyCycleExhausted",
                     permanent=True,
+                    stop_reason="quota_exhausted",
                 )
                 outcome.request_failed = True
                 outcome.abort_remaining = True
+                outcome.stop_reason = "quota_exhausted"
                 return outcome
             outcome.attempt += 1
             self.state.bump("attempts")
@@ -240,13 +243,19 @@ class _BatchRequester:
         status: int | None = None,
         permanent: bool = False,
         abort: bool = False,
+        stop_reason: str | None = None,
     ) -> bool:
         """把整批標為請求失敗；``abort`` 代表剩餘批次也不再送出。"""
         self.state.mark_request_failure(
-            self.ordinals, error, status, permanent=permanent
+            self.ordinals,
+            error,
+            status,
+            permanent=permanent,
+            stop_reason=stop_reason,
         )
         self.outcome.request_failed = True
         self.outcome.abort_remaining = abort
+        self.outcome.stop_reason = stop_reason
         return False
 
     def _emit_failure(
@@ -291,9 +300,11 @@ class _BatchRequester:
             exc,
             error_code="request_failed:chatgpt_oauth",
             permanent=True,
+            stop_reason="auth_required",
         )
         self.outcome.request_failed = True
         self.outcome.abort_remaining = True
+        self.outcome.stop_reason = "auth_required"
         return False
 
     def _on_chatgpt_api_error(self, exc: ChatGPTAPIError) -> bool:
@@ -321,11 +332,19 @@ class _BatchRequester:
             state.cancelled = True
             return False
         except RuntimeError:
+            from translation_tool.core.lm_translator_main import (
+                _is_chatgpt_quota_exhaustion,
+            )
+
+            stop_reason = (
+                "quota_exhausted" if _is_chatgpt_quota_exhaustion(exc) else None
+            )
             return self._fail_request(
                 exc,
                 status=exc.status,
                 permanent=True,
-                abort=exc.status in {400, 401, 403, 404, 422},
+                abort=bool(stop_reason) or exc.status in {400, 401, 403, 404, 422},
+                stop_reason=stop_reason,
             )
         if action is BatchAction.SHRINK_BATCH:
             if self.current_size > 1:
@@ -335,7 +354,22 @@ class _BatchRequester:
         if action is BatchAction.RETRY_SAME_MODEL:
             self._count_transient_retry()
             return True
-        return self._fail_request(exc, status=exc.status, permanent=True, abort=True)
+        return self._fail_request(
+            exc,
+            status=exc.status,
+            permanent=True,
+            abort=True,
+            stop_reason=(
+                "quota_exhausted"
+                if getattr(exc, "code", None)
+                in {
+                    "insufficient_quota",
+                    "quota_exceeded",
+                    "rate_limit_exceeded_quota",
+                }
+                else None
+            ),
+        )
 
     def _on_http_error(self, exc: requests.HTTPError) -> bool:
         from translation_tool.core.lm_translator_main import (
@@ -406,7 +440,9 @@ class _BatchRequester:
         ):
             self._count_transient_retry()
             return True
-        return self._fail_request(exc, status=status_code, abort=True)
+        return self._fail_request(
+            exc, status=status_code, abort=True, stop_reason="service_unavailable"
+        )
 
     def _on_connection_error(self, exc: Exception) -> bool:
         self.state.record_usage(self.attempt_meta or {})
@@ -421,7 +457,7 @@ class _BatchRequester:
         ):
             self._count_transient_retry()
             return True
-        return self._fail_request(exc, abort=True)
+        return self._fail_request(exc, abort=True, stop_reason="service_unavailable")
 
     def _on_unexpected_error(self, exc: Exception) -> bool:
         self.state.record_usage(self.attempt_meta or {})

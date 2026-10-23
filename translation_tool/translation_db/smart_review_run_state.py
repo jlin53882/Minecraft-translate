@@ -79,6 +79,7 @@ def new_smart_review_metrics(*, input_token_budget: int | None) -> dict[str, Any
         "permanent_error_count": 0,
         "failure_classes": {},
         "validation_errors": {},
+        "stop_reason": None,
         "input_token_budget": input_token_budget,
     }
 
@@ -146,6 +147,7 @@ class SmartReviewRunState:
         }
         self.current_batch_handle: Any = None
         self.cancelled = False
+        self.stop_reason: str | None = None
 
     # -- metrics 累計 ---------------------------------------------------------
 
@@ -172,6 +174,7 @@ class SmartReviewRunState:
         *,
         error_code: str | None = None,
         permanent: bool = False,
+        stop_reason: str | None = None,
     ) -> str:
         """保存安全錯誤代碼並更新錯誤分類統計。"""
         code = error_code or _smart_review_error_code(
@@ -183,6 +186,9 @@ class SmartReviewRunState:
             self.bump("permanent_error_count")
         classes = self.metrics["failure_classes"]
         classes[code] = int(classes.get(code, 0)) + 1
+        if stop_reason and self.stop_reason is None:
+            self.stop_reason = stop_reason
+            self.metrics["stop_reason"] = stop_reason
         return code
 
     # -- 進度與事件 -----------------------------------------------------------
@@ -207,6 +213,8 @@ class SmartReviewRunState:
             "status": "running",
             "phase": phase,
         }
+        if self.stop_reason:
+            snapshot["stop_reason"] = self.stop_reason
         # 輸出邊界：core 內部只有 canonical 欄位，回呼端才補舊版欄位。
         if timing is not None:
             snapshot["timing"] = to_legacy_event(timing)

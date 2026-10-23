@@ -37,11 +37,14 @@ from translation_tool.translation_db.smart_review import (
 )
 from translation_tool.translation_db.smart_review import (
     SMART_REVIEW_MANUAL_EDIT_STATUSES,
+    resume_smart_review,
     run_smart_review,
 )
 from translation_tool.translation_db.smart_review import (
     SMART_REVIEW_MAX_BATCH_SIZE as _SMART_REVIEW_MAX_BATCH_SIZE,
 )
+from translation_tool.translation_db.smart_review_history import SmartReviewHistoryStore
+from translation_tool.translation_db.smart_review_planner import plan_new_smart_review
 from translation_tool.translation_db.smart_review_status import SmartReviewStatus
 from translation_tool.utils.config_manager import get_smart_review_settings, load_config
 
@@ -144,6 +147,58 @@ def preview_moddb_smart_review_from_path(
         db.close()
 
 
+def preview_moddb_smart_review_plan_from_path(
+    path: str | Path,
+    priority: tuple[int, ...],
+    *,
+    version: str | None = None,
+    mod_id: str | None = None,
+    kind: str | None = None,
+    effective_source: int | None = SRC_AI,
+    review_status: str = "unreviewed",
+    query: str | None = None,
+    limit: int = 1000,
+    use_recent_history: bool = True,
+    skip_valid_history: bool = True,
+) -> dict[str, int]:
+    """回傳與執行共用的唯讀歷史規劃 KPI，不呼叫 provider。"""
+    db = _open(path, priority, readonly=True)
+    try:
+        snapshots = db.smart_review_candidates(
+            version=version,
+            mod_id=mod_id,
+            kind=kind,
+            effective_source=effective_source,
+            review_status=review_status,
+            query=query,
+            limit=limit,
+        )
+        consulted, historical = (
+            SmartReviewHistoryStore(db.path).recent_candidate_payloads(max_runs=2)
+            if use_recent_history
+            else (0, [])
+        )
+        plan = plan_new_smart_review(
+            snapshots,
+            historical,
+            skip_valid_history=skip_valid_history,
+            history_runs_consulted=consulted,
+        )
+        return {
+            "selected_count": len(plan.selected),
+            "reused_count": plan.reused_count,
+            "actual_ai_count": plan.actual_ai_count,
+            "history_runs_consulted": plan.history_runs_consulted,
+            "pending_review_count": sum(
+                1
+                for result in plan.reused_results
+                if result.get("decision") != "no_change"
+            ),
+        }
+    finally:
+        db.close()
+
+
 def run_moddb_smart_review_from_path(
     path: str | Path,
     priority: tuple[int, ...],
@@ -162,6 +217,9 @@ def run_moddb_smart_review_from_path(
     query: str | None = None,
     cancel_check: Callable[[], bool] | None = None,
     task_id: str | None = None,
+    use_recent_history: bool = False,
+    skip_valid_history: bool = False,
+    resume_run_id: str | None = None,
 ) -> SmartReviewRunResult:
     """從指定資料庫執行智慧校對並逐步回傳執行進度。"""
     cfg = load_config()
@@ -173,6 +231,15 @@ def run_moddb_smart_review_from_path(
     provider = get_translation_provider()
     db = _open(path, priority, readonly=False)
     try:
+        if resume_run_id:
+            return resume_smart_review(
+                db,
+                run_id=resume_run_id,
+                progress=progress,
+                lm_config=lm_config,
+                cancel_check=cancel_check,
+                task_id=task_id,
+            )
         return run_smart_review(
             db,
             model_name=model_name,
@@ -194,6 +261,8 @@ def run_moddb_smart_review_from_path(
             query=query,
             cancel_check=cancel_check,
             task_id=task_id,
+            use_recent_history=use_recent_history,
+            skip_valid_history=skip_valid_history,
         )
     finally:
         db.close()

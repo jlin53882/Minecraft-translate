@@ -51,6 +51,9 @@ class SmartReviewRequest:
     query: str
     limit: int
     batch_size: int
+    use_recent_history: bool = False
+    skip_valid_history: bool = False
+    resume_run_id: str | None = None
 
     def scope_label(self) -> str:
         """回傳給人看的範圍摘要，用於 log 與完成通知。"""
@@ -73,6 +76,12 @@ class SmartReviewJobState:
     valid: int = 0
     invalid: int = 0
     request_errors: int = 0
+    actual_ai: int = 0
+    reused: int = 0
+    pending_review: int = 0
+    excluded: int = 0
+    invalidated_by_manual_edit: int = 0
+    stop_reason: str | None = None
     status: str = ""
     started_at: float = 0.0
     finished_at: float = 0.0
@@ -237,6 +246,9 @@ class SmartReviewJob:
                 progress=self._progress_handler(session),
                 cancel_check=self._should_cancel,
                 task_id=session.task_id,
+                use_recent_history=request.use_recent_history,
+                skip_valid_history=request.skip_valid_history,
+                resume_run_id=request.resume_run_id,
             )
         except Exception as exc:  # noqa: BLE001 - job reports bounded failure
             state.error = str(exc) or type(exc).__name__
@@ -263,11 +275,9 @@ class SmartReviewJob:
             if snapshot.get("run_id") and not state.run_id:
                 state.run_id = str(snapshot["run_id"])
                 session.add_log(f"已建立批次 {state.run_id}", "info")
-            state.selected = int(snapshot.get("selected", state.selected) or 0)
-            state.processed = int(snapshot.get("processed", 0) or 0)
-            state.valid = int(snapshot.get("valid", 0) or 0)
-            state.invalid = int(snapshot.get("invalid", 0) or 0)
-            state.request_errors = int(snapshot.get("request_errors", 0) or 0)
+            self._apply_progress_snapshot(state, snapshot)
+            if snapshot.get("stop_reason"):
+                state.stop_reason = str(snapshot["stop_reason"])
             state.status = str(snapshot.get("status", "running"))
             session.set_progress(state.fraction)
             phase = str(snapshot.get("phase") or "")
@@ -276,49 +286,96 @@ class SmartReviewJob:
             if isinstance(event, dict):
                 self._log_event(session, event)
             if phase == "selection_complete" and isinstance(timing, dict):
-                session.add_log(
-                    f"範圍搜尋完成：選取 {state.selected:,} 筆；"
-                    f"搜尋 {_format_timing(timing_seconds(timing, 'selection_ms'))}、"
-                    f"建立批次 {_format_timing(timing_seconds(timing, 'run_record_ms'))}。",
-                    "info",
-                )
-            delta = state.processed - last["processed"]
-            if delta <= 0:
-                return
-            new_errors = state.request_errors - last["errors"]
-            if phase == "batch_complete" and isinstance(timing, dict) and not event:
-                session.add_log(
-                    f"已處理 {state.processed:,} / {state.selected:,} 筆；"
-                    f"第 {timing.get('batch_index', timing.get('batch_number', '?'))} 批 "
-                    f"（{timing.get('ordinal_start', '?')}～"
-                    f"{timing.get('ordinal_end', '?')}）完成："
-                    f"準備 {_format_timing(timing_seconds(timing, 'prompt_build_ms'))}、"
-                    f"等待配額 {_format_timing(timing_seconds(timing, 'quota_wait_ms'))}、"
-                    f"重試等待 {_format_timing(timing_seconds(timing, 'retry_backoff_ms'))}、"
-                    f"API {_format_timing(timing_seconds(timing, 'api_ms'))}、"
-                    f"解析 {_format_timing(timing_seconds(timing, 'response_parse_ms'))}、"
-                    f"寫入 JSON {_format_timing(timing_seconds(timing, 'history_write_ms'))}、"
-                    f"本批 {_format_timing(timing_seconds(timing, 'elapsed_ms'))}；"
-                    f"請求 {timing.get('attempts', 0)} 次。",
-                    "warning" if new_errors else "info",
-                )
-            else:
-                session.add_log(
-                    f"已處理 {state.processed:,} / {state.selected:,} 筆"
-                    f"（本批 +{delta}）：有效 +{state.valid - last['valid']}、"
-                    f"無效 +{state.invalid - last['invalid']}、"
-                    f"請求錯誤 +{new_errors}；預估剩餘 "
-                    f"{format_duration(state.eta_seconds())}",
-                    "warning" if new_errors else "info",
-                )
-            last.update(
-                processed=state.processed,
-                valid=state.valid,
-                invalid=state.invalid,
-                errors=state.request_errors,
-            )
+                self._log_selection_progress(session, state, timing)
+            self._log_progress_delta(session, state, last, phase, timing, event)
 
         return progress
+
+    @staticmethod
+    def _apply_progress_snapshot(
+        state: SmartReviewJobState, snapshot: dict[str, Any]
+    ) -> None:
+        """把核心帳本快照投影到 UI job state。"""
+        state.selected = int(snapshot.get("selected", state.selected) or 0)
+        state.processed = int(snapshot.get("processed", 0) or 0)
+        state.valid = int(snapshot.get("valid", 0) or 0)
+        state.invalid = int(snapshot.get("invalid", 0) or 0)
+        state.request_errors = int(snapshot.get("request_errors", 0) or 0)
+        metrics = snapshot.get("metrics")
+        if not isinstance(metrics, dict):
+            return
+        state.actual_ai = int(metrics.get("actual_ai_count", state.actual_ai) or 0)
+        state.reused = int(metrics.get("reused_count", state.reused) or 0)
+        state.pending_review = int(
+            metrics.get("pending_review_count", state.pending_review) or 0
+        )
+        state.excluded = int(metrics.get("excluded_count", state.excluded) or 0)
+        state.invalidated_by_manual_edit = int(
+            metrics.get(
+                "invalidated_by_manual_edit_count",
+                state.invalidated_by_manual_edit,
+            )
+            or 0
+        )
+
+    @staticmethod
+    def _log_selection_progress(
+        session: TaskSession, state: SmartReviewJobState, timing: dict[str, Any]
+    ) -> None:
+        """記錄候選選取與建立批次的耗時。"""
+        session.add_log(
+            f"範圍搜尋完成：選取 {state.selected:,} 筆；"
+            f"搜尋 {_format_timing(timing_seconds(timing, 'selection_ms'))}、"
+            f"建立批次 {_format_timing(timing_seconds(timing, 'run_record_ms'))}。",
+            "info",
+        )
+
+    @staticmethod
+    def _log_progress_delta(
+        session: TaskSession,
+        state: SmartReviewJobState,
+        last: dict[str, int],
+        phase: str,
+        timing: dict[str, Any] | None,
+        event: object,
+    ) -> None:
+        """記錄一次有處理進度的批次摘要。"""
+        delta = state.processed - last["processed"]
+        if delta <= 0:
+            return
+        new_errors = state.request_errors - last["errors"]
+        level = "warning" if new_errors else "info"
+        if phase == "batch_complete" and isinstance(timing, dict) and not event:
+            session.add_log(
+                f"已處理 {state.processed:,} / {state.selected:,} 筆；"
+                f"第 {timing.get('batch_index', timing.get('batch_number', '?'))} 批 "
+                f"（{timing.get('ordinal_start', '?')}～"
+                f"{timing.get('ordinal_end', '?')}）完成："
+                f"準備 {_format_timing(timing_seconds(timing, 'prompt_build_ms'))}、"
+                f"等待配額 {_format_timing(timing_seconds(timing, 'quota_wait_ms'))}、"
+                f"重試等待 {_format_timing(timing_seconds(timing, 'retry_backoff_ms'))}、"
+                f"API {_format_timing(timing_seconds(timing, 'api_ms'))}、"
+                f"解析 {_format_timing(timing_seconds(timing, 'response_parse_ms'))}、"
+                f"寫入 JSON {_format_timing(timing_seconds(timing, 'history_write_ms'))}、"
+                f"本批 {_format_timing(timing_seconds(timing, 'elapsed_ms'))}；"
+                f"請求 {timing.get('attempts', 0)} 次。",
+                level,
+            )
+        else:
+            session.add_log(
+                f"已處理 {state.processed:,} / {state.selected:,} 筆"
+                f"（本批 +{delta}）：有效 +{state.valid - last['valid']}、"
+                f"無效 +{state.invalid - last['invalid']}、"
+                f"請求錯誤 +{new_errors}；預估剩餘 "
+                f"{format_duration(state.eta_seconds())}",
+                level,
+            )
+        last.update(
+            processed=state.processed,
+            valid=state.valid,
+            invalid=state.invalid,
+            errors=state.request_errors,
+        )
 
     def _log_event(self, session: TaskSession, event: dict[str, Any]) -> None:
         """把核心的安全事件交給共用 formatter 轉成 TaskSession 日誌。"""
@@ -341,6 +398,15 @@ class SmartReviewJob:
         state.valid = result.valid_count
         state.invalid = result.invalid_count
         state.request_errors = result.request_error_count
+        metrics = result.metrics if isinstance(result.metrics, dict) else {}
+        state.actual_ai = int(metrics.get("actual_ai_count", 0) or 0)
+        state.reused = int(metrics.get("reused_count", 0) or 0)
+        state.pending_review = int(metrics.get("pending_review_count", 0) or 0)
+        state.excluded = int(metrics.get("excluded_count", 0) or 0)
+        state.invalidated_by_manual_edit = int(
+            metrics.get("invalidated_by_manual_edit_count", 0) or 0
+        )
+        state.stop_reason = getattr(result, "stop_reason", None)
         state.status = result.status
         state.finished_at = time.monotonic()
         self._load_breakdown(request, result.run_id, session)
@@ -362,6 +428,10 @@ class SmartReviewJob:
                 "processed": result.processed_count,
                 "valid": result.valid_count,
                 "invalid": result.invalid_count,
+                "actual_ai": state.actual_ai,
+                "reused": state.reused,
+                "pending_review": state.pending_review,
+                "stop_reason": state.stop_reason,
             }
         )
         if result.status == "failed":

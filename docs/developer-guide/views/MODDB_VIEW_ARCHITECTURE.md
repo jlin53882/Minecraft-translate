@@ -28,6 +28,8 @@
 
 ## AI 智慧校對候選
 
+Smart Review 的執行分頁與歷史分頁共用 `smart_review_planner.py`：新批次最多讀取最近兩份可解析 JSON manifest，依完整 CAS 快照選擇最新可重用結果；`applied`／`no_change` 僅在快照有效且啟用跳過時重用，`ready` 保留待審查，暫時失敗或未完成的最新結果才可在這個兩批界線內回看較舊有效結果。原批次續跑由 `prepare_smart_review_resume` 重新核對 SQLite 現況，沿用原 `run_id`，把人工修改造成的失效候選寫入 `attempt_history`，只將可重試的項目排回 `pending`，並把 `quota_exhausted`／`auth_required` 等執行層停止原因與未送出數量保留在 metrics；這些判定同時供唯讀預覽、背景 job 與歷史卡片使用。
+
 批量審核與 Smart Review 的範圍控制項都只顯示真正有未審核候選的模組；來源選項依選定模組重建。開啟對話框、切換版本／類型／品質條件時，模組與來源範圍查詢使用維護型背景作業；模組切換只重用已載入的來源映射，不再次查詢整個資料庫。查詢結果以序號驗證，舊結果不會覆蓋新條件；範圍變更只更新預填值、來源選單與筆數估算，不能繞過使用者明確按下預覽、掃描或開始按鈕。
 
 `entry_filters.py` 的 `批量審核` 按鈕只建立 `BulkReviewDialog`，並把 EntriesPanel 目前的版本、模組與 effective source 預填進對話框；預填不會自動產生預覽或執行，使用者仍須明確按下預覽與確認。`智慧校對` 按鈕只建立 `SmartReviewDialog`，並把 EntriesPanel 的版本、模組、kind、effective source、未審核狀態與搜尋條件帶入；不把模型流程塞入 `EntriesPanel`。視窗只是外殼，三個分頁各自一個模組：`SmartReviewRunPanel`（範圍設定、進度、統計與 log）、`SmartReviewReviewer`（每頁一筆的逐筆審查）、`SmartReviewBatchReviewer`（分頁勾選與批量處理）、`SmartReviewHistory`（歷史批次）。`SmartReviewContext` 集中保存 UI 世代與資料庫身分，所有背景工作透過 `run_background` 啟動，結果只在世代、資料庫與呼叫端的 `still_valid` 都仍成立時才回到 UI。校對本身由 `SmartReviewJob` 執行（頁面層級單例，`job_for_page`），以 `TaskSession` 登記進度與 log，關閉視窗不會中斷。服務層 `moddb_smart_review_service.py` 重新以資料庫 path、priority 與 config 開啟連線；`translation_tool/translation_db/smart_review.py` 是 facade，實作依職責分在同目錄的 `smart_review_*.py`：候選 snapshot（`smart_review_filters.py`）、typed local context（`smart_review_context.py`）、provider structured output（`smart_review_provider.py`、`smart_review_request.py`、`smart_review_repair.py`）、批次流程（`smart_review_run.py`）、JSON 批次持久化（`smart_review_runs.py`、`smart_review_projection.py`）與 CAS apply（`smart_review_apply.py`）。預覽使用唯讀連線，執行與套用透過 `launch_page_operation` 在背景進行。

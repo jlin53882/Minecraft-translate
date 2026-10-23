@@ -88,6 +88,7 @@ class SmartReviewDialog:
         self.history = SmartReviewHistory(
             self.ctx,
             on_open=self.open_review,
+            on_resume=self.run_panel.resume_run,
             active_run_id=self._active_run_id,
         )
         self.nav = kit.Segmented(list(_TABS), "run", self._on_tab)

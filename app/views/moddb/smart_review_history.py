@@ -26,11 +26,13 @@ class SmartReviewHistory:
         ctx: SmartReviewContext,
         *,
         on_open: Callable[[str], None],
+        on_resume: Callable[[str], None] | None = None,
         active_run_id: Callable[[], str | None],
     ) -> None:
         """建立歷史清單；``active_run_id`` 回傳目前正在執行的批次 id。"""
         self.ctx = ctx
         self.on_open = on_open
+        self.on_resume = on_resume
         self.active_run_id = active_run_id
         self._limit = _PAGE_SIZE
         self._seq = 0
@@ -191,13 +193,7 @@ class SmartReviewHistory:
                         spacing=4,
                         expand=True,
                     ),
-                    kit.button(
-                        "開啟審查",
-                        "primary",
-                        size="sm",
-                        icon=ft.Icons.RATE_REVIEW_OUTLINED,
-                        on_click=lambda _e, rid=run_id: self.on_open(rid),
-                    ),
+                    self._card_actions(run, run_id, pending),
                 ],
                 vertical_alignment=ft.CrossAxisAlignment.CENTER,
             ),
@@ -206,3 +202,34 @@ class SmartReviewHistory:
             border=ft.Border.all(1, C.LINE),
             border_radius=10,
         )
+
+    def _card_actions(
+        self, run: dict[str, Any], run_id: str, pending: int
+    ) -> ft.Control:
+        """建立歷史卡片上的審查與安全續跑按鈕。"""
+        actions = [
+            kit.button(
+                "開啟審查",
+                "primary",
+                size="sm",
+                icon=ft.Icons.RATE_REVIEW_OUTLINED,
+                on_click=lambda _e, rid=run_id: self.on_open(rid),
+            )
+        ]
+        resumable = str(run.get("status") or "") in {
+            "cancelled",
+            "interrupted",
+            "partial",
+            "failed",
+        }
+        if self.on_resume is not None and resumable and pending:
+            actions.append(
+                kit.button(
+                    "繼續未完成校對",
+                    "secondary",
+                    size="sm",
+                    icon=ft.Icons.PLAY_CIRCLE_OUTLINE,
+                    on_click=lambda _e, rid=run_id: self.on_resume(rid),
+                )
+            )
+        return ft.Column(actions, spacing=6)

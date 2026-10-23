@@ -15,6 +15,10 @@ from translation_tool.translation_db.models import (
     SmartReviewCandidate,
     SmartReviewSnapshot,
 )
+from translation_tool.translation_db.schema import SRC_MANUAL
+from translation_tool.translation_db.smart_review_filters import (
+    _smart_review_current_snapshot_sql,
+)
 from translation_tool.translation_db.smart_review_history import (
     SmartReviewHistoryStore,
 )
@@ -32,6 +36,89 @@ def _response_reason(raw: object) -> str | None:
         return None
     reason = value.get("reason") if isinstance(value, dict) else None
     return reason if isinstance(reason, str) else None
+
+
+def _resume_scope_matches(current: tuple[Any, ...], scope: dict[str, Any]) -> bool:
+    """確認目前快照仍在原批次的版本、來源與搜尋範圍。"""
+    if scope.get("version") and current[1] != scope.get("version"):
+        return False
+    if scope.get("mod_id") and current[2] != scope.get("mod_id"):
+        return False
+    if scope.get("kind") and current[0] != scope.get("kind"):
+        return False
+    expected_source = scope.get("effective_source")
+    if expected_source is not None and current[6] != expected_source:
+        return False
+    expected_review = scope.get("review_status")
+    if (
+        expected_review in {"unreviewed", "reviewed", "legacy_unknown"}
+        and current[7] != expected_review
+    ):
+        return False
+    needle = str(scope.get("query") or "").strip().casefold()
+    return not needle or any(
+        needle in str(current[index] or "").casefold() for index in (3, 4, 5)
+    )
+
+
+def _resume_snapshot(run_id: str, item: SmartReviewCandidate) -> SmartReviewSnapshot:
+    """把歷史候選轉成續跑所需的不可變 snapshot。"""
+    return SmartReviewSnapshot(
+        run_id=run_id,
+        ordinal=item.ordinal,
+        entry_id=item.entry_id,
+        kind=item.kind,
+        mc_version=item.mc_version,
+        mod_id=item.mod_id,
+        key=item.key,
+        en_us=item.en_us,
+        current_zh_tw=item.current_zh_tw,
+        effective_source=item.effective_source,
+        review_status=item.review_status,
+        effective_revision=item.effective_revision,
+        context=item.context,
+        manual_zh_tw=item.manual_zh_tw,
+        manual_checker=item.manual_checker,
+        manual_review_status=item.manual_review_status,
+        manual_revision=item.manual_revision,
+    )
+
+
+def _resume_counts(items: Sequence[SmartReviewCandidate]) -> dict[str, int]:
+    """由恢復後候選重建既有 AI 結果計數。"""
+    counts = {
+        "processed": 0,
+        "valid": 0,
+        "invalid": 0,
+        "request_errors": 0,
+        "no_change": 0,
+        "suggestions": 0,
+        "needs_context": 0,
+    }
+    for item in items:
+        if item.status == SmartReviewStatus.REQUEST_FAILED:
+            counts["request_errors"] += 1
+            continue
+        if item.status not in {
+            SmartReviewStatus.READY,
+            SmartReviewStatus.NO_CHANGE,
+            SmartReviewStatus.NEEDS_CONTEXT,
+            SmartReviewStatus.INVALID,
+            SmartReviewStatus.APPLIED,
+        }:
+            continue
+        counts["processed"] += 1
+        if item.status == SmartReviewStatus.INVALID:
+            counts["invalid"] += 1
+        else:
+            counts["valid"] += 1
+        if item.status == SmartReviewStatus.NO_CHANGE:
+            counts["no_change"] += 1
+        elif item.status == SmartReviewStatus.NEEDS_CONTEXT:
+            counts["needs_context"] += 1
+        elif item.status in {SmartReviewStatus.READY, SmartReviewStatus.APPLIED}:
+            counts["suggestions"] += 1
+    return counts
 
 
 class SmartReviewRunStoreMixin:
@@ -62,6 +149,73 @@ class SmartReviewRunStoreMixin:
             batch_size=batch_size,
             scope=scope,
         )
+
+    def _resume_current_payload(
+        self, entry_id: int, scope: dict[str, Any]
+    ) -> dict[str, Any] | None:
+        """讀取一筆目前快照；範圍失效時回傳 None 供排除記帳。"""
+        current = self._one(_smart_review_current_snapshot_sql(), (int(entry_id),))
+        if current is None or not _resume_scope_matches(current, scope):
+            return None
+        manual = self._one(
+            "SELECT zh_tw, checker, review_status, revision FROM translation "
+            "WHERE entry_id=? AND source=?",
+            (int(entry_id), SRC_MANUAL),
+        )
+        return {
+            "kind": current[0],
+            "mc_version": current[1],
+            "mod_id": current[2],
+            "entry_key": current[3],
+            "en_us": current[4],
+            "current_zh_tw": current[5],
+            "effective_source": current[6],
+            "review_status": current[7],
+            "effective_revision": current[8],
+            "manual_zh_tw": None if manual is None else manual[0],
+            "manual_checker": None if manual is None else manual[1],
+            "manual_review_status": None if manual is None else manual[2],
+            "manual_revision": None if manual is None else manual[3],
+        }
+
+    def prepare_smart_review_resume(
+        self, run_id: str
+    ) -> tuple[list[SmartReviewSnapshot], dict[str, int], dict[str, Any]]:
+        """以同一 run_id 準備恢復，保留原範圍並只回傳仍需送出的候選。"""
+        history = SmartReviewHistoryStore(self.path)
+        if not history.exists(run_id):
+            raise ValueError("只有 JSON 歷史批次支援同一 run 復原")
+        run = history.get_run(run_id)
+        if run is None:
+            raise ValueError("找不到智慧校對歷史批次")
+        if str(run.get("status") or "") == "running":
+            raise RuntimeError("智慧校對批次仍在執行中，不能重複啟動")
+        candidates = history.list_candidates(run_id)
+        scope = run.get("scope") if isinstance(run.get("scope"), dict) else {}
+        current_by_ordinal = {
+            candidate.ordinal: self._resume_current_payload(candidate.entry_id, scope)
+            for candidate in candidates
+        }
+        resume_stats = history.prepare_resume(run_id, current_by_ordinal)
+        run_metrics = run.get("metrics")
+        if not isinstance(run_metrics, dict):
+            run_metrics = {}
+        run_metrics = dict(run_metrics)
+        run_metrics["excluded_count"] = int(
+            run_metrics.get("excluded_count") or 0
+        ) + int(resume_stats.get("excluded") or 0)
+        run_metrics["invalidated_by_manual_edit_count"] = int(
+            run_metrics.get("invalidated_by_manual_edit_count") or 0
+        ) + int(resume_stats.get("invalidated") or 0)
+        run["metrics"] = run_metrics
+        refreshed = history.list_candidates(run_id)
+        snapshots = [
+            _resume_snapshot(run_id, item)
+            for item in refreshed
+            if item.status == SmartReviewStatus.PENDING
+        ]
+        base = _resume_counts(refreshed)
+        return snapshots, base, run
 
     def record_smart_review_results(
         self,

@@ -512,6 +512,8 @@ class SmartReviewRunResult:
     needs_context_count: int
     metrics: dict[str, object] = field(default_factory=dict)
     status: str = "completed"
+    # 執行層停止原因；不把所有 HTTP 429 或 provider 文字猜成配額耗盡。
+    stop_reason: str | None = None
 
 
 @dataclass

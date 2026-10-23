@@ -21,6 +21,8 @@ from translation_tool.translation_db.models import (
     SmartReviewSnapshot,
 )
 from translation_tool.translation_db.schema import SRC_AI
+from translation_tool.translation_db.smart_review_history import SmartReviewHistoryStore
+from translation_tool.translation_db.smart_review_planner import plan_new_smart_review
 from translation_tool.translation_db.smart_review_prompt import (
     build_smart_review_payload,
     smart_review_response_schema,
@@ -78,6 +80,7 @@ class _SmartReviewBatchRunner:
         self.session = session
         self.state = state
         self.snapshots = snapshots
+        self._attempted_ordinals: set[int] = set()
 
     def _cancel_requested(self) -> bool:
         cancel_check = self.session.cancel_check
@@ -149,12 +152,25 @@ class _SmartReviewBatchRunner:
             retry_runtime,
             cursor.current_size,
         )
+        attempted = {
+            int(item.ordinal)
+            for item in batch
+            if int(item.ordinal) not in self._attempted_ordinals
+        }
+        if attempted:
+            self._attempted_ordinals.update(attempted)
+            state.metrics["actual_ai_count"] = int(
+                state.metrics.get("actual_ai_count") or 0
+            ) + len(attempted)
         if state.cancelled:
             return False
         if outcome.request_failed:
             self._finish_failed_request(
                 cursor, batch_ctx, batch, abort_remaining=outcome.abort_remaining
             )
+            if outcome.stop_reason:
+                state.stop_reason = outcome.stop_reason
+                state.metrics["stop_reason"] = outcome.stop_reason
             return False
         if outcome.shrink_requested and cursor.shrink():
             state.bump("shrink_count")
@@ -223,18 +239,14 @@ class _SmartReviewBatchRunner:
         *,
         abort_remaining: bool,
     ) -> None:
-        """請求失敗：前進游標；provider 要求中止時把剩餘候選標為中止。"""
-        state, snapshots = self.state, self.snapshots
+        """請求失敗：只結算實際送出的批次，未送出候選保留 pending。"""
+        state = self.state
         state.counts.processed += len(batch)
         cursor.position += len(batch)
-        if abort_remaining and cursor.position < len(snapshots):
-            self.db.mark_smart_review_request_error(
-                state.run_id,
-                [item.ordinal for item in snapshots[cursor.position :]],
-                error_code="request_failed:aborted_after_provider_error",
-            )
-            state.counts.processed = len(snapshots)
-            cursor.position = len(snapshots)
+        # abort_remaining 只控制是否繼續送下一批；未送出的項目不是失敗，
+        # 必須維持 pending 才能由同一 run 的「繼續未完成校對」重試。
+        if abort_remaining:
+            cursor.position = len(self.snapshots)
         batch_ctx.actual_count = len(batch)
         state.complete_batch(batch_ctx, SmartReviewStatus.REQUEST_FAILED)
 
@@ -335,14 +347,21 @@ def _open_run_state(
     workflow_started: float,
     selection_started: float,
     selection_seconds: float,
+    selected_count: int | None = None,
+    reused_results: Sequence[dict[str, Any]] = (),
+    history_runs_consulted: int = 0,
+    record_snapshots: Sequence[SmartReviewSnapshot] | None = None,
+    existing_run_id: str | None = None,
+    initial_counts: dict[str, int] | None = None,
+    initial_metrics: dict[str, Any] | None = None,
 ) -> SmartReviewRunState:
     """建立批次紀錄與共用執行器，並回報 ``selection_complete``。"""
     planning_started = time.monotonic()
     planned_batch_count = max(1, (len(snapshots) + batch_size - 1) // batch_size)
     planning_seconds = round(time.monotonic() - planning_started, 3)
     run_record_started = time.monotonic()
-    run_id = db.create_smart_review_run(
-        snapshots,
+    run_id = existing_run_id or db.create_smart_review_run(
+        snapshots if record_snapshots is None else record_snapshots,
         provider=session.provider,
         model=session.model_name,
         version=version,
@@ -371,11 +390,68 @@ def _open_run_state(
         db=db,
         run_id=run_id,
         executor=executor,
-        selected_count=len(snapshots),
+        selected_count=(len(snapshots) if selected_count is None else selected_count),
         planned_batch_count=planned_batch_count,
         progress=progress,
-        metrics=new_smart_review_metrics(input_token_budget=session.input_token_budget),
+        metrics=(
+            {
+                **new_smart_review_metrics(
+                    input_token_budget=session.input_token_budget
+                ),
+                **(initial_metrics if isinstance(initial_metrics, dict) else {}),
+            }
+        ),
         started=workflow_started,
+    )
+    if initial_counts:
+        for key, value in initial_counts.items():
+            if hasattr(state.counts, key):
+                setattr(state.counts, key, int(value))
+    if reused_results:
+        db.record_smart_review_results(run_id, reused_results)
+        history = SmartReviewHistoryStore(db.path)
+        for result in reused_results:
+            state.counts.processed += 1
+            state.counts.valid += 1
+            decision = result.get("decision")
+            if decision == "no_change":
+                state.counts.no_change += 1
+            elif decision == "suggest_revision":
+                state.counts.suggestions += 1
+            else:
+                state.counts.needs_context += 1
+            # record_results projects an AI decision to ready/no_change. Restore
+            # an existing human projection so rejected/applied facts do not
+            # become a fresh ready candidate in the new run.
+            reused_status = str(result.get("reused_status") or "")
+            if reused_status in {
+                SmartReviewStatus.APPLIED,
+                SmartReviewStatus.REJECTED,
+            }:
+                history.update_candidate(
+                    run_id,
+                    int(result["id"]),
+                    status=reused_status,
+                    ai_status=result.get("reused_ai_status"),
+                    applied_batch=result.get("reused_applied_batch"),
+                    applied_at=result.get("reused_applied_at"),
+                )
+    state.metrics.update(
+        {
+            "actual_ai_count": int(state.metrics.get("actual_ai_count") or 0),
+            "planned_ai_count": len(snapshots),
+            "reused_count": (
+                len(reused_results)
+                if existing_run_id is None
+                else int(state.metrics.get("reused_count") or 0)
+            ),
+            "history_runs_consulted": (
+                int(history_runs_consulted)
+                if existing_run_id is None
+                else int(state.metrics.get("history_runs_consulted") or 0)
+            ),
+            "not_attempted_count": 0,
+        }
     )
     state.report_progress(
         phase="selection_complete",
@@ -398,6 +474,22 @@ def _finish_run(
     counts = state.counts
     if state.cancelled:
         db.mark_smart_review_pending_cancelled(state.run_id)
+    history = SmartReviewHistoryStore(db.path)
+    if history.exists(state.run_id):
+        candidates = history.list_candidates(state.run_id)
+        state.metrics["pending_review_count"] = sum(
+            item.status in {SmartReviewStatus.READY, SmartReviewStatus.NEEDS_CONTEXT}
+            for item in candidates
+        )
+        state.metrics["not_attempted_count"] = sum(
+            item.status
+            in {
+                SmartReviewStatus.PENDING,
+                SmartReviewStatus.CANCELLED,
+            }
+            for item in candidates
+        )
+    state.metrics["actual_ai_count"] = int(state.metrics.get("actual_ai_count") or 0)
     status = (
         SmartReviewStatus.CANCELLED
         if state.cancelled
@@ -410,7 +502,7 @@ def _finish_run(
         run_id=state.run_id,
         provider=session.provider,
         model=session.model_name,
-        selected_count=len(snapshots),
+        selected_count=state.selected_count,
         processed_count=counts.processed,
         valid_count=counts.valid,
         invalid_count=counts.invalid,
@@ -420,6 +512,7 @@ def _finish_run(
         needs_context_count=counts.needs_context,
         metrics=state.metrics,
         status=status,
+        stop_reason=state.stop_reason,
     )
 
 
@@ -443,6 +536,8 @@ def run_smart_review(
     query: str | None = None,
     cancel_check: Callable[[], bool] | None = None,
     task_id: str | None = None,
+    use_recent_history: bool = False,
+    skip_valid_history: bool = False,
 ) -> SmartReviewRunResult:
     """執行有界的 AI 智慧校對，只保存候選，不直接寫入翻譯。"""
     if not model_name.strip():
@@ -472,6 +567,18 @@ def run_smart_review(
         prioritize_named_keys=prioritize_named_keys,
     )
     selection_seconds = round(time.monotonic() - selection_started, 3)
+    history_runs_consulted = 0
+    historical_candidates: list[dict[str, Any]] = []
+    if use_recent_history:
+        history_runs_consulted, historical_candidates = SmartReviewHistoryStore(
+            db.path
+        ).recent_candidate_payloads(max_runs=2)
+    plan = plan_new_smart_review(
+        snapshots,
+        historical_candidates,
+        skip_valid_history=skip_valid_history,
+        history_runs_consulted=history_runs_consulted,
+    )
     batch_size = max(
         1,
         min(int(batch_size), smart_review_settings["max_batch_size"]),
@@ -479,7 +586,7 @@ def run_smart_review(
     state = _open_run_state(
         db,
         session,
-        snapshots,
+        plan.to_process,
         batch_size=batch_size,
         limit=limit,
         version=version,
@@ -498,13 +605,92 @@ def run_smart_review(
         workflow_started=workflow_started,
         selection_started=selection_started,
         selection_seconds=selection_seconds,
+        selected_count=len(plan.selected),
+        reused_results=plan.reused_results,
+        history_runs_consulted=plan.history_runs_consulted,
+        record_snapshots=plan.selected,
+        initial_metrics={
+            "applied_skipped_count": plan.applied_skipped_count,
+            "no_change_skipped_count": plan.no_change_skipped_count,
+            "pending_review_count": plan.pending_review_count,
+            "invalidated_by_manual_edit_count": plan.invalidated_count,
+        },
+    )
+    try:
+        _SmartReviewBatchRunner(db, session, state, plan.to_process).run(batch_size)
+    except TaskCancelled:
+        state.cancelled = True
+    except BaseException:
+        state.close_run("failed", include_outcome_counts=False)
+        raise
+    return _finish_run(db, session, state, plan.selected)
+
+
+def resume_smart_review(
+    db,
+    *,
+    run_id: str,
+    api_key: str = "",
+    model_name: str | None = None,
+    provider: str | None = None,
+    progress: Callable[[dict[str, Any]], None] | None = None,
+    lm_config: dict[str, Any] | None = None,
+    cancel_check: Callable[[], bool] | None = None,
+    task_id: str | None = None,
+) -> SmartReviewRunResult:
+    """在原 run_id 上繼續 pending／失敗／人工變更後需重試的候選。"""
+    workflow_started = time.monotonic()
+    snapshots, initial_counts, run = db.prepare_smart_review_resume(run_id)
+    scope = run.get("scope") if isinstance(run.get("scope"), dict) else {}
+    selected_count = int(run.get("selected_count") or 0)
+    selected_count = max(selected_count, len(snapshots))
+    resolved_model = str(model_name or run.get("model") or "").strip()
+    resolved_provider = str(provider or run.get("provider") or "gemini").strip()
+    if not resolved_model:
+        raise ValueError("智慧校對歷史批次沒有可恢復的模型")
+    lm_config = lm_config if isinstance(lm_config, dict) else {}
+    settings = get_smart_review_settings()
+    batch_size = max(
+        1,
+        min(
+            int(run.get("batch_size") or settings["default_batch_size"]),
+            settings["max_batch_size"],
+        ),
+    )
+    session = SmartReviewProviderSession.open(
+        provider=resolved_provider,
+        model_name=resolved_model,
+        api_key=api_key,
+        lm_config=lm_config,
+        cancel_check=cancel_check,
+    )
+    state = _open_run_state(
+        db,
+        session,
+        snapshots,
+        batch_size=batch_size,
+        limit=int(run.get("requested_limit") or selected_count),
+        version=scope.get("version") or run.get("scope_version"),
+        scope=scope,
+        task_id=task_id,
+        progress=progress,
+        workflow_started=workflow_started,
+        selection_started=workflow_started,
+        selection_seconds=0.0,
+        selected_count=selected_count,
+        existing_run_id=run_id,
+        initial_counts=initial_counts,
+        initial_metrics=run.get("metrics")
+        if isinstance(run.get("metrics"), dict)
+        else None,
     )
     try:
         _SmartReviewBatchRunner(db, session, state, snapshots).run(batch_size)
     except TaskCancelled:
         state.cancelled = True
     except BaseException:
-        db.mark_smart_review_pending_cancelled(state.run_id)
-        state.close_run("failed", include_outcome_counts=False)
+        state.stop_reason = "interrupted"
+        state.metrics["stop_reason"] = "interrupted"
+        state.close_run("interrupted", include_outcome_counts=False)
         raise
     return _finish_run(db, session, state, snapshots)
