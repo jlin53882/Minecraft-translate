@@ -76,7 +76,7 @@ def load_config_example() -> dict:
 
     注意：config.example.json 屬於 repo 原始碼的一部分，
     不會被複製進使用者的實際工作目錄。只有 load_config() 在
-    Layer 2 fallback 時會嘗試讀取它。
+    第 3 層 fallback 時會嘗試讀取它。
 
     用途：新版本安裝時補足 config.json 缺少的新欄位。
     """
@@ -319,7 +319,8 @@ def _load_config_uncached(resolved_config_path: Path) -> tuple[dict, bool]:
         return base, status == CONFIG_CORRUPT
     user_config = user_config or {}
 
-    # Merge: user (Layer 1) > example (Layer 2) > default (Layer 3)
+    # 合併優先序：
+    # config.json（Layer 1）> DEFAULT_CONFIG（Layer 2）> config.example.json（Layer 3）
     # 全部用 deep_merge 一次搞定，確保 config.example.json 新增的 top-level key
     # 也會被正確合併進來，不只限於 DEFAULT_CONFIG 定義的 keys。
     config = deep_merge(base, user_config)
