@@ -100,6 +100,45 @@ def test_tiktoken_fit_uses_shared_payload_and_real_item_ids(monkeypatch):
     assert [item["id"] for item in seen_payloads[-1]["items"]] == item_ids
 
 
+def test_tiktoken_fit_limits_prefix_work_and_uses_logarithmic_probes(monkeypatch):
+    estimator = TokenEstimatorConfig(algorithm="tiktoken_calibrated")
+    cfg = BudgetConfig(
+        max_input_token_budget=10**9,
+        max_output_token_budget=10**9,
+        token_estimator=estimator,
+    )
+    seen_payloads = []
+
+    monkeypatch.setattr(bb, "_uses_tiktoken", lambda _estimator: True)
+
+    def fake_payload_estimate(payload, *, estimator=None):
+        seen_payloads.append(payload)
+        return float(len(payload["items"]))
+
+    monkeypatch.setattr(bb, "estimate_payload_tokens", fake_payload_estimate)
+
+    items = _items(10_000, "hello")
+    item_ids = [f"real-{index}" for index in range(len(items))]
+    assert (
+        BatchBudgetTracker("lang").fit(
+            items,
+            300,
+            cfg,
+            item_ids=item_ids,
+        )
+        == 300
+    )
+
+    # The cap is applied before payload construction and exponential probing
+    # avoids the previous 1 + 2 + ... + 300 prefix-estimate work.
+    assert max(len(payload["items"]) for payload in seen_payloads) == 300
+    assert len(seen_payloads) <= 10
+    assert all(
+        payload["items"][-1]["id"] == item_ids[len(payload["items"]) - 1]
+        for payload in seen_payloads
+    )
+
+
 def test_character_payload_estimate_includes_fixed_item_overhead():
     estimator = TokenEstimatorConfig()
     payload = {"items": [{"id": "0", "value": "hello"}]}

@@ -547,23 +547,100 @@ class BatchBudgetTracker:
         cap = total if count_cap <= 0 else min(count_cap, total)
         out_budget, in_budget = self.effective_budgets(cfg)
 
-        resolved_item_ids = _resolve_item_ids(total, item_ids)
-        taken = 0
-        for candidate_count in range(1, cap + 1):
-            candidate = items[:candidate_count]
-            candidate_estimate = self.estimate(
-                candidate,
-                cfg,
-                fixed_input_tokens,
-                item_ids=resolved_item_ids[:candidate_count],
+        if item_ids is not None and len(item_ids) != total:
+            raise ValueError("payload item IDs and items must have the same length")
+        limited_items = items[:cap]
+        limited_item_ids = item_ids[:cap] if item_ids is not None else None
+        resolved_item_ids = _resolve_item_ids(cap, limited_item_ids)
+
+        estimator = cfg.token_estimator
+        factor = self.output_factor(cfg)
+        if not _uses_tiktoken(estimator):
+            # Character estimates are additive.  Keep this path linear instead
+            # of rebuilding every prefix, while preserving the same formula as
+            # ``estimate()`` (including the fallback request overhead).
+            value_tokens = 0.0
+            input_tokens = float(fixed_input_tokens)
+            taken = 0
+            for candidate_count, item in enumerate(limited_items, start=1):
+                value_tokens += estimate_value_tokens(item, estimator=estimator)
+                input_tokens += (
+                    estimate_input_item_tokens(item, estimator=estimator)
+                    + estimator.input_item_overhead_tokens
+                )
+                output_tokens = (
+                    value_tokens * factor
+                    + candidate_count * estimator.output_item_overhead_tokens
+                )
+                if candidate_count > 1 and (
+                    input_tokens > in_budget or output_tokens > out_budget
+                ):
+                    break
+                taken = candidate_count
+            return max(taken, 1)
+
+        # A tiktoken payload is not additive because JSON separators and BPE
+        # boundaries depend on the whole prefix.  Use exponential probing plus
+        # binary search, but keep every probe as an exact provider payload so
+        # the selected prefix still has the same IDs and wire shape as the
+        # request that will be sent.
+        estimates: dict[int, BatchEstimate] = {}
+
+        def _estimate_prefix(candidate_count: int) -> BatchEstimate:
+            cached = estimates.get(candidate_count)
+            if cached is None:
+                cached = self.estimate(
+                    limited_items[:candidate_count],
+                    cfg,
+                    fixed_input_tokens,
+                    item_ids=resolved_item_ids[:candidate_count],
+                )
+                estimates[candidate_count] = cached
+            return cached
+
+        def _fits(candidate_count: int) -> bool:
+            candidate_estimate = _estimate_prefix(candidate_count)
+            return (
+                candidate_estimate.input_tokens <= in_budget
+                and candidate_estimate.output_tokens <= out_budget
             )
-            if taken > 0 and (
-                candidate_estimate.input_tokens > in_budget
-                or candidate_estimate.output_tokens > out_budget
-            ):
-                break
-            taken = candidate_count
-        return max(taken, 1)
+
+        lower = 0
+        upper: int | None = None
+        probe = 1
+        while True:
+            if _fits(probe):
+                lower = probe
+                if probe == cap:
+                    break
+                next_probe = min(probe * 2, cap)
+                if next_probe == probe:
+                    break
+                probe = next_probe
+                continue
+            upper = probe
+            break
+
+        if lower == cap:
+            return cap
+        if upper is None:
+            # The exponential probes may stop below a non-power-of-two cap.
+            upper = cap
+            if _fits(upper):
+                return upper
+
+        while lower + 1 < upper:
+            middle = (lower + upper) // 2
+            if _fits(middle):
+                lower = middle
+            else:
+                upper = middle
+
+        # Re-read the exact selected payload from the cache before returning.
+        # This keeps the final decision tied to the same IDs and serialization
+        # that were used for the budget checks above.
+        _estimate_prefix(lower)
+        return max(lower, 1)
 
     # -- 回饋 --------------------------------------------------------------
 
