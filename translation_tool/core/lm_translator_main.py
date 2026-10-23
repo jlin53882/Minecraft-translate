@@ -61,7 +61,10 @@ from translation_tool.core.lm_same_source_retry import (
     build_same_source_retry_batch,
     merge_same_source_retry_results,
 )
-from translation_tool.core.lm_session import TranslationSessionState
+from translation_tool.core.lm_session import (
+    TranslationSessionState,
+    estimate_conversation_history_tokens,
+)
 from translation_tool.core.official_locale import (
     build_translation_prompt,
     official_translation_for_item,
@@ -150,7 +153,6 @@ _DEFAULT_BATCH_SLEEP = float(
 # =========================================================
 DEFAULT_DRY_RUN = False  # 預設不跳過 API
 DEFAULT_EXPORT_CACHE_ONLY = False  # 預設進行完整翻譯
-CONVERSATION_TURN_OVERHEAD_TOKENS = 4
 
 
 def _detect_batch_profile(items):
@@ -695,12 +697,9 @@ def _estimate_conversation_history_tokens(
     estimator=None,
 ) -> float:
     """估算重試請求已攜帶的對話歷史輸入 Token。"""
-    return sum(
-        estimate_prompt_tokens(
-            turn.get("text", ""), estimator=estimator, include_request_bias=False
-        )
-        + CONVERSATION_TURN_OVERHEAD_TOKENS
-        for turn in conversation_history
+    return estimate_conversation_history_tokens(
+        conversation_history,
+        estimator=estimator,
     )
 
 
@@ -1120,6 +1119,7 @@ def _prepare_batch(runtime: _BatchRuntime) -> _BatchRound:
                     scope_count,
                     runtime.lm_cfg,
                     fixed_input_tokens=runtime.batch_fit_input_tokens,
+                    item_ids=runtime.remaining_item_ids,
                 ),
             ),
         )
@@ -1135,7 +1135,10 @@ def _prepare_batch(runtime: _BatchRuntime) -> _BatchRound:
         current_batch=current_batch,
         fit_count=fit_count,
         estimate=runtime.budget_tracker.estimate(
-            current_batch, runtime.budget_cfg, runtime.fixed_input_tokens
+            current_batch,
+            runtime.budget_cfg,
+            runtime.fixed_input_tokens,
+            item_ids=current_ids,
         ),
         payload=build_translation_payload(
             current_batch,
@@ -1971,7 +1974,11 @@ def _retry_same_source_translations(
         candidates.items,
         runtime.budget_cfg,
         runtime.retry_fixed_input_tokens
-        + _estimate_conversation_history_tokens(conversation_history),
+        + _estimate_conversation_history_tokens(
+            conversation_history,
+            estimator=runtime.budget_cfg.token_estimator,
+        ),
+        item_ids=candidates.item_ids,
     )
     retry_round = _BatchRound(
         current_batch=list(candidates.items),
@@ -2147,6 +2154,7 @@ def _retry_quality_translations(
         + _estimate_conversation_history_tokens(
             conversation_history, estimator=runtime.budget_cfg.token_estimator
         ),
+        item_ids=candidates.item_ids,
     )
     retry_input_tokens = _estimate_retry_input_tokens(
         retry_prompt,
@@ -2770,6 +2778,7 @@ def _apply_batch_shrink(
             runtime.batch_size,
             runtime.lm_cfg,
             fixed_input_tokens=runtime.batch_fit_input_tokens,
+            item_ids=runtime.remaining_item_ids,
         )
         if next_fit < len(round_data.current_batch):
             _note_contract_progress(runtime, len(round_data.current_batch), next_fit)

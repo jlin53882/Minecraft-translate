@@ -92,7 +92,13 @@ class TokenEstimatorConfig:
         if not isinstance(encoding, str) or not encoding.strip():
             encoding = defaults.tiktoken_encoding
 
-        def _finite_num(key: str, default: float, *, minimum: float | None = None):
+        def _finite_num(
+            key: str,
+            default: float,
+            *,
+            minimum: float | None = None,
+            strictly_positive: bool = False,
+        ):
             value = values.get(key)
             if value is None or isinstance(value, bool):
                 return default
@@ -103,6 +109,8 @@ class TokenEstimatorConfig:
             if not math.isfinite(value):
                 return default
             if minimum is not None and value < minimum:
+                return default
+            if strictly_positive and value <= 0:
                 return default
             return value
 
@@ -135,10 +143,14 @@ class TokenEstimatorConfig:
             algorithm=algorithm,
             tiktoken_encoding=encoding.strip(),
             tiktoken_prompt_scale=_finite_num(
-                "tiktoken_prompt_scale", defaults.tiktoken_prompt_scale, minimum=0.0
+                "tiktoken_prompt_scale",
+                defaults.tiktoken_prompt_scale,
+                strictly_positive=True,
             ),
             tiktoken_payload_scale=_finite_num(
-                "tiktoken_payload_scale", defaults.tiktoken_payload_scale, minimum=0.0
+                "tiktoken_payload_scale",
+                defaults.tiktoken_payload_scale,
+                strictly_positive=True,
             ),
             tiktoken_request_bias=_finite_num(
                 "tiktoken_request_bias", defaults.tiktoken_request_bias
@@ -355,20 +367,27 @@ def estimate_prompt_tokens(
 def estimate_payload_tokens(
     payload: dict[str, Any], *, estimator: TokenEstimatorConfig | None = None
 ) -> float:
-    """估算已序列化 provider payload 的輸入 token。"""
+    """估算已序列化 provider payload 的輸入 token。
+
+    Character fallback 的請求還有每項固定輸入開銷；與批次規劃及重試
+    共用這個函式時，不能只計算 JSON 文字本身。
+    """
     estimator = estimator or DEFAULT_TOKEN_ESTIMATOR
     serialized = json.dumps(payload, ensure_ascii=False)
+    items = payload.get("items")
+    item_count = len(items) if isinstance(items, list) else 0
     if _uses_tiktoken(estimator):
         raw = _tiktoken_count(serialized, estimator)
         if raw is not None:
-            items = payload.get("items")
-            item_count = len(items) if isinstance(items, list) else 0
             return max(
                 0.0,
                 raw * estimator.tiktoken_payload_scale
                 + item_count * estimator.tiktoken_item_overhead_tokens,
             )
-    return estimate_text_tokens(serialized, estimator=estimator)
+    return (
+        estimate_text_tokens(serialized, estimator=estimator)
+        + item_count * estimator.input_item_overhead_tokens
+    )
 
 
 def estimate_value_tokens(
@@ -391,6 +410,16 @@ def estimate_input_item_tokens(
     return estimate_value_tokens(
         item, estimator=estimator
     ) + estimate_format_spec_tokens(item, estimate_item_text)
+
+
+def _resolve_item_ids(item_count: int, item_ids: Sequence[str] | None) -> list[str]:
+    """Resolve the IDs used by the actual provider payload for a prefix."""
+    if item_ids is None:
+        return [str(index) for index in range(item_count)]
+    resolved = [str(item_id) for item_id in item_ids]
+    if len(resolved) != item_count:
+        raise ValueError("payload item IDs and items must have the same length")
+    return resolved
 
 
 @dataclass(frozen=True)
@@ -469,18 +498,19 @@ class BatchBudgetTracker:
         items: Sequence[dict[str, Any]],
         cfg: BudgetConfig,
         fixed_input_tokens: float = 0.0,
+        *,
+        item_ids: Sequence[str] | None = None,
     ) -> BatchEstimate:
         """估算「把這些項目整批送出」的輸入 / 輸出 token。"""
         factor = self.output_factor(cfg)
         estimator = cfg.token_estimator
         values = list(items)
+        resolved_item_ids = _resolve_item_ids(len(values), item_ids)
         value = sum(estimate_value_tokens(it, estimator=estimator) for it in values)
         n = len(values)
         if _uses_tiktoken(estimator):
             input_items = estimate_payload_tokens(
-                build_translation_payload(
-                    values, item_ids=[str(index) for index in range(n)]
-                ),
+                build_translation_payload(values, item_ids=resolved_item_ids),
                 estimator=estimator,
             )
         else:
@@ -504,6 +534,8 @@ class BatchBudgetTracker:
         count_cap: int,
         cfg: BudgetConfig,
         fixed_input_tokens: float = 0.0,
+        *,
+        item_ids: Sequence[str] | None = None,
     ) -> int:
         """回傳要取的「前綴」長度：項目數上限 / 輸出預算 / 輸入預算，先到者為準。
 
@@ -514,25 +546,23 @@ class BatchBudgetTracker:
             return 0
         cap = total if count_cap <= 0 else min(count_cap, total)
         out_budget, in_budget = self.effective_budgets(cfg)
-        factor = self.output_factor(cfg)
 
-        used_in = fixed_input_tokens
-        used_out = 0.0
+        resolved_item_ids = _resolve_item_ids(total, item_ids)
         taken = 0
-        estimator = cfg.token_estimator
-        for item in items[:cap]:
-            value = estimate_value_tokens(item, estimator=estimator)
-            in_t = estimate_input_item_tokens(item, estimator=estimator)
-            if not _uses_tiktoken(estimator):
-                in_t += estimator.input_item_overhead_tokens
-            out_t = value * factor + estimator.output_item_overhead_tokens
+        for candidate_count in range(1, cap + 1):
+            candidate = items[:candidate_count]
+            candidate_estimate = self.estimate(
+                candidate,
+                cfg,
+                fixed_input_tokens,
+                item_ids=resolved_item_ids[:candidate_count],
+            )
             if taken > 0 and (
-                used_in + in_t > in_budget or used_out + out_t > out_budget
+                candidate_estimate.input_tokens > in_budget
+                or candidate_estimate.output_tokens > out_budget
             ):
                 break
-            used_in += in_t
-            used_out += out_t
-            taken += 1
+            taken = candidate_count
         return max(taken, 1)
 
     # -- 回饋 --------------------------------------------------------------
@@ -639,6 +669,7 @@ def select_batch_size(
     lm_cfg: dict[str, Any] | None,
     *,
     fixed_input_tokens: float = 0.0,
+    item_ids: Sequence[str] | None = None,
 ) -> int:
     """共用的切批入口：三處切批（共用迴圈 / 目錄翻譯 / 智慧批次）都用它。
 
@@ -651,7 +682,13 @@ def select_batch_size(
     cfg = BudgetConfig.from_config(lm_cfg)
     if not cfg.enabled:
         return cap
-    return get_tracker(profile).fit(items, cap, cfg, fixed_input_tokens)
+    return get_tracker(profile).fit(
+        items,
+        cap,
+        cfg,
+        fixed_input_tokens,
+        item_ids=item_ids,
+    )
 
 
 def is_item_oversized(

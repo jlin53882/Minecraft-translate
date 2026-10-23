@@ -7,10 +7,27 @@ from dataclasses import dataclass, field
 from translation_tool.core.lm_batch_budget import (
     TokenEstimatorConfig,
     estimate_prompt_tokens,
-    estimate_text_tokens,
 )
 
 DEFAULT_SESSION_HISTORY_TOKEN_LIMIT = 32_000
+CONVERSATION_TURN_OVERHEAD_TOKENS = 4
+
+
+def estimate_conversation_history_tokens(
+    history: list[dict[str, str]],
+    *,
+    estimator: TokenEstimatorConfig | None = None,
+) -> float:
+    """Count history with the same prompt model used by batch budgeting."""
+    return sum(
+        estimate_prompt_tokens(
+            turn.get("text", ""),
+            estimator=estimator,
+            include_request_bias=False,
+        )
+        + CONVERSATION_TURN_OVERHEAD_TOKENS
+        for turn in history
+    )
 
 
 @dataclass
@@ -48,16 +65,13 @@ class TranslationSessionState:
             del self.history[:2]
 
     def _token_count(self) -> float:
-        if self.estimator.algorithm == "tiktoken_calibrated":
-            return sum(
-                estimate_prompt_tokens(
-                    turn.get("text", ""),
-                    estimator=self.estimator,
-                    include_request_bias=False,
-                )
-                for turn in self.history
-            )
-        return sum(estimate_text_tokens(turn.get("text", "")) for turn in self.history)
+        return estimate_conversation_history_tokens(
+            self.history, estimator=self.estimator
+        )
 
 
-__all__ = ["TranslationSessionState"]
+__all__ = [
+    "CONVERSATION_TURN_OVERHEAD_TOKENS",
+    "TranslationSessionState",
+    "estimate_conversation_history_tokens",
+]

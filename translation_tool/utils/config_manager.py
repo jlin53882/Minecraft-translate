@@ -872,10 +872,10 @@ def _validate_token_budget_config(lm: dict) -> None:
                 )
 
         algorithm = estimator.get("algorithm")
-        if algorithm is not None and algorithm not in {
-            "character",
-            "tiktoken_calibrated",
-        }:
+        if algorithm is not None and (
+            not isinstance(algorithm, str)
+            or algorithm not in {"character", "tiktoken_calibrated"}
+        ):
             raise ConfigValidationError(
                 "lm_translator.token_estimator.algorithm 必須為 character 或 "
                 f"tiktoken_calibrated，目前為 {algorithm!r}"
@@ -897,14 +897,25 @@ def _validate_token_budget_config(lm: dict) -> None:
             value = estimator.get(key)
             if value is None:
                 continue
-            minimum = 0 if key != "tiktoken_request_bias" else None
+            is_scale = key in {
+                "tiktoken_prompt_scale",
+                "tiktoken_payload_scale",
+            }
+            minimum = 0 if key == "tiktoken_item_overhead_tokens" else None
             if (
                 isinstance(value, bool)
                 or not isinstance(value, (int, float))
                 or not math.isfinite(float(value))
                 or (minimum is not None and value < minimum)
+                or (is_scale and value <= 0)
             ):
-                label = "有限的非負數字" if minimum is not None else "有限數字"
+                label = (
+                    "有限的正數"
+                    if is_scale
+                    else "有限的非負數字"
+                    if minimum is not None
+                    else "有限數字"
+                )
                 raise ConfigValidationError(
                     f"lm_translator.token_estimator.{key} 必須為{label}，"
                     f"目前為 {type(value).__name__}：'{value}'"

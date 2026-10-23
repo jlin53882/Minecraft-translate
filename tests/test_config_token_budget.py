@@ -128,6 +128,13 @@ def test_token_estimator_values_are_validated_and_fallback_is_safe():
     with pytest.raises(ConfigValidationError, match="algorithm"):
         _validate_lm_translator_config({"token_estimator": {"algorithm": "unknown"}})
 
+    with pytest.raises(ConfigValidationError, match="algorithm"):
+        _validate_lm_translator_config({"token_estimator": {"algorithm": []}})
+
+    for key in ("tiktoken_prompt_scale", "tiktoken_payload_scale"):
+        with pytest.raises(ConfigValidationError, match=key):
+            _validate_lm_translator_config({"token_estimator": {key: 0}})
+
     estimator = TokenEstimatorConfig.from_config(
         {
             "token_estimator": {
@@ -148,6 +155,12 @@ def test_token_estimator_values_are_validated_and_fallback_is_safe():
     assert (
         estimator.input_item_overhead_tokens
         == TokenEstimatorConfig().input_item_overhead_tokens
+    )
+    assert (
+        TokenEstimatorConfig.from_config(
+            {"token_estimator": {"tiktoken_prompt_scale": 0}}
+        ).tiktoken_prompt_scale
+        == TokenEstimatorConfig().tiktoken_prompt_scale
     )
 
 

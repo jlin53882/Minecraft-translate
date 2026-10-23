@@ -69,6 +69,50 @@ def test_tiktoken_calibrated_estimator_counts_serialized_request_parts():
     )
 
 
+def test_tiktoken_fit_uses_shared_payload_and_real_item_ids(monkeypatch):
+    estimator = TokenEstimatorConfig(algorithm="tiktoken_calibrated")
+    cfg = BudgetConfig(
+        max_input_token_budget=25,
+        max_output_token_budget=10**9,
+        token_estimator=estimator,
+    )
+    seen_payloads = []
+
+    monkeypatch.setattr(bb, "_uses_tiktoken", lambda _estimator: True)
+
+    def fake_payload_estimate(payload, *, estimator=None):
+        seen_payloads.append(payload)
+        return float(len(payload["items"]) * 10)
+
+    monkeypatch.setattr(bb, "estimate_payload_tokens", fake_payload_estimate)
+
+    tracker = BatchBudgetTracker("lang")
+    item_ids = ["real-a", "real-b", "real-c"]
+    assert (
+        tracker.fit(
+            _items(3, "hello"),
+            3,
+            cfg,
+            item_ids=item_ids,
+        )
+        == 2
+    )
+    assert [item["id"] for item in seen_payloads[-1]["items"]] == item_ids
+
+
+def test_character_payload_estimate_includes_fixed_item_overhead():
+    estimator = TokenEstimatorConfig()
+    payload = {"items": [{"id": "0", "value": "hello"}]}
+
+    raw = estimate_text_tokens(
+        json.dumps(payload, ensure_ascii=False), estimator=estimator
+    )
+
+    assert estimate_payload_tokens(payload, estimator=estimator) == pytest.approx(
+        raw + estimator.input_item_overhead_tokens
+    )
+
+
 def test_estimate_includes_json_wrapper_and_fixed_input():
     tracker = BatchBudgetTracker("lang")
     est = tracker.estimate(_items(4, "a" * 40), CFG, fixed_input_tokens=100)
