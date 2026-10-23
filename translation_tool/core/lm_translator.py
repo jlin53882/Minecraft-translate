@@ -78,6 +78,7 @@ from translation_tool.utils.config_manager import (
 )
 from translation_tool.utils.file_replace import atomic_write_text
 from translation_tool.utils.log_unit import log_debug, log_info, log_warning
+from translation_tool.utils.worker_count import resolve_worker_count
 
 # Keep historical module attributes patchable while the shared loop owns writes.
 add_to_cache = _cache_manager.add_to_cache
@@ -845,9 +846,7 @@ def translate_directory_generator(
             yield {"progress": 1.0}
             return
 
-        work_thread = (
-            load_config().get("translator", {}).get("parallel_execution_workers", 4)
-        )
+        work_thread = resolve_worker_count("lm_extract", load_config())
         file_cache, all_items, extract_events = _extract_directory_items(
             files,
             export_lang=export_lang,

@@ -259,11 +259,8 @@ def test_runtime_constants_equal_schema_defaults():
 
 
 #: 以字面值當後備、且與 schema 預設值不同的位置，以及為什麼可以不同。
-LITERAL_FALLBACK_EXCEPTIONS: dict[tuple[str, str], str] = {
-    ("app/icon_index.py", "parallel_execution_workers"): (
-        "圖示索引是 I/O 為主的背景掃描，刻意用比一般檔案處理（4）更多的執行緒"
-    ),
-}
+#: 目前沒有例外：各用途的後備值集中在 ``worker_count.WORKER_POLICIES``。
+LITERAL_FALLBACK_EXCEPTIONS: dict[tuple[str, str], str] = {}
 EQUALITY_KEYS = {
     "parallel_execution_workers": "translator.parallel_execution_workers",
     "enable_cache_saving": "translator.enable_cache_saving",

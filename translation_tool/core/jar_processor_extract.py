@@ -26,6 +26,7 @@ from translation_tool.utils.cancellation import (
     raise_if_cancelled,
 )
 from translation_tool.utils.ui_mirror import ContextThreadPoolExecutor, run_in_context
+from translation_tool.utils.worker_count import resolve_worker_count
 
 from ..utils.config_manager import load_config
 from ..utils.log_unit import log_error
@@ -415,25 +416,12 @@ def run_extraction_process_impl(
             "total": eligible_total,
             "log": f"[ERROR] 無法掃描 {failed_jar}（JAR 可能已損毀或超出安全讀取上限）",
         }
-    cpu_count = os.cpu_count() or 2
-    config_workers = (
-        load_config().get("translator", {}).get("parallel_execution_workers")
+    max_workers = resolve_worker_count("jar_extract", load_config())
+    log.info(
+        "[workers] actual=%s (cpu_count=%s, capped at 32)",
+        max_workers,
+        os.cpu_count() or 2,
     )
-    if isinstance(config_workers, int) and config_workers > 0:
-        max_workers = min(config_workers, 32)
-        log.info(
-            "[workers] config=%s, actual=%s (cpu_count=%s, capped at 32)",
-            config_workers,
-            max_workers,
-            cpu_count,
-        )
-    else:
-        max_workers = max(1, cpu_count // 2)
-        log.info(
-            "[workers] default=%s (config invalid/missing, cpu_count=%s)",
-            max_workers,
-            cpu_count,
-        )
 
     import time as time_module
 

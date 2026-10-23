@@ -18,6 +18,7 @@ from typing import Any
 
 from translation_tool.core import lm_translator, plugin_resume
 from translation_tool.utils.config_manager import load_config
+from translation_tool.utils.worker_count import resolve_worker_count
 
 LM_KIND = "lm_directory"
 KIND_LABELS = {
@@ -209,9 +210,7 @@ def check_resume_feasibility(task: InterruptedTask) -> ResumeCheck:
         )
         if not files:
             return ResumeCheck(False, "輸入資料夾中找不到可翻譯的檔案")
-        work_thread = (
-            load_config().get("translator", {}).get("parallel_execution_workers", 4)
-        )
+        work_thread = resolve_worker_count("lm_extract", load_config())
         _file_cache, all_items, _events = lm_translator._extract_directory_items(
             files, export_lang=task.export_lang, work_thread=work_thread
         )

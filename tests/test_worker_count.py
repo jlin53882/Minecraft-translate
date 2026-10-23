@@ -69,3 +69,27 @@ def test_cpu_defaults_to_os_cpu_count(monkeypatch):
     assert resolve_worker_count("file_pipeline", None) == 1  # 取不到視為 2 → 一半
     monkeypatch.setattr("translation_tool.utils.worker_count.os.cpu_count", lambda: 12)
     assert resolve_worker_count("file_pipeline", None) == 6
+
+
+def test_only_resolver_and_validators_read_the_workers_key():
+    """讀取 parallel_execution_workers 的程式必須經過 resolve_worker_count。"""
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    allowed = {
+        "translation_tool/utils/worker_count.py",
+        "translation_tool/utils/config_schema.py",
+        "translation_tool/utils/config_manager.py",
+        "app/views/config/settings_schema.py",
+        # 只在日誌/說明文字中提到設定名稱
+        "translation_tool/core/jar_processor_preview.py",
+    }
+    offenders = []
+    for base in ("app", "translation_tool"):
+        for path in (root / base).rglob("*.py"):
+            rel = path.relative_to(root).as_posix()
+            if rel in allowed:
+                continue
+            if "parallel_execution_workers" in path.read_text(encoding="utf-8"):
+                offenders.append(rel)
+    assert offenders == []

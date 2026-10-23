@@ -30,6 +30,7 @@ from translation_tool.utils.bounded_executor import bounded_as_completed
 from translation_tool.utils.cancellation import raise_if_cancelled
 from translation_tool.utils.config_manager import load_config
 from translation_tool.utils.ui_mirror import ContextThreadPoolExecutor
+from translation_tool.utils.worker_count import resolve_worker_count
 
 log = logging.getLogger(__name__)
 
@@ -37,13 +38,10 @@ log = logging.getLogger(__name__)
 def _get_preview_workers() -> int:
     """從 config 讀取 parallel_execution_workers 作為預覽掃描的執行緒數量。"""
     try:
-        config = load_config()
-        config_workers = config.get("translator", {}).get("parallel_execution_workers")
-        if isinstance(config_workers, int) and config_workers > 0:
-            return config_workers
+        return resolve_worker_count("jar_preview", load_config())
     except Exception:
         log.debug("讀取 parallel_execution_workers 失敗，改用預設值", exc_info=True)
-    return min(4, os.cpu_count() or 2)
+    return resolve_worker_count("jar_preview", None)
 
 
 def _scan_single_jar_for_preview(

@@ -13,6 +13,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from translation_tool.utils.worker_count import resolve_worker_count
+
 from . import cache_shards, cache_store
 from .cache_loader import load_cache_type
 from .cache_overview import (
@@ -149,13 +151,12 @@ def _configured_cache_root() -> Path:
 def _load_cache_type(cache_type: str):
     """載入指定類型的快取。"""
     state = _state()
-    translation_config = load_config().get("translator", {})
     load_cache_type(
         cache_type,
         translation_cache=state.translation_cache,
         cache_file_path=state.cache_file_path,
         cache_root=_get_cache_root(),
-        parallel_workers=translation_config.get("parallel_execution_workers", 4),
+        parallel_workers=resolve_worker_count("cache_load", load_config()),
         logger=log,
     )
 
@@ -202,7 +203,7 @@ def reload_translation_cache():
         state = cache_store.get_runtime_state()
         state.active_cache_root = configured_root
         # 重新載入所有快取型別
-        translation_config = load_config().get("translator", {})
+        cache_workers = resolve_worker_count("cache_load", load_config())
         try:
             for cache_type in CACHE_TYPES:
                 load_cache_type(
@@ -210,9 +211,7 @@ def reload_translation_cache():
                     translation_cache=state.translation_cache,
                     cache_file_path=state.cache_file_path,
                     cache_root=_get_cache_root(),
-                    parallel_workers=translation_config.get(
-                        "parallel_execution_workers", 4
-                    ),
+                    parallel_workers=cache_workers,
                     logger=log,
                 )
         except Exception:

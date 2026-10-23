@@ -160,7 +160,7 @@ or `TEMP B-TREE`.
 - 有效時取設定值，再套該用途的上限（若有）；結果至少 1。
 - 用途表 `WORKER_POLICIES`：`count_prescan`（FTB／KubeJS 預掃描，預設 4）、`file_pipeline`（逐檔處理，CPU 一半，上限也是 CPU 一半）、
   `moddb_scan`（上限 CPU 核心數）、`jar_extract`（預設 CPU 一半，上限 32）、`jar_preview`、`jar_browser`、`icon_index`、`icon_cache`、`cache_load`、`lm_extract`。
-- 呼叫端：FTB／KubeJS 預掃描（`count_prescan`）與 FTB 逐檔翻譯（`file_pipeline`）使用本函式；其餘用途的預設與上限已定義在表中，對應的呼叫點仍各自讀設定。
+- 呼叫端：所有讀取 `translator.parallel_execution_workers` 的程式都經過本函式並指定用途（`WORKER_POLICIES` 的鍵）；`tests/test_worker_count.py` 以掃描原始碼確保不會再出現各自讀設定的呼叫點。
 - 未知用途會丟 `KeyError`，避免默默用錯上限。測試：`tests/test_worker_count.py`。
 
 ## Commands

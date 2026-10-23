@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import traceback
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -85,6 +84,7 @@ from translation_tool.translation_db.time_filters import (
 )
 from translation_tool.utils.cancellation import cancel_scope
 from translation_tool.utils.config_manager import load_config
+from translation_tool.utils.worker_count import resolve_worker_count
 
 # View 經由本模組取用資料庫型別與常數（View 不直接 import translation_tool 引擎）
 __all__ = [
@@ -349,11 +349,7 @@ def run_moddb_scan_service(
             f"開始{'預覽' if options.dry_run else '掃描'}：版本 {options.version}，來源 {folder}"
             + (f"，資料庫 {db.path}" if db is not None else "（預覽模式，不寫入）"),
         )
-        workers = int(
-            load_config().get("translator", {}).get("parallel_execution_workers", 4)
-            or 4
-        )
-        workers = max(1, min(workers, os.cpu_count() or 4))
+        workers = resolve_worker_count("moddb_scan", load_config())
         with cancel_scope(cancelled):
             for update in scan_folder_generator(
                 db, folder, options, should_cancel=cancelled, workers=workers

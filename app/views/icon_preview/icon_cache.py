@@ -21,6 +21,7 @@ from translation_tool.utils.cancellation import raise_if_cancelled
 from translation_tool.utils.config_manager import load_config
 from translation_tool.utils.log_unit import log_info, log_warning
 from translation_tool.utils.ui_mirror import ContextThreadPoolExecutor
+from translation_tool.utils.worker_count import resolve_worker_count
 from translation_tool.utils.zip_safety import (
     ArchiveBudgetError,
     ZipReadBudget,
@@ -802,10 +803,7 @@ def _run_jar_workers(jar_to_entries: dict[str, list], process_jar, progress_cb) 
     """以 ThreadPoolExecutor 並行處理每個 JAR，並把結果套用到對應的 entry。回傳已處理的 JAR 數量。"""
     processed = 0
     total = len(jar_to_entries)
-    config_workers = (
-        load_config().get("translator", {}).get("parallel_execution_workers", 4)
-    )
-    max_workers = max(1, config_workers) if isinstance(config_workers, int) else 4
+    max_workers = resolve_worker_count("icon_cache", load_config())
 
     def submit_jar(executor, jar_name: str):
         return executor.submit(process_jar, jar_name)
