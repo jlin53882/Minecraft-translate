@@ -44,8 +44,7 @@ def test_ascii_and_cjk_estimates():
     )
     # 混合：逐字元累加
     assert estimate_text_tokens("ab中") == pytest.approx(
-        2 * estimator.item_ascii_tokens_per_char
-        + estimator.item_cjk_tokens_per_char
+        2 * estimator.item_ascii_tokens_per_char + estimator.item_cjk_tokens_per_char
     )
 
 

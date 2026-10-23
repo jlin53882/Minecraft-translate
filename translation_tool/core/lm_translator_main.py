@@ -879,9 +879,10 @@ def _build_batch_prompt_context(
     history_input_tokens = _estimate_conversation_history_tokens(
         conversation_history, estimator=estimator
     )
-    fixed_input_tokens = estimate_prompt_tokens(
-        effective_prompt, estimator=estimator
-    ) + history_input_tokens
+    fixed_input_tokens = (
+        estimate_prompt_tokens(effective_prompt, estimator=estimator)
+        + history_input_tokens
+    )
     retry_fixed_input_tokens = estimate_prompt_tokens(
         f"{effective_prompt.rstrip()}\n\n{SAME_SOURCE_RETRY_INSTRUCTION}",
         estimator=estimator,

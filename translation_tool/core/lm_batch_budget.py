@@ -180,6 +180,7 @@ def _uses_tiktoken(estimator: TokenEstimatorConfig) -> bool:
         _get_tiktoken_encoding(estimator.tiktoken_encoding) is not None
     )
 
+
 # 輸出係數校正（EMA）：新觀測值的權重與合理範圍
 CALIBRATION_WEIGHT = 0.3
 MIN_OUTPUT_FACTOR = 0.3
@@ -386,12 +387,10 @@ def estimate_input_item_tokens(
         return estimate_payload_tokens(
             build_translation_payload([item], item_ids=["0"]), estimator=estimator
         )
-    estimate_item_text = lambda text: estimate_text_tokens(
-        text, estimator=estimator
-    )
-    return estimate_value_tokens(item, estimator=estimator) + estimate_format_spec_tokens(
-        item, estimate_item_text
-    )
+    estimate_item_text = lambda text: estimate_text_tokens(text, estimator=estimator)
+    return estimate_value_tokens(
+        item, estimator=estimator
+    ) + estimate_format_spec_tokens(item, estimate_item_text)
 
 
 @dataclass(frozen=True)
@@ -485,15 +484,17 @@ class BatchBudgetTracker:
                 estimator=estimator,
             )
         else:
-            input_items = sum(
-                estimate_input_item_tokens(item, estimator=estimator)
-                for item in values
-            ) + n * estimator.input_item_overhead_tokens
+            input_items = (
+                sum(
+                    estimate_input_item_tokens(item, estimator=estimator)
+                    for item in values
+                )
+                + n * estimator.input_item_overhead_tokens
+            )
         return BatchEstimate(
             count=n,
             value_tokens=value,
-            input_tokens=fixed_input_tokens
-            + input_items,
+            input_tokens=fixed_input_tokens + input_items,
             output_tokens=value * factor + n * estimator.output_item_overhead_tokens,
         )
 

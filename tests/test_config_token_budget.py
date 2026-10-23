@@ -126,9 +126,7 @@ def test_token_estimator_values_are_validated_and_fallback_is_safe():
             {"token_estimator": {"item_ascii_tokens_per_char": "0.22"}}
         )
     with pytest.raises(ConfigValidationError, match="algorithm"):
-        _validate_lm_translator_config(
-            {"token_estimator": {"algorithm": "unknown"}}
-        )
+        _validate_lm_translator_config({"token_estimator": {"algorithm": "unknown"}})
 
     estimator = TokenEstimatorConfig.from_config(
         {
@@ -139,9 +137,18 @@ def test_token_estimator_values_are_validated_and_fallback_is_safe():
             }
         }
     )
-    assert estimator.item_ascii_tokens_per_char == TokenEstimatorConfig().item_ascii_tokens_per_char
-    assert estimator.item_cjk_tokens_per_char == TokenEstimatorConfig().item_cjk_tokens_per_char
-    assert estimator.input_item_overhead_tokens == TokenEstimatorConfig().input_item_overhead_tokens
+    assert (
+        estimator.item_ascii_tokens_per_char
+        == TokenEstimatorConfig().item_ascii_tokens_per_char
+    )
+    assert (
+        estimator.item_cjk_tokens_per_char
+        == TokenEstimatorConfig().item_cjk_tokens_per_char
+    )
+    assert (
+        estimator.input_item_overhead_tokens
+        == TokenEstimatorConfig().input_item_overhead_tokens
+    )
 
 
 @pytest.mark.parametrize("value", [1, 8, 15])

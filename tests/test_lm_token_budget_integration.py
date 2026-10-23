@@ -135,9 +135,7 @@ def test_structured_format_spec_counts_only_in_input_estimate():
     }
     cfg = BudgetConfig(output_token_factor=1.5)
     estimator = cfg.token_estimator
-    estimate = BatchBudgetTracker("patch").estimate(
-        [item], cfg, fixed_input_tokens=100
-    )
+    estimate = BatchBudgetTracker("patch").estimate([item], cfg, fixed_input_tokens=100)
     value_tokens = estimate_text_tokens(item["text"], estimator=estimator)
     spec_tokens = estimate_format_spec_tokens(
         item, lambda text: estimate_text_tokens(text, estimator=estimator)
@@ -145,10 +143,7 @@ def test_structured_format_spec_counts_only_in_input_estimate():
 
     assert estimate.value_tokens == pytest.approx(value_tokens)
     assert estimate.input_tokens == pytest.approx(
-        100
-        + value_tokens
-        + spec_tokens
-        + estimator.input_item_overhead_tokens
+        100 + value_tokens + spec_tokens + estimator.input_item_overhead_tokens
     )
     assert estimate.output_tokens == pytest.approx(
         value_tokens * 1.5 + estimator.output_item_overhead_tokens
