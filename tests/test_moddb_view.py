@@ -929,6 +929,12 @@ def test_entries_database_switch_does_not_reuse_old_database_draft(tmp_path):
         panel._on_text_change()
 
         active_db[0] = TranslationDB(second_path)
+        panel.select(1)
+
+        assert panel.selected is not None
+        assert panel.selected.id == 1
+        assert panel.tw_field.value == "第二資料庫譯文"
+
         panel.refresh()
 
         assert panel.selected is not None
@@ -937,6 +943,39 @@ def test_entries_database_switch_does_not_reuse_old_database_draft(tmp_path):
     finally:
         active_db[0].close()
         first_db.close()
+
+
+def test_entries_snapshot_recovery_from_unknown_database_clears_draft(entries):
+    """背景恢復從未知資料庫身分套用快照時，不得沿用舊草稿。"""
+    selected = entries.selected
+    assert selected is not None
+    entries.tw_field.value = "未知身分期間的舊草稿"
+    entries._on_text_change()
+    identity = entries._database_identity(entries.db())
+    snapshot = {
+        "identity": identity,
+        "filter_only": False,
+        "source_catalog": entries._render_source_catalog,
+        "effective_source_codes": [row.source for row in entries.rows],
+        "filter_options_are_filtered": False,
+        "versions": [entries.version],
+        "version": entries.version,
+        "mods": sorted({row.mod_id for row in entries.rows}),
+        "kinds": sorted({row.kind for row in entries.rows}),
+        "source": entries.source_filter.code,
+        "mod_id": entries.mod_id,
+        "kind": entries.kind,
+        "rows": list(entries.rows),
+        "total": entries.total,
+        "page": entries.pager.current_page,
+        "detail": entries.db().entry_detail(selected.id),
+        "smart_review_marks": entries.smart_review_marks,
+    }
+    entries._db_identity = None
+
+    entries.apply_refresh_snapshot(snapshot)
+
+    assert entries.tw_field.value == selected.zh_tw
 
 
 def test_entries_filters_by_state_mod_and_search(entries):

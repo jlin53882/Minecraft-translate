@@ -104,15 +104,13 @@ def _record_search_overlay(
     key: str,
     entry: dict[str, Any],
 ) -> None:
-    """記錄尚未被搜尋索引確認的最新條目，不依賴持久化儲存狀態。"""
+    """記錄尚未被搜尋索引確認的最新條目，不使磁碟基底索引失效。"""
     overlay = state.search_overlay.setdefault(cache_type, {})
     overlay[key] = dict(entry)
     state.search_generation += 1
     state.search_generation_by_type[cache_type] = (
         state.search_generation_by_type.get(cache_type, 0) + 1
     )
-    state.search_index_current = False
-    state.search_index_checked_at = _monotonic()
 
 
 def _state():

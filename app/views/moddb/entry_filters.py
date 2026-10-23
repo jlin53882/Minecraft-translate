@@ -42,10 +42,14 @@ def apply_filter_options(panel, snapshot: dict) -> None:
     """套用背景載入的篩選選項，並保持目前選取值有效。"""
     identity = snapshot.get("identity")
     panel._render_source_catalog = snapshot.get("source_catalog")
-    if panel._db_identity is not None and identity != panel._db_identity:
-        reset_editor_for_database_change(panel)
-        panel.source_filter.reset()
-    panel._db_identity = identity
+    if "identity" in snapshot:
+        sync_identity = getattr(panel, "_sync_database_identity", None)
+        if callable(sync_identity):
+            sync_identity(identity)
+        elif identity != panel._db_identity:
+            reset_editor_for_database_change(panel)
+            panel.source_filter.reset()
+            panel._db_identity = identity
     panel.source_filter.refresh(
         snapshot.get("effective_source_codes", ()),
         catalog=snapshot.get("source_catalog"),

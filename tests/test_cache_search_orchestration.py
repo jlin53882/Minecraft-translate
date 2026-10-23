@@ -101,6 +101,29 @@ def test_pending_search_uses_changed_key_overlay_without_full_cache_scan(
     assert cache_manager.search_cache("舊譯文 42", "lang", use_fuzzy=False) == []
 
 
+def test_pending_overlay_does_not_rebuild_current_base_index(tmp_path, monkeypatch):
+    """基底索引仍有效時，單純 pending 變更只合併覆蓋層。"""
+    monkeypatch.setattr(cache_manager, "resolve_project_path", lambda p: tmp_path / p)
+    _reset_cache_state()
+
+    cache_manager.add_to_cache("lang", "item.minecraft.apple", "Apple", "蘋果")
+    cache_manager.rebuild_search_index()
+    cache_manager.add_to_cache("lang", "item.minecraft.apple", "Apple", "紅蘋果")
+
+    rebuild_calls = []
+
+    def fail_rebuild():
+        rebuild_calls.append(True)
+        raise AssertionError("基底索引仍有效時不應重建")
+
+    monkeypatch.setattr(cache_manager, "rebuild_search_index", fail_rebuild)
+
+    current = cache_manager.search_cache("紅蘋果", "lang", use_fuzzy=False)
+
+    assert not rebuild_calls
+    assert current and current[0]["dst"] == "紅蘋果"
+
+
 def test_overlay_search_checks_base_index_freshness_before_merge(tmp_path, monkeypatch):
     """覆蓋層搜尋前要確認基底索引，避免外部分片更新造成漏結果。"""
     monkeypatch.setattr(cache_manager, "resolve_project_path", lambda p: tmp_path / p)

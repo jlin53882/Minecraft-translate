@@ -356,6 +356,15 @@ class EntriesPanel(ft.Column):
     def _entry_filter(self) -> EntryFilter:
         return entry_filter(self)
 
+    def _sync_database_identity(self, identity) -> bool:
+        """同步資料庫身分，切換時一次清除所有依資料庫而生的 resident state。"""
+        if identity == self._db_identity:
+            return False
+        self.source_filter.reset()
+        editor_drafts.reset_editor_for_database_change(self)
+        self._db_identity = identity
+        return True
+
     def _on_advanced_change(self) -> None:
         on_advanced_change(self)
 
@@ -375,8 +384,7 @@ class EntriesPanel(ft.Column):
         """重新載入版本／模組選項與清單（資料庫更新後呼叫）。"""
         db = self.db()
         if db is None:
-            self._db_identity = None
-            editor_drafts.reset_editor_for_database_change(self)
+            self._sync_database_identity(None)
             self.version_dd.options = []
             self.rows, self.total = [], 0
             self._list_error = None
@@ -384,25 +392,14 @@ class EntriesPanel(ft.Column):
             return
         identity = self._database_identity(db)
         self._render_source_catalog = source_catalog_for(db)
-        if self._db_identity is not None and identity != self._db_identity:
-            # 數字來源碼只屬於舊資料庫的來源登錄表，不可帶入另一個資料庫。
-            self.source_filter.reset()
-            editor_drafts.reset_editor_for_database_change(self)
-        self._db_identity = identity
+        self._sync_database_identity(identity)
         self._refresh_filter_options()
         self._load_list(keep_selection=keep_selection)
 
     def apply_refresh_snapshot(self, snapshot: dict) -> None:
         """Apply a worker-loaded tab snapshot without querying SQLite on the UI thread."""
-        snapshot_identity = snapshot.get("identity")
-        identity_changed = (
-            snapshot_identity is not None
-            and self._db_identity is not None
-            and snapshot_identity != self._db_identity
-        )
-        if identity_changed:
-            editor_drafts.reset_editor_for_database_change(self)
-            self._db_identity = snapshot_identity
+        if "identity" in snapshot:
+            self._sync_database_identity(snapshot.get("identity"))
         filter_only = snapshot.get("filter_only", False)
         if not filter_only or snapshot.get("filter_options_ready"):
             apply_filter_options(self, snapshot)
@@ -622,9 +619,12 @@ class EntriesPanel(ft.Column):
 
     # ------------------------------------------------------------------ 選取
     def select(self, entry_id: int | None) -> None:
+        db = self.db()
+        self._sync_database_identity(
+            self._database_identity(db) if db is not None else None
+        )
         self._editor_drafts.remember(self.selected, self.tw_field.value)
         previous_selected_id = self.selected.id if self.selected else None
-        db = self.db()
         detail = db.entry_detail(entry_id) if (db and entry_id) else None
         self.detail = detail
         self.selected = detail.entry if detail else None

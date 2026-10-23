@@ -38,7 +38,7 @@ class CacheRuntimeState:
     session_entry_versions: dict[str, dict[str, int]] = field(default_factory=dict)
     next_session_entry_version: int = 0
     is_dirty: dict[str, bool] = field(default_factory=dict)
-    # 搜尋索引尚未重建時，只保存被變更的鍵，供查詢覆蓋穩定索引結果。
+    # 磁碟基底索引可維持穩定；尚未反映的記憶體變更只保存於覆蓋層。
     search_overlay: dict[str, dict[str, dict[str, Any]]] = field(default_factory=dict)
     search_generation_by_type: dict[str, int] = field(default_factory=dict)
     search_generation: int = 0
