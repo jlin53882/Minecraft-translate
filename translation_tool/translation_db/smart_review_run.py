@@ -486,11 +486,11 @@ def _finish_run(
             for item in candidates
         )
         state.metrics["not_attempted_count"] = sum(
-            item.status
-            in {
-                SmartReviewStatus.PENDING,
-                SmartReviewStatus.CANCELLED,
-            }
+            item.status == SmartReviewStatus.PENDING
+            or (
+                item.status == SmartReviewStatus.CANCELLED
+                and item.validation_error != "excluded_from_scope"
+            )
             for item in candidates
         )
     state.metrics["actual_ai_count"] = int(state.metrics.get("actual_ai_count") or 0)

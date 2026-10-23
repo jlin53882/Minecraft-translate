@@ -265,6 +265,46 @@ def test_prepare_resume_rejects_running_run_under_write_lock(tmp_path):
         store.prepare_resume(run_id, {})
 
 
+def test_prepare_resume_does_not_recount_already_excluded_candidate(tmp_path):
+    store = SmartReviewHistoryStore(tmp_path / "excluded-idempotent.db")
+    run_id = store.create_run(
+        [_snapshot()],
+        provider="gemini",
+        model="test-model",
+        version="1.21.1",
+        requested_limit=1,
+        batch_size=1,
+    )
+
+    store.finish_run(
+        run_id,
+        processed_count=0,
+        valid_count=0,
+        invalid_count=0,
+        request_error_count=0,
+        metrics={},
+        status="partial",
+    )
+    first = store.prepare_resume(run_id, {1: None})
+    assert first["excluded"] == 1
+    store.finish_run(
+        run_id,
+        processed_count=0,
+        valid_count=0,
+        invalid_count=0,
+        request_error_count=0,
+        metrics={"excluded_count": first["excluded"]},
+        status="partial",
+    )
+
+    second = store.prepare_resume(run_id, {1: None})
+    assert second["excluded"] == 0
+    assert store.get_run(run_id)["metrics"]["excluded_count"] == 1
+    candidate = store.list_candidates(run_id)[0]
+    assert candidate.status == SmartReviewStatus.CANCELLED
+    assert candidate.validation_error == "excluded_from_scope"
+
+
 def test_resume_provider_initialization_failure_does_not_leave_running_status(
     tmp_path, monkeypatch
 ):

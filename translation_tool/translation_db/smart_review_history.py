@@ -159,12 +159,21 @@ def _reset_resume_candidate(
 def _prepare_resume_candidate(
     candidate: dict[str, Any], current: Mapping[str, Any] | None
 ) -> str:
-    """回傳候選的續跑動作：``excluded``、``retry`` 或 ``keep``。"""
+    """回傳候選的續跑動作：``excluded``、``keep_excluded``、``retry`` 或 ``keep``。
+
+    已經因範圍外而取消的候選要保持冪等：再次續跑同一批次時不能重複
+    增加排除 KPI，也不能被重新視為待處理項目。
+    """
     status = str(candidate.get("status") or SmartReviewStatus.PENDING)
     ai_status = candidate.get("ai_status") or status
     if current is None:
         if status in {SmartReviewStatus.APPLIED, SmartReviewStatus.REJECTED}:
             return "keep"
+        if (
+            status == SmartReviewStatus.CANCELLED
+            and candidate.get("validation_error") == "excluded_from_scope"
+        ):
+            return "keep_excluded"
         candidate["status"] = SmartReviewStatus.CANCELLED
         candidate["validation_error"] = "excluded_from_scope"
         return "excluded"
