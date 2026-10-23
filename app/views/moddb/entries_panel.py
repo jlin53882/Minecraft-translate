@@ -436,24 +436,22 @@ class EntriesPanel(ft.Column):
         self._load_kinds()
 
     def _refresh_filter_options(self) -> None:
-        """Reload module/source options using the same scope as the entry list."""
+        """使用與條目清單相同的 scope 重新載入 module/source 選項。"""
         db = self.db()
         if db is None:
             self.version_dd.options = []
             self._load_mods()
             return
 
-        # Keep the synchronous fallback and standalone panel tests on the same
-        # option semantics as ModDbView's worker snapshot.  The import is
-        # intentionally local because panel_refresh imports PAGE_SIZE from
-        # this module.
+        # 讓同步 fallback 與 standalone panel 測試使用和 ModDbView worker snapshot 相同的選項語意。
+        # 這裡刻意採用區域 import，因為 panel_refresh 會從本模組匯入 PAGE_SIZE。
         from app.views.moddb.panel_refresh import _resolve_entries_scope
 
         try:
             criteria = self._entry_filter()
         except ValueError:
-            # _load_list owns the visible validation error.  Keep the last
-            # valid dependent options instead of raising while reporting it.
+            # 顯示給使用者的驗證錯誤由 _load_list 負責。
+            # 回報錯誤時保留上一次有效的相依選項，避免在此處再次拋出例外。
             return
         scope = _resolve_entries_scope(
             db,
@@ -550,8 +548,8 @@ class EntriesPanel(ft.Column):
                 current = self.rows[0]
         self.select(current.id if current else None)
         if self._on_filter_changed is None:
-            # Standalone panels and synchronous fallback pages have no parent
-            # snapshot worker to apply the dependent dropdown options.
+            # standalone panel 與同步 fallback 頁面沒有父層 snapshot worker
+            # 可以套用相依下拉選項，因此由面板自行更新。
             self._refresh_filter_options()
 
     def _render_list(self, *, keep_scroll: bool = False) -> None:

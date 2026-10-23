@@ -673,18 +673,17 @@ class ModDbView(ft.Column):
         self._refresh_active_panel()
 
     def _on_database_changed(self) -> None:
-        """Invalidate every Mod DB snapshot after a committed data mutation."""
+        """資料庫寫入完成後，使所有 Mod DB snapshot 失效。"""
         self._invalidate_database_snapshots()
         if self.tab == "overview":
             self._request_overview_refresh()
         else:
-            # The active panel must also refresh.  In particular, EntriesPanel
-            # can retain filter options or resident state that a row-only
-            # refresh does not cover; hidden panels stay marked for next visit.
+            # 目前頁籤也必須刷新。尤其 EntriesPanel 可能保留篩選選項或 resident state，
+            # 只刷新資料列無法涵蓋這些狀態；隱藏頁籤則保留待下次進入時刷新。
             self._refresh_active_panel()
 
     def _on_entries_changed(self) -> None:
-        """Backward-compatible callback for EntriesPanel mutations."""
+        """EntriesPanel 資料變更的向後相容回呼。"""
         self._on_database_changed()
 
     def _on_entries_filter_changed(

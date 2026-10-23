@@ -493,11 +493,11 @@ class OverviewPanel(ft.Column):
         ).open()
 
     def _on_cleanup_complete(self) -> None:
-        """Refresh every mounted Mod DB view after cleanup apply/revert."""
+        """Cleanup apply/revert 完成後，刷新所有已掛載的 Mod DB 頁面。"""
         if self._on_database_changed is not None:
             self._on_database_changed()
         else:
-            # Standalone OverviewPanel users retain the old local behaviour.
+            # standalone OverviewPanel 使用者保留原本的區域刷新行為。
             self.refresh(update=True)
 
     def _goto_scan(self) -> None:

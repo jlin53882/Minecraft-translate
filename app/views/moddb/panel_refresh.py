@@ -198,11 +198,9 @@ def _resolve_entries_scope(db, request: dict, settings) -> dict:
         kind=kind,
         source=source,
     )
-    # The module/source selectors describe the currently reachable result
-    # scope, not just the optional advanced date/quality controls.  Status,
-    # state, search, kind and fixed-entry filters can all remove a module or
-    # source from the result, so leaving them out makes the dropdown retain
-    # modules that no longer have any matching rows after a write.
+    # module/source 選單描述的是目前可達的結果 scope，不只是選用的日期／品質進階條件。
+    # status、state、搜尋、kind 與固定條目條件都可能從結果中排除某個 module 或 source；
+    # 若忽略這些條件，資料庫寫入後下拉選單就可能保留已沒有符合列的 module。
     options_are_filtered = bool(
         criteria.mod_id is not None
         or criteria.kind is not None

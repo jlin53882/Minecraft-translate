@@ -647,10 +647,9 @@ class BulkReviewDialog:
         show_snack(self.page, message, C.EM, text_color=C.ON_EM)
         if self.on_complete:
             self.on_complete(result)
-        # The dialog remains open after a successful batch so the user can
-        # inspect the summary or revert it.  Its scope dropdowns are therefore
-        # resident UI state and must be re-queried after the transaction; the
-        # EntriesPanel callback only refreshes the outer list.
+        # 批量操作成功後對話框仍會保持開啟，讓使用者查看摘要或還原操作。
+        # 因此對話框內的 scope 下拉選單屬於 resident UI 狀態，交易完成後必須重新查詢；
+        # EntriesPanel 的回呼只會刷新外層清單。
         self._refresh_scope_after_database_change()
         self._safe_update()
 
@@ -698,14 +697,13 @@ class BulkReviewDialog:
         show_snack(self.page, f"批量審核已還原 {format_count(count)} 筆", C.EM)
         if self.on_complete:
             self.on_complete(None)
-        # Reverting restores the candidates that were just reviewed.  Refresh
-        # the resident scope snapshot so the module/source options immediately
-        # reflect the restored database state.
+        # 還原會恢復剛才審核過的候選項目。
+        # 重新載入 resident scope snapshot，讓 module/source 選項立即反映還原後的資料庫狀態。
         self._refresh_scope_after_database_change()
         self._safe_update()
 
     def _refresh_scope_after_database_change(self) -> None:
-        """Reload resident module/source options after a committed mutation."""
+        """資料庫寫入完成後，重新載入 resident module/source 選項。"""
         if not self._closed:
             self._start_scope_options_load()
 
