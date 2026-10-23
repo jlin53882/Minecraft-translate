@@ -53,7 +53,9 @@ def test_load_runs_scan_off_event_loop(tmp_path, monkeypatch):
     monkeypatch.setattr(view, "_detect_source_mode", lambda: "extracted_folder")
     scanned = []
     monkeypatch.setattr(
-        view, "_scan_entries", lambda mode, total: scanned.append(mode) or []
+        view,
+        "_scan_entries",
+        lambda mode, total, generation=None: scanned.append(mode) or [],
     )
 
     view._on_load_clicked(None)

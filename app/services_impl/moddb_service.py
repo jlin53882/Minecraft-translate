@@ -212,8 +212,8 @@ def moddb_read_snapshot(
 
 
 def database_data_generation(db: TranslationDB | None) -> str | None:
-    """回傳資料庫目前的資料世代（無資料庫時為 ``None``），供 UI 判斷快取是否過期。"""
-    return db._data_gen() if db is not None else None
+    """回傳可偵測內外部寫入的快取世代，供 UI 判斷快照是否過期。"""
+    return db._cache_generation() if db is not None else None
 
 
 def database_version_choices(settings: DbSettings | None = None) -> list[str]:

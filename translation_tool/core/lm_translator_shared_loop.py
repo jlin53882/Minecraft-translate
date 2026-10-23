@@ -393,6 +393,13 @@ def translate_items_with_cache_loop(
             completed_calls += 1
         parse_started = time.monotonic()
         safe_translated = list(translated or [])[: len(batch)]
+        status_upper = str(status or "").upper()
+        if status_upper == "CANCELLED" and not safe_translated:
+            batch_handle.emit("cancelled", status="cancelled")
+            batch_handle.complete(
+                status="cancelled", processed_count=processed, actual_count=0
+            )
+            return cancelled_result()
         batch_handle.add_timing(
             "response_parse_ms", (time.monotonic() - parse_started) * 1000
         )
@@ -617,7 +624,10 @@ def translate_items_with_cache_loop(
             retry_count=batch_handle.retry_count,
         )
 
-        st = (status or "").upper()
+        st = status_upper
+        if st == "CANCELLED":
+            return cancelled_result()
+
         if st == "ALL_KEYS_EXHAUSTED":
             exhausted = True
             emit_progress("⚠️ [SharedLM] API 額度用盡，停止工作。")

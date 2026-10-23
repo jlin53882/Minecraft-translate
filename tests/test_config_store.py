@@ -9,6 +9,7 @@ import pytest
 
 from app import config_store
 from app.services_impl import config_service
+from translation_tool.utils.config_schema import get_schema_default
 
 
 @pytest.fixture
@@ -367,6 +368,7 @@ def test_snapshot_is_an_independent_copy(cfg_path):
 
 
 def test_theme_mode_defaults_to_dark_and_roundtrips(cfg_path):
+    assert config_store.DEFAULT_THEME_MODE == get_schema_default("ui.theme_mode")
     assert config_store.get_theme_mode() == "dark"
     assert config_store.set_theme_mode("light") is True
     assert config_store.get_theme_mode() == "light"

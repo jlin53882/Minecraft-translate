@@ -1,10 +1,10 @@
 """
 Unit tests for config three-layer fallback mechanism.
 
-三層 fallback（priority: user > example > default）：
+三層 fallback（優先順序：user > schema default；example 只補充 schema 沒有的欄位）：
   config.json  — 用戶實際值（Layer 1，最高優先）
-  config.example.json — 文件預設值（Layer 2）
-  DEFAULT_CONFIG — 程式碼 fallback（Layer 3，最終保底，唯一真相來源）
+  DEFAULT_CONFIG — schema 預設值（Layer 2，既有欄位的唯一真相來源）
+  config.example.json — 額外欄位的文件 fallback（Layer 3）
 
 測試覆蓋：
 1. 只有 config.json → 使用 user 值
@@ -82,7 +82,7 @@ class TestLayer1UserConfigOnly:
         assert cfg["translator"]["parallel_execution_workers"] == 99
 
     def test_missing_config_json_returns_default(self, tmp_path):
-        """config.json 不存在時，回退到 deep_merge(default, example)。"""
+        """config.json 不存在時，回退到 schema 預設並補充 example 額外欄位。"""
         ex_path = tmp_path / "config.example.json"
         ex_path.write_text("{}", encoding="utf-8")
         with (
@@ -94,7 +94,7 @@ class TestLayer1UserConfigOnly:
         assert "lang_merger" in cfg
 
     def test_corrupt_config_json_returns_default(self, tmp_path):
-        """config.json 格式錯誤時，回退到 default + example。"""
+        """config.json 格式錯誤時，回退到 schema 預設並補充 example 額外欄位。"""
         cfg_path = tmp_path / "config.json"
         cfg_path.write_text("{ invalid json }", encoding="utf-8")
         ex_path = tmp_path / "config.example.json"
@@ -178,12 +178,12 @@ class TestLayer3DefaultFallback:
 
 
 # =============================================================================
-# Priority: user > example > default
+# 優先順序：user > schema default；example 只補充 schema 沒有的欄位
 # =============================================================================
 
 
 class TestThreeLayerPriority:
-    """驗證三層 priority：user 覆蓋 example 覆蓋 default。"""
+    """驗證 user 覆蓋 schema，example 只補充 schema 未定義的欄位。"""
 
     def test_user_overrides_example(self, tmp_path):
         """user 與 example 都有值時，user 優先。"""
@@ -193,13 +193,20 @@ class TestThreeLayerPriority:
             cfg = load_config()
         assert cfg["translator"]["parallel_execution_workers"] == 99
 
-    def test_example_overrides_default(self, tmp_path):
-        """example 有值，user 沒有時，example 優先於 default。"""
+    def test_schema_default_overrides_example(self, tmp_path):
+        """example 與 schema 都有值時，schema 預設優先；額外欄位仍保留。"""
         user_cfg = {}
-        example_cfg = {"translator": {"parallel_execution_workers": 7}}
+        example_cfg = {
+            "translator": {"parallel_execution_workers": 7},
+            "example_only": {"value": 1},
+        }
         with _patch_config_files(tmp_path, user_cfg, example_cfg):
             cfg = load_config()
-        assert cfg["translator"]["parallel_execution_workers"] == 7
+        assert (
+            cfg["translator"]["parallel_execution_workers"]
+            == DEFAULT_CONFIG["translator"]["parallel_execution_workers"]
+        )
+        assert cfg["example_only"] == {"value": 1}
 
     def test_nested_priority(self, tmp_path):
         """巢狀 dict 也能正確三層覆蓋。"""

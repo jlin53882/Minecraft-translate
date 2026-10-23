@@ -60,7 +60,8 @@ flowchart TD
 - 世代檢查：
   - `_load_generation` 與 `_render_generation` 在 `will_unmount` 時遞增。每個 `await` 之後，協程檢查世代是否仍相同，不相同就丟棄結果，不再碰已卸載的控制項。
   - 詳情與渲染也會比對 `current_modid` 與 `_render_generation`，避免換頁後覆蓋畫面。
-- 進度：`_set_progress` 只記錄最新值，`_refresh_progress` 以 0.2 秒節流，透過 `run_task` 在 UI loop 上套用（`progress.py`、`_apply_pending_progress`）。
+- 載入 owner：`_load_operation` 只允許目前世代的載入作業清除 `_loading`；舊作業即使晚到完成，也不能把新作業的忙碌狀態誤清掉。
+- 進度：`_set_progress` 只記錄最新值，並攜帶載入世代；`_refresh_progress` 以 0.2 秒節流，透過 `run_task` 在 UI loop 上套用（`progress.py`、`_apply_pending_progress`）。舊世代排入 event loop 的進度會被丟棄。
 - 搜尋：模組與詳情的搜尋框都使用 `app/ui/debounce.py` 的 `Debouncer`，延遲 150 毫秒後在 UI 執行緒執行 `_do_mod_search` 或 `_do_detail_search`。
 - `will_unmount` 會取消兩個 debouncer；`did_mount` 只同步載入按鈕狀態。
 

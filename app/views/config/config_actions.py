@@ -250,7 +250,9 @@ def _collect_validated_config(
             and field.value.strip() not in LEGACY_API_KEY_PLACEHOLDERS
         ]
         lm_config = config.get("lm_translator", {})
-        provider = lm_config.get("provider", "gemini")
+        provider = lm_config.get(
+            "provider", get_default("lm_translator.provider", "gemini")
+        )
         if not _validate_provider_settings(
             view,
             provider,

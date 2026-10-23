@@ -227,3 +227,24 @@ class TestConfigSchemaValidation:
             f"batch_size 應為 int，實際：{type(batch_size)}"
         )
         assert batch_size * 2 == 600  # 確認可用於數學運算
+
+    @pytest.mark.parametrize(
+        ("section", "key"),
+        [
+            ("lm_translator", "initial_batch_size_lang"),
+            ("lm_translator", "parallel_execution_workers"),
+            ("translator", "parallel_execution_workers"),
+        ],
+    )
+    def test_boolean_is_not_accepted_as_an_integer_setting(
+        self, tmp_path, section, key
+    ):
+        """JSON 的 true/false 不可因為 Python bool 是 int 子類別而通過。"""
+        config_file = tmp_path / f"{section}-{key}.json"
+        config_file.write_text(
+            json.dumps({section: {key: True}}),
+            encoding="utf-8",
+        )
+
+        with pytest.raises(ConfigValidationError, match=key):
+            load_config(str(config_file))

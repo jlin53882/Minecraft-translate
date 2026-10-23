@@ -20,7 +20,8 @@ from datetime import datetime
 from functools import wraps
 
 from translation_tool.utils.app_paths import get_data_root
-from translation_tool.utils.redaction import redact_secrets
+from translation_tool.utils.config_schema import get_schema_default
+from translation_tool.utils.redaction import redact_text
 
 # =============================================================================
 # 自訂異常類別
@@ -216,14 +217,17 @@ def _resolve_error_log_dir():
     """錯誤記錄資料夾：優先用 ``logging.log_dir`` 設定，讀不到則退回資料根目錄下的 logs。"""
     try:
         from translation_tool.utils.config_manager import (
+            get_default,
             load_config,
             resolve_project_path,
         )
 
-        log_dir = (load_config().get("logging") or {}).get("log_dir") or "logs"
+        log_dir = (load_config().get("logging") or {}).get("log_dir") or get_default(
+            "logging.log_dir"
+        )
         return resolve_project_path(log_dir)
     except Exception:  # noqa: BLE001 - 設定讀不到不可讓錯誤記錄本身失敗
-        return get_data_root() / "logs"
+        return get_data_root() / get_schema_default("logging.log_dir")
 
 
 def _log_error_to_file(error: Exception, func_name: str):
@@ -249,18 +253,20 @@ def _log_error_to_file(error: Exception, func_name: str):
             f.write(f"\n{'=' * 80}\n")
             f.write(f"[{timestamp}] 錯誤發生於: {func_name}\n")
             f.write(f"錯誤類型: {type(error).__name__}\n")
-            f.write(f"錯誤訊息: {redact_secrets(error)}\n")
+            f.write(f"錯誤訊息: {redact_text(error)}\n")
 
             if isinstance(error, TranslationError) and error.context:
-                f.write(f"錯誤上下文: {redact_secrets(error.context)}\n")
+                f.write(f"錯誤上下文: {redact_text(error.context)}\n")
 
             f.write("\n堆疊追蹤:\n")
-            f.write(redact_secrets(traceback.format_exc()))
+            f.write(redact_text(traceback.format_exc()))
             f.write(f"{'=' * 80}\n")
 
     except Exception as log_error:  # noqa: BLE001 - 記錄失敗不可中斷主流程
         # 記錄失敗也不應該中斷主流程
-        logging.getLogger(__name__).warning("寫入錯誤日誌失敗: %s", log_error)
+        logging.getLogger(__name__).warning(
+            "寫入錯誤日誌失敗: %s", redact_text(log_error)
+        )
 
 
 # =============================================================================

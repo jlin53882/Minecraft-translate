@@ -960,6 +960,7 @@ def run_kubejs_pipeline(
         translated_json = sorted(paths["translated"].rglob("*.json"))
         translation_ran = False
         translation_cancelled = False
+        translation_incomplete = False
         if pending_count == 0:
             result["step2"] = {"skipped": True, "reason": "pending keys = 0"}
             progress(session, 0.66)
@@ -987,11 +988,27 @@ def run_kubejs_pipeline(
                 )
                 if not isinstance(result["step2"], dict):
                     result["step2"] = {"result": result["step2"]}
-                translation_ran = not dry_run and not result["step2"].get("skipped")
-                if is_cancelled() or result["step2"].get("cancelled"):
+                translation_status = str(result["step2"].get("status") or "").upper()
+                translation_incomplete = bool(
+                    translation_status and translation_status != "DONE"
+                )
+                translation_ran = (
+                    not dry_run
+                    and not result["step2"].get("skipped")
+                    and not translation_incomplete
+                )
+                if (
+                    is_cancelled()
+                    or result["step2"].get("cancelled")
+                    or translation_status == "CANCELLED"
+                ):
                     translation_ran = False
                     translation_cancelled = True
                     result["step2"].update({"skipped": True, "reason": "cancelled"})
+                elif translation_incomplete:
+                    result["step2"].update(
+                        {"skipped": True, "reason": "translation_incomplete"}
+                    )
                 if translation_ran:
                     gaps = _translation_output_gaps(paths["pending"], translated_stage)
                     if gaps:
@@ -1043,7 +1060,11 @@ def run_kubejs_pipeline(
             reason = (
                 "cancelled"
                 if translation_cancelled or is_cancelled()
-                else "no current translation output"
+                else (
+                    "translation_incomplete"
+                    if translation_incomplete
+                    else "no current translation output"
+                )
             )
             result["step3"] = {"skipped": True, "reason": reason}
         elif not translated_json:
@@ -1127,6 +1148,11 @@ def run_kubejs_pipeline(
         isinstance(step2_summary, dict) and step2_summary.get("reason") == "cancelled"
     ):
         log_warning(f"⏹ [KubeJS] 已取消（目前快照保留） {result['duration']}")
+    elif (
+        isinstance(step2_summary, dict)
+        and step2_summary.get("reason") == "translation_incomplete"
+    ):
+        log_warning(f"⚠️ [KubeJS] 翻譯未完成（目前快照保留） {result['duration']}")
     else:
         log_info(f"🎉 [KubeJS] 任務完成！ {result['duration']}")
     progress(session, 0.999)

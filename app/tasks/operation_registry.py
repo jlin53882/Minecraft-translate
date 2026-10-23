@@ -385,6 +385,29 @@ class OperationRegistry:
         handle = self.reserve(descriptor, task_session=session)
         return handle
 
+    def discard_reserved(self, handle: OperationHandle) -> bool:
+        """釋放尚未啟動且未通過 admission 的預約，不產生完成任務。"""
+        with self._condition:
+            if (
+                handle._registry is not self
+                or handle.done_event.is_set()
+                or handle._launched
+            ):
+                return False
+            handle._terminal_reason = "admission_rejected"
+            handle._state = "terminal"
+            self._active.pop(handle.id, None)
+            handle.done_event.set()
+            if (
+                not self._active
+                and not self._accepting
+                and self._shutdown_state != self.DRAIN_TIMEOUT
+            ):
+                self._shutdown_state = self.DRAINING
+            self._condition.notify_all()
+        self._emit("finish", handle)
+        return True
+
     def finish_session(self, session) -> None:
         """End only legacy session-owned operations; workers finish their own handle."""
         handle = getattr(session, "operation_handle", None)

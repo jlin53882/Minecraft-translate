@@ -225,6 +225,40 @@ def test_streaming_quality_page_reused_and_invalidated(tmp_path, monkeypatch):
         db.close()
 
 
+def test_streaming_quality_page_invalidates_after_external_sql_write(
+    tmp_path, monkeypatch
+):
+    """外部 SQLite 寫入改變有效譯文後，品質分頁不可沿用舊的總數。"""
+    monkeypatch.setattr(repository, "_QUALITY_PAGE_BUFFER_LIMIT", 3)
+    db = seed(tmp_path / "db.sqlite")
+    reader = TranslationDB(db.path, readonly=True)
+    fixed_identity = ("quality-external-write", str(db.path))
+    monkeypatch.setattr(reader, "_read_cache_identity", lambda: fixed_identity)
+    monkeypatch.setattr(reader, "_quality_flags_ready", lambda conn=None: False)
+    criteria = EntryFilter(
+        version="1.20.1", quality=repository.QualityFilter(status="consistent")
+    )
+    try:
+        _, before_total = reader.list_entries(criteria=criteria, limit=5, offset=10)
+        assert before_total == 55
+        entry_id = reader._one(
+            "SELECT entry_id FROM effective ORDER BY entry_id LIMIT 1"
+        )[0]
+        before_generation = reader._cache_generation()
+        with sqlite3.connect(db.path) as external:
+            external.execute(
+                "UPDATE effective SET zh_tw='' WHERE entry_id=?", (entry_id,)
+            )
+        assert reader._data_gen() == db._data_gen()
+        assert reader._cache_generation() != before_generation
+
+        _, after_total = reader.list_entries(criteria=criteria, limit=5, offset=10)
+        assert after_total == 54
+    finally:
+        reader.close()
+        db.close()
+
+
 def test_non_exact_quality_options_use_pair_projection(tmp_path, monkeypatch):
     """非精確品質選項只投影模組／來源，不載入完整條目頁。"""
     db = TranslationDB(tmp_path / "options.db")

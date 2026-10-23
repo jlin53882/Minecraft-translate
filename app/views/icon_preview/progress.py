@@ -1,7 +1,7 @@
 """圖示預覽的 Phase 進度顯示輔助（只改記錄值，賦值由 view 在 event loop 上完成）。"""
 
 
-def _make_progress_callback(obj, phase: str, total: int):
+def _make_progress_callback(obj, phase: str, total: int, generation: int | None = None):
     """建立 Phase 進度 callback。
 
     參數：
@@ -9,6 +9,9 @@ def _make_progress_callback(obj, phase: str, total: int):
         phase: Phase 顯示文字
         total: 總步數
     """
+
+    if generation is None:
+        generation = getattr(obj, "_load_generation", None)
 
     def callback(processed: int, total: int):
         # 安全檢查：測試環境或 UI 未初始化時不拋例外
@@ -18,12 +21,20 @@ def _make_progress_callback(obj, phase: str, total: int):
             obj,
             f"[{phase}] {processed} / {total}",
             processed / total if total > 0 else 0,
+            generation=generation,
         )
 
     return callback
 
 
-def _set_progress(obj, text: str, value: float, *, visible: bool | None = None) -> None:
+def _set_progress(
+    obj,
+    text: str,
+    value: float,
+    *,
+    visible: bool | None = None,
+    generation: int | None = None,
+) -> None:
     """更新進度顯示。
 
     掃描在背景執行緒時不可直接改 Flet 控制項（#114 的 worker-thread 契約）：view 提供
@@ -32,7 +43,7 @@ def _set_progress(obj, text: str, value: float, *, visible: bool | None = None) 
     """
     setter = getattr(type(obj), "_set_progress", None)
     if setter is not None:
-        setter(obj, text, value, visible)
+        setter(obj, text, value, visible, generation=generation)
         return
     obj.progress_text.value = text
     obj.progress_bar.value = value
@@ -50,7 +61,13 @@ def _refresh_progress(obj) -> None:
         obj.update()
 
 
-def _show_progress_phase(obj, phase: str, current: int, total: int):
+def _show_progress_phase(
+    obj,
+    phase: str,
+    current: int,
+    total: int,
+    generation: int | None = None,
+):
     """更新 Phase 進度顯示（並墊底一次）。"""
     # 安全檢查：測試環境或 UI 未初始化時不拋例外
     if not hasattr(obj, "progress_text") or not hasattr(obj, "progress_bar"):
@@ -60,4 +77,5 @@ def _show_progress_phase(obj, phase: str, current: int, total: int):
         f"[{phase}] {current} / {total}",
         current / total if total > 0 else 0,
         visible=True,
+        generation=generation,
     )

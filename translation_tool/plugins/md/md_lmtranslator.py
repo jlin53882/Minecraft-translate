@@ -133,7 +133,8 @@ def translate_md_pending(
     session=None,
 ) -> dict[str, Any]:
     """Translate extracted Markdown blocks and write only quality-approved results."""
-    validate_api_keys()
+    if not dry_run:
+        validate_api_keys()
     start_time = time.perf_counter()
 
     in_pending_root = Path(pending_dir).resolve()
@@ -393,14 +394,14 @@ def translate_md_pending(
                 on_progress=on_progress,
             ),
         )
-        loop_status = res.status
-        if res.status == "DONE":
+        loop_status = str(getattr(res, "status", "") or "").upper() or "FAILED"
+        if loop_status == "DONE":
             checkpoint.clear()
         avg_batch_sec = (
             (res.elapsed_sec / res.completed_calls) if res.completed_calls else None
         )
         log_info(
-            f"✨ [MD-LM] 翻譯迴圈結束：processed={int(res.processed or 0)} status={res.status}"
+            f"✨ [MD-LM] 翻譯迴圈結束：processed={int(res.processed or 0)} status={loop_status}"
         )
         log_info("總花費時間：%s", get_formatted_duration(start_time))
 

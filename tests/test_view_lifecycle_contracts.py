@@ -462,7 +462,7 @@ def test_icon_unmount_during_scan_discards_the_result(tmp_path, monkeypatch):
     monkeypatch.setattr(view, "_lookup_cached_entries", lambda mode: None)
     monkeypatch.setattr(view, "_count_scan_steps", lambda mode: 0)
 
-    def slow_scan(mode, total):
+    def slow_scan(mode, total, generation=None):
         release.wait(timeout=5)
         return ["entry"]
 
@@ -476,13 +476,57 @@ def test_icon_unmount_during_scan_discards_the_result(tmp_path, monkeypatch):
         task = asyncio.ensure_future(handler(*args))
         await asyncio.sleep(0.1)
         view.will_unmount()  # 掃描進行中卸載
+        view.did_mount()  # 舊工作完成後仍要恢復重新掛載的按鈕狀態
         release.set()
         await asyncio.wait_for(task, timeout=5)
 
     asyncio.run(scenario())
     assert finished == []  # 結果被丟棄，不再套用到（已卸載的）UI
     assert view._loading is False  # 旗標復位：重新掛載後可以再載入
+    assert view.load_btn.disabled is False
     view.will_unmount()  # idempotent
+
+
+def test_icon_progress_queued_before_unmount_is_discarded(tmp_path):
+    """卸載後才執行的舊進度 callback 不可再碰控制項。"""
+    page, view = _icon_view(tmp_path)
+    updates = []
+    view.update = lambda *args, **kwargs: updates.append((args, kwargs))
+    view._loading = True
+
+    view._set_progress("舊進度", 0.5, True, generation=view._load_generation)
+    view.will_unmount()
+
+    async def scenario():
+        handler, args = page._tasks[0]
+        await handler(*args)
+
+    asyncio.run(scenario())
+    assert updates == []
+
+
+def test_icon_phase_progress_keeps_original_generation_after_remount(tmp_path):
+    """舊世代的圖示 Phase 進度不可在重新掛載後覆蓋新畫面。"""
+    from app.views.icon_preview.progress import _show_progress_phase
+
+    _, view = _icon_view(tmp_path)
+    updates = []
+    view.update = lambda *args, **kwargs: updates.append((args, kwargs))
+    view._loading = True
+    old_generation = view._load_generation
+
+    view.will_unmount()
+    view.did_mount()
+    updates.clear()
+    _show_progress_phase(
+        view,
+        "提取模組圖示",
+        1,
+        2,
+        generation=old_generation,
+    )
+
+    assert updates == []
 
 
 def test_icon_cache_hit_is_applied_without_scanning(tmp_path, monkeypatch):

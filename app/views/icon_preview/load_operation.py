@@ -1,4 +1,4 @@
-"""Registry-owned orchestration for IconPreview's blocking load stages."""
+"""圖示預覽阻塞載入階段的 operation registry 協調層。"""
 
 import asyncio
 
@@ -8,8 +8,8 @@ from translation_tool.utils.cancellation import TaskCancelled, cancel_scope
 from translation_tool.utils.log_unit import log_error, log_info
 
 
-def observe_async_owner(future, operation) -> None:
-    """Release a reservation if its UI coroutine is cancelled before it starts."""
+def observe_async_owner(future, operation, *, on_cancel=None) -> None:
+    """觀察 UI coroutine；若尚未開始就取消，釋放 registry 與畫面 owner。"""
     add_done_callback = getattr(future, "add_done_callback", None)
     if not callable(add_done_callback):
         return
@@ -17,6 +17,8 @@ def observe_async_owner(future, operation) -> None:
     def on_done(done):
         if done.cancelled():
             operation.finish(reason="cancelled")
+            if callable(on_cancel):
+                on_cancel()
             return
         try:
             error = done.exception()
@@ -24,6 +26,8 @@ def observe_async_owner(future, operation) -> None:
             error = ex
         if error is not None:
             operation.finish(error=error)
+            if callable(on_cancel):
+                on_cancel()
 
     add_done_callback(on_done)
 
@@ -75,7 +79,9 @@ async def load_icon_preview(view, generation: int, operation=None) -> None:
                 if not current():
                     return
                 view._show_scan_started(mode, total_steps)
-                entries = await _run_blocking(view._scan_entries, mode, total_steps)
+                entries = await _run_blocking(
+                    view._scan_entries, mode, total_steps, generation
+                )
             except TaskCancelled:
                 cancelled = True
             except asyncio.CancelledError:
@@ -95,9 +101,18 @@ async def load_icon_preview(view, generation: int, operation=None) -> None:
                 )
                 entries = []
     finally:
-        view._loading = False
-        if current():
-            view._update_load_state()
+        active_operation = getattr(view, "_load_operation", operation)
+        owns_loading_state = active_operation is operation
+        if owns_loading_state:
+            release_owner = getattr(view, "_release_load_owner", None)
+            if callable(release_owner):
+                release_owner(operation)
+            else:
+                view._loading = False
+                if getattr(view, "_load_operation", None) is operation:
+                    view._load_operation = None
+                if current():
+                    view._update_load_state()
         if operation is not None:
             operation.finish(
                 reason="cancelled" if cancelled or not current() else "completed",

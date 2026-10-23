@@ -424,6 +424,27 @@ def test_detached_task_session_cannot_bypass_closed_registry_admission():
     assert manager.operation_registry.active_count() == 0
 
 
+def test_rejected_session_reservation_is_not_added_to_recent_tasks(manager):
+    """未通過 admission 的 session 不應被投影成最近任務。"""
+    from app.tasks import task_session as task_session_module
+
+    session = TaskSession(name="被拒絕")
+    session.operation_registry = manager.operation_registry
+
+    def reject(_session, event):
+        return False if event == "admission" else None
+
+    task_session_module.add_observer(reject)
+    try:
+        with pytest.raises(TaskSessionAdmissionError):
+            session.start()
+    finally:
+        task_session_module.remove_observer(reject)
+
+    assert manager.operation_registry.active_count() == 0
+    assert manager.recent() == []
+
+
 def test_detached_task_manager_does_not_own_legacy_session_terminal():
     manager = TaskManager()
     manager.attach()

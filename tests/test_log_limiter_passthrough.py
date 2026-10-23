@@ -124,7 +124,6 @@ def test_pipeline_bundle_step_fails_when_input_missing(tmp_path):
     from app.views.pipeline.pipeline_actions import PipelineActions
 
     session = TaskSession()
-    session.start()
     list(
         PipelineActions().bundle(
             session,

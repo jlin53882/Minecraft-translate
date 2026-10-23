@@ -40,13 +40,13 @@ def _install(module, monkeypatch, status: str) -> _RecordingCheckpoint:
     return checkpoint
 
 
-def _run_ftb(tmp_path: Path) -> None:
+def _run_ftb(tmp_path: Path) -> dict:
     source = tmp_path / "lang" / "en_us"
     source.mkdir(parents=True)
     (source / "a.json").write_text(
         json.dumps({"a.line": "Hello brave new world"}), encoding="utf-8"
     )
-    ftbquests_lmtranslator.translate_ftb_pending_to_zh_tw(
+    return ftbquests_lmtranslator.translate_ftb_pending_to_zh_tw(
         input_lang_dir=str(tmp_path / "lang"),
         output_lang_dir=str(tmp_path / "out"),
         dry_run=False,
@@ -54,18 +54,18 @@ def _run_ftb(tmp_path: Path) -> None:
     )
 
 
-def _run_kubejs(tmp_path: Path) -> None:
+def _run_kubejs(tmp_path: Path) -> dict:
     pending = tmp_path / "pending"
     pending.mkdir()
     (pending / "a.json").write_text(
         json.dumps({"a.line": "Hello brave new world"}), encoding="utf-8"
     )
-    kubejs_tooltip_lmtranslator.translate_kubejs_pending_to_zh_tw(
+    return kubejs_tooltip_lmtranslator.translate_kubejs_pending_to_zh_tw(
         pending_dir=pending, output_dir=tmp_path / "out", write_new_cache=False
     )
 
 
-def _run_md(tmp_path: Path) -> None:
+def _run_md(tmp_path: Path) -> dict:
     pending = tmp_path / "pending"
     pending.mkdir()
     (pending / "intro.md.json").write_text(
@@ -85,7 +85,7 @@ def _run_md(tmp_path: Path) -> None:
         ),
         encoding="utf-8",
     )
-    md_lmtranslator.translate_md_pending(
+    return md_lmtranslator.translate_md_pending(
         pending_dir=str(pending), out_dir=str(tmp_path / "out"), write_new_cache=False
     )
 
@@ -108,3 +108,21 @@ def test_checkpoint_is_cleared_only_when_loop_is_done(
     run(tmp_path)
 
     assert checkpoint.cleared == (1 if status == "DONE" else 0), (plugin, status)
+
+
+@pytest.mark.parametrize(
+    ("status", "expected_status", "expected_cancelled"),
+    [("done", "DONE", False), ("cancelled", "CANCELLED", True)],
+)
+@pytest.mark.parametrize("plugin", sorted(PLUGINS))
+def test_plugin_normalizes_loop_status_before_returning(
+    plugin, status, expected_status, expected_cancelled, tmp_path: Path, monkeypatch
+) -> None:
+    """三個外掛回傳的狀態與取消旗標必須使用一致的大寫契約。"""
+    module, run = PLUGINS[plugin]
+    _install(module, monkeypatch, status)
+
+    result = run(tmp_path)
+
+    assert result["status"] == expected_status
+    assert result["cancelled"] is expected_cancelled
