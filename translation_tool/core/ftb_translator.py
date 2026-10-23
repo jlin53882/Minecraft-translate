@@ -29,6 +29,7 @@ from translation_tool.core.ftb_translator_template import (
     prepare_ftbquests_lang_template_only_impl,
 )
 from translation_tool.core.lm_translator_shared import _get_default_batch_size
+from translation_tool.core.translation_status import translation_stop_reason
 from translation_tool.utils.bounded_executor import bounded_as_completed
 from translation_tool.utils.cancellation import is_cancelled, raise_if_cancelled
 from translation_tool.utils.log_unit import (
@@ -306,6 +307,7 @@ def run_ftb_pipeline(
     result: dict = {}
     translation_cancelled = False
     translation_incomplete = False
+    translation_reason: str | None = None
 
     if step_export:
         log_info("📦 [步驟 1/4] 開始抽取 FTB Quests 原始文本...")
@@ -360,12 +362,9 @@ def run_ftb_pipeline(
             write_new_cache=write_new_cache,
         )
         result["lm_translate"] = lm_res
-        if isinstance(lm_res, dict):
-            lm_status = str(lm_res.get("status") or "").upper()
-            translation_cancelled = bool(lm_res.get("cancelled")) or (
-                lm_status == "CANCELLED"
-            )
-            translation_incomplete = bool(lm_status and lm_status != "DONE")
+        translation_reason = translation_stop_reason(lm_res)
+        translation_cancelled = translation_reason == "cancelled"
+        translation_incomplete = translation_reason not in (None, "cancelled")
         if translation_cancelled:
             result["cancelled"] = True
         try:
@@ -401,7 +400,7 @@ def run_ftb_pipeline(
             log_warning("⚠️ [FTB] 翻譯未完成：略過步驟 4 Inject（保留目前輸出）。")
             result["inject"] = {
                 "skipped": True,
-                "reason": "translation_incomplete",
+                "reason": translation_reason or "translation_incomplete",
             }
         return result
 

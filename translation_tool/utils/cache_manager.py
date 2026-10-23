@@ -23,7 +23,7 @@ from .cache_overview import (
 from .cache_overview import (
     get_active_shard_id as _get_active_shard_id_impl,
 )
-from .cache_search import FuzzyMatcher
+from .cache_search import FuzzyMatcher, build_search_entry
 from .cache_search_facade import CacheSearchFacade
 from .config_manager import load_config, resolve_project_path
 
@@ -34,6 +34,7 @@ ROLLING_SHARD_SIZE = 2500
 ACTIVE_SHARD_FILE = ".active"
 # 初始化失敗後的重試冷卻秒數；避免持續故障時每次讀寫都重跑完整載入並洗版 log。
 _INIT_RETRY_COOLDOWN_SECONDS = 30.0
+_SEARCH_INDEX_CHECK_INTERVAL_SECONDS = 1.0
 _monotonic = time.monotonic
 _CACHE_DIR_NAME = "快取資料"
 
@@ -97,6 +98,23 @@ def _next_session_entry_version(state, cache_type: str, key: str) -> int:
     return version
 
 
+def _record_search_overlay(
+    state: cache_store.CacheRuntimeState,
+    cache_type: str,
+    key: str,
+    entry: dict[str, Any],
+) -> None:
+    """記錄尚未被搜尋索引確認的最新條目，不依賴持久化儲存狀態。"""
+    overlay = state.search_overlay.setdefault(cache_type, {})
+    overlay[key] = dict(entry)
+    state.search_generation += 1
+    state.search_generation_by_type[cache_type] = (
+        state.search_generation_by_type.get(cache_type, 0) + 1
+    )
+    state.search_index_current = False
+    state.search_index_checked_at = _monotonic()
+
+
 def _state():
     """取得或建立快取執行期狀態實例"""
     return cache_store.ensure_runtime_maps(CACHE_TYPES)
@@ -132,6 +150,11 @@ def _clear_partial_state(state) -> None:
     state.cache_file_path = {}
     state.active_cache_root = None
     state.initialized = False
+    state.search_overlay = {}
+    state.search_generation_by_type = {}
+    state.search_generation = 0
+    state.search_index_current = None
+    state.search_index_checked_at = None
 
 
 def _get_cache_root() -> Path:
@@ -235,6 +258,13 @@ def reload_translation_cache_type(cache_type: str):
             log.error(f"快取尚未成功初始化，無法重新載入 {cache_type}")
             return
         state.translation_cache[cache_type] = {}
+        state.search_overlay.setdefault(cache_type, {}).clear()
+        state.search_generation += 1
+        state.search_generation_by_type[cache_type] = (
+            state.search_generation_by_type.get(cache_type, 0) + 1
+        )
+        state.search_index_current = None
+        state.search_index_checked_at = None
         cache_store.get_session_entries(state.session_new_entries, cache_type).clear()
         cache_store.get_session_entries(
             state.session_entry_versions, cache_type
@@ -469,6 +499,7 @@ def add_to_cache_with_receipt(
                 state.session_new_entries, cache_type
             )
             session_entries[key] = entry
+            _record_search_overlay(state, cache_type, key, entry)
             cache_store.mark_dirty(state.is_dirty, cache_type)
             generation = _next_session_entry_version(state, cache_type, key)
         else:
@@ -520,6 +551,7 @@ def add_to_cache_batch(
             changed = cache_store.add_entry(cache, key, entry)
             if changed:
                 session_entries[key] = entry
+                _record_search_overlay(state, cache_type, key, entry)
                 _next_session_entry_version(state, cache_type, key)
                 dirty = True
 
@@ -629,7 +661,12 @@ def get_search_engine():
 
 def is_search_index_current() -> bool:
     """搜尋索引是否與磁碟上的快取分片一致（不需載入快取內容）。"""
-    return _get_search_facade().is_search_index_current(CACHE_TYPES)
+    state = _state()
+    current = _get_search_facade().is_search_index_current(CACHE_TYPES)
+    with state.cache_lock:
+        state.search_index_current = current
+        state.search_index_checked_at = _monotonic()
+    return current
 
 
 def rebuild_search_index() -> bool:
@@ -643,11 +680,22 @@ def rebuild_search_index() -> bool:
     if not state.initialized:
         log.error("快取尚未成功初始化，拒絕重建搜尋索引")
         return False
+    with state.cache_lock:
+        start_generation = state.search_generation
     result = _get_search_facade().rebuild_search_index(
         CACHE_TYPES, state.translation_cache
     )
     # 舊版測試替身／外部 facade 可能沒有回傳值；只有明確 False 才算失敗。
-    return result is not False
+    succeeded = result is not False
+    with state.cache_lock:
+        if succeeded and state.search_generation == start_generation:
+            for overlay in state.search_overlay.values():
+                overlay.clear()
+            state.search_index_current = True
+        else:
+            state.search_index_current = False
+        state.search_index_checked_at = _monotonic()
+    return succeeded
 
 
 def rebuild_search_index_for_type(cache_type: str) -> bool:
@@ -660,10 +708,109 @@ def rebuild_search_index_for_type(cache_type: str) -> bool:
     if not state.initialized:
         log.error(f"快取尚未成功初始化，拒絕重建 {cache_type} 搜尋索引")
         return False
+    with state.cache_lock:
+        start_generation = state.search_generation_by_type.get(cache_type, 0)
     result = _get_search_facade().rebuild_search_index_for_type(
         cache_type, CACHE_TYPES, state.translation_cache
     )
-    return result is not False
+    succeeded = result is not False
+    with state.cache_lock:
+        if (
+            succeeded
+            and state.search_generation_by_type.get(cache_type, 0) == start_generation
+        ):
+            state.search_overlay.setdefault(cache_type, {}).clear()
+        # 只重建單一類型後，其他類型仍可能落後，不能暫時宣稱全域索引已同步。
+        state.search_index_current = False
+        state.search_index_checked_at = _monotonic()
+    return succeeded
+
+
+def _search_index_exists() -> bool:
+    """判斷是否已有可查詢的 SQLite 索引檔。"""
+    return (_get_cache_root() / "search_index.db").exists()
+
+
+def _cached_search_index_current(
+    state: cache_store.CacheRuntimeState, facade: CacheSearchFacade
+) -> bool:
+    """以短暫快取避免每次搜尋重新計算所有分片指紋。"""
+    now = _monotonic()
+    with state.cache_lock:
+        current = state.search_index_current
+        checked_at = state.search_index_checked_at
+    if (
+        current is not None
+        and checked_at is not None
+        and now - checked_at < _SEARCH_INDEX_CHECK_INTERVAL_SECONDS
+    ):
+        return current
+    current = facade.is_search_index_current(CACHE_TYPES)
+    with state.cache_lock:
+        state.search_index_current = current
+        state.search_index_checked_at = _monotonic()
+    return current
+
+
+def _snapshot_search_overlay(
+    state: cache_store.CacheRuntimeState, cache_type: str | None
+) -> dict[tuple[str, str], dict[str, Any]]:
+    """在短鎖區間複製受影響鍵，讓搜尋不持有執行期鎖。"""
+    with state.cache_lock:
+        types = [cache_type] if cache_type is not None else list(CACHE_TYPES)
+        return {
+            (current_type, key): dict(entry)
+            for current_type in types
+            for key, entry in state.search_overlay.get(current_type, {}).items()
+            if isinstance(entry, dict)
+        }
+
+
+def _search_with_overlay(
+    facade: CacheSearchFacade,
+    overlay: dict[tuple[str, str], dict[str, Any]],
+    query: str,
+    cache_type: str | None,
+    limit: int,
+    use_fuzzy: bool,
+) -> list[dict[str, Any]]:
+    """合併穩定索引與變更鍵覆蓋層，避免掃描完整記憶體快取。"""
+    folded_query = query.strip().casefold()
+    if not folded_query or limit <= 0:
+        return []
+
+    overlay_rows: list[dict[str, Any]] = []
+    for (current_type, key), entry in overlay.items():
+        key_text = str(key)
+        values = (
+            key_text,
+            str(entry.get("src", "")),
+            str(entry.get("dst", "")),
+        )
+        if not any(folded_query in value.casefold() for value in values):
+            continue
+        built = build_search_entry(current_type, key_text, entry)
+        if built is not None:
+            built["score"] = 0.0
+            overlay_rows.append(built)
+
+    base_results = facade.search_cache(
+        query=query,
+        cache_type=cache_type,
+        limit=limit + len(overlay),
+        use_fuzzy=False,
+    )
+    replaced_keys = set(overlay)
+    merged = [
+        row
+        for row in base_results
+        if (str(row.get("type", "")), str(row.get("key", "")))
+        not in replaced_keys
+    ]
+    merged.extend(overlay_rows)
+    if use_fuzzy and merged:
+        merged = FuzzyMatcher().rank_results(query, merged)
+    return merged[:limit]
 
 
 def _search_current_cache(
@@ -673,7 +820,7 @@ def _search_current_cache(
     limit: int,
     use_fuzzy: bool,
 ) -> list[dict[str, Any]]:
-    """搜尋目前記憶體快取，避免索引落後時回傳舊資料。"""
+    """索引不可用時的最後保底搜尋；一般變更不再走這條全量路徑。"""
     folded_query = query.strip().casefold()
     if not folded_query or limit <= 0:
         return []
@@ -696,17 +843,10 @@ def _search_current_cache(
                     folded_query in value.casefold() for value in (key_text, src, dst)
                 ):
                     continue
-                results.append(
-                    {
-                        "key": key_text,
-                        "src": src,
-                        "dst": dst,
-                        "mod": entry.get("mod", ""),
-                        "path": entry.get("path", ""),
-                        "type": current_type,
-                        "score": 0.0,
-                    }
-                )
+                built = build_search_entry(current_type, key_text, entry)
+                if built is not None:
+                    built["score"] = 0.0
+                    results.append(built)
     if use_fuzzy and results:
         results = FuzzyMatcher().rank_results(query, results)
     return results[:limit]
@@ -717,14 +857,30 @@ def search_cache(
 ) -> list:
     """搜尋快取中符合查詢字的翻譯"""
     state = _initialized_state()
-    target_types = (
-        [cache_type] if cache_type is not None else list(state.translation_cache)
-    )
-    has_pending_write = any(
-        state.is_dirty.get(current_type, False) for current_type in target_types
-    )
+    limit = int(limit)
+    if limit <= 0 or not query.strip():
+        return []
     facade = _get_search_facade()
-    if has_pending_write or not facade.is_search_index_current(CACHE_TYPES):
+    overlay = _snapshot_search_overlay(state, cache_type)
+    if overlay:
+        if not _search_index_exists():
+            if not rebuild_search_index():
+                return _search_current_cache(state, query, cache_type, limit, use_fuzzy)
+            overlay = _snapshot_search_overlay(state, cache_type)
+        if overlay:
+            return _search_with_overlay(
+                facade, overlay, query, cache_type, limit, use_fuzzy
+            )
+
+    if not _cached_search_index_current(state, facade):
+        # 索引過期時只在這一輪重建一次；重建期間不再讓每個查詢各自全量掃描。
+        if rebuild_search_index():
+            return facade.search_cache(
+                query=query,
+                cache_type=cache_type,
+                limit=limit,
+                use_fuzzy=use_fuzzy,
+            )
         return _search_current_cache(state, query, cache_type, int(limit), use_fuzzy)
     return facade.search_cache(
         query=query, cache_type=cache_type, limit=limit, use_fuzzy=use_fuzzy
@@ -735,6 +891,12 @@ def find_similar_translations(
     text: str, cache_type: str | None = None, threshold: float = 0.6, limit: int = 20
 ) -> list:
     """使用模糊比對找出相似的翻譯"""
-    return _get_search_facade().find_similar_translations(
-        text=text, cache_type=cache_type, threshold=threshold, limit=limit
+    candidates = search_cache(
+        text, cache_type=cache_type, limit=limit * 2, use_fuzzy=False
     )
+    if not candidates:
+        return []
+    similar = FuzzyMatcher().find_similar(
+        text, candidates, threshold=threshold, key_field="src"
+    )
+    return similar[:limit]

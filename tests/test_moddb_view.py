@@ -872,6 +872,42 @@ def test_entries_filter_refresh_updates_selected_smart_review_chip_without_reset
     assert "校對：已套用" in texts_of(entries.smart_chip)
 
 
+def test_entries_full_refresh_keeps_draft_typed_after_save(entries):
+    """儲存後開始輸入時，晚到的完整背景快照不得覆蓋人工草稿。"""
+    selected = next(row for row in entries.rows if row.key == "item.foo.a")
+    entries.select(selected.id)
+    entries.tw_field.value = "剛儲存的譯文"
+    entries._on_text_change()
+    entries._save()
+    entries._page._run_all_tasks()
+
+    delayed_snapshot = {
+        "filter_only": False,
+        "identity": entries._db_identity,
+        "source_catalog": entries._render_source_catalog,
+        "effective_source_codes": [row.source for row in entries.rows],
+        "filter_options_are_filtered": False,
+        "versions": [entries.version],
+        "version": entries.version,
+        "mods": sorted({row.mod_id for row in entries.rows}),
+        "kinds": sorted({row.kind for row in entries.rows}),
+        "source": entries.source_filter.code,
+        "mod_id": entries.mod_id,
+        "kind": entries.kind,
+        "rows": list(entries.rows),
+        "total": entries.total,
+        "page": entries.pager.current_page,
+        "detail": entries.detail,
+        "smart_review_marks": entries.smart_review_marks,
+    }
+    entries.tw_field.value = "儲存後繼續輸入的未儲存草稿"
+    entries._on_text_change()
+
+    entries.apply_refresh_snapshot(delayed_snapshot)
+
+    assert entries.tw_field.value == "儲存後繼續輸入的未儲存草稿"
+
+
 def test_entries_filters_by_state_mod_and_search(entries):
     original_keys = {row.id: f"entry-{row.id}" for row in entries.rows}
     entries._on_state("none")

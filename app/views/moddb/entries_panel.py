@@ -122,6 +122,8 @@ class EntriesPanel(ft.Column):
         # 批次機翻「特殊字元不一致」的檢視：只列這些條目，並把 AI 譯文預填到譯文框供修正
         self.entry_ids: list[int] | None = None
         self.drafts: dict[int, str] = {}
+        # 背景快照抵達時仍要保留使用者尚未儲存的人工編輯，鍵值是資料庫條目 id。
+        self._editor_drafts: dict[int, str] = {}
         # 每換一份清單（套用、清除、切換篩選）就加一；背景儲存完成時據此判斷清單是否還是同一份
         self._flagged_batch = 0
         self.state = "all"
@@ -375,6 +377,7 @@ class EntriesPanel(ft.Column):
         db = self.db()
         if db is None:
             self._db_identity = None
+            self._editor_drafts.clear()
             self.version_dd.options = []
             self.rows, self.total = [], 0
             self._list_error = None
@@ -387,12 +390,15 @@ class EntriesPanel(ft.Column):
             # A numeric source id belongs to the old DB-local registry; do not
             # carry it into a different database.
             self.source_filter.reset()
+            self._editor_drafts.clear()
         self._db_identity = identity
         self._refresh_filter_options()
         self._load_list(keep_selection=keep_selection)
 
     def apply_refresh_snapshot(self, snapshot: dict) -> None:
         """Apply a worker-loaded tab snapshot without querying SQLite on the UI thread."""
+        # 快照可能在使用者開始編輯後才回來；先把畫面上的變更收進常駐狀態。
+        self._remember_editor_draft()
         previous_selected_id = self.selected.id if self.selected else None
         filter_only = snapshot.get("filter_only", False)
         if not filter_only or snapshot.get("filter_options_ready"):
@@ -608,7 +614,20 @@ class EntriesPanel(ft.Column):
         return build_entry_tile(self, row, catalog=self._render_source_catalog)
 
     # ------------------------------------------------------------------ 選取
+    def _remember_editor_draft(self) -> None:
+        """記住目前編輯框相對於資料庫值的差異，避免背景刷新覆蓋輸入。"""
+        entry = self.selected
+        if entry is None:
+            return
+        value = self.tw_field.value or ""
+        saved_value = entry.zh_tw or ""
+        if value == saved_value:
+            self._editor_drafts.pop(entry.id, None)
+        else:
+            self._editor_drafts[entry.id] = value
+
     def select(self, entry_id: int | None) -> None:
+        self._remember_editor_draft()
         previous_selected_id = self.selected.id if self.selected else None
         db = self.db()
         detail = db.entry_detail(entry_id) if (db and entry_id) else None
@@ -652,9 +671,15 @@ class EntriesPanel(ft.Column):
             return
         entry = detail.entry
         self.src_text.value = entry.en_us or NO_SOURCE_TEXT
-        draft = self.drafts.get(entry.id) if not entry.zh_tw else None
-        self.tw_field.value = draft or entry.zh_tw
-        if draft:
+        editor_draft = self._editor_drafts.get(entry.id)
+        machine_draft = self.drafts.get(entry.id) if not entry.zh_tw else None
+        if editor_draft is not None:
+            self.tw_field.value = editor_draft
+        elif machine_draft is not None:
+            self.tw_field.value = machine_draft
+        else:
+            self.tw_field.value = entry.zh_tw
+        if machine_draft is not None and editor_draft is None:
             self.saved_text.value = (
                 "已預填本次機翻的 AI 譯文（特殊字元與原文不一致，尚未寫入）"
             )
@@ -803,6 +828,7 @@ class EntriesPanel(ft.Column):
         self._safe_update()
 
     def _on_text_change(self, _e=None) -> None:
+        self._remember_editor_draft()
         self._update_impact()
         self._safe_update()
 
@@ -813,14 +839,13 @@ class EntriesPanel(ft.Column):
 
     def _reset_input(self) -> None:
         if self.selected is not None:
+            self._editor_drafts.pop(self.selected.id, None)
             self.tw_field.value = self.selected.zh_tw
-            self._update_impact()
-            self._safe_update()
+            self._on_text_change()
 
     def _apply_suggestion(self, text: str) -> None:
         self.tw_field.value = text
-        self._update_impact()
-        self._safe_update()
+        self._on_text_change()
 
     def _step(self, delta: int) -> None:
         if self.selected is None:
@@ -885,8 +910,7 @@ class EntriesPanel(ft.Column):
         """把原文（連同換行與前後空白）原樣放進譯文框，再手動翻譯。"""
         if self.selected is not None and self.selected.en_us:
             self.tw_field.value = self.selected.en_us
-            self._update_impact()
-            self._safe_update()
+            self._on_text_change()
 
     def _update_impact(self) -> None:
         self._review_controller.update_impact()
@@ -1026,8 +1050,13 @@ class EntriesPanel(ft.Column):
                 # 新譯文沒生效、或仍與原文的特殊字元不一致時，問題還在，不能移出待處理清單
                 self._resolve_flagged(entry.id, flagged_batch)
             same_entry = self.selected is not None and self.selected.id == entry.id
-            unchanged_editor = same_entry and self.pending_text() == text
+            if same_entry:
+                # 儲存期間可能又輸入了新內容；只有仍停在已儲存文字時才清掉草稿。
+                self._remember_editor_draft()
+            current_editor_text = (self.tw_field.value or "") if same_entry else None
+            unchanged_editor = same_entry and current_editor_text == text
             if unchanged_editor:
+                self._editor_drafts.pop(entry.id, None)
                 self._load_list(page=self.pager.current_page, keep_scroll=True)
                 if self.selected is not None and self.selected.id == entry.id:
                     self.saved_text.value = message

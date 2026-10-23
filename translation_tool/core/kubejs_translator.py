@@ -42,6 +42,7 @@ from translation_tool.core.kubejs_translator_state import (
     sync_managed_tree,
     write_current_manifest,
 )
+from translation_tool.core.translation_status import translation_stop_reason
 from translation_tool.utils.cancellation import is_cancelled, raise_if_cancelled
 from translation_tool.utils.log_unit import (
     get_formatted_duration,
@@ -960,7 +961,7 @@ def run_kubejs_pipeline(
         translated_json = sorted(paths["translated"].rglob("*.json"))
         translation_ran = False
         translation_cancelled = False
-        translation_incomplete = False
+        translation_reason: str | None = None
         if pending_count == 0:
             result["step2"] = {"skipped": True, "reason": "pending keys = 0"}
             progress(session, 0.66)
@@ -988,26 +989,23 @@ def run_kubejs_pipeline(
                 )
                 if not isinstance(result["step2"], dict):
                     result["step2"] = {"result": result["step2"]}
-                translation_status = str(result["step2"].get("status") or "").upper()
-                translation_incomplete = bool(
-                    translation_status and translation_status != "DONE"
-                )
+                translation_reason = translation_stop_reason(result["step2"])
                 translation_ran = (
                     not dry_run
                     and not result["step2"].get("skipped")
-                    and not translation_incomplete
+                    and translation_reason is None
                 )
                 if (
                     is_cancelled()
-                    or result["step2"].get("cancelled")
-                    or translation_status == "CANCELLED"
+                    or translation_reason == "cancelled"
                 ):
                     translation_ran = False
                     translation_cancelled = True
+                    translation_reason = "cancelled"
                     result["step2"].update({"skipped": True, "reason": "cancelled"})
-                elif translation_incomplete:
+                elif translation_reason is not None:
                     result["step2"].update(
-                        {"skipped": True, "reason": "translation_incomplete"}
+                        {"skipped": True, "reason": translation_reason}
                     )
                 if translation_ran:
                     gaps = _translation_output_gaps(paths["pending"], translated_stage)
@@ -1061,8 +1059,8 @@ def run_kubejs_pipeline(
                 "cancelled"
                 if translation_cancelled or is_cancelled()
                 else (
-                    "translation_incomplete"
-                    if translation_incomplete
+                    translation_reason
+                    if translation_reason is not None
                     else "no current translation output"
                 )
             )
@@ -1150,7 +1148,12 @@ def run_kubejs_pipeline(
         log_warning(f"⏹ [KubeJS] 已取消（目前快照保留） {result['duration']}")
     elif (
         isinstance(step2_summary, dict)
-        and step2_summary.get("reason") == "translation_incomplete"
+        and step2_summary.get("reason")
+        in {
+            "translation_failed",
+            "translation_incomplete",
+            "translation_status_unknown",
+        }
     ):
         log_warning(f"⚠️ [KubeJS] 翻譯未完成（目前快照保留） {result['duration']}")
     else:

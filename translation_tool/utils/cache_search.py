@@ -579,7 +579,9 @@ def build_index_entries(
         if not isinstance(entry, dict):
             continue
         try:
-            results.append(_build_single_entry(cache_type, key, entry))
+            built = _build_single_entry(cache_type, key, entry)
+            if built is not None:
+                results.append(built)
         except Exception as e:  # noqa: BLE001 - 單筆壞資料不影響整體索引
             log_debug(f"建構索引條目失敗: {e}")
 
@@ -594,6 +596,15 @@ def _build_single_entry(
     cache_type: str, key: str, entry: dict[str, Any]
 ) -> dict[str, Any] | None:
     """建立單筆索引條目（供並行呼叫）。"""
+    return build_search_entry(cache_type, key, entry)
+
+
+def build_search_entry(
+    cache_type: str, key: str, entry: dict[str, Any]
+) -> dict[str, Any] | None:
+    """建立與搜尋索引相同形狀的單筆結果，供即時覆蓋層重用。"""
+    if not isinstance(entry, dict):
+        return None
     return {
         "key": key,
         "src": entry.get("src", ""),

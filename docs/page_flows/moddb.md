@@ -81,6 +81,8 @@ flowchart TD
     I -- 否 --> L["僅顯示結果，不改動畫面狀態"]
 ```
 
+背景資料庫快照即使在儲存完成後才抵達，也必須只更新條目清單、篩選選項、審核標籤與統計，不得重設使用者正在編輯的譯文。`EntriesPanel` 以條目 id 保存編輯框相對於資料庫值的 resident 草稿；`apply_refresh_snapshot` 套用新快照前先收集目前差異，`_show_editor` 優先還原該草稿。草稿會在資料庫身分改變時清除，或在儲存回呼確認編輯框仍等於剛寫入的值時清除；儲存後繼續輸入的內容會保留並明確提示尚未儲存。
+
 資料清理由總覽頁的「資料清理」按鈕開啟 `CleanupDialog`（`cleanup_dialog.py`，服務層 `moddb_cleanup_service.py`）。選擇版本時 `_refresh_overview` 在背景呼叫 `cleanup_overview`，依類型與類別顯示該版本可清理的筆數（只讀，換版本時舊結果作廢）；`_export` 呼叫 `export_cleanup_report` 寫出 JSON 檢查檔，檔名由服務層 `export_cleanup` 取唯一名稱（同一秒匯出兩次、或使用者已編輯過的檔案都不會被覆蓋），內容先寫暫存檔再整個換過去。檢查檔記錄格式 `mod-db-cleanup-v2`、類型（`rule` 或 `protected`）、版本與資料庫身分（`meta.cleanup_db_id`）；格式、類型、版本、身分不符，或 `id` 不是正整數、`id` 重複、`delete` 不是布林值的項目一律拒絕或略過。
 
 **預覽與刪除的契約**：`_preview` 呼叫 `preview_cleanup`（在 `_read_snapshot` 的一致讀取內重新檢查檔案內標記要刪除的項目），得到的 `CleanupPlan.token` 是檢查檔內容、資料庫身分、版本、類型、可刪條目與各自完整資料狀態的 SHA-256。`_apply` 把這個 token 交給 `apply_cleanup(path, expected_token)`，核心在寫入交易內重新計算同一份計畫，token 不同就丟 `CleanupPlanChanged`、不刪任何東西，要求重新預覽。畫面端在換版本（`_on_version`）、換檢查檔（`_on_report`）、重新整理清單、匯出或刪除後都作廢預覽結果；`_apply` 另外確認預覽時的資料庫、版本（`CleanupPlan.version`）和目前選的檢查檔都沒變。

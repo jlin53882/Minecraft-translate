@@ -136,10 +136,20 @@ def test_ftb_pipeline_skips_inject_when_translation_cancelled(
     assert list(kept.rglob("ftb_lang.json"))
 
 
-def test_ftb_pipeline_skips_inject_when_translation_is_incomplete(
-    tmp_path: Path, monkeypatch
+@pytest.mark.parametrize(
+    ("translation_result", "expected_reason"),
+    [
+        ({"status": "PARTIAL", "cancelled": False}, "translation_incomplete"),
+        ({"status": "FAILED", "cancelled": False}, "translation_failed"),
+        ({}, "translation_status_unknown"),
+        ({"status": ""}, "translation_status_unknown"),
+        ({"status": "UNKNOWN"}, "translation_status_unknown"),
+    ],
+)
+def test_ftb_pipeline_skips_inject_when_translation_is_not_explicitly_done(
+    translation_result: dict, expected_reason: str, tmp_path: Path, monkeypatch
 ) -> None:
-    """FTB 翻譯非 DONE 時不得把部分輸出注入成完成品。"""
+    """FTB 只有明確 DONE 才能注入，缺少或未知狀態也必須停止。"""
     _make_ftb_pack(tmp_path)
 
     def fake_translate(*, input_lang_dir: str, output_lang_dir: str, **kwargs) -> dict:
@@ -148,7 +158,9 @@ def test_ftb_pipeline_skips_inject_when_translation_is_incomplete(
         (target / "ftb_lang.json").write_text(
             '{"quest.title": "部分譯文"}', encoding="utf-8"
         )
-        return {"status": "PARTIAL", "cancelled": False, "written_files": 1}
+        result = dict(translation_result)
+        result["written_files"] = 1
+        return result
 
     monkeypatch.setattr(
         ftbquests_lmtranslator, "translate_ftb_pending_to_zh_tw", fake_translate
@@ -162,7 +174,7 @@ def test_ftb_pipeline_skips_inject_when_translation_is_incomplete(
 
     assert result["inject"] == {
         "skipped": True,
-        "reason": "translation_incomplete",
+        "reason": expected_reason,
     }
     assert not (tmp_path / "Output" / "ftbquests" / "完成").exists()
 
@@ -265,14 +277,27 @@ def test_md_pipeline_does_not_inject_old_pending_after_cancel(
     assert list((tmp_path / "Output" / "md" / "待翻譯").rglob("*.json"))
 
 
-def test_md_pipeline_does_not_inject_after_incomplete_translation(
-    tmp_path: Path, monkeypatch
+@pytest.mark.parametrize(
+    ("translation_result", "expected_reason"),
+    [
+        ({"status": "PARTIAL", "cancelled": False}, "translation_incomplete"),
+        ({"status": "FAILED", "cancelled": False}, "translation_failed"),
+        ({}, "translation_status_unknown"),
+        ({"status": ""}, "translation_status_unknown"),
+        ({"status": "UNKNOWN"}, "translation_status_unknown"),
+    ],
+)
+def test_md_pipeline_does_not_inject_after_non_done_translation(
+    translation_result: dict,
+    expected_reason: str,
+    tmp_path: Path,
+    monkeypatch,
 ) -> None:
-    """Markdown 翻譯非 DONE 時不得使用待翻譯 JSON 回寫舊內容。"""
+    """Markdown 只有明確 DONE 才能使用翻譯 JSON 回寫原始檔案。"""
     _make_md_pack(tmp_path)
 
     def fake_translate(**kwargs):
-        return {"status": "PARTIAL", "cancelled": False, "written_files": 0}
+        return dict(translation_result)
 
     monkeypatch.setattr(md_translation_assembly, "translate_md_pending", fake_translate)
 
@@ -284,7 +309,7 @@ def test_md_pipeline_does_not_inject_after_incomplete_translation(
 
     assert result["step3"] == {
         "skipped": True,
-        "reason": "translation_incomplete",
+        "reason": expected_reason,
     }
     assert not list((tmp_path / "Output" / "md" / "完成").rglob("*.md"))
 
@@ -329,11 +354,20 @@ def test_kubejs_pipeline_cancelled_result_from_translator_not_committed(
     assert result["step3"] == {"skipped": True, "reason": "cancelled"}
 
 
-@pytest.mark.parametrize("status", ["PARTIAL", "FAILED"])
+@pytest.mark.parametrize(
+    ("translation_result", "expected_reason"),
+    [
+        ({"status": "PARTIAL", "cancelled": False}, "translation_incomplete"),
+        ({"status": "FAILED", "cancelled": False}, "translation_failed"),
+        ({}, "translation_status_unknown"),
+        ({"status": ""}, "translation_status_unknown"),
+        ({"status": "UNKNOWN"}, "translation_status_unknown"),
+    ],
+)
 def test_kubejs_pipeline_non_done_result_is_not_committed_or_injected(
-    status: str, tmp_path: Path
+    translation_result: dict, expected_reason: str, tmp_path: Path
 ) -> None:
-    """KubeJS 翻譯非 DONE 時不得提交翻譯快照或執行注入。"""
+    """KubeJS 只有明確 DONE 才能提交翻譯快照與執行注入。"""
     kubejs = tmp_path / "kubejs" / "client_scripts"
     kubejs.mkdir(parents=True)
     (kubejs / "tooltip.js").write_text(
@@ -341,7 +375,7 @@ def test_kubejs_pipeline_non_done_result_is_not_committed_or_injected(
     )
 
     def incomplete_translator(**kwargs):
-        return {"status": status, "cancelled": False}
+        return dict(translation_result)
 
     result = kubejs_translator.run_kubejs_pipeline(
         input_dir=str(kubejs.parent),
@@ -350,13 +384,10 @@ def test_kubejs_pipeline_non_done_result_is_not_committed_or_injected(
         step_inject=True,
     )
 
-    assert result["step2"] == {
-        "status": status,
-        "cancelled": False,
-        "skipped": True,
-        "reason": "translation_incomplete",
-    }
+    expected_step2 = dict(translation_result)
+    expected_step2.update({"skipped": True, "reason": expected_reason})
+    assert result["step2"] == expected_step2
     assert result["step3"] == {
         "skipped": True,
-        "reason": "translation_incomplete",
+        "reason": expected_reason,
     }

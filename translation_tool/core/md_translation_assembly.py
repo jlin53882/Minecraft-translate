@@ -30,6 +30,7 @@ from translation_tool.core.md_translation_steps import (
     step2_translate_impl,
     step3_inject_impl,
 )
+from translation_tool.core.translation_status import translation_stop_reason
 from translation_tool.plugins.md.md_extract_qa import (
     build_pending_json,
     contains_cjk,
@@ -148,16 +149,15 @@ def _run_step3(
     session,
     dry_run: bool,
     step_inject: bool,
-    translation_cancelled: bool,
-    translation_incomplete: bool,
+    translation_reason: str | None,
 ) -> tuple[dict[str, Any], bool]:
     """依翻譯終態決定是否回寫，回傳步驟結果與是否已取消。"""
-    if translation_cancelled or is_cancelled():
+    if translation_reason == "cancelled" or is_cancelled():
         log_warning("[MD] ⏹ 已取消：略過回寫（已完成的翻譯輸出保留）")
         return {"skipped": True, "reason": "cancelled"}, True
-    if translation_incomplete:
+    if translation_reason is not None:
         log_warning("[MD] ⚠️ 翻譯未完成：略過回寫（保留目前翻譯輸出）")
-        return {"skipped": True, "reason": "translation_incomplete"}, False
+        return {"skipped": True, "reason": translation_reason}, False
     if dry_run:
         log_info("[MD] [3/3] 已略過回寫：dry-run 模式")
         return {"skipped": True, "reason": "dry_run"}, False
@@ -241,8 +241,7 @@ def run_md_pipeline(
         result["step1"] = {"skipped": True, "reason": "step_extract_disabled"}
         progress(session, 0.33)
 
-    translation_cancelled = False
-    translation_incomplete = False
+    translation_reason: str | None = None
     pending_json_count = _count_md_pending_docs(pending_dir)
     if step_translate:
         raise_if_cancelled()  # 前面步驟期間已要求取消時，不開始送 API
@@ -261,13 +260,7 @@ def run_md_pipeline(
                 dry_run=dry_run,
                 write_new_cache=write_new_cache,
             )
-            translation_status = str(result["step2"].get("status") or "").upper()
-            translation_cancelled = bool(result["step2"].get("cancelled")) or (
-                translation_status == "CANCELLED"
-            )
-            translation_incomplete = bool(
-                translation_status and translation_status != "DONE"
-            )
+            translation_reason = translation_stop_reason(result["step2"])
             _log_md_step2_stats(result["step2"])
     else:
         log_info("[MD] [2/3] 已略過翻譯")
@@ -282,8 +275,7 @@ def run_md_pipeline(
         session=session,
         dry_run=dry_run,
         step_inject=step_inject,
-        translation_cancelled=translation_cancelled,
-        translation_incomplete=translation_incomplete,
+        translation_reason=translation_reason,
     )
     if was_cancelled:
         result["cancelled"] = True
@@ -316,7 +308,12 @@ def run_md_pipeline(
         log_warning("[MD] ⏹ 流程已取消，耗時：%s", get_formatted_duration(start_tick))
     elif (
         isinstance(result.get("step3"), dict)
-        and result["step3"].get("reason") == "translation_incomplete"
+        and result["step3"].get("reason")
+        in {
+            "translation_failed",
+            "translation_incomplete",
+            "translation_status_unknown",
+        }
     ):
         log_warning("[MD] ⚠️ 流程未完成，耗時：%s", get_formatted_duration(start_tick))
     else:
