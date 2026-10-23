@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from translation_tool.core import lm_batch_budget as bb
 from translation_tool.core.lm_batch_budget import (
-    JSON_ITEM_OVERHEAD_TOKENS,
     BatchBudgetTracker,
     BudgetConfig,
+    TokenEstimatorConfig,
+    estimate_payload_tokens,
+    estimate_prompt_tokens,
     estimate_text_tokens,
     get_tracker,
     profile_for_cache_type,
@@ -30,29 +34,54 @@ CFG = BudgetConfig(max_output_token_budget=24_000, max_input_token_budget=60_000
 
 
 def test_ascii_and_cjk_estimates():
+    estimator = bb.DEFAULT_TOKEN_ESTIMATOR
     assert estimate_text_tokens("") == 0
-    assert estimate_text_tokens("a" * 100) == pytest.approx(25.0)
-    assert estimate_text_tokens("中" * 10) == pytest.approx(12.0)
+    assert estimate_text_tokens("a" * 100) == pytest.approx(
+        100 * estimator.item_ascii_tokens_per_char
+    )
+    assert estimate_text_tokens("中" * 10) == pytest.approx(
+        10 * estimator.item_cjk_tokens_per_char
+    )
     # 混合：逐字元累加
-    assert estimate_text_tokens("ab中") == pytest.approx(0.5 + 1.2)
+    assert estimate_text_tokens("ab中") == pytest.approx(
+        2 * estimator.item_ascii_tokens_per_char
+        + estimator.item_cjk_tokens_per_char
+    )
 
 
 def test_non_ascii_non_cjk_counts_between():
-    assert estimate_text_tokens("é") == pytest.approx(0.5)
+    assert estimate_text_tokens("é") == pytest.approx(
+        bb.DEFAULT_TOKEN_ESTIMATOR.item_other_tokens_per_char
+    )
+
+
+def test_tiktoken_calibrated_estimator_counts_serialized_request_parts():
+    estimator = TokenEstimatorConfig(algorithm="tiktoken_calibrated")
+    prompt = "Translate this prompt to Traditional Chinese. " * 100
+    payload = {"items": [{"id": "0", "value": "Pressure Chamber"}]}
+
+    prompt_tokens = estimate_prompt_tokens(prompt, estimator=estimator)
+    payload_tokens = estimate_payload_tokens(payload, estimator=estimator)
+
+    assert prompt_tokens > 0
+    assert payload_tokens > 0
+    assert payload_tokens != estimate_text_tokens(
+        json.dumps(payload, ensure_ascii=False), estimator=estimator
+    )
 
 
 def test_estimate_includes_json_wrapper_and_fixed_input():
     tracker = BatchBudgetTracker("lang")
     est = tracker.estimate(_items(4, "a" * 40), CFG, fixed_input_tokens=100)
 
-    value = 4 * 10.0
+    value = 4 * 40 * CFG.token_estimator.item_ascii_tokens_per_char
     assert est.count == 4
     assert est.value_tokens == pytest.approx(value)
     assert est.input_tokens == pytest.approx(
-        100 + value + 4 * JSON_ITEM_OVERHEAD_TOKENS
+        100 + value + 4 * CFG.token_estimator.input_item_overhead_tokens
     )
     assert est.output_tokens == pytest.approx(
-        value * 1.5 + 4 * JSON_ITEM_OVERHEAD_TOKENS
+        value * 1.5 + 4 * CFG.token_estimator.output_item_overhead_tokens
     )
 
 
@@ -104,9 +133,9 @@ def test_fit_input_budget_can_be_the_binding_constraint():
     tracker = BatchBudgetTracker("lang")
     cfg = BudgetConfig(max_input_token_budget=1000, max_output_token_budget=10**9)
 
-    n = tracker.fit(_items(100, "a" * 400), 100, cfg)  # 每條輸入約 112
+    n = tracker.fit(_items(100, "a" * 400), 100, cfg)  # 每條輸入約 126
 
-    assert n == 8  # 8*112 = 896 ≤ 1000 < 9*112
+    assert n == 7  # 7*126 = 882 ≤ 1000 < 8*126
 
 
 def test_fit_fixed_input_tokens_reduce_room():

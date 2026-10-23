@@ -133,18 +133,25 @@ def test_structured_format_spec_counts_only_in_input_estimate():
         "source_text": '# Title\n\n<ItemLink id="example:item" />',
         "cache_type": "patchouli",
     }
+    cfg = BudgetConfig(output_token_factor=1.5)
+    estimator = cfg.token_estimator
     estimate = BatchBudgetTracker("patch").estimate(
-        [item], BudgetConfig(output_token_factor=1.5), fixed_input_tokens=100
+        [item], cfg, fixed_input_tokens=100
     )
-    value_tokens = estimate_text_tokens(item["text"])
-    spec_tokens = estimate_format_spec_tokens(item, estimate_text_tokens)
+    value_tokens = estimate_text_tokens(item["text"], estimator=estimator)
+    spec_tokens = estimate_format_spec_tokens(
+        item, lambda text: estimate_text_tokens(text, estimator=estimator)
+    )
 
     assert estimate.value_tokens == pytest.approx(value_tokens)
     assert estimate.input_tokens == pytest.approx(
-        100 + value_tokens + spec_tokens + bb.JSON_ITEM_OVERHEAD_TOKENS
+        100
+        + value_tokens
+        + spec_tokens
+        + estimator.input_item_overhead_tokens
     )
     assert estimate.output_tokens == pytest.approx(
-        value_tokens * 1.5 + bb.JSON_ITEM_OVERHEAD_TOKENS
+        value_tokens * 1.5 + estimator.output_item_overhead_tokens
     )
 
 

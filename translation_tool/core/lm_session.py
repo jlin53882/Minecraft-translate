@@ -4,7 +4,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from translation_tool.core.lm_batch_budget import estimate_text_tokens
+from translation_tool.core.lm_batch_budget import (
+    TokenEstimatorConfig,
+    estimate_prompt_tokens,
+    estimate_text_tokens,
+)
 
 DEFAULT_SESSION_HISTORY_TOKEN_LIMIT = 32_000
 
@@ -21,6 +25,7 @@ class TranslationSessionState:
 
     key: str
     max_history_tokens: int = DEFAULT_SESSION_HISTORY_TOKEN_LIMIT
+    estimator: TokenEstimatorConfig = field(default_factory=TokenEstimatorConfig)
     history: list[dict[str, str]] = field(default_factory=list)
     generation: int = 0
 
@@ -43,6 +48,15 @@ class TranslationSessionState:
             del self.history[:2]
 
     def _token_count(self) -> float:
+        if self.estimator.algorithm == "tiktoken_calibrated":
+            return sum(
+                estimate_prompt_tokens(
+                    turn.get("text", ""),
+                    estimator=self.estimator,
+                    include_request_bias=False,
+                )
+                for turn in self.history
+            )
         return sum(estimate_text_tokens(turn.get("text", "")) for turn in self.history)
 
 

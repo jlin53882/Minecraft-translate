@@ -3,8 +3,8 @@
 用途：以 token 預算決定一個翻譯批次要包含幾個項目，取代「只看項目數」的切批（issue #108）。
 
 設計重點：
-- **本地估算，不多打 API**：英文約 0.25 token / 字元、CJK 約 1.2 token / 字元，
-  每個項目另加約 12 token 的 JSON 包裝。不用 countTokens API（會多吃 RPM / RPD）。
+- **本地估算，不多打 API**：預設用 `tiktoken` 的 `o200k_base` 作為 provider tokenizer
+  代理，再套用實測校正；套件不可用時退回字元係數。不用 `countTokens` API，避免多吃 RPM / RPD。
 - **切批規則**：由前往後累加，先到者為準 —— 項目數上限、輸出 token 預算、輸入 token 預算。
   一律只取「輸入的前綴」，呼叫端依位置對應結果，不會錯位。
 - **記住學到的預算**：依 profile（lang / ftb / kubejs / md / patch）保存。
@@ -17,19 +17,168 @@
 
 from __future__ import annotations
 
+import json
+import math
 import threading
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from functools import lru_cache
 from typing import Any
 
-from translation_tool.core.lm_format_policy import estimate_format_spec_tokens
+try:
+    import tiktoken
+except ImportError:  # pragma: no cover - exercised only in minimal installs
+    tiktoken = None
+
+from translation_tool.core.lm_format_policy import (
+    build_translation_payload,
+    estimate_format_spec_tokens,
+)
 from translation_tool.utils.log_unit import log_debug, log_info
 
-# 每個項目的 JSON 包裝（id、value 鍵、括號、逗號）約佔的 token。
-JSON_ITEM_OVERHEAD_TOKENS = 12
-ASCII_TOKENS_PER_CHAR = 0.25
-CJK_TOKENS_PER_CHAR = 1.2
-OTHER_TOKENS_PER_CHAR = 0.5  # 非 ASCII 也非 CJK（重音字母、符號、emoji…）
+# 這些是舊版相容常數。新的估算器把 system prompt 與 item payload 分開校正，
+# 並把 input / output 的 JSON 包裝成本拆開；保留名稱可避免外部工具與舊測試失效。
+JSON_ITEM_OVERHEAD_TOKENS = 12.0
+ASCII_TOKENS_PER_CHAR = 0.22
+CJK_TOKENS_PER_CHAR = 0.62
+OTHER_TOKENS_PER_CHAR = 1.5  # 非 ASCII 也非 CJK（重音字母、符號、emoji…）
+
+
+@dataclass(frozen=True)
+class TokenEstimatorConfig:
+    """本地 token 估算器的可調參數。
+
+    Gemini 的 ``countTokens`` 測試顯示，system prompt 與 item payload 的
+    token 密度不同；把兩者分開比單一字元係數更穩定。參數可放在
+    ``lm_translator.token_estimator``，缺漏時使用這組保守預設。
+    """
+
+    prompt_ascii_tokens_per_char: float = 0.10
+    prompt_cjk_tokens_per_char: float = 0.85
+    prompt_other_tokens_per_char: float = 1.50
+    item_ascii_tokens_per_char: float = ASCII_TOKENS_PER_CHAR
+    item_cjk_tokens_per_char: float = CJK_TOKENS_PER_CHAR
+    item_other_tokens_per_char: float = OTHER_TOKENS_PER_CHAR
+    input_item_overhead_tokens: float = 38.0
+    output_item_overhead_tokens: float = JSON_ITEM_OVERHEAD_TOKENS
+    algorithm: str = "character"
+    tiktoken_encoding: str = "o200k_base"
+    tiktoken_prompt_scale: float = 1.38027
+    tiktoken_payload_scale: float = 0.92983
+    tiktoken_request_bias: float = -451.55
+    tiktoken_item_overhead_tokens: float = 0.39633
+
+    @classmethod
+    def from_config(cls, lm_cfg: dict[str, Any] | None) -> TokenEstimatorConfig:
+        """從 ``lm_translator.token_estimator`` 讀取數值，錯誤值退回預設。"""
+        raw = (lm_cfg or {}).get("token_estimator")
+        values = raw if isinstance(raw, dict) else {}
+        defaults = cls()
+
+        def _num(key: str, default: float, *, minimum: float = 0.0) -> float:
+            value = values.get(key)
+            if value is None or isinstance(value, bool):
+                return default
+            try:
+                value = float(value)
+            except (TypeError, ValueError):
+                return default
+            return value if math.isfinite(value) and value >= minimum else default
+
+        algorithm = values.get("algorithm", defaults.algorithm)
+        if algorithm not in {"character", "tiktoken_calibrated"}:
+            algorithm = defaults.algorithm
+        encoding = values.get("tiktoken_encoding", defaults.tiktoken_encoding)
+        if not isinstance(encoding, str) or not encoding.strip():
+            encoding = defaults.tiktoken_encoding
+
+        def _finite_num(key: str, default: float, *, minimum: float | None = None):
+            value = values.get(key)
+            if value is None or isinstance(value, bool):
+                return default
+            try:
+                value = float(value)
+            except (TypeError, ValueError):
+                return default
+            if not math.isfinite(value):
+                return default
+            if minimum is not None and value < minimum:
+                return default
+            return value
+
+        return cls(
+            prompt_ascii_tokens_per_char=_num(
+                "prompt_ascii_tokens_per_char",
+                defaults.prompt_ascii_tokens_per_char,
+            ),
+            prompt_cjk_tokens_per_char=_num(
+                "prompt_cjk_tokens_per_char", defaults.prompt_cjk_tokens_per_char
+            ),
+            prompt_other_tokens_per_char=_num(
+                "prompt_other_tokens_per_char", defaults.prompt_other_tokens_per_char
+            ),
+            item_ascii_tokens_per_char=_num(
+                "item_ascii_tokens_per_char", defaults.item_ascii_tokens_per_char
+            ),
+            item_cjk_tokens_per_char=_num(
+                "item_cjk_tokens_per_char", defaults.item_cjk_tokens_per_char
+            ),
+            item_other_tokens_per_char=_num(
+                "item_other_tokens_per_char", defaults.item_other_tokens_per_char
+            ),
+            input_item_overhead_tokens=_num(
+                "input_item_overhead_tokens", defaults.input_item_overhead_tokens
+            ),
+            output_item_overhead_tokens=_num(
+                "output_item_overhead_tokens", defaults.output_item_overhead_tokens
+            ),
+            algorithm=algorithm,
+            tiktoken_encoding=encoding.strip(),
+            tiktoken_prompt_scale=_finite_num(
+                "tiktoken_prompt_scale", defaults.tiktoken_prompt_scale, minimum=0.0
+            ),
+            tiktoken_payload_scale=_finite_num(
+                "tiktoken_payload_scale", defaults.tiktoken_payload_scale, minimum=0.0
+            ),
+            tiktoken_request_bias=_finite_num(
+                "tiktoken_request_bias", defaults.tiktoken_request_bias
+            ),
+            tiktoken_item_overhead_tokens=_finite_num(
+                "tiktoken_item_overhead_tokens",
+                defaults.tiktoken_item_overhead_tokens,
+                minimum=0.0,
+            ),
+        )
+
+
+DEFAULT_TOKEN_ESTIMATOR = TokenEstimatorConfig()
+
+
+@lru_cache(maxsize=4)
+def _get_tiktoken_encoding(name: str):
+    """取得 tokenizer；套件或 encoding 不可用時讓呼叫端回到字元估算。"""
+    if tiktoken is None:
+        return None
+    try:
+        return tiktoken.get_encoding(name)
+    except Exception:  # noqa: BLE001 - optional fallback must never block translation
+        return None
+
+
+def _tiktoken_count(text: str, estimator: TokenEstimatorConfig) -> int | None:
+    encoding = _get_tiktoken_encoding(estimator.tiktoken_encoding)
+    if encoding is None:
+        return None
+    try:
+        return len(encoding.encode(text, disallowed_special=()))
+    except Exception:  # noqa: BLE001 - malformed provider text uses local fallback
+        return None
+
+
+def _uses_tiktoken(estimator: TokenEstimatorConfig) -> bool:
+    return estimator.algorithm == "tiktoken_calibrated" and (
+        _get_tiktoken_encoding(estimator.tiktoken_encoding) is not None
+    )
 
 # 輸出係數校正（EMA）：新觀測值的權重與合理範圍
 CALIBRATION_WEIGHT = 0.3
@@ -77,6 +226,9 @@ class BudgetConfig:
     min_scale: float = 0.0625
     recover_after: int = 3
     recover_factor: float = 1.5
+    token_estimator: TokenEstimatorConfig = field(
+        default_factory=lambda: DEFAULT_TOKEN_ESTIMATOR
+    )
 
     @classmethod
     def from_config(cls, lm_cfg: dict[str, Any] | None) -> BudgetConfig:
@@ -133,6 +285,7 @@ class BudgetConfig:
                 minimum=1.0001,
                 maximum=4.0,
             ),
+            token_estimator=TokenEstimatorConfig.from_config(lm_cfg),
         )
 
 
@@ -153,32 +306,91 @@ def _is_cjk(ch: str) -> bool:
     )
 
 
-def estimate_text_tokens(text: str) -> float:
-    """估算一段文字的 token 數（純本地、偏保守）。"""
+def estimate_text_tokens(
+    text: str,
+    *,
+    estimator: TokenEstimatorConfig | None = None,
+    component: str = "item",
+) -> float:
+    """估算文字 token 數；``component=prompt`` 使用提示詞係數。"""
     if not text:
         return 0.0
-    if text.isascii():
-        return len(text) * ASCII_TOKENS_PER_CHAR
+    estimator = estimator or DEFAULT_TOKEN_ESTIMATOR
+    if component == "prompt":
+        ascii_rate = estimator.prompt_ascii_tokens_per_char
+        cjk_rate = estimator.prompt_cjk_tokens_per_char
+        other_rate = estimator.prompt_other_tokens_per_char
+    else:
+        ascii_rate = estimator.item_ascii_tokens_per_char
+        cjk_rate = estimator.item_cjk_tokens_per_char
+        other_rate = estimator.item_other_tokens_per_char
     total = 0.0
     for ch in text:
         if ch.isascii():
-            total += ASCII_TOKENS_PER_CHAR
+            total += ascii_rate
         elif _is_cjk(ch):
-            total += CJK_TOKENS_PER_CHAR
+            total += cjk_rate
         else:
-            total += OTHER_TOKENS_PER_CHAR
+            total += other_rate
     return total
 
 
-def estimate_value_tokens(item: dict[str, Any]) -> float:
+def estimate_prompt_tokens(
+    text: str,
+    *,
+    estimator: TokenEstimatorConfig | None = None,
+    include_request_bias: bool = True,
+) -> float:
+    """使用 system prompt 係數估算固定提示詞 token。"""
+    estimator = estimator or DEFAULT_TOKEN_ESTIMATOR
+    if _uses_tiktoken(estimator):
+        raw = _tiktoken_count(text, estimator)
+        if raw is not None:
+            bias = estimator.tiktoken_request_bias if include_request_bias else 0.0
+            return max(0.0, raw * estimator.tiktoken_prompt_scale + bias)
+    return estimate_text_tokens(text, estimator=estimator, component="prompt")
+
+
+def estimate_payload_tokens(
+    payload: dict[str, Any], *, estimator: TokenEstimatorConfig | None = None
+) -> float:
+    """估算已序列化 provider payload 的輸入 token。"""
+    estimator = estimator or DEFAULT_TOKEN_ESTIMATOR
+    serialized = json.dumps(payload, ensure_ascii=False)
+    if _uses_tiktoken(estimator):
+        raw = _tiktoken_count(serialized, estimator)
+        if raw is not None:
+            items = payload.get("items")
+            item_count = len(items) if isinstance(items, list) else 0
+            return max(
+                0.0,
+                raw * estimator.tiktoken_payload_scale
+                + item_count * estimator.tiktoken_item_overhead_tokens,
+            )
+    return estimate_text_tokens(serialized, estimator=estimator)
+
+
+def estimate_value_tokens(
+    item: dict[str, Any], *, estimator: TokenEstimatorConfig | None = None
+) -> float:
     """估算單一項目「要翻譯的文字」的 token 數（送出的 ``value``）。"""
-    return estimate_text_tokens(str(item.get("text") or ""))
+    return estimate_text_tokens(str(item.get("text") or ""), estimator=estimator)
 
 
-def estimate_input_item_tokens(item: dict[str, Any]) -> float:
+def estimate_input_item_tokens(
+    item: dict[str, Any], *, estimator: TokenEstimatorConfig | None = None
+) -> float:
     """Estimate the translated value plus request-only format metadata."""
-    return estimate_value_tokens(item) + estimate_format_spec_tokens(
-        item, estimate_text_tokens
+    estimator = estimator or DEFAULT_TOKEN_ESTIMATOR
+    if _uses_tiktoken(estimator):
+        return estimate_payload_tokens(
+            build_translation_payload([item], item_ids=["0"]), estimator=estimator
+        )
+    estimate_item_text = lambda text: estimate_text_tokens(
+        text, estimator=estimator
+    )
+    return estimate_value_tokens(item, estimator=estimator) + estimate_format_spec_tokens(
+        item, estimate_item_text
     )
 
 
@@ -261,15 +473,28 @@ class BatchBudgetTracker:
     ) -> BatchEstimate:
         """估算「把這些項目整批送出」的輸入 / 輸出 token。"""
         factor = self.output_factor(cfg)
-        value = sum(estimate_value_tokens(it) for it in items)
-        n = len(items)
+        estimator = cfg.token_estimator
+        values = list(items)
+        value = sum(estimate_value_tokens(it, estimator=estimator) for it in values)
+        n = len(values)
+        if _uses_tiktoken(estimator):
+            input_items = estimate_payload_tokens(
+                build_translation_payload(
+                    values, item_ids=[str(index) for index in range(n)]
+                ),
+                estimator=estimator,
+            )
+        else:
+            input_items = sum(
+                estimate_input_item_tokens(item, estimator=estimator)
+                for item in values
+            ) + n * estimator.input_item_overhead_tokens
         return BatchEstimate(
             count=n,
             value_tokens=value,
             input_tokens=fixed_input_tokens
-            + sum(estimate_input_item_tokens(item) for item in items)
-            + n * JSON_ITEM_OVERHEAD_TOKENS,
-            output_tokens=value * factor + n * JSON_ITEM_OVERHEAD_TOKENS,
+            + input_items,
+            output_tokens=value * factor + n * estimator.output_item_overhead_tokens,
         )
 
     def fit(
@@ -293,10 +518,13 @@ class BatchBudgetTracker:
         used_in = fixed_input_tokens
         used_out = 0.0
         taken = 0
+        estimator = cfg.token_estimator
         for item in items[:cap]:
-            value = estimate_value_tokens(item)
-            in_t = estimate_input_item_tokens(item) + JSON_ITEM_OVERHEAD_TOKENS
-            out_t = value * factor + JSON_ITEM_OVERHEAD_TOKENS
+            value = estimate_value_tokens(item, estimator=estimator)
+            in_t = estimate_input_item_tokens(item, estimator=estimator)
+            if not _uses_tiktoken(estimator):
+                in_t += estimator.input_item_overhead_tokens
+            out_t = value * factor + estimator.output_item_overhead_tokens
             if taken > 0 and (
                 used_in + in_t > in_budget or used_out + out_t > out_budget
             ):
@@ -358,7 +586,8 @@ class BatchBudgetTracker:
                 )
             if actual_output_tokens and actual_output_tokens > 0 and value_tokens > 0:
                 observed = (
-                    actual_output_tokens - item_count * JSON_ITEM_OVERHEAD_TOKENS
+                    actual_output_tokens
+                    - item_count * cfg.token_estimator.output_item_overhead_tokens
                 ) / value_tokens
                 observed = min(max(observed, MIN_OUTPUT_FACTOR), MAX_OUTPUT_FACTOR)
                 current = (
@@ -442,10 +671,13 @@ def is_item_oversized(
     cfg = BudgetConfig.from_config(lm_cfg)
     if not cfg.enabled:
         return False
-    input_tokens = estimate_input_item_tokens(item) + JSON_ITEM_OVERHEAD_TOKENS
+    estimator = cfg.token_estimator
+    input_tokens = estimate_input_item_tokens(item, estimator=estimator)
+    if not _uses_tiktoken(estimator):
+        input_tokens += estimator.input_item_overhead_tokens
     output_tokens = (
-        estimate_value_tokens(item) * cfg.output_token_factor
-        + JSON_ITEM_OVERHEAD_TOKENS
+        estimate_value_tokens(item, estimator=estimator) * cfg.output_token_factor
+        + estimator.output_item_overhead_tokens
     )
     return (
         input_tokens > cfg.max_input_token_budget

@@ -26,7 +26,8 @@ from translation_tool.core.lm_batch_actions import BatchAction, decide_batch_act
 from translation_tool.core.lm_batch_budget import (
     PROFILE_BY_CACHE_TYPE,
     BudgetConfig,
-    estimate_text_tokens,
+    estimate_payload_tokens,
+    estimate_prompt_tokens,
     get_tracker,
     profile_for_cache_type,
     select_batch_size,
@@ -690,10 +691,15 @@ def _prompt_text(value: object, fallback: str) -> str:
 
 def _estimate_conversation_history_tokens(
     conversation_history: list[dict[str, str]],
+    *,
+    estimator=None,
 ) -> float:
     """估算重試請求已攜帶的對話歷史輸入 Token。"""
     return sum(
-        estimate_text_tokens(turn.get("text", "")) + CONVERSATION_TURN_OVERHEAD_TOKENS
+        estimate_prompt_tokens(
+            turn.get("text", ""), estimator=estimator, include_request_bias=False
+        )
+        + CONVERSATION_TURN_OVERHEAD_TOKENS
         for turn in conversation_history
     )
 
@@ -702,12 +708,16 @@ def _estimate_retry_input_tokens(
     prompt: str,
     payload: dict,
     conversation_history: list[dict[str, str]],
+    *,
+    estimator=None,
 ) -> float:
     """估算品質重試請求實際送出的完整輸入 Token。"""
     return (
-        estimate_text_tokens(prompt)
-        + _estimate_conversation_history_tokens(conversation_history)
-        + estimate_text_tokens(json.dumps(payload, ensure_ascii=False))
+        estimate_prompt_tokens(prompt, estimator=estimator)
+        + _estimate_conversation_history_tokens(
+            conversation_history, estimator=estimator
+        )
+        + estimate_payload_tokens(payload, estimator=estimator)
     )
 
 
@@ -734,15 +744,20 @@ def _refresh_runtime_prompt_budget(
             ),
             item_ids=prompt_ids,
         )
+    estimator = runtime.budget_cfg.token_estimator
     history_input_tokens = _estimate_conversation_history_tokens(
-        runtime.conversation_history
+        runtime.conversation_history, estimator=estimator
     )
-    prompt_tokens = estimate_text_tokens(runtime.effective_prompt)
-    retry_prompt_tokens = estimate_text_tokens(
-        f"{runtime.effective_prompt.rstrip()}\n\n{SAME_SOURCE_RETRY_INSTRUCTION}"
+    prompt_tokens = estimate_prompt_tokens(
+        runtime.effective_prompt, estimator=estimator
     )
-    quality_retry_prompt_tokens = estimate_text_tokens(
-        f"{runtime.effective_prompt.rstrip()}\n\n{QUALITY_RETRY_INSTRUCTION}"
+    retry_prompt_tokens = estimate_prompt_tokens(
+        f"{runtime.effective_prompt.rstrip()}\n\n{SAME_SOURCE_RETRY_INSTRUCTION}",
+        estimator=estimator,
+    )
+    quality_retry_prompt_tokens = estimate_prompt_tokens(
+        f"{runtime.effective_prompt.rstrip()}\n\n{QUALITY_RETRY_INSTRUCTION}",
+        estimator=estimator,
     )
     runtime.fixed_input_tokens = prompt_tokens + history_input_tokens
     runtime.retry_fixed_input_tokens = retry_prompt_tokens
@@ -859,19 +874,26 @@ def _build_batch_prompt_context(
         include_moddb_reviewed=bool(lm_cfg.get("moddb_reviewed_glossary", True)),
         item_ids=item_ids,
     )
+    estimator = BudgetConfig.from_config(lm_cfg).token_estimator
     retry_same_as_source = bool(lm_cfg.get("retry_same_as_source", True))
-    history_input_tokens = _estimate_conversation_history_tokens(conversation_history)
-    fixed_input_tokens = estimate_text_tokens(effective_prompt) + history_input_tokens
-    retry_fixed_input_tokens = estimate_text_tokens(
-        f"{effective_prompt.rstrip()}\n\n{SAME_SOURCE_RETRY_INSTRUCTION}"
+    history_input_tokens = _estimate_conversation_history_tokens(
+        conversation_history, estimator=estimator
     )
-    quality_retry_fixed_input_tokens = estimate_text_tokens(
-        f"{effective_prompt.rstrip()}\n\n{QUALITY_RETRY_INSTRUCTION}"
+    fixed_input_tokens = estimate_prompt_tokens(
+        effective_prompt, estimator=estimator
+    ) + history_input_tokens
+    retry_fixed_input_tokens = estimate_prompt_tokens(
+        f"{effective_prompt.rstrip()}\n\n{SAME_SOURCE_RETRY_INSTRUCTION}",
+        estimator=estimator,
+    )
+    quality_retry_fixed_input_tokens = estimate_prompt_tokens(
+        f"{effective_prompt.rstrip()}\n\n{QUALITY_RETRY_INSTRUCTION}",
+        estimator=estimator,
     )
     batch_prompt_fit_tokens = (
         retry_fixed_input_tokens
         if retry_same_as_source
-        else estimate_text_tokens(effective_prompt)
+        else estimate_prompt_tokens(effective_prompt, estimator=estimator)
     )
     return _BatchPromptContext(
         profile=profile,
@@ -2121,10 +2143,15 @@ def _retry_quality_translations(
         candidates.items,
         runtime.budget_cfg,
         runtime.quality_retry_fixed_input_tokens
-        + _estimate_conversation_history_tokens(conversation_history),
+        + _estimate_conversation_history_tokens(
+            conversation_history, estimator=runtime.budget_cfg.token_estimator
+        ),
     )
     retry_input_tokens = _estimate_retry_input_tokens(
-        retry_prompt, candidates.payload, conversation_history
+        retry_prompt,
+        candidates.payload,
+        conversation_history,
+        estimator=runtime.budget_cfg.token_estimator,
     )
     if runtime.budget_cfg.enabled and (
         retry_input_tokens > runtime.budget_cfg.max_input_token_budget

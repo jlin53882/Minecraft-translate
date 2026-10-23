@@ -122,6 +122,8 @@ class TestSchema型別合約:
             lm["rate_limit"]["sleep_seconds_between_batches"], (int, float)
         )
         assert lm["rate_limit"]["sleep_seconds_between_batches"] == 4.0
+        assert isinstance(lm["token_estimator"], dict)
+        assert lm["token_estimator"]["algorithm"] == "tiktoken_calibrated"
 
     def test_lm_translator_models_is_dict(self):
         """models 必須是 dict（key = model name），不是 list。"""
