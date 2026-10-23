@@ -15,7 +15,6 @@ import flet as ft
 from app.services_impl.moddb_format_diff_service import analyze_format_diagnostics
 from app.services_impl.moddb_guide_service import is_guide_kind
 from app.services_impl.moddb_service import (
-    SRC_MANUAL,
     EntryDetail,
     EntryFilter,
     EntryRow,
@@ -44,6 +43,7 @@ from app.ui.page_post import post_to_ui
 from app.ui.snack import show_snack
 from app.views.moddb.char_inspector import scrolling_list
 from app.views.moddb.editor_drafts import EditorDraftStore
+from app.views.moddb.editor_save_state import shadowed_versions, shadowing_source
 from app.views.moddb.entry_filters import (
     ALL_KINDS,
     ALL_MODS,
@@ -1054,33 +1054,9 @@ class EntriesPanel(ft.Column):
         self._update_impact()
         self._safe_update()
 
-    @staticmethod
-    def _shadowed_versions(db, done, entry_id: int, saved_text: str) -> list[str]:
-        """同步到的其他版本中，儲存後生效譯文仍不是新譯文的版本。"""
-        held_back: list[str] = []
-        for impact in done:
-            if impact.entry_id == entry_id:
-                continue
-            try:
-                current = db.get_entry(impact.entry_id)
-            except sqlite3.Error:
-                continue
-            if current is not None and current.zh_tw != saved_text:
-                held_back.append(impact.mc_version)
-        return held_back
-
-    @staticmethod
-    def _shadowing_source(db, entry_id: int, saved_text: str) -> str | None:
-        """儲存後生效的若不是剛存的人工譯文，回傳仍在生效的來源名稱。"""
-        try:
-            current = db.get_entry(entry_id)
-        except sqlite3.Error:
-            return None
-        if current is None or current.source in (None, SRC_MANUAL):
-            return None
-        if current.zh_tw == saved_text:
-            return None
-        return source_label(current.source, db.source_catalog)
+    # 保留舊的類別入口，讓既有測試與外部面板整合可以平順移轉到共用邏輯。
+    _shadowed_versions = staticmethod(shadowed_versions)
+    _shadowing_source = staticmethod(shadowing_source)
 
     def _resolve_flagged(self, entry_id: int, flagged_batch: int) -> None:
         """機翻「特殊字元不一致」清單裡的條目已手動儲存：移出清單並通知機翻頁扣掉數量。
