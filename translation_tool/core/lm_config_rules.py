@@ -310,6 +310,19 @@ class ApiKeyCycle:
         self._current_key = key
         return key
 
+    def reuse_current(self) -> str:
+        """重用目前仍有效的 key，供暫時性錯誤的 bounded retry 使用。"""
+        keys = _get_all_keys()
+        current_index = self.current_index
+        if (
+            current_index is not None
+            and 0 <= current_index < len(keys)
+            and current_index not in self._failed
+            and keys[current_index] == self._current_key
+        ):
+            return self._current_key
+        return self.claim()
+
     def _claim_probe(
         self, keys: list[str], cooling: set[int]
     ) -> tuple[int, str] | None:

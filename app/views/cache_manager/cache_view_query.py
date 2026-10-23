@@ -515,6 +515,8 @@ class CacheQueryMixin:
 
     def _on_query_clear(self, e):
         """清除搜尋條件與結果"""
+        # 讓尚未完成的背景搜尋失效，避免清除後舊結果晚到又回寫畫面。
+        self._query_seq += 1
         self.tf_query_input.value = ""
         self.query_results = []
         self.query_selected_result = None

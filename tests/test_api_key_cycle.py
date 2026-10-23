@@ -144,6 +144,16 @@ def test_cycle_two_keys_first_failure_is_not_exhaustion(keys):
     assert cycle.mark_failed() is False  # 兩把都實際失敗才耗盡
 
 
+def test_cycle_reuse_current_key_does_not_advance_tracker(keys):
+    keys["keys"] = ["k0", "k1"]
+    cycle = ApiKeyCycle()
+
+    assert cycle.claim() == "k0"
+    assert cycle.reuse_current() == "k0"
+    assert cycle.current_index == 0
+    assert cycle.claim() == "k1"
+
+
 def test_cycle_three_keys_never_skips_a_key(keys):
     cycle = ApiKeyCycle()
 

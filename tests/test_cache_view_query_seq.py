@@ -63,3 +63,19 @@ def test_current_search_failure_is_reported_and_clears_searching_hint():
 
     assert notes == [("搜尋失敗：disk gone", "error")]
     assert "搜尋中" not in view.query_search_hint.value
+
+
+def test_clear_invalidates_an_inflight_search_result():
+    view, tasks, notes = _view_with_captured_tasks()
+    view._compute_query_results = lambda *_args: [{"key": "old"}]
+
+    view._on_query_search(None)
+    assert view._query_seq == 1
+
+    view._on_query_clear(None)
+    assert view._query_seq == 2
+
+    asyncio.run(tasks[0]())
+
+    assert view.query_results == []
+    assert notes == []

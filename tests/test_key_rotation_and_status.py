@@ -60,7 +60,18 @@ def _rpd():
     return _http_error(429, _RPD_BODY, "quota exceeded")
 
 
-def _unknown_quota():
+def _quota_exhausted():
+    body = {
+        "error": {
+            "message": "Quota exceeded",
+            "status": "RESOURCE_EXHAUSTED",
+            "details": [],
+        }
+    }
+    return _http_error(429, body, "Quota exceeded")
+
+
+def _unknown_valid_json_429():
     return _http_error(429, text="SOMETHING ELSE")
 
 
@@ -305,36 +316,42 @@ def test_429_rpd_one_key_many_models_tries_each_model_then_ends(env):
     assert status == "ALL_KEYS_EXHAUSTED"
 
 
-def test_429_unknown_quota_tries_every_key_before_exhausted(env):
-    env.outcomes = {"key0": _unknown_quota(), "key1": _unknown_quota()}
+def test_429_unknown_valid_json_retries_each_key_before_exhausted(env):
+    env.outcomes = {
+        "key0": _unknown_valid_json_429(),
+        "key1": _unknown_valid_json_429(),
+    }
 
     result, status = main.translate_batch_smart(_items(), 1)
 
-    assert env.calls == ["key0", "key1"]
+    attempts_per_key = main.UNPARSED_RATE_LIMIT_MAX_RETRIES + 1
+    assert env.calls == ["key0"] * attempts_per_key + ["key1"] * attempts_per_key
     assert result == []
     assert status == "ALL_KEYS_EXHAUSTED"
 
 
-def test_429_unknown_quota_second_key_succeeds(env):
-    env.outcomes = {"key0": _unknown_quota(), "key1": _OK_JSON}
+def test_429_unknown_valid_json_retries_before_second_key_succeeds(env):
+    env.outcomes = {"key0": _unknown_valid_json_429(), "key1": _OK_JSON}
 
     result, status = main.translate_batch_smart(_items(), 1)
 
-    assert env.calls == ["key0", "key1"]
+    attempts_per_key = main.UNPARSED_RATE_LIMIT_MAX_RETRIES + 1
+    assert env.calls == ["key0"] * attempts_per_key + ["key1"]
     assert status == "AUTO"
     assert _texts(result) == ["你好"]
 
 
 def test_429_unparseable_body_is_a_rate_limit_not_a_failed_key(env):
-    """body 不是 JSON 的 429 只能保守當成速率限制：先等待再重試，不把 key 標成失效。"""
+    """body 不是 JSON 的 429 先在同一把 key 上等待重試，耗盡上限後才標記並輪替。"""
     env.outcomes = {"key0": _unparseable_429(), "key1": _OK_JSON}
     spy, marked = _spy_mark_failed()
 
     with spy, patch.object(main, "interruptible_sleep") as sleep:
         result, status = main.translate_batch_smart(_items(), 1)
 
-    assert env.calls == ["key0", "key1"]
-    assert marked == []
+    attempts_per_key = main.UNPARSED_RATE_LIMIT_MAX_RETRIES + 1
+    assert env.calls == ["key0"] * attempts_per_key + ["key1"]
+    assert marked == [0]
     sleep.assert_any_call(main.RATE_LIMIT_DEFAULT_WAIT_SEC)
     assert status == "AUTO"
     assert _texts(result) == ["你好"]
@@ -351,7 +368,8 @@ def test_429_unparseable_body_waits_before_each_retry_then_rotates(env):
     assert result == []
     assert status == "ALL_KEYS_EXHAUSTED"
     assert sleep.call_count >= main.UNPARSED_RATE_LIMIT_MAX_RETRIES
-    assert len(env.calls) > 2
+    attempts_per_key = main.UNPARSED_RATE_LIMIT_MAX_RETRIES + 1
+    assert env.calls == ["key0"] * attempts_per_key + ["key1"] * attempts_per_key
     assert marked  # 只有在重試耗盡後才標記 key 失效
 
 
@@ -578,14 +596,14 @@ def test_success_resets_failed_keys_when_failure_memory_is_disabled(env):
     """記憶關閉（key_failure_cooldown_sec = 0）時維持 #112 的行為：每個 cycle 重新開始。
 
     同一次 translate_batch_smart 處理兩個 batch。
-    batch 1：key0 → 429（無法判斷種類，key0 在本 cycle 被標記失敗）→ 改用 key1 成功 → production 必須 reset。
+    batch 1：key0 → 明確 quota exhaustion（key0 在本 cycle 被標記失敗）→ 改用 key1 成功 → production 必須 reset。
     batch 2：key0 重新有資格被使用，所以輪到的 key0 真的被領取並成功。
 
     沒有 reset 的話，key0 會一直留在失敗清單，batch 2 會跳過它改用 key1。
     （不是兩次獨立的 translate 呼叫：每次呼叫本來就會建立新的 ApiKeyCycle。）
     """
     env.cfg.return_value = _config({"m1": True}, lang_batch=1)
-    env.outcomes = {"key0": [_unknown_quota(), _OK_JSON], "key1": _OK_JSON}
+    env.outcomes = {"key0": [_quota_exhausted(), _OK_JSON], "key1": _OK_JSON}
 
     with patch.object(rules, "get_key_failure_cooldown_sec", return_value=0):
         result, status = main.translate_batch_smart(_two_batch_items(), 2)

@@ -102,6 +102,13 @@ CHATGPT_MAX_RETRIES = 3
 RATE_LIMIT_DEFAULT_WAIT_SEC = 10
 # 429 回應無法解析時，連續保守重試同一把 key 的次數；超過才當成該 key 受限並輪替。
 UNPARSED_RATE_LIMIT_MAX_RETRIES = 3
+_EXPLICIT_QUOTA_MESSAGE_MARKERS = (
+    "QUOTA EXCEEDED",
+    "QUOTA EXHAUSTED",
+    "INSUFFICIENT QUOTA",
+    "USAGE LIMIT EXCEEDED",
+    "CREDIT BALANCE EXHAUSTED",
+)
 CHATGPT_MAX_RETRY_AFTER_SEC = 120
 CHATGPT_TRANSIENT_USAGE_ERROR_CODES = frozenset(
     {
@@ -603,6 +610,7 @@ class _BatchRuntime:
     chatgpt_retry_count: int = 0
     gemini_503_retry_count: int = 0
     unparsed_rate_limit_count: int = 0
+    retry_same_key: bool = False
     gemini_503_attempted_models: set[int] = field(default_factory=set)
     contract_errors: list[str] = field(default_factory=list)
     pending_contract_event: dict | None = None
@@ -1114,11 +1122,18 @@ def _prepare_batch(runtime: _BatchRuntime) -> _BatchRound:
     )
 
 
+def _is_explicit_quota_exhaustion(quota_id: str, remote_message: str) -> bool:
+    return bool(quota_id) or any(
+        marker in remote_message for marker in _EXPLICIT_QUOTA_MESSAGE_MARKERS
+    )
+
+
 def _parse_rate_limit_error(error: Exception) -> tuple[str, float, str]:
     """從 429 錯誤解析配額種類、重試延遲秒數（可含小數，無則 0）與已遮罩訊息。
 
-    配額種類為 ``rpd``／``rpm``／``quota``；回應 body 不是可解析的 Google error JSON 時
-    回傳 ``unparsed``：它仍是 HTTP 429，只能保守視為速率限制，不能當成需輪替 key 的配額耗盡。
+    配額種類為 ``rpd``／``rpm``／``quota``；只有明確辨識為配額耗盡時才回傳 ``quota``。
+    合法 JSON 但沒有 RPD／RPM／明確配額耗盡訊號，或回應 body 不是可解析的 Google error JSON
+    時回傳 ``unparsed``：它仍是 HTTP 429，只能保守視為速率限制，不能當成需輪替 key 的配額耗盡。
     延遲來自 ``Retry-After`` header 或 ``RetryInfo``（見 ``retry_after.parse_retry_after``）。
     """
     response = getattr(error, "response", None)
@@ -1162,7 +1177,9 @@ def _parse_rate_limit_error(error: Exception) -> tuple[str, float, str]:
         return "rpd", retry_after, remote_message
     if "PERMINUTE" in quota_id or "RPM" in remote_message:
         return "rpm", retry_after, remote_message
-    return "quota", retry_after, remote_message
+    if _is_explicit_quota_exhaustion(quota_id, remote_message):
+        return "quota", retry_after, remote_message
+    return "unparsed", retry_after, remote_message
 
 
 def _remote_error_detail(error: Exception, limit: int = 300) -> str:
@@ -1496,6 +1513,7 @@ def _handle_unparsed_rate_limit(
     """429 回應無法解析時的保守處理：先等待並重試同一把 key，連續失敗才輪替。"""
     if runtime.unparsed_rate_limit_count >= UNPARSED_RATE_LIMIT_MAX_RETRIES:
         runtime.unparsed_rate_limit_count = 0
+        runtime.retry_same_key = False
         log_warning(
             f"[❓] 429 回應無法解析且重試 {UNPARSED_RATE_LIMIT_MAX_RETRIES} 次仍受限"
             f" ({remote_message or 'unknown'})，嘗試切換 Key"
@@ -1504,6 +1522,7 @@ def _handle_unparsed_rate_limit(
             return BatchAction.EXHAUSTED
         return BatchAction.ROTATE_KEY
     runtime.unparsed_rate_limit_count += 1
+    runtime.retry_same_key = True
     wait_time = retry_after or RATE_LIMIT_DEFAULT_WAIT_SEC
     log_info(f"[⏳] 429 回應無法解析，視為頻率限制：等待 {wait_time:g} 秒")
     _sleep_with_runtime_event(
@@ -2527,7 +2546,16 @@ def _perform_provider_request(
                 provider_model=model_name,
                 expected_count=len(round_data.current_batch),
             )
-            api_key = runtime.key_cycle.claim() if runtime.provider == "gemini" else ""
+            if runtime.provider == "gemini":
+                reuse_current_key = runtime.retry_same_key
+                runtime.retry_same_key = False
+                api_key = (
+                    runtime.key_cycle.reuse_current()
+                    if reuse_current_key
+                    else runtime.key_cycle.claim()
+                )
+            else:
+                api_key = ""
             request_kwargs = _provider_request_kwargs(
                 runtime,
                 model_name,

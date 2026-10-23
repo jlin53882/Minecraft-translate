@@ -52,9 +52,10 @@
 
 ### 429 body 無法解析
 
-`_parse_rate_limit_error` 回傳配額種類 `rpd`／`rpm`／`quota`，body 不是 Google error JSON 時回傳 `unparsed`。
+`_parse_rate_limit_error` 回傳配額種類 `rpd`／`rpm`／`quota`；只有 `QuotaFailure` 或訊息明確表示配額耗盡時才回傳 `quota`。
+合法 JSON 但沒有 RPD／RPM／明確配額耗盡訊號，以及 body 不是 Google error JSON 時，都回傳 `unparsed`。
 `unparsed` 仍是 HTTP 429，只能保守當成速率限制：先等待（Retry-After 或 `RATE_LIMIT_DEFAULT_WAIT_SEC`）並重試，
-連續 `UNPARSED_RATE_LIMIT_MAX_RETRIES` 次仍受限才對該 key 輪替；不會因此把 key 當成每日配額耗盡。
+連續 `UNPARSED_RATE_LIMIT_MAX_RETRIES` 次仍受限才對該 key 輪替；不會因未知的 429 body 把 key 立即標記為配額耗盡。
 真正的 RPD（`PERDAY`／`DAILY`）仍記在模型上並換下一個模型。
 
 ## Gemini key 格式

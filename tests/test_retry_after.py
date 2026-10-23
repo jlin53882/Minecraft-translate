@@ -157,6 +157,52 @@ def test_parse_rate_limit_error_unparsed_body_is_not_a_quota_exhaustion():
     assert wait == 8.0
 
 
+def test_parse_rate_limit_error_unknown_valid_json_is_unparsed():
+    error = _http_429(
+        {
+            "error": {
+                "code": 429,
+                "message": "Rate limit exceeded",
+                "status": "RESOURCE_EXHAUSTED",
+            }
+        },
+        {"Retry-After": "8"},
+    )
+
+    kind, wait, _message = main._parse_rate_limit_error(error)
+
+    assert kind == "unparsed"
+    assert wait == 8.0
+
+
+def test_unknown_valid_json_429_retries_same_key_before_rotation(monkeypatch):
+    from types import SimpleNamespace
+
+    waits = []
+    monkeypatch.setattr(
+        main,
+        "_sleep_with_runtime_event",
+        lambda _runtime, seconds, **_kwargs: waits.append(seconds),
+    )
+    runtime = SimpleNamespace(unparsed_rate_limit_count=0, key_cycle=Mock())
+    error = _http_429(
+        {
+            "error": {
+                "code": 429,
+                "message": "Rate limit exceeded",
+                "status": "RESOURCE_EXHAUSTED",
+            }
+        },
+        {"Retry-After": "8"},
+    )
+
+    action = main._handle_batch_error(runtime, error, 0)
+
+    assert action is main.BatchAction.RETRY_SAME_KEY
+    assert waits == [8.0]
+    runtime.key_cycle.mark_failed.assert_not_called()
+
+
 def test_rate_limit_waits_reject_unbounded_provider_delays():
     error = _http_429(_rpm_body(None), {"Retry-After": "121"})
 
@@ -179,6 +225,12 @@ def test_parse_rate_limit_error_rpd_keeps_model_quota_classification():
         }
     }
     assert main._parse_rate_limit_error(_http_429(body))[0] == "rpd"
+
+
+def test_parse_rate_limit_error_explicit_quota_message_keeps_quota_classification():
+    body = {"error": {"message": "Quota exceeded"}}
+
+    assert main._parse_rate_limit_error(_http_429(body))[0] == "quota"
 
 
 def test_smart_review_and_lm_read_the_same_retry_after():

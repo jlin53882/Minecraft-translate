@@ -96,6 +96,7 @@ flowchart TD
 ```
 
 `cache_search_service` 先走 FTS 搜尋引擎（`cache_manager.search_cache`），沒有結果或失敗時降級為 `_search_linear` 線性掃描。
+清空查詢（`_on_query_clear`）也會遞增同一個 `_query_seq` 並清除目前結果，因此已在背景執行中的舊搜尋完成後會被丟棄，不會重新填回已清空的畫面。
 
 ### 套用與還原 DST（查詢區）
 
@@ -144,7 +145,7 @@ flowchart TD
 ## 狀態與資料
 
 - **Flet 控制項狀態**：`ui_busy`、`busy_reason`、`_all_logs`、`_only_error`、`_last_overview_data`（最近一次總覽資料，多數歷史與分析功能依賴其中的 `cache_root`）。
-- **查詢狀態**：`CacheQueryState`（`app/views/cache_manager/cache_state.py`）提供初始值，實際使用的是 `query_results`、`query_selected_result`、`query_original_dst`、`query_page`、`query_page_size`、`query_total_pages` 等 view 屬性。`_query_seq` 由 `CacheQueryMixin` 以類別預設值 0 初始化、每次搜尋遞增，用於丟棄過期的搜尋結果；舊請求的失敗也依序號丟棄（不通知、不改狀態），只有最新請求的失敗會通知並把「搜尋中」提示改為「搜尋未完成，請重新搜尋」。
+- **查詢狀態**：`CacheQueryState`（`app/views/cache_manager/cache_state.py`）提供初始值，實際使用的是 `query_results`、`query_selected_result`、`query_original_dst`、`query_page`、`query_page_size`、`query_total_pages` 等 view 屬性。`_query_seq` 由 `CacheQueryMixin` 以類別預設值 0 初始化，搜尋與清空查詢都會遞增，用於丟棄過期的搜尋結果；舊請求的成功或失敗也依序號丟棄（不通知、不改狀態），只有最新請求的失敗會通知並把「搜尋中」提示改為「搜尋未完成，請重新搜尋」。
 - **分片狀態**：`CacheShardState` 提供初始值，實際使用 `shard_detail_selected_type`、`shard_detail_selected_file`、`shard_detail_selected_key`、`shard_detail_keys`、`shard_detail_page`、`shard_detail_src_mode`，以及 `shard_dst_original`、`shard_dst_loaded_sig`。
 - **歷史狀態**：`CacheHistoryState` 提供初始值，`history_window_source` 記錄目前開啟的來源。
 - **分片讀取**：`app/views/cache_manager/shard_reader.py` 以檔案簽章為 key 快取分片摘要與 raw 內容；`warm_shard_summaries` 在背景預熱，渲染時不必再解析 JSON。

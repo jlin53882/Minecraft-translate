@@ -60,7 +60,7 @@ CacheView（主入口；did_mount／will_unmount 以 mount generation 丟棄已�
 - 「補滿舊檔」為高風險動作：總覽頁「操作」卡片內有確認勾選 `chk_danger_confirm`（「我了解「補滿舊檔」會覆寫既有分片（高風險）」，預設未勾選）；`_on_save_one_fill` 在未勾選時只提示「尚未勾選高風險確認」而不執行
 
 ### 查詢區
-- `_on_query_search()`：模式 `KEY` / `DST` / `ALL`（預設 ALL）、分類預設全部；mounted App 由 Registry 持有搜尋 worker，以 query sequence 只套用最後一次結果 → `_render_query_results()`
+- `_on_query_search()`：模式 `KEY` / `DST` / `ALL`（預設 ALL）、分類預設全部；mounted App 由 Registry 持有搜尋 worker，以 query sequence 只套用最後一次結果 → `_render_query_results()`。`_on_query_clear()` 也會遞增同一個序號，讓清空後才完成的舊 worker 結果失效。
 - `did_mount()`／`will_unmount()`：總覽載入以 mount generation 綁定掛載週期，舊 worker 完成後不會更新已卸載或重新掛載後的控制項。
 - `_render_query_detail()` / `_on_apply_dst()` / `_on_revert_dst()` / `_on_restore_latest_query()`
 - 分頁：`_set_query_page` + `_on_page_first/prev/next/last/jump` + `_on_page_size_change`
