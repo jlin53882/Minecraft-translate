@@ -39,7 +39,7 @@ app/views/cache_manager/
 ## 呼叫鏈（實際）
 
 ```
-CacheView（主入口）
+CacheView（主入口；did_mount／will_unmount 以 mount generation 丟棄已卸載或舊掛載的總覽結果）
   ├─ 總覽：_load_overview() → cache_get_overview_service() → _render_type_list()
   │        動作：_run_action() → run_cache_action(view, reason, work_fn, ...)
   │              ├─ mounted App 先向 OperationRegistry admission，再由 owner worker 執行 work_fn（`show_progress` 時顯示 SnackBar 進度）
@@ -61,6 +61,7 @@ CacheView（主入口）
 
 ### 查詢區
 - `_on_query_search()`：模式 `KEY` / `DST` / `ALL`（預設 ALL）、分類預設全部；mounted App 由 Registry 持有搜尋 worker，以 query sequence 只套用最後一次結果 → `_render_query_results()`
+- `did_mount()`／`will_unmount()`：總覽載入以 mount generation 綁定掛載週期，舊 worker 完成後不會更新已卸載或重新掛載後的控制項。
 - `_render_query_detail()` / `_on_apply_dst()` / `_on_revert_dst()` / `_on_restore_latest_query()`
 - 分頁：`_set_query_page` + `_on_page_first/prev/next/last/jump` + `_on_page_size_change`
 

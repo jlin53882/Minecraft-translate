@@ -6,14 +6,9 @@
 
 import argparse
 import os
+from pathlib import Path
 
-_parser = argparse.ArgumentParser(
-    description="比對 core/utils/plugins 模組清單與測試檔名，列出疑似缺少測試的模組（唯讀）。"
-)
-_parser.add_argument(
-    "--tests-dir", default="tests", help="測試資料夾（預設為目前目錄下的 tests）"
-)
-_ARGS = _parser.parse_args()
+ROOT = Path(__file__).resolve().parents[1]
 
 # translation_tool/core 所有模組
 core_modules = [
@@ -106,8 +101,42 @@ app_modules = [
     "view_registry",
 ]
 
+
+def _discover_module_stems(root: Path) -> list[str]:
+    """補上手動清單漏掉的新 production module。"""
+    if not root.exists():
+        return []
+    return sorted(
+        {
+            path.stem
+            for path in root.rglob("*.py")
+            if path.name != "__init__.py" and "__pycache__" not in path.parts
+        }
+    )
+
+
+core_modules = sorted(
+    set(core_modules) | set(_discover_module_stems(ROOT / "translation_tool" / "core"))
+)
+utils_modules = sorted(
+    set(utils_modules)
+    | set(_discover_module_stems(ROOT / "translation_tool" / "utils"))
+)
+checkers_modules = sorted(
+    set(checkers_modules)
+    | set(_discover_module_stems(ROOT / "translation_tool" / "checkers"))
+)
+app_modules = sorted(set(app_modules) | set(_discover_module_stems(ROOT / "app")))
+
 # 讀取測試檔案名稱
-test_dir = _ARGS.tests_dir
+parser = argparse.ArgumentParser(
+    description="比對 production module 與測試檔名，列出疑似缺少測試的模組（唯讀）。"
+)
+parser.add_argument(
+    "--tests-dir", default="tests", help="測試資料夾（預設為目前目錄下的 tests）"
+)
+args = parser.parse_args()
+test_dir = args.tests_dir
 test_files = []
 if os.path.exists(test_dir):
     test_files = [

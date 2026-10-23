@@ -66,7 +66,8 @@ def test_bulk_review_dialog_releases_busy_when_result_cannot_be_posted():
     assert dialog._busy is True  # 進度通知失敗不影響操作
     dialog._post(dialog._apply_result, 0, None, None, None)
     assert dialog._busy is False
-    assert dialog.close_btn.disabled is False
+    # 排程失敗 callback 在 worker thread 執行，只能回收純狀態；頁面已卸載，
+    # 不可在該 thread 直接觸碰 Flet controls。
 
 
 def test_cleanup_dialog_releases_busy_when_result_cannot_be_posted():
@@ -74,7 +75,6 @@ def test_cleanup_dialog_releases_busy_when_result_cannot_be_posted():
     dialog._set_busy(True, "刪除中…")
     dialog._post(dialog._after_apply, None, None)
     assert dialog._busy is False
-    assert dialog.close_btn.disabled is False
 
 
 def test_species_suggestion_discards_running_name_when_result_cannot_be_posted():
@@ -123,7 +123,6 @@ def test_species_dialog_scan_failure_releases_busy():
         dialog._apply_scan, 0, None, None, on_failure=lambda: dialog._set_busy(False)
     )
     assert dialog._busy is False
-    assert dialog.scan_btn.disabled is False
 
 
 def test_entries_panel_abandon_save_unblocks_editor():

@@ -25,16 +25,21 @@ from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import Any
 
-from translation_tool.core import official_locale
-from translation_tool.core.official_locale import (
+# Direct execution puts ``tools/`` on sys.path rather than the repository root.
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from translation_tool.core import official_locale  # noqa: E402
+from translation_tool.core.official_locale import (  # noqa: E402
     OfficialLocaleIndex,
     load_official_locale_index,
 )
-from translation_tool.core.terminology_model import (
+from translation_tool.core.terminology_model import (  # noqa: E402
     MATCH_STANDALONE,
     STANDALONE_ALLOWLIST,
 )
-from translation_tool.utils.text_matching import term_canonical_key
+from translation_tool.utils.text_matching import term_canonical_key  # noqa: E402
 
 _REVIEWED = "reviewed"
 

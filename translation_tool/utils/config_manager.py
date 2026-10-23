@@ -419,6 +419,13 @@ def save_config(config, config_path: str | os.PathLike | None = None) -> bool:
     Returns:
         寫入且讀回驗證成功時為 ``True``，否則為 ``False``。
     """
+    if not isinstance(config, dict):
+        log.error(
+            "拒絕儲存非 object 的設定根節點：%s",
+            type(config).__name__,
+        )
+        return False
+
     resolved_config_path = resolve_project_path(config_path or CONFIG_PATH)
     # 同一秒內連續寫入時 mtime 可能不變，直接清掉快取
     clear_config_cache()
@@ -439,6 +446,8 @@ def save_config(config, config_path: str | os.PathLike | None = None) -> bool:
         # 提交前先驗證暫存內容，避免發布不可解析的 JSON。
         with temp_path.open("r", encoding="utf-8") as f:
             staged_data = json.load(f)
+        if not isinstance(staged_data, dict):
+            raise TypeError("設定根節點必須是 JSON object")
         json.dumps(staged_data, sort_keys=True)
 
         # 替換前的最後一道防線：既存檔無法解析時不覆蓋（可能含可救回的金鑰與自訂來源）。
@@ -456,6 +465,8 @@ def save_config(config, config_path: str | os.PathLike | None = None) -> bool:
 
         with resolved_config_path.open("r", encoding="utf-8") as f:
             written_data = json.load(f)
+        if not isinstance(written_data, dict):
+            raise TypeError("寫入後的設定根節點不是 JSON object")
 
         # 能 dump 代表結構是乾淨的
         json.dumps(written_data, sort_keys=True)

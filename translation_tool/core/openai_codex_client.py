@@ -92,6 +92,18 @@ def _parse_retry_after(value: object) -> float | None:
     return parse_retry_after_header_value(value)
 
 
+def _safe_status(value: object, fallback: int | None = None) -> int | None:
+    """Parse a provider status without allowing malformed payloads to escape."""
+    if isinstance(value, bool):
+        return fallback
+    if isinstance(value, int):
+        return value if 100 <= value <= 599 else fallback
+    if isinstance(value, str) and len(value) <= 3 and value.isdigit():
+        parsed = int(value)
+        return parsed if 100 <= parsed <= 599 else fallback
+    return fallback
+
+
 def _stream_request(
     *,
     token: str,
@@ -227,11 +239,7 @@ def _consume_stream(response: requests.Response, meta_out: dict | None) -> str:
             raise ChatGPTAPIError(
                 str(error.get("code") or error_type or "stream_error"),
                 str(error.get("message") or ""),
-                status=(
-                    int(error["status"])
-                    if str(error.get("status") or "").isdigit()
-                    else None
-                ),
+                status=_safe_status(error.get("status")),
                 error_type=str(error_type or ""),
                 param=str(error.get("param") or ""),
                 request_id=str(
@@ -247,19 +255,15 @@ def _consume_stream(response: requests.Response, meta_out: dict | None) -> str:
             error = failed.get("error", {}) if isinstance(failed, dict) else {}
             if not isinstance(error, dict):
                 error = {}
+            rate_limited_status = _safe_status(error.get("status"))
+            if rate_limited_status is None and "rate" in (
+                f"{error.get('type') or ''} {error.get('code') or ''}".lower()
+            ):
+                rate_limited_status = 429
             raise ChatGPTAPIError(
                 str(error.get("code") or error.get("type") or "response_failed"),
                 str(error.get("message") or ""),
-                status=(
-                    int(error["status"])
-                    if str(error.get("status") or "").isdigit()
-                    else (
-                        429
-                        if "rate"
-                        in f"{error.get('type') or ''} {error.get('code') or ''}".lower()
-                        else None
-                    )
-                ),
+                status=rate_limited_status,
                 error_type=str(error.get("type") or ""),
                 param=str(error.get("param") or ""),
                 request_id=response.headers.get("x-request-id", ""),
@@ -274,6 +278,8 @@ def _consume_stream(response: requests.Response, meta_out: dict | None) -> str:
                 if isinstance(incomplete, dict)
                 else {}
             )
+            if not isinstance(details, dict):
+                details = {}
             reason = str(details.get("reason") or "incomplete")
             raise ChatGPTAPIError("incomplete", reason)
         elif event_type == "response.completed":

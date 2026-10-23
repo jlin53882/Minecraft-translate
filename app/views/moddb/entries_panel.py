@@ -886,7 +886,7 @@ class EntriesPanel(ft.Column):
                 self._apply_save_result,
                 *result,
                 label="Mod 資料庫儲存結果",
-                on_failure=self._abandon_save,
+                on_failure=lambda: setattr(self, "_save_running", False),
             )
 
         try:

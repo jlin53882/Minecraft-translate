@@ -56,6 +56,8 @@ class CleanupDialog:
         self.get_db = get_db
         self.on_complete = on_complete
         self._busy = False
+        self._closed = False
+        self._generation = 0
         self._plan = (
             None  # (檢查檔, 預覽結果, 預覽時的資料庫)；任何選項或資料庫變動都要作廢
         )
@@ -192,9 +194,12 @@ class CleanupDialog:
                 data=RESPONSIVE_DIALOG_MARKER,
             ),
             actions=[self.close_btn, self.apply_btn],
+            on_dismiss=self._on_dismiss,
         )
 
     def open(self) -> None:
+        self._closed = False
+        self._generation += 1
         try:
             present_page_dialog(self.page, self.dialog)
         except (AttributeError, RuntimeError):
@@ -204,7 +209,14 @@ class CleanupDialog:
         if self._busy:
             show_snack(self.page, "資料庫處理中，請稍候。", C.GOLD)
             return
+        self._closed = True
+        self._generation += 1
         close_page_dialog(self.page, self.dialog)
+
+    def _on_dismiss(self, _e=None) -> None:
+        """視窗被外部關閉時，讓尚未回來的背景結果失效。"""
+        self._closed = True
+        self._generation += 1
 
     # ------------------------------------------------------------------ 選項
     def _load_options(self) -> None:
@@ -255,7 +267,7 @@ class CleanupDialog:
         self._launch(work, "Mod 資料庫清理總覽", CommitPolicy.PARTIAL_ALLOWED)
 
     def _apply_overview(self, generation: int, version: str, result, error) -> None:
-        if generation != self._overview_generation:
+        if self._closed or generation != self._overview_generation:
             return  # 計算期間又換了版本
         if error is not None:
             self.overview_title.value = f"版本 {version}：無法計算（{error}）"
@@ -350,6 +362,7 @@ class CleanupDialog:
         if db is None or not version or self._busy:
             show_snack(self.page, "請先選擇版本。", C.GOLD)
             return
+        generation = self._generation
         self._set_busy(True, "掃描條目並匯出檢查檔…")
 
         def work() -> None:
@@ -363,11 +376,13 @@ class CleanupDialog:
             except Exception as exc:  # noqa: BLE001 - worker boundary reports unexpected failures
                 error = exc
                 log_exception(f"資料清理匯出失敗：{version}")
-            self._post(self._after_export, report, error)
+            self._post(self._after_export, report, error, generation)
 
         self._launch(work, "Mod 資料庫清理檢查檔匯出", CommitPolicy.PARTIAL_ALLOWED)
 
-    def _after_export(self, report, error) -> None:
+    def _after_export(self, report, error, generation=None) -> None:
+        if not self._callback_is_current(generation):
+            return
         self._set_busy(False)
         if error is not None:
             show_snack(self.page, f"匯出失敗：{error}", C.RED)
@@ -419,6 +434,7 @@ class CleanupDialog:
         db, path = self.get_db(), self._selected_report()
         if db is None or path is None or self._busy:
             return
+        generation = self._generation
         self._reset_plan()
         self._set_busy(True, "讀取檢查檔並重新檢查…")
 
@@ -431,11 +447,13 @@ class CleanupDialog:
             except Exception as exc:  # noqa: BLE001 - worker boundary reports unexpected failures
                 error = exc
                 log_exception(f"資料清理預覽失敗：{path}")
-            self._post(self._after_preview, path, plan, error)
+            self._post(self._after_preview, path, plan, error, generation)
 
         self._launch(work, "Mod 資料庫清理預覽", CommitPolicy.PARTIAL_ALLOWED)
 
-    def _after_preview(self, path: Path, plan, error) -> None:
+    def _after_preview(self, path: Path, plan, error, generation=None) -> None:
+        if not self._callback_is_current(generation):
+            return
         self._set_busy(False)
         if error is not None:
             self.plan_summary.value = f"無法預覽：{error}"
@@ -489,6 +507,7 @@ class CleanupDialog:
             self.plan_summary.visible = True
             self._safe_update()
             return
+        generation = self._generation
         self._set_busy(True, "刪除中…")
 
         def work() -> None:
@@ -500,7 +519,7 @@ class CleanupDialog:
             except Exception as exc:  # noqa: BLE001 - worker boundary reports unexpected failures
                 error = exc
                 log_exception(f"資料清理刪除失敗：{path}")
-            self._post(self._after_apply, plan, error)
+            self._post(self._after_apply, plan, error, generation)
 
         self._launch(
             work,
@@ -509,7 +528,9 @@ class CleanupDialog:
             durability=DurabilityPolicy.USER_ACTION,
         )
 
-    def _after_apply(self, plan, error) -> None:
+    def _after_apply(self, plan, error, generation=None) -> None:
+        if not self._callback_is_current(generation):
+            return
         self._set_busy(False)
         if error is not None:
             log_warning(f"Mod 資料庫清理失敗：{error!r}")
@@ -543,6 +564,7 @@ class CleanupDialog:
         db, info = self.get_db(), self._selected_batch()
         if db is None or info is None or self._busy:
             return
+        generation = self._generation
         self._set_busy(True, "還原中…")
 
         def work() -> None:
@@ -554,7 +576,7 @@ class CleanupDialog:
             except Exception as exc:  # noqa: BLE001 - worker boundary reports unexpected failures
                 error = exc
                 log_exception(f"資料清理還原失敗：{info.batch_id}")
-            self._post(self._after_revert, result, error)
+            self._post(self._after_revert, result, error, generation)
 
         self._launch(
             work,
@@ -563,7 +585,9 @@ class CleanupDialog:
             durability=DurabilityPolicy.USER_ACTION,
         )
 
-    def _after_revert(self, result, error) -> None:
+    def _after_revert(self, result, error, generation=None) -> None:
+        if not self._callback_is_current(generation):
+            return
         self._set_busy(False)
         if error is not None:
             show_snack(self.page, f"還原失敗：{error}", C.RED)
@@ -621,8 +645,18 @@ class CleanupDialog:
             callback,
             *args,
             label="Mod 資料庫清理結果",
-            on_failure=lambda: self._set_busy(False),
+            on_failure=self._mark_post_failure,
         )
+
+    def _callback_is_current(self, generation) -> bool:
+        """只允許仍屬於目前開啟視窗的結果更新 UI。"""
+        return not self._closed and (
+            generation is None or generation == self._generation
+        )
+
+    def _mark_post_failure(self) -> None:
+        """排程失敗時只回收背景狀態；此 callback 可能在 worker thread 執行。"""
+        self._busy = False
 
     def _set_busy(self, busy: bool, text: str = "") -> None:
         self._busy = busy

@@ -494,7 +494,12 @@ def _auth_endpoint(metadata: dict[str, Any], name: str) -> str:
     return value
 
 
-def _safe_oauth_error(response: requests.Response, action: str) -> ChatGPTOAuthError:
+def _safe_oauth_error(
+    response: requests.Response,
+    action: str,
+    *,
+    extra_secrets: tuple[str, ...] = (),
+) -> ChatGPTOAuthError:
     code = ""
     description = ""
     try:
@@ -510,7 +515,7 @@ def _safe_oauth_error(response: requests.Response, action: str) -> ChatGPTOAuthE
     elif code in {"invalid_client", "unauthorized_client"}:
         message = "OpenAI 未接受此登入用戶端，請稍後再試或更新應用程式。"
     elif description:
-        message = f"{action}失敗：{redact_text(description[:240])}"
+        message = f"{action}失敗：{redact_text(description[:240], extra_secrets)}"
     else:
         message = f"{action}失敗（HTTP {response.status_code}）。"
     return ChatGPTOAuthError(message)
@@ -684,7 +689,11 @@ class PendingChatGPTLogin:
                     "無法交換 ChatGPT 登入授權，請重新登入。"
                 ) from exc
             if not response.ok:
-                raise _safe_oauth_error(response, "ChatGPT 登入授權交換")
+                raise _safe_oauth_error(
+                    response,
+                    "ChatGPT 登入授權交換",
+                    extra_secrets=(code, self.verifier, self.state, self.nonce),
+                )
             try:
                 tokens = response.json()
             except ValueError as exc:
@@ -943,7 +952,11 @@ def get_chatgpt_access_token(
         if not response.ok:
             if response.status_code in {400, 401, 403}:
                 raise ChatGPTOAuthError("ChatGPT 登入已失效，請重新登入。")
-            raise _safe_oauth_error(response, "ChatGPT token 更新")
+            raise _safe_oauth_error(
+                response,
+                "ChatGPT token 更新",
+                extra_secrets=(refresh_token, client_id),
+            )
         try:
             tokens = response.json()
         except ValueError as exc:

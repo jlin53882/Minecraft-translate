@@ -261,6 +261,11 @@ class SpeciesBulkLookup:
                 if failures >= MAX_CONSECUTIVE_FAILURES:
                     stop_reason = "failures"
                     break
+            # Cancellation may arrive while the final lookup is in flight.  The
+            # loop-level check above cannot observe that race, otherwise a job
+            # cancelled on its last item is incorrectly reported as completed.
+            if stop_reason == "completed" and self._cancelled(session):
+                stop_reason = "cancelled"
         except Exception:  # noqa: BLE001 - worker boundary
             # 此工作執行緒沒有任務歸屬；重新歸屬讓 app.log 的完整堆疊帶 [task=…]，
             # 畫面只顯示下方 add_log 的摘要

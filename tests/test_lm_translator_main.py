@@ -94,6 +94,43 @@ def test_batch_error_classifier_covers_retry_actions_without_api_calls():
 
 
 @pytest.mark.parametrize(
+    ("message", "expected_shrink"),
+    [
+        ("Invalid JSON schema for this model.", False),
+        ("Request payload too large for the context window.", True),
+    ],
+)
+def test_invalid_argument_only_shrinks_when_provider_identifies_payload_size(
+    message, expected_shrink
+):
+    from types import SimpleNamespace
+
+    import requests
+
+    from translation_tool.core import lm_translator_main as main
+
+    response = requests.Response()
+    response.status_code = 400
+    response._content = ('{"error":{"message":"' + message + '"}}').encode()
+    error = requests.HTTPError("bad request", response=response)
+    runtime = SimpleNamespace(
+        provider="gemini",
+        key_cycle=MagicMock(),
+        model_pool=["gemini-test"],
+        missing_models=set(),
+        gemini_503_attempted_models=set(),
+    )
+
+    if expected_shrink:
+        assert (
+            main._handle_batch_error(runtime, error, 0) is main.BatchAction.SHRINK_BATCH
+        )
+    else:
+        with pytest.raises(RuntimeError, match="不會盲目縮小批次"):
+            main._handle_batch_error(runtime, error, 0)
+
+
+@pytest.mark.parametrize(
     ("api_error", "expected"),
     [
         (

@@ -414,9 +414,12 @@ class BulkReviewDialog:
         self._launch(work, "Mod 資料庫批量審核預覽", CommitPolicy.PARTIAL_ALLOWED)
 
     def _apply_preview(self, generation: int, plan, error) -> None:
-        self._set_busy(False)
+        if self._closed:
+            return
         if generation != self._generation:
+            self._set_busy(False)
             return  # 預覽期間選項又改了
+        self._set_busy(False)
         if error is not None:
             self.summary.value = f"預覽失敗：{error}"
             show_snack(self.page, f"批量審核預覽失敗：{error}", C.RED)
@@ -604,6 +607,11 @@ class BulkReviewDialog:
 
     def _apply_result(self, generation: int, plan, result, error) -> None:
         """把批量審核結果轉成 UI 摘要，並清除已失效的預覽狀態。"""
+        if self._closed:
+            return
+        if generation != self._generation:
+            self._set_busy(False)
+            return  # 這份結果已被新的操作取代
         self._set_busy(False)
         source_text = "全部來源" if plan.source is None else str(plan.source)
         if error is not None:
@@ -645,6 +653,7 @@ class BulkReviewDialog:
         db, result = self.get_db(), self.result
         if db is None or result is None or self._busy:
             return
+        generation = self._generation
         self._set_busy(True, "還原中…")
 
         def work() -> None:
@@ -654,7 +663,7 @@ class BulkReviewDialog:
             except sqlite3.Error as exc:
                 error = exc
                 log_exception(f"Mod 資料庫批量審核還原失敗：batch={result.batch}")
-            self._post(self._apply_revert, count, error)
+            self._post(self._apply_revert, generation, count, error)
 
         self._launch(
             work,
@@ -665,7 +674,12 @@ class BulkReviewDialog:
             shutdown=ShutdownPolicy.ALLOW_TO_FINISH,
         )
 
-    def _apply_revert(self, count, error) -> None:
+    def _apply_revert(self, generation: int, count, error) -> None:
+        if self._closed:
+            return
+        if generation != self._generation:
+            self._set_busy(False)
+            return
         self._set_busy(False)
         if error is not None:
             show_snack(
@@ -724,8 +738,12 @@ class BulkReviewDialog:
             callback,
             *args,
             label="Mod 資料庫批量審核結果",
-            on_failure=(lambda: self._set_busy(False)) if final else None,
+            on_failure=(self._mark_post_failure if final else None),
         )
+
+    def _mark_post_failure(self) -> None:
+        """排程失敗時只回收背景狀態；此 callback 可能在 worker thread 執行。"""
+        self._busy = False
 
     def _set_busy(self, busy: bool, text: str = "") -> None:
         self._busy = busy

@@ -18,6 +18,32 @@ from pathlib import Path
 REPORT_NAME = "patchouli_zhTW_verification_report.json"
 
 
+def _patchouli_identity(path: str, locale: str) -> tuple[str, str, str] | None:
+    """Extract ``(mod, book, locale-relative path)`` from a Patchouli path.
+
+    ZIP entries may include an extraction-root prefix, while the output tree is
+    normally rooted at ``assets``.  Anchoring on the ``assets`` component keeps
+    both layouts equivalent and avoids treating ``patchouli_books`` as a mod.
+    """
+    parts = path.replace("\\", "/").strip("/").split("/")
+    try:
+        assets_index = parts.index("assets")
+    except ValueError:
+        return None
+    if assets_index + 5 >= len(parts):
+        return None
+    if (
+        parts[assets_index + 2] != "patchouli_books"
+        or parts[assets_index + 4] != locale
+        or not parts[-1].endswith(".json")
+    ):
+        return None
+    mod = parts[assets_index + 1]
+    book = parts[assets_index + 3]
+    rest = "/".join(parts[assets_index + 4 :])
+    return mod, book, rest
+
+
 def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="驗證 Patchouli zh_tw 輸出相對於來源 zh_cn 的完整性（會寫入報告 JSON）。"
@@ -58,12 +84,9 @@ def main(argv: list[str] | None = None) -> int:
     # rest = zh_cn/categories/adventure/adventure.json 或 zh_cn/entries/abc/xyz.json
     src_index = {}
     for path, content in src_cn.items():
-        parts = path.replace("\\", "/").split("/")
-        # ['mods_提取book_輸出', 'assets', '{mod}', 'patchouli_books', '{book}', 'zh_cn', ...]
-        if len(parts) >= 6 and parts[-1].endswith(".json"):
-            mod = parts[2]
-            book = parts[4]  # parts[3] 是 'patchouli_books' 固定字
-            rest = "/".join(parts[5:])  # 從 zh_cn 開始
+        identity = _patchouli_identity(path, "zh_cn")
+        if identity is not None:
+            mod, book, rest = identity
             src_index[(mod, book, rest)] = content
 
     print(f"來源索引: {len(src_index)}", flush=True)
@@ -72,12 +95,9 @@ def main(argv: list[str] | None = None) -> int:
     out_index = {}
     for f in pb.rglob("*.json"):
         rel = os.path.normpath(str(f.relative_to(pb)))
-        parts = rel.split(os.sep)
-        # ['assets', '{mod}', 'patchouli_books', '{book}', 'zh_tw', ...]
-        if len(parts) >= 5 and parts[-1].endswith(".json"):
-            mod = parts[1]
-            book = parts[3]  # parts[2] 是 'patchouli_books' 固定字
-            rest = "/".join(parts[4:])  # 從 zh_tw 開始，統一用 /
+        identity = _patchouli_identity(rel, "zh_tw")
+        if identity is not None:
+            mod, book, rest = identity
             out_index[(mod, book, rest)] = f
 
     print(f"輸出索引: {len(out_index)}", flush=True)
@@ -187,6 +207,15 @@ def main(argv: list[str] | None = None) -> int:
             )
 
     results["ok_mods"] = sorted(results["ok_mods"])
+    has_errors = any(
+        results[key]
+        for key in (
+            "missing_in_output",
+            "output_no_source",
+            "key_mismatch",
+            "cjk_issues",
+        )
+    )
 
     print("\n=== 結果 ===", flush=True)
     print(f"來源: {results['total_src']} | 輸出: {results['total_out']}", flush=True)
@@ -199,6 +228,7 @@ def main(argv: list[str] | None = None) -> int:
 
     # 寫報告
     del results["ok_mods"]  # set not JSON serializable
+    OUT.mkdir(parents=True, exist_ok=True)
     report_path = OUT / REPORT_NAME
     with open(report_path, "w", encoding="utf-8") as f:
         json.dump(results, f, ensure_ascii=False, indent=2)
@@ -243,7 +273,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"  {m}: {len(files)} 個")
             for f in files[:3]:
                 print(f"    - {f}")
-    return 0
+    return 1 if has_errors else 0
 
 
 if __name__ == "__main__":

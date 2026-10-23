@@ -458,7 +458,7 @@ class SpeciesCandidateDialog:
                 generation,
                 result,
                 error,
-                on_failure=lambda: self._set_busy(False),
+                on_failure=lambda: setattr(self, "_busy", False),
             )
 
         if not self._launch(work, "Mod 資料庫學名候選掃描"):

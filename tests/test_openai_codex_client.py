@@ -386,6 +386,54 @@ def test_response_incomplete_keeps_shrink_batch_action(monkeypatch):
 
 
 @pytest.mark.parametrize(
+    "event_payload",
+    [
+        {
+            "type": "error",
+            "error": {
+                "code": "stream_backend_error",
+                "status": "not-a-status",
+            },
+        },
+        {
+            "type": "response.failed",
+            "response": {
+                "error": {
+                    "code": "stream_backend_error",
+                    "status": "999999999999999999999999",
+                }
+            },
+        },
+    ],
+)
+def test_malformed_sse_status_is_treated_as_unknown(event_payload):
+    response = _FakeStreamResponse([event_payload])
+
+    with pytest.raises(client.ChatGPTAPIError) as exc_info:
+        client._consume_stream(response, None)
+
+    assert exc_info.value.status is None
+    assert response.closed is True
+
+
+def test_malformed_incomplete_details_do_not_crash_stream_parser():
+    response = _FakeStreamResponse(
+        [
+            {
+                "type": "response.incomplete",
+                "response": {"incomplete_details": ["unexpected"]},
+            }
+        ]
+    )
+
+    with pytest.raises(client.ChatGPTAPIError) as exc_info:
+        client._consume_stream(response, None)
+
+    assert exc_info.value.code == "incomplete"
+    assert response.closed is True
+
+
+@pytest.mark.parametrize(
     ("event", "code"),
     [
         ("response.failed", "subscription_sharing_usage_unavailable"),

@@ -15,6 +15,7 @@ SCRIPTS = [
     "gap_analysis.py",
     "test_all_features.py",
     "test_main.py",
+    "report_standalone_term_candidates.py",
     "verify_patchouli_final.py",
 ]
 

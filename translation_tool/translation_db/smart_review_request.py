@@ -109,7 +109,15 @@ class BatchRequestOutcome:
 
 def _http_retry_after(exc: requests.HTTPError) -> float | None:
     """從 Gemini HTTP 錯誤回應（header 或 RetryInfo）讀取 Retry-After 秒數。"""
-    return parse_response_retry_after(exc.response)
+    retry_after = parse_response_retry_after(exc.response)
+    response = exc.response
+    status = getattr(response, "status_code", None)
+    # 429 is a rate-limit wait, not a promise that the application should
+    # sleep indefinitely.  Keep the raw value for 503 because the dedicated
+    # transient-retry policy uses it to reject waits over its own limit.
+    if status == 429 and (retry_after is None or retry_after < 0 or retry_after > 120):
+        return None
+    return retry_after
 
 
 class _BatchRequester:

@@ -1122,7 +1122,16 @@ def _parse_rate_limit_error(error: Exception) -> tuple[str, float, str]:
     延遲來自 ``Retry-After`` header 或 ``RetryInfo``（見 ``retry_after.parse_retry_after``）。
     """
     response = getattr(error, "response", None)
-    retry_after = parse_response_retry_after(response) or 0.0
+    parsed_retry_after = parse_response_retry_after(response)
+    # A provider-controlled delay must not be allowed to suspend the app for
+    # days.  503 has a separate policy below; this bound is for 429 waits.
+    retry_after = (
+        parsed_retry_after
+        if parsed_retry_after is not None
+        and math.isfinite(parsed_retry_after)
+        and 0 <= parsed_retry_after <= GEMINI_503_MAX_RETRY_AFTER_SEC
+        else 0.0
+    )
     try:
         error_json = response.json().get("error", {})
         if not isinstance(error_json, dict):
@@ -1131,9 +1140,24 @@ def _parse_rate_limit_error(error: Exception) -> tuple[str, float, str]:
         return "unparsed", retry_after, redact_text(error).upper()
     remote_message = redact_text(error_json.get("message", "")).upper()
     quota_id = ""
-    for detail in error_json.get("details", []):
-        if detail.get("@type") == "type.googleapis.com/google.rpc.QuotaFailure":
-            quota_id = detail.get("violations", [{}])[0].get("quotaId", "").upper()
+    details = error_json.get("details", [])
+    if not isinstance(details, list):
+        details = []
+    for detail in details:
+        if not isinstance(detail, dict):
+            continue
+        if detail.get("@type") != "type.googleapis.com/google.rpc.QuotaFailure":
+            continue
+        violations = detail.get("violations", [])
+        if not isinstance(violations, list):
+            continue
+        for violation in violations:
+            if isinstance(violation, dict):
+                quota_id = str(violation.get("quotaId", "")).upper()
+                if quota_id:
+                    break
+        if quota_id:
+            break
     if "PERDAY" in quota_id or "DAILY" in remote_message:
         return "rpd", retry_after, remote_message
     if "PERMINUTE" in quota_id or "RPM" in remote_message:
@@ -1291,8 +1315,11 @@ def _handle_chatgpt_api_error(
     retry_after = getattr(error, "retry_after", None)
     if retry_after is not None:
         try:
-            wait_sec = max(0.0, float(retry_after))
-        except (TypeError, ValueError):
+            parsed_retry_after = float(retry_after)
+            if not math.isfinite(parsed_retry_after) or parsed_retry_after < 0:
+                raise ValueError("retry_after must be finite and non-negative")
+            wait_sec = parsed_retry_after
+        except (TypeError, ValueError, OverflowError):
             retry_after = None
     if retry_after is None:
         base_delay = min(2**runtime.chatgpt_retry_count, 30)
@@ -1559,7 +1586,15 @@ def _handle_batch_error(
             raise RuntimeError(
                 f"❌ maxOutputTokens（{model_output_cap}）超過模型上限；請調低 {setting}"
             )
-        log_info("[⚠️] 400 INVALID_ARGUMENT：payload 格式錯誤或過大，縮小 batch")
+        if not _payload_error_allows_shrink(error, status):
+            detail = _remote_error_detail(error)
+            if detail:
+                log_info(f"[⚠️] 伺服器回應：{detail}")
+            raise RuntimeError(
+                "❌ provider 拒絕翻譯請求；回應沒有指出 payload/context 過大，"
+                "不會盲目縮小批次。請檢查模型、schema 與請求設定。"
+            ) from error
+        log_info("[⚠️] 400 INVALID_ARGUMENT：payload 過大，縮小 batch")
         detail = _remote_error_detail(error)
         if detail:
             log_info(f"[⚠️] 伺服器回應：{detail}")
@@ -1803,9 +1838,12 @@ def _record_quality_retry_failure(
             )
             if is_rate_limited and not _is_chatgpt_quota_exhaustion(error):
                 try:
-                    retry_after = max(0.0, float(error.retry_after or 0.0))
-                except (TypeError, ValueError):
+                    retry_after = float(error.retry_after or 0.0)
+                    if not math.isfinite(retry_after) or retry_after < 0:
+                        raise ValueError("retry_after must be finite and non-negative")
+                except (TypeError, ValueError, OverflowError):
                     retry_after = 0.0
+                retry_after = min(retry_after, CHATGPT_MAX_RETRY_AFTER_SEC)
                 if retry_after <= 0:
                     retry_after = max(1.0, runtime.batch_interval_sec)
                 quota.defer_request_slot(runtime.provider, model_name, retry_after)

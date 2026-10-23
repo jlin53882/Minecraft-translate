@@ -273,6 +273,27 @@ def test_oauth_error_description_is_masked():
     assert FAKE_OPENAI not in str(err) and "ChatGPT token 更新失敗" in str(err)
 
 
+def test_oauth_exchange_error_masks_the_one_time_authorization_code():
+    from translation_tool.core import codex_oauth
+
+    code = "one-time-authorization-code-123456789"
+
+    class Resp:
+        status_code = 400
+        ok = False
+
+        def json(self):
+            return {
+                "error": "invalid_grant",
+                "error_description": f"invalid code={code}",
+            }
+
+    err = codex_oauth._safe_oauth_error(
+        Resp(), "ChatGPT 登入授權交換", extra_secrets=(code,)
+    )
+    assert code not in str(err)
+
+
 def test_oauth_refresh_registers_new_tokens(monkeypatch):
     from contextlib import nullcontext
 

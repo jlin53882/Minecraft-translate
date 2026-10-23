@@ -4,7 +4,11 @@ from __future__ import annotations
 
 import pytest
 
-from translation_tool.utils.worker_count import WORKER_POLICIES, resolve_worker_count
+from translation_tool.utils.worker_count import (
+    MAX_CONFIGURED_WORKERS,
+    WORKER_POLICIES,
+    resolve_worker_count,
+)
 
 
 def _cfg(value):
@@ -17,11 +21,21 @@ def test_valid_small_values_are_used_as_is(value):
     assert resolve_worker_count("file_pipeline", _cfg(value), cpu=16) == value
 
 
-def test_high_value_is_capped_only_for_purposes_with_a_cap():
-    assert resolve_worker_count("count_prescan", _cfg(64), cpu=8) == 64  # 無上限
+def test_high_value_is_capped_by_each_purpose_policy():
+    assert resolve_worker_count("count_prescan", _cfg(64), cpu=8) == 64
     assert resolve_worker_count("file_pipeline", _cfg(64), cpu=8) == 4  # CPU 一半
     assert resolve_worker_count("jar_extract", _cfg(64), cpu=8) == 32
     assert resolve_worker_count("moddb_scan", _cfg(64), cpu=8) == 8
+
+
+def test_extreme_configured_worker_count_has_an_absolute_cap():
+    assert (
+        resolve_worker_count("cache_load", _cfg(10**9), cpu=8) == MAX_CONFIGURED_WORKERS
+    )
+    assert (
+        resolve_worker_count("jar_browser", _cfg(10**9), cpu=8)
+        == MAX_CONFIGURED_WORKERS
+    )
 
 
 def test_low_cpu_count_keeps_at_least_one_worker():

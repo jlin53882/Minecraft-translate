@@ -157,6 +157,15 @@ def test_parse_rate_limit_error_unparsed_body_is_not_a_quota_exhaustion():
     assert wait == 8.0
 
 
+def test_rate_limit_waits_reject_unbounded_provider_delays():
+    error = _http_429(_rpm_body(None), {"Retry-After": "121"})
+
+    assert main._parse_rate_limit_error(error)[1] == 0.0
+    from translation_tool.translation_db.smart_review_request import _http_retry_after
+
+    assert _http_retry_after(error) is None
+
+
 def test_parse_rate_limit_error_rpd_keeps_model_quota_classification():
     body = {
         "error": {

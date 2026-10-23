@@ -259,22 +259,20 @@ def _run_next_migration(conn: sqlite3.Connection, version: int) -> int:
     """從 ``version`` 升到下一版；回傳此後的 schema 版本。
 
     版本以取得寫鎖（``BEGIN IMMEDIATE``）後重讀的為準：等鎖期間若別的程序已升級，
-    這裡看到不同的版本就放棄本次 migration（v2 回填等不是冪等，重跑會蓋掉人工審核），
-    並刪除自己剛建立的備份。``Connection.backup`` 不能在自己持有寫鎖時執行，
-    所以備份先於交易；只有「備份當下的版本」與「持鎖後的版本」一致時才保留，
-    保證留下的備份就是該次 migration 前的狀態，且不會重複建立。
+    這裡看到不同的版本就放棄本次 migration（v2 回填等不是冪等，重跑會蓋掉人工審核）。
+    備份也在寫鎖內建立，但使用獨立的讀取連線；``Connection.backup`` 不能在同一連線
+    持有寫鎖時執行，獨立讀取連線則能看見已提交的 WAL 資料，同時不會讓其他 writer
+    在備份與 migration 之間插入資料。
     ``init_schema`` 開頭的 ``executescript`` 會隱式 commit，交易從這裡才開始。
     """
     next_version = version + 1
-    backup = _backup_for_migration(conn, next_version)
     conn.execute("BEGIN IMMEDIATE")
     try:
         current = stored_schema_version(conn)
         if current != version:
             conn.rollback()
-            if backup is not None:
-                backup.unlink(missing_ok=True)
             return current
+        _backup_for_migration(conn, next_version)
         _migrate_to(conn, next_version)
         conn.execute(
             "UPDATE meta SET value=? WHERE key='schema_version'",
@@ -303,6 +301,25 @@ def _backup_for_migration(conn: sqlite3.Connection, next_version: int) -> Path |
     if next_version == 8:
         return _backup_before_smart_review_draft_migration(conn)
     return None
+
+
+def _create_migration_backup(
+    conn: sqlite3.Connection, source_path: Path, backup_path: Path
+) -> Path:
+    """在 ``conn`` 的寫鎖下，以獨立讀取連線建立一致的旁側備份。"""
+    target = sqlite3.connect(backup_path)
+    source = None
+    try:
+        source = connect(source_path, readonly=True)
+        source.backup(target)
+    except BaseException:
+        backup_path.unlink(missing_ok=True)
+        raise
+    finally:
+        if source is not None:
+            source.close()
+        target.close()
+    return backup_path
 
 
 def _migrate_to(conn: sqlite3.Connection, next_version: int) -> None:
@@ -357,15 +374,7 @@ def _backup_before_review_migration(conn: sqlite3.Connection) -> Path | None:
     backup_path = source_path.with_name(
         f"{source_path.name}.pre-schema-v2-{time.time_ns()}.bak"
     )
-    target = sqlite3.connect(backup_path)
-    try:
-        conn.backup(target)
-    except BaseException:
-        target.close()
-        backup_path.unlink(missing_ok=True)
-        raise
-    target.close()
-    return backup_path
+    return _create_migration_backup(conn, source_path, backup_path)
 
 
 def _migrate_review_state_v2(conn: sqlite3.Connection) -> None:
@@ -409,15 +418,7 @@ def _backup_before_time_migration(conn: sqlite3.Connection) -> Path | None:
     backup_path = source_path.with_name(
         f"{source_path.name}.pre-schema-v3-{time.time_ns()}.bak"
     )
-    target = sqlite3.connect(backup_path)
-    try:
-        conn.backup(target)
-    except BaseException:
-        target.close()
-        backup_path.unlink(missing_ok=True)
-        raise
-    target.close()
-    return backup_path
+    return _create_migration_backup(conn, source_path, backup_path)
 
 
 def _migrate_time_and_revision_v3(conn: sqlite3.Connection) -> None:
@@ -464,15 +465,7 @@ def _backup_before_source_history_migration(
     backup_path = source_path.with_name(
         f"{source_path.name}.pre-schema-v4-{time.time_ns()}.bak"
     )
-    target = sqlite3.connect(backup_path)
-    try:
-        conn.backup(target)
-    except BaseException:
-        target.close()
-        backup_path.unlink(missing_ok=True)
-        raise
-    target.close()
-    return backup_path
+    return _create_migration_backup(conn, source_path, backup_path)
 
 
 def _migrate_source_history_v4(conn: sqlite3.Connection) -> None:
@@ -496,15 +489,7 @@ def _backup_before_ai_repair_source_migration(
     backup_path = source_path.with_name(
         f"{source_path.name}.pre-schema-v5-{time.time_ns()}.bak"
     )
-    target = sqlite3.connect(backup_path)
-    try:
-        conn.backup(target)
-    except BaseException:
-        target.close()
-        backup_path.unlink(missing_ok=True)
-        raise
-    target.close()
-    return backup_path
+    return _create_migration_backup(conn, source_path, backup_path)
 
 
 def _migrate_ai_repair_source_v5(conn: sqlite3.Connection) -> None:
@@ -528,15 +513,7 @@ def _backup_before_independent_review_migration(
     backup_path = source_path.with_name(
         f"{source_path.name}.pre-schema-v6-{time.time_ns()}.bak"
     )
-    target = sqlite3.connect(backup_path)
-    try:
-        conn.backup(target)
-    except BaseException:
-        target.close()
-        backup_path.unlink(missing_ok=True)
-        raise
-    target.close()
-    return backup_path
+    return _create_migration_backup(conn, source_path, backup_path)
 
 
 def _migrate_independent_review_v6(conn: sqlite3.Connection) -> None:
@@ -621,15 +598,7 @@ def _backup_before_smart_review_migration(
     backup_path = source_path.with_name(
         f"{source_path.name}.pre-schema-v7-{time.time_ns()}.bak"
     )
-    target = sqlite3.connect(backup_path)
-    try:
-        conn.backup(target)
-    except BaseException:
-        target.close()
-        backup_path.unlink(missing_ok=True)
-        raise
-    target.close()
-    return backup_path
+    return _create_migration_backup(conn, source_path, backup_path)
 
 
 def _migrate_smart_review_v7(conn: sqlite3.Connection) -> None:
@@ -759,15 +728,7 @@ def _backup_before_smart_review_draft_migration(
     backup_path = source_path.with_name(
         f"{source_path.name}.pre-schema-v8-{time.time_ns()}.bak"
     )
-    target = sqlite3.connect(backup_path)
-    try:
-        conn.backup(target)
-    except BaseException:
-        target.close()
-        backup_path.unlink(missing_ok=True)
-        raise
-    target.close()
-    return backup_path
+    return _create_migration_backup(conn, source_path, backup_path)
 
 
 def _migrate_smart_review_v8(conn: sqlite3.Connection) -> None:

@@ -74,7 +74,7 @@ class CacheView(
         """
         # Initialize attributes BEFORE super().__init__() to avoid _notify errors
         self._all_logs: list[str] = []
-        self._page = page
+        self._page, self._mount_generation, self._is_mounted = page, 0, False
         super().__init__(expand=True, spacing=10)
 
         # -------------------- Global state --------------------
@@ -164,10 +164,13 @@ class CacheView(
         總覽需要載入整個快取（大量資料時數秒），有 event loop 時改在執行緒讀取，
         頁面先顯示「載入中」，不再阻塞切換頁面。
         """
+        self._is_mounted = True
+        self._mount_generation += 1
+        mount_generation = self._mount_generation
         self._bind_page_resize(self.page)
         run_task = getattr(self.page, "run_task", None)
         if run_task is None:
-            self._finish_mount(self._fetch_overview())
+            self._finish_mount(self._fetch_overview(), mount_generation)
             return
 
         try:
@@ -201,7 +204,8 @@ class CacheView(
             while not operation.done_event.is_set():
                 await asyncio.sleep(0.02)
             fetched = result.get("overview", ({}, RuntimeError("load cancelled"), ""))
-            self._finish_mount(fetched)
+            if self._is_mounted and mount_generation == self._mount_generation:
+                self._finish_mount(fetched, mount_generation)
 
         run_task(_load)
 
@@ -216,8 +220,12 @@ class CacheView(
         except Exception as ex:  # noqa: BLE001 - 錯誤顯示在 UI
             return {}, ex, traceback.format_exc()
 
-    def _finish_mount(self, fetched):
+    def _finish_mount(self, fetched, mount_generation=None):
         """（event loop 上）套用總覽並渲染頁面。"""
+        if mount_generation is not None and (
+            not self._is_mounted or mount_generation != self._mount_generation
+        ):
+            return
         try:
             data, error, tb = fetched
             if error is not None:
@@ -264,6 +272,8 @@ class CacheView(
 
     def will_unmount(self):
         """換頁或關閉時移除 resize 訂閱，不留下指向已卸載控制項的回呼。"""
+        self._is_mounted = False
+        self._mount_generation += 1
         self._unbind_page_resize()
 
     def _on_page_resized(self, e):

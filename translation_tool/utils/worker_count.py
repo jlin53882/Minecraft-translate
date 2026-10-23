@@ -4,7 +4,7 @@
 所以各用途保有自己的預設值與上限，不強制相同；共通的只有解析規則：
 
 - 設定值必須是正整數（``bool``、字串、浮點數、0、負數都視為無效）；無效時用該用途的預設值。
-- 有效時取設定值，無效時取預設值；兩者都再套該用途的上限（若有）。
+- 有效時取設定值，無效時取預設值；兩者都再套該用途的上限。
 - 結果至少 1。
 """
 
@@ -28,25 +28,33 @@ def _half(cpu: int) -> int:
     return max(1, cpu // 2)
 
 
+MAX_CONFIGURED_WORKERS = 64
+
+
+def _absolute_cap(_cpu: int) -> int:
+    """限制手動設定的 worker 數，避免無界建立執行緒與待處理 future。"""
+    return MAX_CONFIGURED_WORKERS
+
+
 WORKER_POLICIES: dict[str, WorkerPolicy] = {
-    # 預掃描／計數：輕量讀檔，預設 4，不另設上限
-    "count_prescan": WorkerPolicy(lambda cpu: 4),
+    # 預掃描／計數：輕量讀檔，預設 4。
+    "count_prescan": WorkerPolicy(lambda cpu: 4, cap=_absolute_cap),
     # 翻譯前抽取項目（lm_translator／lm_resume）
-    "lm_extract": WorkerPolicy(lambda cpu: 4),
+    "lm_extract": WorkerPolicy(lambda cpu: 4, cap=_absolute_cap),
     # 翻譯快取分片載入
-    "cache_load": WorkerPolicy(lambda cpu: 4),
+    "cache_load": WorkerPolicy(lambda cpu: 4, cap=_absolute_cap),
     # Mod 資料庫掃描：不超過 CPU 核心數
     "moddb_scan": WorkerPolicy(lambda cpu: 4, cap=lambda cpu: cpu),
     # 圖示索引／預覽快取
-    "icon_index": WorkerPolicy(lambda cpu: 8),
-    "icon_cache": WorkerPolicy(lambda cpu: 4),
+    "icon_index": WorkerPolicy(lambda cpu: 8, cap=_absolute_cap),
+    "icon_cache": WorkerPolicy(lambda cpu: 4, cap=_absolute_cap),
     # 逐檔／逐 JAR 的檔案處理（翻譯、語系合併）：CPU 的一半
     "file_pipeline": WorkerPolicy(_half, cap=_half),
     # JAR 內容提取：預設 CPU 的一半，使用者設定最多 32
     "jar_extract": WorkerPolicy(_half, cap=lambda cpu: 32),
     # JAR 預覽掃描、JAR 瀏覽
-    "jar_preview": WorkerPolicy(lambda cpu: min(4, cpu)),
-    "jar_browser": WorkerPolicy(_half),
+    "jar_preview": WorkerPolicy(lambda cpu: min(4, cpu), cap=_absolute_cap),
+    "jar_browser": WorkerPolicy(_half, cap=_absolute_cap),
 }
 
 

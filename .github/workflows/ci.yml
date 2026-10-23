@@ -80,26 +80,25 @@ jobs:
             --jq '.[] | select(.status != "removed") | .filename' > changed-files.txt
 
           # 只有「沒有符合的檔案」才允許空結果；只保留仍存在的 .py 檔
-          FILES=""
+          FILES=()
           while IFS= read -r f; do
             if [[ "$f" == *.py && -f "$f" ]]; then
-              FILES+="$f"$'\n'
+              FILES+=("$f")
             fi
           done < changed-files.txt
-          FILES="${FILES%$'\n'}"
 
-          if [ -z "$FILES" ]; then
+          if [ "${#FILES[@]}" -eq 0 ]; then
             echo "No Python files changed; skipping ruff."
             exit 0
           fi
 
           echo "Changed Python files:"
-          echo "$FILES"
+          printf '%s\n' "${FILES[@]}"
 
           # 完整的 changed-files Ruff gate，不再有逐檔豁免。
           # E402 設在 pyproject.toml，讓本機與 CI 檢查一致。
-          echo "$FILES" | xargs uv run ruff check
-          echo "$FILES" | xargs uv run ruff format --check
+          uv run ruff check "${FILES[@]}"
+          uv run ruff format --check "${FILES[@]}"
 
   audit:
     # 依 uv.lock 的 production 依賴（不含 dev 群組）檢查已知漏洞（#147）。
