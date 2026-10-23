@@ -388,17 +388,7 @@ class EntriesPanel(ft.Column):
             # carry it into a different database.
             self.source_filter.reset()
         self._db_identity = identity
-        versions = db.versions()
-        kit.set_dropdown_options(self.version_dd, [(v, v) for v in versions])
-        if self.version not in versions:
-            wanted = current_settings().version
-            self.version = (
-                wanted if wanted in versions else (versions[0] if versions else None)
-            )
-        self.version_dd.value = self.version
-        source_codes = db.effective_source_codes(self.version) if self.version else ()
-        self.source_filter.refresh(source_codes, catalog=self._render_source_catalog)
-        self._load_mods()
+        self._refresh_filter_options()
         self._load_list(keep_selection=keep_selection)
 
     def apply_refresh_snapshot(self, snapshot: dict) -> None:
@@ -444,6 +434,53 @@ class EntriesPanel(ft.Column):
             self.mod_id = None
         self.mod_dd.value = self.mod_id or ALL_MODS
         self._load_kinds()
+
+    def _refresh_filter_options(self) -> None:
+        """Reload module/source options using the same scope as the entry list."""
+        db = self.db()
+        if db is None:
+            self.version_dd.options = []
+            self._load_mods()
+            return
+
+        # Keep the synchronous fallback and standalone panel tests on the same
+        # option semantics as ModDbView's worker snapshot.  The import is
+        # intentionally local because panel_refresh imports PAGE_SIZE from
+        # this module.
+        from app.views.moddb.panel_refresh import _resolve_entries_scope
+
+        try:
+            criteria = self._entry_filter()
+        except ValueError:
+            # _load_list owns the visible validation error.  Keep the last
+            # valid dependent options instead of raising while reporting it.
+            return
+        scope = _resolve_entries_scope(
+            db,
+            {
+                "criteria": criteria,
+                "version": self.version,
+                "mod_id": self.mod_id,
+                "kind": self.kind,
+            },
+            current_settings(),
+        )
+        apply_filter_options(
+            self,
+            {
+                "identity": self._database_identity(db),
+                "source_catalog": self._render_source_catalog,
+                "effective_source_codes": scope["source_codes"],
+                "filter_options_are_filtered": scope["options_are_filtered"],
+                "versions": scope["versions"],
+                "version": scope["version"],
+                "mods": scope["mods"],
+                "kinds": scope["kinds"],
+                "source": scope["source"],
+                "mod_id": scope["mod_id"],
+                "kind": scope["kind"],
+            },
+        )
 
     def _load_kinds(self) -> None:
         """類型選項取自資料庫實際出現的類型（日後新增類型會自動出現）。"""
@@ -512,6 +549,10 @@ class EntriesPanel(ft.Column):
             else:
                 current = self.rows[0]
         self.select(current.id if current else None)
+        if self._on_filter_changed is None:
+            # Standalone panels and synchronous fallback pages have no parent
+            # snapshot worker to apply the dependent dropdown options.
+            self._refresh_filter_options()
 
     def _render_list(self, *, keep_scroll: bool = False) -> None:
         self.count_badge.value = (

@@ -229,6 +229,26 @@ def test_entries_write_invalidates_overview_but_keeps_current_rows_fresh(db_path
     assert view._overview_needs_refresh is True
 
 
+def test_cleanup_completion_invalidates_all_mounted_moddb_panels(db_path):
+    """清理／還原完成後，總覽以外的已掛載頁籤也必須標記為過期。"""
+    seed(db_path)
+    view = moddb_view.ModDbView(mock_page(), mock_filepicker())
+    for key in ("entries", "scan", "translate"):
+        view.show_tab(key)
+    view.show_tab("overview")
+    assert all(not needed for needed in view._panel_refresh_needed.values())
+
+    previous_revision = view._data_revision
+    view.overview._on_cleanup_complete()
+
+    assert view._data_revision == previous_revision + 1
+    assert view._panel_refresh_needed == {
+        "entries": True,
+        "scan": True,
+        "translate": True,
+    }
+
+
 def test_task_completion_invalidates_cached_moddb_panels(db_path, monkeypatch):
     seed(db_path)
     view = moddb_view.ModDbView(mock_page(), mock_filepicker())
@@ -919,6 +939,64 @@ def test_advanced_filter_refreshes_module_and_source_options(db_path):
         "__all__",
         str(SRC_AI),
     ]
+    db.close()
+
+
+def test_review_status_filter_refreshes_module_and_source_options(db_path):
+    """審核狀態改變後，模組／來源選單要與實際結果範圍一致。"""
+    db = TranslationDB(db_path)
+    db.ingest(
+        "1.21.1",
+        [
+            ScanItem(KIND_LANG, "foo", "item.foo.a", "Foo", "甲"),
+            ScanItem(KIND_LANG, "bar", "item.bar.a", "Bar", "乙"),
+        ],
+    )
+    foo = next(row for row in db.list_entries("1.21.1")[0] if row.mod_id == "foo")
+    db.review_manual(foo.id, expected_zh_tw="甲", actor="測試審核", propagate=False)
+    db.close()
+
+    settings = DbSettings(path=str(db_path), version="1.21.1")
+    snapshot = moddb_view.load_panel_snapshot(
+        "entries",
+        {
+            "criteria": EntryFilter(version="1.21.1", review_status="unreviewed"),
+            "version": "1.21.1",
+            "mod_id": None,
+            "kind": None,
+            "page": 1,
+        },
+        settings,
+    )
+
+    assert snapshot["total"] == 1
+    assert [row.mod_id for row in snapshot["rows"]] == ["bar"]
+    assert snapshot["mods"] == ["bar"]
+    assert snapshot["filter_options_are_filtered"] is True
+
+
+def test_entries_panel_review_filter_updates_module_dropdown(db_path):
+    """條目頁的未審查篩選會立即移除已無符合條目的模組。"""
+    db = TranslationDB(db_path)
+    db.ingest(
+        "1.21.1",
+        [
+            ScanItem(KIND_LANG, "foo", "item.foo.a", "Foo", "甲"),
+            ScanItem(KIND_LANG, "bar", "item.bar.a", "Bar", "乙"),
+        ],
+    )
+    foo = next(row for row in db.list_entries("1.21.1")[0] if row.mod_id == "foo")
+    db.review_manual(foo.id, expected_zh_tw="甲", actor="測試審核", propagate=False)
+    page = mock_page()
+    page.run_thread = lambda target: target()
+    panel = entries_panel.EntriesPanel(page, lambda: db)
+    panel.refresh()
+
+    panel.review_filter.value = "unreviewed"
+    panel._on_review_status()
+
+    assert [row.mod_id for row in panel.rows] == ["bar"]
+    assert [option.key for option in panel.mod_dd.options] == ["全部模組", "bar"]
     db.close()
 
 

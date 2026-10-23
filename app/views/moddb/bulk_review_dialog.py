@@ -647,6 +647,11 @@ class BulkReviewDialog:
         show_snack(self.page, message, C.EM, text_color=C.ON_EM)
         if self.on_complete:
             self.on_complete(result)
+        # The dialog remains open after a successful batch so the user can
+        # inspect the summary or revert it.  Its scope dropdowns are therefore
+        # resident UI state and must be re-queried after the transaction; the
+        # EntriesPanel callback only refreshes the outer list.
+        self._refresh_scope_after_database_change()
         self._safe_update()
 
     def _revert(self, _e=None) -> None:
@@ -693,7 +698,16 @@ class BulkReviewDialog:
         show_snack(self.page, f"批量審核已還原 {format_count(count)} 筆", C.EM)
         if self.on_complete:
             self.on_complete(None)
+        # Reverting restores the candidates that were just reviewed.  Refresh
+        # the resident scope snapshot so the module/source options immediately
+        # reflect the restored database state.
+        self._refresh_scope_after_database_change()
         self._safe_update()
+
+    def _refresh_scope_after_database_change(self) -> None:
+        """Reload resident module/source options after a committed mutation."""
+        if not self._closed:
+            self._start_scope_options_load()
 
     # ------------------------------------------------------------------ 工具
     def _launch(

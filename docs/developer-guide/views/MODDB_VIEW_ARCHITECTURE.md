@@ -35,6 +35,12 @@
 `SmartReviewDialog` 的審查內容區使用獨立的寬高設定，且在頁面尺寸變更時沿用同一組設定；逐筆與批量工具列以可收合 `SectionCard` 保留摘要資訊又能讓出檢視空間。開啟審查批次時先載入逐筆模式，只有切換到批量模式才呼叫 `SmartReviewBatchReviewer.load_run`，避免隱藏控制項啟動候選分頁查詢。
 智慧校對套用成功後，`open_smart_review` 會先以 `refresh_entry_filter(panel, keep_selection=True)` 重載目前條目頁，再通知 `ModDbView` 外層狀態變更，確保條目列表旁的來源／審核標籤與中央編輯器同步。
 `SmartReviewRunPanel` 開啟或變更範圍時，會以唯讀 count query 顯示符合範圍的未審核 AI 譯文總數、本次上限與批次數；上限輸入 `0` 代表不限，每批筆數仍必須大於 `0`。機翻、既有譯文修復與 Smart Review 都透過 `translation_tool/core/common_batch_executor.py` 的共用批次生命週期回報安全結構化事件；各自的 candidate、prompt、provider retry、validation、CAS／快取／JSON 寫入仍由專屬策略保留。Smart Review 事件分別記錄 batch start、外層 attempt、provider API、底層 network attempt、HTTP／timeout／connection 錯誤分類、Retry-After、配額等待、retry backoff、回應解析與 JSON 寫入耗時；重試等待期間仍透過 `TaskSession` 更新 UI，不把 retry backoff 混入配額等待。完成時再寫入 selection／planning／prompt／API／配額／retry／解析／驗證／寫入／total 的 monotonic timing、valid／invalid／needs_context／no_change／suggest_revision 與 validation error 分布。事件不得包含 API key、完整 prompt、完整 response 或錯誤原文。事件欄位由 `translation_tool/core/batch_events.py` 的 `BATCH_EVENT_SCHEMA_VERSION` 版本化 schema 定義：core 只輸出 canonical 欄位（耗時一律是毫秒 `*_ms`，嘗試序號是 `attempt`，批次序號是 `batch_index`），耗時累加統一經過 `BatchTiming.add()`；舊版 `*_seconds`、`smart_review_attempt` 等欄位只由 `to_legacy_event()` 在進度回呼與持久化 metrics 的輸出邊界補上。事件的中文日誌只由 `format_batch_event()` 產生，`smart_review_job.py` 透過 service 層呼叫它，讀到舊歷史事件時會先 `canonicalize_event()`。
+
+### Mod DB 資料變更與 resident UI 狀態
+
+所有會提交 Mod DB 寫入的面板完成回呼，都必須通知 `ModDbView._on_database_changed`（EntriesPanel 仍保留 `_on_entries_changed` 相容轉接）。這個共通入口會遞增資料世代、使 overview／entries／scan／translate 的快照與 pending 結果失效，刷新目前頁籤，並把隱藏頁籤留在待刷新狀態。EntriesPanel 在寫入後的 row 重載不能取代這個入口，因為模組／來源選項、分頁、總覽 KPI 與其他已掛載頁籤可能仍是 resident snapshot。
+
+`BulkReviewDialog` 是另一個 resident scope：它只顯示仍有未審核候選的模組／來源。批量審查或還原成功後，除了呼叫外層完成回呼，也必須重新啟動 `_start_scope_options_load`；否則資料庫已正確提交，但對話框下拉會保留舊 scope，直到使用者再次切換條件。資料清理／還原完成回呼同樣不可只呼叫 `OverviewPanel.refresh`，必須走上述共通入口。
 `SmartReviewReviewer` 依候選狀態分兩條套用路徑：`ready` 走 `apply_smart_review_candidate`；`SMART_REVIEW_MANUAL_EDIT_STATUSES` 內的狀態（已套用、已保留原譯文、需補 context、不用改、無效、格式不符、已過期）走 `apply_smart_review_manual_edit`，載入時先以 `realign_smart_review_candidate` 對齊快照，並由 `is_manual_edit_row`、`initial_draft_text`、`manual_edit_hint` 決定草稿起點與提示。人工編輯路徑的 CAS 比對對齊後的快照，快照改變（含英文原文）只回傳 `changed`、不把候選降成 `stale`；CAS 先於格式檢查，格式檢查使用交易內的最新原文。SQLite 寫入後批次 JSON 回寫失敗時回傳 `state_sync_failed`，`_after_action` 仍重載條目頁並顯示專屬訊息，後續由 `reconcile_applied` 補回狀態。
 
 `SmartReviewBatchReviewer` 使用 `kit.Pager` 每頁 25 筆，選取以 `run_id` 與候選 `ordinal` 保留，因此可跨頁勾選；「全選全部可套用」會在背景載入目前篩選的完整候選並只選取格式診斷通過的 `ready` 項目；「全選全部可覆蓋」則載入所有 stale 候選，只選取有草稿且格式診斷通過者。批量套用、保留原譯文與覆蓋已過期都先開確認視窗，再由 `apply_moddb_smart_review_batch_from_path` 以部分成功策略逐筆執行；前兩者呼叫原有 CAS 動作，覆蓋動作先以 `realign_smart_review_candidate` 更新 JSON 的 `current_zh_tw` 及其他快照欄位，再呼叫 `apply_smart_review_manual_edit` 以新快照做 CAS。資料庫在對齊後再次變更、已有人工審核列或格式不符時不覆蓋；每筆結果分為成功、stale／不適用、格式問題或錯誤，使用者可看到進度、取消後續項目與最終摘要。批量模式仍不會自動處理 `needs_context`、`no_change`、`invalid` 或其他人工編輯狀態。
@@ -66,7 +72,7 @@ View 不自行判斷格式，一律透過 `app/services_impl/moddb_format_diff_s
 
 `AdvancedFilters` 的 `sort_by` 由排序下拉值與方向狀態組合：`default`／`default_desc` 與各日期排序的 `*_newest`／`*_oldest`；日期欄位由 `picked_date` 轉成本地日期，日期條件在「時間依據」為不限時間時會自動改用條目匯入時間。。清單因日期範圍而為空時，`EntriesPanel._render_list` 呼叫 `AdvancedFilters.announce_no_data`：由 `TranslationDB.time_data_range` 查出該時間依據實際最早／最晚時間，顯示在空狀態並彈出提示。
 
-進階條件同時作用於模組與目前生效來源選單。`panel_refresh._resolve_entries_scope` 會保留使用者目前選定、但在新條件下沒有交集的模組／來源，讓查詢結果正確顯示為空；不可因為選單沒有交集而清除條件並放寬到其他範圍。
+會影響結果範圍的條件同時作用於模組與目前生效來源選單：模組、來源、類型、條目狀態、審核狀態、智慧校對狀態、搜尋與進階時間／品質都由 `panel_refresh._resolve_entries_scope` 交給 `TranslationDB.filter_option_values` 使用與條目列相同的 predicate。它會保留使用者目前選定、但在新條件下沒有交集的模組／來源，讓查詢結果正確顯示為空；不可因為選單沒有交集而清除條件並放寬到其他範圍。
 
 ## 修復結果逐筆審查
 

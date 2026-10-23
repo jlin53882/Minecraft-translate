@@ -110,6 +110,7 @@ class ModDbView(ft.Column):
             request_refresh=self._request_overview_refresh,
             open_scan=lambda: self.show_tab("scan"),
             open_entries=self.open_entries,
+            on_database_changed=self._on_database_changed,
         )
         self.entries = EntriesPanel(
             page,
@@ -671,14 +672,20 @@ class ModDbView(ft.Column):
         self._invalidate_database_snapshots()
         self._refresh_active_panel()
 
-    def _on_entries_changed(self) -> None:
+    def _on_database_changed(self) -> None:
+        """Invalidate every Mod DB snapshot after a committed data mutation."""
         self._invalidate_database_snapshots()
-        # EntriesPanel has already refreshed the row and editor that were just saved.
-        self._panel_refresh_needed["entries"] = False
         if self.tab == "overview":
             self._request_overview_refresh()
-        elif self.tab != "entries":
+        else:
+            # The active panel must also refresh.  In particular, EntriesPanel
+            # can retain filter options or resident state that a row-only
+            # refresh does not cover; hidden panels stay marked for next visit.
             self._refresh_active_panel()
+
+    def _on_entries_changed(self) -> None:
+        """Backward-compatible callback for EntriesPanel mutations."""
+        self._on_database_changed()
 
     def _on_entries_filter_changed(
         self,

@@ -371,6 +371,48 @@ def test_dialog_filters_preview_by_module(db, monkeypatch):
     assert {candidate.mod_id for candidate in dialog.plan.candidates} == {"foo"}
 
 
+def test_dialog_refreshes_scope_options_after_apply_and_revert(db):
+    """批量審核與還原後，仍開啟的模組／來源選單要立即反映資料庫。"""
+    from app.views.moddb.bulk_review_dialog import BulkReviewDialog
+    from tests.conftest import mock_page
+
+    db.ingest(
+        "1.21.1",
+        [
+            _item("foo-key", "Foo", "甲", mod="foo"),
+            _item("bar-key", "Bar", "乙", mod="bar"),
+        ],
+    )
+    page = mock_page()
+    page.run_thread = lambda target: target()
+    dialog = BulkReviewDialog(page, lambda: db, "1.21.1", None)
+    _drain(page)
+
+    assert {option.key for option in dialog.mod_dd.options} == {
+        "__all__",
+        "foo",
+        "bar",
+    }
+    dialog.mod_dd.value = "foo"
+    dialog._on_mod()
+    dialog._preview()
+    _drain(page)
+    dialog._confirm()
+    _drain(page)
+
+    assert {option.key for option in dialog.mod_dd.options} == {"__all__", "bar"}
+    assert dialog.mod_dd.value == "__all__"
+
+    dialog._revert()
+    _drain(page)
+
+    assert {option.key for option in dialog.mod_dd.options} == {
+        "__all__",
+        "foo",
+        "bar",
+    }
+
+
 def test_dialog_prefills_scope_without_creating_preview(db):
     """驗證批量審核可預填模組與來源，且開啟時仍沒有預覽。"""
     from app.views.moddb.bulk_review_dialog import ALL_SOURCES, BulkReviewDialog
