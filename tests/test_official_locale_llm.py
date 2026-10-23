@@ -9,6 +9,7 @@ from app.services_impl.moddb_translate_service import (
     build_items,
 )
 from translation_tool.core import official_locale
+from translation_tool.core.lm_batch_budget import TokenEstimatorConfig
 from translation_tool.core.lm_format_policy import (
     FORMAT_POLICY_PROMPT,
     LANG_SEMANTIC_FORMAT_POLICY_PROMPT,
@@ -16,7 +17,10 @@ from translation_tool.core.lm_format_policy import (
     STRUCTURED_FORMAT_POLICY_PROMPT,
     normalize_legacy_prompt,
 )
-from translation_tool.core.lm_session import TranslationSessionState
+from translation_tool.core.lm_session import (
+    TranslationSessionState,
+    estimate_conversation_history_tokens,
+)
 from translation_tool.core.lm_translator_shared_loop import (
     translate_items_with_cache_loop,
 )
@@ -735,6 +739,26 @@ def test_translation_session_rolls_history_without_changing_session_key() -> Non
     assert state.key == "moddb:operation-1:mod-a"
     assert state.history[-1]["text"] == "第二批譯文"
     assert all(turn["role"] in {"user", "model"} for turn in state.history)
+
+
+def test_translation_session_history_uses_prompt_estimator_coefficients() -> None:
+    estimator = TokenEstimatorConfig(
+        prompt_ascii_tokens_per_char=0.2,
+        prompt_cjk_tokens_per_char=0.8,
+        item_ascii_tokens_per_char=0.1,
+        item_cjk_tokens_per_char=0.1,
+    )
+    state = TranslationSessionState(
+        "moddb:operation-1:mod-a",
+        estimator=estimator,
+    )
+    state.replace([{"role": "user", "text": "中" * 10}])
+
+    assert state._token_count() == estimate_conversation_history_tokens(
+        state.history,
+        estimator=estimator,
+    )
+    assert state._token_count() == 12
 
 
 def test_translation_runtime_uses_trimmed_session_history_between_internal_batches(

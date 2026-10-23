@@ -13,7 +13,7 @@
 | 觀測 | `call_gemini_requests(..., meta_out=dict)` 回報 `finishReason`、`promptTokenCount`、`candidatesTokenCount`、`thoughtsTokenCount`；回傳值仍是字串 |
 | 截斷診斷 | 截斷時 log 一行 `[截斷診斷]`：原因（`MAX_TOKENS` 或 `STOP` 但 JSON 壞）、送出筆數、估算與實際 token |
 | 上限 | Gemini 送 `generationConfig.maxOutputTokens`、OpenAI Responses 送 `max_output_tokens`（預設 65536），避免模型重複輸出燒光額度 |
-| 切批 | `lm_batch_budget.select_batch_size`：由前往後累加，項目數上限 / 輸出 token 預算 / 輸入 token 預算，先到者為準，永遠只取輸入的**前綴** |
+| 切批 | `lm_batch_budget.select_batch_size`：`character` 模式由前往後線性累加；`tiktoken_calibrated` 模式先以 `1、2、4…` 做指數探測找出超出預算的前綴，再用二分搜尋找出最大可用前綴。兩者都以項目數上限／輸出 token 預算／輸入 token 預算中先到者為準，永遠只取輸入的**前綴** |
 | 學習 | 依 profile（lang / ftb / kubejs / md / patch）保存。`MAX_TOKENS` 截斷 → 輸出預算減半；連續成功 → 緩慢回升到設定值 |
 | 校正 | 成功回應後，以實際輸出（`candidates` + 思考 token）用 EMA 校正「輸出 / 輸入」係數 |
 
@@ -22,10 +22,37 @@
 
 ### 估算方式（純本地，不呼叫 `countTokens`）
 
-- ASCII 字元約 0.25 token、CJK 約 1.2 token、其他非 ASCII 約 0.5 token
-- 每個項目加約 12 token 的 JSON 包裝
-- 預期輸出 ≈ 原文 token × `output_token_factor`（預設 1.5）+ 包裝
+- 預設 `algorithm=tiktoken_calibrated`，以 `o200k_base` 計算 prompt 與序列化 payload，
+  再套用校正係數；目前係數是以 `gemini-3.1-flash-lite` 的 `countTokens` 實測資料取得。
+- 若 tiktoken 套件未安裝、encoding 無法載入，或某次編碼失敗，會靜默 fallback 到字元估算：system prompt 的
+  ASCII／CJK／其他非 ASCII 為 `0.10 / 0.85 / 1.50`，項目為 `0.22 / 0.62 / 1.50`，
+  輸入每個項目加 `38`，輸出 JSON 包裝每個項目加 `12` token。
+- 輸出 token 預估仍採原文的字元估算 × `output_token_factor`（預設 1.5）+ 輸出包裝成本；
+  成功回應的 `candidatesTokenCount + thoughtsTokenCount` 只用 EMA 校正係數，並不改成直接採用 tiktoken 的精確值。
 - 輸入另外計入 system prompt、批次相關的官方／已審核術語提示，以及同一模組 session 保留的對話歷史；這些都只影響輸入預算，不會混入翻譯輸出 KPI。
+
+這組係數不是宣稱 tiktoken 等同 Gemini 或 ChatGPT tokenizer；它是以目前 `config.json` 的實際
+翻譯提示詞與 Gemini `countTokens` 觀測值校正出的本地批次規劃器。要重新校正時可直接調整
+`config.json` 中 `lm_translator.token_estimator` 下列欄位。`token_estimator.*` 是進階設定，
+不會出現在一般設定頁；缺少欄位會使用上述預設值。校正限制是：目前以 30 組 Gemini
+`countTokens` 測試群組取得約 2.83% 的群組平均誤差，個別案例仍可能超過 5%，且尚未驗證
+ChatGPT tokenizer 的準確度。
+
+設定值的限制如下：字元係數與 item overhead 必須是有限的非負數；
+`tiktoken_prompt_scale`／`tiktoken_payload_scale` 必須是有限的正數；
+`tiktoken_item_overhead_tokens` 必須是有限的非負數；`tiktoken_request_bias` 則是有限數字，
+可以為負數（預設 `-451.55`）。
+
+| 設定 | 用途 |
+|---|---|
+| `algorithm` | `tiktoken_calibrated`（預設）或 `character`；tiktoken 不可用時自動 fallback |
+| `tiktoken_encoding` | tiktoken encoding，預設 `o200k_base` |
+| `tiktoken_prompt_scale`、`tiktoken_payload_scale` | prompt／payload 的 provider 校正倍率 |
+| `tiktoken_request_bias`、`tiktoken_item_overhead_tokens` | 每次請求與每筆 item 的校正項 |
+| `prompt_ascii_tokens_per_char`、`prompt_cjk_tokens_per_char`、`prompt_other_tokens_per_char` | 固定提示詞、重試提示詞與歷史訊息的字元係數 |
+| `item_ascii_tokens_per_char`、`item_cjk_tokens_per_char`、`item_other_tokens_per_char` | 翻譯 payload 內容與格式 metadata 的字元係數 |
+| `input_item_overhead_tokens` | 輸入 JSON item／欄位的額外成本 |
+| `output_item_overhead_tokens` | 輸出 item 包裝成本，也用於實際輸出用量校正 |
 
 ### 什麼時候縮小學到的預算
 
