@@ -187,6 +187,35 @@ def test_planner_does_not_reuse_a_different_model_result():
     assert plan.actual_ai_count == 1
 
 
+def test_planner_does_not_reuse_history_without_provider_model_metadata():
+    snapshot = _snapshot()
+    plan = plan_new_smart_review(
+        [snapshot],
+        [
+            {
+                "kind": snapshot.kind,
+                "mc_version": snapshot.mc_version,
+                "mod_id": snapshot.mod_id,
+                "entry_key": snapshot.key,
+                "en_us": snapshot.en_us,
+                "current_zh_tw": snapshot.current_zh_tw,
+                "effective_source": snapshot.effective_source,
+                "review_status": snapshot.review_status,
+                "effective_revision": snapshot.effective_revision,
+                "status": "no_change",
+                "ai_status": "no_change",
+                "decision": "no_change",
+            }
+        ],
+        skip_valid_history=True,
+        history_runs_consulted=1,
+        provider="gemini",
+        model="test-model",
+    )
+    assert plan.reused_count == 0
+    assert plan.actual_ai_count == 1
+
+
 def test_resume_counts_rejected_candidate_from_its_ai_status(tmp_path):
     store = SmartReviewHistoryStore(tmp_path / "rejected.db")
     run_id = store.create_run(

@@ -159,7 +159,7 @@ class SmartReviewRunPanel(SmartReviewRunPlanningMixin):
             on_submit=lambda _e: self.refresh_estimate(),
         )
         self.model_dd = kit.dropdown(
-            label="校對模型", dense=True, width=250, on_select=self._scope_changed
+            label="校對模型", dense=True, width=250, on_select=self._model_changed
         )
         options = smart_review_model_options()
         kit.set_dropdown_options(self.model_dd, options)

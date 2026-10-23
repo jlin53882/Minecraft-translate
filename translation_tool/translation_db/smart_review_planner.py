@@ -181,9 +181,9 @@ def plan_new_smart_review(
     for candidate in historical_candidates:
         history_provider = candidate.get("_history_provider")
         history_model = candidate.get("_history_model")
-        if provider and history_provider and str(history_provider) != str(provider):
+        if provider and str(history_provider or "") != str(provider):
             continue
-        if model and history_model and str(history_model) != str(model):
+        if model and str(history_model or "") != str(model):
             continue
         candidates_by_fingerprint.setdefault(payload_fingerprint(candidate), []).append(
             candidate

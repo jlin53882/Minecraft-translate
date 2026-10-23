@@ -105,7 +105,7 @@ flowchart TD
 
 #### AI 智慧校對（本地候選）
 
-智慧校對的新批次先以共用 planner 依目前 DB 快照規劃：可選擇讀取最近兩份可解析 JSON manifest，只有完整 CAS 快照、local context、provider 與 model 相容的 `applied`／`no_change` 結果才可跳過；`ready` 保留為待人工審查，不計入「AI 不用修改」。最新批次若只有 `request_failed`、`pending` 或 `cancelled`，最多回看這兩份歷史中的另一份有效結果，不會延伸掃描第三份。執行前預覽與真正執行使用同一份計畫，顯示歷史重用、待審查與本次實際送 AI 的數量。
+智慧校對的新批次先以共用 planner 依目前 DB 快照規劃：可選擇讀取最近兩份可解析 JSON manifest，只有完整 CAS 快照、local context、provider 與 model 相容的 `applied`／`no_change` 結果才可跳過；缺少 provider/model metadata 的舊歷史在指定模型時保守地不重用；`ready` 保留為待人工審查，不計入「AI 不用修改」。最新批次若只有 `request_failed`、`pending` 或 `cancelled`，最多回看這兩份歷史中的另一份有效結果，不會延伸掃描第三份。執行前預覽與真正執行使用同一份計畫，顯示歷史重用、待審查與本次實際進入 provider request 的數量。
 
 歷史卡片上的「繼續未完成校對」會先驗證原 provider/model，再以原 `run_id` 重新預檢目前有效來源、revision、local context 與人工快照；provider 初始化成功後才會在同一個跨程序寫入鎖內取得批次所有權並改成 `running`，避免初始化失敗或雙重續跑留下錯誤狀態。已完成且快照仍有效的候選保留，`pending`／取消／請求失敗及人工修改造成的失效候選才重新入列，範圍外候選維持排除並記錄原因。恢復不會把 `applied`／`rejected` 轉回 `ready`，舊結果會留在 `attempt_history`，配額耗盡、授權失敗、未真正送出與實際送出的候選分開記帳。
 

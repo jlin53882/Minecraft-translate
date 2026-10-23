@@ -98,7 +98,7 @@ class SmartReviewAttemptEvents:
 
 @dataclass
 class BatchRequestOutcome:
-    """一個批次的請求結果；``cancelled`` 記錄在 ``SmartReviewRunState``。"""
+    """一個批次的請求結果；request_started 代表進入 provider request 邊界。"""
 
     raw: str = ""
     attempt: int = 0

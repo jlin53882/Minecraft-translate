@@ -25,6 +25,11 @@ class SmartReviewRunPlanningMixin:
         self._invalidate_plan_preview()
         self._debounce.call(self.refresh_estimate)
 
+    def _model_changed(self, _e=None) -> None:
+        """模型變更時明確失效舊規劃並重新計算。"""
+        self._invalidate_plan_preview()
+        self._scope_changed()
+
     def _build_history_controls(self) -> None:
         """建立新批次的最近兩批重用與執行前規劃控制項。"""
         self._plan_preview_seq = 0
