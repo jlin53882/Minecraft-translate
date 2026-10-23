@@ -152,11 +152,15 @@ class _SmartReviewBatchRunner:
             retry_runtime,
             cursor.current_size,
         )
-        attempted = {
-            int(item.ordinal)
-            for item in batch
-            if int(item.ordinal) not in self._attempted_ordinals
-        }
+        attempted = (
+            {
+                int(item.ordinal)
+                for item in batch
+                if int(item.ordinal) not in self._attempted_ordinals
+            }
+            if outcome.request_started
+            else set()
+        )
         if attempted:
             self._attempted_ordinals.update(attempted)
             state.metrics["actual_ai_count"] = int(
@@ -578,6 +582,8 @@ def run_smart_review(
         historical_candidates,
         skip_valid_history=skip_valid_history,
         history_runs_consulted=history_runs_consulted,
+        provider=provider,
+        model=model_name,
     )
     batch_size = max(
         1,
@@ -640,12 +646,16 @@ def resume_smart_review(
 ) -> SmartReviewRunResult:
     """在原 run_id 上繼續 pending／失敗／人工變更後需重試的候選。"""
     workflow_started = time.monotonic()
-    snapshots, initial_counts, run = db.prepare_smart_review_resume(run_id)
-    scope = run.get("scope") if isinstance(run.get("scope"), dict) else {}
-    selected_count = int(run.get("selected_count") or 0)
-    selected_count = max(selected_count, len(snapshots))
-    resolved_model = str(model_name or run.get("model") or "").strip()
-    resolved_provider = str(provider or run.get("provider") or "gemini").strip()
+    history = SmartReviewHistoryStore(db.path)
+    if not history.exists(run_id):
+        raise ValueError("只有 JSON 歷史批次支援同一 run 復原")
+    run_preview = history.get_run(run_id)
+    if run_preview is None:
+        raise ValueError("找不到智慧校對歷史批次")
+    if str(run_preview.get("status") or "") == "running":
+        raise RuntimeError("智慧校對批次仍在執行中，不能重複啟動")
+    resolved_model = str(run_preview.get("model") or model_name or "").strip()
+    resolved_provider = str(run_preview.get("provider") or provider or "gemini").strip()
     if not resolved_model:
         raise ValueError("智慧校對歷史批次沒有可恢復的模型")
     lm_config = lm_config if isinstance(lm_config, dict) else {}
@@ -653,7 +663,7 @@ def resume_smart_review(
     batch_size = max(
         1,
         min(
-            int(run.get("batch_size") or settings["default_batch_size"]),
+            int(run_preview.get("batch_size") or settings["default_batch_size"]),
             settings["max_batch_size"],
         ),
     )
@@ -664,6 +674,10 @@ def resume_smart_review(
         lm_config=lm_config,
         cancel_check=cancel_check,
     )
+    snapshots, initial_counts, run = db.prepare_smart_review_resume(run_id)
+    scope = run.get("scope") if isinstance(run.get("scope"), dict) else {}
+    selected_count = int(run.get("selected_count") or 0)
+    selected_count = max(selected_count, len(snapshots))
     state = _open_run_state(
         db,
         session,

@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
@@ -30,13 +31,25 @@ _SNAPSHOT_KEYS = (
     "manual_checker",
     "manual_review_status",
     "manual_revision",
+    "context",
 )
+
+
+def _fingerprint_value(key: str, value: Any) -> Any:
+    """把 JSON list 與 dataclass tuple 的 context 正規化成同一表示。"""
+    if key != "context":
+        return value
+    return json.dumps(
+        value or [], ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    )
 
 
 def snapshot_fingerprint(snapshot: SmartReviewSnapshot) -> tuple[Any, ...]:
     """建立與 JSON ``original_snapshot`` 相容的穩定 CAS 指紋。"""
     return tuple(
-        snapshot.key if key == "entry_key" else getattr(snapshot, key, None)
+        _fingerprint_value(
+            key, snapshot.key if key == "entry_key" else getattr(snapshot, key, None)
+        )
         for key in _SNAPSHOT_KEYS
     )
 
@@ -46,7 +59,9 @@ def payload_fingerprint(candidate: Mapping[str, Any]) -> tuple[Any, ...]:
     original = candidate.get("original_snapshot")
     source = original if isinstance(original, Mapping) else candidate
     return tuple(
-        source.get("entry_key") if key == "entry_key" else source.get(key)
+        _fingerprint_value(
+            key, source.get("entry_key") if key == "entry_key" else source.get(key)
+        )
         for key in _SNAPSHOT_KEYS
     )
 
@@ -158,10 +173,18 @@ def plan_new_smart_review(
     *,
     skip_valid_history: bool,
     history_runs_consulted: int,
+    provider: str | None = None,
+    model: str | None = None,
 ) -> SmartReviewPlan:
     """依最近歷史規劃可重用結果，限制由呼叫端保證為最近兩份 manifest。"""
     candidates_by_fingerprint: dict[tuple[Any, ...], list[Mapping[str, Any]]] = {}
     for candidate in historical_candidates:
+        history_provider = candidate.get("_history_provider")
+        history_model = candidate.get("_history_model")
+        if provider and history_provider and str(history_provider) != str(provider):
+            continue
+        if model and history_model and str(history_model) != str(model):
+            continue
         candidates_by_fingerprint.setdefault(payload_fingerprint(candidate), []).append(
             candidate
         )

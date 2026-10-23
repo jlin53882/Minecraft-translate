@@ -155,7 +155,7 @@ class SmartReviewRunPanel(SmartReviewRunPlanningMixin):
             value=query,
             hint="key、英文原文或目前譯文",
             width=240,
-            on_change=lambda _e: self._debounce.call(self.refresh_estimate),
+            on_change=self._query_changed,
             on_submit=lambda _e: self.refresh_estimate(),
         )
         self.model_dd = kit.dropdown(
@@ -168,7 +168,7 @@ class SmartReviewRunPanel(SmartReviewRunPlanningMixin):
             "本次處理上限（筆，0=不限）",
             value="1000",
             width=190,
-            on_change=lambda _e: self._update_estimate_text(),
+            on_change=lambda _e: self._scope_changed(),
         )
         self.batch_field = kit.text_field(
             "每批（筆）",
@@ -196,6 +196,7 @@ class SmartReviewRunPanel(SmartReviewRunPlanningMixin):
 
     def _start_scope_options_load(self) -> None:
         """背景載入範圍選項，避免開啟或切換條件時阻塞 UI 執行緒。"""
+        self._invalidate_plan_preview()
         self._scope_seq += 1
         seq = self._scope_seq
         version = self.version_dd.value
@@ -464,6 +465,7 @@ class SmartReviewRunPanel(SmartReviewRunPlanningMixin):
 
     def _scope_changed(self, _e=None) -> None:
         """範圍變更後立即清除舊筆數，再以短暫 debounce 背景重新估算。"""
+        self._invalidate_plan_preview()
         self._total = None
         self._estimate_seq += 1
         if self._scope_loading:

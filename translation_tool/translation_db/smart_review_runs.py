@@ -96,27 +96,29 @@ def _resume_counts(items: Sequence[SmartReviewCandidate]) -> dict[str, int]:
         "needs_context": 0,
     }
     for item in items:
-        if item.status == SmartReviewStatus.REQUEST_FAILED:
+        ai_status = item.ai_status or item.status
+        if item.status in {SmartReviewStatus.APPLIED, SmartReviewStatus.REJECTED}:
+            ai_status = item.ai_status or SmartReviewStatus.READY
+        if ai_status == SmartReviewStatus.REQUEST_FAILED:
             counts["request_errors"] += 1
             continue
-        if item.status not in {
+        if ai_status not in {
             SmartReviewStatus.READY,
             SmartReviewStatus.NO_CHANGE,
             SmartReviewStatus.NEEDS_CONTEXT,
             SmartReviewStatus.INVALID,
-            SmartReviewStatus.APPLIED,
         }:
             continue
         counts["processed"] += 1
-        if item.status == SmartReviewStatus.INVALID:
+        if ai_status == SmartReviewStatus.INVALID:
             counts["invalid"] += 1
         else:
             counts["valid"] += 1
-        if item.status == SmartReviewStatus.NO_CHANGE:
+        if ai_status == SmartReviewStatus.NO_CHANGE:
             counts["no_change"] += 1
-        elif item.status == SmartReviewStatus.NEEDS_CONTEXT:
+        elif ai_status == SmartReviewStatus.NEEDS_CONTEXT:
             counts["needs_context"] += 1
-        elif item.status in {SmartReviewStatus.READY, SmartReviewStatus.APPLIED}:
+        elif ai_status == SmartReviewStatus.READY:
             counts["suggestions"] += 1
     return counts
 
@@ -176,6 +178,14 @@ class SmartReviewRunStoreMixin:
             "manual_checker": None if manual is None else manual[1],
             "manual_review_status": None if manual is None else manual[2],
             "manual_revision": None if manual is None else manual[3],
+            "context": self._smart_review_context(
+                int(entry_id),
+                str(current[0]),
+                str(current[1]),
+                str(current[2]),
+                str(current[3]),
+                str(current[4]),
+            ),
         }
 
     def prepare_smart_review_resume(

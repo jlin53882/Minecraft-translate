@@ -19,6 +19,7 @@ manifest 加多個 JSON 分片，更新時只原子替換受影響的分片。Tr
 
 from __future__ import annotations
 
+import json
 import os
 import uuid
 from collections import defaultdict
@@ -84,6 +85,7 @@ _RESUME_SNAPSHOT_KEYS = (
     "manual_checker",
     "manual_review_status",
     "manual_revision",
+    "context",
 )
 
 
@@ -93,10 +95,15 @@ def _resume_fingerprint(
     """建立續跑用的完整快照指紋。"""
     original = value.get("original_snapshot") if use_original else None
     source = original if isinstance(original, Mapping) else value
-    return tuple(
-        source.get("entry_key") if key == "entry_key" else source.get(key)
-        for key in _RESUME_SNAPSHOT_KEYS
-    )
+    values: list[Any] = []
+    for key in _RESUME_SNAPSHOT_KEYS:
+        value = source.get("entry_key") if key == "entry_key" else source.get(key)
+        if key == "context":
+            value = json.dumps(
+                value or [], ensure_ascii=False, sort_keys=True, separators=(",", ":")
+            )
+        values.append(value)
+    return tuple(values)
 
 
 def _reset_resume_candidate(
@@ -559,6 +566,8 @@ class SmartReviewHistoryStore:
                 consulted += 1
                 for item in parsed_items:
                     item["run_id"] = str(payload.get("id") or path.stem)
+                    item["_history_provider"] = payload.get("provider")
+                    item["_history_model"] = payload.get("model")
                     candidates.append(item)
                 if consulted >= bounded:
                     break
@@ -581,6 +590,8 @@ class SmartReviewHistoryStore:
         invalidated = 0
         with self._write_lock():
             payload = self.repository.read_unlocked(run_id)
+            if str(payload.get("status") or "") == "running":
+                raise RuntimeError("智慧校對批次仍在執行中，不能重複啟動")
             items = list(self.repository.candidate_items_unlocked(run_id, payload))
             for candidate in items:
                 ordinal = int(candidate.get("ordinal") or 0)

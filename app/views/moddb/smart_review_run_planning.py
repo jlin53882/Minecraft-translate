@@ -16,8 +16,18 @@ from app.views.moddb.smart_review_job import SmartReviewRequest
 class SmartReviewRunPlanningMixin:
     """把歷史規劃 UI 從執行面板的範圍控制項中隔離。"""
 
+    def _invalidate_plan_preview(self) -> None:
+        """使尚未回來的舊規劃結果失效。"""
+        self._plan_preview_seq = getattr(self, "_plan_preview_seq", 0) + 1
+
+    def _query_changed(self, _e=None) -> None:
+        """搜尋條件變更時先撤銷舊規劃，再 debounce 重新計算。"""
+        self._invalidate_plan_preview()
+        self._debounce.call(self.refresh_estimate)
+
     def _build_history_controls(self) -> None:
         """建立新批次的最近兩批重用與執行前規劃控制項。"""
+        self._plan_preview_seq = 0
         self.use_recent_history = ft.Switch(
             label="讀取最近 2 次智慧校對狀態",
             value=True,
@@ -85,6 +95,8 @@ class SmartReviewRunPlanningMixin:
 
     def _refresh_plan_preview(self) -> None:
         """以同一個 planner 讀取歷史 KPI；預覽不會呼叫 provider。"""
+        self._invalidate_plan_preview()
+        preview_seq = self._plan_preview_seq
         database = self.ctx.database()
         version = self.version_dd.value
         if self._scope_loading or self.job.running or database is None or not version:
@@ -94,6 +106,9 @@ class SmartReviewRunPlanningMixin:
             return
         path, priority = database
         mod_id, kind, source, query = self._scope_values()
+        use_recent_history = bool(self.use_recent_history.value)
+        skip_valid_history = bool(self.skip_valid_history.value)
+        model = str(self.model_dd.value or "")
         self.plan_preview_text.value = "正在以最近兩份歷史計算預估…"
         self.plan_preview_text.color = C.MUTED
         self.ctx.update()
@@ -109,11 +124,17 @@ class SmartReviewRunPlanningMixin:
                 review_status="unreviewed",
                 query=query,
                 limit=limit,
-                use_recent_history=bool(self.use_recent_history.value),
-                skip_valid_history=bool(self.skip_valid_history.value),
+                use_recent_history=use_recent_history,
+                skip_valid_history=skip_valid_history,
+                model=model,
             )
 
+        def still_valid() -> bool:
+            return preview_seq == self._plan_preview_seq and not self.job.running
+
         def done(result: dict[str, int], error: str | None) -> None:
+            if not still_valid():
+                return
             if error:
                 self.plan_preview_text.value = f"無法取得預估：{error}"
                 self.plan_preview_text.color = C.RED
@@ -132,7 +153,7 @@ class SmartReviewRunPlanningMixin:
             work,
             done,
             name="預估智慧校對歷史重用",
-            still_valid=lambda: not self.job.running,
+            still_valid=still_valid,
         )
 
     def resume_run(self, run_id: str) -> None:

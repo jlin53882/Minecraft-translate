@@ -484,6 +484,7 @@ class SmartReviewCandidate:
     status: str = SmartReviewStatus.PENDING
     applied_batch: str | None = None
     applied_at: str | None = None
+    ai_status: str | None = None
 
 
 @dataclass(frozen=True)

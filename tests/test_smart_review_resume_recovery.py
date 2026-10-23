@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 import time
 
+import pytest
+
 from translation_tool.core.openai_codex_client import ChatGPTAPIError
 from translation_tool.translation_db import KIND_LANG, TranslationDB, WriteBackItem
 from translation_tool.translation_db.models import SmartReviewSnapshot
@@ -15,6 +17,8 @@ from translation_tool.translation_db.smart_review import (
 )
 from translation_tool.translation_db.smart_review_history import SmartReviewHistoryStore
 from translation_tool.translation_db.smart_review_planner import plan_new_smart_review
+from translation_tool.translation_db.smart_review_runs import _resume_counts
+from translation_tool.translation_db.smart_review_status import SmartReviewStatus
 
 
 def _response(items: list[dict[str, str]]) -> str:
@@ -149,6 +153,131 @@ def test_planner_uses_older_valid_result_after_newest_request_failure():
     assert plan.no_change_skipped_count == 1
 
 
+def test_planner_does_not_reuse_a_different_model_result():
+    snapshot = _snapshot()
+    history = {
+        "kind": snapshot.kind,
+        "mc_version": snapshot.mc_version,
+        "mod_id": snapshot.mod_id,
+        "entry_key": snapshot.key,
+        "en_us": snapshot.en_us,
+        "current_zh_tw": snapshot.current_zh_tw,
+        "effective_source": snapshot.effective_source,
+        "review_status": snapshot.review_status,
+        "effective_revision": snapshot.effective_revision,
+        "manual_zh_tw": snapshot.manual_zh_tw,
+        "manual_checker": snapshot.manual_checker,
+        "manual_review_status": snapshot.manual_review_status,
+        "manual_revision": snapshot.manual_revision,
+        "status": "no_change",
+        "ai_status": "no_change",
+        "decision": "no_change",
+        "_history_provider": "gemini",
+        "_history_model": "old-model",
+    }
+    plan = plan_new_smart_review(
+        [snapshot],
+        [history],
+        skip_valid_history=True,
+        history_runs_consulted=1,
+        provider="gemini",
+        model="new-model",
+    )
+    assert plan.reused_count == 0
+    assert plan.actual_ai_count == 1
+
+
+def test_resume_counts_rejected_candidate_from_its_ai_status(tmp_path):
+    store = SmartReviewHistoryStore(tmp_path / "rejected.db")
+    run_id = store.create_run(
+        [_snapshot()],
+        provider="gemini",
+        model="test-model",
+        version="1.21.1",
+        requested_limit=1,
+        batch_size=1,
+    )
+    store.record_results(
+        run_id,
+        [
+            {
+                "id": "1",
+                "decision": "suggest_revision",
+                "suggested_zh_tw": "哈囉",
+                "issue_types": [],
+                "evidence_ids": [],
+                "confidence": 0.9,
+                "reason": "建議修改",
+            }
+        ],
+    )
+    store.update_candidate(run_id, 1, status=SmartReviewStatus.REJECTED)
+    counts = _resume_counts(store.list_candidates(run_id))
+    assert counts["processed"] == 1
+    assert counts["valid"] == 1
+    assert counts["suggestions"] == 1
+
+
+def test_prepare_resume_rejects_running_run_under_write_lock(tmp_path):
+    store = SmartReviewHistoryStore(tmp_path / "running.db")
+    run_id = store.create_run(
+        [_snapshot()],
+        provider="gemini",
+        model="test-model",
+        version="1.21.1",
+        requested_limit=1,
+        batch_size=1,
+    )
+    with store._write_lock():
+        payload = store.repository.read_unlocked(run_id)
+        payload["status"] = "running"
+        store.repository.write_unlocked(run_id, payload)
+    with pytest.raises(RuntimeError, match="仍在執行中"):
+        store.prepare_resume(run_id, {})
+
+
+def test_resume_provider_initialization_failure_does_not_leave_running_status(
+    tmp_path, monkeypatch
+):
+    db = TranslationDB(tmp_path / "resume-open-failure.db")
+    db.write_back(
+        "1.21.1",
+        [WriteBackItem(KIND_LANG, "demo", "hello", "Hello", "你好")],
+        fill_other_versions=False,
+    )
+    snapshot = db.smart_review_candidates(version="1.21.1", limit=1)[0]
+    store = SmartReviewHistoryStore(db.path)
+    run_id = store.create_run(
+        [snapshot],
+        provider="gemini",
+        model="gemini-test",
+        version="1.21.1",
+        requested_limit=1,
+        batch_size=1,
+    )
+    store.finish_run(
+        run_id,
+        processed_count=0,
+        valid_count=0,
+        invalid_count=0,
+        request_error_count=1,
+        metrics={},
+        status="partial",
+    )
+
+    def fail_open(**_kwargs):
+        raise ValueError("provider initialization failed")
+
+    monkeypatch.setattr(
+        "translation_tool.translation_db.smart_review_run.SmartReviewProviderSession.open",
+        fail_open,
+    )
+    with pytest.raises(ValueError, match="provider initialization failed"):
+        resume_smart_review(db, run_id=run_id, api_key="test-key")
+    assert store.get_run(run_id)["status"] == "partial"
+    db.close()
+
+
 def test_planner_keeps_ready_for_review_and_reruns_skipped_status_when_disabled():
     snapshot = _snapshot()
     common = {
@@ -229,6 +358,27 @@ def test_chatgpt_explicit_quota_sets_run_stop_reason_without_processing_pending(
         "request_failed",
         "pending",
     ]
+    db.close()
+
+
+def test_cancelled_before_provider_request_does_not_count_actual_ai(tmp_path):
+    db = TranslationDB(tmp_path / "cancel-before-request.db")
+    db.write_back(
+        "1.21.1",
+        [WriteBackItem(KIND_LANG, "demo", "hello", "Hello", "你好")],
+        fill_other_versions=False,
+    )
+    result = run_smart_review(
+        db,
+        model_name="gpt-test",
+        provider="chatgpt",
+        api_key="",
+        limit=1,
+        batch_size=1,
+        cancel_check=lambda: True,
+    )
+    assert result.status == "cancelled"
+    assert result.metrics["actual_ai_count"] == 0
     db.close()
 
 
@@ -319,6 +469,40 @@ def test_resume_invalidates_completed_result_after_manual_snapshot_change(
     assert candidate["status"] == "no_change"
     assert candidate["attempt_history"]
     assert candidate["attempt_history"][0]["status"] == "no_change"
+    db.close()
+
+
+def test_resume_rebuilds_context_for_invalidated_snapshot(tmp_path, monkeypatch):
+    db = TranslationDB(tmp_path / "fresh-context.db")
+    db.write_back(
+        "1.21.1",
+        [WriteBackItem(KIND_LANG, "demo", "hello", "Hello", "你好")],
+        fill_other_versions=False,
+    )
+    monkeypatch.setattr(
+        "translation_tool.translation_db.smart_review_provider.call_gemini_requests",
+        lambda **kwargs: _response(kwargs["payload"]["items"]),
+    )
+    first = run_smart_review(
+        db, model_name="gemini-test", api_key="test-key", limit=1, batch_size=1
+    )
+    entry_id = db.smart_review_candidates(version="1.21.1", limit=1)[0].entry_id
+    with db._tx() as conn:
+        conn.execute(
+            "UPDATE translation SET zh_tw=?, revision=revision+1 "
+            "WHERE entry_id=? AND source=?",
+            ("您好", entry_id, SRC_AI),
+        )
+    monkeypatch.setattr(
+        db,
+        "_smart_review_context",
+        lambda *_args: [{"id": "fresh-context"}],
+    )
+    resume_smart_review(
+        db, run_id=first.run_id, model_name="gemini-test", api_key="test-key"
+    )
+    candidate = SmartReviewHistoryStore(db.path).get_candidate(first.run_id, 1)
+    assert candidate["context"] == [{"id": "fresh-context"}]
     db.close()
 
 

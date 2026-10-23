@@ -106,6 +106,7 @@ class BatchRequestOutcome:
     abort_remaining: bool = False
     shrink_requested: bool = False
     stop_reason: str | None = None
+    request_started: bool = False
 
 
 def _http_retry_after(exc: requests.HTTPError) -> float | None:
@@ -220,6 +221,7 @@ class _BatchRequester:
             model=session.model_name,
             network_attempts=int(state.metrics["network_attempts"]),
         )
+        self.outcome.request_started = True
         api_started = time.monotonic()
         try:
             self.outcome.raw = session.call(

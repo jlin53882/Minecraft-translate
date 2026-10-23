@@ -160,6 +160,7 @@ def preview_moddb_smart_review_plan_from_path(
     limit: int = 1000,
     use_recent_history: bool = True,
     skip_valid_history: bool = True,
+    model: str | None = None,
 ) -> dict[str, int]:
     """回傳與執行共用的唯讀歷史規劃 KPI，不呼叫 provider。"""
     db = _open(path, priority, readonly=True)
@@ -183,6 +184,8 @@ def preview_moddb_smart_review_plan_from_path(
             historical,
             skip_valid_history=skip_valid_history,
             history_runs_consulted=consulted,
+            provider=get_translation_provider(),
+            model=model,
         )
         return {
             "selected_count": len(plan.selected),
