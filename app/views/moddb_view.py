@@ -11,6 +11,7 @@ import flet as ft
 from app.services_impl.moddb_service import (
     TranslationDB,
     current_settings,
+    database_data_generation,
     database_problem,
     open_database,
 )
@@ -606,7 +607,7 @@ class ModDbView(ft.Column):
         if (
             self._db is not None
             and snapshot.get("db_generation") is not None
-            and self._db._data_gen() != snapshot["db_generation"]
+            and database_data_generation(self._db) != snapshot["db_generation"]
         ):
             self._panel_refresh_needed["entries"] = True
             panel.refresh_indicator.visible = False

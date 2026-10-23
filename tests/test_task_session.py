@@ -5,7 +5,9 @@
 
 import threading
 
-from app.tasks.task_session import TaskSession
+import pytest
+
+from app.tasks.task_session import TaskSession, TaskSessionAdmissionError
 
 
 class TestTaskSession:
@@ -83,6 +85,44 @@ class TestTaskSession:
         assert session.status == "RUNNING"
         assert session.error is False
         assert len(session.logs) == 0
+
+    def test_start_rejects_reentry_without_resetting_live_state(self):
+        """作用中 session 重複啟動時不可重設原本的執行狀態。"""
+        session = TaskSession()
+        session.start()
+        task_id = session.task_id
+        session.add_log("仍在執行")
+
+        with pytest.raises(TaskSessionAdmissionError, match="already running"):
+            session.start()
+
+        assert session.task_id == task_id
+        assert session.status == "RUNNING"
+        assert session.snapshot()["log_texts"] == ["仍在執行"]
+        session.finish()
+
+    def test_admission_rejection_releases_unstarted_reservation(self):
+        """admission 拒絕時不可留下未啟動的 registry reservation。"""
+        from app.tasks import task_session as task_session_module
+        from app.tasks.operation_registry import OperationRegistry
+
+        registry = OperationRegistry()
+        session = TaskSession()
+        session.operation_registry = registry
+
+        def reject(_session, event):
+            return False if event == "admission" else None
+
+        task_session_module.add_observer(reject)
+        try:
+            with pytest.raises(TaskSessionAdmissionError):
+                session.start()
+        finally:
+            task_session_module.remove_observer(reject)
+
+        assert registry.active_count() == 0
+        assert session.operation_handle.done_event.is_set()
+        assert session.operation_handle.terminal_reason == "admission_rejected"
 
     def test_snapshot(self):
         """測試快照回傳"""

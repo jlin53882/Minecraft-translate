@@ -39,8 +39,6 @@ def test_lm_page_and_pipeline_share_the_lm_folder_name(monkeypatch):
 
 
 def test_error_log_dir_follows_config(monkeypatch, tmp_path):
-    from translation_tool.utils import config_manager
-
     monkeypatch.setattr(
         config_manager,
         "load_config",
@@ -50,13 +48,16 @@ def test_error_log_dir_follows_config(monkeypatch, tmp_path):
 
 
 def test_error_log_dir_falls_back_when_config_fails(monkeypatch):
-    from translation_tool.utils import config_manager
-
     def boom(*a, **k):
         raise RuntimeError("config broken")
 
     monkeypatch.setattr(config_manager, "load_config", boom)
-    assert exceptions._resolve_error_log_dir().name == "logs"
+    monkeypatch.setattr(
+        exceptions,
+        "get_schema_default",
+        lambda path: "schema-logs" if path == "logging.log_dir" else None,
+    )
+    assert exceptions._resolve_error_log_dir().name == "schema-logs"
 
 
 class _Tasks:

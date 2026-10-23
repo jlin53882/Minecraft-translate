@@ -10,6 +10,7 @@ from app.views.icon_preview.load_operation import (
     load_icon_preview,
     observe_async_owner,
 )
+from tests.conftest import mock_page
 
 
 def _reserve(registry):
@@ -27,6 +28,32 @@ def test_cancelled_ui_task_before_coroutine_start_releases_reservation():
 
     assert operation.done_event.is_set()
     assert registry.active() == []
+
+
+def test_cancelled_icon_view_task_before_coroutine_start_releases_view_owner(
+    tmp_path,
+):
+    """UI coroutine 尚未開始就取消時，載入按鈕也要立即解除鎖定。"""
+    from app.views.icon_preview_view import IconPreviewView
+
+    page = mock_page()
+    view = IconPreviewView(page)
+    view.update = lambda *args, **kwargs: None
+    view.source_root = tmp_path
+    view.review_root = tmp_path
+    future = Future()
+
+    def cancel_before_start(coro, *args):
+        coro.close()
+        future.cancel()
+        return future
+
+    page.run_task = cancel_before_start
+    view._on_load_clicked(None)
+
+    assert view._loading is False
+    assert view._load_operation is None
+    assert view.load_btn.disabled is False
 
 
 def test_cancelled_icon_load_drains_its_blocking_thread_before_terminal():
@@ -140,6 +167,46 @@ def test_icon_load_unmount_invalidates_worker_and_finishes_cancelled():
         assert operation.done_event.is_set()
         assert operation.handle.terminal_reason == "cancelled"
         assert registry.active() == []
+
+    asyncio.run(scenario())
+
+
+def test_stale_icon_load_does_not_clear_newer_load_state():
+    """舊世代載入完成時不可清除新世代載入的 UI 旗標。"""
+    registry = OperationRegistry()
+    old_operation = _reserve(registry)
+    new_operation = _reserve(registry)
+    entered = threading.Event()
+    release = threading.Event()
+
+    class View:
+        _load_generation = 1
+        _loading = True
+        _load_operation = old_operation
+        page = None
+
+        def _detect_source_mode(self):
+            entered.set()
+            release.wait(timeout=2)
+            return "unknown"
+
+        def _update_load_state(self):
+            pass
+
+    async def scenario():
+        view = View()
+        task = asyncio.create_task(load_icon_preview(view, 1, old_operation))
+        assert await asyncio.to_thread(entered.wait, 1)
+        view._load_generation = 2
+        view._loading = True
+        view._load_operation = new_operation
+        release.set()
+        await task
+
+        assert view._loading is True
+        assert old_operation.done_event.is_set()
+        assert not new_operation.done_event.is_set()
+        new_operation.finish()
 
     asyncio.run(scenario())
 

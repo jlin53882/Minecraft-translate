@@ -23,6 +23,7 @@ from .cache_overview import (
 from .cache_overview import (
     get_active_shard_id as _get_active_shard_id_impl,
 )
+from .cache_search import FuzzyMatcher
 from .cache_search_facade import CacheSearchFacade
 from .config_manager import load_config, resolve_project_path
 
@@ -665,11 +666,67 @@ def rebuild_search_index_for_type(cache_type: str) -> bool:
     return result is not False
 
 
+def _search_current_cache(
+    state: cache_store.CacheRuntimeState,
+    query: str,
+    cache_type: str | None,
+    limit: int,
+    use_fuzzy: bool,
+) -> list[dict[str, Any]]:
+    """搜尋目前記憶體快取，避免索引落後時回傳舊資料。"""
+    folded_query = query.strip().casefold()
+    if not folded_query or limit <= 0:
+        return []
+    target_types = (
+        [cache_type] if cache_type is not None else list(state.translation_cache)
+    )
+    results: list[dict[str, Any]] = []
+    with state.cache_lock:
+        for current_type in target_types:
+            cache = state.translation_cache.get(current_type)
+            if not isinstance(cache, dict):
+                continue
+            for key, entry in cache.items():
+                if not isinstance(entry, dict):
+                    continue
+                key_text = str(key)
+                src = str(entry.get("src", ""))
+                dst = str(entry.get("dst", ""))
+                if not any(
+                    folded_query in value.casefold() for value in (key_text, src, dst)
+                ):
+                    continue
+                results.append(
+                    {
+                        "key": key_text,
+                        "src": src,
+                        "dst": dst,
+                        "mod": entry.get("mod", ""),
+                        "path": entry.get("path", ""),
+                        "type": current_type,
+                        "score": 0.0,
+                    }
+                )
+    if use_fuzzy and results:
+        results = FuzzyMatcher().rank_results(query, results)
+    return results[:limit]
+
+
 def search_cache(
     query: str, cache_type: str | None = None, limit: int = 50, use_fuzzy: bool = True
 ) -> list:
     """搜尋快取中符合查詢字的翻譯"""
-    return _get_search_facade().search_cache(
+    state = _initialized_state()
+    target_types = (
+        [cache_type] if cache_type is not None else list(state.translation_cache)
+    )
+    has_pending_write = any(
+        state.is_dirty.get(current_type, False) for current_type in target_types
+    )
+    facade = _get_search_facade()
+    if has_pending_write or not facade.is_search_index_current(CACHE_TYPES):
+        return _search_current_cache(state, query, cache_type, int(limit), use_fuzzy)
+    return facade.search_cache(
         query=query, cache_type=cache_type, limit=limit, use_fuzzy=use_fuzzy
     )
 

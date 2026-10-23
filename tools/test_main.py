@@ -17,6 +17,13 @@ import argparse
 import sys
 from pathlib import Path
 
+try:
+    from tools.cli_encoding import configure_utf8_stdio
+except ModuleNotFoundError:
+    from cli_encoding import configure_utf8_stdio
+
+configure_utf8_stdio()
+
 ROOT = Path(__file__).resolve().parents[1]
 
 

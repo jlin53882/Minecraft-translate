@@ -262,6 +262,37 @@ class TestTranslateItemsWithCacheLoop:
     @patch("translation_tool.core.lm_translator_shared_loop.reload_translation_cache")
     @patch("translation_tool.core.lm_translator_shared_loop.save_translation_cache")
     @patch("translation_tool.core.lm_translator_shared_loop.add_to_cache")
+    def test_translate_items_returned_cancelled_is_not_failed(
+        self, mock_add_cache, mock_save_cache, mock_reload
+    ):
+        """翻譯器回傳 CANCELLED 時，共享迴圈不得誤判為 FAILED。"""
+        from translation_tool.core.lm_translator_shared_loop import (
+            translate_items_with_cache_loop,
+        )
+
+        def mock_translate(batch, total):
+            return [], "CANCELLED"
+
+        items = [
+            {
+                "path": "path1",
+                "text": "Hello",
+                "source_text": "Hello",
+                "cache_type": "lang",
+            }
+        ]
+
+        result = translate_items_with_cache_loop(
+            items, translate_batch_smart=mock_translate
+        )
+
+        assert result.status == "CANCELLED"
+        assert result.processed == 0
+        mock_save_cache.assert_not_called()
+
+    @patch("translation_tool.core.lm_translator_shared_loop.reload_translation_cache")
+    @patch("translation_tool.core.lm_translator_shared_loop.save_translation_cache")
+    @patch("translation_tool.core.lm_translator_shared_loop.add_to_cache")
     def test_translate_items_failure(
         self, mock_add_cache, mock_save_cache, mock_reload
     ):

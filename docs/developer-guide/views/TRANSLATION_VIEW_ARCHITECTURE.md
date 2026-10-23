@@ -87,12 +87,14 @@ TranslationView（ft.Column）
 - **Step1 Export / Step2 Clean**：`export_ftbquests_raw_json` / `clean_ftbquests_from_raw`（實作分在 `ftb_translator_export.py` / `ftb_translator_clean.py`）— 讀 `config/ftbquests/quests/lang/{en_us,zh_cn,zh_tw}` 下 `ftb_lang.json` / `ftb_quests.json`，清理三方合併（`deep_merge_3way`：zh_tw > zh_cn轉繁 > en_us，巢狀遞迴合併）
 - **Step3 Translate**：需要 Step2 產出的 `en_pending_dir`（沒勾 Step2 會報錯）；呼叫 `plugins/ftbquests/ftbquests_lmtranslator.py` 的 `translate_ftb_pending_to_zh_tw`（LM 批次翻譯，`dry_run` / `write_new_cache` 透傳），輸出到 `<out>/ftbquests/LM翻譯輸出/config/ftbquests/quests/lang`（out 預設為 `<input>/Output`）。**FTB pipeline 不使用** `translate_directory_generator`
 - **Step4 Inject**：`dry_run` 時略過；否則讀 Step3 的 `zh_tw` JSON（兩個都不存在 → `FileNotFoundError`），以 `inject_ftbquests_quests_from_zh_tw_json` 注入任務本體、`prepare_ftbquests_lang_template_only` 準備語系模板後以 `inject_ftbquests_zh_tw_from_jsons` 注入介面文字，輸出到 `<out>/ftbquests/完成/config`
+- FTB 的最終注入有狀態閘門：只有 `DONE` 才可注入；`PARTIAL`、`FAILED`、`CANCELLED` 只保留續跑標記與部分輸出，不得把未完成輸出視為完成資料。
 - 清理用 `prune_en_us_by_zh_tw`（巢狀）/ `prune_flat_en_by_tw`（扁平）把 zh_tw 已覆蓋的 en key 移除
 
 ### KubeJS Tooltips（`translation_tool/core/kubejs_translator.py` 的 `run_kubejs_pipeline`）
 - **Step1 Extract**（`step1_extract_and_clean`）：`resolve_kubejs_root`（max_depth=4，優先含 `client_scripts` 的目錄）→ `kubejs_tooltip_extract.extract` → `clean_kubejs_from_raw`（三方合併，`deep_merge_3way_flat` 扁平版：tw > cn轉繁 > en）
 - **Step2 Translate**：`step2_translate_lm` → `kubejs_tooltip_lmtranslator.translate_kubejs_pending_to_zh_tw`（LM 批次翻譯，dry_run / write_new_cache 透傳）
 - **Step3 Inject**：`step3_inject` → `kubejs_tooltip_inject.inject`（把翻譯 JSON 寫回 kubejs 目錄）
+- KubeJS 只有在翻譯狀態為 `DONE` 時才提交可注入快照並執行注入；`PARTIAL`、`FAILED`、`CANCELLED` 不提交最終快照，也不注入。
 - 三方合併前用 `_is_filled_text` 排除空字串與 `{xxx}` 語言參考格式
 - `_read_json_dict_orjson` 處理 BOM 與結尾多餘逗號（容錯解析）
 
@@ -104,6 +106,7 @@ TranslationView（ft.Column）
 - **Step3 Inject**（`step3_inject_impl`）：讀原始 MD + 翻譯 JSON，逐區塊套用（`apply_item_to_md_lines_fn`）→ 寫入 final_dir
   - `map_lang_in_rel_path_allow_zh_fn` 回傳 `status` 只認 `SRC_EN` / `SRC_ZH`，其他狀態跳過（`skipped_lang_status`）
   - 來源 MD 不存在 → `skipped_missing_source`；保留原始結尾換行（`ends_with_nl`）
+- Markdown 只有 `DONE` 才可執行 Step3；`PARTIAL`、`FAILED`、`CANCELLED` 不使用 pending JSON 產生完成目錄，避免未完成翻譯被當成最終輸出。
 
 ## 重開後續跑
 

@@ -25,6 +25,13 @@ from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import Any
 
+try:
+    from tools.cli_encoding import configure_utf8_stdio
+except ModuleNotFoundError:
+    from cli_encoding import configure_utf8_stdio
+
+configure_utf8_stdio()
+
 # Direct execution puts ``tools/`` on sys.path rather than the repository root.
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:

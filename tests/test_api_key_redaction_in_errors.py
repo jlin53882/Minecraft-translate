@@ -58,3 +58,30 @@ def test_save_failure_traceback_is_redacted(monkeypatch, caplog):
         )
     assert ok is False
     assert secret not in caplog.text
+
+
+def test_direct_save_failure_redacts_a_configured_custom_key(
+    tmp_path, monkeypatch, caplog
+):
+    """原子寫入失敗時，例外文字不得把設定中的非標準金鑰寫進日誌。"""
+    import logging
+
+    from translation_tool.utils import config_manager
+
+    secret = "custom-private-key-0123456789"
+    target = tmp_path / "config.json"
+    monkeypatch.setattr(
+        config_manager.os,
+        "replace",
+        lambda *_args: (_ for _ in ()).throw(
+            RuntimeError(f"write failed for {secret}")
+        ),
+    )
+
+    with caplog.at_level(logging.ERROR):
+        assert (
+            config_manager.save_config({"lm_translator": {"keys": [secret]}}, target)
+            is False
+        )
+
+    assert secret not in caplog.text

@@ -62,6 +62,8 @@ def test_post_to_ui_failing_recovery_does_not_raise():
 def test_bulk_review_dialog_releases_busy_when_result_cannot_be_posted():
     dialog = BulkReviewDialog(_rejecting_page(), lambda: None, "1.21.1", None)
     dialog._set_busy(True, "審核中…")
+    dialog._mark_scope_post_failure(dialog._scope_seq)
+    assert dialog._busy is True  # 選項維護工作的失敗不可清掉目前操作狀態
     dialog._post(dialog._show_progress, "x", 0.5, final=False)
     assert dialog._busy is True  # 進度通知失敗不影響操作
     dialog._post(dialog._apply_result, 0, None, None, None)

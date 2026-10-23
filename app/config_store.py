@@ -20,8 +20,12 @@ import copy
 import json
 import logging
 import threading
+import traceback
 from collections.abc import Callable, Iterable
 from typing import Any
+
+from translation_tool.utils.config_schema import get_schema_default
+from translation_tool.utils.redaction import redact_text
 
 logger = logging.getLogger(__name__)
 
@@ -74,13 +78,15 @@ def notify_saved(changed_paths: Iterable[str] | None = None) -> None:
     for callback in listeners:
         try:
             callback()
-        except Exception:
-            logger.exception("設定異動訂閱者失敗")
+        except Exception:  # noqa: BLE001 - 設定訂閱者錯誤不得中斷寫入
+            logger.error("設定異動訂閱者失敗：%s", redact_text(traceback.format_exc()))
     for callback in path_listeners:
         try:
             callback(changed)
-        except Exception:
-            logger.exception("設定異動路徑訂閱者失敗")
+        except Exception:  # noqa: BLE001 - 設定訂閱者錯誤不得中斷寫入
+            logger.error(
+                "設定異動路徑訂閱者失敗：%s", redact_text(traceback.format_exc())
+            )
 
 
 def changed_paths(before: Any, after: Any) -> frozenset[str]:
@@ -184,7 +190,7 @@ def save(config: dict) -> bool:
 # -- 外殼偏好 -----------------------------------------------------------------
 
 THEME_MODES = ("dark", "light")
-DEFAULT_THEME_MODE = "dark"
+DEFAULT_THEME_MODE = get_schema_default("ui.theme_mode")
 
 
 def get_theme_mode() -> str:

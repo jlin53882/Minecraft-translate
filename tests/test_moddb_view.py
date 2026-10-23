@@ -587,6 +587,39 @@ def test_filter_snapshot_generation_guard_rejects_stale_result(db_path, monkeypa
         view._db.close()
 
 
+def test_filter_snapshot_generation_guard_detects_external_write(db_path, monkeypatch):
+    seed(db_path)
+    view = moddb_view.ModDbView(mock_page(), mock_filepicker())
+    view._db = TranslationDB(db_path)
+    view.tab = "entries"
+    scheduled = []
+    monkeypatch.setattr(
+        view,
+        "_request_panel_refresh",
+        lambda key, **_kwargs: scheduled.append(key),
+    )
+    try:
+        before = moddb_service.database_data_generation(view._db)
+        writer = TranslationDB(db_path)
+        writer.ingest(
+            "1.21.1",
+            [ScanItem(KIND_LANG, "foo", "item.foo.external", "External")],
+        )
+        writer.close()
+
+        is_valid = view._validate_filter_snapshot(
+            {"identity": "same-db"},
+            {"identity": "same-db", "db_generation": before},
+            view.entries,
+        )
+
+        assert is_valid is False
+        assert scheduled == ["entries"]
+        assert view._panel_refresh_needed["entries"] is True
+    finally:
+        view._db.close()
+
+
 def test_moddb_overview_load_uses_a_worker_owned_connection(db_path, monkeypatch):
     from app.tasks.operation_registry import OperationRegistry
 

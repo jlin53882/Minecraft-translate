@@ -357,7 +357,9 @@ class IconPreviewDetailMixin:
             )
             return "empty"
 
-    def _load_entries_from_jar_directory(self, processed_callback=None) -> list:
+    def _load_entries_from_jar_directory(
+        self, processed_callback=None, generation: int | None = None
+    ) -> list:
         """從 JAR 目錄讀取所有 en_us.json（不改磁碟，直接讀 ZIP 內容）。
 
         entries 只包含來源資料；zh_tw 會在共用載入完成階段依目前的
@@ -368,7 +370,7 @@ class IconPreviewDetailMixin:
         total_steps = self._count_scan_steps("jar_directory")
 
         entries = self._scan_jar_entries(processed_callback, total_steps)
-        self._extract_and_cache_icons(entries)
+        self._extract_and_cache_icons(entries, generation=generation)
         return entries
 
     def _build_zh_tw_lookup(self, all_modids):
@@ -500,7 +502,9 @@ class IconPreviewDetailMixin:
         log_info(f"[IconPreview] JAR 目錄掃描完成：共 {len(entries)} 筆翻譯")
         return entries
 
-    def _extract_and_cache_icons(self, entries) -> None:
+    def _extract_and_cache_icons(
+        self, entries, *, generation: int | None = None
+    ) -> None:
         """Phase 4/4：批次提取模組圖示並寫入 L2 磁碟快取。"""
         # ===== JAR Icon 掃描：提取 mod icons =====
         icon_cache_root = _get_icon_cache_dir()
@@ -514,7 +518,13 @@ class IconPreviewDetailMixin:
                 jar_to_entries[e.source_jar].append(e)
 
         def _on_icon_progress(done: int, total: int):
-            _show_progress_phase(self, "提取模組圖示", done, total)
+            _show_progress_phase(
+                self,
+                "提取模組圖示",
+                done,
+                total,
+                generation=generation,
+            )
 
         raise_if_cancelled()
         _batch_extract_jar_icons(

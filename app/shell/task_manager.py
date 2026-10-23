@@ -262,6 +262,10 @@ class TaskManager:
             # is initialized; avoid presenting one operation twice at admission.
             return
         if event in {"finish", "result"} and handle._task_session_id is not None:
+            if event == "finish" and handle.terminal_reason == "admission_rejected":
+                # admission 前就被拒絕的預約沒有開始過，不應出現在最近任務。
+                self._emit()
+                return
             # Reconcile the final owner result into this exact run's UI projection.
             self._record_session_terminal(handle)
             # Keep the terminal notification: subscribers may have observed

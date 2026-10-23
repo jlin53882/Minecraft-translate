@@ -49,7 +49,7 @@ translation_tool/core/
        ├─ 未命中 → _count_scan_steps(mode)（glob / rglob）→ _show_scan_started（進度條，在 event loop）
        └─ _scan_entries(mode, total_steps) → _finish_load(entries, mode)
   無 page.run_task（測試替身）時維持同步流程（_try_use_cached_entries / _begin_scan）
-  Lifecycle：will_unmount() 遞增 _load_generation／_render_generation 並取消 debounce——進行中的載入結果丟棄、旗標復位；did_mount() 只同步載入按鈕狀態
+  Lifecycle：will_unmount() 遞增 _load_generation／_render_generation 並取消 debounce——進行中的載入結果丟棄、旗標復位；_load_operation 讓只有目前載入 owner 可以清除忙碌狀態，避免舊作業覆蓋新作業；did_mount() 只同步載入按鈕狀態
   _scan_entries(mode, total_steps)
     ├─ extracted_folder → _load_entries()
     │      └─ 掃 source_root 的 en_us.json（modid 取自路徑中 assets 的下一段），建立 entries（modid/key/en）
@@ -60,7 +60,7 @@ translation_tool/core/
   _finish_load(entries, mode)：寫 L1 快取、依 modid 分組為 mods、_render_mod_list()（第一層，依模組分頁；page_size_selector 控制每頁模組數）
 
 [進度] _make_progress_callback / _show_progress_phase → 模組層 _set_progress → IconPreviewView._set_progress
-  └─ 背景執行緒只記下最新值，_refresh_progress 節流（約 0.2 秒）後經 page.run_task 在 event loop 上套用到 progress_bar / progress_text
+  └─ 背景執行緒只記下最新值與載入世代，_refresh_progress 節流（約 0.2 秒）後經 page.run_task 在 event loop 上套用到 progress_bar / progress_text；舊世代排入 UI loop 的更新會丟棄
 
 [校對] _open_mod_detail(modid) → 第二層
   ├─ 讀 zh_tw：背景執行緒 _find_zh_file（review_root/<modid>/lang/zh_tw.json，不存在則 rglob 補找），回到 event loop 後才套用（期間若返回／換頁／卸載則丟棄）

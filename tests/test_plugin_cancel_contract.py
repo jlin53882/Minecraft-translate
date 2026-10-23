@@ -71,6 +71,40 @@ def test_ftb_plugin_stops_after_cancelled_loop_and_reports_status(
     assert result["cancelled"] is True
 
 
+@pytest.mark.parametrize("status", ["PARTIAL", "FAILED"])
+def test_ftb_plugin_stops_after_non_done_loop_and_reports_status(
+    status: str, tmp_path: Path, monkeypatch
+) -> None:
+    """FTB 對部分完成或失敗不得繼續處理後續檔案，也不得回報 DONE。"""
+    in_dir = tmp_path / "lang"
+    (in_dir / "en_us").mkdir(parents=True)
+    for name in ("a", "b"):
+        (in_dir / "en_us" / f"{name}.json").write_text(
+            json.dumps({f"{name}.key": f"Text {name}"}), encoding="utf-8"
+        )
+    calls: list[int] = []
+
+    def fake_loop(*args, **kwargs):
+        calls.append(1)
+        return SimpleNamespace(
+            status=status, processed=0, elapsed_sec=0.0, completed_calls=0
+        )
+
+    monkeypatch.setattr(ftbquests_lmtranslator, "validate_api_keys", lambda: None)
+    monkeypatch.setattr(ftbquests_lmtranslator, "run_translator_skeleton", fake_loop)
+
+    result = ftbquests_lmtranslator.translate_ftb_pending_to_zh_tw(
+        input_lang_dir=str(in_dir),
+        output_lang_dir=str(tmp_path / "out"),
+        dry_run=False,
+        write_new_cache=False,
+    )
+
+    assert len(calls) == 1
+    assert result["status"] == status
+    assert result["cancelled"] is False
+
+
 def test_ftb_pipeline_skips_inject_when_translation_cancelled(
     tmp_path: Path, monkeypatch
 ) -> None:
@@ -100,6 +134,37 @@ def test_ftb_pipeline_skips_inject_when_translation_cancelled(
     # 已完成的翻譯輸出保留
     kept = tmp_path / "Output" / "ftbquests" / "LM翻譯輸出"
     assert list(kept.rglob("ftb_lang.json"))
+
+
+def test_ftb_pipeline_skips_inject_when_translation_is_incomplete(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """FTB 翻譯非 DONE 時不得把部分輸出注入成完成品。"""
+    _make_ftb_pack(tmp_path)
+
+    def fake_translate(*, input_lang_dir: str, output_lang_dir: str, **kwargs) -> dict:
+        target = Path(output_lang_dir) / "zh_tw"
+        target.mkdir(parents=True, exist_ok=True)
+        (target / "ftb_lang.json").write_text(
+            '{"quest.title": "部分譯文"}', encoding="utf-8"
+        )
+        return {"status": "PARTIAL", "cancelled": False, "written_files": 1}
+
+    monkeypatch.setattr(
+        ftbquests_lmtranslator, "translate_ftb_pending_to_zh_tw", fake_translate
+    )
+
+    result = ftb_translator.run_ftb_pipeline(
+        directory_path=str(tmp_path),
+        output_dir=str(tmp_path / "Output"),
+        dry_run=False,
+    )
+
+    assert result["inject"] == {
+        "skipped": True,
+        "reason": "translation_incomplete",
+    }
+    assert not (tmp_path / "Output" / "ftbquests" / "完成").exists()
 
 
 def test_ftb_pipeline_skips_inject_when_cancel_requested_before_inject(
@@ -200,6 +265,30 @@ def test_md_pipeline_does_not_inject_old_pending_after_cancel(
     assert list((tmp_path / "Output" / "md" / "待翻譯").rglob("*.json"))
 
 
+def test_md_pipeline_does_not_inject_after_incomplete_translation(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Markdown 翻譯非 DONE 時不得使用待翻譯 JSON 回寫舊內容。"""
+    _make_md_pack(tmp_path)
+
+    def fake_translate(**kwargs):
+        return {"status": "PARTIAL", "cancelled": False, "written_files": 0}
+
+    monkeypatch.setattr(md_translation_assembly, "translate_md_pending", fake_translate)
+
+    result = md_translation_assembly.run_md_pipeline(
+        input_dir=str(tmp_path),
+        output_dir=str(tmp_path / "Output"),
+        lang_mode="all",
+    )
+
+    assert result["step3"] == {
+        "skipped": True,
+        "reason": "translation_incomplete",
+    }
+    assert not list((tmp_path / "Output" / "md" / "完成").rglob("*.md"))
+
+
 def test_md_inject_only_not_blocked_without_cancel(tmp_path: Path) -> None:
     """只執行 inject（step_translate 關閉）且未取消時照常回寫。"""
     _make_md_pack(tmp_path)
@@ -238,3 +327,36 @@ def test_kubejs_pipeline_cancelled_result_from_translator_not_committed(
 
     assert result["step2"]["reason"] == "cancelled"
     assert result["step3"] == {"skipped": True, "reason": "cancelled"}
+
+
+@pytest.mark.parametrize("status", ["PARTIAL", "FAILED"])
+def test_kubejs_pipeline_non_done_result_is_not_committed_or_injected(
+    status: str, tmp_path: Path
+) -> None:
+    """KubeJS 翻譯非 DONE 時不得提交翻譯快照或執行注入。"""
+    kubejs = tmp_path / "kubejs" / "client_scripts"
+    kubejs.mkdir(parents=True)
+    (kubejs / "tooltip.js").write_text(
+        "scene.text('scene', 'Text')\n", encoding="utf-8"
+    )
+
+    def incomplete_translator(**kwargs):
+        return {"status": status, "cancelled": False}
+
+    result = kubejs_translator.run_kubejs_pipeline(
+        input_dir=str(kubejs.parent),
+        output_dir=str(tmp_path / "Output"),
+        translator_fn=incomplete_translator,
+        step_inject=True,
+    )
+
+    assert result["step2"] == {
+        "status": status,
+        "cancelled": False,
+        "skipped": True,
+        "reason": "translation_incomplete",
+    }
+    assert result["step3"] == {
+        "skipped": True,
+        "reason": "translation_incomplete",
+    }

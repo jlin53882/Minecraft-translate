@@ -2519,9 +2519,8 @@ def test_json_apply_keeps_cas_read_and_write_in_one_transaction(db, monkeypatch)
                 self._called = True
                 writer.start()
                 assert writer_started.wait(1)
-                # 舊流程沒有交易鎖，外部寫入會在這裡完成；修復後會等
-                # 套用交易提交，再由外部連線完成，形成可驗證的差異。
-                writer_finished.wait(1.0)
+                # 不在主交易持鎖時等待外部寫入；交易提交後由 join 等待它完成，
+                # 才能同時驗證舊流程的覆寫風險與修復後的提交順序。
             return row
 
         def __getattr__(self, name):

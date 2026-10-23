@@ -244,7 +244,8 @@ def translate_ftb_pending_to_zh_tw(
                        （輸出會自動把 en_us 資料夾替換成 zh_tw）
     - session: 可選，用來 add_log / set_progress
     """
-    validate_api_keys()
+    if not dry_run:
+        validate_api_keys()
 
     in_dir = Path(input_lang_dir).resolve()
     out_dir = Path(output_lang_dir).resolve()
@@ -405,7 +406,7 @@ def translate_ftb_pending_to_zh_tw(
     translated_done = 0  # ✅ 只算 API 翻譯完成（主進度分子）
     cache_hit_done_so_far = 0  # ✅ 已寫入輸出的 cache hit（整體完成用）
     total_written = 0
-    loop_status = "DONE"  # 各檔迴圈終態：CANCELLED／ALL_KEYS_EXHAUSTED 會停止後續檔案
+    loop_status = "DONE"  # 非 DONE 的檔案狀態都要停止後續檔案
 
     # ---- Dry-run stats container ----
     per_file_rows: list[dict] = []
@@ -607,7 +608,8 @@ def translate_ftb_pending_to_zh_tw(
                 on_progress=on_progress,
             ),
         )
-        if res.status == "DONE":
+        res_status = str(getattr(res, "status", "") or "").upper()
+        if res_status == "DONE":
             checkpoint.clear()
 
         # final write
@@ -629,17 +631,21 @@ def translate_ftb_pending_to_zh_tw(
         )
         log_info(
             f"✨ [檔案完成] {rel_src} 已寫入\n"
-            f"📈 翻譯數據：本次翻譯 {int(res.processed or 0)} 條 | 檔案狀態：{res.status}\n"
+            f"📈 翻譯數據：本次翻譯 {int(res.processed or 0)} 條 | 檔案狀態：{res_status or 'FAILED'}\n"
             f"🎯 全域進度：目前已完成 {overall_done} / {global_total_keys} ({progress_pct:.1f}%)"
         )
 
-        if res.status == "ALL_KEYS_EXHAUSTED":
-            loop_status = res.status
-            log_info("⚠️ [FTB-LM] ALL_KEYS_EXHAUSTED：已輸出目前成果，停止。")
-            break
-        if res.status == "CANCELLED":
-            loop_status = res.status
-            log_info("⏹ [FTB-LM] 已取消：已輸出目前成果，不再處理後續檔案。")
+        if res_status != "DONE":
+            loop_status = res_status or "FAILED"
+            if loop_status == "ALL_KEYS_EXHAUSTED":
+                log_info("⚠️ [FTB-LM] ALL_KEYS_EXHAUSTED：已輸出目前成果，停止。")
+            elif loop_status == "CANCELLED":
+                log_info("⏹ [FTB-LM] 已取消：已輸出目前成果，不再處理後續檔案。")
+            else:
+                log_warning(
+                    f"⚠️ [FTB-LM] 檔案翻譯未完成（status={loop_status}）："
+                    "已輸出目前成果，不再處理後續檔案。"
+                )
             break
 
     # ---- Dry-run 結尾摘要 ----

@@ -59,6 +59,22 @@ def test_rebuild_search_index_for_type_no_pollution(tmp_path, monkeypatch):
     assert patchouli_results and patchouli_results[0]["type"] == "patchouli"
 
 
+def test_search_uses_current_memory_after_pending_cache_update(tmp_path, monkeypatch):
+    """索引尚未重建時，搜尋不可回傳已被記憶體更新取代的舊譯文。"""
+    monkeypatch.setattr(cache_manager, "resolve_project_path", lambda p: tmp_path / p)
+    _reset_cache_state()
+
+    cache_manager.add_to_cache("lang", "item.minecraft.apple", "Apple", "舊譯文")
+    cache_manager.rebuild_search_index()
+    cache_manager.add_to_cache("lang", "item.minecraft.apple", "Apple", "新譯文")
+
+    assert (
+        cache_manager.search_cache("舊譯文", cache_type="lang", use_fuzzy=False) == []
+    )
+    current = cache_manager.search_cache("新譯文", cache_type="lang", use_fuzzy=False)
+    assert current and current[0]["dst"] == "新譯文"
+
+
 def test_rebuild_uses_build_then_swap_query_not_crash(tmp_path, monkeypatch):
     monkeypatch.setattr(cache_manager, "resolve_project_path", lambda p: tmp_path / p)
     _reset_cache_state()

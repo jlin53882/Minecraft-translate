@@ -530,9 +530,7 @@ def test_pipeline_view_does_not_depend_on_services_or_threads():
 
 
 def _session():
-    s = TaskSession()
-    s.start()
-    return s
+    return TaskSession()
 
 
 def test_actions_merge_dispatches_by_input_mode(tmp_path):

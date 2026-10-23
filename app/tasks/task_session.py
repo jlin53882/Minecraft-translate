@@ -218,6 +218,7 @@ class TaskSession:
         self._next_seq: int = 0
         self._start_logs: list[tuple[str, str]] = []
         self._lock = threading.Lock()
+        self._start_lock = threading.Lock()
         self._cancel_event = threading.Event()
         self._operation_cancel_event: threading.Event | None = None
         self.operation_handle = None
@@ -410,8 +411,21 @@ class TaskSession:
         )
 
     def start(self) -> None:
-        """開始任務，清空日誌並重置序號。"""
+        """開始一次任務；同一個 session 的作用中執行不允許重入。"""
+        if not self._start_lock.acquire(blocking=False):
+            raise TaskSessionAdmissionError("TaskSession is already starting")
+        try:
+            with self._lock:
+                if self._started_at is not None and not self._finished:
+                    raise TaskSessionAdmissionError("TaskSession is already running")
+            self._start_impl()
+        finally:
+            self._start_lock.release()
+
+    def _start_impl(self) -> None:
+        """執行已通過重入保護的任務啟動流程。"""
         registry = self.operation_registry
+        registered_handle = None
         if registry is not None:
             # A page-bound session must enforce its own registry's admission
             # even after TaskManager has detached its process-global observer.
@@ -433,10 +447,13 @@ class TaskSession:
                 self.operation_handle = None
                 handle = None
             if parent is None and handle is None:
-                handle = registry.register_session(self)
-                if handle is None:
+                registered_handle = registry.register_session(self)
+                if registered_handle is None:
                     raise TaskSessionAdmissionError("operation admission is closed")
+                handle = registered_handle
         if not _notify(self, "admission"):
+            if registered_handle is not None:
+                registry.discard_reserved(registered_handle)
             raise TaskSessionAdmissionError("operation admission is closed")
         self._cancel_event.clear()
         with self._lock:

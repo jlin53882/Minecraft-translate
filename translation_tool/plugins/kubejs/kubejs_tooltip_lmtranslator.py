@@ -204,7 +204,8 @@ def translate_kubejs_pending_to_zh_tw(
     - pending_dir: 例如 Output/kubejs/待翻譯
     - output_dir : 例如 Output/kubejs/LM翻譯後
     """
-    validate_api_keys()
+    if not dry_run:
+        validate_api_keys()
 
     in_dir = Path(pending_dir).resolve()
     out_dir = Path(output_dir).resolve()
@@ -598,8 +599,8 @@ def translate_kubejs_pending_to_zh_tw(
                 on_progress=on_progress,
             ),
         )
-        loop_status = res.status
-        if res.status == "DONE":
+        loop_status = str(getattr(res, "status", "") or "").upper() or "FAILED"
+        if loop_status == "DONE":
             checkpoint.clear()
 
         translated_done = int(res.processed or 0)
