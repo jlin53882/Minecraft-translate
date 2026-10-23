@@ -40,7 +40,7 @@
 
 所有會提交 Mod DB 寫入的面板完成回呼，都必須通知 `ModDbView._on_database_changed`（EntriesPanel 仍保留 `_on_entries_changed` 相容轉接）。這個共通入口會遞增資料世代、使 overview／entries／scan／translate 的快照與 pending 結果失效，刷新目前頁籤，並把隱藏頁籤留在待刷新狀態。EntriesPanel 在寫入後的 row 重載不能取代這個入口，因為模組／來源選項、分頁、總覽 KPI 與其他已掛載頁籤可能仍是 resident snapshot。
 
-EntriesPanel 的編輯器另有獨立的 resident 草稿契約：`EditorDraftStore.remember()` 以條目 id 保存編輯框相對於目前資料庫值的差異；`apply_refresh_snapshot` 在替換清單與詳情前先呼叫它，`_show_editor` 再以草稿優先於資料庫快照。完整刷新仍可更新清單、篩選選項、審核標籤與統計，但不會覆蓋未儲存輸入。資料庫身分改變時清除這些草稿；儲存回呼只有在編輯框仍等於剛寫入的原始文字時才清除，儲存完成後繼續輸入則保留並標示尚未儲存。草稿儲存元件位於 `app/views/moddb/editor_drafts.py`，讓 resident state 的規則可獨立維護與測試。
+EntriesPanel 的編輯器另有獨立的 resident 草稿契約：`EditorDraftStore.remember()` 以條目 id 保存編輯框相對於目前資料庫值的差異；`apply_refresh_snapshot` 在替換清單與詳情前先呼叫它，`_show_editor` 再以草稿優先於資料庫快照。完整刷新仍可更新清單、篩選選項、審核標籤與統計，但不會覆蓋未儲存輸入。資料庫身分改變時，先清除草稿並重置選取條目、詳情與編輯框，再套用新資料庫的清單或背景快照，避免相同條目 id 把舊資料庫草稿帶入新資料庫。儲存回呼只有在編輯框仍等於剛寫入的原始文字時才清除，儲存完成後繼續輸入則保留並標示尚未儲存。草稿儲存元件位於 `app/views/moddb/editor_drafts.py`，讓 resident state 的規則可獨立維護與測試。
 
 `BulkReviewDialog` 是另一個 resident scope：它只顯示仍有未審核候選的模組／來源。批量審查或還原成功後，除了呼叫外層完成回呼，也必須重新啟動 `_start_scope_options_load`；否則資料庫已正確提交，但對話框下拉會保留舊 scope，直到使用者再次切換條件。資料清理／還原完成回呼同樣不可只呼叫 `OverviewPanel.refresh`，必須走上述共通入口。
 `SmartReviewReviewer` 依候選狀態分兩條套用路徑：`ready` 走 `apply_smart_review_candidate`；`SMART_REVIEW_MANUAL_EDIT_STATUSES` 內的狀態（已套用、已保留原譯文、需補 context、不用改、無效、格式不符、已過期）走 `apply_smart_review_manual_edit`，載入時先以 `realign_smart_review_candidate` 對齊快照，並由 `is_manual_edit_row`、`initial_draft_text`、`manual_edit_hint` 決定草稿起點與提示。人工編輯路徑的 CAS 比對對齊後的快照，快照改變（含英文原文）只回傳 `changed`、不把候選降成 `stale`；CAS 先於格式檢查，格式檢查使用交易內的最新原文。SQLite 寫入後批次 JSON 回寫失敗時回傳 `state_sync_failed`，`_after_action` 仍重載條目頁並顯示專屬訊息，後續由 `reconcile_applied` 補回狀態。

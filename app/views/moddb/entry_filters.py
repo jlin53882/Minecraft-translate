@@ -11,6 +11,7 @@ from app.ui.snack import show_snack
 from app.views.moddb.advanced_filters import AdvancedFilters
 from app.views.moddb.batch_replace_dialog import BatchReplaceDialog
 from app.views.moddb.bulk_review_dialog import BulkReviewDialog
+from app.views.moddb.editor_drafts import reset_editor_for_database_change
 from app.views.moddb.formatting import STATE_LABELS, kind_label
 from app.views.moddb.smart_review_dialog import SmartReviewDialog
 from app.views.moddb.smart_review_marks import (
@@ -42,6 +43,7 @@ def apply_filter_options(panel, snapshot: dict) -> None:
     identity = snapshot.get("identity")
     panel._render_source_catalog = snapshot.get("source_catalog")
     if panel._db_identity is not None and identity != panel._db_identity:
+        reset_editor_for_database_change(panel)
         panel.source_filter.reset()
     panel._db_identity = identity
     panel.source_filter.refresh(

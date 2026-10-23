@@ -726,11 +726,6 @@ def rebuild_search_index_for_type(cache_type: str) -> bool:
     return succeeded
 
 
-def _search_index_exists() -> bool:
-    """判斷是否已有可查詢的 SQLite 索引檔。"""
-    return (_get_cache_root() / "search_index.db").exists()
-
-
 def _cached_search_index_current(
     state: cache_store.CacheRuntimeState, facade: CacheSearchFacade
 ) -> bool:
@@ -862,10 +857,14 @@ def search_cache(
     facade = _get_search_facade()
     overlay = _snapshot_search_overlay(state, cache_type)
     if overlay:
-        if not _search_index_exists():
+        # 覆蓋層只能修正變更鍵；合併前仍須確認基底索引沒有落後其他分片。
+        if not _cached_search_index_current(state, facade):
             if not rebuild_search_index():
                 return _search_current_cache(state, query, cache_type, limit, use_fuzzy)
             overlay = _snapshot_search_overlay(state, cache_type)
+            # 重建期間若又有新變更，索引與覆蓋層無法證明屬於同一世代，不能冒險漏資料。
+            if overlay and not _cached_search_index_current(state, facade):
+                return _search_current_cache(state, query, cache_type, limit, use_fuzzy)
         if overlay:
             return _search_with_overlay(
                 facade, overlay, query, cache_type, limit, use_fuzzy

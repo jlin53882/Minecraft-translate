@@ -41,8 +41,8 @@ from app.ui.debounce import Debouncer
 from app.ui.design import C
 from app.ui.page_post import post_to_ui
 from app.ui.snack import show_snack
+from app.views.moddb import editor_drafts
 from app.views.moddb.char_inspector import scrolling_list
-from app.views.moddb.editor_drafts import EditorDraftStore
 from app.views.moddb.editor_save_state import shadowed_versions, shadowing_source
 from app.views.moddb.entry_filters import (
     ALL_KINDS,
@@ -123,7 +123,7 @@ class EntriesPanel(ft.Column):
         # 批次機翻「特殊字元不一致」的檢視：只列這些條目，並把 AI 譯文預填到譯文框供修正
         self.entry_ids: list[int] | None = None
         self.drafts: dict[int, str] = {}
-        self._editor_drafts = EditorDraftStore()
+        self._editor_drafts = editor_drafts.EditorDraftStore()
         self._flagged_batch = 0
         self.state = "all"
         self.query = ""
@@ -376,32 +376,40 @@ class EntriesPanel(ft.Column):
         db = self.db()
         if db is None:
             self._db_identity = None
-            self._editor_drafts.clear()
+            editor_drafts.reset_editor_for_database_change(self)
             self.version_dd.options = []
             self.rows, self.total = [], 0
             self._list_error = None
             self._render_list()
-            self._show_editor(None)
             return
         identity = self._database_identity(db)
         self._render_source_catalog = source_catalog_for(db)
         if self._db_identity is not None and identity != self._db_identity:
-            # A numeric source id belongs to the old DB-local registry; do not
-            # carry it into a different database.
+            # 數字來源碼只屬於舊資料庫的來源登錄表，不可帶入另一個資料庫。
             self.source_filter.reset()
-            self._editor_drafts.clear()
+            editor_drafts.reset_editor_for_database_change(self)
         self._db_identity = identity
         self._refresh_filter_options()
         self._load_list(keep_selection=keep_selection)
 
     def apply_refresh_snapshot(self, snapshot: dict) -> None:
         """Apply a worker-loaded tab snapshot without querying SQLite on the UI thread."""
-        # 快照可能在使用者開始編輯後才回來；先把畫面上的變更收進常駐狀態。
-        self._editor_drafts.remember(self.selected, self.tw_field.value)
-        previous_selected_id = self.selected.id if self.selected else None
+        snapshot_identity = snapshot.get("identity")
+        identity_changed = (
+            snapshot_identity is not None
+            and self._db_identity is not None
+            and snapshot_identity != self._db_identity
+        )
+        if identity_changed:
+            editor_drafts.reset_editor_for_database_change(self)
+            self._db_identity = snapshot_identity
         filter_only = snapshot.get("filter_only", False)
         if not filter_only or snapshot.get("filter_options_ready"):
             apply_filter_options(self, snapshot)
+
+        # 快照可能在使用者開始編輯後才回來；先把同一資料庫的變更收進 resident state。
+        self._editor_drafts.remember(self.selected, self.tw_field.value)
+        previous_selected_id = self.selected.id if self.selected else None
 
         self.rows = snapshot.get("rows", [])
         self.smart_review_marks = snapshot.get("smart_review_marks", {})

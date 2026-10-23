@@ -6,7 +6,7 @@ from app.services_impl.moddb_service import EntryRow
 
 
 class EditorDraftStore:
-    """以條目 id 保存尚未寫入資料庫的編輯框內容。"""
+    """以條目 id 保存同一資料庫中尚未寫入的編輯框內容。"""
 
     def __init__(self) -> None:
         self._values: dict[int, str] = {}
@@ -33,3 +33,14 @@ class EditorDraftStore:
     def discard(self, entry_id: int) -> None:
         """放棄指定條目的未儲存內容。"""
         self._values.pop(entry_id, None)
+
+
+def reset_editor_for_database_change(panel) -> None:
+    """資料庫身分改變時清除面板上的舊條目與 resident 編輯狀態。"""
+    panel._editor_drafts.clear()
+    panel.selected = None
+    panel.detail = None
+    panel.tw_field.value = ""
+    panel.saved_text.value = ""
+    panel._review_preview = []
+    panel._show_editor(None)

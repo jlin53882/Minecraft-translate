@@ -908,6 +908,37 @@ def test_entries_full_refresh_keeps_draft_typed_after_save(entries):
     assert entries.tw_field.value == "儲存後繼續輸入的未儲存草稿"
 
 
+def test_entries_database_switch_does_not_reuse_old_database_draft(tmp_path):
+    """切換到相同條目 id 的另一個資料庫時，不得帶入舊資料庫草稿。"""
+    first_path = tmp_path / "first.db"
+    second_path = tmp_path / "second.db"
+    seed(first_path)
+    second_db = TranslationDB(second_path)
+    second_db.ingest(
+        "1.21.1",
+        [ScanItem(KIND_LANG, "foo", "item.foo.a", "Steel Casing", "第二資料庫譯文")],
+    )
+    second_db.close()
+
+    first_db = TranslationDB(first_path)
+    active_db = [first_db]
+    panel = entries_panel.EntriesPanel(mock_page(), lambda: active_db[0])
+    try:
+        panel.refresh()
+        panel.tw_field.value = "第一資料庫未儲存草稿"
+        panel._on_text_change()
+
+        active_db[0] = TranslationDB(second_path)
+        panel.refresh()
+
+        assert panel.selected is not None
+        assert panel.selected.id == 1
+        assert panel.tw_field.value == "第二資料庫譯文"
+    finally:
+        active_db[0].close()
+        first_db.close()
+
+
 def test_entries_filters_by_state_mod_and_search(entries):
     original_keys = {row.id: f"entry-{row.id}" for row in entries.rows}
     entries._on_state("none")
