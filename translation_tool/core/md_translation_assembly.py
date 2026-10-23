@@ -155,12 +155,12 @@ def _run_step3(
     if translation_reason == "cancelled" or is_cancelled():
         log_warning("[MD] ⏹ 已取消：略過回寫（已完成的翻譯輸出保留）")
         return {"skipped": True, "reason": "cancelled"}, True
-    if translation_reason is not None:
-        log_warning("[MD] ⚠️ 翻譯未完成：略過回寫（保留目前翻譯輸出）")
-        return {"skipped": True, "reason": translation_reason}, False
     if dry_run:
         log_info("[MD] [3/3] 已略過回寫：dry-run 模式")
         return {"skipped": True, "reason": "dry_run"}, False
+    if translation_reason is not None:
+        log_warning("[MD] ⚠️ 翻譯未完成：略過回寫（保留目前翻譯輸出）")
+        return {"skipped": True, "reason": translation_reason}, False
     if not step_inject:
         log_info("[MD] [3/3] 已略過回寫")
         return {"skipped": True, "reason": "step_inject_disabled"}, False

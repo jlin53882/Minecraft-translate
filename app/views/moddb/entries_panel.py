@@ -43,6 +43,7 @@ from app.ui.design import C
 from app.ui.page_post import post_to_ui
 from app.ui.snack import show_snack
 from app.views.moddb.char_inspector import scrolling_list
+from app.views.moddb.editor_drafts import EditorDraftStore
 from app.views.moddb.entry_filters import (
     ALL_KINDS,
     ALL_MODS,
@@ -122,9 +123,7 @@ class EntriesPanel(ft.Column):
         # 批次機翻「特殊字元不一致」的檢視：只列這些條目，並把 AI 譯文預填到譯文框供修正
         self.entry_ids: list[int] | None = None
         self.drafts: dict[int, str] = {}
-        # 背景快照抵達時仍要保留使用者尚未儲存的人工編輯，鍵值是資料庫條目 id。
-        self._editor_drafts: dict[int, str] = {}
-        # 每換一份清單（套用、清除、切換篩選）就加一；背景儲存完成時據此判斷清單是否還是同一份
+        self._editor_drafts = EditorDraftStore()
         self._flagged_batch = 0
         self.state = "all"
         self.query = ""
@@ -398,7 +397,7 @@ class EntriesPanel(ft.Column):
     def apply_refresh_snapshot(self, snapshot: dict) -> None:
         """Apply a worker-loaded tab snapshot without querying SQLite on the UI thread."""
         # 快照可能在使用者開始編輯後才回來；先把畫面上的變更收進常駐狀態。
-        self._remember_editor_draft()
+        self._editor_drafts.remember(self.selected, self.tw_field.value)
         previous_selected_id = self.selected.id if self.selected else None
         filter_only = snapshot.get("filter_only", False)
         if not filter_only or snapshot.get("filter_options_ready"):
@@ -614,20 +613,8 @@ class EntriesPanel(ft.Column):
         return build_entry_tile(self, row, catalog=self._render_source_catalog)
 
     # ------------------------------------------------------------------ 選取
-    def _remember_editor_draft(self) -> None:
-        """記住目前編輯框相對於資料庫值的差異，避免背景刷新覆蓋輸入。"""
-        entry = self.selected
-        if entry is None:
-            return
-        value = self.tw_field.value or ""
-        saved_value = entry.zh_tw or ""
-        if value == saved_value:
-            self._editor_drafts.pop(entry.id, None)
-        else:
-            self._editor_drafts[entry.id] = value
-
     def select(self, entry_id: int | None) -> None:
-        self._remember_editor_draft()
+        self._editor_drafts.remember(self.selected, self.tw_field.value)
         previous_selected_id = self.selected.id if self.selected else None
         db = self.db()
         detail = db.entry_detail(entry_id) if (db and entry_id) else None
@@ -828,7 +815,7 @@ class EntriesPanel(ft.Column):
         self._safe_update()
 
     def _on_text_change(self, _e=None) -> None:
-        self._remember_editor_draft()
+        self._editor_drafts.remember(self.selected, self.tw_field.value)
         self._update_impact()
         self._safe_update()
 
@@ -839,7 +826,7 @@ class EntriesPanel(ft.Column):
 
     def _reset_input(self) -> None:
         if self.selected is not None:
-            self._editor_drafts.pop(self.selected.id, None)
+            self._editor_drafts.discard(self.selected.id)
             self.tw_field.value = self.selected.zh_tw
             self._on_text_change()
 
@@ -1052,11 +1039,11 @@ class EntriesPanel(ft.Column):
             same_entry = self.selected is not None and self.selected.id == entry.id
             if same_entry:
                 # 儲存期間可能又輸入了新內容；只有仍停在已儲存文字時才清掉草稿。
-                self._remember_editor_draft()
+                self._editor_drafts.remember(self.selected, self.tw_field.value)
             current_editor_text = (self.tw_field.value or "") if same_entry else None
             unchanged_editor = same_entry and current_editor_text == text
             if unchanged_editor:
-                self._editor_drafts.pop(entry.id, None)
+                self._editor_drafts.discard(entry.id)
                 self._load_list(page=self.pager.current_page, keep_scroll=True)
                 if self.selected is not None and self.selected.id == entry.id:
                     self.saved_text.value = message

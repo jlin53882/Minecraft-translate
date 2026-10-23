@@ -337,7 +337,12 @@ def translate_ftb_pending_to_zh_tw(
 
     if global_total_keys == 0:
         log_info("ℹ️ [FTB-LM] 0 keys，跳過翻譯")
-        return {"written_files": 0, "total_keys": 0, "out_dir": str(out_dir)}
+        return {
+            "status": "DONE",
+            "written_files": 0,
+            "total_keys": 0,
+            "out_dir": str(out_dir),
+        }
 
     # ---- Cache rules ----
     cache_rules = {"ftbquests": CacheRule("path|source_text")}
@@ -685,6 +690,7 @@ def translate_ftb_pending_to_zh_tw(
             log_error(f"⚠️ [FTB-LM] DRY-RUN preview 輸出失敗：{e!r}")
 
         return {
+            "status": "DRY_RUN",
             "dry_run": True,
             "files": len(per_file_rows),
             "total_keys": global_total_keys,

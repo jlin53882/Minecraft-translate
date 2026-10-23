@@ -186,6 +186,7 @@ def translate_md_pending(
         log_info("ℹ️ [MD-LM] 無唯一 blocks（可能全部空白/被過濾），不需翻譯。")
         log_info("總花費時間：%s", get_formatted_duration(start_time))
         return {
+            "status": "DONE",
             "written_files": 0,
             "total_blocks": total_blocks,
             "unique_blocks": 0,
@@ -287,6 +288,7 @@ def translate_md_pending(
         log_info("ℹ️ [MD-LM] dry-run 模式：不翻譯、不寫檔。")
         log_info("總花費時間：%s", get_formatted_duration(start_time))
         return {
+            "status": "DRY_RUN",
             "dry_run": True,
             "files": len(json_files),
             "total_blocks": total_blocks,

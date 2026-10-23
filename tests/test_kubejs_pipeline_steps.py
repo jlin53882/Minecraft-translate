@@ -83,7 +83,7 @@ def test_run_kubejs_pipeline_extracts_translates_and_injects_literals(
             )
             total_keys += len(translated)
             written_files += 1
-        return {"files": written_files, "total_keys": total_keys}
+        return {"status": "DONE", "files": written_files, "total_keys": total_keys}
 
     result = kubejs_translator.run_kubejs_pipeline(
         input_dir=str(tmp_path / "kubejs"),
@@ -133,7 +133,7 @@ def _fake_translate_pending(*, pending_dir: str, output_dir: str, **kwargs) -> d
         )
         files += 1
         total_keys += len(translated)
-    return {"files": files, "total_keys": total_keys}
+    return {"status": "DONE", "files": files, "total_keys": total_keys}
 
 
 def _private_snapshot_layer(
@@ -240,7 +240,7 @@ def test_fresh_run_does_not_include_raw_files_from_previous_source(
             destination.parent.mkdir(parents=True, exist_ok=True)
             destination.write_text(json.dumps(data), encoding="utf-8")
         seen.append(keys)
-        return {"files": len(seen), "total_keys": len(keys)}
+        return {"status": "DONE", "files": len(seen), "total_keys": len(keys)}
 
     for name, text in (("old", "Old source"), ("new", "New source")):
         kubejs = tmp_path / name / "kubejs" / "client_scripts"
@@ -281,7 +281,7 @@ def test_incremental_run_keeps_previous_source_and_imports_new_source(
             destination.parent.mkdir(parents=True, exist_ok=True)
             destination.write_text(json.dumps(data), encoding="utf-8")
         pending_keys.append(keys)
-        return {"files": 1, "total_keys": len(keys)}
+        return {"status": "DONE", "files": 1, "total_keys": len(keys)}
 
     for name, text, source_mode in sources:
         scripts = tmp_path / name / "kubejs" / "client_scripts"
@@ -852,7 +852,7 @@ def test_partial_translation_output_is_not_committed_or_injected(
             json.dumps({next(iter(data)): "只有一筆"}, ensure_ascii=False),
             encoding="utf-8",
         )
-        return {"total_keys": 1}
+        return {"status": "DONE", "total_keys": 1}
 
     try:
         kubejs_translator.run_kubejs_pipeline(

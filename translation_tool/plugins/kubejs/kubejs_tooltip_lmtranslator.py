@@ -289,7 +289,12 @@ def translate_kubejs_pending_to_zh_tw(
 
     if global_total_keys == 0:
         log_info("ℹ️ [KubeJS-LM] 0 keys，跳過翻譯")
-        return {"written_files": 0, "total_keys": 0, "out_dir": str(out_dir)}
+        return {
+            "status": "DONE",
+            "written_files": 0,
+            "total_keys": 0,
+            "out_dir": str(out_dir),
+        }
 
     # -------------------------
     # Cache rules
@@ -500,6 +505,7 @@ def translate_kubejs_pending_to_zh_tw(
 
         progress(1.0)
         return {
+            "status": "DRY_RUN",
             "dry_run": True,
             "files": len(per_file_rows),
             "total_keys": global_total_keys,
