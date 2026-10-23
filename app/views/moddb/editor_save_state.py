@@ -5,9 +5,8 @@ from __future__ import annotations
 import sqlite3
 from collections.abc import Iterable
 
+from app.services_impl.moddb_service import SRC_MANUAL, ReviewPreviewItem, TranslationDB
 from app.services_impl.moddb_source_service import source_label
-from translation_tool.translation_db import ReviewPreviewItem, TranslationDB
-from translation_tool.translation_db.schema import SRC_MANUAL
 
 
 def shadowed_versions(
