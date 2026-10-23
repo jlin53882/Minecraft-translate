@@ -42,6 +42,8 @@
 
 EntriesPanel 的編輯器另有獨立的 resident 草稿契約：`EditorDraftStore.remember()` 以條目 id 保存編輯框相對於目前資料庫值的差異；`apply_refresh_snapshot` 在替換清單與詳情前先呼叫它，`_show_editor` 再以草稿優先於資料庫快照。完整刷新仍可更新清單、篩選選項、審核標籤與統計，但不會覆蓋未儲存輸入。資料庫身分改變時，先清除草稿並重置選取條目、詳情與編輯框，再套用新資料庫的清單或背景快照，避免相同條目 id 把舊資料庫草稿帶入新資料庫。儲存回呼只有在編輯框仍等於剛寫入的原始文字時才清除，儲存完成後繼續輸入則保留並標示尚未儲存。草稿儲存元件位於 `app/views/moddb/editor_drafts.py`，讓 resident state 的規則可獨立維護與測試。
 
+資料庫身分 transition 的共通 owner 是 `EntriesPanel._sync_database_identity`，實際清理由 `editor_drafts.reset_editor_for_database_change` 集中處理。身分改變包含從未知身分恢復為實際資料庫；除了人工草稿、選取與詳情，也必須使機翻 `entry_ids`、`drafts`、`_flagged_batch` 與審查預覽失效，不能只清理編輯框。`ModDbView._validate_entries_snapshot` 是 Entries 快照的套用邊界：完整與 filter-only 背景快照都必須同時符合請求身分、快照身分、目前 panel 身分與 `db_generation`；身分不符時清除舊 scope 並重新載入資料庫，資料代次不符時丟棄快照並重新查詢。過期快照不可把舊資料庫的 source scope、清單或批次條件套用到新資料庫。
+
 `BulkReviewDialog` 是另一個 resident scope：它只顯示仍有未審核候選的模組／來源。批量審查或還原成功後，除了呼叫外層完成回呼，也必須重新啟動 `_start_scope_options_load`；否則資料庫已正確提交，但對話框下拉會保留舊 scope，直到使用者再次切換條件。資料清理／還原完成回呼同樣不可只呼叫 `OverviewPanel.refresh`，必須走上述共通入口。
 `SmartReviewReviewer` 依候選狀態分兩條套用路徑：`ready` 走 `apply_smart_review_candidate`；`SMART_REVIEW_MANUAL_EDIT_STATUSES` 內的狀態（已套用、已保留原譯文、需補 context、不用改、無效、格式不符、已過期）走 `apply_smart_review_manual_edit`，載入時先以 `realign_smart_review_candidate` 對齊快照，並由 `is_manual_edit_row`、`initial_draft_text`、`manual_edit_hint` 決定草稿起點與提示。人工編輯路徑的 CAS 比對對齊後的快照，快照改變（含英文原文）只回傳 `changed`、不把候選降成 `stale`；CAS 先於格式檢查，格式檢查使用交易內的最新原文。SQLite 寫入後批次 JSON 回寫失敗時回傳 `state_sync_failed`，`_after_action` 仍重載條目頁並顯示專屬訊息，後續由 `reconcile_applied` 補回狀態。
 
