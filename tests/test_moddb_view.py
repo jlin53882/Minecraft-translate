@@ -570,7 +570,7 @@ def test_filter_snapshot_generation_guard_rejects_stale_result(db_path, monkeypa
         lambda key, **_kwargs: scheduled.append(key),
     )
     try:
-        is_valid = view._validate_filter_snapshot(
+        is_valid = view._validate_entries_snapshot(
             {"identity": "same-db"},
             {
                 "identity": "same-db",
@@ -607,7 +607,7 @@ def test_filter_snapshot_generation_guard_detects_external_write(db_path, monkey
         )
         writer.close()
 
-        is_valid = view._validate_filter_snapshot(
+        is_valid = view._validate_entries_snapshot(
             {"identity": "same-db"},
             {"identity": "same-db", "db_generation": before},
             view.entries,
@@ -618,6 +618,102 @@ def test_filter_snapshot_generation_guard_detects_external_write(db_path, monkey
         assert view._panel_refresh_needed["entries"] is True
     finally:
         view._db.close()
+
+
+def test_full_snapshot_identity_guard_rejects_stale_database_scope(
+    db_path, monkeypatch
+):
+    """完整快照的資料庫身分過期時，也要清除批次 scope 並重新查詢。"""
+    seed(db_path)
+    view = moddb_view.ModDbView(mock_page(), mock_filepicker())
+    view._db = TranslationDB(db_path)
+    view.tab = "entries"
+    view.entries._db_identity = "database-a"
+    view.entries.entry_ids = [1]
+    view.entries.drafts = {1: "舊資料庫機翻草稿"}
+    view.entries._flagged_batch = 7
+    scheduled = []
+    monkeypatch.setattr(
+        view,
+        "_request_panel_refresh",
+        lambda key, **_kwargs: scheduled.append(key),
+    )
+
+    is_valid = view._validate_entries_snapshot(
+        {"identity": "database-a"},
+        {"identity": "database-b", "filter_only": False},
+        view.entries,
+    )
+
+    assert is_valid is False
+    assert scheduled == ["entries"]
+    assert view.entries._db_identity is None
+    assert view.entries.entry_ids is None
+    assert view.entries.drafts == {}
+    assert view.entries._flagged_batch == 8
+    assert view._db is None
+
+
+def test_entries_database_switch_requeries_after_same_custom_source_code(tmp_path):
+    """不同資料庫重用自訂來源代碼時，不得套用舊快照的來源 scope。"""
+    first_path = tmp_path / "first-custom.db"
+    second_path = tmp_path / "second-custom.db"
+    for path, source_name, translation in (
+        (first_path, "來源 A", "A 資料庫譯文"),
+        (second_path, "來源 B", "B 資料庫譯文"),
+    ):
+        db = TranslationDB(path)
+        db.ingest(
+            "1.21.1",
+            [
+                ScanItem(
+                    KIND_LANG,
+                    "foo",
+                    "item.foo.a",
+                    "Steel Casing",
+                    translation,
+                    source=100,
+                )
+            ],
+        )
+        db.close()
+        with sqlite3.connect(path) as conn:
+            conn.execute(
+                "INSERT INTO meta (key, value) VALUES ('custom_sources', ?) "
+                "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                (json.dumps({source_name: 100}, ensure_ascii=False),),
+            )
+
+    first_db = TranslationDB(first_path)
+    second_db = TranslationDB(second_path)
+    active_db = [first_db]
+    panel = entries_panel.EntriesPanel(mock_page(), lambda: active_db[0])
+    try:
+        panel.refresh()
+        panel.source_filter.dropdown.value = "100"
+        assert panel.source_filter.code == 100
+        first_identity = panel._db_identity
+        second_identity = panel._database_identity(second_db)
+        active_db[0] = second_db
+
+        panel.apply_refresh_snapshot(
+            {
+                "identity": second_identity,
+                "filter_only": False,
+                "source": 100,
+                "rows": list(panel.rows),
+                "total": panel.total,
+                "page": 1,
+            }
+        )
+
+        assert first_identity != second_identity
+        assert panel.source_filter.code is None
+        assert panel.rows[0].zh_tw == "B 資料庫譯文"
+        assert panel._render_source_catalog.label(100) == "來源 B"
+    finally:
+        first_db.close()
+        second_db.close()
 
 
 def test_moddb_overview_load_uses_a_worker_owned_connection(db_path, monkeypatch):
@@ -927,6 +1023,9 @@ def test_entries_database_switch_does_not_reuse_old_database_draft(tmp_path):
         panel.refresh()
         panel.tw_field.value = "第一資料庫未儲存草稿"
         panel._on_text_change()
+        panel.entry_ids = [1]
+        panel.drafts = {1: "第一資料庫機翻草稿"}
+        panel._flagged_batch = 7
 
         active_db[0] = TranslationDB(second_path)
         panel.select(1)
@@ -934,6 +1033,10 @@ def test_entries_database_switch_does_not_reuse_old_database_draft(tmp_path):
         assert panel.selected is not None
         assert panel.selected.id == 1
         assert panel.tw_field.value == "第二資料庫譯文"
+        assert panel.entry_ids is None
+        assert panel.drafts == {}
+        assert panel._flagged_batch == 8
+        assert panel.flagged_banner.visible is False
 
         panel.refresh()
 

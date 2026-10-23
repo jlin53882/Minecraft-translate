@@ -567,10 +567,8 @@ class ModDbView(ft.Column):
                 if self.tab == key:
                     self._request_panel_refresh(key)
                 return
-        if (
-            key == "entries"
-            and snapshot.get("filter_only")
-            and not (self._validate_filter_snapshot(request, snapshot, panel))
+        if key == "entries" and not self._validate_entries_snapshot(
+            request, snapshot, panel
         ):
             return
         if self.tab != key:
@@ -588,16 +586,22 @@ class ModDbView(ft.Column):
         if self.tab == key:
             self._update_panel(key)
 
-    def _validate_filter_snapshot(self, request: dict, snapshot: dict, panel) -> bool:
-        """Reject filter results whose database identity or generation is stale."""
+    def _validate_entries_snapshot(self, request: dict, snapshot: dict, panel) -> bool:
+        """拒絕資料庫身分或資料代次過期的 Entries 快照。"""
         expected_identity = request.get("identity")
-        if (
-            expected_identity is not None
-            and snapshot.get("identity") != expected_identity
-        ):
+        snapshot_identity = snapshot.get("identity")
+        current_identity = getattr(panel, "_db_identity", None)
+        identity_stale = (
+            expected_identity is not None and snapshot_identity != expected_identity
+        ) or (
+            current_identity is not None
+            and snapshot_identity is not None
+            and snapshot_identity != current_identity
+        )
+        if identity_stale:
             self._panel_refresh_needed["entries"] = True
             self.entries._filter_only_refresh = False
-            self.entries._db_identity = None
+            self.entries._sync_database_identity(None)
             self.reload_db()
             panel.refresh_indicator.visible = False
             panel.refresh_indicator.value = ""

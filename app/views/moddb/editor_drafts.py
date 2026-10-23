@@ -1,4 +1,4 @@
-"""Mod DB 編輯框草稿的 resident state 與資料庫值比較契約。"""
+"""Mod DB 編輯框草稿的常駐狀態與資料庫值比較契約。"""
 
 from __future__ import annotations
 
@@ -36,8 +36,12 @@ class EditorDraftStore:
 
 
 def reset_editor_for_database_change(panel) -> None:
-    """資料庫身分改變時清除面板上的舊條目與 resident 編輯狀態。"""
+    """資料庫身分改變時清除所有舊資料庫專屬的常駐狀態。"""
     panel._editor_drafts.clear()
+    panel.entry_ids = None
+    panel.drafts.clear()
+    panel._flagged_batch += 1
+    panel._show_flagged_banner()
     panel.selected = None
     panel.detail = None
     panel.tw_field.value = ""

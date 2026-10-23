@@ -54,6 +54,7 @@ from app.views.moddb.entry_filters import (
     on_advanced_change,
     open_batch_replace,
     open_bulk_review,
+    prepare_entries_snapshot,
     refresh_entry_filter,
 )
 from app.views.moddb.entry_metadata import build_entry_metadata
@@ -357,7 +358,7 @@ class EntriesPanel(ft.Column):
         return entry_filter(self)
 
     def _sync_database_identity(self, identity) -> bool:
-        """同步資料庫身分，切換時一次清除所有依資料庫而生的 resident state。"""
+        """同步資料庫身分，切換時一次清除所有依資料庫而生的常駐狀態。"""
         if identity == self._db_identity:
             return False
         self.source_filter.reset()
@@ -397,14 +398,14 @@ class EntriesPanel(ft.Column):
         self._load_list(keep_selection=keep_selection)
 
     def apply_refresh_snapshot(self, snapshot: dict) -> None:
-        """Apply a worker-loaded tab snapshot without querying SQLite on the UI thread."""
-        if "identity" in snapshot:
-            self._sync_database_identity(snapshot.get("identity"))
+        """套用 worker 載入的頁籤快照，不在 UI 執行緒查詢 SQLite。"""
+        snapshot, refresh_requested = prepare_entries_snapshot(self, snapshot)
+        if refresh_requested:
+            return
         filter_only = snapshot.get("filter_only", False)
         if not filter_only or snapshot.get("filter_options_ready"):
             apply_filter_options(self, snapshot)
 
-        # 快照可能在使用者開始編輯後才回來；先把同一資料庫的變更收進 resident state。
         self._editor_drafts.remember(self.selected, self.tw_field.value)
         previous_selected_id = self.selected.id if self.selected else None
 
@@ -1062,7 +1063,6 @@ class EntriesPanel(ft.Column):
         self._update_impact()
         self._safe_update()
 
-    # 保留舊的類別入口，讓既有測試與外部面板整合可以平順移轉到共用邏輯。
     _shadowed_versions = staticmethod(shadowed_versions)
     _shadowing_source = staticmethod(shadowing_source)
 
