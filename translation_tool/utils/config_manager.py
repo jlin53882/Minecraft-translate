@@ -16,6 +16,7 @@
 import copy
 import json
 import logging
+import math
 import os
 import shutil
 import tempfile
@@ -837,6 +838,88 @@ def _validate_token_budget_config(lm: dict) -> None:
         raise ConfigValidationError(
             f"lm_translator.budget_recover_factor 必須大於 1 且不超過 4，目前為 {recover_factor}"
         )
+
+    estimator = lm.get("token_estimator")
+    if estimator is not None:
+        if not isinstance(estimator, dict):
+            raise ConfigValidationError(
+                "lm_translator.token_estimator 必須為 object，"
+                f"目前為 {type(estimator).__name__}"
+            )
+        estimator_keys = (
+            "prompt_ascii_tokens_per_char",
+            "prompt_cjk_tokens_per_char",
+            "prompt_other_tokens_per_char",
+            "item_ascii_tokens_per_char",
+            "item_cjk_tokens_per_char",
+            "item_other_tokens_per_char",
+            "input_item_overhead_tokens",
+            "output_item_overhead_tokens",
+        )
+        for key in estimator_keys:
+            value = estimator.get(key)
+            if value is None:
+                continue
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, (int, float))
+                or not math.isfinite(float(value))
+                or value < 0
+            ):
+                raise ConfigValidationError(
+                    f"lm_translator.token_estimator.{key} 必須為有限的非負數字，"
+                    f"目前為 {type(value).__name__}：'{value}'"
+                )
+
+        algorithm = estimator.get("algorithm")
+        if algorithm is not None and (
+            not isinstance(algorithm, str)
+            or algorithm not in {"character", "tiktoken_calibrated"}
+        ):
+            raise ConfigValidationError(
+                "lm_translator.token_estimator.algorithm 必須為 character 或 "
+                f"tiktoken_calibrated，目前為 {algorithm!r}"
+            )
+        encoding = estimator.get("tiktoken_encoding")
+        if encoding is not None and (
+            not isinstance(encoding, str) or not encoding.strip()
+        ):
+            raise ConfigValidationError(
+                "lm_translator.token_estimator.tiktoken_encoding 必須為非空字串"
+            )
+        calibration_keys = (
+            "tiktoken_prompt_scale",
+            "tiktoken_payload_scale",
+            "tiktoken_request_bias",
+            "tiktoken_item_overhead_tokens",
+        )
+        for key in calibration_keys:
+            value = estimator.get(key)
+            if value is None:
+                continue
+            is_scale = key in {
+                "tiktoken_prompt_scale",
+                "tiktoken_payload_scale",
+            }
+            minimum = 0 if key == "tiktoken_item_overhead_tokens" else None
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, (int, float))
+                or not math.isfinite(float(value))
+                or (minimum is not None and value < minimum)
+                or (is_scale and value <= 0)
+            ):
+                label = (
+                    "有限的正數"
+                    if is_scale
+                    else "有限的非負數字"
+                    if minimum is not None
+                    else "有限數字"
+                )
+                raise ConfigValidationError(
+                    f"lm_translator.token_estimator.{key} 必須為{label}，"
+                    f"目前為 {type(value).__name__}：'{value}'"
+                )
 
     budget = lm.get("max_output_token_budget")
     if (

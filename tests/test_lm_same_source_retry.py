@@ -447,9 +447,14 @@ def test_retry_token_estimate_uses_only_candidates_and_extended_prompt(
     estimate = tracker.estimate
     observations = []
 
-    def record_estimate(batch, budget, fixed_input_tokens=0):
+    def record_estimate(batch, budget, fixed_input_tokens=0, *, item_ids=None):
         observations.append((len(batch), fixed_input_tokens))
-        return estimate(batch, budget, fixed_input_tokens)
+        return estimate(
+            batch,
+            budget,
+            fixed_input_tokens,
+            item_ids=item_ids,
+        )
 
     monkeypatch.setattr(tracker, "estimate", record_estimate)
     _result, _status, calls = _run_with_api(

@@ -36,6 +36,7 @@
 | `lm_translator.models.*.enabled`、`temperature`、`patchouli_system_prompt`、`lang_system_prompt` | 每次呼叫 `translate_batch_smart` 重讀（約每個檔案一次，未確認頻率） |
 | `initial_batch_size_*`、`min_batch_size`、`batch_shrink_factor`、`batch_write_interval` | 任務 / 批次開始時讀 |
 | `token_budget_*`、`max_output_tokens`、`output_token_factor`、`budget_*` | 每批重讀；學到的預算是行程內狀態 |
+| `lm_translator.token_estimator.*` | 設定 Schema 標示為 `next_batch`；新批次可讀取，但既有 ModDB session 的 estimator 在建立 session 時綁定，進行中的 session 不保證同步更新 |
 | `key_failure_cooldown_sec` | 每次判斷冷卻時讀 |
 | `rate_limit.*`、`rpm_cooldown_sec` | 每次請求前讀 |
 | `translator.parallel_execution_workers` | 每次建立執行緒池時讀；解析規則與各用途的預設／上限見 `translation_tool/utils/worker_count.py`（正整數才有效，無效值退回該用途預設） |

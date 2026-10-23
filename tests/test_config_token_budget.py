@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from translation_tool.core.lm_batch_budget import BudgetConfig
+from translation_tool.core.lm_batch_budget import BudgetConfig, TokenEstimatorConfig
 from translation_tool.utils import config_manager as cm
 from translation_tool.utils.config_manager import (
     DEFAULT_CONFIG,
@@ -56,6 +56,39 @@ def test_config_example_documents_the_new_keys():
 
     for key in KEYS:
         assert key in example, f"config.example.json 缺少 {key}"
+    estimator = example["token_estimator"]
+    assert estimator == {
+        "algorithm": "tiktoken_calibrated",
+        "tiktoken_encoding": "o200k_base",
+        "tiktoken_prompt_scale": 1.38027,
+        "tiktoken_payload_scale": 0.92983,
+        "tiktoken_request_bias": -451.55,
+        "tiktoken_item_overhead_tokens": 0.39633,
+        "prompt_ascii_tokens_per_char": 0.1,
+        "prompt_cjk_tokens_per_char": 0.85,
+        "prompt_other_tokens_per_char": 1.5,
+        "item_ascii_tokens_per_char": 0.22,
+        "item_cjk_tokens_per_char": 0.62,
+        "item_other_tokens_per_char": 1.5,
+        "input_item_overhead_tokens": 38,
+        "output_item_overhead_tokens": 12,
+    }
+    assert BudgetConfig.from_config(example).token_estimator == TokenEstimatorConfig(
+        algorithm="tiktoken_calibrated",
+        tiktoken_encoding="o200k_base",
+        tiktoken_prompt_scale=1.38027,
+        tiktoken_payload_scale=0.92983,
+        tiktoken_request_bias=-451.55,
+        tiktoken_item_overhead_tokens=0.39633,
+        prompt_ascii_tokens_per_char=0.1,
+        prompt_cjk_tokens_per_char=0.85,
+        prompt_other_tokens_per_char=1.5,
+        item_ascii_tokens_per_char=0.22,
+        item_cjk_tokens_per_char=0.62,
+        item_other_tokens_per_char=1.5,
+        input_item_overhead_tokens=38,
+        output_item_overhead_tokens=12,
+    )
     _validate_lm_translator_config(example)
 
 
@@ -71,6 +104,63 @@ def test_valid_custom_values_are_accepted():
             "budget_recover_after": 1,
             "budget_recover_factor": 2,
         }
+    )
+
+
+def test_token_estimator_values_are_validated_and_fallback_is_safe():
+    _validate_lm_translator_config(
+        {
+            "token_estimator": {
+                "prompt_ascii_tokens_per_char": 0.1,
+                "input_item_overhead_tokens": 38,
+            }
+        }
+    )
+
+    with pytest.raises(ConfigValidationError, match="token_estimator"):
+        _validate_lm_translator_config(
+            {"token_estimator": {"item_ascii_tokens_per_char": -1}}
+        )
+    with pytest.raises(ConfigValidationError, match="token_estimator"):
+        _validate_lm_translator_config(
+            {"token_estimator": {"item_ascii_tokens_per_char": "0.22"}}
+        )
+    with pytest.raises(ConfigValidationError, match="algorithm"):
+        _validate_lm_translator_config({"token_estimator": {"algorithm": "unknown"}})
+
+    with pytest.raises(ConfigValidationError, match="algorithm"):
+        _validate_lm_translator_config({"token_estimator": {"algorithm": []}})
+
+    for key in ("tiktoken_prompt_scale", "tiktoken_payload_scale"):
+        with pytest.raises(ConfigValidationError, match=key):
+            _validate_lm_translator_config({"token_estimator": {key: 0}})
+
+    estimator = TokenEstimatorConfig.from_config(
+        {
+            "token_estimator": {
+                "item_ascii_tokens_per_char": "bad",
+                "item_cjk_tokens_per_char": float("inf"),
+                "input_item_overhead_tokens": -1,
+            }
+        }
+    )
+    assert (
+        estimator.item_ascii_tokens_per_char
+        == TokenEstimatorConfig().item_ascii_tokens_per_char
+    )
+    assert (
+        estimator.item_cjk_tokens_per_char
+        == TokenEstimatorConfig().item_cjk_tokens_per_char
+    )
+    assert (
+        estimator.input_item_overhead_tokens
+        == TokenEstimatorConfig().input_item_overhead_tokens
+    )
+    assert (
+        TokenEstimatorConfig.from_config(
+            {"token_estimator": {"tiktoken_prompt_scale": 0}}
+        ).tiktoken_prompt_scale
+        == TokenEstimatorConfig().tiktoken_prompt_scale
     )
 
 

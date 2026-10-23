@@ -6,6 +6,7 @@ from collections.abc import Callable, Sequence
 from pathlib import PurePath
 from typing import Any
 
+from translation_tool.core.lm_batch_budget import BudgetConfig
 from translation_tool.core.lm_session import TranslationSessionState
 from translation_tool.translation_db.schema import KIND_GUIDE, KIND_LANG, KIND_PATCHOULI
 from translation_tool.utils.config_manager import load_config
@@ -59,13 +60,16 @@ def attach_moddb_context(
     ``_batch_group`` remains ``(module, kind)`` so prompts and cache buckets never
     mix in one request.
     """
-    if reviewed_glossary_loader is not None:
-        config = load_config()
-        lm_config = config.get("lm_translator", {})
-        if isinstance(lm_config, dict) and not lm_config.get(
-            "moddb_reviewed_glossary", True
-        ):
-            reviewed_glossary_loader = None
+    lm_config = load_config().get("lm_translator", {})
+    estimator = BudgetConfig.from_config(
+        lm_config if isinstance(lm_config, dict) else {}
+    ).token_estimator
+    if (
+        reviewed_glossary_loader is not None
+        and isinstance(lm_config, dict)
+        and not lm_config.get("moddb_reviewed_glossary", True)
+    ):
+        reviewed_glossary_loader = None
     sessions: dict[str, TranslationSessionState] = {}
     glossaries: dict[tuple[str, str | None], list[dict[str, str]]] = {}
     source_texts_by_context: dict[tuple[str, str | None], dict[str, None]] = {}
@@ -100,7 +104,9 @@ def attach_moddb_context(
         session_key = mod_id or str(item.get("file") or item.get("path") or "")
         sessions.setdefault(
             session_key,
-            TranslationSessionState(f"moddb:{operation_id}:{session_key}"),
+            TranslationSessionState(
+                f"moddb:{operation_id}:{session_key}", estimator=estimator
+            ),
         )
         item["_translation_session"] = sessions[session_key]
         if reviewed_glossary_loader is not None and mod_id:
