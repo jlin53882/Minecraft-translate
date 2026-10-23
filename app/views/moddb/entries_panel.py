@@ -15,7 +15,6 @@ import flet as ft
 from app.services_impl.moddb_format_diff_service import analyze_format_diagnostics
 from app.services_impl.moddb_guide_service import is_guide_kind
 from app.services_impl.moddb_service import (
-    SRC_MANUAL,
     EntryDetail,
     EntryFilter,
     EntryRow,
@@ -42,7 +41,9 @@ from app.ui.debounce import Debouncer
 from app.ui.design import C
 from app.ui.page_post import post_to_ui
 from app.ui.snack import show_snack
+from app.views.moddb import editor_drafts
 from app.views.moddb.char_inspector import scrolling_list
+from app.views.moddb.editor_save_state import shadowed_versions, shadowing_source
 from app.views.moddb.entry_filters import (
     ALL_KINDS,
     ALL_MODS,
@@ -53,6 +54,7 @@ from app.views.moddb.entry_filters import (
     on_advanced_change,
     open_batch_replace,
     open_bulk_review,
+    prepare_entries_snapshot,
     refresh_entry_filter,
 )
 from app.views.moddb.entry_metadata import build_entry_metadata
@@ -122,7 +124,7 @@ class EntriesPanel(ft.Column):
         # 批次機翻「特殊字元不一致」的檢視：只列這些條目，並把 AI 譯文預填到譯文框供修正
         self.entry_ids: list[int] | None = None
         self.drafts: dict[int, str] = {}
-        # 每換一份清單（套用、清除、切換篩選）就加一；背景儲存完成時據此判斷清單是否還是同一份
+        self._editor_drafts = editor_drafts.EditorDraftStore()
         self._flagged_batch = 0
         self.state = "all"
         self.query = ""
@@ -355,6 +357,15 @@ class EntriesPanel(ft.Column):
     def _entry_filter(self) -> EntryFilter:
         return entry_filter(self)
 
+    def _sync_database_identity(self, identity) -> bool:
+        """同步資料庫身分，切換時一次清除所有依資料庫而生的常駐狀態。"""
+        if identity == self._db_identity:
+            return False
+        self.source_filter.reset()
+        editor_drafts.reset_editor_for_database_change(self)
+        self._db_identity = identity
+        return True
+
     def _on_advanced_change(self) -> None:
         on_advanced_change(self)
 
@@ -374,39 +385,29 @@ class EntriesPanel(ft.Column):
         """重新載入版本／模組選項與清單（資料庫更新後呼叫）。"""
         db = self.db()
         if db is None:
-            self._db_identity = None
+            self._sync_database_identity(None)
             self.version_dd.options = []
             self.rows, self.total = [], 0
             self._list_error = None
             self._render_list()
-            self._show_editor(None)
             return
         identity = self._database_identity(db)
         self._render_source_catalog = source_catalog_for(db)
-        if self._db_identity is not None and identity != self._db_identity:
-            # A numeric source id belongs to the old DB-local registry; do not
-            # carry it into a different database.
-            self.source_filter.reset()
-        self._db_identity = identity
-        versions = db.versions()
-        kit.set_dropdown_options(self.version_dd, [(v, v) for v in versions])
-        if self.version not in versions:
-            wanted = current_settings().version
-            self.version = (
-                wanted if wanted in versions else (versions[0] if versions else None)
-            )
-        self.version_dd.value = self.version
-        source_codes = db.effective_source_codes(self.version) if self.version else ()
-        self.source_filter.refresh(source_codes, catalog=self._render_source_catalog)
-        self._load_mods()
+        self._sync_database_identity(identity)
+        self._refresh_filter_options()
         self._load_list(keep_selection=keep_selection)
 
     def apply_refresh_snapshot(self, snapshot: dict) -> None:
-        """Apply a worker-loaded tab snapshot without querying SQLite on the UI thread."""
-        previous_selected_id = self.selected.id if self.selected else None
+        """套用 worker 載入的頁籤快照，不在 UI 執行緒查詢 SQLite。"""
+        snapshot, refresh_requested = prepare_entries_snapshot(self, snapshot)
+        if refresh_requested:
+            return
         filter_only = snapshot.get("filter_only", False)
         if not filter_only or snapshot.get("filter_options_ready"):
             apply_filter_options(self, snapshot)
+
+        self._editor_drafts.remember(self.selected, self.tw_field.value)
+        previous_selected_id = self.selected.id if self.selected else None
 
         self.rows = snapshot.get("rows", [])
         self.smart_review_marks = snapshot.get("smart_review_marks", {})
@@ -444,6 +445,51 @@ class EntriesPanel(ft.Column):
             self.mod_id = None
         self.mod_dd.value = self.mod_id or ALL_MODS
         self._load_kinds()
+
+    def _refresh_filter_options(self) -> None:
+        """使用與條目清單相同的 scope 重新載入 module/source 選項。"""
+        db = self.db()
+        if db is None:
+            self.version_dd.options = []
+            self._load_mods()
+            return
+
+        # 讓同步 fallback 與 standalone panel 測試使用和 ModDbView worker snapshot 相同的選項語意。
+        # 這裡刻意採用區域 import，因為 panel_refresh 會從本模組匯入 PAGE_SIZE。
+        from app.views.moddb.panel_refresh import _resolve_entries_scope
+
+        try:
+            criteria = self._entry_filter()
+        except ValueError:
+            # 顯示給使用者的驗證錯誤由 _load_list 負責。
+            # 回報錯誤時保留上一次有效的相依選項，避免在此處再次拋出例外。
+            return
+        scope = _resolve_entries_scope(
+            db,
+            {
+                "criteria": criteria,
+                "version": self.version,
+                "mod_id": self.mod_id,
+                "kind": self.kind,
+            },
+            current_settings(),
+        )
+        apply_filter_options(
+            self,
+            {
+                "identity": self._database_identity(db),
+                "source_catalog": self._render_source_catalog,
+                "effective_source_codes": scope["source_codes"],
+                "filter_options_are_filtered": scope["options_are_filtered"],
+                "versions": scope["versions"],
+                "version": scope["version"],
+                "mods": scope["mods"],
+                "kinds": scope["kinds"],
+                "source": scope["source"],
+                "mod_id": scope["mod_id"],
+                "kind": scope["kind"],
+            },
+        )
 
     def _load_kinds(self) -> None:
         """類型選項取自資料庫實際出現的類型（日後新增類型會自動出現）。"""
@@ -512,6 +558,10 @@ class EntriesPanel(ft.Column):
             else:
                 current = self.rows[0]
         self.select(current.id if current else None)
+        if self._on_filter_changed is None:
+            # standalone panel 與同步 fallback 頁面沒有父層 snapshot worker
+            # 可以套用相依下拉選項，因此由面板自行更新。
+            self._refresh_filter_options()
 
     def _render_list(self, *, keep_scroll: bool = False) -> None:
         self.count_badge.value = (
@@ -568,10 +618,13 @@ class EntriesPanel(ft.Column):
     def _row_tile(self, row: EntryRow) -> ft.Control:
         return build_entry_tile(self, row, catalog=self._render_source_catalog)
 
-    # ------------------------------------------------------------------ 選取
     def select(self, entry_id: int | None) -> None:
-        previous_selected_id = self.selected.id if self.selected else None
         db = self.db()
+        self._sync_database_identity(
+            self._database_identity(db) if db is not None else None
+        )
+        self._editor_drafts.remember(self.selected, self.tw_field.value)
+        previous_selected_id = self.selected.id if self.selected else None
         detail = db.entry_detail(entry_id) if (db and entry_id) else None
         self.detail = detail
         self.selected = detail.entry if detail else None
@@ -613,9 +666,15 @@ class EntriesPanel(ft.Column):
             return
         entry = detail.entry
         self.src_text.value = entry.en_us or NO_SOURCE_TEXT
-        draft = self.drafts.get(entry.id) if not entry.zh_tw else None
-        self.tw_field.value = draft or entry.zh_tw
-        if draft:
+        editor_draft = self._editor_drafts.get(entry.id)
+        machine_draft = self.drafts.get(entry.id) if not entry.zh_tw else None
+        if editor_draft is not None:
+            self.tw_field.value = editor_draft
+        elif machine_draft is not None:
+            self.tw_field.value = machine_draft
+        else:
+            self.tw_field.value = entry.zh_tw
+        if machine_draft is not None and editor_draft is None:
             self.saved_text.value = (
                 "已預填本次機翻的 AI 譯文（特殊字元與原文不一致，尚未寫入）"
             )
@@ -764,6 +823,7 @@ class EntriesPanel(ft.Column):
         self._safe_update()
 
     def _on_text_change(self, _e=None) -> None:
+        self._editor_drafts.remember(self.selected, self.tw_field.value)
         self._update_impact()
         self._safe_update()
 
@@ -774,14 +834,13 @@ class EntriesPanel(ft.Column):
 
     def _reset_input(self) -> None:
         if self.selected is not None:
+            self._editor_drafts.discard(self.selected.id)
             self.tw_field.value = self.selected.zh_tw
-            self._update_impact()
-            self._safe_update()
+            self._on_text_change()
 
     def _apply_suggestion(self, text: str) -> None:
         self.tw_field.value = text
-        self._update_impact()
-        self._safe_update()
+        self._on_text_change()
 
     def _step(self, delta: int) -> None:
         if self.selected is None:
@@ -846,8 +905,7 @@ class EntriesPanel(ft.Column):
         """把原文（連同換行與前後空白）原樣放進譯文框，再手動翻譯。"""
         if self.selected is not None and self.selected.en_us:
             self.tw_field.value = self.selected.en_us
-            self._update_impact()
-            self._safe_update()
+            self._on_text_change()
 
     def _update_impact(self) -> None:
         self._review_controller.update_impact()
@@ -987,8 +1045,13 @@ class EntriesPanel(ft.Column):
                 # 新譯文沒生效、或仍與原文的特殊字元不一致時，問題還在，不能移出待處理清單
                 self._resolve_flagged(entry.id, flagged_batch)
             same_entry = self.selected is not None and self.selected.id == entry.id
-            unchanged_editor = same_entry and self.pending_text() == text
+            if same_entry:
+                # 儲存期間可能又輸入了新內容；只有仍停在已儲存文字時才清掉草稿。
+                self._editor_drafts.remember(self.selected, self.tw_field.value)
+            current_editor_text = (self.tw_field.value or "") if same_entry else None
+            unchanged_editor = same_entry and current_editor_text == text
             if unchanged_editor:
+                self._editor_drafts.discard(entry.id)
                 self._load_list(page=self.pager.current_page, keep_scroll=True)
                 if self.selected is not None and self.selected.id == entry.id:
                     self.saved_text.value = message
@@ -999,33 +1062,8 @@ class EntriesPanel(ft.Column):
         self._update_impact()
         self._safe_update()
 
-    @staticmethod
-    def _shadowed_versions(db, done, entry_id: int, saved_text: str) -> list[str]:
-        """同步到的其他版本中，儲存後生效譯文仍不是新譯文的版本。"""
-        held_back: list[str] = []
-        for impact in done:
-            if impact.entry_id == entry_id:
-                continue
-            try:
-                current = db.get_entry(impact.entry_id)
-            except sqlite3.Error:
-                continue
-            if current is not None and current.zh_tw != saved_text:
-                held_back.append(impact.mc_version)
-        return held_back
-
-    @staticmethod
-    def _shadowing_source(db, entry_id: int, saved_text: str) -> str | None:
-        """儲存後生效的若不是剛存的人工譯文，回傳仍在生效的來源名稱。"""
-        try:
-            current = db.get_entry(entry_id)
-        except sqlite3.Error:
-            return None
-        if current is None or current.source in (None, SRC_MANUAL):
-            return None
-        if current.zh_tw == saved_text:
-            return None
-        return source_label(current.source, db.source_catalog)
+    _shadowed_versions = staticmethod(shadowed_versions)
+    _shadowing_source = staticmethod(shadowing_source)
 
     def _resolve_flagged(self, entry_id: int, flagged_batch: int) -> None:
         """機翻「特殊字元不一致」清單裡的條目已手動儲存：移出清單並通知機翻頁扣掉數量。
@@ -1100,6 +1138,7 @@ class EntriesPanel(ft.Column):
         self, entry_ids: list[int], drafts: dict[int, str], version: str
     ) -> None:
         """從批次機翻跳進來：只列「特殊字元不一致、沒寫入」的條目，並預填 AI 譯文供修正。"""
+        self._sync_database_identity(self._database_identity(self.db()))
         self.version = version
         self.mod_id = None
         self.kind = None

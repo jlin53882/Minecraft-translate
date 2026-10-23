@@ -113,7 +113,11 @@ class IconPreviewView(IconPreviewDetailMixin, IconPreviewListMixin, ft.Column):
     def _init_icon_preview_state(self, page) -> None:
         """圖示預覽頁的狀態、載入進度與分頁欄。"""
         self._page = page
+        # 預設視為可更新，讓未掛到 Flet tree 的測試替身仍能驗證事件處理；
+        # 真正卸載時改為 False，重新掛載再恢復 True。
+        self._view_mounted = True
         self._loading = False  # 掃描進行中（避免重複點擊載入）
+        self._load_operation = None
         # 每次卸載就遞增：進行中的載入看到世代變了就丟棄結果，不再碰（已卸載的）控制項
         self._load_generation = 0
         # 詳情頁渲染的世代：連續渲染只套用最後一次；卸載時遞增以丟棄進行中的結果
@@ -533,6 +537,7 @@ class IconPreviewView(IconPreviewDetailMixin, IconPreviewListMixin, ft.Column):
     # ==================================================
     def will_unmount(self) -> None:
         """換頁／關閉：讓進行中的載入作廢（結果丟棄、不再更新控制項）並取消 debounce（idempotent）。"""
+        self._view_mounted = False
         self._load_generation += 1
         self._render_generation += 1
         self._mod_search_debouncer.cancel()
@@ -540,7 +545,18 @@ class IconPreviewView(IconPreviewDetailMixin, IconPreviewListMixin, ft.Column):
 
     def did_mount(self) -> None:
         """重新掛載：作廢的載入已把旗標復位，這裡只同步按鈕狀態。"""
+        self._view_mounted = True
         self._update_load_state()
+
+    def _release_load_owner(self, operation=None) -> None:
+        """釋放指定載入 owner；只由仍持有 owner 的流程復位畫面狀態。"""
+        current_operation = getattr(self, "_load_operation", None)
+        if current_operation is not operation:
+            return
+        self._load_operation = None
+        self._loading = False
+        if getattr(self, "_view_mounted", True):
+            self._update_load_state()
 
     def _on_load_clicked(self, e):
         """處理載入按鈕點擊事件（磁碟掃描、讀快取都在背景執行緒，不佔用 event loop）。"""
@@ -589,17 +605,21 @@ class IconPreviewView(IconPreviewDetailMixin, IconPreviewListMixin, ft.Column):
         self.load_btn.disabled = True
         self.update()
         generation = self._load_generation
+        self._load_operation = operation
 
         async def _load():
             await self._load_async(generation, operation)
 
         try:
             future = run_task(_load)
-            observe_async_owner(future, operation)
+            observe_async_owner(
+                future,
+                operation,
+                on_cancel=lambda: self._release_load_owner(operation),
+            )
         except Exception as ex:  # noqa: BLE001 - 排程失敗時需結束 owner 並回報 UI
             operation.finish(error=ex)
-            self._loading = False
-            self._update_load_state()
+            self._release_load_owner(operation)
             log_error(f"[IconPreview] 無法排程載入工作: {ex!r}")
 
     async def _load_async(self, generation: int, operation=None) -> None:
@@ -708,49 +728,79 @@ class IconPreviewView(IconPreviewDetailMixin, IconPreviewListMixin, ft.Column):
         self._show_scan_started(mode, total_steps)
         self._finish_load(self._scan_entries(mode, total_steps), mode)
 
-    def _set_progress(self, text: str, value: float, visible: bool | None) -> None:
+    def _set_progress(
+        self,
+        text: str,
+        value: float,
+        visible: bool | None,
+        *,
+        generation: int | None = None,
+    ) -> None:
         """（可在背景執行緒呼叫）記下最新進度；實際賦值與刷新交給 event loop。"""
-        self._pending_progress = (text, value, visible)
-        self._refresh_progress()
+        if generation is None:
+            generation = getattr(self, "_load_generation", None)
+        self._pending_progress = (generation, text, value, visible)
+        self._refresh_progress(generation)
 
     def _apply_pending_progress(self) -> None:
         """在 event loop 上把最新進度寫進控制項。"""
         pending = getattr(self, "_pending_progress", None)
         if pending is None:
             return
-        text, value, visible = pending
+        if len(pending) == 4:
+            generation, text, value, visible = pending
+            if generation is not None and generation != self._load_generation:
+                return
+        else:
+            text, value, visible = pending
         self.progress_text.value = text
         self.progress_bar.value = value
         if visible is not None:
             self.progress_bar.visible = visible
 
-    def _refresh_progress(self):
+    def _refresh_progress(self, generation: int | None = None):
         """（可在背景執行緒呼叫）節流後由 event loop 刷新進度顯示。"""
         run_task = getattr(self.page, "run_task", None)
         if run_task is None:
+            if generation is not None and generation != self._load_generation:
+                return
             self._apply_pending_progress()
             self.update()
+            return
+        if generation is not None and generation != self._load_generation:
             return
         now = time.monotonic()
         if now - self._last_progress_refresh < 0.2:
             return
         self._last_progress_refresh = now
+        scheduled_generation = generation
 
         async def _update():
             if not self._loading:  # 載入已結束或已作廢（unmount）：不再套用進度
+                return
+            if (
+                scheduled_generation is not None
+                and scheduled_generation != self._load_generation
+            ):
                 return
             self._apply_pending_progress()
             self.update()
 
         run_task(_update)
 
-    def _scan_entries(self, mode: str, total_steps: int) -> list:
+    def _scan_entries(
+        self, mode: str, total_steps: int, generation: int | None = None
+    ) -> list:
         """讀取翻譯與圖示（不直接刷新畫面，可在背景執行緒執行）。"""
         if mode == "jar_directory":
             entries = self._load_entries_from_jar_directory(
                 processed_callback=_make_progress_callback(
-                    self, "讀取翻譯內容", total_steps
-                )
+                    self,
+                    "讀取翻譯內容",
+                    total_steps,
+                    generation=generation,
+                ),
+                generation=generation,
             )
         elif mode == "extracted_folder":
             entries = self._load_entries()

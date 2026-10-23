@@ -38,6 +38,12 @@ class CacheRuntimeState:
     session_entry_versions: dict[str, dict[str, int]] = field(default_factory=dict)
     next_session_entry_version: int = 0
     is_dirty: dict[str, bool] = field(default_factory=dict)
+    # 磁碟基底索引可維持穩定；尚未反映的記憶體變更只保存於覆蓋層。
+    search_overlay: dict[str, dict[str, dict[str, Any]]] = field(default_factory=dict)
+    search_generation_by_type: dict[str, int] = field(default_factory=dict)
+    search_generation: int = 0
+    search_index_current: bool | None = None
+    search_index_checked_at: float | None = None
     cache_lock: threading.RLock = field(default_factory=threading.RLock)
 
 
@@ -73,6 +79,11 @@ def reset_runtime_state(cache_types: list[str]) -> CacheRuntimeState:
     state.session_entry_versions = {k: {} for k in cache_types}
     state.next_session_entry_version = 0
     state.is_dirty = {k: False for k in cache_types}
+    state.search_overlay = {k: {} for k in cache_types}
+    state.search_generation_by_type = {k: 0 for k in cache_types}
+    state.search_generation = 0
+    state.search_index_current = None
+    state.search_index_checked_at = None
     return state
 
 
@@ -101,6 +112,16 @@ def ensure_runtime_maps(cache_types: list[str]) -> CacheRuntimeState:
     else:
         for k in cache_types:
             state.is_dirty.setdefault(k, False)
+    if not state.search_overlay:
+        state.search_overlay = {k: {} for k in cache_types}
+    else:
+        for k in cache_types:
+            state.search_overlay.setdefault(k, {})
+    if not state.search_generation_by_type:
+        state.search_generation_by_type = {k: 0 for k in cache_types}
+    else:
+        for k in cache_types:
+            state.search_generation_by_type.setdefault(k, 0)
     return state
 
 

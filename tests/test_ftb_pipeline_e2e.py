@@ -46,7 +46,11 @@ def test_ftb_pipeline_runs_export_fake_translate_and_inject(
             )
             written_files += 1
             total_keys += len(translated)
-        return {"written_files": written_files, "total_keys": total_keys}
+        return {
+            "status": "DONE",
+            "written_files": written_files,
+            "total_keys": total_keys,
+        }
 
     monkeypatch.setattr(
         ftbquests_lmtranslator,

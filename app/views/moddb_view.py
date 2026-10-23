@@ -11,6 +11,7 @@ import flet as ft
 from app.services_impl.moddb_service import (
     TranslationDB,
     current_settings,
+    database_data_generation,
     database_problem,
     open_database,
 )
@@ -110,6 +111,7 @@ class ModDbView(ft.Column):
             request_refresh=self._request_overview_refresh,
             open_scan=lambda: self.show_tab("scan"),
             open_entries=self.open_entries,
+            on_database_changed=self._on_database_changed,
         )
         self.entries = EntriesPanel(
             page,
@@ -565,10 +567,8 @@ class ModDbView(ft.Column):
                 if self.tab == key:
                     self._request_panel_refresh(key)
                 return
-        if (
-            key == "entries"
-            and snapshot.get("filter_only")
-            and not (self._validate_filter_snapshot(request, snapshot, panel))
+        if key == "entries" and not self._validate_entries_snapshot(
+            request, snapshot, panel
         ):
             return
         if self.tab != key:
@@ -586,16 +586,22 @@ class ModDbView(ft.Column):
         if self.tab == key:
             self._update_panel(key)
 
-    def _validate_filter_snapshot(self, request: dict, snapshot: dict, panel) -> bool:
-        """Reject filter results whose database identity or generation is stale."""
+    def _validate_entries_snapshot(self, request: dict, snapshot: dict, panel) -> bool:
+        """拒絕資料庫身分或資料代次過期的 Entries 快照。"""
         expected_identity = request.get("identity")
-        if (
-            expected_identity is not None
-            and snapshot.get("identity") != expected_identity
-        ):
+        snapshot_identity = snapshot.get("identity")
+        current_identity = getattr(panel, "_db_identity", None)
+        identity_stale = (
+            expected_identity is not None and snapshot_identity != expected_identity
+        ) or (
+            current_identity is not None
+            and snapshot_identity is not None
+            and snapshot_identity != current_identity
+        )
+        if identity_stale:
             self._panel_refresh_needed["entries"] = True
             self.entries._filter_only_refresh = False
-            self.entries._db_identity = None
+            self.entries._sync_database_identity(None)
             self.reload_db()
             panel.refresh_indicator.visible = False
             panel.refresh_indicator.value = ""
@@ -605,7 +611,7 @@ class ModDbView(ft.Column):
         if (
             self._db is not None
             and snapshot.get("db_generation") is not None
-            and self._db._data_gen() != snapshot["db_generation"]
+            and database_data_generation(self._db) != snapshot["db_generation"]
         ):
             self._panel_refresh_needed["entries"] = True
             panel.refresh_indicator.visible = False
@@ -671,14 +677,19 @@ class ModDbView(ft.Column):
         self._invalidate_database_snapshots()
         self._refresh_active_panel()
 
-    def _on_entries_changed(self) -> None:
+    def _on_database_changed(self) -> None:
+        """資料庫寫入完成後，使所有 Mod DB snapshot 失效。"""
         self._invalidate_database_snapshots()
-        # EntriesPanel has already refreshed the row and editor that were just saved.
-        self._panel_refresh_needed["entries"] = False
         if self.tab == "overview":
             self._request_overview_refresh()
-        elif self.tab != "entries":
+        else:
+            # 目前頁籤也必須刷新。尤其 EntriesPanel 可能保留篩選選項或 resident state，
+            # 只刷新資料列無法涵蓋這些狀態；隱藏頁籤則保留待下次進入時刷新。
             self._refresh_active_panel()
+
+    def _on_entries_changed(self) -> None:
+        """EntriesPanel 資料變更的向後相容回呼。"""
+        self._on_database_changed()
 
     def _on_entries_filter_changed(
         self,

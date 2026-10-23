@@ -229,6 +229,26 @@ def test_entries_write_invalidates_overview_but_keeps_current_rows_fresh(db_path
     assert view._overview_needs_refresh is True
 
 
+def test_cleanup_completion_invalidates_all_mounted_moddb_panels(db_path):
+    """清理／還原完成後，總覽以外的已掛載頁籤也必須標記為過期。"""
+    seed(db_path)
+    view = moddb_view.ModDbView(mock_page(), mock_filepicker())
+    for key in ("entries", "scan", "translate"):
+        view.show_tab(key)
+    view.show_tab("overview")
+    assert all(not needed for needed in view._panel_refresh_needed.values())
+
+    previous_revision = view._data_revision
+    view.overview._on_cleanup_complete()
+
+    assert view._data_revision == previous_revision + 1
+    assert view._panel_refresh_needed == {
+        "entries": True,
+        "scan": True,
+        "translate": True,
+    }
+
+
 def test_task_completion_invalidates_cached_moddb_panels(db_path, monkeypatch):
     seed(db_path)
     view = moddb_view.ModDbView(mock_page(), mock_filepicker())
@@ -550,7 +570,7 @@ def test_filter_snapshot_generation_guard_rejects_stale_result(db_path, monkeypa
         lambda key, **_kwargs: scheduled.append(key),
     )
     try:
-        is_valid = view._validate_filter_snapshot(
+        is_valid = view._validate_entries_snapshot(
             {"identity": "same-db"},
             {
                 "identity": "same-db",
@@ -565,6 +585,135 @@ def test_filter_snapshot_generation_guard_rejects_stale_result(db_path, monkeypa
         assert view.entries.refresh_indicator.visible is False
     finally:
         view._db.close()
+
+
+def test_filter_snapshot_generation_guard_detects_external_write(db_path, monkeypatch):
+    seed(db_path)
+    view = moddb_view.ModDbView(mock_page(), mock_filepicker())
+    view._db = TranslationDB(db_path)
+    view.tab = "entries"
+    scheduled = []
+    monkeypatch.setattr(
+        view,
+        "_request_panel_refresh",
+        lambda key, **_kwargs: scheduled.append(key),
+    )
+    try:
+        before = moddb_service.database_data_generation(view._db)
+        writer = TranslationDB(db_path)
+        writer.ingest(
+            "1.21.1",
+            [ScanItem(KIND_LANG, "foo", "item.foo.external", "External")],
+        )
+        writer.close()
+
+        is_valid = view._validate_entries_snapshot(
+            {"identity": "same-db"},
+            {"identity": "same-db", "db_generation": before},
+            view.entries,
+        )
+
+        assert is_valid is False
+        assert scheduled == ["entries"]
+        assert view._panel_refresh_needed["entries"] is True
+    finally:
+        view._db.close()
+
+
+def test_full_snapshot_identity_guard_rejects_stale_database_scope(
+    db_path, monkeypatch
+):
+    """完整快照的資料庫身分過期時，也要清除批次 scope 並重新查詢。"""
+    seed(db_path)
+    view = moddb_view.ModDbView(mock_page(), mock_filepicker())
+    view._db = TranslationDB(db_path)
+    view.tab = "entries"
+    view.entries._db_identity = "database-a"
+    view.entries.entry_ids = [1]
+    view.entries.drafts = {1: "舊資料庫機翻草稿"}
+    view.entries._flagged_batch = 7
+    scheduled = []
+    monkeypatch.setattr(
+        view,
+        "_request_panel_refresh",
+        lambda key, **_kwargs: scheduled.append(key),
+    )
+
+    is_valid = view._validate_entries_snapshot(
+        {"identity": "database-a"},
+        {"identity": "database-b", "filter_only": False},
+        view.entries,
+    )
+
+    assert is_valid is False
+    assert scheduled == ["entries"]
+    assert view.entries._db_identity is None
+    assert view.entries.entry_ids is None
+    assert view.entries.drafts == {}
+    assert view.entries._flagged_batch == 8
+    assert view._db is None
+
+
+def test_entries_database_switch_requeries_after_same_custom_source_code(tmp_path):
+    """不同資料庫重用自訂來源代碼時，不得套用舊快照的來源 scope。"""
+    first_path = tmp_path / "first-custom.db"
+    second_path = tmp_path / "second-custom.db"
+    for path, source_name, translation in (
+        (first_path, "來源 A", "A 資料庫譯文"),
+        (second_path, "來源 B", "B 資料庫譯文"),
+    ):
+        db = TranslationDB(path)
+        db.ingest(
+            "1.21.1",
+            [
+                ScanItem(
+                    KIND_LANG,
+                    "foo",
+                    "item.foo.a",
+                    "Steel Casing",
+                    translation,
+                    source=100,
+                )
+            ],
+        )
+        db.close()
+        with sqlite3.connect(path) as conn:
+            conn.execute(
+                "INSERT INTO meta (key, value) VALUES ('custom_sources', ?) "
+                "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                (json.dumps({source_name: 100}, ensure_ascii=False),),
+            )
+
+    first_db = TranslationDB(first_path)
+    second_db = TranslationDB(second_path)
+    active_db = [first_db]
+    panel = entries_panel.EntriesPanel(mock_page(), lambda: active_db[0])
+    try:
+        panel.refresh()
+        panel.source_filter.dropdown.value = "100"
+        assert panel.source_filter.code == 100
+        first_identity = panel._db_identity
+        second_identity = panel._database_identity(second_db)
+        active_db[0] = second_db
+
+        panel.apply_refresh_snapshot(
+            {
+                "identity": second_identity,
+                "filter_only": False,
+                "source": 100,
+                "rows": list(panel.rows),
+                "total": panel.total,
+                "page": 1,
+            }
+        )
+
+        assert first_identity != second_identity
+        assert panel.source_filter.code is None
+        assert panel.rows[0].zh_tw == "B 資料庫譯文"
+        assert panel._render_source_catalog.label(100) == "來源 B"
+    finally:
+        first_db.close()
+        second_db.close()
 
 
 def test_moddb_overview_load_uses_a_worker_owned_connection(db_path, monkeypatch):
@@ -819,6 +968,119 @@ def test_entries_filter_refresh_updates_selected_smart_review_chip_without_reset
     assert "校對：已套用" in texts_of(entries.smart_chip)
 
 
+def test_entries_full_refresh_keeps_draft_typed_after_save(entries):
+    """儲存後開始輸入時，晚到的完整背景快照不得覆蓋人工草稿。"""
+    selected = next(row for row in entries.rows if row.key == "item.foo.a")
+    entries.select(selected.id)
+    entries.tw_field.value = "剛儲存的譯文"
+    entries._on_text_change()
+    entries._save()
+    entries._page._run_all_tasks()
+
+    delayed_snapshot = {
+        "filter_only": False,
+        "identity": entries._db_identity,
+        "source_catalog": entries._render_source_catalog,
+        "effective_source_codes": [row.source for row in entries.rows],
+        "filter_options_are_filtered": False,
+        "versions": [entries.version],
+        "version": entries.version,
+        "mods": sorted({row.mod_id for row in entries.rows}),
+        "kinds": sorted({row.kind for row in entries.rows}),
+        "source": entries.source_filter.code,
+        "mod_id": entries.mod_id,
+        "kind": entries.kind,
+        "rows": list(entries.rows),
+        "total": entries.total,
+        "page": entries.pager.current_page,
+        "detail": entries.detail,
+        "smart_review_marks": entries.smart_review_marks,
+    }
+    entries.tw_field.value = "儲存後繼續輸入的未儲存草稿"
+    entries._on_text_change()
+
+    entries.apply_refresh_snapshot(delayed_snapshot)
+
+    assert entries.tw_field.value == "儲存後繼續輸入的未儲存草稿"
+
+
+def test_entries_database_switch_does_not_reuse_old_database_draft(tmp_path):
+    """切換到相同條目 id 的另一個資料庫時，不得帶入舊資料庫草稿。"""
+    first_path = tmp_path / "first.db"
+    second_path = tmp_path / "second.db"
+    seed(first_path)
+    second_db = TranslationDB(second_path)
+    second_db.ingest(
+        "1.21.1",
+        [ScanItem(KIND_LANG, "foo", "item.foo.a", "Steel Casing", "第二資料庫譯文")],
+    )
+    second_db.close()
+
+    first_db = TranslationDB(first_path)
+    active_db = [first_db]
+    panel = entries_panel.EntriesPanel(mock_page(), lambda: active_db[0])
+    try:
+        panel.refresh()
+        panel.tw_field.value = "第一資料庫未儲存草稿"
+        panel._on_text_change()
+        panel.entry_ids = [1]
+        panel.drafts = {1: "第一資料庫機翻草稿"}
+        panel._flagged_batch = 7
+
+        active_db[0] = TranslationDB(second_path)
+        panel.select(1)
+
+        assert panel.selected is not None
+        assert panel.selected.id == 1
+        assert panel.tw_field.value == "第二資料庫譯文"
+        assert panel.entry_ids is None
+        assert panel.drafts == {}
+        assert panel._flagged_batch == 8
+        assert panel.flagged_banner.visible is False
+
+        panel.refresh()
+
+        assert panel.selected is not None
+        assert panel.selected.id == 1
+        assert panel.tw_field.value == "第二資料庫譯文"
+    finally:
+        active_db[0].close()
+        first_db.close()
+
+
+def test_entries_snapshot_recovery_from_unknown_database_clears_draft(entries):
+    """背景恢復從未知資料庫身分套用快照時，不得沿用舊草稿。"""
+    selected = entries.selected
+    assert selected is not None
+    entries.tw_field.value = "未知身分期間的舊草稿"
+    entries._on_text_change()
+    identity = entries._database_identity(entries.db())
+    snapshot = {
+        "identity": identity,
+        "filter_only": False,
+        "source_catalog": entries._render_source_catalog,
+        "effective_source_codes": [row.source for row in entries.rows],
+        "filter_options_are_filtered": False,
+        "versions": [entries.version],
+        "version": entries.version,
+        "mods": sorted({row.mod_id for row in entries.rows}),
+        "kinds": sorted({row.kind for row in entries.rows}),
+        "source": entries.source_filter.code,
+        "mod_id": entries.mod_id,
+        "kind": entries.kind,
+        "rows": list(entries.rows),
+        "total": entries.total,
+        "page": entries.pager.current_page,
+        "detail": entries.db().entry_detail(selected.id),
+        "smart_review_marks": entries.smart_review_marks,
+    }
+    entries._db_identity = None
+
+    entries.apply_refresh_snapshot(snapshot)
+
+    assert entries.tw_field.value == selected.zh_tw
+
+
 def test_entries_filters_by_state_mod_and_search(entries):
     original_keys = {row.id: f"entry-{row.id}" for row in entries.rows}
     entries._on_state("none")
@@ -919,6 +1181,64 @@ def test_advanced_filter_refreshes_module_and_source_options(db_path):
         "__all__",
         str(SRC_AI),
     ]
+    db.close()
+
+
+def test_review_status_filter_refreshes_module_and_source_options(db_path):
+    """審核狀態改變後，模組／來源選單要與實際結果範圍一致。"""
+    db = TranslationDB(db_path)
+    db.ingest(
+        "1.21.1",
+        [
+            ScanItem(KIND_LANG, "foo", "item.foo.a", "Foo", "甲"),
+            ScanItem(KIND_LANG, "bar", "item.bar.a", "Bar", "乙"),
+        ],
+    )
+    foo = next(row for row in db.list_entries("1.21.1")[0] if row.mod_id == "foo")
+    db.review_manual(foo.id, expected_zh_tw="甲", actor="測試審核", propagate=False)
+    db.close()
+
+    settings = DbSettings(path=str(db_path), version="1.21.1")
+    snapshot = moddb_view.load_panel_snapshot(
+        "entries",
+        {
+            "criteria": EntryFilter(version="1.21.1", review_status="unreviewed"),
+            "version": "1.21.1",
+            "mod_id": None,
+            "kind": None,
+            "page": 1,
+        },
+        settings,
+    )
+
+    assert snapshot["total"] == 1
+    assert [row.mod_id for row in snapshot["rows"]] == ["bar"]
+    assert snapshot["mods"] == ["bar"]
+    assert snapshot["filter_options_are_filtered"] is True
+
+
+def test_entries_panel_review_filter_updates_module_dropdown(db_path):
+    """條目頁的未審查篩選會立即移除已無符合條目的模組。"""
+    db = TranslationDB(db_path)
+    db.ingest(
+        "1.21.1",
+        [
+            ScanItem(KIND_LANG, "foo", "item.foo.a", "Foo", "甲"),
+            ScanItem(KIND_LANG, "bar", "item.bar.a", "Bar", "乙"),
+        ],
+    )
+    foo = next(row for row in db.list_entries("1.21.1")[0] if row.mod_id == "foo")
+    db.review_manual(foo.id, expected_zh_tw="甲", actor="測試審核", propagate=False)
+    page = mock_page()
+    page.run_thread = lambda target: target()
+    panel = entries_panel.EntriesPanel(page, lambda: db)
+    panel.refresh()
+
+    panel.review_filter.value = "unreviewed"
+    panel._on_review_status()
+
+    assert [row.mod_id for row in panel.rows] == ["bar"]
+    assert [option.key for option in panel.mod_dd.options] == ["全部模組", "bar"]
     db.close()
 
 

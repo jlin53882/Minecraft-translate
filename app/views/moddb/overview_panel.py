@@ -76,14 +76,16 @@ class OverviewPanel(ft.Column):
         request_refresh: Callable[[], None] | None = None,
         open_scan: Callable[[], None] | None = None,
         open_entries: Callable[[str, str | None, str | None], None] | None = None,
+        on_database_changed: Callable[[], None] | None = None,
     ):
-        """``open_entries(state, version, mod_id)`` 讓總覽的連結跳到條目校對。"""
+        """建立總覽；資料變更回呼會讓其他已掛載頁籤的快照失效。"""
         super().__init__(expand=True, spacing=12, scroll=ft.ScrollMode.AUTO)
         self._page = page
         self._get_db = get_db
         self._request_refresh = request_refresh
         self._open_scan = open_scan
         self._open_entries = open_entries
+        self._on_database_changed = on_database_changed
         self._has_snapshot = False
 
         self._build_stat_cards()
@@ -485,8 +487,18 @@ class OverviewPanel(ft.Column):
             show_snack(self._page, "目前沒有可用的資料庫。", C.GOLD)
             return
         CleanupDialog(
-            self._page, self._get_db, lambda: self.refresh(update=True)
+            self._page,
+            self._get_db,
+            self._on_cleanup_complete,
         ).open()
+
+    def _on_cleanup_complete(self) -> None:
+        """Cleanup apply/revert 完成後，刷新所有已掛載的 Mod DB 頁面。"""
+        if self._on_database_changed is not None:
+            self._on_database_changed()
+        else:
+            # standalone OverviewPanel 使用者保留原本的區域刷新行為。
+            self.refresh(update=True)
 
     def _goto_scan(self) -> None:
         if self._open_scan:

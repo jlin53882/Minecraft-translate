@@ -11,6 +11,13 @@ import re
 import zipfile
 from pathlib import Path
 
+try:
+    from tools.cli_encoding import configure_utf8_stdio
+except ModuleNotFoundError:
+    from cli_encoding import configure_utf8_stdio
+
+configure_utf8_stdio()
+
 
 def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(

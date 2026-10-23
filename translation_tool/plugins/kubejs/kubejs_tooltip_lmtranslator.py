@@ -204,7 +204,8 @@ def translate_kubejs_pending_to_zh_tw(
     - pending_dir: 例如 Output/kubejs/待翻譯
     - output_dir : 例如 Output/kubejs/LM翻譯後
     """
-    validate_api_keys()
+    if not dry_run:
+        validate_api_keys()
 
     in_dir = Path(pending_dir).resolve()
     out_dir = Path(output_dir).resolve()
@@ -288,7 +289,12 @@ def translate_kubejs_pending_to_zh_tw(
 
     if global_total_keys == 0:
         log_info("ℹ️ [KubeJS-LM] 0 keys，跳過翻譯")
-        return {"written_files": 0, "total_keys": 0, "out_dir": str(out_dir)}
+        return {
+            "status": "DONE",
+            "written_files": 0,
+            "total_keys": 0,
+            "out_dir": str(out_dir),
+        }
 
     # -------------------------
     # Cache rules
@@ -499,6 +505,7 @@ def translate_kubejs_pending_to_zh_tw(
 
         progress(1.0)
         return {
+            "status": "DRY_RUN",
             "dry_run": True,
             "files": len(per_file_rows),
             "total_keys": global_total_keys,
@@ -598,8 +605,8 @@ def translate_kubejs_pending_to_zh_tw(
                 on_progress=on_progress,
             ),
         )
-        loop_status = res.status
-        if res.status == "DONE":
+        loop_status = str(getattr(res, "status", "") or "").upper() or "FAILED"
+        if loop_status == "DONE":
             checkpoint.clear()
 
         translated_done = int(res.processed or 0)

@@ -155,6 +155,22 @@ def test_error_log_file_is_masked(tmp_path, monkeypatch):
     assert "api failed" in content and CUSTOM_KEY not in content
 
 
+def test_error_log_failure_warning_is_masked(tmp_path, monkeypatch, caplog):
+    from translation_tool.utils import exceptions
+
+    redaction.register_secrets([CUSTOM_KEY])
+    monkeypatch.setattr(
+        exceptions,
+        "_resolve_error_log_dir",
+        lambda: (_ for _ in ()).throw(RuntimeError(f"directory {CUSTOM_KEY} failed")),
+    )
+
+    with caplog.at_level(logging.WARNING, logger="translation_tool.utils.exceptions"):
+        exceptions._log_error_to_file(RuntimeError("probe"), "probe")
+
+    assert CUSTOM_KEY not in caplog.text
+
+
 def test_load_config_registers_user_keys_but_not_placeholders(tmp_path):
     from translation_tool.utils import config_manager as cm
 

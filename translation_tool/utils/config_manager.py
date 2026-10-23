@@ -33,7 +33,11 @@ from translation_tool.utils.config_schema import (
 )
 from translation_tool.utils.fs_utils import fsync_directory
 from translation_tool.utils.path_text import normalize_path_text
-from translation_tool.utils.redaction import RedactingFormatter, register_secrets
+from translation_tool.utils.redaction import (
+    RedactingFormatter,
+    redact_text,
+    register_secrets,
+)
 from translation_tool.utils.smart_review_settings import (  # noqa: F401  (re-export)
     DEFAULT_SMART_REVIEW_BATCH_SIZE,
     DEFAULT_SMART_REVIEW_MAX_BATCH_SIZE,
@@ -72,7 +76,7 @@ def load_config_example() -> dict:
 
     注意：config.example.json 屬於 repo 原始碼的一部分，
     不會被複製進使用者的實際工作目錄。只有 load_config() 在
-    Layer 2 fallback 時會嘗試讀取它。
+    第 3 層 fallback 時會嘗試讀取它。
 
     用途：新版本安裝時補足 config.json 缺少的新欄位。
     """
@@ -243,18 +247,19 @@ def load_config(config_path: str | os.PathLike | None = None) -> dict:
     """
     載入並合併設定檔，實作三層 fallback 機制。
 
-    三層 priority（高 → 低）：
-      Layer 1: config.json       — 用戶實際值（最高優先，單一 json 檔）
-      Layer 2: config.example.json — 文件預設值（新版本補欄位用）
-      Layer 3: DEFAULT_CONFIG    — 程式碼 fallback（最終保底，唯一真相來源）
+    三層優先順序（高 → 低）：
+      Layer 1: config.json         — 使用者實際值（最高優先，單一 JSON 檔）
+      Layer 2: DEFAULT_CONFIG       — schema 定義的預設值（既有欄位唯一來源）
+      Layer 3: config.example.json  — 文件範例值，只補充 schema 未定義的欄位
 
-    合併順序：deep_merge(deep_merge(DEFAULT_CONFIG, example), user_config)
-    - user_config 覆蓋 example 覆蓋 DEFAULT_CONFIG
+    合併順序：deep_merge(deep_merge(example, DEFAULT_CONFIG), user_config)
+    - user_config 覆蓋 schema 預設值
+    - schema 預設值覆蓋 example 的同名值
     - `lm_translator.models` 不做 deep merge（視為使用者資料，完全替換）
 
-    适用场景：
-    - 新安裝：config.json 不存在 → 吃到 example + default 的值
-    - 升級：config.json 少新欄位 → example 補上缺失欄位
+    適用情境：
+    - 新安裝：config.json 不存在 → 使用 schema 預設值與 example 額外欄位
+    - 升級：config.json 少新欄位 → 由 schema 預設值補上，example 只補 schema 沒有的欄位
     - 使用者自訂：config.json 有值 → 以使用者為準
 
     回傳：合併後的新 dict（避免直接回傳 DEFAULT_CONFIG 物件被外部修改）。
@@ -288,18 +293,19 @@ def get_smart_review_settings(config: dict | None = None) -> SmartReviewSettings
 
 def _load_config_uncached(resolved_config_path: Path) -> tuple[dict, bool]:
     """實際讀檔與合併；回傳 (config, 是否可快取)。"""
-    # Layer 3: DEFAULT_CONFIG as base
+    # 第 2 層：以 schema 建出的 DEFAULT_CONFIG 作為基底。
     # 為什麼用 DEFAULT_CONFIG 而不是空 dict 作為起點？
     # 因為 DEFAULT_CONFIG 是「唯一真相來源」——所有欄位都應該有定義值，
     # example 只是用來補新欄位（example 多的欄位），不是用來覆蓋 DEFAULT 已有的值。
     base = copy.deepcopy(DEFAULT_CONFIG)
 
-    # Layer 2: config.example.json
+    # 第 3 層：config.example.json 只補充 schema 尚未定義的欄位。
     example = load_config_example()
     if example:
-        base = deep_merge(base, example)
+        # 以 example 補充 schema 沒有的欄位，但既有 schema 預設值優先。
+        base = deep_merge(example, base)
 
-    # Layer 1: config.json (user values) — only if file exists
+    # 第 1 層：若檔案存在，套用使用者的 config.json 值。
     status, user_config = read_config_file(resolved_config_path)
     if status in (CONFIG_CORRUPT, CONFIG_UNREADABLE):
         log.error(
@@ -313,7 +319,8 @@ def _load_config_uncached(resolved_config_path: Path) -> tuple[dict, bool]:
         return base, status == CONFIG_CORRUPT
     user_config = user_config or {}
 
-    # Merge: user (Layer 1) > example (Layer 2) > default (Layer 3)
+    # 合併優先序：
+    # config.json（Layer 1）> DEFAULT_CONFIG（Layer 2）> config.example.json（Layer 3）
     # 全部用 deep_merge 一次搞定，確保 config.example.json 新增的 top-level key
     # 也會被正確合併進來，不只限於 DEFAULT_CONFIG 定義的 keys。
     config = deep_merge(base, user_config)
@@ -477,7 +484,8 @@ def save_config(config, config_path: str | os.PathLike | None = None) -> bool:
         return True
 
     except Exception as e:  # noqa: BLE001
-        logging.error(f"錯誤：儲存或驗證設定檔失敗: {e!r}")  # noqa: LOG015
+        safe_error = redact_text(str(e), _sensitive_values(config))
+        log.error("錯誤：儲存或驗證設定檔失敗: %s", safe_error)
         return False
     finally:
         if temp_path is not None:
@@ -500,12 +508,12 @@ def setup_logging(config):
     logging_cfg = config.get("logging", {})
 
     log_level = getattr(
-        logging, logging_cfg.get("log_level", "INFO").upper(), logging.INFO
+        logging,
+        str(logging_cfg.get("log_level", get_default("logging.log_level"))).upper(),
+        logging.INFO,
     )
-    log_format = logging_cfg.get(
-        "log_format", "%(asctime)s - %(levelname)s - [%(name)s] - %(message)s"
-    )
-    log_dir = logging_cfg.get("log_dir", "logs")
+    log_format = logging_cfg.get("log_format", get_default("logging.log_format"))
+    log_dir = logging_cfg.get("log_dir", get_default("logging.log_dir"))
     resolved_log_dir = resolve_project_path(log_dir)
 
     # 清理舊 handler
@@ -675,7 +683,7 @@ def _validate_lm_translator_config(lm: dict) -> None:
         if (
             key.startswith("initial_batch_size_")
             and value is not None
-            and not isinstance(value, int)
+            and (isinstance(value, bool) or not isinstance(value, int))
         ):
             raise ConfigValidationError(
                 f"lm_translator.{key} 必須為 int，"
@@ -684,7 +692,9 @@ def _validate_lm_translator_config(lm: dict) -> None:
 
     # 3. parallel_execution_workers 必須是 int > 0
     workers = lm.get("parallel_execution_workers")
-    if workers is not None and (not isinstance(workers, int) or workers <= 0):
+    if workers is not None and (
+        isinstance(workers, bool) or not isinstance(workers, int) or workers <= 0
+    ):
         raise ConfigValidationError(
             f"lm_translator.parallel_execution_workers 必須為正整數，"
             f"目前為 {type(workers).__name__}：{workers}"
@@ -693,7 +703,7 @@ def _validate_lm_translator_config(lm: dict) -> None:
     # 4. temperature 必須是 0.0~2.0 的 float
     temp = lm.get("temperature")
     if temp is not None:
-        if not isinstance(temp, (int, float)):
+        if isinstance(temp, bool) or not isinstance(temp, (int, float)):
             raise ConfigValidationError(
                 f"lm_translator.temperature 必須為數字，"
                 f"目前為 {type(temp).__name__}：'{temp}'"
@@ -709,6 +719,7 @@ def _validate_lm_translator_config(lm: dict) -> None:
         raise ConfigValidationError(
             f"lm_translator.models 必須為 dict，目前為 {type(models_val).__name__}"
         )
+    default_provider = get_default("lm_translator.provider", "gemini")
     if isinstance(models_val, dict):
         for model_name, model_cfg in models_val.items():
             if not isinstance(model_name, str) or not isinstance(model_cfg, dict):
@@ -727,7 +738,7 @@ def _validate_lm_translator_config(lm: dict) -> None:
                 )
 
             if (
-                lm.get("provider", "gemini") == "chatgpt"
+                lm.get("provider", default_provider) == "chatgpt"
                 and isinstance(model_cap, int)
                 and 0 < model_cap < 16
             ):
@@ -738,7 +749,7 @@ def _validate_lm_translator_config(lm: dict) -> None:
 
     # 6. token 預算切批設定（issue #108）
     if (
-        lm.get("provider", "gemini") == "chatgpt"
+        lm.get("provider", default_provider) == "chatgpt"
         and isinstance(lm.get("max_output_tokens"), int)
         and 0 < lm["max_output_tokens"] < 16
     ):
@@ -938,7 +949,9 @@ def _validate_token_budget_config(lm: dict) -> None:
 def _validate_translator_config(translator: dict) -> None:
     """驗證 translator 區塊的型別（ATK-C-2）。"""
     workers = translator.get("parallel_execution_workers")
-    if workers is not None and (not isinstance(workers, int) or workers <= 0):
+    if workers is not None and (
+        isinstance(workers, bool) or not isinstance(workers, int) or workers <= 0
+    ):
         raise ConfigValidationError(
             f"translator.parallel_execution_workers 必須為正整數，"
             f"目前為 {type(workers).__name__}：{workers}"
@@ -1013,7 +1026,7 @@ class LazyConfigProxy:
 config = LazyConfigProxy()
 
 
-DEFAULT_LM_TRANSLATE_FOLDER_NAME = "LM翻譯後"
+DEFAULT_LM_TRANSLATE_FOLDER_NAME = get_default("lm_translator.lm_translate_folder_name")
 _WINDOWS_RESERVED_NAMES = frozenset(
     {"CON", "PRN", "AUX", "NUL"}
     | {f"COM{i}" for i in range(1, 10)}

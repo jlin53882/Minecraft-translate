@@ -15,6 +15,19 @@ from app.ui import kit
 ALL_SOURCES = "__all__"
 
 
+def _normalise_source_codes(codes) -> set[int]:
+    """把快照中的來源代碼轉成整數，略過空值與無法辨識的值。"""
+    normalised: set[int] = set()
+    for code in codes or ():
+        if code in (None, ""):
+            continue
+        try:
+            normalised.add(int(code))
+        except (TypeError, ValueError):
+            continue
+    return normalised
+
+
 class SourceFilter:
     """下拉選單：全部來源，或只看目前生效來源為指定來源的條目。"""
 
@@ -40,7 +53,7 @@ class SourceFilter:
         """更新來源選項，可選擇只顯示目前篩選結果實際使用的來源。"""
         settings = current_settings()
         catalog = catalog or settings.source_catalog
-        available_codes = {int(code) for code in effective_source_codes}
+        available_codes = _normalise_source_codes(effective_source_codes)
         active_custom_codes = {
             code for code in available_codes if code >= CUSTOM_SOURCE_BASE
         }

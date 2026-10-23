@@ -11,8 +11,13 @@ import pytest
 
 from app.views.pipeline.pipeline_config import PipelineConfig
 from translation_tool.utils import config_manager as cm
+from translation_tool.utils.config_schema import get_schema_default
 
 DEFAULT = cm.DEFAULT_LM_TRANSLATE_FOLDER_NAME
+
+
+def test_lm_folder_default_comes_from_schema():
+    assert DEFAULT == get_schema_default("lm_translator.lm_translate_folder_name")
 
 
 def _cfg(name):

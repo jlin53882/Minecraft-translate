@@ -1,18 +1,19 @@
 """
-Unit tests for config three-layer fallback mechanism.
+config 三層 fallback 機制的單元測試。
 
-三層 fallback（priority: user > example > default）：
-  config.json  — 用戶實際值（Layer 1，最高優先）
-  config.example.json — 文件預設值（Layer 2）
-  DEFAULT_CONFIG — 程式碼 fallback（Layer 3，最終保底，唯一真相來源）
+三層 fallback（優先順序：config.json > DEFAULT_CONFIG > config.example.json；
+config.example.json 只補充 schema 沒有的欄位）：
+  config.json  — 用戶實際值（第 1 層，最高優先）
+  DEFAULT_CONFIG — schema 預設值（第 2 層，既有欄位的唯一真相來源）
+  config.example.json — 額外欄位的文件 fallback（第 3 層）
 
 測試覆蓋：
 1. 只有 config.json → 使用 user 值
 2. config.json 缺欄位，有 config.example.json → 使用 example 值
 3. config.json 和 config.example.json 都缺 → 使用 DEFAULT_CONFIG
-4. 三層都有 → user 優先於 example 優先於 default
-5. config.example.json 格式錯誤 → 忽略 example，使用 default
-6. config.json 格式錯誤 → 回退到 default
+4. 三層都有 → config.json 優先於 DEFAULT_CONFIG，DEFAULT_CONFIG 優先於 config.example.json
+5. config.example.json 格式錯誤 → 忽略 example，使用 DEFAULT_CONFIG
+6. config.json 格式錯誤 → 使用 DEFAULT_CONFIG 與 example 的合併結果
 7. get_default() 與 get_default_block() helper 正確性
 8. lm_translator.models 不做 deep merge（使用者資料）
 """
@@ -67,7 +68,7 @@ def _patch_config_files(tmp_path, user_cfg=None, example_cfg=None):
 
 
 # =============================================================================
-# Layer 1: config.json only (no example, no default override)
+# 第 1 層：只有 config.json（沒有 example，也沒有 DEFAULT_CONFIG 覆蓋）
 # =============================================================================
 
 
@@ -75,14 +76,14 @@ class TestLayer1UserConfigOnly:
     """當 config.json 存在且有值時，應使用該值。"""
 
     def test_user_value_takes_priority(self, tmp_path):
-        """config.json 的值優先於 default 和 example。"""
+        """config.json 的值優先於 DEFAULT_CONFIG；DEFAULT_CONFIG 優先於 config.example.json。"""
         user_cfg = {"translator": {"parallel_execution_workers": 99}}
         with _patch_config_files(tmp_path, user_cfg, {}):
             cfg = load_config()
         assert cfg["translator"]["parallel_execution_workers"] == 99
 
     def test_missing_config_json_returns_default(self, tmp_path):
-        """config.json 不存在時，回退到 deep_merge(default, example)。"""
+        """config.json 不存在時，回退到 schema 預設並補充 example 額外欄位。"""
         ex_path = tmp_path / "config.example.json"
         ex_path.write_text("{}", encoding="utf-8")
         with (
@@ -94,7 +95,7 @@ class TestLayer1UserConfigOnly:
         assert "lang_merger" in cfg
 
     def test_corrupt_config_json_returns_default(self, tmp_path):
-        """config.json 格式錯誤時，回退到 default + example。"""
+        """config.json 格式錯誤時，回退到 schema 預設並補充 example 額外欄位。"""
         cfg_path = tmp_path / "config.json"
         cfg_path.write_text("{ invalid json }", encoding="utf-8")
         ex_path = tmp_path / "config.example.json"
@@ -108,11 +109,11 @@ class TestLayer1UserConfigOnly:
 
 
 # =============================================================================
-# Layer 2: config.example.json fills missing user fields
+# config.example.json 補充 schema 未定義的欄位（第 3 層）
 # =============================================================================
 
 
-class TestLayer2ExampleFillsMissing:
+class TestExampleFillsMissing:
     """當 config.json 缺欄位時，config.example.json 補上。"""
 
     def test_example_fills_missing_top_level_key(self, tmp_path):
@@ -156,15 +157,15 @@ class TestLayer2ExampleFillsMissing:
 
 
 # =============================================================================
-# Layer 3: DEFAULT_CONFIG as final fallback
+# DEFAULT_CONFIG 作為 schema 預設值（第 2 層）
 # =============================================================================
 
 
-class TestLayer3DefaultFallback:
+class TestDefaultFallback:
     """當 config.json 和 config.example.json 都缺欄位時，用 DEFAULT_CONFIG。"""
 
     def test_default_fills_when_both_user_and_example_missing(self, tmp_path):
-        """user 和 example 都沒有 translator.parallel_execution_workers → 用 default。"""
+        """user 和 example 都沒有 translator.parallel_execution_workers → 用 DEFAULT_CONFIG。"""
         with _patch_config_files(tmp_path, {}, {}):
             cfg = load_config()
         assert cfg["translator"]["parallel_execution_workers"] == 4
@@ -178,12 +179,12 @@ class TestLayer3DefaultFallback:
 
 
 # =============================================================================
-# Priority: user > example > default
+# 優先順序：config.json > DEFAULT_CONFIG > config.example.json
 # =============================================================================
 
 
 class TestThreeLayerPriority:
-    """驗證三層 priority：user 覆蓋 example 覆蓋 default。"""
+    """驗證 user 覆蓋 schema，example 只補充 schema 未定義的欄位。"""
 
     def test_user_overrides_example(self, tmp_path):
         """user 與 example 都有值時，user 優先。"""
@@ -193,13 +194,20 @@ class TestThreeLayerPriority:
             cfg = load_config()
         assert cfg["translator"]["parallel_execution_workers"] == 99
 
-    def test_example_overrides_default(self, tmp_path):
-        """example 有值，user 沒有時，example 優先於 default。"""
+    def test_schema_default_overrides_example(self, tmp_path):
+        """example 與 DEFAULT_CONFIG 都有值時，DEFAULT_CONFIG 優先；額外欄位仍保留。"""
         user_cfg = {}
-        example_cfg = {"translator": {"parallel_execution_workers": 7}}
+        example_cfg = {
+            "translator": {"parallel_execution_workers": 7},
+            "example_only": {"value": 1},
+        }
         with _patch_config_files(tmp_path, user_cfg, example_cfg):
             cfg = load_config()
-        assert cfg["translator"]["parallel_execution_workers"] == 7
+        assert (
+            cfg["translator"]["parallel_execution_workers"]
+            == DEFAULT_CONFIG["translator"]["parallel_execution_workers"]
+        )
+        assert cfg["example_only"] == {"value": 1}
 
     def test_nested_priority(self, tmp_path):
         """巢狀 dict 也能正確三層覆蓋。"""
@@ -231,7 +239,7 @@ class TestExampleFileErrors:
     """config.example.json 格式錯誤時的 fallback 行為。"""
 
     def test_corrupt_example_ignored_uses_default(self, tmp_path):
-        """config.example.json 格式錯誤時，視同不存在。"""
+        """config.example.json 格式錯誤時，視同不存在並使用 DEFAULT_CONFIG。"""
         user_cfg = {}
         cfg_path = tmp_path / "config.json"
         cfg_path.write_text(json.dumps(user_cfg), encoding="utf-8")
@@ -245,7 +253,7 @@ class TestExampleFileErrors:
         assert cfg["translator"]["parallel_execution_workers"] == 4
 
     def test_missing_example_uses_default(self, tmp_path):
-        """config.example.json 不存在時，用 default 補欄位。"""
+        """config.example.json 不存在時，用 DEFAULT_CONFIG 補欄位。"""
         user_cfg = {}
         cfg_path = tmp_path / "config.json"
         cfg_path.write_text(json.dumps(user_cfg), encoding="utf-8")

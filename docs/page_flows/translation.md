@@ -53,6 +53,8 @@ flowchart TD
   K --> L
 ```
 
+FTB 的翻譯結果只有在狀態為 `DONE` 時才可進入最終注入；`PARTIAL`、`FAILED`、`CANCELLED` 只保留續跑標記與部分輸出，不得把未完成資料當成已完成內容注入。
+
 ### KubeJS 流水線（`run_kubejs_pipeline`）
 
 ```mermaid
@@ -74,6 +76,8 @@ flowchart TD
   L --> M
 ```
 
+KubeJS 的翻譯快照只有 `DONE` 才能提交為可注入版本；`PARTIAL`、`FAILED`、`CANCELLED` 不提交最終快照，也不執行注入，讓下一次續跑仍能從 checkpoint 接續。
+
 ### Markdown 流水線（`run_md_pipeline`）
 
 ```mermaid
@@ -90,6 +94,8 @@ flowchart TD
   G -- 是 --> I["回傳結果"]
   H --> I
 ```
+
+Markdown 只有 `DONE` 才能把翻譯結果寫入完成目錄；`PARTIAL`、`FAILED`、`CANCELLED` 不使用 pending JSON 當作完成輸出，也不執行最終注入。
 
 ## 背景任務與 UI 更新
 

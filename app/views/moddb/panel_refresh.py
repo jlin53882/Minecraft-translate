@@ -198,7 +198,23 @@ def _resolve_entries_scope(db, request: dict, settings) -> dict:
         kind=kind,
         source=source,
     )
-    options_are_filtered = bool(criteria.time is not None or criteria.quality.active)
+    # module/source 選單描述的是目前可達的結果 scope，不只是選用的日期／品質進階條件。
+    # status、state、搜尋、kind 與固定條目條件都可能從結果中排除某個 module 或 source；
+    # 若忽略這些條件，資料庫寫入後下拉選單就可能保留已沒有符合列的 module。
+    options_are_filtered = bool(
+        criteria.mod_id is not None
+        or criteria.kind is not None
+        or criteria.source is not None
+        or criteria.state != "all"
+        or criteria.query.strip()
+        or criteria.review_status is not None
+        or criteria.smart_review is not None
+        or criteria.entry_ids is not None
+        or criteria.include_ids is not None
+        or bool(criteria.exclude_ids)
+        or criteria.time is not None
+        or criteria.quality.active
+    )
     if options_are_filtered and db is not None and version:
         filtered_mods, filtered_sources = db.filter_option_values(criteria)
         # 選值在進階條件下沒有符合條目時，仍要保留原選值；

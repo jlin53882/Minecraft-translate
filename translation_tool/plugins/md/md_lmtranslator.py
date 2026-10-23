@@ -133,7 +133,8 @@ def translate_md_pending(
     session=None,
 ) -> dict[str, Any]:
     """Translate extracted Markdown blocks and write only quality-approved results."""
-    validate_api_keys()
+    if not dry_run:
+        validate_api_keys()
     start_time = time.perf_counter()
 
     in_pending_root = Path(pending_dir).resolve()
@@ -185,6 +186,7 @@ def translate_md_pending(
         log_info("ℹ️ [MD-LM] 無唯一 blocks（可能全部空白/被過濾），不需翻譯。")
         log_info("總花費時間：%s", get_formatted_duration(start_time))
         return {
+            "status": "DONE",
             "written_files": 0,
             "total_blocks": total_blocks,
             "unique_blocks": 0,
@@ -286,6 +288,7 @@ def translate_md_pending(
         log_info("ℹ️ [MD-LM] dry-run 模式：不翻譯、不寫檔。")
         log_info("總花費時間：%s", get_formatted_duration(start_time))
         return {
+            "status": "DRY_RUN",
             "dry_run": True,
             "files": len(json_files),
             "total_blocks": total_blocks,
@@ -393,14 +396,14 @@ def translate_md_pending(
                 on_progress=on_progress,
             ),
         )
-        loop_status = res.status
-        if res.status == "DONE":
+        loop_status = str(getattr(res, "status", "") or "").upper() or "FAILED"
+        if loop_status == "DONE":
             checkpoint.clear()
         avg_batch_sec = (
             (res.elapsed_sec / res.completed_calls) if res.completed_calls else None
         )
         log_info(
-            f"✨ [MD-LM] 翻譯迴圈結束：processed={int(res.processed or 0)} status={res.status}"
+            f"✨ [MD-LM] 翻譯迴圈結束：processed={int(res.processed or 0)} status={loop_status}"
         )
         log_info("總花費時間：%s", get_formatted_duration(start_time))
 

@@ -278,7 +278,13 @@ class BulkReviewDialog:
             except Exception as exc:  # noqa: BLE001 - worker boundary
                 error = exc
                 log_exception("Mod 資料庫批量審核範圍選單載入失敗")
-            self._post(self._apply_scope_options, seq, result, error)
+            self._post(
+                self._apply_scope_options,
+                seq,
+                result,
+                error,
+                on_failure=lambda: self._mark_scope_post_failure(seq),
+            )
 
         self._launch(
             work,
@@ -647,6 +653,10 @@ class BulkReviewDialog:
         show_snack(self.page, message, C.EM, text_color=C.ON_EM)
         if self.on_complete:
             self.on_complete(result)
+        # 批量操作成功後對話框仍會保持開啟，讓使用者查看摘要或還原操作。
+        # 因此對話框內的 scope 下拉選單屬於 resident UI 狀態，交易完成後必須重新查詢；
+        # EntriesPanel 的回呼只會刷新外層清單。
+        self._refresh_scope_after_database_change()
         self._safe_update()
 
     def _revert(self, _e=None) -> None:
@@ -693,7 +703,15 @@ class BulkReviewDialog:
         show_snack(self.page, f"批量審核已還原 {format_count(count)} 筆", C.EM)
         if self.on_complete:
             self.on_complete(None)
+        # 還原會恢復剛才審核過的候選項目。
+        # 重新載入 resident scope snapshot，讓 module/source 選項立即反映還原後的資料庫狀態。
+        self._refresh_scope_after_database_change()
         self._safe_update()
+
+    def _refresh_scope_after_database_change(self) -> None:
+        """資料庫寫入完成後，重新載入 resident module/source 選項。"""
+        if not self._closed:
+            self._start_scope_options_load()
 
     # ------------------------------------------------------------------ 工具
     def _launch(
@@ -728,22 +746,39 @@ class BulkReviewDialog:
             self._set_busy(False)
             show_snack(self.page, "應用程式正在關閉，未啟動操作。", C.GOLD)
 
-    def _post(self, callback, *args, final: bool = True) -> None:
+    def _post(
+        self,
+        callback,
+        *args,
+        final: bool = True,
+        on_failure=None,
+    ) -> None:
         """把背景結果排回畫面執行緒；排程失敗時（頁面已卸載）收回忙碌狀態。
 
         ``final`` 為 False 的進度通知失敗不影響操作本身，不需回收。
+        選項載入等維護工作可提供自己的回收 callback，避免舊工作清掉新操作的狀態。
         """
+        recovery = (
+            on_failure
+            if on_failure is not None
+            else (self._mark_post_failure if final else None)
+        )
         post_to_ui(
             self.page,
             callback,
             *args,
             label="Mod 資料庫批量審核結果",
-            on_failure=(self._mark_post_failure if final else None),
+            on_failure=recovery,
         )
 
     def _mark_post_failure(self) -> None:
         """排程失敗時只回收背景狀態；此 callback 可能在 worker thread 執行。"""
         self._busy = False
+
+    def _mark_scope_post_failure(self, seq: int) -> None:
+        """範圍選單載入失敗時只回收自己的 loading 狀態。"""
+        if seq == self._scope_seq:
+            self._scope_loading = False
 
     def _set_busy(self, busy: bool, text: str = "") -> None:
         self._busy = busy

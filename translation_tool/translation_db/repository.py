@@ -1769,7 +1769,7 @@ class TranslationDB(SmartReviewMixin, BulkReviewMixin, CleanupMixin):
             try:
                 cache_key = (
                     self._read_cache_identity(),
-                    self._data_gen(),
+                    self._cache_generation(),
                     condition,
                     tuple(params),
                     repr(criteria.quality),

@@ -59,6 +59,122 @@ def test_rebuild_search_index_for_type_no_pollution(tmp_path, monkeypatch):
     assert patchouli_results and patchouli_results[0]["type"] == "patchouli"
 
 
+def test_search_uses_current_memory_after_pending_cache_update(tmp_path, monkeypatch):
+    """索引尚未重建時，搜尋不可回傳已被記憶體更新取代的舊譯文。"""
+    monkeypatch.setattr(cache_manager, "resolve_project_path", lambda p: tmp_path / p)
+    _reset_cache_state()
+
+    cache_manager.add_to_cache("lang", "item.minecraft.apple", "Apple", "舊譯文")
+    cache_manager.rebuild_search_index()
+    cache_manager.add_to_cache("lang", "item.minecraft.apple", "Apple", "新譯文")
+
+    assert (
+        cache_manager.search_cache("舊譯文", cache_type="lang", use_fuzzy=False) == []
+    )
+    current = cache_manager.search_cache("新譯文", cache_type="lang", use_fuzzy=False)
+    assert current and current[0]["dst"] == "新譯文"
+
+
+def test_pending_search_uses_changed_key_overlay_without_full_cache_scan(
+    tmp_path, monkeypatch
+):
+    """有待寫入變更時只查變更鍵，不得退回掃描整個記憶體快取。"""
+    monkeypatch.setattr(cache_manager, "resolve_project_path", lambda p: tmp_path / p)
+    _reset_cache_state()
+
+    for index in range(200):
+        cache_manager.add_to_cache(
+            "lang", f"item.minecraft.key_{index}", f"Source {index}", f"譯文 {index}"
+        )
+    cache_manager.rebuild_search_index()
+    cache_manager.add_to_cache("lang", "item.minecraft.key_42", "Source 42", "最新譯文")
+
+    def fail_full_scan(*args, **kwargs):
+        raise AssertionError("搜尋不應掃描完整記憶體快取")
+
+    monkeypatch.setattr(cache_manager, "_search_current_cache", fail_full_scan)
+
+    assert (
+        cache_manager.search_cache("最新譯文", "lang", use_fuzzy=False)[0]["dst"]
+        == "最新譯文"
+    )
+    assert cache_manager.search_cache("舊譯文 42", "lang", use_fuzzy=False) == []
+
+
+def test_pending_overlay_does_not_rebuild_current_base_index(tmp_path, monkeypatch):
+    """基底索引仍有效時，單純 pending 變更只合併覆蓋層。"""
+    monkeypatch.setattr(cache_manager, "resolve_project_path", lambda p: tmp_path / p)
+    _reset_cache_state()
+
+    cache_manager.add_to_cache("lang", "item.minecraft.apple", "Apple", "蘋果")
+    cache_manager.rebuild_search_index()
+    cache_manager.add_to_cache("lang", "item.minecraft.apple", "Apple", "紅蘋果")
+
+    rebuild_calls = []
+
+    def fail_rebuild():
+        rebuild_calls.append(True)
+        raise AssertionError("基底索引仍有效時不應重建")
+
+    monkeypatch.setattr(cache_manager, "rebuild_search_index", fail_rebuild)
+
+    current = cache_manager.search_cache("紅蘋果", "lang", use_fuzzy=False)
+
+    assert not rebuild_calls
+    assert current and current[0]["dst"] == "紅蘋果"
+
+
+def test_overlay_search_checks_base_index_freshness_before_merge(tmp_path, monkeypatch):
+    """覆蓋層搜尋前要確認基底索引，避免外部分片更新造成漏結果。"""
+    monkeypatch.setattr(cache_manager, "resolve_project_path", lambda p: tmp_path / p)
+    _reset_cache_state()
+
+    cache_manager.add_to_cache("lang", "item.minecraft.apple", "Apple", "蘋果")
+    cache_manager.rebuild_search_index()
+    cache_manager.add_to_cache("lang", "item.minecraft.apple", "Apple", "紅蘋果")
+
+    checks = []
+    original = cache_manager._cached_search_index_current
+
+    def record_check(state, facade):
+        checks.append(True)
+        return original(state, facade)
+
+    monkeypatch.setattr(cache_manager, "_cached_search_index_current", record_check)
+
+    current = cache_manager.search_cache("紅蘋果", "lang", use_fuzzy=False)
+
+    assert checks
+    assert current and current[0]["dst"] == "紅蘋果"
+
+
+def test_search_overlay_survives_cache_flush(tmp_path, monkeypatch):
+    """持久化 flush 清掉 pending 後，搜尋覆蓋層仍要遮住舊索引。"""
+    monkeypatch.setattr(cache_manager, "resolve_project_path", lambda p: tmp_path / p)
+    _reset_cache_state()
+
+    cache_manager.add_to_cache("lang", "item.minecraft.apple", "Apple", "舊譯文")
+    cache_manager.rebuild_search_index()
+    cache_manager.add_to_cache("lang", "item.minecraft.apple", "Apple", "新譯文")
+
+    state = cache_store.get_runtime_state()
+    state.cache_file_path["lang"] = tmp_path / "cache" / "lang.json"
+    monkeypatch.setattr(
+        cache_manager,
+        "load_config",
+        lambda: {"translator": {"enable_cache_saving": True}},
+    )
+    monkeypatch.setattr(
+        cache_manager, "_save_entries_to_active_shards", lambda *a, **k: None
+    )
+
+    assert cache_manager.save_translation_cache("lang") is True
+    assert cache_manager.get_session_new_count("lang") == 0
+    assert cache_manager.search_cache("舊譯文", "lang", use_fuzzy=False) == []
+    current = cache_manager.search_cache("新譯文", "lang", use_fuzzy=False)
+    assert current and current[0]["dst"] == "新譯文"
+
+
 def test_rebuild_uses_build_then_swap_query_not_crash(tmp_path, monkeypatch):
     monkeypatch.setattr(cache_manager, "resolve_project_path", lambda p: tmp_path / p)
     _reset_cache_state()

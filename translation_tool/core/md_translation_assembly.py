@@ -30,6 +30,7 @@ from translation_tool.core.md_translation_steps import (
     step2_translate_impl,
     step3_inject_impl,
 )
+from translation_tool.core.translation_status import translation_stop_reason
 from translation_tool.plugins.md.md_extract_qa import (
     build_pending_json,
     contains_cjk,
@@ -139,6 +140,51 @@ def step3_inject(
     )
 
 
+def _run_step3(
+    *,
+    base: Path,
+    pending_dir: Path,
+    translated_dir: Path,
+    final_dir: Path,
+    session,
+    dry_run: bool,
+    step_inject: bool,
+    translation_reason: str | None,
+) -> tuple[dict[str, Any], bool]:
+    """依翻譯終態決定是否回寫，回傳步驟結果與是否已取消。"""
+    if translation_reason == "cancelled" or is_cancelled():
+        log_warning("[MD] ⏹ 已取消：略過回寫（已完成的翻譯輸出保留）")
+        return {"skipped": True, "reason": "cancelled"}, True
+    if dry_run:
+        log_info("[MD] [3/3] 已略過回寫：dry-run 模式")
+        return {"skipped": True, "reason": "dry_run"}, False
+    if translation_reason is not None:
+        log_warning("[MD] ⚠️ 翻譯未完成：略過回寫（保留目前翻譯輸出）")
+        return {"skipped": True, "reason": translation_reason}, False
+    if not step_inject:
+        log_info("[MD] [3/3] 已略過回寫")
+        return {"skipped": True, "reason": "step_inject_disabled"}, False
+
+    translated_json_count = _count_md_pending_docs(translated_dir)
+    inject_json_root = translated_dir if translated_json_count > 0 else pending_dir
+    if _count_md_pending_docs(inject_json_root) == 0:
+        log_info("[MD] [3/3] 已略過回寫：沒有可用來源 JSON")
+        return {"skipped": True, "reason": "no_inject_source_json"}, False
+
+    log_info("[MD] [3/3] 開始回寫 md 檔案")
+    return (
+        step3_inject(
+            input_dir=str(base),
+            json_dir=str(inject_json_root),
+            final_dir=str(final_dir),
+            session=session,
+            progress_base=0.66,
+            progress_span=0.33,
+        ),
+        False,
+    )
+
+
 def run_md_pipeline(
     input_dir: str,
     session=None,
@@ -195,7 +241,7 @@ def run_md_pipeline(
         result["step1"] = {"skipped": True, "reason": "step_extract_disabled"}
         progress(session, 0.33)
 
-    translation_cancelled = False
+    translation_reason: str | None = None
     pending_json_count = _count_md_pending_docs(pending_dir)
     if step_translate:
         raise_if_cancelled()  # 前面步驟期間已要求取消時，不開始送 API
@@ -214,40 +260,25 @@ def run_md_pipeline(
                 dry_run=dry_run,
                 write_new_cache=write_new_cache,
             )
-            translation_cancelled = bool(result["step2"].get("cancelled"))
+            translation_reason = translation_stop_reason(result["step2"])
             _log_md_step2_stats(result["step2"])
     else:
         log_info("[MD] [2/3] 已略過翻譯")
         result["step2"] = {"skipped": True, "reason": "step_translate_disabled"}
         progress(session, 0.66)
 
-    if translation_cancelled or is_cancelled():
-        # 取消後不回寫：翻譯輸出與續跑標記保留，也不用舊 pending JSON 補完
-        log_warning("[MD] ⏹ 已取消：略過回寫（已完成的翻譯輸出保留）")
-        result["step3"] = {"skipped": True, "reason": "cancelled"}
+    result["step3"], was_cancelled = _run_step3(
+        base=base,
+        pending_dir=pending_dir,
+        translated_dir=translated_dir,
+        final_dir=final_dir,
+        session=session,
+        dry_run=dry_run,
+        step_inject=step_inject,
+        translation_reason=translation_reason,
+    )
+    if was_cancelled:
         result["cancelled"] = True
-    elif dry_run:
-        log_info("[MD] [3/3] 已略過回寫：dry-run 模式")
-        result["step3"] = {"skipped": True, "reason": "dry_run"}
-    elif not step_inject:
-        log_info("[MD] [3/3] 已略過回寫")
-        result["step3"] = {"skipped": True, "reason": "step_inject_disabled"}
-    else:
-        translated_json_count = _count_md_pending_docs(translated_dir)
-        inject_json_root = translated_dir if translated_json_count > 0 else pending_dir
-        if _count_md_pending_docs(inject_json_root) == 0:
-            log_info("[MD] [3/3] 已略過回寫：沒有可用來源 JSON")
-            result["step3"] = {"skipped": True, "reason": "no_inject_source_json"}
-        else:
-            log_info("[MD] [3/3] 開始回寫 md 檔案")
-            result["step3"] = step3_inject(
-                input_dir=str(base),
-                json_dir=str(inject_json_root),
-                final_dir=str(final_dir),
-                session=session,
-                progress_base=0.66,
-                progress_span=0.33,
-            )
 
     step2_summary = (
         result.get("step2", {}) if isinstance(result.get("step2"), dict) else {}
@@ -275,6 +306,12 @@ def run_md_pipeline(
     progress(session, 0.999)
     if result.get("cancelled"):
         log_warning("[MD] ⏹ 流程已取消，耗時：%s", get_formatted_duration(start_tick))
+    elif isinstance(result.get("step3"), dict) and result["step3"].get("reason") in {
+        "translation_failed",
+        "translation_incomplete",
+        "translation_status_unknown",
+    }:
+        log_warning("[MD] ⚠️ 流程未完成，耗時：%s", get_formatted_duration(start_tick))
     else:
         log_info("[MD] 流程完成，耗時：%s", get_formatted_duration(start_tick))
     return result

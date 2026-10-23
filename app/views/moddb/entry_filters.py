@@ -11,6 +11,7 @@ from app.ui.snack import show_snack
 from app.views.moddb.advanced_filters import AdvancedFilters
 from app.views.moddb.batch_replace_dialog import BatchReplaceDialog
 from app.views.moddb.bulk_review_dialog import BulkReviewDialog
+from app.views.moddb.editor_drafts import reset_editor_for_database_change
 from app.views.moddb.formatting import STATE_LABELS, kind_label
 from app.views.moddb.smart_review_dialog import SmartReviewDialog
 from app.views.moddb.smart_review_marks import (
@@ -41,9 +42,14 @@ def apply_filter_options(panel, snapshot: dict) -> None:
     """套用背景載入的篩選選項，並保持目前選取值有效。"""
     identity = snapshot.get("identity")
     panel._render_source_catalog = snapshot.get("source_catalog")
-    if panel._db_identity is not None and identity != panel._db_identity:
-        panel.source_filter.reset()
-    panel._db_identity = identity
+    if "identity" in snapshot:
+        sync_identity = getattr(panel, "_sync_database_identity", None)
+        if callable(sync_identity):
+            sync_identity(identity)
+        elif identity != panel._db_identity:
+            reset_editor_for_database_change(panel)
+            panel.source_filter.reset()
+            panel._db_identity = identity
     panel.source_filter.refresh(
         snapshot.get("effective_source_codes", ()),
         catalog=snapshot.get("source_catalog"),
@@ -75,6 +81,45 @@ def apply_filter_options(panel, snapshot: dict) -> None:
     )
     panel.kind = snapshot.get("kind")
     panel.kind_dd.value = panel.kind or ALL_KINDS
+
+
+def refresh_after_database_change(panel) -> None:
+    """資料庫身分改變後，以清除過舊 scope 的目前狀態重新查詢。"""
+    if panel._on_filter_changed is None:
+        panel.refresh(keep_selection=False)
+        return
+    refresh_entry_filter(
+        panel,
+        page=1,
+        keep_selection=False,
+        full_refresh=True,
+    )
+
+
+def prepare_entries_snapshot(panel, snapshot: dict) -> tuple[dict, bool]:
+    """同步快照的資料庫身分，必要時丟棄舊 scope 並重新查詢。"""
+    if "identity" not in snapshot:
+        return snapshot, False
+    previous_identity = panel._db_identity
+    had_database_scope = bool(
+        panel.source_filter.code is not None
+        or panel.entry_ids is not None
+        or panel.drafts
+    )
+    snapshot_identity = snapshot.get("identity")
+    identity_changed = panel._sync_database_identity(snapshot_identity)
+    if (
+        identity_changed
+        and snapshot_identity is not None
+        and (previous_identity is not None or had_database_scope)
+    ):
+        # 舊資料庫的 source／entry_ids 可能已進入背景查詢，不能只重設下拉選單。
+        refresh_after_database_change(panel)
+        return snapshot, True
+    if identity_changed:
+        # 初次接上資料庫時也不接受快照重新帶回舊資料庫的來源選取。
+        snapshot = {**snapshot, "source": None}
+    return snapshot, False
 
 
 def _build_controls(panel) -> None:
@@ -221,6 +266,8 @@ def _build_filter_card(panel) -> None:
 
 
 def database_identity(db):
+    if db is None:
+        return None
     path = getattr(db, "path", None)
     try:
         stat = path.stat()
