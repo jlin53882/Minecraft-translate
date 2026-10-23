@@ -87,18 +87,17 @@ def test_pending_search_uses_changed_key_overlay_without_full_cache_scan(
             "lang", f"item.minecraft.key_{index}", f"Source {index}", f"譯文 {index}"
         )
     cache_manager.rebuild_search_index()
-    cache_manager.add_to_cache(
-        "lang", "item.minecraft.key_42", "Source 42", "最新譯文"
-    )
+    cache_manager.add_to_cache("lang", "item.minecraft.key_42", "Source 42", "最新譯文")
 
     def fail_full_scan(*args, **kwargs):
         raise AssertionError("搜尋不應掃描完整記憶體快取")
 
     monkeypatch.setattr(cache_manager, "_search_current_cache", fail_full_scan)
 
-    assert cache_manager.search_cache("最新譯文", "lang", use_fuzzy=False)[0][
-        "dst"
-    ] == "最新譯文"
+    assert (
+        cache_manager.search_cache("最新譯文", "lang", use_fuzzy=False)[0]["dst"]
+        == "最新譯文"
+    )
     assert cache_manager.search_cache("舊譯文 42", "lang", use_fuzzy=False) == []
 
 
@@ -118,7 +117,9 @@ def test_search_overlay_survives_cache_flush(tmp_path, monkeypatch):
         "load_config",
         lambda: {"translator": {"enable_cache_saving": True}},
     )
-    monkeypatch.setattr(cache_manager, "_save_entries_to_active_shards", lambda *a, **k: None)
+    monkeypatch.setattr(
+        cache_manager, "_save_entries_to_active_shards", lambda *a, **k: None
+    )
 
     assert cache_manager.save_translation_cache("lang") is True
     assert cache_manager.get_session_new_count("lang") == 0

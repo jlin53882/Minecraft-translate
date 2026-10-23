@@ -804,8 +804,7 @@ def _search_with_overlay(
     merged = [
         row
         for row in base_results
-        if (str(row.get("type", "")), str(row.get("key", "")))
-        not in replaced_keys
+        if (str(row.get("type", "")), str(row.get("key", ""))) not in replaced_keys
     ]
     merged.extend(overlay_rows)
     if use_fuzzy and merged:

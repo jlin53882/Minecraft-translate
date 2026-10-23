@@ -995,10 +995,7 @@ def run_kubejs_pipeline(
                     and not result["step2"].get("skipped")
                     and translation_reason is None
                 )
-                if (
-                    is_cancelled()
-                    or translation_reason == "cancelled"
-                ):
+                if is_cancelled() or translation_reason == "cancelled":
                     translation_ran = False
                     translation_cancelled = True
                     translation_reason = "cancelled"
@@ -1146,15 +1143,11 @@ def run_kubejs_pipeline(
         isinstance(step2_summary, dict) and step2_summary.get("reason") == "cancelled"
     ):
         log_warning(f"⏹ [KubeJS] 已取消（目前快照保留） {result['duration']}")
-    elif (
-        isinstance(step2_summary, dict)
-        and step2_summary.get("reason")
-        in {
-            "translation_failed",
-            "translation_incomplete",
-            "translation_status_unknown",
-        }
-    ):
+    elif isinstance(step2_summary, dict) and step2_summary.get("reason") in {
+        "translation_failed",
+        "translation_incomplete",
+        "translation_status_unknown",
+    }:
         log_warning(f"⚠️ [KubeJS] 翻譯未完成（目前快照保留） {result['duration']}")
     else:
         log_info(f"🎉 [KubeJS] 任務完成！ {result['duration']}")

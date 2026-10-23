@@ -306,15 +306,11 @@ def run_md_pipeline(
     progress(session, 0.999)
     if result.get("cancelled"):
         log_warning("[MD] ⏹ 流程已取消，耗時：%s", get_formatted_duration(start_tick))
-    elif (
-        isinstance(result.get("step3"), dict)
-        and result["step3"].get("reason")
-        in {
-            "translation_failed",
-            "translation_incomplete",
-            "translation_status_unknown",
-        }
-    ):
+    elif isinstance(result.get("step3"), dict) and result["step3"].get("reason") in {
+        "translation_failed",
+        "translation_incomplete",
+        "translation_status_unknown",
+    }:
         log_warning("[MD] ⚠️ 流程未完成，耗時：%s", get_formatted_duration(start_tick))
     else:
         log_info("[MD] 流程完成，耗時：%s", get_formatted_duration(start_tick))
