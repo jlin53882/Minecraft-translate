@@ -26,7 +26,10 @@ from translation_tool.utils.cancellation import (
     raise_if_cancelled,
 )
 from translation_tool.utils.ui_mirror import ContextThreadPoolExecutor, run_in_context
-from translation_tool.utils.worker_count import resolve_worker_count
+from translation_tool.utils.worker_count import (
+    configured_worker_value,
+    resolve_worker_count,
+)
 
 from ..utils.config_manager import load_config
 from ..utils.log_unit import log_error
@@ -416,9 +419,11 @@ def run_extraction_process_impl(
             "total": eligible_total,
             "log": f"[ERROR] 無法掃描 {failed_jar}（JAR 可能已損毀或超出安全讀取上限）",
         }
-    max_workers = resolve_worker_count("jar_extract", load_config())
+    config = load_config()
+    max_workers = resolve_worker_count("jar_extract", config)
     log.info(
-        "[workers] actual=%s (cpu_count=%s, capped at 32)",
+        "[workers] config=%r, actual=%s (cpu_count=%s; 設定無效或缺漏時用 CPU/2，上限 32)",
+        configured_worker_value(config),
         max_workers,
         os.cpu_count() or 2,
     )

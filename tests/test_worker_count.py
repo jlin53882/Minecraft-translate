@@ -72,7 +72,8 @@ def test_cpu_defaults_to_os_cpu_count(monkeypatch):
 
 
 def test_only_resolver_and_validators_read_the_workers_key():
-    """讀取 parallel_execution_workers 的程式必須經過 resolve_worker_count。"""
+    """以 AST 找出把設定鍵當完整字串使用的程式（排除 docstring／日誌說明文字）。"""
+    import ast
     from pathlib import Path
 
     root = Path(__file__).resolve().parents[1]
@@ -81,8 +82,6 @@ def test_only_resolver_and_validators_read_the_workers_key():
         "translation_tool/utils/config_schema.py",
         "translation_tool/utils/config_manager.py",
         "app/views/config/settings_schema.py",
-        # 只在日誌/說明文字中提到設定名稱
-        "translation_tool/core/jar_processor_preview.py",
     }
     offenders = []
     for base in ("app", "translation_tool"):
@@ -90,6 +89,18 @@ def test_only_resolver_and_validators_read_the_workers_key():
             rel = path.relative_to(root).as_posix()
             if rel in allowed:
                 continue
-            if "parallel_execution_workers" in path.read_text(encoding="utf-8"):
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+            if any(
+                isinstance(node, ast.Constant)
+                and node.value == "parallel_execution_workers"
+                for node in ast.walk(tree)
+            ):
                 offenders.append(rel)
     assert offenders == []
+
+
+def test_invalid_config_fallback_is_also_capped():
+    # 預設值同樣受用途上限約束（moddb_scan 不超過 CPU 核心數）
+    assert resolve_worker_count("moddb_scan", None, cpu=2) == 2
+    assert resolve_worker_count("moddb_scan", _cfg(0), cpu=1) == 1
+    assert resolve_worker_count("moddb_scan", _cfg("8"), cpu=2) == 2

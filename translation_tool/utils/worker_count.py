@@ -4,7 +4,7 @@
 所以各用途保有自己的預設值與上限，不強制相同；共通的只有解析規則：
 
 - 設定值必須是正整數（``bool``、字串、浮點數、0、負數都視為無效）；無效時用該用途的預設值。
-- 有效時取設定值，再套該用途的上限（若有）。
+- 有效時取設定值，無效時取預設值；兩者都再套該用途的上限（若有）。
 - 結果至少 1。
 """
 
@@ -56,6 +56,18 @@ def _valid_workers(value: Any) -> int | None:
     return value
 
 
+def configured_worker_value(config: Mapping[str, Any] | None) -> Any:
+    """回傳設定檔中的原始 ``parallel_execution_workers``（缺漏為 ``None``），供診斷日誌使用。"""
+    translator = (
+        (config or {}).get("translator") if isinstance(config, Mapping) else None
+    )
+    return (
+        translator.get("parallel_execution_workers")
+        if isinstance(translator, Mapping)
+        else None
+    )
+
+
 def resolve_worker_count(
     purpose: str,
     config: Mapping[str, Any] | None,
@@ -70,17 +82,9 @@ def resolve_worker_count(
     """
     policy = WORKER_POLICIES[purpose]
     cpu_count = max(1, cpu if cpu is not None else (os.cpu_count() or 2))
-    translator = (
-        (config or {}).get("translator") if isinstance(config, Mapping) else None
-    )
-    raw = (
-        translator.get("parallel_execution_workers")
-        if isinstance(translator, Mapping)
-        else None
-    )
-    configured = _valid_workers(raw)
-    if configured is None:
-        return max(1, policy.fallback(cpu_count))
+    workers = _valid_workers(configured_worker_value(config))
+    if workers is None:
+        workers = policy.fallback(cpu_count)
     if policy.cap is not None:
-        configured = min(configured, policy.cap(cpu_count))
-    return max(1, configured)
+        workers = min(workers, policy.cap(cpu_count))
+    return max(1, workers)
