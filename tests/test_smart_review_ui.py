@@ -725,7 +725,9 @@ def test_context_request_ticket_is_invalid_after_close(db):
     assert context.is_current(ticket) is False
 
 
-def test_planning_controller_accepts_explicit_request_and_callbacks(db, ctx, monkeypatch):
+def test_planning_controller_accepts_explicit_request_and_callbacks(
+    db, ctx, monkeypatch
+):
     """規劃控制器只依賴不可變 request 與 callback，不讀取面板控制項。"""
     from app.views.moddb import smart_review_run_planning as planning_module
     from app.views.moddb.smart_review_run_planning import (
@@ -737,19 +739,19 @@ def test_planning_controller_accepts_explicit_request_and_callbacks(db, ctx, mon
     monkeypatch.setattr(
         planning_module,
         "preview_moddb_smart_review_plan_from_path",
-        lambda path, priority, **kwargs: calls.append(
-            (path, priority, kwargs)
-        )
-        or {
-            "mode": "fast_estimate",
-            "is_authoritative": False,
-            "selected_count": 4,
-            "reused_count": 1,
-            "estimated_to_process_count": 3,
-            "estimated_batch_count": 2,
-            "pending_review_count": 0,
-            "history_runs_consulted": 2,
-        },
+        lambda path, priority, **kwargs: (
+            calls.append((path, priority, kwargs))
+            or {
+                "mode": "fast_estimate",
+                "is_authoritative": False,
+                "selected_count": 4,
+                "reused_count": 1,
+                "estimated_to_process_count": 3,
+                "estimated_batch_count": 2,
+                "pending_review_count": 0,
+                "history_runs_consulted": 2,
+            }
+        ),
     )
     result = []
     progress = []

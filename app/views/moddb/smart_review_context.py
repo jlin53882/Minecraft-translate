@@ -107,9 +107,7 @@ class SmartReviewContext:
             domain=normalized_domain,
             sequence=sequence,
             generation=self.generation,
-            db_identity=self.db_identity(
-                include_generation=not stable_identity
-            ),
+            db_identity=self.db_identity(include_generation=not stable_identity),
         )
 
     def invalidate_request(self, domain: str) -> int:
