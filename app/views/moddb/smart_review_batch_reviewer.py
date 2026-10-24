@@ -263,9 +263,7 @@ class SmartReviewBatchReviewer:
         self._row_cache.clear()
         self._load_page(include_run=True, background=False)
 
-    def _load_page(
-        self, *, include_run: bool = False, background: bool = True
-    ) -> None:
+    def _load_page(self, *, include_run: bool = False, background: bool = True) -> None:
         """在單一唯讀連線中取得統計、總數與目前頁候選。
 
         初始批次載入可在背景執行；使用者換頁、篩選與重新整理傳入

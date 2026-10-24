@@ -3734,8 +3734,10 @@ class TranslationDB(SmartReviewMixin, BulkReviewMixin, CleanupMixin):
                         continue
                 elif cur[2] not in (None, "legacy_unknown"):
                     continue  # 舊 history 沒有狀態快照，只能還原未被新版操作改動的舊列
-                if row_action != "review_unmark" and prev_manual is not None and (
-                    prev_checker is None or prev_review_status is None
+                if (
+                    row_action != "review_unmark"
+                    and prev_manual is not None
+                    and (prev_checker is None or prev_review_status is None)
                 ):
                     continue  # 不虛構舊 checker／審核狀態，避免改變有效譯文排序
                 if prev_manual is None:

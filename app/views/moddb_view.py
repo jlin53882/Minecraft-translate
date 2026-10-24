@@ -744,9 +744,7 @@ class ModDbView(ft.Column):
         else:
             self._activate_panel(
                 self.tab,
-                background=(
-                    self.tab != "entries" and self._has_background_scheduler()
-                ),
+                background=(self.tab != "entries" and self._has_background_scheduler()),
                 update=True,
             )
 

@@ -171,8 +171,7 @@ class ReviewScopeController:
 
         message = "已解除人工審核，譯文與來源未變更"
         log_info(
-            f"Mod 資料庫解除人工審核：{entry.mc_version} "
-            f"{entry.mod_id} {entry.key}"
+            f"Mod 資料庫解除人工審核：{entry.mc_version} {entry.mod_id} {entry.key}"
         )
         panel._load_list(page=panel.pager.current_page, keep_scroll=True)
         panel.saved_text.value = message
