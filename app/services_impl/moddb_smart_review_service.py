@@ -45,6 +45,7 @@ from translation_tool.translation_db.smart_review import (
 )
 from translation_tool.translation_db.smart_review_history import SmartReviewHistoryStore
 from translation_tool.translation_db.smart_review_planner import (
+    SmartReviewPlan,
     SmartReviewPlanInput,
     SmartReviewPlanMode,
     plan_new_smart_review,
@@ -151,6 +152,53 @@ def preview_moddb_smart_review_from_path(
         db.close()
 
 
+def _load_preview_history(
+    db_path: str | Path,
+    version: str | None,
+    *,
+    use_recent_history: bool,
+    notify: Callable[[str], None],
+) -> tuple[int, list[dict[str, Any]]]:
+    """讀取快速預估所需的同版本 bounded history。"""
+    if not use_recent_history:
+        return 0, []
+    history = SmartReviewHistoryStore(db_path)
+
+    def history_progress(run_count: int, candidate_count: int) -> None:
+        notify(
+            f"正在讀取第 {run_count}/2 份歷史 JSON…已讀取 {candidate_count:,} 筆候選。"
+        )
+
+    return history.recent_candidate_payloads(
+        max_runs=2,
+        version=version,
+        progress=history_progress,
+    )
+
+
+def _preview_plan_summary(
+    plan: SmartReviewPlan,
+    batch_size: int | None,
+) -> dict[str, Any]:
+    """將快速規劃轉成不混淆 actual AI 數量的服務摘要。"""
+    settings = get_smart_review_settings()
+    effective_batch_size = (
+        int(batch_size)
+        if batch_size is not None
+        else int(settings["default_batch_size"])
+    )
+    summary = plan.summary(batch_size=effective_batch_size).as_dict()
+    summary.update(
+        {
+            "estimated_to_process_count": summary.pop("to_process_count"),
+            "estimated_batch_count": summary.pop("batch_count"),
+            "applied_skipped_count": plan.applied_skipped_count,
+            "no_change_skipped_count": plan.no_change_skipped_count,
+        }
+    )
+    return summary
+
+
 def preview_moddb_smart_review_plan_from_path(
     path: str | Path,
     priority: tuple[int, ...],
@@ -198,21 +246,12 @@ def preview_moddb_smart_review_plan_from_path(
         notify(
             f"已讀取目前候選 {len(snapshots):,} 筆，正在讀取目前版本最近兩份歷史 JSON…"
         )
-        if plan_input.use_recent_history:
-            history = SmartReviewHistoryStore(db.path)
-
-            def history_progress(run_count: int, candidate_count: int) -> None:
-                notify(
-                    f"正在讀取第 {run_count}/2 份歷史 JSON…已讀取 {candidate_count:,} 筆候選。"
-                )
-
-            consulted, historical = history.recent_candidate_payloads(
-                max_runs=2,
-                version=version,
-                progress=history_progress,
-            )
-        else:
-            consulted, historical = 0, []
+        consulted, historical = _load_preview_history(
+            db.path,
+            version,
+            use_recent_history=plan_input.use_recent_history,
+            notify=notify,
+        )
         notify(
             f"已讀取 {consulted} 份歷史、{len(historical):,} 筆候選，正在比對可重用結果…"
         )
@@ -224,22 +263,7 @@ def preview_moddb_smart_review_plan_from_path(
             plan_input=plan_input,
             mode=SmartReviewPlanMode.FAST_ESTIMATE,
         )
-        settings = get_smart_review_settings()
-        effective_batch_size = (
-            int(batch_size)
-            if batch_size is not None
-            else int(settings["default_batch_size"])
-        )
-        summary = plan.summary(batch_size=effective_batch_size).as_dict()
-        summary.update(
-            {
-                "estimated_to_process_count": summary.pop("to_process_count"),
-                "estimated_batch_count": summary.pop("batch_count"),
-                "applied_skipped_count": plan.applied_skipped_count,
-                "no_change_skipped_count": plan.no_change_skipped_count,
-            }
-        )
-        return summary
+        return _preview_plan_summary(plan, batch_size)
     finally:
         db.close()
 

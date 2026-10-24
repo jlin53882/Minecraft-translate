@@ -291,6 +291,65 @@ def _choose_historical_result(
     return None, status, "process"
 
 
+def _resolve_plan_mode(
+    compare_context: bool | None,
+    mode: SmartReviewPlanMode | None,
+) -> SmartReviewPlanMode:
+    """解析舊布林參數與新顯式模式，避免規劃主流程混入相容性分支。"""
+    legacy_mode = (
+        SmartReviewPlanMode.FAST_ESTIMATE
+        if compare_context is False
+        else SmartReviewPlanMode.EXACT_EXECUTION
+    )
+    if mode is None:
+        return legacy_mode
+    if compare_context is not None and mode is not legacy_mode:
+        raise ValueError("compare_context 與 mode 指定了互相衝突的規劃模式")
+    return mode
+
+
+def _history_matches_request(
+    candidate: Mapping[str, Any],
+    *,
+    provider: str | None,
+    model: str | None,
+) -> bool:
+    """確認歷史候選具有與目前 request 相容的 provider/model。"""
+    history_provider = candidate.get("_history_provider")
+    if provider and str(history_provider or "") != str(provider):
+        return False
+    history_model = candidate.get("_history_model")
+    return not model or str(history_model or "") == str(model)
+
+
+def _group_historical_candidates(
+    historical_candidates: Sequence[Mapping[str, Any]],
+    *,
+    provider: str | None,
+    model: str | None,
+    include_context: bool,
+) -> dict[tuple[Any, ...], list[Mapping[str, Any]]]:
+    """依目前規劃模式建立可重用歷史的 fingerprint 索引。"""
+    grouped: dict[tuple[Any, ...], list[Mapping[str, Any]]] = {}
+    for candidate in historical_candidates:
+        if not _history_matches_request(candidate, provider=provider, model=model):
+            continue
+        grouped.setdefault(
+            payload_fingerprint(candidate, include_context=include_context), []
+        ).append(candidate)
+    return grouped
+
+
+def _is_pending_review_result(result: Mapping[str, Any], status: str) -> bool:
+    """判斷重用結果是否仍需人工審查，不改變原候選的人工決策。"""
+    ai_status = str(result.get("reused_ai_status") or status)
+    return (
+        status == SmartReviewStatus.READY
+        or ai_status == SmartReviewStatus.READY
+        or status == SmartReviewStatus.NEEDS_CONTEXT
+    )
+
+
 def plan_new_smart_review(
     snapshots: Sequence[SmartReviewSnapshot],
     historical_candidates: Sequence[Mapping[str, Any]],
@@ -313,27 +372,14 @@ def plan_new_smart_review(
     if plan_input is not None:
         provider = plan_input.provider
         model = plan_input.model
-    legacy_mode = (
-        SmartReviewPlanMode.FAST_ESTIMATE
-        if compare_context is False
-        else SmartReviewPlanMode.EXACT_EXECUTION
+    resolved_mode = _resolve_plan_mode(compare_context, mode)
+    include_context = resolved_mode is SmartReviewPlanMode.EXACT_EXECUTION
+    candidates_by_fingerprint = _group_historical_candidates(
+        historical_candidates,
+        provider=provider,
+        model=model,
+        include_context=include_context,
     )
-    if mode is None:
-        mode = legacy_mode
-    elif compare_context is not None and mode is not legacy_mode:
-        raise ValueError("compare_context 與 mode 指定了互相衝突的規劃模式")
-    include_context = mode is SmartReviewPlanMode.EXACT_EXECUTION
-    candidates_by_fingerprint: dict[tuple[Any, ...], list[Mapping[str, Any]]] = {}
-    for candidate in historical_candidates:
-        history_provider = candidate.get("_history_provider")
-        history_model = candidate.get("_history_model")
-        if provider and str(history_provider or "") != str(provider):
-            continue
-        if model and str(history_model or "") != str(model):
-            continue
-        candidates_by_fingerprint.setdefault(
-            payload_fingerprint(candidate, include_context=include_context), []
-        ).append(candidate)
 
     to_process: list[SmartReviewSnapshot] = []
     reused_results: list[dict[str, Any]] = []
@@ -363,12 +409,7 @@ def plan_new_smart_review(
 
         # ready and needs_context remain reviewable history, while rejected
         # preserves the human decision in the new JSON projection.
-        ai_status = str(result.get("reused_ai_status") or status)
-        if (
-            status == SmartReviewStatus.READY
-            or ai_status == SmartReviewStatus.READY
-            or status == SmartReviewStatus.NEEDS_CONTEXT
-        ):
+        if _is_pending_review_result(result, status):
             pending_review += 1
         reused_results.append(result)
 
@@ -383,7 +424,7 @@ def plan_new_smart_review(
         no_change_skipped_count=no_change_skipped,
         pending_review_count=pending_review,
         invalidated_count=invalidated,
-        mode=mode,
+        mode=resolved_mode,
     )
 
 
