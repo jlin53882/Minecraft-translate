@@ -11,7 +11,7 @@ import pytest
 from translation_tool.core.openai_codex_client import ChatGPTAPIError
 from translation_tool.translation_db import KIND_LANG, TranslationDB, WriteBackItem
 from translation_tool.translation_db.models import SmartReviewSnapshot
-from translation_tool.translation_db.schema import SRC_AI
+from translation_tool.translation_db.schema import SRC_AI, SRC_MANUAL
 from translation_tool.translation_db.smart_review import (
     resume_smart_review,
     run_smart_review,
@@ -427,6 +427,118 @@ def test_resume_reuses_saved_context_when_cas_snapshot_is_unchanged(
 
         assert len(snapshots) == 1
         assert snapshots[0].context == snapshot.context
+    finally:
+        db.close()
+
+
+def test_resume_rebuilds_context_when_reviewed_reference_changes(tmp_path, monkeypatch):
+    """待重送候選要更新已審核參考，但保留同一 run 與人工欄位。"""
+    db = TranslationDB(tmp_path / "resume-reviewed-reference.db")
+    try:
+        # 讓 A 維持 AI 生效，同時保存一筆人工決策欄位供續跑驗證。
+        db.set_priority((SRC_AI, SRC_MANUAL))
+        db.write_back(
+            "1.21.1",
+            [WriteBackItem(KIND_LANG, "demo", "target", "Target", "目標")],
+            fill_other_versions=False,
+        )
+        db.write_back(
+            "1.20.1",
+            [WriteBackItem(KIND_LANG, "demo", "target", "Target", "舊目標")],
+            fill_other_versions=False,
+        )
+        reference = db.smart_review_candidates(
+            version="1.20.1",
+            effective_source=SRC_AI,
+            limit=1,
+        )[0]
+        db.review_manual(
+            reference.entry_id,
+            expected_zh_tw="舊目標",
+            expected_source=SRC_AI,
+            propagate=False,
+        )
+
+        db.save_manual(
+            db.smart_review_candidates(
+                version="1.21.1", effective_source=SRC_AI, limit=1
+            )[0].entry_id,
+            "A 的人工決策",
+            actor="reviewer",
+            propagate=False,
+        )
+        candidate = db.smart_review_candidates(
+            version="1.21.1",
+            effective_source=SRC_AI,
+            review_status="unreviewed",
+            limit=1,
+        )[0]
+        old_reference = next(
+            item
+            for item in candidate.context
+            if item.get("entry_id") == reference.entry_id
+        )
+
+        history = SmartReviewHistoryStore(db.path)
+        run_id = history.create_run(
+            [candidate],
+            provider="gemini",
+            model="test-model",
+            version="1.21.1",
+            requested_limit=1,
+            batch_size=1,
+            scope={"version": "1.21.1", "effective_source": SRC_AI},
+        )
+        history.mark_pending_cancelled(run_id)
+        history.finish_run(
+            run_id,
+            processed_count=0,
+            valid_count=0,
+            invalid_count=0,
+            request_error_count=0,
+            metrics={},
+            status="cancelled",
+        )
+
+        with db._tx(keep_review=True) as conn:
+            conn.execute(
+                "UPDATE translation SET zh_tw=?, revision=revision+1 "
+                "WHERE entry_id=? AND source=?",
+                ("新目標", reference.entry_id, SRC_AI),
+            )
+
+        payloads = []
+
+        def fake_call(**kwargs):
+            payloads.append(kwargs["payload"])
+            return _response(kwargs["payload"]["items"])
+
+        monkeypatch.setattr(
+            "translation_tool.translation_db.smart_review_provider.call_gemini_requests",
+            fake_call,
+        )
+        resumed = resume_smart_review(
+            db,
+            run_id=run_id,
+            model_name="test-model",
+            api_key="test-key",
+        )
+
+        assert resumed.run_id == run_id
+        assert len(payloads) == 1
+        sent_reference = next(
+            item
+            for item in payloads[0]["items"][0]["context"]
+            if item.get("entry_id") == reference.entry_id
+        )
+        assert old_reference["zh_tw"] == "舊目標"
+        assert sent_reference["zh_tw"] == "新目標"
+
+        stored = history.list_candidates(run_id)
+        assert len(stored) == 1
+        assert stored[0].run_id == run_id
+        assert stored[0].manual_zh_tw == "A 的人工決策"
+        assert stored[0].context == tuple(payloads[0]["items"][0]["context"])
     finally:
         db.close()
 

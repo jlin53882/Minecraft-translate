@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Mapping, Sequence
 from typing import Any
 
@@ -76,6 +77,75 @@ _RESUME_CAS_FIELDS = (
     "manual_review_status",
     "manual_revision",
 )
+
+_RESUME_RETRYABLE_STATUSES = frozenset(
+    {
+        SmartReviewStatus.PENDING,
+        SmartReviewStatus.CANCELLED,
+        SmartReviewStatus.REQUEST_FAILED,
+    }
+)
+_RESUME_CONTEXT_REFERENCE_RE = re.compile(
+    r"^(?:db|module-locale):(?P<entry_id>\d+):source:(?P<source>-?\d+)"
+    r":revision:(?P<revision>\d+)$"
+)
+_RESUME_CONTEXT_QUERY_CHUNK = 400
+
+
+def _collect_resume_context_references(
+    candidates: Sequence[SmartReviewCandidate],
+) -> tuple[
+    dict[int, list[tuple[int, int, int, Mapping[str, Any]]]],
+    set[tuple[int, int]],
+    set[int],
+]:
+    """收集待重送候選的 context reference 與無法驗證的序號。"""
+    references_by_ordinal: dict[int, list[tuple[int, int, int, Mapping[str, Any]]]] = {}
+    lookup_keys: set[tuple[int, int]] = set()
+    stale: set[int] = set()
+    for candidate in candidates:
+        if str(candidate.status) not in _RESUME_RETRYABLE_STATUSES:
+            continue
+        for item in candidate.context:
+            if not isinstance(item, Mapping):
+                continue
+            context_id = str(item.get("id") or "")
+            if not context_id.startswith(("db:", "module-locale:")):
+                continue
+            match = _RESUME_CONTEXT_REFERENCE_RE.fullmatch(context_id)
+            if match is None:
+                # 舊格式沒有可驗證的 revision；安全起見只刷新這筆候選。
+                stale.add(candidate.ordinal)
+                continue
+            entry_id = int(match.group("entry_id"))
+            source = int(match.group("source"))
+            revision = int(match.group("revision"))
+            references_by_ordinal.setdefault(candidate.ordinal, []).append(
+                (entry_id, source, revision, item)
+            )
+            lookup_keys.add((entry_id, source))
+    return references_by_ordinal, lookup_keys, stale
+
+
+def _resume_context_reference_is_stale(
+    reference: tuple[int, int, int, Mapping[str, Any]],
+    current: tuple[Any, ...] | None,
+) -> bool:
+    """比較一筆 context reference 的 revision、文字與審核狀態。"""
+    if current is None:
+        return True
+    _entry_id, _source, revision, item = reference
+    context_id = str(item.get("id") or "")
+    default_status = (
+        "unreviewed" if context_id.startswith("module-locale:") else "reviewed"
+    )
+    expected_status = str(item.get("review_status") or default_status)
+    current_status = str(current[4] or default_status)
+    return (
+        int(current[2] or -1) != revision
+        or str(current[3]) != str(item.get("zh_tw") or "")
+        or current_status != expected_status
+    )
 
 
 def _resume_cas_values(
@@ -228,6 +298,45 @@ class SmartReviewRunStoreMixin:
             ),
         }
 
+    def _stale_resume_context_ordinals(
+        self, candidates: Sequence[SmartReviewCandidate]
+    ) -> set[int]:
+        """找出待重送候選中已變動的 DB context reference。
+
+        context evidence 的 id 已包含 ``entry_id``、``source`` 與 translation
+        revision。先批次驗證這些輕量 reference，只有真的變動的候選才會重建完整
+        local context；未受影響的候選仍沿用 JSON 快照，避免續跑時重新查詢數萬筆。
+        """
+        references_by_ordinal, lookup_keys, stale = _collect_resume_context_references(
+            candidates
+        )
+        if not lookup_keys:
+            return stale
+
+        current_by_key: dict[tuple[int, int], tuple[Any, ...]] = {}
+        keys = sorted(lookup_keys)
+        for start in range(0, len(keys), _RESUME_CONTEXT_QUERY_CHUNK):
+            chunk = keys[start : start + _RESUME_CONTEXT_QUERY_CHUNK]
+            where = " OR ".join("(entry_id=? AND source=?)" for _ in chunk)
+            params = tuple(value for key in chunk for value in key)
+            rows = self._q(
+                "SELECT entry_id, source, revision, zh_tw, review_status "
+                f"FROM translation WHERE {where}",
+                params,
+            )
+            current_by_key.update({(int(row[0]), int(row[1])): row for row in rows})
+
+        for ordinal, references in references_by_ordinal.items():
+            if any(
+                _resume_context_reference_is_stale(
+                    reference,
+                    current_by_key.get((reference[0], reference[1])),
+                )
+                for reference in references
+            ):
+                stale.add(ordinal)
+        return stale
+
     def prepare_smart_review_resume(
         self, run_id: str
     ) -> tuple[list[SmartReviewSnapshot], dict[str, int], dict[str, Any]]:
@@ -242,6 +351,8 @@ class SmartReviewRunStoreMixin:
             raise RuntimeError("智慧校對批次仍在執行中，不能重複啟動")
         candidates = history.list_candidates(run_id)
         scope = run.get("scope") if isinstance(run.get("scope"), dict) else {}
+        stale_context_ordinals = self._stale_resume_context_ordinals(candidates)
+        context_cache_reset = False
         current_by_ordinal = {}
         for candidate in candidates:
             current = self._resume_current_payload(
@@ -250,8 +361,16 @@ class SmartReviewRunStoreMixin:
                 include_context=False,
             )
             if current is not None:
-                if _resume_cas_values(candidate) != _resume_cas_values(current):
-                    # 只有 CAS 欄位真的變動才需要重新查詢完整 local context。
+                cas_changed = _resume_cas_values(candidate) != _resume_cas_values(
+                    current
+                )
+                if cas_changed or candidate.ordinal in stale_context_ordinals:
+                    # CAS 或待重送候選引用的 DB context 變動時，才重建完整 context。
+                    if not context_cache_reset:
+                        # 續跑可能跨越另一個連線的資料庫寫入；不能沿用建立原始
+                        # snapshot 時留下的 query cache。
+                        self._smart_review_context_cache = {}
+                        context_cache_reset = True
                     current = self._resume_current_payload(
                         candidate.entry_id,
                         scope,
