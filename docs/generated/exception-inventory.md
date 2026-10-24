@@ -4,11 +4,11 @@
 > 範圍：`app/`、`translation_tool/`、`main.py` 內所有帶 `noqa: BLE001／S110／S112` 的位置。
 > 命令列 QA 工具（`md_extract_qa.py`、`md_inject_qa.py`）的 `print` 為刻意保留，不在此表。
 
-共 **353** 項；其中 **103** 項尚未在程式碼內寫明原因（以「分類」說明處理方式）。
+共 **354** 項；其中 **103** 項尚未在程式碼內寫明原因（以「分類」說明處理方式）。
 
 | 分類 | 數量 | 意義 |
 |---|---|---|
-| 已記錄／回報 | 316 | 例外處理本身有 log、提示、回報錯誤事件或重新丟出；寬鬆捕捉是為了不中斷整批流程 |
+| 已記錄／回報 | 317 | 例外處理本身有 log、提示、回報錯誤事件或重新丟出；寬鬆捕捉是為了不中斷整批流程 |
 | UI／畫面保護 | 18 | UI 層的畫面更新、icon 快取等；失敗只影響顯示，不影響資料 |
 | 盡力而為（靜默） | 19 | 引擎層、只有 `pass`／`continue`／回傳常數；失敗不影響結果（例如進度回報、還原失敗時以原始例外為準） |
 
@@ -164,6 +164,7 @@
 | `app/views/moddb/scan_panel.py:ScanPanel._poll` | BLE001 | 已記錄／回報 | 輪詢失敗不能讓畫面永遠卡在「執行中」 |
 | `app/views/moddb/scan_panel.py:ScanPanel._safe_update` | BLE001 | 已記錄／回報 | 頁面已卸載時不影響掃描本身 |
 | `app/views/moddb/smart_review_context.py:SmartReviewContext.run_background.target` | BLE001 | 已記錄／回報 | UI reports bounded failure |
+| `app/views/moddb/smart_review_context.py:SmartReviewContext.run_inline` | BLE001 | 已記錄／回報 | mirror the background boundary |
 | `app/views/moddb/smart_review_job.py:SmartReviewJob._work` | BLE001 | 已記錄／回報 | job reports bounded failure |
 | `app/views/moddb/smart_review_job.py:SmartReviewJob._load_breakdown` | BLE001 | 已記錄／回報 | statistics are optional |
 | `app/views/moddb/smart_review_job.py:SmartReviewJob._notify_finished.deliver` | BLE001 | 已記錄／回報 | one listener must not block others |

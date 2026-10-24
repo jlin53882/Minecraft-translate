@@ -3397,86 +3397,128 @@ class TranslationDB(SmartReviewMixin, BulkReviewMixin, CleanupMixin):
             raise ValueError("沒有可解除審核的譯文")
 
         with self._tx(bump_generation_on_noop=False, keep_review=True) as conn:
-            review_sql = effective_review_sql("f", self.has_review_state)
-            current = conn.execute(
-                "SELECT f.zh_tw, f.source, f.checker, "
-                f"{review_sql} "
-                "FROM effective f WHERE f.entry_id=?",
-                (entry_id,),
-            ).fetchone()
-            if (
-                current is None
-                or current[0] != expected_zh_tw
-                or (expected_source is not None and current[1] != expected_source)
-                or (
-                    expected_review_status is not None
-                    and current[3] != expected_review_status
-                )
-                or (
-                    expected_checker is not None
-                    and (current[2] or "") != expected_checker
-                )
-                or current[3] not in ("reviewed", "legacy_unknown")
-            ):
-                raise ValueError("目前譯文或審核狀態已變動，請重新整理後再解除審核")
-
-            source = int(current[1])
-            translation_columns = "zh_tw, checker, review_status"
-            if self.has_translation_revision:
-                translation_columns += ", revision"
-            else:
-                translation_columns += ", NULL"
-            row = conn.execute(
-                "SELECT "
-                f"{translation_columns} FROM translation "
-                "WHERE entry_id=? AND source=?",
-                (entry_id, source),
-            ).fetchone()
-            if row is None or row[2] not in (None, "reviewed", "legacy_unknown"):
-                raise ValueError("目前譯文或審核狀態已變動，請重新整理後再解除審核")
-
-            previous_checker = row[1] or ""
-            previous_review_status = current[3]
-            new_checker = "" if source == SRC_MANUAL else previous_checker
-            new_review_status = "unreviewed"
-            conn.execute(
-                "UPDATE translation SET checker=?, review_status=?, "
-                "updated_at=CURRENT_TIMESTAMP WHERE entry_id=? AND source=?",
-                (new_checker, new_review_status, entry_id, source),
+            current = self._clear_review_current(
+                conn,
+                entry_id,
+                expected_zh_tw=expected_zh_tw,
+                expected_source=expected_source,
+                expected_review_status=expected_review_status,
+                expected_checker=expected_checker,
             )
-            updated = conn.execute(
-                "SELECT checker, review_status, "
-                + ("revision" if self.has_translation_revision else "NULL")
-                + " FROM translation WHERE entry_id=? AND source=?",
-                (entry_id, source),
-            ).fetchone()
-            batch = uuid.uuid4().hex
-            conn.execute(
-                "INSERT INTO history "
-                "(entry_id, batch, actor, action, old_zh_tw, new_zh_tw, "
-                "prev_manual, note, prev_checker, prev_review_status, "
-                "new_checker, new_review_status, prev_revision, new_revision, source_id) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                (
-                    entry_id,
-                    batch,
-                    actor,
-                    "review_unmark",
-                    row[0] or "",
-                    row[0] or "",
-                    row[0] or "",
-                    "解除人工審核標記，保留原譯文與來源",
-                    previous_checker,
-                    previous_review_status,
-                    updated[0] or "",
-                    updated[1],
-                    row[3],
-                    updated[2],
-                    source,
-                ),
+            source = int(current[1])
+            row = self._clear_review_translation(conn, entry_id, source)
+            updated = self._unmark_translation(conn, entry_id, source, row)
+            self._record_review_unmark(
+                conn,
+                entry_id,
+                source,
+                row,
+                updated,
+                current[3],
+                actor,
             )
             self._refresh(conn, [entry_id])
         return True
+
+    def _clear_review_current(
+        self,
+        conn: sqlite3.Connection,
+        entry_id: int,
+        *,
+        expected_zh_tw: str,
+        expected_source: int | None,
+        expected_review_status: str | None,
+        expected_checker: str | None,
+    ):
+        """Load and validate the effective row used by the review CAS."""
+        review_sql = effective_review_sql("f", self.has_review_state)
+        current = conn.execute(
+            "SELECT f.zh_tw, f.source, f.checker, "
+            f"{review_sql} FROM effective f WHERE f.entry_id=?",
+            (entry_id,),
+        ).fetchone()
+        if current is None or current[0] != expected_zh_tw:
+            raise ValueError("目前譯文或審核狀態已變動，請重新整理後再解除審核")
+        if expected_source is not None and current[1] != expected_source:
+            raise ValueError("目前譯文或審核狀態已變動，請重新整理後再解除審核")
+        if expected_review_status is not None and current[3] != expected_review_status:
+            raise ValueError("目前譯文或審核狀態已變動，請重新整理後再解除審核")
+        if expected_checker is not None and (current[2] or "") != expected_checker:
+            raise ValueError("目前譯文或審核狀態已變動，請重新整理後再解除審核")
+        if current[3] not in ("reviewed", "legacy_unknown"):
+            raise ValueError("目前譯文或審核狀態已變動，請重新整理後再解除審核")
+        return current
+
+    def _clear_review_translation(
+        self, conn: sqlite3.Connection, entry_id: int, source: int
+    ):
+        """Load the source row and validate its review state before mutation."""
+        columns = "zh_tw, checker, review_status"
+        columns += ", revision" if self.has_translation_revision else ", NULL"
+        row = conn.execute(
+            f"SELECT {columns} FROM translation WHERE entry_id=? AND source=?",
+            (entry_id, source),
+        ).fetchone()
+        if row is None or row[2] not in (None, "reviewed", "legacy_unknown"):
+            raise ValueError("目前譯文或審核狀態已變動，請重新整理後再解除審核")
+        return row
+
+    def _unmark_translation(
+        self,
+        conn: sqlite3.Connection,
+        entry_id: int,
+        source: int,
+        row,
+    ):
+        """Clear the review fields while retaining text and source."""
+        checker = "" if source == SRC_MANUAL else row[1] or ""
+        conn.execute(
+            "UPDATE translation SET checker=?, review_status=?, "
+            "updated_at=CURRENT_TIMESTAMP WHERE entry_id=? AND source=?",
+            (checker, "unreviewed", entry_id, source),
+        )
+        return conn.execute(
+            "SELECT checker, review_status, "
+            + ("revision" if self.has_translation_revision else "NULL")
+            + " FROM translation WHERE entry_id=? AND source=?",
+            (entry_id, source),
+        ).fetchone()
+
+    def _record_review_unmark(
+        self,
+        conn: sqlite3.Connection,
+        entry_id: int,
+        source: int,
+        row,
+        updated,
+        previous_review_status: str,
+        actor: str,
+    ) -> None:
+        """Record an auditable no-text-change review status transition."""
+        conn.execute(
+            "INSERT INTO history "
+            "(entry_id, batch, actor, action, old_zh_tw, new_zh_tw, "
+            "prev_manual, note, prev_checker, prev_review_status, "
+            "new_checker, new_review_status, prev_revision, new_revision, source_id) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (
+                entry_id,
+                uuid.uuid4().hex,
+                actor,
+                "review_unmark",
+                row[0] or "",
+                row[0] or "",
+                row[0] or "",
+                "解除人工審核標記，保留原譯文與來源",
+                row[1] or "",
+                previous_review_status,
+                updated[0] or "",
+                updated[1],
+                row[3],
+                updated[2],
+                source,
+            ),
+        )
 
     def _apply_review_preview(
         self,

@@ -43,10 +43,7 @@ class ReviewScopeController:
         )
         panel.confirm_btn.visible = ready
         panel.confirm_btn.disabled = not ready
-        panel.clear_review_btn.visible = bool(
-            entry and entry.review_status in ("reviewed", "legacy_unknown")
-        )
-        panel.clear_review_btn.disabled = panel._save_running or changed
+        self._update_clear_review_button(entry, changed)
         panel._review_preview = []
         if changed:
             impacts = db.preview_manual(entry.id, text, propagate=panel.sync_row.value)
@@ -56,6 +53,32 @@ class ReviewScopeController:
             self._set_review_impact(entry, db)
         else:
             panel.impact_box.visible = False
+
+    def update_actions_without_impact(self, entry: EntryRow) -> None:
+        """Set editor actions without querying a cross-version review preview."""
+        panel = self.panel
+        panel._update_format_hints()
+        changed = panel.pending_text() != entry.zh_tw
+        ready = bool(
+            entry.zh_tw
+            and entry.review_status not in ("reviewed", "legacy_unknown")
+            and not changed
+        )
+        panel.save_btn.disabled = panel._save_running or not changed
+        panel.confirm_btn.visible = ready
+        panel.confirm_btn.disabled = not ready
+        self._update_clear_review_button(entry, changed)
+        panel._review_preview = []
+        panel.impact_box.visible = False
+
+    def _update_clear_review_button(
+        self, entry: EntryRow | None, changed: bool
+    ) -> None:
+        panel = self.panel
+        panel.clear_review_btn.visible = bool(
+            entry and entry.review_status in ("reviewed", "legacy_unknown")
+        )
+        panel.clear_review_btn.disabled = panel._save_running or changed
 
     def _set_review_impact(self, entry: EntryRow, db: TranslationDB) -> None:
         panel = self.panel

@@ -739,24 +739,7 @@ class EntriesPanel(ft.Column):
 
     def _update_editor_actions_without_impact(self, entry: EntryRow) -> None:
         """Set initial editor state without a cross-version preview query."""
-        self._update_format_hints()
-        changed = bool(entry and self.pending_text() != entry.zh_tw)
-        ready = bool(
-            entry
-            and entry.zh_tw
-            and entry.review_status not in ("reviewed", "legacy_unknown")
-            and not changed
-        )
-        self.save_btn.disabled = self._save_running or not changed
-        self.confirm_btn.visible = ready
-        self.confirm_btn.disabled = not ready
-        self.clear_review_btn.visible = entry.review_status in (
-            "reviewed",
-            "legacy_unknown",
-        )
-        self.clear_review_btn.disabled = self._save_running or changed
-        self._review_preview = []
-        self.impact_box.visible = False
+        self._review_controller.update_actions_without_impact(entry)
 
     def _render_suggestions(self, *, catalog=None) -> None:
         if self.detail is None:
