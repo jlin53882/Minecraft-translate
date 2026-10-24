@@ -2669,10 +2669,7 @@ def test_entries_save_keeps_scroll_position_through_parent_refresh(db_path):
     db = TranslationDB(db_path)
     db.ingest(
         "1.21.1",
-        [
-            ScanItem(KIND_LANG, "foo", f"item.foo.{i}", f"Text {i}")
-            for i in range(6)
-        ],
+        [ScanItem(KIND_LANG, "foo", f"item.foo.{i}", f"Text {i}") for i in range(6)],
     )
     page = mock_page()
     page.run_thread = lambda target: target()
