@@ -131,6 +131,8 @@ class SmartReviewRunState:
         progress: Callable[[dict[str, Any]], None] | None,
         metrics: dict[str, Any],
         started: float,
+        resume_baseline_processed: int = 0,
+        resume_pending_total: int = 0,
     ) -> None:
         self.db = db
         self.run_id = run_id
@@ -140,6 +142,8 @@ class SmartReviewRunState:
         self.progress = progress
         self.metrics = metrics
         self.started = started
+        self.resume_baseline_processed = max(0, int(resume_baseline_processed))
+        self.resume_pending_total = max(0, int(resume_pending_total))
         self.counts = SmartReviewCounts()
         self.token_totals: dict[str, int | None] = {
             "prompt_tokens": None,
@@ -213,6 +217,9 @@ class SmartReviewRunState:
             "status": "running",
             "phase": phase,
         }
+        if self.resume_pending_total:
+            snapshot["resume_baseline_processed"] = self.resume_baseline_processed
+            snapshot["resume_pending_total"] = self.resume_pending_total
         if self.stop_reason:
             snapshot["stop_reason"] = self.stop_reason
         # 輸出邊界：core 內部只有 canonical 欄位，回呼端才補舊版欄位。

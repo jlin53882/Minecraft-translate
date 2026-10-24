@@ -307,6 +307,8 @@ class SmartReviewDialog:
         selected = int(preview.get("selected_count") or 0)
         processed = int(preview.get("processed_count") or 0)
         pending = int(preview.get("pending_count") or 0)
+        requested_limit = int(preview.get("requested_limit") or 0)
+        limit_label = "不限" if requested_limit == 0 else f"{requested_limit:,}"
         model = str(preview.get("model") or self.run_panel.model_dd.value or "")
         batch_size = int(
             preview.get("batch_size") or self.run_panel.batch_field.value or 0
@@ -334,7 +336,7 @@ class SmartReviewDialog:
                         ft.Text(f"範圍：{scope_text}", size=13, selectable=True),
                         ft.Text(
                             f"原批次 {selected:,} 筆；已處理 {processed:,} 筆；"
-                            f"預計重新檢查 {pending:,} 筆。",
+                            f"預計重新檢查 {pending:,} 筆；原上限 {limit_label}。",
                             size=13,
                             selectable=True,
                         ),
@@ -366,14 +368,16 @@ class SmartReviewDialog:
                     "確認並繼續",
                     "primary",
                     icon=ft.Icons.PLAY_ARROW,
-                    on_click=lambda _e, rid=run_id: self._confirm_resume(rid),
+                    on_click=lambda _e, rid=run_id, data=preview: self._confirm_resume(
+                        rid, data
+                    ),
                 ),
             ],
         )
         self._resume_dialog = dialog
         present_page_dialog(self.page, dialog)
 
-    def _confirm_resume(self, run_id: str) -> None:
+    def _confirm_resume(self, run_id: str, preview: dict[str, Any]) -> None:
         """驗證確認視窗輸入，成功後切到執行頁並啟動指定 run。"""
         model = str(self._resume_model_field.value or "").strip()
         raw_batch = str(self._resume_batch_field.value or "").strip()
@@ -401,6 +405,7 @@ class SmartReviewDialog:
             run_id,
             model=model,
             batch_size=batch_size,
+            resume_preview=preview,
         )
         if started:
             show_snack(

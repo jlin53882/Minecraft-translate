@@ -54,6 +54,9 @@ class SmartReviewRequest:
     use_recent_history: bool = False
     skip_valid_history: bool = False
     resume_run_id: str | None = None
+    resume_selected_count: int | None = None
+    resume_processed_count: int | None = None
+    resume_pending_count: int | None = None
 
     def scope_label(self) -> str:
         """回傳給人看的範圍摘要，用於 log 與完成通知。"""
@@ -89,6 +92,9 @@ class SmartReviewJobState:
     error: str | None = None
     breakdown: dict[str, Any] = field(default_factory=dict)
     cancel_requested: bool = False
+    resume_baseline_processed: int = 0
+    resume_pending_total: int = 0
+    resume_started_at: float = 0.0
 
     @property
     def fraction(self) -> float:
@@ -104,8 +110,31 @@ class SmartReviewJobState:
         """依目前速度估算剩餘秒數；資料不足時回傳 None。"""
         if self.phase != "running" or self.processed <= 0 or self.selected <= 0:
             return None
+        if self.request is not None and self.request.resume_run_id:
+            processed_this_resume = max(
+                0, self.processed - self.resume_baseline_processed
+            )
+            remaining = max(
+                0,
+                self.resume_pending_total - processed_this_resume,
+            )
+            if processed_this_resume <= 0 or self.resume_pending_total <= 0:
+                return None
+            eta_started_at = self.resume_started_at or self.started_at
+            end = self.finished_at or (
+                now if now is not None else time.monotonic()
+            )
+            elapsed = max(0.0, end - eta_started_at) if eta_started_at else 0.0
+            return elapsed / processed_this_resume * remaining
         remaining = max(0, self.selected - self.processed)
         return self.elapsed(now) / self.processed * remaining
+
+    @property
+    def resume_processed(self) -> int:
+        """回傳本次續跑新增處理的數量，不包含歷史批次已處理數量。"""
+        if self.request is None or not self.request.resume_run_id:
+            return self.processed
+        return max(0, self.processed - self.resume_baseline_processed)
 
 
 def format_duration(seconds: float | None) -> str:
@@ -174,6 +203,16 @@ class SmartReviewJob:
                 request=request,
                 status="準備中",
                 started_at=time.monotonic(),
+                resume_baseline_processed=(
+                    max(0, int(request.resume_processed_count or 0))
+                    if request.resume_run_id
+                    else 0
+                ),
+                resume_pending_total=(
+                    max(0, int(request.resume_pending_count or 0))
+                    if request.resume_run_id
+                    else 0
+                ),
             )
         session = tag_session(
             TaskSession(), "Mod 資料庫智慧校對", "moddb", page=self.page
@@ -225,11 +264,26 @@ class SmartReviewJob:
         """在背景執行校對，並在成功或失敗後通知 UI。"""
         state = self.state
         session.start()
-        session.add_log(
-            f"開始智慧校對：{request.scope_label()}；模型 {request.model}；"
-            f"上限 {request.limit:,} 筆、每批 {request.batch_size} 筆。",
-            "system",
-        )
+        limit_label = "不限" if request.limit == 0 else f"{request.limit:,}"
+        if request.resume_run_id:
+            selected_label = request.resume_selected_count or state.selected
+            processed_label = request.resume_processed_count or 0
+            pending_label = request.resume_pending_count or 0
+            session.add_log(
+                f"繼續未完成智慧校對：批次 {request.resume_run_id}；"
+                f"{request.scope_label()}；模型 {request.model}；"
+                f"原批次 {selected_label:,} 筆、"
+                f"既有處理 {processed_label:,} 筆、"
+                f"本次待處理 {pending_label:,} 筆、"
+                f"上限 {limit_label} 筆、每批 {request.batch_size} 筆。",
+                "system",
+            )
+        else:
+            session.add_log(
+                f"開始智慧校對：{request.scope_label()}；模型 {request.model}；"
+                f"上限 {limit_label} 筆、每批 {request.batch_size} 筆。",
+                "system",
+            )
         try:
             result = run_moddb_smart_review_from_path(
                 request.path,
@@ -268,7 +322,16 @@ class SmartReviewJob:
     ) -> Callable[[dict[str, Any]], None]:
         """建立核心進度回呼：更新狀態，並把每批的增量寫成一行 log。"""
         state = self.state
-        last = {"processed": 0, "valid": 0, "invalid": 0, "errors": 0}
+        last = {
+            "processed": (
+                state.resume_baseline_processed
+                if state.request is not None and state.request.resume_run_id
+                else 0
+            ),
+            "valid": 0,
+            "invalid": 0,
+            "errors": 0,
+        }
 
         def progress(snapshot: dict[str, Any]) -> None:
             """把核心回報的進度快照寫入狀態並轉成逐批 log。"""
@@ -279,8 +342,14 @@ class SmartReviewJob:
             if snapshot.get("stop_reason"):
                 state.stop_reason = str(snapshot["stop_reason"])
             state.status = str(snapshot.get("status", "running"))
-            session.set_progress(state.fraction)
             phase = str(snapshot.get("phase") or "")
+            if (
+                phase == "selection_complete"
+                and state.request is not None
+                and state.request.resume_run_id
+            ):
+                state.resume_started_at = time.monotonic()
+            session.set_progress(state.fraction)
             timing = snapshot.get("timing")
             event = snapshot.get("event")
             if isinstance(event, dict):
@@ -301,6 +370,15 @@ class SmartReviewJob:
         state.valid = int(snapshot.get("valid", 0) or 0)
         state.invalid = int(snapshot.get("invalid", 0) or 0)
         state.request_errors = int(snapshot.get("request_errors", 0) or 0)
+        state.resume_baseline_processed = int(
+            snapshot.get(
+                "resume_baseline_processed", state.resume_baseline_processed
+            )
+            or 0
+        )
+        state.resume_pending_total = int(
+            snapshot.get("resume_pending_total", state.resume_pending_total) or 0
+        )
         metrics = snapshot.get("metrics")
         if not isinstance(metrics, dict):
             return
@@ -323,6 +401,16 @@ class SmartReviewJob:
         session: TaskSession, state: SmartReviewJobState, timing: dict[str, Any]
     ) -> None:
         """記錄候選選取與建立批次的耗時。"""
+        if state.request is not None and state.request.resume_run_id:
+            session.add_log(
+                f"續跑準備完成：原批次 {state.selected:,} 筆；"
+                f"既有處理 {state.resume_baseline_processed:,} 筆；"
+                f"本次待處理 {state.resume_pending_total:,} 筆；"
+                f"搜尋 {_format_timing(timing_seconds(timing, 'selection_ms'))}、"
+                f"建立批次 {_format_timing(timing_seconds(timing, 'run_record_ms'))}。",
+                "info",
+            )
+            return
         session.add_log(
             f"範圍搜尋完成：選取 {state.selected:,} 筆；"
             f"搜尋 {_format_timing(timing_seconds(timing, 'selection_ms'))}、"

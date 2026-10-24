@@ -6,6 +6,7 @@ import asyncio
 import math
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import flet as ft
 
@@ -158,12 +159,14 @@ class SmartReviewRunPanel(SmartReviewRunPlanningMixin):
             on_change=self._query_changed,
             on_submit=lambda _e: self.refresh_estimate(),
         )
-        self.model_dd = kit.dropdown(
-            label="校對模型", dense=True, width=250, on_select=self._model_changed
-        )
         options = smart_review_model_options()
-        kit.set_dropdown_options(self.model_dd, options)
-        self.model_dd.value = options[0][0] if options else None
+        self.model_dd = kit.text_field(
+            "校對模型",
+            value=options[0][0] if options else "",
+            hint="輸入要使用的模型名稱",
+            width=250,
+            on_change=self._model_changed,
+        )
         self.limit_field = kit.text_field(
             "本次處理上限（筆，0=不限）",
             value="1000",
@@ -593,18 +596,25 @@ class SmartReviewRunPanel(SmartReviewRunPlanningMixin):
         *,
         model_override: str | None = None,
         batch_override: int | None = None,
+        scope_override: dict[str, Any] | None = None,
+        limit_override: int | None = None,
     ) -> SmartReviewRequest:
         """依畫面建立校對請求；條件不完整時丟出給使用者看的錯誤。"""
         database = self.ctx.database()
         if database is None:
             raise ValueError("目前沒有可用的 Mod 資料庫")
-        version = self.version_dd.value
+        scope = scope_override if isinstance(scope_override, dict) else None
+        version = scope.get("version") if scope is not None else self.version_dd.value
         model = self.model_dd.value if model_override is None else model_override
         if not version:
             raise ValueError("請先選擇遊戲版本")
         if not model:
             raise ValueError("請先選擇校對模型（設定頁需啟用至少一個模型）")
-        limit = self._read_int(self.limit_field, minimum=0)
+        limit = (
+            int(limit_override)
+            if limit_override is not None
+            else self._read_int(self.limit_field, minimum=0)
+        )
         batch = (
             self._read_int(self.batch_field)
             if batch_override is None
@@ -612,12 +622,20 @@ class SmartReviewRunPanel(SmartReviewRunPlanningMixin):
         )
         if limit is None:
             raise ValueError("上限必須是 0 或正整數")
+        if limit < 0:
+            raise ValueError("上限必須是 0 或正整數")
         if batch is None:
             raise ValueError("每批必須是大於 0 的整數")
         max_batch_size = get_smart_review_settings()["max_batch_size"]
         if batch > max_batch_size:
             raise ValueError(f"每批必須介於 1 與 {max_batch_size} 筆")
-        mod_id, kind, source, query = self._scope_values()
+        if scope is None:
+            mod_id, kind, source, query = self._scope_values()
+        else:
+            mod_id = scope.get("mod_id") or None
+            kind = scope.get("kind") or None
+            source = scope.get("effective_source")
+            query = str(scope.get("query") or "")
         path, priority = database
         return SmartReviewRequest(
             path=path,
@@ -738,6 +756,8 @@ class SmartReviewRunPanel(SmartReviewRunPlanningMixin):
             state.valid,
             state.invalid,
             state.request_errors,
+            state.resume_baseline_processed,
+            state.resume_pending_total,
             state.cancel_requested,
             format_duration(state.elapsed()),
             format_duration(state.eta_seconds()),
@@ -762,12 +782,21 @@ class SmartReviewRunPanel(SmartReviewRunPlanningMixin):
         """更新進度條、百分比、統計與預估剩餘時間。"""
         self.progress_bar.value = state.fraction if state.selected else None
         eta = format_duration(state.eta_seconds())
-        self.progress_text.value = (
-            f"已處理 {state.processed:,} / {state.selected:,} 筆"
-            f"（{state.fraction:.0%}）· 預估剩餘 {eta}"
-            if state.selected
-            else "正在查詢並準備候選…"
-        )
+        if state.selected:
+            if state.request is not None and state.request.resume_run_id:
+                self.progress_text.value = (
+                    f"總進度 {state.processed:,} / {state.selected:,} 筆"
+                    f"（{state.fraction:.0%}）· 本次續跑 "
+                    f"{state.resume_processed:,} / {state.resume_pending_total:,} 筆"
+                    f" · 預估剩餘 {eta}"
+                )
+            else:
+                self.progress_text.value = (
+                    f"已處理 {state.processed:,} / {state.selected:,} 筆"
+                    f"（{state.fraction:.0%}）· 預估剩餘 {eta}"
+                )
+        else:
+            self.progress_text.value = "正在查詢並準備候選…"
         self.valid_stat.set_value(f"{state.valid:,}")
         self.invalid_stat.set_value(f"{state.invalid:,}")
         self.error_stat.set_value(f"{state.request_errors:,}")

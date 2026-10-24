@@ -57,6 +57,7 @@ def test_resume_preview_reads_one_run_without_mutating_history(tmp_path):
     assert preview["run_id"] == run_id
     assert preview["model"] == "gpt-history"
     assert preview["batch_size"] == 12
+    assert preview["requested_limit"] == 1
     assert preview["selected_count"] == 1
     assert preview["pending_count"] == 1
     assert history.get_run(run_id) == before

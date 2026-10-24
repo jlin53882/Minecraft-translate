@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import flet as ft
 
 from app.services_impl.moddb_smart_review_service import (
@@ -183,15 +185,31 @@ class SmartReviewRunPlanningMixin:
         *,
         model: str | None = None,
         batch_size: int | None = None,
+        resume_preview: dict[str, Any] | None = None,
     ) -> bool:
         """從歷史頁以原 run_id 重試尚未完成項目，回傳是否已啟動。"""
         if self.job.running:
             show_snack(self.ctx.page, "智慧校對正在執行中。", C.GOLD)
             return False
+        if isinstance(resume_preview, dict):
+            self._apply_resume_preview(resume_preview, model, batch_size)
+        scope = (
+            resume_preview.get("scope")
+            if isinstance(resume_preview, dict)
+            and isinstance(resume_preview.get("scope"), dict)
+            else None
+        )
+        limit_override = (
+            int(resume_preview.get("requested_limit") or 0)
+            if isinstance(resume_preview, dict)
+            else None
+        )
         try:
             request: SmartReviewRequest = self._request(
                 model_override=model,
                 batch_override=batch_size,
+                scope_override=scope,
+                limit_override=limit_override,
             )
         except ValueError as exc:
             show_snack(self.ctx.page, str(exc), C.RED)
@@ -199,6 +217,14 @@ class SmartReviewRunPlanningMixin:
         request.resume_run_id = str(run_id)
         request.use_recent_history = False
         request.skip_valid_history = False
+        if isinstance(resume_preview, dict):
+            selected = int(resume_preview.get("selected_count") or 0)
+            processed = int(resume_preview.get("processed_count") or 0)
+            request.resume_selected_count = selected
+            request.resume_processed_count = processed
+            request.resume_pending_count = int(
+                resume_preview.get("pending_count") or max(0, selected - processed)
+            )
         error = self.job.start(request, parent_callback=self.ctx.on_complete)
         if error:
             show_snack(self.ctx.page, error, C.RED)
@@ -208,6 +234,58 @@ class SmartReviewRunPlanningMixin:
         self._render_running()
         self._start_polling()
         return True
+
+    def _apply_resume_preview(
+        self,
+        preview: dict[str, Any],
+        model: str | None,
+        batch_size: int | None,
+    ) -> None:
+        """將確認視窗選定的歷史 scope 與輸入值同步回執行頁。"""
+        scope = preview.get("scope")
+        scope = scope if isinstance(scope, dict) else {}
+        version = str(preview.get("version") or scope.get("version") or "").strip()
+        # 讓仍在執行的初始範圍查詢失效，避免晚到結果把歷史批次的選擇覆蓋回去。
+        self._scope_seq += 1
+        self._scope_loading = False
+
+        def set_dropdown(control: ft.Dropdown, value: str, label: str) -> None:
+            """補上已不在目前未審核選項中的歷史值，避免畫面留舊值。"""
+            options = [(option.key, option.text) for option in control.options]
+            if value not in {key for key, _text in options}:
+                options.append((value, label))
+                kit.set_dropdown_options(control, options)
+            control.value = value
+
+        if version:
+            set_dropdown(self.version_dd, version, version)
+        set_dropdown(
+            self.mod_dd,
+            str(scope.get("mod_id") or "__all__"),
+            str(scope.get("mod_id") or "全部模組"),
+        )
+        set_dropdown(
+            self.kind_dd,
+            str(scope.get("kind") or "__all__"),
+            str(scope.get("kind") or "全部類型"),
+        )
+        source = scope.get("effective_source")
+        set_dropdown(
+            self.source_dd,
+            "__all__" if source is None else str(source),
+            "全部來源" if source is None else str(source),
+        )
+        self.query_field.value = str(scope.get("query") or "")
+        self.model_dd.value = str(
+            model if model is not None else preview.get("model") or ""
+        )
+        self.limit_field.value = str(int(preview.get("requested_limit") or 0))
+        self.batch_field.value = str(
+            int(batch_size if batch_size is not None else preview.get("batch_size") or 0)
+        )
+        self.use_recent_history.value = False
+        self.skip_valid_history.value = False
+        self._invalidate_plan_preview()
 
 
 __all__ = ["SmartReviewRunPlanningMixin"]

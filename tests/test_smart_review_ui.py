@@ -301,6 +301,25 @@ def test_dialog_builds_three_panels_with_defaults(db, monkeypatch):
     assert visible == {"run": True, "review": False, "history": False}
 
 
+def test_run_panel_accepts_a_custom_model_input(db, monkeypatch):
+    """執行頁模型欄位可輸入設定清單以外的模型名稱。"""
+    monkeypatch.setattr(
+        "app.services_impl.moddb_smart_review_service.load_config",
+        lambda: {
+            "lm_translator": {
+                "provider": "gemini",
+                "models": {"gemini-configured": {"enabled": True}},
+            }
+        },
+    )
+    from app.views.moddb.smart_review_dialog import SmartReviewDialog
+
+    dialog = SmartReviewDialog(_sync_page(), lambda: db, "1.21.1", None)
+    dialog.run_panel.model_dd.value = "gemini-custom-model"
+
+    assert dialog.run_panel._request().model == "gemini-custom-model"
+
+
 def test_run_panel_reads_configured_smart_review_batch_size(db, monkeypatch):
     """驗證執行頁的批次預填值來自智慧校對設定，而不是硬編碼。"""
     from app.views.moddb import smart_review_run_panel as run_panel_module
@@ -526,26 +545,28 @@ def test_dialog_resume_confirms_status_and_allows_model_batch_override(db, monke
     dialog._show_tab("history")
     started = []
 
+    preview = {
+        "run_id": "run-continue",
+        "status": "cancelled",
+        "provider": "chatgpt",
+        "model": "gpt-history",
+        "batch_size": 12,
+        "requested_limit": 75_027,
+        "version": "1.21.1",
+        "scope": {"version": "1.21.1"},
+        "selected_count": 75_027,
+        "processed_count": 16_100,
+        "pending_count": 58_927,
+        "status_counts": {"cancelled": 58_927, "no_change": 6_648},
+    }
     monkeypatch.setattr(
         dialog_module,
         "preview_moddb_smart_review_resume_from_path",
-        lambda _path, _priority, run_id: {
-            "run_id": run_id,
-            "status": "cancelled",
-            "provider": "chatgpt",
-            "model": "gpt-history",
-            "batch_size": 12,
-            "version": "1.21.1",
-            "scope": {"version": "1.21.1"},
-            "selected_count": 75_027,
-            "processed_count": 16_100,
-            "pending_count": 58_927,
-            "status_counts": {"cancelled": 58_927, "no_change": 6_648},
-        },
+        lambda _path, _priority, _run_id: preview,
     )
 
-    def resume(run_id, *, model, batch_size):
-        started.append((run_id, model, batch_size))
+    def resume(run_id, *, model, batch_size, resume_preview):
+        started.append((run_id, model, batch_size, resume_preview))
         dialog.job.state = SmartReviewJobState(phase="running")
         return True
 
@@ -565,10 +586,70 @@ def test_dialog_resume_confirms_status_and_allows_model_batch_override(db, monke
     dialog._resume_batch_field.value = "24"
     dialog._resume_dialog.actions[1].on_click(None)
 
-    assert started == [("run-continue", "gpt-override", 24)]
+    assert started == [("run-continue", "gpt-override", 24, preview)]
     assert dialog.nav.value == "run"
     assert dialog._panels["run"].visible is True
     assert "正在繼續未完成校對" in page.snacks[-1]
+
+
+def test_resume_run_syncs_history_scope_into_execution_inputs(db, monkeypatch):
+    """續跑建立 request 前，執行頁欄位要同步到所選歷史批次。"""
+    from app.views.moddb.smart_review_dialog import SmartReviewDialog
+
+    dialog = SmartReviewDialog(_sync_page(), lambda: db, "1.21.1", None)
+    panel = dialog.run_panel
+    panel.version_dd.value = "1.20.1"
+    panel.limit_field.value = "1000"
+    panel.batch_field.value = "20"
+    panel.model_dd.value = "stale-model"
+    captured = []
+
+    def fake_start(request, *, parent_callback=None):
+        captured.append(request)
+
+    monkeypatch.setattr(panel, "_start_polling", lambda: None)
+    monkeypatch.setattr(dialog.job, "start", fake_start)
+    preview = {
+        "model": "gpt-history",
+        "batch_size": 100,
+        "requested_limit": 0,
+        "version": "1.21.1",
+        "scope": {
+            "version": "1.21.1",
+            "mod_id": None,
+            "kind": None,
+            "effective_source": None,
+            "query": "",
+        },
+        "selected_count": 75_027,
+        "processed_count": 15_467,
+        "pending_count": 59_560,
+    }
+
+    assert panel.resume_run(
+        "run-resume",
+        model="gpt-override",
+        batch_size=100,
+        resume_preview=preview,
+    )
+
+    assert panel.version_dd.value == "1.21.1"
+    assert panel.limit_field.value == "0"
+    assert panel.batch_field.value == "100"
+    assert panel.model_dd.value == "gpt-override"
+    assert len(captured) == 1
+    request = captured[0]
+    assert (request.version, request.limit, request.model, request.batch_size) == (
+        "1.21.1",
+        0,
+        "gpt-override",
+        100,
+    )
+    assert (
+        request.resume_selected_count,
+        request.resume_processed_count,
+        request.resume_pending_count,
+    ) == (75_027, 15_467, 59_560)
 
 
 def test_dialog_close_keeps_background_job_running(db):
@@ -708,6 +789,29 @@ def test_format_duration_and_state_estimates():
     assert (
         SmartReviewJobState(phase="done", selected=1, processed=1).eta_seconds() is None
     )
+
+
+def test_resume_eta_uses_only_current_resume_progress(tmp_path):
+    """續跑 ETA 不應把歷史批次已處理數量當成本次速度基準。"""
+    request = _request(tmp_path)
+    request.resume_run_id = "run-resume"
+    request.resume_processed_count = 15_467
+    request.resume_pending_count = 59_560
+    state = SmartReviewJobState(
+        phase="running",
+        request=request,
+        selected=75_027,
+        processed=15_467,
+        resume_baseline_processed=15_467,
+        resume_pending_total=59_560,
+    )
+    state.started_at = 10.0
+    state.resume_started_at = 20.0
+
+    assert state.eta_seconds(now=60.0) is None
+    state.processed = 15_517
+    assert state.resume_processed == 50
+    assert state.eta_seconds(now=60.0) == pytest.approx(47_608.0)
 
 
 def _request(tmp_path) -> SmartReviewRequest:
@@ -921,6 +1025,68 @@ def test_job_runs_in_background_and_derives_logs(tmp_path, monkeypatch):
     assert any("耗時拆解" in text and "API" in text for text in texts)
     assert any("無效原因：reason 不可為空 × 1" in text for text in texts)
     assert job.session.progress == 1.0
+
+
+def test_resume_job_logs_snapshot_counts_and_current_progress(tmp_path, monkeypatch):
+    """續跑 log 顯示歷史快照與本次新增進度，不把舊處理量當成新批次。"""
+    import app.views.moddb.smart_review_job as job_module
+
+    def fake_run(*_args, progress=None, **_kwargs):
+        progress(
+            {
+                "run_id": "run-resume",
+                "selected": 100,
+                "processed": 40,
+                "valid": 40,
+                "phase": "selection_complete",
+                "resume_baseline_processed": 40,
+                "resume_pending_total": 60,
+                "timing": {"selection_seconds": 0.4, "run_record_seconds": 0.02},
+            }
+        )
+        progress(
+            {
+                "run_id": "run-resume",
+                "selected": 100,
+                "processed": 50,
+                "valid": 50,
+                "phase": "batch_complete",
+                "timing": {
+                    "batch_number": 1,
+                    "ordinal_start": 41,
+                    "ordinal_end": 50,
+                    "elapsed_seconds": 1.0,
+                    "attempts": 1,
+                },
+            }
+        )
+        return _Result()
+
+    monkeypatch.setattr(job_module, "run_moddb_smart_review_from_path", fake_run)
+    monkeypatch.setattr(
+        job_module,
+        "get_moddb_smart_review_run_breakdown_from_path",
+        lambda *_a, **_k: {"status": {}, "errors": []},
+    )
+    request = _request(tmp_path)
+    request.limit = 0
+    request.resume_run_id = "run-resume"
+    request.resume_selected_count = 100
+    request.resume_processed_count = 40
+    request.resume_pending_count = 60
+    job = SmartReviewJob(_sync_page())
+
+    assert job.start(request) is None
+
+    texts = [entry.text for entry in job.session.snapshot()["logs"]]
+    assert any(
+        "原批次 100 筆、既有處理 40 筆、本次待處理 60 筆、上限 不限 筆、每批 5 筆"
+        in text
+        for text in texts
+    )
+    assert any("續跑準備完成：原批次 100 筆；既有處理 40 筆；本次待處理 60 筆" in text for text in texts)
+    assert any("已處理 50 / 100 筆" in text and "第 1 批" in text for text in texts)
+    assert not any("已處理 40 / 100 筆" in text for text in texts)
 
 
 def test_job_rejects_second_start_and_reports_failure(tmp_path, monkeypatch):

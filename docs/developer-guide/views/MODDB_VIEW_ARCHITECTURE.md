@@ -28,7 +28,7 @@
 
 ## AI 智慧校對候選
 
-Smart Review 的執行分頁與歷史分頁共用 `smart_review_planner.py`：新批次最多讀取**目前版本**最近兩份可解析 JSON manifest，其他版本不佔額度，依完整 CAS 快照選擇最新可重用結果；`applied`／`no_change` 僅在快照有效且啟用跳過時重用，`ready` 保留待審查，暫時失敗或未完成的最新結果才可在這個兩批界線內回看較舊有效結果。執行前預覽透過 `include_context=False` 與 `compare_context=False` 只讀取 CAS 欄位，不為每筆候選建立 local context；背景工作會回報目前候選、同版本歷史 JSON 分片與規劃比對階段，且預覽的 `actual_ai_count` 才是批次估算的分子。預覽的重用數量是快速估算，真正執行仍建立完整 context 並依完整 CAS 指紋規劃。原批次續跑由 `prepare_smart_review_resume` 重新核對 SQLite 現況，沿用原 `run_id`；歷史頁先顯示指定 run 的狀態確認視窗，模型和批次大小可輸入覆寫，確認後才啟動。未變更 CAS 欄位的候選沿用 JSON context，只有快照變動時才重建 context；人工修改造成的失效候選寫入 `attempt_history`，只將可重試的項目排回 `pending`，並把 `quota_exhausted`／`auth_required` 等執行層停止原因與未送出數量保留在 metrics。這些判定同時供唯讀預覽、背景 job 與歷史卡片使用。
+Smart Review 的執行分頁與歷史分頁共用 `smart_review_planner.py`：新批次最多讀取**目前版本**最近兩份可解析 JSON manifest，其他版本不佔額度，依完整 CAS 快照選擇最新可重用結果；`applied`／`no_change` 僅在快照有效且啟用跳過時重用，`ready` 保留待審查，暫時失敗或未完成的最新結果才可在這個兩批界線內回看較舊有效結果。執行前預覽透過 `include_context=False` 與 `compare_context=False` 只讀取 CAS 欄位，不為每筆候選建立 local context；背景工作會回報目前候選、同版本歷史 JSON 分片與規劃比對階段，且預覽的 `actual_ai_count` 才是批次估算的分子。預覽的重用數量是快速估算，真正執行仍建立完整 context 並依完整 CAS 指紋規劃。原批次續跑由 `prepare_smart_review_resume` 重新核對 SQLite 現況，沿用原 `run_id`；歷史頁先顯示指定 run 的狀態確認視窗，模型和批次大小可輸入覆寫，確認後才把該 run 的完整範圍／原上限同步回執行頁再啟動。晚到的初始範圍查詢不能覆蓋這份快照；執行 log 以資料層重新驗證後的實際數量為準，續跑 ETA 只用本次新增處理量與準備完成後的耗時計算。未變更 CAS 欄位的候選沿用 JSON context，只有快照變動時才重建 context；人工修改造成的失效候選寫入 `attempt_history`，只將可重試的項目排回 `pending`，並把 `quota_exhausted`／`auth_required` 等執行層停止原因與未送出數量保留在 metrics。這些判定同時供唯讀預覽、背景 job 與歷史卡片使用。
 
 批量審核與 Smart Review 的範圍控制項都只顯示真正有未審核候選的模組；來源選項依選定模組重建。開啟對話框、切換版本／類型／品質條件時，模組與來源範圍查詢使用維護型背景作業；模組切換只重用已載入的來源映射，不再次查詢整個資料庫。查詢結果以序號驗證，舊結果不會覆蓋新條件；範圍變更只更新預填值、來源選單與筆數估算，不能繞過使用者明確按下預覽、掃描或開始按鈕。
 

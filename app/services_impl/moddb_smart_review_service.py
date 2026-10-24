@@ -267,6 +267,7 @@ def preview_moddb_smart_review_resume_from_path(
             "provider": str(run.get("provider") or ""),
             "model": str(run.get("model") or ""),
             "batch_size": int(run.get("batch_size") or 0),
+            "requested_limit": int(run.get("requested_limit") or 0),
             "version": str(scope.get("version") or run.get("scope_version") or ""),
             "scope": dict(scope),
             "selected_count": selected_count,

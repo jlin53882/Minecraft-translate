@@ -239,6 +239,28 @@ def test_run_state_emits_canonical_events_and_adapts_only_at_progress_boundary()
     assert executor.metrics.api_ms == 1500  # 批次與整體共用同一個累加入口
 
 
+def test_run_state_progress_carries_resume_baseline_and_pending_total():
+    """續跑進度需把歷史基準與本次待處理總數傳到 UI。"""
+    progress = []
+    state = SmartReviewRunState(
+        db=None,
+        run_id="run-resume",
+        executor=CommonBatchExecutor(operation="smart_review"),
+        selected_count=100,
+        planned_batch_count=1,
+        progress=progress.append,
+        metrics=new_smart_review_metrics(input_token_budget=None),
+        started=0.0,
+        resume_baseline_processed=40,
+        resume_pending_total=60,
+    )
+
+    state.report_progress(phase="selection_complete")
+
+    assert progress[-1]["resume_baseline_processed"] == 40
+    assert progress[-1]["resume_pending_total"] == 60
+
+
 # -- 唯一的 formatter ------------------------------------------------------------------
 
 OLD_HISTORY_EVENTS = [
