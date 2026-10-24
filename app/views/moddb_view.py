@@ -399,7 +399,9 @@ class ModDbView(ft.Column):
                 self._request_panel_refresh(key)
             return
         if key == "entries":
-            self.entries.refresh()
+            keep_scroll = self.entries._refresh_keep_scroll
+            self.entries.refresh(keep_scroll=keep_scroll)
+            self.entries._refresh_keep_scroll = False
             self._panel_refresh_needed[key] = bool(self.entries._list_error)
         elif key == "scan":
             self.scan.refresh_versions()
@@ -479,6 +481,7 @@ class ModDbView(ft.Column):
                     "identity": request.get("identity"),
                     "source_catalog": request.get("source_catalog"),
                     "filter_only": bool(request.get("filter_only")),
+                    "keep_scroll": bool(request.get("keep_scroll")),
                     "error": str(exc),
                 }
 
@@ -630,6 +633,7 @@ class ModDbView(ft.Column):
                 "kind": self.entries.kind,
                 "page": self.entries.pager.current_page,
                 "filter_only": self.entries._filter_only_refresh,
+                "keep_scroll": self.entries._refresh_keep_scroll,
                 "identity": self.entries._db_identity,
                 "source_catalog": self.entries._render_source_catalog,
                 "selected_id": self.entries.selected.id
@@ -701,6 +705,7 @@ class ModDbView(ft.Column):
     ) -> None:
         """Refresh changed filters in a worker and page navigation inline."""
         self._invalidate_panel("entries")
+        self.entries._refresh_keep_scroll = False
         self.entries._refresh_keep_selection = keep_selection
         self.entries._filter_only_refresh = background and not full_refresh
         if self.tab != "entries":

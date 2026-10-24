@@ -2664,6 +2664,58 @@ def test_entries_save_keeps_scroll_position_and_selects_the_next_entry(db_path):
     db.close()
 
 
+def test_entries_save_keeps_scroll_position_through_parent_refresh(db_path):
+    """儲存通知父層完整刷新後，仍維持清單位置並停在下一筆。"""
+    db = TranslationDB(db_path)
+    db.ingest(
+        "1.21.1",
+        [
+            ScanItem(KIND_LANG, "foo", f"item.foo.{i}", f"Text {i}")
+            for i in range(6)
+        ],
+    )
+    page = mock_page()
+    page.run_thread = lambda target: target()
+    scrolls: list[float] = []
+    panel = None
+
+    def parent_refresh() -> None:
+        request = {
+            "criteria": panel._entry_filter(),
+            "version": panel.version,
+            "mod_id": panel.mod_id,
+            "kind": panel.kind,
+            "page": panel.pager.current_page,
+            "filter_only": False,
+            "keep_scroll": panel._refresh_keep_scroll,
+            "identity": panel._db_identity,
+            "source_catalog": panel._render_source_catalog,
+            "selected_id": panel.selected.id if panel.selected else None,
+        }
+        snapshot = moddb_view.load_panel_snapshot(
+            "entries", request, moddb_service.current_settings()
+        )
+        panel.apply_refresh_snapshot(snapshot)
+
+    panel = entries_panel.EntriesPanel(page, lambda: db, on_changed=parent_refresh)
+    panel.refresh()
+    panel._scroll_list_to = scrolls.append
+    panel._on_state("none")
+    keys = [r.key for r in panel.rows]
+    panel.select(panel.rows[2].id)
+    panel._scroll_offset = 420.0
+
+    panel.tw_field.value = "文字二"
+    panel._on_text_change()
+    panel._save()
+    page._run_all_tasks()
+
+    assert scrolls[-2:] == [420.0, 420.0]
+    assert panel.selected is not None and panel.selected.key == keys[3]
+    assert panel._refresh_keep_scroll is False
+    db.close()
+
+
 def test_entries_save_on_the_last_row_of_the_last_page_goes_back_a_page(db_path):
     """最後一頁只剩一筆、存完該筆從篩選消失：退回仍有資料的最後一頁，不顯示空清單。"""
     db = TranslationDB(db_path)
