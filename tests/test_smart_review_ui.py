@@ -519,6 +519,63 @@ def test_run_panel_does_not_refresh_page_when_progress_and_log_unchanged(db):
     assert page.updated == first
 
 
+def test_run_panel_renders_preparation_stage_in_progress_and_status(db):
+    """候選／歷史準備階段要顯示階段文字，不能只顯示空進度。"""
+    from app.views.moddb.smart_review_dialog import SmartReviewDialog
+
+    dialog = SmartReviewDialog(_sync_page(), lambda: db, "1.21.1", None)
+    panel = dialog.run_panel
+    state = SmartReviewJobState(
+        phase="running",
+        stage="history_loading",
+        stage_message="正在讀取第 1/2 份歷史 JSON…已讀取 12 筆候選。",
+        request=_request(db.path),
+        selected=20,
+    )
+    panel._render_progress(state)
+
+    assert panel.progress_bar.value == 0.0
+    assert "正在讀取第 1/2 份歷史 JSON" in panel.progress_text.value
+    assert "模型 m" in panel.status_text.value
+    assert "history_loading" in panel._progress_signature(state)
+
+
+def test_run_panel_shows_indeterminate_plan_progress_until_preview_finishes(
+    db, monkeypatch
+):
+    """歷史預估期間顯示不確定進度，完成後才隱藏。"""
+    from app.views.moddb.smart_review_dialog import SmartReviewDialog
+
+    dialog = SmartReviewDialog(_sync_page(), lambda: db, "1.21.1", None)
+    panel = dialog.run_panel
+    panel._scope_loading = False
+    pending = []
+
+    def hold(work, done, **kwargs):
+        pending.append((work, done, kwargs))
+        return True
+
+    monkeypatch.setattr(panel.ctx, "run_background", hold)
+    panel._refresh_plan_preview()
+
+    assert pending
+    assert panel.plan_progress_bar.visible is True
+    assert panel.plan_progress_bar.value is None
+
+    pending[-1][1](
+        {
+            "selected_count": 1,
+            "reused_count": 0,
+            "estimated_to_process_count": 1,
+            "pending_review_count": 0,
+            "history_runs_consulted": 0,
+        },
+        None,
+    )
+
+    assert panel.plan_progress_bar.visible is False
+
+
 def test_dialog_open_review_switches_tab_and_loads_run(db, monkeypatch):
     """驗證從執行結果前往審查會切分頁並載入該批次。"""
     from app.views.moddb.smart_review_dialog import SmartReviewDialog
@@ -1426,6 +1483,50 @@ def test_job_runs_in_background_and_derives_logs(tmp_path, monkeypatch):
     assert any("耗時拆解" in text and "API" in text for text in texts)
     assert any("無效原因：reason 不可為空 × 1" in text for text in texts)
     assert job.session.progress == 1.0
+
+
+def test_job_logs_preparation_stages_once_and_keeps_stage_visible(tmp_path, monkeypatch):
+    """核心準備階段要進 log；重複快照不可造成重複訊息。"""
+    import app.views.moddb.smart_review_job as job_module
+
+    def fake_run(*_args, progress=None, **_kwargs):
+        progress(
+            {
+                "phase": "candidate_loading",
+                "message": "正在讀取目前符合範圍的候選…",
+            }
+        )
+        progress(
+            {
+                "phase": "candidate_loading",
+                "message": "正在讀取目前符合範圍的候選…",
+            }
+        )
+        progress(
+            {
+                "run_id": "run-stage",
+                "phase": "selection_complete",
+                "selected": 4,
+                "processed": 0,
+                "message": "執行批次已建立，開始送出第一批…",
+            }
+        )
+        return _Result()
+
+    monkeypatch.setattr(job_module, "run_moddb_smart_review_from_path", fake_run)
+    monkeypatch.setattr(
+        job_module,
+        "get_moddb_smart_review_run_breakdown_from_path",
+        lambda *_a, **_k: {"status": {}, "errors": []},
+    )
+    job = SmartReviewJob(_sync_page())
+    assert job.start(_request(tmp_path)) is None
+
+    texts = [entry.text for entry in job.session.snapshot()["logs"]]
+    assert texts.count("正在讀取目前符合範圍的候選…") == 1
+    assert "執行批次已建立，開始送出第一批…" in texts
+    assert job.state.stage == "selection_complete"
+    assert job.state.stage_message == "執行批次已建立，開始送出第一批…"
 
 
 def test_resume_job_logs_snapshot_counts_and_current_progress(tmp_path, monkeypatch):

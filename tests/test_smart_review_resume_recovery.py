@@ -499,10 +499,21 @@ def test_resume_reuses_saved_context_when_cas_snapshot_is_unchanged(
             raise AssertionError("unchanged resume should reuse persisted context")
 
         monkeypatch.setattr(db, "_smart_review_context", fail_context)
-        snapshots, _counts, _run = db.prepare_smart_review_resume(run_id)
+        progress = []
+        snapshots, counts, _run = db.prepare_smart_review_resume(
+            run_id, progress=progress.append
+        )
 
         assert len(snapshots) == 1
         assert snapshots[0].context == snapshot.context
+        assert [item["phase"] for item in progress] == [
+            "resume_history_loaded",
+            "resume_context_checked",
+            "resume_projection_saved",
+            "resume_candidates_ready",
+        ]
+        assert progress[-1]["resume_pending_total"] == 1
+        assert progress[-1]["processed"] == counts["processed"]
     finally:
         db.close()
 

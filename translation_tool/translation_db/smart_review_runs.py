@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
 from translation_tool.translation_db.models import (
@@ -338,7 +338,10 @@ class SmartReviewRunStoreMixin:
         return stale
 
     def prepare_smart_review_resume(
-        self, run_id: str
+        self,
+        run_id: str,
+        *,
+        progress: Callable[[dict[str, Any]], None] | None = None,
     ) -> tuple[list[SmartReviewSnapshot], dict[str, int], dict[str, Any]]:
         """以同一 run_id 準備恢復，保留原範圍並只回傳仍需送出的候選。"""
         history = SmartReviewHistoryStore(self.path)
@@ -350,8 +353,34 @@ class SmartReviewRunStoreMixin:
         if str(run.get("status") or "") == "running":
             raise RuntimeError("智慧校對批次仍在執行中，不能重複啟動")
         candidates = history.list_candidates(run_id)
+        if progress is not None:
+            progress(
+                {
+                    "run_id": run_id,
+                    "phase": "resume_history_loaded",
+                    "status": "running",
+                    "selected": int(run.get("selected_count") or len(candidates)),
+                    "message": (
+                        f"已讀取續跑歷史 {len(candidates):,} 筆，"
+                        "正在驗證最新 context…"
+                    ),
+                }
+            )
         scope = run.get("scope") if isinstance(run.get("scope"), dict) else {}
         stale_context_ordinals = self._stale_resume_context_ordinals(candidates)
+        if progress is not None:
+            progress(
+                {
+                    "run_id": run_id,
+                    "phase": "resume_context_checked",
+                    "status": "running",
+                    "selected": int(run.get("selected_count") or len(candidates)),
+                    "message": (
+                        f"context 變更檢查完成：{len(stale_context_ordinals):,} 筆需要重建，"
+                        "正在整理續跑狀態…"
+                    ),
+                }
+            )
         context_cache_reset = False
         current_by_ordinal = {}
         for candidate in candidates:
@@ -382,6 +411,16 @@ class SmartReviewRunStoreMixin:
                     current["context"] = list(candidate.context)
             current_by_ordinal[candidate.ordinal] = current
         resume_stats = history.prepare_resume(run_id, current_by_ordinal)
+        if progress is not None:
+            progress(
+                {
+                    "run_id": run_id,
+                    "phase": "resume_projection_saved",
+                    "status": "running",
+                    "selected": int(run.get("selected_count") or len(candidates)),
+                    "message": "續跑狀態已更新，正在重建待處理清單…",
+                }
+            )
         run_metrics = run.get("metrics")
         if not isinstance(run_metrics, dict):
             run_metrics = {}
@@ -400,6 +439,25 @@ class SmartReviewRunStoreMixin:
             if item.status == SmartReviewStatus.PENDING
         ]
         base = _resume_counts(refreshed)
+        if progress is not None:
+            progress(
+                {
+                    "run_id": run_id,
+                    "phase": "resume_candidates_ready",
+                    "status": "running",
+                    "selected": int(run.get("selected_count") or len(refreshed)),
+                    "processed": base["processed"],
+                    "valid": base["valid"],
+                    "invalid": base["invalid"],
+                    "request_errors": base["request_errors"],
+                    "resume_baseline_processed": base["processed"],
+                    "resume_pending_total": len(snapshots),
+                    "message": (
+                        f"續跑候選準備完成：待處理 {len(snapshots):,} 筆，"
+                        "正在建立執行批次…"
+                    ),
+                }
+            )
         return snapshots, base, run
 
     def record_smart_review_results(

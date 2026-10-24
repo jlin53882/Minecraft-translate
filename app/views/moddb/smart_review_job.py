@@ -72,6 +72,8 @@ class SmartReviewJobState:
     """任務目前的進度快照；背景執行緒寫入、UI 輪詢讀取。"""
 
     phase: str = "idle"  # idle / running / done / failed
+    stage: str = "idle"
+    stage_message: str = ""
     request: SmartReviewRequest | None = None
     run_id: str | None = None
     selected: int = 0
@@ -331,9 +333,11 @@ class SmartReviewJob:
             "invalid": 0,
             "errors": 0,
         }
+        last_stage: tuple[str, str] = ("", "")
 
         def progress(snapshot: dict[str, Any]) -> None:
             """把核心回報的進度快照寫入狀態並轉成逐批 log。"""
+            nonlocal last_stage
             if snapshot.get("run_id") and not state.run_id:
                 state.run_id = str(snapshot["run_id"])
                 session.add_log(f"已建立批次 {state.run_id}", "info")
@@ -342,6 +346,11 @@ class SmartReviewJob:
                 state.stop_reason = str(snapshot["stop_reason"])
             state.status = str(snapshot.get("status", "running"))
             phase = str(snapshot.get("phase") or "")
+            message = str(snapshot.get("message") or "")
+            stage_key = (phase, message)
+            if message and stage_key != last_stage:
+                session.add_log(message, "info")
+                last_stage = stage_key
             if (
                 phase == "selection_complete"
                 and state.request is not None
@@ -364,11 +373,15 @@ class SmartReviewJob:
         state: SmartReviewJobState, snapshot: dict[str, Any]
     ) -> None:
         """把核心帳本快照投影到 UI job state。"""
+        state.stage = str(snapshot.get("phase", state.stage) or state.stage)
+        state.stage_message = str(snapshot.get("message", "") or "")
         state.selected = int(snapshot.get("selected", state.selected) or 0)
-        state.processed = int(snapshot.get("processed", 0) or 0)
-        state.valid = int(snapshot.get("valid", 0) or 0)
-        state.invalid = int(snapshot.get("invalid", 0) or 0)
-        state.request_errors = int(snapshot.get("request_errors", 0) or 0)
+        state.processed = int(snapshot.get("processed", state.processed) or 0)
+        state.valid = int(snapshot.get("valid", state.valid) or 0)
+        state.invalid = int(snapshot.get("invalid", state.invalid) or 0)
+        state.request_errors = int(
+            snapshot.get("request_errors", state.request_errors) or 0
+        )
         state.resume_baseline_processed = int(
             snapshot.get("resume_baseline_processed", state.resume_baseline_processed)
             or 0

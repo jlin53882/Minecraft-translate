@@ -201,10 +201,11 @@ class SmartReviewRunState:
         self,
         *,
         phase: str = "batch",
+        message: str | None = None,
         timing: dict[str, Any] | None = None,
         event: dict[str, Any] | None = None,
     ) -> None:
-        """回報目前已處理數量、階段與可診斷的耗時。"""
+        """回報目前已處理數量、階段、使用者訊息與可診斷的耗時。"""
         if self.progress is None:
             return
         snapshot: dict[str, Any] = {
@@ -217,6 +218,8 @@ class SmartReviewRunState:
             "status": "running",
             "phase": phase,
         }
+        if message:
+            snapshot["message"] = message
         if self.resume_pending_total:
             snapshot["resume_baseline_processed"] = self.resume_baseline_processed
             snapshot["resume_pending_total"] = self.resume_pending_total

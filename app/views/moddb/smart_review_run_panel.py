@@ -747,6 +747,8 @@ class SmartReviewRunPanel(SmartReviewRunPlanningMixin):
         """建立目前畫面可見值的簽章，避免沒有變更時重送整頁 UI。"""
         return (
             state.phase,
+            state.stage,
+            state.stage_message,
             state.status,
             state.run_id,
             state.selected,
@@ -780,30 +782,36 @@ class SmartReviewRunPanel(SmartReviewRunPlanningMixin):
         """更新進度條、百分比、統計與預估剩餘時間。"""
         self.progress_bar.value = state.fraction if state.selected else None
         eta = format_duration(state.eta_seconds())
+        stage_prefix = f"{state.stage_message} · " if state.stage_message else ""
         if state.selected:
             if state.request is not None and state.request.resume_run_id:
                 self.progress_text.value = (
-                    f"總進度 {state.processed:,} / {state.selected:,} 筆"
+                    f"{stage_prefix}總進度 {state.processed:,} / {state.selected:,} 筆"
                     f"（{state.fraction:.0%}）· 本次續跑 "
                     f"{state.resume_processed:,} / {state.resume_pending_total:,} 筆"
                     f" · 預估剩餘 {eta}"
                 )
             else:
                 self.progress_text.value = (
-                    f"已處理 {state.processed:,} / {state.selected:,} 筆"
+                    f"{stage_prefix}已處理 {state.processed:,} / {state.selected:,} 筆"
                     f"（{state.fraction:.0%}）· 預估剩餘 {eta}"
                 )
         else:
-            self.progress_text.value = "正在查詢並準備候選…"
+            self.progress_text.value = state.stage_message or "正在查詢並準備候選…"
         self.valid_stat.set_value(f"{state.valid:,}")
         self.invalid_stat.set_value(f"{state.invalid:,}")
         self.error_stat.set_value(f"{state.request_errors:,}")
         self.time_stat.set_value(format_duration(state.elapsed()))
         request = state.request
-        self.status_text.value = (
+        scope_status = (
             f"校對中：{request.scope_label()} · 模型 {request.model}"
             if request is not None
             else "校對中…"
+        )
+        self.status_text.value = (
+            f"{scope_status} · {state.stage_message}"
+            if state.stage_message
+            else scope_status
         )
 
     def _on_finished(self, state: SmartReviewJobState) -> None:

@@ -368,6 +368,28 @@ def _resume_progress(
     return processed, len(snapshots)
 
 
+def _report_preparation(
+    progress: Callable[[dict[str, Any]], None] | None,
+    *,
+    phase: str,
+    message: str,
+    run_id: str | None = None,
+    **counts: int,
+) -> None:
+    """回報選取／續跑準備階段；只傳送聚合數字，不逐筆喚醒 UI。"""
+    if progress is None:
+        return
+    snapshot: dict[str, Any] = {
+        "phase": phase,
+        "status": "running",
+        "message": message,
+    }
+    if run_id:
+        snapshot["run_id"] = run_id
+    snapshot.update({key: int(value) for key, value in counts.items()})
+    progress(snapshot)
+
+
 def _restore_initial_counts(
     state: SmartReviewRunState,
     initial_counts: dict[str, int] | None,
@@ -533,6 +555,11 @@ def _open_run_state(
     )
     state.report_progress(
         phase="selection_complete",
+        message=(
+            "執行批次已建立，開始送出第一批…"
+            if snapshots
+            else "執行批次已建立，沒有需要送出的候選。"
+        ),
         timing={
             "selection_ms": round(selection_seconds * 1000),
             "planning_ms": round(planning_seconds * 1000),
@@ -632,6 +659,11 @@ def run_smart_review(
         lm_config=lm_config,
         cancel_check=cancel_check,
     )
+    _report_preparation(
+        progress,
+        phase="candidate_loading",
+        message="正在讀取目前符合範圍的候選…",
+    )
     selection_started = time.monotonic()
     plan_input = SmartReviewPlanInput(
         version=version,
@@ -654,10 +686,49 @@ def run_smart_review(
     selection_seconds = round(time.monotonic() - selection_started, 3)
     history_runs_consulted = 0
     historical_candidates: list[dict[str, Any]] = []
+    _report_preparation(
+        progress,
+        phase="candidate_loaded",
+        message=(
+            f"已讀取目前候選 {len(snapshots):,} 筆，"
+            + (
+                "正在讀取目前版本最近兩份歷史 JSON…"
+                if plan_input.use_recent_history
+                else "正在建立精確執行計畫…"
+            )
+        ),
+        selected=len(snapshots),
+    )
     if plan_input.use_recent_history:
+        def history_progress(run_count: int, candidate_count: int) -> None:
+            _report_preparation(
+                progress,
+                phase="history_loading",
+                message=(
+                    f"正在讀取第 {run_count}/2 份歷史 JSON…"
+                    f"已讀取 {candidate_count:,} 筆候選。"
+                ),
+                selected=len(snapshots),
+            )
+
         history_runs_consulted, historical_candidates = SmartReviewHistoryStore(
             db.path
-        ).recent_candidate_payloads(max_runs=2, version=plan_input.version)
+        ).recent_candidate_payloads(
+            max_runs=2,
+            version=plan_input.version,
+            progress=history_progress,
+        )
+    _report_preparation(
+        progress,
+        phase="planning",
+        message=(
+            f"已讀取 {history_runs_consulted} 份歷史、"
+            f"{len(historical_candidates):,} 筆候選，正在建立精確執行計畫…"
+            if plan_input.use_recent_history
+            else "正在建立精確執行計畫…"
+        ),
+        selected=len(snapshots),
+    )
     plan = plan_new_smart_review(
         snapshots,
         historical_candidates,
@@ -669,6 +740,15 @@ def run_smart_review(
     batch_size = max(
         1,
         min(int(batch_size), smart_review_settings["max_batch_size"]),
+    )
+    _report_preparation(
+        progress,
+        phase="run_initializing",
+        message=(
+            f"執行計畫完成：共 {len(plan.selected):,} 筆，"
+            "正在建立執行批次…"
+        ),
+        selected=len(plan.selected),
     )
     state = _open_run_state(
         db,
@@ -752,10 +832,35 @@ def resume_smart_review(
         lm_config=lm_config,
         cancel_check=cancel_check,
     )
-    snapshots, initial_counts, run = db.prepare_smart_review_resume(run_id)
+    _report_preparation(
+        progress,
+        phase="resume_loading",
+        message="正在讀取續跑歷史並驗證最新 context…",
+        run_id=run_id,
+    )
+    snapshots, initial_counts, run = db.prepare_smart_review_resume(
+        run_id,
+        progress=progress,
+    )
     scope = run.get("scope") if isinstance(run.get("scope"), dict) else {}
     selected_count = int(run.get("selected_count") or 0)
     selected_count = max(selected_count, len(snapshots))
+    _report_preparation(
+        progress,
+        phase="resume_run_initializing",
+        message=(
+            f"續跑範圍確認完成：原批次 {selected_count:,} 筆、"
+            f"本次待處理 {len(snapshots):,} 筆，正在建立執行批次…"
+        ),
+        run_id=run_id,
+        selected=selected_count,
+        processed=int(initial_counts.get("processed") or 0),
+        valid=int(initial_counts.get("valid") or 0),
+        invalid=int(initial_counts.get("invalid") or 0),
+        request_errors=int(initial_counts.get("request_errors") or 0),
+        resume_baseline_processed=int(initial_counts.get("processed") or 0),
+        resume_pending_total=len(snapshots),
+    )
     state = _open_run_state(
         db,
         session,

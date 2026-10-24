@@ -363,6 +363,8 @@ class SmartReviewRunPlanningMixin:
         if hasattr(self, "plan_preview_text"):
             self.plan_preview_text.value = f"條件已變更（{reason}），等待重新計算…"
             self.plan_preview_text.color = C.MUTED
+        if hasattr(self, "plan_progress_bar"):
+            self.plan_progress_bar.visible = False
         if hasattr(self, "estimate_text"):
             self._update_estimate_text(update=False)
 
@@ -420,6 +422,8 @@ class SmartReviewRunPlanningMixin:
         self.plan_preview_text = ft.Text(
             "尚未取得歷史規劃預估。", size=12, color=C.MUTED, selectable=True
         )
+        self.plan_progress_bar = kit.progress_bar(None, "em", height=6)
+        self.plan_progress_bar.visible = False
 
     def _scope_card(self) -> ft.Control:
         """建立含歷史規劃控制項的「校對範圍與模型」卡片。"""
@@ -456,6 +460,7 @@ class SmartReviewRunPlanningMixin:
                         spacing=10,
                         wrap=True,
                     ),
+                    self.plan_progress_bar,
                     self.plan_preview_text,
                     self.estimate_text,
                 ],
@@ -485,6 +490,8 @@ class SmartReviewRunPlanningMixin:
         model = str(self.model_dd.value or "")
         self.plan_preview_text.value = "正在讀取候選與目前版本最近兩份歷史 JSON…"
         self.plan_preview_text.color = C.MUTED
+        self.plan_progress_bar.value = None
+        self.plan_progress_bar.visible = True
         self.ctx.update()
 
         def still_valid() -> bool:
@@ -512,6 +519,8 @@ class SmartReviewRunPlanningMixin:
         )
 
         def show_progress(message: str) -> None:
+            self.plan_progress_bar.visible = True
+            self.plan_progress_bar.value = None
             self.plan_preview_text.value = message
             self.plan_preview_text.color = C.MUTED
             self.ctx.update()
@@ -521,10 +530,12 @@ class SmartReviewRunPlanningMixin:
                 return
             if error:
                 self._plan_preview_result = None
+                self.plan_progress_bar.visible = False
                 self.plan_preview_text.value = f"無法取得預估：{error}"
                 self.plan_preview_text.color = C.RED
             else:
                 self._plan_preview_result = result
+                self.plan_progress_bar.visible = False
                 self.plan_preview_text.value = (
                     f"快速預估範圍 {result['selected_count']:,} 筆；歷史重用 "
                     f"{result['reused_count']:,}；估算送 AI "
@@ -575,6 +586,8 @@ class SmartReviewRunPlanningMixin:
                 self.plan_preview_text.value,
                 self.plan_preview_text.color,
             ),
+            "plan_progress_visible": self.plan_progress_bar.visible,
+            "plan_progress_value": self.plan_progress_bar.value,
         }
 
     def _restore_resume_panel_state(self, snapshot: dict[str, Any]) -> None:
@@ -605,6 +618,8 @@ class SmartReviewRunPlanningMixin:
         self.plan_preview_text.value, self.plan_preview_text.color = snapshot[
             "plan_text"
         ]
+        self.plan_progress_bar.visible = snapshot["plan_progress_visible"]
+        self.plan_progress_bar.value = snapshot["plan_progress_value"]
         self.ctx.update()
 
     def resume_run(
