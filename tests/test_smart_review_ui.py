@@ -535,6 +535,26 @@ def test_dialog_open_review_switches_tab_and_loads_run(db, monkeypatch):
     assert batch_loaded == ["run-9"]
 
 
+def test_dialog_review_tab_loads_missing_run_in_background(db):
+    """切到審查分頁時，尚未載入的批次不可在 UI 事件內同步查詢。"""
+    from app.views.moddb.smart_review_dialog import SmartReviewDialog
+
+    dialog = SmartReviewDialog(_sync_page(), lambda: db, "1.21.1", None)
+    dialog._review_run_id = "run-async"
+    background_names = []
+
+    def record_background(work, _done, *, name, **_kwargs):
+        """只記錄排程，確保審查分頁切換不執行資料庫工作。"""
+        background_names.append(name)
+        return True
+
+    dialog.ctx.run_background = record_background
+    dialog._on_tab("review")
+
+    assert dialog.nav.value == "review"
+    assert background_names == ["載入智慧校對批次"]
+
+
 def test_dialog_resume_confirms_status_and_allows_model_batch_override(db, monkeypatch):
     """續跑先顯示指定 run 狀態，且模型與批次大小可由輸入框覆寫。"""
     import app.views.moddb.smart_review_dialog as dialog_module
@@ -1872,6 +1892,60 @@ def test_history_shows_interrupted_status_and_opens_run(ctx, monkeypatch):
     history.run_id_field.value = " run-typed "
     history._open_typed()
     assert opened == ["run-typed"]
+
+
+def test_history_refresh_runs_in_background_and_drops_stale_results(db, monkeypatch):
+    """歷史清單背景重整時，較早的結果不得覆蓋後一次請求。"""
+    import app.views.moddb.smart_review_history as history_module
+
+    runs = [
+        {
+            "id": "run-latest",
+            "status": "completed",
+            "provider": "gemini",
+            "model": "m",
+            "started_at": "now",
+            "selected_count": 1,
+            "processed_count": 1,
+            "valid_count": 1,
+            "invalid_count": 0,
+            "request_error_count": 0,
+            "scope": {"version": "1.21.1"},
+        }
+    ]
+    monkeypatch.setattr(
+        history_module,
+        "list_moddb_smart_review_runs_from_path",
+        lambda *_a, **_k: runs,
+    )
+    context = SmartReviewContext(_sync_page(), lambda: db, None)
+    pending = []
+
+    def queue(work, done, *, name, still_valid=None, **_kwargs):
+        """攔截背景工作，模擬兩次清單查詢亂序回傳。"""
+        pending.append((work, done, still_valid, name))
+        return True
+
+    context.run_background = queue
+    history = SmartReviewHistory(
+        context, on_open=lambda _run_id: None, active_run_id=lambda: None
+    )
+    history.refresh()
+    history.refresh()
+
+    assert [item[3] for item in pending] == [
+        "載入智慧校對歷史批次",
+        "載入智慧校對歷史批次",
+    ]
+    assert pending[0][2]() is False
+    assert pending[1][2]() is True
+
+    result = pending[1][0]()
+    pending[1][1](result, None)
+
+    assert [card for card in history.list_view.controls]
+    assert history.status_text.value == "共顯示 1 個批次（新到舊）"
+    assert history.refresh_btn.disabled is False
 
 
 def test_run_breakdown_counts_statuses_and_top_errors(db):

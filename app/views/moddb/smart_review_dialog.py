@@ -160,10 +160,12 @@ class SmartReviewDialog:
         )
 
     def _on_tab(self, key: str) -> None:
-        """切換分頁；進入歷史分頁時重新整理清單。"""
+        """立即切換分頁，並把該分頁需要的資料讀取交給背景工作。"""
         self._show_tab(key)
         if key == "history":
             self.history.refresh()
+        elif key == "review":
+            self._load_review_tab_if_needed()
         self.ctx.update()
 
     def _on_review_changed(self, source: str) -> None:
@@ -182,13 +184,22 @@ class SmartReviewDialog:
         """在逐筆與批量審查間切換，保留兩邊的篩選與頁面狀態。"""
         self.reviewer.control.visible = key == "single"
         self.batch_reviewer.control.visible = key == "batch"
-        if (
-            key == "batch"
-            and self._review_run_id
-            and self.batch_reviewer.run_id != self._review_run_id
-        ):
-            self.batch_reviewer.load_run(self._review_run_id)
+        self._load_review_tab_if_needed(mode=key)
         self.ctx.update()
+
+    def _load_review_tab_if_needed(
+        self, *, mode: str | None = None, force: bool = False
+    ) -> None:
+        """只在目前審查面板尚未載入批次時啟動背景讀取。"""
+        if not self._review_run_id:
+            return
+        active_mode = mode or str(self.review_mode.value)
+        if active_mode == "batch":
+            if force or self.batch_reviewer.run_id != self._review_run_id:
+                self.batch_reviewer.load_run(self._review_run_id)
+            return
+        if force or self.reviewer.state.run_id != self._review_run_id:
+            self.reviewer.load_run(self._review_run_id)
 
     def _show_tab(self, key: str) -> None:
         """只顯示指定分頁，其餘隱藏但保留狀態。"""
@@ -201,11 +212,9 @@ class SmartReviewDialog:
         """切到審查分頁並載入指定批次。"""
         self._review_run_id = run_id
         self._show_tab("review")
-        self.reviewer.load_run(run_id)
-        # 批量候選是另一個分頁，等使用者真的切換過去才讀取，避免隱藏
-        # 面板在逐筆審查時也啟動候選分頁查詢。
-        if self.review_mode.value == "batch":
-            self.batch_reviewer.load_run(run_id)
+        # 逐筆與批量面板的 load_run 都會把資料庫讀取排入背景，避免開啟
+        # 歷史批次後切換到審查時阻塞對話框；批量面板仍延後到真的選取批量模式。
+        self._load_review_tab_if_needed(force=True)
         self.ctx.update()
 
     def _resume_run(self, run_id: str) -> None:
