@@ -35,6 +35,10 @@ from app.views.moddb.smart_review_job import (
     job_for_page,
 )
 from app.views.moddb.smart_review_reviewer import SmartReviewReviewer
+from app.views.moddb.smart_review_run_planning import (
+    build_resume_request,
+    parse_resume_selection,
+)
 from app.views.moddb.smart_review_run_status import run_status_label
 from tests.conftest import mock_page
 from tests.test_smart_review import _seed
@@ -389,7 +393,7 @@ def test_run_panel_filters_modules_and_updates_sources_without_starting(
     panel.mod_dd.value = "jar_mod"
     # 這個測試頁面用 asyncio.run 立即執行 run_task；避免 debounce callback
     # 在 callback 內再次呼叫 run_background 時巢狀建立 event loop。
-    panel._scope_debounce.call = lambda *_args, **_kwargs: None
+    panel._debounce.call = lambda *_args, **_kwargs: None
     panel._on_mod()
     assert len(scope_calls) == 1
 
@@ -630,6 +634,7 @@ def test_resume_run_syncs_history_scope_into_execution_inputs(db, monkeypatch):
     monkeypatch.setattr(panel, "_start_polling", lambda: None)
     monkeypatch.setattr(dialog.job, "start", fake_start)
     preview = {
+        "run_id": "run-resume",
         "model": "gpt-history",
         "batch_size": 20,
         "requested_limit": 0,
@@ -670,6 +675,300 @@ def test_resume_run_syncs_history_scope_into_execution_inputs(db, monkeypatch):
         request.resume_processed_count,
         request.resume_pending_count,
     ) == (75_027, 15_467, 59_560)
+
+
+def _resume_preview(**overrides):
+    """建立可重用的續跑預覽輸入。"""
+    preview = {
+        "run_id": "run-resume",
+        "model": "gpt-history",
+        "batch_size": 20,
+        "requested_limit": 0,
+        "version": "1.21.1",
+        "scope": {
+            "version": "1.21.1",
+            "mod_id": None,
+            "kind": None,
+            "effective_source": 0,
+            "query": "",
+        },
+        "selected_count": 75_027,
+        "processed_count": 15_467,
+        "pending_count": 59_560,
+    }
+    preview.update(overrides)
+    return preview
+
+
+def test_resume_build_request_is_pure_and_keeps_original_run_id(tmp_path):
+    """續跑 builder 不修改預覽，且保留原 run_id 與 source=0。"""
+    preview = _resume_preview()
+    selection = parse_resume_selection("run-resume", preview)
+    request = build_resume_request(
+        selection,
+        path=tmp_path / "smart-review.db",
+        priority=(),
+        model_override="gpt-override",
+        batch_size_override=24,
+        max_batch_size=50,
+    )
+
+    assert preview["scope"]["effective_source"] == 0
+    assert request.resume_run_id == "run-resume"
+    assert request.effective_source == 0
+    assert request.use_recent_history is False
+    assert request.skip_valid_history is False
+    assert request.batch_size == 24
+
+
+def test_resume_invalid_input_does_not_mutate_panel_or_start_job(db, monkeypatch):
+    """續跑輸入驗證失敗時，不應先改寫畫面或啟動 job。"""
+    import app.views.moddb.smart_review_run_planning as planning_module
+    from app.views.moddb.smart_review_dialog import SmartReviewDialog
+
+    dialog = SmartReviewDialog(_sync_page(), lambda: db, "1.21.1", None)
+    panel = dialog.run_panel
+    before = (panel.version_dd.value, panel.model_dd.value, panel.limit_field.value)
+    starts = []
+    monkeypatch.setattr(panel.job, "start", lambda *_a, **_k: starts.append(True))
+    monkeypatch.setattr(planning_module, "show_snack", lambda *_a, **_k: None)
+
+    invalid = _resume_preview(model="")
+    assert (
+        panel.resume_run("run-resume", model="", batch_size=20, resume_preview=invalid)
+        is False
+    )
+
+    assert (
+        panel.version_dd.value,
+        panel.model_dd.value,
+        panel.limit_field.value,
+    ) == before
+    assert starts == []
+
+
+def test_resume_launch_failure_restores_coherent_scope(db, monkeypatch):
+    """續跑啟動失敗時，兩階段投影要回復到原本的執行頁條件。"""
+    import app.views.moddb.smart_review_run_planning as planning_module
+    from app.views.moddb.smart_review_dialog import SmartReviewDialog
+
+    dialog = SmartReviewDialog(_sync_page(), lambda: db, "1.21.1", None)
+    panel = dialog.run_panel
+    panel.version_dd.value = "1.21.1"
+    panel.model_dd.value = "old-model"
+    panel.limit_field.value = "1000"
+    panel.batch_field.value = "20"
+    before = (panel.version_dd.value, panel.model_dd.value, panel.limit_field.value)
+    monkeypatch.setattr(panel.job, "start", lambda *_a, **_k: "cannot start")
+    monkeypatch.setattr(planning_module, "show_snack", lambda *_a, **_k: None)
+
+    assert (
+        panel.resume_run(
+            "run-resume",
+            model="new-model",
+            batch_size=24,
+            resume_preview=_resume_preview(),
+        )
+        is False
+    )
+
+    assert (
+        panel.version_dd.value,
+        panel.model_dd.value,
+        panel.limit_field.value,
+    ) == before
+    assert panel.batch_field.value == "20"
+    assert panel.job.running is False
+
+
+def test_resume_preview_stale_after_database_switch_rejected(db, tmp_path, monkeypatch):
+    """切換資料庫後，舊續跑預覽不可投影或啟動。"""
+    import app.views.moddb.smart_review_run_planning as planning_module
+    from app.views.moddb.smart_review_dialog import SmartReviewDialog
+
+    other_path = tmp_path / "other.db"
+    other_path.touch()
+    holder = {"db": db}
+    dialog = SmartReviewDialog(_sync_page(), lambda: holder["db"], "1.21.1", None)
+    panel = dialog.run_panel
+    old_identity = dialog.ctx.db_identity(db.path, include_generation=False)
+    holder["db"] = SimpleNamespace(path=other_path, priority=())
+    starts = []
+    monkeypatch.setattr(panel.job, "start", lambda *_a, **_k: starts.append(True))
+    monkeypatch.setattr(planning_module, "show_snack", lambda *_a, **_k: None)
+
+    preview = _resume_preview(_database_identity=old_identity)
+    assert (
+        panel.resume_run(
+            "run-resume", model="new-model", batch_size=20, resume_preview=preview
+        )
+        is False
+    )
+    assert starts == []
+
+
+def test_resume_scope_change_invalidates_inflight_count_and_plan_preview(
+    db, monkeypatch
+):
+    """候選範圍變更會同時淘汰 count／plan 的晚到結果。"""
+    from app.views.moddb.smart_review_dialog import SmartReviewDialog
+
+    dialog = SmartReviewDialog(_sync_page(), lambda: db, "1.21.1", None)
+    panel = dialog.run_panel
+    panel._scope_loading = False
+    panel._debounce.call = lambda *_a, **_k: None
+    pending = []
+
+    def hold(work, done, **kwargs):
+        pending.append((work, done, kwargs))
+        return True
+
+    panel.ctx.run_background = hold
+    panel.refresh_estimate()
+    old_count_done, old_plan_done = pending[0][1], pending[1][1]
+    panel._scope_changed()
+    panel.refresh_estimate()
+    new_count_done, new_plan_done = pending[2][1], pending[3][1]
+
+    old_count_done(999, None)
+    old_plan_done(
+        {
+            "selected_count": 999,
+            "reused_count": 0,
+            "estimated_to_process_count": 999,
+            "pending_review_count": 0,
+            "history_runs_consulted": 0,
+        },
+        None,
+    )
+    assert panel._total is None
+    assert panel._plan_preview_result is None
+
+    new_count_done(12, None)
+    new_plan_done(
+        {
+            "selected_count": 12,
+            "reused_count": 1,
+            "estimated_to_process_count": 11,
+            "pending_review_count": 0,
+            "history_runs_consulted": 1,
+        },
+        None,
+    )
+    assert panel._total == 12
+    assert panel._plan_preview_result["selected_count"] == 12
+
+
+def test_scope_and_preview_invalidations_follow_one_contract(db, monkeypatch):
+    """一般條件變更依同一契約淘汰對應的計數與歷史預估。"""
+    from app.views.moddb.smart_review_dialog import SmartReviewDialog
+
+    dialog = SmartReviewDialog(_sync_page(), lambda: db, "1.21.1", None)
+    panel = dialog.run_panel
+    panel._scope_loading = False
+    panel._debounce.call = lambda *_args, **_kwargs: None
+    panel._total = 70_000
+    panel._plan_preview_result = {"selected_count": 70_000}
+
+    panel._model_changed()
+    assert panel._total == 70_000
+    assert panel._plan_preview_result is None
+
+    panel._plan_preview_result = {"selected_count": 70_000}
+    panel._limit_changed()
+    assert panel._total == 70_000
+    assert panel._plan_preview_result is None
+
+    panel._scope_changed()
+    assert panel._total is None
+    assert panel._plan_preview_result is None
+
+
+def test_batch_size_recalculates_batches_without_full_history_reload(db, monkeypatch):
+    """只改每批大小時只重算畫面文字，不重新查 70k 候選或歷史。"""
+    from app.views.moddb.smart_review_dialog import SmartReviewDialog
+
+    dialog = SmartReviewDialog(_sync_page(), lambda: db, "1.21.1", None)
+    panel = dialog.run_panel
+    panel._total = 70_000
+    panel._plan_preview_result = {
+        "selected_count": 70_000,
+        "reused_count": 100,
+        "estimated_to_process_count": 69_900,
+        "pending_review_count": 0,
+        "history_runs_consulted": 2,
+    }
+    calls = []
+    monkeypatch.setattr(panel.ctx, "run_background", lambda *a, **k: calls.append(k))
+    panel.batch_field.value = "50"
+    panel.batch_field.on_change(None)
+
+    assert calls == []
+    assert panel._total == 70_000
+    assert "每批 50 筆" in panel.estimate_text.value
+
+
+def test_launch_request_is_shared_by_new_and_resumed_run(db, monkeypatch):
+    """新批次與續跑都經過同一個 launch lifecycle。"""
+    from app.views.moddb.smart_review_dialog import SmartReviewDialog
+
+    dialog = SmartReviewDialog(_sync_page(), lambda: db, "1.21.1", None)
+    panel = dialog.run_panel
+    launched = []
+    monkeypatch.setattr(
+        panel, "_launch_request", lambda request: launched.append(request)
+    )
+    panel._start()
+    assert panel.resume_run(
+        "run-resume",
+        model="resume-model",
+        batch_size=20,
+        resume_preview=_resume_preview(),
+    )
+
+    assert len(launched) == 2
+    assert launched[0].resume_run_id is None
+    assert launched[1].resume_run_id == "run-resume"
+
+
+def test_failed_launch_preserves_previous_log_and_result(db, monkeypatch):
+    """job 啟動失敗不應清除既有 log 或完成結果。"""
+    from app.views.moddb.smart_review_dialog import SmartReviewDialog
+
+    dialog = SmartReviewDialog(_sync_page(), lambda: db, "1.21.1", None)
+    panel = dialog.run_panel
+    cleared = []
+    panel.log_view.clear = lambda: cleared.append(True)
+    panel.result_box.visible = True
+    monkeypatch.setattr(panel.job, "start", lambda *_a, **_k: "launch failed")
+
+    error = panel._launch_request(panel._request())
+
+    assert error == "launch failed"
+    assert cleared == []
+    assert panel.result_box.visible is True
+
+    def raise_launch(*_args, **_kwargs):
+        """模擬工作執行緒建立時的例外。"""
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(panel.job, "start", raise_launch)
+    assert panel._launch_request(panel._request()) == "智慧校對無法啟動：boom"
+    assert cleared == []
+
+
+def test_close_reopen_discards_old_result_but_preserves_job(db):
+    """關閉視窗後舊查詢結果失效，但背景 job 仍保留。"""
+    from app.views.moddb.smart_review_dialog import SmartReviewDialog
+
+    page = _sync_page()
+    dialog = SmartReviewDialog(page, lambda: db, "1.21.1", None)
+    dialog.job.state = SmartReviewJobState(phase="running")
+    ticket = dialog.ctx.begin_request("smart_review_candidate_count")
+    dialog._teardown()
+
+    assert dialog.ctx.is_current(ticket) is False
+    assert dialog.job.running is True
 
 
 def test_dialog_close_keeps_background_job_running(db):

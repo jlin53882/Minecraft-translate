@@ -6,7 +6,6 @@ import asyncio
 import math
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
 
 import flet as ft
 
@@ -33,6 +32,7 @@ from app.views.moddb.smart_review_job import (
 from app.views.moddb.smart_review_run_planning import (
     SmartReviewPlanningController,
     SmartReviewRunPlanningMixin,
+    build_smart_review_request,
 )
 from app.views.moddb.smart_review_run_status import (
     run_status_color,
@@ -65,13 +65,10 @@ class SmartReviewRunPanel(SmartReviewRunPlanningMixin):
         self.on_open_review = on_open_review
         self.on_hide = on_hide
         self._total: int | None = None
-        self._estimate_seq = 0
-        self._scope_seq = 0
         self._scope_loading = False
         self._attached = False
         self._poller = PollerHandle()
         self._debounce = Debouncer(lambda: ctx.page, 0.6)
-        self._scope_debounce = Debouncer(lambda: ctx.page, 0.15)
         self._last_sync_signature: tuple[object, ...] | None = None
         self._scope_modules: tuple[str, ...] = ()
         self._scope_sources_by_mod: dict[str | None, tuple[int, ...]] = {}
@@ -158,7 +155,7 @@ class SmartReviewRunPanel(SmartReviewRunPlanningMixin):
             "本次處理上限（筆，0=不限）",
             value="1000",
             width=190,
-            on_change=lambda _e: self._scope_changed(),
+            on_change=self._limit_changed,
         )
         self.batch_field = kit.text_field(
             "每批（筆）",
@@ -210,15 +207,16 @@ class SmartReviewRunPanel(SmartReviewRunPlanningMixin):
 
     def _start_scope_options_load(self) -> None:
         """背景載入範圍選項，避免開啟或切換條件時阻塞 UI 執行緒。"""
-        self._invalidate_plan_preview()
-        self._scope_seq += 1
-        seq = self._scope_seq
+        self._invalidate_scope_queries(
+            candidate_scope_changed=True,
+            reason="版本或類型",
+        )
+        ticket = self.ctx.begin_request(self._SCOPE_OPTIONS_REQUEST_DOMAIN)
         version = self.version_dd.value
         kind = self.kind_dd.value
         kind_value = None if kind in (None, "", "__all__") else str(kind)
         self._scope_loading = True
         self._total = None
-        self._estimate_seq += 1
         self.estimate_text.value = "正在載入可用的模組與來源…"
         self.estimate_text.color = C.MUTED
         if self._attached:
@@ -230,7 +228,7 @@ class SmartReviewRunPanel(SmartReviewRunPlanningMixin):
 
         def done(result, error: str | None) -> None:
             """只套用仍屬於最新範圍條件的背景結果。"""
-            if seq != self._scope_seq:
+            if not self.ctx.is_current(ticket):
                 return
             self._scope_loading = False
             if error:
@@ -251,7 +249,7 @@ class SmartReviewRunPanel(SmartReviewRunPlanningMixin):
             done,
             name="載入智慧校對範圍選項",
             presentation=OperationPresentation.MAINTENANCE,
-            still_valid=lambda: seq == self._scope_seq,
+            still_valid=lambda: self.ctx.is_current(ticket),
         )
 
     def _apply_scope_options(
@@ -479,13 +477,14 @@ class SmartReviewRunPanel(SmartReviewRunPlanningMixin):
 
     def _scope_changed(self, _e=None) -> None:
         """範圍變更後立即清除舊筆數，再以短暫 debounce 背景重新估算。"""
-        self._invalidate_plan_preview()
-        self._total = None
-        self._estimate_seq += 1
+        self._invalidate_scope_queries(
+            candidate_scope_changed=True,
+            reason="校對範圍",
+        )
         if self._scope_loading:
             self._update_estimate_text()
             return
-        self._scope_debounce.call(self.refresh_estimate)
+        self._debounce.call(self.refresh_estimate)
 
     def _scope_values(self) -> tuple[str | None, str | None, int | None, str]:
         """讀取模組、類型、來源與搜尋條件，並把「全部」轉成 None。"""
@@ -508,8 +507,7 @@ class SmartReviewRunPanel(SmartReviewRunPlanningMixin):
             return
         path, priority = database
         mod_id, kind, source, query = self._scope_values()
-        self._estimate_seq += 1
-        seq = self._estimate_seq
+        ticket = self.ctx.begin_request(self._CANDIDATE_COUNT_REQUEST_DOMAIN)
         self.estimate_text.value = "正在計算符合條件的候選筆數…"
         self.ctx.update()
 
@@ -528,6 +526,8 @@ class SmartReviewRunPanel(SmartReviewRunPlanningMixin):
 
         def done(total, error: str | None) -> None:
             """顯示筆數，或在查詢失敗時說明原因。"""
+            if not self.ctx.is_current(ticket):
+                return
             if error:
                 self._total = None
                 self.estimate_text.value = f"無法計算候選筆數：{error}"
@@ -540,7 +540,11 @@ class SmartReviewRunPanel(SmartReviewRunPlanningMixin):
             work,
             done,
             name="計算智慧校對候選筆數",
-            still_valid=lambda: seq == self._estimate_seq,
+            still_valid=lambda: (
+                self.ctx.is_current(ticket)
+                and not self._scope_loading
+                and not self.job.running
+            ),
         )
         self._refresh_plan_preview()
 
@@ -607,60 +611,30 @@ class SmartReviewRunPanel(SmartReviewRunPlanningMixin):
         *,
         model_override: str | None = None,
         batch_override: int | None = None,
-        scope_override: dict[str, Any] | None = None,
-        limit_override: int | None = None,
     ) -> SmartReviewRequest:
         """依畫面建立校對請求；條件不完整時丟出給使用者看的錯誤。"""
         database = self.ctx.database()
         if database is None:
             raise ValueError("目前沒有可用的 Mod 資料庫")
-        scope = scope_override if isinstance(scope_override, dict) else None
-        version = scope.get("version") if scope is not None else self.version_dd.value
         model = self.model_dd.value if model_override is None else model_override
-        if not version:
-            raise ValueError("請先選擇遊戲版本")
-        if not model:
-            raise ValueError("請先選擇校對模型（設定頁需啟用至少一個模型）")
-        limit = (
-            int(limit_override)
-            if limit_override is not None
-            else self._read_int(self.limit_field, minimum=0)
-        )
-        batch = (
-            self._read_int(self.batch_field)
-            if batch_override is None
-            else int(batch_override)
-        )
-        if limit is None:
-            raise ValueError("上限必須是 0 或正整數")
-        if limit < 0:
-            raise ValueError("上限必須是 0 或正整數")
-        if batch is None:
-            raise ValueError("每批必須是大於 0 的整數")
-        max_batch_size = get_smart_review_settings()["max_batch_size"]
-        if batch > max_batch_size:
-            raise ValueError(f"每批必須介於 1 與 {max_batch_size} 筆")
-        if scope is None:
-            mod_id, kind, source, query = self._scope_values()
-        else:
-            mod_id = scope.get("mod_id") or None
-            kind = scope.get("kind") or None
-            source = scope.get("effective_source")
-            query = str(scope.get("query") or "")
+        mod_id, kind, source, query = self._scope_values()
         path, priority = database
-        return SmartReviewRequest(
+        return build_smart_review_request(
             path=path,
             priority=priority,
-            model=str(model),
-            version=str(version),
+            model=model,
+            version=self.version_dd.value,
             mod_id=mod_id,
             kind=kind,
             effective_source=source,
             query=query,
-            limit=limit,
-            batch_size=batch,
+            limit=self.limit_field.value,
+            batch_size=(
+                self.batch_field.value if batch_override is None else batch_override
+            ),
             use_recent_history=bool(self.use_recent_history.value),
             skip_valid_history=bool(self.skip_valid_history.value),
+            max_batch_size=int(get_smart_review_settings()["max_batch_size"]),
         )
 
     def _start(self, _e=None) -> None:
@@ -675,17 +649,29 @@ class SmartReviewRunPanel(SmartReviewRunPlanningMixin):
             self.status_text.color = C.RED
             self.ctx.update()
             return
-        error = self.job.start(request, parent_callback=self.ctx.on_complete)
+        error = self._launch_request(request)
         if error:
             self.status_text.value = error
             self.status_text.color = C.RED
             self.ctx.update()
             return
+
+    def _launch_request(self, request: SmartReviewRequest) -> str | None:
+        """以同一個成功後生命週期啟動新批次或續跑批次。"""
+        if self.job.running:
+            return "智慧校對正在執行中。"
+        try:
+            error = self.job.start(request, parent_callback=self.ctx.on_complete)
+        except (AttributeError, RuntimeError) as exc:
+            return f"智慧校對無法啟動：{exc}"
+        if error:
+            return error
         self.log_view.clear()
         self.result_box.visible = False
         self._last_sync_signature = None
         self._render_running()
         self._start_polling()
+        return None
 
     def _stop(self, _e=None) -> None:
         """要求停止後續批次。"""
@@ -720,10 +706,11 @@ class SmartReviewRunPanel(SmartReviewRunPlanningMixin):
     def detach(self) -> None:
         """視窗關閉時停止輪詢並取消登記；背景任務本身不受影響。"""
         self._attached = False
-        self._scope_debounce.cancel()
+        self._invalidate_scope_queries(
+            candidate_scope_changed=True,
+            reason="視窗關閉",
+        )
         self._debounce.cancel()
-        self._scope_seq += 1
-        self._estimate_seq += 1
         self._poller.stop()
         self.job.remove_finish_listener(self._on_finished)
 

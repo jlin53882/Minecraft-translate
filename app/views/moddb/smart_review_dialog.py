@@ -232,9 +232,15 @@ class SmartReviewDialog:
         self._show_resume_loading(run_id)
 
         def work() -> dict[str, Any]:
-            return preview_moddb_smart_review_resume_from_path(
+            result = preview_moddb_smart_review_resume_from_path(
                 path, priority, str(run_id)
             )
+            # 續跑確認資料與資料庫身分綁定；切換資料庫後即使 UI 已取得舊
+            # preview，執行頁也會拒絕把它投影到新的資料庫。
+            result["_database_identity"] = self.ctx.db_identity(
+                path, include_generation=False
+            )
+            return result
 
         def done(result: dict[str, Any] | None, error: str | None) -> None:
             if seq != self._resume_seq:
@@ -409,9 +415,6 @@ class SmartReviewDialog:
             self._resume_error_text.color = C.RED
             self.page.update()
             return
-        self._close_resume_dialog()
-        self._show_tab("run")
-        self.ctx.update()
         started = self.run_panel.resume_run(
             run_id,
             model=model,
@@ -419,6 +422,9 @@ class SmartReviewDialog:
             resume_preview=preview,
         )
         if started:
+            self._close_resume_dialog()
+            self._show_tab("run")
+            self.ctx.update()
             show_snack(
                 self.page,
                 "已切換到執行頁面，正在繼續未完成校對。",
