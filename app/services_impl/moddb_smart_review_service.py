@@ -44,7 +44,11 @@ from translation_tool.translation_db.smart_review import (
     SMART_REVIEW_MAX_BATCH_SIZE as _SMART_REVIEW_MAX_BATCH_SIZE,
 )
 from translation_tool.translation_db.smart_review_history import SmartReviewHistoryStore
-from translation_tool.translation_db.smart_review_planner import plan_new_smart_review
+from translation_tool.translation_db.smart_review_planner import (
+    SmartReviewPlanInput,
+    SmartReviewPlanMode,
+    plan_new_smart_review,
+)
 from translation_tool.translation_db.smart_review_status import SmartReviewStatus
 from translation_tool.utils.config_manager import get_smart_review_settings, load_config
 
@@ -158,35 +162,43 @@ def preview_moddb_smart_review_plan_from_path(
     review_status: str = "unreviewed",
     query: str | None = None,
     limit: int = 1000,
+    batch_size: int | None = None,
     use_recent_history: bool = True,
     skip_valid_history: bool = True,
     model: str | None = None,
     progress: Callable[[str], None] | None = None,
-) -> dict[str, int]:
+) -> dict[str, Any]:
     """回傳唯讀歷史規劃 KPI，不呼叫 provider。
 
     預估只讀取 CAS 欄位，不建立每筆完整 local context；真正執行仍由
     ``run_smart_review`` 建立完整 context。這讓預估保持快速，結果屬於可重用數量
-    的估算；``progress`` 只回報階段與筆數，不包含候選內容。
+    的估算，不能當作實際送出的精確數量；``progress`` 只回報階段與筆數，不包含
+    候選內容。
     """
     notify = progress if callable(progress) else lambda _message: None
+    plan_input = SmartReviewPlanInput(
+        version=version,
+        mod_id=mod_id,
+        kind=kind,
+        effective_source=effective_source,
+        review_status=review_status,
+        query=query,
+        limit=limit,
+        provider=get_translation_provider(),
+        model=model,
+        use_recent_history=use_recent_history,
+        skip_valid_history=skip_valid_history,
+    )
     db = _open(path, priority, readonly=True)
     try:
         notify("正在讀取目前符合範圍的候選…")
         snapshots = db.smart_review_candidates(
-            version=version,
-            mod_id=mod_id,
-            kind=kind,
-            effective_source=effective_source,
-            review_status=review_status,
-            query=query,
-            limit=limit,
-            include_context=False,
+            **plan_input.candidate_kwargs(include_context=False)
         )
         notify(
             f"已讀取目前候選 {len(snapshots):,} 筆，正在讀取目前版本最近兩份歷史 JSON…"
         )
-        if use_recent_history:
+        if plan_input.use_recent_history:
             history = SmartReviewHistoryStore(db.path)
 
             def history_progress(run_count: int, candidate_count: int) -> None:
@@ -207,21 +219,27 @@ def preview_moddb_smart_review_plan_from_path(
         plan = plan_new_smart_review(
             snapshots,
             historical,
-            skip_valid_history=skip_valid_history,
+            skip_valid_history=plan_input.skip_valid_history,
             history_runs_consulted=consulted,
-            provider=get_translation_provider(),
-            model=model,
-            compare_context=False,
+            plan_input=plan_input,
+            mode=SmartReviewPlanMode.FAST_ESTIMATE,
         )
-        return {
-            "selected_count": len(plan.selected),
-            "reused_count": plan.reused_count,
-            "actual_ai_count": plan.actual_ai_count,
-            "history_runs_consulted": plan.history_runs_consulted,
-            "pending_review_count": plan.pending_review_count,
-            "applied_skipped_count": plan.applied_skipped_count,
-            "no_change_skipped_count": plan.no_change_skipped_count,
-        }
+        settings = get_smart_review_settings()
+        effective_batch_size = (
+            int(batch_size)
+            if batch_size is not None
+            else int(settings["default_batch_size"])
+        )
+        summary = plan.summary(batch_size=effective_batch_size).as_dict()
+        summary.update(
+            {
+                "estimated_to_process_count": summary.pop("to_process_count"),
+                "estimated_batch_count": summary.pop("batch_count"),
+                "applied_skipped_count": plan.applied_skipped_count,
+                "no_change_skipped_count": plan.no_change_skipped_count,
+            }
+        )
+        return summary
     finally:
         db.close()
 

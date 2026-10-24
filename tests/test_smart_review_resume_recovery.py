@@ -17,7 +17,10 @@ from translation_tool.translation_db.smart_review import (
     run_smart_review,
 )
 from translation_tool.translation_db.smart_review_history import SmartReviewHistoryStore
-from translation_tool.translation_db.smart_review_planner import plan_new_smart_review
+from translation_tool.translation_db.smart_review_planner import (
+    SmartReviewPlanMode,
+    plan_new_smart_review,
+)
 from translation_tool.translation_db.smart_review_runs import _resume_counts
 from translation_tool.translation_db.smart_review_status import SmartReviewStatus
 
@@ -307,6 +310,79 @@ def test_planner_preview_can_compare_cas_without_context():
 
     assert exact.reused_count == 0
     assert preview.reused_count == 1
+    assert exact.mode is SmartReviewPlanMode.EXACT_EXECUTION
+    assert exact.is_authoritative is True
+    assert preview.mode is SmartReviewPlanMode.FAST_ESTIMATE
+    assert preview.is_authoritative is False
+
+
+def test_new_run_passes_selected_version_to_history_reader(tmp_path, monkeypatch):
+    """精確執行讀取最近歷史時，版本範圍必須與候選選取一致。"""
+    db = TranslationDB(tmp_path / "history-version-forwarding.db")
+    db.write_back(
+        "1.21.1",
+        [WriteBackItem(KIND_LANG, "demo", "hello", "Hello", "你好")],
+        fill_other_versions=False,
+    )
+    seen: dict[str, object] = {}
+    original = SmartReviewHistoryStore.recent_candidate_payloads
+
+    def record_version(self, *args, **kwargs):
+        seen.update(kwargs)
+        return original(self, *args, **kwargs)
+
+    monkeypatch.setattr(
+        SmartReviewHistoryStore, "recent_candidate_payloads", record_version
+    )
+    monkeypatch.setattr(
+        "translation_tool.translation_db.smart_review_provider.call_gemini_requests",
+        lambda **kwargs: _response(kwargs["payload"]["items"]),
+    )
+
+    run_smart_review(
+        db,
+        model_name="gemini-test",
+        api_key="test-key",
+        version="1.21.1",
+        limit=1,
+        batch_size=1,
+        use_recent_history=True,
+        skip_valid_history=True,
+    )
+
+    assert seen["max_runs"] == 2
+    assert seen["version"] == "1.21.1"
+    db.close()
+
+
+def test_preview_reports_estimate_mode_and_batch_count(tmp_path):
+    """預估 service 不得把快速結果標成實際送出數量。"""
+    from app.services_impl.moddb_smart_review_service import (
+        preview_moddb_smart_review_plan_from_path,
+    )
+
+    db = TranslationDB(tmp_path / "preview-plan-summary.db")
+    db.write_back(
+        "1.21.1",
+        [WriteBackItem(KIND_LANG, "demo", "hello", "Hello", "你好")],
+        fill_other_versions=False,
+    )
+    db.close()
+
+    summary = preview_moddb_smart_review_plan_from_path(
+        tmp_path / "preview-plan-summary.db",
+        (),
+        version="1.21.1",
+        limit=0,
+        batch_size=1,
+        use_recent_history=False,
+        model="gemini-test",
+    )
+
+    assert summary["mode"] == "fast_estimate"
+    assert summary["is_authoritative"] is False
+    assert summary["estimated_to_process_count"] == 1
+    assert summary["estimated_batch_count"] == 1
 
 
 def test_planner_does_not_reuse_history_without_provider_model_metadata():
@@ -892,5 +968,6 @@ def test_new_run_reuses_snapshot_valid_results_without_provider_call(
     assert calls == 1
     assert second.metrics["reused_count"] == 2
     assert second.metrics["actual_ai_count"] == 0
+    assert second.metrics["plan_mode"] == "exact_execution"
     assert second.processed_count == second.selected_count == 2
     db.close()

@@ -22,7 +22,11 @@ from translation_tool.translation_db.models import (
 )
 from translation_tool.translation_db.schema import SRC_AI
 from translation_tool.translation_db.smart_review_history import SmartReviewHistoryStore
-from translation_tool.translation_db.smart_review_planner import plan_new_smart_review
+from translation_tool.translation_db.smart_review_planner import (
+    SmartReviewPlanInput,
+    SmartReviewPlanMode,
+    plan_new_smart_review,
+)
 from translation_tool.translation_db.smart_review_prompt import (
     build_smart_review_payload,
     smart_review_response_schema,
@@ -629,7 +633,7 @@ def run_smart_review(
         cancel_check=cancel_check,
     )
     selection_started = time.monotonic()
-    snapshots = db.smart_review_candidates(
+    plan_input = SmartReviewPlanInput(
         version=version,
         mod_id=mod_id,
         kind=kind,
@@ -637,23 +641,30 @@ def run_smart_review(
         review_status=review_status,
         query=query,
         limit=limit,
+        provider=provider,
+        model=model_name,
+        use_recent_history=use_recent_history,
+        skip_valid_history=skip_valid_history,
         require_reviewed_reference=require_reviewed_reference,
         prioritize_named_keys=prioritize_named_keys,
+    )
+    snapshots = db.smart_review_candidates(
+        **plan_input.candidate_kwargs(include_context=True)
     )
     selection_seconds = round(time.monotonic() - selection_started, 3)
     history_runs_consulted = 0
     historical_candidates: list[dict[str, Any]] = []
-    if use_recent_history:
+    if plan_input.use_recent_history:
         history_runs_consulted, historical_candidates = SmartReviewHistoryStore(
             db.path
-        ).recent_candidate_payloads(max_runs=2)
+        ).recent_candidate_payloads(max_runs=2, version=plan_input.version)
     plan = plan_new_smart_review(
         snapshots,
         historical_candidates,
-        skip_valid_history=skip_valid_history,
+        skip_valid_history=plan_input.skip_valid_history,
         history_runs_consulted=history_runs_consulted,
-        provider=provider,
-        model=model_name,
+        plan_input=plan_input,
+        mode=SmartReviewPlanMode.EXACT_EXECUTION,
     )
     batch_size = max(
         1,
@@ -666,16 +677,7 @@ def run_smart_review(
         batch_size=batch_size,
         limit=limit,
         version=version,
-        scope={
-            "version": version,
-            "mod_id": mod_id,
-            "kind": kind,
-            "effective_source": effective_source,
-            "review_status": review_status,
-            "query": query or "",
-            "require_reviewed_reference": require_reviewed_reference,
-            "prioritize_named_keys": prioritize_named_keys,
-        },
+        scope=plan_input.scope(),
         task_id=task_id,
         progress=progress,
         workflow_started=workflow_started,
@@ -686,6 +688,7 @@ def run_smart_review(
         history_runs_consulted=plan.history_runs_consulted,
         record_snapshots=plan.selected,
         initial_metrics={
+            "plan_mode": plan.mode.value,
             "applied_skipped_count": plan.applied_skipped_count,
             "no_change_skipped_count": plan.no_change_skipped_count,
             "pending_review_count": plan.pending_review_count,

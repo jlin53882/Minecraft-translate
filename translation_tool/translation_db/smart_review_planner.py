@@ -1,7 +1,8 @@
 """可恢復智慧校對的歷史規劃。
 
 這裡只做純規劃，不呼叫 provider，也不修改翻譯。新 run 最多讀取兩份
-可解析的 JSON manifest；歷史候選只有在 CAS 快照完全相同時才可重用。
+可解析的 JSON manifest；精確執行模式只有在完整 CAS（含 local context）快照
+完全相同時才可重用。快速預估模式可以略過 context，只能作為估算。
 """
 
 from __future__ import annotations
@@ -9,6 +10,7 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from enum import Enum
 from typing import Any
 
 from translation_tool.translation_db.models import SmartReviewSnapshot
@@ -33,6 +35,64 @@ _SNAPSHOT_KEYS = (
     "manual_revision",
     "context",
 )
+
+
+class SmartReviewPlanMode(str, Enum):
+    """指出規劃結果是快速預估，還是可直接執行的精確規劃。"""
+
+    FAST_ESTIMATE = "fast_estimate"
+    EXACT_EXECUTION = "exact_execution"
+
+
+@dataclass(frozen=True)
+class SmartReviewPlanInput:
+    """新批次規劃共用的不可變範圍輸入。
+
+    預估與實際執行都由同一組欄位建立候選與歷史查詢；差異只在規劃模式：
+    快速預估可略過 local context，精確執行必須載入並比對完整 context。
+    """
+
+    version: str | None
+    mod_id: str | None
+    kind: str | None
+    effective_source: int | None
+    review_status: str
+    query: str | None
+    limit: int
+    provider: str | None
+    model: str | None
+    use_recent_history: bool
+    skip_valid_history: bool
+    require_reviewed_reference: bool = False
+    prioritize_named_keys: bool = False
+
+    def candidate_kwargs(self, *, include_context: bool) -> dict[str, Any]:
+        """回傳預估與實際執行共用的候選查詢參數。"""
+        return {
+            "version": self.version,
+            "mod_id": self.mod_id,
+            "kind": self.kind,
+            "effective_source": self.effective_source,
+            "review_status": self.review_status,
+            "query": self.query,
+            "limit": self.limit,
+            "include_context": include_context,
+            "require_reviewed_reference": self.require_reviewed_reference,
+            "prioritize_named_keys": self.prioritize_named_keys,
+        }
+
+    def scope(self) -> dict[str, Any]:
+        """回傳要保存到 run record 的穩定範圍快照。"""
+        return {
+            "version": self.version,
+            "mod_id": self.mod_id,
+            "kind": self.kind,
+            "effective_source": self.effective_source,
+            "review_status": self.review_status,
+            "query": self.query or "",
+            "require_reviewed_reference": self.require_reviewed_reference,
+            "prioritize_named_keys": self.prioritize_named_keys,
+        }
 
 
 def _fingerprint_value(key: str, value: Any) -> Any:
@@ -114,6 +174,64 @@ class SmartReviewPlan:
     no_change_skipped_count: int = 0
     pending_review_count: int = 0
     invalidated_count: int = 0
+    mode: SmartReviewPlanMode = SmartReviewPlanMode.EXACT_EXECUTION
+
+    @property
+    def to_process_count(self) -> int:
+        """回傳本計畫未重用、需要送入 provider 的候選數。"""
+        return len(self.to_process)
+
+    @property
+    def is_authoritative(self) -> bool:
+        """只有精確執行計畫可以作為實際送出數量的依據。"""
+        return self.mode is SmartReviewPlanMode.EXACT_EXECUTION
+
+    def summary(self, *, batch_size: int) -> SmartReviewPlanSummary:
+        """建立供 UI／log 使用的計畫摘要，不混淆預估與實際數量。"""
+        normalized_batch = max(1, int(batch_size))
+        return SmartReviewPlanSummary(
+            mode=self.mode,
+            selected_count=len(self.selected),
+            reused_count=self.reused_count,
+            to_process_count=self.to_process_count,
+            pending_review_count=self.pending_review_count,
+            history_runs_consulted=self.history_runs_consulted,
+            batch_count=(self.to_process_count + normalized_batch - 1)
+            // normalized_batch
+            if self.to_process_count
+            else 0,
+        )
+
+
+@dataclass(frozen=True)
+class SmartReviewPlanSummary:
+    """不論快速預估或精確執行都可安全顯示的計畫摘要。"""
+
+    mode: SmartReviewPlanMode
+    selected_count: int
+    reused_count: int
+    to_process_count: int
+    pending_review_count: int
+    history_runs_consulted: int
+    batch_count: int
+
+    @property
+    def is_authoritative(self) -> bool:
+        """指出摘要是否來自真正執行前的完整 CAS 規劃。"""
+        return self.mode is SmartReviewPlanMode.EXACT_EXECUTION
+
+    def as_dict(self) -> dict[str, Any]:
+        """轉成 UI/service 可傳輸的摘要欄位。"""
+        return {
+            "mode": self.mode.value,
+            "is_authoritative": self.is_authoritative,
+            "selected_count": self.selected_count,
+            "reused_count": self.reused_count,
+            "to_process_count": self.to_process_count,
+            "pending_review_count": self.pending_review_count,
+            "history_runs_consulted": self.history_runs_consulted,
+            "batch_count": self.batch_count,
+        }
 
 
 def _choose_historical_result(
@@ -181,13 +299,30 @@ def plan_new_smart_review(
     history_runs_consulted: int,
     provider: str | None = None,
     model: str | None = None,
-    compare_context: bool = True,
+    compare_context: bool | None = None,
+    plan_input: SmartReviewPlanInput | None = None,
+    mode: SmartReviewPlanMode | None = None,
 ) -> SmartReviewPlan:
     """依最近歷史規劃可重用結果，限制由呼叫端保證為最近兩份 manifest。
 
-    ``compare_context=False`` 僅適用於不會送出模型請求的預估，讓預估不必
-    為數萬筆候選建立完整 local context；真正執行仍使用預設的完整 CAS 指紋。
+    ``FAST_ESTIMATE`` 僅適用於不會送出模型請求的預估，讓預估不必為數萬筆
+    候選建立完整 local context；``EXACT_EXECUTION`` 才能作為實際送出依據。
+    ``compare_context`` 保留給既有呼叫端，``False`` 等同快速預估、``True``
+    等同精確執行。
     """
+    if plan_input is not None:
+        provider = plan_input.provider
+        model = plan_input.model
+    legacy_mode = (
+        SmartReviewPlanMode.FAST_ESTIMATE
+        if compare_context is False
+        else SmartReviewPlanMode.EXACT_EXECUTION
+    )
+    if mode is None:
+        mode = legacy_mode
+    elif compare_context is not None and mode is not legacy_mode:
+        raise ValueError("compare_context 與 mode 指定了互相衝突的規劃模式")
+    include_context = mode is SmartReviewPlanMode.EXACT_EXECUTION
     candidates_by_fingerprint: dict[tuple[Any, ...], list[Mapping[str, Any]]] = {}
     for candidate in historical_candidates:
         history_provider = candidate.get("_history_provider")
@@ -197,7 +332,7 @@ def plan_new_smart_review(
         if model and str(history_model or "") != str(model):
             continue
         candidates_by_fingerprint.setdefault(
-            payload_fingerprint(candidate, include_context=compare_context), []
+            payload_fingerprint(candidate, include_context=include_context), []
         ).append(candidate)
 
     to_process: list[SmartReviewSnapshot] = []
@@ -208,7 +343,7 @@ def plan_new_smart_review(
     invalidated = 0
     for snapshot in snapshots:
         matching = candidates_by_fingerprint.get(
-            snapshot_fingerprint(snapshot, include_context=compare_context), []
+            snapshot_fingerprint(snapshot, include_context=include_context), []
         )
         result, status, reason = _choose_historical_result(
             matching,
@@ -248,11 +383,15 @@ def plan_new_smart_review(
         no_change_skipped_count=no_change_skipped,
         pending_review_count=pending_review,
         invalidated_count=invalidated,
+        mode=mode,
     )
 
 
 __all__ = [
     "SmartReviewPlan",
+    "SmartReviewPlanInput",
+    "SmartReviewPlanMode",
+    "SmartReviewPlanSummary",
     "payload_fingerprint",
     "plan_new_smart_review",
     "snapshot_fingerprint",
