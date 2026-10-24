@@ -1581,8 +1581,11 @@ def test_smart_review_reports_search_and_api_timing(db, monkeypatch):
         progress=events.append,
     )
 
-    assert events[0]["phase"] == "selection_complete"
-    assert "selection_seconds" in events[0]["timing"]
+    selection_events = [
+        event for event in events if event["phase"] == "selection_complete"
+    ]
+    assert len(selection_events) == 1
+    assert "selection_seconds" in selection_events[0]["timing"]
     batch_events = [event for event in events if event["phase"] == "batch_complete"]
     assert len(batch_events) == 2
     assert {"api_seconds", "parse_seconds", "result_write_seconds"} <= set(

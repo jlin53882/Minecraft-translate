@@ -337,6 +337,61 @@ class SmartReviewRunStoreMixin:
                 stale.add(ordinal)
         return stale
 
+    def _resume_current_payloads(
+        self,
+        candidates: Sequence[SmartReviewCandidate],
+        scope: dict[str, Any],
+        stale_context_ordinals: set[int],
+    ) -> dict[int, dict[str, Any] | None]:
+        """讀取續跑候選的輕量快照，必要時才重建完整 context。"""
+        current_by_ordinal: dict[int, dict[str, Any] | None] = {}
+        context_cache_reset = False
+        for candidate in candidates:
+            current = self._resume_current_payload(
+                candidate.entry_id,
+                scope,
+                include_context=False,
+            )
+            if current is not None:
+                cas_changed = _resume_cas_values(candidate) != _resume_cas_values(
+                    current
+                )
+                if cas_changed or candidate.ordinal in stale_context_ordinals:
+                    # CAS 或待重送候選引用的 DB context 變動時，才重建完整 context。
+                    if not context_cache_reset:
+                        # 續跑可能跨越另一個連線的資料庫寫入；不能沿用建立原始
+                        # snapshot 時留下的 query cache。
+                        self._smart_review_context_cache = {}
+                        context_cache_reset = True
+                    current = self._resume_current_payload(
+                        candidate.entry_id,
+                        scope,
+                        include_context=True,
+                    )
+                else:
+                    # 未變更的候選直接沿用 JSON 內的 context，避免續跑時為
+                    # 數萬筆候選重做相同的資料庫證據查詢。
+                    current["context"] = list(candidate.context)
+            current_by_ordinal[candidate.ordinal] = current
+        return current_by_ordinal
+
+    @staticmethod
+    def _merge_resume_metrics(
+        run: dict[str, Any], resume_stats: Mapping[str, Any]
+    ) -> None:
+        """把 projection 對帳結果累加回歷史批次 metrics。"""
+        run_metrics = run.get("metrics")
+        if not isinstance(run_metrics, dict):
+            run_metrics = {}
+        run_metrics = dict(run_metrics)
+        run_metrics["excluded_count"] = int(
+            run_metrics.get("excluded_count") or 0
+        ) + int(resume_stats.get("excluded") or 0)
+        run_metrics["invalidated_by_manual_edit_count"] = int(
+            run_metrics.get("invalidated_by_manual_edit_count") or 0
+        ) + int(resume_stats.get("invalidated") or 0)
+        run["metrics"] = run_metrics
+
     def prepare_smart_review_resume(
         self,
         run_id: str,
@@ -380,35 +435,11 @@ class SmartReviewRunStoreMixin:
                     ),
                 }
             )
-        context_cache_reset = False
-        current_by_ordinal = {}
-        for candidate in candidates:
-            current = self._resume_current_payload(
-                candidate.entry_id,
-                scope,
-                include_context=False,
-            )
-            if current is not None:
-                cas_changed = _resume_cas_values(candidate) != _resume_cas_values(
-                    current
-                )
-                if cas_changed or candidate.ordinal in stale_context_ordinals:
-                    # CAS 或待重送候選引用的 DB context 變動時，才重建完整 context。
-                    if not context_cache_reset:
-                        # 續跑可能跨越另一個連線的資料庫寫入；不能沿用建立原始
-                        # snapshot 時留下的 query cache。
-                        self._smart_review_context_cache = {}
-                        context_cache_reset = True
-                    current = self._resume_current_payload(
-                        candidate.entry_id,
-                        scope,
-                        include_context=True,
-                    )
-                else:
-                    # 未變更的候選直接沿用 JSON 內的 context，避免續跑時為
-                    # 數萬筆候選重做相同的資料庫證據查詢。
-                    current["context"] = list(candidate.context)
-            current_by_ordinal[candidate.ordinal] = current
+        current_by_ordinal = self._resume_current_payloads(
+            candidates,
+            scope,
+            stale_context_ordinals,
+        )
         resume_stats = history.prepare_resume(run_id, current_by_ordinal)
         if progress is not None:
             progress(
@@ -420,17 +451,7 @@ class SmartReviewRunStoreMixin:
                     "message": "續跑狀態已更新，正在重建待處理清單…",
                 }
             )
-        run_metrics = run.get("metrics")
-        if not isinstance(run_metrics, dict):
-            run_metrics = {}
-        run_metrics = dict(run_metrics)
-        run_metrics["excluded_count"] = int(
-            run_metrics.get("excluded_count") or 0
-        ) + int(resume_stats.get("excluded") or 0)
-        run_metrics["invalidated_by_manual_edit_count"] = int(
-            run_metrics.get("invalidated_by_manual_edit_count") or 0
-        ) + int(resume_stats.get("invalidated") or 0)
-        run["metrics"] = run_metrics
+        self._merge_resume_metrics(run, resume_stats)
         refreshed = history.list_candidates(run_id)
         snapshots = [
             _resume_snapshot(run_id, item)

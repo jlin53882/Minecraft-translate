@@ -783,6 +783,58 @@ def run_smart_review(
     return _finish_run(db, session, state, plan.selected)
 
 
+def _load_resume_preview(db: Any, run_id: str) -> dict[str, Any]:
+    """讀取並驗證續跑所需的歷史批次摘要。"""
+    history = SmartReviewHistoryStore(db.path)
+    if not history.exists(run_id):
+        raise ValueError("只有 JSON 歷史批次支援同一 run 復原")
+    run_preview = history.get_run(run_id)
+    if run_preview is None:
+        raise ValueError("找不到智慧校對歷史批次")
+    if str(run_preview.get("status") or "") == "running":
+        raise RuntimeError("智慧校對批次仍在執行中，不能重複啟動")
+    return run_preview
+
+
+def _resolve_resume_options(
+    run_preview: dict[str, Any],
+    model_name: str | None,
+    provider: str | None,
+    batch_size: int | None,
+) -> tuple[str, str, int]:
+    """將使用者覆寫值與歷史批次設定合併成有界執行選項。"""
+    resolved_model = str(model_name or run_preview.get("model") or "").strip()
+    resolved_provider = str(run_preview.get("provider") or provider or "gemini").strip()
+    if not resolved_model:
+        raise ValueError("智慧校對歷史批次沒有可恢復的模型")
+    settings = get_smart_review_settings()
+    requested_batch_size = (
+        batch_size
+        if batch_size is not None
+        else run_preview.get("batch_size") or settings["default_batch_size"]
+    )
+    bounded_batch_size = max(
+        1,
+        min(int(requested_batch_size), settings["max_batch_size"]),
+    )
+    return resolved_model, resolved_provider, bounded_batch_size
+
+
+def _prepare_resume_candidates(
+    db: Any,
+    run_id: str,
+    progress: Callable[[dict[str, Any]], None] | None,
+) -> tuple[list[SmartReviewSnapshot], dict[str, int], dict[str, Any]]:
+    """準備續跑候選並讓 store 回報聚合的 context 驗證階段。"""
+    _report_preparation(
+        progress,
+        phase="resume_loading",
+        message="正在讀取續跑歷史並驗證最新 context…",
+        run_id=run_id,
+    )
+    return db.prepare_smart_review_resume(run_id, progress=progress)
+
+
 def resume_smart_review(
     db,
     *,
@@ -798,31 +850,14 @@ def resume_smart_review(
 ) -> SmartReviewRunResult:
     """在原 run_id 上繼續 pending／失敗／人工變更後需重試的候選。"""
     workflow_started = time.monotonic()
-    history = SmartReviewHistoryStore(db.path)
-    if not history.exists(run_id):
-        raise ValueError("只有 JSON 歷史批次支援同一 run 復原")
-    run_preview = history.get_run(run_id)
-    if run_preview is None:
-        raise ValueError("找不到智慧校對歷史批次")
-    if str(run_preview.get("status") or "") == "running":
-        raise RuntimeError("智慧校對批次仍在執行中，不能重複啟動")
-    resolved_model = str(model_name or run_preview.get("model") or "").strip()
-    resolved_provider = str(run_preview.get("provider") or provider or "gemini").strip()
-    if not resolved_model:
-        raise ValueError("智慧校對歷史批次沒有可恢復的模型")
-    lm_config = lm_config if isinstance(lm_config, dict) else {}
-    settings = get_smart_review_settings()
-    batch_size = max(
-        1,
-        min(
-            int(
-                batch_size
-                if batch_size is not None
-                else run_preview.get("batch_size") or settings["default_batch_size"]
-            ),
-            settings["max_batch_size"],
-        ),
+    run_preview = _load_resume_preview(db, run_id)
+    resolved_model, resolved_provider, batch_size = _resolve_resume_options(
+        run_preview,
+        model_name,
+        provider,
+        batch_size,
     )
+    lm_config = lm_config if isinstance(lm_config, dict) else {}
     session = SmartReviewProviderSession.open(
         provider=resolved_provider,
         model_name=resolved_model,
@@ -830,16 +865,7 @@ def resume_smart_review(
         lm_config=lm_config,
         cancel_check=cancel_check,
     )
-    _report_preparation(
-        progress,
-        phase="resume_loading",
-        message="正在讀取續跑歷史並驗證最新 context…",
-        run_id=run_id,
-    )
-    snapshots, initial_counts, run = db.prepare_smart_review_resume(
-        run_id,
-        progress=progress,
-    )
+    snapshots, initial_counts, run = _prepare_resume_candidates(db, run_id, progress)
     scope = run.get("scope") if isinstance(run.get("scope"), dict) else {}
     selected_count = int(run.get("selected_count") or 0)
     selected_count = max(selected_count, len(snapshots))

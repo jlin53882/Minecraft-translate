@@ -576,6 +576,39 @@ def test_run_panel_shows_indeterminate_plan_progress_until_preview_finishes(
     assert panel.plan_progress_bar.visible is False
 
 
+def test_plan_preview_invalid_batch_does_not_leave_loading_state(db):
+    """無效批次大小不能讓沒有背景工作的預估進度條持續顯示。"""
+    from app.views.moddb.smart_review_dialog import SmartReviewDialog
+
+    dialog = SmartReviewDialog(_sync_page(), lambda: db, "1.21.1", None)
+    panel = dialog.run_panel
+    panel._scope_loading = False
+    panel.plan_progress_bar.visible = True
+    panel.batch_field.value = "0"
+
+    panel._refresh_plan_preview()
+
+    assert panel.plan_progress_bar.visible is False
+    assert "每批必須是大於 0 的整數" in panel.estimate_text.value
+
+
+def test_plan_preview_start_failure_clears_loading_state(db, monkeypatch):
+    """背景預估無法啟動時要顯示錯誤，而不是留下無限 loading。"""
+    from app.views.moddb.smart_review_dialog import SmartReviewDialog
+
+    dialog = SmartReviewDialog(_sync_page(), lambda: db, "1.21.1", None)
+    panel = dialog.run_panel
+    panel._scope_loading = False
+    monkeypatch.setattr(
+        panel._planning_controller, "refresh", lambda *args, **kwargs: False
+    )
+
+    panel._refresh_plan_preview()
+
+    assert panel.plan_progress_bar.visible is False
+    assert "無法啟動預估工作" in panel.plan_preview_text.value
+
+
 def test_dialog_open_review_switches_tab_and_loads_run(db, monkeypatch):
     """驗證從執行結果前往審查會切分頁並載入該批次。"""
     from app.views.moddb.smart_review_dialog import SmartReviewDialog

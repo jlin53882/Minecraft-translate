@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from copy import deepcopy
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -470,6 +470,52 @@ class SmartReviewRunPlanningMixin:
             tone="em",
         )
 
+    def _set_plan_preview_loading(self) -> None:
+        self.plan_preview_text.value = "正在讀取候選與目前版本最近兩份歷史 JSON…"
+        self.plan_preview_text.color = C.MUTED
+        self.plan_progress_bar.value = None
+        self.plan_progress_bar.visible = True
+        self.ctx.update()
+
+    def _hide_plan_preview_loading(self) -> None:
+        """輸入無效或背景工作未啟動時，清除不再有效的 loading 狀態。"""
+        self.plan_progress_bar.visible = False
+        self.plan_progress_bar.value = 0.0
+
+    def _show_plan_preview_progress(self, message: str) -> None:
+        self.plan_progress_bar.visible = True
+        self.plan_progress_bar.value = None
+        self.plan_preview_text.value = message
+        self.plan_preview_text.color = C.MUTED
+        self.ctx.update()
+
+    def _finish_plan_preview(
+        self,
+        result: dict[str, Any] | None,
+        error: str | None,
+        still_valid: Callable[[], bool],
+    ) -> None:
+        if not still_valid():
+            return
+        if error:
+            self._plan_preview_result = None
+            self.plan_progress_bar.visible = False
+            self.plan_preview_text.value = f"無法取得預估：{error}"
+            self.plan_preview_text.color = C.RED
+        else:
+            self._plan_preview_result = result
+            self.plan_progress_bar.visible = False
+            self.plan_preview_text.value = (
+                f"快速預估範圍 {result['selected_count']:,} 筆；歷史重用 "
+                f"{result['reused_count']:,}；估算送 AI "
+                f"{result['estimated_to_process_count']:,}；待人工審查 "
+                f"{result['pending_review_count']:,}；讀取同版本歷史 "
+                f"{result['history_runs_consulted']} 份歷史；開始執行前會重新計算精確計畫。"
+            )
+            self.plan_preview_text.color = C.MUTED
+            self._update_estimate_text(update=False)
+        self.ctx.update()
+
     def _refresh_plan_preview(self) -> None:
         """以同一個 planner 讀取歷史 KPI；預覽不會呼叫 provider。"""
         self._invalidate_scope_queries(
@@ -479,20 +525,17 @@ class SmartReviewRunPlanningMixin:
         database = self.ctx.database()
         version = self.version_dd.value
         if self._scope_loading or self.job.running or database is None or not version:
+            self._hide_plan_preview_loading()
             return
         limit = self._read_int(self.limit_field, minimum=0)
         if limit is None:
+            self._hide_plan_preview_loading()
             return
         path, priority = database
         mod_id, kind, source, query = self._scope_values()
         use_recent_history = bool(self.use_recent_history.value)
         skip_valid_history = bool(self.skip_valid_history.value)
         model = str(self.model_dd.value or "")
-        self.plan_preview_text.value = "正在讀取候選與目前版本最近兩份歷史 JSON…"
-        self.plan_preview_text.color = C.MUTED
-        self.plan_progress_bar.value = None
-        self.plan_progress_bar.visible = True
-        self.ctx.update()
 
         def still_valid() -> bool:
             return (
@@ -501,8 +544,10 @@ class SmartReviewRunPlanningMixin:
 
         batch = self._read_int(self.batch_field)
         if batch is None:
+            self._hide_plan_preview_loading()
             self._update_estimate_text()
             return
+        self._set_plan_preview_loading()
         request = SmartReviewPlanPreviewRequest(
             path=path,
             priority=priority,
@@ -518,41 +563,20 @@ class SmartReviewRunPlanningMixin:
             model=model,
         )
 
-        def show_progress(message: str) -> None:
-            self.plan_progress_bar.visible = True
-            self.plan_progress_bar.value = None
-            self.plan_preview_text.value = message
-            self.plan_preview_text.color = C.MUTED
-            self.ctx.update()
-
-        def done(result: dict[str, Any] | None, error: str | None) -> None:
-            if not still_valid():
-                return
-            if error:
-                self._plan_preview_result = None
-                self.plan_progress_bar.visible = False
-                self.plan_preview_text.value = f"無法取得預估：{error}"
-                self.plan_preview_text.color = C.RED
-            else:
-                self._plan_preview_result = result
-                self.plan_progress_bar.visible = False
-                self.plan_preview_text.value = (
-                    f"快速預估範圍 {result['selected_count']:,} 筆；歷史重用 "
-                    f"{result['reused_count']:,}；估算送 AI "
-                    f"{result['estimated_to_process_count']:,}；待人工審查 "
-                    f"{result['pending_review_count']:,}；讀取同版本歷史 "
-                    f"{result['history_runs_consulted']} 份歷史；開始執行前會重新計算精確計畫。"
-                )
-                self.plan_preview_text.color = C.MUTED
-                self._update_estimate_text(update=False)
-            self.ctx.update()
-
-        self._planning_controller.refresh(
+        started = self._planning_controller.refresh(
             request,
             still_valid=still_valid,
-            on_progress=show_progress,
-            on_done=done,
+            on_progress=self._show_plan_preview_progress,
+            on_done=lambda result, error: self._finish_plan_preview(
+                result, error, still_valid
+            ),
         )
+        if not started:
+            self._finish_plan_preview(
+                None,
+                "無法啟動預估工作，請稍後再試。",
+                still_valid,
+            )
 
     @staticmethod
     def _control_options(control: ft.Dropdown) -> list[tuple[str, str]]:
