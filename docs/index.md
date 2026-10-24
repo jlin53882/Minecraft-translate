@@ -32,6 +32,7 @@
 - [`page_flows/README.md`](page_flows/README.md)：頁面操作到背景工作與結果回到 UI 的流程圖。
 - [`developer-guide/smart-review-status.md`](developer-guide/smart-review-status.md)：智慧校對候選狀態機、允許的轉移與行程內快取清除入口。
 - [`developer-guide/smart-review-history-storage.md`](developer-guide/smart-review-history-storage.md)：智慧校對歷史 JSON 的檔案格式、sidecar、schema 版本與 migration、檢查／修復／備份／清理工具與保留策略。
+- [`developer-guide/smart-review-long-term-maintainability.md`](developer-guide/smart-review-long-term-maintainability.md)：Smart Review 的長期維護 backlog、風險邊界與分階段演進建議。
 - [`developer-guide/lm-token-budget.md`](developer-guide/lm-token-budget.md)：翻譯批次的 token 預算、估算器、切批演算法與校正限制。
 - [`developer-guide/operation-lifecycle.md`](developer-guide/operation-lifecycle.md)、[`developer-guide/worker-thread-audit.md`](developer-guide/worker-thread-audit.md)：長任務、取消、關閉與 worker/UI 邊界。
 - [`developer-guide/jar-pipeline.md`](developer-guide/jar-pipeline.md)、[`developer-guide/translation-engine-skeleton.md`](developer-guide/translation-engine-skeleton.md)：引擎資料流與共用翻譯骨架。
