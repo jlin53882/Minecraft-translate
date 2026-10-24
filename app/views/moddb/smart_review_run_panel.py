@@ -30,7 +30,10 @@ from app.views.moddb.smart_review_job import (
     SmartReviewRequest,
     format_duration,
 )
-from app.views.moddb.smart_review_run_planning import SmartReviewRunPlanningMixin
+from app.views.moddb.smart_review_run_planning import (
+    SmartReviewPlanningController,
+    SmartReviewRunPlanningMixin,
+)
 from app.views.moddb.smart_review_run_status import (
     run_status_color,
     run_status_label,
@@ -73,6 +76,7 @@ class SmartReviewRunPanel(SmartReviewRunPlanningMixin):
         self._scope_modules: tuple[str, ...] = ()
         self._scope_sources_by_mod: dict[str | None, tuple[int, ...]] = {}
         self._source_catalog = getattr(ctx.get_db(), "source_catalog", None)
+        self._planning_controller = SmartReviewPlanningController(ctx)
         self._build_scope_controls(version, mod_id, kind, effective_source, query)
         self._build_history_controls()
         self._build_run_controls()
@@ -574,11 +578,11 @@ class SmartReviewRunPanel(SmartReviewRunPlanningMixin):
         else:
             plan = getattr(self, "_plan_preview_result", None)
             if isinstance(plan, dict):
-                planned = int(plan.get("actual_ai_count") or 0)
+                planned = int(plan.get("estimated_to_process_count") or 0)
                 selected = int(plan.get("selected_count") or 0)
                 scope_label = (
-                    f"符合範圍 {format_count(selected)} 筆；"
-                    f"歷史重用後實際送 AI {format_count(planned)} 筆"
+                    f"快速預估符合範圍 {format_count(selected)} 筆；"
+                    f"估算送 AI {format_count(planned)} 筆"
                 )
             else:
                 planned = self._total if limit == 0 else min(limit, self._total)

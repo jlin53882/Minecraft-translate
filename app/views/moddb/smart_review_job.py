@@ -91,6 +91,7 @@ class SmartReviewJobState:
     result: Any = None
     error: str | None = None
     breakdown: dict[str, Any] = field(default_factory=dict)
+    metrics: dict[str, Any] = field(default_factory=dict)
     cancel_requested: bool = False
     resume_baseline_processed: int = 0
     resume_pending_total: int = 0
@@ -378,6 +379,7 @@ class SmartReviewJob:
         metrics = snapshot.get("metrics")
         if not isinstance(metrics, dict):
             return
+        state.metrics = dict(metrics)
         state.actual_ai = int(metrics.get("actual_ai_count", state.actual_ai) or 0)
         state.reused = int(metrics.get("reused_count", state.reused) or 0)
         state.pending_review = int(
@@ -409,6 +411,8 @@ class SmartReviewJob:
             return
         session.add_log(
             f"範圍搜尋完成：選取 {state.selected:,} 筆；"
+            f"精確規劃送 AI {int(state.metrics.get('planned_ai_count') or 0):,} 筆；"
+            f"歷史重用 {int(state.metrics.get('reused_count') or 0):,} 筆；"
             f"搜尋 {_format_timing(timing_seconds(timing, 'selection_ms'))}、"
             f"建立批次 {_format_timing(timing_seconds(timing, 'run_record_ms'))}。",
             "info",
@@ -483,6 +487,7 @@ class SmartReviewJob:
         state.invalid = result.invalid_count
         state.request_errors = result.request_error_count
         metrics = result.metrics if isinstance(result.metrics, dict) else {}
+        state.metrics = dict(metrics)
         state.actual_ai = int(metrics.get("actual_ai_count", 0) or 0)
         state.reused = int(metrics.get("reused_count", 0) or 0)
         state.pending_review = int(metrics.get("pending_review_count", 0) or 0)

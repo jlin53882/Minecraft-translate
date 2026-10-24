@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 import flet as ft
@@ -15,13 +17,103 @@ from app.ui.snack import show_snack
 from app.views.moddb.smart_review_job import SmartReviewRequest
 
 
+@dataclass(frozen=True)
+class SmartReviewPlanPreviewRequest:
+    """執行頁送給規劃控制器的完整、不可變預估輸入。"""
+
+    path: Path
+    priority: tuple[int, ...]
+    version: str
+    mod_id: str | None
+    kind: str | None
+    effective_source: int | None
+    query: str
+    limit: int
+    batch_size: int
+    use_recent_history: bool
+    skip_valid_history: bool
+    model: str | None
+
+
+class SmartReviewPlanningController:
+    """協調智慧校對預估，不直接依賴 Flet 控制項或執行面板狀態。
+
+    面板只負責把控制項值組成 :class:`SmartReviewPlanPreviewRequest`，並透過
+    callback 投影結果；控制器本身只管理 request ticket、背景工作與 service
+    呼叫，避免舊預估在新範圍套用後覆蓋畫面。
+    """
+
+    _REQUEST_DOMAIN = "smart_review_plan_preview"
+
+    def __init__(self, ctx) -> None:
+        """保存共用 UI context；不保存面板控制項或 job 狀態。"""
+        self.ctx = ctx
+
+    def invalidate(self) -> None:
+        """讓目前預估失效，下一次 refresh 會取得新的 request ticket。"""
+        self.ctx.invalidate_request(self._REQUEST_DOMAIN)
+
+    def refresh(
+        self,
+        request: SmartReviewPlanPreviewRequest,
+        *,
+        still_valid,
+        on_progress,
+        on_done,
+    ) -> bool:
+        """以明確 request 執行背景預估，完成後透過 callback 回傳結果。"""
+        ticket = self.ctx.begin_request(self._REQUEST_DOMAIN)
+
+        def current() -> bool:
+            return self.ctx.is_current(ticket) and still_valid()
+
+        def report_progress(message: str) -> None:
+            if not current():
+                return
+
+            def deliver() -> None:
+                if current():
+                    on_progress(message)
+
+            self.ctx.post(deliver)
+
+        def work() -> dict[str, Any]:
+            return preview_moddb_smart_review_plan_from_path(
+                request.path,
+                request.priority,
+                version=request.version,
+                mod_id=request.mod_id,
+                kind=request.kind,
+                effective_source=request.effective_source,
+                review_status="unreviewed",
+                query=request.query,
+                limit=request.limit,
+                batch_size=request.batch_size,
+                use_recent_history=request.use_recent_history,
+                skip_valid_history=request.skip_valid_history,
+                model=request.model,
+                progress=report_progress,
+            )
+
+        def done(result: dict[str, Any] | None, error: str | None) -> None:
+            if current():
+                on_done(result, error)
+
+        return self.ctx.run_background(
+            work,
+            done,
+            name="預估智慧校對歷史重用",
+            still_valid=current,
+        )
+
+
 class SmartReviewRunPlanningMixin:
-    """把歷史規劃 UI 從執行面板的範圍控制項中隔離。"""
+    """保留 Flet 控制項的 view adapter；背景規劃交給明確 controller。"""
 
     def _invalidate_plan_preview(self) -> None:
         """使尚未回來的舊規劃結果失效。"""
-        self._plan_preview_seq = getattr(self, "_plan_preview_seq", 0) + 1
-        self._plan_preview_result: dict[str, int] | None = None
+        self._planning_controller.invalidate()
+        self._plan_preview_result: dict[str, Any] | None = None
 
     def _query_changed(self, _e=None) -> None:
         """搜尋條件變更時先撤銷舊規劃，再 debounce 重新計算。"""
@@ -35,8 +127,7 @@ class SmartReviewRunPlanningMixin:
 
     def _build_history_controls(self) -> None:
         """建立新批次的最近兩批重用與執行前規劃控制項。"""
-        self._plan_preview_seq = 0
-        self._plan_preview_result: dict[str, int] | None = None
+        self._plan_preview_result: dict[str, Any] | None = None
         self.use_recent_history = ft.Switch(
             label="讀取最近 2 次智慧校對狀態",
             value=True,
@@ -105,7 +196,6 @@ class SmartReviewRunPlanningMixin:
     def _refresh_plan_preview(self) -> None:
         """以同一個 planner 讀取歷史 KPI；預覽不會呼叫 provider。"""
         self._invalidate_plan_preview()
-        preview_seq = self._plan_preview_seq
         database = self.ctx.database()
         version = self.version_dd.value
         if self._scope_loading or self.job.running or database is None or not version:
@@ -123,36 +213,33 @@ class SmartReviewRunPlanningMixin:
         self.ctx.update()
 
         def still_valid() -> bool:
-            return preview_seq == self._plan_preview_seq and not self.job.running
+            return not self.job.running and not self._scope_loading
+
+        batch = self._read_int(self.batch_field)
+        if batch is None:
+            self._update_estimate_text()
+            return
+        request = SmartReviewPlanPreviewRequest(
+            path=path,
+            priority=priority,
+            version=str(version),
+            mod_id=mod_id,
+            kind=kind,
+            effective_source=source,
+            query=query,
+            limit=limit,
+            batch_size=batch,
+            use_recent_history=use_recent_history,
+            skip_valid_history=skip_valid_history,
+            model=model,
+        )
 
         def show_progress(message: str) -> None:
-            def apply_progress() -> None:
-                if not still_valid():
-                    return
-                self.plan_preview_text.value = message
-                self.plan_preview_text.color = C.MUTED
-                self.ctx.update()
+            self.plan_preview_text.value = message
+            self.plan_preview_text.color = C.MUTED
+            self.ctx.update()
 
-            self.ctx.post(apply_progress)
-
-        def work() -> dict[str, int]:
-            return preview_moddb_smart_review_plan_from_path(
-                path,
-                priority,
-                version=str(version),
-                mod_id=mod_id,
-                kind=kind,
-                effective_source=source,
-                review_status="unreviewed",
-                query=query,
-                limit=limit,
-                use_recent_history=use_recent_history,
-                skip_valid_history=skip_valid_history,
-                model=model,
-                progress=show_progress,
-            )
-
-        def done(result: dict[str, int], error: str | None) -> None:
+        def done(result: dict[str, Any] | None, error: str | None) -> None:
             if not still_valid():
                 return
             if error:
@@ -162,21 +249,21 @@ class SmartReviewRunPlanningMixin:
             else:
                 self._plan_preview_result = result
                 self.plan_preview_text.value = (
-                    f"預估範圍 {result['selected_count']:,} 筆；歷史重用 "
-                    f"{result['reused_count']:,}；本次送 AI "
-                    f"{result['actual_ai_count']:,}；待人工審查 "
+                    f"快速預估範圍 {result['selected_count']:,} 筆；歷史重用 "
+                    f"{result['reused_count']:,}；估算送 AI "
+                    f"{result['estimated_to_process_count']:,}；待人工審查 "
                     f"{result['pending_review_count']:,}；讀取同版本歷史 "
-                    f"{result['history_runs_consulted']} 份歷史。"
+                    f"{result['history_runs_consulted']} 份歷史；開始執行前會重新計算精確計畫。"
                 )
                 self.plan_preview_text.color = C.MUTED
                 self._update_estimate_text(update=False)
             self.ctx.update()
 
-        self.ctx.run_background(
-            work,
-            done,
-            name="預估智慧校對歷史重用",
+        self._planning_controller.refresh(
+            request,
             still_valid=still_valid,
+            on_progress=show_progress,
+            on_done=done,
         )
 
     def resume_run(
@@ -290,4 +377,8 @@ class SmartReviewRunPlanningMixin:
         self._invalidate_plan_preview()
 
 
-__all__ = ["SmartReviewRunPlanningMixin"]
+__all__ = [
+    "SmartReviewPlanPreviewRequest",
+    "SmartReviewPlanningController",
+    "SmartReviewRunPlanningMixin",
+]

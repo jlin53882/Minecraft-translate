@@ -427,7 +427,7 @@ def test_run_panel_shows_scope_count_when_attached(db, monkeypatch):
 
     assert calls and calls[-1]["version"] == "1.21.1"
     assert dialog.run_panel._total == 28
-    assert "歷史重用後實際送 AI" in dialog.run_panel.estimate_text.value
+    assert "估算送 AI" in dialog.run_panel.estimate_text.value
     assert "每批 20 筆" in dialog.run_panel.estimate_text.value
 
 
@@ -462,14 +462,14 @@ def test_run_panel_uses_planned_ai_count_for_batch_estimate(db):
     panel._plan_preview_result = {
         "selected_count": 60_186,
         "reused_count": 763,
-        "actual_ai_count": 59_423,
+        "estimated_to_process_count": 59_423,
         "pending_review_count": 127,
         "history_runs_consulted": 1,
     }
     panel._update_estimate_text()
 
     assert "符合範圍 60,186 筆" in panel.estimate_text.value
-    assert "實際送 AI 59,423 筆" in panel.estimate_text.value
+    assert "估算送 AI 59,423 筆" in panel.estimate_text.value
     assert "約 2972 批（每批 20 筆）" in panel.estimate_text.value
 
 
@@ -701,6 +701,86 @@ def test_context_rejects_stale_generation_and_old_database(tmp_path):
     assert not context.is_current(context.generation, identity)
     context.close()
     assert not context.is_current(0)
+
+
+def test_context_request_tickets_are_scoped_and_invalidated(db):
+    """驗證不同 request 領域互不干擾，且同領域新請求會淘汰舊票據。"""
+    context = SmartReviewContext(_sync_page(), lambda: db, None)
+    first = context.begin_request("plan-preview")
+    review = context.begin_request("review-page")
+    second = context.begin_request("plan-preview")
+
+    assert context.is_current(first) is False
+    assert context.is_current(review) is True
+    assert context.is_current(second) is True
+    context.invalidate_request("review-page")
+    assert context.is_current(review) is False
+
+
+def test_context_request_ticket_is_invalid_after_close(db):
+    """驗證關閉視窗會讓尚未回來的 request ticket 失效。"""
+    context = SmartReviewContext(_sync_page(), lambda: db, None)
+    ticket = context.begin_request("history")
+    context.close()
+    assert context.is_current(ticket) is False
+
+
+def test_planning_controller_accepts_explicit_request_and_callbacks(db, ctx, monkeypatch):
+    """規劃控制器只依賴不可變 request 與 callback，不讀取面板控制項。"""
+    from app.views.moddb import smart_review_run_planning as planning_module
+    from app.views.moddb.smart_review_run_planning import (
+        SmartReviewPlanningController,
+        SmartReviewPlanPreviewRequest,
+    )
+
+    calls = []
+    monkeypatch.setattr(
+        planning_module,
+        "preview_moddb_smart_review_plan_from_path",
+        lambda path, priority, **kwargs: calls.append(
+            (path, priority, kwargs)
+        )
+        or {
+            "mode": "fast_estimate",
+            "is_authoritative": False,
+            "selected_count": 4,
+            "reused_count": 1,
+            "estimated_to_process_count": 3,
+            "estimated_batch_count": 2,
+            "pending_review_count": 0,
+            "history_runs_consulted": 2,
+        },
+    )
+    result = []
+    progress = []
+    request = SmartReviewPlanPreviewRequest(
+        path=db.path,
+        priority=(),
+        version="1.21.1",
+        mod_id="demo",
+        kind="lang",
+        effective_source=None,
+        query="hello",
+        limit=4,
+        batch_size=2,
+        use_recent_history=True,
+        skip_valid_history=True,
+        model="model-from-input",
+    )
+
+    controller = SmartReviewPlanningController(ctx)
+    assert controller.refresh(
+        request,
+        still_valid=lambda: True,
+        on_progress=progress.append,
+        on_done=lambda value, error: result.append((value, error)),
+    )
+
+    assert calls[0][0] == db.path
+    assert calls[0][2]["version"] == "1.21.1"
+    assert calls[0][2]["batch_size"] == 2
+    assert calls[0][2]["model"] == "model-from-input"
+    assert result and result[0][0]["mode"] == "fast_estimate"
 
 
 def test_context_write_callback_allows_own_generation_change(tmp_path):

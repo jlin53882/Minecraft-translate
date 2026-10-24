@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sqlite3
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -17,6 +18,16 @@ from app.tasks.operation_registry import (
     ShutdownPolicy,
     launch_page_operation,
 )
+
+
+@dataclass(frozen=True)
+class RequestTicket:
+    """一個查詢領域的世代票據，避免晚到結果覆蓋新請求。"""
+
+    domain: str
+    sequence: int
+    generation: int
+    db_identity: str | None
 
 
 class SmartReviewContext:
@@ -33,6 +44,7 @@ class SmartReviewContext:
         self.on_complete = on_complete
         self.generation = 0
         self.closed = False
+        self._request_sequences: dict[str, int] = {}
 
     def close(self) -> None:
         """標記視窗已關閉，並讓所有進行中的背景結果失效。"""
@@ -82,8 +94,47 @@ class SmartReviewContext:
                 pass
         return identity
 
-    def is_current(self, generation: int, db_identity: str | None = None) -> bool:
+    def begin_request(
+        self, domain: str, *, stable_identity: bool = False
+    ) -> RequestTicket:
+        """開始指定領域的新請求，並回傳可傳給 callback 的不可變票據。"""
+        normalized_domain = str(domain).strip()
+        if not normalized_domain:
+            raise ValueError("request domain 不可為空白")
+        sequence = self._request_sequences.get(normalized_domain, 0) + 1
+        self._request_sequences[normalized_domain] = sequence
+        return RequestTicket(
+            domain=normalized_domain,
+            sequence=sequence,
+            generation=self.generation,
+            db_identity=self.db_identity(
+                include_generation=not stable_identity
+            ),
+        )
+
+    def invalidate_request(self, domain: str) -> int:
+        """使指定領域目前與先前的所有票據失效，回傳新的序號。"""
+        normalized_domain = str(domain).strip()
+        if not normalized_domain:
+            raise ValueError("request domain 不可為空白")
+        sequence = self._request_sequences.get(normalized_domain, 0) + 1
+        self._request_sequences[normalized_domain] = sequence
+        return sequence
+
+    def is_current_ticket(self, ticket: RequestTicket) -> bool:
+        """驗證票據仍屬於目前的 request、UI 世代與資料庫。"""
+        return (
+            isinstance(ticket, RequestTicket)
+            and self._request_sequences.get(ticket.domain, 0) == ticket.sequence
+            and self.is_current(ticket.generation, ticket.db_identity)
+        )
+
+    def is_current(
+        self, generation: int | RequestTicket, db_identity: str | None = None
+    ) -> bool:
         """驗證結果仍屬於目前的 UI 世代與資料庫。"""
+        if isinstance(generation, RequestTicket):
+            return self.is_current_ticket(generation)
         if generation != self.generation:
             return False
         if db_identity is None:
