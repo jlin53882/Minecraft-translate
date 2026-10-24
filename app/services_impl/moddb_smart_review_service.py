@@ -161,10 +161,18 @@ def preview_moddb_smart_review_plan_from_path(
     use_recent_history: bool = True,
     skip_valid_history: bool = True,
     model: str | None = None,
+    progress: Callable[[str], None] | None = None,
 ) -> dict[str, int]:
-    """回傳與執行共用的唯讀歷史規劃 KPI，不呼叫 provider。"""
+    """回傳唯讀歷史規劃 KPI，不呼叫 provider。
+
+    預估只讀取 CAS 欄位，不建立每筆完整 local context；真正執行仍由
+    ``run_smart_review`` 建立完整 context。這讓預估保持快速，結果屬於可重用數量
+    的估算；``progress`` 只回報階段與筆數，不包含候選內容。
+    """
+    notify = progress if callable(progress) else lambda _message: None
     db = _open(path, priority, readonly=True)
     try:
+        notify("正在讀取目前符合範圍的候選…")
         snapshots = db.smart_review_candidates(
             version=version,
             mod_id=mod_id,
@@ -173,11 +181,28 @@ def preview_moddb_smart_review_plan_from_path(
             review_status=review_status,
             query=query,
             limit=limit,
+            include_context=False,
         )
-        consulted, historical = (
-            SmartReviewHistoryStore(db.path).recent_candidate_payloads(max_runs=2)
-            if use_recent_history
-            else (0, [])
+        notify(
+            f"已讀取目前候選 {len(snapshots):,} 筆，正在讀取目前版本最近兩份歷史 JSON…"
+        )
+        if use_recent_history:
+            history = SmartReviewHistoryStore(db.path)
+
+            def history_progress(run_count: int, candidate_count: int) -> None:
+                notify(
+                    f"正在讀取第 {run_count}/2 份歷史 JSON…已讀取 {candidate_count:,} 筆候選。"
+                )
+
+            consulted, historical = history.recent_candidate_payloads(
+                max_runs=2,
+                version=version,
+                progress=history_progress,
+            )
+        else:
+            consulted, historical = 0, []
+        notify(
+            f"已讀取 {consulted} 份歷史、{len(historical):,} 筆候選，正在比對可重用結果…"
         )
         plan = plan_new_smart_review(
             snapshots,
@@ -186,17 +211,68 @@ def preview_moddb_smart_review_plan_from_path(
             history_runs_consulted=consulted,
             provider=get_translation_provider(),
             model=model,
+            compare_context=False,
         )
         return {
             "selected_count": len(plan.selected),
             "reused_count": plan.reused_count,
             "actual_ai_count": plan.actual_ai_count,
             "history_runs_consulted": plan.history_runs_consulted,
-            "pending_review_count": sum(
-                1
-                for result in plan.reused_results
-                if result.get("decision") != "no_change"
-            ),
+            "pending_review_count": plan.pending_review_count,
+            "applied_skipped_count": plan.applied_skipped_count,
+            "no_change_skipped_count": plan.no_change_skipped_count,
+        }
+    finally:
+        db.close()
+
+
+def preview_moddb_smart_review_resume_from_path(
+    path: str | Path,
+    priority: tuple[int, ...],
+    run_id: str,
+) -> dict[str, Any]:
+    """讀取指定續跑批次的確認資料，不啟動 provider 或續跑流程。
+
+    續跑只針對使用者點選的單一 ``run_id``；這個預覽不會重新掃描最近兩份
+    歷史，也不會執行 ``prepare_resume``。真正送出前仍會由資料層重新驗證
+    current snapshot 與 CAS，避免確認畫面期間的資料變更造成誤送。
+    """
+    db = _open(path, priority, readonly=True)
+    try:
+        history = SmartReviewHistoryStore(db.path)
+        if not history.exists(run_id):
+            raise ValueError("只有 JSON 歷史批次支援繼續未完成校對")
+        run = db.get_smart_review_run(run_id)
+        if run is None:
+            raise ValueError("找不到智慧校對歷史批次")
+        if str(run.get("status") or "") == "running":
+            raise RuntimeError("智慧校對批次仍在執行中，不能重複啟動")
+        breakdown = history.breakdown(run_id)
+        status_counts = breakdown.get("status")
+        if not isinstance(status_counts, dict):
+            status_counts = {}
+        normalized_counts = {
+            str(status): int(count or 0)
+            for status, count in status_counts.items()
+        }
+        selected_count = int(run.get("selected_count") or 0)
+        processed_count = int(run.get("processed_count") or 0)
+        pending_count = max(0, selected_count - processed_count)
+        scope = run.get("scope")
+        if not isinstance(scope, dict):
+            scope = {}
+        return {
+            "run_id": str(run.get("id") or run_id),
+            "status": str(run.get("status") or ""),
+            "provider": str(run.get("provider") or ""),
+            "model": str(run.get("model") or ""),
+            "batch_size": int(run.get("batch_size") or 0),
+            "version": str(scope.get("version") or run.get("scope_version") or ""),
+            "scope": dict(scope),
+            "selected_count": selected_count,
+            "processed_count": processed_count,
+            "pending_count": pending_count,
+            "status_counts": normalized_counts,
         }
     finally:
         db.close()
@@ -238,6 +314,8 @@ def run_moddb_smart_review_from_path(
             return resume_smart_review(
                 db,
                 run_id=resume_run_id,
+                model_name=model_name,
+                batch_size=batch_size,
                 progress=progress,
                 lm_config=lm_config,
                 cancel_check=cancel_check,
@@ -756,6 +834,8 @@ __all__ = [
     "load_moddb_smart_review_candidate_page_from_path",
     "moddb_smart_review_read_session",
     "preview_moddb_smart_review_from_path",
+    "preview_moddb_smart_review_plan_from_path",
+    "preview_moddb_smart_review_resume_from_path",
     "realign_moddb_smart_review_candidate_from_path",
     "reject_moddb_smart_review_candidate_from_path",
     "run_moddb_smart_review_from_path",

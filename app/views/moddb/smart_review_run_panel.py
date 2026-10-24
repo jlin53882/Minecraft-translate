@@ -562,13 +562,25 @@ class SmartReviewRunPanel(SmartReviewRunPlanningMixin):
             )
             self.estimate_text.color = C.RED
         else:
-            planned = self._total if limit == 0 else min(limit, self._total)
+            plan = getattr(self, "_plan_preview_result", None)
+            if isinstance(plan, dict):
+                planned = int(plan.get("actual_ai_count") or 0)
+                selected = int(plan.get("selected_count") or 0)
+                scope_label = (
+                    f"符合範圍 {format_count(selected)} 筆；"
+                    f"歷史重用後實際送 AI {format_count(planned)} 筆"
+                )
+            else:
+                planned = self._total if limit == 0 else min(limit, self._total)
+                scope_label = (
+                    f"符合範圍的未審核 AI 譯文共 {format_count(self._total)} 筆；"
+                    f"目前尚未完成歷史重用預估"
+                )
             batches = math.ceil(planned / batch) if planned else 0
             limit_label = "不限" if limit == 0 else format_count(limit)
             self.estimate_text.value = (
-                f"符合範圍的未審核 AI 譯文共 {format_count(self._total)} 筆；"
-                f"本次將處理 {format_count(planned)} 筆（上限 {limit_label}），約 {batches} 批"
-                f"（每批最多 {max_batch_size} 筆）。"
+                f"{scope_label}；本次上限 {limit_label}，約 {batches} 批"
+                f"（每批 {batch} 筆）。"
             )
             self.estimate_text.color = C.MUTED
         if update:
@@ -576,19 +588,28 @@ class SmartReviewRunPanel(SmartReviewRunPlanningMixin):
 
     # ──────────────── 啟動、停止與狀態 ────────────────
 
-    def _request(self) -> SmartReviewRequest:
+    def _request(
+        self,
+        *,
+        model_override: str | None = None,
+        batch_override: int | None = None,
+    ) -> SmartReviewRequest:
         """依畫面建立校對請求；條件不完整時丟出給使用者看的錯誤。"""
         database = self.ctx.database()
         if database is None:
             raise ValueError("目前沒有可用的 Mod 資料庫")
         version = self.version_dd.value
-        model = self.model_dd.value
+        model = self.model_dd.value if model_override is None else model_override
         if not version:
             raise ValueError("請先選擇遊戲版本")
         if not model:
             raise ValueError("請先選擇校對模型（設定頁需啟用至少一個模型）")
         limit = self._read_int(self.limit_field, minimum=0)
-        batch = self._read_int(self.batch_field)
+        batch = (
+            self._read_int(self.batch_field)
+            if batch_override is None
+            else int(batch_override)
+        )
         if limit is None:
             raise ValueError("上限必須是 0 或正整數")
         if batch is None:

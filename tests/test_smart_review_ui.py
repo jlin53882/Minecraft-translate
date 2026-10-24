@@ -408,7 +408,8 @@ def test_run_panel_shows_scope_count_when_attached(db, monkeypatch):
 
     assert calls and calls[-1]["version"] == "1.21.1"
     assert dialog.run_panel._total == 28
-    assert "符合範圍的未審核 AI 譯文共 28 筆" in dialog.run_panel.estimate_text.value
+    assert "歷史重用後實際送 AI" in dialog.run_panel.estimate_text.value
+    assert "每批 20 筆" in dialog.run_panel.estimate_text.value
 
 
 def test_run_panel_treats_zero_limit_as_unlimited(db):
@@ -426,7 +427,31 @@ def test_run_panel_treats_zero_limit_as_unlimited(db):
     assert request.limit == 0
     assert request.batch_size == 40
     assert "上限 不限" in panel.estimate_text.value
-    assert "本次將處理 28 筆" in panel.estimate_text.value
+    assert "本次上限 不限" in panel.estimate_text.value
+    assert "約 1 批（每批 40 筆）" in panel.estimate_text.value
+
+
+def test_run_panel_uses_planned_ai_count_for_batch_estimate(db):
+    """預估行的批次數量必須使用歷史重用後的實際 AI 數量。"""
+    from app.views.moddb.smart_review_dialog import SmartReviewDialog
+
+    dialog = SmartReviewDialog(_sync_page(), lambda: db, "1.21.1", None)
+    panel = dialog.run_panel
+    panel._total = 60_186
+    panel.limit_field.value = "0"
+    panel.batch_field.value = "100"
+    panel._plan_preview_result = {
+        "selected_count": 60_186,
+        "reused_count": 763,
+        "actual_ai_count": 59_423,
+        "pending_review_count": 127,
+        "history_runs_consulted": 1,
+    }
+    panel._update_estimate_text()
+
+    assert "符合範圍 60,186 筆" in panel.estimate_text.value
+    assert "實際送 AI 59,423 筆" in panel.estimate_text.value
+    assert "約 595 批（每批 100 筆）" in panel.estimate_text.value
 
 
 def test_run_panel_rejects_batch_size_over_safe_limit(db, monkeypatch):
@@ -489,6 +514,61 @@ def test_dialog_open_review_switches_tab_and_loads_run(db, monkeypatch):
 
     dialog._on_review_mode("batch")
     assert batch_loaded == ["run-9"]
+
+
+def test_dialog_resume_confirms_status_and_allows_model_batch_override(db, monkeypatch):
+    """續跑先顯示指定 run 狀態，且模型與批次大小可由輸入框覆寫。"""
+    import app.views.moddb.smart_review_dialog as dialog_module
+    from app.views.moddb.smart_review_dialog import SmartReviewDialog
+
+    page = _sync_page()
+    dialog = SmartReviewDialog(page, lambda: db, "1.21.1", None)
+    dialog._show_tab("history")
+    started = []
+
+    monkeypatch.setattr(
+        dialog_module,
+        "preview_moddb_smart_review_resume_from_path",
+        lambda _path, _priority, run_id: {
+            "run_id": run_id,
+            "status": "cancelled",
+            "provider": "chatgpt",
+            "model": "gpt-history",
+            "batch_size": 12,
+            "version": "1.21.1",
+            "scope": {"version": "1.21.1"},
+            "selected_count": 75_027,
+            "processed_count": 16_100,
+            "pending_count": 58_927,
+            "status_counts": {"cancelled": 58_927, "no_change": 6_648},
+        },
+    )
+
+    def resume(run_id, *, model, batch_size):
+        started.append((run_id, model, batch_size))
+        dialog.job.state = SmartReviewJobState(phase="running")
+        return True
+
+    dialog.run_panel.resume_run = resume
+    monkeypatch.setattr(
+        dialog_module,
+        "show_snack",
+        lambda _page, message, *_args, **_kwargs: page.snacks.append(message),
+    )
+
+    dialog._resume_run("run-continue")
+
+    assert dialog._resume_dialog is not None
+    assert dialog._resume_model_field.value == "gpt-history"
+    assert dialog._resume_batch_field.value == "12"
+    dialog._resume_model_field.value = "gpt-override"
+    dialog._resume_batch_field.value = "24"
+    dialog._resume_dialog.actions[1].on_click(None)
+
+    assert started == [("run-continue", "gpt-override", 24)]
+    assert dialog.nav.value == "run"
+    assert dialog._panels["run"].visible is True
+    assert "正在繼續未完成校對" in page.snacks[-1]
 
 
 def test_dialog_close_keeps_background_job_running(db):

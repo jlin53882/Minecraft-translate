@@ -19,6 +19,7 @@ class SmartReviewRunPlanningMixin:
     def _invalidate_plan_preview(self) -> None:
         """使尚未回來的舊規劃結果失效。"""
         self._plan_preview_seq = getattr(self, "_plan_preview_seq", 0) + 1
+        self._plan_preview_result: dict[str, int] | None = None
 
     def _query_changed(self, _e=None) -> None:
         """搜尋條件變更時先撤銷舊規劃，再 debounce 重新計算。"""
@@ -33,6 +34,7 @@ class SmartReviewRunPlanningMixin:
     def _build_history_controls(self) -> None:
         """建立新批次的最近兩批重用與執行前規劃控制項。"""
         self._plan_preview_seq = 0
+        self._plan_preview_result: dict[str, int] | None = None
         self.use_recent_history = ft.Switch(
             label="讀取最近 2 次智慧校對狀態",
             value=True,
@@ -114,9 +116,22 @@ class SmartReviewRunPlanningMixin:
         use_recent_history = bool(self.use_recent_history.value)
         skip_valid_history = bool(self.skip_valid_history.value)
         model = str(self.model_dd.value or "")
-        self.plan_preview_text.value = "正在以最近兩份歷史計算預估…"
+        self.plan_preview_text.value = "正在讀取候選與目前版本最近兩份歷史 JSON…"
         self.plan_preview_text.color = C.MUTED
         self.ctx.update()
+
+        def still_valid() -> bool:
+            return preview_seq == self._plan_preview_seq and not self.job.running
+
+        def show_progress(message: str) -> None:
+            def apply_progress() -> None:
+                if not still_valid():
+                    return
+                self.plan_preview_text.value = message
+                self.plan_preview_text.color = C.MUTED
+                self.ctx.update()
+
+            self.ctx.post(apply_progress)
 
         def work() -> dict[str, int]:
             return preview_moddb_smart_review_plan_from_path(
@@ -132,26 +147,27 @@ class SmartReviewRunPlanningMixin:
                 use_recent_history=use_recent_history,
                 skip_valid_history=skip_valid_history,
                 model=model,
+                progress=show_progress,
             )
-
-        def still_valid() -> bool:
-            return preview_seq == self._plan_preview_seq and not self.job.running
 
         def done(result: dict[str, int], error: str | None) -> None:
             if not still_valid():
                 return
             if error:
+                self._plan_preview_result = None
                 self.plan_preview_text.value = f"無法取得預估：{error}"
                 self.plan_preview_text.color = C.RED
             else:
+                self._plan_preview_result = result
                 self.plan_preview_text.value = (
-                    f"符合範圍 {result['selected_count']:,} 筆；歷史重用 "
-                    f"{result['reused_count']:,}；本次實際提交 AI "
+                    f"預估範圍 {result['selected_count']:,} 筆；歷史重用 "
+                    f"{result['reused_count']:,}；本次送 AI "
                     f"{result['actual_ai_count']:,}；待人工審查 "
-                    f"{result['pending_review_count']:,}；讀取 "
+                    f"{result['pending_review_count']:,}；讀取同版本歷史 "
                     f"{result['history_runs_consulted']} 份歷史。"
                 )
                 self.plan_preview_text.color = C.MUTED
+                self._update_estimate_text(update=False)
             self.ctx.update()
 
         self.ctx.run_background(
@@ -161,27 +177,37 @@ class SmartReviewRunPlanningMixin:
             still_valid=still_valid,
         )
 
-    def resume_run(self, run_id: str) -> None:
-        """從歷史頁以原 run_id 重試尚未完成項目。"""
+    def resume_run(
+        self,
+        run_id: str,
+        *,
+        model: str | None = None,
+        batch_size: int | None = None,
+    ) -> bool:
+        """從歷史頁以原 run_id 重試尚未完成項目，回傳是否已啟動。"""
         if self.job.running:
             show_snack(self.ctx.page, "智慧校對正在執行中。", C.GOLD)
-            return
+            return False
         try:
-            request: SmartReviewRequest = self._request()
+            request: SmartReviewRequest = self._request(
+                model_override=model,
+                batch_override=batch_size,
+            )
         except ValueError as exc:
             show_snack(self.ctx.page, str(exc), C.RED)
-            return
+            return False
         request.resume_run_id = str(run_id)
         request.use_recent_history = False
         request.skip_valid_history = False
         error = self.job.start(request, parent_callback=self.ctx.on_complete)
         if error:
             show_snack(self.ctx.page, error, C.RED)
-            return
+            return False
         self.log_view.clear()
         self.result_box.visible = False
         self._render_running()
         self._start_polling()
+        return True
 
 
 __all__ = ["SmartReviewRunPlanningMixin"]

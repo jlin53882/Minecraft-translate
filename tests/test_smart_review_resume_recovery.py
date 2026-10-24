@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import time
+from dataclasses import replace
 
 import pytest
 
@@ -19,6 +20,46 @@ from translation_tool.translation_db.smart_review_history import SmartReviewHist
 from translation_tool.translation_db.smart_review_planner import plan_new_smart_review
 from translation_tool.translation_db.smart_review_runs import _resume_counts
 from translation_tool.translation_db.smart_review_status import SmartReviewStatus
+
+
+def test_resume_preview_reads_one_run_without_mutating_history(tmp_path):
+    """續跑確認只讀指定 run，並回傳模型、批次與待處理摘要。"""
+    from app.services_impl.moddb_smart_review_service import (
+        preview_moddb_smart_review_resume_from_path,
+    )
+
+    path = tmp_path / "resume-preview.db"
+    db = TranslationDB(path)
+    run_id = db.create_smart_review_run(
+        [_snapshot()],
+        provider="chatgpt",
+        model="gpt-history",
+        version="1.21.1",
+        requested_limit=1,
+        batch_size=12,
+        scope={"version": "1.21.1"},
+    )
+    history = SmartReviewHistoryStore(path)
+    history.finish_run(
+        run_id,
+        processed_count=0,
+        valid_count=0,
+        invalid_count=0,
+        request_error_count=0,
+        metrics={},
+        status="cancelled",
+    )
+    before = history.get_run(run_id)
+    db.close()
+
+    preview = preview_moddb_smart_review_resume_from_path(path, (), run_id)
+
+    assert preview["run_id"] == run_id
+    assert preview["model"] == "gpt-history"
+    assert preview["batch_size"] == 12
+    assert preview["selected_count"] == 1
+    assert preview["pending_count"] == 1
+    assert history.get_run(run_id) == before
 
 
 def _response(items: list[dict[str, str]]) -> str:
@@ -111,6 +152,42 @@ def test_new_run_consults_only_latest_two_parseable_manifests(tmp_path):
     assert run_ids[0] not in {item.get("run_id") for item in historical}
 
 
+def test_new_run_history_limit_is_scoped_to_selected_version(tmp_path):
+    """最近兩份歷史額度只計入目前版本，不能被其他版本搶走。"""
+    store = SmartReviewHistoryStore(tmp_path / "review-version.db")
+    snapshot = _snapshot()
+    versions = ["1.20.1", "1.21.1", "1.20.1", "1.21.1"]
+    run_ids = []
+    for index, version in enumerate(versions):
+        current = replace(snapshot, mc_version=version)
+        run_id = store.create_run(
+            [current],
+            provider="gemini",
+            model="test-model",
+            version=version,
+            requested_limit=1,
+            batch_size=1,
+        )
+        store.finish_run(
+            run_id,
+            processed_count=0,
+            valid_count=0,
+            invalid_count=0,
+            request_error_count=0,
+            metrics={},
+            status="partial",
+        )
+        run_ids.append(run_id)
+        time.sleep(0.02)
+
+    consulted, historical = store.recent_candidate_payloads(
+        max_runs=2, version="1.21.1"
+    )
+
+    assert consulted == 2
+    assert {item["run_id"] for item in historical} == {run_ids[1], run_ids[3]}
+
+
 def test_planner_uses_older_valid_result_after_newest_request_failure():
     snapshot = _snapshot()
     fingerprint = {
@@ -185,6 +262,50 @@ def test_planner_does_not_reuse_a_different_model_result():
     )
     assert plan.reused_count == 0
     assert plan.actual_ai_count == 1
+
+
+def test_planner_preview_can_compare_cas_without_context():
+    """預估模式可略過 context 指紋，真正規劃仍保留完整比對。"""
+    snapshot = replace(_snapshot(), context=({"id": "current"},))
+    history = {
+        "kind": snapshot.kind,
+        "mc_version": snapshot.mc_version,
+        "mod_id": snapshot.mod_id,
+        "entry_key": snapshot.key,
+        "en_us": snapshot.en_us,
+        "current_zh_tw": snapshot.current_zh_tw,
+        "effective_source": snapshot.effective_source,
+        "review_status": snapshot.review_status,
+        "effective_revision": snapshot.effective_revision,
+        "manual_zh_tw": snapshot.manual_zh_tw,
+        "manual_checker": snapshot.manual_checker,
+        "manual_review_status": snapshot.manual_review_status,
+        "manual_revision": snapshot.manual_revision,
+        "context": [{"id": "history"}],
+        "status": "no_change",
+        "ai_status": "no_change",
+        "decision": "no_change",
+        "suggested_zh_tw": "",
+        "confidence": 0.9,
+        "reason": "舊結果",
+    }
+
+    exact = plan_new_smart_review(
+        [snapshot],
+        [history],
+        skip_valid_history=True,
+        history_runs_consulted=1,
+    )
+    preview = plan_new_smart_review(
+        [snapshot],
+        [history],
+        skip_valid_history=True,
+        history_runs_consulted=1,
+        compare_context=False,
+    )
+
+    assert exact.reused_count == 0
+    assert preview.reused_count == 1
 
 
 def test_planner_does_not_reuse_history_without_provider_model_metadata():
@@ -263,6 +384,50 @@ def test_prepare_resume_rejects_running_run_under_write_lock(tmp_path):
         store.repository.write_unlocked(run_id, payload)
     with pytest.raises(RuntimeError, match="仍在執行中"):
         store.prepare_resume(run_id, {})
+
+
+def test_resume_reuses_saved_context_when_cas_snapshot_is_unchanged(
+    tmp_path, monkeypatch
+):
+    """續跑未變更候選時沿用 JSON context，不重做全量 evidence 查詢。"""
+    db = TranslationDB(tmp_path / "resume-context.db")
+    try:
+        db.write_back(
+            "1.21.1",
+            [WriteBackItem(KIND_LANG, "demo", "hello", "Hello", "你好")],
+            fill_other_versions=False,
+        )
+        snapshot = db.smart_review_candidates(version="1.21.1", limit=1)[0]
+        history = SmartReviewHistoryStore(db.path)
+        run_id = history.create_run(
+            [snapshot],
+            provider="gemini",
+            model="test-model",
+            version="1.21.1",
+            requested_limit=1,
+            batch_size=1,
+            scope={},
+        )
+        history.finish_run(
+            run_id,
+            processed_count=0,
+            valid_count=0,
+            invalid_count=0,
+            request_error_count=0,
+            metrics={},
+            status="partial",
+        )
+
+        def fail_context(*_args):
+            raise AssertionError("unchanged resume should reuse persisted context")
+
+        monkeypatch.setattr(db, "_smart_review_context", fail_context)
+        snapshots, _counts, _run = db.prepare_smart_review_resume(run_id)
+
+        assert len(snapshots) == 1
+        assert snapshots[0].context == snapshot.context
+    finally:
+        db.close()
 
 
 def test_prepare_resume_does_not_recount_already_excluded_candidate(tmp_path):

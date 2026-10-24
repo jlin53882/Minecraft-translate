@@ -44,25 +44,31 @@ def _fingerprint_value(key: str, value: Any) -> Any:
     )
 
 
-def snapshot_fingerprint(snapshot: SmartReviewSnapshot) -> tuple[Any, ...]:
+def snapshot_fingerprint(
+    snapshot: SmartReviewSnapshot, *, include_context: bool = True
+) -> tuple[Any, ...]:
     """建立與 JSON ``original_snapshot`` 相容的穩定 CAS 指紋。"""
+    keys = _SNAPSHOT_KEYS if include_context else _SNAPSHOT_KEYS[:-1]
     return tuple(
         _fingerprint_value(
             key, snapshot.key if key == "entry_key" else getattr(snapshot, key, None)
         )
-        for key in _SNAPSHOT_KEYS
+        for key in keys
     )
 
 
-def payload_fingerprint(candidate: Mapping[str, Any]) -> tuple[Any, ...]:
+def payload_fingerprint(
+    candidate: Mapping[str, Any], *, include_context: bool = True
+) -> tuple[Any, ...]:
     """讀取歷史候選的原始快照，兼容 schema v1 舊資料。"""
     original = candidate.get("original_snapshot")
     source = original if isinstance(original, Mapping) else candidate
+    keys = _SNAPSHOT_KEYS if include_context else _SNAPSHOT_KEYS[:-1]
     return tuple(
         _fingerprint_value(
             key, source.get("entry_key") if key == "entry_key" else source.get(key)
         )
-        for key in _SNAPSHOT_KEYS
+        for key in keys
     )
 
 
@@ -175,8 +181,13 @@ def plan_new_smart_review(
     history_runs_consulted: int,
     provider: str | None = None,
     model: str | None = None,
+    compare_context: bool = True,
 ) -> SmartReviewPlan:
-    """依最近歷史規劃可重用結果，限制由呼叫端保證為最近兩份 manifest。"""
+    """依最近歷史規劃可重用結果，限制由呼叫端保證為最近兩份 manifest。
+
+    ``compare_context=False`` 僅適用於不會送出模型請求的預估，讓預估不必
+    為數萬筆候選建立完整 local context；真正執行仍使用預設的完整 CAS 指紋。
+    """
     candidates_by_fingerprint: dict[tuple[Any, ...], list[Mapping[str, Any]]] = {}
     for candidate in historical_candidates:
         history_provider = candidate.get("_history_provider")
@@ -185,9 +196,9 @@ def plan_new_smart_review(
             continue
         if model and str(history_model or "") != str(model):
             continue
-        candidates_by_fingerprint.setdefault(payload_fingerprint(candidate), []).append(
-            candidate
-        )
+        candidates_by_fingerprint.setdefault(
+            payload_fingerprint(candidate, include_context=compare_context), []
+        ).append(candidate)
 
     to_process: list[SmartReviewSnapshot] = []
     reused_results: list[dict[str, Any]] = []
@@ -196,7 +207,9 @@ def plan_new_smart_review(
     pending_review = 0
     invalidated = 0
     for snapshot in snapshots:
-        matching = candidates_by_fingerprint.get(snapshot_fingerprint(snapshot), [])
+        matching = candidates_by_fingerprint.get(
+            snapshot_fingerprint(snapshot, include_context=compare_context), []
+        )
         result, status, reason = _choose_historical_result(
             matching,
             snapshot.ordinal,

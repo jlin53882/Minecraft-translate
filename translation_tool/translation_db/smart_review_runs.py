@@ -8,7 +8,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 from translation_tool.translation_db.models import (
@@ -58,6 +58,36 @@ def _resume_scope_matches(current: tuple[Any, ...], scope: dict[str, Any]) -> bo
     needle = str(scope.get("query") or "").strip().casefold()
     return not needle or any(
         needle in str(current[index] or "").casefold() for index in (3, 4, 5)
+    )
+
+
+_RESUME_CAS_FIELDS = (
+    "kind",
+    "mc_version",
+    "mod_id",
+    "entry_key",
+    "en_us",
+    "current_zh_tw",
+    "effective_source",
+    "review_status",
+    "effective_revision",
+    "manual_zh_tw",
+    "manual_checker",
+    "manual_review_status",
+    "manual_revision",
+)
+
+
+def _resume_cas_values(value: Mapping[str, Any] | SmartReviewCandidate) -> tuple[Any, ...]:
+    """取續跑 CAS 欄位；context 另由歷史快照沿用或在必要時重建。"""
+    if isinstance(value, Mapping):
+        return tuple(
+            value.get("entry_key") if key == "entry_key" else value.get(key)
+            for key in _RESUME_CAS_FIELDS
+        )
+    return tuple(
+        getattr(value, "key" if key == "entry_key" else key, None)
+        for key in _RESUME_CAS_FIELDS
     )
 
 
@@ -153,9 +183,13 @@ class SmartReviewRunStoreMixin:
         )
 
     def _resume_current_payload(
-        self, entry_id: int, scope: dict[str, Any]
+        self,
+        entry_id: int,
+        scope: dict[str, Any],
+        *,
+        include_context: bool = True,
     ) -> dict[str, Any] | None:
-        """讀取一筆目前快照；範圍失效時回傳 None 供排除記帳。"""
+        """讀取一筆目前快照；可略過昂貴 context 建立供續跑快速比對。"""
         current = self._one(_smart_review_current_snapshot_sql(), (int(entry_id),))
         if current is None or not _resume_scope_matches(current, scope):
             return None
@@ -178,13 +212,17 @@ class SmartReviewRunStoreMixin:
             "manual_checker": None if manual is None else manual[1],
             "manual_review_status": None if manual is None else manual[2],
             "manual_revision": None if manual is None else manual[3],
-            "context": self._smart_review_context(
-                int(entry_id),
-                str(current[0]),
-                str(current[1]),
-                str(current[2]),
-                str(current[3]),
-                str(current[4]),
+            "context": (
+                self._smart_review_context(
+                    int(entry_id),
+                    str(current[0]),
+                    str(current[1]),
+                    str(current[2]),
+                    str(current[3]),
+                    str(current[4]),
+                )
+                if include_context
+                else ()
             ),
         }
 
@@ -202,10 +240,26 @@ class SmartReviewRunStoreMixin:
             raise RuntimeError("智慧校對批次仍在執行中，不能重複啟動")
         candidates = history.list_candidates(run_id)
         scope = run.get("scope") if isinstance(run.get("scope"), dict) else {}
-        current_by_ordinal = {
-            candidate.ordinal: self._resume_current_payload(candidate.entry_id, scope)
-            for candidate in candidates
-        }
+        current_by_ordinal = {}
+        for candidate in candidates:
+            current = self._resume_current_payload(
+                candidate.entry_id,
+                scope,
+                include_context=False,
+            )
+            if current is not None:
+                if _resume_cas_values(candidate) != _resume_cas_values(current):
+                    # 只有 CAS 欄位真的變動才需要重新查詢完整 local context。
+                    current = self._resume_current_payload(
+                        candidate.entry_id,
+                        scope,
+                        include_context=True,
+                    )
+                else:
+                    # 未變更的候選直接沿用 JSON 內的 context，避免續跑時為
+                    # 數萬筆候選重做相同的資料庫證據查詢。
+                    current["context"] = list(candidate.context)
+            current_by_ordinal[candidate.ordinal] = current
         resume_stats = history.prepare_resume(run_id, current_by_ordinal)
         run_metrics = run.get("metrics")
         if not isinstance(run_metrics, dict):

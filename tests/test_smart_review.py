@@ -156,6 +156,20 @@ def test_snapshot_uses_implicit_unreviewed_for_non_manual_sources(db):
     assert all(item.effective_source != SRC_MANUAL for item in snapshots)
 
 
+def test_smart_review_candidates_can_skip_context_for_preview(db):
+    """預估只需 CAS 欄位時不建立每筆昂貴的 local context。"""
+    full = db.smart_review_candidates(version="1.21.1", limit=1)
+    compact = db.smart_review_candidates(
+        version="1.21.1",
+        limit=1,
+        include_context=False,
+    )
+
+    assert len(full) == len(compact) == 1
+    assert compact[0].entry_id == full[0].entry_id
+    assert compact[0].context == ()
+
+
 def test_smart_review_scope_options_only_show_unreviewed_modules_and_sources(db):
     """智慧校對範圍選單只列未審核候選，且來源會隨模組分組。"""
     db.write_back(

@@ -638,6 +638,7 @@ def resume_smart_review(
     run_id: str,
     api_key: str = "",
     model_name: str | None = None,
+    batch_size: int | None = None,
     provider: str | None = None,
     progress: Callable[[dict[str, Any]], None] | None = None,
     lm_config: dict[str, Any] | None = None,
@@ -654,7 +655,7 @@ def resume_smart_review(
         raise ValueError("找不到智慧校對歷史批次")
     if str(run_preview.get("status") or "") == "running":
         raise RuntimeError("智慧校對批次仍在執行中，不能重複啟動")
-    resolved_model = str(run_preview.get("model") or model_name or "").strip()
+    resolved_model = str(model_name or run_preview.get("model") or "").strip()
     resolved_provider = str(run_preview.get("provider") or provider or "gemini").strip()
     if not resolved_model:
         raise ValueError("智慧校對歷史批次沒有可恢復的模型")
@@ -663,7 +664,11 @@ def resume_smart_review(
     batch_size = max(
         1,
         min(
-            int(run_preview.get("batch_size") or settings["default_batch_size"]),
+            int(
+                batch_size
+                if batch_size is not None
+                else run_preview.get("batch_size") or settings["default_batch_size"]
+            ),
             settings["max_batch_size"],
         ),
     )

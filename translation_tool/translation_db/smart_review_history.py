@@ -23,7 +23,7 @@ import json
 import os
 import uuid
 from collections import defaultdict
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import AbstractContextManager, contextmanager
 from pathlib import Path
 from types import TracebackType
@@ -547,12 +547,17 @@ class SmartReviewHistoryStore:
         return self._query.get_run(run_id)
 
     def recent_candidate_payloads(
-        self, *, max_runs: int = 2
+        self,
+        *,
+        max_runs: int = 2,
+        version: str | None = None,
+        progress: Callable[[int, int], None] | None = None,
     ) -> tuple[int, list[dict[str, Any]]]:
         """讀取最近最多 ``max_runs`` 份可解析 manifest 的候選。
 
         排序使用與歷史頁相同的 ``started_at``／mtime／run_id。損壞檔案只會
-        被略過，不會佔用「最近兩份」的額度；SQLite 舊批次不在此查詢範圍。
+        被略過，不會佔用「最近兩份」的額度；指定 ``version`` 時，其他版本
+        也不會佔用額度。SQLite 舊批次不在此查詢範圍。
         """
         bounded = max(0, int(max_runs))
         if bounded == 0:
@@ -560,24 +565,41 @@ class SmartReviewHistoryStore:
         self.recover_abandoned_runs()
         consulted = 0
         candidates: list[dict[str, Any]] = []
-        with self.locked():
+        version_filter = str(version).strip() if version else None
+        # 這是唯讀查詢；recovery 已在上方完成，不能讓讀取 10 萬筆歷史候選
+        # 的時間持有跨程序寫入鎖，否則會阻塞套用、歷史分頁與續跑。
+        with self._history_lock.process_lock:
             for _key, path, _stamp in self._query.ranked_run_files():
                 try:
                     payload = self.repository.read_json_path(path)
                     if not isinstance(payload, dict) or not payload.get("id"):
                         continue
-                    items = self.repository.candidate_items_unlocked(path.stem, payload)
-                    parsed_items = [
-                        dict(item) for item in items if isinstance(item, dict)
-                    ]
                 except (OSError, ValueError, TypeError, KeyError):
                     continue
+                scope = payload.get("scope")
+                if isinstance(scope, dict):
+                    payload_version = (
+                        scope.get("version")
+                        or payload.get("scope_version")
+                        or payload.get("version")
+                    )
+                else:
+                    payload_version = payload.get("scope_version") or payload.get(
+                        "version"
+                    )
+                if version_filter and str(payload_version or "") != version_filter:
+                    continue
                 consulted += 1
-                for item in parsed_items:
-                    item["run_id"] = str(payload.get("id") or path.stem)
-                    item["_history_provider"] = payload.get("provider")
-                    item["_history_model"] = payload.get("model")
-                    candidates.append(item)
+                for item in self.repository.candidate_items_unlocked(path.stem, payload):
+                    if not isinstance(item, dict):
+                        continue
+                    parsed_item = dict(item)
+                    parsed_item["run_id"] = str(payload.get("id") or path.stem)
+                    parsed_item["_history_provider"] = payload.get("provider")
+                    parsed_item["_history_model"] = payload.get("model")
+                    candidates.append(parsed_item)
+                if progress is not None:
+                    progress(consulted, len(candidates))
                 if consulted >= bounded:
                     break
         return consulted, candidates
