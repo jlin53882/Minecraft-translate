@@ -6,6 +6,7 @@ import json
 import sqlite3
 import threading
 from dataclasses import replace
+from types import SimpleNamespace
 
 import pytest
 import requests
@@ -83,6 +84,68 @@ def db(tmp_path):
     _seed(database)
     yield database
     database.close()
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _cas_external_writer():
+    """在模組測試開始時建立 writer，避免 Windows 完整套件晚期啟動執行緒卡住。"""
+    state = SimpleNamespace(
+        configure=threading.Event(),
+        external_ready=threading.Event(),
+        go=threading.Event(),
+        attempted=threading.Event(),
+        finished=threading.Event(),
+        stop=threading.Event(),
+        path=None,
+        entry_id=None,
+        errors=[],
+    )
+
+    def write_external_manual_translation():
+        """準備好另一個 SQLite 連線，收到訊號後寫入人工譯文。"""
+        external = None
+        state.configure.wait()
+        if state.stop.is_set():
+            state.finished.set()
+            return
+        try:
+            external = TranslationDB(state.path)
+        except Exception as exc:  # noqa: BLE001 - collect writer errors in main thread
+            state.errors.append(exc)
+            state.external_ready.set()
+            state.finished.set()
+            return
+        state.external_ready.set()
+        try:
+            state.go.wait()
+            if state.stop.is_set():
+                return
+            state.attempted.set()
+            with external._tx() as conn:
+                conn.execute(
+                    "INSERT INTO translation (entry_id, source, zh_tw, checker, review_status) "
+                    "VALUES (?,?,?,'','unreviewed') ON CONFLICT(entry_id, source) DO UPDATE SET "
+                    "zh_tw=excluded.zh_tw, checker='', review_status='unreviewed', "
+                    "updated_at=CURRENT_TIMESTAMP",
+                    (state.entry_id, SRC_MANUAL, "外部人工修改"),
+                )
+        except Exception as exc:  # noqa: BLE001 - collect writer errors in main thread
+            state.errors.append(exc)
+        finally:
+            state.finished.set()
+            external.close()
+
+    state.thread = threading.Thread(
+        target=write_external_manual_translation,
+        name="smart-review-cas-external-writer",
+    )
+    state.thread.start()
+    yield state
+    state.stop.set()
+    state.configure.set()
+    state.go.set()
+    state.thread.join(timeout=5)
+    assert not state.thread.is_alive()
 
 
 def test_snapshot_uses_implicit_unreviewed_for_non_manual_sources(db):
@@ -2453,7 +2516,9 @@ def test_apply_candidate_is_cas_guarded_and_writes_history(db, monkeypatch):
     assert db.entry_detail(candidate.entry_id).entry.source != SRC_MANUAL
 
 
-def test_json_apply_keeps_cas_read_and_write_in_one_transaction(db, monkeypatch):
+def test_json_apply_keeps_cas_read_and_write_in_one_transaction(
+    db, monkeypatch, _cas_external_writer
+):
     """驗證 JSON 候選套用不會覆蓋同時完成的外部人工修改。"""
 
     def fake_call(**kwargs):
@@ -2484,29 +2549,17 @@ def test_json_apply_keeps_cas_read_and_write_in_one_transaction(db, monkeypatch)
     )
     result = run_smart_review(db, model_name="gemini-test", api_key="test-key", limit=1)
     candidate = db.list_smart_review_candidates(result.run_id)[0]
-    external = TranslationDB(db.path)
-    writer_started = threading.Event()
-    writer_finished = threading.Event()
-
-    def write_external_manual_translation():
-        """在候選快照讀取後嘗試寫入另一個人工譯文。"""
-        writer_started.set()
-        with external._tx() as conn:
-            conn.execute(
-                "INSERT INTO translation (entry_id, source, zh_tw, checker, review_status) "
-                "VALUES (?,?,?,'','unreviewed') ON CONFLICT(entry_id, source) DO UPDATE SET "
-                "zh_tw=excluded.zh_tw, checker='', review_status='unreviewed', "
-                "updated_at=CURRENT_TIMESTAMP",
-                (candidate.entry_id, SRC_MANUAL, "外部人工修改"),
-            )
-        writer_finished.set()
-
-    writer = threading.Thread(target=write_external_manual_translation)
+    writer = _cas_external_writer
+    writer.path = str(db.path)
+    writer.entry_id = candidate.entry_id
+    writer.configure.set()
+    assert writer.external_ready.wait(timeout=5)
+    assert not writer.errors, f"外部寫入連線初始化失敗：{writer.errors!r}"
     snapshot_sql = smart_review_module._smart_review_current_snapshot_sql().strip()
     original_connection = db._conn
 
     class CursorProxy:
-        """在 SQLite 游標取回 CAS 快照後啟動外部寫入。"""
+        """在 SQLite 游標取回 CAS 快照後放行外部寫入。"""
 
         def __init__(self, cursor):
             """保存原始游標與一次性回呼。"""
@@ -2518,10 +2571,10 @@ def test_json_apply_keeps_cas_read_and_write_in_one_transaction(db, monkeypatch)
             row = self._cursor.fetchone()
             if not self._called:
                 self._called = True
-                writer.start()
-                assert writer_started.wait(1)
-                # 不在主交易持鎖時等待外部寫入；交易提交後由 join 等待它完成，
-                # 才能同時驗證舊流程的覆寫風險與修復後的提交順序。
+                writer.go.set()
+                assert writer.attempted.wait(timeout=1)
+                # writer 已在此處嘗試 BEGIN IMMEDIATE；不在主交易持鎖時等待
+                # 外部寫入完成，交易提交後由 join 等待它完成。
             return row
 
         def __getattr__(self, name):
@@ -2548,18 +2601,21 @@ def test_json_apply_keeps_cas_read_and_write_in_one_transaction(db, monkeypatch)
             db.apply_smart_review_candidate(result.run_id, candidate.ordinal)
             == "applied"
         )
-        writer.join(timeout=5)
-        assert not writer.is_alive()
-        assert writer_finished.is_set()
-        assert (
-            db._q(
-                "SELECT zh_tw FROM translation WHERE entry_id=? AND source=?",
-                (candidate.entry_id, SRC_MANUAL),
-            )[0][0]
-            == "外部人工修改"
-        )
     finally:
-        external.close()
+        # 失敗時也放行等待中的 writer，避免測試在 Windows 留下未完成的執行緒。
+        writer.go.set()
+        writer.thread.join(timeout=5)
+        db._conn = original_connection
+    assert not writer.thread.is_alive()
+    assert writer.finished.is_set()
+    assert not writer.errors, f"外部寫入執行緒失敗：{writer.errors!r}"
+    assert (
+        db._q(
+            "SELECT zh_tw FROM translation WHERE entry_id=? AND source=?",
+            (candidate.entry_id, SRC_MANUAL),
+        )[0][0]
+        == "外部人工修改"
+    )
 
 
 def test_draft_is_persisted_and_apply_uses_the_human_value(db, monkeypatch):
