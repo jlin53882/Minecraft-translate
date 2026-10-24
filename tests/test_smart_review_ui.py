@@ -1104,7 +1104,10 @@ def test_resume_job_logs_snapshot_counts_and_current_progress(tmp_path, monkeypa
         in text
         for text in texts
     )
-    assert any("續跑準備完成：原批次 100 筆；既有處理 40 筆；本次待處理 60 筆" in text for text in texts)
+    assert any(
+        "續跑準備完成：原批次 100 筆；既有處理 40 筆；本次待處理 60 筆" in text
+        for text in texts
+    )
     assert any("已處理 50 / 100 筆" in text and "第 1 批" in text for text in texts)
     assert not any("已處理 40 / 100 筆" in text for text in texts)
 

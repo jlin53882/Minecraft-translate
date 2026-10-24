@@ -281,7 +281,9 @@ class SmartReviewRunPlanningMixin:
         )
         self.limit_field.value = str(int(preview.get("requested_limit") or 0))
         self.batch_field.value = str(
-            int(batch_size if batch_size is not None else preview.get("batch_size") or 0)
+            int(
+                batch_size if batch_size is not None else preview.get("batch_size") or 0
+            )
         )
         self.use_recent_history.value = False
         self.skip_valid_history.value = False

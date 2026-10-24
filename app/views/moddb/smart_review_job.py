@@ -121,9 +121,7 @@ class SmartReviewJobState:
             if processed_this_resume <= 0 or self.resume_pending_total <= 0:
                 return None
             eta_started_at = self.resume_started_at or self.started_at
-            end = self.finished_at or (
-                now if now is not None else time.monotonic()
-            )
+            end = self.finished_at or (now if now is not None else time.monotonic())
             elapsed = max(0.0, end - eta_started_at) if eta_started_at else 0.0
             return elapsed / processed_this_resume * remaining
         remaining = max(0, self.selected - self.processed)
@@ -371,9 +369,7 @@ class SmartReviewJob:
         state.invalid = int(snapshot.get("invalid", 0) or 0)
         state.request_errors = int(snapshot.get("request_errors", 0) or 0)
         state.resume_baseline_processed = int(
-            snapshot.get(
-                "resume_baseline_processed", state.resume_baseline_processed
-            )
+            snapshot.get("resume_baseline_processed", state.resume_baseline_processed)
             or 0
         )
         state.resume_pending_total = int(

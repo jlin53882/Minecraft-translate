@@ -590,7 +590,9 @@ class SmartReviewHistoryStore:
                 if version_filter and str(payload_version or "") != version_filter:
                     continue
                 consulted += 1
-                for item in self.repository.candidate_items_unlocked(path.stem, payload):
+                for item in self.repository.candidate_items_unlocked(
+                    path.stem, payload
+                ):
                     if not isinstance(item, dict):
                         continue
                     parsed_item = dict(item)

@@ -252,8 +252,7 @@ def preview_moddb_smart_review_resume_from_path(
         if not isinstance(status_counts, dict):
             status_counts = {}
         normalized_counts = {
-            str(status): int(count or 0)
-            for status, count in status_counts.items()
+            str(status): int(count or 0) for status, count in status_counts.items()
         }
         selected_count = int(run.get("selected_count") or 0)
         processed_count = int(run.get("processed_count") or 0)

@@ -272,7 +272,9 @@ class SmartReviewDialog:
                 tight=True,
                 horizontal_alignment=ft.CrossAxisAlignment.CENTER,
             ),
-            actions=[ft.TextButton("取消", on_click=lambda _e: self._cancel_resume_preview())],
+            actions=[
+                ft.TextButton("取消", on_click=lambda _e: self._cancel_resume_preview())
+            ],
         )
         self._resume_dialog = dialog
         present_page_dialog(self.page, dialog)
@@ -341,7 +343,9 @@ class SmartReviewDialog:
             content=ft.Container(
                 content=ft.Column(
                     [
-                        ft.Text(f"批次：{run_id}", size=12, color=C.DIM, selectable=True),
+                        ft.Text(
+                            f"批次：{run_id}", size=12, color=C.DIM, selectable=True
+                        ),
                         ft.Text(f"範圍：{scope_text}", size=13, selectable=True),
                         ft.Text(
                             f"原批次 {selected:,} 筆；已處理 {processed:,} 筆；"

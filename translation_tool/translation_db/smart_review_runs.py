@@ -78,7 +78,9 @@ _RESUME_CAS_FIELDS = (
 )
 
 
-def _resume_cas_values(value: Mapping[str, Any] | SmartReviewCandidate) -> tuple[Any, ...]:
+def _resume_cas_values(
+    value: Mapping[str, Any] | SmartReviewCandidate,
+) -> tuple[Any, ...]:
     """取續跑 CAS 欄位；context 另由歷史快照沿用或在必要時重建。"""
     if isinstance(value, Mapping):
         return tuple(

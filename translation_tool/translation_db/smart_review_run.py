@@ -411,9 +411,7 @@ def _open_run_state(
             if existing_run_id is not None and isinstance(initial_counts, dict)
             else 0
         ),
-        resume_pending_total=(
-            len(snapshots) if existing_run_id is not None else 0
-        ),
+        resume_pending_total=(len(snapshots) if existing_run_id is not None else 0),
     )
     if initial_counts:
         for key, value in initial_counts.items():
