@@ -26,11 +26,13 @@ class SmartReviewHistory:
         ctx: SmartReviewContext,
         *,
         on_open: Callable[[str], None],
+        on_resume: Callable[[str], None] | None = None,
         active_run_id: Callable[[], str | None],
     ) -> None:
         """建立歷史清單；``active_run_id`` 回傳目前正在執行的批次 id。"""
         self.ctx = ctx
         self.on_open = on_open
+        self.on_resume = on_resume
         self.active_run_id = active_run_id
         self._limit = _PAGE_SIZE
         self._seq = 0
@@ -77,10 +79,12 @@ class SmartReviewHistory:
         )
 
     def refresh(self, _e=None) -> None:
-        """在背景重新讀取最近的批次清單。"""
+        """在背景重新讀取最近的批次清單，完成後才更新卡片。"""
         database = self.ctx.database()
         if database is None:
             self.status_text.value = "目前沒有可用的 Mod 資料庫。"
+            self.refresh_btn.disabled = False
+            self.more_btn.disabled = False
             self.ctx.update()
             return
         path, priority = database
@@ -88,6 +92,8 @@ class SmartReviewHistory:
         self._seq += 1
         seq = self._seq
         self.status_text.value = "正在讀取批次清單…"
+        self.refresh_btn.disabled = True
+        self.more_btn.disabled = True
         self.ctx.update()
 
         def work() -> list[dict[str, Any]]:
@@ -98,6 +104,8 @@ class SmartReviewHistory:
 
         def done(runs, error: str | None) -> None:
             """顯示批次卡片或錯誤訊息。"""
+            self.refresh_btn.disabled = False
+            self.more_btn.disabled = False
             if error:
                 self.status_text.value = f"批次清單載入失敗：{error}"
                 self.ctx.update()
@@ -111,12 +119,14 @@ class SmartReviewHistory:
         self.ctx.run_background(
             work,
             done,
-            name="載入智慧校對批次清單",
+            name="載入智慧校對歷史批次",
             still_valid=lambda: seq == self._seq,
         )
 
     def _more(self, _e=None) -> None:
         """多載入一頁批次。"""
+        if self.more_btn.disabled:
+            return
         self._limit += _PAGE_SIZE
         self.refresh()
 
@@ -191,13 +201,7 @@ class SmartReviewHistory:
                         spacing=4,
                         expand=True,
                     ),
-                    kit.button(
-                        "開啟審查",
-                        "primary",
-                        size="sm",
-                        icon=ft.Icons.RATE_REVIEW_OUTLINED,
-                        on_click=lambda _e, rid=run_id: self.on_open(rid),
-                    ),
+                    self._card_actions(run, run_id, pending),
                 ],
                 vertical_alignment=ft.CrossAxisAlignment.CENTER,
             ),
@@ -206,3 +210,34 @@ class SmartReviewHistory:
             border=ft.Border.all(1, C.LINE),
             border_radius=10,
         )
+
+    def _card_actions(
+        self, run: dict[str, Any], run_id: str, pending: int
+    ) -> ft.Control:
+        """建立歷史卡片上的審查與安全續跑按鈕。"""
+        actions = [
+            kit.button(
+                "開啟審查",
+                "primary",
+                size="sm",
+                icon=ft.Icons.RATE_REVIEW_OUTLINED,
+                on_click=lambda _e, rid=run_id: self.on_open(rid),
+            )
+        ]
+        resumable = str(run.get("status") or "") in {
+            "cancelled",
+            "interrupted",
+            "partial",
+            "failed",
+        }
+        if self.on_resume is not None and resumable and pending:
+            actions.append(
+                kit.button(
+                    "繼續未完成校對",
+                    "secondary",
+                    size="sm",
+                    icon=ft.Icons.PLAY_CIRCLE_OUTLINE,
+                    on_click=lambda _e, rid=run_id: self.on_resume(rid),
+                )
+            )
+        return ft.Column(actions, spacing=6)

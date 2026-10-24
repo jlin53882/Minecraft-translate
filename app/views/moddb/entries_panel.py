@@ -117,6 +117,7 @@ class EntriesPanel(ft.Column):
         self._on_flagged_resolved = on_flagged_resolved
         self._refresh_keep_selection = True
         self._filter_only_refresh = False
+        self._refresh_keep_scroll = False
         self._search_debounce = Debouncer(lambda: self._page, SEARCH_DEBOUNCE_SECONDS)
         self.version: str | None = None
         self.mod_id: str | None = None
@@ -275,6 +276,15 @@ class EntriesPanel(ft.Column):
             on_click=self._confirm,
             tooltip="確認目前譯文為人工已審核（生效來源不變）；同步時只審核目前顯示相同譯文的版本",
         )
+        self.clear_review_btn = kit.button(
+            "解除人工審核",
+            "danger",
+            icon=ft.Icons.REMOVE_DONE,
+            size="sm",
+            on_click=self._clear_review,
+            tooltip="只解除目前條目的人工審核標記，保留譯文與來源",
+        )
+        self.clear_review_btn.visible = False
         self.save_btn = kit.button(
             "儲存", "primary", icon=ft.Icons.CHECK, on_click=self._save, disabled=True
         )
@@ -314,7 +324,7 @@ class EntriesPanel(ft.Column):
                     wrap=True,
                 ),
                 ft.Row(
-                    [self.confirm_btn, self.save_btn],
+                    [self.confirm_btn, self.clear_review_btn, self.save_btn],
                     spacing=8,
                     alignment=ft.MainAxisAlignment.END,
                     wrap=True,
@@ -377,12 +387,20 @@ class EntriesPanel(ft.Column):
 
     def _after_batch_replace(self, result) -> None:
         self._load_list(page=self.pager.current_page, keep_scroll=True)
-        if self._on_changed:
-            self._on_changed()
+        self._notify_changed(keep_scroll=True)
         self._safe_update()
 
-    def refresh(self, *, keep_selection: bool = True) -> None:
+    def _notify_changed(self, *, keep_scroll: bool = False) -> None:
+        """通知父層資料已變更，必要時讓下一次完整刷新保留清單位置。"""
+        self._refresh_keep_scroll = keep_scroll
+        if self._on_changed:
+            self._on_changed()
+
+    def refresh(
+        self, *, keep_selection: bool = True, keep_scroll: bool = False
+    ) -> None:
         """重新載入版本／模組選項與清單（資料庫更新後呼叫）。"""
+        self._refresh_keep_scroll = False
         db = self.db()
         if db is None:
             self._sync_database_identity(None)
@@ -395,7 +413,7 @@ class EntriesPanel(ft.Column):
         self._render_source_catalog = source_catalog_for(db)
         self._sync_database_identity(identity)
         self._refresh_filter_options()
-        self._load_list(keep_selection=keep_selection)
+        self._load_list(keep_selection=keep_selection, keep_scroll=keep_scroll)
 
     def apply_refresh_snapshot(self, snapshot: dict) -> None:
         """套用 worker 載入的頁籤快照，不在 UI 執行緒查詢 SQLite。"""
@@ -416,7 +434,9 @@ class EntriesPanel(ft.Column):
         self.advanced_filters.error_text.value = self._list_error or ""
         self.advanced_filters.error_text.visible = bool(self._list_error)
         self.pager.set_state(self.total, snapshot.get("page", 1))
-        self._render_list()
+        keep_scroll = bool(snapshot.get("keep_scroll"))
+        self._render_list(keep_scroll=keep_scroll)
+        self._refresh_keep_scroll = False
         self.detail = snapshot.get("detail")
         self.selected = self.detail.entry if self.detail else None
         if (
@@ -662,6 +682,8 @@ class EntriesPanel(ft.Column):
         self.editor_body.visible = detail is not None
         self.saved_text.value = ""
         if detail is None:
+            self.clear_review_btn.visible = False
+            self.clear_review_btn.disabled = True
             self.history_col.controls = [kit.hint_text("尚未選取條目")]
             return
         entry = detail.entry
@@ -717,16 +739,7 @@ class EntriesPanel(ft.Column):
 
     def _update_editor_actions_without_impact(self, entry: EntryRow) -> None:
         """Set initial editor state without a cross-version preview query."""
-        self._update_format_hints()
-        changed = bool(entry and self.pending_text() != entry.zh_tw)
-        ready = bool(
-            entry and entry.zh_tw and entry.review_status != "reviewed" and not changed
-        )
-        self.save_btn.disabled = self._save_running or not changed
-        self.confirm_btn.visible = ready
-        self.confirm_btn.disabled = not ready
-        self._review_preview = []
-        self.impact_box.visible = False
+        self._review_controller.update_actions_without_impact(entry)
 
     def _render_suggestions(self, *, catalog=None) -> None:
         if self.detail is None:
@@ -1057,8 +1070,7 @@ class EntriesPanel(ft.Column):
                     self.saved_text.value = message
             elif same_entry:
                 self.saved_text.value = f"{message}；目前輸入的變更尚未儲存。"
-            if self._on_changed:
-                self._on_changed()
+            self._notify_changed(keep_scroll=True)
         self._update_impact()
         self._safe_update()
 
@@ -1083,6 +1095,9 @@ class EntriesPanel(ft.Column):
     def _confirm(self, _e=None) -> None:
         self._review_controller.confirm(_e)
 
+    def _clear_review(self, _e=None) -> None:
+        self._review_controller.clear_review(_e)
+
     def _revert(self, history_id: int) -> None:
         db = self.db()
         if db is None:
@@ -1104,8 +1119,7 @@ class EntriesPanel(ft.Column):
             f"已還原 {count} 筆" if count else "沒有可還原的內容（之後已被再次修改）",
             C.EM if count else C.GOLD,
         )
-        if self._on_changed:
-            self._on_changed()
+        self._notify_changed(keep_scroll=True)
         self._safe_update()
 
     def _revert_batch(self, batch_id: str) -> None:
@@ -1124,8 +1138,7 @@ class EntriesPanel(ft.Column):
             f"已還原 {result.reverted:,} 筆；因後續修改略過 {result.skipped:,} 筆。",
             C.EM if result.reverted else C.GOLD,
         )
-        if self._on_changed:
-            self._on_changed()
+        self._notify_changed(keep_scroll=True)
         self._safe_update()
 
     def show_filter(self, state: str) -> None:

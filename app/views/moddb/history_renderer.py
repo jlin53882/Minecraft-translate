@@ -34,6 +34,7 @@ def _history_event(panel, event, catalog) -> ft.Control:
     action = {
         "manual": "手動儲存（未審核）",
         "review": "人工審核",
+        "review_unmark": "解除人工審核",
         "review_migrate": "審核遷移",
         "review_clear": "審核標記退回（人工已修改）",
         "revert": "還原",
@@ -55,6 +56,7 @@ def _history_event(panel, event, catalog) -> ft.Control:
                             "quality_repair",
                             "quality_repair_review",
                             "revert",
+                            "review_unmark",
                         )
                         and event.source_id is not None
                         else ""
@@ -118,6 +120,7 @@ def _append_history_details(controls, panel, event) -> None:
     if event.action in (
         "manual",
         "review",
+        "review_unmark",
         "quality_repair",
         "quality_repair_review",
     ):

@@ -3376,6 +3376,150 @@ class TranslationDB(SmartReviewMixin, BulkReviewMixin, CleanupMixin):
             self._refresh(conn, [change.entry_id for change in done])
         return done
 
+    def clear_manual_review(
+        self,
+        entry_id: int,
+        *,
+        expected_zh_tw: str,
+        expected_source: int | None = None,
+        expected_review_status: str | None = None,
+        expected_checker: str | None = None,
+        actor: str = "",
+    ) -> bool:
+        """解除目前生效譯文的人工審核標記，但保留譯文與來源。
+
+        這是單筆、CAS 保護的狀態變更：只有畫面仍顯示同一份譯文、來源、審核者
+        與已審核狀態時才會寫入，避免使用者在背景更新後清掉別人的新審核。
+        """
+        if not self.has_review_state:
+            raise ValueError("目前資料庫版本不支援解除人工審核，請先升級資料庫")
+        if not expected_zh_tw.strip():
+            raise ValueError("沒有可解除審核的譯文")
+
+        with self._tx(bump_generation_on_noop=False, keep_review=True) as conn:
+            current = self._clear_review_current(
+                conn,
+                entry_id,
+                expected_zh_tw=expected_zh_tw,
+                expected_source=expected_source,
+                expected_review_status=expected_review_status,
+                expected_checker=expected_checker,
+            )
+            source = int(current[1])
+            row = self._clear_review_translation(conn, entry_id, source)
+            updated = self._unmark_translation(conn, entry_id, source, row)
+            self._record_review_unmark(
+                conn,
+                entry_id,
+                source,
+                row,
+                updated,
+                current[3],
+                actor,
+            )
+            self._refresh(conn, [entry_id])
+        return True
+
+    def _clear_review_current(
+        self,
+        conn: sqlite3.Connection,
+        entry_id: int,
+        *,
+        expected_zh_tw: str,
+        expected_source: int | None,
+        expected_review_status: str | None,
+        expected_checker: str | None,
+    ):
+        """Load and validate the effective row used by the review CAS."""
+        review_sql = effective_review_sql("f", self.has_review_state)
+        current = conn.execute(
+            "SELECT f.zh_tw, f.source, f.checker, "
+            f"{review_sql} FROM effective f WHERE f.entry_id=?",
+            (entry_id,),
+        ).fetchone()
+        if current is None or current[0] != expected_zh_tw:
+            raise ValueError("目前譯文或審核狀態已變動，請重新整理後再解除審核")
+        if expected_source is not None and current[1] != expected_source:
+            raise ValueError("目前譯文或審核狀態已變動，請重新整理後再解除審核")
+        if expected_review_status is not None and current[3] != expected_review_status:
+            raise ValueError("目前譯文或審核狀態已變動，請重新整理後再解除審核")
+        if expected_checker is not None and (current[2] or "") != expected_checker:
+            raise ValueError("目前譯文或審核狀態已變動，請重新整理後再解除審核")
+        if current[3] not in ("reviewed", "legacy_unknown"):
+            raise ValueError("目前譯文或審核狀態已變動，請重新整理後再解除審核")
+        return current
+
+    def _clear_review_translation(
+        self, conn: sqlite3.Connection, entry_id: int, source: int
+    ):
+        """Load the source row and validate its review state before mutation."""
+        columns = "zh_tw, checker, review_status"
+        columns += ", revision" if self.has_translation_revision else ", NULL"
+        row = conn.execute(
+            f"SELECT {columns} FROM translation WHERE entry_id=? AND source=?",
+            (entry_id, source),
+        ).fetchone()
+        if row is None or row[2] not in (None, "reviewed", "legacy_unknown"):
+            raise ValueError("目前譯文或審核狀態已變動，請重新整理後再解除審核")
+        return row
+
+    def _unmark_translation(
+        self,
+        conn: sqlite3.Connection,
+        entry_id: int,
+        source: int,
+        row,
+    ):
+        """Clear the review fields while retaining text and source."""
+        checker = "" if source == SRC_MANUAL else row[1] or ""
+        conn.execute(
+            "UPDATE translation SET checker=?, review_status=?, "
+            "updated_at=CURRENT_TIMESTAMP WHERE entry_id=? AND source=?",
+            (checker, "unreviewed", entry_id, source),
+        )
+        return conn.execute(
+            "SELECT checker, review_status, "
+            + ("revision" if self.has_translation_revision else "NULL")
+            + " FROM translation WHERE entry_id=? AND source=?",
+            (entry_id, source),
+        ).fetchone()
+
+    def _record_review_unmark(
+        self,
+        conn: sqlite3.Connection,
+        entry_id: int,
+        source: int,
+        row,
+        updated,
+        previous_review_status: str,
+        actor: str,
+    ) -> None:
+        """Record an auditable no-text-change review status transition."""
+        conn.execute(
+            "INSERT INTO history "
+            "(entry_id, batch, actor, action, old_zh_tw, new_zh_tw, "
+            "prev_manual, note, prev_checker, prev_review_status, "
+            "new_checker, new_review_status, prev_revision, new_revision, source_id) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (
+                entry_id,
+                uuid.uuid4().hex,
+                actor,
+                "review_unmark",
+                row[0] or "",
+                row[0] or "",
+                row[0] or "",
+                "解除人工審核標記，保留原譯文與來源",
+                row[1] or "",
+                previous_review_status,
+                updated[0] or "",
+                updated[1],
+                row[3],
+                updated[2],
+                source,
+            ),
+        )
+
     def _apply_review_preview(
         self,
         conn: sqlite3.Connection,
@@ -3593,11 +3737,12 @@ class TranslationDB(SmartReviewMixin, BulkReviewMixin, CleanupMixin):
                 new_revision,
                 row_source,
                 row_batch,
+                row_action,
             ) in conn.execute(
                 f"SELECT id, entry_id, new_zh_tw, prev_manual, prev_checker, "
                 f"prev_review_status, new_checker, new_review_status, "
-                f"prev_revision, new_revision, source_id, batch FROM history "
-                f"WHERE action IN ('manual','review','smart_review_apply') AND {where} "
+                f"prev_revision, new_revision, source_id, batch, action FROM history "
+                f"WHERE action IN ('manual','review','review_unmark','smart_review_apply') AND {where} "
                 "ORDER BY id DESC",
                 params,
             ).fetchall():
@@ -3620,7 +3765,7 @@ class TranslationDB(SmartReviewMixin, BulkReviewMixin, CleanupMixin):
                     # manual mutation and refuse to invent missing old metadata.
                     later = conn.execute(
                         "SELECT 1 FROM history WHERE entry_id=? AND id>? "
-                        "AND action IN ('manual','review','smart_review_apply','revert','batch_replace',"
+                        "AND action IN ('manual','review','review_unmark','smart_review_apply','revert','batch_replace',"
                         "'batch_revert','quality_repair','quality_repair_review') LIMIT 1",
                         (eid, hid),
                     ).fetchone()
@@ -3631,8 +3776,10 @@ class TranslationDB(SmartReviewMixin, BulkReviewMixin, CleanupMixin):
                         continue
                 elif cur[2] not in (None, "legacy_unknown"):
                     continue  # 舊 history 沒有狀態快照，只能還原未被新版操作改動的舊列
-                if prev_manual is not None and (
-                    prev_checker is None or prev_review_status is None
+                if (
+                    row_action != "review_unmark"
+                    and prev_manual is not None
+                    and (prev_checker is None or prev_review_status is None)
                 ):
                     continue  # 不虛構舊 checker／審核狀態，避免改變有效譯文排序
                 if prev_manual is None:
@@ -3641,6 +3788,12 @@ class TranslationDB(SmartReviewMixin, BulkReviewMixin, CleanupMixin):
                         (eid, rsrc),
                     )
                 else:
+                    restored_review_status = (
+                        None
+                        if row_action == "review_unmark"
+                        and prev_review_status == "legacy_unknown"
+                        else prev_review_status
+                    )
                     conn.execute(
                         "UPDATE translation SET zh_tw=?, checker=?, review_status=?, "
                         "updated_at=CURRENT_TIMESTAMP "
@@ -3648,7 +3801,7 @@ class TranslationDB(SmartReviewMixin, BulkReviewMixin, CleanupMixin):
                         (
                             prev_manual,
                             prev_checker,
-                            prev_review_status or None,
+                            restored_review_status,
                             eid,
                             rsrc,
                         ),

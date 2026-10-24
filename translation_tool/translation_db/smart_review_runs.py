@@ -8,12 +8,17 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Sequence
+import re
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 from translation_tool.translation_db.models import (
     SmartReviewCandidate,
     SmartReviewSnapshot,
+)
+from translation_tool.translation_db.schema import SRC_MANUAL
+from translation_tool.translation_db.smart_review_filters import (
+    _smart_review_current_snapshot_sql,
 )
 from translation_tool.translation_db.smart_review_history import (
     SmartReviewHistoryStore,
@@ -32,6 +37,192 @@ def _response_reason(raw: object) -> str | None:
         return None
     reason = value.get("reason") if isinstance(value, dict) else None
     return reason if isinstance(reason, str) else None
+
+
+def _resume_scope_matches(current: tuple[Any, ...], scope: dict[str, Any]) -> bool:
+    """確認目前快照仍在原批次的版本、來源與搜尋範圍。"""
+    if scope.get("version") and current[1] != scope.get("version"):
+        return False
+    if scope.get("mod_id") and current[2] != scope.get("mod_id"):
+        return False
+    if scope.get("kind") and current[0] != scope.get("kind"):
+        return False
+    expected_source = scope.get("effective_source")
+    if expected_source is not None and current[6] != expected_source:
+        return False
+    expected_review = scope.get("review_status")
+    if (
+        expected_review in {"unreviewed", "reviewed", "legacy_unknown"}
+        and current[7] != expected_review
+    ):
+        return False
+    needle = str(scope.get("query") or "").strip().casefold()
+    return not needle or any(
+        needle in str(current[index] or "").casefold() for index in (3, 4, 5)
+    )
+
+
+_RESUME_CAS_FIELDS = (
+    "kind",
+    "mc_version",
+    "mod_id",
+    "entry_key",
+    "en_us",
+    "current_zh_tw",
+    "effective_source",
+    "review_status",
+    "effective_revision",
+    "manual_zh_tw",
+    "manual_checker",
+    "manual_review_status",
+    "manual_revision",
+)
+
+_RESUME_RETRYABLE_STATUSES = frozenset(
+    {
+        SmartReviewStatus.PENDING,
+        SmartReviewStatus.CANCELLED,
+        SmartReviewStatus.REQUEST_FAILED,
+    }
+)
+_RESUME_CONTEXT_REFERENCE_RE = re.compile(
+    r"^(?:db|module-locale):(?P<entry_id>\d+):source:(?P<source>-?\d+)"
+    r":revision:(?P<revision>\d+)$"
+)
+_RESUME_CONTEXT_QUERY_CHUNK = 400
+
+
+def _collect_resume_context_references(
+    candidates: Sequence[SmartReviewCandidate],
+) -> tuple[
+    dict[int, list[tuple[int, int, int, Mapping[str, Any]]]],
+    set[tuple[int, int]],
+    set[int],
+]:
+    """收集待重送候選的 context reference 與無法驗證的序號。"""
+    references_by_ordinal: dict[int, list[tuple[int, int, int, Mapping[str, Any]]]] = {}
+    lookup_keys: set[tuple[int, int]] = set()
+    stale: set[int] = set()
+    for candidate in candidates:
+        if str(candidate.status) not in _RESUME_RETRYABLE_STATUSES:
+            continue
+        for item in candidate.context:
+            if not isinstance(item, Mapping):
+                continue
+            context_id = str(item.get("id") or "")
+            if not context_id.startswith(("db:", "module-locale:")):
+                continue
+            match = _RESUME_CONTEXT_REFERENCE_RE.fullmatch(context_id)
+            if match is None:
+                # 舊格式沒有可驗證的 revision；安全起見只刷新這筆候選。
+                stale.add(candidate.ordinal)
+                continue
+            entry_id = int(match.group("entry_id"))
+            source = int(match.group("source"))
+            revision = int(match.group("revision"))
+            references_by_ordinal.setdefault(candidate.ordinal, []).append(
+                (entry_id, source, revision, item)
+            )
+            lookup_keys.add((entry_id, source))
+    return references_by_ordinal, lookup_keys, stale
+
+
+def _resume_context_reference_is_stale(
+    reference: tuple[int, int, int, Mapping[str, Any]],
+    current: tuple[Any, ...] | None,
+) -> bool:
+    """比較一筆 context reference 的 revision、文字與審核狀態。"""
+    if current is None:
+        return True
+    _entry_id, _source, revision, item = reference
+    context_id = str(item.get("id") or "")
+    default_status = (
+        "unreviewed" if context_id.startswith("module-locale:") else "reviewed"
+    )
+    expected_status = str(item.get("review_status") or default_status)
+    current_status = str(current[4] or default_status)
+    return (
+        int(current[2] or -1) != revision
+        or str(current[3]) != str(item.get("zh_tw") or "")
+        or current_status != expected_status
+    )
+
+
+def _resume_cas_values(
+    value: Mapping[str, Any] | SmartReviewCandidate,
+) -> tuple[Any, ...]:
+    """取續跑 CAS 欄位；context 另由歷史快照沿用或在必要時重建。"""
+    if isinstance(value, Mapping):
+        return tuple(
+            value.get("entry_key") if key == "entry_key" else value.get(key)
+            for key in _RESUME_CAS_FIELDS
+        )
+    return tuple(
+        getattr(value, "key" if key == "entry_key" else key, None)
+        for key in _RESUME_CAS_FIELDS
+    )
+
+
+def _resume_snapshot(run_id: str, item: SmartReviewCandidate) -> SmartReviewSnapshot:
+    """把歷史候選轉成續跑所需的不可變 snapshot。"""
+    return SmartReviewSnapshot(
+        run_id=run_id,
+        ordinal=item.ordinal,
+        entry_id=item.entry_id,
+        kind=item.kind,
+        mc_version=item.mc_version,
+        mod_id=item.mod_id,
+        key=item.key,
+        en_us=item.en_us,
+        current_zh_tw=item.current_zh_tw,
+        effective_source=item.effective_source,
+        review_status=item.review_status,
+        effective_revision=item.effective_revision,
+        context=item.context,
+        manual_zh_tw=item.manual_zh_tw,
+        manual_checker=item.manual_checker,
+        manual_review_status=item.manual_review_status,
+        manual_revision=item.manual_revision,
+    )
+
+
+def _resume_counts(items: Sequence[SmartReviewCandidate]) -> dict[str, int]:
+    """由恢復後候選重建既有 AI 結果計數。"""
+    counts = {
+        "processed": 0,
+        "valid": 0,
+        "invalid": 0,
+        "request_errors": 0,
+        "no_change": 0,
+        "suggestions": 0,
+        "needs_context": 0,
+    }
+    for item in items:
+        ai_status = item.ai_status or item.status
+        if item.status in {SmartReviewStatus.APPLIED, SmartReviewStatus.REJECTED}:
+            ai_status = item.ai_status or SmartReviewStatus.READY
+        if ai_status == SmartReviewStatus.REQUEST_FAILED:
+            counts["request_errors"] += 1
+            continue
+        if ai_status not in {
+            SmartReviewStatus.READY,
+            SmartReviewStatus.NO_CHANGE,
+            SmartReviewStatus.NEEDS_CONTEXT,
+            SmartReviewStatus.INVALID,
+        }:
+            continue
+        counts["processed"] += 1
+        if ai_status == SmartReviewStatus.INVALID:
+            counts["invalid"] += 1
+        else:
+            counts["valid"] += 1
+        if ai_status == SmartReviewStatus.NO_CHANGE:
+            counts["no_change"] += 1
+        elif ai_status == SmartReviewStatus.NEEDS_CONTEXT:
+            counts["needs_context"] += 1
+        elif ai_status == SmartReviewStatus.READY:
+            counts["suggestions"] += 1
+    return counts
 
 
 class SmartReviewRunStoreMixin:
@@ -62,6 +253,154 @@ class SmartReviewRunStoreMixin:
             batch_size=batch_size,
             scope=scope,
         )
+
+    def _resume_current_payload(
+        self,
+        entry_id: int,
+        scope: dict[str, Any],
+        *,
+        include_context: bool = True,
+    ) -> dict[str, Any] | None:
+        """讀取一筆目前快照；可略過昂貴 context 建立供續跑快速比對。"""
+        current = self._one(_smart_review_current_snapshot_sql(), (int(entry_id),))
+        if current is None or not _resume_scope_matches(current, scope):
+            return None
+        manual = self._one(
+            "SELECT zh_tw, checker, review_status, revision FROM translation "
+            "WHERE entry_id=? AND source=?",
+            (int(entry_id), SRC_MANUAL),
+        )
+        return {
+            "kind": current[0],
+            "mc_version": current[1],
+            "mod_id": current[2],
+            "entry_key": current[3],
+            "en_us": current[4],
+            "current_zh_tw": current[5],
+            "effective_source": current[6],
+            "review_status": current[7],
+            "effective_revision": current[8],
+            "manual_zh_tw": None if manual is None else manual[0],
+            "manual_checker": None if manual is None else manual[1],
+            "manual_review_status": None if manual is None else manual[2],
+            "manual_revision": None if manual is None else manual[3],
+            "context": (
+                self._smart_review_context(
+                    int(entry_id),
+                    str(current[0]),
+                    str(current[1]),
+                    str(current[2]),
+                    str(current[3]),
+                    str(current[4]),
+                )
+                if include_context
+                else ()
+            ),
+        }
+
+    def _stale_resume_context_ordinals(
+        self, candidates: Sequence[SmartReviewCandidate]
+    ) -> set[int]:
+        """找出待重送候選中已變動的 DB context reference。
+
+        context evidence 的 id 已包含 ``entry_id``、``source`` 與 translation
+        revision。先批次驗證這些輕量 reference，只有真的變動的候選才會重建完整
+        local context；未受影響的候選仍沿用 JSON 快照，避免續跑時重新查詢數萬筆。
+        """
+        references_by_ordinal, lookup_keys, stale = _collect_resume_context_references(
+            candidates
+        )
+        if not lookup_keys:
+            return stale
+
+        current_by_key: dict[tuple[int, int], tuple[Any, ...]] = {}
+        keys = sorted(lookup_keys)
+        for start in range(0, len(keys), _RESUME_CONTEXT_QUERY_CHUNK):
+            chunk = keys[start : start + _RESUME_CONTEXT_QUERY_CHUNK]
+            where = " OR ".join("(entry_id=? AND source=?)" for _ in chunk)
+            params = tuple(value for key in chunk for value in key)
+            rows = self._q(
+                "SELECT entry_id, source, revision, zh_tw, review_status "
+                f"FROM translation WHERE {where}",
+                params,
+            )
+            current_by_key.update({(int(row[0]), int(row[1])): row for row in rows})
+
+        for ordinal, references in references_by_ordinal.items():
+            if any(
+                _resume_context_reference_is_stale(
+                    reference,
+                    current_by_key.get((reference[0], reference[1])),
+                )
+                for reference in references
+            ):
+                stale.add(ordinal)
+        return stale
+
+    def prepare_smart_review_resume(
+        self, run_id: str
+    ) -> tuple[list[SmartReviewSnapshot], dict[str, int], dict[str, Any]]:
+        """以同一 run_id 準備恢復，保留原範圍並只回傳仍需送出的候選。"""
+        history = SmartReviewHistoryStore(self.path)
+        if not history.exists(run_id):
+            raise ValueError("只有 JSON 歷史批次支援同一 run 復原")
+        run = history.get_run(run_id)
+        if run is None:
+            raise ValueError("找不到智慧校對歷史批次")
+        if str(run.get("status") or "") == "running":
+            raise RuntimeError("智慧校對批次仍在執行中，不能重複啟動")
+        candidates = history.list_candidates(run_id)
+        scope = run.get("scope") if isinstance(run.get("scope"), dict) else {}
+        stale_context_ordinals = self._stale_resume_context_ordinals(candidates)
+        context_cache_reset = False
+        current_by_ordinal = {}
+        for candidate in candidates:
+            current = self._resume_current_payload(
+                candidate.entry_id,
+                scope,
+                include_context=False,
+            )
+            if current is not None:
+                cas_changed = _resume_cas_values(candidate) != _resume_cas_values(
+                    current
+                )
+                if cas_changed or candidate.ordinal in stale_context_ordinals:
+                    # CAS 或待重送候選引用的 DB context 變動時，才重建完整 context。
+                    if not context_cache_reset:
+                        # 續跑可能跨越另一個連線的資料庫寫入；不能沿用建立原始
+                        # snapshot 時留下的 query cache。
+                        self._smart_review_context_cache = {}
+                        context_cache_reset = True
+                    current = self._resume_current_payload(
+                        candidate.entry_id,
+                        scope,
+                        include_context=True,
+                    )
+                else:
+                    # 未變更的候選直接沿用 JSON 內的 context，避免續跑時為
+                    # 數萬筆候選重做相同的資料庫證據查詢。
+                    current["context"] = list(candidate.context)
+            current_by_ordinal[candidate.ordinal] = current
+        resume_stats = history.prepare_resume(run_id, current_by_ordinal)
+        run_metrics = run.get("metrics")
+        if not isinstance(run_metrics, dict):
+            run_metrics = {}
+        run_metrics = dict(run_metrics)
+        run_metrics["excluded_count"] = int(
+            run_metrics.get("excluded_count") or 0
+        ) + int(resume_stats.get("excluded") or 0)
+        run_metrics["invalidated_by_manual_edit_count"] = int(
+            run_metrics.get("invalidated_by_manual_edit_count") or 0
+        ) + int(resume_stats.get("invalidated") or 0)
+        run["metrics"] = run_metrics
+        refreshed = history.list_candidates(run_id)
+        snapshots = [
+            _resume_snapshot(run_id, item)
+            for item in refreshed
+            if item.status == SmartReviewStatus.PENDING
+        ]
+        base = _resume_counts(refreshed)
+        return snapshots, base, run
 
     def record_smart_review_results(
         self,
@@ -390,9 +729,6 @@ class SmartReviewRunStoreMixin:
         self, *, limit: int = 20, offset: int = 0
     ) -> list[dict[str, Any]]:
         """列出 JSON 批次與舊版 SQLite 批次，依時間合併分頁。"""
-        history_runs = SmartReviewHistoryStore(self.path).all_runs(
-            include_sort_metadata=True
-        )
         start = max(0, int(offset))
         bounded_limit = max(1, int(limit))
         has_scope = self._smart_review_has_column("smart_review_run", "scope_json")
@@ -400,6 +736,10 @@ class SmartReviewRunStoreMixin:
         # SQLite 舊批次必須先抓取足以填滿合併後頁面的前置資料；不能先套用
         # OFFSET，否則與 JSON 批次合併排序後會被再次偏移而漏資料。
         legacy_limit = max(1, start + bounded_limit + 1)
+        history_runs = SmartReviewHistoryStore(self.path).list_runs(
+            limit=legacy_limit,
+            include_sort_metadata=True,
+        )
         rows = self._q(
             "SELECT id, provider, model, scope_version, "
             + scope_column

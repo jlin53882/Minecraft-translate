@@ -499,6 +499,7 @@ def test_entries_panel_save_and_review_use_separate_manual_states(db_path):
     assert "人工已審核" not in "\n".join(texts_of(panel))
     assert panel.review_chip.content is None
     assert panel.confirm_btn.visible
+    assert panel.clear_review_btn.visible is False
 
     panel.tw_field.value = ""
     panel._on_text_change()
@@ -521,6 +522,24 @@ def test_entries_panel_save_and_review_use_separate_manual_states(db_path):
     assert detail.history[0].action == "review"
     assert "人工已審核" in "\n".join(texts_of(panel))
     assert panel.confirm_btn.visible is False
+    assert panel.clear_review_btn.visible is True
+    assert panel.clear_review_btn.disabled is False
+
+    panel.tw_field.value = "人工修改後的草稿"
+    panel._on_text_change()
+    assert panel.clear_review_btn.visible is True
+    assert panel.clear_review_btn.disabled is True
+    panel.tw_field.value = panel.selected.zh_tw
+    panel._on_text_change()
+    assert panel.clear_review_btn.disabled is False
+
+    panel.clear_review_btn.on_click(None)
+    detail = db.entry_detail(panel.selected.id)
+    manual = next(row for row in detail.translations if row.source == SRC_MANUAL)
+    assert manual.review_status == "unreviewed"
+    assert panel.review_chip.content is None
+    assert panel.clear_review_btn.visible is False
+    assert panel.confirm_btn.visible is True
     db.close()
 
 

@@ -19,10 +19,11 @@ manifest 加多個 JSON 分片，更新時只原子替換受影響的分片。Tr
 
 from __future__ import annotations
 
+import json
 import os
 import uuid
 from collections import defaultdict
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import AbstractContextManager, contextmanager
 from pathlib import Path
 from types import TracebackType
@@ -57,6 +58,7 @@ from translation_tool.translation_db.smart_review_history_recovery import (
     HistoryRecovery,
 )
 from translation_tool.translation_db.smart_review_status import (
+    PROCESSED_STATUSES,
     ProjectionState,
     SmartReviewStatus,
 )
@@ -67,6 +69,131 @@ def history_directory_for_db(db_path: str | Path) -> Path:
     """回傳指定翻譯資料庫專用的智慧校對 JSON 目錄。"""
     path = Path(db_path).expanduser().resolve()
     return path.parent / f"{path.stem}.smart_review"
+
+
+_RESUME_SNAPSHOT_KEYS = (
+    "kind",
+    "mc_version",
+    "mod_id",
+    "entry_key",
+    "en_us",
+    "current_zh_tw",
+    "effective_source",
+    "review_status",
+    "effective_revision",
+    "manual_zh_tw",
+    "manual_checker",
+    "manual_review_status",
+    "manual_revision",
+    "context",
+)
+
+
+def _resume_fingerprint(
+    value: Mapping[str, Any], *, use_original: bool
+) -> tuple[Any, ...]:
+    """建立續跑用的完整快照指紋。"""
+    original = value.get("original_snapshot") if use_original else None
+    source = original if isinstance(original, Mapping) else value
+    values: list[Any] = []
+    for key in _RESUME_SNAPSHOT_KEYS:
+        value = source.get("entry_key") if key == "entry_key" else source.get(key)
+        if key == "context":
+            value = json.dumps(
+                value or [], ensure_ascii=False, sort_keys=True, separators=(",", ":")
+            )
+        values.append(value)
+    return tuple(values)
+
+
+def _reset_resume_candidate(
+    candidate: dict[str, Any], current: Mapping[str, Any]
+) -> bool:
+    """把候選重設為 pending，並回傳是否由快照變更觸發。"""
+    old = {
+        key: candidate.get(key)
+        for key in (
+            "status",
+            "ai_status",
+            "decision",
+            "suggested_zh_tw",
+            "issue_types",
+            "evidence_ids",
+            "confidence",
+            "reason",
+            "validation_error",
+            "original_snapshot",
+        )
+    }
+    attempts = candidate.setdefault("attempt_history", [])
+    if isinstance(attempts, list):
+        attempts.append(old)
+    for key in _RESUME_SNAPSHOT_KEYS:
+        candidate[key] = current.get(key)
+    candidate["original_snapshot"] = {
+        key: candidate.get(key) for key in _RESUME_SNAPSHOT_KEYS
+    }
+    changed = _resume_fingerprint(old, use_original=True) != _resume_fingerprint(
+        current, use_original=False
+    )
+    candidate.update(
+        {
+            "decision": None,
+            "suggested_zh_tw": None,
+            "issue_types": [],
+            "evidence_ids": [],
+            "confidence": None,
+            "reason": None,
+            "response": None,
+            "draft_zh_tw": None,
+            "validation_error": "manual_edit_retry" if changed else None,
+            "status": SmartReviewStatus.PENDING,
+            "ai_status": None,
+            "applied_batch": None,
+            "applied_at": None,
+        }
+    )
+    return changed
+
+
+def _prepare_resume_candidate(
+    candidate: dict[str, Any], current: Mapping[str, Any] | None
+) -> str:
+    """回傳候選的續跑動作：``excluded``、``keep_excluded``、``retry`` 或 ``keep``。
+
+    已經因範圍外而取消的候選要保持冪等：再次續跑同一批次時不能重複
+    增加排除 KPI，也不能被重新視為待處理項目。
+    """
+    status = str(candidate.get("status") or SmartReviewStatus.PENDING)
+    ai_status = candidate.get("ai_status") or status
+    if current is None:
+        if status in {SmartReviewStatus.APPLIED, SmartReviewStatus.REJECTED}:
+            return "keep"
+        if (
+            status == SmartReviewStatus.CANCELLED
+            and candidate.get("validation_error") == "excluded_from_scope"
+        ):
+            return "keep_excluded"
+        candidate["status"] = SmartReviewStatus.CANCELLED
+        candidate["validation_error"] = "excluded_from_scope"
+        return "excluded"
+    retryable = status in {
+        SmartReviewStatus.PENDING,
+        SmartReviewStatus.CANCELLED,
+        SmartReviewStatus.REQUEST_FAILED,
+    }
+    changed = _resume_fingerprint(candidate, use_original=True) != _resume_fingerprint(
+        current, use_original=False
+    )
+    invalidated = (
+        ai_status in PROCESSED_STATUSES
+        and status not in {SmartReviewStatus.APPLIED, SmartReviewStatus.REJECTED}
+        and changed
+    )
+    if retryable or invalidated:
+        _reset_resume_candidate(candidate, current)
+        return "invalidated" if invalidated else "retry"
+    return "keep"
 
 
 class SmartReviewHistoryBatch:
@@ -419,6 +546,142 @@ class SmartReviewHistoryStore:
         """讀取單一批次摘要，不把候選全部放進歷史卡片。"""
         return self._query.get_run(run_id)
 
+    def recent_candidate_payloads(
+        self,
+        *,
+        max_runs: int = 2,
+        version: str | None = None,
+        progress: Callable[[int, int], None] | None = None,
+    ) -> tuple[int, list[dict[str, Any]]]:
+        """讀取最近最多 ``max_runs`` 份可解析 manifest 的候選。
+
+        排序使用與歷史頁相同的 ``started_at``／mtime／run_id。損壞檔案只會
+        被略過，不會佔用「最近兩份」的額度；指定 ``version`` 時，其他版本
+        也不會佔用額度。SQLite 舊批次不在此查詢範圍。
+        """
+        bounded = max(0, int(max_runs))
+        if bounded == 0:
+            return 0, []
+        self.recover_abandoned_runs()
+        consulted = 0
+        candidates: list[dict[str, Any]] = []
+        version_filter = str(version).strip() if version else None
+        # 這是唯讀查詢；recovery 已在上方完成，不能讓讀取 10 萬筆歷史候選
+        # 的時間持有跨程序寫入鎖，否則會阻塞套用、歷史分頁與續跑。
+        with self._history_lock.process_lock:
+            for _key, path, _stamp in self._query.ranked_run_files():
+                try:
+                    payload = self.repository.read_json_path(path)
+                    if not isinstance(payload, dict) or not payload.get("id"):
+                        continue
+                except (OSError, ValueError, TypeError, KeyError):
+                    continue
+                scope = payload.get("scope")
+                if isinstance(scope, dict):
+                    payload_version = (
+                        scope.get("version")
+                        or payload.get("scope_version")
+                        or payload.get("version")
+                    )
+                else:
+                    payload_version = payload.get("scope_version") or payload.get(
+                        "version"
+                    )
+                if version_filter and str(payload_version or "") != version_filter:
+                    continue
+                consulted += 1
+                for item in self.repository.candidate_items_unlocked(
+                    path.stem, payload
+                ):
+                    if not isinstance(item, dict):
+                        continue
+                    parsed_item = dict(item)
+                    parsed_item["run_id"] = str(payload.get("id") or path.stem)
+                    parsed_item["_history_provider"] = payload.get("provider")
+                    parsed_item["_history_model"] = payload.get("model")
+                    candidates.append(parsed_item)
+                if progress is not None:
+                    progress(consulted, len(candidates))
+                if consulted >= bounded:
+                    break
+        return consulted, candidates
+
+    def prepare_resume(
+        self,
+        run_id: str,
+        current_by_ordinal: Mapping[int, Mapping[str, Any] | None],
+    ) -> dict[str, int]:
+        """以同一 run_id 準備復原，保留已完成結果與人工變更軌跡。
+
+        ``pending``／``cancelled``／``request_failed`` 會回到 pending；若已完成
+        的候選 CAS 快照已改變，舊結果先放入 ``attempt_history`` 再重試。已套用或
+        已拒絕的候選不會被悄悄改回可套用狀態。
+        """
+        changed = 0
+        retried = 0
+        excluded = 0
+        invalidated = 0
+        with self._write_lock():
+            payload = self.repository.read_unlocked(run_id)
+            if str(payload.get("status") or "") == "running":
+                raise RuntimeError("智慧校對批次仍在執行中，不能重複啟動")
+            items = list(self.repository.candidate_items_unlocked(run_id, payload))
+            for candidate in items:
+                ordinal = int(candidate.get("ordinal") or 0)
+                action = _prepare_resume_candidate(
+                    candidate, current_by_ordinal.get(ordinal)
+                )
+                if action == "excluded":
+                    excluded += 1
+                elif action in {"retry", "invalidated"}:
+                    retried += 1
+                    changed += 1
+                    if action == "invalidated":
+                        invalidated += 1
+
+            payload.update(candidate_counts(payload))
+            metrics = payload.get("metrics")
+            if not isinstance(metrics, dict):
+                metrics = {}
+            metrics["excluded_count"] = (
+                int(metrics.get("excluded_count") or 0) + excluded
+            )
+            metrics["invalidated_by_manual_edit_count"] = (
+                int(metrics.get("invalidated_by_manual_edit_count") or 0) + invalidated
+            )
+            payload["metrics"] = metrics
+            payload.update(
+                {
+                    "status": "running",
+                    "finished_at": None,
+                    "owner_pid": os.getpid(),
+                    "checkpoint_at": timestamp(),
+                    "resume_count": int(payload.get("resume_count") or 0) + 1,
+                    "last_resume_at": timestamp(),
+                }
+            )
+            if is_chunked(payload):
+                updates = {int(item.get("ordinal") or 0): item for item in items}
+                for entry in self.repository.chunk_entries(payload):
+                    chunk = self.repository.read_chunk_unlocked(run_id, entry["index"])
+                    for item in chunk.get("candidates") or []:
+                        replacement = updates.get(int(item.get("ordinal") or 0))
+                        if replacement is not None:
+                            item.clear()
+                            item.update(replacement)
+                    self.repository.write_chunk_unlocked(run_id, entry["index"], chunk)
+                    self.repository.update_chunk_checkpoint_unlocked(
+                        run_id, payload, entry["index"], chunk
+                    )
+                payload.update(self.repository.chunk_summary_unlocked(run_id, payload))
+            self.repository.write_unlocked(run_id, payload)
+        return {
+            "changed": changed,
+            "retried": retried,
+            "excluded": excluded,
+            "invalidated": invalidated,
+        }
+
     def all_runs(self, *, include_sort_metadata: bool = False) -> list[dict[str, Any]]:
         """讀取所有可解析的 JSON 批次，依新到舊排序。
 
@@ -431,9 +694,19 @@ class SmartReviewHistoryStore:
         """回傳最近一次批次的 ``entry_id -> (狀態, 驗證錯誤)``，供條目列顯示狀態。"""
         return self._query.latest_run_marks()
 
-    def list_runs(self, *, limit: int = 20, offset: int = 0) -> list[dict[str, Any]]:
+    def list_runs(
+        self,
+        *,
+        limit: int = 20,
+        offset: int = 0,
+        include_sort_metadata: bool = False,
+    ) -> list[dict[str, Any]]:
         """分頁讀取 JSON 批次摘要。"""
-        return self._query.list_runs(limit=limit, offset=offset)
+        return self._query.list_runs(
+            limit=limit,
+            offset=offset,
+            include_sort_metadata=include_sort_metadata,
+        )
 
     def list_candidates(
         self,

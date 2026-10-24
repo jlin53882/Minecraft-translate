@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import time
 from collections import Counter
 from pathlib import Path
 from typing import Any, ClassVar
@@ -96,37 +97,41 @@ class HistoryQuery:
             return []
         runs: list[tuple[dict[str, Any], tuple[str, int, str]]] = []
         with self.lock.process_lock:
-            for path in self.directory.glob("*.json"):
-                try:
-                    mtime_ns = path.stat().st_mtime_ns
-                    payload = json.loads(path.read_text(encoding="utf-8"))
-                except (OSError, ValueError):
-                    continue
-                if not isinstance(payload, dict) or not payload.get("id"):
-                    continue
-                if is_chunked(payload):
-                    self.repository.ensure_chunked_summary_unlocked(
-                        path.stem, payload, persist=False
-                    )
-                summary = {
-                    key: value for key, value in payload.items() if key != "candidates"
-                }
-                if include_sort_metadata:
-                    summary["_history_mtime_ns"] = mtime_ns
-                runs.append(
-                    (
-                        summary,
-                        _run_sort_key(
-                            payload.get("started_at"),
-                            mtime_ns,
-                            payload.get("id"),
-                        ),
-                    )
+            for _rank, path, stamp in self.ranked_run_files():
+                parsed = self._summary_for_path(
+                    path, stamp, include_sort_metadata=include_sort_metadata
                 )
+                if parsed is not None:
+                    runs.append(parsed)
         return [
             item
             for item, _key in sorted(runs, key=lambda value: value[1], reverse=True)
         ]
+
+    def _summary_for_path(
+        self,
+        path: Path,
+        stamp: _FileStamp,
+        *,
+        include_sort_metadata: bool,
+    ) -> tuple[dict[str, Any], tuple[str, int, str]] | None:
+        """讀取單一 manifest 摘要，不把候選內容帶入歷史清單。"""
+        try:
+            payload = self.repository.read_json_path(path)
+        except (OSError, ValueError, TypeError):
+            return None
+        if not isinstance(payload, dict) or not payload.get("id"):
+            return None
+        if is_chunked(payload):
+            self.repository.ensure_chunked_summary_unlocked(
+                path.stem, payload, persist=False
+            )
+        summary = {key: value for key, value in payload.items() if key != "candidates"}
+        if include_sort_metadata:
+            summary["_history_mtime_ns"] = stamp[0]
+        return summary, _run_sort_key(
+            payload.get("started_at"), stamp[0], payload.get("id")
+        )
 
     def marks_cache_stamp(self, path: Path, manifest_stamp: _FileStamp) -> _MarksStamp:
         """建立最近標籤快取版本，包含分片檔案的存在與 stat 版本。"""
@@ -268,12 +273,46 @@ class HistoryQuery:
             return None
         return str(payload.get("id") or path.stem), marks
 
-    def list_runs(self, *, limit: int = 20, offset: int = 0) -> list[dict[str, Any]]:
-        """分頁讀取 JSON 批次摘要。"""
+    def list_runs(
+        self,
+        *,
+        limit: int = 20,
+        offset: int = 0,
+        include_sort_metadata: bool = False,
+    ) -> list[dict[str, Any]]:
+        """分頁讀取 JSON 批次摘要，只完整解析足以填滿目前頁的 manifest。"""
+        self.recovery.recover_abandoned_runs()
+        if not self.directory.is_dir():
+            return []
+        start = max(0, int(offset))
         bounded_limit = max(1, min(int(limit), 100))
-        return self.all_runs()[
-            max(0, int(offset)) : max(0, int(offset)) + bounded_limit
-        ]
+        end = start + bounded_limit
+        runs: list[tuple[dict[str, Any], tuple[str, int, str]]] = []
+        started = time.perf_counter()
+        scanned = 0
+        with self.lock.process_lock:
+            for _rank, path, stamp in self.ranked_run_files():
+                scanned += 1
+                parsed = self._summary_for_path(
+                    path, stamp, include_sort_metadata=include_sort_metadata
+                )
+                if parsed is None:
+                    continue
+                runs.append(parsed)
+                if len(runs) >= end:
+                    break
+        ordered = sorted(runs, key=lambda value: value[1], reverse=True)
+        result = [item for item, _key in ordered[start:end]]
+        logger.debug(
+            "Smart Review 歷史清單載入：limit=%s offset=%s scanned=%s parsed=%s returned=%s elapsed_ms=%.1f",
+            bounded_limit,
+            start,
+            scanned,
+            len(runs),
+            len(result),
+            (time.perf_counter() - started) * 1000,
+        )
+        return result
 
     def list_candidates(
         self,

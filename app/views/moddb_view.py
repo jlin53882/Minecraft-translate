@@ -399,7 +399,9 @@ class ModDbView(ft.Column):
                 self._request_panel_refresh(key)
             return
         if key == "entries":
-            self.entries.refresh()
+            keep_scroll = self.entries._refresh_keep_scroll
+            self.entries.refresh(keep_scroll=keep_scroll)
+            self.entries._refresh_keep_scroll = False
             self._panel_refresh_needed[key] = bool(self.entries._list_error)
         elif key == "scan":
             self.scan.refresh_versions()
@@ -479,6 +481,7 @@ class ModDbView(ft.Column):
                     "identity": request.get("identity"),
                     "source_catalog": request.get("source_catalog"),
                     "filter_only": bool(request.get("filter_only")),
+                    "keep_scroll": bool(request.get("keep_scroll")),
                     "error": str(exc),
                 }
 
@@ -630,6 +633,7 @@ class ModDbView(ft.Column):
                 "kind": self.entries.kind,
                 "page": self.entries.pager.current_page,
                 "filter_only": self.entries._filter_only_refresh,
+                "keep_scroll": self.entries._refresh_keep_scroll,
                 "identity": self.entries._db_identity,
                 "source_catalog": self.entries._render_source_catalog,
                 "selected_id": self.entries.selected.id
@@ -697,10 +701,11 @@ class ModDbView(ft.Column):
         keep_selection: bool = True,
         full_refresh: bool = False,
         *,
-        background: bool = True,
+        background: bool = False,
     ) -> None:
-        """Refresh changed filters in a worker and page navigation inline."""
+        """在 UI 執行緒同步更新條目篩選與頁碼，避免畫面出現背景刷新狀態。"""
         self._invalidate_panel("entries")
+        self.entries._refresh_keep_scroll = False
         self.entries._refresh_keep_selection = keep_selection
         self.entries._filter_only_refresh = background and not full_refresh
         if self.tab != "entries":
@@ -708,6 +713,10 @@ class ModDbView(ft.Column):
         if background and self._has_background_scheduler():
             self._request_panel_refresh("entries", message="正在篩選條目…")
             return
+        if full_refresh or page == 1:
+            # 同步篩選也要更新模組／來源／類型選單；worker snapshot 原本在
+            # apply_filter_options 內完成這一步，不能因改成 inline 而遺失。
+            self.entries._refresh_filter_options()
         self.entries._load_list(page=page, keep_selection=keep_selection)
         self._panel_refresh_needed["entries"] = bool(self.entries._list_error)
         self.entries.refresh_indicator.visible = False
@@ -729,13 +738,13 @@ class ModDbView(ft.Column):
             self.entries._filter_only_refresh = False
 
     def _refresh_active_panel(self) -> None:
-        """資料庫背景載入期間若切換了頁籤，連線就緒後刷新目前頁面。"""
+        """資料庫更新後刷新目前頁籤；條目清單導覽固定同步更新。"""
         if self.tab == "overview":
             self._request_overview_refresh()
         else:
             self._activate_panel(
                 self.tab,
-                background=self._has_background_scheduler(),
+                background=(self.tab != "entries" and self._has_background_scheduler()),
                 update=True,
             )
 

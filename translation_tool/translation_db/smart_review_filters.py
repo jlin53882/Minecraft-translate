@@ -348,8 +348,13 @@ class SmartReviewCandidateSelectionMixin:
         offset: int = 0,
         require_reviewed_reference: bool = False,
         prioritize_named_keys: bool = False,
+        include_context: bool = True,
     ) -> list[SmartReviewSnapshot]:
-        """依穩定條件選出目前智慧校對候選；``limit=0`` 代表不限。"""
+        """依穩定條件選出目前智慧校對候選；``limit=0`` 代表不限。
+
+        ``include_context=False`` 僅供不會送出模型請求的範圍／歷史預估使用；
+        真正執行智慧校對時維持預設值，以保存完整 local context。
+        """
         bounded_limit = int(limit)
         if bounded_limit < 0:
             raise ValueError("smart review limit 不可小於 0")
@@ -393,7 +398,10 @@ class SmartReviewCandidateSelectionMixin:
             )
         return [
             self._smart_review_snapshot_from_row(
-                row, twin_ids, absolute_offset + row_index
+                row,
+                twin_ids,
+                absolute_offset + row_index,
+                include_context=include_context,
             )
             for row_index, (row, twin_ids) in enumerate(selected_rows, 1)
         ]
@@ -436,6 +444,8 @@ class SmartReviewCandidateSelectionMixin:
         row: tuple[Any, ...],
         twin_ids: tuple[int, ...],
         ordinal: int,
+        *,
+        include_context: bool = True,
     ) -> SmartReviewSnapshot:
         """把候選資料列與其 local context 組成不可變快照。"""
         (
@@ -454,13 +464,17 @@ class SmartReviewCandidateSelectionMixin:
             manual_review_status,
             manual_revision,
         ) = row
-        context = self._smart_review_context(
-            entry_id,
-            kind,
-            mc_version,
-            mod_id,
-            key,
-            en_us,
+        context = (
+            self._smart_review_context(
+                entry_id,
+                kind,
+                mc_version,
+                mod_id,
+                key,
+                en_us,
+            )
+            if include_context
+            else []
         )
         return SmartReviewSnapshot(
             run_id="",

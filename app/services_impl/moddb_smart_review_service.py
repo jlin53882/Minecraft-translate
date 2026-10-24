@@ -37,10 +37,18 @@ from translation_tool.translation_db.smart_review import (
 )
 from translation_tool.translation_db.smart_review import (
     SMART_REVIEW_MANUAL_EDIT_STATUSES,
+    resume_smart_review,
     run_smart_review,
 )
 from translation_tool.translation_db.smart_review import (
     SMART_REVIEW_MAX_BATCH_SIZE as _SMART_REVIEW_MAX_BATCH_SIZE,
+)
+from translation_tool.translation_db.smart_review_history import SmartReviewHistoryStore
+from translation_tool.translation_db.smart_review_planner import (
+    SmartReviewPlan,
+    SmartReviewPlanInput,
+    SmartReviewPlanMode,
+    plan_new_smart_review,
 )
 from translation_tool.translation_db.smart_review_status import SmartReviewStatus
 from translation_tool.utils.config_manager import get_smart_review_settings, load_config
@@ -144,6 +152,174 @@ def preview_moddb_smart_review_from_path(
         db.close()
 
 
+def _load_preview_history(
+    db_path: str | Path,
+    version: str | None,
+    *,
+    use_recent_history: bool,
+    notify: Callable[[str], None],
+) -> tuple[int, list[dict[str, Any]]]:
+    """讀取快速預估所需的同版本 bounded history。"""
+    if not use_recent_history:
+        return 0, []
+    history = SmartReviewHistoryStore(db_path)
+
+    def history_progress(run_count: int, candidate_count: int) -> None:
+        notify(
+            f"正在讀取第 {run_count}/2 份歷史 JSON…已讀取 {candidate_count:,} 筆候選。"
+        )
+
+    return history.recent_candidate_payloads(
+        max_runs=2,
+        version=version,
+        progress=history_progress,
+    )
+
+
+def _preview_plan_summary(
+    plan: SmartReviewPlan,
+    batch_size: int | None,
+) -> dict[str, Any]:
+    """將快速規劃轉成不混淆 actual AI 數量的服務摘要。"""
+    settings = get_smart_review_settings()
+    effective_batch_size = (
+        int(batch_size)
+        if batch_size is not None
+        else int(settings["default_batch_size"])
+    )
+    summary = plan.summary(batch_size=effective_batch_size).as_dict()
+    summary.update(
+        {
+            "estimated_to_process_count": summary.pop("to_process_count"),
+            "estimated_batch_count": summary.pop("batch_count"),
+            "applied_skipped_count": plan.applied_skipped_count,
+            "no_change_skipped_count": plan.no_change_skipped_count,
+        }
+    )
+    return summary
+
+
+def preview_moddb_smart_review_plan_from_path(
+    path: str | Path,
+    priority: tuple[int, ...],
+    *,
+    version: str | None = None,
+    mod_id: str | None = None,
+    kind: str | None = None,
+    effective_source: int | None = SRC_AI,
+    review_status: str = "unreviewed",
+    query: str | None = None,
+    limit: int = 1000,
+    batch_size: int | None = None,
+    use_recent_history: bool = True,
+    skip_valid_history: bool = True,
+    model: str | None = None,
+    progress: Callable[[str], None] | None = None,
+) -> dict[str, Any]:
+    """回傳唯讀歷史規劃 KPI，不呼叫 provider。
+
+    預估只讀取 CAS 欄位，不建立每筆完整 local context；真正執行仍由
+    ``run_smart_review`` 建立完整 context。這讓預估保持快速，結果屬於可重用數量
+    的估算，不能當作實際送出的精確數量；``progress`` 只回報階段與筆數，不包含
+    候選內容。
+    """
+    notify = progress if callable(progress) else lambda _message: None
+    plan_input = SmartReviewPlanInput(
+        version=version,
+        mod_id=mod_id,
+        kind=kind,
+        effective_source=effective_source,
+        review_status=review_status,
+        query=query,
+        limit=limit,
+        provider=get_translation_provider(),
+        model=model,
+        use_recent_history=use_recent_history,
+        skip_valid_history=skip_valid_history,
+    )
+    db = _open(path, priority, readonly=True)
+    try:
+        notify("正在讀取目前符合範圍的候選…")
+        snapshots = db.smart_review_candidates(
+            **plan_input.candidate_kwargs(include_context=False)
+        )
+        notify(
+            f"已讀取目前候選 {len(snapshots):,} 筆，正在讀取目前版本最近兩份歷史 JSON…"
+        )
+        consulted, historical = _load_preview_history(
+            db.path,
+            version,
+            use_recent_history=plan_input.use_recent_history,
+            notify=notify,
+        )
+        notify(
+            f"已讀取 {consulted} 份歷史、{len(historical):,} 筆候選，正在比對可重用結果…"
+        )
+        plan = plan_new_smart_review(
+            snapshots,
+            historical,
+            skip_valid_history=plan_input.skip_valid_history,
+            history_runs_consulted=consulted,
+            plan_input=plan_input,
+            mode=SmartReviewPlanMode.FAST_ESTIMATE,
+        )
+        return _preview_plan_summary(plan, batch_size)
+    finally:
+        db.close()
+
+
+def preview_moddb_smart_review_resume_from_path(
+    path: str | Path,
+    priority: tuple[int, ...],
+    run_id: str,
+) -> dict[str, Any]:
+    """讀取指定續跑批次的確認資料，不啟動 provider 或續跑流程。
+
+    續跑只針對使用者點選的單一 ``run_id``；這個預覽不會重新掃描最近兩份
+    歷史，也不會執行 ``prepare_resume``。真正送出前仍會由資料層重新驗證
+    current snapshot 與 CAS，避免確認畫面期間的資料變更造成誤送。
+    """
+    db = _open(path, priority, readonly=True)
+    try:
+        history = SmartReviewHistoryStore(db.path)
+        if not history.exists(run_id):
+            raise ValueError("只有 JSON 歷史批次支援繼續未完成校對")
+        run = db.get_smart_review_run(run_id)
+        if run is None:
+            raise ValueError("找不到智慧校對歷史批次")
+        if str(run.get("status") or "") == "running":
+            raise RuntimeError("智慧校對批次仍在執行中，不能重複啟動")
+        breakdown = history.breakdown(run_id)
+        status_counts = breakdown.get("status")
+        if not isinstance(status_counts, dict):
+            status_counts = {}
+        normalized_counts = {
+            str(status): int(count or 0) for status, count in status_counts.items()
+        }
+        selected_count = int(run.get("selected_count") or 0)
+        processed_count = int(run.get("processed_count") or 0)
+        pending_count = max(0, selected_count - processed_count)
+        scope = run.get("scope")
+        if not isinstance(scope, dict):
+            scope = {}
+        return {
+            "run_id": str(run.get("id") or run_id),
+            "status": str(run.get("status") or ""),
+            "provider": str(run.get("provider") or ""),
+            "model": str(run.get("model") or ""),
+            "batch_size": int(run.get("batch_size") or 0),
+            "requested_limit": int(run.get("requested_limit") or 0),
+            "version": str(scope.get("version") or run.get("scope_version") or ""),
+            "scope": dict(scope),
+            "selected_count": selected_count,
+            "processed_count": processed_count,
+            "pending_count": pending_count,
+            "status_counts": normalized_counts,
+        }
+    finally:
+        db.close()
+
+
 def run_moddb_smart_review_from_path(
     path: str | Path,
     priority: tuple[int, ...],
@@ -162,6 +338,9 @@ def run_moddb_smart_review_from_path(
     query: str | None = None,
     cancel_check: Callable[[], bool] | None = None,
     task_id: str | None = None,
+    use_recent_history: bool = False,
+    skip_valid_history: bool = False,
+    resume_run_id: str | None = None,
 ) -> SmartReviewRunResult:
     """從指定資料庫執行智慧校對並逐步回傳執行進度。"""
     cfg = load_config()
@@ -173,6 +352,17 @@ def run_moddb_smart_review_from_path(
     provider = get_translation_provider()
     db = _open(path, priority, readonly=False)
     try:
+        if resume_run_id:
+            return resume_smart_review(
+                db,
+                run_id=resume_run_id,
+                model_name=model_name,
+                batch_size=batch_size,
+                progress=progress,
+                lm_config=lm_config,
+                cancel_check=cancel_check,
+                task_id=task_id,
+            )
         return run_smart_review(
             db,
             model_name=model_name,
@@ -194,6 +384,8 @@ def run_moddb_smart_review_from_path(
             query=query,
             cancel_check=cancel_check,
             task_id=task_id,
+            use_recent_history=use_recent_history,
+            skip_valid_history=skip_valid_history,
         )
     finally:
         db.close()
@@ -684,6 +876,8 @@ __all__ = [
     "load_moddb_smart_review_candidate_page_from_path",
     "moddb_smart_review_read_session",
     "preview_moddb_smart_review_from_path",
+    "preview_moddb_smart_review_plan_from_path",
+    "preview_moddb_smart_review_resume_from_path",
     "realign_moddb_smart_review_candidate_from_path",
     "reject_moddb_smart_review_candidate_from_path",
     "run_moddb_smart_review_from_path",

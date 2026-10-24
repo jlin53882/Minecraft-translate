@@ -6,6 +6,7 @@ import asyncio
 import math
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import flet as ft
 
@@ -29,6 +30,10 @@ from app.views.moddb.smart_review_job import (
     SmartReviewRequest,
     format_duration,
 )
+from app.views.moddb.smart_review_run_planning import (
+    SmartReviewPlanningController,
+    SmartReviewRunPlanningMixin,
+)
 from app.views.moddb.smart_review_run_status import (
     run_status_color,
     run_status_label,
@@ -38,7 +43,7 @@ from translation_tool.utils.config_manager import get_smart_review_settings
 _POLL_SECONDS = 0.4
 
 
-class SmartReviewRunPanel:
+class SmartReviewRunPanel(SmartReviewRunPlanningMixin):
     """設定範圍、啟動背景校對，並顯示進度、統計與逐批 log。"""
 
     def __init__(
@@ -71,7 +76,9 @@ class SmartReviewRunPanel:
         self._scope_modules: tuple[str, ...] = ()
         self._scope_sources_by_mod: dict[str | None, tuple[int, ...]] = {}
         self._source_catalog = getattr(ctx.get_db(), "source_catalog", None)
+        self._planning_controller = SmartReviewPlanningController(ctx)
         self._build_scope_controls(version, mod_id, kind, effective_source, query)
+        self._build_history_controls()
         self._build_run_controls()
         self.control = ft.Column(
             [
@@ -130,14 +137,50 @@ class SmartReviewRunPanel:
             + ([(initial_mod, initial_mod)] if initial_mod != "__all__" else []),
         )
         self.mod_dd.value = initial_mod
+        self._set_initial_source_options(effective_source, initial_mod)
+        self.query_field = kit.text_field(
+            "條目搜尋",
+            value=query,
+            hint="key、英文原文或目前譯文",
+            width=240,
+            on_change=self._query_changed,
+            on_submit=lambda _e: self.refresh_estimate(),
+        )
+        options = smart_review_model_options()
+        self.model_dd = kit.text_field(
+            "校對模型",
+            value=options[0][0] if options else "",
+            hint="輸入要使用的模型名稱",
+            width=250,
+            on_change=self._model_changed,
+        )
+        self.limit_field = kit.text_field(
+            "本次處理上限（筆，0=不限）",
+            value="1000",
+            width=190,
+            on_change=lambda _e: self._scope_changed(),
+        )
+        self.batch_field = kit.text_field(
+            "每批（筆）",
+            value=str(smart_review_settings["default_batch_size"]),
+            width=110,
+            on_change=lambda _e: self._update_estimate_text(),
+        )
+        self.estimate_text = ft.Text("", size=13, color=C.MUTED, selectable=True)
+
+    def _set_initial_source_options(
+        self, effective_source: int | None, initial_mod: str
+    ) -> None:
+        """建立初始生效來源選項與模組來源快取。"""
         initial_source = (
             "__all__" if effective_source is None else str(effective_source)
         )
-        self._scope_sources_by_mod = {
-            None: ((int(effective_source),) if effective_source is not None else ()),
-        }
+        initial_sources = (
+            (int(effective_source),) if effective_source is not None else ()
+        )
+        self._scope_sources_by_mod = {None: initial_sources}
         if initial_mod != "__all__":
-            self._scope_sources_by_mod[initial_mod] = self._scope_sources_by_mod[None]
+            self._scope_sources_by_mod[initial_mod] = initial_sources
         kit.set_dropdown_options(
             self.source_dd,
             [("__all__", "全部來源")]
@@ -148,33 +191,6 @@ class SmartReviewRunPanel:
             ),
         )
         self.source_dd.value = initial_source
-        self.query_field = kit.text_field(
-            "條目搜尋",
-            value=query,
-            hint="key、英文原文或目前譯文",
-            width=240,
-            on_change=lambda _e: self._debounce.call(self.refresh_estimate),
-            on_submit=lambda _e: self.refresh_estimate(),
-        )
-        self.model_dd = kit.dropdown(
-            label="校對模型", dense=True, width=250, on_select=self._scope_changed
-        )
-        options = smart_review_model_options()
-        kit.set_dropdown_options(self.model_dd, options)
-        self.model_dd.value = options[0][0] if options else None
-        self.limit_field = kit.text_field(
-            "本次處理上限（筆，0=不限）",
-            value="1000",
-            width=190,
-            on_change=lambda _e: self._update_estimate_text(),
-        )
-        self.batch_field = kit.text_field(
-            "每批（筆）",
-            value=str(smart_review_settings["default_batch_size"]),
-            width=110,
-            on_change=lambda _e: self._update_estimate_text(),
-        )
-        self.estimate_text = ft.Text("", size=13, color=C.MUTED, selectable=True)
 
     def _scope_query(self, version: str | None, kind: str | None):
         """在背景工作中讀取版本、類型與未審核候選的範圍對照。"""
@@ -194,6 +210,7 @@ class SmartReviewRunPanel:
 
     def _start_scope_options_load(self) -> None:
         """背景載入範圍選項，避免開啟或切換條件時阻塞 UI 執行緒。"""
+        self._invalidate_plan_preview()
         self._scope_seq += 1
         seq = self._scope_seq
         version = self.version_dd.value
@@ -305,40 +322,6 @@ class SmartReviewRunPanel:
             self.limit_field,
             self.batch_field,
         ]
-
-    def _scope_card(self) -> ft.Control:
-        """建立「校對範圍與模型」卡片。"""
-        return kit.section_card(
-            "校對範圍與模型",
-            ft.Column(
-                [
-                    kit.hint_text(
-                        "只讀取「目前生效且未審核」的 AI 譯文與本地已審核 context；"
-                        "AI 結果先存成候選，不會自動覆蓋譯文。"
-                    ),
-                    ft.Row(
-                        [
-                            self.version_dd,
-                            self.mod_dd,
-                            self.kind_dd,
-                            self.source_dd,
-                            self.query_field,
-                        ],
-                        spacing=10,
-                        wrap=True,
-                    ),
-                    ft.Row(
-                        [self.model_dd, self.limit_field, self.batch_field],
-                        spacing=10,
-                        wrap=True,
-                    ),
-                    self.estimate_text,
-                ],
-                spacing=10,
-            ),
-            icon=ft.Icons.TUNE,
-            tone="em",
-        )
 
     # ──────────────── 執行與進度控制項 ────────────────
 
@@ -496,6 +479,7 @@ class SmartReviewRunPanel:
 
     def _scope_changed(self, _e=None) -> None:
         """範圍變更後立即清除舊筆數，再以短暫 debounce 背景重新估算。"""
+        self._invalidate_plan_preview()
         self._total = None
         self._estimate_seq += 1
         if self._scope_loading:
@@ -558,6 +542,7 @@ class SmartReviewRunPanel:
             name="計算智慧校對候選筆數",
             still_valid=lambda: seq == self._estimate_seq,
         )
+        self._refresh_plan_preview()
 
     def _read_int(self, control: ft.TextField, minimum: int = 1) -> int | None:
         """讀取整數輸入；格式錯誤或小於下限時回傳 None。"""
@@ -591,13 +576,25 @@ class SmartReviewRunPanel:
             )
             self.estimate_text.color = C.RED
         else:
-            planned = self._total if limit == 0 else min(limit, self._total)
+            plan = getattr(self, "_plan_preview_result", None)
+            if isinstance(plan, dict):
+                planned = int(plan.get("estimated_to_process_count") or 0)
+                selected = int(plan.get("selected_count") or 0)
+                scope_label = (
+                    f"快速預估符合範圍 {format_count(selected)} 筆；"
+                    f"估算送 AI {format_count(planned)} 筆"
+                )
+            else:
+                planned = self._total if limit == 0 else min(limit, self._total)
+                scope_label = (
+                    f"符合範圍的未審核 AI 譯文共 {format_count(self._total)} 筆；"
+                    f"目前尚未完成歷史重用預估"
+                )
             batches = math.ceil(planned / batch) if planned else 0
             limit_label = "不限" if limit == 0 else format_count(limit)
             self.estimate_text.value = (
-                f"符合範圍的未審核 AI 譯文共 {format_count(self._total)} 筆；"
-                f"本次將處理 {format_count(planned)} 筆（上限 {limit_label}），約 {batches} 批"
-                f"（每批最多 {max_batch_size} 筆）。"
+                f"{scope_label}；本次上限 {limit_label}，約 {batches} 批"
+                f"（每批 {batch} 筆）。"
             )
             self.estimate_text.color = C.MUTED
         if update:
@@ -605,27 +602,51 @@ class SmartReviewRunPanel:
 
     # ──────────────── 啟動、停止與狀態 ────────────────
 
-    def _request(self) -> SmartReviewRequest:
+    def _request(
+        self,
+        *,
+        model_override: str | None = None,
+        batch_override: int | None = None,
+        scope_override: dict[str, Any] | None = None,
+        limit_override: int | None = None,
+    ) -> SmartReviewRequest:
         """依畫面建立校對請求；條件不完整時丟出給使用者看的錯誤。"""
         database = self.ctx.database()
         if database is None:
             raise ValueError("目前沒有可用的 Mod 資料庫")
-        version = self.version_dd.value
-        model = self.model_dd.value
+        scope = scope_override if isinstance(scope_override, dict) else None
+        version = scope.get("version") if scope is not None else self.version_dd.value
+        model = self.model_dd.value if model_override is None else model_override
         if not version:
             raise ValueError("請先選擇遊戲版本")
         if not model:
             raise ValueError("請先選擇校對模型（設定頁需啟用至少一個模型）")
-        limit = self._read_int(self.limit_field, minimum=0)
-        batch = self._read_int(self.batch_field)
+        limit = (
+            int(limit_override)
+            if limit_override is not None
+            else self._read_int(self.limit_field, minimum=0)
+        )
+        batch = (
+            self._read_int(self.batch_field)
+            if batch_override is None
+            else int(batch_override)
+        )
         if limit is None:
+            raise ValueError("上限必須是 0 或正整數")
+        if limit < 0:
             raise ValueError("上限必須是 0 或正整數")
         if batch is None:
             raise ValueError("每批必須是大於 0 的整數")
         max_batch_size = get_smart_review_settings()["max_batch_size"]
         if batch > max_batch_size:
             raise ValueError(f"每批必須介於 1 與 {max_batch_size} 筆")
-        mod_id, kind, source, query = self._scope_values()
+        if scope is None:
+            mod_id, kind, source, query = self._scope_values()
+        else:
+            mod_id = scope.get("mod_id") or None
+            kind = scope.get("kind") or None
+            source = scope.get("effective_source")
+            query = str(scope.get("query") or "")
         path, priority = database
         return SmartReviewRequest(
             path=path,
@@ -638,6 +659,8 @@ class SmartReviewRunPanel:
             query=query,
             limit=limit,
             batch_size=batch,
+            use_recent_history=bool(self.use_recent_history.value),
+            skip_valid_history=bool(self.skip_valid_history.value),
         )
 
     def _start(self, _e=None) -> None:
@@ -744,6 +767,8 @@ class SmartReviewRunPanel:
             state.valid,
             state.invalid,
             state.request_errors,
+            state.resume_baseline_processed,
+            state.resume_pending_total,
             state.cancel_requested,
             format_duration(state.elapsed()),
             format_duration(state.eta_seconds()),
@@ -768,12 +793,21 @@ class SmartReviewRunPanel:
         """更新進度條、百分比、統計與預估剩餘時間。"""
         self.progress_bar.value = state.fraction if state.selected else None
         eta = format_duration(state.eta_seconds())
-        self.progress_text.value = (
-            f"已處理 {state.processed:,} / {state.selected:,} 筆"
-            f"（{state.fraction:.0%}）· 預估剩餘 {eta}"
-            if state.selected
-            else "正在查詢並準備候選…"
-        )
+        if state.selected:
+            if state.request is not None and state.request.resume_run_id:
+                self.progress_text.value = (
+                    f"總進度 {state.processed:,} / {state.selected:,} 筆"
+                    f"（{state.fraction:.0%}）· 本次續跑 "
+                    f"{state.resume_processed:,} / {state.resume_pending_total:,} 筆"
+                    f" · 預估剩餘 {eta}"
+                )
+            else:
+                self.progress_text.value = (
+                    f"已處理 {state.processed:,} / {state.selected:,} 筆"
+                    f"（{state.fraction:.0%}）· 預估剩餘 {eta}"
+                )
+        else:
+            self.progress_text.value = "正在查詢並準備候選…"
         self.valid_stat.set_value(f"{state.valid:,}")
         self.invalid_stat.set_value(f"{state.invalid:,}")
         self.error_stat.set_value(f"{state.request_errors:,}")
@@ -821,6 +855,10 @@ class SmartReviewRunPanel:
                 f"需補 context {result.needs_context_count:,}）；"
                 f"無效 {result.invalid_count:,}、請求錯誤 {result.request_error_count:,}。"
             )
+            if getattr(result, "stop_reason", None):
+                self.result_detail.value += (
+                    f" 執行停止原因：{result.stop_reason}（未送出的候選保留待恢復）。"
+                )
         errors = state.breakdown.get("errors") if state.breakdown else None
         self.result_errors.value = (
             "無效原因（前幾名）：\n"

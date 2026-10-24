@@ -79,6 +79,7 @@ def new_smart_review_metrics(*, input_token_budget: int | None) -> dict[str, Any
         "permanent_error_count": 0,
         "failure_classes": {},
         "validation_errors": {},
+        "stop_reason": None,
         "input_token_budget": input_token_budget,
     }
 
@@ -130,6 +131,8 @@ class SmartReviewRunState:
         progress: Callable[[dict[str, Any]], None] | None,
         metrics: dict[str, Any],
         started: float,
+        resume_baseline_processed: int = 0,
+        resume_pending_total: int = 0,
     ) -> None:
         self.db = db
         self.run_id = run_id
@@ -139,6 +142,8 @@ class SmartReviewRunState:
         self.progress = progress
         self.metrics = metrics
         self.started = started
+        self.resume_baseline_processed = max(0, int(resume_baseline_processed))
+        self.resume_pending_total = max(0, int(resume_pending_total))
         self.counts = SmartReviewCounts()
         self.token_totals: dict[str, int | None] = {
             "prompt_tokens": None,
@@ -146,6 +151,7 @@ class SmartReviewRunState:
         }
         self.current_batch_handle: Any = None
         self.cancelled = False
+        self.stop_reason: str | None = None
 
     # -- metrics 累計 ---------------------------------------------------------
 
@@ -172,6 +178,7 @@ class SmartReviewRunState:
         *,
         error_code: str | None = None,
         permanent: bool = False,
+        stop_reason: str | None = None,
     ) -> str:
         """保存安全錯誤代碼並更新錯誤分類統計。"""
         code = error_code or _smart_review_error_code(
@@ -183,6 +190,9 @@ class SmartReviewRunState:
             self.bump("permanent_error_count")
         classes = self.metrics["failure_classes"]
         classes[code] = int(classes.get(code, 0)) + 1
+        if stop_reason and self.stop_reason is None:
+            self.stop_reason = stop_reason
+            self.metrics["stop_reason"] = stop_reason
         return code
 
     # -- 進度與事件 -----------------------------------------------------------
@@ -207,6 +217,11 @@ class SmartReviewRunState:
             "status": "running",
             "phase": phase,
         }
+        if self.resume_pending_total:
+            snapshot["resume_baseline_processed"] = self.resume_baseline_processed
+            snapshot["resume_pending_total"] = self.resume_pending_total
+        if self.stop_reason:
+            snapshot["stop_reason"] = self.stop_reason
         # 輸出邊界：core 內部只有 canonical 欄位，回呼端才補舊版欄位。
         if timing is not None:
             snapshot["timing"] = to_legacy_event(timing)

@@ -38,11 +38,12 @@ class ReviewScopeController:
             and db
             and entry.zh_tw
             and text == entry.zh_tw
-            and entry.review_status != "reviewed"
+            and entry.review_status not in ("reviewed", "legacy_unknown")
             and not changed
         )
         panel.confirm_btn.visible = ready
         panel.confirm_btn.disabled = not ready
+        self._update_clear_review_button(entry, changed)
         panel._review_preview = []
         if changed:
             impacts = db.preview_manual(entry.id, text, propagate=panel.sync_row.value)
@@ -52,6 +53,32 @@ class ReviewScopeController:
             self._set_review_impact(entry, db)
         else:
             panel.impact_box.visible = False
+
+    def update_actions_without_impact(self, entry: EntryRow) -> None:
+        """Set editor actions without querying a cross-version review preview."""
+        panel = self.panel
+        panel._update_format_hints()
+        changed = panel.pending_text() != entry.zh_tw
+        ready = bool(
+            entry.zh_tw
+            and entry.review_status not in ("reviewed", "legacy_unknown")
+            and not changed
+        )
+        panel.save_btn.disabled = panel._save_running or not changed
+        panel.confirm_btn.visible = ready
+        panel.confirm_btn.disabled = not ready
+        self._update_clear_review_button(entry, changed)
+        panel._review_preview = []
+        panel.impact_box.visible = False
+
+    def _update_clear_review_button(
+        self, entry: EntryRow | None, changed: bool
+    ) -> None:
+        panel = self.panel
+        panel.clear_review_btn.visible = bool(
+            entry and entry.review_status in ("reviewed", "legacy_unknown")
+        )
+        panel.clear_review_btn.disabled = panel._save_running or changed
 
     def _set_review_impact(self, entry: EntryRow, db: TranslationDB) -> None:
         panel = self.panel
@@ -123,6 +150,67 @@ class ReviewScopeController:
             self._reject(entry, exc)
             return
         self._show_scope(entry, db, preview, bool(panel.sync_row.value))
+
+    def clear_review(self, _e=None) -> None:
+        """解除目前生效譯文的人工審核標記，不改譯文與來源。"""
+        panel = self.panel
+        entry, db = panel.selected, panel.db()
+        if (
+            not entry
+            or not db
+            or not entry.zh_tw
+            or panel.pending_text() != entry.zh_tw
+            or entry.review_status not in ("reviewed", "legacy_unknown")
+        ):
+            show_snack(
+                panel._page,
+                "目前條目不是可解除的人工審核狀態，請先重新整理。",
+                C.GOLD,
+            )
+            return
+        try:
+            db.clear_manual_review(
+                entry.id,
+                expected_zh_tw=entry.zh_tw,
+                expected_source=entry.source,
+                expected_review_status=entry.review_status,
+                expected_checker=entry.checker,
+                actor="使用者",
+            )
+        except ValueError as exc:
+            self._reject_clear(entry, exc)
+            return
+        except sqlite3.Error as exc:
+            log_exception(
+                f"Mod 資料庫解除人工審核失敗：{entry.mc_version} "
+                f"{entry.mod_id} {entry.key}"
+            )
+            show_snack(
+                panel._page,
+                f"解除人工審核失敗（資料庫錯誤：{exc}）；詳情見後台 log",
+                C.RED,
+            )
+            return
+
+        message = "已解除人工審核，譯文與來源未變更"
+        log_info(
+            f"Mod 資料庫解除人工審核：{entry.mc_version} {entry.mod_id} {entry.key}"
+        )
+        panel._load_list(page=panel.pager.current_page, keep_scroll=True)
+        panel.saved_text.value = message
+        show_snack(panel._page, message, C.EM, text_color=C.ON_EM)
+        panel._notify_changed(keep_scroll=True)
+        panel._safe_update()
+
+    def _reject_clear(self, entry: EntryRow, exc: Exception) -> None:
+        panel = self.panel
+        log_warning(
+            f"Mod 資料庫解除人工審核被拒絕：{entry.mc_version} "
+            f"{entry.mod_id} {entry.key}（{exc!r}）"
+        )
+        show_snack(panel._page, str(exc), C.GOLD)
+        panel._load_list(page=panel.pager.current_page, keep_scroll=True)
+        panel._safe_update()
 
     def _show_scope(
         self,
