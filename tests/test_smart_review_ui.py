@@ -458,7 +458,7 @@ def test_run_panel_uses_planned_ai_count_for_batch_estimate(db):
     panel = dialog.run_panel
     panel._total = 60_186
     panel.limit_field.value = "0"
-    panel.batch_field.value = "100"
+    panel.batch_field.value = "20"
     panel._plan_preview_result = {
         "selected_count": 60_186,
         "reused_count": 763,
@@ -470,7 +470,7 @@ def test_run_panel_uses_planned_ai_count_for_batch_estimate(db):
 
     assert "符合範圍 60,186 筆" in panel.estimate_text.value
     assert "實際送 AI 59,423 筆" in panel.estimate_text.value
-    assert "約 595 批（每批 100 筆）" in panel.estimate_text.value
+    assert "約 2972 批（每批 20 筆）" in panel.estimate_text.value
 
 
 def test_run_panel_rejects_batch_size_over_safe_limit(db, monkeypatch):
@@ -631,7 +631,7 @@ def test_resume_run_syncs_history_scope_into_execution_inputs(db, monkeypatch):
     monkeypatch.setattr(dialog.job, "start", fake_start)
     preview = {
         "model": "gpt-history",
-        "batch_size": 100,
+        "batch_size": 20,
         "requested_limit": 0,
         "version": "1.21.1",
         "scope": {
@@ -649,13 +649,13 @@ def test_resume_run_syncs_history_scope_into_execution_inputs(db, monkeypatch):
     assert panel.resume_run(
         "run-resume",
         model="gpt-override",
-        batch_size=100,
+        batch_size=20,
         resume_preview=preview,
     )
 
     assert panel.version_dd.value == "1.21.1"
     assert panel.limit_field.value == "0"
-    assert panel.batch_field.value == "100"
+    assert panel.batch_field.value == "20"
     assert panel.model_dd.value == "gpt-override"
     assert len(captured) == 1
     request = captured[0]
@@ -663,7 +663,7 @@ def test_resume_run_syncs_history_scope_into_execution_inputs(db, monkeypatch):
         "1.21.1",
         0,
         "gpt-override",
-        100,
+        20,
     )
     assert (
         request.resume_selected_count,

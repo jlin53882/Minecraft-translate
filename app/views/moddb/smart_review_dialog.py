@@ -306,6 +306,20 @@ class SmartReviewDialog:
         ]
         return "；".join(values) if values else "沒有狀態明細"
 
+    def _build_resume_fields(self, preview: dict[str, Any]) -> None:
+        """建立續跑確認視窗的模型、批次與錯誤欄位。"""
+        model = str(preview.get("model") or self.run_panel.model_dd.value or "")
+        batch_size = int(
+            preview.get("batch_size") or self.run_panel.batch_field.value or 0
+        )
+        self._resume_model_field = kit.text_field(
+            "校對模型", value=model, hint="輸入要使用的模型名稱", width=300
+        )
+        self._resume_batch_field = kit.text_field(
+            "每批（筆）", value=str(batch_size), hint="正整數", width=140
+        )
+        self._resume_error_text = ft.Text("", size=12, color=C.RED, selectable=True)
+
     def _show_resume_confirmation(self, run_id: str, preview: dict[str, Any]) -> None:
         """顯示指定 run 的摘要，並讓模型與批次大小由使用者輸入。"""
         scope = preview.get("scope")
@@ -320,23 +334,7 @@ class SmartReviewDialog:
         pending = int(preview.get("pending_count") or 0)
         requested_limit = int(preview.get("requested_limit") or 0)
         limit_label = "不限" if requested_limit == 0 else f"{requested_limit:,}"
-        model = str(preview.get("model") or self.run_panel.model_dd.value or "")
-        batch_size = int(
-            preview.get("batch_size") or self.run_panel.batch_field.value or 0
-        )
-        self._resume_model_field = kit.text_field(
-            "校對模型",
-            value=model,
-            hint="輸入要使用的模型名稱",
-            width=300,
-        )
-        self._resume_batch_field = kit.text_field(
-            "每批（筆）",
-            value=str(batch_size),
-            hint="正整數",
-            width=140,
-        )
-        self._resume_error_text = ft.Text("", size=12, color=C.RED, selectable=True)
+        self._build_resume_fields(preview)
         dialog = ft.AlertDialog(
             modal=True,
             title=ft.Text("確認繼續未完成校對", weight=ft.FontWeight.BOLD),

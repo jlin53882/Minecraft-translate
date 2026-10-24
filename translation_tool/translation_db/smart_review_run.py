@@ -337,6 +337,119 @@ class _SmartReviewBatchRunner:
         self.state.complete_batch(batch_ctx, "completed")
 
 
+def _initial_run_metrics(
+    session: SmartReviewProviderSession,
+    initial_metrics: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """建立新 run 的 metrics，並保留續跑時已保存的 metrics。"""
+    metrics = new_smart_review_metrics(input_token_budget=session.input_token_budget)
+    if isinstance(initial_metrics, dict):
+        metrics.update(initial_metrics)
+    return metrics
+
+
+def _resume_progress(
+    existing_run_id: str | None,
+    initial_counts: dict[str, int] | None,
+    snapshots: Sequence[SmartReviewSnapshot],
+) -> tuple[int, int]:
+    """回傳續跑的既有處理數與本次待處理數。"""
+    if existing_run_id is None:
+        return 0, 0
+    processed = (
+        int(initial_counts.get("processed") or 0)
+        if isinstance(initial_counts, dict)
+        else 0
+    )
+    return processed, len(snapshots)
+
+
+def _restore_initial_counts(
+    state: SmartReviewRunState,
+    initial_counts: dict[str, int] | None,
+) -> None:
+    """將歷史 run 的計數欄位套回目前狀態。"""
+    if not initial_counts:
+        return
+    for key, value in initial_counts.items():
+        if hasattr(state.counts, key):
+            setattr(state.counts, key, int(value))
+
+
+def _restore_reused_result(
+    state: SmartReviewRunState,
+    history: SmartReviewHistoryStore,
+    run_id: str,
+    result: dict[str, Any],
+) -> None:
+    """恢復單筆歷史重用結果的計數與人工狀態。"""
+    state.counts.processed += 1
+    state.counts.valid += 1
+    counter = {
+        "no_change": "no_change",
+        "suggest_revision": "suggestions",
+    }.get(result.get("decision"), "needs_context")
+    setattr(state.counts, counter, getattr(state.counts, counter) + 1)
+    reused_status = str(result.get("reused_status") or "")
+    if reused_status not in {
+        SmartReviewStatus.APPLIED,
+        SmartReviewStatus.REJECTED,
+    }:
+        return
+    history.update_candidate(
+        run_id,
+        int(result["id"]),
+        status=reused_status,
+        ai_status=result.get("reused_ai_status"),
+        applied_batch=result.get("reused_applied_batch"),
+        applied_at=result.get("reused_applied_at"),
+    )
+
+
+def _restore_reused_results(
+    db: Any,
+    run_id: str,
+    state: SmartReviewRunState,
+    reused_results: Sequence[dict[str, Any]],
+) -> None:
+    """將歷史重用結果寫入新 run，並保留原人工投影。"""
+    if not reused_results:
+        return
+    db.record_smart_review_results(run_id, reused_results)
+    history = SmartReviewHistoryStore(db.path)
+    for result in reused_results:
+        _restore_reused_result(state, history, run_id, result)
+
+
+def _update_run_metrics(
+    state: SmartReviewRunState,
+    snapshots: Sequence[SmartReviewSnapshot],
+    reused_results: Sequence[dict[str, Any]],
+    history_runs_consulted: int,
+    existing_run_id: str | None,
+) -> None:
+    """更新新 run 或續跑的規劃統計。"""
+    reused_count = (
+        len(reused_results)
+        if existing_run_id is None
+        else int(state.metrics.get("reused_count") or 0)
+    )
+    consulted = (
+        int(history_runs_consulted)
+        if existing_run_id is None
+        else int(state.metrics.get("history_runs_consulted") or 0)
+    )
+    state.metrics.update(
+        {
+            "actual_ai_count": int(state.metrics.get("actual_ai_count") or 0),
+            "planned_ai_count": len(snapshots),
+            "reused_count": reused_count,
+            "history_runs_consulted": consulted,
+            "not_attempted_count": 0,
+        }
+    )
+
+
 def _open_run_state(
     db: Any,
     session: SmartReviewProviderSession,
@@ -360,6 +473,9 @@ def _open_run_state(
     initial_metrics: dict[str, Any] | None = None,
 ) -> SmartReviewRunState:
     """建立批次紀錄與共用執行器，並回報 ``selection_complete``。"""
+    resume_processed, resume_pending = _resume_progress(
+        existing_run_id, initial_counts, snapshots
+    )
     planning_started = time.monotonic()
     planned_batch_count = max(1, (len(snapshots) + batch_size - 1) // batch_size)
     planning_seconds = round(time.monotonic() - planning_started, 3)
@@ -397,71 +513,19 @@ def _open_run_state(
         selected_count=(len(snapshots) if selected_count is None else selected_count),
         planned_batch_count=planned_batch_count,
         progress=progress,
-        metrics=(
-            {
-                **new_smart_review_metrics(
-                    input_token_budget=session.input_token_budget
-                ),
-                **(initial_metrics if isinstance(initial_metrics, dict) else {}),
-            }
-        ),
+        metrics=_initial_run_metrics(session, initial_metrics),
         started=workflow_started,
-        resume_baseline_processed=(
-            int(initial_counts.get("processed") or 0)
-            if existing_run_id is not None and isinstance(initial_counts, dict)
-            else 0
-        ),
-        resume_pending_total=(len(snapshots) if existing_run_id is not None else 0),
+        resume_baseline_processed=resume_processed,
+        resume_pending_total=resume_pending,
     )
-    if initial_counts:
-        for key, value in initial_counts.items():
-            if hasattr(state.counts, key):
-                setattr(state.counts, key, int(value))
-    if reused_results:
-        db.record_smart_review_results(run_id, reused_results)
-        history = SmartReviewHistoryStore(db.path)
-        for result in reused_results:
-            state.counts.processed += 1
-            state.counts.valid += 1
-            decision = result.get("decision")
-            if decision == "no_change":
-                state.counts.no_change += 1
-            elif decision == "suggest_revision":
-                state.counts.suggestions += 1
-            else:
-                state.counts.needs_context += 1
-            # record_results projects an AI decision to ready/no_change. Restore
-            # an existing human projection so rejected/applied facts do not
-            # become a fresh ready candidate in the new run.
-            reused_status = str(result.get("reused_status") or "")
-            if reused_status in {
-                SmartReviewStatus.APPLIED,
-                SmartReviewStatus.REJECTED,
-            }:
-                history.update_candidate(
-                    run_id,
-                    int(result["id"]),
-                    status=reused_status,
-                    ai_status=result.get("reused_ai_status"),
-                    applied_batch=result.get("reused_applied_batch"),
-                    applied_at=result.get("reused_applied_at"),
-                )
-    state.metrics.update(
-        {
-            "actual_ai_count": int(state.metrics.get("actual_ai_count") or 0),
-            "planned_ai_count": len(snapshots),
-            "reused_count": (
-                len(reused_results)
-                if existing_run_id is None
-                else int(state.metrics.get("reused_count") or 0)
-            ),
-            "history_runs_consulted": (
-                int(history_runs_consulted)
-                if existing_run_id is None
-                else int(state.metrics.get("history_runs_consulted") or 0)
-            ),
-            "not_attempted_count": 0,
-        }
+    _restore_initial_counts(state, initial_counts)
+    _restore_reused_results(db, run_id, state, reused_results)
+    _update_run_metrics(
+        state,
+        snapshots,
+        reused_results,
+        history_runs_consulted,
+        existing_run_id,
     )
     state.report_progress(
         phase="selection_complete",

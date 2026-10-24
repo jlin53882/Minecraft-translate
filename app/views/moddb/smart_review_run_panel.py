@@ -133,24 +133,7 @@ class SmartReviewRunPanel(SmartReviewRunPlanningMixin):
             + ([(initial_mod, initial_mod)] if initial_mod != "__all__" else []),
         )
         self.mod_dd.value = initial_mod
-        initial_source = (
-            "__all__" if effective_source is None else str(effective_source)
-        )
-        self._scope_sources_by_mod = {
-            None: ((int(effective_source),) if effective_source is not None else ()),
-        }
-        if initial_mod != "__all__":
-            self._scope_sources_by_mod[initial_mod] = self._scope_sources_by_mod[None]
-        kit.set_dropdown_options(
-            self.source_dd,
-            [("__all__", "全部來源")]
-            + (
-                [(initial_source, initial_source)]
-                if initial_source != "__all__"
-                else []
-            ),
-        )
-        self.source_dd.value = initial_source
+        self._set_initial_source_options(effective_source, initial_mod)
         self.query_field = kit.text_field(
             "條目搜尋",
             value=query,
@@ -180,6 +163,30 @@ class SmartReviewRunPanel(SmartReviewRunPlanningMixin):
             on_change=lambda _e: self._update_estimate_text(),
         )
         self.estimate_text = ft.Text("", size=13, color=C.MUTED, selectable=True)
+
+    def _set_initial_source_options(
+        self, effective_source: int | None, initial_mod: str
+    ) -> None:
+        """建立初始生效來源選項與模組來源快取。"""
+        initial_source = (
+            "__all__" if effective_source is None else str(effective_source)
+        )
+        initial_sources = (
+            (int(effective_source),) if effective_source is not None else ()
+        )
+        self._scope_sources_by_mod = {None: initial_sources}
+        if initial_mod != "__all__":
+            self._scope_sources_by_mod[initial_mod] = initial_sources
+        kit.set_dropdown_options(
+            self.source_dd,
+            [("__all__", "全部來源")]
+            + (
+                [(initial_source, initial_source)]
+                if initial_source != "__all__"
+                else []
+            ),
+        )
+        self.source_dd.value = initial_source
 
     def _scope_query(self, version: str | None, kind: str | None):
         """在背景工作中讀取版本、類型與未審核候選的範圍對照。"""
