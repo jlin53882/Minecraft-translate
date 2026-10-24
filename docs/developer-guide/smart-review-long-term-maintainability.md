@@ -16,6 +16,9 @@
 - 歷史批次列表先讀取 manifest 前綴，候選分片只在真正進入該頁時解析；projection reconciliation 以資料庫歷史最大 id 作為失效條件，避免每次換頁重掃全部 JSON。
 - 「解除人工審核」只改目前生效譯文的審核狀態，不改譯文與來源；資料層必須以譯文、來源、審核者和狀態作 CAS，並寫入可還原的 `review_unmark` history。UI 只有在 `reviewed` 或 `legacy_unknown` 時顯示按鈕。
 - 進階設定與產生的 `.codebase-memory/` 索引不應混入產品提交；索引留在本機並由 `.gitignore` 排除，文件只記錄可重現的行為與驗證證據。
+- 新批次規劃必須區分 `FAST_ESTIMATE` 與 `EXACT_EXECUTION`：前者只提供不建立完整 context 的唯讀估算，後者在送出前以同一個 `SmartReviewPlanInput`、同版本最近兩份歷史與完整 CAS/context 重新計畫；預估數量不得標成實際送出數量。
+- 執行頁的預估背景工作透過 `SmartReviewPlanningController` 接收不可變 request 與 callback；`smart_review_context.RequestTicket` 以 domain、序號、UI generation 與資料庫身分丟棄晚到結果。面板只組輸入與投影 UI，不讓控制器讀取 Flet 私有控制項。
+- `SmartReviewHistoryStore` 目前已保留 facade，並由 `HistoryLock`、codec、manifest repository、recovery、query 等既有模組承擔分層責任；本輪沒有再拆出另一層 facade 或改寫 JSON／SQLite 協議，避免無證據的架構擴張。
 
 ## 目前範圍與證據
 
