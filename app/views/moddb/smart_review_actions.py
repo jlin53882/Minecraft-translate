@@ -61,17 +61,22 @@ _MANUAL_EDIT_MESSAGES = {
 }
 # state_sync_failed：翻譯已提交，條目頁仍要重載。
 _PARENT_RELOAD_STATUSES = frozenset({SmartReviewStatus.APPLIED, "state_sync_failed"})
+# 這些結果會改變審查佇列；即使不需要重載外層條目頁，也要通知同視窗的另一個審查面板。
+_REVIEW_CHANGED_STATUSES = frozenset(
+    {SmartReviewStatus.APPLIED, SmartReviewStatus.REJECTED, "state_sync_failed"}
+)
 
 
 @dataclass(frozen=True)
 class ActionOutcome:
-    """一次動作的結果：service 狀態、要顯示的提示（可為空）與是否需要重載條目頁。"""
+    """一次動作的結果：提示、外層條目頁刷新與審查面板同步所需的狀態。"""
 
     status: str | None
     message: str | None
     color: str
     error: str | None = None
     reload_parent: bool = False
+    review_changed: bool = False
 
     @property
     def failed(self) -> bool:
@@ -206,4 +211,5 @@ class SmartReviewActionService:
             message,
             color,
             reload_parent=notify_parent and status in _PARENT_RELOAD_STATUSES,
+            review_changed=status in _REVIEW_CHANGED_STATUSES,
         )

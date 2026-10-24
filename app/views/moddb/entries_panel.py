@@ -276,6 +276,15 @@ class EntriesPanel(ft.Column):
             on_click=self._confirm,
             tooltip="確認目前譯文為人工已審核（生效來源不變）；同步時只審核目前顯示相同譯文的版本",
         )
+        self.clear_review_btn = kit.button(
+            "解除人工審核",
+            "danger",
+            icon=ft.Icons.REMOVE_DONE,
+            size="sm",
+            on_click=self._clear_review,
+            tooltip="只解除目前條目的人工審核標記，保留譯文與來源",
+        )
+        self.clear_review_btn.visible = False
         self.save_btn = kit.button(
             "儲存", "primary", icon=ft.Icons.CHECK, on_click=self._save, disabled=True
         )
@@ -315,7 +324,7 @@ class EntriesPanel(ft.Column):
                     wrap=True,
                 ),
                 ft.Row(
-                    [self.confirm_btn, self.save_btn],
+                    [self.confirm_btn, self.clear_review_btn, self.save_btn],
                     spacing=8,
                     alignment=ft.MainAxisAlignment.END,
                     wrap=True,
@@ -673,6 +682,8 @@ class EntriesPanel(ft.Column):
         self.editor_body.visible = detail is not None
         self.saved_text.value = ""
         if detail is None:
+            self.clear_review_btn.visible = False
+            self.clear_review_btn.disabled = True
             self.history_col.controls = [kit.hint_text("尚未選取條目")]
             return
         entry = detail.entry
@@ -731,11 +742,19 @@ class EntriesPanel(ft.Column):
         self._update_format_hints()
         changed = bool(entry and self.pending_text() != entry.zh_tw)
         ready = bool(
-            entry and entry.zh_tw and entry.review_status != "reviewed" and not changed
+            entry
+            and entry.zh_tw
+            and entry.review_status not in ("reviewed", "legacy_unknown")
+            and not changed
         )
         self.save_btn.disabled = self._save_running or not changed
         self.confirm_btn.visible = ready
         self.confirm_btn.disabled = not ready
+        self.clear_review_btn.visible = entry.review_status in (
+            "reviewed",
+            "legacy_unknown",
+        )
+        self.clear_review_btn.disabled = self._save_running or changed
         self._review_preview = []
         self.impact_box.visible = False
 
@@ -1092,6 +1111,9 @@ class EntriesPanel(ft.Column):
 
     def _confirm(self, _e=None) -> None:
         self._review_controller.confirm(_e)
+
+    def _clear_review(self, _e=None) -> None:
+        self._review_controller.clear_review(_e)
 
     def _revert(self, history_id: int) -> None:
         db = self.db()

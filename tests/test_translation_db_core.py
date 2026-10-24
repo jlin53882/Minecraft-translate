@@ -397,6 +397,101 @@ def test_manual_save_review_transition_and_idempotence(db):
     assert db._data_gen() == review_gen
 
 
+def test_clear_manual_review_keeps_translation_and_can_be_reverted(db):
+    db.ingest("1.21.1", [item(tw="來源譯文")])
+    entry = db.list_entries("1.21.1")[0][0]
+    db.save_manual(entry.id, "人工修改", propagate=False)
+    db.review_manual(
+        entry.id, expected_zh_tw="人工修改", actor="reviewer", propagate=False
+    )
+
+    assert db.clear_manual_review(
+        entry.id,
+        expected_zh_tw="人工修改",
+        expected_source=SRC_MANUAL,
+        expected_review_status="reviewed",
+        expected_checker="reviewer",
+        actor="解除者",
+    )
+    detail = db.entry_detail(entry.id)
+    manual = next(row for row in detail.translations if row.source == SRC_MANUAL)
+    assert (manual.zh_tw, manual.checker, manual.review_status) == (
+        "人工修改",
+        "",
+        "unreviewed",
+    )
+    assert (detail.entry.zh_tw, detail.entry.source, detail.entry.review_status) == (
+        "人工修改",
+        SRC_MANUAL,
+        "unreviewed",
+    )
+    clear_history = detail.history[0]
+    assert clear_history.action == "review_unmark"
+    assert clear_history.actor == "解除者"
+
+    assert db.revert(clear_history.id, whole_batch=False) == 1
+    restored = db.entry_detail(entry.id)
+    manual = next(row for row in restored.translations if row.source == SRC_MANUAL)
+    assert (manual.zh_tw, manual.checker, manual.review_status) == (
+        "人工修改",
+        "reviewer",
+        "reviewed",
+    )
+
+
+def test_clear_manual_review_rejects_stale_snapshot_without_mutation(db):
+    """驗證解除審核的 CAS 失敗時不會修改狀態或新增 history。"""
+    db.ingest("1.21.1", [item(tw="來源譯文")])
+    entry = db.list_entries("1.21.1")[0][0]
+    db.save_manual(entry.id, "人工修改", propagate=False)
+    db.review_manual(
+        entry.id, expected_zh_tw="人工修改", actor="reviewer", propagate=False
+    )
+    before = db.entry_detail(entry.id)
+    with pytest.raises(ValueError, match="已變動"):
+        db.clear_manual_review(
+            entry.id,
+            expected_zh_tw="過期譯文",
+            expected_source=SRC_MANUAL,
+            expected_review_status="reviewed",
+            expected_checker="reviewer",
+        )
+
+    after = db.entry_detail(entry.id)
+    assert after.entry.review_status == "reviewed"
+    assert after.entry.zh_tw == "人工修改"
+    assert len(after.history) == len(before.history)
+    assert after.history[0].action == "review"
+
+
+def test_clear_legacy_unknown_manual_review_restores_unknown_state(db):
+    db.ingest("1.21.1", [item(tw="來源譯文")])
+    entry = db.list_entries("1.21.1")[0][0]
+    db.save_manual(entry.id, "人工修改", propagate=False)
+    with db._tx(keep_review=True) as conn:
+        conn.execute(
+            "UPDATE translation SET review_status=NULL WHERE entry_id=? AND source=?",
+            (entry.id, SRC_MANUAL),
+        )
+        db._refresh(conn, [entry.id])
+
+    legacy = db.entry_detail(entry.id)
+    assert legacy.entry.review_status == "legacy_unknown"
+    assert db.clear_manual_review(
+        entry.id,
+        expected_zh_tw="人工修改",
+        expected_source=SRC_MANUAL,
+        expected_review_status="legacy_unknown",
+        expected_checker="",
+    )
+    cleared = db.entry_detail(entry.id)
+    assert cleared.entry.review_status == "unreviewed"
+    clear_history = cleared.history[0]
+    assert db.revert(clear_history.id, whole_batch=False) == 1
+    restored = db.entry_detail(entry.id)
+    assert restored.entry.review_status == "legacy_unknown"
+
+
 def test_manual_edit_demotes_review_and_same_text_save_keeps_review(db):
     db.ingest("1.21.1", [item(tw="來源譯文")])
     entry = db.list_entries("1.21.1")[0][0]
@@ -485,6 +580,41 @@ def test_review_keeps_effective_source_and_marks_it_reviewed(db):
     rows = {row.source: row for row in db.entry_detail(entry.id).translations}
     assert rows[SRC_AI].review_status == "reviewed"
     assert rows[SRC_MANUAL].review_status == "unreviewed"
+
+
+def test_clear_manual_review_keeps_non_manual_effective_source(db):
+    db.ingest("1.21.1", [item(tw="同一譯文")])
+    entry = db.list_entries("1.21.1")[0][0]
+    db.write_back(
+        "1.21.1",
+        [WriteBackItem(KIND_LANG, "foo", entry.key, entry.en_us, "同一譯文")],
+        source=SRC_AI,
+        fill_other_versions=False,
+    )
+    db.set_priority((SRC_AI, SRC_JAR_TW, SRC_MANUAL))
+    db.save_manual(entry.id, "同一譯文", propagate=False)
+    db.review_manual(
+        entry.id,
+        expected_zh_tw="同一譯文",
+        expected_source=SRC_AI,
+        expected_review_status="unreviewed",
+        expected_checker="",
+        propagate=False,
+    )
+
+    db.clear_manual_review(
+        entry.id,
+        expected_zh_tw="同一譯文",
+        expected_source=SRC_AI,
+        expected_review_status="reviewed",
+        expected_checker="",
+    )
+    cleared = db.get_entry(entry.id)
+    assert (cleared.source, cleared.review_status, cleared.zh_tw) == (
+        SRC_AI,
+        "unreviewed",
+        "同一譯文",
+    )
 
 
 def test_reviewing_ai_text_leaves_non_effective_manual_alone_and_is_revertible(db):

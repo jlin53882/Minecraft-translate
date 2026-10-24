@@ -256,15 +256,21 @@ class SmartReviewBatchReviewer:
         self._load_page(include_run=True)
 
     def refresh(self) -> None:
-        """重新讀取目前頁；刷新會清除選取，避免使用舊快照批量寫入。"""
+        """同步重新讀取目前頁；刷新會清除選取，避免使用舊快照批量寫入。"""
         if self._busy or not self.run_id:
             return
         self._selected.clear()
         self._row_cache.clear()
-        self._load_page(include_run=True)
+        self._load_page(include_run=True, background=False)
 
-    def _load_page(self, *, include_run: bool = False) -> None:
-        """在單一唯讀連線中取得統計、總數與目前頁候選。"""
+    def _load_page(
+        self, *, include_run: bool = False, background: bool = True
+    ) -> None:
+        """在單一唯讀連線中取得統計、總數與目前頁候選。
+
+        初始批次載入可在背景執行；使用者換頁、篩選與重新整理傳入
+        ``background=False``，避免可見清單出現晚到的背景結果。
+        """
         database = self.ctx.database()
         if database is None or not self.run_id:
             self._show_empty("沒有可用的資料庫", "請先在條目校對選擇資料庫。")
@@ -319,12 +325,12 @@ class SmartReviewBatchReviewer:
                 self._choose_initial_filter(self.counts)
                 if self._status_query() != status:
                     self.page = 1
-                    self._load_page()
+                    self._load_page(background=background)
                     return
             total_pages = max(1, (total + PAGE_SIZE - 1) // PAGE_SIZE)
             if total and page > total_pages:
                 self.page = total_pages
-                self._load_page()
+                self._load_page(background=background)
                 return
             self.total = int(total or 0)
             self.rows = list(rows or [])
@@ -334,12 +340,16 @@ class SmartReviewBatchReviewer:
             self._set_controls_enabled(True)
             self._render_page()
 
-        self.ctx.run_background(
-            work,
-            done,
-            name="載入智慧校對批量候選",
-            still_valid=lambda: token == self._request_seq,
-        )
+        still_valid = lambda: token == self._request_seq
+        if background:
+            self.ctx.run_background(
+                work,
+                done,
+                name="載入智慧校對批量候選",
+                still_valid=still_valid,
+            )
+        else:
+            self.ctx.run_inline(work, done, still_valid=still_valid)
 
     def _choose_initial_filter(self, counts: dict) -> None:
         """有可套用候選時預設看 ready，否則顯示全部狀態以解釋空批次。"""
@@ -360,14 +370,14 @@ class SmartReviewBatchReviewer:
         self.page = 1
         self._selected.clear()
         self._row_cache.clear()
-        self._load_page()
+        self._load_page(background=False)
 
     def _on_page(self, page: int) -> None:
         """換頁；選取保留在記憶體中，讓使用者可以跨頁勾選。"""
         if self._busy or self._loading or not self.run_id:
             return
         self.page = max(1, int(page))
-        self._load_page()
+        self._load_page(background=False)
 
     # ──────────────── 顯示 ────────────────
 

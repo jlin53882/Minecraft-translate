@@ -273,7 +273,7 @@ def test_task_completion_invalidates_cached_moddb_panels(db_path, monkeypatch):
     assert refreshed == [True]
 
 
-def test_database_tab_refreshes_run_queries_in_worker_threads(db_path, monkeypatch):
+def test_database_tab_refreshes_and_entry_filters_stay_inline(db_path, monkeypatch):
     from app.tasks.operation_registry import OperationRegistry
 
     seed(db_path)
@@ -329,19 +329,16 @@ def test_database_tab_refreshes_run_queries_in_worker_threads(db_path, monkeypat
         query_threads.clear()
         view.show_tab("entries")
         view.entries._on_state("none")
-        assert view.entries.refresh_indicator.visible is True
-        assert view.entries.refresh_indicator.value == "正在篩選條目…"
-        assert page.operation_registry.wait_for_idle(timeout=2)
-        page._run_all_tasks()
-        page._tasks.clear()
         assert [row.key for row in view.entries.rows] == ["item.foo.b"]
-        assert len(filter_connections) == 1
-        assert str(filter_connections[0][0].resolved_path()) == str(db_path)
-        assert filter_connections[0][1] != threading.current_thread().name
+        assert [option.key for option in view.entries.mod_dd.options] == [
+            "全部模組",
+            "foo",
+        ]
+        assert filter_connections == []
         assert query_threads
-        assert all(name != threading.current_thread().name for _, name in query_threads)
+        assert all(name == threading.current_thread().name for _, name in query_threads)
         assert view.entries.refresh_indicator.visible is False
-        assert view._db is None
+        assert view._db is not None
     finally:
         page.operation_registry.begin_shutdown()
         assert page.operation_registry.wait_for_idle(timeout=2)

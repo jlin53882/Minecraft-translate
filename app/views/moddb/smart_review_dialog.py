@@ -62,9 +62,13 @@ class SmartReviewDialog:
             on_open_review=self.open_review,
             on_hide=self._close,
         )
-        self.reviewer = SmartReviewReviewer(self.ctx, on_changed=self.ctx.notify_parent)
+        self.reviewer = SmartReviewReviewer(
+            self.ctx,
+            on_changed=self.ctx.notify_parent,
+            on_review_changed=lambda: self._refresh_opposite_review("single"),
+        )
         self.batch_reviewer = SmartReviewBatchReviewer(
-            self.ctx, on_changed=self.ctx.notify_parent
+            self.ctx, on_changed=lambda: self._on_review_changed("batch")
         )
         self._review_run_id: str | None = None
         self.review_mode = kit.Segmented(
@@ -150,6 +154,18 @@ class SmartReviewDialog:
         if key == "history":
             self.history.refresh()
         self.ctx.update()
+
+    def _on_review_changed(self, source: str) -> None:
+        """通知外層並刷新另一個審查模式的目前批次。"""
+        self.ctx.notify_parent()
+        self._refresh_opposite_review(source)
+
+    def _refresh_opposite_review(self, source: str) -> None:
+        """刷新未執行目前動作的審查模式，避免兩個面板保留舊狀態。"""
+        if source != "single":
+            self.reviewer.refresh()
+        if source != "batch":
+            self.batch_reviewer.refresh()
 
     def _on_review_mode(self, key: str) -> None:
         """在逐筆與批量審查間切換，保留兩邊的篩選與頁面狀態。"""

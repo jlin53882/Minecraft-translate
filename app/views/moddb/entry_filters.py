@@ -304,9 +304,9 @@ def refresh_entry_filter(
     page: int = 1,
     keep_selection: bool = True,
     full_refresh: bool = False,
-    background: bool = True,
+    background: bool = False,
 ) -> None:
-    """重新載入指定結果頁，必要時把篩選變更交給上層處理。"""
+    """同步重新載入指定結果頁，必要時交給上層維持共用狀態。"""
     panel.pager.set_state(panel.total, page)
     if panel._on_filter_changed is not None:
         panel._on_filter_changed(

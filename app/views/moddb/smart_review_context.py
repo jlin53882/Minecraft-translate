@@ -172,3 +172,32 @@ class SmartReviewContext:
             self.post(deliver, None, "應用程式正在關閉，未啟動操作。")
             return False
         return True
+
+    def run_inline(
+        self,
+        work: Callable[[], Any],
+        on_done: Callable[[Any, str | None], None],
+        *,
+        still_valid: Callable[[], bool] | None = None,
+    ) -> bool:
+        """在 UI 執行緒完成短的使用者導覽查詢，再交給相同的結果回呼。
+
+        審查中的換頁／換筆必須在事件回呼內完成，否則畫面會先保留舊內容、
+        再以背景載入狀態覆蓋，使用者會看到與實際選取不一致的短暫畫面。真正
+        耗時的批次、寫入和預載仍使用 :meth:`run_background`。
+        """
+        generation = self.generation
+        identity = self.db_identity()
+        try:
+            result = work()
+        except Exception as exc:  # noqa: BLE001 - mirror the background boundary
+            result, error = None, str(exc) or type(exc).__name__
+        else:
+            error = None
+
+        if self.closed or not self.is_current(generation, identity):
+            return True
+        if still_valid is not None and not still_valid():
+            return True
+        on_done(result, error)
+        return True

@@ -136,6 +136,51 @@ def test_batch_reviewer_paginates_and_preserves_selection_across_pages(
     assert len(breakdown_calls) == 1
 
 
+def test_batch_reviewer_page_navigation_runs_inline(db, ctx, monkeypatch):
+    """批量審查換頁直接更新畫面，不顯示背景載入狀態。"""
+    rows = [_candidate(index) for index in range(1, 31)]
+
+    class Session:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def get_run(self, _run_id):
+            return {"id": "run-1"}
+
+        def run_breakdown(self, _run_id):
+            return {"status": {"ready": len(rows)}}
+
+        def candidate_page(self, _run_id, *, status, limit, offset, **_kwargs):
+            selected = [row for row in rows if status is None or row.status == status]
+            return len(selected), selected[offset : offset + limit]
+
+    monkeypatch.setattr(
+        batch_reviewer_module,
+        "moddb_smart_review_read_session",
+        lambda *_args, **_kwargs: Session(),
+    )
+    background_calls = []
+    original_run_background = ctx.run_background
+
+    def record_background(*args, **kwargs):
+        background_calls.append(kwargs.get("name"))
+        return original_run_background(*args, **kwargs)
+
+    ctx.run_background = record_background
+    reviewer = SmartReviewBatchReviewer(ctx, on_changed=lambda: None)
+    reviewer.load_run("run-1")
+    calls_after_initial_load = list(background_calls)
+
+    reviewer._on_page(2)
+
+    assert background_calls == calls_after_initial_load
+    assert reviewer.page == 2
+    assert [row.ordinal for row in reviewer.rows] == list(range(26, 31))
+
+
 def test_batch_candidate_header_separates_wrapped_chips_from_text(ctx):
     """批量候選標題不可把 expand 文字放進可換行 Row。"""
     reviewer = SmartReviewBatchReviewer(ctx, on_changed=lambda: None)
@@ -384,10 +429,20 @@ def test_run_panel_treats_zero_limit_as_unlimited(db):
     assert "本次將處理 28 筆" in panel.estimate_text.value
 
 
-def test_run_panel_rejects_batch_size_over_safe_limit(db):
+def test_run_panel_rejects_batch_size_over_safe_limit(db, monkeypatch):
     """驗證 UI 不會讓使用者送出超過 Smart Review 安全上限的批次。"""
+    from app.views.moddb import smart_review_run_panel as run_panel_module
     from app.views.moddb.smart_review_dialog import SmartReviewDialog
 
+    monkeypatch.setattr(
+        run_panel_module,
+        "get_smart_review_settings",
+        lambda: {
+            "default_batch_size": 20,
+            "max_batch_size": 50,
+            "storage_chunk_size": 200,
+        },
+    )
     dialog = SmartReviewDialog(_sync_page(), lambda: db, "1.21.1", None)
     panel = dialog.run_panel
     panel._total = 80
@@ -512,6 +567,51 @@ def test_context_run_background_discards_result_after_close(db):
     context.close()
     release.set()
     threading.Event().wait(0.3)
+    assert delivered == []
+
+
+def test_context_run_inline_delivers_success_and_errors(db):
+    """驗證可見導覽查詢同步執行，且仍沿用統一錯誤回呼格式。"""
+    context = SmartReviewContext(_sync_page(), lambda: db, None)
+    delivered = []
+
+    assert context.run_inline(
+        lambda: "ready", lambda result, error: delivered.append((result, error))
+    )
+    assert delivered == [("ready", None)]
+
+    def fail():
+        """模擬同步導覽查詢失敗。"""
+        raise RuntimeError("inline failure")
+
+    assert context.run_inline(
+        fail, lambda result, error: delivered.append((result, error))
+    )
+    assert delivered[-1] == (None, "inline failure")
+
+
+def test_context_run_inline_discards_stale_results(db):
+    """驗證同步查詢在世代或呼叫端條件失效時不會回寫舊畫面。"""
+    context = SmartReviewContext(_sync_page(), lambda: db, None)
+    delivered = []
+
+    def close_while_reading():
+        """模擬查詢期間視窗被關閉。"""
+        context.close()
+        return "late"
+
+    assert context.run_inline(
+        close_while_reading,
+        lambda result, error: delivered.append((result, error)),
+    )
+    assert delivered == []
+
+    context = SmartReviewContext(_sync_page(), lambda: db, None)
+    assert context.run_inline(
+        lambda: "filtered-out",
+        lambda result, error: delivered.append((result, error)),
+        still_valid=lambda: False,
+    )
     assert delivered == []
 
 
@@ -907,6 +1007,22 @@ def test_reviewer_next_and_previous_move_one_item_at_a_time(reviewer):
     assert reviewer.ctx.page.snacks[-1] == "已經是第一筆。"
 
 
+def test_reviewer_navigation_reads_missing_position_inline(reviewer):
+    """逐筆審查換筆查不到預載時也要同步完成，不排入背景載入。"""
+    reviewer.load_run("run-1")
+    reviewer.loader.invalidate()
+    reviewer._preload = lambda: None
+    background_calls = []
+    reviewer.ctx.run_background = lambda *args, **kwargs: background_calls.append(
+        kwargs.get("name")
+    )
+
+    reviewer._go_to(1)
+
+    assert reviewer.state.row.ordinal == 3
+    assert background_calls == []
+
+
 def test_reviewer_clamps_to_remaining_candidate_after_queue_shrinks(reviewer):
     """目前候選被處理後，原位置縮到最後一筆仍應顯示剩餘候選。"""
     reviewer.load_run("run-1")
@@ -921,6 +1037,98 @@ def test_reviewer_clamps_to_remaining_candidate_after_queue_shrinks(reviewer):
     assert reviewer.state.total == 1
     assert reviewer.state.row is not None
     assert reviewer.state.row.ordinal == 2
+
+
+def test_reviewer_refresh_reloads_counts_after_peer_apply(reviewer):
+    """另一個審查面板套用後，逐筆面板要同步清空佇列與篩選筆數。"""
+    reviewer.load_run("run-1")
+    assert reviewer.state.counts["ready"] == 2
+
+    reviewer.fake.rows = [row for row in reviewer.fake.rows if row.status != "ready"]
+    reviewer.refresh()
+
+    assert reviewer.state.total == 0
+    assert reviewer.state.row is None
+    assert reviewer.state.counts.get("ready", 0) == 0
+    labels = [option.text for option in reviewer.filter_dd.options]
+    assert labels[0] == "可套用（0）"
+    assert (
+        reviewer.body.controls[0].content.controls[1].value == "可套用的候選都處理完了"
+    )
+
+
+def test_dialog_refreshes_the_opposite_review_mode_after_apply(db, monkeypatch):
+    """逐筆與批量套用後，已載入的另一個模式要讀取同一批次最新狀態。"""
+    from app.views.moddb.smart_review_dialog import SmartReviewDialog
+
+    monkeypatch.setattr(
+        "app.services_impl.moddb_smart_review_service.load_config",
+        lambda: {
+            "lm_translator": {
+                "provider": "gemini",
+                "models": {"test": {"enabled": True}},
+            }
+        },
+    )
+    initial_rows = [
+        _candidate(1, "invalid", suggested_zh_tw=None),
+        _candidate(2, "ready"),
+        _candidate(3, "ready"),
+        _candidate(4, "applied"),
+    ]
+    fake = _FakeService(list(initial_rows))
+    monkeypatch.setattr(
+        loader_module, "moddb_smart_review_read_session", fake.read_session
+    )
+    monkeypatch.setattr(
+        batch_reviewer_module,
+        "moddb_smart_review_read_session",
+        fake.read_session,
+    )
+
+    def run_now(context, work, on_done, *, still_valid=None, **_kwargs):
+        """同步執行對話框背景讀取，保留過期結果檢查。"""
+        try:
+            result, error = work(), None
+        except Exception as exc:  # noqa: BLE001 - mirrors production error capture
+            result, error = None, str(exc)
+        if context.closed or (still_valid is not None and not still_valid()):
+            return True
+        on_done(result, error)
+        return True
+
+    monkeypatch.setattr(SmartReviewContext, "run_background", run_now)
+    parent_changes = []
+    dialog = SmartReviewDialog(
+        _sync_page(), lambda: db, "1.21.1", lambda: parent_changes.append(True)
+    )
+
+    dialog.open_review("run-1")
+    dialog._on_review_mode("batch")
+    assert dialog.reviewer.state.total == 2
+    assert dialog.batch_reviewer.total == 2
+
+    fake.rows[:] = [row for row in fake.rows if row.status != "ready"]
+    assert dialog.reviewer.state.total == 2
+    dialog.batch_reviewer.on_changed()
+
+    assert dialog.reviewer.state.total == 0
+    assert dialog.reviewer.state.counts.get("ready", 0) == 0
+    assert parent_changes == [True]
+
+    fake.rows[:] = list(initial_rows)
+    dialog.open_review("run-1")
+    dialog._on_review_mode("single")
+    fake.rows[:] = [row for row in fake.rows if row.status != "ready"]
+    assert dialog.batch_reviewer.status_filter == "ready"
+    assert dialog.batch_reviewer.total == 2
+    dialog.reviewer.on_changed()
+    dialog.reviewer.on_review_changed()
+
+    assert dialog.batch_reviewer.status_filter == "all"
+    assert dialog.batch_reviewer.total == 2
+    assert dialog.batch_reviewer.counts.get("ready", 0) == 0
+    assert parent_changes == [True, True]
 
 
 def test_reviewer_accepts_manual_position_and_reuses_known_total(reviewer):
@@ -993,7 +1201,9 @@ def test_reviewer_reapplies_applied_candidate_with_manual_edit(reviewer, monkeyp
     """已套用的筆可編輯後「重新套用」，走人工編輯路徑並通知上層重載條目。"""
     calls = []
     changed = []
+    review_changed = []
     reviewer.on_changed = lambda: changed.append(True)
+    reviewer.on_review_changed = lambda: review_changed.append(True)
     monkeypatch.setattr(
         loader_module,
         "realign_moddb_smart_review_candidate_from_path",
@@ -1026,6 +1236,7 @@ def test_reviewer_reapplies_applied_candidate_with_manual_edit(reviewer, monkeyp
 
     assert calls == [("run-1", 4, "修正後的譯文")]
     assert changed == [True]
+    assert review_changed == [True]
     assert "已套用人工修改" in reviewer.ctx.page.snacks[-1]
 
 
@@ -1264,9 +1475,11 @@ def test_reviewer_keeps_current_draft_when_auto_save_fails(reviewer, monkeypatch
 
 
 def test_reviewer_stale_and_reject_messages(reviewer, monkeypatch):
-    """驗證 stale 只提示不通知上層，保留原譯文會更新統計。"""
+    """驗證 stale 不通知上層，保留原譯文仍通知同視窗審查面板。"""
     changed = []
+    review_changed = []
     reviewer.on_changed = lambda: changed.append(True)
+    reviewer.on_review_changed = lambda: review_changed.append(True)
     monkeypatch.setattr(
         actions_module,
         "apply_moddb_smart_review_candidate_from_path",
@@ -1283,6 +1496,7 @@ def test_reviewer_stale_and_reject_messages(reviewer, monkeypatch):
     assert changed == []
     reviewer._reject()
     assert reviewer.ctx.page.snacks[-1] == "已保留原譯文，這筆不會套用。"
+    assert review_changed == [True]
 
 
 def test_reviewer_discards_stale_position_results(ctx, reviewer):

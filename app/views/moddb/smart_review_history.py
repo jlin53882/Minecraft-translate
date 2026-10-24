@@ -79,7 +79,7 @@ class SmartReviewHistory:
         )
 
     def refresh(self, _e=None) -> None:
-        """在背景重新讀取最近的批次清單。"""
+        """同步重新讀取最近的批次清單，讓「載入更多」完成後立即更新畫面。"""
         database = self.ctx.database()
         if database is None:
             self.status_text.value = "目前沒有可用的 Mod 資料庫。"
@@ -110,12 +110,7 @@ class SmartReviewHistory:
             self.status_text.value = f"共顯示 {min(len(runs), limit)} 個批次（新到舊）"
             self.ctx.update()
 
-        self.ctx.run_background(
-            work,
-            done,
-            name="載入智慧校對批次清單",
-            still_valid=lambda: seq == self._seq,
-        )
+        self.ctx.run_inline(work, done, still_valid=lambda: seq == self._seq)
 
     def _more(self, _e=None) -> None:
         """多載入一頁批次。"""
