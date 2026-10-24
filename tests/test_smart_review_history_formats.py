@@ -28,6 +28,7 @@ from translation_tool.translation_db.smart_review_history import (
     SmartReviewHistoryStore,
     history_directory_for_db,
 )
+from translation_tool.translation_db.smart_review_history_query import HistoryQuery
 
 
 def _legacy_candidate(
@@ -439,6 +440,48 @@ def test_runs_of_all_formats_are_listed_in_one_stable_order(mixed):
             assert run["id"] == run_id
     finally:
         db.close()
+
+
+def test_list_smart_review_runs_parses_only_the_needed_json_prefix(
+    tmp_path, monkeypatch
+):
+    """歷史清單分頁不因舊批次數量增加而完整解析所有 manifest。"""
+    db_path = tmp_path / "bounded-history.db"
+    seed_translation_db(db_path, 1)
+    store = SmartReviewHistoryStore(db_path)
+    store.directory.mkdir(parents=True, exist_ok=True)
+    for index in range(120):
+        payload = _legacy_header(
+            f"json-{index:03d}",
+            started_at=f"2026-01-{index // 24 + 1:02d} {index % 24:02d}:00:00",
+            selected=0,
+        )
+        payload["candidates"] = []
+        (store.directory / f"json-{index:03d}.json").write_text(
+            json.dumps(payload), encoding="utf-8"
+        )
+
+    parsed = []
+    original = HistoryQuery._summary_for_path
+
+    def count_summaries(self, path, stamp, *, include_sort_metadata):
+        parsed.append(path.name)
+        return original(
+            self,
+            path,
+            stamp,
+            include_sort_metadata=include_sort_metadata,
+        )
+
+    monkeypatch.setattr(HistoryQuery, "_summary_for_path", count_summaries)
+    db = TranslationDB(db_path)
+    try:
+        page = db.list_smart_review_runs(limit=2)
+    finally:
+        db.close()
+
+    assert len(page) == 2
+    assert len(parsed) == 3
 
 
 def test_candidates_of_all_formats_read_and_count_the_same_way(mixed):

@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
+import logging
+import time
+
 from app.services_impl.moddb_smart_review_service import SmartReviewCandidate
+
+logger = logging.getLogger(__name__)
 
 
 def load_batch_page(
@@ -18,6 +23,7 @@ def load_batch_page(
     include_summary: bool,
 ) -> tuple[dict | None, dict | None, int, list[SmartReviewCandidate]]:
     """在同一個唯讀 session 讀取批次資訊、必要統計與目前頁。"""
+    started = time.perf_counter()
     with read_session(path, priority) as session:
         info = session.get_run(run_id) if include_run else None
         breakdown = session.run_breakdown(run_id) if include_summary else None
@@ -27,6 +33,14 @@ def load_batch_page(
             limit=page_size,
             offset=(page - 1) * page_size,
         )
+    logger.debug(
+        "Smart Review 批量頁載入：run=%s page=%s status=%s rows=%s elapsed_ms=%.1f",
+        run_id,
+        page,
+        status or "all",
+        len(rows or []),
+        (time.perf_counter() - started) * 1000,
+    )
     return info, breakdown, int(total or 0), list(rows or [])
 
 

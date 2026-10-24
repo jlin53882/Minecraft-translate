@@ -573,6 +573,32 @@ def test_marks_and_filter_reconcile_unsynced_apply_without_opening_reviewer(
     assert calls == []
 
 
+def test_candidate_page_reconciles_once_until_history_changes(db, monkeypatch):
+    """批次換頁不重複掃描 JSON，新增 history audit 後才重新對帳。"""
+    run_id = _run(db, monkeypatch, "suggest_revision")
+    calls = []
+    original = db._smart_review_apply_records
+
+    def record_apply_records(current_run_id):
+        calls.append(current_run_id)
+        return original(current_run_id)
+
+    monkeypatch.setattr(db, "_smart_review_apply_records", record_apply_records)
+    db.load_smart_review_candidate_page(run_id, limit=1, offset=0)
+    db.load_smart_review_candidate_page(run_id, limit=1, offset=1)
+    assert calls == [run_id]
+
+    with db._tx(bump_generation_on_noop=False) as conn:
+        conn.execute(
+            "INSERT INTO history (entry_id, action, batch, note) "
+            "VALUES (?, 'smart_review_apply', 'new-audit', ?)",
+            (1, f"run={run_id}; ordinal=1"),
+        )
+
+    db.load_smart_review_candidate_page(run_id, limit=1, offset=0)
+    assert calls == [run_id, run_id]
+
+
 def test_reject_does_not_override_applied_candidate(db, monkeypatch):
     """已套用的候選不能再被標成 rejected，對帳因此不會覆寫使用者的拒絕決定。"""
     run_id = _run(db, monkeypatch, "no_change")

@@ -670,9 +670,19 @@ class SmartReviewHistoryStore:
         """回傳最近一次批次的 ``entry_id -> (狀態, 驗證錯誤)``，供條目列顯示狀態。"""
         return self._query.latest_run_marks()
 
-    def list_runs(self, *, limit: int = 20, offset: int = 0) -> list[dict[str, Any]]:
+    def list_runs(
+        self,
+        *,
+        limit: int = 20,
+        offset: int = 0,
+        include_sort_metadata: bool = False,
+    ) -> list[dict[str, Any]]:
         """分頁讀取 JSON 批次摘要。"""
-        return self._query.list_runs(limit=limit, offset=offset)
+        return self._query.list_runs(
+            limit=limit,
+            offset=offset,
+            include_sort_metadata=include_sort_metadata,
+        )
 
     def list_candidates(
         self,

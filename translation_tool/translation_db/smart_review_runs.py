@@ -554,9 +554,6 @@ class SmartReviewRunStoreMixin:
         self, *, limit: int = 20, offset: int = 0
     ) -> list[dict[str, Any]]:
         """列出 JSON 批次與舊版 SQLite 批次，依時間合併分頁。"""
-        history_runs = SmartReviewHistoryStore(self.path).all_runs(
-            include_sort_metadata=True
-        )
         start = max(0, int(offset))
         bounded_limit = max(1, int(limit))
         has_scope = self._smart_review_has_column("smart_review_run", "scope_json")
@@ -564,6 +561,10 @@ class SmartReviewRunStoreMixin:
         # SQLite 舊批次必須先抓取足以填滿合併後頁面的前置資料；不能先套用
         # OFFSET，否則與 JSON 批次合併排序後會被再次偏移而漏資料。
         legacy_limit = max(1, start + bounded_limit + 1)
+        history_runs = SmartReviewHistoryStore(self.path).list_runs(
+            limit=legacy_limit,
+            include_sort_metadata=True,
+        )
         rows = self._q(
             "SELECT id, provider, model, scope_version, "
             + scope_column

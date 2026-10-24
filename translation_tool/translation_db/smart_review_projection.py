@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from collections.abc import Sequence
 from typing import Any
 
@@ -42,11 +43,37 @@ class SmartReviewProjectionMixin:
 
     def _reconcile_json_applied_candidates(
         self, history: SmartReviewHistoryStore, run_id: str
-    ) -> None:
-        """以 SQLite audit marker 對帳已提交但尚未回寫 JSON 的候選。"""
+    ) -> bool:
+        """以 SQLite audit marker 對帳已提交但尚未回寫 JSON 的候選。
+
+        SQLite 的 history id 是跨連線、跨 UI 面板的單調版本；同一個批次在
+        版本沒有變化時不需要再次掃描 JSON 分片。回傳 ``True`` 表示本次真的
+        執行了對帳，``False`` 表示命中快取。
+        """
+        key = (str(self.path), run_id)
+        head = self._one("SELECT MAX(id) FROM history")
+        head_id = int(head[0] or 0) if head else 0
+        if _RECONCILED_HISTORY_HEAD.get(key) == head_id:
+            logger.debug(
+                "Smart Review 對帳快取命中：run=%s history_head=%s",
+                run_id,
+                head_id,
+            )
+            return False
+
+        started = time.perf_counter()
         records = self._smart_review_apply_records(run_id)
         if records:
             history.reconcile_applied(run_id, records)
+        _RECONCILED_HISTORY_HEAD[key] = head_id
+        logger.debug(
+            "Smart Review 對帳完成：run=%s history_head=%s records=%s elapsed_ms=%.1f",
+            run_id,
+            head_id,
+            len(records),
+            (time.perf_counter() - started) * 1000,
+        )
+        return True
 
     def _smart_review_apply_records(self, run_id: str) -> dict[int, dict[str, Any]]:
         """讀取某批次每個序號最新的套用 audit（``ordinal -> entry_id／batch／applied_at``）。"""
