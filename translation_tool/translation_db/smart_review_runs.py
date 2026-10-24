@@ -361,8 +361,7 @@ class SmartReviewRunStoreMixin:
                     "status": "running",
                     "selected": int(run.get("selected_count") or len(candidates)),
                     "message": (
-                        f"已讀取續跑歷史 {len(candidates):,} 筆，"
-                        "正在驗證最新 context…"
+                        f"已讀取續跑歷史 {len(candidates):,} 筆，正在驗證最新 context…"
                     ),
                 }
             )

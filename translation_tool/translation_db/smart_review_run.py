@@ -700,6 +700,7 @@ def run_smart_review(
         selected=len(snapshots),
     )
     if plan_input.use_recent_history:
+
         def history_progress(run_count: int, candidate_count: int) -> None:
             _report_preparation(
                 progress,
@@ -744,10 +745,7 @@ def run_smart_review(
     _report_preparation(
         progress,
         phase="run_initializing",
-        message=(
-            f"執行計畫完成：共 {len(plan.selected):,} 筆，"
-            "正在建立執行批次…"
-        ),
+        message=(f"執行計畫完成：共 {len(plan.selected):,} 筆，正在建立執行批次…"),
         selected=len(plan.selected),
     )
     state = _open_run_state(

@@ -1485,7 +1485,9 @@ def test_job_runs_in_background_and_derives_logs(tmp_path, monkeypatch):
     assert job.session.progress == 1.0
 
 
-def test_job_logs_preparation_stages_once_and_keeps_stage_visible(tmp_path, monkeypatch):
+def test_job_logs_preparation_stages_once_and_keeps_stage_visible(
+    tmp_path, monkeypatch
+):
     """核心準備階段要進 log；重複快照不可造成重複訊息。"""
     import app.views.moddb.smart_review_job as job_module
 
