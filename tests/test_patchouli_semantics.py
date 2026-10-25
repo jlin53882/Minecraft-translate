@@ -54,6 +54,39 @@ def test_known_page_separates_display_text_from_structure():
     assert items["multiblock.mapping.A"].kind == STRUCTURAL
 
 
+def test_known_page_unknown_fields_stay_conservative_with_source_context():
+    context = context_from_metadata(
+        "entry.json", source_available=True, source_fingerprint="entry"
+    )
+    items = _by_path(
+        {
+            "type": "patchouli:text",
+            "custom_metadata": "Example Internal Description",
+        },
+        context=context,
+    )
+
+    assert items["custom_metadata"].kind == UNKNOWN
+    assert not items["custom_metadata"].ai_allowed
+    assert not items["custom_metadata"].writer_allowed
+
+
+def test_unknown_custom_page_does_not_inherit_global_display_fields():
+    context = context_from_metadata(
+        "entry.json",
+        source_available=True,
+        source_fingerprint="entry",
+        resolution_error="template_missing",
+    )
+    items = _by_path(
+        {"type": "demo:custom_page", "name": "Some Internal Name"},
+        context=context,
+    )
+
+    assert items["name"].kind == UNKNOWN
+    assert not items["name"].ai_allowed
+
+
 def test_i18n_reference_is_not_sent_to_ai():
     context = context_from_metadata(
         "book.json", book_i18n=True, source_available=True, source_fingerprint="book"

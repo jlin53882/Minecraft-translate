@@ -165,9 +165,21 @@ _KNOWN_PAGE_TYPES = frozenset(
     }
 )
 
+# 這些不是頁型，但其欄位定義本身就是 Patchouli 文件的顯示內容。
+_KNOWN_DOCUMENT_TYPES = frozenset({"book", "template"})
+
 _DISPLAY_COMPONENT_TYPES = frozenset(
     {"patchouli:text", "patchouli:header", "patchouli:tooltip"}
 )
+
+
+def _has_known_display_schema(page_type: str) -> bool:
+    normalized_page_type = _normal_type(page_type)
+    return (
+        not normalized_page_type
+        or normalized_page_type in _KNOWN_PAGE_TYPES
+        or normalized_page_type in _KNOWN_DOCUMENT_TYPES
+    )
 
 
 def _canonical_hash(value: Any) -> str:
@@ -671,9 +683,14 @@ def classify_patchouli_value(
     field = _field(path)
     page_type = _normal_type(known_page_type or context.page_type)
     structural = structural_context or _is_structural_path(path, field)
-    display = (
-        _is_display_path(path, field) if display_context is None else display_context
-    )
+    if display_context is None:
+        display = _is_display_path(path, field)
+        if not _has_known_display_schema(page_type):
+            # 直接呼叫分類器時也要維持自訂頁型的保守規則，不能只依賴 walker
+            # 先把 display_context 設成 False。
+            display = False
+    else:
+        display = display_context
     legacy = _legacy_document_semantic(
         value, path, field, context, source_fingerprint, structural
     )
@@ -723,16 +740,8 @@ def classify_patchouli_value(
         return _display_semantic(
             value, path, field, page_type, context, source_fingerprint
         )
-    if page_type in _KNOWN_PAGE_TYPES and classify_book_string(value, field) == "text":
-        return _semantic(
-            path,
-            value,
-            LITERAL_TEXT,
-            "known_page_custom_sentence",
-            context,
-            source_fingerprint,
-            f"page_type:{page_type}",
-        )
+    # 已知頁型不代表所有自訂欄位都是玩家可見文字。沒有欄位或 template
+    # 證據時，保留 UNKNOWN，避免把內部 metadata 送進翻譯或寫回流程。
     reason = (
         "custom_page_requires_template_context"
         if page_type and page_type not in _KNOWN_PAGE_TYPES
@@ -762,6 +771,7 @@ def _child_flags(
     child_path: str,
     field: str,
     value: Any,
+    page_type: str,
     display_context: bool | None,
     structural_context: bool,
     template_fields: tuple[str, ...],
@@ -772,8 +782,17 @@ def _child_flags(
     ):
         structural = structural_context
     display = display_context
-    if field in _DISPLAY_FIELDS:
+    normalized_page_type = _normal_type(page_type)
+    has_known_display_schema = _has_known_display_schema(normalized_page_type)
+    if field in _DISPLAY_FIELDS and has_known_display_schema:
         display = True
+    elif (
+        normalized_page_type
+        and not has_known_display_schema
+        and display_context is None
+    ):
+        # 自訂頁型沒有 template 證據時，禁止分類器退回全域欄位名單。
+        display = False
     elif field in _STRUCTURAL_FIELDS:
         display = False
     if f"variable:{field}" in template_fields:
@@ -840,6 +859,7 @@ def _walk_patchouli_mapping(
             child_path,
             str(key).lower(),
             value,
+            current_page_type,
             display_context,
             structural_context,
             template_fields,
