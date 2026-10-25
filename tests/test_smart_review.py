@@ -33,6 +33,8 @@ from translation_tool.translation_db.smart_review import (
 from translation_tool.translation_db.smart_review_history_manifest import (
     ChunkManifestRepository,
 )
+from translation_tool.utils.config_schema import get_schema_default
+from translation_tool.utils.smart_review_settings import SmartReviewSettings
 
 
 def _seed(db: TranslationDB) -> None:
@@ -1738,7 +1740,12 @@ def test_smart_review_repair_payload_is_bounded_to_invalid_results(db):
 
 
 def test_smart_review_clamps_excessive_batch_size(db, monkeypatch):
-    """驗證服務層會將過大的批次限制在可觀測性測試採用的安全上限。"""
+    """驗證服務層會依 schema 上限夾住批次，不受本機 config.json 影響。"""
+    max_batch_size = int(get_schema_default("smart_review.max_batch_size"))
+    monkeypatch.setattr(
+        "translation_tool.translation_db.smart_review_run.get_smart_review_settings",
+        lambda: SmartReviewSettings(max_batch_size=max_batch_size),
+    )
     monkeypatch.setattr(
         "translation_tool.translation_db.smart_review_provider.call_gemini_requests",
         lambda **kwargs: _review_response(kwargs["payload"]["items"]),
@@ -1751,7 +1758,7 @@ def test_smart_review_clamps_excessive_batch_size(db, monkeypatch):
         batch_size=100,
     )
     assert result.metrics["batch_count"] == 1
-    assert db.get_smart_review_run(result.run_id)["batch_size"] == 50
+    assert db.get_smart_review_run(result.run_id)["batch_size"] == max_batch_size
 
 
 def test_request_failures_and_cancellation_are_distinct_from_invalid(db, monkeypatch):
