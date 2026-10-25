@@ -42,7 +42,7 @@ jar 自帶的 `zh_tw`／`zh_cn` 與「語系合併」使用同一套判斷與函
 
 掃描頁的「匯入來源」可切換成**翻譯 ZIP**（可選單一 ZIP 檔，或放有 ZIP／jar 的資料夾）。這類來源的 `lang/zh_tw` 視為已翻譯：
 
-- **不判讀譯文內容、不套替換規則，逐字匯入**：lang 檔的每個字串都收（包含沒有中文的值），唯一例外是清理規則判定「不是要翻譯的內容」的條目（翻譯者備註鍵、語言代碼、佔位字、色碼、只有符號的值等；原文被抽取規則濾掉時仍用原文判斷，沒有原文就看鍵與譯文）不收，清理過的資料才不會在匯入後又回來；
+- **不判讀譯文內容、不套替換規則，逐字匯入**：lang 檔的每個字串都收（包含沒有中文的值），唯一例外是清理規則判定「不是要翻譯的內容」的條目（翻譯者備註鍵、語言代碼、佔位字、色碼、只有符號的值等；原文被一般抽取規則濾掉時，仍只對同一 kind、模組、檔案身分與 JSON path 的 raw 英文做安全回補，沒有原文就看鍵與譯文）不收，清理過的資料才不會在匯入後又回來；資源 ID、網址、純格式碼、TODO、Patchouli 的 `pattern`／`mapping` 等結構值不會因為翻譯 ZIP 而復活；
   Patchouli 書籍沿用欄位名稱規則（只看欄位名，不看內容），並略過 `namespace:id` 形式的資源引用。
 - **譯文來源標記**可選（預設「自訂補充」；也可選釘宮翻譯組、i18n 轉換、模組自帶繁中、人工）。
 - ZIP 內任何位置的 jar 也會掃描；`assets`／`data` 可以在路徑的任何位置（例如 `pack/1.20/assets/<模組>/lang/zh_tw.json`）。
@@ -172,14 +172,14 @@ Mod DB 批次機翻預設只處理沒有生效譯文的條目，並透過 `write
 ### 其他會匯入的內容
 
 - 舊版 `key=value` 語言檔（`assets/<模組>/lang/en_US.lang`、`zh_CN.lang`…）：與 `.json` 語言檔同一個身分；同一個語系兩種格式都有時用 `.json`，`assets` 與 `data` 都有時用 `assets`。`data/<模組>/lang/<語系>.json` 也算語言檔。
-- 進度（`data/<模組>/advancement(s)/…`）：只匯入 `display.title`／`display.description` 寫成**字面文字**的進度（類型 `advancement`）；寫成 `{"translate": "鍵"}` 的由語言檔負責，沒有顯示文字的配方解鎖進度不匯入。鍵值不含 `advancement`／`advancements` 資料夾，跨版本是同一個鍵。
+- 進度（`data/<模組>/advancement(s)/…`）：目前只匯入 `display.title`／`display.description` 的直接字面文字或現有的 `.text` 欄位（類型 `advancement`）；寫成 `{"translate": "鍵"}` 的由語言檔負責，沒有顯示文字的配方解鎖進度不匯入。ModDB 目前沒有完整的 Advancement JSON writer，因此 `fallback`、`with[]`、`extra[]`、樣式與事件仍不宣稱支援 round-trip，不會被半成品流程改寫。鍵值不含 `advancement`／`advancements` 資料夾，跨版本是同一個鍵。
 - 書本根目錄的 `book.json` 不匯入：Patchouli 官方文件說明 `book.json` 必須放在原位，資源包能否覆寫它沒有確認。
 
 Patchouli 與 lang 走同一個流程，只是身分不同。FTB Quests / KubeJS / Markdown 不使用資料庫。
 
 ### 資料清理（總覽頁「資料清理」）
 
-清理目前規則判定「不是要翻譯的內容」的舊條目（指南：只有標籤或符號、Markdown 註解、授權條款、設定內容、名字清單、`TODO`／Lorem ipsum 佔位字；Patchouli：多方塊圖案列、佔位字、不是顯示文字的字串）。檢查檔的每個項目除了編號，類型、模組與鍵值也必須與資料庫目前的條目一致，不一致就略過（換了資料庫複本或編號被改動時不會刪到別的條目）。語言檔與進度文字只用保守規則（語言檔另外排除 `_` 開頭的翻譯者備註鍵、`language.code`、`.color` 色碼、`SEED_OIL_BUCKET` 或 `tube_module` 這類常數／識別字與單獨網址；`TODO`／Lorem ipsum 佔位字、只有符號或數字而不含 `%s` 之類格式碼的字串、進度內容就是欄位名稱如 `Description`），不判斷內容語意：小寫單字（`on`、`off`）和含格式碼的字串都是正常譯文，會保留。
+清理目前規則判定「不是要翻譯的內容」的舊條目（指南：只有標籤或符號、Markdown 註解、授權條款、設定內容、名字清單、`TODO`／Lorem ipsum 佔位字；Patchouli：多方塊圖案列、佔位字、不是顯示文字的字串）。檢查檔的每個項目除了編號，類型、模組與鍵值也必須與資料庫目前的條目一致，不一致就略過（換了資料庫複本或編號被改動時不會刪到別的條目）。語言檔與進度文字使用保守且帶語意的規則：`_` 開頭的翻譯者備註鍵、`language.code`、色碼、資源 ID、網址、純數字／格式資料仍排除；但已知顯示語意的 `block`／`effect`／`subtitles`／`gui`／`text.autoconfig.*.option` 等完整鍵，即使值是 `BARBED_WIRE` 或 `tank_leaks` 也不會只因 snake_case 而刪除。`item.*.tooltip` 這類無法由完整鍵確認用途的值仍保守處理；`TODO`／Lorem ipsum、只有符號或數字而不含 `%s` 之類格式碼的字串、進度內容就是欄位名稱如 `Description` 仍可清理。
 
 1. **匯出檢查檔**：選版本後按「匯出檢查檔」，在資料庫檔案旁的 `cleanup_reports` 資料夾寫出 JSON（不刪任何東西；每次匯出都是新檔名，不會蓋掉你已經編輯過的檔案）。檔案內有每類的筆數與逐筆項目（編號、類別、模組、鍵值、原文）。
 2. **自行檢查**：用編輯器開啟，不想刪的項目整個移除，或把 `delete` 改成 `false`（只有明確的 `true` 才會刪除；缺少 `delete` 或寫成字串 `"false"` 的項目會略過並計入略過原因）。

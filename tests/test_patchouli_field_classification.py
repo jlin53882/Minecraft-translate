@@ -88,6 +88,25 @@ def test_tooltip_list_items_are_display_text():
     assert _book_paths(doc) == {"tooltip[0]", "tooltip[1]"}
 
 
+def test_patchouli_page_type_fields_keep_entity_ids_and_multiblock_structure_safe():
+    """頁型／entity id／多方塊結構不翻；可見 name 與未知自然語句仍可辨識。"""
+    doc = {
+        "type": "patchouli:entity",
+        "entity": "minecraft:zombie",
+        "name": "Zombie",
+        "multiblock": {
+            "pattern": [[" A "], [" B "]],
+            "mapping": {"A": "minecraft:stone", "B": "minecraft:dirt"},
+        },
+        "entity_data": {"custom": "This visible explanation is safe."},
+    }
+
+    assert _book_paths(doc) == {"name", "entity_data.custom"}
+    assert classify_book_string("minecraft:zombie", "entity") == "not"
+    assert classify_book_string(" A ", "pattern") == "not"
+    assert classify_book_string("minecraft:stone", "mapping") == "not"
+
+
 @pytest.mark.parametrize(
     "value", ["minecraft:stone", "https://example.com/x", "12", "#FFAA00", "#tier#"]
 )
@@ -131,6 +150,48 @@ def test_advancement_title_is_judged_as_a_display_field():
         "display.title.text": "MasterXort",
         "display.description": "pollen_sifter",
     }
+
+
+def test_lang_display_snake_case_is_extractable_but_identifier_is_not():
+    """顯示欄位的 snake_case 可保留；沒有語意的 tooltip 仍維持保守排除。"""
+    doc = {
+        "block.createaddition.barbed_wire.tooltip": "BARBED_WIRE",
+        "text.autoconfig.simpleplanes.option.FLY_TICKS_PER_COAL": (
+            "FLY_TICKS_PER_COAL"
+        ),
+        "subtitles.clogger_roaring": "clogger_roaring",
+        "effect.undead_revamp2.tankleak": "tank_leaks",
+        "item.m.oil.tooltip": "SEED_OIL_BUCKET",
+    }
+    assert {item["path"] for item in extract_translatables(doc, LANG_FILE)} == {
+        "block.createaddition.barbed_wire.tooltip",
+        "text.autoconfig.simpleplanes.option.FLY_TICKS_PER_COAL",
+        "subtitles.clogger_roaring",
+        "effect.undead_revamp2.tankleak",
+    }
+
+
+def test_advancement_text_components_without_a_writer_are_explicitly_not_claimed():
+    """目前 ModDB 沒有 Advancement JSON writer，不能半途宣稱支援巢狀元件。"""
+    adv = {
+        "criteria": {"x": {}},
+        "display": {
+            "title": {
+                "translate": "advancements.story.mine_stone",
+                "fallback": "Mine Stone",
+                "with": [{"text": "literal"}],
+                "extra": [{"text": "suffix", "bold": True}],
+                "clickEvent": {
+                    "action": "open_url",
+                    "value": "https://example.com",
+                },
+            },
+            "description": {"text": "Literal description"},
+        },
+    }
+    # 只有現有的直接字面 text 路徑會進 ModDB；translate／fallback／with／extra
+    # 尚未接上完整 JSON round-trip，因此必須保持原始 JSON 不被誤寫入。
+    assert advancement_texts(adv) == {"display.description.text": "Literal description"}
 
 
 @pytest.mark.parametrize("value", ["← →", "180°", "TODO"])

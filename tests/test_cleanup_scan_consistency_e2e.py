@@ -9,6 +9,7 @@ from pathlib import Path
 from translation_tool.translation_db import TranslationDB
 from translation_tool.translation_db.models import ScanItem
 from translation_tool.translation_db.scanner import ScanOptions, scan_jar
+from translation_tool.translation_db.schema import SRC_MANUAL
 
 VERSION = "1.21.1"
 DIRS = ("patchouli_books", "guide")
@@ -187,6 +188,199 @@ def test_translated_zip_matches_nested_and_list_translations(tmp_path):
         assert rows["gui.m.nested.text"].zh_tw == "巢狀你好"
         assert rows["gui.m.nested.text"].en_us == "Nested hello world"
         assert rows["gui.m.list[1]"].zh_tw == "第二行"
+
+
+def test_translated_zip_filtered_en_raw_preserved_and_structural_not_resurrected(
+    tmp_path,
+):
+    """翻譯 ZIP 可補回對位短字，但不能復活 raw 結構值。"""
+    en = {
+        "gui.m.wiki.tooltip": "Wiki",
+        "block.createaddition.barbed_wire.tooltip": "BARBED_WIRE",
+        "gui.m.resource.tooltip": "minecraft:stone",
+        "gui.m.placeholder.tooltip": "%s",
+        "gui.m.url.tooltip": "https://example.com/help",
+        "gui.m.todo.tooltip": "TODO",
+    }
+    zh = {key: "中文" for key in en}
+    jar = _jar(tmp_path / "m.jar", lang_en=en, zh=zh)
+
+    rows = {item.key: item for item in _scan(jar, translated=True)}
+
+    assert rows["gui.m.wiki.tooltip"].en_us == "Wiki"
+    assert rows["block.createaddition.barbed_wire.tooltip"].en_us == "BARBED_WIRE"
+    for key in (
+        "gui.m.resource.tooltip",
+        "gui.m.placeholder.tooltip",
+        "gui.m.url.tooltip",
+        "gui.m.todo.tooltip",
+    ):
+        assert key not in rows
+
+
+def test_translated_zip_conflicting_en_source_records_change_without_translation(
+    tmp_path,
+):
+    jar = _jar(
+        tmp_path / "m.jar",
+        lang_en={"item.m.sword": "New English"},
+        zh={"item.m.sword": "新翻譯"},
+    )
+    db = TranslationDB(tmp_path / "t.db")
+    db.ingest(VERSION, [ScanItem("lang", "m", "item.m.sword", "Old English")])
+
+    db.ingest(VERSION, _scan(jar, translated=True))
+
+    assert (
+        db._one("SELECT COUNT(*) FROM src_change WHERE key = ?", ("item.m.sword",))[0]
+        == 1
+    )
+    assert (
+        db._one(
+            "SELECT COUNT(*) FROM translation t JOIN entry e ON e.id=t.entry_id "
+            "WHERE e.key=? AND t.zh_tw=?",
+            ("item.m.sword", "新翻譯"),
+        )[0]
+        == 0
+    )
+
+
+def test_translated_zip_existing_en_is_not_blank_and_reimport_is_idempotent(tmp_path):
+    en = {"gui.m.wiki.tooltip": "Wiki"}
+    zh = {"gui.m.wiki.tooltip": "維基"}
+    jar = _jar(tmp_path / "m.jar", lang_en=en, zh=zh)
+    db = TranslationDB(tmp_path / "t.db")
+
+    items = _scan(jar, translated=True)
+    db.ingest(VERSION, items)
+    first = db._q(
+        "SELECT e.en_us, COUNT(t.id) FROM entry e LEFT JOIN translation t "
+        "ON t.entry_id=e.id WHERE e.key=? GROUP BY e.id",
+        ("gui.m.wiki.tooltip",),
+    )
+    db.ingest(VERSION, items)
+    second = db._q(
+        "SELECT e.en_us, COUNT(t.id) FROM entry e LEFT JOIN translation t "
+        "ON t.entry_id=e.id WHERE e.key=? GROUP BY e.id",
+        ("gui.m.wiki.tooltip",),
+    )
+
+    assert first == second == [("Wiki", 1)]
+
+
+def test_translated_zip_adopts_safe_raw_english_for_an_existing_empty_row(tmp_path):
+    """翻譯 ZIP 的對位原文可補進舊的空英文列，但不改人工譯文契約。"""
+    en = {"gui.m.wiki.tooltip": "Wiki"}
+    zh = {"gui.m.wiki.tooltip": "維基"}
+    jar = _jar(tmp_path / "m.jar", lang_en=en, zh=zh)
+    db = TranslationDB(tmp_path / "t.db")
+    db.ingest(
+        VERSION,
+        [
+            ScanItem(
+                "lang",
+                "m",
+                "gui.m.wiki.tooltip",
+                "",
+                zh_tw="既有譯文",
+                source=SRC_MANUAL,
+            )
+        ],
+    )
+
+    db.ingest(VERSION, _scan(jar, translated=True))
+
+    row = db._one(
+        "SELECT e.en_us, t.zh_tw FROM entry e "
+        "JOIN translation t ON t.entry_id=e.id "
+        "WHERE e.key=? AND t.source=?",
+        ("gui.m.wiki.tooltip", SRC_MANUAL),
+    )
+    assert row == ("Wiki", "既有譯文")
+
+
+def test_translated_zip_patchouli_stale_alignment_never_uses_raw_text(tmp_path):
+    """手冊頁數不同時仍保留 stale guard，不把同索引英文配給錯誤譯文。"""
+    jar = tmp_path / "stale-book.zip"
+    en = {
+        "name": "Getting Started",
+        "pages": [
+            {"type": "patchouli:text", "text": "First page text."},
+            {"type": "patchouli:text", "text": "Second page text."},
+        ],
+    }
+    zh = {
+        "name": "入門",
+        "pages": [{"type": "patchouli:text", "text": "只有一頁。"}],
+    }
+    with zipfile.ZipFile(jar, "w") as zf:
+        zf.writestr(
+            "assets/m/patchouli_books/b/en_us/entries/start.json",
+            json.dumps(en),
+        )
+        zf.writestr(
+            "assets/m/patchouli_books/b/zh_tw/entries/start.json",
+            json.dumps(zh, ensure_ascii=False),
+        )
+
+    rows = _scan(jar, translated=True)
+
+    assert {item.key for item in rows} >= {
+        "patchouli_books/b/entries/start.json#pages[0].text",
+        "patchouli_books/b/entries/start.json#pages[1].text",
+    }
+    assert all(not item.zh_tw for item in rows)
+
+
+def test_translated_zip_patchouli_structural_values_do_not_resurrect(tmp_path):
+    """翻譯 ZIP 不得因 raw fallback 復活 multiblock pattern 或 mapping。"""
+    jar = tmp_path / "book-structure.zip"
+    en = {
+        "name": "Structure Guide",
+        "pages": [
+            {
+                "type": "patchouli:multiblock",
+                "pattern": [[" A "], [" B "]],
+                "mapping": {"A": "minecraft:stone", "B": "minecraft:dirt"},
+            },
+        ],
+    }
+    zh = {
+        "name": "結構指南",
+        "pages": [
+            {
+                "type": "patchouli:multiblock",
+                "pattern": [["甲"]],
+                "mapping": {"甲": "minecraft:stone"},
+            },
+        ],
+    }
+    with zipfile.ZipFile(jar, "w") as zf:
+        zf.writestr(
+            "assets/m/patchouli_books/b/en_us/entries/start.json",
+            json.dumps(en),
+        )
+        zf.writestr(
+            "assets/m/patchouli_books/b/zh_tw/entries/start.json",
+            json.dumps(zh, ensure_ascii=False),
+        )
+
+    rows = _scan(jar, translated=True)
+
+    assert all("pattern" not in item.key and "mapping" not in item.key for item in rows)
+
+
+def test_translated_zip_cn_only_keeps_missing_english_empty(tmp_path):
+    jar = tmp_path / "cn-only.zip"
+    with zipfile.ZipFile(jar, "w") as zf:
+        zf.writestr(
+            "assets/m/lang/zh_cn.json",
+            json.dumps({"item.m.sword": "鐵劍"}, ensure_ascii=False),
+        )
+
+    rows = _scan(jar, translated=True)
+
+    assert [(item.en_us, item.zh_tw, item.zh_cn) for item in rows] == [("", "", "鐵劍")]
 
 
 def test_translated_zip_does_not_bring_cleaned_rows_back(tmp_path):

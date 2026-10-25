@@ -214,10 +214,73 @@ _COLOR_VALUE = re.compile(r"#?[0-9a-fA-F]{6}(?:[0-9a-fA-F]{2})?")
 _CONST_VALUE = re.compile(r"[A-Z0-9]+(?:_[A-Z0-9]+)+")
 _SNAKE_VALUE = re.compile(r"[a-z0-9]+(?:_[a-z0-9]+)+")
 _URL_VALUE = re.compile(r"https?://\S+")
+_LANG_DISPLAY_MARKERS = frozenset(
+    {
+        "button",
+        "buttons",
+        "description",
+        "label",
+        "message",
+        "messages",
+        "name",
+        "option",
+        "options",
+        "screen",
+        "subtitle",
+        "subtitles",
+        "text",
+        "title",
+        "tooltip",
+    }
+)
+_LANG_DISPLAY_ROOTS = frozenset(
+    {
+        "advancement",
+        "advancements",
+        "block",
+        "container",
+        "death",
+        "effect",
+        "effects",
+        "entity",
+        "gui",
+        "screen",
+        "subtitles",
+    }
+)
+_LANG_STRUCTURAL_VALUE = re.compile(
+    r"^(?:#?[a-z0-9_.-]+:[a-z0-9_./-]+|[\w.-]+(?:/[\w.-]+)+)$", re.IGNORECASE
+)
+_LANG_NUMBER_VALUE = re.compile(r"^[-+]?\d+(?:\.\d+)?[a-zA-Z]?$")
+
+
+def is_lang_display_key(key: str) -> bool:
+    """判斷語言鍵是否帶有可驗證的顯示語意。
+
+    這不是模組白名單，也不把所有 ``.tooltip`` 都視為文字。只有規格中常見的
+    顯示命名空間（例如 ``block``、``effect``、``subtitles``、``gui``）或
+    ``text.autoconfig.*.option`` 這類完整語意才會放寬值形狀判斷；資源 ID、網址、
+    色碼及格式資料仍由 ``lang_non_text_reason`` 優先排除。
+    """
+    parts = [part for part in re.split(r"[.\[\]]+", key.casefold()) if part]
+    if not parts:
+        return False
+    if parts[:2] == ["text", "autoconfig"]:
+        return any(part in _LANG_DISPLAY_MARKERS for part in parts[2:])
+    if parts[0] in {"effect", "effects", "subtitles", "subtitle"}:
+        return True
+    return parts[0] in _LANG_DISPLAY_ROOTS and any(
+        part in _LANG_DISPLAY_MARKERS for part in parts[1:]
+    )
 
 
 def lang_non_text_reason(key: str, value: str) -> str | None:
-    """語言檔條目不是顯示文字時回傳原因：翻譯者備註鍵、語言代碼、色碼、``SEED_OIL_BUCKET``、單獨網址。"""
+    """語言檔條目不是顯示文字時回傳原因。
+
+    常數形狀只是弱證據：在已知顯示語意的完整鍵上（例如 block tooltip、effect、
+    subtitles、text.autoconfig option）仍可能是玩家看得到的名稱，因此不能單獨
+    以大寫或 snake_case 刪除。結構值、網址與語言 metadata 則維持高信心排除。
+    """
     text = value.strip()
     if key.startswith("_") or key.lower() in _LANG_META_KEYS:
         return "meta_key"
@@ -225,9 +288,13 @@ def lang_non_text_reason(key: str, value: str) -> str | None:
         text
     ):
         return "code_value"
+    if _URL_VALUE.fullmatch(text) or _LANG_STRUCTURAL_VALUE.fullmatch(text):
+        return "code_value"
+    if _LANG_NUMBER_VALUE.fullmatch(text) or _TRANSLATION_KEY.fullmatch(text):
+        return "code_value"
     if any(
-        pattern.fullmatch(text) for pattern in (_CONST_VALUE, _SNAKE_VALUE, _URL_VALUE)
-    ):
+        pattern.fullmatch(text) for pattern in (_CONST_VALUE, _SNAKE_VALUE)
+    ) and not is_lang_display_key(key):
         return "code_value"
     return None
 
@@ -501,6 +568,29 @@ def classify_book_string(value: str, field: str = "") -> str:
         return "not"
     plain = _BOOK_MARKUP.sub("", _PLACEHOLDER.sub("", s))
     return "text" if _HAS_LETTER.search(plain) else "not"
+
+
+def raw_english_fallback_allowed(kind: str, path: str, value: str) -> bool:
+    """判斷翻譯 ZIP 是否可把同一路徑的 raw 英文補回條目。
+
+    這個判斷只服務「已從翻譯檔找到對位值」的回補路徑，不會擴大一般英文掃描。
+    語言檔沿用共用的 metadata／值形狀分類；Patchouli 則必須通過完整欄位語意，
+    因此 resource ID、URL、pattern、mapping、placeholder 等結構值不會因翻譯 ZIP
+    而重新出現。
+    """
+    if not isinstance(value, str) or not value.strip():
+        return False
+    if kind == "lang":
+        if (
+            lang_non_text_reason(path, value) is not None
+            or value_shape_reason(value) is not None
+        ):
+            return False
+        # 格式碼本身不是英文原文；只有含有可見字母的值才能回補。
+        return _HAS_LETTER.search(_FORMAT_TOKEN.sub("", value)) is not None
+    if kind == "patchouli":
+        return classify_book_string(value, book_field(path)) == "text"
+    return False
 
 
 # ---------------------------------------------------------------------------

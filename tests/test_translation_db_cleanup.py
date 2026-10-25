@@ -241,6 +241,25 @@ def test_lang_metadata_and_code_values_are_cleanup_candidates():
         assert entry_cleanup_category("lang", key, value) is None, key
 
 
+def test_lang_display_semantics_do_not_delete_visible_snake_case_values():
+    """常數形狀不是充分證據；顯示語意仍保護可用的原文與翻譯。"""
+    for key, value in (
+        ("block.createaddition.barbed_wire.tooltip", "BARBED_WIRE"),
+        (
+            "text.autoconfig.simpleplanes.option.FLY_TICKS_PER_COAL",
+            "FLY_TICKS_PER_COAL",
+        ),
+        ("subtitles.clogger_roaring", "clogger_roaring"),
+        ("effect.undead_revamp2.tankleak", "tank_leaks"),
+    ):
+        assert entry_cleanup_category("lang", key, value) is None, key
+
+    # item tooltip 的值沒有足夠語意證明是玩家文字，仍維持保守排除。
+    assert entry_cleanup_category("lang", "item.m.oil.tooltip", "SEED_OIL_BUCKET") == (
+        "code_value"
+    )
+
+
 def test_short_ui_words_are_translatable_but_acronyms_are_not():
     from translation_tool.core.lm_config_rules import is_value_translatable
 

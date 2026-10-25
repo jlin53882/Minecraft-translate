@@ -128,6 +128,45 @@ def test_history_retention_preserves_pending_smart_review_marker(db):
     ) == (0,)
 
 
+def test_pending_smart_review_marker_survives_five_later_writes_and_reopen(tmp_path):
+    """JSON 回寫失敗後重開資料庫，仍能找回 SQLite 的套用證據。"""
+    path = tmp_path / "pending-marker.db"
+    db = TranslationDB(path)
+    db.ingest("1.21.1", [item()])
+    entry_id = db._one("SELECT id FROM entry LIMIT 1")[0]
+    with db._tx() as conn:
+        conn.execute(
+            "INSERT INTO history "
+            "(entry_id, batch, action, old_zh_tw, new_zh_tw, note, projection_state) "
+            "VALUES (?, ?, 'smart_review_apply', '', ?, ?, 'pending')",
+            (entry_id, "smart-run", "AI 譯文", "run=run-1; ordinal=1"),
+        )
+    for number in range(5):
+        with db._tx() as conn:
+            conn.execute(
+                "INSERT INTO history "
+                "(entry_id, batch, action, old_zh_tw, new_zh_tw, note) "
+                "VALUES (?, ?, 'manual', '', ?, ?)",
+                (entry_id, f"manual-{number}", f"人工-{number}", str(number)),
+            )
+    db.close()
+
+    reopened = TranslationDB(path)
+    try:
+        marker = reopened._one(
+            "SELECT action, projection_state, note FROM history "
+            "WHERE entry_id=? AND action='smart_review_apply'",
+            (entry_id,),
+        )
+        assert marker == (
+            "smart_review_apply",
+            "pending",
+            "run=run-1; ordinal=1",
+        )
+    finally:
+        reopened.close()
+
+
 def test_history_retention_migration_prunes_existing_database_and_keeps_backup(
     tmp_path,
 ):
@@ -2304,7 +2343,7 @@ def test_clean_english_switch_controls_filtering_of_english_values(tmp_path):
         for i in scan_jar(jar, ScanOptions("1.21.1", clean_english=False), ()).items
     }
     assert on == {"a.real"}  # 與機器翻譯相同的判斷：略過過短字串與技術 ID
-    assert off == {"a.real", "a.short", "a.id"}  # 關閉：全部逐字匯入
+    assert off == {"a.real", "a.short"}  # 關閉：放寬文字篩選，仍排除技術 ID
 
 
 def test_translated_patchouli_uses_field_names_not_content(db, tmp_path):

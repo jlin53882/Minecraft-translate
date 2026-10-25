@@ -32,7 +32,10 @@ from translation_tool.core.patchouli_compat import (
     find_patchouli_marker_issue,
     find_patchouli_mismatch,
 )
-from translation_tool.core.text_sniffer import advancement_texts
+from translation_tool.core.text_sniffer import (
+    advancement_texts,
+    raw_english_fallback_allowed,
+)
 from translation_tool.core.translatable_extractor import extract_translatables
 from translation_tool.translation_db.cleanup import entry_cleanup_category
 from translation_tool.translation_db.identity import (
@@ -85,7 +88,7 @@ class ScanOptions:
     dry_run: bool = False  # 只讀 jar 並統計，不寫入資料庫
     apply_rules: bool = True  # 與語系合併相同：對 jar 自帶譯文套用「替換規則」
     rules: Any = field(default=(), compare=False, repr=False)  # 載入後的替換規則
-    clean_english: bool = True  # 關閉＝放寬機器翻譯篩選，其餘字串逐字匯入
+    clean_english: bool = True  # 關閉＝放寬文字篩選，但仍排除結構值
     translated: bool = False  # 來源是已翻譯的內容（翻譯 ZIP）：zh_tw 不判讀、直接匯入
     translation_source: int = SRC_CUSTOM  # translated 時，zh_tw 的來源代碼
 
@@ -453,7 +456,8 @@ def _items_for_group(
     if not options.translated and en is None:
         return []  # 掃描 jar 以原文為準；沒有 en_us 就沒有可匯入的條目
 
-    # 英文：預設與翻譯流程使用同一套抽取規則（之後查詢才會對得上）；關閉「清理」則全部字串逐字匯入
+    # 英文：預設與翻譯流程使用同一套抽取規則（之後查詢才會對得上）；
+    # 關閉「清理」只放寬文字形狀篩選，資源 ID 等結構值仍不能匯入。
     en_items: dict[str, str] = {}
     if en is not None and en_member is not None:
         if options.clean_english:
@@ -518,12 +522,24 @@ def _items_for_group(
             is not None
         ):
             continue
+        # 翻譯 ZIP 可能帶入一個被 clean_english 過濾掉、但確實與翻譯值同路徑的
+        # 英文短字。只有通過共同結構分類的 raw 值才回補；不能以「翻譯檔有這個
+        # key」為由復活 resource ID、格式資料或 Patchouli 結構欄位。
+        source_text = en_items.get(path, "")
+        if not source_text:
+            raw_source = en_raw.get(path, "")
+            if raw_english_fallback_allowed(kind, path, raw_source):
+                source_text = raw_source
+            elif raw_source:
+                # 同一路徑確實有英文，但它是結構值／純格式／佔位內容；不能把
+                # 翻譯 ZIP 的中文單獨留下，否則下次清理又會看不到真正的原文。
+                continue
         out.append(
             ScanItem(
                 kind=kind,
                 mod_id=mod_id,
                 key=key,
-                en_us=en_items.get(path, ""),
+                en_us=source_text,
                 zh_tw=tw,
                 zh_cn=cn,
                 source=source,
