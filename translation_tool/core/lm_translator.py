@@ -62,7 +62,10 @@ from translation_tool.core.patchouli_compat import (
     find_patchouli_mismatch,
 )
 from translation_tool.core.text_sniffer import set_advancement_text
-from translation_tool.core.translatable_extractor import is_advancement_file
+from translation_tool.core.translatable_extractor import (
+    is_advancement_file,
+    is_lang_file,
+)
 from translation_tool.core.translation_path_writer import (
     map_lang_output_path,
     set_by_path,
@@ -358,7 +361,7 @@ def _write_directory_outputs(
             dst.write_text(render_guide(file_cache[file_name]), encoding="utf-8")
             continue
         rel = map_lang_output_path(src.relative_to(root))
-        if export_lang and "lang" in src.parts:
+        if export_lang and is_lang_file(src):
             dst = (out_root / rel).with_suffix(".lang")
             dst.parent.mkdir(parents=True, exist_ok=True)
             dst.write_text(
