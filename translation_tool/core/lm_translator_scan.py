@@ -94,16 +94,20 @@ def extract_items_parallel(
             data = json.loads(f.read_bytes())
             raise_if_cancelled()
 
-            if is_lang_file(f):
+            # Advancement 必須優先於 Lang。路徑內即使出現名為 ``lang`` 的
+            # 子資料夾，也要保留專用抽取器與安全 writer 的完整閉環。
+            if is_advancement_file(f):
+                c_type = "advancement"
+            elif is_lang_file(f):
                 c_type = "lang"
 
-                # ⭐ 若要輸出 .lang，但內容不是純 key->str，就只能退回輸出 json
+                # 若要輸出 .lang，但內容不是純 key->str，就只能退回輸出 json
                 if export_lang and not is_plain_lang_json(data):
                     log_info(
                         f"⚠️ Lang 檔為複合格式（含 list/dict），無法輸出 .lang，將改用 .json：{f}"
                     )
             else:
-                c_type = "advancement" if is_advancement_file(f) else "patchouli"
+                c_type = "patchouli"
 
             extracted_items = extract_translatables(data, f)
             for item in extracted_items:

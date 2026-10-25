@@ -61,8 +61,8 @@ class TestScanTranslatableFiles:
         from translation_tool.core.lm_translator_scan import scan_translatable_files
 
         # 建立測試目錄結構
-        lang_dir = tmp_path / "lang"
-        lang_dir.mkdir()
+        lang_dir = tmp_path / "assets" / "demo" / "lang"
+        lang_dir.mkdir(parents=True)
 
         lang_file = lang_dir / "en_us.json"
         lang_file.write_text('{"key": "value"}')
@@ -182,8 +182,8 @@ class TestExtractItemsParallel:
         from translation_tool.core.lm_translator_scan import extract_items_parallel
 
         # 建立測試 lang 檔案
-        lang_dir = tmp_path / "lang"
-        lang_dir.mkdir()
+        lang_dir = tmp_path / "assets" / "demo" / "lang"
+        lang_dir.mkdir(parents=True)
 
         lang_file = lang_dir / "en_us.json"
         test_data = {"item.test": "Test Item", "item.test2": "Test Item 2"}
@@ -208,8 +208,8 @@ class TestExtractItemsParallel:
         from translation_tool.core.lm_translator_scan import extract_items_parallel
 
         # 建立無效 JSON 檔案
-        lang_dir = tmp_path / "lang"
-        lang_dir.mkdir()
+        lang_dir = tmp_path / "assets" / "demo" / "lang"
+        lang_dir.mkdir(parents=True)
 
         invalid_file = lang_dir / "invalid.json"
         invalid_file.write_text("not valid json {")
@@ -232,8 +232,8 @@ class TestExtractItemsParallel:
         from translation_tool.core.lm_translator_scan import extract_items_parallel
 
         # 建立 lang 檔案
-        lang_dir = tmp_path / "lang"
-        lang_dir.mkdir()
+        lang_dir = tmp_path / "assets" / "demo" / "lang"
+        lang_dir.mkdir(parents=True)
         lang_file = lang_dir / "en_us.json"
         lang_file.write_text('{"key": "value"}')
 
@@ -285,3 +285,37 @@ class TestExtractItemsParallel:
             "display.title.fallback",
             "display.title.extra[0].text",
         }
+
+    def test_extract_items_parallel_advancement_wins_over_lang_path_segment(
+        self, tmp_path
+    ):
+        from translation_tool.core.lm_translator_scan import extract_items_parallel
+
+        path = tmp_path / "data" / "demo" / "advancements" / "lang" / "start.json"
+        path.parent.mkdir(parents=True)
+        path.write_text(
+            json.dumps(
+                {
+                    "criteria": {"x": {}},
+                    "display": {
+                        "title": {
+                            "text": "Welcome",
+                            "hoverEvent": {
+                                "action": "show_text",
+                                "contents": {"text": "Do not translate this event"},
+                            },
+                        }
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        results = list(
+            extract_items_parallel(
+                files=[path], export_lang=False, work_thread=2, logger=MagicMock()
+            )
+        )
+        _, items = results[0]
+        assert {item["cache_type"] for item in items} == {"advancement"}
+        assert {item["path"] for item in items} == {"display.title.text"}

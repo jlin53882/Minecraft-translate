@@ -132,15 +132,30 @@ def find_advancement_json(root: Path) -> list[Path]:
 
 def is_lang_file(file_path: Path) -> bool:
     """
-    判斷是否為語言檔（lang 類型）。
+    判斷是否為標準資源結構中的語言檔（lang 類型）。
 
     參數：
         file_path: 檔案路徑
 
     回傳：
-        True 是 lang 檔，False 是 Patchouli 檔
+        True 是 ``assets/<模組>/lang/<語系>.json`` 或
+        ``data/<模組>/lang/<語系>.json``，False 是其他檔案。
+
+    Advancement 優先於路徑片段判斷：即使進度檔的子路徑碰巧叫做
+    ``lang``，也不能被當成語言檔而繞過 Advancement 專用 writer。
     """
-    return "lang" in file_path.parts
+    path = Path(file_path)
+    if is_advancement_file(path):
+        return False
+    parts = path.parts
+    for index, part in enumerate(parts[:-3]):
+        if (
+            part.lower() in {"assets", "data"}
+            and parts[index + 2].lower() == "lang"
+            and index + 3 == len(parts) - 1
+        ):
+            return parts[-1].lower().endswith(".json")
+    return False
 
 
 def _lang_nested_translatable(value: str) -> bool:
@@ -172,9 +187,9 @@ def _extract_advancement_translatables(json_data, file_path) -> list[dict[str, s
     ]
 
 
-def _is_advancement_content_file(file_path, *, is_lang: bool) -> bool:
+def _is_advancement_content_file(file_path) -> bool:
     """確認檔案應走 Advancement 專用抽取，而不是語言檔 walker。"""
-    return not is_lang and is_advancement_file(Path(file_path))
+    return is_advancement_file(Path(file_path))
 
 
 def extract_translatables(json_data, file_path):
@@ -193,9 +208,12 @@ def extract_translatables(json_data, file_path):
         可翻譯項目列表，每項包含 file、path、text、source_text
     """
     items = []
-    is_lang = is_lang_file(Path(file_path))
+    # 先辨識 Advancement，再判斷 Lang；不能讓父目錄或子路徑中的 ``lang``
+    # 片段把合法 Advancement 導向通用 JSON walker。
+    is_advancement = is_advancement_file(Path(file_path))
+    is_lang = not is_advancement and is_lang_file(Path(file_path))
 
-    if _is_advancement_content_file(file_path, is_lang=is_lang):
+    if _is_advancement_content_file(file_path):
         # Advancement 必須在抽取、DB scanner 與 writer 共用同一個完整文件契約；
         # 不完整文件安全略過，不退回通用 JSON 抽取器，避免稍後才由 writer 拒絕。
         return _extract_advancement_translatables(json_data, file_path)

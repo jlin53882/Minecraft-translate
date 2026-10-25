@@ -25,11 +25,23 @@ class TestIsLangFile:
         assert is_lang_file(path) is False
 
     def test_is_lang_file_deep_path(self):
-        """測試深層路徑"""
+        """只接受資源根目錄下的標準 lang 相對路徑。"""
+        from translation_tool.core.translatable_extractor import is_lang_file
+
+        path = Path("data/mod/lang/zh_tw.json")
+        assert is_lang_file(path) is True
+
+    def test_advancement_path_with_lang_segment_is_not_lang_file(self):
+        from translation_tool.core.translatable_extractor import is_lang_file
+
+        path = Path("data/mod/advancements/lang/start.json")
+        assert is_lang_file(path) is False
+
+    def test_nested_non_resource_lang_folder_is_not_lang_file(self):
         from translation_tool.core.translatable_extractor import is_lang_file
 
         path = Path("data/mod/configs/lang/zh_tw.json")
-        assert is_lang_file(path) is True
+        assert is_lang_file(path) is False
 
 
 class TestFindLangJson:

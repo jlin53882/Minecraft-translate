@@ -34,6 +34,7 @@ from translation_tool.core.guide_blocks import NON_TEXT_REASONS, non_text_reason
 from translation_tool.core.text_sniffer import (
     book_field,
     classify_book_string,
+    is_advancement_literal_text,
     is_field_name_text,
     is_placeholder_text,
     lang_non_text_reason,
@@ -105,7 +106,11 @@ def entry_cleanup_category(
         if kind == KIND_ADVANCEMENT:
             if is_field_name_text(key, en_us):
                 return "field_name"
-            # 進度掃描用同一個分類（advancement_texts）：資源 ID、語言檔鍵值、網址不收
+            # Advancement 的 fallback／with／extra 不是 Patchouli 欄位，
+            # 必須和 advancement_texts 共用專用 literal 分類器；否則合法短字
+            # 會被舊的未知欄位保守規則誤列為清理候選。
+            if is_advancement_literal_text(en_us, field=book_field(key)):
+                return None
             verdict = classify_book_string(en_us, book_field(key))
             if verdict != "text":
                 return "lang_key" if verdict == "lang_key" else "not_text"
