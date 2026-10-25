@@ -1116,9 +1116,16 @@ class SmartReviewHistoryStore:
                 records_by_chunk: dict[int, dict[int, Mapping[str, Any]]] = defaultdict(
                     dict
                 )
+                chunk_entries = self.repository.chunk_entries(payload)
+                ordinal_starts = tuple(
+                    int(entry["ordinal_start"]) for entry in chunk_entries
+                )
                 for ordinal, record in records.items():
                     chunk_index = self.repository.chunk_index_for_ordinal(
-                        payload, int(ordinal)
+                        payload,
+                        int(ordinal),
+                        entries=chunk_entries,
+                        ordinal_starts=ordinal_starts,
                     )
                     if chunk_index is not None:
                         records_by_chunk[chunk_index][int(ordinal)] = record

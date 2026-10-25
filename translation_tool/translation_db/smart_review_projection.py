@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import logging
 import time
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from typing import Any
 
 from translation_tool.translation_db.models import (
@@ -42,13 +42,20 @@ class SmartReviewProjectionMixin:
     """提供給 TranslationDB 使用的智慧校對 JSON／SQLite 對帳與標籤投影。"""
 
     def _reconcile_json_applied_candidates(
-        self, history: SmartReviewHistoryStore, run_id: str
+        self,
+        history: SmartReviewHistoryStore,
+        run_id: str,
+        entry_ids: Collection[int] | None = None,
     ) -> bool:
         """以 SQLite audit marker 對帳已提交但尚未回寫 JSON 的候選。
 
         SQLite 的 history id 是跨連線、跨 UI 面板的單調版本；同一個批次在
         版本沒有變化時不需要再次掃描 JSON 分片。回傳 ``True`` 表示本次真的
-        執行了對帳，``False`` 表示命中快取。
+        執行了對帳，``False`` 表示命中快取或指定條目沒有需要對帳的紀錄。
+
+        清單上的智慧校對標籤只需要目前頁面的條目；傳入 ``entry_ids`` 時只
+        對帳這些條目，避免模組切換為了顯示 100 筆清單而掃描整個數萬筆批次。
+        不傳入時維持完整對帳，供批次篩選與歷史查詢使用。
         """
         key = (str(self.path), run_id)
         head = self._one("SELECT MAX(id) FROM history")
@@ -63,9 +70,25 @@ class SmartReviewProjectionMixin:
 
         started = time.perf_counter()
         records = self._smart_review_apply_records(run_id)
+        if entry_ids is not None:
+            wanted = {int(entry_id) for entry_id in entry_ids}
+            records = {
+                ordinal: record
+                for ordinal, record in records.items()
+                if int(record.get("entry_id") or 0) in wanted
+            }
+            if not records:
+                logger.debug(
+                    "Smart Review 頁面條目不需對帳：run=%s entries=%s elapsed_ms=%.1f",
+                    run_id,
+                    len(wanted),
+                    (time.perf_counter() - started) * 1000,
+                )
+                return False
         if records:
             history.reconcile_applied(run_id, records)
-        _RECONCILED_HISTORY_HEAD[key] = head_id
+        if entry_ids is None:
+            _RECONCILED_HISTORY_HEAD[key] = head_id
         logger.debug(
             "Smart Review 對帳完成：run=%s history_head=%s records=%s elapsed_ms=%.1f",
             run_id,
@@ -146,6 +169,7 @@ class SmartReviewProjectionMixin:
 
     def _reconciled_latest_marks(
         self,
+        entry_ids: Collection[int] | None = None,
     ) -> tuple[str | None, dict[int, tuple[str, str | None]]]:
         """取得最近批次標記；SQLite 套用紀錄有新增時先對帳，換頁不重複掃描。
 
@@ -162,13 +186,18 @@ class SmartReviewProjectionMixin:
         if _RECONCILED_HISTORY_HEAD.get(key) == head_id:
             return run_id, marks
         try:
-            self._reconcile_json_applied_candidates(history, run_id)
+            reconciled = self._reconcile_json_applied_candidates(
+                history, run_id, entry_ids
+            )
         except (OSError, ValueError):
             logger.warning(
                 "Smart Review 標籤對帳失敗，下次再試：run=%s", run_id, exc_info=True
             )
             return run_id, marks
-        _RECONCILED_HISTORY_HEAD[key] = head_id
+        if not reconciled:
+            return run_id, marks
+        if entry_ids is None:
+            _RECONCILED_HISTORY_HEAD[key] = head_id
         return history.latest_run_marks()
 
     def smart_review_marks(
@@ -182,7 +211,7 @@ class SmartReviewProjectionMixin:
         wanted = {int(entry_id) for entry_id in entry_ids}
         if not wanted:
             return {}
-        run_id, marks = self._reconciled_latest_marks()
+        run_id, marks = self._reconciled_latest_marks(wanted)
         if run_id is None:
             return {}
         result: dict[int, SmartReviewMark] = {}

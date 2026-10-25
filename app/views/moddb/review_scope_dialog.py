@@ -196,10 +196,13 @@ class ReviewScopeController:
         log_info(
             f"Mod 資料庫解除人工審核：{entry.mc_version} {entry.mod_id} {entry.key}"
         )
-        panel._load_list(page=panel.pager.current_page, keep_scroll=True)
+        if panel._on_changed:
+            # 父層會負責一次完整刷新；避免先載入清單、再由父層重複載入。
+            panel._notify_changed(keep_scroll=True)
+        else:
+            panel._load_list(page=panel.pager.current_page, keep_scroll=True)
         panel.saved_text.value = message
         show_snack(panel._page, message, C.EM, text_color=C.ON_EM)
-        panel._notify_changed(keep_scroll=True)
         panel._safe_update()
 
     def _reject_clear(self, entry: EntryRow, exc: Exception) -> None:
@@ -576,11 +579,14 @@ class ReviewScopeController:
             if others
             else "已標記為人工已審核（來源不變）"
         )
-        panel._load_list(page=panel.pager.current_page, keep_scroll=True)
+        if panel._on_changed:
+            # review_manual 已完成寫入；讓父層以單一路徑刷新清單，避免重複
+            # 執行 smart_review_marks 與選取條目查詢。
+            panel._notify_changed(keep_scroll=True)
+        else:
+            panel._load_list(page=panel.pager.current_page, keep_scroll=True)
         panel.saved_text.value = message
         show_snack(panel._page, message, C.EM, text_color=C.ON_EM)
-        if panel._on_changed:
-            panel._on_changed()
         panel._safe_update()
 
     def _reject(

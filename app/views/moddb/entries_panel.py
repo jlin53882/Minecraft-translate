@@ -386,8 +386,12 @@ class EntriesPanel(ft.Column):
         open_bulk_review(self, _e)
 
     def _after_batch_replace(self, result) -> None:
-        self._load_list(page=self.pager.current_page, keep_scroll=True)
-        self._notify_changed(keep_scroll=True)
+        if self._on_changed:
+            # ModDbView 會在這個回呼中以同一份 snapshot 刷新清單；不要先在
+            # 子面板載入一次，否則批次寫入後會重建兩次清單與智慧校對標籤。
+            self._notify_changed(keep_scroll=True)
+        else:
+            self._load_list(page=self.pager.current_page, keep_scroll=True)
         self._safe_update()
 
     def _notify_changed(self, *, keep_scroll: bool = False) -> None:
@@ -1049,6 +1053,15 @@ class EntriesPanel(ft.Column):
         else:
             show_snack(self._page, message, C.EM, text_color=C.ON_EM)
         if self.db() is db:
+            show_saved_message = False
+            selected_index = next(
+                (
+                    index
+                    for index, row in enumerate(self.rows)
+                    if self.selected is not None and row.id == self.selected.id
+                ),
+                None,
+            )
             if (
                 not shadow
                 and not analyze_format_diagnostics(
@@ -1065,12 +1078,25 @@ class EntriesPanel(ft.Column):
             unchanged_editor = same_entry and current_editor_text == text
             if unchanged_editor:
                 self._editor_drafts.discard(entry.id)
-                self._load_list(page=self.pager.current_page, keep_scroll=True)
-                if self.selected is not None and self.selected.id == entry.id:
-                    self.saved_text.value = message
+                show_saved_message = True
+                if self._on_changed is None:
+                    self._load_list(page=self.pager.current_page, keep_scroll=True)
             elif same_entry:
                 self.saved_text.value = f"{message}；目前輸入的變更尚未儲存。"
             self._notify_changed(keep_scroll=True)
+            if (
+                show_saved_message
+                and self._on_changed is not None
+                and selected_index is not None
+                and self.rows
+                and all(row.id != entry.id for row in self.rows)
+            ):
+                # 父層單一路徑刷新時仍保留「目前條目消失就選下一筆」的操作語意。
+                self.select(self.rows[min(selected_index, len(self.rows) - 1)].id)
+            if show_saved_message and self.selected is not None and self.selected.id == entry.id:
+                # 父層同步刷新會重建 editor 並清掉 saved_text；訊息必須在
+                # callback 完成後再設定，才能讓使用者看到儲存結果。
+                self.saved_text.value = message
         self._update_impact()
         self._safe_update()
 

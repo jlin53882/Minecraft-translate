@@ -246,6 +246,44 @@ def test_process_killed_after_sqlite_commit_is_reconciled(
         db.close()
 
 
+def test_marks_reconcile_only_requested_page_entries(tmp_path, monkeypatch):
+    """條目清單只對帳目前頁面的 entry_id，不掃描整個批次候選。"""
+    path = tmp_path / "targeted-marks.db"
+    _store, run_id, snapshots = seed_ready_run(
+        path, 4, chunk_size=CHUNK_SIZE[CHUNKED]
+    )
+    db = TranslationDB(path)
+    try:
+        target, unrelated = snapshots[0], snapshots[1]
+        records = {
+            target.ordinal: {
+                "entry_id": target.entry_id,
+                "batch": "target-batch",
+                "applied_at": "2026-01-01 00:00:00",
+            },
+            unrelated.ordinal: {
+                "entry_id": unrelated.entry_id,
+                "batch": "unrelated-batch",
+                "applied_at": "2026-01-01 00:00:00",
+            },
+        }
+        captured = []
+        monkeypatch.setattr(db, "_smart_review_apply_records", lambda _run: records)
+
+        def capture_reconcile(history, current_run_id, current_records):
+            captured.append((current_run_id, dict(current_records)))
+            return 0
+
+        monkeypatch.setattr(
+            SmartReviewHistoryStore, "reconcile_applied", capture_reconcile
+        )
+        db.smart_review_marks([target.entry_id])
+
+        assert captured == [(run_id, {target.ordinal: records[target.ordinal]})]
+    finally:
+        db.close()
+
+
 # ---------------------------------------------------------------------------
 # reconcile_applied 本身的語意（不需要資料庫）
 # ---------------------------------------------------------------------------

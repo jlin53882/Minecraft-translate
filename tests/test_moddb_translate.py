@@ -2466,6 +2466,69 @@ def test_manual_fix_of_a_flagged_entry_lowers_the_translate_card(db_path, monkey
     assert entries.entry_ids == []
 
 
+def test_manual_save_parent_refreshes_entries_once(db_path, monkeypatch):
+    """有父層刷新回呼時，儲存完成只重建一次條目清單。"""
+    _, _, entries, db, entry, done, batch = _flagged_entry_saved_by_hand(
+        db_path, monkeypatch
+    )
+    calls = []
+    original_load = entries._load_list
+
+    def counted_load(*args, **kwargs):
+        calls.append((args, kwargs))
+        return original_load(*args, **kwargs)
+
+    monkeypatch.setattr(entries, "_load_list", counted_load)
+    entries._apply_save_result(db, entry, "注入合金", done, None, batch)
+
+    assert len(calls) == 1
+
+
+def test_manual_review_parent_refreshes_entries_once(db_path, monkeypatch):
+    """有父層刷新回呼時，人工審核完成只重建一次條目清單。"""
+    from app.views.moddb.entries_panel import EntriesPanel
+
+    db = TranslationDB(db_path)
+    db.ingest(
+        "1.21.1",
+        [
+            ScanItem(
+                KIND_LANG,
+                "foo",
+                "item.review_once",
+                "English",
+                "英文",
+                source=SRC_AI,
+            )
+        ],
+    )
+    page = mock_page()
+    panel = None
+    parent_refreshes = []
+
+    def parent_refresh() -> None:
+        parent_refreshes.append(True)
+        panel._load_list(page=panel.pager.current_page, keep_scroll=True)
+
+    panel = EntriesPanel(page, lambda: db, on_changed=parent_refresh)
+    panel.refresh()
+    calls = []
+    original_load = panel._load_list
+
+    def counted_load(*args, **kwargs):
+        calls.append((args, kwargs))
+        return original_load(*args, **kwargs)
+
+    monkeypatch.setattr(panel, "_load_list", counted_load)
+    entry = panel.selected
+    assert entry is not None
+    panel._review_controller.execute(entry, db, False, [])
+
+    assert parent_refreshes == [True]
+    assert len(calls) == 1
+    db.close()
+
+
 def test_shadowed_manual_save_keeps_unresolved_flagged_entry(db_path, monkeypatch):
     """自訂優先序讓 AI 譯文仍然生效：人工存檔沒解決問題，不能移出待處理清單。"""
     from translation_tool.translation_db.schema import SRC_JAR_TW

@@ -2662,7 +2662,7 @@ def test_entries_save_keeps_scroll_position_and_selects_the_next_entry(db_path):
 
 
 def test_entries_save_keeps_scroll_position_through_parent_refresh(db_path):
-    """儲存通知父層完整刷新後，仍維持清單位置並停在下一筆。"""
+    """儲存只經父層刷新一次，仍維持清單位置並停在下一筆。"""
     db = TranslationDB(db_path)
     db.ingest(
         "1.21.1",
@@ -2701,10 +2701,11 @@ def test_entries_save_keeps_scroll_position_through_parent_refresh(db_path):
 
     panel.tw_field.value = "文字二"
     panel._on_text_change()
+    refresh_count_before_save = len(scrolls)
     panel._save()
     page._run_all_tasks()
 
-    assert scrolls[-2:] == [420.0, 420.0]
+    assert scrolls[refresh_count_before_save:] == [420.0]
     assert panel.selected is not None and panel.selected.key == keys[3]
     assert panel._refresh_keep_scroll is False
     db.close()
