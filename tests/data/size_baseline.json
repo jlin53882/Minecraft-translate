@@ -40,6 +40,7 @@
     "app/views/moddb/batch_replace_dialog.py": 1013,
     "app/views/moddb/bulk_review_dialog.py": 806,
     "app/views/moddb/entries_panel.py": 1196,
+    "app/views/moddb_view.py": 804,
     "app/views/moddb/repair_reviewer.py": 802,
     "app/views/moddb/smart_review_batch_reviewer.py": 1053,
     "app/views/moddb/smart_review_reviewer.py": 828,
