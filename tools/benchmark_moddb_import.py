@@ -76,10 +76,7 @@ def _make_items(count: int) -> list[ScanItem]:
 
 
 def _write_archive(path: Path, count: int) -> None:
-    values = {
-        f"b.e{index:06d}": "Text entry"
-        for index in range(count)
-    }
+    values = {f"b.e{index:06d}": "Text entry" for index in range(count)}
     path.parent.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         archive.writestr(
