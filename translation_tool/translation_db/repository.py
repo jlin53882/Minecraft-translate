@@ -37,6 +37,10 @@ from translation_tool.translation_db import (
 )
 from translation_tool.translation_db.bulk_review import BulkReviewMixin
 from translation_tool.translation_db.cleanup import CleanupMixin
+from translation_tool.translation_db.history_retention import (
+    HISTORY_RETENTION_LIMIT,
+    prune_history_for_entries,
+)
 from translation_tool.translation_db.models import (
     AITranslationReplaceResult,
     BatchReplaceChange,
@@ -326,6 +330,9 @@ class TranslationDB(SmartReviewMixin, BulkReviewMixin, CleanupMixin):
         with self._lock:
             self._conn.execute("BEGIN IMMEDIATE")
             try:
+                history_id_floor = self._conn.execute(
+                    "SELECT COALESCE(MAX(id), 0) FROM history"
+                ).fetchone()[0]
                 # BEGIN 之後的任何失敗（含旗標初始化）都要回復，不留開啟中的交易
                 if keep_review:
                     self._conn.execute(
@@ -343,6 +350,7 @@ class TranslationDB(SmartReviewMixin, BulkReviewMixin, CleanupMixin):
                 if self._has_quality_flags:
                     # 觸發器只把受影響的條目標成待重算；提交前依 quality.py 重算
                     quality_flags.settle(self._conn)
+                prune_history_for_entries(self._conn, history_id_floor)
                 if keep_review:
                     self._conn.execute(
                         "DELETE FROM meta WHERE key=?", (KEEP_REVIEW_FLAG,)
@@ -2898,7 +2906,7 @@ class TranslationDB(SmartReviewMixin, BulkReviewMixin, CleanupMixin):
                 "SELECT id, batch, at, actor, action, old_zh_tw, new_zh_tw, note, "
                 f"prev_manual, {history_review_sql}, {history_revision_sql}, "
                 f"{history_source_sql} "
-                "FROM history WHERE entry_id=? ORDER BY id DESC LIMIT 50",
+                f"FROM history WHERE entry_id=? ORDER BY id DESC LIMIT {HISTORY_RETENTION_LIMIT}",
                 (entry_id,),
             )
         ]

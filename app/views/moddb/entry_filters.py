@@ -385,6 +385,9 @@ def open_species_scan(panel, _e=None) -> None:
 
 def open_smart_review(panel, _e=None) -> None:
     """開啟智慧校對對話框並傳入目前資料庫與篩選範圍。"""
+    if getattr(panel, "_data_loading", False):
+        show_snack(panel._page, "條目資料仍在載入，請稍候再操作。", C.GOLD)
+        return
     if panel.drafts:
         show_snack(
             panel._page,

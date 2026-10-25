@@ -174,10 +174,9 @@ class ModDbView(ft.Column):
     def get_db(self) -> TranslationDB | None:
         """目前的資料庫（沒有檔案時回傳 None，掃描完成後會重新開啟）。"""
         if not self._db_loaded:
-            # 首次總覽載入期間由背景工作擁有資料庫連線，避免切換其他頁籤時
-            # 又在 UI 執行緒同步開啟同一個大型資料庫。
-            if self._overview_loading:
-                return None
+            # 總覽的重統計仍在背景連線執行；開啟一個 view-owned 連線只做
+            # schema/priority 初始化，讓使用者在總覽尚未完成時仍能操作條目頁。
+            # _adopt_overview_database() 會在背景快照完成後關閉重複的 worker 連線。
             self._db_sig = self._settings_signature()
             self._db = open_database(create=False)
             self._db_loaded = True
@@ -437,6 +436,8 @@ class ModDbView(ft.Column):
         self._panel_refresh_loading.add(key)
         panel.refresh_indicator.value = message or PANEL_REFRESH_MESSAGES[key]
         panel.refresh_indicator.visible = True
+        if key == "entries":
+            self.entries.set_data_loading(True)
         if self.tab == key:
             if message is not None and key == "entries":
                 try:
@@ -454,12 +455,16 @@ class ModDbView(ft.Column):
             launched = False
             panel.refresh_indicator.visible = True
             panel.refresh_indicator.value = f"無法啟動資料載入：{exc}"
+            if key == "entries":
+                self.entries.set_data_loading(False)
             log_debug(f"Mod DB {key} 頁籤資料載入無法啟動：{exc!r}")
         if launched is False:
             self._panel_refresh_loading.discard(key)
             self._panel_refresh_needed[key] = True
             panel.refresh_indicator.visible = False
             panel.refresh_indicator.value = "應用程式正在關閉，無法載入資料。"
+            if key == "entries":
+                self.entries.set_data_loading(False)
             if self.tab == key:
                 self._safe_update()
 
@@ -503,6 +508,8 @@ class ModDbView(ft.Column):
                 except Exception as exc:  # noqa: BLE001 - page may detach during load
                     self._panel_refresh_loading.discard(key)
                     self._panel_refresh_needed[key] = True
+                    if key == "entries":
+                        self.entries.set_data_loading(False)
                     log_debug(f"Mod DB {key} 頁籤結果排程失敗：{exc!r}")
             else:
                 self._apply_panel_refresh(
@@ -539,6 +546,8 @@ class ModDbView(ft.Column):
         if generation != self._panel_refresh_generation[key]:
             return
         self._panel_refresh_loading.discard(key)
+        if key == "entries":
+            self.entries.set_data_loading(False)
         if signature != self._settings_signature():
             self._panel_refresh_needed[key] = True
             panel.refresh_indicator.visible = False

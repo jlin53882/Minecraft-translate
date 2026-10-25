@@ -135,6 +135,7 @@ class EntriesPanel(ft.Column):
         self.smart_review_marks: dict[int, SmartReviewMark] = {}
         self.total = 0
         self._list_error: str | None = None
+        self._data_loading = False
         self.selected: EntryRow | None = None
         self.detail: EntryDetail | None = None
         self.sug_tab = "key"
@@ -360,6 +361,23 @@ class EntriesPanel(ft.Column):
     def db(self) -> TranslationDB | None:
         return self._get_db()
 
+    def set_data_loading(self, loading: bool) -> None:
+        """初次清單載入期間停用依賴範圍資料的操作。"""
+        self._data_loading = loading
+        self._update_data_actions()
+
+    def _update_data_actions(self) -> None:
+        disabled = self._data_loading or bool(self._list_error)
+        for name in (
+            "batch_replace_btn",
+            "bulk_review_btn",
+            "smart_review_btn",
+            "species_scan_btn",
+        ):
+            button = getattr(self, name, None)
+            if button is not None:
+                button.disabled = disabled
+
     @staticmethod
     def _database_identity(db):
         return database_identity(db)
@@ -458,6 +476,7 @@ class EntriesPanel(ft.Column):
         self._render_list_selection(previous_selected_id)
         self.refresh_indicator.value = str(snapshot.get("error") or "")
         self.refresh_indicator.visible = bool(snapshot.get("error"))
+        self.set_data_loading(False)
 
     def _load_mods(self) -> None:
         db = self.db()
@@ -593,8 +612,7 @@ class EntriesPanel(ft.Column):
             if self._list_error
             else f"{format_count(self.total)} 筆"
         )
-        self.batch_replace_btn.disabled = bool(self._list_error)
-        self.bulk_review_btn.disabled = bool(self._list_error)
+        self._update_data_actions()
         self.advanced_filters.set_summary()
         tiles = [self._row_tile(r) for r in self.rows]
         if not tiles:

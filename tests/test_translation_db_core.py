@@ -64,6 +64,60 @@ def item(key="item.foo.a", en="Steel Casing", tw="", cn="", mod="foo", kind=KIND
     return ScanItem(kind, mod, key, en, tw, cn)
 
 
+def test_history_retention_keeps_only_latest_five_rows_per_entry(db):
+    db.ingest("1.21.1", [item()])
+    entry_id = db._one("SELECT id FROM entry LIMIT 1")[0]
+
+    with db._tx() as conn:
+        for number in range(7):
+            conn.execute(
+                "INSERT INTO history "
+                "(entry_id, batch, action, old_zh_tw, new_zh_tw, note) "
+                "VALUES (?, ?, 'manual', '', ?, ?)",
+                (entry_id, f"batch-{number}", f"譯文-{number}", str(number)),
+            )
+
+    rows = db._q("SELECT note FROM history WHERE entry_id=? ORDER BY id", (entry_id,))
+    assert rows == [("2",), ("3",), ("4",), ("5",), ("6",)]
+    assert len(db.entry_detail(entry_id).history) == 5
+
+
+def test_history_retention_migration_prunes_existing_database_and_keeps_backup(
+    tmp_path,
+):
+    path = tmp_path / "history-v8.db"
+    db = TranslationDB(path)
+    db.ingest("1.21.1", [item()])
+    entry_id = db._one("SELECT id FROM entry LIMIT 1")[0]
+    db.close()
+
+    # 重建保留過量記錄的 v9 前資料庫狀態，讓 migration 路徑能和一般寫入
+    # 交易的清理路徑分開驗證。
+    conn = sqlite3.connect(path)
+    conn.execute("UPDATE meta SET value='8' WHERE key='schema_version'")
+    for number in range(7):
+        conn.execute(
+            "INSERT INTO history "
+            "(entry_id, batch, action, old_zh_tw, new_zh_tw, note) "
+            "VALUES (?, ?, 'manual', '', ?, ?)",
+            (entry_id, f"legacy-{number}", f"舊譯文-{number}", str(number)),
+        )
+    conn.commit()
+    conn.close()
+
+    reopened = TranslationDB(path)
+    try:
+        assert reopened._one("SELECT value FROM meta WHERE key='schema_version'") == (
+            "9",
+        )
+        assert reopened._one(
+            "SELECT COUNT(*) FROM history WHERE entry_id=?", (entry_id,)
+        ) == (5,)
+        assert list(tmp_path.glob("history-v8.db.pre-schema-v9-*.bak"))
+    finally:
+        reopened.close()
+
+
 # ---------------------------------------------------------------- 身分
 def test_classify_lang_and_patchouli_members():
     lang = classify_member("assets/foo/lang/en_us.json")
@@ -1538,7 +1592,7 @@ def test_schema_v1_migration_marks_legacy_manual_unknown_and_keeps_backup(tmp_pa
     db = TranslationDB(path)
     detail = db.entry_detail(entry_id)
     manual = next(row for row in detail.translations if row.source == SRC_MANUAL)
-    assert SCHEMA_VERSION == 8
+    assert SCHEMA_VERSION == 9
     assert manual.review_status == "legacy_unknown" and manual.checker == "old-checker"
     assert detail.entry.review_status == "legacy_unknown"
     assert list(tmp_path.glob("legacy.db.pre-schema-v2-*.bak"))
@@ -1548,6 +1602,7 @@ def test_schema_v1_migration_marks_legacy_manual_unknown_and_keeps_backup(tmp_pa
     assert list(tmp_path.glob("legacy.db.pre-schema-v6-*.bak"))
     assert list(tmp_path.glob("legacy.db.pre-schema-v7-*.bak"))
     assert list(tmp_path.glob("legacy.db.pre-schema-v8-*.bak"))
+    assert list(tmp_path.glob("legacy.db.pre-schema-v9-*.bak"))
     assert db._q(
         "SELECT name FROM sqlite_schema WHERE type='table' "
         "AND name IN ('smart_review_run', 'smart_review_candidate') "
@@ -1656,7 +1711,7 @@ def test_schema_v3_migration_backup_includes_committed_wal_snapshot(tmp_path):
         migrated._conn.execute(
             "SELECT value FROM meta WHERE key='schema_version'"
         ).fetchone()[0]
-        == "8"
+        == "9"
     )
     backups = list(tmp_path.glob("legacy-v3-wal.db.pre-schema-v4-*.bak"))
     assert len(backups) == 1

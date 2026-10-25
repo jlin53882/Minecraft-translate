@@ -8,7 +8,7 @@ Mod 翻譯資料庫（SQLite）的資料表結構、來源代碼與連線設定�
   「相同內容」以 ``(類型, 模組, 鍵值, 原文)`` 判斷，可橫跨版本。
 - ``translation``：掛在 entry 上的譯文，同一個 entry 可有多個來源，每個來源最多一筆。
 - ``effective``：每個 entry 依來源優先序選出的「生效譯文」，寫入時維護，讀取不必重算。
-- ``history``：手動更新、AI 舊譯文重翻與還原的異動紀錄。
+- ``history``：手動更新、AI 舊譯文重翻與還原的異動紀錄；每個條目保留最近五筆。
 - ``src_change``：掃描／翻譯時發現「鍵值相同但原文已變動」而略過的紀錄。
 - ``scan_run``：掃描紀錄。
 """
@@ -20,7 +20,7 @@ import time
 from pathlib import Path
 
 KEEP_REVIEW_FLAG = "keep_review_on_text_change"  # 交易內暫時存在的 meta 旗標
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 
 KIND_LANG = "lang"
 KIND_PATCHOULI = "patchouli"
@@ -151,6 +151,7 @@ CREATE TABLE IF NOT EXISTS history (
     note        TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_history_entry ON history (entry_id);
+CREATE INDEX IF NOT EXISTS idx_history_entry_id_desc ON history (entry_id, id DESC);
 CREATE INDEX IF NOT EXISTS idx_history_batch ON history (batch);
 CREATE INDEX IF NOT EXISTS idx_history_entry_action_at ON history (entry_id, action, at);
 -- 智慧校對套用紀錄對帳：依 note 前綴（run=<id>; ordinal=）取範圍，只索引套用紀錄
@@ -300,6 +301,8 @@ def _backup_for_migration(conn: sqlite3.Connection, next_version: int) -> Path |
         return _backup_before_smart_review_migration(conn)
     if next_version == 8:
         return _backup_before_smart_review_draft_migration(conn)
+    if next_version == 9:
+        return _backup_before_history_retention_migration(conn)
     return None
 
 
@@ -337,6 +340,8 @@ def _migrate_to(conn: sqlite3.Connection, next_version: int) -> None:
         _migrate_smart_review_v7(conn)
     elif next_version == 8:
         _migrate_smart_review_v8(conn)
+    elif next_version == 9:
+        _migrate_history_retention_v9(conn)
 
 
 def _install_derived_tables(conn: sqlite3.Connection) -> None:
@@ -745,6 +750,30 @@ def _migrate_smart_review_v8(conn: sqlite3.Connection) -> None:
     }
     if "draft_zh_tw" not in candidate_columns:
         conn.execute("ALTER TABLE smart_review_candidate ADD COLUMN draft_zh_tw TEXT")
+
+
+def _backup_before_history_retention_migration(
+    conn: sqlite3.Connection,
+) -> Path | None:
+    """在刪除超出保留期限的 history 前建立一致的旁側備份。"""
+    main = next(
+        (row[2] for row in conn.execute("PRAGMA database_list") if row[1] == "main"),
+        "",
+    )
+    if not main:
+        return None
+    source_path = Path(main)
+    backup_path = source_path.with_name(
+        f"{source_path.name}.pre-schema-v9-{time.time_ns()}.bak"
+    )
+    return _create_migration_backup(conn, source_path, backup_path)
+
+
+def _migrate_history_retention_v9(conn: sqlite3.Connection) -> None:
+    """刪除既有資料庫中每個條目第五筆以外的舊 history。"""
+    from translation_tool.translation_db.history_retention import prune_all_history
+
+    prune_all_history(conn)
 
 
 def _install_schema_v3_objects(conn: sqlite3.Connection) -> None:

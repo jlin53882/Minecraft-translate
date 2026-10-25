@@ -315,10 +315,16 @@ def test_database_tab_refreshes_and_entry_filters_stay_inline(db_path, monkeypat
         for key in ("entries", "scan", "translate"):
             view.show_tab(key)
             assert view._panels[key].refresh_indicator.visible is True
+            if key == "entries":
+                assert view.entries._data_loading is True
+                assert view.entries.smart_review_btn.disabled is True
             assert page.operation_registry.wait_for_idle(timeout=2)
             page._run_all_tasks()
             page._tasks.clear()
             assert view._panels[key].refresh_indicator.visible is False
+            if key == "entries":
+                assert view.entries._data_loading is False
+                assert view.entries.smart_review_btn.disabled is False
         assert view.entries.total == 3
         assert view.scan._db_versions == {"1.21.1", "1.20.1"}
         assert "未翻譯" in view.translate.count_text.value
@@ -744,14 +750,21 @@ def test_moddb_overview_load_uses_a_worker_owned_connection(db_path, monkeypatch
     try:
         assert load_entered.wait(timeout=1)
         assert view.overview.loading.visible is True
-        assert view._db is None  # 隱藏的掃描面板不可先在 UI 執行緒開資料庫
+        # 總覽統計仍在 worker 中計算，但條目頁可以先取得輕量的 view-owned
+        # 連線，不應因背景統計尚未完成而誤判「沒有可用版本」。
+        view_db = view.get_db()
+        assert view_db is not None
+        assert view._db is view_db
+        assert worker_connections[0] is not view_db
         release_load.set()
         assert registry.wait_for_idle(timeout=2)
         page._run_all_tasks()
         assert len(worker_connections) == 1
-        assert worker_connections[0] is view._db
         assert view.overview.content_col.visible is True
-        assert worker_connections[0]._conn.execute("SELECT 1").fetchone() == (1,)
+        assert view._db is view_db
+        assert view_db._conn.execute("SELECT 1").fetchone() == (1,)
+        with pytest.raises(sqlite3.ProgrammingError):
+            worker_connections[0]._conn.execute("SELECT 1")
         with sqlite3.connect(db_path) as check_conn:
             assert (
                 check_conn.execute("SELECT count(*) FROM stat_cache").fetchone()[0] > 0
