@@ -505,7 +505,12 @@ def test_advancement_cleanup_matches_what_the_scanner_collects():
     for value, expected in values.items():
         key = "a.json#display.title.text"
         assert entry_cleanup_category("advancement", key, value) == expected, value
-        found = advancement_texts({"display": {"title": {"text": value}}})
+        found = advancement_texts(
+            {
+                "criteria": {"x": {}},
+                "display": {"title": {"text": value}},
+            }
+        )
         assert (not found) == (expected is not None), value
 
 

@@ -689,6 +689,35 @@ def advancement_literal_paths(data: object) -> dict[str, str]:
     return found
 
 
+def _is_advancement_structural_value(text: str) -> bool:
+    """判斷是否為 Advancement 不應送入 AI 的結構值。"""
+    if _LANGKEY.fullmatch(text.lstrip("# ")):
+        return True
+    return any(
+        pattern.match(text) if prefix else pattern.fullmatch(text)
+        for pattern, prefix in (
+            (_URL, True),
+            (_JAVA_CLASS, False),
+            (_STACK, True),
+            (_BOOK_NUMBER, False),
+            (_BOOL, False),
+            (_TEMPLATE_VAR, False),
+            (_ANY_RESLOC, False),
+            (_PATHLIKE, False),
+        )
+    )
+
+
+def _is_advancement_technical_identifier(text: str, core: str, field: str) -> bool:
+    """判斷未知 component 欄位中的 snake_case／路徑識別字。"""
+    return (
+        not _WHITESPACE.search(text)
+        and _LOWER_IDENT.fullmatch(core) is not None
+        and any(separator in core for separator in "_./-")
+        and field not in BOOK_DISPLAY_FIELDS
+    )
+
+
 def is_advancement_literal_text(value: str, *, field: str = "") -> bool:
     """判斷 Advancement component literal 是否是安全的顯示文字。
 
@@ -706,28 +735,13 @@ def is_advancement_literal_text(value: str, *, field: str = "") -> bool:
     core = _BOOK_MARKUP.sub("", text).strip()
     if not _ASCII_LETTER.search(core) or value_shape_reason(text) is not None:
         return False
-    if (
-        _LANGKEY.fullmatch(text.lstrip("# "))
-        or _URL.match(text)
-        or _JAVA_CLASS.fullmatch(text)
-        or _STACK.match(text)
-        or _BOOK_NUMBER.fullmatch(text)
-        or _BOOL.fullmatch(text)
-        or _TEMPLATE_VAR.fullmatch(text)
-        or _ANY_RESLOC.fullmatch(text)
-        or _PATHLIKE.fullmatch(text)
-    ):
+    if _is_advancement_structural_value(text):
         return False
     # 裸單字（例如 ``welcome``、``player``）可能是可見文字；帶有
     # snake_case、路徑或版本分隔符的值則保守視為技術識別字。若值位於
     # advancement 的明確顯示欄位，保留既有 Patchouli 類似欄位的語意，
     # 讓像 ``pollen_sifter`` 的合法顯示名稱不因改用共用 walker 而退化。
-    if (
-        not _WHITESPACE.search(text)
-        and _LOWER_IDENT.fullmatch(core)
-        and any(separator in core for separator in "_./-")
-        and field not in BOOK_DISPLAY_FIELDS
-    ):
+    if _is_advancement_technical_identifier(text, core, field):
         return False
     if not _WHITESPACE.search(text):
         return True

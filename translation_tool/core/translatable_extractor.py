@@ -157,6 +157,26 @@ def _list_text_translatable(value: str, is_lang: bool, path: str) -> bool:
     return classify_book_string(value, book_field(path)) == "text"
 
 
+def _extract_advancement_translatables(json_data, file_path) -> list[dict[str, str]]:
+    """依完整 Advancement 文件契約抽取 literal，拒絕 generic JSON fallback。"""
+    if not is_advancement_document(json_data):
+        return []
+    return [
+        {
+            "file": str(file_path),
+            "path": path,
+            "text": text,
+            "source_text": text,
+        }
+        for path, text in advancement_texts(json_data).items()
+    ]
+
+
+def _is_advancement_content_file(file_path, *, is_lang: bool) -> bool:
+    """確認檔案應走 Advancement 專用抽取，而不是語言檔 walker。"""
+    return not is_lang and is_advancement_file(Path(file_path))
+
+
 def extract_translatables(json_data, file_path):
     """
     從 JSON 資料中抽取可翻譯的項目。
@@ -175,20 +195,10 @@ def extract_translatables(json_data, file_path):
     items = []
     is_lang = is_lang_file(Path(file_path))
 
-    if not is_lang and is_advancement_file(Path(file_path)):
+    if _is_advancement_content_file(file_path, is_lang=is_lang):
         # Advancement 必須在抽取、DB scanner 與 writer 共用同一個完整文件契約；
         # 不完整文件安全略過，不退回通用 JSON 抽取器，避免稍後才由 writer 拒絕。
-        if not is_advancement_document(json_data):
-            return []
-        return [
-            {
-                "file": str(file_path),
-                "path": path,
-                "text": text,
-                "source_text": text,
-            }
-            for path, text in advancement_texts(json_data).items()
-        ]
+        return _extract_advancement_translatables(json_data, file_path)
 
     def walk(obj, base_path=""):
         """遞迴遍歷物件提取可翻譯文字。"""
