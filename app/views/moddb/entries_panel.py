@@ -59,6 +59,7 @@ from app.views.moddb.entry_filters import (
 )
 from app.views.moddb.entry_metadata import build_entry_metadata
 from app.views.moddb.entry_row_tile import build_entry_tile
+from app.views.moddb.entry_save_result import apply_save_result
 from app.views.moddb.format_diff_review import FormatDiffReview
 from app.views.moddb.format_diff_viewer import FormatDiffViewer
 from app.views.moddb.formatting import (
@@ -86,7 +87,6 @@ from translation_tool.utils.log_unit import (
     log_debug,
     log_exception,
     log_info,
-    log_warning,
 )
 
 PAGE_SIZE = 50
@@ -1000,109 +1000,7 @@ class EntriesPanel(ft.Column):
         self._update_impact()
 
     def _apply_save_result(self, db, entry, text, done, error, flagged_batch) -> None:
-        self._save_running = False
-        if error is not None:
-            kind, exc = error
-            if kind == "validation":
-                log_warning(
-                    f"Mod 資料庫儲存被拒絕：{entry.mc_version} {entry.mod_id} "
-                    f"{entry.key}（{exc!r}）"
-                )
-                show_snack(self._page, str(exc), C.RED)
-            elif kind == "database":
-                log_exception(
-                    f"Mod 資料庫儲存失敗：{entry.mc_version} {entry.mod_id} {entry.key}"
-                )
-                show_snack(
-                    self._page,
-                    f"儲存失敗（資料庫錯誤：{exc}）。可能是資料庫被其他程式鎖住，請稍後再試；詳情見後台 log",
-                    C.RED,
-                )
-            else:
-                show_snack(self._page, f"儲存失敗：{exc}；詳情見後台 log", C.RED)
-            if self.selected is not None and self.selected.id == entry.id:
-                self.saved_text.value = ""
-            self._update_impact()
-            self._safe_update()
-            return
-
-        if done is None:
-            return
-        others = [i.mc_version for i in done if not i.is_self]
-        log_info(
-            f"Mod 資料庫手動儲存：{entry.mc_version} {entry.mod_id} {entry.key}"
-            f"（同步 {len(others)} 個版本：{'、'.join(others) or '無'}）"
-        )
-        message = (
-            f"已儲存，並同步 {len(others)} 個版本：{'、'.join(others)}"
-            if others
-            else "已儲存"
-        )
-        shadow = self._shadowing_source(db, entry.id, text)
-        held_back = self._shadowed_versions(db, done, entry.id, text)
-        if shadow:
-            # 自訂的來源優先序把別的來源排在人工之前：譯文已存進人工來源，但畫面仍是別的
-            message += f"；但目前來源優先序讓「{shadow}」的譯文仍然生效"
-        if held_back:
-            message += (
-                f"；{'、'.join(held_back)} 因來源優先序仍顯示原本的譯文，"
-                "同步並未在這些版本生效"
-            )
-        if shadow or held_back:
-            show_snack(self._page, message, C.GOLD)
-        else:
-            show_snack(self._page, message, C.EM, text_color=C.ON_EM)
-        if self.db() is db:
-            show_saved_message = False
-            selected_index = next(
-                (
-                    index
-                    for index, row in enumerate(self.rows)
-                    if self.selected is not None and row.id == self.selected.id
-                ),
-                None,
-            )
-            if (
-                not shadow
-                and not analyze_format_diagnostics(
-                    entry.en_us, text, kind=entry.kind
-                ).has_issues
-            ):
-                # 新譯文沒生效、或仍與原文的特殊字元不一致時，問題還在，不能移出待處理清單
-                self._resolve_flagged(entry.id, flagged_batch)
-            same_entry = self.selected is not None and self.selected.id == entry.id
-            if same_entry:
-                # 儲存期間可能又輸入了新內容；只有仍停在已儲存文字時才清掉草稿。
-                self._editor_drafts.remember(self.selected, self.tw_field.value)
-            current_editor_text = (self.tw_field.value or "") if same_entry else None
-            unchanged_editor = same_entry and current_editor_text == text
-            if unchanged_editor:
-                self._editor_drafts.discard(entry.id)
-                show_saved_message = True
-                if self._on_changed is None:
-                    self._load_list(page=self.pager.current_page, keep_scroll=True)
-            elif same_entry:
-                self.saved_text.value = f"{message}；目前輸入的變更尚未儲存。"
-            self._notify_changed(keep_scroll=True)
-            if (
-                show_saved_message
-                and self._on_changed is not None
-                and selected_index is not None
-                and self.rows
-                and all(row.id != entry.id for row in self.rows)
-            ):
-                # 父層單一路徑刷新時仍保留「目前條目消失就選下一筆」的操作語意。
-                self.select(self.rows[min(selected_index, len(self.rows) - 1)].id)
-            if (
-                show_saved_message
-                and self.selected is not None
-                and self.selected.id == entry.id
-            ):
-                # 父層同步刷新會重建 editor 並清掉 saved_text；訊息必須在
-                # callback 完成後再設定，才能讓使用者看到儲存結果。
-                self.saved_text.value = message
-        self._update_impact()
-        self._safe_update()
+        apply_save_result(self, db, entry, text, done, error, flagged_batch)
 
     _shadowed_versions = staticmethod(shadowed_versions)
     _shadowing_source = staticmethod(shadowing_source)
