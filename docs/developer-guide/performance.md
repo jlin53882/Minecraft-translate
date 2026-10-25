@@ -140,6 +140,23 @@ Synthetic JARs, translation items, Dashboard cache shards and replace rules are
 generated in temporary directories. Dashboard task rendering is measured as
 Python-side control refresh; it is not browser frame or scroll performance.
 
+### ModDB 匯入與清理基準
+
+`tools/benchmark_moddb_import.py` 提供不接觸正式資料庫的可重現基準：合成
+語言檔寫在暫存目錄，SQLite ingest、清理報告、preview、apply 與 revert
+都使用暫存資料庫，程序結束後由暫存目錄一併移除。`--real-root` 僅逐一
+唯讀掃描實際的 JAR，不會建立 `TranslationDB` 或寫入資料庫。
+
+```bash
+uv run python -m tools.benchmark_moddb_import --sizes 1000 10000 70000
+uv run python -m tools.benchmark_moddb_import \
+  --real-root "<mods 資料夾>" --version 1.20.1 --sizes 1000
+```
+
+輸出保留每次取樣、median、p95、輸入列數、SQLite 版本、掃描錯誤與資料庫
+隔離聲明。合成基準用來比較程式碼前後的資料庫處理成本；實際 JAR 掃描
+則另外記錄 archive 數、條目數與總耗時，兩者不可合併成單一 UI SLA。
+
 ### Smart Review apply-record reconciliation
 
 `schema.py` installs `idx_history_smart_review_apply` on `history (note)` with

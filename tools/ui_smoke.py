@@ -20,10 +20,15 @@ from datetime import datetime
 from importlib import metadata
 from pathlib import Path
 
-from playwright.sync_api import Page, sync_playwright
-from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
-
 ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from playwright.sync_api import Page, sync_playwright  # noqa: E402
+from playwright.sync_api import TimeoutError as PlaywrightTimeoutError  # noqa: E402
+
+from app.view_registry import VIEW_SPECS  # noqa: E402
+
 DEFAULT_VIEWPORTS = (
     (1360, 900),
     (1180, 800),
@@ -132,21 +137,8 @@ SCENARIO_NOTES = {
     ),
     "dialogs": "截圖需人工檢查 Dialog 是否超出視窗；CanvasKit canvas 不提供可靠 DOM bounds。",
 }
-VIEW_KEYS = (
-    "dashboard",
-    "pipeline",
-    "extractor",
-    "merge",
-    "lm",
-    "translation",
-    "qc",
-    "icon_preview",
-    "cache",
-    "rules",
-    "lookup",
-    "bundler",
-    "config",
-)
+# 與正式 AppShell 共用單一頁面註冊表；新增頁面時 smoke 不會默默漏測。
+VIEW_KEYS = tuple(spec.key for spec in VIEW_SPECS)
 
 
 def find_browser_executable(explicit: str | None = None) -> Path:
