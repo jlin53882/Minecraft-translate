@@ -94,6 +94,7 @@ JUNK_LANG = {
 LICENSE_KEY = "guide/a.md#9"
 ANCHOR_KEY = "patchouli_books/b/entries/start.json#pages[1].anchor"
 OLD_JUNK = JUNK_LANG | {LICENSE_KEY, ANCHOR_KEY}
+LEGACY_CLEANUP = JUNK_LANG | {LICENSE_KEY}
 
 
 def _legacy_items(jar: Path) -> list[ScanItem]:
@@ -136,23 +137,25 @@ def test_first_scan_with_clean_english_ingests_no_flagged_rows(tmp_path):
     assert _report_keys(db, tmp_path, "p.json", protected=True) == set()
 
 
-def test_old_unfiltered_data_is_cleaned_and_rescan_does_not_readd_it(tmp_path):
+def test_old_unfiltered_data_only_cleans_high_confidence_rows(tmp_path):
     jar = _jar(tmp_path / "m.jar")
     db = TranslationDB(tmp_path / "t.db")
     db.ingest(VERSION, _legacy_items(jar))
     assert OLD_JUNK <= _all_keys(db)
 
     flagged = _report_keys(db, tmp_path, "r.json")
-    assert flagged == OLD_JUNK
+    assert flagged == LEGACY_CLEANUP
     path = tmp_path / "r.json"
     plan = db.preview_cleanup(path)
     db.apply_cleanup(path, plan.token)
-    assert not OLD_JUNK & _all_keys(db)
+    assert not LEGACY_CLEANUP & _all_keys(db)
+    assert ANCHOR_KEY in _all_keys(db)  # 缺少原始 context 時，unknown 不自動刪除
     kept = _all_keys(db)
 
     # 重掃同一個 jar（預設清理）：被清掉的不會回來，原本留下的也不會重複或遺失
     db.ingest(VERSION, _scan(jar))
-    assert not OLD_JUNK & _all_keys(db)
+    assert not LEGACY_CLEANUP & _all_keys(db)
+    assert ANCHOR_KEY in _all_keys(db)
     added = _all_keys(db) - kept
     assert {"gui.m.nested.text", "gui.m.list[0]", "gui.m.list[1]"} <= added
     assert _report_keys(db, tmp_path, "r2.json") == set()
@@ -168,6 +171,7 @@ def test_clean_english_off_still_skips_what_cleanup_removes(tmp_path):
     _clean(db, tmp_path)
     db.ingest(VERSION, items)
     assert not JUNK_LANG & _all_keys(db)
+    assert ANCHOR_KEY in _all_keys(db)
     assert _report_keys(db, tmp_path, "r2.json") == set()
 
 

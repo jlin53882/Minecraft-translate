@@ -36,6 +36,7 @@
 - [`developer-guide/lm-token-budget.md`](developer-guide/lm-token-budget.md)：翻譯批次的 token 預算、估算器、切批演算法與校正限制。
 - [`developer-guide/operation-lifecycle.md`](developer-guide/operation-lifecycle.md)、[`developer-guide/worker-thread-audit.md`](developer-guide/worker-thread-audit.md)：長任務、取消、關閉與 worker/UI 邊界。
 - [`developer-guide/jar-pipeline.md`](developer-guide/jar-pipeline.md)、[`developer-guide/translation-engine-skeleton.md`](developer-guide/translation-engine-skeleton.md)：引擎資料流與共用翻譯骨架。
+- [`developer-guide/patchouli-semantic-classification.md`](developer-guide/patchouli-semantic-classification.md)：Patchouli 頁型、template、語意分類、翻譯抽取與清理邊界。
 
 ### Reference、Generated 與 ADR
 

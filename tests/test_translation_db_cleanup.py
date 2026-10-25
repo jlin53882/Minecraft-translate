@@ -92,12 +92,11 @@ def test_export_lists_only_untouched_candidates_and_does_not_delete(tmp_path):
         "license": 1,
         "comment": 1,
         "multiblock": 1,
-        "placeholder": 1,
     }
     assert report.protected == {"license": 1}  # 有繁中的授權條款略過
     data = json.loads((tmp_path / "r.json").read_text(encoding="utf-8"))
     assert data["format"] == "mod-db-cleanup-v2"
-    assert len(data["items"]) == 5
+    assert len(data["items"]) == 4
     assert all(item["delete"] is True for item in data["items"])
 
 
@@ -107,13 +106,13 @@ def test_apply_deletes_checked_items_and_can_be_reverted(tmp_path):
     report_path = tmp_path / "r.json"
     db.export_cleanup_report(VERSION, report_path)
     plan = _apply(db, report_path)
-    assert plan.deletable == 5
-    assert _count(db) == before - 5
+    assert plan.deletable == 4
+    assert _count(db) == before - 4
     assert db._one("SELECT COUNT(*) FROM entry WHERE en_us = ?", (REAL,))[0] == 2
     info = db.last_cleanup_batch()
-    assert info is not None and info.count == 5 and info.reverted_at is None
+    assert info is not None and info.count == 4 and info.reverted_at is None
     result = db.revert_cleanup(info.batch_id)
-    assert (result.restored, result.pending, result.complete) == (5, 0, True)
+    assert (result.restored, result.pending, result.complete) == (4, 0, True)
     assert _count(db) == before
     assert db.last_cleanup_batch().reverted_at is not None
     with pytest.raises(ValueError):
@@ -128,7 +127,7 @@ def test_items_removed_or_marked_false_in_the_report_are_kept(tmp_path):
     data["items"][0]["delete"] = False
     del data["items"][1]
     report_path.write_text(json.dumps(data), encoding="utf-8")
-    assert db.preview_cleanup(report_path).deletable == 3
+    assert db.preview_cleanup(report_path).deletable == 2
 
 
 def test_only_an_explicit_true_delete_flag_deletes(tmp_path):
@@ -164,7 +163,7 @@ def test_apply_revalidates_each_item_against_current_data(tmp_path):
     plan = db.preview_cleanup(report_path)
     assert plan.skipped["已有譯文或歷史"] == 1
     assert plan.skipped["原文已變動"] == 1
-    assert plan.deletable == 3
+    assert plan.deletable == 2
     # 假造的編號與其他版本不會被刪
     data["items"].append({"id": 999999, "delete": True, "category": "license"})
     report_path.write_text(json.dumps(data), encoding="utf-8")
@@ -186,7 +185,7 @@ def test_revert_skips_entries_that_were_scanned_again(tmp_path):
     plan = _apply(db, report_path)
     db.ingest(VERSION, [ScanItem("guide", "m", "g/a.md#1", LICENSE)])
     result = db.revert_cleanup(plan.batch_id)
-    assert (result.restored, len(result.conflicts), result.complete) == (4, 1, False)
+    assert (result.restored, len(result.conflicts), result.complete) == (3, 1, False)
     assert db.last_cleanup_batch().reverted_at is None  # 沒全部還原就不算完成
 
 
@@ -202,7 +201,7 @@ def test_service_exports_into_a_folder_next_to_the_database_and_lists_newest_fir
     other.write_text(first.read_text(encoding="utf-8"), encoding="utf-8")
     assert svc.list_cleanup_reports(db)[0] == other
     plan = svc.preview_cleanup(db, other)
-    assert plan.deletable == 5
+    assert plan.deletable == 4
 
 
 def test_overview_counts_per_kind_and_category_without_deleting(tmp_path):
@@ -216,7 +215,6 @@ def test_overview_counts_per_kind_and_category_without_deleting(tmp_path):
         ("guide", "license"): 1,
         ("guide", "comment"): 1,
         ("patchouli", "multiblock"): 1,
-        ("patchouli", "placeholder"): 1,
     }
     assert protected == 1
     assert _count(db) == before
@@ -313,29 +311,22 @@ def test_protected_export_lists_only_rule_matches_that_have_translations(tmp_pat
     before = _count(db)
     report, path = _protected_report(db, tmp_path, confirm=False)
     assert _count(db) == before  # 匯出不刪任何東西
-    assert report.counts == {"license": 1, "placeholder": 1}
+    assert report.counts == {"license": 1}
     assert report.protected == {}
-    assert report.sources == {"模組自帶繁中": 1, "人工": 1}
+    assert report.sources == {"模組自帶繁中": 1}
     data = json.loads(path.read_text(encoding="utf-8"))
     by_key = {item["key"]: item for item in data["items"]}
     assert set(by_key) == {
         "g/b.md#0",
-        "b/e.json#pages[1].text",
     }  # 正常譯文 Alpha 不列入
-    item = by_key["b/e.json#pages[1].text"]
-    assert item["has_translation"] is True
-    # 人工寫的中文譯文：即使是確定性類別也預設不刪，要人工確認
-    assert item["delete"] is False and item["review"]
     assert (
         by_key["g/b.md#0"]["delete"] is False
     )  # 授權條款是推測類別，有中文譯文也預設不刪
-    assert (report.default_selected, report.review_required) == (0, 2)
-    assert report.exported_total == 2
-    assert item["zh_tw"] == "[待補照片]" and item["source"] == "人工"
-    assert item["category"] == "placeholder" and item["state_hash"]
+    assert (report.default_selected, report.review_required) == (0, 1)
+    assert report.exported_total == 1
     # 一般檢查檔照舊不列入這兩筆
     rule = db.export_cleanup_report(VERSION, tmp_path / "r.json")
-    assert rule.protected == {"license": 1, "placeholder": 1}
+    assert rule.protected == {"license": 1}
 
 
 def test_protected_cleanup_deletes_translations_and_can_be_reverted(tmp_path):
@@ -347,12 +338,12 @@ def test_protected_cleanup_deletes_translations_and_can_be_reverted(tmp_path):
     }
     _report, path = _protected_report(db, tmp_path)
     plan = _apply(db, path)
-    assert plan.deletable == 2 and plan.with_translation == 2
-    assert plan.by_category == {"license": 1, "placeholder": 1}
-    assert _count(db) == before - 2
+    assert plan.deletable == 1 and plan.with_translation == 1
+    assert plan.by_category == {"license": 1}
+    assert _count(db) == before - 1
     assert db._one("SELECT COUNT(*) FROM entry WHERE key = 'item.m.a'")[0] == 1
     result = db.revert_cleanup(plan.batch_id)
-    assert (result.restored, result.complete) == (2, True)
+    assert (result.restored, result.complete) == (1, True)
     assert _count(db) == before
     for table, count in tables.items():
         assert db._one(f"SELECT COUNT(*) FROM {table}")[0] == count, table
@@ -365,7 +356,7 @@ def test_protected_item_is_skipped_when_translation_or_history_changed(tmp_path)
     db.save_manual(entry_id, "授權條款（人工確認）")
     plan = db.preview_cleanup(path)
     assert plan.skipped["譯文或歷史已變動"] == 1
-    assert plan.deletable == 1 and plan.with_translation == 1
+    assert plan.deletable == 0 and plan.with_translation == 0
 
 
 def test_protected_item_still_needs_to_match_the_rules(tmp_path):
@@ -388,7 +379,7 @@ def test_protected_item_still_needs_to_match_the_rules(tmp_path):
     )
     path.write_text(json.dumps(data), encoding="utf-8")
     plan = db.preview_cleanup(path)
-    assert plan.deletable == 2
+    assert plan.deletable == 1
     assert plan.skipped == {"目前規則判為正常內容": 1}
 
 
@@ -401,7 +392,7 @@ def test_without_the_flag_translated_items_stay_protected(tmp_path):
     path.write_text(json.dumps(data), encoding="utf-8")
     plan = db.preview_cleanup(path)
     assert plan.deletable == 0
-    assert plan.skipped["已有譯文或歷史"] == 2
+    assert plan.skipped["已有譯文或歷史"] == 1
 
 
 def test_service_exports_the_translated_report_next_to_the_rule_reports(tmp_path):
@@ -451,15 +442,12 @@ def test_protected_export_does_not_delete_translated_shape_matches_by_default(tm
         db.save_manual(db._one("SELECT id FROM entry WHERE key = ?", (key,))[0], text)
     report, path = _protected_report(db, tmp_path, confirm=False)
     items = {i["key"]: i for i in json.loads(path.read_text("utf-8"))["items"]}
-    assert report.review_required == 2 and report.default_selected == 2
-    assert (
-        items["b/e.json#pages[0].anchor"]["delete"] is False
-        and items["b/e.json#pages[0].anchor"]["review"]
-    )
+    assert "b/e.json#pages[0].anchor" not in items
     assert items["item.m.tip"]["delete"] is False
     assert items["item.m.color"]["delete"] is True  # 譯文沒有中文：照規則
     assert items["_comment"]["delete"] is True  # 語言檔備註靠鍵判斷，不看譯文
-    assert report.exported_total == 4  # 待確認的也算匯出筆數
+    assert report.review_required == 1 and report.default_selected == 2
+    assert report.exported_total == 3  # unknown 不列入待刪除檢查檔
     plan = _apply(db, path)
     assert plan.requested == 2 and plan.deletable == 2
     assert (

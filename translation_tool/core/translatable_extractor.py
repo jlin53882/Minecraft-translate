@@ -14,11 +14,13 @@ from translation_tool.core.book_dirs import DEFAULT_BOOK_DIRS, find_book_dir_ind
 from translation_tool.core.lm_config_rules import (
     is_value_translatable,
 )
+from translation_tool.core.patchouli_semantics import (
+    PatchouliContext,
+    patchouli_translatable_items,
+)
 from translation_tool.core.text_sniffer import (
     VANILLA_NON_TEXT_DIRS,
     advancement_texts,
-    book_field,
-    classify_book_string,
     is_advancement_document,
     lang_non_text_reason,
     looks_like_book_json,
@@ -26,11 +28,7 @@ from translation_tool.core.text_sniffer import (
 )
 from translation_tool.utils.config_manager import load_config
 
-# Patchouli 結構性欄位：整個子樹只描述版面或方塊圖樣，沒有顯示文字。
-# 例如 ``multiblock.pattern`` 的列 ``" 0 "``，翻譯或削掉空白都會讓每列長度不一致，
-# 整本書載入失敗。
 _MAX_SNIFF_BYTES = 2 * 1024 * 1024
-NON_TEXT_PATCHOULI_KEYS = frozenset({"multiblock"})
 
 
 def find_patchouli_json(root: Path, dir_names=None):
@@ -166,10 +164,8 @@ def _lang_nested_translatable(value: str) -> bool:
 
 
 def _list_text_translatable(value: str, is_lang: bool, path: str) -> bool:
-    """陣列裡的字串是否要翻譯：lang 檔用既有規則，手冊檔依上層欄位與值的形狀。"""
-    if is_lang:
-        return _lang_nested_translatable(value)
-    return classify_book_string(value, book_field(path)) == "text"
+    """語言檔陣列裡的字串是否要翻譯。"""
+    return _lang_nested_translatable(value) if is_lang else False
 
 
 def _extract_advancement_translatables(json_data, file_path) -> list[dict[str, str]]:
@@ -192,7 +188,12 @@ def _is_advancement_content_file(file_path) -> bool:
     return is_advancement_file(Path(file_path))
 
 
-def extract_translatables(json_data, file_path):
+def extract_translatables(
+    json_data,
+    file_path,
+    *,
+    patchouli_context: PatchouliContext | None = None,
+):
     """
     從 JSON 資料中抽取可翻譯的項目。
 
@@ -218,12 +219,18 @@ def extract_translatables(json_data, file_path):
         # 不完整文件安全略過，不退回通用 JSON 抽取器，避免稍後才由 writer 拒絕。
         return _extract_advancement_translatables(json_data, file_path)
 
+    if not is_lang:
+        # Patchouli 必須由同一個語意分類器決定 literal/reference/structure。
+        # scanner 讀 ZIP 時會傳入 archive context；一般目錄翻譯則由
+        # patchouli_semantics 依 book.json/template 建立有界快取。
+        return patchouli_translatable_items(
+            json_data, file_path, context=patchouli_context
+        )
+
     def walk(obj, base_path=""):
         """遞迴遍歷物件提取可翻譯文字。"""
         if isinstance(obj, dict):
             for k, v in obj.items():
-                if not is_lang and k in NON_TEXT_PATCHOULI_KEYS:
-                    continue
                 new_path = f"{base_path}.{k}" if base_path else k
 
                 if is_lang and isinstance(v, str):
@@ -254,20 +261,6 @@ def extract_translatables(json_data, file_path):
                         )
                     continue
 
-                elif (
-                    not is_lang
-                    and isinstance(k, str)
-                    and isinstance(v, str)
-                    and classify_book_string(v, k) == "text"
-                ):
-                    items.append(
-                        {
-                            "file": str(file_path),
-                            "path": new_path,
-                            "text": v,
-                            "source_text": v,
-                        }
-                    )
                 else:
                     walk(v, new_path)
 
