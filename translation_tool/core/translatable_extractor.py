@@ -136,8 +136,8 @@ def is_lang_file(file_path: Path) -> bool:
         file_path: 檔案路徑
 
     回傳：
-        True 是 ``assets/<模組>/lang/<語系>.json`` 或
-        ``data/<模組>/lang/<語系>.json``，False 是其他檔案。
+        True 是 ``assets/<模組>/lang/<語系>.json``／``.lang`` 或
+        ``data/<模組>/lang/<語系>.json``／``.lang``，False 是其他檔案。
 
     Advancement 優先於路徑片段判斷：即使進度檔的子路徑碰巧叫做
     ``lang``，也不能被當成語言檔而繞過 Advancement 專用 writer。
@@ -152,7 +152,9 @@ def is_lang_file(file_path: Path) -> bool:
             and parts[index + 2].lower() == "lang"
             and index + 3 == len(parts) - 1
         ):
-            return parts[-1].lower().endswith(".json")
+            # 現代資源包使用 JSON；scanner 仍支援舊版 Minecraft 的 .lang，
+            # 兩者都必須在 canonical lang 路徑內才算語言檔。
+            return parts[-1].lower().endswith((".json", ".lang"))
     return False
 
 
