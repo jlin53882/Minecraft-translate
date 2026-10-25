@@ -23,7 +23,10 @@ from app.views.moddb.smart_review_actions import (
     ActionOutcome,
     SmartReviewActionService,
 )
-from app.views.moddb.smart_review_candidate_loader import SmartReviewCandidateLoader
+from app.views.moddb.smart_review_candidate_loader import (
+    LoadedRun,
+    SmartReviewCandidateLoader,
+)
 from app.views.moddb.smart_review_context import SmartReviewContext
 from app.views.moddb.smart_review_evidence import (
     SmartReviewEvidencePresenter,
@@ -227,8 +230,12 @@ class SmartReviewReviewer:
 
     # ──────────────── 載入 ────────────────
 
-    def load_run(self, run_id: str) -> None:
-        """載入指定批次的資訊與狀態統計，之後顯示第一筆。"""
+    def load_run(self, run_id: str, *, loaded_run: LoadedRun | None = None) -> None:
+        """載入指定批次的資訊與狀態統計，之後顯示第一筆。
+
+        ``loaded_run`` 由對話框在同一次審查開啟時共用，讓逐筆與批量面板
+        使用同一份狀態摘要；沒有傳入時保留獨立載入的測試與舊呼叫契約。
+        """
         database = self.ctx.database()
         if database is None:
             self._show_empty("沒有可用的資料庫", "請先在條目校對選擇資料庫。")
@@ -255,8 +262,17 @@ class SmartReviewReviewer:
             self.filter_dd.value = state.status_filter
             self._refresh_filter_labels()
             state.position = 0
-            self.load_position()
+            if loaded_run is not None:
+                # 初始候選頁沿用共用摘要的總數，避免執行中批次在兩個面板
+                # 分別計數時因中途寫入而顯示不同數字。
+                state.total = loaded_run.total_for(state.status_query)
+                self.load_position(refresh_total=False, stable_identity=True)
+            else:
+                self.load_position()
 
+        if loaded_run is not None:
+            done(loaded_run, None)
+            return
         self.ctx.run_background(
             lambda: self.loader.load_run(path, priority, run_id),
             done,
@@ -278,12 +294,15 @@ class SmartReviewReviewer:
         refresh_total: bool = True,
         refresh_counts: bool = False,
         background: bool = True,
+        stable_identity: bool = False,
     ) -> None:
         """依目前篩選與位置載入單筆候選（每頁一筆）。
 
         ``refresh_counts`` 在套用或保留之後使用：狀態統計與候選在同一個唯讀連線讀取。
         ``background=True`` 用於初始載入；使用者換筆、換篩選與完成後刷新會傳入
         ``False``，讓畫面在同一個事件內完成更新。
+        ``stable_identity=True`` 用於共用摘要的初始讀取，允許執行中的工作
+        更新資料庫世代而不丟棄已取得的唯讀快照。
         """
         database = self.ctx.database()
         state = self.state
@@ -330,6 +349,7 @@ class SmartReviewReviewer:
                 work,
                 done,
                 name="載入智慧校對候選",
+                stable_identity=stable_identity,
                 still_valid=still_valid,
             )
         else:

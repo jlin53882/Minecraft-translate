@@ -120,6 +120,7 @@ class SmartReviewHistory:
             work,
             done,
             name="載入智慧校對歷史批次",
+            stable_identity=True,
             still_valid=lambda: seq == self._seq,
         )
 

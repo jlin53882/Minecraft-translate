@@ -27,6 +27,7 @@ from app.views.moddb.smart_review_batch_outcome import (
     summarize_outcomes,
 )
 from app.views.moddb.smart_review_batch_progress import SmartReviewBatchProgress
+from app.views.moddb.smart_review_candidate_loader import LoadedRun
 from app.views.moddb.smart_review_context import SmartReviewContext
 from app.views.moddb.smart_review_evidence import (
     SmartReviewEvidencePresenter,
@@ -237,8 +238,12 @@ class SmartReviewBatchReviewer:
 
     # ──────────────── 載入與分頁 ────────────────
 
-    def load_run(self, run_id: str) -> None:
-        """切換批次、重設選取並從第一頁載入候選。"""
+    def load_run(self, run_id: str, *, loaded_run: LoadedRun | None = None) -> None:
+        """切換批次、重設選取並從第一頁載入候選。
+
+        ``loaded_run`` 由對話框共用逐筆面板已取得的批次摘要，確保兩種
+        審查模式的篩選計數來自同一個讀取世代。
+        """
         self.run_id = run_id
         self.run_info = {}
         self.counts = {}
@@ -253,6 +258,20 @@ class SmartReviewBatchReviewer:
         self.result_box.visible = False
         self._request_seq += 1
         self._show_loading("正在載入批量候選…")
+        if loaded_run is not None:
+            if loaded_run.info is None:
+                self._show_empty("找不到批次", f"run_id：{run_id}", keep_toolbar=True)
+                return
+            self.run_info = loaded_run.info
+            self._apply_page_summary({"status": loaded_run.counts})
+            self._choose_initial_filter(self.counts)
+            self._load_page(
+                include_run=False,
+                include_summary=False,
+                known_total=self._summary_total(),
+                stable_identity=True,
+            )
+            return
         self._load_page(include_run=True)
 
     def refresh(self) -> None:
@@ -263,11 +282,21 @@ class SmartReviewBatchReviewer:
         self._row_cache.clear()
         self._load_page(include_run=True, background=False)
 
-    def _load_page(self, *, include_run: bool = False, background: bool = True) -> None:
+    def _load_page(
+        self,
+        *,
+        include_run: bool = False,
+        include_summary: bool | None = None,
+        known_total: int | None = None,
+        background: bool = True,
+        stable_identity: bool = False,
+    ) -> None:
         """在單一唯讀連線中取得統計、總數與目前頁候選。
 
         初始批次載入可在背景執行；使用者換頁、篩選與重新整理傳入
         ``background=False``，避免可見清單出現晚到的背景結果。
+        共用批次摘要的初始頁面可使用 ``stable_identity=True``，讓執行中的
+        工作更新資料庫世代時仍能顯示同一份審查快照。
         """
         database = self.ctx.database()
         if database is None or not self.run_id:
@@ -277,7 +306,8 @@ class SmartReviewBatchReviewer:
         run_id = self.run_id
         status = self._status_query()
         page = max(1, self.page)
-        include_summary = should_load_summary(include_run, self._summary_loaded)
+        if include_summary is None:
+            include_summary = should_load_summary(include_run, self._summary_loaded)
         token = self._request_seq = self._request_seq + 1
         self._begin_page_load(page)
 
@@ -292,6 +322,7 @@ class SmartReviewBatchReviewer:
                 moddb_smart_review_read_session,
                 include_run=include_run,
                 include_summary=include_summary,
+                known_total=known_total,
             )
 
         def done(result, error: str | None) -> None:
@@ -313,6 +344,7 @@ class SmartReviewBatchReviewer:
                 work,
                 done,
                 name="載入智慧校對批量候選",
+                stable_identity=stable_identity,
                 still_valid=still_valid,
             )
         else:
@@ -380,6 +412,13 @@ class SmartReviewBatchReviewer:
         }
         self._summary_loaded = True
 
+    def _summary_total(self) -> int:
+        """回傳目前共用摘要對應篩選的總數。"""
+        status = self._status_query()
+        if status is None:
+            return sum(max(0, int(count or 0)) for count in self.counts.values())
+        return max(0, int(self.counts.get(status, 0) or 0))
+
     def _choose_initial_filter(self, counts: dict) -> None:
         """有可套用候選時預設看 ready，否則顯示全部狀態以解釋空批次。"""
         if self.status_filter != str(_BATCHABLE_STATUS):
@@ -412,10 +451,11 @@ class SmartReviewBatchReviewer:
 
     def _refresh_filter_labels(self) -> None:
         """在候選篩選器上顯示各狀態的筆數。"""
+        all_total = sum(max(0, int(count or 0)) for count in self.counts.values())
         pairs = [
             (
                 key,
-                f"{label}（{format_count(self.total if key == ALL_FILTER else self.counts.get(str(key), 0))}）",
+                f"{label}（{format_count(all_total if key == ALL_FILTER else self.counts.get(str(key), 0))}）",
             )
             for key, label in FILTERS
         ]

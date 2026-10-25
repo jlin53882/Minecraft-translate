@@ -36,6 +36,12 @@ class LoadedRun:
     info: dict[str, Any] | None
     counts: dict[str, int]
 
+    def total_for(self, status: str | None) -> int:
+        """回傳同一份批次摘要中指定篩選的總數。"""
+        if status is None:
+            return sum(max(0, int(count or 0)) for count in self.counts.values())
+        return max(0, int(self.counts.get(status, 0) or 0))
+
 
 @dataclass(frozen=True)
 class LoadedPosition:

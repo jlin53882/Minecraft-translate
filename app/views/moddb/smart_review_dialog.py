@@ -20,6 +20,7 @@ from app.ui.dialogs import (
 )
 from app.ui.snack import show_snack
 from app.views.moddb.smart_review_batch_reviewer import SmartReviewBatchReviewer
+from app.views.moddb.smart_review_candidate_loader import SmartReviewCandidateLoader
 from app.views.moddb.smart_review_context import SmartReviewContext
 from app.views.moddb.smart_review_history import SmartReviewHistory
 from app.views.moddb.smart_review_job import job_for_page
@@ -32,6 +33,7 @@ _TABS = (
     ("review", "審查", ft.Icons.RATE_REVIEW_OUTLINED),
     ("history", "歷史批次", ft.Icons.HISTORY),
 )
+_REVIEW_SUMMARY_REQUEST_DOMAIN = "smart-review-review-summary"
 
 
 class SmartReviewDialog:
@@ -76,7 +78,10 @@ class SmartReviewDialog:
         self.batch_reviewer = SmartReviewBatchReviewer(
             self.ctx, on_changed=lambda: self._on_review_changed("batch")
         )
+        self._review_summary_loader = SmartReviewCandidateLoader()
         self._review_run_id: str | None = None
+        self._review_summary_run_id: str | None = None
+        self._review_summary_loading = False
         self._resume_seq = 0
         self._resume_dialog: ft.AlertDialog | None = None
         self._resume_model_field: ft.TextField | None = None
@@ -163,6 +168,7 @@ class SmartReviewDialog:
         """立即切換分頁，並把該分頁需要的資料讀取交給背景工作。"""
         self._show_tab(key)
         if key == "history":
+            self._invalidate_review_summary()
             self.history.refresh()
         elif key == "review":
             self._load_review_tab_if_needed()
@@ -184,22 +190,62 @@ class SmartReviewDialog:
         """在逐筆與批量審查間切換，保留兩邊的篩選與頁面狀態。"""
         self.reviewer.control.visible = key == "single"
         self.batch_reviewer.control.visible = key == "batch"
-        self._load_review_tab_if_needed(mode=key)
+        self._load_review_tab_if_needed()
         self.ctx.update()
 
-    def _load_review_tab_if_needed(
-        self, *, mode: str | None = None, force: bool = False
-    ) -> None:
-        """只在目前審查面板尚未載入批次時啟動背景讀取。"""
+    def _load_review_tab_if_needed(self, *, force: bool = False) -> None:
+        """以共用批次摘要載入逐筆與批量審查面板。"""
         if not self._review_run_id:
             return
-        active_mode = mode or str(self.review_mode.value)
-        if active_mode == "batch":
-            if force or self.batch_reviewer.run_id != self._review_run_id:
-                self.batch_reviewer.load_run(self._review_run_id)
+        run_id = self._review_run_id
+        if not force and self._review_summary_run_id == run_id:
             return
-        if force or self.reviewer.state.run_id != self._review_run_id:
-            self.reviewer.load_run(self._review_run_id)
+        if self._review_summary_loading and self._review_summary_run_id is None:
+            return
+        database = self.ctx.database()
+        if database is None:
+            # 讓兩個面板各自顯示既有的資料庫錯誤，而不是讓摘要讀取
+            # 把審查分頁留在空白狀態。
+            self.reviewer.load_run(run_id)
+            self.batch_reviewer.load_run(run_id)
+            return
+        path, priority = database
+        ticket = self.ctx.begin_request(_REVIEW_SUMMARY_REQUEST_DOMAIN)
+        self._review_summary_loading = True
+        self._review_summary_run_id = None
+        self._review_summary_loader.invalidate()
+
+        def done(result, error: str | None) -> None:
+            """把同一份批次摘要交給兩種審查模式。"""
+            if not self.ctx.is_current(ticket):
+                return
+            self._review_summary_loading = False
+            if error:
+                # 摘要查詢失敗時保留既有面板的錯誤呈現與獨立重試契約。
+                self.reviewer.load_run(run_id)
+                self.batch_reviewer.load_run(run_id)
+                return
+            self._review_summary_run_id = run_id
+            self.reviewer.load_run(run_id, loaded_run=result)
+            self.batch_reviewer.load_run(run_id, loaded_run=result)
+            self.ctx.update()
+
+        self.ctx.run_background(
+            lambda: self._review_summary_loader.load_run(path, priority, run_id),
+            done,
+            name="載入智慧校對審查摘要",
+            stable_identity=True,
+            still_valid=lambda: (
+                self._review_run_id == run_id and self.ctx.is_current(ticket)
+            ),
+        )
+
+    def _invalidate_review_summary(self) -> None:
+        """離開審查分頁時使摘要失效，返回時重新對齊目前批次狀態。"""
+        self._review_summary_run_id = None
+        self._review_summary_loading = False
+        self._review_summary_loader.invalidate()
+        self.ctx.invalidate_request(_REVIEW_SUMMARY_REQUEST_DOMAIN)
 
     def _show_tab(self, key: str) -> None:
         """只顯示指定分頁，其餘隱藏但保留狀態。"""
@@ -212,8 +258,9 @@ class SmartReviewDialog:
         """切到審查分頁並載入指定批次。"""
         self._review_run_id = run_id
         self._show_tab("review")
-        # 逐筆與批量面板的 load_run 都會把資料庫讀取排入背景，避免開啟
-        # 歷史批次後切換到審查時阻塞對話框；批量面板仍延後到真的選取批量模式。
+        self._invalidate_review_summary()
+        # 先讀一次共用摘要，再讓兩個面板各自載入目前可見候選；
+        # 隱藏面板不再延後取得計數，避免切換模式後顯示另一個時間點的數字。
         self._load_review_tab_if_needed(force=True)
         self.ctx.update()
 

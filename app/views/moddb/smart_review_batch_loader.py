@@ -21,8 +21,13 @@ def load_batch_page(
     *,
     include_run: bool,
     include_summary: bool,
+    known_total: int | None = None,
 ) -> tuple[dict | None, dict | None, int, list[SmartReviewCandidate]]:
-    """在同一個唯讀 session 讀取批次資訊、必要統計與目前頁。"""
+    """在同一個唯讀 session 讀取批次資訊、必要統計與目前頁。
+
+    ``known_total`` 用於沿用對話框共用的批次摘要，避免執行中的批次在
+    摘要與候選頁之間變動時，兩個審查模式各自顯示不同的總數。
+    """
     started = time.perf_counter()
     with read_session(path, priority) as session:
         info = session.get_run(run_id) if include_run else None
@@ -32,6 +37,7 @@ def load_batch_page(
             status=status,
             limit=page_size,
             offset=(page - 1) * page_size,
+            known_total=known_total,
         )
     logger.debug(
         "Smart Review 批量頁載入：run=%s page=%s status=%s rows=%s elapsed_ms=%.1f",

@@ -616,11 +616,13 @@ def test_dialog_open_review_switches_tab_and_loads_run(db, monkeypatch):
     dialog = SmartReviewDialog(_sync_page(), lambda: db, "1.21.1", None)
     loaded = []
     batch_loaded = []
-    dialog.reviewer.load_run = loaded.append
-    dialog.batch_reviewer.load_run = batch_loaded.append
+    dialog.reviewer.load_run = lambda run_id, **_kwargs: loaded.append(run_id)
+    dialog.batch_reviewer.load_run = lambda run_id, **_kwargs: batch_loaded.append(
+        run_id
+    )
     dialog.open_review("run-9")
     assert loaded == ["run-9"]
-    assert batch_loaded == []
+    assert batch_loaded == ["run-9"]
     assert dialog.nav.value == "review"
     assert dialog._panels["review"].visible is True
     assert dialog._panels["run"].visible is False
@@ -646,7 +648,73 @@ def test_dialog_review_tab_loads_missing_run_in_background(db):
     dialog._on_tab("review")
 
     assert dialog.nav.value == "review"
-    assert background_names == ["載入智慧校對批次"]
+    assert background_names == ["載入智慧校對審查摘要"]
+
+
+def test_review_modes_share_counts_when_opened_from_running_history(db, monkeypatch):
+    """執行中的批次從歷史開啟後，逐筆與批量使用同一份狀態摘要。"""
+    from app.views.moddb.smart_review_dialog import SmartReviewDialog
+
+    initial_rows = [
+        _candidate(1, "ready"),
+        _candidate(2, "ready"),
+        _candidate(3, "applied"),
+    ]
+    fake = _FakeService(list(initial_rows))
+    monkeypatch.setattr(
+        loader_module, "moddb_smart_review_read_session", fake.read_session
+    )
+    monkeypatch.setattr(
+        batch_reviewer_module,
+        "moddb_smart_review_read_session",
+        fake.read_session,
+    )
+
+    dialog = SmartReviewDialog(_sync_page(), lambda: db, "1.21.1", None)
+    dialog.job.state = SmartReviewJobState(phase="running", run_id="run-1")
+    pending = []
+
+    def queue(work, done, *, still_valid=None, name, **_kwargs):
+        """延後查詢，模擬執行中的批次在摘要與頁面查詢間持續寫入。"""
+        pending.append((name, work, done, still_valid))
+        return True
+
+    dialog.ctx.run_background = queue
+    dialog._on_tab("history")
+    dialog.open_review("run-1")
+
+    def deliver(name):
+        """執行並送回指定的背景查詢結果。"""
+        for index, item in enumerate(pending):
+            if item[0] != name:
+                continue
+            pending.pop(index)
+            _name, work, done, still_valid = item
+            assert still_valid is None or still_valid()
+            try:
+                result, error = work(), None
+            except Exception as exc:  # noqa: BLE001 - mirrors the UI boundary
+                result, error = None, str(exc)
+            done(result, error)
+            return
+        raise AssertionError(f"找不到待處理查詢：{name}")
+
+    deliver("載入智慧校對審查摘要")
+
+    # 摘要已固定為 ready=2、all=3；即使執行工作在面板讀取前完成一筆，
+    # 兩個面板仍應顯示同一個審查快照，而不是各自顯示不同時間點的總數。
+    fake.rows[:] = [row for row in fake.rows if row.ordinal != 1]
+    deliver("載入智慧校對候選")
+    deliver("載入智慧校對批量候選")
+
+    single_labels = [option.text for option in dialog.reviewer.filter_dd.options]
+    batch_labels = [option.text for option in dialog.batch_reviewer.filter_dd.options]
+    assert dialog.reviewer.state.total == 2
+    assert dialog.batch_reviewer.total == 2
+    assert single_labels[0] == "可套用（2）"
+    assert batch_labels[0] == "可套用（2）"
+    assert "全部（3）" in single_labels
+    assert "全部（3）" in batch_labels
 
 
 def test_dialog_resume_confirms_status_and_allows_model_batch_override(db, monkeypatch):
