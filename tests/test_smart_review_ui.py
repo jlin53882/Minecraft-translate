@@ -717,6 +717,66 @@ def test_review_modes_share_counts_when_opened_from_running_history(db, monkeypa
     assert "全部（3）" in batch_labels
 
 
+def test_review_summary_reloads_after_leaving_running_review_tab(db, monkeypatch):
+    """離開執行中的審查頁再返回時，丟棄舊摘要與晚到結果。"""
+    from app.views.moddb.smart_review_candidate_loader import LoadedRun
+    from app.views.moddb.smart_review_dialog import SmartReviewDialog
+
+    summaries = iter(
+        [
+            LoadedRun({"id": "run-1"}, {"ready": 2, "applied": 1}),
+            LoadedRun({"id": "run-1"}, {"ready": 1, "applied": 2}),
+        ]
+    )
+    monkeypatch.setattr(
+        loader_module.SmartReviewCandidateLoader,
+        "load_run",
+        lambda *_args: next(summaries),
+    )
+    loaded = []
+    pending = []
+
+    def record_load(run_id, **kwargs):
+        loaded.append((run_id, kwargs.get("loaded_run")))
+
+    def queue(work, done, *, still_valid=None, name, **_kwargs):
+        pending.append((work, done, still_valid, name))
+        return True
+
+    dialog = SmartReviewDialog(_sync_page(), lambda: db, "1.21.1", None)
+    dialog.reviewer.load_run = record_load
+    dialog.batch_reviewer.load_run = record_load
+    dialog.ctx.run_background = queue
+    dialog.job.state = SmartReviewJobState(phase="running", run_id="run-1")
+
+    dialog.open_review("run-1")
+    assert len(pending) == 1
+    first = pending.pop(0)
+    first[1](first[0](), None)
+    assert dialog._review_summary_run_id == "run-1"
+    assert len(loaded) == 2
+
+    dialog._on_tab("run")
+    assert dialog._review_summary_run_id is None
+    assert first[2]() is False
+
+    # 模擬離開期間批次又處理一筆；回到審查頁必須建立第二次摘要請求。
+    dialog._on_tab("review")
+    assert len(pending) == 1
+    second = pending.pop(0)
+    assert second[3] == "載入智慧校對審查摘要"
+    assert second[2]() is True
+    second[1](second[0](), None)
+
+    assert dialog._review_summary_run_id == "run-1"
+    assert [summary.counts for _run_id, summary in loaded] == [
+        {"ready": 2, "applied": 1},
+        {"ready": 2, "applied": 1},
+        {"ready": 1, "applied": 2},
+        {"ready": 1, "applied": 2},
+    ]
+
+
 def test_dialog_resume_confirms_status_and_allows_model_batch_override(db, monkeypatch):
     """續跑先顯示指定 run 狀態，且模型與批次大小可由輸入框覆寫。"""
     import app.views.moddb.smart_review_dialog as dialog_module

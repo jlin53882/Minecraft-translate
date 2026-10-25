@@ -166,9 +166,12 @@ class SmartReviewDialog:
 
     def _on_tab(self, key: str) -> None:
         """立即切換分頁，並把該分頁需要的資料讀取交給背景工作。"""
+        if key != "review":
+            # 審查摘要只代表上一次進入審查頁的快照；離開到執行／歷史頁
+            # 後，背景批次可能仍在變動，返回時必須重新取得兩種模式共用的數量。
+            self._invalidate_review_summary()
         self._show_tab(key)
         if key == "history":
-            self._invalidate_review_summary()
             self.history.refresh()
         elif key == "review":
             self._load_review_tab_if_needed()
