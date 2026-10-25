@@ -175,11 +175,11 @@ def extract_translatables(json_data, file_path):
     items = []
     is_lang = is_lang_file(Path(file_path))
 
-    if (
-        not is_lang
-        and is_advancement_file(Path(file_path))
-        and is_advancement_document(json_data)
-    ):
+    if not is_lang and is_advancement_file(Path(file_path)):
+        # Advancement 必須在抽取、DB scanner 與 writer 共用同一個完整文件契約；
+        # 不完整文件安全略過，不退回通用 JSON 抽取器，避免稍後才由 writer 拒絕。
+        if not is_advancement_document(json_data):
+            return []
         return [
             {
                 "file": str(file_path),

@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from translation_tool.core.text_sniffer import (
+    is_advancement_literal_text,
     is_prose,
     sniff_text_file,
     split_locale,
@@ -276,6 +277,43 @@ def test_advancement_literal_display_text_is_imported(tmp_path):
         "story/start.json#display.title.text": "Stone Age Begins",
         "story/start.json#display.description": "Mine your first stone block.",
     }
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("welcome", True),
+        ("player", True),
+        ("A", True),
+        ("DJ", True),
+        ("hello %s", True),
+        ("snake_case", False),
+        ("minecraft:stone", False),
+        ("foo.bar", False),
+        ("textures/gui/a.png", False),
+        ("§a", False),
+        ("42", False),
+    ],
+)
+def test_advancement_literal_classifier_keeps_visible_short_text(value, expected):
+    """Advancement literal 與 Patchouli 未知欄位使用不同的文字契約。"""
+    assert is_advancement_literal_text(value) is expected
+
+
+def test_incomplete_advancement_is_skipped_by_extractor_and_scanner(tmp_path):
+    """不完整 Advancement 不得退回 generic JSON 抽取器。"""
+    import json
+
+    from translation_tool.core.translatable_extractor import extract_translatables
+
+    incomplete = {"display": {"title": {"text": "Should not be imported"}}}
+    path = Path("data/m/advancements/story/incomplete.json")
+    assert extract_translatables(incomplete, path) == []
+
+    jar = _jar(tmp_path / "m.jar", {path.as_posix(): json.dumps(incomplete)})
+    result = scan_jar(jar, ScanOptions(version="1.21.1"), dir_names=())
+    assert not result.error
+    assert not any(item.kind == "advancement" for item in result.items)
 
 
 def test_book_extraction_also_pulls_content_detected_books_and_guides(tmp_path):

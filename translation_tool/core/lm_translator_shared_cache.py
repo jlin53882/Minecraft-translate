@@ -36,6 +36,7 @@ class CacheRule:
 
 STRICT_SRC_TYPES = {
     "lang",
+    "advancement",
     "kubejs",
     "ftbquests",
     "md",

@@ -679,7 +679,7 @@ def _walk_advancement_component(
 
 def advancement_literal_paths(data: object) -> dict[str, str]:
     """回傳 Advancement 顯示文字中可安全寫回的 literal 路徑。"""
-    if not isinstance(data, dict) or not isinstance(data.get("display"), dict):
+    if not is_advancement_document(data):
         return {}
     display = data["display"]
     found: dict[str, str] = {}
@@ -687,6 +687,55 @@ def advancement_literal_paths(data: object) -> dict[str, str]:
         if field in display:
             _walk_advancement_component(display[field], f"display.{field}", found)
     return found
+
+
+def is_advancement_literal_text(value: str, *, field: str = "") -> bool:
+    """判斷 Advancement component literal 是否是安全的顯示文字。
+
+    Advancement 的 ``fallback``、``with`` 和 ``extra`` 不是 Patchouli 欄位，
+    不能直接套用 ``classify_book_string`` 的未知欄位保守規則；合法的單字或短字
+    仍可能是玩家看得到的文字。這裡只排除已知的 resource ID、路徑、網址、格式碼
+    以外的純控制值、placeholder 與沒有字母的內容，並保留與其他文字流程一致的
+    結構值防護。
+    """
+    if not isinstance(value, str):
+        return False
+    text = value.strip()
+    if not text or _CJK.search(text):
+        return False
+    core = _BOOK_MARKUP.sub("", text).strip()
+    if not _ASCII_LETTER.search(core) or value_shape_reason(text) is not None:
+        return False
+    if (
+        _LANGKEY.fullmatch(text.lstrip("# "))
+        or _URL.match(text)
+        or _JAVA_CLASS.fullmatch(text)
+        or _STACK.match(text)
+        or _BOOK_NUMBER.fullmatch(text)
+        or _BOOL.fullmatch(text)
+        or _TEMPLATE_VAR.fullmatch(text)
+        or _ANY_RESLOC.fullmatch(text)
+        or _PATHLIKE.fullmatch(text)
+    ):
+        return False
+    # 裸單字（例如 ``welcome``、``player``）可能是可見文字；帶有
+    # snake_case、路徑或版本分隔符的值則保守視為技術識別字。若值位於
+    # advancement 的明確顯示欄位，保留既有 Patchouli 類似欄位的語意，
+    # 讓像 ``pollen_sifter`` 的合法顯示名稱不因改用共用 walker 而退化。
+    if (
+        not _WHITESPACE.search(text)
+        and _LOWER_IDENT.fullmatch(core)
+        and any(separator in core for separator in "_./-")
+        and field not in BOOK_DISPLAY_FIELDS
+    ):
+        return False
+    if not _WHITESPACE.search(text):
+        return True
+    tokens = _BOOK_MARKUP.sub("", text).split()
+    if tokens and all(_STRICT_RESLOC.fullmatch(token) for token in tokens):
+        return False
+    plain = _BOOK_MARKUP.sub("", _PLACEHOLDER.sub("", text))
+    return _HAS_LETTER.search(plain) is not None
 
 
 def advancement_texts(data: object) -> dict[str, str]:
@@ -697,9 +746,9 @@ def advancement_texts(data: object) -> dict[str, str]:
     """
     found: dict[str, str] = {}
     for path, value in advancement_literal_paths(data).items():
-        if classify_book_string(
-            value, book_field(path)
-        ) == "text" and not is_field_name_text(path, value):
+        if is_advancement_literal_text(
+            value, field=book_field(path)
+        ) and not is_field_name_text(path, value):
             found[path] = value
     return found
 
