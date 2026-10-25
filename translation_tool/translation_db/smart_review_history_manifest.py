@@ -200,9 +200,7 @@ class ChunkManifestRepository:
         這兩個參數時維持原本的自動建立行為。
         """
         value = int(ordinal)
-        resolved_entries = (
-            self.chunk_entries(manifest) if entries is None else entries
-        )
+        resolved_entries = self.chunk_entries(manifest) if entries is None else entries
         if not resolved_entries:
             return None
         starts = (

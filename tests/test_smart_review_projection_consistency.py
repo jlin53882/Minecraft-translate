@@ -249,9 +249,7 @@ def test_process_killed_after_sqlite_commit_is_reconciled(
 def test_marks_reconcile_only_requested_page_entries(tmp_path, monkeypatch):
     """條目清單只對帳目前頁面的 entry_id，不掃描整個批次候選。"""
     path = tmp_path / "targeted-marks.db"
-    _store, run_id, snapshots = seed_ready_run(
-        path, 4, chunk_size=CHUNK_SIZE[CHUNKED]
-    )
+    _store, run_id, snapshots = seed_ready_run(path, 4, chunk_size=CHUNK_SIZE[CHUNKED])
     db = TranslationDB(path)
     try:
         target, unrelated = snapshots[0], snapshots[1]

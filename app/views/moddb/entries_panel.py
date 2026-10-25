@@ -1093,7 +1093,11 @@ class EntriesPanel(ft.Column):
             ):
                 # 父層單一路徑刷新時仍保留「目前條目消失就選下一筆」的操作語意。
                 self.select(self.rows[min(selected_index, len(self.rows) - 1)].id)
-            if show_saved_message and self.selected is not None and self.selected.id == entry.id:
+            if (
+                show_saved_message
+                and self.selected is not None
+                and self.selected.id == entry.id
+            ):
                 # 父層同步刷新會重建 editor 並清掉 saved_text；訊息必須在
                 # callback 完成後再設定，才能讓使用者看到儲存結果。
                 self.saved_text.value = message
