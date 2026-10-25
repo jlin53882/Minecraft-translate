@@ -12,7 +12,7 @@
 | `entry` | 某遊戲版本中的一個可翻譯項目：`(kind, mc_version, mod_id, key) → en_us`。`kind` 為 `lang` 或 `patchouli`。另有衍生欄位 `qflags`：該條目目前符合的品質狀態（每個狀態一個位元），供品質篩選沿索引分頁 |
 | `translation` | 掛在 entry 上的譯文，每個來源最多一筆（唯一：`entry_id + source`）；`review_status`（`unreviewed`／`reviewed`／`legacy_unknown`）與來源各自獨立，任何來源都可標為已審核；非人工來源沒有狀態時視為未審核 |
 | `effective` | 每個 entry 依已審核狀態與來源優先序選出的生效譯文，並帶出人工審核狀態；寫入時維護，讀取不必重算。另有三個由觸發器維護的衍生欄位：`mc_version`（條目版本）、`diff`（「版本不同」）、`upd`（生效來源那一筆譯文的 `updated_at`） |
-| `history` | 手動儲存、人工審核、批次取代、AI 舊譯文重翻與還原的異動記錄（保存舊人工譯文、checker、審核狀態及修訂序號；同步版本共用 `batch`）；每個條目只保留最新 5 筆，較舊記錄會刪除 |
+| `history` | 手動儲存、人工審核、批次取代、AI 舊譯文重翻與還原的異動記錄（保存舊人工譯文、checker、審核狀態及修訂序號；同步版本共用 `batch`）；一般每個條目只保留最新 5 筆，尚未完成 JSON 對帳的 `smart_review_apply` marker 會暫時保留，對帳完成後才可被清理 |
 | `src_change` | 「鍵值相同但原文已變動」而略過的記錄 |
 | `scan_run` | 掃描記錄 |
 | `smart_review_run` | 一次有界的本地 AI 智慧校對執行記錄：provider/model、範圍、批次、狀態與統計；不保存 API key |
@@ -214,7 +214,7 @@ Patchouli 與 lang 走同一個流程，只是身分不同。FTB Quests / KubeJS
 
 Schema v3 增加每個來源譯文的首次匯入時間與單調修訂序號，以及 history 的前後修訂快照。升級 v1 會先依序建立 v2 與 v3 備份；升級 v2 會先建立 `*.pre-schema-v3-<時間戳>.bak`。舊資料的 `translation.created_at` 保留為 `NULL`，不推測匯入時間。migration 在單一交易中完成；唯讀開啟舊資料庫不執行 migration，時間欄位會顯示未知。備份檔應和資料庫一樣納入使用者自己的備份政策。
 
-Schema v9 將 `history` 的保留政策固定為「每個條目最新 5 筆」。既有資料庫第一次可寫開啟時會在同一個 migration 交易中清理超出的舊記錄，並先建立 `*.pre-schema-v9-<時間戳>.bak`；之後每次寫入交易只重新整理本次有新增歷史的條目。被刪除的舊記錄不再能從條目頁還原，這是為了限制資料庫成長；若需要完整稽核或長期還原，請保留 migration 備份。
+Schema v9 將 `history` 的一般保留政策固定為「每個條目最新 5 筆」。既有資料庫第一次可寫開啟時會在同一個 migration 交易中清理超出的舊記錄，並先建立 `*.pre-schema-v9-<時間戳>.bak`；之後每次寫入交易只重新整理本次有新增歷史的條目。Schema v10 新增 `history.projection_state`：JSON 尚未確認的 `smart_review_apply` marker 會標為 `pending`，不受五筆清理影響；JSON 成功回寫或對帳後改為 `projected`，之後才會依一般政策清理。被刪除的舊記錄不再能從條目頁還原，這是為了限制資料庫成長；若需要完整稽核或長期還原，請保留 migration 備份。
 
 兩個程序同時開啟舊版資料庫時，版本以取得寫鎖後重新讀到的為準：後到的程序若看到別人已完成該版 migration，就放棄本次升級並刪除自己剛建立的備份，不會重跑回填（例如把人工審核蓋回 `legacy_unknown`），也不會留下重複備份。
 

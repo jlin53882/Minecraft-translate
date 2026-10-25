@@ -18,10 +18,12 @@ def prune_history_for_entries(conn: sqlite3.Connection, history_id_floor: int) -
     ``history_id_floor`` 是交易開始後立即取得的最大 history id。一般歷史
     寫入使用 SQLite 遞增的整數主鍵，因此大於此界線的記錄能精確找出
     需要重新檢查保留範圍的條目；未被本次交易修改的條目不會被掃描或重寫。
+    尚未完成 JSON 投影的 ``smart_review_apply`` marker 不計入刪除候選，
+    直到對帳成功並標為 ``projected``。
     """
     return _prune(
         conn,
-        "WHERE h.entry_id IN (SELECT DISTINCT entry_id FROM history WHERE id > ?)",
+        "AND h.entry_id IN (SELECT DISTINCT entry_id FROM history WHERE id > ?)",
         (history_id_floor,),
     )
 
@@ -42,6 +44,8 @@ def _prune(
         "SELECT h.id, ROW_NUMBER() OVER ("
         "PARTITION BY h.entry_id ORDER BY h.id DESC"
         ") AS row_number FROM history AS h "
+        "WHERE NOT (h.action='smart_review_apply' "
+        "AND COALESCE(h.projection_state, 'projected')='pending') "
         f"{scope_sql}"
         ") ranked WHERE row_number > ?"
         ")",

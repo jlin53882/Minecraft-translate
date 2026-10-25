@@ -71,13 +71,13 @@ def _assert_consistent(store, run_id, total, layout):
 # ---------------------------------------------------------------------------
 
 
-def test_sqlite_commit_with_failed_json_write_is_reconciled_idempotently(
+def test_sqlite_commit_with_failed_json_write_survives_history_retention(
     tmp_path, monkeypatch, layout
 ):
     """JSON 回寫失敗後 SQLite 已套用；下一次讀取補齊狀態，重複讀取不再改檔。"""
     total = 12
     path = tmp_path / "reconcile.db"
-    store, run_id, _snapshots = seed_ready_run(
+    store, run_id, snapshots = seed_ready_run(
         path, total, chunk_size=CHUNK_SIZE[layout]
     )
     db = TranslationDB(path)
@@ -100,8 +100,35 @@ def test_sqlite_commit_with_failed_json_write_is_reconciled_idempotently(
 
         # JSON 尚未跟上；SQLite 已有兩筆套用紀錄。
         assert store.get_candidate(run_id, 2)["status"] == "ready"
+        entry_id = next(
+            snapshot.entry_id for snapshot in snapshots if snapshot.ordinal == 2
+        )
+        # 模擬同一條目之後又有五次歷史寫入；pending marker 仍必須可供恢復。
+        for number in range(5):
+            with db._tx() as conn:
+                conn.execute(
+                    "INSERT INTO history "
+                    "(entry_id, batch, action, old_zh_tw, new_zh_tw, note) "
+                    "VALUES (?, ?, 'manual', '', ?, ?)",
+                    (entry_id, f"follow-up-{number}", f"後續-{number}", str(number)),
+                )
+        assert db._one(
+            "SELECT projection_state FROM history "
+            "WHERE entry_id=? AND action='smart_review_apply'",
+            (entry_id,),
+        ) == ("pending",)
         records = _apply_records(path)
         assert sorted(records) == [2, 7]
+
+        # 重開資料庫後仍須保留 pending marker，確認故障復原不依賴原連線狀態。
+        db.close()
+        db = TranslationDB(path)
+        store = SmartReviewHistoryStore(path)
+        assert db._one(
+            "SELECT projection_state FROM history "
+            "WHERE entry_id=? AND action='smart_review_apply'",
+            (entry_id,),
+        ) == ("pending",)
 
         rows = db.list_smart_review_candidates(run_id)
         statuses = {row.ordinal: row.status for row in rows}
@@ -117,6 +144,11 @@ def test_sqlite_commit_with_failed_json_write_is_reconciled_idempotently(
         db.list_smart_review_candidates(run_id)
         db.load_smart_review_candidate_page(run_id, limit=5)
         db.smart_review_run_breakdown(run_id)
+        assert db._one(
+            "SELECT projection_state FROM history "
+            "WHERE entry_id=? AND action='smart_review_apply'",
+            (entry_id,),
+        ) == ("projected",)
         assert db.count_smart_review_candidates_for_run(run_id, status="applied") == 2
         assert store.reconcile_applied(run_id, _apply_records(path)) == 0
         assert snapshot_bytes(store) == before
@@ -268,7 +300,7 @@ def test_marks_reconcile_only_requested_page_entries(tmp_path, monkeypatch):
         captured = []
         monkeypatch.setattr(db, "_smart_review_apply_records", lambda _run: records)
 
-        def capture_reconcile(history, current_run_id, current_records):
+        def capture_reconcile(history, current_run_id, current_records, **_kwargs):
             captured.append((current_run_id, dict(current_records)))
             return 0
 

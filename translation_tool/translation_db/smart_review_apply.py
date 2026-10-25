@@ -285,6 +285,16 @@ class SmartReviewApplyMixin:
                     exc_info=True,
                 )
                 return SmartReviewStatus.APPLIED
+            if updated:
+                self._mark_smart_review_projection_confirmed(
+                    run_id,
+                    {
+                        ordinal: {
+                            "entry_id": entry_id,
+                            "batch": batch,
+                        }
+                    },
+                )
             if not updated:
                 logger.warning(
                     "Smart Review JSON 候選不存在，SQLite 已套用：run=%s ordinal=%s",
@@ -363,6 +373,7 @@ class SmartReviewApplyMixin:
                         batch=batch,
                         actor=actor,
                         note=f"run={run_id}; ordinal={ordinal}",
+                        projection_pending=True,
                     )
                     self._apply_smart_review_twins(
                         conn,
@@ -536,6 +547,7 @@ class SmartReviewApplyMixin:
                 batch=batch,
                 actor=actor,
                 note=f"run={run_id}; ordinal={ordinal}",
+                projection_pending=True,
             )
             self._apply_smart_review_twins(
                 conn,
@@ -611,11 +623,15 @@ class SmartReviewApplyMixin:
         if not history.exists(run_id):
             return None
         results: list[tuple[int, str, str | None]] = []
+        confirmed_records: dict[int, dict[str, Any]] = {}
         cancelled = False
         with history.batch(run_id) as history_batch:
             records = self._smart_review_apply_records(run_id)
             if records:
-                history_batch.reconcile_applied(records)
+                history_batch.reconcile_applied(
+                    records,
+                    confirmed_records=confirmed_records,
+                )
             for item in candidates:
                 if progress_cancel is not None and progress_cancel():
                     cancelled = True
@@ -647,8 +663,16 @@ class SmartReviewApplyMixin:
                     error = str(exc) or type(exc).__name__
                 result = (ordinal, str(status), error)
                 results.append(result)
+                if status == SmartReviewStatus.APPLIED:
+                    candidate = history_batch.get_candidate(ordinal)
+                    if candidate is not None:
+                        confirmed_records[ordinal] = {
+                            "entry_id": int(candidate["entry_id"]),
+                            "batch": candidate.get("applied_batch"),
+                        }
                 if progress is not None:
                     progress(len(results), len(candidates), result)
+        self._mark_smart_review_projection_confirmed(run_id, confirmed_records)
         if not cancelled and progress_cancel is not None:
             cancelled = bool(progress_cancel())
         return tuple(results), cancelled
@@ -664,6 +688,7 @@ class SmartReviewApplyMixin:
         batch: str,
         actor: str,
         note: str,
+        projection_pending: bool = False,
     ) -> None:
         """在呼叫端的交易內寫入未審核人工譯文與 ``smart_review_apply`` 歷史。"""
         conn.execute(
@@ -680,7 +705,8 @@ class SmartReviewApplyMixin:
         conn.execute(
             "INSERT INTO history (entry_id, batch, actor, action, old_zh_tw, new_zh_tw, "
             "prev_manual, prev_checker, prev_review_status, new_checker, new_review_status, "
-            "prev_revision, new_revision, source_id, note) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "prev_revision, new_revision, source_id, note, projection_state) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (
                 entry_id,
                 batch,
@@ -697,6 +723,7 @@ class SmartReviewApplyMixin:
                 new_revision,
                 SRC_MANUAL,
                 note,
+                "pending" if projection_pending else "projected",
             ),
         )
         self._refresh(conn, [entry_id])
@@ -866,6 +893,7 @@ class SmartReviewApplyMixin:
                     batch=batch,
                     actor=actor,
                     note=f"run={run_id}; ordinal={ordinal}",
+                    projection_pending=True,
                 )
                 self._apply_smart_review_twins(
                     conn,
@@ -879,7 +907,12 @@ class SmartReviewApplyMixin:
                     ordinal=ordinal,
                 )
             return self._mark_candidate_applied(
-                history, run_id, ordinal, proposed=proposed, batch=batch
+                history,
+                run_id,
+                ordinal,
+                entry_id=entry_id,
+                proposed=proposed,
+                batch=batch,
             )
 
     def _mark_candidate_applied(
@@ -888,6 +921,7 @@ class SmartReviewApplyMixin:
         run_id: str,
         ordinal: int,
         *,
+        entry_id: int,
         proposed: str,
         batch: str,
     ) -> str:
@@ -907,6 +941,15 @@ class SmartReviewApplyMixin:
                     validation_error=None,
                     applied_batch=batch,
                     applied_at=history.timestamp(),
+                )
+                self._mark_smart_review_projection_confirmed(
+                    run_id,
+                    {
+                        ordinal: {
+                            "entry_id": entry_id,
+                            "batch": batch,
+                        }
+                    },
                 )
                 return SmartReviewStatus.APPLIED
             except Exception:

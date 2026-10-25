@@ -147,9 +147,12 @@ Python-side control refresh; it is not browser frame or scroll performance.
 run's apply records with a `note >= prefix AND note < upper` range (not `LIKE`)
 so the plan is a `SEARCH` on that partial index, and orders the rows by `id` in
 Python to avoid a temporary sort. The index is created by the same writable
-`CREATE INDEX IF NOT EXISTS` initialization as above and needs no schema-version
-change. `tests/test_smart_review_manual_edit.py` asserts the plan has no `SCAN`
-or `TEMP B-TREE`.
+`CREATE INDEX IF NOT EXISTS` initialization as above. Pending projection markers
+are protected by the history retention query and become eligible for cleanup only
+after JSON confirmation; this does not add a full candidate scan to the normal
+retention path. `tests/test_smart_review_manual_edit.py` asserts the plan has no
+`SCAN` or `TEMP B-TREE`, and the recovery regression covers five later history
+writes for the same entry.
 
 ## Worker 數量
 

@@ -23,7 +23,7 @@ import json
 import os
 import uuid
 from collections import defaultdict
-from collections.abc import Callable, Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, MutableMapping, Sequence
 from contextlib import AbstractContextManager, contextmanager
 from pathlib import Path
 from types import TracebackType
@@ -330,9 +330,11 @@ class SmartReviewHistoryBatch:
         return True
 
     def _reconcile_chunked_applied(
-        self, records: Mapping[int, Mapping[str, Any]]
+        self,
+        records: Mapping[int, Mapping[str, Any]],
+        confirmed_records: MutableMapping[int, Mapping[str, Any]] | None = None,
     ) -> int:
-        """在分片候選內補回 SQLite 套用紀錄。"""
+        """在分片候選內補回 SQLite 套用紀錄，並回報已確認的候選。"""
         payload = self._require_payload()
         grouped: dict[int, dict[int, Mapping[str, Any]]] = defaultdict(dict)
         for ordinal, record in records.items():
@@ -353,6 +355,8 @@ class SmartReviewHistoryBatch:
                     candidate.get("entry_id") or 0
                 ):
                     continue
+                if confirmed_records is not None:
+                    confirmed_records[ordinal] = record
                 batch = str(record.get("batch") or "") or None
                 if candidate.get("status") == SmartReviewStatus.APPLIED and (
                     candidate.get("applied_batch") == batch
@@ -377,9 +381,11 @@ class SmartReviewHistoryBatch:
         return updated
 
     def _reconcile_legacy_applied(
-        self, records: Mapping[int, Mapping[str, Any]]
+        self,
+        records: Mapping[int, Mapping[str, Any]],
+        confirmed_records: MutableMapping[int, Mapping[str, Any]] | None = None,
     ) -> int:
-        """在單檔候選內補回 SQLite 套用紀錄。"""
+        """在單檔候選內補回 SQLite 套用紀錄，並回報已確認的候選。"""
         payload = self._require_payload()
         updated = 0
         for candidate in payload.get("candidates") or []:
@@ -391,6 +397,8 @@ class SmartReviewHistoryBatch:
                 candidate.get("entry_id") or 0
             ):
                 continue
+            if confirmed_records is not None:
+                confirmed_records[ordinal] = record
             batch = str(record.get("batch") or "") or None
             if candidate.get("status") == SmartReviewStatus.APPLIED and (
                 candidate.get("applied_batch") == batch
@@ -414,14 +422,19 @@ class SmartReviewHistoryBatch:
             updated += 1
         return updated
 
-    def reconcile_applied(self, records: Mapping[int, Mapping[str, Any]]) -> int:
-        """在目前批次快照內一次補回 SQLite 已提交的套用紀錄。"""
+    def reconcile_applied(
+        self,
+        records: Mapping[int, Mapping[str, Any]],
+        *,
+        confirmed_records: MutableMapping[int, Mapping[str, Any]] | None = None,
+    ) -> int:
+        """在目前批次快照內補回 SQLite 套用紀錄並回報可清理的 marker。"""
         if not records:
             return 0
         return (
-            self._reconcile_chunked_applied(records)
+            self._reconcile_chunked_applied(records, confirmed_records)
             if is_chunked(self._require_payload())
-            else self._reconcile_legacy_applied(records)
+            else self._reconcile_legacy_applied(records, confirmed_records)
         )
 
     def commit(self) -> None:
@@ -1097,13 +1110,19 @@ class SmartReviewHistoryStore:
             return True
 
     def reconcile_applied(
-        self, run_id: str, records: Mapping[int, Mapping[str, Any]]
+        self,
+        run_id: str,
+        records: Mapping[int, Mapping[str, Any]],
+        *,
+        confirmed_records: MutableMapping[int, Mapping[str, Any]] | None = None,
     ) -> int:
         """依 SQLite 套用歷史，補回尚未標記為 applied（或指向舊套用）的 JSON 候選。
 
         SQLite 翻譯與 JSON 歷史分屬兩個儲存邊界；若前者已提交、後者在
         原子替換時遇到 I/O 錯誤，下一次讀取可以用同一個 run／ordinal 的
         SQLite audit marker 對帳，而不會再次把候選當成 ready 套用。
+        ``confirmed_records`` 會收到 JSON 已存在且已對齊的候選，供資料庫
+        將 pending marker 標記為已完成投影。
         """
         with self._write_lock():
             try:
@@ -1141,6 +1160,8 @@ class SmartReviewHistoryStore:
                             candidate.get("entry_id") or 0
                         ):
                             continue
+                        if confirmed_records is not None:
+                            confirmed_records[ordinal] = record
                         batch = str(record.get("batch") or "") or None
                         if candidate.get("status") == SmartReviewStatus.APPLIED and (
                             candidate.get("applied_batch") == batch
@@ -1183,6 +1204,8 @@ class SmartReviewHistoryStore:
                     candidate.get("entry_id") or 0
                 ):
                     continue
+                if confirmed_records is not None:
+                    confirmed_records[ordinal] = record
                 batch = str(record.get("batch") or "") or None
                 # 已標成 applied 且指向同一次套用的不用改；其餘（待審查，或人工編輯後
                 # 狀態回寫失敗的各種狀態）以 SQLite 的最新套用紀錄為準補回。

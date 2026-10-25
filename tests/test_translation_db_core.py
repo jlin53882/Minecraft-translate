@@ -82,6 +82,52 @@ def test_history_retention_keeps_only_latest_five_rows_per_entry(db):
     assert len(db.entry_detail(entry_id).history) == 5
 
 
+def test_history_retention_preserves_pending_smart_review_marker(db):
+    """JSON 尚未對帳時，套用 marker 不會被五筆一般歷史清掉。"""
+    db.ingest("1.21.1", [item()])
+    entry_id = db._one("SELECT id FROM entry LIMIT 1")[0]
+
+    with db._tx() as conn:
+        conn.execute(
+            "INSERT INTO history "
+            "(entry_id, batch, action, old_zh_tw, new_zh_tw, note, projection_state) "
+            "VALUES (?, ?, 'smart_review_apply', '', ?, ?, 'pending')",
+            (entry_id, "smart-run", "AI 譯文", "run=run-1; ordinal=1"),
+        )
+    for number in range(5):
+        with db._tx() as conn:
+            conn.execute(
+                "INSERT INTO history "
+                "(entry_id, batch, action, old_zh_tw, new_zh_tw, note) "
+                "VALUES (?, ?, 'manual', '', ?, ?)",
+                (entry_id, f"manual-{number}", f"人工-{number}", str(number)),
+            )
+
+    assert db._one(
+        "SELECT projection_state FROM history "
+        "WHERE entry_id=? AND action='smart_review_apply'",
+        (entry_id,),
+    ) == ("pending",)
+
+    with db._tx() as conn:
+        conn.execute(
+            "UPDATE history SET projection_state='projected' "
+            "WHERE entry_id=? AND action='smart_review_apply'",
+            (entry_id,),
+        )
+    with db._tx() as conn:
+        conn.execute(
+            "INSERT INTO history "
+            "(entry_id, batch, action, old_zh_tw, new_zh_tw, note) "
+            "VALUES (?, 'manual-final', 'manual', '', '最後', 'final')",
+            (entry_id,),
+        )
+    assert db._one(
+        "SELECT COUNT(*) FROM history WHERE entry_id=? AND action='smart_review_apply'",
+        (entry_id,),
+    ) == (0,)
+
+
 def test_history_retention_migration_prunes_existing_database_and_keeps_backup(
     tmp_path,
 ):
@@ -94,6 +140,7 @@ def test_history_retention_migration_prunes_existing_database_and_keeps_backup(
     # 重建保留過量記錄的 v9 前資料庫狀態，讓 migration 路徑能和一般寫入
     # 交易的清理路徑分開驗證。
     conn = sqlite3.connect(path)
+    conn.execute("ALTER TABLE history DROP COLUMN projection_state")
     conn.execute("UPDATE meta SET value='8' WHERE key='schema_version'")
     for number in range(7):
         conn.execute(
@@ -108,12 +155,16 @@ def test_history_retention_migration_prunes_existing_database_and_keeps_backup(
     reopened = TranslationDB(path)
     try:
         assert reopened._one("SELECT value FROM meta WHERE key='schema_version'") == (
-            "9",
+            "10",
         )
         assert reopened._one(
             "SELECT COUNT(*) FROM history WHERE entry_id=?", (entry_id,)
         ) == (5,)
+        assert "projection_state" in {
+            row[1] for row in reopened._q("PRAGMA table_info(history)")
+        }
         assert list(tmp_path.glob("history-v8.db.pre-schema-v9-*.bak"))
+        assert list(tmp_path.glob("history-v8.db.pre-schema-v10-*.bak"))
     finally:
         reopened.close()
 
@@ -1592,7 +1643,7 @@ def test_schema_v1_migration_marks_legacy_manual_unknown_and_keeps_backup(tmp_pa
     db = TranslationDB(path)
     detail = db.entry_detail(entry_id)
     manual = next(row for row in detail.translations if row.source == SRC_MANUAL)
-    assert SCHEMA_VERSION == 9
+    assert SCHEMA_VERSION == 10
     assert manual.review_status == "legacy_unknown" and manual.checker == "old-checker"
     assert detail.entry.review_status == "legacy_unknown"
     assert list(tmp_path.glob("legacy.db.pre-schema-v2-*.bak"))
@@ -1603,6 +1654,7 @@ def test_schema_v1_migration_marks_legacy_manual_unknown_and_keeps_backup(tmp_pa
     assert list(tmp_path.glob("legacy.db.pre-schema-v7-*.bak"))
     assert list(tmp_path.glob("legacy.db.pre-schema-v8-*.bak"))
     assert list(tmp_path.glob("legacy.db.pre-schema-v9-*.bak"))
+    assert list(tmp_path.glob("legacy.db.pre-schema-v10-*.bak"))
     assert db._q(
         "SELECT name FROM sqlite_schema WHERE type='table' "
         "AND name IN ('smart_review_run', 'smart_review_candidate') "
@@ -1711,7 +1763,7 @@ def test_schema_v3_migration_backup_includes_committed_wal_snapshot(tmp_path):
         migrated._conn.execute(
             "SELECT value FROM meta WHERE key='schema_version'"
         ).fetchone()[0]
-        == "9"
+        == "10"
     )
     backups = list(tmp_path.glob("legacy-v3-wal.db.pre-schema-v4-*.bak"))
     assert len(backups) == 1
