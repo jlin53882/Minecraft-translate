@@ -1,13 +1,16 @@
 """智慧校對 JSON 候選與 SQLite 套用紀錄的對帳（reconcile）。
 
 套用候選時 SQLite 先提交、JSON 後回寫；兩個儲存之間的失敗以 ``history`` 表
-的 ``smart_review_apply`` audit marker 為準，於下一次讀取時補回 JSON 狀態。
+中尚未完成投影的 ``smart_review_apply`` audit marker 為準，於下一次讀取時補回
+JSON 狀態。pending marker 在 JSON 確認前不受一般 history 五筆保留政策刪除。
 """
 
 from __future__ import annotations
 
 import logging
-from collections.abc import Sequence
+import sqlite3
+import time
+from collections.abc import Collection, Mapping, Sequence
 from typing import Any
 
 from translation_tool.translation_db.models import (
@@ -41,12 +44,110 @@ class SmartReviewProjectionMixin:
     """提供給 TranslationDB 使用的智慧校對 JSON／SQLite 對帳與標籤投影。"""
 
     def _reconcile_json_applied_candidates(
-        self, history: SmartReviewHistoryStore, run_id: str
-    ) -> None:
-        """以 SQLite audit marker 對帳已提交但尚未回寫 JSON 的候選。"""
+        self,
+        history: SmartReviewHistoryStore,
+        run_id: str,
+        entry_ids: Collection[int] | None = None,
+    ) -> bool:
+        """以 SQLite audit marker 對帳已提交但尚未回寫 JSON 的候選。
+
+        SQLite 的 history id 是跨連線、跨 UI 面板的單調版本；同一個批次在
+        版本沒有變化時不需要再次掃描 JSON 分片。回傳 ``True`` 表示本次真的
+        執行了對帳，``False`` 表示命中快取或指定條目沒有需要對帳的紀錄。
+
+        清單上的智慧校對標籤只需要目前頁面的條目；傳入 ``entry_ids`` 時只
+        對帳這些條目，避免模組切換為了顯示 100 筆清單而掃描整個數萬筆批次。
+        不傳入時維持完整對帳，供批次篩選與歷史查詢使用。
+        """
+        key = (str(self.path), run_id)
+        head = self._one("SELECT MAX(id) FROM history")
+        head_id = int(head[0] or 0) if head else 0
+        if _RECONCILED_HISTORY_HEAD.get(key) == head_id:
+            logger.debug(
+                "Smart Review 對帳快取命中：run=%s history_head=%s",
+                run_id,
+                head_id,
+            )
+            return False
+
+        started = time.perf_counter()
         records = self._smart_review_apply_records(run_id)
+        if entry_ids is not None:
+            wanted = {int(entry_id) for entry_id in entry_ids}
+            records = {
+                ordinal: record
+                for ordinal, record in records.items()
+                if int(record.get("entry_id") or 0) in wanted
+            }
+            if not records:
+                logger.debug(
+                    "Smart Review 頁面條目不需對帳：run=%s entries=%s elapsed_ms=%.1f",
+                    run_id,
+                    len(wanted),
+                    (time.perf_counter() - started) * 1000,
+                )
+                return False
+        confirmed_records: dict[int, dict[str, Any]] = {}
+        marker_update_succeeded = True
         if records:
-            history.reconcile_applied(run_id, records)
+            history.reconcile_applied(
+                run_id,
+                records,
+                confirmed_records=confirmed_records,
+            )
+            marker_update_succeeded = (
+                self._mark_smart_review_projection_confirmed(run_id, confirmed_records)
+                is not None
+            )
+        if entry_ids is None and marker_update_succeeded:
+            _RECONCILED_HISTORY_HEAD[key] = head_id
+        logger.debug(
+            "Smart Review 對帳完成：run=%s history_head=%s records=%s elapsed_ms=%.1f",
+            run_id,
+            head_id,
+            len(records),
+            (time.perf_counter() - started) * 1000,
+        )
+        return True
+
+    def _mark_smart_review_projection_confirmed(
+        self,
+        run_id: str,
+        records: Mapping[int, Mapping[str, Any]],
+    ) -> int | None:
+        """把已確認回寫 JSON 的 apply marker 標成可受保留政策清理。"""
+        updates = []
+        for ordinal, record in records.items():
+            batch = str(record.get("batch") or "")
+            if not batch:
+                continue
+            updates.append(
+                (
+                    int(record.get("entry_id") or 0),
+                    batch,
+                    f"run={run_id}; ordinal={int(ordinal)}",
+                )
+            )
+        if not updates:
+            return 0
+        try:
+            with self._tx(bump_generation_on_noop=False) as conn:
+                before = conn.total_changes
+                conn.executemany(
+                    "UPDATE history SET projection_state='projected' "
+                    "WHERE action='smart_review_apply' "
+                    "AND projection_state='pending' AND entry_id=? AND batch=? AND note=?",
+                    updates,
+                )
+                return conn.total_changes - before
+        except (OSError, sqlite3.Error):
+            # JSON 已經確認；狀態欄位更新失敗時保留 pending，下一次讀取可重試。
+            logger.warning(
+                "Smart Review projection marker 更新失敗，將於下次讀取重試：run=%s",
+                run_id,
+                exc_info=True,
+            )
+            return None
 
     def _smart_review_apply_records(self, run_id: str) -> dict[int, dict[str, Any]]:
         """讀取某批次每個序號最新的套用 audit（``ordinal -> entry_id／batch／applied_at``）。"""
@@ -119,6 +220,7 @@ class SmartReviewProjectionMixin:
 
     def _reconciled_latest_marks(
         self,
+        entry_ids: Collection[int] | None = None,
     ) -> tuple[str | None, dict[int, tuple[str, str | None]]]:
         """取得最近批次標記；SQLite 套用紀錄有新增時先對帳，換頁不重複掃描。
 
@@ -135,13 +237,18 @@ class SmartReviewProjectionMixin:
         if _RECONCILED_HISTORY_HEAD.get(key) == head_id:
             return run_id, marks
         try:
-            self._reconcile_json_applied_candidates(history, run_id)
+            reconciled = self._reconcile_json_applied_candidates(
+                history, run_id, entry_ids
+            )
         except (OSError, ValueError):
             logger.warning(
                 "Smart Review 標籤對帳失敗，下次再試：run=%s", run_id, exc_info=True
             )
             return run_id, marks
-        _RECONCILED_HISTORY_HEAD[key] = head_id
+        if not reconciled:
+            return run_id, marks
+        if entry_ids is None:
+            _RECONCILED_HISTORY_HEAD[key] = head_id
         return history.latest_run_marks()
 
     def smart_review_marks(
@@ -155,7 +262,7 @@ class SmartReviewProjectionMixin:
         wanted = {int(entry_id) for entry_id in entry_ids}
         if not wanted:
             return {}
-        run_id, marks = self._reconciled_latest_marks()
+        run_id, marks = self._reconciled_latest_marks(wanted)
         if run_id is None:
             return {}
         result: dict[int, SmartReviewMark] = {}

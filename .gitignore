@@ -69,6 +69,7 @@ config.json
 .agentlens/
 .gitnexus/
 .claude/
+.codebase-memory/
 
 # === Scratch / test output ===
 subdir/

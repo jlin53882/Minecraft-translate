@@ -1,7 +1,8 @@
 # 智慧校對歷史 JSON 儲存
 
 智慧校對的候選（原文快照、context、模型回應）以 JSON 保存，不寫進 SQLite。SQLite `history` 的
-`smart_review_apply` audit 是寫入事實，JSON 是候選狀態投影，兩者的協議見
+`smart_review_apply` audit 是寫入事實；`projection_state=pending` 的 marker 會在 JSON 對帳前受到保護，
+JSON 是候選狀態投影，兩者的協議見
 [`smart-review-status.md`](smart-review-status.md)。本文件說明 JSON 目錄的檔案格式、復原、
 維護工具與保留策略。
 

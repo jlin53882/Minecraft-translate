@@ -304,9 +304,9 @@ def refresh_entry_filter(
     page: int = 1,
     keep_selection: bool = True,
     full_refresh: bool = False,
-    background: bool = True,
+    background: bool = False,
 ) -> None:
-    """重新載入指定結果頁，必要時把篩選變更交給上層處理。"""
+    """同步重新載入指定結果頁，必要時交給上層維持共用狀態。"""
     panel.pager.set_state(panel.total, page)
     if panel._on_filter_changed is not None:
         panel._on_filter_changed(
@@ -385,6 +385,9 @@ def open_species_scan(panel, _e=None) -> None:
 
 def open_smart_review(panel, _e=None) -> None:
     """開啟智慧校對對話框並傳入目前資料庫與篩選範圍。"""
+    if getattr(panel, "_data_loading", False):
+        show_snack(panel._page, "條目資料仍在載入，請稍候再操作。", C.GOLD)
+        return
     if panel.drafts:
         show_snack(
             panel._page,

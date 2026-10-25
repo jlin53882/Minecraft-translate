@@ -21,7 +21,14 @@ ALL_MODS = "__all__"
 
 def load_panel_snapshot(key: str, request: dict, settings) -> dict:
     """Read tab data from a worker-owned, read-only connection."""
-    snapshot = {"key": key, "identity": None, "error": None}
+    snapshot = {
+        "key": key,
+        "identity": None,
+        "error": None,
+        "keep_scroll": (
+            bool(request.get("keep_scroll")) if key == "entries" else False
+        ),
+    }
     snapshot["effective_source_codes"] = ()
     with moddb_read_snapshot(settings) as db:
         snapshot["identity"] = _database_identity(db)
@@ -102,6 +109,7 @@ def _entries_filter_snapshot(db, settings, request: dict) -> dict:
         "source_catalog": source_catalog_for(db),
         "db_generation": None,
         "filter_only": True,
+        "keep_scroll": bool(request.get("keep_scroll")),
         "filter_options_ready": True,
         "versions": [],
         "version": request.get("version"),

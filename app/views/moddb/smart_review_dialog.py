@@ -2,9 +2,14 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import flet as ft
 
-from app.services_impl.moddb_smart_review_service import SMART_REVIEW_DEFAULT_SOURCE
+from app.services_impl.moddb_smart_review_service import (
+    SMART_REVIEW_DEFAULT_SOURCE,
+    preview_moddb_smart_review_resume_from_path,
+)
 from app.ui import kit
 from app.ui.design import C
 from app.ui.dialogs import (
@@ -15,17 +20,20 @@ from app.ui.dialogs import (
 )
 from app.ui.snack import show_snack
 from app.views.moddb.smart_review_batch_reviewer import SmartReviewBatchReviewer
+from app.views.moddb.smart_review_candidate_loader import SmartReviewCandidateLoader
 from app.views.moddb.smart_review_context import SmartReviewContext
 from app.views.moddb.smart_review_history import SmartReviewHistory
 from app.views.moddb.smart_review_job import job_for_page
 from app.views.moddb.smart_review_reviewer import SmartReviewReviewer
 from app.views.moddb.smart_review_run_panel import SmartReviewRunPanel
+from translation_tool.utils.config_manager import get_smart_review_settings
 
 _TABS = (
     ("run", "執行", ft.Icons.AUTO_AWESOME),
     ("review", "審查", ft.Icons.RATE_REVIEW_OUTLINED),
     ("history", "歷史批次", ft.Icons.HISTORY),
 )
+_REVIEW_SUMMARY_REQUEST_DOMAIN = "smart-review-review-summary"
 
 
 class SmartReviewDialog:
@@ -62,11 +70,23 @@ class SmartReviewDialog:
             on_open_review=self.open_review,
             on_hide=self._close,
         )
-        self.reviewer = SmartReviewReviewer(self.ctx, on_changed=self.ctx.notify_parent)
-        self.batch_reviewer = SmartReviewBatchReviewer(
-            self.ctx, on_changed=self.ctx.notify_parent
+        self.reviewer = SmartReviewReviewer(
+            self.ctx,
+            on_changed=self.ctx.notify_parent,
+            on_review_changed=lambda: self._refresh_opposite_review("single"),
         )
+        self.batch_reviewer = SmartReviewBatchReviewer(
+            self.ctx, on_changed=lambda: self._on_review_changed("batch")
+        )
+        self._review_summary_loader = SmartReviewCandidateLoader()
         self._review_run_id: str | None = None
+        self._review_summary_run_id: str | None = None
+        self._review_summary_loading = False
+        self._resume_seq = 0
+        self._resume_dialog: ft.AlertDialog | None = None
+        self._resume_model_field: ft.TextField | None = None
+        self._resume_batch_field: ft.TextField | None = None
+        self._resume_error_text: ft.Text | None = None
         self.review_mode = kit.Segmented(
             [
                 ("single", "逐筆審查", ft.Icons.RATE_REVIEW_OUTLINED),
@@ -88,6 +108,7 @@ class SmartReviewDialog:
         self.history = SmartReviewHistory(
             self.ctx,
             on_open=self.open_review,
+            on_resume=self._resume_run,
             active_run_id=self._active_run_id,
         )
         self.nav = kit.Segmented(list(_TABS), "run", self._on_tab)
@@ -144,23 +165,90 @@ class SmartReviewDialog:
         )
 
     def _on_tab(self, key: str) -> None:
-        """切換分頁；進入歷史分頁時重新整理清單。"""
+        """立即切換分頁，並把該分頁需要的資料讀取交給背景工作。"""
+        if key != "review":
+            # 審查摘要只代表上一次進入審查頁的快照；離開到執行／歷史頁
+            # 後，背景批次可能仍在變動，返回時必須重新取得兩種模式共用的數量。
+            self._invalidate_review_summary()
         self._show_tab(key)
         if key == "history":
             self.history.refresh()
+        elif key == "review":
+            self._load_review_tab_if_needed()
         self.ctx.update()
+
+    def _on_review_changed(self, source: str) -> None:
+        """通知外層並刷新另一個審查模式的目前批次。"""
+        self.ctx.notify_parent()
+        self._refresh_opposite_review(source)
+
+    def _refresh_opposite_review(self, source: str) -> None:
+        """刷新未執行目前動作的審查模式，避免兩個面板保留舊狀態。"""
+        if source != "single":
+            self.reviewer.refresh()
+        if source != "batch":
+            self.batch_reviewer.refresh()
 
     def _on_review_mode(self, key: str) -> None:
         """在逐筆與批量審查間切換，保留兩邊的篩選與頁面狀態。"""
         self.reviewer.control.visible = key == "single"
         self.batch_reviewer.control.visible = key == "batch"
-        if (
-            key == "batch"
-            and self._review_run_id
-            and self.batch_reviewer.run_id != self._review_run_id
-        ):
-            self.batch_reviewer.load_run(self._review_run_id)
+        self._load_review_tab_if_needed()
         self.ctx.update()
+
+    def _load_review_tab_if_needed(self, *, force: bool = False) -> None:
+        """以共用批次摘要載入逐筆與批量審查面板。"""
+        if not self._review_run_id:
+            return
+        run_id = self._review_run_id
+        if not force and self._review_summary_run_id == run_id:
+            return
+        if self._review_summary_loading and self._review_summary_run_id is None:
+            return
+        database = self.ctx.database()
+        if database is None:
+            # 讓兩個面板各自顯示既有的資料庫錯誤，而不是讓摘要讀取
+            # 把審查分頁留在空白狀態。
+            self.reviewer.load_run(run_id)
+            self.batch_reviewer.load_run(run_id)
+            return
+        path, priority = database
+        ticket = self.ctx.begin_request(_REVIEW_SUMMARY_REQUEST_DOMAIN)
+        self._review_summary_loading = True
+        self._review_summary_run_id = None
+        self._review_summary_loader.invalidate()
+
+        def done(result, error: str | None) -> None:
+            """把同一份批次摘要交給兩種審查模式。"""
+            if not self.ctx.is_current(ticket):
+                return
+            self._review_summary_loading = False
+            if error:
+                # 摘要查詢失敗時保留既有面板的錯誤呈現與獨立重試契約。
+                self.reviewer.load_run(run_id)
+                self.batch_reviewer.load_run(run_id)
+                return
+            self._review_summary_run_id = run_id
+            self.reviewer.load_run(run_id, loaded_run=result)
+            self.batch_reviewer.load_run(run_id, loaded_run=result)
+            self.ctx.update()
+
+        self.ctx.run_background(
+            lambda: self._review_summary_loader.load_run(path, priority, run_id),
+            done,
+            name="載入智慧校對審查摘要",
+            stable_identity=True,
+            still_valid=lambda: (
+                self._review_run_id == run_id and self.ctx.is_current(ticket)
+            ),
+        )
+
+    def _invalidate_review_summary(self) -> None:
+        """離開審查分頁時使摘要失效，返回時重新對齊目前批次狀態。"""
+        self._review_summary_run_id = None
+        self._review_summary_loading = False
+        self._review_summary_loader.invalidate()
+        self.ctx.invalidate_request(_REVIEW_SUMMARY_REQUEST_DOMAIN)
 
     def _show_tab(self, key: str) -> None:
         """只顯示指定分頁，其餘隱藏但保留狀態。"""
@@ -173,12 +261,232 @@ class SmartReviewDialog:
         """切到審查分頁並載入指定批次。"""
         self._review_run_id = run_id
         self._show_tab("review")
-        self.reviewer.load_run(run_id)
-        # 批量候選是另一個分頁，等使用者真的切換過去才讀取，避免隱藏
-        # 面板在逐筆審查時也啟動候選分頁查詢。
-        if self.review_mode.value == "batch":
-            self.batch_reviewer.load_run(run_id)
+        self._invalidate_review_summary()
+        # 先讀一次共用摘要，再讓兩個面板各自載入目前可見候選；
+        # 隱藏面板不再延後取得計數，避免切換模式後顯示另一個時間點的數字。
+        self._load_review_tab_if_needed(force=True)
         self.ctx.update()
+
+    def _resume_run(self, run_id: str) -> None:
+        """讀取指定 run 的狀態後，以可編輯確認視窗啟動續跑。"""
+        if self.job.running:
+            show_snack(self.page, "智慧校對正在執行中。", C.GOLD)
+            return
+        database = self.ctx.database()
+        if database is None:
+            show_snack(self.page, "目前沒有可用的 Mod 資料庫。", C.RED)
+            return
+        self._resume_seq += 1
+        seq = self._resume_seq
+        path, priority = database
+        self._show_resume_loading(run_id)
+
+        def work() -> dict[str, Any]:
+            result = preview_moddb_smart_review_resume_from_path(
+                path, priority, str(run_id)
+            )
+            # 續跑確認資料與資料庫身分綁定；切換資料庫後即使 UI 已取得舊
+            # preview，執行頁也會拒絕把它投影到新的資料庫。
+            result["_database_identity"] = self.ctx.db_identity(
+                path, include_generation=False
+            )
+            return result
+
+        def done(result: dict[str, Any] | None, error: str | None) -> None:
+            if seq != self._resume_seq:
+                return
+            self._close_resume_dialog()
+            if error:
+                show_snack(self.page, f"無法讀取續跑狀態：{error}", C.RED)
+                return
+            if not isinstance(result, dict):
+                show_snack(self.page, "無法讀取續跑狀態。", C.RED)
+                return
+            self._show_resume_confirmation(str(run_id), result)
+
+        self.ctx.run_background(
+            work,
+            done,
+            name="讀取智慧校對續跑狀態",
+            still_valid=lambda: seq == self._resume_seq and not self.job.running,
+        )
+
+    def _show_resume_loading(self, run_id: str) -> None:
+        """在讀取續跑狀態時顯示可見等待提示，避免使用者誤以為沒有反應。"""
+        self._close_resume_dialog()
+        dialog = ft.AlertDialog(
+            modal=True,
+            title=ft.Text("讀取續跑狀態", weight=ft.FontWeight.BOLD),
+            content=ft.Column(
+                [
+                    ft.ProgressRing(),
+                    ft.Text(
+                        f"正在確認批次 {run_id} 的模型、批次大小與未完成數量…",
+                        selectable=True,
+                    ),
+                ],
+                tight=True,
+                horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+            ),
+            actions=[
+                ft.TextButton("取消", on_click=lambda _e: self._cancel_resume_preview())
+            ],
+        )
+        self._resume_dialog = dialog
+        present_page_dialog(self.page, dialog)
+
+    def _cancel_resume_preview(self) -> None:
+        """取消尚未完成的續跑狀態讀取。"""
+        self._resume_seq += 1
+        self._close_resume_dialog()
+
+    def _resume_status_summary(self, counts: object) -> str:
+        """把歷史狀態統計轉成確認視窗可讀文字。"""
+        if not isinstance(counts, dict):
+            return "狀態明細暫不可用"
+        labels = {
+            "applied": "已套用",
+            "rejected": "已拒絕",
+            "ready": "可套用",
+            "no_change": "AI 不用修改",
+            "needs_context": "需補 context",
+            "invalid": "無效",
+            "request_failed": "請求錯誤",
+            "cancelled": "未完成／已取消",
+            "pending": "待處理",
+        }
+        values = [
+            f"{labels.get(str(status), str(status))} {int(count):,}"
+            for status, count in counts.items()
+            if int(count or 0) > 0
+        ]
+        return "；".join(values) if values else "沒有狀態明細"
+
+    def _build_resume_fields(self, preview: dict[str, Any]) -> None:
+        """建立續跑確認視窗的模型、批次與錯誤欄位。"""
+        model = str(preview.get("model") or self.run_panel.model_dd.value or "")
+        batch_size = int(
+            preview.get("batch_size") or self.run_panel.batch_field.value or 0
+        )
+        self._resume_model_field = kit.text_field(
+            "校對模型", value=model, hint="輸入要使用的模型名稱", width=300
+        )
+        self._resume_batch_field = kit.text_field(
+            "每批（筆）", value=str(batch_size), hint="正整數", width=140
+        )
+        self._resume_error_text = ft.Text("", size=12, color=C.RED, selectable=True)
+
+    def _show_resume_confirmation(self, run_id: str, preview: dict[str, Any]) -> None:
+        """顯示指定 run 的摘要，並讓模型與批次大小由使用者輸入。"""
+        scope = preview.get("scope")
+        scope = scope if isinstance(scope, dict) else {}
+        version = str(preview.get("version") or scope.get("version") or "-")
+        scope_text = (
+            f"{version} · {scope.get('mod_id') or '全部模組'} / "
+            f"{scope.get('kind') or '全部類型'}"
+        )
+        selected = int(preview.get("selected_count") or 0)
+        processed = int(preview.get("processed_count") or 0)
+        pending = int(preview.get("pending_count") or 0)
+        requested_limit = int(preview.get("requested_limit") or 0)
+        limit_label = "不限" if requested_limit == 0 else f"{requested_limit:,}"
+        self._build_resume_fields(preview)
+        dialog = ft.AlertDialog(
+            modal=True,
+            title=ft.Text("確認繼續未完成校對", weight=ft.FontWeight.BOLD),
+            content=ft.Container(
+                content=ft.Column(
+                    [
+                        ft.Text(
+                            f"批次：{run_id}", size=12, color=C.DIM, selectable=True
+                        ),
+                        ft.Text(f"範圍：{scope_text}", size=13, selectable=True),
+                        ft.Text(
+                            f"原批次 {selected:,} 筆；已處理 {processed:,} 筆；"
+                            f"預計重新檢查 {pending:,} 筆；原上限 {limit_label}。",
+                            size=13,
+                            selectable=True,
+                        ),
+                        ft.Text(
+                            "狀態："
+                            + self._resume_status_summary(preview.get("status_counts")),
+                            size=12,
+                            color=C.MUTED,
+                            selectable=True,
+                        ),
+                        kit.hint_text(
+                            "確認後會再用目前資料庫的 CAS 快照檢查；已套用或已拒絕的候選不會悄悄重送。"
+                        ),
+                        ft.Row(
+                            [self._resume_model_field, self._resume_batch_field],
+                            spacing=10,
+                            wrap=True,
+                        ),
+                        self._resume_error_text,
+                    ],
+                    tight=True,
+                    spacing=10,
+                ),
+                width=620,
+            ),
+            actions=[
+                ft.TextButton("取消", on_click=lambda _e: self._close_resume_dialog()),
+                kit.button(
+                    "確認並繼續",
+                    "primary",
+                    icon=ft.Icons.PLAY_ARROW,
+                    on_click=lambda _e, rid=run_id, data=preview: self._confirm_resume(
+                        rid, data
+                    ),
+                ),
+            ],
+        )
+        self._resume_dialog = dialog
+        present_page_dialog(self.page, dialog)
+
+    def _confirm_resume(self, run_id: str, preview: dict[str, Any]) -> None:
+        """驗證確認視窗輸入，成功後切到執行頁並啟動指定 run。"""
+        model = str(self._resume_model_field.value or "").strip()
+        raw_batch = str(self._resume_batch_field.value or "").strip()
+        settings = get_smart_review_settings()
+        max_batch = int(settings["max_batch_size"])
+        error = None
+        if not model:
+            error = "校對模型不可為空白。"
+        else:
+            try:
+                batch_size = int(raw_batch)
+            except (TypeError, ValueError):
+                batch_size = 0
+            if batch_size < 1 or batch_size > max_batch:
+                error = f"每批必須介於 1 與 {max_batch} 筆。"
+        if error:
+            self._resume_error_text.value = error
+            self._resume_error_text.color = C.RED
+            self.page.update()
+            return
+        started = self.run_panel.resume_run(
+            run_id,
+            model=model,
+            batch_size=batch_size,
+            resume_preview=preview,
+        )
+        if started:
+            self._close_resume_dialog()
+            self._show_tab("run")
+            self.ctx.update()
+            show_snack(
+                self.page,
+                "已切換到執行頁面，正在繼續未完成校對。",
+                C.EM,
+            )
+
+    def _close_resume_dialog(self) -> None:
+        """關閉目前的續跑等待／確認視窗。"""
+        dialog = self._resume_dialog
+        self._resume_dialog = None
+        if dialog is not None:
+            close_page_dialog(self.page, dialog)
 
     def open(self) -> None:
         """開啟視窗，接續背景任務狀態並載入批次清單。"""
@@ -203,5 +511,7 @@ class SmartReviewDialog:
         """停止輪詢並讓進行中的查詢結果失效，但不取消背景校對。"""
         if self.ctx.closed:
             return
+        self._resume_seq += 1
+        self._close_resume_dialog()
         self.ctx.close()
         self.run_panel.detach()

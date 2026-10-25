@@ -199,6 +199,7 @@ def candidate_from_payload(
         status=coerce_status(payload.get("status")),
         applied_batch=payload.get("applied_batch"),
         applied_at=payload.get("applied_at"),
+        ai_status=payload.get("ai_status"),
     )
 
 

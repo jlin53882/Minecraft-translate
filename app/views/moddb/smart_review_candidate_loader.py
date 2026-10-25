@@ -1,10 +1,10 @@
 """智慧校對審查頁的候選載入：批次資訊、統計、分頁讀取，以及前後一筆的預載快取。
 
-``load_run``、``read_position`` 與 ``read_window`` 都在背景執行緒呼叫，只做唯讀查詢（人工編輯
-候選的快照對齊除外），並在**同一個唯讀連線**內完成一次導覽操作需要的所有讀取：載入位置時順便取回
-前後各一筆、套用後刷新時一併取回狀態統計。預載的候選只由 UI 執行緒透過 ``remember``／``take``
-存取；任何寫入、換批次或換篩選都要呼叫 ``invalidate``，資料庫內容改變（``db_identity``
-不同）時快取也會自動失效。
+``load_run``、``read_position`` 與 ``read_window`` 都只做唯讀查詢（人工編輯候選的快照對齊除外），
+並在**同一個唯讀連線**內完成一次導覽操作需要的所有讀取：載入位置時順便取回前後各一筆、套用後刷新
+時一併取回狀態統計。使用者可見的換筆由 UI 執行緒直接呼叫 ``read_position``；``read_window`` 只作為
+背景預載，讓下一筆可以直接顯示。預載的候選只由 UI 執行緒透過 ``remember``／``take`` 存取；任何寫入、
+換批次或換篩選都要呼叫 ``invalidate``，資料庫內容改變（``db_identity`` 不同）時快取也會自動失效。
 """
 
 from __future__ import annotations
@@ -35,6 +35,12 @@ class LoadedRun:
 
     info: dict[str, Any] | None
     counts: dict[str, int]
+
+    def total_for(self, status: str | None) -> int:
+        """回傳同一份批次摘要中指定篩選的總數。"""
+        if status is None:
+            return sum(max(0, int(count or 0)) for count in self.counts.values())
+        return max(0, int(self.counts.get(status, 0) or 0))
 
 
 @dataclass(frozen=True)
@@ -201,7 +207,7 @@ class SmartReviewCandidateLoader:
         db_identity: str | None,
         position: int,
     ) -> SmartReviewCandidate | None:
-        """取得已預載的候選；來源不符或沒有預載時回傳 None（呼叫端改走背景載入）。"""
+        """取得已預載的候選；來源不符或沒有預載時回傳 None（呼叫端改走同步導覽載入）。"""
         if self._cache_key != (run_id, status, db_identity):
             return None
         return self._cache.get(position)

@@ -27,6 +27,7 @@ from app.views.moddb.smart_review_batch_outcome import (
     summarize_outcomes,
 )
 from app.views.moddb.smart_review_batch_progress import SmartReviewBatchProgress
+from app.views.moddb.smart_review_candidate_loader import LoadedRun
 from app.views.moddb.smart_review_context import SmartReviewContext
 from app.views.moddb.smart_review_evidence import (
     SmartReviewEvidencePresenter,
@@ -237,8 +238,12 @@ class SmartReviewBatchReviewer:
 
     # ──────────────── 載入與分頁 ────────────────
 
-    def load_run(self, run_id: str) -> None:
-        """切換批次、重設選取並從第一頁載入候選。"""
+    def load_run(self, run_id: str, *, loaded_run: LoadedRun | None = None) -> None:
+        """切換批次、重設選取並從第一頁載入候選。
+
+        ``loaded_run`` 由對話框共用逐筆面板已取得的批次摘要，確保兩種
+        審查模式的篩選計數來自同一個讀取世代。
+        """
         self.run_id = run_id
         self.run_info = {}
         self.counts = {}
@@ -253,18 +258,46 @@ class SmartReviewBatchReviewer:
         self.result_box.visible = False
         self._request_seq += 1
         self._show_loading("正在載入批量候選…")
+        if loaded_run is not None:
+            if loaded_run.info is None:
+                self._show_empty("找不到批次", f"run_id：{run_id}", keep_toolbar=True)
+                return
+            self.run_info = loaded_run.info
+            self._apply_page_summary({"status": loaded_run.counts})
+            self._choose_initial_filter(self.counts)
+            self._load_page(
+                include_run=False,
+                include_summary=False,
+                known_total=self._summary_total(),
+                stable_identity=True,
+            )
+            return
         self._load_page(include_run=True)
 
     def refresh(self) -> None:
-        """重新讀取目前頁；刷新會清除選取，避免使用舊快照批量寫入。"""
+        """同步重新讀取目前頁；刷新會清除選取，避免使用舊快照批量寫入。"""
         if self._busy or not self.run_id:
             return
         self._selected.clear()
         self._row_cache.clear()
-        self._load_page(include_run=True)
+        self._load_page(include_run=True, background=False)
 
-    def _load_page(self, *, include_run: bool = False) -> None:
-        """在單一唯讀連線中取得統計、總數與目前頁候選。"""
+    def _load_page(
+        self,
+        *,
+        include_run: bool = False,
+        include_summary: bool | None = None,
+        known_total: int | None = None,
+        background: bool = True,
+        stable_identity: bool = False,
+    ) -> None:
+        """在單一唯讀連線中取得統計、總數與目前頁候選。
+
+        初始批次載入可在背景執行；使用者換頁、篩選與重新整理傳入
+        ``background=False``，避免可見清單出現晚到的背景結果。
+        共用批次摘要的初始頁面可使用 ``stable_identity=True``，讓執行中的
+        工作更新資料庫世代時仍能顯示同一份審查快照。
+        """
         database = self.ctx.database()
         if database is None or not self.run_id:
             self._show_empty("沒有可用的資料庫", "請先在條目校對選擇資料庫。")
@@ -273,14 +306,10 @@ class SmartReviewBatchReviewer:
         run_id = self.run_id
         status = self._status_query()
         page = max(1, self.page)
-        include_summary = should_load_summary(include_run, self._summary_loaded)
+        if include_summary is None:
+            include_summary = should_load_summary(include_run, self._summary_loaded)
         token = self._request_seq = self._request_seq + 1
-        self._loading = True
-        self._set_controls_enabled(False)
-        self.status_text.value = (
-            f"正在切換第 {page} 頁…" if self.rows else "正在讀取候選分頁…"
-        )
-        self.ctx.update()
+        self._begin_page_load(page)
 
         def work():
             return load_batch_page(
@@ -293,53 +322,102 @@ class SmartReviewBatchReviewer:
                 moddb_smart_review_read_session,
                 include_run=include_run,
                 include_summary=include_summary,
+                known_total=known_total,
             )
 
         def done(result, error: str | None) -> None:
             if token != self._request_seq:
                 return
-            self._loading = False
-            if error:
-                self._set_controls_enabled(True)
-                self._show_empty("候選載入失敗", error, keep_toolbar=True)
-                return
-            info, breakdown, total, rows = result
-            if include_run and info is None:
-                self._set_controls_enabled(True)
-                self._show_empty("找不到批次", f"run_id：{run_id}", keep_toolbar=True)
-                return
-            if breakdown is not None:
-                status_counts = breakdown.get("status", {}) or {}
-                self.counts = {
-                    str(key): int(value or 0) for key, value in status_counts.items()
-                }
-                self._summary_loaded = True
-            if info is not None:
-                self.run_info = info or {}
-                self._choose_initial_filter(self.counts)
-                if self._status_query() != status:
-                    self.page = 1
-                    self._load_page()
-                    return
-            total_pages = max(1, (total + PAGE_SIZE - 1) // PAGE_SIZE)
-            if total and page > total_pages:
-                self.page = total_pages
-                self._load_page()
-                return
-            self.total = int(total or 0)
-            self.rows = list(rows or [])
-            self._row_cache.update({row.ordinal: row for row in self.rows})
-            self.page = min(page, total_pages)
-            self._refresh_filter_labels()
-            self._set_controls_enabled(True)
-            self._render_page()
+            self._finish_page_load(
+                result,
+                error,
+                include_run=include_run,
+                run_id=run_id,
+                status=status,
+                page=page,
+                background=background,
+            )
 
-        self.ctx.run_background(
-            work,
-            done,
-            name="載入智慧校對批量候選",
-            still_valid=lambda: token == self._request_seq,
+        still_valid = lambda: token == self._request_seq
+        if background:
+            self.ctx.run_background(
+                work,
+                done,
+                name="載入智慧校對批量候選",
+                stable_identity=stable_identity,
+                still_valid=still_valid,
+            )
+        else:
+            self.ctx.run_inline(work, done, still_valid=still_valid)
+
+    def _begin_page_load(self, page: int) -> None:
+        """Disable visible controls while a page request is in flight."""
+        self._loading = True
+        self._set_controls_enabled(False)
+        self.status_text.value = (
+            f"正在切換第 {page} 頁…" if self.rows else "正在讀取候選分頁…"
         )
+        self.ctx.update()
+
+    def _finish_page_load(
+        self,
+        result,
+        error: str | None,
+        *,
+        include_run: bool,
+        run_id: str,
+        status: str | None,
+        page: int,
+        background: bool,
+    ) -> None:
+        """Apply one page result, retrying only when the requested page became stale."""
+        self._loading = False
+        if error:
+            self._set_controls_enabled(True)
+            self._show_empty("候選載入失敗", error, keep_toolbar=True)
+            return
+        info, breakdown, total, rows = result
+        if include_run and info is None:
+            self._set_controls_enabled(True)
+            self._show_empty("找不到批次", f"run_id：{run_id}", keep_toolbar=True)
+            return
+        self._apply_page_summary(breakdown)
+        if info is not None:
+            self.run_info = info or {}
+            self._choose_initial_filter(self.counts)
+            if self._status_query() != status:
+                self.page = 1
+                self._load_page(background=background)
+                return
+        total_pages = max(1, (total + PAGE_SIZE - 1) // PAGE_SIZE)
+        if total and page > total_pages:
+            self.page = total_pages
+            self._load_page(background=background)
+            return
+        self.total = int(total or 0)
+        self.rows = list(rows or [])
+        self._row_cache.update({row.ordinal: row for row in self.rows})
+        self.page = min(page, total_pages)
+        self._refresh_filter_labels()
+        self._set_controls_enabled(True)
+        self._render_page()
+
+    def _apply_page_summary(self, breakdown: dict | None) -> None:
+        """Refresh cached status counts when the query returned a breakdown."""
+        if breakdown is None:
+            return
+        status_counts = breakdown.get("status", {}) or {}
+        self.counts = {
+            str(key): int(value or 0) for key, value in status_counts.items()
+        }
+        self._summary_loaded = True
+
+    def _summary_total(self) -> int:
+        """回傳目前共用摘要對應篩選的總數。"""
+        status = self._status_query()
+        if status is None:
+            return sum(max(0, int(count or 0)) for count in self.counts.values())
+        return max(0, int(self.counts.get(status, 0) or 0))
 
     def _choose_initial_filter(self, counts: dict) -> None:
         """有可套用候選時預設看 ready，否則顯示全部狀態以解釋空批次。"""
@@ -360,23 +438,24 @@ class SmartReviewBatchReviewer:
         self.page = 1
         self._selected.clear()
         self._row_cache.clear()
-        self._load_page()
+        self._load_page(background=False)
 
     def _on_page(self, page: int) -> None:
         """換頁；選取保留在記憶體中，讓使用者可以跨頁勾選。"""
         if self._busy or self._loading or not self.run_id:
             return
         self.page = max(1, int(page))
-        self._load_page()
+        self._load_page(background=False)
 
     # ──────────────── 顯示 ────────────────
 
     def _refresh_filter_labels(self) -> None:
         """在候選篩選器上顯示各狀態的筆數。"""
+        all_total = sum(max(0, int(count or 0)) for count in self.counts.values())
         pairs = [
             (
                 key,
-                f"{label}（{format_count(self.total if key == ALL_FILTER else self.counts.get(str(key), 0))}）",
+                f"{label}（{format_count(all_total if key == ALL_FILTER else self.counts.get(str(key), 0))}）",
             )
             for key, label in FILTERS
         ]

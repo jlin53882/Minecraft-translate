@@ -14,6 +14,7 @@ import os
 import re
 import shutil
 import uuid
+from bisect import bisect_right
 from collections.abc import Iterator, Mapping, Sequence
 from pathlib import Path
 from typing import Any
@@ -184,13 +185,35 @@ class ChunkManifestRepository:
         ]
 
     def chunk_index_for_ordinal(
-        self, manifest: Mapping[str, Any], ordinal: int
+        self,
+        manifest: Mapping[str, Any],
+        ordinal: int,
+        *,
+        entries: Sequence[Mapping[str, Any]] | None = None,
+        ordinal_starts: Sequence[int] | None = None,
     ) -> int | None:
-        """依 manifest 的 ordinal 範圍找到候選所在分片。"""
+        """依 manifest 的 ordinal 範圍找到候選所在分片。
+
+        ``entries``／``ordinal_starts`` 供同一份 manifest 的大量查詢重用已
+        建立的索引。續跑對帳會處理數萬筆套用紀錄；若每筆都重新建立整份
+        分片清單，查詢成本會從 O(n log m) 退化成 O(nm)。一般呼叫不傳入
+        這兩個參數時維持原本的自動建立行為。
+        """
         value = int(ordinal)
-        for entry in self.chunk_entries(manifest):
-            if entry["ordinal_start"] <= value <= entry["ordinal_end"]:
-                return entry["index"]
+        resolved_entries = self.chunk_entries(manifest) if entries is None else entries
+        if not resolved_entries:
+            return None
+        starts = (
+            tuple(int(entry["ordinal_start"]) for entry in resolved_entries)
+            if ordinal_starts is None
+            else ordinal_starts
+        )
+        position = bisect_right(starts, value) - 1
+        if position < 0:
+            return None
+        entry = resolved_entries[position]
+        if value <= int(entry["ordinal_end"]):
+            return int(entry["index"])
         return None
 
     def read_chunk_unlocked(self, run_id: str, chunk_index: int) -> dict[str, Any]:

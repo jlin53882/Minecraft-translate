@@ -23,7 +23,10 @@ from app.views.moddb.smart_review_actions import (
     ActionOutcome,
     SmartReviewActionService,
 )
-from app.views.moddb.smart_review_candidate_loader import SmartReviewCandidateLoader
+from app.views.moddb.smart_review_candidate_loader import (
+    LoadedRun,
+    SmartReviewCandidateLoader,
+)
 from app.views.moddb.smart_review_context import SmartReviewContext
 from app.views.moddb.smart_review_evidence import (
     SmartReviewEvidencePresenter,
@@ -62,10 +65,13 @@ _FORMAT_TONE_COLOR = {"muted": C.MUTED, "gold": C.GOLD, "red": C.RED, "em": C.EM
 class SmartReviewReviewer:
     """逐筆審查某個校對批次：每頁只顯示一筆，翻頁就是換下一筆。"""
 
-    def __init__(self, ctx: SmartReviewContext, *, on_changed) -> None:
-        """建立審查面板；``on_changed`` 在候選被套用後通知外層重新整理。"""
+    def __init__(
+        self, ctx: SmartReviewContext, *, on_changed, on_review_changed=None
+    ) -> None:
+        """建立審查面板；分開通知外層條目頁與同視窗的另一個審查面板。"""
         self.ctx = ctx
         self.on_changed = on_changed
+        self.on_review_changed = on_review_changed
         self.state = SmartReviewReviewerState()
         self.loader = SmartReviewCandidateLoader()
         self.actions = SmartReviewActionService(ctx)
@@ -224,8 +230,12 @@ class SmartReviewReviewer:
 
     # ──────────────── 載入 ────────────────
 
-    def load_run(self, run_id: str) -> None:
-        """載入指定批次的資訊與狀態統計，之後顯示第一筆。"""
+    def load_run(self, run_id: str, *, loaded_run: LoadedRun | None = None) -> None:
+        """載入指定批次的資訊與狀態統計，之後顯示第一筆。
+
+        ``loaded_run`` 由對話框在同一次審查開啟時共用，讓逐筆與批量面板
+        使用同一份狀態摘要；沒有傳入時保留獨立載入的測試與舊呼叫契約。
+        """
         database = self.ctx.database()
         if database is None:
             self._show_empty("沒有可用的資料庫", "請先在條目校對選擇資料庫。")
@@ -252,8 +262,17 @@ class SmartReviewReviewer:
             self.filter_dd.value = state.status_filter
             self._refresh_filter_labels()
             state.position = 0
-            self.load_position()
+            if loaded_run is not None:
+                # 初始候選頁沿用共用摘要的總數，避免執行中批次在兩個面板
+                # 分別計數時因中途寫入而顯示不同數字。
+                state.total = loaded_run.total_for(state.status_query)
+                self.load_position(refresh_total=False, stable_identity=True)
+            else:
+                self.load_position()
 
+        if loaded_run is not None:
+            done(loaded_run, None)
+            return
         self.ctx.run_background(
             lambda: self.loader.load_run(path, priority, run_id),
             done,
@@ -261,12 +280,29 @@ class SmartReviewReviewer:
             still_valid=lambda: state.is_current(token),
         )
 
+    def refresh(self) -> None:
+        """同步重新讀取目前批次與篩選統計，供另一個審查面板更新畫面。"""
+        state = self.state
+        if not state.run_id or state.busy:
+            return
+        self.loader.invalidate()
+        self.load_position(refresh_counts=True, background=False)
+
     def load_position(
-        self, *, refresh_total: bool = True, refresh_counts: bool = False
+        self,
+        *,
+        refresh_total: bool = True,
+        refresh_counts: bool = False,
+        background: bool = True,
+        stable_identity: bool = False,
     ) -> None:
         """依目前篩選與位置載入單筆候選（每頁一筆）。
 
         ``refresh_counts`` 在套用或保留之後使用：狀態統計與候選在同一個唯讀連線讀取。
+        ``background=True`` 用於初始載入；使用者換筆、換篩選與完成後刷新會傳入
+        ``False``，讓畫面在同一個事件內完成更新。
+        ``stable_identity=True`` 用於共用摘要的初始讀取，允許執行中的工作
+        更新資料庫世代而不丟棄已取得的唯讀快照。
         """
         database = self.ctx.database()
         state = self.state
@@ -298,20 +334,26 @@ class SmartReviewReviewer:
             self._render()
             self._preload()
 
-        self.ctx.run_background(
-            lambda: self.loader.read_position(
-                path,
-                priority,
-                run_id,
-                status=status,
-                position=position,
-                known_total=known_total,
-                with_counts=refresh_counts,
-            ),
-            done,
-            name="載入智慧校對候選",
-            still_valid=lambda: state.is_current(token),
+        work = lambda: self.loader.read_position(
+            path,
+            priority,
+            run_id,
+            status=status,
+            position=position,
+            known_total=known_total,
+            with_counts=refresh_counts,
         )
+        still_valid = lambda: state.is_current(token)
+        if background:
+            self.ctx.run_background(
+                work,
+                done,
+                name="載入智慧校對候選",
+                stable_identity=stable_identity,
+                still_valid=still_valid,
+            )
+        else:
+            self.ctx.run_inline(work, done, still_valid=still_valid)
 
     def _preload(self) -> None:
         """在背景預載目前位置前後各一筆，讓下一次換筆不必再讀資料庫。"""
@@ -635,7 +677,7 @@ class SmartReviewReviewer:
         state.status_filter = str(event.control.value or "all")
         state.position = 0
         self.loader.invalidate()
-        self._flush_then(self.load_position)
+        self._flush_then(lambda: self.load_position(background=False))
 
     def _move(self, delta: int) -> None:
         """移到上一筆或下一筆；到頭時說明原因。"""
@@ -681,14 +723,14 @@ class SmartReviewReviewer:
         self._flush_then(lambda: self._go_to(target - 1))
 
     def _go_to(self, position: int) -> None:
-        """換到指定位置：已預載就直接顯示，否則在背景載入。"""
+        """換到指定位置：已預載就直接顯示，否則同步載入。"""
         state = self.state
         cached = self.loader.take(
             state.run_id, state.status_query, self.ctx.db_identity(), position
         )
         state.position = position
         if cached is None:
-            self.load_position(refresh_total=False)
+            self.load_position(refresh_total=False, background=False)
             return
         state.begin_request()
         state.row = cached
@@ -780,5 +822,7 @@ class SmartReviewReviewer:
             return
         if outcome.reload_parent and callable(self.on_changed):
             self.on_changed()
+        if outcome.review_changed and callable(self.on_review_changed):
+            self.on_review_changed()
         self.loader.invalidate()
-        self.load_position(refresh_counts=True)
+        self.load_position(refresh_counts=True, background=False)

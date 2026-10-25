@@ -34,7 +34,7 @@
 
 兩個儲存之間沒有共同交易，邊界如下：
 
-- **SQLite `history` 的 `smart_review_apply` audit 是「寫入事實」**：套用先提交 SQLite（含 CAS 檢查），再回寫 JSON。
+- **SQLite `history` 的 `smart_review_apply` audit 是「寫入事實」**：套用先提交 SQLite（含 CAS 檢查），再回寫 JSON；JSON 還未確認時 `projection_state` 為 `pending`，對帳成功後才改為 `projected`。
 - **JSON 是「候選狀態投影」**：保存候選、狀態與驗證結果；完整候選不放進 SQLite，避免資料庫檔案膨脹。
 - 每次 JSON 候選變更都會遞增批次內的 `projection.revision`，並記錄 `projection.state`（`ProjectionState`）：
   `projected`（依最近一次寫入更新）、`reconciled`（由對帳依 audit 補回）；
@@ -42,6 +42,7 @@
   只會出現在診斷回報，因為這時 JSON 本來就寫不進去。
 - 對帳 `reconcile_applied` 具冪等性：已標成同一次套用的候選不再改寫，重複呼叫不改任何檔案。
   讀取標籤與候選列表時，若 `history` 的最大 id 比上次對帳新，會先對帳。
+- `history` 的每條目五筆保留政策不會刪除 `pending` marker；因此即使 JSON 回寫失敗後同一條目又有五次歷史寫入，下一次讀取仍能完成對帳。確認 JSON 後 marker 轉為 `projected`，再回到一般保留政策。
 - `TranslationDB.smart_review_projection_report(run_id)` 唯讀比對 audit 與 JSON，回傳
   `state`、`revision` 與 `pending_ordinals`。
 
