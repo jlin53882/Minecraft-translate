@@ -13,7 +13,9 @@ from translation_tool.translation_db import (
 )
 
 
-def test_translate_directory_generator_cache_hit_writes_output_json(tmp_path: Path, monkeypatch) -> None:
+def test_translate_directory_generator_cache_hit_writes_output_json(
+    tmp_path: Path, monkeypatch
+) -> None:
     input_root = tmp_path / "input"
     out_root = tmp_path / "out"
 

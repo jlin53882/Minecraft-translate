@@ -2,6 +2,7 @@
 
 用途：測試 LM 翻譯掃描相關功能。
 """
+
 import json
 from unittest.mock import MagicMock
 
@@ -12,11 +13,8 @@ class TestIsPlainLangJson:
     def test_plain_lang_json(self):
         """測試標準 lang JSON。"""
         from translation_tool.core.lm_translator_scan import is_plain_lang_json
-        
-        data = {
-            "key1": "value1",
-            "key2": "value2"
-        }
+
+        data = {"key1": "value1", "key2": "value2"}
 
         assert is_plain_lang_json(data) is True
 
@@ -24,9 +22,7 @@ class TestIsPlainLangJson:
         """測試包含列表的 JSON。"""
         from translation_tool.core.lm_translator_scan import is_plain_lang_json
 
-        data = {
-            "key1": ["value1", "value2"]
-        }
+        data = {"key1": ["value1", "value2"]}
 
         assert is_plain_lang_json(data) is False
 
@@ -34,9 +30,7 @@ class TestIsPlainLangJson:
         """測試包含字典的 JSON。"""
         from translation_tool.core.lm_translator_scan import is_plain_lang_json
 
-        data = {
-            "key1": {"nested": "value"}
-        }
+        data = {"key1": {"nested": "value"}}
 
         assert is_plain_lang_json(data) is False
 
@@ -114,7 +108,9 @@ class TestScanTranslatableFiles:
         assert path in files
         assert lang_files == []
 
-    def test_scan_translatable_files_handles_errors_gracefully(self, tmp_path, monkeypatch):
+    def test_scan_translatable_files_handles_errors_gracefully(
+        self, tmp_path, monkeypatch
+    ):
         """驗證 scan_translatable_files 在 find_patchouli_json 拋例外時，只 log warning 並回傳空結果。"""
         from translation_tool.core.lm_translator_scan import scan_translatable_files
 
@@ -127,6 +123,7 @@ class TestScanTranslatableFiles:
             raise OSError("讀取失敗")
 
         import translation_tool.core.lm_translator_scan as scan_mod
+
         monkeypatch.setattr(scan_mod, "find_patchouli_json", mock_find_patchouli)
         monkeypatch.setattr(scan_mod, "find_lang_json", mock_find_lang)
 
@@ -151,6 +148,7 @@ class TestScanTranslatableFiles:
             raise OSError("讀取失敗")
 
         import translation_tool.core.lm_translator_scan as scan_mod
+
         monkeypatch.setattr(scan_mod, "find_patchouli_json", mock_find_patchouli)
 
         patchouli, lang, files = scan_translatable_files(tmp_path)
@@ -172,12 +170,11 @@ class TestExtractItemsParallel:
         mock_logger = MagicMock()
 
         # extract_items_parallel 現在是 generator，empty 列表無 yield
-        results = list(extract_items_parallel(
-            files=[],
-            export_lang=False,
-            work_thread=2,
-            logger=mock_logger
-        ))
+        results = list(
+            extract_items_parallel(
+                files=[], export_lang=False, work_thread=2, logger=mock_logger
+            )
+        )
         assert results == []
 
     def test_extract_items_parallel_with_json(self, tmp_path):
@@ -189,21 +186,17 @@ class TestExtractItemsParallel:
         lang_dir.mkdir()
 
         lang_file = lang_dir / "en_us.json"
-        test_data = {
-            "item.test": "Test Item",
-            "item.test2": "Test Item 2"
-        }
+        test_data = {"item.test": "Test Item", "item.test2": "Test Item 2"}
         lang_file.write_text(json.dumps(test_data))
 
         mock_logger = MagicMock()
 
         # extract_items_parallel 現在是 generator，取第一次 yield
-        results = list(extract_items_parallel(
-            files=[lang_file],
-            export_lang=False,
-            work_thread=2,
-            logger=mock_logger
-        ))
+        results = list(
+            extract_items_parallel(
+                files=[lang_file], export_lang=False, work_thread=2, logger=mock_logger
+            )
+        )
         assert len(results) == 1
         file_cache, all_items = results[0]
         assert len(file_cache) == 1
@@ -224,12 +217,14 @@ class TestExtractItemsParallel:
         mock_logger = MagicMock()
 
         # extract_items_parallel 現在是 generator；無效檔被跳過，無 yield
-        results = list(extract_items_parallel(
-            files=[invalid_file],
-            export_lang=False,
-            work_thread=2,
-            logger=mock_logger
-        ))
+        results = list(
+            extract_items_parallel(
+                files=[invalid_file],
+                export_lang=False,
+                work_thread=2,
+                logger=mock_logger,
+            )
+        )
         assert results == []
 
     def test_extract_items_parallel_cache_type(self, tmp_path):
@@ -245,12 +240,11 @@ class TestExtractItemsParallel:
         mock_logger = MagicMock()
 
         # extract_items_parallel 現在是 generator，取第一次 yield
-        results = list(extract_items_parallel(
-            files=[lang_file],
-            export_lang=False,
-            work_thread=2,
-            logger=mock_logger
-        ))
+        results = list(
+            extract_items_parallel(
+                files=[lang_file], export_lang=False, work_thread=2, logger=mock_logger
+            )
+        )
         _file_cache, all_items = results[0]
         # 至少應該有 lang 類型
         cache_types = {item.get("cache_type") for item in all_items}
