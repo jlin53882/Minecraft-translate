@@ -639,32 +639,88 @@ def looks_like_book_json(data: object, parts: Sequence[str]) -> bool:
 # ---------------------------------------------------------------------------
 
 
-def advancement_texts(data: object) -> dict[str, str]:
-    """進度 ``display.title``／``display.description`` 裡的**字面**文字：``{JSON 路徑: 文字}``。
+def is_advancement_document(data: object) -> bool:
+    """判斷 JSON 是否符合可安全寫回的 Minecraft Advancement 外形。"""
+    return (
+        isinstance(data, dict)
+        and isinstance(data.get("criteria"), dict)
+        and isinstance(data.get("display"), dict)
+    )
 
-    寫成 ``{"translate": "鍵"}`` 的是語言檔的鍵，由語言檔負責，這裡不收。
+
+def _walk_advancement_component(
+    value: object, path: str, found: dict[str, str]
+) -> None:
+    """只走 Advancement 文字元件允許的 literal 子樹。
+
+    ``translate``、selector、score、NBT、樣式與事件都是結構資料；只有根字串、
+    ``text``／``fallback``，以及 ``with``／``extra`` 裡的元件文字可以進入翻譯閉環。
     """
+    if isinstance(value, str):
+        found[path] = value
+        return
+    if isinstance(value, list):
+        for index, child in enumerate(value):
+            _walk_advancement_component(child, f"{path}[{index}]", found)
+        return
+    if not isinstance(value, dict):
+        return
+
+    for key in ("text", "fallback"):
+        child = value.get(key)
+        if isinstance(child, str):
+            found[f"{path}.{key}"] = child
+    for key in ("with", "extra"):
+        children = value.get(key)
+        if isinstance(children, list):
+            for index, child in enumerate(children):
+                _walk_advancement_component(child, f"{path}.{key}[{index}]", found)
+
+
+def advancement_literal_paths(data: object) -> dict[str, str]:
+    """回傳 Advancement 顯示文字中可安全寫回的 literal 路徑。"""
     if not isinstance(data, dict) or not isinstance(data.get("display"), dict):
         return {}
+    display = data["display"]
     found: dict[str, str] = {}
     for field in ("title", "description"):
-        value = data["display"].get(field)
-        path = f"display.{field}"
-        if isinstance(value, dict) and isinstance(value.get("text"), str):
-            value, path = value["text"], f"{path}.text"
-        if (
-            isinstance(value, str)
-            and classify_book_string(value, book_field(path)) == "text"
-            and not is_field_name_text(path, value)
-        ):
+        if field in display:
+            _walk_advancement_component(display[field], f"display.{field}", found)
+    return found
+
+
+def advancement_texts(data: object) -> dict[str, str]:
+    """進度顯示元件中的可翻譯 literal：``{JSON 路徑: 文字}``。
+
+    ``translate`` 是語言檔鍵，永遠不送給 AI，也不會由 Advancement writer 覆寫。
+    ``fallback``、``with``、``extra`` 僅在它們確實是 literal 文字時納入。
+    """
+    found: dict[str, str] = {}
+    for path, value in advancement_literal_paths(data).items():
+        if classify_book_string(
+            value, book_field(path)
+        ) == "text" and not is_field_name_text(path, value):
             found[path] = value
     return found
 
 
+def set_advancement_text(data: object, path: str, value: str) -> None:
+    """以結構白名單寫回 Advancement literal，拒絕任意 JSON 路徑。
+
+    writer 與 extractor 共用 ``advancement_literal_paths``，因此翻譯後再次寫入時仍能
+    找到原本的路徑；樣式、事件與 ``translate`` key 不會被 generic writer 意外改動。
+    """
+    if not is_advancement_document(data):
+        raise ValueError("不是可寫回的 Advancement JSON")
+    if not isinstance(value, str):
+        raise TypeError("Advancement literal 翻譯必須是字串")
+    if path not in advancement_literal_paths(data):
+        raise KeyError(f"不是允許寫回的 Advancement literal 路徑：{path}")
+    from translation_tool.core.translation_path_writer import set_by_path
+
+    set_by_path(data, path, value)
+
+
 def looks_like_advancement(data: object) -> bool:
-    """有 ``criteria`` 且 ``display`` 帶字面文字的 JSON。"""
-    return (
-        isinstance(data, dict)
-        and isinstance(data.get("criteria"), dict)
-        and bool(advancement_texts(data))
-    )
+    """有 ``criteria``、``display`` 且帶可翻譯字面文字的 JSON。"""
+    return is_advancement_document(data) and bool(advancement_texts(data))

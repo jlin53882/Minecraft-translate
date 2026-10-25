@@ -20,6 +20,7 @@ from pathlib import Path
 from translation_tool.core.book_dirs import DEFAULT_BOOK_DIRS, find_book_dir_index
 from translation_tool.core.text_sniffer import split_locale
 from translation_tool.translation_db.schema import (
+    KIND_ADVANCEMENT,
     KIND_GUIDE,
     KIND_LANG,
     KIND_PATCHOULI,
@@ -79,6 +80,13 @@ def classify_parts(
         if match:
             return FileIdentity(KIND_LANG, mod_id, "", match.group(1).lower())
         return None
+
+    if (
+        len(parts) >= 4
+        and parts[2].lower() in {"advancement", "advancements"}
+        and name.lower().endswith(".json")
+    ):
+        return FileIdentity(KIND_ADVANCEMENT, mod_id, "/".join(parts[3:]), "en_us")
 
     dirs = tuple(dir_names) if dir_names is not None else patchouli_dir_names()
     book_index = find_book_dir_index(parts, dirs)

@@ -172,7 +172,7 @@ Mod DB 批次機翻預設只處理沒有生效譯文的條目，並透過 `write
 ### 其他會匯入的內容
 
 - 舊版 `key=value` 語言檔（`assets/<模組>/lang/en_US.lang`、`zh_CN.lang`…）：與 `.json` 語言檔同一個身分；同一個語系兩種格式都有時用 `.json`，`assets` 與 `data` 都有時用 `assets`。`data/<模組>/lang/<語系>.json` 也算語言檔。
-- 進度（`data/<模組>/advancement(s)/…`）：目前只匯入 `display.title`／`display.description` 的直接字面文字或現有的 `.text` 欄位（類型 `advancement`）；寫成 `{"translate": "鍵"}` 的由語言檔負責，沒有顯示文字的配方解鎖進度不匯入。ModDB 目前沒有完整的 Advancement JSON writer，因此 `fallback`、`with[]`、`extra[]`、樣式與事件仍不宣稱支援 round-trip，不會被半成品流程改寫。鍵值不含 `advancement`／`advancements` 資料夾，跨版本是同一個鍵。
+- 進度（`data/<模組>/advancement(s)/…`）：已完成從抽取、資料庫身分／鍵值、翻譯命中與寫回到 JSON round-trip 的閉環（類型 `advancement`）。`display.title`／`display.description` 支援根字串、`{"text": …}`、陣列，以及巢狀 `fallback`、`with[]`、`extra[]` 的 literal 文字；`{"translate": "鍵"}` 仍由語言檔負責，`translate` key、selector／score／NBT、樣式與 click／hover 事件都不會送給 AI 或被 writer 改寫。寫回使用 Advancement 專用結構白名單，不接受任意 JSON 路徑；文件結構不完整或路徑不再存在時會拒絕寫入，不會產生半成品輸出。`display.title.text`／`display.description.text` 若只是欄位名稱（例如 `Description`）仍依清理規則排除。鍵值不含 `advancement`／`advancements` 資料夾，跨版本是同一個鍵。
 - 書本根目錄的 `book.json` 不匯入：Patchouli 官方文件說明 `book.json` 必須放在原位，資源包能否覆寫它沒有確認。
 
 Patchouli 與 lang 走同一個流程，只是身分不同。FTB Quests / KubeJS / Markdown 不使用資料庫。

@@ -10,7 +10,12 @@ from pathlib import Path
 
 import pytest
 
-from translation_tool.core.text_sniffer import advancement_texts, classify_book_string
+from translation_tool.core.text_sniffer import (
+    advancement_literal_paths,
+    advancement_texts,
+    classify_book_string,
+    set_advancement_text,
+)
 from translation_tool.core.translatable_extractor import extract_translatables
 from translation_tool.translation_db.cleanup import entry_cleanup_category
 
@@ -171,8 +176,72 @@ def test_lang_display_snake_case_is_extractable_but_identifier_is_not():
     }
 
 
-def test_advancement_text_components_without_a_writer_are_explicitly_not_claimed():
-    """目前 ModDB 沒有 Advancement JSON writer，不能半途宣稱支援巢狀元件。"""
+def test_advancement_text_components_round_trip_without_touching_structure():
+    """Advancement 巢狀文字可抽取、寫回，且結構元件保持不變。"""
+    adv = {
+        "criteria": {"x": {}},
+        "display": {
+            "title": {
+                "translate": "advancements.story.mine_stone",
+                "fallback": "Mine Stone",
+                "with": [{"text": "literal"}, "raw literal"],
+                "extra": [{"text": "suffix", "bold": True}],
+                "clickEvent": {
+                    "action": "open_url",
+                    "value": "https://example.com",
+                },
+            },
+            "description": [
+                {"text": "Literal description", "italic": True},
+                {"text": "Second description"},
+            ],
+        },
+    }
+    paths = advancement_texts(adv)
+    assert paths == {
+        "display.title.fallback": "Mine Stone",
+        "display.title.with[0].text": "literal",
+        "display.title.with[1]": "raw literal",
+        "display.title.extra[0].text": "suffix",
+        "display.description[0].text": "Literal description",
+        "display.description[1].text": "Second description",
+    }
+    assert "display.title.translate" not in advancement_literal_paths(adv)
+
+    original_structure = {
+        "translate": adv["display"]["title"]["translate"],
+        "clickEvent": adv["display"]["title"]["clickEvent"],
+        "bold": adv["display"]["title"]["extra"][0]["bold"],
+        "criteria": adv["criteria"],
+    }
+    for index, path in enumerate(paths):
+        set_advancement_text(adv, path, f"翻譯 {index}")
+
+    assert adv["display"]["title"]["translate"] == original_structure["translate"]
+    assert adv["display"]["title"]["clickEvent"] == original_structure["clickEvent"]
+    assert adv["display"]["title"]["extra"][0]["bold"] == original_structure["bold"]
+    assert adv["criteria"] == original_structure["criteria"]
+    assert set(advancement_literal_paths(adv)) == set(paths)
+
+
+def test_advancement_writer_rejects_translate_and_event_paths():
+    adv = {
+        "criteria": {"x": {}},
+        "display": {
+            "title": {
+                "translate": "advancements.story.mine_stone",
+                "text": "Mine Stone",
+                "clickEvent": {"action": "run_command", "value": "/say hi"},
+            }
+        },
+    }
+    with pytest.raises(KeyError):
+        set_advancement_text(adv, "display.title.translate", "不應改鍵")
+    with pytest.raises(KeyError):
+        set_advancement_text(adv, "display.title.clickEvent.value", "不應改事件")
+
+
+def test_advancement_directory_extraction_uses_the_same_literal_contract():
     adv = {
         "criteria": {"x": {}},
         "display": {
@@ -180,18 +249,14 @@ def test_advancement_text_components_without_a_writer_are_explicitly_not_claimed
                 "translate": "advancements.story.mine_stone",
                 "fallback": "Mine Stone",
                 "with": [{"text": "literal"}],
-                "extra": [{"text": "suffix", "bold": True}],
-                "clickEvent": {
-                    "action": "open_url",
-                    "value": "https://example.com",
-                },
-            },
-            "description": {"text": "Literal description"},
+            }
         },
     }
-    # 只有現有的直接字面 text 路徑會進 ModDB；translate／fallback／with／extra
-    # 尚未接上完整 JSON round-trip，因此必須保持原始 JSON 不被誤寫入。
-    assert advancement_texts(adv) == {"display.description.text": "Literal description"}
+    items = extract_translatables(adv, Path("data/m/advancement/story/start.json"))
+    assert [(item["path"], item["source_text"]) for item in items] == [
+        ("display.title.fallback", "Mine Stone"),
+        ("display.title.with[0].text", "literal"),
+    ]
 
 
 @pytest.mark.parametrize("value", ["← →", "180°", "TODO"])

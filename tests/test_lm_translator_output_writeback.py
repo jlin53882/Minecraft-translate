@@ -5,6 +5,12 @@ from pathlib import Path
 import orjson
 
 from translation_tool.core import lm_translator
+from translation_tool.translation_db import (
+    KIND_ADVANCEMENT,
+    DbSettings,
+    ScanItem,
+    TranslationDB,
+)
 
 
 def test_translate_directory_generator_cache_hit_writes_output_json(tmp_path: Path, monkeypatch) -> None:
@@ -65,3 +71,176 @@ def test_translate_directory_generator_cache_hit_writes_output_json(tmp_path: Pa
 
     payload = orjson.loads(outputs[0].read_bytes())
     assert payload["a"] == "你好"
+
+
+def test_translate_directory_generator_advancement_cache_hit_round_trip(
+    tmp_path: Path, monkeypatch
+) -> None:
+    input_root = tmp_path / "input"
+    out_root = tmp_path / "out"
+    advancement_file = (
+        input_root / "data" / "demo_mod" / "advancement" / "story" / "start.json"
+    )
+    advancement_file.parent.mkdir(parents=True, exist_ok=True)
+    source = {
+        "criteria": {"x": {"trigger": "minecraft:tick"}},
+        "display": {
+            "title": {
+                "translate": "advancements.demo.start",
+                "fallback": "Start Here",
+                "extra": [{"text": " now", "bold": True}],
+                "clickEvent": {"action": "run_command", "value": "/say hi"},
+            }
+        },
+    }
+    advancement_file.write_bytes(orjson.dumps(source))
+
+    monkeypatch.setattr(lm_translator, "validate_api_keys", lambda: None)
+    monkeypatch.setattr(lm_translator, "reload_translation_cache", lambda: None)
+    monkeypatch.setattr(lm_translator, "value_fully_translated", lambda value: True)
+    monkeypatch.setattr(
+        lm_translator,
+        "get_cache_dict_ref",
+        lambda cache_type: (
+            {
+                "display.title.fallback|Start Here": {
+                    "src": "Start Here",
+                    "dst": "從這裡開始",
+                },
+                "display.title.extra[0].text| now": {
+                    "src": " now",
+                    "dst": " 現在",
+                },
+            }
+            if cache_type == "advancement"
+            else {}
+        ),
+    )
+    monkeypatch.setattr(
+        lm_translator,
+        "scan_translatable_files",
+        lambda root: ([advancement_file], [], [advancement_file]),
+    )
+    monkeypatch.setattr(
+        lm_translator,
+        "extract_items_parallel",
+        lambda **kw: [
+            (
+                {str(advancement_file): source},
+                [
+                    {
+                        "file": str(advancement_file),
+                        "path": "display.title.fallback",
+                        "text": "Start Here",
+                        "source_text": "Start Here",
+                        "cache_type": "advancement",
+                    },
+                    {
+                        "file": str(advancement_file),
+                        "path": "display.title.extra[0].text",
+                        "text": " now",
+                        "source_text": " now",
+                        "cache_type": "advancement",
+                    },
+                ],
+            )
+        ],
+    )
+
+    list(
+        lm_translator.translate_directory_generator(
+            str(input_root), str(out_root), dry_run=False
+        )
+    )
+
+    payload = orjson.loads(next(out_root.rglob("*.json")).read_bytes())
+    assert payload["display"]["title"]["translate"] == "advancements.demo.start"
+    assert payload["display"]["title"]["fallback"] == "從這裡開始"
+    assert payload["display"]["title"]["extra"][0] == {"text": " 現在", "bold": True}
+    assert (
+        payload["display"]["title"]["clickEvent"]
+        == source["display"]["title"]["clickEvent"]
+    )
+
+
+def test_translate_directory_generator_advancement_db_hit_round_trip(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """隔離資料庫命中後，仍由 Advancement writer 完成目標 JSON 注入。"""
+    input_root = tmp_path / "input"
+    out_root = tmp_path / "out"
+    db_path = tmp_path / "mod-translation.db"
+    advancement_file = (
+        input_root / "data" / "demo_mod" / "advancements" / "story" / "start.json"
+    )
+    advancement_file.parent.mkdir(parents=True, exist_ok=True)
+    source = {
+        "criteria": {"x": {"trigger": "minecraft:tick"}},
+        "display": {
+            "title": {
+                "translate": "advancements.demo.start",
+                "fallback": "Start Here",
+                "extra": [{"text": " now", "italic": True}],
+                "hoverEvent": {"action": "show_text", "contents": "Keep"},
+            },
+            "description": "Description text",
+        },
+    }
+    advancement_file.write_bytes(orjson.dumps(source))
+
+    db = TranslationDB(db_path)
+    db.ingest(
+        "1.20.1",
+        [
+            ScanItem(
+                KIND_ADVANCEMENT,
+                "demo_mod",
+                "story/start.json#display.title.fallback",
+                "Start Here",
+                "從這裡開始",
+            ),
+            ScanItem(
+                KIND_ADVANCEMENT,
+                "demo_mod",
+                "story/start.json#display.title.extra[0].text",
+                " now",
+                " 現在",
+            ),
+        ],
+    )
+    db.close()
+
+    monkeypatch.setattr(lm_translator, "validate_api_keys", lambda: None)
+    monkeypatch.setattr(lm_translator, "reload_translation_cache", lambda: None)
+
+    list(
+        lm_translator.translate_directory_generator(
+            str(input_root),
+            str(out_root),
+            dry_run=False,
+            use_translation_db=True,
+            translation_db_version="1.20.1",
+            translation_db_settings_snapshot=DbSettings(
+                enabled=True,
+                path=str(db_path),
+                version="1.20.1",
+                write_back=False,
+            ),
+        )
+    )
+
+    payload = orjson.loads(next(out_root.rglob("*.json")).read_bytes())
+    assert payload["display"]["title"]["fallback"] == "從這裡開始"
+    assert payload["display"]["title"]["extra"][0] == {
+        "text": " 現在",
+        "italic": True,
+    }
+    assert (
+        payload["display"]["title"]["translate"]
+        == source["display"]["title"]["translate"]
+    )
+    assert (
+        payload["display"]["title"]["hoverEvent"]
+        == source["display"]["title"]["hoverEvent"]
+    )
+    assert payload["display"]["description"] == source["display"]["description"]

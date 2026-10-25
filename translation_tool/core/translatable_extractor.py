@@ -16,8 +16,10 @@ from translation_tool.core.lm_config_rules import (
 )
 from translation_tool.core.text_sniffer import (
     VANILLA_NON_TEXT_DIRS,
+    advancement_texts,
     book_field,
     classify_book_string,
+    is_advancement_document,
     lang_non_text_reason,
     looks_like_book_json,
     value_shape_reason,
@@ -104,6 +106,30 @@ def find_lang_json(root: Path):
     return list(root.rglob("assets/*/lang/*.json"))
 
 
+def is_advancement_file(file_path: Path) -> bool:
+    """判斷是否為 ``data/<mod>/advancement(s)/*.json`` 檔案。"""
+    parts = Path(file_path).parts
+    # 輸入路徑可能帶有外層 ``data``／``assets`` 資料夾名稱；由內向外找，
+    # 才會以實際資源根目錄判斷，而不是被父目錄同名片段誤判。
+    for index in range(len(parts) - 3, -1, -1):
+        part = parts[index]
+        if part.lower() in {"assets", "data"} and parts[index + 2].lower() in {
+            "advancement",
+            "advancements",
+        }:
+            return parts[-1].lower().endswith(".json")
+    return False
+
+
+def find_advancement_json(root: Path) -> list[Path]:
+    """找出 Minecraft Advancement JSON，供一般目錄翻譯流程使用。"""
+    return [
+        path
+        for path in root.rglob("*.json")
+        if is_advancement_file(path.relative_to(root))
+    ]
+
+
 def is_lang_file(file_path: Path) -> bool:
     """
     判斷是否為語言檔（lang 類型）。
@@ -148,6 +174,21 @@ def extract_translatables(json_data, file_path):
     """
     items = []
     is_lang = is_lang_file(Path(file_path))
+
+    if (
+        not is_lang
+        and is_advancement_file(Path(file_path))
+        and is_advancement_document(json_data)
+    ):
+        return [
+            {
+                "file": str(file_path),
+                "path": path,
+                "text": text,
+                "source_text": text,
+            }
+            for path, text in advancement_texts(json_data).items()
+        ]
 
     def walk(obj, base_path=""):
         """遞迴遍歷物件提取可翻譯文字。"""

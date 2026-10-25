@@ -12,6 +12,7 @@ from pathlib import Path
 import pytest
 
 from translation_tool.translation_db import (
+    KIND_ADVANCEMENT,
     KIND_LANG,
     KIND_PATCHOULI,
     ScanItem,
@@ -227,6 +228,16 @@ def test_classify_lang_and_patchouli_members():
     other = classify_member("data/foo/patchouli_books/guide/zh_tw/entries/a/b.json")
     assert other.file_key == book.file_key and other.lang == "zh_tw"
     assert classify_member("assets/foo/patchouli_books/guide/entries/a.json") is None
+
+    advancement = classify_member("data/foo/advancements/story/start.json")
+    assert (advancement.kind, advancement.file_key, advancement.lang) == (
+        KIND_ADVANCEMENT,
+        "story/start.json",
+        "en_us",
+    )
+    assert advancement.item_key("display.title.fallback") == (
+        "story/start.json#display.title.fallback"
+    )
 
 
 def test_classify_file_relative_to_root(tmp_path):
@@ -1988,6 +1999,28 @@ def test_write_back_buffer_flushes_translated_items(db, tmp_path):
     )
     stats = buf.flush()
     assert stats.written == 1 and buf.flush().written == 0
+
+
+def test_write_back_buffer_resolves_advancement_identity_and_lookup(db, tmp_path):
+    f = tmp_path / "data" / "foo" / "advancement" / "story" / "start.json"
+    item_data = {
+        "file": str(f),
+        "path": "display.title.fallback",
+        "source_text": "Start Here",
+        "text": "從這裡開始",
+        "cache_type": "advancement",
+    }
+    buf = WriteBackBuffer(db, "1.21.1", tmp_path)
+    buf.add(item_data)
+    assert buf.flush().written == 1
+
+    hits, rest = split_items_by_db(
+        TranslationResolver(db, "1.21.1"),
+        [{**item_data, "text": "Start Here"}],
+        tmp_path,
+    )
+    assert [item["text"] for item in hits] == ["從這裡開始"]
+    assert rest == []
 
 
 # ---------------------------------------------------------- jar 掃描
