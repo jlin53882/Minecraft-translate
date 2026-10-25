@@ -214,7 +214,7 @@ Patchouli 與 lang 走同一個流程，只是身分不同。FTB Quests / KubeJS
 
 Schema v3 增加每個來源譯文的首次匯入時間與單調修訂序號，以及 history 的前後修訂快照。升級 v1 會先依序建立 v2 與 v3 備份；升級 v2 會先建立 `*.pre-schema-v3-<時間戳>.bak`。舊資料的 `translation.created_at` 保留為 `NULL`，不推測匯入時間。migration 在單一交易中完成；唯讀開啟舊資料庫不執行 migration，時間欄位會顯示未知。備份檔應和資料庫一樣納入使用者自己的備份政策。
 
-Schema v9 將 `history` 的一般保留政策固定為「每個條目最新 5 筆」。既有資料庫第一次可寫開啟時會在同一個 migration 交易中清理超出的舊記錄，並先建立 `*.pre-schema-v9-<時間戳>.bak`；之後每次寫入交易只重新整理本次有新增歷史的條目。Schema v10 新增 `history.projection_state`：JSON 尚未確認的 `smart_review_apply` marker 會標為 `pending`，不受五筆清理影響；JSON 成功回寫或對帳後改為 `projected`，之後才會依一般政策清理。被刪除的舊記錄不再能從條目頁還原，這是為了限制資料庫成長；若需要完整稽核或長期還原，請保留 migration 備份。
+Schema v9 將 `history` 的一般保留政策固定為「每個條目最新 5 筆」。既有資料庫第一次可寫開啟時會在同一個 migration 交易中清理超出的舊記錄，並先建立 `*.pre-schema-v9-<時間戳>.bak`；之後每次寫入交易只重新整理本次有新增歷史的條目。Schema v10 新增 `history.projection_state`：JSON 尚未確認的 `smart_review_apply` marker 會標為 `pending`，不受五筆清理影響；JSON 成功回寫或對帳後改為 `projected`，之後才會依一般政策清理。從 v8 升級時，舊資料沒有投影狀態可供判斷，既有 `smart_review_apply` 會先保守標為 `pending`，待讀取對帳確認後才允許清理，避免 migration 刪掉故障復原證據。被刪除的舊記錄不再能從條目頁還原，這是為了限制資料庫成長；若需要完整稽核或長期還原，請保留 migration 備份。
 
 兩個程序同時開啟舊版資料庫時，版本以取得寫鎖後重新讀到的為準：後到的程序若看到別人已完成該版 migration，就放棄本次升級並刪除自己剛建立的備份，不會重跑回填（例如把人工審核蓋回 `legacy_unknown`），也不會留下重複備份。
 

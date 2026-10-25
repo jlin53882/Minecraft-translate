@@ -803,11 +803,21 @@ def _ensure_history_projection_state_column(conn: sqlite3.Connection) -> None:
 
 
 def _migrate_history_retention_v9(conn: sqlite3.Connection) -> None:
-    """加入 marker 狀態後，再刪除既有資料庫中超出保留範圍的 history。"""
+    """加入 marker 狀態後，再刪除既有資料庫中超出保留範圍的 history。
+
+    v8 的資料庫沒有 ``projection_state``，因此無法知道既有
+    ``smart_review_apply`` 是否已完成 JSON 對帳。對這類未知狀態採保守
+    判定，先標成 ``pending``；下次讀取完成對帳後才會轉為 ``projected``，
+    避免 migration 先把故障復原所需的證據刪掉。
+    """
     from translation_tool.translation_db.history_retention import prune_all_history
 
     # v8→v9 會先清理 history；欄位必須在清理前加入，才能保護尚未對帳的 marker。
     _ensure_history_projection_state_column(conn)
+    conn.execute(
+        "UPDATE history SET projection_state='pending' "
+        "WHERE action='smart_review_apply' AND projection_state='projected'"
+    )
     prune_all_history(conn)
 
 

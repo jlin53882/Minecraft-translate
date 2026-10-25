@@ -209,6 +209,55 @@ def test_history_retention_migration_prunes_existing_database_and_keeps_backup(
         reopened.close()
 
 
+def test_history_retention_migration_preserves_legacy_smart_review_marker(
+    tmp_path,
+):
+    """v8 migration 無法判定舊 marker 是否已對帳時，先保留以便後續恢復。"""
+    path = tmp_path / "history-v8-pending.db"
+    db = TranslationDB(path)
+    db.ingest("1.21.1", [item()])
+    entry_id = db._one("SELECT id FROM entry LIMIT 1")[0]
+    db.close()
+
+    conn = sqlite3.connect(path)
+    conn.execute("ALTER TABLE history DROP COLUMN projection_state")
+    conn.execute("UPDATE meta SET value='8' WHERE key='schema_version'")
+    conn.execute(
+        "INSERT INTO history "
+        "(entry_id, batch, action, old_zh_tw, new_zh_tw, note) "
+        "VALUES (?, 'legacy-smart-run', 'smart_review_apply', '', ?, ?)",
+        (entry_id, "AI 譯文", "run=legacy-run; ordinal=1"),
+    )
+    for number in range(7):
+        conn.execute(
+            "INSERT INTO history "
+            "(entry_id, batch, action, old_zh_tw, new_zh_tw, note) "
+            "VALUES (?, ?, 'manual', '', ?, ?)",
+            (entry_id, f"legacy-manual-{number}", f"人工-{number}", str(number)),
+        )
+    conn.commit()
+    conn.close()
+
+    reopened = TranslationDB(path)
+    try:
+        marker = reopened._one(
+            "SELECT action, projection_state, note FROM history "
+            "WHERE entry_id=? AND action='smart_review_apply'",
+            (entry_id,),
+        )
+        assert marker == (
+            "smart_review_apply",
+            "pending",
+            "run=legacy-run; ordinal=1",
+        )
+        assert reopened._one(
+            "SELECT COUNT(*) FROM history WHERE entry_id=? AND action='manual'",
+            (entry_id,),
+        ) == (5,)
+    finally:
+        reopened.close()
+
+
 # ---------------------------------------------------------------- 身分
 def test_classify_lang_and_patchouli_members():
     lang = classify_member("assets/foo/lang/en_us.json")
