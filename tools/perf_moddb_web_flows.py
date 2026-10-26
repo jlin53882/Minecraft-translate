@@ -435,6 +435,13 @@ def s_scan(ctx: Ctx) -> None:
     x, y, *_ = ctx.tab("掃描匯入")
     ctx.click_at(x, y)
     ctx.settle(900)
+    # 遊戲版本用一個資料庫沒有的版本，真實掃描不會動到既有資料
+    version_box = ctx.find_all(None, "textbox", region=[270, 200, 820, 280])
+    if not version_box:
+        raise ScenarioError("找不到遊戲版本輸入框")
+    ctx.click_at(version_box[0][0], version_box[0][1])
+    ctx.pg.keyboard.type("9.9.9", delay=0)
+    ctx.settle(600)
     boxes = ctx.find_all(None, "textbox", region=[800, 100, 1340, 500])
     if not boxes:
         raise ScenarioError("找不到資料夾輸入框")
@@ -451,7 +458,7 @@ def s_scan(ctx: Ctx) -> None:
     ctx.snap("scan_dry")
 
     def real(i):
-        x, y, *_ = ctx.find("開始掃描", region=[260, 100, 1340, 5000])
+        x, y, *_ = ctx.find("開始掃描", mode="start", region=[260, 100, 1340, 5000])
         ctx.click_at(x, y)
 
     ctx.op("scan_real", real, hot=1)
