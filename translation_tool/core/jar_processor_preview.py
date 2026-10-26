@@ -25,6 +25,10 @@ from collections.abc import Callable, Generator
 from pathlib import Path
 from typing import Any
 
+from translation_tool.core.jar_sniff_extract import (
+    _walk_sniffed_members,
+    _wanted_langs,
+)
 from translation_tool.utils.bounded_executor import bounded_as_completed
 from translation_tool.utils.cancellation import raise_if_cancelled
 from translation_tool.utils.config_manager import load_config
@@ -51,6 +55,9 @@ def _scan_single_jar_for_preview(
     target_regex: re.Pattern | None,
     book_path_regex: re.Pattern | None,
     lang_regex: re.Pattern | None,
+    *,
+    lang_codes: list[str] | None = None,
+    skip_zh_cn: bool = False,
 ) -> dict[str, Any]:
     """在單一 JAR 中執行預覽比對（ThreadPoolExecutor 並行工作函式）。
 
@@ -97,6 +104,37 @@ def _scan_single_jar_for_preview(
         }
 
     entries = details.entries
+    sniffed_matches: list[tuple[str, int]] = []
+    if mode in ("book", "dual"):
+        def is_claimed(name: str) -> bool:
+            if mode == "dual":
+                return bool(
+                    lang_regex is not None
+                    and lang_regex.search(name)
+                    or book_path_regex is not None
+                    and book_path_regex.search(name)
+                )
+            return bool(target_regex is not None and target_regex.search(name))
+
+        def collect_sniffed(
+            zf,
+            member: str,
+            _kind: str,
+            _archive_chain: tuple[str, ...],
+            _budget: ZipReadBudget,
+        ) -> None:
+            sniffed_matches.append((member, zf.getinfo(member).file_size))
+
+        sniffed_langs = _wanted_langs(
+            lang_codes or ["en_us", "zh_tw", "zh_cn"],
+            skip_zh_cn,
+        )
+        _walk_sniffed_members(jar_path, is_claimed, sniffed_langs, collect_sniffed)
+
+    seen_paths = {entry.logical_path for entry in entries}
+    sniffed_matches = [
+        (member, size) for member, size in sniffed_matches if member not in seen_paths
+    ]
     if mode == "dual":
         lang_matched = [
             entry.logical_path
@@ -114,6 +152,8 @@ def _scan_single_jar_for_preview(
             if lang_regex.search(entry.logical_path)
             or book_path_regex.search(entry.logical_path)
         )
+        book_matched.extend(member for member, _size in sniffed_matches)
+        matched_bytes += sum(size for member, size in sniffed_matches)
         return {
             "jar": jar_name,
             "lang_matched": lang_matched,
@@ -126,7 +166,9 @@ def _scan_single_jar_for_preview(
         }
 
     matched_files = [entry.logical_path for entry in entries]
+    matched_files.extend(member for member, _size in sniffed_matches)
     matched_bytes = sum(entry.size for entry in entries)
+    matched_bytes += sum(size for _member, size in sniffed_matches)
     return {
         "jar": jar_name,
         "matched_files": matched_files,
@@ -233,6 +275,7 @@ def preview_extraction_generator_impl(
     from translation_tool.core.jar_processor import (
         build_book_path_regex,
         build_lang_file_regex,
+        get_lang_codes,
     )
 
     if mode == "lang":
@@ -247,6 +290,10 @@ def preview_extraction_generator_impl(
     else:
         yield {"error": f"未知模式: {mode}"}
         return
+
+    resolved_lang_codes = (
+        lang_codes if lang_codes is not None else get_lang_codes()
+    )
 
     # ---- 多執行緒掃描階段 ----
     workers = _get_preview_workers()
@@ -266,6 +313,8 @@ def preview_extraction_generator_impl(
             target_regex,
             book_path_regex,
             lang_regex,
+            lang_codes=resolved_lang_codes,
+            skip_zh_cn=skip_zh_cn,
         )
 
     with (

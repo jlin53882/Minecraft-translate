@@ -10,8 +10,14 @@ import zipfile
 from pathlib import Path
 
 from app.services_impl.pipelines.bundle_service import build_bundle_staging
-from translation_tool.core.jar_processor import _extract_from_jar, build_lang_file_regex
+from translation_tool.core.jar_processor import (
+    _extract_from_jar,
+    build_book_path_regex,
+    build_lang_file_regex,
+    extract_book_files_generator,
+)
 from translation_tool.core.jar_processor_preview import _scan_single_jar_for_preview
+from translation_tool.core.jar_sniff_extract import extract_sniffed_from_jar
 from translation_tool.core.lang_merge_extracted_assets import merge_extracted_to_assets
 from translation_tool.core.output_bundler import bundle_outputs_generator
 from translation_tool.utils.cancellation import TaskCancelled, cancel_scope
@@ -60,6 +66,24 @@ def _sodium_like_inner(value: str = "General") -> bytes:
     )
 
 
+def _custom_book_inner() -> bytes:
+    return _zip_bytes(
+        {
+            "assets/demo/books/chapters/foods.json": json.dumps(
+                {
+                    "title": "demo.book.title",
+                    "pages": [
+                        {
+                            "type": "standard",
+                            "summary": "A nested book that needs translation.",
+                        }
+                    ],
+                }
+            )
+        }
+    )
+
+
 def test_nested_scan_preview_and_canonical_extraction(tmp_path: Path):
     jar = _outer_jar(
         tmp_path / "sodium-neoforge-0.8.13+mc1.21.1.jar",
@@ -94,6 +118,38 @@ def test_nested_scan_preview_and_canonical_extraction(tmp_path: Path):
         ]
         == "General"
     )
+
+
+def test_nested_content_sniff_is_shared_by_preview_and_extraction(tmp_path: Path):
+    jar = _outer_jar(
+        tmp_path / "nested-sniff.jar",
+        nested={"META-INF/jarjar/books.jar": _custom_book_inner()},
+    )
+    book_regex = build_book_path_regex(codes=["en_us"])
+    member = "assets/demo/books/chapters/foods.json"
+
+    preview = _scan_single_jar_for_preview(
+        str(jar), "book", book_regex, book_path_regex=None, lang_regex=None
+    )
+    assert preview["error"] is None
+    assert preview["matched_files"] == [member]
+
+    output = tmp_path / "book_output"
+    written, skipped = extract_sniffed_from_jar(
+        str(jar), str(output), lambda name: bool(book_regex.search(name)), {"en_us"}
+    )
+    assert (written, skipped) == (1, 0)
+    extracted = output / "nested-sniff_extracted" / member
+    assert extracted.is_file()
+    assert "nested book that needs translation" in extracted.read_text(encoding="utf-8")
+
+    pipeline_output = tmp_path / "book_pipeline_output"
+    list(
+        extract_book_files_generator(
+            str(tmp_path), str(pipeline_output), lang_codes=["en_us"]
+        )
+    )
+    assert (pipeline_output / "nested-sniff_extracted" / member).is_file()
 
 
 def test_nested_translation_result_reaches_stage2_staging_and_zip(tmp_path: Path):
