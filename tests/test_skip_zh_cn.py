@@ -123,6 +123,17 @@ class TestBuildLangFileRegexSkipZhCn:
             "回歸:build_lang_file_regex(skip_zh_cn=True) 連 zh_tw 都不匹配"
         )
 
+    def test_lang_regex_matches_data_namespace_paths(self):
+        """DB scanner 也接受 data/<mod>/lang，pipeline 不應漏掉同一來源。"""
+        regex = build_lang_file_regex(skip_zh_cn=False)
+        assert regex.search("data/mymod/lang/en_us.json")
+        assert regex.search("data/mymod/lang/zh_tw.json")
+
+    def test_lang_regex_skip_zh_cn_applies_to_data_namespace_paths(self):
+        regex = build_lang_file_regex(skip_zh_cn=True)
+        assert not regex.search("data/mymod/lang/zh_cn.json")
+        assert regex.search("data/mymod/lang/en_us.json")
+
     def test_build_lang_file_regex_with_codes_and_skip_zh_cn(self):
         """build_lang_file_regex(codes=[...], skip_zh_cn=True) 必須過濾 zh_cn。
 

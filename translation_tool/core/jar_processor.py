@@ -91,7 +91,8 @@ def build_lang_file_regex(
         codes = [c for c in codes if c != "zh_cn"]
     codes_str = "|".join(map(re.escape, codes))
     regex = re.compile(
-        rf"(?:assets/([^/]+)/)?lang/({codes_str})\.(json|lang)$", re.IGNORECASE
+        rf"(?:(?:assets|data)/([^/]+)/)?lang/({codes_str})\.(json|lang)$",
+        re.IGNORECASE,
     )
     return regex
 
