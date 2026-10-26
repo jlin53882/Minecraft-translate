@@ -45,6 +45,7 @@ from translation_tool.utils.redaction import redact_secrets
 
 PREVIEW_PAGE_SIZE = 50
 PROGRESS_UPDATE_INTERVAL = 0.35
+PREVIEW_REQUIRED_HINT = "請先按「產生預覽」，確認替換範圍後才能繼續。"
 
 
 class BatchReplaceDialog:
@@ -118,7 +119,7 @@ class BatchReplaceDialog:
             on_change=self._on_quality_ack,
         )
         self.summary = ft.Text(
-            "尚未預覽",
+            PREVIEW_REQUIRED_HINT,
             size=14,
             weight=ft.FontWeight.BOLD,
         )
@@ -172,6 +173,7 @@ class BatchReplaceDialog:
             "primary",
             on_click=self._open_final_confirmation,
             disabled=True,
+            tooltip=PREVIEW_REQUIRED_HINT,
         )
         self.confirm_final_btn = kit.button(
             "確認並開始不可取消的寫入",
@@ -929,7 +931,16 @@ class BatchReplaceDialog:
         return f"查看略過原因（{self.plan.skipped_count:,d}）"
 
     def _open_final_confirmation(self, _e=None) -> None:
-        if self._busy or self.plan is None or not self.plan.changes:
+        if self._busy:
+            return
+        if self.plan is None:
+            show_snack(self.page, PREVIEW_REQUIRED_HINT, C.GOLD)
+            self._render(update=False)
+            self.summary.value = PREVIEW_REQUIRED_HINT
+            self._update_dialog()
+            return
+        if not self.plan.changes:
+            show_snack(self.page, "預覽完成，但沒有可替換項目。", C.GOLD)
             return
         if not self._quality_ack_is_valid():
             show_snack(self.page, "請先確認品質警告，或取消這次替換。", C.GOLD)

@@ -35,6 +35,7 @@ PAGE_SIZE = 50
 ACTOR = "使用者"
 ALL_MODS = "__all__"
 ALL_SOURCES = "__all__"
+PREVIEW_REQUIRED_HINT = "請先按「產生預覽」，確認批量審核範圍後才能執行。"
 
 
 class BulkReviewDialog:
@@ -147,7 +148,9 @@ class BulkReviewDialog:
         self._refresh_mods()
         self._refresh_sources()
         self.preview_btn = kit.button("產生預覽", "secondary", on_click=self._preview)
-        self.summary = ft.Text("尚未預覽", size=14, weight=ft.FontWeight.BOLD)
+        self.summary = ft.Text(
+            PREVIEW_REQUIRED_HINT, size=14, weight=ft.FontWeight.BOLD
+        )
         self.warning = ft.Text("", size=12, color=C.GOLD, visible=False)
         self.status = ft.Text("", size=12, color=C.MUTED, visible=False)
         self.progress = ft.ProgressBar(visible=False)
@@ -172,6 +175,7 @@ class BulkReviewDialog:
             icon=ft.Icons.VERIFIED_OUTLINED,
             on_click=self._confirm,
             disabled=True,
+            tooltip=PREVIEW_REQUIRED_HINT,
         )
         self.revert_btn = kit.button(
             "還原本次批量審核", "secondary", on_click=self._revert
@@ -564,7 +568,16 @@ class BulkReviewDialog:
     def _confirm(self, _e=None) -> None:
         """確認目前批量審核預覽，並在背景執行套用前的範圍檢查。"""
         db, plan = self.get_db(), self.plan
-        if db is None or plan is None or self._busy:
+        if db is None:
+            show_snack(self.page, "目前沒有可用的資料庫。", C.GOLD)
+            return
+        if self._busy:
+            show_snack(self.page, "批量審核處理中，請稍候。", C.GOLD)
+            return
+        if plan is None:
+            self.summary.value = PREVIEW_REQUIRED_HINT
+            show_snack(self.page, PREVIEW_REQUIRED_HINT, C.GOLD)
+            self._safe_update()
             return
         excluded = tuple(self.excluded)
         generation = self._generation

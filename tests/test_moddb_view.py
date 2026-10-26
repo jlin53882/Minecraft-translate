@@ -1840,10 +1840,10 @@ def test_entries_and_overview_show_unknown_original_text(db_path):
 
 
 def test_batch_replace_dialog_pages_all_rows_and_requires_preview_after_selection(
-    db_path,
+    db_path, monkeypatch
 ):
     from app.services_impl.moddb_service import EntryFilter
-    from app.views.moddb.batch_replace_dialog import BatchReplaceDialog
+    from app.views.moddb import batch_replace_dialog as module
 
     db = TranslationDB(db_path)
     db.ingest(
@@ -1859,13 +1859,24 @@ def test_batch_replace_dialog_pages_all_rows_and_requires_preview_after_selectio
             for index in range(55)
         ],
     )
-    dialog = BatchReplaceDialog(
+    dialog = module.BatchReplaceDialog(
         mock_page(),
         lambda: db,
         EntryFilter(version="1.21.1"),
         lambda _result: None,
         operation_launcher=lambda target, **_kwargs: (target(), True)[1],
     )
+    shown: list[str] = []
+    monkeypatch.setattr(
+        module,
+        "show_snack",
+        lambda _page, message, *_args, **_kwargs: shown.append(message),
+    )
+    assert "產生預覽" in dialog.apply_btn.tooltip
+    dialog._open_final_confirmation()
+    assert shown == [module.PREVIEW_REQUIRED_HINT]
+    assert module.PREVIEW_REQUIRED_HINT in dialog.summary.value
+
     dialog.find_field.value = "舊"
     dialog.replace_field.value = "新"
     dialog._preview()
