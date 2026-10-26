@@ -725,8 +725,7 @@ class SmartReviewApplyMixin:
         except Exception as exc:  # noqa: BLE001 - report a failed transaction chunk
             error = str(exc) or type(exc).__name__
             chunk_outcomes = [
-                (ordinal, "error", error, None)
-                for ordinal, _status, _item_error, _pending in chunk_outcomes
+                (int(item["ordinal"]), "error", error, None) for item in chunk
             ]
         return chunk_outcomes, cancelled
 

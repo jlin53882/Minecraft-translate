@@ -668,22 +668,30 @@ def _apply_moddb_smart_review_fast_batch(
     if not callable(batch_apply):
         return None
     results: list[SmartReviewBatchItemResult] = []
+    selected_by_ordinal = {candidate.ordinal: candidate for candidate in selected}
     run_id = selected[0].run_id
 
-    def fast_progress(
-        _processed: int,
-        _total: int,
+    def make_item(
         batch_item: tuple[int, str, str | None],
-    ) -> None:
+    ) -> SmartReviewBatchItemResult:
         ordinal, status, error = batch_item
-        candidate = selected[len(results)]
-        item = SmartReviewBatchItemResult(
+        candidate = selected_by_ordinal.get(ordinal)
+        if candidate is None:
+            raise ValueError(f"智慧校對批量結果含未知 ordinal：{ordinal}")
+        return SmartReviewBatchItemResult(
             candidate.run_id,
             ordinal,
             candidate.key,
             status,
             error,
         )
+
+    def fast_progress(
+        _processed: int,
+        _total: int,
+        batch_item: tuple[int, str, str | None],
+    ) -> None:
+        item = make_item(batch_item)
         results.append(item)
         if progress is not None:
             progress(
@@ -715,16 +723,7 @@ def _apply_moddb_smart_review_fast_batch(
     fast_items, cancelled = fast_result
     # Reconstruct only for adapters that omit the progress callback.
     if len(results) != len(fast_items):
-        results = [
-            SmartReviewBatchItemResult(
-                selected[index].run_id,
-                ordinal,
-                selected[index].key,
-                status,
-                error,
-            )
-            for index, (ordinal, status, error) in enumerate(fast_items)
-        ]
+        results = [make_item(batch_item) for batch_item in fast_items]
     return SmartReviewBatchResult(
         action=action,
         requested=len(selected),

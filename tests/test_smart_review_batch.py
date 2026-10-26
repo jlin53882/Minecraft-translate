@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from dataclasses import replace
 
 from app.services_impl import moddb_smart_review_service as service
@@ -243,3 +244,121 @@ def test_json_batch_apply_savepoint_keeps_other_candidates(monkeypatch, tmp_path
         )
     finally:
         db.close()
+
+
+def test_json_batch_apply_reports_every_candidate_when_transaction_cannot_start(
+    monkeypatch, tmp_path
+):
+    """整批 transaction 無法開始時，每個候選都要收到錯誤結果。"""
+    path = tmp_path / "smart-review-transaction-start.db"
+    _store, run_id, _snapshots = seed_ready_run(path, 3, chunk_size=3)
+    candidates = _load_ready_candidates(path, run_id, 3)
+    payload = [
+        {
+            "run_id": candidate.run_id,
+            "ordinal": candidate.ordinal,
+            "status": candidate.status,
+            "draft_zh_tw": candidate.draft_zh_tw,
+            "suggested_zh_tw": candidate.suggested_zh_tw,
+        }
+        for candidate in candidates
+    ]
+
+    @contextmanager
+    def fail_transaction(*_args, **_kwargs):
+        if False:
+            yield None
+        raise RuntimeError("injected transaction start failure")
+
+    monkeypatch.setattr(TranslationDB, "_tx", fail_transaction)
+    db = TranslationDB(path)
+    try:
+        result, cancelled = db.apply_smart_review_candidate_batch(run_id, payload)
+    finally:
+        db.close()
+
+    assert cancelled is False
+    assert [ordinal for ordinal, _status, _error in result] == [1, 2, 3]
+    assert [status for _ordinal, status, _error in result] == [
+        "error",
+        "error",
+        "error",
+    ]
+    assert all("injected transaction start failure" in error for _, _, error in result)
+
+
+def test_json_batch_apply_reports_every_candidate_when_transaction_commit_fails(
+    monkeypatch, tmp_path
+):
+    """commit 失敗回滾整批時，已處理與未處理候選都要回報錯誤。"""
+    path = tmp_path / "smart-review-transaction-commit.db"
+    _store, run_id, _snapshots = seed_ready_run(path, 3, chunk_size=3)
+    candidates = _load_ready_candidates(path, run_id, 3)
+    payload = [
+        {
+            "run_id": candidate.run_id,
+            "ordinal": candidate.ordinal,
+            "status": candidate.status,
+            "draft_zh_tw": candidate.draft_zh_tw,
+            "suggested_zh_tw": candidate.suggested_zh_tw,
+        }
+        for candidate in candidates
+    ]
+    original_tx = TranslationDB._tx
+
+    @contextmanager
+    def fail_commit(self, *args, **kwargs):
+        with original_tx(self, *args, **kwargs) as conn:
+            yield conn
+            raise RuntimeError("injected transaction commit failure")
+
+    monkeypatch.setattr(TranslationDB, "_tx", fail_commit)
+    db = TranslationDB(path)
+    try:
+        result, cancelled = db.apply_smart_review_candidate_batch(run_id, payload)
+    finally:
+        db.close()
+
+    assert cancelled is False
+    assert [ordinal for ordinal, _status, _error in result] == [1, 2, 3]
+    assert [status for _ordinal, status, _error in result] == [
+        "error",
+        "error",
+        "error",
+    ]
+    assert all("injected transaction commit failure" in error for _, _, error in result)
+
+
+class _OrdinalBatchDB(_FakeDB):
+    """回傳非連續 ordinal，驗證服務層不以結果長度猜候選。"""
+
+    def apply_smart_review_candidate_batch(
+        self, _run_id, candidates, *, progress_cancel, progress, **_kwargs
+    ):
+        del progress_cancel
+        selected = tuple(candidates)
+        result = (selected[-1]["ordinal"], "applied", None)
+        if progress is not None:
+            progress(len(selected), len(selected), result)
+        return (result,), False
+
+
+def test_fast_batch_progress_matches_candidate_by_ordinal(monkeypatch):
+    """服務層進度應用實際 ordinal 對應 key，而非結果前綴位置。"""
+    database = _OrdinalBatchDB()
+    monkeypatch.setattr(service, "_open", lambda *_args, **_kwargs: database)
+    progress = []
+
+    result = service.apply_moddb_smart_review_batch_from_path(
+        "db.sqlite",
+        (),
+        [_candidate(3), _candidate(9)],
+        progress=progress.append,
+    )
+
+    assert result.processed == 1
+    assert result.items[0].ordinal == 9
+    assert result.items[0].key == "key9"
+    assert progress[0]["item"].ordinal == 9
+    assert progress[0]["item"].key == "key9"
+    assert database.closed is True
