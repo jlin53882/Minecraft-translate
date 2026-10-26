@@ -70,11 +70,11 @@ flowchart TD
 
 - 路徑狀態：`source_root`（模組資料夾）、`review_root`（資源包路徑）。路徑欄位失焦時會正規化（`normalize_path_text`），並視需要呼叫 `_migrate_old_icon_cache`。
 - 資料狀態：
-  - `mods`：`modid → [entry]`，由 `_rebuild_mods` 或 `_finish_load` 建立。
+  - `mods`：`modid → [entry]`。掃描完成時由 `_finish_load` 建成 dict；快取命中時為 `ModEntryStore`（`mod_store.py`），第一次存取某模組才讀該模組分片並補上譯文，模組清單因此只讀當頁模組。
   - `current_modid`、`_zh_data`（目前模組的譯文字典，儲存時整份寫出）、`_current_zh_file`。
   - 分頁：模組清單 `mod_page_size`（預設 50，可選 25、50、100），詳情 `page_size`（預設 50）。
-- L1 快取：`_entries_cache` 與 `_cache_meta["source_identity"]`，僅保存來源資料（modid、key、en、source_jar、icon_path），不含譯文。命中時仍會依目前的 `review_root` 重新補上譯文（`_hydrate_entries`）。
-- L2 快取：`get_data_root()/.icon_cache/`（`entries_cache._get_cache_dir`），只在 `jar_directory` 模式下讀寫，寫入於掃描完成後（`_save_entries_cache_l2`）。快取版本為 `_CACHE_VERSION`，身分由 `_compute_source_identity` 計算。
+- L1 快取：`_source_cache`（`MemorySource` 或 `ShardSource`）與 `_cache_meta["source_identity"]`，僅保存來源資料（modid、key、en、source_jar、icon_path），不含譯文。命中時依目前的 `review_root` 建立譯文對照（`_build_zh_tw_lookup`），由 `ModEntryStore` 逐模組補上。
+- L2 快取：`get_data_root()/.icon_cache/<key>/`（`entries_cache._get_cache_dir`），只在 `jar_directory` 模式下讀寫：`index.json`（身分、模組與筆數）加每個模組一個欄位式分片。寫入於掃描完成後（`_save_entries_cache_l2`），讀取（`open_entries_cache_l2`）命中時只讀 index。快取版本為 `_CACHE_VERSION`，身分由 `_compute_source_identity` 計算。
 - 圖示快取：`get_data_root()/.icon_cache/jar_icons/`（`_get_icon_cache_dir`）。
 - 寫出檔案：`{review_root}/{modid}/lang/zh_tw.json`，UTF-8、`indent=2`、`ensure_ascii=False`。若找不到既有檔案，`_find_zh_file` 回傳 `None`，儲存會被拒絕。
 

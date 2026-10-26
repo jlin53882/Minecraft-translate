@@ -4,9 +4,7 @@
 測試要 monkeypatch 這些函式時，請 patch 本模組（呼叫者都在這裡查名稱）。
 """
 
-import json
 import shutil
-import threading
 import unicodedata
 import zipfile
 from pathlib import Path
@@ -15,7 +13,6 @@ from app.icon_catalog import ModpackAssetCatalog
 from app.icon_resolve import CONTENT_ICON_PREFIXES, IconHit, hit_to_uri, resolve_icon
 from translation_tool.utils.app_paths import get_data_root
 from translation_tool.utils.bounded_executor import bounded_as_completed
-from translation_tool.utils.cache_registry import register_cache
 from translation_tool.utils.cancellation import raise_if_cancelled
 from translation_tool.utils.config_manager import load_config
 from translation_tool.utils.log_unit import log_info, log_warning
@@ -24,7 +21,6 @@ from translation_tool.utils.worker_count import resolve_worker_count
 from translation_tool.utils.zip_safety import (
     ArchiveBudgetError,
     ZipReadBudget,
-    read_limited,
 )
 
 # 只有這些內容 key 需要進行 model icon lookup。
@@ -52,17 +48,6 @@ def _key_needs_icon(key: str) -> bool:
 def _get_icon_cache_dir() -> Path:
     """取得 icon 快取根目錄（統一至 .icon_cache/jar_icons/）。"""
     return get_data_root() / ".icon_cache" / "jar_icons"
-
-
-def _get_model_index_cache_dir() -> Path:
-    """取得 model index 快取目錄（.icon_cache/model_index/）。"""
-    return get_data_root() / ".icon_cache" / "model_index"
-
-
-def _get_jar_hash(jar_path: Path) -> str:
-    """計算 JAR 的 hash（mtime + size），用於 cache 失效判斷。"""
-    stat = jar_path.stat()
-    return f"mtime:{stat.st_mtime:.0f}_size:{stat.st_size}"
 
 
 def _migrate_old_icon_cache(source_root: Path) -> bool:
@@ -108,22 +93,6 @@ def _migrate_old_icon_cache(source_root: Path) -> bool:
     return True
 
 
-# 程序內 model index 快取：(jar 路徑, modid) → (jar_hash, index)
-# 同一個 JAR 的每個物品都會查 model index；原本每次都重新讀取並解析 JSON 快取檔
-# （40 個 JAR 就讀了 9,179 次），改為每個 JAR 只讀一次。
-_MODEL_INDEX_MEMO: dict[tuple[str, str], tuple[str, dict]] = {}
-_MODEL_INDEX_MEMO_LOCK = threading.Lock()
-
-
-def clear_model_index_memo() -> None:
-    """清除程序內 model index 快取。"""
-    with _MODEL_INDEX_MEMO_LOCK:
-        _MODEL_INDEX_MEMO.clear()
-
-
-register_cache("icon_preview.model_index_memo", clear_model_index_memo)
-
-
 def _resolve_icon_from_catalog(
     jar_path: Path,
     lang_namespace: str,
@@ -145,256 +114,6 @@ def _resolve_icon_from_catalog(
         current_zf=current_zf,
         budget=budget,
     )
-
-
-def _load_model_index_from_cache(jar_path: Path, modid: str) -> dict | None:
-    """嘗試讀取 model index cache（先查程序內快取，再查磁碟）。
-
-    失效條件：JAR 的 mtime/size 改變，或 cache 檔不存在/格式無效。
-
-    回傳：
-        model_index dict（name → [路徑列表]），或 None（cache miss）
-    """
-    memo_key = (str(jar_path), modid)
-    current_hash = _get_jar_hash(jar_path)
-    with _MODEL_INDEX_MEMO_LOCK:
-        memo = _MODEL_INDEX_MEMO.get(memo_key)
-    if memo is not None and memo[0] == current_hash:
-        return memo[1]
-
-    index = _load_model_index_from_disk(jar_path, modid, current_hash)
-    if index is not None:
-        with _MODEL_INDEX_MEMO_LOCK:
-            _MODEL_INDEX_MEMO[memo_key] = (current_hash, index)
-    return index
-
-
-def _load_model_index_from_disk(
-    jar_path: Path, modid: str, current_hash: str
-) -> dict | None:
-    """從磁碟讀取 model index cache；hash 或 modid 不符時回傳 None。"""
-    cache_dir = _get_model_index_cache_dir()
-    cache_dir.mkdir(parents=True, exist_ok=True)
-    safe_jar_name = jar_path.stem  # stem 已剝除副檔名
-    cache_file = cache_dir / f"{safe_jar_name}.json"
-
-    if not cache_file.exists():
-        return None
-
-    try:
-        with open(cache_file, encoding="utf-8") as f:
-            data = json.load(f)
-    except (OSError, json.JSONDecodeError):
-        return None
-
-    # 檢查 jar_hash 是否匹配
-    if data.get("jar_hash") != current_hash:
-        return None
-
-    if data.get("modid") != modid:
-        return None
-
-    return data.get("index")
-
-
-def _save_model_index_to_cache(jar_path: Path, modid: str, model_index: dict):
-    """將 model index 寫入磁碟 cache（atomic write）。"""
-    cache_dir = _get_model_index_cache_dir()
-    cache_dir.mkdir(parents=True, exist_ok=True)
-    safe_jar_name = jar_path.stem  # stem 已剝除副檔名
-    cache_file = cache_dir / f"{safe_jar_name}.json"
-
-    data = {
-        "jar_name": jar_path.name,
-        "jar_hash": _get_jar_hash(jar_path),
-        "modid": modid,
-        "index": model_index,
-    }
-
-    tmp = cache_dir / f"{cache_file.stem}.tmp"
-    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-    tmp.replace(cache_file)
-    with _MODEL_INDEX_MEMO_LOCK:
-        _MODEL_INDEX_MEMO[(str(jar_path), modid)] = (data["jar_hash"], model_index)
-
-
-def _build_model_index(names: list[str], modid: str) -> dict[str, list[str]]:
-    """動態掃描所有 .json model 檔，建立 name → [路徑列表] index。
-
-    name = 相對路徑（保留子目錄），例如 block/restonia_crystal_block。
-    同一個 name 可能來自不同子目錄（block/ vs item/），全部保留。
-    """
-    index: dict[str, list[str]] = {}
-    prefix = f"assets/{modid}/models/"
-
-    for n in names:
-        raise_if_cancelled()
-        if not (n.startswith(prefix) and n.endswith(".json")):
-            continue
-        rel = n[len(prefix) :]
-        name = rel.replace(".json", "")
-        # 保留子目錄前綴（例如 block/restonia_crystal_block）
-        # 這樣 _try_extract_mod_icon_from_model 可以用完整路徑做精準 lookup
-        if name not in index:
-            index[name] = []
-        index[name].append(n)
-
-    return index
-
-
-def _get_texture_value(model_data: dict) -> str | None:
-    """從 model JSON 的 textures 欄位取值（無白名單優先順序）。
-
-    邏輯：
-        - 只有 1 個 key → 直接取那個值
-        - 超過 1 個 key → 依序取：layer0 → front → particle → 任意第一個
-    """
-    textures = model_data.get("textures", {})
-    if not textures:
-        return None
-
-    if len(textures) == 1:
-        return next(iter(textures.values()))
-
-    for key in ["layer0", "front", "particle"]:
-        if key in textures:
-            return textures[key]
-
-    return next(iter(textures.values()))
-
-
-def _follow_parent_chain(
-    model_path: str,
-    names: set[str],
-    modid: str,
-    zf: zipfile.ZipFile,
-    visited: set[str] | None = None,
-    budget: ZipReadBudget | None = None,
-) -> str | None:
-    """沿 parent chain 遞迴向上找，直到找到有 textures 的 model。
-
-    遇到 minecraft: 開頭的 parent 直接跳過（不處理 Minecraft 內建資源）。
-    """
-    if visited is None:
-        visited = set()
-
-    if model_path in visited or model_path not in names:
-        return None
-    visited.add(model_path)
-
-    try:
-        raw = read_limited(zf, model_path, budget=budget).decode(
-            "utf-8", errors="replace"
-        )
-        data = json.loads(raw)
-    except ArchiveBudgetError:
-        raise  # 整包累計超限：交給呼叫端中止這個 JAR，不當成單一 model 解析失敗
-    except Exception:  # noqa: BLE001
-        return None
-
-    tex_val = _get_texture_value(data)
-    if tex_val:
-        return tex_val
-
-    parent = data.get("parent")
-    if not parent:
-        return None
-
-    if ":" in parent:
-        ns, path = parent.split(":", 1)
-        if ns == modid:
-            parent_path = f"assets/{ns}/models/{path}.json"
-        elif ns == "minecraft":
-            return None  # 跳過 Minecraft 內建資源
-        else:
-            return None
-    else:
-        base = str(Path(model_path).parent).replace("\\", "/")
-        parent_path = f"{base}/{parent}.json"
-
-    return _follow_parent_chain(parent_path, names, modid, zf, visited, budget)
-
-
-def _texture_to_png_path(tex_val: str) -> str | None:
-    """將 texture value（namespace:path）轉換為 JAR 內的 PNG 路徑。
-
-    格式：namespace:path → assets/namespace/textures/path.png
-    """
-    if not tex_val or ":" not in tex_val:
-        return None
-    ns, path = tex_val.split(":", 1)
-    return f"assets/{ns}/textures/{path}.png"
-
-
-def _try_extract_mod_icon_from_model(
-    jar_path: Path,
-    modid: str,
-    zf: zipfile.ZipFile,
-    names: set[str],
-    key: str | None = None,
-    budget: ZipReadBudget | None = None,
-) -> tuple[str, str] | None:
-    """嘗試從 model JSON 解析 mod icon。
-
-    流程：
-        1. 建立/讀取 model index（使用 cache）
-        2. 如果有 key，先用 key 查 item 自己的 model texture（精準匹配）
-        3. 移除 logo/icon.png fallback（錯誤的 icon 比沒有更糟）
-           （但只有當 key 的 namespace 與 modid 一致時才套用 fallback）
-        4. 使用 texture fallback 策略取值
-
-    回傳：
-        (texture_value, png_path) 或 None
-    """
-    model_index = _load_model_index_from_cache(jar_path, modid)
-    if model_index is None:
-        model_index = _build_model_index(list(names), modid)
-        raise_if_cancelled()
-        _save_model_index_to_cache(jar_path, modid, model_index)
-
-    # ===== 優先：嘗試用 key 查 item 自己的 model texture =====
-    if key:
-        # 將 key 轉為 model name
-        # 例如：block.actuallyadditions.restonia_crystal_block → block/restonia_crystal_block
-        #       item.actuallyadditions.drill → item/drill
-        # 原理：key = "<prefix>.<modid>.<name>"，去掉 modid 前綴就是 model name
-        prefix = key.split(".")[0]  # "block" 或 "item" 等
-        rest = key[len(prefix) + 1 + len(modid) + 1 :]  # "restonia_crystal_block"
-        model_names = [f"{prefix}/{rest}"]
-        if prefix == "entity":
-            # 一些模組的 entity 翻譯（例如 Worm）沒有 entity model，
-            # 但同名物品模型提供了合適的圖示；只在精確同名時作為 fallback。
-            model_names.append(f"item/{rest}")
-
-        for model_name in model_names:
-            if model_name not in model_index:
-                continue
-            for model_path in model_index[model_name]:
-                tex_val = _follow_parent_chain(
-                    model_path, names, modid, zf, budget=budget
-                )
-                if not tex_val:
-                    continue
-                png_path = _texture_to_png_path(tex_val)
-                if png_path and png_path in names:
-                    return tex_val, png_path
-
-    # ===== Fallback：找 icon/logo/item_icon/block_icon 模型 =====
-    # 限制：只有當 key 的 namespace 與 modid 一致時才套用 fallback
-    # 原因：icon/logo 模型是該 mod 的專屬資源（如 assets/actuallyadditions/models/icon.json）
-    # 不該用在 minecraft 命名空間的 key（如 block.minecraft.banner.actuallyadditions.*）
-    # key 格式：<prefix>.<namespace>.<name> 或 <prefix>.<name>（vanilla 無 namespace portion）
-    # namespace portion = key.split(".")[1]
-    # 只有當有 namespace portion（key 有 >= 3 parts）且 namespace != modid 時才阻止
-    if key:
-        key_parts = key.split(".")
-        if len(key_parts) >= 3:
-            key_ns = key_parts[1]  # namespace portion
-            if key_ns != modid:
-                return None  # namespace 不一致，直接回 None，不做任何 fallback
-
-    # 當 model lookup 失敗時，不做任何 logo/icon.png fallback，直接回 None
-    return None
 
 
 # ==================================================

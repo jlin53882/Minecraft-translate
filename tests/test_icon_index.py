@@ -52,11 +52,6 @@ def test_build_and_save_icon_index_creates_loadable_index(tmp_path, monkeypatch)
         archive.writestr("assets/my_mod/textures/item/apple.png", b"png")
 
     monkeypatch.setattr(icon_index, "get_data_root", lambda: tmp_path / "data")
-    from app.views.icon_preview import icon_cache
-
-    monkeypatch.setattr(
-        icon_cache, "_get_model_index_cache_dir", lambda: tmp_path / "model-index"
-    )
     monkeypatch.setattr(
         icon_index,
         "load_config",
@@ -96,11 +91,6 @@ def test_build_and_save_indexes_every_namespace_in_one_jar(tmp_path, monkeypatch
             archive.writestr(f"assets/{namespace}/textures/item/{item}.png", b"png")
 
     monkeypatch.setattr(icon_index, "get_data_root", lambda: tmp_path / "data")
-    from app.views.icon_preview import icon_cache
-
-    monkeypatch.setattr(
-        icon_cache, "_get_model_index_cache_dir", lambda: tmp_path / "model-index"
-    )
     monkeypatch.setattr(
         icon_index,
         "load_config",

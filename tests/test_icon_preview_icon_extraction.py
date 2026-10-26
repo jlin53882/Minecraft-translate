@@ -4,8 +4,6 @@
 
 覆蓋：
 - _batch_extract_jar_icons()：批次 ZIP 處理（每 JAR 只開一次、progress callback、icon_path 回寫）
-- _load_model_index_from_cache()：model index cache 讀取（hit / miss / 失效）
-- _save_model_index_to_cache()：model index cache 寫入
 """
 
 import json
@@ -83,13 +81,7 @@ class TestBatchExtractJarIcons:
             zip_open_count += 1
             return original_zipfile(*args, **kwargs)
 
-        with (
-            patch("zipfile.ZipFile", side_effect=counting_zipfile),
-            patch(
-                "app.views.icon_preview.icon_cache._try_extract_mod_icon_from_model",
-                return_value=None,
-            ),
-        ):
+        with patch("zipfile.ZipFile", side_effect=counting_zipfile):
             processed = _batch_extract_jar_icons(
                 jar_to_entries, cache_root, tmp_path / "mods"
             )
@@ -131,11 +123,9 @@ class TestBatchExtractJarIcons:
         assert entry1.icon_path.startswith("jar://")
         assert "assets/test_mod" in entry1.icon_path
 
-    def test_entity_key_uses_exact_named_item_model_fallback(
-        self, tmp_path, monkeypatch
-    ):
+    def test_entity_key_uses_exact_named_item_model_fallback(self, tmp_path):
         """Entity 翻譯找不到 entity model 時可用同名 item model 顯示圖示。"""
-        from app.views.icon_preview import icon_cache
+        from app.views.icon_preview.icon_cache import _batch_extract_jar_icons
 
         jar = tmp_path / "mods" / "actuallyadditions.jar"
         create_test_jar(
@@ -147,26 +137,14 @@ class TestBatchExtractJarIcons:
                 "assets/actuallyadditions/textures/item/worm.png": png_1x1(),
             },
         )
-        monkeypatch.setattr(
-            icon_cache,
-            "_get_model_index_cache_dir",
-            lambda: tmp_path / "model_index_cache",
+        entry = MockEntry("actuallyadditions", "entity.actuallyadditions.worm")
+
+        _batch_extract_jar_icons(
+            {jar.name: [entry]}, tmp_path / "icon_cache", jar.parent
         )
 
-        with zipfile.ZipFile(jar) as zf:
-            names = set(zf.namelist())
-            result = icon_cache._try_extract_mod_icon_from_model(
-                jar,
-                "actuallyadditions",
-                zf,
-                names,
-                key="entity.actuallyadditions.worm",
-            )
-
-        assert result == (
-            "actuallyadditions:item/worm",
-            "assets/actuallyadditions/textures/item/worm.png",
-        )
+        assert entry.icon_path.startswith("jar://")
+        assert "textures/item/worm.png" in entry.icon_path
 
     def test_catalog_uses_item_model_for_block_key(self, tmp_path):
         from app.views.icon_preview.icon_cache import (
@@ -513,13 +491,9 @@ class TestBatchExtractJarIcons:
         def progress(processed, total):
             progress_calls.append((processed, total))
 
-        with patch(
-            "app.views.icon_preview.icon_cache._try_extract_mod_icon_from_model",
-            return_value=None,
-        ):
-            _batch_extract_jar_icons(
-                jar_to_entries, cache_root, tmp_path / "mods", progress_cb=progress
-            )
+        _batch_extract_jar_icons(
+            jar_to_entries, cache_root, tmp_path / "mods", progress_cb=progress
+        )
 
         # 2 個 JAR 少於 50 → 只有最後一次 callback
         assert len(progress_calls) >= 1
@@ -558,133 +532,6 @@ class TestBatchExtractJarIcons:
 
         assert entries[0].icon_path is not None
         assert entries[1].icon_path is not None
-
-
-# ==================================================
-# _load_model_index_from_cache 測試
-# ==================================================
-
-
-class TestLoadModelIndexFromCache:
-    """_load_model_index_from_cache 的各種情境測試。"""
-
-    def test_cache_miss_no_file(self, tmp_path):
-        """cache 檔不存在 → 回傳 None"""
-        from app.views.icon_preview.icon_cache import _load_model_index_from_cache
-
-        jar = tmp_path / "test.jar"
-        create_test_jar(jar, {})
-
-        result = _load_model_index_from_cache(jar, "test_mod")
-
-        assert result is None
-
-    def test_cache_miss_wrong_modid(self, tmp_path):
-        """cache 存在但 modid 不匹配 → 回傳 None"""
-        from app.views.icon_preview.icon_cache import _load_model_index_from_cache
-
-        jar = tmp_path / "test.jar"
-        create_test_jar(jar, {})
-        cache_dir = tmp_path / "model_index_cache"
-        cache_dir.mkdir()
-        # 建立 cache，modid 為 "wrong_modid"
-        cache_file = cache_dir / "test.json"
-        cache_file.write_text(
-            json.dumps(
-                {
-                    "jar_name": jar.name,
-                    "jar_hash": "dummy_hash",
-                    "modid": "wrong_modid",
-                    "index": {"item/test": []},
-                }
-            )
-        )
-
-        with patch(
-            "app.views.icon_preview.icon_cache._get_jar_hash", return_value="dummy_hash"
-        ):
-            result = _load_model_index_from_cache(jar, "correct_modid")
-
-        assert result is None
-
-    def test_cache_hit(self, tmp_path):
-        """cache 存在且 hash + modid 匹配 → 回傳 index"""
-        from app.views.icon_preview.icon_cache import _load_model_index_from_cache
-
-        jar = tmp_path / "test.jar"
-        create_test_jar(jar, {})
-        expected_index = {"item/test": ["models/item/test.json"]}
-
-        def fake_cache_dir():
-            cache_dir = tmp_path / "model_index_cache"
-            cache_dir.mkdir()
-            cache_file = cache_dir / "test.json"
-            cache_file.write_text(
-                json.dumps(
-                    {
-                        "jar_name": jar.name,
-                        "jar_hash": "abc123",
-                        "modid": "test_mod",
-                        "index": expected_index,
-                    }
-                )
-            )
-            return cache_dir
-
-        with (
-            patch(
-                "app.views.icon_preview.icon_cache._get_jar_hash", return_value="abc123"
-            ),
-            patch(
-                "app.views.icon_preview.icon_cache._get_model_index_cache_dir",
-                side_effect=fake_cache_dir,
-            ),
-        ):
-            result = _load_model_index_from_cache(jar, "test_mod")
-
-        assert result == expected_index
-
-
-# ==================================================
-# _save_model_index_to_cache 測試
-# ==================================================
-
-
-class TestSaveModelIndexToCache:
-    """_save_model_index_to_cache 的各種情境測試。"""
-
-    def test_cache_file_written(self, tmp_path):
-        """寫入後 cache 檔存在且內容正確"""
-        from app.views.icon_preview.icon_cache import _save_model_index_to_cache
-
-        jar = tmp_path / "test.jar"
-        create_test_jar(jar, {})
-        model_index = {"item/test": ["models/item/test.json"]}
-
-        def fake_cache_dir():
-            cache_dir = tmp_path / "model_index_cache"
-            cache_dir.mkdir(parents=True, exist_ok=True)
-            return cache_dir
-
-        with (
-            patch(
-                "app.views.icon_preview.icon_cache._get_jar_hash", return_value="xyz789"
-            ),
-            patch(
-                "app.views.icon_preview.icon_cache._get_model_index_cache_dir",
-                side_effect=fake_cache_dir,
-            ),
-        ):
-            _save_model_index_to_cache(jar, "test_mod", model_index)
-
-        cache_dir = tmp_path / "model_index_cache"
-        cache_file = cache_dir / "test.json"
-        assert cache_file.exists()
-
-        data = json.loads(cache_file.read_text())
-        assert data["modid"] == "test_mod"
-        assert data["jar_hash"] == "xyz789"
-        assert data["index"] == model_index
 
 
 # ==================================================
@@ -727,43 +574,31 @@ class TestToHalfwidth:
 
 
 # ==================================================
-# atomic write 測試（tmp.replace）
+# L2 entries 快取覆寫測試
 # ==================================================
 
 
 class TestAtomicWrite:
-    """atomic write 使用 tmp.replace() 跨平台覆蓋目標檔案的測試。"""
+    """L2 快取整個目錄換上：目標已存在時覆蓋且不留下暫存目錄。"""
 
-    def test_overwrite_existing_cache_file(self, tmp_path):
-        """寫入時目標檔案已存在，tmp.replace 應自動覆蓋不報錯"""
-        import zipfile
+    def test_overwrite_existing_cache(self, tmp_path, monkeypatch):
+        from app.views.icon_preview import entries_cache
 
-        from app.views.icon_preview.icon_cache import _save_model_index_to_cache
+        mods = tmp_path / "mods"
+        mods.mkdir()
+        (mods / "a.jar").write_bytes(b"x")
+        cache_root = tmp_path / "cache"
+        monkeypatch.setattr(entries_cache, "_get_cache_dir", lambda: cache_root)
 
-        jar = tmp_path / "test.jar"
-        with zipfile.ZipFile(jar, "w") as zf:
-            zf.writestr("assets/test_mod/lang/en_us.json", b"{}")
+        entries_cache._save_entries_cache_l2(
+            mods, [{"modid": "m", "key": "k1", "en": "One"}]
+        )
+        entries_cache._save_entries_cache_l2(
+            mods, [{"modid": "m", "key": "k2", "en": "Two"}]
+        )
 
-        model_index = {"item/test": ["models/item/test.json"]}
-
-        with (
-            patch(
-                "app.views.icon_preview.icon_cache._get_jar_hash", return_value="abc123"
-            ),
-            patch(
-                "app.views.icon_preview.icon_cache._get_model_index_cache_dir",
-                return_value=tmp_path / "cache",
-            ),
-        ):
-            # 第一次寫入
-            _save_model_index_to_cache(jar, "test_mod", model_index)
-            # 第二次寫入（目標檔案已存在）
-            _save_model_index_to_cache(
-                jar, "test_mod", {"item/test2": ["models/item/test2.json"]}
-            )
-
-        # 不應報錯，且檔案內容為最新
-        cache_file = tmp_path / "cache" / "test.json"
-        assert cache_file.exists()
-        data = json.loads(cache_file.read_text())
-        assert data["index"] == {"item/test2": ["models/item/test2.json"]}
+        source = entries_cache.open_entries_cache_l2(mods)
+        assert [row["key"] for row in source.load("m")] == ["k2"]
+        assert [p.name for p in cache_root.iterdir()] == [
+            entries_cache._compute_cache_key(mods)
+        ]

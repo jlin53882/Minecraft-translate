@@ -399,13 +399,20 @@ def test_read_icon_bytes_returns_none_for_oversized_png(tmp_path):
 
 
 @pytest.fixture
-def icon_preview(monkeypatch):
-    from app.views.icon_preview import icon_cache as mod
+def mod_catalog(tmp_path):
+    """tmp_path 內 JAR 的資產目錄（測試後關閉）。"""
+    from app.icon_catalog import ModpackAssetCatalog
 
-    # 不碰磁碟上的 model index 快取
-    monkeypatch.setattr(mod, "_load_model_index_from_cache", lambda *a, **k: None)
-    monkeypatch.setattr(mod, "_save_model_index_to_cache", lambda *a, **k: None)
-    return mod
+    catalogs = []
+
+    def build(jar):
+        catalog = ModpackAssetCatalog.from_mods_directory(jar.parent)
+        catalogs.append(catalog)
+        return catalog
+
+    yield build
+    for catalog in catalogs:
+        catalog.close()
 
 
 def test_iter_lang_entries_skips_oversized_lang_file(tmp_path):
@@ -427,17 +434,17 @@ def test_iter_lang_entries_skips_oversized_lang_file(tmp_path):
 
 
 def test_process_single_jar_survives_oversized_lang_and_returns_empty(
-    tmp_path, icon_preview
+    tmp_path, mod_catalog
 ):
     from app.icon_index import _process_single_jar
 
     jar = _make_zip(tmp_path / "m.jar", {"assets/m/lang/en_us.lang": _BIG_TEXT})
 
-    assert _process_single_jar(jar) == {}
+    assert _process_single_jar(jar, mod_catalog(jar)) == {}
 
 
 def test_process_single_jar_keeps_partial_index_when_budget_exceeded(
-    tmp_path, icon_preview, monkeypatch
+    tmp_path, mod_catalog, monkeypatch
 ):
     """整包累計超限：保留已解析的部分，不丟例外、不中止。"""
     jar = _make_zip(
@@ -460,7 +467,7 @@ def test_process_single_jar_keeps_partial_index_when_budget_exceeded(
     )
     from app.icon_index import _process_single_jar
 
-    result = _process_single_jar(jar)
+    result = _process_single_jar(jar, mod_catalog(jar))
 
     assert list(result) == ["item.m.a"]
 

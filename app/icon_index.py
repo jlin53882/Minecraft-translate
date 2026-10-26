@@ -203,7 +203,7 @@ def _iter_entries_from_lang_files(
             break  # 每個 namespace 只取第一個有效的英文 lang 檔
 
 
-def _process_single_jar(jar_path: Path, asset_catalog=None) -> dict[str, str]:
+def _process_single_jar(jar_path: Path, asset_catalog) -> dict[str, str]:
     """Worker: 處理單一 JAR，建立該 JAR 所有 entry 的 icon 索引。
 
     回傳：{key: icon_uri} — 該 JAR 內所有有 icon 的 key mapping
@@ -211,15 +211,10 @@ def _process_single_jar(jar_path: Path, asset_catalog=None) -> dict[str, str]:
     results: dict[str, str] = {}
     try:
         with zipfile.ZipFile(jar_path, "r") as zf:
-            names = set(zf.namelist())
             raise_if_cancelled()
             budget = ZipReadBudget.for_icon_scan(jar_path.name)
-            from app.icon_reader import IconRef
             from app.icon_resolve import CONTENT_ICON_PREFIXES, hit_to_uri
-            from app.views.icon_preview.icon_cache import (
-                _resolve_icon_from_catalog,
-                _try_extract_mod_icon_from_model,
-            )
+            from app.views.icon_preview.icon_cache import _resolve_icon_from_catalog
 
             for modid, key, _value in _iter_entries_from_lang_files(zf, budget=budget):
                 raise_if_cancelled()
@@ -227,24 +222,16 @@ def _process_single_jar(jar_path: Path, asset_catalog=None) -> dict[str, str]:
                 if key.split(".", 1)[0] not in CONTENT_ICON_PREFIXES:
                     continue
 
-                if asset_catalog is not None:
-                    result = _resolve_icon_from_catalog(
-                        jar_path,
-                        modid,
-                        key,
-                        asset_catalog,
-                        current_zf=zf,
-                        budget=budget,
-                    )
-                    if result:
-                        results[key] = hit_to_uri(result)
-                else:
-                    result = _try_extract_mod_icon_from_model(
-                        jar_path, modid, zf, names, key=key, budget=budget
-                    )
-                    if result:
-                        _tex_val, png_path = result
-                        results[key] = IconRef(jar_path, png_path).to_uri()
+                result = _resolve_icon_from_catalog(
+                    jar_path,
+                    modid,
+                    key,
+                    asset_catalog,
+                    current_zf=zf,
+                    budget=budget,
+                )
+                if result:
+                    results[key] = hit_to_uri(result)
     except ArchiveBudgetError:
         # 累計讀取超過安全上限（budget 已記錄警告）：保留已建立的部分索引，不中止整個索引建置
         log_warning(f"[IconIndex] {jar_path.name} 累計讀取超限，僅保留已解析的部分索引")

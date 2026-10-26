@@ -49,7 +49,7 @@ translation_tool/core/
 [載入] _on_load_clicked()（sync handler：驗證路徑、顯示掃描提示，之後以 page.run_task 排程 _load_async）
   └─ _load_async(generation, operation) → load_operation.load_icon_preview()：每個阻塞步驟經 _run_blocking 在執行緒執行，每步之後檢查世代（卸載就丟棄）
        ├─ _detect_source_mode()（glob / rglob）
-       ├─ _lookup_cached_entries(mode)：L1（_entries_cache，source identity 相符；extracted_folder 驗證所有 en_us.json 的相對路徑、大小與 mtime_ns，jar_directory 驗證 JAR 與 runtime assets）→ L2（僅 jar_directory，讀磁碟 JSON）→ 命中即 _apply_cached_entries（_rebuild_mods + _render_mod_list，在 event loop）
+       ├─ _lookup_cached_entries(mode)：L1（_source_cache，source identity 相符；extracted_folder 驗證所有 en_us.json 的相對路徑、大小與 mtime_ns，jar_directory 驗證 JAR 與 runtime assets）→ L2（僅 jar_directory，`open_entries_cache_l2` 只讀 index.json）→ 命中時以 `ModEntryStore`（modid → entries，第一次存取才讀該模組分片並補譯文）包裝，背景執行緒只預載第一頁模組 → _apply_cached_entries（把 store 設為 mods + _render_mod_list，在 event loop，不讀檔）
        ├─ 未命中 → _count_scan_steps(mode)（glob / rglob）→ _show_scan_started（進度條，在 event loop）
        └─ _scan_entries(mode, total_steps) → _finish_load(entries, mode)
   無 page.run_task（測試替身）時維持同步流程（_try_use_cached_entries / _begin_scan）
@@ -105,9 +105,8 @@ translation_tool/core/
 - `_batch_extract_jar_icons(jar_to_entries, icon_cache_root, source_root, progress_cb)`（`icon_cache_root` 參數保留但不再使用）：
   1. 先 `icon_index.load_icon_index(source_root)`；有索引就直接套用（`_apply_icon_index`，不做 JAR I/O）
   2. 無索引則建立 `ModpackAssetCatalog.from_mods_directory(source_root)`，再由 `_run_jar_workers` 以 ThreadPoolExecutor（worker 數取 config `translator.parallel_execution_workers`，預設 4）逐 JAR 處理；只處理 `_key_needs_icon` 為真的 key（item/block/entity 等前綴）
-- 逐 key 解析用 `_resolve_icon_from_catalog`：依 key 前綴（`_CONTENT_ICON_PREFIXES`）、key namespace 與 lang namespace 查 item／block 的 model 與 blockstate，再以 `_follow_parent_chain` 追 parent model 取得 texture；同一批次內以 (modid, key) 記憶結果。
+- 逐 key 解析用 `_resolve_icon_from_catalog`：依 key 前綴（`_CONTENT_ICON_PREFIXES`）、key namespace 與 lang namespace 查 item／block 的 model 與 blockstate，再追 parent model 取得 texture；同一批次內以 (modid, key) 記憶結果。
   - 找不到 → 回 None，**不做 logo/icon.png 最終 fallback**（錯誤的 icon 比沒有更糟）
-- `_try_extract_mod_icon_from_model(jar, modid, zf, names, key)`：model index 路徑（`_load_model_index_from_cache` / `_build_model_index` / `_save_model_index_to_cache`，以 `_get_jar_hash`＝mtime+size 判斷失效），用 key 轉 model name（`block.<modid>.<name>` → `block/<name>`）精準匹配；預建索引 producer 未傳入 catalog 時使用。
 - 預建索引檔位於 `.icon_cache/icon_index/`。以 JAR 檔名、檔案大小與 `mtime_ns` 建立快速 manifest（另含 NeoForge runtime assets）；modpack 路徑、任一 JAR 的新增／刪除／metadata 變更都會造成 cache miss。這不是內容雜湊：若內容變更但檔案大小與時間戳都被保留，無法偵測。
 - 預建 producer（`app/icon_index.py`）讀取 `assets/<modid>/lang/en_us.json`，並直接從路徑取得 namespace；同一 JAR 的多個 namespace 都會掃描。JSON 缺漏或格式錯誤時退回同 namespace 的 `en_us.lang`；其他語系不作為索引來源。
 - 可執行 `python tools/build_icon_index.py "<mods 資料夾>"` 預建索引；入口為 `build_and_save_icon_index`：建置索引、比對建置前後 manifest，若 JAR 在建置期間變更則拋出錯誤且不儲存。圖示解析（`_batch_extract_jar_icons`）會先以 `load_icon_index` 讀取索引；cache miss 則逐 JAR 解析。JAR 更新後重跑命令即可。
@@ -119,8 +118,8 @@ translation_tool/core/
 | 元件 | 說明 |
 |------|------|
 | `source_root` / `review_root` | 原文（en_us + textures）/ 校對（zh_tw）資料夾 |
-| `mods` dict | modid → entries 列表 |
-| `_entries_cache` / `_cache_meta` | L1 以 source identity 驗證：`extracted_folder` 比對所有 `en_us.json` 的相對路徑、大小與 `mtime_ns`；`jar_directory` 比對 JAR 與 NeoForge runtime assets 的路徑／檔名、大小與 `mtime_ns`。L2 為 `.icon_cache/<key>.json`，只供 `jar_directory` 使用，key 是上述 JAR source identity 的摘要 |
+| `mods` | modid → entries 列表：掃描完成後為 dict；快取命中時為 `ModEntryStore`（`mod_store.py`，唯讀 Mapping） |
+| `_source_cache` / `_cache_meta` | L1 以 source identity 驗證：`extracted_folder` 比對所有 `en_us.json` 的相對路徑、大小與 `mtime_ns`；`jar_directory` 比對 JAR 與 NeoForge runtime assets 的路徑／檔名、大小與 `mtime_ns`。L2 為 `.icon_cache/<key>/`（`index.json` 列出模組與筆數，每個模組一個欄位式分片 `<n>.json`），只供 `jar_directory` 使用，key 是上述 JAR source identity 的摘要 |
 | `_mod_search_*` / `_detail_search_*` | 兩層即時搜尋（`Debouncer`，150ms） |
 | `mod_page_size` / `page_size` | 模組清單每頁數（`page_size_selector` 可選 25/50/100）/ 詳情頁每頁筆數（50） |
 | `LangItemRow` | 單筆 key：TextField（繁中可編輯）+ lang key + 英文原文 + icon 預覽 |
@@ -148,15 +147,16 @@ app/views/icon_preview_view.py            ← IconPreviewView 主體：生命週
 app/views/icon_preview/
   ├─ list_mixin.py       IconPreviewListMixin    模組清單、分頁、搜尋
   ├─ detail_mixin.py     IconPreviewDetailMixin  單一模組詳情、載入 entries、翻譯儲存
-  ├─ icon_cache.py       圖示批次提取與快取輔助函式（批次提取、舊式 model index 快取；ModpackAssetCatalog 在 `app/icon_catalog.py`）
-  ├─ entries_cache.py    掃描結果（entries）的 L2 磁碟快取
+  ├─ icon_cache.py       圖示批次提取與快取輔助函式（ModpackAssetCatalog 在 `app/icon_catalog.py`）
+  ├─ entries_cache.py    掃描結果（entries）的 L2 磁碟快取（index + 每模組分片，`ShardSource`）
+  ├─ mod_store.py        `MemorySource` / `ModEntryStore`：依需要載入單一模組的來源項目並補譯文
   ├─ load_operation.py   載入編排（模式偵測、快取查詢、掃描），於 page operation 內執行
   ├─ render_operation.py 詳情頁列渲染（分頁、圖示準備），以世代號只套用最後一次結果
   └─ progress.py         Phase 進度顯示輔助
 app/views/icon_preview_row.py             ← 單列（圖示 + 翻譯欄位）
 ```
 
-測試要 monkeypatch 圖示輔助函式（`_get_cache_dir`、`_get_jar_hash`、`_try_extract_mod_icon_from_model` 等）時，請 patch `app.views.icon_preview.icon_cache`（呼叫者都在該模組內查名稱）；L2 entries 快取目錄 `_get_cache_dir` 在 `entries_cache`。`app/icon_index.py` 也從 `icon_cache` 匯入 `_try_extract_mod_icon_from_model`。
+測試要 monkeypatch 圖示輔助函式（`_get_icon_cache_dir` 等）時，請 patch `app.views.icon_preview.icon_cache`（呼叫者都在該模組內查名稱）；L2 entries 快取目錄 `_get_cache_dir` 在 `entries_cache`。`app/icon_index.py` 也從 `icon_cache` 匯入 `_resolve_icon_from_catalog`。
 
 
 ## 圖示解析與渲染規則

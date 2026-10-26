@@ -27,7 +27,6 @@
 | `utils.config_manager.config` | `utils/config_manager.py` `clear_config_cache` | `load_config` 共用設定快取 |
 | `utils.app_paths.migrated_roots` | `utils/app_paths.py` `clear_migrated_roots` | 已做過舊版資料遷移的根目錄 |
 | `utils.text_matching.normalize_term` | `utils/text_matching.py` `clear_term_normalize_cache` | 術語正規化 `lru_cache(200_000)`；`term_normalize_cache_info()` 供觀測 |
-| `icon_preview.model_index_memo` | `app/views/icon_preview/icon_cache.py` `clear_model_index_memo` | JAR model index 記憶 |
 
 ## 未登錄的純函式 memo
 
