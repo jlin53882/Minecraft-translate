@@ -18,6 +18,10 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
+from translation_tool.core.book_formats import (
+    UNSUPPORTED_BOOK_FORMATS,
+    resolve_book_format,
+)
 from translation_tool.core.guide_blocks import (
     extract_guide_blocks,
     front_title_line,
@@ -79,6 +83,8 @@ def find_guide_files(root: Path) -> list[Path]:
         for path in root.rglob(f"*{suffix}"):
             parts = _guide_parts(path, root)
             if parts is None or parts[2].lower() in VANILLA_NON_TEXT_DIRS:
+                continue
+            if resolve_book_format("/".join(parts)).name in UNSUPPORTED_BOOK_FORMATS:
                 continue
             locale = split_locale(parts[2:])
             if locale.other or locale.lang != "en_us":

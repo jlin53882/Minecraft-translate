@@ -15,6 +15,7 @@ from translation_tool.core.book_formats import (
     FORMAT_STANDARD_PATCHOULI,
     resolve_book_format,
 )
+from translation_tool.core.guide_translation import find_guide_files
 from translation_tool.core.translatable_extractor import extract_translatables
 from translation_tool.translation_db.scanner import ScanOptions, scan_jar
 
@@ -92,6 +93,38 @@ def test_known_custom_formats_are_not_generic_patchouli_or_json():
     assert resolve_book_format(
         "assets/oracle_index/books/index.mdx",
     ).name == FORMAT_ORACLE_INDEX
+
+
+def test_unsupported_custom_docs_are_not_detected_as_guides(tmp_path: Path):
+    oracle = tmp_path / "assets" / "oracle_index" / "books" / "docs" / "index.mdx"
+    oracle.parent.mkdir(parents=True)
+    oracle.write_text(
+        "# Oracle docs\n\nThis is a long documentation paragraph that must not become a game guide.\n",
+        encoding="utf-8",
+    )
+    ordinary = tmp_path / "assets" / "things" / "lavender" / "entries" / "almanac.md"
+    ordinary.parent.mkdir(parents=True)
+    ordinary.write_text(
+        "# Almanac\n\nThis is a long in-game guide paragraph that should remain discoverable.\n",
+        encoding="utf-8",
+    )
+
+    found = {path.relative_to(tmp_path).as_posix() for path in find_guide_files(tmp_path)}
+    assert "assets/oracle_index/books/docs/index.mdx" not in found
+    assert "assets/things/lavender/entries/almanac.md" in found
+
+
+def test_unsupported_mdx_is_ignored_by_archive_sniffer(tmp_path: Path):
+    jar = tmp_path / "oracle.jar"
+    with zipfile.ZipFile(jar, "w") as archive:
+        archive.writestr(
+            "assets/oracle_index/books/docs/index.mdx",
+            "# Oracle docs\n\nThis is a long documentation paragraph that must not become a game guide.\n",
+        )
+
+    result = scan_jar(jar, ScanOptions(version="1.21.1"), dir_names=())
+    assert result.error == ""
+    assert not any(item.kind == "guide" for item in result.items)
 
 
 def test_standard_patchouli_and_known_non_book_paths_keep_their_boundaries():

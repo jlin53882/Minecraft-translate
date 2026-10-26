@@ -22,6 +22,7 @@ from translation_tool.core.book_formats import (
     BOOK_EXCLUDED_DIRS,
     FORMAT_NEUTRAL_PAGES,
     FORMAT_STANDARD_PATCHOULI,
+    UNSUPPORTED_BOOK_FORMATS,
     resolve_book_format,
 )
 from translation_tool.core.text_sniffer import (
@@ -86,6 +87,9 @@ def _kind_of(
     所以翻譯 ZIP 同時有英文與中文指南時，選到哪一份都能辨識。
     單一檔案超過大小上限時視為不是（略過該檔）；整體預算用盡仍拋出 ``ArchiveBudgetError``。
     """
+    path_format = resolve_book_format(member)
+    if path_format.name in UNSUPPORTED_BOOK_FORMATS:
+        return None
     try:
         raw = read_limited(zf, member, budget=budget)
     except ArchiveBudgetError:

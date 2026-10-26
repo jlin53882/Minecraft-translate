@@ -34,6 +34,14 @@ FORMAT_ORACLE_INDEX = "oracle_index"
 FORMAT_UNSUPPORTED = "unsupported"
 FORMAT_UNKNOWN = "unknown"
 
+UNSUPPORTED_BOOK_FORMATS = frozenset(
+    {
+        FORMAT_ETERNAL_STARLIGHT,
+        FORMAT_MODONOMICON,
+        FORMAT_ORACLE_INDEX,
+    }
+)
+
 BOOK_EXCLUDED_DIRS = frozenset(
     {
         *VANILLA_NON_TEXT_DIRS,
