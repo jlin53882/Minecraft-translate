@@ -90,6 +90,7 @@ _NAME_LIKE_KEY_PREFIXES = frozenset(
 )
 
 _MATCH_CACHE_LIMIT = 50_000
+_ALLOWLIST_STATE_KEY = ("\0allowlist", None)
 
 _TERMINOLOGY_INSTRUCTION = (
     "\n【翻譯原則：術語優先、不要無故保留英文】\n"
@@ -156,8 +157,8 @@ class OfficialLocaleIndex:
     )
     # (來源文字, key) → 命中結果。索引不可變，同一來源的命中結果固定；批次規劃、
     # token 預算與送出前的提示詞會對同一批項目重複建立術語提示，記住結果就不用重掃術語表。
-    _match_cache: dict[tuple[str, object], tuple[OfficialTerminologyMatch, ...]] = (
-        field(default_factory=dict, repr=False, compare=False)
+    _match_cache: dict[tuple[str, object], Any] = field(
+        default_factory=dict, repr=False, compare=False
     )
 
     def lookup_exact(self, key: object, en_us: object, zh_cn: object) -> str | None:
@@ -224,6 +225,17 @@ class OfficialLocaleIndex:
             return []
 
         source_key = item.get("path") or item.get("key")
+        # 命中結果取決於 standalone allowlist；報表與測試會替換它（或就地修改），
+        # 內容不同時快取整個作廢。
+        allowlist_state = (STANDALONE_ALLOWLIST, tuple(STANDALONE_ALLOWLIST.items()))
+        previous = self._match_cache.get(_ALLOWLIST_STATE_KEY)
+        if (
+            previous is None
+            or previous[0] is not allowlist_state[0]
+            or previous[1] != allowlist_state[1]
+        ):
+            self._match_cache.clear()
+            self._match_cache[_ALLOWLIST_STATE_KEY] = allowlist_state
         cache_key = (source_text, source_key if isinstance(source_key, str) else None)
         cached = self._match_cache.get(cache_key)
         if cached is not None:
@@ -378,6 +390,7 @@ class OfficialLocaleIndex:
                 break
         if len(self._match_cache) >= _MATCH_CACHE_LIMIT:
             self._match_cache.clear()
+            self._match_cache[_ALLOWLIST_STATE_KEY] = allowlist_state
         result = [match for _priority, match in selected]
         self._match_cache[cache_key] = tuple(result)
         return result
