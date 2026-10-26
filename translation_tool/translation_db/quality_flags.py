@@ -25,13 +25,14 @@ from translation_tool.translation_db.quality import matches_quality
 
 # 旗標定義版本；``quality.py``／``guide_format.py`` 的判斷結果改變時遞增
 # （``tests/test_translation_db_quality_flags.py`` 的規則快照會在規則改變時失敗提醒）。
+# 8：新增「譯文與原文相同」位元（:data:`SAME_AS_SOURCE`）
 # 7：<config> 標記的顯示文字與預設值可翻譯，但結構欄位仍須一致
 # 6：空白分隔的多元件行與多層巢狀巨集行視為獨立元件行
 # 5：獨立成行的 <link> 與含分號的顯示文字也可翻譯
 # 4：<link;分類;顯示文字> 的顯示文字可翻譯
 # 3：獨立成行元件不含文字、段落空行不計文字首尾的空行
 # 2：指南條目的結構標記計入「格式不一致／一致」
-SCHEMA_VERSION = "7"
+SCHEMA_VERSION = "8"
 BITS = {
     "missing_translation": 1,
     "whitespace": 2,
@@ -40,6 +41,8 @@ BITS = {
     "species_name": 16,
     "species_format": 32,
 }
+# 生效譯文與非空原文逐字相同（「同原文」狀態與 AI 同原文重翻）；不是品質狀態，不在 BITS
+SAME_AS_SOURCE = 64
 # 每批重算的條目數：初次安裝 70 萬條目時分批提交，中斷後下次開啟從剩下的待重算條目接續
 SETTLE_CHUNK = 20_000
 
@@ -53,6 +56,10 @@ _INDEXES = {
         )
         for status, bit in BITS.items()
     },
+    "idx_qflags_same_as_source": (
+        "CREATE INDEX idx_qflags_same_as_source ON entry "
+        f"(mc_version, mod_id, kind, key, id) WHERE qflags & {SAME_AS_SOURCE}"
+    ),
     "idx_qflags_pending": (
         "CREATE INDEX idx_qflags_pending ON entry (id) WHERE qflags IS NULL"
     ),
@@ -98,7 +105,7 @@ def compute(
 ) -> int:
     """一個條目的品質旗標（原文、生效譯文、key 與種類決定）。"""
     source, translated = en_us or "", zh_tw or ""
-    flags = 0
+    flags = SAME_AS_SOURCE if source and translated == source else 0
     for status in ("missing_translation", "whitespace"):
         if matches_quality(source, translated, _FILTERS[status], key, kind=kind):
             flags |= BITS[status]
@@ -118,7 +125,8 @@ def _reference(
     key: str, en_us: str | None, zh_tw: str | None, kind: str | None = None
 ) -> int:
     """驗證用：逐一呼叫每個狀態的判斷，不依賴 :func:`compute` 的互斥與略過。"""
-    return sum(
+    flags = SAME_AS_SOURCE if en_us and zh_tw == en_us else 0
+    return flags + sum(
         bit
         for status, bit in BITS.items()
         if matches_quality(en_us or "", zh_tw or "", _FILTERS[status], key, kind=kind)

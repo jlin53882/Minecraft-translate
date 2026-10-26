@@ -54,7 +54,7 @@ does not depend on the table size; record the bound in `ALLOWED_PLAN_MARKERS` or
 - `entry_newest` / `entry_oldest` sorts: `entry.created_at` has no index, and
   adding one slows every import for a rarely used sort.
 - Untranslated candidate lists, reusable candidates and same-as-source AI entries: the sorted
-  set is the number of missing or matching rows in one version.
+  set is the number of missing or matching rows in one version (for same-as-source, the rows carrying the flag bit).
 - `kinds()`: sorts the distinct entry kinds only.
 - The mismatch list: sorts only rows that pass the special-character prefilter.
 - `cleanup_batches()`: sorts the cleanup batches created by manual cleanup operations only.
@@ -165,6 +165,20 @@ original queries, the absence of `USE TEMP B-TREE FOR ORDER BY` in the paged
 queries, and `verify()` after every write path; no wall-clock threshold is
 asserted.
 
+### Mod DB derived "same as source" flag and other read paths
+
+`entry.qflags` carries one extra bit, `quality_flags.SAME_AS_SOURCE` (effective text equals a non-empty source), with
+its own partial index `idx_qflags_same_as_source`. The `same` state, `count_same_as_source_ai` and
+`same_as_source_ai_entries` read it (the latter two name the index with `INDEXED BY`, because the planner does not
+pick a partial index on its own there) and fall back to the original comparison while flags are pending. Changing
+the meaning of a bit requires bumping `quality_flags.SCHEMA_VERSION`; the next writable open recomputes every entry in
+chunks.
+
+`cleanup_candidates` evaluates the cleanup rules in Python for every entry of a version, so the flagged entries are
+cached per data generation (`TranslationDB._cached`); inside a write transaction it is always recomputed.
+`time_data_range` for the manual-activity basis starts from `history` (small) and finds entries by primary key; the
+reverse order probes the history index once per entry of the version.
+
 ### Other metrics
 
 - AppShell mount time and browser-ready time from the real Flet smoke report
@@ -227,13 +241,27 @@ writes for the same entry.
 
 ## Mod DB scan throughput
 
-Scanning is bounded by two serial stages. JAR parsing is pure Python and runs in threads, so it uses about one core
-regardless of the worker count (more workers add GIL contention instead of speed); ingest runs in the single writer
-and is dominated by the triggers that keep derived data exact. Measure both with
-`tools/benchmark_moddb_700k_write.py --jar-folder` (ingest of an existing and of a new version) and compare the
-process CPU time with the wall time to see how many cores are used; profile the writer with `cProfile` on
-`TranslationDB.ingest` and attribute trigger cost by dropping trigger groups (`stat_`, `effcol_`, `qflags_`, `chg_`,
-`activity_`) on a scratch copy.
+Scanning has two serial-ish stages: JAR parsing (pure Python) and ingest in the single writer.
+
+- **Parsing** runs in a `spawn` process pool (`translation_db/scan_pool.py`) when a scan has at least
+  `PROCESS_MIN_JARS` archives and more than one worker; threads are limited by the GIL and get slower with more
+  workers, so the fallback (few JARs, or the pool cannot start) is a single reader thread. Process-pool rules: options
+  cross the process boundary without the replace-rule objects (plain dicts, rebuilt in the worker initializer);
+  cancellation is a shared `Event` set by a watcher thread; worker log records travel back with the result and are
+  replayed in the caller; frozen builds must call `multiprocessing.freeze_support()` in the entry point (`main.py`).
+  Measure the worker count with the parse-only loop (serial, threads 2/4, processes 2/3/4) on at least 300 JARs
+  after the file cache is warm; the process count is bounded by `moddb_scan` in `translation_tool/utils/worker_count.py`.
+- **Ingest** commits once per batch: `TranslationDB.ingest_many` writes up to `_IngestBuffer.MAX_JARS` archives
+  or `MAX_ITEMS` items in one transaction (every commit costs a WAL write and checkpoint regardless of size) and
+  returns per-archive statistics. A cancelled scan still writes the archives already read.
+- **Trigger groups** are attributed by dropping them on a scratch copy (`stat_`, `effcol_`, `qflags_`, `chg_`,
+  `activity_`) and timing the same batched ingest. `frozen()`-style suspension only pays when the recompute after it
+  is cheaper than the triggers it saves. Recomputing by module (counters before/after plus the module's
+  `stat_src` rows and `effective` columns) scans every version of the touched modules, which cost as much as the
+  triggers on a database with several versions per module, so ingest and `write_back` keep the per-row triggers; the
+  full-table `frozen()` is kept for whole-table rewrites such as `_rebuild_effective`. Re-measure before suspending
+  triggers for another write path; a scope has to be proportional to the rows written, not to the modules touched.
+- Compare `process CPU time` with wall time to see how many cores are used, and run every `verify_*` afterwards.
 
 ## Worker 數量
 

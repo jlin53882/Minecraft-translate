@@ -1095,6 +1095,19 @@ class TranslationDB(SmartReviewMixin, BulkReviewMixin, CleanupMixin):
         "(f.entry_id IS NOT NULL AND e.en_us <> '' AND f.zh_tw <> '' "
         "AND f.zh_tw = e.en_us)"
     )
+
+    def _same_as_source_sql(self) -> str:
+        """生效譯文與原文相同的條件；品質旗標可用時讀部分索引（與原條件結果相同）。"""
+        if self._quality_flags_ready():
+            return f"e.qflags & {quality_flags.SAME_AS_SOURCE}"
+        return self._SAME_AS_SOURCE_SQL
+
+    def _same_as_source_entry_table(self) -> str:
+        """「同原文」查詢的條目表：旗標可用時指定部分索引（規劃器不會自己選它）。"""
+        if self._quality_flags_ready():
+            return "entry e INDEXED BY idx_qflags_same_as_source"
+        return "entry e"
+
     _DIFF_SQL = """EXISTS (
         SELECT 1 FROM entry e2 JOIN effective f2 ON f2.entry_id = e2.id
         WHERE e2.kind = e.kind AND e2.mod_id = e.mod_id AND e2.key = e.key
@@ -1492,7 +1505,7 @@ class TranslationDB(SmartReviewMixin, BulkReviewMixin, CleanupMixin):
                 f"f.entry_id IS NOT NULL AND f.source<>{SRC_MANUAL} AND NOT {self._DIFF_SQL}"
             )
         elif criteria.state == "same":
-            where.append(self._SAME_AS_SOURCE_SQL)
+            where.append(self._same_as_source_sql())
 
         if criteria.time is not None:
             time_where, time_params = self._time_filter_sql(criteria.time)
@@ -1805,10 +1818,15 @@ class TranslationDB(SmartReviewMixin, BulkReviewMixin, CleanupMixin):
                 "revert": ("revert", "batch_revert"),
             }[spec.action]
             marks = ",".join("?" for _ in actions)
+            # 從歷史紀錄（筆數遠少於條目）出發，再用主鍵找條目；反過來會逐條目探測整個版本
+            source = self._candidate_source(condition).replace(
+                "FROM entry e",
+                "FROM history h CROSS JOIN entry e ON e.id=h.entry_id",
+                1,
+            )
             sql = (
-                f"SELECT MIN(h.at), MAX(h.at) {self._candidate_source(condition)} "
-                f"JOIN history h ON h.entry_id=e.id AND h.action IN ({marks}) "
-                f"WHERE {condition}"
+                f"SELECT MIN(h.at), MAX(h.at) {source} "
+                f"WHERE h.action IN ({marks}) AND {condition}"
             )
             params = [*actions, *params]
         else:
@@ -4608,7 +4626,7 @@ class TranslationDB(SmartReviewMixin, BulkReviewMixin, CleanupMixin):
     ) -> tuple[str, list]:
         where = [
             "e.mc_version = ?",
-            self._SAME_AS_SOURCE_SQL,
+            self._same_as_source_sql(),
             "f.source = ?",
         ]
         params: list = [version, SRC_AI]
@@ -4623,8 +4641,8 @@ class TranslationDB(SmartReviewMixin, BulkReviewMixin, CleanupMixin):
         """計算目前 effective.source 為 AI 且 effective 譯文等於非空原文的筆數。"""
         where, params = self._same_as_source_ai_where(version, mod_ids)
         sql = (
-            "SELECT COUNT(*) FROM entry e LEFT JOIN effective f ON f.entry_id=e.id "
-            f"WHERE {where}"
+            f"SELECT COUNT(*) FROM {self._same_as_source_entry_table()} "
+            f"LEFT JOIN effective f ON f.entry_id=e.id WHERE {where}"
         )
         return self._cached_count(sql, params)
 
@@ -4639,8 +4657,9 @@ class TranslationDB(SmartReviewMixin, BulkReviewMixin, CleanupMixin):
         sql = (
             "SELECT e.id, e.kind, e.mod_id, e.key, e.en_us, f.zh_tw, e.mc_version, "
             "f.source, t.revision, t.checker, t.review_status "
-            "FROM (SELECT e.id FROM entry e JOIN effective f ON f.entry_id = e.id "
-            f"WHERE {where}) c JOIN entry e ON e.id = c.id "
+            f"FROM (SELECT e.id FROM {self._same_as_source_entry_table()} "
+            f"JOIN effective f ON f.entry_id = e.id WHERE {where}) c "
+            "JOIN entry e ON e.id = c.id "
             "JOIN effective f ON f.entry_id = e.id "
             "LEFT JOIN translation t ON t.entry_id=e.id AND t.source=f.source "
             "ORDER BY e.mod_id, e.kind, e.key"
