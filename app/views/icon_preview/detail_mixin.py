@@ -34,6 +34,38 @@ from translation_tool.utils.log_unit import log_error, log_info, log_warning
 from translation_tool.utils.safe_json_loader import load_json_auto_encoding
 
 
+def _compatible_progress(callback):
+    """包成 ``(processed, total)`` 呼叫；舊測試的 0 參數 callback 與不相容者照舊容忍。"""
+
+    def notify(processed: int, total: int):
+        if not callback:
+            return
+        try:
+            callback(processed, total)
+        except TypeError:
+            try:
+                callback()
+            except TypeError:
+                pass
+
+    return notify
+
+
+def _parse_jar_lang(jar_path, name: str, content):
+    """解析 JAR 內的 en_us.json（容許註解與結尾逗號）；失敗或不是物件時回傳 None。"""
+    text = (
+        content.decode("utf-8-sig", errors="replace")
+        if isinstance(content, bytes)
+        else content
+    )
+    try:
+        data = loads_lang_json(text)
+    except json.JSONDecodeError:
+        log_warning(f"[IconPreview] JAR 解析 JSON 失敗: {jar_path.name} / {name}")
+        return None
+    return data if isinstance(data, dict) else None
+
+
 class IconPreviewDetailMixin:
     """IconPreviewView 的單一模組詳情、載入 entries 與翻譯儲存（由 icon_preview_view.py 拆出，#114）。"""
 
@@ -425,69 +457,27 @@ class IconPreviewDetailMixin:
 
     def _scan_jar_entries(self, processed_callback, total_steps):
         """掃描 JAR 內的 en_us.json 並建立來源 entries。"""
-        # ===== Phase 3/3：使用 jar_browser 多執行緒掃描 =====
         entries = []
         failed_jars = []
-
-        # 墊底一次：讓使用者知道掃描啟動了
-        # 向後兼容：舊測試使用 0 參數 callback，新設計使用 2 參數 callback
-        if processed_callback:
-            try:
-                processed_callback(0, total_steps)
-            except TypeError:
-                try:
-                    processed_callback()
-                except TypeError:
-                    pass  # 忽略不兼容的 callback
-
-        # 包裝 callback：同時支援 0 參數（旧測試）和 2 參數（新設計）
-        def wrapped_callback(processed: int, total: int):
-            if processed_callback:
-                try:
-                    processed_callback(processed, total)
-                except TypeError:
-                    try:
-                        processed_callback()
-                    except TypeError:
-                        pass
+        notify = _compatible_progress(processed_callback)
+        notify(0, total_steps)  # 墊底一次：讓使用者知道掃描啟動了
 
         results = scan_jars(
             jar_dir=self.source_root,
             patterns=[r"assets/([^/]+)/lang/en_us\.json"],
-            processed_callback=wrapped_callback,
+            processed_callback=notify,
         )
-
-        # 建立 entries
         for jar_path, files in results.items():
             raise_if_cancelled()
             for name, content in files.items():
                 raise_if_cancelled()
-                if not name.endswith("lang/en_us.json"):
-                    continue
-                if content is None:
-                    continue  # binary 檔案（不應該在這裡出現）
-
-                parts = name.split("/")
-                modid = parts[1]
-
-                try:
-                    text = (
-                        content.decode("utf-8-sig", errors="replace")
-                        if isinstance(content, bytes)
-                        else content
-                    )
-                    data = loads_lang_json(text)
-                except json.JSONDecodeError:
-                    log_warning(
-                        f"[IconPreview] JAR 解析 JSON 失敗: {jar_path.name} / {name}"
-                    )
+                if not name.endswith("lang/en_us.json") or content is None:
+                    continue  # content 為 None 是 binary 檔案（不應出現在這裡）
+                data = _parse_jar_lang(jar_path, name, content)
+                if data is None:
                     failed_jars.append(jar_path.name)
                     continue
-
-                if not isinstance(data, dict):
-                    continue
-
-                jar_entries_count = 0
+                modid = name.split("/")[1]
                 for key, en_text in data.items():
                     raise_if_cancelled()
                     entries.append(
@@ -499,11 +489,7 @@ class IconPreviewDetailMixin:
                             source_jar=jar_path.name,
                         )
                     )
-                    jar_entries_count += 1
-
-                log_info(
-                    f"[IconPreview] {jar_path.name}: 找到 {jar_entries_count} 筆翻譯"
-                )
+                log_info(f"[IconPreview] {jar_path.name}: 找到 {len(data)} 筆翻譯")
 
         log_info(f"[IconPreview] JAR 目錄掃描完成：共 {len(entries)} 筆翻譯")
         return entries

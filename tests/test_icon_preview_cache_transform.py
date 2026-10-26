@@ -23,7 +23,7 @@ def create_view():
     with patch.object(IconPreviewView, "__init__", lambda self, page: None):
         view = IconPreviewView.__new__(IconPreviewView)
         view._page = MockPage()
-        view._entries_cache = None
+        view._source_cache = None
         view._cache_meta = {}
     return view
 
@@ -152,11 +152,11 @@ class TestCacheReadTransform:
     def test_empty_cache(self):
         """空快取不應炸錯"""
         view = create_view()
-        view._entries_cache = []
+        view._source_cache = []
 
         # 空 list 走 for 迴圈不應有問題
         mods_dict = {}
-        for entry in view._entries_cache:
+        for entry in view._source_cache:
             if isinstance(entry, dict):
                 ns = SimpleNamespace(**entry)
                 mods_dict.setdefault(ns.modid, []).append(ns)

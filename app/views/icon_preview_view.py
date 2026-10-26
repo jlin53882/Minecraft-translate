@@ -7,7 +7,6 @@
 import time
 from collections import defaultdict
 from pathlib import Path
-from types import SimpleNamespace
 
 import flet as ft
 
@@ -25,8 +24,8 @@ from app.ui.snack import show_snack
 from app.views.icon_preview.detail_mixin import IconPreviewDetailMixin
 from app.views.icon_preview.entries_cache import (
     _compute_source_identity,
-    _load_entries_cache_l2,
     _source_entry_data,
+    open_entries_cache_l2,
 )
 from app.views.icon_preview.icon_cache import _migrate_old_icon_cache
 from app.views.icon_preview.list_mixin import IconPreviewListMixin
@@ -34,6 +33,7 @@ from app.views.icon_preview.load_operation import (
     load_icon_preview,
     observe_async_owner,
 )
+from app.views.icon_preview.mod_store import EntrySource, MemorySource, ModEntryStore
 from app.views.icon_preview.progress import _make_progress_callback
 from translation_tool.utils.cancellation import raise_if_cancelled
 from translation_tool.utils.log_unit import log_error, log_info, log_warning
@@ -137,7 +137,7 @@ class IconPreviewView(IconPreviewDetailMixin, IconPreviewListMixin, ft.Column):
         self.current_modid: str | None = None
 
         # 快取（防止重複掃描 JAR）
-        self._entries_cache: list | None = None  # 緩存的 entries（dict 格式）
+        self._source_cache: EntrySource | None = None  # 緩存的來源項目（不含譯文）
         self._cache_meta: dict = {}  # source_root, mode
 
         self._current_zh_file: Path | None = None
@@ -315,7 +315,7 @@ class IconPreviewView(IconPreviewDetailMixin, IconPreviewListMixin, ft.Column):
                     clear_existing=True,
                     duration=3000,
                 )
-            self._entries_cache = None
+            self._source_cache = None
             self._cache_meta = {}
             self._update_load_state()
             log_info(f"[IconPreview] 模組資料夾已設定: {self.source_root}")
@@ -375,7 +375,7 @@ class IconPreviewView(IconPreviewDetailMixin, IconPreviewListMixin, ft.Column):
                     clear_existing=True,
                     duration=3000,
                 )
-            self._entries_cache = None
+            self._source_cache = None
             self._cache_meta = {}
             self._update_load_state()
             log_info(f"[IconPreview] 模組資料夾已設定: {self.source_root}")
@@ -443,7 +443,7 @@ class IconPreviewView(IconPreviewDetailMixin, IconPreviewListMixin, ft.Column):
     def _set_source_path(self, value, *, migrate: bool = False):
         new_root = Path(value).expanduser() if value else None
         if new_root != self.source_root:
-            self._entries_cache = None
+            self._source_cache = None
             self._cache_meta = {}
         self.source_root = new_root
         if migrate and new_root is not None and new_root.is_dir():
@@ -518,7 +518,7 @@ class IconPreviewView(IconPreviewDetailMixin, IconPreviewListMixin, ft.Column):
 
         source_root, review_root = parsed_paths
         if source_root != self.source_root:
-            self._entries_cache = None
+            self._source_cache = None
             self._cache_meta = {}
         _migrate_old_icon_cache(source_root)
         self.source_root = source_root
@@ -629,54 +629,45 @@ class IconPreviewView(IconPreviewDetailMixin, IconPreviewListMixin, ft.Column):
         """
         await load_icon_preview(self, generation, operation)
 
-    def _rebuild_mods(self, entries) -> None:
-        """依 entries 重建 modid → entry 清單（dict 轉回 SimpleNamespace，保持屬性存取相容）。"""
-        mods = defaultdict(list)
-        for entry in entries:
-            if isinstance(entry, dict):
-                mods[entry["modid"]].append(SimpleNamespace(**entry))
-            else:
-                mods[entry.modid].append(entry)
-        self.mods = dict(mods)
-
     def _lookup_cached_entries(self, mode: str):
         """查 L1 記憶體／L2 磁碟快取（純讀取，可在背景執行緒）。
 
-        回傳 ``("L1" | "L2", entries)``；沒有可用快取時回傳 None。
+        回傳 ``("L1" | "L2", ModEntryStore)``；沒有可用快取時回傳 None。
+        只讀 L2 的 index 與第一頁模組的分片，其餘模組在第一次顯示時才讀。
         """
         identity = (
             _compute_source_identity(self.source_root, mode)
             if self.source_root is not None
             else None
         )
-        cache_valid = (
-            self._entries_cache is not None
+        kind, source = None, None
+        if (
+            self._source_cache is not None
             and self._cache_meta.get("source_identity") == identity
-        )
-        if cache_valid:
-            return "L1", self._hydrate_entries(self._entries_cache)
-        # L2 磁碟快取只在 jar_directory 模式
-        if mode == "jar_directory" and self.source_root is not None:
-            cached_entries = _load_entries_cache_l2(self.source_root)
-            if cached_entries is not None:
-                return "L2", self._hydrate_entries(cached_entries)
-        return None
+        ):
+            kind, source = "L1", self._source_cache
+        elif mode == "jar_directory" and self.source_root is not None:
+            # L2 磁碟快取只在 jar_directory 模式
+            source = open_entries_cache_l2(self.source_root, identity)
+            kind = "L2"
+        if source is None:
+            return None
+        store = ModEntryStore(source, self._build_zh_tw_lookup(set(source.modids)))
+        store.warm(source.modids[: self.mod_page_size])
+        return kind, store
 
-    def _apply_cached_entries(self, kind: str, entries, mode: str) -> None:
+    def _apply_cached_entries(self, kind: str, store, mode: str) -> None:
         """（event loop 上）顯示命中的快取並渲染模組清單。"""
         if kind == "L1":
             log_info("[IconPreview] 使用 L1 快取！")
-            label = f"✅ 使用快取（共 {len(entries)} 筆）"
+            label = f"✅ 使用快取（共 {store.total_entries} 筆）"
         else:
             log_info("[IconPreview] 使用 L2 磁碟快取！")
-            label = f"✅ 使用磁碟快取（共 {len(entries)} 筆）"
-            self._entries_cache = [_source_entry_data(entry) for entry in entries]
-            self._cache_meta = {
-                "source_identity": _compute_source_identity(self.source_root, mode)
-            }
+            label = f"✅ 使用磁碟快取（共 {store.total_entries} 筆）"
+            self._source_cache = store.source
+            self._cache_meta = {"source_identity": store.source.identity}
         show_snack(self.page, label, color=C.EM, clear_existing=True, duration=3000)
-        # 用快取重建 mods dict（dict 轉回 SimpleNamespace，保持屬性存取相容）
-        self._rebuild_mods(entries)
+        self.mods = store
         self._render_mod_list()
 
     def _try_use_cached_entries(self, mode: str) -> bool:
@@ -841,11 +832,11 @@ class IconPreviewView(IconPreviewDetailMixin, IconPreviewListMixin, ft.Column):
 
         # L1 stores source-side scan data only; the review translation is
         # hydrated afresh on every load from the currently selected root.
-        cache_entries = [_source_entry_data(entry) for entry in entries]
-        self._entries_cache = cache_entries
-        self._cache_meta = {
-            "source_identity": _compute_source_identity(self.source_root, mode),
-        }
+        identity = _compute_source_identity(self.source_root, mode)
+        self._source_cache = MemorySource.from_entries(
+            [_source_entry_data(entry) for entry in entries], identity
+        )
+        self._cache_meta = {"source_identity": identity}
 
         mods = defaultdict(list)
         for entry in entries:

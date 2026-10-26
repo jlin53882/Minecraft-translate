@@ -1,12 +1,14 @@
-"""圖示預覽的 L2 磁碟快取（掃描結果 entries）。"""
+"""圖示預覽的 L2 磁碟快取（掃描結果 entries，每個模組一個分片檔）。"""
 
 import hashlib
 import json
+import shutil
 from datetime import UTC, datetime
 from pathlib import Path
 
 from app.icon_runtime import get_runtime_asset_paths
 from translation_tool.utils.app_paths import get_data_root
+from translation_tool.utils.log_unit import log_warning
 
 
 def _get_cache_dir() -> Path:
@@ -15,8 +17,9 @@ def _get_cache_dir() -> Path:
 
 
 _SOURCE_ENTRY_FIELDS = ("modid", "key", "en", "source_jar", "icon_path")
-# Version 5：圖示 URI 帶有預覽提示（等角方塊、染色），且解析規則已更新，舊快取內的 icon_path 一律失效。
-_CACHE_VERSION = 5
+# Version 6：快取改為 index.json + 每個模組一個欄位式分片；舊版單檔快取一律失效。
+_CACHE_VERSION = 6
+_INDEX_NAME = "index.json"
 
 
 def _source_entry_data(entry) -> dict:
@@ -111,62 +114,141 @@ def _identity_digest(identity: dict) -> str:
 
 def _compute_cache_key(source_root: Path) -> str:
     """計算 JAR 來源快取 key（路徑、檔名、大小與 mtime_ns）。"""
-    return _identity_digest(_compute_source_identity(source_root, "jar_directory"))[:16]
+    return _cache_key(_compute_source_identity(source_root, "jar_directory"))
 
 
-def _load_entries_cache_l2(source_root: Path) -> list | None:
-    """讀取 L2 磁碟快取。回傳 None 表示快取失效。
+def _cache_key(identity: dict) -> str:
+    return _identity_digest(identity)[:16]
 
-    失效條件：
-    - 快取檔案不存在
-    - JSON 解析失敗
-    - version 不為目前版本（舊版快取直接失效）
-    - source identity 不符
+
+class ShardSource:
+    """L2 快取的某個來源：``index.json`` 列出模組，每個模組的項目在自己的分片檔。"""
+
+    def __init__(self, cache_dir: Path, identity: dict, mods: list):
+        self.identity = identity
+        self._dir = cache_dir
+        self._files = {modid: name for modid, _count, name in mods}
+        self.modids = [modid for modid, _count, _name in mods]
+        self.entry_count = sum(count for _modid, count, _name in mods)
+
+    def load(self, modid: str) -> list[dict]:
+        """讀取單一模組的分片並還原成來源項目 dict；分片遺失或損壞時回傳空清單。"""
+        name = self._files.get(modid)
+        if name is None:
+            return []
+        try:
+            with open(self._dir / name, encoding="utf-8") as f:
+                shard = json.load(f)
+            return _decode_shard(modid, shard)
+        except (OSError, ValueError, KeyError, TypeError) as exc:
+            log_warning(f"[IconPreview] 快取分片讀取失敗 {modid}: {exc!r}")
+            return []
+
+
+def _encode_shard(rows: list[dict]) -> dict:
+    """把同一模組的項目轉成欄位式（key／en／jar 索引／圖示），避免每筆重複欄位名稱。"""
+    jars: list[str] = []
+    jar_ids: dict[str, int] = {}
+    jar_col = []
+    for row in rows:
+        jar = row.get("source_jar")
+        if jar is None:
+            jar_col.append(-1)
+            continue
+        if jar not in jar_ids:
+            jar_ids[jar] = len(jars)
+            jars.append(jar)
+        jar_col.append(jar_ids[jar])
+    return {
+        "key": [row.get("key") for row in rows],
+        "en": [row.get("en") for row in rows],
+        "jars": jars,
+        "jar": jar_col,
+        "icon": [row.get("icon_path") for row in rows],
+    }
+
+
+def _decode_shard(modid: str, shard: dict) -> list[dict]:
+    jars = shard["jars"]
+    rows = []
+    for key, en, jar_id, icon in zip(
+        shard["key"], shard["en"], shard["jar"], shard["icon"], strict=True
+    ):
+        row = {"modid": modid, "key": key, "en": en}
+        if jar_id >= 0:
+            row["source_jar"] = jars[jar_id]
+        if icon is not None:
+            row["icon_path"] = icon
+        rows.append(row)
+    return rows
+
+
+def open_entries_cache_l2(
+    source_root: Path, identity: dict | None = None
+) -> ShardSource | None:
+    """開啟 L2 磁碟快取（只讀 index.json）。回傳 None 表示快取失效。
+
+    失效條件：快取不存在、index 無法解析、version 不符、source identity 不符。
+    各模組的項目在第一次被使用時才由 ``ShardSource.load`` 讀取。
     """
-    cache_dir = _get_cache_dir()
-    cache_file = cache_dir / f"{_compute_cache_key(source_root)}.json"
-
-    if not cache_file.exists():
-        return None
-
+    if identity is None:
+        identity = _compute_source_identity(source_root, "jar_directory")
+    cache_dir = _get_cache_dir() / _cache_key(identity)
     try:
-        with open(cache_file, encoding="utf-8") as f:
+        with open(cache_dir / _INDEX_NAME, encoding="utf-8") as f:
             data = json.load(f)
-    except (OSError, json.JSONDecodeError):
-        return None  # 損壞的快取視為失效
-
-    # Version 1 persisted review-root translations and cannot be trusted.
-    if data.get("version") != _CACHE_VERSION:
+    except (OSError, ValueError):
+        return None  # 不存在或損壞的快取視為失效
+    if not isinstance(data, dict) or data.get("version") != _CACHE_VERSION:
         return None
-
-    identity = _compute_source_identity(source_root, "jar_directory")
     if data.get("source_identity") != identity:
         return None
-
-    entries = data.get("entries")
-    if not isinstance(entries, list):
+    mods = data.get("mods")
+    if not isinstance(mods, list):
         return None
-    return [_source_entry_data(entry) for entry in entries if isinstance(entry, dict)]
+    return ShardSource(cache_dir, identity, mods)
 
 
-def _save_entries_cache_l2(source_root: Path, entries: list):
-    """寫入 L2 磁碟快取（atomic write）。"""
+def _save_entries_cache_l2(
+    source_root: Path, entries: list, identity: dict | None = None
+):
+    """寫入 L2 磁碟快取（先寫暫存目錄再整個換上）。"""
+    if identity is None:
+        identity = _compute_source_identity(source_root, "jar_directory")
+    cache_root = _get_cache_dir()
+    cache_root.mkdir(parents=True, exist_ok=True)
+    key = _cache_key(identity)
+    target = cache_root / key
+    tmp = cache_root / f"{key}.tmp"
+    shutil.rmtree(tmp, ignore_errors=True)
+    tmp.mkdir()
 
-    cache_dir = _get_cache_dir()
-    cache_dir.mkdir(parents=True, exist_ok=True)
-    cache_file = cache_dir / f"{_compute_cache_key(source_root)}.json"
-
-    # Atomic write：用 tmp 檔再 rename
-    tmp = cache_dir / f"{cache_file.stem}.tmp"
     # Translation data is intentionally omitted: it belongs to review_root.
-    identity = _compute_source_identity(source_root, "jar_directory")
-    serializable_entries = [_source_entry_data(entry) for entry in entries]
+    by_mod: dict[str, list[dict]] = {}
+    for entry in entries:
+        row = _source_entry_data(entry)
+        by_mod.setdefault(str(row.get("modid", "")), []).append(row)
 
-    data = {
+    mods = []
+    for number, modid in enumerate(sorted(by_mod)):
+        name = f"{number}.json"
+        (tmp / name).write_text(
+            json.dumps(
+                _encode_shard(by_mod[modid]), ensure_ascii=False, separators=(",", ":")
+            ),
+            encoding="utf-8",
+        )
+        mods.append([modid, len(by_mod[modid]), name])
+    index = {
         "version": _CACHE_VERSION,
         "source_identity": identity,
-        "entries": serializable_entries,
+        "mods": mods,
         "created_at": datetime.now(UTC).isoformat(),
     }
-    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-    tmp.replace(cache_file)  # 跨平台 atomic replace（Python 3.3+，自動覆蓋目標檔案）
+    (tmp / _INDEX_NAME).write_text(
+        json.dumps(index, ensure_ascii=False, separators=(",", ":")), encoding="utf-8"
+    )
+    shutil.rmtree(target, ignore_errors=True)
+    tmp.replace(target)
+    # 舊版單檔快取不會再被讀取，順手移除。
+    (cache_root / f"{key}.json").unlink(missing_ok=True)

@@ -2,13 +2,23 @@
 
 import json
 import os
+from pathlib import Path
 from types import SimpleNamespace
 
 from app.views.icon_preview.entries_cache import (
     _compute_source_identity,
-    _load_entries_cache_l2,
     _save_entries_cache_l2,
+    open_entries_cache_l2,
 )
+from app.views.icon_preview.mod_store import MemorySource
+
+
+def _load_entries_cache_l2(source_root):
+    """開啟 L2 並讀出所有模組的來源項目（None 表示快取失效）。"""
+    source = open_entries_cache_l2(source_root)
+    if source is None:
+        return None
+    return [row for modid in source.modids for row in source.load(modid)]
 
 
 def _write_translation(review_root, value):
@@ -25,12 +35,16 @@ def _write_source_language(source_root, relative_path, value):
 
 
 def _make_view(source_root, review_root, entries_cache=None, cache_meta=None):
+    """``entries_cache`` 為來源項目 dict 清單，會包成 L1 的記憶體來源。"""
     from app.views.icon_preview_view import IconPreviewView
 
     view = IconPreviewView.__new__(IconPreviewView)
     view.source_root = source_root
     view.review_root = review_root
-    view._entries_cache = entries_cache
+    view._source_cache = (
+        None if entries_cache is None else MemorySource.from_entries(entries_cache)
+    )
+    view.mod_page_size = 50
     view._cache_meta = cache_meta or {}
     return view
 
@@ -66,14 +80,13 @@ def test_l1_cache_reuses_source_entries_but_hydrates_new_review_root(tmp_path):
 
     first = view._lookup_cached_entries("jar_directory")
     assert first[0] == "L1"
-    assert first[1][0].zh_tw == "翻譯 A"
+    assert first[1]["mod"][0].zh_tw == "翻譯 A"
 
     view.review_root = review_b
     second = view._lookup_cached_entries("jar_directory")
     assert second[0] == "L1"
-    assert second[1][0].zh_tw == "翻譯 B"
-    assert view._entries_cache is source_entries
-    assert "zh_tw" not in view._entries_cache[0]
+    assert second[1]["mod"][0].zh_tw == "翻譯 B"
+    assert "zh_tw" not in view._source_cache.load("mod")[0]
 
 
 def test_fresh_extracted_scan_hydrates_current_review_root(tmp_path):
@@ -160,17 +173,14 @@ def test_l2_cache_is_rehydrated_per_view_and_serializes_source_only(
         [SimpleNamespace(**_source_entry(), zh_tw="stale translation")],
     )
 
-    cache_file = next(cache_root.glob("*.json"))
-    saved = json.loads(cache_file.read_text(encoding="utf-8"))
+    cache_dir = next(path for path in cache_root.iterdir() if path.is_dir())
+    saved = json.loads((cache_dir / "index.json").read_text(encoding="utf-8"))
     assert saved["version"] == entries_cache._CACHE_VERSION
-    assert "zh_tw" not in saved["entries"][0]
-    assert set(saved["entries"][0]) == {
-        "modid",
-        "key",
-        "en",
-        "source_jar",
-        "icon_path",
-    }
+    assert [mod[:2] for mod in saved["mods"]] == [["mod", 1]]
+    shard_text = (cache_dir / saved["mods"][0][2]).read_text(encoding="utf-8")
+    assert "stale translation" not in shard_text
+    assert "zh_tw" not in shard_text
+    assert _load_entries_cache_l2(source_root) == [_source_entry()]
 
     review_a = tmp_path / "review-a"
     review_b = tmp_path / "review-b"
@@ -182,8 +192,8 @@ def test_l2_cache_is_rehydrated_per_view_and_serializes_source_only(
     first = first_view._lookup_cached_entries("jar_directory")
     second = second_view._lookup_cached_entries("jar_directory")
     assert first[0] == second[0] == "L2"
-    assert first[1][0].zh_tw == "翻譯 A"
-    assert second[1][0].zh_tw == "翻譯 B"
+    assert first[1]["mod"][0].zh_tw == "翻譯 A"
+    assert second[1]["mod"][0].zh_tw == "翻譯 B"
     assert "zh_tw" not in _load_entries_cache_l2(source_root)[0]
 
 
@@ -256,13 +266,100 @@ def test_l2_cache_rejects_previous_schema_versions(tmp_path, monkeypatch):
     cache_root = tmp_path / "cache"
     cache_root.mkdir()
     monkeypatch.setattr(entries_cache, "_get_cache_dir", lambda: cache_root)
-    cache_file = cache_root / f"{entries_cache._compute_cache_key(source_root)}.json"
-    for version in (1, 2):
-        cache_file.write_text(
+    cache_dir = cache_root / entries_cache._compute_cache_key(source_root)
+    cache_dir.mkdir()
+    for version in (1, 2, 5):
+        (cache_dir / "index.json").write_text(
             json.dumps(
-                {"version": version, "source_root": str(source_root), "entries": []}
+                {
+                    "version": version,
+                    "source_identity": _compute_source_identity(
+                        source_root, "jar_directory"
+                    ),
+                    "mods": [],
+                }
             ),
             encoding="utf-8",
         )
 
         assert _load_entries_cache_l2(source_root) is None
+
+
+def test_l2_hit_reads_only_index_and_requested_mod_shards(tmp_path, monkeypatch):
+    """快取命中時只讀 index；各模組的分片在第一次存取時才讀，且不再重複讀。"""
+    from app.views.icon_preview import entries_cache
+    from app.views.icon_preview.mod_store import ModEntryStore
+
+    source_root = tmp_path / "mods"
+    source_root.mkdir()
+    (source_root / "mod.jar").write_bytes(b"jar")
+    monkeypatch.setattr(entries_cache, "_get_cache_dir", lambda: tmp_path / "cache")
+    _save_entries_cache_l2(
+        source_root,
+        [
+            {**_source_entry(), "modid": modid, "key": f"item.{modid}.a"}
+            for modid in ("alpha", "beta", "gamma")
+        ],
+    )
+
+    opened = []
+    real_open = open
+
+    def tracking_open(path, *args, **kwargs):
+        opened.append(Path(path).name)
+        return real_open(path, *args, **kwargs)
+
+    monkeypatch.setattr("builtins.open", tracking_open)
+    source = open_entries_cache_l2(source_root)
+    store = ModEntryStore(source, {"item.beta.a": "乙"})
+    assert opened == ["index.json"]
+    assert list(store) == ["alpha", "beta", "gamma"] and len(store) == 3
+    assert store["beta"][0].zh_tw == "乙"
+    assert store["beta"][0].icon_path == "cached-icon.png"
+    store["beta"]
+    assert opened == ["index.json", "1.json"]
+    assert "delta" not in store
+
+
+def test_view_l2_lookup_warms_only_first_page_and_apply_does_not_read_disk(
+    tmp_path, monkeypatch
+):
+    """L2 命中：背景只讀 index 與第一頁模組的分片；event loop 套用時不再讀檔。"""
+    from app.views.icon_preview import entries_cache
+    from app.views.icon_preview_view import IconPreviewView
+    from tests.conftest import mock_page
+
+    source_root = tmp_path / "mods"
+    source_root.mkdir()
+    (source_root / "mod.jar").write_bytes(b"jar")
+    monkeypatch.setattr(entries_cache, "_get_cache_dir", lambda: tmp_path / "cache")
+    _save_entries_cache_l2(
+        source_root,
+        [
+            {**_source_entry(), "modid": f"mod{n:03d}", "key": f"item.mod{n:03d}.a"}
+            for n in range(120)
+        ],
+    )
+    view = IconPreviewView(mock_page())
+    view.source_root = source_root
+    view.review_root = None
+
+    opened = []
+    real_open = open
+
+    def tracking_open(path, *args, **kwargs):
+        if str(path).endswith(".json"):
+            opened.append(Path(path).name)
+        return real_open(path, *args, **kwargs)
+
+    monkeypatch.setattr("builtins.open", tracking_open)
+    kind, store = view._lookup_cached_entries("jar_directory")
+    assert kind == "L2"
+    assert len(opened) == 1 + view.mod_page_size  # index + 第一頁分片
+    opened.clear()
+
+    view._apply_cached_entries(kind, store, "jar_directory")
+
+    assert opened == []
+    assert len(view.list_view.controls) == view.mod_page_size
+    assert view._source_cache is store.source

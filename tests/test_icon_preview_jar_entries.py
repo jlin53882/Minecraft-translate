@@ -37,7 +37,7 @@ def create_view(
         view.source_root = source_root
         view.review_root = review_root
         # 快取初始狀態
-        view._entries_cache = None
+        view._source_cache = None
         view._cache_meta = {}
     return view
 
