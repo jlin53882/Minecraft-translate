@@ -38,6 +38,7 @@ from translation_tool.utils.replace_rules import (  # noqa: E402
     apply_replace_rules,
 )
 from translation_tool.utils.replace_rules_diagnostics import (  # noqa: E402
+    CONVERTED_SOURCE,
     CROSS_REFERENCE,
     DUPLICATE_FROM,
     EDGE_SPACE,
@@ -198,18 +199,6 @@ def compare_outputs(
 
 
 # ---------------------------------------------------------------- 靜態檢查
-def _reachable(src: str) -> bool:
-    """from 是否可能出現在 s2twp 之後：某種簡體寫法經 s2twp 能回到 from 本身。"""
-    if not _REACH_CONVERTERS:
-        from opencc import OpenCC
-
-        _REACH_CONVERTERS.extend(OpenCC(cfg) for cfg in ("t2s", "tw2sp"))
-    return any(
-        safe_convert_text(conv.convert(src)) == src for conv in _REACH_CONVERTERS
-    )
-
-
-_REACH_CONVERTERS: list = []
 
 
 def _is_regex(rule: Mapping[str, str]) -> bool:
@@ -228,6 +217,12 @@ def static_checks(rules: Sequence[Mapping[str, str]]) -> dict[str, list]:
     """
     literal = [(i, r) for i, r in enumerate(rules) if not _is_regex(r)]
     report: dict[str, list] = defaultdict(list)
+    diagnosed = diagnose_rules(rules, safe_convert_text)
+    unreachable = {
+        idx
+        for idx, issues in diagnosed.items()
+        if any(issue.kind == CONVERTED_SOURCE for issue in issues)
+    }
     loaded = ReplaceRules(dict(r) for r in rules)
     for i, r in literal:
         src, dst = r["from"], r["to"]
@@ -237,7 +232,7 @@ def static_checks(rules: Sequence[Mapping[str, str]]) -> dict[str, list]:
             and not any(c.isascii() and c.isalpha() for c in dst)
         ):
             report["inner_space_in_to"].append({"index": i, "from": src, "to": dst})
-        if not _reachable(src):
+        if i in unreachable:
             report["unreachable_from"].append(
                 {"index": i, "from": src, "to": dst, "s2twp": safe_convert_text(src)}
             )
@@ -252,7 +247,7 @@ def static_checks(rules: Sequence[Mapping[str, str]]) -> dict[str, list]:
         EDGE_SPACE: "edge_whitespace",
         CROSS_REFERENCE: "conflicts",
     }
-    for idx, issues in diagnose_rules(rules).items():
+    for idx, issues in diagnosed.items():
         for issue in issues:
             if issue.kind in names:
                 report[names[issue.kind]].append(

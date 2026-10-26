@@ -73,3 +73,12 @@ def test_diagnose_real_rules_file_is_fast_enough_to_run_on_load():
     rules = json.loads(path.read_text(encoding="utf-8"))
     result = diagnose_rules(rules)
     assert all(0 <= idx < len(rules) for idx in result)
+
+
+def test_converted_source_ignores_phrases_that_conversion_keeps():
+    # 對繁體原詞直接跑 s2twp 會得到「巖漿怪」，但簡中「岩浆怪」轉換後是「岩漿怪」，規則可以命中；
+    # 單字「岩」不論從哪種簡體寫法轉換都會變成「巖」
+    rules = [{"from": "岩漿怪", "to": "岩漿立方怪"}, {"from": "岩", "to": "石"}]
+    result = diagnose_rules(rules, safe_convert_text)
+    assert 0 not in result
+    assert _kinds(result, 1) == {CONVERTED_SOURCE}

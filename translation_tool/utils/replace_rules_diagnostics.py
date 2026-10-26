@@ -8,8 +8,9 @@
 - ``self_reference``：譯詞含有自己的原詞（固定文字規則）。
 - ``cross_reference``：譯詞含有另一條規則的原詞（至少 2 字），兩條規則的用詞互相矛盾。
 - ``edge_space``：原詞或譯詞前後有空白。
-- ``converted_source``：原詞含有 s2twp 轉換後會變成別的字的字，替換發生在轉換之後，
-  所以這個原詞不會出現在文字裡（例如「岩」會先被轉成「巖」）。
+- ``converted_source``：原詞不是任何簡體寫法經 s2twp 轉換後的結果。替換發生在轉換之後，
+  所以這個原詞不會出現在文字裡（例如單字「岩」會先被轉成「巖」；但詞組「花崗岩」轉換後
+  仍是「花崗岩」，可以命中）。以 t2s／tw2sp 回推簡體寫法再轉換判斷。
 
 含正則符號的原詞（``.?*[]()\\``）不做字串包含判斷，只做重複與空白檢查。
 """
@@ -49,6 +50,23 @@ def _changed_chars(source: str, converted: str) -> str:
         return f"{source}→{converted}"
     pairs = [f"{a}→{b}" for a, b in zip(source, converted, strict=True) if a != b]
     return "、".join(dict.fromkeys(pairs))
+
+
+_BACK_CONVERTERS: list[Callable[[str], str]] = []
+
+
+def _back_converters() -> list[Callable[[str], str]]:
+    """把繁體原詞回推成可能的簡體寫法（t2s、tw2sp），用來判斷原詞是否可能出現。"""
+    if not _BACK_CONVERTERS:
+        from opencc import OpenCC
+
+        _BACK_CONVERTERS.extend(OpenCC(cfg).convert for cfg in ("t2s", "tw2sp"))
+    return _BACK_CONVERTERS
+
+
+def _reachable(source: str, convert: Callable[[str], str]) -> bool:
+    """原詞是否可能出現在轉換後的文字：某種簡體寫法經 ``convert`` 能回到原詞。"""
+    return any(convert(back(source)) == source for back in _back_converters())
 
 
 def _contained_froms(
@@ -110,7 +128,7 @@ def diagnose_rules(
         _check_rule(idx, src, dst, by_length, add)
         if convert is not None and _is_fixed(src):
             converted = convert(src)
-            if converted != src:
+            if converted != src and not _reachable(src, convert):
                 add(
                     idx,
                     RuleIssue(
