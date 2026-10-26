@@ -71,7 +71,7 @@ flowchart TD
 - 輸入缺漏（來源、ZIP 清單或輸出目錄為空）：以 `show_snack` 提示，不啟動任務。
 - 應用程式關閉中無法啟動：還原按鈕與狀態晶片，並顯示提示。
 - 合併例外：`_run_merge_worker` 的 `except Exception` 先以 `session_task_scope` 綁定本頁 session，再以 `log_error` 寫入完整堆疊；畫面只顯示「類型: 訊息（完整堆疊已寫入後台 log）」（`add_log_unmirrored`），接著 `set_error()` → `finish()`，狀態晶片顯示「任務發生錯誤」。
-- 輸出檔替換被拒（OneDrive／防毒掃描暫時鎖檔的 `WinError 5`）：語言檔與 `.translation-provenance.json` 以 `replace_with_retry`（`translation_tool/utils/file_replace.py`）退避重試最多 5 次；仍失敗時，語言檔寫入失敗會讓該模組失敗（其他模組照常處理，但階段 1 標為失敗、階段 2 略過），來源標記檔寫入失敗只記警告，不影響該模組。
+- 輸出檔替換被拒（OneDrive／防毒掃描暫時鎖檔的 `WinError 5`）：語言檔與 `.translation-provenance.json` 以 `replace_with_retry`（`translation_tool/utils/file_replace.py`）退避重試最多 5 次；仍失敗時，語言檔寫入失敗會讓該模組失敗（其他模組照常處理，但階段 1 標為失敗、階段 2 略過），來源標記檔（`.translation-provenance.json`）在合併期間累積於記憶體，整批合併結束（含取消、例外）時才寫出一次（`provenance_batch`，`translation_tool/core/lang_merge_provenance.py`）；寫入失敗只記警告，不影響任何模組。
 - 取消：`TaskCancelled` 視為正常終止，寫入「[取消] 合併已停止」warning，不作為錯誤處理。
 - service 內的致命錯誤（例如 ZIP 無法處理）：service 自行 `set_error()`，並由 `_finish_folder_run` 等函式寫入摘要；`finish` 由 service 負責。
 - 狀態同步例外：`_sync_ui_once` 以 `log_warning` 記錄後繼續，不會中斷輪詢。

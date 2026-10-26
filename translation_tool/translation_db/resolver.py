@@ -76,6 +76,11 @@ class TranslationResolver:
         self._target = version_number(version)
 
     def _mod_table(self, mod_id: str):
+        # 已載入的模組不用拿鎖：其他執行緒正在載入另一個模組時（一次查詢要數十毫秒），
+        # 查詢已載入模組的執行緒不該被擋住。字典只會新增完整的表，不會原地修改。
+        table = self._mods.get(mod_id)
+        if table is not None:
+            return table
         with self._lock:
             table = self._mods.get(mod_id)
             if table is None:
