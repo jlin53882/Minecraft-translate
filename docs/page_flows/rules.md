@@ -7,7 +7,9 @@
 替換規則頁用來編輯 `replace_rules.json`（位於專案根目錄，路徑由 `app/services_impl/config_service.py` 的 `REPLACE_RULES_PATH` 指定）。每條規則包含 `from`（正則表達式）與 `to`（替換內容）。頁面提供：
 
 - 分頁表格（每頁 50 列）的逐列編輯與刪除，以及新增空白列。
-- 搜尋（關鍵字或 `/正則/` 模式）與排序（依 From 字典序或長度）。
+- 搜尋（關鍵字或 `/正則/` 模式）、「只看有問題的規則」篩選與排序（依 From 字典序或長度）。
+- 規則診斷：交叉引用、譯詞含自己的原詞、原詞重複、前後空白、原詞含 s2twp 會轉換的字，在該列顯示警示圖示（懸停看原因），不阻擋儲存。
+- 刪除附「復原」；有未儲存變更時顯示標示，重新載入前會確認。
 - 即時測試區：以目前尚未儲存的規則套用到輸入文字。
 - 重新載入（從磁碟讀回）與儲存（驗證後寫回磁碟）。
 
@@ -47,7 +49,7 @@ flowchart TD
     E --> F["_handle_reload_success 或 _handle_reload_failure"]
 ```
 
-重新載入會以磁碟內容覆蓋記憶體中的全部規則，尚未儲存的編輯會遺失。
+重新載入會以磁碟內容覆蓋記憶體中的全部規則。有未儲存的變更時，`reload_rules_clicked` 先以 `confirm_discard_changes` 確認，使用者選「放棄變更並重新載入」才執行；成功後搜尋條件保留，結果換成新載入的規則。
 
 ### 搜尋與排序
 
@@ -63,7 +65,7 @@ flowchart TD
     G -- 是 --> I["search_results 設定後回到第 1 頁渲染"]
 ```
 
-`_rule_matches` 比對時一律忽略大小寫（`search_case_sensitive` 目前固定為 `False`）。正則模式下 `re.error` 會退回一般字串比對。排序（`on_sort_change`）直接對 `all_rules_data` 做 in-place 排序並回到第 1 頁，排序結果只存在記憶體中，要儲存才會寫入磁碟。
+比對在 `rules_filter.rule_matches`，一律忽略大小寫。正則模式下語法錯誤會退回一般字串比對並提示。目前條件存在 `_query` 與 `_only_issues`，`search_results` 由 `_apply_filter` 依它們重算；刪除、復原、排序與重載之後都會重算，所以畫面不會顯示已刪除或過期的規則。搜尋中「#」欄是規則在全部清單中的位置。排序（`on_sort_change`）對 `all_rules_data` 做 in-place 排序、重跑診斷與過濾並回到第 1 頁，排序結果只存在記憶體中，要儲存才會寫入磁碟。
 
 ### 逐列編輯與即時驗證
 
@@ -71,15 +73,17 @@ flowchart TD
 flowchart TD
     A["from 或 to 輸入變更（on_text_change）"] --> B["依 _rid 找到 all_rules_data 的索引"]
     B --> C["更新該列的 from 或 to 欄位值"]
-    C --> D["validate_row_ui：呼叫 validate_rule"]
+    C --> D["_refresh_row_status：呼叫 check_rule"]
     D --> E{"通過？"}
     E -- 是 --> F["清除紅框與錯誤文字"]
     E -- 否 --> G["紅框與錯誤文字顯示原因"]
 ```
 
-`validate_rule` 依序檢查：`from` 不可為空、`from` 必須能被 `re.compile` 編譯（錯誤訊息由 `translate_regex_error` 翻譯）、`from` 不可與其他列重複、`to` 中的 `\N` 或 `$N` 群組參照不可超過群組數、`to` 不可含無效跳脫。即時驗證會對每列掃描全部規則做重複檢查。
+`rules_validation.check_rule`（`validate_rule` 取其訊息）依序檢查：`from` 不可為空、`from` 必須能被 `re.compile` 編譯（錯誤訊息由 `translate_regex_error` 翻譯）、`from` 不可與其他列重複、`to` 中的 `\N` 或 `$N` 群組參照不可超過群組數、`to` 不可含無效跳脫。出錯的欄位紅框並以 `error` 顯示原因（from 的問題在 from 欄，群組引用與跳脫在 to 欄）；from 含正則符號時只在 from 下方提醒「將視為正規表達式」。`_refresh_row_status` 一次掃描建立索引，整頁 50 列的檢查是 O(n)，換頁與跳到錯誤列時也會套用。
 
-新增列（`add_row_clicked`）會在清單末端加入 `from` 與 `to` 皆為空字串的列，並跳到最後一頁。刪除列（`delete_row_clicked`）依 `_rid` 找到索引後刪除，必要時回退一頁。
+編輯同時 `_mark_changed()` 標記未儲存，停頓 0.6 秒後 `_rediagnose_after_edit` 重跑規則診斷並刷新警示圖示。診斷邏輯在 `translation_tool/utils/replace_rules_diagnostics.py` 的 `diagnose_rules`。
+
+新增列（`add_row_clicked`）會在清單末端加入 `from` 與 `to` 皆為空字串的列，跳到最後一頁並把游標放進新列；搜尋或「只看有問題」啟用中會先清除。刪除列（`delete_row_clicked`）依 `_rid` 找到索引後刪除並重算過濾，頁碼超出時回退，提示上的「復原」（`_undo_delete`）把規則放回原位。
 
 ### 即時測試
 
@@ -101,7 +105,7 @@ flowchart TD
     I --> K["finish：顯示規則已成功儲存"]
 ```
 
-`_validate_all` 先以 `_build_from_index` 建立 `{from: [索引...]}` 字典，讓重複檢查達到 O(n)。驗證失敗時 `finish` 會跳到錯誤列所在的頁面並重新渲染。重新渲染時 `_fill_rule_row` 會清除列的錯誤樣式，且 `_render_current_page` 不會重新呼叫 `validate_row_ui`，因此該列不會自動顯示紅框；錯誤只出現在提示訊息中。
+`_validate_all` 先以 `build_from_index` 建立 `{from: [索引...]}` 字典，讓重複檢查達到 O(n)。驗證失敗時 `finish` 以 `_reveal_rule` 跳到錯誤列所在的頁面（該列不在搜尋結果內時先清除搜尋），渲染時對畫面上的列套用驗證，所以該列會顯示紅框與原因。儲存成功且期間沒有新的編輯（`_edit_seq` 未變）時清除未儲存標示。
 
 若 `run_task` 不存在（沒有 event loop），`finish` 會經由 `_run_on_ui_thread` 回到 UI。
 
@@ -117,8 +121,9 @@ flowchart TD
 
 - **`RulesTableState`**（`app/views/rules/rules_state.py`）：`page_size`（50）、`current_page`、`total_pages`、`rid_seq`。`RulesView` 的 `current_page`、`total_pages` 等屬性由它初始化。
 - **`all_rules_data`**：記憶體中的完整規則清單，每筆為 `{"from", "to", "_rid"}`。`_rid` 是 UI 用的穩定序號（`_new_rid` 遞增），不寫入磁碟。`_find_index_by_rid` 以它找回資料位置。
-- **搜尋狀態**：`search_results`（`None` 表示未搜尋）、`search_keyword`、`search_regex`、`search_current_idx`。
-- **儲存內容**：`save_replace_rules` 寫入 `replace_rules.json` 的 `from` 與 `to` 欄位，只保留 `from` 非空的規則。`_rid` 與 `comment`、`category` 等其他欄位不會被寫回（`clean_rules` 只取 `from` 與 `to`）。
+- **搜尋與篩選狀態**：`_query`（`RuleQuery` 或 `None`）、`_only_issues`、`search_results`（`None` 表示未過濾）、`search_keyword`、`search_regex`。
+- **診斷與未儲存**：`_issues`（`{rid: [RuleIssue]}`）、`_has_unsaved`、`_edit_seq`、`_row_status`（各列目前的驗證結果，用來只更新有變的列）。
+- **儲存內容**：`to_saved_rules` 產生寫入 `replace_rules.json` 的內容：只保留 `from` 非空的規則，移除 `_rid`，`comment`、`category` 等其他欄位原樣保留。
 - **執行緒共享**：`_ui_lock` 保護 `_page` 與 `_pending_ui_calls`；`_pending_ui_calls` 只在頁面尚未掛載時使用。
 
 ## 錯誤處理
@@ -128,4 +133,4 @@ flowchart TD
 - **儲存失敗**：`save_replace_rules(raise_on_error=True)` 拋出的例外會被 `validate_and_save` 捕捉並記錄到 `result["error"]`，`finish` 顯示「儲存規則時發生錯誤」，然後重新拋出以讓 operation 記錄錯誤。
 - **應用程式關閉中**：`launch_page_operation` 回傳假值時，儲存會顯示「應用程式正在關閉，未開始規則驗證或儲存」並清除 `_saving`。
 - **正則錯誤**：即時測試與搜尋都會忽略無法編譯的 `from`（即時測試直接排除，搜尋退回一般字串比對），不會中斷頁面。
-- **注意**：`clean_rules` 會過濾 `from` 為空的列，但驗證已先拒絕空的 `from`，因此實際上不會寫入空列。
+- **注意**：`to_saved_rules` 會過濾 `from` 為空的列，但驗證已先拒絕空的 `from`，因此實際上不會寫入空列。
