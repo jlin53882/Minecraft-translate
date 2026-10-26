@@ -22,6 +22,7 @@ class QueryInterrupt:
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._conn: sqlite3.Connection | None = None
+        self._event = threading.Event()
         self.cancelled = False
 
     def attach(self, conn: sqlite3.Connection) -> None:
@@ -38,10 +39,15 @@ class QueryInterrupt:
         """標記取消，並中斷連線上進行中的查詢。"""
         with self._lock:
             self.cancelled = True
+            self._event.set()
             conn = self._conn
             if conn is not None:
                 with contextlib.suppress(sqlite3.Error):
                     conn.interrupt()
+
+    def wait(self, seconds: float) -> bool:
+        """最多等 ``seconds`` 秒（被取消就提早返回）；回傳是否已取消。"""
+        return self._event.wait(seconds)
 
     def raise_if_cancelled(self) -> None:
         """已被取消就丟 ``QueryCancelled``。"""

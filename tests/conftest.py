@@ -95,6 +95,17 @@ def _no_default_batch_interval(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _no_filter_options_settle_wait(monkeypatch):
+    """篩選選項的第二階段正式會等條件穩定 0.25 秒才查；測試不該真的睡覺。
+
+    要驗證「等待期間被取代」的測試自己把 ``SETTLE_SECONDS`` 設回正值。
+    """
+    from app.views.moddb import filter_options_loader
+
+    monkeypatch.setattr(filter_options_loader, "SETTLE_SECONDS", 0.0)
+
+
+@pytest.fixture(autouse=True)
 def _patch_flet_page_property():
     """自動 patch Flet 的 BaseControl.page 屬性。
 

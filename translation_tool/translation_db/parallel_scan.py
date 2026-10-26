@@ -41,9 +41,12 @@ def _executor() -> ThreadPoolExecutor:
 
 
 def worker_count(span: int) -> int:
-    """編號範圍 ``span`` 值得用幾條連線同時掃（1 表示不平行）。"""
+    """編號範圍 ``span`` 值得用幾條連線同時掃（1 表示不平行）。
+
+    留一顆 CPU 給畫面與事件迴圈：4 核時用 3 條連線（95 ms，4 條 79 ms），掃描期間輸入與繪製不被擠掉。
+    """
     cpus = os.cpu_count() or 1
-    return max(1, min(MAX_WORKERS, cpus, span // MIN_SPAN_PER_WORKER))
+    return max(1, min(MAX_WORKERS, cpus - 1, span // MIN_SPAN_PER_WORKER))
 
 
 def split_ranges(low: int, high: int, parts: int) -> list[tuple[int, int]]:

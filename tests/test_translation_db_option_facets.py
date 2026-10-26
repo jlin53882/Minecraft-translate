@@ -457,3 +457,13 @@ def test_split_ranges_cover_the_span_without_overlap():
         assert all(a <= b for a, b in ranges)
         assert all(ranges[i][1] + 1 == ranges[i + 1][0] for i in range(len(ranges) - 1))
     assert parallel_scan.worker_count(10) == 1
+
+
+def test_worker_count_leaves_a_cpu_for_the_ui(monkeypatch):
+    from translation_tool.translation_db import parallel_scan
+
+    big = parallel_scan.MIN_SPAN_PER_WORKER * 10
+    for cpus, expected in ((1, 1), (2, 1), (4, 3), (8, 4), (64, 4)):
+        monkeypatch.setattr(parallel_scan.os, "cpu_count", lambda c=cpus: c)
+        assert parallel_scan.worker_count(big) == expected
+    assert parallel_scan.worker_count(parallel_scan.MIN_SPAN_PER_WORKER - 1) == 1

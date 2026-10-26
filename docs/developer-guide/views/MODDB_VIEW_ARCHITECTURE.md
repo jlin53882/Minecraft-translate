@@ -100,7 +100,7 @@ EntriesPanel 的編輯器另有獨立的 resident 草稿契約：`EditorDraftSto
 
 `EntriesPanel` 的換頁與篩選透過 `ModDbView._on_entries_filter_changed` 發出背景快照：只換頁時 `page_only` 為真，worker 走 `load_entries_filter_snapshot` 且不重算下拉選項；篩選條件改變時才重算選項（`filter_options_ready`）。`apply_filter_options` 回傳選項或選值是否改變，沒有改變就不標記 `_options_dirty`，篩選列因此不會因存檔、還原或翻頁而重畫。
 
-只有篩選條件改變（搜尋、狀態、來源、審核狀態、智慧校對狀態、進階條件）時，`refresh_entry_filter(defer_options=True)` 讓 worker 只讀清單與總筆數（第一段，`options_deferred`）；`ModDbView._continue_filter_options` 在清單套用後把第二段交給 `FilterOptionsLoader`（`app/views/moddb/filter_options_loader.py`），它在 worker 呼叫 `panel_refresh.load_entries_options_snapshot`，結果回到畫面執行緒後由 `ModDbView._apply_entries_options` 檢查資料世代與目前條件，才經 `EntriesPanel.apply_options_snapshot` 套用並以 `flush_filter_options` 只重畫篩選列。解析後的版本／模組／類型／來源和請求不同（`scope_changed`）時改走完整重載。載入器同一時間只跑一個查詢、只保留最新 payload。
+只有篩選條件改變（搜尋、狀態、來源、審核狀態、智慧校對狀態、進階條件）時，`refresh_entry_filter(defer_options=True)` 讓 worker 只讀清單與總筆數（第一段，`options_deferred`）；`ModDbView._continue_filter_options` 在清單套用後把第二段交給 `FilterOptionsLoader`（`app/views/moddb/filter_options_loader.py`），它在 worker 呼叫 `panel_refresh.load_entries_options_snapshot`，結果回到畫面執行緒後由 `ModDbView._apply_entries_options` 檢查資料世代與目前條件，才經 `EntriesPanel.apply_options_snapshot` 套用並以 `flush_filter_options` 只重畫篩選列。解析後的版本／模組／類型／來源和請求不同（`scope_changed`）時改走完整重載。載入器同一時間只跑一個查詢、只保留最新 payload，並先等條件穩定（`SETTLE_SECONDS`，等待期間被新請求取代就不查）。
 
 條目查詢的 worker 連線由 `moddb_read_snapshot(interrupt=QueryInterrupt())` 開啟：較新的請求到來時 `_request_panel_refresh` 對進行中的查詢呼叫 `cancel()`（SQLite `interrupt` 加上 `cancel_scope` 讓平行掃描的各區間停下），worker 回報 `cancelled`，`_reload_after_cancel` 以目前條件重新載入；被中斷的結果從不顯示。
 

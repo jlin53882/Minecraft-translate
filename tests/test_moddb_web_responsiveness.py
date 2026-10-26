@@ -705,3 +705,26 @@ def test_search_typing_burst_queries_once_after_the_pause(view, monkeypatch):
 def test_search_debounce_is_short_enough_to_feel_immediate():
     # 舊查詢會被新條件中斷（QueryInterrupt），縮短等待不會造成每個字元都查詢的堆積
     assert entries_panel.SEARCH_DEBOUNCE_SECONDS <= 0.25
+
+
+def test_filter_options_wait_for_the_conditions_to_settle(monkeypatch):
+    """輸入中每個字都換條件：等待期間又來了新請求，舊的不查資料庫。"""
+    from app.views.moddb import filter_options_loader
+    from app.views.moddb.filter_options_loader import FilterOptionsLoader
+
+    monkeypatch.setattr(filter_options_loader, "SETTLE_SECONDS", 5.0)
+    page = _scheduled_page()
+    loaded: list[str] = []
+    applied: list[str] = []
+    loader = FilterOptionsLoader(
+        page,
+        lambda payload, interrupt: loaded.append(payload) or {},
+        lambda payload, snapshot: applied.append(payload),
+    )
+    loader.request("a")  # 還在等條件穩定
+    monkeypatch.setattr(filter_options_loader, "SETTLE_SECONDS", 0.0)
+    loader.request("b")  # 取代它：只有 b 會真的查
+    _settle(page)
+
+    assert loaded == ["b"]
+    assert applied == ["b"]

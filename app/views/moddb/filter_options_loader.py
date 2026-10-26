@@ -14,6 +14,10 @@ from app.services_impl.moddb_service import QueryCancelled, QueryInterrupt
 from app.views.moddb.background_read import run_read
 from translation_tool.utils.log_unit import log_debug
 
+# 條件穩定（沒有更新的請求）這麼久之後才開始查選項：輸入中的每個字都會換條件，
+# 選項下拉選單（上千個模組）重畫的成本比清單高，不為中途的條件算也不重畫。
+SETTLE_SECONDS = 0.25
+
 
 class FilterOptionsLoader:
     """同一時間最多一個背景查詢，結果只在仍是最新請求時交給 ``apply``。"""
@@ -79,9 +83,14 @@ class FilterOptionsLoader:
                 return
             self._apply(payload, snapshot)
 
+        def work() -> dict:
+            if interrupt.wait(SETTLE_SECONDS):
+                raise QueryCancelled
+            return self._load(payload, interrupt)
+
         launched = run_read(
             self._page,
-            lambda: self._load(payload, interrupt),
+            work,
             done,
             name="Mod 資料庫篩選選項載入",
             owner="moddb-entries-filter-options",

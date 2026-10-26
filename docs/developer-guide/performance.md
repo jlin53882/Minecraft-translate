@@ -97,6 +97,19 @@ the table with a full recompute, and the facet tests compare every facet result 
 path. A list total is taken from a cached facet when it exists and is otherwise counted separately, so a module-only
 service query never scans the whole version.
 
+Text search (`LIKE '%text%'` on key, source text and effective translation) cannot use an index and is a CPU-bound
+row-by-row comparison (about 190 ms for 280,000 entries on one connection). It is not backed by derived data: a
+trigram posting table was estimated from a sample at about 64 distinct trigrams per entry, i.e. roughly 55 million rows
+and 700 MB for 850,000 entries, plus 64 extra index rows per written entry, which does not pay off. Instead
+`translation_tool/translation_db/parallel_scan.py` splits `entry.id` into contiguous ranges and scans them on separate
+read-only connections at once (SQLite releases the GIL while stepping); the ranged facet SQL groups by module per range
+and `option_facets.merge_rows` adds the ranges together. These connections must not use `temp_store = MEMORY` (several
+connections doing `GROUP BY` in memory contend on SQLite's global allocator lock and are slower than one connection when
+many rows match) and are skipped inside a write transaction (other connections cannot see its changes). A search
+without a module or source selection takes its total from this facet (`list_entries`), so the total, the page's
+module/source options and later paging share one scan; with a module selected the index already narrows the count.
+At most `cpu_count - 1` connections (never more than 4) are used so the UI keeps a core. Cancellation reuses `translation_tool/utils/cancellation.py`, so a superseded request stops all ranges.
+
 Pages: when the total is known and zero, or the offset is past it, the page query is skipped (it would otherwise walk
 the whole version looking for rows that do not exist); for the default sort the second half of the list is read from the
 other end through the reversed index and flipped.
