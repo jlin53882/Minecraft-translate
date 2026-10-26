@@ -239,10 +239,17 @@ def extract_sniffed_book_files(
     *,
     lang_codes: list[str],
     skip_zh_cn: bool,
+    source_root: str | Path | None = None,
 ) -> Generator[dict[str, Any], None, None]:
-    """逐個 jar 補提取依內容辨識的手冊／指南，產生進度更新（只含 ``log``）。"""
+    """逐個 jar 補提取依內容辨識的手冊／指南，產生進度更新（只含 ``log``）。
+
+    ``source_root`` must be the same root used by the regular extraction
+    phase when both phases share an output directory.  Keeping the root
+    explicit makes a nested JAR's source identity stable even when all JARs
+    live below a common subdirectory.
+    """
     langs = _wanted_langs(lang_codes, skip_zh_cn)
-    nested_output_names = build_nested_output_names(jar_paths)
+    nested_output_names = build_nested_output_names(jar_paths, source_root)
     total_written = 0
     for jar_path in jar_paths:
         raise_if_cancelled()

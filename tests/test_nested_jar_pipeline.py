@@ -233,6 +233,45 @@ def test_nested_sniff_outputs_are_isolated_for_same_named_outer_jars(tmp_path: P
     assert updates[-1]["log"].endswith("2 個手冊／指南檔")
 
 
+def test_nested_lang_and_book_phases_share_source_root_for_same_named_jars(
+    tmp_path: Path,
+):
+    """名稱提取與內容補掃必須給同一 outer JAR 相同的 wrapper 名稱。"""
+    mods = tmp_path / "mods"
+    for folder, value in (("client", "Client"), ("server", "Server")):
+        _outer_jar(
+            mods / "addons" / folder / "guide.jar",
+            nested={
+                "META-INF/jarjar/inner.jar": _zip_bytes(
+                    {
+                        "assets/demo/lang/en_us.json": json.dumps({"demo.key": value}),
+                        "assets/demo/books/chapters/foods.json": json.dumps(
+                            {
+                                "title": "demo.book.title",
+                                "pages": [{"summary": value}],
+                            }
+                        ),
+                    }
+                )
+            },
+        )
+
+    output = tmp_path / "output"
+    list(extract_lang_files_generator(str(mods), str(output), lang_codes=["en_us"]))
+    list(extract_book_files_generator(str(mods), str(output), lang_codes=["en_us"]))
+
+    lang_wrappers = {
+        path.parents[3].name
+        for path in output.glob("*_extracted/assets/demo/lang/en_us.json")
+    }
+    book_wrappers = {
+        path.parents[4].name
+        for path in output.glob("*_extracted/assets/demo/books/chapters/foods.json")
+    }
+    assert lang_wrappers == book_wrappers
+    assert len(lang_wrappers) == 2
+
+
 def test_nested_content_sniff_preview_reports_partial_nested_archive(
     tmp_path: Path,
 ):

@@ -244,6 +244,7 @@ def _sniff_book_phase(
             lambda name: bool(name_regex.search(name)),
             lang_codes=codes,
             skip_zh_cn=skip_zh_cn,
+            source_root=mods_dir,
         )
     except Exception as exc:  # noqa: BLE001 - 補充階段失敗不影響已提取的檔案
         log_error(f"[Book] 依內容辨識提取失敗：{exc!r}", exc_info=True)
