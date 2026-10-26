@@ -85,6 +85,14 @@ Mod DB 有自己的掃描、版本、來源優先序、校對、批次翻譯和�
 [`../reference/configuration.md`](../reference/configuration.md) 和
 `translation_tool/translation_db/settings.py` 為準。
 
+## 簡繁轉換與替換規則
+
+簡中文字先經 OpenCC `s2twp` 轉成繁體，再套用專案根目錄 `replace_rules.json` 的替換規則，換成台灣官方 Minecraft 用語（例如「刷怪蛋」→「生怪蛋」、「臺階」→「半磚」）。
+規則以官方 zh_cn／zh_tw 為準，採最長匹配、單次掃描：同一段文字只替換一次，較長的詞優先於較短的詞。
+可在「替換規則」頁編輯與測試；規則的撰寫原則與驗證工具見 [`../developer-guide/replace-rules.md`](../developer-guide/replace-rules.md)。
+同一個簡體詞在官方有不同繁體譯名時（例如效果「力量」與附魔「強力」），單一詞規則只能選其一，
+完整名稱（例如「力量藥水」）另有整名規則。
+
 ## 常見判斷
 
 - **想逐步檢查中間檔案**：使用單頁工具，先確認提取輸出，再執行 folder／ZIP 合併，最後指定翻譯輸入和輸出。
