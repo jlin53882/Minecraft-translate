@@ -124,6 +124,7 @@ _PROTECTION = "from==to 的保護型規則：擋住較短規則（例如 迅捷�
 _AMBIGUOUS = (
     "同一簡體詞在官方有不同譯名，引擎把目的詞收斂成較短規則的譯詞（需使用者判斷）"
 )
+_VERB = "動詞用法的保護型規則：擋住名詞規則（命令→指令）改到「命令你的小兵」"
 ALLOWED_CROSS_REFERENCES = {
     "去皮緋紅菌核": _LONGER_WINS,
     "去皮詭異菌核": _LONGER_WINS,
@@ -145,6 +146,12 @@ ALLOWED_CROSS_REFERENCES = {
     "動態暫時無法使用": _PROTECTION,
     "捕獲一條魚": _PROTECTION,
     "配置給": _PROTECTION,
+    "命令你": _VERB,
+    "命令他": _VERB,
+    "命令她": _VERB,
+    "命令牠": _VERB,
+    "命令它": _VERB,
+    "命令其": _VERB,
 }
 
 # 譯詞含空白：官方譯名本身有空白（含英文、數字或標點），不是多餘空白。
